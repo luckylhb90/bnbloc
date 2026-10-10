@@ -1,6 +1,6 @@
 # Enterprise scale: load testing, realtime scale-out, retention, search
 
-Status: approved 2026-10-10, in progress.
+Status: approved 2026-10-10, in progress. Section 1 landed: `cmd/bnbloc-loadtest`, with the baseline in `docs/load-testing.md`.
 
 ## Problem
 
