@@ -21,6 +21,7 @@ import { TenantsTab } from "@/views/org/TenantsTab";
 import { OrgSyncTab } from "@/views/org/OrgSyncTab";
 import { DeploymentCard } from "@/views/org/DeploymentCard";
 import { PlatformAgentsCard } from "@/views/org/PlatformAgentsCard";
+import { PlatformRetentionCard, TenantRetentionSection } from "@/views/org/RetentionCard";
 import { AuditLogTab } from "@/views/org/AuditLogTab";
 import { PublicLinksTab } from "@/views/org/PublicLinksTab";
 import { invalidateTenantPolicy } from "@/lib/tenantPolicy";
@@ -204,6 +205,7 @@ function OverviewTab({ role, scope }: { role: string | null; scope?: string }) {
 
       {role === "super_admin" && <DeploymentCard />}
       {role === "super_admin" && <PlatformAgentsCard />}
+      {role === "super_admin" && <PlatformRetentionCard />}
 
       {/* Org-wide audit trail. */}
       <section className="flex flex-col gap-2">
@@ -618,6 +620,7 @@ function SettingsTab({ scope }: { scope?: string }) {
           links tab lists the active links.
         </p>
       </div>
+      <TenantRetentionSection scope={scope} />
     </section>
   );
 }
