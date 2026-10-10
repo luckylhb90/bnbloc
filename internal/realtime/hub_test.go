@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/luckylhb90/bnbloc/internal/store"
 	"github.com/luckylhb90/bnbloc/internal/wire"
 )
 
@@ -74,7 +75,7 @@ func TestPublishCommitSeedFailureSurfacesAndRetries(t *testing.T) {
 	}
 	sub := h.SubscribeLive("r")
 	defer h.Unsubscribe("r", sub)
-	if _, err := h.PublishCommit(wire.Event{RoomID: "r", Kind: "chat_message"}, nil); err == nil {
+	if _, err := h.PublishCommit(wire.Event{RoomID: "r", Kind: "chat_message"}, Durable{}); err == nil {
 		t.Fatal("publish with a failing seeder succeeded; want the seed error")
 	}
 	if len(sub.Events()) != 0 {
@@ -86,11 +87,11 @@ func TestPublishCommitSeedFailureSurfacesAndRetries(t *testing.T) {
 	if ev := <-sub.Events(); ev.Kind != "presence_typing" || ev.Sequence != 0 {
 		t.Fatalf("transient delivery = %s seq=%d, want presence_typing with no sequence", ev.Kind, ev.Sequence)
 	}
-	if _, err := h.PublishCommit(wire.Event{RoomID: "r", Kind: "chat_message"}, nil); err == nil {
+	if _, err := h.PublishCommit(wire.Event{RoomID: "r", Kind: "chat_message"}, Durable{}); err == nil {
 		t.Fatal("second publish with a failing seeder succeeded; want the seed error")
 	}
 	fail = false
-	ev, err := h.PublishCommit(wire.Event{RoomID: "r", Kind: "chat_message"}, nil)
+	ev, err := h.PublishCommit(wire.Event{RoomID: "r", Kind: "chat_message"}, Durable{})
 	if err != nil || ev.Sequence != 42 {
 		t.Fatalf("after recovery: seq=%d err=%v, want 42 (durable max 41 + 1)", ev.Sequence, err)
 	}
@@ -110,15 +111,16 @@ func TestTransientEventsDoNotConsumeSequences(t *testing.T) {
 	sub := h.SubscribeLive("r")
 	defer h.Unsubscribe("r", sub)
 
-	commit := func(e wire.Event) error { durable = e.Sequence; return nil }
+	j := &testJournal{fn: func(rows []store.RoomMessage) error { durable = rows[len(rows)-1].Seq; return nil }}
+	commit := Durable{Journal: j, Row: store.RoomMessage{TenantID: "t"}}
 	if ev, err := h.PublishCommit(wire.Event{RoomID: "r", Kind: wire.KindChatMessage}, commit); err != nil || ev.Sequence != 1 {
 		t.Fatalf("first chat seq=%d err=%v, want 1", ev.Sequence, err)
 	}
 	for _, kind := range []string{"presence_join", "presence_snapshot", "presence_typing", "agent_roster", "agent_job_created", "agent_session_state"} {
-		ran := false
-		ev, err := h.PublishCommit(wire.Event{RoomID: "r", Kind: kind}, func(wire.Event) error { ran = true; return nil })
-		if err != nil || ev.Sequence != 0 || ran {
-			t.Fatalf("%s: seq=%d err=%v commitRan=%v, want an unsequenced delivery with no commit", kind, ev.Sequence, err, ran)
+		before := j.calls()
+		ev, err := h.PublishCommit(wire.Event{RoomID: "r", Kind: kind}, commit)
+		if err != nil || ev.Sequence != 0 || j.calls() != before {
+			t.Fatalf("%s: seq=%d err=%v journal calls %d->%d, want an unsequenced delivery with no commit", kind, ev.Sequence, err, before, j.calls())
 		}
 	}
 	ev, err := h.PublishCommit(wire.Event{RoomID: "r", Kind: wire.KindAgentMessages}, commit)
@@ -156,7 +158,7 @@ func TestReleaseRoomsClosesAndForgetsUnownedRooms(t *testing.T) {
 	kept := h.Subscribe("kept")
 	defer h.Unsubscribe("kept", kept)
 	for _, room := range []string{"gone", "kept"} {
-		if _, err := h.PublishCommit(wire.Event{RoomID: room, Kind: wire.KindChatMessage}, nil); err != nil {
+		if _, err := h.PublishCommit(wire.Event{RoomID: room, Kind: wire.KindChatMessage}, Durable{}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -174,7 +176,7 @@ func TestReleaseRoomsClosesAndForgetsUnownedRooms(t *testing.T) {
 	// Another replica committed seq 1..5 while the room was away; moving back
 	// seeds from that max instead of resuming the forgotten counter at 2.
 	durable["gone"] = 5
-	ev, err := h.PublishCommit(wire.Event{RoomID: "gone", Kind: wire.KindChatMessage}, nil)
+	ev, err := h.PublishCommit(wire.Event{RoomID: "gone", Kind: wire.KindChatMessage}, Durable{})
 	if err != nil || ev.Sequence != 6 {
 		t.Fatalf("after move back seq=%d err=%v, want 6", ev.Sequence, err)
 	}
@@ -189,19 +191,16 @@ func TestPublishCommitFailureDeliversNothing(t *testing.T) {
 	h := NewHub(8, 8)
 	sub := h.SubscribeLive("r")
 	defer h.Unsubscribe("r", sub)
-	if _, err := h.PublishCommit(wire.Event{RoomID: "r", Kind: "chat_message"}, func(wire.Event) error {
-		return errors.New("persist failed")
-	}); err == nil {
+	failing := &testJournal{fn: func([]store.RoomMessage) error { return errors.New("persist failed") }}
+	if _, err := h.PublishCommit(wire.Event{RoomID: "r", Kind: "chat_message"}, Durable{Journal: failing, Row: store.RoomMessage{TenantID: "t"}}); err == nil {
 		t.Fatal("commit error not returned")
 	}
 	if len(sub.Events()) != 0 {
 		t.Fatal("event delivered although its commit failed")
 	}
 	var committed int64
-	ev, err := h.PublishCommit(wire.Event{RoomID: "r", Kind: "chat_message"}, func(e wire.Event) error {
-		committed = e.Sequence
-		return nil
-	})
+	ok := &testJournal{fn: func(rows []store.RoomMessage) error { committed = rows[0].Seq; return nil }}
+	ev, err := h.PublishCommit(wire.Event{RoomID: "r", Kind: "chat_message"}, Durable{Journal: ok, Row: store.RoomMessage{TenantID: "t"}})
 	if err != nil || ev.Sequence != 1 || committed != 1 {
 		t.Fatalf("retry seq=%d committed=%d err=%v, want 1/1/nil", ev.Sequence, committed, err)
 	}

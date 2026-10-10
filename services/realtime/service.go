@@ -125,7 +125,9 @@ type Service struct {
 // ChatStore persists room-feed messages, reads history pages, and tracks
 // per-user read state for unread counts.
 type ChatStore interface {
-	AppendRoomMessage(ctx context.Context, m store.RoomMessage) error
+	// AppendRoomMessages is the hub's journal (realtime.Journal): the room's
+	// group commit stores each batch of durable events through it.
+	AppendRoomMessages(ctx context.Context, rows []store.RoomMessage) error
 	RoomHistory(ctx context.Context, roomID, channelID string, before int64, limit int) ([]store.RoomMessage, error)
 	RoomFeed(ctx context.Context, roomID string, after int64, limit int) ([]store.RoomMessage, error)
 	MarkRead(ctx context.Context, roomID, channelID, userID string, seq, atMs int64) error
@@ -641,8 +643,17 @@ func (s *Service) handleInternalPublish(w http.ResponseWriter, r *http.Request) 
 	// Same durable-then-deliver contract as chat. The event is stored under
 	// the tenant the signed publisher asserted (bound into the context by
 	// svcauth), so a non-default tenant's replies land in its own history.
-	published, err := s.Hub.PublishCommit(ev, func(ev wire.Event) error { return s.persist(r.Context(), ev, "", "") })
+	d, err := s.durable(r.Context(), ev, "", "")
 	if err != nil {
+		obs.ServerError(w, "publish failed", err)
+		http.Error(w, "publish failed", http.StatusInternalServerError)
+		return
+	}
+	published, err := s.Hub.PublishCommit(ev, d)
+	if err != nil {
+		if !errors.Is(err, store.ErrDuplicateClientMsg) {
+			log.Printf("realtime: persist room=%s kind=%s: %v", ev.RoomID, ev.Kind, err)
+		}
 		obs.ServerError(w, "publish failed", err)
 		http.Error(w, "publish failed", http.StatusInternalServerError)
 		return
@@ -681,17 +692,19 @@ func (s *Service) messageChannel(ctx context.Context, roomID string, seq int64) 
 	return m.ChannelID, true, nil
 }
 
-// persist stores a room-feed message for history paging. It runs as the hub's
-// commit step (PublishCommit), so a failure aborts delivery and is returned to
-// the caller. Only feed-bearing kinds are stored; presence/state churn and the
-// access-revocation kinds are transient, never history.
-// clientMsgID is the optional send-idempotency id (chat only; "" otherwise).
-func (s *Service) persist(ctx context.Context, ev wire.Event, author, clientMsgID string) error {
-	if s.Chat == nil {
-		return nil
+// durable builds what the hub's group commit stores for a room-feed event,
+// for history paging: the row under the request's tenant, through the chat
+// store. The hub stores only feed-bearing kinds and delivers only once the
+// row is durable, so a failure aborts delivery and is returned to the
+// publisher. clientMsgID is the optional send-idempotency id (chat only; ""
+// otherwise). With no chat store (in-memory dev) nothing is stored.
+func (s *Service) durable(ctx context.Context, ev wire.Event, author, clientMsgID string) (realtime.Durable, error) {
+	if s.Chat == nil || !wire.PersistedFeedKind(ev.Kind) {
+		return realtime.Durable{}, nil
 	}
-	if !wire.PersistedFeedKind(ev.Kind) {
-		return nil
+	tid, err := tenant.Require(ctx)
+	if err != nil {
+		return realtime.Durable{}, err
 	}
 	if author == "" {
 		if p, ok := ev.Payload.(map[string]any); ok {
@@ -702,24 +715,14 @@ func (s *Service) persist(ctx context.Context, ev wire.Event, author, clientMsgI
 	}
 	payload, err := json.Marshal(ev.Payload)
 	if err != nil {
-		return err
+		return realtime.Durable{}, err
 	}
-	if err := s.Chat.AppendRoomMessage(ctx, store.RoomMessage{
-		RoomID:      ev.RoomID,
-		ChannelID:   ev.ChannelID,
-		Seq:         ev.Sequence,
-		Kind:        ev.Kind,
+	return realtime.Durable{Journal: s.Chat, Row: store.RoomMessage{
+		TenantID:    tid,
 		Author:      author,
 		ClientMsgID: clientMsgID,
 		Payload:     payload,
-		CreatedAtMs: ev.AtUnixMs,
-	}); err != nil {
-		if !errors.Is(err, store.ErrDuplicateClientMsg) {
-			log.Printf("realtime: persist room=%s seq=%d kind=%s: %v", ev.RoomID, ev.Sequence, ev.Kind, err)
-		}
-		return err
-	}
-	return nil
+	}}, nil
 }
 
 // handleHistory returns a page of persisted room-feed messages older than an

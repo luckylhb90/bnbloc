@@ -92,6 +92,34 @@ Status (2026-10-11): in progress.
   must be utf8mb4 (other charsets and collations are refused, and the
   negotiated session charset is checked at startup). No new env var: the
   defaults are right for every deployment we know of.
+- Per-room group commit: landed (`internal/realtime/hub.go`,
+  `store.ChatStore.AppendRoomMessages`). Decisions:
+  - **Leadership hand-off, not a loop.** When a batch is delivered, the
+    leader hands the lead to the first queued publisher and returns, so no
+    caller's response waits on batches that arrived after its own.
+  - **Batch bounds:** 64 events and 1 MiB of payload per insert; a commit
+    has its own 10 s timeout (it cannot use one caller's request context).
+  - **The fence fails every member, no local retry.** A `(room_id, seq)`
+    conflict means another replica wrote the room's next slots. Re-seeding
+    and retrying locally would keep a stale owner writing a room whose live
+    readers are on the new owner; failing each caller sends its idempotent
+    retry (by `clientMsgId`) to the real owner. Any other commit error also
+    fails every member and re-seeds.
+  - **History duplicates retry the rest.** Rows whose client id is already
+    stored answer their stored sequence; the rest of the batch is
+    renumbered from the same base and retried, so sequences stay dense.
+    The store classifies the conflict by data (one lookup after the failed
+    insert), not by index name.
+  - **Revocations queue, other transients do not.** `member_removed` and
+    `room_deleted` queue behind in-flight durable events, so a message
+    committed before a revocation is never delivered after it (and never
+    replays into a reused room id); presence, typing, roster and job deltas
+    are delivered immediately.
+  - **Per-row tenant.** Each batch row carries the tenant its publisher
+    asserted (`RoomMessage.TenantID`), so batching never changes which
+    tenant a row is stored under.
+  - **Metrics:** `realtime_feed_commits_total{result}` and
+    `realtime_feed_commit_events_total` (mean batch size).
 
 ## 2. realtime and relay scale-out by key ownership
 
@@ -213,7 +241,7 @@ room lock. The counter now always equals the durable max.
 | Replay buffer | room | Forgotten on release (it only serves connected subscribers); reconnecting clients page history. |
 | Presence refcounts + leave timers | room | Closing streams run their deferred leave on the old owner, whose events are suppressed (only the owner announces presence); the new owner rebuilds presence from the reconnects. |
 | Agent roster + withdraw timers | room | Same as presence; each bridge re-advertises when its stream reconnects. |
-| Room publish lock | room | Per replica; only the owner publishes, so it serializes the room's sequence. |
+| Room group commit queue (section 1b) | room | Per replica; only the owner publishes, so its one leader at a time serializes the room's sequence. |
 | Member plugin streams | member | Closed on the old owner; the desktop reconnects to the new owner. |
 | Plugin pending-ack table | member (delivery id) | Deliveries sent before a move stay pending on the old owner; their acks now route to the new owner (404), so they expire after 60 s, audited failed; a notification then falls back to the server notifiers. |
 | Plugin fan-out queue, per-peer hand-off queues | — | Bounded; full queues drop (logged), as before. |

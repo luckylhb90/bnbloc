@@ -7,8 +7,10 @@ import (
 
 // Hub metrics (docs/monitoring.md).
 const (
-	metricEventsPublished = "realtime_events_published_total"
-	metricSSEConnections  = "realtime_sse_connections"
+	metricEventsPublished  = "realtime_events_published_total"
+	metricSSEConnections   = "realtime_sse_connections"
+	metricFeedCommits      = "realtime_feed_commits_total"
+	metricFeedCommitEvents = "realtime_feed_commit_events_total"
 )
 
 // SSE connection kinds: a presence-counting subscriber (a member's web or
@@ -46,6 +48,8 @@ func RegisterMetrics(m *obs.Metrics) {
 		return
 	}
 	m.Describe(metricEventsPublished, "Events published to room streams by kind (unknown kinds count as other).")
+	m.Describe(metricFeedCommits, "Room feed group commits (one multi-row insert each) by result.")
+	m.Describe(metricFeedCommitEvents, "Durable events stored by successful group commits; divided by the ok commits it is the mean batch size.")
 	m.Describe(metricSSEConnections, "Open room event streams by kind (member: presence-counting client; bridge: ?presence=0 observer).")
 	m.GaugeSet(metricSSEConnections, 0, obs.L("kind", SSEKindMember))
 	m.GaugeSet(metricSSEConnections, 0, obs.L("kind", SSEKindBridge))

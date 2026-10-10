@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"sort"
 	"strconv"
 	"strings"
@@ -27,11 +28,32 @@ var ErrDuplicateClientMsg = errors.New("store: duplicate client message id")
 // that history never holds.
 var ErrDuplicateSeq = errors.New("store: duplicate room message sequence")
 
+// ClientMsgConflict reports the rows of a batch whose client message id is
+// already stored in their room under their tenant (a concurrent or retried
+// send won the race). Nothing of the batch was stored. It matches
+// ErrDuplicateClientMsg under errors.Is, and carries each conflicting id's
+// stored sequence so a caller answers the original without a second lookup.
+type ClientMsgConflict struct {
+	// Seqs maps each conflicting client message id to its stored sequence.
+	Seqs map[string]int64
+}
+
+func (e *ClientMsgConflict) Error() string {
+	return fmt.Sprintf("%v (%d of the batch)", ErrDuplicateClientMsg, len(e.Seqs))
+}
+
+// Is makes a conflict match ErrDuplicateClientMsg.
+func (e *ClientMsgConflict) Is(target error) bool { return target == ErrDuplicateClientMsg }
+
 // RoomMessage is one persisted room-feed entry (a chat_message or an
 // agent_messages reply), stored so a client can page history beyond the
 // realtime in-memory replay buffer.
 type RoomMessage struct {
-	RoomID string
+	// TenantID is the tenant a row is written under by AppendRoomMessages
+	// (each publisher of one batch asserts its own). Reads and
+	// AppendRoomMessage take the tenant from the context and leave it empty.
+	TenantID string
+	RoomID   string
 	// ChannelID is the in-room channel this message belongs to; "" addresses
 	// the empty/default channel (all rows written before channels existed).
 	ChannelID   string
@@ -47,9 +69,17 @@ type RoomMessage struct {
 }
 
 type ChatStore interface {
-	// AppendRoomMessage persists one message. A taken client message id returns
-	// ErrDuplicateClientMsg; a taken (room, seq) returns ErrDuplicateSeq.
+	// AppendRoomMessage persists one message under the context's tenant: it
+	// is AppendRoomMessages with a single row.
 	AppendRoomMessage(ctx context.Context, m RoomMessage) error
+	// AppendRoomMessages persists messages of ONE room atomically: every row
+	// or none. Each row is written under its own TenantID (required). A
+	// client message id already stored in the room under the row's tenant
+	// returns *ClientMsgConflict (errors.Is ErrDuplicateClientMsg) naming
+	// every such row; otherwise a taken (room, seq) returns ErrDuplicateSeq.
+	// Rows of other rooms, or two rows with one client message id, are a
+	// caller error.
+	AppendRoomMessages(ctx context.Context, rows []RoomMessage) error
 	// RoomHistory returns up to limit messages with seq < before (before<=0 means
 	// "latest"), ascending by seq, within one channel. It is the page older than
 	// a known cursor. channelID "" addresses the room's empty/default channel;
@@ -105,29 +135,82 @@ func NewMemoryChat() *MemoryChat {
 	}
 }
 
-// AppendRoomMessage stores a message; a taken client id or (room, seq) is an
-// error (see ChatStore).
+// AppendRoomMessage stores one message under the context's tenant (see
+// ChatStore).
 func (s *MemoryChat) AppendRoomMessage(ctx context.Context, m RoomMessage) error {
-	tid, err := tenant.Require(ctx)
-	if err != nil {
+	return appendOne(ctx, s, m)
+}
+
+// AppendRoomMessages stores one room's rows atomically: all are checked
+// under the lock before any is written (see ChatStore).
+func (s *MemoryChat) AppendRoomMessages(_ context.Context, rows []RoomMessage) error {
+	if err := validateBatch(rows); err != nil {
 		return err
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	rk := tid + "\x00" + m.RoomID
-	if m.ClientMsgID != "" {
-		if _, taken := s.byCMI[rk+"\x00"+m.ClientMsgID]; taken {
-			return ErrDuplicateClientMsg
+	conflict := map[string]int64{}
+	seqTaken := false
+	for _, m := range rows {
+		rk := m.TenantID + "\x00" + m.RoomID
+		if m.ClientMsgID != "" {
+			if seq, taken := s.byCMI[rk+"\x00"+m.ClientMsgID]; taken {
+				conflict[m.ClientMsgID] = seq
+			}
+		}
+		for _, e := range s.msgs[rk] {
+			if e.Seq == m.Seq {
+				seqTaken = true
+			}
 		}
 	}
-	for _, e := range s.msgs[rk] {
-		if e.Seq == m.Seq {
-			return ErrDuplicateSeq
+	if len(conflict) > 0 {
+		return &ClientMsgConflict{Seqs: conflict}
+	}
+	if seqTaken {
+		return ErrDuplicateSeq
+	}
+	for _, m := range rows {
+		rk := m.TenantID + "\x00" + m.RoomID
+		m.TenantID = "" // reads leave it empty (see RoomMessage)
+		s.msgs[rk] = append(s.msgs[rk], m)
+		if m.ClientMsgID != "" {
+			s.byCMI[rk+"\x00"+m.ClientMsgID] = m.Seq
 		}
 	}
-	s.msgs[rk] = append(s.msgs[rk], m)
-	if m.ClientMsgID != "" {
-		s.byCMI[rk+"\x00"+m.ClientMsgID] = m.Seq
+	return nil
+}
+
+// appendOne is AppendRoomMessage for every ChatStore: one row under the
+// context's tenant.
+func appendOne(ctx context.Context, s interface {
+	AppendRoomMessages(context.Context, []RoomMessage) error
+}, m RoomMessage) error {
+	tid, err := tenant.Require(ctx)
+	if err != nil {
+		return err
+	}
+	m.TenantID = tid
+	return s.AppendRoomMessages(ctx, []RoomMessage{m})
+}
+
+// validateBatch enforces the AppendRoomMessages input contract: one room, a
+// tenant on every row, and no client message id twice.
+func validateBatch(rows []RoomMessage) error {
+	seen := map[string]bool{}
+	for _, m := range rows {
+		if m.TenantID == "" {
+			return tenant.ErrNoTenant
+		}
+		if m.RoomID != rows[0].RoomID {
+			return fmt.Errorf("store: append batch spans rooms %q and %q", rows[0].RoomID, m.RoomID)
+		}
+		if m.ClientMsgID != "" {
+			if seen[m.ClientMsgID] {
+				return fmt.Errorf("store: append batch repeats client message id %q", m.ClientMsgID)
+			}
+			seen[m.ClientMsgID] = true
+		}
 	}
 	return nil
 }
@@ -355,33 +438,89 @@ func NewMySQLChat(db *sql.DB) *MySQLChat { return &MySQLChat{DB: db} }
 var _ ChatStore = (*MySQLChat)(nil)
 var _ ChatStore = (*MemoryChat)(nil)
 
-// AppendRoomMessage inserts a message. A unique-key violation is classified,
-// never swallowed: the client id taken by another row is
-// ErrDuplicateClientMsg, otherwise the (room, seq) slot is ErrDuplicateSeq.
+// AppendRoomMessage inserts one message under the context's tenant (see
+// ChatStore).
 func (s *MySQLChat) AppendRoomMessage(ctx context.Context, m RoomMessage) error {
-	tid, err := tenant.Require(ctx)
-	if err != nil {
+	return appendOne(ctx, s, m)
+}
+
+// AppendRoomMessages inserts one room's rows in ONE multi-row INSERT: a
+// single statement is atomic in InnoDB, so the batch costs one round trip
+// and one commit, and a failure stores nothing. A unique-key violation is
+// classified, never swallowed: by data, not by index name — rows whose
+// client id now resolves in their tenant lost an idempotency race
+// (*ClientMsgConflict); otherwise the (room, seq) slot is taken
+// (ErrDuplicateSeq).
+func (s *MySQLChat) AppendRoomMessages(ctx context.Context, rows []RoomMessage) error {
+	if len(rows) == 0 {
+		return nil
+	}
+	if err := validateBatch(rows); err != nil {
 		return err
 	}
-	payload := m.Payload
-	if len(payload) == 0 {
-		payload = json.RawMessage("{}")
+	var q strings.Builder
+	q.WriteString(`INSERT INTO room_messages (tenant_id, room_id, channel_id, seq, kind, author, client_msg_id, payload_json, search_text, created_at_ms) VALUES `)
+	args := make([]any, 0, len(rows)*10)
+	for i, m := range rows {
+		if i > 0 {
+			q.WriteString(", ")
+		}
+		q.WriteString("(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+		payload := m.Payload
+		if len(payload) == 0 {
+			payload = json.RawMessage("{}")
+		}
+		args = append(args, m.TenantID, m.RoomID, m.ChannelID, m.Seq, m.Kind, nullStr(m.Author), nullStr(m.ClientMsgID),
+			payload, nullStr(MessageText(m.Kind, payload)), m.CreatedAtMs)
 	}
-	_, err = s.DB.ExecContext(ctx,
-		`INSERT INTO room_messages (tenant_id, room_id, channel_id, seq, kind, author, client_msg_id, payload_json, search_text, created_at_ms)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		tid, m.RoomID, m.ChannelID, m.Seq, m.Kind, nullStr(m.Author), nullStr(m.ClientMsgID), payload,
-		nullStr(MessageText(m.Kind, payload)), m.CreatedAtMs)
+	_, err := s.DB.ExecContext(ctx, q.String(), args...)
 	var me *mysql.MySQLError
 	if errors.As(err, &me) && me.Number == 1062 {
-		// Classify by data, not by index name: if the client id now resolves
-		// to a different row, the send lost an idempotency race.
-		if seq, found := s.LookupClientMsg(ctx, m.RoomID, m.ClientMsgID); found && seq != m.Seq {
-			return ErrDuplicateClientMsg
+		conflict, cerr := s.clientMsgConflicts(ctx, rows)
+		if cerr != nil {
+			return fmt.Errorf("classify duplicate: %w (insert: %v)", cerr, err)
+		}
+		if len(conflict) > 0 {
+			return &ClientMsgConflict{Seqs: conflict}
 		}
 		return ErrDuplicateSeq
 	}
 	return err
+}
+
+// clientMsgConflicts returns, for the rows carrying a client id, the stored
+// sequence of each id already present in the room under the row's tenant.
+func (s *MySQLChat) clientMsgConflicts(ctx context.Context, rows []RoomMessage) (map[string]int64, error) {
+	tenantOf := map[string]string{}
+	args := []any{rows[0].RoomID}
+	for _, m := range rows {
+		if m.ClientMsgID != "" {
+			tenantOf[m.ClientMsgID] = m.TenantID
+			args = append(args, m.ClientMsgID)
+		}
+	}
+	out := map[string]int64{}
+	if len(tenantOf) == 0 {
+		return out, nil
+	}
+	res, err := s.DB.QueryContext(ctx,
+		`SELECT tenant_id, client_msg_id, seq FROM room_messages WHERE room_id = ? AND client_msg_id IN (?`+
+			strings.Repeat(", ?", len(tenantOf)-1)+`)`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer res.Close()
+	for res.Next() {
+		var tid, cmi string
+		var seq int64
+		if err := res.Scan(&tid, &cmi, &seq); err != nil {
+			return nil, err
+		}
+		if tenantOf[cmi] == tid {
+			out[cmi] = seq
+		}
+	}
+	return out, res.Err()
 }
 
 // LookupClientMsg returns the seq of a stored message with this client id.

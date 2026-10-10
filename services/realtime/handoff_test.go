@@ -51,8 +51,12 @@ func TestImportPersistsWithoutPublishing(t *testing.T) {
 	live := svc.Hub.SubscribeLive("room-1")
 	defer svc.Hub.Unsubscribe("room-1", live)
 
-	pre, err := svc.Hub.PublishCommit(wire.Event{RoomID: "room-1", Kind: wire.KindChatMessage, Payload: map[string]any{"userId": "alice", "text": "before"}},
-		func(ev wire.Event) error { return svc.persist(ctx, ev, "alice", "") })
+	preEv := wire.Event{RoomID: "room-1", Kind: wire.KindChatMessage, Payload: map[string]any{"userId": "alice", "text": "before"}}
+	d, err := svc.durable(ctx, preEv, "alice", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	pre, err := svc.Hub.PublishCommit(preEv, d)
 	if err != nil {
 		t.Fatal(err)
 	}

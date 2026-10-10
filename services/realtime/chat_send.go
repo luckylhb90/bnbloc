@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"strings"
 	"time"
 
@@ -147,21 +148,26 @@ func (s *Service) PostChat(ctx context.Context, p ChatPost) (int64, error) {
 	// Persist before fan-out: a message is delivered live only once it is
 	// durable, so a client retry after a failure can never surface a second
 	// live copy, and history never lacks a message members already saw.
-	ev, err := s.Hub.PublishCommit(wire.Event{
+	ev := wire.Event{
 		RoomID:    p.RoomID,
 		ChannelID: channelID,
 		Kind:      "chat_message",
 		Payload:   payload,
 		AtUnixMs:  serverTimeIfUnset(p.AtUnixMs),
-	}, func(ev wire.Event) error { return s.persist(ctx, ev, p.Author, p.ClientMsgID) })
+	}
+	d, err := s.durable(ctx, ev, p.Author, p.ClientMsgID)
+	if err != nil {
+		return 0, fmt.Errorf("message persistence failed: %w", err)
+	}
+	ev, err = s.Hub.PublishCommit(ev, d)
 	if errors.Is(err, store.ErrDuplicateClientMsg) {
-		// A concurrent send with the same client id won the race: answer with
-		// its sequence, exactly like the idempotent retry above.
-		if seq, found := s.Chat.LookupClientMsg(ctx, p.RoomID, p.ClientMsgID); found {
-			return seq, nil
-		}
+		// A concurrent send with the same client id won the race (in the same
+		// commit batch, or already in history): the hub answers its sequence,
+		// exactly like the idempotent retry above.
+		return ev.Sequence, nil
 	}
 	if err != nil {
+		log.Printf("realtime: persist room=%s kind=%s: %v", p.RoomID, ev.Kind, err)
 		return 0, fmt.Errorf("message persistence failed: %w", err)
 	}
 	s.deliverPluginEvent(ctx, ev)

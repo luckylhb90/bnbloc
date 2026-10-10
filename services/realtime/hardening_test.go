@@ -208,7 +208,7 @@ func TestChatClientMsgIDRaceDeliversOnce(t *testing.T) {
 // failingChat rejects every append, simulating a store outage.
 type failingChat struct{ *store.MemoryChat }
 
-func (failingChat) AppendRoomMessage(context.Context, store.RoomMessage) error {
+func (failingChat) AppendRoomMessages(context.Context, []store.RoomMessage) error {
 	return errors.New("db down")
 }
 

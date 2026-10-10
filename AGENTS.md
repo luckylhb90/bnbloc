@@ -479,6 +479,18 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   move) is exact. Two replicas briefly owning a room are fenced by the
   `(room_id, seq)` key plus the idempotent `clientMsgId` retry. Do not
   reintroduce transient sequencing.
+- **Durable publishes group-commit per room** (`Hub.PublishCommit`). One
+  leader at a time takes what queued during the previous commit, assigns
+  consecutive sequences, stores the batch in ONE `AppendRoomMessages`
+  insert, and delivers only after it succeeds. Do not go back to a commit
+  per event under a room lock (the commit wait then queues every message of
+  a busy room), and never add an artificial batching delay. A failed batch
+  fails every member and re-seeds; the fence (`ErrDuplicateSeq`) is NOT
+  retried locally, so a stale owner stops writing and each caller's
+  idempotent retry reaches the real owner. A client id repeated in the
+  batch or already in history answers the original sequence with
+  `store.ErrDuplicateClientMsg`. Transient kinds bypass the queue (never
+  wait on a commit); `member_removed`/`room_deleted` queue behind it.
 - **Presence announces a leave only after a short grace window.** A last-ref
   drop schedules the leave; a re-`Enter` within the window cancels it, so a
   reconnecting client (SSE drop + retry) does not churn `presence_join/leave`.
@@ -648,6 +660,13 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   listing guards (see the message path), not by skipping persistence.
   `message_edited`/`message_deleted` and a task put carry the message's
   `channelId` so their content is filtered like the message itself.
+- **JSON column arguments are `json.RawMessage`, never `[]byte`.** The
+  MySQL client interpolates parameters (`interpolateParams`, one round trip
+  per query); it writes a `[]byte` argument as a `_binary'…'` literal, which
+  MySQL refuses for a JSON column (error 3144) and compares byte-wise
+  against a text column. Marshal through `store.jsonArg`. The DSN must stay
+  utf8mb4 (`store.mysqlConfig` refuses others: client-side escaping is
+  unsafe in some multibyte charsets).
 - **Live schema needs ALTER, not just the schema file.**
   `CREATE TABLE IF NOT EXISTS` does not alter an existing table, so a new
   column (e.g. `client_msg_id`, `deleted_at_ms`) must be `ALTER TABLE`'d

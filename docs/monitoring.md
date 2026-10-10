@@ -55,6 +55,8 @@ route word missing from the vocabulary only reads as `:id`.
 | --- | --- | --- | --- |
 | `bnbloc_realtime_sse_connections` | gauge | `kind` = `member` \| `bridge` | Open room event streams. `member`: a presence-counting client (web, desktop). `bridge`: a `?presence=0` observer (a member's bridge, or `bnbloc smoke`). |
 | `bnbloc_realtime_events_published_total` | counter | `kind` | Events published to room streams, by event kind; kinds outside the known set count as `other`. |
+| `bnbloc_realtime_feed_commits_total` | counter | `result` = `ok` \| `error` | Room feed group commits: each stores a batch of one room's durable events (chat, agent replies, imports) in one multi-row insert. `error` fails every member of the batch (store outage, or the scale-out fence); clients retry idempotently. |
+| `bnbloc_realtime_feed_commit_events_total` | counter | — | Durable events stored by `ok` commits. Divided by `feed_commits_total{result="ok"}` it is the mean batch size: near 1 when rooms are quiet, higher when one room's messages arrive faster than a commit takes. |
 | `bnbloc_notification_deliveries_total` | counter | `outcome` = `delivered` \| `retry` \| `failed` | Notification delivery attempts by this replica's outbox worker (`failed` = given up). |
 | `bnbloc_notification_outbox_items` | gauge | `state` = `queued` \| `retrying` \| `delivered` \| `failed` | Outbox items, every tenant: pending never attempted, pending after a failed attempt, and finished items still retained (pruned after 7 days). Refreshed every 30 s. |
 | `bnbloc_notification_outbox_oldest_pending_age_seconds` | gauge | — | Age of the oldest pending outbox item (0 when none). Refreshed every 30 s. |

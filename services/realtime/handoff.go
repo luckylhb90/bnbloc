@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/luckylhb90/bnbloc/internal/obs"
+	"github.com/luckylhb90/bnbloc/internal/realtime"
 	"github.com/luckylhb90/bnbloc/internal/roomctx"
 	"github.com/luckylhb90/bnbloc/internal/store"
 	"github.com/luckylhb90/bnbloc/internal/tenant"
@@ -129,11 +130,9 @@ func (s *Service) handleInternalImport(w http.ResponseWriter, r *http.Request) {
 	}
 	reply := wire.RoomImportBatchReply{}
 	for _, row := range rows {
+		row.TenantID = tenant.FromContext(r.Context())
 		ev, err := s.Hub.CommitHistory(wire.Event{RoomID: roomID, ChannelID: row.ChannelID, Kind: row.Kind, AtUnixMs: row.CreatedAtMs},
-			func(ev wire.Event) error {
-				row.Seq = ev.Sequence
-				return s.Chat.AppendRoomMessage(r.Context(), row)
-			})
+			realtime.Durable{Journal: s.Chat, Row: row})
 		if err != nil {
 			obs.ServerError(w, "import persistence failed", err)
 			http.Error(w, "import persistence failed", http.StatusInternalServerError)
