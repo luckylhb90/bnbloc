@@ -640,3 +640,50 @@ func (j *testJournalCtx) AppendRoomMessages(ctx context.Context, _ []store.RoomM
 	j.fn(ctx)
 	return nil
 }
+
+// The Committed hook (the search index updater) sees exactly the rows each
+// successful commit stored — live publishes and history imports, with the
+// tenant and sequence the store got, minus repeats answered from history —
+// and nothing of a failed commit or a store-less publish.
+func TestCommittedHookSeesStoredRows(t *testing.T) {
+	chat := store.NewMemoryChat()
+	ctx := tenant.NewContext(context.Background(), testTenantID)
+	if err := chat.AppendRoomMessage(ctx, store.RoomMessage{RoomID: "r", Seq: 1, Kind: wire.KindChatMessage, ClientMsgID: "old", Payload: []byte(`{}`)}); err != nil {
+		t.Fatal(err)
+	}
+	fail := errors.New("disk full")
+	var failing bool
+	var mu sync.Mutex
+	j := &testJournal{inner: chat, fn: func([]store.RoomMessage) error {
+		mu.Lock()
+		defer mu.Unlock()
+		if failing {
+			return fail
+		}
+		return nil
+	}}
+	h := NewHub(64, 64)
+	h.SeedSeq = func(room string) (int64, error) { return chat.MaxRoomSeq(ctx, room, "") }
+	var seen []store.RoomMessage
+	h.Committed = func(rows []store.RoomMessage) { seen = append(seen, rows...) }
+
+	if _, err := h.PublishCommit(chatEvent("r", "a"), chatDurable(j, "a")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.PublishCommit(chatEvent("r", "again"), chatDurable(j, "old")); !errors.Is(err, store.ErrDuplicateClientMsg) {
+		t.Fatalf("repeat err = %v", err)
+	}
+	if _, err := h.CommitHistory(chatEvent("r", "imported"), chatDurable(j, "")); err != nil {
+		t.Fatal(err)
+	}
+	mu.Lock()
+	failing = true
+	mu.Unlock()
+	if _, err := h.PublishCommit(chatEvent("r", "lost"), chatDurable(j, "")); !errors.Is(err, fail) {
+		t.Fatalf("failed commit err = %v", err)
+	}
+	h.Publish(chatEvent("r2", "no journal"))
+	if len(seen) != 2 || seen[0].Seq != 2 || seen[1].Seq != 3 || seen[0].TenantID != testTenantID || seen[0].RoomID != "r" {
+		t.Fatalf("hook saw %+v, want seqs 2 and 3 of room r under %s", seen, testTenantID)
+	}
+}

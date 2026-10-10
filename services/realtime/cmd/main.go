@@ -16,6 +16,7 @@ import (
 	"github.com/luckylhb90/bnbloc/internal/obs"
 	"github.com/luckylhb90/bnbloc/internal/realtime"
 	"github.com/luckylhb90/bnbloc/internal/retention"
+	"github.com/luckylhb90/bnbloc/internal/search"
 	"github.com/luckylhb90/bnbloc/internal/shard"
 	"github.com/luckylhb90/bnbloc/internal/store"
 	"github.com/luckylhb90/bnbloc/internal/svcauth"
@@ -67,8 +68,24 @@ func main() {
 	// the room feed this service persists.
 	svc.Prompts = backends.Prompts
 	svc.Tasks = backends.MessageTasks
-	svc.Messages = backends.Chat
 	svc.Artifacts = backends.Artifacts
+	// Message search backend (docs/prd/2026-10-10-enterprise-scale.md §4):
+	// the store's FULLTEXT index, or OpenSearch when
+	// BNBLOC_SEARCH_OPENSEARCH_URL is set (probed here; refused at startup
+	// in production when unusable). An external index is kept current by
+	// the updater: the hub's commit hook and edits/deletes queue messages,
+	// never blocking the write; retention purges its expired documents.
+	search.RegisterMetrics(metrics)
+	searchIndex, searchUpdates, err := search.FromEnv(context.Background(), backends.Chat, metrics)
+	if err != nil {
+		log.Fatalf("bnbloc-realtime: search: %v", err)
+	}
+	log.Printf("bnbloc-realtime: message search backend: %s", searchIndex.Backend())
+	svc.Search, svc.SearchUpdates = searchIndex, searchUpdates
+	if searchUpdates != nil {
+		svc.Hub.Committed = searchUpdates.Committed
+		go searchUpdates.Run(context.Background())
+	}
 	// Member notifications: the publish tap feeds a bounded producer queue and
 	// a worker drains the durable outbox to every notifier component visible
 	// to the event's tenant.
@@ -148,6 +165,7 @@ func main() {
 	go (&retention.Worker{
 		Store: store.NewRetention(backends), Tenants: backends.Tenant, Settings: backends.Settings,
 		Audit: backends.ExtAudit, Blobs: blobs, Metrics: metrics,
+		Search: searchIndex,
 	}).Run(context.Background())
 	// Seed the hub's per-room sequence from the durable max so sequences continue
 	// monotonically across restarts (keeps unread counts and dedup correct).

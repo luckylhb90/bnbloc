@@ -58,8 +58,9 @@ func (s *Service) registerTeamRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("PUT /v1/rooms/{roomId}/tasks/{seq}", s.handlePutTask)
 	mux.HandleFunc("DELETE /v1/rooms/{roomId}/tasks/{seq}", s.handleDeleteTask)
 	mux.HandleFunc("GET /v1/search", s.handleSearch)
-	// R7 search backfill (super-admin, gated at the gateway).
+	// Search reindex and status (super-admin, gated at the gateway).
 	mux.HandleFunc("POST /v1/platform/search/reindex", s.handleSearchReindex)
+	mux.HandleFunc("GET /v1/platform/search/status", s.handleSearchStatus)
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
@@ -357,7 +358,7 @@ func (s *Service) handleUsePrompt(w http.ResponseWriter, r *http.Request) {
 // ------------------------------------------------------------------ tasks
 
 func (s *Service) tasksReady(w http.ResponseWriter) bool {
-	if s.Tasks == nil || s.Messages == nil {
+	if s.Tasks == nil || s.Chat == nil {
 		obs.ServerError(w, "message tasks unavailable", nil)
 		http.Error(w, "message tasks unavailable", http.StatusServiceUnavailable)
 		return false
@@ -424,7 +425,7 @@ func (s *Service) handlePutTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !found {
-		msg, exists, err := s.Messages.GetRoomMessage(ctx, roomID, seq)
+		msg, exists, err := s.Chat.GetRoomMessage(ctx, roomID, seq)
 		if err != nil {
 			obs.ServerError(w, "message read failed", err)
 			http.Error(w, "message read failed", http.StatusInternalServerError)
@@ -569,10 +570,12 @@ func (s *Service) handleSearch(w http.ResponseWriter, r *http.Request) {
 	}
 
 	resp := wire.SearchResponse{Results: []wire.SearchResult{}}
-	if s.Messages != nil && len(roomIDs) > 0 {
-		msgs, err := s.Messages.SearchRoomMessages(ctx, store.MessageSearch{RoomIDs: roomIDs, Text: text, BeforeMs: before, Limit: limit})
+	if s.Search != nil && len(roomIDs) > 0 {
+		// The index sees only the rooms resolved above; whatever backend
+		// answers, every hit is a store row that passed the same scope.
+		msgs, err := s.Search.Search(ctx, store.MessageSearch{RoomIDs: roomIDs, Text: text, BeforeMs: before, Limit: limit})
 		if err != nil {
-			log.Printf("realtime: search messages: %v", err)
+			obs.ServerError(w, "search messages ("+s.Search.Backend()+")", err)
 			http.Error(w, "search failed", http.StatusInternalServerError)
 			return
 		}

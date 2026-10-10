@@ -115,8 +115,11 @@ Alerts and API tokens (super-admin):
   bnbloc api-tokens revoke <id>
 
 Search (super-admin):
-  bnbloc search reindex [--cursor <c>] [--batches n]   fill the search index for messages stored
-                                          before search existed; resumable, safe while serving
+  bnbloc search reindex [--cursor <c>] [--batches n]   bring the message search index up to date
+                                          with the room feed (MySQL: rows stored without search text;
+                                          OpenSearch: every message's document); resumable, idempotent,
+                                          safe while serving
+  bnbloc search status                    search backend, readiness, index health and update queue
 
 Organization sync (super-admin):
   bnbloc org-sync rules | set-rules --file <f>   the group/department/email-domain mapping rules

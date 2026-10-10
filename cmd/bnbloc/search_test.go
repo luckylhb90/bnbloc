@@ -56,3 +56,33 @@ func TestSearchReindexLoopsUntilDone(t *testing.T) {
 		t.Fatalf("err = %v, want a resume hint", err)
 	}
 }
+
+// `bnbloc search status` prints the backend and fails when it is not ready.
+func TestSearchStatus(t *testing.T) {
+	isolateHome(t)
+	docs := int64(42)
+	status := wire.SearchStatus{Backend: "opensearch", Index: "bnbloc-room-messages-v1", Ready: true, Health: "yellow", Documents: &docs,
+		Updates: &wire.SearchUpdateStats{Applied: 40, Dropped: 2}}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/v1/platform/search/status" {
+			http.NotFound(w, r)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(status)
+	}))
+	defer srv.Close()
+	c := newClient(resolveConfig(srv.URL, "sess"))
+	var out bytes.Buffer
+	if err := searchStatus(context.Background(), c, &out); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"backend:   opensearch", "documents: 42", "dropped 2", "run `bnbloc search reindex`"} {
+		if !strings.Contains(out.String(), want) {
+			t.Fatalf("output lacks %q:\n%s", want, out.String())
+		}
+	}
+	status = wire.SearchStatus{Backend: "opensearch", Error: "connection refused"}
+	if err := searchStatus(context.Background(), c, &bytes.Buffer{}); err == nil {
+		t.Fatal("a not-ready backend exited zero")
+	}
+}

@@ -32,7 +32,7 @@ func TestSearchReindexRouteWalksToDone(t *testing.T) {
 	if err := json.Unmarshal(body, &got); err != nil {
 		t.Fatal(err)
 	}
-	if got.Scanned != 4 || !got.Done || got.Updated != 0 || got.Cursor != "room-2/1" {
+	if got.Backend != "mysql" || got.Scanned != 4 || !got.Done || got.Updated != 0 || got.Cursor != "room-2/1" {
 		t.Fatalf("progress = %+v, want 4 scanned, done, cursor room-2/1", got)
 	}
 	// Resuming at the end is a no-op that stays done.

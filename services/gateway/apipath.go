@@ -218,9 +218,9 @@ func (s *Service) route(p apiPath) string {
 		if p.section() == "tenant" && len(p.segs) >= 3 && p.segs[2] == "prompts" {
 			return s.Backends.Realtime
 		}
-		// The search backfill (R7, super-admin) runs where the room feed
-		// and its search index live.
-		if p.is("v1", "platform", "search", "reindex") {
+		// Search reindex and status (super-admin) run where the room feed
+		// and its search backend live.
+		if p.is("v1", "platform", "search", "reindex") || p.is("v1", "platform", "search", "status") {
 			return s.Backends.Realtime
 		}
 		// Org-admin moderation of tenant room templates (N3), likewise.

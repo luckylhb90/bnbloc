@@ -21,6 +21,7 @@ import (
 	"github.com/luckylhb90/bnbloc/internal/obs"
 	"github.com/luckylhb90/bnbloc/internal/realtime"
 	"github.com/luckylhb90/bnbloc/internal/roomctx"
+	"github.com/luckylhb90/bnbloc/internal/search"
 	"github.com/luckylhb90/bnbloc/internal/shard"
 	"github.com/luckylhb90/bnbloc/internal/store"
 	"github.com/luckylhb90/bnbloc/internal/svcauth"
@@ -99,9 +100,15 @@ type Service struct {
 	// Rooms is the server-side membership listing search is scoped to.
 	Prompts   store.PromptStore
 	Tasks     store.MessageTaskStore
-	Messages  store.ChatIndex
 	Artifacts store.ArtifactIndex
 	Rooms     RoomDirectory
+	// Search is the message search backend (internal/search): the store's
+	// FULLTEXT index, or OpenSearch. SearchUpdates keeps an external index
+	// current: the hub's commit hook queues new rows, and edits and deletes
+	// queue the message they changed (nil for the store index, which needs
+	// none). Queuing never blocks or fails the write.
+	Search        search.Index
+	SearchUpdates *search.Updater
 	// Notifications observes published events (mentions, agent job outcomes)
 	// for member notifications and serves the notification settings routes.
 	// Nil disables both; observation never blocks a publish.
@@ -906,6 +913,7 @@ func (s *Service) handleDeleteMessage(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "cannot delete this message", http.StatusForbidden)
 		return
 	}
+	s.SearchUpdates.Enqueue(store.MessageKey{TenantID: tenant.FromContext(r.Context()), RoomID: roomID, Seq: seq})
 	// Transient: tell live clients to drop the message. Not persisted (it is not
 	// a chat/agent kind), so history simply omits the deleted row.
 	s.Hub.Publish(wire.Event{
@@ -979,6 +987,7 @@ func (s *Service) handleEditMessage(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "cannot edit this message", http.StatusForbidden)
 		return
 	}
+	s.SearchUpdates.Enqueue(store.MessageKey{TenantID: tenant.FromContext(r.Context()), RoomID: roomID, Seq: seq})
 	// Transient: tell live clients to patch the message text. Not persisted (it
 	// is not a chat/agent kind); history reads the updated row directly.
 	// Scoped to the message's channel: the edited text must not reach a stream

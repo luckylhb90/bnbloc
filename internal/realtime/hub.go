@@ -68,6 +68,13 @@ type Hub struct {
 	SeedSeq func(roomID string) (int64, error)
 	// Metrics counts published events by kind (nil = off).
 	Metrics *obs.Metrics
+	// Committed, when set, receives the rows of every successful group
+	// commit to a journal (live publishes and history imports alike),
+	// right after the commit and before delivery, on the commit leader's
+	// goroutine. It must not block or fail: it is how the external search
+	// index learns of new rows (search.Updater.Committed only queues), and
+	// the room's next batch waits for it.
+	Committed func(rows []store.RoomMessage)
 }
 
 // NewHub constructs a hub. replayLimit bounds retained events per room; buffer
@@ -441,8 +448,9 @@ func (h *Hub) commit(batch []*pending) {
 		cur = n
 	}
 	journal := writes[0].d.Journal
+	var rows []store.RoomMessage
 	for len(writes) > 0 {
-		rows := make([]store.RoomMessage, len(writes))
+		rows = make([]store.RoomMessage, len(writes))
 		for i, p := range writes {
 			p.out.Sequence = cur + int64(i) + 1
 			row := p.d.Row
@@ -492,6 +500,9 @@ func (h *Hub) commit(batch []*pending) {
 		last = writes[len(writes)-1].out.Sequence
 		h.Metrics.CounterInc(metricFeedCommits, obs.L("result", "ok"))
 		h.Metrics.CounterAdd(metricFeedCommitEvents, float64(len(writes)))
+		if journal != nil && h.Committed != nil {
+			h.Committed(rows)
+		}
 	}
 	h.mu.Lock()
 	h.seq[roomID] = last

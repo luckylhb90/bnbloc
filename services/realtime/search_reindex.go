@@ -3,6 +3,7 @@ package realtimehttp
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -13,12 +14,20 @@ import (
 	"github.com/luckylhb90/bnbloc/internal/wire"
 )
 
-// Search backfill (batch 3, R7): POST /v1/platform/search/reindex fills the
-// search text of messages stored before global search existed. The gateway
-// gates /v1/platform/* to super-admins (PermManagePlatform) and routes this
-// path here, the owner of room_messages. One call processes a bounded number
-// of batches and a bounded wall time, so it stays well inside proxy timeouts;
-// the caller (`bnbloc search reindex`) loops on the returned cursor until done.
+// Search reindex and status (super-admin). The gateway gates /v1/platform/*
+// to super-admins (PermManagePlatform) and routes these paths here, the
+// owner of room_messages and of the search backend.
+//
+// POST /v1/platform/search/reindex walks the room feed and brings the
+// search index up to date for it: on the store index it fills the search
+// text of rows stored without it; on OpenSearch it writes every row's
+// current document (a backfill of a new index, or a repair after dropped or
+// failed updates). One call processes a bounded number of batches and a
+// bounded wall time, so it stays well inside proxy timeouts; the caller
+// (`bnbloc search reindex`) loops on the returned cursor until done.
+//
+// GET /v1/platform/search/status reports the backend and its health as
+// this replica sees it (`bnbloc search status`).
 
 const (
 	defaultReindexBatches = 10
@@ -33,9 +42,9 @@ func (s *Service) handleSearchReindex(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if s.Messages == nil {
-		obs.ServerError(w, "message store unavailable", nil)
-		http.Error(w, "message store unavailable", http.StatusServiceUnavailable)
+	if s.Search == nil {
+		obs.ServerError(w, "search backend unavailable", nil)
+		http.Error(w, "search backend unavailable", http.StatusServiceUnavailable)
 		return
 	}
 	var req wire.SearchReindexRequest
@@ -52,15 +61,15 @@ func (s *Service) handleSearchReindex(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx := r.Context()
 	deadline := time.Now().Add(reindexCallBudget)
-	resp := wire.SearchReindexResponse{Cursor: req.Cursor}
+	resp := wire.SearchReindexResponse{Backend: s.Search.Backend(), Cursor: req.Cursor}
 	for i := 0; i < batches && !resp.Done && time.Now().Before(deadline); i++ {
-		b, err := s.Messages.ReindexSearchText(ctx, resp.Cursor, store.SearchReindexBatchSize)
+		b, err := s.Search.Reindex(ctx, resp.Cursor, store.SearchReindexBatchSize)
 		if errors.Is(err, store.ErrInvalidSearchCursor) {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
 		if err != nil {
-			log.Printf("realtime: search reindex by %s at cursor %q: %v", userID, resp.Cursor, err)
+			obs.ServerError(w, "search reindex ("+resp.Backend+")", fmt.Errorf("by %s at cursor %q: %w", userID, resp.Cursor, err))
 			http.Error(w, "search reindex failed", http.StatusInternalServerError)
 			return
 		}
@@ -69,7 +78,21 @@ func (s *Service) handleSearchReindex(w http.ResponseWriter, r *http.Request) {
 		resp.Cursor = b.Cursor
 		resp.Done = b.Done
 	}
-	log.Printf("realtime: search reindex by %s: scanned=%d updated=%d cursor=%q done=%v",
-		userID, resp.Scanned, resp.Updated, resp.Cursor, resp.Done)
+	log.Printf("realtime: search reindex (%s) by %s: scanned=%d updated=%d cursor=%q done=%v",
+		resp.Backend, userID, resp.Scanned, resp.Updated, resp.Cursor, resp.Done)
 	writeJSON(w, http.StatusOK, resp)
+}
+
+func (s *Service) handleSearchStatus(w http.ResponseWriter, r *http.Request) {
+	if _, ok := requireSubject(w, r); !ok {
+		return
+	}
+	if s.Search == nil {
+		obs.ServerError(w, "search backend unavailable", nil)
+		http.Error(w, "search backend unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	st := s.Search.Status(r.Context())
+	st.Updates = s.SearchUpdates.Stats()
+	writeJSON(w, http.StatusOK, st)
 }

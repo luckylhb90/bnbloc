@@ -13,6 +13,7 @@ import (
 
 	"github.com/luckylhb90/bnbloc/internal/membership"
 	"github.com/luckylhb90/bnbloc/internal/realtime"
+	"github.com/luckylhb90/bnbloc/internal/search"
 	"github.com/luckylhb90/bnbloc/internal/store"
 	"github.com/luckylhb90/bnbloc/internal/tenant"
 	"github.com/luckylhb90/bnbloc/internal/wire"
@@ -40,7 +41,7 @@ func newTeamFixture(t *testing.T) *teamFixture {
 		Chat:       chat,
 		Prompts:    store.NewMemoryPrompts(),
 		Tasks:      store.NewMemoryMessageTasks(),
-		Messages:   chat,
+		Search:     search.NewStore(chat),
 		Artifacts:  store.NewMemoryArtifacts(),
 		Rooms:      mem,
 	}

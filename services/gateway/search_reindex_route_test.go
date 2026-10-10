@@ -7,8 +7,8 @@ import (
 	"github.com/luckylhb90/bnbloc/internal/rbac"
 )
 
-// R7: the search backfill routes to realtime (the room feed's owner) and is
-// super-admin-only like every /v1/platform path.
+// The search reindex and status route to realtime (the room feed's owner)
+// and are super-admin-only like every /v1/platform path.
 func TestSearchReindexRoute(t *testing.T) {
 	s := &Service{Backends: Backends{Room: "room", Realtime: "rt", Activity: "act", ShareAgent: "share"}}
 	p := mustParseAPIPath(t, http.MethodPost, "/v1/platform/search/reindex")
@@ -17,6 +17,13 @@ func TestSearchReindexRoute(t *testing.T) {
 	}
 	if perm := requiredPermission(http.MethodPost, p); perm != rbac.PermManagePlatform {
 		t.Fatalf("permission = %s, want manage_platform", perm)
+	}
+	status := mustParseAPIPath(t, http.MethodGet, "/v1/platform/search/status")
+	if got := s.route(status); got != "rt" {
+		t.Fatalf("status route = %q, want realtime", got)
+	}
+	if perm := requiredPermission(http.MethodGet, status); perm != rbac.PermManagePlatform {
+		t.Fatalf("status permission = %s, want manage_platform", perm)
 	}
 	if rbac.Can(string(rbac.RoleAdmin), rbac.PermManagePlatform) {
 		t.Fatal("an org admin may reach a platform route")
