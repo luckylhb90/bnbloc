@@ -484,7 +484,9 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   consecutive sequences, stores the batch in ONE `AppendRoomMessages`
   insert, and delivers only after it succeeds. Do not go back to a commit
   per event under a room lock (the commit wait then queues every message of
-  a busy room), and never add an artificial batching delay. A failed batch
+  a busy room), never add an artificial batching delay, and never give the
+  commit a timeout or a caller's context: an abandoned insert may still
+  commit server-side, reported failed and never delivered. A failed batch
   fails every member and re-seeds; the fence (`ErrDuplicateSeq`) is NOT
   retried locally, so a stale owner stops writing and each caller's
   idempotent retry reaches the real owner. A client id repeated in the

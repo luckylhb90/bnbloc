@@ -97,8 +97,16 @@ Status (2026-10-11): in progress.
   - **Leadership hand-off, not a loop.** When a batch is delivered, the
     leader hands the lead to the first queued publisher and returns, so no
     caller's response waits on batches that arrived after its own.
-  - **Batch bounds:** 64 events and 1 MiB of payload per insert; a commit
-    has its own 10 s timeout (it cannot use one caller's request context).
+  - **Batch bounds:** 64 events and 1 MiB of payload per insert.
+  - **A commit runs to its real outcome.** It uses neither a caller's
+    request context nor a timeout. The first version had a 10 s timeout:
+    under a disk stall a commit timed out client-side, still committed
+    server-side, its callers got 500 and its events were never delivered
+    live, and the re-seeded counter then collided with the late rows (one
+    run: 16 timeouts, then 359 fence failures). The pre-1b path had the
+    same flaw through the request context (a client disconnect abandoned
+    the insert). A dead connection still fails, through the driver and TCP
+    keepalive.
   - **The fence fails every member, no local retry.** A `(room_id, seq)`
     conflict means another replica wrote the room's next slots. Re-seeding
     and retrying locally would keep a stale owner writing a room whose live

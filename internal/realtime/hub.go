@@ -216,9 +216,6 @@ type Durable struct {
 const (
 	maxBatchWrites = 64
 	maxBatchBytes  = 1 << 20
-	// commitTimeout bounds one batch commit. The commit cannot use a
-	// caller's request context: it carries every member of the batch.
-	commitTimeout = 10 * time.Second
 )
 
 // Publish fans the event out with no durable store. A transient kind
@@ -502,14 +499,20 @@ func (h *Hub) commit(batch []*pending) {
 }
 
 // store runs one batch insert through the journal (nil = in-memory mode,
-// nothing stored), under its own timeout.
+// nothing stored). The commit runs to its real outcome: no caller's request
+// context (it carries the whole batch) and no timeout. Abandoning an insert
+// client-side does not abort it server-side, so a cancelled or timed-out
+// commit may still land: its callers would be told it failed, its events
+// never delivered live, and the re-seeded counter would then collide with
+// the late rows. Waiting through a slow commit keeps every guarantee; a dead
+// connection still fails, through the driver and TCP keepalive.
 func (h *Hub) store(j Journal, rows []store.RoomMessage) error {
 	if j == nil {
 		return nil
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), commitTimeout)
-	defer cancel()
-	_, err := guard("journal", func() (struct{}, error) { return struct{}{}, j.AppendRoomMessages(ctx, rows) })
+	_, err := guard("journal", func() (struct{}, error) {
+		return struct{}{}, j.AppendRoomMessages(context.Background(), rows)
+	})
 	return err
 }
 

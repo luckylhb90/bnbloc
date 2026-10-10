@@ -615,3 +615,28 @@ func TestGroupCommitSurvivesJournalPanic(t *testing.T) {
 		t.Fatalf("after the panic seq=%d err=%v, want 1 (the room still has a leader)", ev.Sequence, err)
 	}
 }
+
+// The batch commit runs to its real outcome: its context carries no
+// deadline and no cancellation (a caller's request ending, or a timeout,
+// would abandon an insert the server may still commit).
+func TestGroupCommitContextNeverAbandonsTheInsert(t *testing.T) {
+	var deadline, cancellable bool
+	j := &testJournalCtx{fn: func(ctx context.Context) {
+		_, deadline = ctx.Deadline()
+		cancellable = ctx.Done() != nil
+	}}
+	h := NewHub(8, 8)
+	if _, err := h.PublishCommit(chatEvent("r", "x"), Durable{Journal: j, Row: store.RoomMessage{TenantID: testTenantID}}); err != nil {
+		t.Fatal(err)
+	}
+	if deadline || cancellable {
+		t.Fatalf("commit context: deadline=%v cancellable=%v, want neither", deadline, cancellable)
+	}
+}
+
+type testJournalCtx struct{ fn func(context.Context) }
+
+func (j *testJournalCtx) AppendRoomMessages(ctx context.Context, _ []store.RoomMessage) error {
+	j.fn(ctx)
+	return nil
+}
