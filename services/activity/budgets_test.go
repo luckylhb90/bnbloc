@@ -41,8 +41,24 @@ type budgetFixture struct {
 	act      *store.Memory
 	jobs     *store.MemoryBridgeJobs
 	notifier *captureNotifier
-	now      time.Time
 	seq      int64
+	// nowMu guards now: Service.Now is also read by the debounced budget
+	// evaluation, which runs on its own timer goroutine.
+	nowMu sync.Mutex
+	now   time.Time
+}
+
+// clock is the Service clock (safe for concurrent use).
+func (f *budgetFixture) clock() time.Time {
+	f.nowMu.Lock()
+	defer f.nowMu.Unlock()
+	return f.now
+}
+
+func (f *budgetFixture) setNow(now time.Time) {
+	f.nowMu.Lock()
+	defer f.nowMu.Unlock()
+	f.now = now
 }
 
 func bctx() context.Context { return tenant.NewContext(context.Background(), tenant.Default) }
@@ -67,7 +83,7 @@ func newBudgetFixture(t *testing.T) *budgetFixture {
 	f := &budgetFixture{act: store.NewMemory(), jobs: store.NewMemoryBridgeJobs(), notifier: &captureNotifier{}, now: now}
 	f.svc = &Service{
 		Store: f.act, Publisher: &capturePublisher{}, Membership: mem, BridgeJobs: f.jobs,
-		Usage: f.act, Now: func() time.Time { return f.now },
+		Usage: f.act, Now: f.clock,
 		Budgets: store.NewMemoryUsageBudgets(), Tenants: tenants, Notifications: f.notifier,
 		PublicURL: "https://bnbloc.example.com", BudgetDebounce: time.Millisecond,
 	}
@@ -105,8 +121,8 @@ func f64(v float64) *float64 { return &v }
 
 func TestTenantBudgetsRoundTripWithBurn(t *testing.T) {
 	f := newBudgetFixture(t)
-	f.burn(t, "alice", 400, 100, 1.5, f.now.UnixMilli()-1000)
-	f.burn(t, "bob", 50, 0, 0, f.now.UnixMilli()-2000)
+	f.burn(t, "alice", 400, 100, 1.5, f.clock().UnixMilli()-1000)
+	f.burn(t, "bob", 50, 0, 0, f.clock().UnixMilli()-2000)
 	// Last month's usage is not this month's burn.
 	f.burn(t, "alice", 9000, 0, 9, time.Date(2026, 12, 31, 23, 0, 0, 0, time.UTC).UnixMilli())
 
@@ -165,12 +181,12 @@ func (f *budgetFixture) claimAs(t *testing.T, owner string, jobIDs ...string) []
 	t.Helper()
 	ctx := bctx()
 	bridge := "bridge-" + owner
-	_ = f.jobs.PutBridgeHeartbeat(ctx, store.BridgeHeartbeat{BridgeID: bridge, OwnerUserID: owner, Status: store.BridgeOnline, LastSeenAtMs: f.now.UnixMilli()})
-	_ = f.jobs.ReplaceBridgeAgents(ctx, bridge, []store.BridgeAgent{{OwnerUserID: owner, Core: "c1", Provider: "codex", LastSeenAtMs: f.now.UnixMilli()}})
+	_ = f.jobs.PutBridgeHeartbeat(ctx, store.BridgeHeartbeat{BridgeID: bridge, OwnerUserID: owner, Status: store.BridgeOnline, LastSeenAtMs: f.clock().UnixMilli()})
+	_ = f.jobs.ReplaceBridgeAgents(ctx, bridge, []store.BridgeAgent{{OwnerUserID: owner, Core: "c1", Provider: "codex", LastSeenAtMs: f.clock().UnixMilli()}})
 	for _, id := range jobIDs {
 		f.seq++
 		if _, err := f.jobs.PutAgentJob(ctx, store.AgentJob{JobID: id, RoomID: "room-1", ChannelID: "ch", MessageSeq: f.seq, OwnerUserID: owner, RequesterUserID: "bob",
-			Core: "c1", Provider: "codex", MessageText: "go", CreatedAtMs: f.now.UnixMilli()}); err != nil {
+			Core: "c1", Provider: "codex", MessageText: "go", CreatedAtMs: f.clock().UnixMilli()}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -185,7 +201,7 @@ func (f *budgetFixture) claimAs(t *testing.T, owner string, jobIDs ...string) []
 	// Finish what was handed over so the next claim of the same agent is not
 	// held back by a running turn.
 	for _, j := range out.Jobs {
-		if _, err := f.jobs.UpdateAgentJobStatus(ctx, store.JobStatusUpdate{JobID: j.JobID, BridgeID: bridge, Status: store.AgentJobReplied, NowMs: f.now.UnixMilli()}); err != nil {
+		if _, err := f.jobs.UpdateAgentJobStatus(ctx, store.JobStatusUpdate{JobID: j.JobID, BridgeID: bridge, Status: store.AgentJobReplied, NowMs: f.clock().UnixMilli()}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -198,7 +214,7 @@ func (f *budgetFixture) claimAs(t *testing.T, owner string, jobIDs ...string) []
 // alice's agent.
 func TestBudgetHardStopRefusesDriveAtClaim(t *testing.T) {
 	f := newBudgetFixture(t)
-	f.burn(t, "alice", 900, 100, 0, f.now.UnixMilli()-1000)
+	f.burn(t, "alice", 900, 100, 0, f.clock().UnixMilli()-1000)
 	if code, raw := f.do(t, http.MethodPut, "/v1/tenant/budgets", "root", wire.TenantBudgetsUpdate{
 		Members: []wire.MemberBudgetLimits{{UserID: "alice", UsageBudgetLimits: wire.UsageBudgetLimits{Tokens: i64(1000), HardStop: true}}},
 	}); code != http.StatusOK {
@@ -264,13 +280,13 @@ func TestBudgetWarningsOncePerThresholdPerMonth(t *testing.T) {
 	}); code != http.StatusOK {
 		t.Fatalf("put = %d %s", code, raw)
 	}
-	f.burn(t, "alice", 700, 0, 1, f.now.UnixMilli()-3000)
+	f.burn(t, "alice", 700, 0, 1, f.clock().UnixMilli()-3000)
 	f.svc.EvaluateBudgetWarnings(bctx(), "alice")
 	f.svc.EvaluateBudgetWarnings(bctx(), "alice")
 	if evs := f.notifier.all(); len(evs) != 0 {
 		t.Fatalf("warned at 70%% of an 80%% threshold: %+v", evs)
 	}
-	f.burn(t, "alice", 100, 50, 1, f.now.UnixMilli()-2000) // 850 / 1000
+	f.burn(t, "alice", 100, 50, 1, f.clock().UnixMilli()-2000) // 850 / 1000
 	f.svc.EvaluateBudgetWarnings(bctx(), "alice")
 	f.svc.EvaluateBudgetWarnings(bctx(), "alice")
 	evs := f.notifier.all()
@@ -278,7 +294,7 @@ func TestBudgetWarningsOncePerThresholdPerMonth(t *testing.T) {
 		!strings.Contains(evs[0].Title, "85%") || evs[0].URL != "https://bnbloc.example.com/#/settings" {
 		t.Fatalf("80%% warning = %+v", evs)
 	}
-	f.burn(t, "alice", 200, 0, 98, f.now.UnixMilli()-1000) // 1050 tokens; tenant cost 100 / 100
+	f.burn(t, "alice", 200, 0, 98, f.clock().UnixMilli()-1000) // 1050 tokens; tenant cost 100 / 100
 	f.svc.EvaluateBudgetWarnings(bctx(), "alice")
 	f.svc.EvaluateBudgetWarnings(bctx(), "alice")
 	evs = f.notifier.all()
@@ -293,8 +309,8 @@ func TestBudgetWarningsOncePerThresholdPerMonth(t *testing.T) {
 		t.Fatalf("tenant warning = %+v (straight to 100%%: one warning, to the org admins)", org)
 	}
 	// Next month re-arms.
-	f.now = time.Date(2027, 2, 2, 0, 0, 0, 0, time.UTC)
-	f.burn(t, "alice", 1000, 0, 0, f.now.UnixMilli()-1000)
+	f.setNow(time.Date(2027, 2, 2, 0, 0, 0, 0, time.UTC))
+	f.burn(t, "alice", 1000, 0, 0, f.clock().UnixMilli()-1000)
 	f.svc.EvaluateBudgetWarnings(bctx(), "alice")
 	if evs := f.notifier.all(); len(evs) != 4 || evs[3].DedupKey != "budget:alice:2027-02:100" {
 		t.Fatalf("next month = %+v", evs)
@@ -310,7 +326,7 @@ func TestReplyIngestTriggersBudgetWarning(t *testing.T) {
 		t.Fatalf("put = %d %s", code, raw)
 	}
 	code, raw := f.do(t, http.MethodPost, "/v1/rooms/room-1/agent-activity/messages", "alice", wire.ReportMessagesInput{
-		WorkspaceID: "room-1", AgentSessionID: "s1", Messages: []wire.Message{{Seq: 1, CreatedAtUnixMs: f.now.UnixMilli(),
+		WorkspaceID: "room-1", AgentSessionID: "s1", Messages: []wire.Message{{Seq: 1, CreatedAtUnixMs: f.clock().UnixMilli(),
 			Payload: map[string]any{"role": "assistant", "provider": "codex", "metrics": map[string]any{"inputTokens": 150.0, "reported": true}}}},
 	})
 	if code != http.StatusOK {

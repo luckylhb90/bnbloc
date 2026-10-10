@@ -49,7 +49,9 @@ type Service struct {
 	// run detail resolve the first reply's room sequence (nil = omitted).
 	Runs store.AgentRunReader
 	Feed RoomFeedReader
-	// Now is the dashboard clock (nil = time.Now).
+	// Now is the dashboard clock (nil = time.Now). It must be safe for
+	// concurrent use: request handlers and the debounced budget evaluation
+	// (a timer goroutine, noteBudgetBurn) call it from their own goroutines.
 	Now func() time.Time
 	// Budgets holds the monthly usage budgets (R12); nil answers the budget
 	// routes with 501 and refuses no drive. Tenants resolves budget members
