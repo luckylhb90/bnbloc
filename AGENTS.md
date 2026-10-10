@@ -213,8 +213,32 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   `docs/environment-variables.md` + `docs/deploy-service-env.md` in the same
   change. Document only variables the code reads; delete ones it no longer
   reads.
-- **realtime and relay are singletons** (in-process SSE hub / relay pairing
-  table). Never scale them horizontally; the Helm chart refuses it.
+- **realtime and relay scale out by key ownership (`internal/shard`).** Each
+  room (`room:<id>`), member (`member:<id>`) or relay session key is owned by
+  one replica, which holds all of that key's in-process state (hub
+  subscribers, the durable sequence counter, replay buffer, presence/roster
+  and their timers, plugin streams and pending acks, relay pairings).
+  `BNBLOC_<SVC>_PEERS` is one `host:port` DNS name (re-resolved every 5 s) or a
+  comma list; `BNBLOC_<SVC>_SELF` is `host:port` (or a bare IP in DNS mode).
+  Both unset = single node; only one set refuses startup. Peers failing
+  `/readyz` twice leave the set. Any replica forwards a keyed request one hop
+  to the owner (`shard.Forward`; SSE/WebSocket pass through, signed headers
+  untouched); `X-Bnbloc-Forwarded-By` means "serve locally, never re-forward"
+  and the gateway strips it from clients. Routing keys: `/v1/rooms/{id}/…`
+  and `/internal/v1/rooms/{id}/…` → room; `/v1/my/plugin-events` (+ ack) and
+  `/internal/v1/members/{m}/…` → member; relay routes → session key;
+  store-backed reads anywhere. **Never touch a room's hub from a replica that
+  may not own it:** background work goes to the owner (scheduler posts via
+  `/internal/v1/rooms/{id}/schedules/{s}/post`, notifications via
+  `MemberDesktopRoute`, plugin fan-out via the per-peer hand-off). A new keyed
+  route or new per-key in-process state must extend `RouteKey` and
+  `reconcileOwnership`; a new peer-to-peer call is svcauth-signed
+  (`Peers.call`). More than one realtime replica requires S3 (startup refuses
+  the disk store with peers set). Helm runs both as StatefulSets behind a
+  headless `bnbloc-<name>-peers` Service.
+- **Gateway rate limits are per replica, divided by the live count from
+  `BNBLOC_GATEWAY_PEERS`.** Every gateway surface running more than one
+  replica must set it, or N replicas allow N times the configured rate.
 
 ### Public repo: neutral names only
 
@@ -449,6 +473,12 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   the replay-buffer length.** Once the buffer slides past `replayLimit` the
   length plateaus, sequences repeat, and the client (which dedupes by sequence)
   silently drops later events.
+- **Only durable kinds (`chat_message`, `agent_messages`) take a sequence.**
+  Transient events carry sequence 0 and no SSE `id:`, so the counter always
+  equals the stored max and seeding it from the store (restart, ownership
+  move) is exact. Two replicas briefly owning a room are fenced by the
+  `(room_id, seq)` key plus the idempotent `clientMsgId` retry. Do not
+  reintroduce transient sequencing.
 - **Presence announces a leave only after a short grace window.** A last-ref
   drop schedules the leave; a re-`Enter` within the window cancels it, so a
   reconnecting client (SSE drop + retry) does not churn `presence_join/leave`.
