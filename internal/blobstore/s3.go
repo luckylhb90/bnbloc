@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/xml"
 	"errors"
 	"fmt"
 	"io"
@@ -165,6 +166,115 @@ func (s *S3Store) Delete(ctx context.Context, key string) error {
 		return err
 	}
 	return nil
+}
+
+// Walk lists every blob under the store's key prefix with ListObjectsV2,
+// one page (up to 1000 keys) at a time.
+func (s *S3Store) Walk(ctx context.Context, fn func(Info) error) error {
+	prefix := s.cfg.KeyPrefix + keyPrefix
+	token := ""
+	for {
+		q := url.Values{}
+		q.Set("list-type", "2")
+		q.Set("prefix", prefix)
+		if token != "" {
+			q.Set("continuation-token", token)
+		}
+		u := s.bucketURL()
+		u.RawQuery = q.Encode()
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
+		if err != nil {
+			return fmt.Errorf("create s3 list request: %w", err)
+		}
+		if err := s.sign(ctx, req, emptySHA256Hex); err != nil {
+			return err
+		}
+		resp, err := s.client.Do(req)
+		if err != nil {
+			return fmt.Errorf("list s3 blobs: %w", err)
+		}
+		var page listBucketResult
+		if resp.StatusCode < 200 || resp.StatusCode > 299 {
+			body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+			resp.Body.Close()
+			return fmt.Errorf("list s3 blobs: status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+		}
+		err = xml.NewDecoder(io.LimitReader(resp.Body, 16<<20)).Decode(&page)
+		resp.Body.Close()
+		if err != nil {
+			return fmt.Errorf("decode s3 list: %w", err)
+		}
+		for _, obj := range page.Contents {
+			key := strings.TrimPrefix(obj.Key, s.cfg.KeyPrefix)
+			if _, err := validateKey(key); err != nil {
+				continue
+			}
+			if err := fn(Info{Key: key, Size: obj.Size, ModTime: obj.LastModified}); err != nil {
+				return err
+			}
+		}
+		if !page.IsTruncated || page.NextContinuationToken == "" {
+			return nil
+		}
+		token = page.NextContinuationToken
+	}
+}
+
+// listBucketResult is the part of a ListObjectsV2 answer Walk reads.
+type listBucketResult struct {
+	IsTruncated           bool   `xml:"IsTruncated"`
+	NextContinuationToken string `xml:"NextContinuationToken"`
+	Contents              []struct {
+		Key          string    `xml:"Key"`
+		Size         int64     `xml:"Size"`
+		LastModified time.Time `xml:"LastModified"`
+	} `xml:"Contents"`
+}
+
+// Stat reads a blob's size and Last-Modified with a HEAD request.
+func (s *S3Store) Stat(ctx context.Context, key string) (Info, error) {
+	if _, err := validateKey(key); err != nil {
+		return Info{}, err
+	}
+	req, err := s.newRequest(ctx, http.MethodHead, key, nil)
+	if err != nil {
+		return Info{}, err
+	}
+	if err := s.sign(ctx, req, emptySHA256Hex); err != nil {
+		return Info{}, err
+	}
+	resp, err := s.client.Do(req)
+	if err != nil {
+		return Info{}, fmt.Errorf("head s3 blob %s: %w", key, err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode == http.StatusNotFound {
+		return Info{}, fmt.Errorf("blob %s: %w", key, ErrBlobNotFound)
+	}
+	if resp.StatusCode < 200 || resp.StatusCode > 299 {
+		return Info{}, fmt.Errorf("head s3 blob %s: status %d", key, resp.StatusCode)
+	}
+	mod, err := http.ParseTime(resp.Header.Get("Last-Modified"))
+	if err != nil {
+		return Info{}, fmt.Errorf("head s3 blob %s: Last-Modified: %w", key, err)
+	}
+	return Info{Key: key, Size: resp.ContentLength, ModTime: mod}, nil
+}
+
+// bucketURL addresses the bucket itself (the ListObjectsV2 target),
+// path-style or virtual-host like objectURL.
+func (s *S3Store) bucketURL() *url.URL {
+	u := *s.endpoint
+	if s.cfg.UsePathStyle {
+		u.Path = joinS3Path(s.cfg.Bucket)
+	} else {
+		u.Host = s.cfg.Bucket + "." + u.Host
+		u.Path = "/"
+	}
+	u.RawPath = ""
+	u.RawQuery = ""
+	u.Fragment = ""
+	return &u
 }
 
 func (s *S3Store) do(ctx context.Context, method, key string, body io.Reader, size int64, payloadHash string) error {

@@ -39,6 +39,21 @@ type BlobStore interface {
 	Get(ctx context.Context, key string) (io.ReadCloser, int64, error)
 	// Delete removes a blob (best-effort; missing is not an error).
 	Delete(ctx context.Context, key string) error
+	// Walk calls fn once for every stored blob, in no particular order; an
+	// error from fn stops the walk and is returned. The blob collection
+	// (internal/retention) walks the store to find unreferenced blobs.
+	Walk(ctx context.Context, fn func(Info) error) error
+	// Stat returns a blob's size and last write time, ErrBlobNotFound when
+	// it is missing. A Put of content that is already stored rewrites it,
+	// so ModTime is the last time anyone stored those bytes.
+	Stat(ctx context.Context, key string) (Info, error)
+}
+
+// Info describes one stored blob.
+type Info struct {
+	Key     string
+	Size    int64
+	ModTime time.Time
 }
 
 // Presigner is the optional direct-download capability of a BlobStore: a

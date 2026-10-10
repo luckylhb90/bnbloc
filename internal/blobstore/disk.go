@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 type DiskStore struct {
@@ -103,6 +104,66 @@ func (s *DiskStore) Delete(ctx context.Context, key string) error {
 		return fmt.Errorf("delete blob %s: %w", key, err)
 	}
 	return nil
+}
+
+// Walk visits every committed blob (<dir>/<2 hex>/<64 hex>); in-flight
+// temp files ("put-*" in the root) are not blobs and are skipped.
+func (s *DiskStore) Walk(ctx context.Context, fn func(Info) error) error {
+	shards, err := os.ReadDir(s.dir)
+	if err != nil {
+		return fmt.Errorf("list blob dir: %w", err)
+	}
+	for _, shard := range shards {
+		if !shard.IsDir() || len(shard.Name()) != 2 {
+			continue
+		}
+		entries, err := os.ReadDir(filepath.Join(s.dir, shard.Name()))
+		if err != nil {
+			return fmt.Errorf("list blob shard %s: %w", shard.Name(), err)
+		}
+		for _, e := range entries {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			key := keyFromHash(e.Name())
+			if e.IsDir() || !strings.HasPrefix(e.Name(), shard.Name()) {
+				continue
+			}
+			if _, err := validateKey(key); err != nil {
+				continue
+			}
+			info, err := e.Info()
+			if errors.Is(err, os.ErrNotExist) {
+				continue // deleted meanwhile
+			}
+			if err != nil {
+				return fmt.Errorf("stat blob %s: %w", key, err)
+			}
+			if err := fn(Info{Key: key, Size: info.Size(), ModTime: info.ModTime()}); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// Stat reports a blob's size and modification time.
+func (s *DiskStore) Stat(ctx context.Context, key string) (Info, error) {
+	if err := ctx.Err(); err != nil {
+		return Info{}, err
+	}
+	hexPart, err := validateKey(key)
+	if err != nil {
+		return Info{}, err
+	}
+	info, err := os.Stat(s.pathForHash(hexPart))
+	if errors.Is(err, os.ErrNotExist) {
+		return Info{}, fmt.Errorf("blob %s: %w", key, ErrBlobNotFound)
+	}
+	if err != nil {
+		return Info{}, fmt.Errorf("stat blob %s: %w", key, err)
+	}
+	return Info{Key: key, Size: info.Size(), ModTime: info.ModTime()}, nil
 }
 
 func (s *DiskStore) pathForHash(sha256hex string) string {
