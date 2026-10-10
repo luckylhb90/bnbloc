@@ -18,7 +18,6 @@
 package bridge
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"crypto/hmac"
@@ -39,6 +38,7 @@ import (
 	"github.com/luckylhb90/bnbloc/internal/coreset"
 	"github.com/luckylhb90/bnbloc/internal/roomlog"
 	"github.com/luckylhb90/bnbloc/internal/shareagent"
+	"github.com/luckylhb90/bnbloc/internal/sse"
 	"github.com/luckylhb90/bnbloc/internal/store"
 	"github.com/luckylhb90/bnbloc/internal/wire"
 	syncpkg "github.com/luckylhb90/bnbloc/services/bridge/sync"
@@ -1357,34 +1357,29 @@ func (b *Bridge) consumeRoom(ctx context.Context, room string) error {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 256))
 		return fmt.Errorf("subscribe %s: %w: %s", room, &gatewayError{Method: http.MethodGet, URL: b.cfg.GatewayBaseURL + "/v1/rooms/" + room + "/events", Status: resp.StatusCode}, body)
 	}
-	scanner := bufio.NewScanner(resp.Body)
-	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 	// Bridge v2 never drives work from SSE — durable jobs carry the prompt. The
 	// one thing worth listening for is a job leaving this bridge's hands: a member
 	// pressing stop must halt the local turn now, not at the next lease renewal.
-	var kind string
-	for scanner.Scan() {
-		line := scanner.Text()
-		switch {
-		case strings.HasPrefix(line, "event:"):
-			kind = strings.TrimSpace(strings.TrimPrefix(line, "event:"))
-		case strings.HasPrefix(line, "data:"):
-			data := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
-			switch kind {
-			case "agent_job_updated":
-				b.handleJobUpdate(data)
-			case "artifact_state":
-				// A member interacted with a live artifact. Recorded for the
-				// agent's .room/live.md; never drives a turn by itself (every
-				// gesture spawning token-burning turns would be a runaway),
-				// but the trail is there the next time the room talks to us.
-				b.recordGesture(room, parseGesture(data))
-			}
-		case line == "":
-			kind = ""
+	rd := sse.NewReader(resp.Body)
+	for {
+		ev, err := rd.Next()
+		if errors.Is(err, io.EOF) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		switch ev.Name {
+		case "agent_job_updated":
+			b.handleJobUpdate(string(ev.Data))
+		case "artifact_state":
+			// A member interacted with a live artifact. Recorded for the
+			// agent's .room/live.md; never drives a turn by itself (every
+			// gesture spawning token-burning turns would be a runaway),
+			// but the trail is there the next time the room talks to us.
+			b.recordGesture(room, parseGesture(string(ev.Data)))
 		}
 	}
-	return scanner.Err()
 }
 
 // liveGesture is one observed artifact interaction (from artifact_state).

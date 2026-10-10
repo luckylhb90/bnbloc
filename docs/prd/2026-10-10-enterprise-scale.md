@@ -136,6 +136,15 @@ Status (2026-10-11): in progress.
   subscriber is now closed, so the client reconnects and catches up from
   history (`realtime_sse_overflows_total` counts it), and the SSE handler
   writes every queued event before one flush instead of flushing per event.
+- Shared SSE reader and session-token peek: landed. `internal/sse` is the
+  one text/event-stream parser (comments, `id:`/`event:`/`data:`,
+  multi-line data, blank-line dispatch, a 4 MiB line bound); the bridge,
+  `bnbloc smoke` and the load tool read through it and keep their own
+  reconnect logic. The bridge used to dispatch on every `data:` line with a
+  1 MiB line cap, below the largest event realtime may emit (a 1 MiB
+  internal publish plus its envelope); it now dispatches on the blank line
+  like the others. `auth.PeekSession` (beside the signer that owns the
+  format) replaces the two copies of unverified session decoding.
 - Replay buffer max age: landed (raised by section 3). The replay buffer is
   only a latency optimization for connected clients, yet a quiet room whose
   subscriber stayed connected kept its entries forever, so a message data

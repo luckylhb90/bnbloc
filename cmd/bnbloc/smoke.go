@@ -1,11 +1,9 @@
 package main
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"crypto/rand"
-	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -19,6 +17,9 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/luckylhb90/bnbloc/internal/auth"
+	"github.com/luckylhb90/bnbloc/internal/sse"
 )
 
 // `bnbloc smoke` is the post-deploy check of the room message path against a
@@ -285,26 +286,11 @@ func smokeAuth(ctx context.Context, c *client, timeout time.Duration) (string, e
 // verifies the signature on every call; this only labels the run and scopes
 // the auth probe to the token's own subject.
 func sessionSubject(token string) (string, error) {
-	payload, _, ok := strings.Cut(token, ".")
-	if !ok {
-		return "", errors.New("the session token is not a bnbloc session (want <payload>.<signature>)")
-	}
-	raw, err := base64.RawURLEncoding.DecodeString(payload)
+	claims, err := auth.PeekSession(token)
 	if err != nil {
-		return "", fmt.Errorf("the session token payload is not base64url: %w", err)
+		return "", err
 	}
-	var claims struct {
-		Subject string `json:"sub"`
-		Kind    string `json:"kind"`
-		Exp     int64  `json:"exp"`
-	}
-	if err := json.Unmarshal(raw, &claims); err != nil {
-		return "", fmt.Errorf("the session token payload is not JSON: %w", err)
-	}
-	if claims.Kind != "" {
-		return "", fmt.Errorf("the token is a %q token, not a session", claims.Kind)
-	}
-	if claims.Exp != 0 && time.Now().Unix() > claims.Exp {
+	if claims.ExpiresAtUnix != 0 && time.Now().Unix() > claims.ExpiresAtUnix {
 		return "", errNotSignedIn("the gateway", "the session token expired")
 	}
 	return claims.Subject, nil
@@ -409,47 +395,26 @@ func openSmokeStream(ctx context.Context, c *client, roomID string, timeout time
 	}
 }
 
-// readSSE parses a text/event-stream body ("event:"/"data:" fields, blank-line
-// dispatch, ":" comments such as the keep-alive) into events.
+// readSSE decodes the room event stream (internal/sse) into events until
+// the stream ends (nil) or fails.
 func readSSE(ctx context.Context, r io.Reader, out chan<- smokeEvent) error {
-	br := bufio.NewReader(r)
-	var data strings.Builder
-	dispatch := func() error {
-		if data.Len() == 0 {
+	rd := sse.NewReader(r)
+	for {
+		raw, err := rd.Next()
+		if errors.Is(err, io.EOF) {
 			return nil
 		}
-		var ev smokeEvent
-		err := json.Unmarshal([]byte(data.String()), &ev)
-		data.Reset()
 		if err != nil {
-			return nil // not a room event (never sent by realtime); ignore
+			return err
+		}
+		var ev smokeEvent
+		if json.Unmarshal(raw.Data, &ev) != nil {
+			continue // not a room event (never sent by realtime); ignore
 		}
 		select {
 		case out <- ev:
-			return nil
 		case <-ctx.Done():
 			return ctx.Err()
-		}
-	}
-	for {
-		line, err := br.ReadString('\n')
-		line = strings.TrimRight(line, "\r\n")
-		switch {
-		case line == "":
-			if derr := dispatch(); derr != nil {
-				return derr
-			}
-		case strings.HasPrefix(line, "data:"):
-			if data.Len() > 0 {
-				data.WriteByte('\n')
-			}
-			data.WriteString(strings.TrimPrefix(strings.TrimPrefix(line, "data:"), " "))
-		}
-		if err != nil {
-			if errors.Is(err, io.EOF) {
-				return nil
-			}
-			return err
 		}
 	}
 }

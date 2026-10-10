@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"bytes"
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -15,6 +14,8 @@ import (
 	"os"
 	"strings"
 	"time"
+
+	"github.com/luckylhb90/bnbloc/internal/auth"
 )
 
 // api is the load generator's gateway client: the same public routes the web
@@ -146,31 +147,13 @@ func (a *api) login(ctx context.Context, subject, forwardedFor string) (member, 
 // (<base64url JSON payload>.<signature>). The gateway verifies the signature
 // on every call; this only names the member the token belongs to.
 func sessionClaims(token string) (string, time.Time, error) {
-	payload, _, ok := strings.Cut(token, ".")
-	if !ok {
-		return "", time.Time{}, errors.New("not a bnbloc session token (want <payload>.<signature>)")
-	}
-	raw, err := base64.RawURLEncoding.DecodeString(payload)
+	claims, err := auth.PeekSession(token)
 	if err != nil {
-		return "", time.Time{}, fmt.Errorf("session token payload is not base64url: %w", err)
-	}
-	var claims struct {
-		Subject string `json:"sub"`
-		Kind    string `json:"kind"`
-		Exp     int64  `json:"exp"`
-	}
-	if err := json.Unmarshal(raw, &claims); err != nil {
-		return "", time.Time{}, fmt.Errorf("session token payload is not JSON: %w", err)
-	}
-	if claims.Kind != "" {
-		return "", time.Time{}, fmt.Errorf("token is a %q token, not a session", claims.Kind)
-	}
-	if claims.Subject == "" {
-		return "", time.Time{}, errors.New("session token has no subject")
+		return "", time.Time{}, err
 	}
 	var exp time.Time
-	if claims.Exp > 0 {
-		exp = time.Unix(claims.Exp, 0)
+	if claims.ExpiresAtUnix > 0 {
+		exp = time.Unix(claims.ExpiresAtUnix, 0)
 	}
 	return claims.Subject, exp, nil
 }

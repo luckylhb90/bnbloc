@@ -1,9 +1,13 @@
 package main
 
 import (
+	"errors"
+	"io"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/luckylhb90/bnbloc/internal/sse"
 )
 
 func TestTrackerMatchesFirstArrivalPerExpectedStream(t *testing.T) {
@@ -82,24 +86,28 @@ func TestTrackerLostDeliveries(t *testing.T) {
 	}
 }
 
-func TestReadSSEAndDecode(t *testing.T) {
+func TestDecodeStreamEvents(t *testing.T) {
 	body := ": connected\n\n" +
 		"id: 7\nevent: presence_join\ndata: {\"sequence\":7,\"kind\":\"presence_join\",\"payload\":{\"userId\":\"maya\"}}\n\n" +
 		": keep-alive\n\n" +
 		"id: 8\r\nevent: chat_message\r\ndata: {\"sequence\":8,\"kind\":\"chat_message\",\r\ndata: \"payload\":{\"userId\":\"jack\",\"clientMsgId\":\"lt-1\"}}\r\n\r\n" +
 		"data: not json\n\n" +
 		"event: chat_message\ndata: {\"sequence\":9,\"payload\":{\"clientMsgId\":\"lt-2\"}}\n\n"
-	lines := 0
 	var got []roomEvent
 	var kinds []string
-	err := readSSE(strings.NewReader(body), func() { lines++ }, func(kind string, data []byte) {
-		kinds = append(kinds, kind)
-		if ev, ok := decodeEvent(kind, data); ok {
+	rd := sse.NewReader(strings.NewReader(body))
+	for {
+		raw, err := rd.Next()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			t.Fatalf("read: %v", err)
+		}
+		kinds = append(kinds, raw.Name)
+		if ev, ok := decodeEvent(raw.Name, raw.Data); ok {
 			got = append(got, ev)
 		}
-	})
-	if err != nil {
-		t.Fatalf("readSSE: %v", err)
 	}
 	if strings.Join(kinds, ",") != "presence_join,chat_message,,chat_message" {
 		t.Fatalf("kinds = %v", kinds)
@@ -117,9 +125,6 @@ func TestReadSSEAndDecode(t *testing.T) {
 	// The SSE event name supplies the kind when the JSON lacks it.
 	if got[2].clientMsgID != "lt-2" {
 		t.Errorf("kind from event name: %+v", got[2])
-	}
-	if lines == 0 {
-		t.Error("line callback never ran")
 	}
 }
 

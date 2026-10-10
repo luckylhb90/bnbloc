@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
@@ -9,10 +8,11 @@ import (
 	"io"
 	"math/rand/v2"
 	"net/http"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/luckylhb90/bnbloc/internal/sse"
 )
 
 // Reconnect backoff of the web client's subscribeRoom: 1s doubling up to
@@ -127,15 +127,22 @@ func (st *stream) connectOnce(ctx context.Context) (opened bool, err error) {
 		defer watchdog.Stop()
 	}
 	lastSeq := int64(-1)
-	err = readSSE(resp.Body, func() {
-		if watchdog != nil {
-			watchdog.Reset(st.idle)
+	rd := sse.NewReader(resp.Body)
+	if watchdog != nil {
+		rd.OnLine = func() { watchdog.Reset(st.idle) }
+	}
+	for {
+		raw, err := rd.Next()
+		if errors.Is(err, io.EOF) {
+			return true, errors.New("stream closed by the server")
 		}
-	}, func(kind string, data []byte) {
+		if err != nil {
+			return true, fmt.Errorf("read: %w", err)
+		}
 		at := time.Now()
-		ev, ok := decodeEvent(kind, data)
+		ev, ok := decodeEvent(raw.Name, raw.Data)
 		if !ok {
-			return
+			continue
 		}
 		if ev.Sequence > 0 {
 			if ev.Sequence < lastSeq {
@@ -146,11 +153,7 @@ func (st *stream) connectOnce(ctx context.Context) (opened bool, err error) {
 		if ev.clientMsgID != "" {
 			st.tracker.deliver(st.id, ev.clientMsgID, at)
 		}
-	})
-	if err == nil {
-		err = errors.New("stream closed by the server")
 	}
-	return true, err
 }
 
 // roomEvent is the part of a realtime event (internal/wire.Event: kind,
@@ -182,42 +185,4 @@ func decodeEvent(kind string, data []byte) (roomEvent, bool) {
 		ev.clientMsgID = raw.Payload.ClientMsgID
 	}
 	return ev, true
-}
-
-// readSSE parses a text/event-stream body: "event:" and "data:" fields, a
-// blank line dispatches, ":" lines are comments (the keep-alive). line is
-// called for every line read; event for every dispatched event with data. It
-// returns the read error (nil at a clean EOF).
-func readSSE(r io.Reader, line func(), event func(kind string, data []byte)) error {
-	br := bufio.NewReaderSize(r, 64*1024)
-	var kind string
-	var data []byte
-	for {
-		raw, err := br.ReadString('\n')
-		if raw != "" {
-			line()
-		}
-		l := strings.TrimRight(raw, "\r\n")
-		switch {
-		case l == "" && raw != "":
-			if len(data) > 0 {
-				event(kind, data)
-			}
-			kind, data = "", data[:0]
-		case strings.HasPrefix(l, ":"):
-		case strings.HasPrefix(l, "event:"):
-			kind = strings.TrimSpace(strings.TrimPrefix(l, "event:"))
-		case strings.HasPrefix(l, "data:"):
-			if len(data) > 0 {
-				data = append(data, '\n')
-			}
-			data = append(data, strings.TrimPrefix(strings.TrimPrefix(l, "data:"), " ")...)
-		}
-		if err != nil {
-			if errors.Is(err, io.EOF) {
-				return nil
-			}
-			return fmt.Errorf("read: %w", err)
-		}
-	}
 }

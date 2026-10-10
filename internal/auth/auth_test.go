@@ -61,3 +61,31 @@ func TestRefreshAndSessionTokensAreNotInterchangeable(t *testing.T) {
 		t.Fatal("VerifyRefresh accepted an expired refresh token")
 	}
 }
+
+// PeekSession names a bearer's owner without the signing key, for clients
+// holding their own token; it never verifies, so it refuses only what is not
+// a session at all.
+func TestPeekSession(t *testing.T) {
+	s := NewSigner([]byte("k"))
+	exp := time.Now().Add(time.Hour).Unix()
+	c, err := PeekSession(s.Issue(Claims{Subject: "maya", Tenant: "acme", ExpiresAtUnix: exp}))
+	if err != nil || c.Subject != "maya" || c.Tenant != "acme" || c.ExpiresAtUnix != exp {
+		t.Fatalf("PeekSession = %+v, %v", c, err)
+	}
+	// An expired session still decodes: expiry is the caller's to judge.
+	if c, err := PeekSession(s.Issue(Claims{Subject: "maya", ExpiresAtUnix: 1})); err != nil || c.ExpiresAtUnix != 1 {
+		t.Fatalf("expired session = %+v, %v", c, err)
+	}
+	for name, tok := range map[string]string{
+		"no signature":  "opaque",
+		"not base64url": "!!!.sig",
+		"not JSON":      "bm90IGpzb24.sig",
+		"refresh token": s.Issue(Claims{Subject: "maya", Kind: KindRefresh, ExpiresAtUnix: exp}),
+		"frame ticket":  s.Issue(Claims{Subject: "maya", Kind: KindSiteFrame, ExpiresAtUnix: exp}),
+		"no subject":    s.Issue(Claims{ExpiresAtUnix: exp}),
+	} {
+		if _, err := PeekSession(tok); err == nil {
+			t.Errorf("%s: accepted", name)
+		}
+	}
+}

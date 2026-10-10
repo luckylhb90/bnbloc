@@ -9,6 +9,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 )
@@ -147,6 +148,35 @@ func (s *Signer) verify(token string) (Claims, error) {
 	// Every session carries an expiry; a token without one would never expire.
 	if c.ExpiresAtUnix == 0 || s.now().Unix() > c.ExpiresAtUnix {
 		return Claims{}, ErrInvalidToken
+	}
+	return c, nil
+}
+
+// PeekSession decodes a session bearer's claims WITHOUT verifying its
+// signature or expiry. It is for a client that holds its own bearer and needs
+// to know whose it is (the `bnbloc smoke` check, the load tool); the gateway
+// verifies the token on every call, so nothing here authorizes anything. It
+// refuses a token that is not "<payload>.<signature>", a payload that is not
+// base64url JSON, a non-session kind (refresh, frame tickets) and a session
+// without a subject. Expiry is the caller's to judge (ExpiresAtUnix).
+func PeekSession(token string) (Claims, error) {
+	payload, _, ok := strings.Cut(token, ".")
+	if !ok {
+		return Claims{}, errors.New("not a bnbloc session token (want <payload>.<signature>)")
+	}
+	raw, err := base64.RawURLEncoding.DecodeString(payload)
+	if err != nil {
+		return Claims{}, fmt.Errorf("session token payload is not base64url: %w", err)
+	}
+	var c Claims
+	if err := json.Unmarshal(raw, &c); err != nil {
+		return Claims{}, fmt.Errorf("session token payload is not JSON: %w", err)
+	}
+	if c.Kind != "" {
+		return Claims{}, fmt.Errorf("token is a %q token, not a session", c.Kind)
+	}
+	if c.Subject == "" {
+		return Claims{}, errors.New("session token has no subject")
 	}
 	return c, nil
 }
