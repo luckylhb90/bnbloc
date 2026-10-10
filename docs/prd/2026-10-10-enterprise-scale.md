@@ -1,6 +1,6 @@
 # Enterprise scale: load testing, realtime scale-out, retention, search
 
-Status: approved 2026-10-10, in progress (sections 2 and 3 implemented 2026-10-11). Section 1 landed: `cmd/bnbloc-loadtest`, with the baseline in `docs/load-testing.md`.
+Status: approved 2026-10-10, implemented 2026-10-11 (sections 1, 1b, 2, 3 and 4). Section 1 landed: `cmd/bnbloc-loadtest`, with the baseline in `docs/load-testing.md`.
 
 ## Problem
 
@@ -437,6 +437,127 @@ implementing:
 - `bnbloc search reindex` backfills or rebuilds the index from MySQL.
 - Search results always pass the same membership and people-chat filters as
   today; OpenSearch returns candidates and the store stays the authority.
+
+### Status of section 4 (2026-10-11): implemented
+
+`internal/search` (the `Index` seam, the store index, the OpenSearch
+index, the updater, `FromEnv`), `internal/search/searchtest` (an in-process
+fake of the REST subset), `store.SearchSource` reads
+(`internal/store/search_source.go`), the hub's commit hook, the realtime
+search, reindex and status routes, retention, `bnbloc search reindex` /
+`status`, every deploy surface and the docs
+(`docs/production-deployment.md#search-backend`). Decisions taken while
+implementing:
+
+- **The seam.** `search.Index` has `Search`, `Reindex`, `Apply`,
+  `PurgeBefore` and `Status`. The default `search.Store` wraps the store's
+  own FULLTEXT query and backfill unchanged (`Apply` and `PurgeBefore` are
+  no-ops: the row write is the index write, and the FULLTEXT index follows
+  deleted rows). The realtime service holds a `search.Index` instead of the
+  store's search methods; the unused `Service.Messages` field is gone (tasks
+  read messages through `Service.Chat`).
+- **Selection.** `BNBLOC_SEARCH_OPENSEARCH_URL` (+ `_USERNAME` /
+  `_PASSWORD`, both or neither; `_INDEX_PREFIX`, default `bnbloc`). Plain
+  REST over `net/http`. Startup runs `EnsureIndex`: `GET /` (reachable,
+  credentials accepted), `HEAD` the index, create it when missing (a
+  concurrent creator's `resource_already_exists_exception` is success) or
+  verify an existing mapping (field types and the text analyzer; a
+  mismatch names the fix), then wait for yellow. Production retries for a
+  minute and then refuses to start; development warns and every index call
+  retries the probe. A malformed setting is fatal in both modes (nothing
+  sensible to fall back to).
+- **Analyzer.** A custom analyzer from the standard distribution, no
+  plugin: `ngram` tokenizer, exactly 2 characters, over letters, digits,
+  punctuation and symbols (whitespace splits), then `cjk_width`,
+  `lowercase`, `asciifolding`; queried with `match_phrase`. That is the
+  MySQL ngram parser's semantics (a substring match for queries of at least
+  two characters, case- and accent-insensitive) for CJK and English alike,
+  which the parity test needs. Rejected: the built-in `cjk` analyzer
+  (English stays whole words, so `ploy` misses `deploy`), ICU/smartcn
+  (plugins), edge-ngram (prefixes only). Verified on OpenSearch 2 with
+  `_analyze`: `Deploy 部署窗口 Ｃａｆé` → `de ep pl lo oy 部署 署窗 窗口 ca af fe`.
+- **Index and documents.** One index for every tenant,
+  `<prefix>-room-messages-v1`; the mapping version is in the name, so a
+  mapping change creates a new index and `bnbloc search reindex` fills it.
+  `dynamic: strict`; shard and replica counts are deliberately not set
+  (they belong to the cluster: defaults or an operator's index template).
+  Document id `<tenant>/<room>/<seq>` (each part path-escaped); fields
+  `tenant`, `room`, `channel`, `channelKind`, `seq`, `kind`, `author`
+  (`owner/provider` for agent replies), `text`, `createdAt`, `editedAt`,
+  `deleted`. A soft-deleted message keeps a document with `deleted=true`
+  and no text (the filter excludes it and the index holds no deleted
+  content); a row without text (attachment-only, retention fence) has no
+  document. The channel kind is joined from `room_channels` at read time
+  (a primary-key lookup; the memory store reports "").
+- **Query.** `bool.filter` = `term tenant`, `terms room` (the caller's
+  rooms as resolved from bnbloc-room, unchanged), `term deleted=false`,
+  `range createdAt < before`; `must` = `match_phrase text`; sort
+  `createdAt desc, seq desc` (the MySQL order); `_source` only the key.
+  The store is the authority: every candidate is re-read by key
+  (`LoadSearchSources`, one primary-key range per room) and kept only if
+  `store.MessageSearch.Admits` passes — the MySQL query's own predicates
+  (tenant, room, not deleted, before cursor, has text), kept beside that
+  query. A full page thinned by stale candidates is refilled with
+  `search_after` (at most three rounds), so paging (`nextBefore`) behaves
+  as on MySQL. The people chat needs no extra filter because it has none
+  today: search serves human members only (`MemberRooms` lists human
+  memberships, so an agent host never searches the rooms it serves), people
+  messages are visible to them and labeled by the handler as before. The
+  parity test pins that for both backends.
+- **Consistency model.** Eventually consistent, convergent, never wider
+  than the store. The hub's new `Committed` hook receives the rows of every
+  successful group commit (live publishes and handoff imports) on the room
+  owner, right after the commit; `search.Updater.Committed` only queues
+  keys (bounded channel of 10,000, never blocks; a full queue drops and
+  counts). Edit and delete handlers queue the message they changed. One
+  worker per replica drains up to 500 keys, de-duplicates, re-reads them
+  from the store and writes the current state with `_bulk` (bounded to
+  8 MiB per request): last store state wins whatever event queued it, so
+  ordering between events does not matter. A failed batch is retried three
+  times (1 s, 2 s backoff), then logged (`event=bnbloc.search.update_failed`)
+  and counted. Metrics: `search_index_updates_total{result=ok|error|dropped}`,
+  `search_index_queue_length`, `search_stale_candidates_total`; alert
+  `BnblocSearchIndexBehind`. External versioning was considered and
+  rejected: `created_at_ms` is client-settable, so no row field orders
+  revisions monotonically.
+- **Retention.** `retention.Worker.Search` (an interface `search.Index`
+  satisfies) runs one `_delete_by_query` per tenant (`tenant` term,
+  `createdAt < cutoff`) right after the tenant's message purge, even if the
+  row purge failed half-way (every message before the cutoff is expired;
+  a fence has no text). Removed documents count as the retention item
+  `search_documents`; a failure fails the pass and the next pass retries
+  (idempotent). Per-key deletes were rejected: a pass may delete millions
+  of rows, far beyond any bounded queue.
+- **Reindex and status.** The existing R7 route and CLI now go through the
+  seam: `POST /v1/platform/search/reindex` reports the backend; on
+  OpenSearch each batch walks `ScanSearchSources` (the same primary-key
+  cursor as the MySQL backfill) and writes every row's current document
+  (`updated` = documents written). New `GET /v1/platform/search/status`
+  (super-admin, routed to realtime) and `bnbloc search status`: backend,
+  index, readiness, health, document count, and the answering replica's
+  updater counters; non-zero exit when not ready.
+- **Tests.** Unit tests against the fake: config validation, the created
+  index body (analyzer, strict mapping, field types), basic auth on every
+  request, mapping refusal, retry after an outage, `Apply` writing store
+  state (edit, soft delete, gone row, no-text row), the exact query body,
+  the store re-check against an index that ignores every filter (other
+  tenant, other room, deleted, edited, cursor) with refill paging,
+  delete-by-query shape, reindex walk and idempotence, status, and the
+  updater never blocking (queue full, stuck and failing index, retries,
+  counters). Hub: the hook sees exactly the committed rows (not repeats,
+  not failed commits). Retention: the purge call per tenant and failure
+  isolation. Parity (`services/realtime/search_parity_test.go`): two
+  services over the same stores, one per backend, writes through the real
+  publish, edit, delete and agent-reply paths of the OpenSearch one; the
+  same queries (members of different rooms, the rooms filter, an agent
+  host, a non-member, the people chat, CJK, edits, deletes, five pages of
+  paging) give identical responses; then retention empties both and leaves
+  no document of the tenant. Run against MySQL 8.4 and
+  `opensearchproject/opensearch:2` (single node, security plugin disabled)
+  through `BNBLOC_TEST_MYSQL_DSN` / `BNBLOC_TEST_OPENSEARCH_URL`, plus a
+  real-cluster test of concurrent index creation, `_analyze` tokens and the
+  substring semantics. Without the variables the fake and the memory store
+  run.
 
 ## Order
 
