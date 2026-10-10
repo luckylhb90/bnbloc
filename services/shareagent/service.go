@@ -189,6 +189,12 @@ func (s *Service) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/platform/platform-agents", s.handleGetPlatformAgentsPolicy)
 	mux.HandleFunc("PUT /v1/platform/platform-agents", s.handlePutPlatformAgentsPolicy)
 	mux.HandleFunc("GET /v1/platform/platform-agents/usage", s.handlePlatformAgentsUsage)
+	// Data retention: the platform default (manage_platform) and the ctx
+	// tenant's override (manage_org), read by realtime's retention worker.
+	mux.HandleFunc("GET /v1/platform/retention", s.handleGetPlatformRetention)
+	mux.HandleFunc("PUT /v1/platform/retention", s.handlePutPlatformRetention)
+	mux.HandleFunc("GET /v1/tenant/retention", s.handleGetTenantRetention)
+	mux.HandleFunc("PUT /v1/tenant/retention", s.handlePutTenantRetention)
 	mux.HandleFunc("GET /v1/platform-agents", s.handleListPlatformAgents)
 	mux.HandleFunc("GET /v1/rooms/{roomId}/platform-agents", s.handleListRoomPlatformAgents)
 	mux.HandleFunc("POST /v1/rooms/{roomId}/platform-agents", s.handleAddRoomPlatformAgent)
