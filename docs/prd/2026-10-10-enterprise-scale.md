@@ -175,6 +175,33 @@ room lock. The counter now always equals the durable max.
 | Relay parked first peer | session | Closed so it reconnects to the new owner. |
 | Relay established pipe | session | Left alone: both halves are already on one replica. |
 
+**Real-runtime check (2026-10-11, one developer machine).** Native binaries
+of room, gateway and three realtime replicas (fixed peer list
+`127.0.0.1:18182,…:18282,…:18382`, S3 settings so the disk refusal does not
+trip) against one MySQL 8.4 container, with a small round-robin proxy that
+skips refused backends standing in for the Kubernetes Service. Startup
+refusals were checked first (peers + disk store; peers without self). A
+harness held 12 room streams through the gateway the way the web client
+does (reconnect with backoff, catch up from history on every connect,
+dedupe by sequence) while six members sent chat at 1 msg/s each with
+`clientMsgId`s, retrying failures. One replica got `SIGKILL` 22 s in and
+was restarted 20 s later. Result: 322 sends acked, 0 lost, 0 duplicated,
+0 out of order, every stream converged to history. The dead owner left the
+other views after two failed probes (8 s); until then its rooms answered
+502 and senders retried. On restart the returning replica owned its rooms
+2 s before the others noticed: one commit in that window hit the
+`(room_id, seq)` fence (500), re-seeded, and the client's retry landed;
+then the old owners closed 6 streams, which reconnected to it.
+
+The section 1 load tool, run A shape (200 members, 20 rooms of 10,
+50 msgs/s, 45 s) on the same native stack: three replicas delivered 22,500
+of 22,500 (p50/p95/p99 210/702/950 ms, stream connect p50 77 ms); one
+replica delivered 22,500 of 22,500 (p50/p95/p99 221/1729/2555 ms, connect
+p50 57 ms). Both are bound by the MySQL commit on this disk (see
+`docs/load-testing.md`), so the tail difference is noise-prone; the
+forward adds about 20 ms to opening a stream and nothing measurable to
+delivery.
+
 ## 3. Data retention
 
 - **Policy.** A platform default (super-admin) and a per-tenant override
