@@ -15,6 +15,7 @@ import (
 	"github.com/luckylhb90/bnbloc/internal/notify"
 	"github.com/luckylhb90/bnbloc/internal/obs"
 	"github.com/luckylhb90/bnbloc/internal/realtime"
+	"github.com/luckylhb90/bnbloc/internal/retention"
 	"github.com/luckylhb90/bnbloc/internal/shard"
 	"github.com/luckylhb90/bnbloc/internal/store"
 	"github.com/luckylhb90/bnbloc/internal/svcauth"
@@ -117,11 +118,14 @@ func main() {
 	svc.Schedules = backends.Schedules
 	svc.RoomRoles = backends.Room
 	go svc.RunScheduler(context.Background())
-	if blobs, err := blobstore.FromEnv(); err != nil {
+	// blobs stays nil when the store is unavailable (the retention worker
+	// then skips the blob collection).
+	var blobs blobstore.BlobStore
+	if b, err := blobstore.FromEnv(); err != nil {
 		log.Printf("bnbloc-realtime: attachments disabled: %v", err)
 		svc.BlobError = err.Error()
 	} else {
-		svc.Blobs = blobs
+		svc.Blobs, blobs = b, b
 	}
 	// The disk backend is one replica's filesystem: with peers, a blob
 	// written through one replica would be missing on the others.
@@ -136,6 +140,15 @@ func main() {
 		log.Printf("bnbloc-realtime: BNBLOC_ATTACHMENTS_S3_DIRECT_DOWNLOADS is on but the blob store cannot presign (not S3); downloads stream")
 	}
 	svc.DirectDownloads = direct
+	// Data retention (docs/prd/2026-10-10-enterprise-scale.md §3): every
+	// replica runs the worker; the cluster-wide retention lock lets one pass
+	// at a time delete expired rows and collect unreferenced blobs. It only
+	// touches the store and the blob store, never a room hub.
+	retention.RegisterMetrics(metrics)
+	go (&retention.Worker{
+		Store: store.NewRetention(backends), Tenants: backends.Tenant, Settings: backends.Settings,
+		Audit: backends.ExtAudit, Blobs: blobs, Metrics: metrics,
+	}).Run(context.Background())
 	// Seed the hub's per-room sequence from the durable max so sequences continue
 	// monotonically across restarts (keeps unread counts and dedup correct).
 	chat := backends.Chat
