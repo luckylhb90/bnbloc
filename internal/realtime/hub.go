@@ -161,23 +161,32 @@ func (h *Hub) subscribe(roomID string, replay bool) *Subscriber {
 	return sub
 }
 
-// Unsubscribe removes a subscriber and closes its channel.
+// Unsubscribe removes a subscriber and closes its channel. It is a no-op for
+// a subscriber the hub already dropped (released room, overflowed stream).
 func (h *Hub) Unsubscribe(roomID string, sub *Subscriber) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	if set := h.subs[roomID]; set != nil {
-		if _, ok := set[sub]; ok {
-			delete(set, sub)
-			close(sub.ch)
-		}
-		if len(set) == 0 {
-			delete(h.subs, roomID)
-			// Free the replay buffer for an empty room; it is only a latency
-			// optimization for currently-connected subscribers. The per-room seq
-			// counter is retained (one int64) so monotonicity holds without a
-			// store re-seed when the room next becomes active.
-			delete(h.replay, roomID)
-		}
+	h.dropLocked(roomID, sub)
+}
+
+// dropLocked removes sub from the room and closes its channel; the caller
+// holds mu.
+func (h *Hub) dropLocked(roomID string, sub *Subscriber) {
+	set := h.subs[roomID]
+	if set == nil {
+		return
+	}
+	if _, ok := set[sub]; ok {
+		delete(set, sub)
+		close(sub.ch)
+	}
+	if len(set) == 0 {
+		delete(h.subs, roomID)
+		// Free the replay buffer for an empty room; it is only a latency
+		// optimization for currently-connected subscribers. The per-room seq
+		// counter is retained (one int64) so monotonicity holds without a
+		// store re-seed when the room next becomes active.
+		delete(h.replay, roomID)
 	}
 }
 
@@ -248,8 +257,9 @@ func (h *Hub) Publish(ev wire.Event) wire.Event {
 // queue behind the room's in-flight durable events, so a message committed
 // before a revocation is never delivered after it.
 //
-// A slow subscriber whose buffer is full is skipped for an event rather than
-// blocking the hub; it reconciles through the authoritative store.
+// A subscriber whose buffer is full never blocks the hub: its stream is
+// closed (see deliver), and the client reconnects and catches up from
+// history.
 func (h *Hub) PublishCommit(ev wire.Event, d Durable) (wire.Event, error) {
 	switch {
 	case wire.PersistedFeedKind(ev.Kind):
@@ -534,6 +544,15 @@ func (h *Hub) deliver(batch []*pending) {
 			select {
 			case sub.ch <- ev:
 			default:
+				// The stream fell a whole buffer behind. Skipping the event
+				// would leave the client silently without it: nothing on the
+				// stream reveals a gap, and a client pages history only when
+				// its stream ends. Ending the stream sends it down that path
+				// (reconnect, catch up from history) instead. A group commit
+				// delivers a batch as one burst, so this must never be a
+				// silent drop.
+				h.dropLocked(ev.RoomID, sub)
+				h.Metrics.CounterInc(metricSSEOverflows)
 			}
 		}
 		h.Metrics.CounterInc(metricEventsPublished, obs.L("kind", EventKindLabel(ev.Kind)))

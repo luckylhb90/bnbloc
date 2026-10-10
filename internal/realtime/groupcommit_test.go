@@ -512,7 +512,10 @@ func TestGroupCommitOrderingUnderConcurrentSenders(t *testing.T) {
 	chat := store.NewMemoryChat()
 	ctx := tenant.NewContext(context.Background(), testTenantID)
 	j := &testJournal{
-		fn:    func([]store.RoomMessage) error { time.Sleep(time.Duration(rand.Intn(300)) * time.Microsecond); return nil },
+		fn: func([]store.RoomMessage) error {
+			time.Sleep(time.Duration(rand.Intn(300)) * time.Microsecond)
+			return nil
+		},
 		inner: chat,
 	}
 	h := NewHub(senders*perSender, 2*senders*perSender)

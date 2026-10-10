@@ -317,3 +317,33 @@ func TestReplayMaxAgeBelowRetentionMinimum(t *testing.T) {
 		t.Fatalf("replayMaxAge %v is not far below the %v retention minimum", replayMaxAge, min)
 	}
 }
+
+// A subscriber that falls a whole buffer behind is closed, never silently
+// skipped: a skipped event leaves no trace on the stream, while a closed
+// stream makes the client reconnect and catch up from history. A group
+// commit delivers a batch as one burst, so this is load-bearing.
+func TestOverflowedSubscriberIsClosedNotSkipped(t *testing.T) {
+	h := NewHub(16, 2)
+	slow := h.SubscribeLive("r")
+	fast := h.SubscribeLive("r")
+	defer h.Unsubscribe("r", fast)
+	for i := 0; i < 2; i++ {
+		h.Publish(wire.Event{RoomID: "r", Kind: wire.KindChatMessage})
+		<-fast.Events()
+	}
+	h.Publish(wire.Event{RoomID: "r", Kind: wire.KindChatMessage}) // slow's buffer is full
+	if ev := <-fast.Events(); ev.Sequence != 3 {
+		t.Fatalf("the keeping-up subscriber got seq %d, want 3", ev.Sequence)
+	}
+	var got []int64
+	for ev := range slow.Events() { // ends: the stream was closed
+		got = append(got, ev.Sequence)
+	}
+	if len(got) != 2 || got[0] != 1 || got[1] != 2 {
+		t.Fatalf("overflowed subscriber received %v before closing, want [1 2]", got)
+	}
+	if n := h.SubscriberCount("r"); n != 1 {
+		t.Fatalf("subscribers = %d, want only the one keeping up", n)
+	}
+	h.Unsubscribe("r", slow) // the handler's deferred unsubscribe is a no-op
+}

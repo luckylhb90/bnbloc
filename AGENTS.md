@@ -491,6 +491,11 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   batch or already in history answers the original sequence with
   `store.ErrDuplicateClientMsg`. Transient kinds bypass the queue (never
   wait on a commit); `member_removed`/`room_deleted` queue behind it.
+- **A subscriber that falls a full buffer behind is closed, never skipped.**
+  A skipped event leaves no trace on the stream (the client pages history
+  only when its stream ends), so a silent skip is message loss; closing
+  sends the client down its reconnect-and-catch-up path. Batches arrive as
+  bursts, so the SSE handler writes everything queued and flushes once.
 - **Presence announces a leave only after a short grace window.** A last-ref
   drop schedules the leave; a re-`Enter` within the window cancels it, so a
   reconnecting client (SSE drop + retry) does not churn `presence_join/leave`.

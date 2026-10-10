@@ -430,6 +430,28 @@ func (s *Service) handleEvents(w http.ResponseWriter, r *http.Request) {
 	// keeps the stream alive without emitting a spurious event.
 	heartbeat := time.NewTicker(15 * time.Second)
 	defer heartbeat.Stop()
+	// write streams one event; it reports whether the subscriber's access
+	// ended (member removed / room deleted): the client has been told why, so
+	// the stream closes rather than running until it reconnects.
+	write := func(ev wire.Event) (revoked bool) {
+		if !allChannels && ev.ChannelID != "" && ev.ChannelID != channelID {
+			return false
+		}
+		if people != nil && people.skip(ev) {
+			return false
+		}
+		data, err := json.Marshal(ev)
+		if err != nil {
+			return false
+		}
+		// Only durable events carry a sequence (the SSE id); a transient
+		// event has none and must not reset the stream's last event id.
+		if ev.Sequence > 0 {
+			fmt.Fprintf(w, "id: %d\n", ev.Sequence)
+		}
+		fmt.Fprintf(w, "event: %s\ndata: %s\n\n", ev.Kind, data)
+		return accessRevoked(ev, userID)
+	}
 	for {
 		select {
 		case <-ctx.Done():
@@ -441,26 +463,18 @@ func (s *Service) handleEvents(w http.ResponseWriter, r *http.Request) {
 			if !open {
 				return
 			}
-			if !allChannels && ev.ChannelID != "" && ev.ChannelID != channelID {
-				continue
+			// Write what is already queued, then flush once: a group commit
+			// delivers a batch as one burst, and a flush per event lets a
+			// busy stream fall behind (and overflow, which closes it). Only
+			// this handler receives, so the queued receives never block.
+			revoked := write(ev)
+			for n := len(sub.Events()); n > 0 && open && !revoked; n-- {
+				if ev, open = <-sub.Events(); open {
+					revoked = write(ev)
+				}
 			}
-			if people != nil && people.skip(ev) {
-				continue
-			}
-			data, err := json.Marshal(ev)
-			if err != nil {
-				continue
-			}
-			// Only durable events carry a sequence (the SSE id); a transient
-			// event has none and must not reset the stream's last event id.
-			if ev.Sequence > 0 {
-				fmt.Fprintf(w, "id: %d\n", ev.Sequence)
-			}
-			fmt.Fprintf(w, "event: %s\ndata: %s\n\n", ev.Kind, data)
 			flusher.Flush()
-			// Access ended (member removed / room deleted): the client has been
-			// told why; close now rather than streaming until it reconnects.
-			if accessRevoked(ev, userID) {
+			if revoked || !open {
 				return
 			}
 		}

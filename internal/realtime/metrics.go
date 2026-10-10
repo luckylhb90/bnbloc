@@ -11,6 +11,7 @@ const (
 	metricSSEConnections   = "realtime_sse_connections"
 	metricFeedCommits      = "realtime_feed_commits_total"
 	metricFeedCommitEvents = "realtime_feed_commit_events_total"
+	metricSSEOverflows     = "realtime_sse_overflows_total"
 )
 
 // SSE connection kinds: a presence-counting subscriber (a member's web or
@@ -50,6 +51,7 @@ func RegisterMetrics(m *obs.Metrics) {
 	m.Describe(metricEventsPublished, "Events published to room streams by kind (unknown kinds count as other).")
 	m.Describe(metricFeedCommits, "Room feed group commits (one multi-row insert each) by result.")
 	m.Describe(metricFeedCommitEvents, "Durable events stored by successful group commits; divided by the ok commits it is the mean batch size.")
+	m.Describe(metricSSEOverflows, "Room streams closed because the client fell a whole buffer behind; the client reconnects and catches up from history.")
 	m.Describe(metricSSEConnections, "Open room event streams by kind (member: presence-counting client; bridge: ?presence=0 observer).")
 	m.GaugeSet(metricSSEConnections, 0, obs.L("kind", SSEKindMember))
 	m.GaugeSet(metricSSEConnections, 0, obs.L("kind", SSEKindBridge))

@@ -120,6 +120,14 @@ Status (2026-10-11): in progress.
     tenant a row is stored under.
   - **Metrics:** `realtime_feed_commits_total{result}` and
     `realtime_feed_commit_events_total` (mean batch size).
+- Overflowing streams: landed. The first re-measurement showed lost
+  deliveries with no disconnects: a batch reaches each subscriber as one
+  burst, and the hub skipped (silently) any subscriber whose 64-event
+  buffer was full. That skip predates group commit (a slow client could
+  always miss events without noticing); bursts made it visible. A full
+  subscriber is now closed, so the client reconnects and catches up from
+  history (`realtime_sse_overflows_total` counts it), and the SSE handler
+  writes every queued event before one flush instead of flushing per event.
 - Replay buffer max age: landed (raised by section 3). The replay buffer is
   only a latency optimization for connected clients, yet a quiet room whose
   subscriber stayed connected kept its entries forever, so a message data
