@@ -21,6 +21,7 @@ import (
 	"github.com/luckylhb90/bnbloc/internal/obs"
 	"github.com/luckylhb90/bnbloc/internal/realtime"
 	"github.com/luckylhb90/bnbloc/internal/roomctx"
+	"github.com/luckylhb90/bnbloc/internal/shard"
 	"github.com/luckylhb90/bnbloc/internal/store"
 	"github.com/luckylhb90/bnbloc/internal/svcauth"
 	"github.com/luckylhb90/bnbloc/internal/tenant"
@@ -114,6 +115,11 @@ type Service struct {
 	// offline (409 platform_agent_offline) before any job exists. Nil
 	// disables the guard.
 	PlatformAgents *PlatformAgentGuard
+	// Peers is the scale-out replica set (scaleout.go): requests for a room
+	// or member another replica owns are forwarded there, and work produced
+	// here for such keys crosses over internal peer routes. Nil is a single
+	// node (every key owned here).
+	Peers *Peers
 }
 
 // ChatStore persists room-feed messages, reads history pages, and tracks
@@ -161,11 +167,12 @@ type BridgeJobStore interface {
 // scope for the store layer (the gateway's Middleware keeps its verified value
 // when it ran first).
 func (s *Service) Handler() http.Handler {
+	// Presence and roster events are announced only by the room's owner.
 	if s.Presence == nil {
-		s.Presence = realtime.NewPresence(func(ev wire.Event) { s.Hub.Publish(ev) })
+		s.Presence = realtime.NewPresence(s.publishOwned)
 	}
 	if s.Roster == nil {
-		s.Roster = realtime.NewAgentRoster(func(ev wire.Event) { s.Hub.Publish(ev) })
+		s.Roster = realtime.NewAgentRoster(s.publishOwned)
 	}
 	if s.PluginHooks == nil {
 		s.PluginHooks = NewPluginHookDispatcher(nil, nil, nil)
@@ -202,7 +209,12 @@ func (s *Service) Handler() http.Handler {
 	// feed as a forward cursor, and the history-only import write.
 	mux.Handle("GET /internal/v1/rooms/{roomId}/feed", internal(s.handleInternalFeed))
 	mux.Handle("POST /internal/v1/rooms/{roomId}/import", internal(s.handleInternalImport))
-	return svcauth.EnsureTenant(mux)
+	// Replica-to-replica routes (scaleout.go).
+	s.registerPeerRoutes(mux, internal)
+	// Scale-out: release the state of keys this replica stops owning after
+	// every peer-set refresh, and route each keyed request to its owner.
+	s.Peers.Set().OnRefresh(s.reconcileOwnership)
+	return shard.Forward(s.Peers.Set(), RouteKey, svcauth.EnsureTenant(mux))
 }
 
 // resolveChannel maps a request's channelId to its routing target. An explicit
@@ -648,8 +660,11 @@ func (s *Service) deliverPluginEvent(ctx context.Context, ev wire.Event) {
 		people, err := s.isPeopleChannel(ctx, ev.RoomID, ev.ChannelID)
 		if err != nil {
 			log.Printf("realtime: room=%s channel=%s kind lookup failed; skipping plugin hooks: %v", ev.RoomID, ev.ChannelID, err)
-		} else if !people {
+		} else if !people && s.PluginHooks.Hooked(ev.Kind) {
 			s.PluginHooks.Deliver(ctx, s.Membership, ev)
+			// Members owned by other replicas hold their plugin streams
+			// there: hand the event to every peer for its own fan-out.
+			s.Peers.forwardPluginEvent(tenant.FromContext(ctx), ev)
 		}
 	}
 	s.Notifications.Observe(ctx, ev)

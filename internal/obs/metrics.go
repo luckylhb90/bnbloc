@@ -186,6 +186,8 @@ var routeWords = map[string]bool{
 	"public": true, "shares": true, "resolve": true, "presign": true, "site": true, "sites": true, "site-ticket": true,
 	"tenant-policy": true, "platform-agents": true, "agent-hosts": true,
 	"profile": true,
+	// realtime replica-to-replica routes (scale-out by key ownership).
+	"desktop": true, "notifications": true, "post": true,
 }
 
 // idCollections name segments whose NEXT segment is always an identifier, even

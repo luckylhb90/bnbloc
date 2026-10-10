@@ -155,6 +155,9 @@ type pluginStream struct {
 	subject  string
 	tenantID string // the member's session tenant (what their desktop lists)
 	ch       chan wire.PluginDelivery
+	// closed ends the stream: the member moved to another replica
+	// (closeStreams); the desktop reconnects to the new owner.
+	closed chan struct{}
 
 	// installs caches the member's opt-in plugin installs (fan-out worker only).
 	installs     map[string]bool
@@ -262,6 +265,13 @@ func (d *PluginHookDispatcher) currentRecords(ctx context.Context) ([]extpipe.Re
 	}
 	d.snapshot = recordSnapshot{recs: recs, atMs: now, valid: true}
 	return recs, nil
+}
+
+// Hooked reports whether events of kind feed a plugin hook (only those are
+// fanned out, locally or to peers).
+func (d *PluginHookDispatcher) Hooked(kind string) bool {
+	_, _, ok := hookForEvent(kind)
+	return ok
 }
 
 // Deliver is the publish-path tap: it hands a hook-bearing event to the

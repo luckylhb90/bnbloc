@@ -65,6 +65,8 @@ func (s *Service) handlePluginEvents(w http.ResponseWriter, r *http.Request) {
 		select {
 		case <-ctx.Done():
 			return
+		case <-st.closed:
+			return // the member is owned by another replica now
 		case <-heartbeat.C:
 			fmt.Fprint(w, ": keep-alive\n\n")
 			flusher.Flush()
@@ -117,7 +119,7 @@ func (d *PluginHookDispatcher) subscribe(subject, tenantID string) (*pluginStrea
 	if n >= maxPluginStreamsPerSubject {
 		return nil, errTooManyPluginStreams
 	}
-	st := &pluginStream{subject: subject, tenantID: tenantID, ch: make(chan wire.PluginDelivery, pluginStreamBuffer)}
+	st := &pluginStream{subject: subject, tenantID: tenantID, ch: make(chan wire.PluginDelivery, pluginStreamBuffer), closed: make(chan struct{})}
 	d.streams[st] = struct{}{}
 	return st, nil
 }
@@ -128,6 +130,25 @@ func (d *PluginHookDispatcher) unsubscribe(st *pluginStream) {
 	d.mu.Lock()
 	delete(d.streams, st)
 	d.mu.Unlock()
+}
+
+// closeStreams ends the streams of every member owned reports false for (the
+// member's plugin streams moved to another replica) and returns how many.
+// Deliveries already sent stay pending here until acked or expired: the ack
+// is routed to the member's owner, so an in-flight one may expire (audited
+// failed) — the same outcome as a desktop that dropped its stream.
+func (d *PluginHookDispatcher) closeStreams(owned func(member string) bool) int {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	n := 0
+	for st := range d.streams {
+		if !owned(st.subject) {
+			delete(d.streams, st)
+			close(st.closed)
+			n++
+		}
+	}
+	return n
 }
 
 func (d *PluginHookDispatcher) connectedStreams() []*pluginStream {

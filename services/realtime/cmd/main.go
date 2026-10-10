@@ -15,6 +15,7 @@ import (
 	"github.com/luckylhb90/bnbloc/internal/notify"
 	"github.com/luckylhb90/bnbloc/internal/obs"
 	"github.com/luckylhb90/bnbloc/internal/realtime"
+	"github.com/luckylhb90/bnbloc/internal/shard"
 	"github.com/luckylhb90/bnbloc/internal/store"
 	"github.com/luckylhb90/bnbloc/internal/svcauth"
 	realtimehttp "github.com/luckylhb90/bnbloc/services/realtime"
@@ -27,11 +28,19 @@ func main() {
 	// events, SSE connections, notification delivery; docs/monitoring.md).
 	metrics := obs.NewMetrics("bnbloc-realtime")
 	realtime.RegisterMetrics(metrics)
+	// Scale-out (BNBLOC_REALTIME_PEERS + _SELF): each room and member is owned
+	// by one replica; unset is a single node that owns every key.
+	peers, err := shard.FromEnv("BNBLOC_REALTIME")
+	if err != nil {
+		log.Fatalf("bnbloc-realtime: %v", err)
+	}
+	peers.Instrument(metrics, "bnbloc-realtime")
 	svc := &realtimehttp.Service{
 		Hub:        realtime.NewHub(256, 64),
 		Membership: members,
 		// Global search reads only the rooms bnbloc-room lists for the caller.
 		Rooms: members,
+		Peers: realtimehttp.NewPeers(peers),
 	}
 	// Optional durable chat history: when a MySQL DSN is configured, persist the
 	// room feed so clients can page history beyond the in-memory replay buffer.
@@ -40,6 +49,9 @@ func main() {
 	if err != nil {
 		log.Fatalf("bnbloc-realtime: store: %v", err)
 	}
+	// This replica is live in its own view while its readiness check passes
+	// (the other replicas probe its /readyz for the same answer).
+	peers.CheckSelfWith(backends.HealthCheck())
 	svc.Chat = backends.Chat
 	// Channel routing: requests omitting channelId resolve the room's default
 	// channel, the event streams filter by channel, and unread aggregates
@@ -96,7 +108,9 @@ func main() {
 	// The outbox worker routes DesktopChannel items: a member whose desktop
 	// runs a notification plugin (notification.v1) gets their notifications
 	// there; the server notifiers are the durable fallback.
-	svc.Notifications.Worker.Desktop = dispatcher
+	// With peers, a member's desktop streams live on the member's owner; the
+	// worker (which runs on every replica) asks and delivers there.
+	svc.Notifications.Worker.Desktop = realtimehttp.MemberDesktopRoute(dispatcher, svc.Peers)
 	svc.Notifications.Start(context.Background())
 	// Scheduled prompts (N2): realtime owns chat publish, so it runs the
 	// scheduler; runs post as the schedule's creator through the chat path.
@@ -108,6 +122,11 @@ func main() {
 		svc.BlobError = err.Error()
 	} else {
 		svc.Blobs = blobs
+	}
+	// The disk backend is one replica's filesystem: with peers, a blob
+	// written through one replica would be missing on the others.
+	if _, disk := svc.Blobs.(*blobstore.DiskStore); disk && peers != nil {
+		log.Fatalf("bnbloc-realtime: BNBLOC_REALTIME_PEERS is set but the blob store is the local disk; more than one replica requires the S3 backend (BNBLOC_ATTACHMENTS_S3_BUCKET)")
 	}
 	direct, err := blobstore.DirectDownloadsFromEnv()
 	if err != nil {
@@ -129,7 +148,11 @@ func main() {
 		return chat.MaxRoomSeq(ctx, roomID, "")
 	}
 	svc.Hub.Metrics = metrics
-	if err := obs.ServeWithHealth("bnbloc-realtime", cfg.ListenAddr, svcauth.Middleware(svcauth.KeyFromEnv(), svc.Handler()), backends.HealthCheck(), obs.WithMetrics(metrics)); err != nil {
+	handler := svc.Handler()
+	// The first refresh runs before serving, so the replica starts with a
+	// real view of its peers.
+	peers.Start(context.Background())
+	if err := obs.ServeWithHealth("bnbloc-realtime", cfg.ListenAddr, svcauth.Middleware(svcauth.KeyFromEnv(), handler), backends.HealthCheck(), obs.WithMetrics(metrics)); err != nil {
 		log.Fatalf("bnbloc-realtime: %v", err)
 	}
 }
