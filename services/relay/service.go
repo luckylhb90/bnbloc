@@ -6,12 +6,15 @@ package relay
 
 import (
 	"encoding/json"
+	"log"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/luckylhb90/bnbloc/internal/obs"
+	"github.com/luckylhb90/bnbloc/internal/shard"
 )
 
 // ICEConfig is the server-authoritative STUN/relay configuration handed to
@@ -53,11 +56,69 @@ type Service struct {
 	// independent relay instances never pair each other's connections.
 	streamMu       sync.Mutex
 	pendingStreams map[string]*streamPair
+
+	// Peers is the scale-out replica set (BNBLOC_RELAY_PEERS): both halves of
+	// a pairing must meet on one replica, so every session-keyed request is
+	// forwarded to the session key's owner. Nil is a single node.
+	Peers *shard.Set
 }
 
 // New constructs a relay Service with the given ICE configuration.
 func New(cfg ICEConfig) *Service {
 	return &Service{Config: cfg, rendezvous: map[string]*pairing{}, pendingStreams: map[string]*streamPair{}}
+}
+
+// SessionKey is a relay request's ownership key: the session key of the
+// rendezvous and stream routes (the ICE config is served anywhere).
+func SessionKey(r *http.Request) (string, bool) {
+	for _, prefix := range []string{"/relay/rendezvous/", "/relay/stream/"} {
+		if rest, ok := strings.CutPrefix(r.URL.EscapedPath(), prefix); ok {
+			key, err := url.PathUnescape(rest)
+			if err != nil || strings.TrimSpace(key) == "" || strings.Contains(key, "/") {
+				return "", false
+			}
+			return "relay:" + key, true
+		}
+	}
+	return "", false
+}
+
+// release drops the pairing state of session keys this replica no longer
+// owns (after every peer-set refresh): queued rendezvous candidates are
+// discarded and a first peer still parked for its partner is closed, so it
+// reconnects to the key's new owner where its partner will meet it. An
+// established pipe is left alone: both halves are already here and no longer
+// depend on ownership.
+func (s *Service) release(bool) {
+	owned := func(key string) bool { return s.Peers.Owns("relay:" + key) }
+	s.mu.Lock()
+	dropped := 0
+	for key := range s.rendezvous {
+		if !owned(key) {
+			delete(s.rendezvous, key)
+			dropped++
+		}
+	}
+	s.mu.Unlock()
+	var parked []*streamPair
+	s.streamMu.Lock()
+	for key, sp := range s.pendingStreams {
+		if !owned(key) {
+			delete(s.pendingStreams, key)
+			parked = append(parked, sp)
+		}
+	}
+	s.streamMu.Unlock()
+	for _, sp := range parked {
+		// Removed from the map first, so no partner can match it any more:
+		// closing done here is the only close. The WebSocket close handshake
+		// may wait on the peer, so it never runs on the refresh goroutine.
+		close(sp.done)
+		go func() { _ = sp.conn.Close() }()
+	}
+	if dropped > 0 || len(parked) > 0 {
+		log.Printf("bnbloc-relay: ownership moved: dropped %d rendezvous session(s) and %d parked stream(s) now owned by another replica", dropped, len(parked))
+	}
 }
 
 // Handler builds the HTTP mux for the relay service.
@@ -73,7 +134,8 @@ func (s *Service) Handler() http.Handler {
 	mux.HandleFunc("POST /relay/rendezvous/{sessionKey}", s.handleRendezvousPublish)
 	mux.HandleFunc("GET /relay/rendezvous/{sessionKey}", s.handleRendezvousPoll)
 	mux.HandleFunc("GET /relay/stream/{sessionKey}", s.handleStream)
-	return mux
+	s.Peers.OnRefresh(s.release)
+	return shard.Forward(s.Peers, SessionKey, mux)
 }
 
 func (s *Service) handleICEConfig(w http.ResponseWriter, _ *http.Request) {

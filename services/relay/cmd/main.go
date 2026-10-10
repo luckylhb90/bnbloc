@@ -3,11 +3,13 @@
 package main
 
 import (
+	"context"
 	"log"
 	"strings"
 
 	"github.com/luckylhb90/bnbloc/internal/config"
 	"github.com/luckylhb90/bnbloc/internal/obs"
+	"github.com/luckylhb90/bnbloc/internal/shard"
 	"github.com/luckylhb90/bnbloc/services/relay"
 )
 
@@ -18,7 +20,19 @@ func main() {
 		RelayEndpoints: splitEnv("BNBLOC_RELAY_ENDPOINTS"),
 	}
 	svc := relay.New(ice)
-	if err := obs.Serve("bnbloc-relay", cfg.ListenAddr, svc.Handler()); err != nil {
+	// Scale-out (BNBLOC_RELAY_PEERS + _SELF): each session key is owned by one
+	// replica; unset is a single node that pairs every key itself.
+	peers, err := shard.FromEnv("BNBLOC_RELAY")
+	if err != nil {
+		log.Fatalf("bnbloc-relay: %v", err)
+	}
+	metrics := obs.NewMetrics("bnbloc-relay")
+	peers.Instrument(metrics, "bnbloc-relay")
+	peers.CheckSelfWith(func() error { return nil }) // no dependencies: serving = ready
+	svc.Peers = peers
+	handler := svc.Handler()
+	peers.Start(context.Background())
+	if err := obs.ServeWithMetrics("bnbloc-relay", cfg.ListenAddr, handler, metrics); err != nil {
 		log.Fatalf("bnbloc-relay: %v", err)
 	}
 }

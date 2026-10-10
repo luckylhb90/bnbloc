@@ -49,7 +49,8 @@ func (s *Service) handleStream(w http.ResponseWriter, r *http.Request) {
 		defer timer.Stop()
 		select {
 		case <-self.done:
-			// A partner matched and finished piping; the conn is already closed.
+			// A partner matched and finished piping (the conn is already
+			// closed), or the key moved to another replica (release closed it).
 		case <-r.Context().Done():
 			s.cleanupPending(sessionKey, self)
 		case <-timer.C:
