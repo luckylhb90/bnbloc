@@ -1,6 +1,9 @@
 // Package realtime provides an in-process per-room event fan-out hub with
-// presence replay. Realtime reduces latency but is not authority: each event
-// carries a per-connection sequence so consumers ignore older deliveries.
+// presence replay. Realtime reduces latency but is not authority: durable feed
+// events (chat_message, agent_messages) carry the room's durable sequence, the
+// same number history stores, so consumers dedupe live and paged rows by it.
+// Transient events (presence, typing, roster, job/state deltas) carry no
+// sequence (0) and never consume one.
 package realtime
 
 import (
@@ -33,11 +36,15 @@ type Hub struct {
 	mu     sync.Mutex
 	subs   map[string]map[*Subscriber]struct{}
 	replay map[string][]wire.Event
-	// seq is a per-room monotonic sequence counter. It is independent of the
-	// replay buffer length: once the buffer slides past replayLimit, buffer
-	// length plateaus, so deriving the sequence from it would repeat numbers and
-	// the client (which dedupes by sequence) would silently drop later events —
-	// e.g. agent replies after a busy room fills the buffer never render.
+	// seq is a per-room monotonic sequence counter for DURABLE events only. It
+	// is independent of the replay buffer length: once the buffer slides past
+	// replayLimit, buffer length plateaus, so deriving the sequence from it
+	// would repeat numbers and the client (which dedupes by sequence) would
+	// silently drop later events — e.g. agent replies after a busy room fills
+	// the buffer never render. Transient events never advance it, so the
+	// counter always equals the durable max: a new owner (restart, ownership
+	// move) that seeds from the store continues exactly where the old one
+	// stopped and re-issues no number any client has seen.
 	seq map[string]int64
 	// roomLocks holds each room's publish lock (see the Hub doc).
 	roomLocks   map[string]*sync.Mutex
@@ -126,10 +133,11 @@ func (h *Hub) Unsubscribe(roomID string, sub *Subscriber) {
 	}
 }
 
-// Publish assigns the next sequence and fans the event out with no durable
-// commit — for transient kinds (presence, typing, roster, job/state deltas).
-// A seed failure drops the event (logged): a transient event without a valid
-// sequence must not be delivered, and the room re-seeds on its next publish.
+// Publish fans the event out with no durable commit. A transient kind
+// (presence, typing, roster, job/state deltas) is delivered with no sequence;
+// a durable kind is sequenced (in-memory mode and tests). A seed failure of a
+// durable kind drops the event (logged) and the room re-seeds on its next
+// publish.
 func (h *Hub) Publish(ev wire.Event) wire.Event {
 	out, err := h.PublishCommit(ev, nil)
 	if err != nil {
@@ -138,13 +146,20 @@ func (h *Hub) Publish(ev wire.Event) wire.Event {
 	return out
 }
 
-// PublishCommit assigns the room's next sequence, runs commit (typically the
-// durable persist) with the sequenced event, and only when commit succeeds
-// retains the event for replay and delivers it to every current subscriber.
-// When commit (or seeding) fails nothing is delivered, the sequence is not
-// consumed, and the error is returned — so a client retry cannot observe a live
-// event that history never stored, and a durable store that rejected the slot
-// (counter behind the feed) is re-seeded on the next publish.
+// PublishCommit publishes ev under the room's publish lock. A durable kind
+// (wire.PersistedFeedKind) is assigned the room's next sequence and commit
+// (typically the durable persist) runs with the sequenced event; only when
+// commit succeeds is the event retained for replay and delivered to every
+// current subscriber. When commit (or seeding) fails nothing is delivered, the
+// sequence is not consumed, and the error is returned — so a client retry
+// cannot observe a live event that history never stored, and a durable store
+// that rejected the slot (counter behind the feed: another replica briefly
+// owned the room) is re-seeded on the next publish.
+//
+// A transient kind carries no sequence and commit is not run: it is delivered
+// in publish order with the room's durable events (the same lock), never
+// touches the counter, and needs no seed — so it can never make a later
+// durable event look already seen.
 //
 // A slow subscriber whose buffer is full is skipped for this event rather than
 // blocking the hub; it reconciles through the authoritative store.
@@ -153,9 +168,13 @@ func (h *Hub) PublishCommit(ev wire.Event, commit func(wire.Event) error) (wire.
 	lock.Lock()
 	defer lock.Unlock()
 
-	ev, err := h.sequence(ev, commit)
-	if err != nil {
-		return ev, err
+	if wire.PersistedFeedKind(ev.Kind) {
+		var err error
+		if ev, err = h.sequence(ev, commit); err != nil {
+			return ev, err
+		}
+	} else {
+		ev.Sequence = 0
 	}
 
 	h.mu.Lock()
@@ -195,6 +214,9 @@ func (h *Hub) PublishCommit(ev wire.Event, commit func(wire.Event) error) (wire.
 func (h *Hub) CommitHistory(ev wire.Event, commit func(wire.Event) error) (wire.Event, error) {
 	if commit == nil {
 		return ev, fmt.Errorf("commit history: nil commit")
+	}
+	if !wire.PersistedFeedKind(ev.Kind) {
+		return ev, fmt.Errorf("commit history: %q is not a durable feed kind", ev.Kind)
 	}
 	lock := h.roomLock(ev.RoomID)
 	lock.Lock()
@@ -236,6 +258,40 @@ func (h *Hub) sequence(ev wire.Event, commit func(wire.Event) error) (wire.Event
 	h.seq[ev.RoomID] = ev.Sequence
 	h.mu.Unlock()
 	return ev, nil
+}
+
+// ReleaseRooms drops every room owned reports false for: its subscribers'
+// channels are closed (their streams end, and the clients reconnect to the
+// room's new owner and catch up from history), and its replay buffer and
+// sequence counter are forgotten, so a room that later moves back seeds
+// afresh from the durable max instead of resuming a stale counter. It
+// returns the number of subscriber streams closed. Called when the replica's
+// peer set changes (scale-out ownership).
+func (h *Hub) ReleaseRooms(owned func(roomID string) bool) int {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	closed := 0
+	for roomID, set := range h.subs {
+		if owned(roomID) {
+			continue
+		}
+		for sub := range set {
+			close(sub.ch)
+			closed++
+		}
+		delete(h.subs, roomID)
+	}
+	for roomID := range h.replay {
+		if !owned(roomID) {
+			delete(h.replay, roomID)
+		}
+	}
+	for roomID := range h.seq {
+		if !owned(roomID) {
+			delete(h.seq, roomID)
+		}
+	}
+	return closed
 }
 
 // roomLock returns the room's publish lock, creating it on first use.

@@ -437,7 +437,12 @@ func (s *Service) handleEvents(w http.ResponseWriter, r *http.Request) {
 			if err != nil {
 				continue
 			}
-			fmt.Fprintf(w, "id: %d\nevent: %s\ndata: %s\n\n", ev.Sequence, ev.Kind, data)
+			// Only durable events carry a sequence (the SSE id); a transient
+			// event has none and must not reset the stream's last event id.
+			if ev.Sequence > 0 {
+				fmt.Fprintf(w, "id: %d\n", ev.Sequence)
+			}
+			fmt.Fprintf(w, "event: %s\ndata: %s\n\n", ev.Kind, data)
 			flusher.Flush()
 			// Access ended (member removed / room deleted): the client has been
 			// told why; close now rather than streaming until it reconnects.

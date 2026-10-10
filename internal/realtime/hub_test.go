@@ -77,9 +77,17 @@ func TestPublishCommitSeedFailureSurfacesAndRetries(t *testing.T) {
 	if _, err := h.PublishCommit(wire.Event{RoomID: "r", Kind: "chat_message"}, nil); err == nil {
 		t.Fatal("publish with a failing seeder succeeded; want the seed error")
 	}
-	h.Publish(wire.Event{RoomID: "r", Kind: "presence_typing"}) // transient: dropped, logged
 	if len(sub.Events()) != 0 {
-		t.Fatal("an event was delivered without a seeded sequence")
+		t.Fatal("a durable event was delivered without a seeded sequence")
+	}
+	// A transient event needs no seed: it carries no sequence, so a store
+	// outage never drops presence or typing.
+	h.Publish(wire.Event{RoomID: "r", Kind: "presence_typing"})
+	if ev := <-sub.Events(); ev.Kind != "presence_typing" || ev.Sequence != 0 {
+		t.Fatalf("transient delivery = %s seq=%d, want presence_typing with no sequence", ev.Kind, ev.Sequence)
+	}
+	if _, err := h.PublishCommit(wire.Event{RoomID: "r", Kind: "chat_message"}, nil); err == nil {
+		t.Fatal("second publish with a failing seeder succeeded; want the seed error")
 	}
 	fail = false
 	ev, err := h.PublishCommit(wire.Event{RoomID: "r", Kind: "chat_message"}, nil)
@@ -87,7 +95,91 @@ func TestPublishCommitSeedFailureSurfacesAndRetries(t *testing.T) {
 		t.Fatalf("after recovery: seq=%d err=%v, want 42 (durable max 41 + 1)", ev.Sequence, err)
 	}
 	if calls != 3 {
-		t.Fatalf("seeder calls = %d, want 3 (each failed attempt retries)", calls)
+		t.Fatalf("seeder calls = %d, want 3 (each failed durable attempt retries; transient never seeds)", calls)
+	}
+}
+
+// Transient events never consume the durable sequence space: the counter
+// stays equal to the durable max, so a new owner (restart or ownership move)
+// that seeds from the store re-issues no number a client has already seen,
+// and a durable event after a burst of presence/typing continues densely.
+func TestTransientEventsDoNotConsumeSequences(t *testing.T) {
+	durable := int64(0)
+	h := NewHub(16, 16)
+	h.SeedSeq = func(string) (int64, error) { return durable, nil }
+	sub := h.SubscribeLive("r")
+	defer h.Unsubscribe("r", sub)
+
+	commit := func(e wire.Event) error { durable = e.Sequence; return nil }
+	if ev, err := h.PublishCommit(wire.Event{RoomID: "r", Kind: wire.KindChatMessage}, commit); err != nil || ev.Sequence != 1 {
+		t.Fatalf("first chat seq=%d err=%v, want 1", ev.Sequence, err)
+	}
+	for _, kind := range []string{"presence_join", "presence_snapshot", "presence_typing", "agent_roster", "agent_job_created", "agent_session_state"} {
+		ran := false
+		ev, err := h.PublishCommit(wire.Event{RoomID: "r", Kind: kind}, func(wire.Event) error { ran = true; return nil })
+		if err != nil || ev.Sequence != 0 || ran {
+			t.Fatalf("%s: seq=%d err=%v commitRan=%v, want an unsequenced delivery with no commit", kind, ev.Sequence, err, ran)
+		}
+	}
+	ev, err := h.PublishCommit(wire.Event{RoomID: "r", Kind: wire.KindAgentMessages}, commit)
+	if err != nil || ev.Sequence != 2 {
+		t.Fatalf("agent reply after transient burst seq=%d err=%v, want 2 (dense durable space)", ev.Sequence, err)
+	}
+
+	// A new owner seeds from the durable max and continues at 3: the number
+	// it issues is above every number any subscriber of the old owner saw.
+	next := NewHub(16, 16)
+	next.SeedSeq = func(string) (int64, error) { return durable, nil }
+	ev, err = next.PublishCommit(wire.Event{RoomID: "r", Kind: wire.KindChatMessage}, commit)
+	if err != nil || ev.Sequence != 3 {
+		t.Fatalf("new owner first chat seq=%d err=%v, want 3", ev.Sequence, err)
+	}
+	var maxSeen int64
+	for len(sub.Events()) > 0 {
+		if s := (<-sub.Events()).Sequence; s > maxSeen {
+			maxSeen = s
+		}
+	}
+	if ev.Sequence <= maxSeen {
+		t.Fatalf("new owner issued %d, not above the %d an old-owner client saw", ev.Sequence, maxSeen)
+	}
+}
+
+// ReleaseRooms closes the streams of rooms the replica no longer owns and
+// forgets their replay buffer and counter, so a room that moves back seeds
+// afresh from the durable max; owned rooms are untouched.
+func TestReleaseRoomsClosesAndForgetsUnownedRooms(t *testing.T) {
+	durable := map[string]int64{"gone": 0, "kept": 0}
+	h := NewHub(16, 16)
+	h.SeedSeq = func(room string) (int64, error) { return durable[room], nil }
+	gone := h.Subscribe("gone")
+	kept := h.Subscribe("kept")
+	defer h.Unsubscribe("kept", kept)
+	for _, room := range []string{"gone", "kept"} {
+		if _, err := h.PublishCommit(wire.Event{RoomID: room, Kind: wire.KindChatMessage}, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if n := h.ReleaseRooms(func(room string) bool { return room == "kept" }); n != 1 {
+		t.Fatalf("closed %d streams, want 1", n)
+	}
+	<-gone.Events() // the buffered chat
+	if _, open := <-gone.Events(); open {
+		t.Fatal("released room's stream still open")
+	}
+	h.Unsubscribe("gone", gone) // the handler's deferred unsubscribe is a no-op
+	if h.SubscriberCount("kept") != 1 {
+		t.Fatal("owned room's stream was closed")
+	}
+	// Another replica committed seq 1..5 while the room was away; moving back
+	// seeds from that max instead of resuming the forgotten counter at 2.
+	durable["gone"] = 5
+	ev, err := h.PublishCommit(wire.Event{RoomID: "gone", Kind: wire.KindChatMessage}, nil)
+	if err != nil || ev.Sequence != 6 {
+		t.Fatalf("after move back seq=%d err=%v, want 6", ev.Sequence, err)
+	}
+	if late := h.Subscribe("gone"); len(late.Events()) != 1 {
+		t.Fatalf("replay after move back has %d events, want only the new one", len(late.Events()))
 	}
 }
 

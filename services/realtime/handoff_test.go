@@ -95,7 +95,7 @@ func TestImportPersistsWithoutPublishing(t *testing.T) {
 		t.Fatalf("imported payload = %+v", p)
 	}
 	// Live chat continues after the imported rows.
-	next := svc.Hub.Publish(wire.Event{RoomID: "room-1", Kind: "presence_typing"})
+	next := svc.Hub.Publish(wire.Event{RoomID: "room-1", Kind: wire.KindChatMessage})
 	if next.Sequence != reply.LastSequence+1 {
 		t.Fatalf("next seq = %d, want %d", next.Sequence, reply.LastSequence+1)
 	}
