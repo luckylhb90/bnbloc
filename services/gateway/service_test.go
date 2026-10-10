@@ -16,6 +16,7 @@ import (
 	"github.com/luckylhb90/bnbloc/internal/auth"
 	"github.com/luckylhb90/bnbloc/internal/coreset"
 	"github.com/luckylhb90/bnbloc/internal/extpipe"
+	"github.com/luckylhb90/bnbloc/internal/shard"
 	"github.com/luckylhb90/bnbloc/internal/store"
 )
 
@@ -121,6 +122,30 @@ func TestProxyStripsClientUserHeader(t *testing.T) {
 	resp.Body.Close()
 	if string(raw) != "alice" {
 		t.Fatalf("injected user = %q, want alice (spoof ignored)", raw)
+	}
+}
+
+// The replica-to-replica ownership marker never passes the edge: a client
+// could otherwise pin its request to whichever replica it landed on.
+func TestProxyStripsForwardMarker(t *testing.T) {
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, r.Header.Get(shard.ForwardedHeader))
+	}))
+	defer backend.Close()
+	srv := httptest.NewServer(newGateway(t, backend.URL).Handler())
+	defer srv.Close()
+	token, _ := login(t, srv, "good")
+	req, _ := http.NewRequest(http.MethodGet, srv.URL+"/v1/rooms/room-1/anything", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set(shard.ForwardedHeader, "10.0.0.9:8082")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if len(raw) != 0 {
+		t.Fatalf("backend saw forward marker %q", raw)
 	}
 }
 

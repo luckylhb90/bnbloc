@@ -26,6 +26,7 @@ import (
 	"github.com/luckylhb90/bnbloc/internal/orgsync"
 	"github.com/luckylhb90/bnbloc/internal/rbac"
 	"github.com/luckylhb90/bnbloc/internal/realtime"
+	"github.com/luckylhb90/bnbloc/internal/shard"
 	"github.com/luckylhb90/bnbloc/internal/store"
 	"github.com/luckylhb90/bnbloc/internal/svcauth"
 	"github.com/luckylhb90/bnbloc/internal/tarbundle"
@@ -132,6 +133,10 @@ type Service struct {
 	limiter       lazyLimiter
 	guessLimiter  lazyLimiter
 	publicLimiter lazyLimiter
+	// Peers is the live gateway replica set (BNBLOC_GATEWAY_PEERS): every
+	// per-replica limit above enforces 1/N of its configured budget. Nil =
+	// one replica.
+	Peers *shard.Set
 	// daemonBypassOnce guards the one-time evaluation + warning of whether the
 	// trusted-daemon token bypass is allowed (fails closed for the dev default).
 	daemonBypassOnce sync.Once
@@ -653,7 +658,7 @@ func (s *Service) rateAllow(subject string) bool {
 	if subject == daemonServiceSubject {
 		return true
 	}
-	return s.limiter.get(defaultChatRate, defaultChatBurst).allow(subject)
+	return s.limiter.get(defaultChatRate, defaultChatBurst, s.Peers.Size).allow(subject)
 }
 
 // guessAllow lazily builds the slow guess limiter and consumes one token for
@@ -661,18 +666,18 @@ func (s *Service) rateAllow(subject string) bool {
 // login (no trusted subject yet), "subject:<id>" for authenticated invite
 // redemption, "share-ip:<addr>" for public share token misses.
 func (s *Service) guessAllow(key string) bool {
-	return s.guessLimiter.get(defaultGuessRate, defaultGuessBurst).allow(key)
+	return s.guessLimiter.get(defaultGuessRate, defaultGuessBurst, s.Peers.Size).allow(key)
 }
 
 // guessBlocked reports, without consuming, whether key's guess budget is
 // spent.
 func (s *Service) guessBlocked(key string) bool {
-	return s.guessLimiter.get(defaultGuessRate, defaultGuessBurst).blocked(key)
+	return s.guessLimiter.get(defaultGuessRate, defaultGuessBurst, s.Peers.Size).blocked(key)
 }
 
 // publicAllow consumes one public-read token for a client IP.
 func (s *Service) publicAllow(ip string) bool {
-	return s.publicLimiter.get(defaultPublicRate, defaultPublicBurst).allow("ip:" + ip)
+	return s.publicLimiter.get(defaultPublicRate, defaultPublicBurst, s.Peers.Size).allow("ip:" + ip)
 }
 
 // clientIP derives the caller's IP for the per-IP limits. X-Forwarded-For is
@@ -778,6 +783,9 @@ func (s *Service) proxyAs(w http.ResponseWriter, r *http.Request, p apiPath, sub
 	r.Header.Del(svcauth.HeaderTenant)
 	r.Header.Del(svcauth.HeaderSig)
 	r.Header.Del(svcauth.HeaderTs)
+	// The ownership-forward marker is replica-to-replica only: a client that
+	// set it would pin its request to whichever replica it landed on.
+	r.Header.Del(shard.ForwardedHeader)
 	r.Header.Set("X-Bnbloc-User", subject)
 	// Every authenticated request carries a tenant; default for legacy tokens
 	// and the trusted daemon so backends always have a scope to enforce.

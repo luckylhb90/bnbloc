@@ -21,6 +21,7 @@ import (
 	"github.com/luckylhb90/bnbloc/internal/orgsync"
 	"github.com/luckylhb90/bnbloc/internal/provisioning"
 	"github.com/luckylhb90/bnbloc/internal/rbac"
+	"github.com/luckylhb90/bnbloc/internal/shard"
 	"github.com/luckylhb90/bnbloc/internal/store"
 	"github.com/luckylhb90/bnbloc/internal/svcauth"
 	"github.com/luckylhb90/bnbloc/internal/tenant"
@@ -267,6 +268,15 @@ func main() {
 	// Installs land on one replica; every replica converges on the durable
 	// records within one interval.
 	go svc.RunComponentReconcile(context.Background())
+	// Gateway replicas share their per-subject/per-IP rate limits by each
+	// enforcing 1/N of every budget, N being the live replica count read
+	// from BNBLOC_GATEWAY_PEERS (unset = 1).
+	peers, err := shard.CountFromEnv("BNBLOC_GATEWAY")
+	if err != nil {
+		log.Fatalf("bnbloc-gateway: %v", err)
+	}
+	peers.Start(context.Background())
+	svc.Peers = peers
 	// The gateway is the public edge: /metrics is never served on its main
 	// listener; BNBLOC_METRICS_ADDR exposes it on an internal one.
 	if err := obs.ServeWithHealth("bnbloc-gateway", cfg.ListenAddr, svc.Handler(), tw.Health, obs.PublicListener()); err != nil {
