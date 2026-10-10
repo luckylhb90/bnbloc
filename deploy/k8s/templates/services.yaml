@@ -82,7 +82,7 @@ spec:
             {{- end }}
             {{- if and $owner $scaled }}
             # Scale-out by key ownership (internal/shard): the headless name
-            # (re-resolved every 5s to the ready pods) and this pod's own IP.
+            # (re-resolved every 5s to the ready pods; peers probed every second) and this pod's own IP.
             - name: POD_IP
               valueFrom:
                 fieldRef: { fieldPath: status.podIP }

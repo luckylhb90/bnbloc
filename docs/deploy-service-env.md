@@ -102,7 +102,7 @@ history. Kubernetes runs it as a StatefulSet behind the headless
 | `BNBLOC_INTERNAL_KEY` | yes | Same value as gateway. Also signs replica-to-replica calls. |
 | `BNBLOC_ROOM_BASE_URL` | yes | `http://bnbloc-room:8080` — membership checks. |
 | Blob storage | yes | A volume at `/var/lib/bnbloc/attachments` (`BNBLOC_ATTACHMENTS_DIR`), or `BNBLOC_ATTACHMENTS_S3_BUCKET` (+ `_REGION`, `_ENDPOINT`, credentials, `_KEY_PREFIX`, `_PATH_STYLE`). More than one replica requires S3 (startup refuses the disk store with peers configured). |
-| `BNBLOC_REALTIME_PEERS` | with >1 replica | The replica set: one `host:port` DNS name re-resolved every 5 s (Helm: `bnbloc-realtime-peers:8082`) or a comma list of `host:port`. Replicas failing `GET /readyz` twice leave the set. Unset (with `_SELF`) = single node. |
+| `BNBLOC_REALTIME_PEERS` | with >1 replica | The replica set: one `host:port` DNS name re-resolved every 5 s (Helm: `bnbloc-realtime-peers:8082`) or a comma list of `host:port`. Replicas failing `GET /readyz` twice (probed every second, ~2 s; a failed peer call re-probes at once) leave the set. Unset (with `_SELF`) = single node. |
 | `BNBLOC_REALTIME_SELF` | with peers | This replica's address as peers reach it: `host:port`, or the bare pod IP (DNS form; Helm passes `$(POD_IP)`). |
 | `BNBLOC_ATTACHMENTS_S3_DIRECT_DOWNLOADS` | optional | S3 only: opt-in downloads answer 302 to a 5-minute presigned URL (clients must reach the bucket). Default off: everything streams. |
 | `BNBLOC_ATTACHMENTS_S3_PUBLIC_ENDPOINT` | optional | S3 base URL clients reach, when `_ENDPOINT` is internal-only. Empty = `_ENDPOINT`. |

@@ -5,8 +5,11 @@
 //
 // A Set is the live peer set of one service: either a DNS name re-resolved
 // periodically (a Kubernetes headless Service, one address per ready pod) or
-// a fixed comma list of host:port. Every candidate is probed (GET /readyz) on
-// the same tick, so a dead or unready replica leaves the set in both modes.
+// a fixed comma list of host:port. Every candidate is probed (GET /readyz)
+// every second, so a dead or unready replica leaves the set in both modes
+// within about two seconds; a failed call to a live peer (a forward or a
+// peer-to-peer request) re-probes it at once, which shortens that further
+// for a crashed replica. DNS names are re-resolved every five seconds.
 // Ownership of a key is rendezvous (highest-random-weight) hashing over the
 // sorted live set: each replica computes the same owner from the same view,
 // and adding or removing one peer moves only the keys that peer gains or
@@ -38,14 +41,24 @@ import (
 // Refresh cadence and liveness thresholds. These are protocol constants of
 // the ownership layer (how fast a view converges), not deployment data.
 const (
-	// refreshInterval is how often the DNS name is re-resolved and every
-	// candidate re-probed.
-	refreshInterval = 5 * time.Second
-	// probeTimeout bounds one readiness probe.
-	probeTimeout = 2 * time.Second
+	// probeInterval is how often every candidate is re-probed. With
+	// downAfter it bounds how long a dead replica keeps owning keys (its
+	// rooms answer 502 until the view drops it): about 2 s. N replicas cost
+	// N*(N-1) probes per second, negligible at realistic N.
+	probeInterval = time.Second
+	// resolveInterval is how often the DNS name is re-resolved. A replica
+	// that died is dropped by its failed probes, not by DNS, so this only
+	// paces how fast a new replica is discovered.
+	resolveInterval = 5 * time.Second
+	// probeTimeout bounds one readiness probe; peers are cluster-internal,
+	// so a healthy one answers far sooner, and it stays below probeInterval.
+	probeTimeout = 800 * time.Millisecond
 	// downAfter is how many consecutive failed probes drop a live peer: one
 	// lost probe must not move every key it owns (stream churn).
 	downAfter = 2
+	// suspectDebounce spaces the out-of-band probes a failed peer call
+	// triggers, so a burst of failures probes once, not once per request.
+	suspectDebounce = 250 * time.Millisecond
 	// probePath is the readiness endpoint every bnbloc service serves
 	// (internal/obs): a replica that cannot reach its dependencies owns no
 	// keys.
@@ -65,6 +78,11 @@ type Set struct {
 	probe     func(ctx context.Context, addr string) bool
 	selfCheck func() error
 	interval  time.Duration
+	// suspect wakes the refresh loop for an immediate probe after a call to
+	// a live peer failed (buffered 1: concurrent failures coalesce).
+	suspect chan struct{}
+	// refreshMu serializes refreshes (the ticker and suspect wake-ups).
+	refreshMu sync.Mutex
 
 	mu        sync.RWMutex
 	candidate []string
@@ -73,7 +91,7 @@ type Set struct {
 	listeners []func(changed bool)
 	metrics   *obs.Metrics
 	label     string
-	transport *http.Transport
+	transport http.RoundTripper
 }
 
 type peerState struct {
@@ -83,7 +101,8 @@ type peerState struct {
 
 // Options configures New. Peers is the BNBLOC_<SVC>_PEERS value; Self the
 // BNBLOC_<SVC>_SELF value (empty only for a count-only set). Lookup, Probe and
-// Interval default to the real resolver, an HTTP GET of /readyz, and 5s.
+// Interval (the probe cadence) default to the real resolver, an HTTP GET of
+// /readyz, and 1s.
 type Options struct {
 	Peers    string
 	Self     string
@@ -155,16 +174,20 @@ func New(o Options) (*Set, error) {
 		probe:    o.Probe,
 		interval: o.Interval,
 		state:    map[string]*peerState{},
+		suspect:  make(chan struct{}, 1),
 	}
 	if s.interval <= 0 {
-		s.interval = refreshInterval
+		s.interval = probeInterval
 	}
 	if s.lookup == nil {
 		s.lookup = net.DefaultResolver.LookupHost
 	}
-	s.transport = newTransport()
+	base := newTransport()
+	s.transport = &suspectTransport{base: base, set: s}
 	if s.probe == nil {
-		client := &http.Client{Transport: s.transport, Timeout: probeTimeout}
+		// Probes use the bare transport: a failed probe is already counted by
+		// the refresh that ran it and must not wake another one.
+		client := &http.Client{Transport: base, Timeout: probeTimeout}
 		s.probe = func(ctx context.Context, addr string) bool { return httpProbe(ctx, client, addr) }
 	}
 	if len(entries) == 1 {
@@ -236,6 +259,23 @@ func newTransport() *http.Transport {
 	}
 }
 
+// suspectTransport is the transport of every peer call (forwards and
+// peer-to-peer requests). A call that fails for any reason other than its own
+// caller giving up marks the peer suspect, so a crashed replica is re-probed
+// within suspectDebounce instead of at the next tick.
+type suspectTransport struct {
+	base *http.Transport
+	set  *Set
+}
+
+func (t *suspectTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	resp, err := t.base.RoundTrip(req)
+	if err != nil && req.Context().Err() == nil {
+		t.set.Suspect(req.URL.Host)
+	}
+	return resp, err
+}
+
 func httpProbe(ctx context.Context, client *http.Client, addr string) bool {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://"+addr+probePath, nil)
 	if err != nil {
@@ -287,7 +327,9 @@ const (
 )
 
 // Start runs one refresh synchronously (so the first view is real before the
-// service serves) and then refreshes every interval until ctx ends.
+// service serves) and then probes every interval, re-resolving the DNS name
+// every resolveInterval, until ctx ends. A Suspect call probes at once
+// (debounced).
 func (s *Set) Start(ctx context.Context) {
 	if s == nil {
 		return
@@ -296,24 +338,70 @@ func (s *Set) Start(ctx context.Context) {
 	go func() {
 		t := time.NewTicker(s.interval)
 		defer t.Stop()
+		lastResolve := time.Now()
+		var lastSuspect time.Time
 		for {
 			select {
 			case <-ctx.Done():
 				return
 			case <-t.C:
-				s.Refresh(ctx)
+				resolve := time.Since(lastResolve) >= resolveInterval
+				if resolve {
+					lastResolve = time.Now()
+				}
+				s.refresh(ctx, resolve)
+			case <-s.suspect:
+				if wait := suspectDebounce - time.Since(lastSuspect); wait > 0 {
+					select {
+					case <-ctx.Done():
+						return
+					case <-time.After(wait):
+					}
+				}
+				lastSuspect = time.Now()
+				s.refresh(ctx, false)
 			}
 		}
 	}()
+}
+
+// Suspect asks for an immediate probe of addr after a call to it failed. Only
+// a peer in the live view matters (a dropped one is probed every tick
+// anyway); the probe itself decides, with the usual downAfter threshold, so
+// one failed request never moves keys on its own.
+func (s *Set) Suspect(addr string) {
+	if s == nil {
+		return
+	}
+	s.mu.RLock()
+	live := slices.Contains(s.live, addr)
+	s.mu.RUnlock()
+	if !live {
+		return
+	}
+	select {
+	case s.suspect <- struct{}{}:
+	default:
+	}
 }
 
 // Refresh re-resolves the candidates, probes each, and publishes the new live
 // view. A failed DNS lookup keeps the previous candidates (a resolver blip
 // must not empty the set). Listeners (OnRefresh) run after every refresh,
 // outside the lock.
-func (s *Set) Refresh(ctx context.Context) {
+func (s *Set) Refresh(ctx context.Context) { s.refresh(ctx, true) }
+
+// refresh probes the candidates, re-resolving the DNS name first when resolve
+// is set (otherwise the last resolved candidates are probed).
+func (s *Set) refresh(ctx context.Context, resolve bool) {
+	s.refreshMu.Lock()
+	defer s.refreshMu.Unlock()
 	candidates := s.static
-	if s.dnsHost != "" {
+	if s.dnsHost != "" && !resolve {
+		s.mu.RLock()
+		candidates = s.candidate
+		s.mu.RUnlock()
+	} else if s.dnsHost != "" {
 		addrs, err := s.lookup(ctx, s.dnsHost)
 		if err != nil {
 			slog.Warn("bnbloc shard: peer lookup failed; keeping the previous view",

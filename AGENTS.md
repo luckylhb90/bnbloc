@@ -220,8 +220,12 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   and their timers, plugin streams and pending acks, relay pairings).
   `BNBLOC_<SVC>_PEERS` is one `host:port` DNS name (re-resolved every 5 s) or a
   comma list; `BNBLOC_<SVC>_SELF` is `host:port` (or a bare IP in DNS mode).
-  Both unset = single node; only one set refuses startup. Peers failing
-  `/readyz` twice leave the set. Any replica forwards a keyed request one hop
+  Both unset = single node; only one set refuses startup. Every peer is
+  probed (`/readyz`) every second and leaves the set after two failures
+  (~2 s); a failed call to a live peer (forward or peer request, via the
+  set's transport) re-probes it at once, so a crashed replica is dropped in
+  ~0.25 s under traffic. Peer calls must use `Set.Client()`/the forward
+  transport so failures feed this. Any replica forwards a keyed request one hop
   to the owner (`shard.Forward`; SSE/WebSocket pass through, signed headers
   untouched); `X-Bnbloc-Forwarded-By` means "serve locally, never re-forward"
   and the gateway strips it from clients. Routing keys: `/v1/rooms/{id}/…`

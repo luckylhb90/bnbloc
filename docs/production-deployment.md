@@ -505,7 +505,9 @@ its log.
   session (relay) is owned by one pod, picked by rendezvous hashing over the
   ready pods. They run as StatefulSets behind a headless
   `bnbloc-<name>-peers` Service; with `replicas > 1` (or `hpa.enabled`) each
-  pod gets `BNBLOC_<NAME>_PEERS` (the headless name, re-resolved every 5 s)
+  pod gets `BNBLOC_<NAME>_PEERS` (the headless name, re-resolved every 5 s;
+  every peer probed each second, a dead one dropped in about 2 s, or about
+  0.25 s once a request to it fails)
   and `BNBLOC_<NAME>_SELF` (its pod IP). Any pod accepts any request and
   forwards it one hop to the key's owner, so the gateway, room, activity and
   the ingress keep using the normal Service. A pod joining, leaving or

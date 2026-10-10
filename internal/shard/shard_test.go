@@ -4,9 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
+	"net/http"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 func keys(n int) []string {
@@ -236,5 +239,151 @@ func TestRefreshTracksLivePeers(t *testing.T) {
 	s.Refresh(ctx)
 	if !s.Owns("room:x") || s.Size() != 1 {
 		t.Fatal("an empty view must serve every key locally")
+	}
+}
+
+// A failed call to a live peer re-probes it at once: with the periodic tick
+// effectively off, two suspect wake-ups (the usual downAfter threshold) drop
+// a crashed peer in well under a second, while a peer that is already out of
+// the view, or a call its own caller abandoned, wakes nothing.
+func TestSuspectReprobesAtOnce(t *testing.T) {
+	f := &fakeNet{addrs: []string{"10.0.0.1", "10.0.0.2"}, down: map[string]bool{}}
+	var mu sync.Mutex
+	probes := 0
+	probe := func(ctx context.Context, addr string) bool {
+		mu.Lock()
+		probes++
+		mu.Unlock()
+		return f.probe(ctx, addr)
+	}
+	s, err := New(Options{Peers: "peers:8082", Self: "10.0.0.1", Lookup: f.lookup, Probe: probe, Interval: time.Hour})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	s.Start(ctx)
+	if s.Size() != 2 {
+		t.Fatalf("initial view %v", s.Peers())
+	}
+	count := func() int { mu.Lock(); defer mu.Unlock(); return probes }
+
+	// Not in the live view: ignored.
+	before := count()
+	s.Suspect("10.0.0.9:8082")
+	time.Sleep(50 * time.Millisecond)
+	if count() != before {
+		t.Fatal("a suspect for a peer outside the view probed")
+	}
+
+	f.mu.Lock()
+	f.down["10.0.0.2:8082"] = true
+	f.mu.Unlock()
+	start := time.Now()
+	deadline := start.Add(2 * time.Second)
+	for s.Size() == 2 && time.Now().Before(deadline) {
+		s.Suspect("10.0.0.2:8082")
+		time.Sleep(20 * time.Millisecond)
+	}
+	if s.Size() != 1 {
+		t.Fatal("repeated failed calls never dropped the dead peer")
+	}
+	if took := time.Since(start); took > time.Second {
+		t.Fatalf("dropping the dead peer took %v, want well under a second", took)
+	}
+}
+
+// The peer transport marks the target suspect on a failed call, but not when
+// the caller itself gave up.
+func TestTransportSuspectsFailedCalls(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dead := ln.Addr().String()
+	ln.Close() // nothing listens: connection refused
+	s, err := New(Options{Peers: "127.0.0.1:1," + dead, Self: "127.0.0.1:1", Probe: func(context.Context, string) bool { return true }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.Refresh(context.Background())
+
+	canceled, cancel := context.WithCancel(context.Background())
+	cancel()
+	req, _ := http.NewRequestWithContext(canceled, http.MethodGet, "http://"+dead+"/x", nil)
+	if _, err := s.Client().Do(req); err == nil {
+		t.Fatal("expected an error")
+	}
+	select {
+	case <-s.suspect:
+		t.Fatal("a call its caller canceled marked the peer suspect")
+	default:
+	}
+
+	req, _ = http.NewRequest(http.MethodGet, "http://"+dead+"/x", nil)
+	if _, err := s.Client().Do(req); err == nil {
+		t.Fatal("expected connection refused")
+	}
+	select {
+	case <-s.suspect:
+	default:
+		t.Fatal("a refused call did not mark the peer suspect")
+	}
+}
+
+// End to end with real listeners, the real HTTP probe and the real refresh
+// loop: a replica that stops answering leaves a peer's view within about two
+// probe intervals with no traffic, and sooner when a call to it fails.
+func TestDeadReplicaLeavesViewQuickly(t *testing.T) {
+	if testing.Short() {
+		t.Skip("real timers")
+	}
+	start := func() (*http.Server, string) {
+		ln, err := net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			t.Fatal(err)
+		}
+		srv := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })}
+		go srv.Serve(ln)
+		return srv, ln.Addr().String()
+	}
+	run := func(t *testing.T, withTraffic bool) time.Duration {
+		a, addrA := start()
+		defer a.Close()
+		b, addrB := start()
+		s, err := New(Options{Peers: addrA + "," + addrB, Self: addrA})
+		if err != nil {
+			t.Fatal(err)
+		}
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		s.Start(ctx)
+		if s.Size() != 2 {
+			t.Fatalf("initial view %v", s.Peers())
+		}
+		b.Close()
+		killed := time.Now()
+		for s.Size() == 2 && time.Since(killed) < 5*time.Second {
+			if withTraffic {
+				req, _ := http.NewRequest(http.MethodGet, "http://"+addrB+"/v1/rooms/r1/events", nil)
+				if resp, err := s.Client().Do(req); err == nil {
+					resp.Body.Close()
+				}
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+		if s.Size() != 1 {
+			t.Fatal("the dead replica never left the view")
+		}
+		return time.Since(killed)
+	}
+	idle := run(t, false)
+	busy := run(t, true)
+	t.Logf("dead replica dropped after %v idle, %v with failing calls", idle, busy)
+	if idle > 2500*time.Millisecond {
+		t.Fatalf("idle detection took %v, want about two probe intervals", idle)
+	}
+	if busy > 1200*time.Millisecond {
+		t.Fatalf("detection with failing calls took %v, want well under the idle bound", busy)
 	}
 }

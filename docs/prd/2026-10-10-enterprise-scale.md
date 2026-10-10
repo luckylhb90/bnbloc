@@ -227,8 +227,11 @@ singleton guard removed), the all-in-one image and the env docs. Decisions
 taken while implementing, beyond the text above:
 
 - **Liveness, not just membership.** Every candidate of the peer set (DNS
-  answer or fixed list) is probed with `GET /readyz` on each 5 s refresh;
-  two consecutive failures drop it, one success restores it. So a dead
+  answer or fixed list) is probed with `GET /readyz` every second (DNS
+  re-resolved every 5 s); two consecutive failures drop it, one success
+  restores it. A failed call to a live peer (forward or peer request) wakes
+  an immediate, debounced re-probe. (Initially a 5 s refresh; tightened on
+  2026-10-11, see "Failover window" below.) So a dead
   replica leaves the view in list mode too, an unready one owns no keys, and
   the gateway's divisor is the live count. A replica judges itself with its
   own readiness check (no network self-probe). A failed DNS lookup keeps the
@@ -574,3 +577,22 @@ tests, deploy surfaces and docs, and updates this file's status.
   unreferenced blobs are collected.
 - Search: the same queries return the same visible results on MySQL and on
   OpenSearch, including the people-chat and membership filters.
+
+### Failover window (2026-10-11)
+
+The real-runtime check above measured 8 s from a replica's death to its
+rooms moving (two failed probes on a 5 s refresh), during which those rooms
+answered 502. Tightened without new infrastructure:
+
+- Probes run every second with an 800 ms timeout; DNS stays on a 5 s cadence
+  (a dead replica is dropped by its probes, not by DNS).
+- The peer transport marks a live peer suspect when a call to it fails
+  (unless the caller gave up), which wakes an immediate probe, debounced to
+  250 ms. One failed request never moves keys: the usual two-failure rule
+  still decides.
+- Measured with real listeners and the real loop
+  (`TestDeadReplicaLeavesViewQuickly`): about 2.0 s with no traffic, about
+  0.25 s while calls to the dead replica fail.
+- Cost: N*(N-1) `/readyz` probes per second (each a DB ping), 30/s at six
+  replicas.
+
