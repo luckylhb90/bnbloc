@@ -87,6 +87,25 @@ address defaults to the port shown.
 The gateway does not proxy the relay: `/relay/*` is routed by the edge proxy
 (`deploy/Caddyfile`, the Helm Ingress) straight to the relay service.
 
+## Scale-out peer sets (realtime, relay, gateway)
+
+realtime and relay keep per-key state in process memory (rooms and member
+plugin streams; relay pairings). To run more than one replica, each replica
+learns its peers and owns the keys rendezvous hashing assigns it; a request
+for a key another replica owns is forwarded there in one hop (SSE and
+WebSocket pass through), so callers keep using the load-balanced service URL
+(`internal/shard`). Leave both variables of a service unset for a single node
+(compose, the all-in-one image, a one-replica chart): it owns every key and
+nothing is forwarded. Setting one without the other refuses startup. The Helm
+chart sets them when `replicas > 1` or an HPA is enabled.
+
+| Variable | Scope | Default | Meaning |
+| --- | --- | --- | --- |
+| `BNBLOC_REALTIME_PEERS` | realtime | — | The realtime replica set. One `host:port` is a DNS name re-resolved every 5 s, each address a peer at that port (a Kubernetes headless Service: `bnbloc-realtime-peers:8082`); a comma list of two or more `host:port` is a fixed set. Every candidate is probed (`GET /readyz`; two consecutive failures drop it), so a dead or unready replica leaves the set in both forms. With peers configured, startup refuses the disk blob store (more than one replica requires `BNBLOC_ATTACHMENTS_S3_BUCKET`). |
+| `BNBLOC_REALTIME_SELF` | realtime | — | This replica's own address as its peers reach it: `host:port` (one of the list's entries in list form), or a bare IP that takes the DNS entry's port (the pod IP from the downward API; IPv6-safe). |
+| `BNBLOC_RELAY_PEERS` / `BNBLOC_RELAY_SELF` | relay | — | The same pair for the relay (keys: sync session keys). |
+| `BNBLOC_GATEWAY_PEERS` | gateway | — | The gateway replica set, same forms (Helm: `bnbloc-gateway-peers:8080`). The gateway owns no keys; it divides every per-replica rate limit (chat/borrow per subject, guess, public share reads) by the live replica count so N replicas enforce the configured budget in total, not N times it. Unset = one replica. |
+
 ### Build identity (build argument, not runtime)
 
 `CI_COMMIT_SHA` is a **build argument** of the root `Dockerfile` (and so of the
@@ -269,7 +288,9 @@ The relay carries the desktop bridge's live file-sync byte stream as a
 WebSocket. Its endpoints (`/relay/*`) are unauthenticated at the transport;
 authorization is the sync-layer HMAC (`BNBLOC_SYNC_SECRET`, bridge). That token
 rides the stream's cleartext HELLO, so the relay's public entry **must be TLS**.
-Pairing state is in process memory: run exactly one relay replica.
+Pairing state is in process memory: one replica pairs everything itself; more
+replicas need `BNBLOC_RELAY_PEERS`/`_SELF` (Scale-out peer sets above) so both
+halves of a session meet on the session key's owner.
 
 | Variable | Default | Meaning |
 | --- | --- | --- |

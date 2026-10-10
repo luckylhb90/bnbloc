@@ -35,6 +35,9 @@ services:
     build: { context: ., args: { SERVICE: realtime, CI_COMMIT_SHA: "${CI_COMMIT_SHA:-}" } }
     environment:
       BNBLOC_REALTIME_LISTEN_ADDR: ":8082"
+      # One replica = a single node that owns every room: no
+      # BNBLOC_REALTIME_PEERS/_SELF. Scaling realtime out by room ownership
+      # is the Helm chart's job (docs/production-deployment.md).
       BNBLOC_INTERNAL_KEY: "${BNBLOC_INTERNAL_KEY:-dev-bnbloc-internal-key-change-me}"
       BNBLOC_ROOM_BASE_URL: "http://room:8080"
       BNBLOC_MYSQL_DSN: "bnbloc:bnbloc-pass@tcp(mysql:3306)/bnbloc?parseTime=true"
@@ -109,6 +112,7 @@ services:
     build: { context: ., args: { SERVICE: relay, CI_COMMIT_SHA: "${CI_COMMIT_SHA:-}" } }
     environment:
       BNBLOC_RELAY_LISTEN_ADDR: ":8085"
+      # Single node (no BNBLOC_RELAY_PEERS/_SELF): pairs every session here.
 
   gateway:
     build: { context: ., args: { SERVICE: gateway, WEBUI: full, CI_COMMIT_SHA: "${CI_COMMIT_SHA:-}" } }

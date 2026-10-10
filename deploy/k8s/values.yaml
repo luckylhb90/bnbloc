@@ -1,4 +1,5 @@
-# bnbloc Helm values. Each service is an independent Deployment + Service.
+# bnbloc Helm values. Each service is an independent workload + Service
+# (Deployments; realtime and relay are StatefulSets, see below).
 #
 # Secrets are NOT created by this chart: create the referenced Secrets out of
 # band (or with your secrets operator) before installing. Every Go service runs
@@ -65,7 +66,10 @@ gateway:
   # Replicas share all auth state through the database (signing key, SSO
   # hand-offs, refresh-token families) and reconcile installed components
   # from platform settings every 30s, so an install on one replica reaches
-  # the others without a restart and no sticky routing is needed.
+  # the others without a restart and no sticky routing is needed. Rate
+  # limits are per replica memory: each enforces 1/N of every budget, N
+  # being the live replica count (BNBLOC_GATEWAY_PEERS, the
+  # bnbloc-gateway-peers headless Service the chart renders).
   replicas: 2
   # Internal Prometheus listener (BNBLOC_METRICS_ADDR). The public port never
   # serves /metrics; scrape this port in-cluster and never route it from the
@@ -116,12 +120,23 @@ room:
 activity:  { replicas: 2, hpa: { enabled: true, minReplicas: 2, maxReplicas: 10, targetCPUUtilizationPercentage: 70 } }
 shareagent: { replicas: 2 }
 
-# realtime and relay are SINGLETONS (always 1 replica, Recreate rollout): the
-# SSE hub (per-room sequence counter, replay buffer, presence) and the relay's
-# pairing table live in process memory, so a second replica would split rooms
-# and sync sessions between pods. The chart refuses replicas > 1 or an HPA for
-# them. Scale them vertically via resources.
+# realtime and relay scale out by KEY OWNERSHIP (internal/shard): each room
+# and member (realtime) or sync session key (relay) is owned by one pod, which
+# keeps that key's in-process state (stream subscribers, per-room sequence,
+# replay buffer, presence, roster, plugin streams; relay pairings). Any pod
+# accepts any request and forwards it one hop to the key's owner, so callers
+# keep using the bnbloc-<name> Service. They run as StatefulSets behind a
+# headless bnbloc-<name>-peers Service; with replicas > 1 (or an HPA) each pod
+# gets BNBLOC_<NAME>_PEERS/_SELF. A pod joining or leaving moves only its own
+# keys: those streams reconnect to the new owner and catch up from history.
+# More than one realtime replica requires the S3 blob store (the chart fails
+# otherwise). docs/production-deployment.md#scaling-realtime-and-relay.
 realtime:
+  replicas: 1
+  # Optional autoscaling (StatefulSet target). Every scale event moves a
+  # share of rooms (their streams reconnect), so prefer a fixed count sized
+  # with bnbloc-loadtest (docs/load-testing.md).
+  hpa: { enabled: false, minReplicas: 2, maxReplicas: 6, targetCPUUtilizationPercentage: 70 }
   attachments:
     # S3 (or S3-compatible) blob store for attachments + sidecar artifacts.
     # Empty bucket = local disk on the PVC below.
@@ -147,6 +162,8 @@ realtime:
     limits:   { cpu: "2", memory: "1Gi" }
 
 relay:
+  replicas: 1
+  hpa: { enabled: false, minReplicas: 2, maxReplicas: 4, targetCPUUtilizationPercentage: 70 }
   stunServers: []
   endpoints: []
 

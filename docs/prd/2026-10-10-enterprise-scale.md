@@ -1,6 +1,6 @@
 # Enterprise scale: load testing, realtime scale-out, retention, search
 
-Status: approved 2026-10-10, in progress. Section 1 landed: `cmd/bnbloc-loadtest`, with the baseline in `docs/load-testing.md`.
+Status: approved 2026-10-10, in progress (section 2 implemented 2026-10-11). Section 1 landed: `cmd/bnbloc-loadtest`, with the baseline in `docs/load-testing.md`.
 
 ## Problem
 
@@ -95,6 +95,85 @@ replicas allow N times the configured rate. The gateway reads the same kind of
 peer set (`BNBLOC_GATEWAY_PEERS`) and divides the configured rate and burst by
 the live replica count. This is the standard local-rate-limit approximation;
 it needs no shared store.
+
+### Status of section 2 (2026-10-11): implemented
+
+`internal/shard` (peer set, rendezvous ownership, one-hop `Forward`),
+realtime (`services/realtime/scaleout.go`), relay, the gateway limiter, the
+Helm chart (StatefulSets + headless `bnbloc-<name>-peers` Services,
+singleton guard removed), the all-in-one image and the env docs. Decisions
+taken while implementing, beyond the text above:
+
+- **Liveness, not just membership.** Every candidate of the peer set (DNS
+  answer or fixed list) is probed with `GET /readyz` on each 5 s refresh;
+  two consecutive failures drop it, one success restores it. So a dead
+  replica leaves the view in list mode too, an unready one owns no keys, and
+  the gateway's divisor is the live count. A replica judges itself with its
+  own readiness check (no network self-probe). A failed DNS lookup keeps the
+  previous view; an empty view serves locally.
+- **`BNBLOC_<SVC>_SELF` may be a bare IP** in DNS mode (it takes the DNS
+  entry's port), so the chart passes the pod IP unchanged and IPv6 works.
+- **The gateway reads only `BNBLOC_GATEWAY_PEERS`** (it owns no keys); it
+  divides all three per-replica limits (chat/borrow per subject, guess,
+  public share reads), never below one token of burst.
+- **Release on every refresh, not only on change.** A replica may serve a
+  forwarded request locally while views disagree; the next refresh closes
+  any such stream so the client moves to the real owner instead of missing
+  the room's events. A dead owner answers 502 for at most two refreshes;
+  clients retry (SSE reconnect backoff, idempotent send).
+- **Cross-replica work.** The room owner hands each hook-bearing event to
+  every peer (bounded per-peer queues; each peer fans out to the member
+  streams it owns — this is "handed to the member's owner" without the room
+  owner having to know which members hold streams). The notification worker
+  (lease-claimed on every replica) asks the member's owner whether a desktop
+  is connected and delivers there, waiting for the owner's outcome; an
+  unreachable owner falls back to the server notifiers. A schedule slot
+  claimed on any replica is posted by the room's owner over an internal
+  route, with its pause/retry classification preserved.
+- **The ownership marker** (`X-Bnbloc-Forwarded-By`) is stripped by the
+  gateway; relay's routes bypass the gateway, where a client-set marker only
+  makes its own request unpairable.
+- **The chart scales on values.** Peer variables are set only when
+  `replicas > 1` or an HPA is enabled; more than one realtime replica
+  without an S3 bucket fails the render (the binary refuses it too).
+
+**Transient sequences (verified, root cause fixed).** Transient events
+(presence, typing, roster, job/state deltas) took the room's next sequence
+but were never persisted, so a restarted or new owner seeding from the
+durable max re-issued numbers clients had already seen. Checked consumers:
+the web feed (`applyIncoming`, `mergeHistory`, `maxSequence`, read cursor)
+dedupes and orders only durable rows; transient kinds are handled by
+payload, never by sequence; `EventSource` is recreated on every reconnect
+(no `Last-Event-ID`); the bridge never dedupes by sequence and reads history
+by its own durable cursor. So no durable event was dropped — not a live bug.
+The design was still wrong for ownership moves: the hub doc promised
+"consumers ignore older deliveries", a transient publish needed a store seed
+(a DB blip dropped presence), and transient publishes on a room that had
+moved away left a stale counter that collided with the new owner's commits
+when the room moved back. Fix: only durable kinds are sequenced; transient
+kinds carry sequence 0 and no SSE `id:`, delivered in order under the same
+room lock. The counter now always equals the durable max.
+
+**Process-local state and how it behaves under ownership.**
+
+| State | Key | Behavior on an ownership move |
+| --- | --- | --- |
+| Hub subscribers (room SSE streams) | room | Closed on the old owner; clients reconnect to the new owner and catch up from history. |
+| Durable sequence counter | room | Forgotten on release; the new owner seeds from the durable max. Two replicas briefly owning a room are fenced by the `(room_id, seq)` primary key: the loser's commit fails, it re-seeds, and the client's retry (idempotent by `clientMsgId`) succeeds. |
+| Replay buffer | room | Forgotten on release (it only serves connected subscribers); reconnecting clients page history. |
+| Presence refcounts + leave timers | room | Closing streams run their deferred leave on the old owner, whose events are suppressed (only the owner announces presence); the new owner rebuilds presence from the reconnects. |
+| Agent roster + withdraw timers | room | Same as presence; each bridge re-advertises when its stream reconnects. |
+| Room publish lock | room | Per replica; only the owner publishes, so it serializes the room's sequence. |
+| Member plugin streams | member | Closed on the old owner; the desktop reconnects to the new owner. |
+| Plugin pending-ack table | member (delivery id) | Deliveries sent before a move stay pending on the old owner; their acks now route to the new owner (404), so they expire after 60 s, audited failed; a notification then falls back to the server notifiers. |
+| Plugin fan-out queue, per-peer hand-off queues | — | Bounded; full queues drop (logged), as before. |
+| Plugin record snapshot, per-stream install cache, notifier endpoints, secret cache | — | Per-replica caches of durable records (TTL / reconcile); no ownership. |
+| Notification observer (reply ↔ job matching) and collapse window | room | Run where the room's events are published (the owner). Parked state on the old owner flushes without a summary after its wait; a burst straddling a move may notify twice. |
+| Notification outbox worker, scheduler | — | Durable lease claims on every replica; desktop routing and posts go to the owner. |
+| Rate limits | — | realtime has none in process (size caps only); the gateway divides its buckets by the live replica count. |
+| Relay rendezvous queues | session | Dropped on the old owner; peers re-exchange on the new owner. |
+| Relay parked first peer | session | Closed so it reconnects to the new owner. |
+| Relay established pipe | session | Left alone: both halves are already on one replica. |
 
 ## 3. Data retention
 

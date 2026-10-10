@@ -11,9 +11,9 @@ compose path is the primary one; the Kubernetes chart is at the end.
 | gateway | 8080 | 1..n | public API + embedded SPA; proxies the others |
 | room | 8080 | 1..n | rooms, members, invites, artifacts |
 | activity | 8081 | 1..n | agent activity, bridge jobs, reply fan-out |
-| realtime | 8082 | **1** | chat, attachments/artifact blobs, SSE event stream (in-process hub) |
+| realtime | 8082 | 1 (compose); 1..n (Kubernetes, by room ownership) | chat, attachments/artifact blobs, SSE event stream (in-process hub per room owner) |
 | shareagent | 8083 | 1..n | agent borrowing authorization + audit |
-| relay | 8085 | **1** | desktop file-sync byte relay (in-process pairing) |
+| relay | 8085 | 1 (compose); 1..n (Kubernetes, by session ownership) | desktop file-sync byte relay (in-process pairing per session owner) |
 | installed core sidecars | package-defined | — | Core Protocol adapters run by the desktop sidecar manager |
 
 Production core adapters are private component packages: build and sign them
@@ -373,8 +373,9 @@ everything else → web. No runtime environment variables are read.
 
 ## Kubernetes
 
-`deploy/k8s` is a Helm chart rendering one Deployment + Service per service,
-an Ingress, and a PVC for realtime's disk blob store. It is validated with
+`deploy/k8s` is a Helm chart rendering one workload + Service per service
+(Deployments; StatefulSets with a headless peer Service for realtime and
+relay), an Ingress, and a PVC for realtime's disk blob store. It is validated with
 `helm lint`, `helm template`, and kubeconform schema checks; it has not been
 exercised against a live cluster in this repository.
 
@@ -387,14 +388,29 @@ credentials. Set `oidc.issuerURL`/`oidc.clientID` and
 missing Secret key or OIDC value fails the pod at startup with the reason in
 its log.
 
-- **Singletons.** realtime (in-process SSE hub) and relay (in-process pairing)
-  always render 1 replica with a `Recreate` rollout; the chart fails if you set
-  replicas > 1 or an HPA for them. Scale them vertically.
+- **Scaling realtime and relay.** Both keep per-key state in process memory
+  and scale out by key ownership: every room and member (realtime) or sync
+  session (relay) is owned by one pod, picked by rendezvous hashing over the
+  ready pods. They run as StatefulSets behind a headless
+  `bnbloc-<name>-peers` Service; with `replicas > 1` (or `hpa.enabled`) each
+  pod gets `BNBLOC_<NAME>_PEERS` (the headless name, re-resolved every 5 s)
+  and `BNBLOC_<NAME>_SELF` (its pod IP). Any pod accepts any request and
+  forwards it one hop to the key's owner, so the gateway, room, activity and
+  the ingress keep using the normal Service. A pod joining, leaving or
+  failing readiness moves only its own keys: their streams close, clients
+  reconnect to the new owner and catch up from history (no durable message
+  is lost: the new owner seeds each room's sequence from the durable max,
+  and a send retried by `clientMsgId` is idempotent). Allow realtime →
+  realtime and relay → relay traffic on their ports in any network policy.
+  Size the replica count with the load test (`docs/load-testing.md`); an HPA
+  works but every scale event moves a share of rooms.
 - **Blob storage.** With no `realtime.attachments.s3.bucket`, realtime mounts
-  the `bnbloc-realtime-attachments` PVC (ReadWriteOnce is enough for a
-  singleton). Set the bucket to use S3 instead (credentials from a Secret, or
-  the pod's IAM identity); `directDownloads: true` (+ `publicEndpoint` when
-  the endpoint is cluster-internal) answers downloads with presigned URLs.
+  the `bnbloc-realtime-attachments` PVC (ReadWriteOnce: one realtime pod,
+  replaced in place). More than one realtime replica requires the bucket —
+  the chart fails otherwise and realtime refuses the disk store when peers
+  are configured. Credentials come from a Secret or the pod's IAM identity;
+  `directDownloads: true` (+ `publicEndpoint` when the endpoint is
+  cluster-internal) answers downloads with presigned URLs.
 - **Ingress.** One host: `/relay` → relay, `/` → gateway. The default
   annotations target ingress-nginx (256 MiB bodies, no buffering, 30 min
   timeouts); translate them for another controller. Set
@@ -404,7 +420,9 @@ its log.
   SSO hand-offs and refresh-token families live in the database, and every
   replica reconciles installed components from platform settings every 30 s,
   so an install/uninstall on one replica reaches the others without a restart
-  and no sticky routing is needed.
+  and no sticky routing is needed. Rate limits live in each replica's memory;
+  the chart sets `BNBLOC_GATEWAY_PEERS` (headless `bnbloc-gateway-peers`) so
+  each replica enforces 1/N of every budget, N being the live replica count.
 - **Probes.** Liveness `/healthz` (never DB-gated), readiness `/readyz`
   (DB-gated).
 - **Nightly smoke.** `smoke.enabled` renders a CronJob running

@@ -60,6 +60,7 @@ embedded SPA. Stateless apart from the shared database — scale horizontally.
 | `BNBLOC_LOCAL_AGENT_TOKEN` | optional | Shared daemon bearer; empty disables that path. |
 | `BNBLOC_CORES` (+ `BNBLOC_CORE_<NAME>_URL`) | optional | Explicit cores only; installed packages need none. |
 | `BNBLOC_METRICS_ADDR` | for metrics | Internal `/metrics` listener (`:9090` in compose/Helm). The public listener never serves `/metrics` (404); unset = no gateway metrics. Never route or publish it. |
+| `BNBLOC_GATEWAY_PEERS` | with >1 replica | The gateway replica set (Helm: the headless `bnbloc-gateway-peers:8080`; or a comma list of `host:port`). Each replica enforces 1/N of every rate limit, N = live replicas, so the configured budget holds across the deployment. Unset = one replica (N replicas would then allow N times every budget). |
 
 The gateway does **not** proxy the relay (it only reads the relay's `/version`);
 the edge proxy routes `/relay/*`.
@@ -78,19 +79,31 @@ Room directory, membership, invites; fans artifact changes to realtime.
 | `BNBLOC_REALTIME_BASE_URL` | yes | `http://bnbloc-realtime:8082` — artifact-change fan-out, blob artifact versions + thumbnails (stored in realtime's blob store over the signed internal route), and the feed/attachment side of handoff package export/import. |
 | `BNBLOC_ARTIFACT_MAX_BYTES` | no | Max bytes of one blob artifact version. Unset = 100 MiB; must be 1..268435456 (realtime's 256 MiB blob cap) or the service refuses to start. Raise the edge proxy's body limit for `POST /v1/rooms/*/artifacts/*/versions` with it. |
 
-## realtime (`:8082`) — singleton
+## realtime (`:8082`) — scales out by room ownership
 
 Presence + business-event fan-out over SSE; durable chat history; attachment
-and artifact blobs. **Run exactly one replica**: the SSE hub (per-room
-sequence counter, replay buffer, presence) lives in process memory, so a
-second replica would split each room's subscribers and sequences.
+and artifact blobs. The SSE hub (per-room durable sequence counter, replay
+buffer, presence, the agent roster) and members' plugin streams live in
+process memory, so every room and member is **owned by exactly one
+replica**. One replica (no peers) owns everything. With more, set
+`BNBLOC_REALTIME_PEERS` + `BNBLOC_REALTIME_SELF`: any replica accepts any
+request and forwards room-scoped routes (`/v1/rooms/{id}/…`,
+`/internal/v1/rooms/{id}/…`) to the room's owner and the member plugin stream
+(`/v1/my/plugin-events` + ack) to the member's owner, in one hop; store-backed
+reads (unread, search, prompts, blobs) are served anywhere. Callers keep using
+the `bnbloc-realtime` Service. A replica joining or leaving moves only its own
+keys: those streams close, reconnect to the new owner, and catch up from
+history. Kubernetes runs it as a StatefulSet behind the headless
+`bnbloc-realtime-peers` Service.
 
 | Variable | Required | Notes |
 | --- | --- | --- |
 | `BNBLOC_MYSQL_DSN` | yes | Chat history + hub sequence seed. |
-| `BNBLOC_INTERNAL_KEY` | yes | Same value as gateway. |
+| `BNBLOC_INTERNAL_KEY` | yes | Same value as gateway. Also signs replica-to-replica calls. |
 | `BNBLOC_ROOM_BASE_URL` | yes | `http://bnbloc-room:8080` — membership checks. |
-| Blob storage | yes | A volume at `/var/lib/bnbloc/attachments` (`BNBLOC_ATTACHMENTS_DIR`), or `BNBLOC_ATTACHMENTS_S3_BUCKET` (+ `_REGION`, `_ENDPOINT`, credentials, `_KEY_PREFIX`, `_PATH_STYLE`). |
+| Blob storage | yes | A volume at `/var/lib/bnbloc/attachments` (`BNBLOC_ATTACHMENTS_DIR`), or `BNBLOC_ATTACHMENTS_S3_BUCKET` (+ `_REGION`, `_ENDPOINT`, credentials, `_KEY_PREFIX`, `_PATH_STYLE`). More than one replica requires S3 (startup refuses the disk store with peers configured). |
+| `BNBLOC_REALTIME_PEERS` | with >1 replica | The replica set: one `host:port` DNS name re-resolved every 5 s (Helm: `bnbloc-realtime-peers:8082`) or a comma list of `host:port`. Replicas failing `GET /readyz` twice leave the set. Unset (with `_SELF`) = single node. |
+| `BNBLOC_REALTIME_SELF` | with peers | This replica's address as peers reach it: `host:port`, or the bare pod IP (DNS form; Helm passes `$(POD_IP)`). |
 | `BNBLOC_ATTACHMENTS_S3_DIRECT_DOWNLOADS` | optional | S3 only: opt-in downloads answer 302 to a 5-minute presigned URL (clients must reach the bucket). Default off: everything streams. |
 | `BNBLOC_ATTACHMENTS_S3_PUBLIC_ENDPOINT` | optional | S3 base URL clients reach, when `_ENDPOINT` is internal-only. Empty = `_ENDPOINT`. |
 | `BNBLOC_PUBLIC_URL` | recommended | Public web origin; member-notification deep links. Unset = no links. |
@@ -107,7 +120,11 @@ connects to a private, loopback or link-local address for them, and honours
 `HTTPS_PROXY` when one is configured).
 
 Realtime streams `text/event-stream`; the edge proxy must not buffer responses
-and needs a long idle timeout.
+and needs a long idle timeout. Replicas reach each other on the realtime port
+(forwarded requests, `/readyz` probes, and the signed internal peer routes
+`/internal/v1/plugin-events`, `/internal/v1/members/{m}/…`,
+`/internal/v1/rooms/{id}/schedules/{s}/post`); a network policy must allow
+realtime → realtime on `:8082`.
 
 ## activity (`:8081`)
 
@@ -133,17 +150,21 @@ Shared-agent (borrow) authorization, audit, usage.
 | `BNBLOC_ROOM_BASE_URL` | yes | `http://bnbloc-room:8080` — membership. |
 | `BNBLOC_PUBLIC_URL` | recommended | Deep links in borrow-request notifications (queued to the shared outbox; realtime delivers). |
 
-## relay (`:8085`) — singleton
+## relay (`:8085`) — scales out by session-key ownership
 
 ICE config, rendezvous, and the WebSocket byte-stream relay for desktop file
 sync. No database, no svcauth (endpoints are authorized by the sync-layer
-HMAC). **Run exactly one replica**: pairing state is in process memory, so two
-replicas would leave peers on different pods unpaired.
+HMAC). Pairing state is in process memory, so both halves of a session must
+meet on one replica: with more than one, set `BNBLOC_RELAY_PEERS` +
+`BNBLOC_RELAY_SELF` and every rendezvous/stream request is forwarded to its
+session key's owner (WebSocket upgrades pass through). Kubernetes runs it as
+a StatefulSet behind the headless `bnbloc-relay-peers` Service.
 
 | Variable | Required | Notes |
 | --- | --- | --- |
 | `BNBLOC_RELAY_STUN_SERVERS` | optional | Comma-separated STUN servers (only for real p2p). |
 | `BNBLOC_RELAY_ENDPOINTS` | optional | Comma-separated advertised endpoints. |
+| `BNBLOC_RELAY_PEERS` / `BNBLOC_RELAY_SELF` | with >1 replica | Same forms as realtime's (Helm: `bnbloc-relay-peers:8085` and `$(POD_IP)`). Unset = single node. |
 
 Deployment-layer requirements: the edge routes `https://<host>/relay/*` to it
 (forwarding the WebSocket upgrade, long idle timeout), and its public entry is

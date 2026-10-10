@@ -59,6 +59,16 @@ route word missing from the vocabulary only reads as `:id`.
 | `bnbloc_notification_outbox_items` | gauge | `state` = `queued` \| `retrying` \| `delivered` \| `failed` | Outbox items, every tenant: pending never attempted, pending after a failed attempt, and finished items still retained (pruned after 7 days). Refreshed every 30 s. |
 | `bnbloc_notification_outbox_oldest_pending_age_seconds` | gauge | — | Age of the oldest pending outbox item (0 when none). Refreshed every 30 s. |
 
+### Scale-out (realtime, relay)
+
+Registered when the service runs with peers (`BNBLOC_<SVC>_PEERS`).
+
+| Metric | Type | Labels | Meaning |
+| --- | --- | --- | --- |
+| `bnbloc_shard_peers` | gauge | — | Live replicas in this replica's ownership view. Every replica should report the same value; a disagreement that persists beyond a few refreshes (5 s each) means replicas cannot probe each other. |
+| `bnbloc_shard_forwarded_total` | counter | — | Requests this replica proxied to the replica that owns their key (room, member, relay session). |
+| `bnbloc_shard_served_unowned_total` | counter | — | Forwarded requests served here although this replica does not own the key (two views briefly disagreed). Occasional increments during scaling are expected; a steady rate means the views do not converge. |
+
 ### Activity
 
 | Metric | Type | Labels | Meaning |
@@ -77,8 +87,10 @@ route word missing from the vocabulary only reads as `:id`.
 Gauges read from the shared database (`bnbloc_bridges_online`,
 `bnbloc_notification_outbox_*`) report the same value on every replica of a
 service — aggregate with `max()`. Counters and the SSE gauge are per replica —
-aggregate with `sum()`. realtime is a singleton (in-process hub), so its
-per-process series are already deployment-wide.
+aggregate with `sum()`; that includes realtime when it runs several replicas
+(each room's streams and publishes are counted only on its owner, so the sum
+counts every event once; forwarded requests also appear in the receiving
+replica's `bnbloc_http_requests_total`).
 
 Every series that an alert reads is registered at zero at startup, so a
 `== 0` or `rate()` rule sees a sample before the first event.

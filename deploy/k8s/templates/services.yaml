@@ -1,42 +1,54 @@
 {{- /*
-Deployment + Service per bnbloc microservice.
+Workload + Service per bnbloc microservice.
 
 Each entry names the service's port, its values block, whether it reads the
 shared database + svcauth key (`db`), the peers it calls (rendered as
-BNBLOC_<PEER>_BASE_URL), and whether it is a singleton. The env each service
-receives mirrors what its services/<name>/cmd/main.go reads — see
-docs/deploy-service-env.md.
+BNBLOC_<PEER>_BASE_URL), and its scale-out role (`shard`):
+
+  - "owner": realtime and relay keep per-key state in process memory
+    (rooms and member streams; relay pairings). They run as a StatefulSet
+    behind a headless Service (bnbloc-<name>-peers). With more than one
+    replica (or an HPA) every pod gets BNBLOC_<NAME>_PEERS (the headless
+    name, re-resolved to the ready pods) and BNBLOC_<NAME>_SELF (its pod
+    IP), owns the keys rendezvous hashing assigns it, and forwards the rest
+    to their owner (internal/shard). One replica gets neither: single node.
+  - "count": the gateway only needs the live replica count (its rate limits
+    enforce 1/N of each budget), read from BNBLOC_GATEWAY_PEERS.
+
+The env each service receives mirrors what its services/<name>/cmd/main.go
+reads — see docs/deploy-service-env.md.
 */ -}}
 {{- $ports := dict "gateway" 8080 "room" 8080 "activity" 8081 "realtime" 8082 "shareagent" 8083 "relay" 8085 -}}
 {{- $services := dict
-  "gateway"         (dict "cfg" .Values.gateway         "db" true  "singleton" false "peers" (list "room" "activity" "realtime" "shareagent" "relay"))
-  "room"            (dict "cfg" .Values.room            "db" true  "singleton" false "peers" (list "realtime"))
-  "activity"        (dict "cfg" .Values.activity        "db" true  "singleton" false "peers" (list "room" "realtime"))
-  "realtime"        (dict "cfg" .Values.realtime        "db" true  "singleton" true  "peers" (list "room"))
-  "shareagent"      (dict "cfg" .Values.shareagent      "db" true  "singleton" false "peers" (list "room"))
-  "relay"           (dict "cfg" .Values.relay           "db" false "singleton" true  "peers" (list))
+  "gateway"         (dict "cfg" .Values.gateway         "db" true  "shard" "count" "peers" (list "room" "activity" "realtime" "shareagent" "relay"))
+  "room"            (dict "cfg" .Values.room            "db" true  "shard" ""      "peers" (list "realtime"))
+  "activity"        (dict "cfg" .Values.activity        "db" true  "shard" ""      "peers" (list "room" "realtime"))
+  "realtime"        (dict "cfg" .Values.realtime        "db" true  "shard" "owner" "peers" (list "room"))
+  "shareagent"      (dict "cfg" .Values.shareagent      "db" true  "shard" ""      "peers" (list "room"))
+  "relay"           (dict "cfg" .Values.relay           "db" false "shard" "owner" "peers" (list))
 -}}
 {{- range $name, $svc := $services }}
 {{- $cfg := $svc.cfg | default dict }}
 {{- $port := get $ports $name }}
-{{- if $svc.singleton }}
-{{- /* realtime's SSE hub and relay's pairing table are in-process state:
-       more than one pod splits rooms / sync sessions between replicas. */ -}}
-{{- if or (gt (int (default 1 $cfg.replicas)) 1) (and $cfg.hpa $cfg.hpa.enabled) }}
-{{- fail (printf "bnbloc-%s is a singleton (in-process hub/pairing state): replicas must be 1 and hpa disabled" $name) }}
-{{- end }}
+{{- $owner := eq $svc.shard "owner" }}
+{{- /* Scale-out mode: more than one replica, now or through the HPA. */ -}}
+{{- $scaled := or (gt (int (default 1 $cfg.replicas)) 1) (and $cfg.hpa $cfg.hpa.enabled) }}
+{{- if and (eq $name "realtime") $scaled (not $cfg.attachments.s3.bucket) }}
+{{- fail "bnbloc-realtime with more than one replica (or an HPA) needs realtime.attachments.s3.bucket: the disk blob store is one pod's volume, and realtime refuses it when peers are configured" }}
 {{- end }}
 ---
 apiVersion: apps/v1
-kind: Deployment
+kind: {{ ternary "StatefulSet" "Deployment" $owner }}
 metadata:
   name: bnbloc-{{ $name }}
   labels: { app.kubernetes.io/name: bnbloc-{{ $name }} }
 spec:
-  replicas: {{ ternary 1 (default 1 $cfg.replicas) $svc.singleton }}
-  {{- if $svc.singleton }}
-  # Never run two pods at once, even during a rollout.
-  strategy: { type: Recreate }
+  replicas: {{ default 1 $cfg.replicas }}
+  {{- if $owner }}
+  # The headless Service publishes the ready pods' IPs: the peer set.
+  serviceName: bnbloc-{{ $name }}-peers
+  # Ownership is by pod IP, not ordinal: start and replace pods in parallel.
+  podManagementPolicy: Parallel
   {{- end }}
   selector:
     matchLabels: { app.kubernetes.io/name: bnbloc-{{ $name }} }
@@ -67,6 +79,22 @@ spec:
             {{- range $peer := $svc.peers }}
             - name: BNBLOC_{{ upper $peer }}_BASE_URL
               value: "http://bnbloc-{{ $peer }}:{{ get $ports $peer }}"
+            {{- end }}
+            {{- if and $owner $scaled }}
+            # Scale-out by key ownership (internal/shard): the headless name
+            # (re-resolved every 5s to the ready pods) and this pod's own IP.
+            - name: POD_IP
+              valueFrom:
+                fieldRef: { fieldPath: status.podIP }
+            - name: BNBLOC_{{ upper $name }}_PEERS
+              value: "bnbloc-{{ $name }}-peers:{{ $port }}"
+            - name: BNBLOC_{{ upper $name }}_SELF
+              value: "$(POD_IP)"
+            {{- end }}
+            {{- if eq $svc.shard "count" }}
+            # Live replica count for the per-replica share of every rate limit.
+            - name: BNBLOC_{{ upper $name }}_PEERS
+              value: "bnbloc-{{ $name }}-peers:{{ $port }}"
             {{- end }}
             {{- if $svc.db }}
             - name: BNBLOC_MYSQL_DSN
@@ -204,7 +232,26 @@ spec:
       port: {{ $cfg.metricsPort }}
       targetPort: {{ $cfg.metricsPort }}
     {{- end }}
-{{- if and (not $svc.singleton) $cfg.hpa $cfg.hpa.enabled }}
+{{- if $svc.shard }}
+---
+# Headless peer Service: its DNS name resolves to every READY pod, which is
+# the replica set the service shards over (or counts). Not-ready pods are
+# deliberately unpublished: a replica that cannot reach its dependencies owns
+# no keys.
+apiVersion: v1
+kind: Service
+metadata:
+  name: bnbloc-{{ $name }}-peers
+spec:
+  clusterIP: None
+  publishNotReadyAddresses: false
+  selector: { app.kubernetes.io/name: bnbloc-{{ $name }} }
+  ports:
+    - name: http
+      port: {{ $port }}
+      targetPort: {{ $port }}
+{{- end }}
+{{- if and $cfg.hpa $cfg.hpa.enabled }}
 ---
 apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
@@ -213,7 +260,7 @@ metadata:
 spec:
   scaleTargetRef:
     apiVersion: apps/v1
-    kind: Deployment
+    kind: {{ ternary "StatefulSet" "Deployment" $owner }}
     name: bnbloc-{{ $name }}
   minReplicas: {{ $cfg.hpa.minReplicas }}
   maxReplicas: {{ $cfg.hpa.maxReplicas }}
@@ -228,8 +275,10 @@ spec:
 {{- end }}
 {{- if not .Values.realtime.attachments.s3.bucket }}
 ---
-# Realtime's disk blob store (attachments + sidecar artifacts). ReadWriteOnce
-# is sufficient because realtime is a singleton with a Recreate rollout.
+# Realtime's disk blob store (attachments + sidecar artifacts), only for a
+# single realtime replica (more require S3; the chart fails otherwise).
+# ReadWriteOnce is sufficient: the StatefulSet replaces its one pod in place
+# (old pod gone before the new one starts).
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
