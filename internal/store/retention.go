@@ -92,6 +92,9 @@ const (
 	PurgedExtensionAudit   = "extension_audit"
 	PurgedAgentJobs        = "agent_jobs"
 	PurgedBlobs            = "blobs"
+	// PurgedSearchDocuments counts documents removed from an external
+	// message search index (internal/search) after the message purge.
+	PurgedSearchDocuments = "search_documents"
 )
 
 // RetentionFenceKind is the kind of a room message retention redacted

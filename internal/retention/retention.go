@@ -60,10 +60,18 @@ func RegisterMetrics(m *obs.Metrics) {
 	if m == nil {
 		return
 	}
-	m.Describe(MetricDeleted, "Rows and blobs data retention deleted, by item (room_messages, attachments, artifact_versions, shared_agent_audit, extension_audit, agent_jobs, blobs, ...).")
+	m.Describe(MetricDeleted, "Rows, blobs and search documents data retention deleted, by item (room_messages, attachments, artifact_versions, shared_agent_audit, extension_audit, agent_jobs, blobs, search_documents, ...).")
 	m.Describe(MetricRuns, "Retention passes by outcome (ok, error, skipped: another replica held the lock).")
 	m.Describe(MetricBlobBytes, "Bytes of blobs the blob collection deleted.")
 	m.Describe(MetricLastRun, "Unix time of the last finished retention pass on this replica.")
+}
+
+// SearchIndex is the message search index retention keeps in step with
+// the rows (search.Index satisfies it).
+type SearchIndex interface {
+	// PurgeBefore removes the documents of tenantID's messages created
+	// before beforeMs, returning how many it removed.
+	PurgeBefore(ctx context.Context, tenantID string, beforeMs int64) (int64, error)
 }
 
 // Worker deletes expired rows and unreferenced blobs.
@@ -75,7 +83,11 @@ type Worker struct {
 	// (kind retention, action purge), so the deletion itself is on record.
 	Audit store.ExtensionAuditStore
 	// Blobs is the blob store to collect; nil skips the collection.
-	Blobs   blobstore.BlobStore
+	Blobs blobstore.BlobStore
+	// Search removes expired messages from the message search index after
+	// each tenant's message purge (nil = nothing to remove; the store's
+	// FULLTEXT index follows the rows on its own).
+	Search  SearchIndex
 	Metrics *obs.Metrics
 	// Zero values take the defaults above; Now defaults to time.Now.
 	Now            func() time.Time
@@ -227,6 +239,9 @@ func (w *Worker) purgeAll(ctx context.Context, now time.Time, out store.PurgeRes
 			}
 			before := now.Add(-time.Duration(*days) * 24 * time.Hour).UnixMilli()
 			res, err := w.Store.Purge(ctx, store.PurgeRequest{Kind: kind, TenantID: sc.tenant, BeforeMs: before, Batch: w.Batch, NowMs: now.UnixMilli()})
+			if kind == wire.RetentionMessages {
+				err = errors.Join(err, w.purgeSearch(ctx, sc.tenant, before, res))
+			}
 			out.Add(res)
 			if err != nil {
 				slog.Error("bnbloc retention: purge failed", "event", "bnbloc.retention.error", "what", "purge",
@@ -241,6 +256,25 @@ func (w *Worker) purgeAll(ctx context.Context, now time.Time, out store.PurgeRes
 		}
 	}
 	return firstErr
+}
+
+// purgeSearch removes the tenant's expired messages from the search index,
+// counting them in res. It follows the policy cutoff, not the rows the
+// purge reached: every message created before it is deleted or fenced (a
+// fence has no text and no document), and if the purge stopped early the
+// rest goes on the next pass anyway — the index never keeps an expired
+// message after a pass, even when the row purge failed half-way. A failure
+// is retried by the next pass (the delete is idempotent).
+func (w *Worker) purgeSearch(ctx context.Context, tenantID string, before int64, res store.PurgeResult) error {
+	if w.Search == nil {
+		return nil
+	}
+	n, err := w.Search.PurgeBefore(ctx, tenantID, before)
+	res[store.PurgedSearchDocuments] += n
+	if err != nil {
+		return fmt.Errorf("search index: %w", err)
+	}
+	return nil
 }
 
 // auditPurge records what a purge deleted in the tenant's audit log.

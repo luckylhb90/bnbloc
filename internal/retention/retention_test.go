@@ -3,6 +3,7 @@ package retention
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
@@ -337,5 +338,53 @@ func TestWorkerMySQL(t *testing.T) {
 	}
 	if r.exists(oldBlob) {
 		t.Fatal("the blob of the expired attachment survived the collection")
+	}
+}
+
+// fakeSearch records PurgeBefore calls.
+type fakeSearch struct {
+	calls []string
+	err   error
+}
+
+func (f *fakeSearch) PurgeBefore(_ context.Context, tenantID string, beforeMs int64) (int64, error) {
+	f.calls = append(f.calls, tenantID+"@"+strconv.FormatInt(beforeMs, 10))
+	return 3, f.err
+}
+
+// After each tenant's message purge the search index drops every document
+// older than the same cutoff (only tenants whose policy limits messages); a
+// failing index fails the pass but never undoes or blocks the row purge.
+func TestWorkerPurgesSearchIndex(t *testing.T) {
+	r := newRig(t)
+	ctx := context.Background()
+	if _, err := r.b.Tenant.SetTenantRetention(ctx, "acme", wire.RetentionPolicy{MessagesDays: days(31), AuditDays: days(40)}); err != nil {
+		t.Fatal(err)
+	}
+	r.msg(t, "acme", "acme-room", 1, 60*day)
+	r.msg(t, "acme", "acme-room", 2, time.Hour)
+	idx := &fakeSearch{}
+	r.w.Search = idx
+	rep, err := r.w.RunOnce(ctx)
+	if err != nil || !rep.Ran {
+		t.Fatalf("RunOnce = %+v, %v", rep, err)
+	}
+	want := "acme@" + strconv.FormatInt(r.now.Add(-31*day).UnixMilli(), 10)
+	if len(idx.calls) != 1 || idx.calls[0] != want {
+		t.Fatalf("search purges = %v, want [%s] (globex keeps messages forever)", idx.calls, want)
+	}
+	if rep.Deleted[store.PurgedSearchDocuments] != 3 || rep.Deleted[store.PurgedRoomMessages] != 1 {
+		t.Fatalf("report = %v", rep.Deleted)
+	}
+
+	idx.err = errors.New("cluster down")
+	r.msg(t, "acme", "acme-room", 3, 50*day)
+	r.msg(t, "acme", "acme-room", 4, time.Minute)
+	rep, err = r.w.RunOnce(ctx)
+	if err == nil || !strings.Contains(err.Error(), "search index") {
+		t.Fatalf("RunOnce with a failing index err = %v", err)
+	}
+	if got := r.history(t, "acme", "acme-room"); len(got) != 2 || got[0] != 2 || got[1] != 4 {
+		t.Fatalf("rows after a failed index purge = %v, want the purge done anyway", got)
 	}
 }
