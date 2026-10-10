@@ -31,3 +31,6 @@ compose.override.yml
 # in docs/assets/ (scripts/demo-video.swift).
 docs/demo/*.mp4
 docs/demo/*.mov
+
+# Local agent instructions (may import a private overlay)
+CLAUDE.local.md

@@ -38,7 +38,7 @@ ps:
 build:
 	$(COMPOSE) build
 
-# Everything CI runs (go vet/test, web, desktop, boundary): scripts/ci.sh
+# Everything CI runs (go vet/test, web, desktop, secrets): scripts/ci.sh
 test:
 	scripts/ci.sh go
 

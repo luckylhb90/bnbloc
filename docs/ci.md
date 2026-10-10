@@ -1,6 +1,6 @@
 # CI
 
-`scripts/ci.sh [go|web|desktop|boundary|all]` is the single list of checks.
+`scripts/ci.sh [go|web|desktop|secrets|all]` is the single list of checks.
 `.github/workflows/ci.yml` only runs one stage per job; any other runner, or a
 developer before pushing, runs the same script. Add checks to the script, never
 to the workflow file.
@@ -10,7 +10,7 @@ to the workflow file.
 | `go` | `scripts/ci.sh go` | Linux **with Docker** (the `mysql` service container) | Go (`go.mod`) |
 | `web` | `scripts/ci.sh web` | Linux | Node 24, pnpm 10 |
 | `desktop` | `scripts/ci.sh desktop` | macOS | Go, Node 24, pnpm 10, Rust stable |
-| `boundary` | `scripts/ci.sh boundary` | macOS | Go, Node 24, pnpm 10, Rust stable |
+| `secrets` | `scripts/ci.sh secrets` | Linux | gitleaks 8 (full history, `fetch-depth: 0`) |
 
 Triggers: every push, pull requests, a nightly scheduled run of the default
 branch (catches drift in toolchains and images without a push), and manual
@@ -18,7 +18,7 @@ branch (catches drift in toolchains and images without a push), and manual
 
 ## Running on GitHub Enterprise Server
 
-The same workflow file runs on github.com and on the internal GitHub Enterprise
+The same workflow file runs on github.com and on a GitHub Enterprise
 Server host. Nothing in it is host-specific; the host-dependent parts are read
 from Actions **variables** (Settings → Secrets and variables → Actions →
 Variables, at repository or organization level). Unset variables keep the
@@ -47,7 +47,7 @@ their labels:
   job reaches MySQL on `127.0.0.1:3306`, so a runner that itself runs in a
   container needs the published port reachable (or Docker-in-Docker with host
   networking).
-- **macOS runner for `desktop` / `boundary`** builds the Tauri shell natively;
+- **macOS runner for `desktop`** builds the Tauri shell natively;
   Xcode command-line tools are required (no other system packages).
 - Each runner needs outbound HTTPS to the module/package registries the stages
   use (Go module proxy, npm registry, crates.io), or configured internal

@@ -171,8 +171,8 @@ S3 兼容存储或本地磁盘 · 每个服务都提供 Prometheus 指标。
 
 ```sh
 scripts/ci.sh            # CI 的全部检查：Go vet/test、网页构建和测试、
-                         # 桌面端测试、公开边界扫描
-scripts/ci.sh go         # 只跑一个阶段：go | web | desktop | boundary
+                         # 桌面端测试、密钥扫描
+scripts/ci.sh go         # 只跑一个阶段：go | web | desktop | secrets
 ```
 
 设置 `BNBLOC_TEST_MYSQL_DSN` 指向一个 MySQL 8，就会运行 MySQL 集成测试。

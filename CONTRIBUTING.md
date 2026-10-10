@@ -17,7 +17,7 @@ welcome.
 ```sh
 make up                 # full stack with Docker on http://localhost:7090
 scripts/ci.sh           # every check CI runs
-scripts/ci.sh go        # or one stage: go | web | desktop | boundary
+scripts/ci.sh go        # or one stage: go | web | desktop | secrets
 ```
 
 - **Go:** `go build ./... && go vet ./... && go test ./...`. Set

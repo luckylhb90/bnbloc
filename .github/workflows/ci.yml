@@ -84,18 +84,17 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - run: scripts/ci.sh desktop
 
-  # Public-boundary scan + the manifest's public builds (Go, web, sidecar,
-  # Tauri). The private manifest exists only in the private source tree; a
-  # public checkout has nothing to scan and the stage exits cleanly.
-  boundary:
-    runs-on: ${{ fromJSON(vars.BNBLOC_CI_MACOS_RUNS_ON || '"macos-14"') }}
+  # Secret scan of the full history (fetch-depth 0), so a credential that was
+  # committed and later removed still fails the build.
+  secrets:
+    runs-on: ${{ fromJSON(vars.BNBLOC_CI_LINUX_RUNS_ON || '"ubuntu-24.04"') }}
+    env:
+      GITLEAKS_VERSION: 8.30.1
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
-        with: { go-version-file: go.mod }
-      - uses: pnpm/action-setup@v4
-        with: { version: 10 }
-      - uses: actions/setup-node@v4
-        with: { node-version: 24 }
-      - uses: dtolnay/rust-toolchain@stable
-      - run: scripts/ci.sh boundary
+        with: { fetch-depth: 0 }
+      - name: Install gitleaks
+        run: |
+          curl -sSfL "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" \
+            | sudo tar -xz -C /usr/local/bin gitleaks
+      - run: scripts/ci.sh secrets

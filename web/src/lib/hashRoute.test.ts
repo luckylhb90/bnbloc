@@ -70,7 +70,7 @@ test("artifact links are absolute room-member URLs", () => {
 });
 
 test("share links and the public share route", () => {
-  const token = "bsh_s1a2b3_Zm9vYmFyLWJhel9xdXV4";
+  const token = "bsh_s1a2b3_Zm9vYmFyLWJhel9xdXV4"; // gitleaks:allow (made-up test token)
   eq(shareLinkUrl("https://gw.example.com", token), `https://gw.example.com/#/share/${token}`, "gateway base");
   eq(shareLinkUrl("https://gw.example.com/app/#/room/r1", token), `https://gw.example.com/app/#/share/${token}`, "page base");
   eq(shareTokenFromHash(`#/share/${token}`), token, "parses");

@@ -179,8 +179,8 @@ S3-compatible or disk blob storage · Prometheus metrics on every service.
 
 ```sh
 scripts/ci.sh            # everything CI runs: Go vet/test, web build + tests,
-                         # desktop tests, public-boundary scan
-scripts/ci.sh go         # one stage: go | web | desktop | boundary
+                         # desktop tests, secret scan
+scripts/ci.sh go         # one stage: go | web | desktop | secrets
 ```
 
 MySQL integration tests run when `BNBLOC_TEST_MYSQL_DSN` points at a MySQL 8.

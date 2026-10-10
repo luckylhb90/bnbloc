@@ -9,14 +9,11 @@
 #                           BNBLOC_TEST_MYSQL_DSN is set, skip otherwise)
 #   scripts/ci.sh web       pnpm install --frozen-lockfile, build, node tests
 #   scripts/ci.sh desktop   web build + bridge sidecar + cargo test --locked
-#   scripts/ci.sh boundary  public-boundary scan of the tracked tree, including
-#                           the manifest's public builds (needs go, node, pnpm,
-#                           cargo). Skipped when the private manifest is absent
-#                           (a public checkout has nothing private to scan).
+#   scripts/ci.sh secrets   gitleaks over the git history (needs gitleaks)
 #   scripts/ci.sh all       every stage above, in order
 #
 # Toolchain: Go (go.mod), Node 24 (node --test strips TypeScript natively),
-# pnpm 10, Rust stable. The desktop and boundary stages need a host the Tauri
+# pnpm 10, Rust stable, gitleaks 8. The desktop stage needs a host the Tauri
 # app builds on (macOS, or Linux with the webkit2gtk-4.1 development packages).
 set -euo pipefail
 
@@ -72,28 +69,25 @@ stage_desktop() {
   cargo test --locked --manifest-path apps/desktop/src-tauri/Cargo.toml
 }
 
-stage_boundary() {
-  if [ ! -f .components/private-manifest.json ]; then
-    log "boundary: no private manifest in this checkout; nothing to scan"
-    return 0
-  fi
-  log "boundary: scan tracked files + public builds"
-  go run ./scripts/check-public-boundary
+# A made-up token in a test carries an inline `gitleaks:allow` comment.
+stage_secrets() {
+  log "secrets: gitleaks over the git history"
+  gitleaks git --redact --no-banner .
 }
 
 case "${1:-all}" in
   go) stage_go ;;
   web) stage_web ;;
   desktop) stage_desktop ;;
-  boundary) stage_boundary ;;
+  secrets) stage_secrets ;;
   all)
     stage_go
     stage_web
     stage_desktop
-    stage_boundary
+    stage_secrets
     ;;
   *)
-    echo "usage: scripts/ci.sh [go|web|desktop|boundary|all]" >&2
+    echo "usage: scripts/ci.sh [go|web|desktop|secrets|all]" >&2
     exit 2
     ;;
 esac
