@@ -19,6 +19,10 @@ const (
 	// level) or a platform agent added to / removed from a room (the room's
 	// tenant).
 	AuditKindPlatformAgent = "platform-agent"
+	// AuditKindRetention: a data retention policy saved (platform default or
+	// a tenant override) or a retention pass deleting a tenant's expired
+	// data (docs/prd/2026-10-10-enterprise-scale.md §3).
+	AuditKindRetention = "retention"
 )
 
 // AuditLogEntry is one normalized audit record. ID is unique across sources

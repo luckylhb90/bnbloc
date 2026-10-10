@@ -955,6 +955,33 @@ WHERE r.channel_id = '' AND d.user_id IS NULL`)
 			return createSchemaTable(ctx, db, "user_profiles")
 		},
 	},
+	{
+		// Data retention (docs/prd/2026-10-10-enterprise-scale.md §3): the
+		// tenant override columns (null = the platform default) and the
+		// indexes the retention worker deletes by age and the blob
+		// collection checks references with.
+		id: "2026_10_data_retention",
+		run: func(ctx context.Context, db sqlConn) error {
+			for _, col := range []string{"retention_messages_days", "retention_artifact_versions_days", "retention_audit_days", "retention_agent_jobs_days"} {
+				if err := addColumnIfMissing(ctx, db, "tenants", col, "INT NULL"); err != nil {
+					return err
+				}
+			}
+			for _, ix := range []struct{ table, name, ddl string }{
+				{"room_messages", "idx_room_messages_retention", "ADD KEY idx_room_messages_retention (tenant_id, kind, created_at_ms)"},
+				{"attachments", "idx_attachments_created", "ADD KEY idx_attachments_created (tenant_id, created_at_ms)"},
+				{"attachments", "idx_attachments_blob", "ADD KEY idx_attachments_blob (blob_key)"},
+				{"artifact_versions", "idx_artifact_versions_created", "ADD KEY idx_artifact_versions_created (tenant_id, created_at_ms)"},
+				{"artifact_versions", "idx_artifact_versions_blob", "ADD KEY idx_artifact_versions_blob (blob_key)"},
+				{"artifact_versions", "idx_artifact_versions_thumb", "ADD KEY idx_artifact_versions_thumb (thumb_blob_key)"},
+			} {
+				if err := addIndexIfMissing(ctx, db, ix.table, ix.name, ix.ddl); err != nil {
+					return err
+				}
+			}
+			return nil
+		},
+	},
 }
 
 // sqlConn is the statement surface a migration runs on. runMigrations passes

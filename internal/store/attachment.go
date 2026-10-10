@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"sort"
 	"sync"
 
 	"github.com/luckylhb90/bnbloc/internal/tenant"
@@ -25,12 +24,13 @@ type Attachment struct {
 	CreatedAtMs int64
 }
 
-// AttachmentStore persists attachment metadata. Implementations must be safe
-// for concurrent use.
+// AttachmentStore persists attachment metadata. Rows are removed only by data
+// retention (RetentionStore) and their blobs only by the blob collection,
+// which deletes a content-addressed blob once no row references it (a blob
+// may back several rows). Implementations must be safe for concurrent use.
 type AttachmentStore interface {
 	PutAttachment(ctx context.Context, a Attachment) error
 	GetAttachment(ctx context.Context, roomID, id string) (Attachment, bool, error)
-	DeleteRoomAttachments(ctx context.Context, roomID string) ([]string, error)
 }
 
 // MemoryAttachments is an in-memory AttachmentStore for dev/tests.
@@ -69,25 +69,6 @@ func (s *MemoryAttachments) GetAttachment(ctx context.Context, roomID, id string
 	defer s.mu.Unlock()
 	a, ok := s.m[memAttachmentKey(tid, roomID, id)]
 	return a, ok, nil
-}
-
-func (s *MemoryAttachments) DeleteRoomAttachments(ctx context.Context, roomID string) ([]string, error) {
-	tid, err := tenant.Require(ctx)
-	if err != nil {
-		return nil, err
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	prefix := tid + "\x00" + roomID + "\x00"
-	var keys []string
-	for k, a := range s.m {
-		if len(k) >= len(prefix) && k[:len(prefix)] == prefix {
-			keys = append(keys, a.BlobKey)
-			delete(s.m, k)
-		}
-	}
-	sort.Strings(keys)
-	return keys, nil
 }
 
 // MySQLAttachments implements AttachmentStore over database/sql.
@@ -131,33 +112,4 @@ func (s *MySQLAttachments) GetAttachment(ctx context.Context, roomID, id string)
 		return Attachment{}, false, err
 	}
 	return a, true, nil
-}
-
-// DeleteRoomAttachments removes every attachment row for a room and returns the
-// blob keys the caller must purge from the blob store.
-func (s *MySQLAttachments) DeleteRoomAttachments(ctx context.Context, roomID string) ([]string, error) {
-	tid, err := tenant.Require(ctx)
-	if err != nil {
-		return nil, err
-	}
-	rows, err := s.DB.QueryContext(ctx, `SELECT blob_key FROM attachments WHERE tenant_id = ? AND room_id = ?`, tid, roomID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var keys []string
-	for rows.Next() {
-		var k string
-		if err := rows.Scan(&k); err != nil {
-			return nil, err
-		}
-		keys = append(keys, k)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	if _, err := s.DB.ExecContext(ctx, `DELETE FROM attachments WHERE tenant_id = ? AND room_id = ?`, tid, roomID); err != nil {
-		return nil, err
-	}
-	return keys, nil
 }

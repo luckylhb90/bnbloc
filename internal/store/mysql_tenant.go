@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+
+	"github.com/luckylhb90/bnbloc/internal/wire"
 )
 
 // MySQLTenant is the MySQL-backed TenantStore. Like MemoryTenant it operates
@@ -17,7 +19,30 @@ type MySQLTenant struct {
 func NewMySQLTenant(db *sql.DB) *MySQLTenant { return &MySQLTenant{DB: db} }
 
 // tenantCols is the column list a Tenant scans from, in Scan order.
-const tenantCols = `tenant_id, name, status, sso_issuer, run_quota, cost_allowance, require_sandbox_for_borrow, public_shares_disabled, created_at_ms`
+const tenantCols = `tenant_id, name, status, sso_issuer, run_quota, cost_allowance, require_sandbox_for_borrow, public_shares_disabled, created_at_ms,
+  retention_messages_days, retention_artifact_versions_days, retention_audit_days, retention_agent_jobs_days`
+
+// tenantScanner is a *sql.Row or *sql.Rows.
+type tenantScanner interface{ Scan(dest ...any) error }
+
+// scanTenant reads one row of tenantCols.
+func scanTenant(sc tenantScanner) (Tenant, error) {
+	var t Tenant
+	var status string
+	var ret [4]sql.NullInt64
+	if err := sc.Scan(&t.TenantID, &t.Name, &status, &t.SSOIssuer, &t.RunQuota, &t.CostAllowance, &t.RequireSandboxForBorrow, &t.PublicSharesDisabled, &t.CreatedAtMs,
+		&ret[0], &ret[1], &ret[2], &ret[3]); err != nil {
+		return Tenant{}, err
+	}
+	t.Status = TenantStatus(status)
+	for i, k := range wire.RetentionKinds {
+		if ret[i].Valid {
+			v := int(ret[i].Int64)
+			t.Retention = t.Retention.With(k, &v)
+		}
+	}
+	return t, nil
+}
 
 func (m *MySQLTenant) PutTenant(ctx context.Context, t Tenant) error {
 	if t.Status == "" {
@@ -31,18 +56,14 @@ ON DUPLICATE KEY UPDATE name = VALUES(name), status = VALUES(status), sso_issuer
 	return err
 }
 func (m *MySQLTenant) GetTenant(ctx context.Context, tenantID string) (Tenant, error) {
-	var t Tenant
-	var status string
-	err := m.DB.QueryRowContext(ctx, `
-SELECT `+tenantCols+` FROM tenants WHERE tenant_id = ?`, tenantID).
-		Scan(&t.TenantID, &t.Name, &status, &t.SSOIssuer, &t.RunQuota, &t.CostAllowance, &t.RequireSandboxForBorrow, &t.PublicSharesDisabled, &t.CreatedAtMs)
+	t, err := scanTenant(m.DB.QueryRowContext(ctx, `
+SELECT `+tenantCols+` FROM tenants WHERE tenant_id = ?`, tenantID))
 	if errors.Is(err, sql.ErrNoRows) {
 		return Tenant{}, ErrTenantNotFound
 	}
 	if err != nil {
 		return Tenant{}, err
 	}
-	t.Status = TenantStatus(status)
 	return t, nil
 }
 
@@ -56,12 +77,10 @@ SELECT `+tenantCols+` FROM tenants ORDER BY created_at_ms ASC`)
 	defer rows.Close()
 	var out []Tenant
 	for rows.Next() {
-		var t Tenant
-		var status string
-		if err := rows.Scan(&t.TenantID, &t.Name, &status, &t.SSOIssuer, &t.RunQuota, &t.CostAllowance, &t.RequireSandboxForBorrow, &t.PublicSharesDisabled, &t.CreatedAtMs); err != nil {
+		t, err := scanTenant(rows)
+		if err != nil {
 			return out
 		}
-		t.Status = TenantStatus(status)
 		out = append(out, t)
 	}
 	return out
@@ -130,6 +149,29 @@ WHERE tenant_id = ?`, nullableBool(u.RequireSandboxForBorrow), nullableBool(u.Pu
 	// RowsAffected is 0 for an unchanged value too: the read tells a missing
 	// tenant (ErrTenantNotFound) apart from a no-op update.
 	return m.GetTenant(ctx, tenantID)
+}
+
+// SetTenantRetention replaces the four retention override columns in one
+// statement (a null kind uses the platform default).
+func (m *MySQLTenant) SetTenantRetention(ctx context.Context, tenantID string, p wire.RetentionPolicy) (Tenant, error) {
+	if _, err := m.DB.ExecContext(ctx, `
+UPDATE tenants SET
+  retention_messages_days = ?,
+  retention_artifact_versions_days = ?,
+  retention_audit_days = ?,
+  retention_agent_jobs_days = ?
+WHERE tenant_id = ?`, nullableInt(p.MessagesDays), nullableInt(p.ArtifactVersionsDays), nullableInt(p.AuditDays), nullableInt(p.AgentJobsDays), tenantID); err != nil {
+		return Tenant{}, err
+	}
+	return m.GetTenant(ctx, tenantID)
+}
+
+// nullableInt maps an unset value to SQL NULL.
+func nullableInt(v *int) any {
+	if v == nil {
+		return nil
+	}
+	return *v
 }
 
 // nullableBool maps an unset switch to SQL NULL.

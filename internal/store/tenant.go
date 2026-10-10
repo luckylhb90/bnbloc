@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"sync"
+
+	"github.com/luckylhb90/bnbloc/internal/wire"
 )
 
 // Tenant domain errors.
@@ -66,6 +68,10 @@ type Tenant struct {
 	// share links off: creating one is refused and every existing link
 	// resolves 404 while it is on (default off).
 	PublicSharesDisabled bool
+	// Retention is the org-admin data retention override (null = the
+	// platform default, 0 = keep forever, N = delete after N days); see
+	// wire.RetentionPolicy. Set only through SetTenantRetention.
+	Retention wire.RetentionPolicy
 }
 
 // TenantPolicyUpdate changes the org-admin policy switches; a nil field is
@@ -169,6 +175,10 @@ type TenantStore interface {
 	// (agent sandbox for borrowed drives, public share links) and returns
 	// the tenant as stored; ErrTenantNotFound when it does not exist.
 	SetTenantPolicy(ctx context.Context, tenantID string, u TenantPolicyUpdate) (Tenant, error)
+	// SetTenantRetention replaces the tenant's whole data retention override
+	// (a null kind uses the platform default) and returns the tenant as
+	// stored; ErrTenantNotFound when it does not exist. The caller validates.
+	SetTenantRetention(ctx context.Context, tenantID string, p wire.RetentionPolicy) (Tenant, error)
 	// PutJoinRequest creates or replaces a user's join request for a tenant.
 	PutJoinRequest(ctx context.Context, jr JoinRequest) error
 	// GetJoinRequest returns a user's join request for a tenant, found=false when none.
@@ -335,6 +345,30 @@ func (s *MemoryTenant) SetTenantPolicy(_ context.Context, tenantID string, u Ten
 	t = u.apply(t)
 	s.tenants[tenantID] = t
 	return t, nil
+}
+
+func (s *MemoryTenant) SetTenantRetention(_ context.Context, tenantID string, p wire.RetentionPolicy) (Tenant, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	t, ok := s.tenants[tenantID]
+	if !ok {
+		return Tenant{}, ErrTenantNotFound
+	}
+	t.Retention = copyRetention(p)
+	s.tenants[tenantID] = t
+	return t, nil
+}
+
+// copyRetention detaches a policy from the caller's pointers.
+func copyRetention(p wire.RetentionPolicy) wire.RetentionPolicy {
+	out := wire.RetentionPolicy{}
+	for _, k := range wire.RetentionKinds {
+		if d := p.Days(k); d != nil {
+			v := *d
+			out = out.With(k, &v)
+		}
+	}
+	return out
 }
 
 func (s *MemoryTenant) PutJoinRequest(_ context.Context, jr JoinRequest) error {

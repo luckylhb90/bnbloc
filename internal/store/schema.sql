@@ -18,6 +18,10 @@ CREATE TABLE IF NOT EXISTS tenants (
   require_sandbox_for_borrow TINYINT(1) NOT NULL DEFAULT 0,
   public_shares_disabled TINYINT(1) NOT NULL DEFAULT 0,
   created_at_ms BIGINT NOT NULL,
+  retention_messages_days INT NULL,
+  retention_artifact_versions_days INT NULL,
+  retention_audit_days INT NULL,
+  retention_agent_jobs_days INT NULL,
   KEY idx_tenant_issuer (sso_issuer)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
@@ -338,6 +342,7 @@ CREATE TABLE IF NOT EXISTS room_messages (
   PRIMARY KEY (room_id, seq),
   UNIQUE KEY uq_room_client_msg (room_id, client_msg_id),
   KEY idx_room_channel_seq (room_id, channel_id, seq),
+  KEY idx_room_messages_retention (tenant_id, kind, created_at_ms),
   FULLTEXT KEY ft_room_messages_search (search_text) WITH PARSER ngram
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 SET SESSION innodb_ft_enable_stopword = DEFAULT;
@@ -390,7 +395,9 @@ CREATE TABLE IF NOT EXISTS attachments (
   sha256        VARCHAR(64) NOT NULL,
   blob_key      VARCHAR(128) NOT NULL,
   created_at_ms BIGINT NOT NULL,
-  KEY idx_attachments_room (tenant_id, room_id)
+  KEY idx_attachments_room (tenant_id, room_id),
+  KEY idx_attachments_created (tenant_id, created_at_ms),
+  KEY idx_attachments_blob (blob_key)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS room_read_state (
@@ -443,7 +450,10 @@ CREATE TABLE IF NOT EXISTS artifact_versions (
   thumb_rank      INT NOT NULL DEFAULT 0,
   PRIMARY KEY (tenant_id, artifact_id, version),
   KEY idx_artifact_versions_recent (tenant_id, artifact_id, version),
-  KEY idx_artifact_versions_source (tenant_id, source_seq)
+  KEY idx_artifact_versions_source (tenant_id, source_seq),
+  KEY idx_artifact_versions_created (tenant_id, created_at_ms),
+  KEY idx_artifact_versions_blob (blob_key),
+  KEY idx_artifact_versions_thumb (thumb_blob_key)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- Public share links of one artifact (docs/prd/2026-10-09-artifact-shares-
