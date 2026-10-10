@@ -1,0 +1,235 @@
+package pkgmeta
+
+import (
+	"fmt"
+	"regexp"
+	"strings"
+	"unicode/utf8"
+)
+
+// KindPreviewerPackageV1 is the package-envelope kind for a previewer: a
+// static web bundle the web client runs in a sandboxed opaque-origin iframe
+// to render artifact files of the MIME types / extensions it declares
+// (docs/architecture/previewer-components.md). Nothing is launched: the
+// bundle is served from its sha256-pinned artifact (gateway route in the
+// browser, the desktop's own scheme in the shell) and never gets network
+// access.
+const KindPreviewerPackageV1 = "bnbloc.previewer.package/v1"
+
+// PreviewerContractV1 pins the host <-> frame wire contract (the frame
+// protocol in web/previewer-sdk/src/protocol.ts).
+const PreviewerContractV1 = "bnbloc.previewer.contract/v1"
+
+// RuntimeBundle is a static bundle: no process, no endpoint.
+const RuntimeBundle Runtime = "bundle"
+
+// PreviewerBundleArtifact is the one artifact key of a previewer package.
+const PreviewerBundleArtifact = "bundle"
+
+// Previewer is a previewer package's payload (Package.Previewer).
+type Previewer struct {
+	// Entry is the bundle-relative HTML document the frame loads.
+	Entry string         `json:"entry"`
+	Match PreviewerMatch `json:"match"`
+	// Rank orders previewers matching a file with equal specificity, like
+	// the web registry's built-ins (lower first).
+	Rank         int                    `json:"rank"`
+	Capabilities []string               `json:"capabilities,omitempty"`
+	Toolbar      []PreviewerToolbarItem `json:"toolbar,omitempty"`
+}
+
+// PreviewerMatch declares the files a previewer renders.
+type PreviewerMatch struct {
+	MimeTypes  []string `json:"mimeTypes,omitempty"`
+	Extensions []string `json:"extensions,omitempty"`
+}
+
+// PreviewerToolbarItem is one declared toolbar control; the host renders it
+// with its own icon for Icon (a code-owned name).
+type PreviewerToolbarItem struct {
+	ID    string `json:"id"`
+	Icon  string `json:"icon"`
+	Label string `json:"label"`
+	Kind  string `json:"kind"`
+}
+
+// The code-owned previewer vocabularies. They mirror the frame protocol in
+// web/previewer-sdk/src/protocol.ts (PREVIEWER_CAPABILITIES, TOOLBAR_KINDS,
+// TOOLBAR_ICONS); TestPreviewerVocabulariesMatchFrameProtocol keeps them equal.
+var (
+	PreviewerCapabilities = []string{"thumbnail", "liveState", "toolbar"}
+	PreviewerToolbarKinds = []string{"button", "toggle", "zoom"}
+	PreviewerToolbarIcons = []string{
+		"zoom-in", "zoom-out", "fit", "expand", "grid", "layers", "background", "frames",
+		"play", "pause", "reload", "eye", "ruler", "crop", "palette", "info",
+	}
+)
+
+// Previewer bounds (PRD "Previewer contract details").
+const (
+	maxPreviewerMatches      = 32
+	maxPreviewerToolbar      = 20
+	maxPreviewerLabel        = 40
+	maxPreviewerEntry        = 200
+	minPreviewerRank         = 1
+	maxPreviewerRank         = 1000
+	previewerCapabilityTool  = "toolbar"
+	previewerCapabilityThumb = "thumbnail"
+)
+
+var (
+	// type/subtype or type/* (RFC 6838 restricted-name characters, lower case).
+	previewerMimeRE      = regexp.MustCompile(`^[a-z0-9][a-z0-9!#$&^_.+-]{0,62}/(\*|[a-z0-9][a-z0-9!#$&^_.+-]{0,126})$`)
+	previewerExtensionRE = regexp.MustCompile(`^(\.[a-z0-9][a-z0-9_-]{0,15}){1,3}$`)
+	previewerToolbarIDRE = regexp.MustCompile(`^[a-z][a-z0-9-]{0,31}$`)
+	bundlePathSegmentRE  = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
+)
+
+// ValidBundlePath reports whether p is a safe bundle-relative file path:
+// non-empty "/"-separated segments of [A-Za-z0-9._-], none "." or "..", no
+// leading slash, at most 200 characters. It is the one path rule for package
+// entries, archive members, and served request paths.
+func ValidBundlePath(p string) bool {
+	if p == "" || len(p) > maxPreviewerEntry {
+		return false
+	}
+	for _, seg := range strings.Split(p, "/") {
+		if seg == "." || seg == ".." || !bundlePathSegmentRE.MatchString(seg) {
+			return false
+		}
+	}
+	return true
+}
+
+func validatePreviewerPackage(pkg Package) error {
+	if pkg.Contract != PreviewerContractV1 {
+		return fmt.Errorf("unknown previewer contract %q", pkg.Contract)
+	}
+	if pkg.Runtime != RuntimeBundle {
+		return fmt.Errorf(`previewer runtime must be "bundle"`)
+	}
+	switch {
+	case pkg.Endpoint != nil:
+		return fmt.Errorf("previewer must not declare endpoint")
+	case pkg.Sidecar != nil:
+		return fmt.Errorf("previewer must not declare sidecar")
+	case pkg.Manifest != nil:
+		return fmt.Errorf("previewer must not declare manifest")
+	case len(pkg.Hooks) > 0:
+		return fmt.Errorf("hooks are only valid for %s packages", KindPluginPackageV1)
+	case len(pkg.Capabilities) > 0:
+		return fmt.Errorf("previewer capabilities belong in previewer.capabilities")
+	case pkg.Protocol.Min != "" || pkg.Protocol.Max != "":
+		return fmt.Errorf("previewer must not declare protocol (the contract pins the frame protocol)")
+	case len(pkg.Permissions.Network) > 0:
+		return fmt.Errorf("previewer bundles never get network access; remove permissions.network")
+	}
+	if len(pkg.Artifacts) != 1 {
+		return fmt.Errorf("previewer requires exactly one artifact %q", PreviewerBundleArtifact)
+	}
+	if _, ok := pkg.Artifacts[PreviewerBundleArtifact]; !ok {
+		return fmt.Errorf("previewer requires exactly one artifact %q", PreviewerBundleArtifact)
+	}
+	if pkg.Previewer == nil {
+		return fmt.Errorf("previewer package requires previewer")
+	}
+	return validatePreviewer(*pkg.Previewer)
+}
+
+func validatePreviewer(p Previewer) error {
+	if !ValidBundlePath(p.Entry) || !strings.HasSuffix(p.Entry, ".html") {
+		return fmt.Errorf("previewer.entry must be a relative .html path inside the bundle")
+	}
+	if err := validatePreviewerMatch(p.Match); err != nil {
+		return err
+	}
+	if p.Rank < minPreviewerRank || p.Rank > maxPreviewerRank {
+		return fmt.Errorf("previewer.rank must be %d-%d", minPreviewerRank, maxPreviewerRank)
+	}
+	caps := map[string]bool{}
+	for _, c := range p.Capabilities {
+		if !contains(PreviewerCapabilities, c) {
+			return fmt.Errorf("unknown previewer capability %q", c)
+		}
+		if caps[c] {
+			return fmt.Errorf("duplicate previewer capability %q", c)
+		}
+		caps[c] = true
+	}
+	if len(p.Toolbar) > 0 && !caps[previewerCapabilityTool] {
+		return fmt.Errorf("previewer.toolbar requires the %q capability", previewerCapabilityTool)
+	}
+	return validatePreviewerToolbar(p.Toolbar)
+}
+
+func validatePreviewerMatch(m PreviewerMatch) error {
+	if len(m.MimeTypes)+len(m.Extensions) == 0 {
+		return fmt.Errorf("previewer.match requires at least one MIME type or extension")
+	}
+	if len(m.MimeTypes) > maxPreviewerMatches || len(m.Extensions) > maxPreviewerMatches {
+		return fmt.Errorf("previewer.match lists hold at most %d entries", maxPreviewerMatches)
+	}
+	seen := map[string]bool{}
+	for _, mt := range m.MimeTypes {
+		if !previewerMimeRE.MatchString(mt) {
+			return fmt.Errorf("previewer.match.mimeTypes: %q must be a lower-case type/subtype or type/*", mt)
+		}
+		if seen[mt] {
+			return fmt.Errorf("previewer.match.mimeTypes: duplicate %q", mt)
+		}
+		seen[mt] = true
+	}
+	for _, ext := range m.Extensions {
+		if !previewerExtensionRE.MatchString(ext) {
+			return fmt.Errorf("previewer.match.extensions: %q must be a lower-case .ext (up to three parts)", ext)
+		}
+		if seen[ext] {
+			return fmt.Errorf("previewer.match.extensions: duplicate %q", ext)
+		}
+		seen[ext] = true
+	}
+	return nil
+}
+
+func validatePreviewerToolbar(items []PreviewerToolbarItem) error {
+	if len(items) > maxPreviewerToolbar {
+		return fmt.Errorf("previewer.toolbar holds at most %d items", maxPreviewerToolbar)
+	}
+	ids := map[string]bool{}
+	for i, it := range items {
+		if !previewerToolbarIDRE.MatchString(it.ID) {
+			return fmt.Errorf("previewer.toolbar[%d].id %q must match [a-z][a-z0-9-]{0,31}", i, it.ID)
+		}
+		if ids[it.ID] {
+			return fmt.Errorf("previewer.toolbar: duplicate id %q", it.ID)
+		}
+		ids[it.ID] = true
+		if !contains(PreviewerToolbarIcons, it.Icon) {
+			return fmt.Errorf("previewer.toolbar[%d].icon %q is not a known icon", i, it.Icon)
+		}
+		if !contains(PreviewerToolbarKinds, it.Kind) {
+			return fmt.Errorf("previewer.toolbar[%d].kind %q must be button, toggle, or zoom", i, it.Kind)
+		}
+		if n := utf8.RuneCountInString(it.Label); strings.TrimSpace(it.Label) == "" || n > maxPreviewerLabel {
+			return fmt.Errorf("previewer.toolbar[%d].label must be 1-%d characters", i, maxPreviewerLabel)
+		}
+	}
+	return nil
+}
+
+// PreviewerDeclaresThumbnail reports whether a previewer may provide
+// thumbnails (the host stores them only then).
+func PreviewerDeclaresThumbnail(p Previewer) bool {
+	return contains(p.Capabilities, previewerCapabilityThumb)
+}
+
+func contains(list []string, v string) bool {
+	for _, s := range list {
+		if s == v {
+			return true
+		}
+	}
+	return false
+}
+
+func init() { RegisterKindValidator(KindPreviewerPackageV1, validatePreviewerPackage) }

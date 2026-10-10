@@ -1,0 +1,204 @@
+<!doctype html>
+<!--
+  Source of the DMG window background (bundle.macOS.dmg.background in
+  tauri.conf.json). Render it with:
+
+    swift apps/desktop/scripts/render-dmg-background.swift
+
+  which injects the window size and the two icon positions from tauri.conf.json
+  (the LAYOUT marker below), so the steps always line up around Finder's app
+  icon and Applications link. Coordinates are Finder points: an icon position
+  is the centre of its 128 pt icon, measured from the top-left of the window's
+  content area. The content area is the window size minus Finder's title bar
+  (28 pt) and, when the user shows it, the path bar (28 pt): keep everything
+  that matters above height - 56. Finder draws the icon labels itself (black
+  in Light Mode, white in Dark Mode), so each label sits on a mid-tone pad
+  readable in both.
+-->
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+/*LAYOUT*/
+:root {
+  --bg: hsl(240 6% 7%);
+  --surface: hsl(240 5% 11%);
+  --border: hsl(240 5% 22%);
+  --fg: hsl(240 6% 96%);
+  --muted: hsl(240 4% 66%);
+  --accent: hsl(168 62% 42%);
+  --accent-fg: hsl(170 80% 96%);
+  /* Relative luminance ~0.18: Finder's black and white label text both reach
+     about 4.6:1 on it. */
+  --label-pad: hsl(168 22% 41%);
+}
+* { box-sizing: border-box; }
+html, body {
+  margin: 0;
+  width: var(--w);
+  height: var(--h);
+  overflow: hidden;
+  background: var(--bg);
+}
+body {
+  position: relative;
+  font-family: -apple-system, "SF Pro Text", system-ui, sans-serif;
+  color: var(--fg);
+  -webkit-font-smoothing: antialiased;
+}
+.glow {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(420px 220px at calc(var(--app-x) + (var(--apps-x) - var(--app-x)) / 2) calc(var(--app-y) - 10px), hsl(168 62% 42% / 0.16), transparent 70%),
+    radial-gradient(600px 260px at 50% 110%, hsl(168 62% 42% / 0.07), transparent 70%);
+}
+.title {
+  position: absolute;
+  top: 16px;
+  left: 0;
+  right: 0;
+  text-align: center;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.title b { color: var(--accent); font-weight: 600; }
+.slot {
+  position: absolute;
+  width: 148px;
+  height: 148px;
+  margin: -74px 0 0 -74px;
+  border-radius: 30px;
+  border: 1.5px dashed hsl(240 5% 30%);
+  background: hsl(240 5% 100% / 0.025);
+}
+.slot.app { left: var(--app-x); top: var(--app-y); }
+.slot.apps { left: var(--apps-x); top: var(--apps-y); border-color: hsl(168 62% 42% / 0.55); }
+.pad {
+  position: absolute;
+  height: 22px;
+  margin-left: -60px;
+  width: 120px;
+  border-radius: 11px;
+  background: var(--label-pad);
+}
+.pad.app { left: var(--app-x); top: calc(var(--app-y) + var(--label-dy)); }
+.pad.apps { left: var(--apps-x); top: calc(var(--apps-y) + var(--label-dy)); }
+.drag {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: calc(var(--app-y) - 110px);
+  display: flex;
+  justify-content: center;
+}
+.arrow {
+  position: absolute;
+  left: calc(var(--app-x) + 90px);
+  width: calc(var(--apps-x) - var(--app-x) - 180px);
+  top: calc(var(--app-y) - 11px);
+  display: flex;
+  align-items: center;
+}
+.arrow .line {
+  flex: 1;
+  height: 3px;
+  margin-right: -10px;
+  border-radius: 2px;
+  background: linear-gradient(90deg, hsl(168 62% 42% / 0.12), var(--accent));
+}
+.arrow svg { display: block; flex: none; }
+.step {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.25;
+  white-space: nowrap;
+}
+.n {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--accent-fg);
+  font-size: 11px;
+  font-weight: 700;
+}
+.cards {
+  position: absolute;
+  left: 20px;
+  right: 20px;
+  top: calc(var(--app-y) + var(--label-dy) + 38px);
+  display: grid;
+  grid-template-columns: 1fr 1.7fr;
+  gap: 12px;
+}
+.card {
+  border: 1px solid var(--border);
+  background: var(--surface);
+  border-radius: 14px;
+  padding: 12px 14px;
+}
+.card p {
+  margin: 6px 0 0 28px;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--muted);
+}
+.path {
+  margin: 9px 0 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  color: var(--fg);
+}
+.path i { font-style: normal; color: var(--muted); }
+.btn {
+  border-radius: 6px;
+  padding: 2px 8px;
+  background: var(--accent);
+  color: var(--accent-fg);
+  font-weight: 600;
+  box-shadow: 0 0 0 3px hsl(168 62% 42% / 0.25);
+}
+</style>
+</head>
+<body>
+  <div class="glow"></div>
+  <div class="title">Install <b>bnbloc</b> in three steps</div>
+
+  <div class="slot app"></div>
+  <div class="slot apps"></div>
+  <div class="pad app"></div>
+  <div class="pad apps"></div>
+
+  <div class="drag">
+    <div class="step"><span class="n">1</span>Drag bnbloc to Applications</div>
+  </div>
+  <div class="arrow" aria-hidden="true">
+    <span class="line"></span>
+    <svg viewBox="0 0 14 22" width="14" height="22"><path d="M2 2 L12 11 L2 20" stroke="hsl(168 62% 42%)" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" fill="none" /></svg>
+  </div>
+
+  <div class="cards">
+    <div class="card">
+      <div class="step"><span class="n">2</span>Open it once</div>
+      <p>macOS blocks it (the app is not yet notarized).</p>
+    </div>
+    <div class="card">
+      <div class="step"><span class="n">3</span>Allow it in System Settings</div>
+      <div class="path">System Settings <i>→</i> Privacy &amp; Security <i>→</i> <span class="btn">Open Anyway</span></div>
+    </div>
+  </div>
+</body>
+</html>

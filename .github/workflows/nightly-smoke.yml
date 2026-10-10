@@ -1,0 +1,59 @@
+# Nightly post-deploy smoke of a running deployment (docs/ci.md): builds the
+# bnbloc CLI from this checkout and runs `bnbloc smoke` against
+# vars.BNBLOC_SMOKE_GATEWAY. A failed run alerts the platform admins through
+# the deployment's installed notifier components (--alert-on-failure) and
+# fails the job.
+#
+# Configuration (Settings -> Secrets and variables -> Actions):
+#   vars.BNBLOC_SMOKE_GATEWAY      gateway URL; unset skips the job
+#   secrets.BNBLOC_SMOKE_API_TOKEN API token (`bnbloc api-tokens create`) of a
+#                                  super-admin identity (alerts need one)
+#   vars.BNBLOC_SMOKE_AGENT        optional: also wait for this agent's reply
+#   vars.BNBLOC_SMOKE_ALERT_TO     optional: comma-separated alert recipients
+#                                  (default: every platform super-admin)
+#   vars.BNBLOC_CI_LINUX_RUNS_ON   runner labels, as in ci.yml
+name: nightly-smoke
+
+on:
+  schedule:
+    - cron: "41 2 * * *"
+  workflow_dispatch:
+    inputs:
+      agent:
+        description: "Agent to wait for (overrides vars.BNBLOC_SMOKE_AGENT; empty = message path only)"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nightly-smoke
+  cancel-in-progress: false
+
+jobs:
+  smoke:
+    if: ${{ vars.BNBLOC_SMOKE_GATEWAY != '' }}
+    runs-on: ${{ fromJSON(vars.BNBLOC_CI_LINUX_RUNS_ON || '"ubuntu-24.04"') }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with: { go-version-file: go.mod }
+      - name: Build the CLI
+        run: go build -o "$RUNNER_TEMP/bnbloc" ./cmd/bnbloc
+      - name: Smoke
+        env:
+          BNBLOC_GATEWAY: ${{ vars.BNBLOC_SMOKE_GATEWAY }}
+          BNBLOC_API_TOKEN: ${{ secrets.BNBLOC_SMOKE_API_TOKEN }}
+          SMOKE_AGENT: ${{ inputs.agent || vars.BNBLOC_SMOKE_AGENT }}
+          SMOKE_ALERT_TO: ${{ vars.BNBLOC_SMOKE_ALERT_TO }}
+        run: |
+          if [ -z "$BNBLOC_API_TOKEN" ]; then
+            echo "::error::secrets.BNBLOC_SMOKE_API_TOKEN is not set (see docs/ci.md)"
+            exit 1
+          fi
+          args=(smoke --alert-on-failure)
+          if [ -n "$SMOKE_AGENT" ]; then args+=(--agent "$SMOKE_AGENT"); fi
+          if [ -n "$SMOKE_ALERT_TO" ]; then args+=(--alert-to "$SMOKE_ALERT_TO"); fi
+          "$RUNNER_TEMP/bnbloc" "${args[@]}"

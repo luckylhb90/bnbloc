@@ -1,0 +1,729 @@
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
+import { useInjectedAgent, useInjectedDraft, useInjectedReferences } from "@/views/composer/useInjectedDraft";
+import {
+  PaperPlaneRightIcon,
+  HashIcon,
+  PaperclipIcon,
+  PlusIcon,
+  XIcon,
+  RobotIcon,
+} from "@phosphor-icons/react";
+import { cn } from "@/lib/cn";
+import type { LocalAgent } from "@/lib/useLocalAgent";
+import { api } from "@/lib/api";
+import { NO_ROOM_CATALOGS, resolveModelCatalog, type RoomModelCatalogs } from "@/lib/agentCatalogs";
+import { PLATFORM_OFFLINE_MESSAGE, defaultPlatformRecipient } from "@/lib/platformAgents";
+import { Button } from "@/ui/Button";
+import { useToast } from "@/ui/Toast";
+import { AttachmentChips } from "@/views/AttachmentChips";
+import { ATTACHMENT_ACCEPT, useComposerAttachments } from "@/views/useComposerAttachments";
+import { AgentPicker } from "@/views/composer/AgentPicker";
+import { ModelPicker } from "@/views/composer/ModelPicker";
+import { SendModeToggle } from "@/views/composer/SendModeToggle";
+import { StarterPrompts } from "@/views/composer/StarterPrompts";
+import { agentHandle, type Referenceable, type RoomAgent } from "@/views/composer/types";
+import type { SendOptions } from "@/views/room/useRoomMessageActions";
+import type { RoomPlatformAgents } from "@/views/room/useRoomPlatformAgents";
+import { useDisplayNames } from "@/lib/useDisplayName";
+import { mentionLabel, mentionMatches } from "@/views/composer/mentions";
+
+// mentionedAgent finds an in-text "@owner/provider" (core-qualified when the
+// agent advertises a core) naming a known room agent. Tokens are matched as
+// exact handles — never interpolated into a RegExp — so providers with
+// regex-special characters (acp:hermes) cannot break or falsely match.
+function mentionedAgent(text: string, roomAgents: readonly RoomAgent[]): RoomAgent | undefined {
+  const handles = new Set(
+    (text.match(/(?:^|\s)@([\w/:.-]+)/g) || []).map((tok) => tok.trim().slice(1).toLowerCase()),
+  );
+  return roomAgents.find((a) => handles.has(agentHandle(a).toLowerCase()));
+}
+
+const toolButton =
+  "tactile grid size-10 shrink-0 place-items-center rounded-[var(--radius)] text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-2)] hover:text-[var(--color-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/60";
+
+// Composer is the room message input with a bottom toolbar: the "To: Agent |
+// People" segment, a recipient picker (my agents, or another member's agent to
+// borrow), the model picker, an @-mention autocomplete, and a "#" reference
+// picker. The toolbar is one row at every width: on a narrow composer the
+// segment and the model picker are icon-only and attach + reference share one
+// "+" menu. The "people" variant is the people chat's composer: no agent, no
+// pickers — every message is people-only by construction.
+export function Composer({
+  roomId,
+  channelId,
+  agent,
+  onSend,
+  onTyping,
+  disabled,
+  members = [],
+  referenceable = [],
+  roomAgents = [],
+  subject,
+  platformAgents,
+  modelCatalogs = NO_ROOM_CATALOGS,
+  showStarters = false,
+  variant = "room",
+}: {
+  roomId: string;
+  channelId?: string | null;
+  agent: LocalAgent;
+  // Resolves true when the message is owned by the feed (the draft clears),
+  // false when it was rejected outright (the draft is kept for editing).
+  onSend: (text: string, opts: SendOptions) => Promise<boolean>;
+  onTyping?: () => void;
+  disabled?: boolean;
+  members?: string[];
+  referenceable?: Referenceable[];
+  roomAgents?: RoomAgent[];
+  subject?: string | null;
+  // The picker's "Platform agents" group, its confirmed add, and host
+  // routing of a send to a platform agent.
+  platformAgents?: Pick<RoomPlatformAgents, "choices" | "add" | "route" | "commit">;
+  // The room's owner-keyed model catalogs and borrow grants (model picker).
+  modelCatalogs?: RoomModelCatalogs;
+  // An empty room with an agent available: example prompts above the input.
+  showStarters?: boolean;
+  variant?: "room" | "people";
+}) {
+  const people = variant === "people";
+  const toast = useToast();
+  const [text, setText] = useState("");
+  const taRef = useRef<HTMLTextAreaElement>(null);
+  // A prompt "Used" from the library, and references asked from the people
+  // chat, land in the room's main composer only (never the people chat's).
+  useInjectedDraft(roomId, people ? null : channelId, setText, taRef);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  // The selected recipient agent: defaults to my own selected local target;
+  // may be switched to another member's agent (borrow). Null when peopleOnly.
+  const [recipient, setRecipient] = useState<RoomAgent | null>(null);
+  // peopleOnly routes the message to people in the room without driving any
+  // agent. Default false: messages go to the selected agent (the common case).
+  const [peopleOnly, setPeopleOnly] = useState(false);
+  // The welcome card's new room opens with its platform agent selected.
+  const pickInjected = useCallback((a: RoomAgent) => {
+    setRecipient(a);
+    setPeopleOnly(false);
+  }, []);
+  useInjectedAgent(roomId, people ? null : channelId, roomAgents, pickInjected);
+  // Optional agent tuning: an explicit model id and reasoning effort. Empty
+  // string means "use the provider default". These persist across sends (like
+  // the agent target), and are reset only when the effective provider changes
+  // to one whose catalog no longer offers the picked model.
+  const [model, setModel] = useState<string>("");
+  const [reasoning, setReasoning] = useState<string>("");
+  // Attached references (chips shown above the input), quoted into the message
+  // on send so the agent receives the referenced content.
+  const [refs, setRefs] = useState<Referenceable[]>([]);
+  useInjectedReferences(roomId, channelId, !people, setRefs, taRef);
+  const [sending, setSending] = useState(false);
+  const [showRefPicker, setShowRefPicker] = useState(false);
+  // The narrow toolbar's "+" menu (attach / reference).
+  const [showMore, setShowMore] = useState(false);
+  const moreRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!showMore) return;
+    const onDoc = (e: MouseEvent) => {
+      if (moreRef.current && !moreRef.current.contains(e.target as Node)) setShowMore(false);
+    };
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, [showMore]);
+  const attachments = useComposerAttachments(roomId);
+  // @-mention autocomplete: when the caret is inside an "@partial" token, show a
+  // filtered member list; selecting one inserts "@name ".
+  const [mention, setMention] = useState<{ query: string; start: number } | null>(
+    null,
+  );
+  // The list shows display names; picking inserts the canonical handle.
+  const nameOf = useDisplayNames(members.map((m) => (m.includes("/") ? "" : m)).concat(roomAgents.map((a) => a.ownerId)));
+  const labelOf = (m: string) => mentionLabel(m, roomAgents, nameOf);
+  const matches = mention ? mentionMatches(members, mention.query, labelOf) : [];
+  // Keyboard-highlighted mention option (Arrow keys move it, Enter/Tab pick).
+  const [activeMention, setActiveMention] = useState(0);
+  const mentionListId = useId();
+  const highlighted = matches.length > 0 ? Math.min(activeMention, matches.length - 1) : -1;
+
+  // The catalog the model picker reflects, resolved with the same precedence
+  // send() uses to choose the driving agent (an in-text @mention, else the
+  // picked recipient, else my selected local target) and keyed by OWNER:
+  // another member's or a platform agent's catalog comes only from the
+  // room's catalogs (narrowed to a borrow grant's authorized models), never
+  // from my own agents that happen to share its (core, provider).
+  const effTarget = useMemo(
+    () =>
+      resolveModelCatalog({
+        pick: mentionedAgent(text, roomAgents) ?? recipient,
+        subject: subject ?? null,
+        localTargets: agent.targets,
+        selectedTargetId: agent.target,
+        room: modelCatalogs,
+      }),
+    [text, roomAgents, recipient, subject, agent.targets, agent.target, modelCatalogs],
+  );
+  const modelChoices = useMemo(() => effTarget?.models ?? [], [effTarget]);
+  // The model whose reasoning options apply: the explicit pick, else the
+  // target's configured default, else the first catalog entry. Without this
+  // last fallback a harness that has per-model reasoning but no default model
+  // (e.g. claude-code/opencode) would show no reasoning picker until a model
+  // was picked.
+  const effModelForReasoning =
+    model || effTarget?.defaultModel || modelChoices[0] || "";
+  // Reasoning options follow that model (reasoningByModel), falling back to the
+  // target-level ladder. Empty => no reasoning picker.
+  const reasoningChoices = useMemo(() => {
+    const byModel = effTarget?.reasoningByModel?.[effModelForReasoning];
+    if (byModel?.length) return byModel;
+    return effTarget?.reasoningEfforts ?? [];
+  }, [effTarget, effModelForReasoning]);
+
+  // Drop a stale model selection when the effective target no longer offers it.
+  useEffect(() => {
+    if (model && !modelChoices.includes(model)) setModel("");
+  }, [model, modelChoices]);
+  // Drop a stale reasoning selection when it is no longer offered.
+  useEffect(() => {
+    if (reasoning && !reasoningChoices.includes(reasoning)) setReasoning("");
+  }, [reasoning, reasoningChoices]);
+
+  // Restore the last selection for this room+channel from the server (shared
+  // across devices: the same member's desktop and browser land on the agent
+  // they last drove here). Falls back room-level when the channel has no row.
+  // Best-effort: a failed read leaves the defaults (own target / first agent).
+  // The composer is keyed per channel, so this runs once per channel visit;
+  // it re-runs while the roster/targets populate (nothing to match against
+  // yet), stops once restored, and never clobbers a selection the user made.
+  const restored = useRef(false);
+  // Whether the stored-preference restore has run (state, so the fallback
+  // below re-evaluates once it has).
+  const [prefsSettled, setPrefsSettled] = useState(false);
+  const { setTarget, targets } = agent;
+  useEffect(() => {
+    if (people || restored.current || roomAgents.length === 0) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const ch = channelId ?? "";
+        let p = await api.getAgentPrefs(roomId, ch);
+        if (!p.found && ch) p = await api.getAgentPrefs(roomId, "");
+        if (cancelled || restored.current) return;
+        restored.current = true; // landed (or nothing stored): stop retrying
+        setPrefsSettled(true);
+        if (!p.provider) return;
+        const match = roomAgents.find(
+          (a) => a.provider === p.provider && (a.core || "") === (p.core || ""),
+        );
+        if (match) {
+          setRecipient((cur) => cur ?? match);
+          setPeopleOnly(false);
+        } else {
+          const local = targets.find(
+            (t) => t.provider === p.provider && (t.core || "") === (p.core || ""),
+          );
+          if (local) {
+            setTarget(local.id);
+            setRecipient(null);
+            setPeopleOnly(false);
+          }
+        }
+        if (p.model) setModel(p.model);
+        if (p.reasoning) setReasoning(p.reasoning);
+      } catch {
+        // no prefs / offline: defaults stand; a later roster change retries
+        setPrefsSettled(true);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [people, roomId, channelId, roomAgents, targets, setTarget]);
+  // A member with no agent of their own (browser-only, nothing stored for this
+  // room) lands on the room's platform agent instead of "No local agent", so
+  // returning to a room — or reloading it — still has an agent to talk to.
+  useEffect(() => {
+    if (people || !prefsSettled || recipient || peopleOnly) return;
+    const fallback = defaultPlatformRecipient(roomAgents, targets.length > 0 || !!agent.target);
+    if (fallback) setRecipient(fallback);
+  }, [people, prefsSettled, recipient, peopleOnly, roomAgents, targets.length, agent.target]);
+
+  // Persist selection changes (debounced; best-effort — never blocks
+  // sending). A change pending when the composer unmounts (leaving the room
+  // or channel) is flushed instead of dropped.
+  const selCore = recipient?.core ?? effTarget?.core ?? "";
+  const selProvider = recipient?.provider ?? effTarget?.provider ?? "";
+  // The people chat has no agent selection to remember.
+  const snapshot = !people && selProvider ? `${selCore}/${selProvider}/${model}/${reasoning}` : "";
+  const lastSaved = useRef("");
+  const pendingSave = useRef<{ readonly snapshot: string; readonly flush: () => void } | null>(null);
+  useEffect(() => {
+    if (!snapshot || snapshot === lastSaved.current) {
+      pendingSave.current = null;
+      return;
+    }
+    const body = { channelId: channelId ?? "", core: selCore, provider: selProvider, model, reasoning };
+    const flush = () => {
+      pendingSave.current = null;
+      lastSaved.current = snapshot;
+      void api.putAgentPrefs(roomId, body).catch(() => {});
+    };
+    pendingSave.current = { snapshot, flush };
+    const t = window.setTimeout(flush, 1200);
+    return () => window.clearTimeout(t);
+  }, [snapshot, roomId, channelId, selCore, selProvider, model, reasoning]);
+  useEffect(() => () => pendingSave.current?.flush(), []);
+
+  // detectMention inspects the text before the caret for a trailing "@token"
+  // (start-of-input or after whitespace) and opens/updates the picker. The token
+  // allows the characters in an agent handle — "owner/provider", where a
+  // provider may contain ':' (e.g. acp:hermes), '-' (claude-code), or '.' — so
+  // autocomplete keeps matching after the user types the '/' separator.
+  const detectMention = (value: string, caret: number) => {
+    const upto = value.slice(0, caret);
+    const m = /(?:^|\s)@([\w/:.-]*)$/.exec(upto);
+    if (m) {
+      setMention({ query: m[1], start: caret - m[1].length - 1 });
+      setActiveMention(0);
+    } else {
+      setMention(null);
+    }
+  };
+
+  // Throttle typing pings to at most one every 2s while actively typing.
+  const lastTypingRef = useRef(0);
+  const applyText = (value: string, caret: number) => {
+    setText(value);
+    detectMention(value, caret);
+    if (onTyping && value.trim()) {
+      const now = Date.now();
+      if (now - lastTypingRef.current > 2000) {
+        lastTypingRef.current = now;
+        onTyping();
+      }
+    }
+  };
+
+  const pickMention = (name: string) => {
+    if (!mention) return;
+    const before = text.slice(0, mention.start);
+    const after = text.slice(mention.start + 1 + mention.query.length);
+    const next = `${before}@${name} ${after}`;
+    setText(next);
+    setMention(null);
+    requestAnimationFrame(() => taRef.current?.focus());
+  };
+
+  const addRef = (r: Referenceable) => {
+    setRefs((cur) => (cur.some((x) => x.id === r.id) ? cur : [...cur, r]));
+    setShowRefPicker(false);
+    requestAnimationFrame(() => taRef.current?.focus());
+  };
+  const removeRef = (id: number) => setRefs((cur) => cur.filter((x) => x.id !== id));
+
+  const send = async () => {
+    const t = text.trim();
+    if (sending || (!t && refs.length === 0 && attachments.files.length === 0)) return;
+    setSending(true);
+    // Prepend each reference as an attributed Markdown quote so the agent
+    // receives the referenced content inline, then the user's own text.
+    const quoted = refs
+      .map((r) => {
+        const who = r.author === "agent" ? "Agent" : nameOf(r.author);
+        const body = r.text
+          .split("\n")
+          .map((l) => `> ${l}`)
+          .join("\n");
+        return `Referencing ${who}:\n${body}`;
+      })
+      .join("\n\n");
+    const composed = quoted ? (t ? `${quoted}\n\n${t}` : quoted) : t;
+    // Recipient precedence (per design): an in-text @<owner>/<provider> that
+    // names a known room agent wins over the composer selector; else the
+    // explicitly picked recipient; else my selected local target as my own
+    // agent; else null.
+    const myTarget = agent.targets.find((x) => x.id === agent.target);
+    const picked: RoomAgent | null =
+      mentionedAgent(t, roomAgents) ||
+      recipient ||
+      (myTarget?.provider
+        ? { ownerId: subject || "", provider: myTarget.provider, core: myTarget.core || undefined, self: true }
+        : null);
+    const toPeople = people || peopleOnly;
+    // A platform agent goes to the host routing picks now (PRD v2 §4); with
+    // every host offline nothing is sent (no dead job) and the draft stays.
+    const platformRef = picked?.platform ? { core: picked.core ?? "", provider: picked.provider } : null;
+    const host = platformRef && !toPeople ? platformAgents?.route(platformRef) ?? null : null;
+    if (platformRef && !toPeople && !host) {
+      toast.error(PLATFORM_OFFLINE_MESSAGE);
+      setSending(false);
+      return;
+    }
+    const eff: RoomAgent | null =
+      picked && host
+        ? { ...picked, ownerId: host.hostUserId, self: host.hostUserId.toLowerCase() === (subject ?? "").toLowerCase(), defaultModel: host.defaultModel }
+        : picked;
+    // Attach the model+reasoning selection to the agent recipient when one is
+    // present and the user picked either. Omitting both keeps agent defaults.
+    const withOpts: RoomAgent | null =
+      eff && !peopleOnly && (model || reasoning)
+        ? {
+            ...eff,
+            agentOptions: {
+              ...(model ? { model } : {}),
+              ...(reasoning ? { reasoningEffort: reasoning } : {}),
+            },
+          }
+        : eff;
+    try {
+      const uploaded = attachments.files.length > 0 ? await attachments.uploadFiles() : [];
+      if (uploaded === null) return;
+      const accepted = await onSend(composed, {
+        peopleOnly: toPeople,
+        recipient: toPeople ? null : withOpts,
+        attachmentIds: uploaded.map((attachment) => attachment.id),
+        attachments: uploaded,
+      });
+      // Clear only once the message is owned by the feed; a rejected send
+      // (borrow not authorized, not a member…) keeps the draft for editing.
+      if (!accepted) return;
+      if (platformRef && host) platformAgents?.commit(platformRef, host.hostUserId);
+      setText("");
+      setRefs([]);
+      attachments.clearFiles(attachments.files);
+      setMention(null);
+    } finally {
+      setSending(false);
+    }
+  };
+
+  return (
+    <div className="relative w-full">
+      {mention && matches.length > 0 && (
+        <div className="absolute bottom-full left-0 z-20 mb-2 w-56 overflow-hidden rounded-[var(--radius)] border border-[var(--color-border-strong)] bg-[var(--color-elevated)] shadow-[var(--shadow-pop)]">
+          <div className="border-b border-[var(--color-border)] px-3 py-1.5 text-xs font-medium uppercase tracking-wide text-[var(--color-fg-subtle)]">
+            Mention
+          </div>
+          <div id={mentionListId} role="listbox" aria-label="Mention suggestions">
+          {matches.map((m, index) => {
+            const isAgentHandle = m.includes("/");
+            // A borrowable agent: an agent handle owned by someone other than me.
+            // Resolve the owner from the roster (the handle may be core-qualified
+            // as core/owner/provider), not by slicing the first path segment.
+            const owner = roomAgents.find((a) => agentHandle(a) === m)?.ownerId;
+            const borrow =
+              isAgentHandle &&
+              !!subject &&
+              !!owner &&
+              owner.toLowerCase() !== subject.toLowerCase();
+            return (
+              <div
+                key={m}
+                id={`${mentionListId}-${index}`}
+                role="option"
+                aria-selected={index === highlighted}
+                onMouseDown={(e) => e.preventDefault()}
+                onMouseEnter={() => setActiveMention(index)}
+                onClick={() => pickMention(m)}
+                className={cn(
+                  "flex w-full cursor-pointer items-center gap-2 px-3 py-2 text-left text-sm",
+                  index === highlighted
+                    ? "bg-[var(--color-surface-2)] text-[var(--color-fg)]"
+                    : "text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-2)] hover:text-[var(--color-fg)]",
+                )}
+              >
+                <span className="grid size-5 place-items-center rounded-full bg-[var(--color-accent-soft)] text-[0.6rem] font-semibold text-[var(--color-accent)]">
+                  {isAgentHandle ? (
+                    <RobotIcon size={11} weight="fill" />
+                  ) : (
+                    (labelOf(m)[0] || "?").toUpperCase()
+                  )}
+                </span>
+                <span className="min-w-0 flex-1 truncate">{labelOf(m)}</span>
+                {borrow && (
+                  <span className="rounded-full border border-[var(--color-accent)]/30 bg-[var(--color-accent-soft)] px-1.5 text-[0.6rem] font-medium text-[var(--color-accent)]">
+                    Borrow
+                  </span>
+                )}
+              </div>
+            );
+          })}
+          </div>
+        </div>
+      )}
+      {showRefPicker && referenceable.length > 0 && (
+        <div className="absolute bottom-full left-0 z-20 mb-2 max-h-64 w-80 overflow-y-auto rounded-[var(--radius)] border border-[var(--color-border-strong)] bg-[var(--color-elevated)] shadow-[var(--shadow-pop)]">
+          <div className="sticky top-0 border-b border-[var(--color-border)] bg-[var(--color-elevated)] px-3 py-1.5 text-xs font-medium uppercase tracking-wide text-[var(--color-fg-subtle)]">
+            Reference a message
+          </div>
+          {referenceable
+            .slice()
+            .reverse()
+            .map((r) => (
+              <button
+                key={r.id}
+                onClick={() => addRef(r)}
+                className="flex w-full flex-col gap-0.5 px-3 py-2 text-left hover:bg-[var(--color-surface-2)]"
+              >
+                <span className="text-xs font-medium text-[var(--color-accent)]">
+                  {r.author === "agent" ? "Agent" : nameOf(r.author)}
+                </span>
+                <span className="line-clamp-2 text-sm text-[var(--color-fg-muted)]">
+                  {r.text}
+                </span>
+              </button>
+            ))}
+        </div>
+      )}
+      {/* Flat: no card. The room footer draws the single top rule. */}
+      <div
+        onDragOver={(e) => {
+          if (!sending && e.dataTransfer.types.includes("Files")) e.preventDefault();
+        }}
+        onDrop={(e) => {
+          e.preventDefault();
+          if (sending) return;
+          attachments.addFiles(Array.from(e.dataTransfer.files));
+          requestAnimationFrame(() => taRef.current?.focus());
+        }}
+      >
+        <input
+          ref={fileInputRef}
+          type="file"
+          multiple
+          accept={ATTACHMENT_ACCEPT}
+          disabled={disabled || sending}
+          className="hidden"
+          onChange={(e) => {
+            attachments.addFiles(Array.from(e.currentTarget.files ?? []));
+            requestAnimationFrame(() => taRef.current?.focus());
+            e.currentTarget.value = "";
+          }}
+        />
+        {refs.length > 0 && (
+          <div className="flex flex-wrap gap-1.5 px-3 pt-2">
+            {refs.map((r) => (
+              <span
+                key={r.id}
+                className="flex max-w-[16rem] items-center gap-1.5 rounded-full border border-[var(--color-border)] bg-[var(--color-surface-2)] py-1 pl-2.5 pr-1.5 text-xs"
+              >
+                <span className="font-medium text-[var(--color-accent)]">
+                  {r.author === "agent" ? "Agent" : nameOf(r.author)}
+                </span>
+                <span className="truncate text-[var(--color-fg-muted)]">
+                  {r.text}
+                </span>
+                <button
+                  onClick={() => removeRef(r.id)}
+                  className="tactile text-[var(--color-fg-subtle)] hover:text-[var(--color-fg)]"
+                  title="Remove reference"
+                >
+                  <XIcon size={12} />
+                </button>
+              </span>
+            ))}
+          </div>
+        )}
+        {showStarters && !people && (
+          <StarterPrompts
+            onPick={(prompt) => {
+              setText(prompt);
+              setPeopleOnly(false);
+              requestAnimationFrame(() => {
+                const el = taRef.current;
+                if (!el) return;
+                el.focus();
+                el.setSelectionRange(el.value.length, el.value.length);
+              });
+            }}
+          />
+        )}
+        <AttachmentChips
+          attachments={attachments.chipItems}
+          onRemove={attachments.removeFile}
+        />
+        <textarea
+          ref={taRef}
+          // The people chat's placeholder states who can read it; two lines
+          // keep it whole in a narrow panel.
+          rows={people ? 2 : 1}
+          value={text}
+          disabled={disabled}
+          placeholder={
+            people
+              ? "Message people in this room (agents can't see this)"
+              : peopleOnly
+                ? "Message people (the agent won't reply)"
+                : "Message the room and its agent…"
+          }
+          onChange={(e) => applyText(e.target.value, e.target.selectionStart ?? e.target.value.length)}
+          onPaste={(e) => {
+            const imageFiles = Array.from(e.clipboardData.files).filter((file) =>
+              file.type.startsWith("image/"),
+            );
+            if (!sending && imageFiles.length > 0) {
+              e.preventDefault();
+              attachments.addFiles(imageFiles);
+              requestAnimationFrame(() => taRef.current?.focus());
+            }
+          }}
+          role="combobox"
+          aria-label="Message"
+          aria-autocomplete="list"
+          aria-expanded={!!mention && matches.length > 0}
+          aria-controls={mention && matches.length > 0 ? mentionListId : undefined}
+          aria-activedescendant={highlighted >= 0 && mention ? `${mentionListId}-${highlighted}` : undefined}
+          onKeyDown={(e) => {
+            // While the mention list is open, arrows move the highlight and
+            // Enter/Tab accept the highlighted option.
+            if (mention && matches.length > 0) {
+              if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+                e.preventDefault();
+                const delta = e.key === "ArrowDown" ? 1 : -1;
+                setActiveMention((highlighted + delta + matches.length) % matches.length);
+                return;
+              }
+              if (e.key === "Enter" || e.key === "Tab") {
+                e.preventDefault();
+                pickMention(matches[Math.max(0, highlighted)]);
+                return;
+              }
+            }
+            if (e.key === "Escape" && mention) {
+              setMention(null);
+              return;
+            }
+            if (e.key === "Enter" && !e.shiftKey) {
+              e.preventDefault();
+              void send();
+            }
+          }}
+          className="block max-h-40 min-h-[2.5rem] w-full resize-none bg-transparent px-4 pb-1 pt-2.5 text-sm text-[var(--color-fg)] placeholder:text-[var(--color-fg-subtle)] focus:outline-none"
+        />
+        {/* Bottom toolbar, directly under the textarea: ONE row at every
+            width. Narrow: [+] [Agent|People icons] [agent] [model icon] …
+            [send]; wide adds labels and splits attach / reference. */}
+        <div className="flex items-center gap-1 px-2 pb-1.5">
+          {referenceable.length > 0 ? (
+            <>
+              <div ref={moreRef} className="relative @md:hidden">
+                <button
+                  type="button"
+                  onClick={() => setShowMore((v) => !v)}
+                  disabled={disabled || sending}
+                  className={toolButton}
+                  title="Attach a file or reference a message"
+                  aria-label="Attach a file or reference a message"
+                  aria-haspopup="menu"
+                  aria-expanded={showMore}
+                >
+                  <PlusIcon size={18} />
+                </button>
+                {showMore && (
+                  <div role="menu" className="animate-in absolute bottom-full left-0 z-20 mb-2 w-52 overflow-hidden rounded-[var(--radius)] border border-[var(--color-border-strong)] bg-[var(--color-elevated)] py-1 shadow-[var(--shadow-pop)]">
+                    <button
+                      type="button"
+                      role="menuitem"
+                      onClick={() => {
+                        setShowMore(false);
+                        fileInputRef.current?.click();
+                      }}
+                      className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-2)] hover:text-[var(--color-fg)]"
+                    >
+                      <PaperclipIcon size={16} /> Attach files
+                    </button>
+                    <button
+                      type="button"
+                      role="menuitem"
+                      onClick={() => {
+                        setShowMore(false);
+                        setShowRefPicker(true);
+                      }}
+                      className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-2)] hover:text-[var(--color-fg)]"
+                    >
+                      <HashIcon size={16} /> Reference a message
+                    </button>
+                  </div>
+                )}
+              </div>
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={disabled || sending}
+                className={cn(toolButton, "hidden @md:grid")}
+                title="Attach files"
+                aria-label="Attach files"
+              >
+                <PaperclipIcon size={18} />
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowRefPicker((v) => !v)}
+                className={cn(toolButton, "hidden @md:grid")}
+                title="Reference a message"
+                aria-label="Reference a message"
+              >
+                <HashIcon size={18} />
+              </button>
+            </>
+          ) : (
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={disabled || sending}
+              className={toolButton}
+              title="Attach files"
+              aria-label="Attach files"
+            >
+              <PaperclipIcon size={18} />
+            </button>
+          )}
+          {!people && (
+            <SendModeToggle value={peopleOnly ? "people" : "agent"} onChange={(m) => setPeopleOnly(m === "people")} />
+          )}
+          <div className="flex min-w-0 flex-1 items-center gap-1">
+            {!people && !peopleOnly && (
+              <AgentPicker
+                agent={agent}
+                roomAgents={roomAgents}
+                recipient={recipient}
+                subject={subject ?? null}
+                onPick={setRecipient}
+                platform={platformAgents?.choices}
+                onAddPlatform={platformAgents?.add}
+              />
+            )}
+            {!people && !peopleOnly && (modelChoices.length > 0 || reasoningChoices.length > 0) && (
+              <ModelPicker
+                models={modelChoices}
+                reasonings={reasoningChoices}
+                model={model}
+                reasoning={reasoning}
+                defaultModel={effTarget?.defaultModel ?? ""}
+                defaultReasoning={effTarget?.defaultReasoning ?? ""}
+                onPickModel={setModel}
+                onPickReasoning={setReasoning}
+              />
+            )}
+            {!people && peopleOnly && (
+              <span className="hidden truncate px-1 text-xs text-[var(--color-fg-subtle)] @md:inline">
+                The agent reads this but won't reply
+              </span>
+            )}
+          </div>
+          <Button
+            variant="primary"
+            size="icon"
+            onClick={() => void send()}
+            disabled={
+              disabled ||
+              sending ||
+              attachments.isUploading ||
+              (!text.trim() && refs.length === 0 && attachments.files.length === 0)
+            }
+            title="Send"
+          >
+            <PaperPlaneRightIcon size={16} weight="fill" />
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}

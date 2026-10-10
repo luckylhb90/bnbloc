@@ -1,0 +1,33 @@
+/bin/
+*.test
+*.out
+
+# macOS Finder metadata, at any depth. Never track it.
+.DS_Store
+
+# local-only docker compose override (uncommitted deployment wiring)
+compose.override.yml
+
+# Production secrets. Only the .example template is tracked.
+.env
+.env.production
+.env.local
+
+# Agent tooling scratch
+.omo/
+.playwright-mcp/
+
+# IDE
+.idea/
+
+# archify visual-check screenshot evidence (regenerated on demand)
+*.visual-check.*.png
+*.visual-check.json
+
+# Local CLI build output (go build ./cmd/bnbloc in the repo root).
+/bnbloc
+
+# Raw demo screen recordings stay local; the README uses the processed copy
+# in docs/assets/ (scripts/demo-video.swift).
+docs/demo/*.mp4
+docs/demo/*.mov

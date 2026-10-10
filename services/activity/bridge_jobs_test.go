@@ -1,0 +1,236 @@
+package activity
+
+import (
+	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+
+	"github.com/luckylhb90/bnbloc/internal/membership"
+	"github.com/luckylhb90/bnbloc/internal/store"
+	"github.com/luckylhb90/bnbloc/internal/tenant"
+	"github.com/luckylhb90/bnbloc/internal/wire"
+)
+
+// newJobServer builds an activity service backed by the in-memory job queue,
+// with one queued job already claimed by "bridge-maya" (owner "maya").
+func newJobServer(t *testing.T) (*httptest.Server, *capturePublisher, store.BridgeJobStore) {
+	t.Helper()
+	mem := membership.NewStatic()
+	mem.Add("room-1", "maya")
+	pub := &capturePublisher{}
+	jobs := store.NewMemoryBridgeJobs()
+	svc := &Service{Store: store.NewMemory(), Publisher: pub, Membership: mem, BridgeJobs: jobs}
+	srv := httptest.NewServer(svc.Handler())
+	t.Cleanup(srv.Close)
+
+	ctx := tenant.NewContext(context.Background(), tenant.Default)
+	if _, err := jobs.PutAgentJob(ctx, store.AgentJob{JobID: "job-1", RoomID: "room-1", ChannelID: "chan-1", MessageSeq: 7, OwnerUserID: "maya", Core: "nimbus", Provider: "nimbus", MessageText: "go", CreatedAtMs: 1}); err != nil {
+		t.Fatal(err)
+	}
+	if err := jobs.PutBridgeHeartbeat(ctx, store.BridgeHeartbeat{BridgeID: "bridge-maya", OwnerUserID: "maya", Status: store.BridgeOnline, LastSeenAtMs: 1}); err != nil {
+		t.Fatal(err)
+	}
+	if err := jobs.ReplaceBridgeAgents(ctx, "bridge-maya", []store.BridgeAgent{{OwnerUserID: "maya", Core: "nimbus", Provider: "nimbus", LastSeenAtMs: 1}}); err != nil {
+		t.Fatal(err)
+	}
+	if claimed, err := jobs.ClaimAgentJobs(ctx, store.ClaimRequest{BridgeID: "bridge-maya", OwnerUserID: "maya", MaxJobs: 1, NowMs: 2}); err != nil || len(claimed) != 1 {
+		t.Fatalf("setup claim = %d jobs, %v", len(claimed), err)
+	}
+	return srv, pub, jobs
+}
+
+// A job transition must reach the room that owns the job. Publishing without the
+// stored room id strands the event and the composer never learns the turn ended.
+func TestJobStatusPublishesToOwningRoom(t *testing.T) {
+	srv, pub, _ := newJobServer(t)
+	resp := post(t, srv, "/v1/bridge/jobs/job-1/status", "maya", map[string]any{"bridgeId": "bridge-maya", "status": "replied"})
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	if len(pub.events) != 1 {
+		t.Fatalf("published %d events, want 1", len(pub.events))
+	}
+	ev := pub.events[0]
+	if ev.RoomID != "room-1" || ev.ChannelID != "chan-1" || ev.Kind != "agent_job_updated" {
+		t.Fatalf("event = %+v, want room-1/chan-1 agent_job_updated", ev)
+	}
+	job, ok := ev.Payload.(store.AgentJob)
+	if !ok || job.MessageSeq != 7 || job.Status != store.AgentJobReplied {
+		t.Fatalf("payload = %+v, want the replied job for seq 7", ev.Payload)
+	}
+}
+
+// Only the member who registered a bridge may report its jobs. Otherwise any
+// room member knowing a bridgeId could drive another member's job to terminal.
+func TestJobStatusRejectsForeignBridgeOwner(t *testing.T) {
+	srv, pub, jobs := newJobServer(t)
+	resp := post(t, srv, "/v1/bridge/jobs/job-1/status", "intruder", map[string]any{"bridgeId": "bridge-maya", "status": "failed"})
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403", resp.StatusCode)
+	}
+	if len(pub.events) != 0 {
+		t.Fatalf("published %d events on rejection, want 0", len(pub.events))
+	}
+	got := jobs.ListAgentJobs(tenant.NewContext(context.Background(), tenant.Default), "room-1", "", 10)
+	if len(got) != 1 || got[0].Status != store.AgentJobClaimed {
+		t.Fatalf("job status = %+v, want still claimed", got)
+	}
+}
+
+// A running turn renews its lease so no other bridge re-claims it mid-flight.
+func TestJobLeaseRenewalExtendsOwnLease(t *testing.T) {
+	srv, _, jobs := newJobServer(t)
+	resp := post(t, srv, "/v1/bridge/jobs/job-1/lease", "maya", map[string]any{"bridgeId": "bridge-maya"})
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var body struct {
+		LeaseExpiresAtMs int64 `json:"leaseExpiresAtMs"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	if body.LeaseExpiresAtMs <= 0 {
+		t.Fatalf("leaseExpiresAtMs = %d, want a future lease", body.LeaseExpiresAtMs)
+	}
+
+	other := post(t, srv, "/v1/bridge/jobs/job-1/lease", "intruder", map[string]any{"bridgeId": "bridge-maya"})
+	defer other.Body.Close()
+	if other.StatusCode != http.StatusForbidden {
+		t.Fatalf("foreign lease renewal status = %d, want 403", other.StatusCode)
+	}
+	_ = jobs
+}
+
+// An unknown status must be refused rather than written through to the queue.
+func TestJobStatusRejectsUnknownStatus(t *testing.T) {
+	srv, _, _ := newJobServer(t)
+	resp := post(t, srv, "/v1/bridge/jobs/job-1/status", "maya", map[string]any{"bridgeId": "bridge-maya", "status": "banana"})
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+}
+
+// A job nothing ever claimed must fail on its own, notify its room, and leave a
+// visible message. Without the message the turn ends silently: the member only
+// ever sees their own prompt and no explanation.
+func TestSweepFailsQueuedJobAndNotifiesRoom(t *testing.T) {
+	mem := membership.NewStatic()
+	pub := &capturePublisher{}
+	jobs := store.NewMemoryBridgeJobs()
+	svc := &Service{Store: store.NewMemory(), Publisher: pub, Membership: mem, BridgeJobs: jobs}
+	ctx := tenant.NewContext(context.Background(), tenant.Default)
+	if _, err := jobs.PutAgentJob(ctx, store.AgentJob{JobID: "stuck", RoomID: "room-9", ChannelID: "chan-9", MessageSeq: 1, OwnerUserID: "maya", Core: "c", Provider: "nimbus", CreatedAtMs: 1}); err != nil {
+		t.Fatal(err)
+	}
+
+	svc.SweepAgentJobs(ctx)
+
+	var job store.AgentJob
+	var failureText string
+	for _, ev := range pub.events {
+		if ev.RoomID != "room-9" {
+			t.Fatalf("event published to %q, want room-9", ev.RoomID)
+		}
+		switch p := ev.Payload.(type) {
+		case store.AgentJob:
+			job = p
+		case wire.ReportMessagesInput:
+			if len(p.Messages) == 1 {
+				if m, ok := p.Messages[0].Payload.(map[string]any); ok {
+					failureText, _ = m["text"].(string)
+				}
+			}
+		}
+	}
+	if job.Status != store.AgentJobFailed || job.FailureReason != store.FailureNoBridgeOnline {
+		t.Fatalf("swept job = %+v, want failed/no_bridge_online", job)
+	}
+	if !strings.Contains(failureText, "offline") {
+		t.Fatalf("room message = %q, want a visible offline explanation", failureText)
+	}
+}
+
+// Cancelling a live job must stop its worker too: after cancel the bridge that
+// still holds the lease can no longer drive the job to replied, otherwise a
+// cancelled turn would post its answer anyway.
+func TestCancelStopsRunningJobAndLocksOutWorker(t *testing.T) {
+	srv, pub, _ := newJobServer(t)
+	resp := post(t, srv, "/v1/rooms/room-1/agent-jobs/job-1/cancel", "maya", map[string]any{})
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("cancel status = %d, want 200", resp.StatusCode)
+	}
+	var cancelled store.AgentJob
+	for _, ev := range pub.events {
+		if j, ok := ev.Payload.(store.AgentJob); ok {
+			cancelled = j
+		}
+	}
+	if cancelled.Status != store.AgentJobCancelled || cancelled.RoomID != "room-1" {
+		t.Fatalf("published job = %+v, want cancelled in room-1", cancelled)
+	}
+
+	late := post(t, srv, "/v1/bridge/jobs/job-1/status", "maya", map[string]any{"bridgeId": "bridge-maya", "status": "replied"})
+	defer late.Body.Close()
+	if late.StatusCode != http.StatusConflict {
+		t.Fatalf("worker report after cancel = %d, want 409", late.StatusCode)
+	}
+}
+
+// Cancellation is a room action, so a non-member must not be able to stop
+// another room's job.
+func TestCancelRejectsNonMember(t *testing.T) {
+	srv, _, jobs := newJobServer(t)
+	resp := post(t, srv, "/v1/rooms/room-1/agent-jobs/job-1/cancel", "intruder", map[string]any{})
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403", resp.StatusCode)
+	}
+	got := jobs.ListAgentJobs(tenant.NewContext(context.Background(), tenant.Default), "room-1", "", 10)
+	if len(got) != 1 || got[0].Status == store.AgentJobCancelled {
+		t.Fatalf("job = %+v, want untouched", got)
+	}
+}
+
+// The sweeper runs on a background context with no tenant, exactly as the daemon
+// does. Its failure message must still be written: the activity store is
+// tenant-scoped, so writing in the caller's (empty) scope fails tenant.Require
+// and the room is left with no explanation at all.
+func TestSweptFailureMessageIsWrittenWithoutCallerTenant(t *testing.T) {
+	mem := membership.NewStatic()
+	mem.Add("room-9", "maya")
+	activityStore := store.NewMemory()
+	jobs := store.NewMemoryBridgeJobs()
+	pub := &capturePublisher{}
+	svc := &Service{Store: activityStore, Publisher: pub, Membership: mem, BridgeJobs: jobs}
+	seed := tenant.NewContext(context.Background(), tenant.Default)
+	if _, err := jobs.PutAgentJob(seed, store.AgentJob{JobID: "stuck-durable", RoomID: "room-9", MessageSeq: 1, OwnerUserID: "maya", Core: "c", Provider: "nimbus", CreatedAtMs: 1}); err != nil {
+		t.Fatal(err)
+	}
+
+	// No tenant on this context, matching the daemon's sweep loop.
+	svc.SweepAgentJobs(context.Background())
+
+	// Durable when a reader in the job's tenant can see it, which is what a
+	// member reloading the room does.
+	if states := activityStore.SyncStates(seed, "room-9"); len(states) == 0 {
+		t.Fatal("sweep wrote no durable failure message for the room")
+	}
+	var sawMessage bool
+	for _, ev := range pub.events {
+		if ev.Kind == "agent_messages" {
+			sawMessage = true
+		}
+	}
+	if !sawMessage {
+		t.Fatal("sweep published no visible failure message")
+	}
+}

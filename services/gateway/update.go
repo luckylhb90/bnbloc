@@ -1,0 +1,154 @@
+package gateway
+
+import (
+	"encoding/json"
+	"net/http"
+
+	"github.com/luckylhb90/bnbloc/internal/auth"
+	"github.com/luckylhb90/bnbloc/internal/obs"
+	"github.com/luckylhb90/bnbloc/internal/rbac"
+	"github.com/luckylhb90/bnbloc/internal/wire"
+)
+
+type tauriUpdateManifest struct {
+	Version   string `json:"version"`
+	PubDate   string `json:"pub_date,omitempty"`
+	URL       string `json:"url"`
+	Signature string `json:"signature"`
+	Notes     string `json:"notes,omitempty"`
+	Forced    bool   `json:"forced,omitempty"`
+}
+
+func (s *Service) handleAppUpdate(w http.ResponseWriter, r *http.Request) {
+	// Session auth is required because the manifest contains admin-supplied
+	// download URLs; exposing those unauthenticated could leak internal artifacts.
+	if _, err := s.authenticate(r); err != nil {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	cfg, err := loadUpdateConfig(r.Context(), s.PlatformSettings)
+	if err != nil {
+		obs.ServerError(w, "load update config failed", err)
+		http.Error(w, "load update config failed", http.StatusInternalServerError)
+		return
+	}
+	manifest, ok := updateManifestForRequest(cfg, updateRequest{
+		Target:         r.PathValue("target"),
+		CurrentVersion: r.PathValue("currentVersion"),
+		ClientChannel:  requestUpdateChannel(r),
+	})
+	if !ok {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	writeJSON(w, http.StatusOK, manifest)
+}
+
+func (s *Service) handleUpdatePolicy(w http.ResponseWriter, r *http.Request) {
+	// Session auth matches the manifest endpoint: polling policy is only needed
+	// after sign-in, and keeping it authenticated avoids exposing rollout state.
+	if _, err := s.authenticate(r); err != nil {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	cfg, err := loadUpdateConfig(r.Context(), s.PlatformSettings)
+	if err != nil {
+		obs.ServerError(w, "load update policy failed", err)
+		http.Error(w, "load update policy failed", http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusOK, cfg.Policy)
+}
+
+func (s *Service) handlePlatformUpdateConfig(w http.ResponseWriter, r *http.Request) {
+	if !s.requireSuperAdmin(w, r) {
+		return
+	}
+	cfg, err := loadUpdateConfig(r.Context(), s.PlatformSettings)
+	if err != nil {
+		obs.ServerError(w, "load update config failed", err)
+		http.Error(w, "load update config failed", http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusOK, cfg)
+}
+
+func (s *Service) handlePlatformUpdateConfigPut(w http.ResponseWriter, r *http.Request) {
+	claims, ok := s.requireSuperAdminClaims(w, r)
+	if !ok {
+		return
+	}
+	var cfg wire.UpdateConfig
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64*1024)).Decode(&cfg); err != nil {
+		http.Error(w, "invalid json body", http.StatusBadRequest)
+		return
+	}
+	if cfg.Release.Platforms == nil {
+		cfg.Release.Platforms = map[string]wire.UpdatePlatform{}
+	}
+	if err := validateUpdateConfig(cfg); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if err := saveUpdateConfig(r.Context(), s.PlatformSettings, updateConfigSave{Config: cfg, UpdatedBy: claims.Subject, UpdatedAtMs: s.Now().UnixMilli()}); err != nil {
+		obs.ServerError(w, "save update config failed", err)
+		http.Error(w, "save update config failed", http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusOK, cfg)
+}
+
+func (s *Service) requireSuperAdmin(w http.ResponseWriter, r *http.Request) bool {
+	_, ok := s.requireSuperAdminClaims(w, r)
+	return ok
+}
+
+func (s *Service) requireSuperAdminClaims(w http.ResponseWriter, r *http.Request) (auth.Claims, bool) {
+	claims, err := s.authenticate(r)
+	if err != nil {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return auth.Claims{}, false
+	}
+	if !isSuperAdminRole(claims.Role) {
+		http.Error(w, "insufficient org role", http.StatusForbidden)
+		return auth.Claims{}, false
+	}
+	return claims, true
+}
+
+func isSuperAdminRole(role string) bool {
+	return rbac.Can(role, rbac.PermManagePlatform)
+}
+
+func updateManifestForRequest(cfg wire.UpdateConfig, req updateRequest) (tauriUpdateManifest, bool) {
+	if !cfg.Policy.Enabled {
+		return tauriUpdateManifest{}, false
+	}
+	if !wire.IsUpdateTarget(req.Target) {
+		return tauriUpdateManifest{}, false
+	}
+	if req.ClientChannel != cfg.Policy.Channel {
+		return tauriUpdateManifest{}, false
+	}
+	platform, ok := cfg.Release.Platforms[req.Target]
+	if !ok || platform.URL == "" || platform.Signature == "" || cfg.Release.Version == "" {
+		return tauriUpdateManifest{}, false
+	}
+	cmp, err := compareSemver(req.CurrentVersion, cfg.Release.Version)
+	if err != nil || cmp >= 0 {
+		return tauriUpdateManifest{}, false
+	}
+	forced := false
+	if cfg.Policy.MinSupportedVersion != "" {
+		minCmp, err := compareSemver(req.CurrentVersion, cfg.Policy.MinSupportedVersion)
+		forced = err == nil && minCmp < 0
+	}
+	return tauriUpdateManifest{
+		Version:   cfg.Release.Version,
+		PubDate:   cfg.Release.PubDate,
+		URL:       platform.URL,
+		Signature: platform.Signature,
+		Notes:     cfg.Release.Notes,
+		Forced:    forced,
+	}, true
+}

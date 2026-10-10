@@ -1,0 +1,6 @@
+apiVersion: v2
+name: bnbloc
+description: bnbloc control plane (gateway, room, activity, realtime, shareagent, relay)
+type: application
+version: 0.2.0
+appVersion: "0.1.0"

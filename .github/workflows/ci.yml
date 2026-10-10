@@ -1,0 +1,101 @@
+# CI: every job runs one stage of scripts/ci.sh, the single, runner-agnostic
+# list of checks. Keep commands in that script, not here, so any other runner
+# (or a developer before pushing) executes exactly the same checks.
+#
+# Runner labels and the MySQL service image come from repository/organization
+# variables so the same file runs on github.com (hosted runners, the defaults
+# below) and on a GitHub Enterprise host with self-hosted runners. Each runner
+# variable holds JSON: a quoted label ("linux-x64") or a label array
+# (["self-hosted","linux"]). See docs/ci.md.
+name: ci
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  # Nightly run of the default branch (catches drift from toolchains, base
+  # images, and the MySQL image without a push) and a manual trigger.
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # The mysql service container needs a Linux runner with Docker.
+  go:
+    runs-on: ${{ fromJSON(vars.BNBLOC_CI_LINUX_RUNS_ON || '"ubuntu-24.04"') }}
+    services:
+      mysql:
+        image: ${{ vars.BNBLOC_CI_MYSQL_IMAGE || 'mysql:8.4' }}
+        env:
+          MYSQL_ROOT_PASSWORD: ci-root
+          MYSQL_DATABASE: bnbloc
+          MYSQL_USER: bnbloc
+          MYSQL_PASSWORD: ci-pass
+        ports: ["3306:3306"]
+        options: >-
+          --health-cmd "mysqladmin ping -h 127.0.0.1 -pci-root"
+          --health-interval 5s --health-timeout 5s --health-retries 30
+    env:
+      # Enables the MySQL integration tests (internal/store), which skip
+      # without it.
+      BNBLOC_TEST_MYSQL_DSN: "bnbloc:ci-pass@tcp(127.0.0.1:3306)/bnbloc?parseTime=true"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with: { go-version-file: go.mod }
+      - run: scripts/ci.sh go
+
+  web:
+    runs-on: ${{ fromJSON(vars.BNBLOC_CI_LINUX_RUNS_ON || '"ubuntu-24.04"') }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with: { version: 10 }
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+      - run: scripts/ci.sh web
+
+  # The Tauri shell builds natively on macOS with no extra system packages
+  # (Linux would need the webkit2gtk-4.1 dev stack), and it is the shipped
+  # platform.
+  desktop:
+    runs-on: ${{ fromJSON(vars.BNBLOC_CI_MACOS_RUNS_ON || '"macos-14"') }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with: { go-version-file: go.mod }
+      - uses: pnpm/action-setup@v4
+        with: { version: 10 }
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+      - uses: dtolnay/rust-toolchain@stable
+      - run: scripts/ci.sh desktop
+
+  # Public-boundary scan + the manifest's public builds (Go, web, sidecar,
+  # Tauri). The private manifest exists only in the private source tree; a
+  # public checkout has nothing to scan and the stage exits cleanly.
+  boundary:
+    runs-on: ${{ fromJSON(vars.BNBLOC_CI_MACOS_RUNS_ON || '"macos-14"') }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with: { go-version-file: go.mod }
+      - uses: pnpm/action-setup@v4
+        with: { version: 10 }
+      - uses: actions/setup-node@v4
+        with: { node-version: 24 }
+      - uses: dtolnay/rust-toolchain@stable
+      - run: scripts/ci.sh boundary

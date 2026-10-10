@@ -1,0 +1,72 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "bnbloc",
+  "version": "../package.json",
+  "identifier": "sh.bnbloc.desktop",
+  "build": {
+    "beforeDevCommand": "pnpm --dir ../../web dev",
+    "devUrl": "http://localhost:5173",
+    "beforeBuildCommand": "pnpm --dir ../../web build && node scripts/build-bridge-sidecar.mjs",
+    "frontendDist": "../../../services/gateway/webui/static"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [],
+    "security": {
+      "csp": {
+        "default-src": "'self'",
+        "script-src": "'self'",
+        "style-src": "'self' 'unsafe-inline'",
+        "img-src": "'self' data: blob: https: http://localhost:* http://127.0.0.1:*",
+        "font-src": "'self' data:",
+        "media-src": "'self' data: blob:",
+        "connect-src": "'self' ipc: http://ipc.localhost https: wss: http://localhost:* http://127.0.0.1:* ws://localhost:* ws://127.0.0.1:*",
+        "frame-src": "bnbloc-artifact://localhost http://bnbloc-artifact.localhost bnbloc-previewer://localhost http://bnbloc-previewer.localhost bnbloc-site://localhost http://bnbloc-site.localhost",
+        "object-src": "'none'",
+        "base-uri": "'none'",
+        "form-action": "'none'"
+      },
+      "devCsp": null,
+      "dangerousDisableAssetCspModification": ["style-src"]
+    }
+  },
+  "bundle": {
+    "active": true,
+    "createUpdaterArtifacts": true,
+    "targets": "all",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "externalBin": [
+      "binaries/bnbloc-bridge"
+    ],
+    "category": "DeveloperTool",
+    "macOS": {
+      "entitlements": "./Entitlements.plist",
+      "hardenedRuntime": true,
+      "signingIdentity": "-",
+      "dmg": {
+        "background": "dmg/background.tiff",
+        "windowSize": { "width": 660, "height": 450 },
+        "appPosition": { "x": 165, "y": 160 },
+        "applicationFolderPosition": { "x": 495, "y": 160 }
+      }
+    },
+    "shortDescription": "bnbloc desktop client",
+    "longDescription": "The bnbloc shared web UI packaged with a supervised, embedded bridge connector to a local agent core."
+  },
+  "plugins": {
+    "deep-link": {
+      "desktop": {
+        "schemes": ["bnbloc"]
+      }
+    },
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDFFQjBEMkREOUQ2MUVCMjIKUldRaTYyR2QzZEt3SHVaaGVIWTRNT0QzbmcvRHlpOHhsS25SUHA0ZWFnYjBQbzIzNlFsSFhPVWoK"
+    }
+  }
+}

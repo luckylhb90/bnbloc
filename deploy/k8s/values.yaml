@@ -1,0 +1,188 @@
+# bnbloc Helm values. Each service is an independent Deployment + Service.
+#
+# Secrets are NOT created by this chart: create the referenced Secrets out of
+# band (or with your secrets operator) before installing. Every Go service runs
+# with BNBLOC_ENV=production, so a missing DSN / internal key / signing key /
+# OIDC setting fails the pod at startup instead of booting in dev mode.
+image:
+  registry: registry.corp.example
+  # Images are <registry>/<repository>-<service>:<tag>, built from the root
+  # Dockerfile (or deploy/prod/<service>/Dockerfile).
+  repository: bnbloc
+  tag: "0.1.0"
+  pullPolicy: IfNotPresent
+
+# BNBLOC_ENV for every Go service. Keep "production" for any real cluster.
+environment: production
+
+# MySQL DSN shared by every stateful service
+# (user:pass@tcp(host:3306)/bnbloc?parseTime=true[&tls=true]).
+mysql:
+  dsnSecretRef:
+    name: bnbloc-mysql
+    key: dsn
+
+# Service-to-service identity (svcauth). One value, identical everywhere.
+internalKey:
+  secretRef:
+    name: bnbloc-internal
+    key: internalKey
+
+# JWT signing key for bnbloc session tokens (gateway). All gateway replicas
+# share it.
+sessionSigning:
+  secretRef:
+    name: bnbloc-session
+    key: signingKey
+
+# Optional: load secrets from AWS Secrets Manager instead of / on top of the
+# Secrets above (internal/config/aws_secrets.go). Empty = disabled.
+awsSecrets:
+  secretID: ""
+  region: ""
+
+# Enterprise OIDC relying party (gateway). Required in production: the dev
+# verifier accepts any identity and is refused when BNBLOC_ENV=production.
+oidc:
+  issuerURL: ""
+  clientID: ""
+
+# Public web origin (BNBLOC_PUBLIC_URL, e.g. https://bnbloc.corp.example):
+# member notifications deep-link into rooms on it. Empty = notifications carry
+# no link.
+publicURL: ""
+
+# Browser push notifications (N4): the deployment's VAPID key pair, generated
+# with `bnbloc keys gen-vapid` (realtime). Empty publicKey = the channel is
+# off (the web hides its toggle). The private key comes from a Secret; the
+# subject is mailto:<ops address> (empty = publicURL when it is https).
+webPush:
+  publicKey: ""
+  subject: ""
+  privateKeySecretRef: { name: "", key: privateKey }
+
+gateway:
+  # Replicas share all auth state through the database (signing key, SSO
+  # hand-offs, refresh-token families) and reconcile installed components
+  # from platform settings every 30s, so an install on one replica reaches
+  # the others without a restart and no sticky routing is needed.
+  replicas: 2
+  # Internal Prometheus listener (BNBLOC_METRICS_ADDR). The public port never
+  # serves /metrics; scrape this port in-cluster and never route it from the
+  # ingress.
+  metricsPort: 9090
+  hpa: { enabled: true, minReplicas: 2, maxReplicas: 10, targetCPUUtilizationPercentage: 70 }
+  # Cross-tenant platform admins: verified subject ids or emails.
+  superAdmins: []
+  # Extra browser origins for CORS (same-origin browser clients need none).
+  allowedOrigins: []
+  # CIDRs of the ingress controller pods whose X-Forwarded-For is believed
+  # for the per-IP direct-login throttle (BNBLOC_TRUSTED_PROXIES). Only matters
+  # when direct login is enabled (OIDC); SSO-only gateways can leave it empty.
+  # Empty trusts no proxy (direct-login callers then share one bucket).
+  trustedProxies: []
+  # Explicitly configured cores (operator escape hatch; installed component
+  # packages need no entry). Each needs BNBLOC_CORE_<NAME>_URL via extraEnv.
+  cores: []
+  # Optional shared bearer a trusted local daemon presents. Unset disables the
+  # daemon-token bypass (fail closed).
+  localAgentToken:
+    secretRef: { name: "", key: localAgentToken }
+  extraEnv: []
+  ingress:
+    enabled: true
+    className: ""
+    host: bnbloc.corp.example
+    tls: true
+    # The SPA/API and the relay share this host: / -> gateway, /relay -> relay.
+    # Requirements the controller must meet (ingress-nginx annotations shown):
+    # 256 MiB bodies for POST /v1/platform/artifacts and blob artifact
+    # versions (POST /v1/rooms/*/artifacts/*/versions), no response buffering
+    # (room events are SSE), and long read timeouts for SSE/WebSocket.
+    annotations:
+      nginx.ingress.kubernetes.io/proxy-body-size: "256m"
+      nginx.ingress.kubernetes.io/proxy-buffering: "off"
+      nginx.ingress.kubernetes.io/proxy-request-buffering: "off"
+      nginx.ingress.kubernetes.io/proxy-read-timeout: "1800"
+      nginx.ingress.kubernetes.io/proxy-send-timeout: "1800"
+
+room:
+  replicas: 2
+  # Max bytes of one blob artifact version (BNBLOC_ARTIFACT_MAX_BYTES).
+  # Empty = 100 MiB; at most 256 MiB (realtime's blob cap). Raise the
+  # ingress proxy-body-size with it.
+  artifactMaxBytes: ""
+
+activity:  { replicas: 2, hpa: { enabled: true, minReplicas: 2, maxReplicas: 10, targetCPUUtilizationPercentage: 70 } }
+shareagent: { replicas: 2 }
+
+# realtime and relay are SINGLETONS (always 1 replica, Recreate rollout): the
+# SSE hub (per-room sequence counter, replay buffer, presence) and the relay's
+# pairing table live in process memory, so a second replica would split rooms
+# and sync sessions between pods. The chart refuses replicas > 1 or an HPA for
+# them. Scale them vertically via resources.
+realtime:
+  attachments:
+    # S3 (or S3-compatible) blob store for attachments + sidecar artifacts.
+    # Empty bucket = local disk on the PVC below.
+    s3:
+      bucket: ""
+      region: ""
+      endpoint: ""
+      keyPrefix: ""
+      pathStyle: false
+      # Downloads answer 302 to a 5-minute presigned URL (S3 only) instead
+      # of streaming through bnbloc. publicEndpoint = the S3 base URL
+      # clients reach when endpoint is cluster-internal (empty = endpoint).
+      directDownloads: false
+      publicEndpoint: ""
+      # Optional static credentials; empty name = AWS default credential
+      # chain (e.g. IRSA / pod identity).
+      credentialsSecretRef: { name: "", accessKeyIDKey: accessKeyID, secretAccessKeyKey: secretAccessKey }
+    persistence:
+      size: 20Gi
+      storageClass: ""
+  resources:
+    requests: { cpu: "250m", memory: "256Mi" }
+    limits:   { cpu: "2", memory: "1Gi" }
+
+relay:
+  stunServers: []
+  endpoints: []
+
+resources:
+  requests: { cpu: "100m", memory: "128Mi" }
+  limits:   { cpu: "500m", memory: "512Mi" }
+
+# Nightly in-cluster smoke (templates/smoke-cronjob.yaml): a CronJob runs
+# `bnbloc smoke --alert-on-failure` from the CLI image
+# (<registry>/<repository>-cli:<tag>, built with SERVICE=cli or
+# deploy/prod/cli/Dockerfile). A failed run alerts the platform admins through
+# the installed notifier components and leaves a failed Job. The API token is
+# a super-admin-issued token (`bnbloc api-tokens create --subject svc:smoke`;
+# list the subject in gateway.superAdmins so it may send the alert), stored in
+# a Secret created out of band. See docs/production-deployment.md#nightly-smoke.
+smoke:
+  enabled: false
+  # Cron schedule, evaluated in timeZone (an IANA name, e.g. Europe/Berlin);
+  # empty timeZone = the controller's zone (UTC on most clusters).
+  schedule: "41 2 * * *"
+  timeZone: ""
+  # Gateway the smoke drives. Empty = the in-cluster Service
+  # (http://bnbloc-gateway:8080); set the public https URL to also cover the
+  # ingress (TLS, SSE buffering, timeouts).
+  gatewayURL: ""
+  # Also wait for this agent's reply (--agent: provider, core/provider or
+  # target id). The token's subject must own the agent and its bridge must be
+  # online. Empty = message path only.
+  agent: ""
+  # Alert recipients (member ids); empty = every BNBLOC_SUPER_ADMINS entry.
+  alertTo: []
+  # Extra `bnbloc smoke` flags, e.g. ["--timeout", "180s"].
+  extraArgs: []
+  apiTokenSecretRef: { name: "", key: apiToken }
+  # Upper bound of one run (the agent reply wait is --timeout, default 120s).
+  activeDeadlineSeconds: 900
+  resources:
+    requests: { cpu: "10m", memory: "32Mi" }
+    limits:   { cpu: "200m", memory: "128Mi" }

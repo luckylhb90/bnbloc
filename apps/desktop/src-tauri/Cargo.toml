@@ -1,0 +1,70 @@
+[package]
+name = "bnbloc-desktop"
+version = "0.1.24"
+description = "bnbloc desktop client"
+authors = ["bnbloc"]
+edition = "2021"
+rust-version = "1.77"
+
+# The library the mobile/desktop entrypoints share; `main.rs` is a thin wrapper.
+[lib]
+name = "bnbloc_desktop_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-updater = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+parking_lot = "0.12"
+
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream"] }
+sha2 = "0.10"
+futures-util = "0.3"
+tokio = { version = "1", features = ["rt", "time", "sync", "fs", "io-util", "net"] }
+# The plugin host API (internal_ext/plugin_host.rs): a loopback HTTP/1 server
+# for plugin sidecars. hyper/hyper-util/http-body-util are already in the tree
+# through reqwest; only the server side is enabled here.
+hyper = { version = "1", features = ["server", "http1"] }
+hyper-util = { version = "0.1", features = ["tokio"] }
+http-body-util = "0.1"
+# Per-launch plugin host tokens (OS CSPRNG); already in the tree.
+getrandom = "0.3"
+tauri-plugin-deep-link = "2"
+# `deep-link`: a second launch's argv deep link (Windows/Linux warm start) is
+# forwarded to the running instance's deep-link handler instead of dropped.
+tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }
+# Child-process supervision (bridge + component sidecars): a shared wait/kill
+# handle so a stop can close stdin, wait a grace period, then force-kill.
+shared_child = { version = "1", default-features = false }
+# Hand URLs/apps to the OS opener (ShellExecuteExW on Windows, never `cmd`).
+open = "5"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+# App Nap opt-out (main.rs). objc2 refuses to compile for non-Apple targets,
+# so it must stay macOS-only or the Windows/Linux builds fail.
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2-foundation = "0.3"
+
+# Job Objects: every supervised child (bridge + sidecars) and everything it
+# spawns lives in a kill-on-close job (child_process/windows_job.rs). Same
+# 0.61 line shared_child already pulls in.
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_System_Diagnostics_ToolHelp",
+    "Win32_System_JobObjects",
+    "Win32_System_Threading",
+] }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+
+[features]
+custom-protocol = ["tauri/custom-protocol"]

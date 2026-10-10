@@ -1,0 +1,9 @@
+bnbloc
+Copyright 2026 The bnbloc Authors
+
+This product is licensed under the Apache License, Version 2.0 (see LICENSE).
+The bnbloc name and logo are not licensed under it; see TRADEMARKS.md.
+
+Third-party components are distributed under their own licenses; see the
+dependency manifests (go.mod, web/package.json, apps/desktop/package.json,
+apps/desktop/src-tauri/Cargo.toml) for the full list.

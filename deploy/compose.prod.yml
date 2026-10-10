@@ -1,0 +1,260 @@
+# bnbloc production overlay — single-host deployment.
+#
+# Usage (ALWAYS pass both files explicitly; a bare `docker compose` would also
+# auto-load compose.override.yml, which is an internal-only build):
+#
+#   docker compose -f compose.yml -f deploy/compose.prod.yml --env-file .env.production up -d
+#
+# What this overlay changes versus the development compose.yml:
+#   - BNBLOC_ENV=production on every service: each dev-permissive fallback
+#     (unsigned internal identity, dev login verifier, in-memory store,
+#     ephemeral session key) becomes a fatal startup error instead of a warning
+#   - removes the single-host demo wiring (the host.docker.internal alias);
+#     a remote deployment cannot reach a member's local daemons or files
+#   - publishes the gateway and the relay on loopback only — TLS termination
+#     belongs to the reverse proxy in front of them (deploy/Caddyfile), never
+#     to a container published on 0.0.0.0
+#   - adds restart policies, log rotation, readiness healthchecks (gating
+#     start order), and memory/CPU limits so the stack survives a host reboot,
+#     cannot fill the disk with logs, and one leaking service cannot take the
+#     host down
+#
+# Secrets come from .env.production and/or AWS Secrets Manager (set
+# BNBLOC_AWS_SECRET_ID — see internal/config/aws_secrets.go). Vars are passed
+# through as optional (${VAR:-}) so a deployment whose secrets live only in
+# AWS can still create containers; with BNBLOC_ENV=production a value that is
+# missing after the secrets load fails that service at boot.
+#
+# Healthchecks: the service images are distroless (no shell), so each probes
+# itself with the static /usr/local/bin/healthcheck binary built into every
+# image (deploy/healthcheck). It GETs /readyz, which is 503 while the service's
+# database is unreachable — `depends_on: service_healthy` therefore orders
+# start-up on real readiness, not on a started process.
+#
+# Resource limits are sizing defaults for a small deployment; raise them for
+# your load (`docker stats` shows actual use).
+
+x-service: &service
+  restart: unless-stopped
+  logging:
+    driver: json-file
+    options: { max-size: "20m", max-file: "5" }
+
+x-health: &health
+  interval: 15s
+  timeout: 5s
+  start_period: 30s
+  retries: 3
+
+services:
+  # The database is an externally provisioned resource, so the local MySQL
+  # container is disabled. A `profiles` entry Compose never activates is the
+  # only way to suppress a service declared in the base file; the dependent
+  # services below must also drop their `depends_on: mysql`, or Compose starts
+  # it anyway to satisfy the dependency.
+  mysql:
+    profiles: ["disabled-external-db"]
+
+  room:
+    <<: *service
+    depends_on: !override []
+    environment:
+      BNBLOC_ENV: production
+      BNBLOC_MYSQL_DSN: "${BNBLOC_MYSQL_DSN:-}"
+      BNBLOC_AWS_SECRET_ID: "${BNBLOC_AWS_SECRET_ID:-}"
+      BNBLOC_AWS_REGION: "${BNBLOC_AWS_REGION:-}"
+      BNBLOC_INTERNAL_KEY: "${BNBLOC_INTERNAL_KEY:-}"
+      BNBLOC_ARTIFACT_MAX_BYTES: "${BNBLOC_ARTIFACT_MAX_BYTES:-}"
+    healthcheck:
+      <<: *health
+      test: ["CMD", "/usr/local/bin/healthcheck", "http://127.0.0.1:8080/readyz"]
+    deploy:
+      resources:
+        limits: { cpus: "1.0", memory: 256M }
+
+  realtime:
+    <<: *service
+    depends_on: !override
+      room: { condition: service_healthy }
+    environment:
+      BNBLOC_ENV: production
+      BNBLOC_MYSQL_DSN: "${BNBLOC_MYSQL_DSN:-}"
+      BNBLOC_AWS_SECRET_ID: "${BNBLOC_AWS_SECRET_ID:-}"
+      BNBLOC_AWS_REGION: "${BNBLOC_AWS_REGION:-}"
+      BNBLOC_INTERNAL_KEY: "${BNBLOC_INTERNAL_KEY:-}"
+      # Signed plugin packages only (realtime rehydrates plugin records too).
+      BNBLOC_EXT_ALLOW_UNSIGNED: ""
+      # The blob store (BNBLOC_ATTACHMENTS_DIR / BNBLOC_ATTACHMENTS_S3_*,
+      # incl. _DIRECT_DOWNLOADS and _PUBLIC_ENDPOINT) passes through from
+      # compose.yml unchanged.
+      # Member notifications: public origin for deep links. Notifier
+      # components are installed packages (permissions.network).
+      BNBLOC_PUBLIC_URL: "${BNBLOC_PUBLIC_URL:-}"
+      # Browser push (N4): VAPID pair (`bnbloc keys gen-vapid`); empty = off.
+      BNBLOC_WEB_PUSH_VAPID_PUBLIC_KEY: "${BNBLOC_WEB_PUSH_VAPID_PUBLIC_KEY:-}"
+      BNBLOC_WEB_PUSH_VAPID_PRIVATE_KEY: "${BNBLOC_WEB_PUSH_VAPID_PRIVATE_KEY:-}"
+      BNBLOC_WEB_PUSH_VAPID_SUBJECT: "${BNBLOC_WEB_PUSH_VAPID_SUBJECT:-}"
+    healthcheck:
+      <<: *health
+      test: ["CMD", "/usr/local/bin/healthcheck", "http://127.0.0.1:8082/readyz"]
+    deploy:
+      resources:
+        # Holds every open SSE stream and streams attachment/artifact uploads.
+        limits: { cpus: "2.0", memory: 512M }
+
+  activity:
+    <<: *service
+    depends_on: !override
+      room: { condition: service_healthy }
+      realtime: { condition: service_healthy }
+    environment:
+      BNBLOC_ENV: production
+      BNBLOC_MYSQL_DSN: "${BNBLOC_MYSQL_DSN:-}"
+      BNBLOC_AWS_SECRET_ID: "${BNBLOC_AWS_SECRET_ID:-}"
+      BNBLOC_AWS_REGION: "${BNBLOC_AWS_REGION:-}"
+      BNBLOC_INTERNAL_KEY: "${BNBLOC_INTERNAL_KEY:-}"
+      # Single-host serve-all bridges are a testing mode, refused in production.
+      BNBLOC_ACTIVITY_ALLOW_SERVE_ALL: ""
+      # Links in usage budget warnings (R12).
+      BNBLOC_PUBLIC_URL: "${BNBLOC_PUBLIC_URL:-}"
+    healthcheck:
+      <<: *health
+      test: ["CMD", "/usr/local/bin/healthcheck", "http://127.0.0.1:8081/readyz"]
+    deploy:
+      resources:
+        limits: { cpus: "1.0", memory: 256M }
+
+  shareagent:
+    <<: *service
+    depends_on: !override
+      room: { condition: service_healthy }
+    environment:
+      BNBLOC_ENV: production
+      BNBLOC_MYSQL_DSN: "${BNBLOC_MYSQL_DSN:-}"
+      BNBLOC_AWS_SECRET_ID: "${BNBLOC_AWS_SECRET_ID:-}"
+      BNBLOC_AWS_REGION: "${BNBLOC_AWS_REGION:-}"
+      BNBLOC_INTERNAL_KEY: "${BNBLOC_INTERNAL_KEY:-}"
+      # Deep links in borrow-request notifications.
+      BNBLOC_PUBLIC_URL: "${BNBLOC_PUBLIC_URL:-}"
+    healthcheck:
+      <<: *health
+      test: ["CMD", "/usr/local/bin/healthcheck", "http://127.0.0.1:8083/readyz"]
+    deploy:
+      resources:
+        limits: { cpus: "1.0", memory: 256M }
+
+  relay:
+    <<: *service
+    environment:
+      BNBLOC_ENV: production
+    # Loopback only: the reverse proxy routes https://<host>/relay/* here
+    # (deploy/Caddyfile) so remote desktop bridges reach file sync over TLS.
+    # The sync token rides the stream in cleartext — never publish this port
+    # on 0.0.0.0.
+    ports:
+      - "127.0.0.1:7091:8085"
+    healthcheck:
+      <<: *health
+      test: ["CMD", "/usr/local/bin/healthcheck", "http://127.0.0.1:8085/readyz"]
+    deploy:
+      resources:
+        # Pairs file-sync byte streams in memory.
+        limits: { cpus: "1.0", memory: 256M }
+
+  gateway:
+    <<: *service
+    build:
+      args:
+        GO_TAGS: "${GO_TAGS:-}"
+    depends_on: !override
+      room: { condition: service_healthy }
+      activity: { condition: service_healthy }
+      realtime: { condition: service_healthy }
+      shareagent: { condition: service_healthy }
+    # Loopback only: the reverse proxy terminates TLS and is the sole public
+    # listener. Publishing 7090 on 0.0.0.0 would expose plaintext sessions.
+    ports: !override
+      - "127.0.0.1:7090:8080"
+    environment:
+      BNBLOC_ENV: production
+      # Internal /metrics listener (not in `ports`, so never published); the
+      # public listener answers /metrics with 404.
+      BNBLOC_METRICS_ADDR: "${BNBLOC_METRICS_ADDR:-:9090}"
+      BNBLOC_MYSQL_DSN: "${BNBLOC_MYSQL_DSN:-}"
+      BNBLOC_AWS_SECRET_ID: "${BNBLOC_AWS_SECRET_ID:-}"
+      BNBLOC_AWS_REGION: "${BNBLOC_AWS_REGION:-}"
+      BNBLOC_INTERNAL_KEY: "${BNBLOC_INTERNAL_KEY:-}"
+      BNBLOC_SESSION_SIGNING_KEY: "${BNBLOC_SESSION_SIGNING_KEY:-}"
+      BNBLOC_SUPER_ADMINS: "${BNBLOC_SUPER_ADMINS:-}"
+      # Optional shared daemon bearer; empty disables the bypass (fail closed).
+      BNBLOC_LOCAL_AGENT_TOKEN: "${BNBLOC_LOCAL_AGENT_TOKEN:-}"
+      # Identity: production requires an OIDC issuer + client id (the dev
+      # verifier accepts any identity and is refused when BNBLOC_ENV=production).
+      BNBLOC_OIDC_ISSUER_URL: "${BNBLOC_OIDC_ISSUER_URL:-}"
+      BNBLOC_OIDC_CLIENT_ID: "${BNBLOC_OIDC_CLIENT_ID:-}"
+      BNBLOC_ALLOWED_ORIGINS: "${BNBLOC_ALLOWED_ORIGINS:-}"
+      # The edge proxy (Caddy on the host) reaches the loopback-published
+      # gateway through this network's gateway address, so that is the one
+      # peer whose X-Forwarded-For is believed for the per-IP login/invite
+      # limits. Keep it in step with the subnet pinned under `networks` below.
+      BNBLOC_TRUSTED_PROXIES: "${BNBLOC_TRUSTED_PROXIES:-172.29.80.1/32}"
+      # Signed packages only. The dev compose defaults this on so the console
+      # upload flow works out of the box; production pins it off and the
+      # override here prevents the dev default from leaking through.
+      BNBLOC_EXT_ALLOW_UNSIGNED: ""
+      # No core is compiled in or pre-wired: cores exist only after a
+      # super-admin installs a signed package (Platform console → Components,
+      # or `bnbloc cores install`), which persists to platform settings and
+      # rehydrates at boot. BNBLOC_CORES stays available as an operator escape
+      # hatch for explicitly-configured cores (each then needs a reachable
+      # BNBLOC_CORE_<NAME>_URL), defaulting to none.
+      BNBLOC_CORES: "${BNBLOC_CORES:-}"
+    # Drops the host.docker.internal alias from compose.yml; prod has no
+    # host-core wiring.
+    extra_hosts: !reset []
+    healthcheck:
+      <<: *health
+      test: ["CMD", "/usr/local/bin/healthcheck", "http://127.0.0.1:8080/readyz"]
+    deploy:
+      resources:
+        # Proxies SSE and streams artifact uploads (up to 256 MiB) to realtime.
+        limits: { cpus: "2.0", memory: 512M }
+
+  # Nightly smoke (R3): `bnbloc smoke --alert-on-failure` from the CLI image
+  # against the gateway on this network. Profile-gated, so `up` never starts
+  # it; the host's scheduler runs it once (docs/production-deployment.md
+  # #nightly-smoke), e.g. a crontab line:
+  #   41 2 * * * cd /srv/bnbloc && docker compose -f compose.yml -f deploy/compose.prod.yml --env-file .env.production run --rm smoke
+  # A failed run alerts the platform admins through the installed notifiers
+  # and exits non-zero (cron mails/logs it — the fallback signal).
+  smoke:
+    profiles: ["smoke"]
+    build: { context: ., args: { SERVICE: cli, CI_COMMIT_SHA: "${CI_COMMIT_SHA:-}" } }
+    restart: "no"
+    logging:
+      driver: json-file
+      options: { max-size: "5m", max-file: "3" }
+    environment:
+      # Default: the gateway container itself. Set the public https URL to
+      # also cover the reverse proxy.
+      BNBLOC_GATEWAY: "${BNBLOC_SMOKE_GATEWAY:-http://gateway:8080}"
+      # Super-admin-issued API token (`bnbloc api-tokens create --subject
+      # svc:smoke`; list svc:smoke in BNBLOC_SUPER_ADMINS for the alert).
+      BNBLOC_API_TOKEN: "${BNBLOC_SMOKE_API_TOKEN:-}"
+    # Empty --agent skips the agent-reply step; empty --alert-to alerts every
+    # BNBLOC_SUPER_ADMINS entry.
+    command: ["smoke", "--alert-on-failure", "--agent", "${BNBLOC_SMOKE_AGENT:-}", "--alert-to", "${BNBLOC_SMOKE_ALERT_TO:-}"]
+    deploy:
+      resources:
+        limits: { cpus: "0.5", memory: 128M }
+
+networks:
+  # Pinned so the gateway can trust exactly the address the host-side proxy
+  # arrives from (BNBLOC_TRUSTED_PROXIES above). Change both together if this
+  # range collides with another network on the host; an existing deployment
+  # must `docker compose down` once for the new subnet to apply.
+  default:
+    ipam:
+      config:
+        - subnet: 172.29.80.0/24
+          gateway: 172.29.80.1

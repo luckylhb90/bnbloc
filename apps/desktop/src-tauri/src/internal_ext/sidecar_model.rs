@@ -1,0 +1,461 @@
+use std::collections::{HashMap, HashSet};
+
+use crate::child_process::Child;
+
+pub(super) struct Inner {
+    pub(super) desired_up: bool,
+    pub(super) generation: u64,
+    pub(super) sidecars: HashMap<String, ManagedSidecar>,
+    // The core set the running bridge was last started with (or the last set
+    // observed while it was down): binary core name → runtime URL, manifest
+    // core name → manifest content fingerprint. Drives the bridge-stabilizing
+    // watcher in sidecar_bridge_sync.
+    pub(super) bridge_cores: HashMap<String, String>,
+}
+
+pub(super) struct ManagedSidecar {
+    pub(super) spec: Option<SidecarSpec>,
+    pub(super) runtime_url: Option<String>,
+    pub(super) child: Option<Child>,
+    pub(super) generation: u64,
+    pub(super) supervisor_active: bool,
+    /// Set when this spec's artifact was refused (wrong origin, persistent
+    /// checksum mismatch): no supervisor is started and no re-download is
+    /// attempted until the catalog publishes a different spec.
+    pub(super) refused: Option<String>,
+    pub(super) status: AdapterStatus,
+}
+
+impl ManagedSidecar {
+    pub(super) fn pending(status: AdapterStatus) -> Self {
+        Self {
+            spec: None,
+            runtime_url: None,
+            child: None,
+            generation: 0,
+            supervisor_active: false,
+            refused: None,
+            status,
+        }
+    }
+}
+
+#[derive(Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AdapterStatus {
+    pub(super) kind: ComponentKind,
+    pub name: String,
+    pub state: String,
+    pub message: String,
+    pub pid: Option<u32>,
+    pub version: Option<String>,
+    pub local_url: Option<String>,
+}
+
+impl AdapterStatus {
+    pub(super) fn new(
+        kind: ComponentKind,
+        name: &str,
+        state: &str,
+        message: String,
+        pid: Option<u32>,
+        version: Option<String>,
+    ) -> Self {
+        Self {
+            kind,
+            name: name.to_string(),
+            state: state.into(),
+            message,
+            pid,
+            version,
+            local_url: None,
+        }
+    }
+
+    pub(super) fn ready(spec: &SidecarSpec) -> Self {
+        let what = if spec.binary {
+            "sidecar resolved"
+        } else {
+            "manifest installed"
+        };
+        Self::new(
+            spec.kind,
+            &spec.name,
+            "ready",
+            format!("{} {what}", spec.name),
+            None,
+            Some(spec.version.clone()),
+        )
+    }
+}
+
+#[derive(Clone)]
+pub(super) struct GatewayAccess {
+    pub(super) base_url: String,
+    pub(super) token: String,
+}
+
+#[derive(Clone, PartialEq, Eq)]
+pub(super) struct SidecarSpec {
+    pub(super) kind: ComponentKind,
+    pub(super) name: String,
+    pub(super) version: String,
+    pub(super) sha256: String,
+    pub(super) url: String,
+    pub(super) manifest: Option<serde_json::Value>,
+    pub(super) local_url: String,
+    pub(super) listen_env: String,
+    /// Package-declared env var set to "1" so the sidecar knows it is
+    /// supervised and exits when its desktop-owned stdin closes.
+    pub(super) supervised_env: String,
+    pub(super) args: Vec<String>,
+    /// false for a manifest core: no binary to download or supervise — the
+    /// manifest alone is the installable content.
+    pub(super) binary: bool,
+    /// Plugin launch metadata (empty for cores).
+    pub(super) plugin: PluginLaunch,
+    /// Sandbox launch metadata (empty for cores and plugins).
+    pub(super) sandbox: SandboxLaunch,
+}
+
+/// What a sandbox sidecar (`bnbloc.sandbox.package/v1`) is launched with
+/// beyond the common sidecar fields: a fresh bearer in `token_env`, a private
+/// data dir in `data_dir_env`, the extra per-platform files laid out beside
+/// the executable (each path handed over in its env), and the guest profile
+/// the desktop prewarms.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(super) struct SandboxLaunch {
+    pub(super) token_env: String,
+    pub(super) data_dir_env: String,
+    pub(super) files: Vec<SidecarFileSpec>,
+    pub(super) guest: Option<GuestProfile>,
+}
+
+/// One declared sidecar file resolved for this platform
+/// (`artifacts["<platform>/<name>"]`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) struct SidecarFileSpec {
+    pub(super) name: String,
+    pub(super) env: String,
+    pub(super) executable: bool,
+    pub(super) url: String,
+    pub(super) sha256: String,
+}
+
+/// A sandbox package's machine profile (pkgmeta.Guest).
+#[derive(Clone, Debug, PartialEq, Eq, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct GuestProfile {
+    pub(super) image: String,
+    #[serde(default)]
+    pub(super) cpus: u32,
+    #[serde(default, rename = "memoryMiB")]
+    pub(super) memory_mib: u32,
+}
+
+/// What a plugin sidecar is launched with beyond the common sidecar fields:
+/// the host API capabilities it may use (`permissions.host`: it then gets
+/// `BNBLOC_PLUGIN_HOST_URL`/`_TOKEN`) and its desktop-local settings schema
+/// (`localSettings`: the values are passed in `BNBLOC_PLUGIN_SETTINGS_FILE`).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(super) struct PluginLaunch {
+    pub(super) host: Vec<String>,
+    pub(super) local_settings: Vec<LocalSettingField>,
+}
+
+/// One field of a plugin's desktop-local settings schema (pkgmeta.LocalSetting).
+#[derive(Clone, Debug, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LocalSettingField {
+    pub key: String,
+    pub label: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub help: Option<String>,
+    #[serde(default)]
+    pub secret: bool,
+    #[serde(default)]
+    pub required: bool,
+}
+
+impl SidecarSpec {
+    pub(super) fn id(&self) -> String {
+        super::sidecar_status::component_id(self.kind, &self.name)
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ComponentKind {
+    Core,
+    Plugin,
+    /// A Sandbox Protocol runtime (`bnbloc.sandbox.package/v1`): supervised
+    /// like any sidecar plus its extra files, token and data dir; at most one
+    /// is active (internal_ext/sandbox.rs).
+    Sandbox,
+    /// A previewer bundle (`bnbloc.previewer.package/v1`, runtime "bundle"):
+    /// static web code, never a process. Not desktop-supervised; its bundle
+    /// is fetched on demand by the `bnbloc-previewer` scheme
+    /// (internal_ext/previewer_cache.rs).
+    Previewer,
+}
+
+#[derive(serde::Deserialize)]
+pub(super) struct ComponentsResponse {
+    pub(super) components: Vec<ComponentEntry>,
+}
+
+pub(super) struct ResolvedSpecs {
+    pub(super) specs: Vec<SidecarSpec>,
+    pub(super) discovered: HashSet<String>,
+    pub(super) failures: Vec<SpecFailure>,
+    /// Installed components deliberately not run (a second sandbox runtime:
+    /// only one is active per desktop).
+    pub(super) inactive: Vec<SpecFailure>,
+}
+
+pub(super) struct SpecFailure {
+    pub(super) kind: ComponentKind,
+    pub(super) name: String,
+    pub(super) message: String,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct ComponentEntry {
+    pub(super) kind: ComponentKind,
+    pub(super) name: String,
+    pub(super) version: String,
+    pub(super) runtime: Option<String>,
+    pub(super) requires_desktop: Option<bool>,
+    pub(super) rollout: String,
+    pub(super) installed: bool,
+    pub(super) artifacts: Option<HashMap<String, ComponentArtifact>>,
+    pub(super) sidecar: Option<ArtifactSidecar>,
+    pub(super) manifest: Option<serde_json::Value>,
+    #[serde(default)]
+    pub(super) permissions: Option<ComponentPermissions>,
+    #[serde(default)]
+    pub(super) local_settings: Option<Vec<LocalSettingField>>,
+    #[serde(default)]
+    pub(super) guest: Option<GuestProfile>,
+    /// Present for an installed previewer: its verified bundle pin.
+    #[serde(default)]
+    pub(super) previewer: Option<PreviewerEntry>,
+}
+
+/// The part of a catalog previewer block the desktop needs: the gateway
+/// artifact URL of the bundle archive and its sha256 pin.
+#[derive(Clone, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct PreviewerEntry {
+    // Defaulted so one malformed entry can never fail the whole catalog
+    // decode (and with it sidecar supervision); empty pins are not served.
+    #[serde(default)]
+    pub(super) bundle_url: String,
+    #[serde(default)]
+    pub(super) bundle_sha256: String,
+}
+
+#[derive(Clone, Default, serde::Deserialize)]
+pub(super) struct ComponentPermissions {
+    #[serde(default)]
+    pub(super) host: Option<Vec<String>>,
+}
+
+#[derive(Clone, serde::Deserialize)]
+pub(super) struct ComponentArtifact {
+    pub(super) url: String,
+    pub(super) sha256: String,
+}
+
+pub(super) fn resolve_component_specs(
+    response: &ComponentsResponse,
+    platform: &str,
+) -> ResolvedSpecs {
+    let mut specs = Vec::new();
+    let mut discovered = HashSet::new();
+    let mut failures = Vec::new();
+    let mut inactive = Vec::new();
+    // One sandbox runtime per desktop (it owns the one machine): the
+    // lexically first installed name wins, deterministically.
+    let active_sandbox = response
+        .components
+        .iter()
+        .filter(|c| c.kind == ComponentKind::Sandbox && c.active_desktop_component())
+        .map(|c| c.name.as_str())
+        .min();
+
+    for component in &response.components {
+        if !component.active_desktop_component() {
+            continue;
+        }
+        discovered.insert(component.id());
+        if component.kind == ComponentKind::Sandbox && Some(component.name.as_str()) != active_sandbox {
+            inactive.push(SpecFailure {
+                kind: component.kind,
+                name: component.name.clone(),
+                message: format!(
+                    "Not running: only one sandbox runtime runs per computer and {} is active",
+                    active_sandbox.unwrap_or_default()
+                ),
+            });
+            continue;
+        }
+        match component.to_sidecar_spec(platform) {
+            Ok(spec) => specs.push(spec),
+            Err(message) => failures.push(SpecFailure {
+                kind: component.kind,
+                name: component.name.clone(),
+                message,
+            }),
+        }
+    }
+
+    ResolvedSpecs {
+        specs,
+        discovered,
+        failures,
+        inactive,
+    }
+}
+
+impl ComponentEntry {
+    fn id(&self) -> String {
+        super::sidecar_status::component_id(self.kind, &self.name)
+    }
+
+    /// Plugin launch metadata from the catalog entry (cores get none).
+    fn plugin_launch(&self) -> PluginLaunch {
+        if self.kind != ComponentKind::Plugin {
+            return PluginLaunch::default();
+        }
+        PluginLaunch {
+            host: self
+                .permissions
+                .as_ref()
+                .and_then(|p| p.host.clone())
+                .unwrap_or_default(),
+            local_settings: self.local_settings.clone().unwrap_or_default(),
+        }
+    }
+
+    /// Sandbox launch metadata from the catalog entry (other kinds get none).
+    /// Every declared file must have this platform's artifact.
+    fn sandbox_launch(&self, sidecar: &ArtifactSidecar, platform: &str) -> Result<SandboxLaunch, String> {
+        if self.kind != ComponentKind::Sandbox {
+            return Ok(SandboxLaunch::default());
+        }
+        let token_env = sidecar.token_env.clone().unwrap_or_default();
+        if token_env.trim().is_empty() {
+            return Err(format!("{} declares no sidecar.tokenEnv", self.name));
+        }
+        let mut files = Vec::new();
+        for file in sidecar.files.iter().flatten() {
+            let key = format!("{platform}/{}", file.name);
+            let artifact = self
+                .artifacts
+                .as_ref()
+                .and_then(|artifacts| artifacts.get(&key))
+                .ok_or_else(|| format!("{} has no {key} artifact", self.name))?;
+            files.push(SidecarFileSpec {
+                name: file.name.clone(),
+                env: file.env.clone(),
+                executable: file.executable,
+                url: artifact.url.clone(),
+                sha256: artifact.sha256.clone(),
+            });
+        }
+        Ok(SandboxLaunch {
+            token_env,
+            data_dir_env: sidecar.data_dir_env.clone().unwrap_or_default(),
+            files,
+            guest: self.guest.clone(),
+        })
+    }
+
+    fn active_desktop_component(&self) -> bool {
+        if self.rollout == "off" || !self.installed {
+            return false;
+        }
+        match self.runtime.as_deref() {
+            Some("manifest") => self.kind == ComponentKind::Core,
+            Some("sidecar") => self.requires_desktop.unwrap_or(false),
+            Some("endpoint") | None => false,
+            Some(_) => false,
+        }
+    }
+
+    fn to_sidecar_spec(&self, platform: &str) -> Result<SidecarSpec, String> {
+        match self.runtime.as_deref() {
+            Some("manifest") => Ok(SidecarSpec {
+                kind: self.kind,
+                name: self.name.clone(),
+                version: self.version.clone(),
+                sha256: String::new(),
+                url: String::new(),
+                manifest: self.manifest.clone(),
+                local_url: String::new(),
+                listen_env: String::new(),
+                supervised_env: String::new(),
+                args: Vec::new(),
+                binary: false,
+                plugin: PluginLaunch::default(),
+                sandbox: SandboxLaunch::default(),
+            }),
+            Some("sidecar") => {
+                let artifact = self
+                    .artifacts
+                    .as_ref()
+                    .and_then(|artifacts| artifacts.get(platform))
+                    .ok_or_else(|| format!("{} has no {platform} artifact", self.name))?;
+                let sidecar = self
+                    .sidecar
+                    .as_ref()
+                    .ok_or_else(|| format!("{} sidecar metadata missing", self.name))?;
+                Ok(SidecarSpec {
+                    kind: self.kind,
+                    name: self.name.clone(),
+                    version: self.version.clone(),
+                    sha256: artifact.sha256.clone(),
+                    url: artifact.url.clone(),
+                    manifest: self.manifest.clone(),
+                    local_url: sidecar.local_url.clone().unwrap_or_default(),
+                    listen_env: sidecar.listen_env.clone().unwrap_or_default(),
+                    supervised_env: sidecar.supervised_env.clone().unwrap_or_default(),
+                    args: sidecar.args.clone().unwrap_or_default(),
+                    binary: true,
+                    plugin: self.plugin_launch(),
+                    sandbox: self.sandbox_launch(sidecar, platform)?,
+                })
+            }
+            Some("endpoint") | None => Err(format!("{} is not desktop managed", self.name)),
+            Some(runtime) => Err(format!("{} has unsupported runtime {runtime}", self.name)),
+        }
+    }
+}
+
+#[derive(Clone, PartialEq, Eq, serde::Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct ArtifactSidecar {
+    pub(super) local_url: Option<String>,
+    pub(super) listen_env: Option<String>,
+    pub(super) supervised_env: Option<String>,
+    pub(super) args: Option<Vec<String>>,
+    pub(super) token_env: Option<String>,
+    pub(super) data_dir_env: Option<String>,
+    pub(super) files: Option<Vec<ArtifactSidecarFile>>,
+}
+
+/// One declared extra sidecar file (pkgmeta.SidecarFile).
+#[derive(Clone, PartialEq, Eq, serde::Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct ArtifactSidecarFile {
+    pub(super) name: String,
+    pub(super) env: String,
+    #[serde(default)]
+    pub(super) executable: bool,
+}
+
+#[cfg(test)]
+#[path = "sidecar_model_tests.rs"]
+mod sidecar_model_tests;

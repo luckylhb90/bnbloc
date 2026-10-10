@@ -1,0 +1,724 @@
+-- bnbloc control-plane schema (MySQL 8, InnoDB, utf8mb4).
+-- Timestamps are BIGINT unix-ms for parity with the wire contracts.
+-- No provider credentials, host paths, or account cookies are ever stored.
+--
+-- Multi-tenancy: every row is scoped by tenant_id (the organization). It is the
+-- hard isolation boundary — the store refuses a query with no tenant. Existing
+-- single-tenant data is backfilled to tenant 'default' by a migration, so the
+-- upgrade is non-breaking. tenant_id leads composite keys/indexes so per-tenant
+-- scans stay selective.
+
+CREATE TABLE IF NOT EXISTS tenants (
+  tenant_id     VARCHAR(64) PRIMARY KEY,
+  name          VARCHAR(255) NOT NULL,
+  status        ENUM('active','suspended') NOT NULL DEFAULT 'active',
+  sso_issuer    VARCHAR(255) NOT NULL DEFAULT '',
+  run_quota     INT NOT NULL DEFAULT 0,
+  cost_allowance DECIMAL(18,6) NOT NULL DEFAULT 0,
+  require_sandbox_for_borrow TINYINT(1) NOT NULL DEFAULT 0,
+  public_shares_disabled TINYINT(1) NOT NULL DEFAULT 0,
+  created_at_ms BIGINT NOT NULL,
+  KEY idx_tenant_issuer (sso_issuer)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS tenant_members (
+  tenant_id    VARCHAR(64) NOT NULL,
+  user_id      VARCHAR(128) NOT NULL,
+  role         ENUM('org_admin','member','viewer') NOT NULL DEFAULT 'member',
+  joined_at_ms BIGINT NOT NULL,
+  source       VARCHAR(16) NOT NULL DEFAULT 'manual',
+  PRIMARY KEY (tenant_id, user_id),
+  KEY idx_tenant_member_user (user_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS org_sync_subjects (
+  user_id       VARCHAR(128) PRIMARY KEY,
+  email         VARCHAR(255) NOT NULL DEFAULT '',
+  display_name  VARCHAR(255) NOT NULL DEFAULT '',
+  department    VARCHAR(255) NOT NULL DEFAULT '',
+  groups_json   TEXT NOT NULL,
+  synced_at_ms  BIGINT NOT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS org_sync_default_rooms (
+  user_id        VARCHAR(128) NOT NULL,
+  room_id        VARCHAR(64) NOT NULL,
+  granted_at_ms  BIGINT NOT NULL,
+  PRIMARY KEY (user_id, room_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS tenant_join_requests (
+  tenant_id     VARCHAR(64) NOT NULL,
+  user_id       VARCHAR(128) NOT NULL,
+  message       VARCHAR(500) NOT NULL DEFAULT '',
+  status        ENUM('pending','approved','rejected') NOT NULL DEFAULT 'pending',
+  created_at_ms BIGINT NOT NULL,
+  decided_at_ms BIGINT NOT NULL DEFAULT 0,
+  decided_by    VARCHAR(128) NOT NULL DEFAULT '',
+  PRIMARY KEY (tenant_id, user_id),
+  KEY idx_join_req_status (tenant_id, status),
+  KEY idx_join_req_user (user_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS platform_settings (
+  setting_key      VARCHAR(128) PRIMARY KEY,
+  setting_value    TEXT NOT NULL,
+  updated_at_ms    BIGINT NOT NULL,
+  updated_by       VARCHAR(128) NOT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS component_installs (
+  subject          VARCHAR(255) NOT NULL,
+  kind             VARCHAR(64) NOT NULL,
+  name             VARCHAR(255) NOT NULL,
+  installed_at_ms  BIGINT NOT NULL,
+  PRIMARY KEY (subject, kind, name)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+
+CREATE TABLE IF NOT EXISTS extension_audit (
+  id         BIGINT AUTO_INCREMENT PRIMARY KEY,
+  kind       VARCHAR(64) NOT NULL,
+  name       VARCHAR(128) NOT NULL,
+  action     VARCHAR(32) NOT NULL,
+  actor      VARCHAR(128) NOT NULL DEFAULT '',
+  key_id     VARCHAR(128) NOT NULL DEFAULT '',
+  tenant_id  VARCHAR(64) NOT NULL DEFAULT '',
+  outcome    VARCHAR(32) NOT NULL DEFAULT '',
+  detail     TEXT,
+  at_ms      BIGINT NOT NULL,
+  KEY idx_extension_audit_kind (kind, at_ms),
+  KEY idx_extension_audit_at (at_ms),
+  KEY idx_extension_audit_tenant (tenant_id, at_ms)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+
+CREATE TABLE IF NOT EXISTS agent_jobs (
+  job_id              VARCHAR(64) PRIMARY KEY,
+  tenant_id           VARCHAR(64) NOT NULL,
+  room_id             VARCHAR(64) NOT NULL,
+  channel_id          VARCHAR(64) NOT NULL DEFAULT '',
+  message_seq         BIGINT NOT NULL,
+  client_msg_id       VARCHAR(128) NOT NULL DEFAULT '',
+  requester_user_id   VARCHAR(128) NOT NULL,
+  owner_user_id       VARCHAR(128) NOT NULL,
+  core                VARCHAR(64) NOT NULL,
+  provider            VARCHAR(128) NOT NULL,
+  target_id           VARCHAR(128) NOT NULL DEFAULT '',
+  message_text       TEXT NULL,
+  attachment_ids     JSON NULL,
+  model              VARCHAR(128) NOT NULL DEFAULT '',
+  reasoning_effort   VARCHAR(64) NOT NULL DEFAULT '',
+  status              ENUM('queued','claimed','running','reflowing','replied','failed','timed_out','cancelled') NOT NULL DEFAULT 'queued',
+  failure_reason      VARCHAR(64) NOT NULL DEFAULT '',
+  attempt             INT NOT NULL DEFAULT 0,
+  lease_bridge_id     VARCHAR(128) NOT NULL DEFAULT '',
+  lease_expires_at_ms BIGINT NOT NULL DEFAULT 0,
+  created_at_ms       BIGINT NOT NULL,
+  updated_at_ms       BIGINT NOT NULL,
+  started_at_ms       BIGINT NOT NULL DEFAULT 0,
+  finished_at_ms      BIGINT NOT NULL DEFAULT 0,
+  diagnostics_json    JSON NULL,
+  claimed_at_ms       BIGINT NOT NULL DEFAULT 0,
+  UNIQUE KEY uq_agent_job_origin (tenant_id, room_id, message_seq, owner_user_id, core, provider),
+  KEY idx_agent_jobs_claim (tenant_id, owner_user_id, status, lease_expires_at_ms),
+  KEY idx_agent_jobs_room (tenant_id, room_id, channel_id, updated_at_ms),
+  KEY idx_agent_jobs_tenant_created (tenant_id, created_at_ms),
+  KEY idx_agent_jobs_room_created (tenant_id, room_id, created_at_ms),
+  KEY idx_agent_jobs_owner_created (tenant_id, owner_user_id, created_at_ms),
+  KEY idx_agent_jobs_requester_created (tenant_id, requester_user_id, created_at_ms),
+  KEY idx_agent_jobs_owner_status (owner_user_id, status, core, provider)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS bridge_heartbeats (
+  bridge_id       VARCHAR(128) PRIMARY KEY,
+  tenant_id       VARCHAR(64) NOT NULL,
+  owner_user_id   VARCHAR(128) NOT NULL,
+  app_instance_id VARCHAR(128) NOT NULL DEFAULT '',
+  version         VARCHAR(64) NOT NULL DEFAULT '',
+  status          ENUM('online','offline','draining') NOT NULL DEFAULT 'online',
+  serve_all_owners TINYINT(1) NOT NULL DEFAULT 0,
+  last_seen_at_ms BIGINT NOT NULL,
+  metadata_json   JSON NULL,
+  KEY idx_bridge_owner (tenant_id, owner_user_id, last_seen_at_ms)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS bridge_agents (
+  bridge_id          VARCHAR(128) NOT NULL,
+  tenant_id          VARCHAR(64) NOT NULL,
+  owner_user_id      VARCHAR(128) NOT NULL,
+  core               VARCHAR(64) NOT NULL,
+  provider           VARCHAR(128) NOT NULL,
+  target_id          VARCHAR(128) NOT NULL,
+  model_options_json JSON NULL,
+  disabled           TINYINT(1) NOT NULL DEFAULT 0,
+  last_seen_at_ms    BIGINT NOT NULL,
+  PRIMARY KEY (bridge_id, core, provider, target_id),
+  KEY idx_bridge_agents_lookup (tenant_id, owner_user_id, core, provider, disabled)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS user_agent_prefs (
+  tenant_id        VARCHAR(64) NOT NULL,
+  user_id          VARCHAR(128) NOT NULL,
+  room_id          VARCHAR(64) NOT NULL,
+  channel_id       VARCHAR(64) NOT NULL DEFAULT '',
+  selected_core    VARCHAR(64) NOT NULL DEFAULT '',
+  selected_provider VARCHAR(128) NOT NULL DEFAULT '',
+  selected_model   VARCHAR(128) NOT NULL DEFAULT '',
+  selected_reasoning VARCHAR(64) NOT NULL DEFAULT '',
+  updated_at_ms    BIGINT NOT NULL,
+  PRIMARY KEY (tenant_id, user_id, room_id, channel_id),
+  KEY idx_uap_user (tenant_id, user_id, updated_at_ms)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS room_channels (
+  channel_id    VARCHAR(64) PRIMARY KEY,
+  tenant_id     VARCHAR(64) NOT NULL,
+  room_id       VARCHAR(64) NOT NULL,
+  name          VARCHAR(255) NOT NULL,
+  is_default    TINYINT(1) NOT NULL DEFAULT 0,
+  kind          VARCHAR(16) NOT NULL DEFAULT '',
+  created_by    VARCHAR(128) NOT NULL,
+  created_at_ms BIGINT NOT NULL,
+  deleted_at_ms BIGINT NULL,
+  KEY idx_channel_room (tenant_id, room_id, deleted_at_ms)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS rooms (
+  tenant_id      VARCHAR(64) NOT NULL,
+  room_id        VARCHAR(64) NOT NULL,
+  name           VARCHAR(255) NOT NULL,
+  description    VARCHAR(500) NOT NULL DEFAULT '',
+  visibility     ENUM('shared','private') NOT NULL DEFAULT 'private',
+  sync_mode      ENUM('git','mutagen','none') NOT NULL DEFAULT 'git',
+  created_by     VARCHAR(128) NOT NULL,
+  created_at_ms  BIGINT NOT NULL,
+  deleted_at_ms  BIGINT NULL,
+  PRIMARY KEY (room_id),
+  KEY idx_rooms_active_created (tenant_id, deleted_at_ms, created_at_ms)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS room_members (
+  tenant_id      VARCHAR(64) NOT NULL,
+  room_id        VARCHAR(64) NOT NULL,
+  user_id        VARCHAR(128) NOT NULL,
+  role           ENUM('owner','admin','member','visitor') NOT NULL,
+  joined_at_ms   BIGINT NOT NULL,
+  agent_host     TINYINT(1) NOT NULL DEFAULT 0,
+  PRIMARY KEY (room_id, user_id),
+  KEY idx_member_user (tenant_id, user_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS room_invites (
+  code           VARCHAR(64) PRIMARY KEY,
+  tenant_id      VARCHAR(64) NOT NULL,
+  room_id        VARCHAR(64) NOT NULL,
+  role           ENUM('member','visitor') NOT NULL,
+  expires_at_ms  BIGINT NOT NULL,
+  capacity       INT NOT NULL,
+  redeemed_count INT NOT NULL DEFAULT 0,
+  created_by     VARCHAR(128) NOT NULL,
+  KEY idx_invite_room (tenant_id, room_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS agent_sessions (
+  tenant_id           VARCHAR(64) NOT NULL,
+  room_id             VARCHAR(64) NOT NULL,
+  agent_session_id    VARCHAR(128) NOT NULL,
+  provider_session_id VARCHAR(128) NULL,
+  owner_user_id       VARCHAR(128) NOT NULL,
+  state_json          JSON NOT NULL,
+  message_version     BIGINT NOT NULL,
+  updated_at_ms       BIGINT NOT NULL,
+  PRIMARY KEY (room_id, agent_session_id),
+  KEY idx_session_owner (tenant_id, owner_user_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS agent_messages (
+  tenant_id        VARCHAR(64) NOT NULL,
+  room_id          VARCHAR(64) NOT NULL,
+  channel_id       VARCHAR(64) NOT NULL DEFAULT '',
+  agent_session_id VARCHAR(128) NOT NULL,
+  seq              BIGINT NOT NULL,
+  client_submit_id VARCHAR(128) NULL,
+  payload_json     JSON NOT NULL,
+  created_at_ms    BIGINT NOT NULL,
+  PRIMARY KEY (room_id, agent_session_id, seq),
+  UNIQUE KEY uq_client_submit (room_id, agent_session_id, client_submit_id),
+  KEY idx_agent_messages_tenant_time (tenant_id, created_at_ms)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS sync_states (
+  tenant_id         VARCHAR(64) NOT NULL,
+  room_id           VARCHAR(64) NOT NULL,
+  agent_session_id  VARCHAR(128) NOT NULL,
+  pending_count     INT NOT NULL DEFAULT 0,
+  failed_count      INT NOT NULL DEFAULT 0,
+  last_error        TEXT NULL,
+  message_cursor    BIGINT NOT NULL DEFAULT 0,
+  PRIMARY KEY (room_id, agent_session_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS shared_agent_grants (
+  grant_id            VARCHAR(64) PRIMARY KEY,
+  tenant_id           VARCHAR(64) NOT NULL,
+  room_id             VARCHAR(64) NOT NULL,
+  target_id           VARCHAR(128) NOT NULL,
+  owner_user_id       VARCHAR(128) NOT NULL,
+  grantee_user_id     VARCHAR(128) NOT NULL,
+  allowed_models_json JSON NOT NULL,
+  capabilities_json   JSON NOT NULL,
+  run_quota           INT NULL,
+  cost_allowance      DECIMAL(18,6) NULL,
+  max_concurrent      INT NOT NULL DEFAULT 1,
+  reset_at_ms         BIGINT NULL,
+  runs_used           INT NOT NULL DEFAULT 0,
+  cost_used           DECIMAL(18,6) NOT NULL DEFAULT 0,
+  revoked_at_ms       BIGINT NULL,
+  expires_at_ms       BIGINT NULL,
+  created_at_ms       BIGINT NOT NULL,
+  source              VARCHAR(16) NOT NULL DEFAULT '',
+  created_by          VARCHAR(128) NOT NULL DEFAULT '',
+  KEY idx_grant_room (tenant_id, room_id),
+  KEY idx_grant_grantee (tenant_id, grantee_user_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS shared_agent_leases (
+  lease_id        VARCHAR(64) PRIMARY KEY,
+  tenant_id       VARCHAR(64) NOT NULL,
+  grant_id        VARCHAR(64) NOT NULL,
+  acquired_at_ms  BIGINT NOT NULL,
+  released_at_ms  BIGINT NULL,
+  KEY idx_lease_grant (grant_id, released_at_ms)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS shared_agent_audit (
+  audit_id      BIGINT AUTO_INCREMENT PRIMARY KEY,
+  tenant_id     VARCHAR(64) NOT NULL,
+  room_id       VARCHAR(64) NOT NULL,
+  grant_id      VARCHAR(64) NULL,
+  actor_user_id VARCHAR(128) NOT NULL,
+  owner_user_id VARCHAR(128) NOT NULL,
+  action        ENUM('start','resume','settings','turn','release','login','room_create','room_join','room_leave') NOT NULL,
+  decision      ENUM('allow','deny') NOT NULL,
+  deny_reason   VARCHAR(64) NULL,
+  model         VARCHAR(128) NULL,
+  channel_id    VARCHAR(64) NOT NULL DEFAULT '',
+  at_ms         BIGINT NOT NULL,
+  cost          DECIMAL(18,6) NULL,
+  input_tokens  BIGINT NULL,
+  output_tokens BIGINT NULL,
+  reservation_id VARCHAR(64) NULL,
+  settled_at_ms  BIGINT NULL,
+  KEY idx_audit_room_time (tenant_id, room_id, at_ms),
+  KEY idx_audit_tenant_time (tenant_id, at_ms),
+  KEY idx_audit_time (at_ms),
+  UNIQUE KEY uk_audit_reservation (tenant_id, reservation_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- search_text is the message's plain text (chat text / joined agent replies),
+-- indexed FULLTEXT with the ngram parser so CJK text is searchable. The ngram
+-- parser drops every token that CONTAINS a stopword (the default list holds
+-- "a" and "i"), so the index is created with stopwords disabled; the setting
+-- is read only at index creation and is restored right after.
+SET SESSION innodb_ft_enable_stopword = OFF;
+CREATE TABLE IF NOT EXISTS room_messages (
+  tenant_id     VARCHAR(64) NOT NULL,
+  room_id       VARCHAR(64) NOT NULL,
+  channel_id    VARCHAR(64) NOT NULL DEFAULT '',
+  seq           BIGINT NOT NULL,
+  kind          VARCHAR(32) NOT NULL,
+  author        VARCHAR(128) NULL,
+  client_msg_id VARCHAR(128) NULL,
+  payload_json  JSON NOT NULL,
+  search_text   MEDIUMTEXT NULL,
+  created_at_ms BIGINT NOT NULL,
+  deleted_at_ms BIGINT NULL,
+  edited_at_ms  BIGINT NULL,
+  PRIMARY KEY (room_id, seq),
+  UNIQUE KEY uq_room_client_msg (room_id, client_msg_id),
+  KEY idx_room_channel_seq (room_id, channel_id, seq),
+  FULLTEXT KEY ft_room_messages_search (search_text) WITH PARSER ngram
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+SET SESSION innodb_ft_enable_stopword = DEFAULT;
+
+-- Prompt library (F2): prompts saved from room messages. body is a copy taken
+-- at save time. visibility is 'private' (author only) or 'tenant'.
+CREATE TABLE IF NOT EXISTS prompts (
+  prompt_id      VARCHAR(64) PRIMARY KEY,
+  tenant_id      VARCHAR(64) NOT NULL,
+  author         VARCHAR(128) NOT NULL,
+  title          VARCHAR(256) NOT NULL,
+  body           MEDIUMTEXT NOT NULL,
+  tags_json      JSON NOT NULL,
+  visibility     VARCHAR(16) NOT NULL,
+  source_room_id VARCHAR(64) NOT NULL DEFAULT '',
+  source_seq     BIGINT NOT NULL DEFAULT 0,
+  use_count      BIGINT NOT NULL DEFAULT 0,
+  created_at_ms  BIGINT NOT NULL,
+  updated_at_ms  BIGINT NOT NULL,
+  KEY idx_prompts_tenant_updated (tenant_id, updated_at_ms),
+  KEY idx_prompts_tenant_author (tenant_id, author)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Message tasks (F6): a persisted room message (by room sequence) marked as a
+-- task. title/message_author are snapshots taken when the task was marked.
+CREATE TABLE IF NOT EXISTS message_tasks (
+  tenant_id      VARCHAR(64) NOT NULL,
+  room_id        VARCHAR(64) NOT NULL,
+  channel_id     VARCHAR(64) NOT NULL DEFAULT '',
+  seq            BIGINT NOT NULL,
+  status         VARCHAR(16) NOT NULL,
+  title          VARCHAR(512) NOT NULL,
+  message_author VARCHAR(128) NOT NULL DEFAULT '',
+  created_by     VARCHAR(128) NOT NULL,
+  created_at_ms  BIGINT NOT NULL,
+  done_by        VARCHAR(128) NULL,
+  done_at_ms     BIGINT NULL,
+  PRIMARY KEY (room_id, seq),
+  KEY idx_message_tasks_room (tenant_id, room_id, status)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS attachments (
+  id            VARCHAR(64) PRIMARY KEY,
+  tenant_id     VARCHAR(64) NOT NULL,
+  room_id       VARCHAR(64) NOT NULL,
+  uploader      VARCHAR(128) NOT NULL,
+  filename      VARCHAR(512) NOT NULL,
+  content_type  VARCHAR(128) NOT NULL,
+  size_bytes    BIGINT NOT NULL,
+  sha256        VARCHAR(64) NOT NULL,
+  blob_key      VARCHAR(128) NOT NULL,
+  created_at_ms BIGINT NOT NULL,
+  KEY idx_attachments_room (tenant_id, room_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS room_read_state (
+  tenant_id     VARCHAR(64) NOT NULL,
+  room_id       VARCHAR(64) NOT NULL,
+  channel_id    VARCHAR(64) NOT NULL DEFAULT '',
+  user_id       VARCHAR(128) NOT NULL,
+  last_read_seq BIGINT NOT NULL DEFAULT 0,
+  updated_at_ms BIGINT NOT NULL,
+  PRIMARY KEY (room_id, channel_id, user_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS artifacts (
+  artifact_id     VARCHAR(64) PRIMARY KEY,
+  tenant_id       VARCHAR(64) NOT NULL,
+  room_id         VARCHAR(64) NOT NULL,
+  channel_id      VARCHAR(64) NOT NULL DEFAULT '',
+  kind            VARCHAR(32) NOT NULL,
+  title           VARCHAR(256) NOT NULL,
+  language        VARCHAR(64) NOT NULL DEFAULT '',
+  current_version INT NOT NULL DEFAULT 0,
+  created_by      VARCHAR(128) NOT NULL,
+  created_at_ms   BIGINT NOT NULL,
+  updated_at_ms   BIGINT NOT NULL,
+  mime_type       VARCHAR(128) NOT NULL DEFAULT '',
+  file_name       VARCHAR(256) NOT NULL DEFAULT '',
+  KEY idx_artifacts_room (tenant_id, room_id, channel_id, updated_at_ms)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS artifact_versions (
+  tenant_id       VARCHAR(64) NOT NULL,
+  artifact_id     VARCHAR(64) NOT NULL,
+  version         INT NOT NULL,
+  parent_version  INT NOT NULL,
+  content_hash    CHAR(64) NOT NULL,
+  content         MEDIUMTEXT NOT NULL,
+  summary         VARCHAR(512) NOT NULL DEFAULT '',
+  author_user_id  VARCHAR(128) NOT NULL,
+  created_at_ms   BIGINT NOT NULL,
+  storage         VARCHAR(8) NOT NULL DEFAULT 'inline',
+  blob_key        VARCHAR(80) NOT NULL DEFAULT '',
+  size_bytes      BIGINT NOT NULL DEFAULT 0,
+  mime_type       VARCHAR(128) NOT NULL DEFAULT '',
+  source_job_id   VARCHAR(128) NOT NULL DEFAULT '',
+  source_seq      BIGINT NOT NULL DEFAULT 0,
+  thumb_blob_key  VARCHAR(80) NOT NULL DEFAULT '',
+  thumb_mime_type VARCHAR(32) NOT NULL DEFAULT '',
+  thumb_width     INT NOT NULL DEFAULT 0,
+  thumb_height    INT NOT NULL DEFAULT 0,
+  thumb_rank      INT NOT NULL DEFAULT 0,
+  PRIMARY KEY (tenant_id, artifact_id, version),
+  KEY idx_artifact_versions_recent (tenant_id, artifact_id, version),
+  KEY idx_artifact_versions_source (tenant_id, source_seq)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Public share links of one artifact (docs/prd/2026-10-09-artifact-shares-
+-- and-site-previews.md): an expiring, revocable "bsh_<share_id>_<secret>"
+-- token; only the secret's sha256 hex is stored. version 0 follows the
+-- artifact's latest version. Not exported with the room.
+CREATE TABLE IF NOT EXISTS artifact_shares (
+  share_id          VARCHAR(32) PRIMARY KEY,
+  token_hash        CHAR(64) NOT NULL,
+  tenant_id         VARCHAR(64) NOT NULL,
+  room_id           VARCHAR(64) NOT NULL,
+  artifact_id       VARCHAR(64) NOT NULL,
+  version           INT NOT NULL,
+  created_by        VARCHAR(128) NOT NULL,
+  created_at_ms     BIGINT NOT NULL,
+  expires_at_ms     BIGINT NOT NULL,
+  revoked_at_ms     BIGINT NULL,
+  revoked_by        VARCHAR(128) NULL,
+  view_count        BIGINT NOT NULL DEFAULT 0,
+  last_viewed_at_ms BIGINT NULL,
+  UNIQUE KEY uq_artifact_shares_token (token_hash),
+  KEY idx_artifact_shares_artifact (tenant_id, room_id, artifact_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Handoff import provenance: one row per room created from a handoff package.
+-- suggested_members_json is the source room's member list, offered as invite
+-- suggestions only; it never grants anyone access.
+CREATE TABLE IF NOT EXISTS room_imports (
+  tenant_id              VARCHAR(64) NOT NULL,
+  room_id                VARCHAR(64) PRIMARY KEY,
+  source_room_id         VARCHAR(64) NOT NULL,
+  source_room_name       VARCHAR(255) NOT NULL DEFAULT '',
+  source_exported_at_ms  BIGINT NOT NULL,
+  source_exported_by     VARCHAR(128) NOT NULL DEFAULT '',
+  imported_by            VARCHAR(128) NOT NULL,
+  imported_at_ms         BIGINT NOT NULL,
+  suggested_members_json JSON NOT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Pending SSO hand-offs (desktop one-time codes, CLI sign-in grants), shared
+-- by every gateway replica. Keyed by a hash of the code/nonce (never the raw
+-- secret); holds the verified identity, never a token. Single use via
+-- consumed_at_ms; expired rows are pruned on insert.
+CREATE TABLE IF NOT EXISTS sso_handoff_codes (
+  key_hash        CHAR(64) PRIMARY KEY,
+  nonce_hash      CHAR(64) NOT NULL,
+  subject         VARCHAR(255) NOT NULL,
+  email           VARCHAR(255) NOT NULL DEFAULT '',
+  tenant_hint     VARCHAR(64) NOT NULL DEFAULT '',
+  expires_at_ms   BIGINT NOT NULL,
+  consumed_at_ms  BIGINT NULL,
+  KEY idx_sso_handoff_codes_expiry (expires_at_ms)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Refresh-token families: one row per sign-in, tracking the current token id
+-- so rotation, reuse detection, logout and admin revocation are server-side.
+CREATE TABLE IF NOT EXISTS refresh_token_families (
+  family_id        CHAR(32) PRIMARY KEY,
+  subject          VARCHAR(255) NOT NULL,
+  email            VARCHAR(255) NOT NULL DEFAULT '',
+  tenant_hint      VARCHAR(64) NOT NULL DEFAULT '',
+  tenant_id        VARCHAR(64) NOT NULL DEFAULT '',
+  role             VARCHAR(32) NOT NULL DEFAULT '',
+  client           VARCHAR(32) NOT NULL DEFAULT '',
+  user_agent       VARCHAR(255) NOT NULL DEFAULT '',
+  current_jti      CHAR(32) NOT NULL,
+  previous_jti     VARCHAR(32) NOT NULL DEFAULT '',
+  rotated_at_ms    BIGINT NOT NULL,
+  created_at_ms    BIGINT NOT NULL,
+  last_used_at_ms  BIGINT NOT NULL,
+  expires_at_ms    BIGINT NOT NULL,
+  revoked_at_ms    BIGINT NULL,
+  parent_family_id VARCHAR(32) NOT NULL DEFAULT '',
+  KEY idx_refresh_families_subject (subject, tenant_id),
+  KEY idx_refresh_families_tenant (tenant_id),
+  KEY idx_refresh_families_expiry (expires_at_ms)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Borrow quota requests: a borrower asks an agent owner for more runs on the
+-- owner's room authorization. requester/owner are always the authenticated
+-- callers that created/decided the row. pending_key is set only while the
+-- request is pending (NULL once decided), so the unique key admits at most one
+-- open request per (tenant, room, owner, provider, requester).
+CREATE TABLE IF NOT EXISTS shared_agent_quota_requests (
+  request_id        VARCHAR(64) PRIMARY KEY,
+  tenant_id         VARCHAR(64) NOT NULL,
+  room_id           VARCHAR(64) NOT NULL,
+  owner_user_id     VARCHAR(128) NOT NULL,
+  requester_user_id VARCHAR(128) NOT NULL,
+  provider          VARCHAR(128) NOT NULL,
+  requested_runs    INT NULL,
+  note              VARCHAR(500) NOT NULL DEFAULT '',
+  status            ENUM('pending','approved','declined') NOT NULL DEFAULT 'pending',
+  granted_runs      INT NULL,
+  pending_key       VARCHAR(64) NULL,
+  created_at_ms     BIGINT NOT NULL,
+  decided_at_ms     BIGINT NOT NULL DEFAULT 0,
+  decided_by        VARCHAR(128) NOT NULL DEFAULT '',
+  UNIQUE KEY uq_quota_req_pending (pending_key),
+  KEY idx_quota_req_owner (tenant_id, owner_user_id, status, created_at_ms),
+  KEY idx_quota_req_requester (tenant_id, requester_user_id, created_at_ms)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS notification_prefs (
+  tenant_id       VARCHAR(64) NOT NULL,
+  user_id         VARCHAR(128) NOT NULL,
+  mentions        TINYINT(1) NOT NULL,
+  agent_finished  TINYINT(1) NOT NULL,
+  agent_failed    TINYINT(1) NOT NULL,
+  borrow_requests TINYINT(1) NOT NULL,
+  quiet_rooms     TEXT NOT NULL,
+  updated_at_ms   BIGINT NOT NULL,
+  PRIMARY KEY (tenant_id, user_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS notification_outbox (
+  tenant_id          VARCHAR(64) NOT NULL,
+  id                 VARCHAR(64) NOT NULL,
+  notifier           VARCHAR(255) NOT NULL,
+  event_json         TEXT NOT NULL,
+  attempts           INT NOT NULL DEFAULT 0,
+  next_attempt_at_ms BIGINT NOT NULL,
+  claim_token        VARCHAR(64) NOT NULL DEFAULT '',
+  delivered_at_ms    BIGINT NULL,
+  failed_at_ms       BIGINT NULL,
+  last_error         VARCHAR(512) NOT NULL DEFAULT '',
+  created_at_ms      BIGINT NOT NULL,
+  PRIMARY KEY (tenant_id, id, notifier),
+  KEY idx_notification_outbox_due (next_attempt_at_ms),
+  KEY idx_notification_outbox_claim (claim_token),
+  KEY idx_notification_outbox_created (created_at_ms)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Notification reply tokens (N1): a notifier component posts a member's
+-- reply to a notification back into the room with one of these. Only the
+-- SHA-256 of the token is stored; looked up by hash (cross-tenant: the
+-- notifier has no session); many replies per token until expires_at_ms.
+CREATE TABLE IF NOT EXISTS notification_reply_tokens (
+  token_hash     CHAR(64) PRIMARY KEY,
+  tenant_id      VARCHAR(64) NOT NULL,
+  notifier       VARCHAR(255) NOT NULL,
+  event_id       VARCHAR(64) NOT NULL,
+  room_id        VARCHAR(64) NOT NULL,
+  channel_id     VARCHAR(64) NOT NULL DEFAULT '',
+  user_id        VARCHAR(128) NOT NULL,
+  reply_owner_id VARCHAR(128) NOT NULL DEFAULT '',
+  reply_provider VARCHAR(128) NOT NULL DEFAULT '',
+  reply_core     VARCHAR(64) NOT NULL DEFAULT '',
+  created_at_ms  BIGINT NOT NULL,
+  expires_at_ms  BIGINT NOT NULL,
+  KEY idx_notification_reply_tokens_notifier (notifier),
+  KEY idx_notification_reply_tokens_expires (expires_at_ms)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS notification_reply_refs (
+  notifier      VARCHAR(255) NOT NULL,
+  ref_id        VARCHAR(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
+  recipient     VARCHAR(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
+  token_hash    CHAR(64) NOT NULL,
+  created_at_ms BIGINT NOT NULL,
+  expires_at_ms BIGINT NOT NULL,
+  PRIMARY KEY (notifier, ref_id, recipient),
+  KEY idx_notification_reply_refs_expires (expires_at_ms)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS web_push_subscriptions (
+  tenant_id     VARCHAR(64) NOT NULL,
+  id            CHAR(64) NOT NULL,
+  user_id       VARCHAR(128) NOT NULL,
+  endpoint      TEXT NOT NULL,
+  p256dh        VARCHAR(255) NOT NULL,
+  auth_secret   VARCHAR(255) NOT NULL,
+  user_agent    VARCHAR(255) NOT NULL DEFAULT '',
+  created_at_ms BIGINT NOT NULL,
+  updated_at_ms BIGINT NOT NULL,
+  PRIMARY KEY (tenant_id, id),
+  KEY idx_web_push_subscriptions_user (tenant_id, user_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Scheduled prompts (N2): a member's message posted into the room at a time,
+-- as that member, through the normal chat path. next_run_at_ms is NULL when
+-- the schedule will not fire (paused, or a one-shot that already ran).
+-- claim_token/claimed_until_ms are the scheduler's atomic claim of a due run
+-- (a crashed claim expires and the slot is re-claimed; the chat clientMsgId
+-- of the slot dedupes the post).
+CREATE TABLE IF NOT EXISTS room_schedules (
+  schedule_id      VARCHAR(64) PRIMARY KEY,
+  tenant_id        VARCHAR(64) NOT NULL,
+  room_id          VARCHAR(64) NOT NULL,
+  channel_id       VARCHAR(64) NOT NULL DEFAULT '',
+  created_by       VARCHAR(128) NOT NULL,
+  text             MEDIUMTEXT NOT NULL,
+  recipient_json   JSON NOT NULL,
+  recurrence_json  JSON NOT NULL,
+  timezone         VARCHAR(64) NOT NULL,
+  enabled          TINYINT(1) NOT NULL DEFAULT 1,
+  next_run_at_ms   BIGINT NULL,
+  claim_token      VARCHAR(64) NULL,
+  claimed_until_ms BIGINT NULL,
+  last_run_at_ms   BIGINT NULL,
+  last_status      VARCHAR(16) NOT NULL DEFAULT '',
+  last_error       VARCHAR(512) NOT NULL DEFAULT '',
+  last_seq         BIGINT NOT NULL DEFAULT 0,
+  run_count        BIGINT NOT NULL DEFAULT 0,
+  created_at_ms    BIGINT NOT NULL,
+  updated_at_ms    BIGINT NOT NULL,
+  KEY idx_room_schedules_room (tenant_id, room_id),
+  KEY idx_room_schedules_due (enabled, next_run_at_ms)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Room templates (N3): a reusable room setup (description, channels, starter
+-- prompts, suggested agents, default members, disabled schedules). visibility
+-- is 'private' (author only) or 'tenant'. Suggested agents are hints only:
+-- instantiating never grants borrow authorization.
+CREATE TABLE IF NOT EXISTS room_templates (
+  template_id   VARCHAR(64) PRIMARY KEY,
+  tenant_id     VARCHAR(64) NOT NULL,
+  name          VARCHAR(256) NOT NULL,
+  description   VARCHAR(2048) NOT NULL DEFAULT '',
+  visibility    VARCHAR(16) NOT NULL,
+  created_by    VARCHAR(128) NOT NULL,
+  body_json     JSON NOT NULL,
+  use_count     BIGINT NOT NULL DEFAULT 0,
+  created_at_ms BIGINT NOT NULL,
+  updated_at_ms BIGINT NOT NULL,
+  KEY idx_room_templates_tenant_updated (tenant_id, updated_at_ms),
+  KEY idx_room_templates_tenant_author (tenant_id, created_by)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- API tokens (O1): super-admin-issued long-lived credentials for unattended
+-- callers (nightly smoke, deploy pipelines), exchanged at
+-- POST /v1/auth/api-token for a 1-hour session of subject. Only the SHA-256
+-- of the secret is stored; revocable; platform-wide (not tenant-scoped).
+CREATE TABLE IF NOT EXISTS api_tokens (
+  token_id        CHAR(32) PRIMARY KEY,
+  secret_hash     CHAR(64) NOT NULL,
+  subject         VARCHAR(255) NOT NULL,
+  email           VARCHAR(255) NOT NULL DEFAULT '',
+  tenant_hint     VARCHAR(64) NOT NULL DEFAULT '',
+  label           VARCHAR(128) NOT NULL DEFAULT '',
+  created_by      VARCHAR(255) NOT NULL,
+  created_at_ms   BIGINT NOT NULL,
+  expires_at_ms   BIGINT NOT NULL,
+  last_used_at_ms BIGINT NOT NULL DEFAULT 0,
+  revoked_at_ms   BIGINT NULL,
+  revoked_by      VARCHAR(255) NOT NULL DEFAULT '',
+  KEY idx_api_tokens_created (created_at_ms)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Usage budgets (R12): monthly token/cost budgets set by org admins, per
+-- member (user_id) and per tenant (user_id ''). NULL tokens / cost = no limit
+-- on that dimension. warned_period ('YYYY-MM') / warned_level (a percentage)
+-- record the highest warning already sent that month, so each threshold warns
+-- once per month whichever service replica evaluates it.
+CREATE TABLE IF NOT EXISTS usage_budgets (
+  tenant_id       VARCHAR(64) NOT NULL,
+  user_id         VARCHAR(128) NOT NULL,
+  tokens          BIGINT NULL,
+  cost            DECIMAL(18,6) NULL,
+  warn_at_percent INT NOT NULL,
+  hard_stop       TINYINT(1) NOT NULL DEFAULT 0,
+  warned_period   CHAR(7) NOT NULL DEFAULT '',
+  warned_level    INT NOT NULL DEFAULT 0,
+  updated_by      VARCHAR(128) NOT NULL DEFAULT '',
+  updated_at_ms   BIGINT NOT NULL,
+  PRIMARY KEY (tenant_id, user_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Display names (docs/prd/2026-10-10-display-names-and-guided-onboarding.md
+-- §1): the name a user chose to be shown as instead of their id (usually an
+-- e-mail address). Global per user, not per tenant: a person reads the same
+-- in every organization. No row = the default (store.DisplayName).
+CREATE TABLE IF NOT EXISTS user_profiles (
+  user_id        VARCHAR(128) NOT NULL,
+  display_name   VARCHAR(40) NOT NULL,
+  updated_at_ms  BIGINT NOT NULL,
+  PRIMARY KEY (user_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

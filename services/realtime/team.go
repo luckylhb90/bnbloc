@@ -1,0 +1,683 @@
+package realtimehttp
+
+import (
+	"context"
+	"crypto/rand"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"log"
+	"net/http"
+	"strconv"
+	"strings"
+	"time"
+	"unicode/utf8"
+
+	"github.com/luckylhb90/bnbloc/internal/membership"
+	"github.com/luckylhb90/bnbloc/internal/obs"
+	"github.com/luckylhb90/bnbloc/internal/roomctx"
+	"github.com/luckylhb90/bnbloc/internal/store"
+	"github.com/luckylhb90/bnbloc/internal/tenant"
+	"github.com/luckylhb90/bnbloc/internal/wire"
+)
+
+// Team features served by realtime, which owns the room feed they build on:
+//   - F2 prompt library: /v1/prompts (tenant-scoped, author-owned), plus the
+//     org-admin moderation delete /v1/tenant/prompts/{id} (the gateway
+//     enforces manage_org on /v1/tenant/*, as for every org-admin route).
+//   - F6 message tasks: /v1/rooms/{roomId}/tasks (any room member), announced
+//     live by the transient task_updated event.
+//   - F7 global search: /v1/search across the caller's rooms, resolved
+//     server-side from bnbloc-room — never from the request.
+
+// Prompt and task input bounds.
+const (
+	maxPromptTitleRunes = 256
+	maxPromptBodyBytes  = 64 * 1024
+	maxPromptTags       = 12
+	maxPromptTagRunes   = 40
+	maxTaskTitleRunes   = 200
+	maxSearchLimit      = 50
+	defaultSearchLimit  = 20
+)
+
+// RoomDirectory lists the rooms a member belongs to (bnbloc-room is the
+// authority). Global search reads only rooms it returns.
+type RoomDirectory interface {
+	MemberRooms(ctx context.Context, userID, tenantID string) ([]membership.RoomRef, error)
+}
+
+func (s *Service) registerTeamRoutes(mux *http.ServeMux) {
+	mux.HandleFunc("GET /v1/prompts", s.handleListPrompts)
+	mux.HandleFunc("POST /v1/prompts", s.handleCreatePrompt)
+	mux.HandleFunc("PATCH /v1/prompts/{promptId}", s.handleUpdatePrompt)
+	mux.HandleFunc("DELETE /v1/prompts/{promptId}", s.handleDeletePrompt)
+	mux.HandleFunc("POST /v1/prompts/{promptId}/use", s.handleUsePrompt)
+	mux.HandleFunc("DELETE /v1/tenant/prompts/{promptId}", s.handleModeratePrompt)
+	mux.HandleFunc("GET /v1/rooms/{roomId}/tasks", s.handleListTasks)
+	mux.HandleFunc("PUT /v1/rooms/{roomId}/tasks/{seq}", s.handlePutTask)
+	mux.HandleFunc("DELETE /v1/rooms/{roomId}/tasks/{seq}", s.handleDeleteTask)
+	mux.HandleFunc("GET /v1/search", s.handleSearch)
+	// R7 search backfill (super-admin, gated at the gateway).
+	mux.HandleFunc("POST /v1/platform/search/reindex", s.handleSearchReindex)
+}
+
+func writeJSON(w http.ResponseWriter, status int, v any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(v)
+}
+
+// requireSubject returns the authenticated caller, answering 401 when absent.
+func requireSubject(w http.ResponseWriter, r *http.Request) (string, bool) {
+	userID := strings.TrimSpace(r.Header.Get("X-Bnbloc-User"))
+	if userID == "" {
+		http.Error(w, "missing authenticated subject", http.StatusUnauthorized)
+		return "", false
+	}
+	return userID, true
+}
+
+// requireRoomMember resolves the {roomId} path value and the caller, failing
+// closed (403) unless the caller is a member of the room.
+func (s *Service) requireRoomMember(w http.ResponseWriter, r *http.Request) (roomID, userID string, ok bool) {
+	roomID, err := roomctx.Normalize(r.PathValue("roomId"))
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return "", "", false
+	}
+	if userID, ok = requireSubject(w, r); !ok {
+		return "", "", false
+	}
+	if s.Membership == nil || !s.Membership.IsMember(roomID, userID, tenant.FromContext(r.Context())) {
+		http.Error(w, "caller is not a member of room", http.StatusForbidden)
+		return "", "", false
+	}
+	return roomID, userID, true
+}
+
+// ---------------------------------------------------------------- prompts
+
+func newPromptID() string {
+	b := make([]byte, 8)
+	_, _ = rand.Read(b)
+	return "pr_" + hex.EncodeToString(b)
+}
+
+// normalizeTags trims, lowercases and de-duplicates tags, rejecting too many
+// or too long ones.
+func normalizeTags(raw []string) ([]string, error) {
+	out := []string{}
+	seen := map[string]bool{}
+	for _, t := range raw {
+		t = strings.ToLower(strings.TrimSpace(t))
+		if t == "" || seen[t] {
+			continue
+		}
+		if utf8.RuneCountInString(t) > maxPromptTagRunes {
+			return nil, errors.New("tag too long")
+		}
+		seen[t] = true
+		out = append(out, t)
+	}
+	if len(out) > maxPromptTags {
+		return nil, errors.New("too many tags")
+	}
+	return out, nil
+}
+
+func validPromptTitle(title string) error {
+	switch n := utf8.RuneCountInString(title); {
+	case n == 0:
+		return errors.New("title is required")
+	case n > maxPromptTitleRunes:
+		return errors.New("title too long")
+	}
+	return nil
+}
+
+func validPromptBody(body string) error {
+	if strings.TrimSpace(body) == "" {
+		return errors.New("body is required")
+	}
+	if len(body) > maxPromptBodyBytes {
+		return errors.New("body too long")
+	}
+	return nil
+}
+
+func validVisibility(v string) bool { return v == wire.PromptPrivate || v == wire.PromptTenant }
+
+// promptsReady answers 503 when the prompt store is not configured.
+func (s *Service) promptsReady(w http.ResponseWriter) bool {
+	if s.Prompts == nil {
+		obs.ServerError(w, "prompt library unavailable", nil)
+		http.Error(w, "prompt library unavailable", http.StatusServiceUnavailable)
+		return false
+	}
+	return true
+}
+
+// writePromptErr maps prompt store errors: an invisible prompt reads as
+// missing, a visible one the caller may not change is forbidden.
+func writePromptErr(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, store.ErrPromptNotFound):
+		http.Error(w, "prompt not found", http.StatusNotFound)
+	case errors.Is(err, store.ErrPromptForbidden):
+		http.Error(w, "only the author may change this prompt", http.StatusForbidden)
+	default:
+		log.Printf("realtime: prompt store: %v", err)
+		http.Error(w, "prompt library error", http.StatusInternalServerError)
+	}
+}
+
+func (s *Service) handleListPrompts(w http.ResponseWriter, r *http.Request) {
+	userID, ok := requireSubject(w, r)
+	if !ok || !s.promptsReady(w) {
+		return
+	}
+	q := r.URL.Query()
+	limit := int(parseInt(q.Get("limit")))
+	if limit <= 0 || limit > 100 {
+		limit = 100
+	}
+	prompts, err := s.Prompts.ListPrompts(r.Context(), store.PromptQuery{
+		Viewer:   userID,
+		Text:     strings.TrimSpace(q.Get("q")),
+		Tag:      strings.ToLower(strings.TrimSpace(q.Get("tag"))),
+		MineOnly: q.Get("mine") == "1",
+		Limit:    limit,
+	})
+	if err != nil {
+		writePromptErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"prompts": prompts})
+}
+
+func (s *Service) handleCreatePrompt(w http.ResponseWriter, r *http.Request) {
+	userID, ok := requireSubject(w, r)
+	if !ok || !s.promptsReady(w) {
+		return
+	}
+	var body struct {
+		Title        string   `json:"title"`
+		Body         string   `json:"body"`
+		Tags         []string `json:"tags"`
+		Visibility   string   `json:"visibility"`
+		SourceRoomID string   `json:"sourceRoomId"`
+		SourceSeq    int64    `json:"sourceSeq"`
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, maxPromptBodyBytes+maxSmallBodyBytes)
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "invalid json body", http.StatusBadRequest)
+		return
+	}
+	title := strings.TrimSpace(body.Title)
+	if err := validPromptTitle(title); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if err := validPromptBody(body.Body); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	tags, err := normalizeTags(body.Tags)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	visibility := body.Visibility
+	if visibility == "" {
+		visibility = wire.PromptPrivate
+	}
+	if !validVisibility(visibility) {
+		http.Error(w, "visibility must be private or tenant", http.StatusBadRequest)
+		return
+	}
+	// Provenance may only name a room the author can read: a prompt must not
+	// advertise (or probe) another room's messages.
+	sourceRoom := strings.TrimSpace(body.SourceRoomID)
+	if sourceRoom != "" && (s.Membership == nil || !s.Membership.IsMember(sourceRoom, userID, tenant.FromContext(r.Context()))) {
+		http.Error(w, "caller is not a member of the source room", http.StatusForbidden)
+		return
+	}
+	sourceSeq := body.SourceSeq
+	if sourceRoom == "" || sourceSeq < 0 {
+		sourceSeq = 0
+	}
+	now := time.Now().UnixMilli()
+	p, err := s.Prompts.CreatePrompt(r.Context(), wire.Prompt{
+		PromptID:     newPromptID(),
+		Author:       userID,
+		Title:        title,
+		Body:         body.Body,
+		Tags:         tags,
+		Visibility:   visibility,
+		SourceRoomID: sourceRoom,
+		SourceSeq:    sourceSeq,
+		CreatedAtMs:  now,
+		UpdatedAtMs:  now,
+	})
+	if err != nil {
+		writePromptErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, p)
+}
+
+func (s *Service) handleUpdatePrompt(w http.ResponseWriter, r *http.Request) {
+	userID, ok := requireSubject(w, r)
+	if !ok || !s.promptsReady(w) {
+		return
+	}
+	var body struct {
+		Title      *string   `json:"title"`
+		Body       *string   `json:"body"`
+		Tags       *[]string `json:"tags"`
+		Visibility *string   `json:"visibility"`
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, maxPromptBodyBytes+maxSmallBodyBytes)
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "invalid json body", http.StatusBadRequest)
+		return
+	}
+	patch := store.PromptPatch{Body: body.Body, Visibility: body.Visibility}
+	if body.Title != nil {
+		t := strings.TrimSpace(*body.Title)
+		if err := validPromptTitle(t); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		patch.Title = &t
+	}
+	if body.Body != nil {
+		if err := validPromptBody(*body.Body); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+	}
+	if body.Tags != nil {
+		tags, err := normalizeTags(*body.Tags)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		patch.Tags = &tags
+	}
+	if body.Visibility != nil && !validVisibility(*body.Visibility) {
+		http.Error(w, "visibility must be private or tenant", http.StatusBadRequest)
+		return
+	}
+	p, err := s.Prompts.UpdatePrompt(r.Context(), r.PathValue("promptId"), userID, patch, time.Now().UnixMilli())
+	if err != nil {
+		writePromptErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, p)
+}
+
+func (s *Service) handleDeletePrompt(w http.ResponseWriter, r *http.Request) {
+	s.deletePrompt(w, r, false)
+}
+
+// handleModeratePrompt is the org-admin delete of any tenant-visible prompt.
+// It is reachable only through /v1/tenant/*, which the gateway gates on the
+// manage_org permission before signing the request.
+func (s *Service) handleModeratePrompt(w http.ResponseWriter, r *http.Request) {
+	s.deletePrompt(w, r, true)
+}
+
+func (s *Service) deletePrompt(w http.ResponseWriter, r *http.Request, moderator bool) {
+	userID, ok := requireSubject(w, r)
+	if !ok || !s.promptsReady(w) {
+		return
+	}
+	if err := s.Prompts.DeletePrompt(r.Context(), r.PathValue("promptId"), userID, moderator); err != nil {
+		writePromptErr(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Service) handleUsePrompt(w http.ResponseWriter, r *http.Request) {
+	userID, ok := requireSubject(w, r)
+	if !ok || !s.promptsReady(w) {
+		return
+	}
+	p, err := s.Prompts.UsePrompt(r.Context(), r.PathValue("promptId"), userID)
+	if err != nil {
+		writePromptErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, p)
+}
+
+// ------------------------------------------------------------------ tasks
+
+func (s *Service) tasksReady(w http.ResponseWriter) bool {
+	if s.Tasks == nil || s.Messages == nil {
+		obs.ServerError(w, "message tasks unavailable", nil)
+		http.Error(w, "message tasks unavailable", http.StatusServiceUnavailable)
+		return false
+	}
+	return true
+}
+
+// taskTitle snapshots a message's first non-empty line as the task title.
+func taskTitle(text string, seq int64) string {
+	for _, line := range strings.Split(text, "\n") {
+		if line = strings.TrimSpace(line); line != "" {
+			return truncateRunes(line, maxTaskTitleRunes)
+		}
+	}
+	return "Message #" + strconv.FormatInt(seq, 10)
+}
+
+func (s *Service) handleListTasks(w http.ResponseWriter, r *http.Request) {
+	roomID, _, ok := s.requireRoomMember(w, r)
+	if !ok || !s.tasksReady(w) {
+		return
+	}
+	tasks, err := s.Tasks.ListMessageTasks(r.Context(), roomID)
+	if err != nil {
+		obs.ServerError(w, "task read failed", err)
+		http.Error(w, "task read failed", http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"tasks": tasks})
+}
+
+// handlePutTask marks a persisted message as a task or toggles its status
+// ({"status":"open"|"done"}). Any room member may do either. The first mark
+// snapshots the message's title, author and channel; later puts change only
+// the status. The change is announced with a transient task_updated event.
+func (s *Service) handlePutTask(w http.ResponseWriter, r *http.Request) {
+	roomID, userID, ok := s.requireRoomMember(w, r)
+	if !ok || !s.tasksReady(w) {
+		return
+	}
+	seq := parseInt(r.PathValue("seq"))
+	if seq <= 0 {
+		http.Error(w, "invalid message", http.StatusBadRequest)
+		return
+	}
+	var body struct {
+		Status string `json:"status"`
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, maxSmallBodyBytes)
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "invalid json body", http.StatusBadRequest)
+		return
+	}
+	if body.Status != wire.TaskOpen && body.Status != wire.TaskDone {
+		http.Error(w, "status must be open or done", http.StatusBadRequest)
+		return
+	}
+	ctx := r.Context()
+	now := time.Now().UnixMilli()
+	task, found, err := s.Tasks.GetMessageTask(ctx, roomID, seq)
+	if err != nil {
+		obs.ServerError(w, "task read failed", err)
+		http.Error(w, "task read failed", http.StatusInternalServerError)
+		return
+	}
+	if !found {
+		msg, exists, err := s.Messages.GetRoomMessage(ctx, roomID, seq)
+		if err != nil {
+			obs.ServerError(w, "message read failed", err)
+			http.Error(w, "message read failed", http.StatusInternalServerError)
+			return
+		}
+		if !exists {
+			http.Error(w, "message not found", http.StatusNotFound)
+			return
+		}
+		task = wire.MessageTask{
+			RoomID:        roomID,
+			ChannelID:     msg.ChannelID,
+			Seq:           seq,
+			Title:         taskTitle(store.MessageText(msg.Kind, msg.Payload), seq),
+			MessageAuthor: store.MessageAuthor(msg),
+			CreatedBy:     userID,
+			CreatedAtMs:   now,
+		}
+	}
+	task.Status = body.Status
+	task.DoneBy, task.DoneAtMs = "", 0
+	if body.Status == wire.TaskDone {
+		task.DoneBy, task.DoneAtMs = userID, now
+	}
+	stored, err := s.Tasks.PutMessageTask(ctx, task)
+	if err != nil {
+		obs.ServerError(w, "task write failed", err)
+		http.Error(w, "task write failed", http.StatusInternalServerError)
+		return
+	}
+	s.publishTaskUpdated(roomID, stored.ChannelID, wire.TaskUpdatedPayload{Seq: seq, Task: &stored}, now)
+	writeJSON(w, http.StatusOK, stored)
+}
+
+// handleDeleteTask unmarks a message (any room member).
+func (s *Service) handleDeleteTask(w http.ResponseWriter, r *http.Request) {
+	roomID, _, ok := s.requireRoomMember(w, r)
+	if !ok || !s.tasksReady(w) {
+		return
+	}
+	seq := parseInt(r.PathValue("seq"))
+	if seq <= 0 {
+		http.Error(w, "invalid message", http.StatusBadRequest)
+		return
+	}
+	removed, err := s.Tasks.DeleteMessageTask(r.Context(), roomID, seq)
+	if err != nil {
+		obs.ServerError(w, "task write failed", err)
+		http.Error(w, "task write failed", http.StatusInternalServerError)
+		return
+	}
+	if !removed {
+		http.Error(w, "message is not a task", http.StatusNotFound)
+		return
+	}
+	s.publishTaskUpdated(roomID, "", wire.TaskUpdatedPayload{Seq: seq, Removed: true}, time.Now().UnixMilli())
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// publishTaskUpdated announces a task change (the web room stream receives
+// every channel, so the room's task strip stays current). A put is scoped to
+// the task message's channel — its title snapshots the message text, which
+// must not reach a stream that may not see that channel (the people chat);
+// a removal carries only the sequence and is room-wide (channelID "").
+// Transient: persist() only stores chat_message and agent_messages, so it
+// never enters history.
+func (s *Service) publishTaskUpdated(roomID, channelID string, p wire.TaskUpdatedPayload, atMs int64) {
+	s.Hub.Publish(wire.Event{RoomID: roomID, ChannelID: channelID, Kind: wire.EventTaskUpdated, Payload: p, AtUnixMs: atMs})
+}
+
+// ----------------------------------------------------------------- search
+
+// searchChannelKind labels a message hit's channel kind ("people" for the
+// people chat) so the client can show and open it as such; memo caches one
+// lookup per (room, channel) per search. A failed lookup leaves the hit
+// unlabeled — the client then opens it as an ordinary channel, which is a
+// display fallback only (search results are the caller's own memberships).
+func (s *Service) searchChannelKind(ctx context.Context, memo map[string]string, roomID, channelID string) string {
+	if channelID == "" || s.Channels == nil {
+		return ""
+	}
+	key := roomID + "\x00" + channelID
+	if k, ok := memo[key]; ok {
+		return k
+	}
+	kind, _, err := s.Channels.ChannelKind(ctx, roomID, channelID)
+	if err != nil {
+		log.Printf("realtime: search: channel kind room=%s channel=%s: %v", roomID, channelID, err)
+	}
+	memo[key] = kind
+	return kind
+}
+
+// handleSearch is the global search: GET /v1/search?q=&rooms=&limit=&before=.
+// The rooms searched are the caller's memberships as bnbloc-room reports them;
+// the optional rooms param can only narrow that set. Messages page by the
+// before cursor (created_at_ms of the oldest hit); artifact and prompt hits
+// come with the first page only, and prompts only when no room filter is set
+// (they belong to no room).
+func (s *Service) handleSearch(w http.ResponseWriter, r *http.Request) {
+	userID, ok := requireSubject(w, r)
+	if !ok {
+		return
+	}
+	q := r.URL.Query()
+	text := strings.TrimSpace(q.Get("q"))
+	if utf8.RuneCountInString(text) < store.SearchMinRunes {
+		http.Error(w, "query must be at least 2 characters", http.StatusBadRequest)
+		return
+	}
+	limit := int(parseInt(q.Get("limit")))
+	if limit <= 0 || limit > maxSearchLimit {
+		limit = defaultSearchLimit
+	}
+	before := parseInt(q.Get("before"))
+	ctx := r.Context()
+	if s.Rooms == nil {
+		obs.ServerError(w, "room directory unavailable", nil)
+		http.Error(w, "room directory unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	member, err := s.Rooms.MemberRooms(ctx, userID, tenant.FromContext(ctx))
+	if err != nil {
+		log.Printf("realtime: search: member rooms for %s: %v", userID, err)
+		http.Error(w, "room directory unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	filter := map[string]bool{}
+	for _, raw := range strings.Split(q.Get("rooms"), ",") {
+		if id := strings.TrimSpace(raw); id != "" {
+			filter[id] = true
+		}
+	}
+	names := map[string]string{}
+	var roomIDs []string
+	for _, rm := range member {
+		if len(filter) > 0 && !filter[rm.RoomID] {
+			continue
+		}
+		names[rm.RoomID] = rm.Name
+		roomIDs = append(roomIDs, rm.RoomID)
+	}
+
+	resp := wire.SearchResponse{Results: []wire.SearchResult{}}
+	if s.Messages != nil && len(roomIDs) > 0 {
+		msgs, err := s.Messages.SearchRoomMessages(ctx, store.MessageSearch{RoomIDs: roomIDs, Text: text, BeforeMs: before, Limit: limit})
+		if err != nil {
+			log.Printf("realtime: search messages: %v", err)
+			http.Error(w, "search failed", http.StatusInternalServerError)
+			return
+		}
+		kinds := map[string]string{} // room\x00channel -> channel kind
+		for _, m := range msgs {
+			resp.Results = append(resp.Results, wire.SearchResult{
+				Kind:        wire.SearchMessage,
+				RoomID:      m.RoomID,
+				RoomName:    names[m.RoomID],
+				ChannelID:   m.ChannelID,
+				ChannelKind: s.searchChannelKind(ctx, kinds, m.RoomID, m.ChannelID),
+				Seq:         m.Seq,
+				Snippet:     snippetAround(store.MessageText(m.Kind, m.Payload), text),
+				Author:      store.MessageAuthor(m),
+				AtMs:        m.CreatedAtMs,
+			})
+		}
+		if len(msgs) == limit {
+			resp.NextBefore = msgs[len(msgs)-1].CreatedAtMs
+		}
+	}
+	if before <= 0 && s.Artifacts != nil && len(roomIDs) > 0 {
+		arts, err := s.Artifacts.SearchArtifacts(ctx, roomIDs, text, limit)
+		if err != nil {
+			log.Printf("realtime: search artifacts: %v", err)
+		}
+		for _, a := range arts {
+			resp.Results = append(resp.Results, wire.SearchResult{
+				Kind:         wire.SearchArtifact,
+				RoomID:       a.RoomID,
+				RoomName:     names[a.RoomID],
+				ChannelID:    a.ChannelID,
+				ArtifactID:   a.ArtifactID,
+				ArtifactKind: a.Kind,
+				MimeType:     a.MimeType,
+				FileName:     a.FileName,
+				Title:        a.Title,
+				Snippet:      a.Title,
+				Author:       a.CreatedBy,
+				AtMs:         a.UpdatedAtMs,
+			})
+		}
+	}
+	if before <= 0 && len(filter) == 0 && s.Prompts != nil {
+		prompts, err := s.Prompts.ListPrompts(ctx, store.PromptQuery{Viewer: userID, Text: text, Limit: limit})
+		if err != nil {
+			log.Printf("realtime: search prompts: %v", err)
+		}
+		for _, p := range prompts {
+			snippet := snippetAround(p.Body, text)
+			resp.Results = append(resp.Results, wire.SearchResult{
+				Kind:     wire.SearchPrompt,
+				PromptID: p.PromptID,
+				Title:    p.Title,
+				Snippet:  snippet,
+				Author:   p.Author,
+				AtMs:     p.UpdatedAtMs,
+			})
+		}
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// snippetAround returns a short single-line excerpt of text centred on the
+// first case-insensitive occurrence of query (the head of text when absent).
+func snippetAround(text, query string) string {
+	const before, after = 60, 120
+	runes := []rune(strings.Join(strings.Fields(text), " "))
+	q := []rune(query)
+	at := -1
+	for i := 0; i+len(q) <= len(runes); i++ {
+		if strings.EqualFold(string(runes[i:i+len(q)]), query) {
+			at = i
+			break
+		}
+	}
+	if at < 0 {
+		return truncateRunes(string(runes), before+after)
+	}
+	start := max(0, at-before)
+	end := min(len(runes), at+len(q)+after)
+	out := string(runes[start:end])
+	if start > 0 {
+		out = "…" + out
+	}
+	if end < len(runes) {
+		out += "…"
+	}
+	return out
+}
+
+func truncateRunes(s string, n int) string {
+	r := []rune(s)
+	if len(r) <= n {
+		return s
+	}
+	return string(r[:n]) + "…"
+}
+
+// serverTimeIfUnset keeps a client-supplied event time and stamps the server's
+// when it is missing, so every stored feed row has a usable created_at_ms
+// (global search orders and pages by it).
+func serverTimeIfUnset(atMs int64) int64 {
+	if atMs > 0 {
+		return atMs
+	}
+	return time.Now().UnixMilli()
+}

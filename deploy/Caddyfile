@@ -1,0 +1,162 @@
+# bnbloc TLS reverse proxy (Caddy). Caddy is the default here because it
+# obtains and renews certificates automatically; the nginx equivalent follows
+# in a comment block at the end.
+#
+#   caddy run --config deploy/Caddyfile
+#
+# deploy/compose.prod.yml publishes the gateway on 127.0.0.1:7090 and the
+# relay on 127.0.0.1:7091, so this proxy is the only public listener. One host
+# serves both: the SPA + API through the gateway, and /relay/* (desktop bridge
+# live file sync, a WebSocket) straight to the relay — the gateway never
+# proxies the relay.
+{
+	servers {
+		# Long-lived SSE/WebSocket connections must not be cut by an idle
+		# timeout; a 256 MiB artifact upload needs time on a slow link.
+		# (Server timeouts are a global option, not a site directive.)
+		timeouts {
+			read_body 10m
+			idle 30m
+		}
+	}
+}
+
+bnbloc.example.com {
+	# --- Request body limits (per path) ---------------------------------
+	# Sidecar artifact staging (POST /v1/platform/artifacts, super-admin only)
+	# streams raw binaries up to 256 MiB (services/gateway/artifacts.go
+	# maxArtifactUploadBytes); the gateway enforces the exact cap itself.
+	@artifact_upload path /v1/platform/artifacts
+	request_body @artifact_upload {
+		max_size 256MiB
+	}
+	# Room artifact file versions (multipart POST …/versions) stream up to
+	# BNBLOC_ARTIFACT_MAX_BYTES (default 100 MiB, at most 256 MiB); the room
+	# service enforces the exact cap itself.
+	@artifact_version_upload path_regexp ^/v1/rooms/[^/]+/artifacts/[^/]+/versions$
+	request_body @artifact_version_upload {
+		max_size 256MiB
+	}
+	# Everything else: attachments upload at up to 25 MiB
+	# (services/realtime/attachments.go), inline artifact text 2 MiB. 32 MiB
+	# leaves headroom for the multipart envelope without inviting arbitrary
+	# large bodies.
+	@default_body {
+		not path /v1/platform/artifacts
+		not path_regexp ^/v1/rooms/[^/]+/artifacts/[^/]+/versions$
+	}
+	request_body @default_body {
+		max_size 32MiB
+	}
+
+	# --- Relay (desktop bridge file sync) -------------------------------
+	# The bridge dials https://<host>/relay/stream/... with
+	# BNBLOC_RELAY_BASE_URL=https://<host>. The sync token rides the stream's
+	# HELLO in cleartext, so this TLS hop is mandatory. Caddy forwards the
+	# WebSocket upgrade automatically.
+	handle /relay/* {
+		reverse_proxy 127.0.0.1:7091 {
+			flush_interval -1
+		}
+	}
+
+	# --- Everything else: the gateway -----------------------------------
+	# Room event delivery is Server-Sent Events (services/realtime streams
+	# text/event-stream, and the gateway proxies it with FlushInterval -1).
+	# Response buffering in the proxy would hold those frames and the UI would
+	# stop updating live; flush_interval -1 keeps Caddy streaming. Caddy sets
+	# X-Forwarded-For/-Proto/-Host on the upstream request by default.
+	handle {
+		reverse_proxy 127.0.0.1:7090 {
+			flush_interval -1
+		}
+	}
+
+	encode gzip
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		# SAMEORIGIN: the app frames its own artifact runner / previewers.
+		X-Frame-Options "SAMEORIGIN"
+		Referrer-Policy "strict-origin-when-cross-origin"
+	}
+
+	log {
+		output file /var/log/caddy/bnbloc.log {
+			roll_size 50mb
+			roll_keep 10
+		}
+	}
+}
+
+# --- nginx equivalent ---------------------------------------------------
+#
+# server {
+#     listen 443 ssl http2;
+#     server_name bnbloc.example.com;
+#
+#     ssl_certificate     /etc/letsencrypt/live/bnbloc.example.com/fullchain.pem;
+#     ssl_certificate_key /etc/letsencrypt/live/bnbloc.example.com/privkey.pem;
+#
+#     # Default body cap: attachments are 25 MiB, inline artifact text 2 MiB.
+#     # Room artifact file versions need up to BNBLOC_ARTIFACT_MAX_BYTES:
+#     # add a `location ~ ^/v1/rooms/[^/]+/artifacts/[^/]+/versions$` block
+#     # like the staging one below (client_max_body_size 256m, no request
+#     # buffering).
+#     client_max_body_size 32m;
+#
+#     add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+#     add_header X-Content-Type-Options nosniff always;
+#     add_header X-Frame-Options SAMEORIGIN always;  # the app frames its own runner
+#
+#     # Sidecar artifact staging streams raw binaries up to 256 MiB; stream the
+#     # body to the gateway instead of spooling it to disk first.
+#     location = /v1/platform/artifacts {
+#         client_max_body_size 256m;
+#         proxy_request_buffering off;
+#         proxy_read_timeout 10m;
+#         proxy_send_timeout 10m;
+#         proxy_pass http://127.0.0.1:7090;
+#         proxy_http_version 1.1;
+#         proxy_set_header Host              $host;
+#         proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+#         proxy_set_header X-Forwarded-Proto $scheme;
+#     }
+#
+#     # Desktop bridge live file sync: a WebSocket straight to the relay. The
+#     # sync token rides the stream in cleartext — TLS here is mandatory.
+#     location /relay/ {
+#         proxy_pass http://127.0.0.1:7091;
+#         proxy_http_version 1.1;
+#         proxy_set_header Upgrade    $http_upgrade;
+#         proxy_set_header Connection "upgrade";
+#         proxy_set_header Host       $host;
+#         proxy_buffering off;
+#         proxy_read_timeout 30m;
+#         proxy_send_timeout 30m;
+#     }
+#
+#     location / {
+#         proxy_pass http://127.0.0.1:7090;
+#         proxy_http_version 1.1;
+#         proxy_set_header Host              $host;
+#         proxy_set_header X-Real-IP         $remote_addr;
+#         proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+#         proxy_set_header X-Forwarded-Proto $scheme;
+#
+#         # Mandatory for the room event stream: nginx buffers proxied
+#         # responses by default, which would withhold SSE frames until the
+#         # buffer fills and make the room look frozen.
+#         proxy_buffering off;
+#         proxy_cache off;
+#         proxy_read_timeout 30m;
+#         proxy_send_timeout 30m;
+#     }
+# }
+#
+# server {
+#     listen 80;
+#     server_name bnbloc.example.com;
+#     return 301 https://$host$request_uri;
+# }

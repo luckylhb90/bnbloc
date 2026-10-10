@@ -1,0 +1,218 @@
+import { useEffect, useRef, useState } from "react";
+import { api, type Artifact, type ArtifactVersion } from "@/lib/api";
+import { inferMime, type ArtifactFileFacts } from "@/lib/artifactFiles";
+import { fileInfoFromFacts } from "@/views/artifact/fileInfo";
+import type { ArtifactFileInfo } from "@/views/artifact/registry";
+
+// Shared artifact data for the workbench, chat file cards and the
+// deliverables view:
+//   - artifact detail (metadata + version list), cached per artifact and
+//     invalidated by the room stream's artifact_updated, so N cards and an
+//     open tab cost one request, not N;
+//   - version bytes, cached by (room, artifact, version) — versions are
+//     immutable, so a cached blob is never stale;
+//   - card images (stored thumbnail or the image itself) as object URLs.
+// Everything is fetched through the authenticated transport; nothing here
+// puts a credential into a URL.
+
+export interface ArtifactDetail {
+  readonly artifact: Artifact;
+  readonly versions: readonly ArtifactVersion[];
+}
+
+const MAX_DETAILS = 300;
+const details = new Map<string, Promise<ArtifactDetail>>();
+const detailListeners = new Set<(key: string | null) => void>();
+
+function detailKey(roomId: string, artifactId: string): string {
+  return `${roomId}\u0000${artifactId}`;
+}
+
+export function loadArtifactDetail(roomId: string, artifactId: string): Promise<ArtifactDetail> {
+  const key = detailKey(roomId, artifactId);
+  const cached = details.get(key);
+  if (cached) return cached;
+  const pending = api
+    .artifactDetail(roomId, artifactId)
+    .then((res) => ({ artifact: res.artifact, versions: res.versions ?? [] }));
+  // A failure is not cached: the next consumer retries.
+  pending.catch(() => {
+    if (details.get(key) === pending) details.delete(key);
+  });
+  details.set(key, pending);
+  if (details.size > MAX_DETAILS) details.delete(details.keys().next().value as string);
+  return pending;
+}
+
+/** Drops cached detail (one artifact, or the whole room on reconnect) and
+ *  tells mounted consumers to refetch. */
+export function invalidateArtifacts(roomId: string, artifactId?: string): void {
+  if (artifactId) {
+    const key = detailKey(roomId, artifactId);
+    details.delete(key);
+    for (const l of detailListeners) l(key);
+    return;
+  }
+  const prefix = `${roomId}\u0000`;
+  for (const key of [...details.keys()]) if (key.startsWith(prefix)) details.delete(key);
+  for (const l of detailListeners) l(null);
+}
+
+/** Artifact detail for a mounted consumer; `enabled` defers the fetch (a
+ *  card off-screen). Keeps the last detail while a refetch runs. */
+export function useArtifactDetail(
+  roomId: string,
+  artifactId: string | null,
+  enabled = true,
+): { detail: ArtifactDetail | null; error: boolean } {
+  const [rev, setRev] = useState(0);
+  const [state, setState] = useState<{ id: string | null; detail: ArtifactDetail | null; error: boolean }>({
+    id: null,
+    detail: null,
+    error: false,
+  });
+  useEffect(() => {
+    if (!artifactId) return;
+    const mine = detailKey(roomId, artifactId);
+    const listener = (key: string | null) => {
+      if (key === null || key === mine) setRev((n) => n + 1);
+    };
+    detailListeners.add(listener);
+    return () => {
+      detailListeners.delete(listener);
+    };
+  }, [roomId, artifactId]);
+  useEffect(() => {
+    if (!artifactId || !enabled) return;
+    let cancelled = false;
+    loadArtifactDetail(roomId, artifactId)
+      .then((detail) => {
+        if (!cancelled) setState({ id: artifactId, detail, error: false });
+      })
+      .catch(() => {
+        if (!cancelled) setState({ id: artifactId, detail: null, error: true });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [roomId, artifactId, enabled, rev]);
+  if (state.id !== artifactId) return { detail: null, error: false };
+  return { detail: state.detail, error: state.error };
+}
+
+/** File facts of one version (an older version keeps its own MIME type). */
+export function versionFacts(artifact: Artifact, meta?: ArtifactVersion): ArtifactFileFacts {
+  return {
+    kind: artifact.kind,
+    title: artifact.title,
+    fileName: artifact.fileName,
+    mimeType: meta?.mimeType || artifact.mimeType,
+    language: artifact.language,
+  };
+}
+
+export function fileInfoFor(artifact: Artifact, version: number, meta?: ArtifactVersion): ArtifactFileInfo {
+  return fileInfoFromFacts(versionFacts(artifact, meta), version, meta?.sizeBytes);
+}
+
+export function versionMeta(detail: ArtifactDetail | null, version: number): ArtifactVersion | undefined {
+  return detail?.versions.find((v) => v.version === version);
+}
+
+// --- version bytes ---
+
+const MAX_BLOBS = 16;
+const blobs = new Map<string, Promise<Blob>>();
+
+/** One version's bytes. Inline versions come from the version route (works
+ *  against every server); blob-backed versions from the content route. The
+ *  blob is typed with the effective MIME type (an SVG must be image/svg+xml
+ *  to render as an image). */
+export function loadVersionBlob(
+  roomId: string,
+  artifact: Artifact,
+  version: number,
+  meta?: ArtifactVersion,
+): Promise<Blob> {
+  const key = `${roomId}\u0000${artifact.artifactId}\u0000${version}`;
+  const cached = blobs.get(key);
+  if (cached) return cached;
+  const mime = inferMime(versionFacts(artifact, meta)) || "application/octet-stream";
+  const pending = (async () => {
+    if (meta?.storage === "blob") return api.artifactContent(roomId, artifact.artifactId, version);
+    const res = await api.artifactVersion(roomId, artifact.artifactId, version);
+    if (res.version.storage === "blob") return api.artifactContent(roomId, artifact.artifactId, version);
+    return new Blob([res.version.content ?? ""], { type: mime });
+  })().then((blob) => (blob.type === mime ? blob : blob.slice(0, blob.size, mime)));
+  pending.catch(() => {
+    if (blobs.get(key) === pending) blobs.delete(key);
+  });
+  blobs.set(key, pending);
+  if (blobs.size > MAX_BLOBS) blobs.delete(blobs.keys().next().value as string);
+  return pending;
+}
+
+/** The bytes of one version for a mounted viewer. */
+export function useVersionBlob(
+  roomId: string,
+  artifact: Artifact | null,
+  version: number,
+  meta?: ArtifactVersion,
+): { blob: Blob | null; error: string } {
+  const [state, setState] = useState<{ key: string; blob: Blob | null; error: string }>({ key: "", blob: null, error: "" });
+  // The bytes are identified by artifact, version and storage; the latest
+  // objects are read through a ref so a detail refetch does not reload them.
+  const key = artifact && version > 0 ? `${artifact.artifactId}:${version}:${meta?.storage ?? ""}` : "";
+  const latest = useRef({ artifact, meta, version });
+  latest.current = { artifact, meta, version };
+  useEffect(() => {
+    const { artifact: a, meta: m, version: v } = latest.current;
+    if (!key || !a || v <= 0) return;
+    let cancelled = false;
+    loadVersionBlob(roomId, a, v, m)
+      .then((blob) => {
+        if (!cancelled) setState({ key, blob, error: "" });
+      })
+      .catch((e: unknown) => {
+        if (!cancelled) setState({ key, blob: null, error: e instanceof Error && e.message ? e.message : "Could not load this file." });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [roomId, key]);
+  return state.key === key ? { blob: state.blob, error: state.error } : { blob: null, error: "" };
+}
+
+// --- card images ---
+
+const MAX_CARD_IMAGES = 80;
+const cardImages = new Map<string, Promise<string>>();
+
+/** Object URL of a card image: the stored thumbnail ("thumbnail") or the
+ *  image itself ("content"). Evicted URLs are revoked; an <img> that already
+ *  decoded keeps its pixels. */
+export function loadCardImage(
+  roomId: string,
+  artifact: Artifact,
+  meta: ArtifactVersion,
+  source: "thumbnail" | "content",
+): Promise<string> {
+  const key = `${roomId}\u0000${artifact.artifactId}\u0000${meta.version}\u0000${source}`;
+  const cached = cardImages.get(key);
+  if (cached) return cached;
+  const pending = (
+    source === "thumbnail"
+      ? api.artifactThumbnail(roomId, artifact.artifactId, meta.version)
+      : loadVersionBlob(roomId, artifact, meta.version, meta)
+  ).then((blob) => URL.createObjectURL(blob));
+  pending.catch(() => {
+    if (cardImages.get(key) === pending) cardImages.delete(key);
+  });
+  cardImages.set(key, pending);
+  if (cardImages.size > MAX_CARD_IMAGES) {
+    const oldest = cardImages.keys().next().value as string;
+    void cardImages.get(oldest)?.then((url) => URL.revokeObjectURL(url)).catch(() => {});
+    cardImages.delete(oldest);
+  }
+  return pending;
+}

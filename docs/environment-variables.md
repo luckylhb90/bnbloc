@@ -1,0 +1,366 @@
+# Environment Variables
+
+The authoritative environment reference for bnbloc. Every entry is verified
+against the code that reads it (`config.FromEnvRaw` / `config.FromEnv` /
+`os.Getenv` call sites); a variable that nothing reads does not belong here or
+in any compose/Helm file.
+
+For a per-service deployment checklist (which variables each service needs),
+see [Per-Service Deployment Environment](./deploy-service-env.md).
+
+Three deployment shapes consume these differently:
+
+- **Compose** (`compose.yml` + `deploy/compose.prod.yml`): the overlay wires
+  peers and pins the production switches; you supply secrets and identity via
+  `--env-file .env.production` (template: `.env.production.example`).
+- **Kubernetes** (`deploy/k8s`): the chart renders wiring and secret
+  references; you create the referenced Secrets.
+- **All-in-one** (`deploy/prod/Dockerfile`): the supervisor sets every
+  internal wiring variable (`BNBLOC_*_BASE_URL`, `BNBLOC_ROOM_LISTEN_ADDR`)
+  and defaults `BNBLOC_ENV=production`; you supply secrets and identity.
+
+## Deployment mode
+
+| Variable | Scope | Meaning |
+| --- | --- | --- |
+| `BNBLOC_ENV` | every Go service | `production` turns every dev-permissive fallback into a fatal startup error: a missing `BNBLOC_INTERNAL_KEY` (svcauth would trust the identity header unsigned), missing `BNBLOC_MYSQL_DSN` (in-memory store), missing `BNBLOC_SESSION_SIGNING_KEY` (ephemeral key), and dev-only switches such as `BNBLOC_ACTIVITY_ALLOW_SERVE_ALL`. Production never uses the dev verifier: without OIDC, direct login (`/v1/auth/login`) is disabled and sign-in is only through an installed auth-provider (SSO). Bootstrap the first super-admin on a fresh SSO-only deployment with `bnbloc mint-admin-token <subject>` run inside the gateway container (subject must be in `BNBLOC_SUPER_ADMINS`; prints a 15-minute token for `BNBLOC_TOKEN`). Any other value or unset = development, where those fallbacks run with loud warnings. Set by the production overlay, the Helm chart, and the all-in-one image. |
+
+## Secrets loading (AWS Secrets Manager)
+
+| Variable | Scope | Meaning |
+| --- | --- | --- |
+| `BNBLOC_AWS_SECRET_ID` | every Go service | Secret name/ARN whose JSON `SecretString` maps env var names to values, loaded into the process environment at start (only for variables that are unset or empty). Set-but-unloadable is fatal. Unset = no AWS call. |
+| `BNBLOC_AWS_REGION` | every Go service | Optional region pin for the secret; unset defers to the AWS SDK default chain. |
+
+## Metrics listener
+
+| Variable | Scope | Meaning |
+| --- | --- | --- |
+| `BNBLOC_METRICS_ADDR` | every Go service | Internal listen address for Prometheus `/metrics` (e.g. `:9090`). Set: `/metrics` is served only there, never on the main listener. Unset: internal services (room, activity, realtime, shareagent, relay) keep `/metrics` on their main listener, which is reachable only on the private service network, and the gateway — the public edge — serves no metrics at all. The gateway's main listener always answers `/metrics` with 404. Never publish this port. The compose files and the Helm chart set `:9090` for the gateway; the all-in-one image hands the value (default `:9090`) to the gateway process only, since its six services share one network namespace. |
+
+## Required on stateful / authenticated services
+
+Read by gateway, room, realtime, activity, and shareagent. Relay and the
+desktop bridge do not read them: relay is stateless and authorizes by the
+sync-layer HMAC. The value must be identical across every service.
+
+| Variable | Scope | Meaning |
+| --- | --- | --- |
+| `BNBLOC_MYSQL_DSN` | gateway, room, realtime, activity, shareagent | External database DSN, e.g. `bnbloc:pass@tcp(host:3306)/bnbloc?parseTime=true`. `parseTime=true` required; `multiStatements=true` is appended by `store.OpenMySQL`. Append `&tls=true` for a managed instance. The account needs CREATE, ALTER and INDEX — services apply the schema themselves. Empty = in-memory store (dev only; fatal in production). |
+| `BNBLOC_INTERNAL_KEY` | gateway, room, realtime, activity, shareagent | Shared secret authenticating service-to-service calls: the gateway (and every internal caller) signs `X-Bnbloc-User` with it; the backends reject unsigned/mismatched calls with 401. Unset = every backend trusts the header from anything on the internal network (dev only; fatal in production). |
+
+## Gateway
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `BNBLOC_SESSION_SIGNING_KEY` | ephemeral (dev) | Signs browser session JWTs. Leaking it allows forging any identity; rotating it logs everyone out; every gateway replica must share it. Required in production. |
+| `BNBLOC_OIDC_ISSUER_URL` / `BNBLOC_OIDC_CLIENT_ID` | — | OIDC discovery URL and relying-party client id. Both set = OIDC; otherwise development uses the dev verifier (accepts any identity string) and production disables direct login (SSO via an installed auth-provider only). |
+| `BNBLOC_SUPER_ADMINS` | — (`root` in the dev compose) | Comma-separated verified subject ids or emails granted cross-tenant Platform admin. The entries are also the default recipients of an admin alert (`POST /v1/platform/alerts`), as notifier `userId`s. A service subject (`svc:<name>`) of an API token must be listed here to act as a super-admin (e.g. to send the nightly smoke's failure alert). |
+| `BNBLOC_LOCAL_AGENT_TOKEN` | — | Shared bearer a trusted local daemon may present (acts as a fixed daemon subject with member rights). Empty or the dev value `dev-local-agent-token` disables that path (fail closed) unless `BNBLOC_DEV_DISCOVERY` is set. |
+| `BNBLOC_ALLOWED_ORIGINS` | — | Comma-separated extra browser origins allowed for cross-origin API calls. Empty allows only the Tauri desktop origins (`tauri://localhost`, `http://tauri.localhost`); same-origin browser clients need nothing. |
+| `BNBLOC_AUTH_ACS_PATH` | gateway | Public path the IdP posts assertions to — the ACS URL registered with the IdP (e.g. `/api/sso/acs`). Default `/api/auth/acs`. Must be under `/api/` and match the installed auth-provider's own ACS URL setting, which validates the assertion's recipient. |
+| `BNBLOC_TRUSTED_PROXIES` | — | Comma-separated CIDRs/IPs of the reverse proxies in front of the gateway. Their `X-Forwarded-For` is believed (right to left) to find the client IP for the per-IP throttle on direct login (`/v1/auth/login`) — the only IP-keyed limit (invite redemption is throttled per user; the desktop SSO code exchange is not throttled). Only needed when direct login is enabled (OIDC or development); an SSO-only production gateway (direct login disabled) can leave it unset. Unset trusts none (the TCP peer is the client). A malformed entry is fatal. The production overlay sets the compose network gateway (`172.29.80.1/32`); in Kubernetes set the ingress controller's pod CIDR. |
+| `BNBLOC_TENANT_AUTOPROVISION` | on | `false` locks tenant membership to pre-provisioned tenants instead of auto-provisioning at login. |
+| `BNBLOC_DESKTOP_DOWNLOAD_URL` | — | Fallback desktop download link served when the deployment has no curated release history. |
+| `BNBLOC_EXT_ALLOW_UNSIGNED` | unset | Dev-only: accept unsigned component packages (see Components below). |
+
+## Internal wiring
+
+The all-in-one supervisor, the production overlay, and the Helm chart set all
+of these; supply them yourself only when wiring services by hand. Every listen
+address defaults to the port shown.
+
+| Variable | Scope | Default | Meaning |
+| --- | --- | --- | --- |
+| `BNBLOC_GATEWAY_LISTEN_ADDR` | gateway | `:8080` | Gateway bind address. |
+| `BNBLOC_ROOM_LISTEN_ADDR` | room | `:8080` | Room bind address. The all-in-one image moves it to `:8086` to free `:8080` for the gateway. |
+| `BNBLOC_ACTIVITY_LISTEN_ADDR` | activity | `:8081` | Activity bind address. |
+| `BNBLOC_REALTIME_LISTEN_ADDR` | realtime | `:8082` | Realtime bind address. |
+| `BNBLOC_SHAREAGENT_LISTEN_ADDR` | shareagent | `:8083` | Shareagent bind address. |
+| `BNBLOC_RELAY_LISTEN_ADDR` | relay | `:8085` | Relay bind address. |
+| `BNBLOC_ROOM_BASE_URL` | gateway, realtime, activity, shareagent | — | Room service URL: membership checks (empty → static allow-all, a security gap) and the gateway's proxy target. |
+| `BNBLOC_REALTIME_BASE_URL` | gateway, room, activity | — | Realtime service URL: room fans artifact changes to it, stores blob artifact versions and thumbnails in its blob store, and reads/writes the feed and attachments of handoff packages through it; activity publishes agent replies through it (without it replies persist but never reach clients). |
+| `BNBLOC_ACTIVITY_BASE_URL` | gateway | — | Activity service URL. |
+| `BNBLOC_SHAREAGENT_BASE_URL` | gateway | — | Shareagent service URL. |
+| `BNBLOC_RELAY_BASE_URL` | gateway | — | Internal relay URL (`http://relay:8085`), read only to sample the relay's `GET /version` for `GET /v1/platform/versions`. Unset: the relay is left out of the deployment view. (The desktop bridge's variable of the same name is the relay's public base; see the bridge table.) |
+
+The gateway does not proxy the relay: `/relay/*` is routed by the edge proxy
+(`deploy/Caddyfile`, the Helm Ingress) straight to the relay service.
+
+### Build identity (build argument, not runtime)
+
+`CI_COMMIT_SHA` is a **build argument** of the root `Dockerfile` (and so of the
+generated `deploy/prod/<service>/Dockerfile`s), the all-in-one
+`deploy/prod/Dockerfile` and `compose.yml`'s builds, also read by
+`apps/desktop/scripts/build-bridge-sidecar.mjs`: the source commit stamped into
+`internal/buildinfo` (`-ldflags -X`, with the build time) and into the web
+bundle (`build.json`). The name is the build platform's predefined commit
+variable, which it injects as a build arg on every image build, so platform
+builds are stamped with no pipeline change. `.git` is not in the image build
+context, so a manual build passes it:
+`docker build --build-arg CI_COMMIT_SHA=$(git rev-parse HEAD) …` or
+`CI_COMMIT_SHA=$(git rev-parse HEAD) docker compose build`. Without it the
+commit reads `unknown`, which the deployment view reports as unverifiable (a
+warning), not as skew. Local builds (desktop sidecar, web dev) fall back to the
+checkout's `git rev-parse HEAD`.
+Every internal listener serves `GET /version` (`{service, commit, builtAt,
+instance}`); the gateway's public listener does not.
+
+## Attachments and artifact blobs (realtime)
+
+Default is a local disk directory. For more than one host, use S3.
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `BNBLOC_ATTACHMENTS_DIR` | `/var/lib/bnbloc/attachments` (image) | Local blob directory. The service images create it owned by the nonroot user, so a named volume mounted there is writable. Max attachment 25 MiB; staged sidecar artifacts up to 256 MiB; room artifact files up to `BNBLOC_ARTIFACT_MAX_BYTES`. |
+| `BNBLOC_ATTACHMENTS_S3_BUCKET` | — | S3 bucket. Setting it switches from disk to S3. |
+| `BNBLOC_ATTACHMENTS_S3_REGION` | — | S3 region (falls back to `AWS_REGION` / `AWS_DEFAULT_REGION`). |
+| `BNBLOC_ATTACHMENTS_S3_ENDPOINT` | — | S3-compatible endpoint (empty = AWS). |
+| `BNBLOC_ATTACHMENTS_S3_ACCESS_KEY_ID` / `BNBLOC_ATTACHMENTS_S3_SECRET_ACCESS_KEY` / `BNBLOC_ATTACHMENTS_S3_SESSION_TOKEN` | — | Static credentials (fall back to `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` / `AWS_SESSION_TOKEN`, then the AWS default chain, e.g. IRSA). Both key halves or neither. |
+| `BNBLOC_ATTACHMENTS_S3_KEY_PREFIX` | — | Object-key prefix under the bucket (e.g. `bnbloc/`). |
+| `BNBLOC_ATTACHMENTS_S3_PATH_STYLE` | `false` | Path-style addressing (for S3-compatible stores). |
+| `BNBLOC_ATTACHMENTS_S3_DIRECT_DOWNLOADS` | `false` | S3 only: downloads that opt in (`?download=1` on a deliverable or public share, `?direct=1` on `/v1/artifacts/{key}`) answer 302 to a presigned S3 URL valid 5 minutes instead of streaming through bnbloc. Clients must reach the bucket. A disk store ignores it (logged). |
+| `BNBLOC_ATTACHMENTS_S3_PUBLIC_ENDPOINT` | — | Base URL presigned URLs are issued for, when `BNBLOC_ATTACHMENTS_S3_ENDPOINT` is a name only the services resolve (e.g. `http://minio:9000` inside compose, `https://files.example.com` outside). Same path-style / virtual-host addressing. Empty = the endpoint. |
+
+### Artifact files (room)
+
+Room artifacts are text (inline) or files: a blob version's bytes live in
+realtime's blob store above (realtime is the only blob owner; the room service
+writes and reads them over the signed internal route).
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `BNBLOC_ARTIFACT_MAX_BYTES` | `104857600` (100 MiB) | Max bytes of one blob artifact version (room). Must be 1..268435456 (realtime's 256 MiB blob cap); anything else is a startup error. Publishers (the bridge) read the effective value from the artifact list's `maxBytes`. Raise the edge proxy's body limit for `POST /v1/rooms/*/artifacts/*/versions` (Caddyfile, ingress `proxy-body-size`) with it. |
+
+## Member notifications (realtime, shareagent)
+
+Notifications are delivered to installed notifier components (super-admin
+installs, rollout and tenant scope like every component; each component's
+signing secret lives in platform settings). A member's own delivery (a
+personal bot) is a desktop plugin whose settings stay on the member's
+machine; the server stores no member notifier settings. Contract:
+[notifications.md](./notifications.md).
+
+| Variable | Scope | Default | Meaning |
+| --- | --- | --- | --- |
+| `BNBLOC_PUBLIC_URL` | realtime, shareagent, activity | — (`http://localhost:7090` in the dev compose) | Public web origin, e.g. `https://bnbloc.example.com`. Notification payloads deep-link to `<origin>/#/room/<roomId>?seq=<n>[&channel=<id>]` (the message) or `<origin>/#/room/<roomId>`. Unset = notifications carry no `url`. |
+| `BNBLOC_WEB_PUSH_VAPID_PUBLIC_KEY` | realtime | — (channel off) | Browser push notifications: the VAPID public key (base64url P-256 point), generate the pair with `bnbloc keys gen-vapid`. Served to browsers by `GET /v1/push/vapid-public-key`. Neither key set = the channel is off (the route answers 404, the web hides the toggle); one without the other or a mismatched pair is fatal at startup. Not required in production. |
+| `BNBLOC_WEB_PUSH_VAPID_PRIVATE_KEY` | realtime | — | The matching VAPID private key (base64url P-256 scalar). Secret. Rotating the pair invalidates every browser subscription (members turn the toggle on again). |
+| `BNBLOC_WEB_PUSH_VAPID_SUBJECT` | realtime | an https `BNBLOC_PUBLIC_URL` | VAPID contact, `mailto:<address>` or `https://<origin>`, sent to push services. Required when the keys are set and `BNBLOC_PUBLIC_URL` is not https. |
+
+## Activity
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `BNBLOC_ACTIVITY_ALLOW_SERVE_ALL` | off (`true` in the dev compose) | Dev-only: accept job claims from a single-host serve-all bridge (`BNBLOC_BRIDGE_SERVE_ALL_OWNERS`, the desktop's "Single-host mode") that drives every member's agent. Fatal when `BNBLOC_ENV=production`; the production overlay pins it empty. |
+
+## Agent cores (gateway, bridge)
+
+No core is compiled in or pre-wired: a core exists only after a super-admin
+installs a signed package (Platform console → Components, or
+`bnbloc cores install`), which persists to platform settings and rehydrates at
+boot. The variables below are operator overrides, defaulting to nothing.
+A manifest core's discovery may additionally read variables the manifest
+itself names (`discover.listener.pathEnv` to override the listener-descriptor
+path, `discover.hostRewrite.env` to override the loopback host rewrite —
+set-to-empty disables it); those names belong to the manifest, not to bnbloc.
+
+| Variable | Scope | Meaning |
+| --- | --- | --- |
+| `BNBLOC_CORES` | gateway, bridge | Comma-separated cores to activate explicitly (installs need no entry). Unknown names are skipped with a warning. |
+| `BNBLOC_CORE_<NAME>_URL` / `BNBLOC_CORE_<NAME>_TOKEN` | gateway, bridge | Explicit endpoint and token for core `<NAME>` (uppercased). |
+| `BNBLOC_CORE_MANIFESTS_DIR` | bridge | Transient manifest directory written only by the desktop's sidecar manager (gateway-published manifests for its bridge); the DB remains the source of truth. Not an install path. |
+| `BNBLOC_DEV_DISCOVERY` | gateway | Dev-only: enables `/v1/local-agent/discover`, caller-supplied local-agent URL/token on `/v1/local-agent/run`, and the dev daemon-token bypass. A production gateway must never set it. |
+
+## Components and plugin packages (gateway, realtime)
+
+Typed packages (auth providers, cores, plugin sidecars) are installed by a
+super-admin through `POST /v1/platform/components` (signed package body) or
+the CLI (`bnbloc cores install`, `bnbloc cores publish-sidecar`). Production
+requires a signature that verifies against a trusted publisher key
+(`POST /v1/platform/component-keys`).
+
+| Variable | Scope | Default | Meaning |
+| --- | --- | --- | --- |
+| `BNBLOC_EXT_ALLOW_UNSIGNED` | gateway, realtime | unset (signatures required) | Dev-only: accept unsigned packages so the console upload flow and `bnbloc cores install --unsigned` work out of the box. Realtime reads it because plugin packages rehydrate there. The dev compose defaults it on; the production overlay pins it empty. |
+
+### How component distribution behaves (no env needed)
+
+These are code behaviors, not variables — recorded here because operators ask:
+
+- **Rollout gate.** Every component record carries a rollout policy (`auto`,
+  `optin`, `off`, set at publish or via
+  `PUT /v1/platform/components/{name}/rollout`). `off` hides it from all
+  member surfaces; `optin` shows it only to members who installed it
+  (`POST/DELETE /v1/components/{name}/install`); `auto` distributes to
+  everyone. Opted-in components are activated at gateway boot and filtered per
+  member; `/v1/cores`, `/v1/components`, and `/v1/cores/{name}/artifact` all
+  enforce the same gate.
+- **Tenant scope is explicit.** `PUT /v1/platform/components/{name}/tenants`
+  with an empty list is rejected (400); clear the scope with
+  `{"allTenants": true}`.
+- **Kind disambiguation.** Component routes accept `?kind=`; a name shared by
+  two kinds without `?kind=` is a 409.
+- **Artifact provenance and entitlement.** Sidecar binaries are staged through
+  the super-admin `POST /v1/platform/artifacts` (streamed to realtime's blob
+  store, 256 MiB cap) before the package is assembled, so the signed envelope
+  pins hashes the gateway produced. `GET /v1/artifacts/{key}` is entitlement-
+  gated: super-admins may fetch any key; members only the artifacts of
+  components visible to them and published desktop releases. The desktop
+  refuses to run a binary whose sha256 mismatches the signed package.
+- **Plugin sidecars.** A plugin package (`bnbloc.plugin.package/v1`) only
+  subscribes to code-owned hooks (`chat_message.v1`, `agent_messages.v1`,
+  and `notification.v1` — one member's notification, routed to their desktop
+  instead of the server notifiers).
+  Realtime decides which member sees which event and audits the outcome, but
+  never dials a sidecar: each member's desktop that runs a plugin sidecar holds
+  `GET /v1/my/plugin-events` (SSE through the gateway), posts every delivered
+  envelope to its own loopback `POST /events`, and acknowledges it with
+  `POST /v1/my/plugin-events/{id}/ack`. Delivery is per member (every member
+  of the room with the plugin and a connected desktop gets the event) and
+  best-effort (an offline desktop misses events). No variable configures it.
+  The server never launches plugin processes — supervision is the desktop
+  sidecar manager's. The desktop launches a plugin with
+  `BNBLOC_PLUGIN_HOST_URL`/`BNBLOC_PLUGIN_HOST_TOKEN` (its loopback host API,
+  when the package declares `permissions.host`) and
+  `BNBLOC_PLUGIN_SETTINGS_FILE` (the member's desktop-local settings, when it
+  declares `localSettings`); these are read by the plugin, not by any bnbloc
+  service ([notifications.md](./notifications.md#launch-environment)).
+- **Auth-provider sidecars.** An auth-provider package
+  (`bnbloc.auth-provider.package/v1`) exposes
+  `bnbloc.auth-provider.contract/v1` on loopback; the gateway proxies
+  `/api/auth/*` to it and issues the bnbloc session after the provider returns
+  a verified identity (`internal/authprovider.Assertion`: `subject`, `email`,
+  `relay`, and optional `groups`, `department`, `displayName`). The optional
+  directory attributes feed organization sync, configured in the Platform
+  console, not by a variable ([organization-sync.md](./organization-sync.md)).
+- **Notifier endpoints.** A notifier package (`bnbloc.notifier.package/v1`,
+  runtime `endpoint`) names an externally supervised service at
+  `endpoint.baseUrl` (a path prefix is allowed) that answers
+  `GET <baseUrl>/discover` with `bnbloc.notifier.contract/v1`; the gateway
+  probes it at install, realtime activates it on its periodic reconcile and
+  posts signed notifications to `<baseUrl>/v1/notifications`. Its signing
+  secret is generated at install and shown once. See
+  [notifications.md](./notifications.md).
+- **Sandbox runtimes.** A sandbox package (`bnbloc.sandbox.package/v1`,
+  contract `bnbloc.sandbox.contract/v1`) is a Sandbox Protocol v1
+  implementation ([sandbox-protocol.md](./architecture/sandbox-protocol.md)):
+  runtime `sidecar` (per-platform artifacts, loopback `sidecar.localUrl`, and a
+  required `sidecar.tokenEnv`) or runtime `endpoint` (`endpoint.baseUrl`, host
+  in `permissions.network`). Nothing runs in the gateway; it keeps the record
+  and lists installed sandboxes in the member `GET /v1/components` (rollout +
+  tenant gated). The package-declared launch variables below are read by the
+  sidecar, not by any bnbloc service; desktop supervision of sandbox sidecars
+  lands in the next phase.
+- **Sidecar launch block (any sidecar kind).** Besides `sidecar.listenEnv`
+  (listen address) and `sidecar.supervisedEnv` (`1` = exit when stdin closes),
+  a package may declare `sidecar.tokenEnv` (the desktop sets it to a fresh
+  random bearer per launch; the sidecar must require it), `sidecar.dataDirEnv`
+  (a private per-component data directory), and `sidecar.files`
+  (`[{name, env, executable?}]`: extra per-platform artifacts such as a VMM
+  helper or firmware library, published as `artifacts["<platform>/<name>"]`,
+  sha256-verified like the executable, path passed in `env`). Every
+  `<platform>/<name>` key must be a declared file of a platform that has a main
+  artifact, and env names must be unique upper-case identifiers.
+
+## Relay
+
+The relay carries the desktop bridge's live file-sync byte stream as a
+WebSocket. Its endpoints (`/relay/*`) are unauthenticated at the transport;
+authorization is the sync-layer HMAC (`BNBLOC_SYNC_SECRET`, bridge). That token
+rides the stream's cleartext HELLO, so the relay's public entry **must be TLS**.
+Pairing state is in process memory: run exactly one relay replica.
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `BNBLOC_RELAY_STUN_SERVERS` | — | Comma-separated STUN servers advertised for peer reachability. |
+| `BNBLOC_RELAY_ENDPOINTS` | — | Comma-separated advertised relay endpoints. |
+
+## Bridge (member daemon / desktop sidecar)
+
+The desktop app sets these for its embedded bridge from its settings; a
+standalone bridge (compose `bridge` profile) reads them from the environment.
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `BNBLOC_GATEWAY_BASE_URL` | — (required) | Gateway the bridge talks to. |
+| `BNBLOC_BRIDGE_OWNER` | — (required) | The member this bridge acts for. |
+| `BNBLOC_BRIDGE_TENANT` | — | Tenant to sign in to (multi-tenant members). |
+| `BNBLOC_GATEWAY_TOKEN` | — | Static gateway bearer. Empty (normal) = the bridge mints the owner's session via login; set it when the gateway's IdP rejects that login. |
+| `BNBLOC_GATEWAY_REFRESH_TOKEN` | — | The owner's refresh token (set by the desktop after sign-in, in memory only). The bridge forks it once into its own refresh family (`POST /v1/auth/refresh/fork`) and from then on rotates only that family via `POST /v1/auth/refresh` — it never rotates the handed-over token, which the member's client keeps using (a second rotator would trip reuse detection and revoke the sign-in). A graceful stop revokes the bridge's own family (`POST /v1/auth/logout`). Required on SSO-only gateways (direct login disabled). Empty = dev login fallback (development gateways only). |
+| `BNBLOC_BRIDGE_ROOMS` | all the owner's rooms | Comma-separated room ids to watch. |
+| `BNBLOC_BRIDGE_ID` | derived from owner+tenant | Stable durable-job worker identity. |
+| `BNBLOC_BRIDGE_APP_INSTANCE_ID` / `BNBLOC_BRIDGE_VERSION` | — | Heartbeat metadata (set by the desktop). |
+| `BNBLOC_BRIDGE_DISABLED_PROVIDERS` | — | Comma-separated `core/provider` keys the member turned off. |
+| `BNBLOC_BRIDGE_SERVE_ALL_OWNERS` | off | Single-host testing only: drive every member's agent from this one bridge (needs `BNBLOC_ACTIVITY_ALLOW_SERVE_ALL` on activity). |
+| `BNBLOC_BRIDGE_SUPERVISED` | off | Set by the desktop: exit when stdin closes (parent died). |
+| `BNBLOC_BRIDGE_CONTEXT_WINDOW_CHARS` / `BNBLOC_BRIDGE_CONTEXT_RECENT_ROWS` | built-in | Per-drive room-context tuning floors (0 = default). |
+| `BNBLOC_RELAY_BASE_URL` | — | Relay base for live file sync, e.g. `https://bnbloc.example.com` (the edge routes `/relay/*`). Empty disables file sync; chat/agents are unaffected. |
+| `BNBLOC_BRIDGE_SYNC_ENGINE` | `gosync` | File-sync engine for live-sync rooms. |
+| `BNBLOC_SYNC_SECRET` | — | Deployment-wide secret; the per-room sync token is `HMAC(secret, roomId)`. **Required for file sync in any shared deployment** — empty yields an empty token (dev only). All members' bridges must share it. |
+| `BNBLOC_CORES`, `BNBLOC_CORE_*` | — | See Agent cores. |
+| `BNBLOC_SANDBOX_MODE` | `borrowed` | Set by the desktop from the member's Agent sandbox setting: `off` \| `borrowed` \| `all` (which of the member's runs execute their commands in the local VM; with the tenant's `requireSandboxForBorrow` on, borrowed drives that cannot run sandboxed are refused). Always set by the desktop; any other value is a fatal startup error. |
+| `BNBLOC_SANDBOX_URL` / `BNBLOC_SANDBOX_TOKEN` | — | The local sandbox sidecar (Sandbox Protocol v1) and its per-launch admin bearer. Set by the desktop only while the sandbox is ready and the mode is not `off`, in memory only; the bearer never leaves the bridge. |
+| `BNBLOC_SANDBOX_MACHINE` | — | The one machine the desktop prepared (`bnbloc`); the bridge never creates or deletes machines. Set with `BNBLOC_SANDBOX_URL`. |
+| `BNBLOC_SANDBOX_VMEXEC` | — | Absolute path of the `bnbloc-vmexec` helper from the sandbox package. Set with `BNBLOC_SANDBOX_URL`. |
+| `BNBLOC_SANDBOX_WORKSPACES_ROOT` | — | The host directory shared into the machine at the identical guest path (`<home>/bnbloc-workspaces`); sandboxed room workspaces live under it. Set with `BNBLOC_SANDBOX_URL`. |
+
+## Sandbox exec helper (`cmd/bnbloc-vmexec`)
+
+Written by a `sandboxExec` core into the agent CLI's environment from the
+bridge's `execution` descriptor (`core/protocol.VMExecEnv`; parsed by
+`SandboxFromEnv`). Per session, never configured by hand.
+
+| Variable | Meaning |
+|---|---|
+| `BNBLOC_VMEXEC_URL` / `BNBLOC_VMEXEC_TOKEN` | Sandbox Protocol endpoint and the short-lived **space-scoped exec token** (never the admin bearer). |
+| `BNBLOC_VMEXEC_MACHINE` / `BNBLOC_VMEXEC_SPACE` | Machine id/name and space the commands run in. |
+| `BNBLOC_VMEXEC_MOUNTS` | JSON `[{"host":…,"guest":…}]`: host→guest path mapping; a cwd outside every mount is refused (exit 126). |
+| `BNBLOC_VMEXEC_PASSTHROUGH` | Comma-separated command names allowed to run on the host instead. |
+| `BNBLOC_VMEXEC_PATH` / `BNBLOC_VMEXEC_WORKDIR` | The helper's own path (what rewritten hook commands call) and the session workdir. |
+| `BNBLOC_CONFINE_WORKSPACE` | The workspace `confine` grants read+write. |
+| `BNBLOC_CONFINE_ALLOW_READ` / `_ALLOW_WRITE` / `_DENY_WRITE` | JSON arrays of absolute host paths; deny-write wins over every allow. |
+
+## CLI (`cmd/bnbloc`)
+
+| Variable | Meaning |
+| --- | --- |
+| `BNBLOC_GATEWAY` | Default `--gateway` URL. |
+| `BNBLOC_TOKEN` | Default `--token` (a super-admin session token for install/publish commands). |
+| `BNBLOC_API_TOKEN` | A super-admin-issued API token (`bnbloc api-tokens create`), used when no `--token`/`BNBLOC_TOKEN` is given: exchanged once per command for a 1-hour session (`POST /v1/auth/api-token`). The credential for unattended runs such as the nightly smoke workflow (see [ci.md](./ci.md#nightly-smoke)). |
+
+The CLI image (`SERVICE=cli`, `deploy/prod/cli/Dockerfile`) reads the same
+variables. The scheduled nightly smoke wires them per deploy surface (see
+[production-deployment.md](./production-deployment.md#nightly-smoke)): the
+Helm CronJob sets `BNBLOC_GATEWAY` (default `http://bnbloc-gateway:8080`)
+and `BNBLOC_API_TOKEN` (from `smoke.apiTokenSecretRef`); the compose `smoke`
+service (profile `smoke`, `deploy/compose.prod.yml`) takes these
+`.env.production` inputs:
+
+| `.env.production` input | Becomes |
+| --- | --- |
+| `BNBLOC_SMOKE_API_TOKEN` | `BNBLOC_API_TOKEN` (required) |
+| `BNBLOC_SMOKE_GATEWAY` | `BNBLOC_GATEWAY`, default `http://gateway:8080` |
+| `BNBLOC_SMOKE_AGENT` | `--agent` (empty = message path only) |
+| `BNBLOC_SMOKE_ALERT_TO` | `--alert-to` (empty = every `BNBLOC_SUPER_ADMINS` entry) |
+
+## Build-time and test-only
+
+| Variable | Where | Meaning |
+| --- | --- | --- |
+| `BNBLOC_DEFAULT_GATEWAY` | desktop build (`option_env!`) | Gateway URL compiled into the desktop app's updater; see [the release runbook](./desktop-update-release-runbook.md). |
+| `BNBLOC_TEST_MYSQL_DSN` | `go test` | Enables the MySQL integration tests in `internal/store` (skipped otherwise); CI sets it against a MySQL service container. |
+
+## Minimum production set
+
+```bash
+BNBLOC_MYSQL_DSN=bnbloc:CHANGE@tcp(db.internal:3306)/bnbloc?parseTime=true&tls=true
+BNBLOC_INTERNAL_KEY=<random>
+BNBLOC_SESSION_SIGNING_KEY=<random>
+BNBLOC_OIDC_ISSUER_URL=https://idp.corp.example
+BNBLOC_OIDC_CLIENT_ID=bnbloc
+BNBLOC_SUPER_ADMINS=admin@corp.example
+# BNBLOC_ENV=production is set by the overlay / chart / all-in-one image.
+```
+
+`.env.production.example` at the repo root is the annotated template.

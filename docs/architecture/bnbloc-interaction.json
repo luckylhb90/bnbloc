@@ -1,0 +1,56 @@
+{
+  "schema_version": 1,
+  "diagram_type": "sequence",
+  "meta": {
+    "title": "bnbloc — Room Message & File Sync",
+    "output": "bnbloc-interaction.html",
+    "viewBox": [960, 760],
+    "quality_profile": "showcase",
+    "views": [
+      { "id": "send", "label": "Send a chat", "focus": ["client", "gateway", "realtime"], "note": "The gateway signs identity and realtime publishes to the room SSE hub." },
+      { "id": "drive", "label": "Drive the agent", "focus": ["realtime", "bridge", "agent"], "note": "A bridge claims by recipient and drives its local agent core." },
+      { "id": "sync", "label": "Live file sync", "focus": ["bridge", "relay"], "note": "Two members' bridges pair on the relay over a WebSocket, keyed and HMAC-authed by room." }
+    ]
+  },
+  "participants": [
+    { "id": "client", "type": "external", "label": "Client SPA", "sublabel": "browser / desktop" },
+    { "id": "gateway", "type": "backend", "label": "Gateway", "sublabel": "auth edge" },
+    { "id": "realtime", "type": "backend", "label": "Realtime", "sublabel": "SSE hub" },
+    { "id": "bridge", "type": "backend", "label": "Bridge", "sublabel": "member sidecar" },
+    { "id": "agent", "type": "cloud", "label": "Local Agent", "sublabel": "manifest / adapters" },
+    { "id": "relay", "type": "messagebus", "label": "Relay", "sublabel": "WebSocket peer" }
+  ],
+  "segments": [
+    { "from": 120, "to": 250, "label": "Send + fan-out" },
+    { "from": 264, "to": 470, "label": "Claim + drive agent" },
+    { "from": 484, "to": 650, "label": "Reply + live sync" }
+  ],
+  "messages": [
+    { "from": "client", "to": "gateway", "y": 168, "label": "POST chat (Bearer)", "variant": "emphasis" },
+    { "from": "gateway", "to": "realtime", "y": 204, "label": "signed X-Bnbloc-User", "variant": "emphasis" },
+    { "from": "realtime", "to": "client", "y": 240, "label": "chat_message (SSE echo)", "variant": "return" },
+    { "from": "realtime", "to": "bridge", "y": 286, "label": "room SSE → claim by recipient", "variant": "default" },
+    { "from": "bridge", "to": "agent", "y": 322, "label": "turn (chat text)", "variant": "emphasis" },
+    { "from": "agent", "to": "bridge", "y": 358, "label": "completed message", "variant": "return" },
+    { "from": "bridge", "to": "gateway", "y": 394, "label": "reply + agentSessionId", "variant": "default" },
+    { "from": "gateway", "to": "realtime", "y": 430, "label": "activity: dedup + store", "variant": "default" },
+    { "from": "realtime", "to": "client", "y": 466, "label": "agent reply (SSE)", "variant": "return" },
+    { "from": "bridge", "to": "relay", "y": 520, "label": "wss /relay/stream (HMAC)", "variant": "emphasis" },
+    { "from": "relay", "to": "bridge", "y": 556, "label": "pair peer bridge", "variant": "return" },
+    { "from": "bridge", "to": "relay", "y": 592, "label": "file deltas", "variant": "dashed" }
+  ],
+  "activations": [
+    { "participant": "gateway", "from": 142, "to": 196, "type": "backend" },
+    { "participant": "realtime", "from": 178, "to": 250, "type": "backend" },
+    { "participant": "bridge", "from": 250, "to": 400, "type": "backend" },
+    { "participant": "agent", "from": 316, "to": 364, "type": "cloud" },
+    { "participant": "gateway", "from": 388, "to": 436, "type": "backend" },
+    { "participant": "realtime", "from": 424, "to": 472, "type": "backend" },
+    { "participant": "relay", "from": 514, "to": 598, "type": "messagebus" }
+  ],
+  "cards": [
+    { "dot": "cyan", "title": "Send + fan-out", "items": ["Gateway verifies the session and signs X-Bnbloc-User", "Realtime publishes chat to the room SSE hub", "The sender sees its own message echo immediately"] },
+    { "dot": "orange", "title": "Claim + drive", "items": ["A bridge subscribes to the room SSE (presence=0)", "It claims by recipient owner/provider/core", "Its local agent core runs the turn"] },
+    { "dot": "emerald", "title": "Reply + sync", "items": ["Reply carries agentSessionId for activity dedup", "The reply lands on every client's SSE", "File sync pairs bridges on the relay, HMAC-authed by room"] }
+  ]
+}

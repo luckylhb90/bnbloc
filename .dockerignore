@@ -1,0 +1,10 @@
+bin/
+*.test
+.git/
+# Heavy build artifacts that must never enter the image build context. The Rust
+# target dir in particular can be many GB and caused a userspace-copy I/O error
+# during `docker compose build`.
+**/target/
+node_modules/
+web/dist/
+**/*.rcgu.o

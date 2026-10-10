@@ -1,0 +1,11 @@
+{
+  "name": "@bnbloc/previewer-sdk",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Frame-side SDK for bnbloc previewer components (bnbloc.previewer.contract/v1).",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./protocol": "./src/protocol.ts"
+  }
+}

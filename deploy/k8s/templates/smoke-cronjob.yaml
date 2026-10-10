@@ -1,0 +1,70 @@
+{{- /*
+Nightly in-cluster smoke (batch 3, R3): a CronJob that runs
+`bnbloc smoke --alert-on-failure` from the CLI image against the gateway
+Service, so a deployment checks its own message path every night without a
+CI system. A failed run alerts the platform admins through the installed
+notifier components; the failed Job is the fallback signal when the alert
+itself cannot be sent. See docs/production-deployment.md#nightly-smoke.
+*/ -}}
+{{- with .Values.smoke }}
+{{- if .enabled }}
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: bnbloc-smoke
+  labels: { app.kubernetes.io/name: bnbloc-smoke }
+spec:
+  schedule: {{ .schedule | quote }}
+  {{- with .timeZone }}
+  timeZone: {{ . | quote }}
+  {{- end }}
+  # One run at a time; a run missed by more than an hour (controller down)
+  # is skipped rather than started late.
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 3600
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 5
+  jobTemplate:
+    spec:
+      # No retry: a failed run has already alerted, a retry would alert again.
+      backoffLimit: 0
+      activeDeadlineSeconds: {{ .activeDeadlineSeconds }}
+      template:
+        metadata:
+          labels: { app.kubernetes.io/name: bnbloc-smoke }
+        spec:
+          restartPolicy: Never
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65532
+            runAsGroup: 65532
+          containers:
+            - name: bnbloc-smoke
+              image: "{{ $.Values.image.registry }}/{{ $.Values.image.repository }}-cli:{{ $.Values.image.tag }}"
+              imagePullPolicy: {{ $.Values.image.pullPolicy }}
+              args:
+                - smoke
+                - --alert-on-failure
+                {{- with .agent }}
+                - --agent
+                - {{ . | quote }}
+                {{- end }}
+                {{- with .alertTo }}
+                - --alert-to
+                - {{ join "," . | quote }}
+                {{- end }}
+                {{- range .extraArgs }}
+                - {{ . | quote }}
+                {{- end }}
+              env:
+                - name: BNBLOC_GATEWAY
+                  value: {{ .gatewayURL | default "http://bnbloc-gateway:8080" | quote }}
+                - name: BNBLOC_API_TOKEN
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ required "smoke.apiTokenSecretRef.name is required when smoke.enabled" .apiTokenSecretRef.name }}
+                      key: {{ .apiTokenSecretRef.key }}
+              resources: {{- toYaml .resources | nindent 16 }}
+{{- end }}
+{{- end }}

@@ -1,0 +1,16 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="referrer" content="no-referrer">
+<title>artifact</title>
+<!-- Live-artifact runner (guest side of web/src/lib/artifactFrame.ts). Loaded
+     by URL into a sandbox="allow-scripts" iframe — never srcdoc, so it does
+     not inherit the app's Content-Security-Policy. The desktop shell serves
+     it from its bnbloc-artifact:// scheme with its own header policy; the
+     browser loads it from the web bundle. The runner logic is an external
+     file so this page carries no inline script of its own. -->
+<script src="artifact-runner.js"></script>
+</head>
+<body></body>
+</html>

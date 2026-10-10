@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Hardened-runtime entitlements for the bnbloc desktop app AND its bundled
+  bridge sidecar (Tauri signs every externalBin with this same file).
+
+  Deliberately empty: the app needs no hardened-runtime exception. Every
+  candidate was checked; add one here only with the reason next to it.
+
+  - com.apple.security.cs.allow-jit / allow-unsigned-executable-memory:
+    not needed. WKWebView runs (and JITs) web content in Apple's own
+    WebContent XPC processes, not in this process; the Go bridge does not JIT.
+  - com.apple.security.cs.disable-library-validation: not needed. The app
+    loads no third-party dylibs. Bridge and downloaded component sidecars are
+    spawned as separate executables (each with its own signature); library
+    validation only governs code mapped into THIS process.
+  - com.apple.security.cs.allow-dyld-environment-variables: not needed.
+  - com.apple.security.network.client / network.server: only enforced under
+    App Sandbox. The app is not sandboxed (it must run the bridge and
+    gateway-delivered sidecar binaries), so outbound HTTPS and the bridge's
+    loopback listeners need no entitlement.
+  - com.apple.security.device.* (camera, microphone, ...): not used.
+  - com.apple.security.get-task-allow: never in a distributed build.
+-->
+<plist version="1.0">
+<dict/>
+</plist>

@@ -1,0 +1,60 @@
+package gateway
+
+import (
+	"context"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"sync"
+	"testing"
+)
+
+// adoptRoom: a fresh id is created and the daemon added; an existing id (409
+// from the room service, BE-1) is adopted only when the caller is already a
+// member — never re-created, never taken over.
+func TestAdoptRoomHandlesExistingRoomID(t *testing.T) {
+	var mu sync.Mutex
+	var calls []string
+	room := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		calls = append(calls, r.Method+" "+r.URL.Path)
+		mu.Unlock()
+		if r.Method == http.MethodPost && r.URL.Path == "/v1/rooms" {
+			w.WriteHeader(http.StatusConflict)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer room.Close()
+	members := map[string][]string{} // subject -> rooms
+	s := &Service{Rooms: func(subject, _ string) []string { return members[subject] }}
+	s.Backends.Room = room.URL
+	ctx := context.Background()
+
+	// Not a member of the existing room: refused, no member add.
+	if err := s.adoptRoom(ctx, "ws-1", "mallory", "t"); err == nil {
+		t.Fatal("adopting someone else's existing room must fail")
+	}
+	for _, c := range calls {
+		if strings.HasSuffix(c, "/members") {
+			t.Fatalf("member add attempted for a non-member: %v", calls)
+		}
+	}
+
+	// Caller is a member, daemon not yet: adopt and add the daemon.
+	members["alice"] = []string{"ws-1"}
+	calls = nil
+	if err := s.adoptRoom(ctx, "ws-1", "alice", "t"); err != nil {
+		t.Fatalf("adopt existing member room: %v", err)
+	}
+	if len(calls) != 2 || calls[1] != "POST /v1/rooms/ws-1/members" {
+		t.Fatalf("calls = %v; want create (409) then daemon member add", calls)
+	}
+
+	// Already fully adopted: no further writes after the 409.
+	members[daemonServiceSubject] = []string{"ws-1"}
+	calls = nil
+	if err := s.adoptRoom(ctx, "ws-1", "alice", "t"); err != nil || len(calls) != 1 {
+		t.Fatalf("re-adopt: err=%v calls=%v; want only the create attempt", err, calls)
+	}
+}

@@ -1,0 +1,108 @@
+// Command bnbloc-activity runs the agent activity ingest service.
+package main
+
+import (
+	"context"
+	"log"
+	"strings"
+	"time"
+
+	"github.com/luckylhb90/bnbloc/internal/config"
+	"github.com/luckylhb90/bnbloc/internal/membership"
+	"github.com/luckylhb90/bnbloc/internal/notify"
+	"github.com/luckylhb90/bnbloc/internal/obs"
+	"github.com/luckylhb90/bnbloc/internal/realtime"
+	"github.com/luckylhb90/bnbloc/internal/store"
+	"github.com/luckylhb90/bnbloc/internal/svcauth"
+	"github.com/luckylhb90/bnbloc/services/activity"
+)
+
+func main() {
+	cfg := config.FromEnv("BNBLOC_ACTIVITY", ":8081")
+	backends, err := store.NewBackends(config.FromEnvRaw("BNBLOC_MYSQL_DSN"))
+	if err != nil {
+		log.Fatalf("bnbloc-activity: store: %v", err)
+	}
+	metrics := obs.NewMetrics("bnbloc-activity")
+	activity.RegisterMetrics(metrics)
+	svc := &activity.Service{
+		Metrics:    metrics,
+		Store:      backends.Activity,
+		Publisher:  realtime.NewHTTPPublisher(config.FromEnvRaw("BNBLOC_REALTIME_BASE_URL"), "activity"),
+		Membership: membershipFor(cfg.RoomBaseURL),
+		BridgeJobs: backends.BridgeJobs,
+		// Team agent dashboard read side (same shared DB).
+		Team:  backends.TeamAgents(),
+		Usage: backends.AgentUsage(),
+		Rooms: backends.Room,
+		// Room agent catalogs: an agent-host member contributes only the
+		// room's platform agents (platform grants + policy, shared DB).
+		Grants:   backends.Grant,
+		Settings: backends.Settings,
+		// Agent run records (R10) over the job queue; the feed resolves a
+		// run's reply to its room sequence.
+		Runs: backends.AgentRuns(),
+		Feed: backends.Chat,
+		// Single-host serve-all testing must be enabled on the SERVER; a bridge
+		// cannot grant it to itself. Never in production.
+		AllowServeAllOwners: allowServeAll(),
+		// Usage budgets (R12): warnings go through the shared notification
+		// outbox (realtime delivers them); the tenant registry names budget
+		// members and the org admins a tenant budget warns.
+		Budgets: backends.Budgets,
+		Tenants: backends.Tenant,
+		Notifications: notify.NewEmitter(notify.Stores{
+			Prefs: backends.Notifications, Outbox: backends.Notifications, Settings: backends.Settings,
+			Installs: backends.ComponentInstalls, WebPush: backends.WebPush,
+		}, ""),
+		PublicURL: config.FromEnvRaw(notify.PublicURLEnv),
+	}
+	// Jobs nothing can finish (no bridge ever advertised the agent, or a worker
+	// died repeatedly) must reach a terminal state on their own, otherwise a
+	// member waits on a queued job forever.
+	go sweepJobs(context.Background(), svc)
+	if err := obs.ServeWithHealth("bnbloc-activity", cfg.ListenAddr, svcauth.Middleware(svcauth.KeyFromEnv(), svc.Handler()), backends.HealthCheck(), obs.WithMetrics(metrics)); err != nil {
+		log.Fatalf("bnbloc-activity: %v", err)
+	}
+}
+
+// allowServeAll reads the dev-only BNBLOC_ACTIVITY_ALLOW_SERVE_ALL gate. It is
+// fatal in production: one member's bridge driving (and attributing replies
+// for) every member's agent is a single-host testing mode only.
+func allowServeAll() bool {
+	switch strings.ToLower(strings.TrimSpace(config.FromEnvRaw("BNBLOC_ACTIVITY_ALLOW_SERVE_ALL"))) {
+	case "1", "true", "yes", "on":
+	default:
+		return false
+	}
+	if config.Production() {
+		log.Fatalf("bnbloc-activity: BNBLOC_ACTIVITY_ALLOW_SERVE_ALL is a single-host testing mode and is refused when %s=production", config.EnvVar)
+	}
+	log.Printf("WARNING bnbloc-activity: serve-all bridges enabled (BNBLOC_ACTIVITY_ALLOW_SERVE_ALL); single-host testing only")
+	return true
+}
+
+// sweepJobs also refreshes the online-bridges gauge on the same tick.
+func sweepJobs(ctx context.Context, svc *activity.Service) {
+	ticker := time.NewTicker(15 * time.Second)
+	defer ticker.Stop()
+	svc.SampleBridgeMetrics(ctx)
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			svc.SweepAgentJobs(ctx)
+			svc.SampleBridgeMetrics(ctx)
+		}
+	}
+}
+
+// membershipFor returns a bnbloc-room-backed membership client when a room base
+// URL is configured, else a static set for local development.
+func membershipFor(roomBaseURL string) activity.Membership {
+	if roomBaseURL != "" {
+		return membership.NewRoomClient(roomBaseURL)
+	}
+	return membership.NewStatic()
+}

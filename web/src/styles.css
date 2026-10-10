@@ -1,0 +1,300 @@
+@import "tailwindcss";
+
+/* Geist via Fontsource-less CDN fallback: system stack + Geist when present.
+   Bundled locally would need the font files; we use a high-end sans stack and
+   layer Geist Mono for numerals/code where installed. */
+@font-face {
+  font-family: "Geist";
+  src: local("Geist"), local("Geist-Regular");
+  font-weight: 100 900;
+  font-display: swap;
+}
+
+@theme {
+  /* Neutral base — Zinc, never pure black. */
+  --color-bg: hsl(240 6% 7%);
+  --color-surface: hsl(240 5% 10%);
+  --color-surface-2: hsl(240 5% 13%);
+  --color-elevated: hsl(240 5% 16%);
+  --color-border: hsl(240 5% 20%);
+  --color-border-strong: hsl(240 5% 28%);
+  --color-fg: hsl(240 6% 96%);
+  --color-fg-muted: hsl(240 4% 64%);
+  --color-fg-subtle: hsl(240 4% 46%);
+
+  /* Single calibrated accent — desaturated teal, no neon. */
+  --color-accent: hsl(168 62% 42%);
+  --color-accent-hover: hsl(168 62% 47%);
+  --color-accent-fg: hsl(170 80% 96%);
+  --color-accent-soft: hsl(168 40% 20% / 0.5);
+
+  --color-danger: hsl(4 62% 52%);
+  --color-warning: hsl(38 70% 52%);
+
+  --font-sans:
+    "Geist", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono:
+    "Geist Mono", ui-monospace, "JetBrains Mono", "SF Mono", monospace;
+
+  --radius: 0.75rem;
+  --radius-lg: 1rem;
+  --radius-xl: 1.5rem;
+
+  --shadow-diffuse: 0 20px 40px -20px hsl(240 30% 2% / 0.6);
+  --shadow-pop: 0 8px 24px -8px hsl(240 30% 2% / 0.5);
+}
+
+* {
+  border-color: var(--color-border);
+}
+
+/* Safe-area insets: index.html opts into viewport-fit=cover, so without these
+   the notch / gesture bar overlaps content. */
+.pad-safe {
+  padding-left: max(var(--pad-safe-x, 0px), env(safe-area-inset-left));
+  padding-right: max(var(--pad-safe-x, 0px), env(safe-area-inset-right));
+}
+.pad-safe-t {
+  padding-top: max(var(--pad-safe-y, 0px), env(safe-area-inset-top));
+}
+.pad-safe-b {
+  padding-bottom: max(var(--pad-safe-y, 0px), env(safe-area-inset-bottom));
+}
+
+/* Coarse-pointer only, so desktop density is untouched. The ::after overlay
+   grows the hit area without changing the painted size. */
+@media (pointer: coarse) {
+  .tap {
+    position: relative;
+  }
+  /* Checkboxes/radios keep their painted size: their <label> is the target. */
+  .coarse-targets :where(button, [role="button"], select, summary, input:not([type="checkbox"], [type="radio"]), textarea) {
+    min-width: 44px;
+    min-height: 44px;
+  }
+  .tap::after {
+    content: "";
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    translate: -50% -50%;
+    min-width: 44px;
+    min-height: 44px;
+    width: 100%;
+    height: 100%;
+  }
+}
+
+/* Hover never fires on touch, so hover-revealed controls would be unreachable. */
+@media (hover: none) {
+  .hover-reveal {
+    display: inline !important;
+    max-width: 11rem !important;
+    opacity: 1 !important;
+    visibility: visible !important;
+  }
+}
+
+
+html,
+body,
+#root {
+  /* --app-height: the visual viewport on touch devices (lib/viewport.ts). */
+  height: var(--app-height, 100%);
+}
+
+/* iOS zooms the page into any focused field under 16px and never zooms back
+   out; touch-only, so desktop density is untouched. */
+@supports (-webkit-touch-callout: none) {
+  @media (pointer: coarse) {
+    input:not([type="checkbox"], [type="radio"]),
+    textarea,
+    select {
+      font-size: 16px;
+    }
+  }
+}
+
+body {
+  margin: 0;
+  background: var(--color-bg);
+  color: var(--color-fg);
+  font-family: var(--font-sans);
+  font-feature-settings: "cv11", "ss01";
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* Numeric/monospace tabular alignment for counts and ids. */
+.tabular {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Custom scrollbar — subtle, on-surface. */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-border-strong);
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-fg-subtle);
+  background-clip: content-box;
+}
+
+/* Tactile press for interactive elements using the .tactile class. */
+.tactile {
+  transition:
+    transform 0.12s cubic-bezier(0.16, 1, 0.3, 1),
+    background-color 0.15s ease,
+    border-color 0.15s ease,
+    opacity 0.15s ease;
+}
+.tactile:active {
+  transform: translateY(1px) scale(0.985);
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.animate-in {
+  animation: fade-in 0.28s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+@keyframes pulse-dot {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+.pulse-dot {
+  animation: pulse-dot 2s ease-in-out infinite;
+}
+
+@keyframes shimmer {
+  100% {
+    transform: translateX(100%);
+  }
+}
+.skeleton {
+  position: relative;
+  overflow: hidden;
+  background: var(--color-surface-2);
+}
+.skeleton::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(
+    90deg,
+    transparent,
+    hsl(240 5% 22% / 0.6),
+    transparent
+  );
+  animation: shimmer 1.5s infinite;
+}
+
+
+/* === dock-open: shell + rail shed labels while a preview is docked ===
+   Set on <body> by RoomView when the live-preview dock is open. The chat
+   column is the product; everything around it yields width. */
+/* The shell sidebar's icon-rail collapse is implemented as a React variant
+   (Shell.tsx), transitioning in step with the room rail and dock so the whole
+   row reflows as one motion. */
+.shell-sidebar {
+  transition: width 0.2s ease-out, padding 0.2s ease-out;
+}
+
+/* ui/Select: a native select without the platform chrome, with our caret. */
+@layer components {
+  .select-control {
+    appearance: none;
+    -webkit-appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%238b919c' stroke-width='1.75' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 6l4 4 4-4'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 0.5rem center;
+    background-size: 0.875rem;
+    cursor: pointer;
+  }
+  .select-control:disabled {
+    cursor: not-allowed;
+    opacity: 0.6;
+  }
+}
+
+/* === guided tour + getting-started checklist (views/onboarding) ===
+   Every motion here is decoration: under reduced motion the tour card
+   appears in place, the waiting dot holds still and the completion
+   celebration is a static highlight instead of confetti. */
+@keyframes tour-enter {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.tour-enter {
+  animation: tour-enter 0.24s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+.tour-pulse {
+  animation: pulse-dot 1.4s ease-in-out infinite;
+}
+@keyframes confetti-fall {
+  0% {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) rotate(0deg);
+  }
+  100% {
+    opacity: 0;
+    transform: translate3d(var(--confetti-x, 0), 140px, 0) rotate(var(--confetti-r, 360deg));
+  }
+}
+.confetti-piece {
+  position: absolute;
+  top: 0;
+  width: 6px;
+  height: 10px;
+  border-radius: 1px;
+  animation: confetti-fall 1.4s cubic-bezier(0.2, 0.6, 0.4, 1) forwards;
+}
+@keyframes set-glow {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 transparent;
+  }
+  40% {
+    box-shadow: 0 0 0 4px color-mix(in srgb, var(--color-accent) 35%, transparent);
+  }
+}
+.set-glow {
+  animation: set-glow 1.6s ease-out 1;
+}
+@media (prefers-reduced-motion: reduce) {
+  .tour-enter,
+  .tour-pulse,
+  .set-glow {
+    animation: none;
+  }
+  .confetti-piece {
+    display: none;
+  }
+}

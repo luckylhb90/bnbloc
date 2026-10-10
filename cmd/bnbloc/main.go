@@ -1,0 +1,141 @@
+// Command bnbloc is the operator CLI for the bnbloc control plane. It signs in
+// through the gateway's SSO, publishes component packages and desktop app
+// updates, and manages agent-core extensions over the gateway's existing
+// super-admin HTTP API. See docs/cli.md.
+//
+//	bnbloc login --gateway https://gw.example.com      # browser SSO, stores a refresh token
+//	bnbloc cores publish-sidecar --name acme --local-url http://127.0.0.1:7099 \
+//	    --binary darwin-arm64=dist/acme --rollout optin
+//	bnbloc updates publish --archive bnbloc.app.tar.gz --signature bnbloc.app.tar.gz.sig --version 1.2.3
+//
+// Endpoint: --gateway > BNBLOC_GATEWAY > the gateway of the stored sign-in.
+// Credential: --token > BNBLOC_TOKEN > BNBLOC_API_TOKEN > the stored sign-in (~/.bnbloc/config.json).
+package main
+
+import (
+	"fmt"
+	"os"
+)
+
+func main() {
+	if len(os.Args) < 2 {
+		usage()
+		os.Exit(2)
+	}
+	var err error
+	switch os.Args[1] {
+	case "login":
+		err = runLogin(os.Args[2:])
+	case "logout":
+		err = runLogout(os.Args[2:])
+	case "whoami":
+		err = runWhoami(os.Args[2:])
+	case "cores":
+		err = runCores(os.Args[2:])
+	case "components":
+		err = runComponents(os.Args[2:])
+	case "previewers":
+		err = runPreviewers(os.Args[2:])
+	case "updates":
+		err = runUpdates(os.Args[2:])
+	case "keys":
+		err = runKeys(os.Args[2:])
+	case "smoke":
+		err = runSmoke(os.Args[2:])
+	case "alert":
+		err = runAlert(os.Args[2:])
+	case "api-tokens":
+		err = runAPITokens(os.Args[2:])
+	case "search":
+		err = runSearch(os.Args[2:])
+	case "org-sync":
+		err = runOrgSync(os.Args[2:])
+	case "version":
+		err = runVersion(os.Args[2:])
+	case "-h", "--help", "help":
+		usage()
+		return
+	default:
+		fmt.Fprintf(os.Stderr, "bnbloc: unknown command %q\n\n", os.Args[1])
+		usage()
+		os.Exit(2)
+	}
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "bnbloc: %v\n", err)
+		os.Exit(1)
+	}
+}
+
+func usage() {
+	fmt.Fprint(os.Stderr, `bnbloc — control-plane operator CLI (docs/cli.md)
+
+Sign-in:
+  bnbloc login [--gateway <url>]          browser SSO; stores a refresh token in ~/.bnbloc/config.json
+  bnbloc whoami [--gateway <url>]         subject / tenant / role of the stored sign-in
+  bnbloc logout                           forget the stored sign-in
+
+Components:
+  bnbloc cores publish-sidecar --name <n> --binary <goos-goarch>=<path>... [--local-url <url>]
+        [--version v] [--publisher p] [--listen-env VAR] [--supervised-env VAR] [--manifest f]
+        [--rollout auto|optin|off] [--seckey f | --unsigned]
+  bnbloc cores install --url <daemonURL> --name <name> [--publisher p] [--rollout r] [--seckey f | --unsigned]
+  bnbloc cores install --manifest <file> --name <name> [--rollout r] [--seckey f | --unsigned]
+  bnbloc cores install --package <file> [--signature <file>] [--rollout r]   any pre-built package
+        (a notifier package prints its signing secret once)
+  bnbloc cores list
+  bnbloc cores uninstall <name>
+  bnbloc cores enable <name> (--tenant <id>... | --all-tenants)
+  bnbloc components rotate-secret <name>  new notifier signing secret (printed once)
+  bnbloc components test <name>           send a test notification through a notifier to you
+  bnbloc previewers pack <dir> --out <bundle.tar>   archive a built previewer (prints its sha256)
+  bnbloc previewers publish --package <pkg.json> (--bundle <tar> | --dir <dir>) [--rollout r] [--seckey f | --unsigned]
+        upload the bundle, pin it in the package, sign, install
+
+Desktop updates:
+  bnbloc updates publish --archive <bnbloc.app.tar.gz> --signature <file.sig> --version <semver>
+        [--notes <text> | --notes-file <file>] [--target darwin-aarch64|darwin-x86_64]
+  bnbloc updates status
+
+Post-deploy smoke:
+  bnbloc smoke [--agent <provider|core/provider|targetId|owner/provider>] [--timeout 120s] [--keep]
+        throwaway room: stream-first chat echo, history, optional agent reply, delete;
+        one PASS/FAIL line per step, non-zero exit on any FAIL
+        [--alert-on-failure [--alert-to id,...]]  alert platform admins when the run fails
+
+Deployment (super-admin):
+  bnbloc version                          every service instance's commit + the web bundle's;
+                                          non-zero exit when they are not all on one commit
+
+Alerts and API tokens (super-admin):
+  bnbloc alert --title <t> [--text <t>] [--url <u>] [--to id,...]   alert via the installed notifiers
+                                          (default recipients: every platform super-admin)
+  bnbloc api-tokens create --label <l> [--subject svc:<name>] [--ttl-days 90] [--tenant <id>]
+                                          long-lived token for unattended runs, printed once
+  bnbloc api-tokens list
+  bnbloc api-tokens revoke <id>
+
+Search (super-admin):
+  bnbloc search reindex [--cursor <c>] [--batches n]   fill the search index for messages stored
+                                          before search existed; resumable, safe while serving
+
+Organization sync (super-admin):
+  bnbloc org-sync rules | set-rules --file <f>   the group/department/email-domain mapping rules
+  bnbloc org-sync preview --email <e> [--group g]... [--department d]   dry run for one member
+  bnbloc org-sync deprovision <userId>... | --file <ids|->   end departed users' access
+  bnbloc org-sync resync                  re-apply the rules to every member a sign-in recorded
+
+Publisher keys:
+  bnbloc keys gen --out <prefix> [--force]   writes <prefix>.pub and <prefix>.key (0600)
+  bnbloc keys gen-vapid                      prints a browser push (VAPID) key pair as env lines
+  bnbloc keys add --pubkey <file> [--label l]
+  bnbloc keys list
+  bnbloc keys rm <keyId>
+
+Signing commands default --seckey to ~/.bnbloc/component-publisher.key when it exists.
+
+Global flags (every gateway command):
+  --gateway <url>   else BNBLOC_GATEWAY, else the stored sign-in's gateway (default http://localhost:7090)
+  --token <token>   else BNBLOC_TOKEN, else BNBLOC_API_TOKEN (exchanged for a session),
+                    else the stored sign-in (refreshed per command)
+`)
+}

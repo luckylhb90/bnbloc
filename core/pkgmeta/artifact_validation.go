@@ -1,0 +1,128 @@
+package pkgmeta
+
+import (
+	"encoding/json"
+	"fmt"
+	"net/url"
+	"regexp"
+	"strings"
+)
+
+var gatewayArtifactPathRE = regexp.MustCompile(`^/v1/artifacts/sha256/[0-9a-f]{64}$`)
+
+func validateArtifactShapes(raw []byte) error {
+	var shell struct {
+		Artifacts map[string]json.RawMessage `json:"artifacts"`
+	}
+	if err := json.Unmarshal(raw, &shell); err != nil {
+		return nil
+	}
+	for platform, rawArtifact := range shell.Artifacts {
+		var artifact map[string]json.RawMessage
+		if err := json.Unmarshal(rawArtifact, &artifact); err != nil {
+			return fmt.Errorf("artifacts.%s requires url and sha256 strings; use {url:\"\", sha256:\"\"} or omit that artifact entry before upload", platform)
+		}
+		urlValue, hasURL := artifact["url"]
+		shaValue, hasSHA := artifact["sha256"]
+		if len(artifact) != 2 || !hasURL || !hasSHA || !jsonString(urlValue) || !jsonString(shaValue) {
+			return fmt.Errorf("artifacts.%s requires url and sha256 strings; use {url:\"\", sha256:\"\"} or omit that artifact entry before upload", platform)
+		}
+	}
+	return nil
+}
+
+func jsonString(raw json.RawMessage) bool {
+	var value string
+	return json.Unmarshal(raw, &value) == nil
+}
+
+func validateAbsoluteHTTPURL(raw string) error {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil {
+		return err
+	}
+	if u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") {
+		return fmt.Errorf("not absolute http(s)")
+	}
+	return nil
+}
+
+func validateArtifactMap(artifacts map[string]Artifact) error {
+	for platform, artifact := range artifacts {
+		if isUploadPlaceholder(artifact) {
+			continue
+		}
+		if strings.TrimSpace(artifact.URL) == "" || strings.TrimSpace(artifact.SHA256) == "" {
+			return fmt.Errorf("artifacts.%s requires url and sha256 strings; use {url:\"\", sha256:\"\"} or omit that artifact entry before upload", platform)
+		}
+		if !validSHA256(artifact.SHA256) {
+			return fmt.Errorf("artifacts.%s.sha256 must be 64 lowercase hex characters", platform)
+		}
+	}
+	return nil
+}
+
+func isUploadPlaceholder(artifact Artifact) bool {
+	return artifact.URL == "" && artifact.SHA256 == ""
+}
+
+// ValidateGatewayArtifactURLs proves every concrete artifact URL came from the
+// gateway artifact store. It intentionally ignores upload placeholders so local
+// parsers can accept a draft package before upload, while publish-time callers
+// can reject incomplete sidecar/plugin packages after this check.
+func ValidateGatewayArtifactURLs(pkg Package, artifactBaseURL string) error {
+	base, err := ParseGatewayArtifactBaseURL(artifactBaseURL)
+	if err != nil {
+		return err
+	}
+	for platform, artifact := range pkg.Artifacts {
+		if isUploadPlaceholder(artifact) {
+			continue
+		}
+		key, err := GatewayArtifactKey(artifact.URL, base)
+		if err != nil {
+			return fmt.Errorf("artifacts.%s.url: %w", platform, err)
+		}
+		if key != "sha256/"+artifact.SHA256 {
+			return fmt.Errorf("artifacts.%s.url key must match sha256", platform)
+		}
+	}
+	return nil
+}
+
+func ParseGatewayArtifactBaseURL(raw string) (*url.URL, error) {
+	base, err := url.Parse(strings.TrimRight(strings.TrimSpace(raw), "/"))
+	if err != nil || base.Host == "" || (base.Scheme != "http" && base.Scheme != "https") {
+		return nil, fmt.Errorf("artifact base URL invalid")
+	}
+	return base, nil
+}
+
+func GatewayArtifactKey(raw string, base *url.URL) (string, error) {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") {
+		return "", fmt.Errorf("artifact URL must reference a gateway-uploaded artifact")
+	}
+	if !sameOrigin(u, base) || !gatewayArtifactPathRE.MatchString(u.EscapedPath()) || u.RawQuery != "" || u.Fragment != "" {
+		return "", fmt.Errorf("artifact URL must reference a gateway-uploaded artifact")
+	}
+	return strings.TrimPrefix(u.EscapedPath(), "/v1/artifacts/"), nil
+}
+
+func sameOrigin(u, base *url.URL) bool {
+	return strings.EqualFold(u.Scheme, base.Scheme) && strings.EqualFold(u.Host, base.Host)
+}
+
+// ValidateCompleteArtifacts refuses a publish whose downloadable artifacts
+// (a sidecar's binaries, a previewer's bundle) are still upload placeholders.
+func ValidateCompleteArtifacts(pkg Package) error {
+	if pkg.Runtime != RuntimeSidecar && pkg.Runtime != RuntimeBundle {
+		return nil
+	}
+	for platform, artifact := range pkg.Artifacts {
+		if isUploadPlaceholder(artifact) {
+			return fmt.Errorf("artifacts.%s must be uploaded before publish", platform)
+		}
+	}
+	return nil
+}

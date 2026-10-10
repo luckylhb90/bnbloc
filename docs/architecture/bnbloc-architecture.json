@@ -1,0 +1,45 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "bnbloc — Single-Domain Deployment",
+    "quality_profile": "standard",
+    "views": [
+      { "id": "entry", "label": "Single domain entry", "focus": ["browser", "web", "gateway"], "note": "One domain fronts everything; nginx path-routes to the gateway." },
+      { "id": "relay-path", "label": "File-sync path", "focus": ["bridge", "web", "relay"], "note": "The desktop bridge's file sync is proxied direct to the relay, bypassing gateway auth." },
+      { "id": "backends", "label": "Control plane", "focus": ["gateway", "room", "realtime", "mysql"], "note": "The gateway proxies the internal services; all persist to one external MySQL." }
+    ]
+  },
+  "components": [
+    { "id": "browser", "type": "external", "label": "Web Browser", "sublabel": "SPA (same-origin)", "pos": [40, 120], "size": [140, 60] },
+    { "id": "desktopui", "type": "external", "label": "Desktop UI", "sublabel": "Tauri shell", "pos": [40, 240], "size": [140, 60] },
+    { "id": "bridge", "type": "external", "label": "Desktop Bridge", "sublabel": "file-sync sidecar", "pos": [40, 400], "size": [140, 60] },
+    { "id": "web", "type": "frontend", "label": "Web Tier", "sublabel": "nginx :8080", "pos": [280, 240], "size": [150, 64], "tag": "TLS · path router" },
+    { "id": "gateway", "type": "backend", "label": "Gateway", "sublabel": ":8080 · public edge", "pos": [540, 240], "size": [150, 64], "tag": "auth /v1 /api /sso" },
+    { "id": "relay", "type": "backend", "label": "Relay", "sublabel": ":8085 · /relay", "pos": [540, 420], "size": [150, 60], "tag": "WebSocket" },
+    { "id": "room", "type": "backend", "label": "Room", "sublabel": ":8080", "pos": [800, 120], "size": [130, 56] },
+    { "id": "realtime", "type": "backend", "label": "Realtime", "sublabel": ":8082 · SSE", "pos": [800, 200], "size": [130, 56] },
+    { "id": "services", "type": "backend", "label": "Activity · Shareagent", "sublabel": "DeviceAuth :8081/83/84", "pos": [800, 280], "size": [170, 56] },
+    { "id": "mysql", "type": "database", "label": "MySQL 8", "sublabel": "external · :3306", "pos": [820, 420], "size": [140, 64], "tag": "provisioned" }
+  ],
+  "boundaries": [
+    { "kind": "security-group", "label": "One domain (TLS) — the only public entry", "wraps": ["web"] },
+    { "kind": "region", "label": "Internal network (compose / cluster)", "wraps": ["gateway", "relay", "room", "realtime", "services"] }
+  ],
+  "connections": [
+    { "id": "browser-web", "from": "browser", "to": "web", "label": "HTTPS", "variant": "emphasis", "fromSide": "right", "toSide": "left", "labelDy": -22 },
+    { "id": "ui-web", "from": "desktopui", "to": "web", "label": "/v1 /api /sso", "fromSide": "right", "toSide": "left", "labelDy": 20 },
+    { "id": "bridge-web", "from": "bridge", "to": "web", "label": "wss /relay", "variant": "dashed", "fromSide": "right", "toSide": "left", "labelDy": -18 },
+    { "id": "web-gateway", "from": "web", "to": "gateway", "label": "proxy /v1 /api /sso", "variant": "emphasis" },
+    { "id": "web-relay", "from": "web", "to": "relay", "label": "proxy /relay (direct)", "variant": "dashed", "fromSide": "bottom", "toSide": "left" },
+    { "id": "gw-room", "from": "gateway", "to": "room", "label": "rooms", "fromSide": "right", "toSide": "left", "labelDy": -22 },
+    { "id": "gw-realtime", "from": "gateway", "to": "realtime", "label": "chat · SSE", "fromSide": "right", "toSide": "left", "labelDy": 20 },
+    { "id": "gw-services", "from": "gateway", "to": "services", "fromSide": "right", "toSide": "left" },
+    { "id": "gw-sql", "from": "gateway", "to": "mysql", "label": "DSN (all services)", "fromSide": "bottom", "toSide": "top" }
+  ],
+  "cards": [
+    { "dot": "cyan", "title": "Single domain", "items": ["nginx path-routes one TLS domain", "/v1 /api /sso → gateway", "/relay → relay (WebSocket, direct)"] },
+    { "dot": "emerald", "title": "Control plane", "items": ["Gateway is the sole authenticated edge", "7 services reach peers on the internal net", "All persist to one external MySQL"] },
+    { "dot": "rose", "title": "Relay bypass", "items": ["Bridge relay dial carries no session token", "Auth is the sync-layer HMAC, not the gateway", "Relay entry must be TLS (cleartext token)"] }
+  ]
+}

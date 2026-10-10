@@ -1,0 +1,107 @@
+#!/bin/sh
+# bnbloc all-in-one supervisor.
+#
+# Starts the six services as background processes inside one container and
+# ties their lifetimes together: if any one exits, the whole container exits so
+# the orchestrator restarts the unit, rather than leaving the gateway serving
+# requests that fail downstream. tini (PID 1) reaps zombies and forwards
+# signals to this script.
+#
+# Every service resolves its peers over loopback. Room defaults to :8080, which
+# the gateway also binds, so room is pinned to :8086 here; the rest keep their
+# defaults. External inputs (database DSN, secrets, identity) come from the
+# environment and are NOT defaulted — a missing secret must fail the service.
+set -u
+
+# This is a production image: every dev-permissive fallback (unsigned
+# internal identity, dev login verifier, in-memory store, ephemeral session
+# key) is a fatal startup error unless the operator explicitly opts out.
+export BNBLOC_ENV="${BNBLOC_ENV:-production}"
+
+# Room off the gateway's :8080.
+export BNBLOC_ROOM_LISTEN_ADDR=":8086"
+
+# Internal wiring: every service talks to its peers over loopback. These are
+# fixed by the in-container topology, so they are set here rather than asked of
+# the operator.
+export BNBLOC_ROOM_BASE_URL="http://127.0.0.1:8086"
+export BNBLOC_ACTIVITY_BASE_URL="http://127.0.0.1:8081"
+export BNBLOC_REALTIME_BASE_URL="http://127.0.0.1:8082"
+export BNBLOC_SHAREAGENT_BASE_URL="http://127.0.0.1:8083"
+# Read by the gateway only to report the relay's /version (deployment view).
+export BNBLOC_RELAY_BASE_URL="http://127.0.0.1:8085"
+
+# Member notifications read BNBLOC_PUBLIC_URL (room deep links, shared by
+# realtime, shareagent and activity's budget warnings) straight from the
+# container environment; unset
+# means no links. Delivery targets are installed notifier components.
+# Browser push reads BNBLOC_WEB_PUSH_VAPID_PUBLIC_KEY / _PRIVATE_KEY /
+# _SUBJECT (realtime) the same way; unset means the channel is off.
+# Realtime reads its blob store settings (BNBLOC_ATTACHMENTS_DIR or
+# BNBLOC_ATTACHMENTS_S3_*, incl. _DIRECT_DOWNLOADS / _PUBLIC_ENDPOINT for
+# presigned downloads) straight from the container environment.
+# The room service reads BNBLOC_ARTIFACT_MAX_BYTES (one blob artifact
+# version's cap; unset = 100 MiB) straight from the container environment;
+# blob versions are stored through realtime's blob store over loopback.
+
+# /metrics: the internal services keep it on their loopback-only listeners;
+# the gateway (the public listener) serves it only on BNBLOC_METRICS_ADDR.
+# All six processes share this environment and one network namespace, so the
+# value is handed to the gateway alone — exported to every service, all six
+# would try to bind the same address.
+gateway_metrics_addr="${BNBLOC_METRICS_ADDR:-:9090}"
+unset BNBLOC_METRICS_ADDR
+
+pids=""
+
+# Forward a container stop to every child, then wait for them to drain.
+shutdown() {
+  echo "aio: received stop; terminating services"
+  for p in $pids; do
+    kill -TERM "$p" 2>/dev/null || true
+  done
+  wait 2>/dev/null || true
+  exit 0
+}
+trap shutdown TERM INT
+
+start() {
+  name="$1"
+  if [ "$name" = gateway ]; then
+    BNBLOC_METRICS_ADDR="$gateway_metrics_addr" "/usr/local/bin/bnbloc-${name}" &
+  else
+    "/usr/local/bin/bnbloc-${name}" &
+  fi
+  eval "pid_${name}=$!"
+  pids="$pids $!"
+  echo "aio: started ${name} (pid $!)"
+}
+
+# Room first — the others perform membership checks against it. The gateway is
+# last so it only fronts traffic once its upstreams are live.
+start room
+start activity
+start realtime
+start shareagent
+start relay
+start gateway
+
+echo "aio: all services started; supervising"
+
+# Poll liveness. If any supervised process is gone, stop the rest and exit
+# non-zero so the orchestrator restarts the whole container. Polling avoids the
+# SIGCHLD races that a trap-based supervisor hits under `set -e`.
+while true; do
+  sleep 5
+  for name in room activity realtime shareagent relay gateway; do
+    eval "pid=\$pid_${name}"
+    if ! kill -0 "$pid" 2>/dev/null; then
+      echo "aio: ${name} (pid ${pid}) exited; bringing the container down"
+      for p in $pids; do
+        kill -TERM "$p" 2>/dev/null || true
+      done
+      wait 2>/dev/null || true
+      exit 1
+    fi
+  done
+done

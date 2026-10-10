@@ -1,0 +1,282 @@
+{{- /*
+Deployment + Service per bnbloc microservice.
+
+Each entry names the service's port, its values block, whether it reads the
+shared database + svcauth key (`db`), the peers it calls (rendered as
+BNBLOC_<PEER>_BASE_URL), and whether it is a singleton. The env each service
+receives mirrors what its services/<name>/cmd/main.go reads — see
+docs/deploy-service-env.md.
+*/ -}}
+{{- $ports := dict "gateway" 8080 "room" 8080 "activity" 8081 "realtime" 8082 "shareagent" 8083 "relay" 8085 -}}
+{{- $services := dict
+  "gateway"         (dict "cfg" .Values.gateway         "db" true  "singleton" false "peers" (list "room" "activity" "realtime" "shareagent" "relay"))
+  "room"            (dict "cfg" .Values.room            "db" true  "singleton" false "peers" (list "realtime"))
+  "activity"        (dict "cfg" .Values.activity        "db" true  "singleton" false "peers" (list "room" "realtime"))
+  "realtime"        (dict "cfg" .Values.realtime        "db" true  "singleton" true  "peers" (list "room"))
+  "shareagent"      (dict "cfg" .Values.shareagent      "db" true  "singleton" false "peers" (list "room"))
+  "relay"           (dict "cfg" .Values.relay           "db" false "singleton" true  "peers" (list))
+-}}
+{{- range $name, $svc := $services }}
+{{- $cfg := $svc.cfg | default dict }}
+{{- $port := get $ports $name }}
+{{- if $svc.singleton }}
+{{- /* realtime's SSE hub and relay's pairing table are in-process state:
+       more than one pod splits rooms / sync sessions between replicas. */ -}}
+{{- if or (gt (int (default 1 $cfg.replicas)) 1) (and $cfg.hpa $cfg.hpa.enabled) }}
+{{- fail (printf "bnbloc-%s is a singleton (in-process hub/pairing state): replicas must be 1 and hpa disabled" $name) }}
+{{- end }}
+{{- end }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: bnbloc-{{ $name }}
+  labels: { app.kubernetes.io/name: bnbloc-{{ $name }} }
+spec:
+  replicas: {{ ternary 1 (default 1 $cfg.replicas) $svc.singleton }}
+  {{- if $svc.singleton }}
+  # Never run two pods at once, even during a rollout.
+  strategy: { type: Recreate }
+  {{- end }}
+  selector:
+    matchLabels: { app.kubernetes.io/name: bnbloc-{{ $name }} }
+  template:
+    metadata:
+      labels: { app.kubernetes.io/name: bnbloc-{{ $name }} }
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+      containers:
+        - name: bnbloc-{{ $name }}
+          image: "{{ $.Values.image.registry }}/{{ $.Values.image.repository }}-{{ $name }}:{{ $.Values.image.tag }}"
+          imagePullPolicy: {{ $.Values.image.pullPolicy }}
+          ports:
+            - containerPort: {{ $port }}
+            {{- if and (eq $name "gateway") $cfg.metricsPort }}
+            - name: metrics
+              containerPort: {{ $cfg.metricsPort }}
+            {{- end }}
+          env:
+            - name: BNBLOC_ENV
+              value: {{ $.Values.environment | quote }}
+            - name: BNBLOC_{{ upper $name }}_LISTEN_ADDR
+              value: ":{{ $port }}"
+            {{- range $peer := $svc.peers }}
+            - name: BNBLOC_{{ upper $peer }}_BASE_URL
+              value: "http://bnbloc-{{ $peer }}:{{ get $ports $peer }}"
+            {{- end }}
+            {{- if $svc.db }}
+            - name: BNBLOC_MYSQL_DSN
+              valueFrom:
+                secretKeyRef: { name: {{ $.Values.mysql.dsnSecretRef.name }}, key: {{ $.Values.mysql.dsnSecretRef.key }} }
+            - name: BNBLOC_INTERNAL_KEY
+              valueFrom:
+                secretKeyRef: { name: {{ $.Values.internalKey.secretRef.name }}, key: {{ $.Values.internalKey.secretRef.key }} }
+            {{- with $.Values.awsSecrets }}
+            {{- if .secretID }}
+            - name: BNBLOC_AWS_SECRET_ID
+              value: {{ .secretID | quote }}
+            - name: BNBLOC_AWS_REGION
+              value: {{ .region | quote }}
+            {{- end }}
+            {{- end }}
+            {{- end }}
+            {{- if eq $name "gateway" }}
+            {{- if $cfg.metricsPort }}
+            - name: BNBLOC_METRICS_ADDR
+              value: ":{{ $cfg.metricsPort }}"
+            {{- end }}
+            - name: BNBLOC_SESSION_SIGNING_KEY
+              valueFrom:
+                secretKeyRef: { name: {{ $.Values.sessionSigning.secretRef.name }}, key: {{ $.Values.sessionSigning.secretRef.key }} }
+            - name: BNBLOC_OIDC_ISSUER_URL
+              value: {{ $.Values.oidc.issuerURL | quote }}
+            - name: BNBLOC_OIDC_CLIENT_ID
+              value: {{ $.Values.oidc.clientID | quote }}
+            - name: BNBLOC_SUPER_ADMINS
+              value: {{ join "," ($cfg.superAdmins | default list) | quote }}
+            - name: BNBLOC_ALLOWED_ORIGINS
+              value: {{ join "," ($cfg.allowedOrigins | default list) | quote }}
+            - name: BNBLOC_TRUSTED_PROXIES
+              value: {{ join "," ($cfg.trustedProxies | default list) | quote }}
+            - name: BNBLOC_CORES
+              value: {{ join "," ($cfg.cores | default list) | quote }}
+            {{- with $cfg.localAgentToken }}
+            {{- if .secretRef.name }}
+            - name: BNBLOC_LOCAL_AGENT_TOKEN
+              valueFrom:
+                secretKeyRef: { name: {{ .secretRef.name }}, key: {{ .secretRef.key }} }
+            {{- end }}
+            {{- end }}
+            {{- end }}
+            {{- if and (eq $name "room") $cfg.artifactMaxBytes }}
+            - name: BNBLOC_ARTIFACT_MAX_BYTES
+              value: {{ $cfg.artifactMaxBytes | quote }}
+            {{- end }}
+            {{- if eq $name "realtime" }}
+            {{- with $cfg.attachments.s3 }}
+            {{- if .bucket }}
+            - name: BNBLOC_ATTACHMENTS_S3_BUCKET
+              value: {{ .bucket | quote }}
+            - name: BNBLOC_ATTACHMENTS_S3_REGION
+              value: {{ .region | quote }}
+            - name: BNBLOC_ATTACHMENTS_S3_ENDPOINT
+              value: {{ .endpoint | quote }}
+            - name: BNBLOC_ATTACHMENTS_S3_KEY_PREFIX
+              value: {{ .keyPrefix | quote }}
+            - name: BNBLOC_ATTACHMENTS_S3_PATH_STYLE
+              value: {{ .pathStyle | quote }}
+            - name: BNBLOC_ATTACHMENTS_S3_DIRECT_DOWNLOADS
+              value: {{ .directDownloads | default false | quote }}
+            - name: BNBLOC_ATTACHMENTS_S3_PUBLIC_ENDPOINT
+              value: {{ .publicEndpoint | default "" | quote }}
+            {{- if .credentialsSecretRef.name }}
+            - name: BNBLOC_ATTACHMENTS_S3_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef: { name: {{ .credentialsSecretRef.name }}, key: {{ .credentialsSecretRef.accessKeyIDKey }} }
+            - name: BNBLOC_ATTACHMENTS_S3_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef: { name: {{ .credentialsSecretRef.name }}, key: {{ .credentialsSecretRef.secretAccessKeyKey }} }
+            {{- end }}
+            {{- end }}
+            {{- end }}
+            {{- end }}
+            {{- if or (eq $name "realtime") (eq $name "shareagent") (eq $name "activity") }}
+            - name: BNBLOC_PUBLIC_URL
+              value: {{ $.Values.publicURL | quote }}
+            {{- end }}
+            {{- if and (eq $name "realtime") $.Values.webPush.publicKey }}
+            - name: BNBLOC_WEB_PUSH_VAPID_PUBLIC_KEY
+              value: {{ $.Values.webPush.publicKey | quote }}
+            - name: BNBLOC_WEB_PUSH_VAPID_SUBJECT
+              value: {{ $.Values.webPush.subject | quote }}
+            - name: BNBLOC_WEB_PUSH_VAPID_PRIVATE_KEY
+              valueFrom:
+                secretKeyRef: { name: {{ required "webPush.privateKeySecretRef.name is required when webPush.publicKey is set" $.Values.webPush.privateKeySecretRef.name }}, key: {{ $.Values.webPush.privateKeySecretRef.key }} }
+            {{- end }}
+            {{- if eq $name "relay" }}
+            - name: BNBLOC_RELAY_STUN_SERVERS
+              value: {{ join "," ($cfg.stunServers | default list) | quote }}
+            - name: BNBLOC_RELAY_ENDPOINTS
+              value: {{ join "," ($cfg.endpoints | default list) | quote }}
+            {{- end }}
+            {{- with $cfg.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          # Liveness never depends on the database (a DB blip must not restart
+          # pods); readiness does (/readyz is 503 while the DB is unreachable).
+          livenessProbe:
+            httpGet: { path: /healthz, port: {{ $port }} }
+            periodSeconds: 20
+          readinessProbe:
+            httpGet: { path: /readyz, port: {{ $port }} }
+            periodSeconds: 10
+          resources: {{- toYaml ($cfg.resources | default $.Values.resources) | nindent 12 }}
+          {{- if and (eq $name "realtime") (not $cfg.attachments.s3.bucket) }}
+          volumeMounts:
+            - name: attachments
+              mountPath: /var/lib/bnbloc/attachments
+          {{- end }}
+      {{- if and (eq $name "realtime") (not $cfg.attachments.s3.bucket) }}
+      volumes:
+        - name: attachments
+          persistentVolumeClaim:
+            claimName: bnbloc-realtime-attachments
+      {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: bnbloc-{{ $name }}
+spec:
+  type: ClusterIP
+  selector: { app.kubernetes.io/name: bnbloc-{{ $name }} }
+  ports:
+    - name: http
+      port: {{ $port }}
+      targetPort: {{ $port }}
+    {{- if and (eq $name "gateway") $cfg.metricsPort }}
+    # In-cluster scraping only; the ingress routes the http port.
+    - name: metrics
+      port: {{ $cfg.metricsPort }}
+      targetPort: {{ $cfg.metricsPort }}
+    {{- end }}
+{{- if and (not $svc.singleton) $cfg.hpa $cfg.hpa.enabled }}
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: bnbloc-{{ $name }}
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: bnbloc-{{ $name }}
+  minReplicas: {{ $cfg.hpa.minReplicas }}
+  maxReplicas: {{ $cfg.hpa.maxReplicas }}
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: {{ $cfg.hpa.targetCPUUtilizationPercentage }}
+{{- end }}
+{{- end }}
+{{- if not .Values.realtime.attachments.s3.bucket }}
+---
+# Realtime's disk blob store (attachments + sidecar artifacts). ReadWriteOnce
+# is sufficient because realtime is a singleton with a Recreate rollout.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: bnbloc-realtime-attachments
+spec:
+  accessModes: [ReadWriteOnce]
+  {{- with .Values.realtime.attachments.persistence.storageClass }}
+  storageClassName: {{ . | quote }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.realtime.attachments.persistence.size }}
+{{- end }}
+{{- if .Values.gateway.ingress.enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: bnbloc
+  {{- with .Values.gateway.ingress.annotations }}
+  annotations: {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- with .Values.gateway.ingress.className }}
+  ingressClassName: {{ . }}
+  {{- end }}
+  rules:
+    - host: {{ .Values.gateway.ingress.host }}
+      http:
+        paths:
+          # Desktop bridge live file sync (WebSocket). The sync token rides the
+          # stream in cleartext: serve this host over TLS only.
+          - path: /relay
+            pathType: Prefix
+            backend:
+              service:
+                name: bnbloc-relay
+                port: { number: 8085 }
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: bnbloc-gateway
+                port: { number: 8080 }
+  {{- if .Values.gateway.ingress.tls }}
+  tls:
+    - hosts: [{{ .Values.gateway.ingress.host }}]
+      secretName: bnbloc-gateway-tls
+  {{- end }}
+{{- end }}

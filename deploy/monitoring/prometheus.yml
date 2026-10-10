@@ -1,0 +1,41 @@
+# Prometheus scrape configuration for a bnbloc deployment (docs/monitoring.md).
+#
+# Targets are the compose service names (compose.yml / deploy/compose.prod.yml)
+# on the deployment's private network. Internal services serve /metrics on
+# their main listener; the gateway serves it ONLY on its internal metrics
+# listener (BNBLOC_METRICS_ADDR, default :9090) — its public port answers
+# /metrics with 404. Never route any of these from the public edge.
+#
+# Every series already carries service="bnbloc-<name>"; the job label is the
+# same name so `up` and the domain series line up.
+#
+# Kubernetes (deploy/k8s): replace static_configs with the in-cluster Service
+# DNS names (<release>-<service>:<port>, the gateway on its "metrics" port) or
+# a kubernetes_sd_configs block selecting the chart's Services.
+global:
+  scrape_interval: 30s
+  scrape_timeout: 10s
+  evaluation_interval: 30s
+
+rule_files:
+  - alerts.yml
+
+scrape_configs:
+  - job_name: bnbloc-gateway
+    static_configs:
+      - targets: ["gateway:9090"]
+  - job_name: bnbloc-room
+    static_configs:
+      - targets: ["room:8080"]
+  - job_name: bnbloc-activity
+    static_configs:
+      - targets: ["activity:8081"]
+  - job_name: bnbloc-realtime
+    static_configs:
+      - targets: ["realtime:8082"]
+  - job_name: bnbloc-shareagent
+    static_configs:
+      - targets: ["shareagent:8083"]
+  - job_name: bnbloc-relay
+    static_configs:
+      - targets: ["relay:8085"]

@@ -1,0 +1,197 @@
+// Package relay implements the bnbloc-relay service: server-authoritative ICE
+// configuration, a Trickle ICE rendezvous channel for candidate exchange, and
+// a byte-stream relay that pairs two peers on a session key. Payloads are
+// never inspected or logged.
+package relay
+
+import (
+	"encoding/json"
+	"net/http"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/luckylhb90/bnbloc/internal/obs"
+)
+
+// ICEConfig is the server-authoritative STUN/relay configuration handed to
+// peers before they attempt a direct link.
+type ICEConfig struct {
+	StunServers    []string `json:"stunServers"`
+	RelayEndpoints []string `json:"relayEndpoints"`
+}
+
+// Rendezvous quotas bound the memory an unauthenticated caller can make the
+// relay hold. The rendezvous endpoints have no auth (pairing is proven inside
+// the stream), so without these a client could exhaust memory with many random
+// session keys or an unbounded candidate queue.
+const (
+	// maxRendezvousSessions caps concurrently tracked session keys. A publish
+	// that would create a new session beyond this is refused until stale
+	// sessions age out.
+	maxRendezvousSessions = 10000
+	// maxCandidatesPerPeer caps queued candidate blobs per peer in one session.
+	// Trickle ICE needs only a handful; this is generous headroom.
+	maxCandidatesPerPeer = 64
+	// maxCandidateBytes caps a single candidate body. ICE candidates are short
+	// strings; this stops a large-body memory amplification.
+	maxCandidateBytes = 8 << 10
+	// rendezvousTTL purges a session with no activity, releasing its memory even
+	// if the peers never complete or poll.
+	rendezvousTTL = 2 * time.Minute
+)
+
+// Service holds the relay handler dependencies.
+type Service struct {
+	Config ICEConfig
+
+	mu         sync.Mutex
+	rendezvous map[string]*pairing // sessionKey -> pairing
+
+	// streamMu guards pendingStreams: the first peer parked on each stream
+	// session key, waiting for its partner. Per-Service (not package-global) so
+	// independent relay instances never pair each other's connections.
+	streamMu       sync.Mutex
+	pendingStreams map[string]*streamPair
+}
+
+// New constructs a relay Service with the given ICE configuration.
+func New(cfg ICEConfig) *Service {
+	return &Service{Config: cfg, rendezvous: map[string]*pairing{}, pendingStreams: map[string]*streamPair{}}
+}
+
+// Handler builds the HTTP mux for the relay service.
+//
+// Relay endpoints live under the top-level /relay/ prefix (not /v1/relay/) so a
+// single-domain reverse proxy routes them with a distinct, non-nested prefix
+// and never confuses them with the gateway's /v1/ surface. The relay is not
+// part of the versioned gateway API; its clients are the desktop bridge and the
+// gateway's ICE config, not versioned application callers.
+func (s *Service) Handler() http.Handler {
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /relay/ice-config", s.handleICEConfig)
+	mux.HandleFunc("POST /relay/rendezvous/{sessionKey}", s.handleRendezvousPublish)
+	mux.HandleFunc("GET /relay/rendezvous/{sessionKey}", s.handleRendezvousPoll)
+	mux.HandleFunc("GET /relay/stream/{sessionKey}", s.handleStream)
+	return mux
+}
+
+func (s *Service) handleICEConfig(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(s.Config)
+}
+
+// pairing holds one rendezvous session: the opaque candidate blobs each peer
+// published for the other. Polling is the only delivery path (no long-poll).
+type pairing struct {
+	mu         sync.Mutex
+	candidates map[string][][]byte // peerID -> queued candidate blobs for the OTHER peer
+	lastSeen   time.Time           // for stale-session purging
+}
+
+func newPairing() *pairing {
+	return &pairing{candidates: map[string][][]byte{}, lastSeen: time.Now()}
+}
+
+// pairingFor returns the pairing for a session key, creating it if absent. It
+// returns ok=false when a new session would exceed maxRendezvousSessions (after
+// purging stale ones), so the caller can refuse rather than grow unbounded.
+func (s *Service) pairingFor(sessionKey string) (*pairing, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if p := s.rendezvous[sessionKey]; p != nil {
+		p.lastSeen = time.Now()
+		return p, true
+	}
+	s.purgeStaleLocked()
+	if len(s.rendezvous) >= maxRendezvousSessions {
+		return nil, false
+	}
+	p := newPairing()
+	s.rendezvous[sessionKey] = p
+	return p, true
+}
+
+// purgeStaleLocked drops sessions idle past rendezvousTTL. Caller holds s.mu.
+func (s *Service) purgeStaleLocked() {
+	cutoff := time.Now().Add(-rendezvousTTL)
+	for key, p := range s.rendezvous {
+		if p.lastSeen.Before(cutoff) {
+			delete(s.rendezvous, key)
+		}
+	}
+}
+
+type candidateBody struct {
+	PeerID    string `json:"peerId"`
+	Candidate string `json:"candidate"` // opaque base64 blob; never inspected
+}
+
+// handleRendezvousPublish queues a candidate for delivery to the peer.
+func (s *Service) handleRendezvousPublish(w http.ResponseWriter, r *http.Request) {
+	sessionKey := r.PathValue("sessionKey")
+	if strings.TrimSpace(sessionKey) == "" {
+		http.Error(w, "session key required", http.StatusBadRequest)
+		return
+	}
+	var body candidateBody
+	// Cap the body so a single publish cannot amplify memory. The limit covers
+	// the JSON envelope around a maxCandidateBytes candidate.
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxCandidateBytes+512)).Decode(&body); err != nil {
+		http.Error(w, "invalid json body", http.StatusBadRequest)
+		return
+	}
+	if len(body.Candidate) > maxCandidateBytes {
+		http.Error(w, "candidate too large", http.StatusRequestEntityTooLarge)
+		return
+	}
+	p, ok := s.pairingFor(sessionKey)
+	if !ok {
+		obs.ServerError(w, "too many sessions", nil)
+		http.Error(w, "too many sessions", http.StatusServiceUnavailable)
+		return
+	}
+	p.mu.Lock()
+	// The candidate is destined for the OTHER peer; key by publisher so the
+	// poller drains everything not authored by itself. Enforce a per-peer queue
+	// cap so a peer that publishes without the other ever polling cannot grow
+	// the queue without bound.
+	if len(p.candidates[body.PeerID]) >= maxCandidatesPerPeer {
+		p.mu.Unlock()
+		http.Error(w, "candidate queue full", http.StatusTooManyRequests)
+		return
+	}
+	p.candidates[body.PeerID] = append(p.candidates[body.PeerID], []byte(body.Candidate))
+	p.mu.Unlock()
+	w.WriteHeader(http.StatusOK)
+}
+
+// handleRendezvousPoll returns candidates published by the other peer.
+func (s *Service) handleRendezvousPoll(w http.ResponseWriter, r *http.Request) {
+	sessionKey := r.PathValue("sessionKey")
+	self := r.URL.Query().Get("peerId")
+	p, ok := s.pairingFor(sessionKey)
+	if !ok {
+		// At capacity and this is a new key: nothing queued for it anyway.
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string][]string{"candidates": {}})
+		return
+	}
+	p.mu.Lock()
+	out := [][]byte{}
+	for peerID, blobs := range p.candidates {
+		if peerID == self {
+			continue
+		}
+		out = append(out, blobs...)
+		p.candidates[peerID] = nil
+	}
+	p.mu.Unlock()
+
+	candidates := make([]string, len(out))
+	for i, blob := range out {
+		candidates[i] = string(blob)
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string][]string{"candidates": candidates})
+}

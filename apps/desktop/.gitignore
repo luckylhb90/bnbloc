@@ -1,0 +1,16 @@
+# Node
+node_modules/
+
+# Rust / Tauri build output
+src-tauri/target/
+src-tauri/gen/
+
+# Generated bridge sidecar binaries (built per target triple at package time).
+src-tauri/binaries/
+
+# Legacy local core-manifest scratch (DT-20); never part of the app source.
+src-tauri/cores/
+
+# Cargo.lock and pnpm-lock.yaml are tracked on purpose: the desktop app is a
+# binary, so its dependency resolution must be reproducible (cargo --locked,
+# pnpm --frozen-lockfile in CI).

@@ -1,0 +1,200 @@
+services:
+  mysql:
+    image: mysql:8.4
+    environment:
+      MYSQL_ROOT_PASSWORD: bnbloc-root
+      MYSQL_DATABASE: bnbloc
+      MYSQL_USER: bnbloc
+      MYSQL_PASSWORD: bnbloc-pass
+    volumes:
+      - bnbloc-mysql:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-pbnbloc-root"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  # CI_COMMIT_SHA stamps every image's build identity (GET /version, the
+  # Platform console's Deployment card); .git is not in the build context:
+  #   CI_COMMIT_SHA=$(git rev-parse --short=12 HEAD) docker compose build
+  room:
+    build: { context: ., args: { SERVICE: room, CI_COMMIT_SHA: "${CI_COMMIT_SHA:-}" } }
+    environment:
+      BNBLOC_ROOM_LISTEN_ADDR: ":8080"
+      BNBLOC_MYSQL_DSN: "bnbloc:bnbloc-pass@tcp(mysql:3306)/bnbloc?parseTime=true"
+      BNBLOC_INTERNAL_KEY: "${BNBLOC_INTERNAL_KEY:-dev-bnbloc-internal-key-change-me}"
+      # Artifact change events fan out through realtime so open previews refresh;
+      # blob artifact versions + thumbnails are stored in realtime's blob store.
+      BNBLOC_REALTIME_BASE_URL: "http://realtime:8082"
+      # Max bytes of one blob artifact version (empty = 100 MiB; <= 256 MiB).
+      BNBLOC_ARTIFACT_MAX_BYTES: "${BNBLOC_ARTIFACT_MAX_BYTES:-}"
+    depends_on:
+      mysql: { condition: service_healthy }
+
+  realtime:
+    build: { context: ., args: { SERVICE: realtime, CI_COMMIT_SHA: "${CI_COMMIT_SHA:-}" } }
+    environment:
+      BNBLOC_REALTIME_LISTEN_ADDR: ":8082"
+      BNBLOC_INTERNAL_KEY: "${BNBLOC_INTERNAL_KEY:-dev-bnbloc-internal-key-change-me}"
+      BNBLOC_ROOM_BASE_URL: "http://room:8080"
+      BNBLOC_MYSQL_DSN: "bnbloc:bnbloc-pass@tcp(mysql:3306)/bnbloc?parseTime=true"
+      # Blob storage for attachments + sidecar-core artifacts. Set
+      # BNBLOC_ATTACHMENTS_S3_BUCKET to use S3; otherwise the disk dir below is
+      # used. BNBLOC_ATTACHMENTS_S3_KEY_PREFIX is the object-key directory prefix
+      # under the bucket (e.g. "bnbloc/"), applied to every stored blob.
+      BNBLOC_ATTACHMENTS_DIR: "/var/lib/bnbloc/attachments"
+      BNBLOC_ATTACHMENTS_S3_BUCKET: "${BNBLOC_ATTACHMENTS_S3_BUCKET:-}"
+      BNBLOC_ATTACHMENTS_S3_REGION: "${BNBLOC_ATTACHMENTS_S3_REGION:-}"
+      BNBLOC_ATTACHMENTS_S3_ENDPOINT: "${BNBLOC_ATTACHMENTS_S3_ENDPOINT:-}"
+      BNBLOC_ATTACHMENTS_S3_KEY_PREFIX: "${BNBLOC_ATTACHMENTS_S3_KEY_PREFIX:-}"
+      BNBLOC_ATTACHMENTS_S3_ACCESS_KEY_ID: "${BNBLOC_ATTACHMENTS_S3_ACCESS_KEY_ID:-}"
+      BNBLOC_ATTACHMENTS_S3_SECRET_ACCESS_KEY: "${BNBLOC_ATTACHMENTS_S3_SECRET_ACCESS_KEY:-}"
+      BNBLOC_ATTACHMENTS_S3_SESSION_TOKEN: "${BNBLOC_ATTACHMENTS_S3_SESSION_TOKEN:-}"
+      BNBLOC_ATTACHMENTS_S3_PATH_STYLE: "${BNBLOC_ATTACHMENTS_S3_PATH_STYLE:-}"
+      # Direct downloads (S3 only): large downloads answer 302 to a 5-minute
+      # presigned URL instead of streaming through bnbloc. PUBLIC_ENDPOINT is
+      # the S3 base URL clients reach when _ENDPOINT is an internal name.
+      BNBLOC_ATTACHMENTS_S3_DIRECT_DOWNLOADS: "${BNBLOC_ATTACHMENTS_S3_DIRECT_DOWNLOADS:-}"
+      BNBLOC_ATTACHMENTS_S3_PUBLIC_ENDPOINT: "${BNBLOC_ATTACHMENTS_S3_PUBLIC_ENDPOINT:-}"
+      # Plugin packages rehydrate on realtime too; same dev-only default as the
+      # gateway (the production overlay pins it empty).
+      BNBLOC_EXT_ALLOW_UNSIGNED: "${BNBLOC_EXT_ALLOW_UNSIGNED:-true}"
+      # Member notifications: deep links point at the public web origin.
+      # Notifier components are installed packages (permissions.network).
+      BNBLOC_PUBLIC_URL: "${BNBLOC_PUBLIC_URL:-http://localhost:7090}"
+      # Browser push (N4): a VAPID pair from `bnbloc keys gen-vapid`; empty =
+      # the channel is off. Browsers allow push on https or localhost only.
+      BNBLOC_WEB_PUSH_VAPID_PUBLIC_KEY: "${BNBLOC_WEB_PUSH_VAPID_PUBLIC_KEY:-}"
+      BNBLOC_WEB_PUSH_VAPID_PRIVATE_KEY: "${BNBLOC_WEB_PUSH_VAPID_PRIVATE_KEY:-}"
+      BNBLOC_WEB_PUSH_VAPID_SUBJECT: "${BNBLOC_WEB_PUSH_VAPID_SUBJECT:-}"
+    volumes:
+      - bnbloc-attachments:/var/lib/bnbloc/attachments
+    depends_on:
+      room: { condition: service_started }
+      mysql: { condition: service_healthy }
+
+  activity:
+    build: { context: ., args: { SERVICE: activity, CI_COMMIT_SHA: "${CI_COMMIT_SHA:-}" } }
+    environment:
+      BNBLOC_ACTIVITY_LISTEN_ADDR: ":8081"
+      BNBLOC_INTERNAL_KEY: "${BNBLOC_INTERNAL_KEY:-dev-bnbloc-internal-key-change-me}"
+      BNBLOC_MYSQL_DSN: "bnbloc:bnbloc-pass@tcp(mysql:3306)/bnbloc?parseTime=true"
+      BNBLOC_ROOM_BASE_URL: "http://room:8080"
+      BNBLOC_REALTIME_BASE_URL: "http://realtime:8082"
+      # Dev-only: accept job claims from a single-host serve-all bridge (the
+      # desktop's "Single-host mode" / BNBLOC_BRIDGE_SERVE_ALL_OWNERS) that
+      # drives every member's agent. Refused when BNBLOC_ENV=production; the
+      # production overlay pins it empty.
+      BNBLOC_ACTIVITY_ALLOW_SERVE_ALL: "${BNBLOC_ACTIVITY_ALLOW_SERVE_ALL:-true}"
+      # Links in usage budget warnings (R12).
+      BNBLOC_PUBLIC_URL: "${BNBLOC_PUBLIC_URL:-http://localhost:7090}"
+    depends_on:
+      mysql: { condition: service_healthy }
+      room: { condition: service_started }
+
+  shareagent:
+    build: { context: ., args: { SERVICE: shareagent, CI_COMMIT_SHA: "${CI_COMMIT_SHA:-}" } }
+    environment:
+      BNBLOC_SHAREAGENT_LISTEN_ADDR: ":8083"
+      BNBLOC_INTERNAL_KEY: "${BNBLOC_INTERNAL_KEY:-dev-bnbloc-internal-key-change-me}"
+      BNBLOC_MYSQL_DSN: "bnbloc:bnbloc-pass@tcp(mysql:3306)/bnbloc?parseTime=true"
+      BNBLOC_ROOM_BASE_URL: "http://room:8080"
+      # Deep links in borrow-request notifications.
+      BNBLOC_PUBLIC_URL: "${BNBLOC_PUBLIC_URL:-http://localhost:7090}"
+    depends_on:
+      mysql: { condition: service_healthy }
+      room: { condition: service_started }
+
+  relay:
+    build: { context: ., args: { SERVICE: relay, CI_COMMIT_SHA: "${CI_COMMIT_SHA:-}" } }
+    environment:
+      BNBLOC_RELAY_LISTEN_ADDR: ":8085"
+
+  gateway:
+    build: { context: ., args: { SERVICE: gateway, WEBUI: full, CI_COMMIT_SHA: "${CI_COMMIT_SHA:-}" } }
+    ports:
+      - "7090:8080"
+    environment:
+      BNBLOC_GATEWAY_LISTEN_ADDR: ":8080"
+      # /metrics lives on this internal listener only (never published; the
+      # public :8080 answers /metrics with 404). Scrape gateway:9090.
+      BNBLOC_METRICS_ADDR: "${BNBLOC_METRICS_ADDR:-:9090}"
+      BNBLOC_INTERNAL_KEY: "${BNBLOC_INTERNAL_KEY:-dev-bnbloc-internal-key-change-me}"
+      BNBLOC_ROOM_BASE_URL: "http://room:8080"
+      # Tenant registry (org provisioning + membership + quota) shares the
+      # control-plane MySQL with the other services; without it the gateway
+      # would use a separate in-memory registry and members provisioned at
+      # login would never reach the org console (split-brain).
+      BNBLOC_MYSQL_DSN: "bnbloc:bnbloc-pass@tcp(mysql:3306)/bnbloc?parseTime=true"
+      # Platform super-admins (cross-tenant): comma-separated verified subject
+      # ids. A super-admin sees all tenants and can administer any via the
+      # Platform console. Dev default seeds "root"; production sets real ids.
+      BNBLOC_SUPER_ADMINS: "${BNBLOC_SUPER_ADMINS:-root}"
+      BNBLOC_ACTIVITY_BASE_URL: "http://activity:8081"
+      BNBLOC_REALTIME_BASE_URL: "http://realtime:8082"
+      BNBLOC_SHAREAGENT_BASE_URL: "http://shareagent:8083"
+      # Read only to report the relay's /version (GET /v1/platform/versions);
+      # the gateway never proxies the relay.
+      BNBLOC_RELAY_BASE_URL: "http://relay:8085"
+      # No core is compiled in, and none is pre-wired: a core exists only
+      # after a super-admin installs a signed package (Platform console →
+      # Components, or `bnbloc cores install`) — installs persist to platform
+      # settings and rehydrate at every boot. Dev bootstrap, with the stack up:
+      #   bnbloc cores install --gateway http://localhost:7090 --token <root-token> \
+      #     --manifest path/to/my-core.json --name my-core --unsigned
+      # (gateway must run with BNBLOC_EXT_ALLOW_UNSIGNED for --unsigned).
+      # An operator may still name explicitly-configured cores here; each then
+      # needs BNBLOC_CORE_<NAME>_URL set to a reachable endpoint.
+      BNBLOC_CORES: "${BNBLOC_CORES:-}"
+      # Dev-only: accept unsigned extension packages so the console's upload
+      # flow and `bnbloc cores install --unsigned` work out of the box. The
+      # production overlay (deploy/compose.prod.yml) pins this EMPTY — only
+      # signed packages install there.
+      BNBLOC_EXT_ALLOW_UNSIGNED: "${BNBLOC_EXT_ALLOW_UNSIGNED:-true}"
+      BNBLOC_LOCAL_AGENT_TOKEN: "${BNBLOC_LOCAL_AGENT_TOKEN:-dev-local-agent-token}"
+      # Stable session-token signing key so sessions survive gateway restarts.
+      # Dev default is fine locally; production MUST inject a strong secret.
+      BNBLOC_SESSION_SIGNING_KEY: "${BNBLOC_SESSION_SIGNING_KEY:-dev-bnbloc-session-signing-key-change-me}"
+      # OIDC is optional; unset -> dev verifier.
+      BNBLOC_OIDC_ISSUER_URL: "${BNBLOC_OIDC_ISSUER_URL:-}"
+      BNBLOC_OIDC_CLIENT_ID: "${BNBLOC_OIDC_CLIENT_ID:-}"
+    # Host daemons (BNBLOC_CORE_<NAME>_URL, a manifest's discovery host rewrite)
+    # are reached through host.docker.internal. Site-specific host wiring (a
+    # daemon's listener-descriptor bind mount) belongs in a compose overlay
+    # passed with -f, never in this file.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on: [room, activity, realtime, shareagent, relay]
+
+  # bnbloc-bridge connects a member's local, unmodified agent runtime to bnbloc: it
+  # drives the local agent from room chat and pushes replies back into the room
+  # over the runtime's own HTTP API. One bridge acts for one member
+  # (BNBLOC_BRIDGE_OWNER); real multi-machine deploys run one bridge per member
+  # beside their own local agent runtime. Opt-in via the "bridge" profile:
+  #   BNBLOC_BRIDGE_OWNER=<subject> docker compose --profile bridge up -d bridge
+  bridge:
+    build: { context: ., args: { SERVICE: bridge, CI_COMMIT_SHA: "${CI_COMMIT_SHA:-}" } }
+    profiles: ["bridge"]
+    environment:
+      BNBLOC_GATEWAY_BASE_URL: "http://gateway:8080"
+      # The member this bridge acts for; it mints that member's session via
+      # the gateway login (no static token needed).
+      BNBLOC_BRIDGE_OWNER: "${BNBLOC_BRIDGE_OWNER:-}"
+      # Optional comma-separated room ids; empty -> watch all the owner's rooms.
+      BNBLOC_BRIDGE_ROOMS: "${BNBLOC_BRIDGE_ROOMS:-}"
+      # Real-time file sync (live-sync rooms). Empty relay URL disables sync.
+      BNBLOC_RELAY_BASE_URL: "${BNBLOC_RELAY_BASE_URL:-http://relay:8085}"
+      BNBLOC_BRIDGE_SYNC_ENGINE: "${BNBLOC_BRIDGE_SYNC_ENGINE:-gosync}"
+      # Deployment-wide secret; per-room auth token is HMAC(secret, roomId).
+      # All members' bridges must share the same value. Empty disables auth.
+      BNBLOC_SYNC_SECRET: "${BNBLOC_SYNC_SECRET:-}"
+      # Local-agent cores this bridge drives (comma-separated). Empty = none
+      # until a core is installed/configured; no baked-in default.
+      BNBLOC_CORES: "${BNBLOC_CORES:-}"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on: [gateway, relay]
+
+volumes:
+  bnbloc-mysql:
+  bnbloc-attachments:

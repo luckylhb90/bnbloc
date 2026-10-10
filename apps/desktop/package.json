@@ -1,0 +1,16 @@
+{
+  "name": "@bnbloc/desktop",
+  "private": true,
+  "version": "0.1.24",
+  "type": "module",
+  "description": "bnbloc desktop client: the shared web UI plus a supervised, embedded bridge connector.",
+  "scripts": {
+    "build:sidecar": "node scripts/build-bridge-sidecar.mjs",
+    "dev": "cargo tauri dev",
+    "build": "cargo tauri build",
+    "build:universal": "cargo tauri build --target universal-apple-darwin",
+    "build:x86_64": "cargo tauri build --target x86_64-apple-darwin",
+    "build:windows": "cargo tauri build --target x86_64-pc-windows-msvc",
+    "test:scripts": "node --test scripts/*.test.mjs"
+  }
+}

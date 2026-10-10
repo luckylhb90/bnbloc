@@ -1,0 +1,82 @@
+# Prometheus alerting rules for a bnbloc deployment (docs/monitoring.md).
+# Thresholds are starting points; tune them to the deployment's traffic.
+#
+# Gauges read from the shared database (bnbloc_bridges_online,
+# bnbloc_notification_outbox_*) report the same value on every replica of a
+# service: aggregate them with max(). Counters are per replica: sum().
+groups:
+  - name: bnbloc-availability
+    rules:
+      - alert: BnblocServiceDown
+        expr: up{job=~"bnbloc-.*"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "{{ $labels.job }} is down"
+          description: "Prometheus cannot scrape {{ $labels.instance }} ({{ $labels.job }}) for 2 minutes."
+
+      - alert: BnblocHigh5xxRate
+        expr: |
+          (
+            sum by (service) (rate(bnbloc_http_requests_total{status=~"5.."}[5m]))
+            /
+            sum by (service) (rate(bnbloc_http_requests_total[5m]))
+          ) > 0.05
+          and
+          sum by (service) (rate(bnbloc_http_requests_total[5m])) > 0.1
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.service }}: more than 5% of requests fail with 5xx"
+          description: "5xx ratio {{ $value | humanizePercentage }} over the last 10 minutes."
+
+  - name: bnbloc-agents
+    rules:
+      - alert: BnblocNoOnlineBridges
+        expr: max(bnbloc_bridges_online) == 0
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "No bridge has been online for 15 minutes"
+          description: "No member's bridge (desktop app or operator bridge) heartbeated within the offline window; agent requests will queue and time out."
+
+  - name: bnbloc-notifications
+    rules:
+      - alert: BnblocNotificationFailures
+        expr: sum(increase(bnbloc_notification_deliveries_total{outcome="failed"}[1h])) > 5
+        labels:
+          severity: warning
+        annotations:
+          summary: "More than 5 notifications were given up in the last hour"
+          description: "Check the notifier component (Platform -> Components, extension audit kind=notifier) and its endpoint."
+
+      - alert: BnblocNotificationOutboxStuck
+        expr: max(bnbloc_notification_outbox_oldest_pending_age_seconds) > 900
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "A notification has been pending for more than 15 minutes"
+          description: "Oldest pending outbox item is {{ $value | humanizeDuration }} old: the notifier is failing, not activated in realtime, or the realtime worker is not draining."
+
+  - name: bnbloc-realtime
+    rules:
+      # Optional: during business hours (UTC; adjust to the organization's
+      # working hours) a deployment in use always has some member stream
+      # open. Zero for 30 minutes usually means clients cannot connect (edge
+      # proxy, realtime, or the gateway's SSE path). Delete this group for a
+      # deployment without regular daytime use.
+      - alert: BnblocNoMemberStreams
+        expr: |
+          sum(bnbloc_realtime_sse_connections{kind="member"}) == 0
+          and on ()
+          (hour() >= 8 and hour() < 18 and day_of_week() >= 1 and day_of_week() <= 5)
+        for: 30m
+        labels:
+          severity: info
+        annotations:
+          summary: "No member has a room stream open during business hours"
+          description: "bnbloc_realtime_sse_connections{kind=\"member\"} has been 0 for 30 minutes."
