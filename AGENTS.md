@@ -667,6 +667,24 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   against a text column. Marshal through `store.jsonArg`. The DSN must stay
   utf8mb4 (`store.mysqlConfig` refuses others: client-side escaping is
   unsafe in some multibyte charsets).
+- **Data retention deletes; blob GC deletes what no row references.**
+  Retention (`internal/retention`, run by realtime under the
+  `bnbloc_retention` advisory lock) purges per tenant and kind through
+  `store.RetentionStore`, in batches along a `(tenant_id, <age>)` index. A new
+  table holding retained data gets a purge step and an age index there, or is
+  explicitly out of scope in the PRD. **Any new column or setting that stores
+  a blob key MUST be added to `RetentionStore.ReferencedBlobKeys` (both
+  implementations) in the same change**, or the daily blob collection deletes
+  the blob once the 7-day grace period passes. Never delete blobs from a
+  feature path: content-addressed blobs are shared across rows, and only the
+  collection removes them.
+- **Never delete a room's max-seq `room_messages` row.** The hub seeds
+  sequences from `MaxRoomSeq`; retention redacts that row into a soft-deleted
+  `retention_fence` row instead, and any other bulk-delete path must do the
+  same. Readers keep skipping soft-deleted rows.
+- **One deployment per blob store.** The bucket + key prefix (or the
+  attachments volume) belongs to exactly one database; never point a staging
+  copy or a restored database at the production prefix.
 - **Live schema needs ALTER, not just the schema file.**
   `CREATE TABLE IF NOT EXISTS` does not alter an existing table, so a new
   column (e.g. `client_msg_id`, `deleted_at_ms`) must be `ALTER TABLE`'d
