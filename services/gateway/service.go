@@ -663,7 +663,8 @@ func (s *Service) rateAllow(subject string) bool {
 
 // guessAllow lazily builds the slow guess limiter and consumes one token for
 // key. It bounds brute-forceable attempts: "ip:<addr>" for unauthenticated
-// login (no trusted subject yet), "subject:<id>" for authenticated invite
+// login and the API-token exchange (no trusted subject yet; one shared
+// bucket), "subject:<id>" for authenticated invite
 // redemption, "share-ip:<addr>" for public share token misses.
 func (s *Service) guessAllow(key string) bool {
 	return s.guessLimiter.get(defaultGuessRate, defaultGuessBurst, s.Peers.Size).allow(key)

@@ -125,7 +125,7 @@ rehydrate at gateway boot.
   relay on `127.0.0.1:7091` for the proxy's `/relay/*` route
 - pins the compose network to `172.29.80.0/24` and trusts its gateway address
   (`BNBLOC_TRUSTED_PROXIES=172.29.80.1/32`) — the address the host-side proxy
-  arrives from — so the per-IP direct-login throttle sees real client IPs (irrelevant for an SSO-only gateway). Change both if the
+  arrives from — so the per-IP limits (direct login and the API-token exchange, public share reads) see real client IPs. Change both if the
   range collides on your host
 - adds `restart: unless-stopped`, JSON log rotation (20 MB × 5), memory/CPU
   limits, and readiness healthchecks: each distroless image probes itself with

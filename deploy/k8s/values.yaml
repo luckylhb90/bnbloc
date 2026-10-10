@@ -81,9 +81,10 @@ gateway:
   # Extra browser origins for CORS (same-origin browser clients need none).
   allowedOrigins: []
   # CIDRs of the ingress controller pods whose X-Forwarded-For is believed
-  # for the per-IP direct-login throttle (BNBLOC_TRUSTED_PROXIES). Only matters
-  # when direct login is enabled (OIDC); SSO-only gateways can leave it empty.
-  # Empty trusts no proxy (direct-login callers then share one bucket).
+  # for the per-IP limits (BNBLOC_TRUSTED_PROXIES): direct login and the
+  # API-token exchange, and public share reads. SSO-only gateways need it too
+  # (the API-token exchange and public shares stay reachable). Empty trusts
+  # no proxy (every client then shares the controller's bucket).
   trustedProxies: []
   # Explicitly configured cores (operator escape hatch; installed component
   # packages need no entry). Each needs BNBLOC_CORE_<NAME>_URL via extraEnv.

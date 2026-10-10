@@ -144,9 +144,9 @@ const (
 )
 
 // defaultGuessRate / defaultGuessBurst bound brute-forceable attempts (login
-// per client IP, invite redemption per subject): ~5/min sustained with a
-// burst of 10, enough for a human retrying a typo but far below a
-// credential-stuffing / code-guessing rate.
+// and the API-token exchange per client IP, invite redemption per subject):
+// ~5/min sustained with a burst of 10, enough for a human retrying a typo but
+// far below a credential-stuffing / code-guessing rate.
 const (
 	defaultGuessRate  = 5.0 / 60.0
 	defaultGuessBurst = 10.0

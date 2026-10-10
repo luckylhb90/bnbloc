@@ -55,7 +55,7 @@ embedded SPA. Stateless apart from the shared database — scale horizontally.
 | `BNBLOC_ACTIVITY_BASE_URL` | yes | `http://bnbloc-activity:8081` |
 | `BNBLOC_SHAREAGENT_BASE_URL` | yes | `http://bnbloc-shareagent:8083` |
 | `BNBLOC_RELAY_BASE_URL` | optional | `http://bnbloc-relay:8085` — only to report the relay's `/version` in `GET /v1/platform/versions`; unset leaves the relay out. |
-| `BNBLOC_TRUSTED_PROXIES` | only with direct login | CIDRs of the edge proxy, so the per-IP direct-login throttle sees real clients. Not needed for SSO-only production (direct login disabled). |
+| `BNBLOC_TRUSTED_PROXIES` | behind a proxy | CIDRs of the edge proxy, so the per-IP limits (direct login and the API-token exchange, public share reads) see real clients. Needed on SSO-only production too: the API-token exchange and public shares stay reachable there. |
 | `BNBLOC_ALLOWED_ORIGINS` | if cross-origin | Extra browser origins for CORS. |
 | `BNBLOC_LOCAL_AGENT_TOKEN` | optional | Shared daemon bearer; empty disables that path. |
 | `BNBLOC_CORES` (+ `BNBLOC_CORE_<NAME>_URL`) | optional | Explicit cores only; installed packages need none. |
