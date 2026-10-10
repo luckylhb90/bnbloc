@@ -62,6 +62,18 @@ groups:
           summary: "A notification has been pending for more than 15 minutes"
           description: "Oldest pending outbox item is {{ $value | humanizeDuration }} old: the notifier is failing, not activated in realtime, or the realtime worker is not draining."
 
+  - name: bnbloc-search
+    rules:
+      # OpenSearch backend only (the series stay at zero on MySQL FULLTEXT).
+      # Writes never wait for the index, so lost updates only show here.
+      - alert: BnblocSearchIndexBehind
+        expr: sum(increase(bnbloc_search_index_updates_total{result=~"error|dropped"}[15m])) > 0
+        labels:
+          severity: warning
+        annotations:
+          summary: "Search index updates failed or were dropped in the last 15 minutes"
+          description: "{{ $value }} messages did not reach the OpenSearch index (cluster down or too slow). Search stays correct but misses them: fix the cluster, then run `bnbloc search reindex`."
+
   - name: bnbloc-realtime
     rules:
       # Optional: during business hours (UTC; adjust to the organization's

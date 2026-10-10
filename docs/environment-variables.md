@@ -167,6 +167,21 @@ machine; the server stores no member notifier settings. Contract:
 | `BNBLOC_WEB_PUSH_VAPID_PRIVATE_KEY` | realtime | — | The matching VAPID private key (base64url P-256 scalar). Secret. Rotating the pair invalidates every browser subscription (members turn the toggle on again). |
 | `BNBLOC_WEB_PUSH_VAPID_SUBJECT` | realtime | an https `BNBLOC_PUBLIC_URL` | VAPID contact, `mailto:<address>` or `https://<origin>`, sent to push services. Required when the keys are set and `BNBLOC_PUBLIC_URL` is not https. |
 
+## Message search (realtime)
+
+Global search (`GET /v1/search`) uses MySQL FULLTEXT (ngram) unless an
+OpenSearch cluster is configured. Either way results pass the same
+membership and people-chat filters: OpenSearch returns candidates and
+realtime re-checks each one in MySQL. See
+[production-deployment.md](./production-deployment.md#search-backend).
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `BNBLOC_SEARCH_OPENSEARCH_URL` | — (MySQL FULLTEXT) | OpenSearch base URL (`http` or `https`, optionally with a path prefix; no credentials, query or fragment). Setting it switches message search to the index `<prefix>-room-messages-v<N>`. At startup realtime checks the cluster answers, accepts the credentials, and that the index exists with the expected mapping or can be created, and waits until it is allocated. Under `BNBLOC_ENV=production` it retries for a minute and then refuses to start; in development it logs a warning and retries on every index call. A malformed value is fatal in both modes. Trusts the system CA store (`SSL_CERT_FILE` / `SSL_CERT_DIR` add a private CA). |
+| `BNBLOC_SEARCH_OPENSEARCH_USERNAME` | — | HTTP basic auth user. Both this and the password, or neither. |
+| `BNBLOC_SEARCH_OPENSEARCH_PASSWORD` | — | HTTP basic auth password. Secret. |
+| `BNBLOC_SEARCH_OPENSEARCH_INDEX_PREFIX` | `bnbloc` | Index name prefix: lowercase letters, digits, `.`, `_`, `-`, starting with a letter or digit. Use one prefix per deployment when deployments share a cluster. |
+
 ## Activity
 
 | Variable | Default | Meaning |
@@ -370,6 +385,7 @@ service (profile `smoke`, `deploy/compose.prod.yml`) takes these
 | Variable | Where | Meaning |
 | --- | --- | --- |
 | `BNBLOC_DEFAULT_GATEWAY` | desktop build (`option_env!`) | Gateway URL compiled into the desktop app's updater; see [the release runbook](./desktop-update-release-runbook.md). |
+| `BNBLOC_TEST_OPENSEARCH_URL` | `go test` | Runs the OpenSearch integration tests (`internal/search`) and the search parity test (`services/realtime`) against a real cluster, e.g. `opensearchproject/opensearch:2` single-node with the security plugin disabled; without it the parity test uses an in-process fake. Each run creates and deletes its own `bnbloc-test-*` / `bnbloc-itest-*` indexes. |
 | `BNBLOC_TEST_MYSQL_DSN` | `go test` | Enables the MySQL integration tests in `internal/store` (skipped otherwise); CI sets it against a MySQL service container. |
 
 ## Minimum production set

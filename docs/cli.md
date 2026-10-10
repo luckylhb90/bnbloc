@@ -156,27 +156,44 @@ recorded in the extension audit trail (kind `api-token`, name = token id).
 | `DELETE /v1/platform/api-tokens/{id}` | super-admin | 204; 404 when unknown or already revoked |
 | `POST /v1/auth/api-token` `{token}` | the token | `{sessionToken, subject, tenant, role, rooms, expiresAtMs}`; 401 invalid/expired/revoked |
 
-## Search reindex
+## Search reindex and status
 
 ```sh
 bnbloc search reindex                     # walk the whole room feed until done
 bnbloc search reindex --cursor 'room-42/1834'   # resume an interrupted run
+bnbloc search status                      # backend, readiness, index health, update queue
 ```
 
-Fills the global-search index (`room_messages.search_text`) for messages
-stored before search existed (or any row left without it), so they become
-findable. Super-admin only: `POST /v1/platform/search/reindex`
-`{cursor?, maxBatches?}` → `{scanned, updated, cursor, done}`, served by
-realtime. Each call walks at most `--batches` batches of 500 rows in
-primary-key order (default 10, at most 50) and at most ~10 s, so it stays
-inside proxy timeouts; the CLI loops on the returned cursor, printing one
-progress line per call, until `done`. The text is the same the append path
-indexes (chat text, or the joined texts of an agent reply), and a row is only
-written while its search text is still empty, so the command is idempotent
-and safe to run while serving (a concurrent edit is never overwritten).
-A failed call prints the cursor to resume from. The session minted from
-`BNBLOC_API_TOKEN` or the stored sign-in lasts an hour; a longer run fails
-with a 401 and resumes with `--cursor`.
+`reindex` brings the message search index up to date with the room feed.
+Super-admin only: `POST /v1/platform/search/reindex` `{cursor?, maxBatches?}`
+→ `{backend, scanned, updated, cursor, done}`, served by realtime. Each call
+walks at most `--batches` batches of 500 rows in primary-key order (default
+10, at most 50) and at most ~10 s, so it stays inside proxy timeouts; the CLI
+loops on the returned cursor, printing the backend and one progress line per
+call, until `done`. What a batch does depends on the backend:
+
+- **mysql** (the default): fills `room_messages.search_text` for rows stored
+  before search existed (or any row left without it). The text is the same
+  the append path indexes (chat text, or the joined texts of an agent reply),
+  and a row is only written while its search text is still empty, so a
+  concurrent edit is never overwritten. `updated` = rows filled.
+- **opensearch**: writes every row's current document (a soft-deleted message
+  keeps a `deleted` document without text; a row without text has none). Run
+  it after configuring a new index (backfill), after a mapping version bump
+  (a new index name), or when `bnbloc search status` or the
+  `bnbloc_search_index_updates_total{result="error"|"dropped"}` metric shows
+  updates that never reached the index. `updated` = documents written.
+
+Both are idempotent and safe to run while serving. A failed call prints the
+cursor to resume from. The session minted from `BNBLOC_API_TOKEN` or the
+stored sign-in lasts an hour; a longer run fails with a 401 and resumes with
+`--cursor`.
+
+`status` prints `GET /v1/platform/search/status` (super-admin, served by
+realtime): `{backend, index?, ready, health?, documents?, error?, updates?}`.
+`updates` is the answering realtime replica's queue since it started
+(`queued`, `applied`, `failed`, `dropped`); with several replicas each keeps
+its own. It exits non-zero when the backend is not ready.
 
 ## Organization sync
 

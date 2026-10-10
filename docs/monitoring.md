@@ -69,10 +69,21 @@ one replica at a time does a pass, so aggregate the counters with `sum()`.
 
 | Metric | Type | Labels | Meaning |
 | --- | --- | --- | --- |
-| `bnbloc_retention_deleted_total` | counter | `item` = `room_messages` \| `room_messages_redacted` \| `message_tasks` \| `agent_messages` \| `attachments` \| `artifact_versions` \| `artifact_shares` \| `shared_agent_audit` \| `extension_audit` \| `agent_jobs` \| `blobs` | Rows (and blobs) deleted by retention. `room_messages_redacted` counts a room's newest message emptied instead of deleted (it holds the room's sequence). |
+| `bnbloc_retention_deleted_total` | counter | `item` = `room_messages` \| `room_messages_redacted` \| `message_tasks` \| `agent_messages` \| `attachments` \| `artifact_versions` \| `artifact_shares` \| `shared_agent_audit` \| `extension_audit` \| `agent_jobs` \| `blobs` \| `search_documents` | Rows (and blobs) deleted by retention. `room_messages_redacted` counts a room's newest message emptied instead of deleted (it holds the room's sequence). `search_documents` counts documents removed from the OpenSearch index with the messages. |
 | `bnbloc_retention_blob_bytes_deleted_total` | counter | — | Bytes of unreferenced blobs the collection removed. |
 | `bnbloc_retention_runs_total` | counter | `outcome` = `ok` \| `error` \| `skipped` | Retention passes on this replica; `skipped` = another replica held the lock. An `error` pass logs `event=bnbloc.retention.error` with what failed and goes on with the other tenants. |
 | `bnbloc_retention_last_run_timestamp_seconds` | gauge | — | When this replica last finished a pass. Across replicas, `max()` older than a few hours means no replica is cleaning up. |
+
+### Search (realtime)
+
+Registered on every realtime replica; non-zero only with the OpenSearch
+backend ([production-deployment.md](./production-deployment.md#search-backend)).
+
+| Metric | Type | Labels | Meaning |
+| --- | --- | --- | --- |
+| `bnbloc_search_index_updates_total` | counter | `result` = `ok` \| `error` \| `dropped` | Messages handed to the index updater (new rows of the rooms this replica owns, edits, deletes). `error`: failed after three attempts (logged as `event=bnbloc.search.update_failed`); `dropped`: the 10,000-message queue was full (`event=bnbloc.search.update_dropped`). Either leaves the index behind until `bnbloc search reindex`; results stay correct (every candidate is re-checked in MySQL) but may miss new or edited messages. Writes never wait for or fail on the index. |
+| `bnbloc_search_index_queue_length` | gauge | — | Messages waiting for the index on this replica. Steadily near 10,000 means the cluster cannot keep up. |
+| `bnbloc_search_stale_candidates_total` | counter | — | Search candidates the store rejected: deleted, edited away or removed before the index caught up. A steady rate without matching update errors points at a lagging cluster. |
 
 ### Scale-out (realtime, relay)
 
@@ -119,6 +130,7 @@ Every series that an alert reads is registered at zero at startup, so a
 | `BnblocNoOnlineBridges` | no bridge online for 15 min | warning |
 | `BnblocNotificationFailures` | more than 5 notifications given up within an hour | warning |
 | `BnblocNotificationOutboxStuck` | the oldest pending notification is older than 15 min | warning |
+| `BnblocSearchIndexBehind` | OpenSearch index updates failed or were dropped within 15 min (run `bnbloc search reindex` once the cluster is healthy) | warning |
 | `BnblocNoMemberStreams` (optional) | no member stream open for 30 min during business hours (UTC 08–18, Mon–Fri; adjust or delete) | info |
 
 Thresholds are starting points. Route the alerts with your Alertmanager. For

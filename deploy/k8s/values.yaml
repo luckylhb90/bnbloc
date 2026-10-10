@@ -158,6 +158,21 @@ realtime:
     persistence:
       size: 20Gi
       storageClass: ""
+  # Message search backend. Empty url = MySQL FULLTEXT (ngram), nothing to
+  # run. An OpenSearch url (e.g. https://search.corp.example:9200) moves
+  # global search to that cluster: realtime probes it at startup and the pod
+  # fails while the cluster is unreachable, refuses the credentials, or the
+  # index can be neither found nor created. Fill a new index with
+  # `bnbloc search reindex`. Shard/replica counts come from the cluster (or
+  # an index template for <indexPrefix>-*). docs/production-deployment.md#search-backend.
+  search:
+    opensearch:
+      url: ""
+      # Index name prefix: <indexPrefix>-room-messages-v<N>. Empty = bnbloc.
+      indexPrefix: ""
+      # Optional HTTP basic credentials; empty username = none.
+      username: ""
+      passwordSecretRef: { name: "", key: password }
   resources:
     requests: { cpu: "250m", memory: "256Mi" }
     limits:   { cpu: "2", memory: "1Gi" }

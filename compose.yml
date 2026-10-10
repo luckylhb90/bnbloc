@@ -70,6 +70,16 @@ services:
       BNBLOC_WEB_PUSH_VAPID_PUBLIC_KEY: "${BNBLOC_WEB_PUSH_VAPID_PUBLIC_KEY:-}"
       BNBLOC_WEB_PUSH_VAPID_PRIVATE_KEY: "${BNBLOC_WEB_PUSH_VAPID_PRIVATE_KEY:-}"
       BNBLOC_WEB_PUSH_VAPID_SUBJECT: "${BNBLOC_WEB_PUSH_VAPID_SUBJECT:-}"
+      # Message search: empty URL = MySQL FULLTEXT (the default). An
+      # OpenSearch URL switches global search to that index (probed at
+      # startup; fill it with `bnbloc search reindex`). Try it locally with
+      # the profile-gated `opensearch` service below:
+      #   docker compose --profile search up -d opensearch
+      #   BNBLOC_SEARCH_OPENSEARCH_URL=http://opensearch:9200 docker compose up -d realtime
+      BNBLOC_SEARCH_OPENSEARCH_URL: "${BNBLOC_SEARCH_OPENSEARCH_URL:-}"
+      BNBLOC_SEARCH_OPENSEARCH_USERNAME: "${BNBLOC_SEARCH_OPENSEARCH_USERNAME:-}"
+      BNBLOC_SEARCH_OPENSEARCH_PASSWORD: "${BNBLOC_SEARCH_OPENSEARCH_PASSWORD:-}"
+      BNBLOC_SEARCH_OPENSEARCH_INDEX_PREFIX: "${BNBLOC_SEARCH_OPENSEARCH_INDEX_PREFIX:-}"
     volumes:
       - bnbloc-attachments:/var/lib/bnbloc/attachments
     depends_on:
@@ -199,6 +209,22 @@ services:
       - "host.docker.internal:host-gateway"
     depends_on: [gateway, relay]
 
+  # Optional OpenSearch for trying the external search backend locally
+  # (docs/production-deployment.md#search-backend). Single node with the
+  # security plugin off: development only, never a production cluster.
+  #   docker compose --profile search up -d opensearch
+  opensearch:
+    image: opensearchproject/opensearch:2
+    profiles: ["search"]
+    environment:
+      discovery.type: single-node
+      DISABLE_SECURITY_PLUGIN: "true"
+      DISABLE_INSTALL_DEMO_CONFIG: "true"
+      OPENSEARCH_JAVA_OPTS: "-Xms512m -Xmx512m"
+    volumes:
+      - bnbloc-opensearch:/usr/share/opensearch/data
+
 volumes:
   bnbloc-mysql:
   bnbloc-attachments:
+  bnbloc-opensearch:

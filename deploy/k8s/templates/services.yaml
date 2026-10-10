@@ -172,6 +172,23 @@ spec:
             {{- end }}
             {{- end }}
             {{- end }}
+            {{- if eq $name "realtime" }}
+            {{- with $cfg.search.opensearch }}
+            {{- if .url }}
+            - name: BNBLOC_SEARCH_OPENSEARCH_URL
+              value: {{ .url | quote }}
+            - name: BNBLOC_SEARCH_OPENSEARCH_INDEX_PREFIX
+              value: {{ .indexPrefix | default "" | quote }}
+            {{- if .username }}
+            - name: BNBLOC_SEARCH_OPENSEARCH_USERNAME
+              value: {{ .username | quote }}
+            - name: BNBLOC_SEARCH_OPENSEARCH_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: {{ required "realtime.search.opensearch.passwordSecretRef.name is required when a username is set" .passwordSecretRef.name }}, key: {{ .passwordSecretRef.key }} }
+            {{- end }}
+            {{- end }}
+            {{- end }}
+            {{- end }}
             {{- if or (eq $name "realtime") (eq $name "shareagent") (eq $name "activity") }}
             - name: BNBLOC_PUBLIC_URL
               value: {{ $.Values.publicURL | quote }}

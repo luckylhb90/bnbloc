@@ -109,6 +109,9 @@ history. Kubernetes runs it as a StatefulSet behind the headless
 | `BNBLOC_PUBLIC_URL` | recommended | Public web origin; member-notification deep links. Unset = no links. |
 | `BNBLOC_WEB_PUSH_VAPID_PUBLIC_KEY` / `_PRIVATE_KEY` | optional | Browser push notifications (a pair from `bnbloc keys gen-vapid`; the private key is a secret). Unset = channel off. |
 | `BNBLOC_WEB_PUSH_VAPID_SUBJECT` | with the keys | `mailto:<ops address>`; defaults to an https `BNBLOC_PUBLIC_URL`. |
+| `BNBLOC_SEARCH_OPENSEARCH_URL` | optional | OpenSearch base URL for message search; unset = MySQL FULLTEXT. Probed at startup: in production an unreachable cluster, refused credentials or an index that is neither ready nor creatable stops the replica. Helm: `realtime.search.opensearch.url`. |
+| `BNBLOC_SEARCH_OPENSEARCH_USERNAME` / `_PASSWORD` | optional | HTTP basic credentials, both or neither; the password is a secret (Helm: `passwordSecretRef`). |
+| `BNBLOC_SEARCH_OPENSEARCH_INDEX_PREFIX` | optional | Index `<prefix>-room-messages-v<N>`; default `bnbloc`. |
 
 Realtime also runs the notification outbox worker (signed delivery to the
 installed notifier components, see [notifications.md](./notifications.md)); it
@@ -118,6 +121,10 @@ the VAPID keys set it also delivers browser push notifications: realtime then
 needs egress to the browsers' push services (public https endpoints; it never
 connects to a private, loopback or link-local address for them, and honours
 `HTTPS_PROXY` when one is configured).
+
+With `BNBLOC_SEARCH_OPENSEARCH_URL` set, every realtime replica needs egress
+to the OpenSearch cluster (searches, the asynchronous index updates of the
+rooms it owns, retention's delete-by-query, `bnbloc search reindex`).
 
 Realtime streams `text/event-stream`; the edge proxy must not buffer responses
 and needs a long idle timeout. Replicas reach each other on the realtime port
@@ -189,10 +196,10 @@ No database, no internal key; it talks to the gateway like any client.
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | gateway | 8080 | 1..n | ✅ | ✅ | ✅ | ✅ | session key, OIDC, super-admins, activity/shareagent URLs, trusted proxies |
 | room | 8080 | 1..n | ✅ | ✅ | — | ✅ | — |
-| realtime | 8082 | **1** | ✅ | ✅ | ✅ | — | blob storage |
+| realtime | 8082 | 1..n (room ownership) | ✅ | ✅ | ✅ | — | blob storage; optional OpenSearch |
 | activity | 8081 | 1..n | ✅ | ✅ | ✅ | ✅ | — |
 | shareagent | 8083 | 1..n | ✅ | ✅ | ✅ | — | — |
-| relay | 8085 | **1** | — | — | — | — | edge route `/relay/*` |
+| relay | 8085 | 1..n (session ownership) | — | — | — | — | edge route `/relay/*` |
 
 All Go services additionally take `BNBLOC_ENV=production` and, optionally,
 `BNBLOC_AWS_SECRET_ID` / `BNBLOC_AWS_REGION`.

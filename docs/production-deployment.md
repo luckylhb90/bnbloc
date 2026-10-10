@@ -342,6 +342,68 @@ Two rules for the blob store follow from the collection:
   bucket versioning (or blob backups) for at least the database backup
   horizon.
 
+## Search backend
+
+Global search runs on MySQL FULLTEXT (an ngram index over the message text,
+kept in the same row) unless `BNBLOC_SEARCH_OPENSEARCH_URL` points realtime
+at an OpenSearch cluster. MySQL is the right choice for most deployments;
+move to OpenSearch when searches get slow at hundreds of millions of
+messages. Nothing else changes for members: results are the same, ranked
+newest first, and pass the same membership and people-chat rules.
+
+- **Settings.** `BNBLOC_SEARCH_OPENSEARCH_URL` (http or https; a private CA
+  through `SSL_CERT_FILE`), optional basic auth
+  (`BNBLOC_SEARCH_OPENSEARCH_USERNAME` / `_PASSWORD`, both or neither), and
+  `BNBLOC_SEARCH_OPENSEARCH_INDEX_PREFIX` (default `bnbloc`; one prefix per
+  deployment sharing a cluster). Helm: `realtime.search.opensearch`.
+- **Startup.** realtime checks the cluster answers and accepts the
+  credentials, creates the index `<prefix>-room-messages-v1` when it is
+  missing (or verifies the mapping of an existing one), and waits until it
+  is allocated. In production it retries for a minute, then refuses to
+  start. The index takes shard and replica counts from the cluster: install
+  an index template for `<prefix>-*` to choose them. The account needs
+  cluster monitor rights and full rights on `<prefix>-*` (create, read,
+  write, delete by query).
+- **Fill it.** A new index is empty: run `bnbloc search reindex` once after
+  the first start. It writes every stored message, in resumable batches,
+  while the deployment serves; new messages are indexed meanwhile. Run
+  `bnbloc search status` to see the index health and document count.
+- **Staying current.** After each room's group commit, the replica that owns
+  the room queues the new messages for the index; edits and deletes queue the
+  message they changed. One worker per replica writes them in bulk, re-reading
+  each message from MySQL. The chat write never waits for the index and never
+  fails because of it: a failed update is retried three times, then logged and
+  counted (`bnbloc_search_index_updates_total{result="error"}`), and a full
+  queue drops and counts (`result="dropped"`). The `BnblocSearchIndexBehind`
+  alert fires on either; fix the cluster, then run `bnbloc search reindex`.
+  New messages are searchable within about a second (the cluster's refresh
+  interval).
+- **MySQL stays the authority.** OpenSearch only proposes candidates, with
+  tenant, rooms, deleted state and the paging cursor already applied in the
+  query. realtime re-reads every candidate from MySQL and keeps it only if
+  the MySQL query itself would have returned it (same tenant, one of the
+  caller's rooms, not deleted, older than the cursor). A stale index can hide
+  a new message for a moment; it can never show a deleted message or a room
+  the caller left.
+- **Retention.** Each retention pass deletes, per organization, the documents
+  of messages older than the period (one delete-by-query) right after
+  deleting the rows. A failure fails the pass and is retried on the next one.
+- **Analysis.** The text field uses a custom analyzer built from the
+  standard distribution, no plugins: 2-character ngrams over letters,
+  digits, punctuation and symbols, then `cjk_width`, `lowercase` and
+  `asciifolding`. A phrase query over it is a case- and accent-insensitive
+  substring match of two characters or more, for Chinese, Japanese and
+  Korean as for English, exactly what the MySQL ngram index matches. The
+  built-in `cjk` analyzer was not used: it keeps English words whole, so
+  `ploy` would not find `deploy`.
+- **Mapping changes.** The mapping version is part of the index name. A
+  release that changes it creates the new, empty index at startup and
+  searches use it at once, so results are incomplete until
+  `bnbloc search reindex` (run right after the upgrade) finishes. Delete the
+  old `<prefix>-room-messages-v<N>` index afterwards.
+- **Backups.** The index can always be rebuilt from MySQL with
+  `bnbloc search reindex`; it needs no backup of its own.
+
 ## Upgrade
 
 ```bash

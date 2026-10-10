@@ -47,6 +47,10 @@ unset BNBLOC_REALTIME_PEERS BNBLOC_REALTIME_SELF BNBLOC_RELAY_PEERS BNBLOC_RELAY
 # Realtime reads its blob store settings (BNBLOC_ATTACHMENTS_DIR or
 # BNBLOC_ATTACHMENTS_S3_*, incl. _DIRECT_DOWNLOADS / _PUBLIC_ENDPOINT for
 # presigned downloads) straight from the container environment.
+# Realtime reads the message search backend (BNBLOC_SEARCH_OPENSEARCH_URL,
+# _USERNAME, _PASSWORD, _INDEX_PREFIX; unset URL = MySQL FULLTEXT) straight
+# from the container environment; with a URL it probes the cluster at
+# startup and, in production, exits when the index is unusable.
 # The room service reads BNBLOC_ARTIFACT_MAX_BYTES (one blob artifact
 # version's cap; unset = 100 MiB) straight from the container environment;
 # blob versions are stored through realtime's blob store over loopback.

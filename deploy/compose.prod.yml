@@ -90,6 +90,14 @@ services:
       # The blob store (BNBLOC_ATTACHMENTS_DIR / BNBLOC_ATTACHMENTS_S3_*,
       # incl. _DIRECT_DOWNLOADS and _PUBLIC_ENDPOINT) passes through from
       # compose.yml unchanged.
+      # Message search: empty = MySQL FULLTEXT. With an OpenSearch URL the
+      # cluster must be reachable at startup (production refuses to start
+      # otherwise). The profile-gated dev `opensearch` service is not a
+      # production cluster: point this at a managed or operated one.
+      BNBLOC_SEARCH_OPENSEARCH_URL: "${BNBLOC_SEARCH_OPENSEARCH_URL:-}"
+      BNBLOC_SEARCH_OPENSEARCH_USERNAME: "${BNBLOC_SEARCH_OPENSEARCH_USERNAME:-}"
+      BNBLOC_SEARCH_OPENSEARCH_PASSWORD: "${BNBLOC_SEARCH_OPENSEARCH_PASSWORD:-}"
+      BNBLOC_SEARCH_OPENSEARCH_INDEX_PREFIX: "${BNBLOC_SEARCH_OPENSEARCH_INDEX_PREFIX:-}"
       # Member notifications: public origin for deep links. Notifier
       # components are installed packages (permissions.network).
       BNBLOC_PUBLIC_URL: "${BNBLOC_PUBLIC_URL:-}"
