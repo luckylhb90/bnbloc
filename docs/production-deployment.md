@@ -304,6 +304,44 @@ image (`deploy/prod/cli/Dockerfile`) as that platform's scheduled job with
   `BNBLOC_ATTACHMENTS_S3_PUBLIC_ENDPOINT` when clients reach S3 under
   another URL than realtime does).
 
+## Data retention
+
+Nothing is deleted until someone sets a retention period. A super admin sets
+the platform default in the Platform console (Overview → Data retention); an
+organization admin can choose a different period for their own organization
+(Organization → Settings → Data retention, "Platform default" follows the
+platform). Periods are whole days, at least 31 (monthly usage budgets and
+borrow reports read the current month) and at most 36,500.
+
+| Kind | What is deleted |
+| --- | --- |
+| Room messages | Chat messages and agent replies older than the period, with their message tasks and the activity copy of agent replies, plus chat attachments uploaded before it. When a room's newest message is itself expired (the room was quiet for the whole period), that one row is emptied instead of deleted: it keeps the room's sequence number so later messages never reuse one. |
+| Older deliverable versions | Artifact versions older than the period except each artifact's latest version, and public links pinned to a deleted version. |
+| Audit log | Borrow decisions and component, member, tenant and session audit entries. Platform-level entries follow the platform default. |
+| Finished agent runs | Agent jobs that replied, failed, timed out or were cancelled. Queued and running jobs stay. |
+
+realtime runs the cleanup on every replica; a MySQL advisory lock lets one
+replica at a time do an hourly pass. Each pass deletes in batches of 500 rows
+along age indexes, then — at most once a day — removes blobs that no row
+references any more (attachments, artifact versions and thumbnails, and the
+component and desktop-release artifacts named in platform settings). A blob
+last stored less than 7 days ago is never removed, which covers sidecar and
+desktop artifacts staged before their package is published. Each pass that
+deletes something writes a `retention` / `purge` entry to the organization's
+audit log; the Platform console shows when the last pass ran and what it
+removed; metrics are listed in [monitoring.md](./monitoring.md#retention).
+
+Two rules for the blob store follow from the collection:
+
+- **One deployment per bucket and key prefix** (or per attachments volume).
+  The collection deletes every blob under `sha256/` that this database does
+  not reference, so a second deployment, a staging copy or a restored test
+  database must never share the production bucket prefix.
+- **Back up blobs as long as the database.** Restoring a database backup
+  older than the last collection brings back rows whose blobs are gone. Keep
+  bucket versioning (or blob backups) for at least the database backup
+  horizon.
+
 ## Upgrade
 
 ```bash
@@ -317,6 +355,11 @@ up to 600 s for it), so a restart is safe. Roll back by checking out the
 previous revision and repeating — migrations do not auto-revert.
 
 Upgrade notes:
+
+- **Data retention (2026-10-11)** adds migration `2026_10_data_retention`:
+  four nullable columns on `tenants` and age/blob-key indexes on
+  `room_messages`, `attachments` and `artifact_versions`. The index builds
+  are online but take time on large tables; watch the first service's logs.
 
 - **First boot after 2026-10-07** on an existing database runs migration
   `2026_10_converge_fresh_schema`, which rebuilds 8 indexes so an upgraded

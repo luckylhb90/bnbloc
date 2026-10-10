@@ -1,6 +1,6 @@
 # Enterprise scale: load testing, realtime scale-out, retention, search
 
-Status: approved 2026-10-10, in progress (section 2 implemented 2026-10-11). Section 1 landed: `cmd/bnbloc-loadtest`, with the baseline in `docs/load-testing.md`.
+Status: approved 2026-10-10, in progress (sections 2 and 3 implemented 2026-10-11). Section 1 landed: `cmd/bnbloc-loadtest`, with the baseline in `docs/load-testing.md`.
 
 ## Problem
 
@@ -298,6 +298,90 @@ delivery.
   A grace period protects blobs uploaded but not yet referenced.
 - **UI.** The settings live where tenant and platform settings already live.
   The UI states plainly what is deleted and when.
+
+### Status of section 3 (2026-10-11): implemented
+
+`internal/wire/retention.go` (policy, limits, effective resolution),
+`internal/store/retention.go` + `mysql_retention.go` (purge per kind, blob
+references, the retention lock), `internal/retention` (the worker and the
+blob collection), the shareagent routes, realtime wiring, the web settings
+(Organization → Settings, Platform console overview) and
+`docs/production-deployment.md#data-retention`. Decisions taken while
+implementing:
+
+- **Where the policy lives.** The platform default is the platform setting
+  `retention.default` (beside the platform-agent policy); the tenant
+  override is four nullable `tenants.retention_*_days` columns. shareagent
+  owns both (it owns the tenant registry and the platform policies):
+  `GET/PUT /v1/platform/retention` (manage_platform) and
+  `GET/PUT /v1/tenant/retention` (manage_org; the gateway binds the
+  tenant). In the default null keeps forever; in an override null uses the
+  default and 0 keeps forever, so an organization can opt out of a platform
+  default. Days are 31–36,500: monthly budgets and borrow reports read the
+  current month's agent replies and audit rows. Every change is audited
+  (kind `retention`, action `policy`), and every pass that deletes writes a
+  `retention` / `purge` entry per tenant and kind.
+- **What each kind covers.** Messages: `room_messages` with their message
+  tasks, artifact anchors (`source_seq` cleared), the activity copy of agent
+  replies (`agent_messages`, except content-free submit-provenance rows),
+  and attachments by upload age (the message is sent right after its upload;
+  an attachment id re-sent in a newer message is not tracked). Read cursors
+  need no cleanup (unread counts only seq > cursor), history pages by
+  sequence and tolerates gaps, and the FULLTEXT index follows the rows.
+  Artifact versions: every version but the artifact's latest, with the
+  share links pinned to it. Audit: `shared_agent_audit` and
+  `extension_audit` per tenant; platform rows (tenant "") follow the
+  default. Agent jobs: terminal jobs only.
+- **The max-sequence invariant (root cause, not a guard).** The hub seeds a
+  room's counter from `MAX(seq)`; deleting a room's newest rows would lower
+  it and re-issue sequences clients and read cursors already passed. Of the
+  two root fixes — never delete the max-seq row, or persist the counter
+  apart from the rows — this keeps the max-seq row, because the invariant
+  then holds by construction for every reader (`MaxRoomSeq`, the scale-out
+  fence on `(room_id, seq)`, the group commit) without touching the write
+  path. The row is not kept as content: it becomes a fence (kind
+  `retention_fence`, empty payload, no author, text, client id or edit
+  stamp, soft-deleted), so it keeps only room, sequence, channel and time;
+  every reader already skips soft-deleted rows. A later pass deletes a fence
+  once the room has a newer row. Tested on memory and MySQL.
+- **Cheap deletes.** Each kind walks an index on (tenant, age) in batches of
+  500, verified with `EXPLAIN` on MySQL 8.4 with seeded data: room messages
+  use a new `(tenant_id, kind, created_at_ms)` index (one range per kind,
+  kinds found by an index dive each, so fences are never re-read) and the
+  primary key for the per-room max and the deletes; attachments and
+  artifact versions get `(tenant_id, created_at_ms)`; audit, agent replies
+  and jobs reuse existing indexes. Artifact versions page with a keyset
+  cursor so the latest versions they skip are read once per pass. New
+  indexes on `attachments.blob_key`, `artifact_versions.blob_key` and
+  `.thumb_blob_key` make the reference check a lookup.
+- **Several replicas.** Every realtime replica runs the worker; a MySQL
+  advisory lock (`GET_LOCK('bnbloc_retention', 0)` on a pinned connection)
+  lets one pass at a time run, the others count `skipped`. Concurrent
+  passes would also be correct. The worker only deletes rows and blobs and
+  never touches a room hub, so it needs no room ownership.
+- **Blob collection.** At most daily (status in the platform setting
+  `retention.status`), after the row pass: walk the blob store (`Walk`:
+  ListObjectsV2 on S3, the shard directories on disk; `Stat`: HEAD /
+  `os.Stat`), skip blobs stored within the 7-day grace period, ask the store
+  which of each batch of 500 keys a row references (attachments, artifact
+  versions and thumbnails, and any `sha256/<hex>` a platform setting
+  mentions: component packages, desktop releases, the update config — one
+  function lists every source), then re-`Stat` each unreferenced candidate
+  and delete it only if it is still older than the grace period. Content
+  addressing means a blob backing several rows goes only with the last
+  reference; a `Put` of existing content rewrites the blob (fresh time) on
+  both backends, so a re-upload racing the collection is kept. The residual
+  window is between that `Stat` and the delete, for bytes that lay
+  unreferenced longer than the grace period. The unused
+  `AttachmentStore.DeleteRoomAttachments`, which handed blob keys to a
+  caller to delete (unsafe with shared blobs), is removed.
+- **Known gap (needs the hub owner).** The hub's in-memory replay buffer
+  (the last 256 events of a room with subscribers) can still hold a message
+  retention deleted, in a room that kept a subscriber connected and had no
+  traffic for the whole period; a client that connects with replay sees it
+  until it reloads history. The fix belongs in `internal/realtime/hub.go`:
+  drop replay entries older than the room's effective message retention (or
+  a fixed age), on the room owner.
 
 ## 4. Search backend
 

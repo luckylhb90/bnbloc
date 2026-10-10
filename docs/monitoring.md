@@ -61,6 +61,18 @@ route word missing from the vocabulary only reads as `:id`.
 | `bnbloc_notification_outbox_items` | gauge | `state` = `queued` \| `retrying` \| `delivered` \| `failed` | Outbox items, every tenant: pending never attempted, pending after a failed attempt, and finished items still retained (pruned after 7 days). Refreshed every 30 s. |
 | `bnbloc_notification_outbox_oldest_pending_age_seconds` | gauge | — | Age of the oldest pending outbox item (0 when none). Refreshed every 30 s. |
 
+### Retention
+
+Data retention runs on realtime ([production-deployment.md](./production-deployment.md#data-retention));
+one replica at a time does a pass, so aggregate the counters with `sum()`.
+
+| Metric | Type | Labels | Meaning |
+| --- | --- | --- | --- |
+| `bnbloc_retention_deleted_total` | counter | `item` = `room_messages` \| `room_messages_redacted` \| `message_tasks` \| `agent_messages` \| `attachments` \| `artifact_versions` \| `artifact_shares` \| `shared_agent_audit` \| `extension_audit` \| `agent_jobs` \| `blobs` | Rows (and blobs) deleted by retention. `room_messages_redacted` counts a room's newest message emptied instead of deleted (it holds the room's sequence). |
+| `bnbloc_retention_blob_bytes_deleted_total` | counter | — | Bytes of unreferenced blobs the collection removed. |
+| `bnbloc_retention_runs_total` | counter | `outcome` = `ok` \| `error` \| `skipped` | Retention passes on this replica; `skipped` = another replica held the lock. An `error` pass logs `event=bnbloc.retention.error` with what failed and goes on with the other tenants. |
+| `bnbloc_retention_last_run_timestamp_seconds` | gauge | — | When this replica last finished a pass. Across replicas, `max()` older than a few hours means no replica is cleaning up. |
+
 ### Scale-out (realtime, relay)
 
 Registered when the service runs with peers (`BNBLOC_<SVC>_PEERS`).
