@@ -692,6 +692,26 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
 - **One deployment per blob store.** The bucket + key prefix (or the
   attachments volume) belongs to exactly one database; never point a staging
   copy or a restored database at the production prefix.
+- **Message search goes through `internal/search`; the store stays the
+  authority.** `search.Index` is the only search path (`search.Store` = MySQL
+  FULLTEXT ngram, the default; OpenSearch when
+  `BNBLOC_SEARCH_OPENSEARCH_URL` is set). OpenSearch returns candidate keys
+  with the scope filters in the query; every candidate is re-read from the
+  store and kept only if `store.MessageSearch.Admits` passes (the MySQL
+  query's own predicates, kept beside it). A new search filter changes the SQL
+  and `Admits` together; never return index documents to a client directly.
+  Search serves human memberships only (`MemberRooms`); do not add an
+  agent-facing search path.
+- **Index updates never block or fail a write.** New rows reach an external
+  index only through `realtime.Hub.Committed` (room owner, after a successful
+  commit); edits and deletes `Enqueue` the key. `search.Updater` re-reads the
+  store and writes the current state; failures are logged and counted
+  (`search_index_updates_total`) and `bnbloc search reindex` repairs them. A
+  new path that writes or changes `room_messages` queues its keys the same
+  way. Retention keeps the index in step through `retention.Worker.Search`
+  (delete-by-query by tenant and cutoff). A mapping/analyzer change bumps the
+  index version in its name and needs a reindex; the analyzer must keep the
+  MySQL substring semantics (the parity test pins them).
 - **Live schema needs ALTER, not just the schema file.**
   `CREATE TABLE IF NOT EXISTS` does not alter an existing table, so a new
   column (e.g. `client_msg_id`, `deleted_at_ms`) must be `ALTER TABLE`'d
