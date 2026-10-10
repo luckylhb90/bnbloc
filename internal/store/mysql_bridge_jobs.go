@@ -449,7 +449,7 @@ func jsonStringSlice(ids []string) any {
 	if len(ids) == 0 {
 		return nil
 	}
-	raw, err := json.Marshal(ids)
+	raw, err := jsonArg(ids)
 	if err != nil {
 		return nil
 	}
@@ -471,7 +471,7 @@ func nullJSON(raw json.RawMessage) any {
 	if len(raw) == 0 {
 		return nil
 	}
-	return []byte(raw)
+	return raw // JSON text, never []byte (see jsonArg)
 }
 
 // ListBridgeAgentsForOwner returns the owner's advertised agents across all

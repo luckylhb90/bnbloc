@@ -46,7 +46,7 @@ sync-layer HMAC. The value must be identical across every service.
 
 | Variable | Scope | Meaning |
 | --- | --- | --- |
-| `BNBLOC_MYSQL_DSN` | gateway, room, realtime, activity, shareagent | External database DSN, e.g. `bnbloc:pass@tcp(host:3306)/bnbloc?parseTime=true`. `parseTime=true` required; `multiStatements=true` is appended by `store.OpenMySQL`. Append `&tls=true` for a managed instance. The account needs CREATE, ALTER and INDEX — services apply the schema themselves. Empty = in-memory store (dev only; fatal in production). |
+| `BNBLOC_MYSQL_DSN` | gateway, room, realtime, activity, shareagent | External database DSN, e.g. `bnbloc:pass@tcp(host:3306)/bnbloc?parseTime=true`. `parseTime=true` required; `store.OpenMySQL` adds `multiStatements` and `interpolateParams` (client-side parameter escaping: one round trip per query instead of a server-side prepare, execute and close), so the connection charset must be utf8mb4 — a `charset`/`collation` parameter naming anything else is refused at startup. Each service process holds up to 20 connections and keeps them open while idle. Append `&tls=true` for a managed instance. The account needs CREATE, ALTER and INDEX — services apply the schema themselves. Empty = in-memory store (dev only; fatal in production). |
 | `BNBLOC_INTERNAL_KEY` | gateway, room, realtime, activity, shareagent | Shared secret authenticating service-to-service calls: the gateway (and every internal caller) signs `X-Bnbloc-User` with it; the backends reject unsigned/mismatched calls with 401. Unset = every backend trusts the header from anything on the internal network (dev only; fatal in production). |
 
 ## Gateway

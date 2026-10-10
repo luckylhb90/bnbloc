@@ -244,11 +244,11 @@ func scanPrompt(row interface{ Scan(...any) error }) (wire.Prompt, error) {
 	return p, nil
 }
 
-func marshalTags(tags []string) ([]byte, error) {
+func marshalTags(tags []string) (json.RawMessage, error) {
 	if tags == nil {
 		tags = []string{}
 	}
-	return json.Marshal(tags)
+	return jsonArg(tags)
 }
 
 func (s *MySQLPrompts) CreatePrompt(ctx context.Context, p wire.Prompt) (wire.Prompt, error) {

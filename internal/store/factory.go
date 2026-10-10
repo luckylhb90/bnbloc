@@ -3,6 +3,7 @@ package store
 import (
 	"database/sql"
 	_ "embed"
+	"encoding/json"
 	"fmt"
 	"log"
 	"strings"
@@ -16,26 +17,37 @@ import (
 //go:embed schema.sql
 var schemaSQL string
 
+// Connection pool sizing. Every service process opens one pool shared by all
+// of its stores. maxOpenConns bounds what one process may hold against the
+// server's max_connections (151 by default, shared by every service and
+// replica). The pool keeps as many idle connections as it may open: with a
+// smaller idle cap, every burst above it closes the surplus on release and
+// dials it again on the next burst (a 30 s load run at 50 msgs/s opened 165
+// connections that way). connMaxLifetime still recycles connections
+// steadily, so a failover or a load balancer rebalance is picked up.
+const (
+	maxOpenConns    = 20
+	connMaxLifetime = 3 * time.Minute
+)
+
 // OpenMySQL opens a MySQL connection from a DSN, waits for it to be reachable,
 // and applies the schema (idempotent CREATE TABLE IF NOT EXISTS). It returns a
 // ready *sql.DB. Callers pass the DSN, e.g.
-// "user:pass@tcp(host:3306)/bnbloc?parseTime=true&multiStatements=true".
+// "user:pass@tcp(host:3306)/bnbloc?parseTime=true"; mysqlConfig adds the
+// client settings the stores rely on.
 func OpenMySQL(dsn string) (*sql.DB, error) {
-	// multiStatements is required to run the multi-statement schema in one Exec.
-	if !strings.Contains(dsn, "multiStatements=") {
-		sep := "?"
-		if strings.Contains(dsn, "?") {
-			sep = "&"
-		}
-		dsn += sep + "multiStatements=true"
+	cfg, err := mysqlConfig(dsn)
+	if err != nil {
+		return nil, err
 	}
-	db, err := sql.Open("mysql", dsn)
+	connector, err := mysql.NewConnector(cfg)
 	if err != nil {
 		return nil, fmt.Errorf("open mysql: %w", err)
 	}
-	db.SetConnMaxLifetime(3 * time.Minute)
-	db.SetMaxOpenConns(20)
-	db.SetMaxIdleConns(10)
+	db := sql.OpenDB(connector)
+	db.SetConnMaxLifetime(connMaxLifetime)
+	db.SetMaxOpenConns(maxOpenConns)
+	db.SetMaxIdleConns(maxOpenConns)
 
 	// Wait for the database to accept connections (compose start ordering).
 	var pingErr error
@@ -52,6 +64,10 @@ func OpenMySQL(dsn string) (*sql.DB, error) {
 		_ = db.Close()
 		return nil, fmt.Errorf("mysql not reachable: %w", pingErr)
 	}
+	if err := requireUTF8MB4Session(db); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
 	if _, err := db.Exec(schemaSQL); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("apply schema: %w", err)
@@ -61,6 +77,76 @@ func OpenMySQL(dsn string) (*sql.DB, error) {
 		return nil, fmt.Errorf("run migrations: %w", err)
 	}
 	return db, nil
+}
+
+// mysqlConfig parses the operator's DSN and adds the client settings the
+// stores rely on:
+//
+//   - multiStatements, to apply the multi-statement schema in one Exec;
+//   - interpolateParams, so a parameterized query is one round trip (the
+//     driver escapes the arguments into the query text) instead of three
+//     (server-side Prepare, Execute, Close). Client-side escaping is only
+//     safe in a connection charset whose multibyte sequences never contain
+//     the byte 0x5c (backslash): the driver documents BIG5, CP932, GB2312,
+//     GBK and SJIS as unsafe, and its own check covers only the collation
+//     parameter. The schema is utf8mb4 throughout, so the connection must be
+//     utf8mb4 as well: a DSN that asks for any other charset or collation, or
+//     sets a character_set_* session variable, is refused here, and the
+//     negotiated session charset is verified once connected
+//     (requireUTF8MB4Session). The driver's default is the utf8mb4_general_ci
+//     handshake collation.
+func mysqlConfig(dsn string) (*mysql.Config, error) {
+	cfg, err := mysql.ParseDSN(strings.TrimSpace(dsn))
+	if err != nil {
+		return nil, fmt.Errorf("parse mysql dsn: %w", err)
+	}
+	if c := cfg.Collation; c != "" && !strings.HasPrefix(strings.ToLower(c), "utf8mb4_") {
+		return nil, fmt.Errorf("mysql dsn: collation %q is not utf8mb4 (the schema is utf8mb4; remove the collation parameter)", c)
+	}
+	for k, v := range cfg.Params {
+		switch k := strings.ToLower(k); {
+		case k == "charset":
+			if !strings.EqualFold(strings.TrimSpace(v), "utf8mb4") {
+				return nil, fmt.Errorf("mysql dsn: charset %q is not utf8mb4 (the schema is utf8mb4; remove the charset parameter)", v)
+			}
+		case strings.HasPrefix(k, "character_set_") || k == "names":
+			return nil, fmt.Errorf("mysql dsn: the %s session variable is managed by the store (utf8mb4); remove it", k)
+		}
+	}
+	cfg.MultiStatements = true
+	cfg.InterpolateParams = true
+	return cfg, nil
+}
+
+// jsonArg marshals v for a JSON column argument. JSON text must reach the
+// driver as json.RawMessage (or string), never as []byte: with
+// interpolateParams the driver writes a []byte argument as a _binary'…'
+// literal, which MySQL refuses for a JSON column (error 3144) and compares
+// byte-wise against a text column. json.RawMessage is written as a quoted
+// utf8mb4 string, exactly what the prepared-statement protocol sent before.
+// Every JSON column write goes through this helper (or passes a stored
+// json.RawMessage unchanged).
+func jsonArg(v any) (json.RawMessage, error) {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return nil, err
+	}
+	return json.RawMessage(b), nil
+}
+
+// requireUTF8MB4Session verifies the charset the server actually negotiated
+// (the handshake collation can be overridden server-side, e.g. by
+// init_connect or skip-character-set-client-handshake): parameter
+// interpolation is only enabled on a utf8mb4 session.
+func requireUTF8MB4Session(db *sql.DB) error {
+	var client, conn string
+	if err := db.QueryRow(`SELECT @@character_set_client, @@character_set_connection`).Scan(&client, &conn); err != nil {
+		return fmt.Errorf("read session charset: %w", err)
+	}
+	if client != "utf8mb4" || conn != "utf8mb4" {
+		return fmt.Errorf("mysql session charset is client=%s connection=%s, want utf8mb4 (check the server's init_connect and character-set-client-handshake settings)", client, conn)
+	}
+	return nil
 }
 
 // Backends bundles the concrete store implementations a service composes.

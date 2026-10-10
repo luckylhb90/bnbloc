@@ -306,11 +306,11 @@ func (m *MySQLRoomSchedules) CreateSchedule(ctx context.Context, s wire.RoomSche
 		return wire.RoomSchedule{}, err
 	}
 	s.TenantID = tid
-	recip, err := json.Marshal(s.Recipient)
+	recip, err := jsonArg(s.Recipient)
 	if err != nil {
 		return wire.RoomSchedule{}, err
 	}
-	recur, err := json.Marshal(s.Recurrence)
+	recur, err := jsonArg(s.Recurrence)
 	if err != nil {
 		return wire.RoomSchedule{}, err
 	}
@@ -375,11 +375,11 @@ func (m *MySQLRoomSchedules) UpdateSchedule(ctx context.Context, s wire.RoomSche
 	if err != nil {
 		return err
 	}
-	recip, err := json.Marshal(s.Recipient)
+	recip, err := jsonArg(s.Recipient)
 	if err != nil {
 		return err
 	}
-	recur, err := json.Marshal(s.Recurrence)
+	recur, err := jsonArg(s.Recurrence)
 	if err != nil {
 		return err
 	}

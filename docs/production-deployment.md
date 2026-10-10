@@ -66,8 +66,15 @@ set; `deploy/schema.sql` is a verbatim copy for review/manual DDL, and CI fails
 if they diverge) and runs ordered migrations through a `schema_migrations`
 ledger, serialized across services by a MySQL advisory lock. There is no manual
 migration step — but the target database must exist and the account needs DDL
-rights. `multiStatements=true` is appended by `store.OpenMySQL`, so only
-`parseTime=true` belongs in your DSN.
+rights. `store.OpenMySQL` adds the client settings it needs
+(`multiStatements`, and `interpolateParams`, which saves a server-side
+prepare round trip per query), so only `parseTime=true` (plus `tls=true` for
+a managed instance) belongs in your DSN. The connection charset must be
+utf8mb4, the schema's charset: a DSN naming another charset or collation is
+refused at startup, because client-side parameter escaping is unsafe in some
+multibyte charsets. Each service process holds at most 20 connections and
+keeps them open while idle; size the server's `max_connections` for 20 per
+stateful service replica plus headroom.
 
 The full variable reference is [Environment Variables](./environment-variables.md).
 

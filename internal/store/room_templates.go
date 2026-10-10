@@ -260,7 +260,7 @@ func (m *MySQLRoomTemplates) CreateTemplate(ctx context.Context, t wire.RoomTemp
 	}
 	t.TenantID = tid
 	t.Body = normalizeTemplateBody(t.Body)
-	body, err := json.Marshal(t.Body)
+	body, err := jsonArg(t.Body)
 	if err != nil {
 		return wire.RoomTemplate{}, err
 	}
@@ -337,7 +337,7 @@ func (m *MySQLRoomTemplates) UpdateTemplate(ctx context.Context, templateID, req
 	}
 	t = applyTemplatePatch(t, patch, atMs)
 	t.Body = normalizeTemplateBody(t.Body)
-	body, err := json.Marshal(t.Body)
+	body, err := jsonArg(t.Body)
 	if err != nil {
 		return wire.RoomTemplate{}, err
 	}

@@ -43,6 +43,56 @@ and touches every store).
 `docs/load-testing.md` explains how to run it against the compose stack and a
 cluster, and records the baseline measured on the compose stack.
 
+## 1b. Write path
+
+The section 1 baseline showed that delivery latency is the chat POST
+latency, and that the POST waits on the MySQL commit, serialized per room:
+each durable event held the room's publish lock across its own commit, so a
+room's messages queued behind each other's fsync (p50 200 ms / p99 1.8 s at
+50 msgs/s). Section 1b removes that wait without weakening any guarantee.
+
+- **Per-room group commit.** Concurrent durable publishes to one room are
+  committed together. The first publisher becomes the leader; publishes
+  that arrive while a commit is in flight queue behind it. When the commit
+  ends, the next queued publisher leads the next batch: it takes everything
+  queued (bounded by count and bytes; no artificial wait), assigns
+  consecutive sequences, and stores the batch in one multi-row insert
+  through the store seam (`AppendRoomMessages`, memory store equivalent).
+  Only after that commit succeeds does it deliver the batch in sequence
+  order and hand each caller its own result.
+- **Guarantees kept.** Per-room strict order; delivery only after durable;
+  a failed commit consumes no sequence, delivers nothing and re-seeds the
+  room's counter; `clientMsgId` idempotency, including two sends with the
+  same id in one batch and a send whose id is already in history (both
+  answer the original sequence); handoff import (`CommitHistory`) shares the
+  room's queue and counter but is never delivered; transient events keep
+  sequence 0 and never wait on a commit. The scale-out fence (the
+  `(room_id, seq)` primary key) fails every member of the batch, so each
+  caller's idempotent retry lands on the real owner.
+- **Database client settings.** The pool keeps as many idle connections as
+  it may open, so a load run does not churn connections, and the driver
+  interpolates parameters client-side instead of paying a server-side
+  prepare/execute/close per query, guarded by a utf8mb4-only connection
+  charset check.
+- **Shared SSE reader and session-token decoding.** The `bnbloc smoke`
+  command, the bridge and the load tool each parsed the SSE stream; two
+  places decoded session tokens. Both become one shared package each.
+- **Re-measure** with the section 1 tool on the same compose baseline and
+  record before/after numbers in `docs/load-testing.md`.
+
+Status (2026-10-11): in progress.
+
+- Database client settings: landed. The pool keeps `maxOpenConns` (20)
+  idle. `interpolateParams` is on; enabling it exposed a semantic change the
+  driver does not warn about: a `[]byte` argument is interpolated as a
+  `_binary'…'` literal (the prepared protocol sent it as a connection-charset
+  string), which MySQL refuses for JSON columns (error 3144). Every JSON
+  column write now passes `json.RawMessage` (`store.jsonArg`); a type-checked
+  scan of every `database/sql` call found no other `[]byte` argument. The DSN
+  must be utf8mb4 (other charsets and collations are refused, and the
+  negotiated session charset is checked at startup). No new env var: the
+  defaults are right for every deployment we know of.
+
 ## 2. realtime and relay scale-out by key ownership
 
 Each room is owned by exactly one realtime replica, so ordering, per-room

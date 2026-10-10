@@ -23,8 +23,8 @@ func (s *MySQLGrant) PutGrant(ctx context.Context, g Grant) error {
 	if err != nil {
 		return err
 	}
-	models, _ := json.Marshal(g.AllowedModels)
-	caps, _ := json.Marshal(g.Capabilities)
+	models, _ := jsonArg(g.AllowedModels)
+	caps, _ := jsonArg(g.Capabilities)
 	_, err = s.DB.ExecContext(ctx,
 		`INSERT INTO shared_agent_grants
 		 (grant_id, tenant_id, room_id, target_id, owner_user_id, grantee_user_id, allowed_models_json,

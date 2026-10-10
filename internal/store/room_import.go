@@ -75,7 +75,7 @@ func (s *MySQLRoomImports) PutRoomImport(ctx context.Context, info wire.RoomHand
 	if members == nil {
 		members = []wire.RoomExportMember{}
 	}
-	mj, err := json.Marshal(members)
+	mj, err := jsonArg(members)
 	if err != nil {
 		return err
 	}

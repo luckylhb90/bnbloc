@@ -7,7 +7,6 @@ package store
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"errors"
 
 	"github.com/luckylhb90/bnbloc/internal/tenant"
@@ -30,7 +29,7 @@ func (m *MySQL) PutSessionState(ctx context.Context, in wire.ReportSessionStateI
 	if err != nil {
 		return 0, err
 	}
-	stateJSON, err := json.Marshal(in.State)
+	stateJSON, err := jsonArg(in.State)
 	if err != nil {
 		return 0, err
 	}
@@ -84,7 +83,7 @@ WHERE tenant_id = ? AND room_id = ? AND agent_session_id = ?`,
 		if msg.Seq <= prior {
 			continue // replay at or below the durable cursor
 		}
-		payload, err := json.Marshal(msg.Payload)
+		payload, err := jsonArg(msg.Payload)
 		if err != nil {
 			return nil, 0, err
 		}
@@ -120,7 +119,7 @@ func (m *MySQL) RecordSubmitProvenance(ctx context.Context, in wire.SubmitProven
 	if err != nil {
 		return err
 	}
-	admission, err := json.Marshal(in.TurnAdmission)
+	admission, err := jsonArg(in.TurnAdmission)
 	if err != nil {
 		return err
 	}

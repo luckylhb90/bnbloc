@@ -370,7 +370,7 @@ func (s *MySQLChat) AppendRoomMessage(ctx context.Context, m RoomMessage) error 
 	_, err = s.DB.ExecContext(ctx,
 		`INSERT INTO room_messages (tenant_id, room_id, channel_id, seq, kind, author, client_msg_id, payload_json, search_text, created_at_ms)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		tid, m.RoomID, m.ChannelID, m.Seq, m.Kind, nullStr(m.Author), nullStr(m.ClientMsgID), []byte(payload),
+		tid, m.RoomID, m.ChannelID, m.Seq, m.Kind, nullStr(m.Author), nullStr(m.ClientMsgID), payload,
 		nullStr(MessageText(m.Kind, payload)), m.CreatedAtMs)
 	var me *mysql.MySQLError
 	if errors.As(err, &me) && me.Number == 1062 {
