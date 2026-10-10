@@ -120,6 +120,14 @@ Status (2026-10-11): in progress.
     tenant a row is stored under.
   - **Metrics:** `realtime_feed_commits_total{result}` and
     `realtime_feed_commit_events_total` (mean batch size).
+- Replay buffer max age: landed (raised by section 3). The replay buffer is
+  only a latency optimization for connected clients, yet a quiet room whose
+  subscriber stayed connected kept its entries forever, so a message data
+  retention deleted could replay to a new subscriber. Entries now carry the
+  hub time they were retained at (never the client-settable `atUnixMs`) and
+  expire after one day, dropped on subscribe and on publish. One day loses
+  nothing (every client pages history on connect) and is far below the
+  31-day retention minimum; a test pins that relation.
 
 ## 2. realtime and relay scale-out by key ownership
 
@@ -375,13 +383,12 @@ implementing:
   unreferenced longer than the grace period. The unused
   `AttachmentStore.DeleteRoomAttachments`, which handed blob keys to a
   caller to delete (unsafe with shared blobs), is removed.
-- **Known gap (needs the hub owner).** The hub's in-memory replay buffer
-  (the last 256 events of a room with subscribers) can still hold a message
-  retention deleted, in a room that kept a subscriber connected and had no
-  traffic for the whole period; a client that connects with replay sees it
-  until it reloads history. The fix belongs in `internal/realtime/hub.go`:
-  drop replay entries older than the room's effective message retention (or
-  a fixed age), on the room owner.
+- **Replay buffer (resolved in section 1b).** The hub's in-memory replay
+  buffer (the last 256 events of a room with subscribers) could still hold
+  a message retention deleted, in a room that kept a subscriber connected
+  and had no traffic for the whole period. Replay entries now expire after
+  one day (`replayMaxAge`, far below the 31-day retention minimum), dropped
+  on subscribe and on publish.
 
 ## 4. Search backend
 

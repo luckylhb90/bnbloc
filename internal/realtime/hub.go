@@ -41,7 +41,7 @@ func (s *Subscriber) Events() <-chan wire.Event { return s.ch }
 type Hub struct {
 	mu     sync.Mutex
 	subs   map[string]map[*Subscriber]struct{}
-	replay map[string][]wire.Event
+	replay map[string][]replayEntry
 	// seq is a per-room monotonic sequence counter for DURABLE events only. It
 	// is independent of the replay buffer length: once the buffer slides past
 	// replayLimit, buffer length plateaus, so deriving the sequence from it
@@ -56,6 +56,8 @@ type Hub struct {
 	queues      map[string]*roomQueue
 	replayLimit int
 	buffer      int
+	// now is the replay clock (time.Now; tests move it).
+	now func() time.Time
 	// SeedSeq, when set, returns the durable max sequence for a room; the hub
 	// seeds its per-room counter from it on the room's first publish so
 	// sequences survive a restart. A seed error fails that publish and leaves
@@ -79,12 +81,52 @@ func NewHub(replayLimit, buffer int) *Hub {
 	}
 	return &Hub{
 		subs:        map[string]map[*Subscriber]struct{}{},
-		replay:      map[string][]wire.Event{},
+		replay:      map[string][]replayEntry{},
 		seq:         map[string]int64{},
 		queues:      map[string]*roomQueue{},
 		replayLimit: replayLimit,
 		buffer:      buffer,
+		now:         time.Now,
 	}
+}
+
+// replayMaxAge bounds how long an event stays in a room's replay buffer.
+// Replay is only a latency optimization: it lets a client that just
+// connected render the room's recent events without waiting for history,
+// and every client pages history on connect anyway, so dropping an old entry
+// loses nothing. The bound matters for data retention: a quiet room that
+// keeps a subscriber connected never empties its buffer, and without an age
+// limit a message retention deleted from history would still replay to a
+// new subscriber. One day is far below the shortest message retention
+// (wire.RetentionMinDays, 31 days; TestReplayMaxAgeBelowRetentionMinimum
+// pins the relation), so a retention-deleted message is never replayed.
+const replayMaxAge = 24 * time.Hour
+
+// replayEntry is one retained event with the hub time it was retained at.
+// The event's own AtUnixMs is not used: a client may set it.
+type replayEntry struct {
+	ev wire.Event
+	at time.Time
+}
+
+// pruneReplayLocked drops the room's replay entries older than replayMaxAge
+// (entries are in retention order, so the old ones are a prefix). The caller
+// holds mu.
+func (h *Hub) pruneReplayLocked(roomID string, now time.Time) []replayEntry {
+	buf := h.replay[roomID]
+	cut := 0
+	for cut < len(buf) && now.Sub(buf[cut].at) > replayMaxAge {
+		cut++
+	}
+	if cut == len(buf) {
+		delete(h.replay, roomID)
+		return nil
+	}
+	if cut > 0 {
+		buf = append(buf[:0:0], buf[cut:]...)
+		h.replay[roomID] = buf
+	}
+	return buf
 }
 
 // Subscribe registers a subscriber for a room and returns it with the current
@@ -103,18 +145,18 @@ func (h *Hub) subscribe(roomID string, replay bool) *Subscriber {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	buffer := h.buffer
+	var snapshot []replayEntry
 	if replay {
-		buffer += len(h.replay[roomID])
+		snapshot = h.pruneReplayLocked(roomID, h.now())
+		buffer += len(snapshot)
 	}
 	sub := &Subscriber{ch: make(chan wire.Event, buffer)}
 	if h.subs[roomID] == nil {
 		h.subs[roomID] = map[*Subscriber]struct{}{}
 	}
 	h.subs[roomID][sub] = struct{}{}
-	if replay {
-		for _, ev := range h.replay[roomID] {
-			sub.ch <- ev
-		}
+	for _, e := range snapshot {
+		sub.ch <- e.ev
 	}
 	return sub
 }
@@ -481,7 +523,8 @@ func (h *Hub) deliver(batch []*pending) {
 			// Live-only: replayed to a member re-added later, it would close
 			// their fresh stream.
 		default:
-			buf := append(h.replay[ev.RoomID], ev)
+			now := h.now()
+			buf := append(h.pruneReplayLocked(ev.RoomID, now), replayEntry{ev: ev, at: now})
 			if h.replayLimit > 0 && len(buf) > h.replayLimit {
 				buf = buf[len(buf)-h.replayLimit:]
 			}

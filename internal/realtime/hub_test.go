@@ -261,3 +261,59 @@ func TestRevocationEventsAreNotReplayed(t *testing.T) {
 		t.Fatalf("replay after room_deleted has %d events, want 0", n)
 	}
 }
+
+// The replay buffer is a latency optimization for connected clients, not a
+// second history: an entry older than replayMaxAge is dropped on subscribe
+// and on publish, so a quiet room whose subscriber stayed connected never
+// replays a message data retention has deleted from history.
+func TestReplayDropsEntriesOlderThanMaxAge(t *testing.T) {
+	now := time.Unix(1_700_000_000, 0)
+	h := NewHub(16, 16)
+	h.now = func() time.Time { return now }
+	keep := h.SubscribeLive("r") // a connected client keeps the room's buffer alive
+	defer h.Unsubscribe("r", keep)
+
+	h.Publish(wire.Event{RoomID: "r", Kind: wire.KindChatMessage, Payload: "old"})
+	now = now.Add(replayMaxAge - time.Minute)
+	h.Publish(wire.Event{RoomID: "r", Kind: wire.KindChatMessage, Payload: "recent"})
+	if late := h.Subscribe("r"); len(late.Events()) != 2 {
+		t.Fatalf("replay within the max age has %d events, want 2", len(late.Events()))
+	}
+
+	// The room goes quiet past the first entry's age: a new subscriber gets
+	// only the entry that is still young enough.
+	now = now.Add(2 * time.Minute)
+	late := h.Subscribe("r")
+	got := drain(late)
+	if len(got) != 1 || got[0].Payload != "recent" {
+		t.Fatalf("replay after the max age = %v, want only the recent event", got)
+	}
+
+	// A publish prunes too, and an all-expired buffer is freed.
+	now = now.Add(replayMaxAge)
+	h.Publish(wire.Event{RoomID: "r", Kind: wire.KindChatMessage, Payload: "new"})
+	h.mu.Lock()
+	n := len(h.replay["r"])
+	h.mu.Unlock()
+	if n != 1 {
+		t.Fatalf("buffer holds %d entries after a publish, want only the new one", n)
+	}
+	now = now.Add(replayMaxAge + time.Second)
+	if quiet := h.Subscribe("r"); len(quiet.Events()) != 0 {
+		t.Fatalf("an expired buffer replayed %d events", len(quiet.Events()))
+	}
+	h.mu.Lock()
+	_, kept := h.replay["r"]
+	h.mu.Unlock()
+	if kept {
+		t.Fatal("an all-expired replay buffer was not freed")
+	}
+}
+
+// The replay age must stay far below the shortest message retention, or a
+// retention-deleted message could replay.
+func TestReplayMaxAgeBelowRetentionMinimum(t *testing.T) {
+	if min := time.Duration(wire.RetentionMinDays) * 24 * time.Hour; replayMaxAge*7 > min {
+		t.Fatalf("replayMaxAge %v is not far below the %v retention minimum", replayMaxAge, min)
+	}
+}
