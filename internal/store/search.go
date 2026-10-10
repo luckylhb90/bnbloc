@@ -55,6 +55,11 @@ type ChatIndex interface {
 	// without it (pre-search messages), after cursor; cross-tenant
 	// (search_reindex.go).
 	ReindexSearchText(ctx context.Context, cursor string, batch int) (SearchReindexBatch, error)
+	// LoadSearchSources and ScanSearchSources read rows for an external
+	// search index, by key and as a reindex walk; cross-tenant
+	// (search_source.go).
+	LoadSearchSources(ctx context.Context, keys []MessageKey) ([]SearchSource, error)
+	ScanSearchSources(ctx context.Context, cursor string, batch int) ([]SearchSource, SearchReindexBatch, error)
 }
 
 // ArtifactIndex searches room artifacts by title and file name.
@@ -154,8 +159,35 @@ func inPlaceholders(n int) string {
 	return strings.TrimSuffix(strings.Repeat("?,", n), ",")
 }
 
-func searchable(s MessageSearch) bool {
-	return len(s.RoomIDs) > 0 && utf8.RuneCountInString(strings.TrimSpace(s.Text)) >= SearchMinRunes
+// Searchable reports whether q can match anything: at least one room and a
+// query of at least SearchMinRunes. Every backend answers an unsearchable
+// query with no results.
+func (q MessageSearch) Searchable() bool {
+	return len(q.RoomIDs) > 0 && utf8.RuneCountInString(strings.TrimSpace(q.Text)) >= SearchMinRunes
+}
+
+// PageSize is q.Limit bounded to 1..100 (20 when unset or out of range).
+func (q MessageSearch) PageSize() int { return searchLimit(q.Limit) }
+
+// Admits reports whether a stored row passes the scope SearchRoomMessages
+// applies in SQL — the caller's tenant, one of q.RoomIDs, not soft-deleted,
+// older than the BeforeMs cursor, carrying search text — leaving only the
+// text match to the index. An external index (internal/search) re-checks
+// every candidate it returns with it, so its results can never be wider
+// than the MySQL query's. Keep it in step with SearchRoomMessages.
+func (q MessageSearch) Admits(tenantID string, src SearchSource) bool {
+	if src.TenantID != tenantID || src.Deleted || src.Text() == "" {
+		return false
+	}
+	if q.BeforeMs > 0 && src.CreatedAtMs >= q.BeforeMs {
+		return false
+	}
+	for _, id := range q.RoomIDs {
+		if id == src.RoomID {
+			return true
+		}
+	}
+	return false
 }
 
 // --- MemoryChat ---
@@ -189,7 +221,7 @@ func (s *MemoryChat) SearchRoomMessages(ctx context.Context, q MessageSearch) ([
 	if err != nil {
 		return nil, err
 	}
-	if !searchable(q) {
+	if !q.Searchable() {
 		return nil, nil
 	}
 	text := strings.TrimSpace(q.Text)
@@ -213,7 +245,7 @@ func (s *MemoryChat) SearchRoomMessages(ctx context.Context, q MessageSearch) ([
 		}
 		return out[i].Seq > out[j].Seq
 	})
-	if limit := searchLimit(q.Limit); len(out) > limit {
+	if limit := q.PageSize(); len(out) > limit {
 		out = out[:limit]
 	}
 	return out, nil
@@ -265,7 +297,7 @@ func (s *MySQLChat) SearchRoomMessages(ctx context.Context, q MessageSearch) ([]
 	if err != nil {
 		return nil, err
 	}
-	if !searchable(q) {
+	if !q.Searchable() {
 		return nil, nil
 	}
 	args := []any{tid}
@@ -281,7 +313,7 @@ func (s *MySQLChat) SearchRoomMessages(ctx context.Context, q MessageSearch) ([]
 		args = append(args, q.BeforeMs)
 	}
 	query += ` ORDER BY created_at_ms DESC, seq DESC LIMIT ?`
-	args = append(args, searchLimit(q.Limit))
+	args = append(args, q.PageSize())
 	rows, err := s.DB.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err

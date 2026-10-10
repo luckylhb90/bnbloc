@@ -70,6 +70,19 @@ func parseSearchCursor(s string) (searchCursor, error) {
 	return searchCursor{roomID: s[:i], seq: seq}, nil
 }
 
+// keysetAfter is the WHERE clause (with its leading space; "" for the empty
+// cursor) selecting the rows after c in primary-key order, columns qualified
+// by prefix. It is spelled out rather than (room_id, seq) > (?, ?): MySQL
+// turns this form into a primary-key range scan, the row comparison into a
+// full index scan from the first row.
+func (c searchCursor) keysetAfter(prefix string) (string, []any) {
+	if c.roomID == "" && c.seq == 0 {
+		return "", nil
+	}
+	return " WHERE " + prefix + "room_id >= ? AND (" + prefix + "room_id > ? OR " + prefix + "seq > ?)",
+		[]any{c.roomID, c.roomID, c.seq}
+}
+
 func (c searchCursor) less(roomID string, seq int64) bool {
 	return c.roomID < roomID || (c.roomID == roomID && c.seq < seq)
 }
@@ -122,19 +135,11 @@ func (s *MySQLChat) ReindexSearchText(ctx context.Context, cursor string, batch 
 		return SearchReindexBatch{}, err
 	}
 	batch = reindexBatchSize(batch)
+	where, args := from.keysetAfter("")
 	q := `SELECT room_id, seq, kind,
 	        CASE WHEN (search_text IS NULL OR search_text = '') AND kind IN ('chat_message', 'agent_messages')
 	             THEN payload_json END
-	      FROM room_messages`
-	args := []any{}
-	if cursor != "" {
-		// Spelled out rather than (room_id, seq) > (?, ?): MySQL turns this
-		// form into a primary-key range scan, the row comparison into a
-		// full index scan from the first row.
-		q += ` WHERE room_id >= ? AND (room_id > ? OR seq > ?)`
-		args = append(args, from.roomID, from.roomID, from.seq)
-	}
-	q += ` ORDER BY room_id, seq LIMIT ?`
+	      FROM room_messages` + where + ` ORDER BY room_id, seq LIMIT ?`
 	args = append(args, batch)
 	rows, err := s.DB.QueryContext(ctx, q, args...)
 	if err != nil {
