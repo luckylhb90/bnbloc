@@ -84,8 +84,9 @@ func OpenMySQL(dsn string) (*sql.DB, error) {
 //
 //   - multiStatements, to apply the multi-statement schema in one Exec;
 //   - interpolateParams, so a parameterized query is one round trip (the
-//     driver escapes the arguments into the query text) instead of three
-//     (server-side Prepare, Execute, Close). Client-side escaping is only
+//     driver escapes the arguments into the query text) instead of two
+//     (server-side Prepare, then Execute) plus a Close packet. Client-side
+//     escaping is only
 //     safe in a connection charset whose multibyte sequences never contain
 //     the byte 0x5c (backslash): the driver documents BIG5, CP932, GB2312,
 //     GBK and SJIS as unsafe, and its own check covers only the collation

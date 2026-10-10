@@ -80,7 +80,8 @@ room's messages queued behind each other's fsync (p50 200 ms / p99 1.8 s at
 - **Re-measure** with the section 1 tool on the same compose baseline and
   record before/after numbers in `docs/load-testing.md`.
 
-Status (2026-10-11): in progress.
+Status (2026-10-11): implemented; measured in `docs/load-testing.md`
+("Write path").
 
 - Database client settings: landed. The pool keeps `maxOpenConns` (20)
   idle. `interpolateParams` is on; enabling it exposed a semantic change the
@@ -145,6 +146,16 @@ Status (2026-10-11): in progress.
   internal publish plus its envelope); it now dispatches on the blank line
   like the others. `auth.PeekSession` (beside the signer that owns the
   format) replaces the two copies of unverified session decoding.
+- Re-measurement: done, on a host heavily loaded by unrelated workloads
+  (load average 60 to 330, disk stalls of 1 to 15 s), so the tails are
+  noise-dominated and recorded as such. Medians fell in every shape (paired
+  runs: A 26 to 18 ms, one room at 60 msgs/s 26 to 11 ms; heavy load: 85 to
+  835 ms down to 10 to 42 ms), p99 did not measurably change (it is the
+  disk stall), prepared statements fell to zero, and new connections per
+  run fell 3 to 15 times. Under slow commits one busy room saturated the
+  old build and not the new one. The measurement also found the two
+  defects fixed above (silent drops on a full subscriber, the commit
+  timeout).
 - Replay buffer max age: landed (raised by section 3). The replay buffer is
   only a latency optimization for connected clients, yet a quiet room whose
   subscriber stayed connected kept its entries forever, so a message data

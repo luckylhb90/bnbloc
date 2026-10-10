@@ -179,7 +179,10 @@ docker run --rm --network bnbloc-loadtest_default curlimages/curl -s http://real
   - send-to-arrival latency.
 - **streams:**
   - opens, disconnects (an open stream that ended during the run) and
-    reconnects;
+    reconnects. realtime closes a stream that falls a whole buffer (64
+    events) behind (`bnbloc_realtime_sse_overflows_total`); the web client
+    then catches up from history, but the load tool does not, so the events
+    it missed while reconnecting are not counted as expected;
   - failed opens by status;
   - streams open when sending started and at the end;
   - connect time, from request to response headers.
@@ -273,11 +276,110 @@ That matches the per-subject bucket: 20 members × (10 burst + 2/s × 20 s) =
   The latency is waiting (commit, the room lock, the database pool), not
   compute.
 - **Database client settings worth examining** (candidates, not measured in
-  isolation):
+  isolation; both changed in section 1b, see below):
   - The stores open at most 20 connections and keep 10 idle. A 30 s run at
     50 msgs/s opened 165 new MySQL connections.
-  - Every query is a server-side prepared statement, so each one costs
-    Prepare, Execute and Close round trips. A chat message costs about five
-    of them.
+  - Every query is a server-side prepared statement, so each one costs a
+    Prepare and an Execute round trip, plus a Close packet. A chat message
+    costs about five of them.
 - **Sign-in.** It took 29.5 s for 1000 members with `--forwarded-for` and 16
   parallel sign-ins. Each sign-in writes a refresh-token family.
+
+## Write path (section 1b, 2026-10-11)
+
+Section 1b of `docs/prd/2026-10-10-enterprise-scale.md` changed the write
+path: per-room group commit of durable events, idle connections kept open,
+client-side parameter interpolation. This section compares the build before
+it (`9d3332d`) with the build after it (`aca4e3d`; later commits do not
+change the server path) on the same machine and compose stack as the
+baseline.
+
+**Caveats, stronger than for the baseline.** During these runs the host was
+heavily loaded by unrelated workloads (load average 60 to 330, other
+containers using several cores), and the Docker VM's disk stalled for 1 to
+15 s at a time. Latency tails are set by those stalls: identical runs of the
+same build differed by 2 to 3 times at p99. Medians are more stable, and the
+MySQL counters (from `SHOW GLOBAL STATUS` before and after each run) are
+exact. Treat the latency numbers as a direction, not a measurement of this
+build's capacity.
+
+Two shapes were added to A and B, to load one room's commit path:
+
+```sh
+# C: 40 members, 2 rooms of 20, 40 msgs/s (20 per room), 60 s
+bnbloc-loadtest --gateway http://localhost:17090 --forwarded-for \
+  --members 40 --rooms 2 --rate 40 --duration 60s --ramp-up 5s
+# D: 40 members, 1 room, 60 msgs/s, 60 s
+bnbloc-loadtest --gateway http://localhost:17090 --forwarded-for \
+  --members 40 --rooms 1 --rate 60 --duration 60s --ramp-up 5s --max-inflight 2048
+```
+
+**Paired runs** (back to back, before then after, load average 58 to 104):
+
+| Run | Build | Delivery p50 / p95 / p99 / max (ms) | POST p50 / p99 (ms) | New MySQL connections | Prepared statements |
+| --- | --- | --- | --- | --- | --- |
+| A | before | 26 / 4229 / 5808 / 6466 | 28 / 5876 | 153 | 16,818 |
+| A | after | 18 / 4660 / 5859 / 6335 | 19 / 5892 | 64 | 0 |
+| D | before | 26 / 7785 / 8531 / 8631 | 28 / 8531 | 30 | 15,311 |
+| D | after | 11 / 3417 / 5617 / 6172 | 12 / 5606 | 14 | 0 |
+
+**Runs under heavy load** (load average 167 to 330), every run listed:
+
+| Run | Build | Delivery p50 / p99 (ms) | New MySQL connections | Notes |
+| --- | --- | --- | --- | --- |
+| A | before | 154 / 5893 | — | |
+| A | before | 835 / 9102 | 210 | |
+| A | before | 85 / 3345 | 180 | |
+| A | after | 42 / 2911 | 65 | |
+| A | after | 16 / 9212 | 55 | |
+| B | before | 582 / 7614 | 604 | |
+| B | after | 26 / 12333 | 39 | |
+| C | before | 264 / 2076 | 56 | |
+| C | before | 121 / 1714 | 37 | |
+| C | after | 24 / 11811 | 46 | 53 answers of 429 and one 502: the load generator itself stalled, then sent a burst |
+| C | after | 20 / 5878 | 29 | |
+| D | before | 3161 / 6417 | 31 | the room saturated: the POST queue grew for the whole run |
+| D | before | 9958 / 14994 | — | collapsed: 1013 of 3600 sends timed out (15 s), 49 answered 500 |
+| D | after | 39 / 8210 | 16 | 255 sends timed out during a stall longer than 15 s |
+| D | after | 10 / 2614 | 24 | |
+
+Every other run delivered every expected event, in order, with no 429.
+
+**What the comparison shows.**
+
+- **Medians dropped** in every pair and every shape: paired A from 26 to
+  18 ms and D from 26 to 11 ms; under heavy load from 85 to 835 ms (D
+  saturated aside) to 10 to 42 ms. One round trip per query instead of a
+  Prepare and an Execute, and no message waiting for another message's
+  commit.
+- **Tails did not improve measurably on this host.** A 1 to 15 s disk stall
+  delays everything queued behind it, whatever the client does. Group
+  commit drains the backlog after a stall in a few commits instead of one
+  per message (the mean batch grew to 3.3 events in one D run), but the
+  stall itself sets the p99.
+- **One busy room no longer saturates on slow commits.** Under heavy load,
+  one room at 60 msgs/s saturated the before build (p50 3.2 s, then a
+  collapse), while the after build kept its median at 10 to 39 ms. At low
+  host load the before build did not saturate (p50 26 ms), so this is
+  headroom when commits are slow, not a capacity number.
+- **Connection churn fell** from 153 to 210 new connections per A run to 55
+  to 65, and from 604 to 39 per B run (sign-in included).
+- **Prepared statements fell to zero**: about 16,800 per A run before. Per
+  query, the server sees one request instead of two plus a Close packet.
+- **Batches are small at these rates**: about 1.2 events per commit in A
+  and 1.3 to 1.8 in C and D. MySQL already merges concurrent
+  commits of different rooms into one fsync (binlog group commit), so the
+  fsync count did not change; per-room batching matters when one room's
+  messages queue behind a slow commit.
+
+**Defects the measurement found, fixed in section 1b.**
+
+- The first group commit build lost 13 and 322 deliveries in two D runs with
+  no disconnect. A batch reaches each stream as one burst, and the hub
+  skipped any subscriber whose 64-event buffer was full, silently. realtime
+  now closes such a stream (the client catches up from history) and writes
+  every queued event before one flush.
+- The next build gave each batch commit a 10 s timeout. One A run hit a
+  stall longer than that: 16 commits timed out client-side but committed
+  server-side, and the re-seeded counter then collided with those rows (383
+  sends answered 500). A commit now waits for its real outcome.
