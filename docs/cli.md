@@ -247,6 +247,17 @@ bnbloc cores publish-sidecar --name acme --version 1.4.0 --publisher acme-inc \
   --rollout optin
 ```
 
+The generic ACP core ([`cmd/bnbloc-acp`](../cmd/bnbloc-acp)) is published the
+same way; each member then lists their Agent Client Protocol agents in their
+own `agents.json` (see
+[core-providers.md](./architecture/core-providers.md#acp-agents-the-acp-core)):
+
+```sh
+bnbloc cores publish-sidecar --name acp --version 0.1.0 --publisher acme-inc \
+  --local-url http://127.0.0.1:7341 --listen-env BNBLOC_ACP_LISTEN --supervised-env BNBLOC_ACP_SUPERVISED \
+  --binary darwin-arm64=dist/bnbloc-acp-darwin-arm64 --binary windows-amd64=dist/bnbloc-acp-windows-amd64.exe
+```
+
 An already-built package JSON (any component kind) with its detached signature:
 
 ```sh

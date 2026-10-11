@@ -120,6 +120,10 @@ through a **core**:
   is [`core/protocol/types.go`](core/protocol/types.go), and a
   [conformance suite](core/conformance) checks a daemon against it. The demo
   drives Claude Code through such a core.
+- **Agents that speak ACP** (the Agent Client Protocol: Claude Code, Codex,
+  Gemini CLI, OpenCode and more) work through the generic
+  [ACP core](docs/architecture/core-providers.md#acp-agents-the-acp-core):
+  install it once, then list your agents in a JSON file.
 
 Then install the **desktop app** (from the web UI's download page). It runs
 the bridge that connects your machine's agents to your rooms. Want teammates

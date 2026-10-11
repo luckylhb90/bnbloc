@@ -115,6 +115,10 @@ bnbloc 自己不带 agent，它通过**核心**驱动你已经在用的 agent：
   [`core/protocol/types.go`](core/protocol/types.go)，仓库里还带了
   [一致性测试](core/conformance)，可以用来检查你的实现。演示视频里的
   Claude Code 就是这样接进来的。
+- **支持 ACP 的 agent**（Agent Client Protocol：Claude Code、Codex、
+  Gemini CLI、OpenCode 等）通过通用的
+  [ACP 核心](docs/architecture/core-providers.md#acp-agents-the-acp-core)接入：
+  装一次，再在一个 JSON 文件里列出你的 agent 即可。
 
 然后安装**桌面端**（在网页的下载页面）。它运行的 bridge 会把你电脑上的
 agent 接到你的房间里。想让同事不装任何东西就能试？在 Platform 控制台里把你

@@ -116,6 +116,9 @@ an adapter daemon. Pick the form the wire contract fits:
 | 1. Manifest | No | The daemon's control path is request/response REST templating — including listener-file discovery and per-target catalog enrichment (the common case). |
 | 2. Core Protocol adapter daemon | No (own binary) | The lifecycle is procedural — multi-step handshakes, wait loops, or state no template can host. |
 
+An agent that speaks the Agent Client Protocol needs neither: it is a
+configuration entry of the generic ACP core (see "ACP agents" below).
+
 ### 1. Manifest core (no recompile)
 
 A manifest core is distributed as a **signed package**: wrap the manifest JSON
@@ -389,6 +392,83 @@ binary, which is exactly what the adapter forms remove. Go's `plugin` package
 is **permanently out** — Windows-unsupported and toolchain-locked, and Windows
 is a repository compatibility contract.
 
+### ACP agents (the ACP core)
+
+Agents that speak the [Agent Client Protocol](https://agentclientprotocol.com)
+(JSON-RPC 2.0 over the stdio of a subprocess) join through one generic Core
+Protocol adapter daemon, [`cmd/bnbloc-acp`](../../cmd/bnbloc-acp): each
+configured agent is a target of the ACP core, and adding an agent is a config
+entry, not code. Design: [`docs/prd/2026-10-11-acp-core.md`](../prd/2026-10-11-acp-core.md).
+
+**Config.** A JSON file on the machine running the adapter
+(`<user config dir>/bnbloc-acp/agents.json`, or `--config` /
+`BNBLOC_ACP_CONFIG`), re-read when it changes:
+
+```json
+{
+  "idleTimeout": "30m",
+  "agents": [
+    { "name": "claude", "command": "npx", "args": ["-y", "@agentclientprotocol/claude-agent-acp"] },
+    { "name": "codex", "command": "npx", "args": ["-y", "@agentclientprotocol/codex-acp"] },
+    { "name": "gemini", "command": "gemini", "args": ["--acp"] },
+    { "name": "opencode", "command": "opencode", "args": ["acp"],
+      "permissions": { "allow": ["read", "search", "think", "edit", "delete", "move", "execute"] } }
+  ]
+}
+```
+
+[`examples/acp-core/agents.example.json`](../../examples/acp-core/agents.example.json)
+has more (launch commands change between agent releases: check each agent's
+ACP documentation). Fields: `name` (target id and harness name), `command` /
+`args` / `env` (how to start the agent in ACP mode), `authMethod` (an ACP
+auth method passed to `authenticate` first, for agents that require it),
+`mode` (an ACP session mode applied to every session), `mcpServers` (passed
+to every session), `models` + `modelArgs` (a catalog and the spawn args
+applying it, only for an agent that reports no model selector),
+`permissions.allow` (below), and the top-level `idleTimeout`.
+
+**Availability.** The adapter probes every agent (start, `initialize`,
+`session/new` in a scratch directory, stop; no prompt) at start, every
+minute while it is unavailable and every ten minutes while it is available.
+An agent whose command is missing, that needs a sign-in, or that fails to
+start is listed as unavailable with the reason (`GET /acp/v1/agents`,
+`bnbloc-acp check`) and contributes no target, like an unreachable core.
+
+**Models.** From the agent: its session config options with category `model`
+and `thought_level` are the target's models and reasoning levels (current
+values are the defaults); the sender's choice is applied with
+`session/set_config_option`.
+
+**Sessions.** A workspace is a directory under `<home>/workspaces`; each
+session runs one agent process in it. Turns run one at a time (input sent
+during a turn is queued). Streaming `agent_message_chunk` updates aggregate
+into completed assistant messages; a message completes when the agent starts
+another message, moves on to a tool call or plan, or ends the turn. An idle
+session's process stops after `idleTimeout` when the agent can resume
+(`session/resume` or `session/load`), and the next input continues it.
+
+**Permission policy.** The adapter answers the agent's client requests:
+`session/request_permission` is approved when the tool kind is in
+`permissions.allow` (default `read`, `search`, `think`, `edit`, `delete`,
+`move`; `"*"` = all) and every path it names is inside the workspace;
+`fs/read_text_file` / `fs/write_text_file` are confined to the workspace
+(`.room/` is read-only); `terminal/*` needs `execute`. A turn that ends
+without a reply after a refusal fails with the reason, so the room sees why.
+The policy covers what the agent asks; an agent acting through its own tools
+follows its own approval settings (set them through `env`, `args` or
+`mode`). The ACP core does not advertise `sandboxExec`.
+
+**Packaging.** `bnbloc-acp` is published as a desktop sidecar core:
+
+```sh
+GOOS=darwin GOARCH=arm64 go build -o dist/bnbloc-acp-darwin-arm64 ./cmd/bnbloc-acp
+bnbloc cores publish-sidecar --name acp --version 0.1.0 --publisher <you> \
+  --local-url http://127.0.0.1:7341 --listen-env BNBLOC_ACP_LISTEN --supervised-env BNBLOC_ACP_SUPERVISED \
+  --binary darwin-arm64=dist/bnbloc-acp-darwin-arm64
+```
+
+Each member then lists their agents in their own `agents.json`.
+
 ## Configuration and discovery
 
 Both the gateway and bridge build their core list from the same code,
@@ -451,7 +531,10 @@ Follow the existing patterns rather than inventing new harnesses:
   load-time validation); `TestDiscoverListener` covers listener-descriptor
   discovery and the host rewrite.
 - **Core Protocol adapters** — the `core/conformance` suite plus the real
-  `core/protocol` client against your adapter over a mock upstream.
+  `core/protocol` client against your adapter over a mock upstream. The ACP
+  core's tests ([`cmd/bnbloc-acp`](../../cmd/bnbloc-acp)) run the test binary
+  itself as a fake ACP agent (`fakeagent_test.go`); `TestConformance` runs
+  the live suite over it.
 - **Config + discovery** —
   [`internal/coreset/coreset_test.go`](../../internal/coreset/coreset_test.go):
   `TestFromEnvExplicitCoreListed`, `TestFromEnvMultiCoreOrderAndOverride`,

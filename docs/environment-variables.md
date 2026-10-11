@@ -357,6 +357,22 @@ bridge's `execution` descriptor (`core/protocol.VMExecEnv`; parsed by
 | `BNBLOC_CONFINE_WORKSPACE` | The workspace `confine` grants read+write. |
 | `BNBLOC_CONFINE_ALLOW_READ` / `_ALLOW_WRITE` / `_DENY_WRITE` | JSON arrays of absolute host paths; deny-write wins over every allow. |
 
+## ACP core adapter (`cmd/bnbloc-acp`)
+
+Read by the ACP core sidecar on the member's machine (or wherever it runs);
+the desktop sets the listen and supervised variables from the package's
+`listenEnv` / `supervisedEnv`. Variables starting with `BNBLOC_ACP_` are
+never passed on to the agents it starts. See
+[core-providers.md](./architecture/core-providers.md#acp-agents-the-acp-core).
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `BNBLOC_ACP_LISTEN` | `127.0.0.1:7341` | Core Protocol v1 listen address (`--listen`). A non-loopback address requires `BNBLOC_ACP_TOKEN`. |
+| `BNBLOC_ACP_HOME` | `<user config dir>/bnbloc-acp` | State directory (`--home`): `agents.json`, `workspaces/`, probe scratch dirs. |
+| `BNBLOC_ACP_CONFIG` | `<home>/agents.json` | Agent config file (`--config`). Missing = no agents. |
+| `BNBLOC_ACP_TOKEN` | unset | Bearer every request must carry; unset = no auth (loopback only). |
+| `BNBLOC_ACP_SUPERVISED` | unset | `1`: exit when stdin closes (the parent supervisor died). |
+
 ## CLI (`cmd/bnbloc`)
 
 | Variable | Meaning |
