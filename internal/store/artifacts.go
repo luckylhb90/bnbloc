@@ -97,6 +97,16 @@ type Artifact struct {
 	UpdatedAtMs    int64  `json:"updatedAtMs"`
 }
 
+// ArtifactAnchor links a room message (Seq, a version's sourceSeq) to an
+// artifact one of whose versions that message's turn produced.
+type ArtifactAnchor struct {
+	Seq        int64  `json:"seq"`
+	ArtifactID string `json:"artifactId"`
+}
+
+// MaxArtifactAnchors bounds one anchors answer.
+const MaxArtifactAnchors = 2000
+
 // ArtifactThumbnail describes a stored version thumbnail (the bytes are served
 // by the thumbnail route).
 type ArtifactThumbnail struct {
@@ -182,6 +192,11 @@ type ArtifactStore interface {
 	PutArtifact(ctx context.Context, a Artifact) (Artifact, error)
 	GetArtifact(ctx context.Context, artifactID string) (Artifact, error)
 	ListArtifacts(ctx context.Context, q ArtifactQuery) ([]Artifact, error)
+	// ArtifactAnchors returns the (sourceSeq, artifact) links of a room's
+	// artifact versions whose sourceSeq lies in [fromSeq, toSeq], ordered by
+	// seq: the deliverable cards a feed shows under those messages. At most
+	// MaxArtifactAnchors rows.
+	ArtifactAnchors(ctx context.Context, roomID string, fromSeq, toSeq int64) ([]ArtifactAnchor, error)
 	// PublishArtifactVersion appends revision baseVersion+1 (compare-and-swap
 	// on the current version). An inline version's hash and size are computed
 	// from Content; a blob version carries its blob's ContentHash, BlobKey and
@@ -343,6 +358,41 @@ func (s *MemoryArtifacts) ListArtifacts(ctx context.Context, q ArtifactQuery) ([
 	})
 	if len(out) > limit {
 		out = out[:limit]
+	}
+	return out, nil
+}
+
+// ArtifactAnchors returns the room's version links in a seq range (memory
+// impl; see ArtifactStore).
+func (s *MemoryArtifacts) ArtifactAnchors(ctx context.Context, roomID string, fromSeq, toSeq int64) ([]ArtifactAnchor, error) {
+	tid, err := tenant.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	seen := map[ArtifactAnchor]bool{}
+	out := []ArtifactAnchor{}
+	for id, a := range s.artifacts {
+		if a.TenantID != tid || a.RoomID != roomID {
+			continue
+		}
+		for _, v := range s.versions[id] {
+			k := ArtifactAnchor{Seq: v.SourceSeq, ArtifactID: id}
+			if v.SourceSeq > 0 && v.SourceSeq >= fromSeq && v.SourceSeq <= toSeq && !seen[k] {
+				seen[k] = true
+				out = append(out, k)
+			}
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Seq != out[j].Seq {
+			return out[i].Seq < out[j].Seq
+		}
+		return out[i].ArtifactID < out[j].ArtifactID
+	})
+	if len(out) > MaxArtifactAnchors {
+		out = out[:MaxArtifactAnchors]
 	}
 	return out, nil
 }

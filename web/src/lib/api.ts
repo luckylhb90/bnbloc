@@ -527,6 +527,12 @@ export const api = {
     req<{ artifacts: Artifact[]; nextCursor?: string }>(
       `/v1/rooms/${encodeURIComponent(roomId)}/artifacts${artifactListQuery(filter)}`,
     ),
+  // The deliverables produced by the room messages with seq in [from, to]:
+  // the feed anchors its cards under the messages it has loaded, however old.
+  artifactAnchors: (roomId: string, from: number, to: number) =>
+    req<{ anchors: { seq: number; artifactId: string }[] }>(
+      `/v1/rooms/${encodeURIComponent(roomId)}/artifact-anchors?from=${from}&to=${to}`,
+    ),
   artifactDetail: (roomId: string, artifactId: string) =>
     req<{ artifact: Artifact; versions: ArtifactVersion[] }>(
       `/v1/rooms/${encodeURIComponent(roomId)}/artifacts/${encodeURIComponent(artifactId)}`,

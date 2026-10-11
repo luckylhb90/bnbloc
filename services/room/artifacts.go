@@ -200,6 +200,31 @@ func (s *Service) handleListArtifacts(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
+// handleArtifactAnchors answers which artifacts were produced by the room
+// messages with seq in [from, to]: GET .../artifact-anchors?from=&to= →
+// {anchors: [{seq, artifactId}]}. The feed anchors its deliverable cards
+// under exactly the messages it has loaded, however old.
+func (s *Service) handleArtifactAnchors(w http.ResponseWriter, r *http.Request) {
+	roomID := r.PathValue("roomId")
+	if !s.Store.IsMember(r.Context(), roomID, caller(r)) {
+		writeErr(w, http.StatusForbidden, "caller is not a member of room")
+		return
+	}
+	from, errFrom := strconv.ParseInt(r.URL.Query().Get("from"), 10, 64)
+	to, errTo := strconv.ParseInt(r.URL.Query().Get("to"), 10, 64)
+	if errFrom != nil || errTo != nil || from < 1 || to < from {
+		writeErr(w, http.StatusBadRequest, "from and to must be sequences with 1 <= from <= to")
+		return
+	}
+	anchors, err := s.Artifacts.ArtifactAnchors(r.Context(), roomID, from, to)
+	if err != nil {
+		obs.ServerError(w, "list artifact anchors failed", err)
+		writeErr(w, http.StatusInternalServerError, "list artifact anchors failed")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"anchors": anchors})
+}
+
 // parseArtifactQuery reads the list filters and paging cursor.
 func parseArtifactQuery(w http.ResponseWriter, r *http.Request, roomID string) (store.ArtifactQuery, bool) {
 	v := r.URL.Query()

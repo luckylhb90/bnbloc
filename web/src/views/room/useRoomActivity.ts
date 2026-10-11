@@ -14,8 +14,6 @@ let liveStateNonce = 0;
 
 const WORKING_SAFETY_MS = 120_000;
 const ANCHOR_WINDOW_MS = 30 * 60 * 1000;
-const RECENT_ARTIFACT_MS = 24 * 3600 * 1000;
-const RECENT_ARTIFACT_MAX = 24;
 
 type AnchorMap = Record<number, string[]>;
 
@@ -30,10 +28,10 @@ function sourceSeqs(detail: ArtifactDetail): number[] {
   return [...new Set(seqs)];
 }
 
-// FALLBACK ONLY — the time heuristic for versions published without an
-// explicit sourceSeq (artifacts that predate explicit message links, or a
-// publisher that does not send one): anchor under the newest agent job's
-// message when the artifact changed within ANCHOR_WINDOW_MS of that job.
+// FALLBACK ONLY — the time heuristic for a live version published without an
+// explicit sourceSeq (a publisher that does not send one): anchor under the
+// newest agent job's message when the artifact changed within
+// ANCHOR_WINDOW_MS of that job. Reloads anchor by sourceSeq only.
 // Explicit links always win; remove this once no such versions remain.
 function heuristicAnchor(cur: AnchorMap, artifactId: string, jobs: Record<number, AgentJob[]>, changedAtMs: number): AnchorMap {
   for (const ids of Object.values(cur)) if (ids.includes(artifactId)) return cur;
@@ -54,11 +52,15 @@ export function useRoomActivity({
   subject,
   liveReload,
   artifactsOpen,
+  feedSeqs,
 }: {
   readonly roomId: string;
   readonly channelId: string | null;
   readonly subject: string | null;
   readonly liveReload: number;
+  // The sequence range of the messages the feed has loaded (null while
+  // empty): their deliverable cards are anchored from the server.
+  readonly feedSeqs: { readonly min: number; readonly max: number } | null;
   // Whether the Files surface is the one open (no badge while it is).
   readonly artifactsOpen: boolean;
 }) {
@@ -107,9 +109,7 @@ export function useRoomActivity({
   }, []);
 
   // Durable agent-job status for the channel, loaded on entry and on
-  // reconnect catch-up; live transitions arrive as job events. Recent
-  // artifacts are then anchored under the messages that produced them (after
-  // a reload the events that would have anchored them never arrive).
+  // reconnect catch-up; live transitions arrive as job events.
   useEffect(() => {
     if (!channelId) return;
     let cancelled = false;
@@ -124,31 +124,46 @@ export function useRoomActivity({
       if (cancelled) return;
       setAgentJobs(bySeq);
       try {
-        const res = await api.artifacts(roomId, { limit: 50 });
         // The room already holds deliverables: the checklist can tell.
-        if ((res.artifacts ?? []).length > 0) onboardingEvents.emit({ kind: "deliverable", roomId, source: "history" });
-        const recent = (res.artifacts ?? [])
-          .filter((a) => Date.now() - a.updatedAtMs < RECENT_ARTIFACT_MS)
-          .slice(0, RECENT_ARTIFACT_MAX);
-        const details = await Promise.all(recent.map((a) => loadArtifactDetail(roomId, a.artifactId).catch(() => null)));
-        if (cancelled) return;
-        setArtifactsBySeq((cur) => {
-          let next = cur;
-          details.forEach((detail, i) => {
-            const seqs = detail ? sourceSeqs(detail) : [];
-            if (seqs.length > 0) for (const seq of seqs) next = anchor(next, seq, recent[i].artifactId);
-            else next = heuristicAnchor(next, recent[i].artifactId, bySeq, recent[i].updatedAtMs);
-          });
-          return next;
-        });
+        const res = await api.artifacts(roomId, { limit: 1 });
+        if (!cancelled && (res.artifacts ?? []).length > 0) onboardingEvents.emit({ kind: "deliverable", roomId, source: "history" });
       } catch {
-        /* seeding is best-effort; live events still anchor */
+        /* best-effort */
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [roomId, channelId, liveReload, setAgentJobs, setArtifactsBySeq]);
+  }, [roomId, channelId, liveReload, setAgentJobs]);
+
+  // Deliverable cards of the loaded messages, by their explicit sourceSeq
+  // (after a reload the live events that anchored them never arrive). Re-read
+  // when older history pages in (min drops) and after a reconnect; new
+  // messages are anchored by their live artifact events.
+  const minSeq = feedSeqs?.min ?? 0;
+  const maxSeqRef = useRef(0);
+  maxSeqRef.current = feedSeqs?.max ?? 0;
+  useEffect(() => {
+    const max = maxSeqRef.current;
+    if (minSeq <= 0 || max < minSeq) return;
+    let cancelled = false;
+    api
+      .artifactAnchors(roomId, minSeq, max)
+      .then((res) => {
+        if (cancelled) return;
+        setArtifactsBySeq((cur) => {
+          let next = cur;
+          for (const a of res.anchors ?? []) next = anchor(next, a.seq, a.artifactId);
+          return next;
+        });
+      })
+      .catch(() => {
+        /* best-effort: live events still anchor */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [roomId, channelId, minSeq, liveReload, setArtifactsBySeq]);
 
   // applyEvent handles the activity kinds of the room stream. Returns false
   // for kinds it does not own (the feed handles those).

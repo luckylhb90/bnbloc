@@ -122,6 +122,34 @@ func (m *MySQLArtifacts) ListArtifacts(ctx context.Context, q ArtifactQuery) ([]
 	return out, rows.Err()
 }
 
+// ArtifactAnchors returns the room's version links in a seq range (see
+// ArtifactStore). It starts from the room's artifacts (idx_artifacts_room)
+// and reads their versions by primary key, so other rooms' versions in the
+// same seq range are never scanned.
+func (m *MySQLArtifacts) ArtifactAnchors(ctx context.Context, roomID string, fromSeq, toSeq int64) ([]ArtifactAnchor, error) {
+	tid, err := tenant.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := m.DB.QueryContext(ctx, `SELECT DISTINCT v.source_seq, v.artifact_id
+FROM artifacts a JOIN artifact_versions v ON v.tenant_id=a.tenant_id AND v.artifact_id=a.artifact_id
+WHERE a.tenant_id=? AND a.room_id=? AND v.source_seq BETWEEN ? AND ? AND v.source_seq > 0
+ORDER BY v.source_seq, v.artifact_id LIMIT ?`, tid, roomID, fromSeq, toSeq, MaxArtifactAnchors)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []ArtifactAnchor{}
+	for rows.Next() {
+		var a ArtifactAnchor
+		if err := rows.Scan(&a.Seq, &a.ArtifactID); err != nil {
+			return nil, err
+		}
+		out = append(out, a)
+	}
+	return out, rows.Err()
+}
+
 // PublishArtifactVersion appends one revision under compare-and-swap on the
 // artifact's current version. The UPDATE's WHERE enforces the CAS: a racing
 // publisher that already advanced the version makes this a no-row change and

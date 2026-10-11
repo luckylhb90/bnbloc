@@ -146,6 +146,7 @@ func (s *Service) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/rooms/import", s.handleImportRoom)
 	mux.HandleFunc("GET /v1/rooms/{roomId}/handoff", s.handleGetHandoff)
 	mux.HandleFunc("GET /v1/rooms/{roomId}/artifacts", s.handleListArtifacts)
+	mux.HandleFunc("GET /v1/rooms/{roomId}/artifact-anchors", s.handleArtifactAnchors)
 	mux.HandleFunc("POST /v1/rooms/{roomId}/artifacts", s.handleCreateArtifact)
 	mux.HandleFunc("GET /v1/rooms/{roomId}/artifacts/{artifactId}", s.handleGetArtifact)
 	mux.HandleFunc("POST /v1/rooms/{roomId}/artifacts/{artifactId}/versions", s.handlePublishVersion)

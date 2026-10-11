@@ -274,3 +274,39 @@ func TestArtifactStateSnapshot(t *testing.T) {
 		t.Fatalf("non-member snapshot = %d, want 403", code)
 	}
 }
+
+// GET .../artifact-anchors answers the cards of a message range, members only.
+func TestArtifactAnchorsRoute(t *testing.T) {
+	srv, _ := newArtifactServer(t)
+	body := decodeJSON(t, artifactRequest(t, srv, "POST", "/v1/rooms/room-1/artifacts", "alice", map[string]any{
+		"kind": "markdown", "title": "avatar",
+	}))
+	id := body["artifact"].(map[string]any)["artifactId"].(string)
+	if resp := artifactRequest(t, srv, "POST", "/v1/rooms/room-1/artifacts/"+id+"/versions", "alice", map[string]any{
+		"baseVersion": 0, "content": "x", "sourceSeq": 7,
+	}); resp.StatusCode != http.StatusOK {
+		t.Fatalf("publish = %d", resp.StatusCode)
+	} else {
+		resp.Body.Close()
+	}
+	got := decodeJSON(t, artifactRequest(t, srv, "GET", "/v1/rooms/room-1/artifact-anchors?from=1&to=10", "alice", nil))
+	anchors, _ := got["anchors"].([]any)
+	if len(anchors) != 1 || anchors[0].(map[string]any)["artifactId"] != id || anchors[0].(map[string]any)["seq"].(float64) != 7 {
+		t.Fatalf("anchors = %+v", got)
+	}
+	for _, tc := range []struct {
+		user, query string
+		want        int
+	}{
+		{"mallory", "from=1&to=10", http.StatusForbidden},
+		{"alice", "from=0&to=10", http.StatusBadRequest},
+		{"alice", "from=5&to=4", http.StatusBadRequest},
+		{"alice", "to=4", http.StatusBadRequest},
+	} {
+		resp := artifactRequest(t, srv, "GET", "/v1/rooms/room-1/artifact-anchors?"+tc.query, tc.user, nil)
+		resp.Body.Close()
+		if resp.StatusCode != tc.want {
+			t.Fatalf("%s %s = %d, want %d", tc.user, tc.query, resp.StatusCode, tc.want)
+		}
+	}
+}

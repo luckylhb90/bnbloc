@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { onboardingEvents } from "@/lib/onboardingEvents";
+import { feedSeqRange } from "@/lib/feedSeqRange";
 import { XIcon } from "@phosphor-icons/react";
 import { api, ApiError, type AgentJob } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
@@ -185,7 +186,8 @@ export function RoomView({
     scope: { includePeople: true },
   });
   const { connected, showReconnecting, online, typingUsers, unreadByChannel, unreadFromSeq, liveReload } = stream;
-  const activity = useRoomActivity({ roomId, channelId, subject, liveReload, artifactsOpen: panel === "artifacts" });
+  const feedSeqs = useMemo(() => feedSeqRange(feed), [feed]);
+  const activity = useRoomActivity({ roomId, channelId, subject, liveReload, artifactsOpen: panel === "artifacts", feedSeqs });
   activityRef.current = activity;
   const { clearFilesBadge } = activity;
   dispatch.current = (e) => {

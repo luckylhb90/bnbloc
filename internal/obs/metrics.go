@@ -158,7 +158,7 @@ var routeWords = map[string]bool{
 	"v1": true, "internal": true, "relay": true, "api": true, "auth": true,
 	"rooms": true, "rooms-unread": true, "users": true, "invites": true, "redeem": true,
 	"join": true, "leave": true, "transfer": true, "members": true, "membership": true, "tenant": true,
-	"artifacts": true, "versions": true, "state": true, "content": true, "thumbnail": true,
+	"artifacts": true, "artifact-anchors": true, "versions": true, "state": true, "content": true, "thumbnail": true,
 	"channels": true, "agent-prefs": true,
 	"events": true, "agents": true, "chat": true, "attachments": true, "history": true,
 	"typing": true, "read": true, "messages": true, "publish": true, "blobs": true,
