@@ -716,6 +716,16 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   (delete-by-query by tenant and cutoff). A mapping/analyzer change bumps the
   index version in its name and needs a reindex; the analyzer must keep the
   MySQL substring semantics (the parity test pins them).
+- **Entity ids come from `internal/ids.New(prefix)`** (prefix + Unix ms +
+  80 random bits): InnoDB clusters rows by primary key, so creation-ordered
+  ids insert in order while staying unguessable and replica-safe. Never add an
+  auto-increment key or a hand-rolled random-hex id helper for an entity;
+  secrets, codes and tokens stay fully random. Hot tables key on their access
+  path instead (`room_messages (room_id, seq)`: a room's history is one
+  contiguous range read).
+- **Counts shown as badges are bounded** (`store.MaxUnreadCount`: an inner
+  `LIMIT` stops the scan). A new count over an unbounded range must be capped
+  the same way.
 - **Live schema needs ALTER, not just the schema file.**
   `CREATE TABLE IF NOT EXISTS` does not alter an existing table, so a new
   column (e.g. `client_msg_id`, `deleted_at_ms`) must be `ALTER TABLE`'d
