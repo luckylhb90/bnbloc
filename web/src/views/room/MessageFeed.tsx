@@ -1,3 +1,4 @@
+import { useMemo } from "react";
 import { DesktopConnectBody } from "@/views/DesktopConnect";
 import { RocketLaunchIcon } from "@phosphor-icons/react";
 import type { AgentJob } from "@/lib/api";
@@ -7,6 +8,7 @@ import { Button } from "@/ui/Button";
 import { Skeleton } from "@/ui/Card";
 import { AgentJobStatus } from "@/views/AgentJobStatus";
 import { MessageDeliverables } from "@/views/workbench/MessageDeliverables";
+import { placeDeliverables } from "@/lib/deliverablePlacement";
 import { AgentWorking } from "@/views/room/AgentWorking";
 import { Message, sameSender } from "@/views/room/Message";
 import type { FeedItem } from "@/views/room/types";
@@ -80,6 +82,11 @@ export function MessageFeed({
   // agent setup.
   readonly agentReady?: boolean;
 }) {
+  // A turn's cards sit under its last reply (their sourceSeq is the request).
+  const deliverablesAfter = useMemo(
+    () => placeDeliverables(visibleFeed, artifactsBySeq, agentJobs),
+    [visibleFeed, artifactsBySeq, agentJobs],
+  );
   if (!loaded) {
     return (
       <div className={cn("flex flex-col gap-3", READING_MEASURE)}>
@@ -152,6 +159,7 @@ export function MessageFeed({
         </p>
       ) : (
         visibleFeed.map((m, i) => {
+          const placed = deliverablesAfter.get(i) ?? [];
           const seq = typeof m.seq === "number" ? Math.floor(m.seq) : 0;
           const prev = i > 0 ? visibleFeed[i - 1] : null;
           const prevSeq = prev && typeof prev.seq === "number" ? Math.floor(prev.seq) : 0;
@@ -189,15 +197,16 @@ export function MessageFeed({
                   queueAhead={queueAhead}
                 />
               )}
-              {typeof m.seq === "number" && (
+              {placed.map((d) => (
                 <MessageDeliverables
+                  key={d.seq}
                   roomId={roomId}
-                  seq={Math.floor(m.seq)}
-                  artifactIds={artifactsBySeq[Math.floor(m.seq)] ?? []}
+                  seq={d.seq}
+                  artifactIds={d.artifactIds}
                   onOpen={onOpenArtifactInFiles}
                   onViewAll={onViewAllDeliverables ?? (() => {})}
                 />
-              )}
+              ))}
             </div>
           );
         })
