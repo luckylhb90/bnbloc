@@ -518,6 +518,19 @@ its log.
   realtime and relay → relay traffic on their ports in any network policy.
   Size the replica count with the load test (`docs/load-testing.md`); an HPA
   works but every scale event moves a share of rooms.
+- **Without the chart.** With your own manifests, scaling realtime takes
+  three things: (1) the S3 blob store (move existing disk blobs first: disk
+  `<dir>/<hex[:2]>/<hex>` becomes the object `<prefix>/sha256/<hex>`); (2) a
+  headless Service (`clusterIP: None`, `publishNotReadyAddresses: false`)
+  selecting only realtime pods on 8082, alongside the normal Service callers
+  keep using; (3) on the realtime container, `POD_IP` from
+  `fieldRef: status.podIP` declared **before**
+  `BNBLOC_REALTIME_SELF: $(POD_IP)`, plus
+  `BNBLOC_REALTIME_PEERS: <headless-name>:8082` and a `/readyz` readiness
+  probe. A Deployment works; no StatefulSet is required. Allow
+  realtime → realtime on 8082. relay is the same with 8085 and no S3; a
+  multi-replica gateway takes only `BNBLOC_GATEWAY_PEERS`. Check the
+  `bnbloc.shard.peers_changed` log line and the `bnbloc_shard_peers` gauge.
 - **Blob storage.** With no `realtime.attachments.s3.bucket`, realtime mounts
   the `bnbloc-realtime-attachments` PVC (ReadWriteOnce: one realtime pod,
   replaced in place). More than one realtime replica requires the bucket —
