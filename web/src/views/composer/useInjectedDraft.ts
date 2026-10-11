@@ -64,8 +64,9 @@ export function useInjectedReferences(
   }, [roomId, channelId, enabled, setRefs, textareaRef]);
 }
 
-// useInjectedAgent selects a platform agent another view asked for (the
-// welcome card opens its new room with the agent picked). The pick waits
+// useInjectedAgent selects the agent another view asked for (the welcome
+// card opens its new room with a platform agent, or the member's own agent,
+// picked). The pick waits
 // until the room's agents list it, then is taken exactly once.
 export function useInjectedAgent(
   roomId: string,
@@ -78,7 +79,11 @@ export function useInjectedAgent(
     const apply = () => {
       const want = composerAgentPicks.peek(roomId);
       if (!want) return;
-      const match = roomAgents.find((a) => a.platform && samePlatformAgent({ core: a.core ?? "", provider: a.provider }, want));
+      const match = roomAgents.find(
+        (a) =>
+          (want.own ? a.self && !a.platform : !!a.platform) &&
+          samePlatformAgent({ core: a.core ?? "", provider: a.provider }, want),
+      );
       if (!match) return;
       composerAgentPicks.take(roomId);
       pick(match);

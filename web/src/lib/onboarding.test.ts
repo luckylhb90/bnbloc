@@ -9,6 +9,7 @@ import {
   STARTER_PROMPTS,
   WELCOME_DESKTOP_HINT,
   welcomeDesktopAction,
+  welcomeStart,
   welcomeDismissed,
 } from "./onboarding.ts";
 import type { PlatformAgent } from "./platformAgents.ts";
@@ -84,9 +85,34 @@ function testWelcomeDesktopAction(): void {
   assert(WELCOME_DESKTOP_HINT.none === "" && !WELCOME_DESKTOP_HINT.connected.includes("install"), "hints");
 }
 
+// Regression (docs/bugs/2026-10-11-welcome-card-hides-self-hosted-agents.md):
+// a member hosting every platform agent was told none is available.
+function testWelcomeStart(): void {
+  const host = (id: string, online: boolean) => ({ hostUserId: id, online, queued: 0 });
+  const mine = [
+    { core: "acme", provider: "codex", online: true, hosts: [host("maya", true)] },
+    { core: "acme", provider: "claude-code", online: true, hosts: [host("maya", true)] },
+  ] as unknown as PlatformAgent[];
+  const own = [
+    { core: "acme", provider: "opencode", online: true },
+    { core: "acme", provider: "claude-code", online: true },
+  ];
+  const start = welcomeStart(mine, own, "maya");
+  assert(start.kind === "own" && start.agent.provider === "claude-code", "the host starts with their own published agent");
+  const other = [{ core: "acme", provider: "codex", online: true, hosts: [host("jack", true)] }] as unknown as PlatformAgent[];
+  assert(welcomeStart(other, own, "maya").kind === "platform", "another member's online host is offered first");
+  const unpublishedOwn = welcomeStart([], own, "maya");
+  assert(unpublishedOwn.kind === "own" && unpublishedOwn.agent.provider === "opencode", "any own online agent when nothing is published");
+  const offline = welcomeStart([{ core: "acme", provider: "codex", online: false, hosts: [host("jack", false)] }] as unknown as PlatformAgent[], [], "maya");
+  assert(offline.kind === "none" && offline.reason === "offline", "published but no host online");
+  const none = welcomeStart([], [{ core: "acme", provider: "codex", online: false }], "maya");
+  assert(none.kind === "none" && none.reason === "unpublished", "nothing published, own agent offline");
+}
+
 testWelcomeVisibility();
 testDismissalIsPerUser();
 testFirstRoomNaming();
 testDefaultPlatformAgent();
 testStarterPrompts();
 testWelcomeDesktopAction();
+testWelcomeStart();

@@ -58,6 +58,12 @@ export function welcomeDesktopAction(p: {
   return "install";
 }
 
+// Why the card has no agent to start with (WelcomeStart "none").
+export const WELCOME_NO_AGENT: Readonly<Record<"unpublished" | "offline", string>> = {
+  unpublished: "No platform agent is available right now — an admin can enable platform agents for your organization.",
+  offline: "The platform agents are offline right now — try again in a few minutes.",
+};
+
 // The sentence the card adds, after "no platform agent", for each action.
 export const WELCOME_DESKTOP_HINT: Readonly<Record<WelcomeDesktop, string>> = {
   shell: "You can also connect your own agent core from the Agents page.",
@@ -94,11 +100,44 @@ export function firstRoomId(random: () => number = Math.random): string {
   return `my-first-room-${suffix}`;
 }
 
-// defaultPlatformChoice is the welcome card's agent: the first published
-// agent with an online host that is not the member themselves (null: none
-// available, the card offers the desktop path only).
+// defaultPlatformChoice is the first published agent with an online host
+// that is not the member themselves (a member never borrows from themselves).
 export function defaultPlatformChoice(offered: readonly PlatformAgent[], subject: string | null): PlatformChoice | null {
   return platformChoices(offered, [], subject).find((c) => c.online) ?? null;
+}
+
+// An agent of the member's own, as GET /v1/my/agents lists it.
+export interface OwnAgent {
+  readonly core: string;
+  readonly provider: string;
+  readonly online: boolean;
+}
+
+// What the welcome card starts a first room with:
+// - "platform": a platform agent served by another member's online host;
+// - "own": otherwise the member's own online agent, preferring one they
+//   publish as a platform agent (a host is told to start with their agent,
+//   never "no agent available");
+// - "none": nothing to start with, and why: "unpublished" (no platform agent
+//   at all: an admin enables them) or "offline" (published, but no other
+//   host is online right now).
+export type WelcomeStart =
+  | { readonly kind: "platform"; readonly choice: PlatformChoice }
+  | { readonly kind: "own"; readonly agent: OwnAgent }
+  | { readonly kind: "none"; readonly reason: "unpublished" | "offline" };
+
+export function welcomeStart(
+  offered: readonly PlatformAgent[],
+  own: readonly OwnAgent[],
+  subject: string | null,
+): WelcomeStart {
+  const choice = defaultPlatformChoice(offered, subject);
+  if (choice) return { kind: "platform", choice };
+  const online = own.filter((a) => a.online);
+  const published = online.find((a) => offered.some((o) => o.core === a.core && o.provider === a.provider));
+  const agent = published ?? online[0];
+  if (agent) return { kind: "own", agent };
+  return { kind: "none", reason: offered.length > 0 ? "offline" : "unpublished" };
 }
 
 export interface StarterPrompt {

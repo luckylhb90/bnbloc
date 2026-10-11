@@ -114,9 +114,10 @@ function handoff<T>() {
 
 // composerDrafts carries a prompt body to a room's composer.
 export const composerDrafts = handoff<string>();
-// composerAgentPicks carries "select this platform agent" to a room's
-// composer (the welcome card's "Start a room with <agent>").
-export const composerAgentPicks = handoff<{ readonly core: string; readonly provider: string }>();
+// composerAgentPicks carries "select this agent" to a room's composer (the
+// welcome card's "Start a room with <agent>"): a platform agent, or the
+// member's own agent when `own` is set.
+export const composerAgentPicks = handoff<{ readonly core: string; readonly provider: string; readonly own: boolean }>();
 // messageJumps carries a "scroll to this message" request to a room's feed.
 export const messageJumps = handoff<MessageJump>();
 // artifactLinks carries an "open this deliverable" request (a copied

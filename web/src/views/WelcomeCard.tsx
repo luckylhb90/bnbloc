@@ -7,21 +7,22 @@ import { useDesktopPresence } from "@/lib/desktopPresence";
 import { openMacInstallGuide } from "@/lib/macInstall";
 import {
   WELCOME_DESKTOP_HINT,
+  WELCOME_NO_AGENT,
   canDismissWelcome,
-  defaultPlatformChoice,
   dismissWelcome,
   firstRoomId,
   firstRoomName,
   showWelcome,
   welcomeDesktopAction,
   welcomeDismissed,
+  welcomeStart,
 } from "@/lib/onboarding";
-import type { PlatformChoice } from "@/lib/platformAgents";
 import { platformAgentsApi } from "@/lib/platformAgentsApi";
 import { browserStorage } from "@/lib/platformRouting";
 import { composerAgentPicks } from "@/lib/team";
 import { routeHash } from "@/lib/useHashRoute";
 import { usePlatformAgents } from "@/lib/usePlatformAgents";
+import { useQuery } from "@/lib/useQuery";
 import { autoStartTour } from "@/lib/useOnboarding";
 import { Button } from "@/ui/Button";
 import { useToast } from "@/ui/Toast";
@@ -60,11 +61,14 @@ export function WelcomeCard({ rooms, onOpen }: { readonly rooms?: readonly Room[
 
   const list = known ? rooms : ownRooms;
   const roomCount = list ? list.length : null;
-  const choice = defaultPlatformChoice(offered, subject);
+  // The member's own agents: a member who hosts every platform agent (or has
+  // agents of their own) starts with one of those (welcomeStart).
+  const own = useQuery(subject ? `my-agents:${subject.toLowerCase()}` : null, api.myAgents, { staleMs: 30_000 });
+  const startWith = welcomeStart(offered, own.data?.agents ?? [], subject);
   const visible = showWelcome({ roomCount, dismissed });
   // A brand-new member is guided from this first screen: the tour starts on
   // the start button (only when there is an agent to start a room with).
-  const canStart = visible && !!choice;
+  const canStart = visible && startWith.kind !== "none";
   useEffect(() => {
     if (canStart) autoStartTour(subject, roomCount);
   }, [canStart, subject, roomCount]);
@@ -77,15 +81,21 @@ export function WelcomeCard({ rooms, onOpen }: { readonly rooms?: readonly Room[
     openFailed: presence.openFailed,
   });
 
-  const start = async (c: PlatformChoice) => {
+  const start = async () => {
+    if (startWith.kind === "none") return;
     setStarting(true);
-    const ref = { core: c.agent.core ?? "", provider: c.agent.provider };
+    const ref =
+      startWith.kind === "platform"
+        ? { core: startWith.choice.agent.core ?? "", provider: startWith.choice.agent.provider, own: false }
+        : { core: startWith.agent.core, provider: startWith.agent.provider, own: true };
     try {
       const name = firstRoomName((list ?? []).map((r) => r.name || r.roomId));
       const roomId = await createFirstRoom(name);
       // Refresh the session's room scope so the new room is reachable.
       await reauth().catch(() => {});
-      await platformAgentsApi.add(roomId, ref);
+      // A platform agent joins the room through a grant; the member's own
+      // agent needs none (its bridge serves the owner's rooms).
+      if (!ref.own) await platformAgentsApi.add(roomId, { core: ref.core, provider: ref.provider });
       composerAgentPicks.queue(roomId, ref);
       onOpen(roomId);
     } catch (e) {
@@ -128,35 +138,39 @@ export function WelcomeCard({ rooms, onOpen }: { readonly rooms?: readonly Room[
             Try bnbloc with an AI agent
           </h2>
           <p className="mt-1 text-sm text-[var(--color-fg-muted)]">
-            {choice
-              ? `Start a private room with ${choice.agent.provider}, a platform agent — nothing to install. Ask it to build a page, write a plan or explain an idea.`
-              : ["No platform agent is available right now — an admin can enable platform agents for your organization.", WELCOME_DESKTOP_HINT[desktop]]
-                  .filter(Boolean)
-                  .join(" ")}
+            {startWith.kind === "platform"
+              ? `Start a private room with ${startWith.choice.agent.provider}, a platform agent — nothing to install. Ask it to build a page, write a plan or explain an idea.`
+              : startWith.kind === "own"
+                ? `Start a private room with your ${startWith.agent.provider} agent. Ask it to build a page, write a plan or explain an idea.`
+                : [WELCOME_NO_AGENT[startWith.reason], WELCOME_DESKTOP_HINT[desktop]].filter(Boolean).join(" ")}
           </p>
         </div>
       </div>
       <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
-        {choice && (
+        {startWith.kind !== "none" && (
           <Button
             variant="primary"
-            onClick={() => void start(choice)}
+            onClick={() => void start()}
             disabled={starting}
             className="w-full sm:w-auto"
             data-tour="welcome-start"
           >
             <CloudIcon size={16} weight="fill" />
-            {starting ? "Starting…" : `Start a room with ${choice.agent.provider}`}
+            {starting
+              ? "Starting…"
+              : startWith.kind === "platform"
+                ? `Start a room with ${startWith.choice.agent.provider}`
+                : `Start a room with your ${startWith.agent.provider}`}
           </Button>
         )}
         {desktop === "open" && (
-          <Button variant={choice ? "ghost" : "primary"} onClick={presence.open} disabled={presence.checking} className="w-full sm:w-auto">
+          <Button variant={startWith.kind !== "none" ? "ghost" : "primary"} onClick={presence.open} disabled={presence.checking} className="w-full sm:w-auto">
             <DesktopIcon size={16} />
             {presence.checking ? "Opening…" : "Open the desktop app"}
           </Button>
         )}
         {desktop === "install" && (
-          <Button variant={choice ? "ghost" : "primary"} onClick={openDesktop} className="w-full sm:w-auto">
+          <Button variant={startWith.kind !== "none" ? "ghost" : "primary"} onClick={openDesktop} className="w-full sm:w-auto">
             <DownloadSimpleIcon size={16} />
             Install the desktop app to use your own agents
           </Button>
