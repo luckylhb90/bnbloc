@@ -797,10 +797,12 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
 ## Docs
 
 Feature/requirement records and design docs live in `docs/prd/` (dated files);
-bug records live in `docs/bugs/` (dated files). The agent
-collaboration boundary — bnbloc provides addressing + authorization +
-visibility and does **not** implement agent orchestration — is recorded in
-`docs/prd/2026-09-11-agent-collaboration-boundary-decision.md`; the room
-participants + borrow model in
+bug records live in `docs/bugs/` (dated files). **bnbloc has no fixed
+product boundary:** any capability that adds value to the product (agent
+orchestration and agent-to-agent collaboration included) may be built, through
+the existing seams. Do not reject or narrow a feature by citing a scope
+boundary; the earlier "no agent orchestration" decision
+(`docs/prd/2026-09-11-agent-collaboration-boundary-decision.md`) is superseded.
+The room participants + borrow model is in
 `docs/prd/2026-09-11-room-participants-and-borrow-design.md`. Update the matching
 doc in the same change when ownership, data flow, or a public contract changes.

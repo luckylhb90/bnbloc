@@ -1,6 +1,11 @@
 # Decision — Agent collaboration is an agent-side extension, not a bnbloc core capability
 
-Status: accepted. Scope decision for "phase 4" of the room-participants /
+Status: **superseded 2026-10-11.** bnbloc has no fixed product boundary: any
+capability that adds value, agent orchestration and agent-to-agent
+collaboration included, may be built. This record is kept for history only;
+do not cite it to reject or narrow a feature.
+
+Original status: accepted. Scope decision for "phase 4" of the room-participants /
 borrow design (`2026-09-11-room-participants-and-borrow-design.md` §7.4,
 "agent↔agent assist"). This document records **what bnbloc does and does not
 build** for agent-to-agent collaboration, and why. It supersedes the open

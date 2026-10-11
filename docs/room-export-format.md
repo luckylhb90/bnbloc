@@ -73,9 +73,8 @@ are restricted to `[A-Za-z0-9._-]` (anything else becomes `_`).
   agent-addressed chat recorded it.
 - `agentSessions` is the platform's view of each agent session in the feed (id,
   attribution, channel, message count, first/last time). Core-internal state
-  (the agent runtime's own session/memory) is deliberately not included —
-  bnbloc does not own agent internals
-  (`docs/prd/2026-09-11-agent-collaboration-boundary-decision.md`).
+  (the agent runtime's own session/memory) is not included: it lives in the
+  agent runtime, not in bnbloc's store.
 
 ### `messages.jsonl`
 
