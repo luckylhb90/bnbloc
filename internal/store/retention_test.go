@@ -7,6 +7,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -39,7 +40,15 @@ func retentionRigs(t *testing.T) []retentionRig {
 	return rigs
 }
 
-func uniq(prefix string) string { return prefix + strconv.FormatInt(time.Now().UnixNano(), 36) }
+// uniqSeq makes uniq unique within a run: two calls in the same clock tick
+// returned the same id, so two messages shared a client message id.
+var uniqSeq atomic.Int64
+
+// uniq returns an id unique across runs (the clock) and within one (uniqSeq),
+// so tests sharing a MySQL database never collide.
+func uniq(prefix string) string {
+	return prefix + strconv.FormatInt(time.Now().UnixNano(), 36) + "-" + strconv.FormatInt(uniqSeq.Add(1), 36)
+}
 
 const day = int64(24 * time.Hour / time.Millisecond)
 
