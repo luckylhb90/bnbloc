@@ -786,6 +786,10 @@ export const api = {
           defaultReasoning?: string;
         };
       }[];
+      // The member's own desktop app, apart from its agents: online = its
+      // bridge is connected now (even with no agent core); lastSeenAtMs = the
+      // latest connection, 0 when the app never connected (not installed).
+      desktop: { online: boolean; lastSeenAtMs: number };
     }>("/v1/my/agents"),
   // Per-room+channel agent selection (restored by the composer on entry).
   getAgentPrefs: (roomId: string, channelId?: string) =>

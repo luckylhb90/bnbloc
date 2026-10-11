@@ -266,6 +266,32 @@ func TestMySQLBridgeJobsLookupBridge(t *testing.T) {
 	}
 }
 
+// The latest heartbeat of an owner across their bridges, and none for an
+// owner whose desktop never connected.
+func TestMySQLBridgeJobsLatestBridgeForOwner(t *testing.T) {
+	m, closeDB := mysqlJobs(t)
+	defer closeDB()
+	ctx := testCtx()
+	now := time.Now().UnixMilli()
+	owner := "latest-" + itoaBase(now)
+	for i, seen := range []int64{now - 60_000, now, now - 3_600_000} {
+		hb := BridgeHeartbeat{BridgeID: owner + "-" + itoaBase(int64(i)), OwnerUserID: owner, Status: BridgeOnline, LastSeenAtMs: seen}
+		if err := m.PutBridgeHeartbeat(ctx, hb); err != nil {
+			t.Fatalf("PutBridgeHeartbeat: %v", err)
+		}
+	}
+	hb, found, err := m.LatestBridgeForOwner(ctx, owner)
+	if err != nil || !found || hb.LastSeenAtMs != now || hb.BridgeID != owner+"-1" || !BridgeLive(hb, now) {
+		t.Fatalf("LatestBridgeForOwner = %+v found=%v err=%v, want the bridge seen now", hb, found, err)
+	}
+	if BridgeLive(hb, now+BridgeOfflineAfterMs+1) {
+		t.Fatal("a heartbeat older than BridgeOfflineAfterMs must not be live")
+	}
+	if _, found, err := m.LatestBridgeForOwner(ctx, "never-"+itoaBase(now)); err != nil || found {
+		t.Fatalf("an owner with no bridge: found=%v err=%v", found, err)
+	}
+}
+
 // One bridge advertises several targets under the same core/provider (codex,
 // claude-code and opencode all run on the nimbus core). Regression: the
 // bridge_agents primary key omitted target_id, so such a heartbeat failed with a

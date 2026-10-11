@@ -18,9 +18,14 @@ export interface DesktopPresence {
   readonly applicable: boolean;
   // Undefined until the first successful check.
   readonly ownAgents: readonly { online: boolean }[] | undefined;
+  // The member's desktop app is running and connected (its bridge is online,
+  // with or without an agent core).
   readonly connected: boolean;
-  // A successful check found no online agent of the member's own.
+  // A successful check found the desktop app not connected.
   readonly disconnected: boolean;
+  // The desktop app connected at least once (so it is installed); undefined
+  // until the first successful check.
+  readonly installed: boolean | undefined;
   readonly checking: boolean;
   readonly error: string | null;
   // The app was asked to open and the follow-up checks still found it
@@ -38,6 +43,7 @@ const inactive: DesktopPresence = {
   ownAgents: undefined,
   connected: false,
   disconnected: false,
+  installed: undefined,
   checking: false,
   error: null,
   openFailed: false,
@@ -62,6 +68,7 @@ export function DesktopPresenceProvider({ subject, children }: { readonly subjec
   const applicable =
     !!subject && !inDesktopShell() && !isPhoneBrowser(typeof navigator === "undefined" ? "" : navigator.userAgent);
   const [ownAgents, setOwnAgents] = useState<readonly { online: boolean }[] | undefined>();
+  const [desktop, setDesktop] = useState<{ online: boolean; lastSeenAtMs: number } | undefined>();
   const [checking, setChecking] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [openPending, setOpenPending] = useState(false);
@@ -75,11 +82,12 @@ export function DesktopPresenceProvider({ subject, children }: { readonly subjec
     const mine = ++generation.current;
     setChecking(true);
     try {
-      const { agents } = await api.myAgents();
+      const { agents, desktop: app } = await api.myAgents();
       if (mine !== generation.current) return undefined;
       setOwnAgents(agents ?? []);
+      setDesktop(app ?? { online: false, lastSeenAtMs: 0 });
       setError(null);
-      return (agents ?? []).some((a) => a.online);
+      return !!app?.online;
     } catch (failure) {
       if (mine !== generation.current) return undefined;
       setError(failure instanceof Error ? failure.message : "Could not check the desktop connection");
@@ -96,6 +104,7 @@ export function DesktopPresenceProvider({ subject, children }: { readonly subjec
 
   useEffect(() => {
     setOwnAgents(undefined);
+    setDesktop(undefined);
     setOpenFailed(false);
     if (!applicable) return;
     void check();
@@ -151,7 +160,8 @@ export function DesktopPresenceProvider({ subject, children }: { readonly subjec
     }
   }, [desktopDownload.file]);
 
-  const connected = !!ownAgents?.some((a) => a.online);
+  const connected = !!desktop?.online;
+  const installed = desktop === undefined ? undefined : desktop.lastSeenAtMs > 0;
   const value = useMemo<DesktopPresence>(
     () =>
       applicable
@@ -159,7 +169,8 @@ export function DesktopPresenceProvider({ subject, children }: { readonly subjec
             applicable,
             ownAgents,
             connected,
-            disconnected: ownAgents !== undefined && !connected,
+            disconnected: desktop !== undefined && !connected,
+            installed,
             checking: checking || openPending,
             error,
             openFailed: openFailed && !connected,
@@ -170,7 +181,7 @@ export function DesktopPresenceProvider({ subject, children }: { readonly subjec
             check: () => void check(),
           }
         : inactive,
-    [applicable, ownAgents, connected, checking, openPending, error, openFailed, desktopDownload.file, downloading, open, download, check],
+    [applicable, ownAgents, connected, installed, checking, openPending, error, openFailed, desktopDownload.file, downloading, open, download, check],
   );
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

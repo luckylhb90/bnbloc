@@ -34,6 +34,39 @@ export function showWelcome(s: { readonly roomCount: number | null; readonly dis
   return s.roomCount === 0 || !s.dismissed;
 }
 
+// The welcome card's desktop-app action, from the app-wide desktop presence:
+// inside the desktop app ("shell") there is nothing to install; a browser
+// member whose app is running ("connected") is told so; one whose app
+// connected before but is closed is offered to open it ("open"), and the
+// download only once opening it failed; one whose app never connected is
+// offered the install. Until the first presence check answers (installed
+// undefined), and where desktop guidance does not apply (a phone), nothing is
+// offered, so the wrong button never flashes.
+export type WelcomeDesktop = "shell" | "connected" | "open" | "install" | "none";
+
+export function welcomeDesktopAction(p: {
+  readonly inShell: boolean;
+  readonly applicable: boolean;
+  readonly connected: boolean;
+  readonly installed: boolean | undefined;
+  readonly openFailed: boolean;
+}): WelcomeDesktop {
+  if (p.inShell) return "shell";
+  if (!p.applicable || p.installed === undefined) return "none";
+  if (p.connected) return "connected";
+  if (p.installed && !p.openFailed) return "open";
+  return "install";
+}
+
+// The sentence the card adds, after "no platform agent", for each action.
+export const WELCOME_DESKTOP_HINT: Readonly<Record<WelcomeDesktop, string>> = {
+  shell: "You can also connect your own agent core from the Agents page.",
+  connected: "Your desktop app is connected: open a room and pick one of your own agents.",
+  open: "Your desktop app isn't running: open it to use your own agents.",
+  install: "Meanwhile, install the desktop app to use your own agents.",
+  none: "",
+};
+
 // The welcome card may be dismissed only once the member has a room.
 export function canDismissWelcome(roomCount: number | null): boolean {
   return (roomCount ?? 0) > 0;

@@ -1,16 +1,19 @@
 import { useEffect, useState } from "react";
-import { CloudIcon, DownloadSimpleIcon, SparkleIcon, XIcon } from "@phosphor-icons/react";
+import { CloudIcon, DesktopIcon, DownloadSimpleIcon, SparkleIcon, XIcon } from "@phosphor-icons/react";
 import { api, ApiError, type Room } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { inDesktopShell } from "@/lib/config";
+import { useDesktopPresence } from "@/lib/desktopPresence";
 import { openMacInstallGuide } from "@/lib/macInstall";
 import {
+  WELCOME_DESKTOP_HINT,
   canDismissWelcome,
   defaultPlatformChoice,
   dismissWelcome,
   firstRoomId,
   firstRoomName,
   showWelcome,
+  welcomeDesktopAction,
   welcomeDismissed,
 } from "@/lib/onboarding";
 import type { PlatformChoice } from "@/lib/platformAgents";
@@ -36,6 +39,7 @@ export function WelcomeCard({ rooms, onOpen }: { readonly rooms?: readonly Room[
   const { subject, reauth } = useAuth();
   const toast = useToast();
   const { agents: offered } = usePlatformAgents();
+  const presence = useDesktopPresence();
   const [ownRooms, setOwnRooms] = useState<readonly Room[] | null>(null);
   const [dismissed, setDismissed] = useState(() => welcomeDismissed(browserStorage(), subject));
   const [starting, setStarting] = useState(false);
@@ -65,7 +69,13 @@ export function WelcomeCard({ rooms, onOpen }: { readonly rooms?: readonly Room[
     if (canStart) autoStartTour(subject, roomCount);
   }, [canStart, subject, roomCount]);
   if (!visible) return null;
-  const desktop = inDesktopShell();
+  const desktop = welcomeDesktopAction({
+    inShell: inDesktopShell(),
+    applicable: presence.applicable,
+    connected: presence.connected,
+    installed: presence.installed,
+    openFailed: presence.openFailed,
+  });
 
   const start = async (c: PlatformChoice) => {
     setStarting(true);
@@ -120,9 +130,9 @@ export function WelcomeCard({ rooms, onOpen }: { readonly rooms?: readonly Room[
           <p className="mt-1 text-sm text-[var(--color-fg-muted)]">
             {choice
               ? `Start a private room with ${choice.agent.provider}, a platform agent — nothing to install. Ask it to build a page, write a plan or explain an idea.`
-              : desktop
-                ? "No platform agent is available right now — an admin can enable platform agents for your organization. You can also connect your own agent core from the Agents page."
-                : "No platform agent is available right now — an admin can enable platform agents for your organization. Meanwhile, install the desktop app to use your own agents."}
+              : ["No platform agent is available right now — an admin can enable platform agents for your organization.", WELCOME_DESKTOP_HINT[desktop]]
+                  .filter(Boolean)
+                  .join(" ")}
           </p>
         </div>
       </div>
@@ -139,7 +149,13 @@ export function WelcomeCard({ rooms, onOpen }: { readonly rooms?: readonly Room[
             {starting ? "Starting…" : `Start a room with ${choice.agent.provider}`}
           </Button>
         )}
-        {!desktop && (
+        {desktop === "open" && (
+          <Button variant={choice ? "ghost" : "primary"} onClick={presence.open} disabled={presence.checking} className="w-full sm:w-auto">
+            <DesktopIcon size={16} />
+            {presence.checking ? "Opening…" : "Open the desktop app"}
+          </Button>
+        )}
+        {desktop === "install" && (
           <Button variant={choice ? "ghost" : "primary"} onClick={openDesktop} className="w-full sm:w-auto">
             <DownloadSimpleIcon size={16} />
             Install the desktop app to use your own agents

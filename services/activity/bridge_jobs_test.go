@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/luckylhb90/bnbloc/internal/membership"
 	"github.com/luckylhb90/bnbloc/internal/store"
@@ -232,5 +233,60 @@ func TestSweptFailureMessageIsWrittenWithoutCallerTenant(t *testing.T) {
 	}
 	if !sawMessage {
 		t.Fatal("sweep published no visible failure message")
+	}
+}
+
+// GET /v1/my/agents reports the member's desktop app apart from its agents:
+// a running app with no agent core is connected, an app seen before but not
+// now is installed-and-closed, and a member whose app never connected has
+// lastSeenAtMs 0.
+func TestMyAgentsReportsDesktop(t *testing.T) {
+	jobs := store.NewMemoryBridgeJobs()
+	svc := &Service{Store: store.NewMemory(), Publisher: &capturePublisher{}, Membership: membership.NewStatic(), BridgeJobs: jobs}
+	srv := httptest.NewServer(svc.Handler())
+	t.Cleanup(srv.Close)
+	ctx := tenant.NewContext(context.Background(), tenant.Default)
+	now := time.Now().UnixMilli()
+	for _, hb := range []store.BridgeHeartbeat{
+		{BridgeID: "bridge-maya", OwnerUserID: "maya", Status: store.BridgeOnline, LastSeenAtMs: now},
+		{BridgeID: "bridge-jack-old", OwnerUserID: "jack", Status: store.BridgeOnline, LastSeenAtMs: now - 3_600_000},
+		{BridgeID: "bridge-jack", OwnerUserID: "jack", Status: store.BridgeOffline, LastSeenAtMs: now - 60_000},
+	} {
+		if err := jobs.PutBridgeHeartbeat(ctx, hb); err != nil {
+			t.Fatal(err)
+		}
+	}
+	get := func(user string) (online bool, lastSeen int64, agents int) {
+		t.Helper()
+		req, _ := http.NewRequest(http.MethodGet, srv.URL+"/v1/my/agents", nil)
+		req.Header.Set("X-Bnbloc-User", user)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("%s: status %d", user, resp.StatusCode)
+		}
+		var body struct {
+			Agents  []json.RawMessage `json:"agents"`
+			Desktop struct {
+				Online       bool  `json:"online"`
+				LastSeenAtMs int64 `json:"lastSeenAtMs"`
+			} `json:"desktop"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		return body.Desktop.Online, body.Desktop.LastSeenAtMs, len(body.Agents)
+	}
+	if online, seen, n := get("maya"); !online || seen != now || n != 0 {
+		t.Fatalf("maya (app running, no core) = online %v seen %d agents %d", online, seen, n)
+	}
+	if online, seen, _ := get("jack"); online || seen != now-60_000 {
+		t.Fatalf("jack (app closed) = online %v seen %d, want offline at the latest heartbeat", online, seen)
+	}
+	if online, seen, _ := get("alice"); online || seen != 0 {
+		t.Fatalf("alice (never connected) = online %v seen %d", online, seen)
 	}
 }

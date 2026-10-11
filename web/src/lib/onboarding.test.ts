@@ -7,6 +7,8 @@ import {
   showStarterPrompts,
   showWelcome,
   STARTER_PROMPTS,
+  WELCOME_DESKTOP_HINT,
+  welcomeDesktopAction,
   welcomeDismissed,
 } from "./onboarding.ts";
 import type { PlatformAgent } from "./platformAgents.ts";
@@ -67,8 +69,24 @@ function testStarterPrompts(): void {
   assert(!showStarterPrompts({ ...base, people: true }), "never in the people chat");
 }
 
+// Regression (docs/bugs/2026-10-11-welcome-card-install-prompt-ignores-desktop.md):
+// the card offered the install to members whose app was installed, running
+// or not.
+function testWelcomeDesktopAction(): void {
+  const browser = { inShell: false, applicable: true, connected: false, installed: false, openFailed: false };
+  assert(welcomeDesktopAction({ ...browser, inShell: true }) === "shell", "inside the desktop app");
+  assert(welcomeDesktopAction({ ...browser, installed: undefined }) === "none", "nothing until the check answers");
+  assert(welcomeDesktopAction({ ...browser, applicable: false }) === "none", "a phone gets no desktop action");
+  assert(welcomeDesktopAction({ ...browser, connected: true, installed: true }) === "connected", "a running app: no install");
+  assert(welcomeDesktopAction({ ...browser, installed: true }) === "open", "installed but closed: open it");
+  assert(welcomeDesktopAction({ ...browser, installed: true, openFailed: true }) === "install", "opening failed: offer the download");
+  assert(welcomeDesktopAction(browser) === "install", "never connected: install");
+  assert(WELCOME_DESKTOP_HINT.none === "" && !WELCOME_DESKTOP_HINT.connected.includes("install"), "hints");
+}
+
 testWelcomeVisibility();
 testDismissalIsPerUser();
 testFirstRoomNaming();
 testDefaultPlatformAgent();
 testStarterPrompts();
+testWelcomeDesktopAction();

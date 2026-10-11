@@ -434,5 +434,22 @@ func (s *Service) handleMyAgents(w http.ResponseWriter, r *http.Request) {
 	for _, a := range agents {
 		rows = append(rows, out{Core: a.Core, Provider: a.Provider, TargetID: a.TargetID, Online: !a.Disabled, ModelOptions: modelOptions(a)})
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"agents": rows})
+	// desktop is the member's own desktop app, independent of agents: a
+	// bridge with no core yet is still connected, and lastSeenAtMs > 0 means
+	// the app was installed and connected at least once (0 = never).
+	type desktop struct {
+		Online       bool  `json:"online"`
+		LastSeenAtMs int64 `json:"lastSeenAtMs"`
+	}
+	var d desktop
+	hb, found, err := s.BridgeJobs.LatestBridgeForOwner(r.Context(), caller)
+	if err != nil {
+		obs.ServerError(w, "read the member's latest bridge", err)
+		writeErr(w, http.StatusInternalServerError, "could not read the desktop connection")
+		return
+	}
+	if found {
+		d = desktop{Online: store.BridgeLive(hb, time.Now().UnixMilli()), LastSeenAtMs: hb.LastSeenAtMs}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"agents": rows, "desktop": d})
 }

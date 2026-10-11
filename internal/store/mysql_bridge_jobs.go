@@ -478,6 +478,25 @@ func nullJSON(raw json.RawMessage) any {
 // rooms and tenants, joined to a live heartbeat on bridge_id (the globally
 // unique PK). The owner identity is global, so no tenant filter applies —
 // a member's own agents are their own agents wherever their bridge runs.
+// LatestBridgeForOwner returns the owner's latest heartbeat across tenants
+// (see BridgeJobStore). The table holds one row per bridge, so the owner
+// filter needs no index of its own.
+func (m *MySQLBridgeJobs) LatestBridgeForOwner(ctx context.Context, ownerUserID string) (BridgeHeartbeat, bool, error) {
+	var hb BridgeHeartbeat
+	var status string
+	err := m.DB.QueryRowContext(ctx, `SELECT bridge_id, tenant_id, owner_user_id, app_instance_id, version, status, serve_all_owners, last_seen_at_ms
+FROM bridge_heartbeats WHERE owner_user_id=? ORDER BY last_seen_at_ms DESC LIMIT 1`, ownerUserID).
+		Scan(&hb.BridgeID, &hb.TenantID, &hb.OwnerUserID, &hb.AppInstanceID, &hb.Version, &status, &hb.ServeAllOwners, &hb.LastSeenAtMs)
+	if errors.Is(err, sql.ErrNoRows) {
+		return BridgeHeartbeat{}, false, nil
+	}
+	if err != nil {
+		return BridgeHeartbeat{}, false, err
+	}
+	hb.Status = BridgeStatus(status)
+	return hb, true, nil
+}
+
 func (m *MySQLBridgeJobs) ListBridgeAgentsForOwner(ctx context.Context, ownerUserID string) []BridgeAgent {
 	rows, err := m.DB.QueryContext(ctx, `SELECT a.bridge_id, a.tenant_id, a.owner_user_id, a.core, a.provider, a.target_id, a.model_options_json, a.disabled, a.last_seen_at_ms
 FROM bridge_agents a

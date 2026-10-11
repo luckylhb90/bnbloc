@@ -222,6 +222,11 @@ type BridgeJobStore interface {
 	// all rooms/tenants (owner identity is global), liveness-joined — the
 	// "my agents" surface for a member's own view.
 	ListBridgeAgentsForOwner(ctx context.Context, ownerUserID string) []BridgeAgent
+	// LatestBridgeForOwner returns the owner's most recently seen bridge
+	// heartbeat across tenants (owner identity is global), and false when no
+	// desktop bridge of theirs ever connected. Heartbeat rows are never
+	// deleted, so this tells "installed but closed" from "never installed".
+	LatestBridgeForOwner(ctx context.Context, ownerUserID string) (BridgeHeartbeat, bool, error)
 	// CountOnlineBridges counts bridges of every tenant online at nowMs
 	// (metrics).
 	CountOnlineBridges(ctx context.Context, nowMs int64) (int, error)
@@ -625,6 +630,27 @@ func (s *MemoryBridgeJobs) ListBridgeAgentsForOwner(ctx context.Context, ownerUs
 		}
 	}
 	return out
+}
+
+// LatestBridgeForOwner returns the owner's latest heartbeat (memory impl; see
+// BridgeJobStore).
+func (s *MemoryBridgeJobs) LatestBridgeForOwner(_ context.Context, ownerUserID string) (BridgeHeartbeat, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var latest BridgeHeartbeat
+	found := false
+	for _, hb := range s.heartbeats {
+		if hb.OwnerUserID == ownerUserID && (!found || hb.LastSeenAtMs > latest.LastSeenAtMs) {
+			latest, found = hb, true
+		}
+	}
+	return latest, found, nil
+}
+
+// BridgeLive reports whether hb is a live bridge at nowMs: reported online
+// and seen within BridgeOfflineAfterMs (the same rule the agent listings use).
+func BridgeLive(hb BridgeHeartbeat, nowMs int64) bool {
+	return hb.Status == BridgeOnline && hb.LastSeenAtMs >= nowMs-BridgeOfflineAfterMs
 }
 
 // PendingAgentJobs counts the owner's not-yet-started jobs (memory impl; see
