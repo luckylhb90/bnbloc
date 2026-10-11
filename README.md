@@ -121,8 +121,8 @@ through a **core**:
   [conformance suite](core/conformance) checks a daemon against it. The demo
   drives Claude Code through such a core.
 - **Agents that speak ACP** (the Agent Client Protocol: Claude Code, Codex,
-  Gemini CLI, OpenCode and more) work through the generic
-  [ACP core](docs/architecture/core-providers.md#acp-agents-the-acp-core):
+  Gemini CLI, OpenCode and more) work through the open-source
+  [bnbloc-acp](https://github.com/luckylhb90/bnbloc-acp) core component:
   install it once, then list your agents in a JSON file.
 
 Then install the **desktop app** (from the web UI's download page). It runs
