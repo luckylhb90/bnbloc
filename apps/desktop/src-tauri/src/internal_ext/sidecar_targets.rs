@@ -32,17 +32,32 @@ impl Adapter {
         parse_auth_status(name, status, &body)
     }
 
+    /// The agent targets a running core sidecar lists, through the contract
+    /// the sidecar speaks: Core Protocol v1 (`GET /core/v1/targets`), or, for a
+    /// sidecar that ships a manifest, that manifest's `listTargets` op.
     pub async fn targets(&self, name: &str) -> Result<Value, String> {
+        let manifest = self.running_manifest(name);
+        let source = TargetSource::of(manifest.as_ref());
         let (local_url, status, body) = self
-            .local_call(name, Method::GET, "/v1/agent-targets", "list targets")
+            .local_call(name, Method::GET, &source.path, "list targets")
             .await?;
-        let mut value = decode_ok(name, "list targets", status, &body)?;
+        let value = decode_ok(name, "list targets", status, &body)?;
+        let mut value = source.normalize(value);
         if let Some(targets) = value.get_mut("targets").and_then(Value::as_array_mut) {
             for target in targets {
                 qualify_target(name, &local_url, target);
             }
         }
         Ok(value)
+    }
+
+    fn running_manifest(&self, name: &str) -> Option<Value> {
+        self.inner
+            .lock()
+            .sidecars
+            .get(name)
+            .and_then(|sidecar| sidecar.spec.as_ref())
+            .and_then(|spec| spec.manifest.clone())
     }
 
     /// One bounded request to a running sidecar's local API: its runtime URL,
@@ -82,6 +97,78 @@ impl Adapter {
             }
         })
     }
+}
+
+/// Core Protocol v1 target listing (core/protocol `PathTargets`).
+const PROTOCOL_TARGETS_PATH: &str = "/core/v1/targets";
+
+/// Where a core sidecar lists its targets and how to read the answer: the
+/// Core Protocol path and shape (`{"targets":[{id, provider, models…}]}`), or
+/// a manifest's `listTargets` op with its `targets.{list,id,provider}` dotted
+/// paths (core/manifestcore `TargetsSpec`).
+#[derive(Debug, PartialEq)]
+struct TargetSource {
+    path: String,
+    mapping: Option<(String, String, String)>,
+}
+
+impl TargetSource {
+    fn of(manifest: Option<&Value>) -> Self {
+        let op = manifest.and_then(|m| m.get("listTargets"));
+        let path = op.and_then(|o| o.get("path")).and_then(Value::as_str);
+        match (op, path) {
+            (Some(op), Some(path)) if !path.is_empty() => {
+                let spec = op.get("targets");
+                let field = |key: &str, default: &str| {
+                    spec.and_then(|s| s.get(key))
+                        .and_then(Value::as_str)
+                        .filter(|v| !v.is_empty())
+                        .unwrap_or(default)
+                        .to_string()
+                };
+                TargetSource {
+                    path: path.to_string(),
+                    mapping: Some((
+                        field("list", "targets"),
+                        field("id", "id"),
+                        field("provider", "provider"),
+                    )),
+                }
+            }
+            _ => TargetSource {
+                path: PROTOCOL_TARGETS_PATH.to_string(),
+                mapping: None,
+            },
+        }
+    }
+
+    /// The answer in the Core Protocol shape the UI reads.
+    fn normalize(&self, value: Value) -> Value {
+        let Some((list, id, provider)) = &self.mapping else {
+            return value;
+        };
+        let targets = dotted(&value, list)
+            .and_then(Value::as_array)
+            .map(|items| {
+                items
+                    .iter()
+                    .filter_map(|item| {
+                        let id = dotted(item, id)?.as_str()?;
+                        let provider = dotted(item, provider)?.as_str()?;
+                        Some(serde_json::json!({ "id": id, "provider": provider }))
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        serde_json::json!({ "targets": targets })
+    }
+}
+
+/// A dotted JSON path ("a.b") into value; "" is the value itself.
+fn dotted<'a>(value: &'a Value, path: &str) -> Option<&'a Value> {
+    path.split('.')
+        .filter(|p| !p.is_empty())
+        .try_fold(value, |v, key| v.get(key))
 }
 
 fn decode_ok(name: &str, what: &str, status: u16, body: &[u8]) -> Result<Value, String> {
@@ -153,6 +240,35 @@ mod tests {
         assert_eq!(target["id"], "samplecore/sample-codex");
         assert_eq!(target["localAgentUrl"], "http://127.0.0.1:7100");
         assert_eq!(target["runViaGateway"], false);
+    }
+
+    // Regression: the desktop listed every sidecar through a private
+    // "/v1/agent-targets" path, so a sidecar speaking only Core Protocol v1
+    // (the ACP core) answered 404 and its agents never reached the picker.
+    #[test]
+    fn protocol_sidecars_list_targets_through_core_protocol() {
+        let source = TargetSource::of(None);
+        assert_eq!(source.path, "/core/v1/targets");
+        let body = serde_json::json!({"targets": [{"id": "opencode", "provider": "opencode", "models": ["m1"]}]});
+        assert_eq!(source.normalize(body.clone()), body);
+    }
+
+    #[test]
+    fn manifest_sidecars_list_targets_through_their_manifest_op() {
+        let manifest = serde_json::json!({
+            "listTargets": {"method": "GET", "path": "/api/agents",
+                "targets": {"list": "data.items", "id": "key", "provider": "harness"}}
+        });
+        let source = TargetSource::of(Some(&manifest));
+        assert_eq!(source.path, "/api/agents");
+        let body = serde_json::json!({"data": {"items": [
+            {"key": "local:codex", "harness": "codex"},
+            {"key": "broken"}
+        ]}});
+        assert_eq!(
+            source.normalize(body),
+            serde_json::json!({"targets": [{"id": "local:codex", "provider": "codex"}]})
+        );
     }
 
     #[test]
