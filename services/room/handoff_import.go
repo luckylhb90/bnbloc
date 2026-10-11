@@ -20,6 +20,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/luckylhb90/bnbloc/internal/ids"
 	"github.com/luckylhb90/bnbloc/internal/obs"
 	"github.com/luckylhb90/bnbloc/internal/realtime"
 	"github.com/luckylhb90/bnbloc/internal/roomctx"
@@ -588,7 +589,7 @@ func (s *Service) importArtifacts(ctx context.Context, user, roomID string, pkg 
 			channelID = channelMap[a.ChannelID]
 		}
 		art, err := s.Artifacts.PutArtifact(ctx, store.Artifact{
-			ArtifactID: newArtifactID(), RoomID: roomID, ChannelID: channelID, Kind: a.Kind,
+			ArtifactID: ids.New("art_"), RoomID: roomID, ChannelID: channelID, Kind: a.Kind,
 			Title: strings.TrimSpace(a.Title), Language: strings.TrimSpace(a.Language),
 			FileName:  sanitizeArtifactFileName(a.FileName),
 			CreatedBy: user, CreatedAtMs: a.CreatedAtMs, UpdatedAtMs: a.CreatedAtMs,

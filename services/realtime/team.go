@@ -2,8 +2,6 @@ package realtimehttp
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"log"
@@ -13,6 +11,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/luckylhb90/bnbloc/internal/ids"
 	"github.com/luckylhb90/bnbloc/internal/membership"
 	"github.com/luckylhb90/bnbloc/internal/obs"
 	"github.com/luckylhb90/bnbloc/internal/roomctx"
@@ -98,12 +97,6 @@ func (s *Service) requireRoomMember(w http.ResponseWriter, r *http.Request) (roo
 }
 
 // ---------------------------------------------------------------- prompts
-
-func newPromptID() string {
-	b := make([]byte, 8)
-	_, _ = rand.Read(b)
-	return "pr_" + hex.EncodeToString(b)
-}
 
 // normalizeTags trims, lowercases and de-duplicates tags, rejecting too many
 // or too long ones.
@@ -250,7 +243,7 @@ func (s *Service) handleCreatePrompt(w http.ResponseWriter, r *http.Request) {
 	}
 	now := time.Now().UnixMilli()
 	p, err := s.Prompts.CreatePrompt(r.Context(), wire.Prompt{
-		PromptID:     newPromptID(),
+		PromptID:     ids.New("pr_"),
 		Author:       userID,
 		Title:        title,
 		Body:         body.Body,

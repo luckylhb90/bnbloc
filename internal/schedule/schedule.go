@@ -12,8 +12,6 @@
 package schedule
 
 import (
-	"crypto/rand"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"sort"
@@ -91,13 +89,6 @@ func Validate(rec wire.ScheduleRecurrence, tz string) (wire.ScheduleRecurrence, 
 		return rec, nil, err
 	}
 	return out, loc, nil
-}
-
-// NewID mints a schedule id.
-func NewID() string {
-	b := make([]byte, 8)
-	_, _ = rand.Read(b)
-	return "sch_" + hex.EncodeToString(b)
 }
 
 // NormalizeRecipient validates a schedule recipient: "room" (or empty) is a

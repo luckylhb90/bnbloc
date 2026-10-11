@@ -2,13 +2,12 @@ package shareagenthttp
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"errors"
 	"net/http"
 	"strings"
 	"unicode/utf8"
 
+	"github.com/luckylhb90/bnbloc/internal/ids"
 	"github.com/luckylhb90/bnbloc/internal/obs"
 	"github.com/luckylhb90/bnbloc/internal/roomctx"
 	"github.com/luckylhb90/bnbloc/internal/store"
@@ -52,12 +51,6 @@ func quotaRequestView(q store.QuotaRequest) wire.QuotaRequest {
 }
 
 func validRuns(n *int) bool { return n == nil || (*n >= 1 && *n <= maxQuotaRequestRuns) }
-
-func newQuotaRequestID() string {
-	b := make([]byte, 16)
-	_, _ = rand.Read(b)
-	return "qr_" + hex.EncodeToString(b)
-}
 
 // handleCreateQuotaRequest records a borrower's request. The requester must be
 // a room member other than the owner, and the owner must hold a live,
@@ -112,7 +105,7 @@ func (s *Service) handleCreateQuotaRequest(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	created, err := s.QuotaRequests.CreateQuotaRequest(r.Context(), store.QuotaRequest{
-		RequestID:       newQuotaRequestID(),
+		RequestID:       ids.New("qr_"),
 		RoomID:          roomID,
 		OwnerUserID:     owner,
 		RequesterUserID: requester,

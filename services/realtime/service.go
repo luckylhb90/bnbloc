@@ -5,8 +5,6 @@ package realtimehttp
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -542,12 +540,6 @@ func parseAgentRefs(raw, sandboxedRaw string) []realtime.AgentRef {
 		out = append(out, realtime.AgentRef{Core: core, Provider: provider, Sandboxed: sandboxed[strings.ToLower(tok)]})
 	}
 	return out
-}
-
-func newAgentJobID() string {
-	b := make([]byte, 8)
-	_, _ = rand.Read(b)
-	return "job_" + hex.EncodeToString(b)
 }
 
 // handleChat publishes a group-chat message to the room lane, routed to one

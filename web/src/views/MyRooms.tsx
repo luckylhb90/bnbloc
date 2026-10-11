@@ -241,7 +241,7 @@ function RoomRow({
         {unread && unread > 0 ? (
           <span
             className="grid min-w-5 place-items-center rounded-full bg-[var(--color-accent)] px-1.5 text-xs font-semibold text-[var(--color-accent-fg,white)]"
-            title={`${unread} unread`}
+            title={`${unread > 99 ? "99+" : unread} unread`}
           >
             {unread > 99 ? "99+" : unread}
           </span>

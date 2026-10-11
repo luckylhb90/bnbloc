@@ -2,8 +2,6 @@ package room
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"mime"
@@ -12,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/luckylhb90/bnbloc/internal/ids"
 	"github.com/luckylhb90/bnbloc/internal/obs"
 	"github.com/luckylhb90/bnbloc/internal/store"
 	"github.com/luckylhb90/bnbloc/internal/tarbundle"
@@ -123,7 +122,7 @@ func (s *Service) handleCreateArtifact(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	now := s.Now()
-	id := newArtifactID()
+	id := ids.New("art_")
 	// A caller may carry its own stable id (the bridge derives one per session
 	// file, so an agent's turns publish versions of ONE artifact instead of a
 	// duplicate per turn). Server-minted when absent; shape-validated when
@@ -435,16 +434,6 @@ func decodeArtifactBody(w http.ResponseWriter, r *http.Request, dst any) bool {
 		return false
 	}
 	return true
-}
-
-// newArtifactID mints a server-side id (same shape as the room service's other
-// opaque ids).
-func newArtifactID() string {
-	var b [12]byte
-	if _, err := rand.Read(b[:]); err != nil {
-		return "art-fallback"
-	}
-	return "art_" + hex.EncodeToString(b[:])
 }
 
 // maxArtifactStateBytes bounds one collaboration-state payload. The state is

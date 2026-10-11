@@ -3,27 +3,21 @@ package realtimehttp
 import (
 	"bytes"
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"github.com/luckylhb90/bnbloc/internal/httpx"
 	"io"
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/luckylhb90/bnbloc/internal/httpx"
+	"github.com/luckylhb90/bnbloc/internal/ids"
 
 	"github.com/luckylhb90/bnbloc/internal/obs"
 	"github.com/luckylhb90/bnbloc/internal/roomctx"
 	"github.com/luckylhb90/bnbloc/internal/store"
 	"github.com/luckylhb90/bnbloc/internal/tenant"
 )
-
-func newAttachmentID() string {
-	b := make([]byte, 8)
-	_, _ = rand.Read(b)
-	return "att_" + hex.EncodeToString(b)
-}
 
 const (
 	maxAttachmentBytes = 25 * 1024 * 1024
@@ -156,7 +150,7 @@ func (s *Service) handleUploadAttachment(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	att := store.Attachment{
-		ID:          newAttachmentID(),
+		ID:          ids.New("att_"),
 		RoomID:      roomID,
 		Uploader:    userID,
 		Filename:    filename,

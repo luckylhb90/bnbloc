@@ -2,23 +2,15 @@ package room
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"errors"
 	"net/http"
 	"strings"
 
+	"github.com/luckylhb90/bnbloc/internal/ids"
 	"github.com/luckylhb90/bnbloc/internal/obs"
 	"github.com/luckylhb90/bnbloc/internal/store"
 	"github.com/luckylhb90/bnbloc/internal/tenant"
 )
-
-// newChannelID mints a channel id: "ch_" + 8 random bytes hex.
-func newChannelID() string {
-	b := make([]byte, 8)
-	_, _ = rand.Read(b)
-	return "ch_" + hex.EncodeToString(b)
-}
 
 // channelView is the wire shape of a channel in list/create/rename responses.
 // Kind is "people" for the room's people chat, omitted for an ordinary channel.
@@ -51,7 +43,7 @@ func (s *Service) handleListChannels(w http.ResponseWriter, r *http.Request) {
 		// insert may have failed). Heal by creating the locked default channel on
 		// first list so every room always has a selectable message stream.
 		def := store.RoomChannel{
-			ChannelID:   newChannelID(),
+			ChannelID:   ids.New("ch_"),
 			TenantID:    tenant.FromContext(r.Context()),
 			RoomID:      roomID,
 			Name:        "general",
@@ -143,7 +135,7 @@ func (s *Service) handleCreateChannel(w http.ResponseWriter, r *http.Request) {
 // handoff import, a template instantiation) goes through it.
 func (s *Service) createChannel(ctx context.Context, roomID, name, creator string) (store.RoomChannel, error) {
 	ch := store.RoomChannel{
-		ChannelID:   newChannelID(),
+		ChannelID:   ids.New("ch_"),
 		TenantID:    tenant.FromContext(ctx),
 		RoomID:      roomID,
 		Name:        strings.TrimSpace(name),

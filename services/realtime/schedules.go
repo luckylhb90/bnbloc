@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/luckylhb90/bnbloc/internal/ids"
 	"github.com/luckylhb90/bnbloc/internal/obs"
 	"github.com/luckylhb90/bnbloc/internal/schedule"
 	"github.com/luckylhb90/bnbloc/internal/store"
@@ -167,7 +168,7 @@ func (s *Service) handleCreateSchedule(w http.ResponseWriter, r *http.Request) {
 	}
 	now := time.Now()
 	sc := wire.RoomSchedule{
-		ScheduleID: schedule.NewID(), RoomID: roomID, CreatedBy: userID, Enabled: true,
+		ScheduleID: ids.New("sch_"), RoomID: roomID, CreatedBy: userID, Enabled: true,
 		CreatedAtMs: now.UnixMilli(), UpdatedAtMs: now.UnixMilli(),
 	}
 	if in.Text != nil {

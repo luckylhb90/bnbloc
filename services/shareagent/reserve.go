@@ -1,12 +1,11 @@
 package shareagenthttp
 
 import (
-	"crypto/rand"
-	"encoding/hex"
 	"errors"
 	"net/http"
 	"strings"
 
+	"github.com/luckylhb90/bnbloc/internal/ids"
 	"github.com/luckylhb90/bnbloc/internal/obs"
 	"github.com/luckylhb90/bnbloc/internal/roomctx"
 	"github.com/luckylhb90/bnbloc/internal/shareagent"
@@ -141,7 +140,7 @@ func (s *Service) handleReserveBorrow(w http.ResponseWriter, r *http.Request) {
 		model = clipModel(spec.DefaultModel)
 	}
 	now := s.Now()
-	reservationID := newReservationID()
+	reservationID := ids.New("rsv_")
 	grant, err := s.Grants.ReserveRun(r.Context(), store.RunReservation{
 		ReservationID: reservationID, GrantID: grantID, RoomID: roomID, OwnerUserID: owner,
 		BorrowerUserID: borrower, Model: model, ChannelID: channelID, AtMs: now,
@@ -183,11 +182,4 @@ func clipModel(model string) string {
 		model = string(r[:maxRecordedModel])
 	}
 	return model
-}
-
-// newReservationID returns a random reservation id (fits VARCHAR(64)).
-func newReservationID() string {
-	b := make([]byte, 16)
-	_, _ = rand.Read(b)
-	return "rsv_" + hex.EncodeToString(b)
 }

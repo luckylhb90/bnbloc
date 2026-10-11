@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/luckylhb90/bnbloc/internal/ids"
 	"github.com/luckylhb90/bnbloc/internal/store"
 	"github.com/luckylhb90/bnbloc/internal/wire"
 )
@@ -183,7 +184,7 @@ func (s *Service) PostChat(ctx context.Context, p ChatPost) (int64, error) {
 		// timeout decisions fire against a bogus clock.
 		nowMs := time.Now().UnixMilli()
 		job, err := s.BridgeJobs.PutAgentJob(ctx, store.AgentJob{
-			JobID:           newAgentJobID(),
+			JobID:           ids.New("job_"),
 			RoomID:          p.RoomID,
 			ChannelID:       channelID,
 			MessageSeq:      ev.Sequence,

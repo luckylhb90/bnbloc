@@ -93,8 +93,10 @@ type ChatStore interface {
 	// (room, channel, user). channelID "" addresses the empty/default channel.
 	MarkRead(ctx context.Context, roomID, channelID, userID string, seq, atMs int64) error
 	// UnreadCount returns how many stored messages in a room's channel have seq
-	// greater than the user's last-read sequence for that channel. channelID ""
-	// addresses the empty/default channel.
+	// greater than the user's last-read sequence for that channel, at most
+	// MaxUnreadCount (clients show "99+" beyond 99; counting a months-old
+	// backlog in full on every room-list refresh would scan it all). channelID
+	// "" addresses the empty/default channel.
 	UnreadCount(ctx context.Context, roomID, channelID, userID string) (int, error)
 	// MaxRoomSeq returns the highest stored sequence for a room, or 0 if none.
 	// Sequences are a single room-scoped monotonic counter, so channelID "" is
@@ -370,8 +372,13 @@ func (s *MemoryChat) MarkRead(ctx context.Context, roomID, channelID, userID str
 	return nil
 }
 
+// MaxUnreadCount bounds UnreadCount: one more than the largest number a client
+// shows before "99+".
+const MaxUnreadCount = 100
+
 // UnreadCount counts stored messages in one channel with seq greater than the
-// user's last-read sequence for that channel, excluding soft-deleted messages.
+// user's last-read sequence for that channel, excluding soft-deleted messages,
+// up to MaxUnreadCount.
 func (s *MemoryChat) UnreadCount(ctx context.Context, roomID, channelID, userID string) (int, error) {
 	tid, err := tenant.Require(ctx)
 	if err != nil {
@@ -391,6 +398,9 @@ func (s *MemoryChat) UnreadCount(ctx context.Context, roomID, channelID, userID 
 		}
 		if m.Seq > lastRead {
 			n++
+			if n == MaxUnreadCount {
+				break
+			}
 		}
 	}
 	return n, nil
@@ -635,7 +645,9 @@ func (s *MySQLChat) MarkRead(ctx context.Context, roomID, channelID, userID stri
 }
 
 // UnreadCount counts messages in one channel with seq greater than the user's
-// last-read sequence for that channel.
+// last-read sequence for that channel, up to MaxUnreadCount: the inner LIMIT
+// stops the range scan of idx_room_channel_seq (and the clustered reads the
+// deleted_at_ms filter needs) after MaxUnreadCount rows.
 func (s *MySQLChat) UnreadCount(ctx context.Context, roomID, channelID, userID string) (int, error) {
 	tid, err := tenant.Require(ctx)
 	if err != nil {
@@ -650,8 +662,10 @@ func (s *MySQLChat) UnreadCount(ctx context.Context, roomID, channelID, userID s
 	}
 	var n int
 	if err := s.DB.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM room_messages WHERE tenant_id = ? AND room_id = ? AND channel_id = ? AND seq > ? AND deleted_at_ms IS NULL`,
-		tid, roomID, channelID, lastRead).Scan(&n); err != nil {
+		`SELECT COUNT(*) FROM (SELECT 1 FROM room_messages
+		 WHERE tenant_id = ? AND room_id = ? AND channel_id = ? AND seq > ? AND deleted_at_ms IS NULL
+		 LIMIT ?) unread`,
+		tid, roomID, channelID, lastRead, MaxUnreadCount).Scan(&n); err != nil {
 		return 0, err
 	}
 	return n, nil

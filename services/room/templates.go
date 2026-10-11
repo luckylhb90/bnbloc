@@ -2,8 +2,6 @@ package room
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"log"
@@ -11,6 +9,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/luckylhb90/bnbloc/internal/ids"
 	"github.com/luckylhb90/bnbloc/internal/obs"
 	"github.com/luckylhb90/bnbloc/internal/roomctx"
 	"github.com/luckylhb90/bnbloc/internal/schedule"
@@ -45,12 +44,6 @@ const (
 	maxDefaultMembers       = 50
 	maxTemplateSchedules    = 20
 )
-
-func newTemplateID() string {
-	b := make([]byte, 8)
-	_, _ = rand.Read(b)
-	return "tpl_" + hex.EncodeToString(b)
-}
 
 func (s *Service) registerTemplateRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /v1/room-templates", s.handleListTemplates)
@@ -291,7 +284,7 @@ func (s *Service) handleCreateTemplate(w http.ResponseWriter, r *http.Request) {
 
 // saveNewTemplate validates and stores a new template authored by user.
 func (s *Service) saveNewTemplate(w http.ResponseWriter, r *http.Request, user string, in templateInput, body wire.RoomTemplateBody) {
-	t := wire.RoomTemplate{TemplateID: newTemplateID(), CreatedBy: user, CreatedAtMs: s.Now(), UpdatedAtMs: s.Now()}
+	t := wire.RoomTemplate{TemplateID: ids.New("tpl_"), CreatedBy: user, CreatedAtMs: s.Now(), UpdatedAtMs: s.Now()}
 	if in.Name != nil {
 		t.Name = strings.TrimSpace(*in.Name)
 	}
@@ -580,7 +573,7 @@ func (s *Service) instantiate(ctx context.Context, user string, t wire.RoomTempl
 	now := s.Now()
 	for _, ts := range body.Schedules {
 		sc, serr := s.Schedules.CreateSchedule(ctx, wire.RoomSchedule{
-			ScheduleID: schedule.NewID(), RoomID: room.RoomID, ChannelID: channelIDs[strings.ToLower(ts.Channel)],
+			ScheduleID: ids.New("sch_"), RoomID: room.RoomID, ChannelID: channelIDs[strings.ToLower(ts.Channel)],
 			CreatedBy: user, Text: ts.Text, Recipient: ts.Recipient, Recurrence: ts.Recurrence,
 			Timezone: ts.Timezone, Enabled: false, CreatedAtMs: now, UpdatedAtMs: now,
 		})

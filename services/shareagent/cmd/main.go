@@ -4,12 +4,11 @@ package main
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"log"
 	"time"
 
 	"github.com/luckylhb90/bnbloc/internal/config"
+	"github.com/luckylhb90/bnbloc/internal/ids"
 	"github.com/luckylhb90/bnbloc/internal/membership"
 	"github.com/luckylhb90/bnbloc/internal/notify"
 	"github.com/luckylhb90/bnbloc/internal/obs"
@@ -40,7 +39,7 @@ func main() {
 		Grants:     grants,
 		Presence:   presence,
 		Audit:      grants,
-		NewLeaseID: newLeaseID,
+		NewLeaseID: func() string { return ids.New("lease-") },
 		Now:        nowMs,
 	}
 	rooms := membershipFor(cfg.RoomBaseURL)
@@ -114,9 +113,3 @@ func membershipFor(roomBaseURL string) roomMembership {
 }
 
 func nowMs() int64 { return time.Now().UnixMilli() }
-
-func newLeaseID() string {
-	b := make([]byte, 12)
-	_, _ = rand.Read(b)
-	return "lease-" + hex.EncodeToString(b)
-}

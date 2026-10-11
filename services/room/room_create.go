@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/luckylhb90/bnbloc/internal/ids"
 	"github.com/luckylhb90/bnbloc/internal/obs"
 	"github.com/luckylhb90/bnbloc/internal/store"
 	"github.com/luckylhb90/bnbloc/internal/tenant"
@@ -26,7 +27,7 @@ func (s *Service) createRoom(ctx context.Context, room store.Room, owner, defaul
 	}
 	room.CreatedBy = owner
 	def := store.RoomChannel{
-		ChannelID:   newChannelID(),
+		ChannelID:   ids.New("ch_"),
 		TenantID:    tenant.FromContext(ctx),
 		RoomID:      room.RoomID,
 		Name:        defaultChannel,
