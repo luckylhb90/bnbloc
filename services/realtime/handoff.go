@@ -12,9 +12,7 @@ import (
 	"github.com/luckylhb90/bnbloc/internal/membership"
 	"github.com/luckylhb90/bnbloc/internal/obs"
 	"github.com/luckylhb90/bnbloc/internal/realtime"
-	"github.com/luckylhb90/bnbloc/internal/roomctx"
 	"github.com/luckylhb90/bnbloc/internal/store"
-	"github.com/luckylhb90/bnbloc/internal/svcauth"
 	"github.com/luckylhb90/bnbloc/internal/tenant"
 	"github.com/luckylhb90/bnbloc/internal/wire"
 )
@@ -200,16 +198,8 @@ func (s *Service) importRow(r *http.Request, roomID string, batch wire.RoomImpor
 // handoffRoom resolves the room and enforces membership of the asserted user
 // for the internal handoff routes.
 func (s *Service) handoffRoom(w http.ResponseWriter, r *http.Request) (string, bool) {
-	roomID, err := roomctx.Normalize(r.PathValue("roomId"))
-	if err != nil {
-		httpx.Error(w, err.Error(), http.StatusBadRequest)
-		return "", false
-	}
-	userID := svcauth.Subject(r)
 	// A handoff exports or imports the whole feed, the people chat included:
 	// a person's action, never an agent host's.
-	if _, ok := s.member(w, r, roomID, userID, membership.Human); !ok {
-		return "", false
-	}
-	return roomID, true
+	roomID, _, _, ok := s.room(w, r, membership.Human)
+	return roomID, ok
 }

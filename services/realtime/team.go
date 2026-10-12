@@ -14,9 +14,7 @@ import (
 	"github.com/luckylhb90/bnbloc/internal/httpx"
 	"github.com/luckylhb90/bnbloc/internal/membership"
 	"github.com/luckylhb90/bnbloc/internal/obs"
-	"github.com/luckylhb90/bnbloc/internal/roomctx"
 	"github.com/luckylhb90/bnbloc/internal/store"
-	"github.com/luckylhb90/bnbloc/internal/svcauth"
 	"github.com/luckylhb90/bnbloc/internal/tenant"
 	"github.com/luckylhb90/bnbloc/internal/wire"
 )
@@ -50,46 +48,6 @@ func (s *Service) registerTeamRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /v1/platform/search/status", s.handleSearchStatus)
 }
 
-// requireSubject returns the authenticated caller, answering 401 when absent.
-func requireSubject(w http.ResponseWriter, r *http.Request) (string, bool) {
-	userID := svcauth.Subject(r)
-	if userID == "" {
-		httpx.Error(w, "missing authenticated subject", http.StatusUnauthorized)
-		return "", false
-	}
-	return userID, true
-}
-
-// requireRoomMember resolves the {roomId} path value and the caller, failing
-// closed (403) unless the caller's membership has the ability need
-// (s.member).
-func (s *Service) requireRoomMember(w http.ResponseWriter, r *http.Request, need membership.Need) (roomID, userID string, m membership.Member, ok bool) {
-	roomID, err := roomctx.Normalize(r.PathValue("roomId"))
-	if err != nil {
-		httpx.Error(w, err.Error(), http.StatusBadRequest)
-		return "", "", m, false
-	}
-	if userID, ok = requireSubject(w, r); !ok {
-		return "", "", m, false
-	}
-	if m, ok = s.member(w, r, roomID, userID, need); !ok {
-		return "", "", m, false
-	}
-	return roomID, userID, m, true
-}
-
-// member is realtime's one membership check of a request
-// (membership.RoomScope): userID's membership of roomID in the request's
-// tenant, with the ability need. It answers the 403 itself.
-func (s *Service) member(w http.ResponseWriter, r *http.Request, roomID, userID string, need membership.Need) (membership.Member, bool) {
-	m, err := membership.RoomScope(r.Context(), s.Membership, roomID, userID, need)
-	if err != nil {
-		httpx.Error(w, err.Error(), http.StatusForbidden)
-		return m, false
-	}
-	return m, true
-}
-
 // ------------------------------------------------------------------ tasks
 
 func (s *Service) tasksReady(w http.ResponseWriter) bool {
@@ -112,7 +70,7 @@ func taskTitle(text string, seq int64) string {
 }
 
 func (s *Service) handleListTasks(w http.ResponseWriter, r *http.Request) {
-	roomID, _, _, ok := s.requireRoomMember(w, r, membership.AnyMember)
+	roomID, _, _, ok := s.room(w, r, membership.AnyMember)
 	if !ok || !s.tasksReady(w) {
 		return
 	}
@@ -130,7 +88,7 @@ func (s *Service) handleListTasks(w http.ResponseWriter, r *http.Request) {
 // snapshots the message's title, author and channel; later puts change only
 // the status. The change is announced with a transient task_updated event.
 func (s *Service) handlePutTask(w http.ResponseWriter, r *http.Request) {
-	roomID, userID, _, ok := s.requireRoomMember(w, r, membership.AnyMember)
+	roomID, userID, _, ok := s.room(w, r, membership.AnyMember)
 	if !ok || !s.tasksReady(w) {
 		return
 	}
@@ -195,7 +153,7 @@ func (s *Service) handlePutTask(w http.ResponseWriter, r *http.Request) {
 
 // handleDeleteTask unmarks a message (any room member).
 func (s *Service) handleDeleteTask(w http.ResponseWriter, r *http.Request) {
-	roomID, _, _, ok := s.requireRoomMember(w, r, membership.AnyMember)
+	roomID, _, _, ok := s.room(w, r, membership.AnyMember)
 	if !ok || !s.tasksReady(w) {
 		return
 	}

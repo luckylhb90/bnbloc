@@ -139,7 +139,7 @@ func writeScheduleErr(w http.ResponseWriter, err error) {
 }
 
 func (s *Service) handleListSchedules(w http.ResponseWriter, r *http.Request) {
-	roomID, _, _, ok := s.requireRoomMember(w, r, membership.AnyMember)
+	roomID, _, _, ok := s.room(w, r, membership.AnyMember)
 	if !ok || !s.schedulesReady(w) {
 		return
 	}
@@ -153,7 +153,7 @@ func (s *Service) handleListSchedules(w http.ResponseWriter, r *http.Request) {
 
 func (s *Service) handleCreateSchedule(w http.ResponseWriter, r *http.Request) {
 	// A schedule posts as its creator, which only a member who may chat may.
-	roomID, userID, _, ok := s.requireRoomMember(w, r, membership.Chat)
+	roomID, userID, _, ok := s.room(w, r, membership.Chat)
 	if !ok || !s.schedulesReady(w) {
 		return
 	}
@@ -257,7 +257,7 @@ func (s *Service) checkScheduleSpec(ctx context.Context, sc *wire.RoomSchedule, 
 // room owner or an admin may only pause another member's schedule (resuming
 // would post as someone else, so only the creator resumes).
 func (s *Service) handlePatchSchedule(w http.ResponseWriter, r *http.Request) {
-	roomID, userID, _, ok := s.requireRoomMember(w, r, membership.AnyMember)
+	roomID, userID, _, ok := s.room(w, r, membership.AnyMember)
 	if !ok || !s.schedulesReady(w) {
 		return
 	}
@@ -322,7 +322,7 @@ func (s *Service) handlePatchSchedule(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Service) handleDeleteSchedule(w http.ResponseWriter, r *http.Request) {
-	roomID, userID, _, ok := s.requireRoomMember(w, r, membership.AnyMember)
+	roomID, userID, _, ok := s.room(w, r, membership.AnyMember)
 	if !ok || !s.schedulesReady(w) {
 		return
 	}
@@ -345,7 +345,7 @@ func (s *Service) handleDeleteSchedule(w http.ResponseWriter, r *http.Request) {
 // handleRunSchedule posts a schedule's message now (creator only: it posts as
 // the creator). It does not move the planned next run.
 func (s *Service) handleRunSchedule(w http.ResponseWriter, r *http.Request) {
-	roomID, userID, _, ok := s.requireRoomMember(w, r, membership.AnyMember)
+	roomID, userID, _, ok := s.room(w, r, membership.AnyMember)
 	if !ok || !s.schedulesReady(w) {
 		return
 	}

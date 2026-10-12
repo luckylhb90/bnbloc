@@ -17,9 +17,7 @@ import (
 	"github.com/luckylhb90/bnbloc/internal/httpx"
 	"github.com/luckylhb90/bnbloc/internal/membership"
 	"github.com/luckylhb90/bnbloc/internal/obs"
-	"github.com/luckylhb90/bnbloc/internal/roomctx"
 	"github.com/luckylhb90/bnbloc/internal/store"
-	"github.com/luckylhb90/bnbloc/internal/svcauth"
 	"github.com/luckylhb90/bnbloc/internal/tenant"
 	"github.com/luckylhb90/bnbloc/internal/wire"
 )
@@ -90,14 +88,8 @@ func dispatchStripe(parentJobID string) *sync.Mutex {
 
 // handleInternalDispatch serves POST /internal/v1/rooms/{roomId}/dispatch.
 func (s *Service) handleInternalDispatch(w http.ResponseWriter, r *http.Request) {
-	roomID, err := roomctx.Normalize(r.PathValue("roomId"))
-	if err != nil {
-		httpx.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-	caller := svcauth.Subject(r)
-	if caller == "" {
-		httpx.Error(w, "missing authenticated subject", http.StatusUnauthorized)
+	roomID, caller, ok := s.roomCaller(w, r)
+	if !ok {
 		return
 	}
 	if s.Dispatches == nil || s.BridgeJobs == nil {

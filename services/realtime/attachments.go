@@ -12,11 +12,9 @@ import (
 
 	"github.com/luckylhb90/bnbloc/internal/httpx"
 	"github.com/luckylhb90/bnbloc/internal/ids"
-	"github.com/luckylhb90/bnbloc/internal/svcauth"
 
 	"github.com/luckylhb90/bnbloc/internal/membership"
 	"github.com/luckylhb90/bnbloc/internal/obs"
-	"github.com/luckylhb90/bnbloc/internal/roomctx"
 	"github.com/luckylhb90/bnbloc/internal/store"
 )
 
@@ -95,17 +93,8 @@ func (s *Service) attachmentsReady() bool {
 // handleUploadAttachment streams one multipart file into the blob store and
 // records its metadata against the room. Member-scoped like chat send.
 func (s *Service) handleUploadAttachment(w http.ResponseWriter, r *http.Request) {
-	roomID, err := roomctx.Normalize(r.PathValue("roomId"))
-	if err != nil {
-		httpx.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-	userID := svcauth.Subject(r)
-	if userID == "" {
-		httpx.Error(w, "missing authenticated subject", http.StatusUnauthorized)
-		return
-	}
-	if _, ok := s.member(w, r, roomID, userID, membership.AnyMember); !ok {
+	roomID, userID, _, ok := s.room(w, r, membership.AnyMember)
+	if !ok {
 		return
 	}
 	if !s.attachmentsReady() {
@@ -170,17 +159,8 @@ func (s *Service) handleUploadAttachment(w http.ResponseWriter, r *http.Request)
 
 // handleDownloadAttachment streams a stored attachment to a room member.
 func (s *Service) handleDownloadAttachment(w http.ResponseWriter, r *http.Request) {
-	roomID, err := roomctx.Normalize(r.PathValue("roomId"))
-	if err != nil {
-		httpx.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-	userID := svcauth.Subject(r)
-	if userID == "" {
-		httpx.Error(w, "missing authenticated subject", http.StatusUnauthorized)
-		return
-	}
-	if _, ok := s.member(w, r, roomID, userID, membership.AnyMember); !ok {
+	roomID, _, _, ok := s.room(w, r, membership.AnyMember)
+	if !ok {
 		return
 	}
 	if !s.attachmentsReady() {

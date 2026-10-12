@@ -368,22 +368,10 @@ func accessRevoked(ev wire.Event, subject string) bool {
 // handleEvents streams room events as SSE, delivering the replay snapshot first
 // then incremental deliveries until the client disconnects.
 func (s *Service) handleEvents(w http.ResponseWriter, r *http.Request) {
-	roomID, err := roomctx.Normalize(r.PathValue("roomId"))
-	if err != nil {
-		httpx.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-	userID := svcauth.Subject(r)
-	if userID == "" {
-		httpx.Error(w, "missing authenticated subject", http.StatusUnauthorized)
-		return
-	}
 	// A stream outlives any cache entry: it opens on the room service's
-	// current answer (never a cached one, which could still admit a member
-	// removed seconds ago) and re-checks at every heartbeat below.
-	m, err := membership.FreshRoomScope(r.Context(), s.Membership, roomID, userID, membership.AnyMember)
-	if err != nil {
-		httpx.Error(w, err.Error(), http.StatusForbidden)
+	// current answer and re-checks at every heartbeat below.
+	roomID, userID, m, ok := s.streamRoom(w, r, membership.AnyMember)
+	if !ok {
 		return
 	}
 	// A platform agent host's stream (its bridge driving the hosted agent)
@@ -410,6 +398,7 @@ func (s *Service) handleEvents(w http.ResponseWriter, r *http.Request) {
 	}
 	channelID := ""
 	if !allChannels {
+		var err error
 		if channelID, err = s.resolveChannel(r.Context(), roomID, r.URL.Query().Get("channelId")); err != nil {
 			httpx.Error(w, err.Error(), http.StatusNotFound)
 			return
@@ -535,17 +524,8 @@ func (s *Service) handleEvents(w http.ResponseWriter, r *http.Request) {
 // closed on non-membership); the live SSE stream keeps it fresh via
 // agent_roster events.
 func (s *Service) handleAgents(w http.ResponseWriter, r *http.Request) {
-	roomID, err := roomctx.Normalize(r.PathValue("roomId"))
-	if err != nil {
-		httpx.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-	userID := svcauth.Subject(r)
-	if userID == "" {
-		httpx.Error(w, "missing authenticated subject", http.StatusUnauthorized)
-		return
-	}
-	if _, ok := s.member(w, r, roomID, userID, membership.AnyMember); !ok {
+	roomID, _, _, ok := s.room(w, r, membership.AnyMember)
+	if !ok {
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -584,14 +564,8 @@ func parseAgentRefs(raw, sandboxedRaw string) []realtime.AgentRef {
 // channel of the room's message stream (the default when the body omits
 // channelId).
 func (s *Service) handleChat(w http.ResponseWriter, r *http.Request) {
-	roomID, err := roomctx.Normalize(r.PathValue("roomId"))
-	if err != nil {
-		httpx.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-	userID := svcauth.Subject(r)
-	if userID == "" {
-		httpx.Error(w, "missing authenticated subject", http.StatusUnauthorized)
+	roomID, userID, ok := s.roomCaller(w, r)
+	if !ok {
 		return
 	}
 	// Only a member who may chat posts (PostChat checks it): never a visitor,
@@ -788,17 +762,7 @@ func (s *Service) durable(ctx context.Context, ev wire.Event, author, clientMsgI
 // The page is scoped to one channel: the `channelId` query param, defaulting
 // to the room's default channel when omitted.
 func (s *Service) handleHistory(w http.ResponseWriter, r *http.Request) {
-	roomID, err := roomctx.Normalize(r.PathValue("roomId"))
-	if err != nil {
-		httpx.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-	userID := svcauth.Subject(r)
-	if userID == "" {
-		httpx.Error(w, "missing authenticated subject", http.StatusUnauthorized)
-		return
-	}
-	m, ok := s.member(w, r, roomID, userID, membership.AnyMember)
+	roomID, _, m, ok := s.room(w, r, membership.AnyMember)
 	if !ok {
 		return
 	}
@@ -856,17 +820,8 @@ func parseInt(s string) int64 {
 // so unread counts reflect what they have seen. Body: {"seq": <sequence>,
 // "channelId": <optional channel; the room's default when omitted>}.
 func (s *Service) handleMarkRead(w http.ResponseWriter, r *http.Request) {
-	roomID, err := roomctx.Normalize(r.PathValue("roomId"))
-	if err != nil {
-		httpx.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-	userID := svcauth.Subject(r)
-	if userID == "" {
-		httpx.Error(w, "missing authenticated subject", http.StatusUnauthorized)
-		return
-	}
-	if _, ok := s.member(w, r, roomID, userID, membership.AnyMember); !ok {
+	roomID, userID, _, ok := s.room(w, r, membership.AnyMember)
+	if !ok {
 		return
 	}
 	var body struct {
@@ -898,17 +853,8 @@ func (s *Service) handleMarkRead(w http.ResponseWriter, r *http.Request) {
 // author check is enforced in the store; a non-author (or missing) message
 // yields 403 and nothing is broadcast. Deletion is excluded from history.
 func (s *Service) handleDeleteMessage(w http.ResponseWriter, r *http.Request) {
-	roomID, err := roomctx.Normalize(r.PathValue("roomId"))
-	if err != nil {
-		httpx.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-	userID := svcauth.Subject(r)
-	if userID == "" {
-		httpx.Error(w, "missing authenticated subject", http.StatusUnauthorized)
-		return
-	}
-	if _, ok := s.member(w, r, roomID, userID, membership.AnyMember); !ok {
+	roomID, userID, _, ok := s.room(w, r, membership.AnyMember)
+	if !ok {
 		return
 	}
 	seq := parseInt(r.PathValue("seq"))
@@ -953,17 +899,8 @@ func (s *Service) handleDeleteMessage(w http.ResponseWriter, r *http.Request) {
 // author check and delete guard are enforced in the store; a non-author,
 // missing, or deleted message yields 403 and nothing is broadcast.
 func (s *Service) handleEditMessage(w http.ResponseWriter, r *http.Request) {
-	roomID, err := roomctx.Normalize(r.PathValue("roomId"))
-	if err != nil {
-		httpx.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-	userID := svcauth.Subject(r)
-	if userID == "" {
-		httpx.Error(w, "missing authenticated subject", http.StatusUnauthorized)
-		return
-	}
-	if _, ok := s.member(w, r, roomID, userID, membership.AnyMember); !ok {
+	roomID, userID, _, ok := s.room(w, r, membership.AnyMember)
+	if !ok {
 		return
 	}
 	seq := parseInt(r.PathValue("seq"))
@@ -1029,9 +966,8 @@ func (s *Service) handleEditMessage(w http.ResponseWriter, r *http.Request) {
 // the room's live channels, and the per-channel list carries only channels
 // with unread messages, default channel first.
 func (s *Service) handleUnread(w http.ResponseWriter, r *http.Request) {
-	userID := svcauth.Subject(r)
-	if userID == "" {
-		httpx.Error(w, "missing authenticated subject", http.StatusUnauthorized)
+	userID, ok := requireSubject(w, r)
+	if !ok {
 		return
 	}
 	var rooms []string
@@ -1098,17 +1034,8 @@ func (s *Service) handleUnread(w http.ResponseWriter, r *http.Request) {
 // messages). Body {"channelId": <optional>} scopes the hint to one channel
 // (the room's default when omitted).
 func (s *Service) handleTyping(w http.ResponseWriter, r *http.Request) {
-	roomID, err := roomctx.Normalize(r.PathValue("roomId"))
-	if err != nil {
-		httpx.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-	userID := svcauth.Subject(r)
-	if userID == "" {
-		httpx.Error(w, "missing authenticated subject", http.StatusUnauthorized)
-		return
-	}
-	if _, ok := s.member(w, r, roomID, userID, membership.Chat); !ok {
+	roomID, userID, _, ok := s.room(w, r, membership.Chat)
+	if !ok {
 		return
 	}
 	var body struct {
