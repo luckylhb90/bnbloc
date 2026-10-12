@@ -143,6 +143,9 @@ type ContentUse struct {
 type ContentUsesReply struct {
 	Member []ContentUse `json:"member"`
 	Room   []ContentUse `json:"room,omitempty"`
+	// RoomExpert is the id of the room's expert (one of its pinned
+	// experts), when it has one.
+	RoomExpert string `json:"roomExpert,omitempty"`
 }
 
 // ContentUseRequest is PUT /v1/content-uses.

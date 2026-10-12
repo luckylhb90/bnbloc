@@ -46,6 +46,8 @@ import (
 type ContentJobs interface {
 	GetAgentRun(ctx context.Context, jobID string) (store.AgentJob, error)
 	store.AgentDispatchReader
+	// ExpertUsage counts the jobs that wore experts (Library usage).
+	store.ExpertUsageReader
 }
 
 // Content request bounds.
@@ -174,6 +176,7 @@ func contentView(c store.ContentComponent, v store.ContentComponentVersion, clai
 		LatestVersion: c.LatestVersion, Version: v.Version, Permissions: m.Permissions(), NeedsSandbox: m.NeedsSandbox(),
 		Requires: wire.ContentRequires{Skills: m.Requires.Skills, Prompts: m.Requires.Prompts, Permissions: m.Requires.Permissions},
 		Welcome:  m.Welcome, Mine: c.Owner == claims.Subject && c.TenantID == claims.Tenant, Uses: uses,
+		Team:        contentuse.TeamRoster(m.Team),
 		CreatedAtMs: c.CreatedAtMs, UpdatedAtMs: c.UpdatedAtMs,
 	}
 	if out.Permissions == nil {
@@ -289,6 +292,9 @@ func (s *Service) contentViews(ctx context.Context, claims auth.Claims, comps []
 		out = append(out, view)
 	}
 	if err := s.enrichPromptViews(ctx, claims, "", out); err != nil {
+		return nil, err
+	}
+	if err := s.applyContentUsage(ctx, claims, out); err != nil {
 		return nil, err
 	}
 	return out, nil
@@ -880,6 +886,11 @@ func (s *Service) handleListContentUses(w http.ResponseWriter, r *http.Request) 
 			http.Error(w, "list content uses failed", http.StatusInternalServerError)
 			return
 		}
+		if out.RoomExpert, err = s.roomExpertOf(ctx, room); err != nil {
+			obs.ServerError(w, "list room expert failed", err)
+			http.Error(w, "list room expert failed", http.StatusInternalServerError)
+			return
+		}
 	}
 	writeJSON(w, http.StatusOK, out)
 }
@@ -960,11 +971,15 @@ func (s *Service) handlePutContentUse(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	c, err := s.ContentComponents.GetContentComponent(ctx, strings.TrimSpace(req.ComponentID))
-	if err == nil && !extpipe.MemberVisibility(viewerOf(claims), extpipe.GateForContent(c), 0).Installed && !(scope == store.ContentUseRoom && s.contentInRoom(ctx, claims, scopeID, c.ID)) {
+	if err == nil && !extpipe.MemberVisibility(viewerOf(claims), extpipe.GateForContent(c), 0).Installed && !(scope != store.ContentUseMember && s.contentInRoom(ctx, claims, scopeID, c.ID)) {
 		err = store.ErrContentNotFound
 	}
 	if err != nil {
 		contentStoreErr(w, "load content component failed", err)
+		return
+	}
+	if scope == store.ContentUseRoomExpert {
+		s.putRoomExpert(w, r, claims, scopeID, c)
 		return
 	}
 	if spec, _ := contentpkg.Lookup(c.Kind); scope == store.ContentUseMember && !spec.MemberUse {
@@ -983,16 +998,17 @@ func (s *Service) handlePutContentUse(w http.ResponseWriter, r *http.Request) {
 		contentStoreErr(w, "save content use failed", err)
 		return
 	}
+	s.contentUsesChanged(ctx, claims, scope, scopeID, c.ID)
 	w.WriteHeader(http.StatusNoContent)
 }
 
 // contentUseScope validates a use scope: "member" is the caller; "room"
-// needs the room's owner or an admin.
+// and "room-expert" need the room's owner or an admin.
 func (s *Service) contentUseScope(w http.ResponseWriter, claims auth.Claims, scope, roomID string) (store.ContentUseScope, string, bool) {
 	switch scope {
 	case wire.ContentUseMember:
 		return store.ContentUseMember, claims.Subject, true
-	case wire.ContentUseRoom:
+	case wire.ContentUseRoom, wire.ContentUseRoomExpert:
 		roomID = strings.TrimSpace(roomID)
 		if roomID == "" {
 			http.Error(w, "roomId required", http.StatusBadRequest)
@@ -1002,9 +1018,9 @@ func (s *Service) contentUseScope(w http.ResponseWriter, claims auth.Claims, sco
 			http.Error(w, "only the room's owner or admins change its experts and skills", http.StatusForbidden)
 			return "", "", false
 		}
-		return store.ContentUseRoom, roomID, true
+		return store.ContentUseScope(scope), roomID, true
 	default:
-		http.Error(w, "scope must be member or room", http.StatusBadRequest)
+		http.Error(w, "scope must be member, room or room-expert", http.StatusBadRequest)
 		return "", "", false
 	}
 }
@@ -1019,11 +1035,21 @@ func (s *Service) handleDeleteContentUse(w http.ResponseWriter, r *http.Request)
 	if !ok {
 		return
 	}
-	if err := s.ContentComponents.DeleteContentUse(r.Context(), scope, scopeID, strings.TrimSpace(q.Get("componentId"))); err != nil {
+	componentID := strings.TrimSpace(q.Get("componentId"))
+	if err := s.ContentComponents.DeleteContentUse(r.Context(), scope, scopeID, componentID); err != nil {
 		obs.ServerError(w, "delete content use failed", err)
 		http.Error(w, "delete content use failed", http.StatusInternalServerError)
 		return
 	}
+	if scope == store.ContentUseRoom {
+		// The room expert is one of the room's pinned experts.
+		if err := s.unpinRoomExpert(r.Context(), scopeID, componentID); err != nil {
+			obs.ServerError(w, "clear room expert failed", err)
+			http.Error(w, "clear room expert failed", http.StatusInternalServerError)
+			return
+		}
+	}
+	s.contentUsesChanged(r.Context(), claims, scope, scopeID, componentID)
 	w.WriteHeader(http.StatusNoContent)
 }
 
