@@ -1220,6 +1220,11 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   read back (`ErrArtifactIDTaken`), `AddMember` inserts from the ctx
   tenant's live room (`ErrRoomNotFound`), `PutChannel` is a plain insert
   (`ErrChannelExists`).
+- **An SSO issuer maps at most one tenant** (`uq_tenant_issuer`; no issuer
+  is NULL, never `''`). `PutTenant` refuses a taken issuer with
+  `store.ErrSSOIssuerTaken` on both backends (the console answers 409);
+  it is update-else-insert, because `ON DUPLICATE KEY UPDATE` on a table
+  with a second unique key updates whichever row clashed.
 - **A room's rows are listed once: `roomOwnedTables`**
   (`internal/store/room_owned.go`). `DeleteRoom` clears exactly that list on
   MySQL, and every memory store holding room rows implements

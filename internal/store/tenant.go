@@ -11,6 +11,9 @@ import (
 // Tenant domain errors.
 var (
 	ErrTenantNotFound = errors.New("store: tenant not found")
+	// ErrSSOIssuerTaken: another tenant already maps the SSO issuer (an
+	// issuer names at most one tenant).
+	ErrSSOIssuerTaken = errors.New("store: sso issuer already maps another tenant")
 )
 
 // OrgRole is a member's organization-level role (distinct from room roles).
@@ -149,7 +152,8 @@ type JoinRequest struct {
 // TenantStore persists tenants and their members, and resolves the tenant a
 // given IdP issuer/domain maps to. Implementations must be safe for concurrent
 type TenantStore interface {
-	// PutTenant creates or updates a tenant.
+	// PutTenant creates or updates a tenant. An issuer another tenant
+	// already maps is ErrSSOIssuerTaken; an empty issuer maps nothing.
 	PutTenant(ctx context.Context, t Tenant) error
 	// GetTenant returns a tenant or ErrTenantNotFound.
 	GetTenant(ctx context.Context, tenantID string) (Tenant, error)
@@ -231,10 +235,16 @@ func (s *MemoryTenant) PutTenant(_ context.Context, t Tenant) error {
 	if t.Status == "" {
 		t.Status = TenantActive
 	}
+	if owner, ok := s.byIssue[t.SSOIssuer]; ok && t.SSOIssuer != "" && owner != t.TenantID {
+		return ErrSSOIssuerTaken
+	}
 	// Match the MySQL upsert: an existing tenant only takes the new name,
 	// status and SSO issuer; its quotas, policy switches and creation time
-	// are owned by their own setters.
+	// are owned by their own setters. A changed issuer releases the old one.
 	if cur, ok := s.tenants[t.TenantID]; ok {
+		if cur.SSOIssuer != t.SSOIssuer {
+			delete(s.byIssue, cur.SSOIssuer)
+		}
 		cur.Name, cur.Status, cur.SSOIssuer = t.Name, t.Status, t.SSOIssuer
 		t = cur
 	}

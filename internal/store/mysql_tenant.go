@@ -19,7 +19,7 @@ type MySQLTenant struct {
 func NewMySQLTenant(db *sql.DB) *MySQLTenant { return &MySQLTenant{DB: db} }
 
 // tenantCols is the column list a Tenant scans from, in Scan order.
-const tenantCols = `tenant_id, name, status, sso_issuer, run_quota, cost_allowance, require_sandbox_for_borrow, public_shares_disabled, created_at_ms,
+const tenantCols = `tenant_id, name, status, COALESCE(sso_issuer, ''), run_quota, cost_allowance, require_sandbox_for_borrow, public_shares_disabled, created_at_ms,
   retention_messages_days, retention_artifact_versions_days, retention_audit_days, retention_agent_jobs_days`
 
 // scanTenant reads one row of tenantCols.
@@ -45,11 +45,39 @@ func (m *MySQLTenant) PutTenant(ctx context.Context, t Tenant) error {
 	if t.Status == "" {
 		t.Status = TenantActive
 	}
-	_, err := m.DB.ExecContext(ctx, `
-INSERT INTO tenants (tenant_id, name, status, sso_issuer, created_at_ms)
-VALUES (?, ?, ?, ?, ?)
-ON DUPLICATE KEY UPDATE name = VALUES(name), status = VALUES(status), sso_issuer = VALUES(sso_issuer)`,
-		t.TenantID, t.Name, string(t.Status), t.SSOIssuer, t.CreatedAtMs)
+	// Update, else insert: not INSERT ... ON DUPLICATE KEY UPDATE, which on
+	// a clash of the issuer key would update the tenant holding the issuer.
+	// An empty issuer is NULL (uq_tenant_issuer admits any number of those).
+	issuer := nullString(t.SSOIssuer)
+	update := func() (bool, error) {
+		res, err := m.DB.ExecContext(ctx, `UPDATE tenants SET name = ?, status = ?, sso_issuer = ? WHERE tenant_id = ?`,
+			t.Name, string(t.Status), issuer, t.TenantID)
+		if err != nil {
+			return false, issuerTaken(err)
+		}
+		n, err := res.RowsAffected()
+		return n > 0, err
+	}
+	if done, err := update(); done || err != nil {
+		return err
+	}
+	_, err := m.DB.ExecContext(ctx, `INSERT INTO tenants (tenant_id, name, status, sso_issuer, created_at_ms) VALUES (?, ?, ?, ?, ?)`,
+		t.TenantID, t.Name, string(t.Status), issuer, t.CreatedAtMs)
+	if isDupKey(err, "uq_tenant_issuer") {
+		return ErrSSOIssuerTaken
+	}
+	if isDupEntry(err) {
+		// Created concurrently: it exists now, so the update applies.
+		_, err = update()
+	}
+	return err
+}
+
+// issuerTaken maps a clash on uq_tenant_issuer to ErrSSOIssuerTaken.
+func issuerTaken(err error) error {
+	if isDupKey(err, "uq_tenant_issuer") {
+		return ErrSSOIssuerTaken
+	}
 	return err
 }
 func (m *MySQLTenant) GetTenant(ctx context.Context, tenantID string) (Tenant, error) {
@@ -161,7 +189,7 @@ func (m *MySQLTenant) TenantForIssuer(ctx context.Context, issuer string) (strin
 	}
 	var id string
 	err := m.DB.QueryRowContext(ctx, `
-SELECT tenant_id FROM tenants WHERE sso_issuer = ? LIMIT 1`, issuer).Scan(&id)
+SELECT tenant_id FROM tenants WHERE sso_issuer = ?`, issuer).Scan(&id)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", false, nil
 	}

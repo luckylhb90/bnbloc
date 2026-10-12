@@ -7,8 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-
-	"github.com/go-sql-driver/mysql"
 )
 
 // MySQLContentComponents implements ContentComponentStore over database/sql.
@@ -61,8 +59,7 @@ func contentOrgName(c ContentComponent) any {
 
 // isOrgNameClash reports a duplicate on the organization name key.
 func isOrgNameClash(err error) bool {
-	var me *mysql.MySQLError
-	return errors.As(err, &me) && me.Number == mysqlErrDupEntry && strings.Contains(me.Message, "uq_content_components_org_name")
+	return isDupKey(err, "uq_content_components_org_name")
 }
 
 const contentVersionCols = `component_id, version, manifest_json, bundle_blob_key, sha256, size_bytes, signature, created_by, created_at_ms`

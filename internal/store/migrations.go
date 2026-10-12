@@ -1289,6 +1289,25 @@ WHERE r.channel_id = '' AND d.user_id IS NULL`)
 			return nil
 		},
 	},
+	{
+		// A tenant's SSO issuer is unique (store M8): a duplicated issuer
+		// routed sign-ins to an arbitrary tenant. A tenant without an issuer
+		// stores NULL, so turning '' into NULL here is the unique key's
+		// prerequisite, not a backfill.
+		id: "2026_10_tenant_issuer_unique",
+		run: func(ctx context.Context, db sqlConn) error {
+			if _, err := db.ExecContext(ctx, `ALTER TABLE tenants MODIFY COLUMN sso_issuer VARCHAR(255) NULL`); err != nil {
+				return fmt.Errorf("tenants.sso_issuer nullable: %w", err)
+			}
+			if _, err := db.ExecContext(ctx, `UPDATE tenants SET sso_issuer = NULL WHERE sso_issuer = ''`); err != nil {
+				return fmt.Errorf("tenants.sso_issuer empty to NULL: %w", err)
+			}
+			if err := dropIndexIfExists(ctx, db, "tenants", "idx_tenant_issuer"); err != nil {
+				return err
+			}
+			return addIndexIfMissing(ctx, db, "tenants", "uq_tenant_issuer", "ADD UNIQUE KEY uq_tenant_issuer (sso_issuer)")
+		},
+	},
 }
 
 // sqlConn is the statement surface a migration runs on. runMigrations passes

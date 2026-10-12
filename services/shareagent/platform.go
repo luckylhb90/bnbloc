@@ -1,6 +1,7 @@
 package shareagenthttp
 
 import (
+	"errors"
 	"net/http"
 	"strings"
 
@@ -90,7 +91,10 @@ func (s *Service) handlePlatformCreateTenant(w http.ResponseWriter, r *http.Requ
 		SSOIssuer:   strings.TrimSpace(body.SSOIssuer),
 		CreatedAtMs: s.Now(),
 	}
-	if err := s.Tenants.PutTenant(r.Context(), t); err != nil {
+	if err := s.Tenants.PutTenant(r.Context(), t); errors.Is(err, store.ErrSSOIssuerTaken) {
+		writeErr(w, http.StatusConflict, "sso issuer already maps another organization")
+		return
+	} else if err != nil {
 		obs.ServerError(w, "create tenant failed", err)
 		httpx.Error(w, "create tenant failed", http.StatusInternalServerError)
 		return

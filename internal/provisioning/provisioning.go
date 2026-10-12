@@ -94,10 +94,18 @@ func (r *Resolver) Resolve(id auth.Identity, defaultTenant string) (tenantID, ro
 			return "", "", fmt.Errorf("read tenant %s: %w", tenantID, err)
 		}
 		if r.AutoProvision {
-			if err := r.Tenants.PutTenant(ctx, store.Tenant{
+			t := store.Tenant{
 				TenantID: tenantID, Name: tenantID, Status: store.TenantActive,
 				SSOIssuer: issuer, CreatedAtMs: r.Now(),
-			}); err != nil {
+			}
+			err := r.Tenants.PutTenant(ctx, t)
+			if errors.Is(err, store.ErrSSOIssuerTaken) {
+				// The IdP named this tenant, but the issuer already maps
+				// another one: provision it without the mapping.
+				t.SSOIssuer = ""
+				err = r.Tenants.PutTenant(ctx, t)
+			}
+			if err != nil {
 				return "", "", fmt.Errorf("provision tenant %s: %w", tenantID, err)
 			}
 		}

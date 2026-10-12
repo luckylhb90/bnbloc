@@ -12,7 +12,7 @@ CREATE TABLE IF NOT EXISTS tenants (
   tenant_id     VARCHAR(64) PRIMARY KEY,
   name          VARCHAR(255) NOT NULL,
   status        ENUM('active','suspended') NOT NULL DEFAULT 'active',
-  sso_issuer    VARCHAR(255) NOT NULL DEFAULT '',
+  sso_issuer    VARCHAR(255) NULL,
   run_quota     INT NOT NULL DEFAULT 0,
   cost_allowance DECIMAL(18,6) NOT NULL DEFAULT 0,
   require_sandbox_for_borrow TINYINT(1) NOT NULL DEFAULT 0,
@@ -22,7 +22,7 @@ CREATE TABLE IF NOT EXISTS tenants (
   retention_artifact_versions_days INT NULL,
   retention_audit_days INT NULL,
   retention_agent_jobs_days INT NULL,
-  KEY idx_tenant_issuer (sso_issuer)
+  UNIQUE KEY uq_tenant_issuer (sso_issuer)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS tenant_members (

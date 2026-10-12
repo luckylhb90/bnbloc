@@ -2,6 +2,7 @@ package shareagenthttp
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -360,7 +361,10 @@ func (s *Service) handleTenantUpdateSettings(w http.ResponseWriter, r *http.Requ
 	if body.SSOIssuer != nil {
 		t.SSOIssuer = *body.SSOIssuer
 	}
-	if err := s.Tenants.PutTenant(r.Context(), t); err != nil {
+	if err := s.Tenants.PutTenant(r.Context(), t); errors.Is(err, store.ErrSSOIssuerTaken) {
+		writeErr(w, http.StatusConflict, "sso issuer already maps another organization")
+		return
+	} else if err != nil {
 		obs.ServerError(w, "update settings failed", err)
 		httpx.Error(w, "update settings failed", http.StatusInternalServerError)
 		return
