@@ -279,6 +279,56 @@ from a fixed operator whitelist. MongoDB stays a pluggable second backend,
 like OpenSearch is for search, to add when an app's volume or query needs
 outgrow MySQL. Apps and the SDK don't change when the backend does.
 
+## 5a. From zero to a working product: the member's journey
+
+All of this runs on what already exists (rooms, agents, the Library, share
+links, scheduled prompts) plus this PRD's base. The only new UI is listed in
+5b.
+
+1. **Start.** In any room the member types "build a poll for Friday's offsite:
+   three venues, one vote each, live results, closes Thursday 18:00". They can
+   also pick the builtin **App builder** expert, or a starter prompt from the
+   Library (`/poll`, `/survey`, `/signup`). These are ordinary content
+   components that anyone can copy, edit and share, not platform features.
+2. **Build.** The agent writes the app with the builtin "Interactive apps"
+   skill pack loaded, so it knows the SDK, private-by-default, `ifAbsent`
+   with `me().id` for one vote each, and closing by its own code. After the
+   turn, the bridge publishes the folder as a site, and the deliverable card
+   appears under the reply.
+3. **Try it.** The member opens the card. The app runs with real data, as the
+   member. Teammates in the room can try it too. "Change the colour, add a
+   comment box" is just the next turn: a new version, same app, and **the
+   data carries over**, because the app's data space is keyed by the artifact,
+   not the version.
+4. **Reset test data.** The member says "clear the test votes" (the agent
+   uses `app_data`), or uses the card's **Clear data** action.
+5. **Share.** **Share link** on the card. The link follows the latest version
+   by default, so later fixes reach everyone who already has it. The member
+   pastes it into the group chat, or asks the agent to post it through an
+   installed chat tool.
+6. **Collect.** Voters open the link on their phones and see the app
+   full-screen, with no bnbloc chrome and no sign-in (5b). Votes land in the
+   app's encrypted data space. The member watches live counts in the app
+   itself, or in the card's data count.
+7. **Report.** At close time a scheduled prompt fires ("summarise the votes
+   and recommend a venue"), or the member just asks. The agent reads the data
+   with `app_data`, treating it as untrusted, and writes the report into the
+   room as a normal deliverable: a document, a chart or a slide.
+8. **Reuse.** "Save this as a template" uses the existing `save_component`,
+   so the app's source becomes a Library prompt pack or expert that others can
+   copy and adapt.
+
+## 5b. UI this needs (small)
+
+- **App view for site shares.** A share link to a site opens the app
+  full-screen, mobile-friendly, without the file-viewer header, version line
+  or source download. Today `PublicSharePage` wraps every site in file
+  chrome.
+- **Card data line.** A data count plus **Clear data**, **Export** (JSON/CSV
+  of what the owner can read) and **Delete app data**, all owner-only.
+- **Builtin content** (no platform rules): the "Interactive apps" skill pack,
+  the "App builder" expert, and starter prompts.
+
 ## 6. Delivery steps
 
 1. `store.AppDocs`: the interface, the MySQL JSON and memory backends, the
@@ -286,7 +336,9 @@ outgrow MySQL. Apps and the SDK don't change when the backend does.
    room-owned.
 2. Gateway data API and SDK under both capabilities, server stamps, the two
    rules, caps, rate-limit rows, SSE.
-3. Room tool `app_data`, `.room/apps.md`, and the builtin skill pack.
+3. Room tool `app_data`, `.room/apps.md`, and the builtin skill pack, expert
+   and starter prompts.
+3a. App view for site shares and the card's data line (5b).
 4. `BNBLOC_SITES_ORIGIN` on every deploy surface.
 
 Tests:
