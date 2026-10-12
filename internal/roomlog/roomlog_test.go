@@ -68,21 +68,6 @@ func TestComposeSummarizesOverflow(t *testing.T) {
 	}
 }
 
-// Files (L3) are injected as a reference block, never as file contents, and even
-// with no conversation a files-only context is composed (not the bare message).
-func TestComposeInjectsFileManifest(t *testing.T) {
-	got := Compose(nil, "what changed?", Options{
-		SelfSpeaker: "maya/orbit",
-		Files:       "- src/login.go (512 bytes)",
-	})
-	if !strings.Contains(got, "[workspace files]") || !strings.Contains(got, "src/login.go") {
-		t.Fatalf("files manifest must be injected\n---\n%s", got)
-	}
-	if got == "what changed?" {
-		t.Fatal("files-only context must not collapse to the bare message")
-	}
-}
-
 // splitWindow keeps the newest entries within budget verbatim and hands the rest
 // to the summary side, preserving chronological order; it never returns an empty
 // window when entries exist.

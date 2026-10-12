@@ -235,10 +235,7 @@ func ComposeDelta(entries []Entry, current string, opts Options) string {
 	writeAttachmentsBlock(&b, opts.Attachments)
 	b.WriteString("\n[now — respond to this]\n")
 	b.WriteString(current)
-	b.WriteString("\n\n(Reminder: respond ONLY to the [now] message above. Do not re-summarize, " +
-		"re-derive, or \"save to a document\" anything from the history sections unless " +
-		"the [now] message explicitly asks for it. The attachments listed above, if any, " +
-		"ARE part of this message — open them.)")
+	b.WriteString(nowReminder)
 	return b.String()
 }
 
