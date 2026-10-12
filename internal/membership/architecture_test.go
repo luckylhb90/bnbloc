@@ -1,14 +1,13 @@
 package membership
 
 import (
-	"io/fs"
-	"os"
-	"path/filepath"
 	"regexp"
 	"sort"
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/luckylhb90/bnbloc/internal/archtest"
 )
 
 // Room membership has one owner (this package): a backend checks a request
@@ -25,7 +24,6 @@ import (
 //     in a service): each service used to pick its own, and production
 //     fell back to an empty set that silently refused every member.
 func TestNoMembershipFailOpen(t *testing.T) {
-	root := filepath.Join("..", "..")
 	ownDirectory := regexp.MustCompile(`membership\.(NewRoomClient|NewStatic)\(`)
 	failOpen := regexp.MustCompile(`Membership\s*!=\s*nil\s*&&`)
 	directRead := regexp.MustCompile(`\.Membership\.(Lookup|Fresh)\(`)
@@ -43,44 +41,26 @@ func TestNoMembershipFailOpen(t *testing.T) {
 	}
 	roleOwners := []string{"internal/store/", "internal/membership/", "services/room/"}
 	var problems []string
-	for _, dir := range []string{"services", "internal", "core"} {
-		err := filepath.WalkDir(filepath.Join(root, dir), func(path string, d fs.DirEntry, err error) error {
-			if err != nil {
-				return err
+	archtest.Scan(t, archtest.Opts{Lang: archtest.Go, Roots: []string{"services", "internal", "core"}}, func(rel string, src []byte) {
+		for i, line := range strings.Split(string(src), "\n") {
+			if strings.HasPrefix(strings.TrimSpace(line), "//") {
+				continue
 			}
-			if d.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
-				return nil
+			at := rel + ":" + strconv.Itoa(i+1)
+			if failOpen.MatchString(line) {
+				problems = append(problems, at+": fail-open membership guard (use membership.RoomScope)")
 			}
-			rel, _ := filepath.Rel(root, path)
-			rel = filepath.ToSlash(rel)
-			raw, err := os.ReadFile(path)
-			if err != nil {
-				return err
+			if directRead.MatchString(line) && directReadAllowed[rel] == "" {
+				problems = append(problems, at+": direct membership read (use membership.RoomScope)")
 			}
-			for i, line := range strings.Split(string(raw), "\n") {
-				if strings.HasPrefix(strings.TrimSpace(line), "//") {
-					continue
-				}
-				at := rel + ":" + strconv.Itoa(i+1)
-				if failOpen.MatchString(line) {
-					problems = append(problems, at+": fail-open membership guard (use membership.RoomScope)")
-				}
-				if directRead.MatchString(line) && directReadAllowed[rel] == "" {
-					problems = append(problems, at+": direct membership read (use membership.RoomScope)")
-				}
-				if ownDirectory.MatchString(line) {
-					problems = append(problems, at+": membership directory built by hand (use membership.FromEnv)")
-				}
-				if visitor.MatchString(line) && !hasAnyPrefix(rel, roleOwners) {
-					problems = append(problems, at+": visitor role compared (use membership.Member.MayChat)")
-				}
+			if ownDirectory.MatchString(line) {
+				problems = append(problems, at+": membership directory built by hand (use membership.FromEnv)")
 			}
-			return nil
-		})
-		if err != nil {
-			t.Fatal(err)
+			if visitor.MatchString(line) && !hasAnyPrefix(rel, roleOwners) {
+				problems = append(problems, at+": visitor role compared (use membership.Member.MayChat)")
+			}
 		}
-	}
+	})
 	sort.Strings(problems)
 	if len(problems) > 0 {
 		t.Fatalf("room membership re-derived outside internal/membership:\n  %s", strings.Join(problems, "\n  "))

@@ -1,12 +1,11 @@
 package store
 
 import (
-	"io/fs"
-	"os"
-	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
+
+	"github.com/luckylhb90/bnbloc/internal/archtest"
 )
 
 // TestFailureTextOwned: a failed job's reason becomes a member-facing
@@ -15,28 +14,14 @@ import (
 // the notification read "The agent failed (budget_exhausted).").
 func TestFailureTextOwned(t *testing.T) {
 	re := regexp.MustCompile(`(?m)^func \w*[Ff]ailure[A-Z]?\w*Text\(`)
-	root := filepath.Join("..", "..")
-	for _, dir := range []string{"services", "internal"} {
-		err := filepath.WalkDir(filepath.Join(root, dir), func(path string, d fs.DirEntry, err error) error {
-			if err != nil || d.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
-				return err
-			}
-			if strings.HasPrefix(filepath.ToSlash(path), "../../internal/store/") {
-				return nil
-			}
-			raw, err := os.ReadFile(path)
-			if err != nil {
-				return err
-			}
-			if re.Match(raw) {
-				t.Errorf("%s turns a failure reason into text itself; use AgentJobFailureReason.Text", path)
-			}
-			return nil
-		})
-		if err != nil {
-			t.Fatal(err)
+	archtest.Scan(t, archtest.Opts{Lang: archtest.Go, Roots: []string{"services", "internal"}}, func(rel string, src []byte) {
+		if strings.HasPrefix(rel, "internal/store/") {
+			return
 		}
-	}
+		if re.Match(src) {
+			t.Errorf("%s turns a failure reason into text itself; use AgentJobFailureReason.Text", rel)
+		}
+	})
 }
 
 func TestFailureText(t *testing.T) {

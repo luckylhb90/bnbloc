@@ -1,13 +1,12 @@
 package pkgmeta
 
 import (
-	"io/fs"
-	"os"
-	"path/filepath"
 	"regexp"
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/luckylhb90/bnbloc/internal/archtest"
 )
 
 // The reserved room tools name is refused at install, not only when a
@@ -73,32 +72,9 @@ func TestPackageRulesSingleOwner(t *testing.T) {
 		{regexp.MustCompile("`\\^\\[A-Z\\]\\[A-Z0-9_\\]\\*\\$`"), "an env name regexp (pkgmeta.ValidEnvName)"},
 	}
 	owners := map[string]bool{"core/pkgmeta/mcp_validation.go": true, "core/pkgmeta/sidecar_validation.go": true}
-	root, err := filepath.Abs(filepath.Join("..", ".."))
-	if err != nil {
-		t.Fatal(err)
-	}
-	err = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if d.IsDir() {
-			switch d.Name() {
-			case "node_modules", "target", ".git", "web", "apps":
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		if !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
-			return nil
-		}
-		rel, _ := filepath.Rel(root, path)
-		rel = filepath.ToSlash(rel)
+	archtest.Scan(t, archtest.Opts{Lang: archtest.Go}, func(rel string, src []byte) {
 		if owners[rel] {
-			return nil
-		}
-		src, err := os.ReadFile(path)
-		if err != nil {
-			return err
+			return
 		}
 		for i, line := range strings.Split(string(src), "\n") {
 			if s := strings.TrimSpace(line); strings.HasPrefix(s, "//") {
@@ -110,9 +86,5 @@ func TestPackageRulesSingleOwner(t *testing.T) {
 				}
 			}
 		}
-		return nil
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 }

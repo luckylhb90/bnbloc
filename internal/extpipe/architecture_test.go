@@ -1,14 +1,13 @@
 package extpipe
 
 import (
-	"io/fs"
-	"os"
-	"path/filepath"
 	"regexp"
 	"sort"
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/luckylhb90/bnbloc/internal/archtest"
 )
 
 // TestVisibilityOwned: "may member M use component C" (and its tenant-only
@@ -21,37 +20,21 @@ import (
 // package; an admin writer validating a requested rollout is allowlisted
 // with its reason.
 func TestVisibilityOwned(t *testing.T) {
-	root := filepath.Join("..", "..")
 	rederived := regexp.MustCompile(`NormalizeRollout\([^)]*\)\s*(==|!=)|switch\s+[\w.]*NormalizeRollout\(|\.AllowsTenant\(`)
 	allowed := map[string]string{
 		"services/gateway/content_platform.go": "installPlatformContent validates the rollout an admin requests for a signed content package (a write, not a visibility read)",
 	}
 	var problems []string
-	for _, dir := range []string{"services", "internal", "core", "cmd"} {
-		err := filepath.WalkDir(filepath.Join(root, dir), func(path string, d fs.DirEntry, err error) error {
-			if err != nil || d.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
-				return err
-			}
-			rel, _ := filepath.Rel(root, path)
-			rel = filepath.ToSlash(rel)
-			if strings.HasPrefix(rel, "internal/extpipe/") || allowed[rel] != "" {
-				return nil
-			}
-			raw, err := os.ReadFile(path)
-			if err != nil {
-				return err
-			}
-			for i, line := range strings.Split(string(raw), "\n") {
-				if rederived.MatchString(line) && !strings.HasPrefix(strings.TrimSpace(line), "//") {
-					problems = append(problems, rel+":"+strconv.Itoa(i+1))
-				}
-			}
-			return nil
-		})
-		if err != nil {
-			t.Fatal(err)
+	archtest.Scan(t, archtest.Opts{Lang: archtest.Go, Roots: []string{"services", "internal", "core", "cmd"}}, func(rel string, src []byte) {
+		if strings.HasPrefix(rel, "internal/extpipe/") || allowed[rel] != "" {
+			return
 		}
-	}
+		for i, line := range strings.Split(string(src), "\n") {
+			if rederived.MatchString(line) && !strings.HasPrefix(strings.TrimSpace(line), "//") {
+				problems = append(problems, rel+":"+strconv.Itoa(i+1))
+			}
+		}
+	})
 	sort.Strings(problems)
 	if len(problems) > 0 {
 		t.Fatalf("component visibility re-derived (use extpipe.MemberVisibility / MemberVisibilityWith / TenantDistribution):\n  %s", strings.Join(problems, "\n  "))

@@ -4,13 +4,13 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
-	"io/fs"
-	"os"
-	"path/filepath"
+	"path"
 	"regexp"
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/luckylhb90/bnbloc/internal/archtest"
 )
 
 func TestDigestRule(t *testing.T) {
@@ -43,38 +43,16 @@ func TestDigestRule(t *testing.T) {
 // The digest rule has one owner: no other non-test Go file spells the key
 // prefix, a 64-hex pattern or length, or compares digests case-blind.
 func TestDigestRuleSingleOwner(t *testing.T) {
-	root, err := filepath.Abs(filepath.Join("..", ".."))
-	if err != nil {
-		t.Fatal(err)
-	}
 	lenRule := regexp.MustCompile(`(?i)len\([^)]*(sha|hash|digest|hex)[^)]*\)\s*[!=<>]=?\s*64\b`)
 	foldRule := regexp.MustCompile(`(?i)EqualFold\([^)]*(sha|digest|pin)`)
 	fset := token.NewFileSet()
-	err = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+	archtest.Scan(t, archtest.Opts{Lang: archtest.Go}, func(rel string, src []byte) {
+		if path.Dir(rel) == "internal/digest" {
+			return
+		}
+		f, err := parser.ParseFile(fset, rel, src, parser.SkipObjectResolution)
 		if err != nil {
-			return err
-		}
-		if d.IsDir() {
-			switch d.Name() {
-			case "node_modules", "target", ".git", "web", "apps":
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		if !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
-			return nil
-		}
-		rel, _ := filepath.Rel(root, path)
-		if filepath.ToSlash(filepath.Dir(rel)) == "internal/digest" {
-			return nil
-		}
-		src, err := os.ReadFile(path)
-		if err != nil {
-			return err
-		}
-		f, err := parser.ParseFile(fset, path, src, parser.SkipObjectResolution)
-		if err != nil {
-			return err
+			t.Fatal(err)
 		}
 		ast.Inspect(f, func(n ast.Node) bool {
 			lit, ok := n.(*ast.BasicLit)
@@ -98,9 +76,5 @@ func TestDigestRuleSingleOwner(t *testing.T) {
 				t.Errorf("%s:%d checks or compares a digest itself (%s): use internal/digest (exact, lower case)", rel, i+1, strings.TrimSpace(line))
 			}
 		}
-		return nil
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 }

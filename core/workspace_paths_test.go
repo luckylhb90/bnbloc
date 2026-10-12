@@ -2,12 +2,12 @@ package core
 
 import (
 	"encoding/json"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
-	"strings"
 	"testing"
+
+	"github.com/luckylhb90/bnbloc/internal/archtest"
 )
 
 // WorkspacePathCase is one row of testdata/workspace_paths.json, the path
@@ -49,34 +49,13 @@ func TestWorkspacePathTable(t *testing.T) {
 // code elsewhere never decides "is this under .room/ / a harness's config
 // dir" with its own prefix check; it calls the predicates.
 func TestWorkspacePathPolicySingleOwner(t *testing.T) {
-	root := filepath.Join("..")
 	forbidden := regexp.MustCompile(`HasPrefix\([^)]*(RoomContextDir|"\.(room|claude|codex|agents|opencode)/)`)
-	owner := filepath.Join("core", "workspace_paths.go")
-	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		rel, _ := filepath.Rel(root, path)
-		if d.IsDir() {
-			switch d.Name() {
-			case "node_modules", "web", "apps", ".git", ".claude", "testdata":
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		if !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") || rel == owner {
-			return nil
-		}
-		src, err := os.ReadFile(path)
-		if err != nil {
-			return err
+	archtest.Scan(t, archtest.Opts{Lang: archtest.Go}, func(rel string, src []byte) {
+		if rel == "core/workspace_paths.go" {
+			return
 		}
 		if m := forbidden.Find(src); m != nil {
 			t.Errorf("%s decides a workspace path kind itself (%s): use core.BnblocOwnedPath / HostExecutableProjectConfig / ProtectedWorkspacePath", rel, m)
 		}
-		return nil
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 }

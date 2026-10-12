@@ -3,14 +3,13 @@ package core
 import (
 	"context"
 	"errors"
-	"io/fs"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
+
+	"github.com/luckylhb90/bnbloc/internal/archtest"
 )
 
 type envErr struct {
@@ -65,29 +64,13 @@ func TestRESTSendMapsFailures(t *testing.T) {
 // Protocol, conformance) builds its requests through REST.Request: the one
 // place a bearer goes on the wire and the one error mapping.
 func TestProtocolRequestsBuiltByREST(t *testing.T) {
-	root := filepath.Join("..")
 	forbidden := regexp.MustCompile(`http\.NewRequest|"Bearer |\.Header\.Set\("Authorization"`)
-	owner := filepath.Join("core", "rest.go")
-	for _, dir := range []string{"core", "sandbox"} {
-		err := filepath.WalkDir(filepath.Join(root, dir), func(path string, d fs.DirEntry, err error) error {
-			if err != nil {
-				return err
-			}
-			rel, _ := filepath.Rel(root, path)
-			if d.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") || rel == owner {
-				return nil
-			}
-			src, err := os.ReadFile(path)
-			if err != nil {
-				return err
-			}
-			if m := forbidden.Find(src); m != nil {
-				t.Errorf("%s builds its own request (%s): go through core.REST.Request / Do / JSON", rel, m)
-			}
-			return nil
-		})
-		if err != nil {
-			t.Fatal(err)
+	archtest.Scan(t, archtest.Opts{Lang: archtest.Go, Roots: []string{"core", "sandbox"}}, func(rel string, src []byte) {
+		if rel == "core/rest.go" {
+			return
 		}
-	}
+		if m := forbidden.Find(src); m != nil {
+			t.Errorf("%s builds its own request (%s): go through core.REST.Request / Do / JSON", rel, m)
+		}
+	})
 }

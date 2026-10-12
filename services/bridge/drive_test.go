@@ -5,14 +5,13 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
-	"io/fs"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
 	"testing"
 
 	corepkg "github.com/luckylhb90/bnbloc/core"
+	"github.com/luckylhb90/bnbloc/internal/archtest"
 	"github.com/luckylhb90/bnbloc/internal/contentpkg"
 	"github.com/luckylhb90/bnbloc/internal/wire"
 )
@@ -140,13 +139,10 @@ func contentFormNamed(name string) contentpkg.Form {
 // the encodings cannot drift between copies.
 func TestNoHandRolledAgentRefs(t *testing.T) {
 	fset := token.NewFileSet()
-	err := filepath.WalkDir(".", func(path string, d fs.DirEntry, err error) error {
-		if err != nil || d.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
-			return err
-		}
-		file, err := parser.ParseFile(fset, path, nil, 0)
+	archtest.Scan(t, archtest.Opts{Lang: archtest.Go, Roots: []string{"services/bridge"}}, func(rel string, src []byte) {
+		file, err := parser.ParseFile(fset, rel, src, 0)
 		if err != nil {
-			return err
+			t.Fatal(err)
 		}
 		ast.Inspect(file, func(n ast.Node) bool {
 			switch n := n.(type) {
@@ -158,7 +154,7 @@ func TestNoHandRolledAgentRefs(t *testing.T) {
 				if strings.HasPrefix(v, "shared-agent:") {
 					t.Errorf("%s: a hand-rolled shared-agent target (use shareagent.PlatformTarget)", fset.Position(n.Pos()))
 				}
-				if v == "\x00" && path != "drive.go" {
+				if v == "\x00" && rel != "services/bridge/drive.go" {
 					t.Errorf("%s: a hand-rolled NUL-joined key (use driveKey)", fset.Position(n.Pos()))
 				}
 			case *ast.BinaryExpr:
@@ -169,11 +165,7 @@ func TestNoHandRolledAgentRefs(t *testing.T) {
 			}
 			return true
 		})
-		return nil
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 }
 
 // joinsCoreAndProvider reports a "+" chain that puts a "/" between an

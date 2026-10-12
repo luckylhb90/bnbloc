@@ -1,14 +1,12 @@
 package coreset
 
 import (
-	"io/fs"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/luckylhb90/bnbloc/core"
 	"github.com/luckylhb90/bnbloc/core/protocol"
+	"github.com/luckylhb90/bnbloc/internal/archtest"
 )
 
 // EntryFor gives an installed core and an env-configured core the same
@@ -41,44 +39,24 @@ func TestEntryForAppliesEnvOverridesToEveryCore(t *testing.T) {
 // (2026-10-12: the gateway built installed cores a second way and ignored
 // it).
 func TestCoreEntriesBuiltOnlyByEntryFor(t *testing.T) {
-	root := filepath.Join("..", "..")
 	allowed := map[string]string{
 		// The dev discovery probe reports the discovered address itself; it
 		// builds no entry.
-		filepath.Join("services", "gateway", "localagent.go"): "dev discovery probe",
+		"services/gateway/localagent.go": "dev discovery probe",
 		// Conformance checks a provider's Discover contract.
-		filepath.Join("core", "conformance", "conformance.go"): "conformance check",
+		"core/conformance/conformance.go": "conformance check",
 	}
-	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		rel, _ := filepath.Rel(root, path)
-		if d.IsDir() {
-			switch d.Name() {
-			case "node_modules", "web", "apps", ".git", ".claude", "testdata":
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		if !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") || strings.HasPrefix(rel, filepath.Join("internal", "coreset")+string(filepath.Separator)) {
-			return nil
+	archtest.Scan(t, archtest.Opts{Lang: archtest.Go}, func(rel string, src []byte) {
+		if strings.HasPrefix(rel, "internal/coreset/") {
+			return
 		}
 		if _, ok := allowed[rel]; ok {
-			return nil
-		}
-		src, err := os.ReadFile(path)
-		if err != nil {
-			return err
+			return
 		}
 		for _, forbidden := range []string{"(core.Discoverer)", `"BNBLOC_CORE_`} {
 			if strings.Contains(string(src), forbidden) {
 				t.Errorf("%s uses %s: build core entries with coreset.EntryFor / FromEnv", rel, forbidden)
 			}
 		}
-		return nil
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 }

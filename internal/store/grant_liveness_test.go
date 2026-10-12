@@ -1,14 +1,13 @@
 package store
 
 import (
-	"io/fs"
-	"os"
-	"path/filepath"
 	"regexp"
 	"sort"
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/luckylhb90/bnbloc/internal/archtest"
 )
 
 // TestGrantLivenessOwned: whether a grant is in force has one answer,
@@ -19,34 +18,18 @@ import (
 // anywhere outside this package: a nil test of RevokedAtMs, a comparison
 // against a dereferenced ExpiresAtMs, or the `ExpiresAtMs != nil &&` guard.
 func TestGrantLivenessOwned(t *testing.T) {
-	root := filepath.Join("..", "..")
 	liveness := regexp.MustCompile(`\.RevokedAtMs\s*(!=|==)\s*nil|[<>]=?\s*\*[A-Za-z_][\w.]*\.ExpiresAtMs|\.ExpiresAtMs\s*!=\s*nil\s*&&`)
 	var problems []string
-	for _, dir := range []string{"services", "internal", "core", "cmd", "adapter"} {
-		err := filepath.WalkDir(filepath.Join(root, dir), func(path string, d fs.DirEntry, err error) error {
-			if err != nil || d.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
-				return err
-			}
-			rel, _ := filepath.Rel(root, path)
-			rel = filepath.ToSlash(rel)
-			if strings.HasPrefix(rel, "internal/store/") {
-				return nil
-			}
-			raw, err := os.ReadFile(path)
-			if err != nil {
-				return err
-			}
-			for i, line := range strings.Split(string(raw), "\n") {
-				if liveness.MatchString(line) && !strings.HasPrefix(strings.TrimSpace(line), "//") {
-					problems = append(problems, rel+":"+strconv.Itoa(i+1))
-				}
-			}
-			return nil
-		})
-		if err != nil {
-			t.Fatal(err)
+	archtest.Scan(t, archtest.Opts{Lang: archtest.Go, Roots: []string{"services", "internal", "core", "cmd", "adapter"}}, func(rel string, src []byte) {
+		if strings.HasPrefix(rel, "internal/store/") {
+			return
 		}
-	}
+		for i, line := range strings.Split(string(src), "\n") {
+			if liveness.MatchString(line) && !strings.HasPrefix(strings.TrimSpace(line), "//") {
+				problems = append(problems, rel+":"+strconv.Itoa(i+1))
+			}
+		}
+	})
 	sort.Strings(problems)
 	if len(problems) > 0 {
 		t.Fatalf("grant liveness re-derived (use store.Grant.Live, or the policy-aware usableGrant in shareagent):\n  %s", strings.Join(problems, "\n  "))

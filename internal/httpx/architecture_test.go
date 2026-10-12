@@ -1,13 +1,12 @@
 package httpx
 
 import (
-	"io/fs"
-	"os"
-	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
 	"testing"
+
+	"github.com/luckylhb90/bnbloc/internal/archtest"
 )
 
 // TestOneErrorBodyOwner: every bnbloc HTTP surface (the gateway and every
@@ -41,31 +40,15 @@ func TestOneErrorBodyOwner(t *testing.T) {
 			"services/gateway/mcp_packages.go": "the console's MCP form refuses unknown fields (DisallowUnknownFields) and names them",
 		}},
 	}
-	root := filepath.Join("..", "..")
 	var problems []string
-	for _, dir := range []string{"services", "internal"} {
-		err := filepath.WalkDir(filepath.Join(root, dir), func(path string, d fs.DirEntry, err error) error {
-			if err != nil || d.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
-				return err
+	archtest.Scan(t, archtest.Opts{Lang: archtest.Go, Roots: []string{"services", "internal"}}, func(rel string, src []byte) {
+		for _, r := range rules {
+			if !r.re.Match(src) || allowed(rel, r.allow) {
+				continue
 			}
-			rel, _ := filepath.Rel(root, path)
-			rel = filepath.ToSlash(rel)
-			raw, err := os.ReadFile(path)
-			if err != nil {
-				return err
-			}
-			for _, r := range rules {
-				if !r.re.Match(raw) || allowed(rel, r.allow) {
-					continue
-				}
-				problems = append(problems, rel+": "+r.what)
-			}
-			return nil
-		})
-		if err != nil {
-			t.Fatal(err)
+			problems = append(problems, rel+": "+r.what)
 		}
-	}
+	})
 	sort.Strings(problems)
 	if len(problems) > 0 {
 		t.Fatalf("a second error-body or decode owner:\n  %s", strings.Join(problems, "\n  "))

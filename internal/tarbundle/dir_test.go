@@ -6,12 +6,12 @@ import (
 	"bytes"
 	"go/parser"
 	"go/token"
-	"io/fs"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
 	"testing/fstest"
+
+	"github.com/luckylhb90/bnbloc/internal/archtest"
 )
 
 // The one directory packer drops junk, hidden files and protected
@@ -118,33 +118,14 @@ func TestOnlyTarbundleReadsArchives(t *testing.T) {
 		// own archive endpoints (a machine's tar stream).
 		"sandbox/conformance/conformance.go": "sandbox protocol archive endpoints",
 	}
-	root, err := filepath.Abs(filepath.Join("..", ".."))
-	if err != nil {
-		t.Fatal(err)
-	}
 	fset := token.NewFileSet()
-	err = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if d.IsDir() {
-			switch d.Name() {
-			case "node_modules", "target", ".git", "web", "apps":
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		if !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
-			return nil
-		}
-		rel, _ := filepath.Rel(root, path)
-		rel = filepath.ToSlash(rel)
+	archtest.Scan(t, archtest.Opts{Lang: archtest.Go}, func(rel string, src []byte) {
 		if strings.HasPrefix(rel, "internal/tarbundle/") || allowed[rel] != "" {
-			return nil
+			return
 		}
-		f, err := parser.ParseFile(fset, path, nil, parser.ImportsOnly)
+		f, err := parser.ParseFile(fset, rel, src, parser.ImportsOnly)
 		if err != nil {
-			return err
+			t.Fatal(err)
 		}
 		for _, imp := range f.Imports {
 			p, _ := strconv.Unquote(imp.Path.Value)
@@ -152,9 +133,5 @@ func TestOnlyTarbundleReadsArchives(t *testing.T) {
 				t.Errorf("%s imports %s: read archives through internal/tarbundle", rel, p)
 			}
 		}
-		return nil
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 }

@@ -1,13 +1,11 @@
 package contentshare
 
 import (
-	"io/fs"
-	"os"
-	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
 
+	"github.com/luckylhb90/bnbloc/internal/archtest"
 	"github.com/luckylhb90/bnbloc/internal/store"
 )
 
@@ -33,26 +31,12 @@ func TestAnnounceOneKeyPerMember(t *testing.T) {
 // list, realtime on the member, so a member could hear twice).
 func TestShareAnnouncedOnlyHere(t *testing.T) {
 	re := regexp.MustCompile(`Type:\s*wire\.NotificationContentShared`)
-	root := filepath.Join("..", "..")
-	for _, dir := range []string{"services", "internal"} {
-		err := filepath.WalkDir(filepath.Join(root, dir), func(path string, d fs.DirEntry, err error) error {
-			if err != nil || d.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
-				return err
-			}
-			if strings.HasPrefix(filepath.ToSlash(path), "../../internal/contentshare/") {
-				return nil
-			}
-			raw, err := os.ReadFile(path)
-			if err != nil {
-				return err
-			}
-			if re.Match(raw) {
-				t.Errorf("%s builds a content_shared notification; use contentshare.Announce", path)
-			}
-			return nil
-		})
-		if err != nil {
-			t.Fatal(err)
+	archtest.Scan(t, archtest.Opts{Lang: archtest.Go, Roots: []string{"services", "internal"}}, func(rel string, src []byte) {
+		if strings.HasPrefix(rel, "internal/contentshare/") {
+			return
 		}
-	}
+		if re.Match(src) {
+			t.Errorf("%s builds a content_shared notification; use contentshare.Announce", rel)
+		}
+	})
 }

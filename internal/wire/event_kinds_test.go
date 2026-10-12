@@ -6,12 +6,12 @@ import (
 	"go/scanner"
 	"go/token"
 	"io/fs"
-	"os"
-	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/luckylhb90/bnbloc/internal/archtest"
 )
 
 // TestEventKindsRegistered: RoomEventKinds is the one list of room event
@@ -79,44 +79,28 @@ func TestEventKindsRegistered(t *testing.T) {
 		"internal/store/room_owned.go": "agent_messages is also a table name",
 		"internal/store/retention.go":  "agent_messages is also a table name",
 	}
-	root := filepath.Join("..", "..")
 	var problems []string
-	for _, dir := range []string{"services", "internal", "core", "cmd"} {
-		err := filepath.WalkDir(filepath.Join(root, dir), func(path string, d fs.DirEntry, err error) error {
-			if err != nil || d.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
-				return err
-			}
-			rel, _ := filepath.Rel(root, path)
-			rel = filepath.ToSlash(rel)
-			if strings.HasPrefix(rel, "internal/wire/") || allowed[rel] != "" {
-				return nil
-			}
-			src, err := os.ReadFile(path)
-			if err != nil {
-				return err
-			}
-			fs := token.NewFileSet()
-			file := fs.AddFile(path, fs.Base(), len(src))
-			var sc scanner.Scanner
-			sc.Init(file, src, nil, 0)
-			for {
-				pos, tok, lit := sc.Scan()
-				if tok == token.EOF {
-					break
-				}
-				if tok != token.STRING {
-					continue
-				}
-				if v, err := strconv.Unquote(lit); err == nil && seen[v] {
-					problems = append(problems, rel+":"+strconv.Itoa(fs.Position(pos).Line)+": "+lit)
-				}
-			}
-			return nil
-		})
-		if err != nil {
-			t.Fatal(err)
+	archtest.Scan(t, archtest.Opts{Lang: archtest.Go, Roots: []string{"services", "internal", "core", "cmd"}}, func(rel string, src []byte) {
+		if strings.HasPrefix(rel, "internal/wire/") || allowed[rel] != "" {
+			return
 		}
-	}
+		fs := token.NewFileSet()
+		file := fs.AddFile(rel, fs.Base(), len(src))
+		var sc scanner.Scanner
+		sc.Init(file, src, nil, 0)
+		for {
+			pos, tok, lit := sc.Scan()
+			if tok == token.EOF {
+				break
+			}
+			if tok != token.STRING {
+				continue
+			}
+			if v, err := strconv.Unquote(lit); err == nil && seen[v] {
+				problems = append(problems, rel+":"+strconv.Itoa(fs.Position(pos).Line)+": "+lit)
+			}
+		}
+	})
 	sort.Strings(problems)
 	if len(problems) > 0 {
 		t.Fatalf("a room event kind spelled as a literal (name the wire constant):\n  %s", strings.Join(problems, "\n  "))

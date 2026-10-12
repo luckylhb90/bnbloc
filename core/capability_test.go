@@ -4,13 +4,13 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
-	"io/fs"
-	"os"
 	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/luckylhb90/bnbloc/internal/archtest"
 )
 
 const corePkgPath = "github.com/luckylhb90/bnbloc/core"
@@ -28,36 +28,19 @@ var bareAssertionPending = map[string]string{}
 // assertion or type-switch case naming a core interface other than Provider.
 func TestNoBareCapabilityAssertion(t *testing.T) {
 	ifaces := coreInterfaces(t)
-	root := filepath.Join("..")
 	found := map[string][]string{}
-	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+	archtest.Scan(t, archtest.Opts{Lang: archtest.Go}, func(rel string, src []byte) {
+		if rel == "core/provider.go" {
+			return
+		}
+		hits, err := bareCapabilityAssertions(rel, src, ifaces)
 		if err != nil {
-			return err
-		}
-		rel, _ := filepath.Rel(root, path)
-		rel = filepath.ToSlash(rel)
-		if d.IsDir() {
-			switch d.Name() {
-			case "node_modules", "web", "apps", ".git", ".claude", "testdata":
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		if !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") || rel == "core/provider.go" {
-			return nil
-		}
-		hits, err := bareCapabilityAssertions(path, rel, ifaces)
-		if err != nil {
-			return err
+			t.Fatal(err)
 		}
 		if len(hits) > 0 {
 			found[rel] = hits
 		}
-		return nil
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	files := make([]string, 0, len(found))
 	for f := range found {
 		files = append(files, f)
@@ -115,12 +98,8 @@ func coreInterfaces(t *testing.T) map[string]bool {
 // bareCapabilityAssertions reports the core interfaces a file asserts to:
 // x.(core.T) (under any import name) or a type-switch case core.T, and the
 // unqualified forms inside package core itself.
-func bareCapabilityAssertions(path, rel string, ifaces map[string]bool) ([]string, error) {
-	src, err := os.ReadFile(path)
-	if err != nil {
-		return nil, err
-	}
-	f, err := parser.ParseFile(token.NewFileSet(), path, src, 0)
+func bareCapabilityAssertions(rel string, src []byte, ifaces map[string]bool) ([]string, error) {
+	f, err := parser.ParseFile(token.NewFileSet(), rel, src, 0)
 	if err != nil {
 		return nil, err
 	}

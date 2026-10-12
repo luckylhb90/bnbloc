@@ -5,13 +5,13 @@ import (
 	"go/parser"
 	"go/printer"
 	"go/token"
-	"io/fs"
-	"path/filepath"
 	"regexp"
 	"sort"
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/luckylhb90/bnbloc/internal/archtest"
 )
 
 // Subjects (user ids, owners, authors, actors, requesters) are case-sensitive
@@ -67,36 +67,16 @@ func TestIdentityColumnsBinary(t *testing.T) {
 // address, a header) carries an "identity-fold: <reason>" comment on its line
 // or the line above.
 func TestNoIdentityFold(t *testing.T) {
-	root := filepath.Join("..", "..")
 	var problems []string
-	for _, dir := range []string{"services", "internal", "cmd", "core"} {
-		err := filepath.WalkDir(filepath.Join(root, dir), func(path string, d fs.DirEntry, err error) error {
-			if err != nil {
-				return err
-			}
-			if d.IsDir() {
-				if d.Name() == "testdata" || d.Name() == "node_modules" {
-					return filepath.SkipDir
-				}
-				return nil
-			}
-			if !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
-				return nil
-			}
-			found, err := identityFolds(path)
-			if err != nil {
-				return err
-			}
-			rel, _ := filepath.Rel(root, path)
-			for _, f := range found {
-				problems = append(problems, rel+":"+f)
-			}
-			return nil
-		})
+	archtest.Scan(t, archtest.Opts{Lang: archtest.Go, Roots: []string{"services", "internal", "cmd", "core"}}, func(rel string, src []byte) {
+		found, err := identityFolds(rel, src)
 		if err != nil {
 			t.Fatal(err)
 		}
-	}
+		for _, f := range found {
+			problems = append(problems, rel+":"+f)
+		}
+	})
 	sort.Strings(problems)
 	if len(problems) > 0 {
 		t.Fatalf("%d case fold(s) on a subject; subjects are case-sensitive, compare with ==:\n  %s",
@@ -107,9 +87,9 @@ func TestNoIdentityFold(t *testing.T) {
 var foldFuncs = map[string]bool{"EqualFold": true, "ToLower": true, "ToUpper": true}
 
 // identityFolds returns "<line>: <call>" for every case fold on a subject.
-func identityFolds(path string) ([]string, error) {
+func identityFolds(rel string, code []byte) ([]string, error) {
 	fset := token.NewFileSet()
-	file, err := parser.ParseFile(fset, path, nil, parser.ParseComments)
+	file, err := parser.ParseFile(fset, rel, code, parser.ParseComments)
 	if err != nil {
 		return nil, err
 	}

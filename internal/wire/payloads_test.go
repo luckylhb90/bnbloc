@@ -2,12 +2,11 @@ package wire
 
 import (
 	"encoding/json"
-	"io/fs"
-	"os"
-	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
+
+	"github.com/luckylhb90/bnbloc/internal/archtest"
 )
 
 // TestEventPayloadsDecodedOnce: an event payload is read through
@@ -16,28 +15,14 @@ import (
 // one shape each and silently dropped the other (2026-10-12 review).
 func TestEventPayloadsDecodedOnce(t *testing.T) {
 	re := regexp.MustCompile(`\bev\.Payload\.\(`)
-	root := filepath.Join("..", "..")
-	for _, dir := range []string{"services", "internal", "core", "cmd"} {
-		err := filepath.WalkDir(filepath.Join(root, dir), func(path string, d fs.DirEntry, err error) error {
-			if err != nil || d.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
-				return err
-			}
-			if strings.HasPrefix(filepath.ToSlash(path), "../../internal/wire/") {
-				return nil
-			}
-			raw, err := os.ReadFile(path)
-			if err != nil {
-				return err
-			}
-			if re.Match(raw) {
-				t.Errorf("%s type-asserts an event payload; use wire.DecodePayload", path)
-			}
-			return nil
-		})
-		if err != nil {
-			t.Fatal(err)
+	archtest.Scan(t, archtest.Opts{Lang: archtest.Go, Roots: []string{"services", "internal", "core", "cmd"}}, func(rel string, src []byte) {
+		if strings.HasPrefix(rel, "internal/wire/") {
+			return
 		}
-	}
+		if re.Match(src) {
+			t.Errorf("%s type-asserts an event payload; use wire.DecodePayload", rel)
+		}
+	})
 }
 
 // DecodePayload reads a payload in every shape it travels in: typed

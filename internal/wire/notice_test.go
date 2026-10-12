@@ -3,12 +3,11 @@ package wire
 import (
 	"go/scanner"
 	"go/token"
-	"io/fs"
-	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 	"testing"
+
+	"github.com/luckylhb90/bnbloc/internal/archtest"
 )
 
 // TestNoticesCarryKind: every notice line is built by JobNotice, so each
@@ -18,41 +17,25 @@ import (
 // back as their own speech). No source outside this package sets the
 // "notice" payload key or the notice sequence itself.
 func TestNoticesCarryKind(t *testing.T) {
-	root := filepath.Join("..", "..")
 	var problems []string
-	for _, dir := range []string{"services", "internal", "core", "cmd"} {
-		err := filepath.WalkDir(filepath.Join(root, dir), func(path string, d fs.DirEntry, err error) error {
-			if err != nil || d.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
-				return err
-			}
-			rel, _ := filepath.Rel(root, path)
-			rel = filepath.ToSlash(rel)
-			if strings.HasPrefix(rel, "internal/wire/") {
-				return nil
-			}
-			src, err := os.ReadFile(path)
-			if err != nil {
-				return err
-			}
-			fset := token.NewFileSet()
-			file := fset.AddFile(path, fset.Base(), len(src))
-			var sc scanner.Scanner
-			sc.Init(file, src, nil, 0)
-			for {
-				pos, tok, lit := sc.Scan()
-				if tok == token.EOF {
-					break
-				}
-				if (tok == token.STRING && lit == `"notice"`) || (tok == token.IDENT && lit == "JobNoticeSeq") {
-					problems = append(problems, rel+":"+fset.Position(pos).String()+": "+lit)
-				}
-			}
-			return nil
-		})
-		if err != nil {
-			t.Fatal(err)
+	archtest.Scan(t, archtest.Opts{Lang: archtest.Go, Roots: []string{"services", "internal", "core", "cmd"}}, func(rel string, src []byte) {
+		if strings.HasPrefix(rel, "internal/wire/") {
+			return
 		}
-	}
+		fset := token.NewFileSet()
+		file := fset.AddFile(rel, fset.Base(), len(src))
+		var sc scanner.Scanner
+		sc.Init(file, src, nil, 0)
+		for {
+			pos, tok, lit := sc.Scan()
+			if tok == token.EOF {
+				break
+			}
+			if (tok == token.STRING && lit == `"notice"`) || (tok == token.IDENT && lit == "JobNoticeSeq") {
+				problems = append(problems, rel+":"+fset.Position(pos).String()+": "+lit)
+			}
+		}
+	})
 	sort.Strings(problems)
 	if len(problems) > 0 {
 		t.Fatalf("a notice built by hand (use wire.JobNotice):\n  %s", strings.Join(problems, "\n  "))

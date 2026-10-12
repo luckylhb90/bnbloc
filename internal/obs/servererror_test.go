@@ -7,15 +7,15 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
-	"io/fs"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/luckylhb90/bnbloc/internal/archtest"
 )
 
 func TestMiddlewareLogs5xxWithCause(t *testing.T) {
@@ -85,42 +85,21 @@ func TestErrorStatusesThroughWriteStatus(t *testing.T) {
 // scanServiceSources runs check over every non-test Go file under
 // services/ and internal/ except the convention's owners, returning
 // "<file>:<finding>" sorted.
-func scanServiceSources(t *testing.T, check func(path string) ([]string, error)) []string {
+func scanServiceSources(t *testing.T, check func(rel string, src []byte) ([]string, error)) []string {
 	t.Helper()
-	root := filepath.Join("..", "..")
-	owners := map[string]bool{
-		filepath.Join(root, "internal", "obs"):   true,
-		filepath.Join(root, "internal", "httpx"): true,
-	}
 	var problems []string
-	for _, dir := range []string{"services", "internal"} {
-		err := filepath.WalkDir(filepath.Join(root, dir), func(path string, d fs.DirEntry, err error) error {
-			if err != nil {
-				return err
-			}
-			if d.IsDir() {
-				if d.Name() == "testdata" || owners[path] {
-					return filepath.SkipDir
-				}
-				return nil
-			}
-			if !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
-				return nil
-			}
-			found, err := check(path)
-			if err != nil {
-				return err
-			}
-			rel, _ := filepath.Rel(root, path)
-			for _, f := range found {
-				problems = append(problems, rel+":"+f)
-			}
-			return nil
-		})
+	archtest.Scan(t, archtest.Opts{Lang: archtest.Go, Roots: []string{"services", "internal"}}, func(rel string, src []byte) {
+		if strings.HasPrefix(rel, "internal/obs/") || strings.HasPrefix(rel, "internal/httpx/") {
+			return
+		}
+		found, err := check(rel, src)
 		if err != nil {
 			t.Fatal(err)
 		}
-	}
+		for _, f := range found {
+			problems = append(problems, rel+":"+f)
+		}
+	})
 	sort.Strings(problems)
 	return problems
 }
@@ -128,9 +107,9 @@ func scanServiceSources(t *testing.T, check func(path string) ([]string, error))
 // variableErrorStatus returns "<line>: <call>" for every error write
 // (httpx.Error, http.Error) whose status is not a constant, and every
 // WriteHeader of an upstream's StatusCode.
-func variableErrorStatus(path string) ([]string, error) {
+func variableErrorStatus(rel string, src []byte) ([]string, error) {
 	fset := token.NewFileSet()
-	f, err := parser.ParseFile(fset, path, nil, 0)
+	f, err := parser.ParseFile(fset, rel, src, 0)
 	if err != nil {
 		return nil, err
 	}
@@ -167,9 +146,9 @@ func constantStatus(e ast.Expr) bool {
 }
 
 // silent5xx returns "<line>: <call>" for every unlogged 5xx write in path.
-func silent5xx(path string) ([]string, error) {
+func silent5xx(rel string, src []byte) ([]string, error) {
 	fset := token.NewFileSet()
-	f, err := parser.ParseFile(fset, path, nil, 0)
+	f, err := parser.ParseFile(fset, rel, src, 0)
 	if err != nil {
 		return nil, err
 	}

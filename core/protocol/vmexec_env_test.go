@@ -4,12 +4,12 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
-	"io/fs"
-	"path/filepath"
 	"reflect"
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/luckylhb90/bnbloc/internal/archtest"
 )
 
 func TestHostConfineFromEnv(t *testing.T) {
@@ -41,32 +41,14 @@ func TestHostConfineFromEnv(t *testing.T) {
 // allow lists without the workspace and resolved its own path differently).
 func TestVMExecEnvNamesOnlyInProtocol(t *testing.T) {
 	prefixes := []string{"BNBLOC_" + "CONFINE_", "BNBLOC_" + "VMEXEC_"}
-	root, err := filepath.Abs(filepath.Join("..", ".."))
-	if err != nil {
-		t.Fatal(err)
-	}
 	fset := token.NewFileSet()
-	err = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+	archtest.Scan(t, archtest.Opts{Lang: archtest.Go, Tests: true}, func(rel string, src []byte) {
+		if rel == "core/protocol/vmexec_env.go" {
+			return
+		}
+		f, err := parser.ParseFile(fset, rel, src, parser.SkipObjectResolution)
 		if err != nil {
-			return err
-		}
-		if d.IsDir() {
-			switch d.Name() {
-			case "node_modules", "target", ".git", "web", "apps":
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		if !strings.HasSuffix(path, ".go") {
-			return nil
-		}
-		rel, _ := filepath.Rel(root, path)
-		if filepath.ToSlash(rel) == "core/protocol/vmexec_env.go" {
-			return nil
-		}
-		f, err := parser.ParseFile(fset, path, nil, parser.SkipObjectResolution)
-		if err != nil {
-			return err
+			t.Fatal(err)
 		}
 		ast.Inspect(f, func(n ast.Node) bool {
 			lit, ok := n.(*ast.BasicLit)
@@ -81,9 +63,5 @@ func TestVMExecEnvNamesOnlyInProtocol(t *testing.T) {
 			}
 			return true
 		})
-		return nil
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 }

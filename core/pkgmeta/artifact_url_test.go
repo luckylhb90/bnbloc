@@ -1,12 +1,11 @@
 package pkgmeta
 
 import (
-	"io/fs"
-	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/luckylhb90/bnbloc/internal/archtest"
 )
 
 const testKey = "sha256/" + "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
@@ -49,32 +48,17 @@ func TestArtifactURLRoundTrip(t *testing.T) {
 // GatewayArtifactPath / ArtifactKeyOf (2026-10-12: three parsers, one
 // loose, compared keys from different parsers for entitlement).
 func TestArtifactURLOneOwner(t *testing.T) {
-	root := filepath.Join("..", "..")
 	var problems []string
-	for _, dir := range []string{"services", "internal", "cmd", "core"} {
-		err := filepath.WalkDir(filepath.Join(root, dir), func(path string, d fs.DirEntry, err error) error {
-			if err != nil || d.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
-				return err
-			}
-			rel, _ := filepath.Rel(root, path)
-			if strings.HasPrefix(filepath.ToSlash(rel), "core/pkgmeta/") {
-				return nil
-			}
-			raw, err := os.ReadFile(path)
-			if err != nil {
-				return err
-			}
-			for i, line := range strings.Split(string(raw), "\n") {
-				if strings.Contains(line, `"/v1/artifacts/"`) || strings.Contains(line, `/v1/artifacts/" +`) {
-					problems = append(problems, rel+":"+strconv.Itoa(i+1))
-				}
-			}
-			return nil
-		})
-		if err != nil {
-			t.Fatal(err)
+	archtest.Scan(t, archtest.Opts{Lang: archtest.Go, Roots: []string{"services", "internal", "cmd", "core"}}, func(rel string, src []byte) {
+		if strings.HasPrefix(rel, "core/pkgmeta/") {
+			return
 		}
-	}
+		for i, line := range strings.Split(string(src), "\n") {
+			if strings.Contains(line, `"/v1/artifacts/"`) || strings.Contains(line, `/v1/artifacts/" +`) {
+				problems = append(problems, rel+":"+strconv.Itoa(i+1))
+			}
+		}
+	})
 	if len(problems) > 0 {
 		t.Fatalf("the artifact route spelled outside pkgmeta (use GatewayArtifactURL/Path, ArtifactKeyOf):\n  %s", strings.Join(problems, "\n  "))
 	}

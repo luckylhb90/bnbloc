@@ -1,12 +1,11 @@
 package core
 
 import (
-	"io/fs"
-	"os"
-	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
+
+	"github.com/luckylhb90/bnbloc/internal/archtest"
 )
 
 func TestCleanRelPath(t *testing.T) {
@@ -56,32 +55,9 @@ func TestCleanRelPath(t *testing.T) {
 func TestCleanRelPathSingleOwner(t *testing.T) {
 	owners := map[string]bool{"core/relpath.go": true, "core/profile.go": true}
 	forbidden := regexp.MustCompile(`"\.\./"|[=!]= "\.\."`)
-	root, err := filepath.Abs("..")
-	if err != nil {
-		t.Fatal(err)
-	}
-	err = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if d.IsDir() {
-			switch d.Name() {
-			case "node_modules", "target", ".git", "web", "apps":
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		if !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
-			return nil
-		}
-		rel, _ := filepath.Rel(root, path)
-		rel = filepath.ToSlash(rel)
+	archtest.Scan(t, archtest.Opts{Lang: archtest.Go}, func(rel string, src []byte) {
 		if owners[rel] {
-			return nil
-		}
-		src, err := os.ReadFile(path)
-		if err != nil {
-			return err
+			return
 		}
 		for i, line := range strings.Split(string(src), "\n") {
 			if s := strings.TrimSpace(line); strings.HasPrefix(s, "//") {
@@ -91,9 +67,5 @@ func TestCleanRelPathSingleOwner(t *testing.T) {
 				t.Errorf("%s:%d checks a relative path by hand (%s): use core.CleanRelPath", rel, i+1, strings.TrimSpace(line))
 			}
 		}
-		return nil
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 }

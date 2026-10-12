@@ -1,13 +1,12 @@
 package svcauth
 
 import (
-	"io/fs"
-	"os"
-	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
 	"testing"
+
+	"github.com/luckylhb90/bnbloc/internal/archtest"
 )
 
 // scanSources returns "<file>: <what>" for every non-test Go file under
@@ -15,38 +14,22 @@ import (
 // source matches a rule.
 func scanSources(t *testing.T, rules map[string]*regexp.Regexp, allow map[string]string) []string {
 	t.Helper()
-	root := filepath.Join("..", "..")
 	var problems []string
-	for _, dir := range []string{"services", "internal", "cmd"} {
-		err := filepath.WalkDir(filepath.Join(root, dir), func(path string, d fs.DirEntry, err error) error {
-			if err != nil || d.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
-				return err
-			}
-			rel, _ := filepath.Rel(root, path)
-			rel = filepath.ToSlash(rel)
-			if strings.HasPrefix(rel, "internal/svcauth/") {
-				return nil
-			}
-			for prefix := range allow {
-				if strings.HasPrefix(rel, prefix) {
-					return nil
-				}
-			}
-			raw, err := os.ReadFile(path)
-			if err != nil {
-				return err
-			}
-			for what, re := range rules {
-				if re.Match(raw) {
-					problems = append(problems, rel+": "+what)
-				}
-			}
-			return nil
-		})
-		if err != nil {
-			t.Fatal(err)
+	archtest.Scan(t, archtest.Opts{Lang: archtest.Go, Roots: []string{"services", "internal", "cmd"}}, func(rel string, src []byte) {
+		if strings.HasPrefix(rel, "internal/svcauth/") {
+			return
 		}
-	}
+		for prefix := range allow {
+			if strings.HasPrefix(rel, prefix) {
+				return
+			}
+		}
+		for what, re := range rules {
+			if re.Match(src) {
+				problems = append(problems, rel+": "+what)
+			}
+		}
+	})
 	sort.Strings(problems)
 	return problems
 }
