@@ -11,11 +11,17 @@ import (
 	"github.com/luckylhb90/bnbloc/internal/wire"
 )
 
+// ErrRoomImportExists refuses a second provenance row for a room (room ids
+// are global: the key carries no tenant, so the row is written once).
+var ErrRoomImportExists = errors.New("store: room import provenance already recorded")
+
 // RoomImportStore persists the provenance of rooms created from a handoff
 // package import (wire.RoomHandoffInfo): which room the package came from, who
 // exported and imported it, and the source member list offered as invite
 // suggestions. It is written once, when the import creates the room.
 type RoomImportStore interface {
+	// PutRoomImport records a room's provenance in the ctx tenant;
+	// ErrRoomImportExists when the room already has one (in any tenant).
 	PutRoomImport(ctx context.Context, info wire.RoomHandoffInfo) error
 	// GetRoomImport returns the room's provenance; found=false for a room that
 	// was not created by an import.
@@ -42,7 +48,12 @@ func (m *MemoryRoomImports) PutRoomImport(ctx context.Context, info wire.RoomHan
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	info.SuggestedMembers = append([]wire.RoomExportMember(nil), info.SuggestedMembers...)
+	for k := range m.rows {
+		if k[1] == info.RoomID {
+			return ErrRoomImportExists
+		}
+	}
+	info.SuggestedMembers = append([]wire.RoomExportMember{}, info.SuggestedMembers...)
 	m.rows[[2]string{tid, info.RoomID}] = info
 	return nil
 }
@@ -55,6 +66,7 @@ func (m *MemoryRoomImports) GetRoomImport(ctx context.Context, roomID string) (w
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	info, ok := m.rows[[2]string{tid, roomID}]
+	info.SuggestedMembers = append([]wire.RoomExportMember{}, info.SuggestedMembers...)
 	return info, ok, nil
 }
 
@@ -85,7 +97,7 @@ func (s *MySQLRoomImports) PutRoomImport(ctx context.Context, info wire.RoomHand
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		tid, info.RoomID, info.SourceRoomID, info.SourceRoomName, info.SourceExportedAtMs,
 		info.SourceExportedBy, info.ImportedBy, info.ImportedAtMs, mj)
-	return err
+	return dupAs(err, ErrRoomImportExists)
 }
 
 func (s *MySQLRoomImports) GetRoomImport(ctx context.Context, roomID string) (wire.RoomHandoffInfo, bool, error) {

@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"sort"
+	"strings"
 	"sync"
 
 	"github.com/luckylhb90/bnbloc/internal/tenant"
@@ -15,6 +16,10 @@ import (
 // room sequence. Tasks are messages, not a separate board: the row only holds
 // status plus a title/author snapshot taken when the task was marked.
 
+// ErrMessageTaskTaken refuses a task on a (room, seq) another tenant holds:
+// the key carries no tenant, so a write never changes another tenant's row.
+var ErrMessageTaskTaken = errors.New("store: message task key held by another tenant")
+
 // MessageTaskStore persists message tasks. Every method is tenant-scoped by the
 // context's tenant.
 type MessageTaskStore interface {
@@ -23,7 +28,8 @@ type MessageTaskStore interface {
 	// GetMessageTask returns the task on one message, found=false when unmarked.
 	GetMessageTask(ctx context.Context, roomID string, seq int64) (t wire.MessageTask, found bool, err error)
 	// PutMessageTask upserts a task. On an existing row only the status and
-	// done fields change; the creation snapshot is kept.
+	// done fields change; the creation snapshot is kept. It returns the row
+	// as stored; ErrMessageTaskTaken when another tenant holds (room, seq).
 	PutMessageTask(ctx context.Context, t wire.MessageTask) (wire.MessageTask, error)
 	// DeleteMessageTask unmarks a message; removed=false when it was not a task.
 	DeleteMessageTask(ctx context.Context, roomID string, seq int64) (removed bool, err error)
@@ -78,6 +84,11 @@ func (s *MemoryMessageTasks) PutMessageTask(ctx context.Context, t wire.MessageT
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	rk := tid + "\x00" + t.RoomID
+	for k, byseq := range s.rows {
+		if _, held := byseq[t.Seq]; held && k != rk && strings.HasSuffix(k, "\x00"+t.RoomID) {
+			return wire.MessageTask{}, ErrMessageTaskTaken
+		}
+	}
 	if s.rows[rk] == nil {
 		s.rows[rk] = map[int64]wire.MessageTask{}
 	}
@@ -116,7 +127,7 @@ var _ MessageTaskStore = (*MySQLMessageTasks)(nil)
 
 const messageTaskCols = `room_id, channel_id, seq, status, title, message_author, created_by, created_at_ms, COALESCE(done_by, ''), COALESCE(done_at_ms, 0)`
 
-func scanMessageTask(row interface{ Scan(...any) error }) (wire.MessageTask, error) {
+func scanMessageTask(row rowScanner) (wire.MessageTask, error) {
 	var t wire.MessageTask
 	err := row.Scan(&t.RoomID, &t.ChannelID, &t.Seq, &t.Status, &t.Title, &t.MessageAuthor, &t.CreatedBy, &t.CreatedAtMs, &t.DoneBy, &t.DoneAtMs)
 	return t, err
@@ -127,21 +138,8 @@ func (s *MySQLMessageTasks) ListMessageTasks(ctx context.Context, roomID string)
 	if err != nil {
 		return nil, err
 	}
-	rows, err := s.DB.QueryContext(ctx, `SELECT `+messageTaskCols+` FROM message_tasks
-		WHERE tenant_id = ? AND room_id = ? ORDER BY seq`, tid, roomID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	out := []wire.MessageTask{}
-	for rows.Next() {
-		t, err := scanMessageTask(rows)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, t)
-	}
-	return out, rows.Err()
+	return queryAll(ctx, s.DB, `SELECT `+messageTaskCols+` FROM message_tasks
+		WHERE tenant_id = ? AND room_id = ? ORDER BY seq`, scanMessageTask, tid, roomID)
 }
 
 func (s *MySQLMessageTasks) GetMessageTask(ctx context.Context, roomID string, seq int64) (wire.MessageTask, bool, error) {
@@ -165,15 +163,16 @@ func (s *MySQLMessageTasks) PutMessageTask(ctx context.Context, t wire.MessageTa
 	if err != nil {
 		return wire.MessageTask{}, err
 	}
-	var doneAt any
-	if t.DoneAtMs > 0 {
-		doneAt = t.DoneAtMs
-	}
+	// The key (room_id, seq) carries no tenant: the update applies only to
+	// the ctx tenant's row; another tenant's row reads back as missing.
 	if _, err := s.DB.ExecContext(ctx, `INSERT INTO message_tasks
 		(tenant_id, room_id, channel_id, seq, status, title, message_author, created_by, created_at_ms, done_by, done_at_ms)
 		VALUES (?,?,?,?,?,?,?,?,?,?,?)
-		ON DUPLICATE KEY UPDATE status = VALUES(status), done_by = VALUES(done_by), done_at_ms = VALUES(done_at_ms)`,
-		tid, t.RoomID, t.ChannelID, t.Seq, t.Status, t.Title, t.MessageAuthor, t.CreatedBy, t.CreatedAtMs, nullStr(t.DoneBy), doneAt); err != nil {
+		ON DUPLICATE KEY UPDATE
+		  status = IF(tenant_id = VALUES(tenant_id), VALUES(status), status),
+		  done_by = IF(tenant_id = VALUES(tenant_id), VALUES(done_by), done_by),
+		  done_at_ms = IF(tenant_id = VALUES(tenant_id), VALUES(done_at_ms), done_at_ms)`,
+		tid, t.RoomID, t.ChannelID, t.Seq, t.Status, t.Title, t.MessageAuthor, t.CreatedBy, t.CreatedAtMs, nullIfZero(t.DoneBy), nullIfZero(t.DoneAtMs)); err != nil {
 		return wire.MessageTask{}, err
 	}
 	stored, found, err := s.GetMessageTask(ctx, t.RoomID, t.Seq)
@@ -181,7 +180,7 @@ func (s *MySQLMessageTasks) PutMessageTask(ctx context.Context, t wire.MessageTa
 		return wire.MessageTask{}, err
 	}
 	if !found {
-		return wire.MessageTask{}, sql.ErrNoRows
+		return wire.MessageTask{}, ErrMessageTaskTaken
 	}
 	return stored, nil
 }

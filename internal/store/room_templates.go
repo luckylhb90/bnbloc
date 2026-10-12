@@ -23,6 +23,15 @@ var ErrTemplateNotFound = errors.New("store: room template not found")
 // ErrTemplateForbidden reports a visible template the requester may not change.
 var ErrTemplateForbidden = errors.New("store: room template not owned by requester")
 
+// ErrTemplateExists refuses a template id already taken (ids are global: the
+// primary key carries no tenant).
+var ErrTemplateExists = errors.New("store: room template id already exists")
+
+// MaxTemplateList bounds ListTemplates on both backends: the newest
+// MaxTemplateList visible templates (there is no cursor; a tenant's
+// template library is expected to stay well below it).
+const MaxTemplateList = 200
+
 // TemplatePatch is a partial template update; nil fields are unchanged.
 type TemplatePatch struct {
 	Name        *string
@@ -34,9 +43,12 @@ type TemplatePatch struct {
 // RoomTemplateStore persists room templates. Every method is tenant-scoped
 // by the context's tenant.
 type RoomTemplateStore interface {
+	// CreateTemplate inserts a template; ErrTemplateExists when the id is
+	// taken in any tenant.
 	CreateTemplate(ctx context.Context, t wire.RoomTemplate) (wire.RoomTemplate, error)
 	// ListTemplates returns templates visible to viewer (only viewer's own
-	// when mineOnly), most recently updated first.
+	// when mineOnly), most recently updated first (then template id), at
+	// most MaxTemplateList.
 	ListTemplates(ctx context.Context, viewer string, mineOnly bool) ([]wire.RoomTemplate, error)
 	// GetTemplate returns a template visible to viewer.
 	GetTemplate(ctx context.Context, templateID, viewer string) (wire.RoomTemplate, error)
@@ -125,6 +137,11 @@ func (m *MemoryRoomTemplates) CreateTemplate(ctx context.Context, t wire.RoomTem
 	t = cloneTemplate(t)
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	for _, cur := range m.rows {
+		if cur.TemplateID == t.TemplateID {
+			return wire.RoomTemplate{}, ErrTemplateExists
+		}
+	}
 	m.rows[tid+"\x00"+t.TemplateID] = t
 	return cloneTemplate(t), nil
 }
@@ -149,6 +166,9 @@ func (m *MemoryRoomTemplates) ListTemplates(ctx context.Context, viewer string, 
 		}
 		return out[i].TemplateID < out[j].TemplateID
 	})
+	if len(out) > MaxTemplateList {
+		out = out[:MaxTemplateList]
+	}
 	return out, nil
 }
 
@@ -239,7 +259,7 @@ var _ RoomTemplateStore = (*MySQLRoomTemplates)(nil)
 
 const templateCols = `template_id, tenant_id, name, description, visibility, created_by, body_json, use_count, created_at_ms, updated_at_ms`
 
-func scanTemplate(row interface{ Scan(...any) error }) (wire.RoomTemplate, error) {
+func scanTemplate(row rowScanner) (wire.RoomTemplate, error) {
 	var t wire.RoomTemplate
 	var body []byte
 	if err := row.Scan(&t.TemplateID, &t.TenantID, &t.Name, &t.Description, &t.Visibility, &t.CreatedBy,
@@ -267,7 +287,7 @@ func (m *MySQLRoomTemplates) CreateTemplate(ctx context.Context, t wire.RoomTemp
 	_, err = m.DB.ExecContext(ctx, `INSERT INTO room_templates (`+templateCols+`) VALUES (?,?,?,?,?,?,?,?,?,?)`,
 		t.TemplateID, tid, t.Name, t.Description, t.Visibility, t.CreatedBy, body, t.UseCount, t.CreatedAtMs, t.UpdatedAtMs)
 	if err != nil {
-		return wire.RoomTemplate{}, err
+		return wire.RoomTemplate{}, dupAs(err, ErrTemplateExists)
 	}
 	return t, nil
 }
@@ -283,21 +303,8 @@ func (m *MySQLRoomTemplates) ListTemplates(ctx context.Context, viewer string, m
 		q += ` AND created_by = ?`
 		args = append(args, viewer)
 	}
-	q += ` ORDER BY updated_at_ms DESC, template_id LIMIT 200`
-	rows, err := m.DB.QueryContext(ctx, q, args...)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	out := []wire.RoomTemplate{}
-	for rows.Next() {
-		t, err := scanTemplate(rows)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, t)
-	}
-	return out, rows.Err()
+	q += ` ORDER BY updated_at_ms DESC, template_id LIMIT ?`
+	return queryAll(ctx, m.DB, q, scanTemplate, append(args, MaxTemplateList)...)
 }
 
 func (m *MySQLRoomTemplates) visible(ctx context.Context, tid, templateID, viewer string) (wire.RoomTemplate, error) {
@@ -349,8 +356,8 @@ func (m *MySQLRoomTemplates) UpdateTemplate(ctx context.Context, templateID, req
 	if err != nil {
 		return wire.RoomTemplate{}, err
 	}
-	if n, _ := res.RowsAffected(); n == 0 {
-		return wire.RoomTemplate{}, ErrTemplateNotFound
+	if err := requireMatched(res, ErrTemplateNotFound); err != nil {
+		return wire.RoomTemplate{}, err
 	}
 	return t, nil
 }
@@ -381,8 +388,5 @@ func (m *MySQLRoomTemplates) UseTemplate(ctx context.Context, templateID, viewer
 	if err != nil {
 		return err
 	}
-	if n, _ := res.RowsAffected(); n == 0 {
-		return ErrTemplateNotFound
-	}
-	return nil
+	return requireMatched(res, ErrTemplateNotFound)
 }

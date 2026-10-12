@@ -23,6 +23,13 @@ import (
 // ErrScheduleNotFound reports a schedule that does not exist in the room.
 var ErrScheduleNotFound = errors.New("store: schedule not found")
 
+// ErrScheduleExists refuses a schedule id already taken (ids are global: the
+// primary key carries no tenant).
+var ErrScheduleExists = errors.New("store: schedule id already exists")
+
+// MaxScheduleClaim bounds one ClaimDueSchedules call (and is its default).
+const MaxScheduleClaim = 100
+
 // ScheduleRunResult records one run (or skip) of a schedule.
 //
 // ClaimToken is the scheduler's claim of the slot. When it still matches the
@@ -44,9 +51,11 @@ type ScheduleRunResult struct {
 
 // RoomScheduleStore persists scheduled prompts.
 type RoomScheduleStore interface {
+	// CreateSchedule inserts a schedule; ErrScheduleExists when the id is
+	// taken in any tenant.
 	CreateSchedule(ctx context.Context, s wire.RoomSchedule) (wire.RoomSchedule, error)
 	GetSchedule(ctx context.Context, roomID, scheduleID string) (wire.RoomSchedule, error)
-	// ListSchedules returns the room's schedules, oldest first.
+	// ListSchedules returns the room's schedules, oldest first (then id).
 	ListSchedules(ctx context.Context, roomID string) ([]wire.RoomSchedule, error)
 	// CountSchedules returns how many schedules the room has, and how many
 	// of them createdBy owns.
@@ -56,11 +65,13 @@ type RoomScheduleStore interface {
 	// time) and drops any in-flight claim.
 	UpdateSchedule(ctx context.Context, s wire.RoomSchedule) error
 	DeleteSchedule(ctx context.Context, roomID, scheduleID string) error
-	// ClaimDueSchedules atomically claims up to limit enabled schedules whose
-	// next run is due at nowMs and that no live claim holds, stamping them
-	// with a fresh claim token (returned) until leaseUntilMs. Two concurrent
-	// claimers never receive the same row. The returned rows carry the
-	// claimed slot in NextRunAtMs.
+	// ClaimDueSchedules atomically claims up to clampLimit(limit,
+	// MaxScheduleClaim, MaxScheduleClaim) enabled schedules whose next run is
+	// due at nowMs and that no live claim holds (a claim is live strictly
+	// before its lease end, liveAt), earliest due first (then id), stamping
+	// them with a fresh claim token (returned) until leaseUntilMs. Two
+	// concurrent claimers never receive the same row. The returned rows carry
+	// the claimed slot in NextRunAtMs.
 	ClaimDueSchedules(ctx context.Context, nowMs, leaseUntilMs int64, limit int) (token string, rows []wire.RoomSchedule, err error)
 	// CompleteScheduleRun records a run (see ScheduleRunResult).
 	CompleteScheduleRun(ctx context.Context, r ScheduleRunResult) error
@@ -100,6 +111,9 @@ func (m *MemoryRoomSchedules) CreateSchedule(ctx context.Context, s wire.RoomSch
 	s.TenantID = tid
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if _, taken := m.rows[s.ScheduleID]; taken {
+		return wire.RoomSchedule{}, ErrScheduleExists
+	}
 	m.rows[s.ScheduleID] = &memSchedule{s: cloneSchedule(s)}
 	return s, nil
 }
@@ -182,7 +196,7 @@ func (m *MemoryRoomSchedules) UpdateSchedule(ctx context.Context, s wire.RoomSch
 	cur := r.s
 	cur.ChannelID, cur.Text, cur.Recipient, cur.Recurrence = s.ChannelID, s.Text, s.Recipient, s.Recurrence
 	cur.Timezone, cur.Enabled, cur.NextRunAtMs = s.Timezone, s.Enabled, s.NextRunAtMs
-	cur.LastStatus, cur.LastError, cur.UpdatedAtMs = s.LastStatus, s.LastError, s.UpdatedAtMs
+	cur.LastStatus, cur.LastError, cur.UpdatedAtMs = s.LastStatus, truncateRunError(s.LastError), s.UpdatedAtMs
 	r.s = cloneSchedule(cur)
 	r.claimToken, r.claimedUntil = "", 0
 	return nil
@@ -204,16 +218,22 @@ func (m *MemoryRoomSchedules) DeleteSchedule(ctx context.Context, roomID, schedu
 
 func (m *MemoryRoomSchedules) ClaimDueSchedules(_ context.Context, nowMs, leaseUntilMs int64, limit int) (string, []wire.RoomSchedule, error) {
 	token := newClaimToken()
+	limit = clampLimit(limit, MaxScheduleClaim, MaxScheduleClaim)
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	var due []*memSchedule
 	for _, r := range m.rows {
-		if r.s.Enabled && r.s.NextRunAtMs > 0 && r.s.NextRunAtMs <= nowMs && r.claimedUntil < nowMs {
+		if r.s.Enabled && r.s.NextRunAtMs > 0 && r.s.NextRunAtMs <= nowMs && !liveAt(r.claimedUntil, nowMs) {
 			due = append(due, r)
 		}
 	}
-	sort.Slice(due, func(i, j int) bool { return due[i].s.NextRunAtMs < due[j].s.NextRunAtMs })
-	if limit > 0 && len(due) > limit {
+	sort.Slice(due, func(i, j int) bool {
+		if due[i].s.NextRunAtMs != due[j].s.NextRunAtMs {
+			return due[i].s.NextRunAtMs < due[j].s.NextRunAtMs
+		}
+		return due[i].s.ScheduleID < due[j].s.ScheduleID
+	})
+	if len(due) > limit {
 		due = due[:limit]
 	}
 	out := make([]wire.RoomSchedule, 0, len(due))
@@ -274,7 +294,7 @@ var _ RoomScheduleStore = (*MySQLRoomSchedules)(nil)
 const scheduleCols = `schedule_id, tenant_id, room_id, channel_id, created_by, text, recipient_json, recurrence_json,
   timezone, enabled, next_run_at_ms, last_run_at_ms, last_status, last_error, last_seq, run_count, created_at_ms, updated_at_ms`
 
-func scanSchedule(row interface{ Scan(...any) error }) (wire.RoomSchedule, error) {
+func scanSchedule(row rowScanner) (wire.RoomSchedule, error) {
 	var s wire.RoomSchedule
 	var recip, recur []byte
 	var next, last sql.NullInt64
@@ -293,13 +313,6 @@ func scanSchedule(row interface{ Scan(...any) error }) (wire.RoomSchedule, error
 	return s, nil
 }
 
-func nullableMs(v int64) any {
-	if v <= 0 {
-		return nil
-	}
-	return v
-}
-
 func (m *MySQLRoomSchedules) CreateSchedule(ctx context.Context, s wire.RoomSchedule) (wire.RoomSchedule, error) {
 	tid, err := tenant.Require(ctx)
 	if err != nil {
@@ -316,10 +329,10 @@ func (m *MySQLRoomSchedules) CreateSchedule(ctx context.Context, s wire.RoomSche
 	}
 	_, err = m.DB.ExecContext(ctx, `INSERT INTO room_schedules (`+scheduleCols+`) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		s.ScheduleID, tid, s.RoomID, s.ChannelID, s.CreatedBy, s.Text, recip, recur,
-		s.Timezone, s.Enabled, nullableMs(s.NextRunAtMs), nullableMs(s.LastRunAtMs), s.LastStatus, s.LastError,
+		s.Timezone, s.Enabled, nullIfZero(s.NextRunAtMs), nullIfZero(s.LastRunAtMs), s.LastStatus, s.LastError,
 		s.LastSeq, s.RunCount, s.CreatedAtMs, s.UpdatedAtMs)
 	if err != nil {
-		return wire.RoomSchedule{}, err
+		return wire.RoomSchedule{}, dupAs(err, ErrScheduleExists)
 	}
 	return s, nil
 }
@@ -342,21 +355,8 @@ func (m *MySQLRoomSchedules) ListSchedules(ctx context.Context, roomID string) (
 	if err != nil {
 		return nil, err
 	}
-	rows, err := m.DB.QueryContext(ctx, `SELECT `+scheduleCols+` FROM room_schedules
-		WHERE tenant_id = ? AND room_id = ? ORDER BY created_at_ms, schedule_id`, tid, roomID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	out := []wire.RoomSchedule{}
-	for rows.Next() {
-		s, err := scanSchedule(rows)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, s)
-	}
-	return out, rows.Err()
+	return queryAll(ctx, m.DB, `SELECT `+scheduleCols+` FROM room_schedules
+		WHERE tenant_id = ? AND room_id = ? ORDER BY created_at_ms, schedule_id`, scanSchedule, tid, roomID)
 }
 
 func (m *MySQLRoomSchedules) CountSchedules(ctx context.Context, roomID, createdBy string) (int, int, error) {
@@ -387,7 +387,7 @@ func (m *MySQLRoomSchedules) UpdateSchedule(ctx context.Context, s wire.RoomSche
 		recurrence_json = ?, timezone = ?, enabled = ?, next_run_at_ms = ?, last_status = ?, last_error = ?,
 		updated_at_ms = ?, claim_token = NULL, claimed_until_ms = NULL
 		WHERE tenant_id = ? AND room_id = ? AND schedule_id = ?`,
-		s.ChannelID, s.Text, recip, recur, s.Timezone, s.Enabled, nullableMs(s.NextRunAtMs), s.LastStatus,
+		s.ChannelID, s.Text, recip, recur, s.Timezone, s.Enabled, nullIfZero(s.NextRunAtMs), s.LastStatus,
 		truncateRunError(s.LastError), s.UpdatedAtMs, tid, s.RoomID, s.ScheduleID)
 	if err != nil {
 		return err
@@ -416,31 +416,23 @@ func (m *MySQLRoomSchedules) DeleteSchedule(ctx context.Context, roomID, schedul
 // longer satisfies the claim predicate), then a read of the rows carrying
 // this call's fresh token.
 func (m *MySQLRoomSchedules) ClaimDueSchedules(ctx context.Context, nowMs, leaseUntilMs int64, limit int) (string, []wire.RoomSchedule, error) {
-	if limit <= 0 {
-		limit = 100
-	}
+	// cross-tenant: one scheduler claims every tenant's due schedules; each
+	// row carries its own tenant for the run.
 	token := newClaimToken()
+	// A claim is live while claimed_until_ms > now (liveAt), so it is
+	// claimable at claimed_until_ms <= now.
 	if _, err := m.DB.ExecContext(ctx, `UPDATE room_schedules SET claim_token = ?, claimed_until_ms = ?
 		WHERE enabled = 1 AND next_run_at_ms IS NOT NULL AND next_run_at_ms <= ?
-		  AND (claimed_until_ms IS NULL OR claimed_until_ms < ?)
-		ORDER BY next_run_at_ms LIMIT ?`, token, leaseUntilMs, nowMs, nowMs, limit); err != nil {
+		  AND (claimed_until_ms IS NULL OR claimed_until_ms <= ?)
+		ORDER BY next_run_at_ms, schedule_id LIMIT ?`, token, leaseUntilMs, nowMs, nowMs, clampLimit(limit, MaxScheduleClaim, MaxScheduleClaim)); err != nil {
 		return "", nil, err
 	}
-	rows, err := m.DB.QueryContext(ctx, `SELECT `+scheduleCols+` FROM room_schedules
-		WHERE claim_token = ? ORDER BY next_run_at_ms`, token)
+	out, err := queryAll(ctx, m.DB, `SELECT `+scheduleCols+` FROM room_schedules
+		WHERE claim_token = ? ORDER BY next_run_at_ms, schedule_id`, scanSchedule, token)
 	if err != nil {
 		return "", nil, err
 	}
-	defer rows.Close()
-	out := []wire.RoomSchedule{}
-	for rows.Next() {
-		s, err := scanSchedule(rows)
-		if err != nil {
-			return "", nil, err
-		}
-		out = append(out, s)
-	}
-	return token, out, rows.Err()
+	return token, out, nil
 }
 
 // newClaimToken mints a per-call claim token.
@@ -454,6 +446,8 @@ func newClaimToken() string {
 // assignments left to right, so every claim-guarded assignment reads the
 // claim_token BEFORE the final assignment releases it.
 func (m *MySQLRoomSchedules) CompleteScheduleRun(ctx context.Context, r ScheduleRunResult) error {
+	// cross-tenant: the scheduler records the run of a row it claimed; the
+	// schedule id is global.
 	ok := r.Status == wire.ScheduleRunOK
 	_, err := m.DB.ExecContext(ctx, `UPDATE room_schedules SET
 		last_run_at_ms = ?, last_status = ?, last_error = ?,
@@ -465,7 +459,7 @@ func (m *MySQLRoomSchedules) CompleteScheduleRun(ctx context.Context, r Schedule
 		WHERE schedule_id = ?`,
 		r.AtMs, r.Status, truncateRunError(r.Error),
 		ok, r.Seq, ok,
-		claimArg(r.ClaimToken), nullableMs(r.NextRunAtMs),
+		claimArg(r.ClaimToken), nullIfZero(r.NextRunAtMs),
 		claimArg(r.ClaimToken), r.Disable,
 		claimArg(r.ClaimToken),
 		claimArg(r.ClaimToken),

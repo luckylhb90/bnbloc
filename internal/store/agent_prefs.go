@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"errors"
 	"sync"
-	"time"
 
 	"github.com/luckylhb90/bnbloc/internal/tenant"
 )
@@ -34,9 +33,15 @@ type AgentPrefsStore interface {
 	// GetAgentPrefs returns the stored selection for (room, channel); an
 	// absent row is a zero value with ok=false, a read failure an error.
 	GetAgentPrefs(ctx context.Context, roomID, channelID, userID string) (AgentPrefs, bool, error)
-	// PutAgentPrefs upserts the selection for (room, channel).
+	// PutAgentPrefs upserts the selection for (room, channel): every field
+	// is replaced, UpdatedAtMs included (the caller stamps it).
 	PutAgentPrefs(ctx context.Context, p AgentPrefs, userID string) error
 }
+
+var (
+	_ AgentPrefsStore = (*MemoryAgentPrefs)(nil)
+	_ AgentPrefsStore = (*MySQLAgentPrefs)(nil)
+)
 
 // MySQLAgentPrefs is the MySQL-backed AgentPrefsStore.
 type MySQLAgentPrefs struct{ DB *sql.DB }
@@ -84,11 +89,10 @@ type MemoryAgentPrefs struct {
 	mu sync.Mutex
 	// Keyed (tenant, user, room, channel).
 	rows map[[4]string]AgentPrefs
-	now  func() int64
 }
 
 func NewMemoryAgentPrefs() *MemoryAgentPrefs {
-	return &MemoryAgentPrefs{rows: map[[4]string]AgentPrefs{}, now: func() int64 { return time.Now().UnixMilli() }}
+	return &MemoryAgentPrefs{rows: map[[4]string]AgentPrefs{}}
 }
 
 func (m *MemoryAgentPrefs) GetAgentPrefs(ctx context.Context, roomID, channelID, userID string) (AgentPrefs, bool, error) {
@@ -109,9 +113,6 @@ func (m *MemoryAgentPrefs) PutAgentPrefs(ctx context.Context, p AgentPrefs, user
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if p.UpdatedAtMs == 0 {
-		p.UpdatedAtMs = m.now()
-	}
 	m.rows[[4]string{tid, userID, p.RoomID, p.ChannelID}] = p
 	return nil
 }

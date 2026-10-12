@@ -51,8 +51,6 @@ var tenantFilterPending = map[string]bool{
 	"refresh_tokens.go:MySQLRefreshToken.GetRefreshFamily":                           true,
 	"refresh_tokens.go:MySQLRefreshToken.ListRefreshFamilies":                        true,
 	"refresh_tokens.go:MySQLRefreshToken.RevokeRefreshFamily":                        true,
-	"room_schedules.go:MySQLRoomSchedules.ClaimDueSchedules":                         true,
-	"room_schedules.go:MySQLRoomSchedules.CompleteScheduleRun":                       true,
 }
 
 var (

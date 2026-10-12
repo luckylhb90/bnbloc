@@ -25,7 +25,10 @@ type OrgSyncSubject struct {
 // room is added once; a member who leaves it is not re-added). Implementations
 // must be safe for concurrent use.
 type OrgSyncStore interface {
+	// PutOrgSyncSubject upserts a subject's attributes (every field
+	// replaced; nil Groups are stored as []).
 	PutOrgSyncSubject(ctx context.Context, s OrgSyncSubject) error
+	// ListOrgSyncSubjects returns every subject, by user id.
 	ListOrgSyncSubjects(ctx context.Context) ([]OrgSyncSubject, error)
 	DeleteOrgSyncSubject(ctx context.Context, userID string) error
 	// DefaultRoomGranted reports whether sync already added userID to roomID.
@@ -51,7 +54,7 @@ var _ OrgSyncStore = (*MemoryOrgSync)(nil)
 func (s *MemoryOrgSync) PutOrgSyncSubject(_ context.Context, sub OrgSyncSubject) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	sub.Groups = append([]string(nil), sub.Groups...)
+	sub.Groups = append([]string{}, sub.Groups...)
 	s.subjects[sub.UserID] = sub
 	return nil
 }
@@ -61,7 +64,7 @@ func (s *MemoryOrgSync) ListOrgSyncSubjects(_ context.Context) ([]OrgSyncSubject
 	defer s.mu.Unlock()
 	out := make([]OrgSyncSubject, 0, len(s.subjects))
 	for _, sub := range s.subjects {
-		sub.Groups = append([]string(nil), sub.Groups...)
+		sub.Groups = append([]string{}, sub.Groups...)
 		out = append(out, sub)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].UserID < out[j].UserID })
@@ -115,25 +118,17 @@ ON DUPLICATE KEY UPDATE email = VALUES(email), display_name = VALUES(display_nam
 }
 
 func (s *MySQLOrgSync) ListOrgSyncSubjects(ctx context.Context) ([]OrgSyncSubject, error) {
-	rows, err := s.DB.QueryContext(ctx, `
-SELECT user_id, email, display_name, department, groups_json, synced_at_ms FROM org_sync_subjects ORDER BY user_id`)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var out []OrgSyncSubject
-	for rows.Next() {
-		var sub OrgSyncSubject
-		var raw string
-		if err := rows.Scan(&sub.UserID, &sub.Email, &sub.DisplayName, &sub.Department, &raw, &sub.SyncedAtMs); err != nil {
-			return nil, err
-		}
-		if err := json.Unmarshal([]byte(raw), &sub.Groups); err != nil {
-			return nil, err
-		}
-		out = append(out, sub)
-	}
-	return out, rows.Err()
+	return queryAll(ctx, s.DB, `
+SELECT user_id, email, display_name, department, groups_json, synced_at_ms FROM org_sync_subjects ORDER BY user_id`,
+		func(row rowScanner) (OrgSyncSubject, error) {
+			var sub OrgSyncSubject
+			var raw string
+			if err := row.Scan(&sub.UserID, &sub.Email, &sub.DisplayName, &sub.Department, &raw, &sub.SyncedAtMs); err != nil {
+				return sub, err
+			}
+			sub.Groups = []string{}
+			return sub, json.Unmarshal([]byte(raw), &sub.Groups)
+		})
 }
 
 func (s *MySQLOrgSync) DeleteOrgSyncSubject(ctx context.Context, userID string) error {

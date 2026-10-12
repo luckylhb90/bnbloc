@@ -59,8 +59,9 @@ func DisplayName(userID, stored string) string {
 	return userID
 }
 
-// UserProfileStore persists users' chosen display names. User ids match
-// case-insensitively (the MySQL collation; the memory store folds case).
+// UserProfileStore persists users' chosen display names. It is global (not
+// per tenant). User ids compare exactly (D2: a case variant is another
+// subject).
 type UserProfileStore interface {
 	// DisplayNames returns the stored display names of ids, keyed by the id
 	// as given; an id with no stored name is absent (apply DisplayName).
@@ -73,7 +74,7 @@ type UserProfileStore interface {
 // MemoryUserProfiles is the in-memory UserProfileStore.
 type MemoryUserProfiles struct {
 	mu    sync.Mutex
-	names map[string]string // lower(user id) -> display name
+	names map[string]string // user id -> display name
 }
 
 // NewMemoryUserProfiles returns an empty in-memory profile store.
