@@ -116,17 +116,23 @@ prompts: [{id, title, body, variables: [{name, label?, default?, options?}], tag
   `starters` pack holds the general-purpose ones). The pack's author flags
   them; the room's owner chooses by turning the pack on, so a room keeps no
   second list of its own, and the web keeps none either. A member's own
-  packs add no starters.
+  packs add no starters. A room template names prompt packs
+  (`body.promptPacks`, captured from the room's prompt-pack uses by "Save
+  as template"); a room made from it gets them as room uses (those the
+  creator may use, `contentuse.Usable`), so its starters come the same way.
+  `TestOneStarterMechanism` fails on a second starter list.
 - **The personal pack.** "Save as prompt" on a message
   (`POST /v1/content-components/prompts`) appends the prompt to the
   member's own pack `my-prompts` ("My prompts") as a new version (patch
   bump), creating it, and turning it on for them, on the first save. It is
   a normal pack: viewable, editable and deletable in the Library.
-- **Usage counts.** `content_prompt_uses (component_id, prompt_id,
-  use_count, last_used_at_ms)` counts insertions, one upsert per insertion
+- **Usage counts.** `content_prompt_uses (tenant_id, component_id,
+  prompt_id, use_count, last_used_at_ms)` counts insertions per
+  organization, one upsert per insertion
   (`POST /v1/content-components/{id}/prompts/{promptId}/use`, readable packs
-  only), never per keystroke; views carry each prompt's `uses`. Deleting the
-  component deletes its counts.
+  only, built-in ones included), never per keystroke; views carry each
+  prompt's `uses` in the caller's organization. Deleting the component
+  deletes its counts.
 - **Expert quick prompts** may point at a pack's prompt (`{title?, ref:
   "pack/prompt-id"}`, the pack named in `requires.prompts`). Views resolve
   the reference for the viewer, and in the room for room uses and `?room=`
@@ -220,11 +226,17 @@ Tables (migration `2026_10_content_components`):
   `2026_10_agent_jobs_expert_usage`): an expert's runs and distinct
   requesters; a pack's members are its `member` uses. Each count stops at
   `store.MaxUsageCount` (a card's count is a badge, bounded like unread).
+  Every count is the caller's organization's: built-in and platform
+  content is used across organizations, so the use reads
+  (`CountContentUses`, `CountMemberUses`, on `idx_content_uses_component
+  (component_id, tenant_id, scope_kind)`) and the prompt counts take the
+  tenant (migration `2026_10_content_use_counts_tenant`).
 - `content_permission_acks`: a member confirmed a version's declared
   permissions (first use).
-- `content_prompt_uses`: per-prompt insertion counts of prompt packs
-  (migration `2026_10_prompt_packs`, which also dropped the former prompt
-  library's `prompts` table).
+- `content_prompt_uses`: per-organization, per-prompt insertion counts of
+  prompt packs (migration `2026_10_prompt_packs`, which also dropped the
+  former prompt library's `prompts` table; `tenant_id` joined the key in
+  `2026_10_content_use_counts_tenant`).
 - `content_room_shares (room_id, component_id)`: an author's standing share
   with a room (tenant, version, author, note), moved forward (never back)
   by a later share, deleted by its revocation or with the component

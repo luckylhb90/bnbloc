@@ -1126,7 +1126,12 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   path (core's lists own them) and no language.
 - **Every starter prompt is a prompt pack's** (`starterChoices`): the
   room's packs' starters, then the built-in packs' (`starters`). Never add
-  a starter list of the web's own.
+  a starter list of the web's own, nor of any other record: a room
+  template names prompt packs (`body.promptPacks`), which a room made from
+  it gets as room content uses (`services/room/template_packs.go`:
+  `contentuse.Usable` for the creator, then `PutContentUse`).
+  `TestOneStarterMechanism` fails on a starter list in Go, the schema or
+  the web.
 - **Content requests on behalf of a job** (room tools `save_component`,
   `get_component`, …) use the `?job=&room=` grant and act as the job's human
   requester under the dispatch authority rules. Never save content as the
@@ -1136,6 +1141,14 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   `bnbloc.prompt.package/v1` manifest; "Save as prompt" appends to the
   member's `my-prompts` pack; count insertions with `RecordContentPromptUse`
   (once per insertion). Never add a second prompt store or route.
+- **A use count is one organization's.** Built-in and platform content is
+  used by every organization, so every use-count write and read takes the
+  caller's effective tenant (`RecordContentPromptUse`,
+  `ContentPromptUses`, `CountContentUses`, `CountMemberUses`; an empty
+  tenant is `tenant.ErrNoTenant`), and `content_prompt_uses` keys on it.
+  Never mark a count's SQL `cross-tenant`;
+  `TestContractContentComponentStoreTenantUseCounts` checks organization
+  A's uses never show in organization B's counts.
 - **A dropped table stays creatable for locked migrations:** when a table
   leaves `schema.sql`, add it to `retiredTables` (`schema_ddl.go`) with the
   dropping migration's id; never edit the locked migration. A dropped column

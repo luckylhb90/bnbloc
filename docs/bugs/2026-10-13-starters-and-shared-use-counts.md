@@ -1,7 +1,12 @@
 # A template's own starter list, and use counts shared across organizations (2026-10-13)
 
-Status: open. The two follow-ups of
+Status: fixed. The two follow-ups of
 `docs/prd/2026-10-13-builder-format-skill-and-builtin-starters.md`.
+
+Landing commits: 86434d1 (templates name prompt packs; the starter list,
+its limits and UI path deleted; `TestOneStarterMechanism`), 4b8451d
+(per-organization use counts; migration
+`2026_10_content_use_counts_tenant`).
 
 ## 1. A second starter mechanism in room templates
 

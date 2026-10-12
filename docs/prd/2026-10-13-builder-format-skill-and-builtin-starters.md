@@ -11,6 +11,7 @@ prefills read the builder's quick prompts), 97dd10c (the built-in
 Follow-ups noticed, not in scope: a room template's `starterPrompts`
 (`TemplateStartCard`) is a third starter list; prompt-use counts of a
 built-in pack (`content_prompt_uses`) are one row across organizations.
+Both fixed in `docs/bugs/2026-10-13-starters-and-shared-use-counts.md`.
 
 ## Intent
 
