@@ -6,8 +6,6 @@ import {
   cachedWorkshop,
   improvePrompt,
   libraryTabOf,
-  librarySaves,
-  librarySnapshot,
   rememberWorkshop,
   tryItDraft,
   workshopAgent,
@@ -100,17 +98,3 @@ eq(cachedWorkshop(storage, "maya"), "r-new", "cached per member (case-insensitiv
 eq(cachedWorkshop(storage, "jack"), null, "another member");
 eq(cachedWorkshop(null, "maya"), null, "no storage");
 
-// Saves since a snapshot: a new own component or a higher latest version;
-// someone else's or built-in content never counts.
-const before = librarySnapshot([comp({ id: "a", latestVersion: "1.0.0" }), comp({ id: "b", latestVersion: "2.0.0" }), comp({ id: "x", mine: false })]);
-eq(
-  librarySaves(before, [
-    comp({ id: "a", latestVersion: "1.0.1" }),
-    comp({ id: "b", latestVersion: "2.0.0" }),
-    comp({ id: "c", latestVersion: "1.0.0" }),
-    comp({ id: "x", mine: false, latestVersion: "9.0.0" }),
-    comp({ id: "cc_builtin_expert-builder", mine: false, scope: "builtin" }),
-  ]).map((c) => c.id),
-  ["a", "c"],
-  "saves since the snapshot",
-);

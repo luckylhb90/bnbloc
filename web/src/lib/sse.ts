@@ -39,6 +39,8 @@ const ROOM_EVENT_KINDS = [
   "task_updated",
   // A room's experts, room expert and room packs changed (transient).
   "content_uses_changed",
+  // The room tools saved or submitted content for a member (transient).
+  "content_saved",
 ];
 
 // subscribeRoom opens an SSE stream for a room's live events. EventSource cannot

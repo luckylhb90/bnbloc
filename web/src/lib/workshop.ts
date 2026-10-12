@@ -2,10 +2,10 @@
 // authoring by conversation): "Create with AI" opens the member's private
 // workshop room with the built-in builder expert picked and an editable
 // prompt prefilled. The helpers here are pure (prefill texts, which agent
-// runs the builder, which room is the workshop, what a save changed) so they
-// are unit-tested; the view wiring lives in views/library/useWorkshop.ts.
+// runs the builder, which room is the workshop) so they
+// are unit-tested; the view wiring lives in views/library/workshopFlow.ts.
 
-import { contentKindWord, contentLabel, compareVersions, type ContentComponent, type ContentKind } from "./contentComponents.ts";
+import { contentKindWord, contentLabel, type ContentComponent, type ContentKind } from "./contentComponents.ts";
 import { defaultPlatformChoice, type OwnAgent } from "./onboarding.ts";
 import type { PlatformAgent, PlatformChoice } from "./platformAgents.ts";
 
@@ -129,23 +129,4 @@ export function rememberWorkshop(storage: Pick<Storage, "setItem"> | null, subje
   } catch {
     // Storage full or blocked: the lookup finds the room again.
   }
-}
-
-// LibrarySnapshot is the member's own components by id → latest version.
-export type LibrarySnapshot = ReadonlyMap<string, string>;
-
-export function librarySnapshot(list: readonly ContentComponent[]): LibrarySnapshot {
-  const out = new Map<string, string>();
-  for (const c of list) if (c.mine) out.set(c.id, c.latestVersion);
-  return out;
-}
-
-// librarySaves lists what was saved since the snapshot: a new own component,
-// or an own component at a higher latest version.
-export function librarySaves(before: LibrarySnapshot, after: readonly ContentComponent[]): ContentComponent[] {
-  return after.filter((c) => {
-    if (!c.mine) return false;
-    const prev = before.get(c.id);
-    return prev === undefined || compareVersions(c.latestVersion, prev) > 0;
-  });
 }

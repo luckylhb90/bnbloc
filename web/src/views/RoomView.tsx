@@ -47,6 +47,7 @@ import { SaveTemplateDialog } from "@/views/room/SaveTemplateDialog";
 import { TemplateStartCard } from "@/views/room/TemplateStartCard";
 import { SchedulesDialog } from "@/views/room/SchedulesDialog";
 import { RunsDialog } from "@/views/room/RunsDialog";
+import { CONTENT_SAVED, contentSaves, parseContentSaved } from "@/lib/contentSavedEvents";
 import { CONTENT_USES_CHANGED, contentUsesChanged } from "@/lib/contentUsesEvents";
 import { useWorkshopSaves } from "@/views/room/useWorkshopSaves";
 
@@ -168,8 +169,9 @@ export function RoomView({
   });
   const { feed, setFeed } = conversation;
   useLayoutEffect(scroller.settle, [feed, scroller.settle]);
-  // In the expert workshop, what the builder saves is announced as it lands.
-  useWorkshopSaves(roomId, subject, feed);
+  // What the room tools save for the member is announced as it lands
+  // (content_saved).
+  useWorkshopSaves(roomId, subject);
 
   // Stream events dispatch through the latest handlers (activity first, then
   // the roster, then the feed) without resubscribing.
@@ -203,6 +205,11 @@ export function RoomView({
     }
     if (e.kind === CONTENT_USES_CHANGED) {
       contentUsesChanged.emit(roomId);
+      return;
+    }
+    if (e.kind === CONTENT_SAVED) {
+      const saved = parseContentSaved(e.payload);
+      if (saved) contentSaves.emit(roomId, saved);
       return;
     }
     conversation.applyEvent(e);
