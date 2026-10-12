@@ -21,16 +21,48 @@ func NewMySQLContentComponents(db *sql.DB) *MySQLContentComponents {
 
 var _ ContentComponentStore = (*MySQLContentComponents)(nil)
 
-const contentComponentCols = `id, kind, name, tenant_id, owner, scope, status, latest_version, display_name, description, category, source_id, shared_by, created_at_ms, updated_at_ms`
+const contentComponentCols = `id, kind, name, tenant_id, owner, scope, status, latest_version, display_name, description, category, source_id, shared_by, enabled_tenants, created_at_ms, updated_at_ms`
 
 func scanContentComponent(row interface{ Scan(...any) error }) (ContentComponent, error) {
 	var c ContentComponent
 	var scope, status string
-	if err := row.Scan(&c.ID, &c.Kind, &c.Name, &c.TenantID, &c.Owner, &scope, &status, &c.LatestVersion, &c.DisplayName, &c.Description, &c.Category, &c.SourceID, &c.SharedBy, &c.CreatedAtMs, &c.UpdatedAtMs); err != nil {
+	var tenants sql.NullString
+	if err := row.Scan(&c.ID, &c.Kind, &c.Name, &c.TenantID, &c.Owner, &scope, &status, &c.LatestVersion, &c.DisplayName, &c.Description, &c.Category, &c.SourceID, &c.SharedBy, &tenants, &c.CreatedAtMs, &c.UpdatedAtMs); err != nil {
 		return ContentComponent{}, err
 	}
 	c.Scope, c.Status = ContentScope(scope), ContentStatus(status)
+	if tenants.Valid && tenants.String != "" && tenants.String != "null" {
+		if err := json.Unmarshal([]byte(tenants.String), &c.EnabledTenants); err != nil {
+			return ContentComponent{}, fmt.Errorf("content component %s enabled_tenants: %w", c.ID, err)
+		}
+		if len(c.EnabledTenants) == 0 {
+			c.EnabledTenants = nil
+		}
+	}
 	return c, nil
+}
+
+// contentTenantsArg is the enabled_tenants argument (NULL = every tenant).
+func contentTenantsArg(tenants []string) (any, error) {
+	if len(tenants) == 0 {
+		return nil, nil
+	}
+	return jsonArg(tenants)
+}
+
+// contentOrgName is the org_name of a row: its name at organization scope
+// (the column holding UNIQUE (tenant_id, kind, org_name)), NULL otherwise.
+func contentOrgName(c ContentComponent) any {
+	if c.Scope == ContentScopeOrg {
+		return c.Name
+	}
+	return nil
+}
+
+// isOrgNameClash reports a duplicate on the organization name key.
+func isOrgNameClash(err error) bool {
+	var me *mysql.MySQLError
+	return errors.As(err, &me) && me.Number == mysqlErrDupEntry && strings.Contains(me.Message, "uq_content_components_org_name")
 }
 
 const contentVersionCols = `component_id, version, manifest_json, bundle_blob_key, sha256, size_bytes, signature, created_by, created_at_ms`
@@ -75,8 +107,15 @@ func (s *MySQLContentComponents) CreateContentComponent(ctx context.Context, c C
 		return err
 	}
 	defer tx.Rollback()
-	_, err = tx.ExecContext(ctx, `INSERT INTO content_components (`+contentComponentCols+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		c.ID, c.Kind, c.Name, c.TenantID, c.Owner, string(c.Scope), string(c.Status), v.Version, c.DisplayName, c.Description, c.Category, c.SourceID, c.SharedBy, c.CreatedAtMs, c.UpdatedAtMs)
+	tenants, err := contentTenantsArg(c.EnabledTenants)
+	if err != nil {
+		return err
+	}
+	_, err = tx.ExecContext(ctx, `INSERT INTO content_components (`+contentComponentCols+`, org_name) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		c.ID, c.Kind, c.Name, c.TenantID, c.Owner, string(c.Scope), string(c.Status), v.Version, c.DisplayName, c.Description, c.Category, c.SourceID, c.SharedBy, tenants, c.CreatedAtMs, c.UpdatedAtMs, contentOrgName(c))
+	if isOrgNameClash(err) {
+		return ErrContentOrgNameTaken
+	}
 	if isDupEntry(err) {
 		return ErrContentExists
 	}
@@ -150,6 +189,9 @@ func (s *MySQLContentComponents) ListContentComponents(ctx context.Context, q Co
 	if q.SourceID != "" {
 		where, args = append(where, "source_id = ?"), append(args, q.SourceID)
 	}
+	if q.Name != "" {
+		where, args = append(where, "name = ?"), append(args, q.Name)
+	}
 	query := `SELECT ` + contentComponentCols + ` FROM content_components`
 	if len(where) > 0 {
 		query += " WHERE " + strings.Join(where, " AND ")
@@ -212,6 +254,7 @@ func (s *MySQLContentComponents) DeleteContentComponent(ctx context.Context, id 
 	defer tx.Rollback()
 	for _, q := range []string{
 		`DELETE FROM content_publish_requests WHERE component_id = ?`,
+		`DELETE FROM content_room_shares WHERE component_id = ?`,
 		`DELETE FROM content_prompt_uses WHERE component_id = ?`,
 		`DELETE FROM content_permission_acks WHERE component_id = ?`,
 		`DELETE FROM content_component_uses WHERE component_id = ?`,
@@ -226,10 +269,35 @@ func (s *MySQLContentComponents) DeleteContentComponent(ctx context.Context, id 
 }
 
 func (s *MySQLContentComponents) SetContentComponentStatus(ctx context.Context, id string, status ContentStatus, atMs int64) error {
-	res, err := s.DB.ExecContext(ctx, `UPDATE content_components SET status = ?, updated_at_ms = ? WHERE id = ?`, string(status), atMs, id)
+	// Activating an organization row claims its name: a row that predates
+	// the name key may hold none (2026_10_content_org_names kept the
+	// oldest of any duplicates).
+	res, err := s.DB.ExecContext(ctx, `UPDATE content_components SET status = ?, updated_at_ms = ?,
+  org_name = IF(scope = 'org' AND ? = 'active', name, org_name) WHERE id = ?`, string(status), atMs, string(status), id)
+	if isOrgNameClash(err) {
+		return ErrContentOrgNameTaken
+	}
 	if err != nil {
 		return err
 	}
+	return s.requireUpdated(ctx, res, id)
+}
+
+func (s *MySQLContentComponents) SetContentComponentTenants(ctx context.Context, id string, tenants []string, atMs int64) error {
+	arg, err := contentTenantsArg(tenants)
+	if err != nil {
+		return err
+	}
+	res, err := s.DB.ExecContext(ctx, `UPDATE content_components SET enabled_tenants = ?, updated_at_ms = ? WHERE id = ?`, arg, atMs, id)
+	if err != nil {
+		return err
+	}
+	return s.requireUpdated(ctx, res, id)
+}
+
+// requireUpdated maps an UPDATE that matched no row to ErrContentNotFound
+// (an UPDATE that changed nothing still matched).
+func (s *MySQLContentComponents) requireUpdated(ctx context.Context, res sql.Result, id string) error {
 	if n, _ := res.RowsAffected(); n == 0 {
 		var one int
 		if err := s.DB.QueryRowContext(ctx, `SELECT 1 FROM content_components WHERE id = ?`, id).Scan(&one); errors.Is(err, sql.ErrNoRows) {

@@ -220,6 +220,13 @@ func (o *overlay) SetContentComponentStatus(ctx context.Context, id string, stat
 	return o.ContentComponentStore.SetContentComponentStatus(ctx, id, status, atMs)
 }
 
+func (o *overlay) SetContentComponentTenants(ctx context.Context, id string, tenants []string, atMs int64) error {
+	if IsBuiltinID(id) {
+		return ErrReadOnly
+	}
+	return o.ContentComponentStore.SetContentComponentTenants(ctx, id, tenants, atMs)
+}
+
 // PutContentUse checks that a built-in component exists before its use is
 // stored (the store cannot: built-in components have no rows).
 func (o *overlay) PutContentUse(ctx context.Context, u store.ContentUse) error {
@@ -245,7 +252,7 @@ func (o *overlay) GetContentComponent(ctx context.Context, id string) (store.Con
 // built-in content has no tenant and no owner, so only queries without
 // those filters that ask for the builtin scope (or name the id) list it.
 func admits(q store.ContentComponentQuery, c store.ContentComponent) bool {
-	if q.TenantID != "" || q.Owner != "" || q.SourceID != "" || (q.Kind != "" && q.Kind != c.Kind) {
+	if q.TenantID != "" || q.Owner != "" || q.SourceID != "" || (q.Kind != "" && q.Kind != c.Kind) || (q.Name != "" && q.Name != c.Name) {
 		return false
 	}
 	if len(q.IDs) > 0 {

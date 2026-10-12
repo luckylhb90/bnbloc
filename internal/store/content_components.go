@@ -76,9 +76,13 @@ type ContentComponent struct {
 	// publication was made from ("" for an original).
 	SourceID string
 	// SharedBy is the author of a shared copy (its Owner is the recipient).
-	SharedBy    string
-	CreatedAtMs int64
-	UpdatedAtMs int64
+	SharedBy string
+	// EnabledTenants restricts platform content to some organizations (nil
+	// = every organization), the component tenant scope executable records
+	// carry (extpipe.Record.EnabledTenants).
+	EnabledTenants []string
+	CreatedAtMs    int64
+	UpdatedAtMs    int64
 }
 
 // Author is whose content the component is: the author of a shared copy,
@@ -152,7 +156,10 @@ type ContentComponentQuery struct {
 	IDs      []string
 	// SourceID lists the copies and publications made from one component.
 	SourceID string
-	Limit    int
+	// Name lists the components of one name (an organization's name is
+	// unique per kind; ErrContentOrgNameTaken).
+	Name  string
+	Limit int
 }
 
 // MaxContentList bounds one listing.
@@ -167,6 +174,11 @@ var (
 	// ErrContentVersionConflict: the version exists, or latest moved under
 	// a concurrent save.
 	ErrContentVersionConflict = errors.New("store: content component version conflict")
+	// ErrContentOrgNameTaken: the organization already has a component of
+	// that kind and name. An organization row reserves its name whatever
+	// its status (an unpublished one can be restored), so name@range
+	// references never pick between two authors' org components.
+	ErrContentOrgNameTaken = errors.New("store: the organization already has a content component of that name")
 )
 
 // ContentComponentStore persists content components. Implementations are
@@ -192,8 +204,12 @@ type ContentComponentStore interface {
 	// collects them).
 	DeleteContentComponent(ctx context.Context, id string) error
 	// SetContentComponentStatus changes a component's status (unpublish,
-	// restore).
+	// restore). Restoring an organization row claims its name
+	// (ErrContentOrgNameTaken when another row holds it).
 	SetContentComponentStatus(ctx context.Context, id string, status ContentStatus, atMs int64) error
+	// SetContentComponentTenants restricts a component to tenants (nil
+	// lifts the restriction): platform content's tenant scope.
+	SetContentComponentTenants(ctx context.Context, id string, tenants []string, atMs int64) error
 
 	// PutContentUse upserts a use by (scope kind, scope id, component).
 	PutContentUse(ctx context.Context, u ContentUse) error
@@ -212,6 +228,7 @@ type ContentComponentStore interface {
 
 	ContentPromptUseStore
 	ContentPublishRequestStore
+	ContentRoomShareStore
 }
 
 func contentLimit(n int) int {
@@ -252,6 +269,9 @@ func (q ContentComponentQuery) admits(c ContentComponent) bool {
 	if q.SourceID != "" && c.SourceID != q.SourceID {
 		return false
 	}
+	if q.Name != "" && c.Name != q.Name {
+		return false
+	}
 	return true
 }
 
@@ -264,12 +284,13 @@ type MemoryContentComponents struct {
 	acks       map[string]ContentAck                // subject\x00component\x00version
 	promptUses map[string]map[string]int64          // component -> prompt -> uses
 	requests   map[string]ContentPublishRequest     // request id -> request
+	roomShares map[string]ContentRoomShare          // room\x00component -> share
 }
 
 // NewMemoryContentComponents returns an empty in-memory store.
 func NewMemoryContentComponents() *MemoryContentComponents {
 	return &MemoryContentComponents{components: map[string]ContentComponent{}, versions: map[string][]ContentComponentVersion{}, uses: map[string]ContentUse{}, acks: map[string]ContentAck{},
-		promptUses: map[string]map[string]int64{}, requests: map[string]ContentPublishRequest{}}
+		promptUses: map[string]map[string]int64{}, requests: map[string]ContentPublishRequest{}, roomShares: map[string]ContentRoomShare{}}
 }
 
 var _ ContentComponentStore = (*MemoryContentComponents)(nil)
@@ -288,7 +309,11 @@ func (s *MemoryContentComponents) CreateContentComponent(_ context.Context, c Co
 		if contentNameKey(other) == contentNameKey(c) {
 			return ErrContentExists
 		}
+		if c.Scope == ContentScopeOrg && other.Scope == ContentScopeOrg && other.TenantID == c.TenantID && other.Kind == c.Kind && other.Name == c.Name {
+			return ErrContentOrgNameTaken
+		}
 	}
+	c.EnabledTenants = append([]string(nil), c.EnabledTenants...)
 	c.LatestVersion = v.Version
 	s.components[c.ID] = c
 	v.ComponentID = c.ID
@@ -419,6 +444,11 @@ func (s *MemoryContentComponents) DeleteContentComponent(_ context.Context, id s
 			delete(s.requests, rid)
 		}
 	}
+	for k, sh := range s.roomShares {
+		if sh.ComponentID == id {
+			delete(s.roomShares, k)
+		}
+	}
 	return nil
 }
 
@@ -430,6 +460,21 @@ func (s *MemoryContentComponents) SetContentComponentStatus(_ context.Context, i
 		return ErrContentNotFound
 	}
 	c.Status, c.UpdatedAtMs = status, atMs
+	s.components[id] = c
+	return nil
+}
+
+func (s *MemoryContentComponents) SetContentComponentTenants(_ context.Context, id string, tenants []string, atMs int64) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	c, ok := s.components[id]
+	if !ok {
+		return ErrContentNotFound
+	}
+	c.EnabledTenants, c.UpdatedAtMs = append([]string(nil), tenants...), atMs
+	if len(c.EnabledTenants) == 0 {
+		c.EnabledTenants = nil
+	}
 	s.components[id] = c
 	return nil
 }

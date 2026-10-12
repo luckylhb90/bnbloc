@@ -730,7 +730,10 @@ CREATE TABLE IF NOT EXISTS user_profiles (
 -- active | pending | retired. display_name / description / category are the
 -- latest version's. A shared copy (owner = the recipient, shared_by = the
 -- author) and an organization publication (owner = the author) name the
--- author's component they were made from in source_id.
+-- author's component they were made from in source_id. enabled_tenants
+-- restricts platform content to some organizations (NULL = every one).
+-- org_name is the name of an organization row (NULL otherwise): an
+-- organization has one component of a kind and name.
 CREATE TABLE IF NOT EXISTS content_components (
   id              VARCHAR(64) NOT NULL PRIMARY KEY,
   kind            VARCHAR(64) NOT NULL,
@@ -745,9 +748,12 @@ CREATE TABLE IF NOT EXISTS content_components (
   category        VARCHAR(64) NOT NULL DEFAULT '',
   source_id       VARCHAR(64) NOT NULL DEFAULT '',
   shared_by       VARCHAR(128) NOT NULL DEFAULT '',
+  enabled_tenants JSON NULL,
+  org_name        VARCHAR(64) NULL,
   created_at_ms   BIGINT NOT NULL,
   updated_at_ms   BIGINT NOT NULL,
   UNIQUE KEY uq_content_components_name (tenant_id, scope, owner, kind, name, source_id),
+  UNIQUE KEY uq_content_components_org_name (tenant_id, kind, org_name),
   KEY idx_content_components_owner (owner, kind, updated_at_ms),
   KEY idx_content_components_scope (tenant_id, scope, kind, updated_at_ms),
   KEY idx_content_components_source (source_id, scope)
@@ -819,6 +825,23 @@ CREATE TABLE IF NOT EXISTS content_publish_requests (
   UNIQUE KEY uq_content_requests_pending (pending_key),
   KEY idx_content_requests_tenant (tenant_id, status, created_at_ms),
   KEY idx_content_requests_component (component_id, created_at_ms)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Standing shares of an author's content component with a room: the
+-- room's members at share time got a copy, and a member who joins later
+-- gets one too until the author revokes the share. Deleted with the
+-- component.
+CREATE TABLE IF NOT EXISTS content_room_shares (
+  room_id         VARCHAR(128) NOT NULL,
+  component_id    VARCHAR(64) NOT NULL,
+  tenant_id       VARCHAR(64) NOT NULL,
+  version         VARCHAR(64) NOT NULL,
+  shared_by       VARCHAR(128) NOT NULL,
+  note            VARCHAR(500) NOT NULL DEFAULT '',
+  created_at_ms   BIGINT NOT NULL,
+  updated_at_ms   BIGINT NOT NULL,
+  PRIMARY KEY (room_id, component_id),
+  KEY idx_content_room_shares_component (component_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- Per-prompt use counts of prompt packs: bumped once each time a member

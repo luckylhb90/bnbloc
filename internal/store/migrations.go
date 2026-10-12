@@ -1103,6 +1103,42 @@ WHERE r.channel_id = '' AND d.user_id IS NULL`)
 			return nil
 		},
 	},
+	{
+		// Room shares that reach later joiners ("Gap closure" 2).
+		id: "2026_10_content_room_shares",
+		run: func(ctx context.Context, db sqlConn) error {
+			return createSchemaTable(ctx, db, "content_room_shares")
+		},
+	},
+	{
+		// Platform content limited to some organizations ("Gap closure" 3).
+		id: "2026_10_content_platform_tenants",
+		run: func(ctx context.Context, db sqlConn) error {
+			return addColumnIfMissing(ctx, db, "content_components", "enabled_tenants", "JSON NULL AFTER shared_by")
+		},
+	},
+	{
+		// One organization component per kind and name ("Gap closure" 4):
+		// org rows reserve their name. Of any existing duplicates the
+		// oldest (ids are creation-ordered) keeps the name; the others are
+		// unpublished and claim it only if an admin restores them.
+		id: "2026_10_content_org_names",
+		run: func(ctx context.Context, db sqlConn) error {
+			if err := addColumnIfMissing(ctx, db, "content_components", "org_name", "VARCHAR(64) NULL AFTER enabled_tenants"); err != nil {
+				return err
+			}
+			if _, err := db.ExecContext(ctx, `UPDATE content_components c
+  JOIN (SELECT MIN(id) AS id FROM content_components WHERE scope = 'org' GROUP BY tenant_id, kind, name) k ON c.id = k.id
+  SET c.org_name = c.name WHERE c.org_name IS NULL`); err != nil {
+				return fmt.Errorf("reserve organization names: %w", err)
+			}
+			if _, err := db.ExecContext(ctx, `UPDATE content_components SET status = 'retired' WHERE scope = 'org' AND org_name IS NULL`); err != nil {
+				return fmt.Errorf("unpublish duplicate organization names: %w", err)
+			}
+			return addIndexIfMissing(ctx, db, "content_components", "uq_content_components_org_name",
+				"ADD UNIQUE KEY uq_content_components_org_name (tenant_id, kind, org_name)")
+		},
+	},
 }
 
 // sqlConn is the statement surface a migration runs on. runMigrations passes
