@@ -689,6 +689,19 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   a job in that org; no second secret store, no clear-text fallback.
   Unattachable tools go to `contentMissing` and never fail the run.
 
+- **Sharing is a copy, publishing is a second row.** A shared copy is a
+  recipient-owned `shared` component (`source_id`, `shared_by`) reusing the
+  author's version rows. Trust decisions use `ContentComponent.Author()`, never
+  `Owner` (a copy with scripts still forces the sandbox). Org scope is a
+  separate row created or advanced only by an approved
+  `content_publish_requests` row; never make an author's personal row
+  org-visible. Platform content arrives only as a signed package on
+  `POST /v1/platform/components` (`contentpkg.PlatformPackage`,
+  `Pipeline.VerifyPackage`); the console never signs.
+- **"What can member M see" is `contentuse.Visible`** (Library, `name@range`
+  resolution, prompt search); don't add another per-scope query list. Content
+  has no opt-in rollout: members opt in per use; `retired` is unpublish.
+
 ### Borrow authorization
 
 - **Borrowing another member's agent requires that owner's per-room
