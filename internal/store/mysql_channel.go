@@ -9,8 +9,8 @@ import (
 )
 
 // MySQLChannel is the MySQL-backed ChannelStore. Like the other room tables,
-// every query is scoped by the tenant bound to the context (room ids may be
-// reused across tenants) and fails closed when the context carries none.
+// every query is scoped by the tenant bound to the context and fails closed
+// when the context carries none.
 type MySQLChannel struct {
 	DB *sql.DB
 }
@@ -34,10 +34,7 @@ func (m *MySQLChannel) PutChannel(ctx context.Context, c RoomChannel) error {
 INSERT INTO room_channels (channel_id, tenant_id, room_id, name, is_default, kind, created_by, created_at_ms, deleted_at_ms)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		c.ChannelID, c.TenantID, c.RoomID, c.Name, c.IsDefault, c.Kind, c.CreatedBy, c.CreatedAtMs, c.DeletedAtMs)
-	if isDupEntry(err) {
-		return ErrChannelExists
-	}
-	return err
+	return dupAs(err, ErrChannelExists)
 }
 
 func (m *MySQLChannel) GetChannel(ctx context.Context, roomID, channelID string) (RoomChannel, bool, error) {
@@ -47,11 +44,12 @@ func (m *MySQLChannel) GetChannel(ctx context.Context, roomID, channelID string)
 	}
 	return m.scanChannel(ctx, `
 SELECT `+channelColumns+` FROM room_channels
-WHERE tenant_id = ? AND room_id = ? AND channel_id = ? AND deleted_at_ms IS NULL`,
+WHERE tenant_id = ? AND room_id = ? AND channel_id = ? AND `+sqlNotDeleted,
 		tnt, roomID, channelID)
 }
 
-// ListChannels returns a room's live channels, default first then oldest first.
+// ListChannels returns a room's live channels, default first, then oldest
+// first, then by id.
 func (m *MySQLChannel) ListChannels(ctx context.Context, roomID string) ([]RoomChannel, error) {
 	tnt, err := tenant.Require(ctx)
 	if err != nil {
@@ -59,8 +57,8 @@ func (m *MySQLChannel) ListChannels(ctx context.Context, roomID string) ([]RoomC
 	}
 	return queryAll(ctx, m.DB, `
 SELECT `+channelColumns+` FROM room_channels
-WHERE tenant_id = ? AND room_id = ? AND deleted_at_ms IS NULL
-ORDER BY is_default DESC, created_at_ms ASC`, scanChannelRow, tnt, roomID)
+WHERE tenant_id = ? AND room_id = ? AND `+sqlNotDeleted+`
+ORDER BY is_default DESC, created_at_ms ASC, channel_id ASC`, scanChannelRow, tnt, roomID)
 }
 
 // DefaultChannel returns a room's default channel, found=false when none.
@@ -71,7 +69,7 @@ func (m *MySQLChannel) DefaultChannel(ctx context.Context, roomID string) (RoomC
 	}
 	return m.scanChannel(ctx, `
 SELECT `+channelColumns+` FROM room_channels
-WHERE tenant_id = ? AND room_id = ? AND is_default = 1 AND deleted_at_ms IS NULL`,
+WHERE tenant_id = ? AND room_id = ? AND is_default = 1 AND `+sqlNotDeleted,
 		tnt, roomID)
 }
 
@@ -84,7 +82,7 @@ func (m *MySQLChannel) DeleteChannel(ctx context.Context, roomID, channelID stri
 	// no-op, matching the memory store.
 	_, err = m.DB.ExecContext(ctx, `
 UPDATE room_channels SET deleted_at_ms = ?
-WHERE tenant_id = ? AND room_id = ? AND channel_id = ? AND deleted_at_ms IS NULL`,
+WHERE tenant_id = ? AND room_id = ? AND channel_id = ? AND `+sqlNotDeleted,
 		atMs, tnt, roomID, channelID)
 	return err
 }
@@ -98,15 +96,12 @@ func (m *MySQLChannel) RenameChannel(ctx context.Context, roomID, channelID, nam
 	}
 	res, err := m.DB.ExecContext(ctx, `
 UPDATE room_channels SET name = ?
-WHERE tenant_id = ? AND room_id = ? AND channel_id = ? AND deleted_at_ms IS NULL`,
+WHERE tenant_id = ? AND room_id = ? AND channel_id = ? AND `+sqlNotDeleted,
 		name, tnt, roomID, channelID)
 	if err != nil {
 		return err
 	}
-	if n, _ := res.RowsAffected(); n == 0 {
-		return ErrChannelNotFound
-	}
-	return nil
+	return requireMatched(res, ErrChannelNotFound)
 }
 
 // scanChannel runs a single-row channel query: a missing row is found=false,

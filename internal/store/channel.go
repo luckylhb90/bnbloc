@@ -63,8 +63,7 @@ var ErrChannelExists = errors.New("store: channel id already exists")
 
 // ChannelStore persists a room's channels. Implementations must be safe for
 // concurrent use and must scope every operation by the tenant bound to the
-// context (room ids may be reused across tenants), failing closed when the
-// context carries none.
+// context, failing closed when the context carries none.
 type ChannelStore interface {
 	// PutChannel creates a channel; ErrChannelExists when the id is taken
 	// (channel ids are global, so it never rewrites an existing row).
@@ -73,13 +72,15 @@ type ChannelStore interface {
 	// absent or soft-deleted.
 	GetChannel(ctx context.Context, roomID, channelID string) (RoomChannel, bool, error)
 	// ListChannels returns a room's live channels of every kind (the people
-	// chat included), default first then by created_at ascending. Callers that
-	// present or copy ordinary channels filter IsPeople themselves.
+	// chat included), default first, then by created_at ascending, then by
+	// channel id. Callers that present or copy ordinary channels filter
+	// IsPeople themselves.
 	ListChannels(ctx context.Context, roomID string) ([]RoomChannel, error)
 	// DefaultChannel returns a room's default channel, found=false when none.
 	DefaultChannel(ctx context.Context, roomID string) (RoomChannel, bool, error)
-	// DeleteChannel soft-deletes a channel. Deleting an absent channel is a
-	// no-op; callers enforce the default-channel guard.
+	// DeleteChannel soft-deletes a channel. Deleting an absent or already
+	// deleted channel is a no-op (the first deletion time is kept); callers
+	// enforce the default-channel guard.
 	DeleteChannel(ctx context.Context, roomID, channelID string, atMs int64) error
 	// RenameChannel renames a live channel, returning ErrChannelNotFound when
 	// it is absent or soft-deleted — unlike PutChannel, it never resurrects a
@@ -183,7 +184,10 @@ func (s *MemoryChannel) ListChannels(ctx context.Context, roomID string) ([]Room
 		if out[i].IsDefault != out[j].IsDefault {
 			return out[i].IsDefault
 		}
-		return out[i].CreatedAtMs < out[j].CreatedAtMs
+		if out[i].CreatedAtMs != out[j].CreatedAtMs {
+			return out[i].CreatedAtMs < out[j].CreatedAtMs
+		}
+		return out[i].ChannelID < out[j].ChannelID
 	})
 	return out, nil
 }
@@ -212,7 +216,7 @@ func (s *MemoryChannel) DeleteChannel(ctx context.Context, roomID, channelID str
 	defer s.room.mu.Unlock()
 	room := s.room.channels[channelKey(tnt, roomID)]
 	c, ok := room[channelID]
-	if !ok {
+	if !ok || c.DeletedAtMs != nil {
 		return nil
 	}
 	c.DeletedAtMs = &atMs

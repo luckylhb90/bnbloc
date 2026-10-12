@@ -68,9 +68,8 @@ var storeRuleCopies = map[string]map[string]int{
 		"sso_handoffs.go":         1,
 	},
 	"not-deleted": {
-		"chat.go":          6,
-		"mysql_channel.go": 5,
-		"search.go":        2,
+		"chat.go":   6,
+		"search.go": 2,
 	},
 	"null-helper": {
 		"mysql.go":             1,
