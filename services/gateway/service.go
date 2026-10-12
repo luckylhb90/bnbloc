@@ -484,13 +484,15 @@ type switchTenantBody struct {
 	TenantID string `json:"tenantId"`
 }
 
-// handleSwitchTenant re-issues the caller's session token scoped to a different
+// handleSwitchTenant re-issues the caller's session scoped to a different
 // tenant they belong to. Unlike the super-admin acting-tenant header (which
 // overlays one privileged identity across tenants), this is the path for an
 // ORDINARY member of multiple orgs: the new token carries that tenant's role
-// and its room memberships, so the whole session (rooms, agents, RBAC) follows.
-// A super-admin may switch to any tenant; everyone else only to one they are a
-// member of. A suspended tenant is refused (super-admin exempt).
+// and its room memberships, so the whole session (rooms, agents, RBAC)
+// follows. A super-admin may switch to any tenant; everyone else only to one
+// they are a member of (switchScope). The choice persists on the session's
+// refresh family (its tenant hint), so a refresh, and a bridge or CLI
+// session forked from it, land in the switched tenant too.
 func (s *Service) handleSwitchTenant(w http.ResponseWriter, r *http.Request) {
 	claims, err := s.authenticate(r)
 	if err != nil {
@@ -508,46 +510,35 @@ func (s *Service) handleSwitchTenant(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "tenantId required", http.StatusBadRequest)
 		return
 	}
-	isSuper := claims.Role == string(rbac.RoleSuperAdmin)
-	// Resolve the role the caller will hold in the target tenant. A super-admin
-	// keeps super_admin (cross-tenant); anyone else must be a member there.
-	role := string(rbac.RoleSuperAdmin)
-	if !isSuper {
-		if s.TenantMemberRole == nil {
-			obs.ServerError(w, "tenant switching not available", nil)
-			http.Error(w, "tenant switching not available", http.StatusNotImplemented)
-			return
-		}
-		r, ok := s.TenantMemberRole(target, claims.Subject)
-		if !ok {
-			http.Error(w, "not a member of that tenant", http.StatusForbidden)
-			return
-		}
-		role = r
-	}
-	// A suspended tenant is closed to its members; a super-admin may still enter.
-	if s.TenantSuspended != nil && !isSuper && s.TenantSuspended(target) {
-		http.Error(w, "tenant suspended", http.StatusForbidden)
+	scope, err := s.switchScope(claims, target)
+	switch {
+	case errors.Is(err, errNotTenantMember), errors.Is(err, errTenantSuspended):
+		http.Error(w, err.Error(), http.StatusForbidden)
+		return
+	case err != nil:
+		obs.ServerError(w, "tenant switch failed", err)
+		http.Error(w, err.Error(), http.StatusServiceUnavailable)
 		return
 	}
-	// Room memberships are per-subject (rooms are tenant-scoped downstream), so
-	// reuse the resolver; the room service filters by the injected tenant.
-	var rooms []string
-	if s.Rooms != nil {
-		rooms = s.Rooms(claims.Subject, target)
+	now := s.nowTime()
+	if claims.Family != "" {
+		_, err := s.refreshTokens().SwitchRefreshFamily(r.Context(), store.RefreshSwitch{
+			FamilyID: claims.Family, Subject: claims.Subject, TenantHint: target,
+			TenantID: scope.Tenant, Role: scope.Role, NowMs: now.UnixMilli(),
+		})
+		switch {
+		case errors.Is(err, store.ErrRefreshInvalid):
+			http.Error(w, "the sign-in has ended", http.StatusUnauthorized)
+			return
+		case err != nil:
+			obs.ServerError(w, "persist tenant switch failed", err)
+			http.Error(w, "persist tenant switch failed", http.StatusInternalServerError)
+			return
+		}
 	}
-	newClaims := auth.Claims{
-		Subject:       claims.Subject,
-		Rooms:         rooms,
-		Tenant:        target,
-		Role:          role,
-		Family:        claims.Family,
-		ExpiresAtUnix: s.Now().Add(s.SessionTTL).Unix(),
-	}
-	token := s.Signer.Issue(newClaims)
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]any{
-		"sessionToken": token, "subject": claims.Subject, "tenant": target, "role": role, "rooms": rooms,
+	writeJSON(w, http.StatusOK, map[string]any{
+		"sessionToken": mintSession(s.Signer, claims.Subject, claims.Family, scope, now.Add(s.SessionTTL)),
+		"subject":      claims.Subject, "tenant": scope.Tenant, "role": scope.Role, "rooms": scope.Rooms,
 	})
 }
 

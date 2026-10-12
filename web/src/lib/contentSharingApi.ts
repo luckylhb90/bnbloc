@@ -1,4 +1,4 @@
-import { ApiError, req, scoped } from "./api.ts";
+import { ApiError, req } from "./api.ts";
 import { apiUrl } from "./config.ts";
 import { authedFetch, errorDetail } from "./session.ts";
 import type { ContentComponentDetail, ContentPublishRequest } from "./contentComponents.ts";
@@ -7,8 +7,8 @@ import type { ContentAdminComponent, ContentPublishReply, ContentReview, Content
 const enc = encodeURIComponent;
 
 // Sharing and publishing content components (services/gateway
-// content_sharing.go, content_review.go, content_platform.go). tenantId
-// scopes a super admin's organization calls like the other tenant routes.
+// content_sharing.go, content_review.go, content_platform.go). Organization
+// calls act in the session's tenant (a super admin's acting tenant).
 export const contentSharingApi = {
   // The author's side.
   share: (id: string, body: { members?: string[]; roomId?: string; version?: string; note?: string }) =>
@@ -24,18 +24,18 @@ export const contentSharingApi = {
     req<ContentPublishReply>(`/v1/content-components/${enc(id)}/publish`, { method: "POST", body: JSON.stringify({ scope, ...(note ? { note } : {}) }) }),
 
   // Org admins.
-  requests: (all: boolean, tenantId?: string) =>
-    req<{ requests: ContentPublishRequest[] }>(scoped(`/v1/tenant/content-requests${all ? "?status=all" : ""}`, tenantId)),
-  review: (id: string, tenantId?: string) => req<ContentReview>(scoped(`/v1/tenant/content-requests/${enc(id)}`, tenantId)),
-  decide: (id: string, decision: "approve" | "decline", note: string, tenantId?: string) =>
-    req<{ request: ContentPublishRequest }>(scoped(`/v1/tenant/content-requests/${enc(id)}/${decision}`, tenantId), {
+  requests: (all: boolean) =>
+    req<{ requests: ContentPublishRequest[] }>(`/v1/tenant/content-requests${all ? "?status=all" : ""}`),
+  review: (id: string) => req<ContentReview>(`/v1/tenant/content-requests/${enc(id)}`),
+  decide: (id: string, decision: "approve" | "decline", note: string) =>
+    req<{ request: ContentPublishRequest }>(`/v1/tenant/content-requests/${enc(id)}/${decision}`, {
       method: "POST",
       body: JSON.stringify(note ? { note } : {}),
     }),
-  orgContent: (tenantId?: string) => req<{ components: ContentAdminComponent[] }>(scoped("/v1/tenant/content-components", tenantId)),
-  setOrgStatus: (id: string, action: "unpublish" | "restore", tenantId?: string) =>
-    req<void>(scoped(`/v1/tenant/content-components/${enc(id)}/${action}`, tenantId), { method: "POST", raw: true }),
-  removeOrg: (id: string, tenantId?: string) => req<void>(scoped(`/v1/tenant/content-components/${enc(id)}`, tenantId), { method: "DELETE", raw: true }),
+  orgContent: () => req<{ components: ContentAdminComponent[] }>("/v1/tenant/content-components"),
+  setOrgStatus: (id: string, action: "unpublish" | "restore") =>
+    req<void>(`/v1/tenant/content-components/${enc(id)}/${action}`, { method: "POST", raw: true }),
+  removeOrg: (id: string) => req<void>(`/v1/tenant/content-components/${enc(id)}`, { method: "DELETE", raw: true }),
 
   // Super admins.
   platformContent: (scope?: "platform" | "org") =>

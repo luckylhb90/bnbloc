@@ -11,7 +11,7 @@ import { UserName } from "@/views/UserName";
 // creator, expiry, views — with revoke. Switching public links off for the
 // organization is the "Allow public share links" setting (Settings tab); it
 // kills every link at once, this list revokes one.
-export function PublicLinksTab({ scope }: { scope?: string }) {
+export function PublicLinksTab() {
   const toast = useToast();
   const [shares, setShares] = useState<TenantShareView[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -20,11 +20,11 @@ export function PublicLinksTab({ scope }: { scope?: string }) {
   const load = useCallback(async () => {
     setError(null);
     try {
-      setShares((await sharesApi.tenantShares(scope)).shares ?? []);
+      setShares((await sharesApi.tenantShares()).shares ?? []);
     } catch (e) {
       setError(e instanceof Error ? e.message : "failed to load public links");
     }
-  }, [scope]);
+  }, []);
 
   useEffect(() => {
     void load();

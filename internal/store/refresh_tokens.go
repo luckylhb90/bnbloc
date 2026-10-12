@@ -101,6 +101,34 @@ type RefreshTokenStore interface {
 	// RevokeRefreshFamilies revokes every active family matching the filter
 	// and returns how many were revoked.
 	RevokeRefreshFamilies(ctx context.Context, filter RefreshRevokeFilter, nowMs int64) (int, error)
+	// SwitchRefreshFamily moves an active family of the subject to another
+	// tenant (a member's tenant switch): its tenant hint, which every later
+	// refresh and fork resolves from, and its current scope. It never
+	// rotates the token. ErrRefreshInvalid when no active family matched.
+	SwitchRefreshFamily(ctx context.Context, sw RefreshSwitch) (RefreshFamily, error)
+}
+
+// RefreshSwitch moves a family to the tenant a member switched to.
+type RefreshSwitch struct {
+	FamilyID string
+	Subject  string
+	// TenantHint is the switched-to tenant: refreshes and forks land there.
+	TenantHint string
+	// TenantID and Role are the switched session's scope (admin revocation
+	// selects on them).
+	TenantID string
+	Role     string
+	NowMs    int64
+}
+
+// decideRefreshSwitch is the one switch rule both backends apply to a
+// loaded family.
+func decideRefreshSwitch(f RefreshFamily, sw RefreshSwitch) (RefreshFamily, error) {
+	if f.Subject != sw.Subject || !f.active(sw.NowMs) || strings.TrimSpace(sw.TenantHint) == "" {
+		return f, ErrRefreshInvalid
+	}
+	f.TenantHint, f.TenantID, f.Role, f.LastUsedAtMs = sw.TenantHint, sw.TenantID, sw.Role, sw.NowMs
+	return f, nil
 }
 
 // decideRefreshUse is the one rotation/reuse rule both backends apply to a
@@ -200,6 +228,21 @@ func (s *MemoryRefreshToken) UseRefreshFamily(_ context.Context, u RefreshUse) (
 		s.rows[u.FamilyID] = out
 	}
 	return out, err
+}
+
+func (s *MemoryRefreshToken) SwitchRefreshFamily(_ context.Context, sw RefreshSwitch) (RefreshFamily, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	f, ok := s.rows[sw.FamilyID]
+	if !ok {
+		return RefreshFamily{}, ErrRefreshInvalid
+	}
+	out, err := decideRefreshSwitch(f, sw)
+	if err != nil {
+		return RefreshFamily{}, err
+	}
+	s.rows[sw.FamilyID] = out
+	return out, nil
 }
 
 func (s *MemoryRefreshToken) ListRefreshFamilies(_ context.Context, subject string, nowMs int64) ([]RefreshFamily, error) {
@@ -330,6 +373,35 @@ func (s *MySQLRefreshToken) UseRefreshFamily(ctx context.Context, u RefreshUse) 
 		return RefreshFamily{}, err
 	}
 	return out, useErr
+}
+
+func (s *MySQLRefreshToken) SwitchRefreshFamily(ctx context.Context, sw RefreshSwitch) (RefreshFamily, error) {
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return RefreshFamily{}, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	f, err := scanRefreshFamily(tx.QueryRowContext(ctx,
+		`SELECT `+refreshFamilyColumns+` FROM refresh_token_families WHERE family_id = ? FOR UPDATE`, sw.FamilyID))
+	if errors.Is(err, sql.ErrNoRows) {
+		return RefreshFamily{}, ErrRefreshInvalid
+	}
+	if err != nil {
+		return RefreshFamily{}, err
+	}
+	out, err := decideRefreshSwitch(f, sw)
+	if err != nil {
+		return RefreshFamily{}, err
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE refresh_token_families SET
+  tenant_hint = ?, tenant_id = ?, role = ?, last_used_at_ms = ?
+  WHERE family_id = ?`, out.TenantHint, out.TenantID, out.Role, out.LastUsedAtMs, out.FamilyID); err != nil {
+		return RefreshFamily{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return RefreshFamily{}, err
+	}
+	return out, nil
 }
 
 func (s *MySQLRefreshToken) ListRefreshFamilies(ctx context.Context, subject string, nowMs int64) ([]RefreshFamily, error) {

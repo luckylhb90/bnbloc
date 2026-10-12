@@ -27,16 +27,13 @@ const selectClass =
 
 // AuditLogTab is the admin audit log (R13): every audit trail merged newest
 // first, with filters, "Load more" paging and CSV export. An org admin reads
-// their own tenant (scope = the tenant the console administers); a
-// super-admin reads the platform log across tenants, optionally narrowed to
-// one tenant.
+// their own tenant (the tenant the session acts in); a super-admin reads the
+// platform log across tenants, optionally narrowed to one tenant.
 export function AuditLogTab({
   platform,
-  scope,
   tenants,
 }: {
   readonly platform: boolean;
-  readonly scope?: string;
   readonly tenants: readonly PlatformTenant[];
 }) {
   const toast = useToast();
@@ -54,7 +51,7 @@ export function AuditLogTab({
 
   const logScope: AuditLogScope = platform
     ? { kind: "platform", tenant: tenantFilter || undefined }
-    : { kind: "tenant", tenantId: scope };
+    : { kind: "tenant" };
   const scopeKey = JSON.stringify(logScope);
 
   const load = useCallback(() => {

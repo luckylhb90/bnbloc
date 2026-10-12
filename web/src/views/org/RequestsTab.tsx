@@ -5,7 +5,7 @@ import { UserWithEmail } from "@/views/UserName";
 
 // Org-admin: self-service join requests for the tenant (split from
 // Organization.tsx).
-export function RequestsTab({ scope }: { scope?: string }) {
+export function RequestsTab() {
   const [requests, setRequests] = useState<JoinRequest[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
@@ -13,12 +13,12 @@ export function RequestsTab({ scope }: { scope?: string }) {
   const load = useCallback(async () => {
     setError(null);
     try {
-      const { requests } = await api.listJoinRequests("pending", scope);
+      const { requests } = await api.listJoinRequests("pending");
       setRequests(requests ?? []);
     } catch (e) {
       setError(e instanceof Error ? e.message : "failed to load requests");
     }
-  }, [scope]);
+  }, []);
 
   useEffect(() => {
     void load();
@@ -28,8 +28,8 @@ export function RequestsTab({ scope }: { scope?: string }) {
     setBusy(userId);
     setError(null);
     try {
-      if (approve) await api.approveJoinRequest(userId, scope);
-      else await api.rejectJoinRequest(userId, scope);
+      if (approve) await api.approveJoinRequest(userId);
+      else await api.rejectJoinRequest(userId);
       await load();
     } catch (e) {
       setError(e instanceof Error ? e.message : "failed to update request");

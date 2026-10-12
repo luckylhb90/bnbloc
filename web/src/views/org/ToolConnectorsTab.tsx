@@ -11,7 +11,7 @@ import { LocalSettingsCard } from "@/views/settings/LocalSettingsCard";
 // bridge running a job of this organization; secret values are never shown
 // back. Tools with member credentials are set by each member on their own
 // desktop instead.
-export function ToolConnectorsTab({ scope }: { scope?: string }) {
+export function ToolConnectorsTab() {
   const [connectors, setConnectors] = useState<readonly McpConnector[] | null>(null);
   const [available, setAvailable] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -19,14 +19,14 @@ export function ToolConnectorsTab({ scope }: { scope?: string }) {
   const load = useCallback(async () => {
     setError(null);
     try {
-      const reply = await mcpToolsApi.connectors(scope);
+      const reply = await mcpToolsApi.connectors();
       setAvailable(reply.available);
       setConnectors(reply.connectors ?? []);
     } catch (e) {
       setError(e instanceof Error ? e.message : "failed to load tool connectors");
       setConnectors([]);
     }
-  }, [scope]);
+  }, []);
 
   useEffect(() => {
     void load();
@@ -62,11 +62,11 @@ export function ToolConnectorsTab({ scope }: { scope?: string }) {
             }
             fields={connectorFieldsAsSettings(c.fields)}
             onSave={async (values) => {
-              await mcpToolsApi.saveConnector(c.name, values, scope);
+              await mcpToolsApi.saveConnector(c.name, values);
               await load();
             }}
             onClear={async () => {
-              await mcpToolsApi.clearConnector(c.name, scope);
+              await mcpToolsApi.clearConnector(c.name);
               await load();
             }}
             savedText={`${c.name} connector saved`}

@@ -118,44 +118,6 @@ export function parseSsoFragment(hash: string): SsoFragment {
   };
 }
 
-export interface EstablishDeps {
-  setToken: (token: string) => void;
-  switchTenant: (tenantId: string) => Promise<{ sessionToken: string; tenant?: string; role?: string }>;
-}
-
-// establishSession lands a freshly minted grant in `wantedFor(subject)` (when
-// it differs from the grant's tenant), installing each token before the next
-// call so the tenant switch authorizes with the fresh bearer. Login, SSO and
-// refresh all mint the member's DEFAULT tenant (the refresh token is
-// subject-scoped), so every path funnels through here and the tenant choice
-// can never drift between them. The tenant switch keeps the grant's refresh
-// token: switch-tenant does not mint one.
-export async function establishSession(
-  mint: () => Promise<Grant>,
-  wantedFor: (subject: string) => string | null,
-  deps: EstablishDeps,
-  onSwitchFailed?: (status: number, subject: string) => void,
-): Promise<SessionRecord> {
-  const fresh = await mint();
-  const record = recordFromGrant(fresh);
-  deps.setToken(record.token);
-  const wanted = wantedFor(fresh.subject);
-  if (wanted && record.tenant !== wanted) {
-    try {
-      const switched = await deps.switchTenant(wanted);
-      record.token = switched.sessionToken;
-      record.tenant = switched.tenant ?? wanted;
-      record.role = switched.role ?? record.role;
-      deps.setToken(record.token);
-    } catch (e) {
-      // The workspace is gone or no longer permitted: stay on the default
-      // rather than leaving the session unauthenticated.
-      onSwitchFailed?.(errorStatus(e), fresh.subject);
-    }
-  }
-  return record;
-}
-
 export interface RenewDeps {
   // The persisted session (refresh token, subject) at renewal time.
   stored: SessionRecord | null;
@@ -164,7 +126,9 @@ export interface RenewDeps {
   directLoginAvailable: boolean;
   refresh: (refreshToken: string) => Promise<Grant>;
   login: (subject: string) => Promise<Grant>;
-  // Lands the minted grant in the member's tenant and installs/persists it.
+  // Installs and persists the minted grant. It already is in the tenant the
+  // member chose: a tenant switch persists on the sign-in's refresh family,
+  // so the gateway mints every refresh there.
   establish: (mint: () => Promise<Grant>) => Promise<unknown>;
   logout: () => void;
 }

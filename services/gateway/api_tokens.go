@@ -290,9 +290,7 @@ func (s *Service) handleAPITokenExchange(w http.ResponseWriter, r *http.Request)
 	}
 	_ = s.apiTokens().TouchAPIToken(r.Context(), id, now.UnixMilli())
 	expires := now.Add(s.SessionTTL)
-	session := s.Signer.Issue(auth.Claims{
-		Subject: tok.Subject, Rooms: scope.Rooms, Tenant: scope.Tenant, Role: scope.Role, ExpiresAtUnix: expires.Unix(),
-	})
+	session := mintSession(s.Signer, tok.Subject, "", scope, expires)
 	s.auditAPIToken(r.Context(), id, "exchange", "allow", tok.Subject, "")
 	writeJSON(w, http.StatusOK, apiTokenGrant{
 		Token: session, Subject: tok.Subject, Tenant: scope.Tenant, Role: scope.Role, Rooms: scope.Rooms, ExpiresAtMs: expires.UnixMilli(),

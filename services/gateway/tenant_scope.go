@@ -17,10 +17,10 @@ import (
 //  1. The session tenant (the token's claim).
 //  2. A platform super admin may act inside any tenant: the
 //     X-Bnbloc-Acting-Tenant header (the web's global switch, sent on every
-//     request), then ?tenantId= (a per-call override, which wins). For
-//     anyone else both are ignored: they stay bound to their session
-//     tenant. Applied at authentication (authenticate, proxyClaims), so a
-//     handler's claims.Tenant already is the acting tenant.
+//     request; there is no other input). For anyone else it is ignored:
+//     they stay bound to their session tenant. Applied at authentication
+//     (authenticate, proxyClaims), so a handler's claims.Tenant already is
+//     the acting tenant.
 //  3. A request that names a room acts in the room's own tenant
 //     (rooms.tenant_id): a member of a room in another organization, or a
 //     super admin acting elsewhere, transacts where the room lives. This
@@ -45,9 +45,6 @@ func actingTenant(r *http.Request, claims auth.Claims) string {
 	}
 	if h := strings.TrimSpace(r.Header.Get(actingTenantHeader)); h != "" {
 		t = h
-	}
-	if q := strings.TrimSpace(r.URL.Query().Get("tenantId")); q != "" {
-		t = q
 	}
 	return t
 }

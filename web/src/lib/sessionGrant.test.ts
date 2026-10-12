@@ -1,10 +1,10 @@
 import {
-  establishSession,
   parseSessionRecord,
   parseSsoFragment,
   renewDelayMs,
   renewSession,
   RENEW_AHEAD_MS,
+  recordFromGrant,
   type Grant,
   type RenewDeps,
   type SessionRecord,
@@ -30,30 +30,27 @@ function token(claims: Record<string, unknown>): string {
 
 const stored: SessionRecord = { token: "old", refreshToken: "rt-1", subject: "ann@corp", tenant: "t2", role: "member" };
 
-// A harness wiring renewSession to establishSession the way auth.tsx does.
-function harness(over: Partial<RenewDeps> & { switchTenant?: (t: string) => Promise<{ sessionToken: string; tenant?: string }> }) {
-  const state = { token: "old" as string | null, persisted: null as SessionRecord | null, loggedOut: false, refreshedWith: [] as string[], switchedTo: [] as string[] };
+// A harness wiring renewSession the way auth.tsx does: the minted grant is
+// installed and persisted as the gateway answered it.
+function harness(over: Partial<RenewDeps>) {
+  const state = { token: "old" as string | null, persisted: null as SessionRecord | null, loggedOut: false, refreshedWith: [] as string[] };
   const deps: RenewDeps = {
     stored,
     subject: "ann@corp",
     directLoginAvailable: false,
     refresh: async (rt) => {
       state.refreshedWith.push(rt);
-      return { sessionToken: "fresh", refreshToken: "rt-2", subject: "ann@corp", tenant: "t1", role: "member" };
+      // The gateway refreshes into the tenant the member switched to (the
+      // refresh family's tenant hint): t2.
+      return { sessionToken: "fresh", refreshToken: "rt-2", subject: "ann@corp", tenant: "t2", role: "member" };
     },
     login: async () => {
       throw new Error("direct login must not run");
     },
     establish: async (mint) => {
-      state.persisted = await establishSession(mint, () => "t2", {
-        setToken: (t) => (state.token = t),
-        switchTenant:
-          over.switchTenant ??
-          (async (t) => {
-            state.switchedTo.push(t);
-            return { sessionToken: `switched-${t}`, tenant: t };
-          }),
-      });
+      const record = recordFromGrant(await mint());
+      state.token = record.token;
+      state.persisted = record;
     },
     logout: () => {
       state.loggedOut = true;
@@ -64,26 +61,14 @@ function harness(over: Partial<RenewDeps> & { switchTenant?: (t: string) => Prom
   return { state, deps };
 }
 
-async function testRefreshSuccessRotatesAndReswitches(): Promise<void> {
+async function testRefreshSuccessRotates(): Promise<void> {
   const { state, deps } = harness({});
   assert((await renewSession(deps)) === true, "a refresh renews the session");
   assert(state.refreshedWith.join() === "rt-1", "the stored refresh token is spent");
-  assert(state.switchedTo.join() === "t2", "the chosen tenant is re-entered after the refresh");
-  assert(state.token === "switched-t2", "the tenant-scoped bearer is installed");
+  assert(state.token === "fresh", "the refreshed bearer is installed as minted (no client re-switch)");
   assert(state.persisted?.refreshToken === "rt-2", "the ROTATED refresh token is stored");
-  assert(state.persisted?.tenant === "t2", "the record lands in the chosen tenant");
+  assert(state.persisted?.tenant === "t2", "the record is in the tenant the gateway minted it for");
   assert(!state.loggedOut, "no sign-out on success");
-}
-
-async function testRefreshKeepsRotatedTokenWhenSwitchFails(): Promise<void> {
-  const { state, deps } = harness({
-    switchTenant: async () => {
-      throw new HttpError(403);
-    },
-  });
-  assert((await renewSession(deps)) === true, "a refused tenant switch still renews");
-  assert(state.token === "fresh" && state.persisted?.tenant === "t1", "stays on the default tenant");
-  assert(state.persisted?.refreshToken === "rt-2", "rotated refresh token kept");
 }
 
 async function testRefreshRefusedSignsOut(): Promise<void> {
@@ -158,8 +143,7 @@ function testRenewDelay(): void {
   assert(renewDelayMs(token({ sub: "x" }), now) === null && renewDelayMs("junk", now) === null, "no exp → no timer");
 }
 
-await testRefreshSuccessRotatesAndReswitches();
-await testRefreshKeepsRotatedTokenWhenSwitchFails();
+await testRefreshSuccessRotates();
 await testRefreshRefusedSignsOut();
 await testRefreshNetworkErrorKeepsSession();
 await testNoRefreshTokenFallsBack();

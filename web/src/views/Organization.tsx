@@ -7,9 +7,9 @@ import {
   type TenantUsage,
   type TenantMember,
   type TenantSettings,
-  type PlatformTenant,
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
+import { useActingTenant } from "@/lib/session";
 import { cn } from "@/lib/cn";
 import { PlatformComponents } from "@/views/PlatformComponents";
 import { PlatformReleases } from "@/views/PlatformReleases";
@@ -74,26 +74,11 @@ export function Organization() {
   const { tenant, role, subject } = useAuth();
   const [tab, setTab] = useState<Tab>("overview");
   const isSuper = role === "super_admin";
-  // For a super-admin, scope is the selected tenant to administer; it is
-  // threaded into every tab's API call as ?tenantId. For an org-admin it stays
-  // undefined and the gateway binds them to their own tenant.
-  const [scope, setScope] = useState<string | undefined>(undefined);
-  const [tenants, setTenants] = useState<PlatformTenant[]>([]);
-
-  useEffect(() => {
-    if (!isSuper) return;
-    void api
-      .listTenants()
-      .then((r) => {
-        const list = r.tenants ?? [];
-        setTenants(list);
-        // Default the scope to the super-admin's home tenant, else the first.
-        setScope((s) => s ?? tenant ?? list[0]?.tenantId);
-      })
-      .catch(() => {});
-  }, [isSuper, tenant]);
-
-  const activeTenant = (isSuper ? scope : tenant) ?? undefined;
+  // The tenant this console administers is the one the session acts in: a
+  // super-admin's acting tenant (lib/session.ts, sent on every request), else
+  // the session's own. The picker below switches the same acting tenant.
+  const { acting, tenants, switchTo } = useActingTenant(isSuper);
+  const activeTenant = acting ?? tenant ?? undefined;
 
   return (
     <div className="mx-auto flex w-full max-w-4xl flex-col gap-6 p-4 md:p-8">
@@ -126,10 +111,11 @@ export function Organization() {
           <label className="flex items-center gap-2 text-sm">
             <span className="text-[var(--color-fg-subtle)]">Tenant</span>
             <Select
-              value={scope ?? ""}
-              onChange={(e) => setScope(e.target.value)}
+              value={acting ?? ""}
+              onChange={(e) => switchTo(e.target.value || null)}
               className="rounded-[var(--radius)] border border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-1.5 text-sm"
             >
+              <option value="">(home: {tenant})</option>
               {tenants.map((t) => (
                 <option key={t.tenantId} value={t.tenantId}>
                   {t.name || t.tenantId} ({t.tenantId})
@@ -157,16 +143,16 @@ export function Organization() {
         ))}
       </nav>
 
-      {tab === "overview" && <OverviewTab key={activeTenant} role={role} scope={activeTenant} />}
-      {tab === "members" && <MembersTab key={activeTenant} selfId={subject} scope={activeTenant} />}
-      {tab === "requests" && <RequestsTab key={activeTenant} scope={activeTenant} />}
-      {tab === "quota" && <QuotaTab key={activeTenant} scope={activeTenant} />}
-      {tab === "settings" && <SettingsTab key={activeTenant} scope={activeTenant} />}
-      {tab === "links" && <PublicLinksTab key={activeTenant} scope={activeTenant} />}
-      {tab === "tools" && <ToolConnectorsTab key={activeTenant} scope={activeTenant} />}
-      {tab === "content" && <ContentReviewTab key={activeTenant} scope={activeTenant} />}
+      {tab === "overview" && <OverviewTab key={activeTenant} role={role} />}
+      {tab === "members" && <MembersTab key={activeTenant} selfId={subject} />}
+      {tab === "requests" && <RequestsTab key={activeTenant} />}
+      {tab === "quota" && <QuotaTab key={activeTenant} />}
+      {tab === "settings" && <SettingsTab key={activeTenant} />}
+      {tab === "links" && <PublicLinksTab key={activeTenant} />}
+      {tab === "tools" && <ToolConnectorsTab key={activeTenant} />}
+      {tab === "content" && <ContentReviewTab key={activeTenant} />}
       {tab === "audit" && (
-        <AuditLogTab key={isSuper ? "platform" : activeTenant} platform={isSuper} scope={activeTenant} tenants={tenants} />
+        <AuditLogTab key={isSuper ? "platform" : activeTenant} platform={isSuper} tenants={tenants} />
       )}
       {tab === "tenants" && isSuper && <TenantsTab />}
       {tab === "orgsync" && isSuper && <OrgSyncTab />}
@@ -178,7 +164,7 @@ export function Organization() {
   );
 }
 
-function OverviewTab({ role, scope }: { role: string | null; scope?: string }) {
+function OverviewTab({ role }: { role: string | null }) {
   const [usage, setUsage] = useState<TenantUsage | null>(null);
   const [records, setRecords] = useState<TenantAuditRecord[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -188,7 +174,7 @@ function OverviewTab({ role, scope }: { role: string | null; scope?: string }) {
     setLoading(true);
     setError(null);
     try {
-      const [u, a] = await Promise.all([api.tenantUsage(scope), api.tenantAudit(200, scope)]);
+      const [u, a] = await Promise.all([api.tenantUsage(), api.tenantAudit(200)]);
       setUsage(u);
       setRecords(a.records ?? []);
     } catch (e) {
@@ -196,7 +182,7 @@ function OverviewTab({ role, scope }: { role: string | null; scope?: string }) {
     } finally {
       setLoading(false);
     }
-  }, [scope]);
+  }, []);
 
   useEffect(() => {
     void load();
@@ -292,7 +278,7 @@ function OverviewTab({ role, scope }: { role: string | null; scope?: string }) {
 
 const ROLES: TenantMember["role"][] = ["org_admin", "member", "viewer"];
 
-function MembersTab({ selfId, scope }: { selfId: string | null; scope?: string }) {
+function MembersTab({ selfId }: { selfId: string | null }) {
   const [members, setMembers] = useState<TenantMember[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
@@ -302,12 +288,12 @@ function MembersTab({ selfId, scope }: { selfId: string | null; scope?: string }
   const load = useCallback(async () => {
     setError(null);
     try {
-      const { members } = await api.tenantMembers(scope);
+      const { members } = await api.tenantMembers();
       setMembers(members ?? []);
     } catch (e) {
       setError(e instanceof Error ? e.message : "failed to load members");
     }
-  }, [scope]);
+  }, []);
 
   useEffect(() => {
     void load();
@@ -329,7 +315,7 @@ function MembersTab({ selfId, scope }: { selfId: string | null; scope?: string }
   const addMember = async () => {
     const id = newId.trim();
     if (!id) return;
-    await run("__add__", () => api.addTenantMember(id, newRole, scope), "failed to add member");
+    await run("__add__", () => api.addTenantMember(id, newRole), "failed to add member");
     setNewId("");
   };
 
@@ -407,7 +393,7 @@ function MembersTab({ selfId, scope }: { selfId: string | null; scope?: string }
                         onChange={(e) =>
                           void run(
                             m.userId,
-                            () => api.setTenantMemberRole(m.userId, e.target.value as TenantMember["role"], scope),
+                            () => api.setTenantMemberRole(m.userId, e.target.value as TenantMember["role"]),
                             "failed to change role",
                           )
                         }
@@ -424,7 +410,7 @@ function MembersTab({ selfId, scope }: { selfId: string | null; scope?: string }
                     <td className="px-3 py-2 text-right">
                       <button
                         onClick={() =>
-                          void run(m.userId, () => api.removeTenantMember(m.userId, scope), "failed to remove member")
+                          void run(m.userId, () => api.removeTenantMember(m.userId), "failed to remove member")
                         }
                         disabled={isSelf || busy === m.userId}
                         className="tactile rounded-[var(--radius)] border border-[var(--color-border)] px-2 py-1 text-xs text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-2)] disabled:opacity-40"
@@ -450,7 +436,7 @@ function MembersTab({ selfId, scope }: { selfId: string | null; scope?: string }
   );
 }
 
-function QuotaTab({ scope }: { scope?: string }) {
+function QuotaTab() {
   const [runQuota, setRunQuota] = useState("");
   const [costAllowance, setCostAllowance] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -460,13 +446,13 @@ function QuotaTab({ scope }: { scope?: string }) {
   const load = useCallback(async () => {
     setError(null);
     try {
-      const u = await api.tenantUsage(scope);
+      const u = await api.tenantUsage();
       setRunQuota(String(u.runQuota));
       setCostAllowance(String(u.costAllowance));
     } catch (e) {
       setError(e instanceof Error ? e.message : "failed to load quota");
     }
-  }, [scope]);
+  }, []);
 
   useEffect(() => {
     void load();
@@ -477,7 +463,7 @@ function QuotaTab({ scope }: { scope?: string }) {
     setError(null);
     setSaved(false);
     try {
-      await api.setTenantQuota(Number(runQuota) || 0, Number(costAllowance) || 0, scope);
+      await api.setTenantQuota(Number(runQuota) || 0, Number(costAllowance) || 0);
       setSaved(true);
     } catch (e) {
       setError(e instanceof Error ? e.message : "failed to save quota");
@@ -525,7 +511,7 @@ function QuotaTab({ scope }: { scope?: string }) {
   );
 }
 
-function SettingsTab({ scope }: { scope?: string }) {
+function SettingsTab() {
   const [settings, setSettings] = useState<TenantSettings | null>(null);
   const [name, setName] = useState("");
   const [ssoIssuer, setSsoIssuer] = useState("");
@@ -536,14 +522,14 @@ function SettingsTab({ scope }: { scope?: string }) {
   const load = useCallback(async () => {
     setError(null);
     try {
-      const s = await api.tenantSettings(scope);
+      const s = await api.tenantSettings();
       setSettings(s);
       setName(s.name);
       setSsoIssuer(s.ssoIssuer);
     } catch (e) {
       setError(e instanceof Error ? e.message : "failed to load settings");
     }
-  }, [scope]);
+  }, []);
 
   useEffect(() => {
     void load();
@@ -554,7 +540,7 @@ function SettingsTab({ scope }: { scope?: string }) {
     setError(null);
     setSaved(false);
     try {
-      const s = await api.updateTenantSettings({ name, ssoIssuer }, scope);
+      const s = await api.updateTenantSettings({ name, ssoIssuer });
       setSettings(s);
       setSaved(true);
     } catch (e) {
@@ -572,7 +558,7 @@ function SettingsTab({ scope }: { scope?: string }) {
     setPolicySaving(true);
     setError(null);
     try {
-      setSettings(await api.updateTenantSettings(patch, scope));
+      setSettings(await api.updateTenantSettings(patch));
       invalidateTenantPolicy();
     } catch (e) {
       setError(e instanceof Error ? e.message : "failed to save the policy");
@@ -644,7 +630,7 @@ function SettingsTab({ scope }: { scope?: string }) {
           links tab lists the active links.
         </p>
       </div>
-      <TenantRetentionSection scope={scope} />
+      <TenantRetentionSection />
     </section>
   );
 }

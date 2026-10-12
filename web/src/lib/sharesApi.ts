@@ -1,4 +1,4 @@
-import { ApiError, req, scoped } from "./api.ts";
+import { ApiError, req } from "./api.ts";
 import { apiUrl } from "./config";
 import { errorDetail } from "./session.ts";
 import { tapOnboarding } from "./onboardingEvents.ts";
@@ -26,7 +26,7 @@ export const sharesApi = {
   revoke: (roomId: string, artifactId: string, shareId: string) =>
     req<void>(`${sharesPath(roomId, artifactId)}/${encodeURIComponent(shareId)}`, { method: "DELETE", raw: true }),
   // Org admin: every active link of the tenant.
-  tenantShares: (tenantId?: string) => req<{ shares: TenantShareView[] }>(scoped("/v1/tenant/shares?active=1", tenantId)),
+  tenantShares: () => req<{ shares: TenantShareView[] }>("/v1/tenant/shares?active=1"),
   // A member's frame URL for one site version (ticketed, 1 h).
   siteTicket: (roomId: string, artifactId: string, version: number) =>
     req<SiteTicket>(

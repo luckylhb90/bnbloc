@@ -13,9 +13,8 @@ function equal(actual: unknown, expected: unknown): void {
   if (actual !== expected) throw new Error(`expected ${String(expected)}, got ${String(actual)}`);
 }
 
-test("tenant scope reads the tenant route; a super-admin's org scope rides tenantId", () => {
+test("tenant scope reads the tenant route in the session's (acting) tenant", () => {
   equal(auditLogPath({ kind: "tenant" }, EMPTY_AUDIT_FILTER), "/v1/tenant/audit-log");
-  equal(auditLogPath({ kind: "tenant", tenantId: "acme" }, EMPTY_AUDIT_FILTER), "/v1/tenant/audit-log?tenantId=acme");
 });
 
 test("platform scope reads the platform route with an optional tenant filter", () => {

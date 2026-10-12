@@ -2,6 +2,7 @@ import { useState } from "react";
 import { CloudIcon, ShieldCheckIcon } from "@phosphor-icons/react";
 import { sameUser } from "@/lib/format";
 import { hostsLabel, platformAgentOnline, type RoomPlatformAgent } from "@/lib/platformAgents";
+import { mayChat as canChat } from "@/lib/roomRoles";
 import { Badge } from "@/ui/Card";
 import { Button } from "@/ui/Button";
 import { useDisplayNames } from "@/lib/useDisplayName";
@@ -24,7 +25,7 @@ export function PlatformAgentsSection({
   const [removing, setRemoving] = useState<string | null>(null);
   const nameOf = useDisplayNames(agents.flatMap((a) => [...a.hosts.map((h) => h.hostUserId), a.addedBy]));
   if (agents.length === 0) return null;
-  const mayChat = !!myRole && myRole !== "visitor";
+  const mayChat = canChat({ role: myRole });
   return (
     <div className="mt-6">
       <div className="mb-2 flex items-center gap-2">

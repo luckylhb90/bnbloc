@@ -144,15 +144,6 @@ export class ApiError extends Error {
   }
 }
 
-// scoped appends ?tenantId=/&tenantId= to a tenant-scoped path when a
-// super-admin targets a specific org. The gateway ignores the param for
-// non-super-admins, so it is always safe to send when set.
-export function scoped(path: string, tenantId?: string): string {
-  if (!tenantId) return path;
-  const sep = path.includes("?") ? "&" : "?";
-  return `${path}${sep}tenantId=${encodeURIComponent(tenantId)}`;
-}
-
 export const api = {
   login: (idpToken: string) =>
     req<Grant>("/v1/auth/login", {
@@ -274,61 +265,60 @@ export const api = {
   // Any user: the caller's own join requests across tenants (status tracking).
   myJoinRequests: () => req<{ requests: JoinRequest[] }>("/v1/tenants/join-requests"),
   // Org-admin: pending join requests for the ctx tenant (status=all|approved|rejected widens).
-  listJoinRequests: (status?: "pending" | "approved" | "rejected" | "all", tenantId?: string) =>
+  listJoinRequests: (status?: "pending" | "approved" | "rejected" | "all") =>
     req<{ requests: JoinRequest[] }>(
-      scoped(`/v1/tenant/join-requests${status ? `?status=${status}` : ""}`, tenantId),
+      `/v1/tenant/join-requests${status ? `?status=${status}` : ""}`,
     ),
   // Org-admin: approve a pending request (creates membership).
-  approveJoinRequest: (userId: string, tenantId?: string) =>
-    req<JoinRequest>(scoped(`/v1/tenant/join-requests/${encodeURIComponent(userId)}/approve`, tenantId), {
+  approveJoinRequest: (userId: string) =>
+    req<JoinRequest>(`/v1/tenant/join-requests/${encodeURIComponent(userId)}/approve`, {
       method: "POST",
     }),
   // Org-admin: reject a pending request.
-  rejectJoinRequest: (userId: string, tenantId?: string) =>
-    req<JoinRequest>(scoped(`/v1/tenant/join-requests/${encodeURIComponent(userId)}/reject`, tenantId), {
+  rejectJoinRequest: (userId: string) =>
+    req<JoinRequest>(`/v1/tenant/join-requests/${encodeURIComponent(userId)}/reject`, {
       method: "POST",
     }),
   // Org-admin: the tenant's audit trail across all its rooms (newest-first).
   // A super-admin passes tenantId to target another org; org-admins omit it and
   // stay scoped to their own tenant (the gateway ignores the param for them).
-  tenantAudit: (limit = 100, tenantId?: string) =>
-    req<{ records: TenantAuditRecord[] }>(scoped(`/v1/tenant/audit?limit=${limit}`, tenantId)),
+  tenantAudit: (limit = 100) =>
+    req<{ records: TenantAuditRecord[] }>(`/v1/tenant/audit?limit=${limit}`),
   // Org-admin: the tenant's aggregate agent usage + configured ceilings.
-  tenantUsage: (tenantId?: string) => req<TenantUsage>(scoped("/v1/tenant/usage", tenantId)),
+  tenantUsage: () => req<TenantUsage>("/v1/tenant/usage"),
   // Org-admin: the tenant's members with their org roles.
-  tenantMembers: (tenantId?: string) =>
-    req<{ members: TenantMember[] }>(scoped("/v1/tenant/members", tenantId)),
+  tenantMembers: () =>
+    req<{ members: TenantMember[] }>("/v1/tenant/members"),
   // Org-admin: add (or upsert) a member by subject id with a chosen role.
-  addTenantMember: (userId: string, role: "org_admin" | "member" | "viewer", tenantId?: string) =>
-    req<TenantMember>(scoped("/v1/tenant/members", tenantId), {
+  addTenantMember: (userId: string, role: "org_admin" | "member" | "viewer") =>
+    req<TenantMember>("/v1/tenant/members", {
       method: "POST",
       body: JSON.stringify({ userId, role }),
     }),
   // Org-admin: remove a member (cannot remove self or the last admin).
-  removeTenantMember: (userId: string, tenantId?: string) =>
+  removeTenantMember: (userId: string) =>
     req<{ removed: boolean; userId: string }>(
-      scoped(`/v1/tenant/members/${encodeURIComponent(userId)}`, tenantId),
+      `/v1/tenant/members/${encodeURIComponent(userId)}`,
       { method: "DELETE" },
     ),
   // Org-admin: change one member's org role (cannot target yourself).
-  setTenantMemberRole: (userId: string, role: "org_admin" | "member" | "viewer", tenantId?: string) =>
-    req<TenantMember>(scoped(`/v1/tenant/members/${encodeURIComponent(userId)}/role`, tenantId), {
+  setTenantMemberRole: (userId: string, role: "org_admin" | "member" | "viewer") =>
+    req<TenantMember>(`/v1/tenant/members/${encodeURIComponent(userId)}/role`, {
       method: "PUT",
       body: JSON.stringify({ role }),
     }),
   // Org-admin: persist org-level run/cost ceilings (0 = unlimited).
-  setTenantQuota: (runQuota: number, costAllowance: number, tenantId?: string) =>
-    req<{ runQuota: number; costAllowance: number }>(scoped("/v1/tenant/quota", tenantId), {
+  setTenantQuota: (runQuota: number, costAllowance: number) =>
+    req<{ runQuota: number; costAllowance: number }>("/v1/tenant/quota", {
       method: "PUT",
       body: JSON.stringify({ runQuota, costAllowance }),
     }),
   // Org-admin: read/update the tenant settings (display name, SSO issuer).
-  tenantSettings: (tenantId?: string) => req<TenantSettings>(scoped("/v1/tenant/settings", tenantId)),
+  tenantSettings: () => req<TenantSettings>("/v1/tenant/settings"),
   updateTenantSettings: (
     body: { name?: string; ssoIssuer?: string; requireSandboxForBorrow?: boolean; publicSharesDisabled?: boolean },
-    tenantId?: string,
   ) =>
-    req<TenantSettings>(scoped("/v1/tenant/settings", tenantId), {
+    req<TenantSettings>("/v1/tenant/settings", {
       method: "PUT",
       body: JSON.stringify(body),
     }),

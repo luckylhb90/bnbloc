@@ -8,10 +8,9 @@ import {
   useState,
 } from "react";
 import { api } from "@/lib/api";
-import { refreshSession, setReauthHandler, setToken } from "@/lib/session";
+import { bindActingTenant, clearActingTenant, refreshSession, setReauthHandler, setToken } from "@/lib/session";
 import {
   SESSION_KEY,
-  establishSession,
   parseSessionRecord,
   parseSsoFragment,
   recordFromGrant,
@@ -59,49 +58,12 @@ const sessionStore = (): Storage | null => {
   }
 };
 
-// The session lives in sessionStorage (browser) or localStorage (desktop shell);
-// member picked must outlive the window: reopening the app should land where
-// they left off, not on their default workspace. Keyed by subject so two
-// identities on one machine do not inherit each other's choice.
-const TENANT_KEY = "bnbloc.lastTenant";
-
-function tenantMemory(): Record<string, string> {
-  if (typeof localStorage === "undefined") return {};
-  try {
-    const raw = localStorage.getItem(TENANT_KEY);
-    return raw ? (JSON.parse(raw) as Record<string, string>) : {};
-  } catch {
-    return {};
-  }
-}
-
 function storedSession(): SessionRecord | null {
   return parseSessionRecord(sessionStore()?.getItem(SESSION_KEY));
 }
 
 function persistSession(record: SessionRecord) {
   sessionStore()?.setItem(SESSION_KEY, JSON.stringify(record));
-}
-
-function rememberedTenant(subject: string | null | undefined): string | null {
-  if (!subject) return null;
-  return tenantMemory()[subject] ?? null;
-}
-
-function rememberTenant(subject: string | null | undefined, tenant: string | null) {
-  if (!subject || typeof localStorage === "undefined") return;
-  const all = tenantMemory();
-  if (tenant) all[subject] = tenant;
-  else delete all[subject];
-  try {
-    localStorage.setItem(TENANT_KEY, JSON.stringify(all));
-  } catch {
-    // storage full or blocked: the choice simply is not remembered
-  }
-}
-
-function forgetTenant(subject: string | null | undefined) {
-  rememberTenant(subject, null);
 }
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
@@ -117,6 +79,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // tokenEra bump so the desktop shell re-feeds its sidecars/bridge.
   const apply = useCallback((record: SessionRecord) => {
     setToken(record.token);
+    bindActingTenant(record.subject);
     setTokenEra((n) => n + 1);
     setSubject(record.subject);
     setTenant(record.tenant);
@@ -163,6 +126,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const saved = storedSession();
     if (saved) {
       setToken(saved.token);
+      bindActingTenant(saved.subject);
       setSubject(saved.subject);
       setTenant(saved.tenant);
       setRole(saved.role);
@@ -171,38 +135,27 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   // Mirrors of the session scope for the re-auth handler, which is installed
-  // once and must read the CURRENT subject/tenant, not a stale closure.
+  // once and must read the CURRENT subject, not a stale closure.
   const subjectRef = useRef(subject);
   subjectRef.current = subject;
-  const tenantRef = useRef(tenant);
-  tenantRef.current = tenant;
   const directLoginRef = useRef(directLoginAvailable);
   directLoginRef.current = directLoginAvailable;
 
-  // establish mints a grant (login or refresh) and lands it in the tenant the
-  // member chose — shared by sign-in and silent renewal so the two can never
-  // drift apart (see establishSession).
+  // establish mints a grant (login or refresh) and installs it. The gateway
+  // mints it in the tenant the member chose: a tenant switch persists on the
+  // sign-in's refresh family, so no client-side re-switch is needed.
   const establish = useCallback(
-    async (
-      mint: () => Promise<Grant>,
-      wantedFor: (subject: string) => string | null,
-      onSwitchFailed?: (status: number, subject: string) => void,
-    ) => {
-      const record = await establishSession(mint, wantedFor, { setToken, switchTenant: api.switchTenant }, onSwitchFailed);
+    async (mint: () => Promise<Grant>) => {
+      const record = recordFromGrant(await mint());
       apply(record);
       return record;
     },
     [apply],
   );
 
-  // The chosen workspace is remembered across sessions, not just reloads:
-  // signing in restores the last choice. Only a genuine "not available to this
-  // member" forgets it; a transient error must not erase the setting.
   const login = useCallback(
     async (idpToken: string) => {
-      await establish(() => api.login(idpToken), rememberedTenant, (status, subject) => {
-        if (status === 403 || status === 404) forgetTenant(subject);
-      });
+      await establish(() => api.login(idpToken));
     },
     [establish],
   );
@@ -213,7 +166,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setSubject(subject);
     setTenant(tenant ?? null);
     setRole(role ?? null);
-    // switch-tenant mints no refresh token: the subject-scoped one stays.
+    // switch-tenant mints no refresh token: the sign-in's stays, and its
+    // family now refreshes into the switched tenant (server-side).
     persistSession({
       token: sessionToken,
       refreshToken: storedSession()?.refreshToken ?? null,
@@ -221,7 +175,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       tenant: tenant ?? null,
       role: role ?? null,
     });
-    rememberTenant(subject, tenant ?? null);
     // Rooms/agents/RBAC are all scoped to the token's tenant; reload so every
     // view re-fetches under the new scope instead of showing stale data.
     window.location.reload();
@@ -229,6 +182,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const logout = useCallback(() => {
     const refreshToken = storedSession()?.refreshToken;
+    clearActingTenant();
     setToken(null);
     setSubject(null);
     setTenant(null);
@@ -246,10 +200,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // funnels through session.refreshSession(), which coalesces concurrent
   // callers onto this handler. renewSession decides: refresh token → refresh;
   // none → direct re-login only where the gateway offers it; else sign out.
-  // The new grant lands back in the tenant the member chose (a refresh, like a
-  // login, mints the default tenant). Subject and tenant come from refs/
-  // storage, not render closures: the handler can run during the first render
-  // after a reload, before state is populated.
+  // The gateway mints the new grant in the tenant the member chose. The
+  // subject comes from refs/storage, not render closures: the handler can run
+  // during the first render after a reload, before state is populated.
   useEffect(() => {
     setReauthHandler(() => {
       const stored = storedSession();
@@ -259,10 +212,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         directLoginAvailable: directLoginRef.current,
         refresh: api.refresh,
         login: api.login,
-        establish: async (mint) => {
-          const record = await establish(mint, (sub) => tenantRef.current ?? stored?.tenant ?? rememberedTenant(sub));
-          rememberTenant(record.subject, record.tenant);
-        },
+        establish,
         logout,
       });
     });

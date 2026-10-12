@@ -21,12 +21,10 @@ import (
 	"github.com/luckylhb90/bnbloc/internal/obs"
 	"github.com/luckylhb90/bnbloc/internal/orgsync"
 	"github.com/luckylhb90/bnbloc/internal/provisioning"
-	"github.com/luckylhb90/bnbloc/internal/rbac"
 	"github.com/luckylhb90/bnbloc/internal/sealbox"
 	"github.com/luckylhb90/bnbloc/internal/shard"
 	"github.com/luckylhb90/bnbloc/internal/store"
 	"github.com/luckylhb90/bnbloc/internal/svcauth"
-	"github.com/luckylhb90/bnbloc/internal/tenant"
 	"github.com/luckylhb90/bnbloc/services/gateway"
 	"github.com/luckylhb90/bnbloc/services/gateway/webui"
 )
@@ -360,45 +358,16 @@ func truthy(raw string) bool {
 // into the web session) to install the auth-provider component.
 const mintAdminTokenCmd = "mint-admin-token"
 
-// bootstrapTokenTTL bounds a minted bootstrap session.
-const bootstrapTokenTTL = 15 * time.Minute
-
 func runMintAdminToken(args []string) {
 	if len(args) != 1 {
 		log.Fatalf("usage: bnbloc-gateway %s <super-admin subject or email>", mintAdminTokenCmd)
 	}
 	key := config.FromEnvRaw("BNBLOC_SESSION_SIGNING_KEY")
-	token, err := mintAdminToken(args[0], splitCSV(config.FromEnvRaw("BNBLOC_SUPER_ADMINS")), key, time.Now())
+	token, err := gateway.MintAdminToken(args[0], splitCSV(config.FromEnvRaw("BNBLOC_SUPER_ADMINS")), key, time.Now())
 	if err != nil {
 		log.Fatalf("bnbloc-gateway %s: %v", mintAdminTokenCmd, err)
 	}
 	fmt.Println(token)
-}
-
-// mintAdminToken issues a short-lived platform super-admin session for subject,
-// which must be listed in superAdmins (exactly: subjects are case-sensitive)
-// — the same list login consults. The signing key must be the running
-// gateway's stable key, or the token would not verify there.
-func mintAdminToken(subject string, superAdmins []string, signingKey string, now time.Time) (string, error) {
-	subject = strings.TrimSpace(subject)
-	if signingKey == "" {
-		return "", fmt.Errorf("BNBLOC_SESSION_SIGNING_KEY is not set (the running gateway could not verify the token)")
-	}
-	listed := false
-	for _, a := range superAdmins {
-		if strings.TrimSpace(a) == subject {
-			listed = true
-		}
-	}
-	if subject == "" || !listed {
-		return "", fmt.Errorf("%q is not listed in BNBLOC_SUPER_ADMINS", subject)
-	}
-	return auth.NewSigner([]byte(signingKey)).Issue(auth.Claims{
-		Subject:       subject,
-		Tenant:        tenant.Default,
-		Role:          string(rbac.RoleSuperAdmin),
-		ExpiresAtUnix: now.Add(bootstrapTokenTTL).Unix(),
-	}), nil
 }
 
 // resolveACSPath reads BNBLOC_AUTH_ACS_PATH: the public path of the ACS URL

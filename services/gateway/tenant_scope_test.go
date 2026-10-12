@@ -96,9 +96,9 @@ func (g *contentGateway) storedTenant(id string) string {
 
 var actingB = map[string]string{actingTenantHeader: "org-b"}
 
-// A super admin acting as tenant B (the header, or ?tenantId= which wins)
-// creates, lists and saves new versions of their content in B; their
-// session tenant's Library does not hold it.
+// A super admin acting as tenant B (the header) creates, lists and saves
+// new versions of their content in B; their session tenant's Library does
+// not hold it, and a ?tenantId= query is no acting-tenant input.
 func TestActingTenantScopesMemberContent(t *testing.T) {
 	g := actingContentGateway(t)
 	form, _ := json.Marshal(expertForm("acting"))
@@ -116,11 +116,8 @@ func TestActingTenantScopesMemberContent(t *testing.T) {
 	if !g.libraryIDs("root", "", actingB)[c.ID] {
 		t.Fatal("library acting as org-b misses the component")
 	}
-	if !g.libraryIDs("root", "?tenantId=org-b", nil)[c.ID] {
-		t.Fatal("library with ?tenantId=org-b misses the component")
-	}
-	if !g.libraryIDs("root", "?tenantId=org-b", map[string]string{actingTenantHeader: "org-x"})[c.ID] {
-		t.Fatal("?tenantId= must win over the header")
+	if g.libraryIDs("root", "?tenantId=org-b", nil)[c.ID] {
+		t.Fatal("?tenantId= acted in org-b: the header is the only acting-tenant input")
 	}
 	if g.libraryIDs("root", "", nil)[c.ID] {
 		t.Fatal("the session tenant's library (org-a) lists org-b content")
@@ -168,8 +165,8 @@ func TestJobGrantSaveVisibleInActingTenant(t *testing.T) {
 	}
 }
 
-// A non-super-admin is bound to their session tenant: the header and
-// ?tenantId= are ignored on gateway-served routes.
+// A non-super-admin is bound to their session tenant: the header is ignored
+// on gateway-served routes.
 func TestActingTenantIgnoredForMembers(t *testing.T) {
 	g := actingContentGateway(t)
 	form, _ := json.Marshal(expertForm("member"))
@@ -221,7 +218,7 @@ func TestContentRoomScopeActsInRoomTenant(t *testing.T) {
 	}
 }
 
-// The proxy: a super admin's acting tenant (header, ?tenantId= wins) scopes a
+// The proxy: a super admin's acting tenant (the header) scopes a
 // tenant-level path, a room-scoped path acts in the room's tenant, and the
 // header never reaches the backend.
 func TestProxyEffectiveTenant(t *testing.T) {
@@ -263,8 +260,8 @@ func TestProxyEffectiveTenant(t *testing.T) {
 	if got := call("/v1/tenant/usage", "org-x"); got != "org-x" {
 		t.Fatalf("tenant path acting org-x = %q", got)
 	}
-	if got := call("/v1/tenant/usage?tenantId=org-y", "org-x"); got != "org-y" {
-		t.Fatalf("tenant path ?tenantId=org-y = %q, want it to win", got)
+	if got := call("/v1/tenant/usage?tenantId=org-y", "org-x"); got != "org-x" {
+		t.Fatalf("tenant path ?tenantId=org-y = %q, want the header's org-x (no query input)", got)
 	}
 	if got := call("/v1/rooms/room-1/members", "org-x"); got != "org-b" {
 		t.Fatalf("room path = %q, want the room's tenant org-b", got)

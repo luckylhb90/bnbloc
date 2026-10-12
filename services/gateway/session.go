@@ -121,16 +121,64 @@ func (s *Service) resolveSession(identity auth.Identity) (sessionScope, error) {
 			return sessionScope{}, fmt.Errorf("resolve tenant: %w", err)
 		}
 	}
-	// A suspended tenant is closed to its members; a platform super-admin is
-	// exempt (they must still reach the suspended org to re-activate it).
-	if s.TenantSuspended != nil && role != string(rbac.RoleSuperAdmin) && s.TenantSuspended(tenantID) {
+	return s.landIn(identity.Subject, tenantID, role)
+}
+
+// landIn is where a session lands once its tenant and org role are known:
+// the suspended-tenant gate and the room scope. A suspended tenant is closed
+// to its members; a platform super-admin is exempt (they must still reach
+// the suspended org to re-activate it).
+func (s *Service) landIn(subject, tenantID, role string) (sessionScope, error) {
+	if s.TenantSuspended != nil && !rbac.Can(role, rbac.PermManagePlatform) && s.TenantSuspended(tenantID) {
 		return sessionScope{}, errTenantSuspended
 	}
-	var rooms []string
+	rooms := []string{}
 	if s.Rooms != nil {
-		rooms = s.Rooms(identity.Subject, tenantID)
+		if rs := s.Rooms(subject, tenantID); rs != nil {
+			rooms = rs
+		}
 	}
 	return sessionScope{Tenant: tenantID, Role: role, Rooms: rooms}, nil
+}
+
+// errNotTenantMember refuses a switch into a tenant the caller does not
+// belong to.
+var errNotTenantMember = errors.New("not a member of that tenant")
+
+// errSwitchUnavailable: no tenant directory to check a switch against.
+var errSwitchUnavailable = errors.New("tenant switching not available")
+
+// switchScope resolves a member's switch into target: a platform super admin
+// may enter any tenant (keeping the platform role); anyone else only one
+// they belong to, with their role there. It never provisions a membership.
+func (s *Service) switchScope(claims auth.Claims, target string) (sessionScope, error) {
+	role := claims.Role
+	if !rbac.Can(claims.Role, rbac.PermManagePlatform) {
+		if s.TenantMemberRole == nil {
+			return sessionScope{}, errSwitchUnavailable
+		}
+		r, ok := s.TenantMemberRole(target, claims.Subject)
+		if !ok {
+			return sessionScope{}, errNotTenantMember
+		}
+		role = r
+	}
+	return s.landIn(claims.Subject, target, role)
+}
+
+// mintSession is the ONE way a session bearer is minted, for every path that
+// issues one: sign-in, refresh and fork (grantFor), a tenant switch, the
+// API-token exchange and the operator's bootstrap token (MintAdminToken).
+// family is the refresh family the session renews through ("" for none).
+func mintSession(signer *auth.Signer, subject, family string, scope sessionScope, expires time.Time) string {
+	return signer.Issue(auth.Claims{
+		Subject:       subject,
+		Rooms:         scope.Rooms,
+		Tenant:        scope.Tenant,
+		Role:          scope.Role,
+		Family:        family,
+		ExpiresAtUnix: expires.Unix(),
+	})
 }
 
 // issueSession is the ONE way the gateway turns a verified identity into a
@@ -185,14 +233,7 @@ func (s *Service) openFamily(ctx context.Context, identity auth.Identity, scope 
 // grantFor mints the session bearer and the family's current refresh token.
 func (s *Service) grantFor(fam store.RefreshFamily, scope sessionScope) sessionGrant {
 	now := s.nowTime()
-	token := s.Signer.Issue(auth.Claims{
-		Subject:       fam.Subject,
-		Rooms:         scope.Rooms,
-		Tenant:        scope.Tenant,
-		Role:          scope.Role,
-		Family:        fam.FamilyID,
-		ExpiresAtUnix: now.Add(s.SessionTTL).Unix(),
-	})
+	token := mintSession(s.Signer, fam.Subject, fam.FamilyID, scope, now.Add(s.SessionTTL))
 	refresh := s.Signer.Issue(auth.Claims{
 		Subject:       fam.Subject,
 		Tenant:        fam.TenantHint,
@@ -625,4 +666,30 @@ func (s *Service) claimCLIHandoff(ctx context.Context, nonce string) (auth.Ident
 		return auth.Identity{}, false, err
 	}
 	return auth.Identity{Subject: h.Subject, Email: h.Email, Tenant: h.TenantHint}, true, nil
+}
+
+// bootstrapTokenTTL bounds a minted bootstrap session.
+const bootstrapTokenTTL = 15 * time.Minute
+
+// MintAdminToken issues a short-lived platform super-admin session for
+// subject (the operator's `bnbloc-gateway mint-admin-token`), which must be
+// listed in superAdmins (case-insensitive) — the same list login consults.
+// The signing key must be the running gateway's stable key, or the token
+// would not verify there. It mints through mintSession like every session.
+func MintAdminToken(subject string, superAdmins []string, signingKey string, now time.Time) (string, error) {
+	subject = strings.TrimSpace(subject)
+	if signingKey == "" {
+		return "", fmt.Errorf("BNBLOC_SESSION_SIGNING_KEY is not set (the running gateway could not verify the token)")
+	}
+	listed := false
+	for _, a := range superAdmins {
+		if strings.TrimSpace(a) == subject {
+			listed = true
+		}
+	}
+	if subject == "" || !listed {
+		return "", fmt.Errorf("%q is not listed in BNBLOC_SUPER_ADMINS", subject)
+	}
+	scope := sessionScope{Tenant: tenant.Default, Role: string(rbac.RoleSuperAdmin), Rooms: []string{}}
+	return mintSession(auth.NewSigner([]byte(signingKey)), subject, "", scope, now.Add(bootstrapTokenTTL)), nil
 }

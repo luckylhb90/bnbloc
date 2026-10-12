@@ -26,7 +26,7 @@ export interface AuditLogReply {
 // The console the log is read from: an org admin's tenant, or the platform
 // (all tenants, optionally narrowed to one).
 export type AuditLogScope =
-  | { readonly kind: "tenant"; readonly tenantId?: string }
+  | { readonly kind: "tenant" }
   | { readonly kind: "platform"; readonly tenant?: string };
 
 export interface AuditLogFilter {
@@ -78,13 +78,9 @@ export function auditLogPath(
   if (opts.limit) q.set("limit", String(opts.limit));
   if (opts.cursor) q.set("cursor", opts.cursor);
   if (opts.csv) q.set("format", "csv");
-  if (scope.kind === "platform") {
-    if (scope.tenant) q.set("tenant", scope.tenant);
-  } else if (scope.tenantId) {
-    // A super-admin administering one org from its console (ignored by the
-    // gateway for org admins, who stay in their own tenant).
-    q.set("tenantId", scope.tenantId);
-  }
+  // The platform log narrows to one tenant with a filter; the tenant log is
+  // the tenant the session acts in (a super-admin's acting tenant).
+  if (scope.kind === "platform" && scope.tenant) q.set("tenant", scope.tenant);
   const base = scope.kind === "platform" ? "/v1/platform/audit-log" : "/v1/tenant/audit-log";
   const qs = q.toString();
   return qs ? `${base}?${qs}` : base;

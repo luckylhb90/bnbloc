@@ -295,8 +295,8 @@ Design: PRD §1 "Sources, scopes and trust" and "Status: step 4".
   room tools' `publish_component` with a job grant) opens a publish request
   for a version (default the latest); a newer request withdraws a pending
   one, and the organization's current version cannot be requested again.
-  Org admins (`manage_org` in that organization; a super admin with
-  `?tenantId=`) list requests, review one (the version's declared
+  Org admins (`manage_org` in that organization; a super admin acting
+  in it) list requests, review one (the version's declared
   permissions, the files that execute (`Package.ScriptFiles`),
   requirements including MCP tools, a team's roster, skills, and the
   file-by-file changes from the version the organization uses, text

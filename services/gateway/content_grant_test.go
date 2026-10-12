@@ -148,16 +148,17 @@ func TestRoomGrantDetailBundleDownloadable(t *testing.T) {
 }
 
 // The effective tenant has one owner (tenant_scope.go): no other gateway
-// file reads the acting-tenant header or a tenantId query parameter, or
-// resolves a room's tenant itself.
+// file reads the acting-tenant header or resolves a room's tenant itself,
+// and no file reads a ?tenantId= override (the header is the only input).
 func TestEffectiveTenantSingleOwner(t *testing.T) {
 	files, _ := filepath.Glob("*.go")
 	var problems []string
 	fset := token.NewFileSet()
 	for _, f := range files {
-		if strings.HasSuffix(f, "_test.go") || f == "tenant_scope.go" {
+		if strings.HasSuffix(f, "_test.go") {
 			continue
 		}
+		owner := f == "tenant_scope.go"
 		file, err := parser.ParseFile(fset, f, nil, 0)
 		if err != nil {
 			t.Fatal(err)
@@ -166,11 +167,11 @@ func TestEffectiveTenantSingleOwner(t *testing.T) {
 			at := func(why string) { problems = append(problems, fset.Position(n.Pos()).String()+": "+why) }
 			switch x := n.(type) {
 			case *ast.BasicLit:
-				if v, err := strconv.Unquote(x.Value); err == nil && x.Kind == token.STRING && strings.Contains(v, "X-Bnbloc-Acting-Tenant") {
+				if v, err := strconv.Unquote(x.Value); err == nil && x.Kind == token.STRING && strings.Contains(v, "X-Bnbloc-Acting-Tenant") && !owner {
 					at("acting-tenant header spelled out")
 				}
 			case *ast.Ident:
-				if x.Name == "roomTenantOr" {
+				if x.Name == "roomTenantOr" && !owner {
 					at("roomTenantOr outside its named variants")
 				}
 			case *ast.CallExpr:
@@ -179,12 +180,14 @@ func TestEffectiveTenantSingleOwner(t *testing.T) {
 					return true
 				}
 				switch {
-				case sel.Sel.Name == "RoomTenant":
+				case sel.Sel.Name == "RoomTenant" && !owner:
 					at("room tenant resolved outside tenant_scope.go")
 				case sel.Sel.Name == "Get" && len(x.Args) == 1:
-					if id, ok := x.Args[0].(*ast.Ident); ok && id.Name == "actingTenantHeader" {
+					if id, ok := x.Args[0].(*ast.Ident); ok && id.Name == "actingTenantHeader" && !owner {
 						at("acting-tenant header read")
 					}
+					// The header is the only acting-tenant input: no ?tenantId=
+					// anywhere, the owner included.
 					if lit, ok := x.Args[0].(*ast.BasicLit); ok && lit.Value == `"tenantId"` {
 						if call, ok := sel.X.(*ast.CallExpr); ok {
 							if q, ok := call.Fun.(*ast.SelectorExpr); ok && q.Sel.Name == "Query" {

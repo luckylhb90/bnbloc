@@ -196,10 +196,11 @@ func TestOrgMCPConnectors(t *testing.T) {
 	if _, raw := g.do("maya", http.MethodGet, "/v1/components?kind=mcp", "", nil); !strings.Contains(string(raw), `"orgConfigured":true`) {
 		t.Fatalf("catalog = %s", raw)
 	}
-	// A super admin administers another organization's connector with
-	// ?tenantId=, like every tenant route.
+	// A super admin administers another organization's connector acting in
+	// it, like every tenant route.
 	g.tokens["root"] = superAdminToken(t, g)
-	if code, raw := g.json("root", http.MethodPut, "/v1/tenant/mcp-connectors/search?tenantId=other", map[string]any{"values": map[string]string{"TOOLS_TOKEN": "other-token"}}); code != http.StatusNoContent {
+	other, _ := json.Marshal(map[string]any{"values": map[string]string{"TOOLS_TOKEN": "other-token"}})
+	if code, raw := g.doWith("root", http.MethodPut, "/v1/tenant/mcp-connectors/search", map[string]string{actingTenantHeader: "other"}, "application/json", other); code != http.StatusNoContent {
 		t.Fatalf("super admin put = %d %s", code, raw)
 	}
 	if c, ok, _ := g.svc.mcpConnectors().Get(context.Background(), "other", "search"); !ok || c.Values["TOOLS_TOKEN"] != "other-token" {

@@ -1,0 +1,7 @@
+[
+  {"role": "owner", "agentHost": false, "isHuman": true, "mayChat": true},
+  {"role": "admin", "agentHost": false, "isHuman": true, "mayChat": true},
+  {"role": "member", "agentHost": false, "isHuman": true, "mayChat": true},
+  {"role": "visitor", "agentHost": false, "isHuman": true, "mayChat": false},
+  {"role": "visitor", "agentHost": true, "isHuman": false, "mayChat": false}
+]

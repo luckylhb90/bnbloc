@@ -24,7 +24,7 @@ import { VersionDiff } from "@/views/workbench/VersionDiff";
 // organization uses) and approved or declined with a note for its author.
 // Below, what is published: unpublish (hidden from the Library and new use;
 // rooms that pinned it keep their version), restore or remove it.
-export function ContentReviewTab({ scope }: { scope?: string }) {
+export function ContentReviewTab() {
   const toast = useToast();
   const [requests, setRequests] = useState<readonly ContentPublishRequest[] | null>(null);
   const [published, setPublished] = useState<readonly ContentAdminComponent[] | null>(null);
@@ -36,7 +36,7 @@ export function ContentReviewTab({ scope }: { scope?: string }) {
   const load = useCallback(async () => {
     setError(null);
     try {
-      const [r, p] = await Promise.all([contentSharingApi.requests(history, scope), contentSharingApi.orgContent(scope)]);
+      const [r, p] = await Promise.all([contentSharingApi.requests(history), contentSharingApi.orgContent()]);
       setRequests(r.requests ?? []);
       setPublished(p.components ?? []);
     } catch (e) {
@@ -44,7 +44,7 @@ export function ContentReviewTab({ scope }: { scope?: string }) {
       setRequests([]);
       setPublished([]);
     }
-  }, [history, scope]);
+  }, [history]);
 
   useEffect(() => {
     void load();
@@ -52,7 +52,7 @@ export function ContentReviewTab({ scope }: { scope?: string }) {
 
   const setStatus = async (c: ContentComponent, action: "unpublish" | "restore") => {
     try {
-      await contentSharingApi.setOrgStatus(c.id, action, scope);
+      await contentSharingApi.setOrgStatus(c.id, action);
       toast.success(action === "unpublish" ? `${contentLabel(c)} is unpublished` : `${contentLabel(c)} is published again`);
       await load();
     } catch (e) {
@@ -61,7 +61,7 @@ export function ContentReviewTab({ scope }: { scope?: string }) {
   };
   const remove = async (c: ContentComponent) => {
     try {
-      await contentSharingApi.removeOrg(c.id, scope);
+      await contentSharingApi.removeOrg(c.id);
       toast.success(`${contentLabel(c)} is removed from your organization`);
       await load();
     } catch (e) {
@@ -136,7 +136,6 @@ export function ContentReviewTab({ scope }: { scope?: string }) {
 
       <ReviewDialog
         requestId={reviewing}
-        scope={scope}
         onClose={() => setReviewing(null)}
         onDecided={() => {
           setReviewing(null);
@@ -192,12 +191,10 @@ function RequestRow({ request: r, onReview }: { readonly request: ContentPublish
 // ReviewDialog shows what an approver decides on and takes the decision.
 function ReviewDialog({
   requestId,
-  scope,
   onClose,
   onDecided,
 }: {
   readonly requestId: string | null;
-  readonly scope?: string;
   readonly onClose: () => void;
   readonly onDecided: () => void;
 }) {
@@ -214,19 +211,19 @@ function ReviewDialog({
     setError(null);
     setNote("");
     contentSharingApi
-      .review(requestId, scope)
+      .review(requestId)
       .then((r) => live && setReview(r))
       .catch((e) => live && setError(apiErrorText(e, "Could not load the request")));
     return () => {
       live = false;
     };
-  }, [requestId, scope]);
+  }, [requestId]);
 
   const decide = async (decision: "approve" | "decline") => {
     if (!requestId) return;
     setBusy(true);
     try {
-      await contentSharingApi.decide(requestId, decision, note.trim(), scope);
+      await contentSharingApi.decide(requestId, decision, note.trim());
       toast.success(decision === "approve" ? "Approved: it is published to your organization" : "Declined: its author is told why");
       onDecided();
     } catch (e) {

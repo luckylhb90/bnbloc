@@ -28,7 +28,7 @@ func TestRetentionRoutesAuthorization(t *testing.T) {
 	srv := httptest.NewServer(svc.Handler())
 	defer srv.Close()
 
-	call := func(method, path string) int {
+	call := func(method, path, acting string) int {
 		t.Helper()
 		gotPath, gotTenant = "", ""
 		token, _ := login(t, srv, "good")
@@ -40,6 +40,9 @@ func TestRetentionRoutesAuthorization(t *testing.T) {
 		}
 		req, _ := http.NewRequest(method, srv.URL+path, body)
 		req.Header.Set("Authorization", "Bearer "+token)
+		if acting != "" {
+			req.Header.Set(actingTenantHeader, acting)
+		}
 		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
 			t.Fatalf("request: %v", err)
@@ -52,19 +55,20 @@ func TestRetentionRoutesAuthorization(t *testing.T) {
 		role, method, path string
 		want               int
 		tenant             string
+		acting             string
 	}{
-		{"member", http.MethodGet, "/v1/tenant/retention", http.StatusForbidden, ""},
-		{"member", http.MethodPut, "/v1/tenant/retention", http.StatusForbidden, ""},
-		{"member", http.MethodGet, "/v1/platform/retention", http.StatusForbidden, ""},
-		{"org_admin", http.MethodGet, "/v1/tenant/retention", http.StatusOK, "home"},
-		{"org_admin", http.MethodPut, "/v1/tenant/retention?tenantId=globex", http.StatusOK, "home"},
-		{"org_admin", http.MethodGet, "/v1/platform/retention", http.StatusForbidden, ""},
-		{"org_admin", http.MethodPut, "/v1/platform/retention", http.StatusForbidden, ""},
-		{"super_admin", http.MethodPut, "/v1/platform/retention", http.StatusOK, "home"},
-		{"super_admin", http.MethodPut, "/v1/tenant/retention?tenantId=acme", http.StatusOK, "acme"},
+		{"member", http.MethodGet, "/v1/tenant/retention", http.StatusForbidden, "", ""},
+		{"member", http.MethodPut, "/v1/tenant/retention", http.StatusForbidden, "", ""},
+		{"member", http.MethodGet, "/v1/platform/retention", http.StatusForbidden, "", ""},
+		{"org_admin", http.MethodGet, "/v1/tenant/retention", http.StatusOK, "home", ""},
+		{"org_admin", http.MethodPut, "/v1/tenant/retention", http.StatusOK, "home", "globex"},
+		{"org_admin", http.MethodGet, "/v1/platform/retention", http.StatusForbidden, "", ""},
+		{"org_admin", http.MethodPut, "/v1/platform/retention", http.StatusForbidden, "", ""},
+		{"super_admin", http.MethodPut, "/v1/platform/retention", http.StatusOK, "home", ""},
+		{"super_admin", http.MethodPut, "/v1/tenant/retention", http.StatusOK, "acme", "acme"},
 	} {
 		role = c.role
-		if got := call(c.method, c.path); got != c.want {
+		if got := call(c.method, c.path, c.acting); got != c.want {
 			t.Fatalf("%s %s %s = %d, want %d", c.role, c.method, c.path, got, c.want)
 		}
 		if c.want != http.StatusOK {

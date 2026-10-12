@@ -31,7 +31,7 @@ import { useToast } from "@/ui/Toast";
 const INTRO =
   "Data older than the period you set is deleted for good by a background cleanup, and stored files nothing uses any more are removed. Deleted data cannot be restored.";
 
-export function TenantRetentionSection({ scope }: { readonly scope?: string }) {
+export function TenantRetentionSection() {
   const toast = useToast();
   const [view, setView] = useState<TenantRetentionView | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -39,11 +39,11 @@ export function TenantRetentionSection({ scope }: { readonly scope?: string }) {
   const load = useCallback(async () => {
     setError(null);
     try {
-      setView(await retentionApi.tenant(scope));
+      setView(await retentionApi.tenant());
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not load data retention");
     }
-  }, [scope]);
+  }, []);
 
   useEffect(() => {
     void load();
@@ -51,7 +51,7 @@ export function TenantRetentionSection({ scope }: { readonly scope?: string }) {
 
   const save = async (policy: RetentionPolicy) => {
     try {
-      setView(await retentionApi.saveTenant(policy, scope));
+      setView(await retentionApi.saveTenant(policy));
       toast.success("Data retention saved");
       return true;
     } catch (e) {

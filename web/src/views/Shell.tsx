@@ -13,8 +13,8 @@ import {
   MagnifyingGlassIcon,
   BuildingsIcon,
 } from "@phosphor-icons/react";
-import { api, type Room, type PlatformTenant } from "@/lib/api";
-import { setActingTenant, getActingTenant } from "@/lib/session";
+import { api, type Room } from "@/lib/api";
+import { useActingTenant } from "@/lib/session";
 import { useAuth } from "@/lib/auth";
 import { cn } from "@/lib/cn";
 import { useStage } from "@/lib/capability";
@@ -25,9 +25,6 @@ import { openGlobalSearch } from "@/lib/team";
 import { onRoomGone, withoutRoom } from "@/lib/roomGone";
 
 export type View = "plaza" | "myrooms" | "agents" | "team" | "components" | "org" | "directory" | "releases" | "library" | "settings";
-
-// localStorage key for the super-admin's persisted acting tenant.
-const ACTING_KEY = "bnbloc.actingTenant";
 
 export function Shell({
   view,
@@ -86,30 +83,10 @@ export function Shell({
   };
   const [rooms, setRooms] = useState<Room[]>([]);
   const isSuper = role === "super_admin";
-  // Super-admin global tenant switch: the tenant the whole session acts as.
-  // Persisted so it survives reloads; the api layer sends it as
-  // X-Bnbloc-Acting-Tenant on every request (gateway honors it for super only).
-  const [tenants, setTenants] = useState<PlatformTenant[]>([]);
-  const [acting, setActing] = useState<string>(() => getActingTenant() ?? "");
-
-  useEffect(() => {
-    if (!isSuper) return;
-    api
-      .listTenants()
-      .then((r) => setTenants(r.tenants ?? []))
-      .catch(() => {});
-  }, [isSuper]);
-
-  // Switching acts the session as another tenant. Persist + reload so every
-  // view re-fetches under the new scope (rooms, agents, admin all follow).
-  const switchTenant = (tid: string) => {
-    if (tid === acting) return;
-    setActing(tid);
-    setActingTenant(tid || null);
-    if (tid) localStorage.setItem(ACTING_KEY, tid);
-    else localStorage.removeItem(ACTING_KEY);
-    window.location.reload();
-  };
+  // Super-admin global tenant switch: the tenant the whole session acts as
+  // (lib/session.ts owns it; switching reloads so every view re-fetches under
+  // the new scope).
+  const { acting, tenants, switchTo: switchActingTenant } = useActingTenant(isSuper);
 
   // Ordinary members of multiple orgs get a workspace switcher too. Unlike the
   // super-admin path (a header overlay), this re-issues the session token for
@@ -423,8 +400,8 @@ export function Shell({
                 </div>
               )}
               <Select
-                value={acting}
-                onChange={(e) => switchTenant(e.target.value)}
+                value={acting ?? ""}
+                onChange={(e) => switchActingTenant(e.target.value || null)}
                 title={`Acting tenant: ${acting || tenant}`}
                 className={cn(
                   "text-sm",
