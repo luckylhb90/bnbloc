@@ -6,6 +6,7 @@ import (
 	"errors"
 	"sort"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -95,6 +96,36 @@ func (r AgentJobFailureReason) Retryable() bool {
 		return true
 	default:
 		return false
+	}
+}
+
+// Text is the ONE sentence a member reads about a failed job (a room
+// notice, a notification), naming the agent (its provider; "agent" when
+// unknown). Reasons the bridge refuses with its own explanation fall back
+// to the generic sentence.
+func (r AgentJobFailureReason) Text(agent string) string {
+	name := "agent"
+	if agent = strings.TrimSpace(agent); agent != "" {
+		name = agent + " agent"
+	}
+	the := "The " + name
+	switch r {
+	case FailureNoBridgeOnline, FailureAgentNotAdvertised:
+		return the + " is offline: no bridge picked up this request."
+	case FailureBorrowNotAuthorized:
+		return "The owner has not authorized borrowing the " + name + "."
+	case FailureTurnTimeout:
+		return the + " stopped responding and the request was retried without success."
+	case FailureReplyTimeout:
+		return the + " stopped responding."
+	case FailureBudgetExhausted:
+		return the + " did not run: a monthly budget is reached."
+	case FailureSandboxRequired:
+		return the + " did not run: this organization requires a sandbox for borrowed agents."
+	case FailureCancelled:
+		return "The request was cancelled."
+	default:
+		return the + " could not complete this request."
 	}
 }
 

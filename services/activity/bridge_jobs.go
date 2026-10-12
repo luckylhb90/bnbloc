@@ -272,25 +272,7 @@ func (s *Service) SweepAgentJobs(ctx context.Context) {
 	}
 	for _, job := range jobs {
 		s.publishJob(ctx, job, now)
-		s.postJobNotice(ctx, job, sweptFailureText(job), now)
-	}
-}
-
-// sweptFailureText explains a server-side failure in the room feed. A swept job
-// has no worker left to post its own error, so without this the turn ends
-// silently and the member only sees their own message.
-func sweptFailureText(job store.AgentJob) string {
-	agent := strings.TrimSpace(job.Provider)
-	if agent == "" {
-		agent = "agent"
-	}
-	switch job.FailureReason {
-	case store.FailureNoBridgeOnline:
-		return "The " + agent + " agent is offline: no bridge picked up this request."
-	case store.FailureTurnTimeout:
-		return "The " + agent + " agent stopped responding and the request was retried without success."
-	default:
-		return "The " + agent + " agent could not complete this request."
+		s.postJobNotice(ctx, job, job.FailureReason.Text(job.Provider), now)
 	}
 }
 

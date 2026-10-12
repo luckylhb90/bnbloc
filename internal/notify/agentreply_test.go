@@ -166,7 +166,7 @@ func TestObserverEmitsWithoutReplyAfterWait(t *testing.T) {
 	}})
 	drain(o)
 	failed, ok := f.payload(t, wire.NotificationAgentFailed, "job:job_4", "n1")
-	if !ok || !strings.HasPrefix(failed.Text, "The agent is offline.") || !strings.HasSuffix(failed.URL, "#/room/r1?seq=33&channel=c9") {
+	if !ok || !strings.HasPrefix(failed.Text, store.FailureNoBridgeOnline.Text("codex")) || !strings.HasSuffix(failed.URL, "#/room/r1?seq=33&channel=c9") {
 		t.Fatalf("agent_failed = %+v ok=%v", failed, ok)
 	}
 }

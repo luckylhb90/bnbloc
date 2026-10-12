@@ -280,7 +280,7 @@ func jobEvents(obs observation, reply agentReply) []Event {
 		}
 		out := []Event{{
 			Type: wire.NotificationAgentFailed, RoomID: obs.roomID, Recipients: []string{j.RequesterUserID},
-			Actor: actor, Title: actor + " could not complete your request", Text: failureText(j.FailureReason) + " " + request,
+			Actor: actor, Title: actor + " could not complete your request", Text: store.AgentJobFailureReason(j.FailureReason).Text(j.Provider) + " " + request,
 			DedupKey: "job:" + j.JobID, Seq: j.MessageSeq, ChannelID: channel, Reply: agentReplyTo(channel, j),
 		}}
 		if store.AgentJobFailureReason(j.FailureReason) == store.FailureBorrowNotAuthorized &&
@@ -295,18 +295,4 @@ func jobEvents(obs observation, reply agentReply) []Event {
 		return out
 	}
 	return nil
-}
-
-func failureText(reason string) string {
-	switch store.AgentJobFailureReason(reason) {
-	case store.FailureNoBridgeOnline, store.FailureAgentNotAdvertised:
-		return "The agent is offline."
-	case store.FailureBorrowNotAuthorized:
-		return "The owner has not authorized borrowing this agent."
-	case store.FailureTurnTimeout, store.FailureReplyTimeout:
-		return "The agent stopped responding."
-	case "":
-		return "The agent failed."
-	}
-	return "The agent failed (" + reason + ")."
 }
