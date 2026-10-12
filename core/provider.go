@@ -137,10 +137,13 @@ type SessionWorkdirReporter interface {
 }
 
 // WorkspaceFileWriter is implemented by cores whose session workspaces can
-// receive room-context files: the bridge materializes the shared room history
+// receive bnbloc-owned files: the bridge materializes the shared room history
 // under .room/ so the agent consults it with its own file tools (pull) instead
-// of having history pushed into every prompt. relPath must live inside .room/.
-// A core without it keeps the push-based prompt context.
+// of having history pushed into every prompt, and the agent-config files of a
+// profile (skills a core without agentProfile reads from .agents/skills/).
+// relPath must pass WorkspaceFileAllowed: inside .room/ or one of
+// AgentConfigPaths; a core refuses any other path. A core without it keeps
+// the push-based prompt context.
 type WorkspaceFileWriter interface {
 	WriteWorkspaceFile(ctx context.Context, ep Endpoint, workspaceID, relPath, content string) error
 }
@@ -148,7 +151,8 @@ type WorkspaceFileWriter interface {
 // WorkspaceFileBytesWriter is the binary counterpart of WorkspaceFileWriter: a
 // core that can accept binary workspace files (images, PDFs) implements it so
 // the bridge can materialize a chat attachment under .room/attachments/ for the
-// agent to open with its own file/vision tools. relPath must live inside .room/.
+// agent to open with its own file/vision tools. relPath must pass
+// WorkspaceFileAllowed, like WorkspaceFileWriter's.
 // A core without it does not receive binary attachments (the turn still names
 // them by path); this keeps attachment interpretation in the core runtime, not
 // in bnbloc.
@@ -215,6 +219,11 @@ type SessionRequest struct {
 	TargetID    string         // agent target/harness id chosen by the caller
 	Prompt      string         // initial user message
 	Options     SessionOptions // model + reasoning selected by the sender
+	// Profile is the role the session wears (capability agentProfile): an
+	// expert's instructions, skills, MCP servers and env. nil = the agent's
+	// own configuration only. The bridge sets it only for a core that
+	// advertises agentProfile; its secrets are never logged or persisted.
+	Profile *AgentProfile
 }
 
 // SessionResult is the neutral result of creating a session. TurnID and Phase

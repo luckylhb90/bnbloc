@@ -1,6 +1,6 @@
 // Package tarbundle is the one reader/writer of bnbloc file bundles: an
 // uncompressed POSIX ustar archive of regular files whose every path passes
-// pkgmeta.ValidBundlePath. Two formats share it, differing only in caps:
+// core.ValidBundlePath. Two formats share it, differing only in caps:
 // previewer component bundles (bnbloc.previewer.package/v1 artifact
 // "bundle"; the gateway parses them to serve and verify, the CLI packs a
 // directory) and site snapshots (a "site" artifact version: the bridge packs
@@ -24,7 +24,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/luckylhb90/bnbloc/core/pkgmeta"
+	"github.com/luckylhb90/bnbloc/core"
 )
 
 // Limits caps one bundle's files.
@@ -116,7 +116,7 @@ func Parse(raw []byte, wantSHA256 string, l Limits) (*Bundle, error) {
 		name := hdr.Name
 		switch hdr.Typeflag {
 		case tar.TypeDir:
-			if dir := strings.TrimSuffix(name, "/"); dir != "" && !pkgmeta.ValidBundlePath(dir) {
+			if dir := strings.TrimSuffix(name, "/"); dir != "" && !core.ValidBundlePath(dir) {
 				return nil, fmt.Errorf("bundle: invalid directory %q", hdr.Name)
 			}
 			continue
@@ -124,7 +124,7 @@ func Parse(raw []byte, wantSHA256 string, l Limits) (*Bundle, error) {
 		default:
 			return nil, fmt.Errorf("bundle: %q is not a regular file", hdr.Name)
 		}
-		if !pkgmeta.ValidBundlePath(name) {
+		if !core.ValidBundlePath(name) {
 			return nil, fmt.Errorf("bundle: invalid path %q", hdr.Name)
 		}
 		if _, dup := b.files[name]; dup {
@@ -186,7 +186,7 @@ func Pack(dir string, l Limits) ([]byte, error) {
 		if !d.Type().IsRegular() {
 			return fmt.Errorf("%s is not a regular file", rel)
 		}
-		if !pkgmeta.ValidBundlePath(rel) {
+		if !core.ValidBundlePath(rel) {
 			return fmt.Errorf("%s is not a valid bundle path ([A-Za-z0-9._-] segments)", rel)
 		}
 		paths = append(paths, rel)
@@ -229,7 +229,7 @@ func PackFiles(files map[string][]byte, l Limits) ([]byte, error) {
 	paths := make([]string, 0, len(files))
 	total := 0
 	for p, data := range files {
-		if !pkgmeta.ValidBundlePath(p) {
+		if !core.ValidBundlePath(p) {
 			return nil, fmt.Errorf("%s is not a valid bundle path ([A-Za-z0-9._-] segments)", p)
 		}
 		if total += len(data); total > l.MaxBytes {

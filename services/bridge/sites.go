@@ -11,7 +11,6 @@ import (
 	"strings"
 
 	corepkg "github.com/luckylhb90/bnbloc/core"
-	"github.com/luckylhb90/bnbloc/core/pkgmeta"
 	"github.com/luckylhb90/bnbloc/internal/store"
 	"github.com/luckylhb90/bnbloc/internal/tarbundle"
 )
@@ -266,7 +265,7 @@ func (b *Bridge) publishSite(ctx context.Context, room, channelID string, rs *ro
 		if !ok {
 			continue
 		}
-		if !pkgmeta.ValidBundlePath(p) {
+		if !corepkg.ValidBundlePath(p) {
 			invalid = append(invalid, p)
 			continue
 		}

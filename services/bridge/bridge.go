@@ -215,6 +215,9 @@ type Bridge struct {
 	// sandbox is the agent sandbox this bridge drives sandboxed turns in
 	// (sandbox.go); never nil (an unconfigured one is simply never ready).
 	sandbox *sandboxRuntime
+
+	// contrib holds the registered session contributors (profile.go).
+	contrib contributors
 }
 
 type roomSession struct {
@@ -242,7 +245,14 @@ type roomSession struct {
 	// they reach. Zero value = nothing materialized yet.
 	ctx          roomlog.CtxState
 	stateVersion int64 // monotonic version for agent_session_state reports
-	mu           sync.Mutex
+	// profileSum is the content checksum of the agent profile the session
+	// was created with ("" = none); a turn whose profile differs gets a new
+	// session (profile.go).
+	profileSum string
+	// hooks are the session contributors' turn/release callbacks (guarded
+	// by mu).
+	hooks sessionHooks
+	mu    sync.Mutex
 }
 
 func (rs *roomSession) markTurn(t deliverableTurn) {
@@ -539,11 +549,15 @@ type claimResponse struct {
 	Jobs []bridgeJob `json:"jobs"`
 }
 
-// jobRef identifies the claimed job a drive runs for: its id and the chat
-// message that prompted it (the source link of published deliverables).
+// jobRef identifies the claimed job a drive runs for: its id, the chat
+// message that prompted it (the source link of published deliverables), the
+// human who asked (the requester whose authority the turn runs under) and
+// the tenant it runs in.
 type jobRef struct {
-	ID         string
-	MessageSeq int64
+	ID              string
+	MessageSeq      int64
+	RequesterUserID string
+	TenantID        string
 }
 
 type bridgeJob struct {
@@ -714,7 +728,7 @@ func (b *Bridge) runBridgeJob(ctx context.Context, job bridgeJob) {
 	}
 	opts := corepkg.SessionOptions{Model: job.Model, ReasoningEffort: job.ReasoningEffort}
 	reflowReported := false
-	res, err := b.driveClaim(ctx, jobRef{ID: job.JobID, MessageSeq: job.MessageSeq}, job.RoomID, owner, coreName, job.Provider, target, text, job.AttachmentIDs, opts, prepareExec, job.ChannelID, func(rs *roomSession) {
+	res, err := b.driveClaim(ctx, jobRef{ID: job.JobID, MessageSeq: job.MessageSeq, RequesterUserID: job.RequesterUserID, TenantID: job.TenantID}, job.RoomID, owner, coreName, job.Provider, target, text, job.AttachmentIDs, opts, prepareExec, job.ChannelID, func(rs *roomSession) {
 		// Publish the bound session so a cancel arriving mid-turn can interrupt it.
 		rj.bind(coreName, rs)
 		reflowReported = true
@@ -1005,7 +1019,7 @@ func (b *Bridge) rediscoverCores(ctx context.Context) {
 		if rebound {
 			for key, rs := range b.sessions {
 				if rs.core == name {
-					delete(b.sessions, key)
+					b.unbindLocked(key)
 				}
 			}
 		}
@@ -1046,7 +1060,7 @@ func (b *Bridge) forgetRoom(room string) {
 	prefix := room + "\x00"
 	for key := range b.sessions {
 		if strings.HasPrefix(key, prefix) {
-			delete(b.sessions, key)
+			b.unbindLocked(key)
 		}
 	}
 	roomLocks.Range(func(k, _ any) bool {
@@ -1508,7 +1522,7 @@ func (b *Bridge) driveClaim(ctx context.Context, job jobRef, room, owner, core, 
 	promptFn := func(workspaceID string, st *roomlog.CtxState, atts []writtenAttachment) string {
 		return b.drivePrompt(ctx, room, owner, core, provider, workspaceID, "", text, atts, st, true)
 	}
-	rs, err := b.ensureSession(ctx, room, owner, core, provider, target, attachmentIDs, promptFn, opts)
+	rs, err := b.ensureSession(ctx, job, room, owner, core, provider, target, channelID, attachmentIDs, promptFn, opts)
 	if err != nil {
 		b.postDriveFailed(ctx, jobID, room, owner, provider, cleanDriveError(err), channelID)
 		return driveResult{}, err
@@ -1517,6 +1531,7 @@ func (b *Bridge) driveClaim(ctx context.Context, job jobRef, room, owner, core, 
 	// send follow-up input for an existing session.
 	if !rs.freshlyCreated {
 		entry, _ := b.coreEntry(core)
+		rs.roomSession.startTurn(TurnInfo{JobID: job.ID, RequesterUserID: job.RequesterUserID, ChannelID: channelID, MessageSeq: job.MessageSeq})
 		prompt := b.drivePrompt(ctx, room, owner, core, provider, rs.workspaceID, rs.sessionID, text, rs.written, &rs.roomSession.ctx, false)
 		if err := b.sendInput(ctx, entry, rs.workspaceID, rs.sessionID, prompt, opts); err != nil {
 			b.postDriveFailed(ctx, jobID, room, owner, provider, cleanDriveError(err), channelID)
@@ -1561,7 +1576,7 @@ type ensureResult struct {
 // the materialized state through st, and names the written attachments.
 type promptFn func(workspaceID string, st *roomlog.CtxState, atts []writtenAttachment) string
 
-func (b *Bridge) ensureSession(ctx context.Context, room, owner, core, provider, target string, attachmentIDs []string, prompt promptFn, opts corepkg.SessionOptions) (*ensureResult, error) {
+func (b *Bridge) ensureSession(ctx context.Context, job jobRef, room, owner, core, provider, target, channelID string, attachmentIDs []string, prompt promptFn, opts corepkg.SessionOptions) (*ensureResult, error) {
 	entry, ok := b.coreEntry(core)
 	if !ok {
 		return nil, fmt.Errorf("unknown core %q", core)
@@ -1583,7 +1598,7 @@ func (b *Bridge) ensureSession(ctx context.Context, room, owner, core, provider,
 				"provider", provider, "session", existing.sessionID, "error", err)
 			b.mu.Lock()
 			if b.sessions[key] == existing {
-				delete(b.sessions, key)
+				b.unbindLocked(key)
 			}
 			b.mu.Unlock()
 		} else {
@@ -1605,12 +1620,29 @@ func (b *Bridge) ensureSession(ctx context.Context, room, owner, core, provider,
 	written := b.materializeAttachments(ctx, core, room, workspaceID, attachmentIDs)
 	var st roomlog.CtxState
 	initialPrompt := prompt(workspaceID, &st, written)
-	sessionID, err := b.createSession(ctx, entry, workspaceID, target, initialPrompt, opts)
+	// The profile the session wears: only a core advertising agentProfile
+	// receives one, with the session contributors' parts merged in.
+	var profile *corepkg.AgentProfile
+	var hooks sessionHooks
+	if corepkg.Supports(ctx, entry.provider, entry.endpoint, corepkg.CapabilityAgentProfile) {
+		profile = &corepkg.AgentProfile{}
+		hooks = b.contribute(ctx, SessionInfo{
+			Key: key, TenantID: job.TenantID, RoomID: room, ChannelID: channelID, Owner: owner, Core: core, Provider: provider,
+			Sandboxed: opts.Execution != nil, JobID: job.ID, RequesterUserID: job.RequesterUserID,
+		}, profile)
+		if profile.Empty() {
+			profile = nil
+		}
+	}
+	rs := &roomSession{owner: owner, provider: provider, core: core, workspaceID: workspaceID, ctx: st, hooks: hooks}
+	rs.startTurn(TurnInfo{JobID: job.ID, RequesterUserID: job.RequesterUserID, ChannelID: channelID, MessageSeq: job.MessageSeq})
+	sessionID, err := b.createSession(ctx, entry, workspaceID, target, initialPrompt, opts, profile)
 	if err != nil {
+		rs.release()
 		b.deleteWorkspace(ctx, entry, workspaceID)
 		return nil, fmt.Errorf("create session: %w", err)
 	}
-	rs := &roomSession{owner: owner, provider: provider, core: core, workspaceID: workspaceID, sessionID: sessionID, ctx: st}
+	rs.sessionID = sessionID
 	b.mu.Lock()
 	b.sessions[key] = rs
 	b.mu.Unlock()
@@ -1813,7 +1845,7 @@ func (b *Bridge) deleteWorkspace(ctx context.Context, entry coreEntry, workspace
 	}
 }
 
-func (b *Bridge) createSession(ctx context.Context, entry coreEntry, workspaceID, target, prompt string, opts corepkg.SessionOptions) (string, error) {
+func (b *Bridge) createSession(ctx context.Context, entry coreEntry, workspaceID, target, prompt string, opts corepkg.SessionOptions, profile *corepkg.AgentProfile) (string, error) {
 	var sessionID string
 	err := retryCore(ctx, false, func() error {
 		res, e := entry.provider.CreateSession(ctx, entry.endpoint, corepkg.SessionRequest{
@@ -1821,6 +1853,7 @@ func (b *Bridge) createSession(ctx context.Context, entry coreEntry, workspaceID
 			TargetID:    target,
 			Prompt:      prompt,
 			Options:     opts,
+			Profile:     profile,
 		})
 		if e != nil {
 			return e

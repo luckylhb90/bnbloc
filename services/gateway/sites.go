@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/luckylhb90/bnbloc/core/pkgmeta"
+	"github.com/luckylhb90/bnbloc/core"
 	"github.com/luckylhb90/bnbloc/internal/auth"
 	"github.com/luckylhb90/bnbloc/internal/obs"
 	"github.com/luckylhb90/bnbloc/internal/roomctx"
@@ -333,12 +333,12 @@ func siteFile(b *tarbundle.Bundle, p string) (file, redirect string) {
 		if clean != "" {
 			index = clean + "/index.html"
 		}
-		if pkgmeta.ValidBundlePath(index) {
+		if core.ValidBundlePath(index) {
 			if _, ok := b.File(index); ok {
 				return index, ""
 			}
 		}
-	} else if pkgmeta.ValidBundlePath(clean) {
+	} else if core.ValidBundlePath(clean) {
 		if _, ok := b.File(clean); ok {
 			return clean, ""
 		}

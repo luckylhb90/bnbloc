@@ -165,19 +165,6 @@ func TestPreviewerPayload_onlyOnPreviewerKind(t *testing.T) {
 	}
 }
 
-func TestValidBundlePath(t *testing.T) {
-	for _, p := range []string{"index.html", "a/b/c.js", "assets/app-1.2.css", "_x/.well"} {
-		if !ValidBundlePath(p) {
-			t.Fatalf("%q rejected", p)
-		}
-	}
-	for _, p := range []string{"", "/index.html", "a//b", "a/./b", "../x", "a/..", "a\\b", "a b", "a/%2e%2e", "ü.html", strings.Repeat("a", 201)} {
-		if ValidBundlePath(p) {
-			t.Fatalf("%q accepted", p)
-		}
-	}
-}
-
 // The Go vocabularies must equal the frame protocol's (the TypeScript file is
 // the single source of truth both the host and the SDK import).
 func TestPreviewerVocabulariesMatchFrameProtocol(t *testing.T) {

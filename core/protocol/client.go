@@ -123,6 +123,13 @@ func (c *Client) CreateSession(ctx context.Context, ep core.Endpoint, req core.S
 	if _, err := c.Discovery(ctx, ep); err != nil {
 		return core.SessionResult{}, err
 	}
+	// A profile goes only to a core that advertises agentProfile: sending it
+	// to one that does not would silently drop the role the session wears.
+	if req.Profile != nil {
+		if err := c.requireCapability(ctx, ep, CapabilityAgentProfile); err != nil {
+			return core.SessionResult{}, err
+		}
+	}
 	var out CreateSessionResponse
 	if err := c.postJSON(ctx, ep, WorkspaceSessionsPath(req.WorkspaceID), WireCreateSession(req), &out); err != nil {
 		return core.SessionResult{}, fmt.Errorf("create session: %w", err)

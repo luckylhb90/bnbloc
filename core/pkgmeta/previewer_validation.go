@@ -5,6 +5,8 @@ import (
 	"regexp"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/luckylhb90/bnbloc/core"
 )
 
 // KindPreviewerPackageV1 is the package-envelope kind for a previewer: a
@@ -70,7 +72,6 @@ const (
 	maxPreviewerMatches      = 32
 	maxPreviewerToolbar      = 20
 	maxPreviewerLabel        = 40
-	maxPreviewerEntry        = 200
 	minPreviewerRank         = 1
 	maxPreviewerRank         = 1000
 	previewerCapabilityTool  = "toolbar"
@@ -82,24 +83,7 @@ var (
 	previewerMimeRE      = regexp.MustCompile(`^[a-z0-9][a-z0-9!#$&^_.+-]{0,62}/(\*|[a-z0-9][a-z0-9!#$&^_.+-]{0,126})$`)
 	previewerExtensionRE = regexp.MustCompile(`^(\.[a-z0-9][a-z0-9_-]{0,15}){1,3}$`)
 	previewerToolbarIDRE = regexp.MustCompile(`^[a-z][a-z0-9-]{0,31}$`)
-	bundlePathSegmentRE  = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
 )
-
-// ValidBundlePath reports whether p is a safe bundle-relative file path:
-// non-empty "/"-separated segments of [A-Za-z0-9._-], none "." or "..", no
-// leading slash, at most 200 characters. It is the one path rule for package
-// entries, archive members, and served request paths.
-func ValidBundlePath(p string) bool {
-	if p == "" || len(p) > maxPreviewerEntry {
-		return false
-	}
-	for _, seg := range strings.Split(p, "/") {
-		if seg == "." || seg == ".." || !bundlePathSegmentRE.MatchString(seg) {
-			return false
-		}
-	}
-	return true
-}
 
 func validatePreviewerPackage(pkg Package) error {
 	if pkg.Contract != PreviewerContractV1 {
@@ -137,7 +121,7 @@ func validatePreviewerPackage(pkg Package) error {
 }
 
 func validatePreviewer(p Previewer) error {
-	if !ValidBundlePath(p.Entry) || !strings.HasSuffix(p.Entry, ".html") {
+	if !core.ValidBundlePath(p.Entry) || !strings.HasSuffix(p.Entry, ".html") {
 		return fmt.Errorf("previewer.entry must be a relative .html path inside the bundle")
 	}
 	if err := validatePreviewerMatch(p.Match); err != nil {

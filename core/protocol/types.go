@@ -3,10 +3,13 @@
 package protocol
 
 import (
+	"encoding/base64"
+	"errors"
 	"fmt"
 	"net/url"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/luckylhb90/bnbloc/core"
 )
@@ -39,6 +42,10 @@ const (
 	// fails a core that advertises one without the other).
 	CapabilitySessionFiles     = string(core.CapabilitySessionFiles)
 	CapabilitySessionFileBytes = string(core.CapabilitySessionFileBytes)
+	// CapabilityAgentProfile: the core honors the `profile` of a session
+	// create (instructions, skills, MCP servers, env) and maps it onto its
+	// agent natively. See AgentProfile.
+	CapabilityAgentProfile = string(core.CapabilityAgentProfile)
 	// CapabilityDiscover marks a package whose daemon can be located without an
 	// explicit endpoint (package metadata only; not a runtime method).
 	CapabilityDiscover = "discover"
@@ -146,6 +153,68 @@ type CreateSessionRequest struct {
 	// Execution is sent only to a core advertising sandboxExec; absent = run
 	// on the host as today.
 	Execution *Execution `json:"execution,omitempty"`
+	// Profile is sent only to a core advertising agentProfile; absent = the
+	// agent's own configuration only.
+	Profile *AgentProfile `json:"profile,omitempty"`
+}
+
+// AgentProfile is the role a session wears (capability agentProfile). The
+// core maps it onto its agent natively and keeps the member's own agent
+// configuration loading alongside:
+//
+//   - Instructions are appended to the agent's system instructions (an ACP
+//     `_meta` system-prompt append, an env var, or an instructions file such
+//     as AGENTS.md / CLAUDE.md in the workspace).
+//   - Skills are written as <skills dir>/<name>/<path> (e.g.
+//     .claude/skills/, .agents/skills/, .opencode/skills/) so the agent
+//     loads them on demand from SKILL.md's description.
+//   - McpServers are attached to the agent session (ACP `session/new`
+//     mcpServers); an http/sse server goes only to an agent that supports
+//     that transport.
+//   - Env is extra process environment.
+//
+// Files the core writes live only under the workspace's agent-config paths
+// (core.AgentConfigPaths). Env values and MCP header/env values are secrets:
+// a core never logs or persists them. A core that cannot honor a profile
+// answers bad_request rather than silently dropping it.
+type AgentProfile struct {
+	Instructions string            `json:"instructions,omitempty"`
+	Skills       []ProfileSkill    `json:"skills,omitempty"`
+	McpServers   []McpServer       `json:"mcpServers,omitempty"`
+	Env          map[string]string `json:"env,omitempty"`
+}
+
+// ProfileSkill is one skill directory: Name is its slug (a single valid
+// bundle path segment), Files its files relative to that directory.
+type ProfileSkill struct {
+	Name  string        `json:"name"`
+	Files []ProfileFile `json:"files"`
+}
+
+// ProfileFile is one skill file. Content carries UTF-8 text; ContentBase64
+// carries any other bytes (when set, Content is ignored).
+type ProfileFile struct {
+	Path          string `json:"path"`
+	Content       string `json:"content,omitempty"`
+	ContentBase64 string `json:"contentBase64,omitempty"`
+}
+
+// McpServer is the ACP McpServer union: a stdio server (`type` omitted or
+// "stdio": command, args, env) or an http / sse server (url, headers).
+type McpServer struct {
+	Type    string      `json:"type,omitempty"`
+	Name    string      `json:"name"`
+	Command string      `json:"command,omitempty"`
+	Args    []string    `json:"args,omitempty"`
+	Env     []NameValue `json:"env,omitempty"`
+	URL     string      `json:"url,omitempty"`
+	Headers []NameValue `json:"headers,omitempty"`
+}
+
+// NameValue is an env variable or HTTP header (ACP EnvVariable/HttpHeader).
+type NameValue struct {
+	Name  string `json:"name"`
+	Value string `json:"value"`
 }
 
 type CreateSessionResponse struct {
@@ -324,12 +393,12 @@ func (o SessionOptions) Core() core.SessionOptions {
 }
 
 func WireCreateSession(r core.SessionRequest) CreateSessionRequest {
-	return CreateSessionRequest{TargetID: r.TargetID, Prompt: r.Prompt, Options: WireOptions(r.Options), Execution: WireExecution(r.Options.Execution)}
+	return CreateSessionRequest{TargetID: r.TargetID, Prompt: r.Prompt, Options: WireOptions(r.Options), Execution: WireExecution(r.Options.Execution), Profile: WireProfile(r.Profile)}
 }
 
 // Core maps the request onto core.SessionRequest for the workspace named in
-// the request path. An execution descriptor the core cannot interpret is an
-// error (answer bad_request).
+// the request path. An execution descriptor or a profile the core cannot
+// interpret is an error (answer bad_request).
 func (r CreateSessionRequest) Core(workspaceID string) (core.SessionRequest, error) {
 	opts := r.Options.Core()
 	exec, err := r.Execution.Core()
@@ -337,7 +406,180 @@ func (r CreateSessionRequest) Core(workspaceID string) (core.SessionRequest, err
 		return core.SessionRequest{}, err
 	}
 	opts.Execution = exec
-	return core.SessionRequest{WorkspaceID: workspaceID, TargetID: r.TargetID, Prompt: r.Prompt, Options: opts}, nil
+	profile, err := r.Profile.Core()
+	if err != nil {
+		return core.SessionRequest{}, err
+	}
+	return core.SessionRequest{WorkspaceID: workspaceID, TargetID: r.TargetID, Prompt: r.Prompt, Options: opts, Profile: profile}, nil
+}
+
+// WireProfile maps the neutral profile onto the wire (nil stays nil). A file
+// whose bytes are not UTF-8 travels as contentBase64.
+func WireProfile(p *core.AgentProfile) *AgentProfile {
+	if p == nil {
+		return nil
+	}
+	out := &AgentProfile{Instructions: p.Instructions}
+	if len(p.Env) > 0 {
+		out.Env = make(map[string]string, len(p.Env))
+		for k, v := range p.Env {
+			out.Env[k] = v
+		}
+	}
+	for _, s := range p.Skills {
+		ws := ProfileSkill{Name: s.Name, Files: make([]ProfileFile, 0, len(s.Files))}
+		for _, f := range s.Files {
+			wf := ProfileFile{Path: f.Path}
+			if utf8.Valid(f.Content) {
+				wf.Content = string(f.Content)
+			} else {
+				wf.ContentBase64 = base64.StdEncoding.EncodeToString(f.Content)
+			}
+			ws.Files = append(ws.Files, wf)
+		}
+		out.Skills = append(out.Skills, ws)
+	}
+	for _, m := range p.MCPServers {
+		out.McpServers = append(out.McpServers, McpServer{
+			Type: wireMcpType(m.Type), Name: m.Name, Command: m.Command, Args: m.Args,
+			Env: wireNameValues(m.Env), URL: m.URL, Headers: wireNameValues(m.Headers),
+		})
+	}
+	return out
+}
+
+// MaxProfileSkills / MaxProfileMcpServers bound a profile on the wire.
+const (
+	MaxProfileSkills     = 64
+	MaxProfileMcpServers = 32
+)
+
+// Core maps a wire profile onto the neutral one, validating it: skill names
+// are single bundle path segments, file paths valid bundle paths (no "..",
+// no absolute paths), MCP servers named and well-formed for their type.
+func (p *AgentProfile) Core() (*core.AgentProfile, error) {
+	if p == nil {
+		return nil, nil
+	}
+	if len(p.Skills) > MaxProfileSkills {
+		return nil, fmt.Errorf("profile: more than %d skills", MaxProfileSkills)
+	}
+	if len(p.McpServers) > MaxProfileMcpServers {
+		return nil, fmt.Errorf("profile: more than %d mcp servers", MaxProfileMcpServers)
+	}
+	out := &core.AgentProfile{Instructions: p.Instructions}
+	if len(p.Env) > 0 {
+		out.Env = make(map[string]string, len(p.Env))
+		for k, v := range p.Env {
+			if !validEnvName(k) {
+				return nil, fmt.Errorf("profile: invalid env name %q", k)
+			}
+			out.Env[k] = v
+		}
+	}
+	seenSkill := map[string]bool{}
+	for _, s := range p.Skills {
+		if !core.ValidBundlePath(s.Name) || strings.Contains(s.Name, "/") || strings.HasPrefix(s.Name, ".") {
+			return nil, fmt.Errorf("profile: invalid skill name %q", s.Name)
+		}
+		if seenSkill[s.Name] {
+			return nil, fmt.Errorf("profile: duplicate skill %q", s.Name)
+		}
+		seenSkill[s.Name] = true
+		cs := core.ProfileSkill{Name: s.Name}
+		seenFile := map[string]bool{}
+		for _, f := range s.Files {
+			if !core.ValidBundlePath(f.Path) {
+				return nil, fmt.Errorf("profile: skill %s: invalid file path %q", s.Name, f.Path)
+			}
+			if seenFile[f.Path] {
+				return nil, fmt.Errorf("profile: skill %s: duplicate file %q", s.Name, f.Path)
+			}
+			seenFile[f.Path] = true
+			content := []byte(f.Content)
+			if f.ContentBase64 != "" {
+				raw, err := base64.StdEncoding.DecodeString(f.ContentBase64)
+				if err != nil {
+					return nil, fmt.Errorf("profile: skill %s: file %q: invalid contentBase64", s.Name, f.Path)
+				}
+				content = raw
+			}
+			cs.Files = append(cs.Files, core.ProfileFile{Path: f.Path, Content: content})
+		}
+		out.Skills = append(out.Skills, cs)
+	}
+	seenServer := map[string]bool{}
+	for _, m := range p.McpServers {
+		if strings.TrimSpace(m.Name) == "" {
+			return nil, errors.New("profile: mcp server without a name")
+		}
+		if seenServer[m.Name] {
+			return nil, fmt.Errorf("profile: duplicate mcp server %q", m.Name)
+		}
+		seenServer[m.Name] = true
+		cm := core.MCPServer{Name: m.Name, Type: m.Type, Command: m.Command, Args: m.Args, Env: coreNameValues(m.Env), URL: m.URL, Headers: coreNameValues(m.Headers)}
+		switch cm.Transport() {
+		case core.MCPStdio:
+			if strings.TrimSpace(m.Command) == "" {
+				return nil, fmt.Errorf("profile: mcp server %q: stdio needs a command", m.Name)
+			}
+			cm.Type = core.MCPStdio
+		case core.MCPHTTP, core.MCPSSE:
+			if strings.TrimSpace(m.URL) == "" {
+				return nil, fmt.Errorf("profile: mcp server %q: %s needs a url", m.Name, m.Type)
+			}
+		default:
+			return nil, fmt.Errorf("profile: mcp server %q: unknown type %q", m.Name, m.Type)
+		}
+		out.MCPServers = append(out.MCPServers, cm)
+	}
+	return out, nil
+}
+
+// wireMcpType omits "stdio" on the wire (the ACP stdio variant has no type).
+func wireMcpType(t string) string {
+	if t == core.MCPStdio {
+		return ""
+	}
+	return t
+}
+
+func wireNameValues(in []core.NameValue) []NameValue {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]NameValue, 0, len(in))
+	for _, nv := range in {
+		out = append(out, NameValue{Name: nv.Name, Value: nv.Value})
+	}
+	return out
+}
+
+func coreNameValues(in []NameValue) []core.NameValue {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]core.NameValue, 0, len(in))
+	for _, nv := range in {
+		out = append(out, core.NameValue{Name: nv.Name, Value: nv.Value})
+	}
+	return out
+}
+
+// validEnvName accepts POSIX-style environment variable names.
+func validEnvName(k string) bool {
+	if k == "" {
+		return false
+	}
+	for i, r := range k {
+		switch {
+		case r == '_', r >= 'A' && r <= 'Z', r >= 'a' && r <= 'z':
+		case r >= '0' && r <= '9' && i > 0:
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 // CoreOptions maps a follow-up input's options and execution onto

@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/luckylhb90/bnbloc/core"
 	"github.com/luckylhb90/bnbloc/core/pkgmeta"
 	"github.com/luckylhb90/bnbloc/internal/auth"
 	"github.com/luckylhb90/bnbloc/internal/extpipe"
@@ -102,7 +103,7 @@ func previewerFrameBase(name, version string) string {
 // file.
 func (s *Service) handlePreviewerFile(w http.ResponseWriter, r *http.Request) {
 	name, version, file := r.PathValue("name"), r.PathValue("version"), r.PathValue("path")
-	if !pkgmeta.ValidBundlePath(file) {
+	if !core.ValidBundlePath(file) {
 		http.NotFound(w, r)
 		return
 	}
