@@ -1,8 +1,8 @@
 # Content components: experts, skill packs, prompt packs; room tools and expert teams
 
 Status: approved, in development (2026-10-12): steps 1 and 2 implemented,
-step 3 implemented, step 5 implemented for experts and skill packs (see
-"Status" below). Feasibility verified in code and by experiments (see
+step 3 implemented, step 5 implemented for experts and skill packs, step 6
+expert teams implemented (see "Status" below). Feasibility verified in code and by experiments (see
 "Evidence").
 
 ## Why
