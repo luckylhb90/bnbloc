@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/luckylhb90/bnbloc/core"
+	"github.com/luckylhb90/bnbloc/internal/roomlog"
 	"github.com/luckylhb90/bnbloc/internal/tarbundle"
 )
 
@@ -100,11 +101,13 @@ func getComponentTool() Tool {
 
 func listComponentsTool() Tool {
 	return Tool{
-		Name:        "list_components",
-		Title:       "List experts and skill packs",
-		Description: "The experts and skill packs the person who asked you has in their Library (their own are marked mine), to find one to improve.",
+		Name:  "list_components",
+		Title: "List the Library",
+		Description: "The Library of the person who asked you, most recently updated first: the experts, skill packs, prompt packs and MCP tools " +
+			"they may use (their own are marked mine). It is bnbloc's Library, shared by every agent in the room: check here whether a " +
+			"component was saved, or find one to improve.",
 		InputSchema: objectSchema(map[string]any{
-			"kind": map[string]any{"type": "string", "enum": []string{"expert", "skill"}, "description": "Only this kind."},
+			"kind": map[string]any{"type": "string", "enum": []string{"expert", "skill", "prompt", roomlog.LibraryKindMCP}, "description": "Only this kind."},
 		}),
 		ReadOnly: true,
 		Call:     listComponents,
@@ -379,46 +382,16 @@ func listComponents(ctx context.Context, env *Env, args json.RawMessage) Result 
 	if err := decodeArgs(args, &in); err != nil {
 		return toolError("invalid arguments: %v", err)
 	}
-	_, grant, refused := jobGrant(env, "list_components")
+	job, _, refused := jobGrant(env, "list_components")
 	if refused != nil {
 		return *refused
 	}
-	if in.Kind != "" {
-		grant.Set("kind", in.Kind)
-	}
-	raw, err := env.Gateway.Do(ctx, "GET", "/v1/content-components?"+grant.Encode(), nil)
+	items, err := roomlog.ReadLibrary(ctx, gatewayFetch(env), env.Session.Scope().RoomID, job.JobID, in.Kind)
 	if err != nil {
 		return refusal("listing the Library", err)
 	}
-	var list struct {
-		Components []struct {
-			ID            string `json:"id"`
-			Kind          string `json:"kind"`
-			Name          string `json:"name"`
-			DisplayName   string `json:"displayName"`
-			Description   string `json:"description"`
-			Scope         string `json:"scope"`
-			LatestVersion string `json:"latestVersion"`
-			Mine          bool   `json:"mine"`
-		} `json:"components"`
-	}
-	if err := json.Unmarshal(raw, &list); err != nil {
-		return toolError("unreadable Library listing: %v", err)
-	}
-	type item struct {
-		ID          string `json:"id"`
-		Kind        string `json:"kind"`
-		Name        string `json:"name"`
-		DisplayName string `json:"displayName,omitempty"`
-		Description string `json:"description,omitempty"`
-		Version     string `json:"version"`
-		Mine        bool   `json:"mine"`
-		Scope       string `json:"scope"`
-	}
-	items := make([]item, 0, len(list.Components))
-	for _, c := range list.Components {
-		items = append(items, item{ID: c.ID, Kind: c.Kind, Name: c.Name, DisplayName: c.DisplayName,
-			Description: truncateBytes(c.Description, 300), Version: c.LatestVersion, Mine: c.Mine, Scope: c.Scope})
+	for i := range items {
+		items[i].Description = truncateBytes(items[i].Description, 300)
 	}
 	return Result{Value: map[string]any{"components": items}}
 }

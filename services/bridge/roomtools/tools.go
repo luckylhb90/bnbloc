@@ -20,8 +20,9 @@ const Instructions = `You are working in a bnbloc room shared by people and thei
 - ask_agent: send a task to one agent and wait for its reply and deliverables. The task is posted in the room on behalf of the person who asked you, so it runs under their authority (another member's agent may refuse without their authorization). Give a self-contained task.
 - room_status: the state of tasks you dispatched (use the handle ask_agent returns when it stops waiting).
 - read_room: recent messages of this conversation.
+- read_artifact: the content of a room deliverable (ids in .room/artifacts.md). Every agent has its own workspace: another agent's files are never in yours, so check its work here.
 - post_progress: post a short progress line of your current request to the room (once per phase of a longer task).
-- save_component, get_component, list_components: save an expert, skill pack or prompt pack you drafted in your workspace (a directory with component.json) to the Library of the person who asked you, only after they confirm; read or list theirs to improve one.
+- save_component, get_component, list_components: save an expert, skill pack or prompt pack you drafted in your workspace (a directory with component.json) to the Library of the person who asked you, only after they confirm; read or list theirs (list_components also lists their MCP tools) to improve one or to check what was saved. The Library is bnbloc's, shared by every agent in the room.
 - publish_component: after they confirm, ask their organization's admins to publish one of theirs to the organization (scope org; the admins approve it), or take it back (scope personal).
 Dispatching is bounded: at most 8 tasks per request you are working on, at most 3 hops deep, never to yourself or to an agent already working on this request.`
 
@@ -131,7 +132,7 @@ func (r *Registry) Descriptors() []map[string]any {
 func DefaultRegistry() *Registry {
 	r := NewRegistry()
 	for _, t := range []Tool{
-		listRoomAgentsTool(), askAgentTool(), roomStatusTool(), readRoomTool(),
+		listRoomAgentsTool(), askAgentTool(), roomStatusTool(), readRoomTool(), readArtifactTool(),
 		saveComponentTool(), getComponentTool(), listComponentsTool(), publishComponentTool(), tryDraftTool(),
 		postProgressTool(),
 	} {
