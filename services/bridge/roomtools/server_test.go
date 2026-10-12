@@ -405,7 +405,7 @@ func TestAskAgentFlow(t *testing.T) {
 	if len(dl) != 1 {
 		t.Fatalf("deliverables = %v", sc["deliverables"])
 	}
-	if d := dl[0].(map[string]any); d["name"] != "parser.go" || d["kind"] != "code" || d["link"] != "https://bnbloc.example.com/v1/rooms/room-1/artifacts/art_1/versions/2/content" {
+	if d := dl[0].(map[string]any); d["name"] != "parser.go" || d["kind"] != "code" || d["artifactId"] != "art_1" || d["version"] != float64(2) || d["link"] != "https://bnbloc.example.com/v1/rooms/room-1/artifacts/art_1/versions/2/content" {
 		t.Fatalf("deliverable = %v", d)
 	}
 

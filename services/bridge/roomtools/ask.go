@@ -36,11 +36,15 @@ type outcome struct {
 	Note          string        `json:"note,omitempty"`
 }
 
-// deliverable is one file the dispatched agent published for the task.
+// deliverable is one file the dispatched agent published for the task:
+// read_artifact reads it by ArtifactID (a session without .room/ files has
+// no other source of the id), the person opens Link.
 type deliverable struct {
-	Name string `json:"name"`
-	Kind string `json:"kind"`
-	Link string `json:"link"`
+	Name       string `json:"name"`
+	Kind       string `json:"kind"`
+	ArtifactID string `json:"artifactId"`
+	Version    int    `json:"version,omitempty"`
+	Link       string `json:"link"`
 }
 
 func settled(status string) bool {
@@ -56,7 +60,7 @@ func askAgentTool() Tool {
 		Name:  "ask_agent",
 		Title: "Ask another agent of the room",
 		Description: "Send a task to another agent of this room and wait for it to finish. The task is posted in the room on behalf of the person who asked you " +
-			"(visible to everyone, attributed to you) and runs under that person's authority. Returns the agent's reply and the files it delivered. " +
+			"(visible to everyone, attributed to you) and runs under that person's authority. Returns the agent's reply and the files it delivered (read one with read_artifact by its artifactId). " +
 			"If the agent is still working when the wait ends, returns its handle: check it later with room_status.",
 		InputSchema: objectSchema(map[string]any{
 			"handle":       map[string]any{"type": "string", "description": `The agent's handle from list_room_agents, e.g. "jack/codex"; when you lead a team, a role of your roster (e.g. "reviewer").`},
@@ -323,7 +327,7 @@ func deliverables(ctx context.Context, env *Env, run wire.AgentRun) []deliverabl
 		if a.CurrentVersion > 0 {
 			link += "/versions/" + strconv.Itoa(a.CurrentVersion) + "/content"
 		}
-		out = append(out, deliverable{Name: name, Kind: a.Kind, Link: link})
+		out = append(out, deliverable{Name: name, Kind: a.Kind, ArtifactID: a.ArtifactID, Version: a.CurrentVersion, Link: link})
 	}
 	return out
 }

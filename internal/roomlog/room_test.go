@@ -92,6 +92,11 @@ func TestSessionGuidanceGolden(t *testing.T) {
 			t.Errorf("guidance with tools and .room/ lacks %q:\n%s", s, tools)
 		}
 	}
+	// A session with the tools but no .room/ files (a core that takes no
+	// workspace files) is never pointed at a file it does not have.
+	if noFiles := SessionGuidance(Guidance{HasTools: true}); strings.Contains(noFiles, ".room/") || strings.Contains(noFiles, "artifacts.md") {
+		t.Errorf("guidance without .room/ files mentions them:\n%s", noFiles)
+	}
 	if want := fmt.Sprintf("at most %d tasks per request you are working on, %d hops deep", wire.MaxDispatchFanOut, wire.MaxDispatchDepth); !strings.Contains(tools, want) {
 		t.Errorf("the dispatch limits are not the wire constants (%q):\n%s", want, tools)
 	}
