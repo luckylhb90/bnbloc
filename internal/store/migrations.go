@@ -998,6 +998,20 @@ WHERE r.channel_id = '' AND d.user_id IS NULL`)
 				"ADD KEY idx_agent_jobs_dispatched_by (tenant_id, dispatched_by_job_id)")
 		},
 	},
+	{
+		// Content components (docs/prd/2026-10-12-experts-and-teams.md):
+		// experts and skill packs, their immutable versions, where they are
+		// enabled (member, room) and permission confirmations.
+		id: "2026_10_content_components",
+		run: func(ctx context.Context, db sqlConn) error {
+			for _, t := range []string{"content_components", "content_component_versions", "content_component_uses", "content_permission_acks"} {
+				if err := createSchemaTable(ctx, db, t); err != nil {
+					return err
+				}
+			}
+			return nil
+		},
+	},
 }
 
 // sqlConn is the statement surface a migration runs on. runMigrations passes

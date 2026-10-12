@@ -151,9 +151,10 @@ type RetentionStore interface {
 	// ReferencedBlobKeys returns the subset of keys some row still
 	// references. The reference sources are all listed here, in one place:
 	// attachments.blob_key, artifact_versions.blob_key and .thumb_blob_key,
-	// and every "sha256/<hex>" a platform setting mentions (component
-	// packages, desktop releases, the update config). A new table that
-	// stores a blob key must be added to both implementations.
+	// content_component_versions.bundle_blob_key, and every "sha256/<hex>" a
+	// platform setting mentions (component packages, desktop releases, the
+	// update config). A new table that stores a blob key must be added to
+	// both implementations.
 	ReferencedBlobKeys(ctx context.Context, keys []string) (map[string]bool, error)
 	// TryRetentionLock takes the cluster-wide retention lock without
 	// waiting; ok=false when another replica holds it. release frees it.
@@ -197,6 +198,7 @@ func NewRetention(b *Backends) RetentionStore {
 	m.Grants, _ = b.Grant.(*MemoryGrant)
 	m.ExtAudit, _ = b.ExtAudit.(*MemoryExtensionAudit)
 	m.Jobs, _ = b.BridgeJobs.(*MemoryBridgeJobs)
+	m.Content, _ = b.ContentComponents.(*MemoryContentComponents)
 	return m
 }
 
@@ -211,6 +213,7 @@ type MemoryRetention struct {
 	Grants      *MemoryGrant
 	ExtAudit    *MemoryExtensionAudit
 	Jobs        *MemoryBridgeJobs
+	Content     *MemoryContentComponents
 	Settings    PlatformSettingsStore
 
 	lock sync.Mutex
@@ -467,6 +470,13 @@ func (m *MemoryRetention) ReferencedBlobKeys(ctx context.Context, keys []string)
 		if all[k] {
 			out[k] = true
 		}
+	}
+	if c := m.Content; c != nil {
+		want := map[string]bool{}
+		for _, k := range keys {
+			want[k] = true
+		}
+		c.referencedBlobs(want, out)
 	}
 	return out, nil
 }

@@ -210,6 +210,9 @@ type Backends struct {
 	OrgSync OrgSyncStore
 	// Profiles holds users' chosen display names (global per user).
 	Profiles UserProfileStore
+	// ContentComponents holds content components (experts, skill packs),
+	// their versions, uses and permission acks.
+	ContentComponents ContentComponentStore
 }
 
 // NewBackends builds the store set. If dsn is empty, everything is in-memory.
@@ -259,6 +262,7 @@ func NewBackends(dsn string) (*Backends, error) {
 			Budgets:           NewMemoryUsageBudgets(),
 			OrgSync:           NewMemoryOrgSync(),
 			Profiles:          NewMemoryUserProfiles(),
+			ContentComponents: NewMemoryContentComponents(),
 		}, nil
 	}
 	db, err := OpenMySQL(dsn)
@@ -296,6 +300,7 @@ func NewBackends(dsn string) (*Backends, error) {
 		Budgets:           NewMySQLUsageBudgets(db),
 		OrgSync:           NewMySQLOrgSync(db),
 		Profiles:          NewMySQLUserProfiles(db),
+		ContentComponents: NewMySQLContentComponents(db),
 	}, nil
 }
 

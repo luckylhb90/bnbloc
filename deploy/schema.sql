@@ -735,3 +735,71 @@ CREATE TABLE IF NOT EXISTS user_profiles (
   updated_at_ms  BIGINT NOT NULL,
   PRIMARY KEY (user_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Content components (docs/prd/2026-10-12-experts-and-teams.md): member- and
+-- platform-authored packages that are mostly text (experts, skill packs,
+-- prompt packs). One row per component; (tenant, scope, owner, kind, name) is
+-- unique. scope: personal | shared | org | platform; status: active | pending
+-- | retired. display_name / description / category are the latest version's.
+CREATE TABLE IF NOT EXISTS content_components (
+  id              VARCHAR(64) NOT NULL PRIMARY KEY,
+  kind            VARCHAR(64) NOT NULL,
+  name            VARCHAR(64) NOT NULL,
+  tenant_id       VARCHAR(64) NOT NULL DEFAULT '',
+  owner           VARCHAR(128) NOT NULL DEFAULT '',
+  scope           VARCHAR(16) NOT NULL,
+  status          VARCHAR(16) NOT NULL,
+  latest_version  VARCHAR(64) NOT NULL,
+  display_name    VARCHAR(256) NOT NULL DEFAULT '',
+  description     VARCHAR(2048) NOT NULL DEFAULT '',
+  category        VARCHAR(64) NOT NULL DEFAULT '',
+  created_at_ms   BIGINT NOT NULL,
+  updated_at_ms   BIGINT NOT NULL,
+  UNIQUE KEY uq_content_components_name (tenant_id, scope, owner, kind, name),
+  KEY idx_content_components_owner (owner, kind, updated_at_ms),
+  KEY idx_content_components_scope (tenant_id, scope, kind, updated_at_ms)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Immutable versions of a content component: the manifest and the bundle
+-- (a tar blob addressed by sha256; RetentionStore.ReferencedBlobKeys keeps
+-- it from blob collection). signature is set for platform-signed versions.
+CREATE TABLE IF NOT EXISTS content_component_versions (
+  component_id    VARCHAR(64) NOT NULL,
+  version         VARCHAR(64) NOT NULL,
+  manifest_json   JSON NOT NULL,
+  bundle_blob_key VARCHAR(128) NOT NULL,
+  sha256          CHAR(64) NOT NULL,
+  size_bytes      BIGINT NOT NULL,
+  signature       TEXT NULL,
+  created_by      VARCHAR(128) NOT NULL,
+  created_at_ms   BIGINT NOT NULL,
+  PRIMARY KEY (component_id, version),
+  KEY idx_content_versions_blob (bundle_blob_key)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Where a content component is enabled or pinned: scope_kind member (a
+-- member's skill packs, for all their agents) or room (room skill packs and
+-- pinned experts). pinned_version '' follows the latest version.
+CREATE TABLE IF NOT EXISTS content_component_uses (
+  scope_kind      VARCHAR(16) NOT NULL,
+  scope_id        VARCHAR(128) NOT NULL,
+  component_id    VARCHAR(64) NOT NULL,
+  tenant_id       VARCHAR(64) NOT NULL DEFAULT '',
+  kind            VARCHAR(64) NOT NULL,
+  pinned_version  VARCHAR(64) NOT NULL DEFAULT '',
+  created_by      VARCHAR(128) NOT NULL,
+  created_at_ms   BIGINT NOT NULL,
+  PRIMARY KEY (scope_kind, scope_id, component_id),
+  KEY idx_content_uses_component (component_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- A member confirmed the declared permissions of a content component
+-- version (shown and confirmed on first use).
+CREATE TABLE IF NOT EXISTS content_permission_acks (
+  subject         VARCHAR(128) NOT NULL,
+  component_id    VARCHAR(64) NOT NULL,
+  version         VARCHAR(64) NOT NULL,
+  acked_at_ms     BIGINT NOT NULL,
+  PRIMARY KEY (subject, component_id, version),
+  KEY idx_content_acks_component (component_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
