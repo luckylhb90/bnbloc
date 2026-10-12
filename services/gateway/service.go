@@ -244,6 +244,8 @@ func (s *Service) Handler() http.Handler {
 	mux.HandleFunc("PUT /v1/platform/components/{name}/rollout", s.handleSetComponentRollout)
 	mux.HandleFunc("POST /v1/platform/components/{name}/secret/rotate", s.handleRotateComponentSecret)
 	mux.HandleFunc("POST /v1/platform/components/{name}/test", s.handleTestComponent)
+	// The console's MCP tool form: a draft in, the package JSON to sign out.
+	mux.HandleFunc("POST /v1/platform/mcp-packages", s.handleBuildMCPPackage)
 	// A notifier's signed reply on a member's behalf (no session: the
 	// component's signing secret authenticates it).
 	mux.HandleFunc("POST /v1/notifier/replies", s.handleNotifierReply)
