@@ -47,6 +47,7 @@ import { SaveTemplateDialog } from "@/views/room/SaveTemplateDialog";
 import { TemplateStartCard } from "@/views/room/TemplateStartCard";
 import { SchedulesDialog } from "@/views/room/SchedulesDialog";
 import { RunsDialog } from "@/views/room/RunsDialog";
+import { CONTENT_USES_CHANGED, contentUsesChanged } from "@/lib/contentUsesEvents";
 import { useWorkshopSaves } from "@/views/room/useWorkshopSaves";
 
 type Panel = "chat" | "artifacts";
@@ -198,6 +199,10 @@ export function RoomView({
     if (activity.applyEvent(e)) return;
     if (e.kind === "agent_roster") {
       if (e.rosterAgents) data.setRoster(e.rosterAgents);
+      return;
+    }
+    if (e.kind === CONTENT_USES_CHANGED) {
+      contentUsesChanged.emit(roomId);
       return;
     }
     conversation.applyEvent(e);

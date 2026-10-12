@@ -41,10 +41,22 @@ type Skill struct {
 
 // Options are the use-site inputs of validation.
 type Options struct {
-	// MCPTool reports whether an MCP tool component of that name is
-	// available. nil = none is (MCP tool components are a later step), so
-	// every requires.mcp entry is refused.
-	MCPTool func(name string) bool
+	// MCPTool looks up the MCP tool component a requires.mcp entry names,
+	// as the saving member may use it. nil checks references by syntax
+	// only: stored content is read and materialized without the platform's
+	// catalog, so a component uninstalled later never makes it invalid (use
+	// time reports the tool missing instead).
+	MCPTool func(name string) (MCPToolInfo, bool)
+}
+
+// MCPToolInfo describes the MCP tool component a reference names.
+type MCPToolInfo struct {
+	// Transport is "stdio" or "http".
+	Transport string
+	// Host is an http tool's URL host, as mcp.http:<host> names it.
+	Host string
+	// Env are the variable names the component declares.
+	Env []string
 }
 
 // Validate parses a bundle (verifying wantSHA256 when non-empty) and checks
@@ -168,20 +180,22 @@ func validateEnvelope(m Manifest, opts Options) error {
 			return err
 		}
 	}
+	mcpSeen := map[string]bool{}
 	for _, t := range r.MCP {
 		if !ValidName(t.Name) {
 			return fmt.Errorf("requires.mcp: invalid tool name %q", t.Name)
 		}
+		if mcpSeen[t.Name] {
+			return fmt.Errorf("requires.mcp: %q is named twice", t.Name)
+		}
+		mcpSeen[t.Name] = true
 		for _, e := range t.Env {
 			if !validEnvName(e) {
 				return fmt.Errorf("requires.mcp %s: invalid env name %q", t.Name, e)
 			}
 		}
-		// stdio MCP servers come only from MCP tool components (platform-
-		// signed, hash-pinned); content references them by name and an
-		// unknown one is refused.
-		if opts.MCPTool == nil || !opts.MCPTool(t.Name) {
-			return fmt.Errorf("requires.mcp: MCP tool %q is not available (MCP tools are published by the platform)", t.Name)
+		if err := checkMCPReference(m, t, opts); err != nil {
+			return err
 		}
 	}
 	seen := map[string]bool{}
@@ -206,6 +220,42 @@ func validateEnvelope(m Manifest, opts Options) error {
 			}
 		default:
 			return fmt.Errorf("unknown permission %q (want %s, %s or %s<host>)", p, PermScripts, PermMCPStdio, PermMCPHTTPPrefix)
+		}
+	}
+	return nil
+}
+
+// checkMCPReference holds a requires.mcp entry to the MCP tool component
+// it names, when the caller can look components up (a save): MCP servers
+// come only from those platform-signed components, so a reference must name
+// one, only its declared variables, and the package must declare the
+// permission the tool's transport needs (mcp.stdio, or mcp.http:<host>) so
+// its card shows what runs.
+func checkMCPReference(m Manifest, t MCPRequirement, opts Options) error {
+	if opts.MCPTool == nil {
+		return nil
+	}
+	info, ok := opts.MCPTool(t.Name)
+	if !ok {
+		return fmt.Errorf("requires.mcp: %q is not an MCP tool component available to you (MCP tools are published by the platform)", t.Name)
+	}
+	declared := map[string]bool{}
+	for _, e := range info.Env {
+		declared[e] = true
+	}
+	for _, e := range t.Env {
+		if !declared[e] {
+			return fmt.Errorf("requires.mcp %s: %q is not one of its variables (%s)", t.Name, e, strings.Join(info.Env, ", "))
+		}
+	}
+	switch info.Transport {
+	case "stdio":
+		if !m.declares(PermMCPStdio) {
+			return fmt.Errorf("requires.mcp %s: a stdio MCP tool needs the %q permission", t.Name, PermMCPStdio)
+		}
+	case "http":
+		if want := PermMCPHTTPPrefix + info.Host; !m.declares(want) {
+			return fmt.Errorf("requires.mcp %s: an http MCP tool needs the %q permission", t.Name, want)
 		}
 	}
 	return nil

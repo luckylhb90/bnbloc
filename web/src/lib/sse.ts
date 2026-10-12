@@ -150,6 +150,8 @@ const ROOM_EVENT_KINDS = [
   "room_deleted",
   // Message tasks (transient): the room's task strip updates live.
   "task_updated",
+  // A room's experts, room expert and room packs changed (transient).
+  "content_uses_changed",
 ];
 
 // subscribeRoom opens an SSE stream for a room's live events. EventSource cannot

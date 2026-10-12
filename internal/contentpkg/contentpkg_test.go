@@ -113,7 +113,6 @@ func TestValidateRefuses(t *testing.T) {
 		"bad version":        {"version": "1.0"},
 		"v version":          {"version": "v1.0.0"},
 		"unknown permission": {"requires": map[string]any{"permissions": []string{"network"}}},
-		"mcp unknown tool":   {"requires": map[string]any{"mcp": []map[string]any{{"name": "browser"}}, "permissions": []string{"mcp.stdio"}}},
 		"stdio without mcp":  {"requires": map[string]any{"permissions": []string{"mcp.stdio"}}},
 		"bad skill ref":      {"requires": map[string]any{"skills": []string{"x@^banana"}}},
 		"unknown field":      {"surprise": true},
@@ -126,10 +125,44 @@ func TestValidateRefuses(t *testing.T) {
 			t.Errorf("%s: accepted", name)
 		}
 	}
-	// A known MCP tool is accepted.
-	extra := map[string]any{"requires": map[string]any{"mcp": []map[string]any{{"name": "browser", "env": []string{"BROWSER_TOKEN"}}}, "permissions": []string{"mcp.stdio"}}}
-	if _, err := Validate(bundle(t, expertFiles(t, extra)), "", Options{MCPTool: func(n string) bool { return n == "browser" }}); err != nil {
-		t.Fatalf("known mcp tool: %v", err)
+	// References must name an MCP tool component (when the caller can look
+	// them up: a save), only its variables, with the transport's permission.
+	tools := Options{MCPTool: func(n string) (MCPToolInfo, bool) {
+		switch n {
+		case "browser":
+			return MCPToolInfo{Transport: "stdio", Env: []string{"BROWSER_TOKEN"}}, true
+		case "search":
+			return MCPToolInfo{Transport: "http", Host: "tools.example.com", Env: []string{"TOOLS_TOKEN"}}, true
+		}
+		return MCPToolInfo{}, false
+	}}
+	mcpReq := func(mcp []map[string]any, perms ...string) map[string]any {
+		return map[string]any{"requires": map[string]any{"mcp": mcp, "permissions": perms}}
+	}
+	for name, c := range map[string]struct {
+		extra map[string]any
+		want  string
+	}{
+		"known stdio tool":         {mcpReq([]map[string]any{{"name": "browser", "env": []string{"BROWSER_TOKEN"}}}, "mcp.stdio"), ""},
+		"known http tool":          {mcpReq([]map[string]any{{"name": "search"}}, "mcp.http:tools.example.com"), ""},
+		"unknown tool":             {mcpReq([]map[string]any{{"name": "ghost"}}, "mcp.stdio"), "not an MCP tool component"},
+		"undeclared env":           {mcpReq([]map[string]any{{"name": "browser", "env": []string{"OTHER"}}}, "mcp.stdio"), "not one of its variables"},
+		"stdio without permission": {mcpReq([]map[string]any{{"name": "browser"}}, "scripts"), `needs the "mcp.stdio" permission`},
+		"http wrong host":          {mcpReq([]map[string]any{{"name": "search"}}, "mcp.http:other.example.com"), `"mcp.http:tools.example.com"`},
+		"named twice":              {mcpReq([]map[string]any{{"name": "browser"}, {"name": "browser"}}, "mcp.stdio"), "named twice"},
+	} {
+		_, err := Validate(bundle(t, expertFiles(t, c.extra)), "", tools)
+		switch {
+		case c.want == "" && err != nil:
+			t.Errorf("%s: %v", name, err)
+		case c.want != "" && (err == nil || !strings.Contains(err.Error(), c.want)):
+			t.Errorf("%s: err = %v, want %q", name, err, c.want)
+		}
+	}
+	// Reading stored content checks references by syntax only: a tool
+	// uninstalled since never makes it invalid.
+	if _, err := Validate(bundle(t, expertFiles(t, mcpReq([]map[string]any{{"name": "ghost"}}, "mcp.stdio"))), "", Options{}); err != nil {
+		t.Fatalf("stored content with a gone tool: %v", err)
 	}
 	// The digest is verified.
 	if _, err := Validate(bundle(t, expertFiles(t, nil)), strings.Repeat("0", 64), Options{}); err == nil {

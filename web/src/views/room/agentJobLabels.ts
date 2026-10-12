@@ -33,6 +33,23 @@ export const LIVE_AGENT_JOB_STATUSES = new Set<AgentJob["status"]>([
   "reflowing",
 ]);
 
+// jobContentMissing reads the requirements a running job's content could
+// not meet (the bridge's diagnostics.contentMissing: skill packs an expert
+// requires, a room expert that is gone): the turn runs without them.
+export function jobContentMissing(diagnostics: unknown): string[] {
+  if (!diagnostics || typeof diagnostics !== "object") return [];
+  const m = (diagnostics as Record<string, unknown>).contentMissing;
+  return Array.isArray(m) ? m.filter((x): x is string => typeof x === "string" && x.trim() !== "") : [];
+}
+
+// jobWearing is what a running job wears, from its diagnostics: the
+// chat's expert and the room's ("Reviewer (v1.2.0)").
+export function jobWearing(diagnostics: unknown): string[] {
+  if (!diagnostics || typeof diagnostics !== "object") return [];
+  const d = diagnostics as Record<string, unknown>;
+  return [d.roomExpert, d.expert].filter((x): x is string => typeof x === "string" && x !== "");
+}
+
 // agentJobStatusLabel is a job row's status. `ahead` is how many of the
 // serving host's jobs are queued before this one (platform agents, PRD v2
 // §3): a waiting job behind others says so instead of "waiting for bridge".

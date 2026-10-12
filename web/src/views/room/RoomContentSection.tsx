@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { BrainIcon, ChatTextIcon, TrashIcon, WrenchIcon } from "@phosphor-icons/react";
 import { useAuth } from "@/lib/auth";
-import { contentKindWord, contentLabel, type ContentComponent, type ContentUse } from "@/lib/contentComponents";
+import { contentKindWord, contentLabel, isTeam, type ContentComponent, type ContentUse } from "@/lib/contentComponents";
+import { contentUsesChanged } from "@/lib/contentUsesEvents";
 import { apiErrorText, contentApi } from "@/lib/contentComponentsApi";
 import { Button } from "@/ui/Button";
 import { Badge } from "@/ui/Card";
@@ -29,6 +30,8 @@ export function RoomContentSection({ roomId }: { readonly roomId: string }) {
   const canEdit = role === "owner" || role === "admin";
   const toast = useToast();
   const [uses, setUses] = useState<readonly ContentUse[] | null>(null);
+  // The room's expert (one of its pinned experts), worn by every agent turn.
+  const [roomExpert, setRoomExpert] = useState("");
   const [mine, setMine] = useState<readonly ContentComponent[]>([]);
   const [adding, setAdding] = useState("");
   const [mode, setMode] = useState<PinMode>("pinned");
@@ -40,7 +43,11 @@ export function RoomContentSection({ roomId }: { readonly roomId: string }) {
     let live = true;
     contentApi
       .uses(roomId)
-      .then((r) => live && setUses(r.room ?? []))
+      .then((r) => {
+        if (!live) return;
+        setUses(r.room ?? []);
+        setRoomExpert(r.roomExpert ?? "");
+      })
       .catch((e) => {
         if (!live) return;
         setUses([]);
@@ -61,6 +68,20 @@ export function RoomContentSection({ roomId }: { readonly roomId: string }) {
       live = false;
     };
   }, [canEdit, epoch]);
+
+  // Another member changed the room's uses: follow live.
+  useEffect(() => contentUsesChanged.subscribe((id) => id === roomId && reload()), [roomId, reload]);
+
+  const pickRoomExpert = async (id: string) => {
+    try {
+      if (id) await contentApi.putUse("room-expert", id, { roomId });
+      else if (roomExpert) await contentApi.removeUse("room-expert", roomExpert, roomId);
+      toast.success(id ? "Every agent turn here now wears the room expert" : "The room has no room expert now");
+      reload();
+    } catch (e) {
+      toast.error(apiErrorText(e, "Could not change the room expert"));
+    }
+  };
 
   const addable = useMemo(() => mine.filter((c) => !(uses ?? []).some((u) => u.componentId === c.id)), [mine, uses]);
 
@@ -109,6 +130,7 @@ export function RoomContentSection({ roomId }: { readonly roomId: string }) {
             {u.pinnedVersion ? `v${u.pinnedVersion}` : `latest (v${c.latestVersion})`}
           </span>
           {u.updateAvailable && <Badge tone="accent">v{c.latestVersion} available</Badge>}
+          {u.componentId === roomExpert && <Badge tone="accent">Room expert</Badge>}
           <span className="min-w-0 flex-1 truncate text-xs text-[var(--color-fg-subtle)]">
             by {c.mine ? "you" : <UserName id={c.owner} />}
           </span>
@@ -145,6 +167,27 @@ export function RoomContentSection({ roomId }: { readonly roomId: string }) {
           <section>
             <p className="mb-1 text-xs font-medium uppercase tracking-wide text-[var(--color-fg-muted)]">Pinned experts</p>
             {experts.length === 0 ? <p className="text-xs text-[var(--color-fg-subtle)]">None</p> : <ul className="flex flex-col gap-1.5">{experts.map(row)}</ul>}
+            {experts.length > 0 && (
+              <div className="mt-2 flex flex-col gap-1">
+                <label className="text-xs text-[var(--color-fg-muted)]" htmlFor={`room-expert-${roomId}`}>
+                  Room expert: every agent turn here wears it, under the expert a message picks
+                </label>
+                {canEdit ? (
+                  <Select id={`room-expert-${roomId}`} value={roomExpert} onChange={(e) => void pickRoomExpert(e.target.value)} className="max-w-sm">
+                    <option value="">None</option>
+                    {experts
+                      .filter((u) => u.component && !isTeam(u.component))
+                      .map((u) => (
+                        <option key={u.componentId} value={u.componentId}>
+                          {contentLabel(u.component!)}
+                        </option>
+                      ))}
+                  </Select>
+                ) : (
+                  <p className="text-sm">{experts.find((u) => u.componentId === roomExpert)?.component ? contentLabel(experts.find((u) => u.componentId === roomExpert)!.component!) : "None"}</p>
+                )}
+              </div>
+            )}
           </section>
           <section>
             <p className="mb-1 text-xs font-medium uppercase tracking-wide text-[var(--color-fg-muted)]">Room skill packs</p>

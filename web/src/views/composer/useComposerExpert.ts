@@ -10,6 +10,7 @@ import {
 } from "@/lib/contentComponents";
 import { contentApi } from "@/lib/contentComponentsApi";
 import { composerExpertPicks } from "@/lib/team";
+import { contentUsesChanged } from "@/lib/contentUsesEvents";
 
 export interface ComposerExpert {
   // The member's own experts and the room's pinned ones (room pins first).
@@ -51,6 +52,14 @@ export function useComposerExpert(roomId: string, enabled: boolean): ComposerExp
       live = false;
     };
   }, [roomId, enabled, epoch]);
+
+  // The room's pins changed (another member's settings): refetch, live.
+  useEffect(() => {
+    if (!enabled) return;
+    return contentUsesChanged.subscribe((id) => {
+      if (id === roomId) setEpoch((n) => n + 1);
+    });
+  }, [roomId, enabled]);
 
   // A picked expert that left the choices (deleted, unpinned) is dropped.
   useEffect(() => {
