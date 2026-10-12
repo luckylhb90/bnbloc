@@ -1,4 +1,4 @@
-import { getToken } from "./session";
+import { getToken, refreshSession } from "./session";
 import { apiUrl } from "./config";
 import { normalizeRoomEvent, type RoomEvent } from "./roomEvents.ts";
 
@@ -60,7 +60,9 @@ export function subscribeRoom(
   roomId: string,
   onEvent: (e: RoomEvent) => void,
   onStatus?: (up: boolean) => void,
-  onAuthError?: () => Promise<boolean>,
+  // Mints a fresh session after a run of failures; defaults to the app's
+  // own refresh, so no subscriber goes dark after a signing-key rotation.
+  onAuthError: () => Promise<boolean> = refreshSession,
   channelId?: string,
   scope: RoomStreamScope = {},
 ): () => void {
@@ -103,7 +105,7 @@ export function subscribeRoom(
     // A run of failures usually means the token went stale (signing-key
     // rotation) — EventSource can't recover on its own, so refresh once before
     // reconnecting, then reset the failure counter on success.
-    if (attempts >= REAUTH_AFTER && onAuthError && !reauthing) {
+    if (attempts >= REAUTH_AFTER && !reauthing) {
       reauthing = true;
       try {
         const ok = await onAuthError().catch(() => false);

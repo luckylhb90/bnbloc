@@ -108,56 +108,30 @@ function tauri(): { invoke: InvokeFn; listen: ListenFn } | null {
   return { invoke, listen };
 }
 
-// Session handoff for torn-out preview windows. sessionStorage is per-window:
-// a freshly created Tauri webview boots with none, so the pop-out would land
-// on the login screen. The stashing side (popOutPreview, below) copies the
-// live session into localStorage; the receiving side (seedPreviewSession,
-// called before React mounts in main.tsx) moves it into the new window's
-// sessionStorage and deletes the stash. One-shot, no lingering credential.
-export const PREVIEW_SESSION_KEY = "bnbloc.popSession";
-
 // Reads the web session for shell IPC (sidecar adapter, bridge refresh
-// token, updater). The session persists in localStorage (see auth.tsx);
-// sessionStorage is checked as a fallback so a session minted before the
-// upgrade is still found.
+// token, updater). The session persists in localStorage (see auth.tsx).
 function storedSession(): SessionRecord | null {
   if (typeof window === "undefined") return null;
-  const read = (store: Storage | null) => {
-    try {
-      return parseSessionRecord(store?.getItem(SESSION_KEY));
-    } catch {
-      return null;
-    }
-  };
-  return read(window.localStorage) ?? read(window.sessionStorage);
+  try {
+    return parseSessionRecord(window.localStorage.getItem(SESSION_KEY));
+  } catch {
+    return null;
+  }
 }
 
 function sessionToken(): string | null {
   return storedSession()?.token ?? null;
 }
 
-export function seedPreviewSession(): void {
-  try {
-    if (sessionStorage.getItem(SESSION_KEY)) return; // already has one
-    const stash = localStorage.getItem(PREVIEW_SESSION_KEY);
-    if (!stash) return;
-    localStorage.removeItem(PREVIEW_SESSION_KEY);
-    sessionStorage.setItem(SESSION_KEY, stash);
-  } catch {
-    // storage unavailable: the preview window falls back to the login screen
-  }
-}
-
 // popOutWindow asks the shell to open one of its auxiliary windows (a
-// torn-out preview, the people chat). The session is stashed first so the
-// new window can adopt it (see seedPreviewSession). False when not in the
-// shell or the shell refused (the caller keeps its in-app surface).
+// torn-out preview, the people chat). Every window of the app shares one
+// origin and so one localStorage: the new window boots signed in. False
+// when not in the shell or the shell refused (the caller keeps its in-app
+// surface).
 async function popOutWindow(command: string, args: Record<string, string>): Promise<boolean> {
   const t = tauri();
   if (!t) return false;
   try {
-    const session = sessionStorage.getItem(SESSION_KEY);
-    if (session) localStorage.setItem(PREVIEW_SESSION_KEY, session);
     await t.invoke(command, args);
     return true;
   } catch {

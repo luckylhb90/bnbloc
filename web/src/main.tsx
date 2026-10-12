@@ -6,7 +6,6 @@ import { ToastProvider } from "@/ui/Toast";
 import { ResubmissionToasts } from "@/views/ResubmissionToasts";
 import { ErrorBoundary } from "@/ui/ErrorBoundary";
 import { App } from "@/App";
-import { seedPreviewSession } from "@/lib/desktop";
 import { inDesktopShell } from "@/lib/config";
 import { registerAppWorkerAfterLoad } from "@/lib/appWorker";
 import { trackVisualViewport } from "@/lib/viewport";
@@ -41,10 +40,6 @@ function Root() {
     </AuthProvider>
   );
 }
-
-// A torn-out preview window adopts its parent's session before anything
-// renders, so useAuth's boot read finds it and the view skips Login.
-seedPreviewSession();
 
 // handCodeToDesktopApp: an SSO callback landing in a plain browser for a flow
 // the desktop app initiated (it opens SSO in the system browser). For such a

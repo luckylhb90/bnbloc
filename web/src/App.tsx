@@ -135,9 +135,9 @@ export function App() {
   }
 
   // A torn-out preview window renders only its artifact (no shell, no room):
-  // the hash route is the whole window's identity. Auth still gates it — a
-  // preview window whose session handoff failed lands on Login like any
-  // other window, and signs straight into its artifact from there. Checked
+  // the hash route is the whole window's identity. Auth still gates it — it
+  // shares the app's stored session; a signed-out window lands on Login like
+  // any other, and signs straight into its artifact from there. Checked
   // after the hooks and gates above so hook order never varies.
   const preview = isPreviewRoute();
   if (preview) {

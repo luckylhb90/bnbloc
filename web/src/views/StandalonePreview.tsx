@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { api, ApiError } from "@/lib/api";
+import { useAuth } from "@/lib/auth";
 import { subscribeRoom } from "@/lib/sse";
 import type { RoomEvent } from "@/lib/roomEvents";
 import { isRoomGoneStatus, reportRoomGone, roomAccessEnded, type RoomAccessEnd } from "@/lib/roomGone";
@@ -18,7 +19,9 @@ import { invalidateArtifacts } from "@/views/workbench/artifactData";
 let liveStateNonce = 0;
 
 export function StandalonePreview({ roomId, artifactId }: { roomId: string; artifactId: string }) {
-  const [subject, setSubject] = useState<string | null>(null);
+  // The window shares the app's signed-in session (one origin, one
+  // localStorage): own identity filters self-echoes and matches a removal.
+  const { subject } = useAuth();
   const [version, setVersion] = useState<number | undefined>(undefined);
   // The room is gone for this member: the window says so and stops its
   // stream instead of reconnecting into 403s.
@@ -27,15 +30,8 @@ export function StandalonePreview({ roomId, artifactId }: { roomId: string; arti
     Record<string, { state: unknown; actor: string; nonce: number }>
   >({});
 
-  // Own identity (for self-echo filtering) + the artifact title for the
-  // native window title.
+  // The artifact title for the native window title.
   useEffect(() => {
-    try {
-      const s = JSON.parse(sessionStorage.getItem("bnbloc.session") || "null");
-      if (s?.subject) setSubject(s.subject);
-    } catch {
-      /* no session yet: Login renders instead */
-    }
     let cancelled = false;
     api
       .artifactDetail(roomId, artifactId)
