@@ -982,6 +982,22 @@ WHERE r.channel_id = '' AND d.user_id IS NULL`)
 			return nil
 		},
 	},
+	{
+		// Room tools (docs/prd/2026-10-12-experts-and-teams.md §7): a job an
+		// agent dispatched names its parent job and its hop depth; the
+		// dispatch guards count a parent's dispatches on the index.
+		id: "2026_10_agent_job_dispatch",
+		run: func(ctx context.Context, db sqlConn) error {
+			if err := addColumnIfMissing(ctx, db, "agent_jobs", "dispatched_by_job_id", "VARCHAR(64) NOT NULL DEFAULT ''"); err != nil {
+				return err
+			}
+			if err := addColumnIfMissing(ctx, db, "agent_jobs", "dispatch_depth", "INT NOT NULL DEFAULT 0"); err != nil {
+				return err
+			}
+			return addIndexIfMissing(ctx, db, "agent_jobs", "idx_agent_jobs_dispatched_by",
+				"ADD KEY idx_agent_jobs_dispatched_by (tenant_id, dispatched_by_job_id)")
+		},
+	},
 }
 
 // sqlConn is the statement surface a migration runs on. runMigrations passes

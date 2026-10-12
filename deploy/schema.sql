@@ -124,6 +124,8 @@ CREATE TABLE IF NOT EXISTS agent_jobs (
   finished_at_ms      BIGINT NOT NULL DEFAULT 0,
   diagnostics_json    JSON NULL,
   claimed_at_ms       BIGINT NOT NULL DEFAULT 0,
+  dispatched_by_job_id VARCHAR(64) NOT NULL DEFAULT '',
+  dispatch_depth      INT NOT NULL DEFAULT 0,
   UNIQUE KEY uq_agent_job_origin (tenant_id, room_id, message_seq, owner_user_id, core, provider),
   KEY idx_agent_jobs_claim (tenant_id, owner_user_id, status, lease_expires_at_ms),
   KEY idx_agent_jobs_room (tenant_id, room_id, channel_id, updated_at_ms),
@@ -131,7 +133,8 @@ CREATE TABLE IF NOT EXISTS agent_jobs (
   KEY idx_agent_jobs_room_created (tenant_id, room_id, created_at_ms),
   KEY idx_agent_jobs_owner_created (tenant_id, owner_user_id, created_at_ms),
   KEY idx_agent_jobs_requester_created (tenant_id, requester_user_id, created_at_ms),
-  KEY idx_agent_jobs_owner_status (owner_user_id, status, core, provider)
+  KEY idx_agent_jobs_owner_status (owner_user_id, status, core, provider),
+  KEY idx_agent_jobs_dispatched_by (tenant_id, dispatched_by_job_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS bridge_heartbeats (

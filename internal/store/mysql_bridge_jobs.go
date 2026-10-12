@@ -35,9 +35,9 @@ func (m *MySQLBridgeJobs) PutAgentJob(ctx context.Context, j AgentJob) (AgentJob
 		j.UpdatedAtMs = j.CreatedAtMs
 	}
 	if _, err := m.DB.ExecContext(ctx, `
-INSERT INTO agent_jobs (job_id, tenant_id, room_id, channel_id, message_seq, client_msg_id, requester_user_id, owner_user_id, core, provider, target_id, message_text, attachment_ids, model, reasoning_effort, status, failure_reason, attempt, lease_bridge_id, lease_expires_at_ms, created_at_ms, updated_at_ms, started_at_ms, finished_at_ms, diagnostics_json)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-ON DUPLICATE KEY UPDATE job_id = job_id`, j.JobID, tid, j.RoomID, j.ChannelID, j.MessageSeq, j.ClientMsgID, j.RequesterUserID, j.OwnerUserID, j.Core, j.Provider, j.TargetID, j.MessageText, jsonStringSlice(j.AttachmentIDs), j.Model, j.ReasoningEffort, string(j.Status), string(j.FailureReason), j.Attempt, j.LeaseBridgeID, j.LeaseExpiresAtMs, j.CreatedAtMs, j.UpdatedAtMs, j.StartedAtMs, j.FinishedAtMs, nullJSON(j.DiagnosticsJSON)); err != nil {
+INSERT INTO agent_jobs (job_id, tenant_id, room_id, channel_id, message_seq, client_msg_id, requester_user_id, owner_user_id, core, provider, target_id, message_text, attachment_ids, model, reasoning_effort, status, failure_reason, attempt, lease_bridge_id, lease_expires_at_ms, created_at_ms, updated_at_ms, started_at_ms, finished_at_ms, diagnostics_json, dispatched_by_job_id, dispatch_depth)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+ON DUPLICATE KEY UPDATE job_id = job_id`, j.JobID, tid, j.RoomID, j.ChannelID, j.MessageSeq, j.ClientMsgID, j.RequesterUserID, j.OwnerUserID, j.Core, j.Provider, j.TargetID, j.MessageText, jsonStringSlice(j.AttachmentIDs), j.Model, j.ReasoningEffort, string(j.Status), string(j.FailureReason), j.Attempt, j.LeaseBridgeID, j.LeaseExpiresAtMs, j.CreatedAtMs, j.UpdatedAtMs, j.StartedAtMs, j.FinishedAtMs, nullJSON(j.DiagnosticsJSON), j.DispatchedByJobID, j.DispatchDepth); err != nil {
 		return AgentJob{}, err
 	}
 	return m.agentJobByOrigin(ctx, tid, j)
@@ -413,7 +413,7 @@ func scanAgentJobTxByID(ctx context.Context, tx *sql.Tx, id string) (AgentJob, e
 
 // agentJobColumns is the one column list every agent_jobs read selects, in
 // scanAgentJobRow's order.
-const agentJobColumns = `job_id, tenant_id, room_id, channel_id, message_seq, client_msg_id, requester_user_id, owner_user_id, core, provider, target_id, message_text, attachment_ids, model, reasoning_effort, status, failure_reason, attempt, lease_bridge_id, lease_expires_at_ms, created_at_ms, updated_at_ms, started_at_ms, finished_at_ms, diagnostics_json, claimed_at_ms`
+const agentJobColumns = `job_id, tenant_id, room_id, channel_id, message_seq, client_msg_id, requester_user_id, owner_user_id, core, provider, target_id, message_text, attachment_ids, model, reasoning_effort, status, failure_reason, attempt, lease_bridge_id, lease_expires_at_ms, created_at_ms, updated_at_ms, started_at_ms, finished_at_ms, diagnostics_json, claimed_at_ms, dispatched_by_job_id, dispatch_depth`
 
 type agentJobScanner interface{ Scan(dest ...any) error }
 
@@ -426,7 +426,7 @@ func scanAgentJobRow(row agentJobScanner) (AgentJob, error) {
 	var messageText, model, reasoningEffort sql.NullString
 	var attachmentIDs []byte
 	var diag []byte
-	err := row.Scan(&j.JobID, &j.TenantID, &j.RoomID, &j.ChannelID, &j.MessageSeq, &j.ClientMsgID, &j.RequesterUserID, &j.OwnerUserID, &j.Core, &j.Provider, &j.TargetID, &messageText, &attachmentIDs, &model, &reasoningEffort, &status, &reason, &j.Attempt, &j.LeaseBridgeID, &j.LeaseExpiresAtMs, &j.CreatedAtMs, &j.UpdatedAtMs, &j.StartedAtMs, &j.FinishedAtMs, &diag, &j.ClaimedAtMs)
+	err := row.Scan(&j.JobID, &j.TenantID, &j.RoomID, &j.ChannelID, &j.MessageSeq, &j.ClientMsgID, &j.RequesterUserID, &j.OwnerUserID, &j.Core, &j.Provider, &j.TargetID, &messageText, &attachmentIDs, &model, &reasoningEffort, &status, &reason, &j.Attempt, &j.LeaseBridgeID, &j.LeaseExpiresAtMs, &j.CreatedAtMs, &j.UpdatedAtMs, &j.StartedAtMs, &j.FinishedAtMs, &diag, &j.ClaimedAtMs, &j.DispatchedByJobID, &j.DispatchDepth)
 	if errors.Is(err, sql.ErrNoRows) {
 		return AgentJob{}, ErrAgentJobNotFound
 	}

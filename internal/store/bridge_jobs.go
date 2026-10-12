@@ -123,6 +123,12 @@ type AgentJob struct {
 	StartedAtMs     int64           `json:"startedAtMs"`
 	FinishedAtMs    int64           `json:"finishedAtMs"`
 	DiagnosticsJSON json.RawMessage `json:"diagnostics"`
+	// DispatchedByJobID is the job whose agent dispatched this one through
+	// the room tools (ask_agent); "" for a job a person (or a schedule)
+	// started. DispatchDepth counts the hops from that person's message
+	// (0 = not dispatched). See agent_dispatch.go.
+	DispatchedByJobID string `json:"dispatchedByJobId,omitempty"`
+	DispatchDepth     int    `json:"dispatchDepth,omitempty"`
 }
 
 // BridgeHeartbeat records one desktop bridge's liveness in a tenant.
