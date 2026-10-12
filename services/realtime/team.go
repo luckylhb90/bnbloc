@@ -10,6 +10,8 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/luckylhb90/bnbloc/internal/contentuse"
+	"github.com/luckylhb90/bnbloc/internal/extpipe"
 	"github.com/luckylhb90/bnbloc/internal/membership"
 	"github.com/luckylhb90/bnbloc/internal/obs"
 	"github.com/luckylhb90/bnbloc/internal/roomctx"
@@ -341,6 +343,25 @@ func (s *Service) handleSearch(w http.ResponseWriter, r *http.Request) {
 				Snippet:      a.Title,
 				Author:       a.CreatedBy,
 				AtMs:         a.UpdatedAtMs,
+			})
+		}
+	}
+	// Prompts of the prompt packs the member can see belong to no room:
+	// first page only, and only when no room filter is set.
+	if before <= 0 && len(filter) == 0 && s.Content != nil {
+		hits, err := contentuse.SearchPrompts(ctx, s.Content, extpipe.Viewer{Subject: userID, Tenant: tenant.FromContext(ctx)}, text, limit)
+		if err != nil {
+			log.Printf("realtime: search prompts: %v", err)
+		}
+		for _, h := range hits {
+			resp.Results = append(resp.Results, wire.SearchResult{
+				Kind:        wire.SearchPrompt,
+				ComponentID: h.Component.ID,
+				PromptID:    h.Prompt.ID,
+				Title:       h.Prompt.Title,
+				Snippet:     snippetAround(h.Prompt.Body, text),
+				Author:      h.Component.Author(),
+				AtMs:        h.Component.UpdatedAtMs,
 			})
 		}
 	}

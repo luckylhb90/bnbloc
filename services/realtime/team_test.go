@@ -22,9 +22,10 @@ import (
 // teamFixture is a realtime service with in-memory team stores. alice and bob
 // share room-1; only carol is in room-2.
 type teamFixture struct {
-	srv  *httptest.Server
-	hub  *realtime.Hub
-	chat *store.MemoryChat
+	srv     *httptest.Server
+	hub     *realtime.Hub
+	chat    *store.MemoryChat
+	content *store.MemoryContentComponents
 }
 
 func newTeamFixture(t *testing.T) *teamFixture {
@@ -43,10 +44,11 @@ func newTeamFixture(t *testing.T) *teamFixture {
 		Search:     search.NewStore(chat),
 		Artifacts:  store.NewMemoryArtifacts(),
 		Rooms:      mem,
+		Content:    store.NewMemoryContentComponents(),
 	}
 	srv := httptest.NewServer(svc.Handler())
 	t.Cleanup(srv.Close)
-	return &teamFixture{srv: srv, hub: hub, chat: chat}
+	return &teamFixture{srv: srv, hub: hub, chat: chat, content: svc.Content.(*store.MemoryContentComponents)}
 }
 
 func (f *teamFixture) do(t *testing.T, user, method, path string, body any) (int, []byte) {
@@ -222,3 +224,45 @@ func TestSnippetAround(t *testing.T) {
 func tenantCtx() context.Context { return tenant.NewContext(context.Background(), tenant.Default) }
 
 func itoaTest(n int64) string { return strconv.FormatInt(n, 10) }
+
+// Global search returns prompts of the prompt packs the member can see
+// (here the organization's), on the first page and without a room filter;
+// never someone else's personal pack.
+func TestSearchFindsVisiblePrompts(t *testing.T) {
+	f := newTeamFixture(t)
+	ctx := context.Background()
+	pack := func(id, owner string, scope store.ContentScope, title, body string) {
+		t.Helper()
+		m, _ := json.Marshal(map[string]any{"kind": "bnbloc.prompt.package/v1", "name": id, "version": "1.0.0",
+			"prompts": []map[string]any{{"id": "p1", "title": title, "body": body}}})
+		c := store.ContentComponent{ID: id, Kind: "bnbloc.prompt.package/v1", Name: id, TenantID: tenant.Default, Owner: owner,
+			Scope: scope, Status: store.ContentStatusActive, SourceID: "src-" + id, UpdatedAtMs: 5}
+		if scope == store.ContentScopePersonal {
+			c.SourceID = ""
+		}
+		if err := f.content.CreateContentComponent(ctx, c, store.ContentComponentVersion{Version: "1.0.0", ManifestJSON: m, BundleBlobKey: "sha256/" + id, SHA256: id}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	pack("org-pack", "carol", store.ContentScopeOrg, "Deploy checklist", "Steps before a deploy window")
+	pack("carols", "carol", store.ContentScopePersonal, "Deploy secrets", "private")
+	code, body := f.do(t, "alice", http.MethodGet, "/v1/search?q=deploy", nil)
+	if code != http.StatusOK {
+		t.Fatalf("search = %d %s", code, body)
+	}
+	var out wire.SearchResponse
+	_ = json.Unmarshal(body, &out)
+	var prompts []wire.SearchResult
+	for _, r := range out.Results {
+		if r.Kind == wire.SearchPrompt {
+			prompts = append(prompts, r)
+		}
+	}
+	if len(prompts) != 1 || prompts[0].ComponentID != "org-pack" || prompts[0].PromptID != "p1" || prompts[0].Title != "Deploy checklist" || prompts[0].Author != "carol" {
+		t.Fatalf("prompt hits = %+v", prompts)
+	}
+	code, body = f.do(t, "alice", http.MethodGet, "/v1/search?q=deploy&rooms=room-1", nil)
+	if code != http.StatusOK || strings.Contains(string(body), `"kind":"prompt"`) {
+		t.Fatalf("room-filtered search = %d %s", code, body)
+	}
+}

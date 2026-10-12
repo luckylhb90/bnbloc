@@ -43,6 +43,9 @@ type TaskUpdatedPayload struct {
 const (
 	SearchMessage  = "message"
 	SearchArtifact = "artifact"
+	// SearchPrompt is a prompt of a prompt pack the member can see (their
+	// own, shared with them, their organization's, the platform's).
+	SearchPrompt = "prompt"
 )
 
 // SearchResult is one global-search hit. Snippet is plain text (the client
@@ -63,9 +66,12 @@ type SearchResult struct {
 	MimeType     string `json:"mimeType,omitempty"`
 	FileName     string `json:"fileName,omitempty"`
 	Title        string `json:"title,omitempty"`
-	Snippet      string `json:"snippet"`
-	Author       string `json:"author,omitempty"`
-	AtMs         int64  `json:"atMs"`
+	// ComponentID / PromptID name a prompt hit's pack and prompt.
+	ComponentID string `json:"componentId,omitempty"`
+	PromptID    string `json:"promptId,omitempty"`
+	Snippet     string `json:"snippet"`
+	Author      string `json:"author,omitempty"`
+	AtMs        int64  `json:"atMs"`
 }
 
 // SearchResponse is the GET /v1/search reply. NextBefore, when non-zero, is
