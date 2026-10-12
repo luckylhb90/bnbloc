@@ -12,3 +12,34 @@ type ContentUsesChanged struct {
 	Scope       string `json:"scope"`
 	ComponentID string `json:"componentId"`
 }
+
+// EventContentSaved is a transient room event: the room tools saved a
+// content component (save_component) or asked to publish one
+// (publish_component) for the job's requester, in the job's room. The
+// workshop shows the save from it ("Saved expert …" with "Open in Library"
+// and "Try it now") instead of re-listing the Library after every agent
+// reply. Payload: ContentSaved; clients act only on their own (Owner).
+const EventContentSaved = "content_saved"
+
+// ContentSaved actions.
+const (
+	ContentSavedSaved     = "saved"
+	ContentSavedSubmitted = "submitted"
+)
+
+// ContentSaved is the payload of EventContentSaved.
+type ContentSaved struct {
+	ComponentID string `json:"componentId"`
+	Kind        string `json:"kind"`
+	Name        string `json:"name"`
+	DisplayName string `json:"displayName,omitempty"`
+	Version     string `json:"version"`
+	// Action is saved (a new component or version) or submitted (a publish
+	// request to the organization, opened by publish_component or by the
+	// save of a new version of a component the organization uses).
+	Action string `json:"action"`
+	// Created marks a new component (not a new version).
+	Created bool `json:"created,omitempty"`
+	// Owner is the member it was saved for (the job's requester).
+	Owner string `json:"owner"`
+}

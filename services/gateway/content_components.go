@@ -113,6 +113,10 @@ func contentStoreErr(w http.ResponseWriter, what string, err error) {
 		http.Error(w, err.Error(), http.StatusConflict)
 		return
 	}
+	if errors.Is(err, store.ErrContentOrgNameTaken) {
+		http.Error(w, "the organization already has a component of that kind and name: remove the other one first", http.StatusConflict)
+		return
+	}
 	obs.ServerError(w, what, err)
 	http.Error(w, what, http.StatusInternalServerError)
 }
@@ -556,6 +560,7 @@ func (s *Service) createContent(w http.ResponseWriter, r *http.Request, actor co
 	}
 	c.LatestVersion = v.Version
 	s.auditJobSave(ctx, actor, c, v.Version)
+	s.contentSaved(ctx, actor, c, v.Version, wire.ContentSavedSaved, true)
 	s.writeContentDetail(w, r, claims, c, http.StatusCreated)
 }
 
@@ -703,11 +708,19 @@ func (s *Service) addContentVersion(w http.ResponseWriter, r *http.Request, acto
 	}
 	next.LatestVersion = v.Version
 	s.auditJobSave(ctx, actor, next, v.Version)
-	s.writeContentDetail(w, r, claims, next, http.StatusCreated)
+	s.contentSaved(ctx, actor, next, v.Version, wire.ContentSavedSaved, false)
+	resubmitted := s.resubmitOrgPublication(ctx, r, actor, next, v.Version)
+	s.writeContentDetailWith(w, r, claims, next, http.StatusCreated, func(d *wire.ContentComponentDetail) { d.Resubmitted = resubmitted })
 }
 
 // writeContentDetail answers a component with its versions.
 func (s *Service) writeContentDetail(w http.ResponseWriter, r *http.Request, claims auth.Claims, c store.ContentComponent, status int) {
+	s.writeContentDetailWith(w, r, claims, c, status, nil)
+}
+
+// writeContentDetailWith answers a component with its versions, letting the
+// caller add to the detail (a save's resubmitted request).
+func (s *Service) writeContentDetailWith(w http.ResponseWriter, r *http.Request, claims auth.Claims, c store.ContentComponent, status int, extra func(*wire.ContentComponentDetail)) {
 	ctx := r.Context()
 	views, err := s.contentViews(ctx, claims, []store.ContentComponent{c}, nil)
 	if err != nil || len(views) == 0 {
@@ -727,6 +740,9 @@ func (s *Service) writeContentDetail(w http.ResponseWriter, r *http.Request, cla
 	out := wire.ContentComponentDetail{Component: views[0], Versions: make([]wire.ContentVersion, 0, len(versions))}
 	for _, v := range versions {
 		out.Versions = append(out.Versions, contentVersionView(v))
+	}
+	if extra != nil {
+		extra(&out)
 	}
 	writeJSON(w, status, out)
 }

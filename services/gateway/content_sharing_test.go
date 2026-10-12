@@ -348,6 +348,11 @@ func TestContentOrgApproval(t *testing.T) {
 	if code != http.StatusCreated {
 		t.Fatalf("new version = %d %s", code, raw)
 	}
+	// The organization uses it, so the new version asked for approval by
+	// itself; asking again supersedes that request.
+	if rs := decodeDetail(t, raw).Resubmitted; rs == nil || rs.Version != "1.0.1" || rs.ApprovedVersion != "1.0.0" {
+		t.Fatalf("resubmitted = %+v", rs)
+	}
 	if code, raw := g.json("maya", http.MethodPost, "/v1/content-components/"+src.ID+"/publish", wire.ContentPublishInput{Scope: "org", Version: "1.0.0"}); code != http.StatusConflict {
 		t.Fatalf("republish the approved version = %d %s", code, raw)
 	}
@@ -410,7 +415,7 @@ func TestContentOrgApproval(t *testing.T) {
 	if code, _ := g.do("ada", http.MethodDelete, "/v1/tenant/content-components/"+orgID, "", nil); code != http.StatusNoContent {
 		t.Fatalf("remove = %d", code)
 	}
-	if a := g.actions(); a != "request reviewer@1.0.0, approve reviewer@1.0.0, request reviewer@1.0.1, decline reviewer@1.0.1, unpublish reviewer@1.0.0, restore reviewer@1.0.0, unpublish reviewer@1.0.0, remove reviewer@1.0.0" {
+	if a := g.actions(); a != "request reviewer@1.0.0, approve reviewer@1.0.0, request reviewer@1.0.1, request reviewer@1.0.1, decline reviewer@1.0.1, unpublish reviewer@1.0.0, restore reviewer@1.0.0, unpublish reviewer@1.0.0, remove reviewer@1.0.0" {
 		t.Fatalf("audit = %s", a)
 	}
 }

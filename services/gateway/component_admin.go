@@ -196,20 +196,29 @@ func (s *Service) handleSetComponentTenants(w http.ResponseWriter, r *http.Reque
 		http.Error(w, "invalid json body", http.StatusBadRequest)
 		return
 	}
+	// Explicit semantics, fail closed: allTenants lifts the restriction (and
+	// must not be combined with a list); otherwise enabledTenants must name at
+	// least one tenant — an empty list is rejected, never read as "all".
+	if req.AllTenants && len(req.EnabledTenants) > 0 {
+		http.Error(w, "allTenants and enabledTenants are mutually exclusive", http.StatusBadRequest)
+		return
+	}
+	// Platform content shares the route and its semantics (?kind=expert|
+	// skill|prompt picks it; a bare name held by both registries is a 409).
+	if c, ok, handled := s.platformContentByName(w, r, name); handled {
+		if ok {
+			s.setPlatformContentTenants(w, r, claims, c, req)
+		}
+		return
+	}
 	rec, ok := s.requestComponentRecord(w, r, name)
 	if !ok {
 		return
 	}
-	// Explicit semantics, fail closed: allTenants lifts the restriction (and
-	// must not be combined with a list); otherwise enabledTenants must name at
-	// least one tenant — an empty list is rejected, never read as "all".
 	pipe := s.corePipeline()
 	kind := componentKindForName(rec)
 	var err error
 	switch {
-	case req.AllTenants && len(req.EnabledTenants) > 0:
-		http.Error(w, "allTenants and enabledTenants are mutually exclusive", http.StatusBadRequest)
-		return
 	case req.AllTenants:
 		err = pipe.ClearTenants(r.Context(), kind, rec.Name, claims.Subject)
 	default:

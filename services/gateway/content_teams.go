@@ -141,6 +141,24 @@ func (s *Service) unpinRoomExpert(ctx context.Context, roomID, componentID strin
 	return err
 }
 
+// contentSaved tells the job's room that the room tools saved (or asked to
+// publish) a component for the job's requester: a transient content_saved
+// event the workshop toasts from. Only requests on behalf of a job have a
+// room; a member's own save in the Library needs no event.
+func (s *Service) contentSaved(ctx context.Context, actor contentActor, c store.ContentComponent, version, action string, created bool) {
+	if actor.Job == nil || actor.Job.RoomID == "" || s.Backends.Realtime == "" {
+		return
+	}
+	tid := firstNonEmpty(actor.Job.TenantID, actor.Claims.Tenant)
+	pub := realtime.NewHTTPPublisher(s.Backends.Realtime, "gateway")
+	pub.Publish(tenant.NewContext(ctx, tid), wire.Event{
+		RoomID: actor.Job.RoomID, Kind: wire.EventContentSaved,
+		Payload: wire.ContentSaved{ComponentID: c.ID, Kind: shortKind(c.Kind), Name: c.Name, DisplayName: c.DisplayName,
+			Version: version, Action: action, Created: created, Owner: actor.Claims.Subject},
+		AtUnixMs: s.nowTime().UnixMilli(),
+	})
+}
+
 // contentUsesChanged tells a room's clients that its content uses changed
 // (a transient content_uses_changed event): the composer and the room
 // settings refetch the room's uses without reopening the room. A member

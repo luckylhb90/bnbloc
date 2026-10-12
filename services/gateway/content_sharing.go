@@ -12,8 +12,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/luckylhb90/bnbloc/internal/auth"
-	"github.com/luckylhb90/bnbloc/internal/contentpkg"
-	"github.com/luckylhb90/bnbloc/internal/contentuse"
+	"github.com/luckylhb90/bnbloc/internal/contentshare"
 	"github.com/luckylhb90/bnbloc/internal/ids"
 	"github.com/luckylhb90/bnbloc/internal/notify"
 	"github.com/luckylhb90/bnbloc/internal/obs"
@@ -27,7 +26,8 @@ import (
 // and-teams.md §1, step 4), the author's side:
 //
 //	POST /v1/content-components/{id}/shares   {members?, roomId?, version?, note?}
-//	GET  /v1/content-components/{id}/shares   the copies made from it
+//	GET  /v1/content-components/{id}/shares   the copies made from it and its room shares
+//	DELETE /v1/content-components/{id}/shares/rooms/{room}   revoke a room share (copies stay)
 //	POST /v1/content-components/{id}/update   a shared copy moves to the author's latest
 //	POST /v1/content-components/{id}/publish  {scope: org|personal|platform, version?, note?}
 //
@@ -50,6 +50,7 @@ const (
 func (s *Service) registerContentSharing(mux *http.ServeMux) {
 	mux.HandleFunc("POST /v1/content-components/{id}/shares", s.handleShareContent)
 	mux.HandleFunc("GET /v1/content-components/{id}/shares", s.handleListContentShares)
+	mux.HandleFunc("DELETE /v1/content-components/{id}/shares/rooms/{room}", s.handleRevokeRoomShare)
 	mux.HandleFunc("POST /v1/content-components/{id}/update", s.handleUpdateContentCopy)
 	mux.HandleFunc("POST /v1/content-components/{id}/publish", s.handlePublishContent)
 }
@@ -62,30 +63,6 @@ func contentNote(w http.ResponseWriter, note string) (string, bool) {
 		return "", false
 	}
 	return note, true
-}
-
-// contentLabel names a component in notifications and audit details:
-// `expert "Reviewer"`.
-func contentLabel(c store.ContentComponent) string {
-	return contentKindLabel(c.Kind) + ` "` + firstNonEmpty(c.DisplayName, c.Name) + `"`
-}
-
-// cloneVersion is a version row copied onto another component: the same
-// manifest and content-addressed bundle (no bytes are copied), keeping who
-// wrote it. A platform signature never carries over.
-func cloneVersion(v store.ContentComponentVersion, now int64) store.ContentComponentVersion {
-	return store.ContentComponentVersion{Version: v.Version, ManifestJSON: v.ManifestJSON, BundleBlobKey: v.BundleBlobKey,
-		SHA256: v.SHA256, SizeBytes: v.SizeBytes, CreatedBy: v.CreatedBy, CreatedAtMs: now}
-}
-
-// listingFields copies a version's display fields onto a component row.
-func listingFields(c *store.ContentComponent, v store.ContentComponentVersion, now int64) error {
-	m, err := contentuse.Manifest(v)
-	if err != nil {
-		return err
-	}
-	c.DisplayName, c.Description, c.Category, c.UpdatedAtMs = m.DisplayName, m.Description, m.Category, now
-	return nil
 }
 
 // auditContent appends a content lifecycle row (kind content).
@@ -168,9 +145,19 @@ func (s *Service) handleShareContent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	out := wire.ContentShareReply{Version: v.Version, Shared: []wire.ContentShareResult{}, Skipped: skipped}
+	if room := strings.TrimSpace(req.RoomID); room != "" {
+		// The room share stands: members who join later get a copy too
+		// (realtime's member-join step), until the author revokes it.
+		if err := contentshare.RecordRoomShare(ctx, s.ContentComponents, src, v, room, note, s.nowTime().UnixMilli()); err != nil {
+			obs.ServerError(w, "record room share failed", err)
+			http.Error(w, "record room share failed", http.StatusInternalServerError)
+			return
+		}
+		out.Room = room
+	}
 	var reached []string
 	for _, member := range recipients {
-		res, err := s.shareTo(ctx, src, v, member)
+		res, err := contentshare.Copy(ctx, s.ContentComponents, src, v, member, s.nowTime().UnixMilli())
 		if err != nil {
 			obs.ServerError(w, "share content component failed", err)
 			http.Error(w, "share content component failed", http.StatusInternalServerError)
@@ -186,7 +173,7 @@ func (s *Service) handleShareContent(w http.ResponseWriter, r *http.Request) {
 		for _, res := range out.Shared {
 			names = append(names, res.Member+" ("+res.Status+")")
 		}
-		detail := contentLabel(src) + " v" + v.Version + " shared by " + claims.Subject + " with " + strings.Join(names, ", ")
+		detail := contentshare.Label(src) + " v" + v.Version + " shared by " + claims.Subject + " with " + strings.Join(names, ", ")
 		if req.RoomID != "" {
 			detail += " (room " + strings.TrimSpace(req.RoomID) + ")"
 		}
@@ -198,7 +185,7 @@ func (s *Service) handleShareContent(w http.ResponseWriter, r *http.Request) {
 	}
 	s.notifyContent(ctx, claims.Tenant, notify.Event{
 		Type: wire.NotificationContentShared, Recipients: reached, Actor: claims.Subject,
-		Title: claims.Subject + " shared the " + contentLabel(src) + " with you", Text: text,
+		Title: claims.Subject + " shared the " + contentshare.Label(src) + " with you", Text: text,
 		// One event per share call: a later share of the same version to
 		// someone else is a new notification, a retried one is not.
 		URL: appLink(r, "library"), DedupKey: "share:" + src.ID + "@" + v.Version + ":" + strings.Join(reached, ","),
@@ -267,54 +254,6 @@ func (s *Service) shareRecipients(w http.ResponseWriter, r *http.Request, claims
 	return recipients, skipped, true
 }
 
-// shareTo gives one recipient a copy of src at version v: a new copy, or
-// their existing copy of src moved forward to v (never back).
-func (s *Service) shareTo(ctx context.Context, src store.ContentComponent, v store.ContentComponentVersion, member string) (wire.ContentShareResult, error) {
-	now := s.nowTime().UnixMilli()
-	for attempt := 0; attempt < 2; attempt++ {
-		existing, err := s.ContentComponents.ListContentComponents(ctx, store.ContentComponentQuery{
-			TenantID: src.TenantID, Owner: member, Kind: src.Kind, Scopes: []store.ContentScope{store.ContentScopeShared}, SourceID: src.ID, Limit: 1,
-		})
-		if err != nil {
-			return wire.ContentShareResult{}, err
-		}
-		if len(existing) > 0 {
-			cp := existing[0]
-			res := wire.ContentShareResult{Member: member, ComponentID: cp.ID, Version: cp.LatestVersion, Status: wire.ContentShareUnchanged}
-			if cmp, err := semver.Compare(v.Version, cp.LatestVersion); err != nil || cmp <= 0 {
-				return res, nil
-			}
-			next := cp
-			if err := listingFields(&next, v, now); err != nil {
-				return wire.ContentShareResult{}, err
-			}
-			switch err := s.ContentComponents.AddContentComponentVersion(ctx, next, cp.LatestVersion, cloneVersion(v, now)); {
-			case errors.Is(err, store.ErrContentVersionConflict):
-				return res, nil // moved by a concurrent share: it has a version at least as new
-			case err != nil:
-				return wire.ContentShareResult{}, err
-			}
-			res.Version, res.Status = v.Version, wire.ContentShareUpdated
-			return res, nil
-		}
-		cp := store.ContentComponent{
-			ID: ids.New("cc_"), Kind: src.Kind, Name: src.Name, TenantID: src.TenantID, Owner: member,
-			Scope: store.ContentScopeShared, Status: store.ContentStatusActive, SourceID: src.ID, SharedBy: src.Owner, CreatedAtMs: now,
-		}
-		if err := listingFields(&cp, v, now); err != nil {
-			return wire.ContentShareResult{}, err
-		}
-		switch err := s.ContentComponents.CreateContentComponent(ctx, cp, cloneVersion(v, now)); {
-		case errors.Is(err, store.ErrContentExists):
-			continue // a concurrent share created it: move that one instead
-		case err != nil:
-			return wire.ContentShareResult{}, err
-		}
-		return wire.ContentShareResult{Member: member, ComponentID: cp.ID, Version: v.Version, Status: wire.ContentShareCreated}, nil
-	}
-	return wire.ContentShareResult{}, fmt.Errorf("share %s with %s: copy changed concurrently", src.ID, member)
-}
-
 // handleListContentShares lists the copies of the caller's component.
 func (s *Service) handleListContentShares(w http.ResponseWriter, r *http.Request) {
 	claims, ok := s.contentCaller(w, r, false)
@@ -339,7 +278,46 @@ func (s *Service) handleListContentShares(w http.ResponseWriter, r *http.Request
 	for _, c := range copies {
 		out = append(out, wire.ContentCopy{Member: c.Owner, ComponentID: c.ID, Version: c.LatestVersion, UpdatedAtMs: c.UpdatedAtMs})
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"copies": out})
+	shares, err := s.ContentComponents.ListContentRoomShares(ctx, store.ContentRoomShareQuery{ComponentID: src.ID})
+	if err != nil {
+		obs.ServerError(w, "list room shares failed", err)
+		http.Error(w, "list room shares failed", http.StatusInternalServerError)
+		return
+	}
+	rooms := make([]wire.ContentRoomShare, 0, len(shares))
+	for _, sh := range shares {
+		rooms = append(rooms, wire.ContentRoomShare{RoomID: sh.RoomID, Version: sh.Version, Note: sh.Note, CreatedAtMs: sh.CreatedAtMs, UpdatedAtMs: sh.UpdatedAtMs})
+	}
+	writeJSON(w, http.StatusOK, wire.ContentShares{Copies: out, Rooms: rooms})
+}
+
+// handleRevokeRoomShare ends the author's room share: members who join the
+// room later get no copy; the copies already given stay theirs.
+func (s *Service) handleRevokeRoomShare(w http.ResponseWriter, r *http.Request) {
+	claims, ok := s.contentCaller(w, r, true)
+	if !ok {
+		return
+	}
+	ctx := r.Context()
+	src, err := s.ownContent(ctx, claims, r.PathValue("id"))
+	if err != nil {
+		contentStoreErr(w, "load content component failed", err)
+		return
+	}
+	room := r.PathValue("room")
+	removed, err := s.ContentComponents.DeleteContentRoomShare(ctx, room, src.ID)
+	if err != nil {
+		obs.ServerError(w, "revoke room share failed", err)
+		http.Error(w, "revoke room share failed", http.StatusInternalServerError)
+		return
+	}
+	if !removed {
+		http.Error(w, "this component is not shared with that room", http.StatusNotFound)
+		return
+	}
+	s.auditContent(ctx, "unshare", claims.Subject, claims.Tenant, src, src.LatestVersion,
+		contentshare.Label(src)+" room share with "+room+" revoked by "+claims.Subject+" (copies already given stay)")
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // sourceOfCopy loads the author's component a shared copy came from, while
@@ -397,12 +375,12 @@ func (s *Service) handleUpdateContentCopy(w http.ResponseWriter, r *http.Request
 	}
 	now := s.nowTime().UnixMilli()
 	next := cp
-	if err := listingFields(&next, v, now); err != nil {
+	if err := contentshare.ListingFields(&next, v, now); err != nil {
 		obs.ServerError(w, "decode content manifest failed", err)
 		http.Error(w, "decode content manifest failed", http.StatusInternalServerError)
 		return
 	}
-	switch err := s.ContentComponents.AddContentComponentVersion(ctx, next, cp.LatestVersion, cloneVersion(v, now)); {
+	switch err := s.ContentComponents.AddContentComponentVersion(ctx, next, cp.LatestVersion, contentshare.CloneVersion(v, now)); {
 	case errors.Is(err, store.ErrContentVersionConflict):
 		http.Error(w, "the copy changed while updating: reload and try again", http.StatusConflict)
 		return
@@ -412,7 +390,7 @@ func (s *Service) handleUpdateContentCopy(w http.ResponseWriter, r *http.Request
 	}
 	next.LatestVersion = v.Version
 	s.auditContent(ctx, "update", claims.Subject, claims.Tenant, next, v.Version,
-		contentLabel(next)+" copy of "+claims.Subject+" updated to "+cp.SharedBy+"'s v"+v.Version)
+		contentshare.Label(next)+" copy of "+claims.Subject+" updated to "+cp.SharedBy+"'s v"+v.Version)
 	s.writeContentDetail(w, r, claims, next, http.StatusOK)
 }
 
@@ -480,7 +458,6 @@ func (s *Service) orgPublication(ctx context.Context, src store.ContentComponent
 
 func (s *Service) requestOrgPublication(w http.ResponseWriter, r *http.Request, actor contentActor, c store.ContentComponent, version, note string) {
 	ctx := r.Context()
-	claims := actor.Claims
 	v, err := s.ContentComponents.GetContentComponentVersion(ctx, c.ID, firstNonEmpty(version, c.LatestVersion))
 	if err != nil {
 		contentStoreErr(w, "load content version failed", err)
@@ -496,43 +473,134 @@ func (s *Service) requestOrgPublication(w http.ResponseWriter, r *http.Request, 
 		http.Error(w, fmt.Sprintf("version %s is already published to your organization", v.Version), http.StatusConflict)
 		return
 	}
-	req, err := s.ContentComponents.CreateContentRequest(ctx, store.ContentPublishRequest{
-		ID: ids.New("cpr_"), TenantID: claims.Tenant, ComponentID: c.ID, Kind: c.Kind, Name: c.Name, Version: v.Version,
-		RequestedBy: claims.Subject, Note: note, CreatedAtMs: s.nowTime().UnixMilli(),
-	})
+	switch holder, err := s.orgNameHolder(ctx, c); {
+	case err != nil:
+		obs.ServerError(w, "check organization names failed", err)
+		http.Error(w, "check organization names failed", http.StatusInternalServerError)
+		return
+	case holder != nil:
+		http.Error(w, orgNameTaken(*holder, "rename yours: save it under a new name, and ask again"), http.StatusConflict)
+		return
+	}
+	view, err := s.openPublishRequest(ctx, r, actor, c, v.Version, note, org, true)
 	if err != nil {
 		obs.ServerError(w, "create publish request failed", err)
 		http.Error(w, "create publish request failed", http.StatusInternalServerError)
 		return
 	}
-	detail := contentLabel(c) + " v" + v.Version + " submitted for the organization by " + claims.Subject
-	if actor.Job != nil {
-		detail += " (through agent " + actor.Job.OwnerUserID + "/" + actor.Job.Provider + ", job " + actor.Job.JobID + ")"
-	}
-	s.auditContent(ctx, "request", claims.Subject, claims.Tenant, c, v.Version, detail)
-	text := note
-	if text == "" {
-		text = "Review its permissions and changes in the Organization console."
-	}
-	var admins []string
-	if s.OrgAdmins != nil {
-		admins = s.OrgAdmins(claims.Tenant)
-	}
-	s.notifyContent(ctx, claims.Tenant, notify.Event{
-		Type: wire.NotificationContentReview, Recipients: admins, Actor: claims.Subject,
-		Title: claims.Subject + " asks to publish the " + contentLabel(c) + " v" + v.Version + " to the organization",
-		Text:  text, URL: appLink(r, "org"), DedupKey: "content-request:" + req.ID,
-	})
-	approved := ""
-	if org != nil && org.Status == store.ContentStatusActive {
-		approved = org.LatestVersion
-	}
-	view := publishRequestView(req, firstNonEmpty(c.DisplayName, c.Name), approved)
+	approved := view.ApprovedVersion
 	msg := "Waiting for an organization admin's approval."
 	if approved != "" {
 		msg += " Members keep using version " + approved + " until then."
 	}
 	writeJSON(w, http.StatusCreated, wire.ContentPublishReply{Scope: wire.ContentScopePersonal, Request: &view, Note: msg})
+}
+
+// openPublishRequest stores a pending request for version of the author's
+// component c (superseding a pending one), audits it and, when notify,
+// tells the organization's admins. org is c's organization row (nil before
+// a first approval).
+func (s *Service) openPublishRequest(ctx context.Context, r *http.Request, actor contentActor, c store.ContentComponent, version, note string, org *store.ContentComponent, notifyAdmins bool) (wire.ContentPublishRequest, error) {
+	claims := actor.Claims
+	req, err := s.ContentComponents.CreateContentRequest(ctx, store.ContentPublishRequest{
+		ID: ids.New("cpr_"), TenantID: claims.Tenant, ComponentID: c.ID, Kind: c.Kind, Name: c.Name, Version: version,
+		RequestedBy: claims.Subject, Note: note, CreatedAtMs: s.nowTime().UnixMilli(),
+	})
+	if err != nil {
+		return wire.ContentPublishRequest{}, err
+	}
+	s.contentSaved(ctx, actor, c, version, wire.ContentSavedSubmitted, false)
+	detail := contentshare.Label(c) + " v" + version + " submitted for the organization by " + claims.Subject
+	if actor.Job != nil {
+		detail += " (through agent " + actor.Job.OwnerUserID + "/" + actor.Job.Provider + ", job " + actor.Job.JobID + ")"
+	}
+	s.auditContent(ctx, "request", claims.Subject, claims.Tenant, c, version, detail)
+	if notifyAdmins {
+		text := note
+		if text == "" {
+			text = "Review its permissions and changes in the Organization console."
+		}
+		var admins []string
+		if s.OrgAdmins != nil {
+			admins = s.OrgAdmins(claims.Tenant)
+		}
+		s.notifyContent(ctx, claims.Tenant, notify.Event{
+			Type: wire.NotificationContentReview, Recipients: admins, Actor: claims.Subject,
+			Title: claims.Subject + " asks to publish the " + contentshare.Label(c) + " v" + version + " to the organization",
+			Text:  text, URL: appLink(r, "org"), DedupKey: "content-request:" + req.ID,
+		})
+	}
+	approved := ""
+	if org != nil && org.Status == store.ContentStatusActive {
+		approved = org.LatestVersion
+	}
+	return publishRequestView(req, firstNonEmpty(c.DisplayName, c.Name), approved), nil
+}
+
+// resubmitOrgPublication opens the publish request of a new version the
+// author just saved, when their component is in use by the organization
+// (an active org row) or has a request pending ("Gap closure" 5): one
+// pending request per component (the new one supersedes it), and the
+// admins are notified only when none was pending, so repeated saves do not
+// repeat the notification. Best-effort: the save already succeeded, so a
+// failure is logged and the author can still ask by hand.
+func (s *Service) resubmitOrgPublication(ctx context.Context, r *http.Request, actor contentActor, c store.ContentComponent, version string) *wire.ContentPublishRequest {
+	if c.Scope != store.ContentScopePersonal || c.Owner != actor.Claims.Subject {
+		return nil
+	}
+	org, err := s.orgPublication(ctx, c)
+	if err != nil {
+		slog.Warn("bnbloc gateway: resubmit to the organization failed", "event", "bnbloc.content.resubmit_failed", "component", c.ID, "error", err)
+		return nil
+	}
+	pending, err := s.ContentComponents.ListContentRequests(ctx, store.ContentRequestQuery{ComponentID: c.ID, Status: store.ContentRequestPending, Limit: 1})
+	if err != nil {
+		slog.Warn("bnbloc gateway: resubmit to the organization failed", "event", "bnbloc.content.resubmit_failed", "component", c.ID, "error", err)
+		return nil
+	}
+	if (org == nil || org.Status != store.ContentStatusActive) && len(pending) == 0 {
+		return nil
+	}
+	if holder, err := s.orgNameHolder(ctx, c); err != nil || holder != nil {
+		return nil // the name is another author's: the request could not be approved
+	}
+	note := "Opened automatically for the new version " + version + "."
+	if len(pending) > 0 {
+		note = "Opened automatically for the new version " + version + " (replaces the request for " + pending[0].Version + ")."
+	}
+	view, err := s.openPublishRequest(ctx, r, actor, c, version, note, org, len(pending) == 0)
+	if err != nil {
+		slog.Warn("bnbloc gateway: resubmit to the organization failed", "event", "bnbloc.content.resubmit_failed", "component", c.ID, "error", err)
+		return nil
+	}
+	return &view
+}
+
+// orgNameHolder is the organization row of another component that holds
+// c's name in its organization (nil when the name is free or c's own): an
+// organization has one component of a kind and name ("Gap closure" 4).
+func (s *Service) orgNameHolder(ctx context.Context, c store.ContentComponent) (*store.ContentComponent, error) {
+	rows, err := s.ContentComponents.ListContentComponents(ctx, store.ContentComponentQuery{
+		TenantID: c.TenantID, Kind: c.Kind, Name: c.Name, Scopes: []store.ContentScope{store.ContentScopeOrg},
+	})
+	if err != nil {
+		return nil, err
+	}
+	for i := range rows {
+		if rows[i].SourceID != c.ID {
+			return &rows[i], nil
+		}
+	}
+	return nil, nil
+}
+
+// orgNameTaken says that holder holds the name, and what to do.
+func orgNameTaken(holder store.ContentComponent, then string) string {
+	state := ""
+	if holder.Status == store.ContentStatusRetired {
+		state = ", unpublished"
+	}
+	return fmt.Sprintf("the organization already has a %s named %s (by %s%s): %s", contentshare.KindLabel(holder.Kind), holder.Name, holder.Owner, state, then)
 }
 
 // withdrawOrgPublication takes the author's component out of the
@@ -568,7 +636,7 @@ func (s *Service) withdrawOrgPublication(w http.ResponseWriter, r *http.Request,
 			return
 		}
 		s.auditContent(ctx, "unpublish", claims.Subject, claims.Tenant, *org, org.LatestVersion,
-			contentLabel(*org)+" taken out of the organization by its author "+claims.Subject)
+			contentshare.Label(*org)+" taken out of the organization by its author "+claims.Subject)
 	}
 	writeJSON(w, http.StatusOK, wire.ContentPublishReply{Scope: wire.ContentScopePersonal, Note: "It is personal: only its author uses it (copies shared with members stay theirs)."})
 }
@@ -611,7 +679,10 @@ func (s *Service) applyContentSharing(ctx context.Context, claims auth.Claims, c
 		}
 		requestBySource = map[string]store.ContentPublishRequest{}
 		for _, q := range reqs { // newest first: keep the first per component
-			if _, ok := requestBySource[q.ComponentID]; !ok {
+			kept, ok := requestBySource[q.ComponentID]
+			// A request superseded in the same millisecond (a save's
+			// resubmission, then an explicit one) is not the latest.
+			if !ok || (kept.CreatedAtMs == q.CreatedAtMs && kept.Status == store.ContentRequestWithdrawn && q.Status != store.ContentRequestWithdrawn) {
 				requestBySource[q.ComponentID] = q
 			}
 		}
@@ -654,14 +725,4 @@ func (s *Service) applyContentSharing(ctx context.Context, claims auth.Claims, c
 		}
 	}
 	return nil
-}
-
-// contentKindLabel is a kind's display word ("expert", "skill pack").
-func contentKindLabel(kind string) string {
-	if k, ok := contentpkg.Lookup(kind); ok && k.Short == "skill" {
-		return "skill pack"
-	} else if ok && k.Short == "prompt" {
-		return "prompt pack"
-	}
-	return shortKind(kind)
 }

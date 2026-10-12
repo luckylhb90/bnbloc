@@ -107,6 +107,11 @@ type ContentVersion struct {
 type ContentComponentDetail struct {
 	Component ContentComponent `json:"component"`
 	Versions  []ContentVersion `json:"versions"`
+	// Resubmitted is the publish request a new version opened by itself:
+	// the organization uses the component (or a request was pending), so
+	// the new version waits for an org admin's approval while members keep
+	// the approved one ("Gap closure" 5).
+	Resubmitted *ContentPublishRequest `json:"resubmitted,omitempty"`
 }
 
 // ContentFile is one file of a version: its text when it is UTF-8 and
@@ -286,6 +291,9 @@ type ContentShareReply struct {
 	Version string               `json:"version"`
 	Shared  []ContentShareResult `json:"shared"`
 	Skipped []ContentShareSkip   `json:"skipped"`
+	// Room is the room whose share now stands: members who join it later
+	// get a copy too, until the author revokes it.
+	Room string `json:"room,omitempty"`
 }
 
 // Share outcomes (ContentShareResult.Status).
@@ -307,6 +315,24 @@ type ContentShareResult struct {
 type ContentShareSkip struct {
 	Member string `json:"member"`
 	Reason string `json:"reason"`
+}
+
+// ContentShares answers GET /v1/content-components/{id}/shares: the
+// copies made from the author's component and its standing room shares.
+type ContentShares struct {
+	Copies []ContentCopy      `json:"copies"`
+	Rooms  []ContentRoomShare `json:"rooms"`
+}
+
+// ContentRoomShare is a standing share with a room: members who join the
+// room get a copy at Version until the author revokes it
+// (DELETE /v1/content-components/{id}/shares/rooms/{room}).
+type ContentRoomShare struct {
+	RoomID      string `json:"roomId"`
+	Version     string `json:"version"`
+	Note        string `json:"note,omitempty"`
+	CreatedAtMs int64  `json:"createdAtMs"`
+	UpdatedAtMs int64  `json:"updatedAtMs"`
 }
 
 // ContentCopy is one shared copy of an author's component
@@ -380,4 +406,8 @@ type ContentFileChange struct {
 type ContentAdminComponent struct {
 	Component ContentComponent `json:"component"`
 	TenantID  string           `json:"tenantId,omitempty"`
+	// EnabledTenants limits platform content to these organizations
+	// (absent = every organization); set with
+	// PUT /v1/platform/components/{name}/tenants?kind=.
+	EnabledTenants []string `json:"enabledTenants,omitempty"`
 }

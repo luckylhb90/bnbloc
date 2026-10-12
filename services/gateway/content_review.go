@@ -12,6 +12,7 @@ import (
 
 	"github.com/luckylhb90/bnbloc/internal/auth"
 	"github.com/luckylhb90/bnbloc/internal/contentpkg"
+	"github.com/luckylhb90/bnbloc/internal/contentshare"
 	"github.com/luckylhb90/bnbloc/internal/ids"
 	"github.com/luckylhb90/bnbloc/internal/notify"
 	"github.com/luckylhb90/bnbloc/internal/obs"
@@ -332,10 +333,10 @@ func (s *Service) orgPublish(ctx context.Context, src store.ContentComponent, v 
 		if org == nil {
 			row := store.ContentComponent{ID: ids.New("cc_"), Kind: src.Kind, Name: src.Name, TenantID: src.TenantID, Owner: src.Owner,
 				Scope: store.ContentScopeOrg, Status: store.ContentStatusActive, SourceID: src.ID, CreatedAtMs: now}
-			if err := listingFields(&row, v, now); err != nil {
+			if err := contentshare.ListingFields(&row, v, now); err != nil {
 				return store.ContentComponent{}, err
 			}
-			switch err := s.ContentComponents.CreateContentComponent(ctx, row, cloneVersion(v, now)); {
+			switch err := s.ContentComponents.CreateContentComponent(ctx, row, contentshare.CloneVersion(v, now)); {
 			case errors.Is(err, store.ErrContentExists):
 				continue // a concurrent approval created it
 			case err != nil:
@@ -350,10 +351,10 @@ func (s *Service) orgPublish(ctx context.Context, src store.ContentComponent, v 
 			return store.ContentComponent{}, err
 		}
 		if cmp > 0 {
-			if err := listingFields(&row, v, now); err != nil {
+			if err := contentshare.ListingFields(&row, v, now); err != nil {
 				return store.ContentComponent{}, err
 			}
-			if err := s.ContentComponents.AddContentComponentVersion(ctx, row, org.LatestVersion, cloneVersion(v, now)); err != nil {
+			if err := s.ContentComponents.AddContentComponentVersion(ctx, row, org.LatestVersion, contentshare.CloneVersion(v, now)); err != nil {
 				return store.ContentComponent{}, err
 			}
 			row.LatestVersion = v.Version
@@ -412,6 +413,17 @@ func (s *Service) decideContentRequest(w http.ResponseWriter, r *http.Request, s
 		if src, v, ok = s.requestedVersion(w, r, req); !ok {
 			return
 		}
+		// An organization has one component of a kind and name: another
+		// author's holds it, so this one is renamed, not approved.
+		switch holder, err := s.orgNameHolder(ctx, src); {
+		case err != nil:
+			obs.ServerError(w, "check organization names failed", err)
+			http.Error(w, "check organization names failed", http.StatusInternalServerError)
+			return
+		case holder != nil:
+			http.Error(w, orgNameTaken(*holder, "decline this request and ask "+req.RequestedBy+" to rename theirs"), http.StatusConflict)
+			return
+		}
 	}
 	decided, err := s.ContentComponents.DecideContentRequest(ctx, store.ContentRequestDecision{
 		RequestID: req.ID, TenantID: claims.Tenant, Status: status, By: claims.Subject, Note: note, AtMs: s.nowTime().UnixMilli(),
@@ -428,15 +440,19 @@ func (s *Service) decideContentRequest(w http.ResponseWriter, r *http.Request, s
 		http.Error(w, "decide publish request failed", http.StatusInternalServerError)
 		return
 	}
-	label := contentKindLabel(req.Kind) + ` "` + req.Name + `"`
+	label := contentshare.KindLabel(req.Kind) + ` "` + req.Name + `"`
 	approved := ""
 	if status == store.ContentRequestApproved {
-		label = contentLabel(src)
+		label = contentshare.Label(src)
 		org, err := s.orgPublish(ctx, src, v)
 		if err != nil {
 			_ = s.ContentComponents.ReopenContentRequest(ctx, req.ID)
 			if errors.Is(err, errStaleRequest) {
 				http.Error(w, "the organization already uses a newer version: ask the author for a new request", http.StatusConflict)
+				return
+			}
+			if errors.Is(err, store.ErrContentOrgNameTaken) {
+				http.Error(w, "the organization already has a "+contentshare.KindLabel(src.Kind)+" named "+src.Name+": decline this request and ask "+req.RequestedBy+" to rename theirs", http.StatusConflict)
 				return
 			}
 			obs.ServerError(w, "publish to the organization failed", err)
@@ -498,14 +514,15 @@ func (s *Service) writeAdminContent(w http.ResponseWriter, r *http.Request, clai
 		http.Error(w, "load published content failed", http.StatusInternalServerError)
 		return
 	}
-	tenants := map[string]string{}
+	byID := map[string]store.ContentComponent{}
 	for _, c := range comps {
-		tenants[c.ID] = c.TenantID
+		byID[c.ID] = c
 	}
 	sortContentViews(views)
 	out := make([]wire.ContentAdminComponent, 0, len(views))
 	for _, v := range views {
-		out = append(out, wire.ContentAdminComponent{Component: v, TenantID: tenants[v.ID]})
+		c := byID[v.ID]
+		out = append(out, wire.ContentAdminComponent{Component: v, TenantID: c.TenantID, EnabledTenants: c.EnabledTenants})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"components": out})
 }
@@ -550,7 +567,7 @@ func (s *Service) setContentStatus(w http.ResponseWriter, r *http.Request, claim
 	if status == store.ContentStatusActive {
 		action, verb = "restore", "restored"
 	}
-	s.auditContent(r.Context(), action, claims.Subject, c.TenantID, c, c.LatestVersion, contentLabel(c)+" "+verb+" by "+claims.Subject)
+	s.auditContent(r.Context(), action, claims.Subject, c.TenantID, c, c.LatestVersion, contentshare.Label(c)+" "+verb+" by "+claims.Subject)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -574,6 +591,6 @@ func (s *Service) removeContent(w http.ResponseWriter, r *http.Request, claims a
 		contentStoreErr(w, "remove content component failed", err)
 		return
 	}
-	s.auditContent(r.Context(), "remove", claims.Subject, c.TenantID, c, c.LatestVersion, contentLabel(c)+" removed by "+claims.Subject)
+	s.auditContent(r.Context(), "remove", claims.Subject, c.TenantID, c, c.LatestVersion, contentshare.Label(c)+" removed by "+claims.Subject)
 	w.WriteHeader(http.StatusNoContent)
 }

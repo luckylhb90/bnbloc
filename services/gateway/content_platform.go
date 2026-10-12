@@ -11,6 +11,7 @@ import (
 	"github.com/luckylhb90/bnbloc/internal/auth"
 	"github.com/luckylhb90/bnbloc/internal/contentbuiltin"
 	"github.com/luckylhb90/bnbloc/internal/contentpkg"
+	"github.com/luckylhb90/bnbloc/internal/contentshare"
 	"github.com/luckylhb90/bnbloc/internal/contentuse"
 	"github.com/luckylhb90/bnbloc/internal/extpipe"
 	"github.com/luckylhb90/bnbloc/internal/ids"
@@ -222,7 +223,7 @@ func (s *Service) installPlatformContent(w http.ResponseWriter, r *http.Request,
 	if keyID != "" {
 		signed = "signed by key " + keyID
 	}
-	s.auditContent(ctx, "install", claims.Subject, "", c, m.Version, contentLabel(c)+" v"+m.Version+" installed for every organization by "+claims.Subject+", "+signed+", publisher "+pkg.Publisher)
+	s.auditContent(ctx, "install", claims.Subject, "", c, m.Version, contentshare.Label(c)+" v"+m.Version+" installed for every organization by "+claims.Subject+", "+signed+", publisher "+pkg.Publisher)
 	writeJSON(w, http.StatusOK, contentInstallReply{ID: c.ID, Name: c.Name, Kind: shortKind(c.Kind), Version: m.Version, Scope: string(c.Scope), Status: string(c.Status)})
 }
 
@@ -327,4 +328,79 @@ func (s *Service) handleRemovePlatformContent(w http.ResponseWriter, r *http.Req
 		return
 	}
 	s.removeContent(w, r, claims, c)
+}
+
+// platformContentByName resolves {name} of PUT /v1/platform/components/
+// {name}/tenants to a platform content row ("Gap closure" 3). handled is
+// false when the request names no platform content (the executable record
+// path takes it). ?kind=expert|skill|prompt picks content; without a kind,
+// a name held by platform content and by an executable record is
+// ambiguous (409, like a name shared by two executable kinds). It writes
+// the error response when handled && !ok.
+func (s *Service) platformContentByName(w http.ResponseWriter, r *http.Request, name string) (store.ContentComponent, bool, bool) {
+	if s.ContentComponents == nil {
+		return store.ContentComponent{}, false, false
+	}
+	kindParam := strings.TrimSpace(r.URL.Query().Get("kind"))
+	kind := ""
+	if kindParam != "" {
+		k, ok := contentpkg.Lookup(kindParam)
+		if !ok {
+			return store.ContentComponent{}, false, false // an executable kind
+		}
+		kind = k.Kind
+	}
+	ctx := r.Context()
+	rows, err := s.ContentComponents.ListContentComponents(ctx, store.ContentComponentQuery{Kind: kind, Name: name, Scopes: []store.ContentScope{store.ContentScopePlatform}})
+	if err != nil {
+		obs.ServerError(w, "load platform content failed", err)
+		http.Error(w, "load platform content failed", http.StatusInternalServerError)
+		return store.ContentComponent{}, false, true
+	}
+	switch {
+	case len(rows) == 0 && kind != "":
+		http.Error(w, "component not found", http.StatusNotFound)
+		return store.ContentComponent{}, false, true
+	case len(rows) == 0:
+		return store.ContentComponent{}, false, false
+	case len(rows) > 1:
+		http.Error(w, errAmbiguousComponent.Error(), http.StatusConflict)
+		return store.ContentComponent{}, false, true
+	}
+	if kind == "" {
+		_, found, err := s.findComponentRecord(ctx, "", name)
+		if err != nil && !errors.Is(err, errAmbiguousComponent) {
+			obs.ServerError(w, "load components failed", err)
+			http.Error(w, "load components failed", http.StatusInternalServerError)
+			return store.ContentComponent{}, false, true
+		}
+		if found || err != nil {
+			http.Error(w, errAmbiguousComponent.Error(), http.StatusConflict)
+			return store.ContentComponent{}, false, true
+		}
+	}
+	return rows[0], true, true
+}
+
+// setPlatformContentTenants limits platform content to some organizations
+// or lifts the limit (the request's semantics were checked by the shared
+// handler). Every member surface reads it through extpipe.MemberVisibility.
+func (s *Service) setPlatformContentTenants(w http.ResponseWriter, r *http.Request, claims auth.Claims, c store.ContentComponent, req setTenantsRequest) {
+	var tenants []string
+	if !req.AllTenants {
+		if tenants = extpipe.NormalizeTenants(req.EnabledTenants); len(tenants) == 0 {
+			http.Error(w, extpipe.ErrNoTenants.Error(), http.StatusBadRequest)
+			return
+		}
+	}
+	if err := s.ContentComponents.SetContentComponentTenants(r.Context(), c.ID, tenants, s.nowTime().UnixMilli()); err != nil {
+		contentStoreErr(w, "set tenants failed", err)
+		return
+	}
+	scope := "every organization"
+	if tenants != nil {
+		scope = strings.Join(tenants, ", ")
+	}
+	s.auditContent(r.Context(), "set-tenants", claims.Subject, "", c, c.LatestVersion, contentshare.Label(c)+" limited to "+scope+" by "+claims.Subject)
+	w.WriteHeader(http.StatusNoContent)
 }
