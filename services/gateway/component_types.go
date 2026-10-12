@@ -22,7 +22,7 @@ type installedComponent struct {
 	Protocol        protocol.ProtocolRange      `json:"protocol"`
 	KeyID           string                      `json:"keyId"`
 	ContentHash     string                      `json:"contentHash"`
-	InstalledAt     int64                       `json:"installedAt"`
+	InstalledAtMs   int64                       `json:"installedAtMs"`
 	Description     string                      `json:"description,omitempty"`
 	Capabilities    []string                    `json:"capabilities,omitempty"`
 	Permissions     pkgmeta.Permissions         `json:"permissions"`
@@ -38,8 +38,6 @@ type installedComponent struct {
 	Rollout         string                      `json:"rollout"`
 	Trust           componentTrust              `json:"trust"`
 	Adoption        componentAdoption           `json:"adoption"`
-	MemberInstalls  int                         `json:"memberInstalls,omitempty"`
-	TotalMembers    int                         `json:"totalMembers,omitempty"`
 }
 
 type componentTrust struct {

@@ -119,11 +119,13 @@ func (s *Service) handleNotifierReply(w http.ResponseWriter, r *http.Request) {
 // must not be suspended, and the member must still belong to it with a role
 // that may chat. Room membership is checked by realtime's chat endpoint.
 func (s *Service) notifierReplyDenied(ctx context.Context, rec extpipe.Record, tok store.NotificationReplyToken) string {
-	if !notify.Distributes(rec, tok.TenantID) {
+	vis := extpipe.MemberVisibilityWith(extpipe.Viewer{Subject: tok.UserID, Tenant: tok.TenantID}, extpipe.GateForRecord(rec), func() int64 {
+		return notify.MemberInstalledAt(tenant.NewContext(ctx, tok.TenantID), s.ComponentInstalls, tok.UserID, rec.Name)
+	})
+	switch {
+	case !vis.Visible:
 		return "notifier is off or not enabled for this tenant"
-	}
-	if extpipe.NormalizeRollout(rec.Rollout) == extpipe.RolloutOptIn &&
-		!notify.MemberInstalled(tenant.NewContext(ctx, tok.TenantID), s.ComponentInstalls, tok.UserID, rec.Name) {
+	case !vis.Installed:
 		return "member has not turned this notifier on"
 	}
 	role, err := s.memberRole(tok.TenantID, tok.UserID)

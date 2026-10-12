@@ -62,7 +62,7 @@ test("a 403 is an authorization answer and never triggers a session refresh", as
   let refreshes = 0;
   session({ token: "session", reauth: async () => { refreshes++; return true; } });
   await assert.rejects(
-    uploadArtifact(file, { origin: "http://localhost", fetchImpl: async () => new Response("forbidden", { status: 403 }) }),
+    uploadArtifact(file, { origin: "http://localhost", fetchImpl: async () => new Response(JSON.stringify({ error: "forbidden" }), { status: 403 }) }),
     /forbidden/,
   );
   assert.equal(refreshes, 0);
@@ -73,7 +73,7 @@ test("artifact upload exposes storage errors without attempting publication", as
   await assert.rejects(
     (session({ token: "session" }), uploadArtifact(file, {
       origin: "http://localhost",
-      fetchImpl: async () => new Response("artifact store not configured", { status: 503 }),
+      fetchImpl: async () => new Response(JSON.stringify({ error: "artifact store not configured" }), { status: 503 }),
     })),
     /artifact store not configured/i,
   );

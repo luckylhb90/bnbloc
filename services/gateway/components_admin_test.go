@@ -81,8 +81,8 @@ func TestComponents_rolloutAdminSurface(t *testing.T) {
 			if component.Rollout != "auto" {
 				t.Fatalf("component rollout = %q, want auto default", component.Rollout)
 			}
-			if component.MemberInstalls != 0 || component.TotalMembers != 3 {
-				t.Fatalf("adoption = %d/%d, want 0/3 before any opt-in", component.MemberInstalls, component.TotalMembers)
+			if component.Adoption.MemberInstalls != 0 || component.Adoption.TotalMembers != 3 {
+				t.Fatalf("adoption = %d/%d, want 0/3 before any opt-in", component.Adoption.MemberInstalls, component.Adoption.TotalMembers)
 			}
 		}
 	}

@@ -95,7 +95,7 @@ func HasHook(cfg Config, hookID string) bool {
 // is the record half of hook entitlement; the member half (session tenant,
 // opt-in install) is checked where the member's stream is known.
 func Subscribes(rec extpipe.Record, hookID, tenantID string) bool {
-	if extpipe.NormalizeRollout(rec.Rollout) == extpipe.RolloutOff || !rec.AllowsTenant(tenantID) {
+	if !extpipe.TenantDistribution(rec, tenantID).Distributed {
 		return false
 	}
 	cfg, err := DecodeRecord(rec)

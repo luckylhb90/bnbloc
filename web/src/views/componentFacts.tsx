@@ -24,8 +24,8 @@ export function RolloutBadge({ rollout }: { readonly rollout: ComponentRollout }
 }
 
 export function AdoptionBar({ component }: { readonly component: PlatformComponent }) {
-  const total = component.adoption.totalMembers ?? component.totalMembers ?? 0;
-  const installs = component.adoption.memberInstalls ?? component.memberInstalls ?? 0;
+  const total = component.adoption.totalMembers ?? 0;
+  const installs = component.adoption.memberInstalls;
   const pct = adoptionPercent(component.rollout, installs, total);
   return (
     <div className="mt-4">
@@ -152,8 +152,8 @@ export function memberMeta(component: MemberComponent): string {
     component.kind,
     component.runtime,
     component.requiresDesktop ? "runs with the desktop app" : undefined,
-    !component.installed && (component.membersInstalled ?? 0) > 0
-      ? `${component.membersInstalled} member${component.membersInstalled === 1 ? " uses" : "s use"} it`
+    !component.installed && (component.memberInstalls ?? 0) > 0
+      ? `${component.memberInstalls} member${component.memberInstalls === 1 ? " uses" : "s use"} it`
       : undefined,
   ];
   return facts.filter((fact): fact is string => Boolean(fact)).join(" · ");

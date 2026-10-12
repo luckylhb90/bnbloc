@@ -146,11 +146,9 @@ export interface PlatformComponent extends ComponentBase {
   readonly manifest?: unknown;
   readonly keyId?: string;
   readonly contentHash?: string;
-  readonly installedAt?: number;
+  readonly installedAtMs?: number;
   readonly trust: ComponentTrust;
   readonly adoption: ComponentAdoption;
-  readonly memberInstalls?: number;
-  readonly totalMembers?: number;
 }
 
 // The install answer: a notifier's first install carries its signing secret,
@@ -164,7 +162,8 @@ export interface MemberComponent extends ComponentBase {
   readonly installed: boolean;
   readonly managed: boolean;
   readonly installedAtMs?: number;
-  readonly membersInstalled?: number;
+  // Members who opted in (the platform list's adoption.memberInstalls).
+  readonly memberInstalls?: number;
 }
 
 export interface ComponentPackageEnvelope {

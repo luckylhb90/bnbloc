@@ -88,7 +88,7 @@ function AdminComponentCard({
         <FactBlock label="Kind" value={kindLabel(component.kind)} />
         <FactBlock label="Runtime" value={component.runtime} />
         {component.protocol && <FactBlock label="Protocol" value={`${component.protocol.min}-${component.protocol.max}`} />}
-        {component.installedAt && <FactBlock label="Installed" value={new Date(component.installedAt).toLocaleString()} />}
+        {component.installedAtMs && <FactBlock label="Installed" value={new Date(component.installedAtMs).toLocaleString()} />}
       </div>
       <ChipGroup label="Capabilities" values={component.capabilities ?? []} empty="No capabilities recorded." />
       <ChipGroup label="Hooks" values={component.hooks ?? []} empty="No event hooks declared." />

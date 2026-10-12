@@ -236,7 +236,7 @@ function PublishedComponents({
 function summarizeComponents(components: readonly PlatformComponent[]) {
   const ofKind = (kind: ComponentKind) => components.filter((component) => component.kind === kind).length;
   const auto = components.filter((component) => component.rollout === "auto").length;
-  const members = Math.max(0, ...components.map((component) => component.adoption.totalMembers ?? component.totalMembers ?? 0));
+  const members = Math.max(0, ...components.map((component) => component.adoption.totalMembers ?? 0));
   return {
     total: components.length,
     core: ofKind("core"),

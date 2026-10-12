@@ -165,7 +165,7 @@ var routeWords = map[string]bool{
 	"agent-activity": true, "session-state": true,
 	"bridge": true, "heartbeat": true, "my": true, "jobs": true, "claim": true, "status": true, "lease": true,
 	"agent-jobs": true, "cancel": true, "agent-catalogs": true,
-	"stream": true,
+	"stream":        true,
 	"shared-agents": true, "shared-agents-usage": true, "authorization": true, "record": true,
 	"tenants": true, "platform": true, "quota": true, "settings": true, "audit": true, "usage": true,
 	"directory": true, "join-requests": true, "join-request": true, "approve": true, "reject": true, "role": true,

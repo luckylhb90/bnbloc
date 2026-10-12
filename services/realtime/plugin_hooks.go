@@ -457,21 +457,16 @@ func (d *PluginHookDispatcher) pluginsForHook(ctx context.Context, hookID, tenan
 	return out
 }
 
-// streamMayUse is the member-visibility gate (the same rule the gateway's
-// member component catalog applies): the record must be distributed to the
-// member's session tenant, and an opt-in record must be installed by them.
+// streamMayUse is the member-visibility gate (extpipe.MemberVisibility, the
+// rule the gateway's member component catalog applies) for the stream's
+// member in their session tenant: an opt-in record must be installed by them.
 func (d *PluginHookDispatcher) streamMayUse(ctx context.Context, st *pluginStream, rec extpipe.Record) bool {
-	if !rec.AllowsTenant(st.tenantID) {
-		return false
-	}
-	switch extpipe.NormalizeRollout(rec.Rollout) {
-	case extpipe.RolloutOff:
-		return false
-	case extpipe.RolloutOptIn:
-		return d.streamInstalled(ctx, st, rec.Name)
-	default:
-		return true
-	}
+	return extpipe.MemberVisibilityWith(extpipe.Viewer{Subject: st.subject, Tenant: st.tenantID}, extpipe.GateForRecord(rec), func() int64 {
+		if d.streamInstalled(ctx, st, rec.Name) {
+			return 1 // the cache keeps whether, not when
+		}
+		return 0
+	}).Installed
 }
 
 // streamInstalled reports whether the stream's member opted in to the plugin,

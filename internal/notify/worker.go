@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/luckylhb90/bnbloc/internal/extpipe"
 	"github.com/luckylhb90/bnbloc/internal/extreg"
 	"github.com/luckylhb90/bnbloc/internal/obs"
 	"github.com/luckylhb90/bnbloc/internal/store"
@@ -217,7 +218,7 @@ func (w *Worker) send(ctx context.Context, it store.NotificationOutboxItem) (sto
 	switch {
 	case err != nil:
 		return store.NotificationRetry, "read notifier records: " + err.Error(), nil
-	case !found || !Distributes(rec, it.TenantID):
+	case !found || !extpipe.TenantDistribution(rec, it.TenantID).Distributed:
 		// Uninstalled, switched off, or re-scoped away from the tenant after
 		// the item was queued: nothing will ever accept it.
 		return store.NotificationFailed, "notifier uninstalled, off, or not enabled for the tenant", nil

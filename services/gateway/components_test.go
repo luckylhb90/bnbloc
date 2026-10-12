@@ -105,12 +105,12 @@ type coreJSON struct {
 }
 
 type componentJSON struct {
-	Name             string `json:"name"`
-	Rollout          string `json:"rollout"`
-	Kind             string `json:"kind"`
-	Installed        bool   `json:"installed"`
-	Managed          bool   `json:"managed"`
-	MembersInstalled int    `json:"membersInstalled"`
+	Name           string `json:"name"`
+	Rollout        string `json:"rollout"`
+	Kind           string `json:"kind"`
+	Installed      bool   `json:"installed"`
+	Managed        bool   `json:"managed"`
+	MemberInstalls int    `json:"memberInstalls"`
 }
 
 func listComponentsForMember(t *testing.T, srv *httptest.Server, token string) map[string]componentJSON {
@@ -203,7 +203,7 @@ func TestComponents_rolloutLifecycle(t *testing.T) {
 	if !contains(names, "rollout-core") {
 		t.Fatal("installed optin core missing from /v1/cores")
 	}
-	if c := listComponentsForMember(t, srv, memberToken)["rollout-core"]; !c.Installed || c.Managed || c.MembersInstalled != 1 {
+	if c := listComponentsForMember(t, srv, memberToken)["rollout-core"]; !c.Installed || c.Managed || c.MemberInstalls != 1 {
 		t.Fatalf("components = %+v, want installed, unmanaged, 1 member install", c)
 	}
 	if status, _ := artifactStatus(t, srv, memberToken, "rollout-core"); status != http.StatusOK {

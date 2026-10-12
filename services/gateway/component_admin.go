@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
-	"strings"
 
 	"github.com/luckylhb90/bnbloc/internal/auth"
 	"github.com/luckylhb90/bnbloc/internal/contentpkg"
@@ -88,12 +87,7 @@ func (s *Service) handleInstallComponent(w http.ResponseWriter, r *http.Request,
 }
 
 func (s *Service) handleUninstallComponent(w http.ResponseWriter, r *http.Request, claims auth.Claims) {
-	name := strings.TrimSpace(r.PathValue("name"))
-	if name == "" {
-		httpx.Error(w, "component name required", http.StatusBadRequest)
-		return
-	}
-	rec, ok := s.requestComponentRecord(w, r, name)
+	rec, ok := s.requestComponentRecord(w, r, r.PathValue("name"))
 	if !ok {
 		return
 	}
@@ -113,11 +107,6 @@ func (s *Service) handleUninstallComponent(w http.ResponseWriter, r *http.Reques
 }
 
 func (s *Service) handleSetComponentRollout(w http.ResponseWriter, r *http.Request, claims auth.Claims) {
-	name := strings.TrimSpace(r.PathValue("name"))
-	if name == "" {
-		httpx.Error(w, "component name required", http.StatusBadRequest)
-		return
-	}
 	var req setRolloutRequest
 	if !httpx.DecodeJSON(w, r, 16*1024, &req) {
 		return
@@ -126,7 +115,7 @@ func (s *Service) handleSetComponentRollout(w http.ResponseWriter, r *http.Reque
 		httpx.Error(w, "rollout must be auto, optin, or off", http.StatusBadRequest)
 		return
 	}
-	rec, ok := s.requestComponentRecord(w, r, name)
+	rec, ok := s.requestComponentRecord(w, r, r.PathValue("name"))
 	if !ok {
 		return
 	}
@@ -144,42 +133,32 @@ func (s *Service) handleSetComponentRollout(w http.ResponseWriter, r *http.Reque
 }
 
 func (s *Service) handleSetComponentTenants(w http.ResponseWriter, r *http.Request, claims auth.Claims) {
-	name := strings.TrimSpace(r.PathValue("name"))
-	if name == "" {
-		httpx.Error(w, "component name required", http.StatusBadRequest)
-		return
-	}
 	var req setTenantsRequest
 	if !httpx.DecodeJSON(w, r, 64*1024, &req) {
 		return
 	}
-	// Explicit semantics, fail closed: allTenants lifts the restriction (and
-	// must not be combined with a list); otherwise enabledTenants must name at
-	// least one tenant — an empty list is rejected, never read as "all".
-	if req.AllTenants && len(req.EnabledTenants) > 0 {
-		httpx.Error(w, "allTenants and enabledTenants are mutually exclusive", http.StatusBadRequest)
+	tenants, err := req.scope()
+	if err != nil {
+		httpx.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 	// Platform content shares the route and its semantics (?kind=expert|
 	// skill|prompt picks it; a bare name held by both registries is a 409).
-	if c, ok, handled := s.platformContentByName(w, r, name); handled {
-		if ok {
-			s.setPlatformContentTenants(w, r, claims, c, req)
-		}
-		return
-	}
-	rec, ok := s.requestComponentRecord(w, r, name)
+	c, ok := s.requestComponent(w, r, r.PathValue("name"), true)
 	if !ok {
 		return
 	}
+	if c.content != nil {
+		s.setPlatformContentTenants(w, r, claims, *c.content, tenants)
+		return
+	}
+	rec := c.record
 	pipe := s.corePipeline()
 	kind := componentKindForName(rec)
-	var err error
-	switch {
-	case req.AllTenants:
+	if tenants == nil {
 		err = pipe.ClearTenants(r.Context(), kind, rec.Name, claims.Subject)
-	default:
-		err = pipe.SetTenants(r.Context(), kind, rec.Name, req.EnabledTenants, claims.Subject)
+	} else {
+		err = pipe.SetTenants(r.Context(), kind, rec.Name, tenants, claims.Subject)
 	}
 	if err != nil {
 		if errors.Is(err, extpipe.ErrSettingsStore) || errors.Is(err, extpipe.ErrPersist) {
@@ -211,28 +190,45 @@ func (s *Service) listInstalledComponents(ctx context.Context) ([]installedCompo
 }
 
 func (s *Service) addComponentAdoption(ctx context.Context, components []installedComponent) error {
-	countsByKind := map[string]map[string]int{}
-	if s.ComponentInstalls != nil {
-		for _, component := range components {
-			if _, ok := countsByKind[component.Kind]; ok {
-				continue
-			}
-			counts, err := s.ComponentInstalls.CountComponentInstalls(ctx, component.Kind)
-			if err != nil {
-				return err
-			}
-			countsByKind[component.Kind] = counts
-		}
+	kinds := make([]string, 0, len(components))
+	for _, c := range components {
+		kinds = append(kinds, c.Kind)
+	}
+	counts, err := s.componentInstallCounts(ctx, kinds)
+	if err != nil {
+		return err
 	}
 	total := 0
 	if s.MemberCount != nil {
 		total = s.MemberCount()
 	}
 	for i := range components {
-		count := countsByKind[components[i].Kind][components[i].Name]
-		components[i].MemberInstalls = count
-		components[i].TotalMembers = total
-		components[i].Adoption = componentAdoption{MemberInstalls: count, TotalMembers: total}
+		components[i].Adoption = componentAdoption{MemberInstalls: counts[componentKey(components[i].Kind, components[i].Name)], TotalMembers: total}
 	}
 	return nil
+}
+
+// componentInstallCounts is the one count of members' opt-in installs, by
+// componentKey, for the given kinds (each read once): the platform list's
+// adoption and the member catalog's memberInstalls both read it.
+func (s *Service) componentInstallCounts(ctx context.Context, kinds []string) (map[string]int, error) {
+	out := map[string]int{}
+	if s.ComponentInstalls == nil {
+		return out, nil
+	}
+	seen := map[string]bool{}
+	for _, kind := range kinds {
+		if seen[kind] {
+			continue
+		}
+		seen[kind] = true
+		counts, err := s.ComponentInstalls.CountComponentInstalls(ctx, kind)
+		if err != nil {
+			return nil, err
+		}
+		for name, n := range counts {
+			out[componentKey(kind, name)] = n
+		}
+	}
+	return out, nil
 }

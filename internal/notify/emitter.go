@@ -270,28 +270,30 @@ func (e *Emitter) optedIn(ctx context.Context, name string, members []string) []
 	}
 	var out []string
 	for _, m := range members {
-		if MemberInstalled(ctx, e.Installs, m, name) {
+		if MemberInstalledAt(ctx, e.Installs, m, name) > 0 {
 			out = append(out, m)
 		}
 	}
 	return out
 }
 
-// MemberInstalled reports whether member opted in to the notifier name.
-func MemberInstalled(ctx context.Context, installs store.ComponentInstallStore, member, name string) bool {
+// MemberInstalledAt is when member opted in to the notifier name, 0 when
+// they did not (or the read failed: fail closed, never deliver through a
+// component the member did not choose).
+func MemberInstalledAt(ctx context.Context, installs store.ComponentInstallStore, member, name string) int64 {
 	if installs == nil {
-		return false
+		return 0
 	}
 	rows, err := installs.ListComponentInstalls(ctx, member)
 	if err != nil {
-		return false
+		return 0
 	}
 	for _, in := range rows {
 		if in.Kind == string(extreg.KindNotifier) && in.Name == name {
-			return true
+			return in.InstalledAtMs
 		}
 	}
-	return false
+	return 0
 }
 
 // filter drops the actor, duplicates, members whose prefs exclude the type or

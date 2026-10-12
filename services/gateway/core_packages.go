@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"errors"
 	"net/http"
 	"strings"
 
@@ -8,6 +9,7 @@ import (
 	"github.com/luckylhb90/bnbloc/core/pkgmeta"
 	"github.com/luckylhb90/bnbloc/internal/auth"
 	"github.com/luckylhb90/bnbloc/internal/coreset"
+	"github.com/luckylhb90/bnbloc/internal/extpipe"
 	"github.com/luckylhb90/bnbloc/internal/httpx"
 	"github.com/luckylhb90/bnbloc/internal/obs"
 )
@@ -70,6 +72,29 @@ func (s *Service) handleCoreArtifact(w http.ResponseWriter, r *http.Request, cla
 type setTenantsRequest struct {
 	EnabledTenants []string `json:"enabledTenants"`
 	AllTenants     bool     `json:"allTenants"`
+}
+
+// errTenantsExclusive refuses a scope request that both lifts the
+// restriction and names tenants.
+var errTenantsExclusive = errors.New("allTenants and enabledTenants are mutually exclusive")
+
+// scope is the one validation of a tenant-scope request, for executable
+// records and platform content alike. Explicit and fail closed: allTenants
+// lifts the restriction (nil) and must not be combined with a list;
+// otherwise the list must name at least one tenant (an empty list is
+// refused, never read as "all").
+func (req setTenantsRequest) scope() ([]string, error) {
+	if req.AllTenants {
+		if len(req.EnabledTenants) > 0 {
+			return nil, errTenantsExclusive
+		}
+		return nil, nil
+	}
+	tenants := extpipe.NormalizeTenants(req.EnabledTenants)
+	if len(tenants) == 0 {
+		return nil, extpipe.ErrNoTenants
+	}
+	return tenants, nil
 }
 
 func (s *Service) addCoreEntry(entry coreset.Entry) {

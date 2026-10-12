@@ -153,7 +153,7 @@ func (h *Handlers) visibleNotifier(w http.ResponseWriter, r *http.Request) (extp
 		httpx.Error(w, "read notifiers failed", http.StatusInternalServerError)
 		return extpipe.Record{}, false
 	}
-	if !found || !Distributes(rec, tenant.FromContext(r.Context())) {
+	if !found || !extpipe.TenantDistribution(rec, tenant.FromContext(r.Context())).Distributed {
 		httpx.Error(w, "notifier not found", http.StatusNotFound)
 		return extpipe.Record{}, false
 	}
@@ -174,19 +174,19 @@ func (h *Handlers) handleListNotifiers(w http.ResponseWriter, r *http.Request) {
 	tid := tenant.FromContext(r.Context())
 	out := []wire.MemberNotifier{}
 	for _, rec := range recs {
-		if !Distributes(rec, tid) {
+		vis := extpipe.MemberVisibilityWith(extpipe.Viewer{Subject: user, Tenant: tid}, extpipe.GateForRecord(rec), func() int64 {
+			return MemberInstalledAt(r.Context(), h.Installs, user, rec.Name)
+		})
+		if !vis.Visible {
 			continue
 		}
 		cfg, err := extpipe.DecodeConfig(rec)
 		if err != nil {
 			continue
 		}
-		optIn := extpipe.NormalizeRollout(rec.Rollout) == extpipe.RolloutOptIn
-		n := wire.MemberNotifier{
-			Name: rec.Name, Description: cfg.Description, OptIn: optIn,
-			Installed: !optIn || MemberInstalled(r.Context(), h.Installs, user, rec.Name),
-		}
-		out = append(out, n)
+		out = append(out, wire.MemberNotifier{
+			Name: rec.Name, Description: cfg.Description, OptIn: !vis.Managed, Installed: vis.Installed,
+		})
 	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"notifiers": out})
 }

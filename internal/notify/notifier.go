@@ -142,12 +142,6 @@ func (d *Directory) Records(ctx context.Context) ([]extpipe.Record, error) {
 	return recs, nil
 }
 
-// Distributes reports whether rec delivers to tenantID: rollout not off and
-// the tenant in scope. Opt-in additionally filters recipients (Target.OptIn).
-func Distributes(rec extpipe.Record, tenantID string) bool {
-	return extpipe.NormalizeRollout(rec.Rollout) != extpipe.RolloutOff && rec.AllowsTenant(tenantID)
-}
-
 // Targets lists the notifier components an event of tenantID goes to.
 func (d *Directory) Targets(ctx context.Context, tenantID string) ([]Target, error) {
 	recs, err := d.Records(ctx)
@@ -156,8 +150,9 @@ func (d *Directory) Targets(ctx context.Context, tenantID string) ([]Target, err
 	}
 	var out []Target
 	for _, rec := range recs {
-		if Distributes(rec, tenantID) {
-			out = append(out, Target{Name: rec.Name, OptIn: extpipe.NormalizeRollout(rec.Rollout) == extpipe.RolloutOptIn, Record: rec})
+		// Opt-in additionally filters recipients (Target.OptIn).
+		if d := extpipe.TenantDistribution(rec, tenantID); d.Distributed {
+			out = append(out, Target{Name: rec.Name, OptIn: d.OptIn, Record: rec})
 		}
 	}
 	return out, nil

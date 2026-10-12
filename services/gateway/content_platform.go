@@ -295,69 +295,9 @@ func (s *Service) handleRemovePlatformContent(w http.ResponseWriter, r *http.Req
 	s.removeContent(w, r, claims, c)
 }
 
-// platformContentByName resolves {name} of PUT /v1/platform/components/
-// {name}/tenants to a platform content row ("Gap closure" 3). handled is
-// false when the request names no platform content (the executable record
-// path takes it). ?kind=expert|skill|prompt picks content; without a kind,
-// a name held by platform content and by an executable record is
-// ambiguous (409, like a name shared by two executable kinds). It writes
-// the error response when handled && !ok.
-func (s *Service) platformContentByName(w http.ResponseWriter, r *http.Request, name string) (store.ContentComponent, bool, bool) {
-	if s.ContentComponents == nil {
-		return store.ContentComponent{}, false, false
-	}
-	kindParam := strings.TrimSpace(r.URL.Query().Get("kind"))
-	kind := ""
-	if kindParam != "" {
-		k, ok := contentpkg.Lookup(kindParam)
-		if !ok {
-			return store.ContentComponent{}, false, false // an executable kind
-		}
-		kind = k.Kind
-	}
-	ctx := r.Context()
-	rows, err := s.ContentComponents.ListContentComponents(ctx, store.ContentComponentQuery{Kind: kind, Name: name, Scopes: []store.ContentScope{store.ContentScopePlatform}})
-	if err != nil {
-		obs.ServerError(w, "load platform content failed", err)
-		httpx.Error(w, "load platform content failed", http.StatusInternalServerError)
-		return store.ContentComponent{}, false, true
-	}
-	switch {
-	case len(rows) == 0 && kind != "":
-		httpx.Error(w, "component not found", http.StatusNotFound)
-		return store.ContentComponent{}, false, true
-	case len(rows) == 0:
-		return store.ContentComponent{}, false, false
-	case len(rows) > 1:
-		httpx.Error(w, errAmbiguousComponent.Error(), http.StatusConflict)
-		return store.ContentComponent{}, false, true
-	}
-	if kind == "" {
-		_, found, err := s.findComponentRecord(ctx, "", name)
-		if err != nil && !errors.Is(err, errAmbiguousComponent) {
-			obs.ServerError(w, "load components failed", err)
-			httpx.Error(w, "load components failed", http.StatusInternalServerError)
-			return store.ContentComponent{}, false, true
-		}
-		if found || err != nil {
-			httpx.Error(w, errAmbiguousComponent.Error(), http.StatusConflict)
-			return store.ContentComponent{}, false, true
-		}
-	}
-	return rows[0], true, true
-}
-
-// setPlatformContentTenants limits platform content to some organizations
-// or lifts the limit (the request's semantics were checked by the shared
-// handler). Every member surface reads it through extpipe.MemberVisibility.
-func (s *Service) setPlatformContentTenants(w http.ResponseWriter, r *http.Request, claims auth.Claims, c store.ContentComponent, req setTenantsRequest) {
-	var tenants []string
-	if !req.AllTenants {
-		if tenants = extpipe.NormalizeTenants(req.EnabledTenants); len(tenants) == 0 {
-			httpx.Error(w, extpipe.ErrNoTenants.Error(), http.StatusBadRequest)
-			return
-		}
-	}
+// setPlatformContentTenants limits platform content to tenants or lifts the
+// limit (nil; setTenantsRequest.scope checked the request). Every member surface reads it through extpipe.MemberVisibility.
+func (s *Service) setPlatformContentTenants(w http.ResponseWriter, r *http.Request, claims auth.Claims, c store.ContentComponent, tenants []string) {
 	if err := s.ContentComponents.SetContentComponentTenants(r.Context(), c.ID, tenants, s.nowTime().UnixMilli()); err != nil {
 		contentStoreErr(w, "set tenants failed", err)
 		return

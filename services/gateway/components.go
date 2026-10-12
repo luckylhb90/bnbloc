@@ -36,13 +36,15 @@ type componentInfo struct {
 	// Capabilities and Protocol tell the desktop/bridge what a protocol
 	// component (a sandbox runtime) was published to support before it is
 	// launched; the running implementation's discovery stays authoritative.
-	Capabilities     []string                `json:"capabilities,omitempty"`
-	Protocol         *protocol.ProtocolRange `json:"protocol,omitempty"`
-	Rollout          string                  `json:"rollout"`
-	Installed        bool                    `json:"installed"`
-	Managed          bool                    `json:"managed"`
-	InstalledAtMs    int64                   `json:"installedAtMs,omitempty"`
-	MembersInstalled int                     `json:"membersInstalled,omitempty"`
+	Capabilities  []string                `json:"capabilities,omitempty"`
+	Protocol      *protocol.ProtocolRange `json:"protocol,omitempty"`
+	Rollout       string                  `json:"rollout"`
+	Installed     bool                    `json:"installed"`
+	Managed       bool                    `json:"managed"`
+	InstalledAtMs int64                   `json:"installedAtMs,omitempty"`
+	// MemberInstalls counts the members who opted in (the platform list's
+	// adoption.memberInstalls).
+	MemberInstalls int `json:"memberInstalls,omitempty"`
 	// Guest is a sandbox's machine profile: the desktop prewarms it.
 	Guest *pkgmeta.Guest `json:"guest,omitempty"`
 	// Previewer is an installed previewer's match/toolbar metadata, its
@@ -53,47 +55,31 @@ type componentInfo struct {
 }
 
 func (s *Service) handleComponents(w http.ResponseWriter, r *http.Request, claims auth.Claims) {
-	recs, err := s.corePipeline().List(r.Context(), "")
+	view, err := s.loadMemberComponents(r.Context(), claims)
 	if err != nil {
 		obs.ServerError(w, "load components failed", err)
 		httpx.Error(w, "load components failed", http.StatusInternalServerError)
 		return
 	}
-	installedBy, err := s.memberInstalledComponents(r.Context(), claims.Subject)
+	kinds := make([]string, 0, len(view.list))
+	for _, rec := range view.list {
+		kinds = append(kinds, rec.Kind)
+	}
+	memberCounts, err := s.componentInstallCounts(r.Context(), kinds)
 	if err != nil {
 		obs.ServerError(w, "load components failed", err)
 		httpx.Error(w, "load components failed", http.StatusInternalServerError)
 		return
-	}
-	memberCounts := map[string]int{}
-	if s.ComponentInstalls != nil {
-		seenKinds := map[string]bool{}
-		for _, rec := range recs {
-			kind := rec.Kind
-			if seenKinds[kind] {
-				continue
-			}
-			seenKinds[kind] = true
-			counts, err := s.ComponentInstalls.CountComponentInstalls(r.Context(), kind)
-			if err != nil {
-				obs.ServerError(w, "load components failed", err)
-				httpx.Error(w, "load components failed", http.StatusInternalServerError)
-				return
-			}
-			for name, count := range counts {
-				memberCounts[componentKey(kind, name)] = count
-			}
-		}
 	}
 	// ?kind= narrows the catalog to one kind (e.g. the web host reads only
 	// previewers); absent lists every member-visible kind.
 	onlyKind := strings.TrimSpace(r.URL.Query().Get("kind"))
-	out := make([]componentInfo, 0, len(recs))
-	for _, rec := range recs {
+	out := make([]componentInfo, 0, len(view.list))
+	for _, rec := range view.list {
 		if !componentKindVisibleInMemberCatalog(componentKindForName(rec)) || (onlyKind != "" && rec.Kind != onlyKind) {
 			continue
 		}
-		vis := extpipe.MemberVisibility(viewerOf(claims), extpipe.GateForRecord(rec), installedBy[componentKey(rec.Kind, rec.Name)])
+		vis := view.visibility(rec)
 		if !vis.Visible {
 			continue
 		}
@@ -104,20 +90,20 @@ func (s *Service) handleComponents(w http.ResponseWriter, r *http.Request, claim
 			return
 		}
 		component := componentInfo{
-			Kind:             rec.Kind,
-			Name:             rec.Name,
-			Version:          rec.Version,
-			Publisher:        rec.Publisher,
-			Description:      cfg.Description,
-			Runtime:          string(cfg.Runtime),
-			Contract:         cfg.Contract,
-			RequiresDesktop:  componentRequiresDesktop(cfg.Runtime, rec.Kind),
-			Hooks:            cfg.Hooks,
-			Rollout:          extpipe.NormalizeRollout(rec.Rollout),
-			Installed:        vis.Installed,
-			Managed:          vis.Managed,
-			InstalledAtMs:    vis.InstalledAtMs,
-			MembersInstalled: memberCounts[componentKey(rec.Kind, rec.Name)],
+			Kind:            rec.Kind,
+			Name:            rec.Name,
+			Version:         rec.Version,
+			Publisher:       rec.Publisher,
+			Description:     cfg.Description,
+			Runtime:         string(cfg.Runtime),
+			Contract:        cfg.Contract,
+			RequiresDesktop: componentRequiresDesktop(cfg.Runtime, rec.Kind),
+			Hooks:           cfg.Hooks,
+			Rollout:         extpipe.NormalizeRollout(rec.Rollout),
+			Installed:       vis.Installed,
+			Managed:         vis.Managed,
+			InstalledAtMs:   vis.InstalledAtMs,
+			MemberInstalls:  memberCounts[componentKey(rec.Kind, rec.Name)],
 		}
 		if vis.Installed {
 			perms := cfg.EffectivePermissions(rec)
@@ -180,12 +166,7 @@ func (s *Service) handleComponentInstall(w http.ResponseWriter, r *http.Request,
 		httpx.Error(w, "component installs unavailable", http.StatusServiceUnavailable)
 		return
 	}
-	name := strings.TrimSpace(r.PathValue("name"))
-	if name == "" {
-		httpx.Error(w, "component name required", http.StatusBadRequest)
-		return
-	}
-	rec, ok := s.requestComponentRecord(w, r, name)
+	rec, ok := s.requestComponentRecord(w, r, r.PathValue("name"))
 	if !ok {
 		return
 	}
@@ -194,7 +175,7 @@ func (s *Service) handleComponentInstall(w http.ResponseWriter, r *http.Request,
 		httpx.Error(w, "component not found", http.StatusNotFound)
 		return
 	}
-	if extpipe.NormalizeRollout(rec.Rollout) != extpipe.RolloutOptIn {
+	if vis.Managed {
 		httpx.Error(w, "component is not opt-in", http.StatusBadRequest)
 		return
 	}
@@ -216,12 +197,7 @@ func (s *Service) handleComponentUninstall(w http.ResponseWriter, r *http.Reques
 		httpx.Error(w, "component installs unavailable", http.StatusServiceUnavailable)
 		return
 	}
-	name := strings.TrimSpace(r.PathValue("name"))
-	if name == "" {
-		httpx.Error(w, "component name required", http.StatusBadRequest)
-		return
-	}
-	rec, ok := s.requestComponentRecord(w, r, name)
+	rec, ok := s.requestComponentRecord(w, r, r.PathValue("name"))
 	if !ok {
 		return
 	}

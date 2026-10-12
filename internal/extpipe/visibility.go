@@ -107,3 +107,32 @@ func MemberVisibility(v Viewer, g Gate, installedAtMs int64) Visibility {
 		return Visibility{Visible: true, Installed: true, Managed: true}
 	}
 }
+
+// MemberVisibilityWith is MemberVisibility reading the member's opt-in
+// install only when the rollout needs it (an opt-in component the member
+// may see): installedAtMs returns the install time, 0 when there is none.
+// Surfaces that look installs up per component (a plugin stream, a
+// notifier, a notifier reply) use it instead of re-deriving the opt-in rule.
+func MemberVisibilityWith(v Viewer, g Gate, installedAtMs func() int64) Visibility {
+	vis := MemberVisibility(v, g, 0)
+	if vis.Visible && !vis.Installed && NormalizeRollout(g.Rollout) == RolloutOptIn {
+		return MemberVisibility(v, g, installedAtMs())
+	}
+	return vis
+}
+
+// Distribution is how an installed record reaches a tenant before any member
+// is known (an event's tenant, a notifier's target list): Distributed — the
+// rollout is not off and the tenant is in scope; OptIn — a member uses it
+// only once they installed it.
+type Distribution struct {
+	Distributed bool
+	OptIn       bool
+}
+
+// TenantDistribution is the tenant-only half of MemberVisibility for an
+// installed record.
+func TenantDistribution(rec Record, tenantID string) Distribution {
+	vis := MemberVisibility(Viewer{Tenant: tenantID}, GateForRecord(rec), 0)
+	return Distribution{Distributed: vis.Visible, OptIn: vis.Visible && !vis.Managed}
+}

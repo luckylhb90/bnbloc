@@ -20,7 +20,7 @@ func componentFromExtRecord(rec extpipe.Record) (installedComponent, error) {
 		Protocol:        cfg.Protocol,
 		KeyID:           rec.KeyID,
 		ContentHash:     rec.ContentHash,
-		InstalledAt:     rec.InstalledAtMs,
+		InstalledAtMs:   rec.InstalledAtMs,
 		Description:     cfg.Description,
 		Capabilities:    cfg.Capabilities,
 		Permissions:     cfg.EffectivePermissions(rec),

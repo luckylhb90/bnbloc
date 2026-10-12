@@ -9,11 +9,13 @@ import (
 	"github.com/luckylhb90/bnbloc/core"
 	"github.com/luckylhb90/bnbloc/core/pkgmeta"
 	"github.com/luckylhb90/bnbloc/internal/auth"
+	"github.com/luckylhb90/bnbloc/internal/contentpkg"
 	"github.com/luckylhb90/bnbloc/internal/coreset"
 	"github.com/luckylhb90/bnbloc/internal/extpipe"
 	"github.com/luckylhb90/bnbloc/internal/extreg"
 	"github.com/luckylhb90/bnbloc/internal/httpx"
 	"github.com/luckylhb90/bnbloc/internal/obs"
+	"github.com/luckylhb90/bnbloc/internal/store"
 )
 
 func (s *Service) memberInstalledComponents(ctx context.Context, subject string) (map[string]int64, error) {
@@ -64,26 +66,80 @@ func (s *Service) findComponentRecord(ctx context.Context, kind extreg.Kind, nam
 	}
 }
 
-// requestComponentRecord resolves the {name} component of a request, using
-// the optional ?kind= query parameter to disambiguate. It writes the error
-// response (404 / 409 / 500) and reports ok=false when there is no single
-// match.
-func (s *Service) requestComponentRecord(w http.ResponseWriter, r *http.Request, name string) (extpipe.Record, bool) {
-	kind := extreg.Kind(strings.TrimSpace(r.URL.Query().Get("kind")))
-	rec, ok, err := s.findComponentRecord(r.Context(), kind, name)
-	switch {
-	case errors.Is(err, errAmbiguousComponent):
-		httpx.Error(w, err.Error(), http.StatusConflict)
-		return extpipe.Record{}, false
-	case err != nil:
-		obs.ServerError(w, "load components failed", err)
-		httpx.Error(w, "load components failed", http.StatusInternalServerError)
-		return extpipe.Record{}, false
-	case !ok:
-		httpx.Error(w, "component not found", http.StatusNotFound)
-		return extpipe.Record{}, false
+// namedComponent is what a component route's {name} resolves to: an
+// installed executable record, or (on the routes both registries share)
+// a platform content row.
+type namedComponent struct {
+	record  extpipe.Record
+	content *store.ContentComponent
+}
+
+// requestComponent is the one {name} resolver of the component routes, with
+// the optional ?kind= to disambiguate: a name held by more than one
+// component — two executable kinds, or (withContent) an executable record
+// and platform content — without a kind is ambiguous (409), never a silent
+// pick. withContent admits platform content (expert|skill|prompt kinds).
+// It writes the error response (400 / 404 / 409 / 500) and reports
+// ok=false when there is no single match.
+func (s *Service) requestComponent(w http.ResponseWriter, r *http.Request, name string, withContent bool) (namedComponent, bool) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		httpx.Error(w, "component name required", http.StatusBadRequest)
+		return namedComponent{}, false
 	}
-	return rec, true
+	ctx := r.Context()
+	kindParam := strings.TrimSpace(r.URL.Query().Get("kind"))
+	var content []store.ContentComponent
+	if withContent && s.ContentComponents != nil {
+		contentKind, isContent := "", kindParam == ""
+		if k, ok := contentpkg.Lookup(kindParam); ok {
+			contentKind, isContent = k.Kind, true
+		}
+		if isContent {
+			rows, err := s.ContentComponents.ListContentComponents(ctx, store.ContentComponentQuery{Kind: contentKind, Name: name, Scopes: []store.ContentScope{store.ContentScopePlatform}})
+			if err != nil {
+				obs.ServerError(w, "load platform content failed", err)
+				httpx.Error(w, "load platform content failed", http.StatusInternalServerError)
+				return namedComponent{}, false
+			}
+			content = rows
+			if contentKind != "" {
+				kindParam = "-" // a content kind names no executable record
+			}
+		}
+	}
+	var records []extpipe.Record
+	if kindParam != "-" {
+		recs, err := s.corePipeline().List(ctx, extreg.Kind(kindParam))
+		if err != nil {
+			obs.ServerError(w, "load components failed", err)
+			httpx.Error(w, "load components failed", http.StatusInternalServerError)
+			return namedComponent{}, false
+		}
+		for _, rec := range recs {
+			if rec.Name == name {
+				records = append(records, rec)
+			}
+		}
+	}
+	switch {
+	case len(records)+len(content) == 0:
+		httpx.Error(w, "component not found", http.StatusNotFound)
+		return namedComponent{}, false
+	case len(records)+len(content) > 1:
+		httpx.Error(w, errAmbiguousComponent.Error(), http.StatusConflict)
+		return namedComponent{}, false
+	case len(content) == 1:
+		return namedComponent{content: &content[0]}, true
+	}
+	return namedComponent{record: records[0]}, true
+}
+
+// requestComponentRecord is requestComponent over the executable records
+// only.
+func (s *Service) requestComponentRecord(w http.ResponseWriter, r *http.Request, name string) (extpipe.Record, bool) {
+	c, ok := s.requestComponent(w, r, name, false)
+	return c.record, ok
 }
 
 // componentKindVisibleInMemberCatalog names the kinds a member's desktop
@@ -103,6 +159,7 @@ func componentKindVisibleInMemberCatalog(kind extreg.Kind) bool {
 // of a records scan per core.
 type memberComponents struct {
 	viewer    extpipe.Viewer
+	list      []extpipe.Record          // every install record, in registry order
 	records   map[string]extpipe.Record // componentKey(kind, name) -> record
 	installed map[string]int64          // componentKey(kind, name) -> opt-in install time
 }
@@ -116,7 +173,7 @@ func (s *Service) loadMemberComponents(ctx context.Context, claims auth.Claims) 
 	if err != nil {
 		return memberComponents{}, err
 	}
-	view := memberComponents{viewer: viewerOf(claims), records: make(map[string]extpipe.Record, len(recs)), installed: installed}
+	view := memberComponents{viewer: viewerOf(claims), list: recs, records: make(map[string]extpipe.Record, len(recs)), installed: installed}
 	for _, rec := range recs {
 		view.records[componentKey(rec.Kind, rec.Name)] = rec
 	}
