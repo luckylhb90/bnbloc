@@ -2,7 +2,6 @@ package notify
 
 import (
 	"context"
-	"encoding/json"
 	"strings"
 	"time"
 
@@ -53,20 +52,8 @@ func replyKey(tenantID, roomID, session string) string {
 // text of its last non-empty message. Job notices (refused borrow, failure
 // notes) are synthetic rows under a job's notice session, never a reply.
 func decodeReply(payload any) (session, text string, ok bool) {
-	raw, err := json.Marshal(payload)
-	if err != nil {
-		return "", "", false
-	}
-	var in struct {
-		AgentSessionID string `json:"agentSessionId"`
-		Messages       []struct {
-			Payload struct {
-				Role string `json:"role"`
-				Text string `json:"text"`
-			} `json:"payload"`
-		} `json:"messages"`
-	}
-	if err := json.Unmarshal(raw, &in); err != nil {
+	in, ok := wire.DecodePayload[wire.AgentMessagesPayload](payload)
+	if !ok {
 		return "", "", false
 	}
 	session = strings.TrimSpace(in.AgentSessionID)

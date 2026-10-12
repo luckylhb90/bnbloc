@@ -12,6 +12,7 @@ import (
 
 	"github.com/luckylhb90/bnbloc/internal/httpx"
 	"github.com/luckylhb90/bnbloc/internal/ids"
+	"github.com/luckylhb90/bnbloc/internal/wire"
 
 	"github.com/luckylhb90/bnbloc/internal/membership"
 	"github.com/luckylhb90/bnbloc/internal/obs"
@@ -207,14 +208,14 @@ func writeAttachmentHeaders(h http.Header, att store.Attachment) {
 
 // validateAttachmentIDs confirms every id belongs to the room and returns their
 // metadata for embedding in the chat_message payload.
-func (s *Service) validateAttachmentIDs(ctx context.Context, roomID string, ids []string) ([]map[string]any, error) {
+func (s *Service) validateAttachmentIDs(ctx context.Context, roomID string, ids []string) ([]wire.ChatAttachment, error) {
 	if len(ids) == 0 {
 		return nil, nil
 	}
 	if !s.attachmentsReady() {
 		return nil, errors.New("attachments not configured")
 	}
-	out := make([]map[string]any, 0, len(ids))
+	out := make([]wire.ChatAttachment, 0, len(ids))
 	for _, id := range ids {
 		att, ok, err := s.Attachments.GetAttachment(ctx, roomID, strings.TrimSpace(id))
 		if err != nil {
@@ -228,13 +229,8 @@ func (s *Service) validateAttachmentIDs(ctx context.Context, roomID string, ids 
 	return out, nil
 }
 
-func attachmentMeta(a store.Attachment) map[string]any {
-	return map[string]any{
-		"id":          a.ID,
-		"filename":    a.Filename,
-		"contentType": a.ContentType,
-		"size":        a.Size,
-	}
+func attachmentMeta(a store.Attachment) wire.ChatAttachment {
+	return wire.ChatAttachment{ID: a.ID, Filename: a.Filename, ContentType: a.ContentType, Size: a.Size}
 }
 
 func sanitizeFilename(name string) string {

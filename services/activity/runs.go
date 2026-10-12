@@ -249,14 +249,8 @@ func (s *Service) replyRoomSeq(ctx context.Context, j store.AgentJob, messageID 
 // batchHasMessage reports whether a persisted agent_messages batch carries
 // the reply with this messageId.
 func batchHasMessage(payload json.RawMessage, messageID string) bool {
-	var p struct {
-		Messages []struct {
-			Payload struct {
-				MessageID string `json:"messageId"`
-			} `json:"payload"`
-		} `json:"messages"`
-	}
-	if json.Unmarshal(payload, &p) != nil {
+	p, ok := wire.DecodePayload[wire.AgentMessagesPayload](payload)
+	if !ok {
 		return false
 	}
 	for _, m := range p.Messages {

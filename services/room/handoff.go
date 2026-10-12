@@ -94,39 +94,20 @@ func (s *Service) handleGetHandoff(w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, http.StatusOK, info)
 }
 
-// feedPayload is the read view of a feed row's payload the handoff needs:
-// chat attribution/attachments/recipient, and agent session attribution.
+// feedPayload is the read view of a feed row's payload the handoff needs: a
+// chat row's attribution, attachments and recipient, or an agent batch's
+// session and messages (one row is one kind; the other half stays zero).
 type feedPayload struct {
-	UserID      string          `json:"userId"`
-	Text        string          `json:"text"`
-	Attachments []attachmentRef `json:"attachments"`
-	Recipient   *struct {
-		OwnerID  string `json:"ownerId"`
-		Provider string `json:"provider"`
-		Core     string `json:"core"`
-	} `json:"recipient"`
-	AgentSessionID string `json:"agentSessionId"`
-	Messages       []struct {
-		Payload struct {
-			Text        string `json:"text"`
-			OwnerUserID string `json:"ownerUserId"`
-			Provider    string `json:"provider"`
-		} `json:"payload"`
-		CreatedAtUnixMs int64 `json:"createdAtUnixMs"`
-	} `json:"messages"`
+	wire.ChatMessagePayload
+	AgentSessionID string              `json:"agentSessionId"`
+	Messages       []wire.AgentMessage `json:"messages"`
 }
 
 // attachmentRef is the attachment metadata a chat payload embeds.
-type attachmentRef struct {
-	ID          string `json:"id"`
-	Filename    string `json:"filename"`
-	ContentType string `json:"contentType"`
-	Size        int64  `json:"size"`
-}
+type attachmentRef = wire.ChatAttachment
 
 func decodeFeedPayload(raw json.RawMessage) feedPayload {
-	var p feedPayload
-	_ = json.Unmarshal(raw, &p)
+	p, _ := wire.DecodePayload[feedPayload](raw)
 	return p
 }
 

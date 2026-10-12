@@ -265,10 +265,11 @@ func (h *Hub) Publish(ev wire.Event) wire.Event {
 // closed (see deliver), and the client reconnects and catches up from
 // history.
 func (h *Hub) PublishCommit(ev wire.Event, d Durable) (wire.Event, error) {
+	spec, _ := wire.LookupEventKind(ev.Kind)
 	switch {
-	case wire.PersistedFeedKind(ev.Kind):
+	case spec.Durable:
 		return h.enqueue(&pending{ev: ev, d: d, durable: true, deliver: true})
-	case ev.Kind == wire.EventMemberRemoved || ev.Kind == wire.EventRoomDeleted:
+	case spec.Revocation:
 		ev.Sequence = 0
 		return h.enqueue(&pending{ev: ev, deliver: true})
 	default:

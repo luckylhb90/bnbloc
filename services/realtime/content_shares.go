@@ -101,16 +101,6 @@ func (s *Service) notifyRoomShare(ctx context.Context, g contentshare.Grant, mem
 // joinedMember reads a member_joined payload: typed in-process, a decoded
 // JSON map through the internal ingest.
 func joinedMember(ev wire.Event) string {
-	switch p := ev.Payload.(type) {
-	case wire.MemberJoinedPayload:
-		return strings.TrimSpace(p.UserID)
-	case *wire.MemberJoinedPayload:
-		if p != nil {
-			return strings.TrimSpace(p.UserID)
-		}
-	case map[string]any:
-		u, _ := p["userId"].(string)
-		return strings.TrimSpace(u)
-	}
-	return ""
+	p, _ := wire.DecodePayload[wire.MemberJoinedPayload](ev.Payload)
+	return strings.TrimSpace(p.UserID)
 }

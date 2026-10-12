@@ -333,25 +333,14 @@ func (f *peopleFilter) skip(ev wire.Event) bool {
 }
 
 // revocation reports whether ev ends access to its room: the room was
-// deleted (user "", every member) or one member was removed. The payload is
-// a typed wire.MemberRemovedPayload in-process and a decoded JSON map when
-// it arrived through the internal ingest.
+// deleted (user "", every member) or one member was removed.
 func revocation(ev wire.Event) (user string, revoked bool) {
 	switch ev.Kind {
 	case wire.EventRoomDeleted:
 		return "", true
 	case wire.EventMemberRemoved:
-		switch p := ev.Payload.(type) {
-		case wire.MemberRemovedPayload:
-			return p.UserID, p.UserID != ""
-		case *wire.MemberRemovedPayload:
-			if p != nil {
-				return p.UserID, p.UserID != ""
-			}
-		case map[string]any:
-			u, _ := p["userId"].(string)
-			return u, u != ""
-		}
+		p, ok := wire.DecodePayload[wire.MemberRemovedPayload](ev.Payload)
+		return p.UserID, ok && p.UserID != ""
 	}
 	return "", false
 }
@@ -734,11 +723,9 @@ func (s *Service) durable(ctx context.Context, ev wire.Event, author, clientMsgI
 	if err != nil {
 		return realtime.Durable{}, err
 	}
-	if author == "" {
-		if p, ok := ev.Payload.(map[string]any); ok {
-			if u, ok := p["userId"].(string); ok {
-				author = u
-			}
+	if author == "" && ev.Kind == wire.KindChatMessage {
+		if p, ok := wire.DecodePayload[wire.ChatMessagePayload](ev.Payload); ok {
+			author = p.UserID
 		}
 	}
 	payload, err := json.Marshal(ev.Payload)

@@ -2,7 +2,6 @@ package notify
 
 import (
 	"context"
-	"encoding/json"
 	"log/slog"
 	"strconv"
 	"strings"
@@ -100,12 +99,11 @@ func (o *Observer) Observe(ctx context.Context, ev wire.Event) {
 	obs := observation{tenantID: tenant.FromContext(ctx), kind: ev.Kind, roomID: ev.RoomID, channelID: ev.ChannelID, seq: ev.Sequence, atMs: ev.AtUnixMs}
 	switch ev.Kind {
 	case wire.KindChatMessage:
-		p, ok := ev.Payload.(map[string]any)
+		p, ok := wire.DecodePayload[wire.ChatMessagePayload](ev.Payload)
 		if !ok {
 			return
 		}
-		obs.author, _ = p["userId"].(string)
-		obs.text, _ = p["text"].(string)
+		obs.author, obs.text = p.UserID, p.Text
 		if !strings.Contains(obs.text, "@") {
 			return
 		}
@@ -143,15 +141,8 @@ func (o *Observer) Observe(ctx context.Context, ev wire.Event) {
 }
 
 func decodeJob(payload any) (jobView, bool) {
-	raw, err := json.Marshal(payload)
-	if err != nil {
-		return jobView{}, false
-	}
-	var j jobView
-	if err := json.Unmarshal(raw, &j); err != nil || j.JobID == "" {
-		return jobView{}, false
-	}
-	return j, true
+	j, ok := wire.DecodePayload[jobView](payload)
+	return j, ok && j.JobID != ""
 }
 
 // Run processes queued observations until ctx ends, and emits parked
