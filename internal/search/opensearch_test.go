@@ -255,7 +255,7 @@ func TestSearchQueryShape(t *testing.T) {
 	if err := json.Unmarshal([]byte(body), &q); err != nil {
 		t.Fatalf("search body %q: %v", body, err)
 	}
-	want := `{"_source":["tenant","room","seq"],"query":{"bool":{"filter":[{"term":{"tenant":"acme"}},{"terms":{"room":["room-1","room-2"]}},{"term":{"deleted":false}},{"range":{"createdAt":{"lt":900}}}],"must":[{"match_phrase":{"text":"deploy"}}]}},"size":7,"sort":[{"createdAt":{"order":"desc"}},{"seq":{"order":"desc"}}],"track_total_hits":false}`
+	want := `{"_source":["tenant","room","seq"],"query":{"bool":{"filter":[{"term":{"tenant":"acme"}},{"terms":{"room":["room-1","room-2"]}},{"term":{"deleted":false}},{"range":{"createdAt":{"lt":900}}}],"must":[{"match_phrase":{"text":"deploy"}}]}},"size":7,"sort":[{"createdAt":{"order":"desc"}},{"seq":{"order":"desc"}},{"room":{"order":"desc"}}],"track_total_hits":false}`
 	if got, _ := json.Marshal(q); string(got) != want {
 		t.Fatalf("search body:\n got %s\nwant %s", got, want)
 	}

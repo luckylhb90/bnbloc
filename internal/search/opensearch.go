@@ -633,6 +633,8 @@ func (o *OpenSearch) query(ctx context.Context, tenantID string, q store.Message
 		"sort": []any{
 			map[string]any{"createdAt": map[string]any{"order": "desc"}},
 			map[string]any{"seq": map[string]any{"order": "desc"}},
+			// The store's full tie-break (SearchRoomMessages order): room id.
+			map[string]any{"room": map[string]any{"order": "desc"}},
 		},
 	}
 	if after != nil {

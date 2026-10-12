@@ -196,9 +196,11 @@ func (q MessageSearch) Admits(tenantID string, src SearchSource) bool {
 
 var _ ChatIndex = (*MemoryChat)(nil)
 
-func (s *MemoryChat) isDeleted(rk string, seq int64) bool {
-	return s.deleted[rk+"\x00"+strconv.FormatInt(seq, 10)]
-}
+// deletedKey is the s.deleted key of message seq of the room stored under rk.
+func deletedKey(rk string, seq int64) string { return rk + "\x00" + strconv.FormatInt(seq, 10) }
+
+// isDeleted is the memory side of sqlNotDeleted.
+func (s *MemoryChat) isDeleted(rk string, seq int64) bool { return s.deleted[deletedKey(rk, seq)] }
 
 // GetRoomMessage returns one live message by sequence.
 func (s *MemoryChat) GetRoomMessage(ctx context.Context, roomID string, seq int64) (RoomMessage, bool, error) {

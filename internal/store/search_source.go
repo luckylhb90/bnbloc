@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"sort"
-	"strconv"
 	"strings"
 )
 
@@ -117,7 +116,7 @@ func (s *MemoryChat) ScanSearchSources(_ context.Context, cursor string, batch i
 func (s *MemoryChat) sourceLocked(rk string, m RoomMessage) SearchSource {
 	i := strings.LastIndex(rk, "\x00")
 	m.TenantID = rk[:i]
-	return SearchSource{RoomMessage: m, Deleted: s.deleted[rk+"\x00"+strconv.FormatInt(m.Seq, 10)]}
+	return SearchSource{RoomMessage: m, Deleted: s.isDeleted(rk, m.Seq)}
 }
 
 // --- MySQLChat ---

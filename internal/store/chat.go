@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"sort"
-	"strconv"
 	"strings"
 	"sync"
 
@@ -256,7 +255,7 @@ func (s *MemoryChat) DeleteRoomMessage(ctx context.Context, roomID string, seq i
 			if m.Author != requester {
 				return false, nil
 			}
-			s.deleted[rk+"\x00"+strconv.FormatInt(seq, 10)] = true
+			s.deleted[deletedKey(rk, seq)] = true
 			return true, nil
 		}
 	}
