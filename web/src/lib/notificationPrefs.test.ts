@@ -1,4 +1,4 @@
-import { DEFAULT_NOTIFICATION_PREFS, describeTestResult, isRoomMuted, withRoomMuted } from "./notificationPrefs.ts";
+import { DEFAULT_NOTIFICATION_PREFS, NOTIFICATION_TOGGLES, describeTestResult, isRoomMuted, withRoomMuted } from "./notificationPrefs.ts";
 
 // The web tsconfig has no node types, so the tests use a local runner (same
 // convention as the other *.test.ts files); a failure throws and fails `node --test`.
@@ -50,4 +50,10 @@ test("test-send outcomes read as toasts", () => {
     ok: false,
     message: "Test notification failed: notifier answered HTTP 401",
   });
+});
+
+test("every preference switch has a toggle, the content ones included", () => {
+  const keys = Object.entries(DEFAULT_NOTIFICATION_PREFS).filter(([, v]) => typeof v === "boolean").map(([k]) => k).sort();
+  assert.deepEqual(NOTIFICATION_TOGGLES.map((t) => t.key).sort(), keys);
+  assert.equal(DEFAULT_NOTIFICATION_PREFS.contentShared && DEFAULT_NOTIFICATION_PREFS.contentReview, true);
 });

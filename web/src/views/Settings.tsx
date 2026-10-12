@@ -3,7 +3,7 @@ import { BellSlashIcon } from "@phosphor-icons/react";
 import { api, type Room } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { notificationsApi } from "@/lib/notificationsApi";
-import { withRoomMuted, type NotificationPrefs } from "@/lib/notificationPrefs";
+import { NOTIFICATION_TOGGLES, withRoomMuted, type NotificationPrefs } from "@/lib/notificationPrefs";
 import { PageHeader } from "@/ui/Page";
 import { Card } from "@/ui/Card";
 import { Button } from "@/ui/Button";
@@ -18,14 +18,6 @@ import { MyBudget } from "@/views/settings/MyBudget";
 import { AgentSandbox } from "@/views/settings/AgentSandbox";
 import { ProfileSettings } from "@/views/settings/ProfileSettings";
 
-type Toggle = "mentions" | "agentFinished" | "agentFailed" | "borrowRequests";
-
-const TOGGLES: { key: Toggle; label: string; hint: string }[] = [
-  { key: "mentions", label: "Mentions", hint: "Someone @-mentions you in a room." },
-  { key: "agentFinished", label: "Agent finished", hint: "An agent finished a request you sent it." },
-  { key: "agentFailed", label: "Agent failed", hint: "An agent could not complete a request you sent it." },
-  { key: "borrowRequests", label: "Borrow requests", hint: "A member asks to use (or needs more runs of) your agent." },
-];
 
 // Settings holds the member's personal settings. Notifications are delivered
 // by the notifier components the platform admin installed; these switches
@@ -93,7 +85,7 @@ export function Settings() {
             </p>
           </div>
           <Card className="divide-y divide-[var(--color-border)]">
-            {TOGGLES.map((t) => (
+            {NOTIFICATION_TOGGLES.map((t) => (
               <label key={t.key} className="flex cursor-pointer items-center justify-between gap-4 px-4 py-3">
                 <span className="min-w-0">
                   <span className="block text-sm font-medium">{t.label}</span>

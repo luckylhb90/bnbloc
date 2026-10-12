@@ -8,8 +8,24 @@ export interface NotificationPrefs {
   agentFinished: boolean;
   agentFailed: boolean;
   borrowRequests: boolean;
+  contentShared: boolean;
+  contentReview: boolean;
   quietRooms: string[];
 }
+
+// NotificationToggle is a per-type switch of the member's preferences.
+export type NotificationToggle = "mentions" | "agentFinished" | "agentFailed" | "borrowRequests" | "contentShared" | "contentReview";
+
+// NOTIFICATION_TOGGLES are Settings → Notifications' switches, one per
+// notification type a member can turn off.
+export const NOTIFICATION_TOGGLES: readonly { readonly key: NotificationToggle; readonly label: string; readonly hint: string }[] = [
+  { key: "mentions", label: "Mentions", hint: "Someone @-mentions you in a room." },
+  { key: "agentFinished", label: "Agent finished", hint: "An agent finished a request you sent it." },
+  { key: "agentFailed", label: "Agent failed", hint: "An agent could not complete a request you sent it." },
+  { key: "borrowRequests", label: "Borrow requests", hint: "A member asks to use (or needs more runs of) your agent." },
+  { key: "contentShared", label: "Shared with you", hint: "Someone shares an expert, skill pack or prompt pack with you, or with a room you join." },
+  { key: "contentReview", label: "Content reviews", hint: "Content waits for your approval as an organization admin, or an admin decided on content you asked to publish." },
+];
 
 // A notifier component as the member sees it (the organization's delivery).
 // An opt-in notifier reaches the member only once they turned it on.
@@ -41,6 +57,8 @@ export const DEFAULT_NOTIFICATION_PREFS: NotificationPrefs = {
   agentFinished: true,
   agentFailed: true,
   borrowRequests: true,
+  contentShared: true,
+  contentReview: true,
   quietRooms: [],
 };
 
