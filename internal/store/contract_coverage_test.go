@@ -15,50 +15,11 @@ import (
 // contractPending are store interfaces implemented by both a memory and a
 // MySQL store that have no contract test yet. The list only shrinks; Batch
 // 4.1 of the code-health plan empties it.
-var contractPending = map[string]bool{
-	"APITokenStore":               true,
-	"AuditLogReader":              true,
-	"ComponentInstallStore":       true,
-	"ContentComponentStore":       true,
-	"ExtensionAuditStore":         true,
-	"GrantStore":                  true,
-	"NotificationOutboxStore":     true,
-	"NotificationPrefsStore":      true,
-	"NotificationReplyTokenStore": true,
-	"PlatformSettingsStore":       true,
-	"QuotaRequestStore":           true,
-	"RefreshTokenStore":           true,
-	"RetentionStore":              true,
-	"SSOHandoffStore":             true,
-	"UsageBudgetStore":            true,
-	"WebPushSubscriptionStore":    true,
-}
+var contractPending = map[string]bool{}
 
 // rigPending are store test files that still open MySQL outside the one rig.
 // The list only shrinks; Batch 4.1 empties it.
-var rigPending = map[string]bool{
-	"api_tokens_test.go":                    true,
-	"audit_log_test.go":                     true,
-	"content_components_test.go":            true,
-	"content_drafts_test.go":                true,
-	"content_gap_test.go":                   true,
-	"content_prompt_uses_test.go":           true,
-	"content_sharing_migration_test.go":     true,
-	"content_sharing_test.go":               true,
-	"content_usage_test.go":                 true,
-	"grant_usage_test.go":                   true,
-	"mysql_auth_state_test.go":              true,
-	"notification_dispatch_test.go":         true,
-	"notification_outbox_migration_test.go": true,
-	"notification_replies_test.go":          true,
-	"notification_reply_refs_test.go":       true,
-	"notifications_test.go":                 true,
-	"retention_test.go":                     true,
-	"run_reservations_test.go":              true,
-	"team_billing_test.go":                  true,
-	"usage_budgets_test.go":                 true,
-	"web_push_test.go":                      true,
-}
+var rigPending = map[string]bool{}
 
 // TestEveryStoreInterfaceHasContract fails when a store interface with a
 // memory and a MySQL implementation (a Backends field, or

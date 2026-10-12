@@ -18,30 +18,7 @@ import (
 // tenant-scoped table without naming tenant_id and without a
 // `cross-tenant: <reason>` comment yet. The list only shrinks; Batch 4.3 of
 // the code-health plan empties it.
-var tenantFilterPending = map[string]bool{
-	"content_prompt_uses.go:MySQLContentComponents.RecordContentPromptUse":           true,
-	"content_usage.go:MySQLContentComponents.CountMemberUses":                        true,
-	"mysql_content_components.go:MySQLContentComponents.AddContentComponentVersion":  true,
-	"mysql_content_components.go:MySQLContentComponents.CountContentUses":            true,
-	"mysql_content_components.go:MySQLContentComponents.DeleteContentComponent":      true,
-	"mysql_content_components.go:MySQLContentComponents.DeleteContentUse":            true,
-	"mysql_content_components.go:MySQLContentComponents.GetContentComponent":         true,
-	"mysql_content_components.go:MySQLContentComponents.SetContentComponentStatus":   true,
-	"mysql_content_components.go:MySQLContentComponents.SetContentComponentTenants":  true,
-	"mysql_content_publish_requests.go:MySQLContentComponents.CreateContentRequest":  true,
-	"mysql_content_publish_requests.go:MySQLContentComponents.GetContentRequest":     true,
-	"mysql_content_publish_requests.go:MySQLContentComponents.ReopenContentRequest":  true,
-	"mysql_content_room_shares.go:MySQLContentComponents.DeleteContentRoomShare":     true,
-	"mysql_notifications.go:MySQLNotifications.PruneNotifications":                   true,
-	"mysql_retention.go:MySQLRetention.PurgeExpiredDrafts":                           true,
-	"mysql_retention.go:MySQLRetention.ReferencedBlobKeys":                           true,
-	"notification_replies.go:MySQLNotificationReplies.DeleteNotificationReplyTokens": true,
-	"notification_replies.go:MySQLNotificationReplies.PruneNotificationReplyTokens":  true,
-	"ops_stats.go:MySQLNotifications.NotificationOutboxStats":                        true,
-	"refresh_tokens.go:MySQLRefreshToken.GetRefreshFamily":                           true,
-	"refresh_tokens.go:MySQLRefreshToken.ListRefreshFamilies":                        true,
-	"refresh_tokens.go:MySQLRefreshToken.RevokeRefreshFamily":                        true,
-}
+var tenantFilterPending = map[string]bool{}
 
 var (
 	createTableRe = regexp.MustCompile("(?s)CREATE TABLE IF NOT EXISTS `?(\\w+)`?\\s*\\((.*?)\\n\\)")

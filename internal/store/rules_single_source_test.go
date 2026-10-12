@@ -18,36 +18,7 @@ import (
 // rule and file. The list only shrinks: a new copy fails the test, and an
 // entry whose count dropped must be lowered (or removed) with the change
 // that removed the copy. Batch 4.3 of the code-health plan empties it.
-var storeRuleCopies = map[string]map[string]int{
-	"expiry-inline": {
-		"api_tokens.go":              1,
-		"content_drafts.go":          1,
-		"notification_replies.go":    1,
-		"notification_reply_refs.go": 1,
-		"refresh_tokens.go":          4,
-		"sso_handoffs.go":            2,
-	},
-	"limit-clamp": {
-		"audit_log.go":                2,
-		"content_components.go":       1,
-		"content_publish_requests.go": 1,
-		"grants.go":                   2,
-		"mysql_grant.go":              2,
-		"mysql_notifications.go":      2,
-		"notification_replies.go":     1,
-		"notifications.go":            1,
-		"quota_requests.go":           1,
-		"retention.go":                1,
-	},
-	"mysql-error": {
-		"api_tokens.go":           1,
-		"mysql_quota_requests.go": 2,
-		"sso_handoffs.go":         1,
-	},
-	"null-helper": {
-		"mysql_grant.go": 4,
-	},
-}
+var storeRuleCopies = map[string]map[string]int{}
 
 // storeRuleOwners are the files allowed to spell each rule.
 var storeRuleOwners = map[string][]string{

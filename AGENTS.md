@@ -1253,12 +1253,19 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   `bnbloc_retention` advisory lock) purges per tenant and kind through
   `store.RetentionStore`, in batches along a `(tenant_id, <age>)` index. A new
   table holding retained data gets a purge step and an age index there, or is
-  explicitly out of scope in the PRD. **Any new column or setting that stores
-  a blob key MUST be added to `RetentionStore.ReferencedBlobKeys` (both
-  implementations) in the same change**, or the daily blob collection deletes
-  the blob once the 7-day grace period passes. Never delete blobs from a
-  feature path: content-addressed blobs are shared across rows, and only the
-  collection removes them.
+  explicitly out of scope in the PRD. **Any new column that stores a blob key
+  MUST join `blobKeySources` (`internal/store/retention.go`, the one list both
+  `ReferencedBlobKeys` implementations read) in the same change**
+  (`TestBlobKeyColumnsReferenced` fails on a `*blob_key` column missing
+  there); a platform setting is scanned for `sha256/<hex>` keys. Otherwise
+  the daily blob collection deletes the blob once the 7-day grace period
+  passes. Never delete blobs from a feature path: content-addressed blobs are
+  shared across rows, and only the collection removes them.
+- **A platform setting is read-modify-written through
+  `store.UpdatePlatformSetting`** (compare-and-set over
+  `PlatformSettingsStore.SwapPlatformSetting`, re-applied when a concurrent
+  writer won), never `Get` then `Put`: two hosts saving the platform-agent
+  policy at once used to lose one entry (`store.UpdatePlatformAgents`).
 - **Never delete a room's max-seq `room_messages` row.** The hub seeds
   sequences from `MaxRoomSeq`; retention redacts that row into a soft-deleted
   `retention_fence` row instead, and any other bulk-delete path must do the
