@@ -499,19 +499,22 @@ export interface ExpertMarker {
   readonly name: string;
   readonly displayName?: string;
   readonly version: string;
+  // An unsaved draft worn for a quick try (the builder's try_draft).
+  readonly draft?: boolean;
 }
 
 export function expertMarker(payload: unknown): ExpertMarker | undefined {
   if (!payload || typeof payload !== "object") return undefined;
   const e = (payload as { expert?: unknown }).expert;
   if (!e || typeof e !== "object") return undefined;
-  const { id, name, displayName, version } = e as Record<string, unknown>;
+  const { id, name, displayName, version, draft } = e as Record<string, unknown>;
   if (typeof id !== "string" || !id || typeof name !== "string") return undefined;
   return {
     id,
     name,
     displayName: typeof displayName === "string" && displayName ? displayName : undefined,
     version: typeof version === "string" ? version : "",
+    ...(draft === true ? { draft: true } : {}),
   };
 }
 

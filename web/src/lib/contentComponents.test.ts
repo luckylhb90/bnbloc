@@ -160,6 +160,11 @@ assert(!matchesContent(comp({}), "deploy"), "no match");
 
 // The chat payload marker and its badge.
 eq(expertMarker({ expert: { id: "cc_1", name: "reviewer", displayName: "Reviewer", version: "1.2.0" } }), { id: "cc_1", name: "reviewer", displayName: "Reviewer", version: "1.2.0" }, "marker");
+eq(
+  expertMarker({ expert: { id: "cd_1", name: "reviewer", displayName: "Reviewer", version: "1.0.0", draft: true } }),
+  { id: "cd_1", name: "reviewer", displayName: "Reviewer", version: "1.0.0", draft: true },
+  "a quick try's draft marker",
+);
 eq(expertMarker({ text: "x" }), undefined, "no marker");
 eq(expertMarker({ expert: { name: "x" } }), undefined, "marker without id");
 eq(expertBadge({ name: "reviewer", displayName: "Reviewer", version: "1.2.0" }), "Reviewer v1.2.0", "badge");

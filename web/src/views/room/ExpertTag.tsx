@@ -8,11 +8,11 @@ export function ExpertTag({ expert, className }: { readonly expert: ExpertMarker
   return (
     <span
       data-expert
-      title={`The agent answered as the expert ${label}`}
+      title={expert.draft ? `The agent tried the unsaved draft ${label}` : `The agent answered as the expert ${label}`}
       className={"inline-flex min-w-0 items-center gap-1 text-[0.68rem] text-[var(--color-accent)] " + (className ?? "")}
     >
       <BrainIcon size={12} weight="fill" className="shrink-0" />
-      <span className="truncate">expert {label}</span>
+      <span className="truncate">{expert.draft ? `draft ${label}` : `expert ${label}`}</span>
     </span>
   );
 }
