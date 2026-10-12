@@ -676,11 +676,21 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   `extpipe.MemberVisibility`, for executable and content components alike
   (room pins and uses come in through `internal/contentuse`). Never
   re-derive visibility in a handler.
-- **Agent-config paths are bnbloc-owned** (`CLAUDE.md`, `AGENTS.md`,
-  `.claude/skills/**`, `.agents/skills/**`, `.opencode/**`, `.mcp.json`):
-  never deliverables, site content or code sync; write-denied in sandboxed
-  drives. A core's file writer accepts only `core.WorkspaceFileAllowed`
-  paths.
+- **Workspace paths have one policy: `core/workspace_paths.go`.**
+  `core.BnblocOwnedPath` is what bnbloc writes for the agent (`.room/`,
+  `CLAUDE.md`, `AGENTS.md`, `.claude/skills/**`, `.agents/skills/**`,
+  `.opencode/**`, `.mcp.json`); `core.HostExecutableProjectConfig` is the
+  project config a harness executes on the host (`.claude/**`,
+  `CLAUDE.local.md`, `.codex/**`, `opencode.json(c)`), matched
+  case-insensitively. Neither is the room's project
+  (`core.ProtectedWorkspacePath`): never a deliverable, site content,
+  code sync (either direction) or packed component; write-denied in
+  sandboxed drives and cleared from the sandbox workdir before a fresh
+  session. A core's file writer accepts only `core.WorkspaceFileAllowed`
+  (owned) paths. Every consumer is checked against one table
+  (`core/testdata/workspace_paths.json`, `TestBnblocOwnedPathAgreesEverywhere`
+  and its sync/packer siblings); `TestWorkspacePathPolicySingleOwner`
+  forbids a local prefix check.
 - **Agent profiles are per session.** A profile goes only to a core
   advertising `agentProfile` (`core.Supports`); its content checksum is part
   of the bridge session key; contributed MCP servers and env stay out of it.

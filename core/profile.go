@@ -4,7 +4,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"log/slog"
-	"path"
 	"regexp"
 	"sort"
 	"strings"
@@ -140,64 +139,6 @@ func (p *AgentProfile) ContentSum() string {
 		}
 	}
 	return hex.EncodeToString(h.Sum(nil))
-}
-
-// AgentConfigPaths are the workspace paths an agent reads its configuration
-// from (instructions files, skills directories, MCP config). They are the
-// only paths outside .room/ a WorkspaceFileWriter accepts, and they are
-// bnbloc-owned: never published as deliverables, never code-synced, and
-// write-denied in sandboxed runs. A trailing "/" names a directory tree.
-var AgentConfigPaths = []string{
-	"CLAUDE.md",
-	"AGENTS.md",
-	".claude/skills/",
-	".agents/skills/",
-	".opencode/",
-	".mcp.json",
-}
-
-// RoomContextDir is the bridge's pull-based room context tree.
-const RoomContextDir = ".room/"
-
-// IsAgentConfigPath reports whether a workspace-relative, slash-separated
-// path is (or lies under) one of AgentConfigPaths.
-func IsAgentConfigPath(rel string) bool {
-	rel = strings.TrimPrefix(path.Clean("/"+strings.ReplaceAll(rel, "\\", "/")), "/")
-	for _, p := range AgentConfigPaths {
-		if strings.HasSuffix(p, "/") {
-			dir := strings.TrimSuffix(p, "/")
-			if rel == dir || strings.HasPrefix(rel, p) {
-				return true
-			}
-			continue
-		}
-		if rel == p {
-			return true
-		}
-	}
-	return false
-}
-
-// WorkspaceFileAllowed is the WorkspaceFileWriter path contract: a clean
-// relative path inside .room/ or one of AgentConfigPaths. Cores enforce it
-// on every write; callers never write anywhere else.
-func WorkspaceFileAllowed(rel string) bool {
-	if rel == "" || strings.Contains(rel, "\\") || strings.HasPrefix(rel, "/") {
-		return false
-	}
-	clean := path.Clean(rel)
-	if clean != rel || clean == "." || clean == ".." || strings.HasPrefix(clean, "../") {
-		return false
-	}
-	if strings.HasPrefix(clean, RoomContextDir) {
-		return true
-	}
-	for _, p := range AgentConfigPaths {
-		if clean == p || (strings.HasSuffix(p, "/") && strings.HasPrefix(clean, p)) {
-			return true
-		}
-	}
-	return false
 }
 
 // maxBundlePath bounds one bundle path.

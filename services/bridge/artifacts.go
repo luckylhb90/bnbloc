@@ -86,7 +86,7 @@ var ignoredDeliverableExts = map[string]bool{
 
 // ignoredDeliverable reports a workspace path the publisher never publishes.
 func ignoredDeliverable(rel string) bool {
-	if ignoredDeliverableExts[strings.ToLower(path.Ext(rel))] || dependencyPath(rel, false) || bnblocOwnedPath(rel) {
+	if ignoredDeliverableExts[strings.ToLower(path.Ext(rel))] || dependencyPath(rel, false) || corepkg.ProtectedWorkspacePath(rel) {
 		return true
 	}
 	segs := strings.Split(rel, "/")

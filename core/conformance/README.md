@@ -33,7 +33,7 @@ Two optional capabilities carry contract checks beyond "it answers":
 
 - `writeFile`: a `.room/` file and an agent-config file
   (`.agents/skills/…`) are written, and a path outside `.room/` and
-  `core.AgentConfigPaths` must be refused (`core.WorkspaceFileAllowed`).
+  `core.BnblocOwnedPaths` must be refused (`core.WorkspaceFileAllowed`).
 - `agentProfile`: a session created with a profile (instructions, a skill,
   an env var) must start.
 

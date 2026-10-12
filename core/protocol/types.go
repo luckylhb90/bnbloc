@@ -192,7 +192,7 @@ type CreateSessionRequest struct {
 //   - Env is extra process environment.
 //
 // Files the core writes live only under the workspace's agent-config paths
-// (core.AgentConfigPaths). Env values and MCP header/env values are secrets:
+// (core.BnblocOwnedPaths). Env values and MCP header/env values are secrets:
 // a core never logs or persists them. A core that cannot honor a profile
 // answers bad_request rather than silently dropping it.
 type AgentProfile struct {

@@ -38,7 +38,7 @@ import (
 // session binding: a turn whose content differs starts a new session.
 
 // fallbackSkillsDir is where the bridge writes skill files for a core
-// without agentProfile (one of core.AgentConfigPaths).
+// without agentProfile (one of core.BnblocOwnedPaths).
 const fallbackSkillsDir = ".agents/skills"
 
 // Fallback prompt bounds for skills inlined into the prefix (a core that
@@ -316,15 +316,19 @@ func (b *Bridge) writeFallbackSkills(ctx context.Context, coreName, workspaceID 
 	return true
 }
 
-// resetAgentConfig removes the bnbloc-owned agent-config paths from a
-// sandbox workdir before a fresh session is created in it: the workdir is
-// reused across sessions of a (room, core, provider), so a profile's files
-// are re-materialized from scratch whenever the content changes.
+// resetAgentConfig removes the protected paths (core.ProtectedWorkspacePaths:
+// the .room/ context, the agent config a session wears, host-executed
+// project config) from a sandbox workdir before a fresh session is created
+// in it. The workdir is reused across sessions of a (room, core, provider):
+// a profile's files and the room context are re-materialized from scratch,
+// and nothing a previous session left there (in particular project config
+// written from inside the sandbox, which the host-side deny-write cannot
+// see) is loaded by the next one.
 func resetAgentConfig(workdir string) {
 	if strings.TrimSpace(workdir) == "" {
 		return
 	}
-	for _, p := range corepkg.AgentConfigPaths {
+	for _, p := range corepkg.ProtectedWorkspacePaths() {
 		target := filepath.Join(workdir, filepath.FromSlash(strings.TrimSuffix(p, "/")))
 		if err := os.RemoveAll(target); err != nil {
 			slog.Warn("bnbloc bridge agent config reset failed",
@@ -333,14 +337,15 @@ func resetAgentConfig(workdir string) {
 	}
 }
 
-// agentConfigDenyWrite lists a workdir's agent-config paths for the host
-// confinement's DenyWrite: the agent must not edit the role it wears, nor
-// create one the workspace does not have yet. A directory keeps its
-// trailing "/" (the DenyWrite contract), so confinement can protect it
-// before it exists.
-func agentConfigDenyWrite(workdir string) []string {
-	out := make([]string, 0, len(corepkg.AgentConfigPaths))
-	for _, p := range corepkg.AgentConfigPaths {
+// protectedDenyWrite lists a workdir's protected paths for the host
+// confinement's DenyWrite: the agent must not edit the role it wears or the
+// room context, nor plant project config a harness would execute on the
+// host, nor create any of them. A directory keeps its trailing "/" (the
+// DenyWrite contract), so confinement can protect it before it exists.
+func protectedDenyWrite(workdir string) []string {
+	paths := corepkg.ProtectedWorkspacePaths()
+	out := make([]string, 0, len(paths))
+	for _, p := range paths {
 		path := filepath.Join(workdir, filepath.FromSlash(strings.TrimSuffix(p, "/")))
 		if strings.HasSuffix(p, "/") {
 			path += "/"
@@ -349,13 +354,6 @@ func agentConfigDenyWrite(workdir string) []string {
 	}
 	sort.Strings(out)
 	return out
-}
-
-// bnblocOwnedPath reports a workspace path bnbloc writes for the agent (the
-// .room/ context and the agent-config paths): never a deliverable, never
-// site content.
-func bnblocOwnedPath(rel string) bool {
-	return strings.HasPrefix(rel, corepkg.RoomContextDir) || corepkg.IsAgentConfigPath(rel)
 }
 
 // jobContentOrRefuse resolves the job's content. A job that names an expert

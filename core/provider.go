@@ -141,8 +141,8 @@ type SessionWorkdirReporter interface {
 // under .room/ so the agent consults it with its own file tools (pull) instead
 // of having history pushed into every prompt, and the agent-config files of a
 // profile (skills a core without agentProfile reads from .agents/skills/).
-// relPath must pass WorkspaceFileAllowed: inside .room/ or one of
-// AgentConfigPaths; a core refuses any other path. A core without it keeps
+// relPath must pass WorkspaceFileAllowed: a file under one of
+// BnblocOwnedPaths; a core refuses any other path. A core without it keeps
 // the push-based prompt context.
 type WorkspaceFileWriter interface {
 	WriteWorkspaceFile(ctx context.Context, ep Endpoint, workspaceID, relPath, content string) error

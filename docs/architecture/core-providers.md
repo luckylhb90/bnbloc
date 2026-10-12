@@ -154,13 +154,18 @@ contributor attaches a server the agent can reach instead of the core
 dropping it. A manifest declares it as `listTargets.targets.mcpTransports`
 (a list element's own `mcpTransports` wins).
 
-**Agent-config paths.** The `writeFile` path contract is `.room/` plus the
-fixed agent-config list `core.AgentConfigPaths` (`CLAUDE.md`, `AGENTS.md`,
-`.claude/skills/**`, `.agents/skills/**`, `.opencode/**`, `.mcp.json`);
-`core.WorkspaceFileAllowed` is the rule a core enforces on every write. These
-paths are bnbloc-owned: the bridge never publishes them as deliverables nor
-code-syncs them, and they are write-denied in sandboxed runs
-(`hostConfine.denyWrite`).
+**Workspace path policy** (`core/workspace_paths.go`). The `writeFile` path
+contract is `core.BnblocOwnedPaths`: `.room/` plus the agent config a
+session wears (`CLAUDE.md`, `AGENTS.md`, `.claude/skills/**`,
+`.agents/skills/**`, `.opencode/**`, `.mcp.json`); `core.WorkspaceFileAllowed`
+is the rule a core enforces on every write. Beside it,
+`core.HostExecutableProjectConfigPaths` names the project config a harness
+executes on the host (`.claude/**`, `CLAUDE.local.md`, `.codex/**`,
+`opencode.json(c)`). Neither kind is the room's project
+(`core.ProtectedWorkspacePath`): the bridge never publishes, site-snapshots,
+code-syncs (either direction) or packs them into a component, and both are
+write-denied in sandboxed runs (`hostConfine.denyWrite`) and cleared from a
+sandbox workdir before a fresh session.
 
 Vocabulary note: the codebase overloads "provider". **Core** = the daemon
 backend (an installed manifest or adapter core such as `acme`), carried on the wire as `core`. **Harness** = the

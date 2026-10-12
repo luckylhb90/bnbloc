@@ -252,10 +252,11 @@ func (s *sandboxRuntime) prepare(ctx context.Context, room, core, provider, owne
 		VMExec:      s.cfg.VMExec,
 		Workdir:     workdir,
 		Mounts:      []corepkg.PathMount{{Host: workdir, Guest: workdir}},
-		// The agent-config paths (an expert's instructions, skills, MCP
-		// config) are the role the session wears: the agent must not
-		// rewrite them, so a borrowed prompt cannot plant one.
-		HostConfine: corepkg.HostConfine{Workspace: workdir, DenyWrite: agentConfigDenyWrite(workdir)},
+		// The protected paths (the role the session wears, the room
+		// context, host-executed project config) are write-denied: a
+		// borrowed prompt can neither rewrite its role nor plant config a
+		// harness would execute on the host.
+		HostConfine: corepkg.HostConfine{Workspace: workdir, DenyWrite: protectedDenyWrite(workdir)},
 	}}, nil
 }
 

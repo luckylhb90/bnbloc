@@ -340,25 +340,3 @@ func TestForeignScriptContentRequiresTheSandbox(t *testing.T) {
 	}
 }
 
-// The agent-config paths are bnbloc-owned: never deliverables or site
-// content, and write-denied in a sandboxed drive.
-func TestAgentConfigPathsAreExcluded(t *testing.T) {
-	for _, p := range []string{"CLAUDE.md", "AGENTS.md", ".claude/skills/x/SKILL.md", ".agents/skills/x/run.sh", ".opencode/opencode.json", ".mcp.json", ".room/INDEX.md"} {
-		if !ignoredDeliverable(p) {
-			t.Errorf("%s publishes as a deliverable", p)
-		}
-		if _, ok := siteContentPath("", p); ok {
-			t.Errorf("%s is site content", p)
-		}
-	}
-	for _, p := range []string{"README.md", "docs/AGENTS.md", "src/main.go"} {
-		if ignoredDeliverable(p) {
-			t.Errorf("%s is not published", p)
-		}
-	}
-	deny := agentConfigDenyWrite("/w/space")
-	want := []string{"/w/space/.agents/skills/", "/w/space/.claude/skills/", "/w/space/.mcp.json", "/w/space/.opencode/", "/w/space/AGENTS.md", "/w/space/CLAUDE.md"}
-	if strings.Join(deny, ",") != strings.Join(want, ",") {
-		t.Errorf("deny-write = %v, want %v (directories keep their trailing /)", deny, want)
-	}
-}

@@ -1,0 +1,28 @@
+{
+  "comment": "One workspace path table, read by every consumer of the workspace path policy (core/workspace_paths.go): core predicates and WorkspaceFileAllowed, the bridge's deliverables, sites, sandbox deny-write and reset, the sync ignore, and save_component's packer. protected: never synced, published, packed, and write-denied in the sandbox. writable: a core's WorkspaceFileWriter accepts it. project: an ordinary project file every consumer keeps.",
+  "paths": [
+    {"path": ".room/INDEX.md", "protected": true, "writable": true},
+    {"path": ".room/attachments/a.png", "protected": true, "writable": true},
+    {"path": "./.room/chunk-1.md", "protected": true},
+    {"path": "CLAUDE.md", "protected": true, "writable": true},
+    {"path": "AGENTS.md", "protected": true, "writable": true},
+    {"path": ".claude/skills/review/SKILL.md", "protected": true, "writable": true},
+    {"path": ".agents/skills/x/run.sh", "protected": true, "writable": true},
+    {"path": ".opencode/opencode.json", "protected": true, "writable": true},
+    {"path": ".mcp.json", "protected": true, "writable": true},
+    {"path": ".claude/settings.json", "protected": true},
+    {"path": ".claude/settings.local.json", "protected": true},
+    {"path": ".claude/agents/reviewer.md", "protected": true},
+    {"path": ".claude/commands/ship.md", "protected": true},
+    {"path": ".claude/hooks/pre.sh", "protected": true},
+    {"path": ".Claude/Settings.json", "protected": true},
+    {"path": "CLAUDE.local.md", "protected": true},
+    {"path": ".codex/config.toml", "protected": true},
+    {"path": "opencode.json", "protected": true},
+    {"path": "opencode.jsonc", "protected": true},
+    {"path": "README.md", "project": true},
+    {"path": "src/main.go", "project": true},
+    {"path": "docs/AGENTS.md", "project": true},
+    {"path": "docs/opencode.json", "project": true}
+  ]
+}

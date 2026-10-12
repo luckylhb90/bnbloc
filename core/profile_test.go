@@ -41,15 +41,28 @@ func TestWorkspaceFileAllowed(t *testing.T) {
 	}
 }
 
-func TestIsAgentConfigPath(t *testing.T) {
-	for _, p := range []string{"CLAUDE.md", "AGENTS.md", ".claude/skills", ".claude/skills/a/SKILL.md", ".agents/skills/x", ".opencode", ".opencode/x", ".mcp.json"} {
-		if !IsAgentConfigPath(p) {
-			t.Errorf("%q not a config path", p)
+func TestWorkspacePathKinds(t *testing.T) {
+	for _, p := range []string{"CLAUDE.md", "AGENTS.md", ".claude/skills", ".claude/skills/a/SKILL.md", ".agents/skills/x", ".opencode", ".opencode/x", ".mcp.json", ".room", ".room/INDEX.md", "./.room/x", ".ROOM/x", "Claude.md"} {
+		if !BnblocOwnedPath(p) {
+			t.Errorf("%q not bnbloc-owned", p)
 		}
 	}
-	for _, p := range []string{"docs/CLAUDE.md", "AGENTS.md.bak", ".claude/settings.json", ".agents/other", "report.md"} {
-		if IsAgentConfigPath(p) {
-			t.Errorf("%q is a config path", p)
+	for _, p := range []string{"docs/CLAUDE.md", "AGENTS.md.bak", ".claude/settings.json", ".agents/other", "report.md", ".roomy/x"} {
+		if BnblocOwnedPath(p) {
+			t.Errorf("%q is bnbloc-owned", p)
+		}
+	}
+	// The project config a harness executes on the host: settings (hooks,
+	// env), agents, commands, hook scripts; also when spelled differently on
+	// a case-insensitive filesystem.
+	for _, p := range []string{".claude/settings.json", ".claude/settings.local.json", ".claude/agents/x.md", ".claude/commands/x.md", ".claude/hooks/h.sh", ".Claude/Settings.json", "CLAUDE.local.md", ".codex/config.toml", "opencode.json", "opencode.jsonc", `.claude\settings.json`} {
+		if !HostExecutableProjectConfig(p) {
+			t.Errorf("%q not host-executable project config", p)
+		}
+	}
+	for _, p := range []string{"src/.claude/settings.json", "opencode.json.md", "docs/opencode.json", "codex/config.toml"} {
+		if HostExecutableProjectConfig(p) {
+			t.Errorf("%q is host-executable project config", p)
 		}
 	}
 }

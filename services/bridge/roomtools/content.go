@@ -138,7 +138,10 @@ func cleanDir(dir string) (string, error) {
 }
 
 // packDir reads every file under dir from the workspace and packs them
-// (paths relative to dir) into a content bundle.
+// (paths relative to dir) into a content bundle. Protected workspace paths
+// (core.ProtectedWorkspacePath: room history, the agent config the session
+// wears, host-executed project config) are never packed: a component is
+// shared with other people.
 func packDir(ctx context.Context, ws Workspace, dir string) ([]byte, int, error) {
 	files, err := ws.ListFiles(ctx)
 	if err != nil {
@@ -149,7 +152,7 @@ func packDir(ctx context.Context, ws Workspace, dir string) ([]byte, int, error)
 	total := int64(0)
 	prefix := dir + "/"
 	for _, f := range files {
-		if !strings.HasPrefix(f.Path, prefix) {
+		if !strings.HasPrefix(f.Path, prefix) || core.ProtectedWorkspacePath(f.Path) {
 			continue
 		}
 		rel := strings.TrimPrefix(f.Path, prefix)

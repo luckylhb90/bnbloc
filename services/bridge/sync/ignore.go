@@ -33,10 +33,12 @@ func newIgnoreMatcher(extra []string) *ignoreMatcher {
 // base name or the full relative path.
 func (m *ignoreMatcher) match(rel string) bool {
 	rel = filepath.ToSlash(rel)
-	// The agent-config paths (an expert's instructions and skills, MCP
-	// config) are bnbloc-owned per session: never part of the code a room
-	// shares.
-	if corepkg.IsAgentConfigPath(rel) {
+	// The protected paths are never part of the code a room shares, in
+	// either direction: bnbloc's own per-session files (.room/ context, the
+	// agent config a session wears) and the project config a harness
+	// executes on the host, which a peer must never plant in the owner's
+	// workspace (the owner's own drives run there unconfined).
+	if corepkg.ProtectedWorkspacePath(rel) {
 		return true
 	}
 	segments := strings.Split(rel, "/")

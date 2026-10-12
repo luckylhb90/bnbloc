@@ -86,7 +86,7 @@ func siteContentPath(root, rel string) (string, bool) {
 			return "", false
 		}
 	}
-	if inner == "" || dependencyPath(inner, false) || bnblocOwnedPath(rel) {
+	if inner == "" || dependencyPath(inner, false) || corepkg.ProtectedWorkspacePath(rel) {
 		return "", false
 	}
 	return inner, true
