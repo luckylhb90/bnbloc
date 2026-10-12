@@ -202,7 +202,7 @@ impl Adapter {
     /// the uninstall sweep judges it only against its own scope's catalog.
     /// The runtime derives Unix socket paths from it; macOS caps them at 104
     /// bytes and the sidecar shortens them through a /tmp link.
-    fn sandbox_data_dir(&self, name: &str) -> Result<PathBuf, String> {
+    pub(super) fn sandbox_data_dir(&self, name: &str) -> Result<PathBuf, String> {
         let dir = self
             .member_dir()?
             .join(crate::internal_ext::member_dir::SANDBOX_DATA_DIR)
@@ -313,25 +313,6 @@ impl Adapter {
             Ok(()) => self.forget_spawn(&spec.id(), pid),
             Err(e) => eprintln!("[sandbox] could not stop pid {pid}: {e}"),
         }
-    }
-
-    /// The sandbox-only launch env (token, data dir, file paths); returns
-    /// the launch's bearer. None for other kinds.
-    pub(super) fn sandbox_launch_env(
-        &self,
-        spec: &SidecarSpec,
-        exe: &std::path::Path,
-        cmd: &mut std::process::Command,
-    ) -> Result<Option<Secret>, String> {
-        if spec.kind != ComponentKind::Sandbox {
-            return Ok(None);
-        }
-        let token = Secret::generate()?;
-        let data_dir = self.sandbox_data_dir(&spec.name)?;
-        for (key, value) in sandbox_bundle::launch_env(spec, exe, token.expose(), &data_dir) {
-            cmd.env(key, value);
-        }
-        Ok(Some(token))
     }
 
     /// Record a spawned sandbox sidecar as the current launch and start its

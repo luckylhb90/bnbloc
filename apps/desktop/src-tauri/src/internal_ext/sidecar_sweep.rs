@@ -6,8 +6,10 @@
 //! credentials and sign-in. Each successful reconcile sweeps the disk against
 //! the live catalog it just fetched, never against what this app session saw
 //! before, so a component uninstalled while the app was closed is forgotten
-//! as well. Previewer bundles, MCP binaries and core manifests follow the
-//! catalog the same way in their own modules.
+//! as well. Each kind sweeps what it keeps (`KindRuntime::sweep`); the
+//! binary cache, shared by every binary kind, is swept here once against all
+//! of them. MCP binaries and core manifests follow the catalog where they
+//! are written (the MCP pass, the manifest writer).
 //!
 //! State is only ever judged against a catalog of its own scope. The
 //! catalog belongs to one member acting in one tenant (a super-admin's
@@ -19,26 +21,26 @@
 //! rebuildable machine-wide caches (sidecar binaries, sandbox bundles) are
 //! swept against whichever catalog is current: re-downloading them is
 //! harmless.
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
-use crate::internal_ext::mcp_tools::{installed_mcp_tools, mcp_keep, SignIns};
-use crate::internal_ext::member_dir::{MCP_SETTINGS_DIR, PLUGIN_SETTINGS_DIR, SANDBOX_DATA_DIR};
-use crate::internal_ext::plugin_settings::forget_unlisted;
+use crate::internal_ext::kind_runtime::{runtime, KINDS};
+use crate::internal_ext::mcp_tools::{installed_mcp_tools, mcp_keep, McpKeep, SignIns};
+use crate::internal_ext::pin::Sha256Pin;
+use crate::internal_ext::previewer_cache::installed_previewers;
 use crate::internal_ext::sidecar_model::{desktop_components, ComponentKind, ComponentsResponse};
 use crate::internal_ext::sidecar_status::component_id;
 use crate::internal_ext::sidecar_util::{cache_stem, parse_cache_file};
 
 /// What the live catalog still has, per kind of thing this desktop keeps.
-#[derive(Debug, Default)]
+#[derive(Default)]
 pub(super) struct Live {
     /// Cache stems of the desktop components (binary cache names).
     binaries: HashSet<String>,
-    /// Cache stems of the sandbox components (bundle and data dir names).
-    sandboxes: HashSet<String>,
-    plugins: HashSet<String>,
-    mcp_settings: HashSet<String>,
-    mcp_sign_ins: HashSet<String>,
+    /// The desktop components (cores, plugins, sandboxes) by kind.
+    names: HashMap<ComponentKind, HashSet<String>>,
+    mcp: McpKeep,
+    previewers: HashSet<Sha256Pin>,
 }
 
 impl Live {
@@ -47,20 +49,33 @@ impl Live {
         for c in desktop_components(catalog) {
             live.binaries
                 .insert(cache_stem(&component_id(c.kind, &c.name)));
-            match c.kind {
-                ComponentKind::Sandbox => {
-                    live.sandboxes.insert(cache_stem(&c.name));
-                }
-                ComponentKind::Plugin => {
-                    live.plugins.insert(c.name.clone());
-                }
-                _ => {}
-            }
+            live.names.entry(c.kind).or_default().insert(c.name.clone());
         }
-        let keep = mcp_keep(&installed_mcp_tools(catalog, platform));
-        live.mcp_settings = keep.settings;
-        live.mcp_sign_ins = keep.sign_ins;
+        live.mcp = mcp_keep(&installed_mcp_tools(catalog, platform));
+        live.previewers = installed_previewers(catalog)
+            .into_values()
+            .map(|pin| pin.sha256)
+            .collect();
         live
+    }
+
+    /// The live desktop components of `kind`.
+    pub(super) fn names(&self, kind: ComponentKind) -> &HashSet<String> {
+        static NONE: std::sync::OnceLock<HashSet<String>> = std::sync::OnceLock::new();
+        self.names
+            .get(&kind)
+            .unwrap_or_else(|| NONE.get_or_init(HashSet::new))
+    }
+
+    /// The MCP tools whose member settings and sign-ins the catalog still
+    /// asks for.
+    pub(super) fn mcp(&self) -> &McpKeep {
+        &self.mcp
+    }
+
+    /// The pins of the installed previewer bundles.
+    pub(super) fn previewers(&self) -> &HashSet<Sha256Pin> {
+        &self.previewers
     }
 }
 
@@ -74,14 +89,18 @@ pub(super) struct SweepDirs {
     /// Machine-wide, rebuildable: the sandbox bundle cache
     /// (`<app cache>/sandbox`, one directory per sandbox component).
     pub(super) sandbox_bundles: Option<PathBuf>,
+    /// Machine-wide, rebuildable: the previewer bundle archives.
+    pub(super) previewers: Option<PathBuf>,
     /// The member directory (member_dir) of the SAME session the catalog
     /// was fetched with: its plugin settings, MCP settings and sign-ins,
     /// and sandbox data.
     pub(super) member: Option<PathBuf>,
 }
 
-/// Delete everything in `dirs` the live catalog no longer has. Blocking,
-/// best-effort: a failure is logged and retried by the next reconcile.
+/// Delete everything in `dirs` the live catalog no longer has: the shared
+/// binary cache here, then each kind's own things (`KindRuntime::sweep`).
+/// Blocking, best-effort: a failure is logged and retried by the next
+/// reconcile.
 pub(super) fn sweep(dirs: &SweepDirs, live: &Live, sign_ins: &SignIns) {
     if let Some(dir) = &dirs.binaries {
         for (name, path) in entries(dir) {
@@ -91,23 +110,16 @@ pub(super) fn sweep(dirs: &SweepDirs, live: &Live, sign_ins: &SignIns) {
             }
         }
     }
-    if let Some(base) = &dirs.sandbox_bundles {
-        forget_sandboxes(base, live);
+    for kind in KINDS {
+        runtime(kind).sweep(dirs, live, sign_ins);
     }
-    let Some(member) = &dirs.member else {
-        return;
-    };
-    forget_sandboxes(&member.join(SANDBOX_DATA_DIR), live);
-    forget_unlisted(&member.join(PLUGIN_SETTINGS_DIR), &live.plugins);
-    let mcp = member.join(MCP_SETTINGS_DIR);
-    forget_unlisted(&mcp, &live.mcp_settings);
-    sign_ins.retain(&mcp, &live.mcp_sign_ins);
 }
 
-/// `base` holds one directory per sandbox component.
-fn forget_sandboxes(base: &Path, live: &Live) {
+/// Remove every entry of `base` whose name is not in `keep` (`base` holds
+/// one entry per component).
+pub(super) fn forget_entries_except(base: &Path, keep: &HashSet<String>) {
     for (name, path) in entries(base) {
-        if !live.sandboxes.contains(&name) {
+        if !keep.contains(&name) {
             remove(&path);
         }
     }
@@ -122,7 +134,7 @@ fn entries(dir: &Path) -> Vec<(String, PathBuf)> {
         .collect()
 }
 
-fn remove(path: &Path) {
+pub(super) fn remove(path: &Path) {
     let removed = if path.is_dir() {
         std::fs::remove_dir_all(path)
     } else {
@@ -160,15 +172,25 @@ mod tests {
         SweepDirs {
             binaries: Some(root.join("cache/cores")),
             sandbox_bundles: Some(root.join("cache/sandbox")),
+            previewers: Some(root.join("cache/previewers")),
             member: member_dir(&root.join("config"), GW, "maya", tenant),
         }
     }
 
+    /// The bundle pin of previewer `<p>view`.
+    fn view_pin(p: &str) -> String {
+        Sha256Pin::of(p.as_bytes()).as_str().to_string()
+    }
+
     /// A tenant's catalog: core `<p>core`, plugin `<p>bot`, sandbox `<p>vm`,
-    /// MCP tools `<p>kept` (member settings) and `<p>drive` (sign-in).
+    /// MCP tools `<p>kept` (member settings) and `<p>drive` (sign-in),
+    /// previewer `<p>view`.
     fn tenant_catalog(p: &str) -> Live {
         Live::of(
             &catalog(serde_json::json!({"components": [
+                {"kind": "previewer", "name": format!("{p}view"), "version": "1.0.0", "runtime": "bundle",
+                 "rollout": "auto", "installed": true,
+                 "previewer": {"bundleUrl": "/v1/artifacts/v", "bundleSha256": view_pin(p)}},
                 {"kind": "core", "name": format!("{p}core"), "version": "1", "runtime": "sidecar",
                  "requiresDesktop": true, "rollout": "auto", "installed": true},
                 {"kind": "plugin", "name": format!("{p}bot"), "version": "1", "runtime": "sidecar",
@@ -220,6 +242,7 @@ mod tests {
             member.join("mcp-settings/oauth/y.json"),
             member.join("sandbox/s/disk.img"),
             cores.join(cache_file_name("z", SHA)),
+            root.join(format!("cache/previewers/{}.tar", view_pin("gone"))),
             cores.join(format!(
                 ".{}.0123456789abcdef.part",
                 cache_file_name("plugin/x", SHA)
@@ -231,6 +254,7 @@ mod tests {
             cores.join(cache_file_name("acore", SHA)),
             cores.join(cache_file_name("plugin/abot", SHA)),
             root.join("cache/sandbox/avm/0.1.0-abc/avm"),
+            root.join(format!("cache/previewers/{}.tar", view_pin("a"))),
         ]);
         for path in gone.iter().chain(&stays) {
             write(path);

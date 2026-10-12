@@ -38,10 +38,6 @@ impl Adapter {
         components: &ComponentsResponse,
     ) -> (Vec<SidecarSpec>, HashSet<String>) {
         let platform = current_platform();
-        // Previewer bundles follow the same catalog: drop uninstalled ones.
-        self.retain_previewers(components);
-        // So do MCP tools: materialize stdio binaries, drop removed ones.
-        self.sync_mcp_tools(components);
         let resolved = resolve_component_specs(components, &platform);
         for failure in &resolved.failures {
             self.set_initial_status(

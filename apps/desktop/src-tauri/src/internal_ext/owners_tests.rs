@@ -183,6 +183,33 @@ fn settings_have_one_writer() {
     only_in("settings::save(", "lib.rs");
 }
 
+/// The generic machinery (reconcile, supervision, the sweep) asks the kind's
+/// runtime (kind_runtime::runtime) and never branches on a kind itself.
+#[test]
+fn the_generic_machinery_never_branches_on_a_kind() {
+    let generic = [
+        "internal_ext.rs",
+        "internal_ext/sidecar_runtime.rs",
+        "internal_ext/sidecar_fetch.rs",
+        "internal_ext/sidecar_sweep.rs",
+    ];
+    for (rel, code) in sources() {
+        if generic.contains(&rel.as_str()) {
+            assert!(
+                !code.contains("ComponentKind::"),
+                "{rel} branches on a component kind; extend KindRuntime instead"
+            );
+        }
+    }
+}
+
+/// A plugin's host grant is revoked only by the launch's guard, which ends
+/// on every exit path.
+#[test]
+fn host_grants_are_revoked_only_by_the_launch_guard() {
+    only_in(".revoke(", "internal_ext/kind_runtime.rs");
+}
+
 #[test]
 fn sign_in_files_are_reached_only_through_sign_ins() {
     // Every read, write and delete of a sign-in file goes through SignIns

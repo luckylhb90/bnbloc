@@ -213,29 +213,29 @@ impl Adapter {
             .map_err(|e| PreviewerError::Unavailable(format!("read the downloaded bundle: {e}")))
     }
 
-    /// Reconcile hook: forget previewers no longer installed for this member
-    /// and delete their cached archives.
+    /// Reconcile sync (kind_runtime::Previewer): stop serving previewers no
+    /// longer installed for this member. Their archives go with the sweep.
     pub(super) fn retain_previewers(&self, catalog: &ComponentsResponse) {
-        let Some(state) = self.app.try_state::<PreviewerBundles>() else {
-            return;
-        };
-        let keep = state.retain(&installed_previewers(catalog));
-        let Ok(dir) = self.dirs().map(crate::dirs::Dirs::previewers) else {
-            return;
-        };
-        let Ok(entries) = std::fs::read_dir(&dir) else {
-            return;
-        };
-        for entry in entries.flatten() {
-            let name = entry.file_name().to_string_lossy().into_owned();
-            // `<sha>.tar`, or an in-flight download of it.
-            let live = crate::files::owner_name(&name)
-                .strip_suffix(".tar")
-                .and_then(|sha| Sha256Pin::parse(sha).ok())
-                .is_some_and(|sha| keep.contains(&sha));
-            if !live {
-                let _ = std::fs::remove_file(entry.path());
-            }
+        if let Some(state) = self.app.try_state::<PreviewerBundles>() {
+            state.retain(&installed_previewers(catalog));
+        }
+    }
+}
+
+/// Delete the cached archives in `dir` (`<sha>.tar`, and in-flight
+/// downloads of one) whose pin is not in `keep`. Blocking.
+pub(super) fn forget_bundles_except(dir: &std::path::Path, keep: &HashSet<Sha256Pin>) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        let live = crate::files::owner_name(&name)
+            .strip_suffix(".tar")
+            .and_then(|sha| Sha256Pin::parse(sha).ok())
+            .is_some_and(|sha| keep.contains(&sha));
+        if !live {
+            crate::internal_ext::sidecar_sweep::remove(&entry.path());
         }
     }
 }

@@ -9,6 +9,7 @@ mod reconcile_tests;
 mod sandbox_live_tests;
 
 pub(super) mod gateway_client;
+pub(super) mod kind_runtime;
 pub(super) mod loopback;
 pub(super) mod mcp_tools;
 pub(super) mod member_dir;
@@ -192,11 +193,10 @@ impl Adapter {
             .sidecars
             .iter()
             .filter(|(_, sidecar)| {
-                sidecar.spec.as_ref().is_some_and(|spec| match spec.kind {
-                    sidecar_model::ComponentKind::Plugin => !spec.plugin.local_settings.is_empty(),
-                    sidecar_model::ComponentKind::Sandbox => true,
-                    _ => false,
-                })
+                sidecar
+                    .spec
+                    .as_ref()
+                    .is_some_and(|spec| kind_runtime::runtime(spec.kind).member_scoped(spec))
             })
             .map(|(id, _)| id.clone())
             .collect();
@@ -215,6 +215,9 @@ impl Adapter {
         let _serialized = self.reconcile_lock.lock().await;
         let gateway = self.gateway.session();
         let catalog = self.fetch_components(&gateway).await?;
+        for kind in kind_runtime::KINDS {
+            kind_runtime::runtime(kind).sync(self, &catalog);
+        }
         let (specs, discovered) = self.resolve_specs(&catalog);
         self.write_manifests(&specs).await?;
         self.apply_specs(specs, discovered);
@@ -236,6 +239,7 @@ impl Adapter {
         let dirs = sidecar_sweep::SweepDirs {
             binaries: self.dirs().ok().map(crate::dirs::Dirs::binaries),
             sandbox_bundles: self.dirs().ok().map(crate::dirs::Dirs::sandbox_bundles),
+            previewers: self.dirs().ok().map(crate::dirs::Dirs::previewers),
             member: self.session_scope(gateway).map(|(_, dir)| dir),
         };
         let mcp = Arc::clone(&self.mcp);

@@ -74,6 +74,7 @@ pub(super) struct McpTool {
 /// What the uninstall sweep (sidecar_sweep) keeps of the member's MCP
 /// files: the tools whose member settings, and those whose sign-ins, the
 /// catalog still asks for.
+#[derive(Default)]
 pub(super) struct McpKeep {
     pub(super) settings: HashSet<String>,
     pub(super) sign_ins: HashSet<String>,

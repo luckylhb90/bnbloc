@@ -2,19 +2,18 @@ use std::path::Path;
 use std::time::Instant;
 
 use crate::child_process::{self, ChildEvent, RestartPolicy, STOP_GRACE};
+use crate::internal_ext::kind_runtime::runtime;
 use crate::internal_ext::loopback::LoopbackHttp;
 use crate::internal_ext::pin::Sha256Pin;
 use crate::internal_ext::sidecar_fetch::FetchError;
-use crate::internal_ext::sidecar_model::{ComponentKind, SidecarSpec};
+use crate::internal_ext::sidecar_model::SidecarSpec;
 use crate::internal_ext::sidecar_orphan::{
     listener_port, listening_pid, owned_orphan, plan_occupied_listener, process_exe,
     read_spawn_record, remove_spawn_record, terminate_orphan, write_spawn_record, ListenerPlan,
     OccupiedListener, Orphan, SpawnRecord, CAN_TERMINATE,
 };
-use crate::internal_ext::sidecar_util::{
-    home_env, probe_core_protocol_listener, runtime_listener_for, sidecar_path_env,
-};
-use crate::internal_ext::{plugin_host, plugin_settings, Adapter};
+use crate::internal_ext::sidecar_util::{home_env, probe_core_protocol_listener, sidecar_path_env};
+use crate::internal_ext::Adapter;
 
 /// Consecutive checksum mismatches tolerated (a truncated or proxied
 /// transfer) before the artifact is refused for this spec.
@@ -36,15 +35,13 @@ impl Adapter {
                 })
                 .collect::<Vec<_>>()
         };
-        // A plugin missing required local settings is not launched: the
-        // member enters them in Settings → Notifications (which restarts it).
+        // A sidecar its kind holds back (a plugin missing required local
+        // settings) is not launched; its status says why.
         let specs = specs
             .into_iter()
             .filter_map(|spec| {
                 let id = spec.id();
-                if let Some(blocker) =
-                    self.plugin_settings_blocker(&spec.name, &spec.plugin.local_settings)
-                {
+                if let Some(blocker) = runtime(spec.kind).blocker(self, &spec) {
                     self.set_status(&id, "waiting", blocker, None);
                     return None;
                 }
@@ -76,11 +73,7 @@ impl Adapter {
                 return;
             }
             let started = Instant::now();
-            let prepared = if spec.kind == ComponentKind::Sandbox {
-                self.ensure_sandbox_bundle(&spec).await
-            } else {
-                self.ensure_binary(&spec).await
-            };
+            let prepared = runtime(spec.kind).prepare(self, &spec).await;
             match prepared {
                 Ok(path) => {
                     verify_failures = 0;
@@ -152,14 +145,7 @@ impl Adapter {
         sidecar_generation: u64,
     ) {
         let id = spec.id();
-        // A sandbox sidecar gets a fresh loopback port each launch (its
-        // callers learn the URL from the desktop); other sidecars keep the
-        // package's fixed localUrl.
-        let listener = if spec.kind == ComponentKind::Sandbox {
-            self.sandbox_listener(spec).await
-        } else {
-            runtime_listener_for(&spec.local_url)
-        };
+        let listener = runtime(spec.kind).listener(self, spec).await;
         match listener {
             Ok(listener) => {
                 if let Err(error) = self
@@ -211,7 +197,7 @@ impl Adapter {
             return;
         };
         let orphan = self.find_orphan(spec).await;
-        let probe = if speaks_core_protocol(spec) {
+        let probe = if runtime(spec.kind).reuses_listener(spec) {
             Some(probe_core_protocol_listener(&spec.local_url, &spec.name).await)
         } else {
             None
@@ -371,20 +357,13 @@ impl Adapter {
             sidecar_path_env(current_path.as_deref(), home.map(|(_, home)| home.into())),
         );
         cmd.args(&spec.args);
-        let host_token = self.plugin_launch_env(spec, &mut cmd).await?;
-        let host_token = host_token.as_ref();
-        let sandbox_token = self.sandbox_launch_env(spec, path, &mut cmd)?;
+        let kind = runtime(spec.kind);
+        // Released however this launch ends: a failed spawn, a stale one,
+        // the exit (kind_runtime::LaunchGuard).
+        let mut guard = kind.launch(self, spec, path, &mut cmd).await?;
         drop(listener.take());
-        let spawned = child_process::spawn(cmd).map_err(|e| format!("spawn sidecar: {e}"));
-        let (mut rx, child) = match spawned {
-            Ok(spawned) => spawned,
-            Err(e) => {
-                if let Some(token) = host_token {
-                    self.host.revoke(token);
-                }
-                return Err(e);
-            }
-        };
+        let (mut rx, child) =
+            child_process::spawn(cmd).map_err(|e| format!("spawn sidecar: {e}"))?;
         let pid = child.pid();
         {
             let mut inner = self.inner.lock();
@@ -408,8 +387,7 @@ impl Adapter {
             }
         }
         self.record_spawn(&id, pid, spec.pin());
-        let sandbox_seq =
-            sandbox_token.map(|token| self.sandbox_spawned(spec, runtime_url, token, path));
+        kind.on_spawned(self, spec, runtime_url, path, &mut guard);
         let mut tail = String::new();
         let mut exit_code = None;
         while let Some(event) = rx.recv().await {
@@ -426,12 +404,7 @@ impl Adapter {
             }
         }
         self.forget_spawn(&id, pid);
-        if let Some(token) = host_token {
-            self.host.revoke(token);
-        }
-        if let Some(seq) = sandbox_seq {
-            self.sandbox_exited(seq, &tail);
-        }
+        guard.exited(&tail);
         self.clear_child(
             &id,
             manager_generation,
@@ -440,34 +413,6 @@ impl Adapter {
             &tail,
         );
         Ok(())
-    }
-
-    /// The plugin-only launch env: the host API URL and a per-launch token
-    /// when the package declares `permissions.host` (returned so the token
-    /// is revoked when this process ends), and the local settings file when
-    /// it declares `localSettings`.
-    async fn plugin_launch_env(
-        &self,
-        spec: &SidecarSpec,
-        cmd: &mut std::process::Command,
-    ) -> Result<Option<crate::secret::Secret>, String> {
-        if spec.kind != crate::internal_ext::sidecar_model::ComponentKind::Plugin {
-            return Ok(None);
-        }
-        if !spec.plugin.local_settings.is_empty() {
-            cmd.env(
-                plugin_settings::SETTINGS_FILE_ENV,
-                self.plugin_settings_file(&spec.name)?,
-            );
-        }
-        if spec.plugin.host.is_empty() {
-            return Ok(None);
-        }
-        let url = self.host.ensure_started().await?;
-        let token = self.host.grant(&spec.name, &spec.plugin.host)?;
-        cmd.env(plugin_host::HOST_URL_ENV, url);
-        cmd.env(plugin_host::HOST_TOKEN_ENV, token.expose());
-        Ok(Some(token))
     }
 
     fn current(&self, name: &str, manager_generation: u64, sidecar_generation: u64) -> bool {
@@ -510,12 +455,6 @@ impl Adapter {
             }
         }
     }
-}
-
-/// A manifestless core sidecar speaks Core Protocol and exposes `/core/v1/discover`;
-/// plugins and legacy REST-manifest cores do not, so they are never probed for reuse.
-fn speaks_core_protocol(spec: &SidecarSpec) -> bool {
-    spec.kind == crate::internal_ext::sidecar_model::ComponentKind::Core && spec.manifest.is_none()
 }
 
 fn claim_supervisor(

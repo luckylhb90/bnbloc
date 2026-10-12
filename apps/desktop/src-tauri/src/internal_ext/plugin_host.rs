@@ -150,6 +150,11 @@ impl PluginHost {
         Ok(token)
     }
 
+    #[cfg(test)]
+    pub(super) fn grant_count(&self) -> usize {
+        self.grants.lock().len()
+    }
+
     /// Revoke one launch's token (the process exited or was stopped).
     pub(super) fn revoke(&self, token: &Secret) {
         self.grants.lock().retain(|g| &g.token != token);
