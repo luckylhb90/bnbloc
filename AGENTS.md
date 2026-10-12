@@ -492,7 +492,12 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   hooks drawn ONLY
   from the code-owned registry (`chat_message.v1`, `agent_messages.v1`,
   `notification.v1` in `core/pkgmeta/package_validation.go`). An unknown hook fails validation
-  before anything persists. Realtime is the hook AUTHORITY and AUDITOR, never
+  before anything persists. Which kinds may carry which payload field is
+  one table (`kindFields`, `core/pkgmeta/shape.go`; a stray field is
+  refused, `TestKindOnlyFieldsRefused`), and the runtime blocks are
+  `RequireEndpointRuntime`/`requireGuardedEndpoint`/`requireSidecarRuntime`
+  (endpointpkg re-applies the first at activation). Realtime is the hook
+  AUTHORITY and AUDITOR, never
   the dialer: plugin sidecars run on member machines, so the server never
   POSTs to a `localUrl` (that was the bug in
   `docs/bugs/2026-10-08-plugin-hook-delivery-unreachable.md`). Delivery is

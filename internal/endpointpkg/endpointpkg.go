@@ -125,8 +125,8 @@ func (k Kind) Endpoint(rec extpipe.Record, guard extgov.Guard) (Endpoint, error)
 }
 
 // Validate applies the endpoint rules to a decoded config: runtime
-// "endpoint", the kind's contract, a base URL, and that URL's host in
-// permissions.network.
+// "endpoint" (pkgmeta.RequireEndpointRuntime, the install gate's rule), the
+// kind's contract, and the base URL's host under the activation guard.
 func (k Kind) Validate(cfg extpipe.PackageConfig, guard extgov.Guard) error {
 	if cfg.Runtime != pkgmeta.RuntimeEndpoint {
 		return fmt.Errorf(`%s runtime must be "endpoint"`, k.Label)
@@ -134,8 +134,8 @@ func (k Kind) Validate(cfg extpipe.PackageConfig, guard extgov.Guard) error {
 	if cfg.Contract != k.Contract {
 		return fmt.Errorf("unknown %s contract %q", k.Label, cfg.Contract)
 	}
-	if cfg.Endpoint == nil || strings.TrimSpace(cfg.Endpoint.BaseURL) == "" {
-		return fmt.Errorf("%s endpoint requires endpoint.baseUrl", k.Label)
+	if err := pkgmeta.RequireEndpointRuntime(cfg.Package(k.PackageKind, extpipe.Record{}), k.Label); err != nil {
+		return err
 	}
 	if !guard.Net.AllowURL(cfg.Endpoint.BaseURL) {
 		return fmt.Errorf("%s endpoint host is not in permissions.network", k.Label)

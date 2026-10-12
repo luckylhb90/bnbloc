@@ -45,7 +45,7 @@ func TestParsePackage_rejectsInvalidNotifier(t *testing.T) {
 	}{
 		"sidecar runtime":  {func(b map[string]any) { b["runtime"] = "sidecar" }, `notifier runtime must be "endpoint"`},
 		"wrong contract":   {func(b map[string]any) { b["contract"] = "bnbloc.notifier.contract/v9" }, "unknown notifier contract"},
-		"missing endpoint": {func(b map[string]any) { delete(b, "endpoint") }, "notifier endpoint requires endpoint.baseUrl"},
+		"missing endpoint": {func(b map[string]any) { delete(b, "endpoint") }, `notifier runtime "endpoint" requires endpoint.baseUrl`},
 		// Notifiers carry no member settings: personal delivery is a desktop
 		// plugin (localSettings), never a server-side secret.
 		"member settings": {func(b map[string]any) { b["memberSettings"] = []map[string]any{{"key": "a", "label": "A"}} }, "unknown field"},

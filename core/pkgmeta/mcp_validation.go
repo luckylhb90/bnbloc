@@ -5,8 +5,6 @@ import (
 	"regexp"
 	"strings"
 	"unicode/utf8"
-
-	"github.com/luckylhb90/bnbloc/internal/extgov"
 )
 
 // KindMCPPackageV1 is the package-envelope kind of an MCP tool component
@@ -182,19 +180,8 @@ func validateMCPPackage(pkg Package) error {
 	if pkg.Contract != MCPContractV1 {
 		return fmt.Errorf("unknown mcp contract %q", pkg.Contract)
 	}
-	switch {
-	case pkg.MCP == nil:
+	if pkg.MCP == nil {
 		return fmt.Errorf("mcp package requires mcp")
-	case pkg.Sidecar != nil:
-		return fmt.Errorf("mcp package must not declare sidecar (a stdio server is spawned by the agent, never supervised)")
-	case pkg.Manifest != nil:
-		return fmt.Errorf("mcp package must not declare manifest")
-	case len(pkg.Hooks) > 0:
-		return fmt.Errorf("hooks are only valid for %s packages", KindPluginPackageV1)
-	case len(pkg.Capabilities) > 0:
-		return fmt.Errorf("mcp package must not declare capabilities")
-	case pkg.Protocol.Min != "" || pkg.Protocol.Max != "":
-		return fmt.Errorf("mcp package must not declare protocol (MCP negotiates its own)")
 	}
 	m := *pkg.MCP
 	if err := validateMCPTools(m.Tools); err != nil {
@@ -233,23 +220,11 @@ func validateMCPPackage(pkg Package) error {
 			}
 		}
 	case RuntimeEndpoint:
-		if len(pkg.Artifacts) > 0 {
-			return fmt.Errorf(`mcp runtime "endpoint" must not declare artifacts`)
+		if err := requireGuardedEndpoint(pkg, "mcp"); err != nil {
+			return err
 		}
 		if m.Stdio != nil {
 			return fmt.Errorf(`mcp runtime "endpoint" must not declare mcp.stdio`)
-		}
-		if pkg.Endpoint == nil || strings.TrimSpace(pkg.Endpoint.BaseURL) == "" {
-			return fmt.Errorf(`mcp runtime "endpoint" requires endpoint.baseUrl (the MCP URL)`)
-		}
-		if err := validateAbsoluteHTTPURL(pkg.Endpoint.BaseURL); err != nil {
-			return fmt.Errorf("endpoint.baseUrl must be an absolute http(s) URL")
-		}
-		if len(pkg.Permissions.Network) == 0 {
-			return fmt.Errorf(`mcp runtime "endpoint" requires permissions.network`)
-		}
-		if !extgov.NewNetGuard(pkg.Permissions.Network).AllowURL(pkg.Endpoint.BaseURL) {
-			return fmt.Errorf("mcp endpoint host is not in permissions.network")
 		}
 		if err := validateMCPHTTP(m); err != nil {
 			return err

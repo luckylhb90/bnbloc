@@ -101,6 +101,7 @@ func TestValidatePackage_refusesGuestOnOtherKinds(t *testing.T) {
 	}
 	pkg.Kind = KindCorePackageV1
 	pkg.Guest = &Guest{Image: "alpine:3.20"}
+	pkg.Contract, pkg.Capabilities = "", nil
 	if err := ValidatePackage(pkg); err == nil || !strings.Contains(err.Error(), "guest is only valid") {
 		t.Fatalf("error = %v", err)
 	}

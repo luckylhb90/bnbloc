@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/luckylhb90/bnbloc/internal/extgov"
 	sandboxprotocol "github.com/luckylhb90/bnbloc/sandbox/protocol"
 )
 
@@ -37,48 +36,19 @@ func validateSandboxPackage(pkg Package) error {
 	if !hasExec {
 		return fmt.Errorf("sandbox package must declare the %q capability", sandboxprotocol.CapabilityExec)
 	}
-	if len(pkg.Hooks) > 0 {
-		return fmt.Errorf("hooks are only valid for %s packages", KindPluginPackageV1)
-	}
 	if err := validateSandboxGuest(pkg.Guest); err != nil {
 		return err
 	}
 	switch pkg.Runtime {
 	case RuntimeSidecar:
-		if len(pkg.Artifacts) == 0 {
-			return fmt.Errorf(`sandbox runtime "sidecar" requires artifacts`)
-		}
-		if pkg.Sidecar == nil || strings.TrimSpace(pkg.Sidecar.LocalURL) == "" {
-			return fmt.Errorf(`sandbox runtime "sidecar" requires sidecar.localUrl`)
-		}
-		if err := ValidateLoopbackHTTPURL(pkg.Sidecar.LocalURL); err != nil {
-			return fmt.Errorf("sidecar.localUrl must be a loopback http URL")
+		if err := requireSidecarRuntime(pkg, "sandbox"); err != nil {
+			return err
 		}
 		if strings.TrimSpace(pkg.Sidecar.TokenEnv) == "" {
 			return fmt.Errorf(`sandbox runtime "sidecar" requires sidecar.tokenEnv (the per-launch bearer)`)
 		}
-		if pkg.Endpoint != nil {
-			return fmt.Errorf(`sandbox runtime "sidecar" must not declare endpoint`)
-		}
 	case RuntimeEndpoint:
-		if len(pkg.Artifacts) > 0 {
-			return fmt.Errorf(`sandbox runtime "endpoint" must not declare artifacts`)
-		}
-		if pkg.Sidecar != nil {
-			return fmt.Errorf(`sandbox runtime "endpoint" must not declare sidecar`)
-		}
-		if pkg.Endpoint == nil || strings.TrimSpace(pkg.Endpoint.BaseURL) == "" {
-			return fmt.Errorf(`sandbox runtime "endpoint" requires endpoint.baseUrl`)
-		}
-		if err := validateAbsoluteHTTPURL(pkg.Endpoint.BaseURL); err != nil {
-			return fmt.Errorf("endpoint.baseUrl must be an absolute http(s) URL")
-		}
-		if len(pkg.Permissions.Network) == 0 {
-			return fmt.Errorf(`sandbox runtime "endpoint" requires permissions.network`)
-		}
-		if !extgov.NewNetGuard(pkg.Permissions.Network).AllowURL(pkg.Endpoint.BaseURL) {
-			return fmt.Errorf("sandbox endpoint host is not in permissions.network")
-		}
+		return requireGuardedEndpoint(pkg, "sandbox")
 	default:
 		return fmt.Errorf(`sandbox runtime must be "sidecar" or "endpoint", got %q`, pkg.Runtime)
 	}

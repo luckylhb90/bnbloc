@@ -220,22 +220,8 @@ func validatePackage(pkg Package) error {
 	if !ok {
 		return fmt.Errorf("unknown package kind %q", pkg.Kind)
 	}
-	if pkg.Kind != KindPluginPackageV1 {
-		if len(pkg.LocalSettings) > 0 {
-			return fmt.Errorf("localSettings is only valid for %s packages", KindPluginPackageV1)
-		}
-		if len(pkg.Permissions.Host) > 0 {
-			return fmt.Errorf("permissions.host is only valid for %s packages", KindPluginPackageV1)
-		}
-	}
-	if pkg.Guest != nil && pkg.Kind != KindSandboxPackageV1 {
-		return fmt.Errorf("guest is only valid for %s packages", KindSandboxPackageV1)
-	}
-	if pkg.Previewer != nil && pkg.Kind != KindPreviewerPackageV1 {
-		return fmt.Errorf("previewer is only valid for %s packages", KindPreviewerPackageV1)
-	}
-	if pkg.MCP != nil && pkg.Kind != KindMCPPackageV1 {
-		return fmt.Errorf("mcp is only valid for %s packages", KindMCPPackageV1)
+	if err := validateKindFields(pkg); err != nil {
+		return err
 	}
 	if err := validateSidecarShape(pkg); err != nil {
 		return err
@@ -284,15 +270,7 @@ func validateCorePackage(pkg Package) error {
 	}
 	switch pkg.Runtime {
 	case RuntimeEndpoint:
-		if len(pkg.Artifacts) > 0 {
-			return fmt.Errorf(`runtime "endpoint" must not declare artifacts`)
-		}
-		if pkg.Endpoint == nil || strings.TrimSpace(pkg.Endpoint.BaseURL) == "" {
-			return fmt.Errorf(`runtime "endpoint" requires endpoint.baseUrl`)
-		}
-		if err := validateAbsoluteHTTPURL(pkg.Endpoint.BaseURL); err != nil {
-			return fmt.Errorf("endpoint.baseUrl must be an absolute http(s) URL")
-		}
+		return RequireEndpointRuntime(pkg, "core")
 	case RuntimeManifest:
 		if len(pkg.Artifacts) > 0 {
 			return fmt.Errorf(`runtime "manifest" must not declare artifacts`)
@@ -309,8 +287,8 @@ func validateCorePackage(pkg Package) error {
 			return fmt.Errorf("manifest invalid: %w", err)
 		}
 	case RuntimeSidecar:
-		if len(pkg.Artifacts) == 0 {
-			return fmt.Errorf(`runtime "sidecar" requires artifacts`)
+		if err := requireSidecarRuntime(pkg, "core"); err != nil {
+			return err
 		}
 		// A sidecar speaks Core Protocol v1 at its loopback URL and
 		// self-describes via /core/v1/discover, so a drive manifest is not
@@ -320,12 +298,6 @@ func validateCorePackage(pkg Package) error {
 			if _, err := manifestcore.New(*pkg.Manifest); err != nil {
 				return fmt.Errorf("manifest invalid: %w", err)
 			}
-		}
-		if pkg.Sidecar == nil || strings.TrimSpace(pkg.Sidecar.LocalURL) == "" {
-			return fmt.Errorf(`runtime "sidecar" requires sidecar.localUrl`)
-		}
-		if err := ValidateLoopbackHTTPURL(pkg.Sidecar.LocalURL); err != nil {
-			return fmt.Errorf("sidecar.localUrl must be a loopback http URL")
 		}
 	default:
 		return fmt.Errorf("unknown runtime %q", pkg.Runtime)

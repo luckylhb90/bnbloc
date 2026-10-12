@@ -115,14 +115,8 @@ func validatePluginPackage(pkg Package) error {
 			return fmt.Errorf("unknown hook %q", id)
 		}
 	}
-	if len(pkg.Artifacts) == 0 {
-		return fmt.Errorf("plugin sidecar requires artifacts")
-	}
-	if pkg.Sidecar == nil || strings.TrimSpace(pkg.Sidecar.LocalURL) == "" {
-		return fmt.Errorf("plugin sidecar requires sidecar.localUrl")
-	}
-	if err := ValidateLoopbackHTTPURL(pkg.Sidecar.LocalURL); err != nil {
-		return fmt.Errorf("sidecar.localUrl must be a loopback http URL")
+	if err := requireSidecarRuntime(pkg, "plugin"); err != nil {
+		return err
 	}
 	seen := map[string]bool{}
 	for _, p := range pkg.Permissions.Host {
@@ -182,9 +176,8 @@ func validateLocalSettings(fields []LocalSetting) error {
 }
 
 // validateEndpointPackage is the one shape rule of every endpoint component
-// kind (auth-provider, notifier): the kind's contract, runtime "endpoint", no
-// artifacts (nothing is downloaded or supervised by bnbloc), and an absolute
-// endpoint.baseUrl. label names the kind in errors.
+// kind (auth-provider, notifier): the kind's contract and a guarded runtime
+// "endpoint" (requireGuardedEndpoint). label names the kind in errors.
 func validateEndpointPackage(pkg Package, label, contract string) error {
 	if pkg.Contract != contract {
 		return fmt.Errorf("unknown %s contract %q", label, pkg.Contract)
@@ -192,16 +185,7 @@ func validateEndpointPackage(pkg Package, label, contract string) error {
 	if pkg.Runtime != RuntimeEndpoint {
 		return fmt.Errorf(`%s runtime must be "endpoint"`, label)
 	}
-	if len(pkg.Artifacts) > 0 {
-		return fmt.Errorf(`%s runtime "endpoint" must not declare artifacts`, label)
-	}
-	if pkg.Endpoint == nil || strings.TrimSpace(pkg.Endpoint.BaseURL) == "" {
-		return fmt.Errorf("%s endpoint requires endpoint.baseUrl", label)
-	}
-	if err := validateAbsoluteHTTPURL(pkg.Endpoint.BaseURL); err != nil {
-		return fmt.Errorf("endpoint.baseUrl must be an absolute http(s) URL")
-	}
-	return nil
+	return requireGuardedEndpoint(pkg, label)
 }
 
 func validatePluginCapabilities(caps []string) error {

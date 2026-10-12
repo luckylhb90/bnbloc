@@ -92,20 +92,7 @@ func validatePreviewerPackage(pkg Package) error {
 	if pkg.Runtime != RuntimeBundle {
 		return fmt.Errorf(`previewer runtime must be "bundle"`)
 	}
-	switch {
-	case pkg.Endpoint != nil:
-		return fmt.Errorf("previewer must not declare endpoint")
-	case pkg.Sidecar != nil:
-		return fmt.Errorf("previewer must not declare sidecar")
-	case pkg.Manifest != nil:
-		return fmt.Errorf("previewer must not declare manifest")
-	case len(pkg.Hooks) > 0:
-		return fmt.Errorf("hooks are only valid for %s packages", KindPluginPackageV1)
-	case len(pkg.Capabilities) > 0:
-		return fmt.Errorf("previewer capabilities belong in previewer.capabilities")
-	case pkg.Protocol.Min != "" || pkg.Protocol.Max != "":
-		return fmt.Errorf("previewer must not declare protocol (the contract pins the frame protocol)")
-	case len(pkg.Permissions.Network) > 0:
+	if len(pkg.Permissions.Network) > 0 {
 		return fmt.Errorf("previewer bundles never get network access; remove permissions.network")
 	}
 	if len(pkg.Artifacts) != 1 {

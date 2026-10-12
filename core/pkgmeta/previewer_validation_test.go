@@ -88,7 +88,7 @@ func TestPreviewerPackage_rejectsInvalidShapes(t *testing.T) {
 		}, "network"},
 		{"endpoint", func(pkg, _ map[string]any) { pkg["endpoint"] = map[string]string{"baseUrl": "https://x"} }, "endpoint"},
 		{"hooks", func(pkg, _ map[string]any) { pkg["hooks"] = []string{"chat_message.v1"} }, "hooks"},
-		{"top-level capabilities", func(pkg, _ map[string]any) { pkg["capabilities"] = []string{"thumbnail"} }, "previewer.capabilities"},
+		{"top-level capabilities", func(pkg, _ map[string]any) { pkg["capabilities"] = []string{"thumbnail"} }, "must not declare capabilities"},
 		{"absolute entry", func(_, p map[string]any) { p["entry"] = "/index.html" }, "entry"},
 		{"traversal entry", func(_, p map[string]any) { p["entry"] = "../index.html" }, "entry"},
 		{"dot entry", func(_, p map[string]any) { p["entry"] = "./index.html" }, "entry"},
