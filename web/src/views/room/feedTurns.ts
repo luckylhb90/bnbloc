@@ -144,14 +144,33 @@ export function blockTitle(block: Pick<TurnBlock, "roles" | "agents" | "dispatch
 // Job statuses that are still working (the block stays open while any is).
 const ACTIVE = new Set(["queued", "claimed", "running", "reflowing"]);
 
+export interface BlockProgress {
+  readonly done: number;
+  readonly total: number;
+  // Some dispatched job is still working (the block stays open).
+  readonly active: boolean;
+}
+
 // blockProgress summarizes the dispatched jobs: how many settled and whether
-// any is still working. statusOf answers a dispatch row's job status (or
-// undefined while it is not known yet: counted as working).
-export function blockProgress(block: Pick<TurnBlock, "dispatches">, statusOf: (index: number) => string | undefined): { readonly done: number; readonly total: number; readonly active: boolean } {
+// any is still working. statusOf answers a dispatch row's job status, or
+// undefined when the room's job list does not hold it (an old turn): such a
+// job counts neither as working nor as done.
+export function blockProgress(block: Pick<TurnBlock, "dispatches">, statusOf: (index: number) => string | undefined): BlockProgress {
   let done = 0;
+  let active = false;
   for (const i of block.dispatches) {
     const s = statusOf(i);
-    if (s && !ACTIVE.has(s)) done++;
+    if (!s) continue;
+    if (ACTIVE.has(s)) active = true;
+    else done++;
   }
-  return { done, total: block.dispatches.length, active: done < block.dispatches.length };
+  return { done, total: block.dispatches.length, active };
+}
+
+// progressText is the block header's state: "1 of 3 done" while working,
+// "Done" / "All 3 done" once settled, else how many tasks it holds.
+export function progressText(p: BlockProgress): string {
+  if (p.active) return `${p.done} of ${p.total} done`;
+  if (p.done === p.total) return p.total === 1 ? "Done" : `All ${p.total} done`;
+  return p.total === 1 ? "1 task" : `${p.total} tasks`;
 }

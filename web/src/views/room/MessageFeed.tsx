@@ -12,7 +12,7 @@ import { placeDeliverables } from "@/lib/deliverablePlacement";
 import { AgentWorking } from "@/views/room/AgentWorking";
 import { Message, sameSender } from "@/views/room/Message";
 import type { FeedItem } from "@/views/room/types";
-import { blockProgress, blockTitle, layoutTurns, renderOrder, type TurnBlock } from "@/views/room/feedTurns";
+import { blockProgress, blockTitle, layoutTurns, progressText, renderOrder, type BlockProgress, type TurnBlock } from "@/views/room/feedTurns";
 import type { PlacedDeliverables } from "@/lib/deliverablePlacement";
 
 export function MessageFeed({
@@ -350,7 +350,7 @@ function DelegatedWork({
   children,
 }: {
   readonly block: TurnBlock;
-  readonly progress: { readonly done: number; readonly total: number; readonly active: boolean };
+  readonly progress: BlockProgress;
   readonly open: boolean;
   readonly onToggle: () => void;
   readonly children: ReactNode;
@@ -368,9 +368,7 @@ function DelegatedWork({
         <CaretRightIcon size={12} className={cn("shrink-0 transition-transform", open && "rotate-90")} />
         <Icon size={13} className="shrink-0 text-[var(--color-accent)]" />
         <span className="min-w-0 truncate font-medium text-[var(--color-fg)]">{blockTitle(block)}</span>
-        <span className="ml-auto shrink-0">
-          {progress.active ? `${progress.done} of ${progress.total} done` : progress.total === 1 ? "Done" : `All ${progress.total} done`}
-        </span>
+        <span className="ml-auto shrink-0">{progressText(progress)}</span>
       </button>
       {open && <div className="flex flex-col gap-1.5 border-t border-[var(--color-border)] px-2 py-1.5">{children}</div>}
     </div>

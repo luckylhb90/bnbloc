@@ -1,7 +1,7 @@
 import { normalizeRoomEvent, type RoomEvent } from "../../lib/roomEvents.ts";
 import type { FeedItem } from "./types.ts";
 import { applyIncoming, feedItemFromEvent, mergeHistory } from "./feedModel.ts";
-import { blockProgress, blockTitle, layoutTurns, renderOrder, type FeedEntry } from "./feedTurns.ts";
+import { blockProgress, blockTitle, layoutTurns, progressText, renderOrder, type FeedEntry } from "./feedTurns.ts";
 
 function assert(condition: boolean, message: string): void {
   if (!condition) throw new Error(message);
@@ -105,6 +105,14 @@ if (block?.kind === "block") {
   const statuses: Record<number, string> = { 12: "replied", 14: "running", 15: "replied" };
   const p = blockProgress(block.block, (i) => statuses[Math.floor(live[i].seq ?? 0)]);
   eq(p, { done: 2, total: 3, active: true }, "progress while the critic runs");
+  eq(progressText(p), "2 of 3 done", "progress text while running");
+  const settled = blockProgress(block.block, () => "replied");
+  eq(progressText(settled), "All 3 done", "all settled");
+  // An old turn whose jobs the room's job list no longer holds is neither
+  // working nor done: the block stays folded.
+  const unknown = blockProgress(block.block, () => undefined);
+  eq(unknown, { done: 0, total: 3, active: false }, "unknown jobs");
+  eq(progressText(unknown), "3 tasks", "unknown jobs text");
   eq(renderOrder(layoutTurns(live)).map((i) => Math.floor(live[i].seq ?? 0)), [10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20], "render order");
 }
 
