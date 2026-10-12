@@ -502,3 +502,51 @@ through the step-1 session contributor hook), 6f1bb5b (gateway door),
   resolves as the requester's (their own or one pinned in the room), is
   pinned on the dispatched job and applied by the target bridge; an expert
   the requester may not use is refused (`expert_not_available`).
+
+## Status: step 5 (builder, experts and skill packs)
+
+**2026-10-12: in development.** Scope of this pass: the builder for
+experts and skill packs (prompt packs follow step 3), "Create with AI" and
+"Improve with AI" in the Library, and two save paths that work on any
+agent. Decisions:
+
+- **Built-in content is a content source, not a second library.** The
+  builder ships inside the binaries (`internal/contentbuiltin`, embedded
+  package directories validated by `internal/contentpkg` at startup) and
+  is overlaid on the content store the gateway and realtime already use,
+  as components of scope `builtin`. `extpipe.MemberVisibility` admits
+  built-in content to every member (read-only, never owned); the Library,
+  the composer's expert picker, chat pinning, `contentuse.Effective` and
+  the bundle entitlement all see it through the same calls. Its bundle is
+  served from the binary under a `builtin/<sha256>` artifact key, so the
+  blob store and its collection never hold it. It is versioned with the
+  release: changing its files means bumping its `component.json` version.
+- **One builder for both kinds** ("Expert builder", `expert-builder`): the
+  interview, draft layout and save are the same; the member's request says
+  which kind.
+- **Save with room tools** (cores advertising `agentProfile`):
+  `save_component(dir, id?)` reads `drafts/<name>/` from the session
+  workspace through the core's session-files seam, packs it, validates it
+  with `contentpkg` (errors go back to the agent) and posts it to the
+  ordinary content routes with a `?job=&room=` grant. The gateway admits
+  the grant only while the job is live and leased by a bridge of the
+  caller (`store.JobLeasedBy`, the rule dispatch uses) and the job's
+  requester is still a human member of the room; the component is then
+  saved **as the requester** (owner = requester, personal scope). When the
+  agent is not the requester's own (a borrowed or platform agent), a
+  package declaring `scripts` is refused: someone else's machine may not
+  plant executable content into a member's own library, where it would run
+  unsandboxed; the member saves it explicitly from the deliverables
+  instead. `get_component(id)` reads a component as the requester the same
+  way (the "Improve" flow). `publish_component(id, scope)` keeps personal
+  scope only until step 4.
+- **Save without room tools** (any core): the draft files are ordinary
+  deliverables; the turn's deliverables offer "Save as expert" / "Save as
+  skill pack" when they hold a content `component.json`. The web packs the
+  files and calls the existing create/new-version routes as the clicking
+  member; the validator's message shows inline.
+- **The workshop room.** "Create with AI" opens the member's private
+  "Expert workshop" room (created on first use, reused later), with the
+  builder pinned and picked in the composer and the member's own agent
+  (else a platform agent) selected. Drafts, tries and history stay out of
+  shared rooms.
