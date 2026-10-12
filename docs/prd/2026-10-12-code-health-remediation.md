@@ -339,6 +339,44 @@ desktop agent.
 | 2.6 | **Grants and visibility**: `store.Grant.Live(at)` and one admission rule, `used + cost <= allowance` (a reservation costs 1 run). `RaiseRunQuota` checks expiry. `extpipe.MemberVisibility` is used everywhere, with a tenant-only helper. One name→component resolver and one tenant-list validation. Remove the dual adoption fields and the web's `?? x` reads. | store M11; svc M2, M3; gw M7, M15, M16 | M |
 | 2.7 | **Gateway misc owners**: `s.publicOrigin(r)` honoring `TrustedProxies`. `pkgmeta` both builds and parses artifact keys. CORS `Access-Control-Expose-Headers`. Local-agent core selection goes through the rollout gate and `core.As`. `corePipeline` initializes with synchronization. Booleans and the super-admin list are parsed once, and env is read at startup. One audit-record builder that always sets the tenant. `memberContent` is tenant-scoped. One component-name check. Fix the room-id comment. | gw M8, M9, M17, M18, L6, L7, L9–L11, L13, L14; bridge 27 | M |
 
+- **Status 2.1: landed.** `services/gateway/routes.go` is the route table
+  (`member`/`gated(perm)`/`open(why)`, `spends(costBudget|guessBudget)`,
+  `with(needContent|needOrgSync)`); `serve` authenticates and gates, the
+  proxy's `edgeGate` shares `permitted`/`spend`, handlers take `claims`.
+  `requireSuperAdmin(Claims)`, `isSuperAdminRole`, `orgAdmin`, the three
+  store-nil wrappers, the `register*` functions and the 405 switches are
+  gone. One suspended-tenant gate (`tenantClosed`), one tenant-membership
+  read (`memberRole`, fail closed for notifier replies), one session-error
+  mapping (`writeSessionErr`; a suspended tenant is 403 on refresh too, and
+  the bridge and CLI end the sign-in on 403). The gateway's one cached
+  membership source is `Service.Membership` (landed with 2.2). Tests:
+  `TestEveryGatewayRouteGated`, `TestHandlersNeverAuthenticate`.
+- **Status 2.2: landed.** `svcauth.Key.Assert` (subject, defaulted tenant,
+  org role, signature), `NewRequest`, `Subject`, `Role`, `RequireService`;
+  `Sign` is gone. The gateway's `backend_client.go` (`callBackend`), the
+  proxy's `Assert`, a role dropped when a room moves the request into
+  another organization, the legacy-token tenant default once in
+  `actingTenant`. Realtime publish/blobs/peer routes, room agent hosts and
+  share resolution are service-only; blob calls assert the calling service.
+  svc M18 (signed org role, `rbac.Can(svcauth.Role(r), …)`) landed here.
+  Tests: `TestSignedRequestsUseNewRequest`, `TestSubjectReadOnlyViaSvcauth`,
+  `TestTamperedRoleRejected`, `TestAssertReplacesForgedHeaders`,
+  `TestRequireServiceAdmitsOnlyNamedServices`.
+- **Status 2.3: landed.** `internal/httpx`: `ErrorBody`, `Error`,
+  `ErrorText`, `WriteJSON`, `DecodeJSON`/`DecodeOptionalJSON`,
+  `WriteStatus`, `Unavailable`. The non-constant-status writer is
+  `httpx.WriteStatus`, not `obs.WriteStatus` (httpx imports obs, so obs
+  cannot write the body). Every gateway and backend error, decode and
+  "not configured" answer moved over; blob failures map once; the web reads
+  only `{"error"}`. Tests: `TestNoSilent5xx` (obs.ServerError only),
+  `TestErrorStatusesThroughWriteStatus`, `TestOneErrorBodyOwner`.
+- **Status 2.7: landed.** `publicOrigin` (the gateway now reads
+  `BNBLOC_PUBLIC_URL`), `pkgmeta` artifact URL owner, CORS expose headers,
+  `pickCore` over visible cores (dev discovery included), `corePipeline`
+  once, `config.Bool`/`List`, startup-read env, `s.audit`, `ownedBy`, the
+  room-id comment, and gw L4 (`builtin` gone from `/v1/cores` and the web).
+  gw L6 (one component-name check) went with 2.6's resolver.
+
 **Removals (D3):**
 - The legacy borrow authority: shareagent start/resume/settings/turn/release/access, `handleAction`, `proxyTurn`, controller `Authorize`/`Release`, `staticPresence`/`unavailableOwners`, and store `AcquireLease`/`ConsumeRun` once unused (svc M1).
 - Activity submit-provenance and sync-states endpoints, plus store `RecordSubmitProvenance`/`SubmitQueryable` (svc L1, store L17).
