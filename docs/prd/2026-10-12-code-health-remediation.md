@@ -106,6 +106,10 @@ policy fails closed): eb77683. Desktop and dev-discovery rows: other agents.
 | Orphan kill trusts the spawn record alone | desk H6 | One `owned_orphan(record, exe, root)` that requires both the pid match and an executable under the cache root. | S |
 | Dev discovery is allowed in production | gw H6, L1 | `BNBLOC_DEV_DISCOVERY` becomes fatal at startup under `BNBLOC_ENV=production`. Delete the daemon-token bypass, which has no client (`service.go:665-679,763-786`, `localagent.go:308-315`), and fix `docs/bridge.md`. | S |
 
+- **Status (row "Dev discovery is allowed in production" only):** landed in
+  0b7bfda with `TestDevDiscoveryRefusedInProduction` and
+  `TestNoDaemonTokenBypass`; the other 1A rows belong to other batches of
+  work.
 - **Owners:** `core.BnblocOwnedPath`, `core.HostExecutableProjectConfig`,
   vmexec `credentialPaths`, desktop `member_dir`, `owned_orphan`.
 - **Tests:**
@@ -159,6 +163,10 @@ policy fails closed): eb77683. Desktop and dev-discovery rows: other agents.
 | Session minting bypasses `resolveSession` | gw H5 | `handleSwitchTenant`, `handleAPITokenExchange` and `mintAdminToken` mint through one `mintSession`. The chosen tenant is stored on the refresh family's existing `tenant_hint`, so refresh, the bridge fork and the CLI keep it. Delete the web's re-apply (`sessionGrant.ts:120-150`). | M |
 | The web Organization console overrides the acting tenant; the acting tenant survives logout | web H1, H2 | `useActingTenant()` in `lib/session.ts` owns the key (scoped by subject and gateway), the tenant list, the setter and the cleanup on logout. Delete `scoped()` and `?tenantId=` from the web, **and** the `?tenantId=` input from `tenant_scope.go`, which has no non-web caller. The header becomes the only input. | M |
 
+- **Status:** landed: 48d6041 (membership owner, svc H1–H4, M10), 0b7bfda
+  (namesRoom, local-agent gate, dev discovery), 244b1a6 (contentGrant), 4ce973d
+  (mintSession and switch persistence, useActingTenant, no `?tenantId=`,
+  `lib/roomRoles.ts`). The web composer's visitor gating stays in 5.2.
 - **Owners:** `membership.Member.MayChat` / `IsHuman`, `RoomClient.Forget`,
   `membership.RoomScope`, `apiPath.namesRoom`, `contentGrant`, `mintSession`,
   `useActingTenant`.

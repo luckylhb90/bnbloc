@@ -310,23 +310,63 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   compose entry needs `BNBLOC_INTERNAL_KEY`. A service doing room-membership
   checks also needs `BNBLOC_ROOM_BASE_URL` + a `room` dependency, or
   `membershipFor` falls back to deny-all `NewStatic()` (symptom: owner gets 403).
+- **Room membership has one owner: `internal/membership`.** A backend checks
+  a request with `membership.RoomScope(ctx, dir, room, user, need)`: fail
+  closed (a nil directory refuses), in the room's own tenant (the room
+  probe answers it; a request signed for another tenant is refused), with
+  the ability the route needs: `AnyMember` (reads, a host's bridge),
+  `Human` (`Member.IsHuman`: presence, the people chat, handoff) or `Chat`
+  (`Member.MayChat`, human and not a visitor: chat, typing, schedules,
+  dispatch requesters, authorizing or borrowing an agent, quota requests).
+  Visitors are read-only (D1). `PostChat` enforces `Chat` itself, so no
+  post path (scheduler, run-now, dispatch) can skip it. The web mirrors the
+  abilities in `lib/roomRoles.ts`, pinned to
+  `internal/membership/testdata/abilities.json`. `TestNoMembershipFailOpen`
+  forbids fail-open guards, direct directory reads in handlers and visitor
+  comparisons outside the owners.
+- **A removed member keeps no access.** realtime calls `Directory.Forget`
+  when it ingests `member_removed`/`room_deleted` (before delivering it), a
+  stream opens on an uncached lookup (`FreshRoomScope`) and re-checks at
+  every heartbeat, and the gateway forgets its cached answers on a removal,
+  leave or room deletion it proxies (`TestRevocationClosesAccess`).
 - **Gateway room scope is dynamic, not just the baked JWT claim.** The session
   token lists rooms as of login; a room created/joined afterward is not in it, so
   `handleProxy` falls back to a live `subjectInRoom` lookup on the claim miss.
   Do not "fix" a post-login 403 by forcing re-login — the fallback handles it.
 
 - **The effective tenant has one rule: `services/gateway/tenant_scope.go`.**
-  Session tenant; a super admin's `X-Bnbloc-Acting-Tenant`, then `?tenantId=`
-  (wins), ignored for everyone else, applied at authentication
-  (`authenticate`, `proxyClaims`), so `claims.Tenant` IS the effective tenant
-  in every handler. A request naming a room acts in the room's tenant through
-  `roomClaims` (reach check + `rooms.tenant_id`, which wins over the acting
-  tenant); content routes do this for `?room=`, consistent with the job grant.
-  Never read the acting header, `?tenantId=` or `RoomTenant` in a handler
-  (2026-10-12: the Library ignored the acting tenant while job-grant saves
-  landed in the room's tenant). A gateway call to a backend on a member's
-  behalf signs the effective tenant (`svcauth.HeaderTenant` before
-  `svcauth.Sign`).
+  Session tenant; a super admin's `X-Bnbloc-Acting-Tenant` (the only input:
+  there is no `?tenantId=`), ignored for everyone else, applied at
+  authentication (`authenticate`, `proxyClaims`), so `claims.Tenant` IS the
+  effective tenant in every handler. A request naming a room acts in the
+  room's tenant (`rooms.tenant_id`, which wins over the acting tenant) through
+  a named variant only: `inRoomTenant` (the proxy, for every path
+  `apiPath.namesRoom()`, the room itself included; sub-resources also need
+  reach), `roomClaims` (reach: content `?room=`, the job grant, a search
+  narrowed to one room, site tickets), `roomEditorClaims`, `roomInTenant`.
+  Never read the acting header or call `RoomTenant`/`roomTenantOr` in a
+  handler (2026-10-12: the Library ignored the acting tenant while job-grant
+  saves landed in the room's tenant); `TestEffectiveTenantSingleOwner`
+  enforces it. A gateway call to a backend on a member's behalf signs the
+  effective tenant (`svcauth.HeaderTenant` before `svcauth.Sign`), and every
+  backend refuses a room request signed for another tenant than the room's
+  (`membership.RoomScope`). The web's one owner is `useActingTenant()` in
+  `web/src/lib/session.ts` (per gateway and subject, cleared at sign-out; web
+  boundary rule 7).
+- **A content request's actor has one owner: `contentGrant`**
+  (`content_requester.go`). Every content route goes through
+  `contentCaller(w, r, write, grant)` and declares its job-grant mode: the
+  actions room tools perform honor `?job=&room=` (acting as the job's
+  requester), the rest refuse it with 400 (decision O6;
+  `TestJobGrantHonoredOrRefused` fails on a route without a mode). The
+  artifact download resolves the same actor, so a `?room=` detail's bundle
+  URLs download with the same `?room=`.
+- **Every session bearer is minted by `mintSession`** (`session.go`): sign-in,
+  refresh, fork, tenant switch, API-token exchange, `MintAdminToken`
+  (`TestSessionsMintedOnlyByMintSession`). A tenant switch persists on the
+  sign-in's refresh family (`store.SwitchRefreshFamily`, the tenant hint), so
+  refreshes and forked bridge/CLI sessions land in the switched tenant; the
+  web never re-applies it.
 
 ### Local-agent cores (multi-core)
 
@@ -882,7 +922,7 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
 - **`PutGrant`'s upsert must clear `revoked_at_ms` and reset usage** on
   re-authorize, or a re-enabled provider stays revoked (the upsert originally
   omitted these columns — re-authorizing silently did nothing).
-- **Platform agents** (`docs/prd/2026-10-10-zero-install-onboarding.md`): a `source=platform` grant is valid only while published (read-time, `liveAuthorization` + reserve) and always sandboxed (reserve `sandboxRequired`); its host's agent-host membership passes `IsMember` but never `IsHumanMember` — a new human-only surface must check `IsHumanMember`. The policy is per host (`hosts[]`; PUT writes only the caller's entry) and a room holds one grant per serving host: decide "is this a usable platform grant / platform drive" only through `internal/shareagent` (`RoomPlatformGrants`, `ReadPlatformDrive`), never by re-reading the policy shape (v2: `docs/prd/2026-10-10-platform-agents-v2-onboarding.md`).
+- **Platform agents** (`docs/prd/2026-10-10-zero-install-onboarding.md`): a `source=platform` grant is valid only while published (read-time, `liveAuthorization` + reserve) and always sandboxed (reserve `sandboxRequired`); its host's agent-host membership passes `membership.AnyMember` but never `Human` or `Chat` — a new human-only surface checks `RoomScope(..., membership.Human)` (or `Chat`). A platform grant has its own id namespace (`platformGrantID`); `borrowGrant` picks the grant a borrow runs under, so an owner's room authorization of the same agent never overwrites or revokes it. The policy is per host (`hosts[]`; PUT writes only the caller's entry) and a room holds one grant per serving host: decide "is this a usable platform grant / platform drive" only through `internal/shareagent` (`RoomPlatformGrants`, `ReadPlatformDrive`), never by re-reading the policy shape (v2: `docs/prd/2026-10-10-platform-agents-v2-onboarding.md`).
 
 ### Rooms, members, messages
 
