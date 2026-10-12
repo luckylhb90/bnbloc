@@ -584,6 +584,10 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   stays read-only, so a borrowed prompt cannot plant an escape for the owner's
   next unsandboxed session. Do not "fix" a CLI write failure by widening this
   to a whole config dir: add the specific state path to the harness layout.
+  A deny-write entry ending in `/` names a directory. Under bubblewrap,
+  missing deny-write paths inside writable trees are created as read-only
+  placeholders and their parent directories pinned so they cannot be renamed
+  away; never skip a deny-write path because it does not exist.
 - **The bridge MUST send `agentSessionId` when posting a reply to
   `agent-activity/messages`.** Activity dedupes new messages by a
   per-`(room, agentSessionId)` cursor. With the field missing, every session's
@@ -701,6 +705,42 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
 - **"What can member M see" is `contentuse.Visible`** (Library, `name@range`
   resolution, prompt search); don't add another per-scope query list. Content
   has no opt-in rollout: members opt in per use; `retired` is unpublish.
+
+- **Copies go through `internal/contentshare`** (share route and join step
+  alike). A room share stands until revoked and is handed out from realtime on
+  `member_joined`; any new human-join path in the room service must publish
+  `member_joined`.
+- **An organization has one content component per kind and name**
+  (`ErrContentOrgNameTaken`); references stay `name@range`, never an
+  author-qualified syntax. Platform content tenant scope is the component one
+  (`PUT /v1/platform/components/{name}/tenants`).
+- **A new version of an org-used component reopens approval by itself** (one
+  pending per component). Room-tool saves announce themselves with a
+  `content_saved` room event; never poll the Library to find a save. MCP
+  packages are assembled only by `pkgmeta.PrepareMCP`/`AssembleMCP`.
+- **A quick try wears a staged draft, never a component:** `try_draft` stages
+  through `POST /v1/content-drafts` (job grant) into `content_drafts`
+  (expiring, never listed); only a job dispatched by the staging job, in its
+  room and before expiry, wears it. Its trust owner is the staging agent's
+  owner.
+- **Every agent row a job writes carries `payload.jobId` and
+  `payload.sourceSeq`; a dispatch carries `dispatchedBy.parentSeq`.** The feed
+  nests delegated work from these alone (`views/room/feedTurns.ts`).
+- **The room expert is recorded where it is resolved** (the gateway's
+  effective resolution writes `agent_jobs.room_expert_*` and audits a change),
+  not at post time.
+- **The member stream `GET /v1/my/plugin-events` is the desktop's channel:**
+  held whenever the sidecar manager runs, with `?plugins=1` only while a
+  plugin sidecar runs (only those get `plugin_event` and count as a desktop).
+  A gateway route that changes a member's executable catalog signals
+  `componentsChanged` (realtime `POST /internal/v1/components/changed`,
+  passed on to every replica); the 60 s poll is only a safety net.
+- **http MCP per-member sign-in is `mcp.http.auth.scheme = "oauth"`.** The
+  desktop (`internal_ext/mcp_oauth.rs`) discovers the authorization server at
+  sign-in (never declared or hardcoded), requires PKCE S256 and checks
+  `resource`, `state` and `iss`. Tokens live 0600 under
+  `<mcp-settings>/oauth/`; never send them to the gateway, log them, put them
+  in the session checksum or lend them to a borrowed or platform drive.
 
 ### Borrow authorization
 
