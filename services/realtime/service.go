@@ -884,7 +884,7 @@ func (s *Service) handleDeleteMessage(w http.ResponseWriter, r *http.Request) {
 	s.Hub.Publish(wire.Event{
 		RoomID:    roomID,
 		ChannelID: channelID,
-		Kind:      "message_deleted",
+		Kind:      wire.EventMessageDeleted,
 		Payload:   map[string]any{"sequence": seq},
 		AtUnixMs:  time.Now().UnixMilli(),
 	})
@@ -948,7 +948,7 @@ func (s *Service) handleEditMessage(w http.ResponseWriter, r *http.Request) {
 	s.Hub.Publish(wire.Event{
 		RoomID:    roomID,
 		ChannelID: channelID,
-		Kind:      "message_edited",
+		Kind:      wire.EventMessageEdited,
 		Payload:   map[string]any{"sequence": seq, "text": text, "editedAtMs": now},
 		AtUnixMs:  now,
 	})
@@ -1051,7 +1051,7 @@ func (s *Service) handleTyping(w http.ResponseWriter, r *http.Request) {
 	s.Hub.Publish(wire.Event{
 		RoomID:    roomID,
 		ChannelID: channelID,
-		Kind:      "presence_typing",
+		Kind:      wire.EventPresenceTyping,
 		Payload:   map[string]any{"userId": userID},
 		AtUnixMs:  time.Now().UnixMilli(),
 	})

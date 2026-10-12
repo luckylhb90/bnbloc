@@ -61,9 +61,9 @@ func (p *Presence) Enter(roomID, userID string) {
 	// Announce join only on a genuine first arrival, not a reconnect that a
 	// pending leave had not yet finalized.
 	if first && !reconnecting {
-		p.emit(roomID, "presence_join", map[string]any{"userId": userID})
+		p.emit(roomID, wire.EventPresenceJoin, map[string]any{"userId": userID})
 	}
-	p.emit(roomID, "presence_snapshot", map[string]any{"members": members})
+	p.emit(roomID, wire.EventPresenceSnapshot, map[string]any{"members": members})
 }
 
 // Leave drops a user's presence reference. When the last reference goes, the
@@ -105,8 +105,8 @@ func (p *Presence) finalizeLeave(roomID, userID string) {
 	members := p.membersLocked(roomID)
 	p.mu.Unlock()
 
-	p.emit(roomID, "presence_leave", map[string]any{"userId": userID})
-	p.emit(roomID, "presence_snapshot", map[string]any{"members": members})
+	p.emit(roomID, wire.EventPresenceLeave, map[string]any{"userId": userID})
+	p.emit(roomID, wire.EventPresenceSnapshot, map[string]any{"members": members})
 }
 
 // Members returns the current present users in a room.

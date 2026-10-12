@@ -168,7 +168,7 @@ func (r *AgentRoster) snapshotLocked(roomID string) []wire.RosterAgent {
 
 func (r *AgentRoster) emit(roomID string, agents []wire.RosterAgent) {
 	if r.publish != nil {
-		r.publish(wire.Event{RoomID: roomID, Kind: "agent_roster", Payload: map[string]any{"agents": agents}})
+		r.publish(wire.Event{RoomID: roomID, Kind: wire.EventAgentRoster, Payload: map[string]any{"agents": agents}})
 	}
 }
 

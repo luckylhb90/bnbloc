@@ -22,21 +22,12 @@ const (
 	SSEKindBridge = "bridge"
 )
 
-// publishedKinds is the bounded label set of published event kinds. A kind
-// outside it (the internal ingest accepts any kind string) is counted as
-// "other", so a caller can never grow the label space.
-var publishedKinds = map[string]bool{
-	wire.KindChatMessage: true, wire.KindAgentMessages: true,
-	"agent_job_created": true, "agent_job_updated": true, "agent_session_state": true, "agent_roster": true,
-	"presence_join": true, "presence_leave": true, "presence_snapshot": true, "presence_typing": true,
-	"message_deleted": true, "message_edited": true, wire.EventTaskUpdated: true,
-	"artifact_updated": true, "artifact_state": true,
-	wire.EventMemberRemoved: true, wire.EventRoomDeleted: true,
-}
-
-// EventKindLabel maps an event kind onto the bounded metric label set.
+// EventKindLabel maps an event kind onto the bounded metric label set: the
+// registered kinds (wire.RoomEventKinds). Any other kind string (the
+// internal ingest accepts one) is counted as "other", so a caller can never
+// grow the label space.
 func EventKindLabel(kind string) string {
-	if publishedKinds[kind] {
+	if _, ok := wire.LookupEventKind(kind); ok {
 		return kind
 	}
 	return "other"

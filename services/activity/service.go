@@ -132,7 +132,7 @@ func (s *Service) handleSessionState(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	s.Publisher.Publish(r.Context(), wire.Event{RoomID: roomID, Kind: "agent_session_state", Payload: in, AtUnixMs: in.OccurredAtUnixMs})
+	s.Publisher.Publish(r.Context(), wire.Event{RoomID: roomID, Kind: wire.EventAgentSessionState, Payload: in, AtUnixMs: in.OccurredAtUnixMs})
 	httpx.WriteJSON(w, http.StatusOK, wire.ReportSessionStateReply{SyncCursor: cursor})
 }
 
@@ -191,7 +191,7 @@ func (s *Service) handleMessages(w http.ResponseWriter, r *http.Request) {
 	if len(fresh) > 0 {
 		out := in
 		out.Messages = fresh
-		s.Publisher.Publish(r.Context(), wire.Event{RoomID: roomID, ChannelID: in.ChannelID, Kind: "agent_messages", Payload: out})
+		s.Publisher.Publish(r.Context(), wire.Event{RoomID: roomID, ChannelID: in.ChannelID, Kind: wire.KindAgentMessages, Payload: out})
 		// Reported usage moves the owners' monthly budgets (R12).
 		s.noteReplyBurn(r.Context(), fresh)
 	}

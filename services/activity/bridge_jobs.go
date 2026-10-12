@@ -255,7 +255,7 @@ func (s *Service) publishJob(ctx context.Context, job store.AgentJob, now int64)
 		return
 	}
 	// The event belongs to the job's tenant (the sweeper runs tenantless).
-	s.Publisher.Publish(tenant.NewContext(ctx, job.TenantID), wire.Event{RoomID: job.RoomID, ChannelID: job.ChannelID, Kind: "agent_job_updated", Payload: job, AtUnixMs: now})
+	s.Publisher.Publish(tenant.NewContext(ctx, job.TenantID), wire.Event{RoomID: job.RoomID, ChannelID: job.ChannelID, Kind: wire.EventAgentJobUpdated, Payload: job, AtUnixMs: now})
 }
 
 // SweepAgentJobs fails jobs no worker can finish and notifies their rooms. The
@@ -339,7 +339,7 @@ func (s *Service) postJobNotice(ctx context.Context, job store.AgentJob, text st
 	}
 	out := in
 	out.Messages = fresh
-	s.Publisher.Publish(ctx, wire.Event{RoomID: job.RoomID, ChannelID: job.ChannelID, Kind: "agent_messages", Payload: out, AtUnixMs: now})
+	s.Publisher.Publish(ctx, wire.Event{RoomID: job.RoomID, ChannelID: job.ChannelID, Kind: wire.KindAgentMessages, Payload: out, AtUnixMs: now})
 }
 
 // handleCancelAgentJob stops a job a member no longer wants. Unlike a worker

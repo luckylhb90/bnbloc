@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/luckylhb90/bnbloc/internal/extreg"
+	"github.com/luckylhb90/bnbloc/internal/wire"
 )
 
 // KindPluginPackageV1 is the package-envelope kind for an out-of-process plugin.
@@ -53,8 +54,8 @@ type HookSpec struct {
 // hook here, and a plugin declaring any key absent from this map is rejected
 // before persistence. The keys are "<event>.v<version>".
 var hookRegistry = map[string]HookSpec{
-	"chat_message.v1":   {Event: "chat_message", Version: "1"},
-	"agent_messages.v1": {Event: "agent_messages", Version: "1"},
+	"chat_message.v1":   {Event: wire.KindChatMessage, Version: "1"},
+	"agent_messages.v1": {Event: wire.KindAgentMessages, Version: "1"},
 	// notification.v1 is not a room event: it carries one member's
 	// notification (wire.PluginNotification) to that member's own desktop
 	// plugin, which delivers it in their place (docs/notifications.md).

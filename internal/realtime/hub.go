@@ -538,15 +538,16 @@ func (h *Hub) deliver(batch []*pending) {
 			continue
 		}
 		ev := p.out
-		switch ev.Kind {
-		case wire.EventRoomDeleted:
+		switch {
+		case ev.Kind == wire.EventRoomDeleted:
 			// Nothing of a deleted room may replay into a later room that
 			// reuses its id, and the revocation itself must not either.
 			delete(h.replay, ev.RoomID)
-		case wire.EventMemberRemoved:
-			// Live-only: replayed to a member re-added later, it would close
-			// their fresh stream.
-		default:
+		case wire.ReplayedKind(ev.Kind):
+			// Only replay kinds (wire.RoomEventKinds) are retained: a
+			// transient event (a typing hint, a toast, a badge, a stale
+			// state, a revocation) delivered again on reconnect would look
+			// new to the client.
 			now := h.now()
 			buf := append(h.pruneReplayLocked(ev.RoomID, now), replayEntry{ev: ev, at: now})
 			if h.replayLimit > 0 && len(buf) > h.replayLimit {

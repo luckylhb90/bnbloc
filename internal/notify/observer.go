@@ -99,7 +99,7 @@ func (o *Observer) Observe(ctx context.Context, ev wire.Event) {
 	}
 	obs := observation{tenantID: tenant.FromContext(ctx), kind: ev.Kind, roomID: ev.RoomID, channelID: ev.ChannelID, seq: ev.Sequence, atMs: ev.AtUnixMs}
 	switch ev.Kind {
-	case "chat_message":
+	case wire.KindChatMessage:
 		p, ok := ev.Payload.(map[string]any)
 		if !ok {
 			return
@@ -109,7 +109,7 @@ func (o *Observer) Observe(ctx context.Context, ev wire.Event) {
 		if !strings.Contains(obs.text, "@") {
 			return
 		}
-	case "agent_job_updated":
+	case wire.EventAgentJobUpdated:
 		job, ok := decodeJob(ev.Payload)
 		if !ok {
 			return
@@ -120,7 +120,7 @@ func (o *Observer) Observe(ctx context.Context, ev wire.Event) {
 			return
 		}
 		obs.job = job
-	case "agent_messages":
+	case wire.KindAgentMessages:
 		session, text, ok := decodeReply(ev.Payload)
 		if !ok {
 			return
@@ -202,11 +202,11 @@ func (o *Observer) emit(parent context.Context, tenantID string, events []Event)
 // events maps an observation to notification Events.
 func (o *Observer) events(obs observation) []Event {
 	switch obs.kind {
-	case "chat_message":
+	case wire.KindChatMessage:
 		return o.mentionEvents(obs)
-	case "agent_messages":
+	case wire.KindAgentMessages:
 		return o.replyObserved(obs, time.Now())
-	case "agent_job_updated":
+	case wire.EventAgentJobUpdated:
 		if store.AgentJobStatus(obs.job.Status) == store.AgentJobReplied {
 			return o.jobReplied(obs, time.Now())
 		}

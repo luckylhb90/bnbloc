@@ -262,6 +262,31 @@ func TestRevocationEventsAreNotReplayed(t *testing.T) {
 	}
 }
 
+// Only replay kinds (wire.RoomEventKinds) are retained: a reconnecting
+// stream is never sent a transient event again (a typing hint, a "saved"
+// toast, a Files badge, a stale artifact state), which the client would
+// treat as new.
+func TestTransientKindsAreNotReplayed(t *testing.T) {
+	h := NewHub(32, 32)
+	keep := h.SubscribeLive("r")
+	defer h.Unsubscribe("r", keep)
+	for _, k := range wire.RoomEventKinds {
+		if k.Name == wire.EventRoomDeleted {
+			continue
+		}
+		h.Publish(wire.Event{RoomID: "r", Kind: k.Name})
+	}
+	late := h.Subscribe("r")
+	defer h.Unsubscribe("r", late)
+	var got []string
+	for _, ev := range drain(late) {
+		got = append(got, ev.Kind)
+	}
+	if len(got) != 2 || got[0] != wire.KindChatMessage || got[1] != wire.KindAgentMessages {
+		t.Fatalf("replay = %v, want only the durable chat and agent messages", got)
+	}
+}
+
 // The replay buffer is a latency optimization for connected clients, not a
 // second history: an entry older than replayMaxAge is dropped on subscribe
 // and on publish, so a quiet room whose subscriber stayed connected never

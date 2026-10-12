@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/luckylhb90/bnbloc/internal/sse"
+	"github.com/luckylhb90/bnbloc/internal/wire"
 )
 
 // `bnbloc smoke` is the post-deploy check of the room message path against a
@@ -208,7 +209,7 @@ func smokeChecks(ctx context.Context, c *client, opts smokeOptions, run *smokeRu
 			return "", err
 		}
 		ev, err := w.wait(opts.StepTimeout, "chat_message echo", func(ev smokeEvent) (bool, error) {
-			return ev.Kind == "chat_message" && payloadString(ev.Payload, "clientMsgId") == clientMsgID, nil
+			return ev.Kind == wire.KindChatMessage && payloadString(ev.Payload, "clientMsgId") == clientMsgID, nil
 		})
 		if err != nil {
 			return "", err
@@ -229,7 +230,7 @@ func smokeChecks(ctx context.Context, c *client, opts smokeOptions, run *smokeRu
 			return "", err
 		}
 		for _, m := range page.Messages {
-			if m.Kind == "chat_message" && payloadString(m.Payload, "clientMsgId") == clientMsgID {
+			if m.Kind == wire.KindChatMessage && payloadString(m.Payload, "clientMsgId") == clientMsgID {
 				return fmt.Sprintf("seq %d", m.Sequence), nil
 			}
 		}
@@ -376,7 +377,7 @@ func (w *smokeWaiter) wait(timeout time.Duration, what string, match func(smokeE
 	for {
 		select {
 		case ev := <-w.events:
-			if ev.Kind == "room_deleted" {
+			if ev.Kind == wire.EventRoomDeleted {
 				return ev, errors.New("the room was deleted while waiting")
 			}
 			ok, err := match(ev)
@@ -480,7 +481,7 @@ func smokeAgentReply(ctx context.Context, c *client, w *smokeWaiter, roomID, sub
 	handle := rcpt.OwnerID + "/" + rcpt.Provider
 	var reply string
 	_, err = w.wait(opts.AgentTimeout, "reply from "+handle, func(ev smokeEvent) (bool, error) {
-		if ev.Kind != "agent_messages" {
+		if ev.Kind != wire.KindAgentMessages {
 			return false, nil
 		}
 		var batch struct {

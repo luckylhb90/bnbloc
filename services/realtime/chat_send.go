@@ -197,7 +197,7 @@ func (s *Service) PostChat(ctx context.Context, p ChatPost) (ChatPosted, error) 
 	ev := wire.Event{
 		RoomID:    p.RoomID,
 		ChannelID: channelID,
-		Kind:      "chat_message",
+		Kind:      wire.KindChatMessage,
 		Payload:   payload,
 		AtUnixMs:  serverTimeIfUnset(p.AtUnixMs),
 	}
@@ -264,7 +264,7 @@ func (s *Service) PostChat(ctx context.Context, p ChatPost) (ChatPosted, error) 
 		} else {
 			posted.Job = &job
 			s.auditExpertUse(ctx, expert, job)
-			s.Hub.Publish(wire.Event{RoomID: p.RoomID, ChannelID: channelID, Kind: "agent_job_created", Payload: job, AtUnixMs: nowMs})
+			s.Hub.Publish(wire.Event{RoomID: p.RoomID, ChannelID: channelID, Kind: wire.EventAgentJobCreated, Payload: job, AtUnixMs: nowMs})
 		}
 	}
 	return posted, nil

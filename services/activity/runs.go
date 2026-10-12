@@ -234,7 +234,7 @@ func (s *Service) replyRoomSeq(ctx context.Context, j store.AgentJob, messageID 
 			return 0
 		}
 		for _, m := range msgs {
-			if m.Kind == "agent_messages" && batchHasMessage(m.Payload, messageID) {
+			if m.Kind == wire.KindAgentMessages && batchHasMessage(m.Payload, messageID) {
 				return m.Seq
 			}
 			after = m.Seq

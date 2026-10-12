@@ -427,7 +427,7 @@ func (s *Service) publishArtifactEventReason(ctx context.Context, art store.Arti
 	// watched artifact look frozen until the 30s list poll happens to fire.
 	s.Publisher.Publish(ctx, wire.Event{
 		RoomID:   art.RoomID,
-		Kind:     "artifact_updated",
+		Kind:     wire.EventArtifactUpdated,
 		Payload:  payload,
 		AtUnixMs: art.UpdatedAtMs,
 	})
@@ -501,7 +501,7 @@ func (s *Service) handleArtifactState(w http.ResponseWriter, r *http.Request) {
 	// receive every gesture.
 	s.Publisher.Publish(r.Context(), wire.Event{
 		RoomID: roomID,
-		Kind:   "artifact_state",
+		Kind:   wire.EventArtifactState,
 		Payload: map[string]any{
 			"artifactId": body.ArtifactID,
 			"actor":      userID,

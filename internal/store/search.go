@@ -10,6 +10,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/luckylhb90/bnbloc/internal/tenant"
+	"github.com/luckylhb90/bnbloc/internal/wire"
 )
 
 // Global search (F7) and single-message lookup over the persisted room feed
@@ -74,13 +75,13 @@ type ArtifactIndex interface {
 // agent_messages batch.
 func MessageText(kind string, payload json.RawMessage) string {
 	switch kind {
-	case "chat_message":
+	case wire.KindChatMessage:
 		var p struct {
 			Text string `json:"text"`
 		}
 		_ = json.Unmarshal(payload, &p)
 		return p.Text
-	case "agent_messages":
+	case wire.KindAgentMessages:
 		var p struct {
 			Messages []struct {
 				Payload struct {
@@ -104,7 +105,7 @@ func MessageText(kind string, payload json.RawMessage) string {
 // a chat message, or "owner/provider" for an agent reply (whose row carries no
 // author column).
 func MessageAuthor(m RoomMessage) string {
-	if m.Author != "" || m.Kind != "agent_messages" {
+	if m.Author != "" || m.Kind != wire.KindAgentMessages {
 		return m.Author
 	}
 	var p struct {

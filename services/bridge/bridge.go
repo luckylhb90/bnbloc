@@ -1237,9 +1237,9 @@ func (b *Bridge) consumeRoom(ctx context.Context, room string) error {
 			return err
 		}
 		switch ev.Name {
-		case "agent_job_updated":
+		case wire.EventAgentJobUpdated:
 			b.handleJobUpdate(string(ev.Data))
-		case "artifact_state":
+		case wire.EventArtifactState:
 			// A member interacted with a live artifact. Recorded for the
 			// agent's .room/live.md; never drives a turn by itself (every
 			// gesture spawning token-burning turns would be a runaway),

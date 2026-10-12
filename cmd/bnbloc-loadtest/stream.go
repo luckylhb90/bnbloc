@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/luckylhb90/bnbloc/internal/sse"
+	"github.com/luckylhb90/bnbloc/internal/wire"
 )
 
 // Reconnect backoff of the web client's subscribeRoom: 1s doubling up to
@@ -181,7 +182,7 @@ func decodeEvent(kind string, data []byte) (roomEvent, bool) {
 		raw.Kind = kind
 	}
 	ev := roomEvent{Sequence: raw.Sequence}
-	if raw.Kind == "chat_message" {
+	if raw.Kind == wire.KindChatMessage {
 		ev.clientMsgID = raw.Payload.ClientMsgID
 	}
 	return ev, true

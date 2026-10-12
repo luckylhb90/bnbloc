@@ -11,18 +11,13 @@ import "encoding/json"
 // build writes and accepts. An import of any other value is refused.
 const RoomExportFormat = "bnbloc.room-export/v1"
 
-// Room feed kinds. Only these two are durable history (realtime persists them;
-// presence/typing/state churn is transient), so they are the only kinds a
-// handoff package carries.
+// Room feed kinds. Only these two are durable history (RoomEventKinds:
+// realtime persists them; presence/typing/state churn is transient), so they
+// are the only kinds a handoff package carries.
 const (
 	KindChatMessage   = "chat_message"
 	KindAgentMessages = "agent_messages"
 )
-
-// PersistedFeedKind reports whether kind is a durable room-feed kind.
-func PersistedFeedKind(kind string) bool {
-	return kind == KindChatMessage || kind == KindAgentMessages
-}
 
 // RoomExportManifest is manifest.json at the package root.
 type RoomExportManifest struct {
