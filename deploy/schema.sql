@@ -255,7 +255,6 @@ CREATE TABLE IF NOT EXISTS agent_messages (
   room_id          VARCHAR(64) NOT NULL,
   agent_session_id VARCHAR(128) NOT NULL,
   seq              BIGINT NOT NULL,
-  client_submit_id VARCHAR(128) NULL,
   payload_json     JSON NOT NULL,
   created_at_ms    BIGINT NOT NULL,
   usage_reported      TINYINT(1) NOT NULL DEFAULT 0,
@@ -265,7 +264,6 @@ CREATE TABLE IF NOT EXISTS agent_messages (
   usage_output_tokens BIGINT NOT NULL DEFAULT 0,
   usage_cost_usd      DECIMAL(18,6) NULL,
   PRIMARY KEY (room_id, agent_session_id, seq),
-  UNIQUE KEY uq_client_submit (room_id, agent_session_id, client_submit_id),
   KEY idx_agent_messages_tenant_time (tenant_id, created_at_ms)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
@@ -299,15 +297,6 @@ CREATE TABLE IF NOT EXISTS shared_agent_grants (
   created_by          VARCHAR(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL DEFAULT '',
   KEY idx_grant_room (tenant_id, room_id),
   KEY idx_grant_grantee (tenant_id, grantee_user_id)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-
-CREATE TABLE IF NOT EXISTS shared_agent_leases (
-  lease_id        VARCHAR(64) PRIMARY KEY,
-  tenant_id       VARCHAR(64) NOT NULL,
-  grant_id        VARCHAR(64) NOT NULL,
-  acquired_at_ms  BIGINT NOT NULL,
-  released_at_ms  BIGINT NULL,
-  KEY idx_lease_grant (grant_id, released_at_ms)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS shared_agent_audit (

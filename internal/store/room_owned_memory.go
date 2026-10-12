@@ -76,8 +76,7 @@ func (s *MemoryBridgeJobs) deleteRoomRows(tenantID, roomID string) {
 	}
 }
 
-// shared_agent_grants, shared_agent_audit (shared_agent_leases has no
-// memory rows).
+// shared_agent_grants, shared_agent_audit.
 func (s *MemoryGrant) deleteRoomRows(tenantID, roomID string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

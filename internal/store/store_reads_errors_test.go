@@ -18,16 +18,6 @@ import (
 	"github.com/luckylhb90/bnbloc/internal/tenant"
 )
 
-// readsWithoutError are the store interface operations that still return a
-// result with no error. A read that cannot report a failure turns a database
-// blip into a wrong answer ("not a member", "no usage", "no rows"), which is
-// how a failed membership read once re-provisioned a subject and rewrote
-// their org role. This list only shrinks: a new store operation returns an
-// error, and an entry whose method gained one must be removed (the test fails
-// on a stale entry). The two left go with their endpoints.
-var readsWithoutError = map[string]bool{
-}
-
 // storeOp is one method of an exported store interface that takes a context.
 type storeOp struct {
 	Iface, Method string
@@ -83,34 +73,20 @@ func storeOps(t *testing.T) []storeOp {
 }
 
 // TestStoreReadsReturnErrors fails when a store interface operation (a method
-// taking a context) returns results without an error, unless it is on the
-// shrinking allowlist above, and when an allowlisted method no longer exists
-// in that shape.
+// taking a context) returns results without an error. A read that cannot
+// report a failure turns a database blip into a wrong answer ("not a
+// member", "no usage", "no rows"), which is how a failed membership read
+// once re-provisioned a subject and rewrote their org role.
 func TestStoreReadsReturnErrors(t *testing.T) {
-	found := map[string]bool{}
 	var offenders []string
 	for _, op := range storeOps(t) {
-		if op.ReturnsError {
-			continue
-		}
-		found[op.key()] = true
-		if !readsWithoutError[op.key()] {
+		if !op.ReturnsError {
 			offenders = append(offenders, fmt.Sprintf("%s (%s)", op.key(), op.Pos))
 		}
 	}
 	sort.Strings(offenders)
 	if len(offenders) > 0 {
 		t.Errorf("store operations must return an error (a failed read is never an empty answer):\n  %s", strings.Join(offenders, "\n  "))
-	}
-	var stale []string
-	for k := range readsWithoutError {
-		if !found[k] {
-			stale = append(stale, k)
-		}
-	}
-	sort.Strings(stale)
-	if len(stale) > 0 {
-		t.Errorf("readsWithoutError entries that now return an error (or are gone); remove them so the list only shrinks:\n  %s", strings.Join(stale, "\n  "))
 	}
 }
 

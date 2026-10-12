@@ -29,7 +29,6 @@ type ReportSessionStateReply struct {
 // Message is one canonical agent activity message.
 type Message struct {
 	Seq             int64  `json:"seq"`
-	ClientSubmitID  string `json:"clientSubmitId,omitempty"`
 	Payload         any    `json:"payload"`
 	CreatedAtUnixMs int64  `json:"createdAtUnixMs"`
 }

@@ -28,8 +28,6 @@ func byTenantRoom(table string) roomOwnedTable {
 // and the memory stores implement the same set through roomRowsOwner.
 var roomOwnedTables = []roomOwnedTable{
 	// Cleared through a parent, before the parent goes.
-	{table: "shared_agent_leases", args: tenantTenantRoomArgs,
-		where: `tenant_id = ? AND grant_id IN (SELECT grant_id FROM shared_agent_grants WHERE tenant_id = ? AND room_id = ?)`},
 	{table: "artifact_versions", args: tenantTenantRoomArgs,
 		where: `tenant_id = ? AND artifact_id IN (SELECT artifact_id FROM artifacts WHERE tenant_id = ? AND room_id = ?)`},
 	// Reply references are cross-tenant rows keyed by the token they name.

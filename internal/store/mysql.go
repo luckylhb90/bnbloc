@@ -99,10 +99,10 @@ WHERE tenant_id = ? AND room_id = ? AND agent_session_id = ? FOR UPDATE`,
 			cost = *u.CostUsd
 		}
 		res, err := tx.ExecContext(ctx, `
-INSERT IGNORE INTO agent_messages (tenant_id, room_id, agent_session_id, seq, client_submit_id, payload_json, created_at_ms,
+INSERT IGNORE INTO agent_messages (tenant_id, room_id, agent_session_id, seq, payload_json, created_at_ms,
   usage_reported, usage_owner_user_id, usage_provider, usage_input_tokens, usage_output_tokens, usage_cost_usd)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			tnt, roomID, in.AgentSessionID, msg.Seq, nullIfZero(msg.ClientSubmitID), payload, msg.CreatedAtUnixMs,
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			tnt, roomID, in.AgentSessionID, msg.Seq, payload, msg.CreatedAtUnixMs,
 			reported, u.Owner, u.Provider, u.InputTokens, u.OutputTokens, cost)
 		if err != nil {
 			return nil, 0, err

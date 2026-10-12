@@ -28,7 +28,8 @@ func schemaTableDDL(table string) (string, error) {
 // retired table is skipped there, and the dropping migration removes it
 // from databases that have it.
 var retiredTables = map[string]string{
-	"prompts": "2026_10_prompt_packs",
+	"prompts":             "2026_10_prompt_packs",
+	"shared_agent_leases": "2026_10_drop_legacy_borrow_and_submit",
 }
 
 // retiredColumns are columns ("table.column") a later migration drops (and
@@ -46,10 +47,16 @@ var retiredColumns = map[string]string{
 	"agent_sessions.owner_user_id":       "2026_10_drop_unused_columns",
 	"agent_sessions.state_json":          "2026_10_drop_unused_columns",
 	"agent_sessions.updated_at_ms":       "2026_10_drop_unused_columns",
+	"agent_messages.client_submit_id":    "2026_10_drop_legacy_borrow_and_submit",
 }
 
-// retiredColumn reports whether table.column is in retiredColumns.
+// retiredColumn reports whether table.column is in retiredColumns, or its
+// table in retiredTables: a locked migration never alters either on a
+// fresh database.
 func retiredColumn(table, column string) bool {
+	if _, ok := retiredTables[table]; ok {
+		return true
+	}
 	_, ok := retiredColumns[table+"."+column]
 	return ok
 }

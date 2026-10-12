@@ -37,7 +37,6 @@ func TestMySQLDeleteRoomRemovesEveryRoomOwnedRow(t *testing.T) {
 		"agent_jobs":                  `INSERT INTO agent_jobs (job_id, tenant_id, room_id, message_seq, requester_user_id, owner_user_id, core, provider, created_at_ms, updated_at_ms) VALUES ('job-{id}', 'org-a', '{id}', 1, 'alice', 'alice', 'c', 'p', 1, 1)`,
 		"user_agent_prefs":            `INSERT INTO user_agent_prefs (tenant_id, user_id, room_id, channel_id, updated_at_ms) VALUES ('org-a', 'alice', '{id}', '', 1)`,
 		"shared_agent_grants":         `INSERT INTO shared_agent_grants (grant_id, tenant_id, room_id, target_id, owner_user_id, grantee_user_id, allowed_models_json, capabilities_json, created_at_ms) VALUES ('g-{id}', 'org-a', '{id}', 't', 'alice', 'bob', '[]', '[]', 1)`,
-		"shared_agent_leases":         `INSERT INTO shared_agent_leases (lease_id, tenant_id, grant_id, acquired_at_ms) VALUES ('l-{id}', 'org-a', 'g-{id}', 1)`,
 		"shared_agent_audit":          `INSERT INTO shared_agent_audit (tenant_id, room_id, actor_user_id, owner_user_id, action, decision, at_ms) VALUES ('org-a', '{id}', 'bob', 'alice', 'turn', 'allow', 1)`,
 		"shared_agent_quota_requests": `INSERT INTO shared_agent_quota_requests (request_id, tenant_id, room_id, owner_user_id, requester_user_id, provider, created_at_ms) VALUES ('q-{id}', 'org-a', '{id}', 'alice', 'bob', 'p', 1)`,
 		"room_imports":                `INSERT INTO room_imports (tenant_id, room_id, source_room_id, source_exported_at_ms, imported_by, imported_at_ms, suggested_members_json) VALUES ('org-a', '{id}', 'src', 1, 'alice', 1, '[]')`,

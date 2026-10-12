@@ -1386,6 +1386,24 @@ WHERE r.channel_id = '' AND d.user_id IS NULL`)
 			return nil
 		},
 	},
+	{
+		// What the removed legacy borrow authority and the submit-provenance
+		// endpoint left behind (docs/prd/2026-10-12-code-health-
+		// remediation.md, Batch 2 removals, 4.5): the concurrency leases
+		// table and agent_messages.client_submit_id (with its unique key),
+		// which nothing writes or reads any more. They are retiredTables /
+		// retiredColumns.
+		id: "2026_10_drop_legacy_borrow_and_submit",
+		run: func(ctx context.Context, db sqlConn) error {
+			if _, err := db.ExecContext(ctx, "DROP TABLE IF EXISTS shared_agent_leases"); err != nil {
+				return fmt.Errorf("drop shared_agent_leases: %w", err)
+			}
+			if err := dropIndexIfExists(ctx, db, "agent_messages", "uq_client_submit"); err != nil {
+				return err
+			}
+			return dropColumnIfExists(ctx, db, "agent_messages", "client_submit_id")
+		},
+	},
 }
 
 // sqlConn is the statement surface a migration runs on. runMigrations passes
@@ -1503,8 +1521,12 @@ func addColumnIfMissing(ctx context.Context, db sqlConn, table, column, ddl stri
 }
 
 // addIndexIfMissing runs "ALTER TABLE <table> <ddl>" only when indexName does
-// not already exist on the table.
+// not already exist on the table. A retired table (retiredTables) is left to
+// the migration that drops it.
 func addIndexIfMissing(ctx context.Context, db sqlConn, table, indexName, ddl string) error {
+	if _, retired := retiredTables[table]; retired {
+		return nil
+	}
 	exists, err := indexExists(ctx, db, table, indexName)
 	if err != nil {
 		return err
