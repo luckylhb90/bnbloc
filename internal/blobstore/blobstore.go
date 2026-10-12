@@ -3,8 +3,6 @@ package blobstore
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -15,12 +13,12 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/luckylhb90/bnbloc/internal/config"
+	"github.com/luckylhb90/bnbloc/internal/digest"
 )
 
 const (
-	keyPrefix       = "sha256/"
-	defaultDiskDir  = "./.bnbloc-attachments"
-	sha256HexLength = 64
+	keyPrefix      = digest.KeyPrefix
+	defaultDiskDir = "./.bnbloc-attachments"
 )
 
 var (
@@ -89,9 +87,8 @@ type S3Config struct {
 }
 
 func ContentKey(content []byte) (key string, sha256hex string) {
-	sum := sha256.Sum256(content)
-	sha256hex = hex.EncodeToString(sum[:])
-	return keyPrefix + sha256hex, sha256hex
+	sha256hex = digest.Of(content)
+	return digest.Key(sha256hex), sha256hex
 }
 
 func FromEnv() (BlobStore, error) {
@@ -176,18 +173,9 @@ func parseBoolEnv(key string) (bool, error) {
 }
 
 func validateKey(key string) (string, error) {
-	hexPart, ok := strings.CutPrefix(key, keyPrefix)
-	if !ok || len(hexPart) != sha256HexLength {
+	hexPart, ok := digest.ParseKey(key)
+	if !ok {
 		return "", fmt.Errorf("key %q: %w", key, ErrInvalidKey)
 	}
-	for _, r := range hexPart {
-		if r < '0' || r > '9' && r < 'a' || r > 'f' {
-			return "", fmt.Errorf("key %q: %w", key, ErrInvalidKey)
-		}
-	}
 	return hexPart, nil
-}
-
-func keyFromHash(sha256hex string) string {
-	return keyPrefix + sha256hex
 }

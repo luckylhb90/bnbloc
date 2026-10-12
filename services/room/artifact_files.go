@@ -6,7 +6,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"github.com/luckylhb90/bnbloc/internal/httpx"
 	"image/png"
 	"io"
 	"mime"
@@ -15,6 +14,9 @@ import (
 	"strconv"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/luckylhb90/bnbloc/internal/digest"
+	"github.com/luckylhb90/bnbloc/internal/httpx"
 
 	"github.com/luckylhb90/bnbloc/internal/config"
 	"github.com/luckylhb90/bnbloc/internal/obs"
@@ -503,7 +505,7 @@ func (s *Service) handleGetArtifactThumbnail(w http.ResponseWriter, r *http.Requ
 		writeErr(w, http.StatusNotFound, "no thumbnail")
 		return
 	}
-	etag := `"` + strings.TrimPrefix(v.ThumbnailBlobKey, "sha256/") + `"`
+	etag := `"` + strings.TrimPrefix(v.ThumbnailBlobKey, digest.KeyPrefix) + `"`
 	if r.Header.Get("If-None-Match") == etag {
 		w.WriteHeader(http.StatusNotModified)
 		return

@@ -21,6 +21,7 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/luckylhb90/bnbloc/internal/digest"
 	"github.com/luckylhb90/bnbloc/internal/wire"
 )
 
@@ -34,7 +35,6 @@ const tauriSignatureHeader = "untrusted comment: signature from tauri secret key
 var (
 	desktopVersionRE   = regexp.MustCompile(`^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$`)
 	strictBase64RE     = regexp.MustCompile(`^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$`)
-	artifactKeyRE      = regexp.MustCompile(`(?i)^sha256/[0-9a-f]{64}$`)
 	desktopArchiveRE   = regexp.MustCompile(`(?i)^bnbloc\.app\.tar\.gz$`)
 	errArchiveNotTauri = fmt.Errorf("select the signed %s updater archive, not a DMG installer", desktopArchiveName)
 )
@@ -159,7 +159,7 @@ func prepareDesktopRelease(cfg wire.UpdateConfig, hub []wire.ReleaseEntry, a upl
 		return wire.UpdateConfig{}, wire.ReleaseEntry{}, fmt.Errorf("the artifact URL must be an absolute HTTP(S) gateway URL")
 	}
 	segments := strings.Split(u.Path, "/")
-	if !strings.Contains(u.Path, "/v1/artifacts/") || !strings.EqualFold(segments[len(segments)-1], a.SHA256) {
+	if !strings.Contains(u.Path, "/v1/artifacts/") || segments[len(segments)-1] != a.SHA256 {
 		return wire.UpdateConfig{}, wire.ReleaseEntry{}, fmt.Errorf("the artifact URL must be the content-addressed URL returned by this gateway")
 	}
 	if a.Size <= 0 {
@@ -213,10 +213,10 @@ func prepareDesktopRelease(cfg wire.UpdateConfig, hub []wire.ReleaseEntry, a upl
 // the sha256 is the key's digest, and the size is the local file's. The CLI
 // additionally pins the digest to the one it computed over the local file.
 func checkUploadResponse(key, sha string, size int64, localSHA string, localSize int64) error {
-	if !artifactKeyRE.MatchString(key) || !strings.EqualFold(strings.TrimPrefix(strings.ToLower(key), "sha256/"), sha) || size != localSize {
+	if keySHA, ok := digest.ParseKey(key); !ok || keySHA != sha || size != localSize {
 		return fmt.Errorf("artifact upload response did not match the selected file (key %q, sha256 %q, size %d; local size %d)", key, sha, size, localSize)
 	}
-	if !strings.EqualFold(sha, localSHA) {
+	if sha != localSHA {
 		return fmt.Errorf("artifact upload sha256 %s does not match the local file's %s", sha, localSHA)
 	}
 	return nil

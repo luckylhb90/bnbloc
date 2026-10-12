@@ -294,7 +294,7 @@ func (p *handoffPackage) readAttachments() error {
 			if err != nil {
 				return err
 			}
-			if !strings.EqualFold(sum, a.SHA256) {
+			if sum != a.SHA256 {
 				return badPackage("attachment %q content does not match its sha256", a.ID)
 			}
 		}

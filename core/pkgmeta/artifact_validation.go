@@ -4,11 +4,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/url"
-	"regexp"
 	"strings"
+
+	"github.com/luckylhb90/bnbloc/internal/digest"
 )
 
-var gatewayArtifactPathRE = regexp.MustCompile(`^/v1/artifacts/sha256/[0-9a-f]{64}$`)
+// gatewayArtifactPath is the gateway route a content-addressed artifact key
+// is served under.
+const gatewayArtifactPath = "/v1/artifacts/"
 
 func validateArtifactShapes(raw []byte) error {
 	var shell struct {
@@ -55,7 +58,7 @@ func validateArtifactMap(artifacts map[string]Artifact) error {
 		if strings.TrimSpace(artifact.URL) == "" || strings.TrimSpace(artifact.SHA256) == "" {
 			return fmt.Errorf("artifacts.%s requires url and sha256 strings; use {url:\"\", sha256:\"\"} or omit that artifact entry before upload", platform)
 		}
-		if !validSHA256(artifact.SHA256) {
+		if !digest.Valid(artifact.SHA256) {
 			return fmt.Errorf("artifacts.%s.sha256 must be 64 lowercase hex characters", platform)
 		}
 	}
@@ -83,7 +86,7 @@ func ValidateGatewayArtifactURLs(pkg Package, artifactBaseURL string) error {
 		if err != nil {
 			return fmt.Errorf("artifacts.%s.url: %w", platform, err)
 		}
-		if key != "sha256/"+artifact.SHA256 {
+		if key != digest.Key(artifact.SHA256) {
 			return fmt.Errorf("artifacts.%s.url key must match sha256", platform)
 		}
 	}
@@ -103,10 +106,11 @@ func GatewayArtifactKey(raw string, base *url.URL) (string, error) {
 	if err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") {
 		return "", fmt.Errorf("artifact URL must reference a gateway-uploaded artifact")
 	}
-	if !sameOrigin(u, base) || !gatewayArtifactPathRE.MatchString(u.EscapedPath()) || u.RawQuery != "" || u.Fragment != "" {
+	key, onRoute := strings.CutPrefix(u.EscapedPath(), gatewayArtifactPath)
+	if !sameOrigin(u, base) || !onRoute || !digest.ValidKey(key) || u.RawQuery != "" || u.Fragment != "" {
 		return "", fmt.Errorf("artifact URL must reference a gateway-uploaded artifact")
 	}
-	return strings.TrimPrefix(u.EscapedPath(), "/v1/artifacts/"), nil
+	return key, nil
 }
 
 func sameOrigin(u, base *url.URL) bool {

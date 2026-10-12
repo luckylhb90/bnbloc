@@ -9,7 +9,6 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"strings"
 )
 
 // uploadedArtifact is a file staged in the gateway's content-addressed
@@ -81,7 +80,7 @@ func verifyArtifactDownload(c *client, a uploadedArtifact) error {
 		if err != nil {
 			return fmt.Errorf("download %s: %w", a.Key, err)
 		}
-		if !strings.EqualFold(sha, a.SHA256) || size != a.Size {
+		if sha != a.SHA256 || size != a.Size {
 			return fmt.Errorf("downloaded artifact does not match the upload (sha256 %s, %d bytes; want %s, %d bytes)", sha, size, a.SHA256, a.Size)
 		}
 		return nil

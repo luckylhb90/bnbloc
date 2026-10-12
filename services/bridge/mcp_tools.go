@@ -292,7 +292,7 @@ func (b *Bridge) mcpBinary(idx *mcpIndex, t wire.ContentMCPTool) (string, string
 		return "", "stdio tools need the desktop app"
 	}
 	for _, e := range idx.Tools {
-		if e.Name != t.Name || !strings.EqualFold(e.SHA256, pin) {
+		if e.Name != t.Name || e.SHA256 != pin {
 			continue
 		}
 		rel, err := filepath.Rel(dir, e.Path)

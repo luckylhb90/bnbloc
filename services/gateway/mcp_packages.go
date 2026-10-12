@@ -5,11 +5,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"regexp"
 	"sort"
 	"strings"
 
 	"github.com/luckylhb90/bnbloc/core/pkgmeta"
+	"github.com/luckylhb90/bnbloc/internal/digest"
 	"github.com/luckylhb90/bnbloc/internal/obs"
 )
 
@@ -45,8 +45,6 @@ type mcpStagedBinary struct {
 	Key string `json:"key"`
 }
 
-var stagedArtifactKeyRE = regexp.MustCompile(`^sha256/[0-9a-f]{64}$`)
-
 func (s *Service) handleBuildMCPPackage(w http.ResponseWriter, r *http.Request) {
 	if _, ok := s.requireSuperAdminClaims(w, r); !ok {
 		return
@@ -63,12 +61,13 @@ func (s *Service) handleBuildMCPPackage(w http.ResponseWriter, r *http.Request) 
 	pins := make(map[string]pkgmeta.Artifact, len(draft.Artifacts))
 	for platform, staged := range draft.Artifacts {
 		key := strings.TrimSpace(staged.Key)
-		if !stagedArtifactKeyRE.MatchString(key) {
-			http.Error(w, fmt.Sprintf("artifacts.%s.key must be the key the artifact upload answered (sha256/<hex>)", platform), http.StatusBadRequest)
+		sha, ok := digest.ParseKey(key)
+		if !ok {
+			http.Error(w, fmt.Sprintf("artifacts.%s.key must be the key the artifact upload answered (%s<hex>)", platform, digest.KeyPrefix), http.StatusBadRequest)
 			return
 		}
 		platforms = append(platforms, platform)
-		pins[platform] = pkgmeta.Artifact{URL: base + "/v1/artifacts/" + key, SHA256: strings.TrimPrefix(key, "sha256/")}
+		pins[platform] = pkgmeta.Artifact{URL: base + "/v1/artifacts/" + key, SHA256: sha}
 	}
 	sort.Strings(platforms)
 	prepared, err := pkgmeta.PrepareMCP(pkgmeta.Package{

@@ -10,6 +10,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/luckylhb90/bnbloc/internal/digest"
 )
 
 type DiskStore struct {
@@ -52,7 +54,7 @@ func (s *DiskStore) Put(ctx context.Context, r io.Reader) (key string, size int6
 	}
 
 	sha256hex = hex.EncodeToString(h.Sum(nil))
-	key = keyFromHash(sha256hex)
+	key = digest.Key(sha256hex)
 	path := s.pathForHash(sha256hex)
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return "", 0, "", fmt.Errorf("create blob shard dir: %w", err)
@@ -125,7 +127,7 @@ func (s *DiskStore) Walk(ctx context.Context, fn func(Info) error) error {
 			if err := ctx.Err(); err != nil {
 				return err
 			}
-			key := keyFromHash(e.Name())
+			key := digest.Key(e.Name())
 			if e.IsDir() || !strings.HasPrefix(e.Name(), shard.Name()) {
 				continue
 			}

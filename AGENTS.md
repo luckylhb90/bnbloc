@@ -583,6 +583,11 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   run a binary whose sha256 mismatches the signed package. A plugin's
   `sidecar.localUrl` must be loopback http (package validation + probe), and
   the desktop refuses to deliver to a sidecar runtime URL that is not.
+- **A digest has one rule: `internal/digest`.** A sha256 is 64 lower-case
+  hex characters, a content-addressed key is `sha256/<hex>`
+  (`digest.Of`/`Valid`/`Key`/`ParseKey`), compared exactly: an upper-case
+  digest is not a digest. `TestDigestRuleSingleOwner` forbids the prefix,
+  a 64-hex pattern or a case-blind compare anywhere else.
 
 ### Verification traps
 

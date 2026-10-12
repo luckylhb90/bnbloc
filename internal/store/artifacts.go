@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/luckylhb90/bnbloc/internal/digest"
 	"github.com/luckylhb90/bnbloc/internal/tenant"
 )
 
@@ -238,7 +239,7 @@ func prepareArtifactVersion(v ArtifactVersion) (ArtifactVersion, error) {
 		v.ContentHash = HashArtifactContent(v.Content)
 		v.SizeBytes = int64(len(v.Content))
 	case ArtifactStorageBlob:
-		if v.BlobKey == "" || len(v.ContentHash) != 64 || v.Content != "" || v.SizeBytes < 0 {
+		if v.BlobKey == "" || !digest.Valid(v.ContentHash) || v.Content != "" || v.SizeBytes < 0 {
 			return v, ErrInvalidArtifactVersion
 		}
 	default:

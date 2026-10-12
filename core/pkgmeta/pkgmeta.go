@@ -3,8 +3,6 @@ package pkgmeta
 import (
 	"bytes"
 	"crypto/ed25519"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/url"
@@ -13,6 +11,7 @@ import (
 
 	"github.com/luckylhb90/bnbloc/core/manifestcore"
 	"github.com/luckylhb90/bnbloc/core/protocol"
+	"github.com/luckylhb90/bnbloc/internal/digest"
 )
 
 const KindCorePackageV1 = "bnbloc.core.package/v1"
@@ -181,8 +180,7 @@ func VerifySignedPackage(body, signature []byte, trusted []TrustedKey) (Verified
 	if err != nil {
 		return VerifiedPackage{}, err
 	}
-	hash := sha256.Sum256(body)
-	return VerifiedPackage{Package: pkg, KeyID: decodedSig.KeyID, ContentHash: hex.EncodeToString(hash[:])}, nil
+	return VerifiedPackage{Package: pkg, KeyID: decodedSig.KeyID, ContentHash: digest.Of(body)}, nil
 }
 
 // kindValidators holds the per-kind payload validator. The kind-neutral shell
@@ -347,10 +345,3 @@ func ValidateLoopbackHTTPURL(raw string) error {
 	return nil
 }
 
-func validSHA256(raw string) bool {
-	if len(raw) != 64 || strings.ToLower(raw) != raw {
-		return false
-	}
-	_, err := hex.DecodeString(raw)
-	return err == nil
-}

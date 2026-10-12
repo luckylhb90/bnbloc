@@ -15,6 +15,7 @@ import (
 
 	"github.com/luckylhb90/bnbloc/core"
 	"github.com/luckylhb90/bnbloc/internal/auth"
+	"github.com/luckylhb90/bnbloc/internal/digest"
 	"github.com/luckylhb90/bnbloc/internal/obs"
 	"github.com/luckylhb90/bnbloc/internal/roomctx"
 	"github.com/luckylhb90/bnbloc/internal/store"
@@ -68,22 +69,10 @@ type siteVersion struct {
 // version is not one (inline, another type, or malformed metadata).
 func siteVersionOf(storage, mimeType, blobKey, contentHash string) (siteVersion, bool) {
 	if storage != store.ArtifactStorageBlob || store.MediaType(mimeType) != tarbundle.SiteMIME ||
-		blobKey == "" || !isSHA256Hex(contentHash) {
+		blobKey == "" || !digest.Valid(contentHash) {
 		return siteVersion{}, false
 	}
 	return siteVersion{ContentHash: contentHash, BlobKey: blobKey}, true
-}
-
-func isSHA256Hex(s string) bool {
-	if len(s) != 64 {
-		return false
-	}
-	for i := 0; i < len(s); i++ {
-		if c := s[i]; !('0' <= c && c <= '9' || 'a' <= c && c <= 'f') {
-			return false
-		}
-	}
-	return true
 }
 
 // siteTicketScope is a ticket's ID: the one version it reads.

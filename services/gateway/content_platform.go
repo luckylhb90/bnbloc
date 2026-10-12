@@ -13,6 +13,7 @@ import (
 	"github.com/luckylhb90/bnbloc/internal/contentpkg"
 	"github.com/luckylhb90/bnbloc/internal/contentshare"
 	"github.com/luckylhb90/bnbloc/internal/contentuse"
+	"github.com/luckylhb90/bnbloc/internal/digest"
 	"github.com/luckylhb90/bnbloc/internal/extpipe"
 	"github.com/luckylhb90/bnbloc/internal/ids"
 	"github.com/luckylhb90/bnbloc/internal/obs"
@@ -109,7 +110,7 @@ func (s *Service) handleExportContentPackage(w http.ResponseWriter, r *http.Requ
 		contentStoreErr(w, "load content version failed", err)
 		return
 	}
-	if v.BundleBlobKey != "sha256/"+v.SHA256 {
+	if v.BundleBlobKey != digest.Key(v.SHA256) {
 		http.Error(w, "this version's bundle is not in the gateway artifact store", http.StatusConflict)
 		return
 	}
@@ -183,14 +184,14 @@ func (s *Service) installPlatformContent(w http.ResponseWriter, r *http.Request,
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	digest := pkg.Artifacts[contentpkg.PlatformBundleArtifact].SHA256
-	key := "sha256/" + digest
+	sha := pkg.Artifacts[contentpkg.PlatformBundleArtifact].SHA256
+	key := digest.Key(sha)
 	raw, err := s.readArtifactBlob(ctx, key, tarbundle.ContentLimits.MaxArchiveBytes())
 	if err != nil {
 		http.Error(w, "read the package's bundle: "+err.Error(), http.StatusBadRequest)
 		return
 	}
-	cpkg, err := contentpkg.Validate(raw, digest, contentOptions())
+	cpkg, err := contentpkg.Validate(raw, sha, contentOptions())
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return

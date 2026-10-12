@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/luckylhb90/bnbloc/internal/digest"
 	"github.com/luckylhb90/bnbloc/internal/wire"
 )
 
@@ -169,7 +170,7 @@ type RetentionStore interface {
 
 // blobKeyInText finds blob keys mentioned in a platform setting value
 // (artifact URLs end in /v1/artifacts/sha256/<hex>).
-var blobKeyInText = regexp.MustCompile(`(?i)sha256/[0-9a-f]{64}`)
+var blobKeyInText = regexp.MustCompile(digest.KeyPattern)
 
 // platformBlobKeys collects every blob key the platform settings mention.
 func platformBlobKeys(ctx context.Context, st PlatformSettingsStore) (map[string]bool, error) {

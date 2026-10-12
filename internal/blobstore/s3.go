@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/luckylhb90/bnbloc/internal/digest"
 )
 
 type S3Store struct {
@@ -119,7 +120,7 @@ func (s *S3Store) Put(ctx context.Context, r io.Reader) (key string, size int64,
 		return "", 0, "", fmt.Errorf("rewind s3 blob temp file: %w", err)
 	}
 	sha256hex = hex.EncodeToString(h.Sum(nil))
-	key = keyFromHash(sha256hex)
+	key = digest.Key(sha256hex)
 	if err := s.do(ctx, http.MethodPut, key, tmp, size, sha256hex); err != nil {
 		_ = tmp.Close()
 		return "", 0, "", err
