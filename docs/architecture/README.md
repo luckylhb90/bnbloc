@@ -29,6 +29,11 @@ extend it" references.
   discover drivable agents in a room (the Bridge-advertised roster), the two
   agent paths (gateway-dials-daemon vs chat-drives-agent), remote-gateway
   detection, and the `BNBLOC_GATEWAY_TOKEN` override.
+- [Content components: experts and skill packs](content-components.md) —
+  member-authored packages (the shared validator, storage, the one
+  visibility function), how a chat's expert and the room's and member's skill
+  packs reach an agent session (`agentProfile` or the prompt fallback), the
+  safety rules and the HTTP surface.
 - [Room tools](room-tools.md) — how an agent lists the room's agents and
   dispatches work to them (`ask_agent`): the bridge's loopback MCP server and
   its per-session bearers, the realtime dispatch route, its authority (the

@@ -165,6 +165,30 @@ to a core.
   mount in phase 1: guest-disk overlays would hide them from host-side
   language servers and MCP tools (open item, see the PRD).
 
+## Experts and skill packs (agent profiles)
+
+Every claimed job asks the gateway what its turn wears
+(`GET /v1/content-components/effective?job=&room=`, answered only to the
+bridge holding the job's lease): the expert the chat picked, the room's and
+the agent owner's skill packs, and the packs the expert requires. Each bundle
+is downloaded under the job's grant (`/v1/artifacts/{key}?job=&room=`),
+verified against its sha256 and validated by `internal/contentpkg`.
+
+- A core advertising `agentProfile` receives the profile (instructions,
+  skills, plus the session contributors' MCP servers such as room tools) on
+  session create. Any other core gets the instructions and a skill summary
+  prefixed to the session's first prompt, with the skill files under
+  `.agents/skills/` when it accepts workspace files.
+- The profile's content checksum is part of the session binding: a turn
+  wearing different content starts a new session (and a sandbox workdir's
+  agent-config paths are cleared first).
+- Someone else's content that declares `scripts` or `mcp.stdio` forces the
+  sandbox (refused where the sandbox cannot take it); sandboxed drives deny
+  writes to the agent-config paths, which are never published or synced.
+- A job whose expert no longer resolves is refused with a room notice.
+
+Reference: [`architecture/content-components.md`](architecture/content-components.md).
+
 ## Running
 
 Opt-in via the compose `bridge` profile:

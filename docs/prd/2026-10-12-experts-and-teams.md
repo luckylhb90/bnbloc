@@ -1,7 +1,8 @@
 # Content components: experts, skill packs, prompt packs; room tools and expert teams
 
-Status: approved, in development (2026-10-12). Feasibility verified in
-code and by experiments (see "Evidence").
+Status: approved, in development (2026-10-12): steps 1 and 2 implemented
+(see "Status" below). Feasibility verified in code and by experiments (see
+"Evidence").
 
 ## Why
 
@@ -387,6 +388,68 @@ restarts.
 - **Prompt library:** the existing `prompts` table and the
   `/v1/prompts` routes (realtime `team.go`) overlap with prompt packs, hence
   the cutover.
+
+## Status: step 1 (framework, experts, skill packs)
+
+**2026-10-12: implemented** (architecture:
+`docs/architecture/content-components.md`; the protocol in
+`docs/architecture/core-providers.md`). Commits: 34ab597 (`agentProfile`,
+the agent-config path contract, the bridge session contributor hook),
+c4c0c7c (manifest profile vars, conformance), 1d7ea85 (per-target MCP
+transports), d7487b4 + 2fbc527 (shared semver), f3a6a76 (`contentpkg`
+validator/builder/importer), 55c06fb (content tables), 1b39dd0 (one
+visibility function), e6233e7 (shared live-lease rule), 1a67c55 (chat and
+jobs carry the expert), fe0574c (gateway routes), 9302fab (bridge
+materialization, fallback, exclusions, forced sandbox). bnbloc-acp:
+e4643e7 (profile mapping per agent), 38f282a (`mcpTransports`). Decisions
+made while building:
+
+- **Ownership.** The gateway serves the content routes itself: it owns the
+  component surface (`/v1/components`, opt-in installs) and the artifact
+  entitlement every download goes through, holds the store, and stages
+  bundles in realtime's blob store like sidecar and previewer artifacts.
+- **`/v1/components`** lists content components in a separate
+  `contentComponents` array through the same visibility function; the
+  desktop's executable catalog decodes `components` strictly and nothing of
+  a content component is desktop-supervised.
+- **Room uses grant use in the room.** A component pinned (expert) or
+  enabled (skill pack) in a room by its owner/admins is usable by that
+  room's turns and readable by its members (`?room=`), pinned to a version or
+  following the latest. This is the room-level enablement of step 1; named
+  shared copies stay step 4.
+- **Member skill packs** apply to the agent OWNER's agents (their machine,
+  their setup), also when borrowed; the chat's expert is resolved as the
+  requester.
+- **The expert's version is pinned when the chat is posted** (requested,
+  else the room's pin, else the latest) and recorded on the job, the message
+  and `extension_audit` (kind `content`).
+- **A profile is per session.** Its content checksum (instructions + skill
+  files; MCP servers and env excluded so per-session credentials do not
+  churn sessions) is part of the bridge's session binding: different content
+  starts a new session; a reused sandbox workdir has its agent-config paths
+  cleared first. The fallback prefix therefore goes on a session's first
+  prompt only.
+- **Delete** removes a personal component, its versions, uses and acks (the
+  blob collection reclaims bundles). Retire/unpublish for shared scopes is
+  step 4 (the status column carries it).
+- **MCP.** Content cannot declare MCP servers yet: `requires.mcp` names MCP
+  tool components, none exists, so every one is refused ("reject unknown
+  stdio MCP"). Session contributors (room tools) attach MCP servers today.
+- **`.opencode/**`** is an agent-config path, so OpenCode's own plugin
+  `node_modules` there are never published or synced either.
+
+**Verified end to end** (local services on MySQL 8.4, a bridge driving
+bnbloc-acp → OpenCode 1.18.35 with `opencode/big-pickle`): an expert with a
+marker instruction (`MARKER-ALPHA`) and an embedded marker skill
+(`MARKER-BETA`) picked in the chat answered "The secret phrase is
+MARKER-BETA. MARKER-ALPHA"; the run record read "Marker expert v1.0.0 on
+maya/acp/opencode" and the audit row was written. A skill pack imported from
+a zipped skill directory and enabled for the member answered `MARKER-GAMMA`
+on the next turn, in a new session (content changed).
+
+**Open in step 1:** an optional room expert applied to every agent turn
+(only pinned experts are offered in the composer); usage counts beyond
+`uses` (runs/members per component); org/platform scopes (step 4).
 
 ## Status: step 2 (room tools)
 
