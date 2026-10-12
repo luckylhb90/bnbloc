@@ -161,12 +161,14 @@ pub fn save(path: &Path, settings: &Settings) -> Result<(), String> {
 /// (0600 on Unix): the one writer of every credential-bearing file the shell
 /// keeps (these settings, plugin local settings).
 pub(crate) fn write_owner_only(path: &Path, raw: &[u8]) -> Result<(), String> {
-    let dir = path.parent().ok_or("settings path has no parent")?;
-    std::fs::create_dir_all(dir).map_err(|e| format!("create settings dir: {e}"))?;
+    let dir = path
+        .parent()
+        .ok_or_else(|| format!("{} has no parent dir", path.display()))?;
+    std::fs::create_dir_all(dir).map_err(|e| format!("create {}: {e}", dir.display()))?;
     let name = path
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
-        .unwrap_or_else(|| SETTINGS_FILE.to_string());
+        .ok_or_else(|| format!("{} names no file", path.display()))?;
     let tmp = dir.join(format!(".{name}.tmp"));
     let _ = std::fs::remove_file(&tmp);
     let mut options = std::fs::OpenOptions::new();
@@ -178,12 +180,12 @@ pub(crate) fn write_owner_only(path: &Path, raw: &[u8]) -> Result<(), String> {
     }
     let mut file = options
         .open(&tmp)
-        .map_err(|e| format!("write settings: {e}"))?;
+        .map_err(|e| format!("write {}: {e}", path.display()))?;
     file.write_all(raw)
         .and_then(|_| file.sync_all())
-        .map_err(|e| format!("write settings: {e}"))?;
+        .map_err(|e| format!("write {}: {e}", path.display()))?;
     drop(file);
-    std::fs::rename(&tmp, path).map_err(|e| format!("replace settings: {e}"))
+    std::fs::rename(&tmp, path).map_err(|e| format!("replace {}: {e}", path.display()))
 }
 
 #[cfg(unix)]

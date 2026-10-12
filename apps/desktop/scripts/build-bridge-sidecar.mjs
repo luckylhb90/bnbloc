@@ -125,7 +125,9 @@ function goBuild({ triple, file, goos, goarch }, goTags, ldflags) {
   execFileSync("go", buildArgs, {
     cwd: repoRoot,
     stdio: "inherit",
-    env: { ...process.env, GOOS: goos, GOARCH: goarch, CGO_ENABLED: "0", GOFLAGS: "-mod=mod" },
+    // -mod=readonly: the build never rewrites go.mod/go.sum (CI checks
+    // them as committed).
+    env: { ...process.env, GOOS: goos, GOARCH: goarch, CGO_ENABLED: "0", GOFLAGS: "-mod=readonly" },
   });
   console.log(`[sidecar] wrote ${outPath}`);
 }

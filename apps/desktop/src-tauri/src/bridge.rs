@@ -154,10 +154,7 @@ impl Supervisor {
     /// overlap.
     pub fn start(&self, settings: Settings) -> Result<(), String> {
         if !settings.is_runnable() {
-            return Err(
-                "settings incomplete: gatewayUrl, owner, and at least one core are required"
-                    .to_string(),
-            );
+            return Err("settings incomplete: gatewayUrl and owner are required".to_string());
         }
         // The previous run's graceful stop starts now; the new run waits for
         // it so two bridges never overlap.
