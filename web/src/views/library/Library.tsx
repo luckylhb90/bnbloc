@@ -21,6 +21,7 @@ import { EmptyState, PageHeader } from "@/ui/Page";
 import { Segment } from "@/ui/Segment";
 import { useToast } from "@/ui/Toast";
 import { PromptEditorDialog, UsePromptDialog } from "@/views/library/PromptDialogs";
+import { ContentTab } from "@/views/library/ContentTab";
 import { TemplatesTab } from "@/views/library/TemplatesTab";
 import { UserName } from "@/views/UserName";
 
@@ -33,10 +34,10 @@ const SCOPES = [
 // Library is the prompt library page (F2): the member's own prompts plus
 // every prompt shared with their organization, searchable and filterable by
 // tag. "Use" drops a prompt into a room's composer.
-function PromptLibrary({ onOpenRoom, tabs }: { onOpenRoom: (roomId: string) => void; tabs: React.ReactNode }) {
+function PromptLibrary({ onOpenRoom, tabs, initialQuery }: { onOpenRoom: (roomId: string) => void; tabs: React.ReactNode; initialQuery: string }) {
   const { subject, role } = useAuth();
   const toast = useToast();
-  const [q, setQ] = useState(() => takeLibraryQuery() ?? "");
+  const [q, setQ] = useState(initialQuery);
   const [tag, setTag] = useState("");
   const [scope, setScope] = useState<Scope>("all");
   const [prompts, setPrompts] = useState<Prompt[] | null>(null);
@@ -213,19 +214,26 @@ function PromptLibrary({ onOpenRoom, tabs }: { onOpenRoom: (roomId: string) => v
   );
 }
 
-type LibraryTab = "prompts" | "templates";
+type LibraryTab = "experts" | "skills" | "prompts" | "templates";
 const LIBRARY_TABS = [
+  { value: "experts" as const, label: "Experts" },
+  { value: "skills" as const, label: "Skills" },
   { value: "prompts" as const, label: "Prompts" },
   { value: "templates" as const, label: "Templates" },
 ];
 
-// Library holds the prompt library (F2) and the room-template library (N3).
+// Library holds the experts and skill packs (content components), the
+// prompt library (F2) and the room-template library (N3).
 export function Library({ onOpenRoom }: { onOpenRoom: (roomId: string) => void }) {
-  const [tab, setTab] = useState<LibraryTab>("prompts");
-  const tabs = <Segment options={LIBRARY_TABS} value={tab} onChange={setTab} className="w-56" />;
+  // A prompt hit in global search opens the Prompts tab with its query.
+  const [initialQuery] = useState(() => takeLibraryQuery() ?? "");
+  const [tab, setTab] = useState<LibraryTab>(initialQuery ? "prompts" : "experts");
+  const tabs = <Segment options={LIBRARY_TABS} value={tab} onChange={setTab} className="w-[26rem] max-w-full" />;
+  if (tab === "experts") return <ContentTab kind="expert" tabs={tabs} />;
+  if (tab === "skills") return <ContentTab kind="skill" tabs={tabs} />;
   return tab === "templates" ? (
     <TemplatesTab tabs={tabs} onOpenRoom={onOpenRoom} />
   ) : (
-    <PromptLibrary tabs={tabs} onOpenRoom={onOpenRoom} />
+    <PromptLibrary tabs={tabs} onOpenRoom={onOpenRoom} initialQuery={initialQuery} />
   );
 }
