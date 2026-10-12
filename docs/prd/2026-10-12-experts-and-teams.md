@@ -1,7 +1,7 @@
 # Content components: experts, skill packs, prompt packs; room tools and expert teams
 
-Status: approved, in development (2026-10-12): steps 1 and 2 implemented
-(see "Status" below). Feasibility verified in code and by experiments (see
+Status: approved, in development (2026-10-12): steps 1 and 2 implemented,
+step 3 in development (see "Status" below). Feasibility verified in code and by experiments (see
 "Evidence").
 
 ## Why
@@ -502,6 +502,50 @@ through the step-1 session contributor hook), 6f1bb5b (gateway door),
   resolves as the requester's (their own or one pinned in the room), is
   pinned on the dispatched job and applied by the target bridge; an expert
   the requester may not use is refused (`expert_not_available`).
+
+## Status: step 3 (prompt packs)
+
+**2026-10-12: in development.** Scope: the prompt pack kind, its use in
+the composer, per-prompt usage counts, the Library's Prompts tab, and the
+clean cutover of the old prompt library. Decisions:
+
+- **A kind, not a library.** `bnbloc.prompt.package/v1` registers a
+  `contentpkg.KindSpec` (its own `tarbundle` limit profile: `component.json`
+  and an optional `README.md`, 1 MiB). The prompts live in `component.json`
+  (`prompts: [{id, title, body, variables, tags, slash?}]`), so a listing
+  reads them from the stored manifest without fetching bundles. The
+  validator checks unique ids and slash commands, that every `{{name}}` in a
+  body is a declared variable and every declared variable is used, a
+  variable's default is one of its options, and the text and count bounds.
+- **Import** (the same `contentpkg.Import`, through a kind hook instead of a
+  branch): a markdown file (one prompt per heading) or a json file (a list
+  of prompts, or `{prompts: [...]}`), alone or in an archive. Placeholders
+  in imported bodies are declared as variables. "From selected messages" is
+  the Library form prefilled from messages picked in a room.
+- **Scopes and uses are the content ones.** A prompt pack is personal now
+  (shared, org and platform with step 4). A member turns a pack on for
+  themselves (`content-uses` member scope, now open to every kind that
+  declares member use: skill and prompt packs) or a room's owner/admins turn
+  it on for the room. The composer offers the prompts of the member's
+  enabled packs and the room's.
+- **The member's personal pack** is a normal pack they own, `my-prompts`
+  ("My prompts"): "Save as prompt" on a message
+  (`POST /v1/content-components/prompts`) appends the prompt as a new
+  version, creating the pack and turning it on for the member on first use.
+- **Usage counts** are a small table, `content_prompt_uses (component_id,
+  prompt_id, use_count, last_used_at_ms)`, bumped once per insertion
+  (`POST /v1/content-components/{id}/prompts/{promptId}/use`), never per
+  keystroke, and deleted with the component.
+- **Expert quick prompts** may name a pack prompt instead of text
+  (`{title?, ref: "pack/prompt-id"}`); the pack must be in the expert's
+  `requires.prompts`. Views resolve it, as the viewer and in the room when
+  one is given, to the highest satisfying version of a pack they may use.
+- **Cutover (start empty):** the `prompts` table is dropped by a new
+  migration (the locked migration that created it becomes a no-op for a
+  retired table), and the realtime `/v1/prompts*` and
+  `/v1/tenant/prompts/*` routes, `internal/store/prompts.go`, the prompt
+  hits of global search, the Plaza's shared prompts and the web prompt
+  dialogs are removed.
 
 ## Status: step 5 (builder, experts and skill packs)
 
