@@ -198,3 +198,20 @@ func TestGetComponentReadsLatestFiles(t *testing.T) {
 		t.Fatalf("result = %s", raw)
 	}
 }
+
+// A save the organization's publication resubmits tells the agent to say
+// so: the new version waits for an org admin.
+func TestSaveComponentReportsResubmission(t *testing.T) {
+	ws := fakeWorkspace{"drafts/reviewer/component.json": `{}`, "drafts/reviewer/INSTRUCTIONS.md": "Review.\n"}
+	detail := `{"component":{"id":"cc_1","kind":"expert","name":"reviewer","scope":"personal","latestVersion":"1.1.0"},"resubmitted":{"id":"cpr_1","version":"1.1.0","approvedVersion":"1.0.0"}}`
+	gw := &recordingGateway{reply: func(string, string) ([]byte, error) { return []byte(detail), nil }}
+	res := saveComponent(context.Background(), contentEnv(ws, gw, true), json.RawMessage(`{"dir":"drafts/reviewer","id":"cc_1"}`))
+	if res.Err != "" {
+		t.Fatalf("save = %s", res.Err)
+	}
+	out := res.Value.(map[string]any)
+	note, _ := out["note"].(string)
+	if out["resubmitted"] == nil || !strings.Contains(note, "version 1.1.0 was sent to its admins for approval; members keep using version 1.0.0 until then") {
+		t.Fatalf("result = %+v", out)
+	}
+}
