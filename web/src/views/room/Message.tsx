@@ -1,5 +1,7 @@
 import { memo, useEffect, useState } from "react";
 import {
+  FlagIcon,
+  HourglassIcon,
   RobotIcon,
   CopyIcon,
   CheckIcon,
@@ -109,6 +111,11 @@ function DispatchedVia({ author, dispatch, className }: { author: string; dispat
       <span className="truncate">
         <UserName id={author} /> → via {dispatch.via}
         {dispatch.to ? <> → {dispatch.to}</> : null}
+        {dispatch.role ? (
+          <span data-team-role className="ml-1 rounded-full border border-[var(--color-accent)]/30 bg-[var(--color-accent-soft)] px-1.5 text-[var(--color-accent)]">
+            {dispatch.role}
+          </span>
+        ) : null}
         {dispatch.expert ? <> (as {dispatch.expert})</> : null}
       </span>
     </span>
@@ -181,6 +188,23 @@ export const Message = memo(function Message({
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(item.text);
   const shown = useReveal(item.text, item.animate);
+
+  // An agent's notice line (a team lead's progress, a member that has not
+  // finished): one compact line under the agent's name, not a reply.
+  if (isAgent && item.notice) {
+    return (
+      <div id={`msg-${item.id}`} data-notice={item.notice} className="ml-10 mt-1 flex min-w-0 items-center gap-1.5 text-xs text-[var(--color-fg-muted)]">
+        {item.notice === "member-timeout" ? <HourglassIcon size={12} className="shrink-0" /> : <FlagIcon size={12} className="shrink-0" />}
+        <span className="shrink-0 font-medium">{item.agentLabel || "Agent"}</span>
+        <span className="min-w-0 break-words">{item.text}</span>
+        {item.createdAtMs ? (
+          <span className="shrink-0 text-[0.68rem] text-[var(--color-fg-subtle)]" title={exactTime(item.createdAtMs)}>
+            {relativeTime(item.createdAtMs)}
+          </span>
+        ) : null}
+      </div>
+    );
+  }
 
   // Own messages stay as a compact right-aligned bubble (short user turns read
   // well that way). Everyone else — agent and other members — renders flat and

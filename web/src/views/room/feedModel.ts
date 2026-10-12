@@ -32,6 +32,7 @@ export function feedItemFromEvent(e: RoomEvent, subject: string | null, live: bo
     scheduledId: e.scheduledId,
     dispatch: e.dispatch,
     expert: e.expert,
+    notice: e.notice,
     peopleOnly: e.kind === "chat_message" && e.toAgent === false ? true : undefined,
     status: self ? "sent" : undefined,
     animate: live && author === "agent" ? true : undefined,

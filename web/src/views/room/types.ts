@@ -66,6 +66,9 @@ export interface FeedItem {
   dispatch?: DispatchAttribution;
   // The expert the message asked its agent to wear (payload.expert).
   expert?: ExpertMarker;
+  // An agent's notice line (a team lead's progress, a member timeout):
+  // rendered as a compact line, not a reply.
+  notice?: string;
   // A member's message addressed to people only (no agent recipient): no
   // agent reply is coming. Agents still read it as room context.
   peopleOnly?: boolean;

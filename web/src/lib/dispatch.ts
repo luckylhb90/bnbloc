@@ -14,6 +14,8 @@ export interface DispatchAttribution {
   // The addressed agent's handle ("bob/claude"), from payload.recipient.
   readonly to?: string;
   readonly expert?: string;
+  // The team role the dispatch staffs (a team lead's dispatch).
+  readonly role?: string;
 }
 
 // dispatchAttribution reads payload.dispatchedBy (and the recipient) from a
@@ -22,7 +24,7 @@ export function dispatchAttribution(payload: unknown): DispatchAttribution | und
   if (!payload || typeof payload !== "object") return undefined;
   const d = (payload as { dispatchedBy?: unknown }).dispatchedBy;
   if (!d || typeof d !== "object") return undefined;
-  const { jobId, depth, via } = d as { jobId?: unknown; depth?: unknown; via?: unknown };
+  const { jobId, depth, via, role } = d as { jobId?: unknown; depth?: unknown; via?: unknown; role?: unknown };
   const e = (payload as { expert?: { name?: unknown; displayName?: unknown } }).expert;
   const expert = typeof e?.displayName === "string" && e.displayName ? e.displayName : typeof e?.name === "string" && e.name ? e.name : undefined;
   if (typeof jobId !== "string" || !jobId) return undefined;
@@ -39,13 +41,16 @@ export function dispatchAttribution(payload: unknown): DispatchAttribution | und
     via: typeof via === "string" && via ? via : "an agent",
     to,
     expert,
+    ...(typeof role === "string" && role ? { role } : {}),
   };
 }
 
 // dispatchLine is the plain-text chain for a title or a screen reader:
-// "maya → via jack/codex → bob/claude (as reviewer)".
+// "maya → via jack/codex → bob/claude (as reviewer)", with a team role
+// "maya → via jack/codex → bob/claude · reviewer (as Code reviewer)".
 export function dispatchLine(author: string, d: DispatchAttribution): string {
   const target = d.to ? ` → ${d.to}` : "";
+  const teamRole = d.role ? ` · ${d.role}` : "";
   const role = d.expert ? ` (as ${d.expert})` : "";
-  return `${author} → via ${d.via}${target}${role}`;
+  return `${author} → via ${d.via}${target}${teamRole}${role}`;
 }

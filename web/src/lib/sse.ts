@@ -64,6 +64,9 @@ export interface RoomEvent {
   dispatch?: DispatchAttribution;
   // For chat_message asking its agent to wear an expert (payload.expert).
   expert?: ExpertMarker;
+  // For agent_messages that are a job's notice line, not a reply
+  // (payload.notice: "progress", "member-timeout").
+  notice?: string;
   // For task_updated: a message task was marked, toggled or unmarked.
   taskUpdate?: TaskUpdate;
   // For chat_message: whether it was addressed to an agent (payload
@@ -295,6 +298,9 @@ export function normalizeRoomEvent(ev: RoomEvent, emit: (e: RoomEvent) => void):
       const handle = provider ? (owner ? `${owner}/${provider}` : provider) : undefined;
       const metrics = isTurnMetrics(mp.metrics) ? mp.metrics : undefined;
       const thinking = typeof mp.thinking === "string" && mp.thinking ? mp.thinking : undefined;
+      // A notice line (a team lead's progress) is no reply: it leaves the
+      // agent's working indicator alone.
+      const notice = typeof mp.notice === "string" && mp.notice ? mp.notice : undefined;
       emit({
         kind: "agent_messages",
         sequence: base + i / 1000, // fractional offset preserves in-batch order
@@ -307,7 +313,8 @@ export function normalizeRoomEvent(ev: RoomEvent, emit: (e: RoomEvent) => void):
         metrics,
         thinking,
         // An assistant reply clears its own agent's working indicator.
-        agentKey: role === "assistant" && handle ? handle.toLowerCase() : undefined,
+        agentKey: role === "assistant" && handle && !notice ? handle.toLowerCase() : undefined,
+        ...(notice ? { notice } : {}),
         importedFrom: importedFrom(p),
       });
     });
