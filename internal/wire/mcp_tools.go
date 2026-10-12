@@ -41,6 +41,18 @@ type ContentMCPTool struct {
 	RequiredBy []string `json:"requiredBy"`
 }
 
+// RequiredEnv lists the variables the turn needs set (pkgmeta.UnsetEnv
+// decides which are).
+func (t ContentMCPTool) RequiredEnv() []string {
+	var out []string
+	for _, e := range t.Env {
+		if e.Required {
+			out = append(out, e.Name)
+		}
+	}
+	return out
+}
+
 // ContentMCPAuth is the header an http MCP server expects (scheme none,
 // bearer or header, Env naming the value's variable; or oauth: the
 // requester's own sign-in from their desktop, attached as a bearer token by

@@ -111,7 +111,7 @@ func Resolve(refs []wire.ContentRef, lookup Lookup, org OrgValues) ([]wire.Conte
 				}
 				return nil, nil, err
 			}
-			if !ok || !requiredSet(tool.Env, values) {
+			if !ok || len(pkgmeta.UnsetEnv(tool.RequiredEnv(), values)) > 0 {
 				missing = append(missing, "MCP tool "+name+" (an organization admin has not configured its connector)")
 				continue
 			}
@@ -121,15 +121,6 @@ func Resolve(refs []wire.ContentRef, lookup Lookup, org OrgValues) ([]wire.Conte
 	}
 	sort.Strings(missing)
 	return tools, missing, nil
-}
-
-func requiredSet(env []wire.ContentMCPEnv, values map[string]string) bool {
-	for _, e := range env {
-		if e.Required && values[e.Name] == "" {
-			return false
-		}
-	}
-	return true
 }
 
 func contains(list []string, v string) bool {

@@ -9,8 +9,13 @@ import (
 
 var (
 	sidecarFileNameRE = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]*$`)
-	sidecarEnvNameRE  = regexp.MustCompile(`^[A-Z][A-Z0-9_]*$`)
+	envNameRE         = regexp.MustCompile(`^[A-Z][A-Z0-9_]*$`)
 )
+
+// ValidEnvName is the one rule for an environment variable a package names
+// (a sidecar's launch env, an MCP tool's env, a content package's
+// requires.mcp env): an upper-case identifier.
+func ValidEnvName(name string) bool { return envNameRE.MatchString(name) }
 
 // SidecarFileArtifactKey is the Package.Artifacts key of a declared sidecar
 // file for one platform: "<platform>/<name>".
@@ -30,7 +35,7 @@ func validateSidecarShape(pkg Package) error {
 			if env == "" {
 				return nil
 			}
-			if !sidecarEnvNameRE.MatchString(env) {
+			if !ValidEnvName(env) {
 				return fmt.Errorf("sidecar.%s %q must be an upper-case identifier", field, env)
 			}
 			if prev, dup := envs[env]; dup {

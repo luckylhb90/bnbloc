@@ -958,6 +958,13 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   `BNBLOC_SECRET_STORE_KEY` and decrypted only into the per-job resolution for
   a job in that org; no second secret store, no clear-text fallback.
   Unattachable tools go to `contentMissing` and never fail the run.
+  One rule each, in `pkgmeta`: a tool's name is `ValidMCPToolName` (a
+  package name, never the room tools' `ReservedMCPServerName`, refused at
+  install, in `requires.mcp` and in the bridge alike), an env name is
+  `ValidEnvName`, "required env is set" is `UnsetEnv` (a blank value is
+  unset; connector status and save, job resolution and the bridge agree),
+  and a package or content version is `semver.Valid`
+  (`TestPackageRulesSingleOwner`).
 
 - **Sharing is a copy, publishing is a second row.** A shared copy is a
   recipient-owned `shared` component (`source_id`, `shared_by`) reusing the

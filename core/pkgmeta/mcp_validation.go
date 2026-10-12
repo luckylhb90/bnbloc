@@ -130,7 +130,55 @@ var (
 	mcpScopeRE = regexp.MustCompile(`^[\x21\x23-\x5B\x5D-\x7E]+$`)
 )
 
+// ReservedMCPServerName is the name bnbloc's own room tools server is
+// attached under in every driven session; no MCP tool component may take
+// it.
+const ReservedMCPServerName = "bnbloc-room"
+
+// ValidMCPToolName is the one rule for an MCP tool component's name, the
+// name content requires it by and its member settings file name: a package
+// name (never a path) that is not ReservedMCPServerName. Installing a
+// package, validating a requires.mcp entry and attaching a tool in the
+// bridge all apply it.
+func ValidMCPToolName(name string) error {
+	if !ValidPackageName(name) {
+		return fmt.Errorf("MCP tool name %q must use lowercase letters, digits, dot, underscore, or dash", name)
+	}
+	if name == ReservedMCPServerName {
+		return fmt.Errorf("MCP tool name %q is reserved for the room tools", name)
+	}
+	return nil
+}
+
+// RequiredEnv lists the variables a tool declares required.
+func RequiredEnv(env []MCPEnv) []string {
+	var out []string
+	for _, e := range env {
+		if e.Required {
+			out = append(out, e.Name)
+		}
+	}
+	return out
+}
+
+// UnsetEnv is the one "required env is set" rule (an org connector's
+// status and save, a job's tool resolution, the bridge attaching a tool):
+// the names in required, in order, whose value is blank (absent, empty or
+// whitespace). A value that would not reach the server is not set.
+func UnsetEnv(required []string, values map[string]string) []string {
+	var unset []string
+	for _, name := range required {
+		if strings.TrimSpace(values[name]) == "" {
+			unset = append(unset, name)
+		}
+	}
+	return unset
+}
+
 func validateMCPPackage(pkg Package) error {
+	if err := ValidMCPToolName(pkg.Name); err != nil {
+		return err
+	}
 	if pkg.Contract != MCPContractV1 {
 		return fmt.Errorf("unknown mcp contract %q", pkg.Contract)
 	}
@@ -241,7 +289,7 @@ func validateMCPEnv(m MCP) error {
 	}
 	seen := map[string]bool{}
 	for i, e := range m.Env {
-		if !sidecarEnvNameRE.MatchString(e.Name) {
+		if !ValidEnvName(e.Name) {
 			return fmt.Errorf("mcp.env[%d].name %q must be an upper-case identifier", i, e.Name)
 		}
 		if strings.HasPrefix(e.Name, mcpReservedEnvPref) {

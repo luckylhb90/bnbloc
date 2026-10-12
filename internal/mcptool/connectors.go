@@ -161,23 +161,17 @@ func MergeValues(env []pkgmeta.MCPEnv, current, update map[string]string) (map[s
 		if v == "" && e.Secret {
 			v = current[e.Name]
 		}
-		if v == "" {
-			if e.Required {
-				return nil, fmt.Errorf("%s is required", e.Name)
-			}
-			continue
+		if v != "" {
+			next[e.Name] = v
 		}
-		next[e.Name] = v
+	}
+	if unset := pkgmeta.UnsetEnv(pkgmeta.RequiredEnv(env), next); len(unset) > 0 {
+		return nil, fmt.Errorf("%s is required", unset[0])
 	}
 	return next, nil
 }
 
 // Configured reports whether values satisfy a component's required env.
 func Configured(env []pkgmeta.MCPEnv, values map[string]string) bool {
-	for _, e := range env {
-		if e.Required && values[e.Name] == "" {
-			return false
-		}
-	}
-	return true
+	return len(pkgmeta.UnsetEnv(pkgmeta.RequiredEnv(env), values)) == 0
 }

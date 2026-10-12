@@ -62,3 +62,15 @@ func TestSatisfies(t *testing.T) {
 		t.Fatalf("BumpPatch = %s, %v", v, err)
 	}
 }
+
+func TestValid(t *testing.T) {
+	for v, ok := range map[string]bool{
+		"1.0.0": true, "0.1.2-rc.1": true, "1.2.3+build.7": true,
+		"v1.0.0": false, "1.0.0 ": false, "1.0": false, "01.0.0": false, "1.0.0+": false, "1.0.0+a..b": false,
+		"1.0.0-١": false, "١.0.0": false,
+	} {
+		if Valid(v) != ok {
+			t.Errorf("Valid(%q) != %v", v, ok)
+		}
+	}
+}

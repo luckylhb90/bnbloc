@@ -10,6 +10,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/luckylhb90/bnbloc/core"
+	"github.com/luckylhb90/bnbloc/core/pkgmeta"
 	"github.com/luckylhb90/bnbloc/internal/semver"
 	"github.com/luckylhb90/bnbloc/internal/tarbundle"
 )
@@ -148,7 +149,7 @@ func validateEnvelope(m Manifest, opts Options) error {
 	if !ValidName(m.Name) {
 		return fmt.Errorf("name %q: use lower-case letters, digits and hyphens (at most 63)", m.Name)
 	}
-	if _, err := semver.Parse(m.Version); err != nil || strings.HasPrefix(m.Version, "v") {
+	if !semver.Valid(m.Version) {
 		return fmt.Errorf("version %q is not a semantic version (major.minor.patch)", m.Version)
 	}
 	if err := checkText("displayName", m.DisplayName, maxDisplayName, true); err != nil {
@@ -195,15 +196,15 @@ func validateEnvelope(m Manifest, opts Options) error {
 	}
 	mcpSeen := map[string]bool{}
 	for _, t := range r.MCP {
-		if !ValidName(t.Name) {
-			return fmt.Errorf("requires.mcp: invalid tool name %q", t.Name)
+		if err := pkgmeta.ValidMCPToolName(t.Name); err != nil {
+			return fmt.Errorf("requires.mcp: %w", err)
 		}
 		if mcpSeen[t.Name] {
 			return fmt.Errorf("requires.mcp: %q is named twice", t.Name)
 		}
 		mcpSeen[t.Name] = true
 		for _, e := range t.Env {
-			if !validEnvName(e) {
+			if !pkgmeta.ValidEnvName(e) {
 				return fmt.Errorf("requires.mcp %s: invalid env name %q", t.Name, e)
 			}
 		}
@@ -296,21 +297,6 @@ func checkText(field, s string, max int, singleLine bool) error {
 		return fmt.Errorf("%s must be one line", field)
 	}
 	return nil
-}
-
-func validEnvName(k string) bool {
-	if k == "" {
-		return false
-	}
-	for i, r := range k {
-		switch {
-		case r == '_', r >= 'A' && r <= 'Z', r >= 'a' && r <= 'z':
-		case r >= '0' && r <= '9' && i > 0:
-		default:
-			return false
-		}
-	}
-	return true
 }
 
 // scriptExts are file extensions that execute.

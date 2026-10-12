@@ -7,7 +7,6 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
-	"regexp"
 	"runtime"
 	"strings"
 	"time"
@@ -15,7 +14,6 @@ import (
 	corepkg "github.com/luckylhb90/bnbloc/core"
 	"github.com/luckylhb90/bnbloc/core/pkgmeta"
 	"github.com/luckylhb90/bnbloc/internal/wire"
-	"github.com/luckylhb90/bnbloc/services/bridge/roomtools"
 )
 
 // MCP tool components (docs/prd/2026-10-12-experts-and-teams.md §6): the
@@ -53,10 +51,6 @@ type mcpIndexEntry struct {
 	Path   string `json:"path"`
 }
 
-// mcpToolNameRE is the component name shape (pkgmeta's package name): it
-// is also a settings file name, never a path.
-var mcpToolNameRE = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]*$`)
-
 // mcpPlatform is this machine's artifact platform key ("darwin-arm64"),
 // the key sidecar and MCP binaries are published under.
 func mcpPlatform() string { return runtime.GOOS + "-" + runtime.GOARCH }
@@ -81,7 +75,7 @@ func (b *Bridge) resolveMCP(tools []wire.ContentMCPTool, refs []wire.ContentRef,
 	foreignSeen := map[string]bool{}
 	var index *mcpIndex
 	for _, t := range tools {
-		if !mcpToolNameRE.MatchString(t.Name) || t.Name == roomtools.ServerName {
+		if pkgmeta.ValidMCPToolName(t.Name) != nil {
 			missing = append(missing, "MCP tool "+t.Name+" (invalid name)")
 			continue
 		}
@@ -165,13 +159,7 @@ func (b *Bridge) mcpValues(t wire.ContentMCPTool, own bool) (map[string]string, 
 	default:
 		return nil, "unknown credentials source"
 	}
-	var unset []string
-	for _, e := range t.Env {
-		if e.Required && values[e.Name] == "" {
-			unset = append(unset, e.Name)
-		}
-	}
-	if len(unset) > 0 {
+	if unset := pkgmeta.UnsetEnv(t.RequiredEnv(), values); len(unset) > 0 {
 		if t.Credentials == pkgmeta.MCPCredentialsMember {
 			return nil, "set " + strings.Join(unset, ", ") + " in Settings → Tools"
 		}

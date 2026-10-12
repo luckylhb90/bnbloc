@@ -12,12 +12,16 @@ import (
 	"github.com/luckylhb90/bnbloc/core/manifestcore"
 	"github.com/luckylhb90/bnbloc/core/protocol"
 	"github.com/luckylhb90/bnbloc/internal/digest"
+	"github.com/luckylhb90/bnbloc/internal/semver"
 )
 
 const KindCorePackageV1 = "bnbloc.core.package/v1"
 
-var semverRE = regexp.MustCompile(`^[0-9]+\.[0-9]+\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?$`)
 var packageNameRE = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]*$`)
+
+// ValidPackageName is the package name rule: lower-case letters, digits,
+// dot, underscore and dash, starting with a letter or digit.
+func ValidPackageName(name string) bool { return packageNameRE.MatchString(name) }
 
 type Runtime string
 
@@ -243,10 +247,10 @@ func validatePackageShell(pkg Package) error {
 	if strings.TrimSpace(pkg.Name) == "" {
 		return fmt.Errorf("package name required")
 	}
-	if !packageNameRE.MatchString(pkg.Name) {
+	if !ValidPackageName(pkg.Name) {
 		return fmt.Errorf("package name must use lowercase letters, digits, dot, underscore, or dash")
 	}
-	if !semverRE.MatchString(pkg.Version) {
+	if !semver.Valid(pkg.Version) {
 		return fmt.Errorf("package version must be semver")
 	}
 	if strings.TrimSpace(pkg.Publisher) == "" {
@@ -344,4 +348,3 @@ func ValidateLoopbackHTTPURL(raw string) error {
 	}
 	return nil
 }
-

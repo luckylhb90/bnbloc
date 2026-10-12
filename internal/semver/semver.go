@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
-	"unicode"
 )
 
 // Version is a parsed semantic version (build metadata dropped).
@@ -59,6 +58,25 @@ func Parse(raw string) (Version, error) {
 	return Version{Major: major, Minor: minor, Patch: patch, Pre: pre}, nil
 }
 
+// Valid reports whether s is a version exactly as a package or component
+// declares it: major.minor.patch[-prerelease][+build], with no leading "v"
+// and no surrounding space (Parse is lenient about both). Package and
+// content component versions share it.
+func Valid(s string) bool {
+	if s == "" || s != strings.TrimSpace(s) || strings.HasPrefix(s, "v") {
+		return false
+	}
+	if _, build, ok := strings.Cut(s, "+"); ok {
+		for _, id := range strings.Split(build, ".") {
+			if id == "" || !isIdentifier(id) {
+				return false
+			}
+		}
+	}
+	_, err := Parse(s)
+	return err == nil
+}
+
 func parseNumber(s string) (int, error) {
 	if s == "" {
 		return 0, fmt.Errorf("semver number required")
@@ -67,7 +85,7 @@ func parseNumber(s string) (int, error) {
 		return 0, fmt.Errorf("semver number has leading zero")
 	}
 	for _, r := range s {
-		if !unicode.IsDigit(r) {
+		if !('0' <= r && r <= '9') {
 			return 0, fmt.Errorf("semver number must be numeric")
 		}
 	}
@@ -80,7 +98,7 @@ func parseNumber(s string) (int, error) {
 
 func isIdentifier(s string) bool {
 	for _, r := range s {
-		if r == '-' || unicode.IsDigit(r) || r >= 'A' && r <= 'Z' || r >= 'a' && r <= 'z' {
+		if r == '-' || ('0' <= r && r <= '9') || r >= 'A' && r <= 'Z' || r >= 'a' && r <= 'z' {
 			continue
 		}
 		return false
@@ -155,7 +173,7 @@ func identifierNumber(s string) (int, bool) {
 		return 0, false
 	}
 	for _, r := range s {
-		if !unicode.IsDigit(r) {
+		if !('0' <= r && r <= '9') {
 			return 0, false
 		}
 	}

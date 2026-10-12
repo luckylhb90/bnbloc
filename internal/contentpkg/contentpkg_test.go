@@ -159,6 +159,27 @@ func TestValidateRefuses(t *testing.T) {
 			t.Errorf("%s: err = %v, want %q", name, err, c.want)
 		}
 	}
+	// A requires.mcp entry names a tool by the package's own name rule
+	// (pkgmeta.ValidMCPToolName) and its env by the package env rule: a
+	// tool that installs can be required, the reserved room tools server
+	// cannot.
+	for name, c := range map[string]struct {
+		req  map[string]any
+		want string
+	}{
+		"dotted and underscored tool": {map[string]any{"name": "acme_search.v2"}, ""},
+		"reserved room tools":         {map[string]any{"name": "bnbloc-room"}, "reserved"},
+		"upper-case tool":             {map[string]any{"name": "Acme"}, "MCP tool name"},
+		"lower-case env":              {map[string]any{"name": "acme", "env": []string{"token"}}, "invalid env name"},
+	} {
+		_, err := Validate(bundle(t, expertFiles(t, mcpReq([]map[string]any{c.req}, "mcp.stdio"))), "", Options{})
+		switch {
+		case c.want == "" && err != nil:
+			t.Errorf("%s: %v", name, err)
+		case c.want != "" && (err == nil || !strings.Contains(err.Error(), c.want)):
+			t.Errorf("%s: err = %v, want %q", name, err, c.want)
+		}
+	}
 	// Reading stored content checks references by syntax only: a tool
 	// uninstalled since never makes it invalid.
 	if _, err := Validate(bundle(t, expertFiles(t, mcpReq([]map[string]any{{"name": "ghost"}}, "mcp.stdio"))), "", Options{}); err != nil {

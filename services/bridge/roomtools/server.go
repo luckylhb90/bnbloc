@@ -36,6 +36,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/luckylhb90/bnbloc/core/pkgmeta"
 )
 
 // Protocol versions. Modern requests carry their version per request;
@@ -56,7 +58,7 @@ var (
 const Endpoint = "/mcp"
 
 // ServerName is the server's MCP identity and the name it is attached under.
-const ServerName = "bnbloc-room"
+const ServerName = pkgmeta.ReservedMCPServerName
 
 // TokenEnv carries the bearer to the stdio shim (an env var, never argv:
 // argv is visible to every local user in the process list).
