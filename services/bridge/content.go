@@ -373,7 +373,7 @@ func (b *Bridge) jobContentOrRefuse(ctx context.Context, job bridgeJob, owner, c
 	if errors.As(err, &unavailable) {
 		text = "The expert " + unavailable.expert + " is no longer available to " + job.RequesterUserID + ". Nothing ran."
 	}
-	b.postNotice(ctx, job.JobID, job.RoomID, job.ChannelID, "content-unavailable", map[string]any{
+	b.postNotice(ctx, job.ref(), job.RoomID, job.ChannelID, "content-unavailable", map[string]any{
 		"text":        text,
 		"ownerUserId": owner,
 		"provider":    job.Provider,

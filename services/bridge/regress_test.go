@@ -176,9 +176,9 @@ func TestNoticesCarryPerJobAgentSession(t *testing.T) {
 	g := newActivityGateway(t, "room-1")
 	b := New(Config{GatewayBaseURL: g.srv.URL, GatewayToken: "t", OwnerSubject: "alice"})
 	ctx := context.Background()
-	b.postBorrowDenied(ctx, "job-7", "room-1", "alice", "codex", "ch", "owner_not_authorized")
-	b.postDriveFailed(ctx, "job-8", "room-1", "alice", "codex", "daemon down", "ch")
-	b.postBorrowDenied(ctx, "job-7", "room-1", "alice", "codex", "ch", "owner_not_authorized") // retry: idempotent
+	b.postBorrowDenied(ctx, jobRef{ID: "job-7", MessageSeq: 3}, "room-1", "alice", "codex", "ch", "owner_not_authorized")
+	b.postDriveFailed(ctx, jobRef{ID: "job-8"}, "room-1", "alice", "codex", "daemon down", "ch")
+	b.postBorrowDenied(ctx, jobRef{ID: "job-7", MessageSeq: 3}, "room-1", "alice", "codex", "ch", "owner_not_authorized") // retry: idempotent
 
 	posts, fresh := g.stored()
 	if len(posts) != 3 || len(fresh) != 2 {
@@ -187,6 +187,24 @@ func TestNoticesCarryPerJobAgentSession(t *testing.T) {
 	if posts[0].AgentSessionID != "job-job-7" || posts[1].AgentSessionID != "job-job-8" || posts[0].ChannelID != "ch" {
 		t.Fatalf("notice sessions = %q/%q channel %q", posts[0].AgentSessionID, posts[1].AgentSessionID, posts[0].ChannelID)
 	}
+	// Every notice names its job and the job's request (the feed nests it).
+	if id, seq := payloadJob(fresh[0]); id != "job-7" || seq != int64(3) {
+		t.Fatalf("borrow notice job = %q/%v; want job-7/3", id, seq)
+	}
+	if id, seq := payloadJob(fresh[1]); id != "job-8" || seq != nil {
+		t.Fatalf("drive notice job = %q/%v; want job-8 without a request seq", id, seq)
+	}
+}
+
+// payloadJob reads a row's job tag (jobId, sourceSeq).
+func payloadJob(m wire.Message) (string, any) {
+	p, _ := m.Payload.(map[string]any)
+	id, _ := p["jobId"].(string)
+	seq := p["sourceSeq"]
+	if f, ok := seq.(float64); ok {
+		seq = int64(f)
+	}
+	return id, seq
 }
 
 // BR-11: a reply whose post fails transiently is re-posted on the next poll
@@ -199,12 +217,16 @@ func TestReplyPostFailureIsRetried(t *testing.T) {
 	prov.pollsBusy = 3 // stay busy long enough for the retries to happen mid-turn
 	b := New(Config{GatewayBaseURL: g.srv.URL, GatewayToken: "t", OwnerSubject: "alice", Cores: newTestCore(prov)})
 
-	res, err := b.driveClaim(context.Background(), jobRef{ID: "job-1"}, "room-1", "alice", "core-a", "codex", "c", "go", nil, corepkg.SessionOptions{}, nil, "ch", nil)
+	res, err := b.driveClaim(context.Background(), jobRef{ID: "job-1", MessageSeq: 9}, "room-1", "alice", "core-a", "codex", "c", "go", nil, corepkg.SessionOptions{}, nil, "ch", nil)
 	if err != nil || !res.replied {
 		t.Fatalf("drive = %+v, %v; want the reply delivered after retries", res, err)
 	}
-	if _, fresh := g.stored(); len(fresh) != 1 || storedTexts(fresh)[0] != "done" {
+	_, fresh := g.stored()
+	if len(fresh) != 1 || storedTexts(fresh)[0] != "done" {
 		t.Fatalf("stored = %q; want the reply exactly once", storedTexts(fresh))
+	}
+	if id, seq := payloadJob(fresh[0]); id != "job-1" || seq != int64(9) {
+		t.Fatalf("reply job = %q/%v; want job-1/9 (the turn it answers)", id, seq)
 	}
 }
 

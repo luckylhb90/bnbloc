@@ -78,7 +78,7 @@ func (b *Bridge) refuseTeamWithoutTools(ctx context.Context, job bridgeJob, owne
 		return false
 	}
 	text := "The team " + firstNonEmpty(c.team.Name, "expert") + " needs an agent that can use the room tools to ask its members; " + job.Provider + " cannot. Nothing ran."
-	b.postNotice(ctx, job.JobID, job.RoomID, job.ChannelID, "team-unsupported", map[string]any{
+	b.postNotice(ctx, job.ref(), job.RoomID, job.ChannelID, "team-unsupported", map[string]any{
 		"text":        text,
 		"ownerUserId": owner,
 		"provider":    job.Provider,

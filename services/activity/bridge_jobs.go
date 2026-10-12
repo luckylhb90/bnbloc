@@ -333,6 +333,7 @@ func (s *Service) postJobNotice(ctx context.Context, job store.AgentJob, text st
 				"provider":    job.Provider,
 				"failReason":  string(job.FailureReason),
 				"jobId":       job.JobID,
+				"sourceSeq":   job.MessageSeq,
 			},
 			CreatedAtUnixMs: now,
 		}},

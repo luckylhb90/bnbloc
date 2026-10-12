@@ -144,7 +144,7 @@ func TestDispatchPostsAsTheParentRequester(t *testing.T) {
 	if payload.UserID != "maya" || payload.Recipient["ownerId"] != "bob" || payload.Recipient["provider"] != "claude" {
 		t.Fatalf("payload = %+v; want maya's message to bob/claude", payload)
 	}
-	if payload.DispatchedBy != (wire.DispatchMarker{JobID: p.JobID, Depth: 1, Via: "jack/codex"}) {
+	if payload.DispatchedBy != (wire.DispatchMarker{JobID: p.JobID, ParentSeq: p.MessageSeq, Depth: 1, Via: "jack/codex"}) {
 		t.Fatalf("dispatchedBy = %+v", payload.DispatchedBy)
 	}
 	if msgs[0].ChannelID != "ch_general" {

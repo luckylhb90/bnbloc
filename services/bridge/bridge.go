@@ -570,6 +570,11 @@ type jobRef struct {
 	content *jobContent
 }
 
+// ref is the job's drive identity.
+func (j bridgeJob) ref() jobRef {
+	return jobRef{ID: j.JobID, MessageSeq: j.MessageSeq, RequesterUserID: j.RequesterUserID, TenantID: j.TenantID}
+}
+
 type bridgeJob struct {
 	JobID           string
 	TenantID        string
@@ -734,7 +739,7 @@ func (b *Bridge) runBridgeJob(ctx context.Context, job bridgeJob) {
 			return
 		}
 		if denyReason != "" {
-			b.postBorrowDenied(ctx, job.JobID, job.RoomID, owner, job.Provider, job.ChannelID, denyReason)
+			b.postBorrowDenied(ctx, job.ref(), job.RoomID, owner, job.Provider, job.ChannelID, denyReason)
 			b.reportJobStatus(ctx, job.JobID, store.AgentJobFailed, store.FailureBorrowNotAuthorized, map[string]any{"core": coreName, "provider": job.Provider, "requesterUserId": job.RequesterUserID, "denyReason": denyReason})
 			return
 		}
@@ -1538,7 +1543,6 @@ var roomLocks sync.Map // "roomId\x00core\x00provider" -> *sync.Mutex
 // that lock — space re-ensure + a fresh exec token — and its descriptor rides
 // the session create / input.
 func (b *Bridge) driveClaim(ctx context.Context, job jobRef, room, owner, core, provider, target, text string, attachmentIDs []string, opts corepkg.SessionOptions, prepareExec func(context.Context) (*corepkg.Execution, error), channelID string, beforeReflow func(*roomSession)) (driveResult, error) {
-	jobID := job.ID
 	key := driveSessionKey(room, core, provider, prepareExec != nil)
 	lockAny, _ := roomLocks.LoadOrStore(key, &sync.Mutex{})
 	lock := lockAny.(*sync.Mutex)
@@ -1549,7 +1553,7 @@ func (b *Bridge) driveClaim(ctx context.Context, job jobRef, room, owner, core, 
 	if prepareExec != nil {
 		exec, err := prepareExec(ctx)
 		if err != nil {
-			b.postDriveFailed(ctx, jobID, room, owner, provider, "the agent sandbox could not be prepared: "+err.Error(), channelID)
+			b.postDriveFailed(ctx, job, room, owner, provider, "the agent sandbox could not be prepared: "+err.Error(), channelID)
 			return driveResult{}, err
 		}
 		opts.Execution = exec
@@ -1564,7 +1568,7 @@ func (b *Bridge) driveClaim(ctx context.Context, job jobRef, room, owner, core, 
 	}
 	rs, err := b.ensureSession(ctx, job, room, owner, core, provider, target, channelID, attachmentIDs, promptFn, opts)
 	if err != nil {
-		b.postDriveFailed(ctx, jobID, room, owner, provider, cleanDriveError(err), channelID)
+		b.postDriveFailed(ctx, job, room, owner, provider, cleanDriveError(err), channelID)
 		return driveResult{}, err
 	}
 	// If the session was freshly created, the initial prompt already ran; only
@@ -1574,7 +1578,7 @@ func (b *Bridge) driveClaim(ctx context.Context, job jobRef, room, owner, core, 
 		rs.roomSession.startTurn(TurnInfo{JobID: job.ID, RequesterUserID: job.RequesterUserID, ChannelID: channelID, MessageSeq: job.MessageSeq, Workspace: sessionWorkspace{b, rs.roomSession}, Team: job.content.teamRoster()})
 		prompt := b.drivePrompt(ctx, room, owner, core, provider, rs.workspaceID, rs.sessionID, text, rs.written, &rs.roomSession.ctx, false)
 		if err := b.sendInput(ctx, entry, rs.workspaceID, rs.sessionID, prompt, opts); err != nil {
-			b.postDriveFailed(ctx, jobID, room, owner, provider, cleanDriveError(err), channelID)
+			b.postDriveFailed(ctx, job, room, owner, provider, cleanDriveError(err), channelID)
 			return driveResult{workspaceID: rs.workspaceID, sessionID: rs.sessionID}, err
 		}
 	}
@@ -1592,7 +1596,7 @@ func (b *Bridge) driveClaim(ctx context.Context, job jobRef, room, owner, core, 
 	// reply would then surface only on the next message's reflow.
 	b.waitTurnStart(ctx, rs.roomSession)
 	var usage turnUsage
-	replied, err := b.reflow(ctx, jobID, room, rs.roomSession, channelID, &usage)
+	replied, err := b.reflow(ctx, job, room, rs.roomSession, channelID, &usage)
 	b.postSessionState(ctx, room, rs.roomSession, "idle")
 	return driveResult{workspaceID: rs.workspaceID, sessionID: rs.sessionID, replied: replied, usage: usage}, err
 }
@@ -1980,7 +1984,7 @@ func (b *Bridge) sessionReachable(ctx context.Context, entry coreEntry, workspac
 // new assistant replies into the room until the turn is idle and drained. It
 // returns whether a visible assistant reply was posted, and folds each consumed
 // reply's reported metrics into usage (nil = not tracked).
-func (b *Bridge) reflow(ctx context.Context, jobID, room string, rs *roomSession, channelID string, usage *turnUsage) (bool, error) {
+func (b *Bridge) reflow(ctx context.Context, job jobRef, room string, rs *roomSession, channelID string, usage *turnUsage) (bool, error) {
 	// idleDeadline is a sliding "no activity" window: the turn may run for a
 	// long time (codex can work for minutes), so a fixed cap would truncate a
 	// live reply. Each sign of progress — a new message, or a still-busy turn —
@@ -2073,7 +2077,7 @@ func (b *Bridge) reflow(ctx context.Context, jobID, room string, rs *roomSession
 			// reply, surface the error so the member sees why nothing came back
 			// instead of a silent no-op (mirrors postBorrowDenied).
 			if ts.Failed && !posted {
-				b.postTurnFailed(ctx, jobID, room, rs, ts.FailMessage, channelID)
+				b.postTurnFailed(ctx, job, room, rs, ts.FailMessage, channelID)
 				return false, fmt.Errorf("turn failed: %s", ts.FailMessage)
 			}
 			return posted, nil
@@ -2162,6 +2166,10 @@ func (b *Bridge) postRoomMessage(ctx context.Context, room string, rs *roomSessi
 	if len(m.Metrics) > 0 {
 		payload["metrics"] = m.Metrics
 	}
+	// The turn the reply answers: the feed nests a dispatched job's replies
+	// under the request that dispatched it (payload chain, no lookups).
+	turn := rs.lastTurn()
+	tagJob(payload, turn.JobID, turn.SourceSeq)
 	body := map[string]any{
 		"workspaceId":    room,
 		"agentSessionId": rs.sessionID,
@@ -2346,11 +2354,25 @@ func noticeSessionID(jobID string) string {
 	return "notice-" + corepkg.UUIDv4()
 }
 
+// tagJob marks an agent row with the job it belongs to and that job's
+// request (the room sequence of the message that started it), so clients
+// place replies and notices under their request without looking jobs up.
+func tagJob(payload map[string]any, jobID string, sourceSeq int64) {
+	if strings.TrimSpace(jobID) == "" {
+		return
+	}
+	payload["jobId"] = jobID
+	if sourceSeq > 0 {
+		payload["sourceSeq"] = sourceSeq
+	}
+}
+
 // postNotice records one notice row for a job in the room feed.
-func (b *Bridge) postNotice(ctx context.Context, jobID, room, channelID, kind string, payload map[string]any) {
-	session := noticeSessionID(jobID)
+func (b *Bridge) postNotice(ctx context.Context, job jobRef, room, channelID, kind string, payload map[string]any) {
+	session := noticeSessionID(job.ID)
 	payload["messageId"] = kind + "-" + session
 	payload["role"] = "assistant"
+	tagJob(payload, job.ID, job.MessageSeq)
 	body := map[string]any{
 		"workspaceId":    room,
 		"agentSessionId": session,
@@ -2370,8 +2392,8 @@ func (b *Bridge) postNotice(ctx context.Context, jobID, room, channelID, kind st
 // postBorrowDenied surfaces a refused borrow in the room feed, attributed to the
 // requested agent handle, so the borrower sees why nothing ran instead of a
 // silent no-op. The denial is visible, matching the design's accountable model.
-func (b *Bridge) postBorrowDenied(ctx context.Context, jobID, room, owner, provider, channelID, denyReason string) {
-	b.postNotice(ctx, jobID, room, channelID, "borrow-denied", map[string]any{
+func (b *Bridge) postBorrowDenied(ctx context.Context, job jobRef, room, owner, provider, channelID, denyReason string) {
+	b.postNotice(ctx, job, room, channelID, "borrow-denied", map[string]any{
 		"text":        borrowDeniedText(owner, provider, denyReason),
 		"ownerUserId": owner,
 		"provider":    provider,
@@ -2400,12 +2422,12 @@ func borrowDeniedText(owner, provider, denyReason string) string {
 // postTurnFailed surfaces a failed agent turn in the room feed, attributed to
 // the driven agent. detail is the provider's error message (e.g. a missing API
 // key); a generic line is used when it is empty.
-func (b *Bridge) postTurnFailed(ctx context.Context, jobID, room string, rs *roomSession, detail string, channelID string) {
+func (b *Bridge) postTurnFailed(ctx context.Context, job jobRef, room string, rs *roomSession, detail string, channelID string) {
 	text := "The agent could not complete this request"
 	if d := strings.TrimSpace(detail); d != "" {
 		text += ": " + d
 	}
-	b.postNotice(ctx, jobID, room, channelID, "turn-failed", map[string]any{
+	b.postNotice(ctx, job, room, channelID, "turn-failed", map[string]any{
 		"text":        text,
 		"ownerUserId": firstNonEmpty(rs.owner, b.cfg.OwnerSubject),
 		"provider":    rs.provider,
@@ -2415,12 +2437,12 @@ func (b *Bridge) postTurnFailed(ctx context.Context, jobID, room string, rs *roo
 
 // postDriveFailed surfaces a failure to *start or send to* an agent (before any
 // turn runs). detail is the cleaned core error (see cleanDriveError).
-func (b *Bridge) postDriveFailed(ctx context.Context, jobID, room, owner, provider, detail, channelID string) {
+func (b *Bridge) postDriveFailed(ctx context.Context, job jobRef, room, owner, provider, detail, channelID string) {
 	text := "The " + provider + " agent could not be reached"
 	if d := strings.TrimSpace(detail); d != "" {
 		text += ": " + d
 	}
-	b.postNotice(ctx, jobID, room, channelID, "drive-failed", map[string]any{
+	b.postNotice(ctx, job, room, channelID, "drive-failed", map[string]any{
 		"text":        text,
 		"ownerUserId": firstNonEmpty(owner, b.cfg.OwnerSubject),
 		"provider":    provider,

@@ -118,7 +118,7 @@ func TestAskAgentThroughATeamRole(t *testing.T) {
 func TestTeamFailureStopAndTimeoutNotice(t *testing.T) {
 	tg := newTeamGateway("failed", "timed_out", "running")
 	srv, token, sess := startServer(t, tg)
-	sess.Bind(Job{JobID: "job_lead", RequesterUserID: "maya", ChannelID: "ch_general", Team: releaseTeam()})
+	sess.Bind(Job{JobID: "job_lead", RequesterUserID: "maya", ChannelID: "ch_general", MessageSeq: 30, Team: releaseTeam()})
 
 	text, _ := ask(t, srv, token, map[string]any{"handle": "reviewer", "task": "a"})
 	if !strings.Contains(text, "failed member tasks so far: 1") {
@@ -146,6 +146,7 @@ func TestTeamFailureStopAndTimeoutNotice(t *testing.T) {
 	_ = json.Unmarshal(notices[0].Body, &note)
 	if note.AgentSessionID != "job-job_lead-progress" || note.ChannelID != "ch_general" || len(note.Messages) != 1 ||
 		note.Messages[0].Payload["notice"] != NoticeTimeout || note.Messages[0].Payload["ownerUserId"] != "jack" ||
+		note.Messages[0].Payload["jobId"] != "job_lead" || note.Messages[0].Payload["sourceSeq"] != float64(30) ||
 		!strings.Contains(note.Messages[0].Payload["text"].(string), "reviewer (bob/claude) has not finished after 1 seconds") {
 		t.Fatalf("notice = %+v", note)
 	}

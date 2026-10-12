@@ -429,7 +429,7 @@ func (b *Bridge) sandboxedAgent(ctx context.Context, coreName string) bool {
 // reservation answered sandboxRequired): a visible sandbox-required notice
 // and the final job failure sandbox_required. Nothing has run.
 func (b *Bridge) refuseUnsandboxed(ctx context.Context, job bridgeJob, owner, coreName, text string) {
-	b.postNotice(ctx, job.JobID, job.RoomID, job.ChannelID, "sandbox-required", map[string]any{
+	b.postNotice(ctx, job.ref(), job.RoomID, job.ChannelID, "sandbox-required", map[string]any{
 		"text":        text,
 		"ownerUserId": owner,
 		"provider":    job.Provider,

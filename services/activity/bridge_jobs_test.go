@@ -136,6 +136,7 @@ func TestSweepFailsQueuedJobAndNotifiesRoom(t *testing.T) {
 
 	var job store.AgentJob
 	var failureText string
+	var tag map[string]any
 	for _, ev := range pub.events {
 		if ev.RoomID != "room-9" {
 			t.Fatalf("event published to %q, want room-9", ev.RoomID)
@@ -147,6 +148,7 @@ func TestSweepFailsQueuedJobAndNotifiesRoom(t *testing.T) {
 			if len(p.Messages) == 1 {
 				if m, ok := p.Messages[0].Payload.(map[string]any); ok {
 					failureText, _ = m["text"].(string)
+					tag = m
 				}
 			}
 		}
@@ -156,6 +158,10 @@ func TestSweepFailsQueuedJobAndNotifiesRoom(t *testing.T) {
 	}
 	if !strings.Contains(failureText, "offline") {
 		t.Fatalf("room message = %q, want a visible offline explanation", failureText)
+	}
+	// The notice names its job and request, so the feed nests it.
+	if tag["jobId"] != "stuck" || tag["sourceSeq"] != int64(1) {
+		t.Fatalf("notice tag = %v/%v; want stuck/1", tag["jobId"], tag["sourceSeq"])
 	}
 }
 

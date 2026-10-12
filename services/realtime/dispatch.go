@@ -196,7 +196,7 @@ func (s *Service) Dispatch(ctx context.Context, roomID, caller string, in wire.D
 		ClientMsgID: clientMsgID,
 		ChannelID:   parent.ChannelID,
 		Recipient:   &ChatRecipient{OwnerID: in.Recipient.OwnerID, Provider: in.Recipient.Provider, Core: in.Recipient.Core},
-		Dispatched:  &wire.DispatchMarker{JobID: parent.JobID, Depth: depth, Via: agentHandle(parent.OwnerUserID, parent.Provider), Role: in.Role},
+		Dispatched:  &wire.DispatchMarker{JobID: parent.JobID, ParentSeq: parent.MessageSeq, Depth: depth, Via: agentHandle(parent.OwnerUserID, parent.Provider), Role: in.Role},
 		Expert:      in.Expert,
 	})
 	switch {

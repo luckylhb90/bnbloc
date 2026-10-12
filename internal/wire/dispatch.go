@@ -23,14 +23,18 @@ const (
 )
 
 // DispatchMarker is payload.dispatchedBy on a chat_message an agent
-// dispatched: the parent job, the new job's depth and the dispatching
-// agent's handle ("jack/codex"). Clients render "maya → via jack/codex →
-// bob/claude". An expert the dispatch asked the target to wear is the
+// dispatched: the parent job and its request, the new job's depth and the
+// dispatching agent's handle ("jack/codex"). Clients render "maya → via
+// jack/codex → bob/claude". An expert the dispatch asked the target to wear is the
 // message's ordinary payload.expert.
 type DispatchMarker struct {
 	JobID string `json:"jobId"`
-	Depth int    `json:"depth"`
-	Via   string `json:"via,omitempty"`
+	// ParentSeq is the room sequence of the parent job's request: clients
+	// nest the dispatch (and, through its replies' sourceSeq, everything it
+	// produced) under that message without looking jobs up.
+	ParentSeq int64  `json:"parentSeq,omitempty"`
+	Depth     int    `json:"depth"`
+	Via       string `json:"via,omitempty"`
 	// Role is the team role the dispatch staffs (a team lead's dispatch).
 	Role string `json:"role,omitempty"`
 }
