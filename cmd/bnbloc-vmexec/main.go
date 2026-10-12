@@ -26,6 +26,9 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
+
+	coreprotocol "github.com/luckylhb90/bnbloc/core/protocol"
 )
 
 const (
@@ -84,12 +87,14 @@ func usage(w io.Writer) {
   bnbloc-vmexec claude-prefix <command string>       CLAUDE_CODE_SHELL_PREFIX router (also --claude-prefix,
                                                      or invoke as `+claudePrefixArgv0+`)
   bnbloc-vmexec confine [flags] -- <cli...>          exec a CLI under the host sandbox profile
-        --harness claude|codex|opencode|generic  --allow-read P  --allow-write P  --deny-read P
+        --harness `+harnessNames(false)+`  --allow-read P  --allow-write P  --deny-read P
         --deny-write P  --allow-write-prefix P (temp-then-rename files beside read-only config)
         --deny-keychain  --print-profile
-  bnbloc-vmexec hook claude|opencode                 command-rewriting hook adapter (stdin -> stdout)
+  bnbloc-vmexec hook `+harnessNames(true)+`                 command-rewriting hook adapter (stdin -> stdout)
 
-environment: BNBLOC_VMEXEC_URL, _TOKEN, _MACHINE, _SPACE, _MOUNTS, _PASSTHROUGH, _PATH, _WORKDIR;
-             BNBLOC_CONFINE_WORKSPACE, _ALLOW_READ, _ALLOW_WRITE
 `)
+	fmt.Fprintf(w, "environment: %s\n             %s\n",
+		strings.Join([]string{coreprotocol.EnvVMExecURL, coreprotocol.EnvVMExecToken, coreprotocol.EnvVMExecMachine, coreprotocol.EnvVMExecSpace,
+			coreprotocol.EnvVMExecMounts, coreprotocol.EnvVMExecPassthrough, coreprotocol.EnvVMExecPath, coreprotocol.EnvVMExecWorkdir}, ", "),
+		strings.Join([]string{coreprotocol.EnvConfineWorkspace, coreprotocol.EnvConfineAllowRead, coreprotocol.EnvConfineAllowWrite, coreprotocol.EnvConfineDenyWrite}, ", "))
 }

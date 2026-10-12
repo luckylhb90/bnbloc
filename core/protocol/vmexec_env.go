@@ -11,9 +11,11 @@ import (
 // Environment variables through which a sandboxExec core hands one session's
 // SandboxExecution to the bnbloc-vmexec helper (and to every process it
 // spawns: the CLI, its shell-prefix router, its command-rewriting hooks).
-// VMExecEnv produces them and SandboxFromEnv parses them: the one encoding
-// both sides share. BNBLOC_VMEXEC_TOKEN is the space-scoped exec token (a
-// secret); it can only run commands in the session's own space.
+// VMExecEnv produces them and SandboxFromEnv, HostConfineFromEnv and
+// PassthroughFromEnv parse them: the one encoding both sides share, and the
+// only place these names are spelled (TestVMExecEnvNamesOnlyInProtocol).
+// BNBLOC_VMEXEC_TOKEN is the space-scoped exec token (a secret); it can only
+// run commands in the session's own space.
 const (
 	EnvVMExecURL         = "BNBLOC_VMEXEC_URL"
 	EnvVMExecToken       = "BNBLOC_VMEXEC_TOKEN"
@@ -70,7 +72,7 @@ func nonNil(v []string) []string {
 
 // SandboxFromEnv parses the vmexec environment written by VMExecEnv. URL,
 // token, machine, space and at least one mount are required; HostConfine is
-// set when BNBLOC_CONFINE_WORKSPACE is.
+// HostConfineFromEnv's.
 func SandboxFromEnv(getenv func(string) string) (SandboxExecution, error) {
 	s := SandboxExecution{
 		URL:       strings.TrimSpace(getenv(EnvVMExecURL)),
@@ -102,26 +104,55 @@ func SandboxFromEnv(getenv func(string) string) (SandboxExecution, error) {
 			return SandboxExecution{}, fmt.Errorf("%s: mount %+v is not an absolute host→guest pair", EnvVMExecMounts, m)
 		}
 	}
+	s.Passthrough = PassthroughFromEnv(getenv)
+	c, err := HostConfineFromEnv(getenv)
+	if err != nil {
+		return SandboxExecution{}, err
+	}
+	s.HostConfine = c
+	return s, nil
+}
+
+// PassthroughFromEnv parses BNBLOC_VMEXEC_PASSTHROUGH: the command names
+// that run on the host.
+func PassthroughFromEnv(getenv func(string) string) []string {
+	var out []string
 	for _, name := range strings.Split(getenv(EnvVMExecPassthrough), ",") {
 		if name = strings.TrimSpace(name); name != "" {
-			s.Passthrough = append(s.Passthrough, name)
+			out = append(out, name)
 		}
 	}
-	if ws := strings.TrimSpace(getenv(EnvConfineWorkspace)); ws != "" {
-		c := &HostConfine{Workspace: ws}
-		for name, dst := range map[string]*[]string{EnvConfineAllowRead: &c.AllowRead, EnvConfineAllowWrite: &c.AllowWrite, EnvConfineDenyWrite: &c.DenyWrite} {
-			if raw := strings.TrimSpace(getenv(name)); raw != "" {
-				if err := json.Unmarshal([]byte(raw), dst); err != nil {
-					return SandboxExecution{}, fmt.Errorf("%s: %w", name, err)
-				}
-				if len(*dst) == 0 {
-					*dst = nil
-				}
-			}
+	return out
+}
+
+// HostConfineFromEnv parses the BNBLOC_CONFINE_* half of the environment:
+// nil when none is set. Each list is honored whether or not the workspace
+// variable is set (a confine invocation may name the workspace by flag), so
+// a deny list in the environment is never dropped; an unparsable list is an
+// error, never an empty one.
+func HostConfineFromEnv(getenv func(string) string) (*HostConfine, error) {
+	c := &HostConfine{Workspace: strings.TrimSpace(getenv(EnvConfineWorkspace))}
+	set := c.Workspace != ""
+	for _, l := range []struct {
+		name string
+		dst  *[]string
+	}{{EnvConfineAllowRead, &c.AllowRead}, {EnvConfineAllowWrite, &c.AllowWrite}, {EnvConfineDenyWrite, &c.DenyWrite}} {
+		raw := strings.TrimSpace(getenv(l.name))
+		if raw == "" {
+			continue
 		}
-		s.HostConfine = c
+		set = true
+		if err := json.Unmarshal([]byte(raw), l.dst); err != nil {
+			return nil, fmt.Errorf("%s: %w", l.name, err)
+		}
+		if len(*l.dst) == 0 {
+			*l.dst = nil
+		}
 	}
-	return s, nil
+	if !set {
+		return nil, nil
+	}
+	return c, nil
 }
 
 func sorted(v []string) []string {

@@ -103,7 +103,7 @@ func (r *runner) run(ctx context.Context, cmd []string, pipeStdin bool) int {
 	if isPassthrough(cmd, r.cfg.Passthrough) {
 		argv := cmd
 		if len(cmd) == 1 {
-			argv = []string{"/bin/sh", "-c", cmd[0]}
+			argv = []string{hostShell(r.environ), "-c", cmd[0]}
 		}
 		if err := r.hostExec(argv, r.environ); err != nil {
 			fmt.Fprintf(r.stderr, "bnbloc-vmexec: passthrough %s: %v\n", argv[0], err)
@@ -111,19 +111,43 @@ func (r *runner) run(ctx context.Context, cmd []string, pipeStdin bool) int {
 		}
 		return 0
 	}
+	guestCwd, code, ok := r.guestCwd(fmt.Sprintf("%q", strings.Join(cmd, " ")))
+	if !ok {
+		return code
+	}
+	code, _ = r.exec(ctx, guestCommand(cmd), guestCwd, pipeStdin)
+	return code
+}
+
+// guestCwd maps the current directory into the space: the one
+// cwd-outside-the-workspace rule of every sandboxed run. A directory no
+// mount covers refuses the command (what names it in the message); ok is
+// false with the exit code to return.
+func (r *runner) guestCwd(what string) (string, int, bool) {
 	cwd, err := r.getwd()
 	if err != nil {
 		fmt.Fprintf(r.stderr, "bnbloc-vmexec: current directory: %v\n", err)
-		return exitFailure
+		return "", exitFailure, false
 	}
-	guestCwd, ok := mapHostPath(r.cfg.Mounts, cwd)
+	guest, ok := mapHostPath(r.cfg.Mounts, cwd)
 	if !ok {
-		fmt.Fprintf(r.stderr, "bnbloc-vmexec: the current directory %s is outside the sandbox workspace (%s); refusing to run %q\n",
-			cwd, strings.Join(mountHosts(r.cfg.Mounts), ", "), strings.Join(cmd, " "))
-		return exitRefused
+		fmt.Fprintf(r.stderr, "bnbloc-vmexec: the current directory %s is outside the sandbox workspace (%s); refusing to run %s\n",
+			cwd, strings.Join(mountHosts(r.cfg.Mounts), ", "), what)
+		return "", exitRefused, false
 	}
-	code, _ := r.exec(ctx, guestCommand(cmd), guestCwd, pipeStdin)
-	return code
+	return guest, 0, true
+}
+
+// hostShell is the shell a command string runs in on the host (a
+// passthrough command, the CLI's own host tooling): the user's $SHELL, as
+// the harness itself would, else /bin/sh.
+func hostShell(environ []string) string {
+	for _, kv := range environ {
+		if v, ok := strings.CutPrefix(kv, "SHELL="); ok && strings.TrimSpace(v) != "" {
+			return v
+		}
+	}
+	return "/bin/sh"
 }
 
 // guestCommand turns one command string into a shell invocation (bash when

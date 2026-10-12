@@ -31,8 +31,12 @@ const exitHookBlock = 2
 // on stdout, so the shell command runs through `vmexec run` in the sandbox.
 // Passthrough commands are left untouched (they run on the host).
 func hook(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
-	if len(args) != 1 {
-		fmt.Fprintln(stderr, "bnbloc-vmexec hook: expected a harness: claude | opencode")
+	h, ok := harness{}, false
+	if len(args) == 1 {
+		h, ok = lookupHarness(args[0])
+	}
+	if !ok || h.hook == nil {
+		fmt.Fprintf(stderr, "bnbloc-vmexec hook: expected a harness with a hook dialect: %s\n", harnessNames(true))
 		return exitHookBlock
 	}
 	raw, err := io.ReadAll(io.LimitReader(stdin, 16<<20))
@@ -40,16 +44,8 @@ func hook(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "bnbloc-vmexec hook: read event: %v\n", err)
 		return exitHookBlock
 	}
-	rw := commandRewriter{vmexec: vmexecPath(), passthrough: passthroughFromEnv()}
-	switch args[0] {
-	case "claude":
-		return rw.claudeHook(raw, stdout, stderr)
-	case "opencode":
-		return rw.opencodeHook(raw, stdout, stderr)
-	default:
-		fmt.Fprintf(stderr, "bnbloc-vmexec hook: unknown harness %q (claude | opencode)\n", args[0])
-		return exitHookBlock
-	}
+	rw := commandRewriter{vmexec: vmexecPath(os.Getenv), passthrough: coreprotocol.PassthroughFromEnv(os.Getenv)}
+	return h.hook(rw, raw, stdout, stderr)
 }
 
 type commandRewriter struct {
@@ -218,29 +214,24 @@ func writeJSON(stdout, stderr io.Writer, v any) int {
 	return 0
 }
 
-// vmexecPath is the helper the rewritten commands call: the path the core
-// declared (BNBLOC_VMEXEC_PATH), else this executable.
-func vmexecPath() string {
-	if p := strings.TrimSpace(os.Getenv(coreprotocol.EnvVMExecPath)); p != "" {
-		return p
-	}
-	if exe, err := os.Executable(); err == nil {
-		if resolved, err := filepath.EvalSymlinks(exe); err == nil {
-			return resolved
+// vmexecPath is this helper's own path, the one rule both its uses share
+// (the command the hooks rewrite to, the directory confine keeps readable):
+// the path the core declared (protocol.EnvVMExecPath), else this
+// executable, with symlinks resolved either way (a host sandbox profile
+// matches the real path).
+func vmexecPath(getenv func(string) string) string {
+	p := strings.TrimSpace(getenv(coreprotocol.EnvVMExecPath))
+	if p == "" {
+		exe, err := os.Executable()
+		if err != nil {
+			return "bnbloc-vmexec"
 		}
-		return exe
+		p = exe
 	}
-	return "bnbloc-vmexec"
-}
-
-func passthroughFromEnv() []string {
-	var out []string
-	for _, name := range strings.Split(os.Getenv(coreprotocol.EnvVMExecPassthrough), ",") {
-		if name = strings.TrimSpace(name); name != "" {
-			out = append(out, name)
-		}
+	if resolved, err := filepath.EvalSymlinks(p); err == nil {
+		return resolved
 	}
-	return out
+	return p
 }
 
 // shellQuote single-quotes a word for POSIX shells.

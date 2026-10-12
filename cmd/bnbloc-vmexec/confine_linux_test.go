@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	coreprotocol "github.com/luckylhb90/bnbloc/core/protocol"
 )
 
 // TestConfineBwrap_agentConfigPaths runs the real bubblewrap: a confined
@@ -51,7 +53,7 @@ try 'mv .claude .claude-moved && mkdir -p .claude/skills/x' renamed-parent
 try 'mv .opencode .opencode-moved' renamed-dir
 echo ok > ok.txt`
 	cmd := exec.Command(bin, "confine", "--workspace", ws, "--", "sh", "-c", script, "sh", ws)
-	cmd.Env = append(os.Environ(), "HOME="+home, "BNBLOC_CONFINE_DENY_WRITE="+deny)
+	cmd.Env = append(os.Environ(), "HOME="+home, coreprotocol.EnvConfineDenyWrite+"="+deny)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("confined run: %v\n%s", err, out)

@@ -83,79 +83,135 @@ type harnessLayout struct {
 
 func prefixRegex(path string) string { return "^" + regexp.QuoteMeta(path) }
 
-func harnessLayoutFor(name, home string) (harnessLayout, bool) {
-	h := func(rel string) string { return filepath.Join(home, rel) }
-	switch name {
-	case "claude":
-		c := firstNonEmptyStr(os.Getenv("CLAUDE_CONFIG_DIR"), h(".claude"))
-		in := func(rels ...string) []string {
-			out := make([]string, 0, len(rels))
-			for _, r := range rels {
-				out = append(out, filepath.Join(c, r))
-			}
-			return out
-		}
-		// ~/.claude.json is readable but NOT writable: besides UI state it
-		// holds the user/project MCP server config (executable on the host);
-		// Claude runs fine without persisting it.
-		var files []string
-		for _, f := range []string{"history.jsonl", "stats-cache.json", "mcp-needs-auth-cache.json", ".last-cleanup", ".last-update-result.json", "jobs.json", ".credentials.json"} {
-			files = append(files, prefixRegex(filepath.Join(c, f)))
-		}
-		return harnessLayout{
-			name:      name,
-			roots:     []string{c, h(".local/share/claude"), h(".local/state/claude"), h(".cache/claude"), h("Library/Caches/claude-cli-nodejs")},
-			rootFiles: []string{prefixRegex(h(".claude.json"))},
-			stateDirs: append(in("projects", "transcripts", "todos", "shell-snapshots", "statsig", "session-env", "sessions",
-				"file-history", "paste-cache", "tasks", "telemetry", "debug", "backups", "cache", "downloads", "ide", "teams", "plans", "plugins/data"),
-				h(".local/state/claude"), h(".cache/claude"), h("Library/Caches/claude-cli-nodejs")),
-			stateFiles: files,
-		}, true
-	case "codex":
-		x := firstNonEmptyStr(os.Getenv("CODEX_HOME"), h(".codex"))
-		in := func(rels ...string) []string {
-			out := make([]string, 0, len(rels))
-			for _, r := range rels {
-				out = append(out, filepath.Join(x, r))
-			}
-			return out
-		}
-		files := []string{prefixRegex(x) + `/[a-z_]+_[0-9]+\.sqlite`}
-		for _, f := range []string{"history.jsonl", "session_index.jsonl", "transcription-history.jsonl", "version.json", "installation_id",
-			"auth.json", ".codex-global-state.json", ".models_cache", "models_cache.json", ".sqlite-maintenance.lock"} {
-			files = append(files, prefixRegex(filepath.Join(x, f)))
-		}
-		return harnessLayout{
-			name:  name,
-			roots: []string{x, h(".cache/codex-runtimes")},
-			stateDirs: in("sessions", "archived_sessions", "log", ".tmp", "tmp", "cache", "shell_snapshots", "sqlite", "memories",
-				"app-server-control", "app-server-daemon", "ipc", "mcp-oauth-locks", "project-metadata-locks", "thread-writer-locks",
-				"rollout-migrations", "visualizations"),
-			stateFiles: files,
-		}, true
-	case "opencode":
-		cache := h(".cache/opencode")
-		return harnessLayout{
-			name:      name,
-			roots:     []string{h(".config/opencode"), h(".local/share/opencode"), h(".local/state/opencode"), cache},
-			stateDirs: []string{h(".local/share/opencode"), h(".local/state/opencode"), cache},
-			readOnly:  []string{filepath.Join(cache, "packages"), filepath.Join(cache, "bin"), filepath.Join(cache, "node_modules")},
-		}, true
-	}
-	return harnessLayout{}, false
+// harness is one agent CLI vmexec knows: its documented host layout (what
+// confine keeps readable and writable for it, and read-denies when it is
+// not the confined CLI) and, when the CLI has one, the command-rewriting
+// hook dialect `vmexec hook <name>` speaks for it.
+type harness struct {
+	name   string
+	layout func(home string) harnessLayout
+	// plugins lists the plugin sources the CLI declares in its config dir
+	// that may live outside it (pluginSources adds symlinked skills).
+	plugins func(cfg string) []string
+	hook    func(c commandRewriter, raw []byte, stdout, stderr io.Writer) int
 }
 
-var knownHarnesses = []string{"claude", "codex", "opencode"}
+// harnesses is the one harness list: confine's layouts, the executable
+// name a harness is derived from, the hook dialects and the usage text all
+// read it. A CLI not in it is "generic" (no state paths of its own).
+var harnesses = []harness{
+	{name: "claude", layout: claudeLayout, plugins: claudePluginSources, hook: commandRewriter.claudeHook},
+	{name: "codex", layout: codexLayout},
+	{name: "opencode", layout: opencodeLayout, hook: commandRewriter.opencodeHook},
+}
+
+// genericHarness names a CLI with no known layout.
+const genericHarness = "generic"
+
+func lookupHarness(name string) (harness, bool) {
+	for _, h := range harnesses {
+		if h.name == name {
+			return h, true
+		}
+	}
+	return harness{}, false
+}
+
+// harnessNames lists the harness names (with a hook dialect only, when
+// hooks is set), "|"-separated for usage and error text.
+func harnessNames(hooks bool) string {
+	var names []string
+	for _, h := range harnesses {
+		if !hooks || h.hook != nil {
+			names = append(names, h.name)
+		}
+	}
+	if !hooks {
+		names = append(names, genericHarness)
+	}
+	return strings.Join(names, "|")
+}
+
+func harnessLayoutFor(name, home string) (harnessLayout, bool) {
+	h, ok := lookupHarness(name)
+	if !ok {
+		return harnessLayout{}, false
+	}
+	l := h.layout(home)
+	l.name = name
+	return l, true
+}
+
+func claudeLayout(home string) harnessLayout {
+	h := func(rel string) string { return filepath.Join(home, rel) }
+	c := firstNonEmptyStr(os.Getenv("CLAUDE_CONFIG_DIR"), h(".claude"))
+	in := func(rels ...string) []string {
+		out := make([]string, 0, len(rels))
+		for _, r := range rels {
+			out = append(out, filepath.Join(c, r))
+		}
+		return out
+	}
+	// ~/.claude.json is readable but NOT writable: besides UI state it
+	// holds the user/project MCP server config (executable on the host);
+	// Claude runs fine without persisting it.
+	var files []string
+	for _, f := range []string{"history.jsonl", "stats-cache.json", "mcp-needs-auth-cache.json", ".last-cleanup", ".last-update-result.json", "jobs.json", ".credentials.json"} {
+		files = append(files, prefixRegex(filepath.Join(c, f)))
+	}
+	return harnessLayout{
+		roots:     []string{c, h(".local/share/claude"), h(".local/state/claude"), h(".cache/claude"), h("Library/Caches/claude-cli-nodejs")},
+		rootFiles: []string{prefixRegex(h(".claude.json"))},
+		stateDirs: append(in("projects", "transcripts", "todos", "shell-snapshots", "statsig", "session-env", "sessions",
+			"file-history", "paste-cache", "tasks", "telemetry", "debug", "backups", "cache", "downloads", "ide", "teams", "plans", "plugins/data"),
+			h(".local/state/claude"), h(".cache/claude"), h("Library/Caches/claude-cli-nodejs")),
+		stateFiles: files,
+	}
+}
+
+func codexLayout(home string) harnessLayout {
+	h := func(rel string) string { return filepath.Join(home, rel) }
+	x := firstNonEmptyStr(os.Getenv("CODEX_HOME"), h(".codex"))
+	in := func(rels ...string) []string {
+		out := make([]string, 0, len(rels))
+		for _, r := range rels {
+			out = append(out, filepath.Join(x, r))
+		}
+		return out
+	}
+	files := []string{prefixRegex(x) + `/[a-z_]+_[0-9]+\.sqlite`}
+	for _, f := range []string{"history.jsonl", "session_index.jsonl", "transcription-history.jsonl", "version.json", "installation_id",
+		"auth.json", ".codex-global-state.json", ".models_cache", "models_cache.json", ".sqlite-maintenance.lock"} {
+		files = append(files, prefixRegex(filepath.Join(x, f)))
+	}
+	return harnessLayout{
+		roots: []string{x, h(".cache/codex-runtimes")},
+		stateDirs: in("sessions", "archived_sessions", "log", ".tmp", "tmp", "cache", "shell_snapshots", "sqlite", "memories",
+			"app-server-control", "app-server-daemon", "ipc", "mcp-oauth-locks", "project-metadata-locks", "thread-writer-locks",
+			"rollout-migrations", "visualizations"),
+		stateFiles: files,
+	}
+}
+
+func opencodeLayout(home string) harnessLayout {
+	h := func(rel string) string { return filepath.Join(home, rel) }
+	cache := h(".cache/opencode")
+	return harnessLayout{
+		roots:     []string{h(".config/opencode"), h(".local/share/opencode"), h(".local/state/opencode"), cache},
+		stateDirs: []string{h(".local/share/opencode"), h(".local/state/opencode"), cache},
+		readOnly:  []string{filepath.Join(cache, "packages"), filepath.Join(cache, "bin"), filepath.Join(cache, "node_modules")},
+	}
+}
 
 // harnessFor derives the harness from the CLI's executable name.
 func harnessFor(argv0 string) string {
 	base := strings.ToLower(trimExe(filepath.Base(argv0)))
-	for _, h := range knownHarnesses {
-		if base == h || strings.HasPrefix(base, h+"-") {
-			return h
+	for _, h := range harnesses {
+		if base == h.name || strings.HasPrefix(base, h.name+"-") {
+			return h.name
 		}
 	}
-	return "generic"
+	return genericHarness
 }
 
 // sensitiveHomePaths are read-denied (content) for every confined CLI: SSH,
@@ -204,14 +260,16 @@ func (s *confineSpec) resolve() {
 	s.layouts, s.others = nil, nil
 	listed := map[string]bool{}
 	for _, name := range s.Harnesses {
-		if l, ok := harnessLayoutFor(name, s.Home); ok && !listed[name] {
+		if h, ok := lookupHarness(name); ok && !listed[name] {
+			l, _ := harnessLayoutFor(name, s.Home)
 			s.layouts = append(s.layouts, l)
-			s.pluginDirs = append(s.pluginDirs, pluginSources(name, l.roots)...)
+			s.pluginDirs = append(s.pluginDirs, pluginSources(h, l.roots)...)
 		}
 		listed[name] = true
 	}
-	for _, name := range knownHarnesses {
-		if l, ok := harnessLayoutFor(name, s.Home); ok && !listed[name] {
+	for _, h := range harnesses {
+		if !listed[h.name] {
+			l, _ := harnessLayoutFor(h.name, s.Home)
 			s.others = append(s.others, l)
 		}
 	}
@@ -222,36 +280,14 @@ func (s *confineSpec) resolve() {
 // install paths and marketplace locations (incl. local directory sources),
 // and the resolved targets of symlinked skills/commands/agents. They become
 // readable, never writable.
-func pluginSources(harness string, roots []string) []string {
+func pluginSources(h harness, roots []string) []string {
 	if len(roots) == 0 {
 		return nil
 	}
 	cfg := roots[0]
 	var out []string
-	if harness == "claude" {
-		var installed struct {
-			Plugins map[string][]struct {
-				InstallPath string `json:"installPath"`
-			} `json:"plugins"`
-		}
-		if raw, err := os.ReadFile(filepath.Join(cfg, "plugins", "installed_plugins.json")); err == nil && json.Unmarshal(raw, &installed) == nil {
-			for _, list := range installed.Plugins {
-				for _, p := range list {
-					out = append(out, p.InstallPath)
-				}
-			}
-		}
-		var markets map[string]struct {
-			InstallLocation string `json:"installLocation"`
-			Source          struct {
-				Path string `json:"path"`
-			} `json:"source"`
-		}
-		if raw, err := os.ReadFile(filepath.Join(cfg, "plugins", "known_marketplaces.json")); err == nil && json.Unmarshal(raw, &markets) == nil {
-			for _, m := range markets {
-				out = append(out, m.InstallLocation, m.Source.Path)
-			}
-		}
+	if h.plugins != nil {
+		out = h.plugins(cfg)
 	}
 	for _, sub := range []string{"skills", "skill", "commands", "agents", "plugins", "prompts"} {
 		entries, err := os.ReadDir(filepath.Join(cfg, sub))
@@ -277,6 +313,37 @@ func pluginSources(harness string, roots []string) []string {
 		}
 	}
 	return abs
+}
+
+// claudePluginSources are Claude's installed plugin install paths and
+// marketplace locations (incl. local directory sources), from its config
+// dir cfg.
+func claudePluginSources(cfg string) []string {
+	var out []string
+	var installed struct {
+		Plugins map[string][]struct {
+			InstallPath string `json:"installPath"`
+		} `json:"plugins"`
+	}
+	if raw, err := os.ReadFile(filepath.Join(cfg, "plugins", "installed_plugins.json")); err == nil && json.Unmarshal(raw, &installed) == nil {
+		for _, list := range installed.Plugins {
+			for _, p := range list {
+				out = append(out, p.InstallPath)
+			}
+		}
+	}
+	var markets map[string]struct {
+		InstallLocation string `json:"installLocation"`
+		Source          struct {
+			Path string `json:"path"`
+		} `json:"source"`
+	}
+	if raw, err := os.ReadFile(filepath.Join(cfg, "plugins", "known_marketplaces.json")); err == nil && json.Unmarshal(raw, &markets) == nil {
+		for _, m := range markets {
+			out = append(out, m.InstallLocation, m.Source.Path)
+		}
+	}
+	return out
 }
 
 // canonical resolves symlinks of the deepest existing ancestor (the sandbox
@@ -758,31 +825,23 @@ func confine(args []string, stdout, stderr io.Writer) int {
 	}
 }
 
-// parseConfine reads the flags (repeatable path flags) and the
-// BNBLOC_CONFINE_* environment written by core/protocol.VMExecEnv.
+// parseConfine reads the flags (repeatable path flags) and the host
+// confinement environment written by core/protocol.VMExecEnv
+// (protocol.HostConfineFromEnv).
 func parseConfine(args []string, getenv func(string) string) (spec confineSpec, argv []string, printOnly bool, err error) {
 	home, herr := os.UserHomeDir()
 	if herr != nil {
 		return spec, nil, false, fmt.Errorf("home directory: %w", herr)
 	}
 	spec.Home = home
-	spec.Workspace = strings.TrimSpace(getenv(coreprotocol.EnvConfineWorkspace))
-	for name, dst := range map[string]*[]string{
-		coreprotocol.EnvConfineAllowRead:  &spec.AllowRead,
-		coreprotocol.EnvConfineAllowWrite: &spec.AllowWrite,
-		coreprotocol.EnvConfineDenyWrite:  &spec.DenyWrite,
-	} {
-		if raw := strings.TrimSpace(getenv(name)); raw != "" {
-			if jerr := json.Unmarshal([]byte(raw), dst); jerr != nil {
-				return spec, nil, false, fmt.Errorf("%s: %w", name, jerr)
-			}
-		}
+	hc, herr := coreprotocol.HostConfineFromEnv(getenv)
+	if herr != nil {
+		return spec, nil, false, herr
 	}
-	if p := strings.TrimSpace(getenv(coreprotocol.EnvVMExecPath)); p != "" {
-		spec.VMExecDir = filepath.Dir(p)
-	} else if exe, xerr := os.Executable(); xerr == nil {
-		spec.VMExecDir = filepath.Dir(exe)
+	if hc != nil {
+		spec.Workspace, spec.AllowRead, spec.AllowWrite, spec.DenyWrite = hc.Workspace, hc.AllowRead, hc.AllowWrite, hc.DenyWrite
 	}
+	spec.VMExecDir = filepath.Dir(vmexecPath(getenv))
 	pathFlags := map[string]*[]string{
 		"--allow-read": &spec.AllowRead, "--allow-write": &spec.AllowWrite,
 		"--allow-write-prefix": &spec.AllowWritePrefix,

@@ -149,10 +149,9 @@ func claudePrefix(args []string, stderr io.Writer) int {
 	}
 	command := args[0]
 	body, cwdFile, userCmd, isBash := claudeBashCommand(command)
-	hostShell := firstNonEmptyStr(os.Getenv("SHELL"), "/bin/sh")
 	if !isBash {
 		// Hooks, MCP servers, the status line: host tooling, run on the host.
-		if err := execHost([]string{hostShell, "-c", command}, os.Environ()); err != nil {
+		if err := execHost([]string{hostShell(os.Environ()), "-c", command}, os.Environ()); err != nil {
 			fmt.Fprintf(stderr, "bnbloc-vmexec: host spawn: %v\n", err)
 			return exitFailure
 		}
@@ -164,7 +163,7 @@ func claudePrefix(args []string, stderr io.Writer) int {
 		return exitFailure
 	}
 	if isPassthrough([]string{userCmd}, r.cfg.Passthrough) {
-		if err := r.hostExec([]string{hostShell, "-c", command}, r.environ); err != nil {
+		if err := r.hostExec([]string{hostShell(r.environ), "-c", command}, r.environ); err != nil {
 			fmt.Fprintf(stderr, "bnbloc-vmexec: passthrough: %v\n", err)
 			return exitFailure
 		}
@@ -176,16 +175,9 @@ func claudePrefix(args []string, stderr io.Writer) int {
 // runClaudeBash runs a Bash-tool command body in the space and relays the
 // final working directory to Claude's host cwd file.
 func (r *runner) runClaudeBash(ctx context.Context, body, cwdFile string) int {
-	cwd, err := r.getwd()
-	if err != nil {
-		fmt.Fprintf(r.stderr, "bnbloc-vmexec: current directory: %v\n", err)
-		return exitFailure
-	}
-	guestCwd, ok := mapHostPath(r.cfg.Mounts, cwd)
+	guestCwd, code, ok := r.guestCwd("the command")
 	if !ok {
-		fmt.Fprintf(r.stderr, "bnbloc-vmexec: the current directory %s is outside the sandbox workspace (%s); refusing to run the command\n",
-			cwd, strings.Join(mountHosts(r.cfg.Mounts), ", "))
-		return exitRefused
+		return code
 	}
 	stateFile := `"$HOME"/.bnbloc-cwd-` + randomID()
 	script := body + " && pwd -P >| " + stateFile

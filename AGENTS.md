@@ -788,7 +788,14 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   `tauri.conf.json`). The hook adapters treat only an exact
   `<vmexec> run [--stdio] -- <word>` as already routed and fail closed with
   exit 2 (the PreToolUse code that blocks; any other non-zero lets the tool
-  run on the host).
+  run on the host). The vmexec environment is spelled and parsed only in
+  `core/protocol/vmexec_env.go` (`SandboxFromEnv`, `HostConfineFromEnv`,
+  `PassthroughFromEnv`; `TestVMExecEnvNamesOnlyInProtocol`); a confine list
+  in the environment is honored even when the workspace comes by flag. The
+  CLIs vmexec knows are one table (`harnesses` in confine.go: layout,
+  plugin sources, hook dialect); a sandboxed run's cwd is mapped by
+  `runner.guestCwd`, and a host command string runs in `hostShell`
+  (`$SHELL`, else `/bin/sh`).
 - **A claimed job runs one pipeline of named stages**
   (`services/bridge/drive.go`): admit, resolve content, snapshot
   capabilities, plan execution, authorize, bind target, drive, settle.
