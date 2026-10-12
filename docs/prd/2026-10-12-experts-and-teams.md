@@ -1,6 +1,6 @@
 # Content components: experts, skill packs, prompt packs; room tools and expert teams
 
-Status: design, approved for planning (2026-10-12). Feasibility verified in
+Status: approved, in development (2026-10-12). Feasibility verified in
 code and by experiments (see "Evidence").
 
 ## Why
@@ -218,9 +218,9 @@ prompts/
   - "share with org" is the org scope;
   - org-admin moderation is the scope's approval and removal.
   - The separate prompts store, routes and moderation path are removed. This
-    is a clean cutover, not a second library beside packs. **Open
-    decision:** convert existing saved prompts into each author's personal
-    pack in the cutover migration, or start empty (pre-release default).
+    is a clean cutover, not a second library beside packs. **Decided
+    (2026-10-12): start empty.** The `prompts` table is dropped, with no
+    conversion (pre-release, no real usage to keep).
 - **Usage counts:** carried over (`use_count` becomes per-prompt usage in
   the pack).
 
@@ -341,9 +341,8 @@ restarts.
   in the answers, and the expert's MCP tool is called.
 - **Skill pack at room level.** A room-enabled skill pack is used by two
   different agents in the room.
-- **Prompt pack.** A slash command with a variable fills and sends. Existing
-  saved prompts appear as the member's personal pack, or not, per the open
-  decision.
+- **Prompt pack.** A slash command with a variable fills and sends. The old
+  prompt library and its table are gone.
 - **Dispatch.** A dispatch to a teammate's agent is refused without a grant
   and charged with one; the depth and fan-out limits hold.
 - **Team.** A team of three experts on two vendors completes a task end to
