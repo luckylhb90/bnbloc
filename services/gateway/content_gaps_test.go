@@ -76,7 +76,7 @@ func (g *sharingGateway) promotePlatform(form map[string]any) string {
 	pub, priv, _ := ed25519.GenerateKey(rand.Reader)
 	trusted, _ := json.Marshal([]pkgmeta.TrustedKey{{KeyID: "0102030405060708", PublicKey: minisignTestPublicKey("0102030405060708", pub)}})
 	_ = g.svc.PlatformSettings.PutPlatformSetting(context.Background(), store.PlatformSetting{Key: componentTrustedKeysKey, Value: string(trusted)})
-	code, raw := g.json("sam", http.MethodPost, "/v1/platform/components", componentInstallRequest{Package: string(body), Signature: signPackage(priv, body)})
+	code, raw := g.json("sam", http.MethodPost, "/v1/platform/components", wire.ComponentInstallRequest{Package: string(body), Signature: signPackage(priv, body)})
 	if code != http.StatusOK {
 		g.t.Fatalf("install = %d %s", code, raw)
 	}

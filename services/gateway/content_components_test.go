@@ -154,7 +154,7 @@ func TestContentCreateListReadDownload(t *testing.T) {
 	}
 	_, raw = g.do("maya", http.MethodGet, "/v1/components", "", nil)
 	var catalog struct {
-		Components        []componentInfo
+		Components        []wire.MemberComponent
 		ContentComponents []wire.ContentComponent
 	}
 	_ = json.Unmarshal(raw, &catalog)

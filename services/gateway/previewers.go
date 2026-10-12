@@ -9,17 +9,16 @@ import (
 	"strings"
 	"time"
 
-	"github.com/luckylhb90/bnbloc/internal/httpx"
-	"github.com/luckylhb90/bnbloc/internal/wire"
-
 	"github.com/luckylhb90/bnbloc/core"
 	"github.com/luckylhb90/bnbloc/core/pkgmeta"
 	"github.com/luckylhb90/bnbloc/internal/auth"
 	"github.com/luckylhb90/bnbloc/internal/extpipe"
 	"github.com/luckylhb90/bnbloc/internal/extreg"
+	"github.com/luckylhb90/bnbloc/internal/httpx"
 	"github.com/luckylhb90/bnbloc/internal/obs"
 	"github.com/luckylhb90/bnbloc/internal/previewerruntime"
 	"github.com/luckylhb90/bnbloc/internal/tarbundle"
+	"github.com/luckylhb90/bnbloc/internal/wire"
 )
 
 // Previewer components (bnbloc.previewer.package/v1) in the gateway: the
@@ -30,20 +29,6 @@ import (
 // previewerFrameTTL bounds a frame ticket: the catalog mints a fresh one on
 // every read, and the web host re-reads the catalog before it expires.
 const previewerFrameTTL = time.Hour
-
-// previewerCatalogInfo is the member-catalog block of an installed previewer
-// (componentInfo.Previewer).
-type previewerCatalogInfo struct {
-	pkgmeta.Previewer
-	// BundleURL is the gateway artifact URL of the archive (the desktop
-	// downloads it and checks BundleSHA256).
-	BundleURL    string `json:"bundleUrl"`
-	BundleSHA256 string `json:"bundleSha256"`
-	// FrameURL is the gateway-relative browser frame base (ticket included);
-	// the host appends Entry.
-	FrameURL         string `json:"frameUrl"`
-	FrameExpiresAtMs int64  `json:"frameExpiresAtMs"`
-}
 
 func (s *Service) previewerInstaller() extpipe.KindInstaller {
 	return previewerruntime.Installer(s.probePreviewerBundle)
@@ -66,7 +51,7 @@ func (s *Service) probePreviewerBundle(ctx context.Context, _ extpipe.Record, cf
 
 // previewerCatalog builds an installed previewer's catalog block, minting a
 // frame ticket bound to the caller and this exact version.
-func (s *Service) previewerCatalog(claims auth.Claims, rec extpipe.Record, cfg extpipe.PackageConfig) *previewerCatalogInfo {
+func (s *Service) previewerCatalog(claims auth.Claims, rec extpipe.Record, cfg extpipe.PackageConfig) *wire.MemberComponentPreviewer {
 	art, ok := previewerruntime.Bundle(cfg)
 	if !ok {
 		return nil
@@ -80,12 +65,12 @@ func (s *Service) previewerCatalog(claims auth.Claims, rec extpipe.Record, cfg e
 		Kind:          auth.KindPreviewerFrame,
 		ID:            previewerTicketScope(rec.Name, rec.Version),
 	})
-	return &previewerCatalogInfo{
-		Previewer:        *cfg.Previewer,
-		BundleURL:        art.URL,
-		BundleSHA256:     art.SHA256,
-		FrameURL:         previewerFrameBase(rec.Name, rec.Version) + url.PathEscape(ticket) + "/",
-		FrameExpiresAtMs: expires.UnixMilli(),
+	return &wire.MemberComponentPreviewer{
+		ComponentPreviewer: *cfg.Previewer,
+		BundleURL:          art.URL,
+		BundleSHA256:       art.SHA256,
+		FrameURL:           previewerFrameBase(rec.Name, rec.Version) + url.PathEscape(ticket) + "/",
+		FrameExpiresAtMs:   expires.UnixMilli(),
 	}
 }
 

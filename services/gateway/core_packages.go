@@ -54,7 +54,7 @@ func (s *Service) handleCoreArtifact(w http.ResponseWriter, r *http.Request, cla
 		httpx.Error(w, "load components failed", http.StatusInternalServerError)
 		return
 	}
-	switch p.Runtime {
+	switch pkgmeta.Runtime(p.Runtime) {
 	case pkgmeta.RuntimeManifest:
 		httpx.WriteJSON(w, http.StatusOK, map[string]any{"version": p.Version, "manifest": p.Manifest})
 	case pkgmeta.RuntimeSidecar:

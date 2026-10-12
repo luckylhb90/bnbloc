@@ -57,7 +57,7 @@ func TestAuthProviderPackageInstall_persistsGatewayContract(t *testing.T) {
 		if component.Name != name {
 			continue
 		}
-		if component.Kind != string(extreg.KindAuthProvider) || component.Runtime != pkgmeta.RuntimeEndpoint || component.Contract != pkgmeta.AuthProviderContractV1 {
+		if component.Kind != string(extreg.KindAuthProvider) || component.Runtime != string(pkgmeta.RuntimeEndpoint) || component.Contract != pkgmeta.AuthProviderContractV1 {
 			t.Fatalf("component kind/runtime/contract = %s/%s/%s, want auth-provider/endpoint/%s", component.Kind, component.Runtime, component.Contract, pkgmeta.AuthProviderContractV1)
 		}
 		if component.Trust.KeyID == "" || !component.Trust.Signed {

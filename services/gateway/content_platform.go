@@ -127,7 +127,7 @@ type contentInstallReply struct {
 // store, validated again and must be the version the package names; the
 // platform row is created or moved forward to it. Rollout off installs it
 // unpublished; content has no opt-in rollout.
-func (s *Service) installPlatformContent(w http.ResponseWriter, r *http.Request, claims auth.Claims, req componentInstallRequest) {
+func (s *Service) installPlatformContent(w http.ResponseWriter, r *http.Request, claims auth.Claims, req wire.ComponentInstallRequest) {
 	ctx := r.Context()
 	if s.ContentComponents == nil {
 		obs.ServerError(w, "content components unavailable", nil)

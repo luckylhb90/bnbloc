@@ -1,4 +1,5 @@
-import type { ComponentMCP, ComponentPackageEnvelope, ComponentPackageKind, ComponentRuntime, LocalSettingField } from "./apiTypes";
+import type { ComponentMCP, ComponentPackageEnvelope, ComponentRuntime, ComponentLocalSetting } from "./apiTypes";
+import type { ComponentPackageKind } from "./componentKinds";
 import { COMPONENT_KINDS, componentKindOfPackage } from "./componentKinds.ts";
 
 export type PublishWizardStep = "source" | "configure" | "artifacts" | "publish";
@@ -24,7 +25,7 @@ export interface PackageDraftFields {
   readonly contract?: string;
   readonly hooks?: readonly string[];
   readonly host?: readonly string[];
-  readonly localSettings?: readonly LocalSettingField[];
+  readonly localSettings?: readonly ComponentLocalSetting[];
   // An MCP tool's block, carried unchanged from the imported package.
   readonly mcp?: ComponentMCP;
 }

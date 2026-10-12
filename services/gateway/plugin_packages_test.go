@@ -63,7 +63,7 @@ func TestPluginPackageInstall_persistsPluginWithoutGatewayActivation(t *testing.
 		if component.Name != "room-auditor" {
 			continue
 		}
-		if component.Kind != string(pkgmeta.KindPlugin) || component.Runtime != pkgmeta.RuntimeSidecar {
+		if component.Kind != string(pkgmeta.KindPlugin) || component.Runtime != string(pkgmeta.RuntimeSidecar) {
 			t.Fatalf("component kind/runtime = %s/%s, want plugin/sidecar", component.Kind, component.Runtime)
 		}
 		if len(component.Hooks) != 2 || component.Hooks[0] != "chat_message.v1" || component.Hooks[1] != "agent_messages.v1" {

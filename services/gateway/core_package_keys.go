@@ -13,19 +13,8 @@ import (
 	"github.com/luckylhb90/bnbloc/internal/httpx"
 	"github.com/luckylhb90/bnbloc/internal/obs"
 	"github.com/luckylhb90/bnbloc/internal/store"
+	"github.com/luckylhb90/bnbloc/internal/wire"
 )
-
-type trustedKeyView struct {
-	KeyID     string `json:"keyId"`
-	PublicKey string `json:"publicKey"`
-	Label     string `json:"label,omitempty"`
-	AddedAtMs int64  `json:"addedAtMs,omitempty"`
-	AddedBy   string `json:"addedBy,omitempty"`
-}
-
-type trustedKeyRecord struct {
-	trustedKeyView
-}
 
 func (s *Service) handleListComponentTrustedKeys(w http.ResponseWriter, r *http.Request, _ auth.Claims) {
 	keys, err := loadTrustedKeyRecords(r.Context(), s.PlatformSettings)
@@ -37,7 +26,7 @@ func (s *Service) handleListComponentTrustedKeys(w http.ResponseWriter, r *http.
 	// signatureRequired tells the publishing UI whether this gateway
 	// refuses unsigned packages, so it demands a signature exactly when
 	// the install would (the runtime decision, not a client guess).
-	httpx.WriteJSON(w, http.StatusOK, map[string]any{"keys": keys, "signatureRequired": !s.AllowExtUnsigned})
+	httpx.WriteJSON(w, http.StatusOK, wire.ComponentKeysReply{Keys: keys, SignatureRequired: !s.AllowExtUnsigned})
 }
 
 func (s *Service) handleAddComponentTrustedKey(w http.ResponseWriter, r *http.Request, claims auth.Claims) {
@@ -68,19 +57,19 @@ func (s *Service) handleAddComponentTrustedKey(w http.ResponseWriter, r *http.Re
 			return
 		}
 	}
-	record := trustedKeyRecord{trustedKeyView{
+	record := wire.ComponentKey{
 		KeyID:     keyID,
 		PublicKey: strings.TrimSpace(body.PublicKey),
 		Label:     strings.TrimSpace(body.Label),
 		AddedAtMs: time.Now().UnixMilli(),
 		AddedBy:   actor,
-	}}
+	}
 	if err := saveTrustedKeyRecords(r.Context(), s.PlatformSettings, append(existing, record), actor); err != nil {
 		obs.ServerError(w, "save trusted keys failed", err)
 		httpx.Error(w, "save trusted keys failed", http.StatusInternalServerError)
 		return
 	}
-	httpx.WriteJSON(w, http.StatusOK, record.trustedKeyView)
+	httpx.WriteJSON(w, http.StatusOK, record)
 }
 
 func (s *Service) handleDeleteComponentTrustedKey(w http.ResponseWriter, r *http.Request, claims auth.Claims) {
@@ -91,7 +80,7 @@ func (s *Service) handleDeleteComponentTrustedKey(w http.ResponseWriter, r *http
 		httpx.Error(w, "load trusted keys failed", http.StatusInternalServerError)
 		return
 	}
-	kept := make([]trustedKeyRecord, 0, len(existing))
+	kept := make([]wire.ComponentKey, 0, len(existing))
 	found := false
 	for _, k := range existing {
 		if strings.EqualFold(k.KeyID, keyID) {
@@ -114,22 +103,22 @@ func (s *Service) handleDeleteComponentTrustedKey(w http.ResponseWriter, r *http
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func loadTrustedKeyRecords(ctx context.Context, settings store.PlatformSettingsStore) ([]trustedKeyRecord, error) {
+func loadTrustedKeyRecords(ctx context.Context, settings store.PlatformSettingsStore) ([]wire.ComponentKey, error) {
 	if settings == nil {
 		return nil, fmt.Errorf("platform settings store not configured")
 	}
 	setting, ok, err := settings.GetPlatformSetting(ctx, componentTrustedKeysKey)
 	if err != nil || !ok || strings.TrimSpace(setting.Value) == "" {
-		return []trustedKeyRecord{}, err
+		return []wire.ComponentKey{}, err
 	}
-	var keys []trustedKeyRecord
+	var keys []wire.ComponentKey
 	if err := json.Unmarshal([]byte(setting.Value), &keys); err != nil {
 		return nil, err
 	}
 	return keys, nil
 }
 
-func saveTrustedKeyRecords(ctx context.Context, settings store.PlatformSettingsStore, keys []trustedKeyRecord, actor string) error {
+func saveTrustedKeyRecords(ctx context.Context, settings store.PlatformSettingsStore, keys []wire.ComponentKey, actor string) error {
 	if settings == nil {
 		return fmt.Errorf("platform settings store not configured")
 	}

@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/luckylhb90/bnbloc/core"
+	"github.com/luckylhb90/bnbloc/core/manifestcore"
 	"github.com/luckylhb90/bnbloc/core/pkgmeta"
 	"github.com/luckylhb90/bnbloc/core/protocol"
 	"github.com/luckylhb90/bnbloc/internal/extreg"
@@ -238,7 +239,7 @@ func TestSidecarPackageRehydratesFromStore(t *testing.T) {
 		if pkg.Sidecar == nil || pkg.Sidecar.LocalURL != "http://127.0.0.1:7099" || pkg.Sidecar.ListenEnv != "BNBLOC_TEST_SIDECAR_LISTEN" {
 			t.Fatalf("rehydrated sidecar launch contract lost: %+v", pkg.Sidecar)
 		}
-		if pkg.Manifest == nil || pkg.Manifest.Name != name {
+		if m, ok := pkg.Manifest.(*manifestcore.Manifest); !ok || m.Name != name {
 			t.Fatalf("rehydrated sidecar manifest lost: %+v", pkg.Manifest)
 		}
 		return

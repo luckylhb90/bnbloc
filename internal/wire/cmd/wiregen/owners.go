@@ -19,7 +19,9 @@ import (
 // enumSource is a named string type owned outside internal/wire whose
 // constants the web needs as a union. A wire field names it with
 // `tstype:"<TS>"`; the values are read from the owner's source, so a new
-// constant there reaches the web on the next generation.
+// constant there reaches the web on the next generation. An owner whose
+// constants are untyped names them by a common prefix instead
+// (goType "const <Prefix>").
 type enumSource struct {
 	dir    string // package directory, relative to the module root
 	goType string
@@ -35,6 +37,8 @@ var enumSources = []enumSource{
 	{"internal/store", "SyncMode", "RoomSyncMode", "How a room's members converge their code (store.SyncMode)."},
 	{"internal/rbac", "Role", "OrgRole", "An organization role as the session carries it (rbac.Role)."},
 	{"internal/rbac", "Permission", "OrgPermission", "A coarse organization permission (rbac.Permission)."},
+	{"core/pkgmeta", "Runtime", "ComponentRuntime", "How a component package runs (pkgmeta.Runtime)."},
+	{"internal/extpipe", "const Rollout", "ComponentRollout", "Who gets an installed component (extpipe.Rollout*)."},
 }
 
 type enum struct {
@@ -88,8 +92,10 @@ func externalEnums(root string) (enums, error) {
 }
 
 // typedConsts lists the string values of the constants declared with type
-// goType in the package's (non-test) source, in source order.
+// goType (or, for "const <Prefix>", the untyped constants named <Prefix>…)
+// in the package's (non-test) source, in source order.
 func typedConsts(dir, goType string) ([]string, error) {
+	prefix, untyped := strings.CutPrefix(goType, "const ")
 	paths, err := filepath.Glob(filepath.Join(dir, "*.go"))
 	if err != nil {
 		return nil, err
@@ -112,11 +118,17 @@ func typedConsts(dir, goType string) ([]string, error) {
 			}
 			for _, spec := range gd.Specs {
 				vs := spec.(*ast.ValueSpec)
-				id, ok := vs.Type.(*ast.Ident)
-				if !ok || id.Name != goType {
+				if untyped {
+					if vs.Type != nil || len(vs.Names) != len(vs.Values) {
+						continue
+					}
+				} else if id, ok := vs.Type.(*ast.Ident); !ok || id.Name != goType {
 					continue
 				}
-				for _, v := range vs.Values {
+				for i, v := range vs.Values {
+					if untyped && !strings.HasPrefix(vs.Names[i].Name, prefix) {
+						continue
+					}
 					lit, ok := v.(*ast.BasicLit)
 					if !ok || lit.Kind != token.STRING {
 						return nil, fmt.Errorf("%s: a %s constant must be a string literal", fset.Position(v.Pos()), goType)

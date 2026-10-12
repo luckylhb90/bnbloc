@@ -14,6 +14,7 @@ import (
 	"github.com/luckylhb90/bnbloc/core/pkgmeta"
 	"github.com/luckylhb90/bnbloc/core/protocol"
 	"github.com/luckylhb90/bnbloc/internal/httpx"
+	"github.com/luckylhb90/bnbloc/internal/wire"
 )
 
 func postComponent(t *testing.T, baseURL, token string, body []byte, signature string) ([]byte, int) {
@@ -23,7 +24,7 @@ func postComponent(t *testing.T, baseURL, token string, body []byte, signature s
 
 func postComponentWithRollout(t *testing.T, baseURL, token string, body []byte, signature string, rollout string) ([]byte, int) {
 	t.Helper()
-	request := componentInstallRequest{Package: string(body), Signature: signature, Rollout: rollout}
+	request := wire.ComponentInstallRequest{Package: string(body), Signature: signature, Rollout: rollout}
 	requestBody, _ := json.Marshal(request)
 	req, _ := http.NewRequest(http.MethodPost, baseURL+"/v1/platform/components", bytes.NewReader(requestBody))
 	req.Header.Set("Authorization", "Bearer "+token)
@@ -36,7 +37,7 @@ func postComponentWithRollout(t *testing.T, baseURL, token string, body []byte, 
 	return raw, resp.StatusCode
 }
 
-func listComponentsForAdmin(t *testing.T, baseURL, token string) []installedComponent {
+func listComponentsForAdmin(t *testing.T, baseURL, token string) []wire.PlatformComponent {
 	t.Helper()
 	req, _ := http.NewRequest(http.MethodGet, baseURL+"/v1/platform/components", nil)
 	req.Header.Set("Authorization", "Bearer "+token)
@@ -46,7 +47,7 @@ func listComponentsForAdmin(t *testing.T, baseURL, token string) []installedComp
 	}
 	defer resp.Body.Close()
 	var out struct {
-		Components []installedComponent `json:"components"`
+		Components []wire.PlatformComponent `json:"components"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
 		t.Fatalf("decode components: %v", err)

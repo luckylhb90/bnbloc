@@ -69,7 +69,7 @@ func TestNotifierComponentLifecycle(t *testing.T) {
 	body := notifierPackageBody(t, "corp", receiver.URL+"/notifier")
 
 	raw, status := postComponent(t, srv.URL, token, body, signPackage(key.private, body))
-	var installed componentInstallResponse
+	var installed wire.PublishedComponent
 	_ = json.Unmarshal(raw, &installed)
 	if status != http.StatusOK || installed.Kind != "notifier" || !strings.HasPrefix(installed.Secret, "whsec_") {
 		t.Fatalf("install = %d %s", status, raw)
@@ -81,7 +81,7 @@ func TestNotifierComponentLifecycle(t *testing.T) {
 	}
 	// Reinstalling (upgrade) keeps the secret and does not show it again.
 	raw, status = postComponent(t, srv.URL, token, body, signPackage(key.private, body))
-	var again componentInstallResponse
+	var again wire.PublishedComponent
 	_ = json.Unmarshal(raw, &again)
 	if status != http.StatusOK || again.Secret != "" {
 		t.Fatalf("reinstall = %d %s", status, raw)

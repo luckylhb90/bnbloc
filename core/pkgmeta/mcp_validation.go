@@ -52,61 +52,6 @@ const (
 	MCPAuthOAuth = "oauth"
 )
 
-// MCP is an MCP component's payload (Package.MCP).
-type MCP struct {
-	// Tools are the tools the server offers, for display (the server's own
-	// tools/list stays authoritative at run time).
-	Tools []MCPTool `json:"tools"`
-	// Env are the variables the server needs; values never ship in a
-	// package (Credentials says where they come from).
-	Env []MCPEnv `json:"env,omitempty"`
-	// Credentials is member or org; required exactly when Env is declared.
-	Credentials string    `json:"credentials,omitempty"`
-	Stdio       *MCPStdio `json:"stdio,omitempty"`
-	HTTP        *MCPHTTP  `json:"http,omitempty"`
-}
-
-// MCPTool is one tool of the server.
-type MCPTool struct {
-	Name        string `json:"name"`
-	Description string `json:"description,omitempty"`
-}
-
-// MCPEnv is one variable an MCP server needs.
-type MCPEnv struct {
-	Name        string `json:"name"`
-	Description string `json:"description,omitempty"`
-	Secret      bool   `json:"secret,omitempty"`
-	Required    bool   `json:"required,omitempty"`
-}
-
-// MCPStdio is how a stdio server is started: the materialized binary with
-// these arguments (env values arrive as its process environment).
-type MCPStdio struct {
-	Args []string `json:"args,omitempty"`
-}
-
-// MCPHTTP is how an endpoint server is called.
-type MCPHTTP struct {
-	Auth MCPHTTPAuth `json:"auth"`
-}
-
-// MCPHTTPAuth is the header an endpoint server expects: none, a bearer token
-// (Authorization: Bearer <Env>), a named header (<Header>: <Env>), or a
-// member's OAuth sign-in (Authorization: Bearer <their access token>).
-type MCPHTTPAuth struct {
-	Scheme string `json:"scheme"`
-	Header string `json:"header,omitempty"`
-	Env    string `json:"env,omitempty"`
-	// ClientID (oauth, optional) is a client the publisher registered with
-	// the server's authorization server; without it the desktop registers
-	// itself where the authorization server allows it.
-	ClientID string `json:"clientId,omitempty"`
-	// Scopes (oauth, optional) are requested when the server's challenge
-	// names none.
-	Scopes []string `json:"scopes,omitempty"`
-}
-
 // MCP bounds: a display catalog, not the server's schema.
 const (
 	maxMCPTools        = 64

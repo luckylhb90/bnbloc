@@ -28,33 +28,6 @@ const RuntimeBundle Runtime = "bundle"
 // PreviewerBundleArtifact is the one artifact key of a previewer package.
 const PreviewerBundleArtifact = "bundle"
 
-// Previewer is a previewer package's payload (Package.Previewer).
-type Previewer struct {
-	// Entry is the bundle-relative HTML document the frame loads.
-	Entry string         `json:"entry"`
-	Match PreviewerMatch `json:"match"`
-	// Rank orders previewers matching a file with equal specificity, like
-	// the web registry's built-ins (lower first).
-	Rank         int                    `json:"rank"`
-	Capabilities []string               `json:"capabilities,omitempty"`
-	Toolbar      []PreviewerToolbarItem `json:"toolbar,omitempty"`
-}
-
-// PreviewerMatch declares the files a previewer renders.
-type PreviewerMatch struct {
-	MimeTypes  []string `json:"mimeTypes,omitempty"`
-	Extensions []string `json:"extensions,omitempty"`
-}
-
-// PreviewerToolbarItem is one declared toolbar control; the host renders it
-// with its own icon for Icon (a code-owned name).
-type PreviewerToolbarItem struct {
-	ID    string `json:"id"`
-	Icon  string `json:"icon"`
-	Label string `json:"label"`
-	Kind  string `json:"kind"`
-}
-
 // The code-owned previewer vocabularies. They mirror the frame protocol in
 // web/previewer-sdk/src/protocol.ts (PREVIEWER_CAPABILITIES, TOOLBAR_KINDS,
 // TOOLBAR_ICONS); TestPreviewerVocabulariesMatchFrameProtocol keeps them equal.

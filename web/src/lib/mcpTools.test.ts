@@ -46,8 +46,8 @@ test("an OAuth tool is signed in to, not configured", () => {
 
 test("credentials: none, org and member", () => {
   equal(credentialStatus(tool({ tools: [{ name: "t" }], transport: "http" })).state, "ready");
-  equal(credentialStatus(tool({ tools: [], env: [{ name: "T", required: true }], credentials: "org", orgConfigured: true })).state, "ready");
-  equal(credentialStatus(tool({ tools: [], env: [{ name: "T", required: true }], credentials: "org", orgConfigured: false })).state, "missing");
+  equal(credentialStatus(tool({ tools: [], env: [{ name: "T", required: true }], credentials: "org", transport: "stdio", orgConfigured: true })).state, "ready");
+  equal(credentialStatus(tool({ tools: [], env: [{ name: "T", required: true }], credentials: "org", transport: "stdio", orgConfigured: false })).state, "missing");
   // In a browser the member's own credentials live on their desktop.
   equal(credentialStatus(member).state, "elsewhere");
   equal(credentialStatus(member, local(true)).state, "ready");

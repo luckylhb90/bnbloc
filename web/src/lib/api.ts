@@ -61,10 +61,11 @@ import type {
 import type {
   ComponentInstallRequest,
   ComponentKey,
-  ComponentKind,
+  ComponentKeysReply,
   ComponentRollout,
-  MemberComponent,
-  PlatformComponent,
+  ComponentRolloutRequest,
+  ComponentsReply,
+  PlatformComponentsReply,
   PublishedComponent,
 } from "./apiTypes";
 import type { NotificationTestResult } from "./notificationPrefs.ts";
@@ -74,10 +75,10 @@ import { roomPath } from "./roomId.ts";
 // Thin fetch wrapper around the gateway /v1 + /api surface. Injects the session
 // bearer token and centralizes error shaping so views get typed helpers.
 
+export type { ComponentKind } from "./componentKinds";
 export type {
   ComponentInstallRequest,
   ComponentKey,
-  ComponentKind,
   ComponentPackageEnvelope,
   ComponentRollout,
   ComponentValidationStep,
@@ -148,7 +149,7 @@ async function fetchArtifactBlob(path: string): Promise<Blob> {
 
 // A component is addressed by name AND kind: a core and a plugin may share a
 // name, and an unqualified name that matches two kinds is a 409.
-type ComponentRef = { readonly name: string; readonly kind: ComponentKind };
+type ComponentRef = { readonly name: string; readonly kind: string };
 function componentPath(base: string, c: ComponentRef, suffix = ""): string {
   return `${base}/${encodeURIComponent(c.name)}${suffix}?kind=${encodeURIComponent(c.kind)}`;
 }
@@ -206,7 +207,7 @@ export const api = {
       method: "PUT",
       body: JSON.stringify(body),
     }),
-  listPlatformComponents: () => req<{ components: PlatformComponent[] }>("/v1/platform/components"),
+  listPlatformComponents: () => req<PlatformComponentsReply>("/v1/platform/components"),
   publishComponent: (body: ComponentInstallRequest) =>
     req<PublishedComponent>("/v1/platform/components", {
       method: "POST",
@@ -218,7 +219,7 @@ export const api = {
   setComponentRollout: (component: ComponentRef, rollout: ComponentRollout) =>
     req<void>(componentPath("/v1/platform/components", component, "/rollout"), {
       method: "PUT",
-      body: JSON.stringify({ rollout }),
+      body: JSON.stringify({ rollout } satisfies ComponentRolloutRequest),
       as: "none",
     }),
   uninstallPlatformComponent: (component: ComponentRef) =>
@@ -231,12 +232,12 @@ export const api = {
     req<NotificationTestResult>(componentPath("/v1/platform/components", component, "/test"), { method: "POST" }),
   // signatureRequired mirrors the gateway's install policy (false only on a dev
   // gateway with BNBLOC_EXT_ALLOW_UNSIGNED); absent is treated as required.
-  listComponentKeys: () => req<{ keys: ComponentKey[]; signatureRequired?: boolean }>("/v1/platform/component-keys"),
+  listComponentKeys: () => req<ComponentKeysReply>("/v1/platform/component-keys"),
   addComponentKey: (body: { readonly publicKey: string; readonly label?: string }) =>
     req<ComponentKey>("/v1/platform/component-keys", { method: "POST", body: JSON.stringify(body) }),
   removeComponentKey: (keyId: string) =>
     req<void>(`/v1/platform/component-keys/${encodeURIComponent(keyId)}`, { method: "DELETE", as: "none" }),
-  components: () => req<{ components: MemberComponent[] }>("/v1/components"),
+  components: () => req<ComponentsReply>("/v1/components"),
   installComponent: (component: ComponentRef) =>
     req<void>(componentPath("/v1/components", component, "/install"), { method: "POST", as: "none" }),
   uninstallComponent: (component: ComponentRef) =>

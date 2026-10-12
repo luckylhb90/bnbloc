@@ -3,7 +3,21 @@
 // to compile until it has its label and package kind. The review panel, the
 // package builder, the component cards and the package reader all read it
 // (three hand-written label chains called a sandbox an "Auth provider").
-import type { ComponentKind, ComponentPackageKind, ComponentRuntime } from "./apiTypes";
+import type { ComponentRuntime } from "./wire.gen.ts";
+
+// The executable component kinds the console publishes and lists, and the
+// package kind each one's file declares. The server keeps a component's kind
+// as a plain string (extreg.Kind); these are the kinds the web knows how to
+// present.
+export type ComponentKind = "core" | "plugin" | "auth-provider" | "notifier" | "sandbox" | "previewer" | "mcp";
+export type ComponentPackageKind =
+  | "bnbloc.core.package/v1"
+  | "bnbloc.plugin.package/v1"
+  | "bnbloc.auth-provider.package/v1"
+  | "bnbloc.notifier.package/v1"
+  | "bnbloc.sandbox.package/v1"
+  | "bnbloc.previewer.package/v1"
+  | "bnbloc.mcp.package/v1";
 
 export interface ComponentKindMeta {
   readonly label: string;

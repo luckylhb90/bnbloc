@@ -155,8 +155,8 @@ function readSidecar(value: unknown): { readonly ok: true; readonly value?: Comp
       ...(typeof value["supervisedEnv"] === "string" ? { supervisedEnv: value["supervisedEnv"] } : {}),
       ...(typeof value["tokenEnv"] === "string" ? { tokenEnv: value["tokenEnv"] } : {}),
       ...(typeof value["dataDirEnv"] === "string" ? { dataDirEnv: value["dataDirEnv"] } : {}),
-      ...(args.value ? { args: args.value } : {}),
-      ...(files.value ? { files: files.value } : {}),
+      ...(args.value ? { args: [...args.value] } : {}),
+      ...(files.value ? { files: [...files.value] } : {}),
     },
   };
 }
@@ -179,7 +179,7 @@ function readPermissions(value: unknown): { readonly ok: true; readonly value?: 
   if (!network.ok) return network;
   const host = readStringList(value["host"], "permissions.host");
   if (!host.ok) return host;
-  return { ok: true, value: { ...(network.value ? { network: network.value } : {}), ...(host.value ? { host: host.value } : {}) } };
+  return { ok: true, value: { ...(network.value ? { network: [...network.value] } : {}), ...(host.value ? { host: [...host.value] } : {}) } };
 }
 
 function readLocalSettings(value: unknown): { readonly ok: true; readonly value?: ComponentPackageEnvelope["localSettings"] } | { readonly ok: false; readonly error: string } {
@@ -230,8 +230,8 @@ function readPreviewer(value: unknown): { readonly ok: true; readonly value?: Co
     value: {
       entry: value["entry"],
       rank: value["rank"],
-      match: { ...(mimeTypes.value ? { mimeTypes: mimeTypes.value } : {}), ...(extensions.value ? { extensions: extensions.value } : {}) },
-      ...(capabilities.value ? { capabilities: capabilities.value } : {}),
+      match: { ...(mimeTypes.value ? { mimeTypes: [...mimeTypes.value] } : {}), ...(extensions.value ? { extensions: [...extensions.value] } : {}) },
+      ...(capabilities.value ? { capabilities: [...capabilities.value] } : {}),
       ...(Array.isArray(toolbar) ? { toolbar: toolbar as ComponentPreviewer["toolbar"] } : {}),
     },
   };

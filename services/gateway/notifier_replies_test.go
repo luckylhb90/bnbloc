@@ -88,7 +88,7 @@ func newReplyFixture(t *testing.T) *replyFixture {
 	svc, srv, admin, key := signedPackageGatewayWithArtifactStore(t, true, false)
 	body := notifierPackageBody(t, "corp", receiver.URL+"/notifier")
 	raw, status := postComponent(t, srv.URL, admin, body, signPackage(key.private, body))
-	var installed componentInstallResponse
+	var installed wire.PublishedComponent
 	_ = json.Unmarshal(raw, &installed)
 	if status != http.StatusOK || installed.Secret == "" {
 		t.Fatalf("install = %d %s", status, raw)

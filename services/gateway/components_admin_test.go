@@ -13,6 +13,7 @@ import (
 	"github.com/luckylhb90/bnbloc/core/pkgmeta"
 	"github.com/luckylhb90/bnbloc/internal/extpipe"
 	"github.com/luckylhb90/bnbloc/internal/store"
+	"github.com/luckylhb90/bnbloc/internal/wire"
 )
 
 type failingComponentInstallStore struct{}
@@ -116,7 +117,7 @@ func TestComponentsPublishPersistsRequestedRollout(t *testing.T) {
 			if status != http.StatusOK {
 				t.Fatalf("publish status=%d body=%s, want 200", status, raw)
 			}
-			var published installedComponent
+			var published wire.PlatformComponent
 			if err := json.Unmarshal(raw, &published); err != nil {
 				t.Fatalf("decode published component: %v", err)
 			}
@@ -229,7 +230,7 @@ func TestComponentsAdminList_includesPluginFacts_withoutCoreDecode(t *testing.T)
 		t.Fatalf("status=%d body=%s, want 200", resp.StatusCode, raw)
 	}
 	var out struct {
-		Components []installedComponent `json:"components"`
+		Components []wire.PlatformComponent `json:"components"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
 		t.Fatalf("decode components: %v", err)
@@ -238,7 +239,7 @@ func TestComponentsAdminList_includesPluginFacts_withoutCoreDecode(t *testing.T)
 		if component.Name != "audit-plugin" {
 			continue
 		}
-		if component.Kind != "plugin" || component.Runtime != pkgmeta.RuntimeSidecar {
+		if component.Kind != "plugin" || component.Runtime != string(pkgmeta.RuntimeSidecar) {
 			t.Fatalf("component kind/runtime = %s/%s, want plugin/sidecar", component.Kind, component.Runtime)
 		}
 		if len(component.Hooks) != 1 || component.Hooks[0] != "chat_message.v1" {

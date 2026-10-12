@@ -1,4 +1,5 @@
-import type { ComponentMCP, ComponentPackageEnvelope, ComponentPackageKind, ComponentRuntime, LocalSettingField } from "./apiTypes";
+import type { ComponentMCP, ComponentPackageEnvelope, ComponentRuntime, ComponentLocalSetting } from "./apiTypes";
+import type { ComponentPackageKind } from "./componentKinds";
 import type { ArtifactRequirement } from "./componentArtifactRequirements";
 
 export type ComponentPackageDraft = {
@@ -23,7 +24,7 @@ export type ComponentPackageDraft = {
   // Plugin-only, carried unchanged from an imported package: the desktop
   // host API capabilities and the desktop-local settings schema.
   readonly host?: readonly string[];
-  readonly localSettings?: readonly LocalSettingField[];
+  readonly localSettings?: readonly ComponentLocalSetting[];
   // MCP-only, carried unchanged from an imported package: its tools, env,
   // credentials source and stdio args or http auth.
   readonly mcp?: ComponentMCP;
@@ -87,7 +88,7 @@ export function buildComponentPackage(draft: ComponentPackageDraft): ComponentPa
     const localUrl = draft.localUrl?.trim() ?? "";
     if (!localUrl) return failure("Sidecar runtime requires a loopback local URL.");
     if (!draft.platformArtifacts?.length) return failure("Select at least one platform binary.");
-    sidecar = { localUrl, ...(draft.listenEnv?.trim() ? { listenEnv: draft.listenEnv.trim() } : {}), ...(draft.supervisedEnv?.trim() ? { supervisedEnv: draft.supervisedEnv.trim() } : {}), ...(draft.args?.length ? { args: draft.args } : {}) };
+    sidecar = { localUrl, ...(draft.listenEnv?.trim() ? { listenEnv: draft.listenEnv.trim() } : {}), ...(draft.supervisedEnv?.trim() ? { supervisedEnv: draft.supervisedEnv.trim() } : {}), ...(draft.args?.length ? { args: [...draft.args] } : {}) };
     artifacts = Object.fromEntries([...new Set(draft.platformArtifacts)].map((platform) => [platform, { url: "", sha256: "" }]));
     artifactRequirements = Object.keys(artifacts).sort((a, b) => a.localeCompare(b)).map((platform) => ({ platform }));
     if (draft.kind === "bnbloc.core.package/v1" && draft.manifestText?.trim()) {
@@ -115,7 +116,7 @@ export function buildComponentPackage(draft: ComponentPackageDraft): ComponentPa
       ...(artifacts ? { artifacts } : {}),
       ...(draft.capabilities?.length ? { capabilities: draft.capabilities } : {}),
       ...(draft.network?.length || (isPluginDraft(draft) && draft.host?.length)
-        ? { permissions: { ...(draft.network?.length ? { network: draft.network } : {}), ...(isPluginDraft(draft) && draft.host?.length ? { host: draft.host } : {}) } }
+        ? { permissions: { ...(draft.network?.length ? { network: [...draft.network] } : {}), ...(isPluginDraft(draft) && draft.host?.length ? { host: [...draft.host] } : {}) } }
         : {}),
       ...(draft.contract ? { contract: draft.contract } : {}),
       ...(draft.hooks?.length ? { hooks: draft.hooks } : {}),

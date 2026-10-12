@@ -29,14 +29,6 @@ func notifierInstaller() extpipe.KindInstaller {
 	return in
 }
 
-// componentInstallResponse is the install answer: the installed component
-// plus, for a notifier installed for the first time, its signing secret —
-// shown this once and never returned by any list.
-type componentInstallResponse struct {
-	installedComponent
-	Secret string `json:"secret,omitempty"`
-}
-
 func (s *Service) notifierSecrets() *notify.SecretStore {
 	return &notify.SecretStore{Settings: s.PlatformSettings}
 }

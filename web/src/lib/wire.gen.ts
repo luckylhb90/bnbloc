@@ -461,6 +461,329 @@ export interface MyBudgetReply extends BudgetPeriod {
   blockedBy?: string;
 }
 
+// ---- wire/component_shapes.go ----
+
+// ComponentEndpoint is part of a component package (core/pkgmeta).
+export interface ComponentEndpoint {
+  baseUrl: string;
+}
+
+// ComponentArtifact is part of a component package (core/pkgmeta).
+export interface ComponentArtifact {
+  url: string;
+  sha256: string;
+}
+
+// ComponentPermissions is part of a component package (core/pkgmeta).
+export interface ComponentPermissions {
+  network?: string[];
+  // Host lists the desktop plugin host API capabilities a plugin sidecar
+  // may use (plugin packages only; PluginHostPermissions is the registry).
+  // A plugin declaring any gets BNBLOC_PLUGIN_HOST_URL/_TOKEN at launch.
+  host?: string[];
+}
+
+// ComponentLocalSetting is one field of a plugin's desktop-local settings schema.
+// Secret values are write-only in the desktop UI (masked, never shown back).
+export interface ComponentLocalSetting {
+  key: string;
+  label: string;
+  help?: string;
+  secret?: boolean;
+  required?: boolean;
+}
+
+// ComponentSidecar is part of a component package (core/pkgmeta).
+export interface ComponentSidecar {
+  listenEnv?: string;
+  // SupervisedEnv names the env var the desktop sets to "1" at launch so the
+  // sidecar knows it is supervised and exits when its stdin pipe closes.
+  supervisedEnv?: string;
+  localUrl: string;
+  args?: string[];
+  // TokenEnv names the env var the desktop sets to a fresh random bearer
+  // token at every launch. A sidecar declaring it must require that bearer
+  // on every request; the desktop hands the same token to its local callers.
+  tokenEnv?: string;
+  // DataDirEnv names the env var the desktop sets to a per-component
+  // private data directory it creates (owner-only) before launch.
+  dataDirEnv?: string;
+  // Files are extra per-platform artifacts the sidecar needs beside its
+  // executable (e.g. a VMM helper binary and a firmware library). Each is
+  // published in Package.Artifacts under "<platform>/<name>", downloaded
+  // and sha256-verified by the desktop exactly like the executable, and its
+  // local path is handed to the sidecar in env Env.
+  files?: ComponentSidecarFile[];
+}
+
+// ComponentSidecarFile declares one extra sidecar artifact (ComponentSidecar.Files).
+export interface ComponentSidecarFile {
+  name: string;
+  env: string;
+  // Executable marks a file the desktop must mark executable (+x).
+  executable?: boolean;
+}
+
+// ComponentGuest is a sandbox package's machine profile (pkgmeta.Package.Guest).
+export interface ComponentGuest {
+  // Image is the OCI reference the machine boots (never a host path).
+  image: string;
+  cpus?: number;
+  memoryMiB?: number;
+}
+
+// ComponentPreviewer is a previewer package's payload (pkgmeta.Package.Previewer).
+export interface ComponentPreviewer {
+  // Entry is the bundle-relative HTML document the frame loads.
+  entry: string;
+  match: ComponentPreviewerMatch;
+  // Rank orders previewers matching a file with equal specificity, like
+  // the web registry's built-ins (lower first).
+  rank: number;
+  capabilities?: string[];
+  toolbar?: ComponentPreviewerToolbarItem[];
+}
+
+// ComponentPreviewerMatch declares the files a previewer renders.
+export interface ComponentPreviewerMatch {
+  mimeTypes?: string[];
+  extensions?: string[];
+}
+
+// ComponentPreviewerToolbarItem is one declared toolbar control; the host renders it
+// with its own icon for Icon (a code-owned name).
+export interface ComponentPreviewerToolbarItem {
+  id: string;
+  icon: string;
+  label: string;
+  kind: string;
+}
+
+// ComponentMCP is an MCP component's payload (pkgmeta.Package.MCP).
+export interface ComponentMCP {
+  // Tools are the tools the server offers, for display (the server's own
+  // tools/list stays authoritative at run time).
+  tools: ComponentMCPTool[];
+  // Env are the variables the server needs; values never ship in a
+  // package (Credentials says where they come from).
+  env?: ComponentMCPEnv[];
+  // Credentials is member or org; required exactly when Env is declared.
+  credentials?: string;
+  stdio?: ComponentMCPStdio;
+  http?: ComponentMCPHTTP;
+}
+
+// ComponentMCPTool is one tool of the server.
+export interface ComponentMCPTool {
+  name: string;
+  description?: string;
+}
+
+// ComponentMCPEnv is one variable an MCP server needs.
+export interface ComponentMCPEnv {
+  name: string;
+  description?: string;
+  secret?: boolean;
+  required?: boolean;
+}
+
+// ComponentMCPStdio is how a stdio server is started: the materialized binary with
+// these arguments (env values arrive as its process environment).
+export interface ComponentMCPStdio {
+  args?: string[];
+}
+
+// ComponentMCPHTTP is how an endpoint server is called.
+export interface ComponentMCPHTTP {
+  auth: ComponentMCPHTTPAuth;
+}
+
+// ComponentMCPHTTPAuth is the header an endpoint server expects: none, a bearer token
+// (Authorization: Bearer <Env>), a named header (<Header>: <Env>), or a
+// member's OAuth sign-in (Authorization: Bearer <their access token>).
+export interface ComponentMCPHTTPAuth {
+  scheme: string;
+  header?: string;
+  env?: string;
+  // ClientID (oauth, optional) is a client the publisher registered with
+  // the server's authorization server; without it the desktop registers
+  // itself where the authorization server allows it.
+  clientId?: string;
+  // Scopes (oauth, optional) are requested when the server's challenge
+  // names none.
+  scopes?: string[];
+}
+
+// ---- wire/components.go ----
+
+// ComponentProtocolRange is the Core Protocol range a core or sandbox
+// package was published for (core/protocol.ProtocolRange).
+export interface ComponentProtocolRange {
+  min: string;
+  max: string;
+}
+
+// ComponentTrust is how an installed component was verified: the publisher
+// key that signed it and the hash of the package it installed.
+export interface ComponentTrust {
+  keyId?: string;
+  contentHash?: string;
+  signed: boolean;
+}
+
+// ComponentAdoption counts the members who opted in to a component.
+export interface ComponentAdoption {
+  memberInstalls: number;
+  totalMembers?: number;
+}
+
+// PlatformComponent is one installed component in the platform console
+// (GET /v1/platform/components).
+export interface PlatformComponent {
+  kind: string;
+  name: string;
+  version: string;
+  publisher: string;
+  runtime: ComponentRuntime;
+  contract?: string;
+  protocol: ComponentProtocolRange;
+  keyId: string;
+  contentHash: string;
+  installedAtMs: number;
+  description?: string;
+  capabilities?: string[];
+  permissions: ComponentPermissions;
+  hooks?: string[];
+  localSettings?: ComponentLocalSetting[];
+  artifacts?: Record<string, ComponentArtifact>;
+  endpoint?: ComponentEndpoint;
+  sidecar?: ComponentSidecar;
+  // RequiresDesktop marks a component that runs on each member's desktop
+  // (a sidecar other than an auth provider, a stdio MCP server).
+  requiresDesktop?: boolean;
+  // Manifest is a manifest core's interpreted manifest
+  // (core/manifestcore.Manifest), shown as published.
+  manifest?: unknown;
+  previewer?: ComponentPreviewer;
+  mcp?: ComponentMCP;
+  rollout: ComponentRollout;
+  trust: ComponentTrust;
+  adoption: ComponentAdoption;
+}
+
+// PlatformComponentsReply is GET /v1/platform/components.
+export interface PlatformComponentsReply {
+  components: PlatformComponent[];
+}
+
+// PublishedComponent answers an install: the installed component, and a
+// notifier's signing secret on its first install (shown this once).
+export interface PublishedComponent extends PlatformComponent {
+  secret?: string;
+}
+
+// ComponentInstallRequest is POST /v1/platform/components: a package and
+// its detached signature, as text.
+export interface ComponentInstallRequest {
+  package: string;
+  signature: string;
+  rollout?: ComponentRollout;
+}
+
+// ComponentRolloutRequest sets an installed component's rollout.
+export interface ComponentRolloutRequest {
+  rollout: ComponentRollout;
+}
+
+// MemberComponent is one component of the member catalog (GET
+// /v1/components): what the member may use, and, once installed for them,
+// what their desktop needs to run it.
+export interface MemberComponent {
+  kind: string;
+  name: string;
+  version: string;
+  publisher?: string;
+  description?: string;
+  runtime?: ComponentRuntime;
+  contract?: string;
+  requiresDesktop?: boolean;
+  hooks?: string[];
+  // Permissions and LocalSettings tell the member's desktop how to launch
+  // a plugin sidecar: the host API capabilities it may use, and the
+  // settings the member fills in locally (never sent back here).
+  permissions?: ComponentPermissions;
+  localSettings?: ComponentLocalSetting[];
+  artifacts?: Record<string, ComponentArtifact>;
+  endpoint?: ComponentEndpoint;
+  sidecar?: ComponentSidecar;
+  // Capabilities and Protocol tell the desktop/bridge what a protocol
+  // component (a sandbox runtime) was published to support before it is
+  // launched; the running implementation's discovery stays authoritative.
+  capabilities?: string[];
+  protocol?: ComponentProtocolRange;
+  rollout: ComponentRollout;
+  installed: boolean;
+  managed: boolean;
+  installedAtMs?: number;
+  // MemberInstalls counts the members who opted in (the platform list's
+  // adoption.memberInstalls).
+  memberInstalls?: number;
+  // Guest is a sandbox's machine profile: the desktop prewarms it.
+  guest?: ComponentGuest;
+  // Previewer is an installed previewer's match/toolbar metadata, its
+  // pinned bundle, and the caller's browser frame URL.
+  previewer?: MemberComponentPreviewer;
+  // MCP is an MCP tool's tools, env and credentials source.
+  mcp?: MemberComponentMCP;
+}
+
+// MemberComponentPreviewer is an installed previewer in the member catalog:
+// its package payload, its pinned bundle and the caller's frame.
+export interface MemberComponentPreviewer extends ComponentPreviewer {
+  // BundleURL is the gateway artifact URL of the archive (the desktop
+  // downloads it and checks BundleSHA256).
+  bundleUrl: string;
+  bundleSha256: string;
+  // FrameURL is the gateway-relative browser frame base (ticket included);
+  // the host appends Entry.
+  frameUrl: string;
+  frameExpiresAtMs: number;
+}
+
+// MemberComponentMCP is an installed MCP tool in the member catalog: its
+// package payload, how it is reached, and (org credentials) whether the
+// member's organization configured its connector.
+export interface MemberComponentMCP extends ComponentMCP {
+  transport: string;
+  // OrgConfigured is set for org credentials.
+  orgConfigured?: boolean;
+}
+
+// ComponentsReply is GET /v1/components: the executable catalog the desktop
+// supervises and the content components (experts, skill packs) the member
+// may use.
+export interface ComponentsReply {
+  components: MemberComponent[];
+  contentComponents: ContentComponent[];
+}
+
+// ComponentKey is one trusted publisher key (GET /v1/platform/component-keys).
+export interface ComponentKey {
+  keyId: string;
+  publicKey: string;
+  label?: string;
+  addedAtMs?: number;
+  addedBy?: string;
+}
+
+// ComponentKeysReply lists the trusted publisher keys, and whether this
+// gateway refuses unsigned packages (the publishing UI demands a signature
+// exactly when the install would).
+export interface ComponentKeysReply {
+  keys: ComponentKey[];
+  signatureRequired: boolean;
+}
+
 // ---- wire/content_components.go ----
 
 // ContentComponent is one content component as a member sees it, at its
@@ -3196,6 +3519,12 @@ export const OrgRoleValues: readonly OrgRole[] = ["super_admin", "org_admin", "m
 // A coarse organization permission (rbac.Permission).
 export type OrgPermission = "manage_platform" | "manage_org" | "create_room" | "drive_agent" | "read";
 export const OrgPermissionValues: readonly OrgPermission[] = ["manage_platform", "manage_org", "create_room", "drive_agent", "read"];
+// How a component package runs (pkgmeta.Runtime).
+export type ComponentRuntime = "stdio" | "endpoint" | "manifest" | "sidecar" | "bundle";
+export const ComponentRuntimeValues: readonly ComponentRuntime[] = ["stdio", "endpoint", "manifest", "sidecar", "bundle"];
+// Who gets an installed component (extpipe.Rollout*).
+export type ComponentRollout = "auto" | "optin" | "off";
+export const ComponentRolloutValues: readonly ComponentRollout[] = ["auto", "optin", "off"];
 // A content component kind's short name (the contentpkg registry).
 export type ContentKind = "expert" | "prompt" | "skill";
 export const ContentKindValues: readonly ContentKind[] = ["expert", "prompt", "skill"];

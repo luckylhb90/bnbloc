@@ -13,6 +13,7 @@ import (
 	"github.com/luckylhb90/bnbloc/core/protocol"
 	"github.com/luckylhb90/bnbloc/internal/digest"
 	"github.com/luckylhb90/bnbloc/internal/semver"
+	"github.com/luckylhb90/bnbloc/internal/wire"
 )
 
 const KindCorePackageV1 = "bnbloc.core.package/v1"
@@ -73,70 +74,28 @@ type Package struct {
 	MCP *MCP `json:"mcp,omitempty"`
 }
 
-// Guest is a sandbox package's machine profile (Package.Guest).
-type Guest struct {
-	// Image is the OCI reference the machine boots (never a host path).
-	Image     string `json:"image"`
-	CPUs      int    `json:"cpus,omitempty"`
-	MemoryMiB int    `json:"memoryMiB,omitempty"`
-}
-
-// LocalSetting is one field of a plugin's desktop-local settings schema.
-// Secret values are write-only in the desktop UI (masked, never shown back).
-type LocalSetting struct {
-	Key      string `json:"key"`
-	Label    string `json:"label"`
-	Help     string `json:"help,omitempty"`
-	Secret   bool   `json:"secret,omitempty"`
-	Required bool   `json:"required,omitempty"`
-}
-
-type Endpoint struct {
-	BaseURL string `json:"baseUrl"`
-}
-
-type Artifact struct {
-	URL    string `json:"url"`
-	SHA256 string `json:"sha256"`
-}
-
-type Sidecar struct {
-	ListenEnv string `json:"listenEnv,omitempty"`
-	// SupervisedEnv names the env var the desktop sets to "1" at launch so the
-	// sidecar knows it is supervised and exits when its stdin pipe closes.
-	SupervisedEnv string   `json:"supervisedEnv,omitempty"`
-	LocalURL      string   `json:"localUrl"`
-	Args          []string `json:"args,omitempty"`
-	// TokenEnv names the env var the desktop sets to a fresh random bearer
-	// token at every launch. A sidecar declaring it must require that bearer
-	// on every request; the desktop hands the same token to its local callers.
-	TokenEnv string `json:"tokenEnv,omitempty"`
-	// DataDirEnv names the env var the desktop sets to a per-component
-	// private data directory it creates (owner-only) before launch.
-	DataDirEnv string `json:"dataDirEnv,omitempty"`
-	// Files are extra per-platform artifacts the sidecar needs beside its
-	// executable (e.g. a VMM helper binary and a firmware library). Each is
-	// published in Package.Artifacts under "<platform>/<name>", downloaded
-	// and sha256-verified by the desktop exactly like the executable, and its
-	// local path is handed to the sidecar in env Env.
-	Files []SidecarFile `json:"files,omitempty"`
-}
-
-// SidecarFile declares one extra sidecar artifact (see Sidecar.Files).
-type SidecarFile struct {
-	Name string `json:"name"`
-	Env  string `json:"env"`
-	// Executable marks a file the desktop must mark executable (+x).
-	Executable bool `json:"executable,omitempty"`
-}
-
-type Permissions struct {
-	Network []string `json:"network,omitempty"`
-	// Host lists the desktop plugin host API capabilities a plugin sidecar
-	// may use (plugin packages only; PluginHostPermissions is the registry).
-	// A plugin declaring any gets BNBLOC_PLUGIN_HOST_URL/_TOKEN at launch.
-	Host []string `json:"host,omitempty"`
-}
+// The parts of a package the gateway also shows in its component
+// projections. internal/wire owns their JSON (component_shapes.go, from
+// which the web's types are generated); these are their names for
+// package authors, who cannot import an internal package.
+type (
+	Endpoint             = wire.ComponentEndpoint
+	Artifact             = wire.ComponentArtifact
+	Permissions          = wire.ComponentPermissions
+	LocalSetting         = wire.ComponentLocalSetting
+	Sidecar              = wire.ComponentSidecar
+	SidecarFile          = wire.ComponentSidecarFile
+	Guest                = wire.ComponentGuest
+	Previewer            = wire.ComponentPreviewer
+	PreviewerMatch       = wire.ComponentPreviewerMatch
+	PreviewerToolbarItem = wire.ComponentPreviewerToolbarItem
+	MCP                  = wire.ComponentMCP
+	MCPTool              = wire.ComponentMCPTool
+	MCPEnv               = wire.ComponentMCPEnv
+	MCPStdio             = wire.ComponentMCPStdio
+	MCPHTTP              = wire.ComponentMCPHTTP
+	MCPHTTPAuth          = wire.ComponentMCPHTTPAuth
+)
 
 type TrustedKey struct {
 	KeyID     string `json:"keyId"`

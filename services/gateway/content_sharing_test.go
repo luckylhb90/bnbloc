@@ -443,7 +443,7 @@ func TestContentPlatformPromote(t *testing.T) {
 	trusted, _ := json.Marshal([]pkgmeta.TrustedKey{{KeyID: "0102030405060708", PublicKey: minisignTestPublicKey("0102030405060708", pub)}})
 	_ = g.svc.PlatformSettings.PutPlatformSetting(context.Background(), store.PlatformSetting{Key: componentTrustedKeysKey, Value: string(trusted)})
 	install := func(user string, body []byte, sig, rollout string) (int, []byte) {
-		return g.json(user, http.MethodPost, "/v1/platform/components", componentInstallRequest{Package: string(body), Signature: sig, Rollout: rollout})
+		return g.json(user, http.MethodPost, "/v1/platform/components", wire.ComponentInstallRequest{Package: string(body), Signature: sig, Rollout: rollout})
 	}
 	if code, raw := install("sam", body, "", ""); code != http.StatusBadRequest || !strings.Contains(string(raw), "signature required") {
 		t.Fatalf("unsigned = %d %s", code, raw)

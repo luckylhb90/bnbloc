@@ -1,6 +1,7 @@
 import { useRef, useState } from "react";
 import { Select } from "@/ui/Select";
-import type { ComponentPackageKind, ComponentRuntime } from "@/lib/apiTypes";
+import type { ComponentRuntime } from "@/lib/apiTypes";
+import type { ComponentPackageKind } from "@/lib/componentKinds";
 import type { InspectedComponentFile } from "@/lib/componentPackageIntake";
 import { Button } from "@/ui/Button";
 import { Field } from "@/ui/Input";

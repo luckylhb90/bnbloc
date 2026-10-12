@@ -2,22 +2,24 @@ package gateway
 
 import (
 	"github.com/luckylhb90/bnbloc/core/pkgmeta"
+	"github.com/luckylhb90/bnbloc/core/protocol"
 	"github.com/luckylhb90/bnbloc/internal/extpipe"
+	"github.com/luckylhb90/bnbloc/internal/wire"
 )
 
-func componentFromExtRecord(rec extpipe.Record) (installedComponent, error) {
+func componentFromExtRecord(rec extpipe.Record) (wire.PlatformComponent, error) {
 	cfg, err := extpipe.DecodeConfig(rec)
 	if err != nil {
-		return installedComponent{}, err
+		return wire.PlatformComponent{}, err
 	}
-	return installedComponent{
+	out := wire.PlatformComponent{
 		Kind:            rec.Kind,
 		Name:            rec.Name,
 		Version:         rec.Version,
 		Publisher:       rec.Publisher,
-		Runtime:         cfg.Runtime,
+		Runtime:         string(cfg.Runtime),
 		Contract:        cfg.Contract,
-		Protocol:        cfg.Protocol,
+		Protocol:        componentProtocol(cfg.Protocol),
 		KeyID:           rec.KeyID,
 		ContentHash:     rec.ContentHash,
 		InstalledAtMs:   rec.InstalledAtMs,
@@ -30,12 +32,20 @@ func componentFromExtRecord(rec extpipe.Record) (installedComponent, error) {
 		Endpoint:        cfg.Endpoint,
 		Sidecar:         cfg.Sidecar,
 		RequiresDesktop: componentRequiresDesktop(cfg.Runtime, rec.Kind),
-		Manifest:        cfg.Manifest,
 		Previewer:       cfg.Previewer,
 		MCP:             cfg.MCP,
 		Rollout:         extpipe.NormalizeRollout(rec.Rollout),
-		Trust:           componentTrust{KeyID: rec.KeyID, ContentHash: rec.ContentHash, Signed: rec.KeyID != ""},
-	}, nil
+		Trust:           wire.ComponentTrust{KeyID: rec.KeyID, ContentHash: rec.ContentHash, Signed: rec.KeyID != ""},
+	}
+	if cfg.Manifest != nil {
+		out.Manifest = cfg.Manifest
+	}
+	return out, nil
+}
+
+// componentProtocol is the projection of a package's protocol range.
+func componentProtocol(p protocol.ProtocolRange) wire.ComponentProtocolRange {
+	return wire.ComponentProtocolRange{Min: p.Min, Max: p.Max}
 }
 
 func componentRequiresDesktop(runtime pkgmeta.Runtime, kind string) bool {

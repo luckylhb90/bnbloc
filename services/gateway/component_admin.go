@@ -11,6 +11,7 @@ import (
 	"github.com/luckylhb90/bnbloc/internal/extpipe"
 	"github.com/luckylhb90/bnbloc/internal/httpx"
 	"github.com/luckylhb90/bnbloc/internal/obs"
+	"github.com/luckylhb90/bnbloc/internal/wire"
 )
 
 const componentTrustedKeysKey = "component.trustedKeys"
@@ -27,11 +28,11 @@ func (s *Service) handleListComponents(w http.ResponseWriter, r *http.Request, c
 		httpx.Error(w, "load components failed", http.StatusInternalServerError)
 		return
 	}
-	httpx.WriteJSON(w, http.StatusOK, map[string]any{"components": components})
+	httpx.WriteJSON(w, http.StatusOK, wire.PlatformComponentsReply{Components: components})
 }
 
 func (s *Service) handleInstallComponent(w http.ResponseWriter, r *http.Request, claims auth.Claims) {
-	var req componentInstallRequest
+	var req wire.ComponentInstallRequest
 	if !httpx.DecodeJSON(w, r, 512*1024, &req) {
 		return
 	}
@@ -83,7 +84,7 @@ func (s *Service) handleInstallComponent(w http.ResponseWriter, r *http.Request,
 		return
 	}
 	s.componentsChanged(r.Context(), "", "")
-	httpx.WriteJSON(w, http.StatusOK, componentInstallResponse{installedComponent: component, Secret: secret})
+	httpx.WriteJSON(w, http.StatusOK, wire.PublishedComponent{PlatformComponent: component, Secret: secret})
 }
 
 func (s *Service) handleUninstallComponent(w http.ResponseWriter, r *http.Request, claims auth.Claims) {
@@ -107,7 +108,7 @@ func (s *Service) handleUninstallComponent(w http.ResponseWriter, r *http.Reques
 }
 
 func (s *Service) handleSetComponentRollout(w http.ResponseWriter, r *http.Request, claims auth.Claims) {
-	var req setRolloutRequest
+	var req wire.ComponentRolloutRequest
 	if !httpx.DecodeJSON(w, r, 16*1024, &req) {
 		return
 	}
@@ -173,12 +174,12 @@ func (s *Service) handleSetComponentTenants(w http.ResponseWriter, r *http.Reque
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func (s *Service) listInstalledComponents(ctx context.Context) ([]installedComponent, error) {
+func (s *Service) listInstalledComponents(ctx context.Context) ([]wire.PlatformComponent, error) {
 	recs, err := s.corePipeline().List(ctx, "")
 	if err != nil {
 		return nil, err
 	}
-	out := make([]installedComponent, 0, len(recs))
+	out := make([]wire.PlatformComponent, 0, len(recs))
 	for _, rec := range recs {
 		component, err := componentFromExtRecord(rec)
 		if err != nil {
@@ -189,7 +190,7 @@ func (s *Service) listInstalledComponents(ctx context.Context) ([]installedCompo
 	return out, nil
 }
 
-func (s *Service) addComponentAdoption(ctx context.Context, components []installedComponent) error {
+func (s *Service) addComponentAdoption(ctx context.Context, components []wire.PlatformComponent) error {
 	kinds := make([]string, 0, len(components))
 	for _, c := range components {
 		kinds = append(kinds, c.Kind)
@@ -207,7 +208,7 @@ func (s *Service) addComponentAdoption(ctx context.Context, components []install
 		total = n
 	}
 	for i := range components {
-		components[i].Adoption = componentAdoption{MemberInstalls: counts[componentKey(components[i].Kind, components[i].Name)], TotalMembers: total}
+		components[i].Adoption = wire.ComponentAdoption{MemberInstalls: counts[componentKey(components[i].Kind, components[i].Name)], TotalMembers: total}
 	}
 	return nil
 }

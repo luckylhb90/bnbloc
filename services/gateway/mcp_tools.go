@@ -123,21 +123,11 @@ func (s *Service) afterMCPUninstall(ctx context.Context, rec extpipe.Record) {
 	}
 }
 
-// mcpCatalogInfo is an installed MCP component in the member catalog: its
-// tools, env and credentials source, and for org credentials whether the
-// member's organization configured its connector.
-type mcpCatalogInfo struct {
-	*pkgmeta.MCP
-	Transport string `json:"transport"`
-	// OrgConfigured is set for org credentials.
-	OrgConfigured *bool `json:"orgConfigured,omitempty"`
-}
-
-func (s *Service) mcpCatalog(ctx context.Context, claims auth.Claims, rec extpipe.Record, cfg extpipe.PackageConfig) *mcpCatalogInfo {
+func (s *Service) mcpCatalog(ctx context.Context, claims auth.Claims, rec extpipe.Record, cfg extpipe.PackageConfig) *wire.MemberComponentMCP {
 	if cfg.MCP == nil {
 		return nil
 	}
-	out := &mcpCatalogInfo{MCP: cfg.MCP, Transport: mcptool.Transport(cfg)}
+	out := &wire.MemberComponentMCP{ComponentMCP: *cfg.MCP, Transport: mcptool.Transport(cfg)}
 	if cfg.MCP.Credentials == pkgmeta.MCPCredentialsOrg {
 		configured := false
 		if c, ok, err := s.mcpConnectors().Get(ctx, claims.Tenant, rec.Name); err == nil && ok {
