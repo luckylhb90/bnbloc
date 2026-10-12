@@ -70,6 +70,14 @@ func (s *Service) roomClaims(claims auth.Claims, roomID string) (auth.Claims, bo
 	if !s.roomReachable(claims, roomID) {
 		return claims, false
 	}
+	return s.inRoomTenant(claims, roomID), true
+}
+
+// inRoomTenant returns the claims acting in the room's tenant (step 3) for a
+// request whose right to name the room its route decides: the proxy, where
+// sub-resources need the caller's reach and the room itself, a join, or an
+// org admin's share-link revocation do not (the room service decides).
+func (s *Service) inRoomTenant(claims auth.Claims, roomID string) auth.Claims {
 	claims.Tenant = s.roomTenantOr(roomID, claims.Tenant)
-	return claims, true
+	return claims
 }

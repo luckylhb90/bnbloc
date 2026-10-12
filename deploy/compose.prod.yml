@@ -199,8 +199,6 @@ services:
       # Seals organization MCP tool connectors (unset = org connectors off).
       BNBLOC_SECRET_STORE_KEY: "${BNBLOC_SECRET_STORE_KEY:-}"
       BNBLOC_SUPER_ADMINS: "${BNBLOC_SUPER_ADMINS:-}"
-      # Optional shared daemon bearer; empty disables the bypass (fail closed).
-      BNBLOC_LOCAL_AGENT_TOKEN: "${BNBLOC_LOCAL_AGENT_TOKEN:-}"
       # Identity: production requires an OIDC issuer + client id (the dev
       # verifier accepts any identity and is refused when BNBLOC_ENV=production).
       BNBLOC_OIDC_ISSUER_URL: "${BNBLOC_OIDC_ISSUER_URL:-}"

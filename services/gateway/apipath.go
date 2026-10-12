@@ -109,6 +109,48 @@ func (p apiPath) section() string {
 // token may reach only for rooms it is a member of.
 func (p apiPath) roomScoped() bool { return p.RoomID != "" && p.RoomSub != "" }
 
+// namesRoom reports whether the path names one room: the room itself or any
+// of its sub-resources (not the /v1/rooms/import collection route). Such a
+// request acts in the room's own tenant (tenant_scope.go).
+func (p apiPath) namesRoom() bool { return p.RoomID != "" && !p.isRoomImport() }
+
+// searchRoom is the one room a global search is narrowed to
+// (GET /v1/search?rooms=<id>): the in-room search, which acts in that room's
+// tenant like the room's own paths. "" for a search over several rooms or
+// all of the caller's (the session tenant's).
+func (p apiPath) searchRoom(r *http.Request) string {
+	if !p.is("v1", "search") {
+		return ""
+	}
+	rooms := strings.Split(r.URL.Query().Get("rooms"), ",")
+	if len(rooms) != 1 {
+		return ""
+	}
+	room := strings.TrimSpace(rooms[0])
+	if roomctx.ValidateID(room) != nil {
+		return ""
+	}
+	return room
+}
+
+// endsMembership reports a request that ends a room membership: removing a
+// member (DELETE /v1/rooms/{id}/members/{user}), leaving (POST
+// /v1/rooms/{id}/leave, the caller), or deleting the room (every member,
+// user ""). The edge forgets its cached answers for it.
+func (p apiPath) endsMembership(method, caller string) (user string, ok bool) {
+	switch {
+	case p.RoomID == "" || p.isRoomImport():
+		return "", false
+	case method == http.MethodDelete && len(p.segs) == 3:
+		return "", true
+	case method == http.MethodDelete && len(p.segs) == 5 && p.RoomSub == "members":
+		return p.segs[4], true
+	case method == http.MethodPost && len(p.segs) == 4 && p.RoomSub == "leave":
+		return caller, true
+	}
+	return "", false
+}
+
 // isArtifactShareRevoke reports DELETE
 // /v1/rooms/{id}/artifacts/{artifactId}/shares/{shareId}. An org admin may
 // revoke any public link of their organization without being a member of
@@ -284,7 +326,7 @@ func requiredPermission(method string, p apiPath) rbac.Permission {
 		return rbac.PermRead
 	}
 	switch {
-	case method == http.MethodPost && (p.is("v1", "rooms") || p.isRoomImport() || p.isTemplateInstantiate()):
+	case method == http.MethodPost && p.createsRoom():
 		return rbac.PermCreateRoom
 	case method == http.MethodPost && len(p.segs) == 4 && p.section() == "invites" && p.segs[3] == "redeem":
 		return rbac.PermCreateRoom
@@ -314,7 +356,7 @@ func rateLimited(method string, p apiPath) bool {
 	if method != http.MethodPost && method != http.MethodPut {
 		return false
 	}
-	if method == http.MethodPost && (p.is("v1", "rooms") || p.isRoomImport() || p.isTemplateInstantiate()) {
+	if method == http.MethodPost && p.createsRoom() {
 		return true
 	}
 	// Running a schedule now posts chat (and may drive an agent).
@@ -334,6 +376,15 @@ func rateLimited(method string, p apiPath) bool {
 // signs the caller (the bridge's owner) like every proxied request.
 func (p apiPath) isRoomDispatch(method string) bool {
 	return method == http.MethodPost && len(p.segs) == 4 && p.RoomSub == "dispatch"
+}
+
+// createsRoom reports the POST routes that create a room, which carry room
+// creation's permission and rate limit: the collection, a handoff import, a
+// template instantiation, and a local agent run (it adopts the agent's
+// workspace as a room and drives the agent there; every role that may create
+// a room may drive an agent).
+func (p apiPath) createsRoom() bool {
+	return p.is("v1", "rooms") || p.isRoomImport() || p.isTemplateInstantiate() || p.is("v1", "local-agent", "run")
 }
 
 // isTemplateInstantiate reports /v1/room-templates/{id}/instantiate: it

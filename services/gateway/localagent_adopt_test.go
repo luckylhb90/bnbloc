@@ -9,7 +9,7 @@ import (
 	"testing"
 )
 
-// adoptRoom: a fresh id is created and the daemon added; an existing id (409
+// adoptRoom: a fresh id is created; an existing id (409
 // from the room service, BE-1) is adopted only when the caller is already a
 // member — never re-created, never taken over. Every room call carries the
 // request's effective tenant (signed), so the room lands in that tenant.
@@ -45,20 +45,13 @@ func TestAdoptRoomHandlesExistingRoomID(t *testing.T) {
 		}
 	}
 
-	// Caller is a member, daemon not yet: adopt and add the daemon.
+	// Caller is a member: adopted as is, nothing else is written.
 	members["alice"] = []string{"ws-1"}
 	calls = nil
 	if err := s.adoptRoom(ctx, "ws-1", "alice", "t"); err != nil {
 		t.Fatalf("adopt existing member room: %v", err)
 	}
-	if len(calls) != 2 || calls[1] != "POST /v1/rooms/ws-1/members" {
-		t.Fatalf("calls = %v; want create (409) then daemon member add", calls)
-	}
-
-	// Already fully adopted: no further writes after the 409.
-	members[daemonServiceSubject] = []string{"ws-1"}
-	calls = nil
-	if err := s.adoptRoom(ctx, "ws-1", "alice", "t"); err != nil || len(calls) != 1 {
-		t.Fatalf("re-adopt: err=%v calls=%v; want only the create attempt", err, calls)
+	if len(calls) != 1 {
+		t.Fatalf("calls = %v; want only the create attempt (409)", calls)
 	}
 }

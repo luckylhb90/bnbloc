@@ -5,10 +5,8 @@ package gateway
 
 import (
 	"context"
-	"crypto/subtle"
 	"encoding/json"
 	"errors"
-	"log"
 	"net"
 	"net/http"
 	"net/http/httputil"
@@ -45,9 +43,6 @@ type Backends struct {
 	// Relay is the relay's internal URL, read only to report its /version
 	// in the deployment view (the gateway never proxies the relay); "" omits it.
 	Relay string
-	// LocalAgentToken is the shared secret a trusted local daemon (the bridge)
-	// presents to bypass IdP auth and forward as the daemon service subject.
-	LocalAgentToken string
 }
 
 // Service holds the gateway dependencies.
@@ -159,10 +154,6 @@ type Service struct {
 	// per-replica limit above enforces 1/N of its configured budget. Nil =
 	// one replica.
 	Peers *shard.Set
-	// daemonBypassOnce guards the one-time evaluation + warning of whether the
-	// trusted-daemon token bypass is allowed (fails closed for the dev default).
-	daemonBypassOnce sync.Once
-	daemonBypassOK   bool
 	// TrustedProxies are the reverse proxies (CIDRs, BNBLOC_TRUSTED_PROXIES)
 	// whose X-Forwarded-For the gateway believes when deriving a client IP for
 	// the unauthenticated login throttle. Empty trusts no proxy: the TCP peer
@@ -579,6 +570,9 @@ func (s *Service) handleProxy(w http.ResponseWriter, r *http.Request) {
 	// Exempt POST /v1/rooms/{id}/join: joining a shared room is exactly how a
 	// non-member gains membership, so it cannot require prior membership. The
 	// room service still refuses to join a private room without an invite.
+	// The room itself (/v1/rooms/{id}) answers a non-member too (a shared
+	// room's preview, 404 for a private one), so only sub-resources need the
+	// caller's reach.
 	if p.roomScoped() {
 		isJoin := r.Method == http.MethodPost && p.RoomSub == "join" && len(p.segs) == 4
 		// An org admin revoking a public share link need not be a room
@@ -593,37 +587,24 @@ func (s *Service) handleProxy(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	// Coarse org RBAC: a viewer is read-only, so a cost-bearing or org-admin
-	// write is refused at the edge before it reaches a backend. Room-role checks
-	// (owner/admin/member) remain the room/shareagent services' job.
-	if perm := requiredPermission(r.Method, p); perm != rbac.PermRead {
-		if !rbac.Can(claims.Role, perm) {
-			http.Error(w, "insufficient org role", http.StatusForbidden)
-			return
-		}
-	}
-	// Invite redemption is authenticated, so the code-guessing throttle is keyed
-	// on the subject: one account cannot brute-force invite codes, and users
-	// behind a shared proxy/NAT never share a bucket.
-	if isInviteRedeem(r.Method, p) && !s.guessAllow("subject:"+claims.Subject) {
-		http.Error(w, "rate limit exceeded", http.StatusTooManyRequests)
-		return
-	}
-	// Throttle cost-bearing writes (chat, borrow) per subject so a client cannot
-	// spam messages or drive unbounded agent turns. Reads/SSE are never limited.
-	if rateLimited(r.Method, p) && !s.rateAllow(claims.Subject) {
-		http.Error(w, "rate limit exceeded", http.StatusTooManyRequests)
+	if !s.edgeGate(w, r, p, claims) {
 		return
 	}
 	// The effective tenant (tenant_scope.go): proxyClaims already applied a
-	// super admin's acting tenant; a room-scoped path acts in the room's own
-	// tenant (the caller's reach of the room was checked above). Strip the
-	// client-supplied acting-tenant header so it never reaches a backend as
-	// an unsigned scope hint; proxyAs sets the authoritative, signed
-	// X-Bnbloc-Tenant from effectiveTenant.
-	effectiveTenant := claims.Tenant
-	if p.roomScoped() {
-		effectiveTenant = s.roomTenantOr(p.RoomID, effectiveTenant)
+	// super admin's acting tenant; a path that names a room acts in the
+	// room's own tenant (inRoomTenant, the reach checked above where the
+	// route needs it), and a search narrowed to one room in that room's
+	// (roomClaims). Strip the client-supplied acting-tenant header so it
+	// never reaches a backend as an unsigned scope hint; proxyAs sets the
+	// authoritative, signed X-Bnbloc-Tenant from the claims.
+	if p.namesRoom() {
+		claims = s.inRoomTenant(claims, p.RoomID)
+	} else if room := p.searchRoom(r); room != "" {
+		var ok bool
+		if claims, ok = s.roomClaims(claims, room); !ok {
+			http.Error(w, "room scope not authorized", http.StatusForbidden)
+			return
+		}
 	}
 	r.Header.Del(actingTenantHeader)
 	if p.isRoomDispatch(r.Method) {
@@ -631,19 +612,46 @@ func (s *Service) handleProxy(w http.ResponseWriter, r *http.Request) {
 		r.URL.Path = "/internal/v1/rooms/" + p.RoomID + "/dispatch"
 		r.URL.RawPath = "/internal/v1/rooms/" + url.PathEscape(p.RoomID) + "/dispatch"
 	}
-	s.proxyAs(w, r, p, claims.Subject, effectiveTenant)
+	s.proxyAs(w, r, p, claims.Subject, claims.Tenant)
+	// A membership this request may have ended (a removal, a leave, the
+	// room's deletion) leaves no cached positive answer at this edge.
+	if user, ok := p.endsMembership(r.Method, claims.Subject); ok {
+		s.forgetRoomMember(p.RoomID, user)
+	}
 }
 
-// proxyClaims authenticates a proxied request. A trusted local daemon presents
-// the shared LocalAgentToken and acts as the fixed daemon subject with ordinary
-// MEMBER rights: it goes through the same room scope, org RBAC (so platform and
-// tenant-admin paths are refused), and tenant derivation as every session —
-// the shared secret is a credential, never a bypass. Otherwise the caller needs
-// a valid session token, acting in its effective tenant (actingTenant).
-func (s *Service) proxyClaims(r *http.Request, p apiPath) (auth.Claims, bool) {
-	if c, ok := s.daemonClaims(r); ok {
-		return c, true
+// edgeGate applies the coarse org RBAC and rate-limit policy of a request
+// (requiredPermission, rateLimited): the proxy's, and every route the
+// gateway serves itself that creates or drives (POST /v1/local-agent/run).
+// It answers 403/429 itself.
+func (s *Service) edgeGate(w http.ResponseWriter, r *http.Request, p apiPath, claims auth.Claims) bool {
+	// A viewer is read-only, so a cost-bearing or org-admin write is refused
+	// at the edge before it reaches a backend. Room-role checks
+	// (owner/admin/member) remain the room/shareagent services' job.
+	if perm := requiredPermission(r.Method, p); perm != rbac.PermRead && !rbac.Can(claims.Role, perm) {
+		http.Error(w, "insufficient org role", http.StatusForbidden)
+		return false
 	}
+	// Invite redemption is authenticated, so the code-guessing throttle is keyed
+	// on the subject: one account cannot brute-force invite codes, and users
+	// behind a shared proxy/NAT never share a bucket.
+	if isInviteRedeem(r.Method, p) && !s.guessAllow("subject:"+claims.Subject) {
+		http.Error(w, "rate limit exceeded", http.StatusTooManyRequests)
+		return false
+	}
+	// Throttle cost-bearing writes (chat, borrow, room creation) per subject
+	// so a client cannot spam messages or drive unbounded agent turns.
+	// Reads/SSE are never limited.
+	if rateLimited(r.Method, p) && !s.rateAllow(claims.Subject) {
+		http.Error(w, "rate limit exceeded", http.StatusTooManyRequests)
+		return false
+	}
+	return true
+}
+
+// proxyClaims authenticates a proxied request: a valid session token, acting
+// in its effective tenant (actingTenant).
+func (s *Service) proxyClaims(r *http.Request, p apiPath) (auth.Claims, bool) {
 	token := headerBearer(r)
 	if token == "" && p.isAttachmentDownload(r.Method) {
 		// An <img>/<a download> cannot set headers: an attachment read
@@ -665,23 +673,8 @@ func (s *Service) proxyClaims(r *http.Request, p apiPath) (auth.Claims, bool) {
 	return c, true
 }
 
-// daemonClaims recognizes the trusted local daemon's bearer (constant-time
-// compare) when the bypass is allowed (a strong configured token).
-func (s *Service) daemonClaims(r *http.Request) (auth.Claims, bool) {
-	want := s.Backends.LocalAgentToken
-	got := headerBearer(r)
-	if want == "" || got == "" || subtle.ConstantTimeCompare([]byte(got), []byte(want)) != 1 || !s.daemonTokenBypassAllowed() {
-		return auth.Claims{}, false
-	}
-	return auth.Claims{Subject: daemonServiceSubject, Tenant: tenant.Default, Role: string(rbac.RoleMember)}, true
-}
-
-// rateAllow lazily builds the per-subject limiter and consumes one token. The
-// trusted daemon subject is exempt (it is the bridge, not a spamming client).
+// rateAllow lazily builds the per-subject limiter and consumes one token.
 func (s *Service) rateAllow(subject string) bool {
-	if subject == daemonServiceSubject {
-		return true
-	}
 	return s.limiter.get(defaultChatRate, defaultChatBurst, s.Peers.Size).allow(subject)
 }
 
@@ -759,37 +752,6 @@ func (s *Service) trustedProxy(ip string) bool {
 // stripped before proxying so a backend only ever sees the signed tenant.
 const actingTenantHeader = "X-Bnbloc-Acting-Tenant"
 
-// daemonTokenBypassAllowed reports whether the shared-secret daemon-token
-// bypass may be honored. It fails closed when the token is the well-known dev
-// default ("dev-local-agent-token") unless dev discovery is explicitly enabled,
-// so a production deployment that forgot to set a strong token cannot be
-// impersonated by anyone who knows the default. Evaluated once, with a loud
-// warning.
-func (s *Service) daemonTokenBypassAllowed() bool {
-	s.daemonBypassOnce.Do(func() {
-		tok := strings.TrimSpace(s.Backends.LocalAgentToken)
-		if tok == "" || tok == devLocalAgentToken {
-			if devDiscoveryEnabled() {
-				log.Printf("bnbloc-gateway: WARNING daemon-token bypass using dev default token; enabled only because BNBLOC_DEV_DISCOVERY is set (dev mode)")
-				s.daemonBypassOK = true
-			} else {
-				log.Printf("bnbloc-gateway: WARNING BNBLOC_LOCAL_AGENT_TOKEN is unset or the dev default; DISABLING the daemon-token bypass (fail closed). Set a strong BNBLOC_LOCAL_AGENT_TOKEN to enable it")
-				s.daemonBypassOK = false
-			}
-			return
-		}
-		s.daemonBypassOK = true
-	})
-	return s.daemonBypassOK
-}
-
-// devLocalAgentToken is the well-known development default daemon token. When
-// the configured token equals this (or is unset) the bypass is dev-only.
-const devLocalAgentToken = "dev-local-agent-token"
-
-// daemonServiceSubject is the fixed identity a trusted local daemon forwards as.
-const daemonServiceSubject = "local-agent-daemon"
-
 // proxyAs reverse-proxies to the owning backend, injecting the authoritative
 // X-Bnbloc-User and X-Bnbloc-Tenant. Scope enforcement happens in the caller.
 func (s *Service) proxyAs(w http.ResponseWriter, r *http.Request, p apiPath, subject, tenantID string) {
@@ -813,7 +775,7 @@ func (s *Service) proxyAs(w http.ResponseWriter, r *http.Request, p apiPath, sub
 	r.Header.Del(shard.ForwardedHeader)
 	r.Header.Set("X-Bnbloc-User", subject)
 	// Every authenticated request carries a tenant; default for legacy tokens
-	// and the trusted daemon so backends always have a scope to enforce.
+	// so backends always have a scope to enforce.
 	if tenantID == "" {
 		tenantID = tenant.Default
 	}
@@ -964,10 +926,10 @@ func newRoomMembershipLookup(roomBaseURL string, client *http.Client) func(strin
 // NewRoomTenantResolver returns a RoomTenant resolver that asks bnbloc-room for
 // a room's authoritative tenant (tenant-agnostic, keyed on room id). A short
 // positive cache keeps the per-request lookup cheap; a room's tenant is
-// immutable, so caching is safe. Returns "" on any error (leaves the session
-// tenant in force — fail toward the existing behavior, never toward a wrong
-// tenant). Signs as the daemon service subject since this is an internal,
-// non-user-specific lookup.
+// immutable, so caching is safe. Returns "" on any error: the request then
+// keeps the caller's tenant, which a backend refuses for the room
+// (membership.RoomScope) — never a wrong tenant. Signs as the gateway's own
+// service subject: an internal, non-user-specific lookup.
 func NewRoomTenantResolver(roomBaseURL string, client *http.Client) func(string) string {
 	if client == nil {
 		client = &http.Client{Timeout: 5 * time.Second}
@@ -986,8 +948,8 @@ func NewRoomTenantResolver(roomBaseURL string, client *http.Client) func(string)
 		if err != nil {
 			return ""
 		}
-		req.Header.Set("X-Bnbloc-User", daemonServiceSubject)
-		svcauth.Sign(req, svcauth.KeyFromEnv(), daemonServiceSubject)
+		req.Header.Set(svcauth.HeaderUser, gatewayServiceSubject)
+		svcauth.Sign(req, svcauth.KeyFromEnv(), gatewayServiceSubject)
 		resp, err := client.Do(req)
 		if err != nil {
 			return ""
@@ -1005,6 +967,20 @@ func NewRoomTenantResolver(roomBaseURL string, client *http.Client) func(string)
 		cache.put(roomID, out.TenantID)
 		return out.TenantID
 	}
+}
+
+// forgetRoomMember drops this edge's cached positive membership answers for
+// user in roomID (every member's when user is ""), after a request that ended
+// them. Other replicas keep theirs until memberCacheTTL; every backend
+// re-checks membership itself (membership.RoomScope) and a removed member's
+// stream ends on the room service's own signal.
+func (s *Service) forgetRoomMember(roomID, user string) {
+	s.memberCacheOnce.Do(func() { s.memberCache = newBoundedCache[bool](memberCacheTTL, roomCacheMaxEntries) })
+	s.memberCache.deleteWhere(func(key string) bool {
+		subject, rest, _ := strings.Cut(key, "\x00")
+		room, _, _ := strings.Cut(rest, "\x00")
+		return room == roomID && (user == "" || subject == user)
+	})
 }
 
 // subjectInRoom reports whether subject is currently a member of roomID via a

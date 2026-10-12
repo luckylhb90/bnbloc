@@ -58,7 +58,6 @@ embedded SPA. Stateless apart from the shared database — scale horizontally.
 | `BNBLOC_RELAY_BASE_URL` | optional | `http://bnbloc-relay:8085` — only to report the relay's `/version` in `GET /v1/platform/versions`; unset leaves the relay out. |
 | `BNBLOC_TRUSTED_PROXIES` | behind a proxy | CIDRs of the edge proxy, so the per-IP limits (direct login and the API-token exchange, public share reads) see real clients. Needed on SSO-only production too: the API-token exchange and public shares stay reachable there. |
 | `BNBLOC_ALLOWED_ORIGINS` | if cross-origin | Extra browser origins for CORS. |
-| `BNBLOC_LOCAL_AGENT_TOKEN` | optional | Shared daemon bearer; empty disables that path. |
 | `BNBLOC_CORES` (+ `BNBLOC_CORE_<NAME>_URL`) | optional | Explicit cores only; installed packages need none. |
 | `BNBLOC_METRICS_ADDR` | for metrics | Internal `/metrics` listener (`:9090` in compose/Helm). The public listener never serves `/metrics` (404); unset = no gateway metrics. Never route or publish it. |
 | `BNBLOC_GATEWAY_PEERS` | with >1 replica | The gateway replica set (Helm: the headless `bnbloc-gateway-peers:8080`; or a comma list of `host:port`). Each replica enforces 1/N of every rate limit, N = live replicas, so the configured budget holds across the deployment. Unset = one replica (N replicas would then allow N times every budget). |

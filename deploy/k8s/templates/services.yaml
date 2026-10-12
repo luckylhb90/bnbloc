@@ -132,13 +132,6 @@ spec:
               value: {{ join "," ($cfg.trustedProxies | default list) | quote }}
             - name: BNBLOC_CORES
               value: {{ join "," ($cfg.cores | default list) | quote }}
-            {{- with $cfg.localAgentToken }}
-            {{- if .secretRef.name }}
-            - name: BNBLOC_LOCAL_AGENT_TOKEN
-              valueFrom:
-                secretKeyRef: { name: {{ .secretRef.name }}, key: {{ .secretRef.key }} }
-            {{- end }}
-            {{- end }}
             {{- with $cfg.secretStoreKey }}
             {{- if .secretRef.name }}
             - name: BNBLOC_SECRET_STORE_KEY

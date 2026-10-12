@@ -76,10 +76,11 @@ once, and every history section is fenced as records-not-requests. The session
 workspace file manifest is no longer injected in either model: the workspace is
 the session's own, so its contents are self-redundant.
 
-Gateway calls use an **owner session token** minted via `/v1/auth/login`: a
-room's membership authorizes both SSE subscription and activity posts. (The
-fixed daemon subject is not a room member, so the daemon token cannot post room
-activity.)
+Gateway calls use the **owner's own session**: a refresh token handed over by
+the desktop (forked into the bridge's own family), a static
+`BNBLOC_GATEWAY_TOKEN`, or, in development only, a dev login. The owner's room
+membership authorizes both SSE subscription and activity posts. There is no
+shared daemon credential: every gateway request is a member's session.
 
 ## Identity and scope
 
@@ -97,7 +98,6 @@ startup (SSE replay buffer).
 | `BNBLOC_CORES`                       | comma-separated core names to drive (`acme,nimbus`). First entry is the default core. Empty = no env-configured core: cores arrive via install (Components API) or `BNBLOC_CORE_<NAME>_URL`.       |
 | `BNBLOC_BRIDGE_ROOMS`                | comma-separated room ids to watch; empty watches all the owner's rooms.                                                                                                                            |
 | `BNBLOC_CORE_<NAME>_URL`             | explicit endpoint for one core (e.g. `BNBLOC_CORE_ACME_URL`), with `_TOKEN` beside it. Wins over per-core discovery; the only operator path to a core outside installs.                          |
-| `BNBLOC_LOCAL_AGENT_TOKEN`           | token the GATEWAY presents to a local agent core (dev default `dev-local-agent-token`); the bridge itself takes per-core tokens via `BNBLOC_CORE_<NAME>_TOKEN`.                                         |
 | `BNBLOC_GATEWAY_TOKEN`               | static bearer for gateway calls; empty makes the bridge mint an owner session token via login. Set it for enterprise-IdP (remote) gateways that reject the dev login.                              |
 | `BNBLOC_GATEWAY_REFRESH_TOKEN`       | owner refresh token handed over by the desktop; the bridge forks it once into its own refresh family (`POST /v1/auth/refresh/fork`) and rotates only that family via `POST /v1/auth/refresh` (works on SSO-only gateways), so it never races the desktop's own rotation. A graceful stop revokes the bridge family. Empty = dev login fallback. |
 | `BNBLOC_BRIDGE_SERVE_ALL_OWNERS`     | single-host mode: this one bridge drives every member's agent from the one local core (local multi-user testing). Off in a real deployment.                                                        |

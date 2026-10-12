@@ -15,9 +15,8 @@
 //
 // Key distribution is via BNBLOC_INTERNAL_KEY. When the key is unset the
 // middleware runs in dev-permissive mode (a one-time loud warning, requests pass
-// through) so local single-host development keeps working, mirroring the
-// gateway daemon-token policy. Set the key in any shared or multi-tenant
-// deployment.
+// through) so local single-host development keeps working; production
+// (BNBLOC_ENV=production) refuses to start without it.
 package svcauth
 
 import (

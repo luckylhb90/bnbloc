@@ -135,55 +135,32 @@ func TestClientIPTrustsOnlyConfiguredProxies(t *testing.T) {
 	}
 }
 
-// BE-13: the daemon token is a member-level credential, not a bypass: platform
-// and tenant-admin paths are refused, room scope still applies, and a wrong
-// token is simply unauthorized.
-func TestDaemonTokenGoesThroughScopeAndRBAC(t *testing.T) {
-	var hits []string
-	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		hits = append(hits, r.URL.Path+" as "+r.Header.Get("X-Bnbloc-User"))
-	}))
+// There is no shared daemon bearer: only a session token authenticates a
+// proxied request, the old dev default included, even with the dev
+// discovery switch on.
+func TestNoDaemonTokenBypass(t *testing.T) {
+	t.Setenv("BNBLOC_DEV_DISCOVERY", "1")
+	var hits int
+	backend := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { hits++ }))
 	defer backend.Close()
-	const daemonToken = "a-strong-daemon-token-for-tests"
-	gw := &Service{
-		Signer:   auth.NewSigner([]byte("k")),
-		Backends: Backends{Room: backend.URL, ShareAgent: backend.URL, Activity: backend.URL, LocalAgentToken: daemonToken},
-		Rooms: func(subject, _ string) []string {
-			if subject == daemonServiceSubject {
-				return []string{"daemon-room"}
-			}
-			return nil
-		},
-	}
+	gw := newGateway(t, backend.URL)
+	gw.Backends.Activity = backend.URL
 	srv := httptest.NewServer(gw.Handler())
 	defer srv.Close()
-	do := func(method, path, token string) int {
-		req, _ := http.NewRequest(method, srv.URL+path, nil)
+	for _, token := range []string{"dev-local-agent-token", "a-strong-shared-token"} {
+		req, _ := http.NewRequest(http.MethodPost, srv.URL+"/v1/rooms/room-1/agent-activity/messages", nil)
 		req.Header.Set("Authorization", "Bearer "+token)
 		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
 			t.Fatal(err)
 		}
 		resp.Body.Close()
-		return resp.StatusCode
+		if resp.StatusCode != http.StatusUnauthorized {
+			t.Fatalf("bearer %q = %d, want 401", token, resp.StatusCode)
+		}
 	}
-	if c := do(http.MethodGet, "/v1/platform/tenants", daemonToken); c != http.StatusForbidden {
-		t.Errorf("daemon on platform path: %d, want 403", c)
-	}
-	if c := do(http.MethodPost, "/v1/tenant/members", daemonToken); c != http.StatusForbidden {
-		t.Errorf("daemon on tenant-admin path: %d, want 403", c)
-	}
-	if c := do(http.MethodPost, "/v1/rooms/other-room/agent-activity/messages", daemonToken); c != http.StatusForbidden {
-		t.Errorf("daemon outside its rooms: %d, want 403", c)
-	}
-	if c := do(http.MethodPost, "/v1/rooms/daemon-room/agent-activity/messages", daemonToken+"x"); c != http.StatusUnauthorized {
-		t.Errorf("wrong daemon token: %d, want 401", c)
-	}
-	if c := do(http.MethodPost, "/v1/rooms/daemon-room/agent-activity/messages", daemonToken); c != http.StatusOK {
-		t.Errorf("daemon in its room: %d, want 200", c)
-	}
-	if len(hits) != 1 || hits[0] != "/v1/rooms/daemon-room/agent-activity/messages as "+daemonServiceSubject {
-		t.Fatalf("backend hits = %v", hits)
+	if hits != 0 {
+		t.Fatalf("backend reached %d times without a session", hits)
 	}
 }
 

@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/luckylhb90/bnbloc/core"
+	"github.com/luckylhb90/bnbloc/internal/config"
 	"github.com/luckylhb90/bnbloc/internal/coreset"
 	"github.com/luckylhb90/bnbloc/internal/obs"
 	"github.com/luckylhb90/bnbloc/internal/svcauth"
@@ -92,6 +93,16 @@ func (s *Service) handleLocalAgentRun(w http.ResponseWriter, r *http.Request) {
 	claims, err := s.authenticate(r)
 	if err != nil {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	// It creates a room and drives an agent: the proxy's org RBAC and rate
+	// limit apply (edgeGate), not just a session.
+	p, err := parseAPIPath(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if !s.edgeGate(w, r, p, claims) {
 		return
 	}
 	var body struct {
@@ -290,29 +301,26 @@ func (s *Service) handleLocalAgentTargets(w http.ResponseWriter, r *http.Request
 	writeJSON(w, http.StatusOK, map[string]any{"targets": out})
 }
 
-// adoptRoom makes the workspace id a bnbloc room the caller (and the daemon
-// service subject) can use. It creates the room; when the id already exists
-// (room ids are global, so a create in any tenant collides) it is adopted only
-// if the caller is already a member — it is never re-created, and a room that
-// belongs to someone else is refused rather than taken over.
+// adoptRoom makes the workspace id a bnbloc room the caller can use. It
+// creates the room; when the id already exists (room ids are global, so a
+// create in any tenant collides) it is adopted only if the caller is already
+// a member — it is never re-created, and a room that belongs to someone else
+// is refused rather than taken over.
 func (s *Service) adoptRoom(ctx context.Context, roomID, subject, tenantID string) error {
 	create, _ := json.Marshal(map[string]any{"roomId": roomID, "name": "Local agent room"})
 	err := s.roomBackendCall(ctx, http.MethodPost, "/v1/rooms", subject, tenantID, create)
 	var rbe *roomBackendError
 	switch {
 	case err == nil:
+		return nil
 	case errors.As(err, &rbe) && rbe.Status == http.StatusConflict:
 		if !s.subjectInRoom(subject, roomID, tenantID) {
 			return fmt.Errorf("room %q already exists and the caller is not a member", roomID)
 		}
-		if s.subjectInRoom(daemonServiceSubject, roomID, tenantID) {
-			return nil // already adopted on an earlier run
-		}
+		return nil
 	default:
 		return err
 	}
-	addMember, _ := json.Marshal(map[string]any{"userId": daemonServiceSubject, "role": "member"})
-	return s.roomBackendCall(ctx, http.MethodPost, "/v1/rooms/"+url.PathEscape(roomID)+"/members", subject, tenantID, addMember)
 }
 
 // roomBackendError is a non-2xx answer from the room service, kept structured
@@ -418,11 +426,23 @@ func (s *Service) handleLocalAgentDiscover(w http.ResponseWriter, r *http.Reques
 	})
 }
 
+// devDiscoveryEnv is the dev-only single-host switch: /v1/local-agent/discover
+// (which reads and returns the host core's token) and a caller-supplied core
+// address on /v1/local-agent/run.
+const devDiscoveryEnv = "BNBLOC_DEV_DISCOVERY"
+
 // devDiscoveryEnabled reports whether the dev-only local-agent discovery path
-// (which reads and returns the host daemon's token) is explicitly enabled via
-// BNBLOC_DEV_DISCOVERY=1. It is off by default so a production gateway never
-// leaks the host token.
+// is explicitly enabled (BNBLOC_DEV_DISCOVERY=1). Never in production: the
+// switch refuses startup there (CheckProductionEnv), and reads off here too.
 func devDiscoveryEnabled() bool {
-	v := strings.TrimSpace(os.Getenv("BNBLOC_DEV_DISCOVERY"))
+	if config.Production() {
+		return false
+	}
+	v := strings.TrimSpace(os.Getenv(devDiscoveryEnv))
 	return v == "1" || strings.EqualFold(v, "true")
 }
+
+// CheckProductionEnv refuses a production gateway (BNBLOC_ENV=production)
+// started with a dev-only switch set. The composition root calls it before
+// serving.
+func CheckProductionEnv() error { return config.RefuseInProduction(devDiscoveryEnv) }

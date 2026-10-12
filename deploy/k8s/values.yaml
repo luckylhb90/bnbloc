@@ -89,10 +89,6 @@ gateway:
   # Explicitly configured cores (operator escape hatch; installed component
   # packages need no entry). Each needs BNBLOC_CORE_<NAME>_URL via extraEnv.
   cores: []
-  # Optional shared bearer a trusted local daemon presents. Unset disables the
-  # daemon-token bypass (fail closed).
-  localAgentToken:
-    secretRef: { name: "", key: localAgentToken }
   # Seals organization MCP tool connectors at rest (BNBLOC_SECRET_STORE_KEY:
   # 32 random bytes, base64 or hex, e.g. `openssl rand -base64 32`). Every
   # replica shares it; losing it loses the stored connectors (org admins

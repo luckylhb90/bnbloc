@@ -88,8 +88,7 @@ The full variable reference is [Environment Variables](./environment-variables.m
 | `BNBLOC_OIDC_ISSUER_URL` + `BNBLOC_OIDC_CLIENT_ID` | The identity provider. Production refuses the dev verifier, which accepts any identity string. |
 | `BNBLOC_SUPER_ADMINS` | Cross-tenant platform admins; set real verified subject ids/emails. |
 
-Optional: `BNBLOC_LOCAL_AGENT_TOKEN` (shared daemon bearer; empty disables
-that path), `BNBLOC_ALLOWED_ORIGINS`, S3 attachment settings,
+Optional: `BNBLOC_ALLOWED_ORIGINS`, S3 attachment settings,
 `BNBLOC_AWS_SECRET_ID` to load secrets from AWS Secrets Manager.
 
 ### Components and plugin packages

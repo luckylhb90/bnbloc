@@ -165,7 +165,6 @@ services:
       # production overlay (deploy/compose.prod.yml) pins this EMPTY — only
       # signed packages install there.
       BNBLOC_EXT_ALLOW_UNSIGNED: "${BNBLOC_EXT_ALLOW_UNSIGNED:-true}"
-      BNBLOC_LOCAL_AGENT_TOKEN: "${BNBLOC_LOCAL_AGENT_TOKEN:-dev-local-agent-token}"
       # Stable session-token signing key so sessions survive gateway restarts.
       # Dev default is fine locally; production MUST inject a strong secret.
       BNBLOC_SESSION_SIGNING_KEY: "${BNBLOC_SESSION_SIGNING_KEY:-dev-bnbloc-session-signing-key-change-me}"

@@ -70,6 +70,17 @@ func (c *boundedCache[V]) put(k string, v V) {
 	c.m[k] = boundedEntry[V]{v: v, expires: now.Add(c.ttl)}
 }
 
+// deleteWhere drops every entry whose key matches.
+func (c *boundedCache[V]) deleteWhere(match func(key string) bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for k := range c.m {
+		if match(k) {
+			delete(c.m, k)
+		}
+	}
+}
+
 func (c *boundedCache[V]) len() int {
 	c.mu.Lock()
 	defer c.mu.Unlock()

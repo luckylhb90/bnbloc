@@ -248,6 +248,10 @@ func main() {
 	if err := svcauth.CheckKey(svcauth.KeyFromEnv()); err != nil {
 		log.Fatalf("bnbloc-gateway: %v", err)
 	}
+	// A dev-only switch (BNBLOC_DEV_DISCOVERY) never runs in production.
+	if err := gateway.CheckProductionEnv(); err != nil {
+		log.Fatalf("bnbloc-gateway: %v", err)
+	}
 	tw := resolveTenantWiring()
 	allowUnsigned := truthy(config.FromEnvRaw("BNBLOC_EXT_ALLOW_UNSIGNED"))
 	// Organization MCP connectors are sealed under the secret store key;
@@ -263,12 +267,11 @@ func main() {
 		Verifier: resolveVerifier(),
 		Signer:   auth.NewSigner(resolveSigningKey()),
 		Backends: gateway.Backends{
-			Room:            config.FromEnvRaw("BNBLOC_ROOM_BASE_URL"),
-			Activity:        config.FromEnvRaw("BNBLOC_ACTIVITY_BASE_URL"),
-			ShareAgent:      config.FromEnvRaw("BNBLOC_SHAREAGENT_BASE_URL"),
-			Realtime:        config.FromEnvRaw("BNBLOC_REALTIME_BASE_URL"),
-			Relay:           config.FromEnvRaw("BNBLOC_RELAY_BASE_URL"),
-			LocalAgentToken: config.FromEnvRaw("BNBLOC_LOCAL_AGENT_TOKEN"),
+			Room:       config.FromEnvRaw("BNBLOC_ROOM_BASE_URL"),
+			Activity:   config.FromEnvRaw("BNBLOC_ACTIVITY_BASE_URL"),
+			ShareAgent: config.FromEnvRaw("BNBLOC_SHAREAGENT_BASE_URL"),
+			Realtime:   config.FromEnvRaw("BNBLOC_REALTIME_BASE_URL"),
+			Relay:      config.FromEnvRaw("BNBLOC_RELAY_BASE_URL"),
 		},
 		Rooms:             gateway.NewRoomMembershipResolver(config.FromEnvRaw("BNBLOC_ROOM_BASE_URL"), nil),
 		InRoom:            gateway.NewRoomMembershipProbe(config.FromEnvRaw("BNBLOC_ROOM_BASE_URL"), nil),

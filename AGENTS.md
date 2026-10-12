@@ -502,7 +502,11 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   desktop releases. A new artifact consumer must go through that check.
 - **`/v1/local-agent/run` takes a caller-supplied core URL/token only under
   `BNBLOC_DEV_DISCOVERY`** and always requires `agentTargetId`; production
-  callers drive the gateway-resolved core endpoint.
+  callers drive the gateway-resolved core endpoint. `BNBLOC_DEV_DISCOVERY` is
+  fatal at startup in production (`gateway.CheckProductionEnv`,
+  `config.RefuseInProduction`). The route creates a room and drives an
+  agent, so it passes the proxy's org RBAC and rate limit (`edgeGate`).
+  There is no shared daemon bearer: every gateway request is a session.
 - **Gateway-uploaded artifact provenance.** A sidecar package's platform
   binaries are staged through the super-admin `POST /v1/platform/artifacts`
   (streams to realtime's blob store, 256 MiB cap, sha256 content-addressed)
@@ -583,8 +587,8 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   chat/agent_messages persist), so they never enter history.
 - **Safety limits live at two layers.** realtime caps chat text (16KB -> 413,
   empty -> 400, body 64KB via MaxBytesReader); the gateway rate-limits
-  cost-bearing writes (POST chat, borrow) per subject (~2/s, burst 10 -> 429),
-  exempting the daemon subject. Reads/SSE/history are never limited. The client
+  cost-bearing writes (POST chat, borrow, room creation) per subject (~2/s,
+  burst 10 -> 429). Reads/SSE/history are never limited. The client
   maps 429/413 to specific toasts; other swallowed errors are background
   best-effort by design.
 
