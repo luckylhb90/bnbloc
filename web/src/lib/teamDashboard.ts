@@ -10,7 +10,7 @@ export type TeamScope = "self" | "tenant";
 export type { QuotaRequestStatus, TeamJob, TeamRange, UsageAs, UsageGroupBy } from "./wire.gen.ts";
 import type { QuotaRequestStatus, TeamRange, UsageAs, UsageGroupBy } from "./wire.gen.ts";
 
-export type { BorrowUsageReport, BorrowUsageRow, CreateQuotaRequestInput, QuotaRequest, TeamAgent, TeamAgentUsage, TeamAgentsReply } from "./wire.gen.ts";
+export type { BorrowUsageReport, CreateQuotaRequestInput, QuotaRequest, TeamAgent, TeamAgentsReply } from "./wire.gen.ts";
 import type { QuotaRequest, TeamAgent } from "./wire.gen.ts";
 
 

@@ -4,7 +4,7 @@
 // unit-tested.
 import { formatUsd } from "./format.ts";
 
-export type { AgentCostSample, ContentTeam, ContentTeamExpert, ContentTeamMember, PlanAgent, TeamCostEstimate, TeamPlanEntry, TeamPlanRequest } from "./wire.gen.ts";
+export type { ContentTeam, TeamCostEstimate, TeamPlanEntry, TeamPlanRequest } from "./wire.gen.ts";
 import type { ContentTeam, TeamCostEstimate, TeamPlanEntry, TeamPlanRequest } from "./wire.gen.ts";
 
 export type { TeamPlanReply as TeamPlan } from "./wire.gen.ts";

@@ -8,7 +8,7 @@
 
 import { OrgRolePermissions, OrgRoleUnknown, type OrgPermission } from "./wire.gen.ts";
 
-export type { OrgPermission, OrgRole } from "./wire.gen.ts";
+export type { OrgPermission } from "./wire.gen.ts";
 
 // can reports whether the session's org role holds perm. A session without
 // a role holds the grants of the empty role; an unrecognized role those of

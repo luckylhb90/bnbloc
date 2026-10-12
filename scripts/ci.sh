@@ -9,7 +9,7 @@
 #                           (MySQL integration tests run when
 #                           BNBLOC_TEST_MYSQL_DSN is set, skip otherwise;
 #                           they need CREATE/DROP DATABASE on its server)
-#   scripts/ci.sh web       pnpm install --frozen-lockfile, build, node tests
+#   scripts/ci.sh web       pnpm install --frozen-lockfile, build, node tests, knip
 #   scripts/ci.sh desktop   web build + bridge sidecar + cargo test --locked
 #   scripts/ci.sh secrets   gitleaks over the git history (needs gitleaks)
 #   scripts/ci.sh all       every stage above, in order
@@ -60,6 +60,8 @@ stage_web() {
   web_install_build
   log "web: node --test"
   (cd web && node --test 'src/**/*.test.ts' 'scripts/*.test.mjs' 'previewer-sdk/src/*.test.ts')
+  log "web: knip (no unused files, exports or dependencies)"
+  pnpm --dir web exec knip
   log "web: reference previewer build"
   node --test examples/previewers/sprite-sheet/build.test.mjs
 }

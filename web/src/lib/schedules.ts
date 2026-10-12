@@ -7,7 +7,7 @@ import { defaultDisplayName, formatAgentHandle } from "./displayNames.ts";
 export type { RoomSchedule, ScheduleRecipient, ScheduleRecurrence, ScheduledMarker } from "./wire.gen.ts";
 import type { RoomSchedule, ScheduleRecipient, ScheduleRecurrence, ScheduledMarker } from "./wire.gen.ts";
 
-export type { RecurrenceKind, ScheduleRunStatus } from "./wire.gen.ts";
+export type { RecurrenceKind } from "./wire.gen.ts";
 import type { RecurrenceKind } from "./wire.gen.ts";
 
 export interface ScheduleInput {

@@ -10,11 +10,7 @@ import { AgentJobStatusValues, AgentJobTerminalStatuses } from "./wire.gen.ts";
 export type {
   AgentRun,
   AgentRunAgent,
-  AgentRunPhases,
-  AgentRunReply,
-  AgentRunRequest,
   AgentRunsReply,
-  AgentRunUsage,
   RunScope,
 } from "./wire.gen.ts";
 import type { AgentRun, AgentRunAgent, RunScope } from "./wire.gen.ts";

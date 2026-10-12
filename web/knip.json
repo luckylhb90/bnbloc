@@ -1,0 +1,8 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+  "entry": ["src/**/*.test.ts", "scripts/*.mjs", "previewer-sdk/src/*.ts"],
+  "project": ["src/**/*.{ts,tsx}", "scripts/*.mjs", "previewer-sdk/src/*.ts"],
+  "ignore": ["src/lib/wire.gen.ts"],
+  "ignoreDependencies": ["tailwindcss"],
+  "ignoreExportsUsedInFile": true
+}

@@ -3,7 +3,7 @@
 // Shapes are internal/wire/notifications.go's (wire.gen.ts); the contract is documented in
 // docs/notifications.md.
 
-export type { MemberNotifier, NotificationPrefs, NotificationRecipientResult, NotificationTestResult } from "./wire.gen.ts";
+export type { MemberNotifier, NotificationPrefs, NotificationTestResult } from "./wire.gen.ts";
 import type { NotificationPrefs, NotificationTestResult } from "./wire.gen.ts";
 
 // NotificationToggle is a per-type switch of the member's preferences.

@@ -6,7 +6,6 @@ export type {
   AgentJob,
   AgentTarget,
   Artifact,
-  ArtifactThumbnail,
   ArtifactVersion,
   Core,
   PlazaRoom,
@@ -19,7 +18,7 @@ import type { RoomDetail, RoomPreview } from "./wire.gen.ts";
 
 export type { UpdatePlatform as UpdatePlatformArtifact } from "./wire.gen.ts";
 
-export type { ReleaseEntry, ReleaseFile, ReleaseHub, ReleaseHubMeta, UpdateConfig, UpdatePolicy, UpdateRelease } from "./wire.gen.ts";
+export type { ReleaseEntry, ReleaseFile, ReleaseHub, ReleaseHubMeta, UpdateConfig, UpdatePolicy } from "./wire.gen.ts";
 
 // Room is GET /v1/rooms/{id}: a member's detail, or a non-member's preview
 // of a shared room (`"preview" in room` tells them apart).

@@ -194,10 +194,6 @@ export interface ComponentPublishRequest {
 }
 export type ComponentInstallRequest = ComponentPublishRequest;
 
-export interface ComponentRolloutRequest {
-  readonly rollout: ComponentRollout;
-}
-
 export type ComponentValidationStepId =
   | "reading"
   | "schema"

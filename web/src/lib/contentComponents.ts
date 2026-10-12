@@ -5,7 +5,7 @@
 
 import { parseDefaultAgent } from "./teams.ts";
 
-export type { ChatExpert, ContentComponent, ContentComponentDetail, ContentFile, ContentMCPRequirement, ContentPublication, ContentPublishRequest, ContentQuickPrompt, ContentRequires, ContentSkill, ContentUse, ContentUsesReply, ContentVersion, ContentVersionDetail } from "./wire.gen.ts";
+export type { ChatExpert, ContentComponent, ContentComponentDetail, ContentMCPRequirement, ContentPublishRequest, ContentQuickPrompt, ContentRequires, ContentUse, ContentUsesReply, ContentVersionDetail } from "./wire.gen.ts";
 import type { ChatExpert, ContentComponent, ContentQuickPrompt, ContentRequires, ContentUse, ContentVersionDetail } from "./wire.gen.ts";
 
 export type { ContentKind } from "./wire.gen.ts";

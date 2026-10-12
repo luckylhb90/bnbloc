@@ -4,7 +4,7 @@
 // consoles render them with. Calls are in contentSharingApi.ts.
 import { contentLabel, isBuiltin, type ContentComponent, type ContentPublishRequest } from "./contentComponents.ts";
 
-export type { ContentAdminComponent, ContentCopy, ContentFileChange, ContentPublishReply, ContentReview, ContentRoomShare, ContentShareReply, ContentShareResult, ContentShareSkip, ContentShares } from "./wire.gen.ts";
+export type { ContentAdminComponent, ContentCopy, ContentFileChange, ContentPublishReply, ContentReview, ContentRoomShare, ContentShareReply, ContentShares } from "./wire.gen.ts";
 import type { ContentFileChange, ContentShareReply } from "./wire.gen.ts";
 
 // tenantScopeLabel describes where platform content reaches.

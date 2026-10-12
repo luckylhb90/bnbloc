@@ -75,28 +75,14 @@ import { roomPath } from "./roomId.ts";
 // bearer token and centralizes error shaping so views get typed helpers.
 
 export type {
-  ComponentAdoption,
-  ComponentArtifact,
-  ComponentBase,
-  ComponentEndpoint,
   ComponentInstallRequest,
   ComponentKey,
   ComponentKind,
   ComponentPackageEnvelope,
-  ComponentPackageKind,
-  ComponentPermissions,
-  ComponentProtocolRange,
   ComponentRollout,
-  ComponentRolloutRequest,
-  ComponentRuntime,
-  ComponentSidecar,
-  ComponentTrust,
   ComponentValidationStep,
   ComponentValidationStepId,
-  ComponentValidationStepState,
-  ComponentPublishRequest,
   MemberComponent,
-  LocalSettingField,
   PlatformComponent,
   PublishedComponent,
 } from "./apiTypes";

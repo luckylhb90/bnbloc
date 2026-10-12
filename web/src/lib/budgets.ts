@@ -1,6 +1,6 @@
 import { compactNumber, formatUsd } from "./format.ts";
 
-export type { BudgetPeriod, BudgetView, MemberBurn, TenantBudgetsUpdate, UsageBurn } from "./wire.gen.ts";
+export type { BudgetView, TenantBudgetsUpdate, UsageBurn } from "./wire.gen.ts";
 import type { BudgetView, TenantBudgetsUpdate, UsageBurn } from "./wire.gen.ts";
 
 export type { UsageBudgetLimits as BudgetLimits, MyBudgetReply as MyBudget, TenantBudgetsReply as TenantBudgets } from "./wire.gen.ts";

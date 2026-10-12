@@ -1,7 +1,7 @@
 // Deployment build identity (GET /v1/platform/versions, super-admin): wire
 // shapes are internal/wire/versions.go's (wire.gen.ts).
 
-export type { DeploymentVersions, ServiceVersion, WebBundleVersion } from "./wire.gen.ts";
+export type { DeploymentVersions } from "./wire.gen.ts";
 import type { DeploymentVersions } from "./wire.gen.ts";
 
 export interface DeploymentRow {

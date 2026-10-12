@@ -6,7 +6,7 @@
 import { compactNumber, formatUsd } from "./format.ts";
 import { prettyModel } from "./modelLabel.ts";
 
-export type { PlatformAgentUsageReply as PlatformAgentsUsage, PlatformAgentUsageMember as PlatformUsageMember, PlatformAgentUsageRoom as PlatformUsageRoom, PlatformAgentUsageRun as PlatformUsageRun, PlatformAgentUsageTotals as PlatformUsageTotals } from "./wire.gen.ts";
+export type { PlatformAgentUsageReply as PlatformAgentsUsage, PlatformAgentUsageTotals as PlatformUsageTotals } from "./wire.gen.ts";
 import type { PlatformAgentUsageReply as PlatformAgentsUsage, PlatformAgentUsageTotals as PlatformUsageTotals } from "./wire.gen.ts";
 
 const ZERO: PlatformUsageTotals = { runs: 0, members: 0, rooms: 0, tokens: 0, cost: 0 };
