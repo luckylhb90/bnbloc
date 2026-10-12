@@ -24,7 +24,7 @@ function testFewestQueued(): void {
 
 function testStickyLastHost(): void {
   const hosts = [h("a", true, 0), h("b", true, BUSIER_BY - 1)];
-  assert(pickHost(hosts, "B")?.hostUserId === "b", "the last host stays while fewer than 3 jobs busier");
+  assert(pickHost(hosts, "b")?.hostUserId === "b", "the last host stays while fewer than 3 jobs busier");
   assert(pickHost([h("a", true, 0), h("b", true, BUSIER_BY)], "b")?.hostUserId === "a", "3+ busier: move to the least busy");
   assert(pickHost([h("a", true, 5), h("b", false, 0)], "b")?.hostUserId === "a", "an offline last host is skipped");
 }
@@ -33,7 +33,8 @@ function testLastHostStorage(): void {
   const s = memoryStorage();
   const codex = { core: "nimbus", provider: "codex" };
   assert(readLastHost(s, "jack", "r1", codex) === null, "nothing remembered");
-  rememberHost(s, "Jack", "r1", codex, "rose");
+  rememberHost(s, "jack", "r1", codex, "rose");
+  assert(readLastHost(s, "Jack", "r1", codex) === null, "Jack is another member");
   assert(readLastHost(s, "jack", "r1", { core: "Nimbus", provider: "Codex" }) === "rose", "per member, room and agent");
   assert(readLastHost(s, "jack", "r2", codex) === null, "another room has its own host");
   assert(readLastHost(s, "bob", "r1", codex) === null, "another member has their own host");

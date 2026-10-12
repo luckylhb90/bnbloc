@@ -34,8 +34,9 @@ function testWelcomeVisibility(): void {
 
 function testDismissalIsPerUser(): void {
   const s = memoryStorage();
-  dismissWelcome(s, "Jack");
+  dismissWelcome(s, "jack");
   assert(welcomeDismissed(s, "jack"), "dismissed for jack");
+  assert(!welcomeDismissed(s, "Jack"), "Jack is another member");
   assert(!welcomeDismissed(s, "rose"), "not for rose");
   assert(!welcomeDismissed(null, "jack") && !welcomeDismissed(s, null), "no storage / no user");
 }

@@ -15,7 +15,7 @@ import { UserName } from "@/views/UserName";
 // unpriced/trial models).
 export function PlatformAgentsUsagePanel() {
   const { subject } = useAuth();
-  const query = useQuery(subject ? `platform-agents-usage:${subject.toLowerCase()}` : null, platformAgentsApi.usage, {
+  const query = useQuery(subject ? `platform-agents-usage:${subject}` : null, platformAgentsApi.usage, {
     staleMs: 30_000,
   });
   const usage = query.data;

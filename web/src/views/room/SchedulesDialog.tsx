@@ -252,7 +252,7 @@ export function SchedulesDialog({
 
 // recipientKey identifies a recipient option ("room" or the agent identity).
 function recipientKey(r: ScheduleRecipient): string {
-  return r.kind === "room" ? "room" : `${r.ownerId.toLowerCase()}\x00${r.core ?? ""}\x00${r.provider}`;
+  return r.kind === "room" ? "room" : `${r.ownerId}\x00${r.core ?? ""}\x00${r.provider}`;
 }
 
 // ScheduleEditor creates or edits one schedule. The recipient choices are the

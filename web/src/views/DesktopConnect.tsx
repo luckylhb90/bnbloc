@@ -41,7 +41,7 @@ export function DesktopConnectNotice({ collapsed }: { readonly collapsed: boolea
   );
 }
 
-const dismissKey = (subject: string) => `bnbloc.desktopHint.dismissed.${subject.toLowerCase()}`;
+const dismissKey = (subject: string) => `bnbloc.desktopHint.dismissed.${subject}`;
 
 // DesktopConnectBanner is the in-room hint for a browser member whose desktop
 // app is not connected. Dismissible per member; the sidebar entry stays. A room

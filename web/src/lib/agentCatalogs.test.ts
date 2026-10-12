@@ -20,7 +20,7 @@ const mine: AgentTarget = {
 };
 
 const catalogs: RoomAgentCatalog[] = [
-  { ownerUserId: "Alice", core: "acme", provider: "codex", online: true, modelOptions: { models: ["my-room"] } },
+  { ownerUserId: "alice", core: "acme", provider: "codex", online: true, modelOptions: { models: ["my-room"] } },
   {
     ownerUserId: "bob",
     core: "acme",
@@ -53,7 +53,7 @@ function testNoPickUsesMySelectedLocalTarget(): void {
 function testOwnAgentPrefersTheLocalTarget(): void {
   const own = { ownerId: "alice", core: "acme", provider: "codex" };
   assert(resolve(own)?.models?.[0] === "my-local-a", "desktop: the local target is the freshest catalog");
-  assert(resolve(own, [])?.models?.[0] === "my-room", "browser: my agent's room catalog (owner matched case-insensitively)");
+  assert(resolve(own, [])?.models?.[0] === "my-room", "browser: my agent's room catalog");
 }
 
 function testAnotherMembersAgentNeverGetsMyCatalog(): void {
@@ -111,9 +111,10 @@ function testRestrictKeepsAnAuthorizedDefault(): void {
 }
 
 function testRefreshKeyFollowsTheAgentSet(): void {
-  const a = catalogRefreshKey([{ ownerId: "Bob", core: "c", provider: "codex" }, { ownerId: "alice", provider: "x" }]);
+  const a = catalogRefreshKey([{ ownerId: "bob", core: "c", provider: "codex" }, { ownerId: "alice", provider: "x" }]);
   const b = catalogRefreshKey([{ ownerId: "alice", provider: "x" }, { ownerId: "bob", core: "c", provider: "codex" }]);
-  assert(a === b, "order and owner case do not change the key");
+  assert(a === b, "order does not change the key");
+  assert(a !== catalogRefreshKey([{ ownerId: "Bob", core: "c", provider: "codex" }, { ownerId: "alice", provider: "x" }]), "another owner (subjects are case-sensitive) changes the key");
   assert(a !== catalogRefreshKey([{ ownerId: "alice", provider: "x" }]), "a removed agent changes the key");
 }
 

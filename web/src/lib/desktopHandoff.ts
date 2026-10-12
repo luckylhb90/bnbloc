@@ -16,9 +16,9 @@ export function shouldShowDesktopHandoff(input: {
   readonly roomAgents: readonly { ownerUserId: string }[] | undefined;
   readonly roomRosterKnown: boolean;
 }): boolean {
-  const subject = input.subject?.trim().toLowerCase();
+  const subject = input.subject?.trim();
   const ownRoomAgentOnline =
-    !!subject && (input.roomAgents ?? []).some((agent) => agent.ownerUserId.toLowerCase() === subject);
+    !!subject && (input.roomAgents ?? []).some((agent) => agent.ownerUserId === subject);
   return (
     !input.inDesktopShell &&
     !isPhoneBrowser(input.userAgent) &&

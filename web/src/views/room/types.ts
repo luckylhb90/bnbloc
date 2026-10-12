@@ -2,6 +2,7 @@ import type { ChatAttachment, TurnMetrics } from "@/lib/api";
 import type { AgentOptions } from "@/views/composer/types";
 import type { DispatchAttribution } from "@/lib/dispatch";
 import type { ChatExpert, ExpertMarker } from "@/lib/contentComponents";
+import { sameUser } from "../../lib/format.ts";
 
 // The routing of one chat send, exactly as it went (or will go) on the wire.
 export interface ChatRecipient {
@@ -87,9 +88,8 @@ export interface FeedItem {
 // never equal the subject, so they render on the opposite side. Guards against
 // display-name vs userId casing (e.g. "Maya" vs "maya") that flipped alignment.
 export function isSelf(author: string | undefined, subject: string | null): boolean {
-  if (!author || !subject) return false;
   if (author === "agent") return false;
-  return author.toLowerCase() === subject.toLowerCase();
+  return sameUser(author, subject);
 }
 
 // One monotonic client id source shared by every feed producer (live dispatch,

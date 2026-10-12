@@ -14,6 +14,7 @@ import { defaultDisplayName } from "./displayNames.ts";
 import { agentIdentity, borrowKey, mergeRoomAgents, type RosterAgent, type SharedAgent } from "./roomAgents.ts";
 import { pickHost } from "./platformRouting.ts";
 import type { RoomAgent } from "../views/composer/types.ts";
+import { sameUser } from "./format.ts";
 
 export interface PlatformAgentRef {
   readonly core: string;
@@ -97,9 +98,6 @@ export function samePlatformAgent(a: PlatformAgentRef, b: PlatformAgentRef): boo
   return (a.core ?? "").toLowerCase() === (b.core ?? "").toLowerCase() && a.provider.toLowerCase() === b.provider.toLowerCase();
 }
 
-function sameUser(a: string | null | undefined, b: string | null | undefined): boolean {
-  return !!a && !!b && a.toLowerCase() === b.toLowerCase();
-}
 
 export function platformAgentOnline(a: PlatformAgent): boolean {
   return a.hosts.some((h) => h.online);

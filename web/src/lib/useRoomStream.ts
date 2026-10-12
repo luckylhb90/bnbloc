@@ -9,13 +9,11 @@ import { maxSequence } from "@/views/room/feedModel";
 import { unreadBaseline } from "@/lib/unreadBaseline";
 import { roomAccessEnded, type RoomAccessEnd } from "@/lib/roomGone";
 
-// Case-insensitive self match, mirrored from the feed's own isSelf: the agent
-// (author "agent") never equals the subject, and display-name vs userId casing
-// ("Maya" vs "maya") must not flip a self check.
+// Self match, mirrored from the feed's own isSelf: the agent (author "agent")
+// never equals the subject; user ids compare exactly (sameUser).
 function isSelfUser(who: string | undefined, subject: string | null): boolean {
-  if (!who || !subject) return false;
   if (who === "agent") return false;
-  return who.toLowerCase() === subject.toLowerCase();
+  return sameUser(who, subject);
 }
 
 interface UseRoomStreamParams {

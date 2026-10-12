@@ -288,7 +288,7 @@ export function shouldAutoStartTour(s: OnboardingState, priorRoomCount: number |
 
 // ---- persistence
 
-export const onboardingKey = (subject: string) => `bnbloc.onboarding.v1:${subject.toLowerCase()}`;
+export const onboardingKey = (subject: string) => `bnbloc.onboarding.v1:${subject}`;
 
 const ITEM_IDS = new Set<string>(CHECKLIST.map((i) => i.id));
 const STATUSES = new Set<string>(["never", "active", "skipped", "done"]);

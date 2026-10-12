@@ -63,7 +63,9 @@ test("banner names the source room and the import date", () => {
 
 test("suggestions never hand out ownership and skip current members", () => {
   assert.deepEqual(info.suggestedMembers.map((m) => suggestedInviteRole(m.role)), ["admin", "member", "visitor"]);
-  assert.deepEqual(pendingSuggestions(info.suggestedMembers, ["dave", "bob"]).map((m) => m.userId), ["alice", "vic"]);
+  assert.deepEqual(pendingSuggestions(info.suggestedMembers, ["dave", "Bob"]).map((m) => m.userId), ["alice", "vic"]);
+  // Subjects are case-sensitive: "bob" is not the suggested "Bob".
+  assert.deepEqual(pendingSuggestions(info.suggestedMembers, ["dave", "bob"]).map((m) => m.userId), ["alice", "Bob", "vic"]);
 });
 
 test("download filename comes from Content-Disposition", () => {

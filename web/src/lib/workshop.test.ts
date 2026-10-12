@@ -79,7 +79,8 @@ const rooms = [
   { roomId: "r-shared", name: WORKSHOP_ROOM_NAME, visibility: "shared", isOwner: true, createdAtMs: 9 },
   { roomId: "r-theirs", name: WORKSHOP_ROOM_NAME, visibility: "private", isOwner: false, createdBy: "jack", createdAtMs: 9 },
   { roomId: "r-old", name: WORKSHOP_ROOM_NAME, visibility: "private", isOwner: true, createdAtMs: 1 },
-  { roomId: "r-new", name: "expert workshop", visibility: "private", createdBy: "Maya", createdAtMs: 5 },
+  { roomId: "r-new", name: "expert workshop", visibility: "private", createdBy: "maya", createdAtMs: 5 },
+  { roomId: "r-case", name: WORKSHOP_ROOM_NAME, visibility: "private", createdBy: "Maya", createdAtMs: 6 },
   { roomId: "r-renamed", name: "My builder", visibility: "private", isOwner: true, createdAtMs: 3 },
 ];
 eq(workshopCandidates(rooms, "maya", null), ["r-new", "r-old", "r-renamed"], "named first, newest first");
@@ -93,8 +94,9 @@ assert(/^expert-workshop-[a-z2-9]{6}$/.test(workshopRoomId(() => 0.5)), "worksho
 // The cache is per member and tolerates missing storage.
 const store = new Map<string, string>();
 const storage = { getItem: (k: string) => store.get(k) ?? null, setItem: (k: string, v: string) => void store.set(k, v) };
-rememberWorkshop(storage, "Maya", "r-new");
-eq(cachedWorkshop(storage, "maya"), "r-new", "cached per member (case-insensitive)");
+rememberWorkshop(storage, "maya", "r-new");
+eq(cachedWorkshop(storage, "maya"), "r-new", "cached per member");
+eq(cachedWorkshop(storage, "Maya"), null, "Maya is another member");
 eq(cachedWorkshop(storage, "jack"), null, "another member");
 eq(cachedWorkshop(null, "maya"), null, "no storage");
 

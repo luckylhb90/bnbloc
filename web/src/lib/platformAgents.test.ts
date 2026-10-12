@@ -87,7 +87,8 @@ function testPlatformChoices(): void {
   assert(!!c && c.inRoom && c.online, "in-room flag from the room list, online from the live offer");
   assert(c?.agent.defaultModel === "x-free", "the routed host's default model rides on the recipient");
   assert(choices.find((x) => x.agent.provider === "claude-code")?.inRoom === false, "not yet added");
-  assert(platformChoices([codex], [], "Admin").length === 0, "the host is not offered their own agents");
+  assert(platformChoices([codex], [], "admin").length === 0, "the host is not offered their own agents");
+  assert(platformChoices([codex], [], "Admin").length === 1, "Admin is another member");
 }
 
 function testMultiHostAgentIsOneChoice(): void {
@@ -142,7 +143,7 @@ function testComposeRoutesRoomPlatformAgents(): void {
 
 function testQueueAheadAndOfflineRefusal(): void {
   const inRoom: RoomPlatformAgent = { core: "nimbus", provider: "codex", online: true, hosts: [host("admin", true, 3)], addedBy: "", addedAtMs: 0 };
-  const job = { status: "queued" as const, ownerUserId: "Admin", core: "nimbus", provider: "codex" };
+  const job = { status: "queued" as const, ownerUserId: "admin", core: "nimbus", provider: "codex" };
   assert(jobQueueAhead(job, [inRoom]) === 2, "the host's queue counts the job itself");
   assert(jobQueueAhead({ ...job, status: "running" }, [inRoom]) === 0, "a started job is not waiting");
   assert(jobQueueAhead({ ...job, failureReason: "no_bridge_online" }, [inRoom]) === 0, "a retry keeps its own label");
@@ -173,7 +174,7 @@ function testConsoleRows(): void {
   ];
   const policy = {
     hosts: [
-      { hostUserId: "Admin", enabled: true, agents: [{ core: "nimbus", provider: "codex", defaultModel: "x-free" }, { core: "orbit", provider: "gemini" }] },
+      { hostUserId: "admin", enabled: true, agents: [{ core: "nimbus", provider: "codex", defaultModel: "x-free" }, { core: "orbit", provider: "gemini" }] },
       { hostUserId: "rose", enabled: false, agents: [{ core: "nimbus", provider: "codex" }] },
     ],
   };
@@ -240,7 +241,8 @@ function testRouteSendSharesTheHost(): void {
   const r = routeSend(picked, route, "maya");
   assert(r.recipient?.ownerId === "host-b" && r.host?.hostUserId === "host-b" && !r.offline, "routed to the picked host");
   assert(r.recipient?.defaultModel === "x-free" && r.recipient.self === false, "the host's default model; not self");
-  assert(routeSend(picked, route, "HOST-B").recipient?.self === true, "self when the caller is the host");
+  assert(routeSend(picked, route, "host-b").recipient?.self === true, "self when the caller is the host");
+  assert(routeSend(picked, route, "HOST-B").recipient?.self === false, "HOST-B is another member");
   const off = routeSend(picked, () => null, "maya");
   assert(off.offline && off.host === null, "every host offline");
   const own = { ownerId: "maya", provider: "codex", self: true };

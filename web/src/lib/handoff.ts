@@ -79,8 +79,8 @@ export function pendingSuggestions(
   suggested: readonly HandoffMember[],
   currentMembers: readonly string[],
 ): HandoffMember[] {
-  const have = new Set(currentMembers.map((m) => m.toLowerCase()));
-  return suggested.filter((m) => !have.has(m.userId.toLowerCase()));
+  const have = new Set(currentMembers);
+  return suggested.filter((m) => !have.has(m.userId));
 }
 
 // downloadFilename extracts the filename from a Content-Disposition header,

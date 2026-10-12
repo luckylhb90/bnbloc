@@ -6,7 +6,7 @@ import { platformChoices, type PlatformAgent, type PlatformChoice } from "./plat
 
 type Storage = Pick<globalThis.Storage, "getItem" | "setItem">;
 
-const dismissKey = (subject: string) => `bnbloc.welcomeDismissed.${subject.toLowerCase()}`;
+const dismissKey = (subject: string) => `bnbloc.welcomeDismissed.${subject}`;
 
 export function welcomeDismissed(storage: Storage | null, subject: string | null): boolean {
   if (!storage || !subject) return false;

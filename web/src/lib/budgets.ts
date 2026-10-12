@@ -121,9 +121,8 @@ export function buildBudgetsUpdate(
   for (const m of members) {
     const userId = m.userId.trim();
     if (!userId) return { error: "Every member budget needs a member" };
-    const key = userId.toLowerCase();
-    if (seen.has(key)) return { error: `${userId} has two budgets` };
-    seen.add(key);
+    if (seen.has(userId)) return { error: `${userId} has two budgets` };
+    seen.add(userId);
     const r = limitsFromDraft(m);
     if (r.error) return { error: `${userId}: ${r.error}` };
     update.members.push({ userId, ...(r.limits as BudgetLimits) });

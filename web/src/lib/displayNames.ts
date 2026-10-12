@@ -64,7 +64,7 @@ export function maskEmailsInText(text: string): string {
 }
 
 export function nameKey(id: string): string {
-  return id.trim().toLowerCase();
+  return id.trim();
 }
 
 export type FetchProfiles = (ids: readonly string[]) => Promise<readonly Profile[]>;

@@ -51,7 +51,7 @@ async function testBatchingAndDedupe(): Promise<void> {
   const r = new NameResolver({
     fetchProfiles: async (ids) => {
       calls.push([...ids]);
-      return ids.filter((id) => id.startsWith("a")).map((id): Profile => ({ userId: id.toUpperCase(), displayName: `N-${id}` }));
+      return ids.filter((id) => id.toLowerCase().startsWith("a")).map((id): Profile => ({ userId: id, displayName: `N-${id}` }));
     },
     schedule: (f) => {
       flush = f;
@@ -66,8 +66,8 @@ async function testBatchingAndDedupe(): Promise<void> {
   assert(flush !== null, "a flush was scheduled");
   await r.flush();
   assert(calls.length === 2, `chunked at maxBatch: ${JSON.stringify(calls)}`);
-  assert(calls.flat().length === 3, "each distinct id (case-insensitive) sent once");
-  assert(r.peek("a1@x.io") === "N-a1@x.io" && r.peek("A1@X.IO") === "N-a1@x.io", "cached, case-insensitive");
+  assert(calls.flat().length === 4, "each distinct id sent once (A1@x.io is another subject)");
+  assert(r.peek("a1@x.io") === "N-a1@x.io" && r.peek("A1@x.io") === "N-A1@x.io", "cached per exact id");
   assert(r.peek("b2@x.io") === "b2", "an unanswered id falls back to the default");
   assert(notified === 1, "one notification per batch");
   r.request(["a1@x.io", "b2@x.io"]);

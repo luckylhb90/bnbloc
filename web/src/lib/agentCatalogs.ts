@@ -6,6 +6,7 @@
 // core's own data (relayed by each owner's bridge); nothing here invents one.
 import type { AgentTarget } from "./apiModels.ts";
 import { borrowKey, type SharedAgent } from "./roomAgents.ts";
+import { sameUser } from "./format.ts";
 
 // A model catalog as the picker reads it (AgentTarget's picker fields).
 export interface ModelCatalog {
@@ -53,9 +54,6 @@ export interface CatalogPick {
   readonly defaultModel?: string;
 }
 
-function sameUser(a: string | null | undefined, b: string | null | undefined): boolean {
-  return !!a && !!b && a.toLowerCase() === b.toLowerCase();
-}
 
 function sameAgent(a: { readonly core?: string; readonly provider: string }, b: { readonly core?: string; readonly provider: string }): boolean {
   return a.provider === b.provider && (a.core || "") === (b.core || "");
@@ -137,7 +135,7 @@ function platformCatalog(catalog: ModelCatalog | null, pick: CatalogPick): Model
 // (roster, grants, platform agents), so the catalogs are re-read then.
 export function catalogRefreshKey(agents: readonly { readonly ownerId: string; readonly core?: string; readonly provider: string }[]): string {
   return agents
-    .map((a) => `${a.ownerId.toLowerCase()}/${a.core ?? ""}/${a.provider}`)
+    .map((a) => `${a.ownerId}/${a.core ?? ""}/${a.provider}`)
     .sort()
     .join(",");
 }

@@ -67,20 +67,15 @@ function trimFixed(value: number): string {
   return value.toFixed(1).replace(/\.0$/, "");
 }
 
-// dedupeMembers folds members that differ only by case (a dev-identity artifact
-// where the same person signs in as "maya" and "Maya") to one canonical entry,
-// preferring the first-seen spelling. Keeps order stable.
+// dedupeMembers drops repeated member ids, keeping the first of each. Ids
+// compare exactly: subjects are case-sensitive, so "maya" and "Maya" are two
+// members. Keeps order stable.
 export function dedupeMembers(members: string[]): string[] {
-  const seen = new Map<string, string>();
-  for (const m of members) {
-    const key = m.toLowerCase();
-    if (!seen.has(key)) seen.set(key, m);
-  }
-  return [...seen.values()];
+  return [...new Set(members)];
 }
 
-// sameUser compares two user ids case-insensitively.
+// sameUser is the one same-subject check of the web client: user ids compare
+// exactly (subjects are case-sensitive, as on the server).
 export function sameUser(a: string | null | undefined, b: string | null | undefined): boolean {
-  if (!a || !b) return false;
-  return a.toLowerCase() === b.toLowerCase();
+  return !!a && !!b && a === b;
 }

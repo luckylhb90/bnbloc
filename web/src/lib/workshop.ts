@@ -78,7 +78,7 @@ export interface WorkshopRoomFacts {
 export const MAX_WORKSHOP_PROBES = 8;
 
 function ownedPrivate(r: WorkshopRoomFacts, subject: string): boolean {
-  return r.visibility === "private" && (r.isOwner === true || (!!r.createdBy && r.createdBy.toLowerCase() === subject.toLowerCase()));
+  return r.visibility === "private" && (r.isOwner === true || (!!r.createdBy && r.createdBy === subject));
 }
 
 // workshopCandidates orders the rooms that may be the member's workshop:
@@ -110,7 +110,7 @@ export function workshopRoomId(random: () => number = Math.random): string {
 // The workshop room id is cached per member in local storage (a fast path;
 // the server state — an owned private room pinning the builder — decides).
 export function workshopStorageKey(subject: string): string {
-  return `bnbloc.workshopRoom.${subject.toLowerCase()}`;
+  return `bnbloc.workshopRoom.${subject}`;
 }
 
 export function cachedWorkshop(storage: Pick<Storage, "getItem"> | null, subject: string | null): string | null {

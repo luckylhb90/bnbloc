@@ -13,7 +13,7 @@ const NONE: readonly PlatformAgent[] = [];
 export function usePlatformAgents(): { readonly agents: readonly PlatformAgent[]; readonly refetch: () => void } {
   const { subject, tenant } = useAuth();
   const query = useQuery(
-    subject ? `platform-agents:${tenant ?? ""}:${subject.toLowerCase()}` : null,
+    subject ? `platform-agents:${tenant ?? ""}:${subject}` : null,
     platformAgentsApi.available,
     { staleMs: STALE_MS },
   );

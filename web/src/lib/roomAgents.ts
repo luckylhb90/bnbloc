@@ -3,6 +3,7 @@
 // harness under two cores, or the same harness of two members, are different
 // agents and must never collapse into one row or one authorization.
 import type { RoomAgent } from "../views/composer/types.ts";
+import { sameUser } from "./format.ts";
 
 // An agent a member's bridge advertises as reachable in the room.
 export interface RosterAgent {
@@ -23,9 +24,6 @@ export interface SharedAgent {
   readonly allowedModels?: readonly string[];
 }
 
-function sameUser(a: string | null | undefined, b: string | null | undefined): boolean {
-  return !!a && !!b && a.toLowerCase() === b.toLowerCase();
-}
 
 // borrowTarget is the shared-agent identity the authority keys grants by,
 // matching the bridge's borrowTarget (services/bridge): a colon separates core
@@ -43,7 +41,7 @@ export function borrowKey(a: { readonly core?: string; readonly provider: string
 
 // agentIdentity is the stable (owner, core, provider) key of a room agent.
 export function agentIdentity(a: { readonly ownerId: string; readonly core?: string; readonly provider: string }): string {
-  return `${a.ownerId.toLowerCase()}/${(a.core ?? "").toLowerCase()}/${a.provider.toLowerCase()}`;
+  return `${a.ownerId}/${a.core ?? ""}/${a.provider}`;
 }
 
 // mergeRoomAgents builds the room's selectable agents: the live roster (the
@@ -63,10 +61,10 @@ export function mergeRoomAgents(
     self: sameUser(a.ownerUserId, subject),
     ...(a.sandboxed ? { sandboxed: true } : {}),
   }));
-  const grants = new Set(agents.map((a) => `${a.ownerId.toLowerCase()}|${borrowKey(a)}`));
+  const grants = new Set(agents.map((a) => `${a.ownerId}|${borrowKey(a)}`));
   for (const s of shared) {
     if (sameUser(s.ownerUserId, subject)) continue;
-    const key = `${s.ownerUserId.toLowerCase()}|${s.provider}`;
+    const key = `${s.ownerUserId}|${s.provider}`;
     if (grants.has(key)) continue;
     grants.add(key);
     agents.push({ ownerId: s.ownerUserId, provider: s.provider, self: false });

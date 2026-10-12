@@ -67,7 +67,7 @@ const req = (status: "pending" | "approved" | "declined", version: string, over 
 }
 
 // Members typed in a field: any separator, each once.
-eq(parseMembers(" jack, bob;\nmaya  jack\tBOB "), ["jack", "bob", "maya"], "parseMembers");
+eq(parseMembers(" jack, bob;\nmaya  jack\tbob BOB "), ["jack", "bob", "maya", "BOB"], "parseMembers (BOB is another subject)");
 eq(parseMembers(""), [], "empty");
 
 // The share toast names who got it, who had it and who was skipped.

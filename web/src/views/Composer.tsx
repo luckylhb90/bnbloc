@@ -423,7 +423,7 @@ export function Composer({
               isAgentHandle &&
               !!subject &&
               !!owner &&
-              owner.toLowerCase() !== subject.toLowerCase();
+              owner !== subject;
             return (
               <div
                 key={m}

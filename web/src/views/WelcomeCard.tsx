@@ -63,7 +63,7 @@ export function WelcomeCard({ rooms, onOpen }: { readonly rooms?: readonly Room[
   const roomCount = list ? list.length : null;
   // The member's own agents: a member who hosts every platform agent (or has
   // agents of their own) starts with one of those (welcomeStart).
-  const own = useQuery(subject ? `my-agents:${subject.toLowerCase()}` : null, api.myAgents, { staleMs: 30_000 });
+  const own = useQuery(subject ? `my-agents:${subject}` : null, api.myAgents, { staleMs: 30_000 });
   const startWith = welcomeStart(offered, own.data?.agents ?? [], subject);
   const visible = showWelcome({ roomCount, dismissed });
   // A brand-new member is guided from this first screen: the tour starts on

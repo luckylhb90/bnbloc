@@ -23,10 +23,10 @@ function testMergeRoomAgentsDedupesGrantsAgainstTheRoster(): void {
       { ownerUserId: "carol", provider: "codex" }, // not advertised right now
       { ownerUserId: "alice", provider: "corex:codex" }, // mine: never borrowable
     ],
-    "Alice",
+    "alice",
   );
   assert(agents.length === 3, "a grant for an advertised agent is not a second row");
-  assert(agents.find((a) => a.ownerId === "alice")?.self === true, "self is matched case-insensitively");
+  assert(agents.find((a) => a.ownerId === "alice")?.self === true, "self is matched");
   assert(agents.some((a) => a.ownerId === "carol" && !a.self), "authorized-but-offline agents stay discoverable");
 }
 
@@ -62,7 +62,7 @@ function testPickerKeepsOwnersApart(): void {
   assert(rowIsActive(bobs!, bobs!.agent!, "corex/local:codex"), "a picked recipient activates its own row");
   assert(!rowIsActive(mine!, bobs!.agent!, "corex/local:codex"), "…and not my row of the same harness");
   assert(rowIsActive(mine!, null, "corex/local:codex"), "with no recipient my selected target is active");
-  assert(agentIdentity({ ownerId: "Bob", core: "X", provider: "Codex" }) === "bob/x/codex", "identity is case-folded");
+  assert(agentIdentity({ ownerId: "Bob", core: "X", provider: "Codex" }) === "Bob/X/Codex", "identity is exact (subjects are case-sensitive)");
 }
 
 function testRoomIdRule(): void {

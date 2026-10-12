@@ -64,7 +64,7 @@ export function BudgetsTab() {
 
   const views = useMemo(() => {
     const byUser = new Map<string, BudgetView>();
-    for (const v of data?.members ?? []) byUser.set((v.userId ?? "").toLowerCase(), v);
+    for (const v of data?.members ?? []) byUser.set(v.userId ?? "", v);
     return byUser;
   }, [data]);
 
@@ -93,8 +93,8 @@ export function BudgetsTab() {
   if (error) return <ErrorBox>{error}</ErrorBox>;
   if (!data) return <Skeleton className="h-40" />;
 
-  const budgeted = new Set(memberDrafts.map((d) => d.userId.trim().toLowerCase()));
-  const available = members.filter((m) => !budgeted.has(m.toLowerCase()));
+  const budgeted = new Set(memberDrafts.map((d) => d.userId.trim()));
+  const available = members.filter((m) => !budgeted.has(m));
 
   return (
     <div className="flex flex-col gap-6">
@@ -169,7 +169,7 @@ export function BudgetsTab() {
         ) : (
           <div className="flex flex-col gap-3">
             {memberDrafts.map((d, i) => {
-              const view = views.get(d.userId.trim().toLowerCase());
+              const view = views.get(d.userId.trim());
               return (
                 <Card key={i} className="flex flex-col gap-3 px-4 py-3">
                   <label className="flex flex-col gap-1 text-xs text-[var(--color-fg-muted)] sm:max-w-xs">
@@ -221,7 +221,7 @@ export function BudgetsTab() {
               </thead>
               <tbody>
                 {data.usage.map((u) => {
-                  const v = views.get(u.userId.toLowerCase());
+                  const v = views.get(u.userId);
                   return (
                     <tr key={u.userId} className="border-t border-[var(--color-border)]">
                       <td className="px-3 py-2">

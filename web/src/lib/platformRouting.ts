@@ -9,12 +9,10 @@
 // localStorage so a room keeps talking to the same machine (same agent
 // session) while it is healthy.
 import type { PlatformAgentRef, PlatformHost } from "./platformAgents.ts";
+import { sameUser } from "./format.ts";
 
 export const BUSIER_BY = 3;
 
-function sameUser(a: string | null | undefined, b: string | null | undefined): boolean {
-  return !!a && !!b && a.toLowerCase() === b.toLowerCase();
-}
 
 // pickHost returns the host a send goes to, or null when no host is online.
 // Ties keep the listed order (the server's order is stable).
@@ -35,7 +33,7 @@ const MAX_ENTRIES = 200;
 type Storage = Pick<globalThis.Storage, "getItem" | "setItem">;
 
 function entryKey(subject: string, roomId: string, agent: PlatformAgentRef): string {
-  return `${subject.toLowerCase()}|${roomId}|${(agent.core ?? "").toLowerCase()}/${agent.provider.toLowerCase()}`;
+  return `${subject}|${roomId}|${(agent.core ?? "").toLowerCase()}/${agent.provider.toLowerCase()}`;
 }
 
 function readAll(storage: Storage): Record<string, string> {

@@ -145,9 +145,10 @@ function testChecklistTicks(): void {
 }
 
 function testRoomEventMapping(): void {
-  const chat = { kind: "chat_message", text: "hi", author: "Jack", sequence: 4, toAgent: true };
+  const chat = { kind: "chat_message", text: "hi", author: "jack", sequence: 4, toAgent: true };
   const own = onboardingEventFromRoomEvent(chat, "jack", ROOM, "stream");
-  assert(own?.kind === "message_sent" && own.seq === 4 && own.toAgent, "own echo (case-insensitive) is a send");
+  assert(own?.kind === "message_sent" && own.seq === 4 && own.toAgent, "own echo is a send");
+  assert(onboardingEventFromRoomEvent({ ...chat, author: "Jack" }, "jack", ROOM, "stream") === null, "Jack is another member");
   assert(onboardingEventFromRoomEvent({ ...chat, author: "rose" }, "jack", ROOM, "stream") === null, "someone else's message is nothing");
   const people = onboardingEventFromRoomEvent({ ...chat, toAgent: false }, "jack", ROOM, "history");
   assert(people?.kind === "message_sent" && !people.toAgent && people.source === "history", "people-only send");
@@ -177,8 +178,8 @@ async function testBus(): Promise<void> {
 function testPersistence(): void {
   const st = memoryStorage();
   const s = run(started, { type: "next" }, ev({ kind: "invite_created", roomId: ROOM }), { type: "collapse", collapsed: true });
-  saveOnboarding(st, "Jack", s);
-  assert(st.data.has("bnbloc.onboarding.v1:jack") && onboardingKey("JACK") === "bnbloc.onboarding.v1:jack", "per-member key");
+  saveOnboarding(st, "jack", s);
+  assert(st.data.has("bnbloc.onboarding.v1:jack") && onboardingKey("JACK") === "bnbloc.onboarding.v1:JACK", "per-member key (exact subject)");
   const back = loadOnboarding(st, "jack");
   assert(JSON.stringify(back) === JSON.stringify(s), "round-trips");
   assert(loadOnboarding(st, "rose") === INITIAL_ONBOARDING, "another member starts fresh");

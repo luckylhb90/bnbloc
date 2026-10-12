@@ -7,6 +7,7 @@
 // is in-tab and synchronous; consumers (useOnboarding) map events onto the
 // signed-in member's persisted state. Pure: node-tested.
 import type { RoomEvent } from "./roomEvents.ts";
+import { sameUser } from "./format.ts";
 
 // Where an event was seen. "action" is the member's own request succeeding
 // (the send POST answered); "stream" is the live room stream (it may replay
@@ -48,8 +49,8 @@ export const onboardingEvents = {
 // onboardingEventFromRoomEvent maps one normalized room event (live or from
 // history) onto the onboarding event it means for `subject`, or null: the
 // member's own chat message is a send, an assistant message is an agent
-// reply, an artifact_updated is a deliverable. Self matching is
-// case-insensitive (the feed's isSelf rule).
+// reply, an artifact_updated is a deliverable. Self matching is exact
+// (sameUser, the feed's isSelf rule).
 export function onboardingEventFromRoomEvent(
   e: RoomEvent,
   subject: string | null,
@@ -61,7 +62,7 @@ export function onboardingEventFromRoomEvent(
   if (e.kind === "agent_messages" && e.author === "agent") {
     return { kind: "agent_reply", roomId, source, seq: e.sequence };
   }
-  if (e.kind === "chat_message" && subject && e.author && e.author.toLowerCase() === subject.toLowerCase()) {
+  if (e.kind === "chat_message" && sameUser(e.author, subject)) {
     return { kind: "message_sent", roomId, source, seq: e.sequence, toAgent: e.toAgent !== false };
   }
   return null;

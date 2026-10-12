@@ -28,7 +28,8 @@ test("only 404 and 403 mean the room is gone", () => {
 
 test("room_deleted and the member's own removal end access; others do not", () => {
   assert.equal(roomAccessEnded({ kind: "room_deleted" }, "alice"), "deleted");
-  assert.equal(roomAccessEnded({ kind: "member_removed", removedUser: "Alice" }, "alice"), "removed");
+  assert.equal(roomAccessEnded({ kind: "member_removed", removedUser: "alice" }, "alice"), "removed");
+  assert.equal(roomAccessEnded({ kind: "member_removed", removedUser: "Alice" }, "alice"), null);
   assert.equal(roomAccessEnded({ kind: "member_removed", removedUser: "bob" }, "alice"), null);
   assert.equal(roomAccessEnded({ kind: "member_removed", removedUser: "alice" }, null), null);
   assert.equal(roomAccessEnded({ kind: "chat_message" }, "alice"), null);

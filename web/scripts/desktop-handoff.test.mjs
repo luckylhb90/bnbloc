@@ -26,8 +26,10 @@ test("handoff remains contextual to browser own-agent absence", () => {
   };
   assert.equal(shouldShowDesktopHandoff({ ...base, inDesktopShell: true }), false);
   assert.equal(shouldShowDesktopHandoff({ ...base, ownAgents: [{ online: true }] }), false);
-  assert.equal(shouldShowDesktopHandoff({ ...base, roomAgents: [{ ownerUserId: "alice" }] }), false);
+  assert.equal(shouldShowDesktopHandoff({ ...base, roomAgents: [{ ownerUserId: "Alice" }] }), false);
   assert.equal(shouldShowDesktopHandoff({ ...base, roomAgents: [{ ownerUserId: "bob" }] }), true);
+  // Subjects are case-sensitive: "alice" is another member.
+  assert.equal(shouldShowDesktopHandoff({ ...base, roomAgents: [{ ownerUserId: "alice" }] }), true);
 });
 
 test("phone user agents receive chat guidance but not desktop handoff", () => {

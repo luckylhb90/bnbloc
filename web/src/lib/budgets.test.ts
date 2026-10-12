@@ -51,8 +51,8 @@ test("buildBudgetsUpdate names the failing row and refuses duplicates", () => {
   assert.deepEqual(buildBudgetsUpdate(null, []).update, { tenant: null, members: [] });
   assert.equal(buildBudgetsUpdate(null, [{ ...emptyDraft("bob") }]).error, "bob: set a token or cost limit");
   assert.equal(
-    buildBudgetsUpdate(null, [{ ...emptyDraft("bob"), tokens: "1" }, { ...emptyDraft("BOB"), tokens: "2" }]).error,
-    "BOB has two budgets",
+    buildBudgetsUpdate(null, [{ ...emptyDraft("bob"), tokens: "1" }, { ...emptyDraft("bob"), tokens: "2" }]).error,
+    "bob has two budgets",
   );
   assert.equal(buildBudgetsUpdate(null, [{ ...emptyDraft(" "), tokens: "1" }]).error, "Every member budget needs a member");
 });

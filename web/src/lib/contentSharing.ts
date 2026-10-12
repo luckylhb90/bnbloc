@@ -108,8 +108,8 @@ export function parseMembers(text: string): string[] {
   const out: string[] = [];
   for (const raw of text.split(/[\s,;]+/)) {
     const m = raw.trim();
-    if (!m || seen.has(m.toLowerCase())) continue;
-    seen.add(m.toLowerCase());
+    if (!m || seen.has(m)) continue;
+    seen.add(m);
     out.push(m);
   }
   return out;

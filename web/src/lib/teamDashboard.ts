@@ -183,7 +183,7 @@ export function summarizeTeam(agents: readonly TeamAgent[]): {
     if (a.currentJob) busy++;
     turns += a.turns;
     borrowedRuns += a.borrowedRuns;
-    const usageKey = `${a.owner.toLowerCase()}\u0000${a.provider}`;
+    const usageKey = `${a.owner}\u0000${a.provider}`;
     if (a.usage?.costUsd !== undefined && !countedUsage.has(usageKey)) {
       countedUsage.add(usageKey);
       costUsd = (costUsd ?? 0) + a.usage.costUsd;
