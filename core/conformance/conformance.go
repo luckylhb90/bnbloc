@@ -46,7 +46,29 @@ func CheckLive(ctx context.Context, cfg Config) error {
 	if err := CheckProvider(ctx, provider, cfg); err != nil {
 		return err
 	}
+	if protocol.HasCapability(d, protocol.CapabilityWriteFile) {
+		if err := checkLiveWriteFileRefusal(ctx, provider, cfg); err != nil {
+			return err
+		}
+	}
 	return checkLiveErrorEnvelope(ctx, provider, cfg)
+}
+
+// checkLiveWriteFileRefusal sends the daemon a write outside
+// core.WorkspaceFileAllowed directly (the protocol client refuses it before
+// the wire): the daemon must refuse it too, with a 4xx.
+func checkLiveWriteFileRefusal(ctx context.Context, provider *protocol.Client, cfg Config) error {
+	workspaceID, err := provider.CreateWorkspace(ctx, cfg.Endpoint)
+	if err != nil {
+		return fmt.Errorf("CreateWorkspace: %w", err)
+	}
+	raw := core.REST{Name: "conformance", HTTP: cfg.HTTPClient}
+	_, err = raw.Do(ctx, http.MethodPut, cfg.Endpoint, protocol.WorkspaceFilePath(workspaceID, "conformance-outside.txt"), protocol.WriteWorkspaceFileRequest{Content: "x"})
+	var he *core.HTTPError
+	if !errors.As(err, &he) || he.Status < 400 || he.Status >= 500 {
+		return fmt.Errorf("daemon accepted (or failed with %v) a write outside .room/ and the agent-config paths; want a 4xx refusal", err)
+	}
+	return nil
 }
 
 func RunProvider(t *testing.T, provider core.Provider, cfg Config) {

@@ -121,12 +121,8 @@ func (c *Client) CreateSession(ctx context.Context, ep core.Endpoint, req core.S
 	if _, err := c.Discovery(ctx, ep); err != nil {
 		return core.SessionResult{}, err
 	}
-	// A profile goes only to a core that advertises agentProfile: sending it
-	// to one that does not would silently drop the role the session wears.
-	if req.Profile != nil {
-		if err := c.requireCapability(ctx, ep, CapabilityAgentProfile); err != nil {
-			return core.SessionResult{}, err
-		}
+	if err := c.requireRequestCapabilities(ctx, ep, req.Profile, req.Options.Execution); err != nil {
+		return core.SessionResult{}, err
 	}
 	var out CreateSessionResponse
 	if err := c.postJSON(ctx, ep, WorkspaceSessionsPath(req.WorkspaceID), WireCreateSession(req), &out); err != nil {
@@ -137,6 +133,9 @@ func (c *Client) CreateSession(ctx context.Context, ep core.Endpoint, req core.S
 
 func (c *Client) SendInput(ctx context.Context, ep core.Endpoint, workspaceID, sessionID, text string, opts core.SessionOptions) error {
 	if _, err := c.Discovery(ctx, ep); err != nil {
+		return err
+	}
+	if err := c.requireRequestCapabilities(ctx, ep, nil, opts.Execution); err != nil {
 		return err
 	}
 	body := SendInputRequest{Text: text, Options: WireOptions(opts), Execution: WireExecution(opts.Execution)}
@@ -192,8 +191,12 @@ func (c *Client) Interrupt(ctx context.Context, ep core.Endpoint, workspaceID, s
 	return nil
 }
 
-// WriteWorkspaceFile implements core.WorkspaceFileWriter (see Supports).
+// WriteWorkspaceFile implements core.WorkspaceFileWriter (see Supports). A
+// path outside core.WorkspaceFileAllowed is refused before any request.
 func (c *Client) WriteWorkspaceFile(ctx context.Context, ep core.Endpoint, workspaceID, relPath, content string) error {
+	if err := core.CheckWorkspaceFile(relPath); err != nil {
+		return err
+	}
 	if err := c.requireCapability(ctx, ep, CapabilityWriteFile); err != nil {
 		return err
 	}
@@ -206,6 +209,9 @@ func (c *Client) WriteWorkspaceFile(ctx context.Context, ep core.Endpoint, works
 
 // WriteWorkspaceFileBytes implements core.WorkspaceFileBytesWriter (see Supports).
 func (c *Client) WriteWorkspaceFileBytes(ctx context.Context, ep core.Endpoint, workspaceID, relPath string, content []byte) error {
+	if err := core.CheckWorkspaceFile(relPath); err != nil {
+		return err
+	}
 	if err := c.requireCapability(ctx, ep, CapabilityWriteFile); err != nil {
 		return err
 	}
@@ -266,7 +272,23 @@ func (c *Client) requireCapability(ctx context.Context, ep core.Endpoint, cap st
 	if HasCapability(d, cap) {
 		return nil
 	}
-	return &ProtocolError{Code: ErrorCapabilityMissing, Message: fmt.Sprintf("core %s does not advertise %q", d.Name, cap)}
+	return &core.CapabilityMissingError{Core: c.Name(), Capability: core.Capability(cap)}
+}
+
+// requireRequestCapabilities refuses a request carrying what the core does
+// not advertise: a profile without agentProfile (it would silently drop the
+// role the session wears) or an execution without sandboxExec (the exec
+// token would go to a core that runs on the host).
+func (c *Client) requireRequestCapabilities(ctx context.Context, ep core.Endpoint, profile *core.AgentProfile, exec *core.Execution) error {
+	if profile != nil {
+		if err := c.requireCapability(ctx, ep, CapabilityAgentProfile); err != nil {
+			return err
+		}
+	}
+	if exec != nil {
+		return c.requireCapability(ctx, ep, CapabilitySandboxExec)
+	}
+	return nil
 }
 
 func (c *Client) getJSON(ctx context.Context, ep core.Endpoint, path string, out any) error {

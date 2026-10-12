@@ -358,8 +358,8 @@ func TestClient_SessionFiles_absent_whenNotAdvertised(t *testing.T) {
 		t.Fatal("SessionFiles offered without sessionFiles advertised")
 	}
 	_, err := client.ReadSessionFile(ctx, ep, "ws-1", "s-1", "a.png")
-	var protoErr *ProtocolError
-	if !errors.As(err, &protoErr) || protoErr.Code != ErrorCapabilityMissing {
+	var missing *core.CapabilityMissingError
+	if !errors.As(err, &missing) || missing.Capability != core.CapabilitySessionFileBytes {
 		t.Fatalf("ReadSessionFile err = %v, want capability_missing", err)
 	}
 	if _, err := client.ListSessionFiles(ctx, ep, "ws-1", "s-1"); err == nil {

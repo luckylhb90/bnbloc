@@ -428,6 +428,12 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
     a bare type assertion: a manifest or protocol provider implements every
     optional method but `As` consults its `CapabilityReporter` (declared ops /
     discovery document) per endpoint. There are no capability wrapper types.
+  - **A request a core does not offer is refused, never dropped, with one
+    error:** `core.CapabilityMissingError` (`errors.Is`
+    `core.ErrCapabilityMissing`, which a daemon's `capability_missing`
+    envelope matches too) from manifest cores and the protocol client alike:
+    an absent op or capability, a `Profile` without `agentProfile`, an
+    `Execution` without `sandboxExec` (`TestCapabilityMissingReportedAlike`).
   A core with no reachable endpoint is listed but contributes zero targets
   (best-effort skip) — graceful, not an error. Bridge session/lock keys are
   `room\x00core\x00provider` so cores don't collide.
@@ -839,8 +845,11 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   (`core.ProtectedWorkspacePath`): never a deliverable, site content,
   code sync (either direction) or packed component; write-denied in
   sandboxed drives, fenced at every sandboxed turn and cleared from the
-  sandbox workdir before a fresh session. A core's file writer accepts only `core.WorkspaceFileAllowed`
-  (owned) paths. Every consumer is checked against one table
+  sandbox workdir before a fresh session. A core's file writer accepts only
+  `core.WorkspaceFileAllowed` (owned) paths; manifest cores and the protocol
+  client refuse any other before the wire (`core.CheckWorkspaceFile`,
+  `TestWorkspaceWriterEnforcesPolicy`), and the live conformance suite
+  sends one raw to check the daemon refuses it too. Every consumer is checked against one table
   (`core/testdata/workspace_paths.json`, `TestBnblocOwnedPathAgreesEverywhere`
   and its sync/packer siblings); `TestWorkspacePathPolicySingleOwner`
   forbids a local prefix check.

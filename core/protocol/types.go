@@ -106,6 +106,12 @@ type ProtocolError struct {
 	Retryable *bool     `json:"retryable,omitempty"`
 }
 
+// Is makes a daemon's capability_missing match core.ErrCapabilityMissing,
+// like the client's own local refusal.
+func (e *ProtocolError) Is(target error) bool {
+	return target == core.ErrCapabilityMissing && e != nil && e.Code == ErrorCapabilityMissing
+}
+
 // RetryHint implements core.RetryHinter.
 func (e *ProtocolError) RetryHint() (retry, stated bool) {
 	if e == nil || e.Retryable == nil {

@@ -182,13 +182,18 @@ func (p *Provider) CreateWorkspace(ctx context.Context, ep core.Endpoint) (strin
 // deleteWorkspace; see Supports).
 func (p *Provider) DeleteWorkspace(ctx context.Context, ep core.Endpoint, workspaceID string) error {
 	v := vars{"workspaceId": workspaceID}
-	_, err := p.call(ctx, ep, p.m.DeleteWksp, v)
+	_, err := p.callOptional(ctx, ep, core.CapabilityDeleteWorkspace, p.m.DeleteWksp, v)
 	return err
 }
 
 // CreateSession implements core.Provider, resolving an empty target to the first
-// listed target when the manifest requested the "firstTarget" fallback.
+// listed target when the manifest requested the "firstTarget" fallback. A
+// profile or an execution the manifest cannot carry is refused, never
+// dropped.
 func (p *Provider) CreateSession(ctx context.Context, ep core.Endpoint, req core.SessionRequest) (core.SessionResult, error) {
+	if err := p.requireRequest(req.Profile, req.Options.Execution); err != nil {
+		return core.SessionResult{}, err
+	}
 	sessionID := core.UUIDv4()
 	targetID := req.TargetID
 	if targetID == "" && bodyWantsFirstTarget(p.m.CreateSession.Body) {
@@ -236,6 +241,9 @@ func (p *Provider) CreateSession(ctx context.Context, ep core.Endpoint, req core
 // whose daemon requires a per-request idempotency key (e.g. a
 // clientSubmitId) gets one that never repeats across retries.
 func (p *Provider) SendInput(ctx context.Context, ep core.Endpoint, workspaceID, sessionID, text string, opts core.SessionOptions) error {
+	if err := p.requireRequest(nil, opts.Execution); err != nil {
+		return err
+	}
 	v := vars{
 		"workspaceId":     workspaceID,
 		"sessionId":       sessionID,
@@ -251,8 +259,11 @@ func (p *Provider) SendInput(ctx context.Context, ep core.Endpoint, workspaceID,
 // WriteWorkspaceFile implements core.WorkspaceFileWriter (when the manifest
 // declares writeWorkspaceFile; see Supports).
 func (p *Provider) WriteWorkspaceFile(ctx context.Context, ep core.Endpoint, workspaceID, relPath, content string) error {
+	if err := core.CheckWorkspaceFile(relPath); err != nil {
+		return err
+	}
 	v := vars{"workspaceId": workspaceID, "relPath": relPath, "content": content, "contentBase64": ""}
-	_, err := p.call(ctx, ep, p.m.WriteFile, v)
+	_, err := p.callOptional(ctx, ep, core.CapabilityWriteFile, p.m.WriteFile, v)
 	return err
 }
 
@@ -260,8 +271,11 @@ func (p *Provider) WriteWorkspaceFile(ctx context.Context, ep core.Endpoint, wor
 // body: the manifest template selects {contentBase64} for binary files. The
 // daemon decodes it.
 func (p *Provider) WriteWorkspaceFileBytes(ctx context.Context, ep core.Endpoint, workspaceID, relPath string, content []byte) error {
+	if err := core.CheckWorkspaceFile(relPath); err != nil {
+		return err
+	}
 	v := vars{"workspaceId": workspaceID, "relPath": relPath, "content": "", "contentBase64": base64.StdEncoding.EncodeToString(content)}
-	_, err := p.call(ctx, ep, p.m.WriteFile, v)
+	_, err := p.callOptional(ctx, ep, core.CapabilityWriteFile, p.m.WriteFile, v)
 	return err
 }
 
@@ -270,7 +284,7 @@ func (p *Provider) WriteWorkspaceFileBytes(ctx context.Context, ep core.Endpoint
 // each listed element's path/bytes/mtimeMs.
 func (p *Provider) ListSessionFiles(ctx context.Context, ep core.Endpoint, workspaceID, sessionID string) ([]core.SessionFile, error) {
 	v := vars{"workspaceId": workspaceID, "sessionId": sessionID}
-	out, err := p.call(ctx, ep, p.m.ListSessionFiles, v)
+	out, err := p.callOptional(ctx, ep, core.CapabilitySessionFiles, p.m.ListSessionFiles, v)
 	if err != nil {
 		return nil, err
 	}
@@ -283,7 +297,7 @@ func (p *Provider) ListSessionFiles(ctx context.Context, ep core.Endpoint, works
 // (base64) in the response; otherwise extract.content locates its text.
 func (p *Provider) ReadSessionFile(ctx context.Context, ep core.Endpoint, workspaceID, sessionID, relPath string) ([]byte, error) {
 	v := vars{"workspaceId": workspaceID, "sessionId": sessionID, "relPath": relPath}
-	out, err := p.call(ctx, ep, p.m.ReadSessionFile, v)
+	out, err := p.callOptional(ctx, ep, core.CapabilitySessionFiles, p.m.ReadSessionFile, v)
 	if err != nil {
 		return nil, err
 	}
@@ -301,7 +315,7 @@ func (p *Provider) ReadSessionFile(ctx context.Context, ep core.Endpoint, worksp
 // declares sessionWorkdir; see Supports) via extract.workdir.
 func (p *Provider) SessionWorkdir(ctx context.Context, ep core.Endpoint, workspaceID, sessionID string) (string, error) {
 	v := vars{"workspaceId": workspaceID, "sessionId": sessionID}
-	out, err := p.call(ctx, ep, p.m.SessionWorkdir, v)
+	out, err := p.callOptional(ctx, ep, core.CapabilitySessionWorkdir, p.m.SessionWorkdir, v)
 	if err != nil {
 		return "", err
 	}
@@ -312,7 +326,7 @@ func (p *Provider) SessionWorkdir(ctx context.Context, ep core.Endpoint, workspa
 // interrupt op; see Supports).
 func (p *Provider) Interrupt(ctx context.Context, ep core.Endpoint, workspaceID, sessionID string) error {
 	v := vars{"workspaceId": workspaceID, "sessionId": sessionID}
-	_, err := p.call(ctx, ep, p.m.Interrupt, v)
+	_, err := p.callOptional(ctx, ep, core.CapabilityInterrupt, p.m.Interrupt, v)
 	return err
 }
 
@@ -437,12 +451,45 @@ func (p *Provider) Supports(_ context.Context, _ core.Endpoint, c core.Capabilit
 	}
 }
 
+// require refuses, with the error the Core Protocol client returns too, a
+// capability the manifest does not offer.
+func (p *Provider) require(c core.Capability) error {
+	if p.Supports(context.Background(), core.Endpoint{}, c) {
+		return nil
+	}
+	return &core.CapabilityMissingError{Core: p.m.Name, Capability: c}
+}
+
+// requireRequest refuses a request carrying a profile the manifest does not
+// map (agentProfile) or an execution (a manifest core never offers
+// sandboxExec): dropping either would run the session without the role or
+// outside the sandbox it asked for.
+func (p *Provider) requireRequest(profile *core.AgentProfile, exec *core.Execution) error {
+	if profile != nil {
+		if err := p.require(core.CapabilityAgentProfile); err != nil {
+			return err
+		}
+	}
+	if exec != nil {
+		return p.require(core.CapabilitySandboxExec)
+	}
+	return nil
+}
+
+// callOptional runs an optional capability's op after require.
+func (p *Provider) callOptional(ctx context.Context, ep core.Endpoint, c core.Capability, op Op, v vars) (any, error) {
+	if err := p.require(c); err != nil {
+		return nil, err
+	}
+	return p.call(ctx, ep, op, v)
+}
+
 // call renders the op's path + body with vars and executes it through the
 // shared core REST client (bearer, per-request timeout, status errors),
 // returning the decoded JSON response (or nil for an empty body).
 func (p *Provider) call(ctx context.Context, ep core.Endpoint, op Op, v vars) (any, error) {
 	if !op.declared() {
-		return nil, fmt.Errorf("manifestcore %q: op not declared in manifest", p.m.Name)
+		return nil, fmt.Errorf("manifestcore %q: %w: op not declared in manifest", p.m.Name, core.ErrCapabilityMissing)
 	}
 	path := renderPath(op.Path+pathWhenTemplate(op.PathWhen, v), v)
 	var body io.Reader

@@ -11,6 +11,7 @@ package core
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -70,6 +71,27 @@ const (
 	// not advertise it never receives an Execution (Supports gates it).
 	CapabilitySandboxExec Capability = "sandboxExec"
 )
+
+// ErrCapabilityMissing matches (errors.Is) every refusal of a request a core
+// does not offer: an optional method whose op or capability is absent, a
+// Profile without agentProfile, an Execution without sandboxExec, and a
+// daemon's own capability_missing envelope.
+var ErrCapabilityMissing = errors.New("capability_missing")
+
+// CapabilityMissingError is the one error a provider returns when it refuses
+// a request locally because the core does not offer Capability: manifest
+// cores and the Core Protocol client report it identically.
+type CapabilityMissingError struct {
+	Core       string
+	Capability Capability
+}
+
+func (e *CapabilityMissingError) Error() string {
+	return fmt.Sprintf("core %s does not offer %q (capability_missing)", e.Core, e.Capability)
+}
+
+// Is makes every CapabilityMissingError match ErrCapabilityMissing.
+func (e *CapabilityMissingError) Is(target error) bool { return target == ErrCapabilityMissing }
 
 // Supports reports whether p offers capability c for ep. It is the
 // method-less counterpart of As, for capabilities that change what a request

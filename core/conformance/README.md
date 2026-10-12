@@ -34,6 +34,8 @@ Two optional capabilities carry contract checks beyond "it answers":
 - `writeFile`: a `.room/` file and an agent-config file
   (`.agents/skills/…`) are written, and a path outside `.room/` and
   `core.BnblocOwnedPaths` must be refused (`core.WorkspaceFileAllowed`).
+  The protocol client refuses such a path before the wire, so the live suite
+  also sends one raw and requires the daemon's own 4xx.
 - `agentProfile`: a session created with a profile (instructions, a skill,
   an env var) must start.
 

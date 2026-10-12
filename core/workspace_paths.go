@@ -1,6 +1,8 @@
 package core
 
 import (
+	"errors"
+	"fmt"
 	"path"
 	"strings"
 )
@@ -101,6 +103,20 @@ func WorkspaceFileAllowed(rel string) bool {
 		return false
 	}
 	return matchWorkspacePath(BnblocOwnedPaths, strings.ToLower(clean), false)
+}
+
+// ErrWorkspacePathNotAllowed is the refusal of a workspace file write
+// outside WorkspaceFileAllowed.
+var ErrWorkspacePathNotAllowed = errors.New("workspace path not allowed")
+
+// CheckWorkspaceFile is the WorkspaceFileWriter guard: every writer (a
+// manifest core, the Core Protocol client, a daemon) refuses a path that is
+// not WorkspaceFileAllowed before any I/O.
+func CheckWorkspaceFile(rel string) error {
+	if !WorkspaceFileAllowed(rel) {
+		return fmt.Errorf("%w: %q (only bnbloc-owned workspace paths)", ErrWorkspacePathNotAllowed, rel)
+	}
+	return nil
 }
 
 // normalizeWorkspacePath cleans a workspace-relative path to slash form

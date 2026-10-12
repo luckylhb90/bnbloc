@@ -123,8 +123,7 @@ func TestClient_Profile_gatedByDiscovery_andCarriedOnTheWire(t *testing.T) {
 		t.Fatal("agentProfile supported without being advertised")
 	}
 	_, err := pc.CreateSession(ctx, pep, core.SessionRequest{WorkspaceID: "ws", Prompt: "go", Profile: sampleProfile()})
-	var pe *ProtocolError
-	if err == nil || !errors.As(err, &pe) || pe.Code != ErrorCapabilityMissing {
+	if !errors.Is(err, core.ErrCapabilityMissing) {
 		t.Fatalf("err = %v", err)
 	}
 }

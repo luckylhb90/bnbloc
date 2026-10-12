@@ -95,7 +95,9 @@ command-rewriting hooks); file tools, MCP servers and hooks stay on the host.
 space-scoped Sandbox Protocol exec token (it can only run commands in that
 space) — never log or persist it; a fresh one arrives every turn. A core must
 answer `bad_request` for an execution it cannot honor (never silently run on
-the host); absent `execution` = run on the host as before. The workspace of a
+the host); absent `execution` = run on the host as before. bnbloc never sends
+one to a core that does not advertise `sandboxExec`: manifest cores and the
+protocol client refuse it with `core.CapabilityMissingError`. The workspace of a
 sandboxed session is created IN `workdir` (`CreateWorkspaceRequest.workdir`,
 `core.WorkdirWorkspaceCreator`, offered with `sandboxExec`) so the `.room/`
 context and attachments the bridge writes before the first turn land where
@@ -133,8 +135,9 @@ workspace (`AGENTS.md`, `CLAUDE.md`); each skill as
 MCP servers in the ACP `McpServer` shape (stdio has no `type`); `env` as
 extra agent environment. Env values and MCP header/env values are secrets: a
 core never logs or persists them. A core that cannot honor a profile answers
-`bad_request`; the protocol client refuses to send one to a core that does not
-advertise the capability. A profile is per session: the bridge starts a new
+`bad_request`; manifest cores and the protocol client refuse to send one to a
+core that does not offer the capability (`core.CapabilityMissingError`, the
+same error as any other absent capability). A profile is per session: the bridge starts a new
 session when the content (instructions + skill files) or the set of MCP tool
 components (name, transport, binary or URL, the names of the env and headers
 they get, never their values) changes. A stdio MCP tool's command is a binary
@@ -158,7 +161,8 @@ dropping it. A manifest declares it as `listTargets.targets.mcpTransports`
 contract is `core.BnblocOwnedPaths`: `.room/` plus the agent config a
 session wears (`CLAUDE.md`, `AGENTS.md`, `.claude/skills/**`,
 `.agents/skills/**`, `.opencode/**`, `.mcp.json`); `core.WorkspaceFileAllowed`
-is the rule a core enforces on every write. Beside it,
+is the rule a core enforces on every write, and both clients refuse any other
+path before the wire (`core.CheckWorkspaceFile`). Beside it,
 `core.HostExecutableProjectConfigPaths` names the project config a harness
 executes on the host (`.claude/**`, `CLAUDE.local.md`, `.codex/**`,
 `opencode.json(c)`). Neither kind is the room's project
