@@ -132,6 +132,9 @@ func TestAPITokenLifecycle(t *testing.T) {
 	actions := map[string]int{}
 	for _, r := range recs {
 		actions[r.Action+"/"+r.Outcome]++
+		if r.TenantID == "" {
+			t.Errorf("audit row %s/%s has no tenant: its admins never see it", r.Action, r.Outcome)
+		}
 	}
 	if actions["issue/allow"] != 1 || actions["exchange/allow"] != 1 || actions["revoke/allow"] != 1 || actions["exchange/deny"] < 2 {
 		t.Fatalf("audit = %v", actions)

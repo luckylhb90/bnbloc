@@ -13,7 +13,6 @@ import (
 	"github.com/luckylhb90/bnbloc/internal/httpx"
 	"github.com/luckylhb90/bnbloc/internal/semver"
 
-	"github.com/luckylhb90/bnbloc/internal/config"
 	"github.com/luckylhb90/bnbloc/internal/obs"
 	"github.com/luckylhb90/bnbloc/internal/store"
 	"github.com/luckylhb90/bnbloc/internal/wire"
@@ -135,12 +134,11 @@ func (s *Service) handleAppReleases(w http.ResponseWriter, r *http.Request, clai
 		httpx.Error(w, "load releases failed", http.StatusInternalServerError)
 		return
 	}
-	// Deployment without curated release history: BNBLOC_DESKTOP_DOWNLOAD_URL
-	// still activates the UI's download affordances (one synthetic release).
-	if len(hub.Releases) == 0 {
-		if url := strings.TrimSpace(config.FromEnvRaw("BNBLOC_DESKTOP_DOWNLOAD_URL")); url != "" {
-			hub.Releases = []wire.ReleaseEntry{{Version: "latest", Files: []wire.ReleaseFile{{Platform: "any", Arch: "any", URL: url, Name: "bnbloc-desktop"}}}}
-		}
+	// Deployment without curated release history: the configured download
+	// link still activates the UI's download affordances (one synthetic
+	// release).
+	if len(hub.Releases) == 0 && s.DesktopDownloadURL != "" {
+		hub.Releases = []wire.ReleaseEntry{{Version: "latest", Files: []wire.ReleaseFile{{Platform: "any", Arch: "any", URL: s.DesktopDownloadURL, Name: "bnbloc-desktop"}}}}
 	}
 	httpx.WriteJSON(w, http.StatusOK, hub)
 }

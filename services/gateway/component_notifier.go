@@ -107,7 +107,7 @@ func (s *Service) handleRotateComponentSecret(w http.ResponseWriter, r *http.Req
 		httpx.Error(w, "rotate secret failed", http.StatusInternalServerError)
 		return
 	}
-	s.auditNotifier(r.Context(), rec, "rotate-secret", "allow", claims.Subject, "")
+	s.auditNotifier(r.Context(), claims, rec, "rotate-secret", "allow", "")
 	httpx.WriteJSON(w, http.StatusOK, map[string]string{"secret": secret})
 }
 
@@ -141,16 +141,13 @@ func (s *Service) handleTestComponent(w http.ResponseWriter, r *http.Request, cl
 	if !res.Delivered {
 		outcome = "failed"
 	}
-	s.auditNotifier(r.Context(), rec, "test", outcome, claims.Subject, strings.TrimSpace(res.EventID+" "+res.Error))
+	s.auditNotifier(r.Context(), claims, rec, "test", outcome, strings.TrimSpace(res.EventID+" "+res.Error))
 	httpx.WriteJSON(w, http.StatusOK, res)
 }
 
-func (s *Service) auditNotifier(ctx context.Context, rec extpipe.Record, action, outcome, actor, detail string) {
-	if s.ExtAudit == nil {
-		return
-	}
-	_ = s.ExtAudit.AppendExtAudit(ctx, store.ExtAuditRecord{
-		Kind: rec.Kind, Name: rec.Name, Action: action, Actor: actor, Outcome: outcome, Detail: detail, AtMs: s.nowTime().UnixMilli(),
+func (s *Service) auditNotifier(ctx context.Context, claims auth.Claims, rec extpipe.Record, action, outcome, detail string) {
+	s.audit(ctx, claims.Tenant, store.ExtAuditRecord{
+		Kind: rec.Kind, Name: rec.Name, Action: action, Actor: claims.Subject, Outcome: outcome, Detail: detail,
 	})
 }
 

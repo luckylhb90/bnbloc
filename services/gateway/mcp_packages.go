@@ -55,7 +55,7 @@ func (s *Service) handleBuildMCPPackage(w http.ResponseWriter, r *http.Request, 
 		httpx.Error(w, "invalid json body: "+err.Error(), http.StatusBadRequest)
 		return
 	}
-	base := publicBaseURL(r)
+	base := s.publicOrigin(r)
 	platforms := make([]string, 0, len(draft.Artifacts))
 	pins := make(map[string]pkgmeta.Artifact, len(draft.Artifacts))
 	for platform, staged := range draft.Artifacts {
@@ -66,7 +66,7 @@ func (s *Service) handleBuildMCPPackage(w http.ResponseWriter, r *http.Request, 
 			return
 		}
 		platforms = append(platforms, platform)
-		pins[platform] = pkgmeta.Artifact{URL: base + "/v1/artifacts/" + key, SHA256: sha}
+		pins[platform] = pkgmeta.Artifact{URL: pkgmeta.GatewayArtifactURL(base, key), SHA256: sha}
 	}
 	sort.Strings(platforms)
 	prepared, err := pkgmeta.PrepareMCP(pkgmeta.Package{

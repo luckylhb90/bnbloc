@@ -21,6 +21,7 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/luckylhb90/bnbloc/core/pkgmeta"
 	"github.com/luckylhb90/bnbloc/internal/digest"
 	"github.com/luckylhb90/bnbloc/internal/wire"
 )
@@ -156,8 +157,7 @@ func prepareDesktopRelease(cfg wire.UpdateConfig, hub []wire.ReleaseEntry, a upl
 	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
 		return wire.UpdateConfig{}, wire.ReleaseEntry{}, fmt.Errorf("the artifact URL must be an absolute HTTP(S) gateway URL")
 	}
-	segments := strings.Split(u.Path, "/")
-	if !strings.Contains(u.Path, "/v1/artifacts/") || segments[len(segments)-1] != a.SHA256 {
+	if key, ok := pkgmeta.ArtifactKeyOf(a.URL); !ok || key != digest.Key(a.SHA256) {
 		return wire.UpdateConfig{}, wire.ReleaseEntry{}, fmt.Errorf("the artifact URL must be the content-addressed URL returned by this gateway")
 	}
 	if a.Size <= 0 {

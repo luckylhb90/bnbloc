@@ -135,11 +135,11 @@ func (m memberComponents) visibility(rec extpipe.Record) extpipe.Visibility {
 // coreVisible reports whether a registered/configured core is usable by the
 // member: an installed core passes the rollout + tenant gate; a core with no
 // install record is visible when the operator configured it (BNBLOC_CORES /
-// _URL) or it is not an installed-registry core at all.
+// _URL). No core is compiled in, so there is no third kind.
 func (m memberComponents) coreVisible(s *Service, name string) bool {
 	rec, ok := m.record(core.KindCore, name)
 	if !ok {
-		return s.configuredCore(name) || !installedRegistryCore(name)
+		return s.configuredCore(name)
 	}
 	return m.visibility(rec).Installed
 }
@@ -198,11 +198,6 @@ func (s *Service) storeDiscoveredEndpoint(name string, before, after core.Endpoi
 			return
 		}
 	}
-}
-
-func installedRegistryCore(name string) bool {
-	desc, ok := core.Describe(name)
-	return ok && desc.Source == core.SourceInstalled
 }
 
 // viewerOf is the member a session acts as, for the one visibility gate

@@ -389,6 +389,18 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   session-error mapping `writeSessionErr` (suspended/not a member 403,
   rejected refresh 401). The gateway's one live room-membership source is
   `Service.Membership` (`roomMember`, a cached `membership.RoomClient`).
+- **Gateway value owners.** Where clients reach the gateway is
+  `s.publicOrigin(r)` (`BNBLOC_PUBLIC_URL` when set, else the request's host
+  with the scheme a trusted proxy forwarded; `TestForwardedHeadersReadOnce`):
+  every link to another member, published artifact URL and previewer CSP.
+  The artifact URL is built and parsed only by `pkgmeta`
+  (`GatewayArtifactURL`/`Path`, `ArtifactKeyOf`, `GatewayArtifactKey`;
+  `TestArtifactURLOneOwner`). An audit row is written only by `s.audit(ctx,
+  tenantID, rec)`, which always takes the tenant
+  (`TestAuditWrittenOnlyByAudit`). "Is this component mine" is `ownedBy`
+  (owner and tenant; `TestContentOwnershipOneRule`). Environment is read at
+  startup (`config.Bool`, `config.List`; `Service.DevDiscovery`,
+  `DesktopDownloadURL`, `PublicURL`), never per request.
 - **Every session bearer is minted by `mintSession`** (`session.go`): sign-in,
   refresh, fork, tenant switch, API-token exchange, `MintAdminToken`
   (`TestSessionsMintedOnlyByMintSession`). A tenant switch persists on the
@@ -489,7 +501,8 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   (`coreset.FromEnv`). A typo or not-yet-loaded manifest name in user-editable
   settings must never crash-loop the bridge/gateway — do not "fix" it back to
   fail-fast. `GET /v1/cores` lists every registered core with
-  `{available,builtin}` for UI validation.
+  `{available,backend,removable}` for UI validation (no core is compiled in,
+  so there is no "built-in" flag).
 - **Core availability truth is `GET /v1/cores`, NOT the discover probe.**
   `/v1/local-agent/discover` is dev-gated (404 in production, SEC6), so the web
   MUST NOT use it to decide "is a core connected" — that caused a prod dead-end

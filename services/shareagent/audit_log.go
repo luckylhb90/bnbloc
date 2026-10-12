@@ -214,7 +214,7 @@ func (s *Service) writeAuditCSV(w http.ResponseWriter, r *http.Request, q store.
 	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
 	w.Header().Set("Content-Disposition", `attachment; filename="audit-log.csv"`)
 	if truncated {
-		w.Header().Set("X-Bnbloc-Truncated", strconv.Itoa(maxAuditExportRows))
+		w.Header().Set(wire.TruncatedHeader, strconv.Itoa(maxAuditExportRows))
 	}
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(buf.Bytes())

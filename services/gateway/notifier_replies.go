@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log/slog"
 	"net/http"
 	"net/url"
 	"strings"
@@ -198,17 +197,11 @@ func (s *Service) postNotifierReply(ctx context.Context, tok store.NotificationR
 // auditNotifierReply records a reply decision in the extension audit trail
 // (ids only, never the text or the token).
 func (s *Service) auditNotifierReply(ctx context.Context, rec extpipe.Record, tok store.NotificationReplyToken, outcome, reason string) {
-	if s.ExtAudit == nil {
-		return
-	}
 	detail := "room=" + tok.RoomID + " event=" + tok.EventID
 	if reason != "" {
 		detail += ": " + reason
 	}
-	if err := s.ExtAudit.AppendExtAudit(ctx, store.ExtAuditRecord{
-		Kind: rec.Kind, Name: rec.Name, Action: "reply", Actor: tok.UserID, Outcome: outcome,
-		Detail: detail, TenantID: tok.TenantID, AtMs: s.nowTime().UnixMilli(),
-	}); err != nil {
-		slog.Warn("bnbloc-gateway: audit notifier reply failed", "notifier", rec.Name, "error", err)
-	}
+	s.audit(ctx, tok.TenantID, store.ExtAuditRecord{
+		Kind: rec.Kind, Name: rec.Name, Action: "reply", Actor: tok.UserID, Outcome: outcome, Detail: detail,
+	})
 }

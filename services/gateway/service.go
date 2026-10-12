@@ -113,6 +113,7 @@ type Service struct {
 	PlatformSettings store.PlatformSettingsStore
 	ExtAudit         store.ExtensionAuditStore
 	ExtPipe          *extpipe.Pipeline
+	extPipeOnce      sync.Once
 	AllowExtUnsigned bool
 	// SecretBox seals organization MCP connectors (BNBLOC_SECRET_STORE_KEY);
 	// nil turns org connectors off (mcp_tools.go).
@@ -152,6 +153,17 @@ type Service struct {
 	// per-replica limit above enforces 1/N of its configured budget. Nil =
 	// one replica.
 	Peers *shard.Set
+	// DevDiscovery is the dev-only single-host switch (BNBLOC_DEV_DISCOVERY,
+	// DevDiscoveryFromEnv: never in production): /v1/local-agent/discover
+	// and a caller-supplied core address on the local-agent routes.
+	DevDiscovery bool
+	// DesktopDownloadURL (BNBLOC_DESKTOP_DOWNLOAD_URL) is the desktop
+	// download offered while no release is curated; "" offers none.
+	DesktopDownloadURL string
+	// PublicURL is the deployment's public origin (BNBLOC_PUBLIC_URL, e.g.
+	// https://bnbloc.example.com): the base of every link and artifact URL
+	// the gateway hands out (publicOrigin). Empty = the request's own origin.
+	PublicURL string
 	// TrustedProxies are the reverse proxies (CIDRs, BNBLOC_TRUSTED_PROXIES)
 	// whose X-Forwarded-For the gateway believes when deriving a client IP for
 	// the unauthenticated login throttle. Empty trusts no proxy: the TCP peer
@@ -215,32 +227,6 @@ func (s *Service) Handler() http.Handler {
 	return s.withCORS(mux)
 }
 
-// coreByName returns the configured core with the given name, or nil when no
-// core matches (e.g. a stale core-qualified target id from an old client).
-func (s *Service) coreByName(name string) *coreset.Entry {
-	s.coresMu.RLock()
-	defer s.coresMu.RUnlock()
-	for i := range s.Cores {
-		if s.Cores[i].Name == name {
-			e := s.Cores[i]
-			return &e
-		}
-	}
-	return nil
-}
-
-// defaultCore returns the first configured core (the default), or nil when no
-// core is configured.
-func (s *Service) defaultCore() *coreset.Entry {
-	s.coresMu.RLock()
-	defer s.coresMu.RUnlock()
-	if len(s.Cores) == 0 {
-		return nil
-	}
-	e := s.Cores[0]
-	return &e
-}
-
 // handleCores lists every registered core with its availability and unified
 // descriptor (backend/source/removable) so clients present a validated picker
 // and management UI. It is a read of the gateway's own state (no backend, no
@@ -268,7 +254,6 @@ func (s *Service) handleCores(w http.ResponseWriter, r *http.Request, claims aut
 	type coreInfo struct {
 		Name            string `json:"name"`
 		Available       bool   `json:"available"`
-		Builtin         bool   `json:"builtin"`
 		Backend         string `json:"backend"`
 		Removable       bool   `json:"removable"`
 		Runtime         string `json:"runtime,omitempty"`
@@ -283,7 +268,6 @@ func (s *Service) handleCores(w http.ResponseWriter, r *http.Request, claims aut
 		}
 		info := coreInfo{Name: n, Available: avail[n]}
 		if d, ok := core.Describe(n); ok {
-			info.Builtin = d.Source == core.SourceBuiltin
 			info.Backend = string(d.Backend)
 			info.Removable = d.Removable
 		}
@@ -339,6 +323,10 @@ func (s *Service) withCORS(next http.Handler) http.Handler {
 			// client may send on any request; it must be allowed here or the
 			// browser/webview preflight blocks every request that carries it.
 			h.Set("Access-Control-Allow-Headers", "Authorization, Content-Type, "+actingTenantHeader)
+			// Response headers a cross-origin client (the desktop webview)
+			// reads beyond the safelisted ones: a download's file name and
+			// the audit export's truncation count.
+			h.Set("Access-Control-Expose-Headers", "Content-Disposition, "+wire.TruncatedHeader)
 			h.Set("Access-Control-Max-Age", "600")
 		}
 		if r.Method == http.MethodOptions {
@@ -620,6 +608,42 @@ func (s *Service) clientIP(r *http.Request) string {
 		}
 	}
 	return client
+}
+
+// publicOrigin is the one answer to "where do clients reach this gateway":
+// the configured public origin (PublicURL) when the deployment names one —
+// links in notifications to other members, published artifact URLs and a
+// previewer's CSP never echo a caller's Host header then — else the
+// request's host with publicScheme.
+func (s *Service) publicOrigin(r *http.Request) string {
+	if base := strings.TrimRight(strings.TrimSpace(s.PublicURL), "/"); base != "" {
+		return base
+	}
+	return s.publicScheme(r) + "://" + r.Host
+}
+
+// publicScheme is the scheme the client used: the X-Forwarded-Proto of a
+// trusted proxy (like clientIP, a client-written header is believed only
+// from one), else the connection's own.
+func (s *Service) publicScheme(r *http.Request) string {
+	if base := strings.TrimSpace(s.PublicURL); base != "" {
+		if u, err := url.Parse(base); err == nil && u.Scheme != "" {
+			return u.Scheme
+		}
+	}
+	peer := r.RemoteAddr
+	if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
+		peer = host
+	}
+	if s.trustedProxy(peer) {
+		if fwd := strings.TrimSpace(r.Header.Get("X-Forwarded-Proto")); fwd != "" {
+			return strings.ToLower(strings.TrimSpace(strings.Split(fwd, ",")[0]))
+		}
+	}
+	if r.TLS != nil {
+		return "https"
+	}
+	return "http"
 }
 
 // trustedProxy reports whether ip lies in a configured trusted-proxy prefix.

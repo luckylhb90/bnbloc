@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -239,7 +238,7 @@ func (s *Service) artifactEntitled(ctx context.Context, actor contentActor, key 
 			return false, err
 		}
 		for _, art := range cfg.Artifacts {
-			if artifactURLKey(art.URL) == key {
+			if artifactKeyIs(art.URL, key) {
 				return true, nil
 			}
 		}
@@ -250,7 +249,7 @@ func (s *Service) artifactEntitled(ctx context.Context, actor contentActor, key 
 	}
 	for _, rel := range hub.Releases {
 		for _, f := range rel.Files {
-			if artifactURLKey(f.URL) == key {
+			if artifactKeyIs(f.URL, key) {
 				return true, nil
 			}
 		}
@@ -260,27 +259,18 @@ func (s *Service) artifactEntitled(ctx context.Context, actor contentActor, key 
 		return false, err
 	}
 	for _, p := range update.Release.Platforms {
-		if artifactURLKey(p.URL) == key {
+		if artifactKeyIs(p.URL, key) {
 			return true, nil
 		}
 	}
 	return s.contentBundleEntitled(ctx, actor, key)
 }
 
-// artifactURLKey extracts the blob key from a gateway artifact URL
-// (<origin>/v1/artifacts/<key>), or "" for any other URL. The origin is not
-// compared: a package pins the public URL it was published under, while a
-// download may arrive through another route to the same gateway.
-func artifactURLKey(raw string) string {
-	u, err := url.Parse(strings.TrimSpace(raw))
-	if err != nil {
-		return ""
-	}
-	const prefix = "/v1/artifacts/"
-	if !strings.HasPrefix(u.Path, prefix) {
-		return ""
-	}
-	return strings.TrimPrefix(u.Path, prefix)
+// artifactKeyIs reports whether a published artifact URL names key
+// (pkgmeta.ArtifactKeyOf, any origin).
+func artifactKeyIs(raw, key string) bool {
+	k, ok := pkgmeta.ArtifactKeyOf(raw)
+	return ok && k == key
 }
 
 // proxyArtifact performs the signed upload request to realtime and copies

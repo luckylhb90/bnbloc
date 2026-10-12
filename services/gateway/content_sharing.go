@@ -61,12 +61,9 @@ func contentNote(w http.ResponseWriter, note string) (string, bool) {
 // auditContent appends a content lifecycle row (kind content).
 // Best-effort, like the other content audits.
 func (s *Service) auditContent(ctx context.Context, action, actor, tenantID string, c store.ContentComponent, version, detail string) {
-	if s.ExtAudit == nil {
-		return
-	}
-	_ = s.ExtAudit.AppendExtAudit(ctx, store.ExtAuditRecord{
+	s.audit(ctx, tenantID, store.ExtAuditRecord{
 		Kind: wire.AuditKindContent, Name: c.Name + "@" + version, Action: action, Actor: actor,
-		TenantID: tenantID, Outcome: "allow", Detail: detail, AtMs: s.nowTime().UnixMilli(),
+		Outcome: "allow", Detail: detail,
 	})
 }
 
@@ -88,8 +85,8 @@ func (s *Service) notifyContent(ctx context.Context, tenantID string, ev notify.
 }
 
 // appLink is a deep link into the web app ("#/library", "#/org").
-func appLink(r *http.Request, route string) string {
-	return publicBaseURL(r) + "/#/" + route
+func (s *Service) appLink(r *http.Request, route string) string {
+	return s.publicOrigin(r) + "/#/" + route
 }
 
 // orgMember reports whether subject belongs to the organization (fail
@@ -182,7 +179,7 @@ func (s *Service) handleShareContent(w http.ResponseWriter, r *http.Request, cal
 		Title: claims.Subject + " shared the " + contentshare.Label(src) + " with you", Text: text,
 		// One event per share call: a later share of the same version to
 		// someone else is a new notification, a retried one is not.
-		URL: appLink(r, "library"), DedupKey: "share:" + src.ID + "@" + v.Version + ":" + strings.Join(reached, ","),
+		URL: s.appLink(r, "library"), DedupKey: "share:" + src.ID + "@" + v.Version + ":" + strings.Join(reached, ","),
 	})
 	httpx.WriteJSON(w, http.StatusOK, out)
 }
@@ -517,7 +514,7 @@ func (s *Service) openPublishRequest(ctx context.Context, r *http.Request, actor
 		s.notifyContent(ctx, claims.Tenant, notify.Event{
 			Type: wire.NotificationContentReview, Recipients: admins, Actor: claims.Subject,
 			Title: claims.Subject + " asks to publish the " + contentshare.Label(c) + " v" + version + " to the organization",
-			Text:  text, URL: appLink(r, "org"), DedupKey: "content-request:" + req.ID,
+			Text:  text, URL: s.appLink(r, "org"), DedupKey: "content-request:" + req.ID,
 		})
 	}
 	approved := ""
@@ -535,7 +532,7 @@ func (s *Service) openPublishRequest(ctx context.Context, r *http.Request, actor
 // repeat the notification. Best-effort: the save already succeeded, so a
 // failure is logged and the author can still ask by hand.
 func (s *Service) resubmitOrgPublication(ctx context.Context, r *http.Request, actor contentActor, c store.ContentComponent, version string) *wire.ContentPublishRequest {
-	if c.Scope != store.ContentScopePersonal || c.Owner != actor.Claims.Subject {
+	if c.Scope != store.ContentScopePersonal || !ownedBy(c, actor.Claims) {
 		return nil
 	}
 	org, err := s.orgPublication(ctx, c)
@@ -648,7 +645,7 @@ func (s *Service) applyContentSharing(ctx context.Context, claims auth.Claims, c
 	authored := false
 	for _, c := range comps {
 		byID[c.ID] = c
-		authored = authored || (c.Scope == store.ContentScopePersonal && c.Owner == claims.Subject)
+		authored = authored || (c.Scope == store.ContentScopePersonal && ownedBy(c, claims))
 	}
 	var orgBySource map[string]store.ContentComponent
 	var requestBySource map[string]store.ContentPublishRequest

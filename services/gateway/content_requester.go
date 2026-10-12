@@ -174,16 +174,15 @@ func jobSaveAllowed(w http.ResponseWriter, actor contentActor, pkg *contentpkg.P
 // auditJobSave records a component saved by an agent on behalf of a job's
 // requester. Best-effort, like the expert use audit.
 func (s *Service) auditJobSave(ctx context.Context, actor contentActor, c store.ContentComponent, version string) {
-	if actor.Job == nil || s.ExtAudit == nil {
+	if actor.Job == nil {
 		return
 	}
 	j := actor.Job
 	agent := jobAgent(*j)
-	_ = s.ExtAudit.AppendExtAudit(ctx, store.ExtAuditRecord{
+	s.audit(ctx, j.TenantID, store.ExtAuditRecord{
 		Kind: wire.AuditKindContent, Name: c.Name + "@" + version, Action: "save", Actor: j.RequesterUserID,
-		TenantID: j.TenantID, Outcome: "allow",
+		Outcome: "allow",
 		Detail: shortKind(c.Kind) + " " + c.Name + " v" + version + " saved by agent " + agent + " for " + j.RequesterUserID +
 			" (job " + j.JobID + ", room " + j.RoomID + ", bridge of " + actor.Bridge + ")",
-		AtMs: s.nowTime().UnixMilli(),
 	})
 }

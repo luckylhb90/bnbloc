@@ -19,11 +19,11 @@ import (
 
 func getArtifactStatus(t *testing.T, srv *httptest.Server, token string, art pkgmeta.Artifact) int {
 	t.Helper()
-	key := artifactURLKey(art.URL)
-	if key == "" {
+	key, ok := pkgmeta.ArtifactKeyOf(art.URL)
+	if !ok {
 		t.Fatalf("artifact URL %q has no gateway key", art.URL)
 	}
-	req, _ := http.NewRequest(http.MethodGet, srv.URL+"/v1/artifacts/"+key, nil)
+	req, _ := http.NewRequest(http.MethodGet, pkgmeta.GatewayArtifactURL(srv.URL, key), nil)
 	req.Header.Set("Authorization", "Bearer "+token)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -148,7 +148,6 @@ func TestSetComponentTenants_rejectsAmbiguousScopes(t *testing.T) {
 // BR-9: /v1/local-agent/run dials only trusted core endpoints; a caller
 // address override is a single-host dev feature, and no target is guessed.
 func TestLocalAgentRun_refusesOverrideAndRequiresTarget(t *testing.T) {
-	t.Setenv("BNBLOC_DEV_DISCOVERY", "")
 	_, srv, adminToken, memberToken := rolloutTestGateway(t)
 	installConfiguredEndpointCore(t, srv, adminToken)
 
@@ -165,22 +164,21 @@ func TestLocalAgentRun_refusesOverrideAndRequiresTarget(t *testing.T) {
 }
 
 func TestLocalAgentOverride_devAllowsOnlyLoopbackIPs(t *testing.T) {
-	t.Setenv("BNBLOC_DEV_DISCOVERY", "1")
+	dev := &Service{DevDiscovery: true}
 	for _, ok := range []string{"http://127.0.0.1:7777", "http://[::1]:7777", "https://127.0.0.2"} {
-		if _, err := localAgentOverride(ok, "tok"); err != nil {
+		if _, err := dev.localAgentOverride(ok, "tok"); err != nil {
 			t.Fatalf("override %q refused in dev: %v", ok, err)
 		}
 	}
 	for _, bad := range []string{"http://localhost:7777", "http://host.docker.internal:7777", "http://mysql:3306", "http://10.0.0.5", "http://169.254.169.254", "file:///etc/passwd"} {
-		if _, err := localAgentOverride(bad, ""); err == nil {
+		if _, err := dev.localAgentOverride(bad, ""); err == nil {
 			t.Fatalf("override %q accepted; want refused", bad)
 		}
 	}
-	if ep, err := localAgentOverride("  ", ""); err != nil || ep.OK() {
+	if ep, err := dev.localAgentOverride("  ", ""); err != nil || ep.OK() {
 		t.Fatalf("empty override = %+v, %v; want no override", ep, err)
 	}
-	t.Setenv("BNBLOC_DEV_DISCOVERY", "")
-	if _, err := localAgentOverride("http://127.0.0.1:7777", ""); err == nil || !strings.Contains(err.Error(), "single-host dev") {
+	if _, err := (&Service{}).localAgentOverride("http://127.0.0.1:7777", ""); err == nil || !strings.Contains(err.Error(), "single-host dev") {
 		t.Fatalf("override outside dev = %v; want refused", err)
 	}
 }

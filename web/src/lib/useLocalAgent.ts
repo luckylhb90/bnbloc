@@ -18,7 +18,7 @@ export interface LocalAgent {
   // coreStatus is the gateway's view of every registered core and whether it
   // resolved a reachable endpoint (from GET /v1/cores). It is the production-safe
   // availability signal, unlike the dev-gated discover probe.
-  coreStatus: { name: string; available: boolean; builtin: boolean }[];
+  coreStatus: { name: string; available: boolean }[];
   // anyCoreAvailable is true when the gateway reports at least one reachable
   // core, so the UI can distinguish "no core connected" from "core up, no agents
   // enabled yet".
@@ -58,7 +58,7 @@ export function useLocalAgent(active: boolean): LocalAgent {
     () => localStorage.getItem(LS_TARGET) || "",
   );
   const [coreStatus, setCoreStatus] = useState<
-    { name: string; available: boolean; builtin: boolean }[]
+    { name: string; available: boolean }[]
   >([]);
   const [devDiscovery, setDevDiscovery] = useState(false);
   const sidecars = useSidecarAgents(active);

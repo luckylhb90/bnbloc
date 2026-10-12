@@ -9,9 +9,37 @@ import (
 	"github.com/luckylhb90/bnbloc/internal/digest"
 )
 
-// gatewayArtifactPath is the gateway route a content-addressed artifact key
-// is served under.
-const gatewayArtifactPath = "/v1/artifacts/"
+// gatewayArtifactPrefix is the gateway route a content-addressed artifact
+// key is served under.
+const gatewayArtifactPrefix = "/v1/artifacts/"
+
+// The gateway artifact URL has one owner, this file: GatewayArtifactPath and
+// GatewayArtifactURL build it, ArtifactKeyOf and GatewayArtifactKey parse it.
+
+// GatewayArtifactPath is the gateway's download path of a blob key.
+func GatewayArtifactPath(key string) string { return gatewayArtifactPrefix + key }
+
+// GatewayArtifactURL is the absolute download URL of a blob key under the
+// gateway's public origin base.
+func GatewayArtifactURL(base, key string) string {
+	return strings.TrimRight(strings.TrimSpace(base), "/") + GatewayArtifactPath(key)
+}
+
+// ArtifactKeyOf is the content-addressed blob key ("sha256/<hex>") a
+// gateway artifact URL or path names, whatever its origin (a package pins
+// the public URL it was published under, while a download may arrive
+// through another route to the same gateway); false for anything else.
+func ArtifactKeyOf(raw string) (string, bool) {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || u.RawQuery != "" || u.Fragment != "" {
+		return "", false
+	}
+	key, onRoute := strings.CutPrefix(u.EscapedPath(), gatewayArtifactPrefix)
+	if !onRoute || !digest.ValidKey(key) {
+		return "", false
+	}
+	return key, true
+}
 
 func validateArtifactShapes(raw []byte) error {
 	var shell struct {
@@ -101,13 +129,15 @@ func ParseGatewayArtifactBaseURL(raw string) (*url.URL, error) {
 	return base, nil
 }
 
+// GatewayArtifactKey is the blob key of an absolute artifact URL that this
+// gateway (origin base) published.
 func GatewayArtifactKey(raw string, base *url.URL) (string, error) {
 	u, err := url.Parse(strings.TrimSpace(raw))
-	if err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") {
+	if err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") || !sameOrigin(u, base) {
 		return "", fmt.Errorf("artifact URL must reference a gateway-uploaded artifact")
 	}
-	key, onRoute := strings.CutPrefix(u.EscapedPath(), gatewayArtifactPath)
-	if !sameOrigin(u, base) || !onRoute || !digest.ValidKey(key) || u.RawQuery != "" || u.Fragment != "" {
+	key, ok := ArtifactKeyOf(raw)
+	if !ok {
 		return "", fmt.Errorf("artifact URL must reference a gateway-uploaded artifact")
 	}
 	return key, nil

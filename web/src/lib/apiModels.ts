@@ -289,7 +289,6 @@ export interface AgentTarget {
 export interface Core {
   name: string;
   available: boolean;
-  builtin: boolean;
   backend?: string;
   removable?: boolean;
   // "sidecar" cores are driven by the client's own bridge (not the gateway);

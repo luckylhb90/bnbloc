@@ -5,6 +5,11 @@ package wire
 // every tenant or ?tenant=). The JSON tags are the public contract the web
 // client reads.
 
+// TruncatedHeader names the response header an audit CSV export sets to
+// the row cap when it stopped there (the gateway exposes it to
+// cross-origin clients).
+const TruncatedHeader = "X-Bnbloc-Truncated"
+
 // Audit log entry kinds written by the platform itself. Component kinds
 // (core, plugin, notifier, auth-provider, webhook) are the extension kinds
 // recorded by the component lifecycle and their deliveries.

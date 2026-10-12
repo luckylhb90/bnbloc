@@ -189,7 +189,7 @@ spec:
             {{- end }}
             {{- end }}
             {{- end }}
-            {{- if or (eq $name "realtime") (eq $name "shareagent") (eq $name "activity") }}
+            {{- if or (eq $name "gateway") (eq $name "realtime") (eq $name "shareagent") (eq $name "activity") }}
             - name: BNBLOC_PUBLIC_URL
               value: {{ $.Values.publicURL | quote }}
             {{- end }}

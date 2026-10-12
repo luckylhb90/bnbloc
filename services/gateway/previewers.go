@@ -136,7 +136,7 @@ func (s *Service) handlePreviewerFile(w http.ResponseWriter, r *http.Request) {
 	}
 	h := w.Header()
 	h.Set("Content-Type", tarbundle.ContentType(file))
-	h.Set("Content-Security-Policy", previewerCSP(publicBaseURL(r)+previewerFrameBase(name, version)))
+	h.Set("Content-Security-Policy", previewerCSP(s.publicOrigin(r)+previewerFrameBase(name, version)))
 	h.Set("X-Content-Type-Options", "nosniff")
 	h.Set("Referrer-Policy", "no-referrer")
 	// Module scripts and fonts load in CORS mode from the frame's opaque
@@ -185,8 +185,8 @@ func (s *Service) visiblePreviewer(ctx context.Context, claims auth.Claims, name
 func (s *Service) fetchPreviewerBundle(ctx context.Context, art pkgmeta.Artifact) (*tarbundle.Bundle, error) {
 	previewers, _ := s.bundleCaches()
 	return previewers.LoadPinned(art.SHA256, tarbundle.PreviewerLimits, func() ([]byte, error) {
-		key := artifactURLKey(art.URL)
-		if key == "" {
+		key, ok := pkgmeta.ArtifactKeyOf(art.URL)
+		if !ok {
 			return nil, fmt.Errorf("bundle URL is not a gateway artifact")
 		}
 		return s.readArtifactBlob(ctx, key, tarbundle.PreviewerLimits.MaxArchiveBytes())

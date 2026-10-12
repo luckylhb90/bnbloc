@@ -286,13 +286,7 @@ func (s *Service) handleDeleteMCPConnector(w http.ResponseWriter, r *http.Reques
 
 // auditMCPConnector records a connector change (names only, never values).
 func (s *Service) auditMCPConnector(ctx context.Context, rec extpipe.Record, claims auth.Claims, action string) {
-	if s.ExtAudit == nil {
-		return
-	}
-	if err := s.ExtAudit.AppendExtAudit(ctx, store.ExtAuditRecord{
+	s.audit(ctx, claims.Tenant, store.ExtAuditRecord{
 		Kind: rec.Kind, Name: rec.Name, Action: action, Actor: claims.Subject, Outcome: "allow",
-		TenantID: claims.Tenant, AtMs: s.nowTime().UnixMilli(),
-	}); err != nil {
-		slog.Warn("bnbloc-gateway: audit MCP connector failed", "component", rec.Name, "error", err)
-	}
+	})
 }

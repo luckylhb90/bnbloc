@@ -61,13 +61,16 @@ func (s *Service) nowTime() time.Time {
 	return time.Now()
 }
 
+// corePipeline is the component pipeline: the composition root's, else
+// one built on first use (tests, a dev gateway), exactly once even when
+// handlers race for it.
 func (s *Service) corePipeline() *extpipe.Pipeline {
-	if s.ExtPipe != nil {
-		return s.ExtPipe
-	}
-	p := NewCorePipeline(s, s.ExtAudit)
-	s.ExtPipe = p
-	return p
+	s.extPipeOnce.Do(func() {
+		if s.ExtPipe == nil {
+			s.ExtPipe = NewCorePipeline(s, s.ExtAudit)
+		}
+	})
+	return s.ExtPipe
 }
 
 func (s *Service) coreInstaller() extpipe.KindInstaller {
@@ -108,9 +111,6 @@ func (s *Service) probeCoreRecord(ctx context.Context, rec extpipe.Record, guard
 func (s *Service) activateCoreRecord(ctx context.Context, rec extpipe.Record, guard extgov.Guard) (any, error) {
 	cfg, err := decodeCoreRecord(rec)
 	if err != nil {
-		return nil, err
-	}
-	if err := ensureCoreInstallable(rec.Name); err != nil {
 		return nil, err
 	}
 	if cfg.Runtime == pkgmeta.RuntimeSidecar {
@@ -161,14 +161,6 @@ func (s *Service) coreInstance(ctx context.Context, activation coreActivation, g
 	default:
 		return nil, coreset.Entry{}, fmt.Errorf("unknown runtime %q", activation.cfg.Runtime)
 	}
-}
-
-func ensureCoreInstallable(name string) error {
-	ext, ok := core.Describe(name)
-	if ok && !ext.Removable {
-		return fmt.Errorf("extreg: %s/%s is a built-in and cannot be replaced", core.KindCore, name)
-	}
-	return nil
 }
 
 func endpointCoreInstance(_ context.Context, pkg pkgmeta.Package, guard extgov.Guard) (core.Provider, coreset.Entry, error) {

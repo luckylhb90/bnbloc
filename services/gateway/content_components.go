@@ -14,6 +14,7 @@ import (
 	"sync"
 	"unicode/utf8"
 
+	"github.com/luckylhb90/bnbloc/core/pkgmeta"
 	"github.com/luckylhb90/bnbloc/internal/auth"
 	"github.com/luckylhb90/bnbloc/internal/contentbuiltin"
 	"github.com/luckylhb90/bnbloc/internal/contentpkg"
@@ -134,6 +135,13 @@ func (s *Service) ownContent(ctx context.Context, claims auth.Claims, id string)
 	return c, nil
 }
 
+// ownedBy reports a component row the caller owns in the organization
+// they act in: the one "is this mine" rule of the content routes (an owner
+// id alone matches the same subject's rows in another organization).
+func ownedBy(c store.ContentComponent, claims auth.Claims) bool {
+	return c.Owner == claims.Subject && c.TenantID == claims.Tenant
+}
+
 // heldContent loads a component the caller holds in their own Library: a
 // personal one or a shared copy (delete). An org publication belongs to
 // the organization (its admins remove it).
@@ -142,7 +150,7 @@ func (s *Service) heldContent(ctx context.Context, claims auth.Claims, id string
 	if err != nil {
 		return store.ContentComponent{}, err
 	}
-	if c.Owner != claims.Subject || c.TenantID != claims.Tenant ||
+	if !ownedBy(c, claims) ||
 		(c.Scope != store.ContentScopePersonal && c.Scope != store.ContentScopeShared) {
 		return store.ContentComponent{}, store.ErrContentNotFound
 	}
@@ -169,7 +177,7 @@ func contentView(c store.ContentComponent, v store.ContentComponentVersion, clai
 		SharedBy: c.SharedBy, SourceID: c.SourceID,
 		CreatedAtMs: c.CreatedAtMs, UpdatedAtMs: c.UpdatedAtMs,
 	}
-	held := c.Owner == claims.Subject && c.TenantID == claims.Tenant
+	held := ownedBy(c, claims)
 	out.Mine = held && c.Scope == store.ContentScopePersonal
 	out.Removable = held && (c.Scope == store.ContentScopePersonal || c.Scope == store.ContentScopeShared)
 	if out.Permissions == nil {
@@ -217,13 +225,13 @@ func (s *Service) memberContent(ctx context.Context, claims auth.Claims, full st
 	// component (its publication), not as a second card.
 	authored := map[string]bool{}
 	for _, c := range visible {
-		if c.Scope == store.ContentScopePersonal && c.Owner == claims.Subject {
+		if c.Scope == store.ContentScopePersonal && ownedBy(c, claims) {
 			authored[c.ID] = true
 		}
 	}
 	comps := visible[:0:0]
 	for _, c := range visible {
-		if c.Scope == store.ContentScopeOrg && c.Owner == claims.Subject && authored[c.SourceID] {
+		if c.Scope == store.ContentScopeOrg && ownedBy(c, claims) && authored[c.SourceID] {
 			continue
 		}
 		comps = append(comps, c)
@@ -692,7 +700,7 @@ func (s *Service) writeContentDetailWith(w http.ResponseWriter, r *http.Request,
 }
 
 func contentVersionView(v store.ContentComponentVersion) wire.ContentVersion {
-	return wire.ContentVersion{Version: v.Version, SHA256: v.SHA256, BundleKey: v.BundleBlobKey, BundleURL: "/v1/artifacts/" + v.BundleBlobKey,
+	return wire.ContentVersion{Version: v.Version, SHA256: v.SHA256, BundleKey: v.BundleBlobKey, BundleURL: pkgmeta.GatewayArtifactPath(v.BundleBlobKey),
 		SizeBytes: v.SizeBytes, CreatedBy: v.CreatedBy, CreatedAtMs: v.CreatedAtMs}
 }
 
@@ -1094,14 +1102,13 @@ func (s *Service) recordRoomExpert(ctx context.Context, job store.AgentJob, ref 
 	}
 	name := firstNonEmpty(ref.DisplayName, ref.Name)
 	changed, err := s.ContentJobs.RecordJobRoomExpert(tenant.NewContext(ctx, job.TenantID), job.JobID, store.JobExpert{ID: ref.ComponentID, Version: ref.Version, Name: name})
-	if err != nil || !changed || s.ExtAudit == nil {
+	if err != nil || !changed {
 		return err
 	}
-	_ = s.ExtAudit.AppendExtAudit(ctx, store.ExtAuditRecord{
+	s.audit(ctx, job.TenantID, store.ExtAuditRecord{
 		Kind: wire.AuditKindContent, Name: ref.Name + "@" + ref.Version, Action: "use", Actor: job.RequesterUserID,
-		TenantID: job.TenantID, Outcome: "running",
-		Detail: "room expert " + name + " v" + ref.Version + " on agent " + jobAgent(job) + " (job " + job.JobID + ", room " + job.RoomID + ")",
-		AtMs:   s.nowTime().UnixMilli(),
+		Outcome: "running",
+		Detail:  "room expert " + name + " v" + ref.Version + " on agent " + jobAgent(job) + " (job " + job.JobID + ", room " + job.RoomID + ")",
 	})
 	return nil
 }

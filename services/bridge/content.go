@@ -12,6 +12,7 @@ import (
 	"sync"
 
 	corepkg "github.com/luckylhb90/bnbloc/core"
+	"github.com/luckylhb90/bnbloc/core/pkgmeta"
 	"github.com/luckylhb90/bnbloc/internal/contentpkg"
 	"github.com/luckylhb90/bnbloc/internal/tarbundle"
 	"github.com/luckylhb90/bnbloc/internal/wire"
@@ -268,7 +269,7 @@ func (b *Bridge) resolveJobContent(ctx context.Context, job bridgeJob, owner str
 func (b *Bridge) contentPackage(ctx context.Context, job bridgeJob, ref wire.ContentRef) (*contentpkg.Package, error) {
 	bundle, err := contentBundleCache().LoadPinned(ref.SHA256, tarbundle.ContentLimits, func() ([]byte, error) {
 		q := url.Values{"job": {job.JobID}, "room": {job.RoomID}}
-		return b.gatewayGET(ctx, "/v1/artifacts/"+ref.BundleKey+"?"+q.Encode())
+		return b.gatewayGET(ctx, pkgmeta.GatewayArtifactPath(ref.BundleKey)+"?"+q.Encode())
 	})
 	if err != nil {
 		return nil, err

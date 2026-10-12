@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/luckylhb90/bnbloc/internal/config"
 	"github.com/luckylhb90/bnbloc/internal/semver"
 
 	"github.com/luckylhb90/bnbloc/internal/store"
@@ -44,14 +45,14 @@ func loadUpdateConfig(ctx context.Context, settings store.PlatformSettingsStore)
 	for _, row := range rows {
 		values[row.Key] = row.Value
 	}
-	cfg.Policy.Enabled = parseBoolSetting(values[updateKeyEnabled], cfg.Policy.Enabled)
+	cfg.Policy.Enabled = config.ParseBool(values[updateKeyEnabled], cfg.Policy.Enabled)
 	cfg.Policy.Channel = strings.TrimSpace(values[updateKeyChannel])
 	if cfg.Policy.Channel == "" {
 		cfg.Policy.Channel = wire.UpdateChannelStable
 	}
-	cfg.Policy.AutoCheck = parseBoolSetting(values[updateKeyAutoCheck], cfg.Policy.AutoCheck)
+	cfg.Policy.AutoCheck = config.ParseBool(values[updateKeyAutoCheck], cfg.Policy.AutoCheck)
 	cfg.Policy.CheckIntervalHours = parseIntSetting(values[updateKeyCheckIntervalHours], cfg.Policy.CheckIntervalHours)
-	cfg.Policy.AutoInstall = parseBoolSetting(values[updateKeyAutoInstall], cfg.Policy.AutoInstall)
+	cfg.Policy.AutoInstall = config.ParseBool(values[updateKeyAutoInstall], cfg.Policy.AutoInstall)
 	cfg.Policy.MinSupportedVersion = strings.TrimSpace(values[updateKeyMinSupportedVersion])
 	cfg.Release.Version = strings.TrimSpace(values[updateKeyReleaseVersion])
 	cfg.Release.Notes = values[updateKeyReleaseNotes]
@@ -155,18 +156,6 @@ func validateUpdateConfig(cfg wire.UpdateConfig) error {
 
 func releaseTargetKey(target, field string) string {
 	return "release." + target + "." + field
-}
-
-func parseBoolSetting(raw string, fallback bool) bool {
-	v := strings.TrimSpace(raw)
-	if v == "" {
-		return fallback
-	}
-	parsed, err := strconv.ParseBool(v)
-	if err != nil {
-		return fallback
-	}
-	return parsed
 }
 
 func parseIntSetting(raw string, fallback int) int {

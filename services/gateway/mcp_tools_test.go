@@ -45,7 +45,7 @@ func mcpGateway(t *testing.T, withKey bool) (*contentGateway, string) {
 	endpoint := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusUnauthorized) }))
 	t.Cleanup(endpoint.Close)
 	g.svc.AllowExtUnsigned = true
-	g.svc.ExtPipe = nil
+	g.svc.ExtPipe = NewCorePipeline(g.svc, g.svc.ExtAudit) // rebuilt with AllowExtUnsigned
 	sha := strings.Repeat("a", 64)
 	stdio := pkgmeta.Package{
 		Kind: pkgmeta.KindMCPPackageV1, Name: "codeword", Version: "1.0.0", Publisher: "acme",

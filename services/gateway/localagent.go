@@ -9,7 +9,6 @@ import (
 	"net"
 	"net/http"
 	"net/url"
-	"os"
 	"strings"
 	"time"
 
@@ -54,12 +53,12 @@ var errLocalAgentOverrideDisabled = fmt.Errorf("a local agent address override i
 // accepted — no hostnames (localhost, host.docker.internal, docker service
 // names), no private ranges, no metadata endpoint. An empty raw URL means no
 // override.
-func localAgentOverride(rawURL, token string) (agentEndpoint, error) {
+func (s *Service) localAgentOverride(rawURL, token string) (agentEndpoint, error) {
 	rawURL = strings.TrimSpace(rawURL)
 	if rawURL == "" {
 		return agentEndpoint{}, nil
 	}
-	if !devDiscoveryEnabled() {
+	if !s.DevDiscovery {
 		return agentEndpoint{}, errLocalAgentOverrideDisabled
 	}
 	u, err := url.Parse(rawURL)
@@ -99,7 +98,7 @@ func (s *Service) handleLocalAgentRun(w http.ResponseWriter, r *http.Request, cl
 	if !httpx.DecodeJSON(w, r, 64*1024, &body) {
 		return
 	}
-	override, err := localAgentOverride(body.LocalAgentURL, body.LocalAgentToken)
+	override, err := s.localAgentOverride(body.LocalAgentURL, body.LocalAgentToken)
 	if err != nil {
 		httpx.Error(w, err.Error(), http.StatusForbidden)
 		return
@@ -118,24 +117,13 @@ func (s *Service) handleLocalAgentRun(w http.ResponseWriter, r *http.Request, cl
 		httpx.Error(w, "load components failed", http.StatusInternalServerError)
 		return
 	}
-	var entry *coreset.Entry
-	if coreName != "" {
-		for i := range visibleEntries {
-			if visibleEntries[i].Name == coreName {
-				entry = &visibleEntries[i]
-				break
-			}
-		}
-		if entry == nil {
-			httpx.Error(w, "core not available", http.StatusNotFound)
-			return
-		}
-	} else if len(visibleEntries) > 0 {
-		entry = &visibleEntries[0]
-	}
-	if entry == nil {
-		obs.ServerError(w, "no core configured", nil)
-		httpx.Error(w, "no core configured", http.StatusServiceUnavailable)
+	entry := pickCore(visibleEntries, coreName)
+	switch {
+	case entry == nil && coreName != "":
+		httpx.Error(w, "core not available", http.StatusNotFound)
+		return
+	case entry == nil:
+		httpx.Unavailable(w, "a core")
 		return
 	}
 	// The agent target is the caller's choice from /v1/local-agent/targets;
@@ -180,6 +168,18 @@ func (s *Service) handleLocalAgentRun(w http.ResponseWriter, r *http.Request, cl
 
 }
 
+// pickCore is the core a local-agent request names among the member's
+// visible entries: the named one, else the first (the default); nil when
+// the name matches none or there are none.
+func pickCore(entries []coreset.Entry, name string) *coreset.Entry {
+	for i := range entries {
+		if name == "" || entries[i].Name == name {
+			return &entries[i]
+		}
+	}
+	return nil
+}
+
 func localAgentRunFailed(w http.ResponseWriter, step, coreName string, err error) {
 	obs.ServerError(w, "local agent core request failed ("+step+", core "+coreName+")", err)
 	httpx.Error(w, "local agent core request failed ("+step+")", http.StatusBadGateway)
@@ -197,7 +197,7 @@ func (s *Service) handleLocalAgentTargets(w http.ResponseWriter, r *http.Request
 		httpx.Error(w, "load components failed", http.StatusInternalServerError)
 		return
 	}
-	override, err := localAgentOverride(r.URL.Query().Get("localAgentUrl"), r.URL.Query().Get("localAgentToken"))
+	override, err := s.localAgentOverride(r.URL.Query().Get("localAgentUrl"), r.URL.Query().Get("localAgentToken"))
 	if err != nil {
 		httpx.Error(w, err.Error(), http.StatusForbidden)
 		return
@@ -214,20 +214,7 @@ func (s *Service) handleLocalAgentTargets(w http.ResponseWriter, r *http.Request
 	}
 	var queries []query
 	if override.OK() {
-		var entry *coreset.Entry
-		if len(visibleEntries) > 0 {
-			entry = &visibleEntries[0]
-		}
-		if name := strings.TrimSpace(r.URL.Query().Get("core")); name != "" {
-			entry = nil
-			for i := range visibleEntries {
-				if visibleEntries[i].Name == name {
-					entry = &visibleEntries[i]
-					break
-				}
-			}
-		}
-		if entry != nil {
+		if entry := pickCore(visibleEntries, strings.TrimSpace(r.URL.Query().Get("core"))); entry != nil {
 			queries = append(queries, query{entry: entry, ep: s.callerEndpoint(entry, override)})
 		}
 	} else {
@@ -345,18 +332,23 @@ func (s *Service) handleLocalAgentDiscover(w http.ResponseWriter, r *http.Reques
 	// unless BNBLOC_DEV_DISCOVERY=1 is set, it never authenticates, never
 	// discovers, and never returns a token — it 404s as if the route did not
 	// exist.
-	if !devDiscoveryEnabled() {
+	if !s.DevDiscovery {
 		http.NotFound(w, r)
 		return
 	}
-	if _, err := s.authenticate(r); err != nil {
+	claims, err := s.authenticate(r)
+	if err != nil {
 		httpx.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
-	entry := s.defaultCore()
-	if name := strings.TrimSpace(r.URL.Query().Get("core")); name != "" {
-		entry = s.coreByName(name)
+	// The member's rollout-visible cores only, like every core surface.
+	visibleEntries, err := s.visibleCoreEntries(r.Context(), claims)
+	if err != nil {
+		obs.ServerError(w, "load components failed", err)
+		httpx.Error(w, "load components failed", http.StatusInternalServerError)
+		return
 	}
+	entry := pickCore(visibleEntries, strings.TrimSpace(r.URL.Query().Get("core")))
 	if entry == nil {
 		httpx.WriteJSON(w, http.StatusOK, map[string]any{"found": false})
 		return
@@ -380,15 +372,11 @@ func (s *Service) handleLocalAgentDiscover(w http.ResponseWriter, r *http.Reques
 // address on /v1/local-agent/run.
 const devDiscoveryEnv = "BNBLOC_DEV_DISCOVERY"
 
-// devDiscoveryEnabled reports whether the dev-only local-agent discovery path
-// is explicitly enabled (BNBLOC_DEV_DISCOVERY=1). Never in production: the
-// switch refuses startup there (CheckProductionEnv), and reads off here too.
-func devDiscoveryEnabled() bool {
-	if config.Production() {
-		return false
-	}
-	v := strings.TrimSpace(os.Getenv(devDiscoveryEnv))
-	return v == "1" || strings.EqualFold(v, "true")
+// DevDiscoveryFromEnv reads the dev-only switch (BNBLOC_DEV_DISCOVERY) at
+// startup into Service.DevDiscovery. Never in production: the switch
+// refuses startup there (CheckProductionEnv), and reads off here too.
+func DevDiscoveryFromEnv() bool {
+	return !config.Production() && config.Bool(devDiscoveryEnv, false)
 }
 
 // CheckProductionEnv refuses a production gateway (BNBLOC_ENV=production)

@@ -150,7 +150,7 @@ func (s *Service) handleCreateAPIToken(w http.ResponseWriter, r *http.Request, c
 		httpx.Error(w, "issue token failed", http.StatusInternalServerError)
 		return
 	}
-	s.auditAPIToken(r.Context(), id, "issue", "allow", claims.Subject, "subject="+subject+" label="+label)
+	s.auditAPIToken(r.Context(), claims.Tenant, id, "issue", "allow", claims.Subject, "subject="+subject+" label="+label)
 	httpx.WriteJSON(w, http.StatusCreated, struct {
 		apiTokenView
 		Token string `json:"token"`
@@ -199,7 +199,7 @@ func (s *Service) handleRevokeAPIToken(w http.ResponseWriter, r *http.Request, c
 		httpx.Error(w, "token not found or already revoked", http.StatusNotFound)
 		return
 	}
-	s.auditAPIToken(r.Context(), id, "revoke", "allow", claims.Subject, "")
+	s.auditAPIToken(r.Context(), claims.Tenant, id, "revoke", "allow", claims.Subject, "")
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -245,18 +245,18 @@ func (s *Service) handleAPITokenExchange(w http.ResponseWriter, r *http.Request)
 	}
 	now := s.nowTime()
 	if !secrettoken.Verify(secret, tok.SecretHash) {
-		s.auditAPIToken(r.Context(), id, "exchange", "deny", tok.Subject, "secret mismatch")
+		s.auditAPIToken(r.Context(), tokenTenant(tok), id, "exchange", "deny", tok.Subject, "secret mismatch")
 		httpx.Error(w, errAPITokenRejected.Error(), http.StatusUnauthorized)
 		return
 	}
 	if !tok.Active(now.UnixMilli()) {
-		s.auditAPIToken(r.Context(), id, "exchange", "deny", tok.Subject, "revoked or expired")
+		s.auditAPIToken(r.Context(), tokenTenant(tok), id, "exchange", "deny", tok.Subject, "revoked or expired")
 		httpx.Error(w, errAPITokenRejected.Error(), http.StatusUnauthorized)
 		return
 	}
 	scope, err := s.resolveSession(auth.Identity{Subject: tok.Subject, Email: tok.Email, Tenant: tok.TenantHint})
 	if errors.Is(err, errTenantSuspended) {
-		s.auditAPIToken(r.Context(), id, "exchange", "deny", tok.Subject, "tenant suspended")
+		s.auditAPIToken(r.Context(), tokenTenant(tok), id, "exchange", "deny", tok.Subject, "tenant suspended")
 	}
 	if err != nil {
 		writeSessionErr(w, err)
@@ -265,19 +265,16 @@ func (s *Service) handleAPITokenExchange(w http.ResponseWriter, r *http.Request)
 	_ = s.apiTokens().TouchAPIToken(r.Context(), id, now.UnixMilli())
 	expires := now.Add(s.SessionTTL)
 	session := mintSession(s.Signer, tok.Subject, "", scope, expires)
-	s.auditAPIToken(r.Context(), id, "exchange", "allow", tok.Subject, "")
+	s.auditAPIToken(r.Context(), scope.Tenant, id, "exchange", "allow", tok.Subject, "")
 	httpx.WriteJSON(w, http.StatusOK, apiTokenGrant{
 		Token: session, Subject: tok.Subject, Tenant: scope.Tenant, Role: scope.Role, Rooms: scope.Rooms, ExpiresAtMs: expires.UnixMilli(),
 	})
 
 }
 
-func (s *Service) auditAPIToken(ctx context.Context, id, action, outcome, actor, detail string) {
-	if s.ExtAudit == nil {
-		return
-	}
-	_ = s.ExtAudit.AppendExtAudit(ctx, store.ExtAuditRecord{
-		Kind: apiTokenAuditKind, Name: id, Action: action, Actor: actor, Outcome: outcome, Detail: detail, AtMs: s.nowTime().UnixMilli(),
+func (s *Service) auditAPIToken(ctx context.Context, tenantID, id, action, outcome, actor, detail string) {
+	s.audit(ctx, tenantID, store.ExtAuditRecord{
+		Kind: apiTokenAuditKind, Name: id, Action: action, Actor: actor, Outcome: outcome, Detail: detail,
 	})
 }
 
@@ -324,11 +321,18 @@ func (s *Service) handlePlatformAlert(w http.ResponseWriter, r *http.Request, cl
 		httpx.Error(w, "alert failed", http.StatusInternalServerError)
 		return
 	}
-	if s.ExtAudit != nil {
-		_ = s.ExtAudit.AppendExtAudit(r.Context(), store.ExtAuditRecord{
-			Kind: "admin-alert", Name: res.ID, Action: "alert", Actor: claims.Subject, TenantID: tid, Outcome: "queued",
-			Detail: "notifiers=" + strings.Join(res.Notifiers, ",") + " recipients=" + strings.Join(res.Recipients, ","), AtMs: s.nowTime().UnixMilli(),
-		})
-	}
+	s.audit(r.Context(), tid, store.ExtAuditRecord{
+		Kind: wire.AuditKindAdminAlert, Name: res.ID, Action: "alert", Actor: claims.Subject, Outcome: "queued",
+		Detail: "notifiers=" + strings.Join(res.Notifiers, ",") + " recipients=" + strings.Join(res.Recipients, ","),
+	})
 	httpx.WriteJSON(w, http.StatusAccepted, res)
+}
+
+// tokenTenant is the tenant an API token's refused exchange is recorded in:
+// the one it would have landed in.
+func tokenTenant(tok store.APIToken) string {
+	if t := strings.TrimSpace(tok.TenantHint); t != "" {
+		return t
+	}
+	return tenant.Default
 }

@@ -20,10 +20,11 @@ func TestDevDiscoveryRefusedInProduction(t *testing.T) {
 	if err := CheckProductionEnv(); err == nil || !strings.Contains(err.Error(), "BNBLOC_DEV_DISCOVERY") {
 		t.Fatalf("CheckProductionEnv = %v, want the switch refused", err)
 	}
-	if devDiscoveryEnabled() {
+	if DevDiscoveryFromEnv() {
 		t.Fatal("dev discovery reads on in production")
 	}
 	gw := newGateway(t, "")
+	gw.DevDiscovery = DevDiscoveryFromEnv()
 	srv := httptest.NewServer(gw.Handler())
 	defer srv.Close()
 	token := gw.Signer.Issue(auth.Claims{Subject: "alice", ExpiresAtUnix: time.Now().Add(time.Hour).Unix()})
@@ -36,8 +37,8 @@ func TestDevDiscoveryRefusedInProduction(t *testing.T) {
 	}
 	t.Setenv(config.EnvVar, "")
 	t.Setenv("BNBLOC_DEV_DISCOVERY", "1")
-	if err := CheckProductionEnv(); err != nil || !devDiscoveryEnabled() {
-		t.Fatalf("development: CheckProductionEnv = %v, enabled = %v", err, devDiscoveryEnabled())
+	if err := CheckProductionEnv(); err != nil || !DevDiscoveryFromEnv() {
+		t.Fatalf("development: CheckProductionEnv = %v, enabled = %v", err, DevDiscoveryFromEnv())
 	}
 }
 

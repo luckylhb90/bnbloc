@@ -8,6 +8,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/luckylhb90/bnbloc/internal/coreset"
 	"github.com/luckylhb90/bnbloc/internal/membership"
 	"github.com/luckylhb90/bnbloc/internal/store"
 )
@@ -79,4 +80,18 @@ func (ps *probeServer) count() int {
 	ps.mu.Lock()
 	defer ps.mu.Unlock()
 	return ps.probes
+}
+
+// coreByName returns the configured core named name (tests read the
+// gateway's activated core list).
+func (s *Service) coreByName(name string) *coreset.Entry {
+	s.coresMu.RLock()
+	defer s.coresMu.RUnlock()
+	for i := range s.Cores {
+		if s.Cores[i].Name == name {
+			e := s.Cores[i]
+			return &e
+		}
+	}
+	return nil
 }

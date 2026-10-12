@@ -241,7 +241,6 @@ export function Agents() {
   const displayCores: {
     name: string;
     available: boolean;
-    builtin: boolean;
     requiresDesktop: boolean;
     config: CoreConfig;
   }[] = [];
@@ -253,18 +252,17 @@ export function Agents() {
       displayCores.push({
         name: d.name,
         available: d.available,
-        builtin: d.builtin,
         requiresDesktop: !!d.requiresDesktop || d.runtime === "sidecar",
         config,
       });
     }
     for (const c of settings.cores) {
       if (c.name && !seen.has(c.name)) {
-        displayCores.push({ name: c.name, available: false, builtin: false, requiresDesktop: false, config: c });
+        displayCores.push({ name: c.name, available: false, requiresDesktop: false, config: c });
       } else if (!c.name) {
         // A freshly "+ Add a core" row with no name yet: always show it so the
         // user can type its name/connection.
-        displayCores.push({ name: "", available: false, builtin: false, requiresDesktop: false, config: c });
+        displayCores.push({ name: "", available: false, requiresDesktop: false, config: c });
       }
     }
   }
@@ -348,7 +346,6 @@ export function Agents() {
               key={d.name || `new:${i}`}
               core={d.config}
               available={d.available}
-              builtin={d.builtin}
               requiresDesktop={d.requiresDesktop}
               inDesktop={shell}
               providers={providers[d.name] || []}
@@ -358,7 +355,7 @@ export function Agents() {
               onToggle={(p) => toggleProvider(d.name, p)}
               onChange={(patch) => updateCore(d.name, patch)}
               onRemove={() => removeCore(d.name)}
-              canRemove={!d.builtin && shell}
+              canRemove={shell}
               knownCores={knownCores}
               onRescan={rescan}
               desktopDownload={desktopDownload}
@@ -547,7 +544,6 @@ function Banner({
 function CoreGroup({
   core,
   available,
-  builtin,
   requiresDesktop,
   inDesktop,
   providers,
@@ -565,7 +561,6 @@ function CoreGroup({
 }: {
   core: CoreConfig;
   available: boolean;
-  builtin: boolean;
   requiresDesktop: boolean;
   inDesktop: boolean;
   providers: string[];
@@ -592,7 +587,6 @@ function CoreGroup({
         name={core.name}
         status={status}
         label={live?.label}
-        builtin={builtin}
         right={
           <Button size="icon" variant="ghost" aria-label="Remove core" disabled={!canRemove} onClick={onRemove}>
             <TrashIcon size={16} />

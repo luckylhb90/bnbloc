@@ -144,6 +144,8 @@ services:
       # ids. A super-admin sees all tenants and can administer any via the
       # Platform console. Dev default seeds "root"; production sets real ids.
       BNBLOC_SUPER_ADMINS: "${BNBLOC_SUPER_ADMINS:-root}"
+      # Public origin of every link and artifact URL the gateway hands out.
+      BNBLOC_PUBLIC_URL: "${BNBLOC_PUBLIC_URL:-http://localhost:7090}"
       BNBLOC_ACTIVITY_BASE_URL: "http://activity:8081"
       BNBLOC_REALTIME_BASE_URL: "http://realtime:8082"
       BNBLOC_SHAREAGENT_BASE_URL: "http://shareagent:8083"

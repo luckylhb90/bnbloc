@@ -49,8 +49,9 @@ oidc:
   clientID: ""
 
 # Public web origin (BNBLOC_PUBLIC_URL, e.g. https://bnbloc.corp.example):
-# member notifications deep-link into rooms on it. Empty = notifications carry
-# no link.
+# member notifications deep-link into rooms on it, and the gateway builds
+# every link and artifact URL it hands out on it. Empty = notifications carry
+# no link and the gateway uses each request's own origin.
 publicURL: ""
 
 # Browser push notifications (N4): the deployment's VAPID key pair, generated

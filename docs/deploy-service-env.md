@@ -51,6 +51,7 @@ embedded SPA. Stateless apart from the shared database — scale horizontally.
 | `BNBLOC_SECRET_STORE_KEY` | for org MCP connectors | 32 random bytes (base64 or hex) sealing organization MCP tool connectors at rest. All replicas share it. Unset = org connectors off; malformed = refuses to start. |
 | `BNBLOC_OIDC_ISSUER_URL` + `BNBLOC_OIDC_CLIENT_ID` | no | OIDC relying party. Unset in production = direct login disabled; sign in via an installed auth-provider (SSO). |
 | `BNBLOC_SUPER_ADMINS` | yes | Comma-separated verified subject ids/emails (cross-tenant admins). |
+| `BNBLOC_PUBLIC_URL` | recommended | Public origin; every link and artifact URL the gateway hands out (content notifications, published package artifacts, previewer CSP). Unset = each request's own origin. |
 | `BNBLOC_ROOM_BASE_URL` | yes | `http://bnbloc-room:8080` |
 | `BNBLOC_REALTIME_BASE_URL` | yes | `http://bnbloc-realtime:8082` |
 | `BNBLOC_ACTIVITY_BASE_URL` | yes | `http://bnbloc-activity:8081` |
@@ -195,7 +196,7 @@ No database, no internal key; it talks to the gateway like any client.
 
 | Service | Port | Replicas | MYSQL_DSN | INTERNAL_KEY | ROOM_BASE_URL | REALTIME_BASE_URL | Extra |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| gateway | 8080 | 1..n | ✅ | ✅ | ✅ | ✅ | session key, OIDC, super-admins, activity/shareagent URLs, trusted proxies |
+| gateway | 8080 | 1..n | ✅ | ✅ | ✅ | ✅ | session key, OIDC, super-admins, activity/shareagent URLs, trusted proxies, public URL |
 | room | 8080 | 1..n | ✅ | ✅ | — | ✅ | — |
 | realtime | 8082 | 1..n (room ownership) | ✅ | ✅ | ✅ | — | blob storage; optional OpenSearch |
 | activity | 8081 | 1..n | ✅ | ✅ | ✅ | ✅ | — |

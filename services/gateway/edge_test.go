@@ -139,11 +139,11 @@ func TestClientIPTrustsOnlyConfiguredProxies(t *testing.T) {
 // proxied request, the old dev default included, even with the dev
 // discovery switch on.
 func TestNoDaemonTokenBypass(t *testing.T) {
-	t.Setenv("BNBLOC_DEV_DISCOVERY", "1")
 	var hits int
 	backend := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { hits++ }))
 	defer backend.Close()
 	gw := newGateway(t, backend.URL)
+	gw.DevDiscovery = true
 	gw.Backends.Activity = backend.URL
 	srv := httptest.NewServer(gw.Handler())
 	defer srv.Close()

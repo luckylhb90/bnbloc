@@ -149,15 +149,13 @@ func resolveTenantWiring() tenantWiring {
 		return tenantWiring{}
 	}
 	res := provisioning.New(backends.Tenant)
-	if config.FromEnvRaw("BNBLOC_TENANT_AUTOPROVISION") == "false" {
-		res.AutoProvision = false
-	}
+	res.AutoProvision = config.Bool("BNBLOC_TENANT_AUTOPROVISION", true)
 	// Platform super-admins (cross-tenant) are configured, not provisioned:
 	// BNBLOC_SUPER_ADMINS is a comma-separated list of verified subject ids or
 	// emails (an email is the natural choice for an operator). A subject
 	// matches exactly; an email entry matches the identity's email
 	// case-insensitively (provisioning.Resolver.isSuperAdmin).
-	if admins := splitCSV(config.FromEnvRaw("BNBLOC_SUPER_ADMINS")); len(admins) > 0 {
+	if admins := superAdmins(); len(admins) > 0 {
 		res.SuperAdmins = make(map[string]bool, len(admins))
 		for _, a := range admins {
 			if a = strings.TrimSpace(a); a != "" {
@@ -249,7 +247,7 @@ func main() {
 		log.Fatalf("bnbloc-gateway: %v", err)
 	}
 	tw := resolveTenantWiring()
-	allowUnsigned := truthy(config.FromEnvRaw("BNBLOC_EXT_ALLOW_UNSIGNED"))
+	allowUnsigned := config.Bool("BNBLOC_EXT_ALLOW_UNSIGNED", false)
 	// Organization MCP connectors are sealed under the secret store key;
 	// unset turns them off, a malformed key refuses to start.
 	secretBox, err := sealbox.FromEnv()
@@ -287,17 +285,22 @@ func main() {
 		MemberCount:       tw.MemberCount,
 		RoomMembers:       tw.RoomMembers,
 		OrgAdmins:         tw.OrgAdmins,
-		AllowedOrigins:    splitCSV(config.FromEnvRaw("BNBLOC_ALLOWED_ORIGINS")),
+		AllowedOrigins:    config.List("BNBLOC_ALLOWED_ORIGINS"),
 		TrustedProxies:    resolveTrustedProxies(),
-		TenantResolver:    tw.Resolve,
-		TenantSuspended:   tw.Suspended,
-		TenantMemberRole:  tw.MemberRole,
-		SSOHandoffs:       tw.SSOHandoffs,
-		RefreshTokens:     tw.RefreshTokens,
-		APITokens:         tw.APITokens,
-		Alerts:            tw.Alerts,
-		OrgSync:           tw.OrgSync,
-		SuperAdmins:       splitCSV(config.FromEnvRaw("BNBLOC_SUPER_ADMINS")),
+		PublicURL:         config.FromEnvRaw(notify.PublicURLEnv),
+		DevDiscovery:      gateway.DevDiscoveryFromEnv(),
+		// Deployment without curated release history: a download link still
+		// activates the UI's download affordances (one synthetic release).
+		DesktopDownloadURL: strings.TrimSpace(config.FromEnvRaw("BNBLOC_DESKTOP_DOWNLOAD_URL")),
+		TenantResolver:     tw.Resolve,
+		TenantSuspended:    tw.Suspended,
+		TenantMemberRole:   tw.MemberRole,
+		SSOHandoffs:        tw.SSOHandoffs,
+		RefreshTokens:      tw.RefreshTokens,
+		APITokens:          tw.APITokens,
+		Alerts:             tw.Alerts,
+		OrgSync:            tw.OrgSync,
+		SuperAdmins:        superAdmins(),
 	}
 	// Boot is the first component reconcile, on the SAME pipeline the
 	// periodic reconcile and the install/uninstall handlers use, so the live
@@ -333,15 +336,6 @@ func contentJobs(jobs store.BridgeJobStore) gateway.ContentJobs {
 	return cj
 }
 
-func truthy(raw string) bool {
-	switch strings.ToLower(strings.TrimSpace(raw)) {
-	case "1", "true", "yes", "y", "on":
-		return true
-	default:
-		return false
-	}
-}
-
 // mintAdminTokenCmd is the operator bootstrap subcommand. A production gateway
 // has no password login, so the FIRST super-admin of an SSO-only deployment
 // (before any auth-provider is installed) needs another way in. Whoever can
@@ -360,7 +354,7 @@ func runMintAdminToken(args []string) {
 		log.Fatalf("usage: bnbloc-gateway %s <super-admin subject or email>", mintAdminTokenCmd)
 	}
 	key := config.FromEnvRaw("BNBLOC_SESSION_SIGNING_KEY")
-	token, err := gateway.MintAdminToken(args[0], splitCSV(config.FromEnvRaw("BNBLOC_SUPER_ADMINS")), key, time.Now())
+	token, err := gateway.MintAdminToken(args[0], superAdmins(), key, time.Now())
 	if err != nil {
 		log.Fatalf("bnbloc-gateway %s: %v", mintAdminTokenCmd, err)
 	}
@@ -389,7 +383,7 @@ func resolveACSPath() string {
 // entry is fatal so a typo cannot silently disable or widen the trust.
 func resolveTrustedProxies() []netip.Prefix {
 	var out []netip.Prefix
-	for _, raw := range splitCSV(config.FromEnvRaw("BNBLOC_TRUSTED_PROXIES")) {
+	for _, raw := range config.List("BNBLOC_TRUSTED_PROXIES") {
 		if p, err := netip.ParsePrefix(raw); err == nil {
 			out = append(out, p.Masked())
 			continue
@@ -403,17 +397,7 @@ func resolveTrustedProxies() []netip.Prefix {
 	return out
 }
 
-// splitCSV parses a comma-separated env value into a trimmed, non-empty list.
-func splitCSV(v string) []string {
-	if strings.TrimSpace(v) == "" {
-		return nil
-	}
-	parts := strings.Split(v, ",")
-	out := make([]string, 0, len(parts))
-	for _, p := range parts {
-		if p = strings.TrimSpace(p); p != "" {
-			out = append(out, p)
-		}
-	}
-	return out
-}
+// superAdmins is BNBLOC_SUPER_ADMINS, the configured platform super-admin
+// list (verified subject ids or emails), read the one way for login
+// provisioning, admin alerts and the bootstrap token.
+func superAdmins() []string { return config.List("BNBLOC_SUPER_ADMINS") }

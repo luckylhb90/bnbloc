@@ -238,6 +238,11 @@ func TestCORSPreflightFromShellOriginBeforeAuth(t *testing.T) {
 	if got := resp.Header.Get("Access-Control-Allow-Headers"); !strings.Contains(got, "X-Bnbloc-Acting-Tenant") {
 		t.Fatalf("allow-headers = %q, want it to include X-Bnbloc-Acting-Tenant", got)
 	}
+	// The webview reads a download's file name and the audit export's
+	// truncation count, which a cross-origin response hides unless exposed.
+	if got := resp.Header.Get("Access-Control-Expose-Headers"); !strings.Contains(got, "Content-Disposition") || !strings.Contains(got, "X-Bnbloc-Truncated") {
+		t.Fatalf("expose-headers = %q", got)
+	}
 }
 
 // A preflight from an unlisted origin is refused (403), never proxied.
@@ -357,20 +362,17 @@ func TestCoresListsRegisteredWithAvailability(t *testing.T) {
 		Cores []struct {
 			Name      string `json:"name"`
 			Available bool   `json:"available"`
-			Builtin   bool   `json:"builtin"`
 		} `json:"cores"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	byName := map[string]struct {
-		available, builtin bool
-	}{}
+	byName := map[string]bool{}
 	for _, c := range out.Cores {
-		byName[c.Name] = struct{ available, builtin bool }{c.Available, c.Builtin}
+		byName[c.Name] = c.Available
 	}
-	if got, ok := byName[wired]; !ok || !got.available || !got.builtin {
-		t.Fatalf("%s = %+v (present=%v), want available+builtin", wired, got, ok)
+	if available, ok := byName[wired]; !ok || !available {
+		t.Fatalf("%s available=%v (present=%v), want a listed, available configured core", wired, available, ok)
 	}
 	if _, ok := byName[manifestName]; ok {
 		t.Fatalf("%s leaked without a persisted component record", manifestName)
@@ -434,11 +436,12 @@ func TestCoresTenantEnablementFilter(t *testing.T) {
 	gw.AllowExtUnsigned = true
 	t.Cleanup(func() { _ = core.Unregister(scoped) })
 
-	// A registered builtin (no tenant overlay) must stay visible to both
-	// tenants while the scoped core filters.
-	const builtinName = "builtin-no-overlay"
+	// An operator-configured core (no install record, so no tenant overlay)
+	// stays visible to both tenants while the scoped core filters.
+	const builtinName = "configured-no-overlay"
 	core.Register(builtinName, func() core.Provider { return fakeCoreProvider{name: builtinName} })
 	t.Cleanup(func() { _ = core.Unregister(builtinName) })
+	gw.Cores = append(gw.Cores, coreset.Entry{Name: builtinName, Provider: fakeCoreProvider{name: builtinName}})
 
 	// Seed the install record through the pipeline, then scope it to tenant t1.
 	pkgBody, _ := json.Marshal(legacyManifestPackage(manifestcore.Manifest{
@@ -488,14 +491,14 @@ func TestCoresTenantEnablementFilter(t *testing.T) {
 		t.Fatalf("t1 caller should see the core scoped to t1; got %v", t1)
 	}
 	if !t1[builtinName] {
-		t.Fatalf("t1 caller should still see the builtin core; got %v", t1)
+		t.Fatalf("t1 caller should still see the configured core; got %v", t1)
 	}
 	t2 := seesCore("t2")
 	if t2[scoped] {
 		t.Fatalf("t2 caller must NOT see a core scoped to t1; got %v", t2)
 	}
 	if !t2[builtinName] {
-		t.Fatalf("t2 caller should still see the builtin core; got %v", t2)
+		t.Fatalf("t2 caller should still see the configured core; got %v", t2)
 	}
 }
 

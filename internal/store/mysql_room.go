@@ -139,11 +139,11 @@ func (s *MySQLRoom) RoomTenant(ctx context.Context, roomID string) (string, bool
 	return tid, true
 }
 
-// GetRoom returns a room scoped to the caller's tenant. Room ids are NOT
-// globally unique (two tenants may each have their own room with the same id),
-// so a caller reaching a room outside their session tenant resolves it through
-// the room-anchored membership probes (MembershipAnyTenant / TenantOfRoom), not
-// by un-scoping this read.
+// GetRoom returns a room scoped to the caller's tenant. Room ids are
+// globally unique (rooms' primary key is room_id alone), but a read stays
+// in the request's tenant: a caller reaching a room outside their session
+// tenant first resolves the room's tenant through the room-anchored probes
+// (MembershipAnyTenant / TenantOfRoom), never by un-scoping this read.
 func (s *MySQLRoom) GetRoom(ctx context.Context, roomID string) (Room, error) {
 	tid, err := tenant.Require(ctx)
 	if err != nil {

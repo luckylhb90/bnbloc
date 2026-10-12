@@ -315,7 +315,7 @@ func (s *Service) takeSSORelay(w http.ResponseWriter, r *http.Request) string {
 // the ACS cross-site, which only carries SameSite=None (hence Secure) cookies;
 // plain-http development falls back to Lax.
 func (s *Service) ssoRelayCookieFor(r *http.Request, value string, maxAge int) *http.Cookie {
-	secure := r.TLS != nil || strings.EqualFold(strings.TrimSpace(r.Header.Get("X-Forwarded-Proto")), "https")
+	secure := s.publicScheme(r) == "https"
 	sameSite := http.SameSiteLaxMode
 	if secure {
 		sameSite = http.SameSiteNoneMode

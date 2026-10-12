@@ -5,6 +5,7 @@ package config
 import (
 	"os"
 	"strconv"
+	"strings"
 )
 
 // Service holds the common configuration shared by every bnbloc service.
@@ -51,4 +52,32 @@ func GetInt(key string, fallback int) int {
 		}
 	}
 	return fallback
+}
+
+// ParseBool is the one reading of a boolean switch, in the environment or a
+// stored setting: 1/true/yes/on and 0/false/no/off (any case); anything else
+// — unset included — is fallback.
+func ParseBool(raw string, fallback bool) bool {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "1", "true", "yes", "on":
+		return true
+	case "0", "false", "no", "off":
+		return false
+	}
+	return fallback
+}
+
+// Bool reads a boolean environment switch (ParseBool).
+func Bool(key string, fallback bool) bool { return ParseBool(os.Getenv(key), fallback) }
+
+// List reads a comma-separated environment list: trimmed, empty entries
+// dropped, nil when unset.
+func List(key string) []string {
+	var out []string
+	for _, p := range strings.Split(os.Getenv(key), ",") {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }

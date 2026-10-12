@@ -1,7 +1,6 @@
 // Shared Agents-page primitives (file-length split from Agents.tsx): core
 // status vocabulary + header, exported for the agents/* component modules.
 import { cn } from "@/lib/cn";
-import { Badge } from "@/ui/Card";
 
 export // A core's real status, distinct from the gateway's coarse "available" (which
 // only means an endpoint address resolved, not that a daemon answered):
@@ -26,7 +25,6 @@ export function CoreHeader({
   name,
   status,
   label,
-  builtin,
   right,
 }: {
   name: string;
@@ -34,7 +32,6 @@ export function CoreHeader({
   // A more precise label than the status vocabulary (e.g. a managed
   // sidecar's "starting…" / "sign-in required").
   label?: string;
-  builtin: boolean;
   right?: React.ReactNode;
 }) {
   return (
@@ -48,7 +45,6 @@ export function CoreHeader({
       >
         {label || STATUS_LABEL[status]}
       </span>
-      <Badge tone={builtin ? "neutral" : "accent"}>{builtin ? "built-in" : "extension"}</Badge>
       <div className="flex-1" />
       {right}
     </div>

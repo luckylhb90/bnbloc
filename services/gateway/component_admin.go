@@ -54,7 +54,7 @@ func (s *Service) handleInstallComponent(w http.ResponseWriter, r *http.Request,
 		Signature:       []byte(req.Signature),
 		Actor:           claims.Subject,
 		Rollout:         req.Rollout,
-		ArtifactBaseURL: publicBaseURL(r),
+		ArtifactBaseURL: s.publicOrigin(r),
 		ArtifactProbe:   s.probeUploadedArtifacts,
 	})
 	if err != nil {
@@ -85,18 +85,6 @@ func (s *Service) handleInstallComponent(w http.ResponseWriter, r *http.Request,
 	}
 	s.componentsChanged(r.Context(), "", "")
 	httpx.WriteJSON(w, http.StatusOK, componentInstallResponse{installedComponent: component, Secret: secret})
-}
-
-func publicBaseURL(r *http.Request) string {
-	scheme := "http"
-	if r.TLS != nil {
-		scheme = "https"
-	}
-	if forwarded := strings.TrimSpace(r.Header.Get("X-Forwarded-Proto")); forwarded != "" {
-		scheme = strings.ToLower(strings.TrimSpace(strings.Split(forwarded, ",")[0]))
-	}
-	host := r.Host
-	return scheme + "://" + host
 }
 
 func (s *Service) handleUninstallComponent(w http.ResponseWriter, r *http.Request, claims auth.Claims) {

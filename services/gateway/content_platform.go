@@ -93,7 +93,7 @@ func (s *Service) handleExportContentPackage(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	publisher := firstNonEmpty(q.Get("publisher"), "self")
-	pkg := contentpkg.PlatformPackage(m, v.SHA256, publicBaseURL(r)+"/v1/artifacts/"+v.BundleBlobKey, publisher)
+	pkg := contentpkg.PlatformPackage(m, v.SHA256, pkgmeta.GatewayArtifactURL(s.publicOrigin(r), v.BundleBlobKey), publisher)
 	if err := pkgmeta.ValidatePackage(pkg); err != nil {
 		httpx.Error(w, err.Error(), http.StatusBadRequest)
 		return
@@ -152,7 +152,7 @@ func (s *Service) installPlatformContent(w http.ResponseWriter, r *http.Request,
 		httpx.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	if err := pkgmeta.ValidateGatewayArtifactURLs(pkg, publicBaseURL(r)); err != nil {
+	if err := pkgmeta.ValidateGatewayArtifactURLs(pkg, s.publicOrigin(r)); err != nil {
 		httpx.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}

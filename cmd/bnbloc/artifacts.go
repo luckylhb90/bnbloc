@@ -9,6 +9,8 @@ import (
 	"io"
 	"net/http"
 	"os"
+
+	"github.com/luckylhb90/bnbloc/core/pkgmeta"
 )
 
 // uploadedArtifact is a file staged in the gateway's content-addressed
@@ -69,13 +71,13 @@ func uploadArtifactFile(c *client, path string) (uploadedArtifact, error) {
 	if err := checkUploadResponse(out.Key, out.SHA256, out.Size, localSHA, localSize); err != nil {
 		return uploadedArtifact{}, err
 	}
-	return uploadedArtifact{Key: out.Key, SHA256: out.SHA256, Size: out.Size, URL: c.cfg.Gateway + "/v1/artifacts/" + out.Key}, nil
+	return uploadedArtifact{Key: out.Key, SHA256: out.SHA256, Size: out.Size, URL: pkgmeta.GatewayArtifactURL(c.cfg.Gateway, out.Key)}, nil
 }
 
 // verifyArtifactDownload fetches a staged artifact back through the gateway
 // (authenticated, as clients will) and checks its sha256 and size.
 func verifyArtifactDownload(c *client, a uploadedArtifact) error {
-	return c.stream(context.Background(), "/v1/artifacts/"+a.Key, func(r io.Reader) error {
+	return c.stream(context.Background(), pkgmeta.GatewayArtifactPath(a.Key), func(r io.Reader) error {
 		sha, size, err := readerDigest(r)
 		if err != nil {
 			return fmt.Errorf("download %s: %w", a.Key, err)

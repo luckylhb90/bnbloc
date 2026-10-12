@@ -434,7 +434,7 @@ func (s *Service) decideContent(w http.ResponseWriter, r *http.Request, claims a
 	}
 	s.notifyContent(ctx, claims.Tenant, notify.Event{
 		Type: wire.NotificationContentReview, Recipients: []string{req.RequestedBy}, Actor: claims.Subject,
-		Title: title, Text: text, URL: appLink(r, "library"), DedupKey: "content-decision:" + req.ID,
+		Title: title, Text: text, URL: s.appLink(r, "library"), DedupKey: "content-decision:" + req.ID,
 	})
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"request": publishRequestView(decided, firstNonEmpty(src.DisplayName, req.Name), approved)})
 }

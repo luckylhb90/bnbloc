@@ -39,9 +39,9 @@ export BNBLOC_RELAY_BASE_URL="http://127.0.0.1:8085"
 unset BNBLOC_REALTIME_PEERS BNBLOC_REALTIME_SELF BNBLOC_RELAY_PEERS BNBLOC_RELAY_SELF BNBLOC_GATEWAY_PEERS
 
 # Member notifications read BNBLOC_PUBLIC_URL (room deep links, shared by
-# realtime, shareagent and activity's budget warnings) straight from the
-# container environment; unset
-# means no links. Delivery targets are installed notifier components.
+# realtime, shareagent and activity's budget warnings; the gateway's links
+# and artifact URLs) straight from the container environment; unset
+# means no notification links and request-origin gateway links. Delivery targets are installed notifier components.
 # Browser push reads BNBLOC_WEB_PUSH_VAPID_PUBLIC_KEY / _PRIVATE_KEY /
 # _SUBJECT (realtime) the same way; unset means the channel is off.
 # The gateway reads BNBLOC_SECRET_STORE_KEY (seals organization MCP tool
