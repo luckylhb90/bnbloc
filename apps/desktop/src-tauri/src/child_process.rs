@@ -19,16 +19,24 @@
 #[cfg(windows)]
 mod windows_job;
 
+use std::future::Future;
 use std::io::{BufRead, BufReader, Read};
 use std::process::{ChildStdin, Command, Stdio};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use futures_util::future::{BoxFuture, FutureExt, Shared};
 use shared_child::SharedChild;
 use tokio::sync::mpsc;
 
 /// Grace period between the graceful stop signal and a force-kill.
 pub(crate) const STOP_GRACE: Duration = Duration::from_secs(5);
+
+/// Output lines buffered per child. A child that writes faster than its
+/// supervisor reads loses lines (counted, then reported in one line), never
+/// memory: the pumps never block the child.
+const LINE_BUFFER: usize = 1024;
 
 /// How long the exit event waits for the output pumps to drain. Bounded so a
 /// grandchild that inherited (and keeps open) the stdout pipe cannot hold the
@@ -54,9 +62,7 @@ pub(crate) struct Child {
 }
 
 /// Spawn `cmd` with piped stdio. Returns the event stream and the handle.
-pub(crate) fn spawn(
-    mut cmd: Command,
-) -> std::io::Result<(mpsc::UnboundedReceiver<ChildEvent>, Child)> {
+pub(crate) fn spawn(mut cmd: Command) -> std::io::Result<(mpsc::Receiver<ChildEvent>, Child)> {
     cmd.stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
@@ -73,13 +79,14 @@ pub(crate) fn spawn(
         (Arc::new(SharedChild::new(child)?), job)
     };
     let stdin = shared.take_stdin();
-    let (tx, rx) = mpsc::unbounded_channel();
+    let (tx, rx) = mpsc::channel(LINE_BUFFER);
+    let dropped = Arc::new(AtomicUsize::new(0));
     let mut pumps = Vec::new();
     if let Some(out) = shared.take_stdout() {
-        pumps.push(pump_lines(out, tx.clone()));
+        pumps.push(pump_lines(out, tx.clone(), Arc::clone(&dropped)));
     }
     if let Some(err) = shared.take_stderr() {
-        pumps.push(pump_lines(err, tx.clone()));
+        pumps.push(pump_lines(err, tx.clone(), Arc::clone(&dropped)));
     }
     let waiter = shared.clone();
     std::thread::spawn(move || {
@@ -90,7 +97,14 @@ pub(crate) fn spawn(
                 std::thread::sleep(Duration::from_millis(10));
             }
         }
-        let _ = tx.send(ChildEvent::Exited(code));
+        // A loss no later line reported, then the exit: never dropped, they
+        // wait for room (the supervisor reads until the exit; a dropped
+        // receiver ends the wait).
+        let lost = dropped.swap(0, Ordering::SeqCst);
+        if lost > 0 {
+            let _ = tx.blocking_send(dropped_note(lost));
+        }
+        let _ = tx.blocking_send(ChildEvent::Exited(code));
     });
     Ok((
         rx,
@@ -103,9 +117,17 @@ pub(crate) fn spawn(
     ))
 }
 
+fn dropped_note(n: usize) -> ChildEvent {
+    ChildEvent::Line(format!("[{n} output lines dropped]"))
+}
+
+/// Forward `reader`'s lines without ever blocking the child: a line that
+/// finds the buffer full is counted in `dropped` and reported by the next
+/// line that fits (or by the exit).
 fn pump_lines<R: Read + Send + 'static>(
     reader: R,
-    tx: mpsc::UnboundedSender<ChildEvent>,
+    tx: mpsc::Sender<ChildEvent>,
+    dropped: Arc<AtomicUsize>,
 ) -> std::thread::JoinHandle<()> {
     std::thread::spawn(move || {
         let mut reader = BufReader::new(reader);
@@ -117,10 +139,26 @@ fn pump_lines<R: Read + Send + 'static>(
                 Ok(_) => {
                     let line = String::from_utf8_lossy(&buf);
                     let line = line.trim_end_matches(['\r', '\n']);
-                    if !line.trim().is_empty()
-                        && tx.send(ChildEvent::Line(line.to_string())).is_err()
-                    {
-                        return;
+                    if line.trim().is_empty() {
+                        continue;
+                    }
+                    let lost = dropped.swap(0, Ordering::SeqCst);
+                    if lost > 0 {
+                        match tx.try_send(dropped_note(lost)) {
+                            Ok(()) => {}
+                            Err(mpsc::error::TrySendError::Full(_)) => {
+                                dropped.fetch_add(lost + 1, Ordering::SeqCst);
+                                continue;
+                            }
+                            Err(mpsc::error::TrySendError::Closed(_)) => return,
+                        }
+                    }
+                    match tx.try_send(ChildEvent::Line(line.to_string())) {
+                        Ok(()) => {}
+                        Err(mpsc::error::TrySendError::Full(_)) => {
+                            dropped.fetch_add(1, Ordering::SeqCst);
+                        }
+                        Err(mpsc::error::TrySendError::Closed(_)) => return,
                     }
                 }
             }
@@ -195,16 +233,114 @@ pub(crate) fn terminate_all(mut children: Vec<Child>, grace: Duration) {
 /// [`terminate_all`] on a blocking thread, started immediately. The stop runs
 /// to completion even if nobody awaits the handle (or the awaiting task is
 /// aborted); await it to know every child is gone.
-pub(crate) fn terminate_detached(
+fn terminate_detached(
     children: Vec<Child>,
     grace: Duration,
 ) -> tauri::async_runtime::JoinHandle<()> {
     tauri::async_runtime::spawn_blocking(move || terminate_all(children, grace))
 }
 
-/// [`terminate_detached`], resolving once every child is gone.
+/// [`terminate_all`] off the async runtime, resolving once every child is
+/// gone (the updater's joint stop before an install).
 pub(crate) async fn terminate(children: Vec<Child>, grace: Duration) {
     let _ = terminate_detached(children, grace).await;
+}
+
+type PendingStop = Shared<BoxFuture<'static, ()>>;
+
+/// The stops still in progress, by what they stop (the bridge, a sidecar
+/// id), so a relaunch never overlaps the run it replaces. Every stop of a
+/// supervised child goes through `stop`; a launch first awaits `stopped`
+/// for its key. A pending stop stays listed until it finishes, so a
+/// relaunch whose task is aborted (a second start right after the first)
+/// loses nothing: the next one still waits for it.
+#[derive(Clone)]
+pub(crate) struct Stopping {
+    grace: Duration,
+    pending: Arc<parking_lot::Mutex<Vec<(String, PendingStop)>>>,
+}
+
+impl Default for Stopping {
+    fn default() -> Self {
+        Self::with_grace(STOP_GRACE)
+    }
+}
+
+impl Stopping {
+    pub(crate) fn with_grace(grace: Duration) -> Self {
+        Self {
+            grace,
+            pending: Arc::default(),
+        }
+    }
+
+    /// Stop `children` of `key` gracefully in the background.
+    pub(crate) fn stop(&self, key: &str, children: Vec<Child>) {
+        if children.is_empty() {
+            return;
+        }
+        let handle = terminate_detached(children, self.grace);
+        let done = async move {
+            let _ = handle.await;
+        }
+        .boxed()
+        .shared();
+        let mut pending = self.pending.lock();
+        pending.retain(|(_, stop)| stop.peek().is_none());
+        pending.push((key.to_string(), done));
+    }
+
+    /// Resolves once every stop of `key` started so far has finished.
+    pub(crate) fn stopped(&self, key: &str) -> impl Future<Output = ()> + Send + 'static {
+        let waits: Vec<PendingStop> = self
+            .pending
+            .lock()
+            .iter()
+            .filter(|(k, _)| k == key)
+            .map(|(_, stop)| stop.clone())
+            .collect();
+        async move {
+            for stop in waits {
+                stop.await;
+            }
+        }
+    }
+}
+
+/// How a supervised child is restarted after it exits: the crash backoff,
+/// and whether a clean exit ends supervision. The two supervised kinds
+/// diverge on purpose: the bridge exits 0 only when it decides to stop, so a
+/// clean exit is final; a component sidecar runs for as long as it is
+/// installed, so any exit restarts it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct RestartPolicy {
+    min: Duration,
+    max: Duration,
+    /// A run that stayed up this long resets the backoff.
+    stable_after: Duration,
+    clean_exit_is_final: bool,
+}
+
+impl RestartPolicy {
+    pub(crate) const BRIDGE: Self = Self {
+        min: Duration::from_secs(1),
+        max: Duration::from_secs(30),
+        stable_after: Duration::from_secs(60),
+        clean_exit_is_final: true,
+    };
+    pub(crate) const SIDECAR: Self = Self {
+        clean_exit_is_final: false,
+        ..Self::BRIDGE
+    };
+
+    pub(crate) fn backoff(&self) -> Backoff {
+        Backoff::new(self.min, self.max, self.stable_after)
+    }
+
+    /// Whether a run that ended with `exit` is started again.
+    pub(crate) fn restarts_after(&self, exit: Option<i32>) -> bool {
+        !(self.clean_exit_is_final && exit == Some(0))
+    }
 }
 
 /// Crash-restart backoff shared by the bridge supervisor and the sidecar
@@ -307,7 +443,7 @@ mod tests {
         cmd
     }
 
-    async fn collect(mut rx: mpsc::UnboundedReceiver<ChildEvent>) -> Vec<ChildEvent> {
+    async fn collect(mut rx: mpsc::Receiver<ChildEvent>) -> Vec<ChildEvent> {
         let mut events = Vec::new();
         while let Some(event) = rx.recv().await {
             let done = matches!(event, ChildEvent::Exited(_));
@@ -366,6 +502,78 @@ mod tests {
             std::thread::sleep(Duration::from_millis(20));
         }
         assert!(!alive, "process group {pid} still alive after force kill");
+    }
+
+    /// A child that floods its output while nobody reads loses lines, never
+    /// its exit, and the loss is reported.
+    #[tokio::test]
+    async fn output_is_bounded_and_the_exit_always_arrives() {
+        let (rx, _child) = spawn(sh(
+            "i=0; while [ $i -lt 5000 ]; do echo line-$i; i=$((i+1)); done; exit 7",
+        ))
+        .expect("spawn");
+        // Let the child finish while the buffer fills up.
+        tokio::time::sleep(Duration::from_millis(1500)).await;
+        let events = collect(rx).await;
+        assert_eq!(events.last(), Some(&ChildEvent::Exited(Some(7))));
+        assert!(events.len() <= LINE_BUFFER + 2, "{} events", events.len());
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, ChildEvent::Line(l) if l.ends_with("output lines dropped]"))),
+            "the loss is reported"
+        );
+    }
+
+    /// A relaunch waits for the stop of the run it replaces, even when the
+    /// first relaunch's task was aborted, and never for another key's.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn relaunch_waits_for_previous_stop() {
+        let (mut rx, child) = spawn(sh(
+            "trap '' TERM; exec 0</dev/null; echo ready; while :; do sleep 1; done",
+        ))
+        .expect("spawn");
+        assert_eq!(rx.recv().await, Some(ChildEvent::Line("ready".into())));
+        let pid = child.pid() as libc::pid_t;
+        let alive = move || unsafe { libc::kill(-pid, 0) } == 0;
+        let stopping = Stopping::with_grace(Duration::from_millis(400));
+        stopping.stop("bridge", vec![child]);
+
+        // The first relaunch is aborted while it waits (a second start).
+        let aborted = tokio::spawn(stopping.stopped("bridge"));
+        aborted.abort();
+        // Another key never waits for this stop.
+        let other = Instant::now();
+        stopping.stopped("sidecar").await;
+        assert!(other.elapsed() < Duration::from_millis(200));
+
+        let started = Instant::now();
+        stopping.stopped("bridge").await;
+        assert!(
+            started.elapsed() >= Duration::from_millis(300),
+            "waited for the stop"
+        );
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while alive() && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert!(!alive(), "the replaced run is gone before the relaunch");
+        // Finished stops are not waited for again.
+        let again = Instant::now();
+        stopping.stopped("bridge").await;
+        assert!(again.elapsed() < Duration::from_millis(100));
+    }
+
+    #[test]
+    fn restart_policies_diverge_only_on_a_clean_exit() {
+        for policy in [RestartPolicy::BRIDGE, RestartPolicy::SIDECAR] {
+            assert!(policy.restarts_after(Some(1)));
+            assert!(policy.restarts_after(None), "killed by a signal");
+            let mut b = policy.backoff();
+            assert_eq!(b.next(Duration::ZERO), Duration::from_secs(1));
+        }
+        assert!(!RestartPolicy::BRIDGE.restarts_after(Some(0)));
+        assert!(RestartPolicy::SIDECAR.restarts_after(Some(0)));
     }
 
     #[test]

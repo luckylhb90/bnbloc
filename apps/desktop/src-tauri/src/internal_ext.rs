@@ -46,7 +46,7 @@ use sidecar_model::{GatewayAccess, Inner, ManagedSidecar, SidecarSpec};
 pub use sidecar_targets::SidecarAuthStatus;
 use sidecar_util::core_env_var;
 
-use crate::child_process::{self, Backoff, Child, STOP_GRACE};
+use crate::child_process::{Backoff, Child, Stopping};
 
 /// Steady-state catalog refresh cadence: the safety net behind the pushed
 /// `components_changed` hints (plugin_events.rs), which refresh within
@@ -84,6 +84,9 @@ pub struct Adapter {
     mcp: Arc<mcp_tools::McpState>,
     /// Coalesces pushed catalog hints into one refresh (plugin_events.rs).
     catalog_hints: Arc<plugin_events::HintDebounce>,
+    /// Stops of sidecar runs still in progress, by sidecar id: a relaunch
+    /// waits for its own (a fixed port is free again, a data dir released).
+    stopping: Stopping,
 }
 
 impl Adapter {
@@ -109,6 +112,7 @@ impl Adapter {
             sandbox: Arc::new(Mutex::new(sandbox::SandboxState::default())),
             mcp: Arc::new(mcp_tools::McpState::default()),
             catalog_hints: Arc::new(plugin_events::HintDebounce::default()),
+            stopping: Stopping::default(),
         }
     }
 
@@ -374,7 +378,7 @@ impl Adapter {
         };
         if let Some(child) = child {
             self.forget_spawn(id, child.pid());
-            child_process::terminate_detached(vec![child], STOP_GRACE);
+            self.stopping.stop(id, vec![child]);
         }
         if let Some(generation) = generation {
             self.start_known(generation);
@@ -388,7 +392,9 @@ impl Adapter {
         };
         // What an uninstalled component leaves on disk goes with the
         // reconcile's sweep (sidecar_sweep).
-        child_process::terminate_detached(applied.removed, STOP_GRACE);
+        for (id, child) in applied.removed {
+            self.stopping.stop(&id, vec![child]);
+        }
         if let Some(generation) = applied.generation_to_start {
             self.start_known(generation);
         }
@@ -411,7 +417,7 @@ fn apply_specs_to_inner(
     for name in uninstalled {
         if let Some(mut sidecar) = inner.sidecars.remove(&name) {
             sidecar.generation += 1;
-            removed.extend(sidecar.child.take());
+            removed.extend(sidecar.child.take().map(|child| (name.clone(), child)));
         }
     }
 
@@ -422,7 +428,7 @@ fn apply_specs_to_inner(
             sidecar.runtime_url = None;
             sidecar.supervisor_active = false;
             sidecar.refused = None;
-            removed.extend(sidecar.child.take());
+            removed.extend(sidecar.child.take().map(|child| (name.clone(), child)));
         }
     }
 
@@ -441,7 +447,7 @@ fn apply_specs_to_inner(
             }
             Some(sidecar) => {
                 sidecar.generation += 1;
-                removed.extend(sidecar.child.take());
+                removed.extend(sidecar.child.take().map(|child| (id.clone(), child)));
                 sidecar.spec = Some(spec);
                 sidecar.runtime_url = None;
                 sidecar.supervisor_active = false;
@@ -463,8 +469,8 @@ fn apply_specs_to_inner(
 
 struct AppliedSpecs {
     generation_to_start: Option<u64>,
-    /// Children of removed/replaced sidecars, to stop.
-    removed: Vec<Child>,
+    /// Children of removed/replaced sidecars (with their ids), to stop.
+    removed: Vec<(String, Child)>,
 }
 
 /// Extend the bridge env (bridge::env_for) with the managed cores and MCP

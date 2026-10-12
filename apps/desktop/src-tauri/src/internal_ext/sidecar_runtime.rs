@@ -1,7 +1,7 @@
 use std::path::Path;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
-use crate::child_process::{self, Backoff, ChildEvent, STOP_GRACE};
+use crate::child_process::{self, ChildEvent, RestartPolicy, STOP_GRACE};
 use crate::internal_ext::loopback::LoopbackHttp;
 use crate::internal_ext::pin::Sha256Pin;
 use crate::internal_ext::sidecar_fetch::FetchError;
@@ -16,10 +16,6 @@ use crate::internal_ext::sidecar_util::{
 };
 use crate::internal_ext::{plugin_host, plugin_settings, Adapter};
 
-const BACKOFF_MIN: Duration = Duration::from_secs(1);
-const BACKOFF_MAX: Duration = Duration::from_secs(30);
-/// A sidecar run that stayed up this long resets the crash-restart backoff.
-const STABLE_RUN: Duration = Duration::from_secs(60);
 /// Consecutive checksum mismatches tolerated (a truncated or proxied
 /// transfer) before the artifact is refused for this spec.
 const MAX_VERIFY_FAILURES: u32 = 3;
@@ -71,7 +67,8 @@ impl Adapter {
     }
 
     async fn supervise(&self, spec: SidecarSpec, manager_generation: u64, sidecar_generation: u64) {
-        let mut backoff = Backoff::new(BACKOFF_MIN, BACKOFF_MAX, STABLE_RUN);
+        // Any exit restarts a sidecar (RestartPolicy::SIDECAR).
+        let mut backoff = RestartPolicy::SIDECAR.backoff();
         let mut verify_failures = 0;
         let id = spec.id();
         loop {
@@ -87,6 +84,12 @@ impl Adapter {
             match prepared {
                 Ok(path) => {
                     verify_failures = 0;
+                    // Never overlap the run this one replaces (a fixed port,
+                    // a data dir).
+                    self.stopping.stopped(&id).await;
+                    if !self.current(&id, manager_generation, sidecar_generation) {
+                        return;
+                    }
                     self.run_binary(&spec, &path, manager_generation, sidecar_generation)
                         .await;
                 }
@@ -400,7 +403,7 @@ impl Adapter {
             };
             drop(inner);
             if let Some(child) = stale {
-                child_process::terminate_detached(vec![child], STOP_GRACE);
+                self.stopping.stop(&id, vec![child]);
                 return Ok(());
             }
         }

@@ -37,22 +37,27 @@ const EXIT_GRACE: std::time::Duration = std::time::Duration::from_secs(3);
 /// App-managed supervisor handle.
 struct AppState {
     supervisor: Supervisor,
-    /// Cached last-known settings. Writes hold this lock across the file
-    /// save, so concurrent `set_settings` calls persist in order.
+    /// Cached last-known settings; written only by `update_settings`.
     settings: Mutex<Settings>,
     settings_path: Option<PathBuf>,
 }
 
 impl AppState {
-    fn save_settings(&self, settings: Settings) -> Result<(), String> {
+    /// The one writer of the settings: `edit` changes the current settings
+    /// under the lock, the result is saved, then cached and returned.
+    /// Concurrent writers (the web's form, the sandbox mode) apply in order,
+    /// each over the other's result, never over a stale copy.
+    fn update_settings(&self, edit: impl FnOnce(&mut Settings)) -> Result<Settings, String> {
         let mut current = self.settings.lock();
         let path = self
             .settings_path
             .as_deref()
             .ok_or("settings dir unavailable")?;
-        settings::save(path, &settings)?;
-        *current = settings;
-        Ok(())
+        let mut next = current.clone();
+        edit(&mut next);
+        settings::save(path, &next)?;
+        *current = next.clone();
+        Ok(next)
     }
 }
 
@@ -80,9 +85,11 @@ fn get_settings(state: State<'_, AppState>) -> Settings {
     state.settings.lock().clone()
 }
 
+/// The web's settings form. The web owns every field but the shell's own
+/// (`Settings::apply_web`): a stale snapshot never reverts those.
 #[tauri::command]
 fn set_settings(state: State<'_, AppState>, settings: Settings) -> Result<(), String> {
-    state.save_settings(settings.clone())?;
+    let settings = state.update_settings(|current| current.apply_web(settings))?;
     // Apply immediately: (re)start if runnable, else stop.
     if settings.is_runnable() {
         state.supervisor.start(settings)?;

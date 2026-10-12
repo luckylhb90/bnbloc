@@ -24,7 +24,7 @@ use std::time::{Duration, Instant};
 
 use tauri::Manager;
 
-use crate::child_process::{self, STOP_GRACE};
+use crate::child_process::STOP_GRACE;
 use crate::internal_ext::sandbox_api::{
     create_machine_request, Discovery, MachineView, SandboxApi,
 };
@@ -475,7 +475,7 @@ impl Adapter {
             .get_mut(&id)
             .and_then(|sidecar| sidecar.child.take());
         if let Some(child) = child {
-            child_process::terminate_detached(vec![child], STOP_GRACE);
+            self.stopping.stop(&id, vec![child]);
         }
     }
 
@@ -898,9 +898,7 @@ pub(crate) fn sandbox_mode_set(
     adapter: tauri::State<'_, Adapter>,
     mode: SandboxMode,
 ) -> Result<SandboxStatus, String> {
-    let mut settings = state.settings.lock().clone();
-    settings.sandbox_mode = mode;
-    state.save_settings(settings)?;
+    state.update_settings(|settings| settings.sandbox_mode = mode)?;
     adapter.sandbox_mode_changed();
     Ok(adapter.sandbox_status())
 }

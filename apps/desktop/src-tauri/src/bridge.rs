@@ -28,16 +28,17 @@ use serde::Serialize;
 use tauri::async_runtime::JoinHandle;
 use tauri::AppHandle;
 
-use crate::child_process::{self, Backoff, Child, ChildEvent, STOP_GRACE};
+use crate::child_process::{self, Child, ChildEvent, RestartPolicy, Stopping};
 use crate::internal_ext::sidecar_util::core_env_var;
 use crate::settings::Settings;
 
 const MAX_LOG_LINES: usize = 200;
 const SETTLE: Duration = Duration::from_millis(1200);
-const BACKOFF_MIN: Duration = Duration::from_secs(1);
-const BACKOFF_MAX: Duration = Duration::from_secs(30);
-/// A run that stayed up this long resets the crash-restart backoff.
-const STABLE_RUN: Duration = Duration::from_secs(60);
+/// Log lines reach the web at most this often (one status per interval,
+/// however fast the bridge logs).
+const LOG_EMIT_INTERVAL: Duration = Duration::from_millis(250);
+/// The bridge's key in its `Stopping`.
+const STOP_KEY: &str = "bridge";
 /// Settle window before a refresh-token handoff restarts the bridge, so the
 /// sign-in burst (adapter handoff + owner/tenant `set_settings` restart)
 /// collapses into at most one restart.
@@ -98,6 +99,8 @@ struct Inner {
     run_has_refresh: bool,
     /// A refresh-token restart is scheduled (debounce).
     refresh_restart_pending: bool,
+    /// A status emit for new log lines is scheduled (throttle).
+    log_emit_pending: bool,
 }
 
 impl Inner {
@@ -114,6 +117,9 @@ impl Inner {
 pub struct Supervisor {
     app: AppHandle,
     inner: Arc<Mutex<Inner>>,
+    /// Stops of earlier runs still in progress: a start waits for them, so
+    /// two bridges never overlap.
+    stopping: Stopping,
 }
 
 impl Supervisor {
@@ -133,7 +139,9 @@ impl Supervisor {
                 refresh_token: None,
                 run_has_refresh: false,
                 refresh_restart_pending: false,
+                log_emit_pending: false,
             })),
+            stopping: Stopping::default(),
         }
     }
 
@@ -149,18 +157,17 @@ impl Supervisor {
     }
 
     /// Start (or restart) the bridge with the given settings. Marks the bridge
-    /// as desired-up and launches a fresh supervise task, which first waits
-    /// for a previous run to finish its graceful stop so two bridges never
-    /// overlap.
+    /// as desired-up and launches a fresh supervise task; every spawn first
+    /// waits for the stops of earlier runs (`Stopping`), so two bridges never
+    /// overlap, however many starts arrive together.
     pub fn start(&self, settings: Settings) -> Result<(), String> {
         if !settings.is_runnable() {
             return Err("settings incomplete: gatewayUrl and owner are required".to_string());
         }
-        // The previous run's graceful stop starts now; the new run waits for
-        // it so two bridges never overlap.
-        let previous_stop = self
-            .detach()
-            .map(|child| child_process::terminate_detached(vec![child], STOP_GRACE));
+        // The previous run's graceful stop starts now.
+        if let Some(child) = self.detach() {
+            self.stopping.stop(STOP_KEY, vec![child]);
+        }
         let generation = {
             let mut g = self.inner.lock();
             g.desired_up = true;
@@ -175,9 +182,6 @@ impl Supervisor {
 
         let sup = self.clone();
         let task = tauri::async_runtime::spawn(async move {
-            if let Some(stop) = previous_stop {
-                let _ = stop.await;
-            }
             sup.supervise(settings, generation).await;
         });
         self.inner.lock().task = Some(task);
@@ -239,7 +243,7 @@ impl Supervisor {
     /// stop completes in the background.
     pub fn stop(&self) {
         if let Some(child) = self.detach() {
-            child_process::terminate_detached(vec![child], STOP_GRACE);
+            self.stopping.stop(STOP_KEY, vec![child]);
         }
         self.emit_status();
     }
@@ -263,11 +267,15 @@ impl Supervisor {
     }
 
     /// The supervise loop: spawn, mark running after settle, then restart on
-    /// crash with bounded backoff until desired-up is cleared. Each iteration is
-    /// guarded by the generation so a stale loop exits after stop()/restart.
+    /// exit per `RestartPolicy::BRIDGE` until desired-up is cleared. Each
+    /// iteration is guarded by the generation so a stale loop exits after
+    /// stop()/restart.
     async fn supervise(&self, settings: Settings, generation: u64) {
-        let mut backoff = Backoff::new(BACKOFF_MIN, BACKOFF_MAX, STABLE_RUN);
+        let policy = RestartPolicy::BRIDGE;
+        let mut backoff = policy.backoff();
         loop {
+            // Never overlap a run that is still stopping.
+            self.stopping.stopped(STOP_KEY).await;
             if !self.generation_current(generation) {
                 return;
             }
@@ -275,9 +283,8 @@ impl Supervisor {
             let outcome = self.spawn_once(&settings, generation).await;
             let ran_for = started.elapsed();
             match outcome {
-                // Clean exit (code 0): the bridge chose to stop; do not respawn.
-                Ok(true) => return,
-                Ok(false) => {}
+                Ok(exit) if !policy.restarts_after(exit) => return,
+                Ok(_) => {}
                 Err(e) => {
                     self.log_line(format!("[supervisor] spawn error: {e}"));
                     let mut g = self.inner.lock();
@@ -305,8 +312,12 @@ impl Supervisor {
     }
 
     /// Spawn one bridge process and pump its events until it exits. Returns
-    /// Ok(true) if it exited cleanly (code 0), Ok(false) otherwise.
-    async fn spawn_once(&self, settings: &Settings, generation: u64) -> Result<bool, String> {
+    /// its exit code (None: killed by a signal, or superseded before it ran).
+    async fn spawn_once(
+        &self,
+        settings: &Settings,
+        generation: u64,
+    ) -> Result<Option<i32>, String> {
         let mut cmd = std::process::Command::new(sidecar_path()?);
         let refresh_token = {
             let mut g = self.inner.lock();
@@ -322,10 +333,11 @@ impl Supervisor {
         {
             let mut g = self.inner.lock();
             if g.generation != generation {
-                // A stop/restart raced ahead; stop this child and bail.
+                // A stop/restart raced ahead; stop this child and bail (the
+                // next run waits for this stop too).
                 drop(g);
-                child_process::terminate_detached(vec![child], STOP_GRACE);
-                return Ok(true);
+                self.stopping.stop(STOP_KEY, vec![child]);
+                return Ok(None);
             }
             g.child = Some(child);
             g.pid = Some(pid);
@@ -370,7 +382,7 @@ impl Supervisor {
         }
         drop(g);
         self.emit_status();
-        Ok(clean)
+        Ok(exit_code)
     }
 
     /// Add a shell line to the bridge log the Agents view shows.
@@ -387,8 +399,21 @@ impl Supervisor {
         // supervisor errors in the shell's own log stream, not only in the
         // webview status feed.
         eprintln!("[bridge-supervisor] {line}");
-        self.inner.lock().push_log(line);
-        self.emit_status();
+        // The web gets the tail at most every LOG_EMIT_INTERVAL: a chatty
+        // bridge costs one status per interval, not one per line.
+        let schedule = {
+            let mut g = self.inner.lock();
+            g.push_log(line);
+            !std::mem::replace(&mut g.log_emit_pending, true)
+        };
+        if schedule {
+            let sup = self.clone();
+            tauri::async_runtime::spawn(async move {
+                tokio::time::sleep(LOG_EMIT_INTERVAL).await;
+                sup.inner.lock().log_emit_pending = false;
+                sup.emit_status();
+            });
+        }
     }
 
     fn emit_status(&self) {

@@ -141,6 +141,16 @@ pub fn normalize_gateway_url(raw: &str) -> String {
 }
 
 impl Settings {
+    /// Take the web's settings form: every field but the ones the shell
+    /// owns, which only their own command changes (`sandbox_mode`:
+    /// `sandbox_mode_set`). The web writes whole snapshots, which may be
+    /// stale; a stale snapshot must not revert a shell-owned field.
+    pub fn apply_web(&mut self, from_web: Settings) {
+        let sandbox_mode = self.sandbox_mode;
+        *self = from_web;
+        self.sandbox_mode = sandbox_mode;
+    }
+
     /// True when the minimum fields to run the bridge are present. The bridge
     /// itself only requires a gateway and an owner (`services/bridge/cmd`);
     /// with no configured core it runs idle until cores are installed or
@@ -315,6 +325,26 @@ mod tests {
         save(&path, &settings).expect("save settings");
         assert_eq!(load(&path).expect("load").sandbox_mode, SandboxMode::All);
         std::fs::remove_dir_all(&dir).expect("cleanup");
+    }
+
+    /// The sandbox mode is set through its own command; the web's form,
+    /// written as a whole and possibly stale, never reverts it.
+    #[test]
+    fn set_settings_preserves_shell_owned_fields() {
+        let mut current = Settings {
+            owner: "maya".into(),
+            sandbox_mode: SandboxMode::All,
+            ..Default::default()
+        };
+        let stale_form = Settings {
+            owner: "maya".into(),
+            tenant: "t2".into(),
+            sandbox_mode: SandboxMode::Borrowed,
+            ..Default::default()
+        };
+        current.apply_web(stale_form);
+        assert_eq!(current.sandbox_mode, SandboxMode::All);
+        assert_eq!(current.tenant, "t2", "the web's fields are taken");
     }
 
     #[test]

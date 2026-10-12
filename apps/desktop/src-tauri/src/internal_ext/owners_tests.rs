@@ -155,6 +155,34 @@ fn gateway_calls_go_through_the_gateway_client() {
     );
 }
 
+/// Every stop of a supervised child goes through child_process::Stopping,
+/// so a relaunch waits for the run it replaces.
+#[test]
+fn stops_go_through_stopping() {
+    only_in("terminate_detached(", "child_process.rs");
+}
+
+/// Restart backoff comes from the one RestartPolicy.
+#[test]
+fn restarts_follow_one_policy() {
+    only_in_any(
+        "Backoff::new(",
+        &[
+            "child_process.rs",
+            // Not process restarts: the catalog poll retry and the member
+            // stream reconnect.
+            "internal_ext.rs",
+            "internal_ext/plugin_events.rs",
+        ],
+    );
+}
+
+/// settings.json has one writer (AppState::update_settings).
+#[test]
+fn settings_have_one_writer() {
+    only_in("settings::save(", "lib.rs");
+}
+
 #[test]
 fn sign_in_files_are_reached_only_through_sign_ins() {
     // Every read, write and delete of a sign-in file goes through SignIns
