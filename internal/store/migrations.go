@@ -1139,6 +1139,24 @@ WHERE r.channel_id = '' AND d.user_id IS NULL`)
 				"ADD UNIQUE KEY uq_content_components_org_name (tenant_id, kind, org_name)")
 		},
 	},
+	{
+		// The room expert a turn wore, recorded on its job like the chat's
+		// expert (docs/prd/2026-10-12-experts-and-teams.md, "Runtime gap
+		// closure" 2).
+		id: "2026_10_agent_jobs_room_expert",
+		run: func(ctx context.Context, db sqlConn) error {
+			for _, c := range [][2]string{
+				{"room_expert_id", "VARCHAR(64) NOT NULL DEFAULT '' AFTER expert_name"},
+				{"room_expert_version", "VARCHAR(64) NOT NULL DEFAULT '' AFTER room_expert_id"},
+				{"room_expert_name", "VARCHAR(256) NOT NULL DEFAULT '' AFTER room_expert_version"},
+			} {
+				if err := addColumnIfMissing(ctx, db, "agent_jobs", c[0], c[1]); err != nil {
+					return err
+				}
+			}
+			return nil
+		},
+	},
 }
 
 // sqlConn is the statement surface a migration runs on. runMigrations passes

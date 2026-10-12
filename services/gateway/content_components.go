@@ -48,6 +48,9 @@ type ContentJobs interface {
 	store.AgentDispatchReader
 	// ExpertUsage counts the jobs that wore experts (Library usage).
 	store.ExpertUsageReader
+	// RecordJobRoomExpert records the room expert a job's turn wears (the
+	// effective resolution decides it).
+	store.RoomExpertRecorder
 }
 
 // Content request bounds.
@@ -1172,7 +1175,44 @@ func (s *Service) handleContentEffective(w http.ResponseWriter, r *http.Request)
 		http.Error(w, "resolve job MCP tools failed", http.StatusInternalServerError)
 		return
 	}
+	if err := s.recordRoomExpert(r.Context(), job, eff.RoomExpert); err != nil {
+		obs.ServerError(w, "record job room expert failed", err)
+		http.Error(w, "record job room expert failed", http.StatusInternalServerError)
+		return
+	}
 	writeJSON(w, http.StatusOK, eff)
+}
+
+// jobAgent is a job's agent as audit details name it: owner/provider, or
+// owner/core/provider when the job names its core.
+func jobAgent(j store.AgentJob) string {
+	if j.Core != "" {
+		return j.OwnerUserID + "/" + j.Core + "/" + j.Provider
+	}
+	return j.OwnerUserID + "/" + j.Provider
+}
+
+// recordRoomExpert records the room expert the job's turn wears on the job
+// (its run record names it beside the chat's expert) and, when that is new
+// for the job, appends the content use audit row the chat's expert gets at
+// post time. The room expert is resolved here, at turn time, so this is
+// the one place it is known.
+func (s *Service) recordRoomExpert(ctx context.Context, job store.AgentJob, ref *wire.ContentRef) error {
+	if ref == nil || s.ContentJobs == nil {
+		return nil
+	}
+	name := firstNonEmpty(ref.DisplayName, ref.Name)
+	changed, err := s.ContentJobs.RecordJobRoomExpert(tenant.NewContext(ctx, job.TenantID), job.JobID, store.JobExpert{ID: ref.ComponentID, Version: ref.Version, Name: name})
+	if err != nil || !changed || s.ExtAudit == nil {
+		return err
+	}
+	_ = s.ExtAudit.AppendExtAudit(ctx, store.ExtAuditRecord{
+		Kind: wire.AuditKindContent, Name: ref.Name + "@" + ref.Version, Action: "use", Actor: job.RequesterUserID,
+		TenantID: job.TenantID, Outcome: "running",
+		Detail: "room expert " + name + " v" + ref.Version + " on agent " + jobAgent(job) + " (job " + job.JobID + ", room " + job.RoomID + ")",
+		AtMs:   s.nowTime().UnixMilli(),
+	})
+	return nil
 }
 
 // contentBundleEntitled reports whether the caller may download a content

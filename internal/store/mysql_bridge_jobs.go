@@ -413,7 +413,7 @@ func scanAgentJobTxByID(ctx context.Context, tx *sql.Tx, id string) (AgentJob, e
 
 // agentJobColumns is the one column list every agent_jobs read selects, in
 // scanAgentJobRow's order.
-const agentJobColumns = `job_id, tenant_id, room_id, channel_id, message_seq, client_msg_id, requester_user_id, owner_user_id, core, provider, target_id, message_text, attachment_ids, model, reasoning_effort, status, failure_reason, attempt, lease_bridge_id, lease_expires_at_ms, created_at_ms, updated_at_ms, started_at_ms, finished_at_ms, diagnostics_json, claimed_at_ms, dispatched_by_job_id, dispatch_depth, expert_id, expert_version, expert_name`
+const agentJobColumns = `job_id, tenant_id, room_id, channel_id, message_seq, client_msg_id, requester_user_id, owner_user_id, core, provider, target_id, message_text, attachment_ids, model, reasoning_effort, status, failure_reason, attempt, lease_bridge_id, lease_expires_at_ms, created_at_ms, updated_at_ms, started_at_ms, finished_at_ms, diagnostics_json, claimed_at_ms, dispatched_by_job_id, dispatch_depth, expert_id, expert_version, expert_name, room_expert_id, room_expert_version, room_expert_name`
 
 type agentJobScanner interface{ Scan(dest ...any) error }
 
@@ -426,7 +426,7 @@ func scanAgentJobRow(row agentJobScanner) (AgentJob, error) {
 	var messageText, model, reasoningEffort sql.NullString
 	var attachmentIDs []byte
 	var diag []byte
-	err := row.Scan(&j.JobID, &j.TenantID, &j.RoomID, &j.ChannelID, &j.MessageSeq, &j.ClientMsgID, &j.RequesterUserID, &j.OwnerUserID, &j.Core, &j.Provider, &j.TargetID, &messageText, &attachmentIDs, &model, &reasoningEffort, &status, &reason, &j.Attempt, &j.LeaseBridgeID, &j.LeaseExpiresAtMs, &j.CreatedAtMs, &j.UpdatedAtMs, &j.StartedAtMs, &j.FinishedAtMs, &diag, &j.ClaimedAtMs, &j.DispatchedByJobID, &j.DispatchDepth, &j.ExpertID, &j.ExpertVersion, &j.ExpertName)
+	err := row.Scan(&j.JobID, &j.TenantID, &j.RoomID, &j.ChannelID, &j.MessageSeq, &j.ClientMsgID, &j.RequesterUserID, &j.OwnerUserID, &j.Core, &j.Provider, &j.TargetID, &messageText, &attachmentIDs, &model, &reasoningEffort, &status, &reason, &j.Attempt, &j.LeaseBridgeID, &j.LeaseExpiresAtMs, &j.CreatedAtMs, &j.UpdatedAtMs, &j.StartedAtMs, &j.FinishedAtMs, &diag, &j.ClaimedAtMs, &j.DispatchedByJobID, &j.DispatchDepth, &j.ExpertID, &j.ExpertVersion, &j.ExpertName, &j.RoomExpertID, &j.RoomExpertVersion, &j.RoomExpertName)
 	if errors.Is(err, sql.ErrNoRows) {
 		return AgentJob{}, ErrAgentJobNotFound
 	}

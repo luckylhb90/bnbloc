@@ -48,6 +48,7 @@ func runsFixture(t *testing.T) *Service {
 			OwnerUserID: owner, Core: "c1", Provider: "codex", MessageText: "please fix " + strings.Repeat("x", 400), Model: "m-large", CreatedAtMs: created}
 		if id == "j-borrow" {
 			j.ExpertID, j.ExpertName, j.ExpertVersion = "cc_rev", "Reviewer", "1.2.0"
+			j.RoomExpertID, j.RoomExpertName, j.RoomExpertVersion = "cc_house", "House style", "2.0.0"
 		}
 		if _, err := jobs.PutAgentJob(ctx, j); err != nil {
 			t.Fatal(err)
@@ -135,8 +136,11 @@ func TestRoomRunsRecordPhasesReplyAndUsage(t *testing.T) {
 	if b.Expert == nil || b.Expert.ID != "cc_rev" || b.Expert.Name != "Reviewer" || b.Expert.Version != "1.2.0" {
 		t.Fatalf("expert = %+v", b.Expert)
 	}
+	if b.RoomExpert == nil || b.RoomExpert.ID != "cc_house" || b.RoomExpert.Name != "House style" || b.RoomExpert.Version != "2.0.0" {
+		t.Fatalf("room expert = %+v", b.RoomExpert)
+	}
 	f := out.Runs[0]
-	if f.Status != "failed" || f.FailureReason != "borrow_not_authorized" || f.Error != "core exploded" || f.Borrowed || f.Usage != nil || f.Expert != nil {
+	if f.Status != "failed" || f.FailureReason != "borrow_not_authorized" || f.Error != "core exploded" || f.Borrowed || f.Usage != nil || f.Expert != nil || f.RoomExpert != nil {
 		t.Fatalf("failed run = %+v", f)
 	}
 

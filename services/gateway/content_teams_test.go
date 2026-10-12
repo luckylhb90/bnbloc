@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -188,5 +189,54 @@ func TestContentRoomExpert(t *testing.T) {
 	}
 	if strings.Join(changed, ",") != "room,room,room,room-expert,room-expert,room" {
 		t.Fatalf("content_uses_changed scopes = %v", changed)
+	}
+}
+
+// The bridge resolving a job's turn records the room expert it wears on
+// the job (its run record) and audits the use once, like the chat's expert.
+func TestContentEffectiveRecordsRoomExpert(t *testing.T) {
+	g := newContentGateway(t)
+	audit := store.NewMemoryExtensionAudit()
+	g.svc.ExtAudit = audit
+	house := g.create("maya", map[string]any{"kind": "expert", "name": "house-style", "displayName": "House style", "instructions": "Write plainly."})
+	for _, req := range []wire.ContentUseRequest{
+		{Scope: "room", RoomID: "room-1", ComponentID: house.ID},
+		{Scope: wire.ContentUseRoomExpert, RoomID: "room-1", ComponentID: house.ID},
+	} {
+		if code, raw := g.json("maya", http.MethodPut, "/v1/content-uses", req); code != http.StatusNoContent {
+			t.Fatalf("use %s = %d %s", req.Scope, code, raw)
+		}
+	}
+	ctx := tenant.NewContext(context.Background(), "home")
+	if err := g.jobs.PutBridgeHeartbeat(ctx, store.BridgeHeartbeat{BridgeID: "br-jack", OwnerUserID: "jack", Status: store.BridgeOnline, LastSeenAtMs: time.Now().UnixMilli()}); err != nil {
+		t.Fatal(err)
+	}
+	job, err := g.jobs.PutAgentJob(ctx, store.AgentJob{JobID: "job-re", RoomID: "room-1", MessageSeq: 4, RequesterUserID: "maya", OwnerUserID: "jack", Core: "acme", Provider: "codex",
+		Status: store.AgentJobRunning, LeaseBridgeID: "br-jack", CreatedAtMs: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := "/v1/content-components/effective?job=" + job.JobID + "&room=room-1"
+	for range 2 { // a retried resolution records nothing new
+		code, raw := g.do("jack", http.MethodGet, path, "", nil)
+		var eff wire.ContentEffective
+		if code != http.StatusOK || json.Unmarshal(raw, &eff) != nil || eff.RoomExpert == nil || eff.RoomExpert.ComponentID != house.ID {
+			t.Fatalf("effective = %d %s", code, raw)
+		}
+	}
+	got, err := g.jobs.GetAgentRun(ctx, job.JobID)
+	if err != nil || got.RoomExpertID != house.ID || got.RoomExpertVersion != "1.0.0" || got.RoomExpertName != "House style" {
+		t.Fatalf("job = %+v, %v", got, err)
+	}
+	recs, _ := audit.ExtAuditRecords(ctx, wire.AuditKindContent, 0, 0)
+	var uses []store.ExtAuditRecord
+	for _, r := range recs {
+		if r.Action == "use" {
+			uses = append(uses, r)
+		}
+	}
+	if len(uses) != 1 || uses[0].Actor != "maya" || uses[0].Name != "house-style@1.0.0" ||
+		uses[0].Detail != "room expert House style v1.0.0 on agent jack/acme/codex (job job-re, room room-1)" {
+		t.Fatalf("audit uses = %+v", uses)
 	}
 }

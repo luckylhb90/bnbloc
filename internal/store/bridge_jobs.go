@@ -136,6 +136,12 @@ type AgentJob struct {
 	ExpertID      string `json:"expertId,omitempty"`
 	ExpertVersion string `json:"expertVersion,omitempty"`
 	ExpertName    string `json:"expertName,omitempty"`
+	// RoomExpertID / RoomExpertVersion / RoomExpertName are the room's
+	// expert the turn wore, recorded when the bridge running the job
+	// resolves what it wears (agent_room_expert.go). Empty = none.
+	RoomExpertID      string `json:"roomExpertId,omitempty"`
+	RoomExpertVersion string `json:"roomExpertVersion,omitempty"`
+	RoomExpertName    string `json:"roomExpertName,omitempty"`
 }
 
 // BridgeHeartbeat records one desktop bridge's liveness in a tenant.

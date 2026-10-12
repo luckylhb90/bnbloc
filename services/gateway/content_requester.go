@@ -93,10 +93,7 @@ func (s *Service) auditJobSave(ctx context.Context, actor contentActor, c store.
 		return
 	}
 	j := actor.Job
-	agent := j.OwnerUserID + "/" + j.Provider
-	if j.Core != "" {
-		agent = j.OwnerUserID + "/" + j.Core + "/" + j.Provider
-	}
+	agent := jobAgent(*j)
 	_ = s.ExtAudit.AppendExtAudit(ctx, store.ExtAuditRecord{
 		Kind: wire.AuditKindContent, Name: c.Name + "@" + version, Action: "save", Actor: j.RequesterUserID,
 		TenantID: j.TenantID, Outcome: "allow",

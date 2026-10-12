@@ -349,6 +349,9 @@ func (v *runViewer) record(j store.AgentJob, detail bool) wire.AgentRun {
 	if j.ExpertID != "" {
 		run.Expert = &wire.AgentRunExpert{ID: j.ExpertID, Name: j.ExpertName, Version: j.ExpertVersion}
 	}
+	if j.RoomExpertID != "" {
+		run.RoomExpert = &wire.AgentRunExpert{ID: j.RoomExpertID, Name: j.RoomExpertName, Version: j.RoomExpertVersion}
+	}
 	// A failure's diagnostics say why; a replied job may carry a warning
 	// (the drive ended in error after a reply was already posted). A requeued
 	// retry keeps the last attempt's error while it waits.

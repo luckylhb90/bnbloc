@@ -125,6 +125,9 @@ type AgentRun struct {
 	// Expert is the expert the agent wore for this run ("expert X v1.2 on
 	// agent Y"); absent when the chat picked none.
 	Expert *AgentRunExpert `json:"expert,omitempty"`
+	// RoomExpert is the room's expert the turn wore under the chat's own,
+	// recorded when the turn resolved it; absent when the room had none.
+	RoomExpert *AgentRunExpert `json:"roomExpert,omitempty"`
 	// Redacted marks a run whose request/reply text and diagnostics are
 	// withheld because the viewer is not a member of the run's room.
 	Redacted bool `json:"redacted,omitempty"`
