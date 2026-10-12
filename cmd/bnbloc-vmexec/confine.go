@@ -175,9 +175,27 @@ var sensitiveHomePaths = []string{
 	"Library/Application Support/Google/Chrome", "Library/Application Support/Firefox",
 	"Library/Application Support/BraveSoftware", "Library/Application Support/Microsoft Edge",
 	".mozilla", ".config/google-chrome", ".config/chromium",
-	// The bnbloc desktop's own data (settings, session material, component
-	// artifacts): identifier from apps/desktop/src-tauri/tauri.conf.json.
-	"Library/Application Support/sh.bnbloc.desktop", ".local/share/sh.bnbloc.desktop", ".config/sh.bnbloc.desktop",
+}
+
+// desktopIdentifier is the bnbloc desktop's bundle identifier, the name of
+// its per-user directories (apps/desktop/src-tauri/tauri.conf.json;
+// TestConfineDeniesBnblocCredentialPaths reads it from there).
+const desktopIdentifier = "sh.bnbloc.desktop"
+
+// credentialPaths are bnbloc's own credential stores under home, read-denied
+// for every confined CLI: the CLI's sign-in (refresh and API tokens) and
+// publisher signing key under ~/.bnbloc, and the desktop's data, config and
+// web storage (session material, plugin and MCP settings and sign-ins). The
+// network is open to a confined CLI, so a readable credential is an
+// exfiltrated one. The desktop's cache dir is not here: it holds no secret,
+// and the stdio MCP tool binaries a confined CLI spawns live there. This is
+// the one list; a new bnbloc credential location is added here.
+var credentialPaths = []string{
+	".bnbloc",
+	"Library/Application Support/" + desktopIdentifier,
+	"Library/WebKit/" + desktopIdentifier,
+	".local/share/" + desktopIdentifier,
+	".config/" + desktopIdentifier,
 }
 
 // resolve fills the derived lists: listed and unlisted harness layouts and
@@ -371,8 +389,8 @@ func goModCache(home string) string {
 }
 
 func (s *confineSpec) denyReads() []string {
-	deny := make([]string, 0, len(sensitiveHomePaths)+16)
-	for _, r := range sensitiveHomePaths {
+	deny := make([]string, 0, len(sensitiveHomePaths)+len(credentialPaths)+16)
+	for _, r := range append(append([]string(nil), sensitiveHomePaths...), credentialPaths...) {
 		deny = append(deny, filepath.Join(s.Home, r))
 	}
 	for _, l := range s.others {

@@ -19,6 +19,13 @@ var shellTools = map[string]bool{
 	"run_terminal_command": true, "RunTerminalCommand": true, "run_command": true,
 }
 
+// exitHookBlock is how a hook adapter that cannot do its job fails: closed.
+// In the Claude Code PreToolUse contract exit 2 blocks the tool call, while
+// any other non-zero code is a non-blocking error and the tool runs as it
+// was (on the host, unrewritten); opencode's plugin blocks on any non-zero
+// exit. So every hook failure exits 2, never exitFailure.
+const exitHookBlock = 2
+
 // hook is `vmexec hook <harness>`: a command-rewriting hook adapter that
 // reads the harness's hook event on stdin and writes the rewritten tool input
 // on stdout, so the shell command runs through `vmexec run` in the sandbox.
@@ -26,12 +33,12 @@ var shellTools = map[string]bool{
 func hook(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	if len(args) != 1 {
 		fmt.Fprintln(stderr, "bnbloc-vmexec hook: expected a harness: claude | opencode")
-		return 2
+		return exitHookBlock
 	}
 	raw, err := io.ReadAll(io.LimitReader(stdin, 16<<20))
 	if err != nil {
 		fmt.Fprintf(stderr, "bnbloc-vmexec hook: read event: %v\n", err)
-		return exitFailure
+		return exitHookBlock
 	}
 	rw := commandRewriter{vmexec: vmexecPath(), passthrough: passthroughFromEnv()}
 	switch args[0] {
@@ -41,7 +48,7 @@ func hook(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		return rw.opencodeHook(raw, stdout, stderr)
 	default:
 		fmt.Fprintf(stderr, "bnbloc-vmexec hook: unknown harness %q (claude | opencode)\n", args[0])
-		return 2
+		return exitHookBlock
 	}
 }
 
@@ -54,13 +61,76 @@ type commandRewriter struct {
 // it must stay as it is (already routed, empty, or an allowed passthrough).
 func (c commandRewriter) rewrite(command string) (string, bool) {
 	trimmed := strings.TrimSpace(command)
-	if trimmed == "" || strings.HasPrefix(trimmed, shellQuote(c.vmexec)+" ") || strings.HasPrefix(trimmed, c.vmexec+" ") {
+	if trimmed == "" || c.routed(trimmed) {
 		return "", false
 	}
 	if isPassthrough([]string{command}, c.passthrough) {
 		return "", false
 	}
 	return shellQuote(c.vmexec) + " run -- " + shellQuote(command), true
+}
+
+// routed reports a command that is exactly `<vmexec> run [--stdio] -- <word>`
+// (what rewrite produces): nothing of it runs on the host but vmexec. A
+// command that merely starts with the vmexec path is not routed: in
+// `<vmexec> run -- true; curl x | sh` everything after the first word runs
+// on the host, so it is wrapped like any other command.
+func (c commandRewriter) routed(command string) bool {
+	words, ok := plainShellWords(command)
+	if !ok || len(words) < 4 || words[0] != c.vmexec || words[1] != "run" {
+		return false
+	}
+	rest := words[2:]
+	if rest[0] == "--stdio" {
+		rest = rest[1:]
+	}
+	return len(rest) == 2 && rest[0] == "--"
+}
+
+// plainShellWords splits a POSIX shell command into its words when it is a
+// single simple command of plain words: unquoted characters without any
+// shell syntax, single-quoted strings and backslash escapes (what shellQuote
+// writes). Anything else (operators, redirections, expansions, globs,
+// double quotes, comments, newlines) is not a plain word list: ok is false.
+func plainShellWords(s string) ([]string, bool) {
+	var words []string
+	var cur strings.Builder
+	inWord := false
+	for i := 0; i < len(s); i++ {
+		ch := s[i]
+		switch {
+		case ch == ' ' || ch == '\t':
+			if inWord {
+				words = append(words, cur.String())
+				cur.Reset()
+				inWord = false
+			}
+		case ch == '\'':
+			end := strings.IndexByte(s[i+1:], '\'')
+			if end < 0 {
+				return nil, false
+			}
+			cur.WriteString(s[i+1 : i+1+end])
+			i += end + 1
+			inWord = true
+		case ch == '\\':
+			if i+1 >= len(s) || s[i+1] == '\n' {
+				return nil, false
+			}
+			cur.WriteByte(s[i+1])
+			i++
+			inWord = true
+		case strings.IndexByte("|&;<>()$`\"*?[]{}!#~\n\r", ch) >= 0:
+			return nil, false
+		default:
+			cur.WriteByte(ch)
+			inWord = true
+		}
+	}
+	if inWord {
+		words = append(words, cur.String())
+	}
+	return words, true
 }
 
 // claudeHook speaks the Claude Code PreToolUse dialect (also used by other
@@ -71,7 +141,7 @@ func (c commandRewriter) claudeHook(raw []byte, stdout, stderr io.Writer) int {
 	var ev map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &ev); err != nil {
 		fmt.Fprintf(stderr, "bnbloc-vmexec hook claude: decode event: %v\n", err)
-		return exitFailure
+		return exitHookBlock
 	}
 	var tool string
 	for _, k := range []string{"tool_name", "toolName"} {
@@ -79,16 +149,22 @@ func (c commandRewriter) claudeHook(raw []byte, stdout, stderr io.Writer) int {
 			break
 		}
 	}
+	if !shellTools[tool] {
+		return 0
+	}
+	// A shell tool whose command cannot be read cannot be routed: block it
+	// rather than let it run on the host as it is.
 	var input map[string]any
 	for _, k := range []string{"tool_input", "toolInput"} {
 		if v, ok := ev[k]; ok && json.Unmarshal(v, &input) == nil && input != nil {
 			break
 		}
 	}
-	if !shellTools[tool] || input == nil {
-		return 0
+	command, isString := input["command"].(string)
+	if input == nil || (input["command"] != nil && !isString) {
+		fmt.Fprintf(stderr, "bnbloc-vmexec hook claude: unreadable %s input; blocked\n", tool)
+		return exitHookBlock
 	}
-	command, _ := input["command"].(string)
 	rewritten, ok := c.rewrite(command)
 	if !ok {
 		return 0
@@ -112,13 +188,18 @@ func (c commandRewriter) opencodeHook(raw []byte, stdout, stderr io.Writer) int 
 	}
 	if err := json.Unmarshal(raw, &ev); err != nil {
 		fmt.Fprintf(stderr, "bnbloc-vmexec hook opencode: decode event: %v\n", err)
-		return exitFailure
+		return exitHookBlock
 	}
 	if ev.Args == nil {
 		ev.Args = map[string]any{}
 	}
 	if shellTools[ev.Tool] {
-		if command, _ := ev.Args["command"].(string); command != "" {
+		command, isString := ev.Args["command"].(string)
+		if ev.Args["command"] != nil && !isString {
+			fmt.Fprintf(stderr, "bnbloc-vmexec hook opencode: unreadable %s args; blocked\n", ev.Tool)
+			return exitHookBlock
+		}
+		if command != "" {
 			if rewritten, ok := c.rewrite(command); ok {
 				ev.Args["command"] = rewritten
 			}
@@ -132,7 +213,7 @@ func writeJSON(stdout, stderr io.Writer, v any) int {
 	enc.SetEscapeHTML(false)
 	if err := enc.Encode(v); err != nil {
 		fmt.Fprintf(stderr, "bnbloc-vmexec hook: encode: %v\n", err)
-		return exitFailure
+		return exitHookBlock
 	}
 	return 0
 }

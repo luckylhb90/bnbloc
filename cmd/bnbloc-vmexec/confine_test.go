@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -289,5 +290,40 @@ func TestConfine_denyWritePlaceholders(t *testing.T) {
 	// Seatbelt matches the clean path of a directory entry.
 	if p := s.seatbeltProfile(); !strings.Contains(p, `(subpath "`+canonical(filepath.Join(ws, ".claude/skills"))+`")`) {
 		t.Errorf("profile lacks the deny-write directory:\n%s", p)
+	}
+}
+
+// bnbloc's own credentials are never readable from a confined CLI: the
+// CLI's sign-in and publisher key (~/.bnbloc) and the desktop's data dirs,
+// named by the identifier the desktop actually ships with.
+func TestConfineDeniesBnblocCredentialPaths(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("..", "..", "apps", "desktop", "src-tauri", "tauri.conf.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var conf struct {
+		Identifier string `json:"identifier"`
+	}
+	if err := json.Unmarshal(raw, &conf); err != nil {
+		t.Fatal(err)
+	}
+	if conf.Identifier != desktopIdentifier {
+		t.Fatalf("desktop identifier = %q, confine denies %q", conf.Identifier, desktopIdentifier)
+	}
+	for _, harness := range []string{"claude", "codex", "opencode", "generic"} {
+		s := testSpec(t, harness)
+		deny, allow := s.denyReads(), s.allowReads()
+		for _, rel := range []string{".bnbloc", "Library/Application Support/" + conf.Identifier, ".local/share/" + conf.Identifier, ".config/" + conf.Identifier} {
+			p := filepath.Join(s.Home, rel)
+			if !contains(deny, p) {
+				t.Errorf("%s: %s is readable (deny %v)", harness, p, deny)
+			}
+			// An allow of the path or a sub-path wins over its deny.
+			for _, a := range allow {
+				if a == canonical(p) || strings.HasPrefix(a, canonical(p)+"/") {
+					t.Errorf("%s: %s is re-allowed by %s", harness, p, a)
+				}
+			}
+		}
 	}
 }

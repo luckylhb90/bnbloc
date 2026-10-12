@@ -17,7 +17,8 @@
 //
 // Exit codes: the command's own exit code; 125 when vmexec itself fails (bad
 // environment, sandbox unreachable, protocol error); 126 when it refuses
-// (cwd outside the space mounts, no host sandbox available).
+// (cwd outside the space mounts, no host sandbox available). The hook
+// adapters exit 2 when they fail: the PreToolUse code that blocks the tool.
 package main
 
 import (

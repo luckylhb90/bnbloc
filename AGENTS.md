@@ -636,7 +636,14 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   A deny-write entry ending in `/` names a directory. Under bubblewrap,
   missing deny-write paths inside writable trees are created as read-only
   placeholders and their parent directories pinned so they cannot be renamed
-  away; never skip a deny-write path because it does not exist.
+  away; never skip a deny-write path because it does not exist. Reads of
+  bnbloc's own credentials (`~/.bnbloc`, the desktop's data/config/web
+  storage) are denied through the one `credentialPaths` list
+  (`TestConfineDeniesBnblocCredentialPaths` reads the identifier from
+  `tauri.conf.json`). The hook adapters treat only an exact
+  `<vmexec> run [--stdio] -- <word>` as already routed and fail closed with
+  exit 2 (the PreToolUse code that blocks; any other non-zero lets the tool
+  run on the host).
 - **The bridge MUST send `agentSessionId` when posting a reply to
   `agent-activity/messages`.** Activity dedupes new messages by a
   per-`(room, agentSessionId)` cursor. With the field missing, every session's

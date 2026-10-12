@@ -433,7 +433,10 @@ Landed in this repo (public, generic):
   `~/.claude.json`, plugin package caches) stays read-only; denyWrite last.
   A deny-write path is protected before it exists (a `denyWrite` entry
   ending in `/` names a directory; the bridge sends the workspace's
-  agent-config paths that way): Seatbelt denies creating it; bubblewrap can
+  protected paths that way, `core.ProtectedWorkspacePaths`: `.room/`, the
+  agent config the session wears and the host-executed project config
+  `.claude/`, `CLAUDE.local.md`, `.codex/`, `opencode.json(c)`, 2026-10-12):
+  Seatbelt denies creating it; bubblewrap can
   only bind an existing path, so confine first creates each missing
   deny-write path inside a writable tree as an empty placeholder (a
   directory, an empty file, `{}` for a `.json` file) and binds it read-only,
@@ -446,7 +449,13 @@ Landed in this repo (public, generic):
   nor rename `.claude` away to recreate it).
   `hook claude` (PreToolUse dialect, snake/camel keys) and `hook opencode`
   (`{tool,args}` → `{args}`) rewrite shell commands to `'<vmexec>' run --
-  '<cmd>'`, leaving passthrough commands alone. Verified on macOS with real
+  '<cmd>'`, leaving passthrough commands alone. Only an exact
+  `<vmexec> run [--stdio] -- <word>` counts as already routed (a command
+  that merely starts with the vmexec path is wrapped too), and an event the
+  adapter cannot read exits 2, which blocks the tool in the PreToolUse
+  contract (other non-zero codes would let it run unrewritten on the host;
+  2026-10-12). Reads also deny `~/.bnbloc` (the CLI's sign-in and publisher
+  key) and the desktop's web storage beside its data dirs. Verified on macOS with real
   `claude -p` turns under `confine` (incl. a Write tool); the integration test
   (`SANDBOX_URL`) drives the binary against a live sidecar.
 - **Bridge** — `BNBLOC_SANDBOX_*` read once, token unset from the process env,
