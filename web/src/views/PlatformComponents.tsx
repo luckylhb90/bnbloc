@@ -10,6 +10,7 @@ import { Segment } from "@/ui/Segment";
 import { useToast } from "@/ui/Toast";
 import { ComponentCard } from "@/views/ComponentCard";
 import { ComponentUploadFlow } from "@/views/ComponentUploadFlow";
+import { PlatformMCPForm } from "@/views/PlatformMCPForm";
 import { TrustedKeysPanel } from "@/views/PlatformTrustedKeys";
 
 type KindFilter = "all" | ComponentKind;
@@ -147,6 +148,7 @@ export function PlatformComponents() {
               window.setTimeout(() => document.querySelector(`#component-${CSS.escape(name)}`)?.scrollIntoView({ behavior: "smooth", block: "center" }), 100);
             }}
           />
+          <PlatformMCPForm />
           <PublishedComponents
             components={components}
             shown={shown}

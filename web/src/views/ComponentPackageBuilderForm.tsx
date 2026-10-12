@@ -3,11 +3,12 @@ import type { PackageDraftFields } from "@/lib/componentPublishWizard";
 import { ArrowLeftIcon, ArrowRightIcon } from "@phosphor-icons/react";
 import type { ComponentPackageEnvelope, ComponentRollout } from "@/lib/apiTypes";
 import { buildComponentPackage } from "@/lib/componentPackageBuilder";
+import { BINARY_PLATFORMS } from "@/lib/mcpPackageForm";
 import { Button } from "@/ui/Button";
 import { Field, Input, Textarea } from "@/ui/Input";
 import { ComponentRolloutOptions } from "@/views/ComponentRolloutOptions";
 
-const PLATFORMS = ["darwin-arm64", "darwin-amd64", "linux-amd64", "linux-arm64", "windows-amd64"] as const;
+const PLATFORMS = BINARY_PLATFORMS;
 
 export function ComponentPackageBuilderForm({ initialDraft, initialEnvelope, onBack, onContinue }: {
   readonly initialDraft: PackageDraftFields;
