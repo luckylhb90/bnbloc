@@ -176,6 +176,7 @@ var routeWords = map[string]bool{
 	"update-config": true, "releases": true, "app-releases": true, "meta": true,
 	"export": true, "import": true, "handoff": true, "feed": true,
 	"prompts": true, "use": true, "tasks": true, "search": true,
+	"content-components": true, "content-uses": true, "effective": true,
 	"refresh": true, "fork": true, "sessions": true,
 	"team": true, "borrow": true, "usage-report": true, "quota-requests": true, "decline": true,
 	"schedules": true, "room-templates": true, "from-room": true, "instantiate": true,

@@ -6,9 +6,11 @@ import (
 
 	"github.com/luckylhb90/bnbloc/core/pkgmeta"
 	"github.com/luckylhb90/bnbloc/core/protocol"
+	"github.com/luckylhb90/bnbloc/internal/contentpkg"
 	"github.com/luckylhb90/bnbloc/internal/extpipe"
 	"github.com/luckylhb90/bnbloc/internal/extreg"
 	"github.com/luckylhb90/bnbloc/internal/obs"
+	"github.com/luckylhb90/bnbloc/internal/wire"
 )
 
 type componentInfo struct {
@@ -137,7 +139,35 @@ func (s *Service) handleComponents(w http.ResponseWriter, r *http.Request) {
 		}
 		out = append(out, component)
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"components": out})
+	// Content components (experts, skill packs) the member may use, through
+	// the same visibility function. They are listed apart from the
+	// executable catalog the desktop supervises: nothing of theirs runs as a
+	// process.
+	var content []wire.ContentComponent
+	if onlyKind == "" || isContentKind(onlyKind) {
+		content, err = s.memberContent(r.Context(), claims, contentKindFilter(onlyKind))
+		if err != nil {
+			obs.ServerError(w, "load content components failed", err)
+			http.Error(w, "load content components failed", http.StatusInternalServerError)
+			return
+		}
+	}
+	if content == nil {
+		content = []wire.ContentComponent{}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"components": out, "contentComponents": content})
+}
+
+func isContentKind(kind string) bool {
+	_, ok := contentpkg.Lookup(kind)
+	return ok
+}
+
+func contentKindFilter(kind string) string {
+	if isContentKind(kind) {
+		return kind
+	}
+	return ""
 }
 
 func (s *Service) handleComponentInstall(w http.ResponseWriter, r *http.Request) {

@@ -61,6 +61,11 @@ type Service struct {
 	// their token's tenant. nil disables the cross-tenant fallback (the baked
 	// claim + same-tenant Rooms lookup still apply).
 	InRoom func(subject, roomID string) bool
+	// RoomRole answers a subject's role in a room (any tenant) and whether
+	// the membership is a human's (not a platform agent host's); "" when
+	// not a member. It gates room content settings (owner/admin). nil
+	// refuses them.
+	RoomRole func(subject, roomID string) (role string, human bool)
 	// RoomTenant resolves a room's authoritative tenant (rooms.tenant_id) so a
 	// room-scoped request executes in the ROOM's tenant, not the caller's
 	// session tenant. Empty result leaves the session tenant in force. nil
@@ -112,6 +117,12 @@ type Service struct {
 	// components (rollout=optin extension records). nil (in-memory dev/tests)
 	// leaves optin components hidden for everyone; auto ones still distribute.
 	ComponentInstalls store.ComponentInstallStore
+	// ContentComponents holds content components (experts, skill packs:
+	// content_components.go) and ContentJobs the job read side a bridge's
+	// content resolution is checked against. nil answers the content
+	// routes 503.
+	ContentComponents store.ContentComponentStore
+	ContentJobs       ContentJobs
 	// NotifierReplies resolves the reply tokens of delivered notifications
 	// for POST /v1/notifier/replies (N1); uninstalling a notifier deletes
 	// its tokens. nil answers the route 503.
@@ -248,6 +259,7 @@ func (s *Service) Handler() http.Handler {
 	mux.HandleFunc("PUT /v1/platform/app-releases/{version}", s.handlePlatformReleasePut)
 	mux.HandleFunc("DELETE /v1/platform/app-releases/{version}", s.handlePlatformReleaseDelete)
 	mux.HandleFunc("GET /v1/platform/versions", s.handlePlatformVersions)
+	s.registerContentComponents(mux)
 	s.registerAPITokens(mux)
 	s.registerSSO(mux)
 	s.registerOrgSync(mux)
@@ -874,34 +886,63 @@ func NewRoomMembershipResolver(roomBaseURL string, client *http.Client) func(str
 // room-scope fallback). It signs the request as the subject so the room service
 // trusts the identity. Fails closed (false) on any error or when unconfigured.
 func NewRoomMembershipProbe(roomBaseURL string, client *http.Client) func(string, string) bool {
+	probe := newRoomMembershipLookup(roomBaseURL, client)
+	return func(subject, roomID string) bool {
+		m, ok := probe(subject, roomID)
+		return ok && m.Member
+	}
+}
+
+// NewRoomRoleProbe returns a RoomRole resolver over the same tenant-agnostic
+// membership probe: the subject's room role and whether the membership is
+// a human's. Fails closed ("" on any error).
+func NewRoomRoleProbe(roomBaseURL string, client *http.Client) func(string, string) (string, bool) {
+	probe := newRoomMembershipLookup(roomBaseURL, client)
+	return func(subject, roomID string) (string, bool) {
+		m, ok := probe(subject, roomID)
+		if !ok || !m.Member {
+			return "", false
+		}
+		return m.Role, !m.AgentHost
+	}
+}
+
+// roomMembershipProbe is bnbloc-room's membership probe answer.
+type roomMembershipProbe struct {
+	Member    bool   `json:"member"`
+	Role      string `json:"role"`
+	AgentHost bool   `json:"agentHost"`
+}
+
+// newRoomMembershipLookup asks bnbloc-room for a subject's membership of a
+// room in any tenant (GET /v1/rooms/{room}/membership/{subject}).
+func newRoomMembershipLookup(roomBaseURL string, client *http.Client) func(string, string) (roomMembershipProbe, bool) {
 	if client == nil {
 		client = &http.Client{Timeout: 5 * time.Second}
 	}
-	return func(subject, roomID string) bool {
+	return func(subject, roomID string) (roomMembershipProbe, bool) {
 		if roomBaseURL == "" {
-			return false
+			return roomMembershipProbe{}, false
 		}
 		req, err := http.NewRequest(http.MethodGet, roomBaseURL+"/v1/rooms/"+url.PathEscape(roomID)+"/membership/"+url.PathEscape(subject), nil)
 		if err != nil {
-			return false
+			return roomMembershipProbe{}, false
 		}
 		req.Header.Set("X-Bnbloc-User", subject)
 		svcauth.Sign(req, svcauth.KeyFromEnv(), subject)
 		resp, err := client.Do(req)
 		if err != nil {
-			return false
+			return roomMembershipProbe{}, false
 		}
 		defer resp.Body.Close()
 		if resp.StatusCode != http.StatusOK {
-			return false
+			return roomMembershipProbe{}, false
 		}
-		var out struct {
-			Member bool `json:"member"`
-		}
+		var out roomMembershipProbe
 		if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
-			return false
+			return roomMembershipProbe{}, false
 		}
-		return out.Member
+		return out, true
 	}
 }
 

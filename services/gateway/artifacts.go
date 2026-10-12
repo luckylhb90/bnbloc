@@ -120,7 +120,7 @@ func (s *Service) handleArtifactDownload(w http.ResponseWriter, r *http.Request)
 		http.Error(w, "artifact store not configured", http.StatusServiceUnavailable)
 		return
 	}
-	entitled, err := s.artifactEntitled(r.Context(), claims, key)
+	entitled, err := s.artifactEntitled(r.Context(), claims, key, r.URL.Query())
 	if err != nil {
 		obs.ServerError(w, "load artifact entitlement failed", err)
 		http.Error(w, "load artifact entitlement failed", http.StatusInternalServerError)
@@ -219,8 +219,11 @@ func streamBlob(w http.ResponseWriter, body io.Reader, size int64) {
 //   - the artifacts of a component that passes their rollout + tenant gate
 //     (the same gate /v1/components and /v1/cores/{name}/artifact apply);
 //   - the files of a published desktop release (/v1/app/releases) and the
-//     current desktop update (/v1/app/update), which every member may read.
-func (s *Service) artifactEntitled(ctx context.Context, claims auth.Claims, key string) (bool, error) {
+//     current desktop update (/v1/app/update), which every member may read;
+//   - the bundle of a content component version visible to them, used by a
+//     room they are in (?room=), or in effect for a job their bridge runs
+//     (?job=&room=; contentBundleEntitled).
+func (s *Service) artifactEntitled(ctx context.Context, claims auth.Claims, key string, grant url.Values) (bool, error) {
 	if key == "" {
 		return false, nil
 	}
@@ -265,7 +268,7 @@ func (s *Service) artifactEntitled(ctx context.Context, claims auth.Claims, key 
 			return true, nil
 		}
 	}
-	return false, nil
+	return s.contentBundleEntitled(ctx, claims, key, grant)
 }
 
 // artifactURLKey extracts the blob key from a gateway artifact URL

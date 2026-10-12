@@ -115,6 +115,9 @@ type tenantWiring struct {
 	ExtAudit   store.ExtensionAuditStore
 	// ComponentInstalls backs the member component catalog's opt-in installs.
 	ComponentInstalls store.ComponentInstallStore
+	// ContentComponents and ContentJobs back the content component routes.
+	ContentComponents store.ContentComponentStore
+	ContentJobs       gateway.ContentJobs
 	// NotifierReplies resolves notification reply tokens (N1).
 	NotifierReplies store.NotificationReplyTokenStore
 	// SSOHandoffs and RefreshTokens are the shared auth state every gateway
@@ -192,7 +195,9 @@ func resolveTenantWiring() tenantWiring {
 		return len(seen)
 	}
 	return tenantWiring{Resolve: res.Resolve, Suspended: suspended, MemberRole: memberRole, Settings: backends.Settings, ExtAudit: backends.ExtAudit, ComponentInstalls: backends.ComponentInstalls, NotifierReplies: backends.ReplyTokens, SSOHandoffs: backends.SSOHandoffs, RefreshTokens: backends.RefreshTokens, MemberCount: memberCount, Health: backends.HealthCheck(),
-		APITokens: backends.APITokens,
+		APITokens:         backends.APITokens,
+		ContentComponents: backends.ContentComponents,
+		ContentJobs:       contentJobs(backends.BridgeJobs),
 		OrgSync: &orgsync.Syncer{
 			Settings: backends.Settings, Tenants: backends.Tenant, Rooms: backends.Room,
 			State: backends.OrgSync, Sessions: backends.RefreshTokens, Audit: backends.ExtAudit,
@@ -234,6 +239,7 @@ func main() {
 		},
 		Rooms:             gateway.NewRoomMembershipResolver(config.FromEnvRaw("BNBLOC_ROOM_BASE_URL"), nil),
 		InRoom:            gateway.NewRoomMembershipProbe(config.FromEnvRaw("BNBLOC_ROOM_BASE_URL"), nil),
+		RoomRole:          gateway.NewRoomRoleProbe(config.FromEnvRaw("BNBLOC_ROOM_BASE_URL"), nil),
 		RoomTenant:        gateway.NewRoomTenantResolver(config.FromEnvRaw("BNBLOC_ROOM_BASE_URL"), nil),
 		SessionTTL:        time.Hour,
 		AuthACSPath:       resolveACSPath(),
@@ -243,6 +249,8 @@ func main() {
 		ExtAudit:          tw.ExtAudit,
 		AllowExtUnsigned:  allowUnsigned,
 		ComponentInstalls: tw.ComponentInstalls,
+		ContentComponents: tw.ContentComponents,
+		ContentJobs:       tw.ContentJobs,
 		NotifierReplies:   tw.NotifierReplies,
 		MemberCount:       tw.MemberCount,
 		AllowedOrigins:    splitCSV(config.FromEnvRaw("BNBLOC_ALLOWED_ORIGINS")),
@@ -282,6 +290,13 @@ func main() {
 	if err := obs.ServeWithHealth("bnbloc-gateway", cfg.ListenAddr, svc.Handler(), tw.Health, obs.PublicListener()); err != nil {
 		log.Fatalf("bnbloc-gateway: %v", err)
 	}
+}
+
+// contentJobs is the job store's read side content resolution needs (both
+// store implementations provide it).
+func contentJobs(jobs store.BridgeJobStore) gateway.ContentJobs {
+	cj, _ := jobs.(gateway.ContentJobs)
+	return cj
 }
 
 func truthy(raw string) bool {
