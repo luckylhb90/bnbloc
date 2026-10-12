@@ -132,7 +132,6 @@ pub(super) async fn bundle_ready(plan: &BundlePlan) -> bool {
 /// mark executables, then move the staging directory into place. Returns
 /// whether anything was downloaded.
 pub(super) async fn prepare_bundle(
-    client: &reqwest::Client,
     gateway: &GatewayAccess,
     plan: &BundlePlan,
     mut progress: impl FnMut(&str, FetchProgress),
@@ -147,7 +146,6 @@ pub(super) async fn prepare_bundle(
         let dest = plan.staging.join(&entry.rel);
         if !entry.sha256.file_matches(&dest).await {
             fetch_verified(
-                client,
                 gateway,
                 &entry.url,
                 &entry.sha256,
@@ -374,9 +372,7 @@ mod tests {
             base_url: base_url.clone(),
             token: "session".into(),
         };
-        let client = reqwest::Client::new();
-
-        let downloaded = prepare_bundle(&client, &gateway, &plan, |_, _| {})
+        let downloaded = prepare_bundle(&gateway, &plan, |_, _| {})
             .await
             .expect("bundle prepared");
 
@@ -412,7 +408,7 @@ mod tests {
         );
 
         // A verified bundle is reused without any download.
-        let again = prepare_bundle(&client, &gateway, &plan, |_, _| {})
+        let again = prepare_bundle(&gateway, &plan, |_, _| {})
             .await
             .expect("reuse");
         assert!(!again);
@@ -442,7 +438,7 @@ mod tests {
             base_url: base_url2,
             token: "session".into(),
         };
-        prepare_bundle(&client, &gateway2, &plan2, |_, _| {})
+        prepare_bundle(&gateway2, &plan2, |_, _| {})
             .await
             .expect("v2");
         remove_stale_bundles(&plan2.root, Some(&plan2.dir));
@@ -467,7 +463,7 @@ mod tests {
             token: "session".into(),
         };
 
-        let err = prepare_bundle(&reqwest::Client::new(), &gateway, &plan, |_, _| {})
+        let err = prepare_bundle(&gateway, &plan, |_, _| {})
             .await
             .expect_err("a mismatching file must be refused");
 
@@ -491,7 +487,7 @@ mod tests {
             base_url: "http://127.0.0.1:9".into(),
             token: "session".into(),
         };
-        let err = prepare_bundle(&reqwest::Client::new(), &gateway, &plan, |_, _| {})
+        let err = prepare_bundle(&gateway, &plan, |_, _| {})
             .await
             .expect_err("foreign origin");
         assert!(matches!(err, FetchError::Refused(_)), "{err:?}");

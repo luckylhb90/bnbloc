@@ -36,6 +36,7 @@ use parking_lot::Mutex;
 use reqwest::header::CONTENT_TYPE;
 use sha2::{Digest, Sha256};
 
+use crate::internal_ext::gateway_client::{GatewayClient, GatewayError};
 use crate::internal_ext::loopback::{self, LoopbackHttp};
 use crate::internal_ext::sidecar_model::GatewayAccess;
 use crate::internal_ext::sidecar_util::hex_lower;
@@ -74,24 +75,19 @@ struct Bucket {
 /// The host API state: the grants of running plugins and the member session
 /// requests are forwarded with.
 pub(super) struct PluginHost {
-    gateway: Arc<Mutex<GatewayAccess>>,
+    gateway: GatewayClient,
     grants: Mutex<Vec<Grant>>,
     buckets: Mutex<HashMap<String, Bucket>>,
     addr: tokio::sync::Mutex<Option<SocketAddr>>,
-    http: reqwest::Client,
 }
 
 impl PluginHost {
-    pub(super) fn new(gateway: Arc<Mutex<GatewayAccess>>) -> Arc<Self> {
+    pub(super) fn new(gateway: GatewayClient) -> Arc<Self> {
         Arc::new(Self {
             gateway,
             grants: Mutex::new(Vec::new()),
             buckets: Mutex::new(HashMap::new()),
             addr: tokio::sync::Mutex::new(None),
-            http: reqwest::Client::builder()
-                .timeout(GATEWAY_TIMEOUT)
-                .build()
-                .unwrap_or_default(),
         })
     }
 
@@ -193,7 +189,7 @@ impl PluginHost {
         if !self.admit(&plugin) {
             return error(StatusCode::TOO_MANY_REQUESTS, "plugin chat rate limit");
         }
-        let gateway = self.gateway.lock().clone();
+        let gateway = self.gateway.session();
         self.forward_chat(&gateway, &plugin, chat).await
     }
 
@@ -259,53 +255,46 @@ impl PluginHost {
         if let Some(recipient) = chat.recipient {
             body["recipient"] = recipient;
         }
-        let resp = match self
-            .http
-            .post(url)
-            .bearer_auth(&gateway.token)
-            .header(CONTENT_TYPE, "application/json")
-            .body(body.to_string())
-            .send()
-            .await
-        {
+        let sent = gateway
+            .send(reqwest::Method::POST, url.as_str(), |r| {
+                r.timeout(GATEWAY_TIMEOUT)
+                    .header(CONTENT_TYPE, "application/json")
+                    .body(body.to_string())
+            })
+            .await;
+        let resp = match sent {
             Ok(resp) => resp,
-            Err(e) => {
-                return error(
-                    StatusCode::BAD_GATEWAY,
-                    &format!("gateway unreachable: {e}"),
-                )
-            }
-        };
-        let status = resp.status();
-        let text = resp.text().await.unwrap_or_default();
-        if status.is_success() {
-            let sequence = serde_json::from_str::<serde_json::Value>(&text)
-                .ok()
-                .and_then(|v| v.get("sequence").and_then(serde_json::Value::as_i64));
-            return match sequence {
-                Some(sequence) => json(StatusCode::OK, serde_json::json!({ "sequence": sequence })),
-                None => error(
-                    StatusCode::BAD_GATEWAY,
-                    "gateway answered without a sequence",
-                ),
-            };
-        }
-        let reason = text.trim();
-        match status.as_u16() {
             // The member session expired or was revoked: transient for the
             // plugin (the web hands the desktop a fresh one).
-            401 => error(StatusCode::SERVICE_UNAVAILABLE, "member session expired"),
-            400 | 403 | 404 | 409 | 413 | 429 => error(
-                StatusCode::from_u16(status.as_u16()).unwrap_or(StatusCode::BAD_GATEWAY),
-                if reason.is_empty() {
-                    "refused by the gateway"
-                } else {
-                    reason
-                },
-            ),
-            code => error(
+            Err(GatewayError::SessionExpired) => {
+                return error(StatusCode::SERVICE_UNAVAILABLE, "member session expired")
+            }
+            Err(GatewayError::Refused { status, reason }) => {
+                return error(
+                    StatusCode::from_u16(status).unwrap_or(StatusCode::BAD_GATEWAY),
+                    if reason.is_empty() {
+                        "refused by the gateway"
+                    } else {
+                        &reason
+                    },
+                )
+            }
+            Err(GatewayError::Failed {
+                status: Some(429), ..
+            }) => return error(StatusCode::TOO_MANY_REQUESTS, "gateway rate limit"),
+            Err(e @ GatewayError::Failed { .. }) => {
+                return error(StatusCode::BAD_GATEWAY, &e.to_string())
+            }
+        };
+        let text = resp.text().await.unwrap_or_default();
+        let sequence = serde_json::from_str::<serde_json::Value>(&text)
+            .ok()
+            .and_then(|v| v.get("sequence").and_then(serde_json::Value::as_i64));
+        match sequence {
+            Some(sequence) => json(StatusCode::OK, serde_json::json!({ "sequence": sequence })),
+            None => error(
                 StatusCode::BAD_GATEWAY,
-                &format!("gateway answered HTTP {code}"),
+                "gateway answered without a sequence",
             ),
         }
     }
@@ -455,10 +444,9 @@ mod tests {
     }
 
     async fn host_with(gateway_url: &str, session: &str) -> (Arc<PluginHost>, String) {
-        let host = PluginHost::new(Arc::new(Mutex::new(GatewayAccess {
-            base_url: gateway_url.to_string(),
-            token: session.to_string(),
-        })));
+        let gateway = GatewayClient::new(gateway_url);
+        gateway.set(gateway_url, session.to_string());
+        let host = PluginHost::new(gateway);
         let base = host.ensure_started().await.expect("start");
         (host, base)
     }
@@ -606,20 +594,17 @@ mod tests {
         assert_eq!(body["error"], "caller is not a member of room");
 
         let (gw, _r) = gateway_once("401 Unauthorized", "unauthorized");
-        host.gateway.lock().base_url = gw;
+        host.gateway.set(&gw, "s".into());
         assert_eq!(post(&base, token.expose(), CHAT).await.0, 503);
 
         let (gw, _r) = gateway_once("500 Internal Server Error", "boom");
-        host.gateway.lock().base_url = gw;
+        host.gateway.set(&gw, "s".into());
         assert_eq!(post(&base, token.expose(), CHAT).await.0, 502);
     }
 
     #[test]
     fn rate_limit_is_per_plugin() {
-        let host = PluginHost::new(Arc::new(Mutex::new(GatewayAccess {
-            base_url: String::new(),
-            token: String::new(),
-        })));
+        let host = PluginHost::new(GatewayClient::default());
         for _ in 0..RATE_BURST as usize {
             assert!(host.admit("busy"));
         }

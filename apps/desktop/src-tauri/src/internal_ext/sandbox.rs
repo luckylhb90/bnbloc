@@ -221,15 +221,13 @@ impl Adapter {
         let id = spec.id();
         let base = self.dirs().map_err(FetchError::Retry)?.sandbox_bundles();
         let plan = sandbox_bundle::bundle_plan(&base, spec).map_err(FetchError::Refused)?;
-        let gateway = self.gateway.lock().clone();
-        let client = self.http().map_err(FetchError::Retry)?;
+        let gateway = self.gateway.session();
         let started = Instant::now();
-        let downloaded =
-            sandbox_bundle::prepare_bundle(&client, &gateway, &plan, |file, progress| {
-                let (state, message) = progress.status(&format!("{} {file}", spec.name));
-                self.set_status(&id, state, message, None);
-            })
-            .await?;
+        let downloaded = sandbox_bundle::prepare_bundle(&gateway, &plan, |file, progress| {
+            let (state, message) = progress.status(&format!("{} {file}", spec.name));
+            self.set_status(&id, state, message, None);
+        })
+        .await?;
         self.set_status(
             &id,
             "ready",

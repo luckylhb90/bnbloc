@@ -39,6 +39,10 @@ const SITES_PREFIX: &str = "/v1/sites/";
 /// Longest ticket accepted (a signed claim set; far below URL limits).
 const MAX_TICKET: usize = 4096;
 
+/// The largest site file proxied: a whole site's byte cap
+/// (internal/tarbundle SiteLimits.MaxBytes), so no one file can exceed it.
+const MAX_SITE_FILE_BYTES: usize = 64 << 20;
+
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 const READ_IDLE_TIMEOUT: Duration = Duration::from_secs(30);
 
@@ -194,15 +198,37 @@ pub(crate) async fn forward(base: &str, upstream: &str, method: &Method) -> Resp
     let body = if method == Method::HEAD {
         Vec::new()
     } else {
-        match resp.bytes().await {
-            Ok(bytes) => bytes.to_vec(),
+        match read_bounded(resp).await {
+            Ok(body) => body,
             Err(err) => {
-                eprintln!("[site] read failed: {}", err.without_url());
+                eprintln!("[site] {err}");
                 return status_only(StatusCode::BAD_GATEWAY);
             }
         }
     };
     relay(status, &headers, body)
+}
+
+/// A site file's bytes, refused past MAX_SITE_FILE_BYTES (announced or
+/// streamed): a webview request never buffers more.
+async fn read_bounded(resp: reqwest::Response) -> Result<Vec<u8>, String> {
+    use futures_util::StreamExt;
+    if resp
+        .content_length()
+        .is_some_and(|len| len > MAX_SITE_FILE_BYTES as u64)
+    {
+        return Err("site file over the size cap".into());
+    }
+    let mut body = Vec::new();
+    let mut stream = resp.bytes_stream();
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(|e| format!("read failed: {}", e.without_url()))?;
+        if body.len() + chunk.len() > MAX_SITE_FILE_BYTES {
+            return Err("site file over the size cap".into());
+        }
+        body.extend_from_slice(&chunk);
+    }
+    Ok(body)
 }
 
 /// Handles one scheme request asynchronously (it goes to the network).

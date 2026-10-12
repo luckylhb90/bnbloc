@@ -166,12 +166,11 @@ async fn binaries_are_downloaded_verified_and_cached() {
         base_url: base,
         token: "member-session".into(),
     };
-    let client = reqwest::Client::new();
     let dir = temp_dir("fetch");
     let sha = Sha256Pin::of(BIN);
     let dest = tool_file(&dir, "codeword", &sha);
     let url = format!("/v1/artifacts/sha256/{sha}");
-    let first = ensure_verified(&client, &gateway, &url, &sha, &dest, true, |_| {})
+    let first = ensure_verified(&gateway, &url, &sha, &dest, true, |_| {})
         .await
         .expect("download");
     assert!(first, "the first pass downloads");
@@ -184,14 +183,14 @@ async fn binaries_are_downloaded_verified_and_cached() {
             0
         );
     }
-    let again = ensure_verified(&client, &gateway, &url, &sha, &dest, true, |_| {})
+    let again = ensure_verified(&gateway, &url, &sha, &dest, true, |_| {})
         .await
         .expect("cached");
     assert!(!again, "a verified binary is kept");
     assert_eq!(hits.load(std::sync::atomic::Ordering::SeqCst), 1);
     let zero = Sha256Pin::parse(&"0".repeat(64)).unwrap();
     let wrong = tool_file(&dir, "codeword", &zero);
-    let refused = ensure_verified(&client, &gateway, &url, &zero, &wrong, true, |_| {}).await;
+    let refused = ensure_verified(&gateway, &url, &zero, &wrong, true, |_| {}).await;
     assert!(matches!(refused, Err(FetchError::Mismatch(_))));
     assert!(!wrong.exists(), "mismatched bytes never land");
     let _ = std::fs::remove_dir_all(&dir);

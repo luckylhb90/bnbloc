@@ -25,8 +25,7 @@ use serde_json::json;
 use tauri::{Manager, State};
 
 use bridge::{Status, Supervisor};
-use settings::Settings;
-use updater_client::gateway_url;
+use settings::{gateway_url, Settings};
 
 /// The main window's label. Its close ends the app; any other window (the
 /// `preview-*` pop-outs) is just a view and never touches supervision.
@@ -97,8 +96,8 @@ fn set_settings(state: State<'_, AppState>, settings: Settings) -> Result<(), St
 /// session bearer; the bridge supervisor gets the member's refresh token
 /// (memory only), which the bridge renews its own session from — the
 /// supervisor restarts the bridge only when it is running without one. An
-/// empty session token is the web's sign-out: the refresh token is cleared
-/// and the manager keeps its last gateway access. Returns immediately: the
+/// empty session token is the web's sign-out: the refresh token and the
+/// manager's session are cleared. Returns immediately: the
 /// catalog refresh runs in the background (a gateway outage must not stall
 /// the UI's boot).
 #[tauri::command]
@@ -110,11 +109,15 @@ fn internal_adapter_session(
     refresh_token: Option<String>,
 ) {
     if session_token.trim().is_empty() {
+        // Signed out: nothing acts as the member any more (no catalog
+        // fetches, downloads, member stream or plugin chat with the old
+        // session).
         state.supervisor.set_refresh_token(None);
+        adapter.update_gateway(&gateway_url, String::new());
         return;
     }
     state.supervisor.set_refresh_token(refresh_token);
-    adapter.update_gateway(gateway_url, session_token);
+    adapter.update_gateway(&gateway_url, session_token);
     adapter.start();
     adapter.refresh_in_background();
 }
@@ -357,12 +360,7 @@ pub fn run() {
 
             // Desktop builds supervise installed Components sidecars only; the
             // package catalog supplies names, artifacts, and launch metadata.
-            let adapter = internal_ext::Adapter::new(
-                handle.clone(),
-                dirs,
-                gateway,
-                settings.gateway_token.clone(),
-            );
+            let adapter = internal_ext::Adapter::new(handle.clone(), dirs, &gateway);
             adapter.start();
             app.manage(adapter);
 

@@ -1,34 +1,35 @@
 use std::collections::HashSet;
-use std::sync::OnceLock;
-use std::time::Duration;
 
+use crate::internal_ext::gateway_client::{GatewayError, API_TIMEOUT};
 use crate::internal_ext::sidecar_model::{
     resolve_component_specs, ComponentsResponse, GatewayAccess, SidecarSpec,
 };
 use crate::internal_ext::sidecar_util::current_platform;
 use crate::internal_ext::Adapter;
 
-// Every adapter HTTP call (gateway API, local sidecar API, artifact download)
-// runs on one shared client with hard bounds, so a peer that accepts the
-// connection but never responds surfaces an error instead of parking a
-// reconcile forever. There is NO total-request timeout on the client: a large
-// artifact over a slow link must not be cut off mid-transfer. Instead a
-// connect timeout plus a per-read idle timeout catch dead and stalled peers,
-// and small API calls add their own total bound (API_TIMEOUT).
-const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
-const READ_IDLE_TIMEOUT: Duration = Duration::from_secs(30);
-/// Total bound for small JSON API calls (catalog, local targets/login).
-pub(super) const API_TIMEOUT: Duration = Duration::from_secs(30);
-
-/// Why a sidecar binary could not be made runnable.
+/// Why an artifact could not be made usable. Every kind shows it the same
+/// way: `Retry` waits (and retries), `Mismatch` and `Refused` fail.
 #[derive(Debug)]
 pub(crate) enum FetchError {
-    /// Transient (network, disk, status code): retry with backoff.
+    /// Transient (network, disk, a 429/5xx, an expired session): retry
+    /// with backoff.
     Retry(String),
     /// The download completed but its sha256 is not the pinned one.
     Mismatch(String),
-    /// Never retried for this spec (e.g. artifact URL off the gateway origin).
+    /// Never retried for this spec (an artifact URL off the gateway origin,
+    /// a gateway refusal, an artifact over the size cap).
     Refused(String),
+}
+
+impl From<GatewayError> for FetchError {
+    fn from(e: GatewayError) -> Self {
+        match e {
+            GatewayError::Refused { .. } => FetchError::Refused(format!("download: {e}")),
+            GatewayError::SessionExpired | GatewayError::Failed { .. } => {
+                FetchError::Retry(format!("download: {e}"))
+            }
+        }
+    }
 }
 
 impl Adapter {
@@ -92,36 +93,17 @@ impl Adapter {
         &self,
         gateway: &GatewayAccess,
     ) -> Result<ComponentsResponse, String> {
-        let url = format!("{}/v1/components", gateway.base_url);
-        let resp = self
-            .http()?
-            .get(&url)
-            .timeout(API_TIMEOUT)
-            .bearer_auth(&gateway.token)
-            .send()
+        let resp = gateway
+            .send(reqwest::Method::GET, "/v1/components", |r| {
+                r.timeout(API_TIMEOUT)
+            })
             .await
             .map_err(|e| format!("list components: {e}"))?;
-        if !resp.status().is_success() {
-            return Err(format!("list components: status {}", resp.status()));
-        }
         let body = resp
             .bytes()
             .await
             .map_err(|e| format!("list components read: {e}"))?;
         serde_json::from_slice::<ComponentsResponse>(&body)
             .map_err(|e| format!("list components decode: {e}"))
-    }
-
-    pub(super) fn http(&self) -> Result<reqwest::Client, String> {
-        static CLIENT: OnceLock<Result<reqwest::Client, String>> = OnceLock::new();
-        CLIENT
-            .get_or_init(|| {
-                reqwest::Client::builder()
-                    .connect_timeout(CONNECT_TIMEOUT)
-                    .read_timeout(READ_IDLE_TIMEOUT)
-                    .build()
-                    .map_err(|e| format!("build http client: {e}"))
-            })
-            .clone()
     }
 }

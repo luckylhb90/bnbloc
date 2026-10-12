@@ -8,6 +8,7 @@ mod reconcile_tests;
 #[cfg(test)]
 mod sandbox_live_tests;
 
+pub(super) mod gateway_client;
 pub(super) mod loopback;
 pub(super) mod mcp_tools;
 pub(super) mod member_dir;
@@ -37,6 +38,7 @@ use std::sync::Arc;
 use parking_lot::Mutex;
 use tauri::{AppHandle, Manager};
 
+use gateway_client::GatewayClient;
 pub use mcp_tools::McpToolSettings;
 pub use plugin_settings::PluginLocalSettings;
 pub use sidecar_model::AdapterStatus;
@@ -66,7 +68,7 @@ pub struct Adapter {
     /// The session the manager runs with. Its token also names the member
     /// scope (subject and tenant) whose directory holds that scope's state
     /// (member_dir; `session_scope`).
-    gateway: Arc<Mutex<GatewayAccess>>,
+    gateway: GatewayClient,
     inner: Arc<Mutex<Inner>>,
     /// Serializes reconciles: the boot-time session handoff, the poll loop,
     /// and a post-update resume may all trigger one, and interleaved runs
@@ -85,23 +87,17 @@ pub struct Adapter {
 }
 
 impl Adapter {
-    pub fn new(
-        app: AppHandle,
-        dirs: Result<crate::dirs::Dirs, String>,
-        gateway_url: String,
-        gateway_token: String,
-    ) -> Self {
+    /// A manager for the gateway at `gateway_url`, with no member session
+    /// until the web hands one over (`update_gateway`).
+    pub fn new(app: AppHandle, dirs: Result<crate::dirs::Dirs, String>, gateway_url: &str) -> Self {
         if let Ok(dirs) = &dirs {
             member_dir::remove_unkeyed_dirs(dirs.config(), dirs.data());
         }
-        let gateway = Arc::new(Mutex::new(GatewayAccess {
-            base_url: gateway_url.trim_end_matches('/').to_string(),
-            token: gateway_token,
-        }));
+        let gateway = GatewayClient::new(gateway_url);
         Self {
             app,
             dirs: Arc::new(dirs),
-            host: plugin_host::PluginHost::new(Arc::clone(&gateway)),
+            host: plugin_host::PluginHost::new(gateway.clone()),
             gateway,
             inner: Arc::new(Mutex::new(Inner {
                 desired_up: false,
@@ -116,17 +112,15 @@ impl Adapter {
         }
     }
 
-    /// Take over the web's session. A session of another member scope
-    /// (member, tenant or gateway) switches the member directory, and the
-    /// sidecars that read their scope's state (plugins with local settings,
-    /// the sandbox with its data dir) restart with the new scope's.
-    pub fn update_gateway(&self, gateway_url: String, gateway_token: String) {
+    /// Take over the web's session; an empty token is the web's sign-out,
+    /// which leaves the manager no session at all. A session of another
+    /// member scope (member, tenant or gateway, or none) switches the member
+    /// directory, and the sidecars that read their scope's state (plugins
+    /// with local settings, the sandbox with its data dir) restart with the
+    /// new scope's.
+    pub fn update_gateway(&self, gateway_url: &str, gateway_token: String) {
         let before = self.member_dir().ok();
-        {
-            let mut gateway = self.gateway.lock();
-            gateway.base_url = gateway_url.trim_end_matches('/').to_string();
-            gateway.token = gateway_token;
-        }
+        self.gateway.set(gateway_url, gateway_token);
         if self.member_dir().ok() != before {
             self.restart_member_sidecars();
         }
@@ -154,7 +148,7 @@ impl Adapter {
     /// The private directory of the member scope the manager's session acts
     /// in.
     pub(super) fn member_dir(&self) -> Result<std::path::PathBuf, String> {
-        let gateway = self.gateway.lock().clone();
+        let gateway = self.gateway.session();
         self.session_scope(&gateway)
             .map(|(_, dir)| dir)
             .ok_or_else(|| "no member is signed in on this computer yet".to_string())
@@ -169,7 +163,7 @@ impl Adapter {
         &self,
         settings: &crate::settings::Settings,
     ) -> Option<std::path::PathBuf> {
-        let gateway = self.gateway.lock().clone();
+        let gateway = self.gateway.session();
         let (member, dir) = self.session_scope(&gateway)?;
         let tenant = settings.tenant.trim();
         if !tenant.is_empty() && tenant != member.tenant {
@@ -210,12 +204,12 @@ impl Adapter {
     /// The configured gateway origin (no trailing slash; "" before one is
     /// known). The site scheme proxies ticketed site routes to it.
     pub(crate) fn gateway_base_url(&self) -> String {
-        self.gateway.lock().base_url.clone()
+        self.gateway.base_url()
     }
 
     async fn reconcile(&self) -> Result<(), String> {
         let _serialized = self.reconcile_lock.lock().await;
-        let gateway = self.gateway.lock().clone();
+        let gateway = self.gateway.session();
         let catalog = self.fetch_components(&gateway).await?;
         let (specs, discovered) = self.resolve_specs(&catalog);
         self.write_manifests(&specs).await?;

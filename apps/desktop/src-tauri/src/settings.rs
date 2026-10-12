@@ -115,6 +115,31 @@ impl SandboxMode {
     }
 }
 
+// The gateway a fresh install points at before the user configured one. It
+// is deployment data, so it is never hardcoded: a deployment's build sets
+// BNBLOC_DEFAULT_GATEWAY (see docs/desktop-update-release-runbook.md). An
+// unset build has no default — the UI asks for a gateway instead of silently
+// talking to someone else's deployment.
+const DEFAULT_GATEWAY_URL: Option<&str> = option_env!("BNBLOC_DEFAULT_GATEWAY");
+
+/// The gateway base URL every part of the shell uses (the page's init
+/// script, the bridge env, the updater, pop-out windows): the configured
+/// one, else the build's default, else empty (not configured); normalized
+/// by `normalize_gateway_url`.
+pub fn gateway_url(settings: &Settings) -> String {
+    let configured = settings.gateway_url.trim();
+    normalize_gateway_url(if configured.is_empty() {
+        DEFAULT_GATEWAY_URL.unwrap_or_default()
+    } else {
+        configured
+    })
+}
+
+/// The one spelling of a gateway origin: trimmed, no trailing slash.
+pub fn normalize_gateway_url(raw: &str) -> String {
+    raw.trim().trim_end_matches('/').to_string()
+}
+
 impl Settings {
     /// True when the minimum fields to run the bridge are present. The bridge
     /// itself only requires a gateway and an owner (`services/bridge/cmd`);
@@ -290,6 +315,20 @@ mod tests {
         save(&path, &settings).expect("save settings");
         assert_eq!(load(&path).expect("load").sandbox_mode, SandboxMode::All);
         std::fs::remove_dir_all(&dir).expect("cleanup");
+    }
+
+    #[test]
+    fn unconfigured_gateway_follows_the_build_default() {
+        let resolved = gateway_url(&Settings::default());
+        match DEFAULT_GATEWAY_URL {
+            Some(default) => assert_eq!(resolved, normalize_gateway_url(default)),
+            None => assert_eq!(resolved, ""),
+        }
+        let s = Settings {
+            gateway_url: " https://gw.example.com/ ".into(),
+            ..Default::default()
+        };
+        assert_eq!(gateway_url(&s), "https://gw.example.com");
     }
 
     #[test]

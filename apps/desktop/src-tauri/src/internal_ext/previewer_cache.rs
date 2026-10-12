@@ -153,7 +153,7 @@ impl Adapter {
         let pin = match state.cached_pin(name, version) {
             Some(pin) => pin,
             None => {
-                let gateway = self.gateway.lock().clone();
+                let gateway = self.gateway.session();
                 let catalog = self
                     .fetch_components(&gateway)
                     .await
@@ -188,24 +188,15 @@ impl Adapter {
         if let Some(raw) = read_verified(&path, &pin.sha256).await {
             return Ok(raw);
         }
-        let gateway = self.gateway.lock().clone();
-        let client = self.http().map_err(PreviewerError::Unavailable)?;
-        fetch_verified(
-            &client,
-            &gateway,
-            &pin.url,
-            &pin.sha256,
-            &path,
-            false,
-            |_| {},
-        )
-        .await
-        .map_err(|e| match e {
-            FetchError::Retry(msg) => PreviewerError::Unavailable(msg),
-            FetchError::Mismatch(msg) | FetchError::Refused(msg) => {
-                PreviewerError::BadArtifact(msg)
-            }
-        })?;
+        let gateway = self.gateway.session();
+        fetch_verified(&gateway, &pin.url, &pin.sha256, &path, false, |_| {})
+            .await
+            .map_err(|e| match e {
+                FetchError::Retry(msg) => PreviewerError::Unavailable(msg),
+                FetchError::Mismatch(msg) | FetchError::Refused(msg) => {
+                    PreviewerError::BadArtifact(msg)
+                }
+            })?;
         // fetch_verified checked these bytes against the pin as it wrote
         // them: no second hash.
         tokio::fs::read(&path)

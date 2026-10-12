@@ -431,11 +431,12 @@ fn env_for(
     // the shell's stop signal, which also fires if this shell dies (SIGKILL,
     // crash), so the bridge never outlives it.
     env.insert("BNBLOC_BRIDGE_SUPERVISED".into(), "1".into());
-    env.insert("BNBLOC_GATEWAY_BASE_URL".into(), s.gateway_url.clone());
+    let gateway = crate::settings::gateway_url(s);
+    env.insert("BNBLOC_GATEWAY_BASE_URL".into(), gateway.clone());
     // Live file sync: the public edge serves the relay under /relay/* on the
     // gateway's own origin, and the bridge appends /relay/stream/<key> itself,
     // so the relay base is the gateway's bare origin.
-    if let Some(relay) = relay_base_url(&s.gateway_url) {
+    if let Some(relay) = relay_base_url(&gateway) {
         env.insert("BNBLOC_RELAY_BASE_URL".into(), relay);
     }
     env.insert("BNBLOC_BRIDGE_OWNER".into(), s.owner.clone());
@@ -642,7 +643,11 @@ mod tests {
                 .map(String::as_str),
             Some("https://gw.example:8443")
         );
-        assert!(!env_for(&Settings::default(), None, None).contains_key("BNBLOC_RELAY_BASE_URL"));
+        if crate::settings::gateway_url(&Settings::default()).is_empty() {
+            assert!(
+                !env_for(&Settings::default(), None, None).contains_key("BNBLOC_RELAY_BASE_URL")
+            );
+        }
     }
 
     #[test]

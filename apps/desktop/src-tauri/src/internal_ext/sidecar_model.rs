@@ -100,10 +100,12 @@ impl AdapterStatus {
     }
 }
 
-#[derive(Clone)]
-pub(super) struct GatewayAccess {
-    pub(super) base_url: String,
-    pub(super) token: String,
+/// One member session: the gateway origin and its bearer (empty while
+/// signed out). Calls as the member go through `send` (gateway_client.rs).
+#[derive(Clone, Default)]
+pub(crate) struct GatewayAccess {
+    pub(crate) base_url: String,
+    pub(crate) token: String,
 }
 
 #[derive(Clone, PartialEq, Eq)]

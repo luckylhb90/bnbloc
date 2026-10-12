@@ -126,7 +126,7 @@ async fn sandbox_live_bundle_launch_discover_prewarm_restart() {
         token: "session".into(),
     };
     let t = Instant::now();
-    sandbox_bundle::prepare_bundle(&reqwest::Client::new(), &gateway, &plan, |_, _| {})
+    sandbox_bundle::prepare_bundle(&gateway, &plan, |_, _| {})
         .await
         .expect("bundle");
     eprintln!(

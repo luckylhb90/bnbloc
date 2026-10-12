@@ -4,7 +4,8 @@ use serde::Serialize;
 use tauri::{Emitter, State};
 use tauri_plugin_updater::UpdaterExt;
 
-use crate::{child_process, settings::Settings, AppState};
+use crate::settings::{gateway_url, Settings};
+use crate::{child_process, AppState};
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -22,25 +23,6 @@ pub struct UpdateCheckResult {
 struct UpdateProgress {
     downloaded: u64,
     total: Option<u64>,
-}
-
-// The gateway a fresh install points at before the user configured one. It
-// is deployment data, so it is never hardcoded: a deployment's build sets
-// BNBLOC_DEFAULT_GATEWAY (see docs/desktop-update-release-runbook.md). An
-// unset build has no default — the UI asks for a gateway instead of silently
-// talking to someone else's deployment.
-const DEFAULT_GATEWAY_URL: Option<&str> = option_env!("BNBLOC_DEFAULT_GATEWAY");
-
-/// The gateway base URL: the configured one, else the build's default, else
-/// empty (not configured).
-pub fn gateway_url(settings: &Settings) -> String {
-    let configured = settings.gateway_url.trim();
-    let url = if configured.is_empty() {
-        DEFAULT_GATEWAY_URL.unwrap_or_default().trim()
-    } else {
-        configured
-    };
-    url.trim_end_matches('/').to_string()
 }
 
 // The updater talks to the gateway: connecting must be quick, and a stalled
@@ -181,14 +163,9 @@ mod tests {
     }
 
     #[test]
-    fn unconfigured_gateway_follows_the_build_default_or_fails_closed() {
-        let resolved = gateway_url(&Settings::default());
-        match DEFAULT_GATEWAY_URL {
-            Some(default) => assert_eq!(resolved, default.trim().trim_end_matches('/')),
-            None => {
-                assert_eq!(resolved, "");
-                assert!(update_endpoint(&Settings::default()).is_err());
-            }
+    fn unconfigured_gateway_fails_closed_without_a_build_default() {
+        if gateway_url(&Settings::default()).is_empty() {
+            assert!(update_endpoint(&Settings::default()).is_err());
         }
     }
 

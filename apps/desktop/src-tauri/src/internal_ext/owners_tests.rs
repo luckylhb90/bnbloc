@@ -41,14 +41,19 @@ fn sources() -> Vec<(String, String)> {
 
 /// `needle` appears in non-test code only in `owner`.
 fn only_in(needle: &str, owner: &str) {
+    only_in_any(needle, &[owner]);
+}
+
+/// `needle` appears in non-test code only in `owners`.
+fn only_in_any(needle: &str, owners: &[&str]) {
     let offenders: Vec<String> = sources()
         .into_iter()
-        .filter(|(rel, code)| rel != owner && code.contains(needle))
+        .filter(|(rel, code)| !owners.contains(&rel.as_str()) && code.contains(needle))
         .map(|(rel, _)| rel)
         .collect();
     assert!(
         offenders.is_empty(),
-        "{needle:?} belongs to {owner} alone; also in {offenders:?}"
+        "{needle:?} belongs to {owners:?} alone; also in {offenders:?}"
     );
 }
 
@@ -132,6 +137,22 @@ fn loopback_hosts_are_named_only_by_loopback() {
     for needle in ["\"127.0.0.1", "\"localhost\"", "[::1]", "is_loopback()"] {
         only_in(needle, "internal_ext/loopback.rs");
     }
+}
+
+/// Calls as the member go through GatewayAccess::send, which reads every
+/// answer once (gateway_client::check): no call site attaches the session
+/// or maps a gateway status itself.
+#[test]
+fn gateway_calls_go_through_the_gateway_client() {
+    // The sandbox API authenticates to its own sidecar with the launch's
+    // bearer, never the member session.
+    only_in_any(
+        ".bearer_auth(",
+        &[
+            "internal_ext/gateway_client.rs",
+            "internal_ext/sandbox_api.rs",
+        ],
+    );
 }
 
 #[test]

@@ -140,25 +140,17 @@ impl Adapter {
         generation: u64,
         opened_before: &mut bool,
     ) -> Result<(), String> {
-        let gateway = self.gateway.lock().clone();
-        if gateway.base_url.is_empty() || gateway.token.is_empty() {
-            return Err("no gateway session".into());
-        }
+        let gateway = self.gateway.session();
         // The flag tells realtime whether plugin deliveries (and
         // notification routing) may use this stream; the stream is reopened
         // when it stops matching.
         let plugins = self.runs_plugins();
-        let resp = self
-            .http()?
-            .get(stream_url(&gateway.base_url, plugins))
-            .bearer_auth(&gateway.token)
-            .header(ACCEPT, "text/event-stream")
-            .send()
+        let resp = gateway
+            .send(reqwest::Method::GET, &stream_path(plugins), |r| {
+                r.header(ACCEPT, "text/event-stream")
+            })
             .await
             .map_err(|e| format!("open stream: {e}"))?;
-        if !resp.status().is_success() {
-            return Err(format!("open stream: status {}", resp.status()));
-        }
         // A hint sent while the stream was down is lost: catch up once.
         if std::mem::replace(opened_before, true) {
             self.request_catalog_refresh();
@@ -192,7 +184,7 @@ impl Adapter {
             // this stream).
             if !self.manager_current(generation)
                 || self.runs_plugins() != plugins
-                || !same_session(&self.gateway.lock(), &gateway)
+                || !same_session(&self.gateway.session(), &gateway)
             {
                 return Ok(());
             }
@@ -229,27 +221,27 @@ impl Adapter {
         if id.is_empty() || !id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
             return Err(format!("invalid delivery id {id:?}"));
         }
-        let resp = self
-            .http()?
-            .post(format!("{}/v1/my/plugin-events/{id}/ack", gateway.base_url))
-            .timeout(ACK_TIMEOUT)
-            .bearer_auth(&gateway.token)
-            .header(CONTENT_TYPE, "application/json")
-            .body(ack_body(outcome))
-            .send()
+        gateway
+            .send(
+                reqwest::Method::POST,
+                &format!("/v1/my/plugin-events/{id}/ack"),
+                |r| {
+                    r.timeout(ACK_TIMEOUT)
+                        .header(CONTENT_TYPE, "application/json")
+                        .body(ack_body(outcome))
+                },
+            )
             .await
-            .map_err(|e| e.to_string())?;
-        if !resp.status().is_success() {
-            return Err(format!("status {}", resp.status()));
-        }
-        Ok(())
+            .map(|_| ())
+            .map_err(|e| e.to_string())
     }
 }
 
-/// The member stream URL; `?plugins=1` while a plugin sidecar is installed.
-fn stream_url(base_url: &str, plugins: bool) -> String {
+/// The member stream path; `?plugins=1` while a plugin sidecar is
+/// installed.
+fn stream_path(plugins: bool) -> String {
     let query = if plugins { "?plugins=1" } else { "" };
-    format!("{base_url}/v1/my/plugin-events{query}")
+    format!("/v1/my/plugin-events{query}")
 }
 
 /// What a stream frame asks of the desktop.
@@ -429,15 +421,9 @@ mod tests {
     }
 
     #[test]
-    fn stream_url_flags_plugin_desktops() {
-        assert_eq!(
-            stream_url("https://gw.example", true),
-            "https://gw.example/v1/my/plugin-events?plugins=1"
-        );
-        assert_eq!(
-            stream_url("https://gw.example", false),
-            "https://gw.example/v1/my/plugin-events"
-        );
+    fn stream_path_flags_plugin_desktops() {
+        assert_eq!(stream_path(true), "/v1/my/plugin-events?plugins=1");
+        assert_eq!(stream_path(false), "/v1/my/plugin-events");
     }
 
     #[test]

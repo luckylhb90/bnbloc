@@ -1,6 +1,6 @@
 use tauri::{Manager, State};
 
-use crate::{gateway_init_script, updater_client::gateway_url, AppState};
+use crate::{gateway_init_script, settings::gateway_url, AppState};
 
 /// Open an http(s) URL in the OS default browser (ShellExecuteExW on Windows,
 /// `open`/`xdg-open` elsewhere — never through a command interpreter).

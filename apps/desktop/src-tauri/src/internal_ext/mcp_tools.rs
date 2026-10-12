@@ -294,8 +294,7 @@ impl Adapter {
         tokio::fs::create_dir_all(&dir)
             .await
             .map_err(|e| format!("create MCP tools dir: {e}"))?;
-        let gateway = self.gateway.lock().clone();
-        let client = self.http()?;
+        let gateway = self.gateway.session();
         let mut entries = Vec::new();
         let mut keep = HashSet::new();
         for tool in &tools {
@@ -313,7 +312,7 @@ impl Adapter {
             let dest = tool_file(&dir, &tool.name, sha);
             keep.insert(dest.clone());
             let name = tool.name.clone();
-            let result = ensure_verified(&client, &gateway, url, sha, &dest, true, |p| {
+            let result = ensure_verified(&gateway, url, sha, &dest, true, |p| {
                 let (state, message) = p.status(&name);
                 self.set_mcp_local(&name, state, message);
             })
@@ -327,7 +326,17 @@ impl Adapter {
                         path: dest.to_string_lossy().into_owned(),
                     });
                 }
-                Err(FetchError::Retry(m) | FetchError::Mismatch(m) | FetchError::Refused(m)) => {
+                // The sidecars' reading of a fetch failure: a transient one
+                // waits for the next pass, a refused artifact fails.
+                Err(FetchError::Retry(m)) => {
+                    eprintln!("[mcp-tools:{}] {m}", tool.name);
+                    self.set_mcp_local(
+                        &tool.name,
+                        "waiting",
+                        format!("Waiting to install {}: {m}", tool.name),
+                    );
+                }
+                Err(FetchError::Mismatch(m) | FetchError::Refused(m)) => {
                     eprintln!("[mcp-tools:{}] {m}", tool.name);
                     self.set_mcp_local(&tool.name, "failed", m);
                 }

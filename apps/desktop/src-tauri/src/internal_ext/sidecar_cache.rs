@@ -23,10 +23,8 @@ impl Adapter {
         let cache_path = self
             .cache_path(&id, &artifact.sha256)
             .map_err(FetchError::Retry)?;
-        let gateway = self.gateway.lock().clone();
-        let client = self.http().map_err(FetchError::Retry)?;
+        let gateway = self.gateway.session();
         let downloaded = ensure_verified(
-            &client,
             &gateway,
             &artifact.url,
             &artifact.sha256,
@@ -83,6 +81,18 @@ impl Adapter {
     }
 }
 
+/// The largest artifact the desktop downloads: the largest object the
+/// gateway's blob store holds (services/room maxArtifactBlobBytes, the
+/// platform artifact upload cap).
+const MAX_ARTIFACT_BYTES: u64 = 256 << 20;
+
+fn too_large() -> FetchError {
+    FetchError::Refused(format!(
+        "download: the artifact is larger than {} MiB",
+        MAX_ARTIFACT_BYTES >> 20
+    ))
+}
+
 /// Progress of one verified download, for status lines.
 pub(super) enum FetchProgress {
     Downloading { written: u64, total: Option<u64> },
@@ -106,7 +116,6 @@ impl FetchProgress {
 /// pinned component binary (supervised sidecars, materialized stdio MCP
 /// tools).
 pub(super) async fn ensure_verified(
-    client: &reqwest::Client,
     gateway: &GatewayAccess,
     url: &str,
     sha256: &Sha256Pin,
@@ -117,7 +126,7 @@ pub(super) async fn ensure_verified(
     if sha256.file_matches(dest).await {
         return Ok(false);
     }
-    fetch_verified(client, gateway, url, sha256, dest, executable, progress).await?;
+    fetch_verified(gateway, url, sha256, dest, executable, progress).await?;
     Ok(true)
 }
 
@@ -142,7 +151,6 @@ pub(super) async fn ensure_verified(
 /// `Authorization` on a cross-host redirect), and the sha256 pin below is the
 /// trust check on the bytes either way.
 pub(super) async fn fetch_verified(
-    client: &reqwest::Client,
     gateway: &GatewayAccess,
     url: &str,
     sha256: &Sha256Pin,
@@ -153,19 +161,11 @@ pub(super) async fn fetch_verified(
     let url = direct_download_url(
         &artifact_download_url(&gateway.base_url, url).map_err(FetchError::Refused)?,
     );
-    let resp = client
-        .get(url)
-        .bearer_auth(&gateway.token)
-        .send()
-        .await
-        .map_err(|e| FetchError::Retry(format!("download: {e}")))?;
-    if !resp.status().is_success() {
-        return Err(FetchError::Retry(format!(
-            "download: status {}",
-            resp.status()
-        )));
-    }
+    let resp = gateway.send(reqwest::Method::GET, &url, |r| r).await?;
     let total = resp.content_length();
+    if total.is_some_and(|total| total > MAX_ARTIFACT_BYTES) {
+        return Err(too_large());
+    }
     let dir = dest
         .parent()
         .ok_or(FetchError::Retry("download path has no parent".into()))?;
@@ -184,11 +184,14 @@ pub(super) async fn fetch_verified(
         let mut written: u64 = 0;
         while let Some(chunk) = stream.next().await {
             let chunk = chunk.map_err(|e| FetchError::Retry(format!("download stream: {e}")))?;
+            written += chunk.len() as u64;
+            if written > MAX_ARTIFACT_BYTES {
+                return Err(too_large());
+            }
             hasher.update(&chunk);
             file.write_all(&chunk)
                 .await
                 .map_err(|e| FetchError::Retry(format!("write temp: {e}")))?;
-            written += chunk.len() as u64;
             progress(FetchProgress::Downloading { written, total });
         }
         file.sync_all()
@@ -299,10 +302,8 @@ mod tests {
         };
         let dest = std::env::temp_dir().join(format!("bnbloc-direct-{}-{tag}", std::process::id()));
         let _ = std::fs::remove_file(&dest);
-        let client = reqwest::Client::new();
         let sha = Sha256Pin::of(pin);
         let result = fetch_verified(
-            &client,
             &access,
             "/v1/artifacts/sha256/k",
             &sha,

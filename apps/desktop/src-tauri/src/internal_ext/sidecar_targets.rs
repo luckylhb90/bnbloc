@@ -1,8 +1,10 @@
 use reqwest::Method;
 use serde_json::Value;
 
-use crate::internal_ext::sidecar_fetch::API_TIMEOUT;
 use crate::internal_ext::Adapter;
+
+/// Bound on one call to a running sidecar's local API.
+const LOCAL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 
 /// A sidecar's sign-in state from the OPTIONAL sidecar-contract endpoint
 /// `GET {localUrl}/v1/auth/status` → `{"authenticated", "user", "checkedAtMs"}`.
@@ -75,7 +77,7 @@ impl Adapter {
         let url = format!("{}{path}", local_url.trim_end_matches('/'));
         let response = crate::internal_ext::loopback::client()?
             .request(method, &url)
-            .timeout(API_TIMEOUT)
+            .timeout(LOCAL_TIMEOUT)
             .send()
             .await
             .map_err(|e| format!("{what} {name}: {e}"))?;
