@@ -15,6 +15,7 @@ import {
   promptPackPayload,
   promptPackProblem,
   promptsFromMessages,
+  roomStarters,
   slashMatches,
   slashQuery,
   slugify,
@@ -135,9 +136,9 @@ eq(promptPackProblem(form), "The name uses lower-case letters, digits and hyphen
 form.name = "writing";
 eq(promptPackProblem(form), "Add at least one prompt", "needs a prompt");
 form.prompts = [
-  { id: "", title: "Notes", body: "Notes for {{audience}}", slash: "/Notes", tags: "Writing, ops", variables: [{ name: "audience", label: "Audience", default: "devs", options: "users\ndevs\n" }] },
-  { id: "", title: "", body: "Second prompt\nline", slash: "", tags: "", variables: [] },
-  { id: "", title: "", body: "", slash: "", tags: "", variables: [] },
+  { id: "", title: "Notes", body: "Notes for {{audience}}", slash: "/Notes", tags: "Writing, ops", variables: [{ name: "audience", label: "Audience", default: "devs", options: "users\ndevs\n" }], starter: true },
+  { id: "", title: "", body: "Second prompt\nline", slash: "", tags: "", variables: [], starter: false },
+  { id: "", title: "", body: "", slash: "", tags: "", variables: [], starter: false },
 ];
 eq(promptPackProblem(form), null, "valid");
 eq(
@@ -146,7 +147,7 @@ eq(
     kind: "prompt",
     name: "writing",
     prompts: [
-      { id: "notes", title: "Notes", body: "Notes for {{audience}}", slash: "/notes", tags: ["writing", "ops"], variables: [{ name: "audience", label: "Audience", default: "devs", options: ["users", "devs"] }] },
+      { id: "notes", title: "Notes", body: "Notes for {{audience}}", slash: "/notes", tags: ["writing", "ops"], variables: [{ name: "audience", label: "Audience", default: "devs", options: ["users", "devs"] }], starter: true },
       { id: "second-prompt", title: "Second prompt", body: "Second prompt\nline" },
     ],
   },
@@ -199,3 +200,18 @@ eq(
 );
 
 console.log("promptPacks tests passed");
+
+// ---- starters: the prompts flagged starter of the room's prompt packs, each pack once, bounded.
+{
+  const starter = prompt("kickoff", { title: "Kick off", starter: true });
+  const other = prompt("other");
+  const roomPack = pack("room-kit", [other, starter]);
+  const skills = { ...pack("skills", [prompt("x", { starter: true })]), kind: "skill" as const };
+  const got = roomStarters([use(skills, "room"), use(roomPack, "room"), use(roomPack, "room")]);
+  eq(got.map((c) => [c.pack, c.prompt.id, c.source]), [["room-kit", "kickoff", "room"]], "room starters");
+  const many = pack("many", Array.from({ length: 9 }, (_, i) => prompt(`p${i}`, { starter: true })));
+  eq(roomStarters([use(many, "room")]).length, 6, "starters are bounded");
+  // The flag round-trips through the form.
+  const back = promptPackPayload(formFromPack(pack("kit", [starter, other])));
+  eq((back.prompts as { starter?: boolean }[]).map((p) => !!p.starter), [true, false], "starter round trip");
+}

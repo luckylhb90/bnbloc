@@ -19,6 +19,8 @@ export interface ContentPrompt {
   readonly variables?: readonly PromptVariable[];
   readonly tags?: readonly string[];
   readonly slash?: string;
+  // Offered among a room's starter prompts when the pack is on for the room.
+  readonly starter?: boolean;
   readonly uses: number;
 }
 
@@ -67,6 +69,29 @@ export function promptChoices(member: readonly ContentUse[], room: readonly Cont
   };
   add(member, "mine");
   add(room, "room");
+  return out;
+}
+
+// MAX_PACK_STARTERS bounds the pack prompts above an empty room's composer.
+export const MAX_PACK_STARTERS = 6;
+
+// roomStarters are the starter prompts of the prompt packs turned on for
+// the room (prompts their author flagged starter), in the room's order,
+// at most MAX_PACK_STARTERS. Callers pass the room's uses only: a member's
+// own packs add no starters, the room's owner chose the room's packs.
+export function roomStarters(room: readonly ContentUse[], limit = MAX_PACK_STARTERS): PromptChoice[] {
+  const out: PromptChoice[] = [];
+  const seen = new Set<string>();
+  for (const u of room) {
+    const c = u.component;
+    if (u.kind !== "prompt" || !c || seen.has(u.componentId)) continue;
+    seen.add(u.componentId);
+    for (const p of c.prompts ?? []) {
+      if (!p.starter) continue;
+      out.push({ prompt: p, componentId: c.id, pack: c.name, packLabel: packLabel(c), version: c.version || c.latestVersion, source: "room" });
+      if (out.length >= limit) return out;
+    }
+  }
   return out;
 }
 
@@ -172,6 +197,8 @@ export interface PromptDraft {
   // Comma or space separated.
   tags: string;
   variables: VariableDraft[];
+  // Offered among the starter prompts of rooms the pack is on for.
+  starter: boolean;
 }
 
 export interface PromptPackForm {
@@ -182,7 +209,7 @@ export interface PromptPackForm {
 }
 
 export function emptyPromptDraft(): PromptDraft {
-  return { id: "", title: "", body: "", slash: "", tags: "", variables: [] };
+  return { id: "", title: "", body: "", slash: "", tags: "", variables: [], starter: false };
 }
 
 export function emptyPromptPackForm(): PromptPackForm {
@@ -236,6 +263,7 @@ export function draftFromPrompt(p: ContentPrompt): PromptDraft {
     slash: p.slash ?? "",
     tags: (p.tags ?? []).join(", "),
     variables: (p.variables ?? []).map((v) => ({ name: v.name, label: v.label ?? "", default: v.default ?? "", options: (v.options ?? []).join("\n") })),
+    starter: !!p.starter,
   };
 }
 
@@ -305,6 +333,7 @@ export function promptPackPayload(f: PromptPackForm): Record<string, unknown> {
       ...(slash ? { slash: `/${slash}` } : {}),
       ...(tags.length > 0 ? { tags } : {}),
       ...(variables.length > 0 ? { variables } : {}),
+      ...(d.starter ? { starter: true } : {}),
     };
   });
   return out;

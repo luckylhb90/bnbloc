@@ -16,6 +16,7 @@ import { announcePromptPacksChanged, promptPacksApi } from "@/lib/promptPacksApi
 import { Button } from "@/ui/Button";
 import { Dialog } from "@/ui/Dialog";
 import { Field, Input, Textarea } from "@/ui/Input";
+import { Switch } from "@/ui/Segment";
 import { Select } from "@/ui/Select";
 import { useToast } from "@/ui/Toast";
 
@@ -49,6 +50,11 @@ function PromptEditor({ draft, onChange, onRemove }: { readonly draft: PromptDra
         onChange={(e) => set({ body: e.target.value, variables: syncVariables(e.target.value, draft.variables) })}
       />
       <Input value={draft.tags} placeholder="Tags, e.g. writing, review" aria-label="Tags" onChange={(e) => set({ tags: e.target.value })} />
+      <Switch
+        checked={draft.starter}
+        onChange={(on) => set({ starter: on })}
+        label="Starter: offered in empty rooms that use this pack"
+      />
       {draft.variables.length > 0 && (
         <div className="flex flex-col gap-2">
           <p className="text-xs font-medium uppercase tracking-wide text-[var(--color-fg-muted)]">Variables</p>

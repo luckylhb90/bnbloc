@@ -627,6 +627,11 @@ export function Composer({
         )}
         {showStarters && !people && (
           <StarterPrompts
+            packStarters={prompts.starters}
+            onPickPack={(c) => {
+              setPeopleOnly(false);
+              prompts.pick(c);
+            }}
             onPick={(prompt) => {
               setText(prompt);
               setPeopleOnly(false);

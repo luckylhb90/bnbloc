@@ -5,6 +5,7 @@ import {
   fillPrompt,
   insertPrompt,
   promptChoices,
+  roomStarters,
   slashMatches,
   slashQuery,
   type PromptChoice,
@@ -15,6 +16,8 @@ import { PROMPT_PACKS_CHANGED, promptPacksApi } from "@/lib/promptPacksApi";
 export interface ComposerPrompts {
   // The prompts of the member's packs and the room's.
   readonly choices: readonly PromptChoice[];
+  // The starter prompts of the room's packs (an empty room's examples).
+  readonly starters: readonly PromptChoice[];
   // The /command menu: its matches (empty when closed) and highlight.
   readonly slashMatches: readonly PromptChoice[];
   readonly active: number;
@@ -46,6 +49,7 @@ export function useComposerPrompts(
   textareaRef: RefObject<HTMLTextAreaElement | null>,
 ): ComposerPrompts {
   const [choices, setChoices] = useState<readonly PromptChoice[]>([]);
+  const [starters, setStarters] = useState<readonly PromptChoice[]>([]);
   const [slash, setSlash] = useState<{ query: string; end: number } | null>(null);
   const [active, setActive] = useState(0);
   const [filling, setFilling] = useState<{ choice: PromptChoice; slashEnd: number | null } | null>(null);
@@ -56,8 +60,17 @@ export function useComposerPrompts(
     let live = true;
     contentApi
       .uses(roomId)
-      .then((r) => live && setChoices(promptChoices(r.member ?? [], r.room ?? [])))
-      .catch(() => live && setChoices([])); // prompts are optional: the composer works without them
+      .then((r) => {
+        if (!live) return;
+        setChoices(promptChoices(r.member ?? [], r.room ?? []));
+        setStarters(roomStarters(r.room ?? []));
+      })
+      .catch(() => {
+        // prompts are optional: the composer works without them
+        if (!live) return;
+        setChoices([]);
+        setStarters([]);
+      });
     return () => {
       live = false;
     };
@@ -133,6 +146,7 @@ export function useComposerPrompts(
 
   return {
     choices,
+    starters,
     slashMatches: matches,
     active: highlighted,
     setActive,
