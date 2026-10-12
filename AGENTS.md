@@ -321,8 +321,18 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
 - **A new service that reads `X-Bnbloc-User` MUST wrap its handler in
   `svcauth.Middleware(svcauth.KeyFromEnv(), h)`** in its `cmd/main.go`, and its
   compose entry needs `BNBLOC_INTERNAL_KEY`. A service doing room-membership
-  checks also needs `BNBLOC_ROOM_BASE_URL` + a `room` dependency, or
-  `membershipFor` falls back to deny-all `NewStatic()` (symptom: owner gets 403).
+  checks also needs `BNBLOC_ROOM_BASE_URL` + a `room` dependency.
+- **Every service builds its directory with `membership.FromEnv`** (the room
+  service's client; unset `BNBLOC_ROOM_BASE_URL` is fatal in production, an
+  announced empty directory that refuses every member in development; never
+  a hand-built client or static set: `TestNoMembershipFailOpen`). Realtime
+  room routes resolve room, caller and membership only through `s.room` /
+  `s.streamRoom` / `s.roomCaller` (`TestRoomPreambleOwned`). A person gains
+  a membership only through `addMember` or `redeemInvite` (room_create.go),
+  which announce `member_joined` (`TestJoinsAnnounced`). Whether an agent
+  may read or write a channel is `store.ChannelAdmitsAgents` (fail closed),
+  checked by every agent ingest, the handoff import and activity before it
+  stores a reply included (`TestPeopleChatRuleOwned`).
 - **Room membership has one owner: `internal/membership`.** A backend checks
   a request with `membership.RoomScope(ctx, dir, room, user, need)`: fail
   closed (a nil directory refuses), in the room's own tenant (the room
@@ -651,6 +661,17 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
 
 ### Realtime / SSE
 
+- **Room event kinds are registered in `wire.RoomEventKinds`** (durable,
+  replay, revocation, channel-scoped). Persistence, sequencing, replay,
+  metric labels and stream revocation read it, and the web generates its
+  kinds from it. Name the wire constant, never a literal
+  (`TestEventKindsRegistered`). The hub replays only replay kinds (the
+  durable two), so a reconnect never re-delivers a toast, badge, typing hint
+  or stale state (`TestTransientKindsAreNotReplayed`). Read a payload with
+  `wire.DecodePayload[T]` (`ChatMessagePayload`, `AgentMessagesPayload`, …),
+  never by type-asserting `ev.Payload`. Realtime publishes through
+  `s.publish` only, which runs the plugin, notification and member-join
+  taps (`TestOnePublishPath`).
 - **The room SSE stream needs a heartbeat.** An idle room with no events sends
   no bytes; the browser `EventSource` / proxies drop the connection on their
   read-idle timeout, the client reconnects (churning presence join/leave), and
@@ -961,7 +982,9 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
 - **Someone else's content declaring `scripts` or `mcp.stdio` forces a
   sandboxed drive** (`decideSandbox`), refused where no sandbox can take it.
 - **Work on behalf of a running job** (dispatch, content resolution, bundle
-  grants) is checked with `store.JobLeasedBy`.
+  grants, a team plan) goes through `store.LoadLeasedJob` and its one status
+  mapping `store.LeasedJobStatus` (404 not in the room, 409 not running, 403
+  another member's bridge, 500 a store error).
 - **Agents dispatch agents only through the room tools, as the job's human
   requester.** `services/bridge/roomtools` is a loopback MCP server, one
   bearer per driven session (constant-time compared, bound to the turn's job
@@ -1006,9 +1029,14 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   `contentuse` (`Effective.team`); member agents staffed only by
   `internal/expertteam` (`POST /v1/rooms/{id}/team-plan`), never on the lead's
   own agent. Team guards (roles, `wire.MaxTeamFailures`, timeout notices,
-  `post_progress`) live in the room tools, never in instructions alone. Job
-  notice lines go under `job-<id>…` activity sessions with `payload.notice`,
-  never a real agent session.
+  `post_progress`) live in the room tools, never in instructions alone.
+- **Every notice line is built by `wire.JobNotice`** (bridge, activity, room
+  tools): it carries `payload.notice`, the job tags and the job's
+  `job-<id>…` notice session, never a real agent session
+  (`TestNoticesCarryKind`). A failed job's member-facing sentence is
+  `store.AgentJobFailureReason.Text`. A share's notification is
+  `contentshare.Announce` (one dedup key per member and version), from the
+  gateway and realtime alike.
 - **MCP servers come only from MCP tool components**
   (`bnbloc.mcp.package/v1`, platform-signed); content names a tool in
   `requires.mcp`, never a command or URL. The desktop downloads stdio tool

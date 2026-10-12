@@ -370,6 +370,26 @@ desktop agent.
   "not configured" answer moved over; blob failures map once; the web reads
   only `{"error"}`. Tests: `TestNoSilent5xx` (obs.ServerError only),
   `TestErrorStatusesThroughWriteStatus`, `TestOneErrorBodyOwner`.
+- **Status 2.4: landed.** `membership.FromEnv` (every service and the
+  gateway), realtime's `s.room`/`s.streamRoom`/`s.roomCaller` preamble, one
+  join path (`addMember`, `redeemInvite`), `store.ChannelAdmitsAgents` (the
+  handoff import and activity refuse agent replies in the people chat),
+  `store.LoadLeasedJob` + `LeasedJobStatus` (activity's team plan now
+  answers 409 for a job that is not running, like the other callers). svc
+  M18 (the signed org role) landed with 2.2. Tests: `TestFromEnv`,
+  `TestRoomPreambleOwned`, `TestJoinsAnnounced`, `TestPeopleChatRuleOwned`,
+  `TestLoadLeasedJobStatuses`, `TestNoMembershipFailOpen` extended.
+- **Status 2.5: landed.** `wire.RoomEventKinds` (the hub replays only replay
+  kinds; metric labels and `PersistedFeedKind` derive from it), typed
+  payloads + `DecodePayload`, `wire.JobNotice` for every notice writer (the
+  bridge's readers stay with Batch 3), `contentshare.Announce`, one
+  `Service.publish`. Deviation: the failure sentence is
+  `store.AgentJobFailureReason.Text`, not `wire.FailureText` (wire cannot
+  import the store's reason type); the audit helper landed with the 2.6
+  work (`internal/audit.Record`). Tests: `TestEventKindsRegistered`,
+  `TestTransientKindsAreNotReplayed`, `TestNoticesCarryKind`,
+  `TestEventPayloadsDecodedOnce`, `TestFailureTextOwned`,
+  `TestShareAnnouncedOnlyHere`, `TestOnePublishPath`.
 - **Status 2.6: landed.** `store.Grant.Live` plus shareagent's
   `usableGrant`, one admission rule (`admitReservation`), `RaiseRunQuota`
   refusing an expired grant; `extpipe.MemberVisibilityWith` and
