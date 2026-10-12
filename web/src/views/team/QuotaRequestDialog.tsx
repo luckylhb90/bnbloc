@@ -7,6 +7,7 @@ import { useToast } from "@/ui/Toast";
 import { useDisplayName } from "@/lib/useDisplayName";
 import { formatAgentHandle } from "@/lib/displayNames";
 import { errorText } from "@/lib/errors";
+import { refreshQuotaRequests } from "@/lib/queries";
 
 const MAX_NOTE = 500;
 
@@ -42,6 +43,7 @@ export function QuotaRequestDialog({
     setBusy(true);
     try {
       await api.createQuotaRequest({ roomId, owner, provider, requestedRuns: runsValue, note: note.trim() });
+      refreshQuotaRequests();
       toast.success(`Asked ${ownerName} for more runs`);
       onClose();
     } catch (e) {

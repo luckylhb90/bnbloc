@@ -15,6 +15,7 @@ import {
 } from "@phosphor-icons/react";
 import { api, type RoomSummary } from "@/lib/api";
 import { useActingTenant } from "@/lib/session";
+import { useTenants } from "@/lib/queries";
 import { useAuth } from "@/lib/auth";
 import { cn } from "@/lib/cn";
 import { useStage } from "@/lib/capability";
@@ -87,7 +88,8 @@ export function Shell({
   // Super-admin global tenant switch: the tenant the whole session acts as
   // (lib/session.ts owns it; switching reloads so every view re-fetches under
   // the new scope).
-  const { acting, tenants, switchTo: switchActingTenant } = useActingTenant(isSuper);
+  const { acting, switchTo: switchActingTenant } = useActingTenant(isSuper);
+  const tenants = useTenants(isSuper).data ?? [];
 
   // Ordinary members of multiple orgs get a workspace switcher too. Unlike the
   // super-admin path (a header overlay), this re-issues the session token for

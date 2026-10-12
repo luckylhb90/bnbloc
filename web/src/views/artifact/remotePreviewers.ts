@@ -6,6 +6,7 @@ import {
   type PreviewerDescriptor,
 } from "@/lib/previewerFrame";
 import { registerArtifactViewer, unregisterArtifactViewer } from "./registry";
+import { visiblePoll } from "@/lib/useVisiblePoll";
 
 // Installed previewer components in the viewer registry. The member catalog
 // (GET /v1/components?kind=previewer — rollout + tenant gated server-side) is
@@ -88,9 +89,9 @@ export async function freshPreviewer(name: string, nowMs = Date.now()): Promise<
 export function startPreviewerSync(): () => void {
   const tick = () => void syncInstalledPreviewers().catch(() => {});
   tick();
-  const timer = window.setInterval(tick, SYNC_INTERVAL_MS);
+  const stop = visiblePoll(tick, SYNC_INTERVAL_MS);
   return () => {
-    window.clearInterval(timer);
+    stop();
     for (const name of [...installed.keys()]) {
       installed.delete(name);
       unregisterArtifactViewer(previewerViewerId(name));

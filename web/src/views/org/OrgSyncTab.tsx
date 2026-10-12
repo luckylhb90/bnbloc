@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { Select } from "@/ui/Select";
 import { ArrowDownIcon, ArrowUpIcon, PlusIcon, TrashIcon } from "@phosphor-icons/react";
-import { api, type PlatformTenant } from "@/lib/api";
 import {
   describeChange,
   matchKind,
@@ -16,6 +15,7 @@ import { ErrorBox } from "@/ui/ErrorBox";
 import { useToast } from "@/ui/Toast";
 import { UserName } from "@/views/UserName";
 import { errorText } from "@/lib/errors";
+import { useTenants } from "@/lib/queries";
 
 // Platform super-admin: organization sync. Rules map the groups, department
 // or email domain an auth provider asserts at sign-in onto a tenant
@@ -66,7 +66,7 @@ function splitList(v: string): string[] {
 export function OrgSyncTab() {
   const toast = useToast();
   const [rows, setRows] = useState<Row[] | null>(null);
-  const [tenants, setTenants] = useState<PlatformTenant[]>([]);
+  const tenants = useTenants().data ?? [];
   const [meta, setMeta] = useState<{ updatedAtMs?: number; updatedBy?: string }>({});
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
@@ -74,10 +74,9 @@ export function OrgSyncTab() {
   const load = useCallback(async () => {
     setError(null);
     try {
-      const [set, t] = await Promise.all([orgSyncApi.rules(), api.listTenants()]);
+      const set = await orgSyncApi.rules();
       setRows(set.rules.map(toRow));
       setMeta({ updatedAtMs: set.updatedAtMs, updatedBy: set.updatedBy });
-      setTenants(t.tenants ?? []);
     } catch (e) {
       setError(errorText(e, "failed to load org sync rules"));
     }

@@ -1,6 +1,6 @@
 import { useState } from "react";
-import { api, type PlatformTenant } from "@/lib/api";
-import { useQuery } from "@/lib/useQuery";
+import { api } from "@/lib/api";
+import { refreshTenants, useTenants } from "@/lib/queries";
 import { cn } from "@/lib/cn";
 import { ErrorBox } from "@/ui/ErrorBox";
 import { errorText } from "@/lib/errors";
@@ -8,33 +8,20 @@ import { errorText } from "@/lib/errors";
 // Platform super-admin: the cross-tenant registry (split from
 // Organization.tsx).
 export function TenantsTab() {
-  const {
-    data: tenants,
-    error: loadError,
-    refetch,
-  } = useQuery<PlatformTenant[]>("platform/tenants", async () => {
-    const { tenants } = await api.listTenants();
-    return tenants ?? [];
-  });
+  const { data: tenants, error: loadError } = useTenants();
   const [mutError, setMutError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [newId, setNewId] = useState("");
   const [newName, setNewName] = useState("");
 
-  const error =
-    mutError ??
-    (loadError instanceof Error
-      ? loadError.message
-      : loadError
-        ? "failed to load tenants"
-        : null);
+  const error = mutError ?? (loadError ? errorText(loadError, "failed to load tenants") : null);
 
   const run = async (key: string, fn: () => Promise<unknown>, failMsg: string) => {
     setBusy(key);
     setMutError(null);
     try {
       await fn();
-      refetch();
+      refreshTenants();
     } catch (e) {
       setMutError(errorText(e, failMsg));
     } finally {

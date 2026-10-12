@@ -10,6 +10,7 @@ import {
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { useActingTenant } from "@/lib/session";
+import { useTenants } from "@/lib/queries";
 import { cn } from "@/lib/cn";
 import { PlatformComponents } from "@/views/PlatformComponents";
 import { PlatformReleases } from "@/views/PlatformReleases";
@@ -79,7 +80,8 @@ export function Organization() {
   // The tenant this console administers is the one the session acts in: a
   // super-admin's acting tenant (lib/session.ts, sent on every request), else
   // the session's own. The picker below switches the same acting tenant.
-  const { acting, tenants, switchTo } = useActingTenant(isSuper);
+  const { acting, switchTo } = useActingTenant(isSuper);
+  const tenants = useTenants(isSuper).data ?? [];
   const activeTenant = acting ?? tenant ?? undefined;
 
   return (

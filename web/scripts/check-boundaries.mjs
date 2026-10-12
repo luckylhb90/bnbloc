@@ -80,6 +80,26 @@ export const RULES = [
     sample: { file: "views/X.tsx", text: "<ActorLabel actor={`${job.ownerUserId}/${job.provider}`} />" },
   },
   {
+    id: 5,
+    name: "polling goes through lib/useVisiblePoll.ts (paused while the page is hidden)",
+    // Polls ran every 2 s in a background tab (web M9). The exceptions are
+    // deliberate: Shell's unread poll raises notifications while hidden, the
+    // typing prune is a local timer, the update watcher follows the policy's
+    // own interval.
+    pattern: /setInterval\(/,
+    allowed: ["lib/useVisiblePoll.ts", "views/Shell.tsx", "lib/useRoomStream.ts", "views/DesktopUpdateWatcher.tsx"],
+    sample: { file: "views/X.tsx", text: "const timer = window.setInterval(() => void load(), 2000);" },
+  },
+  {
+    id: "M10",
+    name: "a cached query is keyed by queryKey / publicQueryKey (member, tenant, gateway)",
+    // Hand-made keys missed the tenant, so a cached answer crossed a tenant
+    // switch or a sign-out (web M10).
+    pattern: /useQuery(?:<[^>]*>)?\(\s*(?:["'`]|subject\b)/,
+    allowed: ["lib/useQuery.ts"],
+    sample: { file: "views/X.tsx", text: "const q = useQuery(subject ? `my-agents:${subject}` : null, api.myAgents);" },
+  },
+  {
     id: 6,
     name: "the session token rides a URL only on the room event stream",
     // EventSource cannot set headers, so sse.ts passes the session as

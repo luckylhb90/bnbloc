@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { cn } from "@/lib/cn";
 import {
@@ -28,6 +27,7 @@ import { useToast } from "@/ui/Toast";
 import { PlatformAgentsUsagePanel } from "@/views/org/PlatformAgentsUsage";
 import { UserName } from "@/views/UserName";
 import { errorText } from "@/lib/errors";
+import { useMyAgents } from "@/lib/queries";
 
 const EMPTY_ENTRY: PlatformAgentsPolicyInput = { enabled: false, agents: [] };
 
@@ -45,7 +45,17 @@ export function PlatformAgentsCard() {
   const { subject } = useAuth();
   const toast = useToast();
   const [policy, setPolicy] = useState<PlatformAgentsPolicy | null>(null);
-  const [mine, setMine] = useState<ConsoleOwnAgent[]>([]);
+  const my = useMyAgents();
+  const mine: ConsoleOwnAgent[] = useMemo(
+    () =>
+      (my.data?.agents ?? []).map((a) => ({
+        core: a.core,
+        provider: a.provider,
+        online: a.online,
+        models: a.modelOptions?.models ?? [],
+      })),
+    [my.data],
+  );
   const [draft, setDraft] = useState<PlatformAgentsPolicyInput>(EMPTY_ENTRY);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -53,16 +63,8 @@ export function PlatformAgentsCard() {
   const load = useCallback(async () => {
     setError(null);
     try {
-      const [p, my] = await Promise.all([platformAgentsApi.policy(), api.myAgents().catch(() => ({ agents: [] }))]);
+      const p = await platformAgentsApi.policy();
       setPolicy(p);
-      setMine(
-        (my.agents ?? []).map((a) => ({
-          core: a.core,
-          provider: a.provider,
-          online: a.online,
-          models: a.modelOptions?.models ?? [],
-        })),
-      );
       setDraft(entryOf(p, subject));
     } catch (e) {
       setError(errorText(e, "Could not load platform agents"));

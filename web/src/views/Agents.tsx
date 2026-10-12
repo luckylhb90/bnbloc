@@ -34,6 +34,7 @@ import { ReleaseDownloadButton } from "@/views/ReleaseDownloadButton";
 import { PlatformAgentsHint } from "@/views/PlatformAgentsHint";
 import { EmailInput } from "@/views/UserName";
 import { errorText } from "@/lib/errors";
+import { refreshMyAgents, useMyAgents } from "@/lib/queries";
 
 // Agents is the single page for everything about the agents this workspace can
 // drive. It replaces the former split between the read-only "Agent cores" page
@@ -86,6 +87,17 @@ export function Agents() {
   // Desktop-managed sidecars: live, shared state (re-lists agents as soon as a
   // core finishes starting; see useSidecarAgents).
   const sidecars = useSidecarAgents(shell);
+  // Browser: the member's own bridge-advertised agents (the rows the desktop
+  // app renders — one data source, one layout).
+  const myAgents = useMyAgents(!shell);
+  const myAgentProviders = useMemo(() => {
+    const byCore: Record<string, string[]> = {};
+    for (const a of myAgents.data?.agents ?? []) {
+      const list = (byCore[a.core] ||= []);
+      if (!list.includes(a.provider)) list.push(a.provider);
+    }
+    return byCore;
+  }, [myAgents.data]);
   const adapterStatus = useMemo(() => sidecars.entries.map((e) => e.status), [sidecars.entries]);
   const [scan, setScan] = useState<"loading" | "ok" | "error">("loading");
   const [knownCores, setKnownCores] = useState<string[]>([]);
@@ -104,15 +116,6 @@ export function Agents() {
         const list = (byCore[t.core] ||= []);
         if (!list.includes(t.provider)) list.push(t.provider);
       }
-      if (!shell) {
-        // Browser: the member's own bridge-advertised agents (same rows the
-        // desktop app renders — one data source, one layout).
-        const mine = await api.myAgents().catch(() => ({ agents: [] as { core: string; provider: string }[] }));
-        for (const a of mine.agents || []) {
-          const list = (byCore[a.core] ||= []);
-          if (!list.includes(a.provider)) list.push(a.provider);
-        }
-      }
       setGatewayProviders(byCore);
       setScan("ok");
     } catch {
@@ -129,19 +132,20 @@ export function Agents() {
   const rescan = () => {
     void scanAgents();
     sidecarAgents.refresh();
+    if (!shell) refreshMyAgents();
   };
 
   // Gateway-listed providers plus what the running managed sidecars list.
   const providers = useMemo(() => {
     const merged: Record<string, string[]> = {};
-    for (const src of [gatewayProviders, sidecarProviders(sidecars.entries)]) {
+    for (const src of [gatewayProviders, sidecarProviders(sidecars.entries), myAgentProviders]) {
       for (const [core, list] of Object.entries(src)) {
         const into = (merged[core] ||= []);
         for (const p of list) if (!into.includes(p)) into.push(p);
       }
     }
     return merged;
-  }, [gatewayProviders, sidecars.entries]);
+  }, [gatewayProviders, sidecars.entries, myAgentProviders]);
   const sidecarView = (name: string): SidecarCoreView | null =>
     sidecarCoreView(sidecars.entries.find((e) => e.status.name === name && isCore(e.status)));
 

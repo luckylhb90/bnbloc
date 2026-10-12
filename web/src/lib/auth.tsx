@@ -21,6 +21,8 @@ import {
 } from "@/lib/sessionGrant";
 import { takeDesktopSsoNonce } from "@/lib/desktop";
 import { forgetBrowserPush } from "@/lib/webPush";
+import { clearQueryCache } from "@/lib/useQuery";
+import { forgetLocalAgent } from "@/lib/useLocalAgent";
 
 interface AuthState {
   subject: string | null;
@@ -177,12 +179,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     });
     // Rooms/agents/RBAC are all scoped to the token's tenant; reload so every
     // view re-fetches under the new scope instead of showing stale data.
+    clearQueryCache();
     window.location.reload();
   }, []);
 
   const logout = useCallback(() => {
     const refreshToken = storedSession()?.refreshToken;
     clearActingTenant();
+    // The next member never reads this one's cached answers.
+    clearQueryCache();
+    forgetLocalAgent();
     setToken(null);
     setSubject(null);
     setTenant(null);

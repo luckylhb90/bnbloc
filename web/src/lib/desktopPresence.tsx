@@ -6,6 +6,8 @@ import { isPhoneBrowser } from "@/lib/desktopHandoff";
 import { afterReleaseDownload } from "@/lib/macInstall";
 import { useDesktopDownload } from "@/lib/useDesktopDownload";
 import { errorText } from "./errors.ts";
+import { useMyAgents } from "./queries";
+import { useVisiblePoll } from "./useVisiblePoll";
 
 // How often a browser re-checks whether the member's desktop bridge is online,
 // and the re-checks after "Open desktop app" (the app needs a few seconds to
@@ -68,61 +70,43 @@ export function useDesktopPresence(): DesktopPresence {
 export function DesktopPresenceProvider({ subject, children }: { readonly subject: string | null; readonly children: ReactNode }) {
   const applicable =
     !!subject && !inDesktopShell() && !isPhoneBrowser(typeof navigator === "undefined" ? "" : navigator.userAgent);
-  const [ownAgents, setOwnAgents] = useState<readonly { online: boolean }[] | undefined>();
-  const [desktop, setDesktop] = useState<{ online: boolean; lastSeenAtMs: number } | undefined>();
-  const [checking, setChecking] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  // The one /v1/my/agents query (lib/queries.ts), polled while the page is
+  // visible: the agents surfaces read the same answer.
+  const my = useMyAgents(applicable);
+  const { refetch } = my;
+  useVisiblePoll(() => void refetch(), POLL_MS, applicable);
+  const desktop = my.data?.desktop;
+  const connected = !!desktop?.online;
   const [openPending, setOpenPending] = useState(false);
+  // The last check after "Open desktop app" answered (judged against the
+  // answer it brought, in the effect below).
+  const [openWaitOver, setOpenWaitOver] = useState(false);
   const [openFailed, setOpenFailed] = useState(false);
   const [downloading, setDownloading] = useState(false);
+  const [downloadError, setDownloadError] = useState<string | null>(null);
   const desktopDownload = useDesktopDownload();
-  const generation = useRef(0);
   const timers = useRef<number[]>([]);
-
-  const check = useCallback(async (): Promise<boolean | undefined> => {
-    const mine = ++generation.current;
-    setChecking(true);
-    try {
-      const { agents, desktop: app } = await api.myAgents();
-      if (mine !== generation.current) return undefined;
-      setOwnAgents(agents ?? []);
-      setDesktop(app ?? { online: false, lastSeenAtMs: 0 });
-      setError(null);
-      return !!app?.online;
-    } catch (failure) {
-      if (mine !== generation.current) return undefined;
-      setError(errorText(failure, "Could not check the desktop connection"));
-      return undefined;
-    } finally {
-      if (mine === generation.current) setChecking(false);
-    }
-  }, []);
 
   const clearTimers = useCallback(() => {
     for (const t of timers.current) window.clearTimeout(t);
     timers.current = [];
   }, []);
-
   useEffect(() => {
-    setOwnAgents(undefined);
-    setDesktop(undefined);
     setOpenFailed(false);
-    if (!applicable) return;
-    void check();
-    const poll = window.setInterval(() => void check(), POLL_MS);
-    const onVisible = () => {
-      if (document.visibilityState === "visible") void check();
-    };
-    document.addEventListener("visibilitychange", onVisible);
-    window.addEventListener("focus", onVisible);
-    return () => {
-      generation.current += 1;
-      window.clearInterval(poll);
-      document.removeEventListener("visibilitychange", onVisible);
-      window.removeEventListener("focus", onVisible);
+    return clearTimers;
+  }, [applicable, subject, clearTimers]);
+  // The app came online: whatever "Open desktop app" was waiting for is done.
+  // Still offline after the last check: most likely not installed.
+  useEffect(() => {
+    if (connected) {
       clearTimers();
-    };
-  }, [applicable, check, clearTimers, subject]);
+      setOpenPending(false);
+    } else if (openWaitOver) {
+      setOpenPending(false);
+      setOpenFailed(true);
+    }
+    setOpenWaitOver(false);
+  }, [connected, openWaitOver, clearTimers]);
 
   const open = useCallback(() => {
     void openExternal("bnbloc://open");
@@ -132,57 +116,51 @@ export function DesktopPresenceProvider({ subject, children }: { readonly subjec
     OPEN_RECHECKS_MS.forEach((delay, i) => {
       timers.current.push(
         window.setTimeout(() => {
-          void check().then((online) => {
-            if (online) {
-              clearTimers();
-              setOpenPending(false);
-            } else if (i === OPEN_RECHECKS_MS.length - 1) {
-              setOpenPending(false);
-              setOpenFailed(true);
-            }
+          void refetch().then(() => {
+            if (i === OPEN_RECHECKS_MS.length - 1) setOpenWaitOver(true);
           });
         }, delay),
       );
     });
-  }, [check, clearTimers]);
+  }, [refetch, clearTimers]);
 
   const download = useCallback(async () => {
     const file = desktopDownload.file;
     if (!file) return;
     setDownloading(true);
-    setError(null);
+    setDownloadError(null);
     try {
       await api.downloadReleaseFile(file);
       afterReleaseDownload(file);
     } catch (failure) {
-      setError(errorText(failure, "Could not download the desktop app"));
+      setDownloadError(errorText(failure, "Could not download the desktop app"));
     } finally {
       setDownloading(false);
     }
   }, [desktopDownload.file]);
 
-  const connected = !!desktop?.online;
   const installed = desktop === undefined ? undefined : desktop.lastSeenAtMs > 0;
+  const error = downloadError ?? (my.error ? errorText(my.error, "Could not check the desktop connection") : null);
   const value = useMemo<DesktopPresence>(
     () =>
       applicable
         ? {
             applicable,
-            ownAgents,
+            ownAgents: my.data?.agents,
             connected,
             disconnected: desktop !== undefined && !connected,
             installed,
-            checking: checking || openPending,
+            checking: my.fetching || openPending,
             error,
             openFailed: openFailed && !connected,
             file: desktopDownload.file,
             downloading,
             open,
             download: () => void download(),
-            check: () => void check(),
+            check: () => void refetch(),
           }
         : inactive,
-    [applicable, ownAgents, connected, installed, checking, openPending, error, openFailed, desktopDownload.file, downloading, open, download, check],
+    [applicable, my.data, my.fetching, connected, installed, openPending, error, openFailed, desktopDownload.file, downloading, open, download, refetch],
   );
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

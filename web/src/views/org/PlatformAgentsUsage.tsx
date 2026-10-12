@@ -4,7 +4,7 @@ import { useAuth } from "@/lib/auth";
 import { compactNumber, exactTime, formatUsd, relativeTime } from "@/lib/format";
 import { platformAgentsApi } from "@/lib/platformAgentsApi";
 import { roomLabel, runModelLabel, usageSummary, usageTiles, type PlatformUsageTotals } from "@/lib/platformUsage";
-import { useQuery } from "@/lib/useQuery";
+import { queryKey, useQuery } from "@/lib/useQuery";
 import { Button } from "@/ui/Button";
 import { ErrorBox } from "@/ui/ErrorBox";
 import { UserName } from "@/views/UserName";
@@ -15,8 +15,8 @@ import { errorText } from "@/lib/errors";
 // members, top rooms and recent runs. Cost is what the bridges report (0 for
 // unpriced/trial models).
 export function PlatformAgentsUsagePanel() {
-  const { subject } = useAuth();
-  const query = useQuery(subject ? `platform-agents-usage:${subject}` : null, platformAgentsApi.usage, {
+  const { subject, tenant } = useAuth();
+  const query = useQuery(queryKey("platform-agents-usage", { subject, tenant }), platformAgentsApi.usage, {
     staleMs: 30_000,
   });
   const usage = query.data;

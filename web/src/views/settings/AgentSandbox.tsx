@@ -7,6 +7,7 @@ import { Card } from "@/ui/Card";
 import { Segment } from "@/ui/Segment";
 import { useToast } from "@/ui/Toast";
 import { errorText } from "@/lib/errors";
+import { useVisiblePoll } from "@/lib/useVisiblePoll";
 
 const TONE_CLASS = {
   muted: "text-[var(--color-fg-subtle)]",
@@ -39,11 +40,9 @@ export function AgentSandbox() {
   // Poll faster while the VM is coming up.
   const settling = status?.state === "starting" || status?.state === "installing";
   useEffect(() => {
-    if (!inShell) return;
-    void load();
-    const timer = window.setInterval(() => void load(), settling ? 2000 : 10000);
-    return () => window.clearInterval(timer);
-  }, [inShell, load, settling]);
+    if (inShell) void load();
+  }, [inShell, load]);
+  useVisiblePoll(() => void load(), settling ? 2000 : 10000, inShell);
 
   if (!inShell) return null;
 

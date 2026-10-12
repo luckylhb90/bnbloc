@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useState } from "react";
+import { useMemo, useState } from "react";
 import { CheckIcon, XIcon } from "@phosphor-icons/react";
 import { api } from "@/lib/api";
 import { relativeTime } from "@/lib/format";
 import { sortQuotaRequests, type QuotaRequest } from "@/lib/teamDashboard";
 import { useVisiblePoll } from "@/lib/useVisiblePoll";
+import { refreshQuotaRequests, useQuotaRequests } from "@/lib/queries";
 import { Badge } from "@/ui/Card";
 import { Button } from "@/ui/Button";
 import { Input } from "@/ui/Input";
@@ -39,24 +40,14 @@ export function QuotaRequestsPanel({
   readonly onChanged?: () => void;
 }) {
   const toast = useToast();
-  const [requests, setRequests] = useState<QuotaRequest[] | null>(null);
-  const [failed, setFailed] = useState(false);
+  const query = useQuotaRequests(role, { roomId, pendingOnly });
+  const requests = useMemo(() => (query.data ? sortQuotaRequests(query.data) : null), [query.data]);
+  const failed = !!query.error;
   const [busy, setBusy] = useState("");
   // requestId -> runs the owner will grant (defaults to the requested amount).
   const [grant, setGrant] = useState<Record<string, string>>({});
 
-  const load = useCallback(() => {
-    api
-      .quotaRequests(role, { roomId, status: pendingOnly ? "pending" : undefined })
-      .then((r) => {
-        setRequests(sortQuotaRequests(r.requests ?? []));
-        setFailed(false);
-      })
-      .catch(() => setFailed(true));
-  }, [role, roomId, pendingOnly]);
-
-  useEffect(load, [load]);
-  useVisiblePoll(load, POLL_MS);
+  useVisiblePoll(() => void query.refetch(), POLL_MS);
 
   const decide = async (req: QuotaRequest, approve: boolean) => {
     setBusy(req.requestId);
@@ -77,11 +68,11 @@ export function QuotaRequestsPanel({
         await api.declineQuotaRequest(req.requestId);
         toast.info(`Declined ${displayNameOf(req.requester)}'s request`);
       }
-      load();
+      refreshQuotaRequests();
       onChanged?.();
     } catch (e) {
       toast.error(errorText(e, "Could not update the request"));
-      load();
+      refreshQuotaRequests();
     } finally {
       setBusy("");
     }
@@ -155,14 +146,7 @@ export function QuotaRequestsPanel({
 // usePendingQuotaCount polls how many requests await the signed-in owner
 // (optionally in one room), for the badge on the borrow-authorization icon.
 export function usePendingQuotaCount(roomId?: string): { count: number; refresh: () => void } {
-  const [count, setCount] = useState(0);
-  const refresh = useCallback(() => {
-    api
-      .quotaRequests("owner", { status: "pending", roomId })
-      .then((r) => setCount((r.requests ?? []).length))
-      .catch(() => {});
-  }, [roomId]);
-  useEffect(refresh, [refresh]);
-  useVisiblePoll(refresh, POLL_MS);
-  return { count, refresh };
+  const query = useQuotaRequests("owner", { roomId, pendingOnly: true });
+  useVisiblePoll(() => void query.refetch(), POLL_MS);
+  return { count: query.data?.length ?? 0, refresh: refreshQuotaRequests };
 }

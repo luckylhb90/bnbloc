@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { api, type AgentTarget } from "@/lib/api";
+import { useCallback, useEffect, useMemo, useSyncExternalStore } from "react";
+import { api, type AgentTarget, type Core } from "@/lib/api";
 import { desktop, type DesktopSettings } from "@/lib/desktop";
 import { sidecarsPending, sidecarTargets } from "@/lib/sidecarState";
 import { sidecarAgents, useSidecarAgents } from "@/lib/useSidecarAgents";
@@ -11,14 +11,14 @@ const LS_TARGET = "bnbloc.agentTarget";
 export interface LocalAgent {
   url: string;
   token: string;
-  targets: AgentTarget[];
+  targets: readonly AgentTarget[];
   target: string; // selected agent target id (core-qualified "<core>/<rawid>")
   core: string; // core of the selected target (derived from the target list)
   detected: boolean | null;
   // coreStatus is the gateway's view of every registered core and whether it
   // resolved a reachable endpoint (from GET /v1/cores). It is the production-safe
   // availability signal, unlike the dev-gated discover probe.
-  coreStatus: { name: string; available: boolean }[];
+  coreStatus: readonly Core[];
   // anyCoreAvailable is true when the gateway reports at least one reachable
   // core, so the UI can distinguish "no core connected" from "core up, no agents
   // enabled yet".
@@ -43,51 +43,86 @@ export interface LocalAgent {
   reload: () => void;
 }
 
-// useLocalAgent centralizes local-agent-core discovery, target listing, the
-// selected target, and persisted manual address — shared by the composer's
-// agent picker and the run-agent dialog. A saved manual URL wins over discovery.
-// Desktop-managed sidecar targets come from the shared live sidecar store, so
-// they appear as soon as a sidecar finishes starting (no one-shot scan).
-export function useLocalAgent(active: boolean): LocalAgent {
-  const [url, setUrl] = useState(() => localStorage.getItem(LS_URL) || "");
-  const [token, setToken] = useState(() => localStorage.getItem(LS_TOKEN) || "");
-  const [gatewayTargets, setGatewayTargets] = useState<AgentTarget[]>([]);
-  const [loaded, setLoaded] = useState(false);
-  const [settings, setSettings] = useState<DesktopSettings | null>(null);
-  const [target, setTargetState] = useState(
-    () => localStorage.getItem(LS_TARGET) || "",
-  );
-  const [coreStatus, setCoreStatus] = useState<
-    { name: string; available: boolean }[]
-  >([]);
-  const [devDiscovery, setDevDiscovery] = useState(false);
-  const sidecars = useSidecarAgents(active);
+// The local-agent state is one module store (web M5): every useLocalAgent
+// (room view, my rooms, the run dialog, the people chat) reads the same
+// answer, one load serves them all, and a selection made in one is the
+// selection of every other.
+interface LocalAgentState {
+  readonly url: string;
+  readonly token: string;
+  readonly gatewayTargets: readonly AgentTarget[];
+  readonly loaded: boolean;
+  readonly settings: DesktopSettings | null;
+  readonly target: string;
+  readonly coreStatus: readonly Core[];
+  readonly devDiscovery: boolean;
+}
 
-  const setTarget = useCallback((id: string) => {
-    setTargetState(id);
-    if (id) localStorage.setItem(LS_TARGET, id);
-    else localStorage.removeItem(LS_TARGET);
-  }, []);
+let state: LocalAgentState = {
+  url: readStored(LS_URL),
+  token: readStored(LS_TOKEN),
+  gatewayTargets: [],
+  loaded: false,
+  settings: null,
+  target: readStored(LS_TARGET),
+  coreStatus: [],
+  devDiscovery: false,
+};
+let loading: Promise<void> | null = null;
+const listeners = new Set<() => void>();
 
-  const load = useCallback(async () => {
-    setLoaded(false);
-    let u = localStorage.getItem(LS_URL) || "";
-    let t = localStorage.getItem(LS_TOKEN) || "";
+function readStored(key: string): string {
+  try {
+    return localStorage.getItem(key) || "";
+  } catch {
+    return "";
+  }
+}
 
+function writeStored(key: string, value: string): void {
+  try {
+    if (value) localStorage.setItem(key, value);
+    else localStorage.removeItem(key);
+  } catch {
+    /* storage unavailable: the in-memory value still applies */
+  }
+}
+
+function setState(patch: Partial<LocalAgentState>): void {
+  state = { ...state, ...patch };
+  for (const l of listeners) l();
+}
+
+function subscribe(l: () => void): () => void {
+  listeners.add(l);
+  return () => listeners.delete(l);
+}
+
+function setTarget(id: string): void {
+  if (id === state.target) return;
+  writeStored(LS_TARGET, id);
+  setState({ target: id });
+}
+
+// load reads the cores, the dev-discovery signal and the targets once for
+// every subscriber (concurrent callers share the in-flight load).
+function load(): Promise<void> {
+  if (loading) return loading;
+  loading = (async () => {
+    setState({ loaded: false });
+    let u = state.url;
+    let t = state.token;
     // GET /v1/cores is the production-safe availability truth (unlike the
-    // dev-gated discover probe): it reports every registered core and whether
-    // the gateway resolved a reachable endpoint for it.
-    try {
-      const cs = await api.cores();
-      setCoreStatus(cs.cores || []);
-    } catch {
-      setCoreStatus([]);
-    }
-
-    // The dev discovery probe doubles as the dev-mode signal: it answers only
-    // when the gateway runs BNBLOC_DEV_DISCOVERY (404 in production). Only in
-    // that mode is a manual local core address sent; otherwise any stored
-    // address is ignored, never forwarded.
+    // dev-gated discover probe): it reports every registered core and
+    // whether the gateway resolved a reachable endpoint for it.
+    const coreStatus = await api
+      .cores()
+      .then((cs) => cs.cores)
+      .catch(() => []);
+    // The dev discovery probe doubles as the dev-mode signal: it answers
+    // only when the gateway runs BNBLOC_DEV_DISCOVERY (404 in production).
+    // Only in that mode is a manual local core address sent; otherwise any
+    // stored address is ignored, never forwarded.
     let dev = false;
     try {
       const d = await api.localAgentDiscover();
@@ -95,37 +130,52 @@ export function useLocalAgent(active: boolean): LocalAgent {
       if (!u && d.found && d.localAgentUrl) {
         u = d.localAgentUrl;
         t = d.localAgentToken || "";
-        setUrl(u);
-        setToken(t);
-        localStorage.setItem(LS_URL, u);
-        if (t) localStorage.setItem(LS_TOKEN, t);
+        writeStored(LS_URL, u);
+        writeStored(LS_TOKEN, t);
       }
     } catch {
       dev = false;
     }
-    setDevDiscovery(dev);
-    if (!dev) {
-      u = "";
-      t = "";
-    }
+    // Transient failure: no gateway targets right now (the desktop shell
+    // still lists its managed sidecars); the saved choice stands.
+    const gatewayTargets = await api
+      .localAgentTargets(dev ? u || undefined : undefined, dev ? t || undefined : undefined)
+      .then((res) => res.targets)
+      .catch(() => []);
+    // In the desktop shell, respect the "Agent sources" panel (getSettings
+    // is null in a plain browser, where nothing is filtered).
+    const settings = await desktop.getSettings();
+    setState({ url: u, token: t, coreStatus, devDiscovery: dev, gatewayTargets, settings, loaded: true });
+  })().finally(() => {
+    loading = null;
+  });
+  return loading;
+}
 
-    try {
-      const res = await api.localAgentTargets(u || undefined, t || undefined);
-      setGatewayTargets(res.targets || []);
-    } catch {
-      // Transient failure: no gateway targets right now (the desktop shell
-      // still lists its managed sidecars); the saved choice stands.
-      setGatewayTargets([]);
-    }
-    // In the desktop shell, respect the "Agent sources" panel (getSettings is
-    // null in a plain browser, where nothing is filtered).
-    setSettings(await desktop.getSettings());
-    setLoaded(true);
-  }, []);
+function reload(): void {
+  void load();
+  sidecarAgents.refresh();
+}
 
+// forgetLocalAgent drops the loaded answer at sign-out: the next member's
+// first useLocalAgent loads their own cores and targets.
+export function forgetLocalAgent(): void {
+  setState({ gatewayTargets: [], coreStatus: [], settings: null, devDiscovery: false, loaded: false });
+}
+
+// useLocalAgent is local-agent-core discovery, target listing, the selected
+// target and the persisted manual address — shared by the composer's agent
+// picker and the run-agent dialog. A saved manual URL wins over discovery.
+// Desktop-managed sidecar targets come from the shared live sidecar store, so
+// they appear as soon as a sidecar finishes starting (no one-shot scan).
+export function useLocalAgent(active: boolean): LocalAgent {
+  const { url, token, gatewayTargets, loaded, settings, target, coreStatus, devDiscovery } = useSyncExternalStore(subscribe, () => state, () => state);
+  const sidecars = useSidecarAgents(active);
   useEffect(() => {
-    if (active) void load();
-  }, [active, load]);
+    if (active && !state.loaded) void load();
+  }, [active]);
+  const setUrl = useCallback((v: string) => setState({ url: v }), []);
+  const setToken = useCallback((v: string) => setState({ token: v }), []);
 
   // A provider the user turned off must not be selectable here (the bridge
   // drops messages to it), and the ★ default seeds the initial selection.
@@ -150,25 +200,20 @@ export function useLocalAgent(active: boolean): LocalAgent {
   // saved target that no longer exists is cleared, never kept as a phantom
   // selection — except while a managed core is still starting, when it may
   // simply not be listed yet.
+  // Only an active instance judges the selection: an inactive one sees no
+  // managed sidecar targets and would clear a saved one.
   useEffect(() => {
-    if (!loaded) return;
-    const saved = localStorage.getItem(LS_TARGET) || "";
+    if (!active || !loaded) return;
+    const saved = state.target;
     if (pending && !targets.some((x) => x.id === saved)) return;
     setTarget(targets.find((x) => x.id === saved)?.id || defaultId || targets[0]?.id || "");
-  }, [loaded, pending, targets, defaultId, setTarget]);
-
-  const reload = useCallback(() => {
-    void load();
-    sidecarAgents.refresh();
-  }, [load]);
+  }, [active, loaded, pending, targets, defaultId]);
 
   const save = useCallback(() => {
-    if (url) localStorage.setItem(LS_URL, url);
-    else localStorage.removeItem(LS_URL);
-    if (token) localStorage.setItem(LS_TOKEN, token);
-    else localStorage.removeItem(LS_TOKEN);
+    writeStored(LS_URL, state.url);
+    writeStored(LS_TOKEN, state.token);
     reload();
-  }, [url, token, reload]);
+  }, []);
 
   // The selected target's core, derived from the current target list. The id is
   // core-qualified ("<core>/<rawid>"), so this mirrors what the gateway splits.
@@ -208,6 +253,6 @@ export function useLocalAgent(active: boolean): LocalAgent {
       save,
       reload,
     }),
-    [devAddress, url, token, targets, target, core, detected, coreStatus, anyCoreAvailable, devDiscovery, isRemoteGateway, setTarget, save, reload],
+    [devAddress, url, token, targets, target, core, detected, coreStatus, anyCoreAvailable, devDiscovery, isRemoteGateway, setUrl, setToken, save],
   );
 }

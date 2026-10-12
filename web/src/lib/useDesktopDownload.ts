@@ -3,10 +3,8 @@ import { api, type ReleaseFile } from "@/lib/api";
 import { gatewayBase } from "@/lib/config";
 import { detectDesktopArch, detectDesktopPlatform, pickDesktopDownload, type DesktopArch } from "@/lib/desktopDownload";
 import { isGatewayArtifactUrl } from "@/lib/desktopHandoff";
-import { useQuery } from "@/lib/useQuery";
+import { publicQueryKey, useQuery } from "@/lib/useQuery";
 
-const RELEASES_QUERY_KEY = "app-releases";
-const POLICY_QUERY_KEY = "app-update-policy";
 
 // useDesktopDownload resolves the desktop installer for this browser from the
 // Release Hub, restricted to the instance's update channel (the channel its
@@ -17,8 +15,8 @@ export function useDesktopDownload(): {
   readonly loading: boolean;
   readonly isGatewayArtifact: boolean;
 } {
-  const releases = useQuery(RELEASES_QUERY_KEY, api.getAppReleases, { staleMs: Infinity });
-  const policy = useQuery(POLICY_QUERY_KEY, api.getUpdatePolicy, { staleMs: Infinity });
+  const releases = useQuery(publicQueryKey("app-releases"), api.getAppReleases, { staleMs: Infinity });
+  const policy = useQuery(publicQueryKey("app-update-policy"), api.getUpdatePolicy, { staleMs: Infinity });
   const [arch, setArch] = useState<DesktopArch | null>(null);
   useEffect(() => {
     let cancelled = false;

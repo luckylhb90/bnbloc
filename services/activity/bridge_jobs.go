@@ -418,25 +418,12 @@ func (s *Service) handleMyAgents(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, "list bridge agents failed", http.StatusInternalServerError)
 		return
 	}
-	type out struct {
-		Core         string                  `json:"core"`
-		Provider     string                  `json:"provider"`
-		TargetID     string                  `json:"targetId"`
-		Online       bool                    `json:"online"`
-		ModelOptions *wire.AgentModelOptions `json:"modelOptions,omitempty"`
-	}
-	rows := make([]out, 0, len(agents))
+	reply := wire.MyAgentsReply{Agents: make([]wire.MyAgent, 0, len(agents))}
 	for _, a := range agents {
-		rows = append(rows, out{Core: a.Core, Provider: a.Provider, TargetID: a.TargetID, Online: !a.Disabled, ModelOptions: modelOptions(a)})
+		reply.Agents = append(reply.Agents, wire.MyAgent{Core: a.Core, Provider: a.Provider, TargetID: a.TargetID, Online: !a.Disabled, ModelOptions: modelOptions(a)})
 	}
-	// desktop is the member's own desktop app, independent of agents: a
-	// bridge with no core yet is still connected, and lastSeenAtMs > 0 means
-	// the app was installed and connected at least once (0 = never).
-	type desktop struct {
-		Online       bool  `json:"online"`
-		LastSeenAtMs int64 `json:"lastSeenAtMs"`
-	}
-	var d desktop
+	// The member's own desktop app, independent of agents: a bridge with no
+	// core yet is still connected.
 	hb, found, err := s.BridgeJobs.LatestBridgeForOwner(r.Context(), caller)
 	if err != nil {
 		obs.ServerError(w, "read the member's latest bridge", err)
@@ -444,7 +431,7 @@ func (s *Service) handleMyAgents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if found {
-		d = desktop{Online: store.BridgeLive(hb, now), LastSeenAtMs: hb.LastSeenAtMs}
+		reply.Desktop = wire.MyDesktop{Online: store.BridgeLive(hb, now), LastSeenAtMs: hb.LastSeenAtMs}
 	}
-	httpx.WriteJSON(w, http.StatusOK, map[string]any{"agents": rows, "desktop": d})
+	httpx.WriteJSON(w, http.StatusOK, reply)
 }

@@ -1,7 +1,7 @@
 import { useAuth } from "./auth";
 import type { PlatformAgent } from "./platformAgents.ts";
 import { platformAgentsApi } from "./platformAgentsApi.ts";
-import { useQuery } from "./useQuery.ts";
+import { queryKey, useQuery } from "./useQuery.ts";
 
 const STALE_MS = 30_000;
 const NONE: readonly PlatformAgent[] = [];
@@ -13,7 +13,7 @@ const NONE: readonly PlatformAgent[] = [];
 export function usePlatformAgents(): { readonly agents: readonly PlatformAgent[]; readonly refetch: () => void } {
   const { subject, tenant } = useAuth();
   const query = useQuery(
-    subject ? `platform-agents:${tenant ?? ""}:${subject}` : null,
+    queryKey("platform-agents", { subject, tenant }),
     platformAgentsApi.available,
     { staleMs: STALE_MS },
   );

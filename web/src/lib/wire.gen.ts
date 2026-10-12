@@ -1534,6 +1534,33 @@ export interface MCPConnectorUpdate {
   values: Record<string, string>;
 }
 
+// ---- wire/my_agents.go ----
+
+// MyAgent is one agent the caller's own bridge advertises (any room).
+// Online is false while the owner disabled it.
+export interface MyAgent {
+  core: string;
+  provider: string;
+  targetId: string;
+  online: boolean;
+  modelOptions?: AgentModelOptions;
+}
+
+// MyDesktop is the caller's own desktop app, apart from its agents: Online
+// is its bridge connected now (even with no agent core); LastSeenAtMs the
+// latest connection, 0 when the app never connected (not installed).
+export interface MyDesktop {
+  online: boolean;
+  lastSeenAtMs: number;
+}
+
+// MyAgentsReply is GET /v1/my/agents: the same agent list the member's
+// desktop app shows, because both render what their bridge advertises.
+export interface MyAgentsReply {
+  agents: MyAgent[];
+  desktop: MyDesktop;
+}
+
 // ---- wire/notifications.go ----
 
 // Notification types carried in NotificationPayload.Type.

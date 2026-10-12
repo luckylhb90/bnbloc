@@ -4,8 +4,7 @@
 // super-admin acting-tenant header, and the single 401 → silent re-auth →
 // retry-once rule live in exactly one place.
 
-import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
-import type { PlatformTenant } from "./apiModels.ts";
+import { useCallback, useSyncExternalStore } from "react";
 import { gatewayBase } from "./config.ts";
 import { statusText } from "./errors.ts";
 
@@ -89,33 +88,20 @@ function subscribeActing(fn: () => void): () => void {
   return () => actingListeners.delete(fn);
 }
 
-// useActingTenant is the views' handle on the acting tenant: its value, the
-// tenants a super-admin may act in, and the switch (which reloads, so every
-// view re-fetches under the new scope).
+// useActingTenant is the views' handle on the acting tenant: its value and
+// the switch (which reloads, so every view re-fetches under the new scope).
+// The tenants to pick from are lib/queries.ts useTenants.
 export function useActingTenant(isSuper: boolean): {
   readonly acting: string | null;
-  readonly tenants: readonly PlatformTenant[];
   readonly switchTo: (tenantId: string | null) => void;
 } {
   const acting = useSyncExternalStore(subscribeActing, getActingTenant, getActingTenant);
-  const [tenants, setTenants] = useState<PlatformTenant[]>([]);
-  useEffect(() => {
-    if (!isSuper) return;
-    let live = true;
-    void import("./api.ts")
-      .then(({ api }) => api.listTenants())
-      .then((r) => live && setTenants(r.tenants ?? []))
-      .catch(() => {});
-    return () => {
-      live = false;
-    };
-  }, [isSuper]);
   const switchTo = useCallback((tenantId: string | null) => {
     if ((tenantId || null) === getActingTenant()) return;
     setActingTenant(tenantId);
     window.location.reload();
   }, []);
-  return { acting: isSuper ? acting : null, tenants, switchTo };
+  return { acting: isSuper ? acting : null, switchTo };
 }
 
 // The re-auth handler is installed by the auth layer. It mints a fresh session

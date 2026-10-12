@@ -15,6 +15,7 @@ import {
   type ArtifactVersionReply,
   type CoresReply,
   type FeedPage,
+  type MyAgentsReply,
   type PlazaReply,
   type RoomDetail,
   type RoomMembersReply,
@@ -732,28 +733,7 @@ export const api = {
     }),
   // The caller's own bridge-advertised agents (all rooms): the "my agents"
   // surface rendered identically on desktop and in the browser.
-  myAgents: () =>
-    req<{
-      agents: {
-        core: string;
-        provider: string;
-        targetId: string;
-        online: boolean;
-        // The bridge-uploaded model catalog (same shape as AgentTarget's
-        // pickers): models, reasoningEfforts, reasoningByModel, defaults.
-        modelOptions?: {
-          models?: string[];
-          reasoningEfforts?: string[];
-          reasoningByModel?: Record<string, string[]>;
-          defaultModel?: string;
-          defaultReasoning?: string;
-        };
-      }[];
-      // The member's own desktop app, apart from its agents: online = its
-      // bridge is connected now (even with no agent core); lastSeenAtMs = the
-      // latest connection, 0 when the app never connected (not installed).
-      desktop: { online: boolean; lastSeenAtMs: number };
-    }>("/v1/my/agents"),
+  myAgents: () => req<MyAgentsReply>("/v1/my/agents"),
   // Per-room+channel agent selection (useAgentPrefs restores it on entry).
   getAgentPrefs: (roomId: string, channelId?: string) =>
     req<{

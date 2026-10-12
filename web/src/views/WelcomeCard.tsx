@@ -3,6 +3,7 @@ import { CloudIcon, DesktopIcon, DownloadSimpleIcon, SparkleIcon, XIcon } from "
 import { api, ApiError, type RoomSummary } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { can } from "@/lib/permissions";
+import { useMyAgents } from "@/lib/queries";
 import { inDesktopShell } from "@/lib/config";
 import { useDesktopPresence } from "@/lib/desktopPresence";
 import { openMacInstallGuide } from "@/lib/macInstall";
@@ -23,7 +24,6 @@ import { browserStorage } from "@/lib/platformRouting";
 import { composerAgentPicks } from "@/lib/team";
 import { routeHash } from "@/lib/useHashRoute";
 import { usePlatformAgents } from "@/lib/usePlatformAgents";
-import { useQuery } from "@/lib/useQuery";
 import { autoStartTour } from "@/lib/useOnboarding";
 import { Button } from "@/ui/Button";
 import { useToast } from "@/ui/Toast";
@@ -68,7 +68,7 @@ export function WelcomeCard({ rooms, onOpen }: { readonly rooms?: readonly RoomS
   const roomCount = list ? list.length : null;
   // The member's own agents: a member who hosts every platform agent (or has
   // agents of their own) starts with one of those (welcomeStart).
-  const own = useQuery(subject ? `my-agents:${subject}` : null, api.myAgents, { staleMs: 30_000 });
+  const own = useMyAgents();
   const startWith = welcomeStart(offered, own.data?.agents ?? [], subject);
   const visible = showWelcome({ roomCount, dismissed });
   // A brand-new member is guided from this first screen: the tour starts on
