@@ -67,13 +67,19 @@ func TestEstimate(t *testing.T) {
 	agent := &wire.PlanAgent{OwnerID: "x", Provider: "y"}
 	lead := wire.TeamPlanEntry{Agent: agent, Cost: cost(10, 0.10)}
 	roles := []wire.TeamPlanEntry{
-		{Role: "a", Agent: agent, Cost: cost(5, 0.20)},
+		{Role: "a", Agent: &wire.PlanAgent{OwnerID: "x2", Provider: "y"}, Cost: cost(5, 0.20)},
 		{Role: "b", Agent: agent, Cost: &wire.AgentCostSample{Runs: 0}},
 		{Role: "c"}, // unstaffed: not counted, not unknown
 	}
 	est := Estimate(lead, roles)
 	if est.CostUsd == nil || *est.CostUsd < 0.2999 || *est.CostUsd > 0.3001 || est.Runs != 15 || len(est.Unknown) != 1 || est.Unknown[0] != "b" {
 		t.Fatalf("estimate = %+v (%v)", est, est.CostUsd)
+	}
+	// Two roles on one agent cost twice but rest on its runs once.
+	other := &wire.PlanAgent{OwnerID: "o", Provider: "p"}
+	shared := Estimate(wire.TeamPlanEntry{Agent: other, Cost: cost(4, 0.10)}, []wire.TeamPlanEntry{{Role: "a", Agent: agent, Cost: cost(3, 0.05)}, {Role: "b", Agent: agent, Cost: cost(3, 0.05)}})
+	if shared.CostUsd == nil || *shared.CostUsd < 0.1999 || *shared.CostUsd > 0.2001 || shared.Runs != 7 {
+		t.Fatalf("shared agent = %+v (%v)", shared, shared.CostUsd)
 	}
 	none := Estimate(wire.TeamPlanEntry{Agent: agent}, nil)
 	if none.CostUsd != nil || len(none.Unknown) != 1 || none.Unknown[0] != LeadSeat {

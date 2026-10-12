@@ -129,10 +129,12 @@ func unstaffed(da contentpkg.DefaultAgent, requester string, leadOnly bool) stri
 // Estimate sums one team request: the lead plus every staffed role once,
 // each at its agent's average reported cost. Seats whose agent reported no
 // cost are named in Unknown and left out of the sum; CostUsd is absent when
-// no seat has data.
+// no seat has data. Runs counts the runs the sum rests on, each agent's
+// once (two roles on one agent share its sample).
 func Estimate(lead wire.TeamPlanEntry, roles []wire.TeamPlanEntry) wire.TeamCostEstimate {
 	var est wire.TeamCostEstimate
 	total, known := 0.0, false
+	sampled := map[string]bool{}
 	add := func(seat string, e wire.TeamPlanEntry) {
 		if e.Agent == nil {
 			return
@@ -142,7 +144,10 @@ func Estimate(lead wire.TeamPlanEntry, roles []wire.TeamPlanEntry) wire.TeamCost
 			return
 		}
 		total += *e.Cost.AvgCostUsd
-		est.Runs += e.Cost.Runs
+		if key := strings.ToLower(e.Agent.OwnerID + "/" + e.Agent.Core + "/" + e.Agent.Provider); !sampled[key] {
+			sampled[key] = true
+			est.Runs += e.Cost.Runs
+		}
 		known = true
 	}
 	add(LeadSeat, lead)
