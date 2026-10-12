@@ -5,17 +5,21 @@
 //! crashed or was force-quit, and that build of the sidecar ignored stdin
 //! EOF). Such an orphan is unsupervised and may run an outdated artifact, so
 //! reusing it forever would keep a newer published package from ever running.
-//! The manager replaces it — but only with evidence this app spawned it:
+//! The manager replaces it — but only with evidence this app spawned it, and
+//! `owned_orphan` is the one rule for that evidence (fixed-port sidecars and
+//! the sandbox alike). It takes BOTH:
 //!
 //! - a spawn record (`<app cache>/sidecar-pids/<id>.json`) written at spawn,
 //!   removed when that child exits, naming the pid, the artifact sha256, and
-//!   the app process that spawned it; or
-//! - the listening process's executable is this component's cached artifact
-//!   in this app's private cache dir (covers orphans from builds that predate
-//!   spawn records; the file name carries the artifact sha256).
+//!   the app process that spawned it (another app process than this one);
+//!   and
+//! - the process's executable lives under this component's private cache
+//!   root.
 //!
-//! A listener without that evidence is never signalled: a compatible Core
-//! Protocol listener is reused as before, anything else waits.
+//! A pid the OS reused after a crash or reboot fails the second check; a
+//! child of this session (running, or replaced and still stopping) fails the
+//! first. A process without that evidence is never signalled: a compatible
+//! Core Protocol listener is reused as before, anything else waits.
 //!
 //! Versions are not compared: the package version is publisher-chosen and the
 //! daemon's discover `version` is its own semver — different version spaces.
@@ -23,7 +27,7 @@
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
-use crate::internal_ext::sidecar_util::{cache_file_sha, cache_stem, listen_addr, CoreListener};
+use crate::internal_ext::sidecar_util::{cache_stem, listen_addr, CoreListener};
 
 /// What the app recorded when it spawned a sidecar child.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -36,12 +40,12 @@ pub(super) struct SpawnRecord {
     pub(super) app_pid: u32,
 }
 
-/// A listener this app spawned in an earlier session.
+/// A process this app spawned in an earlier session.
 #[derive(Debug, PartialEq, Eq)]
 pub(super) struct Orphan {
     pub(super) pid: u32,
-    /// The artifact it runs, when known.
-    pub(super) sha256: Option<String>,
+    /// The artifact it runs (from its spawn record).
+    pub(super) sha256: String,
 }
 
 /// What the manager does about an occupied fixed listener.
@@ -84,10 +88,10 @@ pub(super) fn plan_occupied_listener(facts: OccupiedListener<'_>) -> ListenerPla
                 facts.url, facts.spec_version
             ));
         }
-        let reason = match orphan.sha256.as_deref() {
-            Some(sha) if !sha.eq_ignore_ascii_case(facts.spec_sha256) => "an outdated build",
-            Some(_) => "no longer supervised",
-            None => "unknown build",
+        let reason = if orphan.sha256.eq_ignore_ascii_case(facts.spec_sha256) {
+            "no longer supervised"
+        } else {
+            "an outdated build"
         };
         return ListenerPlan::Replace {
             pid: orphan.pid,
@@ -109,36 +113,27 @@ pub(super) fn plan_occupied_listener(facts: OccupiedListener<'_>) -> ListenerPla
     }
 }
 
-/// Whether the process listening on the sidecar port is an orphan this app
-/// spawned in an earlier session (see the module doc for the evidence).
-pub(super) fn identify_orphan(
-    listener_pid: Option<u32>,
-    live_child_pids: &[u32],
+/// The one orphan rule: `pid` is a process this app spawned in an EARLIER
+/// session only when its spawn `record` names that pid and another app
+/// process, AND its executable (`exe`, as the OS reports it) lives under the
+/// component's private `root`. Either piece alone is not evidence: a record
+/// survives a crash while the OS reuses the pid, and an executable path says
+/// nothing about which session started it. Blocking (canonicalizes paths).
+pub(super) fn owned_orphan(
+    pid: u32,
     record: Option<&SpawnRecord>,
-    exe_path: Option<&str>,
-    cache_dir: &Path,
-    id: &str,
+    exe: Option<&str>,
+    root: &Path,
     app_pid: u32,
 ) -> Option<Orphan> {
-    let pid = listener_pid?;
-    if live_child_pids.contains(&pid) {
-        // Our own child from this session (e.g. a replaced one still stopping).
-        return None;
-    }
-    if let Some(record) = record.filter(|r| r.pid == pid && r.app_pid != app_pid) {
-        return Some(Orphan {
-            pid,
-            sha256: Some(record.sha256.clone()),
-        });
-    }
-    let exe = PathBuf::from(exe_path?.trim().trim_end_matches(" (deleted)"));
-    if exe.parent()? != cache_dir {
-        return None;
-    }
-    let sha256 = cache_file_sha(exe.file_name()?.to_str()?, id)?;
-    Some(Orphan {
+    let record = record.filter(|r| r.pid == pid && r.app_pid != app_pid)?;
+    let exe = PathBuf::from(exe?.trim().trim_end_matches(" (deleted)"));
+    let parent = exe.parent()?;
+    let parent = std::fs::canonicalize(parent).unwrap_or_else(|_| parent.to_path_buf());
+    let root = std::fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
+    (root.is_absolute() && parent.starts_with(&root)).then(|| Orphan {
         pid,
-        sha256: Some(sha256),
+        sha256: record.sha256.clone(),
     })
 }
 
@@ -303,7 +298,7 @@ mod tests {
     fn own_orphan_with_an_outdated_artifact_is_replaced() {
         let orphan = Orphan {
             pid: 42,
-            sha256: Some(SHA_OLD.into()),
+            sha256: SHA_OLD.into(),
         };
         match plan_occupied_listener(facts(Some(orphan), compatible("1.0.0"), true)) {
             ListenerPlan::Replace { pid, message } => {
@@ -321,7 +316,7 @@ mod tests {
     fn own_orphan_of_the_current_artifact_is_replaced_to_regain_supervision() {
         let orphan = Orphan {
             pid: 42,
-            sha256: Some(SHA_NEW.into()),
+            sha256: SHA_NEW.into(),
         };
         assert!(matches!(
             plan_occupied_listener(facts(Some(orphan), compatible("1.0.0"), true)),
@@ -333,7 +328,7 @@ mod tests {
     fn own_orphan_that_cannot_be_stopped_waits_with_guidance() {
         let orphan = Orphan {
             pid: 42,
-            sha256: Some(SHA_OLD.into()),
+            sha256: SHA_OLD.into(),
         };
         assert_eq!(
             plan_occupied_listener(facts(Some(orphan), compatible("1.0.0"), false)),
@@ -364,142 +359,68 @@ mod tests {
         ));
     }
 
-    fn cache() -> PathBuf {
-        PathBuf::from("/cache/cores")
-    }
-
+    /// The orphan rule needs both pieces of evidence: a spawn record from an
+    /// earlier app process naming the pid, and the pid's executable under the
+    /// component's cache root.
     #[test]
-    fn a_record_from_an_earlier_session_identifies_the_orphan() {
+    fn orphan_requires_exe_evidence() {
+        let root = std::env::temp_dir().join(format!("bnbloc-orphan-root-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).expect("root");
+        let exe = root.join(cache_file_name("samplecore", SHA_OLD));
+        let exe = exe.to_string_lossy().into_owned();
         let record = SpawnRecord {
             pid: 42,
             sha256: SHA_OLD.into(),
             app_pid: 7,
         };
+
+        // Both: an orphan of an earlier session, running the recorded build.
         assert_eq!(
-            identify_orphan(
-                Some(42),
-                &[],
-                Some(&record),
-                None,
-                &cache(),
-                "samplecore",
-                APP
-            ),
+            owned_orphan(42, Some(&record), Some(&exe), &root, APP),
             Some(Orphan {
                 pid: 42,
-                sha256: Some(SHA_OLD.into())
+                sha256: SHA_OLD.into()
             })
         );
-        // Recorded by the running app: not an earlier session's orphan.
+        let deleted = format!("{exe} (deleted)");
+        assert!(owned_orphan(42, Some(&record), Some(&deleted), &root, APP).is_some());
+
+        // A matching record but an executable outside the cache root: the OS
+        // reused the pid for something else after a crash or reboot.
+        for foreign in [
+            "/usr/bin/python3".to_string(),
+            format!("/usr/local/bin/{}", cache_file_name("samplecore", SHA_OLD)),
+            "samplecore".to_string(),
+        ] {
+            assert_eq!(
+                owned_orphan(42, Some(&record), Some(&foreign), &root, APP),
+                None,
+                "{foreign}"
+            );
+        }
+        assert_eq!(owned_orphan(42, Some(&record), None, &root, APP), None);
+
+        // Our executable but no record of an earlier session: never ours to
+        // kill (a child of this session being replaced has no record left,
+        // and a running one is recorded by this app).
+        assert_eq!(owned_orphan(42, None, Some(&exe), &root, APP), None);
         let ours = SpawnRecord {
             app_pid: APP,
             ..record.clone()
         };
+        assert_eq!(owned_orphan(42, Some(&ours), Some(&exe), &root, APP), None);
+        // The record names another pid than the one in question.
         assert_eq!(
-            identify_orphan(
-                Some(42),
-                &[],
-                Some(&ours),
-                None,
-                &cache(),
-                "samplecore",
-                APP
-            ),
+            owned_orphan(43, Some(&record), Some(&exe), &root, APP),
             None
         );
-        // The listener is some other pid than the recorded one.
+        // An empty root never contains anything.
         assert_eq!(
-            identify_orphan(
-                Some(43),
-                &[],
-                Some(&record),
-                None,
-                &cache(),
-                "samplecore",
-                APP
-            ),
+            owned_orphan(42, Some(&record), Some(&exe), Path::new(""), APP),
             None
         );
-        // A live child of this session is never an orphan.
-        assert_eq!(
-            identify_orphan(
-                Some(42),
-                &[42],
-                Some(&record),
-                None,
-                &cache(),
-                "samplecore",
-                APP
-            ),
-            None
-        );
-        assert_eq!(
-            identify_orphan(None, &[], Some(&record), None, &cache(), "samplecore", APP),
-            None
-        );
-    }
-
-    #[test]
-    fn the_cached_artifact_executable_identifies_an_unrecorded_orphan() {
-        let exe = cache().join(cache_file_name("samplecore", SHA_OLD));
-        let exe = exe.to_string_lossy();
-        assert_eq!(
-            identify_orphan(Some(42), &[], None, Some(&exe), &cache(), "samplecore", APP),
-            Some(Orphan {
-                pid: 42,
-                sha256: Some(SHA_OLD.into())
-            })
-        );
-        let deleted = format!("{exe} (deleted)");
-        assert!(identify_orphan(
-            Some(42),
-            &[],
-            None,
-            Some(&deleted),
-            &cache(),
-            "samplecore",
-            APP
-        )
-        .is_some());
-        // Another component's artifact, or the same name outside our cache.
-        let other = cache().join(cache_file_name("othercore", SHA_OLD));
-        assert_eq!(
-            identify_orphan(
-                Some(42),
-                &[],
-                None,
-                Some(&other.to_string_lossy()),
-                &cache(),
-                "samplecore",
-                APP
-            ),
-            None
-        );
-        let elsewhere = format!("/usr/local/bin/{}", cache_file_name("samplecore", SHA_OLD));
-        assert_eq!(
-            identify_orphan(
-                Some(42),
-                &[],
-                None,
-                Some(&elsewhere),
-                &cache(),
-                "samplecore",
-                APP
-            ),
-            None
-        );
-        assert_eq!(
-            identify_orphan(
-                Some(42),
-                &[],
-                None,
-                Some("/usr/bin/python3"),
-                &cache(),
-                "samplecore",
-                APP
-            ),
-            None
-        );
+        std::fs::remove_dir_all(&root).expect("cleanup");
     }
 
     #[test]

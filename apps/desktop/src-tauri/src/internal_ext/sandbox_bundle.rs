@@ -253,27 +253,6 @@ pub(super) fn vmexec_path(spec: &SidecarSpec, exe: &Path) -> Option<PathBuf> {
         .then(|| exe.parent().unwrap_or(exe).join(VMEXEC_FILE))
 }
 
-/// The pid of a sandbox sidecar this app spawned in an EARLIER session that
-/// is still running (its spawn record names another app process and the
-/// process runs an executable from this component's bundle root). A pid the
-/// OS reused for anything else never matches: the executable must be ours.
-pub(super) fn recorded_orphan(
-    record: Option<&crate::internal_ext::sidecar_orphan::SpawnRecord>,
-    app_pid: u32,
-    exe: Option<&str>,
-    bundle_root: &Path,
-) -> Option<u32> {
-    let record = record?;
-    if record.app_pid == app_pid {
-        return None;
-    }
-    let exe = PathBuf::from(exe?.trim().trim_end_matches(" (deleted)"));
-    let root = std::fs::canonicalize(bundle_root).unwrap_or_else(|_| bundle_root.to_path_buf());
-    let parent = exe.parent()?;
-    let parent = std::fs::canonicalize(parent).unwrap_or_else(|_| parent.to_path_buf());
-    parent.starts_with(&root).then_some(record.pid)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -565,8 +544,11 @@ mod tests {
         assert_eq!(vmexec_path(&spec, exe), None, "no declared vmexec helper");
     }
 
+    /// The sandbox goes through the one orphan rule: its executable sits in a
+    /// per-version bundle dir below the component's bundle root.
     #[test]
-    fn recorded_orphan_needs_an_earlier_app_and_our_executable() {
+    fn a_sandbox_orphan_runs_from_its_bundle_root() {
+        use crate::internal_ext::sidecar_orphan::owned_orphan;
         let root = temp_base("orphan");
         let bundle = root.join("0.1.0-abc");
         std::fs::create_dir_all(&bundle).unwrap();
@@ -578,18 +560,13 @@ mod tests {
             app_pid: 1,
         };
         assert_eq!(
-            recorded_orphan(Some(&record), 2, Some(&exe), &root),
+            owned_orphan(4242, Some(&record), Some(&exe), &root, 2).map(|o| o.pid),
             Some(4242)
         );
         // Our own child (same app process) is never an orphan.
-        assert_eq!(recorded_orphan(Some(&record), 1, Some(&exe), &root), None);
+        assert!(owned_orphan(4242, Some(&record), Some(&exe), &root, 1).is_none());
         // A reused pid running something else is never signalled.
-        assert_eq!(
-            recorded_orphan(Some(&record), 2, Some("/usr/bin/vim"), &root),
-            None
-        );
-        assert_eq!(recorded_orphan(Some(&record), 2, None, &root), None);
-        assert_eq!(recorded_orphan(None, 2, Some(&exe), &root), None);
+        assert!(owned_orphan(4242, Some(&record), Some("/usr/bin/vim"), &root, 2).is_none());
         let _ = std::fs::remove_dir_all(&root);
     }
 }

@@ -282,21 +282,22 @@ impl Adapter {
         let id = spec.id();
         let root = base.join(cache_stem(&spec.name));
         let orphan = tauri::async_runtime::spawn_blocking(move || {
-            let record = crate::internal_ext::sidecar_orphan::read_spawn_record(&record_dir, &id);
-            let exe = record
-                .as_ref()
-                .and_then(|r| crate::internal_ext::sidecar_orphan::process_exe(r.pid));
-            sandbox_bundle::recorded_orphan(
-                record.as_ref(),
-                std::process::id(),
-                exe.as_deref(),
+            use crate::internal_ext::sidecar_orphan::{
+                owned_orphan, process_exe, read_spawn_record,
+            };
+            let record = read_spawn_record(&record_dir, &id)?;
+            owned_orphan(
+                record.pid,
+                Some(&record),
+                process_exe(record.pid).as_deref(),
                 &root,
+                std::process::id(),
             )
         })
         .await
         .ok()
         .flatten();
-        let Some(pid) = orphan else {
+        let Some(pid) = orphan.map(|o| o.pid) else {
             return;
         };
         if !crate::internal_ext::sidecar_orphan::CAN_TERMINATE {

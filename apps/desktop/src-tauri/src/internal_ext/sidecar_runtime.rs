@@ -5,7 +5,7 @@ use crate::child_process::{self, Backoff, ChildEvent, STOP_GRACE};
 use crate::internal_ext::sidecar_fetch::FetchError;
 use crate::internal_ext::sidecar_model::{ComponentKind, SidecarSpec};
 use crate::internal_ext::sidecar_orphan::{
-    identify_orphan, listener_port, listening_pid, plan_occupied_listener, process_exe,
+    listener_port, listening_pid, owned_orphan, plan_occupied_listener, process_exe,
     read_spawn_record, remove_spawn_record, terminate_orphan, write_spawn_record, ListenerPlan,
     OccupiedListener, Orphan, SpawnRecord, CAN_TERMINATE,
 };
@@ -285,25 +285,13 @@ impl Adapter {
         let cache_dir = self.cache_dir().ok()?;
         let record_dir = self.spawn_record_dir()?;
         let id = spec.id();
-        let live: Vec<u32> = self
-            .inner
-            .lock()
-            .sidecars
-            .values()
-            .filter_map(|sidecar| sidecar.child.as_ref().map(|child| child.pid()))
-            .collect();
         tauri::async_runtime::spawn_blocking(move || {
-            let pid = listening_pid(port);
-            let exe = pid.and_then(process_exe).map(|exe| canonical_parent(&exe));
-            let cache_dir = std::fs::canonicalize(&cache_dir).unwrap_or(cache_dir);
-            let record = read_spawn_record(&record_dir, &id);
-            identify_orphan(
+            let pid = listening_pid(port)?;
+            owned_orphan(
                 pid,
-                &live,
-                record.as_ref(),
-                exe.as_deref(),
+                read_spawn_record(&record_dir, &id).as_ref(),
+                process_exe(pid).as_deref(),
                 &cache_dir,
-                &id,
                 std::process::id(),
             )
         })
@@ -504,15 +492,6 @@ impl Adapter {
                 sidecar.status.pid = None;
             }
         }
-    }
-}
-/// `exe` with its directory canonicalized (the file itself may be deleted),
-/// so it compares equal to the canonical cache dir.
-fn canonical_parent(exe: &str) -> String {
-    let exe = std::path::Path::new(exe.trim().trim_end_matches(" (deleted)"));
-    match (exe.parent().map(std::fs::canonicalize), exe.file_name()) {
-        (Some(Ok(dir)), Some(file)) => dir.join(file).to_string_lossy().into_owned(),
-        _ => exe.to_string_lossy().into_owned(),
     }
 }
 
