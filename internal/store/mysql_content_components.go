@@ -221,6 +221,16 @@ func (s *MySQLContentComponents) DeleteContentComponent(ctx context.Context, id 
 }
 
 func (s *MySQLContentComponents) PutContentUse(ctx context.Context, u ContentUse) error {
+	if strings.HasPrefix(u.ComponentID, BuiltinContentIDPrefix) {
+		// A built-in component has no row to select from (the overlay checked
+		// that it exists).
+		_, err := s.DB.ExecContext(ctx, `INSERT INTO content_component_uses
+  (scope_kind, scope_id, component_id, tenant_id, kind, pinned_version, created_by, created_at_ms)
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  ON DUPLICATE KEY UPDATE pinned_version = VALUES(pinned_version)`,
+			string(u.ScopeKind), u.ScopeID, u.ComponentID, u.TenantID, u.Kind, u.PinnedVersion, u.CreatedBy, u.CreatedAtMs)
+		return err
+	}
 	_, err := s.DB.ExecContext(ctx, `INSERT INTO content_component_uses
   (scope_kind, scope_id, component_id, tenant_id, kind, pinned_version, created_by, created_at_ms)
   SELECT ?, ?, id, ?, ?, ?, ?, ? FROM content_components WHERE id = ?

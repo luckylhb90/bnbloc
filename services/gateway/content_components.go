@@ -16,6 +16,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/luckylhb90/bnbloc/internal/auth"
+	"github.com/luckylhb90/bnbloc/internal/contentbuiltin"
 	"github.com/luckylhb90/bnbloc/internal/contentpkg"
 	"github.com/luckylhb90/bnbloc/internal/contentuse"
 	"github.com/luckylhb90/bnbloc/internal/extpipe"
@@ -223,6 +224,7 @@ func (s *Service) memberContent(ctx context.Context, claims auth.Claims, kind st
 		{TenantID: claims.Tenant, Owner: claims.Subject, Kind: full, Scopes: []store.ContentScope{store.ContentScopePersonal, store.ContentScopeShared}},
 		{TenantID: claims.Tenant, Kind: full, Scopes: []store.ContentScope{store.ContentScopeOrg}},
 		{Kind: full, Scopes: []store.ContentScope{store.ContentScopePlatform}},
+		{Kind: full, Scopes: []store.ContentScope{store.ContentScopeBuiltin}},
 	} {
 		list, err := s.ContentComponents.ListContentComponents(ctx, q)
 		if err != nil {
@@ -676,9 +678,12 @@ var contentBundles = struct {
 func (s *Service) contentPackage(ctx context.Context, v store.ContentComponentVersion) (*contentpkg.Package, error) {
 	contentBundles.once.Do(func() { contentBundles.cache = tarbundle.NewCache(64 << 20) })
 	b, err := contentBundles.cache.GetOrLoad(v.SHA256, func() (*tarbundle.Bundle, error) {
-		raw, err := s.readArtifactBlob(ctx, v.BundleBlobKey, tarbundle.ContentLimits.MaxArchiveBytes())
-		if err != nil {
-			return nil, err
+		raw, ok := contentbuiltin.Bundle(v.BundleBlobKey)
+		if !ok {
+			var err error
+			if raw, err = s.readArtifactBlob(ctx, v.BundleBlobKey, tarbundle.ContentLimits.MaxArchiveBytes()); err != nil {
+				return nil, err
+			}
 		}
 		return tarbundle.Parse(raw, v.SHA256, tarbundle.ContentLimits)
 	})

@@ -32,7 +32,16 @@ const (
 	ContentScopeOrg ContentScope = "org"
 	// ContentScopePlatform: every organization (rollout + tenant scope).
 	ContentScopePlatform ContentScope = "platform"
+	// ContentScopeBuiltin: shipped inside the binaries
+	// (internal/contentbuiltin), read-only and visible to every member. It is
+	// never stored: the built-in source overlays it on this store.
+	ContentScopeBuiltin ContentScope = "builtin"
 )
+
+// BuiltinContentIDPrefix prefixes the ids of built-in components. They have
+// no rows here; a use of one (a room pinning the built-in builder) is stored
+// like any other, its existence vouched for by the built-in overlay.
+const BuiltinContentIDPrefix = "cc_builtin_"
 
 // ContentStatus is a component's publication state within its scope.
 type ContentStatus string
@@ -379,7 +388,7 @@ func contentUseKey(scopeKind ContentUseScope, scopeID, componentID string) strin
 func (s *MemoryContentComponents) PutContentUse(_ context.Context, u ContentUse) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if _, ok := s.components[u.ComponentID]; !ok {
+	if _, ok := s.components[u.ComponentID]; !ok && !strings.HasPrefix(u.ComponentID, BuiltinContentIDPrefix) {
 		return ErrContentNotFound
 	}
 	k := contentUseKey(u.ScopeKind, u.ScopeID, u.ComponentID)

@@ -9,6 +9,7 @@ import (
 
 	"github.com/luckylhb90/bnbloc/internal/blobstore"
 	"github.com/luckylhb90/bnbloc/internal/config"
+	"github.com/luckylhb90/bnbloc/internal/contentbuiltin"
 	"github.com/luckylhb90/bnbloc/internal/extpipe"
 	"github.com/luckylhb90/bnbloc/internal/extreg"
 	"github.com/luckylhb90/bnbloc/internal/membership"
@@ -64,7 +65,9 @@ func main() {
 		svc.Dispatches = d
 	}
 	svc.Audit = backends.ExtAudit
-	svc.Content = backends.ContentComponents
+	// Built-in content (the Expert builder) overlays the stored components,
+	// so a chat may wear it like any other expert.
+	svc.Content = contentbuiltin.Overlay(backends.ContentComponents)
 	// A chat to a platform agent whose host is offline is refused before a
 	// job exists (shared grants, policy and bridge advertisements).
 	svc.PlatformAgents = &realtimehttp.PlatformAgentGuard{Grants: backends.Grant, Settings: backends.Settings, Bridges: backends.BridgeJobs}

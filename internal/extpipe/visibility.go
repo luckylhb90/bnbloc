@@ -57,7 +57,8 @@ func GateForContent(c store.ContentComponent) Gate {
 	return Gate{Scope: c.Scope, Owner: c.Owner, TenantID: c.TenantID, Status: c.Status}
 }
 
-// MemberVisibility is the one gate: owner scopes admit their owner in the
+// MemberVisibility is the one gate: built-in content (shipped with the
+// release) admits every member; owner scopes admit their owner in the
 // component's tenant; org scope admits its tenant; platform scope admits the
 // allowed tenants; then retired content is hidden, pending content is the
 // owner's alone (listed, not usable), and the rollout decides — off hides,
@@ -73,6 +74,11 @@ func MemberVisibility(v Viewer, g Gate, installedAtMs int64) Visibility {
 		return Visibility{}
 	}
 	switch g.Scope {
+	case store.ContentScopeBuiltin:
+		if v.Subject == "" {
+			return Visibility{}
+		}
+		return Visibility{Visible: true, Installed: true, Managed: true}
 	case store.ContentScopePersonal, store.ContentScopeShared:
 		if v.Subject == "" || v.Subject != g.Owner || v.Tenant != g.TenantID {
 			return Visibility{}

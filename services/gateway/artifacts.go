@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -15,6 +16,7 @@ import (
 
 	"github.com/luckylhb90/bnbloc/core/pkgmeta"
 	"github.com/luckylhb90/bnbloc/internal/auth"
+	"github.com/luckylhb90/bnbloc/internal/contentbuiltin"
 	"github.com/luckylhb90/bnbloc/internal/extpipe"
 	"github.com/luckylhb90/bnbloc/internal/obs"
 	"github.com/luckylhb90/bnbloc/internal/realtime"
@@ -115,11 +117,6 @@ func (s *Service) handleArtifactDownload(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	key := strings.TrimPrefix(r.PathValue("key"), "/")
-	if strings.TrimSpace(s.Backends.Realtime) == "" {
-		obs.ServerError(w, "artifact store not configured", nil)
-		http.Error(w, "artifact store not configured", http.StatusServiceUnavailable)
-		return
-	}
 	entitled, err := s.artifactEntitled(r.Context(), claims, key, r.URL.Query())
 	if err != nil {
 		obs.ServerError(w, "load artifact entitlement failed", err)
@@ -128,6 +125,19 @@ func (s *Service) handleArtifactDownload(w http.ResponseWriter, r *http.Request)
 	}
 	if !entitled {
 		http.Error(w, "artifact not found", http.StatusNotFound)
+		return
+	}
+	// A built-in content bundle ships inside the binary, never in the blob
+	// store.
+	if raw, ok := contentbuiltin.Bundle(key); ok {
+		w.Header().Set("Content-Type", "application/octet-stream")
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		streamBlob(w, bytes.NewReader(raw), int64(len(raw)))
+		return
+	}
+	if strings.TrimSpace(s.Backends.Realtime) == "" {
+		obs.ServerError(w, "artifact store not configured", nil)
+		http.Error(w, "artifact store not configured", http.StatusServiceUnavailable)
 		return
 	}
 	// ?direct=1 (the desktop's component downloader): a presigned S3 URL

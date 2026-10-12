@@ -14,6 +14,7 @@ import (
 
 	"github.com/luckylhb90/bnbloc/internal/auth"
 	"github.com/luckylhb90/bnbloc/internal/config"
+	"github.com/luckylhb90/bnbloc/internal/contentbuiltin"
 	"github.com/luckylhb90/bnbloc/internal/coreset"
 	"github.com/luckylhb90/bnbloc/internal/extreg"
 	"github.com/luckylhb90/bnbloc/internal/notify"
@@ -195,8 +196,9 @@ func resolveTenantWiring() tenantWiring {
 		return len(seen)
 	}
 	return tenantWiring{Resolve: res.Resolve, Suspended: suspended, MemberRole: memberRole, Settings: backends.Settings, ExtAudit: backends.ExtAudit, ComponentInstalls: backends.ComponentInstalls, NotifierReplies: backends.ReplyTokens, SSOHandoffs: backends.SSOHandoffs, RefreshTokens: backends.RefreshTokens, MemberCount: memberCount, Health: backends.HealthCheck(),
-		APITokens:         backends.APITokens,
-		ContentComponents: backends.ContentComponents,
+		APITokens: backends.APITokens,
+		// Built-in content (the Expert builder) overlays the stored components.
+		ContentComponents: contentbuiltin.Overlay(backends.ContentComponents),
 		ContentJobs:       contentJobs(backends.BridgeJobs),
 		OrgSync: &orgsync.Syncer{
 			Settings: backends.Settings, Tenants: backends.Tenant, Rooms: backends.Room,

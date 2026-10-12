@@ -69,6 +69,8 @@ func TestRouteLabel(t *testing.T) {
 		"/v1/content-components/effective":                 "/v1/content-components/effective",
 		"/v1/content-components/cc_1/versions/1.2.0/ack":   "/v1/content-components/:id/versions/:id/ack",
 		"/v1/content-uses":                                 "/v1/content-uses",
+		"/v1/artifacts/builtin/9f2c":                       "/v1/artifacts/:id/:id",
+		"/v1/content-components/cc_builtin_expert-builder": "/v1/content-components/:id",
 		"/v1/rooms/r/artifacts/art_1/versions/3/thumbnail": "/v1/rooms/:id/artifacts/:id/versions/:id/thumbnail",
 		"/v1/rooms/r/artifacts/a/versions/3/site-ticket":   "/v1/rooms/:id/artifacts/:id/versions/:id/site-ticket",
 		"/v1/public/shares/bsh_x_secret":                   "/v1/public/shares/:id",
