@@ -671,3 +671,13 @@ own) as the clicking member; the validator's message shows inline.
 same visibility function, in a separate `contentComponents` array (the
 desktop's executable catalog decodes `components` strictly; nothing of a
 content component runs as a supervised process).
+
+**The Library as an agent reads it.** With a `?job=&room=` grant
+(`contentGrant`, honored like the content routes) `GET /v1/components` is
+the job requester's Library: `contentComponents` (`contentuse.Visible`) and
+only the MCP tools of `components` (`extpipe.MemberVisibility`, each with
+`publishedAtMs`, when the platform installed that version), never the
+executable catalog a desktop supervises. `roomlog.ReadLibrary` is its one
+reader: the room tools' `list_components` and the bridge's
+`.room/library.md` (room-tools.md, "What every agent is told"). Nothing on
+the agent side re-derives visibility.

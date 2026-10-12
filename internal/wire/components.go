@@ -115,6 +115,8 @@ type MemberComponent struct {
 	Installed     bool                    `json:"installed"`
 	Managed       bool                    `json:"managed"`
 	InstalledAtMs int64                   `json:"installedAtMs,omitempty"`
+	// PublishedAtMs is when the platform installed this version.
+	PublishedAtMs int64 `json:"publishedAtMs,omitempty"`
 	// MemberInstalls counts the members who opted in (the platform list's
 	// adoption.memberInstalls).
 	MemberInstalls int `json:"memberInstalls,omitempty"`

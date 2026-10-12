@@ -13,7 +13,19 @@ import (
 	"github.com/luckylhb90/bnbloc/internal/wire"
 )
 
-func (s *Service) handleComponents(w http.ResponseWriter, r *http.Request, claims auth.Claims) {
+// handleComponents is the member catalog: the executable components the
+// member may use and their Library's content components. With a ?job=&room=
+// grant (contentGrant: the bridge running the job acts as its requester) it
+// is the requester's Library as an agent reads it (the room tools'
+// list_components, the bridge's .room/library.md): content components and
+// MCP tools only, never the executable catalog a desktop supervises.
+func (s *Service) handleComponents(w http.ResponseWriter, r *http.Request, caller auth.Claims) {
+	actor, ok := s.contentCaller(w, r, caller, grantHonored)
+	if !ok {
+		return
+	}
+	claims := actor.Claims
+	library := actor.Job != nil
 	view, err := s.loadMemberComponents(r.Context(), claims)
 	if err != nil {
 		obs.ServerError(w, "load components failed", err)
@@ -35,7 +47,7 @@ func (s *Service) handleComponents(w http.ResponseWriter, r *http.Request, claim
 	onlyKind := strings.TrimSpace(r.URL.Query().Get("kind"))
 	out := make([]wire.MemberComponent, 0, len(view.list))
 	for _, rec := range view.list {
-		if !componentKindVisibleInMemberCatalog(componentKindForName(rec)) || (onlyKind != "" && rec.Kind != onlyKind) {
+		if !componentKindVisibleInMemberCatalog(componentKindForName(rec)) || (onlyKind != "" && rec.Kind != onlyKind) || (library && !isMCP(rec)) {
 			continue
 		}
 		vis := view.visibility(rec)
@@ -62,6 +74,7 @@ func (s *Service) handleComponents(w http.ResponseWriter, r *http.Request, claim
 			Installed:       vis.Installed,
 			Managed:         vis.Managed,
 			InstalledAtMs:   vis.InstalledAtMs,
+			PublishedAtMs:   rec.InstalledAtMs,
 			MemberInstalls:  memberCounts[componentKey(rec.Kind, rec.Name)],
 		}
 		if vis.Installed {

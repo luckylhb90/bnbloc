@@ -25,6 +25,7 @@ import (
 // ?job= outright. A new content route must be added here.
 var contentRouteGrants = map[string]jobGrant{
 	"GET /v1/content-components":                              grantHonored,
+	"GET /v1/components":                                      grantHonored,
 	"POST /v1/content-components":                             grantHonored,
 	"POST /v1/content-components/import":                      grantHonored,
 	"GET /v1/content-components/effective":                    grantHonored,
@@ -53,7 +54,7 @@ var contentRouteGrants = map[string]jobGrant{
 // route.
 func TestJobGrantHonoredOrRefused(t *testing.T) {
 	registered := map[string]bool{}
-	route := regexp.MustCompile(`"((?:GET|POST|PUT|PATCH|DELETE) /v1/content-[^"]*)"`)
+	route := regexp.MustCompile(`"((?:GET|POST|PUT|PATCH|DELETE) /v1/(?:content-[^"]*|components))"`)
 	files, _ := filepath.Glob("*.go")
 	for _, f := range files {
 		if strings.HasSuffix(f, "_test.go") {

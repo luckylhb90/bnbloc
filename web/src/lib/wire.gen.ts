@@ -725,6 +725,8 @@ export interface MemberComponent {
   installed: boolean;
   managed: boolean;
   installedAtMs?: number;
+  // PublishedAtMs is when the platform installed this version.
+  publishedAtMs?: number;
   // MemberInstalls counts the members who opted in (the platform list's
   // adoption.memberInstalls).
   memberInstalls?: number;
