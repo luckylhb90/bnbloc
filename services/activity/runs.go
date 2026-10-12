@@ -343,6 +343,9 @@ func (v *runViewer) record(j store.AgentJob, detail bool) wire.AgentRun {
 			UpdatedAtMs:  j.UpdatedAtMs,
 		},
 	}
+	if j.DispatchedByJobID != "" {
+		run.DispatchedBy = &wire.AgentRunDispatch{JobID: j.DispatchedByJobID, Depth: j.DispatchDepth}
+	}
 	// A failure's diagnostics say why; a replied job may carry a warning
 	// (the drive ended in error after a reply was already posted). A requeued
 	// retry keeps the last attempt's error while it waits.

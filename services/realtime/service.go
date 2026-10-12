@@ -120,6 +120,12 @@ type Service struct {
 	// offline (409 platform_agent_offline) before any job exists. Nil
 	// disables the guard.
 	PlatformAgents *PlatformAgentGuard
+	// Dispatches backs the agent dispatch route (dispatch.go): the parent
+	// job chain, a parent's dispatches and bridge owners. Nil answers the
+	// route 503. Audit records every dispatch decision (extension_audit kind
+	// agent_dispatch); nil records nothing.
+	Dispatches DispatchStore
+	Audit      store.ExtensionAuditStore
 	// Peers is the scale-out replica set (scaleout.go): requests for a room
 	// or member another replica owns are forwarded there, and work produced
 	// here for such keys crosses over internal peer routes. Nil is a single
@@ -216,6 +222,10 @@ func (s *Service) Handler() http.Handler {
 	// feed as a forward cursor, and the history-only import write.
 	mux.Handle("GET /internal/v1/rooms/{roomId}/feed", internal(s.handleInternalFeed))
 	mux.Handle("POST /internal/v1/rooms/{roomId}/import", internal(s.handleInternalImport))
+	// Agent dispatch (room tools): a bridge, signed as its owner by the
+	// gateway, posts a task for another agent on behalf of the requester of
+	// the job it is running. Room-keyed, so it runs on the room's owner.
+	mux.Handle("POST /internal/v1/rooms/{roomId}/dispatch", internal(s.handleInternalDispatch))
 	// Replica-to-replica routes (scaleout.go).
 	s.registerPeerRoutes(mux, internal)
 	// Scale-out: release the state of keys this replica stops owning after
@@ -585,7 +595,7 @@ func (s *Service) handleChat(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid json body", http.StatusBadRequest)
 		return
 	}
-	seq, err := s.PostChat(r.Context(), ChatPost{
+	posted, err := s.PostChat(r.Context(), ChatPost{
 		RoomID:        roomID,
 		Author:        userID,
 		Text:          body.Text,
@@ -600,7 +610,7 @@ func (s *Service) handleChat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]int64{"sequence": seq})
+	_ = json.NewEncoder(w).Encode(map[string]int64{"sequence": posted.Sequence})
 }
 
 // writeChatPostErr maps a PostChat error to its HTTP status.

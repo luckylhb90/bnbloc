@@ -67,50 +67,63 @@ type ChatPost struct {
 	// Scheduled marks a message the scheduler posted (payload.scheduled), so
 	// clients can badge it. Never set for a typed message.
 	Scheduled *wire.ScheduledMarker
+	// Dispatched marks a message an agent dispatched through the room tools
+	// (payload.dispatchedBy); the agent job it creates records the parent
+	// job and depth. Never set for a typed message.
+	Dispatched *wire.DispatchMarker
+}
+
+// ChatPosted is what PostChat did: the message's sequence and, for an agent
+// recipient, the job it queued (nil for a people-only message, an
+// idempotent retry of an earlier post, or a job write that failed).
+type ChatPosted struct {
+	Sequence int64
+	Job      *store.AgentJob
 }
 
 // PostChat validates, persists, and publishes a chat message, then creates
 // the agent job for an agent recipient. It returns the message's sequence
-// (the original one for a clientMsgId already seen). Errors: errEmptyMessage,
-// errMessageTooLong, errBadAttachment, errUnknownChannel,
-// errAgentInPeopleChat, errPlatformAgentOffline, or a persistence failure.
-func (s *Service) PostChat(ctx context.Context, p ChatPost) (int64, error) {
+// (the original one for a clientMsgId already seen) and the queued job.
+// Errors: errEmptyMessage, errMessageTooLong, errBadAttachment,
+// errUnknownChannel, errAgentInPeopleChat, errPlatformAgentOffline, or a
+// persistence failure.
+func (s *Service) PostChat(ctx context.Context, p ChatPost) (ChatPosted, error) {
 	if len(p.Text) > maxChatTextBytes {
-		return 0, errMessageTooLong
+		return ChatPosted{}, errMessageTooLong
 	}
 	text := strings.TrimSpace(p.Text)
 	attachments, err := s.validateAttachmentIDs(ctx, p.RoomID, p.AttachmentIDs)
 	if err != nil {
-		return 0, errBadAttachment{err}
+		return ChatPosted{}, errBadAttachment{err}
 	}
 	if text == "" && len(attachments) == 0 {
-		return 0, errEmptyMessage
+		return ChatPosted{}, errEmptyMessage
 	}
 	// Idempotency: a retry carrying a client id we already stored returns the
 	// original sequence without re-publishing (no duplicate message).
 	if p.ClientMsgID != "" && s.Chat != nil {
 		if seq, found := s.Chat.LookupClientMsg(ctx, p.RoomID, p.ClientMsgID); found {
-			return seq, nil
+			return ChatPosted{Sequence: seq}, nil
 		}
 	}
 	channelID, err := s.resolveChannel(ctx, p.RoomID, p.ChannelID)
 	if err != nil {
-		return 0, err
+		return ChatPosted{}, err
 	}
 	agent := p.Recipient != nil && p.Recipient.Provider != ""
 	if agent {
 		// The people chat is human-only: no agent is ever driven from it.
 		people, err := s.isPeopleChannel(ctx, p.RoomID, channelID)
 		if err != nil {
-			return 0, fmt.Errorf("channel lookup failed: %w", err)
+			return ChatPosted{}, fmt.Errorf("channel lookup failed: %w", err)
 		}
 		if people {
-			return 0, errAgentInPeopleChat
+			return ChatPosted{}, errAgentInPeopleChat
 		}
 		// A platform agent whose host is offline is refused before anything
 		// is published or queued.
 		if err := s.checkPlatformAgentOnline(ctx, p.RoomID, p.Author, p.Recipient); err != nil {
-			return 0, err
+			return ChatPosted{}, err
 		}
 	}
 	payload := map[string]any{"userId": p.Author, "text": text}
@@ -125,6 +138,9 @@ func (s *Service) PostChat(ctx context.Context, p ChatPost) (int64, error) {
 	}
 	if p.Scheduled != nil {
 		payload["scheduled"] = map[string]any{"scheduleId": p.Scheduled.ScheduleID}
+	}
+	if p.Dispatched != nil {
+		payload["dispatchedBy"] = *p.Dispatched
 	}
 	if agent {
 		rp := map[string]any{
@@ -158,20 +174,21 @@ func (s *Service) PostChat(ctx context.Context, p ChatPost) (int64, error) {
 	}
 	d, err := s.durable(ctx, ev, p.Author, p.ClientMsgID)
 	if err != nil {
-		return 0, fmt.Errorf("message persistence failed: %w", err)
+		return ChatPosted{}, fmt.Errorf("message persistence failed: %w", err)
 	}
 	ev, err = s.Hub.PublishCommit(ev, d)
 	if errors.Is(err, store.ErrDuplicateClientMsg) {
 		// A concurrent send with the same client id won the race (in the same
 		// commit batch, or already in history): the hub answers its sequence,
 		// exactly like the idempotent retry above.
-		return ev.Sequence, nil
+		return ChatPosted{Sequence: ev.Sequence}, nil
 	}
 	if err != nil {
 		log.Printf("realtime: persist room=%s kind=%s: %v", p.RoomID, ev.Kind, err)
-		return 0, fmt.Errorf("message persistence failed: %w", err)
+		return ChatPosted{}, fmt.Errorf("message persistence failed: %w", err)
 	}
 	s.deliverPluginEvent(ctx, ev)
+	posted := ChatPosted{Sequence: ev.Sequence}
 	if agent && s.BridgeJobs != nil {
 		coreName := strings.TrimSpace(p.Recipient.Core)
 		var model, reasoningEffort string
@@ -183,28 +200,38 @@ func (s *Service) PostChat(ctx context.Context, p ChatPost) (int64, error) {
 		// may be zero or skewed; letting it into the queue would make lease and
 		// timeout decisions fire against a bogus clock.
 		nowMs := time.Now().UnixMilli()
+		var parentJobID string
+		var depth int
+		if p.Dispatched != nil {
+			parentJobID, depth = p.Dispatched.JobID, p.Dispatched.Depth
+		}
 		job, err := s.BridgeJobs.PutAgentJob(ctx, store.AgentJob{
-			JobID:           ids.New("job_"),
-			RoomID:          p.RoomID,
-			ChannelID:       channelID,
-			MessageSeq:      ev.Sequence,
-			ClientMsgID:     p.ClientMsgID,
-			RequesterUserID: p.Author,
-			OwnerUserID:     p.Recipient.OwnerID,
-			Core:            coreName,
-			Provider:        p.Recipient.Provider,
-			TargetID:        strings.Trim(strings.Join([]string{coreName, p.Recipient.Provider}, "/"), "/"),
-			MessageText:     text,
-			AttachmentIDs:   p.AttachmentIDs,
-			Model:           model,
-			ReasoningEffort: reasoningEffort,
-			Status:          store.AgentJobQueued,
-			CreatedAtMs:     nowMs,
-			UpdatedAtMs:     nowMs,
+			JobID:             ids.New("job_"),
+			RoomID:            p.RoomID,
+			ChannelID:         channelID,
+			MessageSeq:        ev.Sequence,
+			ClientMsgID:       p.ClientMsgID,
+			RequesterUserID:   p.Author,
+			OwnerUserID:       p.Recipient.OwnerID,
+			Core:              coreName,
+			Provider:          p.Recipient.Provider,
+			TargetID:          strings.Trim(strings.Join([]string{coreName, p.Recipient.Provider}, "/"), "/"),
+			MessageText:       text,
+			AttachmentIDs:     p.AttachmentIDs,
+			Model:             model,
+			ReasoningEffort:   reasoningEffort,
+			Status:            store.AgentJobQueued,
+			CreatedAtMs:       nowMs,
+			UpdatedAtMs:       nowMs,
+			DispatchedByJobID: parentJobID,
+			DispatchDepth:     depth,
 		})
-		if err == nil {
+		if err != nil {
+			log.Printf("realtime: agent job room=%s seq=%d: %v", p.RoomID, ev.Sequence, err)
+		} else {
+			posted.Job = &job
 			s.Hub.Publish(wire.Event{RoomID: p.RoomID, ChannelID: channelID, Kind: "agent_job_created", Payload: job, AtUnixMs: nowMs})
 		}
 	}
-	return ev.Sequence, nil
+	return posted, nil
 }

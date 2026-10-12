@@ -188,6 +188,8 @@ var routeWords = map[string]bool{
 	"profile": true,
 	// realtime replica-to-replica routes (scale-out by key ownership).
 	"desktop": true, "notifications": true, "post": true,
+	// agent dispatch (room tools): /v1 + /internal/v1 rooms/{id}/dispatch.
+	"dispatch": true,
 }
 
 // idCollections name segments whose NEXT segment is always an identifier, even

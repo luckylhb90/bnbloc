@@ -111,10 +111,3 @@ func (m *MySQLBridgeJobs) BridgeOwner(ctx context.Context, bridgeID string) (str
 	}
 	return owner, err
 }
-
-// AgentDispatches returns the bridge-job store's dispatch read side (nil when
-// the configured store does not provide one).
-func (b *Backends) AgentDispatches() AgentDispatchReader {
-	r, _ := b.BridgeJobs.(AgentDispatchReader)
-	return r
-}

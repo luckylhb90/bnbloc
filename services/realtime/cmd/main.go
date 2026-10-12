@@ -60,6 +60,10 @@ func main() {
 	// per channel.
 	svc.Channels = backends.Channel
 	svc.BridgeJobs = backends.BridgeJobs
+	if d, ok := backends.BridgeJobs.(realtimehttp.DispatchStore); ok {
+		svc.Dispatches = d
+	}
+	svc.Audit = backends.ExtAudit
 	// A chat to a platform agent whose host is offline is refused before a
 	// job exists (shared grants, policy and bridge advertisements).
 	svc.PlatformAgents = &realtimehttp.PlatformAgentGuard{Grants: backends.Grant, Settings: backends.Settings, Bridges: backends.BridgeJobs}

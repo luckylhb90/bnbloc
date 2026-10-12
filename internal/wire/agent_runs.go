@@ -112,6 +112,9 @@ type AgentRun struct {
 	Phases        AgentRunPhases  `json:"phases"`
 	Reply         *AgentRunReply  `json:"reply,omitempty"`
 	Usage         *AgentRunUsage  `json:"usage,omitempty"`
+	// DispatchedBy is set when an agent dispatched this run through the room
+	// tools (the parent job and the hop depth).
+	DispatchedBy *AgentRunDispatch `json:"dispatchedBy,omitempty"`
 	// Redacted marks a run whose request/reply text and diagnostics are
 	// withheld because the viewer is not a member of the run's room.
 	Redacted bool `json:"redacted,omitempty"`

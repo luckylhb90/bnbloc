@@ -79,7 +79,7 @@ func newCluster(t *testing.T, n int) *cluster {
 			return c.chat.MaxRoomSeq(tenant.NewContext(context.Background(), tenant.Default), room, "")
 		}
 		r.svc = &Service{
-			Hub: hub, Membership: c.members, Chat: c.chat, BridgeJobs: jobs,
+			Hub: hub, Membership: c.members, Chat: c.chat, BridgeJobs: jobs, Dispatches: jobs,
 			Schedules: c.sched, RoomRoles: schedRoles{rooms: map[string]bool{}},
 			PluginHooks: fix.dispatcher, Peers: NewPeers(set),
 		}

@@ -385,7 +385,8 @@ func (s *Service) postScheduled(ctx context.Context, sc wire.RoomSchedule, slot 
 	if sc.Recipient.Kind == wire.ScheduleRecipientAgent {
 		post.Recipient = &ChatRecipient{OwnerID: sc.Recipient.OwnerID, Provider: sc.Recipient.Provider, Core: sc.Recipient.Core}
 	}
-	return s.PostChat(ctx, post)
+	posted, err := s.PostChat(ctx, post)
+	return posted.Sequence, err
 }
 
 // ---------------------------------------------------------------- scheduler
