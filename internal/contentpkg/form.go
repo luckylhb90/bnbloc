@@ -24,6 +24,9 @@ type Form struct {
 	QuickPrompts []QuickPrompt `json:"quickPrompts,omitempty"`
 	Welcome      string        `json:"welcome,omitempty"`
 	Skills       []FormSkill   `json:"skills,omitempty"`
+
+	// Team makes an expert a team (its roster).
+	Team *TeamSpec `json:"team,omitempty"`
 }
 
 // FormSkill is one skill written in the form: its SKILL.md is generated
@@ -126,6 +129,7 @@ func yamlScalar(s string) string {
 func expertFromForm(f Form, m *Manifest, files map[string][]byte) error {
 	m.QuickPrompts = f.QuickPrompts
 	m.Welcome = strings.TrimSpace(f.Welcome)
+	m.Team = f.Team
 	files[InstructionsFile] = []byte(strings.TrimSpace(f.Instructions) + "\n")
 	for _, s := range f.Skills {
 		files[skillDir(KindExpert, s.Name)+"/SKILL.md"] = SkillMarkdown(s.Name, s.Description, s.Body)
@@ -134,8 +138,8 @@ func expertFromForm(f Form, m *Manifest, files map[string][]byte) error {
 }
 
 func skillPackFromForm(f Form, m *Manifest, files map[string][]byte) error {
-	if strings.TrimSpace(f.Instructions) != "" || len(f.QuickPrompts) > 0 || f.Welcome != "" {
-		return fmt.Errorf("instructions, quick prompts and a welcome belong to experts")
+	if strings.TrimSpace(f.Instructions) != "" || len(f.QuickPrompts) > 0 || f.Welcome != "" || f.Team != nil {
+		return fmt.Errorf("instructions, quick prompts, a welcome and a team belong to experts")
 	}
 	for _, s := range f.Skills {
 		m.Skills = append(m.Skills, s.Name)

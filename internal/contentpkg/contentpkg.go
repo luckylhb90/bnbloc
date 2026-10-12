@@ -87,8 +87,8 @@ type Manifest struct {
 	// the room (INSTRUCTIONS.md holds the always-on part).
 	QuickPrompts []QuickPrompt `json:"quickPrompts,omitempty"`
 	Welcome      string        `json:"welcome,omitempty"`
-	// Team is reserved for expert teams (a later delivery step); a manifest
-	// that sets it is refused until teams exist.
+	// Team makes the expert a team: the lead wears it (INSTRUCTIONS.md is
+	// the SOP) and dispatches to the roster's roles (team.go).
 	Team *TeamSpec `json:"team,omitempty"`
 
 	// Skill pack: the slugs of its skills (<slug>/SKILL.md each).
@@ -116,12 +116,6 @@ type MCPRequirement struct {
 type QuickPrompt struct {
 	Title  string `json:"title"`
 	Prompt string `json:"prompt"`
-}
-
-// TeamSpec is the reserved team block of an expert.
-type TeamSpec struct {
-	Lead    string           `json:"lead,omitempty"`
-	Members []map[string]any `json:"members,omitempty"`
 }
 
 // Reference is a parsed "name@range" requirement.

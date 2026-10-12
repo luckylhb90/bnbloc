@@ -147,7 +147,12 @@ func validateEnvelope(m Manifest, opts Options) error {
 		return err
 	}
 	if m.Team != nil {
-		return fmt.Errorf("team experts are not supported yet")
+		if m.Kind != KindExpert {
+			return fmt.Errorf("a team belongs to an expert")
+		}
+		if err := validateTeam(*m.Team); err != nil {
+			return err
+		}
 	}
 	r := m.Requires
 	if len(r.Skills)+len(r.Prompts)+len(r.MCP)+len(r.Permissions) > maxRequires {

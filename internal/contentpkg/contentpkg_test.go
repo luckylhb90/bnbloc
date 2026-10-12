@@ -116,7 +116,6 @@ func TestValidateRefuses(t *testing.T) {
 		"mcp unknown tool":   {"requires": map[string]any{"mcp": []map[string]any{{"name": "browser"}}, "permissions": []string{"mcp.stdio"}}},
 		"stdio without mcp":  {"requires": map[string]any{"permissions": []string{"mcp.stdio"}}},
 		"bad skill ref":      {"requires": map[string]any{"skills": []string{"x@^banana"}}},
-		"team":               {"team": map[string]any{"lead": "x"}},
 		"unknown field":      {"surprise": true},
 		"skills on expert":   {"skills": []string{"review"}},
 		"multiline display":  {"displayName": "a\nb"},
