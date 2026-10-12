@@ -21,7 +21,7 @@ var _ ContentComponentStore = (*MySQLContentComponents)(nil)
 
 const contentComponentCols = `id, kind, name, tenant_id, owner, scope, status, latest_version, display_name, description, category, source_id, shared_by, enabled_tenants, created_at_ms, updated_at_ms`
 
-func scanContentComponent(row interface{ Scan(...any) error }) (ContentComponent, error) {
+func scanContentComponent(row rowScanner) (ContentComponent, error) {
 	var c ContentComponent
 	var scope, status string
 	var tenants sql.NullString
@@ -64,7 +64,7 @@ func isOrgNameClash(err error) bool {
 
 const contentVersionCols = `component_id, version, manifest_json, bundle_blob_key, sha256, size_bytes, signature, created_by, created_at_ms`
 
-func scanContentVersion(row interface{ Scan(...any) error }) (ContentComponentVersion, error) {
+func scanContentVersion(row rowScanner) (ContentComponentVersion, error) {
 	var v ContentComponentVersion
 	var manifest []byte
 	var sig sql.NullString
@@ -122,6 +122,8 @@ func (s *MySQLContentComponents) CreateContentComponent(ctx context.Context, c C
 }
 
 func (s *MySQLContentComponents) AddContentComponentVersion(ctx context.Context, c ContentComponent, prevLatest string, v ContentComponentVersion) error {
+	// cross-tenant: content ids are global (platform content spans tenants);
+	// callers decide visibility (extpipe.MemberVisibility).
 	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -147,6 +149,8 @@ func (s *MySQLContentComponents) AddContentComponentVersion(ctx context.Context,
 }
 
 func (s *MySQLContentComponents) GetContentComponent(ctx context.Context, id string) (ContentComponent, error) {
+	// cross-tenant: content ids are global (platform content spans tenants);
+	// callers decide visibility (extpipe.MemberVisibility).
 	c, err := scanContentComponent(s.DB.QueryRowContext(ctx, `SELECT `+contentComponentCols+` FROM content_components WHERE id = ?`, id))
 	if errors.Is(err, sql.ErrNoRows) {
 		return ContentComponent{}, ErrContentNotFound
@@ -188,42 +192,12 @@ func (s *MySQLContentComponents) ListContentComponents(ctx context.Context, q Co
 	if len(where) > 0 {
 		query += " WHERE " + strings.Join(where, " AND ")
 	}
-	query += fmt.Sprintf(" ORDER BY updated_at_ms DESC, id LIMIT %d", contentLimit(q.Limit))
-	rows, err := s.DB.QueryContext(ctx, query, args...)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	out := []ContentComponent{}
-	for rows.Next() {
-		c, err := scanContentComponent(rows)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, c)
-	}
-	return out, rows.Err()
-}
-
-func (s *MySQLContentComponents) queryVersions(ctx context.Context, query string, args ...any) ([]ContentComponentVersion, error) {
-	rows, err := s.DB.QueryContext(ctx, query, args...)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	out := []ContentComponentVersion{}
-	for rows.Next() {
-		v, err := scanContentVersion(rows)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, v)
-	}
-	return out, rows.Err()
+	query += " ORDER BY updated_at_ms DESC, id LIMIT ?"
+	return queryAll(ctx, s.DB, query, scanContentComponent, append(args, contentLimit(q.Limit))...)
 }
 
 func (s *MySQLContentComponents) ListContentComponentVersions(ctx context.Context, componentID string) ([]ContentComponentVersion, error) {
-	return s.queryVersions(ctx, `SELECT `+contentVersionCols+` FROM content_component_versions WHERE component_id = ? ORDER BY created_at_ms DESC, version DESC LIMIT ?`, componentID, MaxContentList)
+	return queryAll(ctx, s.DB, `SELECT `+contentVersionCols+` FROM content_component_versions WHERE component_id = ? ORDER BY created_at_ms DESC, version DESC LIMIT ?`, scanContentVersion, componentID, MaxContentList)
 }
 
 func (s *MySQLContentComponents) GetContentComponentVersion(ctx context.Context, componentID, version string) (ContentComponentVersion, error) {
@@ -234,11 +208,24 @@ func (s *MySQLContentComponents) GetContentComponentVersion(ctx context.Context,
 	return v, err
 }
 
-func (s *MySQLContentComponents) ContentVersionsByBlob(ctx context.Context, key string) ([]ContentComponentVersion, error) {
-	return s.queryVersions(ctx, `SELECT `+contentVersionCols+` FROM content_component_versions WHERE bundle_blob_key = ? LIMIT ?`, key, MaxContentList)
+// ContentComponentsByBlob is one query: the versions bundling the key
+// (idx_content_versions_blob) semi-joined to the components in reach (see
+// ContentBlobQuery.reaches, its memory form).
+func (s *MySQLContentComponents) ContentComponentsByBlob(ctx context.Context, q ContentBlobQuery) ([]ContentComponent, error) {
+	// cross-tenant: platform content spans tenants; the reach names the tenant.
+	return queryAll(ctx, s.DB, `SELECT `+contentComponentCols+` FROM content_components
+  WHERE id IN (SELECT component_id FROM content_component_versions WHERE bundle_blob_key = ?)
+    AND (scope = ?
+      OR (tenant_id = ? AND (scope = ? OR (? <> '' AND owner = ?)))
+      OR (? <> '' AND id IN (SELECT component_id FROM content_component_uses WHERE scope_kind = ? AND scope_id = ?)))
+  ORDER BY id LIMIT ?`, scanContentComponent,
+		q.Key, string(ContentScopePlatform), q.Tenant, string(ContentScopeOrg), q.Subject, q.Subject,
+		q.RoomID, string(ContentUseRoom), q.RoomID, MaxContentList)
 }
 
 func (s *MySQLContentComponents) DeleteContentComponent(ctx context.Context, id string) error {
+	// cross-tenant: content ids are global (platform content spans tenants);
+	// callers decide visibility (extpipe.MemberVisibility).
 	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -261,6 +248,8 @@ func (s *MySQLContentComponents) DeleteContentComponent(ctx context.Context, id 
 }
 
 func (s *MySQLContentComponents) SetContentComponentStatus(ctx context.Context, id string, status ContentStatus, atMs int64) error {
+	// cross-tenant: content ids are global (platform content spans tenants);
+	// callers decide visibility (extpipe.MemberVisibility).
 	// Activating an organization row claims its name: a row that predates
 	// the name key may hold none (2026_10_content_org_names kept the
 	// oldest of any duplicates).
@@ -276,6 +265,8 @@ func (s *MySQLContentComponents) SetContentComponentStatus(ctx context.Context, 
 }
 
 func (s *MySQLContentComponents) SetContentComponentTenants(ctx context.Context, id string, tenants []string, atMs int64) error {
+	// cross-tenant: content ids are global (platform content spans tenants);
+	// callers decide visibility (extpipe.MemberVisibility).
 	arg, err := contentTenantsArg(tenants)
 	if err != nil {
 		return err
@@ -298,7 +289,7 @@ func (s *MySQLContentComponents) PutContentUse(ctx context.Context, u ContentUse
 			string(u.ScopeKind), u.ScopeID, u.ComponentID, u.TenantID, u.Kind, u.PinnedVersion, u.CreatedBy, u.CreatedAtMs)
 		return err
 	}
-	_, err := s.DB.ExecContext(ctx, `INSERT INTO content_component_uses
+	res, err := s.DB.ExecContext(ctx, `INSERT INTO content_component_uses
   (scope_kind, scope_id, component_id, tenant_id, kind, pinned_version, created_by, created_at_ms)
   SELECT ?, ?, id, ?, ?, ?, ?, ? FROM content_components WHERE id = ?
   ON DUPLICATE KEY UPDATE pinned_version = VALUES(pinned_version)`,
@@ -306,44 +297,34 @@ func (s *MySQLContentComponents) PutContentUse(ctx context.Context, u ContentUse
 	if err != nil {
 		return err
 	}
-	var one int
-	if err := s.DB.QueryRowContext(ctx, `SELECT 1 FROM content_component_uses WHERE scope_kind = ? AND scope_id = ? AND component_id = ?`,
-		string(u.ScopeKind), u.ScopeID, u.ComponentID).Scan(&one); errors.Is(err, sql.ErrNoRows) {
-		return ErrContentNotFound
-	} else if err != nil {
-		return err
-	}
-	return nil
+	// The INSERT ... SELECT matches nothing only when the component is gone
+	// (an unchanged duplicate still counts: clientFoundRows).
+	return requireMatched(res, ErrContentNotFound)
 }
 
 func (s *MySQLContentComponents) DeleteContentUse(ctx context.Context, scopeKind ContentUseScope, scopeID, componentID string) error {
+	// cross-tenant: content ids are global (platform content spans tenants);
+	// callers decide visibility (extpipe.MemberVisibility).
 	_, err := s.DB.ExecContext(ctx, `DELETE FROM content_component_uses WHERE scope_kind = ? AND scope_id = ? AND component_id = ?`, string(scopeKind), scopeID, componentID)
 	return err
 }
 
 func (s *MySQLContentComponents) ListContentUses(ctx context.Context, scopeKind ContentUseScope, scopeID string) ([]ContentUse, error) {
-	rows, err := s.DB.QueryContext(ctx, `SELECT scope_kind, scope_id, component_id, tenant_id, kind, pinned_version, created_by, created_at_ms
-  FROM content_component_uses WHERE scope_kind = ? AND scope_id = ? ORDER BY created_at_ms, component_id LIMIT ?`, string(scopeKind), scopeID, MaxContentList)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	out := []ContentUse{}
-	for rows.Next() {
+	return queryAll(ctx, s.DB, `SELECT scope_kind, scope_id, component_id, tenant_id, kind, pinned_version, created_by, created_at_ms
+  FROM content_component_uses WHERE scope_kind = ? AND scope_id = ? ORDER BY created_at_ms, component_id LIMIT ?`, func(r rowScanner) (ContentUse, error) {
 		var u ContentUse
 		var sk string
-		if err := rows.Scan(&sk, &u.ScopeID, &u.ComponentID, &u.TenantID, &u.Kind, &u.PinnedVersion, &u.CreatedBy, &u.CreatedAtMs); err != nil {
-			return nil, err
-		}
+		err := r.Scan(&sk, &u.ScopeID, &u.ComponentID, &u.TenantID, &u.Kind, &u.PinnedVersion, &u.CreatedBy, &u.CreatedAtMs)
 		u.ScopeKind = ContentUseScope(sk)
-		out = append(out, u)
-	}
-	return out, rows.Err()
+		return u, err
+	}, string(scopeKind), scopeID, MaxContentList)
 }
 
 // CountContentUses counts on idx_content_uses_component, bounded per
 // component at MaxUsageCount (a badge count, like CountMemberUses).
 func (s *MySQLContentComponents) CountContentUses(ctx context.Context, componentIDs []string) (map[string]int, error) {
+	// cross-tenant: content ids are global (platform content spans tenants);
+	// callers decide visibility (extpipe.MemberVisibility).
 	out := map[string]int{}
 	seen := map[string]bool{}
 	for _, id := range componentIDs {
@@ -378,18 +359,10 @@ func (s *MySQLContentComponents) ListContentAcks(ctx context.Context, subject st
 	for _, id := range componentIDs {
 		args = append(args, id)
 	}
-	rows, err := s.DB.QueryContext(ctx, `SELECT subject, component_id, version, acked_at_ms FROM content_permission_acks
-  WHERE subject = ? AND component_id IN (`+inPlaceholders(len(componentIDs))+`) ORDER BY component_id, version`, args...)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	for rows.Next() {
+	return queryAll(ctx, s.DB, `SELECT subject, component_id, version, acked_at_ms FROM content_permission_acks
+  WHERE subject = ? AND component_id IN (`+inPlaceholders(len(componentIDs))+`) ORDER BY component_id, version`, func(r rowScanner) (ContentAck, error) {
 		var a ContentAck
-		if err := rows.Scan(&a.Subject, &a.ComponentID, &a.Version, &a.AckedAtMs); err != nil {
-			return nil, err
-		}
-		out = append(out, a)
-	}
-	return out, rows.Err()
+		err := r.Scan(&a.Subject, &a.ComponentID, &a.Version, &a.AckedAtMs)
+		return a, err
+	}, args...)
 }

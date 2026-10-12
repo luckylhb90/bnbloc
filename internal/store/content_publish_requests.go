@@ -90,20 +90,14 @@ type ContentPublishRequestStore interface {
 	DecideContentRequest(ctx context.Context, d ContentRequestDecision) (ContentPublishRequest, error)
 	// ReopenContentRequest returns an approved request to pending: the
 	// compensating step when publishing the approved version fails, so a
-	// request is never left approved with no effect. It fails when a newer
-	// request is pending.
+	// request is never left approved with no effect. Only an approved
+	// request reopens: ErrContentRequestNotFound for an unknown one,
+	// ErrContentRequestDecided for one that is not approved (pending,
+	// declined or withdrawn) or when a newer request is pending.
 	ReopenContentRequest(ctx context.Context, id string) error
 }
 
-func contentRequestLimit(n int) int {
-	if n <= 0 {
-		return 100
-	}
-	if n > MaxContentList {
-		return MaxContentList
-	}
-	return n
-}
+func contentRequestLimit(n int) int { return clampLimit(n, 100, MaxContentList) }
 
 func (q ContentRequestQuery) admits(r ContentPublishRequest) bool {
 	return (q.TenantID == "" || r.TenantID == q.TenantID) &&
@@ -181,6 +175,9 @@ func (s *MemoryContentComponents) ReopenContentRequest(_ context.Context, id str
 	r, ok := s.requests[id]
 	if !ok {
 		return ErrContentRequestNotFound
+	}
+	if r.Status != ContentRequestApproved {
+		return ErrContentRequestDecided
 	}
 	for oid, other := range s.requests {
 		if oid != id && other.ComponentID == r.ComponentID && other.Status == ContentRequestPending {

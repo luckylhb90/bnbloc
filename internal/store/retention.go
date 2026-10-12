@@ -125,12 +125,7 @@ type PurgeRequest struct {
 	NowMs int64
 }
 
-func (r PurgeRequest) batch() int {
-	if r.Batch <= 0 || r.Batch > 5000 {
-		return 500
-	}
-	return r.Batch
-}
+func (r PurgeRequest) batch() int { return clampLimit(r.Batch, 500, 5000) }
 
 // PurgeResult counts deleted rows by item (Purged* names).
 type PurgeResult map[string]int64
@@ -151,13 +146,11 @@ type RetentionStore interface {
 	// short statement/transaction.
 	Purge(ctx context.Context, req PurgeRequest) (PurgeResult, error)
 	// ReferencedBlobKeys returns the subset of keys some row still
-	// references. The reference sources are all listed here, in one place:
-	// attachments.blob_key, artifact_versions.blob_key and .thumb_blob_key,
-	// content_component_versions.bundle_blob_key,
-	// content_drafts.bundle_blob_key, and every "sha256/<hex>" a
-	// platform setting mentions (component packages, desktop releases, the
-	// update config). A new table that stores a blob key must be added to
-	// both implementations.
+	// references: a column of blobKeySources (listed once, read by both
+	// implementations) or any "sha256/<hex>" a platform setting mentions
+	// (component packages, desktop releases, the update config). A new
+	// column that stores a blob key joins blobKeySources
+	// (TestBlobKeyColumnsReferenced).
 	ReferencedBlobKeys(ctx context.Context, keys []string) (map[string]bool, error)
 	// PurgeExpiredDrafts deletes the content drafts expired at req.NowMs
 	// (staged for a quick try, they expire instead of following a policy),
@@ -166,6 +159,72 @@ type RetentionStore interface {
 	// TryRetentionLock takes the cluster-wide retention lock without
 	// waiting; ok=false when another replica holds it. release frees it.
 	TryRetentionLock(ctx context.Context) (release func(), ok bool, err error)
+}
+
+// blobKeySource is one column that stores a blob key: MySQL reads the
+// column, the memory store reads the same values through memory.
+type blobKeySource struct {
+	table, column string
+	memory        func(m *MemoryRetention, see func(key string))
+}
+
+// blobKeySources are every column holding a blob key a row still uses, in
+// one place: MySQLRetention.ReferencedBlobKeys queries each (on its blob
+// index) and MemoryRetention.ReferencedBlobKeys reads each, so the two can
+// never list different sources. TestBlobKeyColumnsReferenced requires every
+// *blob_key column of schema.sql here, and a contract case on both
+// backends for each entry.
+var blobKeySources = []blobKeySource{
+	{"attachments", "blob_key", func(m *MemoryRetention, see func(string)) {
+		if at := m.Attachments; at != nil {
+			at.mu.Lock()
+			defer at.mu.Unlock()
+			for _, a := range at.m {
+				see(a.BlobKey)
+			}
+		}
+	}},
+	{"artifact_versions", "blob_key", func(m *MemoryRetention, see func(string)) {
+		m.eachArtifactVersion(func(v ArtifactVersion) { see(v.BlobKey) })
+	}},
+	{"artifact_versions", "thumb_blob_key", func(m *MemoryRetention, see func(string)) {
+		m.eachArtifactVersion(func(v ArtifactVersion) { see(v.ThumbnailBlobKey) })
+	}},
+	{"content_component_versions", "bundle_blob_key", func(m *MemoryRetention, see func(string)) {
+		if c := m.Content; c != nil {
+			c.mu.Lock()
+			defer c.mu.Unlock()
+			for _, vs := range c.versions {
+				for _, v := range vs {
+					see(v.BundleBlobKey)
+				}
+			}
+		}
+	}},
+	{"content_drafts", "bundle_blob_key", func(m *MemoryRetention, see func(string)) {
+		if c := m.Content; c != nil {
+			c.mu.Lock()
+			defer c.mu.Unlock()
+			for _, d := range c.drafts {
+				see(d.BundleBlobKey)
+			}
+		}
+	}},
+}
+
+// eachArtifactVersion visits every stored artifact version.
+func (m *MemoryRetention) eachArtifactVersion(fn func(ArtifactVersion)) {
+	a := m.Artifacts
+	if a == nil {
+		return
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	for _, vs := range a.versions {
+		for _, v := range vs {
+			fn(v)
+		}
+	}
 }
 
 // blobKeyInText finds blob keys mentioned in a platform setting value
@@ -448,43 +507,27 @@ func (m *MemoryRetention) purgeJobs(req PurgeRequest, out PurgeResult) {
 	}
 }
 
-// ReferencedBlobKeys answers from the memory stores and the platform
-// settings (see RetentionStore).
+// ReferencedBlobKeys answers from blobKeySources over the memory stores and
+// the platform settings (see RetentionStore).
 func (m *MemoryRetention) ReferencedBlobKeys(ctx context.Context, keys []string) (map[string]bool, error) {
-	all, err := platformBlobKeys(ctx, m.Settings)
+	platform, err := platformBlobKeys(ctx, m.Settings)
 	if err != nil {
 		return nil, err
 	}
-	if at := m.Attachments; at != nil {
-		at.mu.Lock()
-		for _, a := range at.m {
-			all[a.BlobKey] = true
-		}
-		at.mu.Unlock()
-	}
-	if a := m.Artifacts; a != nil {
-		a.mu.Lock()
-		for _, vs := range a.versions {
-			for _, v := range vs {
-				all[v.BlobKey] = true
-				all[v.ThumbnailBlobKey] = true
-			}
-		}
-		a.mu.Unlock()
-	}
+	want := make(map[string]bool, len(keys))
 	out := map[string]bool{}
 	for _, k := range keys {
-		if all[k] {
+		want[k] = true
+		if platform[strings.ToLower(k)] {
 			out[k] = true
 		}
 	}
-	if c := m.Content; c != nil {
-		want := map[string]bool{}
-		for _, k := range keys {
-			want[k] = true
-		}
-		c.referencedBlobs(want, out)
-		c.draftBlobKeys(want, out)
+	for _, src := range blobKeySources {
+		src.memory(m, func(key string) {
+			if want[key] {
+				out[key] = true
+			}
+		})
 	}
 	return out, nil
 }

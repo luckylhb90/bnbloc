@@ -5,32 +5,20 @@ import (
 	"errors"
 	"strings"
 	"testing"
-	"time"
 )
 
-func TestMemoryContentPromptUses(t *testing.T) {
-	testContentPromptUses(t, NewMemoryContentComponents(), "pu-mem")
-}
-
-func TestMySQLContentPromptUses(t *testing.T) {
-	dsn := mysqlTestDSN(t)
-	b, err := NewBackends(dsn)
-	if err != nil {
-		t.Fatalf("NewBackends: %v", err)
-	}
-	prefix := "pu-it-" + itoaBase(time.Now().UnixNano())
-	t.Cleanup(func() {
-		_, _ = b.DB.Exec(`DELETE FROM content_prompt_uses WHERE component_id LIKE ?`, prefix+"%")
-		_, _ = b.DB.Exec(`DELETE FROM content_component_versions WHERE component_id LIKE ?`, prefix+"%")
-		_, _ = b.DB.Exec(`DELETE FROM content_components WHERE id LIKE ?`, prefix+"%")
-		_ = b.DB.Close()
+func TestContractContentComponentStorePromptUses(t *testing.T) {
+	forEachBackend(t, func(t *testing.T, b *Backends) {
+		testContentPromptUses(t, b.ContentComponents, uniq("pu-"))
+		if b.DB == nil {
+			return
+		}
+		// The prompt library's table is gone (start empty).
+		var n int
+		if err := b.DB.QueryRow(`SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = 'prompts'`).Scan(&n); err != nil || n != 0 {
+			t.Fatalf("prompts table count = %d, %v", n, err)
+		}
 	})
-	testContentPromptUses(t, b.ContentComponents, prefix)
-	// The prompt library's table is gone (start empty).
-	var n int
-	if err := b.DB.QueryRow(`SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = 'prompts'`).Scan(&n); err != nil || n != 0 {
-		t.Fatalf("prompts table count = %d, %v", n, err)
-	}
 }
 
 func testContentPromptUses(t *testing.T, s ContentComponentStore, prefix string) {

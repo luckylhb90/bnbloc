@@ -107,12 +107,20 @@ func TestContentDraftStagedWornAndExpired(t *testing.T) {
 		t.Fatalf("bundle for a stray job = %d", code)
 	}
 
-	// Expired: the try's job no longer wears it.
-	stored.ExpiresAtMs = now - 1
-	if err := g.svc.ContentComponents.PutContentDraft(ctx, stored); err != nil {
+	// Expired: a try's job no longer wears it (a draft id is staged once, so
+	// the expired copy is its own draft).
+	expired := stored
+	expired.ID, expired.ExpiresAtMs = stored.ID+"-expired", now-1
+	if err := g.svc.ContentComponents.PutContentDraft(ctx, expired); err != nil {
 		t.Fatal(err)
 	}
-	if eff := effective(child.JobID); eff.Expert != nil || len(eff.Missing) != 1 || !strings.Contains(eff.Missing[0], "Drafted (draft)") {
+	late, err := g.jobs.PutAgentJob(ctx, store.AgentJob{JobID: "job-try-late", RoomID: "room-1", MessageSeq: 12, RequesterUserID: "maya", OwnerUserID: "bob", Provider: "claude",
+		Status: store.AgentJobRunning, LeaseBridgeID: "br-bob", DispatchedByJobID: "job-builder", DispatchDepth: 1,
+		ExpertID: expired.ID, ExpertVersion: "1.0.0", ExpertName: "Drafted (draft)", CreatedAtMs: 4})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if eff := effective(late.JobID); eff.Expert != nil || len(eff.Missing) != 1 || !strings.Contains(eff.Missing[0], "Drafted (draft)") {
 		t.Fatalf("expired draft = %+v", eff)
 	}
 }

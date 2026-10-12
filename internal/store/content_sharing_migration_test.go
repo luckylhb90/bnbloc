@@ -4,6 +4,8 @@ import (
 	"context"
 	"strings"
 	"testing"
+
+	"github.com/luckylhb90/bnbloc/internal/testmysql"
 )
 
 // TestContentSharingMigrationConvergesOldShape: a database deployed before
@@ -11,8 +13,7 @@ import (
 // name key, no content_publish_requests) converges on the current shape, and
 // a rerun is a no-op.
 func TestContentSharingMigrationConvergesOldShape(t *testing.T) {
-	dsn := mysqlTestDSN(t)
-	b, err := NewBackends(dsn)
+	b, err := NewBackends(testmysql.Fresh(t))
 	if err != nil {
 		t.Fatal(err)
 	}

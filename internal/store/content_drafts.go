@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"time"
 )
@@ -55,11 +56,15 @@ type ContentDraft struct {
 	ExpiresAtMs   int64
 }
 
-// Live reports whether the draft may still be worn at nowMs.
-func (d ContentDraft) Live(nowMs int64) bool { return nowMs < d.ExpiresAtMs }
+// Live reports whether the draft may still be worn at nowMs (liveAt).
+func (d ContentDraft) Live(nowMs int64) bool { return liveAt(d.ExpiresAtMs, nowMs) }
+
+// ErrContentDraftExists rejects a second draft under one id.
+var ErrContentDraftExists = errors.New("store: content draft exists")
 
 // ContentDraftStore persists staged drafts (part of the content store).
 type ContentDraftStore interface {
+	// PutContentDraft stages d; a taken id is ErrContentDraftExists.
 	PutContentDraft(ctx context.Context, d ContentDraft) error
 	// GetContentDraft returns a draft, expired or not (ErrContentNotFound
 	// once the retention pass deleted it).
@@ -71,6 +76,9 @@ func (s *MemoryContentComponents) PutContentDraft(_ context.Context, d ContentDr
 	defer s.mu.Unlock()
 	if s.drafts == nil {
 		s.drafts = map[string]ContentDraft{}
+	}
+	if _, taken := s.drafts[d.ID]; taken {
+		return ErrContentDraftExists
 	}
 	s.drafts[d.ID] = d
 	return nil
@@ -98,15 +106,4 @@ func (s *MemoryContentComponents) purgeExpiredDrafts(nowMs int64) int64 {
 		}
 	}
 	return n
-}
-
-// draftBlobKeys reports which of keys a stored draft references.
-func (s *MemoryContentComponents) draftBlobKeys(keys map[string]bool, out map[string]bool) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	for _, d := range s.drafts {
-		if keys[d.BundleBlobKey] {
-			out[d.BundleBlobKey] = true
-		}
-	}
 }

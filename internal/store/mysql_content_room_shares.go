@@ -33,23 +33,15 @@ func (s *MySQLContentComponents) ListContentRoomShares(ctx context.Context, q Co
 		query += " WHERE " + strings.Join(where, " AND ")
 	}
 	query += " ORDER BY created_at_ms, room_id, component_id LIMIT ?"
-	rows, err := s.DB.QueryContext(ctx, query, append(args, MaxContentList)...)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	out := []ContentRoomShare{}
-	for rows.Next() {
+	return queryAll(ctx, s.DB, query, func(r rowScanner) (ContentRoomShare, error) {
 		var sh ContentRoomShare
-		if err := rows.Scan(&sh.RoomID, &sh.ComponentID, &sh.TenantID, &sh.Version, &sh.SharedBy, &sh.Note, &sh.CreatedAtMs, &sh.UpdatedAtMs); err != nil {
-			return nil, err
-		}
-		out = append(out, sh)
-	}
-	return out, rows.Err()
+		err := r.Scan(&sh.RoomID, &sh.ComponentID, &sh.TenantID, &sh.Version, &sh.SharedBy, &sh.Note, &sh.CreatedAtMs, &sh.UpdatedAtMs)
+		return sh, err
+	}, append(args, MaxContentList)...)
 }
 
 func (s *MySQLContentComponents) DeleteContentRoomShare(ctx context.Context, roomID, componentID string) (bool, error) {
+	// cross-tenant: room and component ids are global; the caller owns both.
 	res, err := s.DB.ExecContext(ctx, `DELETE FROM content_room_shares WHERE room_id = ? AND component_id = ?`, roomID, componentID)
 	if err != nil {
 		return false, err

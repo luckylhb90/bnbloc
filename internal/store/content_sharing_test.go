@@ -5,27 +5,12 @@ import (
 	"errors"
 	"strings"
 	"testing"
-	"time"
 )
 
-func TestMemoryContentSharing(t *testing.T) {
-	testContentSharing(t, NewMemoryContentComponents(), "cs-mem")
-}
-
-func TestMySQLContentSharing(t *testing.T) {
-	dsn := mysqlTestDSN(t)
-	b, err := NewBackends(dsn)
-	if err != nil {
-		t.Fatalf("NewBackends: %v", err)
-	}
-	prefix := "cs-it-" + itoaBase(time.Now().UnixNano())
-	t.Cleanup(func() {
-		_, _ = b.DB.Exec(`DELETE FROM content_publish_requests WHERE component_id LIKE ?`, prefix+"%")
-		_, _ = b.DB.Exec(`DELETE FROM content_component_versions WHERE component_id LIKE ?`, prefix+"%")
-		_, _ = b.DB.Exec(`DELETE FROM content_components WHERE id LIKE ?`, prefix+"%")
-		_ = b.DB.Close()
+func TestContractContentComponentStoreSharing(t *testing.T) {
+	forEachBackend(t, func(t *testing.T, b *Backends) {
+		testContentSharing(t, b.ContentComponents, uniq("cs-"))
 	})
-	testContentSharing(t, b.ContentComponents, prefix)
 }
 
 // testContentSharing covers the step-4 store surface: copies keyed by
@@ -120,12 +105,21 @@ func testContentSharing(t *testing.T, s ContentComponentStore, prefix string) {
 	if _, err := s.DecideContentRequest(ctx, ContentRequestDecision{RequestID: r2.ID, TenantID: tid, Status: ContentRequestDeclined, By: "ada", AtMs: 13}); !errors.Is(err, ErrContentRequestDecided) {
 		t.Fatalf("second decision = %v", err)
 	}
-	// The compensating step reopens it.
+	// The compensating step reopens it; only an approved request reopens.
+	if err := s.ReopenContentRequest(ctx, r1.ID); !errors.Is(err, ErrContentRequestDecided) {
+		t.Fatalf("reopen of a withdrawn request = %v, want ErrContentRequestDecided", err)
+	}
+	if err := s.ReopenContentRequest(ctx, prefix+"-none"); !errors.Is(err, ErrContentRequestNotFound) {
+		t.Fatalf("reopen of a missing request = %v, want ErrContentRequestNotFound", err)
+	}
 	if err := s.ReopenContentRequest(ctx, r2.ID); err != nil {
 		t.Fatal(err)
 	}
 	if again, _ := s.GetContentRequest(ctx, r2.ID); again.Status != ContentRequestPending || again.DecidedBy != "" {
 		t.Fatalf("reopened = %+v", again)
+	}
+	if err := s.ReopenContentRequest(ctx, r2.ID); !errors.Is(err, ErrContentRequestDecided) {
+		t.Fatalf("reopen of a pending request = %v, want ErrContentRequestDecided", err)
 	}
 	// A reopen never makes two pending requests.
 	if _, err := s.CreateContentRequest(ctx, ContentPublishRequest{ID: prefix + "-r3", TenantID: tid, ComponentID: src.ID, Kind: src.Kind,
@@ -143,7 +137,7 @@ func testContentSharing(t *testing.T, s ContentComponentStore, prefix string) {
 	if err := s.DeleteContentComponent(ctx, src.ID); err != nil {
 		t.Fatal(err)
 	}
-	if left, _ := s.ListContentRequests(ctx, ContentRequestQuery{ComponentID: src.ID}); len(left) != 0 {
-		t.Fatalf("requests after delete = %+v", left)
+	if left, err := s.ListContentRequests(ctx, ContentRequestQuery{ComponentID: src.ID}); err != nil || left == nil || len(left) != 0 {
+		t.Fatalf("requests after delete = %#v, %v (want [])", left, err)
 	}
 }

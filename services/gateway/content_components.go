@@ -1122,18 +1122,13 @@ func (s *Service) contentBundleEntitled(ctx context.Context, actor contentActor,
 	if s.ContentComponents == nil {
 		return false, nil
 	}
-	versions, err := s.ContentComponents.ContentVersionsByBlob(ctx, key)
+	comps, err := s.ContentComponents.ContentComponentsByBlob(ctx, store.ContentBlobQuery{
+		Key: key, Subject: actor.Claims.Subject, Tenant: actor.Claims.Tenant, RoomID: actor.Room,
+	})
 	if err != nil {
 		return false, err
 	}
-	for _, v := range versions {
-		c, err := s.ContentComponents.GetContentComponent(ctx, v.ComponentID)
-		if errors.Is(err, store.ErrContentNotFound) {
-			continue
-		}
-		if err != nil {
-			return false, err
-		}
+	for _, c := range comps {
 		if extpipe.MemberVisibility(viewerOf(actor.Claims), extpipe.GateForContent(c), 0).Visible {
 			return true, nil
 		}

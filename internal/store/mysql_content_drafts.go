@@ -12,10 +12,11 @@ func (s *MySQLContentComponents) PutContentDraft(ctx context.Context, d ContentD
   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		d.ID, d.TenantID, d.RoomID, d.JobID, d.Requester, d.Author, d.Kind, d.Name, d.DisplayName, d.Version, d.ManifestJSON,
 		d.BundleBlobKey, d.SHA256, d.SizeBytes, d.CreatedAtMs, d.ExpiresAtMs)
-	return err
+	return dupAs(err, ErrContentDraftExists)
 }
 
 func (s *MySQLContentComponents) GetContentDraft(ctx context.Context, id string) (ContentDraft, error) {
+	// cross-tenant: a draft id is global; the caller checks its tenant and job.
 	var d ContentDraft
 	var manifest []byte
 	err := s.DB.QueryRowContext(ctx, `SELECT id, tenant_id, room_id, job_id, requester, author, kind, name, display_name, version, manifest_json,

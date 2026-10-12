@@ -193,8 +193,8 @@ func TestOverlayListsAndReadsBuiltins(t *testing.T) {
 	if _, err := st.GetContentComponentVersion(ctx, BuilderID, "0.0.1"); !errors.Is(err, store.ErrContentNotFound) {
 		t.Fatalf("unknown version = %v", err)
 	}
-	byBlob, err := st.ContentVersionsByBlob(ctx, vs[0].BundleBlobKey)
-	if err != nil || len(byBlob) != 1 || byBlob[0].ComponentID != BuilderID {
+	byBlob, err := st.ContentComponentsByBlob(ctx, store.ContentBlobQuery{Key: vs[0].BundleBlobKey})
+	if err != nil || len(byBlob) != 1 || byBlob[0].ID != BuilderID {
 		t.Fatalf("by blob = %+v, %v", byBlob, err)
 	}
 

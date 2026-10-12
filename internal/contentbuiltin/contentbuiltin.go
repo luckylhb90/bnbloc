@@ -312,17 +312,19 @@ func (o *overlay) GetContentComponentVersion(ctx context.Context, componentID, v
 	return o.ContentComponentStore.GetContentComponentVersion(ctx, componentID, version)
 }
 
-func (o *overlay) ContentVersionsByBlob(ctx context.Context, key string) ([]store.ContentComponentVersion, error) {
-	if strings.HasPrefix(key, BundleKeyPrefix) {
-		var out []store.ContentComponentVersion
+// ContentComponentsByBlob answers a built-in bundle key with its built-in
+// components (in every member's reach); any other key from the store.
+func (o *overlay) ContentComponentsByBlob(ctx context.Context, q store.ContentBlobQuery) ([]store.ContentComponent, error) {
+	if strings.HasPrefix(q.Key, BundleKeyPrefix) {
+		out := []store.ContentComponent{}
 		for _, p := range All() {
-			if p.Version.BundleBlobKey == key {
-				out = append(out, p.Version)
+			if p.Version.BundleBlobKey == q.Key {
+				out = append(out, p.Component)
 			}
 		}
 		return out, nil
 	}
-	return o.ContentComponentStore.ContentVersionsByBlob(ctx, key)
+	return o.ContentComponentStore.ContentComponentsByBlob(ctx, q)
 }
 
 func marshalManifest(m contentpkg.Manifest) (json.RawMessage, error) {

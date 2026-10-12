@@ -6,36 +6,12 @@ import (
 	"errors"
 	"strings"
 	"testing"
-	"time"
 )
 
-func TestMemoryContentComponentStore(t *testing.T) {
-	testContentComponentStore(t, NewMemoryContentComponents(), "cc-mem")
-}
-
-func TestMySQLContentComponentStore(t *testing.T) {
-	dsn := mysqlTestDSN(t)
-	b, err := NewBackends(dsn)
-	if err != nil {
-		t.Fatalf("NewBackends: %v", err)
-	}
-	prefix := "cc-it-" + itoaBase(time.Now().UnixNano())
-	t.Cleanup(func() {
-		_, _ = b.DB.Exec(`DELETE FROM content_permission_acks WHERE component_id LIKE ?`, prefix+"%")
-		_, _ = b.DB.Exec(`DELETE FROM content_component_uses WHERE component_id LIKE ?`, prefix+"%")
-		_, _ = b.DB.Exec(`DELETE FROM content_component_versions WHERE component_id LIKE ?`, prefix+"%")
-		_, _ = b.DB.Exec(`DELETE FROM content_components WHERE id LIKE ?`, prefix+"%")
-		_ = b.DB.Close()
+func TestContractContentComponentStore(t *testing.T) {
+	forEachBackend(t, func(t *testing.T, b *Backends) {
+		testContentComponentStore(t, b.ContentComponents, uniq("cc-"))
 	})
-	testContentComponentStore(t, b.ContentComponents, prefix)
-
-	// jack's remaining version keeps its bundle referenced (blob GC keeps it).
-	kept := "sha256/" + strings.Repeat("b", 64)
-	unused := "sha256/" + strings.Repeat("9", 64)
-	refs, err := NewRetention(b).ReferencedBlobKeys(context.Background(), []string{kept, unused})
-	if err != nil || !refs[kept] || refs[unused] {
-		t.Fatalf("refs = %+v, %v", refs, err)
-	}
 }
 
 func contentVersion(id, version, blob string, at int64) ContentComponentVersion {
@@ -46,8 +22,7 @@ func contentVersion(id, version, blob string, at int64) ContentComponentVersion 
 func testContentComponentStore(t *testing.T, s ContentComponentStore, prefix string) {
 	ctx := context.Background()
 	tid := prefix + "-t"
-	blob1 := "sha256/" + strings.Repeat("a", 64)
-	blob2 := "sha256/" + strings.Repeat("b", 64)
+	blob1, blob2 := uniqBlobKey(), uniqBlobKey()
 	c := ContentComponent{ID: prefix + "-1", Kind: "bnbloc.expert.package/v1", Name: "reviewer", TenantID: tid, Owner: "maya",
 		Scope: ContentScopePersonal, Status: ContentStatusActive, DisplayName: "Reviewer", CreatedAtMs: 1, UpdatedAtMs: 1}
 	if err := s.CreateContentComponent(ctx, c, contentVersion(c.ID, "1.0.0", blob1, 1)); err != nil {
@@ -101,9 +76,17 @@ func testContentComponentStore(t *testing.T, s ContentComponentStore, prefix str
 	if _, err := s.GetContentComponentVersion(ctx, c.ID, "9.9.9"); !errors.Is(err, ErrContentNotFound) {
 		t.Fatalf("missing version = %v", err)
 	}
-	byBlob, err := s.ContentVersionsByBlob(ctx, blob2)
-	if err != nil || len(byBlob) != 2 {
-		t.Fatalf("by blob = %+v, %v", byBlob, err)
+	// Versions list newest first: by creation time, then version.
+	same := c
+	same.UpdatedAtMs = 12
+	if err := s.AddContentComponentVersion(ctx, same, "1.0.1", contentVersion(c.ID, "1.0.10", blob2, 10)); err != nil {
+		t.Fatal(err)
+	}
+	if vs := must(s.ListContentComponentVersions(ctx, c.ID))(t); len(vs) != 3 || vs[0].Version != "1.0.10" || vs[1].Version != "1.0.1" || vs[2].Version != "1.0.0" {
+		t.Fatalf("version order = %+v", vs)
+	}
+	if vs := must(s.ListContentComponentVersions(ctx, prefix+"-none"))(t); vs == nil || len(vs) != 0 {
+		t.Fatalf("versions of a missing component = %#v, want []", vs)
 	}
 
 	// Listing filters by tenant, owner, kind, scope and ids, newest first.
@@ -129,7 +112,8 @@ func testContentComponentStore(t *testing.T, s ContentComponentStore, prefix str
 	if err := s.PutContentUse(ctx, use); err != nil {
 		t.Fatal(err)
 	}
-	use.PinnedVersion, use.CreatedBy = "", "jack"
+	// A re-put moves the pinned version only (the SQL upsert's one column).
+	use.PinnedVersion, use.CreatedBy, use.CreatedAtMs, use.Kind, use.TenantID = "", "jack", 99, "other-kind", tid+"-other"
 	if err := s.PutContentUse(ctx, use); err != nil {
 		t.Fatal(err)
 	}
@@ -154,8 +138,9 @@ func testContentComponentStore(t *testing.T, s ContentComponentStore, prefix str
 		t.Fatal(err)
 	}
 	uses, err := s.ListContentUses(ctx, ContentUseRoom, prefix+"-room")
-	if err != nil || len(uses) != 1 || uses[0].PinnedVersion != "" || uses[0].CreatedBy != "maya" || uses[0].Kind != c.Kind {
-		t.Fatalf("uses = %+v, %v", uses, err)
+	if err != nil || len(uses) != 1 || uses[0].PinnedVersion != "" || uses[0].CreatedBy != "maya" || uses[0].Kind != c.Kind ||
+		uses[0].CreatedAtMs != 20 || uses[0].TenantID != tid {
+		t.Fatalf("uses after a re-put = %+v, %v; want only the pin changed", uses, err)
 	}
 	counts, err := s.CountContentUses(ctx, []string{c.ID, jack.ID})
 	if err != nil || counts[c.ID] != 2 || counts[jack.ID] != 0 {
@@ -193,25 +178,7 @@ func testContentComponentStore(t *testing.T, s ContentComponentStore, prefix str
 	if uses, _ := s.ListContentUses(ctx, ContentUseMember, "maya"); len(uses) != 0 {
 		t.Fatalf("uses after delete = %+v", uses)
 	}
-	if acks, _ := s.ListContentAcks(ctx, "jack", []string{c.ID}); len(acks) != 0 {
-		t.Fatalf("acks after delete = %+v", acks)
-	}
-}
-
-// A content bundle stays referenced (blob GC keeps it) while a version
-// names it.
-func TestMemoryRetentionKeepsContentBundles(t *testing.T) {
-	b, err := NewBackends("")
-	if err != nil {
-		t.Fatal(err)
-	}
-	key := "sha256/" + strings.Repeat("e", 64)
-	c := ContentComponent{ID: "cc-1", Kind: "k", Name: "n", Scope: ContentScopePersonal, Status: ContentStatusActive}
-	if err := b.ContentComponents.CreateContentComponent(context.Background(), c, contentVersion("cc-1", "1.0.0", key, 1)); err != nil {
-		t.Fatal(err)
-	}
-	refs, err := NewRetention(b).ReferencedBlobKeys(context.Background(), []string{key, "sha256/" + strings.Repeat("f", 64)})
-	if err != nil || !refs[key] || len(refs) != 1 {
-		t.Fatalf("refs = %+v, %v", refs, err)
+	if acks, err := s.ListContentAcks(ctx, "jack", []string{c.ID}); err != nil || acks == nil || len(acks) != 0 {
+		t.Fatalf("acks after delete = %#v, %v; want []", acks, err)
 	}
 }

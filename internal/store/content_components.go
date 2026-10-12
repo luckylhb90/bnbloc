@@ -182,7 +182,9 @@ var (
 )
 
 // ContentComponentStore persists content components. Implementations are
-// safe for concurrent use.
+// safe for concurrent use. It is not tenant-scoped by the context: content
+// ids are global (platform content spans tenants), rows carry their
+// TenantID, and callers decide visibility (extpipe.MemberVisibility).
 type ContentComponentStore interface {
 	// CreateContentComponent inserts a component with its first version
 	// (ErrContentExists on a name clash in the scope).
@@ -194,11 +196,14 @@ type ContentComponentStore interface {
 	GetContentComponent(ctx context.Context, id string) (ContentComponent, error)
 	ListContentComponents(ctx context.Context, q ContentComponentQuery) ([]ContentComponent, error)
 	// ListContentComponentVersions returns a component's versions, newest
-	// first.
+	// first (by creation time, then version descending), at most
+	// MaxContentList.
 	ListContentComponentVersions(ctx context.Context, componentID string) ([]ContentComponentVersion, error)
 	GetContentComponentVersion(ctx context.Context, componentID, version string) (ContentComponentVersion, error)
-	// ContentVersionsByBlob returns the versions whose bundle is key.
-	ContentVersionsByBlob(ctx context.Context, key string) ([]ContentComponentVersion, error)
+	// ContentComponentsByBlob answers the bundle entitlement question in one
+	// query: the components with a version bundling q.Key that are within
+	// q's reach (ContentBlobQuery), by id, at most MaxContentList.
+	ContentComponentsByBlob(ctx context.Context, q ContentBlobQuery) ([]ContentComponent, error)
 	// DeleteContentComponent removes a component, its versions, uses, acks
 	// and publish requests (the bundles become unreferenced; blob GC
 	// collects them).
@@ -211,10 +216,13 @@ type ContentComponentStore interface {
 	// lifts the restriction): platform content's tenant scope.
 	SetContentComponentTenants(ctx context.Context, id string, tenants []string, atMs int64) error
 
-	// PutContentUse upserts a use by (scope kind, scope id, component).
+	// PutContentUse upserts a use by (scope kind, scope id, component): a
+	// new use, or the existing one moved to u.PinnedVersion (everything else
+	// it keeps). A component that does not exist is ErrContentNotFound.
 	PutContentUse(ctx context.Context, u ContentUse) error
 	DeleteContentUse(ctx context.Context, scopeKind ContentUseScope, scopeID, componentID string) error
-	// ListContentUses returns a scope's uses, oldest first.
+	// ListContentUses returns a scope's uses, oldest first (then by
+	// component id), at most MaxContentList.
 	ListContentUses(ctx context.Context, scopeKind ContentUseScope, scopeID string) ([]ContentUse, error)
 	// CountContentUses returns, per component, how many scopes use it
 	// (room experts excluded; capped at MaxUsageCount, a badge count).
@@ -233,11 +241,32 @@ type ContentComponentStore interface {
 	ContentDraftStore
 }
 
-func contentLimit(n int) int {
-	if n <= 0 || n > MaxContentList {
-		return MaxContentList
+func contentLimit(n int) int { return clampLimit(n, MaxContentList, MaxContentList) }
+
+// ContentBlobQuery is the reach of one bundle download: the components with
+// a version bundling Key that member Subject in Tenant could be entitled to
+// — their own components of the tenant (personal, shared copies, pending),
+// the tenant's organization components, platform components, and the
+// components room RoomID uses ("" = no room). It only narrows the
+// candidates to one bounded query; extpipe.MemberVisibility (and the room
+// membership) still decides.
+type ContentBlobQuery struct {
+	Key     string
+	Subject string
+	Tenant  string
+	RoomID  string
+}
+
+// reaches is the memory form of ContentBlobQuery's reach (the SQL in
+// MySQLContentComponents.ContentComponentsByBlob).
+func (q ContentBlobQuery) reaches(c ContentComponent, roomUses func(componentID string) bool) bool {
+	switch {
+	case c.Scope == ContentScopePlatform:
+		return true
+	case c.TenantID == q.Tenant && (c.Scope == ContentScopeOrg || (q.Subject != "" && c.Owner == q.Subject)):
+		return true
 	}
-	return n
+	return q.RoomID != "" && roomUses(c.ID)
 }
 
 func (q ContentComponentQuery) admits(c ContentComponent) bool {
@@ -380,10 +409,15 @@ func (s *MemoryContentComponents) ListContentComponents(_ context.Context, q Con
 func (s *MemoryContentComponents) ListContentComponentVersions(_ context.Context, componentID string) ([]ContentComponentVersion, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	vs := s.versions[componentID]
-	out := make([]ContentComponentVersion, 0, len(vs))
-	for i := len(vs) - 1; i >= 0; i-- {
-		out = append(out, vs[i])
+	out := append([]ContentComponentVersion{}, s.versions[componentID]...)
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].CreatedAtMs != out[j].CreatedAtMs {
+			return out[i].CreatedAtMs > out[j].CreatedAtMs
+		}
+		return out[i].Version > out[j].Version
+	})
+	if len(out) > MaxContentList {
+		out = out[:MaxContentList]
 	}
 	return out, nil
 }
@@ -399,31 +433,31 @@ func (s *MemoryContentComponents) GetContentComponentVersion(_ context.Context, 
 	return ContentComponentVersion{}, ErrContentNotFound
 }
 
-func (s *MemoryContentComponents) ContentVersionsByBlob(_ context.Context, key string) ([]ContentComponentVersion, error) {
+func (s *MemoryContentComponents) ContentComponentsByBlob(_ context.Context, q ContentBlobQuery) ([]ContentComponent, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	out := []ContentComponentVersion{}
-	for _, vs := range s.versions {
+	roomUses := func(id string) bool {
+		_, ok := s.uses[contentUseKey(ContentUseRoom, q.RoomID, id)]
+		return ok
+	}
+	out := []ContentComponent{}
+	for id, vs := range s.versions {
+		c, ok := s.components[id]
+		if !ok || !q.reaches(c, roomUses) {
+			continue
+		}
 		for _, v := range vs {
-			if v.BundleBlobKey == key {
-				out = append(out, v)
+			if v.BundleBlobKey == q.Key {
+				out = append(out, c)
+				break
 			}
 		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	if len(out) > MaxContentList {
+		out = out[:MaxContentList]
 	}
 	return out, nil
-}
-
-// referencedBlobs reports which keys a version still references.
-func (s *MemoryContentComponents) referencedBlobs(keys map[string]bool, out map[string]bool) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	for _, vs := range s.versions {
-		for _, v := range vs {
-			if keys[v.BundleBlobKey] {
-				out[v.BundleBlobKey] = true
-			}
-		}
-	}
 }
 
 func (s *MemoryContentComponents) DeleteContentComponent(_ context.Context, id string) error {
@@ -494,7 +528,9 @@ func (s *MemoryContentComponents) PutContentUse(_ context.Context, u ContentUse)
 	}
 	k := contentUseKey(u.ScopeKind, u.ScopeID, u.ComponentID)
 	if prev, ok := s.uses[k]; ok {
-		u.CreatedAtMs, u.CreatedBy = prev.CreatedAtMs, prev.CreatedBy
+		// A re-put moves the pinned version only, like the SQL upsert.
+		prev.PinnedVersion = u.PinnedVersion
+		u = prev
 	}
 	s.uses[k] = u
 	return nil
@@ -522,6 +558,9 @@ func (s *MemoryContentComponents) ListContentUses(_ context.Context, scopeKind C
 		}
 		return out[i].ComponentID < out[j].ComponentID
 	})
+	if len(out) > MaxContentList {
+		out = out[:MaxContentList]
+	}
 	return out, nil
 }
 
@@ -565,7 +604,10 @@ func (s *MemoryContentComponents) ListContentAcks(_ context.Context, subject str
 		}
 	}
 	sort.Slice(out, func(i, j int) bool {
-		return strings.Compare(out[i].ComponentID+out[i].Version, out[j].ComponentID+out[j].Version) < 0
+		if out[i].ComponentID != out[j].ComponentID {
+			return out[i].ComponentID < out[j].ComponentID
+		}
+		return out[i].Version < out[j].Version
 	})
 	return out, nil
 }

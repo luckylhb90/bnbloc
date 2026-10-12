@@ -35,8 +35,9 @@ type ContentRoomShareQuery struct {
 // ContentRoomShareStore persists room shares (part of the content store).
 type ContentRoomShareStore interface {
 	// PutContentRoomShare upserts the share of (room, component): a new
-	// share, or the existing one moved to s's version and note (its
-	// CreatedAtMs kept).
+	// share, or the existing one moved to s's version, sharer, note and
+	// update time (its tenant and CreatedAtMs kept). A component that does
+	// not exist is ErrContentNotFound.
 	PutContentRoomShare(ctx context.Context, s ContentRoomShare) error
 	// ListContentRoomShares returns matching shares, oldest first (at most
 	// MaxContentList).
@@ -55,7 +56,9 @@ func (s *MemoryContentComponents) PutContentRoomShare(_ context.Context, sh Cont
 	}
 	k := roomShareKey(sh.RoomID, sh.ComponentID)
 	if prev, ok := s.roomShares[k]; ok {
-		sh.CreatedAtMs = prev.CreatedAtMs
+		// A re-share changes what the SQL upsert changes.
+		prev.Version, prev.SharedBy, prev.Note, prev.UpdatedAtMs = sh.Version, sh.SharedBy, sh.Note, sh.UpdatedAtMs
+		sh = prev
 	}
 	s.roomShares[k] = sh
 	return nil

@@ -6,27 +6,14 @@ import (
 	"reflect"
 	"strings"
 	"testing"
-	"time"
+
+	"github.com/luckylhb90/bnbloc/internal/testmysql"
 )
 
-func TestMemoryContentGapClosure(t *testing.T) {
-	testContentGapClosure(t, NewMemoryContentComponents(), "cg-mem")
-}
-
-func TestMySQLContentGapClosure(t *testing.T) {
-	dsn := mysqlTestDSN(t)
-	b, err := NewBackends(dsn)
-	if err != nil {
-		t.Fatalf("NewBackends: %v", err)
-	}
-	prefix := "cg-it-" + itoaBase(time.Now().UnixNano())
-	t.Cleanup(func() {
-		_, _ = b.DB.Exec(`DELETE FROM content_room_shares WHERE component_id LIKE ?`, prefix+"%")
-		_, _ = b.DB.Exec(`DELETE FROM content_component_versions WHERE component_id LIKE ?`, prefix+"%")
-		_, _ = b.DB.Exec(`DELETE FROM content_components WHERE id LIKE ?`, prefix+"%")
-		_ = b.DB.Close()
+func TestContractContentComponentStoreGapClosure(t *testing.T) {
+	forEachBackend(t, func(t *testing.T, b *Backends) {
+		testContentGapClosure(t, b.ContentComponents, uniq("cg-"))
 	})
-	testContentGapClosure(t, b.ContentComponents, prefix)
 }
 
 // testContentGapClosure covers the store side of the content gap closure:
@@ -127,9 +114,15 @@ func testContentGapClosure(t *testing.T, s ContentComponentStore, prefix string)
 	}
 	put(room1, "1.0.0", 10)
 	put(room2, "1.0.0", 11)
-	put(room1, "1.1.0", 12) // a later share moves it
+	// A later share moves version, sharer, note and update time; tenant and
+	// creation time stay (the SQL upsert's columns).
+	if err := s.PutContentRoomShare(ctx, ContentRoomShare{TenantID: tid + "-other", RoomID: room1, ComponentID: src.ID, Version: "1.1.0", SharedBy: "jack",
+		Note: "v1.1.0", CreatedAtMs: 12, UpdatedAtMs: 12}); err != nil {
+		t.Fatal(err)
+	}
 	got, err := s.ListContentRoomShares(ctx, ContentRoomShareQuery{RoomID: room1})
-	if err != nil || len(got) != 1 || got[0].Version != "1.1.0" || got[0].Note != "v1.1.0" || got[0].CreatedAtMs != 10 || got[0].UpdatedAtMs != 12 {
+	if err != nil || len(got) != 1 || got[0].Version != "1.1.0" || got[0].Note != "v1.1.0" || got[0].SharedBy != "jack" ||
+		got[0].CreatedAtMs != 10 || got[0].UpdatedAtMs != 12 || got[0].TenantID != tid {
 		t.Fatalf("room1 shares = %+v, %v", got, err)
 	}
 	got, err = s.ListContentRoomShares(ctx, ContentRoomShareQuery{ComponentID: src.ID})
@@ -148,8 +141,8 @@ func testContentGapClosure(t *testing.T, s ContentComponentStore, prefix string)
 	if err := s.DeleteContentComponent(ctx, src.ID); err != nil {
 		t.Fatal(err)
 	}
-	if got, _ := s.ListContentRoomShares(ctx, ContentRoomShareQuery{RoomID: room1}); len(got) != 0 {
-		t.Fatalf("shares outlived their component: %+v", got)
+	if got, err := s.ListContentRoomShares(ctx, ContentRoomShareQuery{RoomID: room1}); err != nil || got == nil || len(got) != 0 {
+		t.Fatalf("shares outlived their component: %#v, %v (want [])", got, err)
 	}
 }
 
@@ -158,18 +151,13 @@ func testContentGapClosure(t *testing.T, s ContentComponentStore, prefix string)
 // oldest published and unpublishes the other, which cannot be restored
 // while the name is held.
 func TestContentOrgNamesMigrationKeepsOldest(t *testing.T) {
-	dsn := mysqlTestDSN(t)
-	b, err := NewBackends(dsn)
+	b, err := NewBackends(testmysql.Fresh(t))
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer b.DB.Close()
 	ctx := context.Background()
-	prefix := "cgm-it-" + itoaBase(time.Now().UnixNano())
-	defer func() {
-		_, _ = b.DB.Exec(`DELETE FROM content_component_versions WHERE component_id LIKE ?`, prefix+"%")
-		_, _ = b.DB.Exec(`DELETE FROM content_components WHERE id LIKE ?`, prefix+"%")
-	}()
+	prefix := uniq("cgm-")
 	if _, err := b.DB.ExecContext(ctx, "ALTER TABLE content_components DROP INDEX uq_content_components_org_name, DROP COLUMN org_name"); err != nil {
 		t.Fatal(err)
 	}

@@ -48,6 +48,8 @@ func (s *MemoryContentComponents) ContentPromptUses(_ context.Context, component
 // written once per insertion). A component that does not exist is
 // ErrContentNotFound.
 func (s *MySQLContentComponents) RecordContentPromptUse(ctx context.Context, componentID, promptID string, atMs int64) error {
+	// cross-tenant: content ids are global (platform content spans tenants);
+	// callers decide visibility (extpipe.MemberVisibility).
 	res, err := s.DB.ExecContext(ctx, `INSERT INTO content_prompt_uses (component_id, prompt_id, use_count, last_used_at_ms)
   SELECT id, ?, 1, ? FROM content_components WHERE id = ?
   ON DUPLICATE KEY UPDATE use_count = use_count + 1, last_used_at_ms = GREATEST(last_used_at_ms, VALUES(last_used_at_ms))`,
@@ -55,10 +57,7 @@ func (s *MySQLContentComponents) RecordContentPromptUse(ctx context.Context, com
 	if err != nil {
 		return err
 	}
-	if n, err := res.RowsAffected(); err == nil && n == 0 {
-		return ErrContentNotFound
-	}
-	return nil
+	return requireMatched(res, ErrContentNotFound)
 }
 
 func (s *MySQLContentComponents) ContentPromptUses(ctx context.Context, componentIDs []string) (map[string]map[string]int64, error) {

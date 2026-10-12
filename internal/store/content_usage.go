@@ -123,6 +123,8 @@ func (s *MemoryContentComponents) CountMemberUses(_ context.Context, componentID
 // CountMemberUses implements ContentComponentStore for MySQL (on
 // idx_content_uses_component, bounded per component).
 func (s *MySQLContentComponents) CountMemberUses(ctx context.Context, componentIDs []string) (map[string]int, error) {
+	// cross-tenant: content ids are global (platform content spans tenants);
+	// callers decide visibility (extpipe.MemberVisibility).
 	out := map[string]int{}
 	seen := map[string]bool{}
 	for _, id := range componentIDs {

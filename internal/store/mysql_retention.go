@@ -382,11 +382,10 @@ WHERE v.tenant_id = ? AND v.created_at_ms < ? AND v.version < a.current_version`
 	}
 }
 
-// ReferencedBlobKeys checks keys against every blob-key column (indexed:
-// idx_attachments_blob, idx_artifact_versions_blob,
-// idx_artifact_versions_thumb, idx_content_versions_blob,
-// idx_content_drafts_blob) and the platform settings.
+// ReferencedBlobKeys checks keys against every column of blobKeySources (each
+// on its blob index) and the platform settings.
 func (s *MySQLRetention) ReferencedBlobKeys(ctx context.Context, keys []string) (map[string]bool, error) {
+	// cross-tenant: blob collection spans every tenant (blobs are shared).
 	out := map[string]bool{}
 	if len(keys) == 0 {
 		return out, nil
@@ -403,28 +402,13 @@ func (s *MySQLRetention) ReferencedBlobKeys(ctx context.Context, keys []string) 
 		}
 	}
 	in := inPlaceholders(len(keys))
-	for _, q := range []string{
-		`SELECT DISTINCT blob_key FROM attachments WHERE blob_key IN (` + in + `)`,
-		`SELECT DISTINCT blob_key FROM artifact_versions WHERE blob_key IN (` + in + `)`,
-		`SELECT DISTINCT thumb_blob_key FROM artifact_versions WHERE thumb_blob_key IN (` + in + `)`,
-		`SELECT DISTINCT bundle_blob_key FROM content_component_versions WHERE bundle_blob_key IN (` + in + `)`,
-		`SELECT DISTINCT bundle_blob_key FROM content_drafts WHERE bundle_blob_key IN (` + in + `)`,
-	} {
-		rows, err := s.DB.QueryContext(ctx, q, args...)
+	for _, src := range blobKeySources {
+		found, err := queryAll(ctx, s.DB, `SELECT DISTINCT `+src.column+` FROM `+src.table+` WHERE `+src.column+` IN (`+in+`)`, scanString, args...)
 		if err != nil {
-			return nil, fmt.Errorf("blob references: %w", err)
+			return nil, fmt.Errorf("blob references in %s.%s: %w", src.table, src.column, err)
 		}
-		for rows.Next() {
-			var k string
-			if err := rows.Scan(&k); err != nil {
-				rows.Close()
-				return nil, err
-			}
+		for _, k := range found {
 			out[k] = true
-		}
-		rows.Close()
-		if err := rows.Err(); err != nil {
-			return nil, err
 		}
 	}
 	return out, nil
@@ -433,6 +417,7 @@ func (s *MySQLRetention) ReferencedBlobKeys(ctx context.Context, keys []string) 
 // PurgeExpiredDrafts deletes expired content drafts in batches (on
 // idx_content_drafts_expires; see RetentionStore).
 func (s *MySQLRetention) PurgeExpiredDrafts(ctx context.Context, req PurgeRequest) (PurgeResult, error) {
+	// cross-tenant: drafts expire on their own clock, in every tenant at once.
 	out := PurgeResult{}
 	err := s.deleteBatches(ctx, out, PurgedContentDrafts, `DELETE FROM content_drafts WHERE expires_at_ms <= ? LIMIT ?`, req.NowMs, req.batch())
 	return out, err
