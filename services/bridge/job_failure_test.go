@@ -46,6 +46,7 @@ func TestDriveRefusalsAreFinal(t *testing.T) {
 		{"prepare: core not running yet", atStage(stagePrepare, coreNotRunningError{core: "acme"}), store.FailureCoreUnavailable},
 		{"prepare: sandbox busy", atStage(stagePrepare, httpErr(http.StatusServiceUnavailable)), store.FailureCoreUnavailable},
 		{"prepare: deterministic", atStage(stagePrepare, errors.New("the core no longer supports sandbox execution")), store.FailureRunnerFailed},
+		{"prepare: sandbox not up yet", atStage(stagePrepare, fmt.Errorf("the agent sandbox could not be prepared: %w", sandboxNotReadyError{err: dial})), store.FailureSandboxStarting},
 		{"start: never reached the core", atStage(stageStart, dial), store.FailureRunnerStartFailed},
 		{"start: core refused before processing", atStage(stageStart, httpErr(http.StatusTooManyRequests)), store.FailureRunnerStartFailed},
 		{"start: ambiguous 500", atStage(stageStart, httpErr(http.StatusInternalServerError)), store.FailureRunnerFailed},

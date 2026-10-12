@@ -438,8 +438,24 @@ func (b *Bridge) planSandbox(ctx context.Context, d *drive) (prepare func(contex
 	}
 	room, core, provider, owner := d.job.RoomID, d.core, d.job.Provider, d.owner
 	return func(ctx context.Context) (*corepkg.Execution, error) {
-		return s.prepare(ctx, room, core, provider, owner)
+		exec, err := s.prepare(ctx, room, core, provider, owner)
+		if err != nil {
+			return nil, s.prepareFailure(ctx, err)
+		}
+		return exec, nil
 	}, "", ""
+}
+
+// prepareFailure is a failed prepare as the drive reports it: a
+// sandboxNotReadyError (job failure sandbox_starting, retried) when the
+// sandbox is not up yet, judged by the error and a fresh readiness probe
+// (a failed ensure or mint invalidated the cached one), else err.
+func (s *sandboxRuntime) prepareFailure(ctx context.Context, err error) error {
+	ready, _ := s.status(ctx)
+	if sandboxStarting(err, ready) {
+		return sandboxNotReadyError{err: err}
+	}
+	return err
 }
 
 // sandboxedAgent reports whether this bridge runs the borrowed drives of a

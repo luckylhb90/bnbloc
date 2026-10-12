@@ -8,6 +8,7 @@ import (
 	corepkg "github.com/luckylhb90/bnbloc/core"
 	"github.com/luckylhb90/bnbloc/internal/store"
 	"github.com/luckylhb90/bnbloc/internal/wire"
+	sandbox "github.com/luckylhb90/bnbloc/sandbox/protocol"
 )
 
 // Job failure classification. This file is the one place the bridge decides
@@ -134,6 +135,39 @@ func (e coreNotRunningError) Error() string {
 	return "the " + e.core + " core is not running on this machine yet"
 }
 
+// sandboxNotReadyError: the agent sandbox a drive must run in is not up yet
+// (its runtime does not answer, or its machine is still starting); nothing
+// was sent to a core. sandboxStarting decides which prepare failures mean
+// it.
+type sandboxNotReadyError struct{ err error }
+
+func (e sandboxNotReadyError) Error() string {
+	return "the agent sandbox is still starting: " + e.err.Error()
+}
+func (e sandboxNotReadyError) Unwrap() error { return e.err }
+
+// sandboxStarting reports whether a failed sandbox prepare (space ensure,
+// quiesce, exec-token mint) means the sandbox is not up yet: the runtime
+// could not be reached or asked to come back (core.Retryable: a dial
+// failure, 429/503, a stated retry), it reports its backend or machine not
+// there yet (backend_unavailable, invalid_state, machine_not_found), or the
+// readiness probe after the failure finds it not ready (ready=false).
+// Anything else (a refused request, a local workspace error) is a real
+// failure.
+func sandboxStarting(err error, ready bool) bool {
+	if !ready || corepkg.Retryable(err, false) {
+		return true
+	}
+	var pe *sandbox.ProtocolError
+	if errors.As(err, &pe) {
+		switch pe.Code {
+		case sandbox.ErrorBackendUnavailable, sandbox.ErrorInvalidState, sandbox.ErrorMachineNotFound:
+			return true
+		}
+	}
+	return false
+}
+
 // turnFailedError: the core reports the started turn failed (detail is the
 // provider's message, e.g. a missing API key).
 type turnFailedError struct{ detail string }
@@ -145,12 +179,13 @@ func (e turnFailedError) Error() string { return "turn failed: " + e.detail }
 var errNoReply = errors.New("agent turn completed without a visible reply")
 
 // driveFailureReason maps a failed drive to its job failure reason by stage.
-// Before the turn starts, an unreachable core is core_unavailable; a start
-// request that provably never took effect (core.Retryable for a request
-// that is not idempotent) is runner_start_failed. Both retry. A turn that
-// ran without a reply is reply_timeout. Anything else — a started turn, an
-// ambiguous start, a deterministic failure, an error of unknown stage — is
-// runner_failed, which never retries.
+// Before the turn starts, a sandbox that is not up yet is sandbox_starting
+// and an unreachable core core_unavailable; a start request that provably
+// never took effect (core.Retryable for a request that is not idempotent)
+// is runner_start_failed. All three retry. A turn that ran without a reply
+// is reply_timeout. Anything else — a started turn, an ambiguous start, a
+// deterministic failure, an error of unknown stage — is runner_failed,
+// which never retries.
 func driveFailureReason(err error) store.AgentJobFailureReason {
 	if errors.Is(err, errNoReply) {
 		return store.FailureReplyTimeout
@@ -161,6 +196,10 @@ func driveFailureReason(err error) store.AgentJobFailureReason {
 	}
 	switch de.stage {
 	case stagePrepare:
+		var notReady sandboxNotReadyError
+		if errors.As(err, &notReady) {
+			return store.FailureSandboxStarting
+		}
 		var notRunning coreNotRunningError
 		if errors.As(err, &notRunning) || corepkg.Retryable(err, false) {
 			return store.FailureCoreUnavailable
@@ -190,9 +229,12 @@ func driveFailureNotice(err error) string {
 // notices) is store.AgentJobFailureReason.Text, which knows no error detail.
 func driveErrorText(provider string, err error) string {
 	var failed turnFailedError
+	var notReady sandboxNotReadyError
 	switch {
 	case errors.Is(err, errNoReply):
 		return "The " + provider + " agent finished without a visible reply."
+	case errors.As(err, &notReady):
+		return "The " + provider + " agent did not start: its agent sandbox is still starting."
 	case errors.As(err, &failed):
 		return withDetail("The agent could not complete this request", failed.detail)
 	case driveFailureNotice(err) == "turn-failed":

@@ -15,6 +15,7 @@ import (
 	"testing"
 
 	corepkg "github.com/luckylhb90/bnbloc/core"
+	"github.com/luckylhb90/bnbloc/internal/store"
 	sandbox "github.com/luckylhb90/bnbloc/sandbox/protocol"
 )
 
@@ -34,6 +35,10 @@ type fakeSandboxd struct {
 	// deleteFails makes a space delete answer 500; deleteMissing answers
 	// space_not_found (a space that does not exist has no process).
 	deleteFails, deleteMissing bool
+	// ensureFails makes a space ensure answer with this error (status,
+	// code).
+	ensureFails      *sandbox.ProtocolError
+	ensureFailStatus int
 }
 
 // spaceCalls is the fake's space call log.
@@ -86,6 +91,11 @@ func newFakeSandboxd(t *testing.T) *fakeSandboxd {
 			var req sandbox.SpaceRequest
 			_ = json.NewDecoder(r.Body).Decode(&req)
 			f.calls = append(f.calls, "ensure")
+			if f.ensureFails != nil {
+				w.WriteHeader(f.ensureFailStatus)
+				_ = json.NewEncoder(w).Encode(sandbox.ErrorEnvelope{Error: *f.ensureFails})
+				return
+			}
 			f.ensures = append(f.ensures, req)
 			f.spaces = append(f.spaces, strings.TrimPrefix(p, sandbox.SpacesPath("bnbloc")+"/"))
 			_ = json.NewEncoder(w).Encode(sandbox.Space{Name: "s", User: "sp-s", UID: 20001})
@@ -439,11 +449,52 @@ func TestSandbox_spaceFailureFailsTheDrive_neverFallsBackToTheHost(t *testing.T)
 	if prov.hostWorkspace != 0 || prov.prompt != "" {
 		t.Fatal("a sandboxed drive whose space failed ran on the host")
 	}
-	if st := gw.lastStatus(); st["status"] != "failed" {
+	// The sidecar not answering is a sandbox not up yet: retried, and said so.
+	if st := gw.lastStatus(); st["status"] != "failed" || st["failureReason"] != string(store.FailureSandboxStarting) {
 		t.Fatalf("status = %v", st)
 	}
 	if ready, _ := b.sandbox.status(context.Background()); ready {
 		t.Fatal("a failed prepare must invalidate the readiness cache")
+	}
+}
+
+// A desktop that restarted hands the bridge its sandbox while the machine is
+// still booting: the space ensure is refused until it runs. That is
+// sandbox_starting (retried), not a core that is unreachable and not a final
+// failure; a refusal while the machine runs is a real failure.
+func TestSandbox_machineStillStartingIsSandboxStarting(t *testing.T) {
+	for _, c := range []struct {
+		name   string
+		state  sandbox.State
+		status int
+		code   sandbox.ErrorCode
+		want   store.AgentJobFailureReason
+	}{
+		{"machine booting, ensure refused", sandbox.StateCreating, http.StatusConflict, sandbox.ErrorInvalidState, store.FailureSandboxStarting},
+		{"backend not up", sandbox.StateRunning, http.StatusConflict, sandbox.ErrorBackendUnavailable, store.FailureSandboxStarting},
+		{"machine re-created", sandbox.StateRunning, http.StatusNotFound, sandbox.ErrorMachineNotFound, store.FailureSandboxStarting},
+		{"probe finds it stopped", sandbox.StateStopped, http.StatusBadRequest, sandbox.ErrorBadRequest, store.FailureSandboxStarting},
+		{"running machine refuses the request", sandbox.StateRunning, http.StatusBadRequest, sandbox.ErrorBadRequest, store.FailureRunnerFailed},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			gw := newSandboxGateway(t, "room-1", false)
+			sbx := newFakeSandboxd(t)
+			prov := &sandboxProv{supports: true}
+			b, _ := sandboxBridge(t, gw, sbx, SandboxBorrowed, prov)
+			b.sandbox.status(context.Background()) // ready, cached
+			sbx.mu.Lock()
+			sbx.state, sbx.ensureFailStatus, sbx.ensureFails = c.state, c.status, &sandbox.ProtocolError{Code: c.code, Message: "not now"}
+			sbx.mu.Unlock()
+
+			b.runBridgeJob(context.Background(), job("job-1", "bob"))
+
+			if prov.hostWorkspace != 0 || prov.prompt != "" {
+				t.Fatal("a sandboxed drive whose space failed ran")
+			}
+			if st := gw.lastStatus(); st["status"] != "failed" || st["failureReason"] != string(c.want) {
+				t.Fatalf("status = %v, want failed/%s", st, c.want)
+			}
+		})
 	}
 }
 
