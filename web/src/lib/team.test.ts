@@ -7,7 +7,6 @@ import {
   mergeDraft,
   messageJumps,
   parseTags,
-  promptTitleFromText,
   taskSeq,
 } from "./team.ts";
 
@@ -18,11 +17,6 @@ function assert(condition: boolean, message: string): void {
 function eq(a: unknown, b: unknown, message: string): void {
   assert(JSON.stringify(a) === JSON.stringify(b), `${message}: got ${JSON.stringify(a)}, want ${JSON.stringify(b)}`);
 }
-
-// Titles come from the first non-empty line, headings unwrapped, trimmed.
-eq(promptTitleFromText("\n\n# Release notes\nbody"), "Release notes", "heading title");
-eq(promptTitleFromText("x".repeat(100), 10), "xxxxxxxxx…", "long title truncated");
-eq(promptTitleFromText("   "), "", "empty title");
 
 eq(parseTags(" Writing, ops  #ops,writing "), ["writing", "ops"], "tags normalized");
 eq(parseTags(""), [], "no tags");
@@ -58,10 +52,10 @@ eq(applyTaskUpdate([t(2), t(5)], { seq: 2, removed: true }).map((x) => x.seq), [
 
 const r = (kind: SearchResult["kind"], snippet: string): SearchResult => ({ kind, snippet, atMs: 0 });
 eq(
-  groupResults([r("prompt", "p"), r("message", "m1"), r("message", "m2")]).map((g) => [g.kind, g.items.length]),
+  groupResults([r("artifact", "a"), r("message", "m1"), r("message", "m2")]).map((g) => [g.kind, g.items.length]),
   [
     ["message", 2],
-    ["prompt", 1],
+    ["artifact", 1],
   ],
   "grouped by kind, messages first",
 );

@@ -1,37 +1,5 @@
 // Wire shapes of the team features served by realtime (internal/wire/team.go):
-// the prompt library, chat messages marked as tasks, and global search.
-
-export type PromptVisibility = "private" | "tenant";
-
-export interface Prompt {
-  promptId: string;
-  tenantId: string;
-  author: string;
-  title: string;
-  body: string;
-  tags: string[];
-  visibility: PromptVisibility;
-  sourceRoomId?: string;
-  sourceSeq?: number;
-  useCount: number;
-  createdAtMs: number;
-  updatedAtMs: number;
-}
-
-export interface PromptInput {
-  title: string;
-  body: string;
-  tags: string[];
-  visibility: PromptVisibility;
-  sourceRoomId?: string;
-  sourceSeq?: number;
-}
-
-export interface PromptQuery {
-  q?: string;
-  tag?: string;
-  mine?: boolean;
-}
+// chat messages marked as tasks and global search.
 
 export type TaskStatus = "open" | "done";
 
@@ -55,7 +23,7 @@ export interface TaskUpdate {
   removed?: boolean;
 }
 
-export type SearchKind = "message" | "artifact" | "prompt";
+export type SearchKind = "message" | "artifact";
 
 export interface SearchResult {
   kind: SearchKind;
@@ -66,7 +34,6 @@ export interface SearchResult {
   channelKind?: "people";
   seq?: number;
   artifactId?: string;
-  promptId?: string;
   title?: string;
   snippet: string;
   author?: string;

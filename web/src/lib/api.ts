@@ -56,14 +56,7 @@ import type {
   PublishedComponent,
 } from "./apiTypes";
 import type { NotificationTestResult } from "./notificationPrefs.ts";
-import type {
-  MessageTask,
-  Prompt,
-  PromptInput,
-  PromptQuery,
-  SearchResponse,
-  TaskStatus,
-} from "./teamModels";
+import type { MessageTask, SearchResponse, TaskStatus } from "./teamModels";
 
 // Thin fetch wrapper around the gateway /v1 + /api surface. Injects the session
 // bearer token and centralizes error shaping so views get typed helpers.
@@ -362,25 +355,6 @@ export const api = {
     }),
   cores: () => req<{ cores: Core[] }>("/v1/cores"),
 
-  // Prompt library (F2): tenant-scoped; edit/delete are author-only.
-  listPrompts: (q: PromptQuery = {}) => {
-    const p = new URLSearchParams();
-    if (q.q) p.set("q", q.q);
-    if (q.tag) p.set("tag", q.tag);
-    if (q.mine) p.set("mine", "1");
-    const qs = p.toString();
-    return req<{ prompts: Prompt[] }>(`/v1/prompts${qs ? `?${qs}` : ""}`);
-  },
-  createPrompt: (body: PromptInput) =>
-    req<Prompt>("/v1/prompts", { method: "POST", body: JSON.stringify(body) }),
-  updatePrompt: (id: string, patch: Partial<Pick<PromptInput, "title" | "body" | "tags" | "visibility">>) =>
-    req<Prompt>(`/v1/prompts/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify(patch) }),
-  deletePrompt: (id: string) =>
-    req<void>(`/v1/prompts/${encodeURIComponent(id)}`, { method: "DELETE", raw: true }),
-  usePrompt: (id: string) => req<Prompt>(`/v1/prompts/${encodeURIComponent(id)}/use`, { method: "POST" }),
-  // Org admins: remove any team-visible prompt (manage_org at the gateway).
-  moderatePrompt: (id: string) =>
-    req<void>(`/v1/tenant/prompts/${encodeURIComponent(id)}`, { method: "DELETE", raw: true }),
   // Chat messages as tasks (F6): any room member may mark/toggle/unmark.
   roomTasks: (roomId: string) => req<{ tasks: MessageTask[] }>(`/v1/rooms/${encodeURIComponent(roomId)}/tasks`),
   setTask: (roomId: string, seq: number, status: TaskStatus) =>

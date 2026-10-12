@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { PlusIcon, TrashIcon } from "@phosphor-icons/react";
 import {
   ARCHIVE_ACCEPT,
+  contentKindWord,
   emptyContentForm,
   formFromVersion,
   formProblem,
@@ -16,8 +17,6 @@ import { Dialog } from "@/ui/Dialog";
 import { Field, Input, Textarea } from "@/ui/Input";
 import { Select } from "@/ui/Select";
 import { useToast } from "@/ui/Toast";
-
-const KIND_WORD: Record<ContentKind, string> = { expert: "expert", skill: "skill pack" };
 
 // The editor target: a new component of a kind, or a new version of one of
 // the member's components (prefilled from its latest version).
@@ -103,7 +102,7 @@ export function ContentEditorDialog({
     setBusy(true);
     try {
       const d = base ? await contentApi.newVersion(base.id, form, base.latestVersion) : await contentApi.create(form);
-      toast.success(base ? `Saved version ${d.component.latestVersion}` : `Created ${KIND_WORD[form.kind]} ${d.component.name}`);
+      toast.success(base ? `Saved version ${d.component.latestVersion}` : `Created ${contentKindWord(form.kind)} ${d.component.name}`);
       onSaved();
       onClose();
     } catch (e) {
@@ -119,7 +118,7 @@ export function ContentEditorDialog({
       open={!!target}
       onClose={onClose}
       size="lg"
-      title={base ? `New version of ${base.displayName || base.name}` : `New ${KIND_WORD[kind]}`}
+      title={base ? `New version of ${base.displayName || base.name}` : `New ${contentKindWord(kind)}`}
       description={
         base
           ? `Saves version after ${base.latestVersion}. Earlier versions stay as they are.`
@@ -243,7 +242,7 @@ export function ImportDialog({
     <Dialog
       open={open}
       onClose={onClose}
-      title={`Import ${KIND_WORD[kind] === "expert" ? "an expert" : "a skill pack"}`}
+      title={`Import ${kind === "expert" ? "an expert" : "a skill pack"}`}
       description={
         kind === "expert"
           ? "A .zip or .tar(.gz) of a folder with INSTRUCTIONS.md (or AGENTS.md / CLAUDE.md), or a Claude Code-style plugin with an agent."
@@ -272,7 +271,7 @@ export function ImportDialog({
         </Field>
         <Field label="Import as">
           <Select value={into} onChange={(e) => setInto(e.target.value)}>
-            <option value="">A new {KIND_WORD[kind]}</option>
+            <option value="">A new {contentKindWord(kind)}</option>
             {mine.map((c) => (
               <option key={c.id} value={c.id}>
                 New version of {c.displayName || c.name} (now {c.latestVersion})

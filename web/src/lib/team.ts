@@ -1,18 +1,10 @@
-// Pure helpers for the team features (prompt library, message tasks, global
-// search) plus the two cross-view hand-offs they need: a composer draft queued
-// for a room ("Use" a prompt) and a message jump queued for a room (search /
+// Pure helpers for the team features (message tasks, global search) plus the
+// cross-view hand-offs they need: a composer draft queued for a room (a
+// template's starter prompt) and a message jump queued for a room (search /
 // task "jump to message"). Both hand-offs are in-memory: the target room view
 // consumes them on mount, or immediately when it is already open.
 import type { MessageTask, SearchResult, TaskUpdate } from "./teamModels.ts";
 import type { Referenceable } from "../views/composer/types.ts";
-
-// promptTitleFromText proposes a library title: the message's first non-empty
-// line, trimmed to a readable length.
-export function promptTitleFromText(text: string, max = 80): string {
-  const line = text.split("\n").map((l) => l.trim()).find((l) => l !== "") ?? "";
-  const plain = line.replace(/^#+\s*/, "");
-  return plain.length > max ? `${plain.slice(0, max - 1).trimEnd()}…` : plain;
-}
 
 // parseTags splits a comma/whitespace separated tag field into normalized,
 // de-duplicated tags (the server applies the same normalization).
@@ -67,14 +59,13 @@ export function applyTaskUpdate(tasks: readonly MessageTask[], update: TaskUpdat
 export const SEARCH_KIND_LABELS: Record<SearchResult["kind"], string> = {
   message: "Messages",
   artifact: "Documents",
-  prompt: "Prompts",
 };
 
-// groupResults orders search hits by kind (messages, documents, prompts),
+// groupResults orders search hits by kind (messages, then documents),
 // keeping the server's order within a kind. The flat order is the keyboard
 // navigation order.
 export function groupResults(results: readonly SearchResult[]): { kind: SearchResult["kind"]; items: SearchResult[] }[] {
-  const kinds: SearchResult["kind"][] = ["message", "artifact", "prompt"];
+  const kinds: SearchResult["kind"][] = ["message", "artifact"];
   return kinds
     .map((kind) => ({ kind, items: results.filter((r) => r.kind === kind) }))
     .filter((g) => g.items.length > 0);
@@ -183,7 +174,8 @@ export function listenForSharedComposerRefs(): () => void {
   return () => window.removeEventListener("storage", onStorage);
 }
 
-// The last room the member opened: the default target of "Use" a prompt.
+// The last room the member opened: the default room a prompt pack is turned
+// on for from the Library.
 const LAST_ROOM_KEY = "bnbloc.lastRoom";
 export function rememberLastRoom(roomId: string): void {
   try {
@@ -198,18 +190,6 @@ export function lastRoom(): string | null {
   } catch {
     return null;
   }
-}
-
-// A query handed to the Library page (a prompt hit in global search opens the
-// library filtered to it). Taken once on the page's mount.
-let pendingLibraryQuery: string | null = null;
-export function queueLibraryQuery(q: string): void {
-  pendingLibraryQuery = q;
-}
-export function takeLibraryQuery(): string | null {
-  const q = pendingLibraryQuery;
-  pendingLibraryQuery = null;
-  return q;
 }
 
 // The Library tab to open (a save toast's "Open in Library"). Taken once on

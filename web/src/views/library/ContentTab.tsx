@@ -10,7 +10,7 @@ import {
   UploadSimpleIcon,
   WrenchIcon,
 } from "@phosphor-icons/react";
-import { contentLabel, isBuiltin, matchesContent, type ContentComponent, type ContentKind } from "@/lib/contentComponents";
+import { contentLabel, isBuiltin, matchesContent, type ContentComponent } from "@/lib/contentComponents";
 import { apiErrorText, contentApi } from "@/lib/contentComponentsApi";
 import { relativeTime } from "@/lib/format";
 import { improvePrompt, workshopPrompt } from "@/lib/workshop";
@@ -26,7 +26,7 @@ import { ContentViewDialog, PermissionBadges } from "@/views/library/ContentView
 import { useOpenWorkshop } from "@/views/library/workshopFlow";
 import { UserName } from "@/views/UserName";
 
-const COPY: Record<ContentKind, { subtitle: string; empty: string; hint: string; search: string }> = {
+const COPY: Record<"expert" | "skill", { subtitle: string; empty: string; hint: string; search: string }> = {
   expert: {
     subtitle: "Roles your agents can wear: instructions, skills and quick prompts",
     empty: "No experts yet",
@@ -50,7 +50,7 @@ export function ContentTab({
   tabs,
   onOpenRoom,
 }: {
-  readonly kind: ContentKind;
+  readonly kind: "expert" | "skill";
   readonly tabs: React.ReactNode;
   readonly onOpenRoom: (roomId: string) => void;
 }) {

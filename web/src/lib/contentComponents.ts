@@ -3,7 +3,9 @@
 // helpers here are pure (form <-> payload mapping, version and update logic,
 // expert mentions, the chat payload marker) so they are unit-tested.
 
-export type ContentKind = "expert" | "skill";
+import type { ContentPrompt, PromptRef } from "./promptPacks.ts";
+
+export type ContentKind = "expert" | "skill" | "prompt";
 
 // The built-in builder expert (shipped with the release, read-only, listed
 // for every member with scope "builtin"): it interviews the member, drafts
@@ -21,10 +23,11 @@ export function isBuiltin(c: Pick<ContentComponent, "scope">): boolean {
 export const CONTENT_PACKAGE_KINDS: Readonly<Record<string, ContentKind>> = {
   "bnbloc.expert.package/v1": "expert",
   "bnbloc.skill.package/v1": "skill",
+  "bnbloc.prompt.package/v1": "prompt",
 };
 
 export function contentKindWord(kind: ContentKind): string {
-  return kind === "skill" ? "skill pack" : "expert";
+  return kind === "skill" ? "skill pack" : kind === "prompt" ? "prompt pack" : "expert";
 }
 
 export interface ContentSkill {
@@ -32,9 +35,13 @@ export interface ContentSkill {
   readonly description: string;
 }
 
+// A quick prompt is its text, or ref ("pack/prompt-id") to a prompt of a
+// pack the expert requires, resolved for the viewer when they may use it.
 export interface ContentQuickPrompt {
   readonly title: string;
   readonly prompt: string;
+  readonly ref?: string;
+  readonly resolved?: PromptRef;
 }
 
 export interface ContentRequires {
@@ -63,6 +70,8 @@ export interface ContentComponent {
   readonly requires: ContentRequires;
   readonly skills?: readonly ContentSkill[];
   readonly quickPrompts?: readonly ContentQuickPrompt[];
+  // A prompt pack's prompts (lib/promptPacks.ts).
+  readonly prompts?: readonly ContentPrompt[];
   readonly welcome?: string;
   readonly mine: boolean;
   readonly acked: boolean;
@@ -204,7 +213,10 @@ export function formPayload(f: ContentForm): Record<string, unknown> {
     out.instructions = f.instructions.trim();
     const welcome = trimmed(f.welcome);
     if (welcome) out.welcome = welcome;
-    const qp = f.quickPrompts.map((q) => ({ title: trimmed(q.title), prompt: q.prompt.trim() })).filter((q) => q.title || q.prompt);
+    // A quick prompt that points at a pack's prompt keeps its ref.
+    const qp = f.quickPrompts
+      .map((q) => (q.ref && !q.prompt.trim() ? { title: trimmed(q.title), ref: q.ref } : { title: trimmed(q.title), prompt: q.prompt.trim() }))
+      .filter((q) => q.title || ("prompt" in q ? q.prompt : q.ref));
     if (qp.length > 0) out.quickPrompts = qp;
   }
   return out;
@@ -272,7 +284,7 @@ export function needsConfirmation(c: Pick<ContentComponent, "mine" | "acked" | "
 export function matchesContent(c: ContentComponent, q: string): boolean {
   const needle = q.trim().toLowerCase();
   if (!needle) return true;
-  const hay = [c.name, c.displayName, c.description, c.category, ...(c.tags ?? []), ...(c.skills ?? []).map((s) => s.name)]
+  const hay = [c.name, c.displayName, c.description, c.category, ...(c.tags ?? []), ...(c.skills ?? []).map((s) => s.name), ...(c.prompts ?? []).map((p) => p.title)]
     .filter(Boolean)
     .join("\n")
     .toLowerCase();

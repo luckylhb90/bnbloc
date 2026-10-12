@@ -345,7 +345,7 @@ export function RoomView({
     },
     [roomId, peopleDocked, closePeoplePanel, toast],
   );
-  // Team features: message tasks, "Save to library", jump-to-message.
+  // Team features: message tasks, "Save as prompt", jump-to-message.
   const team = useRoomTeam({
     roomId,
     channelId,

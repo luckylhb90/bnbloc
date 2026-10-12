@@ -6,13 +6,14 @@ import { taskSeq } from "@/lib/team";
 import type { FeedItem } from "@/views/room/types";
 import { useDisplayName } from "@/lib/useDisplayName";
 
-// Team actions on a feed row — "Save to library" (F2) and "Mark as task" (F6)
+// Team actions on a feed row — "Save as prompt" (prompt packs) and "Mark as
+// task" (F6)
 // — plus the task badge. They reach the memoized Message rows through context
 // so the row props (and the existing copy / edit / delete actions) stay as
 // they are; only these small components re-render when tasks change.
 export interface MessageExtras {
   readonly taskBySeq: ReadonlyMap<number, MessageTask>;
-  readonly onSaveToLibrary: (item: FeedItem) => void;
+  readonly onSaveAsPrompt: (item: FeedItem) => void;
   readonly onMarkTask: (seq: number) => void;
   readonly onUnmarkTask: (seq: number) => void;
   readonly onSetTaskStatus: (seq: number, status: TaskStatus) => void;
@@ -51,9 +52,9 @@ export function MessageExtraActions({ item, floating }: { item: FeedItem; floati
       {item.text && (
         <button
           type="button"
-          onClick={() => extras.onSaveToLibrary(item)}
-          title="Save to library"
-          aria-label="Save to library"
+          onClick={() => extras.onSaveAsPrompt(item)}
+          title="Save as prompt"
+          aria-label="Save as prompt"
           className={iconButton}
         >
           <BookmarkSimpleIcon size={12} />

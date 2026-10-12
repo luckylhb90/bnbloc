@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { BrainIcon, TrashIcon, WrenchIcon } from "@phosphor-icons/react";
+import { BrainIcon, ChatTextIcon, TrashIcon, WrenchIcon } from "@phosphor-icons/react";
 import { useAuth } from "@/lib/auth";
-import { contentLabel, type ContentComponent, type ContentUse } from "@/lib/contentComponents";
+import { contentKindWord, contentLabel, type ContentComponent, type ContentUse } from "@/lib/contentComponents";
 import { apiErrorText, contentApi } from "@/lib/contentComponentsApi";
 import { Button } from "@/ui/Button";
 import { Badge } from "@/ui/Card";
@@ -9,6 +9,7 @@ import { Segment } from "@/ui/Segment";
 import { Select } from "@/ui/Select";
 import { useToast } from "@/ui/Toast";
 import { ContentViewDialog, PermissionBadges } from "@/views/library/ContentViewDialog";
+import { PromptPackViewDialog } from "@/views/library/PromptPackDialogs";
 import { useMyRoomRole } from "@/views/room/useMyRoomRole";
 import { UserName } from "@/views/UserName";
 
@@ -94,7 +95,13 @@ export function RoomContentSection({ roomId }: { readonly roomId: string }) {
     return (
       <li key={u.componentId} className="flex flex-col gap-1 rounded-[var(--radius)] border border-[var(--color-border)] px-3 py-2">
         <div className="flex min-w-0 items-center gap-2 text-sm">
-          {u.kind === "expert" ? <BrainIcon size={15} className="shrink-0 text-[var(--color-accent)]" /> : <WrenchIcon size={15} className="shrink-0" />}
+          {u.kind === "expert" ? (
+            <BrainIcon size={15} className="shrink-0 text-[var(--color-accent)]" />
+          ) : u.kind === "prompt" ? (
+            <ChatTextIcon size={15} className="shrink-0" />
+          ) : (
+            <WrenchIcon size={15} className="shrink-0" />
+          )}
           <button type="button" onClick={() => setViewing(c)} className="tactile min-w-0 truncate text-left font-medium hover:underline">
             {contentLabel(c)}
           </button>
@@ -123,11 +130,12 @@ export function RoomContentSection({ roomId }: { readonly roomId: string }) {
 
   const experts = (uses ?? []).filter((u) => u.kind === "expert");
   const skills = (uses ?? []).filter((u) => u.kind === "skill");
+  const promptPacks = (uses ?? []).filter((u) => u.kind === "prompt");
   return (
     <div className="rounded-[var(--radius)] border border-[var(--color-border)] p-4">
-      <p className="text-sm font-medium">Experts and skills</p>
+      <p className="text-sm font-medium">Experts, skills and prompts</p>
       <p className="mb-3 text-xs text-[var(--color-fg-muted)]">
-        Pinned experts are offered in this room's composer and as @name. Skill packs load for every agent in the room.
+        Pinned experts are offered in this room's composer and as @name. Skill packs load for every agent in the room. Prompt packs show in everyone's prompt picker here.
         {!canEdit && role !== null ? " The room's owner and admins change them." : ""}
       </p>
       {uses === null ? (
@@ -142,14 +150,18 @@ export function RoomContentSection({ roomId }: { readonly roomId: string }) {
             <p className="mb-1 text-xs font-medium uppercase tracking-wide text-[var(--color-fg-muted)]">Room skill packs</p>
             {skills.length === 0 ? <p className="text-xs text-[var(--color-fg-subtle)]">None</p> : <ul className="flex flex-col gap-1.5">{skills.map(row)}</ul>}
           </section>
+          <section>
+            <p className="mb-1 text-xs font-medium uppercase tracking-wide text-[var(--color-fg-muted)]">Room prompt packs</p>
+            {promptPacks.length === 0 ? <p className="text-xs text-[var(--color-fg-subtle)]">None</p> : <ul className="flex flex-col gap-1.5">{promptPacks.map(row)}</ul>}
+          </section>
           {canEdit && (
             <div className="flex flex-col gap-2">
               <div className="flex items-center gap-2">
-                <Select value={adding} onChange={(e) => setAdding(e.target.value)} aria-label="Add an expert or skill pack">
+                <Select value={adding} onChange={(e) => setAdding(e.target.value)} aria-label="Add an expert, skill pack or prompt pack">
                   <option value="">{addable.length > 0 ? "Add one of yours…" : "Nothing of yours to add (create in the Library)"}</option>
                   {addable.map((c) => (
                     <option key={c.id} value={c.id}>
-                      {c.kind === "expert" ? "Expert" : "Skill pack"}: {contentLabel(c)} (v{c.latestVersion})
+                      {contentKindWord(c.kind).replace(/^./, (x) => x.toUpperCase())}: {contentLabel(c)} (v{c.latestVersion})
                     </option>
                   ))}
                 </Select>
@@ -162,7 +174,8 @@ export function RoomContentSection({ roomId }: { readonly roomId: string }) {
           )}
         </div>
       )}
-      <ContentViewDialog component={viewing} roomId={roomId} onClose={() => setViewing(null)} />
+      <ContentViewDialog component={viewing?.kind === "prompt" ? null : viewing} roomId={roomId} onClose={() => setViewing(null)} />
+      <PromptPackViewDialog pack={viewing?.kind === "prompt" ? viewing : null} roomId={roomId} onClose={() => setViewing(null)} />
     </div>
   );
 }
