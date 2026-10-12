@@ -8,9 +8,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"strings"
 
-	"github.com/go-sql-driver/mysql"
 	"github.com/luckylhb90/bnbloc/internal/tenant"
 	"github.com/luckylhb90/bnbloc/internal/wire"
 )
@@ -130,21 +128,6 @@ ON DUPLICATE KEY UPDATE message_cursor = GREATEST(message_cursor, VALUES(message
 		return nil, 0, err
 	}
 	return fresh, cursor, nil
-}
-
-// mysqlErrDupEntry is MySQL's ER_DUP_ENTRY (duplicate key on insert).
-const mysqlErrDupEntry = 1062
-
-// isDupEntry reports a duplicate-key error.
-func isDupEntry(err error) bool {
-	var me *mysql.MySQLError
-	return errors.As(err, &me) && me.Number == mysqlErrDupEntry
-}
-
-// isDupKey reports a duplicate-key error on the named unique key.
-func isDupKey(err error, key string) bool {
-	var me *mysql.MySQLError
-	return errors.As(err, &me) && me.Number == mysqlErrDupEntry && strings.Contains(me.Message, key)
 }
 
 // requireMatched maps an UPDATE that matched no row to notFound. The
