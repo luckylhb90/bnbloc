@@ -7,6 +7,7 @@ import {
 } from "@/lib/previewerFrame";
 import { registerArtifactViewer, unregisterArtifactViewer } from "./registry";
 import { visiblePoll } from "@/lib/useVisiblePoll";
+import { roomPath } from "@/lib/roomId";
 
 // Installed previewer components in the viewer registry. The member catalog
 // (GET /v1/components?kind=previewer — rollout + tenant gated server-side) is
@@ -102,6 +103,6 @@ export function startPreviewerSync(): () => void {
 /** Stores a previewer-made PNG as the version's thumbnail (the room service
  *  keeps the first one; later writes are ignored). */
 export async function putVersionThumbnail(roomId: string, artifactId: string, version: number, png: ArrayBuffer): Promise<void> {
-  const path = `/v1/rooms/${encodeURIComponent(roomId)}/artifacts/${encodeURIComponent(artifactId)}/versions/${version}/thumbnail`;
+  const path = roomPath(roomId, "artifacts", artifactId, "versions", version, "thumbnail");
   await req<void>(path, { method: "PUT", headers: { "Content-Type": "image/png" }, body: png, as: "none" });
 }

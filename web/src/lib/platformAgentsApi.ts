@@ -7,6 +7,7 @@ import type {
   RoomPlatformAgent,
 } from "./platformAgents.ts";
 import { normalizeUsage, usageQuery, type PlatformAgentsUsage } from "./platformUsage.ts";
+import { roomPath } from "./roomId.ts";
 
 // Go encodes an empty list as null.
 const normalizedPolicy = (p: PlatformAgentsPolicy): PlatformAgentsPolicy => ({
@@ -17,7 +18,7 @@ function normalizedAgents<T extends PlatformAgent>(res: { agents: T[] | null }):
   return { agents: (res.agents ?? []).map((a) => ({ ...a, hosts: a.hosts ?? [] })) };
 }
 
-const roomPath = (roomId: string) => `/v1/rooms/${encodeURIComponent(roomId)}/platform-agents`;
+const platformAgentsPath = (roomId: string) => roomPath(roomId, "platform-agents");
 
 export const platformAgentsApi = {
   // Super admin: every host's published set.
@@ -34,16 +35,16 @@ export const platformAgentsApi = {
   // each host's online/queued state.
   available: () => req<{ agents: PlatformAgent[] | null }>("/v1/platform-agents").then(normalizedAgents),
   // The room's added platform agents (room members).
-  inRoom: (roomId: string) => req<{ agents: RoomPlatformAgent[] | null }>(roomPath(roomId)).then(normalizedAgents),
+  inRoom: (roomId: string) => req<{ agents: RoomPlatformAgent[] | null }>(platformAgentsPath(roomId)).then(normalizedAgents),
   // Idempotent: grants the room a standing authorization for the agent on
   // every host that publishes it.
   add: (roomId: string, agent: PlatformAgentRef) =>
-    req<{ agent: RoomPlatformAgent }>(roomPath(roomId), {
+    req<{ agent: RoomPlatformAgent }>(platformAgentsPath(roomId), {
       method: "POST",
       body: JSON.stringify({ core: agent.core, provider: agent.provider }),
     }),
   remove: (roomId: string, agent: PlatformAgentRef) =>
-    req<void>(`${roomPath(roomId)}/${encodeURIComponent(agent.provider)}?core=${encodeURIComponent(agent.core)}`, {
+    req<void>(`${roomPath(roomId, "platform-agents", agent.provider)}?core=${encodeURIComponent(agent.core)}`, {
       method: "DELETE",
       as: "none",
     }),

@@ -2,6 +2,7 @@ import { getToken, refreshSession } from "./session";
 import { apiUrl } from "./config";
 import { normalizeRoomEvent, type RoomEvent } from "./roomEvents.ts";
 import { ROOM_EVENT_KINDS } from "./roomEventKinds.ts";
+import { roomPath } from "./roomId.ts";
 
 // Which events a room subscription receives. The default (the room view)
 // is every channel; includePeople also admits the room's people chat, which
@@ -94,7 +95,7 @@ export function subscribeRoom(
     // active channel by the caller.
     const scopeQ = scope.channelOnly ? "" : `&allChannels=1${scope.includePeople ? "&includePeople=1" : ""}`;
     const url = apiUrl(
-      `/v1/rooms/${encodeURIComponent(roomId)}/events?${
+      `${roomPath(roomId, "events")}?${
         token ? `access_token=${encodeURIComponent(token)}` : ""
       }${channelQ}${scopeQ}`,
     );

@@ -13,3 +13,10 @@ export function roomIdProblem(raw: string): string | null {
   if (FORBIDDEN.test(id)) return "Room id cannot contain / \\ ? # or %";
   return null;
 }
+
+// roomPath is the API path of a room or of one of its sub-resources:
+// roomPath(id, "artifacts", artifactId, "versions", 2). Every part is
+// URL-encoded (web L2: the path was hand-built about sixty times).
+export function roomPath(roomId: string, ...segments: readonly (string | number)[]): string {
+  return `/v1/rooms/${[roomId, ...segments].map((s) => encodeURIComponent(String(s))).join("/")}`;
+}

@@ -1,5 +1,6 @@
 import { req } from "./api.ts";
 import { runsPath, type AgentRun, type AgentRunsReply, type RunListQuery } from "./agentRuns.ts";
+import { roomPath } from "./roomId.ts";
 
 // Agent run records (R10), served by activity. A room's runs need room
 // membership; "self" is the caller's agents and requests; "tenant" is the
@@ -10,5 +11,5 @@ export const agentRunsApi = {
   tenant: (q: RunListQuery = {}) => req<AgentRunsReply>(runsPath("tenant", q)),
   // One room run with its diagnostics and the first reply's room sequence.
   detail: (roomId: string, jobId: string) =>
-    req<AgentRun>(`/v1/rooms/${encodeURIComponent(roomId)}/jobs/${encodeURIComponent(jobId)}`),
+    req<AgentRun>(roomPath(roomId, "jobs", jobId)),
 };

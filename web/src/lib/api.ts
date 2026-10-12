@@ -69,6 +69,7 @@ import type {
 } from "./apiTypes";
 import type { NotificationTestResult } from "./notificationPrefs.ts";
 import type { MessageTask, SearchResponse, TaskStatus } from "./teamModels";
+import { roomPath } from "./roomId.ts";
 
 // Thin fetch wrapper around the gateway /v1 + /api surface. Injects the session
 // bearer token and centralizes error shaping so views get typed helpers.
@@ -152,7 +153,7 @@ function artifactListQuery(filter: ArtifactListFilter): string {
 }
 
 function artifactVersionPath(roomId: string, artifactId: string, version: number): string {
-  return `/v1/rooms/${encodeURIComponent(roomId)}/artifacts/${encodeURIComponent(artifactId)}/versions/${version}`;
+  return roomPath(roomId, "artifacts", artifactId, "versions", version);
 }
 
 async function fetchArtifactBlob(path: string): Promise<Blob> {
@@ -363,14 +364,14 @@ export const api = {
   cores: () => req<CoresReply>("/v1/cores"),
 
   // Chat messages as tasks (F6): any room member may mark/toggle/unmark.
-  roomTasks: (roomId: string) => req<{ tasks: MessageTask[] }>(`/v1/rooms/${encodeURIComponent(roomId)}/tasks`),
+  roomTasks: (roomId: string) => req<{ tasks: MessageTask[] }>(roomPath(roomId, "tasks")),
   setTask: (roomId: string, seq: number, status: TaskStatus) =>
-    req<MessageTask>(`/v1/rooms/${encodeURIComponent(roomId)}/tasks/${seq}`, {
+    req<MessageTask>(roomPath(roomId, "tasks", seq), {
       method: "PUT",
       body: JSON.stringify({ status }),
     }),
   unmarkTask: (roomId: string, seq: number) =>
-    req<void>(`/v1/rooms/${encodeURIComponent(roomId)}/tasks/${seq}`, { method: "DELETE", as: "none" }),
+    req<void>(roomPath(roomId, "tasks", seq), { method: "DELETE", as: "none" }),
   // Global search (F7) across the caller's rooms (resolved server-side).
   search: (q: string, opts: { before?: number; limit?: number } = {}) => {
     const p = new URLSearchParams({ q });
@@ -388,7 +389,7 @@ export const api = {
     req<PlazaReply>(`/v1/rooms?q=${encodeURIComponent(q)}${offset > 0 ? `&offset=${offset}` : ""}`),
   // A member gets the room's detail; a non-member of a shared room its
   // preview (a join card); a private room is 404 to a non-member.
-  getRoom: (id: string) => req<RoomDetail | RoomPreview>(`/v1/rooms/${encodeURIComponent(id)}`),
+  getRoom: (id: string) => req<RoomDetail | RoomPreview>(roomPath(id)),
   createRoom: (body: {
     roomId: string;
     name?: string;
@@ -404,29 +405,29 @@ export const api = {
       syncMode?: string;
     },
   ) =>
-    req<RoomDetail>(`/v1/rooms/${encodeURIComponent(id)}`, {
+    req<RoomDetail>(roomPath(id), {
       method: "PATCH",
       body: JSON.stringify(body),
     }),
   deleteRoom: (id: string) =>
-    req<void>(`/v1/rooms/${encodeURIComponent(id)}`, {
+    req<void>(roomPath(id), {
       method: "DELETE",
       as: "none",
     }),
   joinRoom: (id: string) =>
-    req<void>(`/v1/rooms/${encodeURIComponent(id)}/join`, {
+    req<void>(roomPath(id, "join"), {
       method: "POST",
       as: "none",
     }),
   leaveRoom: (id: string) =>
-    req<void>(`/v1/rooms/${encodeURIComponent(id)}/leave`, {
+    req<void>(roomPath(id, "leave"), {
       method: "POST",
       as: "none",
     }),
   // The room's people. Agent-host memberships (a platform agent's host) are
   // split off here, the one place, so no people list ever shows them.
   members: async (id: string) => {
-    const res = await req<RoomMembersReply>(`/v1/rooms/${encodeURIComponent(id)}/members`);
+    const res = await req<RoomMembersReply>(roomPath(id, "members"));
     const { people, agentHosts } = splitAgentHosts(res.members ?? []);
     return { members: people, agentHosts };
   },
@@ -434,7 +435,7 @@ export const api = {
   // yourself — use leave for the latter).
   removeMember: (id: string, userId: string) =>
     req<void>(
-      `/v1/rooms/${encodeURIComponent(id)}/members/${encodeURIComponent(userId)}`,
+      roomPath(id, "members", userId),
       { method: "DELETE", as: "none" },
     ),
   // Per-room unread counts for the caller; pass the known room ids. The
@@ -452,14 +453,14 @@ export const api = {
   // Advance the caller's last-read sequence in a room (clears its unread).
   // channelId scopes the cursor to one channel; absent = the room default.
   markRead: (id: string, seq: number, channelId?: string) =>
-    req<void>(`/v1/rooms/${encodeURIComponent(id)}/read`, {
+    req<void>(roomPath(id, "read"), {
       method: "POST",
       body: JSON.stringify({ seq, ...(channelId ? { channelId } : {}) }),
       as: "none",
     }),
   // Emit a transient typing hint to the room (ephemeral; not persisted).
   roomTyping: (id: string, channelId?: string) =>
-    req<void>(`/v1/rooms/${encodeURIComponent(id)}/typing`, {
+    req<void>(roomPath(id, "typing"), {
       method: "POST",
       body: JSON.stringify({ ...(channelId ? { channelId } : {}) }),
       as: "none",
@@ -468,25 +469,25 @@ export const api = {
   // the latest page), ascending by sequence. Beyond the live replay buffer.
   roomHistory: (id: string, before?: number, limit = 50, channelId?: string) =>
     req<FeedPage>(
-      `/v1/rooms/${encodeURIComponent(id)}/history?limit=${limit}${before ? `&before=${before}` : ""}${channelId ? `&channelId=${encodeURIComponent(channelId)}` : ""}`,
+      `${roomPath(id, "history")}?limit=${limit}${before ? `&before=${before}` : ""}${channelId ? `&channelId=${encodeURIComponent(channelId)}` : ""}`,
     ),
   // Durable agent jobs for the current room/channel, used to show queued,
   // running, and failed state below the originating chat message.
   agentJobs: (roomId: string, channelId?: string) =>
     req<AgentJobsReply>(
-      `/v1/rooms/${encodeURIComponent(roomId)}/agent-jobs${channelId ? `?channelId=${encodeURIComponent(channelId)}` : ""}`,
+      `${roomPath(roomId, "agent-jobs")}${channelId ? `?channelId=${encodeURIComponent(channelId)}` : ""}`,
     ),
   // Stop a queued or running job. Authorized by room membership, so a member can
   // stop a runaway turn even when another member's bridge holds the lease.
   cancelAgentJob: (roomId: string, jobId: string) =>
     req<{ jobId: string; status: string }>(
-      `/v1/rooms/${encodeURIComponent(roomId)}/agent-jobs/${encodeURIComponent(jobId)}/cancel`,
+      roomPath(roomId, "agent-jobs", jobId, "cancel"),
       { method: "POST", body: JSON.stringify({}) },
     ),
 
   // Room artifacts: create / list / read / publish under the room's membership.
   createArtifact: (roomId: string, body: { kind: string; title: string; channelId?: string; language?: string; content?: string; summary?: string }) =>
-    req<ArtifactReply>(`/v1/rooms/${encodeURIComponent(roomId)}/artifacts`, {
+    req<ArtifactReply>(roomPath(roomId, "artifacts"), {
       method: "POST",
       body: JSON.stringify(body),
     }),
@@ -494,21 +495,21 @@ export const api = {
   // author / producing message / text search) and paged (nextCursor).
   artifacts: (roomId: string, filter: ArtifactListFilter = {}) =>
     req<ArtifactList>(
-      `/v1/rooms/${encodeURIComponent(roomId)}/artifacts${artifactListQuery(filter)}`,
+      `${roomPath(roomId, "artifacts")}${artifactListQuery(filter)}`,
     ),
   // The deliverables produced by the room messages with seq in [from, to]:
   // the feed anchors its cards under the messages it has loaded, however old.
   artifactAnchors: (roomId: string, from: number, to: number) =>
     req<{ anchors: { seq: number; artifactId: string }[] }>(
-      `/v1/rooms/${encodeURIComponent(roomId)}/artifact-anchors?from=${from}&to=${to}`,
+      `${roomPath(roomId, "artifact-anchors")}?from=${from}&to=${to}`,
     ),
   artifactDetail: (roomId: string, artifactId: string) =>
     req<ArtifactDetail>(
-      `/v1/rooms/${encodeURIComponent(roomId)}/artifacts/${encodeURIComponent(artifactId)}`,
+      roomPath(roomId, "artifacts", artifactId),
     ),
   artifactVersion: (roomId: string, artifactId: string, version: number) =>
     req<ArtifactVersionReply>(
-      `/v1/rooms/${encodeURIComponent(roomId)}/artifacts/${encodeURIComponent(artifactId)}/versions/${version}`,
+      roomPath(roomId, "artifacts", artifactId, "versions", version),
     ),
   // Relay a live artifact's collaboration state (a gesture in a running
   // preview) to the room. Transient: it fans out to current viewers, it is
@@ -518,10 +519,10 @@ export const api = {
   // current board. undefined = no live session yet.
   getArtifactState: (roomId: string, artifactId: string) =>
     req<{ state: unknown; actor: string; atUnixMs: number } | undefined>(
-      `/v1/rooms/${encodeURIComponent(roomId)}/artifacts/${encodeURIComponent(artifactId)}/state`,
+      roomPath(roomId, "artifacts", artifactId, "state"),
     ),
   artifactState: (roomId: string, artifactId: string, state: unknown) =>
-    req<void>(`/v1/rooms/${encodeURIComponent(roomId)}/artifacts/${encodeURIComponent(artifactId)}/state`, {
+    req<void>(roomPath(roomId, "artifacts", artifactId, "state"), {
       method: "POST",
       body: JSON.stringify({ artifactId, state }),
     }),
@@ -531,7 +532,7 @@ export const api = {
     body: { baseVersion: number; content: string; summary?: string },
   ) =>
     req<ArtifactReply>(
-      `/v1/rooms/${encodeURIComponent(roomId)}/artifacts/${encodeURIComponent(artifactId)}/versions`,
+      roomPath(roomId, "artifacts", artifactId, "versions"),
       { method: "POST", body: JSON.stringify(body) },
     ),
   // One version's raw bytes (inline text or blob-backed file), fetched with
@@ -554,7 +555,7 @@ export const api = {
     if (body.summary) form.append("summary", body.summary);
     if (body.sourceJobId) form.append("sourceJobId", body.sourceJobId);
     if (body.sourceSeq) form.append("sourceSeq", String(body.sourceSeq));
-    return req<ArtifactReply>(`/v1/rooms/${encodeURIComponent(roomId)}/artifacts/${encodeURIComponent(artifactId)}/versions`, {
+    return req<ArtifactReply>(roomPath(roomId, "artifacts", artifactId, "versions"), {
       method: "POST",
       body: form,
     });
@@ -564,37 +565,37 @@ export const api = {
   // (owner/admin or creator; the default channel is immutable), delete
   // (owner/admin; the default channel is undeletable).
   channels: (roomId: string) =>
-    req<{ channels: Channel[] }>(`/v1/rooms/${encodeURIComponent(roomId)}/channels`),
+    req<{ channels: Channel[] }>(roomPath(roomId, "channels")),
   createChannel: (roomId: string, name: string) =>
-    req<Channel>(`/v1/rooms/${encodeURIComponent(roomId)}/channels`, {
+    req<Channel>(roomPath(roomId, "channels"), {
       method: "POST",
       body: JSON.stringify({ name }),
     }),
   renameChannel: (roomId: string, channelId: string, name: string) =>
     req<Channel>(
-      `/v1/rooms/${encodeURIComponent(roomId)}/channels/${encodeURIComponent(channelId)}`,
+      roomPath(roomId, "channels", channelId),
       { method: "PATCH", body: JSON.stringify({ name }) },
     ),
   // The room's people chat: a human-only side conversation agents never see.
   // peopleChat reads it (404 until a member first opens it); openPeopleChat
   // creates it on first open (idempotent, any member).
   peopleChat: (roomId: string) =>
-    req<Channel>(`/v1/rooms/${encodeURIComponent(roomId)}/people-chat`),
+    req<Channel>(roomPath(roomId, "people-chat")),
   openPeopleChat: (roomId: string) =>
-    req<Channel>(`/v1/rooms/${encodeURIComponent(roomId)}/people-chat`, { method: "POST" }),
+    req<Channel>(roomPath(roomId, "people-chat"), { method: "POST" }),
   deleteChannel: (roomId: string, channelId: string) =>
     req<{ deleted: boolean }>(
-      `/v1/rooms/${encodeURIComponent(roomId)}/channels/${encodeURIComponent(channelId)}`,
+      roomPath(roomId, "channels", channelId),
       { method: "DELETE" },
     ),
   transferOwner: (id: string, userId: string) =>
-    req<void>(`/v1/rooms/${encodeURIComponent(id)}/transfer`, {
+    req<void>(roomPath(id, "transfer"), {
       method: "POST",
       body: JSON.stringify({ userId }),
       as: "none",
     }),
   createInvite: (id: string, body: { role?: string; capacity?: number; expiresAtMs?: number }) =>
-    req<{ code: string }>(`/v1/rooms/${encodeURIComponent(id)}/invites`, {
+    req<{ code: string }>(roomPath(id, "invites"), {
       method: "POST",
       body: JSON.stringify(body),
     }).then(tapOnboarding<{ code: string }>({ kind: "invite_created", roomId: id })),
@@ -606,20 +607,20 @@ export const api = {
   // Delete a room message you authored (soft delete; broadcast to the room).
   deleteMessage: (id: string, seq: number) =>
     req<void>(
-      `/v1/rooms/${encodeURIComponent(id)}/messages/${seq}`,
+      roomPath(id, "messages", seq),
       { method: "DELETE", as: "none" },
     ),
   // Edit a room message you authored (only the author, and not if deleted).
   // Broadcasts a message_edited event to the room.
   editMessage: (id: string, seq: number, text: string) =>
     req<void>(
-      `/v1/rooms/${encodeURIComponent(id)}/messages/${seq}`,
+      roomPath(id, "messages", seq),
       { method: "PATCH", body: JSON.stringify({ text }), as: "none" },
     ),
   // Add (or upsert the role of) a member by id (owner/admin only). Reuses the
   // members upsert endpoint, which updates role on conflict.
   addMember: (id: string, userId: string, role: string) =>
-    req<void>(`/v1/rooms/${encodeURIComponent(id)}/members`, {
+    req<void>(roomPath(id, "members"), {
       method: "POST",
       body: JSON.stringify({ userId, role }),
       as: "none",
@@ -633,25 +634,25 @@ export const api = {
       provider: string;
       allowedModels: string[];
       hasQuota: boolean;
-    }[]>(`/v1/rooms/${encodeURIComponent(id)}/shared-agents`),
+    }[]>(roomPath(id, "shared-agents")),
   // The model catalogs of the agents addressable in a room, keyed by owner
   // (owner, core, provider): members' live agents and the room's platform
   // agents. The composer's model picker reads a recipient's catalog here.
   roomAgentCatalogs: (id: string) =>
-    req<{ agents: RoomAgentCatalog[] }>(`/v1/rooms/${encodeURIComponent(id)}/agent-catalogs`),
+    req<{ agents: RoomAgentCatalog[] }>(roomPath(id, "agent-catalogs")),
   // Live room agent roster: the union of the agents every member's bridge
   // advertises as reachable here. Remote-safe — unlike localAgentTargets it
   // does not require the gateway to reach the caller's machine, so a browser
   // user against a remote gateway still sees drivable agents.
   roomAgents: (id: string) =>
     req<{ agents: { ownerUserId: string; core?: string; provider: string; sandboxed?: boolean }[] }>(
-      `/v1/rooms/${encodeURIComponent(id)}/agents`,
+      roomPath(id, "agents"),
     ),
   // Multipart upload (the browser sets the multipart boundary).
   uploadAttachment: async (roomId: string, file: File): Promise<ChatAttachment> => {
     const form = new FormData();
     form.append("file", file);
-    return req<ChatAttachment>(`/v1/rooms/${encodeURIComponent(roomId)}/attachments`, { method: "POST", body: form });
+    return req<ChatAttachment>(roomPath(roomId, "attachments"), { method: "POST", body: form });
   },
   // Handoff package (owner/admin): download the room's export zip. The server
   // streams the archive, so its size is unknown up front; onProgress gets the
@@ -660,7 +661,7 @@ export const api = {
     roomId: string,
     onProgress?: (bytes: number) => void,
   ): Promise<{ blob: Blob; filename: string }> => {
-    const res = await req<Response>(`/v1/rooms/${encodeURIComponent(roomId)}/export`, { as: "response" });
+    const res = await req<Response>(roomPath(roomId, "export"), { as: "response" });
     const filename = downloadFilename(res.headers.get("Content-Disposition"), roomId);
     if (!res.body) return { blob: await res.blob(), filename };
     const reader = res.body.getReader();
@@ -683,18 +684,18 @@ export const api = {
   },
   // A room's import provenance; 404 (ApiError) for a room that was not imported.
   roomHandoff: (roomId: string) =>
-    req<RoomHandoffInfo>(`/v1/rooms/${encodeURIComponent(roomId)}/handoff`),
+    req<RoomHandoffInfo>(roomPath(roomId, "handoff")),
   // A short-lived ticket URL for one attachment (an <img>/<a download>
   // cannot carry the bearer); lib/attachmentTickets.ts caches and renews it.
   attachmentTicket: (roomId: string, attachmentId: string) =>
     req<{ url: string; expiresAtMs: number }>(
-      `/v1/rooms/${encodeURIComponent(roomId)}/attachments/${encodeURIComponent(attachmentId)}/ticket`,
+      roomPath(roomId, "attachments", attachmentId, "ticket"),
       { method: "POST" },
     ),
   // Set a member's role (owner/admin only; cannot target the owner or grant
   // owner). Reuses the add-member upsert, which updates role on conflict.
   setMemberRole: (id: string, userId: string, role: "admin" | "member" | "visitor") =>
-    req<void>(`/v1/rooms/${encodeURIComponent(id)}/members`, {
+    req<void>(roomPath(id, "members"), {
       method: "POST",
       body: JSON.stringify({ userId, role }),
       as: "none",
@@ -719,7 +720,7 @@ export const api = {
     },
     clientMsgId: string,
   ) =>
-    req<{ sequence: number }>(`/v1/rooms/${encodeURIComponent(id)}/chat`, {
+    req<{ sequence: number }>(roomPath(id, "chat"), {
       method: "POST",
       body: JSON.stringify({
         text: message.text,
@@ -745,12 +746,12 @@ export const api = {
       model: string;
       reasoning: string;
       found: boolean;
-    }>(`/v1/rooms/${encodeURIComponent(roomId)}/agent-prefs${channelId ? `?channel=${encodeURIComponent(channelId)}` : ""}`),
+    }>(`${roomPath(roomId, "agent-prefs")}${channelId ? `?channel=${encodeURIComponent(channelId)}` : ""}`),
   putAgentPrefs: (
     roomId: string,
     body: { channelId?: string; ownerId: string; core: string; provider: string; model?: string; reasoning?: string },
   ) =>
-    req<void>(`/v1/rooms/${encodeURIComponent(roomId)}/agent-prefs`, {
+    req<void>(roomPath(roomId, "agent-prefs"), {
       method: "PUT",
       body: JSON.stringify(body),
       as: "none",
@@ -787,7 +788,7 @@ export const api = {
     ttlMs?: number,
   ) =>
     req<{ authorized: boolean; expiresAtMs: number }>(
-      `/v1/rooms/${encodeURIComponent(roomId)}/shared-agents/${encodeURIComponent(target)}/authorization`,
+      roomPath(roomId, "shared-agents", target, "authorization"),
       {
         method: "PUT",
         body: JSON.stringify({ allowedModels, ttlMs }),
@@ -795,7 +796,7 @@ export const api = {
     ),
   deauthorizeBorrow: (roomId: string, target: string) =>
     req<{ authorized: boolean }>(
-      `/v1/rooms/${encodeURIComponent(roomId)}/shared-agents/${encodeURIComponent(target)}/authorization`,
+      roomPath(roomId, "shared-agents", target, "authorization"),
       { method: "DELETE" },
     ),
   borrowAuthorization: (roomId: string, target: string, owner: string) =>
@@ -807,7 +808,7 @@ export const api = {
       runsUsed?: number;
       quotaExhausted?: boolean;
     }>(
-      `/v1/rooms/${encodeURIComponent(roomId)}/shared-agents/${encodeURIComponent(target)}/authorization?owner=${encodeURIComponent(owner)}`,
+      `${roomPath(roomId, "shared-agents", target, "authorization")}?owner=${encodeURIComponent(owner)}`,
     ),
   // Owner accountability view: the caller's live authorizations in a room with
   // usage and recent borrowers.
@@ -822,7 +823,7 @@ export const api = {
         recentBorrowers: string[];
       }[];
     }>(
-      `/v1/rooms/${encodeURIComponent(roomId)}/shared-agents-usage`,
+      roomPath(roomId, "shared-agents-usage"),
     ),
   // Team agent dashboard (F1): the caller's own agents ("self") or, for org
   // admins, every member's ("tenant", gated on manage_org by the gateway).

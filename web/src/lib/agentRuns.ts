@@ -18,6 +18,7 @@ export type {
   RunScope,
 } from "./wire.gen.ts";
 import type { AgentRun, AgentRunAgent, RunScope } from "./wire.gen.ts";
+import { roomPath } from "./roomId.ts";
 
 // Status filter choices the run views offer ("" = every status).
 export type RunStatusFilter = "" | "active" | "failed" | "replied" | "cancelled";
@@ -51,7 +52,7 @@ export interface RunListQuery {
 export function runsPath(scope: RunScope, q: RunListQuery = {}, roomId = ""): string {
   const base =
     scope === "room"
-      ? `/v1/rooms/${encodeURIComponent(roomId)}/jobs`
+      ? roomPath(roomId, "jobs")
       : scope === "self"
         ? "/v1/my/jobs"
         : "/v1/tenant/jobs";

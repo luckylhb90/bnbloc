@@ -111,6 +111,13 @@ export const RULES = [
     sample: { file: "views/X.tsx", text: "const q = useQuery(subject ? `my-agents:${subject}` : null, api.myAgents);" },
   },
   {
+    id: "L2",
+    name: "a room's API path is built by roomPath (lib/roomId.ts)",
+    pattern: /\/v1\/rooms\/\$\{/,
+    allowed: ["lib/roomId.ts"],
+    sample: { file: "lib/xApi.ts", text: "req(`/v1/rooms/${encodeURIComponent(id)}/members`)" },
+  },
+  {
     id: 6,
     name: "the session token rides a URL only on the room event stream",
     // EventSource cannot set headers, so sse.ts passes the session as

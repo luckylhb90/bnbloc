@@ -3,6 +3,7 @@ import { apiUrl } from "./config";
 import { errorDetail } from "./session.ts";
 import { tapOnboarding } from "./onboardingEvents.ts";
 import type { CreatedShare, PublicShare, ShareView, SiteTicket, TenantShareView } from "./shares.ts";
+import { roomPath } from "./roomId.ts";
 
 // Share-link and site endpoints. Member routes go through the authenticated
 // transport (`req`); the public ones (publicShareApi) are plain fetches that
@@ -10,7 +11,7 @@ import type { CreatedShare, PublicShare, ShareView, SiteTicket, TenantShareView 
 // must work in a browser that has none.
 
 function sharesPath(roomId: string, artifactId: string): string {
-  return `/v1/rooms/${encodeURIComponent(roomId)}/artifacts/${encodeURIComponent(artifactId)}/shares`;
+  return roomPath(roomId, "artifacts", artifactId, "shares");
 }
 
 export const sharesApi = {
@@ -30,7 +31,7 @@ export const sharesApi = {
   // A member's frame URL for one site version (ticketed, 1 h).
   siteTicket: (roomId: string, artifactId: string, version: number) =>
     req<SiteTicket>(
-      `/v1/rooms/${encodeURIComponent(roomId)}/artifacts/${encodeURIComponent(artifactId)}/versions/${version}/site-ticket`,
+      roomPath(roomId, "artifacts", artifactId, "versions", version, "site-ticket"),
       { method: "POST" },
     ),
 };

@@ -1,7 +1,8 @@
 import { req } from "./api.ts";
 import type { RoomSchedule, ScheduleInput } from "./schedules.ts";
+import { roomPath } from "./roomId.ts";
 
-const base = (roomId: string) => `/v1/rooms/${encodeURIComponent(roomId)}/schedules`;
+const base = (roomId: string) => roomPath(roomId, "schedules");
 
 // Scheduled prompts (N2), served by realtime. The creator edits/runs; the
 // room owner or an admin may pause or delete any schedule.
