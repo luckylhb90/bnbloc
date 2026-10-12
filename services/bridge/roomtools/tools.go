@@ -130,7 +130,7 @@ func DefaultRegistry() *Registry {
 	r := NewRegistry()
 	for _, t := range []Tool{
 		listRoomAgentsTool(), askAgentTool(), roomStatusTool(), readRoomTool(),
-		saveComponentTool(), getComponentTool(), listComponentsTool(), publishComponentTool(),
+		saveComponentTool(), getComponentTool(), listComponentsTool(), publishComponentTool(), tryDraftTool(),
 		postProgressTool(),
 	} {
 		if err := r.Register(t); err != nil {

@@ -118,47 +118,55 @@ func askAgent(ctx context.Context, env *Env, args json.RawMessage) Result {
 		}
 		label = target.Handle
 	}
+	out, res := dispatchTask(ctx, env, job, target, label, wire.DispatchRequest{Text: in.Task, Expert: expertRef(in.Expert), Role: role.Role}, in.WaitSeconds)
+	if out != nil && role.Role != "" {
+		out["role"] = role.Role
+	}
+	return res
+}
+
+// dispatchTask posts one dispatch of the bound job to target (req's text
+// and what the target wears; the parent and recipient are filled here)
+// through the gateway's dispatch door, where every dispatch guard applies,
+// then waits for it like ask_agent: the outcome map (nil when the dispatch
+// was refused) and the tool result carrying it. ask_agent and try_draft
+// share it.
+func dispatchTask(ctx context.Context, env *Env, job Job, target roomAgent, label string, req wire.DispatchRequest, waitSeconds *int) (map[string]any, Result) {
 	scope := env.Session.Scope()
-	raw, err := env.Gateway.Do(ctx, http.MethodPost, "/v1/rooms/"+url.PathEscape(scope.RoomID)+"/dispatch", wire.DispatchRequest{
-		ParentJobID: job.JobID,
-		Recipient:   wire.DispatchRecipient{OwnerID: target.Owner, Provider: target.Provider, Core: target.Core},
-		Text:        in.Task,
-		Expert:      expertRef(in.Expert),
-		ClientMsgID: newClientMsgID(),
-		Role:        role.Role,
-	})
+	req.ParentJobID = job.JobID
+	req.Recipient = wire.DispatchRecipient{OwnerID: target.Owner, Provider: target.Provider, Core: target.Core}
+	req.ClientMsgID = newClientMsgID()
+	raw, err := env.Gateway.Do(ctx, http.MethodPost, "/v1/rooms/"+url.PathEscape(scope.RoomID)+"/dispatch", req)
 	if err != nil {
 		noteRefusal(env, job)
-		return refusal("dispatch to "+label, err)
+		return nil, refusal("dispatch to "+label, err)
 	}
 	var reply wire.DispatchReply
 	if err := json.Unmarshal(raw, &reply); err != nil || reply.JobID == "" {
-		return toolError("dispatch to %s: unexpected answer", target.Handle)
+		return nil, toolError("dispatch to %s: unexpected answer", target.Handle)
 	}
 	env.Session.remember(dispatched{JobID: reply.JobID, Handle: target.Handle, Sequence: reply.Sequence})
 
 	wait := env.Config.DefaultWait
-	if in.WaitSeconds != nil {
-		wait = time.Duration(*in.WaitSeconds) * time.Second
+	if waitSeconds != nil {
+		wait = time.Duration(*waitSeconds) * time.Second
 	}
 	if wait > env.Config.MaxWait {
 		wait = env.Config.MaxWait
 	}
 	run, err := waitSettled(ctx, env, reply.JobID, target.Handle, wait)
 	if err != nil {
-		return Result{Value: map[string]any{
+		out := map[string]any{
 			"handle": reply.JobID, "agent": target.Handle, "status": "queued", "settled": false,
 			"note": "dispatched; reading its state failed (" + err.Error() + "); check it with room_status",
-		}}
+		}
+		return out, Result{Value: out}
 	}
 	out := toMap(describe(ctx, env, run, target.Handle))
-	if role.Role != "" {
-		out["role"] = role.Role
-	}
 	if note := noteOutcome(ctx, env, job, label, run, wait); note != "" {
 		out["team"] = note
 	}
-	return Result{Value: out}
+	return out, Result{Value: out}
 }
 
 // expertRef parses "id" or "id@version" (nil for none).
