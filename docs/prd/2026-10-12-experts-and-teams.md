@@ -1027,3 +1027,116 @@ and in global search). Executable components are unchanged. Decisions:
 - **Org-shared prompts are back** through org-scoped prompt packs: the
   Plaza shows the organization's prompts again, and global search returns
   prompt hits from the packs the member can see.
+
+## Gap closure (content features)
+
+**2026-10-12: recorded, in development.** The gaps the steps above left
+open for content components, closed through the existing seams. Runtime
+gaps (bridge, room tools, feed, desktop) are a separate pass. Decisions:
+
+1. **Notification preferences.** `content_shared` and `content_review`
+   get their switches in the existing prefs model: `contentShared` and
+   `contentReview` in `wire.NotificationPrefs` (store columns
+   `content_shared`, `content_review`, default on; migration
+   `2026_10_notification_prefs_content`), `notify.Allows` reads them, and
+   Settings → Notifications shows them beside the other types.
+2. **Room shares reach later joiners.** A share with a room records the
+   room share (`content_room_shares (room_id, component_id)`: tenant,
+   version, author, note; moved forward by a later share, never back;
+   deleted with the component). There was no join hook, so the seam is
+   added once beside `member_removed`: every human join in the room
+   service (add member, join a shared room, redeem an invite, a template's
+   default members) publishes a transient `member_joined` room event
+   (`{userId}`), and realtime's publish tap hands it to the content share
+   step (`internal/contentshare`, the copy logic extracted from the
+   gateway, which uses it too): each room share of that room gives the
+   joiner a copy (the same copy rule as a share), with the
+   `content_shared` notification and a `share` audit row. A room share
+   stops handing out copies when its author has left the room. The author
+   revokes one with `DELETE /v1/content-components/{id}/shares/rooms/{room}`:
+   later joiners get nothing, existing copies stay. `GET …/shares` lists
+   the room shares beside the copies.
+3. **Platform content tenant scope.** A platform row carries
+   `enabled_tenants` (NULL = every organization; migration
+   `2026_10_content_platform_tenants`). `extpipe.GateForContent` passes it
+   to `MemberVisibility`, whose platform branch already applies the
+   component tenant rule, so `contentuse.Visible`, `Usable`, `name@range`
+   resolution, prompt search and the bundle entitlement all honour it.
+   It is set through the existing route,
+   `PUT /v1/platform/components/{name}/tenants`, with its fail-closed
+   semantics (an empty list is a 400, `{"allTenants": true}` clears it):
+   `?kind=expert|skill|prompt` picks platform content, and without a kind a
+   name held by both an executable record and platform content is a 409.
+   The console's Platform content page edits it.
+4. **Same-name org components: org names are unique per organization.**
+   Two options: author-qualified references, or one org component per
+   (organization, kind, name). Uniqueness is the cleaner one with the
+   existing syntax: `name@range` stays what authors write (in
+   `requires.skills`, `requires.prompts`, team roles, quick prompt
+   `pack/prompt-id`, whose `/` an author prefix would collide with), so
+   the validator, the resolution and every form stay as they are and
+   nothing is migrated in stored content; an author-qualified syntax would
+   change all of them and still leave `name@range` ambiguous for existing
+   content. The store holds it: an org row reserves its name (an
+   `org_name` column, set for scope org whatever the status, so an
+   unpublished row can be restored; `UNIQUE (tenant_id, kind, org_name)`,
+   migration `2026_10_content_org_names`, which keeps the oldest of any
+   existing duplicates and retires the others). Requesting and approving
+   a clashing name are refused with a clear message ("the organization
+   already has a skill pack named review-kit by jack: rename yours, save
+   it under a new name, and ask again"); the author renames by saving
+   under a new name.
+5. **Re-approval on new versions.** When the author saves a new version
+   (form, archive, import, or the room tools) of a component that the
+   organization uses (an active org row) or that has a pending request,
+   the gateway opens the publish request for the new version itself
+   (one pending request per component: it supersedes the older one; the
+   org admins are notified only when no request was pending, so repeated
+   saves do not repeat the notification). The save's reply carries the
+   request (`resubmitted`), and the Library tells the author ("sent to
+   your organization's admins for approval; members keep using v1.1.0
+   until then"). An unpublished or withdrawn publication is not resubmitted.
+6. **"Create with AI" for prompt packs.** The Expert builder learns the
+   prompt pack format (prompts with variables, slash commands, the starter
+   flag) and is bumped to 1.1.0; the Prompts tab gets "Create with AI" and
+   "Improve with AI" through the same `workshopFlow`; the builder drafts
+   `drafts/<name>/component.json` with prompts and variables and saves
+   through `save_component`, or the member uses "Save as prompt pack" on
+   the deliverables.
+7. **Room starter prompts from packs: a `starter` flag on a pack prompt.**
+   The pack's author marks the prompts that open a conversation well
+   (`starter: true`); a room's empty-feed starter prompts are the starter
+   prompts of the packs turned on for the room, then the generic examples.
+   Why the flag and not a per-room pick: the room's owner already chooses
+   by turning the pack on, the flag needs no second per-room list (no
+   schema, no settings to keep in step when a pack changes), and the
+   author knows which prompts stand alone. A starter with variables asks
+   for them like any pack prompt.
+8. **Form editing.** The expert form edits a quick prompt's `ref`: pick a
+   prompt of a pack the member can see (the pack is added to
+   `requires.prompts`). The Library form edits `requires.mcp`: pick from
+   the MCP tool components visible to the member, tick the env names the
+   tool declares, and the matching permission (`mcp.stdio`, or
+   `mcp.http:<host>`) is added; the gateway's save check stays the
+   authority.
+9. **A pushed "content saved" event.** A save or publish by the room tools
+   (a request on behalf of a job's requester) publishes a transient
+   `content_saved` room event in the job's room (`{componentId, kind,
+   name, displayName, version, action: saved|submitted, created, owner}`)
+   through realtime's internal publish, like `content_uses_changed`. The
+   workshop listens for it on the room stream and toasts the requester's
+   saves; the re-list of the Library after every agent reply is removed.
+   No new stream type.
+10. **MCP console form.** The platform console builds an MCP tool package
+    from a form: name, version, publisher, tools, env (secret, required),
+    credentials source, and either stdio binaries per platform (uploaded
+    through the existing `POST /v1/platform/artifacts` staging) with
+    `args`, or an http URL with its auth and network permission. The
+    package is assembled by the gateway
+    (`POST /v1/platform/mcp-packages`) with `pkgmeta.AssembleMCP`, the
+    assembly `bnbloc cores publish-mcp` uses (extracted from the CLI, not
+    copied), and returned as the JSON to sign. Signing stays offline: the
+    console offers the file and explains the CLI step (`bnbloc cores
+    install --package <file>` signs with the publisher key and installs,
+    or a detached signature goes with the file into Components → Publish),
+    like content promote.
