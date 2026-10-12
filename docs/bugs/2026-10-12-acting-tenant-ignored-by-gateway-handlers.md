@@ -1,6 +1,6 @@
 # Acting tenant ignored by gateway-served handlers (2026-10-12)
 
-Status: fixed (gateway); pending deploy.
+Status: fixed in 3abf760 (gateway); pending deploy.
 
 ## Repro
 
