@@ -64,4 +64,20 @@ next claim's `running` report clears `failure_reason`. To a member,
 
 ## Landing
 
-- Commits: see `git log --grep "retried-job-hides-why"`.
+Status: fixed.
+
+- `2872a8b` store: every requeue records its attempt; the sweep owns lease
+  loss (migration `2026_10_agent_jobs_attempts`, wire `attempts`)
+- `f37795f` bridge: a sandbox not up yet at prepare is `sandbox_starting`
+- `b169c98` web: a retried job says why; the run detail lists its attempts
+- `cac0754` ci: the isolated web build's cleanup trap fires once (found
+  while verifying: `scripts/ci.sh web` exited 1 after every check passed)
+
+Tests: `TestContractBridgeJobStoreAttemptHistory`,
+`TestContractBridgeJobStoreLapsedLeaseRequeuedBySweep`, the updated sweep,
+retry and renewal contract cases (memory and MySQL), `TestJobRequeueOwned`,
+`TestAgentJobViewCarriesAttempts`, `TestRoomRunDetailResolvesReplySeq`,
+`TestSweepRequeuesLapsedLeaseWithoutNotice`,
+`TestSandbox_machineStillStartingIsSandboxStarting`,
+`TestDriveRefusalsAreFinal`, and `web/src/views/room/agentJobLabels.test.ts`.
+Each was broken once to check it fails.

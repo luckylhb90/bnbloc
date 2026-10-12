@@ -912,9 +912,12 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   the chat picked (refused).
 - **A job retries only when no agent work can have started.**
   `store.AgentJobFailureReason.Retryable` owns what retries
-  (`core_unavailable`, `runner_start_failed`, the lease sweep's
-  `turn_timeout`); `services/bridge/job_failure.go` owns which reason a
-  failure gets and the notice that says why: a stage's `refusal` (a
+  (`core_unavailable`, `sandbox_starting`, `runner_start_failed`,
+  `budget_unavailable`, the lease sweep's `lease_expired`);
+  `services/bridge/job_failure.go` owns which reason a
+  failure gets and the notice that says why (a sandbox prepare failure that
+  means the sandbox is not up yet is `sandbox_starting`: `sandboxStarting`
+  over the error and a fresh readiness probe): a stage's `refusal` (a
   `refusalKind`: notice kind + final reason, `invalid_job`,
   `agent_not_advertised`, `content_unavailable`, `team_unsupported`,
   `sandbox_required`, `borrow_not_authorized`) goes through `b.refuse`,
@@ -925,6 +928,19 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   notice. Never classify by error text, and never report a failed status
   or declare a refusal elsewhere (`TestDriveRefusalsAreFinal`,
   `TestEveryStageRefusalPostsItsNotice`).
+- **Every requeue records its attempt, in the statement that requeues.**
+  The one requeue is `AgentJob.requeued` (memory) and its SQL twin
+  `sqlRequeue` (`internal/store/bridge_jobs.go`): queued, lease released,
+  `{attempt, reason, atMs}` appended to `agent_jobs.attempts_json` (the
+  newest `MaxRecordedAttempts`; a terminal failure keeps them). A bridge's
+  retryable report and the sweep's lapsed lease both go through it, under
+  the one rule `retries` (`TestJobRequeueOwned`). The sweep owns lease
+  loss: only a queued job is claimable, a lapsed lease is requeued as
+  `lease_expired` (failed on the last attempt), and a queued job's timeout
+  counts from when it entered the queue (`updated_at_ms`). Members read
+  the attempts as reason codes (`wire.AgentJobAttempt`, decision O4) in the
+  job events, the room's job list and the run record
+  (docs/bugs/2026-10-12-retried-job-hides-why.md).
 - **Every notice row is a `wire.JobNotice`** (`internal/wire/job_notice.go`:
   `Payload()` is the one payload with `payload.notice` as its kind,
   `Report()` the one recorded batch) under the job's notice session
@@ -1090,7 +1106,10 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   own agent. Team guards (roles, `wire.MaxTeamFailures`, timeout notices,
   `post_progress`) live in the room tools, never in instructions alone.
 - A failed job's member-facing sentence is
-  `store.AgentJobFailureReason.Text`. A share's notification is
+  `store.AgentJobFailureReason.Text`; the web's one reason table is
+  `AGENT_JOB_FAILURES` (`views/room/agentJobLabels.ts`: a label and a
+  "why" clause per reason, read through `failureLabel`/`failureWhy`; a live
+  retried job's "retrying — …" is `retryNote`). A share's notification is
   `contentshare.Announce` (one dedup key per member and version), from the
   gateway and realtime alike.
 - **MCP servers come only from MCP tool components**
