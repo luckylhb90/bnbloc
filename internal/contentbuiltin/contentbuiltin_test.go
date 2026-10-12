@@ -108,6 +108,38 @@ func TestLoadRefusesInvalidPackage(t *testing.T) {
 	}
 }
 
+// Junk a checkout or an editor leaves in the packages tree (Finder
+// metadata, AppleDouble files, a stray metadata directory) is ignored: it
+// must never fail boot or change a built-in's bytes.
+func TestLoadIgnoresJunkFiles(t *testing.T) {
+	pkg := fstest.MapFS{
+		"packages/helper/component.json":  {Data: []byte(`{"kind":"bnbloc.expert.package/v1","name":"helper","version":"1.0.0","displayName":"Helper"}`)},
+		"packages/helper/INSTRUCTIONS.md": {Data: []byte("Do things.\n")},
+	}
+	clean, err := load(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	junk := fstest.MapFS{
+		"packages/.DS_Store":                {Data: []byte("x")},
+		"packages/__MACOSX/helper/._x":      {Data: []byte("x")},
+		"packages/.idea/workspace.xml":      {Data: []byte("x")},
+		"packages/helper/.DS_Store":         {Data: []byte("\x00\x01binary")},
+		"packages/helper/._INSTRUCTIONS.md": {Data: []byte("\x00\x05")},
+		"packages/helper/Thumbs.db":         {Data: []byte("x")},
+	}
+	for k, v := range pkg {
+		junk[k] = v
+	}
+	got, err := load(junk)
+	if err != nil {
+		t.Fatalf("load with junk files = %v", err)
+	}
+	if len(got) != 1 || got[IDPrefix+"helper"].Version.SHA256 != clean[IDPrefix+"helper"].Version.SHA256 {
+		t.Fatalf("junk changed the built-ins: %d packages", len(got))
+	}
+}
+
 func TestOverlayListsAndReadsBuiltins(t *testing.T) {
 	ctx := context.Background()
 	base := store.NewMemoryContentComponents()

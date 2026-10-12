@@ -137,48 +137,43 @@ func cleanDir(dir string) (string, error) {
 	return clean, nil
 }
 
-// packDir reads every file under dir from the workspace and packs them
-// (paths relative to dir) into a content bundle. Protected workspace paths
+// packDir packs every file under dir in the workspace (paths relative to
+// dir) into a content bundle through the one directory packer
+// (tarbundle.PackEntries): junk, hidden files and protected workspace paths
 // (core.ProtectedWorkspacePath: room history, the agent config the session
-// wears, host-executed project config) are never packed: a component is
-// shared with other people.
+// wears, host-executed project config) are never packed, since a component
+// is shared with other people.
 func packDir(ctx context.Context, ws Workspace, dir string) ([]byte, int, error) {
 	files, err := ws.ListFiles(ctx)
 	if err != nil {
 		return nil, 0, fmt.Errorf("listing your workspace failed: %v", err)
 	}
-	limits := tarbundle.ContentLimits
-	out := map[string][]byte{}
-	total := int64(0)
 	prefix := dir + "/"
+	var entries []tarbundle.Entry
+	packed, component := 0, false
 	for _, f := range files {
-		if !strings.HasPrefix(f.Path, prefix) || core.ProtectedWorkspacePath(f.Path) {
+		rel, ok := strings.CutPrefix(f.Path, prefix)
+		if !ok {
 			continue
 		}
-		rel := strings.TrimPrefix(f.Path, prefix)
-		if len(out) >= limits.MaxFiles {
-			return nil, 0, fmt.Errorf("%s holds more than %d files", dir, limits.MaxFiles)
+		e := tarbundle.Entry{Rel: rel, Path: f.Path, Size: f.Bytes, Read: func() ([]byte, error) { return ws.ReadFile(ctx, f.Path) }}
+		if e.Packed() {
+			packed++
+			component = component || rel == "component.json"
 		}
-		if total += f.Bytes; total > int64(limits.MaxBytes) {
-			return nil, 0, fmt.Errorf("%s is larger than %d bytes", dir, limits.MaxBytes)
-		}
-		data, err := ws.ReadFile(ctx, f.Path)
-		if err != nil {
-			return nil, 0, fmt.Errorf("reading %s failed: %v", f.Path, err)
-		}
-		out[rel] = data
+		entries = append(entries, e)
 	}
-	if len(out) == 0 {
+	if packed == 0 {
 		return nil, 0, fmt.Errorf("no files under %s in your workspace (write the draft there first)", dir)
 	}
-	if _, ok := out["component.json"]; !ok {
+	if !component {
 		return nil, 0, fmt.Errorf("%s has no component.json", dir)
 	}
-	raw, err := tarbundle.PackFiles(out, limits)
+	raw, n, err := tarbundle.PackEntries(entries, tarbundle.ContentLimits)
 	if err != nil {
 		return nil, 0, fmt.Errorf("packing %s failed: %v", dir, err)
 	}
-	return raw, len(out), nil
+	return raw, n, nil
 }
 
 // componentDetail is the part of the gateway's component detail the tools

@@ -82,7 +82,7 @@ func load(fsys fs.FS) (map[string]*Package, error) {
 	}
 	out := map[string]*Package{}
 	for _, d := range dirs {
-		if !d.IsDir() {
+		if !d.IsDir() || tarbundle.Ignored(d.Name()) {
 			continue
 		}
 		p, err := loadPackage(fsys, path.Join("packages", d.Name()))
@@ -98,22 +98,9 @@ func load(fsys fs.FS) (map[string]*Package, error) {
 }
 
 func loadPackage(fsys fs.FS, root string) (*Package, error) {
-	files := map[string][]byte{}
-	err := fs.WalkDir(fsys, root, func(p string, d fs.DirEntry, err error) error {
-		if err != nil || d.IsDir() {
-			return err
-		}
-		data, err := fs.ReadFile(fsys, p)
-		if err != nil {
-			return err
-		}
-		files[strings.TrimPrefix(p, root+"/")] = data
-		return nil
-	})
-	if err != nil {
-		return nil, err
-	}
-	raw, err := tarbundle.PackFiles(files, tarbundle.ContentLimits)
+	// The one directory packer: junk a checkout or an editor leaves beside
+	// the files (.DS_Store, ._*) is never packed, so it cannot fail boot.
+	raw, err := tarbundle.PackFS(fsys, root, tarbundle.ContentLimits)
 	if err != nil {
 		return nil, err
 	}

@@ -9,6 +9,12 @@
 // a static web app from session files, the gateway serves it). The desktop
 // shell has its own reader of the previewer format (apps/desktop/src-tauri),
 // and the reference previewer's build script its own writer.
+//
+// It is also the only Go code that reads archives
+// (TestOnlyTarbundleReadsArchives): a stored bundle through
+// Cache.LoadPinned, an upload of a foreign format through ReadArchive; and
+// the one directory packer (PackEntries, PackFS, Pack) with one exclusion
+// rule (Entry.Packed: junk, hidden files, core.ProtectedWorkspacePath).
 package tarbundle
 
 import (
@@ -17,10 +23,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/fs"
-	"os"
 	"path"
-	"path/filepath"
 	"sort"
 	"strings"
 
@@ -162,65 +165,6 @@ func (b *Bundle) RequireEntry(entry string) error {
 		return fmt.Errorf("bundle has no entry %q", entry)
 	}
 	return nil
-}
-
-// Pack archives every regular file under dir into a deterministic bundle
-// (PackFiles). Hidden files (a leading dot in any segment) are skipped; any
-// other path the bundle rules refuse, a symlink, or the caps fail the pack.
-func Pack(dir string, l Limits) ([]byte, error) {
-	var paths []string
-	err := filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		rel, err := filepath.Rel(dir, p)
-		if err != nil {
-			return err
-		}
-		if rel == "." {
-			return nil
-		}
-		rel = filepath.ToSlash(rel)
-		if strings.HasPrefix(path.Base(rel), ".") {
-			if d.IsDir() {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		if d.IsDir() {
-			return nil
-		}
-		if !d.Type().IsRegular() {
-			return fmt.Errorf("%s is not a regular file", rel)
-		}
-		if !core.ValidBundlePath(rel) {
-			return fmt.Errorf("%s is not a valid bundle path ([A-Za-z0-9._-] segments)", rel)
-		}
-		paths = append(paths, rel)
-		return nil
-	})
-	if err != nil {
-		return nil, err
-	}
-	if len(paths) == 0 {
-		return nil, fmt.Errorf("%s holds no files", dir)
-	}
-	if len(paths) > l.MaxFiles {
-		return nil, fmt.Errorf("%s holds more than %d files", dir, l.MaxFiles)
-	}
-	files := make(map[string][]byte, len(paths))
-	total := 0
-	for _, rel := range paths {
-		data, err := os.ReadFile(filepath.Join(dir, filepath.FromSlash(rel)))
-		if err != nil {
-			return nil, err
-		}
-		if total += len(data); total > l.MaxBytes {
-			return nil, fmt.Errorf("%s exceeds %d bytes", dir, l.MaxBytes)
-		}
-		files[rel] = data
-	}
-	return PackFiles(files, l)
 }
 
 // PackFiles archives files (bundle path -> bytes) into a deterministic

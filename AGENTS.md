@@ -853,6 +853,14 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   (later prompt packs) enter only through `internal/contentpkg` (form,
   archive, import, bridge). A new content kind registers a `KindSpec`; no
   branches in shared code.
+- **Archives and directory packing have one owner: `internal/tarbundle`.**
+  An upload of a foreign format is read by `ReadArchive` (an unsafe name is
+  refused, never rewritten), and every directory pack (save_component's
+  draft, the CLI's previewer dir, the built-in packages) goes through
+  `PackEntries`/`PackFS` with one exclusion rule (`Entry.Packed`: junk such
+  as `.DS_Store`, hidden files, `core.ProtectedWorkspacePath`).
+  `TestOnlyTarbundleReadsArchives` forbids `archive/tar|zip` elsewhere
+  (the room handoff zip and the sandbox conformance suite are allowlisted).
 - **"May member M use component C" has one answer:**
   `extpipe.MemberVisibility`, for executable and content components alike
   (room pins and uses come in through `internal/contentuse`). Never

@@ -1,21 +1,16 @@
 package contentpkg
 
 import (
-	"archive/tar"
-	"archive/zip"
 	"bytes"
-	"compress/gzip"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"path"
 	"regexp"
 	"sort"
 	"strings"
 	"unicode/utf8"
 
-	"github.com/luckylhb90/bnbloc/core"
 	"github.com/luckylhb90/bnbloc/internal/tarbundle"
 )
 
@@ -266,24 +261,13 @@ func findInstructions(files map[string][]byte) (string, map[string]string, error
 	return "", nil, errors.New("an expert needs instructions: add INSTRUCTIONS.md (or AGENTS.md / CLAUDE.md), or import a plugin with an agent")
 }
 
-// junk are archive entries an import drops (OS and VCS metadata).
-func junk(p string) bool {
-	for _, seg := range strings.Split(p, "/") {
-		switch seg {
-		case "__MACOSX", ".DS_Store", ".git", "node_modules", ".gitignore", "Thumbs.db":
-			return true
-		}
-	}
-	return false
-}
-
 // readUpload reads an upload: an archive, or a single text file (a
 // markdown or json file of prompts), named by its content.
 func readUpload(raw []byte) (map[string][]byte, error) {
-	if isArchive(raw) || !utf8.Valid(raw) {
+	if tarbundle.IsArchive(raw) || !utf8.Valid(raw) {
 		// Every content kind's archive is read within the widest content
 		// profile; the kind's own caps apply to the package built from it.
-		return readArchive(raw, tarbundle.ContentLimits)
+		return tarbundle.ReadArchive(raw, tarbundle.ContentLimits)
 	}
 	if len(raw) > promptPackMaxSize {
 		return nil, fmt.Errorf("the file exceeds %d bytes", promptPackMaxSize)
@@ -296,110 +280,6 @@ func readUpload(raw []byte) (map[string][]byte, error) {
 		return map[string][]byte{"prompts.json": raw}, nil
 	}
 	return map[string][]byte{"prompts.md": raw}, nil
-}
-
-// isArchive reports a zip, gzip or tar upload by its magic bytes.
-func isArchive(raw []byte) bool {
-	return bytes.HasPrefix(raw, []byte("PK\x03\x04")) || bytes.HasPrefix(raw, []byte{0x1f, 0x8b}) ||
-		(len(raw) >= 262 && string(raw[257:262]) == "ustar")
-}
-
-// readArchive reads a tar, tar.gz or zip archive into files, refusing what a
-// package cannot hold (links, unsafe names) and capping counts and sizes by
-// l (an archive bomb stops at the cap, never expands fully).
-func readArchive(raw []byte, l tarbundle.Limits) (map[string][]byte, error) {
-	if int64(len(raw)) > l.MaxArchiveBytes() {
-		return nil, fmt.Errorf("archive exceeds %d bytes", l.MaxArchiveBytes())
-	}
-	files := map[string][]byte{}
-	total := 0
-	add := func(name string, r io.Reader, size int64) error {
-		name = strings.TrimPrefix(path.Clean("/"+strings.ReplaceAll(name, "\\", "/")), "/")
-		if name == "" || junk(name) {
-			return nil
-		}
-		if !core.ValidBundlePath(name) {
-			return fmt.Errorf("%q: file names may use letters, digits, '.', '_' and '-' only", name)
-		}
-		if len(files) >= l.MaxFiles {
-			return fmt.Errorf("archive holds more than %d files", l.MaxFiles)
-		}
-		if size > int64(l.MaxBytes-total) {
-			return fmt.Errorf("archive content exceeds %d bytes", l.MaxBytes)
-		}
-		data, err := io.ReadAll(io.LimitReader(r, int64(l.MaxBytes-total)+1))
-		if err != nil {
-			return fmt.Errorf("%s: %w", name, err)
-		}
-		if total += len(data); total > l.MaxBytes {
-			return fmt.Errorf("archive content exceeds %d bytes", l.MaxBytes)
-		}
-		if _, dup := files[name]; dup {
-			return fmt.Errorf("%q appears twice", name)
-		}
-		files[name] = data
-		return nil
-	}
-	switch {
-	case bytes.HasPrefix(raw, []byte("PK\x03\x04")):
-		zr, err := zip.NewReader(bytes.NewReader(raw), int64(len(raw)))
-		if err != nil {
-			return nil, fmt.Errorf("not a valid zip archive: %w", err)
-		}
-		for _, f := range zr.File {
-			if f.FileInfo().IsDir() {
-				continue
-			}
-			if !f.Mode().IsRegular() {
-				return nil, fmt.Errorf("%q is not a regular file", f.Name)
-			}
-			rc, err := f.Open()
-			if err != nil {
-				return nil, fmt.Errorf("%s: %w", f.Name, err)
-			}
-			err = add(f.Name, rc, int64(f.UncompressedSize64))
-			rc.Close()
-			if err != nil {
-				return nil, err
-			}
-		}
-	default:
-		var r io.Reader = bytes.NewReader(raw)
-		if bytes.HasPrefix(raw, []byte{0x1f, 0x8b}) {
-			gz, err := gzip.NewReader(bytes.NewReader(raw))
-			if err != nil {
-				return nil, fmt.Errorf("not a valid gzip archive: %w", err)
-			}
-			r = gz
-		}
-		tr := tar.NewReader(r)
-		for {
-			hdr, err := tr.Next()
-			if err == io.EOF {
-				break
-			}
-			if err != nil {
-				return nil, fmt.Errorf("not a valid tar archive: %w", err)
-			}
-			switch hdr.Typeflag {
-			case tar.TypeDir, tar.TypeXGlobalHeader:
-				continue
-			case tar.TypeReg, '\x00':
-			default:
-				if junk(hdr.Name) {
-					continue
-				}
-				return nil, fmt.Errorf("%q is not a regular file", hdr.Name)
-			}
-			if err := add(hdr.Name, tr, hdr.Size); err != nil {
-				return nil, err
-			}
-		}
-	}
-	if len(files) == 0 {
-		return nil, errors.New("the archive holds no files")
-	}
-	return files, nil
 }
 
 // stripCommonRoot removes one directory every file shares ("my-skill/…"),
