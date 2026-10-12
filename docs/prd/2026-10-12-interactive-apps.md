@@ -1,364 +1,353 @@
 # Interactive apps: agent-built sites with their own data (2026-10-12)
 
-Status: proposed (rev 2, after product-owner review). Build after the
-code-health batches 2/4/5 land: they rework the gateway route table, the store
-rig and the web wire types this feature sits on.
+Status: **accepted** by the product owner on 2026-10-12. Development starts
+once code-health batches 2, 4 and 5 have landed. This feature builds on the
+gateway route table (2.1), `svcauth.NewRequest` (2.2), `httpx` (2.3), the
+event-kind registry (2.5), the store rig (4.1) and the generated wire types
+(5.1).
 
 ## 1. Why
 
-A member asks an agent in a room to build a small interactive project, like a
-poll. They get a working page and send the link to a group chat. People use
-it, and the same agent then reads the collected data and writes the report,
-all in the same room. Polls are only one example. The platform does not
-know or care what the app is; sign-ups, surveys, lunch orders, retro boards and
-games are all "a page plus some data plus an agent that reads it back".
+A member asks an agent in a room to build a small interactive project, such
+as a poll. The member gets a working page, sends the link to a group chat, and
+people use it. The same agent then reads the collected data and writes the
+report. All of this happens in the same room.
+
+A poll is only one example. Sign-ups, surveys, lunch orders, retro boards,
+approval forms and games have the same shape: a page, some data, and an agent
+that reads the data back. The platform never knows or cares what the app is.
 
 ## 2. Principle: a base, not a product
 
-The platform provides only what an app cannot provide for itself. Everything
-else is the app's own code, written by the agent:
+The platform provides only what an app cannot provide for itself.
 
+**The test:** anything that can live safely in the app's own code stays out
+of the platform. The platform keeps only what fails that test: durable
+storage, verifiable identity, the rules client code cannot enforce, safety
+caps and isolation.
+
+**The app's code, written by the agent, decides everything else:**
 - who may take part;
 - one vote per person;
-- open/close;
-- field validation;
+- opening and closing;
+- validation;
 - results pages;
 - exports.
 
-The platform adds no manifest, no participant modes, no schemas and no app
+So the platform has no manifest, no participant modes, no schemas and no app
 lifecycle.
-
-The test for adding anything to the platform: the app cannot do it in its own
-code, or doing it there would be unsafe. Durable storage, verifiable identity
-and isolation pass that test. Business rules do not.
 
 ## 3. What exists today (verified 2026-10-12)
 
-- **Build:** the bridge publishes any workspace folder with `index.html` (or
-  its `dist/`) as a versioned `site` artifact after each turn
-  (`services/bridge/sites.go`).
-- **Serve:** the gateway serves sites under a member ticket
-  (`/v1/sites/{ticket}/…`) or a public share link
-  (`/v1/public/shares/{token}/site/…`), with `CSP: sandbox allow-scripts …`
-  and an opaque origin.
-- **Distribute:** public share links already exist: anonymous, with an expiry,
-  revocable, and org admins can disable them.
-- **Missing: durable data.** The live-state relay keeps only the last 16 KiB
-  per artifact, in memory, members only, and is not wired for sites.
-- **Missing: agent read-back.** No room tool reads an app's data.
+| Step | Today | Gap |
+|---|---|---|
+| Build | After each turn the bridge publishes any workspace folder with `index.html`, or its `dist/`, as a versioned `site` artifact (`services/bridge/sites.go`). The artifact id is stable across versions. | none |
+| Serve | The gateway serves sites behind a member ticket (`/v1/sites/{ticket}/…`) or a public share link (`/v1/public/shares/{token}/site/…`). Sites run with `CSP: sandbox allow-scripts …` and an opaque origin. | Sites share the web app's origin. The share page wraps an app in file-viewer chrome. |
+| Distribute | Public share links: anonymous, with an expiry, revocable, and org admins can disable them. | none |
+| Collect | The live-state relay holds only the last 16 KiB per artifact, in memory, for members only. It is not wired to sites. | **Durable data is missing.** |
+| Read back | Room tools read chat and Library components. | **No tool reads an app's data.** |
 
-## 4. The core capabilities (the whole feature)
+## 4. The platform base
 
 ### 4.1 App data: a document store per app
 
-- Each published site gets its own data space, keyed by (tenant, room,
-  artifact). Within it there are named **collections** of **JSON documents**,
-  created on first write. There is no schema; the app decides the shape.
-- API, path-relative under the capability the page was opened with, so the
-  page handles no tokens:
-  - `POST ~app/c/{collection}`: insert.
-  - `GET ~app/c/{collection}?filter=…&sort=…&limit=…&after=…`: find.
-    `filter` is a small JSON subset (`$eq $ne $in $gt $gte $lt $lte $exists`
-    on top-level and dotted fields).
-  - `GET|PUT|PATCH|DELETE ~app/c/{collection}/{id}`.
-  - `GET ~app/events`: SSE stream of changes, for live results.
-  - `GET ~app/me`: who the caller is.
-- A tiny first-party SDK at `~app/sdk.js` wraps these calls:
-  `app.collection("votes").insert({...})`, `.find(filter)`, `.subscribe()`,
-  `app.me()`.
-- The server stamps every document with `_id`, `_by`, `_byName`,
-  `_createdAt` and `_updatedAt`. The client cannot set or change them.
+- **Data space.** Each published site owns one data space, keyed by its
+  artifact id (the `app_id`). The space lives in the artifact's room and
+  tenant. Inside it are named **collections** of **JSON documents**, each
+  created on first write. There is no schema.
+- **API.** Every path is relative to the capability the page was opened
+  with, so the page handles no tokens:
 
-### 4.1a Concurrency: per-document, like any document database
+  | Method and path | Purpose |
+  |---|---|
+  | `POST ~app/c/{collection}` | insert (`{public}` option) |
+  | `GET ~app/c/{collection}?filter=&sort=&limit=&after=` | find, with paging |
+  | `GET` / `PUT` / `PATCH` / `DELETE ~app/c/{collection}/{id}` | read, replace, merge or `$inc`, delete. `PUT` takes `ifAbsent`; writes take `ifVersion`. |
+  | `GET ~app/events` | change feed (SSE) |
+  | `GET ~app/me` | the caller's id, and their display name when it is the caller's own |
 
-The concurrency model is the same whichever backend is used (MongoDB is also
-atomic per document):
+- **Filters.** `filter` accepts a fixed set of operators: `$eq $ne $in $gt
+  $gte $lt $lte $exists`, on top-level and dotted fields. Any other operator
+  is refused.
+- **SDK.** A small first-party SDK is served at `~app/sdk.js`:
+  `app.collection("votes").insert(doc, {public})`, `.find(filter)`,
+  `.get(id)`, `.put(id, doc, {ifAbsent, ifVersion})`, `.patch(id, ops)`,
+  `.remove(id)`, `.subscribe(fn)`, `app.me()`. It is versioned with the
+  gateway.
+- **Server stamps.** The server stamps every document with `_id`, `_by`,
+  `_createdAt`, `_updatedAt` and `_version`. Clients can never set or change
+  them.
 
-- **One row per document, never a shared JSON blob.** Concurrent inserts are
-  independent rows (time-ordered `_id`), so a thousand people voting at once
-  never contend.
-- **Every write to one document is atomic.** `PUT`/`PATCH`/`DELETE` is a
-  single `UPDATE … WHERE id=?` under its row lock; a `PATCH` applies its
-  `JSON_SET` paths in that one statement.
-- **Optimistic concurrency.** Each document carries a server-incremented
-  `_version`. A write with `ifVersion` (`If-Match`) that no longer matches gets
-  409, and the SDK returns it so the app can re-read and retry. Without
-  `ifVersion`, the last writer wins.
-- **Atomic counters.** `PATCH` supports `$inc` on numeric fields
-  (`UPDATE … SET body = JSON_SET(body, '$.n', COALESCE(JSON_EXTRACT(body, '$.n'), 0) + ?)`),
-  so a shared counter never loses an update.
-- **Create-only with the app's own id.** `PUT ~app/c/{collection}/{id}` with
-  `ifAbsent` (`If-None-Match: *`) succeeds once and returns 409 afterwards,
-  enforced by the primary key. An app gets race-free "one record per key" by
-  choosing the key, e.g. `id = me().id`, with no platform rule about votes.
+### 4.2 Concurrency: per document, like any document database
 
-The recommended pattern for tallies is still one document per action, counted
-on read. There's no hot row at all.
+- **No shared blob.** Each document is its own row. Concurrent inserts are
+  independent rows with time-ordered `_id`s, so a thousand simultaneous
+  voters never contend.
+- **Atomic writes.** A write to one document runs in one transaction: lock the
+  row with `SELECT … FOR UPDATE`, decrypt, apply the replace, merge or `$inc`,
+  re-encrypt, then `UPDATE`. Writes are atomic per document, and `$inc` never
+  loses an update.
+- **Optimistic concurrency.** A write that sends `ifVersion` gets 409 when the
+  document has moved on. The app re-reads and retries. Without `ifVersion`,
+  the last write wins.
+- **Create-only.** `PUT …/{id}` with `ifAbsent` succeeds exactly once; the
+  primary key enforces it. An app gets a race-free "one record per key" by
+  choosing the key, for example `id = (await app.me()).id`.
+- **Recommended tally pattern.** Write one document per action and count when
+  reading. That leaves no hot row at all.
 
-### 4.2 Identity: a fact the app can trust
+### 4.3 Identity: a fact the app can trust
 
-- `_by` and `me()` are the caller as the server knows it. A member who opens
-  the app from bnbloc is that member (exact subject, per D2). A visitor on a
-  public link gets a stable anonymous id for that browser.
-- That is all the platform decides. "One vote per person" is the app's own
-  logic: it reads its documents and counts the latest one per `_by`. Because
-  `_by` is server-stamped, nobody can forge it, even by calling the API
-  directly.
+- **Who `_by` is.** The server derives `_by`, and `me().id` returns the same
+  value. It is an opaque per-app pseudonym: `HMAC(app_id, participant)`.
+  - A member who opens the app from bnbloc, through a member ticket, is that
+    member. Subjects are exact (D2).
+  - A visitor on a public link is a **visitor id**. The share page mints a
+    signed, random visitor token once per browser, keeps it in its own
+    storage, and hands it to the app frame. Sandboxed app frames have no
+    storage of their own.
+- **One vote per person** is the app's own logic, built on a value nobody can
+  forge.
+- **Real identity.** The real identity behind `_by` (a member's name) is
+  returned only to the app's owners (4.4).
 
-### 4.3 The only two rules, and why the platform must own them
+### 4.4 The two rules the platform owns
 
-Front-end code can't stop someone who calls the API directly, so two rules
-can't live in the app:
+Client code can't stop someone who calls the API directly. So these two
+rules, and only these, live in the platform.
 
-1. **Only the author or a room member can change or delete a document.**
-   Without this, anyone with the link could wipe everyone else's data.
-2. **Documents are private by default.** Only the author and the app's
-   owners (room members and the room's agents) can read a document, unless
-   the app inserts it with `{public: true}`: options, a published tally, a
-   shared board. Anything the app does not mark public, such as a ballot,
-   contact details or free-text answers, is never readable by other link
-   holders, even through direct API calls.
+**The app's owners** are the members of the artifact's room and the room's
+agents.
 
-Everything else is the app's choice.
+1. **Only a document's author or an owner may change or delete it.**
+   Otherwise anyone holding the link could wipe everyone else's data.
+2. **Documents are private by default.** A document is readable only by its
+   author and the owners, unless the app inserted it with `{public: true}`.
+   Typical public documents are options, a published tally or a shared board.
+   Ballots, contact details and free text stay private, even against direct
+   API calls.
 
-### 4.4 Safety limits (cost and abuse, not product rules)
+### 4.5 Safety limits: cost and abuse, not product rules
 
-- Size caps: per document (default 64 KiB), per app (default 100k documents
-  or 256 MiB).
-- Per-IP and per-link rate limits, configured as route-table rows.
-- Writes stop the moment the share link is revoked or expires, or the room is
-  deleted.
-- App data is room-owned: it is in `roomOwnedTables` and follows room
-  retention.
+- **Size caps** are wire constants:
+  - 64 KiB per document;
+  - 100k documents or 256 MiB per app;
+  - 64 collections per app.
+- **Rate limits.** Route-table rows set per-IP, per-link and per-participant
+  limits. Writes are stricter than reads.
+- **Writes stop immediately** when the share link is revoked or expires, when
+  an org admin disables public links, or when the room is deleted.
 
-### 4.5 Agent read-back
+### 4.6 Agent read-back
 
-- Room tool `app_data(artifactId, collection?, filter?, limit?, after?)`: the
-  agent reads, and can also write (e.g. seeding the options), with paging. The
-  agent does the analysis itself; the platform doesn't aggregate.
-- `.room/apps.md` lists the room's apps, their collections and document
-  counts.
-- A builtin skill pack "Interactive apps" documents the SDK and the two rules,
-  so any agent from any vendor builds apps correctly.
+- **Room tool** `app_data(artifactId, collection?, filter?, limit?, after?)`.
+  - Agents can read and write with paging, for example to seed the options or
+    to clear test data.
+  - The agent does the analysis itself; the platform doesn't aggregate.
+  - Results are fenced as untrusted third-party content, never as
+    instructions.
+- **`.room/apps.md`** lists the room's apps with their collections and
+  document counts.
+- **Builtin content.** These are not platform rules, and any member can copy
+  and edit them:
+  - an "Interactive apps" skill pack, covering the SDK, private-by-default,
+    `ifAbsent` with `me().id`, closing in code, and treating data as
+    untrusted;
+  - an "App builder" expert;
+  - starter prompts `/poll`, `/survey` and `/signup`.
 
-### 4.6 Privacy and security (platform responsibility)
+### 4.7 Privacy and security
 
-**Isolation between apps, rooms and tenants**
-- The app id comes only from the capability. The gateway resolves the
-  ticket or share link to (tenant, room, app) and binds every query to it.
-  No route takes an app id, room id or tenant id from the request.
-  `TestAppDataScopeFromCapabilityOnly` is a static scan, and a behavioural
-  test checks that app A's capability never reads app B.
+**Scope comes only from the capability.**
+- The gateway resolves a member ticket, a share link or the agent's session to
+  (tenant, room, app). The data owner binds every query to that scope.
+- No route takes an app, room or tenant id from the request body or query.
+- Enforced by `TestAppDataScopeFromCapabilityOnly` (a static scan) and a
+  behavioural test: app A's capability never reaches app B.
 
-**Isolation from bnbloc itself**
-- Sites keep the opaque origin: a sandbox CSP and no `allow-same-origin`.
-  Production uses the separate `BNBLOC_SITES_ORIGIN`.
-- App code can't read sessions, cookies, the room or other apps.
-- The data API accepts no cookie or session, only the URL capability. That
-  makes it CSRF-proof, and a malicious app can't act as its viewer anywhere
-  else.
+**Isolation from bnbloc.**
+- Sites keep their opaque origin: a sandbox CSP and no `allow-same-origin`.
+- `BNBLOC_SITES_ORIGIN` serves sites and their data API from a separate
+  origin. It is recommended in production, and once it is set the gateway
+  refuses site paths on the main origin.
+- The data API accepts no cookie and no session header for app traffic, only
+  the URL capability plus the visitor token. That makes it CSRF-proof, and an
+  app can never act as its viewer anywhere else.
 
-**Who sees what inside an app**
-- Private by default (rule 2). Only documents the app marks `public` are
-  readable by link holders.
-- Visitors get pseudonyms. `_by` is an opaque per-app id, `HMAC(app_id,
-  participant)`:
-  - The same person can't be linked across apps.
-  - A public-link visitor never sees a member's real subject or name.
-  - Real identities (`_byName`) are returned only to the app's owners and its
-    agents.
-- The app's owners are the room members and the room's agents. They read
-  everything, including private documents. Every agent read and every export
-  is audited.
+**Lifecycle.**
+- Capability tokens are redacted from gateway access logs, and sites already
+  send `no-referrer`.
+- A participant can delete their own documents. Owners can export, clear or
+  delete an app's data.
+- Every agent read and every export is audited.
+- Room deletion and room retention remove app data along with the room.
 
-**Transport, storage, lifecycle**
-- TLS in transit. Document bodies are encrypted at the application layer;
-  see 4.7.
-- Bodies are stored and returned as JSON only. bnbloc's own UI never renders
-  them as HTML, and an app's XSS stays inside its own sandbox.
-- Capability tokens are redacted from gateway access logs. Sites already send
-  `Referrer-Policy: no-referrer`.
-- Revoking or expiring a link stops reads and writes immediately. Org
-  admins' "disable public links" applies to app data too.
-- A participant can delete their own documents, and owners can wipe an app.
-  Room deletion and room retention remove app data along with the room.
+**Rendering.** Bodies are JSON only. bnbloc's own UI never renders them as
+HTML, so an XSS in an app stays inside that app's sandbox.
 
-**App data is untrusted input to agents**
-- Anything a visitor writes can carry prompt injection.
-- `app_data` returns documents fenced as untrusted, third-party content and
-  never as instructions. The builtin skill pack tells agents to treat it
-  that way.
-- Borrowed or platform agents that read app data stay inside the existing
-  sandbox and confinement rules.
+### 4.8 Encryption: the database never holds a readable body
 
-### 4.7 Encryption: the database never holds a readable body
+Disk or RDS encryption at rest protects against stolen disks and snapshots,
+but not against anyone with SQL access (a DBA, a leaked backup, an injection
+elsewhere). So app data is encrypted in the service before it reaches the
+database.
 
-Disk or RDS encryption at rest only protects stolen disks and snapshots.
-Anyone with SQL access, such as a DBA, a leaked backup or an injection
-elsewhere, would still read plaintext. So app data is encrypted in the
-gateway, before it reaches the database.
-
-- **Envelope encryption, one key per app.**
-  - Each app gets a random 256-bit data key, used for AES-256-GCM over each
-    document body. The additional authenticated data is `app_id|collection|doc_id`,
-    so a ciphertext can't be moved to another document or app.
-  - The data key is stored only wrapped by the master key, through the one
-    existing owner `internal/sealbox`, which already seals member and org
-    credentials.
-  - The master key never sits in the database: it is `BNBLOC_SECRET_STORE_KEY`
-    today, with a KMS-backed key as a drop-in later.
+- **Envelope encryption, one data key per app.**
+  - Each app gets a random 256-bit data key, generated on first write.
+  - Every document body is sealed with AES-256-GCM, with
+    `app_id|collection|doc_id` as additional data, so a ciphertext can't be
+    moved to another document or app.
+  - The data key is stored only after the master key wraps it, through the
+    existing owner `internal/sealbox`.
+  - The master key is `BNBLOC_SECRET_STORE_KEY` today; a KMS-backed key can be
+    swapped in later. It never sits in the database.
 - **What stays plaintext:** only routing metadata: `app_id`, `collection`,
-  `doc_id`, the pseudonymous `by_key` (an HMAC, not the identity), `public`,
-  `version` and the timestamps. Bodies and the real-identity mapping are
-  ciphertext.
-- **Crypto-shredding.** Deleting an app, its room, or a retention purge
-  destroys the app's data key, so every copy of its documents becomes
-  unreadable at once, including copies in database backups.
-- **Rotation.** A master-key rotation re-wraps the data keys only; documents
+  `doc_id`, the pseudonymous `by_key`, `public`, `version` and the
+  timestamps. The body and the real author identity are ciphertext.
+- **Crypto-shredding.** Deleting an app or its room, or a retention purge,
+  destroys the app's data key. Every copy of its documents becomes
+  unreadable, including copies in database backups.
+- **Rotation.** Rotating the master key re-wraps only the data keys; documents
   are not re-encrypted.
-- **Cost.** Body fields can't be filtered in SQL. Queries narrow by metadata
-  in SQL (collection, author, time, public), and the gateway applies `filter`
-  to the decrypted page. The per-app cap bounds this. The tallies, lists and
-  full reads apps and agents actually do are unaffected.
-- **Who can still decrypt:** the running gateway, which holds the master key.
-  It has to, to serve the app. A database-only compromise reveals no
+- **Cost.** SQL can't see body fields. SQL narrows by metadata (collection,
+  author, time, public), and the service applies `filter` to the decrypted
+  page. The per-app cap bounds this.
+- **Who can decrypt:** only the running service that holds the master key,
+  because it has to serve the app. A database-only compromise reveals no
   content.
-- **Later, if needed: owner-only end-to-end encryption.** The page encrypts a
-  private document to the owners' public keys, and only an owner's desktop,
-  which also runs the bridge and its agents, can decrypt it. Not in this
-  round: it needs member key management, and it breaks reads by the gateway
-  and by agents running anywhere other than the owner's desktop.
-- One owner: `appdata.Cipher`, which wraps `sealbox` for keys and AES-GCM for
-  bodies. A static test forbids writing `app_docs.body` anywhere except
-  through it.
+- **One owner:** `appdata.Cipher` (sealbox for keys, AES-GCM for bodies). A
+  static test forbids writing `app_docs.body` anywhere else.
+- **Later, if needed:** owner-only end-to-end encryption. The page would
+  encrypt to the owners' public keys, and only an owner's desktop, where the
+  bridge and its agents run, could decrypt. It is out of this round because
+  it needs member key management and would block gateway-side and remote
+  agent reads.
 
-## 5. Storage backend
+## 5. Where it lives and how it is stored
 
-The API is a document model whatever the backend. The real choice is
-operational.
+### 5.1 Services
 
-| | MySQL 8 JSON (existing DB) | MongoDB (new dependency) |
+- **The room service owns app data** (`services/room/appdata.go`). It already
+  owns artifacts, room scoping and room-owned tables.
+- **The gateway** resolves each capability and forwards a signed internal
+  request (`svcauth.NewRequest`, including the resolved app and participant).
+  Each route is a route-table row carrying its rate budget.
+- **The change feed** rides the realtime hub's sharded fan-out as a transient
+  `app_changed` kind, which is never replayed. It carries only `(collection,
+  id, version)`, so the feed leaks nothing. The page re-fetches under its own
+  read rights.
+
+### 5.2 Storage: MySQL first, behind one interface
+
+**Decided:** `store.AppDocs` is one interface (insert, find, get, locked
+update, delete, wipe, count). It ships with memory and MySQL backends and one
+contract suite. MongoDB is a possible later backend behind the same
+interface, as OpenSearch is for search, if an app's volume or query needs ever
+outgrow MySQL. Apps and the SDK don't change when the backend does.
+
+| | MySQL (existing) | MongoDB (later, if needed) |
 |---|---|---|
-| Fit for schemaless docs + simple filters | Good: `JSON` column, `JSON_EXTRACT`, generated-column indexes for hot fields | Native |
-| Expected volume per app (hundreds to ~100k docs) | Comfortable | Comfortable |
-| Operations | Nothing new: same backups, migrations, retention, `DeleteRoom`, tenant isolation, memory-store parity | A new cluster to run, back up and secure on every deploy surface (compose, prod overlay, EKS; AWS DocumentDB has compatibility gaps). Room deletion and retention then span two databases |
-| Arbitrary per-field indexes, heavy aggregation | Limited | Strong |
+| Schemaless documents | Fine: bodies are encrypted blobs, and filtering happens after decryption anyway | Native |
+| Expected volume (hundreds to ~100k documents per app) | Comfortable | Comfortable |
+| Operations | Nothing new: same backups, migrations, retention, `DeleteRoom`, tenant isolation and memory parity | A new cluster on every deploy surface; room deletion and retention would span two databases |
 
-**Layout: one shared table for every app, never a table per app.**
+**One shared table for every app, never a table per app:**
 
 ```
 app_docs(
-  app_id, collection, doc_id,          -- PRIMARY KEY, in this order
-  tenant_id, room_id, by_key, private,
-  version, body JSON, created_at_ms, updated_at_ms)
-INDEX (app_id, collection, by_key, doc_id)   -- "mine" / dedupe reads
+  app_id, collection, doc_id,               -- PRIMARY KEY, in this order
+  tenant_id, room_id, by_key, public,
+  author_sealed, version, body_sealed,
+  created_at_ms, updated_at_ms)
+INDEX (app_id, collection, by_key, doc_id)  -- "mine" reads
+app_keys(app_id PRIMARY KEY, tenant_id, room_id, wrapped_key, created_at_ms)
 ```
 
-- InnoDB clusters rows by primary key. One app's documents are stored
-  contiguously, and every query is a range scan inside that app's prefix, so
-  in practice each app behaves like its own table. One app's size doesn't slow
-  another app.
-- A table per app would mean DDL at runtime: thousands of tables against the
-  table cache and file handles, outside `migrations.lock` and the schema
-  fingerprint, invisible to `roomOwnedTables`/retention, and an `ALTER` per
-  app for any change. All of that is ruled out.
-- What the shared table gives up is arbitrary per-app indexes. A filter on a
-  non-key field scans only that app's range, which the per-app cap bounds
-  (100k docs). The same `body` can later get generated-column indexes for
-  common fields, if needed.
-- Growth path, without changing the API: `PARTITION BY KEY(app_id)`, then move
-  hot apps to another database instance by `app_id`. In a MongoDB backend
-  this is one collection with `app_id` leading every index; it is not a
-  collection per app either.
-- Deleting an app or a room is a batched range delete on the key prefix.
+- **Why it scales per app.** InnoDB clusters rows by primary key, so one app's
+  documents sit together. Every query is a range scan inside that app's
+  prefix, so one app's size never slows another.
+- **Why not a table per app.** That would mean runtime DDL: thousands of
+  tables, outside `migrations.lock`, retention and `roomOwnedTables`, and one
+  `ALTER` per app. Ruled out.
+- **Growth path, with no API change:** first `PARTITION BY KEY(app_id)`, then
+  hot apps move to another instance by `app_id`.
+- **Room-owned.** Both tables are listed in `roomOwnedTables`. Deleting an app
+  or a room destroys its key, then range-deletes its documents in batches.
 
-**Recommendation:** define one interface, `store.AppDocs` (insert, find with
-the filter subset, get, update, delete, change feed), and ship the MySQL JSON
-backend first. Filters translate to parameterized `JSON_EXTRACT` predicates
-from a fixed operator whitelist. MongoDB stays a pluggable second backend,
-like OpenSearch is for search, to add when an app's volume or query needs
-outgrow MySQL. Apps and the SDK don't change when the backend does.
+## 6. From zero to a working product: the member's journey
 
-## 5a. From zero to a working product: the member's journey
-
-All of this runs on what already exists (rooms, agents, the Library, share
-links, scheduled prompts) plus this PRD's base. The only new UI is listed in
-5b.
-
-1. **Start.** In any room the member types "build a poll for Friday's offsite:
-   three venues, one vote each, live results, closes Thursday 18:00". They can
-   also pick the builtin **App builder** expert, or a starter prompt from the
-   Library (`/poll`, `/survey`, `/signup`). These are ordinary content
-   components that anyone can copy, edit and share, not platform features.
-2. **Build.** The agent writes the app with the builtin "Interactive apps"
-   skill pack loaded, so it knows the SDK, private-by-default, `ifAbsent`
-   with `me().id` for one vote each, and closing by its own code. After the
-   turn, the bridge publishes the folder as a site, and the deliverable card
-   appears under the reply.
-3. **Try it.** The member opens the card. The app runs with real data, as the
-   member. Teammates in the room can try it too. "Change the colour, add a
-   comment box" is just the next turn: a new version, same app, and **the
-   data carries over**, because the app's data space is keyed by the artifact,
-   not the version.
-4. **Reset test data.** The member says "clear the test votes" (the agent
-   uses `app_data`), or uses the card's **Clear data** action.
-5. **Share.** **Share link** on the card. The link follows the latest version
-   by default, so later fixes reach everyone who already has it. The member
-   pastes it into the group chat, or asks the agent to post it through an
-   installed chat tool.
+1. **Start.** In any room the member types: "build a poll for Friday's
+   offsite: three venues, one vote each, live results, closes Thursday
+   18:00". Alternatively, they pick the **App builder** expert or a starter
+   prompt (`/poll`).
+2. **Build.** The agent writes the app with the "Interactive apps" skill pack
+   loaded. After the turn the bridge publishes the folder, and the deliverable
+   card appears under the reply.
+3. **Try it.** The member opens the card. The app runs on real data as the
+   member, and teammates in the room can try it too. "Change the colour, add a
+   comment box" is simply the next turn: a new version of the same app. **The
+   data carries over**, because the data space is keyed by the artifact, not
+   the version.
+4. **Reset test data.** "Clear the test votes" (the agent uses `app_data`), or
+   the card's **Clear data** action.
+5. **Share.** **Share link** on the card. The link follows the latest version,
+   so later fixes reach everyone who already has it. The member pastes it into
+   the group chat, or asks the agent to post it through an installed chat
+   tool.
 6. **Collect.** Voters open the link on their phones and see the app
-   full-screen, with no bnbloc chrome and no sign-in (5b). Votes land in the
-   app's encrypted data space. The member watches live counts in the app
-   itself, or in the card's data count.
-7. **Report.** At close time a scheduled prompt fires ("summarise the votes
-   and recommend a venue"), or the member just asks. The agent reads the data
-   with `app_data`, treating it as untrusted, and writes the report into the
-   room as a normal deliverable: a document, a chart or a slide.
-8. **Reuse.** "Save this as a template" uses the existing `save_component`,
-   so the app's source becomes a Library prompt pack or expert that others can
-   copy and adapt.
+   full-screen, with no sign-in. Votes land encrypted in the app's data space.
+   Live counts show in the app itself and on the card.
+7. **Report.** At close time a scheduled prompt runs ("summarise the votes and
+   recommend a venue"), or the member simply asks. The agent reads the data
+   with `app_data` and writes the report into the room as a normal
+   deliverable.
+8. **Reuse.** "Save this as a template" uses `save_component`, and the app
+   becomes a Library item others can copy and adapt.
 
-## 5b. UI this needs (small)
+**New UI (small):**
+- **App view for site shares.** The app shows full-screen and mobile-friendly,
+  without file-viewer chrome or a source download. The share page also holds
+  the visitor token.
+- **Card data line.** A document count, plus owner-only **Clear data**,
+  **Export** (JSON/CSV) and **Delete app data**.
 
-- **App view for site shares.** A share link to a site opens the app
-  full-screen, mobile-friendly, without the file-viewer header, version line
-  or source download. Today `PublicSharePage` wraps every site in file
-  chrome.
-- **Card data line.** A data count plus **Clear data**, **Export** (JSON/CSV
-  of what the owner can read) and **Delete app data**, all owner-only.
-- **Builtin content** (no platform rules): the "Interactive apps" skill pack,
-  the "App builder" expert, and starter prompts.
+## 7. Delivery steps
 
-## 6. Delivery steps
+| Step | Scope |
+|---|---|
+| 1 | `store.AppDocs`, with memory and MySQL backends, the migration (`app_docs`, `app_keys`), the contract suite and `roomOwnedTables` entries; `appdata.Cipher` |
+| 2 | Room service data owner: scope, the two rules, caps, filters, locked updates |
+| 3 | Gateway: capability resolution for member tickets, share links and agent sessions; visitor tokens; route-table rows; `~app/sdk.js`; change feed |
+| 4 | Room tool `app_data`, `.room/apps.md`, and the builtin skill pack, expert and starter prompts |
+| 5 | Web: app view for site shares; the card data line |
+| 6 | `BNBLOC_SITES_ORIGIN` on every deploy surface |
 
-1. `store.AppDocs`: the interface, the MySQL JSON and memory backends, the
-   migration, a contract suite over both backends, and registration as
-   room-owned.
-2. Gateway data API and SDK under both capabilities, server stamps, the two
-   rules, caps, rate-limit rows, SSE.
-3. Room tool `app_data`, `.room/apps.md`, and the builtin skill pack, expert
-   and starter prompts.
-3a. App view for site shares and the card's data line (5b).
-4. `BNBLOC_SITES_ORIGIN` on every deploy surface.
+### Tests
 
-Tests:
-- A capability for app A never reads app B.
-- The client can't set `_by`.
-- `ifVersion` conflicts return 409.
-- `$inc` loses no update under concurrency.
+Each step lands with the tests for what it owns.
+
+**Scope and isolation**
+- app A's capability never reaches app B (static and behavioural);
+- the client cannot set `_by` or any other stamp;
+- a revoked or expired link, or a disabled org, stops reads and writes.
+
+**Concurrency**
+- `ifVersion` returns 409 on conflict;
+- `$inc` loses nothing under concurrency;
 - `ifAbsent` creates exactly once under concurrency.
-- A non-author can't update or delete a document.
-- A document not marked public is hidden from other link holders.
-- Visitors only ever see pseudonymous `_by`.
-- Capability tokens never appear in access logs.
-- The raw `app_docs.body` column is never readable plaintext; ciphertext
-  moved to another document fails to open.
-- After an app is deleted, its documents are unreadable even from a restored
-  backup (data key destroyed).
-- A revoked link stops writes.
-- The filter whitelist rejects unknown operators.
 
-## 7. Open decision
+**The two rules**
+- a non-author, non-owner cannot update or delete;
+- a document not marked public is hidden from other link holders;
+- visitors see only pseudonymous `_by`.
 
-- Storage backend: MySQL JSON first behind `store.AppDocs` (recommended), or
-  MongoDB from day one.
+**Encryption**
+- the `body_sealed` column never holds plaintext;
+- a ciphertext moved to another row fails to open;
+- after deletion, documents are unreadable even with the rows restored (the
+  key is destroyed).
+
+**Other**
+- capability tokens never appear in access logs;
+- an unknown filter operator is refused;
+- memory and MySQL pass the same contract suite.
