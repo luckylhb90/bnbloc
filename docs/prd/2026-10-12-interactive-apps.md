@@ -112,10 +112,12 @@ can't live in the app:
 
 1. **Only the author or a room member can change or delete a document.**
    Without this, anyone with the link could wipe everyone else's data.
-2. **A document can be private:** `insert(doc, {private: true})`. Only its
-   author and room members can read it. This is the only way an app can
-   collect something like a secret ballot or contact details without exposing
-   it to every link holder.
+2. **Documents are private by default.** Only the author and the app's
+   owners (room members and the room's agents) can read a document, unless
+   the app inserts it with `{public: true}`: options, a published tally, a
+   shared board. Anything the app does not mark public, such as a ballot,
+   contact details or free-text answers, is never readable by other link
+   holders, even through direct API calls.
 
 Everything else is the app's choice.
 
@@ -139,14 +141,54 @@ Everything else is the app's choice.
 - A builtin skill pack "Interactive apps" documents the SDK and the two rules,
   so any agent from any vendor builds apps correctly.
 
-### 4.6 Isolation (platform responsibility)
+### 4.6 Privacy and security (platform responsibility)
 
+**Isolation between apps, rooms and tenants**
+- The app id comes only from the capability. The gateway resolves the
+  ticket or share link to (tenant, room, app) and binds every query to it.
+  No route takes an app id, room id or tenant id from the request.
+  `TestAppDataScopeFromCapabilityOnly` is a static scan, and a behavioural
+  test checks that app A's capability never reads app B.
+
+**Isolation from bnbloc itself**
 - Sites keep the opaque origin: a sandbox CSP and no `allow-same-origin`.
-- Add `BNBLOC_SITES_ORIGIN`, a separate origin for sites and their data API,
-  recommended in production.
-- The data API never reads cookies or session headers, only the URL
-  capability. A capability for app A can never reach app B's data or the
-  room's data.
+  Production uses the separate `BNBLOC_SITES_ORIGIN`.
+- App code can't read sessions, cookies, the room or other apps.
+- The data API accepts no cookie or session, only the URL capability. That
+  makes it CSRF-proof, and a malicious app can't act as its viewer anywhere
+  else.
+
+**Who sees what inside an app**
+- Private by default (rule 2). Only documents the app marks `public` are
+  readable by link holders.
+- Visitors get pseudonyms. `_by` is an opaque per-app id, `HMAC(app_id,
+  participant)`:
+  - The same person can't be linked across apps.
+  - A public-link visitor never sees a member's real subject or name.
+  - Real identities (`_byName`) are returned only to the app's owners and its
+    agents.
+- The app's owners are the room members and the room's agents. They read
+  everything, including private documents. Every agent read and every export
+  is audited.
+
+**Transport, storage, lifecycle**
+- TLS in transit; the database's encryption at rest.
+- Bodies are stored and returned as JSON only. bnbloc's own UI never renders
+  them as HTML, and an app's XSS stays inside its own sandbox.
+- Capability tokens are redacted from gateway access logs. Sites already send
+  `Referrer-Policy: no-referrer`.
+- Revoking or expiring a link stops reads and writes immediately. Org
+  admins' "disable public links" applies to app data too.
+- A participant can delete their own documents, and owners can wipe an app.
+  Room deletion and room retention remove app data along with the room.
+
+**App data is untrusted input to agents**
+- Anything a visitor writes can carry prompt injection.
+- `app_data` returns documents fenced as untrusted, third-party content and
+  never as instructions. The builtin skill pack tells agents to treat it
+  that way.
+- Borrowed or platform agents that read app data stay inside the existing
+  sandbox and confinement rules.
 
 ## 5. Storage backend
 
@@ -212,7 +254,9 @@ Tests:
 - `$inc` loses no update under concurrency.
 - `ifAbsent` creates exactly once under concurrency.
 - A non-author can't update or delete a document.
-- A private document is hidden from other visitors.
+- A document not marked public is hidden from other link holders.
+- Visitors only ever see pseudonymous `_by`.
+- Capability tokens never appear in access logs.
 - A revoked link stops writes.
 - The filter whitelist rejects unknown operators.
 
