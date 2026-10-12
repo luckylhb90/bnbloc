@@ -387,3 +387,31 @@ restarts.
 - **Prompt library:** the existing `prompts` table and the
   `/v1/prompts` routes (realtime `team.go`) overlap with prompt packs, hence
   the cutover.
+
+## Status: step 2 (room tools)
+
+**2026-10-12: in development.** Scope of this step, as built:
+
+- **Dispatch route.** Realtime serves `POST /internal/v1/rooms/{room}/dispatch`
+  (svcauth `RequireSigned`, routed to the room's owner replica by
+  `RouteKey`). The gateway's public door is `POST /v1/rooms/{room}/dispatch`:
+  the ordinary proxy checks (room scope, `drive_agent`, the per-subject chat
+  rate limit) run, then the request is rewritten to the internal path and
+  signed with the caller's identity (the bridge's owner).
+- **Guards** (protocol safety constants, not environment data): depth at
+  most 3, at most 8 dispatches per parent job (counted from persisted jobs),
+  no self-dispatch, no cycle along the parent chain, parent job running and
+  leased by a bridge of the caller, requester still a human member, never in
+  the people chat.
+- **Attribution.** The post goes through `PostChat` with the parent job's
+  requester as author and a `dispatchedBy {jobId, depth, via}` marker in the
+  message payload; the new job persists `dispatchedByJobId` and
+  `dispatchDepth` (new `agent_jobs` columns). Run records and the audit log
+  (`extension_audit` kind `agent_dispatch`) show it; the feed renders
+  "maya → via jack/codex → bob/claude".
+- **Bridge MCP server** (`services/bridge/roomtools`): loopback, random
+  port, one bearer per driven core session (constant-time compared, revoked
+  when the session is dropped), bound to the job the session is currently
+  driving. Streamable HTTP, dual-era (`initialize` legacy and per-request
+  `_meta` modern), plus a stdio shim (`bnbloc-bridge roomtools-stdio`).
+  Tools: `list_room_agents`, `ask_agent`, `room_status`, `read_room`.
