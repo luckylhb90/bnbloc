@@ -89,7 +89,7 @@ type QuotaRequestStore interface {
 	GetQuotaRequest(ctx context.Context, requestID string) (QuotaRequest, error)
 	// ListQuotaRequests returns matching requests newest-first (limit<=0 → 100,
 	// capped at 500).
-	ListQuotaRequests(ctx context.Context, q QuotaRequestQuery) []QuotaRequest
+	ListQuotaRequests(ctx context.Context, q QuotaRequestQuery) ([]QuotaRequest, error)
 	// DecideQuotaRequest atomically moves a pending request owned by
 	// d.OwnerUserID to d.Status. ErrQuotaRequestDecided when it is no longer
 	// pending.
@@ -169,10 +169,10 @@ func (s *MemoryQuotaRequests) GetQuotaRequest(ctx context.Context, requestID str
 }
 
 // ListQuotaRequests returns matching requests newest-first.
-func (s *MemoryQuotaRequests) ListQuotaRequests(ctx context.Context, q QuotaRequestQuery) []QuotaRequest {
+func (s *MemoryQuotaRequests) ListQuotaRequests(ctx context.Context, q QuotaRequestQuery) ([]QuotaRequest, error) {
 	tnt, err := tenant.Require(ctx)
 	if err != nil {
-		return nil
+		return nil, err
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -199,7 +199,7 @@ func (s *MemoryQuotaRequests) ListQuotaRequests(ctx context.Context, q QuotaRequ
 	if limit := quotaListLimit(q.Limit); len(out) > limit {
 		out = out[:limit]
 	}
-	return out
+	return out, nil
 }
 
 // DecideQuotaRequest moves a pending request to its decision.

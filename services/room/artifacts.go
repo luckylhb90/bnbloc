@@ -87,7 +87,13 @@ func validArtifactKind(k string) bool {
 func (s *Service) handleCreateArtifact(w http.ResponseWriter, r *http.Request) {
 	roomID := r.PathValue("roomId")
 	userID := caller(r)
-	if !s.Store.IsMember(r.Context(), roomID, userID) {
+	isMember, err := s.Store.IsMember(r.Context(), roomID, userID)
+	if err != nil {
+		obs.ServerError(w, "read membership failed", err)
+		httpx.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if !isMember {
 		httpx.Error(w, "caller is not a member of room", http.StatusForbidden)
 		return
 	}
@@ -182,7 +188,13 @@ func (s *Service) handleCreateArtifact(w http.ResponseWriter, r *http.Request) {
 // is the blob version cap, so publishers skip files the room would refuse.
 func (s *Service) handleListArtifacts(w http.ResponseWriter, r *http.Request) {
 	roomID := r.PathValue("roomId")
-	if !s.Store.IsMember(r.Context(), roomID, caller(r)) {
+	isMember, err := s.Store.IsMember(r.Context(), roomID, caller(r))
+	if err != nil {
+		obs.ServerError(w, "read membership failed", err)
+		httpx.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if !isMember {
 		httpx.Error(w, "caller is not a member of room", http.StatusForbidden)
 		return
 	}
@@ -210,7 +222,13 @@ func (s *Service) handleListArtifacts(w http.ResponseWriter, r *http.Request) {
 // under exactly the messages it has loaded, however old.
 func (s *Service) handleArtifactAnchors(w http.ResponseWriter, r *http.Request) {
 	roomID := r.PathValue("roomId")
-	if !s.Store.IsMember(r.Context(), roomID, caller(r)) {
+	isMember, err := s.Store.IsMember(r.Context(), roomID, caller(r))
+	if err != nil {
+		obs.ServerError(w, "read membership failed", err)
+		httpx.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if !isMember {
 		httpx.Error(w, "caller is not a member of room", http.StatusForbidden)
 		return
 	}
@@ -279,7 +297,12 @@ func (s *Service) handleGetArtifact(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, "artifact not found", http.StatusNotFound)
 		return
 	}
-	versions := s.Artifacts.ListArtifactVersions(r.Context(), art.ArtifactID, 50)
+	versions, err := s.Artifacts.ListArtifactVersions(r.Context(), art.ArtifactID, 50)
+	if err != nil {
+		obs.ServerError(w, "list artifact versions failed", err)
+		httpx.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"artifact": art, "versions": versions})
 }
 
@@ -309,7 +332,13 @@ func (s *Service) handleGetArtifactVersion(w http.ResponseWriter, r *http.Reques
 func (s *Service) handlePublishVersion(w http.ResponseWriter, r *http.Request) {
 	roomID := r.PathValue("roomId")
 	userID := caller(r)
-	if !s.Store.IsMember(r.Context(), roomID, userID) {
+	isMember, err := s.Store.IsMember(r.Context(), roomID, userID)
+	if err != nil {
+		obs.ServerError(w, "read membership failed", err)
+		httpx.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if !isMember {
 		httpx.Error(w, "caller is not a member of room", http.StatusForbidden)
 		return
 	}
@@ -382,7 +411,13 @@ func (s *Service) commitVersion(w http.ResponseWriter, r *http.Request, art stor
 // authorizeArtifactRead checks room membership and that the artifact belongs to
 // the room in the path, so an id leaked across rooms cannot be probed.
 func (s *Service) authorizeArtifactRead(w http.ResponseWriter, r *http.Request, roomID string) bool {
-	if !s.Store.IsMember(r.Context(), roomID, caller(r)) {
+	isMember, err := s.Store.IsMember(r.Context(), roomID, caller(r))
+	if err != nil {
+		obs.ServerError(w, "read membership failed", err)
+		httpx.Error(w, err.Error(), http.StatusInternalServerError)
+		return false
+	}
+	if !isMember {
 		httpx.Error(w, "caller is not a member of room", http.StatusForbidden)
 		return false
 	}
@@ -461,7 +496,13 @@ type artifactStateBody struct {
 func (s *Service) handleArtifactState(w http.ResponseWriter, r *http.Request) {
 	roomID := r.PathValue("roomId")
 	userID := caller(r)
-	if !s.Store.IsMember(r.Context(), roomID, userID) {
+	isMember, err := s.Store.IsMember(r.Context(), roomID, userID)
+	if err != nil {
+		obs.ServerError(w, "read membership failed", err)
+		httpx.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if !isMember {
 		httpx.Error(w, "caller is not a member of room", http.StatusForbidden)
 		return
 	}
@@ -520,7 +561,13 @@ func (s *Service) handleArtifactState(w http.ResponseWriter, r *http.Request) {
 func (s *Service) handleGetArtifactState(w http.ResponseWriter, r *http.Request) {
 	roomID := r.PathValue("roomId")
 	userID := caller(r)
-	if !s.Store.IsMember(r.Context(), roomID, userID) {
+	isMember, err := s.Store.IsMember(r.Context(), roomID, userID)
+	if err != nil {
+		obs.ServerError(w, "read membership failed", err)
+		httpx.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if !isMember {
 		httpx.Error(w, "caller is not a member of room", http.StatusForbidden)
 		return
 	}

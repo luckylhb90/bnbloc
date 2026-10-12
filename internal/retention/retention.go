@@ -230,7 +230,14 @@ func (w *Worker) purgeAll(ctx context.Context, now time.Time, out store.PurgeRes
 		policy wire.RetentionPolicy
 		kinds  []wire.RetentionKind
 	}{{"", platform, []wire.RetentionKind{wire.RetentionAudit}}}
-	for _, t := range w.Tenants.ListTenants(ctx) {
+	tenants, err := w.Tenants.ListTenants(ctx)
+	if err != nil {
+		// Without the tenant list each tenant's override is unknown: skip the
+		// pass rather than purge with a partial view.
+		slog.Error("bnbloc retention: tenants unreadable; pass skipped", "event", "bnbloc.retention.error", "what", "tenants", "error", err)
+		return err
+	}
+	for _, t := range tenants {
 		scopes = append(scopes, struct {
 			tenant string
 			policy wire.RetentionPolicy

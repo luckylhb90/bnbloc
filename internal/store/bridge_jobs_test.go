@@ -230,13 +230,13 @@ func TestDeadBridgeNeitherClaimsNorAdvertises(t *testing.T) {
 	if jobs, _ := s.ClaimAgentJobs(bctx(), ClaimRequest{BridgeID: "dead", OwnerUserID: "maya", MaxJobs: 1, NowMs: now}); len(jobs) != 0 {
 		t.Fatalf("dead bridge claimed %d jobs", len(jobs))
 	}
-	if agents := s.ListBridgeAgents(bctx(), "room-1"); len(agents) != 0 {
+	if agents := must(s.ListBridgeAgents(bctx(), "room-1"))(t); len(agents) != 0 {
 		t.Fatalf("dead bridge still advertises %+v", agents)
 	}
 
 	// A fresh heartbeat brings it back.
 	_ = s.PutBridgeHeartbeat(bctx(), BridgeHeartbeat{BridgeID: "dead", OwnerUserID: "maya", Status: BridgeOnline, LastSeenAtMs: now})
-	if agents := s.ListBridgeAgents(bctx(), "room-1"); len(agents) != 1 {
+	if agents := must(s.ListBridgeAgents(bctx(), "room-1"))(t); len(agents) != 1 {
 		t.Fatalf("revived bridge advertises %d agents, want 1", len(agents))
 	}
 	if jobs, _ := s.ClaimAgentJobs(bctx(), ClaimRequest{BridgeID: "dead", OwnerUserID: "maya", MaxJobs: 1, NowMs: now}); len(jobs) != 1 {

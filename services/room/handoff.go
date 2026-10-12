@@ -73,7 +73,13 @@ type HandoffFeed interface {
 // (invite suggestions only). 404 for a room that was not imported.
 func (s *Service) handleGetHandoff(w http.ResponseWriter, r *http.Request) {
 	roomID := r.PathValue("roomId")
-	if !s.Store.IsMember(r.Context(), roomID, caller(r)) {
+	isMember, err := s.Store.IsMember(r.Context(), roomID, caller(r))
+	if err != nil {
+		obs.ServerError(w, "read membership failed", err)
+		httpx.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if !isMember {
 		httpx.Error(w, "caller is not a member of room", http.StatusForbidden)
 		return
 	}

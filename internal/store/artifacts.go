@@ -213,7 +213,7 @@ type ArtifactStore interface {
 	// SizeBytes. A non-empty MimeType becomes the artifact's current MIME type.
 	PublishArtifactVersion(ctx context.Context, artifactID string, v ArtifactVersion, baseVersion int) (Artifact, ArtifactVersion, error)
 	GetArtifactVersion(ctx context.Context, artifactID string, version int) (ArtifactVersion, error)
-	ListArtifactVersions(ctx context.Context, artifactID string, limit int) []ArtifactVersion
+	ListArtifactVersions(ctx context.Context, artifactID string, limit int) ([]ArtifactVersion, error)
 	// SetArtifactThumbnail stores a version thumbnail when none is stored or
 	// the stored one has a lower rank. It returns the version as stored and
 	// whether this write landed.
@@ -480,10 +480,10 @@ func (s *MemoryArtifacts) GetArtifactVersion(ctx context.Context, artifactID str
 	return v, nil
 }
 
-func (s *MemoryArtifacts) ListArtifactVersions(ctx context.Context, artifactID string, limit int) []ArtifactVersion {
+func (s *MemoryArtifacts) ListArtifactVersions(ctx context.Context, artifactID string, limit int) ([]ArtifactVersion, error) {
 	tid, err := tenant.Require(ctx)
 	if err != nil {
-		return nil
+		return nil, err
 	}
 	if limit <= 0 {
 		limit = 50
@@ -492,7 +492,7 @@ func (s *MemoryArtifacts) ListArtifactVersions(ctx context.Context, artifactID s
 	defer s.mu.Unlock()
 	a, ok := s.artifacts[artifactID]
 	if !ok || a.TenantID != tid {
-		return nil
+		return nil, nil
 	}
 	var out []ArtifactVersion
 	for _, v := range s.versions[artifactID] {
@@ -504,7 +504,7 @@ func (s *MemoryArtifacts) ListArtifactVersions(ctx context.Context, artifactID s
 	if len(out) > limit {
 		out = out[:limit]
 	}
-	return out
+	return out, nil
 }
 
 func (s *MemoryArtifacts) SetArtifactThumbnail(ctx context.Context, artifactID string, version int, t ArtifactThumbnailWrite) (ArtifactVersion, bool, error) {

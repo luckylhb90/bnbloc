@@ -161,7 +161,7 @@ func TestRetentionPurgeMessages(t *testing.T) {
 				t.Fatal("the fence must read as deleted")
 			}
 			turns := 0
-			for _, u := range b.AgentUsage().AgentUsage(ctx, "", 0) {
+			for _, u := range must(b.AgentUsage().AgentUsage(ctx, "", 0))(t) {
 				turns += u.ReportedTurns
 			}
 			if turns != 1 {
@@ -233,10 +233,10 @@ func TestRetentionPurgeArtifactVersions(t *testing.T) {
 			if res[PurgedArtifactVersions] != 2 || res[PurgedArtifactShares] != 1 {
 				t.Fatalf("purge = %v", res)
 			}
-			if got := b.Artifacts.ListArtifactVersions(ctx, stale.ArtifactID, 10); len(got) != 1 || got[0].Version != 3 {
+			if got := must(b.Artifacts.ListArtifactVersions(ctx, stale.ArtifactID, 10))(t); len(got) != 1 || got[0].Version != 3 {
 				t.Fatalf("stale versions = %+v", got)
 			}
-			if got := b.Artifacts.ListArtifactVersions(ctx, frozen.ArtifactID, 10); len(got) != 1 {
+			if got := must(b.Artifacts.ListArtifactVersions(ctx, frozen.ArtifactID, 10))(t); len(got) != 1 {
 				t.Fatalf("the latest version must stay: %+v", got)
 			}
 			left, err := shares.ListArtifactShares(ctx, room, stale.ArtifactID, 0)
@@ -304,7 +304,7 @@ func TestRetentionPurgeAuditAndJobs(t *testing.T) {
 			if err != nil || res[PurgedAgentJobs] != 1 {
 				t.Fatalf("jobs purge = %v, %v", res, err)
 			}
-			left := b.BridgeJobs.ListAgentJobs(ctx, room, "", 10)
+			left := must(b.BridgeJobs.ListAgentJobs(ctx, room, "", 10))(t)
 			if len(left) != 2 {
 				t.Fatalf("jobs left = %+v", left)
 			}

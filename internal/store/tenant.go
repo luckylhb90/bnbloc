@@ -154,7 +154,7 @@ type TenantStore interface {
 	// GetTenant returns a tenant or ErrTenantNotFound.
 	GetTenant(ctx context.Context, tenantID string) (Tenant, error)
 	// ListTenants returns every tenant, for the platform (super-admin) console.
-	ListTenants(ctx context.Context) []Tenant
+	ListTenants(ctx context.Context) ([]Tenant, error)
 	// TenantForIssuer returns the tenant id mapped to an SSO issuer / email
 	// domain, or found=false when none is registered. A read failure is an
 	// error, never "not registered".
@@ -174,7 +174,7 @@ type TenantStore interface {
 	// user, who is promoted to org_admin).
 	MemberCount(ctx context.Context, tenantID string) (int, error)
 	// ListMembers returns all members of a tenant (for the org-admin console).
-	ListMembers(ctx context.Context, tenantID string) []TenantMember
+	ListMembers(ctx context.Context, tenantID string) ([]TenantMember, error)
 	// RemoveMember deletes a membership. Removing an absent member is a no-op.
 	RemoveMember(ctx context.Context, tenantID, userID string) error
 	// SetQuota persists a tenant's org-level run/cost ceilings (0 = unlimited).
@@ -190,20 +190,20 @@ type TenantStore interface {
 	// PutJoinRequest creates or replaces a user's join request for a tenant.
 	PutJoinRequest(ctx context.Context, jr JoinRequest) error
 	// GetJoinRequest returns a user's join request for a tenant, found=false when none.
-	GetJoinRequest(ctx context.Context, tenantID, userID string) (JoinRequest, bool)
+	GetJoinRequest(ctx context.Context, tenantID, userID string) (JoinRequest, bool, error)
 	// ListJoinRequests returns a tenant's join requests filtered by status
 	// (empty status = all), for the admin review queue.
-	ListJoinRequests(ctx context.Context, tenantID string, status JoinRequestStatus) []JoinRequest
+	ListJoinRequests(ctx context.Context, tenantID string, status JoinRequestStatus) ([]JoinRequest, error)
 	// ListJoinRequestsForUser returns all of a user's join requests across
 	// tenants, so a user can see the status of what they applied to.
-	ListJoinRequestsForUser(ctx context.Context, userID string) []JoinRequest
+	ListJoinRequestsForUser(ctx context.Context, userID string) ([]JoinRequest, error)
 	// PrimaryTenantForUser returns the tenant a user should land in at login
 	// when neither an explicit IdP tenant nor an issuer mapping applies: their
 	// most-recently-joined membership. found=false when the user has none.
-	PrimaryTenantForUser(ctx context.Context, userID string) (tenantID string, found bool)
+	PrimaryTenantForUser(ctx context.Context, userID string) (tenantID string, found bool, err error)
 	// ListMembershipsForUser returns every tenant membership of a user (any
 	// source), for organization sync and deprovisioning.
-	ListMembershipsForUser(ctx context.Context, userID string) []TenantMember
+	ListMembershipsForUser(ctx context.Context, userID string) ([]TenantMember, error)
 }
 
 // MemoryTenant is an in-memory TenantStore for dev and tests.
@@ -255,14 +255,14 @@ func (s *MemoryTenant) GetTenant(_ context.Context, tenantID string) (Tenant, er
 	return t, nil
 }
 
-func (s *MemoryTenant) ListTenants(_ context.Context) []Tenant {
+func (s *MemoryTenant) ListTenants(_ context.Context) ([]Tenant, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	out := make([]Tenant, 0, len(s.tenants))
 	for _, t := range s.tenants {
 		out = append(out, t)
 	}
-	return out
+	return out, nil
 }
 
 func (s *MemoryTenant) TenantForIssuer(_ context.Context, issuer string) (string, bool, error) {
@@ -303,7 +303,7 @@ func (s *MemoryTenant) EnsureMember(_ context.Context, m TenantMember) (TenantMe
 	return m, true, nil
 }
 
-func (s *MemoryTenant) ListMembershipsForUser(_ context.Context, userID string) []TenantMember {
+func (s *MemoryTenant) ListMembershipsForUser(_ context.Context, userID string) ([]TenantMember, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	var out []TenantMember
@@ -312,7 +312,7 @@ func (s *MemoryTenant) ListMembershipsForUser(_ context.Context, userID string) 
 			out = append(out, m)
 		}
 	}
-	return out
+	return out, nil
 }
 
 func (s *MemoryTenant) GetMember(_ context.Context, tenantID, userID string) (TenantMember, bool, error) {
@@ -337,14 +337,14 @@ func (s *MemoryTenant) RemoveMember(_ context.Context, tenantID, userID string) 
 	return nil
 }
 
-func (s *MemoryTenant) ListMembers(_ context.Context, tenantID string) []TenantMember {
+func (s *MemoryTenant) ListMembers(_ context.Context, tenantID string) ([]TenantMember, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	out := make([]TenantMember, 0, len(s.members[tenantID]))
 	for _, m := range s.members[tenantID] {
 		out = append(out, m)
 	}
-	return out
+	return out, nil
 }
 
 func (s *MemoryTenant) SetQuota(_ context.Context, tenantID string, runQuota int, costAllowance float64) error {
@@ -406,14 +406,14 @@ func (s *MemoryTenant) PutJoinRequest(_ context.Context, jr JoinRequest) error {
 	return nil
 }
 
-func (s *MemoryTenant) GetJoinRequest(_ context.Context, tenantID, userID string) (JoinRequest, bool) {
+func (s *MemoryTenant) GetJoinRequest(_ context.Context, tenantID, userID string) (JoinRequest, bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	jr, ok := s.requests[tenantID][userID]
-	return jr, ok
+	return jr, ok, nil
 }
 
-func (s *MemoryTenant) ListJoinRequests(_ context.Context, tenantID string, status JoinRequestStatus) []JoinRequest {
+func (s *MemoryTenant) ListJoinRequests(_ context.Context, tenantID string, status JoinRequestStatus) ([]JoinRequest, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	out := make([]JoinRequest, 0, len(s.requests[tenantID]))
@@ -422,10 +422,10 @@ func (s *MemoryTenant) ListJoinRequests(_ context.Context, tenantID string, stat
 			out = append(out, jr)
 		}
 	}
-	return out
+	return out, nil
 }
 
-func (s *MemoryTenant) ListJoinRequestsForUser(_ context.Context, userID string) []JoinRequest {
+func (s *MemoryTenant) ListJoinRequestsForUser(_ context.Context, userID string) ([]JoinRequest, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	var out []JoinRequest
@@ -434,10 +434,10 @@ func (s *MemoryTenant) ListJoinRequestsForUser(_ context.Context, userID string)
 			out = append(out, jr)
 		}
 	}
-	return out
+	return out, nil
 }
 
-func (s *MemoryTenant) PrimaryTenantForUser(_ context.Context, userID string) (string, bool) {
+func (s *MemoryTenant) PrimaryTenantForUser(_ context.Context, userID string) (string, bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	// A real org membership always outranks the "default" catch-all tenant,
@@ -459,5 +459,5 @@ func (s *MemoryTenant) PrimaryTenantForUser(_ context.Context, userID string) (s
 			best, bestAt, bestDefault = tid, m.JoinedAtMs, isDefault
 		}
 	}
-	return best, best != ""
+	return best, best != "", nil
 }

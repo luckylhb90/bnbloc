@@ -72,15 +72,15 @@ func TestRoomIsolationAcrossTenants(t *testing.T) {
 		if _, err := s.GetRoom(cb, aID); !errors.Is(err, ErrRoomNotFound) {
 			t.Fatalf("B GetRoom(a) = %v, want not found", err)
 		}
-		if s.IsMember(cb, aID, "bob") || memberAnyTenant(s, cb, aID, "bob") {
+		if must(s.IsMember(cb, aID, "bob"))(t) || memberAnyTenant(t, s, cb, aID, "bob") {
 			t.Fatal("bob must not have gained membership in A's room")
 		}
 
 		// Cross-tenant membership must not leak: alice is not a member in tenant B.
-		if s.IsMember(cb, aID, "alice") {
+		if must(s.IsMember(cb, aID, "alice"))(t) {
 			t.Fatal("alice (tenant A) must not be a member in tenant B")
 		}
-		if !s.IsMember(ca, aID, "alice") {
+		if !must(s.IsMember(ca, aID, "alice"))(t) {
 			t.Fatal("alice must be a member in her own tenant A")
 		}
 
@@ -94,10 +94,10 @@ func TestRoomIsolationAcrossTenants(t *testing.T) {
 		}
 
 		// RoomsForUser is tenant-scoped: bob has a room in B, none in A.
-		if got := s.RoomsForUser(ca, "bob"); len(got) != 0 {
+		if got := must(s.RoomsForUser(ca, "bob"))(t); len(got) != 0 {
 			t.Fatalf("bob rooms in tenant A = %v, want none", got)
 		}
-		if got := s.RoomsForUser(cb, "bob"); len(got) != 1 {
+		if got := must(s.RoomsForUser(cb, "bob"))(t); len(got) != 1 {
 			t.Fatalf("bob rooms in tenant B = %v, want 1", got)
 		}
 	})
@@ -118,23 +118,23 @@ func TestIsMemberAnyTenantIgnoresForeignTenantMembership(t *testing.T) {
 			t.Fatalf("add into another tenant's room = %v, want ErrRoomNotFound", err)
 		}
 		plantMember(t, bk, b, Membership{RoomID: r, UserID: "mallory", Role: RoleOwner, JoinedAtMs: 2})
-		if memberAnyTenant(s, cb, r, "mallory") {
+		if memberAnyTenant(t, s, cb, r, "mallory") {
 			t.Fatal("a membership under a foreign tenant must not count")
 		}
-		if got := s.RoomsForUserAllTenants(cb, "mallory"); len(got) != 0 {
+		if got := must(s.RoomsForUserAllTenants(cb, "mallory"))(t); len(got) != 0 {
 			t.Fatalf("mallory all-tenant rooms = %v, want none", got)
 		}
-		if !memberAnyTenant(s, cb, r, "alice") {
+		if !memberAnyTenant(t, s, cb, r, "alice") {
 			t.Fatal("the real member resolves from any tenant context")
 		}
 		// A deleted room grants nothing.
 		if err := s.DeleteRoom(ca, r); err != nil {
 			t.Fatalf("delete: %v", err)
 		}
-		if memberAnyTenant(s, ca, r, "alice") {
+		if memberAnyTenant(t, s, ca, r, "alice") {
 			t.Fatal("deleted room must not report members")
 		}
-		if _, ok := s.RoomTenant(ca, r); ok {
+		if _, ok := must2(s.RoomTenant(ca, r))(t); ok {
 			t.Fatal("deleted room must not resolve a tenant")
 		}
 		// The id is never reused, even after delete.
@@ -162,7 +162,7 @@ func TestInviteRedeemRejectsCrossTenant(t *testing.T) {
 		if _, err := s.RedeemInvite(cb, code, "mallory", 2); err == nil {
 			t.Fatal("cross-tenant invite redeem must fail, but it succeeded")
 		}
-		if s.IsMember(ca, r, "mallory") {
+		if must(s.IsMember(ca, r, "mallory"))(t) {
 			t.Fatal("a refused cross-tenant redeem left a membership")
 		}
 		// Redeeming in the correct tenant works.
@@ -224,17 +224,17 @@ func TestRoomsForUserAllTenantsIsTheBridgeDiscoveryShape(t *testing.T) {
 		}
 
 		// Scoped listing (UI): each session tenant sees only its own room.
-		if got := s.RoomsForUser(ca, bob); len(got) != 1 || got[0] != aRoom {
+		if got := must(s.RoomsForUser(ca, bob))(t); len(got) != 1 || got[0] != aRoom {
 			t.Fatalf("bob rooms in tenant A = %v, want [%s]", got, aRoom)
 		}
-		if got := s.RoomsForUser(cb, bob); len(got) != 1 || got[0] != bRoom {
+		if got := must(s.RoomsForUser(cb, bob))(t); len(got) != 1 || got[0] != bRoom {
 			t.Fatalf("bob rooms in tenant B = %v, want [%s]", got, bRoom)
 		}
 
 		// Bridge discovery: minted-in-A token still finds the B room — the bridge
 		// must subscribe to both or b-room's agents show offline for everyone.
 		seen := map[string]bool{}
-		for _, r := range s.RoomsForUserAllTenants(ca, bob) {
+		for _, r := range must(s.RoomsForUserAllTenants(ca, bob))(t) {
 			seen[r] = true
 		}
 		if len(seen) != 2 || !seen[aRoom] || !seen[bRoom] {
@@ -242,7 +242,7 @@ func TestRoomsForUserAllTenantsIsTheBridgeDiscoveryShape(t *testing.T) {
 		}
 
 		// Another user's rooms are never included.
-		if got := s.RoomsForUserAllTenants(ca, alice); len(got) != 0 {
+		if got := must(s.RoomsForUserAllTenants(ca, alice))(t); len(got) != 0 {
 			t.Fatalf("alice all-tenant rooms = %v, want none", got)
 		}
 	})
@@ -266,7 +266,7 @@ func TestRoomsForUserDetailedStaysTenantScoped(t *testing.T) {
 			ctx  context.Context
 			want string
 		}{{ca, da}, {cb, db}} {
-			got := s.RoomsForUserDetailed(tc.ctx, u)
+			got := must(s.RoomsForUserDetailed(tc.ctx, u))(t)
 			if len(got) != 1 || got[0].RoomID != tc.want {
 				t.Fatalf("detailed rooms = %+v, want only %s", got, tc.want)
 			}
@@ -275,7 +275,7 @@ func TestRoomsForUserDetailedStaysTenantScoped(t *testing.T) {
 }
 
 // memberAnyTenant reports whether MembershipAnyTenant finds a membership.
-func memberAnyTenant(s RoomStore, ctx context.Context, roomID, userID string) bool {
-	_, ok := s.MembershipAnyTenant(ctx, roomID, userID)
+func memberAnyTenant(t testing.TB, s RoomStore, ctx context.Context, roomID, userID string) bool {
+	_, ok := must2(s.MembershipAnyTenant(ctx, roomID, userID))(t)
 	return ok
 }

@@ -53,7 +53,7 @@ func reservationCases(t *testing.T, g GrantStore, prefix string) {
 		if got, _ := g.GetGrant(ctx, id); got.RunsUsed != quota {
 			t.Fatalf("runsUsed = %d, want %d", got.RunsUsed, quota)
 		}
-		turns := g.BorrowTurns(ctx, BorrowTurnQuery{FromMs: 0})
+		turns := must(g.BorrowTurns(ctx, BorrowTurnQuery{FromMs: 0}))(t)
 		n := 0
 		for _, r := range turns {
 			if r.GrantID == id {
@@ -106,7 +106,7 @@ func reservationCases(t *testing.T, g GrantStore, prefix string) {
 			t.Fatalf("grant runs=%d cost=%v, want 1 / 0.6", got.RunsUsed, got.CostUsed)
 		}
 		var rec *AuditRecord
-		for _, r := range g.BorrowTurns(ctx, BorrowTurnQuery{FromMs: 0}) {
+		for _, r := range must(g.BorrowTurns(ctx, BorrowTurnQuery{FromMs: 0}))(t) {
 			if r.GrantID == id {
 				r := r
 				rec = &r

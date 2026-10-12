@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"sync"
 	"time"
 
@@ -31,8 +32,8 @@ type AgentPrefs struct {
 // AgentPrefsStore persists per-user, per-room+channel agent selections.
 type AgentPrefsStore interface {
 	// GetAgentPrefs returns the stored selection for (room, channel); an
-	// absent row is a zero value with ok=false, never an error.
-	GetAgentPrefs(ctx context.Context, roomID, channelID, userID string) (AgentPrefs, bool)
+	// absent row is a zero value with ok=false, a read failure an error.
+	GetAgentPrefs(ctx context.Context, roomID, channelID, userID string) (AgentPrefs, bool, error)
 	// PutAgentPrefs upserts the selection for (room, channel).
 	PutAgentPrefs(ctx context.Context, p AgentPrefs, userID string) error
 }
@@ -43,10 +44,10 @@ type MySQLAgentPrefs struct{ DB *sql.DB }
 // NewMySQLAgentPrefs builds a MySQLAgentPrefs over a shared pool.
 func NewMySQLAgentPrefs(db *sql.DB) *MySQLAgentPrefs { return &MySQLAgentPrefs{DB: db} }
 
-func (m *MySQLAgentPrefs) GetAgentPrefs(ctx context.Context, roomID, channelID, userID string) (AgentPrefs, bool) {
+func (m *MySQLAgentPrefs) GetAgentPrefs(ctx context.Context, roomID, channelID, userID string) (AgentPrefs, bool, error) {
 	tid, err := tenant.Require(ctx)
 	if err != nil {
-		return AgentPrefs{}, false
+		return AgentPrefs{}, false, err
 	}
 	var p AgentPrefs
 	err = m.DB.QueryRowContext(ctx,
@@ -54,11 +55,14 @@ func (m *MySQLAgentPrefs) GetAgentPrefs(ctx context.Context, roomID, channelID, 
 		 FROM user_agent_prefs WHERE tenant_id=? AND user_id=? AND room_id=? AND channel_id=?`,
 		tid, userID, roomID, channelID).
 		Scan(&p.OwnerID, &p.Core, &p.Provider, &p.Model, &p.Reasoning, &p.UpdatedAtMs)
+	if errors.Is(err, sql.ErrNoRows) {
+		return AgentPrefs{}, false, nil
+	}
 	if err != nil {
-		return AgentPrefs{}, false
+		return AgentPrefs{}, false, err
 	}
 	p.RoomID, p.ChannelID = roomID, channelID
-	return p, true
+	return p, true, nil
 }
 
 func (m *MySQLAgentPrefs) PutAgentPrefs(ctx context.Context, p AgentPrefs, userID string) error {
@@ -87,15 +91,15 @@ func NewMemoryAgentPrefs() *MemoryAgentPrefs {
 	return &MemoryAgentPrefs{rows: map[[4]string]AgentPrefs{}, now: func() int64 { return time.Now().UnixMilli() }}
 }
 
-func (m *MemoryAgentPrefs) GetAgentPrefs(ctx context.Context, roomID, channelID, userID string) (AgentPrefs, bool) {
+func (m *MemoryAgentPrefs) GetAgentPrefs(ctx context.Context, roomID, channelID, userID string) (AgentPrefs, bool, error) {
 	tid, err := tenant.Require(ctx)
 	if err != nil {
-		return AgentPrefs{}, false
+		return AgentPrefs{}, false, err
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	p, ok := m.rows[[4]string{tid, userID, roomID, channelID}]
-	return p, ok
+	return p, ok, nil
 }
 
 func (m *MemoryAgentPrefs) PutAgentPrefs(ctx context.Context, p AgentPrefs, userID string) error {

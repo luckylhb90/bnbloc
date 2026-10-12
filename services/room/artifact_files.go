@@ -304,7 +304,13 @@ func firstNonEmptyString(vals ...string) string {
 // read; it writes the refusal and returns ok=false otherwise.
 func (s *Service) artifactVersionForRead(w http.ResponseWriter, r *http.Request) (store.Artifact, store.ArtifactVersion, bool) {
 	roomID := r.PathValue("roomId")
-	if !s.Store.IsMember(r.Context(), roomID, caller(r)) {
+	isMember, err := s.Store.IsMember(r.Context(), roomID, caller(r))
+	if err != nil {
+		obs.ServerError(w, "read membership failed", err)
+		httpx.Error(w, err.Error(), http.StatusInternalServerError)
+		return store.Artifact{}, store.ArtifactVersion{}, false
+	}
+	if !isMember {
 		httpx.Error(w, "caller is not a member of room", http.StatusForbidden)
 		return store.Artifact{}, store.ArtifactVersion{}, false
 	}

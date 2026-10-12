@@ -50,7 +50,7 @@ func TestMySQLArtifactVersionCAS(t *testing.T) {
 		t.Fatalf("v2 = %+v, %v: the loser's write must not have landed", got, err)
 	}
 	// List omits content; per-version fetch serves it.
-	for _, v := range m.ListArtifactVersions(ctx, id, 10) {
+	for _, v := range must(m.ListArtifactVersions(ctx, id, 10))(t) {
 		if v.Content != "" {
 			t.Fatal("version list leaked content")
 		}

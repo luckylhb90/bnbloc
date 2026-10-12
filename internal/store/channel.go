@@ -71,13 +71,13 @@ type ChannelStore interface {
 	PutChannel(ctx context.Context, c RoomChannel) error
 	// GetChannel returns a live channel by id within a room, found=false when
 	// absent or soft-deleted.
-	GetChannel(ctx context.Context, roomID, channelID string) (RoomChannel, bool)
+	GetChannel(ctx context.Context, roomID, channelID string) (RoomChannel, bool, error)
 	// ListChannels returns a room's live channels of every kind (the people
 	// chat included), default first then by created_at ascending. Callers that
 	// present or copy ordinary channels filter IsPeople themselves.
-	ListChannels(ctx context.Context, roomID string) []RoomChannel
+	ListChannels(ctx context.Context, roomID string) ([]RoomChannel, error)
 	// DefaultChannel returns a room's default channel, found=false when none.
-	DefaultChannel(ctx context.Context, roomID string) (RoomChannel, bool)
+	DefaultChannel(ctx context.Context, roomID string) (RoomChannel, bool, error)
 	// DeleteChannel soft-deletes a channel. Deleting an absent channel is a
 	// no-op; callers enforce the default-channel guard.
 	DeleteChannel(ctx context.Context, roomID, channelID string, atMs int64) error
@@ -151,24 +151,24 @@ func (s *MemoryChannel) PutChannel(ctx context.Context, c RoomChannel) error {
 	return s.room.putChannelLocked(tnt, c)
 }
 
-func (s *MemoryChannel) GetChannel(ctx context.Context, roomID, channelID string) (RoomChannel, bool) {
+func (s *MemoryChannel) GetChannel(ctx context.Context, roomID, channelID string) (RoomChannel, bool, error) {
 	tnt, err := tenant.Require(ctx)
 	if err != nil {
-		return RoomChannel{}, false
+		return RoomChannel{}, false, err
 	}
 	s.room.mu.Lock()
 	defer s.room.mu.Unlock()
 	c, ok := s.room.channels[channelKey(tnt, roomID)][channelID]
 	if !ok || c.DeletedAtMs != nil {
-		return RoomChannel{}, false
+		return RoomChannel{}, false, nil
 	}
-	return c, true
+	return c, true, nil
 }
 
-func (s *MemoryChannel) ListChannels(ctx context.Context, roomID string) []RoomChannel {
+func (s *MemoryChannel) ListChannels(ctx context.Context, roomID string) ([]RoomChannel, error) {
 	tnt, err := tenant.Require(ctx)
 	if err != nil {
-		return nil
+		return nil, err
 	}
 	s.room.mu.Lock()
 	defer s.room.mu.Unlock()
@@ -185,22 +185,22 @@ func (s *MemoryChannel) ListChannels(ctx context.Context, roomID string) []RoomC
 		}
 		return out[i].CreatedAtMs < out[j].CreatedAtMs
 	})
-	return out
+	return out, nil
 }
 
-func (s *MemoryChannel) DefaultChannel(ctx context.Context, roomID string) (RoomChannel, bool) {
+func (s *MemoryChannel) DefaultChannel(ctx context.Context, roomID string) (RoomChannel, bool, error) {
 	tnt, err := tenant.Require(ctx)
 	if err != nil {
-		return RoomChannel{}, false
+		return RoomChannel{}, false, err
 	}
 	s.room.mu.Lock()
 	defer s.room.mu.Unlock()
 	for _, c := range s.room.channels[channelKey(tnt, roomID)] {
 		if c.IsDefault && c.DeletedAtMs == nil {
-			return c, true
+			return c, true, nil
 		}
 	}
-	return RoomChannel{}, false
+	return RoomChannel{}, false, nil
 }
 
 func (s *MemoryChannel) DeleteChannel(ctx context.Context, roomID, channelID string, atMs int64) error {

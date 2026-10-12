@@ -245,7 +245,11 @@ func TestApply_addsDefaultRoomsOnce(t *testing.T) {
 	tctx := tenant.NewContext(context.Background(), "acme")
 	attrs := Attributes{UserID: "cy@acme.com", Email: "cy@acme.com"}
 	f.apply(t, attrs)
-	if !f.rooms.IsMember(tctx, "lobby", "cy@acme.com") {
+	isMember, err := f.rooms.IsMember(tctx, "lobby", "cy@acme.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !isMember {
 		t.Fatal("not added to the default room")
 	}
 	// When the member leaves the room and signs in again.
@@ -254,8 +258,8 @@ func TestApply_addsDefaultRoomsOnce(t *testing.T) {
 	}
 	res := f.apply(t, attrs)
 	// Then they are not re-added.
-	if f.rooms.IsMember(tctx, "lobby", "cy@acme.com") || len(res.Changes) != 0 {
-		t.Fatalf("re-added to a left default room (changes %+v)", res.Changes)
+	if member, err := f.rooms.IsMember(tctx, "lobby", "cy@acme.com"); err != nil || member || len(res.Changes) != 0 {
+		t.Fatalf("re-added to a left default room (changes %+v, %v)", res.Changes, err)
 	}
 }
 
@@ -318,7 +322,11 @@ func TestDeprovisionRemovesEveryMembershipAndRevokesSessions(t *testing.T) {
 	if len(out) != 1 || len(out[0].RemovedTenants) != 2 || out[0].RevokedSessions != 1 {
 		t.Fatalf("deprovision = %+v", out)
 	}
-	if got := f.tenants.ListMembershipsForUser(ctx, "fay"); len(got) != 0 {
+	got, err := f.tenants.ListMembershipsForUser(ctx, "fay")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 0 {
 		t.Fatalf("memberships left: %+v", got)
 	}
 	// And a resync cannot restore the departed user.

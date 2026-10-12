@@ -29,10 +29,10 @@ func TestMySQLBackendsRoundTrip(t *testing.T) {
 	if err := b.Room.AddMember(testCtx(), Membership{RoomID: roomID, UserID: "alice", Role: RoleOwner, JoinedAtMs: now}); err != nil {
 		t.Fatalf("AddMember: %v", err)
 	}
-	if !b.Room.IsMember(testCtx(), roomID, "alice") {
+	if !must(b.Room.IsMember(testCtx(), roomID, "alice"))(t) {
 		t.Fatal("expected alice to be a member after persistence")
 	}
-	if got := b.Room.RoomsForUser(testCtx(), "alice"); !contains(got, roomID) {
+	if got := must(b.Room.RoomsForUser(testCtx(), "alice"))(t); !contains(got, roomID) {
 		t.Fatalf("RoomsForUser missing %s: %v", roomID, got)
 	}
 
@@ -43,7 +43,7 @@ func TestMySQLBackendsRoundTrip(t *testing.T) {
 	if err := b.Room.CreateRoomWithOwnerAndChannel(testCtx(), Room{RoomID: chanRoom, Name: "it2", CreatedBy: "alice", CreatedAtMs: now}, Membership{RoomID: chanRoom, UserID: "alice", Role: RoleOwner, JoinedAtMs: now}, def); err != nil {
 		t.Fatalf("CreateRoomWithOwnerAndChannel: %v", err)
 	}
-	if got, ok := b.Channel.DefaultChannel(testCtx(), chanRoom); !ok || got.ChannelID != def.ChannelID || !got.IsDefault {
+	if got, ok := must2(b.Channel.DefaultChannel(testCtx(), chanRoom))(t); !ok || got.ChannelID != def.ChannelID || !got.IsDefault {
 		t.Fatalf("default channel after transactional create = %+v,%v want %s default", got, ok, def.ChannelID)
 	}
 	if err := b.Channel.RenameChannel(testCtx(), chanRoom, def.ChannelID, "lobby"); err != nil {

@@ -18,8 +18,8 @@ import (
 
 type fixedAdvertisements map[string][]store.BridgeAgent
 
-func (f fixedAdvertisements) ListBridgeAgentsForOwner(_ context.Context, owner string) []store.BridgeAgent {
-	return f[owner]
+func (f fixedAdvertisements) ListBridgeAgentsForOwner(_ context.Context, owner string) ([]store.BridgeAgent, error) {
+	return f[owner], nil
 }
 
 // A chat to a platform agent whose host is offline is refused with 409

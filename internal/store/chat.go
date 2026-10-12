@@ -106,7 +106,7 @@ type ChatStore interface {
 	// LookupClientMsg returns the sequence of a previously-stored message with
 	// this client-generated id in the room, for send idempotency. found=false
 	// when there is none (or clientMsgID is empty).
-	LookupClientMsg(ctx context.Context, roomID, clientMsgID string) (seq int64, found bool)
+	LookupClientMsg(ctx context.Context, roomID, clientMsgID string) (seq int64, found bool, err error)
 	// DeleteRoomMessage soft-deletes a message if requester is its author.
 	// Returns deleted=false when the message is missing or not the requester's.
 	DeleteRoomMessage(ctx context.Context, roomID string, seq int64, requester string, atMs int64) (deleted bool, err error)
@@ -218,18 +218,18 @@ func validateBatch(rows []RoomMessage) error {
 }
 
 // LookupClientMsg returns the seq stored under a client message id, if any.
-func (s *MemoryChat) LookupClientMsg(ctx context.Context, roomID, clientMsgID string) (int64, bool) {
+func (s *MemoryChat) LookupClientMsg(ctx context.Context, roomID, clientMsgID string) (int64, bool, error) {
 	if clientMsgID == "" {
-		return 0, false
+		return 0, false, nil
 	}
 	tid, err := tenant.Require(ctx)
 	if err != nil {
-		return 0, false
+		return 0, false, err
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	seq, ok := s.byCMI[tid+"\x00"+roomID+"\x00"+clientMsgID]
-	return seq, ok
+	return seq, ok, nil
 }
 
 // DeleteRoomMessage soft-deletes a message if the requester authored it.
@@ -534,22 +534,25 @@ func (s *MySQLChat) clientMsgConflicts(ctx context.Context, rows []RoomMessage) 
 }
 
 // LookupClientMsg returns the seq of a stored message with this client id.
-func (s *MySQLChat) LookupClientMsg(ctx context.Context, roomID, clientMsgID string) (int64, bool) {
+func (s *MySQLChat) LookupClientMsg(ctx context.Context, roomID, clientMsgID string) (int64, bool, error) {
 	if clientMsgID == "" {
-		return 0, false
+		return 0, false, nil
 	}
 	tid, err := tenant.Require(ctx)
 	if err != nil {
-		return 0, false
+		return 0, false, err
 	}
 	var seq int64
 	err = s.DB.QueryRowContext(ctx,
 		`SELECT seq FROM room_messages WHERE tenant_id = ? AND room_id = ? AND client_msg_id = ?`,
 		tid, roomID, clientMsgID).Scan(&seq)
-	if err != nil {
-		return 0, false
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, false, nil
 	}
-	return seq, true
+	if err != nil {
+		return 0, false, err
+	}
+	return seq, true, nil
 }
 
 // RoomHistory returns up to limit messages with seq < before (before<=0 =

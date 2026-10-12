@@ -56,10 +56,10 @@ func quotaRequestCases(t *testing.T, s QuotaRequestStore, tnt, room string) {
 	if _, err := s.GetQuotaRequest(tenantCtx(tnt+"-other"), req.RequestID); !errors.Is(err, ErrQuotaRequestNotFound) {
 		t.Fatalf("cross-tenant get err = %v, want not found", err)
 	}
-	if n := len(s.ListQuotaRequests(ctx, QuotaRequestQuery{OwnerUserID: "alice", Status: QuotaRequestPending})); n != 1 {
+	if n := len(must(s.ListQuotaRequests(ctx, QuotaRequestQuery{OwnerUserID: "alice", Status: QuotaRequestPending}))(t)); n != 1 {
 		t.Fatalf("owner pending = %d, want 1", n)
 	}
-	if n := len(s.ListQuotaRequests(ctx, QuotaRequestQuery{RequesterUserID: "alice"})); n != 0 {
+	if n := len(must(s.ListQuotaRequests(ctx, QuotaRequestQuery{RequesterUserID: "alice"}))(t)); n != 0 {
 		t.Fatalf("alice as requester = %d, want 0", n)
 	}
 	// Only the owner may decide.
@@ -122,7 +122,7 @@ func borrowUsageCases(t *testing.T, g GrantStore, tnt, room string) {
 			t.Fatalf("AppendAudit: %v", err)
 		}
 	}
-	turns := g.BorrowTurns(ctx, BorrowTurnQuery{FromMs: 0, ToMs: 5000, OwnerUserID: "alice"})
+	turns := must(g.BorrowTurns(ctx, BorrowTurnQuery{FromMs: 0, ToMs: 5000, OwnerUserID: "alice"}))(t)
 	if len(turns) != 2 || turns[0].ActorUserID != "bob" || turns[1].ActorUserID != "jack" {
 		t.Fatalf("owner turns = %+v, want bob then jack", turns)
 	}
@@ -134,10 +134,10 @@ func borrowUsageCases(t *testing.T, g GrantStore, tnt, room string) {
 		turns[0].Model != "m-1" || turns[1].InputTokens != nil || turns[1].OutputTokens != nil {
 		t.Fatalf("tokens = %+v / %+v, want 1200/34 (m-1) and absent", turns[0], turns[1])
 	}
-	if n := len(g.BorrowTurns(ctx, BorrowTurnQuery{FromMs: 0, ToMs: 5000, BorrowerUserID: "bob"})); n != 1 {
+	if n := len(must(g.BorrowTurns(ctx, BorrowTurnQuery{FromMs: 0, ToMs: 5000, BorrowerUserID: "bob"}))(t)); n != 1 {
 		t.Fatalf("bob turns = %d, want 1", n)
 	}
-	if n := len(g.BorrowTurns(tenantCtx(tnt+"-other"), BorrowTurnQuery{FromMs: 0, ToMs: 5000})); n != 0 {
+	if n := len(must(g.BorrowTurns(tenantCtx(tnt+"-other"), BorrowTurnQuery{FromMs: 0, ToMs: 5000}))(t)); n != 0 {
 		t.Fatalf("cross-tenant turns = %d, want 0", n)
 	}
 
@@ -191,7 +191,7 @@ func teamAgentCases(t *testing.T, jobs BridgeJobStore, team TeamAgentReader, tnt
 	_ = jobs.ReplaceBridgeAgents(ctx, live, []BridgeAgent{{OwnerUserID: alice, Core: "c1", Provider: "codex", TargetID: "c1/local:codex", LastSeenAtMs: now}})
 	_ = jobs.ReplaceBridgeAgents(ctx, stale, []BridgeAgent{{OwnerUserID: bob, Core: "c1", Provider: "claude", TargetID: "c1/local:claude", LastSeenAtMs: now}})
 
-	agents := team.TenantTeamAgents(ctx, "", now)
+	agents := must(team.TenantTeamAgents(ctx, "", now))(t)
 	if len(agents) != 2 {
 		t.Fatalf("tenant agents = %+v, want 2", agents)
 	}
@@ -200,10 +200,10 @@ func teamAgentCases(t *testing.T, jobs BridgeJobStore, team TeamAgentReader, tnt
 			t.Fatalf("agent %+v: online should be true only for the live bridge", a)
 		}
 	}
-	if own := team.TenantTeamAgents(ctx, bob, now); len(own) != 1 || own[0].OwnerUserID != bob || own[0].LastSeenAtMs != now-10*BridgeOfflineAfterMs {
+	if own := must(team.TenantTeamAgents(ctx, bob, now))(t); len(own) != 1 || own[0].OwnerUserID != bob || own[0].LastSeenAtMs != now-10*BridgeOfflineAfterMs {
 		t.Fatalf("bob's agents = %+v", own)
 	}
-	if other := team.TenantTeamAgents(tenantCtx(tnt+"-other"), "", now); len(other) != 0 {
+	if other := must(team.TenantTeamAgents(tenantCtx(tnt+"-other"), "", now))(t); len(other) != 0 {
 		t.Fatalf("cross-tenant agents = %+v", other)
 	}
 
@@ -227,7 +227,7 @@ func teamAgentCases(t *testing.T, jobs BridgeJobStore, team TeamAgentReader, tnt
 		}
 	}
 	got := map[string]bool{}
-	for _, j := range team.TenantTeamJobs(ctx, alice, since) {
+	for _, j := range must(team.TenantTeamJobs(ctx, alice, since))(t) {
 		got[j.JobID] = true
 	}
 	if !got["old-queued-"+sfx] || !got["recent-"+sfx] || got["old-done-"+sfx] || got["bobs-"+sfx] {
@@ -275,7 +275,7 @@ func agentUsageCases(t *testing.T, act ActivityStore, usage AgentUsageReader, tn
 	if _, _, err := act.AppendMessages(ctx, room, in); err != nil {
 		t.Fatalf("AppendMessages: %v", err)
 	}
-	rows := usage.AgentUsage(ctx, "alice", 1000)
+	rows := must(usage.AgentUsage(ctx, "alice", 1000))(t)
 	if len(rows) != 1 {
 		t.Fatalf("alice usage = %+v, want one row", rows)
 	}
@@ -283,13 +283,13 @@ func agentUsageCases(t *testing.T, act ActivityStore, usage AgentUsageReader, tn
 	if u.Provider != "codex" || u.ReportedTurns != 3 || u.InputTokens != 150 || u.OutputTokens != 15 || u.CostUsd != 0.25 || u.CostReportedBy != 1 {
 		t.Fatalf("alice usage = %+v", u)
 	}
-	if rows := usage.AgentUsage(ctx, "Alice", 1000); len(rows) != 1 || rows[0].InputTokens != 3 || rows[0].OwnerUserID != "Alice" {
+	if rows := must(usage.AgentUsage(ctx, "Alice", 1000))(t); len(rows) != 1 || rows[0].InputTokens != 3 || rows[0].OwnerUserID != "Alice" {
 		t.Fatalf("Alice usage = %+v, want only her own turn (subjects are case-sensitive)", rows)
 	}
-	if all := usage.AgentUsage(ctx, "", 1000); len(all) != 3 {
+	if all := must(usage.AgentUsage(ctx, "", 1000))(t); len(all) != 3 {
 		t.Fatalf("tenant usage = %+v, want alice + Alice + bob", all)
 	}
-	if other := usage.AgentUsage(tenantCtx(tnt+"-other"), "", 0); len(other) != 0 {
+	if other := must(usage.AgentUsage(tenantCtx(tnt+"-other"), "", 0))(t); len(other) != 0 {
 		t.Fatalf("cross-tenant usage = %+v", other)
 	}
 }

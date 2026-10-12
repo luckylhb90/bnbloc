@@ -72,7 +72,7 @@ func TestDeletedRoomHiddenFromPlazaAndGet(t *testing.T) {
 	if total != 0 || len(rooms) != 0 {
 		t.Fatalf("deleted room should not appear in plaza, got %d", total)
 	}
-	if s.IsMember(testCtx(), "r1", "owner") {
+	if must(s.IsMember(testCtx(), "r1", "owner"))(t) {
 		t.Fatal("delete should drop memberships")
 	}
 }
@@ -86,10 +86,10 @@ func TestTransferOwnerSwapsRoles(t *testing.T) {
 	if err := s.TransferOwner(testCtx(), "r1", "bob"); err != nil {
 		t.Fatal(err)
 	}
-	if role, _ := s.MemberRole(testCtx(), "r1", "bob"); role != RoleOwner {
+	if role, _ := must2(s.MemberRole(testCtx(), "r1", "bob"))(t); role != RoleOwner {
 		t.Fatalf("bob should be owner, got %q", role)
 	}
-	if role, _ := s.MemberRole(testCtx(), "r1", "owner"); role != RoleMember {
+	if role, _ := must2(s.MemberRole(testCtx(), "r1", "owner"))(t); role != RoleMember {
 		t.Fatalf("prior owner should be demoted to member, got %q", role)
 	}
 }
@@ -100,7 +100,7 @@ func TestTransferOwnerRejectsNonMember(t *testing.T) {
 	if err := s.TransferOwner(testCtx(), "r1", "stranger"); err == nil {
 		t.Fatal("transfer to a non-member must fail")
 	}
-	if role, _ := s.MemberRole(testCtx(), "r1", "owner"); role != RoleOwner {
+	if role, _ := must2(s.MemberRole(testCtx(), "r1", "owner"))(t); role != RoleOwner {
 		t.Fatalf("owner must be unchanged after failed transfer, got %q", role)
 	}
 }
@@ -128,7 +128,7 @@ func TestRoomsForUserDetailedFlagsOwnership(t *testing.T) {
 	if err := s.AddMember(testCtx(), Membership{RoomID: "theirs", UserID: "me", Role: RoleMember, JoinedAtMs: 2}); err != nil {
 		t.Fatal(err)
 	}
-	rows := s.RoomsForUserDetailed(testCtx(), "me")
+	rows := must(s.RoomsForUserDetailed(testCtx(), "me"))(t)
 	if len(rows) != 2 {
 		t.Fatalf("expected 2 rooms, got %d", len(rows))
 	}
@@ -203,7 +203,7 @@ func TestCreateRoomRejectsExistingID(t *testing.T) {
 	if got.Name != "taken" {
 		t.Fatalf("room renamed to %q by a failed create", got.Name)
 	}
-	if s.IsMember(testCtx(), "taken", "mallory") {
+	if must(s.IsMember(testCtx(), "taken", "mallory"))(t) {
 		t.Fatal("failed create must not add the caller as a member")
 	}
 }
@@ -224,13 +224,13 @@ func TestDeleteRoomRemovesOwnedRows(t *testing.T) {
 	if err := s.DeleteRoom(testCtx(), "gone"); err != nil {
 		t.Fatalf("delete: %v", err)
 	}
-	if got := ch.ListChannels(testCtx(), "gone"); len(got) != 0 {
+	if got := must(ch.ListChannels(testCtx(), "gone"))(t); len(got) != 0 {
 		t.Fatalf("channels after delete = %+v, want none", got)
 	}
-	if _, ok := ch.DefaultChannel(testCtx(), "gone"); ok {
+	if _, ok := must2(ch.DefaultChannel(testCtx(), "gone"))(t); ok {
 		t.Fatal("default channel must be gone")
 	}
-	if s.IsMember(testCtx(), "gone", "alice") || s.MemberCount(testCtx(), "gone") != 0 {
+	if must(s.IsMember(testCtx(), "gone", "alice"))(t) || must(s.MemberCount(testCtx(), "gone"))(t) != 0 {
 		t.Fatal("memberships must be gone")
 	}
 	if _, err := s.RedeemInvite(testCtx(), "c1", "bob", 2); !errors.Is(err, ErrInviteNotFound) {

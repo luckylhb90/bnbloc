@@ -30,7 +30,12 @@ func (s *Service) handleTenantMembers(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	tid := tenant.FromContext(r.Context())
-	members := s.Tenants.ListMembers(r.Context(), tid)
+	members, err := s.Tenants.ListMembers(r.Context(), tid)
+	if err != nil {
+		obs.ServerError(w, "list members failed", err)
+		httpx.Error(w, "list members failed", http.StatusInternalServerError)
+		return
+	}
 	views := make([]memberView, 0, len(members))
 	for _, m := range members {
 		views = append(views, memberView{
@@ -80,7 +85,13 @@ func (s *Service) handleTenantSetMemberRole(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	newRole := store.NormalizeOrgRole(body.Role)
-	if s.strandsLastAdmin(r.Context(), tid, existing, newRole) {
+	strands, err := s.strandsLastAdmin(r.Context(), tid, existing, newRole)
+	if err != nil {
+		obs.ServerError(w, "list members failed", err)
+		httpx.Error(w, "list members failed", http.StatusInternalServerError)
+		return
+	}
+	if strands {
 		httpx.Error(w, "cannot demote the last org admin", http.StatusConflict)
 		return
 	}
@@ -140,7 +151,13 @@ func (s *Service) handleTenantAddMember(w http.ResponseWriter, r *http.Request) 
 	role := store.NormalizeOrgRole(body.Role)
 	// Add-member upserts: on an existing member it is a role change, so it must
 	// honor the same last-admin guard as the role-change path.
-	if ok && s.strandsLastAdmin(r.Context(), tid, existing, role) {
+	strands, err := s.strandsLastAdmin(r.Context(), tid, existing, role)
+	if err != nil {
+		obs.ServerError(w, "list members failed", err)
+		httpx.Error(w, "list members failed", http.StatusInternalServerError)
+		return
+	}
+	if ok && strands {
 		httpx.Error(w, "cannot demote the last org admin", http.StatusConflict)
 		return
 	}
@@ -192,7 +209,13 @@ func (s *Service) handleTenantRemoveMember(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	// Removal drops the member's role entirely ("" is never org_admin).
-	if s.strandsLastAdmin(r.Context(), tid, target, "") {
+	strands, err := s.strandsLastAdmin(r.Context(), tid, target, "")
+	if err != nil {
+		obs.ServerError(w, "list members failed", err)
+		httpx.Error(w, "list members failed", http.StatusInternalServerError)
+		return
+	}
+	if strands {
 		httpx.Error(w, "cannot remove the last org admin", http.StatusConflict)
 		return
 	}
@@ -218,17 +241,21 @@ func (s *Service) handleTenantRemoveMember(w http.ResponseWriter, r *http.Reques
 // tenant without any org_admin: the member is currently an admin, is losing the
 // role, and is the only admin. It is the single last-admin guard shared by
 // role change, add-member upsert, and removal.
-func (s *Service) strandsLastAdmin(ctx context.Context, tenantID string, member store.TenantMember, newRole store.OrgRole) bool {
+func (s *Service) strandsLastAdmin(ctx context.Context, tenantID string, member store.TenantMember, newRole store.OrgRole) (bool, error) {
 	if member.Role != store.OrgRoleAdmin || newRole == store.OrgRoleAdmin {
-		return false
+		return false, nil
+	}
+	members, err := s.Tenants.ListMembers(ctx, tenantID)
+	if err != nil {
+		return false, err
 	}
 	admins := 0
-	for _, m := range s.Tenants.ListMembers(ctx, tenantID) {
+	for _, m := range members {
 		if m.Role == store.OrgRoleAdmin {
 			admins++
 		}
 	}
-	return admins <= 1
+	return admins <= 1, nil
 }
 
 type quotaBody struct {

@@ -124,11 +124,11 @@ type tenantWiring struct {
 	// OrgSync applies the organization-sync rules (R11).
 	OrgSync *orgsync.Syncer
 	// MemberCount counts distinct members across tenants (adoption stats).
-	MemberCount func() int
+	MemberCount func() (int, error)
 	// RoomMembers lists a room's human members and OrgAdmins an
 	// organization's org admins (content sharing and approval).
 	RoomMembers func(ctx context.Context, roomID string) ([]string, error)
-	OrgAdmins   func(tenantID string) []string
+	OrgAdmins   func(tenantID string) ([]string, error)
 	// Health pings the control-plane store for the readiness probe; nil when no
 	// DB is configured (dev/in-memory), which reads as always-ready.
 	Health func() error
@@ -182,34 +182,50 @@ func resolveTenantWiring() tenantWiring {
 	}
 	// Distinct subjects across all tenants (adoption denominators); a subject
 	// in two tenants counts once.
-	memberCount := func() int {
+	memberCount := func() (int, error) {
+		all, err := tenants.ListTenants(context.Background())
+		if err != nil {
+			return 0, err
+		}
 		seen := map[string]bool{}
-		for _, t := range tenants.ListTenants(context.Background()) {
-			for _, m := range tenants.ListMembers(context.Background(), t.TenantID) {
+		for _, t := range all {
+			members, err := tenants.ListMembers(context.Background(), t.TenantID)
+			if err != nil {
+				return 0, err
+			}
+			for _, m := range members {
 				seen[m.UserID] = true
 			}
 		}
-		return len(seen)
+		return len(seen), nil
 	}
 	// A room's human members (a content share with a room); ctx carries the
 	// room's tenant.
 	roomMembers := func(ctx context.Context, roomID string) ([]string, error) {
+		members, err := backends.Room.Members(ctx, roomID)
+		if err != nil {
+			return nil, err
+		}
 		var out []string
-		for _, m := range backends.Room.Members(ctx, roomID) {
+		for _, m := range members {
 			if !m.AgentHost {
 				out = append(out, m.UserID)
 			}
 		}
 		return out, nil
 	}
-	orgAdmins := func(tenantID string) []string {
+	orgAdmins := func(tenantID string) ([]string, error) {
+		members, err := tenants.ListMembers(context.Background(), tenantID)
+		if err != nil {
+			return nil, err
+		}
 		var out []string
-		for _, m := range tenants.ListMembers(context.Background(), tenantID) {
+		for _, m := range members {
 			if m.Role == store.OrgRoleAdmin {
 				out = append(out, m.UserID)
 			}
 		}
-		return out
+		return out, nil
 	}
 	return tenantWiring{Resolve: res.Resolve, RoomMembers: roomMembers, OrgAdmins: orgAdmins, Suspended: suspended, MemberRole: memberRole, Settings: backends.Settings, ExtAudit: backends.ExtAudit, ComponentInstalls: backends.ComponentInstalls, NotifierReplies: backends.ReplyTokens, SSOHandoffs: backends.SSOHandoffs, RefreshTokens: backends.RefreshTokens, MemberCount: memberCount, Health: backends.HealthCheck(),
 		APITokens: backends.APITokens,

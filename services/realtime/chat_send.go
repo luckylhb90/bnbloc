@@ -119,7 +119,11 @@ func (s *Service) PostChat(ctx context.Context, p ChatPost) (ChatPosted, error) 
 	// Idempotency: a retry carrying a client id we already stored returns the
 	// original sequence without re-publishing (no duplicate message).
 	if p.ClientMsgID != "" && s.Chat != nil {
-		if seq, found := s.Chat.LookupClientMsg(ctx, p.RoomID, p.ClientMsgID); found {
+		seq, found, err := s.Chat.LookupClientMsg(ctx, p.RoomID, p.ClientMsgID)
+		if err != nil {
+			return ChatPosted{}, err
+		}
+		if found {
 			return ChatPosted{Sequence: seq}, nil
 		}
 	}

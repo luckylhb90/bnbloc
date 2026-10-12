@@ -38,7 +38,10 @@ func tctx() context.Context {
 type staticMembers struct{ *store.MemoryRoom }
 
 func (s staticMembers) Lookup(roomID, userID string) (membership.Member, bool) {
-	m, ok := s.MemoryRoom.MembershipAnyTenant(tctx(), roomID, userID)
+	m, ok, err := s.MemoryRoom.MembershipAnyTenant(tctx(), roomID, userID)
+	if err != nil {
+		return membership.Member{}, false // fail closed
+	}
 	return membership.Member{Role: m.Role, AgentHost: m.AgentHost, Tenant: m.TenantID}, ok
 }
 
@@ -86,7 +89,11 @@ func newHarness(t *testing.T) *harness {
 		},
 		Rooms: func(subject, tenantID string) []string {
 			var out []string
-			for _, m := range rooms.Members(tctx(), "room-1") {
+			members, err := rooms.Members(tctx(), "room-1")
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, m := range members {
 				if m.UserID == subject {
 					out = append(out, "room-1")
 				}

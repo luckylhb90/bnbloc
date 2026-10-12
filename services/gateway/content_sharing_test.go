@@ -59,11 +59,11 @@ func newSharingGateway(t *testing.T) *sharingGateway {
 		}
 		return []string{"maya", "jack", "bob"}, nil
 	}
-	g.svc.OrgAdmins = func(tid string) []string {
+	g.svc.OrgAdmins = func(tid string) ([]string, error) {
 		if tid == "home" {
-			return []string{"ada"}
+			return []string{"ada"}, nil
 		}
-		return nil
+		return nil, nil
 	}
 	audit := store.NewMemoryExtensionAudit()
 	g.svc.ExtAudit = audit

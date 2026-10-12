@@ -17,7 +17,10 @@ func TestRecordBorrowCarriesChannel(t *testing.T) {
 	if code != http.StatusOK || body["recorded"] != true {
 		t.Fatalf("record = %d %v", code, body)
 	}
-	recs := gs.AuditRecords(tctx(tenant.Default), "room-1", 10, 0)
+	recs, err := gs.AuditRecords(tctx(tenant.Default), "room-1", 10, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(recs) == 0 {
 		t.Fatal("no audit records after borrow")
 	}
@@ -46,7 +49,10 @@ func TestDeniedBorrowCarriesChannel(t *testing.T) {
 	if code != http.StatusForbidden || body["denyReason"] != "org_quota_exhausted" {
 		t.Fatalf("denied borrow = %d %v", code, body)
 	}
-	recs := gs.AuditRecords(tctx(tenant.Default), "room-1", 10, 0)
+	recs, err := gs.AuditRecords(tctx(tenant.Default), "room-1", 10, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(recs) < 2 {
 		t.Fatalf("audit records = %d, want >= 2", len(recs))
 	}

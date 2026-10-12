@@ -64,7 +64,12 @@ func (s *Service) handleDeleteAgentHost(w http.ResponseWriter, r *http.Request) 
 	if !ok {
 		return
 	}
-	m, member := s.Store.GetMember(r.Context(), roomID, userID)
+	m, member, err := s.Store.GetMember(r.Context(), roomID, userID)
+	if err != nil {
+		obs.ServerError(w, "read membership failed", err)
+		httpx.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
 	if !member || !m.AgentHost {
 		w.WriteHeader(http.StatusNoContent)
 		return

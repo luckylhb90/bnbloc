@@ -86,13 +86,17 @@ func budgetPeriod(now time.Time) wire.BudgetPeriod {
 
 // periodBurn sums the reported usage since sinceMs for owner ("" = the whole
 // tenant): the total, and per owner (keyed lower-case).
-func (s *Service) periodBurn(ctx context.Context, owner string, sinceMs int64) (wire.UsageBurn, map[string]*wire.MemberBurn) {
+func (s *Service) periodBurn(ctx context.Context, owner string, sinceMs int64) (wire.UsageBurn, map[string]*wire.MemberBurn, error) {
 	var total wire.UsageBurn
 	byOwner := map[string]*wire.MemberBurn{}
 	if s.Usage == nil {
-		return total, byOwner
+		return total, byOwner, nil
 	}
-	for _, u := range s.Usage.AgentUsage(ctx, owner, sinceMs) {
+	usage, err := s.Usage.AgentUsage(ctx, owner, sinceMs)
+	if err != nil {
+		return total, byOwner, err
+	}
+	for _, u := range usage {
 		tokens := u.InputTokens + u.OutputTokens
 		total.Tokens += tokens
 		total.Cost += u.CostUsd
@@ -105,7 +109,7 @@ func (s *Service) periodBurn(ctx context.Context, owner string, sinceMs int64) (
 		m.Tokens += tokens
 		m.Cost += u.CostUsd
 	}
-	return total, byOwner
+	return total, byOwner, nil
 }
 
 // budgetPercent is the higher of the token and cost burn percentages
@@ -150,7 +154,10 @@ func (s *Service) tenantBudgets(ctx context.Context) (wire.TenantBudgetsReply, e
 	if err != nil {
 		return wire.TenantBudgetsReply{}, err
 	}
-	total, byOwner := s.periodBurn(ctx, "", period.PeriodStartMs)
+	total, byOwner, err := s.periodBurn(ctx, "", period.PeriodStartMs)
+	if err != nil {
+		return wire.TenantBudgetsReply{}, err
+	}
 	out := wire.TenantBudgetsReply{BudgetPeriod: period, Members: []wire.BudgetView{}, Usage: []wire.MemberBurn{}}
 	for _, b := range budgets {
 		if b.UserID == "" {
@@ -330,7 +337,12 @@ func (s *Service) handleMyBudget(w http.ResponseWriter, r *http.Request) {
 	}
 	caller := svcauth.Subject(r)
 	period := budgetPeriod(s.clock())
-	burn, _ := s.periodBurn(r.Context(), caller, period.PeriodStartMs)
+	burn, _, err := s.periodBurn(r.Context(), caller, period.PeriodStartMs)
+	if err != nil {
+		obs.ServerError(w, "usage read failed", err)
+		httpx.Error(w, "budget read failed", http.StatusInternalServerError)
+		return
+	}
 	out := wire.MyBudgetReply{BudgetPeriod: period, Burn: burn}
 	b, ok, err := s.Budgets.GetUsageBudget(r.Context(), caller)
 	if err != nil {
@@ -368,16 +380,20 @@ func (s *Service) budgetBlock(ctx context.Context, owner string, sinceMs int64) 
 		return ""
 	}
 	if b, ok, err := s.Budgets.GetUsageBudget(ctx, owner); err == nil && ok && b.HardStop {
-		burn, _ := s.periodBurn(ctx, owner, sinceMs)
-		if _, reached := budgetPercent(b, burn); reached {
+		burn, _, err := s.periodBurn(ctx, owner, sinceMs)
+		if err != nil {
+			slog.Warn("bnbloc activity usage read failed", "event", "bnbloc.activity.budgets_failed", "owner", owner, "error", err)
+		} else if _, reached := budgetPercent(b, burn); reached {
 			return budgetByMember
 		}
 	} else if err != nil {
 		slog.Warn("bnbloc activity budget read failed", "event", "bnbloc.activity.budgets_failed", "owner", owner, "error", err)
 	}
 	if b, ok, err := s.Budgets.GetUsageBudget(ctx, ""); err == nil && ok && b.HardStop {
-		burn, _ := s.periodBurn(ctx, "", sinceMs)
-		if _, reached := budgetPercent(b, burn); reached {
+		burn, _, err := s.periodBurn(ctx, "", sinceMs)
+		if err != nil {
+			slog.Warn("bnbloc activity usage read failed", "event", "bnbloc.activity.budgets_failed", "error", err)
+		} else if _, reached := budgetPercent(b, burn); reached {
 			return budgetByTenant
 		}
 	} else if err != nil {
@@ -486,13 +502,25 @@ func (s *Service) EvaluateBudgetWarnings(ctx context.Context, owner string) {
 	period := budgetPeriod(s.clock())
 	if owner != "" {
 		if b, ok, err := s.Budgets.GetUsageBudget(ctx, owner); err == nil && ok {
-			burn, _ := s.periodBurn(ctx, owner, period.PeriodStartMs)
-			s.warnBudget(ctx, b, burn, period, []string{owner})
+			if burn, _, err := s.periodBurn(ctx, owner, period.PeriodStartMs); err != nil {
+				slog.Warn("bnbloc activity usage read failed; budget warning skipped", "event", "bnbloc.activity.budgets_failed", "owner", owner, "error", err)
+			} else {
+				s.warnBudget(ctx, b, burn, period, []string{owner})
+			}
 		}
 	}
 	if b, ok, err := s.Budgets.GetUsageBudget(ctx, ""); err == nil && ok {
-		burn, _ := s.periodBurn(ctx, "", period.PeriodStartMs)
-		s.warnBudget(ctx, b, burn, period, s.orgAdmins(ctx))
+		burn, _, err := s.periodBurn(ctx, "", period.PeriodStartMs)
+		if err != nil {
+			slog.Warn("bnbloc activity usage read failed; budget warning skipped", "event", "bnbloc.activity.budgets_failed", "error", err)
+			return
+		}
+		admins, err := s.orgAdmins(ctx)
+		if err != nil {
+			slog.Warn("bnbloc activity org admins read failed; budget warning skipped", "event", "bnbloc.activity.budgets_failed", "error", err)
+			return
+		}
+		s.warnBudget(ctx, b, burn, period, admins)
 	}
 }
 
@@ -562,17 +590,21 @@ func budgetWarningEvent(b store.UsageBudget, burn wire.UsageBurn, period wire.Bu
 }
 
 // orgAdmins lists the ctx tenant's org admins (tenant budget recipients).
-func (s *Service) orgAdmins(ctx context.Context) []string {
+func (s *Service) orgAdmins(ctx context.Context) ([]string, error) {
 	if s.Tenants == nil {
-		return nil
+		return nil, nil
+	}
+	members, err := s.Tenants.ListMembers(ctx, tenant.FromContext(ctx))
+	if err != nil {
+		return nil, err
 	}
 	var out []string
-	for _, m := range s.Tenants.ListMembers(ctx, tenant.FromContext(ctx)) {
+	for _, m := range members {
 		if m.Role == store.OrgRoleAdmin {
 			out = append(out, m.UserID)
 		}
 	}
-	return out
+	return out, nil
 }
 
 // noteReplyBurn schedules budget evaluations for the owners whose freshly

@@ -22,11 +22,8 @@ func NewMySQLTenant(db *sql.DB) *MySQLTenant { return &MySQLTenant{DB: db} }
 const tenantCols = `tenant_id, name, status, sso_issuer, run_quota, cost_allowance, require_sandbox_for_borrow, public_shares_disabled, created_at_ms,
   retention_messages_days, retention_artifact_versions_days, retention_audit_days, retention_agent_jobs_days`
 
-// tenantScanner is a *sql.Row or *sql.Rows.
-type tenantScanner interface{ Scan(dest ...any) error }
-
 // scanTenant reads one row of tenantCols.
-func scanTenant(sc tenantScanner) (Tenant, error) {
+func scanTenant(sc rowScanner) (Tenant, error) {
 	var t Tenant
 	var status string
 	var ret [4]sql.NullInt64
@@ -68,59 +65,36 @@ SELECT `+tenantCols+` FROM tenants WHERE tenant_id = ?`, tenantID))
 }
 
 // ListTenants returns every tenant, for the platform (super-admin) console.
-func (m *MySQLTenant) ListTenants(ctx context.Context) []Tenant {
-	rows, err := m.DB.QueryContext(ctx, `
-SELECT `+tenantCols+` FROM tenants ORDER BY created_at_ms ASC`)
-	if err != nil {
-		return nil
-	}
-	defer rows.Close()
-	var out []Tenant
-	for rows.Next() {
-		t, err := scanTenant(rows)
-		if err != nil {
-			return out
-		}
-		out = append(out, t)
-	}
-	return out
+func (m *MySQLTenant) ListTenants(ctx context.Context) ([]Tenant, error) {
+	return queryAll(ctx, m.DB, `
+SELECT `+tenantCols+` FROM tenants ORDER BY created_at_ms ASC`, scanTenant)
 }
 
 // ListMembers returns all members of a tenant.
-func (m *MySQLTenant) ListMembers(ctx context.Context, tenantID string) []TenantMember {
-	rows, err := m.DB.QueryContext(ctx, `
-SELECT tenant_id, user_id, role, joined_at_ms, source FROM tenant_members WHERE tenant_id = ? ORDER BY joined_at_ms ASC`, tenantID)
-	if err != nil {
-		return nil
-	}
-	return scanTenantMembers(rows)
+func (m *MySQLTenant) ListMembers(ctx context.Context, tenantID string) ([]TenantMember, error) {
+	return queryAll(ctx, m.DB, `
+SELECT `+tenantMemberCols+` FROM tenant_members WHERE tenant_id = ? ORDER BY joined_at_ms ASC`, scanTenantMember, tenantID)
 }
 
 // ListMembershipsForUser returns every tenant membership of a user.
-func (m *MySQLTenant) ListMembershipsForUser(ctx context.Context, userID string) []TenantMember {
-	rows, err := m.DB.QueryContext(ctx, `
-SELECT tenant_id, user_id, role, joined_at_ms, source FROM tenant_members WHERE user_id = ? ORDER BY joined_at_ms ASC`, userID)
-	if err != nil {
-		return nil
-	}
-	return scanTenantMembers(rows)
+func (m *MySQLTenant) ListMembershipsForUser(ctx context.Context, userID string) ([]TenantMember, error) {
+	return queryAll(ctx, m.DB, `
+SELECT `+tenantMemberCols+` FROM tenant_members WHERE user_id = ? ORDER BY joined_at_ms ASC`, scanTenantMember, userID)
 }
 
-// scanTenantMembers reads tenant_id, user_id, role, joined_at_ms, source rows.
-func scanTenantMembers(rows *sql.Rows) []TenantMember {
-	defer rows.Close()
-	var out []TenantMember
-	for rows.Next() {
-		var mem TenantMember
-		var role, source string
-		if err := rows.Scan(&mem.TenantID, &mem.UserID, &role, &mem.JoinedAtMs, &source); err != nil {
-			return out
-		}
-		mem.Role = OrgRole(role)
-		mem.Source = MemberSource(source)
-		out = append(out, mem)
+// tenantMemberCols is the column list scanTenantMember reads, in its order.
+const tenantMemberCols = `tenant_id, user_id, role, joined_at_ms, source`
+
+// scanTenantMember reads one row of tenantMemberCols.
+func scanTenantMember(r rowScanner) (TenantMember, error) {
+	var mem TenantMember
+	var role, source string
+	if err := r.Scan(&mem.TenantID, &mem.UserID, &role, &mem.JoinedAtMs, &source); err != nil {
+		return TenantMember{}, err
 	}
-	return out
+	mem.Role = OrgRole(role)
+	mem.Source = MemberSource(source)
+	return mem, nil
 }
 
 // SetQuota persists a tenant's org-level ceilings.
@@ -241,19 +215,15 @@ VALUES (?, ?, ?, ?, ?)`,
 var errMemberVanished = errors.New("store: tenant membership removed concurrently")
 
 func (m *MySQLTenant) GetMember(ctx context.Context, tenantID, userID string) (TenantMember, bool, error) {
-	var mem TenantMember
-	var role, source string
-	err := m.DB.QueryRowContext(ctx, `
-SELECT tenant_id, user_id, role, joined_at_ms, source FROM tenant_members WHERE tenant_id = ? AND user_id = ?`,
-		tenantID, userID).Scan(&mem.TenantID, &mem.UserID, &role, &mem.JoinedAtMs, &source)
+	mem, err := scanTenantMember(m.DB.QueryRowContext(ctx, `
+SELECT `+tenantMemberCols+` FROM tenant_members WHERE tenant_id = ? AND user_id = ?`,
+		tenantID, userID))
 	if errors.Is(err, sql.ErrNoRows) {
 		return TenantMember{}, false, nil
 	}
 	if err != nil {
 		return TenantMember{}, false, err
 	}
-	mem.Role = OrgRole(role)
-	mem.Source = MemberSource(source)
 	return mem, true, nil
 }
 
@@ -282,22 +252,35 @@ ON DUPLICATE KEY UPDATE message=VALUES(message), status=VALUES(status),
 	return err
 }
 
-func (m *MySQLTenant) GetJoinRequest(ctx context.Context, tenantID, userID string) (JoinRequest, bool) {
+// joinRequestCols is the column list scanJoinRequest reads, in its order.
+const joinRequestCols = `tenant_id, user_id, message, status, created_at_ms, decided_at_ms, decided_by`
+
+// scanJoinRequest reads one row of joinRequestCols.
+func scanJoinRequest(r rowScanner) (JoinRequest, error) {
 	var jr JoinRequest
 	var status string
-	err := m.DB.QueryRowContext(ctx, `
-SELECT tenant_id, user_id, message, status, created_at_ms, decided_at_ms, decided_by
-FROM tenant_join_requests WHERE tenant_id = ? AND user_id = ?`, tenantID, userID).
-		Scan(&jr.TenantID, &jr.UserID, &jr.Message, &status, &jr.CreatedAtMs, &jr.DecidedAtMs, &jr.DecidedBy)
-	if err != nil {
-		return JoinRequest{}, false
+	if err := r.Scan(&jr.TenantID, &jr.UserID, &jr.Message, &status, &jr.CreatedAtMs, &jr.DecidedAtMs, &jr.DecidedBy); err != nil {
+		return JoinRequest{}, err
 	}
 	jr.Status = JoinRequestStatus(status)
-	return jr, true
+	return jr, nil
 }
 
-func (m *MySQLTenant) ListJoinRequests(ctx context.Context, tenantID string, status JoinRequestStatus) []JoinRequest {
-	q := `SELECT tenant_id, user_id, message, status, created_at_ms, decided_at_ms, decided_by
+func (m *MySQLTenant) GetJoinRequest(ctx context.Context, tenantID, userID string) (JoinRequest, bool, error) {
+	jr, err := scanJoinRequest(m.DB.QueryRowContext(ctx, `
+SELECT `+joinRequestCols+`
+FROM tenant_join_requests WHERE tenant_id = ? AND user_id = ?`, tenantID, userID))
+	if errors.Is(err, sql.ErrNoRows) {
+		return JoinRequest{}, false, nil
+	}
+	if err != nil {
+		return JoinRequest{}, false, err
+	}
+	return jr, true, nil
+}
+
+func (m *MySQLTenant) ListJoinRequests(ctx context.Context, tenantID string, status JoinRequestStatus) ([]JoinRequest, error) {
+	q := `SELECT ` + joinRequestCols + `
 FROM tenant_join_requests WHERE tenant_id = ?`
 	args := []any{tenantID}
 	if status != "" {
@@ -305,43 +288,27 @@ FROM tenant_join_requests WHERE tenant_id = ?`
 		args = append(args, string(status))
 	}
 	q += ` ORDER BY created_at_ms ASC`
-	return m.scanJoinRequests(ctx, q, args...)
+	return queryAll(ctx, m.DB, q, scanJoinRequest, args...)
 }
 
-func (m *MySQLTenant) ListJoinRequestsForUser(ctx context.Context, userID string) []JoinRequest {
-	return m.scanJoinRequests(ctx, `
-SELECT tenant_id, user_id, message, status, created_at_ms, decided_at_ms, decided_by
-FROM tenant_join_requests WHERE user_id = ? ORDER BY created_at_ms DESC`, userID)
+func (m *MySQLTenant) ListJoinRequestsForUser(ctx context.Context, userID string) ([]JoinRequest, error) {
+	return queryAll(ctx, m.DB, `
+SELECT `+joinRequestCols+`
+FROM tenant_join_requests WHERE user_id = ? ORDER BY created_at_ms DESC`, scanJoinRequest, userID)
 }
 
-func (m *MySQLTenant) scanJoinRequests(ctx context.Context, query string, args ...any) []JoinRequest {
-	rows, err := m.DB.QueryContext(ctx, query, args...)
-	if err != nil {
-		return nil
-	}
-	defer rows.Close()
-	var out []JoinRequest
-	for rows.Next() {
-		var jr JoinRequest
-		var status string
-		if err := rows.Scan(&jr.TenantID, &jr.UserID, &jr.Message, &status, &jr.CreatedAtMs, &jr.DecidedAtMs, &jr.DecidedBy); err != nil {
-			return out
-		}
-		jr.Status = JoinRequestStatus(status)
-		out = append(out, jr)
-	}
-	return out
-}
-
-func (m *MySQLTenant) PrimaryTenantForUser(ctx context.Context, userID string) (string, bool) {
+func (m *MySQLTenant) PrimaryTenantForUser(ctx context.Context, userID string) (string, bool, error) {
 	var tid string
 	// A real org membership outranks the "default" catch-all (auto-provisioned
 	// on first login); within the same class the most-recently-joined wins.
 	err := m.DB.QueryRowContext(ctx, `
 SELECT tenant_id FROM tenant_members WHERE user_id = ?
 ORDER BY (tenant_id = 'default') ASC, joined_at_ms DESC LIMIT 1`, userID).Scan(&tid)
-	if err != nil {
-		return "", false
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", false, nil
 	}
-	return tid, true
+	if err != nil {
+		return "", false, err
+	}
+	return tid, true, nil
 }

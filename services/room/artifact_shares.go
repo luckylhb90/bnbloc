@@ -93,7 +93,13 @@ func (s *Service) sharesReady(w http.ResponseWriter) bool {
 // a room member and the artifact lives in the path's room.
 func (s *Service) shareArtifact(w http.ResponseWriter, r *http.Request) (store.Artifact, bool) {
 	roomID := r.PathValue("roomId")
-	if !s.Store.IsMember(r.Context(), roomID, caller(r)) {
+	isMember, err := s.Store.IsMember(r.Context(), roomID, caller(r))
+	if err != nil {
+		obs.ServerError(w, "read membership failed", err)
+		httpx.Error(w, err.Error(), http.StatusInternalServerError)
+		return store.Artifact{}, false
+	}
+	if !isMember {
 		httpx.Error(w, "caller is not a member of room", http.StatusForbidden)
 		return store.Artifact{}, false
 	}
@@ -202,7 +208,12 @@ func (s *Service) handleRevokeShare(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx := r.Context()
 	roomID, user := r.PathValue("roomId"), caller(r)
-	role, member := s.Store.MemberRole(ctx, roomID, user)
+	role, member, err := s.Store.MemberRole(ctx, roomID, user)
+	if err != nil {
+		obs.ServerError(w, "read membership failed", err)
+		httpx.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
 	// The caller's org role in the room's tenant, as the gateway signed it.
 	orgAdmin := rbac.Can(svcauth.Role(r), rbac.PermManageOrg)
 	if !member && !orgAdmin {

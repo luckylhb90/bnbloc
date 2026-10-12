@@ -5,6 +5,7 @@ import (
 
 	"github.com/luckylhb90/bnbloc/internal/httpx"
 	"github.com/luckylhb90/bnbloc/internal/membership"
+	"github.com/luckylhb90/bnbloc/internal/obs"
 	"github.com/luckylhb90/bnbloc/internal/roomctx"
 	"github.com/luckylhb90/bnbloc/internal/store"
 )
@@ -34,7 +35,13 @@ func (s *Service) handleListSharedAgents(w http.ResponseWriter, r *http.Request)
 	}
 	now := s.Now()
 	entries := []sharedAgentEntry{}
-	for _, g := range s.Grants.RoomGrants(r.Context(), roomID) {
+	grants, err := s.Grants.RoomGrants(r.Context(), roomID)
+	if err != nil {
+		obs.ServerError(w, "list grants failed", err)
+		httpx.Error(w, "list grants failed", http.StatusInternalServerError)
+		return
+	}
+	for _, g := range grants {
 		if !g.Live(now) {
 			continue
 		}

@@ -71,7 +71,7 @@ func testArtifactFiles(t *testing.T, s ArtifactStore, ctx context.Context, sfx s
 	if _, _, err := s.SetArtifactThumbnail(ctx, img, 9, tw); err != ErrArtifactNotFound {
 		t.Fatalf("missing version thumbnail = %v", err)
 	}
-	if meta := s.ListArtifactVersions(ctx, img, 10); len(meta) != 1 || meta[0].Thumbnail == nil {
+	if meta := must(s.ListArtifactVersions(ctx, img, 10))(t); len(meta) != 1 || meta[0].Thumbnail == nil {
 		t.Fatalf("version list lost the thumbnail: %+v", meta)
 	}
 

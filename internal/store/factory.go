@@ -281,6 +281,11 @@ func NewBackends(dsn string) (*Backends, error) {
 		return nil, err
 	}
 	log.Printf("bnbloc: store: mysql backend ready at %s (schema + migrations applied)", dsnSummary(dsn))
+	return newMySQLBackends(db), nil
+}
+
+// newMySQLBackends is the MySQL store set over one pool (schema already applied).
+func newMySQLBackends(db *sql.DB) *Backends {
 	return &Backends{
 		DB:                db,
 		Activity:          NewMySQL(db),
@@ -311,7 +316,7 @@ func NewBackends(dsn string) (*Backends, error) {
 		OrgSync:           NewMySQLOrgSync(db),
 		Profiles:          NewMySQLUserProfiles(db),
 		ContentComponents: NewMySQLContentComponents(db),
-	}, nil
+	}
 }
 
 // HealthCheck returns a readiness checker that pings the database. When DB is

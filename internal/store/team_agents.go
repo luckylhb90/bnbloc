@@ -31,11 +31,11 @@ type TeamAgentReader interface {
 	// TenantTeamAgents returns every non-disabled agent advertised in the ctx
 	// tenant (ownerUserID "" = all owners), online when its bridge heartbeated
 	// within BridgeOfflineAfterMs of nowMs.
-	TenantTeamAgents(ctx context.Context, ownerUserID string, nowMs int64) []TeamAgent
+	TenantTeamAgents(ctx context.Context, ownerUserID string, nowMs int64) ([]TeamAgent, error)
 	// TenantTeamJobs returns the ctx tenant's jobs created at/after sinceMs plus
 	// every still-active job regardless of age (ownerUserID "" = all owners),
 	// newest-first, at most MaxTeamJobs.
-	TenantTeamJobs(ctx context.Context, ownerUserID string, sinceMs int64) []AgentJob
+	TenantTeamJobs(ctx context.Context, ownerUserID string, sinceMs int64) ([]AgentJob, error)
 }
 
 // AgentTurnUsage aggregates the turn metrics agents reported on their replies
@@ -55,7 +55,7 @@ type AgentTurnUsage struct {
 type AgentUsageReader interface {
 	// AgentUsage sums reported reply metrics in the ctx tenant for replies
 	// created at/after sinceMs (ownerUserID "" = all owners).
-	AgentUsage(ctx context.Context, ownerUserID string, sinceMs int64) []AgentTurnUsage
+	AgentUsage(ctx context.Context, ownerUserID string, sinceMs int64) ([]AgentTurnUsage, error)
 }
 
 var (
@@ -64,10 +64,10 @@ var (
 )
 
 // TenantTeamAgents implements TeamAgentReader for the memory store.
-func (s *MemoryBridgeJobs) TenantTeamAgents(ctx context.Context, ownerUserID string, nowMs int64) []TeamAgent {
+func (s *MemoryBridgeJobs) TenantTeamAgents(ctx context.Context, ownerUserID string, nowMs int64) ([]TeamAgent, error) {
 	tid, err := tenant.Require(ctx)
 	if err != nil {
-		return nil
+		return nil, err
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -90,14 +90,14 @@ func (s *MemoryBridgeJobs) TenantTeamAgents(ctx context.Context, ownerUserID str
 			out = append(out, TeamAgent{OwnerUserID: a.OwnerUserID, Core: a.Core, Provider: a.Provider, TargetID: a.TargetID, Online: online, LastSeenAtMs: seen})
 		}
 	}
-	return out
+	return out, nil
 }
 
 // TenantTeamJobs implements TeamAgentReader for the memory store.
-func (s *MemoryBridgeJobs) TenantTeamJobs(ctx context.Context, ownerUserID string, sinceMs int64) []AgentJob {
+func (s *MemoryBridgeJobs) TenantTeamJobs(ctx context.Context, ownerUserID string, sinceMs int64) ([]AgentJob, error) {
 	tid, err := tenant.Require(ctx)
 	if err != nil {
-		return nil
+		return nil, err
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -118,7 +118,7 @@ func (s *MemoryBridgeJobs) TenantTeamJobs(ctx context.Context, ownerUserID strin
 	if len(out) > MaxTeamJobs {
 		out = out[:MaxTeamJobs]
 	}
-	return out
+	return out, nil
 }
 
 // usageSample is one reported reply's normalized usage, kept by the memory
@@ -171,10 +171,10 @@ func (m *Memory) recordUsageLocked(tnt, room string, fresh []wire.Message) {
 }
 
 // AgentUsage implements AgentUsageReader for the memory store.
-func (m *Memory) AgentUsage(ctx context.Context, ownerUserID string, sinceMs int64) []AgentTurnUsage {
+func (m *Memory) AgentUsage(ctx context.Context, ownerUserID string, sinceMs int64) ([]AgentTurnUsage, error) {
 	tnt, err := tenant.Require(ctx)
 	if err != nil {
-		return nil
+		return nil, err
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -207,7 +207,7 @@ func (m *Memory) AgentUsage(ctx context.Context, ownerUserID string, sinceMs int
 	for _, k := range order {
 		out = append(out, *byKey[k])
 	}
-	return out
+	return out, nil
 }
 
 // TeamAgents returns the bridge-job store's dashboard read side (nil when the

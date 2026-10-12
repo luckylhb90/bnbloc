@@ -38,7 +38,7 @@ type BorrowUsageStore interface {
 	// BorrowTurns returns the ctx tenant's (every tenant's with
 	// q.AllTenants) recorded borrow turns matching q, oldest-first, at most
 	// MaxBorrowTurnRows.
-	BorrowTurns(ctx context.Context, q BorrowTurnQuery) []AuditRecord
+	BorrowTurns(ctx context.Context, q BorrowTurnQuery) ([]AuditRecord, error)
 	// RaiseRunQuota atomically adds `add` runs to a grant live at atMs
 	// (Grant.Live) without touching its usage counters, so an approved
 	// request extends the window instead of resetting history.
@@ -56,12 +56,12 @@ func isBorrowTurn(rec AuditRecord) bool {
 }
 
 // BorrowTurns scans the in-memory audit trail (see BorrowUsageStore).
-func (s *MemoryGrant) BorrowTurns(ctx context.Context, q BorrowTurnQuery) []AuditRecord {
+func (s *MemoryGrant) BorrowTurns(ctx context.Context, q BorrowTurnQuery) ([]AuditRecord, error) {
 	tnt := tenant.FromContext(ctx)
 	if !q.AllTenants {
 		var err error
 		if tnt, err = tenant.Require(ctx); err != nil {
-			return nil
+			return nil, err
 		}
 	}
 	s.mu.Lock()
@@ -86,7 +86,7 @@ func (s *MemoryGrant) BorrowTurns(ctx context.Context, q BorrowTurnQuery) []Audi
 	if len(out) > MaxBorrowTurnRows {
 		out = out[:MaxBorrowTurnRows]
 	}
-	return out
+	return out, nil
 }
 
 // RaiseRunQuota raises a live grant's run quota (see BorrowUsageStore).

@@ -123,14 +123,14 @@ type GrantStore interface {
 	// AuditRecords returns audit records for a room newest-first. limit<=0
 	// defaults to 100 and is capped at 500; beforeAtMs>0 returns only records
 	// strictly older than that timestamp for cursor pagination.
-	AuditRecords(ctx context.Context, roomID string, limit int, beforeAtMs int64) []AuditRecord
+	AuditRecords(ctx context.Context, roomID string, limit int, beforeAtMs int64) ([]AuditRecord, error)
 	// TenantAuditRecords returns audit records for the ctx tenant across ALL
 	// rooms newest-first, for an org-wide audit trail. limit<=0 defaults to 100
 	// and is capped at 500; beforeAtMs>0 returns only records strictly older
 	// than that timestamp for cursor pagination.
-	TenantAuditRecords(ctx context.Context, limit int, beforeAtMs int64) []AuditRecord
+	TenantAuditRecords(ctx context.Context, limit int, beforeAtMs int64) ([]AuditRecord, error)
 	// RoomGrants returns all grants in a room (callers filter revoked/expired).
-	RoomGrants(ctx context.Context, roomID string) []Grant
+	RoomGrants(ctx context.Context, roomID string) ([]Grant, error)
 	// BorrowUsageStore: borrow-turn reporting and quota raises (F3).
 	BorrowUsageStore
 	// RunReservationStore: reserve-then-settle borrowed runs (R8).
@@ -236,10 +236,10 @@ func (s *MemoryGrant) AppendAudit(ctx context.Context, rec AuditRecord) error {
 // AuditRecords returns a room's audit records newest-first. limit<=0 defaults
 // to 100 (capped at 500); beforeAtMs>0 keeps only records strictly older than
 // that timestamp for cursor pagination.
-func (s *MemoryGrant) AuditRecords(ctx context.Context, roomID string, limit int, beforeAtMs int64) []AuditRecord {
+func (s *MemoryGrant) AuditRecords(ctx context.Context, roomID string, limit int, beforeAtMs int64) ([]AuditRecord, error) {
 	tnt, err := tenant.Require(ctx)
 	if err != nil {
-		return nil
+		return nil, err
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -263,16 +263,16 @@ func (s *MemoryGrant) AuditRecords(ctx context.Context, roomID string, limit int
 	if len(out) > limit {
 		out = out[:limit]
 	}
-	return out
+	return out, nil
 }
 
 // TenantAuditRecords returns the ctx tenant's audit records across ALL rooms
 // newest-first for an org-wide audit trail. limit<=0 defaults to 100 (capped at
 // 500); beforeAtMs>0 keeps only records strictly older than that timestamp.
-func (s *MemoryGrant) TenantAuditRecords(ctx context.Context, limit int, beforeAtMs int64) []AuditRecord {
+func (s *MemoryGrant) TenantAuditRecords(ctx context.Context, limit int, beforeAtMs int64) ([]AuditRecord, error) {
 	tnt, err := tenant.Require(ctx)
 	if err != nil {
-		return nil
+		return nil, err
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -296,14 +296,14 @@ func (s *MemoryGrant) TenantAuditRecords(ctx context.Context, limit int, beforeA
 	if len(out) > limit {
 		out = out[:limit]
 	}
-	return out
+	return out, nil
 }
 
 // RoomGrants returns all grants in a room (callers filter revoked/expired).
-func (s *MemoryGrant) RoomGrants(ctx context.Context, roomID string) []Grant {
+func (s *MemoryGrant) RoomGrants(ctx context.Context, roomID string) ([]Grant, error) {
 	tnt, err := tenant.Require(ctx)
 	if err != nil {
-		return nil
+		return nil, err
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -315,5 +315,5 @@ func (s *MemoryGrant) RoomGrants(ctx context.Context, roomID string) []Grant {
 		out = append(out, g)
 	}
 	sort.SliceStable(out, func(i, j int) bool { return out[i].CreatedAtMs > out[j].CreatedAtMs })
-	return out
+	return out, nil
 }

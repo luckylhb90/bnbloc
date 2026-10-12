@@ -39,7 +39,7 @@ func PlatformTarget(ref wire.PlatformAgentRef) string {
 
 // RoomGrantLister lists a room's grants in the ctx tenant (store.GrantStore).
 type RoomGrantLister interface {
-	RoomGrants(ctx context.Context, roomID string) []store.Grant
+	RoomGrants(ctx context.Context, roomID string) ([]store.Grant, error)
 }
 
 // RoomPlatformGrant is one platform grant of a room and whether its agent may
@@ -59,9 +59,13 @@ type RoomPlatformGrant struct {
 // — revoked and expired ones included, so a caller can tell a host that once
 // served the room from one that never did — each with its availability under
 // policy at nowMs.
-func RoomPlatformGrants(ctx context.Context, grants RoomGrantLister, policy wire.PlatformAgentsPolicy, roomID string, nowMs int64) []RoomPlatformGrant {
+func RoomPlatformGrants(ctx context.Context, grants RoomGrantLister, policy wire.PlatformAgentsPolicy, roomID string, nowMs int64) ([]RoomPlatformGrant, error) {
+	all, err := grants.RoomGrants(ctx, roomID)
+	if err != nil {
+		return nil, err
+	}
 	var out []RoomPlatformGrant
-	for _, g := range grants.RoomGrants(ctx, roomID) {
+	for _, g := range all {
 		if g.Source != store.GrantSourcePlatform {
 			continue
 		}
@@ -74,14 +78,14 @@ func RoomPlatformGrants(ctx context.Context, grants RoomGrantLister, policy wire
 			Available: live && valid && policy.Publishes(g.OwnerUserID, ref.Core, ref.Provider),
 		})
 	}
-	return out
+	return out, nil
 }
 
 // AgentAdvertisements is the bridge advertisement authority (the source of
 // GET /v1/my/agents): an agent is online while its owner's live bridge
 // advertises it. store.BridgeJobStore satisfies it.
 type AgentAdvertisements interface {
-	ListBridgeAgentsForOwner(ctx context.Context, ownerUserID string) []store.BridgeAgent
+	ListBridgeAgentsForOwner(ctx context.Context, ownerUserID string) ([]store.BridgeAgent, error)
 }
 
 // OnlineAgents indexes an owner's live advertised agents by (core, provider)
@@ -109,22 +113,30 @@ type PlatformDrive struct {
 
 // ReadPlatformDrive classifies a chat recipient. The policy, grants and
 // advertisements are all shared-store reads, so every caller decides the
-// same way.
+// same way; a failed read is an error, never "not a platform drive".
 func ReadPlatformDrive(ctx context.Context, grants RoomGrantLister, policy wire.PlatformAgentsPolicy, ads AgentAdvertisements,
-	roomID, author, owner string, ref wire.PlatformAgentRef, nowMs int64) PlatformDrive {
+	roomID, author, owner string, ref wire.PlatformAgentRef, nowMs int64) (PlatformDrive, error) {
 	if owner == "" || author == owner || ref.Core == "" || ref.Provider == "" {
-		return PlatformDrive{}
+		return PlatformDrive{}, nil
+	}
+	pgs, err := RoomPlatformGrants(ctx, grants, policy, roomID, nowMs)
+	if err != nil {
+		return PlatformDrive{}, err
 	}
 	platform := false
-	for _, pg := range RoomPlatformGrants(ctx, grants, policy, roomID, nowMs) {
+	for _, pg := range pgs {
 		if pg.Available && pg.Grant.OwnerUserID == owner && pg.Agent == ref {
 			platform = true
 			break
 		}
 	}
 	if !platform {
-		return PlatformDrive{}
+		return PlatformDrive{}, nil
 	}
-	_, online := OnlineAgents(ads.ListBridgeAgentsForOwner(ctx, owner))[ref]
-	return PlatformDrive{Platform: true, Online: online}
+	advertised, err := ads.ListBridgeAgentsForOwner(ctx, owner)
+	if err != nil {
+		return PlatformDrive{}, err
+	}
+	_, online := OnlineAgents(advertised)[ref]
+	return PlatformDrive{Platform: true, Online: online}, nil
 }

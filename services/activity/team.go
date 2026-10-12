@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/luckylhb90/bnbloc/internal/httpx"
+	"github.com/luckylhb90/bnbloc/internal/obs"
 	"github.com/luckylhb90/bnbloc/internal/store"
 	"github.com/luckylhb90/bnbloc/internal/svcauth"
 	"github.com/luckylhb90/bnbloc/internal/wire"
@@ -83,11 +84,17 @@ func (s *Service) handleTeamAgents(scope string) http.HandlerFunc {
 		if scope == teamScopeTenant {
 			owner = ""
 		}
+		agents, err := s.teamAgents(r, owner, since, now.UnixMilli())
+		if err != nil {
+			obs.ServerError(w, "team dashboard read failed", err)
+			httpx.Error(w, "team dashboard read failed", http.StatusInternalServerError)
+			return
+		}
 		httpx.WriteJSON(w, http.StatusOK, wire.TeamAgentsReply{
 			Scope:   scope,
 			Range:   rng,
 			SinceMs: since,
-			Agents:  s.teamAgents(r, owner, since, now.UnixMilli()),
+			Agents:  agents,
 		})
 
 	}
@@ -96,7 +103,7 @@ func (s *Service) handleTeamAgents(scope string) http.HandlerFunc {
 // teamAgents joins advertised agents, jobs, and reported usage into one row
 // per (owner, core, provider). An agent seen only in jobs or usage (its bridge
 // no longer advertises it) still gets a row, offline.
-func (s *Service) teamAgents(r *http.Request, owner string, since, nowMs int64) []wire.TeamAgent {
+func (s *Service) teamAgents(r *http.Request, owner string, since, nowMs int64) ([]wire.TeamAgent, error) {
 	ctx := r.Context()
 	rows := map[string]*wire.TeamAgent{}
 	row := func(o, core, provider string) *wire.TeamAgent {
@@ -108,7 +115,11 @@ func (s *Service) teamAgents(r *http.Request, owner string, since, nowMs int64) 
 		rows[k] = a
 		return a
 	}
-	for _, ta := range s.Team.TenantTeamAgents(ctx, owner, nowMs) {
+	advertised, err := s.Team.TenantTeamAgents(ctx, owner, nowMs)
+	if err != nil {
+		return nil, err
+	}
+	for _, ta := range advertised {
 		a := row(ta.OwnerUserID, ta.Core, ta.Provider)
 		// Several bridges may advertise the same agent: online if any is, last
 		// seen at the most recent heartbeat.
@@ -123,7 +134,11 @@ func (s *Service) teamAgents(r *http.Request, owner string, since, nowMs int64) 
 	rooms := roomNamer{s: s, r: r, names: map[string]string{}}
 	// Jobs arrive newest-first, so the first active / first terminal job per
 	// agent is its current / last job.
-	for _, j := range s.Team.TenantTeamJobs(ctx, owner, since) {
+	jobs, err := s.Team.TenantTeamJobs(ctx, owner, since)
+	if err != nil {
+		return nil, err
+	}
+	for _, j := range jobs {
 		a := row(j.OwnerUserID, j.Core, j.Provider)
 		if !j.Status.Terminal() {
 			if a.CurrentJob == nil {
@@ -148,7 +163,11 @@ func (s *Service) teamAgents(r *http.Request, owner string, since, nowMs int64) 
 		}
 	}
 	if s.Usage != nil {
-		s.attachUsage(rows, row, s.Usage.AgentUsage(ctx, owner, since))
+		usage, err := s.Usage.AgentUsage(ctx, owner, since)
+		if err != nil {
+			return nil, err
+		}
+		s.attachUsage(rows, row, usage)
 	}
 	out := make([]wire.TeamAgent, 0, len(rows))
 	for _, a := range rows {
@@ -163,7 +182,7 @@ func (s *Service) teamAgents(r *http.Request, owner string, since, nowMs int64) 
 		}
 		return out[i].Provider < out[k].Provider
 	})
-	return out
+	return out, nil
 }
 
 // attachUsage puts each (owner, provider) usage total on the matching agent

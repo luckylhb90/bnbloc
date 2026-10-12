@@ -44,7 +44,7 @@ func TestMySQLRoomCreateRejectsExistingIDAcrossTenants(t *testing.T) {
 	if got, err := s.GetRoom(ca, "r1"); err != nil || got.Name != "Alpha" {
 		t.Fatalf("room after failed creates = %+v, %v; want Alpha unchanged", got, err)
 	}
-	if memberAnyTenant(s, ca, "r1", "mallory") {
+	if memberAnyTenant(t, s, ca, "r1", "mallory") {
 		t.Fatal("a failed create must not leave the caller a member")
 	}
 
@@ -53,13 +53,13 @@ func TestMySQLRoomCreateRejectsExistingIDAcrossTenants(t *testing.T) {
 	if _, err := db.Exec(`INSERT INTO room_members (tenant_id, room_id, user_id, role, joined_at_ms) VALUES (?, 'r1', 'stray', 'owner', 3)`, tenantB); err != nil {
 		t.Fatalf("seed stray: %v", err)
 	}
-	if memberAnyTenant(s, cb, "r1", "stray") {
+	if memberAnyTenant(t, s, cb, "r1", "stray") {
 		t.Fatal("foreign-tenant membership must not count")
 	}
-	if got := s.RoomsForUserAllTenants(cb, "stray"); len(got) != 0 {
+	if got := must(s.RoomsForUserAllTenants(cb, "stray"))(t); len(got) != 0 {
 		t.Fatalf("stray all-tenant rooms = %v, want none", got)
 	}
-	if !memberAnyTenant(s, cb, "r1", "alice") {
+	if !memberAnyTenant(t, s, cb, "r1", "alice") {
 		t.Fatal("the real member resolves from any tenant context")
 	}
 }

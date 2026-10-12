@@ -44,8 +44,9 @@ func (e errPlatformAgentOffline) Error() string {
 }
 
 // checkPlatformAgentOnline returns errPlatformAgentOffline for a chat by
-// author to an offline platform agent. An unreadable policy does not refuse
-// the chat: the host's reserve is the authority and fails closed anyway.
+// author to an offline platform agent. An unreadable policy, grant or
+// advertisement does not refuse the chat: the host's reserve is the
+// authority and fails closed anyway.
 func (s *Service) checkPlatformAgentOnline(ctx context.Context, roomID, author string, rc *ChatRecipient) error {
 	g := s.PlatformAgents
 	if g == nil || rc == nil {
@@ -59,7 +60,12 @@ func (s *Service) checkPlatformAgentOnline(ctx context.Context, roomID, author s
 	}
 	owner := strings.TrimSpace(rc.OwnerID)
 	ref := wire.PlatformAgentRef{Core: strings.TrimSpace(rc.Core), Provider: strings.TrimSpace(rc.Provider)}
-	d := shareagent.ReadPlatformDrive(ctx, g.Grants, policy, g.Bridges, roomID, author, owner, ref, time.Now().UnixMilli())
+	d, err := shareagent.ReadPlatformDrive(ctx, g.Grants, policy, g.Bridges, roomID, author, owner, ref, time.Now().UnixMilli())
+	if err != nil {
+		slog.Warn("bnbloc realtime: platform drive unreadable; skipping the offline guard",
+			"event", "bnbloc.realtime.platform_policy_unreadable", "room", roomID, "error", err)
+		return nil
+	}
 	if d.Platform && !d.Online {
 		return errPlatformAgentOffline{host: owner, ref: ref}
 	}

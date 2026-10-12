@@ -165,7 +165,7 @@ type RoomStore interface {
 	// RoomTenant returns a room's authoritative tenant keyed on room_id alone
 	// (globally unique), so a room-scoped request can resolve its tenant without
 	// already knowing it. false when the room is absent/deleted.
-	RoomTenant(ctx context.Context, roomID string) (string, bool)
+	RoomTenant(ctx context.Context, roomID string) (string, bool, error)
 	// CreateRoomWithOwnerAndChannel atomically creates a room, its owner
 	// membership, and the room's default channel in a single transaction
 	// (design lock: a room always exists with exactly one default channel). If
@@ -178,31 +178,31 @@ type RoomStore interface {
 	AddMember(ctx context.Context, m Membership) error
 	RemoveMember(ctx context.Context, roomID, userID string) error
 	// MemberRole is GetMember's role (an agent host reads as a visitor).
-	MemberRole(ctx context.Context, roomID, userID string) (Role, bool)
+	MemberRole(ctx context.Context, roomID, userID string) (Role, bool, error)
 	// GetMember returns a user's membership of a room in the ctx tenant,
 	// agent-host memberships included (Membership.AgentHost).
-	GetMember(ctx context.Context, roomID, userID string) (Membership, bool)
-	IsMember(ctx context.Context, roomID, userID string) bool
+	GetMember(ctx context.Context, roomID, userID string) (Membership, bool, error)
+	IsMember(ctx context.Context, roomID, userID string) (bool, error)
 	// MembershipAnyTenant returns the membership keyed on (room_id, user_id)
 	// alone, ignoring the caller's tenant — the room-scope fallback for a
 	// member whose room lives in a different tenant than their token. Only a
 	// membership in the room's own tenant, of a live room, counts.
-	MembershipAnyTenant(ctx context.Context, roomID, userID string) (Membership, bool)
+	MembershipAnyTenant(ctx context.Context, roomID, userID string) (Membership, bool, error)
 	// Members returns every membership of a room, agent hosts flagged.
-	Members(ctx context.Context, roomID string) []Membership
+	Members(ctx context.Context, roomID string) ([]Membership, error)
 	// RoomsForUser returns the rooms the user is a human member of (agent-host
 	// memberships are not the user's rooms).
-	RoomsForUser(ctx context.Context, userID string) []string
+	RoomsForUser(ctx context.Context, userID string) ([]string, error)
 	// RoomsForUserAllTenants returns every room the user is a human member of
 	// across all tenants — the bridge discovery shape. The bridge subscribes,
 	// advertises, and claims in each of the owner's rooms, so a session token
 	// minted in one tenant must not hide rooms in another. UI listings use the
 	// tenant-scoped RoomsForUser.
-	RoomsForUserAllTenants(ctx context.Context, userID string) []string
+	RoomsForUserAllTenants(ctx context.Context, userID string) ([]string, error)
 	// AgentHostRoomsAllTenants returns the live rooms, across all tenants,
 	// where the user holds an agent-host membership (the bridge's
 	// includeAgentHost discovery).
-	AgentHostRoomsAllTenants(ctx context.Context, userID string) []string
+	AgentHostRoomsAllTenants(ctx context.Context, userID string) ([]string, error)
 	// AddAgentHost gives userID an agent-host membership of roomID unless they
 	// already hold any membership there (a human membership is never
 	// downgraded). ErrRoomNotFound when the room is absent or deleted.
@@ -231,9 +231,9 @@ type RoomStore interface {
 	TransferOwner(ctx context.Context, roomID, newOwner string) error
 	// RoomsForUserDetailed returns rich rows for the user's rooms (human
 	// memberships only).
-	RoomsForUserDetailed(ctx context.Context, userID string) []RoomMembershipDetail
+	RoomsForUserDetailed(ctx context.Context, userID string) ([]RoomMembershipDetail, error)
 	// MemberCount returns the number of human members in a room.
-	MemberCount(ctx context.Context, roomID string) int
+	MemberCount(ctx context.Context, roomID string) (int, error)
 }
 
 // MemoryRoom is an in-memory RoomStore for M0/M1 and tests.
@@ -385,14 +385,14 @@ func (s *MemoryRoom) putChannelLocked(tid string, c RoomChannel) error {
 
 // RoomTenant returns a room's tenant regardless of the caller's tenant, keyed
 // on room_id alone (globally unique). false when absent/deleted.
-func (s *MemoryRoom) RoomTenant(_ context.Context, roomID string) (string, bool) {
+func (s *MemoryRoom) RoomTenant(_ context.Context, roomID string) (string, bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	key, ok := s.liveRoomKeyLocked(roomID)
 	if !ok {
-		return "", false
+		return "", false, nil
 	}
-	return s.rooms[key].TenantID, true
+	return s.rooms[key].TenantID, true, nil
 }
 
 // GetRoom returns a room or ErrRoomNotFound. Soft-deleted rooms are not found.
@@ -458,42 +458,42 @@ func (s *MemoryRoom) RemoveMember(ctx context.Context, roomID, userID string) er
 }
 
 // GetMember returns a user's membership of a room.
-func (s *MemoryRoom) GetMember(ctx context.Context, roomID, userID string) (Membership, bool) {
+func (s *MemoryRoom) GetMember(ctx context.Context, roomID, userID string) (Membership, bool, error) {
 	tid, err := tenant.Require(ctx)
 	if err != nil {
-		return Membership{}, false
+		return Membership{}, false, err
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	m, ok := s.members[tkey(tid, roomID)][userID]
-	return m, ok
+	return m, ok, nil
 }
 
 // MemberRole returns a user's role in a room.
-func (s *MemoryRoom) MemberRole(ctx context.Context, roomID, userID string) (Role, bool) {
-	m, ok := s.GetMember(ctx, roomID, userID)
-	return m.Role, ok
+func (s *MemoryRoom) MemberRole(ctx context.Context, roomID, userID string) (Role, bool, error) {
+	m, ok, err := s.GetMember(ctx, roomID, userID)
+	return m.Role, ok, err
 }
 
 // IsMember reports membership.
-func (s *MemoryRoom) IsMember(ctx context.Context, roomID, userID string) bool {
-	_, ok := s.GetMember(ctx, roomID, userID)
-	return ok
+func (s *MemoryRoom) IsMember(ctx context.Context, roomID, userID string) (bool, error) {
+	_, ok, err := s.GetMember(ctx, roomID, userID)
+	return ok, err
 }
 
 // MembershipAnyTenant returns the membership of the given room regardless of
 // the caller's tenant. Room ids are globally unique, so the room resolves to
 // the one tenant that holds it, and only a membership in THAT tenant of a live
 // room counts — a membership row filed under any other tenant is never honored.
-func (s *MemoryRoom) MembershipAnyTenant(ctx context.Context, roomID, userID string) (Membership, bool) {
+func (s *MemoryRoom) MembershipAnyTenant(ctx context.Context, roomID, userID string) (Membership, bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	key, ok := s.liveRoomKeyLocked(roomID)
 	if !ok {
-		return Membership{}, false
+		return Membership{}, false, nil
 	}
 	m, member := s.members[key][userID]
-	return m, member
+	return m, member, nil
 }
 
 // AddAgentHost adds an agent-host membership unless userID is already a
@@ -530,10 +530,10 @@ func (s *MemoryRoom) RemoveAgentHost(ctx context.Context, roomID, userID string)
 }
 
 // Members returns all memberships for a room.
-func (s *MemoryRoom) Members(ctx context.Context, roomID string) []Membership {
+func (s *MemoryRoom) Members(ctx context.Context, roomID string) ([]Membership, error) {
 	tid, err := tenant.Require(ctx)
 	if err != nil {
-		return nil
+		return nil, err
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -542,14 +542,14 @@ func (s *MemoryRoom) Members(ctx context.Context, roomID string) []Membership {
 	for _, m := range set {
 		out = append(out, m)
 	}
-	return out
+	return out, nil
 }
 
 // RoomsForUser returns the room ids the user is a member of.
-func (s *MemoryRoom) RoomsForUser(ctx context.Context, userID string) []string {
+func (s *MemoryRoom) RoomsForUser(ctx context.Context, userID string) ([]string, error) {
 	tid, err := tenant.Require(ctx)
 	if err != nil {
-		return nil
+		return nil, err
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -559,7 +559,7 @@ func (s *MemoryRoom) RoomsForUser(ctx context.Context, userID string) []string {
 			out = append(out, m.RoomID)
 		}
 	}
-	return out
+	return out, nil
 }
 
 // RoomsForUserAllTenants returns every room the user is a member of across all
@@ -567,19 +567,19 @@ func (s *MemoryRoom) RoomsForUser(ctx context.Context, userID string) []string {
 // advertises, and claims in every room its owner belongs to, so it must see
 // them all regardless of which tenant its owner's session token was minted in.
 // UI-facing listings stay tenant-scoped (RoomsForUser).
-func (s *MemoryRoom) RoomsForUserAllTenants(ctx context.Context, userID string) []string {
+func (s *MemoryRoom) RoomsForUserAllTenants(ctx context.Context, userID string) ([]string, error) {
 	return s.roomsAllTenants(ctx, userID, false)
 }
 
 // AgentHostRoomsAllTenants returns the live rooms where userID holds an
 // agent-host membership, across all tenants.
-func (s *MemoryRoom) AgentHostRoomsAllTenants(ctx context.Context, userID string) []string {
+func (s *MemoryRoom) AgentHostRoomsAllTenants(ctx context.Context, userID string) ([]string, error) {
 	return s.roomsAllTenants(ctx, userID, true)
 }
 
-func (s *MemoryRoom) roomsAllTenants(ctx context.Context, userID string, agentHost bool) []string {
+func (s *MemoryRoom) roomsAllTenants(ctx context.Context, userID string, agentHost bool) ([]string, error) {
 	if _, err := tenant.Require(ctx); err != nil {
-		return nil
+		return nil, err
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -594,7 +594,7 @@ func (s *MemoryRoom) roomsAllTenants(ctx context.Context, userID string, agentHo
 			out = append(out, m.RoomID)
 		}
 	}
-	return out
+	return out, nil
 }
 
 // CreateInvite stores an invite code.
@@ -661,14 +661,14 @@ func (s *MemoryRoom) memberCountLocked(rk string) int {
 }
 
 // MemberCount returns the number of members in a room.
-func (s *MemoryRoom) MemberCount(ctx context.Context, roomID string) int {
+func (s *MemoryRoom) MemberCount(ctx context.Context, roomID string) (int, error) {
 	tid, err := tenant.Require(ctx)
 	if err != nil {
-		return 0
+		return 0, err
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.memberCountLocked(tkey(tid, roomID))
+	return s.memberCountLocked(tkey(tid, roomID)), nil
 }
 
 // SearchRooms returns non-deleted rooms matching the query, newest-first.
@@ -812,10 +812,10 @@ func (s *MemoryRoom) TransferOwner(ctx context.Context, roomID, newOwner string)
 }
 
 // RoomsForUserDetailed returns rich rows for the user's non-deleted rooms.
-func (s *MemoryRoom) RoomsForUserDetailed(ctx context.Context, userID string) []RoomMembershipDetail {
+func (s *MemoryRoom) RoomsForUserDetailed(ctx context.Context, userID string) ([]RoomMembershipDetail, error) {
 	tid, err := tenant.Require(ctx)
 	if err != nil {
-		return nil
+		return nil, err
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -843,5 +843,5 @@ func (s *MemoryRoom) RoomsForUserDetailed(ctx context.Context, userID string) []
 		}
 		return out[i].RoomID < out[j].RoomID
 	})
-	return out
+	return out, nil
 }

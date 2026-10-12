@@ -194,7 +194,13 @@ func (s *Service) handleOwnerAuthorizations(w http.ResponseWriter, r *http.Reque
 	// own turn shares the "turn" action but has actor == owner).
 	recent := map[string][]string{}
 	seen := map[string]map[string]bool{}
-	for _, rec := range s.Grants.AuditRecords(r.Context(), roomID, 100, 0) {
+	recs, err := s.Grants.AuditRecords(r.Context(), roomID, 100, 0)
+	if err != nil {
+		obs.ServerError(w, "read audit failed", err)
+		httpx.Error(w, "read audit failed", http.StatusInternalServerError)
+		return
+	}
+	for _, rec := range recs {
 		if rec.OwnerUserID != owner || rec.Decision != "allow" || rec.ActorUserID == "" {
 			continue
 		}
@@ -212,7 +218,13 @@ func (s *Service) handleOwnerAuthorizations(w http.ResponseWriter, r *http.Reque
 	}
 	// One view per live room authorization the caller owns in this room.
 	views := []authorizationView{}
-	for _, grant := range s.Grants.RoomGrants(r.Context(), roomID) {
+	grants, err := s.Grants.RoomGrants(r.Context(), roomID)
+	if err != nil {
+		obs.ServerError(w, "list grants failed", err)
+		httpx.Error(w, "list grants failed", http.StatusInternalServerError)
+		return
+	}
+	for _, grant := range grants {
 		if grant.OwnerUserID != owner || grant.GranteeUserID != "*" || !s.usableGrant(r.Context(), grant) {
 			continue
 		}

@@ -5,6 +5,7 @@ import (
 	"strconv"
 
 	"github.com/luckylhb90/bnbloc/internal/httpx"
+	"github.com/luckylhb90/bnbloc/internal/obs"
 )
 
 // auditRecordView is the JSON projection of one org-wide audit record. It omits
@@ -39,7 +40,12 @@ func (s *Service) handleTenantAudit(w http.ResponseWriter, r *http.Request) {
 			before = n
 		}
 	}
-	recs := s.Grants.TenantAuditRecords(r.Context(), limit, before)
+	recs, err := s.Grants.TenantAuditRecords(r.Context(), limit, before)
+	if err != nil {
+		obs.ServerError(w, "read audit failed", err)
+		httpx.Error(w, "read audit failed", http.StatusInternalServerError)
+		return
+	}
 	views := make([]auditRecordView, 0, len(recs))
 	for _, rec := range recs {
 		views = append(views, auditRecordView{

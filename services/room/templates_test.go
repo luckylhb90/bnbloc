@@ -141,11 +141,19 @@ func TestInstantiateCreatesRoomChannelsMembersDisabledSchedules(t *testing.T) {
 	if err != nil || rm.Name != "Review #1" || rm.Description != "Design reviews" || rm.Visibility != store.VisibilityPrivate {
 		t.Fatalf("room = %+v, %v", rm, err)
 	}
-	if role, _ := f.svc.Store.MemberRole(ctx, "review-1", "bob"); role != store.RoleOwner {
+	role, _, err := f.svc.Store.MemberRole(ctx, "review-1", "bob")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if role != store.RoleOwner {
 		t.Fatalf("instantiator role = %s, want owner", role)
 	}
 	// Default members join as members (bob, the creator, is skipped).
-	if role, ok := f.svc.Store.MemberRole(ctx, "review-1", "carol"); !ok || role != store.RoleMember {
+	role, ok, err := f.svc.Store.MemberRole(ctx, "review-1", "carol")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok || role != store.RoleMember {
 		t.Fatalf("carol = %s %v", role, ok)
 	}
 	if strings.Join(res.AddedMembers, ",") != "carol" {
@@ -153,7 +161,11 @@ func TestInstantiateCreatesRoomChannelsMembersDisabledSchedules(t *testing.T) {
 	}
 	var names []string
 	design := ""
-	for _, c := range f.svc.Channels.ListChannels(ctx, "review-1") {
+	channels, err := f.svc.Channels.ListChannels(ctx, "review-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range channels {
 		names = append(names, c.Name)
 		if c.Name == "design" {
 			design = c.ChannelID
@@ -202,11 +214,19 @@ func TestInstantiateNeverAuthorizesSuggestedAgents(t *testing.T) {
 		t.Fatalf("instance = %+v", res)
 	}
 	for _, owner := range []string{"dave", "erin"} {
-		if f.svc.Store.IsMember(dctx(), "pair-1", owner) {
+		isMember, err := f.svc.Store.IsMember(dctx(), "pair-1", owner)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if isMember {
 			t.Fatalf("suggested agent owner %s was added to the room", owner)
 		}
 	}
-	if members := f.svc.Store.Members(dctx(), "pair-1"); len(members) != 1 || members[0].UserID != "alice" {
+	members, err := f.svc.Store.Members(dctx(), "pair-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(members) != 1 || members[0].UserID != "alice" {
 		t.Fatalf("members = %+v", members)
 	}
 }
@@ -220,7 +240,11 @@ func TestTemplateFromRoom(t *testing.T) {
 	f.call(http.MethodPost, "/v1/rooms/src/members", "olga", map[string]any{"userId": "bob", "role": "member"})
 	f.call(http.MethodPost, "/v1/rooms/src/members", "olga", map[string]any{"userId": "amy", "role": "admin"})
 	var triage string
-	for _, c := range f.svc.Channels.ListChannels(dctx(), "src") {
+	channels, err := f.svc.Channels.ListChannels(dctx(), "src")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range channels {
 		if c.Name == "triage" {
 			triage = c.ChannelID
 		}

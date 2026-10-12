@@ -40,7 +40,7 @@ func TestArtifactVersionListOmitsContent(t *testing.T) {
 	s := NewMemoryArtifacts()
 	_, _ = s.PutArtifact(actx(), Artifact{ArtifactID: "a1", RoomID: "r1", Kind: ArtifactKindMarkdown, Title: "spec", CreatedBy: "alice"})
 	_, _, _ = s.PublishArtifactVersion(actx(), "a1", ArtifactVersion{Content: "body", Summary: "s", AuthorUserID: "alice"}, 0)
-	for _, v := range s.ListArtifactVersions(actx(), "a1", 10) {
+	for _, v := range must(s.ListArtifactVersions(actx(), "a1", 10))(t) {
 		if v.Content != "" {
 			t.Fatal("version list leaked content")
 		}

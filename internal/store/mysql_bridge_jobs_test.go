@@ -318,7 +318,7 @@ func TestMySQLBridgeJobsHeartbeatAcceptsMultipleTargetsPerProvider(t *testing.T)
 		t.Fatalf("repeat heartbeat: %v", err)
 	}
 	var got int
-	for _, a := range m.ListBridgeAgents(ctx, "") {
+	for _, a := range must(m.ListBridgeAgents(ctx, ""))(t) {
 		if a.BridgeID == id {
 			got++
 		}
@@ -387,7 +387,7 @@ func TestMySQLBridgeJobsDeadBridgeNeitherClaimsNorAdvertises(t *testing.T) {
 	if len(claimed) != 0 {
 		t.Fatalf("dead bridge claimed %d jobs", len(claimed))
 	}
-	for _, a := range m.ListBridgeAgents(ctx, "") {
+	for _, a := range must(m.ListBridgeAgents(ctx, ""))(t) {
 		if a.BridgeID == id {
 			t.Fatal("dead bridge still advertises its agents")
 		}

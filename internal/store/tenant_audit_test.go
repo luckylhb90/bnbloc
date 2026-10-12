@@ -29,7 +29,7 @@ func TestTenantAuditRecordsIsolatesTenantsAcrossRooms(t *testing.T) {
 	}
 
 	// Tenant A sees exactly its three rows, newest-first, across both rooms.
-	got := s.TenantAuditRecords(ca, 0, 0)
+	got := must(s.TenantAuditRecords(ca, 0, 0))(t)
 	if len(got) != 3 {
 		t.Fatalf("A TenantAuditRecords = %d rows, want 3", len(got))
 	}
@@ -48,13 +48,13 @@ func TestTenantAuditRecordsIsolatesTenantsAcrossRooms(t *testing.T) {
 	}
 
 	// Tenant B sees only its single row despite the reused "shared" room id.
-	gotB := s.TenantAuditRecords(cb, 0, 0)
+	gotB := must(s.TenantAuditRecords(cb, 0, 0))(t)
 	if len(gotB) != 1 || gotB[0].ActorUserID != "bob" {
 		t.Fatalf("B TenantAuditRecords = %+v, want single bob row", gotB)
 	}
 
 	// before-cursor keeps only records strictly older than the timestamp.
-	cur := s.TenantAuditRecords(ca, 0, 30)
+	cur := must(s.TenantAuditRecords(ca, 0, 30))(t)
 	if len(cur) != 2 || cur[0].AtMs != 20 || cur[1].AtMs != 10 {
 		t.Fatalf("A before=30 = %+v, want at_ms 20 then 10", cur)
 	}

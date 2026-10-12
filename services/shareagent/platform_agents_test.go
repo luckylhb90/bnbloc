@@ -24,8 +24,8 @@ type fakeBridges struct {
 	queued map[string][]store.AgentJobCount
 }
 
-func (f *fakeBridges) ListBridgeAgentsForOwner(_ context.Context, owner string) []store.BridgeAgent {
-	return f.ads[owner]
+func (f *fakeBridges) ListBridgeAgentsForOwner(_ context.Context, owner string) ([]store.BridgeAgent, error) {
+	return f.ads[owner], nil
 }
 
 func (f *fakeBridges) PendingAgentJobs(_ context.Context, owner string) ([]store.AgentJobCount, error) {
@@ -288,8 +288,8 @@ func TestPlatformAgentAddAuthorization(t *testing.T) {
 	if !e.isAgentHost("room-b", "root") {
 		t.Fatal("the add left no agent-host membership")
 	}
-	if len(e.grants.RoomGrants(tctx("org-b"), "room-b")) != 1 {
-		t.Fatal("the add left no platform grant in the other organization")
+	if gs, err := e.grants.RoomGrants(tctx("org-b"), "room-b"); err != nil || len(gs) != 1 {
+		t.Fatalf("the add left no platform grant in the other organization (%v)", err)
 	}
 }
 
@@ -430,7 +430,11 @@ func TestPlatformAgentReserve(t *testing.T) {
 		t.Fatalf("runs used = %d, want 3 (a refused drive reserves nothing)", g.RunsUsed)
 	}
 	allowed, denied := 0, 0
-	for _, rec := range e.grants.AuditRecords(dctx(), "room-1", 0, 0) {
+	recs, err := e.grants.AuditRecords(dctx(), "room-1", 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, rec := range recs {
 		if rec.GrantID != g.GrantID || rec.ActorUserID != "bob" || rec.OwnerUserID != "root" {
 			continue
 		}
@@ -589,7 +593,11 @@ func TestPlatformAgentReserveDefaultModel(t *testing.T) {
 		t.Fatalf("reserve without a default = %d %v", code, out)
 	}
 	var models []string
-	for _, rec := range e.grants.AuditRecords(dctx(), "room-1", 0, 0) {
+	recs, err := e.grants.AuditRecords(dctx(), "room-1", 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, rec := range recs {
 		if rec.Decision == "allow" && rec.GrantID == platformGrantID(dctx(), "room-1", "root", "nimbus:codex") {
 			models = append(models, rec.Model)
 		}

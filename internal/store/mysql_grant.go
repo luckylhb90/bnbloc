@@ -72,10 +72,8 @@ const grantColumns = `grant_id, room_id, target_id, owner_user_id, grantee_user_
 		        capabilities_json, run_quota, cost_allowance, max_concurrent, reset_at_ms,
 		        runs_used, cost_used, revoked_at_ms, expires_at_ms, created_at_ms, source, created_by`
 
-type grantScanner interface{ Scan(dest ...any) error }
-
 // scanGrant reads one grantColumns row (TenantID is the caller's to set).
-func scanGrant(row grantScanner) (Grant, error) {
+func scanGrant(row rowScanner) (Grant, error) {
 	var g Grant
 	var models, caps []byte
 	var runQuota sql.NullInt64
@@ -158,13 +156,25 @@ func (s *MySQLGrant) AppendAudit(ctx context.Context, rec AuditRecord) error {
 	return err
 }
 
+// auditRecordColumns is the column list scanAuditRecord reads, in its order.
+const auditRecordColumns = `room_id, COALESCE(grant_id,''), actor_user_id, owner_user_id, action, decision,
+		        COALESCE(deny_reason,''), COALESCE(model,''), COALESCE(channel_id,''), at_ms`
+
+// scanAuditRecord reads one auditRecordColumns row.
+func scanAuditRecord(row rowScanner) (AuditRecord, error) {
+	var r AuditRecord
+	err := row.Scan(&r.RoomID, &r.GrantID, &r.ActorUserID, &r.OwnerUserID, &r.Action,
+		&r.Decision, &r.DenyReason, &r.Model, &r.ChannelID, &r.AtMs)
+	return r, err
+}
+
 // AuditRecords returns a room's audit records newest-first. limit<=0 defaults
 // to 100 (capped at 500); beforeAtMs>0 keeps only records strictly older than
 // that timestamp for cursor pagination.
-func (s *MySQLGrant) AuditRecords(ctx context.Context, roomID string, limit int, beforeAtMs int64) []AuditRecord {
+func (s *MySQLGrant) AuditRecords(ctx context.Context, roomID string, limit int, beforeAtMs int64) ([]AuditRecord, error) {
 	tnt, err := tenant.Require(ctx)
 	if err != nil {
-		return nil
+		return nil, err
 	}
 	if limit <= 0 {
 		limit = 100
@@ -179,32 +189,17 @@ func (s *MySQLGrant) AuditRecords(ctx context.Context, roomID string, limit int,
 		args = append(args, beforeAtMs)
 	}
 	args = append(args, limit)
-	rows, err := s.DB.QueryContext(ctx,
-		`SELECT room_id, COALESCE(grant_id,''), actor_user_id, owner_user_id, action, decision,
-		        COALESCE(deny_reason,''), COALESCE(model,''), COALESCE(channel_id,''), at_ms
-		 FROM shared_agent_audit WHERE `+where+` ORDER BY at_ms DESC LIMIT ?`, args...)
-	if err != nil {
-		return nil
-	}
-	defer rows.Close()
-	var out []AuditRecord
-	for rows.Next() {
-		var r AuditRecord
-		if err := rows.Scan(&r.RoomID, &r.GrantID, &r.ActorUserID, &r.OwnerUserID, &r.Action,
-			&r.Decision, &r.DenyReason, &r.Model, &r.ChannelID, &r.AtMs); err == nil {
-			out = append(out, r)
-		}
-	}
-	return out
+	return queryAll(ctx, s.DB,
+		`SELECT `+auditRecordColumns+` FROM shared_agent_audit WHERE `+where+` ORDER BY at_ms DESC LIMIT ?`, scanAuditRecord, args...)
 }
 
 // TenantAuditRecords returns the ctx tenant's audit records across ALL rooms
 // newest-first for an org-wide audit trail. limit<=0 defaults to 100 (capped at
 // 500); beforeAtMs>0 keeps only records strictly older than that timestamp.
-func (s *MySQLGrant) TenantAuditRecords(ctx context.Context, limit int, beforeAtMs int64) []AuditRecord {
+func (s *MySQLGrant) TenantAuditRecords(ctx context.Context, limit int, beforeAtMs int64) ([]AuditRecord, error) {
 	tnt, err := tenant.Require(ctx)
 	if err != nil {
-		return nil
+		return nil, err
 	}
 	if limit <= 0 {
 		limit = 100
@@ -219,48 +214,24 @@ func (s *MySQLGrant) TenantAuditRecords(ctx context.Context, limit int, beforeAt
 		args = append(args, beforeAtMs)
 	}
 	args = append(args, limit)
-	rows, err := s.DB.QueryContext(ctx,
-		`SELECT room_id, COALESCE(grant_id,''), actor_user_id, owner_user_id, action, decision,
-		        COALESCE(deny_reason,''), COALESCE(model,''), COALESCE(channel_id,''), at_ms
-		 FROM shared_agent_audit WHERE `+where+` ORDER BY at_ms DESC LIMIT ?`, args...)
-	if err != nil {
-		return nil
-	}
-	defer rows.Close()
-	var out []AuditRecord
-	for rows.Next() {
-		var r AuditRecord
-		if err := rows.Scan(&r.RoomID, &r.GrantID, &r.ActorUserID, &r.OwnerUserID, &r.Action,
-			&r.Decision, &r.DenyReason, &r.Model, &r.ChannelID, &r.AtMs); err == nil {
-			out = append(out, r)
-		}
-	}
-	return out
+	return queryAll(ctx, s.DB,
+		`SELECT `+auditRecordColumns+` FROM shared_agent_audit WHERE `+where+` ORDER BY at_ms DESC LIMIT ?`, scanAuditRecord, args...)
 }
 
 // RoomGrants returns all grants in a room newest-first (callers filter
 // revoked/expired).
-func (s *MySQLGrant) RoomGrants(ctx context.Context, roomID string) []Grant {
+func (s *MySQLGrant) RoomGrants(ctx context.Context, roomID string) ([]Grant, error) {
 	tnt, err := tenant.Require(ctx)
 	if err != nil {
-		return nil
+		return nil, err
 	}
-	rows, err := s.DB.QueryContext(ctx,
-		`SELECT `+grantColumns+` FROM shared_agent_grants WHERE tenant_id = ? AND room_id = ? ORDER BY created_at_ms DESC`, tnt, roomID)
-	if err != nil {
-		return nil
-	}
-	defer rows.Close()
-	var out []Grant
-	for rows.Next() {
-		g, err := scanGrant(rows)
-		if err != nil {
-			continue
-		}
-		g.TenantID = tnt
-		out = append(out, g)
-	}
-	return out
+	return queryAll(ctx, s.DB,
+		`SELECT `+grantColumns+` FROM shared_agent_grants WHERE tenant_id = ? AND room_id = ? ORDER BY created_at_ms DESC`,
+		func(r rowScanner) (Grant, error) {
+			g, err := scanGrant(r)
+			g.TenantID = tnt
+			return g, err
+		}, tnt, roomID)
 }
 
 func nullInt(p *int) any {

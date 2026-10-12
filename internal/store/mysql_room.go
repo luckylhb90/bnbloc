@@ -129,14 +129,17 @@ func (s *MySQLRoom) createRoomTx(ctx context.Context, tx *sql.Tx, r Room, owner 
 // globally unique) with no tenant filter. It is how a room-scoped request
 // resolves which tenant to execute in, independent of the caller's session
 // tenant. Returns false when the room does not exist or is deleted.
-func (s *MySQLRoom) RoomTenant(ctx context.Context, roomID string) (string, bool) {
+func (s *MySQLRoom) RoomTenant(ctx context.Context, roomID string) (string, bool, error) {
 	var tid string
 	err := s.DB.QueryRowContext(ctx,
 		`SELECT tenant_id FROM rooms WHERE room_id = ? AND deleted_at_ms IS NULL`, roomID).Scan(&tid)
-	if err != nil {
-		return "", false
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", false, nil
 	}
-	return tid, true
+	if err != nil {
+		return "", false, err
+	}
+	return tid, true, nil
 }
 
 // GetRoom returns a room scoped to the caller's tenant. Room ids are
@@ -234,25 +237,25 @@ func (s *MySQLRoom) RemoveAgentHost(ctx context.Context, roomID, userID string) 
 // tenant scope. Room ids are not globally unique; the room-anchored
 // cross-tenant probe (MembershipAnyTenant) exists for the multi-tenant
 // member path.
-func (s *MySQLRoom) GetMember(ctx context.Context, roomID, userID string) (Membership, bool) {
+func (s *MySQLRoom) GetMember(ctx context.Context, roomID, userID string) (Membership, bool, error) {
 	tid, err := tenant.Require(ctx)
 	if err != nil {
-		return Membership{}, false
+		return Membership{}, false, err
 	}
-	return scanMembership(s.DB.QueryRowContext(ctx,
+	return scanOneMembership(s.DB.QueryRowContext(ctx,
 		`SELECT `+membershipColumns+` FROM room_members WHERE tenant_id = ? AND room_id = ? AND user_id = ?`, tid, roomID, userID))
 }
 
 // MemberRole returns a user's role in a room within the caller's tenant.
-func (s *MySQLRoom) MemberRole(ctx context.Context, roomID, userID string) (Role, bool) {
-	m, ok := s.GetMember(ctx, roomID, userID)
-	return m.Role, ok
+func (s *MySQLRoom) MemberRole(ctx context.Context, roomID, userID string) (Role, bool, error) {
+	m, ok, err := s.GetMember(ctx, roomID, userID)
+	return m.Role, ok, err
 }
 
 // IsMember reports membership.
-func (s *MySQLRoom) IsMember(ctx context.Context, roomID, userID string) bool {
-	_, ok := s.GetMember(ctx, roomID, userID)
-	return ok
+func (s *MySQLRoom) IsMember(ctx context.Context, roomID, userID string) (bool, error) {
+	_, ok, err := s.GetMember(ctx, roomID, userID)
+	return ok, err
 }
 
 // MembershipAnyTenant answers "is this user in this room" without pinning
@@ -261,8 +264,8 @@ func (s *MySQLRoom) IsMember(ctx context.Context, roomID, userID string) bool {
 // (a multi-tenant member). The membership must be filed under the room's own
 // tenant and the room must be live: a membership row under any other tenant
 // (e.g. one left by the pre-BE-1 create upsert) never grants access.
-func (s *MySQLRoom) MembershipAnyTenant(ctx context.Context, roomID, userID string) (Membership, bool) {
-	return scanMembership(s.DB.QueryRowContext(ctx,
+func (s *MySQLRoom) MembershipAnyTenant(ctx context.Context, roomID, userID string) (Membership, bool, error) {
+	return scanOneMembership(s.DB.QueryRowContext(ctx,
 		`SELECT m.tenant_id, m.room_id, m.user_id, m.role, m.joined_at_ms, m.agent_host FROM room_members m
 		 JOIN rooms r ON r.room_id = m.room_id AND r.tenant_id = m.tenant_id AND r.deleted_at_ms IS NULL
 		 WHERE m.room_id = ? AND m.user_id = ? LIMIT 1`, roomID, userID))
@@ -271,99 +274,75 @@ func (s *MySQLRoom) MembershipAnyTenant(ctx context.Context, roomID, userID stri
 // membershipColumns is the column list scanMembership reads, in its order.
 const membershipColumns = `tenant_id, room_id, user_id, role, joined_at_ms, agent_host`
 
-type membershipScanner interface{ Scan(dest ...any) error }
-
-// scanMembership reads one membershipColumns row; false on no row or error.
-func scanMembership(row membershipScanner) (Membership, bool) {
+// scanMembership reads one membershipColumns row.
+func scanMembership(row rowScanner) (Membership, error) {
 	var m Membership
 	var role string
 	if err := row.Scan(&m.TenantID, &m.RoomID, &m.UserID, &role, &m.JoinedAtMs, &m.AgentHost); err != nil {
-		return Membership{}, false
+		return Membership{}, err
 	}
 	m.Role = Role(role)
-	return m, true
+	return m, nil
+}
+
+// scanOneMembership reads a single-row membership lookup: false on no row,
+// any other failure is an error.
+func scanOneMembership(row rowScanner) (Membership, bool, error) {
+	m, err := scanMembership(row)
+	if errors.Is(err, sql.ErrNoRows) {
+		return Membership{}, false, nil
+	}
+	if err != nil {
+		return Membership{}, false, err
+	}
+	return m, true, nil
 }
 
 // Members returns all memberships for a room, agent hosts flagged.
-func (s *MySQLRoom) Members(ctx context.Context, roomID string) []Membership {
+func (s *MySQLRoom) Members(ctx context.Context, roomID string) ([]Membership, error) {
 	tid, err := tenant.Require(ctx)
 	if err != nil {
-		return nil
+		return nil, err
 	}
-	rows, err := s.DB.QueryContext(ctx,
-		`SELECT `+membershipColumns+` FROM room_members WHERE tenant_id = ? AND room_id = ?`, tid, roomID)
-	if err != nil {
-		return nil
-	}
-	defer rows.Close()
-	var out []Membership
-	for rows.Next() {
-		if m, ok := scanMembership(rows); ok {
-			out = append(out, m)
-		}
-	}
-	return out
+	return queryAll(ctx, s.DB,
+		`SELECT `+membershipColumns+` FROM room_members WHERE tenant_id = ? AND room_id = ?`, scanMembership, tid, roomID)
 }
 
 // RoomsForUser returns the room ids the user is a member of in the caller's
 // tenant scope (UI listings, login room-stamping). The bridge discovery
 // shape is RoomsForUserAllTenants.
-func (s *MySQLRoom) RoomsForUser(ctx context.Context, userID string) []string {
+func (s *MySQLRoom) RoomsForUser(ctx context.Context, userID string) ([]string, error) {
 	tid, err := tenant.Require(ctx)
 	if err != nil {
-		return nil
+		return nil, err
 	}
-	rows, err := s.DB.QueryContext(ctx, `SELECT room_id FROM room_members WHERE tenant_id = ? AND user_id = ? AND agent_host = 0`, tid, userID)
-	if err != nil {
-		return nil
-	}
-	defer rows.Close()
-	var out []string
-	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err == nil {
-			out = append(out, id)
-		}
-	}
-	return out
+	return queryAll(ctx, s.DB, `SELECT room_id FROM room_members WHERE tenant_id = ? AND user_id = ? AND agent_host = 0`, scanString, tid, userID)
 }
 
 // RoomsForUserAllTenants returns every room the user is a member of across
 // all tenants — the BRIDGE discovery shape: the bridge subscribes, advertises,
 // and claims in every room its owner belongs to, regardless of which tenant
 // its owner's session token was minted in. UI listings stay tenant-scoped.
-func (s *MySQLRoom) RoomsForUserAllTenants(ctx context.Context, userID string) []string {
+func (s *MySQLRoom) RoomsForUserAllTenants(ctx context.Context, userID string) ([]string, error) {
 	return s.roomsAllTenants(ctx, userID, false)
 }
 
 // AgentHostRoomsAllTenants returns the live rooms, across all tenants, where
 // the user holds an agent-host membership.
-func (s *MySQLRoom) AgentHostRoomsAllTenants(ctx context.Context, userID string) []string {
+func (s *MySQLRoom) AgentHostRoomsAllTenants(ctx context.Context, userID string) ([]string, error) {
 	return s.roomsAllTenants(ctx, userID, true)
 }
 
-func (s *MySQLRoom) roomsAllTenants(ctx context.Context, userID string, agentHost bool) []string {
+func (s *MySQLRoom) roomsAllTenants(ctx context.Context, userID string, agentHost bool) ([]string, error) {
 	if _, err := tenant.Require(ctx); err != nil {
-		return nil
+		return nil, err
 	}
 	// Same rule as MembershipAnyTenant: only memberships filed under the
 	// room's own tenant, of live rooms.
-	rows, err := s.DB.QueryContext(ctx,
+	return queryAll(ctx, s.DB,
 		`SELECT m.room_id FROM room_members m
 		 JOIN rooms r ON r.room_id = m.room_id AND r.tenant_id = m.tenant_id AND r.deleted_at_ms IS NULL
-		 WHERE m.user_id = ? AND m.agent_host = ?`, userID, agentHost)
-	if err != nil {
-		return nil
-	}
-	defer rows.Close()
-	var out []string
-	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err == nil {
-			out = append(out, id)
-		}
-	}
-	return out
+		 WHERE m.user_id = ? AND m.agent_host = ?`, scanString, userID, agentHost)
 }
 
 // CreateInvite stores an invite code.
@@ -451,16 +430,16 @@ func (s *MySQLRoom) RedeemInvite(ctx context.Context, code, userID string, nowMs
 }
 
 // MemberCount returns the number of members in a room.
-func (s *MySQLRoom) MemberCount(ctx context.Context, roomID string) int {
+func (s *MySQLRoom) MemberCount(ctx context.Context, roomID string) (int, error) {
 	tid, err := tenant.Require(ctx)
 	if err != nil {
-		return 0
+		return 0, err
 	}
 	var n int
 	if err := s.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM room_members WHERE tenant_id = ? AND room_id = ? AND agent_host = 0`, tid, roomID).Scan(&n); err != nil {
-		return 0
+		return 0, err
 	}
-	return n
+	return n, nil
 }
 
 // SearchRooms returns non-deleted rooms matching the query, newest-first, with
@@ -621,34 +600,27 @@ func (s *MySQLRoom) TransferOwner(ctx context.Context, roomID, newOwner string) 
 // in the caller's tenant scope — this is the UI "my rooms" listing and MUST
 // stay tenant-scoped: switching tenants switches the visible workspace.
 // (The bridge discovery shape is the separate RoomsForUserAllTenants.)
-func (s *MySQLRoom) RoomsForUserDetailed(ctx context.Context, userID string) []RoomMembershipDetail {
+func (s *MySQLRoom) RoomsForUserDetailed(ctx context.Context, userID string) ([]RoomMembershipDetail, error) {
 	tid, err := tenant.Require(ctx)
 	if err != nil {
-		return nil
+		return nil, err
 	}
-	rows, err := s.DB.QueryContext(ctx,
+	return queryAll(ctx, s.DB,
 		`SELECT r.tenant_id, r.room_id, r.name, r.description, r.visibility, r.sync_mode, r.created_by, r.created_at_ms, m.role,
 		        (SELECT COUNT(*) FROM room_members mm WHERE mm.tenant_id = r.tenant_id AND mm.room_id = r.room_id AND mm.agent_host = 0) AS member_count
 		 FROM room_members m
 		 JOIN rooms r ON r.tenant_id = m.tenant_id AND r.room_id = m.room_id
 		 WHERE m.tenant_id = ? AND m.user_id = ? AND m.agent_host = 0 AND r.deleted_at_ms IS NULL
-		 ORDER BY r.created_at_ms DESC, r.room_id ASC`, tid, userID)
-	if err != nil {
-		return nil
-	}
-	defer rows.Close()
-	var out []RoomMembershipDetail
-	for rows.Next() {
-		var d RoomMembershipDetail
-		var visibility, syncMode, role string
-		if err := rows.Scan(&d.TenantID, &d.RoomID, &d.Name, &d.Description, &visibility, &syncMode, &d.CreatedBy, &d.CreatedAtMs, &role, &d.MemberCount); err != nil {
-			continue
-		}
-		d.Visibility = NormalizeVisibility(visibility)
-		d.SyncMode = NormalizeSyncMode(syncMode)
-		d.Role = Role(role)
-		d.IsOwner = d.Role == RoleOwner
-		out = append(out, d)
-	}
-	return out
+		 ORDER BY r.created_at_ms DESC, r.room_id ASC`, func(r rowScanner) (RoomMembershipDetail, error) {
+			var d RoomMembershipDetail
+			var visibility, syncMode, role string
+			if err := r.Scan(&d.TenantID, &d.RoomID, &d.Name, &d.Description, &visibility, &syncMode, &d.CreatedBy, &d.CreatedAtMs, &role, &d.MemberCount); err != nil {
+				return d, err
+			}
+			d.Visibility = NormalizeVisibility(visibility)
+			d.SyncMode = NormalizeSyncMode(syncMode)
+			d.Role = Role(role)
+			d.IsOwner = d.Role == RoleOwner
+			return d, nil
+		}, tid, userID)
 }

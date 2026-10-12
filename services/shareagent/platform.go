@@ -31,7 +31,12 @@ func (s *Service) handlePlatformTenants(w http.ResponseWriter, r *http.Request) 
 		httpx.Unavailable(w, "tenant registry")
 		return
 	}
-	tenants := s.Tenants.ListTenants(r.Context())
+	tenants, err := s.Tenants.ListTenants(r.Context())
+	if err != nil {
+		obs.ServerError(w, "list tenants failed", err)
+		httpx.Error(w, "list tenants failed", http.StatusInternalServerError)
+		return
+	}
 	views := make([]platformTenantView, 0, len(tenants))
 	for _, t := range tenants {
 		views = append(views, platformTenantView{

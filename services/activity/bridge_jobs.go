@@ -392,7 +392,13 @@ func (s *Service) handleRoomAgentJobs(w http.ResponseWriter, r *http.Request) {
 	if !s.authorize(w, r, roomID) {
 		return
 	}
-	httpx.WriteJSON(w, http.StatusOK, map[string]any{"jobs": s.BridgeJobs.ListAgentJobs(r.Context(), roomID, r.URL.Query().Get("channelId"), 100)})
+	jobs, err := s.BridgeJobs.ListAgentJobs(r.Context(), roomID, r.URL.Query().Get("channelId"), 100)
+	if err != nil {
+		obs.ServerError(w, "list agent jobs failed", err)
+		httpx.Error(w, "list agent jobs failed", http.StatusInternalServerError)
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"jobs": jobs})
 }
 
 // handleMyAgents returns the CALLER's own bridge-advertised agents across all
@@ -405,7 +411,12 @@ func (s *Service) handleMyAgents(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, "missing authenticated subject", http.StatusUnauthorized)
 		return
 	}
-	agents := s.BridgeJobs.ListBridgeAgentsForOwner(r.Context(), caller)
+	agents, err := s.BridgeJobs.ListBridgeAgentsForOwner(r.Context(), caller)
+	if err != nil {
+		obs.ServerError(w, "list bridge agents failed", err)
+		httpx.Error(w, "list bridge agents failed", http.StatusInternalServerError)
+		return
+	}
 	type out struct {
 		Core         string                  `json:"core"`
 		Provider     string                  `json:"provider"`

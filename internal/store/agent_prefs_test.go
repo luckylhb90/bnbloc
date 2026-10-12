@@ -35,13 +35,13 @@ func exerciseAgentPrefs(t *testing.T, s AgentPrefsStore, room string) {
 	t.Helper()
 	ctx := tenantCtx("default")
 
-	if _, ok := s.GetAgentPrefs(ctx, room, "ch1", "u1"); ok {
+	if _, ok := must2(s.GetAgentPrefs(ctx, room, "ch1", "u1"))(t); ok {
 		t.Fatal("absent prefs reported present")
 	}
 	if err := s.PutAgentPrefs(ctx, AgentPrefs{RoomID: room, ChannelID: "ch1", OwnerID: "Jack", Core: "nimbus", Provider: "codex", Model: "gpt-x", Reasoning: "high", UpdatedAtMs: 1}, "u1"); err != nil {
 		t.Fatalf("put: %v", err)
 	}
-	got, ok := s.GetAgentPrefs(ctx, room, "ch1", "u1")
+	got, ok := must2(s.GetAgentPrefs(ctx, room, "ch1", "u1"))(t)
 	if !ok || got.OwnerID != "Jack" || got.Core != "nimbus" || got.Provider != "codex" || got.Model != "gpt-x" || got.Reasoning != "high" {
 		t.Fatalf("got %+v ok=%v", got, ok)
 	}
@@ -50,10 +50,10 @@ func exerciseAgentPrefs(t *testing.T, s AgentPrefsStore, room string) {
 	if err := s.PutAgentPrefs(ctx, AgentPrefs{RoomID: room, ChannelID: "", OwnerID: "u1", Core: "nimbus", Provider: "claude-code", UpdatedAtMs: 2}, "u1"); err != nil {
 		t.Fatalf("put room-level: %v", err)
 	}
-	if got, _ := s.GetAgentPrefs(ctx, room, "", "u1"); got.Provider != "claude-code" || got.OwnerID != "u1" {
+	if got, _ := must2(s.GetAgentPrefs(ctx, room, "", "u1"))(t); got.Provider != "claude-code" || got.OwnerID != "u1" {
 		t.Fatalf("room-level = %+v", got)
 	}
-	if _, ok := s.GetAgentPrefs(ctx, room, "ch1", "u2"); ok {
+	if _, ok := must2(s.GetAgentPrefs(ctx, room, "ch1", "u2"))(t); ok {
 		t.Fatal("user isolation broken: u2 sees u1 prefs")
 	}
 
@@ -61,7 +61,7 @@ func exerciseAgentPrefs(t *testing.T, s AgentPrefsStore, room string) {
 	if err := s.PutAgentPrefs(ctx, AgentPrefs{RoomID: room, ChannelID: "ch1", OwnerID: "u1", Core: "nimbus", Provider: "opencode", UpdatedAtMs: 3}, "u1"); err != nil {
 		t.Fatalf("upsert: %v", err)
 	}
-	if got, _ := s.GetAgentPrefs(ctx, room, "ch1", "u1"); got.Provider != "opencode" || got.Model != "" || got.OwnerID != "u1" {
+	if got, _ := must2(s.GetAgentPrefs(ctx, room, "ch1", "u1"))(t); got.Provider != "opencode" || got.Model != "" || got.OwnerID != "u1" {
 		t.Fatalf("upsert = %+v, want replaced row", got)
 	}
 }

@@ -135,7 +135,7 @@ WHERE tenant_id=? AND share_id=?`, atMs, tid, shareID)
 }
 
 // scanArtifactShare reads artifactShareCols, then any extra columns.
-func scanArtifactShare(row artifactScanner, extra ...any) (ArtifactShare, error) {
+func scanArtifactShare(row rowScanner, extra ...any) (ArtifactShare, error) {
 	var sh ArtifactShare
 	var revokedAt, lastViewed sql.NullInt64
 	var revokedBy sql.NullString

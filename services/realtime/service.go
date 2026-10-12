@@ -51,6 +51,17 @@ const (
 // history read, read cursor, typing hint, or stream into another room's stream.
 var errUnknownChannel = errors.New("channel not found in room")
 
+// writeChannelErr answers a resolveChannel error: 404 for an unknown
+// channel, a logged 500 for a failed channel read.
+func writeChannelErr(w http.ResponseWriter, err error) {
+	if errors.Is(err, errUnknownChannel) {
+		httpx.Error(w, err.Error(), http.StatusNotFound)
+		return
+	}
+	obs.ServerError(w, "channel lookup failed", err)
+	httpx.Error(w, "channel lookup failed", http.StatusInternalServerError)
+}
+
 // errAgentInPeopleChat rejects an agent recipient (or an agent reply) in the
 // room's people chat: it is a human-only conversation agents never see.
 var errAgentInPeopleChat = errors.New("agents cannot be addressed in the people chat")
@@ -148,7 +159,7 @@ type ChatStore interface {
 	MarkRead(ctx context.Context, roomID, channelID, userID string, seq, atMs int64) error
 	UnreadCount(ctx context.Context, roomID, channelID, userID string) (int, error)
 	MaxRoomSeq(ctx context.Context, roomID, channelID string) (int64, error)
-	LookupClientMsg(ctx context.Context, roomID, clientMsgID string) (int64, bool)
+	LookupClientMsg(ctx context.Context, roomID, clientMsgID string) (int64, bool, error)
 	DeleteRoomMessage(ctx context.Context, roomID string, seq int64, requester string, atMs int64) (bool, error)
 	EditRoomMessage(ctx context.Context, roomID string, seq int64, requester, text string, atMs int64) (edited bool, err error)
 	// GetRoomMessage returns one live message by sequence (found=false when
@@ -163,11 +174,11 @@ type ChatStore interface {
 // the channel list for unread aggregation.
 type ChannelStore interface {
 	// GetChannel returns a live channel of the room, found=false otherwise.
-	GetChannel(ctx context.Context, roomID, channelID string) (store.RoomChannel, bool)
+	GetChannel(ctx context.Context, roomID, channelID string) (store.RoomChannel, bool, error)
 	// DefaultChannel returns the room's default channel, found=false when none.
-	DefaultChannel(ctx context.Context, roomID string) (store.RoomChannel, bool)
+	DefaultChannel(ctx context.Context, roomID string) (store.RoomChannel, bool, error)
 	// ListChannels returns the room's live channels, default first.
-	ListChannels(ctx context.Context, roomID string) []store.RoomChannel
+	ListChannels(ctx context.Context, roomID string) ([]store.RoomChannel, error)
 	// ChannelKind reads a channel's kind, reporting read failures so the
 	// people-chat guards fail closed.
 	ChannelKind(ctx context.Context, roomID, channelID string) (kind string, found bool, err error)
@@ -258,7 +269,11 @@ func (s *Service) Handler() http.Handler {
 func (s *Service) resolveChannel(ctx context.Context, roomID, channelID string) (string, error) {
 	if channelID = strings.TrimSpace(channelID); channelID != "" {
 		if s.Channels != nil {
-			if _, ok := s.Channels.GetChannel(ctx, roomID, channelID); !ok {
+			_, ok, err := s.Channels.GetChannel(ctx, roomID, channelID)
+			if err != nil {
+				return "", fmt.Errorf("%w: %w", errChannelLookup, err)
+			}
+			if !ok {
 				return "", errUnknownChannel
 			}
 		}
@@ -267,7 +282,10 @@ func (s *Service) resolveChannel(ctx context.Context, roomID, channelID string) 
 	if s.Channels == nil {
 		return "", nil
 	}
-	def, ok := s.Channels.DefaultChannel(ctx, roomID)
+	def, ok, err := s.Channels.DefaultChannel(ctx, roomID)
+	if err != nil {
+		return "", fmt.Errorf("%w: %w", errChannelLookup, err)
+	}
 	if !ok {
 		return "", errUnknownChannel
 	}
@@ -386,7 +404,7 @@ func (s *Service) handleEvents(w http.ResponseWriter, r *http.Request) {
 	if !allChannels {
 		var err error
 		if channelID, err = s.resolveChannel(r.Context(), roomID, r.URL.Query().Get("channelId")); err != nil {
-			httpx.Error(w, err.Error(), http.StatusNotFound)
+			writeChannelErr(w, err)
 			return
 		}
 		if !human && !s.agentMayReadChannel(w, r.Context(), roomID, channelID) {
@@ -776,7 +794,7 @@ func (s *Service) handleHistory(w http.ResponseWriter, r *http.Request) {
 	}
 	channelID, err := s.resolveChannel(r.Context(), roomID, r.URL.Query().Get("channelId"))
 	if err != nil {
-		httpx.Error(w, err.Error(), http.StatusNotFound)
+		writeChannelErr(w, err)
 		return
 	}
 	if !m.IsHuman() && !s.agentMayReadChannel(w, r.Context(), roomID, channelID) {
@@ -834,7 +852,7 @@ func (s *Service) handleMarkRead(w http.ResponseWriter, r *http.Request) {
 	if s.Chat != nil {
 		channelID, err := s.resolveChannel(r.Context(), roomID, body.ChannelId)
 		if err != nil {
-			httpx.Error(w, err.Error(), http.StatusNotFound)
+			writeChannelErr(w, err)
 			return
 		}
 		if err := s.Chat.MarkRead(r.Context(), roomID, channelID, userID, body.Seq, time.Now().UnixMilli()); err != nil {
@@ -1005,7 +1023,12 @@ func (s *Service) handleUnread(w http.ResponseWriter, r *http.Request) {
 					total = n
 				}
 			} else {
-				for _, ch := range s.Channels.ListChannels(ctx, roomID) {
+				channels, err := s.Channels.ListChannels(ctx, roomID)
+				if err != nil {
+					log.Printf("realtime: unread room=%s user=%s: channels: %v", roomID, userID, err)
+					continue
+				}
+				for _, ch := range channels {
 					n, err := s.Chat.UnreadCount(ctx, roomID, ch.ChannelID, userID)
 					if err != nil || n == 0 {
 						continue
@@ -1046,7 +1069,7 @@ func (s *Service) handleTyping(w http.ResponseWriter, r *http.Request) {
 	}
 	channelID, err := s.resolveChannel(r.Context(), roomID, body.ChannelId)
 	if err != nil {
-		httpx.Error(w, err.Error(), http.StatusNotFound)
+		writeChannelErr(w, err)
 		return
 	}
 	_, _ = s.publish(r.Context(), wire.Event{

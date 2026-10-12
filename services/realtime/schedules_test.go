@@ -58,9 +58,9 @@ func (r schedRoles) GetRoom(_ context.Context, roomID string) (store.Room, error
 	return store.Room{RoomID: roomID}, nil
 }
 
-func (r schedRoles) MemberRole(_ context.Context, roomID, userID string) (store.Role, bool) {
+func (r schedRoles) MemberRole(_ context.Context, roomID, userID string) (store.Role, bool, error) {
 	role, ok := r.roles[roomID+"\x00"+userID]
-	return role, ok
+	return role, ok, nil
 }
 
 type schedFixture struct {
@@ -217,7 +217,10 @@ func TestScheduleRunPostsAsCreatorThroughChatPath(t *testing.T) {
 	}
 	// The agent job the bridge claims by recipient exists, requested by the
 	// creator (the bridge enforces bob's borrow authorization at drive time).
-	jobs := f.jobs.ListAgentJobs(tenant.NewContext(context.Background(), tenant.Default), "room-1", "", 10)
+	jobs, err := f.jobs.ListAgentJobs(tenant.NewContext(context.Background(), tenant.Default), "room-1", "", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(jobs) != 1 || jobs[0].RequesterUserID != "alice" || jobs[0].OwnerUserID != "bob" || jobs[0].TargetID != "c1/codex" {
 		t.Fatalf("agent jobs = %+v", jobs)
 	}

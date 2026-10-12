@@ -95,10 +95,10 @@ func (s *MySQLQuotaRequests) GetQuotaRequest(ctx context.Context, requestID stri
 }
 
 // ListQuotaRequests returns matching requests newest-first.
-func (s *MySQLQuotaRequests) ListQuotaRequests(ctx context.Context, q QuotaRequestQuery) []QuotaRequest {
+func (s *MySQLQuotaRequests) ListQuotaRequests(ctx context.Context, q QuotaRequestQuery) ([]QuotaRequest, error) {
 	tnt, err := tenant.Require(ctx)
 	if err != nil {
-		return nil
+		return nil, err
 	}
 	where := "tenant_id = ?"
 	args := []any{tnt}
@@ -119,20 +119,18 @@ func (s *MySQLQuotaRequests) ListQuotaRequests(ctx context.Context, q QuotaReque
 		args = append(args, string(q.Status))
 	}
 	args = append(args, quotaListLimit(q.Limit))
-	rows, err := s.DB.QueryContext(ctx,
+	out, err := queryAll(ctx, s.DB,
 		`SELECT `+quotaRequestCols+` FROM shared_agent_quota_requests WHERE `+where+
-			` ORDER BY created_at_ms DESC LIMIT ?`, args...)
+			` ORDER BY created_at_ms DESC LIMIT ?`, func(r rowScanner) (QuotaRequest, error) {
+			return scanQuotaRequest(r.Scan, tnt)
+		}, args...)
 	if err != nil {
-		return nil
+		return nil, err
 	}
-	defer rows.Close()
-	out := []QuotaRequest{}
-	for rows.Next() {
-		if r, err := scanQuotaRequest(rows.Scan, tnt); err == nil {
-			out = append(out, r)
-		}
+	if out == nil {
+		out = []QuotaRequest{}
 	}
-	return out
+	return out, nil
 }
 
 // DecideQuotaRequest moves a pending request owned by the decider to its

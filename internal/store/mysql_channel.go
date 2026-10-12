@@ -40,10 +40,10 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 	return err
 }
 
-func (m *MySQLChannel) GetChannel(ctx context.Context, roomID, channelID string) (RoomChannel, bool) {
+func (m *MySQLChannel) GetChannel(ctx context.Context, roomID, channelID string) (RoomChannel, bool, error) {
 	tnt, err := tenant.Require(ctx)
 	if err != nil {
-		return RoomChannel{}, false
+		return RoomChannel{}, false, err
 	}
 	return m.scanChannel(ctx, `
 SELECT `+channelColumns+` FROM room_channels
@@ -52,35 +52,22 @@ WHERE tenant_id = ? AND room_id = ? AND channel_id = ? AND deleted_at_ms IS NULL
 }
 
 // ListChannels returns a room's live channels, default first then oldest first.
-func (m *MySQLChannel) ListChannels(ctx context.Context, roomID string) []RoomChannel {
+func (m *MySQLChannel) ListChannels(ctx context.Context, roomID string) ([]RoomChannel, error) {
 	tnt, err := tenant.Require(ctx)
 	if err != nil {
-		return nil
+		return nil, err
 	}
-	rows, err := m.DB.QueryContext(ctx, `
+	return queryAll(ctx, m.DB, `
 SELECT `+channelColumns+` FROM room_channels
 WHERE tenant_id = ? AND room_id = ? AND deleted_at_ms IS NULL
-ORDER BY is_default DESC, created_at_ms ASC`, tnt, roomID)
-	if err != nil {
-		return nil
-	}
-	defer rows.Close()
-	var out []RoomChannel
-	for rows.Next() {
-		c, err := scanChannelRow(rows)
-		if err != nil {
-			return out
-		}
-		out = append(out, c)
-	}
-	return out
+ORDER BY is_default DESC, created_at_ms ASC`, scanChannelRow, tnt, roomID)
 }
 
 // DefaultChannel returns a room's default channel, found=false when none.
-func (m *MySQLChannel) DefaultChannel(ctx context.Context, roomID string) (RoomChannel, bool) {
+func (m *MySQLChannel) DefaultChannel(ctx context.Context, roomID string) (RoomChannel, bool, error) {
 	tnt, err := tenant.Require(ctx)
 	if err != nil {
-		return RoomChannel{}, false
+		return RoomChannel{}, false, err
 	}
 	return m.scanChannel(ctx, `
 SELECT `+channelColumns+` FROM room_channels
@@ -122,14 +109,17 @@ WHERE tenant_id = ? AND room_id = ? AND channel_id = ? AND deleted_at_ms IS NULL
 	return nil
 }
 
-// scanChannel runs a single-row channel query. A missing row (like any query
-// error) maps to found=false, mirroring the memory store's lookup contract.
-func (m *MySQLChannel) scanChannel(ctx context.Context, query string, args ...any) (RoomChannel, bool) {
+// scanChannel runs a single-row channel query: a missing row is found=false,
+// any other failure an error.
+func (m *MySQLChannel) scanChannel(ctx context.Context, query string, args ...any) (RoomChannel, bool, error) {
 	c, err := scanChannelRow(m.DB.QueryRowContext(ctx, query, args...))
-	if err != nil {
-		return RoomChannel{}, false
+	if errors.Is(err, sql.ErrNoRows) {
+		return RoomChannel{}, false, nil
 	}
-	return c, true
+	if err != nil {
+		return RoomChannel{}, false, err
+	}
+	return c, true, nil
 }
 
 // channelColumns is the column list scanChannelRow reads, in order.
@@ -176,10 +166,7 @@ SELECT kind FROM room_channels WHERE tenant_id = ? AND room_id = ? AND channel_i
 	return kind, true, nil
 }
 
-// channelScanner is satisfied by both *sql.Row and *sql.Rows.
-type channelScanner interface{ Scan(dest ...any) error }
-
-func scanChannelRow(sc channelScanner) (RoomChannel, error) {
+func scanChannelRow(sc rowScanner) (RoomChannel, error) {
 	var c RoomChannel
 	err := sc.Scan(&c.ChannelID, &c.TenantID, &c.RoomID, &c.Name, &c.IsDefault, &c.Kind, &c.CreatedBy, &c.CreatedAtMs, &c.DeletedAtMs)
 	return c, err

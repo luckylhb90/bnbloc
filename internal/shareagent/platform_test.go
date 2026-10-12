@@ -45,8 +45,12 @@ func TestRoomPlatformGrantsAvailability(t *testing.T) {
 	}
 	policy := wire.PlatformAgentsPolicy{Hosts: []wire.PlatformAgentHost{{HostUserID: "root", Enabled: true,
 		Agents: []wire.PlatformAgentSpec{{Core: "c", Provider: "codex"}, {Core: "c", Provider: "claude"}}}}}
+	pgs, err := RoomPlatformGrants(ctx, grants, policy, "room-1", 100)
+	if err != nil {
+		t.Fatal(err)
+	}
 	got := map[string]bool{}
-	for _, pg := range RoomPlatformGrants(ctx, grants, policy, "room-1", 100) {
+	for _, pg := range pgs {
 		got[pg.Grant.GrantID] = pg.Available
 	}
 	want := map[string]bool{"live": true, "expired": false, "unpublished": false, "other-host": false}
@@ -79,8 +83,12 @@ func TestRoomPlatformGrantsMultiHost(t *testing.T) {
 		{HostUserID: "root2", Enabled: true, Agents: codex},
 		{HostUserID: "root3", Enabled: false, Agents: codex},
 	}}
+	pgs, err := RoomPlatformGrants(ctx, grants, policy, "room-1", 100)
+	if err != nil {
+		t.Fatal(err)
+	}
 	got := map[string]bool{}
-	for _, pg := range RoomPlatformGrants(ctx, grants, policy, "room-1", 100) {
+	for _, pg := range pgs {
 		got[pg.Grant.GrantID] = pg.Available
 	}
 	if !got["root"] || !got["root2"] || got["root3"] {
@@ -90,8 +98,8 @@ func TestRoomPlatformGrantsMultiHost(t *testing.T) {
 
 type fixedAds map[string][]store.BridgeAgent
 
-func (f fixedAds) ListBridgeAgentsForOwner(_ context.Context, owner string) []store.BridgeAgent {
-	return f[owner]
+func (f fixedAds) ListBridgeAgentsForOwner(_ context.Context, owner string) ([]store.BridgeAgent, error) {
+	return f[owner], nil
 }
 
 // A chat is a platform drive only for someone else's agent the room holds an
@@ -106,19 +114,19 @@ func TestReadPlatformDrive(t *testing.T) {
 	codex := wire.PlatformAgentRef{Core: "c", Provider: "codex"}
 	offline := fixedAds{}
 	online := fixedAds{"root": {{OwnerUserID: "root", Core: "c", Provider: "codex", TargetID: "c/codex"}}}
-	if d := ReadPlatformDrive(ctx, grants, policy, offline, "room-1", "bob", "root", codex, 1); !d.Platform || d.Online {
+	if d, err := ReadPlatformDrive(ctx, grants, policy, offline, "room-1", "bob", "root", codex, 1); err != nil || !d.Platform || d.Online {
 		t.Fatalf("offline host = %+v", d)
 	}
-	if d := ReadPlatformDrive(ctx, grants, policy, online, "room-1", "bob", "root", codex, 1); !d.Platform || !d.Online {
+	if d, err := ReadPlatformDrive(ctx, grants, policy, online, "room-1", "bob", "root", codex, 1); err != nil || !d.Platform || !d.Online {
 		t.Fatalf("online host = %+v", d)
 	}
-	if d := ReadPlatformDrive(ctx, grants, policy, offline, "room-1", "root", "root", codex, 1); d.Platform {
+	if d, err := ReadPlatformDrive(ctx, grants, policy, offline, "room-1", "root", "root", codex, 1); err != nil || d.Platform {
 		t.Fatal("the host driving their own agent is not a platform drive")
 	}
-	if d := ReadPlatformDrive(ctx, grants, policy, offline, "room-1", "bob", "alice", wire.PlatformAgentRef{Core: "c", Provider: "claude"}, 1); d.Platform {
+	if d, err := ReadPlatformDrive(ctx, grants, policy, offline, "room-1", "bob", "alice", wire.PlatformAgentRef{Core: "c", Provider: "claude"}, 1); err != nil || d.Platform {
 		t.Fatal("an owner-issued borrow is not a platform drive")
 	}
-	if d := ReadPlatformDrive(ctx, grants, wire.PlatformAgentsPolicy{}, offline, "room-1", "bob", "root", codex, 1); d.Platform {
+	if d, err := ReadPlatformDrive(ctx, grants, wire.PlatformAgentsPolicy{}, offline, "room-1", "bob", "root", codex, 1); err != nil || d.Platform {
 		t.Fatal("an unpublished agent is not a platform drive")
 	}
 }

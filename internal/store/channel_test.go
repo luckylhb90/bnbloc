@@ -21,7 +21,7 @@ func TestMemoryChannelDefaultAndCRUD(t *testing.T) {
 		t.Fatalf("put channel: %v", err)
 	}
 
-	list := s.ListChannels(ctx, "room-1")
+	list := must(s.ListChannels(ctx, "room-1"))(t)
 	if len(list) != 2 {
 		t.Fatalf("list len = %d, want 2", len(list))
 	}
@@ -30,12 +30,12 @@ func TestMemoryChannelDefaultAndCRUD(t *testing.T) {
 		t.Fatalf("first listed channel should be the default, got %+v", list[0])
 	}
 
-	d, ok := s.DefaultChannel(ctx, "room-1")
+	d, ok := must2(s.DefaultChannel(ctx, "room-1"))(t)
 	if !ok || d.ChannelID != "ch_def" {
 		t.Fatalf("default = %+v,%v want ch_def", d, ok)
 	}
 
-	got, ok := s.GetChannel(ctx, "room-1", "ch_fe")
+	got, ok := must2(s.GetChannel(ctx, "room-1", "ch_fe"))(t)
 	if !ok || got.Name != "frontend" {
 		t.Fatalf("get = %+v,%v", got, ok)
 	}
@@ -43,14 +43,14 @@ func TestMemoryChannelDefaultAndCRUD(t *testing.T) {
 	if err := s.DeleteChannel(ctx, "room-1", "ch_fe", 3); err != nil {
 		t.Fatalf("delete: %v", err)
 	}
-	if _, ok := s.GetChannel(ctx, "room-1", "ch_fe"); ok {
+	if _, ok := must2(s.GetChannel(ctx, "room-1", "ch_fe"))(t); ok {
 		t.Fatal("deleted channel still present in GetChannel")
 	}
 	// A soft-deleted channel disappears from every live view, not just Get.
-	if got := s.ListChannels(ctx, "room-1"); len(got) != 1 || got[0].ChannelID != "ch_def" {
+	if got := must(s.ListChannels(ctx, "room-1"))(t); len(got) != 1 || got[0].ChannelID != "ch_def" {
 		t.Fatalf("after delete, list = %+v, want only ch_def", got)
 	}
-	if _, ok := s.DefaultChannel(ctx, "room-1"); !ok {
+	if _, ok := must2(s.DefaultChannel(ctx, "room-1"))(t); !ok {
 		t.Fatal("default channel must survive a sibling's deletion")
 	}
 }
@@ -72,23 +72,23 @@ func TestMemoryChannelTenantIsolation(t *testing.T) {
 	put(ctxA, "ch_a", "general", true)
 	put(ctxB, "ch_b", "general", true) // same room id, other tenant
 
-	if got := s.ListChannels(ctxA, "room-1"); len(got) != 1 || got[0].ChannelID != "ch_a" {
+	if got := must(s.ListChannels(ctxA, "room-1"))(t); len(got) != 1 || got[0].ChannelID != "ch_a" {
 		t.Fatalf("tenant A list = %+v, want only ch_a", got)
 	}
-	if got := s.ListChannels(ctxB, "room-1"); len(got) != 1 || got[0].ChannelID != "ch_b" {
+	if got := must(s.ListChannels(ctxB, "room-1"))(t); len(got) != 1 || got[0].ChannelID != "ch_b" {
 		t.Fatalf("tenant B list = %+v, want only ch_b", got)
 	}
-	if _, ok := s.GetChannel(ctxA, "room-1", "ch_b"); ok {
+	if _, ok := must2(s.GetChannel(ctxA, "room-1", "ch_b"))(t); ok {
 		t.Fatal("tenant A must not read tenant B's channel")
 	}
-	if _, ok := s.DefaultChannel(ctxB, "room-1"); !ok {
+	if _, ok := must2(s.DefaultChannel(ctxB, "room-1"))(t); !ok {
 		t.Fatal("tenant B must see its own default channel")
 	}
 	// A delete under tenant B never removes tenant A's channel.
 	if err := s.DeleteChannel(ctxB, "room-1", "ch_a", 9); err != nil {
 		t.Fatalf("cross-tenant delete call errored: %v", err)
 	}
-	if _, ok := s.GetChannel(ctxA, "room-1", "ch_a"); !ok {
+	if _, ok := must2(s.GetChannel(ctxA, "room-1", "ch_a"))(t); !ok {
 		t.Fatal("tenant B's delete removed tenant A's channel")
 	}
 }
@@ -107,10 +107,10 @@ func TestMemoryChannelRenameDoesNotResurrect(t *testing.T) {
 	if err := s.RenameChannel(ctx, "room-1", "ch_fe", "renamed"); err != ErrChannelNotFound {
 		t.Fatalf("rename of deleted channel = %v, want ErrChannelNotFound", err)
 	}
-	if _, ok := s.GetChannel(ctx, "room-1", "ch_fe"); ok {
+	if _, ok := must2(s.GetChannel(ctx, "room-1", "ch_fe"))(t); ok {
 		t.Fatal("deleted channel must stay deleted after a failed rename")
 	}
-	if got := s.ListChannels(ctx, "room-1"); len(got) != 0 {
+	if got := must(s.ListChannels(ctx, "room-1"))(t); len(got) != 0 {
 		t.Fatalf("list after delete+failed rename = %+v, want empty", got)
 	}
 	// Sanity: renaming a live channel does rename it.
@@ -120,7 +120,7 @@ func TestMemoryChannelRenameDoesNotResurrect(t *testing.T) {
 	if err := s.RenameChannel(ctx, "room-1", "ch_ok", "ok-v2"); err != nil {
 		t.Fatalf("rename live: %v", err)
 	}
-	if c, ok := s.GetChannel(ctx, "room-1", "ch_ok"); !ok || c.Name != "ok-v2" {
+	if c, ok := must2(s.GetChannel(ctx, "room-1", "ch_ok"))(t); !ok || c.Name != "ok-v2" {
 		t.Fatalf("live rename result = %+v,%v want ok-v2", c, ok)
 	}
 	// Renaming an absent channel is also ErrChannelNotFound.
@@ -143,14 +143,14 @@ func TestCreateRoomWithOwnerAndChannelSeedsDefault(t *testing.T) {
 	if _, err := rooms.GetRoom(ctx, "r1"); err != nil {
 		t.Fatalf("room missing after create: %v", err)
 	}
-	if role, ok := rooms.MemberRole(ctx, "r1", "alice"); !ok || role != RoleOwner {
+	if role, ok := must2(rooms.MemberRole(ctx, "r1", "alice"))(t); !ok || role != RoleOwner {
 		t.Fatalf("owner role = %v,%v want owner", role, ok)
 	}
-	got, ok := channels.DefaultChannel(ctx, "r1")
+	got, ok := must2(channels.DefaultChannel(ctx, "r1"))(t)
 	if !ok || got.ChannelID != "ch_gen" || got.Name != "general" || !got.IsDefault {
 		t.Fatalf("default via view = %+v,%v want ch_gen/general/default", got, ok)
 	}
-	if list := channels.ListChannels(ctx, "r1"); len(list) != 1 || !list[0].IsDefault {
+	if list := must(channels.ListChannels(ctx, "r1"))(t); len(list) != 1 || !list[0].IsDefault {
 		t.Fatalf("list via view = %+v, want exactly the default", list)
 	}
 }

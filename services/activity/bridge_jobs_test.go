@@ -77,7 +77,10 @@ func TestJobStatusRejectsForeignBridgeOwner(t *testing.T) {
 	if len(pub.events) != 0 {
 		t.Fatalf("published %d events on rejection, want 0", len(pub.events))
 	}
-	got := jobs.ListAgentJobs(tenant.NewContext(context.Background(), tenant.Default), "room-1", "", 10)
+	got, err := jobs.ListAgentJobs(tenant.NewContext(context.Background(), tenant.Default), "room-1", "", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(got) != 1 || got[0].Status != store.AgentJobClaimed {
 		t.Fatalf("job status = %+v, want still claimed", got)
 	}
@@ -201,7 +204,10 @@ func TestCancelRejectsNonMember(t *testing.T) {
 	if resp.StatusCode != http.StatusForbidden {
 		t.Fatalf("status = %d, want 403", resp.StatusCode)
 	}
-	got := jobs.ListAgentJobs(tenant.NewContext(context.Background(), tenant.Default), "room-1", "", 10)
+	got, err := jobs.ListAgentJobs(tenant.NewContext(context.Background(), tenant.Default), "room-1", "", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(got) != 1 || got[0].Status == store.AgentJobCancelled {
 		t.Fatalf("job = %+v, want untouched", got)
 	}

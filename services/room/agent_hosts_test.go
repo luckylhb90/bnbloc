@@ -74,14 +74,21 @@ func TestAgentHostRoutesViaMembershipClient(t *testing.T) {
 	if err := rc.DeleteAgentHost(ctx, tenant.Default, "room-1", "bob"); err != nil {
 		t.Fatal(err)
 	}
-	if mb, _ := svc.Store.GetMember(dctx(), "room-1", "bob"); mb.AgentHost || mb.Role != store.RoleMember {
+	mb, _, err := svc.Store.GetMember(dctx(), "room-1", "bob")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if mb.AgentHost || mb.Role != store.RoleMember {
 		t.Fatalf("bob after agent-host writes = %+v", mb)
 	}
 	if err := rc.DeleteAgentHost(ctx, tenant.Default, "room-1", "root"); err != nil {
 		t.Fatalf("delete: %v", err)
 	}
-	if _, member := rc.Lookup("room-1", "root"); member || svc.Store.IsMember(dctx(), "room-1", "root") {
+	if _, member := rc.Lookup("room-1", "root"); member {
 		t.Fatal("the agent host survived its removal (the client cache must be dropped too)")
+	}
+	if member, err := svc.Store.IsMember(dctx(), "room-1", "root"); err != nil || member {
+		t.Fatalf("the agent host survived its removal: member=%v err=%v", member, err)
 	}
 	if err := rc.DeleteAgentHost(ctx, tenant.Default, "room-1", "root"); err != nil {
 		t.Fatalf("delete of an absent agent host = %v, want nil", err)
@@ -169,7 +176,11 @@ func TestAgentHostHumanOnlySurfaces(t *testing.T) {
 	if joined["role"] != string(store.RoleMember) {
 		t.Fatalf("join = %v", joined)
 	}
-	if m, _ := svc.Store.GetMember(dctx(), "room-1", "root"); m.AgentHost {
+	m, _, err := svc.Store.GetMember(dctx(), "room-1", "root")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m.AgentHost {
 		t.Fatal("joining must make the agent host a human member")
 	}
 }
@@ -182,17 +193,25 @@ func TestAgentHostNotExportedAsMember(t *testing.T) {
 	if err := svc.Store.AddAgentHost(dctx(), "room-1", "root", 3); err != nil {
 		t.Fatal(err)
 	}
-	for _, m := range svc.Store.Members(dctx(), "room-1") {
+	members, err := svc.Store.Members(dctx(), "room-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, m := range members {
 		if m.UserID == "root" && !m.AgentHost {
 			t.Fatal("seed")
 		}
 	}
 	e := &roomExporter{svc: svc, ctx: dctx(), room: store.Room{RoomID: "room-1"}}
-	members := e.manifest(0, 0).Members
-	if len(members) != 2 {
-		t.Fatalf("exported members = %+v; want alice and bob", members)
+	manifest, err := e.manifest(0, 0)
+	if err != nil {
+		t.Fatal(err)
 	}
-	for _, m := range members {
+	exported := manifest.Members
+	if len(exported) != 2 {
+		t.Fatalf("exported members = %+v; want alice and bob", exported)
+	}
+	for _, m := range exported {
 		if m.UserID == "root" {
 			t.Fatal("the handoff manifest exported an agent host as a member")
 		}

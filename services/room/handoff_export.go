@@ -38,7 +38,12 @@ func (s *Service) handleExportRoom(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, "missing authenticated subject", http.StatusUnauthorized)
 		return
 	}
-	role, ok := s.Store.MemberRole(r.Context(), roomID, user)
+	role, ok, err := s.Store.MemberRole(r.Context(), roomID, user)
+	if err != nil {
+		obs.ServerError(w, "read membership failed", err)
+		httpx.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
 	if !ok {
 		httpx.Error(w, "caller is not a member of room", http.StatusForbidden)
 		return
@@ -123,7 +128,11 @@ func (e *roomExporter) writeJSON(name string, v any) error {
 }
 
 func (e *roomExporter) run(first []wire.FeedMessage) error {
-	e.channels = e.svc.Channels.ListChannels(e.ctx, e.room.RoomID)
+	channels, err := e.svc.Channels.ListChannels(e.ctx, e.room.RoomID)
+	if err != nil {
+		return fmt.Errorf("channels: %w", err)
+	}
+	e.channels = channels
 	e.channelNames = map[string]string{}
 	e.peopleChannels = map[string]bool{}
 	for _, c := range e.channels {
@@ -146,7 +155,11 @@ func (e *roomExporter) run(first []wire.FeedMessage) error {
 	if err != nil {
 		return fmt.Errorf("artifacts: %w", err)
 	}
-	return e.writeJSON("manifest.json", e.manifest(attachmentCount, artifactCount))
+	m, err := e.manifest(attachmentCount, artifactCount)
+	if err != nil {
+		return fmt.Errorf("members: %w", err)
+	}
+	return e.writeJSON("manifest.json", m)
 }
 
 // eachFeed pages the room feed forward from the start, calling fn per row.
@@ -425,7 +438,10 @@ func (e *roomExporter) writeArtifacts() (int, error) {
 	}
 	sort.Slice(arts, func(i, j int) bool { return arts[i].CreatedAtMs < arts[j].CreatedAtMs })
 	for _, a := range arts {
-		versions := e.svc.Artifacts.ListArtifactVersions(e.ctx, a.ArtifactID, maxHandoffArtifactVersions)
+		versions, err := e.svc.Artifacts.ListArtifactVersions(e.ctx, a.ArtifactID, maxHandoffArtifactVersions)
+		if err != nil {
+			return 0, err
+		}
 		sort.Slice(versions, func(i, j int) bool { return versions[i].Version < versions[j].Version })
 		dir := "artifacts/" + packageSegment(a.ArtifactID) + "/"
 		meta := wire.RoomExportArtifact{
@@ -484,7 +500,7 @@ func (e *roomExporter) writeArtifactVersion(file string, v store.ArtifactVersion
 	return err
 }
 
-func (e *roomExporter) manifest(attachmentCount, artifactCount int) wire.RoomExportManifest {
+func (e *roomExporter) manifest(attachmentCount, artifactCount int) (wire.RoomExportManifest, error) {
 	m := wire.RoomExportManifest{
 		Format:       wire.RoomExportFormat,
 		ExportedAtMs: e.now,
@@ -507,7 +523,11 @@ func (e *roomExporter) manifest(attachmentCount, artifactCount int) wire.RoomExp
 		}
 		m.Channels = append(m.Channels, ch)
 	}
-	for _, mem := range e.svc.Store.Members(e.ctx, e.room.RoomID) {
+	members, err := e.svc.Store.Members(e.ctx, e.room.RoomID)
+	if err != nil {
+		return m, err
+	}
+	for _, mem := range members {
 		// An agent host is not a person of the room; an import would make it
 		// a human member.
 		if mem.AgentHost {
@@ -521,5 +541,5 @@ func (e *roomExporter) manifest(attachmentCount, artifactCount int) wire.RoomExp
 	for _, k := range e.sessionOrder {
 		m.AgentSessions = append(m.AgentSessions, *e.sessions[k])
 	}
-	return m
+	return m, nil
 }

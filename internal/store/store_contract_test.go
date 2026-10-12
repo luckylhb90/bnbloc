@@ -2,7 +2,6 @@ package store
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"sync"
@@ -10,7 +9,6 @@ import (
 
 	"github.com/luckylhb90/bnbloc/internal/testmysql"
 
-	"github.com/luckylhb90/bnbloc/internal/tenant"
 	"github.com/luckylhb90/bnbloc/internal/wire"
 )
 
@@ -175,7 +173,7 @@ func TestContractRePutIntoAnotherRoomOrTenantIsRefused(t *testing.T) {
 		if err := b.Room.AddMember(cb, Membership{RoomID: roomA, UserID: "mallory", Role: RoleOwner, JoinedAtMs: 2}); !errors.Is(err, ErrRoomNotFound) {
 			t.Fatalf("AddMember into another tenant's room = %v, want ErrRoomNotFound", err)
 		}
-		if _, ok := b.Room.GetMember(ca, roomA, "mallory"); ok {
+		if _, ok := must2(b.Room.GetMember(ca, roomA, "mallory"))(t); ok {
 			t.Fatal("a refused AddMember left a membership behind")
 		}
 		// A re-add changes the role only; the join time stays.
@@ -185,7 +183,7 @@ func TestContractRePutIntoAnotherRoomOrTenantIsRefused(t *testing.T) {
 		if err := b.Room.AddMember(ca, Membership{RoomID: roomA, UserID: "jack", Role: RoleVisitor, JoinedAtMs: 20}); err != nil {
 			t.Fatal(err)
 		}
-		if m, _ := b.Room.GetMember(ca, roomA, "jack"); m.Role != RoleVisitor || m.JoinedAtMs != 10 {
+		if m, _ := must2(b.Room.GetMember(ca, roomA, "jack"))(t); m.Role != RoleVisitor || m.JoinedAtMs != 10 {
 			t.Fatalf("re-added member = %+v, want visitor joined at 10", m)
 		}
 
@@ -198,7 +196,7 @@ func TestContractRePutIntoAnotherRoomOrTenantIsRefused(t *testing.T) {
 		if err := b.Channel.PutChannel(cb, hijack); !errors.Is(err, ErrChannelExists) {
 			t.Fatalf("PutChannel with another tenant's id = %v, want ErrChannelExists", err)
 		}
-		if got, ok := b.Channel.GetChannel(ca, roomA, ch.ChannelID); !ok || got.Name != "a" {
+		if got, ok := must2(b.Channel.GetChannel(ca, roomA, ch.ChannelID))(t); !ok || got.Name != "a" {
 			t.Fatalf("channel after refused put = %+v %v", got, ok)
 		}
 	})
@@ -223,35 +221,6 @@ func TestContractEnsureMemberNeverChangesARole(t *testing.T) {
 	})
 }
 
-// The login-path reads report a failed query as an error, never as "absent"
-// (a failed membership read used to re-provision the subject).
-func TestMySQLTenantReadsReportFailures(t *testing.T) {
-	dsn := mysqlTestDSN(t)
-	cfg, err := mysqlConfig(dsn)
-	if err != nil {
-		t.Fatal(err)
-	}
-	db, err := sql.Open("mysql", cfg.FormatDSN())
-	if err != nil {
-		t.Fatal(err)
-	}
-	_ = db.Close() // every query now fails
-	ctx := tenant.NewContext(context.Background(), "t-closed")
-	ts := NewMySQLTenant(db)
-	if _, _, err := ts.GetMember(ctx, "t-closed", "maya"); err == nil {
-		t.Fatal("GetMember on a failing database returned no error")
-	}
-	if _, err := ts.MemberCount(ctx, "t-closed"); err == nil {
-		t.Fatal("MemberCount on a failing database returned no error")
-	}
-	if _, _, err := ts.TenantForIssuer(ctx, "acme.example"); err == nil {
-		t.Fatal("TenantForIssuer on a failing database returned no error")
-	}
-	if _, _, err := NewMySQLGrant(db).TenantUsage(ctx); err == nil {
-		t.Fatal("TenantUsage on a failing database returned no error")
-	}
-}
-
 // Subjects are case-sensitive (and accent-sensitive): a case or accent
 // variant is another subject on both backends. MySQL's default collation
 // used to fold them, so "Maya" could edit "maya"'s message there and not in
@@ -261,16 +230,16 @@ func TestContractCaseVariantIdsAreDistinct(t *testing.T) {
 		tid := uniq("t-case-")
 		ctx := tenantCtx(tid)
 		room := newContractRoom(t, ctx, b, "maya")
-		if b.Room.IsMember(ctx, room, "Maya") {
+		if must(b.Room.IsMember(ctx, room, "Maya"))(t) {
 			t.Fatal("Maya is a member of maya's room")
 		}
 		if err := b.Room.AddMember(ctx, Membership{RoomID: room, UserID: "Maya", Role: RoleVisitor, JoinedAtMs: 2}); err != nil {
 			t.Fatal(err)
 		}
-		if m, _ := b.Room.GetMember(ctx, room, "maya"); m.Role != RoleOwner {
+		if m, _ := must2(b.Room.GetMember(ctx, room, "maya"))(t); m.Role != RoleOwner {
 			t.Fatalf("adding Maya changed maya's membership: %+v", m)
 		}
-		if n := b.Room.MemberCount(ctx, room); n != 2 {
+		if n := must(b.Room.MemberCount(ctx, room))(t); n != 2 {
 			t.Fatalf("MemberCount = %d, want 2 (maya and Maya)", n)
 		}
 

@@ -23,7 +23,11 @@ func TestCreateRoomExistingIDConflicts(t *testing.T) {
 	if resp.StatusCode != http.StatusConflict {
 		t.Fatalf("re-create status = %d, want 409", resp.StatusCode)
 	}
-	if svc.Store.IsMember(dctx(), "room-1", "mallory") {
+	isMember, err := svc.Store.IsMember(dctx(), "room-1", "mallory")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if isMember {
 		t.Fatal("mallory must not have become a member")
 	}
 	if rm, _ := svc.Store.GetRoom(dctx(), "room-1"); rm.Name != "Team" {

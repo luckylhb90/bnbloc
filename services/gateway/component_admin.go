@@ -200,7 +200,11 @@ func (s *Service) addComponentAdoption(ctx context.Context, components []install
 	}
 	total := 0
 	if s.MemberCount != nil {
-		total = s.MemberCount()
+		n, err := s.MemberCount()
+		if err != nil {
+			return err
+		}
+		total = n
 	}
 	for i := range components {
 		components[i].Adoption = componentAdoption{MemberInstalls: counts[componentKey(components[i].Kind, components[i].Name)], TotalMembers: total}

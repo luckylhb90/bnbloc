@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/luckylhb90/bnbloc/internal/httpx"
+	"github.com/luckylhb90/bnbloc/internal/obs"
 	"github.com/luckylhb90/bnbloc/internal/store"
 	"github.com/luckylhb90/bnbloc/internal/wire"
 )
@@ -150,7 +151,12 @@ func (s *Service) serveUsageReport(w http.ResponseWriter, r *http.Request, as st
 		return
 	}
 	q.FromMs, q.ToMs = p.from.UnixMilli(), p.to.UnixMilli()
-	turns := s.Grants.BorrowTurns(r.Context(), q)
+	turns, err := s.Grants.BorrowTurns(r.Context(), q)
+	if err != nil {
+		obs.ServerError(w, "read borrow turns failed", err)
+		httpx.Error(w, "read borrow turns failed", http.StatusInternalServerError)
+		return
+	}
 	report := wire.BorrowUsageReport{
 		As:        as,
 		GroupBy:   p.groupBy,

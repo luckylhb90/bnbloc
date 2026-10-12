@@ -503,7 +503,12 @@ func (s *Service) openPublishRequest(ctx context.Context, r *http.Request, actor
 		}
 		var admins []string
 		if s.OrgAdmins != nil {
-			admins = s.OrgAdmins(claims.Tenant)
+			var err error
+			if admins, err = s.OrgAdmins(claims.Tenant); err != nil {
+				// The request is stored; only its notification is lost.
+				slog.Warn("bnbloc gateway: org admins unreadable; review notification skipped",
+					"event", "bnbloc.content.notify_failed", "request", req.ID, "error", err)
+			}
 		}
 		s.notifyContent(ctx, claims.Tenant, notify.Event{
 			Type: wire.NotificationContentReview, Recipients: admins, Actor: claims.Subject,

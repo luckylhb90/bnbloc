@@ -214,8 +214,8 @@ func (e *ValidationError) Error() string {
 
 // Rooms is the room-store surface sync needs (store.RoomStore satisfies it).
 type Rooms interface {
-	RoomTenant(ctx context.Context, roomID string) (string, bool)
-	IsMember(ctx context.Context, roomID, userID string) bool
+	RoomTenant(ctx context.Context, roomID string) (string, bool, error)
+	IsMember(ctx context.Context, roomID, userID string) (bool, error)
 	AddMember(ctx context.Context, m store.Membership) error
 }
 
@@ -285,7 +285,11 @@ func (s *Syncer) Validate(ctx context.Context, rules []Rule) error {
 			return &ValidationError{Rule: i, Msg: fmt.Sprintf("at most %d default rooms", maxDefaultRooms)}
 		}
 		for _, room := range rooms {
-			if rt, ok := s.Rooms.RoomTenant(ctx, room); !ok || rt != tid {
+			rt, ok, err := s.Rooms.RoomTenant(ctx, room)
+			if err != nil {
+				return fmt.Errorf("org sync: resolve room %s: %w", room, err)
+			}
+			if !ok || rt != tid {
 				return &ValidationError{Rule: i, Msg: fmt.Sprintf("room %q does not exist in tenant %q", room, tid)}
 			}
 		}
@@ -361,8 +365,12 @@ func (s *Syncer) Apply(ctx context.Context, attrs Attributes, actor string, dryR
 // add default rooms once, and remove sync-owned memberships no rule targets
 // (revoking the sign-ins that landed in that tenant).
 func (s *Syncer) converge(ctx context.Context, userID string, res *Result, actor string, dryRun bool) error {
+	memberships, err := s.Tenants.ListMembershipsForUser(ctx, userID)
+	if err != nil {
+		return fmt.Errorf("org sync: read memberships: %w", err)
+	}
 	current := map[string]store.TenantMember{}
-	for _, m := range s.Tenants.ListMembershipsForUser(ctx, userID) {
+	for _, m := range memberships {
 		current[m.TenantID] = m
 	}
 	nowMs := s.now().UnixMilli()
@@ -438,10 +446,17 @@ func (s *Syncer) defaultRooms(ctx context.Context, userID string, t Target, res 
 		if done {
 			continue
 		}
-		if rt, ok := s.Rooms.RoomTenant(ctx, room); !ok || rt != t.Tenant {
+		rt, ok, err := s.Rooms.RoomTenant(ctx, room)
+		if err != nil {
+			return fmt.Errorf("org sync: resolve room %s: %w", room, err)
+		}
+		if !ok || rt != t.Tenant {
 			continue // deleted or moved since the rules were saved
 		}
-		member := s.Rooms.IsMember(tctx, room, userID)
+		member, err := s.Rooms.IsMember(tctx, room, userID)
+		if err != nil {
+			return fmt.Errorf("org sync: room %s membership: %w", room, err)
+		}
 		if !member {
 			res.Changes = append(res.Changes, Change{Action: ActionRoom, Tenant: t.Tenant, RoomID: room})
 		}
@@ -509,7 +524,10 @@ func (s *Syncer) Deprovision(ctx context.Context, userIDs []string, actor string
 	out := make([]DeprovisionResult, 0, len(ids))
 	for _, uid := range ids {
 		res := DeprovisionResult{UserID: uid, RemovedTenants: []string{}}
-		members := s.Tenants.ListMembershipsForUser(ctx, uid)
+		members, err := s.Tenants.ListMembershipsForUser(ctx, uid)
+		if err != nil {
+			return out, fmt.Errorf("deprovision %s: read memberships: %w", uid, err)
+		}
 		sort.Slice(members, func(i, j int) bool { return members[i].TenantID < members[j].TenantID })
 		for _, m := range members {
 			if err := s.Tenants.RemoveMember(ctx, m.TenantID, uid); err != nil {

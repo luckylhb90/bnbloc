@@ -39,7 +39,7 @@ func testPeopleChannel(t *testing.T, s ChannelStore, ctx context.Context, room s
 		}
 	}
 	people := 0
-	for _, c := range s.ListChannels(ctx, room) {
+	for _, c := range must(s.ListChannels(ctx, room))(t) {
 		if c.IsPeople() {
 			people++
 		}

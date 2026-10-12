@@ -13,13 +13,13 @@ import (
 // columns are utf8mb4_bin), matching the memory store's ==. PlatformOnly joins
 // the turn's grant (grant ids are globally unique: the tenant is part of their
 // hash).
-func (s *MySQLGrant) BorrowTurns(ctx context.Context, q BorrowTurnQuery) []AuditRecord {
+func (s *MySQLGrant) BorrowTurns(ctx context.Context, q BorrowTurnQuery) ([]AuditRecord, error) {
 	where := "a.action = 'turn' AND a.decision = 'allow' AND a.actor_user_id <> '' AND a.actor_user_id <> a.owner_user_id AND a.at_ms >= ?"
 	args := []any{q.FromMs}
 	if !q.AllTenants {
 		tnt, err := tenant.Require(ctx)
 		if err != nil {
-			return nil
+			return nil, err
 		}
 		where = "a.tenant_id = ? AND " + where
 		args = append([]any{tnt}, args...)
@@ -41,38 +41,34 @@ func (s *MySQLGrant) BorrowTurns(ctx context.Context, q BorrowTurnQuery) []Audit
 		from += " JOIN shared_agent_grants g ON g.grant_id = a.grant_id AND g.source = '" + GrantSourcePlatform + "'"
 	}
 	args = append(args, MaxBorrowTurnRows)
-	rows, err := s.DB.QueryContext(ctx,
+	return queryAll(ctx, s.DB,
 		`SELECT a.tenant_id, a.room_id, COALESCE(a.grant_id,''), a.actor_user_id, a.owner_user_id, a.action, a.decision,
 		        COALESCE(a.model,''), COALESCE(a.channel_id,''), a.at_ms, a.cost, a.input_tokens, a.output_tokens
-		 FROM `+from+` WHERE `+where+` ORDER BY a.at_ms ASC LIMIT ?`, args...)
-	if err != nil {
-		return nil
+		 FROM `+from+` WHERE `+where+` ORDER BY a.at_ms ASC LIMIT ?`, scanBorrowTurn, args...)
+}
+
+// scanBorrowTurn reads one BorrowTurns row.
+func scanBorrowTurn(row rowScanner) (AuditRecord, error) {
+	var r AuditRecord
+	var cost sql.NullFloat64
+	var inTok, outTok sql.NullInt64
+	if err := row.Scan(&r.TenantID, &r.RoomID, &r.GrantID, &r.ActorUserID, &r.OwnerUserID, &r.Action,
+		&r.Decision, &r.Model, &r.ChannelID, &r.AtMs, &cost, &inTok, &outTok); err != nil {
+		return AuditRecord{}, err
 	}
-	defer rows.Close()
-	var out []AuditRecord
-	for rows.Next() {
-		var r AuditRecord
-		var cost sql.NullFloat64
-		var inTok, outTok sql.NullInt64
-		if err := rows.Scan(&r.TenantID, &r.RoomID, &r.GrantID, &r.ActorUserID, &r.OwnerUserID, &r.Action,
-			&r.Decision, &r.Model, &r.ChannelID, &r.AtMs, &cost, &inTok, &outTok); err != nil {
-			continue
-		}
-		if cost.Valid {
-			c := cost.Float64
-			r.Cost = &c
-		}
-		if inTok.Valid {
-			v := inTok.Int64
-			r.InputTokens = &v
-		}
-		if outTok.Valid {
-			v := outTok.Int64
-			r.OutputTokens = &v
-		}
-		out = append(out, r)
+	if cost.Valid {
+		c := cost.Float64
+		r.Cost = &c
 	}
-	return out
+	if inTok.Valid {
+		v := inTok.Int64
+		r.InputTokens = &v
+	}
+	if outTok.Valid {
+		v := outTok.Int64
+		r.OutputTokens = &v
+	}
+	return r, nil
 }
 
 // RaiseRunQuota adds runs to a live grant's run quota in one conditional

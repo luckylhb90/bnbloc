@@ -196,7 +196,16 @@ func (h *hostStates) load(host string) {
 	if h.s.Bridges == nil {
 		return
 	}
-	h.online[host] = shareagent.OnlineAgents(h.s.Bridges.ListBridgeAgentsForOwner(h.ctx, host))
+	advertised, err := h.s.Bridges.ListBridgeAgentsForOwner(h.ctx, host)
+	if err != nil {
+		// A presentation read with no 500 path: this response shows the
+		// host's agents offline, and the failure is logged (as for the
+		// pending count below).
+		slog.Warn("bnbloc shareagent: advertised agents read failed",
+			"event", "bnbloc.shareagent.advertised_agents_failed", "host", host, "error", err)
+		return
+	}
+	h.online[host] = shareagent.OnlineAgents(advertised)
 	counts, err := h.s.Bridges.PendingAgentJobs(h.ctx, host)
 	if err != nil {
 		// The listing stays right about who is online; queued reads 0.
@@ -303,9 +312,19 @@ func (s *Service) handleListRoomPlatformAgents(w http.ResponseWriter, r *http.Re
 	}
 	ctx := r.Context()
 	tid := tenant.FromContext(ctx)
-	pgs := shareagent.RoomPlatformGrants(ctx, s.Grants, p, roomID, s.Now())
+	pgs, err := shareagent.RoomPlatformGrants(ctx, s.Grants, p, roomID, s.Now())
+	if err != nil {
+		obs.ServerError(w, "list grants failed", err)
+		httpx.Error(w, "list grants failed", http.StatusInternalServerError)
+		return
+	}
 	if s.extendRoomPlatformAgents(ctx, tid, roomID, p, pgs) {
-		pgs = shareagent.RoomPlatformGrants(ctx, s.Grants, p, roomID, s.Now())
+		pgs, err = shareagent.RoomPlatformGrants(ctx, s.Grants, p, roomID, s.Now())
+		if err != nil {
+			obs.ServerError(w, "list grants failed", err)
+			httpx.Error(w, "list grants failed", http.StatusInternalServerError)
+			return
+		}
 	}
 	// host -> has an available agent here, for every host that ever had a
 	// platform grant in the room (revoked ones included, so a host whose
@@ -453,8 +472,14 @@ func (s *Service) handleAddRoomPlatformAgent(w http.ResponseWriter, r *http.Requ
 		httpx.Error(w, errNotPublished, http.StatusNotFound)
 		return
 	}
+	pgs, err := shareagent.RoomPlatformGrants(ctx, s.Grants, p, roomID, s.Now())
+	if err != nil {
+		obs.ServerError(w, "list grants failed", err)
+		httpx.Error(w, "list grants failed", http.StatusInternalServerError)
+		return
+	}
 	serving := map[string]bool{}
-	for _, pg := range shareagent.RoomPlatformGrants(ctx, s.Grants, p, roomID, s.Now()) {
+	for _, pg := range pgs {
 		if pg.Available && pg.Agent == ref {
 			serving[pg.Grant.OwnerUserID] = true
 		}
@@ -471,8 +496,14 @@ func (s *Service) handleAddRoomPlatformAgent(w http.ResponseWriter, r *http.Requ
 		}
 		created = true
 	}
+	pgs, err = shareagent.RoomPlatformGrants(ctx, s.Grants, p, roomID, s.Now())
+	if err != nil {
+		obs.ServerError(w, "list grants failed", err)
+		httpx.Error(w, "list grants failed", http.StatusInternalServerError)
+		return
+	}
 	var view wire.PlatformAgent
-	for _, a := range roomPlatformAgents(shareagent.RoomPlatformGrants(ctx, s.Grants, p, roomID, s.Now()), p, s.newHostStates(ctx)) {
+	for _, a := range roomPlatformAgents(pgs, p, s.newHostStates(ctx)) {
 		if a.Core == ref.Core && a.Provider == ref.Provider {
 			view = a
 		}
@@ -505,9 +536,15 @@ func (s *Service) handleRemoveRoomPlatformAgent(w http.ResponseWriter, r *http.R
 	}
 	// The room's live grants of this agent, whoever hosts them (policy-
 	// independent: a host may have unpublished since).
+	pgs, err := shareagent.RoomPlatformGrants(ctx, s.Grants, wire.PlatformAgentsPolicy{}, roomID, s.Now())
+	if err != nil {
+		obs.ServerError(w, "list grants failed", err)
+		httpx.Error(w, "list grants failed", http.StatusInternalServerError)
+		return
+	}
 	var targets []store.Grant
 	var rest []store.Grant // the room's other live platform grants
-	for _, pg := range shareagent.RoomPlatformGrants(ctx, s.Grants, wire.PlatformAgentsPolicy{}, roomID, s.Now()) {
+	for _, pg := range pgs {
 		switch {
 		case !pg.Live:
 		case pg.Agent == ref:

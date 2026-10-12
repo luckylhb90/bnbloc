@@ -44,7 +44,7 @@ func rolloutTestGateway(t *testing.T) (*Service, *httptest.Server, string, strin
 		}
 		return "home", string(rbac.RoleMember), nil
 	}
-	svc.MemberCount = func() int { return 3 }
+	svc.MemberCount = func() (int, error) { return 3, nil }
 	memberToken, _ := login(t, srv, "member")
 	return svc, srv, adminToken, memberToken
 }

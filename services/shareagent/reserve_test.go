@@ -131,7 +131,11 @@ func TestReserveBorrowRefusals(t *testing.T) {
 		t.Fatalf("runsUsed = %d after refusals, want 0", n)
 	}
 	var denies int
-	for _, rec := range gs.AuditRecords(dctx(), "room-1", 50, 0) {
+	recs, err := gs.AuditRecords(dctx(), "room-1", 50, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, rec := range recs {
 		if rec.Decision == "deny" && rec.DenyReason == shareagent.DenyOwnerNotAuthorized {
 			denies++
 		}
@@ -183,7 +187,10 @@ func TestRecordSettlesReservation(t *testing.T) {
 	if g.RunsUsed != 1 || g.CostUsed != 0.5 {
 		t.Fatalf("grant runs=%d cost=%v, want 1 / 0.5", g.RunsUsed, g.CostUsed)
 	}
-	turns := gs.BorrowTurns(dctx(), store.BorrowTurnQuery{})
+	turns, err := gs.BorrowTurns(dctx(), store.BorrowTurnQuery{})
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(turns) != 1 || turns[0].Model != "gpt-5.1" || turns[0].ChannelID != "ch_1" || turns[0].ActorUserID != "bob" ||
 		turns[0].Cost == nil || *turns[0].Cost != 0.5 || turns[0].InputTokens == nil || *turns[0].InputTokens != 10 {
 		t.Fatalf("recorded turn = %+v", turns)

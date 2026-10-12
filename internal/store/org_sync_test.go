@@ -37,7 +37,7 @@ func TestOrgSyncStoreAndMemberSource(t *testing.T) {
 				t.Fatal(err)
 			}
 			got := map[string]TenantMember{}
-			for _, m := range b.Tenant.ListMembershipsForUser(ctx, user) {
+			for _, m := range must(b.Tenant.ListMembershipsForUser(ctx, user))(t) {
 				got[m.TenantID] = m
 			}
 			if got[tid].Source != MemberSourceSync || got[tid+"-b"].Source != MemberSourceManual || len(got) != 2 {
@@ -50,7 +50,7 @@ func TestOrgSyncStoreAndMemberSource(t *testing.T) {
 			if m, _, _ := b.Tenant.GetMember(ctx, tid, user); m.Source != MemberSourceManual || m.Role != OrgRoleAdmin {
 				t.Fatalf("after manual upsert = %+v", m)
 			}
-			if ms := b.Tenant.ListMembers(ctx, tid); len(ms) != 1 || ms[0].Source != MemberSourceManual {
+			if ms := must(b.Tenant.ListMembers(ctx, tid))(t); len(ms) != 1 || ms[0].Source != MemberSourceManual {
 				t.Fatalf("list members = %+v", ms)
 			}
 

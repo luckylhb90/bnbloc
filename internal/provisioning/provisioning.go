@@ -168,7 +168,11 @@ func (r *Resolver) resolveTenant(ctx context.Context, id auth.Identity, defaultT
 	// admin-approved join request take effect — after approval the user has a
 	// membership row, so their next login lands in that tenant instead of the
 	// default. A user with no membership falls through to the default.
-	if t, ok := r.Tenants.PrimaryTenantForUser(ctx, id.Subject); ok {
+	t, ok, err := r.Tenants.PrimaryTenantForUser(ctx, id.Subject)
+	if err != nil {
+		return "", fmt.Errorf("resolve primary tenant: %w", err)
+	}
+	if ok {
 		return t, nil
 	}
 	if defaultTenant == "" {

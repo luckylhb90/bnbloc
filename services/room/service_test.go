@@ -56,7 +56,10 @@ func TestCreateRoomMakesCreatorOwner(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("create status = %d, want 200", resp.StatusCode)
 	}
-	role, ok := svc.Store.MemberRole(dctx(), "room-1", "alice")
+	role, ok, err := svc.Store.MemberRole(dctx(), "room-1", "alice")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if !ok || role != store.RoleOwner {
 		t.Fatalf("creator role = %v ok=%v, want owner", role, ok)
 	}

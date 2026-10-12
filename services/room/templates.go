@@ -401,7 +401,13 @@ func (s *Service) handleTemplateFromRoom(w http.ResponseWriter, r *http.Request,
 		httpx.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	if role, ok := s.Store.MemberRole(r.Context(), roomID, user); !ok || !role.CanInvite() {
+	role, ok, err := s.Store.MemberRole(r.Context(), roomID, user)
+	if err != nil {
+		obs.ServerError(w, "read membership failed", err)
+		httpx.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if !ok || !role.CanInvite() {
 		httpx.Error(w, "only the room owner or an admin may save it as a template", http.StatusForbidden)
 		return
 	}
@@ -425,8 +431,14 @@ func (s *Service) handleTemplateFromRoom(w http.ResponseWriter, r *http.Request,
 		StarterPrompts:  in.StarterPrompts,
 		SuggestedAgents: in.SuggestedAgents,
 	}
+	channels, err := s.Channels.ListChannels(r.Context(), roomID)
+	if err != nil {
+		obs.ServerError(w, "list channels failed", err)
+		httpx.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
 	channelNames := map[string]string{}
-	for _, c := range s.Channels.ListChannels(r.Context(), roomID) {
+	for _, c := range channels {
 		// The people chat is per-room conversation, not room setup.
 		if c.IsDefault || c.IsPeople() {
 			continue
@@ -435,7 +447,13 @@ func (s *Service) handleTemplateFromRoom(w http.ResponseWriter, r *http.Request,
 		body.Channels = append(body.Channels, c.Name)
 	}
 	if in.IncludeMembers {
-		for _, m := range s.Store.Members(r.Context(), roomID) {
+		members, err := s.Store.Members(r.Context(), roomID)
+		if err != nil {
+			obs.ServerError(w, "list members failed", err)
+			httpx.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		for _, m := range members {
 			// Agent hosts are not people a template should add.
 			if m.UserID != user && !m.AgentHost {
 				body.DefaultMembers = append(body.DefaultMembers, m.UserID)

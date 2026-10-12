@@ -132,7 +132,7 @@ func TestContractDeleteRoomClearsRoomOwnedRows(t *testing.T) {
 		probes = []probe{
 			{"room_messages", func(r string) bool { h, _ := b.Chat.RoomHistory(ctx, r, "", 0, 10); return len(h) > 0 }},
 			{"message_tasks", func(r string) bool { l, _ := b.MessageTasks.ListMessageTasks(ctx, r); return len(l) > 0 }},
-			{"agent_messages", func(r string) bool { return len(b.AgentUsage().AgentUsage(ctx, r, 0)) > 0 }},
+			{"agent_messages", func(r string) bool { return len(must(b.AgentUsage().AgentUsage(ctx, r, 0))(t)) > 0 }},
 			{"agent_jobs", func(r string) bool {
 				_, err := b.BridgeJobs.(AgentRunReader).GetAgentRun(ctx, "job-"+r)
 				return err == nil
@@ -141,7 +141,7 @@ func TestContractDeleteRoomClearsRoomOwnedRows(t *testing.T) {
 			{"shared_agent_quota_requests", func(r string) bool { _, err := b.QuotaRequests.GetQuotaRequest(ctx, "q-"+r); return err == nil }},
 			{"attachments", func(r string) bool { _, ok, _ := b.Attachments.GetAttachment(ctx, r, "att-"+r); return ok }},
 			{"artifacts", func(r string) bool { _, err := b.Artifacts.GetArtifact(ctx, "art-"+r); return err == nil }},
-			{"user_agent_prefs", func(r string) bool { _, ok := b.AgentPrefs.GetAgentPrefs(ctx, r, "", "maya"); return ok }},
+			{"user_agent_prefs", func(r string) bool { _, ok := must2(b.AgentPrefs.GetAgentPrefs(ctx, r, "", "maya"))(t); return ok }},
 			{"room_imports", func(r string) bool { _, ok, _ := b.RoomImports.GetRoomImport(ctx, r); return ok }},
 			{"room_schedules", func(r string) bool { _, err := b.Schedules.GetSchedule(ctx, r, "sch-"+r); return err == nil }},
 			{"notification_reply_tokens", func(r string) bool { _, ok, _ := b.ReplyTokens.GetNotificationReplyToken(ctx, "tok-"+r); return ok }},

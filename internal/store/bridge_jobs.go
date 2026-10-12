@@ -275,7 +275,7 @@ const (
 
 type BridgeJobStore interface {
 	PutAgentJob(ctx context.Context, j AgentJob) (AgentJob, error)
-	ListAgentJobs(ctx context.Context, roomID, channelID string, limit int) []AgentJob
+	ListAgentJobs(ctx context.Context, roomID, channelID string, limit int) ([]AgentJob, error)
 	ClaimAgentJobs(ctx context.Context, req ClaimRequest) ([]AgentJob, error)
 	UpdateAgentJobStatus(ctx context.Context, upd JobStatusUpdate) (AgentJob, error)
 	CancelAgentJob(ctx context.Context, req CancelRequest) (AgentJob, error)
@@ -284,11 +284,11 @@ type BridgeJobStore interface {
 	PutBridgeHeartbeat(ctx context.Context, hb BridgeHeartbeat) error
 	LookupBridge(ctx context.Context, bridgeID string) (BridgeHeartbeat, error)
 	ReplaceBridgeAgents(ctx context.Context, bridgeID string, agents []BridgeAgent) error
-	ListBridgeAgents(ctx context.Context, roomID string) []BridgeAgent
+	ListBridgeAgents(ctx context.Context, roomID string) ([]BridgeAgent, error)
 	// ListBridgeAgentsForOwner returns one owner's advertised agents across
 	// all rooms/tenants (owner identity is global), liveness-joined — the
 	// "my agents" surface for a member's own view.
-	ListBridgeAgentsForOwner(ctx context.Context, ownerUserID string) []BridgeAgent
+	ListBridgeAgentsForOwner(ctx context.Context, ownerUserID string) ([]BridgeAgent, error)
 	// LatestBridgeForOwner returns the owner's most recently seen bridge
 	// heartbeat across tenants (owner identity is global), and false when no
 	// desktop bridge of theirs ever connected. Heartbeat rows are never
@@ -382,10 +382,10 @@ func (s *MemoryBridgeJobs) PutAgentJob(ctx context.Context, j AgentJob) (AgentJo
 	return j, nil
 }
 
-func (s *MemoryBridgeJobs) ListAgentJobs(ctx context.Context, roomID, channelID string, limit int) []AgentJob {
+func (s *MemoryBridgeJobs) ListAgentJobs(ctx context.Context, roomID, channelID string, limit int) ([]AgentJob, error) {
 	tid, err := tenant.Require(ctx)
 	if err != nil {
-		return nil
+		return nil, err
 	}
 	if limit <= 0 {
 		limit = 100
@@ -406,7 +406,7 @@ func (s *MemoryBridgeJobs) ListAgentJobs(ctx context.Context, roomID, channelID 
 	if len(out) > limit {
 		out = out[len(out)-limit:]
 	}
-	return out
+	return out, nil
 }
 
 func (s *MemoryBridgeJobs) PutBridgeHeartbeat(ctx context.Context, hb BridgeHeartbeat) error {
@@ -445,10 +445,10 @@ func (s *MemoryBridgeJobs) ReplaceBridgeAgents(ctx context.Context, bridgeID str
 // alive. A bridge that stopped heartbeating leaves its rows behind, and serving
 // them would offer members an agent nobody can drive: the composer lists it and
 // the job then waits out the queue timeout instead of being refused up front.
-func (s *MemoryBridgeJobs) ListBridgeAgents(ctx context.Context, roomID string) []BridgeAgent {
+func (s *MemoryBridgeJobs) ListBridgeAgents(ctx context.Context, roomID string) ([]BridgeAgent, error) {
 	tid, err := tenant.Require(ctx)
 	if err != nil {
-		return nil
+		return nil, err
 	}
 	_ = roomID
 	s.mu.Lock()
@@ -465,7 +465,7 @@ func (s *MemoryBridgeJobs) ListBridgeAgents(ctx context.Context, roomID string) 
 			}
 		}
 	}
-	return out
+	return out, nil
 }
 
 func (s *MemoryBridgeJobs) ClaimAgentJobs(ctx context.Context, req ClaimRequest) ([]AgentJob, error) {
@@ -678,9 +678,9 @@ func (s *MemoryBridgeJobs) LookupBridge(ctx context.Context, bridgeID string) (B
 
 // ListBridgeAgentsForOwner returns the owner's advertised agents joined to a
 // live heartbeat (memory impl; see MySQLBridgeJobs for the contract).
-func (s *MemoryBridgeJobs) ListBridgeAgentsForOwner(ctx context.Context, ownerUserID string) []BridgeAgent {
+func (s *MemoryBridgeJobs) ListBridgeAgentsForOwner(ctx context.Context, ownerUserID string) ([]BridgeAgent, error) {
 	if _, err := tenant.Require(ctx); err != nil {
-		return nil
+		return nil, err
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -696,7 +696,7 @@ func (s *MemoryBridgeJobs) ListBridgeAgentsForOwner(ctx context.Context, ownerUs
 			}
 		}
 	}
-	return out
+	return out, nil
 }
 
 // LatestBridgeForOwner returns the owner's latest heartbeat (memory impl; see

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/luckylhb90/bnbloc/internal/httpx"
+	"github.com/luckylhb90/bnbloc/internal/obs"
 	"github.com/luckylhb90/bnbloc/internal/shareagent"
 	"github.com/luckylhb90/bnbloc/internal/store"
 	"github.com/luckylhb90/bnbloc/internal/tenant"
@@ -41,9 +42,14 @@ func (s *Service) handlePlatformAgentsUsage(w http.ResponseWriter, r *http.Reque
 	now := time.UnixMilli(nowMs).In(loc)
 	monthStart := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, loc).UnixMilli()
 	dayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, loc).UnixMilli()
-	turns := s.Grants.BorrowTurns(r.Context(), store.BorrowTurnQuery{
+	turns, err := s.Grants.BorrowTurns(r.Context(), store.BorrowTurnQuery{
 		FromMs: monthStart, ToMs: nowMs + 1, PlatformOnly: true, AllTenants: true,
 	})
+	if err != nil {
+		obs.ServerError(w, "read borrow turns failed", err)
+		httpx.Error(w, "read borrow turns failed", http.StatusInternalServerError)
+		return
+	}
 	httpx.WriteJSON(w, http.StatusOK, s.platformUsage(r.Context(), turns, dayStart))
 }
 

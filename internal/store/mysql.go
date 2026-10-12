@@ -162,6 +162,39 @@ func requireMatched(res sql.Result, notFound error) error {
 	return nil
 }
 
+// rowScanner is one row to scan: a *sql.Row or the current row of *sql.Rows.
+type rowScanner interface{ Scan(dest ...any) error }
+
+// queryAll runs a list read and scans every row with scan. It is the one
+// list-read shape: a query, scan or iteration (rows.Err) failure is returned,
+// never a short or empty list. No rows is a nil slice.
+func queryAll[T any](ctx context.Context, db sqlConn, q string, scan func(rowScanner) (T, error), args ...any) ([]T, error) {
+	rows, err := db.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []T
+	for rows.Next() {
+		v, err := scan(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, v)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// scanString scans a single string column (a queryAll scan func).
+func scanString(r rowScanner) (string, error) {
+	var s string
+	err := r.Scan(&s)
+	return s, err
+}
+
 func nullString(s string) any {
 	if s == "" {
 		return nil

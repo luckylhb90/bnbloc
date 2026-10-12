@@ -66,13 +66,20 @@ func (s *Service) addMember(ctx context.Context, roomID, userID string, role sto
 	if strings.TrimSpace(userID) == "" {
 		return errMemberPolicy{http.StatusBadRequest, "userId is required"}
 	}
-	if existing, ok := s.Store.MemberRole(ctx, roomID, userID); ok && existing == store.RoleOwner {
+	existing, ok, err := s.Store.MemberRole(ctx, roomID, userID)
+	if err != nil {
+		return err
+	}
+	if ok && existing == store.RoleOwner {
 		return errMemberPolicy{http.StatusForbidden, "cannot change the owner's role; transfer ownership instead"}
 	}
 	if role == store.RoleOwner {
 		return errMemberPolicy{http.StatusBadRequest, "use ownership transfer to grant owner"}
 	}
-	prev, had := s.Store.GetMember(ctx, roomID, userID)
+	prev, had, err := s.Store.GetMember(ctx, roomID, userID)
+	if err != nil {
+		return err
+	}
 	if err := s.Store.AddMember(ctx, store.Membership{RoomID: roomID, UserID: userID, Role: role, JoinedAtMs: s.Now()}); err != nil {
 		return err
 	}

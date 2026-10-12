@@ -44,43 +44,43 @@ func testAgentHostMembership(t *testing.T, s RoomStore) {
 		t.Fatalf("agent host of a missing room = %v, want ErrRoomNotFound", err)
 	}
 
-	m, ok := s.GetMember(ctx, "r1", "host")
+	m, ok := must2(s.GetMember(ctx, "r1", "host"))(t)
 	if !ok || !m.AgentHost || m.Role != RoleVisitor {
 		t.Fatalf("agent host membership = %+v %v; want an agent-host visitor", m, ok)
 	}
-	if !s.IsMember(ctx, "r1", "host") {
+	if !must(s.IsMember(ctx, "r1", "host"))(t) {
 		t.Fatal("an agent host reads the room (its bridge): IsMember must hold")
 	}
-	if am, ok := s.MembershipAnyTenant(tenantCtx(tenantB), "r1", "host"); !ok || !am.AgentHost {
+	if am, ok := must2(s.MembershipAnyTenant(tenantCtx(tenantB), "r1", "host"))(t); !ok || !am.AgentHost {
 		t.Fatalf("cross-tenant probe = %+v %v; want the agent-host flag", am, ok)
 	}
 	// Not the host's rooms, not counted, flagged in the member list.
-	if got := s.RoomsForUser(ctx, "host"); len(got) != 0 {
+	if got := must(s.RoomsForUser(ctx, "host"))(t); len(got) != 0 {
 		t.Fatalf("RoomsForUser(host) = %v, want none", got)
 	}
-	if got := s.RoomsForUserAllTenants(ctx, "host"); len(got) != 0 {
+	if got := must(s.RoomsForUserAllTenants(ctx, "host"))(t); len(got) != 0 {
 		t.Fatalf("RoomsForUserAllTenants(host) = %v, want none", got)
 	}
-	if got := s.RoomsForUserDetailed(ctx, "host"); len(got) != 0 {
+	if got := must(s.RoomsForUserDetailed(ctx, "host"))(t); len(got) != 0 {
 		t.Fatalf("RoomsForUserDetailed(host) = %v, want none", got)
 	}
-	if got := s.AgentHostRoomsAllTenants(ctx, "host"); !slices.Equal(got, []string{"r1"}) {
+	if got := must(s.AgentHostRoomsAllTenants(ctx, "host"))(t); !slices.Equal(got, []string{"r1"}) {
 		t.Fatalf("AgentHostRoomsAllTenants(host) = %v, want [r1]", got)
 	}
-	if got := s.AgentHostRoomsAllTenants(ctx, "alice"); len(got) != 0 {
+	if got := must(s.AgentHostRoomsAllTenants(ctx, "alice"))(t); len(got) != 0 {
 		t.Fatalf("a human member's agent-host rooms = %v, want none", got)
 	}
-	if n := s.MemberCount(ctx, "r1"); n != 1 {
+	if n := must(s.MemberCount(ctx, "r1"))(t); n != 1 {
 		t.Fatalf("MemberCount = %d, want 1 (agent hosts are not counted)", n)
 	}
-	if rows := s.RoomsForUserDetailed(ctx, "alice"); len(rows) != 2 || rows[0].MemberCount != 1 || rows[1].MemberCount != 1 {
+	if rows := must(s.RoomsForUserDetailed(ctx, "alice"))(t); len(rows) != 2 || rows[0].MemberCount != 1 || rows[1].MemberCount != 1 {
 		t.Fatalf("detailed rows = %+v; member counts exclude agent hosts", rows)
 	}
 	if rooms, _, err := s.SearchRooms(ctx, "r1", 10, 0); err != nil || len(rooms) != 1 || rooms[0].MemberCount != 1 {
 		t.Fatalf("plaza = %+v %v; member counts exclude agent hosts", rooms, err)
 	}
 	flagged := 0
-	for _, mem := range s.Members(ctx, "r1") {
+	for _, mem := range must(s.Members(ctx, "r1"))(t) {
 		if mem.AgentHost {
 			flagged++
 			if mem.UserID != "host" {
@@ -100,19 +100,19 @@ func testAgentHostMembership(t *testing.T, s RoomStore) {
 	if err := s.AddAgentHost(ctx, "r2", "alice", 7); err != nil {
 		t.Fatal(err)
 	}
-	if m, _ := s.GetMember(ctx, "r2", "alice"); m.AgentHost || m.Role != RoleOwner {
+	if m, _ := must2(s.GetMember(ctx, "r2", "alice"))(t); m.AgentHost || m.Role != RoleOwner {
 		t.Fatalf("owner after AddAgentHost = %+v; must stay a human owner", m)
 	}
-	if err := s.RemoveAgentHost(ctx, "r2", "alice"); err != nil || !s.IsMember(ctx, "r2", "alice") {
+	if err := s.RemoveAgentHost(ctx, "r2", "alice"); err != nil || !must(s.IsMember(ctx, "r2", "alice"))(t) {
 		t.Fatalf("RemoveAgentHost removed a human member (err %v)", err)
 	}
 	if err := s.AddMember(ctx, Membership{RoomID: "r1", UserID: "host", Role: RoleMember, JoinedAtMs: 8}); err != nil {
 		t.Fatal(err)
 	}
-	if m, _ := s.GetMember(ctx, "r1", "host"); m.AgentHost || m.Role != RoleMember {
+	if m, _ := must2(s.GetMember(ctx, "r1", "host"))(t); m.AgentHost || m.Role != RoleMember {
 		t.Fatalf("joined agent host = %+v; want a human member", m)
 	}
-	if got := s.RoomsForUser(ctx, "host"); !slices.Equal(got, []string{"r1"}) {
+	if got := must(s.RoomsForUser(ctx, "host"))(t); !slices.Equal(got, []string{"r1"}) {
 		t.Fatalf("RoomsForUser after joining = %v", got)
 	}
 
@@ -123,7 +123,7 @@ func testAgentHostMembership(t *testing.T, s RoomStore) {
 	if err := s.RemoveAgentHost(ctx, "r2", "host"); err != nil {
 		t.Fatal(err)
 	}
-	if s.IsMember(ctx, "r2", "host") {
+	if must(s.IsMember(ctx, "r2", "host"))(t) {
 		t.Fatal("RemoveAgentHost left the agent-host membership")
 	}
 	if err := s.RemoveAgentHost(ctx, "r2", "host"); err != nil {
@@ -141,7 +141,7 @@ func testAgentHostMembership(t *testing.T, s RoomStore) {
 	if err != nil || got.Role != RoleMember || got.AgentHost {
 		t.Fatalf("redeem by an agent host = %+v %v; want a human member", got, err)
 	}
-	if m, _ := s.GetMember(ctx, "r2", "host"); m.AgentHost {
+	if m, _ := must2(s.GetMember(ctx, "r2", "host"))(t); m.AgentHost {
 		t.Fatalf("membership after redeem = %+v", m)
 	}
 }

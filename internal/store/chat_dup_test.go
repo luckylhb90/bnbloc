@@ -26,7 +26,7 @@ func appendDupContract(t *testing.T, s ChatStore, roomID string) {
 	if err := s.AppendRoomMessage(ctx, msg(2, "cm-1")); !errors.Is(err, ErrDuplicateClientMsg) {
 		t.Fatalf("same client id at a new seq: err = %v, want ErrDuplicateClientMsg", err)
 	}
-	if seq, ok := s.LookupClientMsg(ctx, roomID, "cm-1"); !ok || seq != 1 {
+	if seq, ok := must2(s.LookupClientMsg(ctx, roomID, "cm-1"))(t); !ok || seq != 1 {
 		t.Fatalf("LookupClientMsg = %d,%v, want the original seq 1", seq, ok)
 	}
 	if err := s.AppendRoomMessage(ctx, msg(1, "cm-2")); !errors.Is(err, ErrDuplicateSeq) {
@@ -129,7 +129,7 @@ func appendBatchContract(t *testing.T, s ChatStore, roomID string) {
 	if got := stored(); len(got) != 3 {
 		t.Fatalf("another tenant's row is visible in this tenant: %v", got)
 	}
-	if seq, ok := s.LookupClientMsg(tenant.NewContext(context.Background(), acme.TenantID), roomID, "e"); !ok || seq != 4 {
+	if seq, ok := must2(s.LookupClientMsg(tenant.NewContext(context.Background(), acme.TenantID), roomID, "e"))(t); !ok || seq != 4 {
 		t.Fatalf("other tenant lookup = %d,%v, want 4", seq, ok)
 	}
 }

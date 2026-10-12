@@ -42,7 +42,7 @@ func testPlatformGrant(t *testing.T, g GrantStore) {
 		t.Fatalf("platform grant = %+v %v", got, err)
 	}
 	var seen int
-	for _, rg := range g.RoomGrants(ctx, "r1") {
+	for _, rg := range must(g.RoomGrants(ctx, "r1"))(t) {
 		if rg.GrantID == "pg" && rg.Source == GrantSourcePlatform && rg.CreatedBy == "bob" {
 			seen++
 		}
@@ -63,7 +63,7 @@ func testPlatformGrant(t *testing.T, g GrantStore) {
 	}
 	// Usage accountability: the platform runs are audited as borrowed turns.
 	turns := 0
-	for _, rec := range g.AuditRecords(ctx, "r1", 0, 0) {
+	for _, rec := range must(g.AuditRecords(ctx, "r1", 0, 0))(t) {
 		if rec.GrantID == "pg" && rec.Action == "turn" && rec.Decision == "allow" && rec.ActorUserID == "bob" {
 			turns++
 		}

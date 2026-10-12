@@ -49,10 +49,10 @@ SELECT `+agentJobColumns+`
 FROM agent_jobs WHERE tenant_id=? AND room_id=? AND message_seq=? AND owner_user_id=? AND core=? AND provider=?`, tid, j.RoomID, j.MessageSeq, j.OwnerUserID, j.Core, j.Provider)
 }
 
-func (m *MySQLBridgeJobs) ListAgentJobs(ctx context.Context, roomID, channelID string, limit int) []AgentJob {
+func (m *MySQLBridgeJobs) ListAgentJobs(ctx context.Context, roomID, channelID string, limit int) ([]AgentJob, error) {
 	tid, err := tenant.Require(ctx)
 	if err != nil {
-		return nil
+		return nil, err
 	}
 	if limit <= 0 {
 		limit = 100
@@ -65,18 +65,7 @@ func (m *MySQLBridgeJobs) ListAgentJobs(ctx context.Context, roomID, channelID s
 	}
 	q += ` ORDER BY created_at_ms DESC LIMIT ?`
 	args = append(args, limit)
-	rows, err := m.DB.QueryContext(ctx, q, args...)
-	if err != nil {
-		return nil
-	}
-	defer rows.Close()
-	var out []AgentJob
-	for rows.Next() {
-		if j, err := scanAgentJobRows(rows); err == nil {
-			out = append(out, j)
-		}
-	}
-	return out
+	return queryAll(ctx, m.DB, q, scanAgentJobRow, args...)
 }
 
 func (m *MySQLBridgeJobs) ClaimAgentJobs(ctx context.Context, req ClaimRequest) ([]AgentJob, error) {
@@ -386,6 +375,21 @@ ON DUPLICATE KEY UPDATE owner_user_id=VALUES(owner_user_id), model_options_json=
 	return tx.Commit()
 }
 
+// bridgeAgentColumns is the column list scanBridgeAgent reads, in its order
+// (bridge_agents aliased a).
+const bridgeAgentColumns = `a.bridge_id, a.tenant_id, a.owner_user_id, a.core, a.provider, a.target_id, a.model_options_json, a.disabled, a.last_seen_at_ms`
+
+// scanBridgeAgent reads one bridgeAgentColumns row.
+func scanBridgeAgent(r rowScanner) (BridgeAgent, error) {
+	var a BridgeAgent
+	var raw []byte
+	if err := r.Scan(&a.BridgeID, &a.TenantID, &a.OwnerUserID, &a.Core, &a.Provider, &a.TargetID, &raw, &a.Disabled, &a.LastSeenAtMs); err != nil {
+		return BridgeAgent{}, err
+	}
+	a.ModelOptionsJSON = json.RawMessage(raw)
+	return a, nil
+}
+
 // ListBridgeAgents returns capabilities advertised by bridges that are still
 // alive. Advertisement rows outlive the bridge process, so serving them would
 // offer members an agent nobody can drive and the job would then sit until the
@@ -398,28 +402,14 @@ ON DUPLICATE KEY UPDATE owner_user_id=VALUES(owner_user_id), model_options_json=
 // roster join with room membership remains the visibility boundary: a member
 // sees exactly the agents advertised in rooms they are in. liveness is keyed
 // by bridge_id only.
-func (m *MySQLBridgeJobs) ListBridgeAgents(ctx context.Context, _ string) []BridgeAgent {
+func (m *MySQLBridgeJobs) ListBridgeAgents(ctx context.Context, _ string) ([]BridgeAgent, error) {
 	if _, err := tenant.Require(ctx); err != nil {
-		return nil
+		return nil, err
 	}
-	rows, err := m.DB.QueryContext(ctx, `SELECT a.bridge_id, a.tenant_id, a.owner_user_id, a.core, a.provider, a.target_id, a.model_options_json, a.disabled, a.last_seen_at_ms
+	return queryAll(ctx, m.DB, `SELECT `+bridgeAgentColumns+`
 FROM bridge_agents a
 JOIN bridge_heartbeats h ON h.bridge_id=a.bridge_id AND h.status='online' AND h.last_seen_at_ms >= ?
-WHERE a.disabled=0 ORDER BY a.owner_user_id, a.core, a.provider`, time.Now().UnixMilli()-BridgeOfflineAfterMs)
-	if err != nil {
-		return nil
-	}
-	defer rows.Close()
-	var out []BridgeAgent
-	for rows.Next() {
-		var a BridgeAgent
-		var raw []byte
-		if rows.Scan(&a.BridgeID, &a.TenantID, &a.OwnerUserID, &a.Core, &a.Provider, &a.TargetID, &raw, &a.Disabled, &a.LastSeenAtMs) == nil {
-			a.ModelOptionsJSON = json.RawMessage(raw)
-			out = append(out, a)
-		}
-	}
-	return out
+WHERE a.disabled=0 ORDER BY a.owner_user_id, a.core, a.provider`, scanBridgeAgent, time.Now().UnixMilli()-BridgeOfflineAfterMs)
 }
 
 func (m *MySQLBridgeJobs) scanAgentJob(ctx context.Context, q string, args ...any) (AgentJob, error) {
@@ -440,12 +430,8 @@ func scanAgentJobTxByID(ctx context.Context, tx *sql.Tx, id string) (AgentJob, e
 // scanAgentJobRow's order.
 const agentJobColumns = `job_id, tenant_id, room_id, channel_id, message_seq, client_msg_id, requester_user_id, owner_user_id, core, provider, target_id, message_text, attachment_ids, model, reasoning_effort, status, failure_reason, attempt, lease_bridge_id, lease_expires_at_ms, created_at_ms, updated_at_ms, started_at_ms, finished_at_ms, diagnostics_json, claimed_at_ms, dispatched_by_job_id, dispatch_depth, expert_id, expert_version, expert_name, room_expert_id, room_expert_version, room_expert_name`
 
-type agentJobScanner interface{ Scan(dest ...any) error }
-
-type rowsScanner struct{ *sql.Rows }
-
-func scanAgentJobRows(rows *sql.Rows) (AgentJob, error) { return scanAgentJobRow(rowsScanner{rows}) }
-func scanAgentJobRow(row agentJobScanner) (AgentJob, error) {
+func scanAgentJobRows(rows *sql.Rows) (AgentJob, error) { return scanAgentJobRow(rows) }
+func scanAgentJobRow(row rowScanner) (AgentJob, error) {
 	var j AgentJob
 	var status, reason string
 	var messageText, model, reasoningEffort sql.NullString
@@ -522,26 +508,12 @@ FROM bridge_heartbeats WHERE owner_user_id=? ORDER BY last_seen_at_ms DESC LIMIT
 	return hb, true, nil
 }
 
-func (m *MySQLBridgeJobs) ListBridgeAgentsForOwner(ctx context.Context, ownerUserID string) []BridgeAgent {
-	rows, err := m.DB.QueryContext(ctx, `SELECT a.bridge_id, a.tenant_id, a.owner_user_id, a.core, a.provider, a.target_id, a.model_options_json, a.disabled, a.last_seen_at_ms
+func (m *MySQLBridgeJobs) ListBridgeAgentsForOwner(ctx context.Context, ownerUserID string) ([]BridgeAgent, error) {
+	return queryAll(ctx, m.DB, `SELECT `+bridgeAgentColumns+`
 FROM bridge_agents a
 JOIN bridge_heartbeats h ON h.bridge_id=a.bridge_id AND h.status='online' AND h.last_seen_at_ms >= ?
 WHERE a.owner_user_id=? AND a.disabled=0
-ORDER BY a.core, a.provider`, time.Now().UnixMilli()-BridgeOfflineAfterMs, ownerUserID)
-	if err != nil {
-		return nil
-	}
-	defer rows.Close()
-	var out []BridgeAgent
-	for rows.Next() {
-		var a BridgeAgent
-		var raw []byte
-		if rows.Scan(&a.BridgeID, &a.TenantID, &a.OwnerUserID, &a.Core, &a.Provider, &a.TargetID, &raw, &a.Disabled, &a.LastSeenAtMs) == nil {
-			a.ModelOptionsJSON = json.RawMessage(raw)
-			out = append(out, a)
-		}
-	}
-	return out
+ORDER BY a.core, a.provider`, scanBridgeAgent, time.Now().UnixMilli()-BridgeOfflineAfterMs, ownerUserID)
 }
 
 // PendingAgentJobs counts the owner's not-yet-started jobs across tenants

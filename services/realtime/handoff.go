@@ -111,6 +111,11 @@ func (s *Service) handleInternalImport(w http.ResponseWriter, r *http.Request) {
 	rows := make([]store.RoomMessage, 0, len(batch.Messages))
 	for i, m := range batch.Messages {
 		row, err := s.importRow(r, roomID, batch, importedAt, m)
+		if errors.Is(err, errChannelLookup) {
+			obs.ServerError(w, "channel lookup failed", err)
+			httpx.Error(w, "channel lookup failed", http.StatusInternalServerError)
+			return
+		}
 		if err != nil {
 			status := http.StatusBadRequest
 			switch {
@@ -141,8 +146,8 @@ func (s *Service) handleInternalImport(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(reply)
 }
 
-// errChannelLookup marks an import refused because a channel's kind could
-// not be read (the people-chat guard fails closed).
+// errChannelLookup marks a failed channel read (a kind or the default
+// channel): never "unknown channel", and guards built on it fail closed.
 var errChannelLookup = errors.New("channel lookup failed")
 
 // importRow validates one imported message and builds its stored row. The

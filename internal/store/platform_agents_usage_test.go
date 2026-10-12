@@ -26,14 +26,14 @@ func platformTurnCases(t *testing.T, g GrantStore, sfx string) {
 			t.Fatalf("AppendAudit: %v", err)
 		}
 	}
-	turns := g.BorrowTurns(tenantCtx("t-pa-a-"+sfx), BorrowTurnQuery{FromMs: 0, ToMs: 5000, OwnerUserID: host, PlatformOnly: true, AllTenants: true})
+	turns := must(g.BorrowTurns(tenantCtx("t-pa-a-"+sfx), BorrowTurnQuery{FromMs: 0, ToMs: 5000, OwnerUserID: host, PlatformOnly: true, AllTenants: true}))(t)
 	if len(turns) != 2 || turns[0].GrantID != "pg-a-"+sfx || turns[0].TenantID != "t-pa-a-"+sfx || turns[1].TenantID != "t-pa-b-"+sfx {
 		t.Fatalf("platform turns = %+v", turns)
 	}
-	if n := len(g.BorrowTurns(tenantCtx("t-pa-a-"+sfx), BorrowTurnQuery{FromMs: 0, ToMs: 5000, OwnerUserID: host, PlatformOnly: true})); n != 1 {
+	if n := len(must(g.BorrowTurns(tenantCtx("t-pa-a-"+sfx), BorrowTurnQuery{FromMs: 0, ToMs: 5000, OwnerUserID: host, PlatformOnly: true}))(t)); n != 1 {
 		t.Fatalf("tenant-scoped platform turns = %d, want 1", n)
 	}
-	if n := len(g.BorrowTurns(tenantCtx("t-pa-a-"+sfx), BorrowTurnQuery{FromMs: 0, ToMs: 5000, OwnerUserID: host, AllTenants: true})); n != 3 {
+	if n := len(must(g.BorrowTurns(tenantCtx("t-pa-a-"+sfx), BorrowTurnQuery{FromMs: 0, ToMs: 5000, OwnerUserID: host, AllTenants: true}))(t)); n != 3 {
 		t.Fatalf("all-tenant turns = %d, want 3", n)
 	}
 }

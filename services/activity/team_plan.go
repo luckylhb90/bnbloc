@@ -85,7 +85,12 @@ func (s *Service) handleTeamPlan(w http.ResponseWriter, r *http.Request) {
 		lead = wire.PlanAgent{OwnerID: strings.TrimSpace(in.Lead.OwnerID), Core: strings.TrimSpace(in.Lead.Core), Provider: strings.TrimSpace(in.Lead.Provider)}
 	}
 
-	addressable := s.roomAddressableAgents(r, roomID)
+	addressable, err := s.roomAddressableAgents(r, roomID)
+	if err != nil {
+		obs.ServerError(w, "list room agents failed", err)
+		httpx.Error(w, "list room agents failed", http.StatusInternalServerError)
+		return
+	}
 	agents := make([]wire.PlanAgent, 0, len(addressable))
 	for _, a := range addressable {
 		agents = append(agents, wire.PlanAgent{OwnerID: a.OwnerUserID, Core: a.Core, Provider: a.Provider, Platform: a.Platform})

@@ -224,7 +224,11 @@ func TestBudgetHardStopRefusesDriveAtClaim(t *testing.T) {
 		t.Fatalf("claimed %d jobs over a reached hard-stop budget, want 0", len(got))
 	}
 	var job store.AgentJob
-	for _, j := range f.jobs.ListAgentJobs(bctx(), "room-1", "", 10) {
+	jobList, err := f.jobs.ListAgentJobs(bctx(), "room-1", "", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, j := range jobList {
 		if j.JobID == "j-alice" {
 			job = j
 		}

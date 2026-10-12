@@ -66,7 +66,7 @@ type Service struct {
 	RoomMembers func(ctx context.Context, roomID string) ([]string, error)
 	// OrgAdmins lists an organization's org admins (content publish
 	// requests notify them). nil notifies nobody.
-	OrgAdmins func(tenantID string) []string
+	OrgAdmins func(tenantID string) ([]string, error)
 	// RoomTenant resolves a room's authoritative tenant (rooms.tenant_id) so a
 	// room-scoped request executes in the ROOM's tenant, not the caller's
 	// session tenant. Empty result leaves the session tenant in force. nil
@@ -134,7 +134,7 @@ type Service struct {
 	NotifierReplies store.NotificationReplyTokenStore
 	// MemberCount returns the instance's total distinct members (adoption
 	// denominators). nil or 0 renders counts without percentages.
-	MemberCount func() int
+	MemberCount func() (int, error)
 	// AllowedOrigins are extra browser origins permitted for cross-origin API
 	// access (CORS). The desktop shell's webview origins (tauri://localhost and
 	// http://tauri.localhost on Windows) are always allowed; a deployment can

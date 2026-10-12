@@ -169,7 +169,12 @@ func (s *Service) handleListQuotaRequests(w http.ResponseWriter, r *http.Request
 		}
 		q.RoomID = roomID
 	}
-	reqs := s.QuotaRequests.ListQuotaRequests(r.Context(), q)
+	reqs, err := s.QuotaRequests.ListQuotaRequests(r.Context(), q)
+	if err != nil {
+		obs.ServerError(w, "list quota requests failed", err)
+		httpx.Error(w, "list quota requests failed", http.StatusInternalServerError)
+		return
+	}
 	out := make([]wire.QuotaRequest, 0, len(reqs))
 	for _, rq := range reqs {
 		out = append(out, quotaRequestView(rq))

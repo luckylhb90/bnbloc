@@ -29,7 +29,10 @@ import (
 type roomStoreMembership struct{ rooms *store.MemoryRoom }
 
 func (m roomStoreMembership) Lookup(roomID, userID string) (membership.Member, bool) {
-	mem, ok := m.rooms.MembershipAnyTenant(context.Background(), roomID, userID)
+	mem, ok, err := m.rooms.MembershipAnyTenant(context.Background(), roomID, userID)
+	if err != nil {
+		return membership.Member{}, false // fail closed
+	}
 	return membership.Member{Role: mem.Role, AgentHost: mem.AgentHost, Tenant: mem.TenantID}, ok
 }
 
@@ -337,10 +340,18 @@ func TestHandoffExportImportRoundTrip(t *testing.T) {
 		t.Fatalf("import result = %+v", res)
 	}
 	ctx := tenant.NewContext(context.Background(), tenant.Default)
-	if members := e.rooms.Members(ctx, res.RoomID); len(members) != 1 || members[0].UserID != "dave" || members[0].Role != store.RoleOwner {
+	members, err := e.rooms.Members(ctx, res.RoomID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(members) != 1 || members[0].UserID != "dave" || members[0].Role != store.RoleOwner {
 		t.Fatalf("imported room members = %+v (the file's member list must not grant access)", members)
 	}
-	if e.rooms.IsMember(ctx, res.RoomID, "alice") {
+	isMember, err := e.rooms.IsMember(ctx, res.RoomID, "alice")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if isMember {
 		t.Fatal("source member gained access from the package")
 	}
 	if len(res.Handoff.SuggestedMembers) != 3 || res.Handoff.SourceRoomID != roomID {
@@ -525,7 +536,11 @@ func TestHandoffImportRejectsBadPackages(t *testing.T) {
 	}
 	// A refused package creates nothing.
 	ctx := tenant.NewContext(context.Background(), tenant.Default)
-	if rooms := e.rooms.RoomsForUser(ctx, "dave"); len(rooms) != 0 {
+	rooms, err := e.rooms.RoomsForUser(ctx, "dave")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rooms) != 0 {
 		t.Fatalf("rejected imports left rooms behind: %v", rooms)
 	}
 }

@@ -39,8 +39,14 @@ func (s *Service) handleTenantDirectory(w http.ResponseWriter, r *http.Request) 
 		httpx.Error(w, "missing authenticated subject", http.StatusUnauthorized)
 		return
 	}
+	tenants, err := s.Tenants.ListTenants(r.Context())
+	if err != nil {
+		obs.ServerError(w, "list tenants failed", err)
+		httpx.Error(w, "list tenants failed", http.StatusInternalServerError)
+		return
+	}
 	out := make([]directoryTenantView, 0)
-	for _, t := range s.Tenants.ListTenants(r.Context()) {
+	for _, t := range tenants {
 		if t.Status != store.TenantActive {
 			continue
 		}
@@ -51,9 +57,15 @@ func (s *Service) handleTenantDirectory(w http.ResponseWriter, r *http.Request) 
 			httpx.Error(w, "read membership failed", http.StatusInternalServerError)
 			return
 		}
+		jr, requested, err := s.Tenants.GetJoinRequest(r.Context(), t.TenantID, caller)
+		if err != nil {
+			obs.ServerError(w, "read join request failed", err)
+			httpx.Error(w, "read join request failed", http.StatusInternalServerError)
+			return
+		}
 		if member {
 			relation = "member"
-		} else if jr, ok := s.Tenants.GetJoinRequest(r.Context(), t.TenantID, caller); ok {
+		} else if requested {
 			relation = string(jr.Status)
 		}
 		out = append(out, directoryTenantView{TenantID: t.TenantID, Name: t.Name, Relation: relation})
@@ -131,7 +143,12 @@ func (s *Service) handleMyJoinRequests(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, "missing authenticated subject", http.StatusUnauthorized)
 		return
 	}
-	reqs := s.Tenants.ListJoinRequestsForUser(r.Context(), caller)
+	reqs, err := s.Tenants.ListJoinRequestsForUser(r.Context(), caller)
+	if err != nil {
+		obs.ServerError(w, "list join requests failed", err)
+		httpx.Error(w, "list join requests failed", http.StatusInternalServerError)
+		return
+	}
 	views := make([]map[string]any, 0, len(reqs))
 	for _, jr := range reqs {
 		views = append(views, joinRequestView(jr))
@@ -157,7 +174,12 @@ func (s *Service) handleListJoinRequests(w http.ResponseWriter, r *http.Request)
 	case "rejected":
 		status = store.JoinRejected
 	}
-	reqs := s.Tenants.ListJoinRequests(r.Context(), tid, status)
+	reqs, err := s.Tenants.ListJoinRequests(r.Context(), tid, status)
+	if err != nil {
+		obs.ServerError(w, "list join requests failed", err)
+		httpx.Error(w, "list join requests failed", http.StatusInternalServerError)
+		return
+	}
 	views := make([]map[string]any, 0, len(reqs))
 	for _, jr := range reqs {
 		views = append(views, joinRequestView(jr))
@@ -185,7 +207,12 @@ func (s *Service) decideJoinRequest(w http.ResponseWriter, r *http.Request, appr
 	}
 	tid := tenant.FromContext(r.Context())
 	userID := r.PathValue("userId")
-	jr, ok := s.Tenants.GetJoinRequest(r.Context(), tid, userID)
+	jr, ok, err := s.Tenants.GetJoinRequest(r.Context(), tid, userID)
+	if err != nil {
+		obs.ServerError(w, "read join request failed", err)
+		httpx.Error(w, "read join request failed", http.StatusInternalServerError)
+		return
+	}
 	if !ok {
 		httpx.Error(w, "join request not found", http.StatusNotFound)
 		return

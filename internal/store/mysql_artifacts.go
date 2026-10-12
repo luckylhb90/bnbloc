@@ -227,29 +227,18 @@ SELECT `+versionCols(true)+`
 FROM artifact_versions WHERE tenant_id=? AND artifact_id=? AND version=?`, tid, artifactID, version))
 }
 
-func (m *MySQLArtifacts) ListArtifactVersions(ctx context.Context, artifactID string, limit int) []ArtifactVersion {
+func (m *MySQLArtifacts) ListArtifactVersions(ctx context.Context, artifactID string, limit int) ([]ArtifactVersion, error) {
 	tid, err := tenant.Require(ctx)
 	if err != nil {
-		return nil
+		return nil, err
 	}
 	if limit <= 0 {
 		limit = 50
 	}
-	rows, err := m.DB.QueryContext(ctx, `
+	return queryAll(ctx, m.DB, `
 SELECT `+versionCols(false)+`
 FROM artifact_versions WHERE tenant_id=? AND artifact_id=?
-ORDER BY version DESC LIMIT ?`, tid, artifactID, limit)
-	if err != nil {
-		return nil
-	}
-	defer rows.Close()
-	var out []ArtifactVersion
-	for rows.Next() {
-		if v, err := scanArtifactVersion(rows); err == nil {
-			out = append(out, v)
-		}
-	}
-	return out
+ORDER BY version DESC LIMIT ?`, scanArtifactVersion, tid, artifactID, limit)
 }
 
 // SetArtifactThumbnail is one conditional UPDATE: it lands only when no
@@ -275,9 +264,7 @@ WHERE tenant_id=? AND artifact_id=? AND version=? AND (thumb_blob_key='' OR thum
 	return v, n > 0, nil
 }
 
-type artifactScanner interface{ Scan(dest ...any) error }
-
-func scanArtifact(row artifactScanner) (Artifact, error) {
+func scanArtifact(row rowScanner) (Artifact, error) {
 	var a Artifact
 	err := row.Scan(&a.ArtifactID, &a.TenantID, &a.RoomID, &a.ChannelID, &a.Kind, &a.Title, &a.Language, &a.MimeType, &a.FileName, &a.CurrentVersion, &a.CreatedBy, &a.CreatedAtMs, &a.UpdatedAtMs)
 	if err == sql.ErrNoRows {
@@ -289,7 +276,7 @@ func scanArtifact(row artifactScanner) (Artifact, error) {
 	return a, nil
 }
 
-func scanArtifactVersion(row artifactScanner) (ArtifactVersion, error) {
+func scanArtifactVersion(row rowScanner) (ArtifactVersion, error) {
 	var v ArtifactVersion
 	var thumbMime string
 	var thumbW, thumbH int

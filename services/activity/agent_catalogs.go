@@ -7,6 +7,7 @@ import (
 	"sort"
 
 	"github.com/luckylhb90/bnbloc/internal/httpx"
+	"github.com/luckylhb90/bnbloc/internal/obs"
 	"github.com/luckylhb90/bnbloc/internal/roomctx"
 	"github.com/luckylhb90/bnbloc/internal/shareagent"
 	"github.com/luckylhb90/bnbloc/internal/store"
@@ -49,8 +50,14 @@ func (s *Service) handleRoomAgentCatalogs(w http.ResponseWriter, r *http.Request
 	if !s.authorize(w, r, roomID) {
 		return
 	}
+	addressable, err := s.roomAddressableAgents(r, roomID)
+	if err != nil {
+		obs.ServerError(w, "list room agents failed", err)
+		httpx.Error(w, "list room agents failed", http.StatusInternalServerError)
+		return
+	}
 	agents := []wire.RoomAgentCatalog{}
-	for _, a := range s.roomAddressableAgents(r, roomID) {
+	for _, a := range addressable {
 		agents = append(agents, a.RoomAgentCatalog)
 	}
 	httpx.WriteJSON(w, http.StatusOK, wire.RoomAgentCatalogsReply{Agents: agents})
@@ -67,21 +74,31 @@ type addressableAgent struct {
 // human members' live agents and the room's available platform agents
 // (never an agent-host member's other agents), sorted by owner, core and
 // provider. The room agent catalogs and the team plan both read it.
-func (s *Service) roomAddressableAgents(r *http.Request, roomID string) []addressableAgent {
+func (s *Service) roomAddressableAgents(r *http.Request, roomID string) ([]addressableAgent, error) {
 	ctx := r.Context()
 	var hosted map[string]map[wire.PlatformAgentRef]bool // host -> added + published agents
 	agents := []addressableAgent{}
-	for _, m := range s.Rooms.Members(ctx, roomID) {
+	members, err := s.Rooms.Members(ctx, roomID)
+	if err != nil {
+		return nil, err
+	}
+	for _, m := range members {
 		var allowed map[wire.PlatformAgentRef]bool
 		if m.AgentHost {
 			if hosted == nil {
-				hosted = s.roomPlatformAgents(r, roomID)
+				if hosted, err = s.roomPlatformAgents(r, roomID); err != nil {
+					return nil, err
+				}
 			}
 			if allowed = hosted[m.UserID]; len(allowed) == 0 {
 				continue
 			}
 		}
-		for _, c := range ownerCatalogs(s.BridgeJobs.ListBridgeAgentsForOwner(ctx, m.UserID), allowed) {
+		advertised, err := s.BridgeJobs.ListBridgeAgentsForOwner(ctx, m.UserID)
+		if err != nil {
+			return nil, err
+		}
+		for _, c := range ownerCatalogs(advertised, allowed) {
 			agents = append(agents, addressableAgent{RoomAgentCatalog: c, Platform: m.AgentHost})
 		}
 	}
@@ -95,24 +112,29 @@ func (s *Service) roomAddressableAgents(r *http.Request, roomID string) []addres
 		}
 		return a.Provider < b.Provider
 	})
-	return agents
+	return agents, nil
 }
 
 // roomPlatformAgents indexes the room's available platform agents by host.
 // It fails closed: no grant store or policy, or an unreadable policy, yields
-// none (the hosts' agents are left out; members' own agents still list).
-func (s *Service) roomPlatformAgents(r *http.Request, roomID string) map[string]map[wire.PlatformAgentRef]bool {
+// none (the hosts' agents are left out; members' own agents still list). A
+// failed grant read is an error.
+func (s *Service) roomPlatformAgents(r *http.Request, roomID string) (map[string]map[wire.PlatformAgentRef]bool, error) {
 	out := map[string]map[wire.PlatformAgentRef]bool{}
 	if s.Grants == nil || s.Settings == nil {
-		return out
+		return out, nil
 	}
 	policy, err := store.LoadPlatformAgents(r.Context(), s.Settings)
 	if err != nil {
 		slog.Warn("bnbloc activity: platform agents policy unreadable; leaving hosts' agents out of the room catalogs",
 			"event", "bnbloc.activity.platform_policy_unreadable", "room", roomID, "error", err)
-		return out
+		return out, nil
 	}
-	for _, pg := range shareagent.RoomPlatformGrants(r.Context(), s.Grants, policy, roomID, s.clock().UnixMilli()) {
+	pgs, err := shareagent.RoomPlatformGrants(r.Context(), s.Grants, policy, roomID, s.clock().UnixMilli())
+	if err != nil {
+		return nil, err
+	}
+	for _, pg := range pgs {
 		if !pg.Available {
 			continue
 		}
@@ -122,7 +144,7 @@ func (s *Service) roomPlatformAgents(r *http.Request, roomID string) map[string]
 		}
 		out[host][pg.Agent] = true
 	}
-	return out
+	return out, nil
 }
 
 // ownerCatalogs projects one owner's live advertised agents, one row per

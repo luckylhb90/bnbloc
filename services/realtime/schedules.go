@@ -58,7 +58,7 @@ const (
 // "room deleted" diagnosis use it.
 type RoomRoleStore interface {
 	GetRoom(ctx context.Context, roomID string) (store.Room, error)
-	MemberRole(ctx context.Context, roomID, userID string) (store.Role, bool)
+	MemberRole(ctx context.Context, roomID, userID string) (store.Role, bool, error)
 }
 
 func (s *Service) registerScheduleRoutes(mux *http.ServeMux) {
@@ -79,12 +79,12 @@ func (s *Service) schedulesReady(w http.ResponseWriter) bool {
 }
 
 // canModerateSchedules reports whether userID is the room's owner or an admin.
-func (s *Service) canModerateSchedules(ctx context.Context, roomID, userID string) bool {
+func (s *Service) canModerateSchedules(ctx context.Context, roomID, userID string) (bool, error) {
 	if s.RoomRoles == nil {
-		return false
+		return false, nil
 	}
-	role, ok := s.RoomRoles.MemberRole(ctx, roomID, userID)
-	return ok && role.CanInvite()
+	role, ok, err := s.RoomRoles.MemberRole(ctx, roomID, userID)
+	return ok && role.CanInvite(), err
 }
 
 // scheduleInput is the create body and (with every field optional) the
@@ -235,6 +235,9 @@ func (s *Service) checkScheduleSpec(ctx context.Context, sc *wire.RoomSchedule, 
 	sc.Recipient = rcpt
 	if sc.ChannelID != "" {
 		if _, err := s.resolveChannel(ctx, sc.RoomID, sc.ChannelID); err != nil {
+			if errors.Is(err, errChannelLookup) {
+				return http.StatusInternalServerError, err
+			}
 			return http.StatusNotFound, err
 		}
 		if sc.Recipient.Kind == wire.ScheduleRecipientAgent {
@@ -273,7 +276,13 @@ func (s *Service) handlePatchSchedule(w http.ResponseWriter, r *http.Request) {
 	if cur.CreatedBy != userID {
 		pauseOnly := in.Enabled != nil && !*in.Enabled && in.Text == nil && in.ChannelID == nil &&
 			in.Recipient == nil && in.Recurrence == nil && in.Timezone == nil
-		if !pauseOnly || !s.canModerateSchedules(r.Context(), roomID, userID) {
+		moderator, err := s.canModerateSchedules(r.Context(), roomID, userID)
+		if err != nil {
+			obs.ServerError(w, "read membership failed", err)
+			httpx.Error(w, "read membership failed", http.StatusInternalServerError)
+			return
+		}
+		if !pauseOnly || !moderator {
 			httpx.Error(w, "only the creator may change this schedule (owners and admins may pause it)", http.StatusForbidden)
 			return
 		}
@@ -331,7 +340,13 @@ func (s *Service) handleDeleteSchedule(w http.ResponseWriter, r *http.Request) {
 		writeScheduleErr(w, err)
 		return
 	}
-	if cur.CreatedBy != userID && !s.canModerateSchedules(r.Context(), roomID, userID) {
+	moderator, err := s.canModerateSchedules(r.Context(), roomID, userID)
+	if err != nil {
+		obs.ServerError(w, "read membership failed", err)
+		httpx.Error(w, "read membership failed", http.StatusInternalServerError)
+		return
+	}
+	if cur.CreatedBy != userID && !moderator {
 		httpx.Error(w, "only the creator, the room owner, or an admin may delete this schedule", http.StatusForbidden)
 		return
 	}

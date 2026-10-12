@@ -285,7 +285,10 @@ func TestUsageReportCarriesTokens(t *testing.T) {
 			t.Fatalf("record %v = %d, want 400", body, code)
 		}
 	}
-	turns := gs.BorrowTurns(tctx(tenant.Default), store.BorrowTurnQuery{})
+	turns, err := gs.BorrowTurns(tctx(tenant.Default), store.BorrowTurnQuery{})
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(turns) != 4 || turns[0].Model != "m-1" || turns[0].InputTokens == nil || *turns[0].InputTokens != 100 ||
 		turns[2].InputTokens != nil || turns[2].OutputTokens != nil {
 		t.Fatalf("audit turns = %+v", turns)
