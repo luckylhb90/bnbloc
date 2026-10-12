@@ -257,6 +257,7 @@ function RunRow({ run, showRoom, onOpen }: { readonly run: AgentRun; readonly sh
         <StatusBadge run={run} />
         <span className="min-w-0 truncate font-medium text-[var(--color-fg)]">
           {run.expert && <>expert {expertBadge({ name: run.expert.name || run.expert.id, version: run.expert.version })} on </>}
+          {!run.expert && run.roomExpert && <>room expert {expertBadge({ name: run.roomExpert.name || run.roomExpert.id, version: run.roomExpert.version })} on </>}
           <RunAgent agent={run.agent} />
         </span>
         {run.borrowed && (
@@ -364,6 +365,14 @@ function RunDetail({
             <dt className="text-[var(--color-fg-subtle)]">Expert</dt>
             <dd className="truncate">
               {expertBadge({ name: run.expert.name || run.expert.id, version: run.expert.version })} on <RunAgent agent={run.agent} />
+            </dd>
+          </>
+        )}
+        {run.roomExpert && (
+          <>
+            <dt className="text-[var(--color-fg-subtle)]">Room expert</dt>
+            <dd className="truncate">
+              {expertBadge({ name: run.roomExpert.name || run.roomExpert.id, version: run.roomExpert.version })}
             </dd>
           </>
         )}

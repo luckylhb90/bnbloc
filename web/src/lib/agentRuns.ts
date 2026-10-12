@@ -70,6 +70,9 @@ export interface AgentRun {
   dispatchedBy?: { jobId: string; depth: number };
   // The expert the agent wore for this run, at the version the job pinned.
   expert?: { id: string; name?: string; version?: string };
+  // The room's expert the turn wore under the chat's own (recorded when the
+  // turn resolved it).
+  roomExpert?: { id: string; name?: string; version?: string };
   redacted?: boolean;
   diagnostics?: Record<string, unknown>;
 }
