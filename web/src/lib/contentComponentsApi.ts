@@ -23,10 +23,14 @@ function roomQuery(roomId?: string): string {
 
 // Archive uploads (import, a new version from a package) send the raw file.
 async function postArchive<T>(path: string, file: File): Promise<T> {
+  return postBody<T>(path, file, archiveContentType(file.name));
+}
+
+async function postBody<T>(path: string, body: Blob, contentType: string): Promise<T> {
   const res = await authedFetch(apiUrl(path), {
     method: "POST",
-    headers: { "Content-Type": archiveContentType(file.name) },
-    body: file,
+    headers: { "Content-Type": contentType },
+    body,
   });
   if (!res.ok) throw new ApiError(res.status, await errorDetail(res));
   return (await res.json()) as T;
@@ -58,6 +62,12 @@ export const contentApi = {
     }
     return postArchive<ContentComponentDetail>(`/v1/content-components/import?${q}`, file);
   },
+  // A package archive (a tar the web packed from drafted deliverables): a
+  // new component (component.json names its kind and name), or a new
+  // version of one of the caller's (the server bumps the version).
+  createArchive: (tar: Blob) => postBody<ContentComponentDetail>("/v1/content-components", tar, "application/x-tar"),
+  newVersionArchive: (id: string, tar: Blob) =>
+    postBody<ContentComponentDetail>(`/v1/content-components/${enc(id)}/versions`, tar, "application/x-tar"),
   remove: (id: string) => req<void>(`/v1/content-components/${enc(id)}`, { method: "DELETE", raw: true }),
   ack: (id: string, version: string, roomId?: string) =>
     req<void>(`/v1/content-components/${enc(id)}/versions/${enc(version)}/ack${roomQuery(roomId)}`, { method: "POST", raw: true }),

@@ -1,9 +1,11 @@
 import { SquaresFourIcon } from "@phosphor-icons/react";
 import { FileCard } from "./FileCard";
+import { SaveDraftActions } from "./SaveDraftActions";
 
 // The file cards under a chat message: the deliverables that message's agent
 // turn produced, as a grid of up to MAX_CARDS, with "View all deliverables
 // (N)" opening the workbench's deliverables list filtered to the message.
+// A drafted expert or skill pack among them gets a "Save as …" action.
 
 const MAX_CARDS = 6;
 
@@ -28,6 +30,7 @@ export function MessageDeliverables({
           <FileCard key={id} roomId={roomId} artifactId={id} onOpen={onOpen} />
         ))}
       </div>
+      <SaveDraftActions roomId={roomId} artifactIds={artifactIds} />
       {artifactIds.length > MAX_CARDS && (
         <button
           type="button"
