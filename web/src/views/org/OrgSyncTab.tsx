@@ -18,6 +18,7 @@ import { errorText } from "@/lib/errors";
 import { useTenants } from "@/lib/queries";
 import { ConfirmDialog } from "@/ui/Dialog";
 import { listPlaceholder } from "@/ui/QueryState";
+import { exactTime } from "@/lib/format";
 
 // Platform super-admin: organization sync. Rules map the groups, department
 // or email domain an auth provider asserts at sign-in onto a tenant
@@ -261,7 +262,7 @@ export function OrgSyncTab() {
         </button>
         {meta.updatedAtMs ? (
           <span className="text-xs text-[var(--color-fg-subtle)]">
-            Saved {new Date(meta.updatedAtMs).toLocaleString()}
+            Saved {exactTime(meta.updatedAtMs)}
             {meta.updatedBy ? (
               <>
                 {" "}by <UserName id={meta.updatedBy} />

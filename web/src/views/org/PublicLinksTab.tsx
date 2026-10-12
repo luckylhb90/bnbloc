@@ -8,6 +8,7 @@ import { useToast } from "@/ui/Toast";
 import { UserName } from "@/views/UserName";
 import { errorText } from "@/lib/errors";
 import { listPlaceholder } from "@/ui/QueryState";
+import { exactTime } from "@/lib/format";
 
 // Org-admin: every active public share link of the tenant — room, artifact,
 // creator, expiry, views — with revoke. Switching public links off for the
@@ -84,7 +85,7 @@ export function PublicLinksTab() {
                   <td className="px-3 py-2 text-[var(--color-fg-muted)]">
                     <UserName id={s.createdBy} />
                   </td>
-                  <td className="px-3 py-2 text-[var(--color-fg-muted)]" title={new Date(s.expiresAtMs).toLocaleString()}>
+                  <td className="px-3 py-2 text-[var(--color-fg-muted)]" title={exactTime(s.expiresAtMs)}>
                     {expiresLabel(s.expiresAtMs, now)}
                   </td>
                   <td className="px-3 py-2 tabular-nums text-[var(--color-fg-muted)]">{viewsLabel(s.viewCount)}</td>

@@ -18,10 +18,36 @@ export function relativeTime(ms: number | undefined, now: number = Date.now()): 
   return new Date(ms).toLocaleDateString();
 }
 
-// exactTime renders the full local timestamp for tooltips.
+// exactTime renders the full local timestamp (tooltips, audit rows).
 export function exactTime(ms: number | undefined): string {
   if (!ms) return "";
   return new Date(ms).toLocaleString();
+}
+
+// formatDate renders the local date of a timestamp ("—" when unset).
+export function formatDate(ms: number | undefined): string {
+  return ms ? new Date(ms).toLocaleDateString() : "—";
+}
+
+// formatDay renders a day as "Oct 12, 2026" (locale: the browser's when unset).
+export function formatDay(ms: number, locale?: string): string {
+  return new Date(ms).toLocaleDateString(locale, { year: "numeric", month: "short", day: "numeric" });
+}
+
+// formatClock renders the local time of day of a timestamp.
+export function formatClock(ms: number): string {
+  return new Date(ms).toLocaleTimeString();
+}
+
+// agoText phrases a past time as a sentence part: "just now", "3 minutes
+// ago", "5 hours ago", or "on <date>" past two days.
+export function agoText(ms: number, now: number = Date.now()): string {
+  const min = Math.max(0, Math.round((now - ms) / 60000));
+  if (min < 1) return "just now";
+  if (min < 60) return `${min} ${min === 1 ? "minute" : "minutes"} ago`;
+  const h = Math.round(min / 60);
+  if (h < 48) return `${h} ${h === 1 ? "hour" : "hours"} ago`;
+  return `on ${new Date(ms).toLocaleDateString()}`;
 }
 
 export function formatBytes(bytes: number): string {

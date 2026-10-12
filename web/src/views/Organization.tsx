@@ -35,6 +35,7 @@ import { errorText } from "@/lib/errors";
 import { ConfirmDialog } from "@/ui/Dialog";
 import { displayNameOf } from "@/lib/useDisplayName";
 import { listPlaceholder } from "@/ui/QueryState";
+import { exactTime, formatDate, formatUsd } from "@/lib/format";
 
 type Tab =
   | "overview"
@@ -213,8 +214,8 @@ function OverviewTab({ role }: { role: string | null }) {
         <Stat label="Agent runs" value={usage ? String(usage.runsUsed) : "—"} sub={ceil(usage?.runQuota)} />
         <Stat
           label="Cost"
-          value={usage ? usage.costUsed.toFixed(2) : "—"}
-          sub={usage?.costAllowance ? usage.costAllowance.toFixed(2) : "unlimited"}
+          value={usage ? formatUsd(usage.costUsed) : "—"}
+          sub={usage?.costAllowance ? formatUsd(usage.costAllowance) : "unlimited"}
         />
         <Stat label="Audit events" value={records ? String(records.length) : "—"} />
         <Stat label="Role" value={role || "—"} />
@@ -245,7 +246,7 @@ function OverviewTab({ role }: { role: string | null }) {
                 records.map((r, i) => (
                   <tr key={i} className="border-t border-[var(--color-border)]">
                     <td className="px-3 py-2 tabular-nums text-[var(--color-fg-muted)]">
-                      {new Date(r.atMs).toLocaleString()}
+                      {exactTime(r.atMs)}
                     </td>
                     <td className="px-3 py-2">
                       <UserWithEmail id={r.actorUserId} />
@@ -394,7 +395,7 @@ function MembersTab({ selfId }: { selfId: string | null }) {
                       )}
                     </td>
                     <td className="px-3 py-2 tabular-nums text-[var(--color-fg-muted)]">
-                      {m.joinedAtMs ? new Date(m.joinedAtMs).toLocaleDateString() : "—"}
+                      {formatDate(m.joinedAtMs)}
                     </td>
                     <td className="px-3 py-2">
                       <Select

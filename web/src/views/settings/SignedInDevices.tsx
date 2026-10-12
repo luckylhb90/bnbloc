@@ -4,7 +4,7 @@ import { ApiError } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { clientLabel, groupDevices, otherSessionCount, type MySession } from "@/lib/devices";
 import { devicesApi } from "@/lib/devicesApi";
-import { exactTime, relativeTime } from "@/lib/format";
+import { exactTime, agoText } from "@/lib/format";
 import { Button } from "@/ui/Button";
 import { Badge, Card, Skeleton } from "@/ui/Card";
 import { ConfirmDialog } from "@/ui/Dialog";
@@ -26,12 +26,6 @@ function ClientIcon({ client }: { readonly client: string }) {
   }
 }
 
-// ago phrases relativeTime ("just now", "3m", or a date) as a past time.
-function ago(ms: number): string {
-  const r = relativeTime(ms);
-  if (r === "just now") return r;
-  return /^\d+[smhd]$/.test(r) ? `${r} ago` : `on ${r}`;
-}
 
 // What a pending confirmation will do.
 type Pending =
@@ -203,9 +197,9 @@ function SessionRow({
             {session.current && <Badge tone="accent">This device</Badge>}
           </span>
           <span className="block text-xs text-[var(--color-fg-muted)]">
-            <span title={exactTime(session.createdAtMs)}>Signed in {ago(session.createdAtMs)}</span>
+            <span title={exactTime(session.createdAtMs)}>Signed in {agoText(session.createdAtMs)}</span>
             {" · "}
-            <span title={exactTime(session.lastUsedAtMs)}>Last used {ago(session.lastUsedAtMs)}</span>
+            <span title={exactTime(session.lastUsedAtMs)}>Last used {agoText(session.lastUsedAtMs)}</span>
           </span>
         </span>
       </span>

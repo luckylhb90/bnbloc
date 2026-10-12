@@ -4,6 +4,7 @@ import { ErrorBox } from "@/ui/ErrorBox";
 import { UserWithEmail } from "@/views/UserName";
 import { errorText } from "@/lib/errors";
 import { listPlaceholder } from "@/ui/QueryState";
+import { formatDate } from "@/lib/format";
 
 // Org-admin: self-service join requests for the tenant (split from
 // Organization.tsx).
@@ -62,7 +63,7 @@ export function RequestsTab() {
                   </td>
                   <td className="px-3 py-2 text-[var(--color-fg-muted)]">{r.message || "—"}</td>
                   <td className="px-3 py-2 tabular-nums text-[var(--color-fg-muted)]">
-                    {r.createdAtMs ? new Date(r.createdAtMs).toLocaleDateString() : "—"}
+                    {formatDate(r.createdAtMs)}
                   </td>
                   <td className="px-3 py-2 text-right">
                     <div className="flex justify-end gap-2">

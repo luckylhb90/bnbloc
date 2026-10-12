@@ -10,6 +10,7 @@
 
 export type { PlatformRetentionView, RetentionKind, RetentionLimits, RetentionPolicy, RetentionStatus, TenantRetentionView } from "./wire.gen.ts";
 import type { RetentionKind, RetentionLimits, RetentionPolicy, RetentionStatus, TenantRetentionView } from "./wire.gen.ts";
+import { agoText } from "./format.ts";
 
 export type RetentionLayer = "platform" | "tenant";
 
@@ -136,17 +137,9 @@ export function describeStatus(status: RetentionStatus, now: number = Date.now()
     .filter(([, n]) => n > 0)
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([item, n]) => `${n.toLocaleString("en-US")} ${ITEM_LABELS[item] ?? item}`);
-  const when = ago(status.lastRunAtMs, now);
+  const when = agoText(status.lastRunAtMs, now);
   return parts.length > 0
     ? `The last cleanup ran ${when} and removed ${parts.join(", ")}.`
     : `The last cleanup ran ${when} and found nothing to remove.`;
 }
 
-function ago(ms: number, now: number): string {
-  const min = Math.max(0, Math.round((now - ms) / 60000));
-  if (min < 1) return "just now";
-  if (min < 60) return `${min} ${min === 1 ? "minute" : "minutes"} ago`;
-  const h = Math.round(min / 60);
-  if (h < 48) return `${h} ${h === 1 ? "hour" : "hours"} ago`;
-  return `on ${new Date(ms).toLocaleDateString()}`;
-}

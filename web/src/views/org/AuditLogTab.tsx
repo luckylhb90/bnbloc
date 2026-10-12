@@ -22,6 +22,7 @@ import { useToast } from "@/ui/Toast";
 import { UserWithEmail } from "@/views/UserName";
 import { useEmailMask } from "@/lib/privacyMode";
 import { errorText } from "@/lib/errors";
+import { exactTime } from "@/lib/format";
 
 const selectClass =
   "h-10 rounded-[var(--radius)] border border-[var(--color-border)] bg-[var(--color-surface-2)] px-2 text-sm";
@@ -215,7 +216,7 @@ export function AuditLogTab({
               {entries.map((e) => (
                 <tr key={e.id} className="border-t border-[var(--color-border)] align-top">
                   <td className="whitespace-nowrap px-3 py-2 tabular-nums text-[var(--color-fg-muted)]">
-                    {new Date(e.atMs).toLocaleString()}
+                    {exactTime(e.atMs)}
                   </td>
                   {platform && (
                     <td className="px-3 py-2 text-[var(--color-fg-muted)]">{e.tenantId || "platform"}</td>

@@ -8,6 +8,7 @@ import type { RoomHandoffInfo, RoomImportResult } from "./wire.gen.ts";
 
 export type { RoomExportMember as HandoffMember } from "./wire.gen.ts";
 import type { RoomExportMember as HandoffMember } from "./wire.gen.ts";
+import { formatDay } from "./format.ts";
 
 // importedFrom reads the server-stamped payload.imported marker of a history
 // row and returns the source room's display name (falling back to its id), or
@@ -31,7 +32,7 @@ export function importedEditedAtMs(payload: Record<string, unknown> | undefined)
 
 // handoffBannerText is the imported-room banner line.
 export function handoffBannerText(info: RoomHandoffInfo, locale?: string): string {
-  const date = new Date(info.importedAtMs).toLocaleDateString(locale, { year: "numeric", month: "short", day: "numeric" });
+  const date = formatDay(info.importedAtMs, locale);
   const source = info.sourceRoomName || info.sourceRoomId;
   return `Imported from ${source} on ${date}`;
 }

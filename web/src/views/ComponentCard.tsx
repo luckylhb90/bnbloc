@@ -8,6 +8,7 @@ import { ConfirmDialog } from "@/ui/Dialog";
 import { Segment } from "@/ui/Segment";
 import { AdoptionBar, ArtifactFacts, ChipGroup, FactBlock, KindIcon, MCPFacts, PreviewerFacts, RolloutBadge, TrustBlock, memberMeta } from "@/views/componentFacts";
 import { componentKindLabel } from "@/lib/componentKinds";
+import { exactTime } from "@/lib/format";
 
 const ROLLOUT_SEGMENTS = [
   { value: "auto", label: "Auto" },
@@ -89,7 +90,7 @@ function AdminComponentCard({
         <FactBlock label="Kind" value={componentKindLabel(component.kind)} />
         <FactBlock label="Runtime" value={component.runtime} />
         {component.protocol && <FactBlock label="Protocol" value={`${component.protocol.min}-${component.protocol.max}`} />}
-        {component.installedAtMs && <FactBlock label="Installed" value={new Date(component.installedAtMs).toLocaleString()} />}
+        {component.installedAtMs && <FactBlock label="Installed" value={exactTime(component.installedAtMs)} />}
       </div>
       <ChipGroup label="Capabilities" values={component.capabilities ?? []} empty="No capabilities recorded." />
       <ChipGroup label="Hooks" values={component.hooks ?? []} empty="No event hooks declared." />

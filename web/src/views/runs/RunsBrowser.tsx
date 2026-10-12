@@ -23,7 +23,7 @@ import {
 } from "@/lib/agentRuns";
 import { agentRunsApi } from "@/lib/agentRunsApi";
 import { cn } from "@/lib/cn";
-import { exactTime, formatDuration, formatUsd, relativeTime } from "@/lib/format";
+import { exactTime, formatDuration, formatUsd, relativeTime, formatClock } from "@/lib/format";
 import { formatTokens } from "@/lib/teamDashboard";
 import { useVisiblePoll } from "@/lib/useVisiblePoll";
 import { Button } from "@/ui/Button";
@@ -416,7 +416,7 @@ function RunDetail({
             <li key={s.id} className="flex items-baseline gap-3 text-xs tabular">
               <span className="w-32 shrink-0 text-[var(--color-fg)]">{s.label}</span>
               <span className="text-[var(--color-fg-muted)]" title={exactTime(s.atMs)}>
-                {new Date(s.atMs).toLocaleTimeString()}
+                {formatClock(s.atMs)}
               </span>
               {s.sincePrevMs !== undefined && <span className="text-[var(--color-fg-subtle)]">+{formatDuration(s.sincePrevMs)}</span>}
             </li>

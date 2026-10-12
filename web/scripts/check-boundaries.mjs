@@ -118,6 +118,15 @@ export const RULES = [
     sample: { file: "lib/xApi.ts", text: "req(`/v1/rooms/${encodeURIComponent(id)}/members`)" },
   },
   {
+    id: 11,
+    name: "dates, money and bytes are formatted by lib/format.ts",
+    // Cost read "$0.00 of $5.00", bytes "3072.0 MB", relative times came in
+    // three variants (web M25, L3, L4).
+    pattern: /new Date\([^)]*\)\.toLocale(?:String|DateString|TimeString)\(|\.toFixed\(2\)|\/ 1024\b/,
+    allowed: ["lib/format.ts"],
+    sample: { file: "views/X.tsx", text: "<td>{new Date(e.atMs).toLocaleString()}</td>" },
+  },
+  {
     id: 12,
     name: "what the client says about a kind lives in its Record table (COMPONENT_KINDS, CONTENT_KINDS)",
     // Label chains per kind drifted: a sandbox read "Auth provider" in

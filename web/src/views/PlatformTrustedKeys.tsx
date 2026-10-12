@@ -6,6 +6,7 @@ import { ConfirmDialog } from "@/ui/Dialog";
 import { useToast } from "@/ui/Toast";
 import { UserName } from "@/views/UserName";
 import { errorText } from "@/lib/errors";
+import { exactTime } from "@/lib/format";
 
 // Trusted publisher keys are the market's root of trust: install refuses any
 // package signed by a key not listed here. So the empty state is a warning, not
@@ -91,7 +92,7 @@ export function TrustedKeysPanel() {
                 </div>
                 {k.addedAtMs ? (
                   <p className="mt-0.5 text-xs text-[var(--color-fg-subtle)]">
-                    Added {new Date(k.addedAtMs).toLocaleString()}
+                    Added {exactTime(k.addedAtMs)}
                     {k.addedBy ? (
                       <>
                         {" "}by <UserName id={k.addedBy} />
