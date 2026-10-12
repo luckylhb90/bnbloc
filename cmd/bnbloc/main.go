@@ -78,6 +78,9 @@ Components:
   bnbloc cores publish-sidecar --name <n> --binary <goos-goarch>=<path>... [--local-url <url>]
         [--version v] [--publisher p] [--listen-env VAR] [--supervised-env VAR] [--manifest f]
         [--rollout auto|optin|off] [--seckey f | --unsigned]
+  bnbloc cores publish-mcp --package <mcp.json> [--binary <goos-goarch>=<path>...]
+        [--rollout auto|optin|off] [--seckey f | --unsigned]
+        an MCP tool: a stdio server's binaries are uploaded and pinned; an endpoint takes none
   bnbloc cores install --url <daemonURL> --name <name> [--publisher p] [--rollout r] [--seckey f | --unsigned]
   bnbloc cores install --manifest <file> --name <name> [--rollout r] [--seckey f | --unsigned]
   bnbloc cores install --package <file> [--signature <file>] [--rollout r]   any pre-built package

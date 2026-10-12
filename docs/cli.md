@@ -292,6 +292,22 @@ bnbloc previewers pack dist/site --out dist/bundle.tar      # deterministic usta
 bnbloc previewers publish --package dist/package.json --bundle dist/bundle.tar --rollout optin
 ```
 
+An MCP tool (`bnbloc.mcp.package/v1`, see
+[architecture/content-components.md](./architecture/content-components.md#mcp-tool-components))
+is a package JSON naming its tools, env, credentials source and runtime
+(`kind` and `contract` may be omitted). A stdio tool's per-platform
+binaries are uploaded and pinned like a sidecar's; an endpoint tool takes
+none:
+
+```sh
+bnbloc cores publish-mcp --package codeword.mcp.json \
+  --binary darwin-arm64=dist/codeword-darwin-arm64 --binary linux-amd64=dist/codeword-linux-amd64 \
+  --rollout auto
+bnbloc cores publish-mcp --package search.mcp.json   # runtime "endpoint"
+```
+
+Manage it with the component routes and `?kind=mcp`.
+
 ## Publish a desktop update
 
 ```sh

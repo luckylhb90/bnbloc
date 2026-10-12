@@ -17,13 +17,15 @@ import (
 
 func runCores(args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("cores: expected a subcommand (install|publish-sidecar|list|uninstall|enable)")
+		return fmt.Errorf("cores: expected a subcommand (install|publish-sidecar|publish-mcp|list|uninstall|enable)")
 	}
 	switch args[0] {
 	case "install":
 		return coresInstall(args[1:])
 	case "publish-sidecar":
 		return coresPublishSidecar(args[1:])
+	case "publish-mcp":
+		return coresPublishMCP(args[1:])
 	case "list":
 		return coresList(args[1:])
 	case "uninstall":
@@ -84,7 +86,7 @@ func coresInstall(args []string) error {
 	return nil
 }
 
-// publishComponent is the ONE component publish call (install, publish-sidecar):
+// publishComponent is the ONE component publish call (install, publish-sidecar, publish-mcp):
 // POST /v1/platform/components with the package, its signature, and an
 // optional rollout the gateway applies atomically with the publish (the same
 // request the platform console sends). A notifier's first install answers
