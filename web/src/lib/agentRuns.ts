@@ -65,6 +65,9 @@ export interface AgentRun {
   phases: AgentRunPhases;
   reply?: AgentRunReply;
   usage?: AgentRunUsage;
+  // Set when an agent dispatched this run through the room tools: the
+  // parent job and the hop depth.
+  dispatchedBy?: { jobId: string; depth: number };
   redacted?: boolean;
   diagnostics?: Record<string, unknown>;
 }

@@ -4,6 +4,7 @@ import { getToken } from "./session";
 import { apiUrl } from "./config";
 import { importedEditedAtMs, importedFrom } from "./handoff.ts";
 import { scheduledMarker } from "./schedules.ts";
+import { dispatchAttribution, type DispatchAttribution } from "./dispatch.ts";
 
 export interface RoomEvent {
   kind?: string;
@@ -57,6 +58,9 @@ export interface RoomEvent {
   // For chat_message posted by a scheduled prompt (payload.scheduled): the
   // schedule id, so the feed can badge it.
   scheduledId?: string;
+  // For chat_message an agent dispatched on its author's behalf (payload
+  // dispatchedBy): the dispatching agent and the addressed one.
+  dispatch?: DispatchAttribution;
   // For task_updated: a message task was marked, toggled or unmarked.
   taskUpdate?: TaskUpdate;
   // For chat_message: whether it was addressed to an agent (payload
@@ -322,6 +326,7 @@ export function normalizeRoomEvent(ev: RoomEvent, emit: (e: RoomEvent) => void):
     ev.importedFrom = importedFrom(p);
     ev.editedAtMs ??= importedEditedAtMs(p);
     ev.scheduledId = scheduledMarker(p)?.scheduleId;
+    ev.dispatch = dispatchAttribution(p);
     const recipient = p.recipient as { provider?: unknown } | undefined;
     ev.toAgent = typeof recipient?.provider === "string" && recipient.provider !== "";
   } else if (ev.kind === "agent_session_state") {

@@ -44,6 +44,7 @@ export const AUDIT_KIND_GROUPS: readonly { readonly id: string; readonly label: 
   { id: "", label: "All kinds", kinds: "" },
   { id: "components", label: "Components", kinds: "core,plugin,notifier,auth-provider,webhook" },
   { id: "borrow", label: "Borrow decisions", kinds: "borrow" },
+  { id: "agent_dispatch", label: "Agent dispatches", kinds: "agent_dispatch" },
   { id: "session", label: "Sessions", kinds: "session" },
   { id: "member", label: "Members", kinds: "member" },
   { id: "tenant", label: "Tenants", kinds: "tenant" },

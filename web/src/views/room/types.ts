@@ -1,5 +1,6 @@
 import type { ChatAttachment, TurnMetrics } from "@/lib/api";
 import type { AgentOptions } from "@/views/composer/types";
+import type { DispatchAttribution } from "@/lib/dispatch";
 
 // The routing of one chat send, exactly as it went (or will go) on the wire.
 export interface ChatRecipient {
@@ -57,6 +58,9 @@ export interface FeedItem {
   // Set when a scheduled prompt posted this message (its schedule id); the
   // feed renders a clock badge.
   scheduledId?: string;
+  // Set when an agent dispatched this message on its author's behalf (room
+  // tools): the feed renders "maya → via jack/codex → bob/claude".
+  dispatch?: DispatchAttribution;
   // A member's message addressed to people only (no agent recipient): no
   // agent reply is coming. Agents still read it as room context.
   peopleOnly?: boolean;

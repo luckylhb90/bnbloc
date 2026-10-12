@@ -140,3 +140,12 @@ function testScheduledMarkerReachesTheRow(): void {
   assert(echo(4, "typed").scheduledId === undefined, "a typed message carries no schedule id");
 }
 testScheduledMarkerReachesTheRow();
+
+function testDispatchAttributionReachesTheRow(): void {
+  const dispatch = { jobId: "job_parent", depth: 1, via: "jack/codex", to: "bob/claude" };
+  const row = feedItemFromEvent({ kind: "chat_message", sequence: 5, author: "maya", text: "review it", dispatch }, me, true);
+  assert(row?.dispatch?.via === "jack/codex" && row.dispatch.to === "bob/claude", "a dispatched message keeps its attribution");
+  assert(row?.author === "maya", "a dispatched message is its requester's");
+  assert(echo(6, "typed").dispatch === undefined, "a typed message carries no dispatch attribution");
+}
+testDispatchAttributionReachesTheRow();

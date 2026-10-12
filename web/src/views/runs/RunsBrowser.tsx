@@ -262,6 +262,7 @@ function RunRow({ run, showRoom, onOpen }: { readonly run: AgentRun; readonly sh
             borrowed by <UserName id={run.requester} />
           </Badge>
         )}
+        {run.dispatchedBy && <Badge>dispatched by an agent</Badge>}
         <span className="ml-auto shrink-0 text-xs text-[var(--color-fg-subtle)] tabular" title={exactTime(run.phases.queuedAtMs)}>
           {relativeTime(run.phases.queuedAtMs)}
         </span>
@@ -356,6 +357,15 @@ function RunDetail({
             </span>
           )}
         </dd>
+        {run.dispatchedBy && (
+          <>
+            <dt className="text-[var(--color-fg-subtle)]">Dispatched by</dt>
+            <dd className="truncate">
+              an agent running job <span className="font-mono">{run.dispatchedBy.jobId}</span>
+              <span className="text-[var(--color-fg-muted)]"> · step {run.dispatchedBy.depth}</span>
+            </dd>
+          </>
+        )}
         {run.agent.targetId && (
           <>
             <dt className="text-[var(--color-fg-subtle)]">Target</dt>

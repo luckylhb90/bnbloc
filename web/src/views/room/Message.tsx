@@ -11,6 +11,7 @@ import {
   ClockIcon,
   UsersIcon,
   ArrowBendUpRightIcon,
+  ArrowsSplitIcon,
 } from "@phosphor-icons/react";
 import { relativeTime, exactTime } from "@/lib/format";
 import type { FeedItem } from "@/views/room/types";
@@ -22,6 +23,7 @@ import { MessageBody } from "@/views/room/MessageBody";
 import { ThinkingDisclosure } from "@/views/room/ThinkingDisclosure";
 import { TurnMetricsFooter } from "@/views/room/TurnMetricsFooter";
 import { MessageExtraActions, TaskBadge } from "@/views/room/messageExtras";
+import { dispatchLine, type DispatchAttribution } from "@/lib/dispatch";
 
 // sameSender groups consecutive messages from the same author on the same side,
 // so a run of agent replies stacks without repeating the avatar and name.
@@ -86,6 +88,28 @@ function PeopleOnlyMarker() {
       className="inline-flex items-center text-[var(--color-fg-subtle)]"
     >
       <UsersIcon size={12} />
+    </span>
+  );
+}
+
+// DispatchedVia attributes a message an agent dispatched on its author's
+// behalf: "maya → via jack/codex → bob/claude". The author is the person
+// whose request it serves (and whose authority it runs under).
+function DispatchedVia({ author, dispatch, className }: { author: string; dispatch: DispatchAttribution; className?: string }) {
+  const line = dispatchLine(author, dispatch);
+  return (
+    <span
+      data-dispatched
+      title={`Sent by ${dispatch.via} on behalf of ${author} (step ${dispatch.depth} of a delegated request)`}
+      aria-label={line}
+      className={"inline-flex min-w-0 items-center gap-1 text-[0.68rem] text-[var(--color-fg-subtle)] " + (className ?? "")}
+    >
+      <ArrowsSplitIcon size={12} className="shrink-0" />
+      <span className="truncate">
+        <UserName id={author} /> → via {dispatch.via}
+        {dispatch.to ? <> → {dispatch.to}</> : null}
+        {dispatch.expert ? <> (as {dispatch.expert})</> : null}
+      </span>
     </span>
   );
 }
@@ -287,6 +311,7 @@ export const Message = memo(function Message({
                     <ClockIcon size={12} />
                   </span>
                 )}
+                {item.dispatch && <DispatchedVia author={item.author} dispatch={item.dispatch} />}
                 <CopyButton text={item.text} />
                 {canAsk && onAskAgent && <AskAgentButton item={item} onAskAgent={onAskAgent} />}
                 <MessageExtraActions item={item} />
@@ -354,6 +379,7 @@ export const Message = memo(function Message({
           </div>
         )}
         {grouped && <TaskBadge item={item} className="mb-1" />}
+        {item.dispatch && <DispatchedVia author={item.author} dispatch={item.dispatch} className="mb-1" />}
         {isAgent && item.thinking ? (
           <ThinkingDisclosure thinking={item.thinking} metrics={item.metrics} />
         ) : null}
