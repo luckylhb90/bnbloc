@@ -101,7 +101,7 @@ type recordSnapshot struct {
 type pluginEvent struct {
 	tenantID string
 	ev       wire.Event
-	members  Membership
+	members  membership.Reader
 
 	notification *wire.PluginNotification
 	group        *deliveryGroup
@@ -287,7 +287,7 @@ func (d *PluginHookDispatcher) Hooked(kind string) bool {
 // Deliver is the publish-path tap: it hands a hook-bearing event to the
 // fan-out worker without blocking. With no desktop stream connected there is
 // no one to deliver to, so nothing is queued.
-func (d *PluginHookDispatcher) Deliver(ctx context.Context, members Membership, ev wire.Event) {
+func (d *PluginHookDispatcher) Deliver(ctx context.Context, members membership.Reader, ev wire.Event) {
 	if _, _, ok := hookForEvent(ev.Kind); !ok {
 		return
 	}

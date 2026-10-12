@@ -257,6 +257,10 @@ func main() {
 	if secretBox == nil {
 		log.Printf("bnbloc-gateway: %s unset; organization MCP connectors are off", sealbox.KeyEnv)
 	}
+	members, err := membership.FromEnv()
+	if err != nil {
+		log.Fatalf("bnbloc-gateway: %v", err)
+	}
 	svc := &gateway.Service{
 		Verifier: resolveVerifier(),
 		Signer:   auth.NewSigner(resolveSigningKey()),
@@ -268,7 +272,7 @@ func main() {
 			Relay:      config.FromEnvRaw("BNBLOC_RELAY_BASE_URL"),
 		},
 		Rooms:             gateway.NewRoomMembershipResolver(config.FromEnvRaw("BNBLOC_ROOM_BASE_URL")),
-		Membership:        membership.NewRoomClient(config.FromEnvRaw("BNBLOC_ROOM_BASE_URL")),
+		Membership:        members,
 		RoomTenant:        gateway.NewRoomTenantResolver(config.FromEnvRaw("BNBLOC_ROOM_BASE_URL")),
 		SessionTTL:        time.Hour,
 		AuthACSPath:       resolveACSPath(),

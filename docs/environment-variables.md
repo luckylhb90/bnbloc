@@ -78,7 +78,7 @@ address defaults to the port shown.
 | `BNBLOC_REALTIME_LISTEN_ADDR` | realtime | `:8082` | Realtime bind address. |
 | `BNBLOC_SHAREAGENT_LISTEN_ADDR` | shareagent | `:8083` | Shareagent bind address. |
 | `BNBLOC_RELAY_LISTEN_ADDR` | relay | `:8085` | Relay bind address. |
-| `BNBLOC_ROOM_BASE_URL` | gateway, realtime, activity, shareagent | — | Room service URL: membership checks (empty → static allow-all, a security gap) and the gateway's proxy target. |
+| `BNBLOC_ROOM_BASE_URL` | gateway, realtime, activity, shareagent | — | Room service URL: the membership authority (`membership.FromEnv`; unset is fatal under `BNBLOC_ENV=production`, and in development every room refuses every member) and the gateway's proxy target. |
 | `BNBLOC_REALTIME_BASE_URL` | gateway, room, activity | — | Realtime service URL: room fans artifact changes to it, stores blob artifact versions and thumbnails in its blob store, and reads/writes the feed and attachments of handoff packages through it; activity publishes agent replies through it (without it replies persist but never reach clients). |
 | `BNBLOC_ACTIVITY_BASE_URL` | gateway | — | Activity service URL. |
 | `BNBLOC_SHAREAGENT_BASE_URL` | gateway | — | Shareagent service URL. |

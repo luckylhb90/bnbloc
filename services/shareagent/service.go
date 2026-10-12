@@ -16,16 +16,10 @@ import (
 	"github.com/luckylhb90/bnbloc/internal/svcauth"
 )
 
-// Membership authorizes a caller for a room (fail closed) through
-// membership.RoomScope (requireMember), like every backend: the role, and
-// whether the membership is a platform agent host's, come with it
-// (membership.Member).
-type Membership = membership.Directory
-
 // Service holds the shareagent handler dependencies.
 type Service struct {
 	Grants     store.GrantStore
-	Membership Membership
+	Membership membership.Directory
 	Now        func() int64
 	// Tenants is the tenant registry, used by the org-admin console for member
 	// management, quota get/set, and tenant settings. Its persisted per-tenant

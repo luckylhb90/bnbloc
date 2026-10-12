@@ -27,7 +27,10 @@ func main() {
 	grants := backends.Grant
 	metrics := obs.NewMetrics("bnbloc-shareagent")
 	shareagent.RegisterMetrics(metrics)
-	rooms := membershipFor(cfg.RoomBaseURL)
+	rooms, err := membership.FromEnv()
+	if err != nil {
+		log.Fatalf("bnbloc-shareagent: %v", err)
+	}
 	roomName := func(ctx context.Context, roomID string) string {
 		if r, err := backends.Room.GetRoom(ctx, roomID); err == nil {
 			return r.Name
@@ -70,22 +73,6 @@ func main() {
 	if err := obs.ServeWithHealth("bnbloc-shareagent", cfg.ListenAddr, svcauth.Middleware(svcauth.KeyFromEnv(), svc.Handler()), backends.HealthCheck(), obs.WithMetrics(metrics)); err != nil {
 		log.Fatalf("bnbloc-shareagent: %v", err)
 	}
-}
-
-// roomMembership is the room service as shareagent uses it: membership
-// lookups and agent-host membership writes.
-type roomMembership interface {
-	shareagenthttp.Membership
-	shareagenthttp.AgentHosts
-}
-
-// membershipFor returns a bnbloc-room-backed membership client when a room base
-// URL is configured, else a static set for local development.
-func membershipFor(roomBaseURL string) roomMembership {
-	if roomBaseURL != "" {
-		return membership.NewRoomClient(roomBaseURL)
-	}
-	return membership.NewStatic()
 }
 
 func nowMs() int64 { return time.Now().UnixMilli() }

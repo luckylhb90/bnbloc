@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/luckylhb90/bnbloc/internal/config"
+	"github.com/luckylhb90/bnbloc/internal/membership"
 	"github.com/luckylhb90/bnbloc/internal/obs"
 	"github.com/luckylhb90/bnbloc/internal/store"
 	"github.com/luckylhb90/bnbloc/internal/wire"
@@ -59,7 +60,7 @@ type Options struct {
 
 // NewService wires the notification subsystem over st. Membership authorizes
 // mention candidates (a mention only counts for a room member).
-func NewService(st Stores, membership Membership, opts Options) *Service {
+func NewService(st Stores, members membership.Reader, opts Options) *Service {
 	emitter := NewEmitter(st, opts.PublicURL)
 	secrets := &SecretStore{Settings: st.Settings}
 	worker := &Worker{Outbox: st.Outbox, Notifiers: emitter.Notifiers, Secrets: secrets, Audit: st.Audit}
@@ -77,7 +78,7 @@ func NewService(st Stores, membership Membership, opts Options) *Service {
 	return &Service{
 		Notifiers: emitter.Notifiers,
 		Emitter:   emitter,
-		Observer:  NewObserver(emitter, membership, DefaultQueueSize),
+		Observer:  NewObserver(emitter, members, DefaultQueueSize),
 		Worker:    worker,
 		Push:      worker.Push,
 		Handlers: &Handlers{

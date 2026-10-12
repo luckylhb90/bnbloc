@@ -55,19 +55,10 @@ var errUnknownChannel = errors.New("channel not found in room")
 // room's people chat: it is a human-only conversation agents never see.
 var errAgentInPeopleChat = errors.New("agents cannot be addressed in the people chat")
 
-// Membership authorizes a caller for a room (fail closed), through
-// membership.RoomScope (s.member): any membership, a platform agent host's
-// included, reads the room (its bridge streams it and reads history);
-// Member.IsHuman gates the human-only surfaces (presence, roster
-// advertisement, the people chat, plugin events, mentions) and
-// Member.MayChat everything that acts in the conversation (chat, typing,
-// schedules, dispatch requesters: PostChat enforces it for every post).
-type Membership = membership.Directory
-
 // Service holds the realtime handler dependencies.
 type Service struct {
 	Hub        *realtime.Hub
-	Membership Membership
+	Membership membership.Directory
 	Presence   *realtime.Presence
 	// Roster tracks which agents each member's bridge advertises as reachable in
 	// a room, so the composer picker offers real drivable agents without the

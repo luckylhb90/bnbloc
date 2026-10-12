@@ -26,7 +26,10 @@ import (
 
 func main() {
 	cfg := config.FromEnv("BNBLOC_REALTIME", ":8082")
-	members := membershipFor(cfg.RoomBaseURL)
+	members, err := membership.FromEnv()
+	if err != nil {
+		log.Fatalf("bnbloc-realtime: %v", err)
+	}
 	// One registry for request metrics and the domain series (published
 	// events, SSE connections, notification delivery; docs/monitoring.md).
 	metrics := obs.NewMetrics("bnbloc-realtime")
@@ -193,18 +196,6 @@ func main() {
 	if err := obs.ServeWithHealth("bnbloc-realtime", cfg.ListenAddr, svcauth.Middleware(svcauth.KeyFromEnv(), handler), backends.HealthCheck(), obs.WithMetrics(metrics)); err != nil {
 		log.Fatalf("bnbloc-realtime: %v", err)
 	}
-}
-
-// membershipFor returns a bnbloc-room-backed membership client when a room base
-// URL is configured, else a static set for local development.
-func membershipFor(roomBaseURL string) interface {
-	realtimehttp.Membership
-	realtimehttp.RoomDirectory
-} {
-	if roomBaseURL != "" {
-		return membership.NewRoomClient(roomBaseURL)
-	}
-	return membership.NewStatic()
 }
 
 func truthy(raw string) bool {

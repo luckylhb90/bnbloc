@@ -23,13 +23,17 @@ func main() {
 	if err != nil {
 		log.Fatalf("bnbloc-activity: store: %v", err)
 	}
+	members, err := membership.FromEnv()
+	if err != nil {
+		log.Fatalf("bnbloc-activity: %v", err)
+	}
 	metrics := obs.NewMetrics("bnbloc-activity")
 	activity.RegisterMetrics(metrics)
 	svc := &activity.Service{
 		Metrics:    metrics,
 		Store:      backends.Activity,
 		Publisher:  realtime.NewHTTPPublisher(config.FromEnvRaw("BNBLOC_REALTIME_BASE_URL"), "activity"),
-		Membership: membershipFor(cfg.RoomBaseURL),
+		Membership: members,
 		BridgeJobs: backends.BridgeJobs,
 		// Team agent dashboard read side (same shared DB).
 		Team:  backends.TeamAgents(),
@@ -105,13 +109,4 @@ func sweepJobs(ctx context.Context, svc *activity.Service) {
 			svc.SampleBridgeMetrics(ctx)
 		}
 	}
-}
-
-// membershipFor returns a bnbloc-room-backed membership client when a room base
-// URL is configured, else a static set for local development.
-func membershipFor(roomBaseURL string) activity.Membership {
-	if roomBaseURL != "" {
-		return membership.NewRoomClient(roomBaseURL)
-	}
-	return membership.NewStatic()
 }

@@ -19,16 +19,11 @@ import (
 	"github.com/luckylhb90/bnbloc/internal/wire"
 )
 
-// Membership authorizes a caller for a room through membership.RoomScope.
-// bnbloc-activity never accepts a report for a room the caller is not a
-// member of, in the room's own tenant (fail closed).
-type Membership = membership.Directory
-
 // Service holds the activity handler dependencies.
 type Service struct {
 	Store      store.ActivityStore
 	Publisher  realtime.Publisher
-	Membership Membership
+	Membership membership.Directory
 	BridgeJobs store.BridgeJobStore
 	// AllowServeAllOwners is the SERVER-side gate for single-host serve-all
 	// testing (one bridge driving every member's agent). Only when it is set

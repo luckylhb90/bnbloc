@@ -15,11 +15,6 @@ import (
 	"github.com/luckylhb90/bnbloc/internal/wire"
 )
 
-// Membership reads room membership (the realtime/room contract). A platform
-// agent host's hidden membership is not a person's: room notifications only
-// ever reach the room's people (membership.HumanMember).
-type Membership = membership.Reader
-
 // DefaultQueueSize bounds the observation queue between the publish tap and
 // the notification producer. A full queue drops (and counts) observations:
 // notifications are best-effort, the chat path never waits on them.
@@ -31,7 +26,7 @@ const DefaultQueueSize = 512
 // lookups, so it never runs on the publisher's goroutine).
 type Observer struct {
 	Emitter    *Emitter
-	Membership Membership
+	Membership membership.Reader
 
 	queue   chan observation
 	dropped atomic.Int64
@@ -86,7 +81,7 @@ type jobView struct {
 }
 
 // NewObserver builds an observer with a bounded queue.
-func NewObserver(e *Emitter, m Membership, size int) *Observer {
+func NewObserver(e *Emitter, m membership.Reader, size int) *Observer {
 	if size <= 0 {
 		size = DefaultQueueSize
 	}

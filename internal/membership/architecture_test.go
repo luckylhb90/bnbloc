@@ -20,9 +20,13 @@ import (
 //   - a direct directory read in a handler (`.Membership.Lookup(` /
 //     `.Fresh(`) instead of RoomScope, outside the reads listed below;
 //   - the visitor role compared outside the owners (MayChat is the rule;
-//     the store and the room service, which writes roles, own the role).
+//     the store and the room service, which writes roles, own the role);
+//   - a directory built outside FromEnv (`NewRoomClient(` / `NewStatic()`
+//     in a service): each service used to pick its own, and production
+//     fell back to an empty set that silently refused every member.
 func TestNoMembershipFailOpen(t *testing.T) {
 	root := filepath.Join("..", "..")
+	ownDirectory := regexp.MustCompile(`membership\.(NewRoomClient|NewStatic)\(`)
 	failOpen := regexp.MustCompile(`Membership\s*!=\s*nil\s*&&`)
 	directRead := regexp.MustCompile(`\.Membership\.(Lookup|Fresh)\(`)
 	visitor := regexp.MustCompile(`\bRoleVisitor\b`)
@@ -63,6 +67,9 @@ func TestNoMembershipFailOpen(t *testing.T) {
 				}
 				if directRead.MatchString(line) && directReadAllowed[rel] == "" {
 					problems = append(problems, at+": direct membership read (use membership.RoomScope)")
+				}
+				if ownDirectory.MatchString(line) {
+					problems = append(problems, at+": membership directory built by hand (use membership.FromEnv)")
 				}
 				if visitor.MatchString(line) && !hasAnyPrefix(rel, roleOwners) {
 					problems = append(problems, at+": visitor role compared (use membership.Member.MayChat)")
