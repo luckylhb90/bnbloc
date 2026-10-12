@@ -1,0 +1,114 @@
+# Room tools: agents dispatch agents
+
+Design: `docs/prd/2026-10-12-experts-and-teams.md` §7 (delivery step 2).
+
+An agent the bridge drives can see the room's agents and ask one of them
+for part of its work. The dispatched task is an ordinary room message and
+an ordinary agent job, posted **on behalf of the person who asked the
+dispatching agent**. Nothing about authorization is new: the target bridge
+sees a job whose requester is that person and runs borrow authorization,
+reservation, quota, budgets, sandbox policy and the platform default model
+exactly as for a message the person typed.
+
+```
+agent CLI ──MCP──▶ bridge room tools server (127.0.0.1, per-session bearer)
+                     │ bridge's own session
+                     ▼
+gateway POST /v1/rooms/{room}/dispatch      (room scope, drive_agent, chat rate limit)
+                     │ rewritten + svcauth-signed as the bridge owner
+                     ▼
+realtime POST /internal/v1/rooms/{room}/dispatch   (RouteKey → the room's owner replica)
+                     │ guards, then PostChat as the parent job's requester
+                     ▼
+chat_message {dispatchedBy} + agent job {dispatchedByJobId, dispatchDepth}
+                     │ claimed by the target agent's bridge like any job
+                     ▼
+reply in the room; deliverables published with sourceSeq = the dispatch's seq
+```
+
+## The bridge MCP server (`services/bridge/roomtools`)
+
+- **One server per bridge**, loopback (`127.0.0.1`, random port), endpoint
+  `/mcp`. It refuses a non-loopback `Origin` or `Host` (DNS rebinding) and
+  answers `GET`/`DELETE` with 405.
+- **One bearer per driven core session.** The bridge's session contributor
+  hook (`services/bridge/profile.go`) asks for the session's contribution
+  when the session is created on an `agentProfile` core: the server mints a
+  random bearer and the session's profile gets the server, either
+  - `http` with an `Authorization: Bearer …` header, when the target
+    advertises http MCP (`core.Target.MCPTransports`), or
+  - the stdio shim `bnbloc-bridge roomtools-stdio --url <endpoint>` with the
+    bearer in `BNBLOC_ROOMTOOLS_TOKEN` (env, never argv). ACP requires every
+    agent to accept stdio servers.
+  Bearers are looked up by hash and compared in constant time; the release
+  hook revokes a bearer when the bridge drops the session binding (rebind,
+  forgotten room, core endpoint change), and a bridge stop revokes them all.
+- **Bound to the current job.** The turn hook binds the bearer to the job
+  each turn drives. A bearer only ever dispatches on behalf of that job, and
+  realtime admits the dispatch only while the job is running on a bridge of
+  the caller, so a bearer that outlives its turn dispatches nothing.
+- **The agent never sees the bridge's session.** Every gateway call is made
+  by the bridge's own authenticated client; the bearer is meaningless
+  outside the bridge process.
+- **Protocol:** MCP Streamable HTTP, dual-era. Legacy clients
+  (2025-03-26 … 2025-11-25) open with `initialize`; modern clients
+  (2026-07-28) carry `_meta.io.modelcontextprotocol/protocolVersion` per
+  request and mirror it into `MCP-Protocol-Version` / `Mcp-Method` /
+  `Mcp-Name` (checked: `-32020 HeaderMismatch`, `-32022` unsupported
+  version, 404 for an unknown method, `server/discover`). No protocol
+  sessions are minted. A tool call carrying a progress token from a client
+  that accepts SSE is answered as a stream of `notifications/progress`
+  followed by the result (ask_agent's wait). The stdio shim is a stateless
+  relay: one POST per stdin line, every JSON-RPC message of the answer as
+  one stdout line, headers mirrored from the body, `notifications/cancelled`
+  aborting the matching request.
+- **Tools** (a registry: step 5's `save_component` / `publish_component`
+  register the same way):
+
+| Tool | Reads / writes |
+| --- | --- |
+| `list_room_agents()` | `GET /v1/rooms/{room}/agents` (the live roster); handles `owner/provider`, or `owner/core/provider` where one owner exposes a provider on two cores. |
+| `ask_agent(handle, task, expert?, wait_seconds?)` | `POST /v1/rooms/{room}/dispatch` with the bound job as parent, then polls `GET /v1/rooms/{room}/jobs/{jobId}` (default 10 min, at most 20, below the bridge's 30-minute turn cap). Settled: the reply text (the run's session replies in the channel history, up to the run's finish) and the deliverables `GET …/artifacts?sourceSeq=<dispatch seq>` as `[{name, kind, link}]`. Still running: the handle. |
+| `room_status(handle?)` | The run record of one task this session dispatched (with reply and deliverables once settled), or all of them. |
+| `read_room(since?, limit?)` | History of the bound job's channel. That channel is never the people chat (no agent job exists there), so agents never read it. |
+
+Room tools need the bridge and the agent CLI on the same host (the desktop
+sidecar case). A sandboxed drive still works: the agent CLI and its MCP
+servers stay on the host; only shell commands run in the microVM.
+
+## The dispatch route (realtime)
+
+`POST /internal/v1/rooms/{room}/dispatch` (`svcauth.RequireSigned`) with
+`wire.DispatchRequest {parentJobId, recipient, text, expert?, clientMsgId?}`.
+The gateway's public door `POST /v1/rooms/{room}/dispatch` is the only edge
+route rewritten onto an internal one. `RouteKey` keys the path to the room,
+so the post (which touches the room's hub) runs on the room's owner replica.
+
+**Guards** (refusals answer `{code, error}`; every decision, admitted or
+refused, is an `extension_audit` row of kind `agent_dispatch` with the
+bridge owner as actor and the parent job, requester, new job and depth in
+the detail):
+
+| Guard | Refusal |
+| --- | --- |
+| parent job exists in this room | 404 `parent_not_found` |
+| parent is claimed / running / reflowing and leased | 409 `parent_not_running` |
+| the lease is held by a bridge of the caller (`BridgeOwner`, cross-tenant by bridge id) | 403 `not_parent_bridge` |
+| the requester is still a human member of the room | 403 `requester_not_member` |
+| depth ≤ 3 (`wire.MaxDispatchDepth`) | 409 `depth_exceeded` |
+| recipient ≠ the parent's agent (an empty core matches any core) | 409 `self_dispatch` |
+| recipient not an agent higher up the parent chain | 409 `dispatch_cycle` |
+| ≤ 8 persisted dispatches per parent (`wire.MaxDispatchFanOut`) | 409 `fan_out_exceeded` |
+| not the people chat | 400 `people_chat` |
+| the dispatching member's chat rate limit (gateway) | 429 |
+
+The fan-out count and the post are serialized per parent job (striped
+mutex, no per-key state; every dispatch of a parent lands on its room's
+owner). A `clientMsgId` retry answers the original job. The depth and
+fan-out limits are protocol safety constants, not deployment data.
+
+**Attribution.** The message's author is the parent job's requester;
+`payload.dispatchedBy {jobId, depth, via, expert?}` marks it (the feed
+shows "maya → via jack/codex → bob/claude"), and the job persists
+`dispatched_by_job_id` / `dispatch_depth` (run records show
+`dispatchedBy`).

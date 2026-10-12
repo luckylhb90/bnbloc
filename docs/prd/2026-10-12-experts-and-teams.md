@@ -390,7 +390,11 @@ restarts.
 
 ## Status: step 2 (room tools)
 
-**2026-10-12: in development.** Scope of this step, as built:
+**2026-10-12: implemented** (architecture: `docs/architecture/room-tools.md`).
+Commits: 71d47fe (store: dispatch parent and depth), e47947c (realtime
+dispatch route and guards; 462fc62 named 5xx), 6e95c2a (bridge room tools MCP server, wired
+through the step-1 session contributor hook), 6f1bb5b (gateway door),
+2e3711d (feed, runs and audit attribution). Scope, as built:
 
 - **Dispatch route.** Realtime serves `POST /internal/v1/rooms/{room}/dispatch`
   (svcauth `RequireSigned`, routed to the room's owner replica by
@@ -415,3 +419,14 @@ restarts.
   driving. Streamable HTTP, dual-era (`initialize` legacy and per-request
   `_meta` modern), plus a stdio shim (`bnbloc-bridge roomtools-stdio`).
   Tools: `list_room_agents`, `ask_agent`, `room_status`, `read_room`.
+- **Attached** to every session created on an `agentProfile` core: http
+  with a bearer header where the target advertises http MCP
+  (`Target.MCPTransports`), the stdio shim otherwise. Cores without
+  `agentProfile` get no room tools (they cannot attach MCP servers).
+- **Rate limit:** the gateway charges the dispatch to the calling member's
+  chat bucket (the bridge owner, who is the requester for their own agent;
+  for a borrowed agent the owner's bridge pays). Fan-out and depth bound
+  what one request can spend.
+- **Open:** `expert` is carried to the dispatched message
+  (`dispatchedBy.expert`) and the audit; applying it on the target's
+  session waits for the experts-on-jobs work of step 1.

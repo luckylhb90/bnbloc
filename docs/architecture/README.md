@@ -29,6 +29,10 @@ extend it" references.
   discover drivable agents in a room (the Bridge-advertised roster), the two
   agent paths (gateway-dials-daemon vs chat-drives-agent), remote-gateway
   detection, and the `BNBLOC_GATEWAY_TOKEN` override.
+- [Room tools](room-tools.md) — how an agent lists the room's agents and
+  dispatches work to them (`ask_agent`): the bridge's loopback MCP server and
+  its per-session bearers, the realtime dispatch route, its authority (the
+  parent job's requester) and its guards.
 
 ## Local Bridge
 

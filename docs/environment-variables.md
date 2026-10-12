@@ -341,6 +341,17 @@ standalone bridge (compose `bridge` profile) reads them from the environment.
 | `BNBLOC_SANDBOX_VMEXEC` | — | Absolute path of the `bnbloc-vmexec` helper from the sandbox package. Set with `BNBLOC_SANDBOX_URL`. |
 | `BNBLOC_SANDBOX_WORKSPACES_ROOT` | — | The host directory shared into the machine at the identical guest path (`<home>/bnbloc-workspaces`); sandboxed room workspaces live under it. Set with `BNBLOC_SANDBOX_URL`. |
 
+### Room tools stdio shim (`bnbloc-bridge roomtools-stdio`)
+
+No operator sets these. The bridge attaches its loopback room tools MCP
+server to every agent session it creates (docs/architecture/room-tools.md);
+an agent without http MCP launches the stdio shim, and the bridge puts the
+session's bearer in the shim's environment (never in argv).
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `BNBLOC_ROOMTOOLS_TOKEN` | — (required by the shim) | The session's room tools bearer, set by the bridge in the MCP server's `env`. The endpoint is the `--url` argument. |
+
 ## Sandbox exec helper (`cmd/bnbloc-vmexec`)
 
 Written by a `sandboxExec` core into the agent CLI's environment from the
