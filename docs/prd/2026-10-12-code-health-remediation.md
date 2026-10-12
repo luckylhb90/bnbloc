@@ -236,7 +236,7 @@ classification (`refuse`, `failJob`, `atStage`, `driveFailureReason`);
 #### 1E. Web client highs (M–L)
 
 Status: landed on branch `worktree-agent-a7a5bfbb8064292e7` (not yet on
-`main`): H4 8d0ce32, H6 a5649d2, H3 4a3b724, H10 a6cd93f, H9/M6 05e9c09.
+`main`): H4 1ff487c, H6 a5649d2, H3 4a3b724, H10 a6cd93f, H9/M6 05e9c09.
 H10 also removed the gateway's unused `access_token` form on deliverable
 downloads; the attachment ticket lives 15 min. H9 adds migration
 `2026_10_agent_prefs_owner` (`user_agent_prefs.selected_owner`, no
