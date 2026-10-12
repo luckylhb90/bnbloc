@@ -10,7 +10,7 @@ import {
   UploadSimpleIcon,
   WrenchIcon,
 } from "@phosphor-icons/react";
-import { contentLabel, isBuiltin, matchesContent, type ContentComponent } from "@/lib/contentComponents";
+import { contentLabel, isBuiltin, isTeam, matchesContent, usageLine, type ContentComponent } from "@/lib/contentComponents";
 import { apiErrorText, contentApi } from "@/lib/contentComponentsApi";
 import { relativeTime } from "@/lib/format";
 import { improvePrompt, workshopPrompt } from "@/lib/workshop";
@@ -23,6 +23,7 @@ import { Switch } from "@/ui/Segment";
 import { useToast } from "@/ui/Toast";
 import { ContentEditorDialog, ImportDialog, type EditorTarget } from "@/views/library/ContentEditorDialog";
 import { ContentViewDialog, PermissionBadges } from "@/views/library/ContentViewDialog";
+import { TeamBadge, TeamRoster } from "@/views/library/ContentFormExtras";
 import { useOpenWorkshop } from "@/views/library/workshopFlow";
 import { UserName } from "@/views/UserName";
 
@@ -163,10 +164,13 @@ export function ContentTab({
                       {c.name} · v{c.latestVersion}
                     </p>
                   </div>
+                  {isTeam(c) && <TeamBadge />}
                   {isBuiltin(c) && <Badge tone="accent">Built-in</Badge>}
                   {c.category && <Badge>{c.category}</Badge>}
                 </div>
                 {c.description && <p className="line-clamp-3 text-sm text-[var(--color-fg-muted)]">{c.description}</p>}
+                {isTeam(c) && c.team && <TeamRoster team={c.team} compact />}
+                {(c.tags?.length ?? 0) > 0 && <p className="truncate text-xs text-[var(--color-fg-subtle)]">{c.tags?.map((t) => `#${t}`).join(" ")}</p>}
                 {(c.skills?.length ?? 0) > 0 && (
                   <div className="flex flex-wrap gap-1">
                     {c.skills?.map((s) => (
@@ -193,6 +197,7 @@ export function ContentTab({
                       </>
                     )}
                     {c.uses > 0 ? ` · in use ${c.uses}×` : ""}
+                    {usageLine(c) ? ` · ${usageLine(c)}` : ""}
                   </span>
                   <button type="button" onClick={() => setViewing(c)} title="View" aria-label={`View ${c.name}`} className="tactile hover:text-[var(--color-fg)]">
                     <EyeIcon size={15} />

@@ -4,7 +4,9 @@ import {
   contentLabel,
   formatSize,
   isBuiltin,
+  isTeam,
   permissionLabel,
+  usageLine,
   type ContentComponent,
   type ContentComponentDetail,
   type ContentVersionDetail,
@@ -18,6 +20,7 @@ import { Dialog } from "@/ui/Dialog";
 import { Select } from "@/ui/Select";
 import { useToast } from "@/ui/Toast";
 import { UserName } from "@/views/UserName";
+import { TeamBadge, TeamRoster } from "@/views/library/ContentFormExtras";
 
 // PermissionBadges shows what a component declares (scripts, local tools,
 // hosts it calls); someone else's script-bearing content runs sandboxed.
@@ -134,6 +137,12 @@ export function ContentViewDialog({
               <span>v{version}</span>
             )}
           </div>
+          {(isTeam(c) || usageLine(c)) && (
+            <div className="flex flex-wrap items-center gap-2 text-xs text-[var(--color-fg-subtle)]">
+              {isTeam(c) && <TeamBadge />}
+              {usageLine(c) && <span>{usageLine(c)}</span>}
+            </div>
+          )}
           <PermissionBadges component={c} />
           {c.needsSandbox && !c.mine && (
             <p className="text-xs text-[var(--color-fg-muted)]">It runs scripts or tools, so turns that use it run in the agent sandbox.</p>
@@ -146,6 +155,12 @@ export function ContentViewDialog({
                 <section>
                   <h3 className="mb-1 text-xs font-medium uppercase tracking-wide text-[var(--color-fg-muted)]">Instructions</h3>
                   <pre className="max-h-64 overflow-auto whitespace-pre-wrap rounded-[var(--radius)] bg-[var(--color-surface-2)] p-3 text-xs">{view.instructions.trim()}</pre>
+                </section>
+              )}
+              {isTeam(c) && c.team && (
+                <section>
+                  <h3 className="mb-1 text-xs font-medium uppercase tracking-wide text-[var(--color-fg-muted)]">Team</h3>
+                  <TeamRoster team={c.team} />
                 </section>
               )}
               {c.welcome && (

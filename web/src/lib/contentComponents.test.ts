@@ -123,7 +123,10 @@ eq(
     welcome: "hi",
     quickPrompts: [{ title: "t", prompt: "p" }],
     skills: [{ name: "checklist", description: "d", body: "body" }],
+    tags: [],
+    icon: "",
     requires: { skills: ["x@^1"] },
+    team: { lead: "", members: [] },
   },
   "form from version",
 );

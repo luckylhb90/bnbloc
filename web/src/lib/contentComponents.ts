@@ -4,6 +4,7 @@
 // expert mentions, the chat payload marker) so they are unit-tested.
 
 import type { ContentPrompt, PromptRef } from "./promptPacks.ts";
+import { parseDefaultAgent, type ContentTeam } from "./teams.ts";
 
 export type ContentKind = "expert" | "skill" | "prompt";
 
@@ -76,6 +77,12 @@ export interface ContentComponent {
   readonly mine: boolean;
   readonly acked: boolean;
   readonly uses: number;
+  // Usage: an expert's runs and their distinct requesters; a pack's
+  // members who turned it on (capped server-side).
+  readonly runs?: number;
+  readonly members?: number;
+  // A team expert's roster (lib/teams.ts).
+  readonly team?: ContentTeam;
   readonly createdAtMs: number;
   readonly updatedAtMs: number;
 }
@@ -110,7 +117,9 @@ export interface ContentVersionDetail {
   readonly files: readonly ContentFile[];
 }
 
-export type ContentUseScope = "member" | "room";
+// "room-expert" is a room's expert: one of its pinned experts that every
+// agent turn in the room wears.
+export type ContentUseScope = "member" | "room" | "room-expert";
 
 export interface ContentUse {
   readonly scope: ContentUseScope;
@@ -127,6 +136,8 @@ export interface ContentUse {
 export interface ContentUsesReply {
   readonly member: readonly ContentUse[];
   readonly room?: readonly ContentUse[];
+  // The id of the room's expert, when it has one.
+  readonly roomExpert?: string;
 }
 
 // ContentForm is the Library form (both kinds); the server lays it out into
@@ -147,9 +158,24 @@ export interface ContentForm {
   welcome: string;
   quickPrompts: ContentQuickPrompt[];
   skills: ContentFormSkill[];
-  // Kept as they were: the form does not edit requirements or permissions,
-  // but a new version must not drop what the base declared.
+  tags?: string[];
+  icon?: string;
+  // Skill and prompt packs by name@range, and declared permissions.
   requires: ContentRequires;
+  // An expert's team roster (absent or empty: not a team).
+  team?: ContentFormTeam;
+}
+
+export interface ContentFormRole {
+  role: string;
+  expert: string;
+  defaultAgent: string;
+  description: string;
+}
+
+export interface ContentFormTeam {
+  lead: string;
+  members: ContentFormRole[];
 }
 
 export function emptyContentForm(kind: ContentKind): ContentForm {
@@ -163,7 +189,10 @@ export function emptyContentForm(kind: ContentKind): ContentForm {
     welcome: "",
     quickPrompts: [],
     skills: kind === "skill" ? [{ name: "", description: "", body: "" }] : [],
+    tags: [],
+    icon: "",
     requires: {},
+    team: { lead: "", members: [] },
   };
 }
 
@@ -180,7 +209,13 @@ export function formFromVersion(d: ContentVersionDetail): ContentForm {
     welcome: c.welcome ?? "",
     quickPrompts: (c.quickPrompts ?? []).map((q) => ({ ...q })),
     skills: (c.skills ?? []).map((s) => ({ name: s.name, description: s.description, body: (d.skillBodies?.[s.name] ?? "").trim() })),
+    tags: [...(c.tags ?? [])],
+    icon: c.icon ?? "",
     requires: c.requires ?? {},
+    team: {
+      lead: c.team?.lead && c.team.lead !== "lead" ? c.team.lead : "",
+      members: (c.team?.members ?? []).map((m) => ({ role: m.role, expert: m.expert, defaultAgent: m.defaultAgent, description: m.description ?? "" })),
+    },
   };
 }
 
@@ -193,10 +228,12 @@ function trimmed(s: string): string {
 // list fields it does not use and a skill pack no instructions.
 export function formPayload(f: ContentForm): Record<string, unknown> {
   const out: Record<string, unknown> = { kind: f.kind, name: trimmed(f.name) };
-  for (const key of ["displayName", "description", "category"] as const) {
-    const v = trimmed(f[key]);
+  for (const key of ["displayName", "description", "category", "icon"] as const) {
+    const v = trimmed(f[key] ?? "");
     if (v) out[key] = v;
   }
+  const tags = cleanTags(f.tags ?? []);
+  if (tags.length > 0) out.tags = tags;
   const req = f.requires ?? {};
   if ((req.skills?.length ?? 0) + (req.prompts?.length ?? 0) + (req.permissions?.length ?? 0) > 0) {
     out.requires = {
@@ -218,8 +255,52 @@ export function formPayload(f: ContentForm): Record<string, unknown> {
       .map((q) => (q.ref && !q.prompt.trim() ? { title: trimmed(q.title), ref: q.ref } : { title: trimmed(q.title), prompt: q.prompt.trim() }))
       .filter((q) => q.title || ("prompt" in q ? q.prompt : q.ref));
     if (qp.length > 0) out.quickPrompts = qp;
+    const roles = (f.team?.members ?? [])
+      .map((m) => ({ role: trimmed(m.role), expert: trimmed(m.expert), defaultAgent: trimmed(m.defaultAgent), description: trimmed(m.description) }))
+      .filter((m) => m.role || m.expert);
+    if (roles.length > 0) {
+      const lead = trimmed(f.team?.lead ?? "");
+      out.team = {
+        ...(lead ? { lead } : {}),
+        members: roles.map((m) => ({ role: m.role, expert: m.expert, defaultAgent: m.defaultAgent, ...(m.description ? { description: m.description } : {}) })),
+      };
+    }
   }
   return out;
+}
+
+// cleanTags lower-cases, trims and de-duplicates tags (the validator takes
+// lower-case letters, digits, spaces, "_" and "-").
+export function cleanTags(tags: readonly string[]): string[] {
+  const out: string[] = [];
+  for (const t of tags) {
+    const v = t.trim().toLowerCase();
+    if (v && !out.includes(v)) out.push(v);
+  }
+  return out;
+}
+
+// splitList reads a comma- or newline-separated field (tags, requirements).
+export function splitList(s: string): string[] {
+  return s
+    .split(/[,\n]/)
+    .map((x) => x.trim())
+    .filter(Boolean);
+}
+
+// isTeam: an expert with a roster.
+export function isTeam(c: Pick<ContentComponent, "team"> | null | undefined): boolean {
+  return !!c?.team && c.team.members.length > 0;
+}
+
+// usageLine is a card's usage: "12 runs · 3 members" (experts), "4
+// members" (packs); "" when unused. A count at the server's cap reads "+".
+export function usageLine(c: Pick<ContentComponent, "kind" | "runs" | "members">, cap = 9999): string {
+  const n = (v: number, word: string) => `${v}${v >= cap ? "+" : ""} ${word}${v === 1 ? "" : "s"}`;
+  const parts: string[] = [];
+  if (c.kind === "expert" && (c.runs ?? 0) > 0) parts.push(n(c.runs!, "run"));
+  if ((c.members ?? 0) > 0) parts.push(n(c.members!, "member"));
+  return parts.join(" · ");
 }
 
 // formProblem is the first thing the form must fix before saving (the
@@ -229,6 +310,23 @@ export function formProblem(f: ContentForm): string | null {
   if (!name) return "Give it a name";
   if (!/^[a-z0-9][a-z0-9-]{0,62}$/.test(name)) return "The name uses lower-case letters, digits and hyphens";
   if (f.kind === "expert" && !f.instructions.trim()) return "An expert needs instructions";
+  for (const t of cleanTags(f.tags ?? [])) {
+    if (!/^[a-z0-9][a-z0-9 _-]*$/.test(t) || t.length > 32) return `The tag "${t}" uses lower-case letters, digits, spaces, "_" and "-" (at most 32)`;
+  }
+  for (const r of [...(f.requires?.skills ?? []), ...(f.requires?.prompts ?? [])]) {
+    if (!/^[a-z0-9][a-z0-9-]{0,62}(@\S+)?$/.test(r.trim())) return `The requirement "${r}" reads name or name@range`;
+  }
+  const roles = (f.team?.members ?? []).filter((m) => m.role.trim() || m.expert.trim());
+  if (f.kind === "expert" && roles.length > 8) return "A team has at most 8 roles";
+  const seen = new Set<string>();
+  for (const m of roles) {
+    const role = m.role.trim();
+    if (!/^[a-z0-9][a-z0-9-]{0,62}$/.test(role)) return "Each team role needs a name of lower-case letters, digits and hyphens";
+    if (seen.has(role)) return `The role ${role} is listed twice`;
+    seen.add(role);
+    if (!/^[a-z0-9][a-z0-9-]{0,62}(@\S+)?$/.test(m.expert.trim())) return `The role ${role} needs an expert as name or name@range`;
+    if (!parseDefaultAgent(m.defaultAgent)) return `The role ${role} needs an agent: your own, a platform agent, or a member's`;
+  }
   const skills = f.skills.filter((s) => s.name.trim() || s.description.trim() || s.body.trim());
   if (f.kind === "skill" && skills.length === 0) return "A skill pack needs at least one skill";
   for (const s of skills) {

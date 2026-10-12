@@ -17,6 +17,7 @@ import { Dialog } from "@/ui/Dialog";
 import { Field, Input, Textarea } from "@/ui/Input";
 import { Select } from "@/ui/Select";
 import { useToast } from "@/ui/Toast";
+import { RequirementsFields, TagsIconFields, TeamEditor } from "@/views/library/ContentFormExtras";
 
 // The editor target: a new component of a kind, or a new version of one of
 // the member's components (prefilled from its latest version).
@@ -152,6 +153,7 @@ export function ContentEditorDialog({
           <Field label="Description">
             <Input value={form.description} onChange={(e) => patch({ description: e.target.value })} />
           </Field>
+          <TagsIconFields form={form} patch={patch} />
           {kind === "expert" && (
             <>
               <Field label="Category" hint="Optional, e.g. engineering or writing">
@@ -186,9 +188,8 @@ export function ContentEditorDialog({
             </span>
             <SkillsEditor skills={form.skills} onChange={(skills) => patch({ skills })} />
           </div>
-          {(form.requires.permissions?.length ?? 0) > 0 && (
-            <p className="text-xs text-[var(--color-fg-subtle)]">Declared permissions carry over: {form.requires.permissions?.join(", ")}</p>
-          )}
+          <RequirementsFields form={form} patch={patch} kind={kind} />
+          {kind === "expert" && <TeamEditor team={form.team} onChange={(team) => patch({ team })} />}
         </div>
       )}
     </Dialog>
