@@ -64,6 +64,10 @@ type Package struct {
 	// Previewer-only payload: the files a previewer bundle renders, its
 	// bundle entry, rank, capabilities and toolbar (previewer_validation.go).
 	Previewer *Previewer `json:"previewer,omitempty"`
+
+	// MCP-only payload: the tools, env requirements, credentials source and
+	// runtime details of an MCP tool component (mcp_validation.go).
+	MCP *MCP `json:"mcp,omitempty"`
 }
 
 // Guest is a sandbox package's machine profile (Package.Guest).
@@ -227,6 +231,9 @@ func validatePackage(pkg Package) error {
 	}
 	if pkg.Previewer != nil && pkg.Kind != KindPreviewerPackageV1 {
 		return fmt.Errorf("previewer is only valid for %s packages", KindPreviewerPackageV1)
+	}
+	if pkg.MCP != nil && pkg.Kind != KindMCPPackageV1 {
+		return fmt.Errorf("mcp is only valid for %s packages", KindMCPPackageV1)
 	}
 	if err := validateSidecarShape(pkg); err != nil {
 		return err

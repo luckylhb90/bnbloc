@@ -33,6 +33,8 @@ type PackageConfig struct {
 	Guest *pkgmeta.Guest `json:"guest,omitempty"`
 	// Previewer is a previewer's match/entry/rank/capabilities/toolbar.
 	Previewer *pkgmeta.Previewer `json:"previewer,omitempty"`
+	// MCP is an MCP tool's tools, env, credentials source and runtime details.
+	MCP *pkgmeta.MCP `json:"mcp,omitempty"`
 }
 
 // ConfigFromPackage projects a verified package onto its persisted config.
@@ -52,6 +54,7 @@ func ConfigFromPackage(pkg pkgmeta.Package) PackageConfig {
 		LocalSettings: append([]pkgmeta.LocalSetting(nil), pkg.LocalSettings...),
 		Guest:         pkg.Guest,
 		Previewer:     pkg.Previewer,
+		MCP:           pkg.MCP,
 	}
 }
 
@@ -95,6 +98,7 @@ func (c PackageConfig) Package(kind string, rec Record) pkgmeta.Package {
 		LocalSettings: c.LocalSettings,
 		Guest:         c.Guest,
 		Previewer:     c.Previewer,
+		MCP:           c.MCP,
 	}
 }
 

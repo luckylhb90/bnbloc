@@ -114,9 +114,10 @@ func sameOrigin(u, base *url.URL) bool {
 }
 
 // ValidateCompleteArtifacts refuses a publish whose downloadable artifacts
-// (a sidecar's binaries, a previewer's bundle) are still upload placeholders.
+// (a sidecar's or stdio MCP server's binaries, a previewer's bundle) are
+// still upload placeholders.
 func ValidateCompleteArtifacts(pkg Package) error {
-	if pkg.Runtime != RuntimeSidecar && pkg.Runtime != RuntimeBundle {
+	if pkg.Runtime != RuntimeSidecar && pkg.Runtime != RuntimeBundle && pkg.Runtime != RuntimeStdio {
 		return nil
 	}
 	for platform, artifact := range pkg.Artifacts {

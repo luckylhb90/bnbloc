@@ -15,6 +15,10 @@ const (
 	// KindPreviewer is a static web bundle the web client runs in a
 	// sandboxed frame to render artifact files (no process, no endpoint).
 	KindPreviewer Kind = "previewer"
+	// KindMCP is an MCP tool component: a stdio server the member's desktop
+	// materializes and the agent spawns per session, or an http endpoint.
+	// Content components require it by name.
+	KindMCP Kind = "mcp"
 )
 
 type HookEnvelopeContract string
@@ -29,6 +33,7 @@ const (
 	KindContractWebhookV1      KindContract = "bnbloc.webhook.contract/v1"
 	KindContractSandboxV1      KindContract = "bnbloc.sandbox.contract/v1"
 	KindContractPreviewerV1    KindContract = "bnbloc.previewer.contract/v1"
+	KindContractMCPV1          KindContract = "bnbloc.mcp.contract/v1"
 )
 
 type HookEnvelope struct {
@@ -108,5 +113,9 @@ func init() {
 	// and (browser) the bundle serving; the desktop serves bundles from its
 	// own scheme. Nothing executes server-side.
 	RegisterKind(KindDescriptor{Kind: KindPreviewer, Contract: KindContractPreviewerV1, Hosts: []Service{ServiceGateway}})
+	// MCP tools: the gateway owns the install record, the member catalog,
+	// org connectors and the per-job resolution; the desktop materializes
+	// stdio binaries and the agent runs them. Nothing runs server-side.
+	RegisterKind(KindDescriptor{Kind: KindMCP, Contract: KindContractMCPV1, Hosts: []Service{ServiceGateway}})
 	RegisterKind(KindDescriptor{Kind: KindWebhook, Contract: KindContractWebhookV1, Hosts: []Service{ServiceRealtime}, HookEnvelopes: true})
 }
