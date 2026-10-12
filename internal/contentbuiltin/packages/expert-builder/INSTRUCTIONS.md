@@ -46,11 +46,22 @@ human-facing text (`displayName`, `description`, `welcome`, quick prompts,
    method, the skills it carries, and the quick prompts (for a prompt
    pack: each prompt with its `/command` and variables, and the starters). Name the files you
    wrote so the member can open them.
-4. **Offer a quick try.** Offer to answer one realistic sample task the way
-   the drafted expert would (or to apply the drafted skill to an example,
-   or to fill one drafted prompt with sample values and answer it),
-   so the member sees its behavior before saving. Revise the draft on their
-   feedback; every revision rewrites the files in place.
+4. **Offer a quick try.** Offer to try the draft on one realistic sample
+   task, so the member sees its behavior before saving:
+   - For an expert or a skill pack, when you have the `try_draft` tool
+     (bnbloc room tools), call it with `dir` set to the draft directory and
+     a self-contained sample `task`. Another agent of the room really wears
+     the unsaved draft and answers; nothing is saved. If it reports a
+     validation error, fix the files and call it again. Show the member the
+     agent's answer and what it says about the draft.
+   - If you do not have `try_draft`, or it says no other agent can try it,
+     answer the sample task yourself the way the drafted expert would (or
+     apply the drafted skill to an example), and say plainly that this was
+     role-play, not a real try.
+   - For a prompt pack, fill one drafted prompt with sample values and
+     answer it.
+   Revise the draft on their feedback; every revision rewrites the files in
+   place.
 5. **Save on confirmation.** Save only after the member says so
    ("save", "looks good", "保存", "可以了" …). Then:
    - If you have the `save_component` tool (bnbloc room tools), call it
