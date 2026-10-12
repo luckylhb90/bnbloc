@@ -771,12 +771,22 @@ export const api = {
       // latest connection, 0 when the app never connected (not installed).
       desktop: { online: boolean; lastSeenAtMs: number };
     }>("/v1/my/agents"),
-  // Per-room+channel agent selection (restored by the composer on entry).
+  // Per-room+channel agent selection (useAgentPrefs restores it on entry).
   getAgentPrefs: (roomId: string, channelId?: string) =>
-    req<{ roomId: string; channelId: string; core: string; provider: string; model: string; reasoning: string; found: boolean }>(
-      `/v1/rooms/${encodeURIComponent(roomId)}/agent-prefs${channelId ? `?channel=${encodeURIComponent(channelId)}` : ""}`,
-    ),
-  putAgentPrefs: (roomId: string, body: { channelId?: string; core: string; provider: string; model?: string; reasoning?: string }) =>
+    req<{
+      roomId: string;
+      channelId: string;
+      ownerId: string;
+      core: string;
+      provider: string;
+      model: string;
+      reasoning: string;
+      found: boolean;
+    }>(`/v1/rooms/${encodeURIComponent(roomId)}/agent-prefs${channelId ? `?channel=${encodeURIComponent(channelId)}` : ""}`),
+  putAgentPrefs: (
+    roomId: string,
+    body: { channelId?: string; ownerId: string; core: string; provider: string; model?: string; reasoning?: string },
+  ) =>
     req<void>(`/v1/rooms/${encodeURIComponent(roomId)}/agent-prefs`, {
       method: "PUT",
       body: JSON.stringify(body),

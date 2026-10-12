@@ -781,7 +781,7 @@ func (s *Service) handleGetAgentPrefs(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"roomId": roomID, "channelId": channel,
-		"core": p.Core, "provider": p.Provider, "model": p.Model, "reasoning": p.Reasoning,
+		"ownerId": p.OwnerID, "core": p.Core, "provider": p.Provider, "model": p.Model, "reasoning": p.Reasoning,
 		"found": ok,
 	})
 }
@@ -806,6 +806,7 @@ func (s *Service) handlePutAgentPrefs(w http.ResponseWriter, r *http.Request) {
 	}
 	var body struct {
 		Channel   string `json:"channelId"`
+		Owner     string `json:"ownerId"`
 		Core      string `json:"core"`
 		Provider  string `json:"provider"`
 		Model     string `json:"model"`
@@ -815,12 +816,14 @@ func (s *Service) handlePutAgentPrefs(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "invalid json body")
 		return
 	}
-	if strings.TrimSpace(body.Provider) == "" {
-		writeErr(w, http.StatusBadRequest, "provider is required")
+	// An agent is (owner, core, provider): without the owner a restore could
+	// land on another member's agent of the same harness.
+	if strings.TrimSpace(body.Provider) == "" || strings.TrimSpace(body.Owner) == "" {
+		writeErr(w, http.StatusBadRequest, "ownerId and provider are required")
 		return
 	}
 	if err := s.AgentPrefs.PutAgentPrefs(r.Context(), store.AgentPrefs{
-		RoomID: roomID, ChannelID: body.Channel,
+		RoomID: roomID, ChannelID: body.Channel, OwnerID: body.Owner,
 		Core: body.Core, Provider: body.Provider, Model: body.Model, Reasoning: body.Reasoning,
 		UpdatedAtMs: s.Now(),
 	}, user); err != nil {

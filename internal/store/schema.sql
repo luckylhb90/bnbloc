@@ -176,6 +176,7 @@ CREATE TABLE IF NOT EXISTS user_agent_prefs (
   user_id          VARCHAR(128) NOT NULL,
   room_id          VARCHAR(64) NOT NULL,
   channel_id       VARCHAR(64) NOT NULL DEFAULT '',
+  selected_owner   VARCHAR(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL DEFAULT '',
   selected_core    VARCHAR(64) NOT NULL DEFAULT '',
   selected_provider VARCHAR(128) NOT NULL DEFAULT '',
   selected_model   VARCHAR(128) NOT NULL DEFAULT '',

@@ -1165,6 +1165,18 @@ WHERE r.channel_id = '' AND d.user_id IS NULL`)
 			return createSchemaTable(ctx, db, "content_drafts")
 		},
 	},
+	{
+		// A member's saved agent names its owner too: (core, provider)
+		// alone restored another member's agent and started a borrow
+		// (docs/prd/2026-10-12-code-health-remediation.md, web H9). An
+		// identity column, so exact (D2). No backfill: a row without an
+		// owner restores nothing.
+		id: "2026_10_agent_prefs_owner",
+		run: func(ctx context.Context, db sqlConn) error {
+			return addColumnIfMissing(ctx, db, "user_agent_prefs", "selected_owner",
+				"VARCHAR(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL DEFAULT '' AFTER channel_id")
+		},
+	},
 }
 
 // sqlConn is the statement surface a migration runs on. runMigrations passes

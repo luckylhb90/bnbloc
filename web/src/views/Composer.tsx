@@ -11,9 +11,9 @@ import {
 } from "@phosphor-icons/react";
 import { cn } from "@/lib/cn";
 import type { LocalAgent } from "@/lib/useLocalAgent";
-import { api } from "@/lib/api";
 import { NO_ROOM_CATALOGS, resolveModelCatalog, type RoomModelCatalogs } from "@/lib/agentCatalogs";
-import { PLATFORM_OFFLINE_MESSAGE, defaultPlatformRecipient, routeSend } from "@/lib/platformAgents";
+import { PLATFORM_OFFLINE_MESSAGE, routeSend } from "@/lib/platformAgents";
+import { useAgentPrefs } from "@/views/composer/useAgentPrefs";
 import { Button } from "@/ui/Button";
 import { useToast } from "@/ui/Toast";
 import { AttachmentChips } from "@/views/AttachmentChips";
@@ -58,7 +58,7 @@ const toolButton =
 export function Composer({
   roomId,
   channelId,
-  agent,
+  agent: localAgent,
   onSend,
   onTyping,
   disabled,
@@ -100,24 +100,22 @@ export function Composer({
   // chat, land in the room's main composer only (never the people chat's).
   useInjectedDraft(roomId, people ? null : channelId, setText, taRef);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  // The selected recipient agent: defaults to my own selected local target;
-  // may be switched to another member's agent (borrow). Null when peopleOnly.
-  const [recipient, setRecipient] = useState<RoomAgent | null>(null);
-  // peopleOnly routes the message to people in the room without driving any
-  // agent. Default false: messages go to the selected agent (the common case).
-  const [peopleOnly, setPeopleOnly] = useState(false);
+  // The agent selection, restored from and saved to the room's prefs: the
+  // picked recipient (another member's agent to borrow, a platform agent;
+  // null = my own selected target), people-only (drives no agent), and the
+  // model + reasoning tuning ("" = the provider default; reset only when the
+  // effective provider's catalog no longer offers the pick).
+  const { agent, recipient, setRecipient, peopleOnly, setPeopleOnly, model, setModel, reasoning, setReasoning } =
+    useAgentPrefs({ roomId, channelId, enabled: !people, agent: localAgent, roomAgents, subject: subject ?? null });
   // The welcome card's new room opens with its platform agent selected.
-  const pickInjected = useCallback((a: RoomAgent) => {
-    setRecipient(a);
-    setPeopleOnly(false);
-  }, []);
+  const pickInjected = useCallback(
+    (a: RoomAgent) => {
+      setRecipient(a);
+      setPeopleOnly(false);
+    },
+    [setRecipient, setPeopleOnly],
+  );
   useInjectedAgent(roomId, people ? null : channelId, roomAgents, pickInjected);
-  // Optional agent tuning: an explicit model id and reasoning effort. Empty
-  // string means "use the provider default". These persist across sends (like
-  // the agent target), and are reset only when the effective provider changes
-  // to one whose catalog no longer offers the picked model.
-  const [model, setModel] = useState<string>("");
-  const [reasoning, setReasoning] = useState<string>("");
   // Attached references (chips shown above the input), quoted into the message
   // on send so the agent receives the referenced content.
   const [refs, setRefs] = useState<Referenceable[]>([]);
@@ -200,92 +198,6 @@ export function Composer({
   useEffect(() => {
     if (reasoning && !reasoningChoices.includes(reasoning)) setReasoning("");
   }, [reasoning, reasoningChoices]);
-
-  // Restore the last selection for this room+channel from the server (shared
-  // across devices: the same member's desktop and browser land on the agent
-  // they last drove here). Falls back room-level when the channel has no row.
-  // Best-effort: a failed read leaves the defaults (own target / first agent).
-  // The composer is keyed per channel, so this runs once per channel visit;
-  // it re-runs while the roster/targets populate (nothing to match against
-  // yet), stops once restored, and never clobbers a selection the user made.
-  const restored = useRef(false);
-  // Whether the stored-preference restore has run (state, so the fallback
-  // below re-evaluates once it has).
-  const [prefsSettled, setPrefsSettled] = useState(false);
-  const { setTarget, targets } = agent;
-  useEffect(() => {
-    if (people || restored.current || roomAgents.length === 0) return;
-    let cancelled = false;
-    void (async () => {
-      try {
-        const ch = channelId ?? "";
-        let p = await api.getAgentPrefs(roomId, ch);
-        if (!p.found && ch) p = await api.getAgentPrefs(roomId, "");
-        if (cancelled || restored.current) return;
-        restored.current = true; // landed (or nothing stored): stop retrying
-        setPrefsSettled(true);
-        if (!p.provider) return;
-        const match = roomAgents.find(
-          (a) => a.provider === p.provider && (a.core || "") === (p.core || ""),
-        );
-        if (match) {
-          setRecipient((cur) => cur ?? match);
-          setPeopleOnly(false);
-        } else {
-          const local = targets.find(
-            (t) => t.provider === p.provider && (t.core || "") === (p.core || ""),
-          );
-          if (local) {
-            setTarget(local.id);
-            setRecipient(null);
-            setPeopleOnly(false);
-          }
-        }
-        if (p.model) setModel(p.model);
-        if (p.reasoning) setReasoning(p.reasoning);
-      } catch {
-        // no prefs / offline: defaults stand; a later roster change retries
-        setPrefsSettled(true);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [people, roomId, channelId, roomAgents, targets, setTarget]);
-  // A member with no agent of their own (browser-only, nothing stored for this
-  // room) lands on the room's platform agent instead of "No local agent", so
-  // returning to a room — or reloading it — still has an agent to talk to.
-  useEffect(() => {
-    if (people || !prefsSettled || recipient || peopleOnly) return;
-    const fallback = defaultPlatformRecipient(roomAgents, targets.length > 0 || !!agent.target);
-    if (fallback) setRecipient(fallback);
-  }, [people, prefsSettled, recipient, peopleOnly, roomAgents, targets.length, agent.target]);
-
-  // Persist selection changes (debounced; best-effort — never blocks
-  // sending). A change pending when the composer unmounts (leaving the room
-  // or channel) is flushed instead of dropped.
-  const selCore = recipient?.core ?? effTarget?.core ?? "";
-  const selProvider = recipient?.provider ?? effTarget?.provider ?? "";
-  // The people chat has no agent selection to remember.
-  const snapshot = !people && selProvider ? `${selCore}/${selProvider}/${model}/${reasoning}` : "";
-  const lastSaved = useRef("");
-  const pendingSave = useRef<{ readonly snapshot: string; readonly flush: () => void } | null>(null);
-  useEffect(() => {
-    if (!snapshot || snapshot === lastSaved.current) {
-      pendingSave.current = null;
-      return;
-    }
-    const body = { channelId: channelId ?? "", core: selCore, provider: selProvider, model, reasoning };
-    const flush = () => {
-      pendingSave.current = null;
-      lastSaved.current = snapshot;
-      void api.putAgentPrefs(roomId, body).catch(() => {});
-    };
-    pendingSave.current = { snapshot, flush };
-    const t = window.setTimeout(flush, 1200);
-    return () => window.clearTimeout(t);
-  }, [snapshot, roomId, channelId, selCore, selProvider, model, reasoning]);
-  useEffect(() => () => pendingSave.current?.flush(), []);
 
   // detectMention inspects the text before the caret for a trailing "@token"
   // (start-of-input or after whitespace) and opens/updates the picker. The token

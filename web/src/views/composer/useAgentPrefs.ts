@@ -1,0 +1,134 @@
+import { useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from "react";
+import { api } from "@/lib/api";
+import { restoreAgent, savedAgent } from "@/lib/agentPrefs";
+import { defaultPlatformRecipient } from "@/lib/platformAgents";
+import type { LocalAgent } from "@/lib/useLocalAgent";
+import type { RoomAgent } from "@/views/composer/types";
+
+export interface AgentPrefs {
+  // The member's agents as this room sees them: `target` is the own local
+  // target picked HERE (restored from the room's prefs), falling back to
+  // the app-wide selection, which this room never overwrites.
+  readonly agent: LocalAgent;
+  // A picked room agent (another member's to borrow, a platform agent);
+  // null drives my own selected target.
+  readonly recipient: RoomAgent | null;
+  readonly setRecipient: Dispatch<SetStateAction<RoomAgent | null>>;
+  // People-only: the message drives no agent.
+  readonly peopleOnly: boolean;
+  readonly setPeopleOnly: Dispatch<SetStateAction<boolean>>;
+  // Per-send tuning ("" = the agent's default).
+  readonly model: string;
+  readonly setModel: Dispatch<SetStateAction<string>>;
+  readonly reasoning: string;
+  readonly setReasoning: Dispatch<SetStateAction<string>>;
+}
+
+// useAgentPrefs owns the composer's agent selection for one room+channel:
+// it restores the member's saved agent from the server (the only per-room
+// store, shared across devices; channel row, then the room-level row),
+// matching it by owner, core and provider (lib/agentPrefs.ts), lands on the
+// room's platform agent when the member has none of their own, and saves
+// changes back (debounced; a pending save is flushed on unmount).
+export function useAgentPrefs({
+  roomId,
+  channelId,
+  enabled,
+  agent: localAgent,
+  roomAgents,
+  subject,
+}: {
+  readonly roomId: string;
+  readonly channelId: string | null | undefined;
+  // False for the people chat: it has no agent selection.
+  readonly enabled: boolean;
+  readonly agent: LocalAgent;
+  readonly roomAgents: readonly RoomAgent[];
+  readonly subject: string | null;
+}): AgentPrefs {
+  const [recipient, setRecipient] = useState<RoomAgent | null>(null);
+  const [peopleOnly, setPeopleOnly] = useState(false);
+  const [model, setModel] = useState("");
+  const [reasoning, setReasoning] = useState("");
+  const [ownTarget, setOwnTarget] = useState("");
+  const { targets } = localAgent;
+  const target = targets.some((t) => t.id === ownTarget) ? ownTarget : localAgent.target;
+  const agent = useMemo<LocalAgent>(
+    () => ({ ...localAgent, target, core: targets.find((t) => t.id === target)?.core || "", setTarget: setOwnTarget }),
+    [localAgent, targets, target],
+  );
+
+  // Restore once per channel visit. It re-runs while the roster populates
+  // (nothing to match against yet), stops once restored, and never clobbers
+  // a selection the user made. Best-effort: a failed read leaves defaults.
+  const restored = useRef(false);
+  const [settled, setSettled] = useState(false);
+  useEffect(() => {
+    if (!enabled || restored.current || roomAgents.length === 0) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const ch = channelId ?? "";
+        let p = await api.getAgentPrefs(roomId, ch);
+        if (!p.found && ch) p = await api.getAgentPrefs(roomId, "");
+        if (cancelled || restored.current) return;
+        restored.current = true; // landed (or nothing stored): stop retrying
+        setSettled(true);
+        const r = restoreAgent(p, roomAgents, targets, subject);
+        if (r && "ownTargetId" in r) {
+          setOwnTarget(r.ownTargetId);
+          setRecipient(null);
+          setPeopleOnly(false);
+        } else if (r) {
+          setRecipient((cur) => cur ?? r.recipient);
+          setPeopleOnly(false);
+        }
+        if (p.model) setModel(p.model);
+        if (p.reasoning) setReasoning(p.reasoning);
+      } catch {
+        // no prefs / offline: defaults stand; a later roster change retries
+        setSettled(true);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [enabled, roomId, channelId, roomAgents, targets, subject]);
+
+  // A member with no agent of their own (browser-only, nothing stored for
+  // this room) lands on the room's platform agent instead of "No local
+  // agent", so returning to a room still has an agent to talk to.
+  useEffect(() => {
+    if (!enabled || !settled || recipient || peopleOnly) return;
+    const fallback = defaultPlatformRecipient(roomAgents, targets.length > 0 || !!target);
+    if (fallback) setRecipient(fallback);
+  }, [enabled, settled, recipient, peopleOnly, roomAgents, targets.length, target]);
+
+  // Save the pick (debounced; best-effort, never blocks sending) once the
+  // stored one was read, so a default never overwrites it. A change pending
+  // when the composer unmounts (leaving the room or channel) is flushed
+  // instead of dropped.
+  const pick = enabled && settled ? savedAgent(recipient, targets.find((t) => t.id === target), subject) : null;
+  const snapshot = pick ? `${pick.ownerId}/${pick.core}/${pick.provider}/${model}/${reasoning}` : "";
+  const lastSaved = useRef("");
+  const pendingSave = useRef<{ readonly flush: () => void } | null>(null);
+  useEffect(() => {
+    if (!pick || snapshot === lastSaved.current) {
+      pendingSave.current = null;
+      return;
+    }
+    const body = { channelId: channelId ?? "", ...pick, model, reasoning };
+    const flush = () => {
+      pendingSave.current = null;
+      lastSaved.current = snapshot;
+      void api.putAgentPrefs(roomId, body).catch(() => {});
+    };
+    pendingSave.current = { flush };
+    const t = window.setTimeout(flush, 1200);
+    return () => window.clearTimeout(t);
+    // pick, model and reasoning are snapshot's parts: snapshot is their identity.
+  }, [snapshot, roomId, channelId]);
+  useEffect(() => () => pendingSave.current?.flush(), []);
+
+  return { agent, recipient, setRecipient, peopleOnly, setPeopleOnly, model, setModel, reasoning, setReasoning };
+}

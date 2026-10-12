@@ -16,8 +16,11 @@ import (
 // the composer's vocabulary (core/provider/model/reasoning); empty means
 // unset and falls through to the next preference layer.
 type AgentPrefs struct {
-	RoomID      string
-	ChannelID   string // "" = room-level default
+	RoomID    string
+	ChannelID string // "" = room-level default
+	// OwnerID is whose agent it is: the member's own or one they borrow.
+	// (core, provider) alone names a harness, not an agent.
+	OwnerID     string
 	Core        string
 	Provider    string
 	Model       string
@@ -47,10 +50,10 @@ func (m *MySQLAgentPrefs) GetAgentPrefs(ctx context.Context, roomID, channelID, 
 	}
 	var p AgentPrefs
 	err = m.DB.QueryRowContext(ctx,
-		`SELECT selected_core, selected_provider, selected_model, selected_reasoning, updated_at_ms
+		`SELECT selected_owner, selected_core, selected_provider, selected_model, selected_reasoning, updated_at_ms
 		 FROM user_agent_prefs WHERE tenant_id=? AND user_id=? AND room_id=? AND channel_id=?`,
 		tid, userID, roomID, channelID).
-		Scan(&p.Core, &p.Provider, &p.Model, &p.Reasoning, &p.UpdatedAtMs)
+		Scan(&p.OwnerID, &p.Core, &p.Provider, &p.Model, &p.Reasoning, &p.UpdatedAtMs)
 	if err != nil {
 		return AgentPrefs{}, false
 	}
@@ -64,11 +67,11 @@ func (m *MySQLAgentPrefs) PutAgentPrefs(ctx context.Context, p AgentPrefs, userI
 		return err
 	}
 	_, err = m.DB.ExecContext(ctx,
-		`INSERT INTO user_agent_prefs (tenant_id, user_id, room_id, channel_id, selected_core, selected_provider, selected_model, selected_reasoning, updated_at_ms)
-		 VALUES (?,?,?,?,?,?,?,?,?)
-		 ON DUPLICATE KEY UPDATE selected_core=VALUES(selected_core), selected_provider=VALUES(selected_provider),
+		`INSERT INTO user_agent_prefs (tenant_id, user_id, room_id, channel_id, selected_owner, selected_core, selected_provider, selected_model, selected_reasoning, updated_at_ms)
+		 VALUES (?,?,?,?,?,?,?,?,?,?)
+		 ON DUPLICATE KEY UPDATE selected_owner=VALUES(selected_owner), selected_core=VALUES(selected_core), selected_provider=VALUES(selected_provider),
 		   selected_model=VALUES(selected_model), selected_reasoning=VALUES(selected_reasoning), updated_at_ms=VALUES(updated_at_ms)`,
-		tid, userID, p.RoomID, p.ChannelID, p.Core, p.Provider, p.Model, p.Reasoning, p.UpdatedAtMs)
+		tid, userID, p.RoomID, p.ChannelID, p.OwnerID, p.Core, p.Provider, p.Model, p.Reasoning, p.UpdatedAtMs)
 	return err
 }
 
