@@ -12,7 +12,7 @@ import { api, type Prompt } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { cn } from "@/lib/cn";
 import { relativeTime } from "@/lib/format";
-import { takeLibraryQuery } from "@/lib/team";
+import { takeLibraryQuery, takeLibraryTab, type LibraryTabName } from "@/lib/team";
 import { Button } from "@/ui/Button";
 import { Badge, Card, Skeleton } from "@/ui/Card";
 import { ConfirmDialog } from "@/ui/Dialog";
@@ -214,7 +214,7 @@ function PromptLibrary({ onOpenRoom, tabs, initialQuery }: { onOpenRoom: (roomId
   );
 }
 
-type LibraryTab = "experts" | "skills" | "prompts" | "templates";
+type LibraryTab = LibraryTabName;
 const LIBRARY_TABS = [
   { value: "experts" as const, label: "Experts" },
   { value: "skills" as const, label: "Skills" },
@@ -227,10 +227,11 @@ const LIBRARY_TABS = [
 export function Library({ onOpenRoom }: { onOpenRoom: (roomId: string) => void }) {
   // A prompt hit in global search opens the Prompts tab with its query.
   const [initialQuery] = useState(() => takeLibraryQuery() ?? "");
-  const [tab, setTab] = useState<LibraryTab>(initialQuery ? "prompts" : "experts");
+  // "Open in Library" from a save toast opens the saved kind's tab.
+  const [tab, setTab] = useState<LibraryTab>(() => takeLibraryTab() ?? (initialQuery ? "prompts" : "experts"));
   const tabs = <Segment options={LIBRARY_TABS} value={tab} onChange={setTab} className="w-[26rem] max-w-full" />;
-  if (tab === "experts") return <ContentTab kind="expert" tabs={tabs} />;
-  if (tab === "skills") return <ContentTab kind="skill" tabs={tabs} />;
+  if (tab === "experts") return <ContentTab key="expert" kind="expert" tabs={tabs} onOpenRoom={onOpenRoom} />;
+  if (tab === "skills") return <ContentTab key="skill" kind="skill" tabs={tabs} onOpenRoom={onOpenRoom} />;
   return tab === "templates" ? (
     <TemplatesTab tabs={tabs} onOpenRoom={onOpenRoom} />
   ) : (

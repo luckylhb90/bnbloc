@@ -5,6 +5,28 @@
 
 export type ContentKind = "expert" | "skill";
 
+// The built-in builder expert (shipped with the release, read-only, listed
+// for every member with scope "builtin"): it interviews the member, drafts
+// an expert or skill pack and saves it. A protocol constant of the product's
+// own built-in content, not deployment data.
+export const BUILDER_EXPERT_ID = "cc_builtin_expert-builder";
+
+// isBuiltin: content that ships with the release (read-only, owned by no
+// member).
+export function isBuiltin(c: Pick<ContentComponent, "scope">): boolean {
+  return c.scope === "builtin";
+}
+
+// The manifest kinds of content packages, by short kind.
+export const CONTENT_PACKAGE_KINDS: Readonly<Record<string, ContentKind>> = {
+  "bnbloc.expert.package/v1": "expert",
+  "bnbloc.skill.package/v1": "skill",
+};
+
+export function contentKindWord(kind: ContentKind): string {
+  return kind === "skill" ? "skill pack" : "expert";
+}
+
 export interface ContentSkill {
   readonly name: string;
   readonly description: string;

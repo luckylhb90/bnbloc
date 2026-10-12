@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   chatExpert,
   expertChoices,
@@ -9,6 +9,7 @@ import {
   type ExpertMarker,
 } from "@/lib/contentComponents";
 import { contentApi } from "@/lib/contentComponentsApi";
+import { composerExpertPicks } from "@/lib/team";
 
 export interface ComposerExpert {
   // The member's own experts and the room's pinned ones (room pins first).
@@ -37,13 +38,15 @@ export function useComposerExpert(roomId: string, enabled: boolean): ComposerExp
   const [expert, setExpert] = useState<ExpertChoice | null>(null);
   const [confirming, setConfirming] = useState<{ choice: ExpertChoice; resolve: (ok: boolean) => void } | null>(null);
   const [epoch, setEpoch] = useState(0);
+  const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
     if (!enabled) return;
     let live = true;
     Promise.all([contentApi.list("expert"), contentApi.uses(roomId)])
       .then(([mine, uses]) => live && setChoices(expertChoices(mine.components ?? [], uses.room ?? [])))
-      .catch(() => live && setChoices([])); // experts are optional: the composer works without them
+      .catch(() => live && setChoices([])) // experts are optional: the composer works without them
+      .finally(() => live && setLoaded(true));
     return () => {
       live = false;
     };
@@ -53,6 +56,32 @@ export function useComposerExpert(roomId: string, enabled: boolean): ComposerExp
   useEffect(() => {
     if (expert && !choices.some((c) => c.component.id === expert.component.id)) setExpert(null);
   }, [choices, expert]);
+
+  // Another view asked for an expert (the workshop's builder, "Try it now"
+  // on a just-saved expert): picked once the choices list it. A pick the
+  // loaded choices do not have yet reloads them once (a fresh save).
+  const reloadedFor = useRef<string | null>(null);
+  useEffect(() => {
+    if (!enabled) return;
+    const apply = () => {
+      const want = composerExpertPicks.peek(roomId);
+      if (!want) return;
+      const match = choices.find((c) => c.component.id === want.id);
+      if (match) {
+        composerExpertPicks.take(roomId);
+        setExpert(want.version ? { ...match, version: want.version } : match);
+        return;
+      }
+      if (loaded && reloadedFor.current !== want.id) {
+        reloadedFor.current = want.id;
+        setEpoch((n) => n + 1);
+      }
+    };
+    apply();
+    return composerExpertPicks.subscribe((id) => {
+      if (id === roomId) apply();
+    });
+  }, [roomId, enabled, choices, loaded]);
 
   const mentionMatches = useCallback((query: string) => (enabled ? expertMentionMatches(choices, query) : []), [choices, enabled]);
 

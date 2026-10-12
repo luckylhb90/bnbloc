@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
-import { DownloadSimpleIcon, ShieldWarningIcon } from "@phosphor-icons/react";
+import { DownloadSimpleIcon, ShieldWarningIcon, SparkleIcon } from "@phosphor-icons/react";
 import {
   contentLabel,
   formatSize,
+  isBuiltin,
   permissionLabel,
   type ContentComponent,
   type ContentComponentDetail,
@@ -11,6 +12,7 @@ import {
 import { apiErrorText, contentApi } from "@/lib/contentComponentsApi";
 import { relativeTime } from "@/lib/format";
 import { saveBlob } from "@/lib/saveBlob";
+import { Button } from "@/ui/Button";
 import { Badge } from "@/ui/Card";
 import { Dialog } from "@/ui/Dialog";
 import { Select } from "@/ui/Select";
@@ -35,15 +37,18 @@ export function PermissionBadges({ component }: { readonly component: ContentCom
 
 // ContentViewDialog shows one component: a version's instructions, skills
 // and files, the version list, and bundle downloads. roomId reads a
-// component someone else pinned in that room.
+// component someone else pinned in that room. onImprove offers "Improve
+// with AI" on the member's own components.
 export function ContentViewDialog({
   component,
   roomId,
   onClose,
+  onImprove,
 }: {
   readonly component: ContentComponent | null;
   readonly roomId?: string;
   readonly onClose: () => void;
+  readonly onImprove?: (c: ContentComponent) => void;
 }) {
   const toast = useToast();
   const [detail, setDetail] = useState<ContentComponentDetail | null>(null);
@@ -89,15 +94,33 @@ export function ContentViewDialog({
 
   const c = view?.component ?? component;
   return (
-    <Dialog open={!!component} onClose={onClose} size="lg" title={c ? contentLabel(c) : undefined} description={c?.description || undefined}>
+    <Dialog
+      open={!!component}
+      onClose={onClose}
+      size="lg"
+      title={c ? contentLabel(c) : undefined}
+      description={c?.description || undefined}
+      footer={
+        c?.mine && onImprove ? (
+          <Button variant="primary" onClick={() => onImprove(c)}>
+            <SparkleIcon size={16} weight="fill" />
+            Improve with AI
+          </Button>
+        ) : undefined
+      }
+    >
       {c && (
         <div className="flex flex-col gap-4 text-sm">
           <div className="flex flex-wrap items-center gap-2 text-xs text-[var(--color-fg-subtle)]">
             <Badge>{c.kind === "expert" ? "Expert" : "Skill pack"}</Badge>
             <span className="font-mono">{c.name}</span>
-            <span>
-              by {c.mine ? "you" : <UserName id={c.owner} />}
-            </span>
+            {isBuiltin(c) ? (
+              <span>built in · bnbloc</span>
+            ) : (
+              <span>
+                by {c.mine ? "you" : <UserName id={c.owner} />}
+              </span>
+            )}
             {detail && detail.versions.length > 1 ? (
               <Select value={version} onChange={(e) => setVersion(e.target.value)} className="h-8 w-36 text-xs" aria-label="Version">
                 {detail.versions.map((v) => (
@@ -182,7 +205,8 @@ export function ContentViewDialog({
                   <li key={v.version} className="flex items-center gap-2 text-xs">
                     <span className="w-16 font-mono">v{v.version}</span>
                     <span className="min-w-0 flex-1 truncate text-[var(--color-fg-subtle)]">
-                      {relativeTime(v.createdAtMs)} · {formatSize(v.sizeBytes)}
+                      {v.createdAtMs > 0 ? `${relativeTime(v.createdAtMs)} · ` : ""}
+                      {formatSize(v.sizeBytes)}
                     </span>
                     <button
                       type="button"

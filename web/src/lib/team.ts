@@ -118,6 +118,10 @@ export const composerDrafts = handoff<string>();
 // welcome card's "Start a room with <agent>"): a platform agent, or the
 // member's own agent when `own` is set.
 export const composerAgentPicks = handoff<{ readonly core: string; readonly provider: string; readonly own: boolean }>();
+// composerExpertPicks carries "select this expert" to a room's composer (the
+// expert workshop opens with the builder picked; "Try it now" picks a
+// just-saved expert). Taken once the composer's expert choices list it.
+export const composerExpertPicks = handoff<{ readonly id: string; readonly version?: string }>();
 // messageJumps carries a "scroll to this message" request to a room's feed.
 export const messageJumps = handoff<MessageJump>();
 // artifactLinks carries an "open this deliverable" request (a copied
@@ -206,6 +210,19 @@ export function takeLibraryQuery(): string | null {
   const q = pendingLibraryQuery;
   pendingLibraryQuery = null;
   return q;
+}
+
+// The Library tab to open (a save toast's "Open in Library"). Taken once on
+// the page's mount.
+export type LibraryTabName = "experts" | "skills" | "prompts" | "templates";
+let pendingLibraryTab: LibraryTabName | null = null;
+export function queueLibraryTab(tab: LibraryTabName): void {
+  pendingLibraryTab = tab;
+}
+export function takeLibraryTab(): LibraryTabName | null {
+  const t = pendingLibraryTab;
+  pendingLibraryTab = null;
+  return t;
 }
 
 // Global search is opened from anywhere (sidebar button, Cmd/Ctrl+K) through
