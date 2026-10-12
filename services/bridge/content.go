@@ -334,11 +334,18 @@ func resetAgentConfig(workdir string) {
 }
 
 // agentConfigDenyWrite lists a workdir's agent-config paths for the host
-// confinement's DenyWrite: the agent must not edit the role it wears.
+// confinement's DenyWrite: the agent must not edit the role it wears, nor
+// create one the workspace does not have yet. A directory keeps its
+// trailing "/" (the DenyWrite contract), so confinement can protect it
+// before it exists.
 func agentConfigDenyWrite(workdir string) []string {
 	out := make([]string, 0, len(corepkg.AgentConfigPaths))
 	for _, p := range corepkg.AgentConfigPaths {
-		out = append(out, filepath.Join(workdir, filepath.FromSlash(strings.TrimSuffix(p, "/"))))
+		path := filepath.Join(workdir, filepath.FromSlash(strings.TrimSuffix(p, "/")))
+		if strings.HasSuffix(p, "/") {
+			path += "/"
+		}
+		out = append(out, path)
 	}
 	sort.Strings(out)
 	return out

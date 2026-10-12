@@ -356,10 +356,9 @@ func TestAgentConfigPathsAreExcluded(t *testing.T) {
 			t.Errorf("%s is not published", p)
 		}
 	}
-	deny := strings.Join(agentConfigDenyWrite("/w/space"), ",")
-	for _, want := range []string{"/w/space/CLAUDE.md", "/w/space/AGENTS.md", "/w/space/.claude/skills", "/w/space/.agents/skills", "/w/space/.opencode", "/w/space/.mcp.json"} {
-		if !strings.Contains(deny, want) {
-			t.Errorf("deny-write lacks %s: %s", want, deny)
-		}
+	deny := agentConfigDenyWrite("/w/space")
+	want := []string{"/w/space/.agents/skills/", "/w/space/.claude/skills/", "/w/space/.mcp.json", "/w/space/.opencode/", "/w/space/AGENTS.md", "/w/space/CLAUDE.md"}
+	if strings.Join(deny, ",") != strings.Join(want, ",") {
+		t.Errorf("deny-write = %v, want %v (directories keep their trailing /)", deny, want)
 	}
 }

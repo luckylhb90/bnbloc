@@ -205,7 +205,9 @@ type PathMount struct {
 
 // HostConfine is the host OS-sandbox scope of the agent CLI process.
 // DenyWrite wins over every allow (e.g. routing config the core placed in
-// the workdir, which the agent must not edit mid-turn).
+// the workdir, which the agent must not edit mid-turn), also for a path
+// that does not exist yet: the agent may not create it either. A DenyWrite
+// entry ending in "/" names a directory.
 type HostConfine struct {
 	Workspace  string
 	AllowRead  []string

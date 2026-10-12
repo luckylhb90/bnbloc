@@ -230,3 +230,64 @@ func TestParseConfine_allowWritePrefix(t *testing.T) {
 		t.Fatal("relative prefix accepted")
 	}
 }
+
+// Agent-config paths the workspace does not have yet are created as empty
+// read-only placeholders before bubblewrap runs (a bind needs an existing
+// mount point); nothing is created outside a writable tree.
+func TestConfine_denyWritePlaceholders(t *testing.T) {
+	s := testSpec(t, "claude")
+	s.TempDirs = nil // the test home may itself sit in a temp dir
+	ws := s.Workspace
+	outside := filepath.Join(s.Home, "not-writable", "CLAUDE.md")
+	s.DenyWrite = []string{
+		filepath.Join(ws, "CLAUDE.md"), filepath.Join(ws, ".mcp.json"),
+		filepath.Join(ws, ".claude/skills") + "/", filepath.Join(ws, ".opencode") + "/",
+		outside,
+	}
+	if err := os.WriteFile(filepath.Join(ws, "AGENTS.md"), []byte("kept"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s.DenyWrite = append(s.DenyWrite, filepath.Join(ws, "AGENTS.md"))
+	if err := s.ensureDenyWriteMountPoints(); err != nil {
+		t.Fatal(err)
+	}
+	for rel, want := range map[string]string{"CLAUDE.md": "", ".mcp.json": "{}\n", "AGENTS.md": "kept"} {
+		raw, err := os.ReadFile(filepath.Join(ws, rel))
+		if err != nil || string(raw) != want {
+			t.Errorf("%s = %q, %v; want %q", rel, raw, err, want)
+		}
+	}
+	for _, rel := range []string{".claude/skills", ".opencode"} {
+		if fi, err := os.Stat(filepath.Join(ws, rel)); err != nil || !fi.IsDir() {
+			t.Errorf("%s is not a placeholder directory: %v", rel, err)
+		}
+	}
+	if _, err := os.Stat(filepath.Dir(outside)); !os.IsNotExist(err) {
+		t.Errorf("a placeholder was created outside every writable tree: %v", err)
+	}
+	args := strings.Join(s.bwrapArgs("/usr/bin/bwrap", []string{"claude"}), " ")
+	for _, rel := range []string{"CLAUDE.md", ".mcp.json", ".claude/skills", ".opencode", "AGENTS.md"} {
+		p := canonical(filepath.Join(ws, rel))
+		if !strings.Contains(args, "--ro-bind "+p+" "+p) {
+			t.Errorf("bwrap args lack the read-only bind of %s:\n%s", rel, args)
+		}
+	}
+	// The parent of a nested deny-write dir is pinned (self-bound, writable)
+	// before the read-only binds, so it cannot be renamed away.
+	pin := canonical(filepath.Join(ws, ".claude"))
+	ro := canonical(filepath.Join(ws, ".claude/skills"))
+	if i, j := strings.Index(args, "--bind "+pin+" "+pin+" "), strings.Index(args, "--ro-bind "+ro+" "+ro); i < 0 || j < i {
+		t.Errorf("bwrap args must pin %s before the read-only bind of %s:\n%s", pin, ro, args)
+	}
+	if strings.Contains(args, "--bind "+canonical(ws)+"/.opencode ") {
+		t.Errorf("a deny-write dir itself is bound read-only, never pinned writable:\n%s", args)
+	}
+	// Idempotent: an existing placeholder is left alone.
+	if err := s.ensureDenyWriteMountPoints(); err != nil {
+		t.Fatal(err)
+	}
+	// Seatbelt matches the clean path of a directory entry.
+	if p := s.seatbeltProfile(); !strings.Contains(p, `(subpath "`+canonical(filepath.Join(ws, ".claude/skills"))+`")`) {
+		t.Errorf("profile lacks the deny-write directory:\n%s", p)
+	}
+}

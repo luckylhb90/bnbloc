@@ -84,7 +84,9 @@ of a sandboxed session:
 ```
 
 The core keeps the agent CLI on the host, runs it in `workdir` confined with
-`bnbloc-vmexec confine` (Seatbelt on macOS, bubblewrap on Linux), and routes
+`bnbloc-vmexec confine` (Seatbelt on macOS, bubblewrap on Linux; a
+`denyWrite` path stays read-only even before it exists, and an entry ending
+in `/` names a directory), and routes
 the CLI's shell commands into the space through `bnbloc-vmexec` (`run`,
 `claude-prefix` for `CLAUDE_CODE_SHELL_PREFIX`, `hook <harness>` for
 command-rewriting hooks); file tools, MCP servers and hooks stay on the host.

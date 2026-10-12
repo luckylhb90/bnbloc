@@ -36,8 +36,9 @@ import (
 //     skills, agents, commands, MCP config, user-level CLAUDE.md/AGENTS.md,
 //     plugin package caches — stays read-only, so a borrowed prompt cannot
 //     plant an escape that runs unsandboxed in the owner's next own session.
-//     DenyWrite (core-declared, e.g. routing config in the workdir) wins over
-//     every allow.
+//     DenyWrite (core-declared, e.g. routing config in the workdir; a
+//     trailing "/" names a directory) wins over every allow, including for
+//     paths that do not exist yet.
 //   - Network: allowed (the CLI talks to its model API from the host).
 type confineSpec struct {
 	Home       string
@@ -442,12 +443,87 @@ func (s *confineSpec) allowWriteFiles() []string {
 // denyWrites win over every allow: executable-bearing paths inside state
 // dirs, and the core-declared DenyWrite.
 func (s *confineSpec) denyWrites() []string {
-	var d []string
-	for _, l := range s.layouts {
-		d = append(d, l.readOnly...)
+	out := make([]string, 0, len(s.DenyWrite)+4)
+	for _, e := range s.denyWriteEntries() {
+		out = append(out, e.path)
 	}
-	d = append(d, s.DenyWrite...)
-	return uniqCanonical(d)
+	return out
+}
+
+// denyWriteEntry is one deny-write path (canonical) and whether it names a
+// directory. The DenyWrite contract marks a directory with a trailing "/"
+// (canonicalization drops it, so it is read first); a harness's readOnly
+// paths are directories.
+type denyWriteEntry struct {
+	path string
+	dir  bool
+}
+
+func (s *confineSpec) denyWriteEntries() []denyWriteEntry {
+	dirs := map[string]bool{}
+	var paths []string
+	for _, l := range s.layouts {
+		for _, p := range l.readOnly {
+			paths = append(paths, p)
+			dirs[canonical(p)] = true
+		}
+	}
+	for _, p := range s.DenyWrite {
+		paths = append(paths, p)
+		if strings.HasSuffix(p, "/") {
+			dirs[canonical(p)] = true
+		}
+	}
+	clean := uniqCanonical(paths)
+	out := make([]denyWriteEntry, 0, len(clean))
+	for _, p := range clean {
+		out = append(out, denyWriteEntry{path: p, dir: dirs[p]})
+	}
+	return out
+}
+
+// ensureDenyWriteMountPoints creates every deny-write path that does not
+// exist yet but lies inside a writable tree, as an empty placeholder: a
+// directory for a directory entry, else an empty file ("{}" for a .json
+// file), parents included. Root cause: bubblewrap can only bind a path that
+// exists, so a missing deny-write path (an agent-config file the workspace
+// does not have yet) could not be made read-only, and the confined CLI could
+// create it (Seatbelt denies the creation itself). A missing path outside
+// every writable tree needs nothing: the read-only root already refuses it.
+// A placeholder that cannot be created fails the run, never runs it with the
+// path writable.
+func (s *confineSpec) ensureDenyWriteMountPoints() error {
+	writable := s.allowWrites()
+	inWritable := func(p string) bool {
+		for _, w := range writable {
+			if strings.HasPrefix(p, strings.TrimSuffix(w, "/")+"/") {
+				return true
+			}
+		}
+		return false
+	}
+	for _, e := range s.denyWriteEntries() {
+		if _, err := os.Lstat(e.path); err == nil || !errors.Is(err, os.ErrNotExist) || !inWritable(e.path) {
+			continue
+		}
+		if e.dir {
+			if err := os.MkdirAll(e.path, 0o755); err != nil {
+				return fmt.Errorf("deny-write placeholder %s: %w", e.path, err)
+			}
+			continue
+		}
+		if err := os.MkdirAll(filepath.Dir(e.path), 0o755); err != nil {
+			return fmt.Errorf("deny-write placeholder %s: %w", e.path, err)
+		}
+		var content []byte
+		if strings.EqualFold(filepath.Ext(e.path), ".json") {
+			content = []byte("{}\n")
+		}
+		if err := os.WriteFile(e.path, content, 0o644); err != nil {
+			return fmt.Errorf("deny-write placeholder %s: %w", e.path, err)
+		}
+	}
+	return nil
 }
 
 // seatbeltProfile renders the macOS Seatbelt profile. Precedence: a later
@@ -518,7 +594,10 @@ func matchingFiles(re string) []string {
 // read-only, tmpfs over read-denied directories, re-bound readable trees,
 // writable binds for the write set, and read-only binds for denyWrites last
 // (later mounts win); network shared. State files are bound one by one (an
-// atomic rename into a read-only parent is not possible under bwrap).
+// atomic rename into a read-only parent is not possible under bwrap). A
+// deny-write path is bound only when it exists: confine creates the missing
+// ones first (ensureDenyWriteMountPoints), and its ancestors inside the
+// writable tree are pinned as mount points (denyWriteAncestors).
 func (s *confineSpec) bwrapArgs(bwrap string, argv []string) []string {
 	args := []string{bwrap, "--die-with-parent", "--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc"}
 	exists := func(p string) (os.FileInfo, bool) {
@@ -554,12 +633,53 @@ func (s *confineSpec) bwrapArgs(bwrap string, argv []string) []string {
 			args = append(args, "--bind", f, f)
 		}
 	}
+	for _, d := range s.denyWriteAncestors() {
+		args = append(args, "--bind", d, d)
+	}
 	for _, d := range s.denyWrites() {
 		if _, ok := exists(d); ok {
 			args = append(args, "--ro-bind", d, d)
 		}
 	}
 	return append(append(args, "--"), argv...)
+}
+
+// denyWriteAncestors are the existing directories between a deny-write path
+// and the writable tree holding it (e.g. <workspace>/.claude for
+// <workspace>/.claude/skills/). bubblewrap protects a path by mounting on
+// it, and a mount moves with its parent: renaming .claude away and creating
+// a fresh .claude/skills would escape the read-only bind. Binding each such
+// ancestor onto itself (still writable) makes it a mount point, which
+// cannot be renamed or removed. Seatbelt needs none of this: its rules
+// match paths, not mounts. Shallow first, so the deny binds land on top.
+func (s *confineSpec) denyWriteAncestors() []string {
+	writable := s.allowWrites()
+	seen := map[string]bool{}
+	var out []string
+	for _, e := range s.denyWriteEntries() {
+		root := ""
+		for _, w := range writable {
+			if strings.HasPrefix(e.path, strings.TrimSuffix(w, "/")+"/") && len(w) > len(root) {
+				root = w
+			}
+		}
+		if root == "" {
+			continue
+		}
+		for dir := filepath.Dir(e.path); dir != root && strings.HasPrefix(dir, root+"/"); dir = filepath.Dir(dir) {
+			if fi, err := os.Stat(dir); err == nil && fi.IsDir() && !seen[dir] {
+				seen[dir] = true
+				out = append(out, dir)
+			}
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if di, dj := strings.Count(out[i], "/"), strings.Count(out[j], "/"); di != dj {
+			return di < dj
+		}
+		return out[i] < out[j]
+	})
+	return out
 }
 
 // confine is `vmexec confine [flags] -- <cli…>`: build the profile from the
@@ -598,6 +718,10 @@ func confine(args []string, stdout, stderr io.Writer) int {
 		bwrap, err := exec.LookPath("bwrap")
 		if err != nil {
 			fmt.Fprintf(stderr, "bnbloc-vmexec confine: bubblewrap (bwrap) is not installed; refusing to run %s unconfined\n", argv[0])
+			return exitRefused
+		}
+		if err := spec.ensureDenyWriteMountPoints(); err != nil {
+			fmt.Fprintf(stderr, "bnbloc-vmexec confine: %v; refusing to run %s with it writable\n", err, argv[0])
 			return exitRefused
 		}
 		cmd := spec.bwrapArgs(bwrap, argv)

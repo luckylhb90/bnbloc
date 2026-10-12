@@ -431,6 +431,19 @@ Landed in this repo (public, generic):
   explicit STATE dirs/files only; config that executes on the host later
   (settings, hooks, plugins, skills, agents, commands, MCP config incl.
   `~/.claude.json`, plugin package caches) stays read-only; denyWrite last.
+  A deny-write path is protected before it exists (a `denyWrite` entry
+  ending in `/` names a directory; the bridge sends the workspace's
+  agent-config paths that way): Seatbelt denies creating it; bubblewrap can
+  only bind an existing path, so confine first creates each missing
+  deny-write path inside a writable tree as an empty placeholder (a
+  directory, an empty file, `{}` for a `.json` file) and binds it read-only,
+  refusing the run if it cannot. A mount moves with its parent, so the
+  directories between the writable tree and a deny-write path (e.g.
+  `<workspace>/.claude` for `.claude/skills/`) are bound onto themselves,
+  still writable, which makes them unrenamable mount points; Seatbelt rules
+  match paths and need neither step (2026-10-12; a borrowed agent can no
+  longer create `CLAUDE.md` or `.claude/skills/` in its workspace on Linux,
+  nor rename `.claude` away to recreate it).
   `hook claude` (PreToolUse dialect, snake/camel keys) and `hook opencode`
   (`{tool,args}` → `{args}`) rewrite shell commands to `'<vmexec>' run --
   '<cmd>'`, leaving passthrough commands alone. Verified on macOS with real

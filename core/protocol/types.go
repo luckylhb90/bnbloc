@@ -282,7 +282,8 @@ type PathMount struct {
 // state dirs are added by vmexec confine itself), and DenyWrite paths that
 // stay read-only even inside an allowed tree (it wins over every allow; a
 // core lists the routing config it places in the workdir here so the agent
-// cannot edit it mid-turn).
+// cannot edit it mid-turn). A DenyWrite path is protected whether or not it
+// exists yet; an entry ending in "/" names a directory.
 type HostConfine struct {
 	Workspace  string   `json:"workspace"`
 	AllowRead  []string `json:"allowRead,omitempty"`
