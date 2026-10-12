@@ -1050,6 +1050,21 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   (`TestHistoryReadsOnlyAgentChannels`, `TestDecodeRowSkipsNotices`). The
   bridge reads with its owner's human session, so realtime does not guard
   it: never add an agent-facing history read beside it.
+- **Every agent is told the room model, with or without room tools.**
+  `roomlog` owns what an agent reads about the room besides history
+  (`docs/architecture/room-tools.md`, "What every agent is told"):
+  `.room/README.md` (`ReadmeFile`; the push prompt carries the same
+  `RoomModel`: own workspaces, deliverables stored by bnbloc, the Library is
+  bnbloc's and shared, how to verify), `.room/artifacts.md` (each
+  deliverable's producer by `VersionProducer`, the source job's agent from
+  the run record, marked not in this workspace) and `.room/library.md`
+  (`ReadLibrary`: `GET /v1/components?job=&room=`, the requester's Library
+  as the gateway's visibility owners admit it; the room tools'
+  `list_components` reads the same). An agent with tools reads a
+  deliverable with `read_artifact`, through the room's own artifact routes
+  (membership and room checked there), bounded and fenced as untrusted.
+  Never tell an agent a deliverable or a component is "in its workspace",
+  and never compute a producer or a Library listing elsewhere.
 
 - **Built-in content is a content source**, not a second library:
   `internal/contentbuiltin`, wrapped over the content store at gateway and

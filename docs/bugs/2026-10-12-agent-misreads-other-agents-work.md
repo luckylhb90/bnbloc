@@ -1,6 +1,6 @@
 # An agent misreads another agent's work as missing (2026-10-12)
 
-Status: open (record before build).
+Status: fixed (see Landing); pending deploy.
 
 ## Repro (seen on QA)
 
@@ -72,4 +72,17 @@ advertise them, so its agents get the room tools.
 
 ## Landing
 
-(commits to follow)
+- f3811e2 gateway: `GET /v1/components` with a job grant is the requester's
+  Library (content and MCP tools; `publishedAtMs`).
+- 7f42349 `roomlog`: `.room/README.md`, producers in `.room/artifacts.md`,
+  `.room/library.md`; the bridge writes them every turn.
+- ca597a0 room tools: `read_artifact`; `list_components` lists the whole
+  Library.
+- 821ace8 ci: the web stage's cleanup trap (found while verifying).
+
+Tests: `TestReadmeGolden`, `TestArtifactsGoldenNamesProducers`,
+`TestLibraryGolden`, `TestDeliverablesCacheAndFailure` (roomlog);
+`TestDriveClaimPullWritesRoomFilesAndPointerPrompt` (bridge);
+`TestGrantedCatalogIsTheRequestersLibrary` (gateway: another member's
+private component never appears); `TestReadArtifact*` against the real room
+service (non-member, another room, size cap); `TestListComponents…`.

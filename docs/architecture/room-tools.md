@@ -72,7 +72,8 @@ reply in the room; deliverables published with sourceSeq = the dispatch's seq
 | `read_room(since?, limit?)` | History of every channel an agent may read (`roomlog.History`: the room's channel listing, never the people chat), people's messages and agents' replies, notices skipped. |
 | `save_component(dir, id?)` | Reads every file under `dir` (workspace-relative, e.g. `drafts/reviewer`) through the core's session-files seam (`core.SessionFiles`, handed to the tools per turn as `TurnInfo.Workspace`), packs them (`tarbundle`, content limits) and posts the archive to `POST /v1/content-components` (or `…/{id}/versions`) with the bound job's `?job=&room=` grant: the gateway validates it and saves it as the job's requester. The validator's message comes back as the tool error. A core without session files cannot save; the agent points the member at "Save as expert" under its reply's files. When the organization uses the component, the result carries `resubmitted` and the note tells the agent to say the new version waits for an org admin. Every granted save or publish puts a transient `content_saved` event in the room, which the member's workshop toasts. |
 | `get_component(id, version?)` | `GET /v1/content-components/{id}[/versions/{v}]` with the grant: the manifest and every text file, as the requester may read it (the "Improve" flow). |
-| `list_components(kind?)` | `GET /v1/content-components` with the grant: the requester's Library. |
+| `list_components(kind?)` | `GET /v1/components` with the grant (`roomlog.ReadLibrary`): the requester's whole Library, most recently updated first: experts, skill packs, prompt packs (`kind` `expert`, `skill`, `prompt`) and MCP tools (`mcp`), with version, scope, `mine` and the update time. |
+| `read_artifact(artifactId, path?, version?)` | A deliverable of the session's room (below), through the room's own artifact routes. |
 | `publish_component(id, scope, note?)` | Posts to `POST /v1/content-components/{id}/publish` with the job's grant, as the requester: `org` opens a publish request an organization admin approves (the reply carries the request and the version members keep meanwhile), `personal` withdraws it and takes the component out of the organization; `platform` is answered locally as a platform admin's action ([content-components.md](content-components.md), "Sharing and publishing"). |
 | `post_progress(text)` | Posts one progress line of the bound job as a room notice (below): at most 20 per job, 500 characters each. |
 | `try_draft(dir, task, handle?, wait_seconds?)` | A real quick try of an unsaved expert or skill pack (below): packs `dir` like `save_component`, validates it with `contentpkg` (the error goes back to the agent), stages it with the job grant (`POST /v1/content-drafts`) and dispatches `task` to another agent wearing it through the same door, guards and wait as `ask_agent`. |
@@ -87,6 +88,52 @@ no script-bearing package.
 Room tools need the bridge and the agent CLI on the same host (the desktop
 sidecar case). A sandboxed drive still works: the agent CLI and its MCP
 servers stay on the host; only shell commands run in the microVM.
+
+## What every agent is told (with or without room tools)
+
+An agent that did not know each agent has its own workspace looked for
+another agent's drafts in its own, found none, and called them never
+written (`docs/bugs/2026-10-12-agent-misreads-other-agents-work.md`). The
+room model is therefore stated to every agent, on every core, whether its
+targets advertise `mcpTransports` (and get these tools) or not:
+
+- **`.room/README.md`** (`roomlog.ReadmeFile`, the push model's first
+  prompt carries the same `roomlog.RoomModel`): every agent works in its
+  own workspace; deliverables are stored by bnbloc and named by their
+  producer, never files of the reader's workspace; the Library is bnbloc's
+  Library of the person who asked (experts, skill packs, prompt packs, MCP
+  tools), shared by every agent and core in the room; how to verify, with
+  these tools or without them.
+- **`.room/artifacts.md`** (`roomlog.ReadDeliverables`,
+  `DeliverablesFile`): the room's `roomlog.MaxListedDeliverables` newest
+  deliverables, each with kind, latest version, id and producer, marked
+  "NOT in this workspace" (the reader's own: "from you"). The producer of a
+  version is `roomlog.VersionProducer`: its source job's agent from the run
+  record (`owner/provider` and core), else its author (a person's upload).
+  The bridge caches resolved versions (`roomlog.ProducerCache`; a version
+  never changes), so a turn costs one listing.
+- **`.room/library.md`** (`roomlog.ReadLibrary`, `LibraryFile`): the
+  requester's Library read with the turn's job grant, the
+  `roomlog.MaxLibraryItems` most recently updated (name, kind, version,
+  scope, updated time). The gateway's visibility owners decide what is in
+  it (content-components.md, "The Library as an agent reads it").
+
+The bridge rewrites these every turn (`roomRecordFiles`, beside the history
+and `live.md`); a read that fails renders as unreadable, never as empty, and
+never fails the turn. `.room/` is a bnbloc-owned path
+(`core.BnblocOwnedPath`): never a deliverable, synced or packed.
+
+**`read_artifact`** (`services/bridge/roomtools/artifact.go`) lets an agent
+with tools check another agent's work: the artifact detail and version
+routes (`GET /v1/rooms/{room}/artifacts/{id}[/versions/{v}]`) as the bridge's
+session, so the room service refuses a non-member and an artifact of
+another room (the tool also refuses a detail naming another room); a blob
+version through its content route, a site's file (`path`, default
+`index.html`) through a site ticket and the gateway's site file rules. A
+stored version over 4 MiB is not downloaded; the text returned is capped at
+64 KiB (`truncated`), binary content is not shown, and the text is fenced
+between markers carrying a random nonce, naming its producer, as data to
+check, never instructions.
 
 ## Teams
 
