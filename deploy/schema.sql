@@ -107,9 +107,9 @@ CREATE TABLE IF NOT EXISTS agent_jobs (
   client_msg_id       VARCHAR(128) NOT NULL DEFAULT '',
   requester_user_id   VARCHAR(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
   owner_user_id       VARCHAR(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
-  core                VARCHAR(64) NOT NULL,
-  provider            VARCHAR(128) NOT NULL,
-  target_id           VARCHAR(128) NOT NULL DEFAULT '',
+  core                VARCHAR(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
+  provider            VARCHAR(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
+  target_id           VARCHAR(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL DEFAULT '',
   message_text       TEXT NULL,
   attachment_ids     JSON NULL,
   model              VARCHAR(128) NOT NULL DEFAULT '',
@@ -117,7 +117,7 @@ CREATE TABLE IF NOT EXISTS agent_jobs (
   status              ENUM('queued','claimed','running','reflowing','replied','failed','timed_out','cancelled') NOT NULL DEFAULT 'queued',
   failure_reason      VARCHAR(64) NOT NULL DEFAULT '',
   attempt             INT NOT NULL DEFAULT 0,
-  lease_bridge_id     VARCHAR(128) NOT NULL DEFAULT '',
+  lease_bridge_id     VARCHAR(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL DEFAULT '',
   lease_expires_at_ms BIGINT NOT NULL DEFAULT 0,
   created_at_ms       BIGINT NOT NULL,
   updated_at_ms       BIGINT NOT NULL,
@@ -148,7 +148,7 @@ CREATE TABLE IF NOT EXISTS agent_jobs (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS bridge_heartbeats (
-  bridge_id       VARCHAR(128) PRIMARY KEY,
+  bridge_id       VARCHAR(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin PRIMARY KEY,
   tenant_id       VARCHAR(64) NOT NULL,
   owner_user_id   VARCHAR(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
   app_instance_id VARCHAR(128) NOT NULL DEFAULT '',
@@ -162,12 +162,12 @@ CREATE TABLE IF NOT EXISTS bridge_heartbeats (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS bridge_agents (
-  bridge_id          VARCHAR(128) NOT NULL,
+  bridge_id          VARCHAR(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
   tenant_id          VARCHAR(64) NOT NULL,
   owner_user_id      VARCHAR(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
-  core               VARCHAR(64) NOT NULL,
-  provider           VARCHAR(128) NOT NULL,
-  target_id          VARCHAR(128) NOT NULL,
+  core               VARCHAR(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
+  provider           VARCHAR(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
+  target_id          VARCHAR(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
   model_options_json JSON NULL,
   disabled           TINYINT(1) NOT NULL DEFAULT 0,
   last_seen_at_ms    BIGINT NOT NULL,

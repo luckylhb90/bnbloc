@@ -790,3 +790,34 @@ func TestJobStatusSetsPartitionTheStatuses(t *testing.T) {
 		t.Fatalf("terminal IN-list = %s", sqlTerminalJobStatuses)
 	}
 }
+
+// Bridge and advertisement keys are exact (D2): a bridge id embeds its
+// owner's subject, so two members whose subjects differ only in case run two
+// bridges, and a core's target ids differing only in case are two targets.
+func TestContractBridgeJobStoreKeysAreCaseSensitive(t *testing.T) {
+	const now = int64(3_000_000)
+	forEachBackend(t, func(t *testing.T, b *Backends) {
+		lower := newBJRig(b)
+		upper := &bjRig{b: b, ctx: lower.ctx, tid: lower.tid, owner: strings.ToUpper(lower.owner), bridge: strings.ToUpper(lower.bridge), core: lower.core, room: lower.room}
+		lower.beat(t, BridgeOnline, now)
+		upper.beat(t, BridgeOnline, now)
+		for _, r := range []*bjRig{lower, upper} {
+			if owner, err := r.jobs().BridgeOwner(r.ctx, r.bridge); err != nil || owner != r.owner {
+				t.Fatalf("BridgeOwner(%s) = %q, %v; want %s", r.bridge, owner, err, r.owner)
+			}
+		}
+		lower.advertise(t, "t1", "T1")
+		got := must(lower.jobs().ListBridgeAgentsForOwner(lower.ctx, lower.owner, now))(t)
+		var targets []string
+		for _, a := range got {
+			targets = append(targets, a.TargetID)
+		}
+		slices.Sort(targets)
+		if want := []string{"T1", "t1"}; !slices.Equal(targets, want) {
+			t.Fatalf("advertised targets = %v, want %v", targets, want)
+		}
+		if got := must(upper.jobs().ListBridgeAgentsForOwner(upper.ctx, upper.owner, now))(t); len(got) != 0 {
+			t.Fatalf("the case-variant owner lists %d agents of the other bridge", len(got))
+		}
+	})
+}

@@ -1362,6 +1362,30 @@ WHERE r.channel_id = '' AND d.user_id IS NULL`)
 			return nil
 		},
 	},
+	{
+		// Bridge and advertisement keys compare exactly, as the memory
+		// store compares them (D2): a bridge id embeds its owner's subject
+		// ("bridge-<subject>-<tenant>"), so under the default collation two
+		// members whose subjects differ only in case shared one heartbeat
+		// row; target ids are core-reported. agent_jobs.core/provider join
+		// bridge_agents' in the claim, so both sides change together.
+		id: "2026_10_bridge_keys_bin",
+		run: func(ctx context.Context, db sqlConn) error {
+			for _, tc := range []struct {
+				table string
+				cols  []string
+			}{
+				{"bridge_heartbeats", []string{"bridge_id"}},
+				{"bridge_agents", []string{"bridge_id", "core", "provider", "target_id"}},
+				{"agent_jobs", []string{"core", "provider", "target_id", "lease_bridge_id"}},
+			} {
+				if err := ensureColumnsCollation(ctx, db, tc.table, "utf8mb4", "utf8mb4_bin", tc.cols...); err != nil {
+					return err
+				}
+			}
+			return nil
+		},
+	},
 }
 
 // sqlConn is the statement surface a migration runs on. runMigrations passes
