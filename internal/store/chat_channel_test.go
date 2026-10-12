@@ -27,7 +27,7 @@ func TestRoomHistoryScopedByChannel(t *testing.T) {
 		t.Fatalf("channel history = %+v, want seq 1,3 for ch_a", got)
 	}
 	// max seq is room-scoped (single monotonic counter), not per channel
-	if mx, _ := s.MaxRoomSeq(ctx, "room-1", ""); mx != 3 {
+	if mx, _ := s.MaxRoomSeq(ctx, "room-1"); mx != 3 {
 		t.Fatalf("max seq = %d, want 3 (room-scoped)", mx)
 	}
 	// read cursors are per channel

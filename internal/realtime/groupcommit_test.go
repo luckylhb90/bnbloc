@@ -300,7 +300,7 @@ func TestGroupCommitClientMsgAlreadyInHistory(t *testing.T) {
 	g := newGate()
 	j := &testJournal{fn: func([]store.RoomMessage) error { g.wait(); return nil }, inner: chat}
 	h := NewHub(64, 64)
-	h.SeedSeq = func(room string) (int64, error) { return chat.MaxRoomSeq(ctx, room, "") }
+	h.SeedSeq = func(room string) (int64, error) { return chat.MaxRoomSeq(ctx, room) }
 	sub := h.SubscribeLive("r")
 	defer h.Unsubscribe("r", sub)
 
@@ -342,7 +342,7 @@ func TestGroupCommitFenceFailsEveryMember(t *testing.T) {
 	g := newGate()
 	j := &testJournal{fn: func([]store.RoomMessage) error { g.wait(); return nil }, inner: chat}
 	h := NewHub(64, 64)
-	h.SeedSeq = func(room string) (int64, error) { return chat.MaxRoomSeq(ctx, room, "") }
+	h.SeedSeq = func(room string) (int64, error) { return chat.MaxRoomSeq(ctx, room) }
 	sub := h.SubscribeLive("r")
 	defer h.Unsubscribe("r", sub)
 
@@ -519,7 +519,7 @@ func TestGroupCommitOrderingUnderConcurrentSenders(t *testing.T) {
 		inner: chat,
 	}
 	h := NewHub(senders*perSender, 2*senders*perSender)
-	h.SeedSeq = func(room string) (int64, error) { return chat.MaxRoomSeq(ctx, room, "") }
+	h.SeedSeq = func(room string) (int64, error) { return chat.MaxRoomSeq(ctx, room) }
 	sub := h.SubscribeLive("r")
 	defer h.Unsubscribe("r", sub)
 	other := h.SubscribeLive("other")
@@ -663,7 +663,7 @@ func TestCommittedHookSeesStoredRows(t *testing.T) {
 		return nil
 	}}
 	h := NewHub(64, 64)
-	h.SeedSeq = func(room string) (int64, error) { return chat.MaxRoomSeq(ctx, room, "") }
+	h.SeedSeq = func(room string) (int64, error) { return chat.MaxRoomSeq(ctx, room) }
 	var seen []store.RoomMessage
 	h.Committed = func(rows []store.RoomMessage) { seen = append(seen, rows...) }
 

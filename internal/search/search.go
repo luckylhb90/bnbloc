@@ -80,9 +80,10 @@ func (s *Store) Search(ctx context.Context, q store.MessageSearch) ([]store.Room
 	return s.Chat.SearchRoomMessages(ctx, q)
 }
 
-// Reindex fills room_messages.search_text for rows stored without it.
-func (s *Store) Reindex(ctx context.Context, cursor string, batch int) (store.SearchReindexBatch, error) {
-	return s.Chat.ReindexSearchText(ctx, cursor, batch)
+// Reindex has nothing to do: search_text is written with the row (at append
+// and on edit), so the store's index is never behind it.
+func (s *Store) Reindex(_ context.Context, cursor string, _ int) (store.SearchReindexBatch, error) {
+	return store.SearchReindexBatch{Cursor: cursor, Done: true}, nil
 }
 
 // Apply has nothing to do: the row write is the index write.

@@ -98,7 +98,7 @@ func findContent(list []wire.ContentComponent, name, scope string) *wire.Content
 
 // actions lists the audit rows of kind content as "action name".
 func (g *sharingGateway) actions() string {
-	recs, _ := g.audit.ExtAuditRecords(context.Background(), wire.AuditKindContent, 0, 0)
+	recs, _ := g.audit.AuditLog(context.Background(), store.AuditLogQuery{AllTenants: true, Kinds: []string{wire.AuditKindContent}})
 	var out []string
 	for i := len(recs) - 1; i >= 0; i-- {
 		out = append(out, recs[i].Action+" "+recs[i].Name)
@@ -520,7 +520,7 @@ func TestContentPublishAsJobRequester(t *testing.T) {
 	if code, _ := g.json("jack", http.MethodPost, "/v1/content-components/"+src.ID+"/publish", wire.ContentPublishInput{Scope: "org"}); code != http.StatusNotFound {
 		t.Fatalf("publish without the grant = %d", code)
 	}
-	recs, _ := g.audit.ExtAuditRecords(context.Background(), wire.AuditKindContent, 0, 0)
+	recs, _ := g.audit.AuditLog(context.Background(), store.AuditLogQuery{AllTenants: true, Kinds: []string{wire.AuditKindContent}})
 	if len(recs) != 1 || recs[0].Actor != "maya" || !strings.Contains(recs[0].Detail, "through agent jack/opencode, job job-1") {
 		t.Fatalf("audit = %+v", recs)
 	}

@@ -59,7 +59,7 @@ func TestDispatchThroughATeamRole(t *testing.T) {
 	if payload.UserID != "maya" || payload.DispatchedBy.Role != "reviewer" || payload.DispatchedBy.Via != "jack/codex" || payload.Expert.ID != "cc_rev" {
 		t.Fatalf("payload = %+v", payload)
 	}
-	recs, _ := f.audit.ExtAuditRecords(dctx(), AgentDispatchAuditKind, 10, 0)
+	recs, _ := f.audit.AuditLog(dctx(), store.AuditLogQuery{AllTenants: true, Kinds: []string{AgentDispatchAuditKind}, Limit: 10})
 	if len(recs) != 1 || !strings.Contains(recs[0].Detail, "role=reviewer") || !strings.Contains(recs[0].Detail, "requester=maya") {
 		t.Fatalf("audit = %+v", recs)
 	}

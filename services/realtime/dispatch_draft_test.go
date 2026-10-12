@@ -74,7 +74,7 @@ func TestDispatchWearsAStagedDraft(t *testing.T) {
 	if payload.Expert["id"] != "cd_ok" || payload.Expert["draft"] != true {
 		t.Fatalf("message expert = %v", payload.Expert)
 	}
-	recs, _ := f.audit.ExtAuditRecords(dctx(), wire.AuditKindContent, 10, 0)
+	recs, _ := f.audit.AuditLog(dctx(), store.AuditLogQuery{AllTenants: true, Kinds: []string{wire.AuditKindContent}, Limit: 10})
 	if len(recs) != 1 || recs[0].Action != "try" || recs[0].Actor != "maya" || !strings.Contains(recs[0].Detail, "draft Reviewer (draft) v1.0.0 on agent bob/acme/claude") {
 		t.Fatalf("audit = %+v", recs)
 	}

@@ -27,7 +27,7 @@ func newHandoffServer(t *testing.T) (*Service, *store.MemoryChat, *realtime.Hand
 	chat := store.NewMemoryChat()
 	svc := &Service{Hub: realtime.NewHub(64, 16), Membership: mem, Chat: chat}
 	// Durable seeding, as in production: the hub continues from the store max.
-	svc.Hub.SeedSeq = func(roomID string) (int64, error) { return chat.MaxRoomSeq(context.Background(), roomID, "") }
+	svc.Hub.SeedSeq = func(roomID string) (int64, error) { return chat.MaxRoomSeq(context.Background(), roomID) }
 	srv := httptest.NewServer(svcauth.Middleware(key, svc.Handler()))
 	t.Cleanup(srv.Close)
 	return svc, chat, realtime.NewHandoffClient(srv.URL, "room"), tenant.NewContext(context.Background(), tenant.Default)

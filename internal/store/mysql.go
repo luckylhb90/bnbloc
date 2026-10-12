@@ -25,28 +25,20 @@ type MySQL struct {
 // NewMySQL constructs a MySQL-backed activity store.
 func NewMySQL(db *sql.DB) *MySQL { return &MySQL{DB: db} }
 
-// PutSessionState upserts a session snapshot, keeping the newer message_version.
+// PutSessionState advances the session's message_version (a monotonic
+// fence: GREATEST keeps the stored version when the incoming one is older)
+// and returns the stored version. Only the version is kept: nothing reads a
+// snapshot of the session.
 func (m *MySQL) PutSessionState(ctx context.Context, in wire.ReportSessionStateInput) (int64, error) {
 	tnt, err := tenant.Require(ctx)
 	if err != nil {
 		return 0, err
 	}
-	stateJSON, err := jsonArg(in.State)
-	if err != nil {
-		return 0, err
-	}
-	// ON DUPLICATE KEY UPDATE only advances when the incoming version is newer;
-	// GREATEST keeps the stored version otherwise (monotonic fence).
 	_, err = m.DB.ExecContext(ctx, `
-INSERT INTO agent_sessions
-  (tenant_id, room_id, agent_session_id, provider_session_id, owner_user_id, state_json, message_version, updated_at_ms)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-ON DUPLICATE KEY UPDATE
-  state_json = IF(VALUES(message_version) > message_version, VALUES(state_json), state_json),
-  provider_session_id = IF(VALUES(message_version) > message_version, VALUES(provider_session_id), provider_session_id),
-  updated_at_ms = IF(VALUES(message_version) > message_version, VALUES(updated_at_ms), updated_at_ms),
-  message_version = GREATEST(message_version, VALUES(message_version))`,
-		tnt, in.WorkspaceID, in.AgentSessionID, nullString(in.ProviderSessionID), in.OwnerUserID, stateJSON, in.MessageVersion, in.OccurredAtUnixMs)
+INSERT INTO agent_sessions (tenant_id, room_id, agent_session_id, message_version)
+VALUES (?, ?, ?, ?)
+ON DUPLICATE KEY UPDATE message_version = GREATEST(message_version, VALUES(message_version))`,
+		tnt, in.WorkspaceID, in.AgentSessionID, in.MessageVersion)
 	if err != nil {
 		return 0, err
 	}

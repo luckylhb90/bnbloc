@@ -118,7 +118,7 @@ func TestWorkerAppliesEffectivePolicy(t *testing.T) {
 	if got := r.history(t, "acme", "acme-quiet"); len(got) != 0 {
 		t.Fatalf("acme quiet history = %v", got)
 	}
-	if mx, _ := r.b.Chat.MaxRoomSeq(actx, "acme-quiet", ""); mx != 1 {
+	if mx, _ := r.b.Chat.MaxRoomSeq(actx, "acme-quiet"); mx != 1 {
 		t.Fatalf("the quiet room's max sequence went down to %d", mx)
 	}
 	// globex keeps 60-day-old messages under the 365-day default; its
@@ -128,7 +128,7 @@ func TestWorkerAppliesEffectivePolicy(t *testing.T) {
 	}
 	// acme keeps its audit forever (0); the platform rows follow the
 	// 400-day default.
-	recs, _ := r.b.ExtAudit.ExtAuditRecords(ctx, "", 100, 0)
+	recs, _ := r.b.ExtAudit.(store.AuditLogReader).AuditLog(ctx, store.AuditLogQuery{AllTenants: true, Limit: 100})
 	var acmeRows, platformRows int
 	purgeRecord := ""
 	for _, rec := range recs {
@@ -317,7 +317,7 @@ func TestWorkerMySQL(t *testing.T) {
 	if got := r.history(t, tid, room); len(got) != 1 || got[0] != 2 {
 		t.Fatalf("history = %v", got)
 	}
-	if mx, err := b.Chat.MaxRoomSeq(tctx, quiet, ""); err != nil || mx != 1 {
+	if mx, err := b.Chat.MaxRoomSeq(tctx, quiet); err != nil || mx != 1 {
 		t.Fatalf("quiet room max = %d, %v", mx, err)
 	}
 	if _, found, _ := b.Attachments.GetAttachment(tctx, room, tid+"-att"); found {

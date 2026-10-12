@@ -1308,6 +1308,38 @@ WHERE r.channel_id = '' AND d.user_id IS NULL`)
 			return addIndexIfMissing(ctx, db, "tenants", "uq_tenant_issuer", "ADD UNIQUE KEY uq_tenant_issuer (sso_issuer)")
 		},
 	},
+	{
+		// Columns nothing reads or writes (docs/prd/2026-10-12-code-health-
+		// remediation.md, 4.5, D3): sync_states' pending/failed/error
+		// counters were never written, agent_messages.channel_id was
+		// always '', and agent_sessions kept a snapshot (state, provider
+		// session, owner, time) nothing ever read. idx_artifact_versions_recent
+		// duplicated the primary key. They are retiredColumns.
+		id: "2026_10_drop_unused_columns",
+		run: func(ctx context.Context, db sqlConn) error {
+			if err := dropIndexIfExists(ctx, db, "agent_sessions", "idx_session_owner"); err != nil {
+				return err
+			}
+			if err := dropIndexIfExists(ctx, db, "artifact_versions", "idx_artifact_versions_recent"); err != nil {
+				return err
+			}
+			for _, tc := range [][2]string{
+				{"sync_states", "pending_count"},
+				{"sync_states", "failed_count"},
+				{"sync_states", "last_error"},
+				{"agent_messages", "channel_id"},
+				{"agent_sessions", "provider_session_id"},
+				{"agent_sessions", "owner_user_id"},
+				{"agent_sessions", "state_json"},
+				{"agent_sessions", "updated_at_ms"},
+			} {
+				if err := dropColumnIfExists(ctx, db, tc[0], tc[1]); err != nil {
+					return err
+				}
+			}
+			return nil
+		},
+	},
 }
 
 // sqlConn is the statement surface a migration runs on. runMigrations passes
@@ -1404,8 +1436,11 @@ func migrationApplied(ctx context.Context, q sqlConn, id string) (bool, error) {
 
 // addColumnIfMissing adds table.column with the given DDL type only when it is
 // not already present in the current schema (MySQL lacks ADD COLUMN IF NOT
-// EXISTS).
+// EXISTS). A retired column (retiredColumns) is never added.
 func addColumnIfMissing(ctx context.Context, db sqlConn, table, column, ddl string) error {
+	if retiredColumn(table, column) {
+		return nil
+	}
 	var n int
 	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM information_schema.columns
     WHERE table_schema = DATABASE() AND table_name = ? AND column_name = ?`,
@@ -1486,8 +1521,14 @@ func indexColumns(ctx context.Context, db sqlConn, table, indexName string) ([]s
 // ensureIndexColumns makes a non-unique index named indexName cover exactly
 // cols, in order: it adds a missing index, rebuilds one whose columns differ
 // (drop + add in one ALTER, so the table is never left without it), and is a
-// no-op when the index already matches.
+// no-op when the index already matches. An index over a retired column
+// (retiredColumns) is left to the migration that drops the column.
 func ensureIndexColumns(ctx context.Context, db sqlConn, table, indexName string, cols []string) error {
+	for _, c := range cols {
+		if retiredColumn(table, c) {
+			return nil
+		}
+	}
 	have, err := indexColumns(ctx, db, table, indexName)
 	if err != nil {
 		return err
@@ -1507,10 +1548,14 @@ func ensureIndexColumns(ctx context.Context, db sqlConn, table, indexName string
 
 // ensureColumnsCollation rewrites the listed text columns of table to
 // charset/collation, keeping each column's type, nullability and default as
-// stored, in one ALTER; columns already in that collation are left alone.
+// stored, in one ALTER; columns already in that collation, and retired
+// columns (retiredColumns), are left alone.
 func ensureColumnsCollation(ctx context.Context, db sqlConn, table, charset, collation string, cols ...string) error {
 	var mods []string
 	for _, col := range cols {
+		if retiredColumn(table, col) {
+			continue
+		}
 		var typ, nullable string
 		var def, have sql.NullString
 		err := db.QueryRowContext(ctx, `SELECT column_type, is_nullable, column_default, collation_name FROM information_schema.columns
@@ -1537,6 +1582,23 @@ func ensureColumnsCollation(ctx context.Context, db sqlConn, table, charset, col
 	}
 	if _, err := db.ExecContext(ctx, fmt.Sprintf("ALTER TABLE %s %s", table, strings.Join(mods, ", "))); err != nil {
 		return fmt.Errorf("collate %s: %w", table, err)
+	}
+	return nil
+}
+
+// dropColumnIfExists drops table.column when present.
+func dropColumnIfExists(ctx context.Context, db sqlConn, table, column string) error {
+	var n int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM information_schema.columns
+    WHERE table_schema = DATABASE() AND table_name = ? AND column_name = ?`,
+		table, column).Scan(&n); err != nil {
+		return fmt.Errorf("inspect column %s.%s: %w", table, column, err)
+	}
+	if n == 0 {
+		return nil
+	}
+	if _, err := db.ExecContext(ctx, fmt.Sprintf("ALTER TABLE %s DROP COLUMN %s", table, column)); err != nil {
+		return fmt.Errorf("drop column %s.%s: %w", table, column, err)
 	}
 	return nil
 }

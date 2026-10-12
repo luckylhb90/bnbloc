@@ -362,7 +362,7 @@ func (s *Service) handleTenantUpdateSettings(w http.ResponseWriter, r *http.Requ
 		t.SSOIssuer = *body.SSOIssuer
 	}
 	if err := s.Tenants.PutTenant(r.Context(), t); errors.Is(err, store.ErrSSOIssuerTaken) {
-		writeErr(w, http.StatusConflict, "sso issuer already maps another organization")
+		httpx.Error(w, "sso issuer already maps another organization", http.StatusConflict)
 		return
 	} else if err != nil {
 		obs.ServerError(w, "update settings failed", err)

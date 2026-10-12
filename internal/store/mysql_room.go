@@ -124,7 +124,6 @@ func (s *MySQLRoom) createRoomTx(ctx context.Context, tx *sql.Tx, r Room, owner 
 	return nil
 }
 
-// GetRoom returns a room or ErrRoomNotFound.
 // RoomTenant returns a room's authoritative tenant, keyed on room_id (the PK,
 // globally unique) with no tenant filter. It is how a room-scoped request
 // resolves which tenant to execute in, independent of the caller's session
@@ -142,11 +141,11 @@ func (s *MySQLRoom) RoomTenant(ctx context.Context, roomID string) (string, bool
 	return tid, true, nil
 }
 
-// GetRoom returns a room scoped to the caller's tenant. Room ids are
-// globally unique (rooms' primary key is room_id alone), but a read stays
-// in the request's tenant: a caller reaching a room outside their session
-// tenant first resolves the room's tenant through the room-anchored probes
-// (MembershipAnyTenant / TenantOfRoom), never by un-scoping this read.
+// GetRoom returns a room scoped to the caller's tenant, or ErrRoomNotFound.
+// Room ids are globally unique (the primary key), but a room is only read in
+// its own tenant: a caller reaching a room outside their session tenant
+// resolves its tenant first (RoomTenant, MembershipAnyTenant), never by
+// un-scoping this read.
 func (s *MySQLRoom) GetRoom(ctx context.Context, roomID string) (Room, error) {
 	tid, err := tenant.Require(ctx)
 	if err != nil {
@@ -234,9 +233,8 @@ func (s *MySQLRoom) RemoveAgentHost(ctx context.Context, roomID, userID string) 
 }
 
 // GetMember returns a user's membership of a room within the caller's
-// tenant scope. Room ids are not globally unique; the room-anchored
-// cross-tenant probe (MembershipAnyTenant) exists for the multi-tenant
-// member path.
+// tenant scope; the room-anchored cross-tenant probe (MembershipAnyTenant)
+// serves the multi-tenant member path.
 func (s *MySQLRoom) GetMember(ctx context.Context, roomID, userID string) (Membership, bool, error) {
 	tid, err := tenant.Require(ctx)
 	if err != nil {

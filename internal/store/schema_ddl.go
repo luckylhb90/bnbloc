@@ -31,6 +31,29 @@ var retiredTables = map[string]string{
 	"prompts": "2026_10_prompt_packs",
 }
 
+// retiredColumns are columns ("table.column") a later migration drops (and
+// schema.sql no longer holds), with the dropping migration's id. A locked
+// migration that adds, collates or indexes one still runs on a fresh
+// database: the migration helpers skip a retired column there (and an index
+// over one), and the dropping migration removes it from databases that
+// have it.
+var retiredColumns = map[string]string{
+	"sync_states.pending_count":          "2026_10_drop_unused_columns",
+	"sync_states.failed_count":           "2026_10_drop_unused_columns",
+	"sync_states.last_error":             "2026_10_drop_unused_columns",
+	"agent_messages.channel_id":          "2026_10_drop_unused_columns",
+	"agent_sessions.provider_session_id": "2026_10_drop_unused_columns",
+	"agent_sessions.owner_user_id":       "2026_10_drop_unused_columns",
+	"agent_sessions.state_json":          "2026_10_drop_unused_columns",
+	"agent_sessions.updated_at_ms":       "2026_10_drop_unused_columns",
+}
+
+// retiredColumn reports whether table.column is in retiredColumns.
+func retiredColumn(table, column string) bool {
+	_, ok := retiredColumns[table+"."+column]
+	return ok
+}
+
 // createSchemaTable runs schemaTableDDL(table) (idempotent: IF NOT EXISTS);
 // a retired table is not created.
 func createSchemaTable(ctx context.Context, db sqlConn, table string) error {

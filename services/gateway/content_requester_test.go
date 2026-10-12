@@ -137,7 +137,7 @@ func TestContentSaveAsJobRequester(t *testing.T) {
 	}
 
 	// Each save is audited with the agent, the requester and the bridge.
-	recs, err := audit.ExtAuditRecords(context.Background(), wire.AuditKindContent, 50, 0)
+	recs, err := audit.AuditLog(context.Background(), store.AuditLogQuery{AllTenants: true, Kinds: []string{wire.AuditKindContent}, Limit: 50})
 	if err != nil {
 		t.Fatal(err)
 	}

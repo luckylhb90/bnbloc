@@ -44,12 +44,12 @@ func TestMemberJoinGetsRoomShares(t *testing.T) {
 	if len(cps) != 1 || cps[0].SharedBy != "maya" || cps[0].LatestVersion != "1.0.0" {
 		t.Fatalf("bob's copies = %+v", cps)
 	}
-	recs, _ := audit.ExtAuditRecords(dctx(), wire.AuditKindContent, 10, 0)
+	recs, _ := audit.AuditLog(dctx(), store.AuditLogQuery{AllTenants: true, Kinds: []string{wire.AuditKindContent}, Limit: 10})
 	if len(recs) != 1 || recs[0].Action != "share" || recs[0].Actor != "maya" || !strings.Contains(recs[0].Detail, "with bob (created, joined room room-1)") {
 		t.Fatalf("audit = %+v", recs)
 	}
 	svc.grantRoomShares(dctx(), tenant.Default, "room-1", "bob")
-	if recs, _ := audit.ExtAuditRecords(dctx(), wire.AuditKindContent, 10, 0); len(recs) != 1 {
+	if recs, _ := audit.AuditLog(dctx(), store.AuditLogQuery{AllTenants: true, Kinds: []string{wire.AuditKindContent}, Limit: 10}); len(recs) != 1 {
 		t.Fatalf("a second join audited again: %+v", recs)
 	}
 	// The author never gets a copy of her own component.

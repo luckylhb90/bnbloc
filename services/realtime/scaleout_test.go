@@ -76,7 +76,7 @@ func newCluster(t *testing.T, n int) *cluster {
 		}
 		hub := realtime.NewHub(64, 64)
 		hub.SeedSeq = func(room string) (int64, error) {
-			return c.chat.MaxRoomSeq(tenant.NewContext(context.Background(), tenant.Default), room, "")
+			return c.chat.MaxRoomSeq(context.Background(), room)
 		}
 		r.svc = &Service{
 			Hub: hub, Membership: c.members, Chat: c.chat, BridgeJobs: jobs, Dispatches: jobs,

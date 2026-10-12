@@ -128,7 +128,7 @@ func TestAPITokenLifecycle(t *testing.T) {
 		t.Fatalf("revoked exchange = %d", code)
 	}
 	// Issue, exchange and revoke are audited.
-	recs, _ := gw.ExtAudit.ExtAuditRecords(context.Background(), apiTokenAuditKind, 100, 0)
+	recs, _ := gw.ExtAudit.(store.AuditLogReader).AuditLog(context.Background(), store.AuditLogQuery{AllTenants: true, Kinds: []string{apiTokenAuditKind}, Limit: 100})
 	actions := map[string]int{}
 	for _, r := range recs {
 		actions[r.Action+"/"+r.Outcome]++

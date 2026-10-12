@@ -157,7 +157,7 @@ func TestDispatchPostsAsTheParentRequester(t *testing.T) {
 	if child.RequesterUserID != "maya" || child.OwnerUserID != "bob" || child.DispatchedByJobID != p.JobID || child.DispatchDepth != 1 || child.Status != store.AgentJobQueued {
 		t.Fatalf("child job = %+v", child)
 	}
-	recs, _ := f.audit.ExtAuditRecords(dctx(), AgentDispatchAuditKind, 10, 0)
+	recs, _ := f.audit.AuditLog(dctx(), store.AuditLogQuery{AllTenants: true, Kinds: []string{AgentDispatchAuditKind}, Limit: 10})
 	if len(recs) != 1 || recs[0].Actor != "jack" || recs[0].Outcome != "allow" || recs[0].Name != "bob/claude" ||
 		!strings.Contains(recs[0].Detail, "parentJob=job_parent") || !strings.Contains(recs[0].Detail, "requester=maya") || !strings.Contains(recs[0].Detail, "job="+jobID) {
 		t.Fatalf("audit = %+v", recs)
@@ -232,7 +232,7 @@ func TestDispatchGuards(t *testing.T) {
 			if msgs, _ := f.chat.RoomFeed(dctx(), "room-1", 0, 10); len(msgs) != 0 {
 				t.Fatalf("a refused dispatch posted %d messages", len(msgs))
 			}
-			recs, _ := f.audit.ExtAuditRecords(dctx(), AgentDispatchAuditKind, 10, 0)
+			recs, _ := f.audit.AuditLog(dctx(), store.AuditLogQuery{AllTenants: true, Kinds: []string{AgentDispatchAuditKind}, Limit: 10})
 			if len(recs) != 1 || recs[0].Outcome != "deny" || !strings.Contains(recs[0].Detail, "reason="+tc.code) {
 				t.Fatalf("audit = %+v; want one denial with reason %s", recs, tc.code)
 			}
@@ -340,7 +340,7 @@ func TestDispatchStoreFailureIs500(t *testing.T) {
 	if code != http.StatusInternalServerError || out["code"] != nil {
 		t.Fatalf("dispatch = %d %v; want a 500 without a guard code", code, out)
 	}
-	recs, _ := f.audit.ExtAuditRecords(dctx(), AgentDispatchAuditKind, 10, 0)
+	recs, _ := f.audit.AuditLog(dctx(), store.AuditLogQuery{AllTenants: true, Kinds: []string{AgentDispatchAuditKind}, Limit: 10})
 	if len(recs) != 1 || recs[0].Outcome != "failed" {
 		t.Fatalf("audit = %+v; want one failed row", recs)
 	}

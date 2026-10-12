@@ -64,7 +64,7 @@ func TestSessionRevocationsAudited(t *testing.T) {
 	*now = now.Add(refreshReuseGrace + time.Second)
 	_, _ = refreshWith(t, srv.URL, "/v1/auth/refresh", g1.RefreshToken)
 
-	recs, _ := audit.ExtAuditRecords(context.Background(), wire.AuditKindSession, 10, 0)
+	recs, _ := audit.AuditLog(context.Background(), store.AuditLogQuery{AllTenants: true, Kinds: []string{wire.AuditKindSession}, Limit: 10})
 	actions := map[string]int{}
 	for _, r := range recs {
 		actions[r.Action]++

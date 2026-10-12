@@ -57,7 +57,7 @@ func TestChatExpertPinnedOnJobAndAudited(t *testing.T) {
 	if j == nil || j.ExpertID != "cc_rev" || j.ExpertVersion != "1.1.0" || j.ExpertName != "Reviewer" {
 		t.Fatalf("job = %+v", j)
 	}
-	recs, _ := audit.ExtAuditRecords(dctx(), wire.AuditKindContent, 10, 0)
+	recs, _ := audit.AuditLog(dctx(), store.AuditLogQuery{AllTenants: true, Kinds: []string{wire.AuditKindContent}, Limit: 10})
 	if len(recs) != 1 || recs[0].Name != "reviewer@1.1.0" || recs[0].Actor != "maya" || recs[0].Detail != "expert Reviewer v1.1.0 on agent jack/acme/codex (job "+j.JobID+", room room-1)" {
 		t.Fatalf("audit = %+v", recs)
 	}

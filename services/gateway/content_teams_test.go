@@ -227,8 +227,8 @@ func TestContentEffectiveRecordsRoomExpert(t *testing.T) {
 	if err != nil || got.RoomExpertID != house.ID || got.RoomExpertVersion != "1.0.0" || got.RoomExpertName != "House style" {
 		t.Fatalf("job = %+v, %v", got, err)
 	}
-	recs, _ := audit.ExtAuditRecords(ctx, wire.AuditKindContent, 0, 0)
-	var uses []store.ExtAuditRecord
+	recs, _ := audit.AuditLog(ctx, store.AuditLogQuery{AllTenants: true, Kinds: []string{wire.AuditKindContent}})
+	var uses []store.AuditLogRow
 	for _, r := range recs {
 		if r.Action == "use" {
 			uses = append(uses, r)

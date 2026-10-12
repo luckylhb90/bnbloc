@@ -251,7 +251,7 @@ func TestPipelineSetRolloutPersistsAndAuditsTransition(t *testing.T) {
 	if found.Rollout != RolloutOptIn {
 		t.Fatalf("rollout = %q; want %q", found.Rollout, RolloutOptIn)
 	}
-	audits, err := p.Audit.ExtAuditRecords(ctx, string(fakeKind), 0, 0)
+	audits, err := p.Audit.(store.AuditLogReader).AuditLog(ctx, store.AuditLogQuery{AllTenants: true, Kinds: []string{string(fakeKind)}})
 	if err != nil {
 		t.Fatalf("audit records: %v", err)
 	}

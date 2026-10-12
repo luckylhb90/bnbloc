@@ -62,7 +62,7 @@ func TestRetentionPolicyRoutes(t *testing.T) {
 	if eff := body["effective"].(map[string]any); code != http.StatusOK || eff["messagesDays"] != float64(365) || eff["agentJobsDays"] != nil {
 		t.Fatalf("globex view: %d %v", code, body)
 	}
-	recs, _ := audit.ExtAuditRecords(context.Background(), wire.AuditKindRetention, 10, 0)
+	recs, _ := audit.AuditLog(context.Background(), store.AuditLogQuery{AllTenants: true, Kinds: []string{wire.AuditKindRetention}, Limit: 10})
 	if len(recs) != 2 {
 		t.Fatalf("audit records = %+v", recs)
 	}

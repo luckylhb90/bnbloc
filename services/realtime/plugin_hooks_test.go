@@ -142,13 +142,13 @@ func chatEvent(room, author, text string) wire.Event {
 	return wire.Event{RoomID: room, Kind: "chat_message", Payload: map[string]any{"userId": author, "text": text}}
 }
 
-func auditOutcomes(t *testing.T, audit *store.MemoryExtensionAudit) []store.ExtAuditRecord {
+func auditOutcomes(t *testing.T, audit *store.MemoryExtensionAudit) []store.AuditLogRow {
 	t.Helper()
-	recs, err := audit.ExtAuditRecords(context.Background(), string(pkgmeta.KindPlugin), 50, 0)
+	recs, err := audit.AuditLog(context.Background(), store.AuditLogQuery{AllTenants: true, Kinds: []string{string(pkgmeta.KindPlugin)}, Limit: 50})
 	if err != nil {
 		t.Fatalf("audit: %v", err)
 	}
-	var out []store.ExtAuditRecord
+	var out []store.AuditLogRow
 	for _, rec := range recs {
 		if rec.Action == "deliver" {
 			out = append(out, rec)

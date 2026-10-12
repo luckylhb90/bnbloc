@@ -207,7 +207,7 @@ func TestApply_addsChangesRoleAndRemovesSyncMembershipsAndRevokesSessions(t *tes
 		t.Fatalf("revoked labs=%d acme=%d, want only labs", labs.RevokedAtMs, acme.RevokedAtMs)
 	}
 	// And every change is audited.
-	recs, _ := f.audit.ExtAuditRecords(ctx, AuditKind, 0, 0)
+	recs, _ := f.audit.AuditLog(ctx, store.AuditLogQuery{AllTenants: true, Kinds: []string{AuditKind}})
 	actions := map[string]int{}
 	for _, r := range recs {
 		actions[r.Action]++

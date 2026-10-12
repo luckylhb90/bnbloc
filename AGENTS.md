@@ -1038,7 +1038,9 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   (once per insertion). Never add a second prompt store or route.
 - **A dropped table stays creatable for locked migrations:** when a table
   leaves `schema.sql`, add it to `retiredTables` (`schema_ddl.go`) with the
-  dropping migration's id; never edit the locked migration.
+  dropping migration's id; never edit the locked migration. A dropped column
+  goes to `retiredColumns` the same way (the migration helpers skip it, and
+  any index over it, when a locked migration names it on a fresh database).
 - **Teams resolve in two places only:** member experts as the requester in
   `contentuse` (`Effective.team`); member agents staffed only by
   `internal/expertteam` (`POST /v1/rooms/{id}/team-plan`), never on the lead's

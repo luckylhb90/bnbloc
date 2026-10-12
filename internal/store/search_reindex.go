@@ -1,34 +1,25 @@
 package store
 
 import (
-	"context"
-	"database/sql"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"sort"
 	"strconv"
 	"strings"
 )
 
-// Search backfill (batch 3, R7). Messages persisted before migration
-// 2026_10_message_search carry no room_messages.search_text, so the FULLTEXT
-// search never finds them. ReindexSearchText fills it for one bounded batch of
-// rows, walking the table in primary-key order ((room_id, seq)) from an opaque
-// cursor, so a caller can page through the whole feed in bounded steps and
-// resume where it stopped.
-//
-// It is idempotent and safe while serving: the text comes from MessageText
-// (the exact normalization AppendRoomMessage writes), and each row is only
-// written while its search_text is still empty, so a concurrent edit (which
-// rewrites search_text) or a second reindex run never clobbers newer text.
-// It is cross-tenant by design: a platform operation over the whole feed.
+// The reindex walk (search_source.go, ScanSearchSources): an external
+// search index is brought up to date for one bounded batch of rows at a
+// time, walking room_messages in primary-key order ((room_id, seq)) from an
+// opaque cursor, so a caller pages through the whole feed and resumes where
+// it stopped. It is cross-tenant by design: a platform operation over the
+// whole feed. The store's own FULLTEXT index needs no walk: search_text is
+// written with the row.
 
 // SearchReindexBatchSize is the number of rows one batch reads.
 const SearchReindexBatchSize = 500
 
-// SearchReindexBatch reports one batch: rows read, rows whose search text was
-// filled, the cursor to continue from, and whether the end of the table was
+// SearchReindexBatch reports one batch: rows read, rows (documents) written,
+// the cursor to continue from, and whether the end of the table was
 // reached.
 type SearchReindexBatch struct {
 	Scanned int    `json:"scanned"`
@@ -92,99 +83,4 @@ func reindexBatchSize(n int) int {
 		return SearchReindexBatchSize
 	}
 	return n
-}
-
-// ReindexSearchText for the memory backend: search matches the payload text
-// on every query, so there is never stale index text to fill. It still walks
-// the rows with the same cursor contract (Updated is always 0).
-func (s *MemoryChat) ReindexSearchText(_ context.Context, cursor string, batch int) (SearchReindexBatch, error) {
-	from, err := parseSearchCursor(cursor)
-	if err != nil {
-		return SearchReindexBatch{}, err
-	}
-	batch = reindexBatchSize(batch)
-	s.mu.Lock()
-	var rows []searchCursor
-	for key, msgs := range s.msgs {
-		roomID := key[strings.LastIndex(key, "\x00")+1:]
-		for _, m := range msgs {
-			if from.less(roomID, m.Seq) {
-				rows = append(rows, searchCursor{roomID: roomID, seq: m.Seq})
-			}
-		}
-	}
-	s.mu.Unlock()
-	sort.Slice(rows, func(i, j int) bool { return rows[i].less(rows[j].roomID, rows[j].seq) })
-	// Done when the batch is short, the same rule as the MySQL backend.
-	out := SearchReindexBatch{Cursor: cursor, Done: len(rows) < batch}
-	if len(rows) > batch {
-		rows = rows[:batch]
-	}
-	out.Scanned = len(rows)
-	if len(rows) > 0 {
-		out.Cursor = rows[len(rows)-1].String()
-	}
-	return out, nil
-}
-
-// ReindexSearchText fills room_messages.search_text for one batch of rows
-// after cursor. The payload is only read for rows that need indexing.
-func (s *MySQLChat) ReindexSearchText(ctx context.Context, cursor string, batch int) (SearchReindexBatch, error) {
-	from, err := parseSearchCursor(cursor)
-	if err != nil {
-		return SearchReindexBatch{}, err
-	}
-	batch = reindexBatchSize(batch)
-	where, args := from.keysetAfter("")
-	q := `SELECT room_id, seq, kind,
-	        CASE WHEN (search_text IS NULL OR search_text = '') AND kind IN ('chat_message', 'agent_messages')
-	             THEN payload_json END
-	      FROM room_messages` + where + ` ORDER BY room_id, seq LIMIT ?`
-	args = append(args, batch)
-	rows, err := s.DB.QueryContext(ctx, q, args...)
-	if err != nil {
-		return SearchReindexBatch{}, err
-	}
-	type pending struct {
-		at   searchCursor
-		text string
-	}
-	var todo []pending
-	out := SearchReindexBatch{Cursor: cursor}
-	for rows.Next() {
-		var at searchCursor
-		var kind string
-		var payload sql.RawBytes
-		if err := rows.Scan(&at.roomID, &at.seq, &kind, &payload); err != nil {
-			rows.Close()
-			return SearchReindexBatch{}, err
-		}
-		out.Scanned++
-		out.Cursor = at.String()
-		if payload != nil {
-			if text := MessageText(kind, json.RawMessage(payload)); text != "" {
-				todo = append(todo, pending{at: at, text: text})
-			}
-		}
-	}
-	if err := rows.Close(); err != nil {
-		return SearchReindexBatch{}, err
-	}
-	if err := rows.Err(); err != nil {
-		return SearchReindexBatch{}, err
-	}
-	out.Done = out.Scanned < batch
-	for _, p := range todo {
-		res, err := s.DB.ExecContext(ctx,
-			`UPDATE room_messages SET search_text = ?
-			 WHERE room_id = ? AND seq = ? AND (search_text IS NULL OR search_text = '')`,
-			p.text, p.at.roomID, p.at.seq)
-		if err != nil {
-			return SearchReindexBatch{}, err
-		}
-		if n, _ := res.RowsAffected(); n > 0 {
-			out.Updated++
-		}
-	}
-	return out, nil
 }

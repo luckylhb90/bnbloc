@@ -98,11 +98,11 @@ type ChatStore interface {
 	// backlog in full on every room-list refresh would scan it all). channelID
 	// "" addresses the empty/default channel.
 	UnreadCount(ctx context.Context, roomID, channelID, userID string) (int, error)
-	// MaxRoomSeq returns the highest stored sequence for a room, or 0 if none.
-	// Sequences are a single room-scoped monotonic counter, so channelID "" is
-	// room-wide (across every channel) — seq allocation must pass "". A
-	// non-empty channelID restricts the max to that channel.
-	MaxRoomSeq(ctx context.Context, roomID, channelID string) (int64, error)
+	// MaxRoomSeq returns the highest stored sequence for a room (across every
+	// channel: sequences are one room-scoped counter), or 0 if none. It is
+	// keyed on the room alone (room ids are globally unique), so the hub's
+	// seeding needs no request tenant.
+	MaxRoomSeq(ctx context.Context, roomID string) (int64, error)
 	// LookupClientMsg returns the sequence of a previously-stored message with
 	// this client-generated id in the room, for send idempotency. found=false
 	// when there is none (or clientMsgID is empty).
@@ -407,30 +407,15 @@ func (s *MemoryChat) UnreadCount(ctx context.Context, roomID, channelID, userID 
 }
 
 // MaxRoomSeq returns the highest stored sequence for a room, or 0 if none.
-// channelID "" is room-wide (seq is one room-scoped counter, so allocation
-// reads ""); a non-empty channelID restricts the max to that channel.
-func (s *MemoryChat) MaxRoomSeq(ctx context.Context, roomID, channelID string) (int64, error) {
-	tid, err := tenant.Require(ctx)
-	// SeedSeq callers may not yet have a request tenant, but sequence allocation
-	// is room-wide and room ids are globally unique in the room table. Permit only
-	// the documented room-wide lookup (channelID == "") in that tenant-less path.
-	if err != nil && channelID != "" {
-		return 0, err
-	}
+func (s *MemoryChat) MaxRoomSeq(_ context.Context, roomID string) (int64, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	var mx int64
 	for key, msgs := range s.msgs {
-		if err == nil && key != tid+"\x00"+roomID {
-			continue
-		}
-		if err != nil && !strings.HasSuffix(key, "\x00"+roomID) {
+		if !strings.HasSuffix(key, "\x00"+roomID) {
 			continue
 		}
 		for _, m := range msgs {
-			if channelID != "" && m.ChannelID != channelID {
-				continue
-			}
 			if m.Seq > mx {
 				mx = m.Seq
 			}
@@ -674,28 +659,11 @@ func (s *MySQLChat) UnreadCount(ctx context.Context, roomID, channelID, userID s
 	return n, nil
 }
 
-// MaxRoomSeq returns the highest stored sequence for a room, or 0 if none.
-// channelID "" is room-wide (seq is one room-scoped counter, so allocation
-// reads ""); a non-empty channelID restricts the max to that channel.
-func (s *MySQLChat) MaxRoomSeq(ctx context.Context, roomID, channelID string) (int64, error) {
-	tid, terr := tenant.Require(ctx)
-	// SeedSeq callers may not yet have a request tenant, but sequence allocation
-	// is room-wide and room ids are globally unique in the room table. Permit only
-	// the documented room-wide lookup (channelID == "") in that tenant-less path.
-	q := `SELECT MAX(seq) FROM room_messages WHERE room_id = ?`
-	args := []any{roomID}
-	if terr == nil {
-		q = `SELECT MAX(seq) FROM room_messages WHERE tenant_id = ? AND room_id = ?`
-		args = []any{tid, roomID}
-	} else if channelID != "" {
-		return 0, terr
-	}
-	if channelID != "" {
-		q += ` AND channel_id = ?`
-		args = append(args, channelID)
-	}
+// MaxRoomSeq returns the highest stored sequence for a room, or 0 if none
+// (on the primary key's room_id prefix).
+func (s *MySQLChat) MaxRoomSeq(ctx context.Context, roomID string) (int64, error) {
 	var mx sql.NullInt64
-	if err := s.DB.QueryRowContext(ctx, q, args...).Scan(&mx); err != nil {
+	if err := s.DB.QueryRowContext(ctx, `SELECT MAX(seq) FROM room_messages WHERE room_id = ?`, roomID).Scan(&mx); err != nil {
 		return 0, err
 	}
 	if mx.Valid {

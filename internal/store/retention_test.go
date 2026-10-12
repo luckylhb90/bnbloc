@@ -144,7 +144,7 @@ func TestRetentionPurgeMessages(t *testing.T) {
 				t.Fatalf("quiet history = %v (the fence must not show)", got)
 			}
 			for room, want := range map[string]int64{busy: 3, quiet: 2} {
-				if got, err := b.Chat.MaxRoomSeq(ctx, room, ""); err != nil || got != want {
+				if got, err := b.Chat.MaxRoomSeq(ctx, room); err != nil || got != want {
 					t.Fatalf("MaxRoomSeq(%s) = %d, %v; want %d", room, got, err, want)
 				}
 			}
@@ -182,7 +182,7 @@ func TestRetentionPurgeMessages(t *testing.T) {
 			if err != nil || res[PurgedRoomMessages] != 1 {
 				t.Fatalf("fence cleanup = %v, %v", res, err)
 			}
-			if got, _ := b.Chat.MaxRoomSeq(ctx, quiet, ""); got != 3 {
+			if got, _ := b.Chat.MaxRoomSeq(ctx, quiet); got != 3 {
 				t.Fatalf("MaxRoomSeq after fence cleanup = %d", got)
 			}
 			if got := historySeqs(t, ctx, b, quiet); !eqSeqs(got, []int64{3}) {

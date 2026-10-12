@@ -173,11 +173,8 @@ walks at most `--batches` batches of 500 rows in primary-key order (default
 loops on the returned cursor, printing the backend and one progress line per
 call, until `done`. What a batch does depends on the backend:
 
-- **mysql** (the default): fills `room_messages.search_text` for rows stored
-  before search existed (or any row left without it). The text is the same
-  the append path indexes (chat text, or the joined texts of an agent reply),
-  and a row is only written while its search text is still empty, so a
-  concurrent edit is never overwritten. `updated` = rows filled.
+- **mysql** (the default): nothing to do; the FULLTEXT index is written with
+  each row, so the call reports `done` at once.
 - **opensearch**: writes every row's current document (a soft-deleted message
   keeps a `deleted` document without text; a row without text has none). Run
   it after configuring a new index (backfill), after a mapping version bump

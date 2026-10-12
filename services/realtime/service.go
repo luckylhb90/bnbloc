@@ -158,7 +158,7 @@ type ChatStore interface {
 	RoomFeed(ctx context.Context, roomID string, after int64, limit int) ([]store.RoomMessage, error)
 	MarkRead(ctx context.Context, roomID, channelID, userID string, seq, atMs int64) error
 	UnreadCount(ctx context.Context, roomID, channelID, userID string) (int, error)
-	MaxRoomSeq(ctx context.Context, roomID, channelID string) (int64, error)
+	MaxRoomSeq(ctx context.Context, roomID string) (int64, error)
 	LookupClientMsg(ctx context.Context, roomID, clientMsgID string) (int64, bool, error)
 	DeleteRoomMessage(ctx context.Context, roomID string, seq int64, requester string, atMs int64) (bool, error)
 	EditRoomMessage(ctx context.Context, roomID string, seq int64, requester, text string, atMs int64) (edited bool, err error)

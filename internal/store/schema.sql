@@ -246,19 +246,13 @@ CREATE TABLE IF NOT EXISTS agent_sessions (
   tenant_id           VARCHAR(64) NOT NULL,
   room_id             VARCHAR(64) NOT NULL,
   agent_session_id    VARCHAR(128) NOT NULL,
-  provider_session_id VARCHAR(128) NULL,
-  owner_user_id       VARCHAR(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
-  state_json          JSON NOT NULL,
   message_version     BIGINT NOT NULL,
-  updated_at_ms       BIGINT NOT NULL,
-  PRIMARY KEY (room_id, agent_session_id),
-  KEY idx_session_owner (tenant_id, owner_user_id)
+  PRIMARY KEY (room_id, agent_session_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS agent_messages (
   tenant_id        VARCHAR(64) NOT NULL,
   room_id          VARCHAR(64) NOT NULL,
-  channel_id       VARCHAR(64) NOT NULL DEFAULT '',
   agent_session_id VARCHAR(128) NOT NULL,
   seq              BIGINT NOT NULL,
   client_submit_id VARCHAR(128) NULL,
@@ -279,9 +273,6 @@ CREATE TABLE IF NOT EXISTS sync_states (
   tenant_id         VARCHAR(64) NOT NULL,
   room_id           VARCHAR(64) NOT NULL,
   agent_session_id  VARCHAR(128) NOT NULL,
-  pending_count     INT NOT NULL DEFAULT 0,
-  failed_count      INT NOT NULL DEFAULT 0,
-  last_error        TEXT NULL,
   message_cursor    BIGINT NOT NULL DEFAULT 0,
   PRIMARY KEY (room_id, agent_session_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
@@ -453,7 +444,6 @@ CREATE TABLE IF NOT EXISTS artifact_versions (
   thumb_height    INT NOT NULL DEFAULT 0,
   thumb_rank      INT NOT NULL DEFAULT 0,
   PRIMARY KEY (tenant_id, artifact_id, version),
-  KEY idx_artifact_versions_recent (tenant_id, artifact_id, version),
   KEY idx_artifact_versions_source (tenant_id, source_seq),
   KEY idx_artifact_versions_created (tenant_id, created_at_ms),
   KEY idx_artifact_versions_blob (blob_key),

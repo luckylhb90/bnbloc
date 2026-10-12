@@ -52,10 +52,6 @@ type ChatIndex interface {
 	// SearchRoomMessages returns messages in s.RoomIDs whose text contains
 	// s.Text, newest first.
 	SearchRoomMessages(ctx context.Context, s MessageSearch) ([]RoomMessage, error)
-	// ReindexSearchText fills the search text of one batch of rows stored
-	// without it (pre-search messages), after cursor; cross-tenant
-	// (search_reindex.go).
-	ReindexSearchText(ctx context.Context, cursor string, batch int) (SearchReindexBatch, error)
 	// LoadSearchSources and ScanSearchSources read rows for an external
 	// search index, by key and as a reindex walk; cross-tenant
 	// (search_source.go).

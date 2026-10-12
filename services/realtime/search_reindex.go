@@ -20,10 +20,10 @@ import (
 // owner of room_messages and of the search backend.
 //
 // POST /v1/platform/search/reindex walks the room feed and brings the
-// search index up to date for it: on the store index it fills the search
-// text of rows stored without it; on OpenSearch it writes every row's
+// search index up to date for it: on OpenSearch it writes every row's
 // current document (a backfill of a new index, or a repair after dropped or
-// failed updates). One call processes a bounded number of batches and a
+// failed updates); the store index has nothing to do (the row write is the
+// index write), so it reports done at once. One call processes a bounded number of batches and a
 // bounded wall time, so it stays well inside proxy timeouts; the caller
 // (`bnbloc search reindex`) loops on the returned cursor until done.
 //

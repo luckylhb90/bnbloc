@@ -185,8 +185,7 @@ func main() {
 	svc.Hub.SeedSeq = func(roomID string) (int64, error) {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		// "" is room-wide: seq allocation must span every channel.
-		return chat.MaxRoomSeq(ctx, roomID, "")
+		return chat.MaxRoomSeq(ctx, roomID)
 	}
 	svc.Hub.Metrics = metrics
 	handler := svc.Handler()

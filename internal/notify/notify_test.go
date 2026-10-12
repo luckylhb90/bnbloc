@@ -413,8 +413,8 @@ func TestWorkerDeliversSignedAndBacksOff(t *testing.T) {
 	if it.DeliveredAtMs == 0 || it.Attempts != 2 {
 		t.Fatalf("after success: %+v", it)
 	}
-	recs, _ := f.audit.ExtAuditRecords(context.Background(), string(extreg.KindNotifier), 10, 0)
-	var deliveries []store.ExtAuditRecord
+	recs, _ := f.audit.AuditLog(context.Background(), store.AuditLogQuery{AllTenants: true, Kinds: []string{string(extreg.KindNotifier)}, Limit: 10})
+	var deliveries []store.AuditLogRow
 	for _, rec := range recs {
 		if rec.Action == "deliver" {
 			deliveries = append(deliveries, rec)

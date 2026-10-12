@@ -80,7 +80,7 @@ func TestMySQLDeleteRoomRemovesEveryRoomOwnedRow(t *testing.T) {
 		"room_read_state":             `INSERT INTO room_read_state (tenant_id, room_id, channel_id, user_id, last_read_seq, updated_at_ms) VALUES ('org-a', '{id}', 'ch', 'alice', 1, 1)`,
 		"room_invites":                `INSERT INTO room_invites (code, tenant_id, room_id, role, expires_at_ms, capacity, created_by) VALUES ('inv-{id}', 'org-a', '{id}', 'member', 9, 1, 'alice')`,
 		"message_tasks":               `INSERT INTO message_tasks (tenant_id, room_id, seq, status, title, created_by, created_at_ms) VALUES ('org-a', '{id}', 1, 'open', 'the message text', 'alice', 1)`,
-		"agent_sessions":              `INSERT INTO agent_sessions (tenant_id, room_id, agent_session_id, owner_user_id, state_json, message_version, updated_at_ms) VALUES ('org-a', '{id}', 's', 'alice', '{}', 1, 1)`,
+		"agent_sessions":              `INSERT INTO agent_sessions (tenant_id, room_id, agent_session_id, message_version) VALUES ('org-a', '{id}', 's', 1)`,
 		"agent_messages":              `INSERT INTO agent_messages (tenant_id, room_id, agent_session_id, seq, payload_json, created_at_ms) VALUES ('org-a', '{id}', 's', 1, '{}', 1)`,
 		"sync_states":                 `INSERT INTO sync_states (tenant_id, room_id, agent_session_id, message_cursor) VALUES ('org-a', '{id}', 's', 1)`,
 		"attachments":                 `INSERT INTO attachments (id, tenant_id, room_id, uploader, filename, content_type, size_bytes, sha256, blob_key, created_at_ms) VALUES ('att-{id}', 'org-a', '{id}', 'alice', 'f', 'text/plain', 1, 'x', 'k', 1)`,
