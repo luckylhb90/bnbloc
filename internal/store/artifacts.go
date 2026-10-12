@@ -363,16 +363,22 @@ func (s *MemoryArtifacts) ListArtifacts(ctx context.Context, q ArtifactQuery) ([
 		}
 		out = append(out, a)
 	}
+	sortArtifactsNewestFirst(out)
+	if len(out) > limit {
+		out = out[:limit]
+	}
+	return out, nil
+}
+
+// sortArtifactsNewestFirst is the MySQL artifact list order: updated_at_ms
+// DESC, artifact_id DESC.
+func sortArtifactsNewestFirst(out []Artifact) {
 	sort.Slice(out, func(i, j int) bool {
 		if out[i].UpdatedAtMs != out[j].UpdatedAtMs {
 			return out[i].UpdatedAtMs > out[j].UpdatedAtMs
 		}
 		return out[i].ArtifactID > out[j].ArtifactID
 	})
-	if len(out) > limit {
-		out = out[:limit]
-	}
-	return out, nil
 }
 
 // ArtifactAnchors returns the room's version links in a seq range (memory

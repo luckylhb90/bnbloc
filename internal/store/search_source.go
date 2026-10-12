@@ -48,8 +48,8 @@ const searchSourceLoadChunk = 500
 // --- MemoryChat ---
 
 // LoadSearchSources returns the stored rows of keys (soft-deleted included,
-// missing keys omitted). The memory store has no channel registry, so
-// ChannelKind is always "".
+// missing keys omitted), by (room, seq). The memory store has no channel
+// registry, so ChannelKind is always "".
 func (s *MemoryChat) LoadSearchSources(_ context.Context, keys []MessageKey) ([]SearchSource, error) {
 	want := map[string]map[int64]bool{}
 	for _, k := range keys {
@@ -61,7 +61,7 @@ func (s *MemoryChat) LoadSearchSources(_ context.Context, keys []MessageKey) ([]
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	var out []SearchSource
+	out := []SearchSource{}
 	for rk, seqs := range want {
 		for _, m := range s.msgs[rk] {
 			if seqs[m.Seq] {
@@ -69,7 +69,15 @@ func (s *MemoryChat) LoadSearchSources(_ context.Context, keys []MessageKey) ([]
 			}
 		}
 	}
+	sortSearchSources(out)
 	return out, nil
+}
+
+// sortSearchSources is the reindex walk's (room, seq) order.
+func sortSearchSources(rows []SearchSource) {
+	sort.Slice(rows, func(i, j int) bool {
+		return searchCursor{rows[i].RoomID, rows[i].Seq}.less(rows[j].RoomID, rows[j].Seq)
+	})
 }
 
 // ScanSearchSources reads one batch of rows after cursor in the reindex
@@ -91,9 +99,7 @@ func (s *MemoryChat) ScanSearchSources(_ context.Context, cursor string, batch i
 		}
 	}
 	s.mu.Unlock()
-	sort.Slice(rows, func(i, j int) bool {
-		return searchCursor{rows[i].RoomID, rows[i].Seq}.less(rows[j].RoomID, rows[j].Seq)
-	})
+	sortSearchSources(rows)
 	out := SearchReindexBatch{Cursor: cursor, Done: len(rows) < batch}
 	if len(rows) > batch {
 		rows = rows[:batch]
@@ -123,7 +129,7 @@ const searchSourceSelect = `SELECT m.tenant_id, m.room_id, m.channel_id, m.seq, 
   FROM room_messages m
   LEFT JOIN room_channels c ON c.channel_id = m.channel_id AND c.room_id = m.room_id AND m.channel_id <> ''`
 
-func scanSearchSource(row interface{ Scan(...any) error }) (SearchSource, error) {
+func scanSearchSource(row rowScanner) (SearchSource, error) {
 	var s SearchSource
 	var payload []byte
 	var editedAt sql.NullInt64
@@ -140,11 +146,11 @@ func scanSearchSource(row interface{ Scan(...any) error }) (SearchSource, error)
 }
 
 // LoadSearchSources returns the stored rows of keys (soft-deleted included,
-// missing keys omitted), grouped per room so each room's sequences are one
-// primary-key range lookup. A row stored under another tenant than its key
-// names is omitted.
+// missing keys omitted), by (room, seq), grouped per room so each room's
+// sequences are one primary-key range lookup. A row stored under another
+// tenant than its key names is omitted.
 func (s *MySQLChat) LoadSearchSources(ctx context.Context, keys []MessageKey) ([]SearchSource, error) {
-	var out []SearchSource
+	out := []SearchSource{}
 	for len(keys) > 0 {
 		n := min(len(keys), searchSourceLoadChunk)
 		rows, err := s.loadSearchSources(ctx, keys[:n])
@@ -154,6 +160,7 @@ func (s *MySQLChat) LoadSearchSources(ctx context.Context, keys []MessageKey) ([
 		out = append(out, rows...)
 		keys = keys[n:]
 	}
+	sortSearchSources(out)
 	return out, nil
 }
 

@@ -79,8 +79,5 @@ func (c searchCursor) less(roomID string, seq int64) bool {
 }
 
 func reindexBatchSize(n int) int {
-	if n <= 0 || n > SearchReindexBatchSize {
-		return SearchReindexBatchSize
-	}
-	return n
+	return clampLimit(n, SearchReindexBatchSize, SearchReindexBatchSize)
 }

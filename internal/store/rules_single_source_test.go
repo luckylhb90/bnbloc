@@ -46,7 +46,6 @@ var storeRuleCopies = map[string]map[string]int{
 		"artifacts.go":                2,
 		"audit_log.go":                2,
 		"bridge_jobs.go":              1,
-		"chat.go":                     3,
 		"content_components.go":       1,
 		"content_publish_requests.go": 1,
 		"grants.go":                   2,
@@ -59,17 +58,11 @@ var storeRuleCopies = map[string]map[string]int{
 		"quota_requests.go":           1,
 		"retention.go":                1,
 		"room_schedules.go":           1,
-		"search.go":                   1,
 	},
 	"mysql-error": {
 		"api_tokens.go":           1,
-		"chat.go":                 2,
 		"mysql_quota_requests.go": 2,
 		"sso_handoffs.go":         1,
-	},
-	"not-deleted": {
-		"chat.go":   6,
-		"search.go": 2,
 	},
 	"null-helper": {
 		"mysql.go":             1,

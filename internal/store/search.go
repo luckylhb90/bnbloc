@@ -34,7 +34,8 @@ const SearchMinRunes = 2
 
 // MessageSearch scopes one message search: rooms the caller may read (the
 // caller resolves membership; the store never widens it), the query text, an
-// optional created_at_ms cursor (only older hits), and a page size.
+// optional created_at_ms cursor (only older hits), and a page size
+// (PageSize).
 type MessageSearch struct {
 	RoomIDs  []string
 	Text     string
@@ -49,8 +50,9 @@ type ChatIndex interface {
 	// GetRoomMessage returns one live (not soft-deleted) message by its room
 	// sequence; found=false when missing or deleted.
 	GetRoomMessage(ctx context.Context, roomID string, seq int64) (m RoomMessage, found bool, err error)
-	// SearchRoomMessages returns messages in s.RoomIDs whose text contains
-	// s.Text, newest first.
+	// SearchRoomMessages returns live messages in s.RoomIDs whose text
+	// contains s.Text, newest first (created_at, then seq, then room id,
+	// descending); an unsearchable query (Searchable) answers [].
 	SearchRoomMessages(ctx context.Context, s MessageSearch) ([]RoomMessage, error)
 	// LoadSearchSources and ScanSearchSources read rows for an external
 	// search index, by key and as a reindex walk; cross-tenant
@@ -62,7 +64,9 @@ type ChatIndex interface {
 // ArtifactIndex searches room artifacts by title and file name.
 type ArtifactIndex interface {
 	// SearchArtifacts returns artifacts in roomIDs whose title or file name
-	// contains text, most recently updated first.
+	// contains text (taken literally), most recently updated first (then
+	// artifact id, descending), at most clampLimit(limit, DefaultSearchPage,
+	// MaxSearchPage); an empty text or room list answers [].
 	SearchArtifacts(ctx context.Context, roomIDs []string, text string, limit int) ([]Artifact, error)
 }
 
@@ -144,12 +148,13 @@ func fulltextPhrase(text string) string {
 	return `"` + strings.ReplaceAll(text, `"`, " ") + `"`
 }
 
-func searchLimit(n int) int {
-	if n <= 0 || n > 100 {
-		return 20
-	}
-	return n
-}
+// Search page sizes (messages and artifacts).
+const (
+	DefaultSearchPage = 20
+	MaxSearchPage     = 100
+)
+
+func searchLimit(n int) int { return clampLimit(n, DefaultSearchPage, MaxSearchPage) }
 
 // inPlaceholders returns "?,?,…" for n arguments.
 func inPlaceholders(n int) string {
@@ -163,7 +168,7 @@ func (q MessageSearch) Searchable() bool {
 	return len(q.RoomIDs) > 0 && utf8.RuneCountInString(strings.TrimSpace(q.Text)) >= SearchMinRunes
 }
 
-// PageSize is q.Limit bounded to 1..100 (20 when unset or out of range).
+// PageSize is clampLimit(q.Limit, DefaultSearchPage, MaxSearchPage).
 func (q MessageSearch) PageSize() int { return searchLimit(q.Limit) }
 
 // Admits reports whether a stored row passes the scope SearchRoomMessages
@@ -219,12 +224,12 @@ func (s *MemoryChat) SearchRoomMessages(ctx context.Context, q MessageSearch) ([
 		return nil, err
 	}
 	if !q.Searchable() {
-		return nil, nil
+		return []RoomMessage{}, nil
 	}
 	text := strings.TrimSpace(q.Text)
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	var out []RoomMessage
+	out := []RoomMessage{}
 	for _, roomID := range q.RoomIDs {
 		rk := tid + "\x00" + roomID
 		for _, m := range s.msgs[rk] {
@@ -236,11 +241,14 @@ func (s *MemoryChat) SearchRoomMessages(ctx context.Context, q MessageSearch) ([
 			}
 		}
 	}
-	sort.SliceStable(out, func(i, j int) bool {
+	sort.Slice(out, func(i, j int) bool {
 		if out[i].CreatedAtMs != out[j].CreatedAtMs {
 			return out[i].CreatedAtMs > out[j].CreatedAtMs
 		}
-		return out[i].Seq > out[j].Seq
+		if out[i].Seq != out[j].Seq {
+			return out[i].Seq > out[j].Seq
+		}
+		return out[i].RoomID > out[j].RoomID
 	})
 	if limit := q.PageSize(); len(out) > limit {
 		out = out[:limit]
@@ -254,7 +262,7 @@ var _ ChatIndex = (*MySQLChat)(nil)
 
 const roomMessageCols = `room_id, COALESCE(channel_id, ''), seq, kind, COALESCE(author,''), payload_json, created_at_ms, edited_at_ms`
 
-func scanRoomMessage(row interface{ Scan(...any) error }) (RoomMessage, error) {
+func scanRoomMessage(row rowScanner) (RoomMessage, error) {
 	var m RoomMessage
 	var payload []byte
 	var editedAt sql.NullInt64
@@ -277,7 +285,7 @@ func (s *MySQLChat) GetRoomMessage(ctx context.Context, roomID string, seq int64
 	}
 	m, err := scanRoomMessage(s.DB.QueryRowContext(ctx,
 		`SELECT `+roomMessageCols+` FROM room_messages
-		 WHERE tenant_id = ? AND room_id = ? AND seq = ? AND deleted_at_ms IS NULL`, tid, roomID, seq))
+		 WHERE tenant_id = ? AND room_id = ? AND seq = ? AND `+sqlNotDeleted, tid, roomID, seq))
 	if err == sql.ErrNoRows {
 		return RoomMessage{}, false, nil
 	}
@@ -297,36 +305,22 @@ func (s *MySQLChat) SearchRoomMessages(ctx context.Context, q MessageSearch) ([]
 		return nil, err
 	}
 	if !q.Searchable() {
-		return nil, nil
+		return []RoomMessage{}, nil
 	}
 	args := []any{tid}
 	for _, id := range q.RoomIDs {
 		args = append(args, id)
 	}
 	query := `SELECT ` + roomMessageCols + ` FROM room_messages
-	 WHERE tenant_id = ? AND room_id IN (` + inPlaceholders(len(q.RoomIDs)) + `) AND deleted_at_ms IS NULL
+	 WHERE tenant_id = ? AND room_id IN (` + inPlaceholders(len(q.RoomIDs)) + `) AND ` + sqlNotDeleted + `
 	   AND MATCH(search_text) AGAINST (? IN BOOLEAN MODE)`
 	args = append(args, fulltextPhrase(strings.TrimSpace(q.Text)))
 	if q.BeforeMs > 0 {
 		query += ` AND created_at_ms < ?`
 		args = append(args, q.BeforeMs)
 	}
-	query += ` ORDER BY created_at_ms DESC, seq DESC LIMIT ?`
-	args = append(args, q.PageSize())
-	rows, err := s.DB.QueryContext(ctx, query, args...)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var out []RoomMessage
-	for rows.Next() {
-		m, err := scanRoomMessage(rows)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, m)
-	}
-	return out, rows.Err()
+	query += ` ORDER BY created_at_ms DESC, seq DESC, room_id DESC LIMIT ?`
+	return queryAll(ctx, s.DB, query, scanRoomMessage, append(args, q.PageSize())...)
 }
 
 // --- artifacts ---
@@ -343,7 +337,7 @@ func (s *MemoryArtifacts) SearchArtifacts(ctx context.Context, roomIDs []string,
 	}
 	text = strings.TrimSpace(text)
 	if len(roomIDs) == 0 || text == "" {
-		return nil, nil
+		return []Artifact{}, nil
 	}
 	in := make(map[string]bool, len(roomIDs))
 	for _, id := range roomIDs {
@@ -351,13 +345,13 @@ func (s *MemoryArtifacts) SearchArtifacts(ctx context.Context, roomIDs []string,
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	var out []Artifact
+	out := []Artifact{}
 	for _, a := range s.artifacts {
 		if a.TenantID == tid && in[a.RoomID] && (containsFold(a.Title, text) || containsFold(a.FileName, text)) {
 			out = append(out, a)
 		}
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].UpdatedAtMs > out[j].UpdatedAtMs })
+	sortArtifactsNewestFirst(out)
 	if limit = searchLimit(limit); len(out) > limit {
 		out = out[:limit]
 	}
@@ -374,27 +368,14 @@ func (m *MySQLArtifacts) SearchArtifacts(ctx context.Context, roomIDs []string, 
 	}
 	text = strings.TrimSpace(text)
 	if len(roomIDs) == 0 || text == "" {
-		return nil, nil
+		return []Artifact{}, nil
 	}
 	args := []any{tid}
 	for _, id := range roomIDs {
 		args = append(args, id)
 	}
 	args = append(args, likePattern(text), likePattern(text), searchLimit(limit))
-	rows, err := m.DB.QueryContext(ctx, `SELECT `+artifactCols+` FROM artifacts
+	return queryAll(ctx, m.DB, `SELECT `+artifactCols+` FROM artifacts
 	 WHERE tenant_id = ? AND room_id IN (`+inPlaceholders(len(roomIDs))+`) AND (title LIKE ? OR file_name LIKE ?)
-	 ORDER BY updated_at_ms DESC LIMIT ?`, args...)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var out []Artifact
-	for rows.Next() {
-		a, err := scanArtifact(rows)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, a)
-	}
-	return out, rows.Err()
+	 ORDER BY updated_at_ms DESC, artifact_id DESC LIMIT ?`, scanArtifact, args...)
 }

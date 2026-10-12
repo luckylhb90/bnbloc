@@ -21,7 +21,6 @@ import (
 var tenantFilterPending = map[string]bool{
 	"agent_dispatch.go:MySQLBridgeJobs.BridgeOwner":                                  true,
 	"attachment.go:MySQLAttachments.GetAttachment":                                   true,
-	"chat.go:MySQLChat.MaxRoomSeq":                                                   true,
 	"content_prompt_uses.go:MySQLContentComponents.RecordContentPromptUse":           true,
 	"content_usage.go:MySQLContentComponents.CountMemberUses":                        true,
 	"mysql_artifact_shares.go:MySQLArtifacts.ResolveArtifactShare":                   true,

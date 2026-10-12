@@ -117,12 +117,12 @@ func TestContractRoomStoreCreateGetUpdate(t *testing.T) {
 
 func TestContractRoomStoreMembers(t *testing.T) {
 	forEachBackend(t, func(t *testing.T, b *Backends) {
-		tid := uniq("t-mem-")
+		tid, maya := uniq("t-mem-"), uniq("maya-")
 		ctx := tenantCtx(tid)
 		s := b.Room
 		a, z := "a-"+uniq(""), "z-"+uniq("")
-		createRoomAt(t, b, tid, z, "z", "", "maya", 5)
-		createRoomAt(t, b, tid, a, "a", "", "maya", 6)
+		createRoomAt(t, b, tid, z, "z", "", maya, 5)
+		createRoomAt(t, b, tid, a, "a", "", maya, 6)
 
 		// Empty answers are empty lists (they serialize as []).
 		for name, got := range map[string][]string{
@@ -141,13 +141,13 @@ func TestContractRoomStoreMembers(t *testing.T) {
 		}
 
 		// Room lists are ordered by room id; the detailed list newest first.
-		if got := must(s.RoomsForUser(ctx, "maya"))(t); !slices.Equal(got, []string{a, z}) {
+		if got := must(s.RoomsForUser(ctx, maya))(t); !slices.Equal(got, []string{a, z}) {
 			t.Fatalf("RoomsForUser = %v, want [%s %s]", got, a, z)
 		}
-		if got := must(s.RoomsForUserAllTenants(ctx, "maya"))(t); !slices.Equal(got, []string{a, z}) {
+		if got := must(s.RoomsForUserAllTenants(ctx, maya))(t); !slices.Equal(got, []string{a, z}) {
 			t.Fatalf("RoomsForUserAllTenants = %v", got)
 		}
-		if got := must(s.RoomsForUserDetailed(ctx, "maya"))(t); len(got) != 2 || got[0].RoomID != a || !got[0].IsOwner || got[0].Role != RoleOwner {
+		if got := must(s.RoomsForUserDetailed(ctx, maya))(t); len(got) != 2 || got[0].RoomID != a || !got[0].IsOwner || got[0].Role != RoleOwner {
 			t.Fatalf("RoomsForUserDetailed = %+v", got)
 		}
 
@@ -165,7 +165,7 @@ func TestContractRoomStoreMembers(t *testing.T) {
 		for _, m := range must(s.Members(ctx, z))(t) {
 			order = append(order, m.UserID+"/"+string(m.Role)+"/"+strconv.FormatInt(m.JoinedAtMs, 10))
 		}
-		if want := []string{"maya/owner/5", "bea/member/7", "jack/visitor/7"}; !slices.Equal(order, want) {
+		if want := []string{maya + "/owner/5", "bea/member/7", "jack/visitor/7"}; !slices.Equal(order, want) {
 			t.Fatalf("Members = %v, want %v", order, want)
 		}
 		if role, ok := must2(s.MemberRole(ctx, z, "jack"))(t); !ok || role != RoleVisitor {
@@ -191,7 +191,7 @@ func TestContractRoomStoreMembers(t *testing.T) {
 		if err := s.TransferOwner(ctx, z, "stranger"); !errors.Is(err, ErrNewOwnerNotMember) {
 			t.Fatalf("transfer to a non-member = %v, want ErrNewOwnerNotMember", err)
 		}
-		if role, _ := must2(s.MemberRole(ctx, z, "maya"))(t); role != RoleOwner {
+		if role, _ := must2(s.MemberRole(ctx, z, maya))(t); role != RoleOwner {
 			t.Fatalf("owner after a refused transfer = %q", role)
 		}
 		if err := s.TransferOwner(ctx, uniq("nope-"), "jack"); !errors.Is(err, ErrRoomNotFound) {
@@ -203,10 +203,10 @@ func TestContractRoomStoreMembers(t *testing.T) {
 		if role, _ := must2(s.MemberRole(ctx, z, "jack"))(t); role != RoleOwner {
 			t.Fatalf("new owner role = %q", role)
 		}
-		if role, _ := must2(s.MemberRole(ctx, z, "maya"))(t); role != RoleMember {
+		if role, _ := must2(s.MemberRole(ctx, z, maya))(t); role != RoleMember {
 			t.Fatalf("prior owner role = %q, want member", role)
 		}
-		if got := must(s.RoomsForUserDetailed(ctx, "maya"))(t); len(got) != 2 || got[1].RoomID != z || got[1].IsOwner || got[1].Role != RoleMember || got[1].MemberCount != 2 {
+		if got := must(s.RoomsForUserDetailed(ctx, maya))(t); len(got) != 2 || got[1].RoomID != z || got[1].IsOwner || got[1].Role != RoleMember || got[1].MemberCount != 2 {
 			t.Fatalf("detailed row of a joined room = %+v", got)
 		}
 	})

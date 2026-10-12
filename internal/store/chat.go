@@ -11,8 +11,6 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/go-sql-driver/mysql"
-
 	"github.com/luckylhb90/bnbloc/internal/tenant"
 )
 
@@ -80,14 +78,16 @@ type ChatStore interface {
 	// Rows of other rooms, or two rows with one client message id, are a
 	// caller error.
 	AppendRoomMessages(ctx context.Context, rows []RoomMessage) error
-	// RoomHistory returns up to limit messages with seq < before (before<=0 means
-	// "latest"), ascending by seq, within one channel. It is the page older than
-	// a known cursor. channelID "" addresses the room's empty/default channel;
-	// it is not a room-wide wildcard.
+	// RoomHistory returns the newest clampLimit(limit, DefaultRoomHistoryPage,
+	// MaxRoomHistoryPage) live messages with seq < before (before<=0 means
+	// "latest"), ascending by seq, within one channel. It is the page older
+	// than a known cursor. channelID "" addresses the room's empty/default
+	// channel; it is not a room-wide wildcard.
 	RoomHistory(ctx context.Context, roomID, channelID string, before int64, limit int) ([]RoomMessage, error)
-	// RoomFeed returns up to limit messages with seq > after across EVERY
-	// channel of the room, ascending by seq, excluding soft-deleted rows. It is
-	// the forward cursor the handoff export streams the whole feed with.
+	// RoomFeed returns the first clampLimit(limit, DefaultRoomFeedPage,
+	// MaxRoomFeedPage) messages with seq > after across EVERY channel of the
+	// room, ascending by seq, excluding soft-deleted rows. It is the forward
+	// cursor the handoff export streams the whole feed with.
 	RoomFeed(ctx context.Context, roomID string, after int64, limit int) ([]RoomMessage, error)
 	// MarkRead advances a user's last-read sequence (monotonic), tracked per
 	// (room, channel, user). channelID "" addresses the empty/default channel.
@@ -99,16 +99,17 @@ type ChatStore interface {
 	// "" addresses the empty/default channel.
 	UnreadCount(ctx context.Context, roomID, channelID, userID string) (int, error)
 	// MaxRoomSeq returns the highest stored sequence for a room (across every
-	// channel: sequences are one room-scoped counter), or 0 if none. It is
-	// keyed on the room alone (room ids are globally unique), so the hub's
-	// seeding needs no request tenant.
+	// channel: sequences are one room-scoped counter, soft-deleted rows
+	// included), or 0 if none. It is keyed on the room alone (room ids are
+	// globally unique), so the hub's seeding needs no request tenant.
 	MaxRoomSeq(ctx context.Context, roomID string) (int64, error)
 	// LookupClientMsg returns the sequence of a previously-stored message with
 	// this client-generated id in the room, for send idempotency. found=false
 	// when there is none (or clientMsgID is empty).
 	LookupClientMsg(ctx context.Context, roomID, clientMsgID string) (seq int64, found bool, err error)
 	// DeleteRoomMessage soft-deletes a message if requester is its author.
-	// Returns deleted=false when the message is missing or not the requester's.
+	// Returns deleted=false when the message is missing or not the requester's;
+	// a repeated delete by the author is deleted=true.
 	DeleteRoomMessage(ctx context.Context, roomID string, seq int64, requester string, atMs int64) (deleted bool, err error)
 	// EditRoomMessage updates a message's text and stamps edited_at_ms, but only
 	// when requester is its author and it is not soft-deleted. Returns
@@ -117,6 +118,15 @@ type ChatStore interface {
 	// ChatIndex: single-message lookup and cross-room search (search.go).
 	ChatIndex
 }
+
+// Room feed page sizes: one clampLimit call per read, the same on both
+// backends.
+const (
+	DefaultRoomHistoryPage = 50
+	MaxRoomHistoryPage     = 200
+	DefaultRoomFeedPage    = 50
+	MaxRoomFeedPage        = 500
+)
 
 // MemoryChat is an in-memory ChatStore for local dev / tests.
 type MemoryChat struct {
@@ -269,10 +279,7 @@ func (s *MemoryChat) EditRoomMessage(ctx context.Context, roomID string, seq int
 		if m.Seq != seq {
 			continue
 		}
-		if m.Author != requester {
-			return false, nil
-		}
-		if s.deleted[rk+"\x00"+strconv.FormatInt(seq, 10)] {
+		if m.Author != requester || s.isDeleted(rk, seq) {
 			return false, nil
 		}
 		m.Payload = setPayloadText(m.Payload, text)
@@ -306,28 +313,29 @@ func (s *MemoryChat) RoomHistory(ctx context.Context, roomID, channelID string, 
 	if err != nil {
 		return nil, err
 	}
+	limit = clampLimit(limit, DefaultRoomHistoryPage, MaxRoomHistoryPage)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	rk := tid + "\x00" + roomID
-	all := s.msgs[rk]
-	// `limit` so we return the newest page below the cursor, ascending. Deleted
-	// messages are excluded.
-	var matched []RoomMessage
-	for _, m := range all {
-		if m.ChannelID != channelID {
-			continue
-		}
-		if s.deleted[rk+"\x00"+strconv.FormatInt(m.Seq, 10)] {
-			continue
-		}
-		if before <= 0 || m.Seq < before {
+	// The newest page below the cursor, ascending. Deleted messages are
+	// excluded.
+	matched := []RoomMessage{}
+	for _, m := range s.msgs[rk] {
+		if m.ChannelID == channelID && !s.isDeleted(rk, m.Seq) && (before <= 0 || m.Seq < before) {
 			matched = append(matched, m)
 		}
 	}
-	if limit > 0 && len(matched) > limit {
+	sortBySeq(matched)
+	if len(matched) > limit {
 		matched = matched[len(matched)-limit:]
 	}
 	return matched, nil
+}
+
+// sortBySeq orders one room's messages by sequence (the MySQL primary key
+// order).
+func sortBySeq(msgs []RoomMessage) {
+	sort.Slice(msgs, func(i, j int) bool { return msgs[i].Seq < msgs[j].Seq })
 }
 
 // RoomFeed returns the page of messages after the cursor across all channels,
@@ -337,20 +345,17 @@ func (s *MemoryChat) RoomFeed(ctx context.Context, roomID string, after int64, l
 	if err != nil {
 		return nil, err
 	}
-	if limit <= 0 {
-		limit = 50
-	}
+	limit = clampLimit(limit, DefaultRoomFeedPage, MaxRoomFeedPage)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	rk := tid + "\x00" + roomID
-	var matched []RoomMessage
+	matched := []RoomMessage{}
 	for _, m := range s.msgs[rk] {
-		if m.Seq <= after || s.deleted[rk+"\x00"+strconv.FormatInt(m.Seq, 10)] {
-			continue
+		if m.Seq > after && !s.isDeleted(rk, m.Seq) {
+			matched = append(matched, m)
 		}
-		matched = append(matched, m)
 	}
-	sort.Slice(matched, func(i, j int) bool { return matched[i].Seq < matched[j].Seq })
+	sortBySeq(matched)
 	if len(matched) > limit {
 		matched = matched[:limit]
 	}
@@ -390,10 +395,7 @@ func (s *MemoryChat) UnreadCount(ctx context.Context, roomID, channelID, userID 
 	lastRead := s.read[rk+"\x00"+channelID+"\x00"+userID]
 	n := 0
 	for _, m := range s.msgs[rk] {
-		if m.ChannelID != channelID {
-			continue
-		}
-		if s.deleted[rk+"\x00"+strconv.FormatInt(m.Seq, 10)] {
+		if m.ChannelID != channelID || s.isDeleted(rk, m.Seq) {
 			continue
 		}
 		if m.Seq > lastRead {
@@ -407,6 +409,7 @@ func (s *MemoryChat) UnreadCount(ctx context.Context, roomID, channelID, userID 
 }
 
 // MaxRoomSeq returns the highest stored sequence for a room, or 0 if none.
+// Like MySQL it is keyed on the room alone (room ids are global).
 func (s *MemoryChat) MaxRoomSeq(_ context.Context, roomID string) (int64, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -469,8 +472,7 @@ func (s *MySQLChat) AppendRoomMessages(ctx context.Context, rows []RoomMessage) 
 			payload, nullStr(MessageText(m.Kind, payload)), m.CreatedAtMs)
 	}
 	_, err := s.DB.ExecContext(ctx, q.String(), args...)
-	var me *mysql.MySQLError
-	if errors.As(err, &me) && me.Number == 1062 {
+	if isDupEntry(err) {
 		conflict, cerr := s.clientMsgConflicts(ctx, rows)
 		if cerr != nil {
 			return fmt.Errorf("classify duplicate: %w (insert: %v)", cerr, err)
@@ -549,34 +551,16 @@ func (s *MySQLChat) RoomHistory(ctx context.Context, roomID, channelID string, b
 	if err != nil {
 		return nil, err
 	}
-	if limit <= 0 {
-		limit = 50
-	}
-	var rows *sql.Rows
+	q := `SELECT ` + roomMessageCols + ` FROM room_messages
+	 WHERE tenant_id = ? AND room_id = ? AND channel_id = ? AND ` + sqlNotDeleted
+	args := []any{tid, roomID, channelID}
 	if before > 0 {
-		rows, err = s.DB.QueryContext(ctx,
-			`SELECT `+roomMessageCols+`
-			 FROM room_messages WHERE tenant_id = ? AND room_id = ? AND channel_id = ? AND seq < ? AND deleted_at_ms IS NULL
-			 ORDER BY seq DESC LIMIT ?`, tid, roomID, channelID, before, limit)
-	} else {
-		rows, err = s.DB.QueryContext(ctx,
-			`SELECT `+roomMessageCols+`
-			 FROM room_messages WHERE tenant_id = ? AND room_id = ? AND channel_id = ? AND deleted_at_ms IS NULL
-			 ORDER BY seq DESC LIMIT ?`, tid, roomID, channelID, limit)
+		q += ` AND seq < ?`
+		args = append(args, before)
 	}
+	desc, err := queryAll(ctx, s.DB, q+` ORDER BY seq DESC LIMIT ?`, scanRoomMessage,
+		append(args, clampLimit(limit, DefaultRoomHistoryPage, MaxRoomHistoryPage))...)
 	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var desc []RoomMessage
-	for rows.Next() {
-		m, err := scanRoomMessage(rows)
-		if err != nil {
-			return nil, err
-		}
-		desc = append(desc, m)
-	}
-	if err := rows.Err(); err != nil {
 		return nil, err
 	}
 	// Reverse to ascending by seq.
@@ -593,26 +577,10 @@ func (s *MySQLChat) RoomFeed(ctx context.Context, roomID string, after int64, li
 	if err != nil {
 		return nil, err
 	}
-	if limit <= 0 {
-		limit = 50
-	}
-	rows, err := s.DB.QueryContext(ctx,
+	return queryAll(ctx, s.DB,
 		`SELECT `+roomMessageCols+`
-		 FROM room_messages WHERE tenant_id = ? AND room_id = ? AND seq > ? AND deleted_at_ms IS NULL
-		 ORDER BY seq ASC LIMIT ?`, tid, roomID, after, limit)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var out []RoomMessage
-	for rows.Next() {
-		m, err := scanRoomMessage(rows)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, m)
-	}
-	return out, rows.Err()
+		 FROM room_messages WHERE tenant_id = ? AND room_id = ? AND seq > ? AND `+sqlNotDeleted+`
+		 ORDER BY seq ASC LIMIT ?`, scanRoomMessage, tid, roomID, after, clampLimit(limit, DefaultRoomFeedPage, MaxRoomFeedPage))
 }
 
 // MarkRead advances the user's last-read sequence in a channel (monotonic via
@@ -651,7 +619,7 @@ func (s *MySQLChat) UnreadCount(ctx context.Context, roomID, channelID, userID s
 	var n int
 	if err := s.DB.QueryRowContext(ctx,
 		`SELECT COUNT(*) FROM (SELECT 1 FROM room_messages
-		 WHERE tenant_id = ? AND room_id = ? AND channel_id = ? AND seq > ? AND deleted_at_ms IS NULL
+		 WHERE tenant_id = ? AND room_id = ? AND channel_id = ? AND seq > ? AND `+sqlNotDeleted+`
 		 LIMIT ?) unread`,
 		tid, roomID, channelID, lastRead, MaxUnreadCount).Scan(&n); err != nil {
 		return 0, err
@@ -662,6 +630,8 @@ func (s *MySQLChat) UnreadCount(ctx context.Context, roomID, channelID, userID s
 // MaxRoomSeq returns the highest stored sequence for a room, or 0 if none
 // (on the primary key's room_id prefix).
 func (s *MySQLChat) MaxRoomSeq(ctx context.Context, roomID string) (int64, error) {
+	// cross-tenant: room ids are global and the hub seeds a room's sequence
+	// before any request tenant exists.
 	var mx sql.NullInt64
 	if err := s.DB.QueryRowContext(ctx, `SELECT MAX(seq) FROM room_messages WHERE room_id = ?`, roomID).Scan(&mx); err != nil {
 		return 0, err
@@ -684,7 +654,7 @@ func (s *MySQLChat) DeleteRoomMessage(ctx context.Context, roomID string, seq in
 	}
 	res, err := s.DB.ExecContext(ctx,
 		`UPDATE room_messages SET deleted_at_ms = ?
-		 WHERE tenant_id = ? AND room_id = ? AND seq = ? AND author = ? AND deleted_at_ms IS NULL`,
+		 WHERE tenant_id = ? AND room_id = ? AND seq = ? AND author = ? AND `+sqlNotDeleted,
 		atMs, tid, roomID, seq, requester)
 	if err != nil {
 		return false, err
@@ -722,7 +692,7 @@ func (s *MySQLChat) EditRoomMessage(ctx context.Context, roomID string, seq int6
 	res, err := s.DB.ExecContext(ctx,
 		`UPDATE room_messages
 		 SET payload_json = JSON_SET(payload_json, '$.text', ?), search_text = ?, edited_at_ms = ?
-		 WHERE tenant_id = ? AND room_id = ? AND seq = ? AND author = ? AND deleted_at_ms IS NULL`,
+		 WHERE tenant_id = ? AND room_id = ? AND seq = ? AND author = ? AND `+sqlNotDeleted,
 		text, text, atMs, tid, roomID, seq, requester)
 	if err != nil {
 		return false, err
