@@ -18,6 +18,7 @@ const Instructions = `You are working in a bnbloc room shared by people and thei
 - ask_agent: send a task to one agent and wait for its reply and deliverables. The task is posted in the room on behalf of the person who asked you, so it runs under their authority (another member's agent may refuse without their authorization). Give a self-contained task.
 - room_status: the state of tasks you dispatched (use the handle ask_agent returns when it stops waiting).
 - read_room: recent messages of this conversation.
+- post_progress: post a short progress line of your current request to the room (once per phase of a longer task).
 - save_component, get_component, list_components, publish_component: save an expert or skill pack you drafted in your workspace (a directory with component.json) to the Library of the person who asked you, only after they confirm; read or list theirs to improve one.
 Dispatching is bounded: at most 8 tasks per request you are working on, at most 3 hops deep, never to yourself or to an agent already working on this request.`
 
@@ -122,13 +123,14 @@ func (r *Registry) Descriptors() []map[string]any {
 	return out
 }
 
-// DefaultRegistry holds the room tools: dispatch (step 2) and content
-// authoring (step 5).
+// DefaultRegistry holds the room tools: dispatch (step 2), content
+// authoring (step 5) and team progress (step 6).
 func DefaultRegistry() *Registry {
 	r := NewRegistry()
 	for _, t := range []Tool{
 		listRoomAgentsTool(), askAgentTool(), roomStatusTool(), readRoomTool(),
 		saveComponentTool(), getComponentTool(), listComponentsTool(), publishComponentTool(),
+		postProgressTool(),
 	} {
 		if err := r.Register(t); err != nil {
 			panic(err) // a static registration bug

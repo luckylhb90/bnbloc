@@ -746,6 +746,9 @@ func (b *Bridge) runBridgeJob(ctx context.Context, job bridgeJob) {
 	if content.expert != nil {
 		running["expert"] = expertLabel(content.expert)
 	}
+	if content.roomExpert != nil {
+		running["roomExpert"] = expertLabel(content.roomExpert)
+	}
 	if len(content.missing) > 0 {
 		running["contentMissing"] = content.missing
 	}
@@ -1557,7 +1560,7 @@ func (b *Bridge) driveClaim(ctx context.Context, job jobRef, room, owner, core, 
 	// send follow-up input for an existing session.
 	if !rs.freshlyCreated {
 		entry, _ := b.coreEntry(core)
-		rs.roomSession.startTurn(TurnInfo{JobID: job.ID, RequesterUserID: job.RequesterUserID, ChannelID: channelID, MessageSeq: job.MessageSeq, Workspace: sessionWorkspace{b, rs.roomSession}})
+		rs.roomSession.startTurn(TurnInfo{JobID: job.ID, RequesterUserID: job.RequesterUserID, ChannelID: channelID, MessageSeq: job.MessageSeq, Workspace: sessionWorkspace{b, rs.roomSession}, Team: job.content.teamRoster()})
 		prompt := b.drivePrompt(ctx, room, owner, core, provider, rs.workspaceID, rs.sessionID, text, rs.written, &rs.roomSession.ctx, false)
 		if err := b.sendInput(ctx, entry, rs.workspaceID, rs.sessionID, prompt, opts); err != nil {
 			b.postDriveFailed(ctx, jobID, room, owner, provider, cleanDriveError(err), channelID)
@@ -1686,7 +1689,7 @@ func (b *Bridge) ensureSession(ctx context.Context, job jobRef, room, owner, cor
 		initialPrompt = job.content.promptPrefix(written) + initialPrompt
 	}
 	rs := &roomSession{owner: owner, provider: provider, core: core, workspaceID: workspaceID, ctx: st, hooks: hooks, profileSum: contentSum}
-	rs.startTurn(TurnInfo{JobID: job.ID, RequesterUserID: job.RequesterUserID, ChannelID: channelID, MessageSeq: job.MessageSeq, Workspace: sessionWorkspace{b, rs}})
+	rs.startTurn(TurnInfo{JobID: job.ID, RequesterUserID: job.RequesterUserID, ChannelID: channelID, MessageSeq: job.MessageSeq, Workspace: sessionWorkspace{b, rs}, Team: job.content.teamRoster()})
 	sessionID, err := b.createSession(ctx, entry, workspaceID, target, initialPrompt, opts, profile)
 	if err != nil {
 		rs.release()

@@ -90,6 +90,8 @@ type Job struct {
 	// Workspace reads the session's workspace files (save_component); nil
 	// when the core offers no session files.
 	Workspace Workspace
+	// Team is the roster when the turn wears a team expert (team.go).
+	Team *Team
 }
 
 // maxTrackedDispatches bounds the dispatches a session remembers for
@@ -105,6 +107,8 @@ type Session struct {
 	job        Job
 	dispatched []dispatched
 	gone       bool
+	// notes holds the bound job's team guard and progress state.
+	notes jobNotes
 }
 
 // dispatched is one dispatch this session made.

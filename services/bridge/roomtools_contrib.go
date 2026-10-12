@@ -84,7 +84,7 @@ func (c *roomToolsContributor) ContributeSession(_ context.Context, info Session
 		MCPServers:   []corepkg.MCPServer{server},
 		Instructions: roomtools.Instructions,
 		Turn: func(t TurnInfo) {
-			sess.Bind(roomtools.Job{JobID: t.JobID, RequesterUserID: t.RequesterUserID, ChannelID: t.ChannelID, MessageSeq: t.MessageSeq, Workspace: t.Workspace})
+			sess.Bind(roomtools.Job{JobID: t.JobID, RequesterUserID: t.RequesterUserID, ChannelID: t.ChannelID, MessageSeq: t.MessageSeq, Workspace: t.Workspace, Team: t.Team})
 		},
 		Release: func() { c.srv.Revoke(sess) },
 	}, nil

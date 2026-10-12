@@ -18,6 +18,7 @@ import (
 	"github.com/luckylhb90/bnbloc/internal/store"
 	"github.com/luckylhb90/bnbloc/internal/tarbundle"
 	"github.com/luckylhb90/bnbloc/internal/wire"
+	"github.com/luckylhb90/bnbloc/services/bridge/roomtools"
 )
 
 // Content in effect for a turn (docs/prd/2026-10-12-experts-and-teams.md):
@@ -49,7 +50,11 @@ const (
 // jobContent is what one job's turn wears.
 type jobContent struct {
 	expert *wire.ContentRef
-	packs  []wire.ContentRef
+	// roomExpert is the room's expert, worn under the chat's own.
+	roomExpert *wire.ContentRef
+	// team is the roster when the expert is a team (team.go).
+	team  *roomtools.Team
+	packs []wire.ContentRef
 	// missing are requirements no usable package satisfies.
 	missing      []string
 	instructions string
@@ -176,11 +181,15 @@ func (b *Bridge) resolveJobContent(ctx context.Context, job bridgeJob, owner str
 	if job.ExpertID != "" && eff.Expert == nil {
 		return nil, &contentUnavailableError{expert: firstNonEmpty(job.ExpertName, job.ExpertID)}
 	}
-	c := &jobContent{expert: eff.Expert, packs: eff.SkillPacks, missing: eff.Missing}
+	c := &jobContent{expert: eff.Expert, roomExpert: eff.RoomExpert, packs: eff.SkillPacks, missing: eff.Missing}
 	refs := eff.SkillPacks
 	if eff.Expert != nil {
 		refs = append([]wire.ContentRef{*eff.Expert}, refs...)
 	}
+	if eff.RoomExpert != nil {
+		refs = append([]wire.ContentRef{*eff.RoomExpert}, refs...)
+	}
+	roomInstructions := ""
 	seen := map[string]bool{}
 	for _, ref := range refs {
 		pkg, err := b.contentPackage(ctx, job, ref)
@@ -190,8 +199,11 @@ func (b *Bridge) resolveJobContent(ctx context.Context, job bridgeJob, owner str
 		if ref.NeedsSandbox && !sameUserID(ref.Owner, owner) {
 			c.foreign = append(c.foreign, firstNonEmpty(ref.DisplayName, ref.Name))
 		}
-		if ref.Source == wire.ContentSourceExpert {
+		switch ref.Source {
+		case wire.ContentSourceExpert:
 			c.instructions = pkg.Instructions
+		case wire.ContentSourceRoomExpert:
+			roomInstructions = pkg.Instructions
 		}
 		profileSkills := pkg.ProfileSkills()
 		for i, s := range pkg.Skills {
@@ -207,6 +219,19 @@ func (b *Bridge) resolveJobContent(ctx context.Context, job bridgeJob, owner str
 				_, body = contentpkg.ParseFrontmatter(string(raw))
 			}
 			c.summaries = append(c.summaries, skillSummary{name: s.Name, description: s.Description, body: body})
+		}
+	}
+	// The room's expert comes first: the chat's own expert is worn on top.
+	if r := strings.TrimSpace(roomInstructions); r != "" {
+		if strings.TrimSpace(c.instructions) != "" {
+			c.instructions = r + "\n\n" + c.instructions
+		} else {
+			c.instructions = r
+		}
+	}
+	if eff.Team != nil {
+		if err := b.teamContent(ctx, job, c, eff.Team); err != nil {
+			return nil, err
 		}
 	}
 	if !c.empty() {
@@ -313,6 +338,9 @@ func bnblocOwnedPath(rel string) bool {
 func (b *Bridge) jobContentOrRefuse(ctx context.Context, job bridgeJob, owner, coreName string) (*jobContent, bool) {
 	content, err := b.resolveJobContent(ctx, job, owner)
 	if err == nil {
+		if b.refuseTeamWithoutTools(ctx, job, owner, coreName, content) {
+			return nil, false
+		}
 		return content, true
 	}
 	if job.ExpertID == "" {

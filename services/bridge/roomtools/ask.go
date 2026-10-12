@@ -59,7 +59,7 @@ func askAgentTool() Tool {
 			"(visible to everyone, attributed to you) and runs under that person's authority. Returns the agent's reply and the files it delivered. " +
 			"If the agent is still working when the wait ends, returns its handle: check it later with room_status.",
 		InputSchema: objectSchema(map[string]any{
-			"handle":       map[string]any{"type": "string", "description": `The agent's handle from list_room_agents, e.g. "jack/codex".`},
+			"handle":       map[string]any{"type": "string", "description": `The agent's handle from list_room_agents, e.g. "jack/codex"; when you lead a team, a role of your roster (e.g. "reviewer").`},
 			"task":         map[string]any{"type": "string", "description": "A self-contained task: the agent sees the room's conversation, not your private context."},
 			"expert":       map[string]any{"type": "string", "description": `Optional expert (role) for the agent to wear: its component id, optionally "@version" (it must be usable by the person who asked you).`},
 			"wait_seconds": map[string]any{"type": "integer", "minimum": 0, "description": "How long to wait for the result (default 600, at most 1200). 0 returns at once with the handle."},
@@ -90,16 +90,33 @@ func askAgent(ctx context.Context, env *Env, args json.RawMessage) Result {
 	if job.JobID == "" {
 		return toolError("ask_agent works only while you are answering a request in the room")
 	}
-	agents, err := roomAgents(ctx, env)
-	if err != nil {
-		return refusal("listing the room's agents", err)
+	if stop := teamStopped(env, job); stop != nil {
+		return *stop
 	}
-	target, ok := resolveHandle(agents, in.Handle)
-	if !ok {
-		return toolError("no agent %q in this room right now; available: %s", in.Handle, handles(agents))
+	// A team lead names a role: its agent, wearing its expert.
+	role, refused := teamTarget(job.Team, in.Handle, in.Expert)
+	if refused != nil {
+		return *refused
 	}
-	if target.You {
-		return toolError("%s is you; ask another agent", target.Handle)
+	var target roomAgent
+	label := ""
+	if role.Agent != nil {
+		target = roomAgent{Handle: role.Agent.Handle, Owner: role.Agent.OwnerID, Core: role.Agent.Core, Provider: role.Agent.Provider}
+		in.Expert = role.Expert.ComponentID + "@" + role.Expert.Version
+		label = role.Role + " (" + target.Handle + ")"
+	} else {
+		agents, err := roomAgents(ctx, env)
+		if err != nil {
+			return refusal("listing the room's agents", err)
+		}
+		var ok bool
+		if target, ok = resolveHandle(agents, in.Handle); !ok {
+			return toolError("no agent %q in this room right now; available: %s", in.Handle, handles(agents))
+		}
+		if target.You {
+			return toolError("%s is you; ask another agent", target.Handle)
+		}
+		label = target.Handle
 	}
 	scope := env.Session.Scope()
 	raw, err := env.Gateway.Do(ctx, http.MethodPost, "/v1/rooms/"+url.PathEscape(scope.RoomID)+"/dispatch", wire.DispatchRequest{
@@ -108,9 +125,11 @@ func askAgent(ctx context.Context, env *Env, args json.RawMessage) Result {
 		Text:        in.Task,
 		Expert:      expertRef(in.Expert),
 		ClientMsgID: newClientMsgID(),
+		Role:        role.Role,
 	})
 	if err != nil {
-		return refusal("dispatch to "+target.Handle, err)
+		noteRefusal(env, job)
+		return refusal("dispatch to "+label, err)
 	}
 	var reply wire.DispatchReply
 	if err := json.Unmarshal(raw, &reply); err != nil || reply.JobID == "" {
@@ -132,7 +151,14 @@ func askAgent(ctx context.Context, env *Env, args json.RawMessage) Result {
 			"note": "dispatched; reading its state failed (" + err.Error() + "); check it with room_status",
 		}}
 	}
-	return Result{Value: toMap(describe(ctx, env, run, target.Handle))}
+	out := toMap(describe(ctx, env, run, target.Handle))
+	if role.Role != "" {
+		out["role"] = role.Role
+	}
+	if note := noteOutcome(ctx, env, job, label, run, wait); note != "" {
+		out["team"] = note
+	}
+	return Result{Value: out}
 }
 
 // expertRef parses "id" or "id@version" (nil for none).

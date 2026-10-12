@@ -8,6 +8,7 @@ import (
 	"sync"
 
 	corepkg "github.com/luckylhb90/bnbloc/core"
+	"github.com/luckylhb90/bnbloc/services/bridge/roomtools"
 )
 
 // Agent profiles (docs/prd/2026-10-12-experts-and-teams.md): the role an
@@ -56,6 +57,8 @@ type TurnInfo struct {
 	// Workspace reads the session's workspace through the core's
 	// session-files seam; it reports an error when the core offers none.
 	Workspace SessionWorkspace
+	// Team is the roster when the turn wears a team expert (team.go).
+	Team *roomtools.Team
 }
 
 // SessionWorkspace reads one driven session's workspace files.
