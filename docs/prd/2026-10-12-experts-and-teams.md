@@ -457,7 +457,9 @@ on the next turn, in a new session (content changed).
 (only pinned experts are offered in the composer); usage counts beyond
 `uses` (runs/members per component); editing requirements, tags and icons in
 the Library form (they carry over unchanged); the live job-status line does
-not show `contentMissing` yet; org/platform scopes (step 4).
+not show `contentMissing` yet; org/platform scopes (step 4). All but the
+scopes were closed in step 6 (see "Status: step 6 (expert teams) and the
+step-1 gaps").
 
 ## Status: step 2 (room tools)
 
@@ -660,9 +662,46 @@ agent. Decisions:
 
 ## Status: step 6 (expert teams) and the step-1 gaps
 
-**2026-10-12: in development.** Scope of this pass: expert teams (section
+**2026-10-12: implemented.** Scope of this pass: expert teams (section
 8) on the room tools, the expert a dispatch asks for, and the gaps step 1
 left open. MCP tool components (the other half of step 6) are not in it.
+Architecture: `docs/architecture/content-components.md` ("Expert teams",
+"Room expert", "Usage counts") and `docs/architecture/room-tools.md`
+("Teams"). Commits: 94ea5f1 (this record), 1e00033 (the team block),
+83e1008 (usage counts, the room-expert use), 747492e (team and room
+expert resolution, `internal/expertteam`), 6f4e82c (activity's team
+plan), 42a1943 (the role on a dispatch), f2ddcbd (gateway: usage, rosters,
+room expert, `content_uses_changed`), 9cbdd5a (bridge: lead a team, wear
+the room expert, the tool-layer guards, `post_progress`), c510481 (the
+estimate counts each agent's runs once); web: a831453 (Library), 2439018
+(composer badge and estimate), 0c4dde9 (feed role labels and notices).
+The web half of the room expert, the live refresh and the job line
+(`contentUsesEvents`, room settings, `AgentJobStatus`) landed inside
+7a712e1: a concurrent commit in the shared working tree picked up those
+staged files under its own message; the content is as intended.
+
+**Verified end to end** (local services on MySQL 8.4, one bridge driving
+bnbloc-acp → OpenCode 1.18.35 with `opencode/big-pickle`, two agent
+entries `opencode` and `opencode-b` for one member, since one real agent
+was available): a "Haiku team" (SOP: phase 1 writer, phase 2 critic, then
+merge) with roles `writer` (requester's own agent) and `critic`
+(`member:maya/opencode-b`), each wearing its own expert. The team plan
+staffed both roles on `maya/opencode-b` (the lead's own agent excluded).
+Asked "autumn rain on a tin roof", the lead posted "Phase 1/2: haiku
+dispatch to writer" as a notice, dispatched to `writer` (feed marker
+`role: writer`, expert Haiku writer, depth 1; the reply ended with the
+writer expert's `WRITER-MARK`), posted "Phase 2/2", dispatched the exact
+haiku to `critic` (its reply ended with `CRITIC-MARK`, a new session since
+the content changed), and answered with the haiku, "Critic's score: 9/10"
+and `TEAM-DONE`, in about 90 seconds. Run records show each expert and the
+dispatch origin; `extension_audit` has a `content`/`use` row per job and an
+`agent_dispatch` row per role dispatch. Afterwards the plan estimated $0
+per request (the free model reports a zero cost), first counting the
+shared agent's runs twice; c510481 fixed that. A room expert ("end every reply with
+HOUSE-MARK") picked in room settings was worn by a plain chat without an
+expert, and the SSE stream delivered `content_uses_changed` for the pin and
+the room expert.
+
 Decisions:
 
 - **A dispatch's expert is already worn** (afa20f8): `ask_agent`'s
@@ -744,6 +783,14 @@ Decisions:
 - **Left to others:** the desktop, and confining a borrowed drive on Linux
   without a sandbox (bubblewrap): someone else's script-bearing content is
   refused there until it exists.
+- **Not done in this pass:** the feed labels a team's dispatches with their
+  role but does not nest them under the lead's turn; the room expert is
+  resolved at turn time (like room skill packs), so the job and run record
+  name only the chat's expert (the running job line shows both); a team's
+  member experts resolve among the requester's tenant components and the
+  room's pins, so a built-in expert is not yet a team member; a composer
+  plan for a platform lead names the agent, not the host routing picks at
+  send.
 
 ## Status: step 6 (MCP tool components)
 

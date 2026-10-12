@@ -27,7 +27,8 @@ uploads, imports, the bridge's materialization):
   `description`, `category`, `tags`, `icon`, `requires` (`skills` /
   `prompts` as `name@range`, `mcp` by tool name with env names,
   `permissions`), plus the kind's fields (`quickPrompts`, `welcome`;
-  `skills`; `prompts`). A `team` block is refused until expert teams exist;
+  `skills`; `prompts`). An expert may carry a `team` block (see "Expert
+  teams"); every other kind refuses one;
 - declared permissions: `scripts`, `mcp.stdio`, `mcp.http:<host>`. A
   package that ships scripts (a `scripts/` or `bin/` dir, or a script
   extension) must declare `scripts`. stdio MCP servers come only from MCP
@@ -148,8 +149,15 @@ Tables (migration `2026_10_content_components`):
   still the one it was based on, and must be semver-newer.
 - `content_component_uses`: where a component is enabled or pinned —
   `member` (a skill pack for all of a member's agents, a prompt pack in
-  their composer) or `room` (room skill packs and prompt packs, pinned
-  experts) — at a pinned version or following the latest (`''`).
+  their composer), `room` (room skill packs and prompt packs, pinned
+  experts) or `room-expert` (the room's expert, one of its pinned experts;
+  scope id = the room, at most one) — at a pinned version or following the
+  latest (`''`). A `room-expert` row is not counted as a second use.
+- Usage counts read `agent_jobs` on `idx_agent_jobs_expert (tenant_id,
+  expert_id, requester_user_id)` (migration
+  `2026_10_agent_jobs_expert_usage`): an expert's runs and distinct
+  requesters; a pack's members are its `member` uses. Each count stops at
+  `store.MaxUsageCount` (a card's count is a badge, bounded like unread).
 - `content_permission_acks`: a member confirmed a version's declared
   permissions (first use).
 - `content_prompt_uses`: per-prompt insertion counts of prompt packs
@@ -210,6 +218,71 @@ and `contentuse.Effective` (a job's turn) both decide through it.
    files; MCP servers and env excluded) is part of the session binding: a
    turn wearing different content starts a new session; a reused sandbox
    workdir has its agent-config paths cleared first.
+6. **Room expert.** A room's expert (a `room-expert` use) is resolved at
+   turn time like room skill packs: `Effective` returns it as `roomExpert`
+   (with the skill packs it requires, its bundle granted) unless the chat
+   picked it, and reports it missing once the room no longer pins it. The
+   bridge puts its instructions first and the chat expert's after; the
+   running job's diagnostics name both (`roomExpert`, `expert`). It is not
+   pinned on the job.
+7. **What is missing** (an unmet requirement, a room expert gone) is in the
+   running job's `contentMissing`; the live job line shows it ("Running
+   without …").
+
+## Expert teams
+
+A team is an expert with a `team` block (`internal/contentpkg/team.go`):
+
+```json
+"team": {
+  "lead": "coordinator",
+  "members": [
+    {"role": "writer", "expert": "haiku-writer@^1", "defaultAgent": "requester", "description": "Writes haiku."},
+    {"role": "critic", "expert": "haiku-critic@^1", "defaultAgent": "member:maya/opencode-b"}
+  ]
+}
+```
+
+- `lead` is the lead's title (display; default `lead`). The lead is the
+  agent the requester addresses with the team picked; the team expert's
+  `INSTRUCTIONS.md` is its SOP.
+- 1 to 8 roles (`wire.MaxDispatchFanOut`): `role` (`[a-z0-9-]`, unique,
+  not the lead's), `expert` (`name@range`), `defaultAgent` (`requester` —
+  the requester's own agent, `platform` — a platform agent added to the
+  room, `member:<id>[/<provider>]`), optional `description` (what the role
+  covers).
+- **Experts resolve as the requester** (`contentuse.ResolveTeam`, in
+  `Effective`'s `team`): the highest version satisfying the range among the
+  experts they may use and the room's pinned ones. A member expert that is
+  itself a team is refused (`missing`). Member experts are not granted to
+  the lead's bridge; each member's bridge resolves its own job's expert.
+- **Agents are staffed** by `internal/expertteam.Resolve` from the room's
+  addressable agents (activity's rule for the agent catalogs: members' live
+  agents plus the room's available platform agents), never on the lead's
+  own agent; several candidates pick the first by owner, core, provider.
+  Activity serves it as `POST /v1/rooms/{room}/team-plan` (below).
+- **Pre-flight estimate** (`expertteam.Estimate`): the lead plus every
+  staffed role once, each at its agent's average reported `costUsd` over
+  its last 20 replied runs in the organization; seats without a reported
+  cost are named (`unknown`), never guessed; `runs` counts each agent's
+  sample once. The composer shows it when a team is picked and holds the
+  send until the member confirms.
+- **Run time** (bridge): the lead's bridge asks for the plan with
+  `?job=`, appends the generated roster section (`expertteam.Section`:
+  role → expert → agent handle, online or why not; the capability, progress
+  and failure rules) after the SOP, and binds the roster to the turn's
+  room tools session (`TurnInfo.Team`). The roster is part of the content
+  checksum. A team on a core without `agentProfile` is refused with a
+  notice (no room tools, no dispatch). The guards live in the room tools
+  ([`room-tools.md`](room-tools.md), "Teams").
+
+`POST /v1/rooms/{room}/team-plan` (activity) takes `{lead?: {ownerId,
+core?, provider}, members: [{role, defaultAgent}]}` and answers
+`wire.TeamPlanReply {lead, roles: [{role, defaultAgent, agent?, online,
+reason?, cost?}], estimate: {costUsd?, runs, unknown?}}`. Without `?job=`
+the caller is the requester and `lead` is required (a room member); with
+`?job=` the job must be in the room, live and leased by a bridge of the
+caller (`store.JobLeasedBy`), and the lead and requester are the job's.
 
 ## Safety
 
@@ -232,7 +305,7 @@ store and the artifact entitlement). JSON shapes: `internal/wire/content_compone
 
 | Route | What |
 |---|---|
-| `GET /v1/content-components?kind=expert\|skill\|prompt` | The caller's Library: their own components plus org/platform ones visible to them, at the latest version |
+| `GET /v1/content-components?kind=expert\|skill\|prompt` | The caller's Library: their own components plus org/platform ones visible to them, at the latest version, with usage counts (`runs`, `members`) and a team's roster (`team`) |
 | `POST /v1/content-components` | Save a new component: `{form, version?}` (JSON) or a package archive (`component.json` names it). 201 detail; 409 duplicate name; 400 validator message. With `?job=&room=`: a save by the bridge running the job, as its requester (below) |
 | `POST /v1/content-components/import?kind=&name=` | Import an archive (tar, tar.gz, zip) or a single markdown/json file of prompts as a new component; `?id=` imports a new version of the caller's component |
 | `POST /v1/content-components/prompts` | "Save as prompt": `{title?, body, tags?}` into the caller's personal prompt pack (created on the first save); 201 `{component, promptId, created}` |
@@ -242,11 +315,16 @@ store and the artifact entitlement). JSON shapes: `internal/wire/content_compone
 | `POST /v1/content-components/{id}/versions` | New immutable version: `{form, baseVersion, version?}` (the base's extra files carry over) or an archive; owner only; strictly newer |
 | `GET /v1/content-components/{id}/versions/{v}[?room=]` | The version: component as of it, instructions, skill bodies, files (text when viewable) |
 | `POST /v1/content-components/{id}/versions/{v}/ack[?room=]` | Confirm the version's declared permissions |
-| `GET /v1/content-uses[?room=]` | The caller's member uses and a room's uses, each with its component at the version in effect and `updateAvailable` |
-| `PUT /v1/content-uses` | `{scope: member\|room, roomId?, componentId, version?}`: member scope takes the kinds with `MemberUse` (skill and prompt packs); room scope needs the room's owner or an admin |
-| `DELETE /v1/content-uses?scope=&roomId=&componentId=` | Remove a use |
+| `GET /v1/content-uses[?room=]` | The caller's member uses and a room's uses, each with its component at the version in effect and `updateAvailable`; `roomExpert` names the room's expert |
+| `PUT /v1/content-uses` | `{scope: member\|room\|room-expert, roomId?, componentId, version?}`: member scope takes the kinds with `MemberUse` (skill and prompt packs); room scopes need the room's owner or an admin; `room-expert` takes one of the room's pinned experts (never a team) and replaces the previous one |
+| `DELETE /v1/content-uses?scope=&roomId=&componentId=` | Remove a use (unpinning the room expert clears it) |
 | `GET /v1/content-components/effective?job=&room=` | The bridge running a job: what its turn wears |
 | `GET /v1/artifacts/{key}[?room=\|?job=&room=]` | Bundle download (`artifactEntitled`) |
+
+Every change of a room's uses (a pin, the room expert, a room pack)
+publishes a transient `content_uses_changed` room event (`{scope,
+componentId}`) through realtime's internal publish; the composer's experts
+and the room settings refetch the room's uses on it.
 
 **Requests on behalf of a job's requester.** The room tools
 (`save_component`, `get_component`, `list_components`; see

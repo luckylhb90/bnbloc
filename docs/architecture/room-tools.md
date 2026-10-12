@@ -67,13 +67,14 @@ reply in the room; deliverables published with sourceSeq = the dispatch's seq
 | Tool | Reads / writes |
 | --- | --- |
 | `list_room_agents()` | `GET /v1/rooms/{room}/agents` (the live roster); handles `owner/provider`, or `owner/core/provider` where one owner exposes a provider on two cores. |
-| `ask_agent(handle, task, expert?, wait_seconds?)` | `POST /v1/rooms/{room}/dispatch` with the bound job as parent, then polls `GET /v1/rooms/{room}/jobs/{jobId}` (default 10 min, at most 20, below the bridge's 30-minute turn cap). Settled: the reply text (the run's session replies in the channel history, up to the run's finish) and the deliverables `GET …/artifacts?sourceSeq=<dispatch seq>` as `[{name, kind, link}]`. Still running: the handle. |
+| `ask_agent(handle, task, expert?, wait_seconds?)` | A team lead may pass a role of its roster as the handle (below). `POST /v1/rooms/{room}/dispatch` with the bound job as parent, then polls `GET /v1/rooms/{room}/jobs/{jobId}` (default 10 min, at most 20, below the bridge's 30-minute turn cap). Settled: the reply text (the run's session replies in the channel history, up to the run's finish) and the deliverables `GET …/artifacts?sourceSeq=<dispatch seq>` as `[{name, kind, link}]`. Still running: the handle. |
 | `room_status(handle?)` | The run record of one task this session dispatched (with reply and deliverables once settled), or all of them. |
 | `read_room(since?, limit?)` | History of the bound job's channel. That channel is never the people chat (no agent job exists there), so agents never read it. |
 | `save_component(dir, id?)` | Reads every file under `dir` (workspace-relative, e.g. `drafts/reviewer`) through the core's session-files seam (`core.SessionFiles`, handed to the tools per turn as `TurnInfo.Workspace`), packs them (`tarbundle`, content limits) and posts the archive to `POST /v1/content-components` (or `…/{id}/versions`) with the bound job's `?job=&room=` grant: the gateway validates it and saves it as the job's requester. The validator's message comes back as the tool error. A core without session files cannot save; the agent points the member at "Save as expert" under its reply's files. |
 | `get_component(id, version?)` | `GET /v1/content-components/{id}[/versions/{v}]` with the grant: the manifest and every text file, as the requester may read it (the "Improve" flow). |
 | `list_components(kind?)` | `GET /v1/content-components` with the grant: the requester's Library. |
 | `publish_component(id, scope)` | Personal scope only until sharing and approval (PRD step 4); any other scope answers that it is not available yet. |
+| `post_progress(text)` | Posts one progress line of the bound job as a room notice (below): at most 20 per job, 500 characters each. |
 
 **Content tools' authority** is the dispatch model applied to the content
 routes (`docs/architecture/content-components.md`, "Requests on behalf of a
@@ -86,10 +87,43 @@ Room tools need the bridge and the agent CLI on the same host (the desktop
 sidecar case). A sandboxed drive still works: the agent CLI and its MCP
 servers stay on the host; only shell commands run in the microVM.
 
+## Teams
+
+A turn wearing a team expert ([`content-components.md`](content-components.md),
+"Expert teams") binds its roster to the session (`roomtools.Job.Team`:
+each role's agent or why none, and its resolved expert or why none). The
+guards hold in the tool layer (`services/bridge/roomtools/team.go`):
+
+- **Roles.** `ask_agent(handle: "<role>")` dispatches to the role's agent
+  wearing the role's expert (`expert` = its `id@version`) with
+  `role` on the dispatch. A handle without "/" that is no role is refused
+  as not covered by the roster ("refuse that part instead of improvising a
+  role"); an unstaffed role or one whose expert does not resolve names
+  why; a role refuses an explicit `expert`. A lead may still name an agent
+  handle.
+- **Failures.** A member task that ends `failed`, `timed_out` or
+  `cancelled`, or a dispatch refused, counts against the request; after
+  `wire.MaxTeamFailures` (3, a protocol safety constant beside the depth
+  and fan-out limits) `ask_agent` refuses further dispatches and tells the
+  lead to stop and report.
+- **Timeouts.** A member task still running when `ask_agent` stops waiting
+  posts a notice ("critic (maya/opencode-b) has not finished after 10
+  minutes; …"); the lead checks it later with `room_status`.
+- **Notices.** `post_progress` lines and timeout notices are
+  `agent_messages` of the job's own activity session
+  `job-<jobId>-progress` (under the job notice namespace, so they never
+  move a reply cursor, never count as the agent's reply and never trigger
+  a reply notification), with wall-clock sequences and `payload.notice`
+  (`progress`, `member-timeout`); the feed renders them as one compact
+  line and they leave the agent's working indicator alone.
+
+The per-job state (failures, progress lines) resets when the session binds
+another job.
+
 ## The dispatch route (realtime)
 
 `POST /internal/v1/rooms/{room}/dispatch` (`svcauth.RequireSigned`) with
-`wire.DispatchRequest {parentJobId, recipient, text, expert?, clientMsgId?}`
+`wire.DispatchRequest {parentJobId, recipient, text, expert?, clientMsgId?, role?}`
 (`expert` is a `wire.ChatExpert {id, version?}`).
 The gateway's public door `POST /v1/rooms/{room}/dispatch` is the only edge
 route rewritten onto an internal one. `RouteKey` keys the path to the room,
@@ -120,8 +154,9 @@ owner). A `clientMsgId` retry answers the original job. The depth and
 fan-out limits are protocol safety constants, not deployment data.
 
 **Attribution.** The message's author is the parent job's requester;
-`payload.dispatchedBy {jobId, depth, via}` marks it (the feed shows
-"maya → via jack/codex → bob/claude", plus "(as <expert>)" from the
-message's `payload.expert`), and the job persists
+`payload.dispatchedBy {jobId, depth, via, role?}` marks it (the feed shows
+"maya → via jack/codex → bob/claude", the team role as a label, plus
+"(as <expert>)" from the message's `payload.expert`; the audit detail
+carries `role=`), and the job persists
 `dispatched_by_job_id` / `dispatch_depth` (run records show
 `dispatchedBy`).
