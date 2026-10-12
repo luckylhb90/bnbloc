@@ -42,7 +42,19 @@ func TestSealOpenRoundTripAndBinding(t *testing.T) {
 	if _, err := testBox(t).Open(sealed, "row-a"); !errors.Is(err, ErrOpen) {
 		t.Fatalf("another key must not open it: %v", err)
 	}
-	if _, err := b.Open("v1:"+sealed[3:len(sealed)-2]+"AA", "row-a"); !errors.Is(err, ErrOpen) {
+	// Flip one bit of the authentication tag: a textual edit of the encoding
+	// (say, replacing the last two characters) is a no-op whenever the
+	// value already ends that way.
+	raw, err := base64.RawStdEncoding.DecodeString(strings.TrimPrefix(sealed, "v1:"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw[len(raw)-1] ^= 0x01
+	tampered := "v1:" + base64.RawStdEncoding.EncodeToString(raw)
+	if tampered == sealed {
+		t.Fatal("the tampered value equals the sealed one")
+	}
+	if _, err := b.Open(tampered, "row-a"); !errors.Is(err, ErrOpen) {
 		t.Fatalf("tampered value must not open: %v", err)
 	}
 	again, _ := b.Seal([]byte("s3cr3t"), "row-a")
