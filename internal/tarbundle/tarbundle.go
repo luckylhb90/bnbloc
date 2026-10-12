@@ -1,6 +1,8 @@
 // Package tarbundle is the one reader/writer of bnbloc file bundles: an
 // uncompressed POSIX ustar archive of regular files whose every path passes
-// core.ValidBundlePath. Two formats share it, differing only in caps:
+// core.ValidBundlePath. Content component bundles (experts, skill packs:
+// internal/contentpkg, ContentLimits) use it too. Two more formats share it,
+// differing only in caps:
 // previewer component bundles (bnbloc.previewer.package/v1 artifact
 // "bundle"; the gateway parses them to serve and verify, the CLI packs a
 // directory) and site snapshots (a "site" artifact version: the bridge packs
@@ -39,6 +41,11 @@ var PreviewerLimits = Limits{MaxBytes: 16 << 20, MaxFiles: 512}
 
 // SiteLimits are the site snapshot caps (PRD 2026-10-09 "Site snapshots").
 var SiteLimits = Limits{MaxBytes: 64 << 20, MaxFiles: 2000}
+
+// ContentLimits are the content component bundle caps (experts and skill
+// packs, docs/prd/2026-10-12-experts-and-teams.md): mostly text, with room
+// for a skill's scripts and reference files.
+var ContentLimits = Limits{MaxBytes: 8 << 20, MaxFiles: 512}
 
 // SiteMIME is the media type of a site snapshot version's blob (a bundle
 // within SiteLimits).
