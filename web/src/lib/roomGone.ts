@@ -9,6 +9,14 @@ import { sameUser } from "./format.ts";
 
 export type RoomAccessEnd = "deleted" | "removed";
 
+// roomGoneText is what every surface says when a room is gone for the
+// member ("missing": the detail answered 404/403).
+export function roomGoneText(reason: RoomAccessEnd | "missing"): string {
+  if (reason === "deleted") return "This room was deleted.";
+  if (reason === "removed") return "You were removed from this room.";
+  return "This room no longer exists or you no longer have access.";
+}
+
 // isRoomGoneStatus: the room-detail statuses that mean "this room is not
 // reachable for you any more" (as opposed to a transient failure).
 export function isRoomGoneStatus(status: number): boolean {

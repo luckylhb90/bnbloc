@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { api, ApiError } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { dedupeMembers } from "@/lib/format";
-import { isRoomGoneStatus, reportRoomGone, type RoomAccessEnd } from "@/lib/roomGone";
+import { isRoomGoneStatus, reportRoomGone, type RoomAccessEnd, roomGoneText } from "@/lib/roomGone";
 import { shareComposerRef } from "@/lib/team";
 import { useLocalAgent } from "@/lib/useLocalAgent";
 import { useToast } from "@/ui/Toast";
@@ -70,11 +70,7 @@ export function StandalonePeopleChat({ roomId }: { roomId: string }) {
   if (gone) {
     return (
       <div className="grid h-[100dvh] place-items-center bg-[var(--color-bg)] p-6 text-sm text-[var(--color-fg-muted)]">
-        {gone === "deleted"
-          ? "This room was deleted."
-          : gone === "removed"
-            ? "You were removed from this room."
-            : "This room no longer exists or you no longer have access."}
+        {roomGoneText(gone)}
       </div>
     );
   }

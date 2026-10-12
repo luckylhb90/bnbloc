@@ -7,7 +7,7 @@ import { useAuth } from "@/lib/auth";
 import { useCoarsePointer, useStage } from "@/lib/capability";
 import { useDock } from "@/lib/useDock";
 import { useRoomStream } from "@/lib/useRoomStream";
-import { reportRoomGone, type RoomAccessEnd } from "@/lib/roomGone";
+import { reportRoomGone, type RoomAccessEnd, roomGoneText } from "@/lib/roomGone";
 import type { RoomEvent } from "@/lib/roomEvents";
 import { LazyDeliverablesView } from "@/views/workbench/LazyWorkbench";
 import { useWorkbench } from "@/views/workbench/useWorkbench";
@@ -103,13 +103,7 @@ export function RoomView({
       if (goneRef.current) return;
       goneRef.current = true;
       reportRoomGone(roomId);
-      toast.info(
-        reason === "deleted"
-          ? "This room was deleted"
-          : reason === "removed"
-            ? "You were removed from this room"
-            : "This room no longer exists or you no longer have access",
-      );
+      toast.info(roomGoneText(reason));
       onBack();
     },
     [roomId, toast, onBack],

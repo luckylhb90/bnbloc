@@ -72,9 +72,7 @@ export function RunAgentDialog({
       setPrompt("");
       onStarted(r.roomId);
     } catch (e) {
-      toast.error(
-        errorText(e, "could not start local agent"),
-      );
+      toast.error(errorText(e, "Could not start the local agent"));
     } finally {
       setBusy(false);
     }

@@ -3,7 +3,7 @@ import { api, ApiError } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { subscribeRoom } from "@/lib/sse";
 import type { RoomEvent } from "@/lib/roomEvents";
-import { isRoomGoneStatus, reportRoomGone, roomAccessEnded, type RoomAccessEnd } from "@/lib/roomGone";
+import { isRoomGoneStatus, reportRoomGone, roomAccessEnded, type RoomAccessEnd, roomGoneText } from "@/lib/roomGone";
 import { ArtifactTabView } from "@/views/workbench/ArtifactTabView";
 import { invalidateArtifacts } from "@/views/workbench/artifactData";
 
@@ -95,11 +95,7 @@ export function StandalonePreview({ roomId, artifactId }: { roomId: string; arti
     <div className="flex h-[100dvh] flex-col bg-[var(--color-bg)]">
       {gone ? (
         <div className="grid flex-1 place-items-center p-6 text-sm text-[var(--color-fg-muted)]">
-          {gone === "deleted"
-            ? "This room was deleted."
-            : gone === "removed"
-              ? "You were removed from this room."
-              : "This room no longer exists or you no longer have access."}
+          {roomGoneText(gone)}
         </div>
       ) : (
         <div className="min-h-0 flex-1">
