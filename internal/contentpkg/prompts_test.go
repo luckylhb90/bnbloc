@@ -239,3 +239,25 @@ func TestNormalizePrompts(t *testing.T) {
 		t.Fatalf("label = %q", l)
 	}
 }
+
+// A pack prompt flagged starter is offered among a room's starter prompts:
+// the flag round-trips through the manifest, a json import and a markdown
+// "starter: yes" line ("Gap closure" 7).
+func TestPromptStarterFlag(t *testing.T) {
+	files := promptPackFiles(t, []map[string]any{{"id": "a", "title": "A", "body": "b", "starter": true}, {"id": "c", "title": "C", "body": "d"}}, nil)
+	p, err := Validate(bundle(t, files), "", Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !p.Manifest.Prompts[0].Starter || p.Manifest.Prompts[1].Starter {
+		t.Fatalf("manifest prompts = %+v", p.Manifest.Prompts)
+	}
+	p, _, err = Import([]byte(`[{"title":"Kick off","prompt":"Plan the week","starter":true}]`), "prompt", "kit", "1.0.0", Options{})
+	if err != nil || !p.Manifest.Prompts[0].Starter {
+		t.Fatalf("json import = %+v %v", p, err)
+	}
+	p, _, err = Import([]byte("## Kick off\nstarter: yes\n\nPlan the week.\n\n## Other\nstarter: no\n\nSomething.\n"), "prompt", "kit", "1.0.0", Options{})
+	if err != nil || !p.Manifest.Prompts[0].Starter || p.Manifest.Prompts[1].Starter || strings.Contains(p.Manifest.Prompts[0].Body, "starter") {
+		t.Fatalf("markdown import = %+v %v", p.Manifest.Prompts, err)
+	}
+}

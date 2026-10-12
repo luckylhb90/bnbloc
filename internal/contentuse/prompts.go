@@ -56,7 +56,7 @@ func ResolvePromptRef(ctx context.Context, st store.ContentComponentStore, v ext
 
 // WirePrompt is a manifest prompt on the wire (Uses filled by the caller).
 func WirePrompt(p contentpkg.Prompt) wire.ContentPrompt {
-	out := wire.ContentPrompt{ID: p.ID, Title: p.Title, Body: p.Body, Tags: p.Tags, Slash: p.Slash}
+	out := wire.ContentPrompt{ID: p.ID, Title: p.Title, Body: p.Body, Tags: p.Tags, Slash: p.Slash, Starter: p.Starter}
 	for _, v := range p.Variables {
 		out.Variables = append(out.Variables, wire.ContentPromptVariable{Name: v.Name, Label: v.Label, Default: v.Default, Options: v.Options})
 	}

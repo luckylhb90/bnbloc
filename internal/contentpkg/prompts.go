@@ -31,6 +31,9 @@ type Prompt struct {
 	Tags      []string         `json:"tags,omitempty"`
 	// Slash is the composer command that inserts it ("/release-notes").
 	Slash string `json:"slash,omitempty"`
+	// Starter offers it among a room's starter prompts (an empty room's
+	// examples above the composer) when the pack is turned on for the room.
+	Starter bool `json:"starter,omitempty"`
 }
 
 // PromptVariable is one {{name}} of a prompt: a text field, or a select
@@ -321,6 +324,7 @@ type importedPrompt struct {
 	Tags      []string         `json:"tags"`
 	Slash     string           `json:"slash"`
 	Command   string           `json:"command"`
+	Starter   bool             `json:"starter"`
 }
 
 func promptsFromJSON(data []byte) ([]Prompt, importMeta, error) {
@@ -352,7 +356,7 @@ func promptsFromJSON(data []byte) ([]Prompt, importMeta, error) {
 			continue
 		}
 		out = append(out, Prompt{ID: ip.ID, Title: firstNonEmpty(ip.Title, ip.Name), Body: body,
-			Variables: ip.Variables, Tags: ip.Tags, Slash: firstNonEmpty(ip.Slash, ip.Command)})
+			Variables: ip.Variables, Tags: ip.Tags, Slash: firstNonEmpty(ip.Slash, ip.Command), Starter: ip.Starter})
 	}
 	return out, meta, nil
 }
@@ -362,7 +366,8 @@ var headingRE = regexp.MustCompile(`^(#{1,6})\s+(.+?)\s*#*\s*$`)
 // promptsFromMarkdown splits a markdown file into prompts: one per
 // second-level heading when it has any (a top "# " heading then names the
 // pack, the text under it describes it), else one per first-level heading,
-// else the whole file is one prompt. Lines "id:", "slash:" and "tags:"
+// else the whole file is one prompt. Lines "id:", "slash:", "tags:" and
+// "starter:" (yes/no)
 // right under a prompt's heading set those fields. Headings inside code
 // fences do not split.
 func promptsFromMarkdown(text, fileBase string) ([]Prompt, importMeta) {
@@ -447,6 +452,8 @@ func promptsFromMarkdown(text, fileBase string) ([]Prompt, importMeta) {
 					cur.Slash = v
 				case "tags":
 					cur.Tags = splitTags(v)
+				case "starter":
+					cur.Starter = isYes(v)
 				}
 				continue
 			}
@@ -469,7 +476,17 @@ func allBlank(lines []string) bool {
 	return true
 }
 
-// promptMetaLine reads "id: x", "slash: /x" or "tags: a, b" under a heading.
+// isYes reads a yes/no meta value ("starter: yes").
+func isYes(v string) bool {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "yes", "true", "y", "1", "on":
+		return true
+	}
+	return false
+}
+
+// promptMetaLine reads "id: x", "slash: /x", "tags: a, b" or "starter: yes"
+// under a heading.
 func promptMetaLine(l string) (string, string, bool) {
 	k, v, ok := strings.Cut(strings.TrimSpace(l), ":")
 	if !ok {
@@ -477,7 +494,7 @@ func promptMetaLine(l string) (string, string, bool) {
 	}
 	k = strings.ToLower(strings.TrimSpace(k))
 	switch k {
-	case "id", "slash", "tags":
+	case "id", "slash", "tags", "starter":
 		return k, strings.TrimSpace(v), true
 	}
 	return "", "", false

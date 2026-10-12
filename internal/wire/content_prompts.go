@@ -14,6 +14,9 @@ type ContentPrompt struct {
 	Tags      []string                `json:"tags,omitempty"`
 	// Slash is the composer command that inserts it ("/release-notes").
 	Slash string `json:"slash,omitempty"`
+	// Starter offers it among the starter prompts of a room the pack is
+	// turned on for.
+	Starter bool `json:"starter,omitempty"`
 	// Uses counts its insertions by every member.
 	Uses int64 `json:"uses"`
 }
