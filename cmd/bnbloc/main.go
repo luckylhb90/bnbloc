@@ -34,6 +34,8 @@ func main() {
 		err = runCores(os.Args[2:])
 	case "components":
 		err = runComponents(os.Args[2:])
+	case "content":
+		err = runContent(os.Args[2:])
 	case "previewers":
 		err = runPreviewers(os.Args[2:])
 	case "updates":
@@ -90,6 +92,11 @@ Components:
   bnbloc cores enable <name> (--tenant <id>... | --all-tenants)
   bnbloc components rotate-secret <name>  new notifier signing secret (printed once)
   bnbloc components test <name>           send a test notification through a notifier to you
+  bnbloc content export <id> [--version v] [--publisher p] [--out f]
+        the signable package of an expert, skill pack or prompt pack version (sign it offline,
+        then bnbloc cores install --package f --signature <sig>)
+  bnbloc content promote <id> [--version v] [--publisher p] [--rollout auto|off] [--seckey f | --unsigned]
+        export, sign and install it for every organization
   bnbloc previewers pack <dir> --out <bundle.tar>   archive a built previewer (prints its sha256)
   bnbloc previewers publish --package <pkg.json> (--bundle <tar> | --dir <dir>) [--rollout r] [--seckey f | --unsigned]
         upload the bundle, pin it in the package, sign, install

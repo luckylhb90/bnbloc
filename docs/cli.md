@@ -308,6 +308,26 @@ bnbloc cores publish-mcp --package search.mcp.json   # runtime "endpoint"
 
 Manage it with the component routes and `?kind=mcp`.
 
+## Promote content to every organization
+
+An expert, skill pack or prompt pack (a member's, or one an organization
+approved) reaches every organization when a super admin installs its
+signed package ([architecture/content-components.md](./architecture/content-components.md#sharing-and-publishing)).
+The gateway exports the package of one version (the bundle stays on the
+gateway, pinned by sha256); signing stays on your machine:
+
+```sh
+bnbloc content export cc_01J… --version 1.2.0 --publisher acme --out reviewer.package.json
+# sign reviewer.package.json offline, then:
+bnbloc cores install --package reviewer.package.json --signature reviewer.package.json.minisig
+# or export, sign with the publisher key and install in one step:
+bnbloc content promote cc_01J… --version 1.2.0 --publisher acme
+```
+
+`--rollout off` installs it unpublished; content has no opt-in rollout.
+Unpublish, restore or remove it in the platform console (Content) or with
+`/v1/platform/content-components/{id}/unpublish|restore` and `DELETE`.
+
 ## Publish a desktop update
 
 ```sh
