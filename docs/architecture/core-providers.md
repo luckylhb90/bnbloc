@@ -478,9 +478,10 @@ The bridge/gateway drive it through the protocol client with
    (`bnbloc cores publish-sidecar`), with the gateway managing listing +
    artifact distribution.
 
-Native Go providers (`core.Register` + blank import) remain a registry
-mechanism, but no core ships that way: adding one recompiles and re-ships every
-binary, which is exactly what the adapter forms remove. Go's `plugin` package
+There are no native Go providers: the registry has no compiled-in (built-in)
+source, and `core.Register` is gone (2026-10-12). A compiled-in core would
+recompile and re-ship every binary, which is exactly what the adapter forms
+remove. Go's `plugin` package
 is **permanently out** — Windows-unsupported and toolchain-locked, and Windows
 is a repository compatibility contract.
 

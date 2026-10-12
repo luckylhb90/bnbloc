@@ -399,30 +399,20 @@ func init() {
 	})
 }
 
-// BackendKind / SourceClass / CoreExtension alias the kind-agnostic extreg types
-// so existing core callers are unchanged while extreg owns the storage.
+// BackendKind / CoreExtension alias the kind-agnostic extreg types so core
+// callers name them here while extreg owns the storage. No core is compiled
+// in: every one is registered at runtime (an installed package, a manifest,
+// an operator-declared adapter).
 type BackendKind = extreg.Backend
-type SourceClass = extreg.Source
 type CoreExtension = extreg.Extension
 
 const (
-	BackendNative   = extreg.BackendNative
 	BackendManifest = extreg.BackendManifest
 	BackendSidecar  = extreg.BackendSidecar
-	SourceBuiltin   = extreg.SourceBuiltin
-	SourceInstalled = extreg.SourceInstalled
 )
 
-// Register makes a native Go provider available by name — a non-removable
-// built-in ({native, builtin}). Panics on a duplicate so wiring mistakes fail
-// loudly at startup. The Factory is carried in the extreg record's Config.
-func Register(name string, f Factory) {
-	extreg.RegisterBuiltin(extreg.Extension{Kind: KindCore, Name: name, Backend: BackendNative, Config: f})
-}
-
-// Reregister installs or replaces a core at runtime without panicking on a
-// duplicate. It refuses to overwrite a non-removable built-in. d classifies the
-// install ({backend, installed, removable}); f is the factory (carried in Config).
+// Reregister installs or replaces a core at runtime. d classifies the
+// install (its backend); f is the factory (carried in Config).
 func Reregister(name string, f Factory, d CoreExtension) error {
 	d.Kind = KindCore
 	d.Name = name
@@ -430,7 +420,7 @@ func Reregister(name string, f Factory, d CoreExtension) error {
 	return extreg.Reregister(d)
 }
 
-// Unregister removes a runtime-installed (removable) core; refuses a built-in.
+// Unregister removes an installed core.
 func Unregister(name string) error {
 	return extreg.Unregister(KindCore, name)
 }

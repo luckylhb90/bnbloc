@@ -5,28 +5,8 @@ import (
 	"testing"
 )
 
-func TestRegisterBuiltinAndGet(t *testing.T) {
-	t.Cleanup(func() { _ = Unregister("testkind", "a") })
-	RegisterBuiltin(Extension{Kind: "testkind", Name: "a", Backend: BackendNative, Config: 42})
-	e, ok := Get("testkind", "a")
-	if !ok || e.Source != SourceBuiltin || e.Removable || e.Config.(int) != 42 {
-		t.Fatalf("builtin = %+v ok=%v; want source=builtin removable=false config=42", e, ok)
-	}
-}
-
-func TestReregisterRefusesBuiltin(t *testing.T) {
-	t.Cleanup(func() { _ = Unregister("testkind", "b") })
-	RegisterBuiltin(Extension{Kind: "testkind", Name: "b", Backend: BackendNative})
-	if err := Reregister(Extension{Kind: "testkind", Name: "b", Removable: true}); err == nil {
-		t.Fatal("Reregister must refuse a non-removable builtin")
-	}
-	if err := Unregister("testkind", "b"); err == nil {
-		t.Fatal("Unregister must refuse a non-removable builtin")
-	}
-}
-
 func TestReregisterInstalledThenUnregister(t *testing.T) {
-	if err := Reregister(Extension{Kind: "testkind", Name: "c", Backend: BackendManifest, Source: SourceInstalled, Removable: true}); err != nil {
+	if err := Reregister(Extension{Kind: "testkind", Name: "c", Backend: BackendManifest}); err != nil {
 		t.Fatalf("Reregister installed: %v", err)
 	}
 	if _, ok := Get("testkind", "c"); !ok {
@@ -41,8 +21,8 @@ func TestReregisterInstalledThenUnregister(t *testing.T) {
 }
 
 func TestListFiltersByKind(t *testing.T) {
-	RegisterBuiltin(Extension{Kind: "k1", Name: "x", Backend: BackendNative})
-	RegisterBuiltin(Extension{Kind: "k2", Name: "y", Backend: BackendNative})
+	_ = Reregister(Extension{Kind: "k1", Name: "x", Backend: BackendManifest})
+	_ = Reregister(Extension{Kind: "k2", Name: "y", Backend: BackendManifest})
 	t.Cleanup(func() { _ = Unregister("k1", "x"); _ = Unregister("k2", "y") })
 	if got := List("k1"); len(got) != 1 || got[0].Name != "x" {
 		t.Fatalf("List(k1) = %+v; want [x]", got)
@@ -51,7 +31,7 @@ func TestListFiltersByKind(t *testing.T) {
 
 func TestSetInstance(t *testing.T) {
 	t.Cleanup(func() { _ = Unregister("testkind", "d") })
-	RegisterBuiltin(Extension{Kind: "testkind", Name: "d", Backend: BackendNative})
+	_ = Reregister(Extension{Kind: "testkind", Name: "d", Backend: BackendManifest})
 	SetInstance("testkind", "d", "live")
 	if e, _ := Get("testkind", "d"); e.Instance.(string) != "live" {
 		t.Fatalf("Instance = %v; want live", e.Instance)

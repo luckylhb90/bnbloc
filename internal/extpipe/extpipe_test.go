@@ -24,7 +24,7 @@ func init() {
 	RegisterInstaller(KindInstaller{
 		Kind: fakeKind,
 		Decode: func(pkg pkgmeta.Package) (json.RawMessage, extreg.Backend, error) {
-			return json.RawMessage(`{}`), extreg.BackendNative, nil
+			return json.RawMessage(`{}`), extreg.BackendManifest, nil
 		},
 		Probe: func(context.Context, Record, extgov.Guard) error { return nil },
 		Activate: func(_ context.Context, rec Record, _ extgov.Guard) (any, error) {
@@ -59,7 +59,7 @@ func TestPipelineInstallActivatesAndPersists(t *testing.T) {
 		t.Fatalf("rollout = %q; want auto", rec.Rollout)
 	}
 	e, ok := extreg.Get(fakeKind, "ext1")
-	if !ok || e.Instance.(string) != "live:ext1" || e.Source != extreg.SourceInstalled {
+	if !ok || e.Instance.(string) != "live:ext1" {
 		t.Fatalf("registered = %+v; want live installed instance", e)
 	}
 	list, _ := p.List(ctx, fakeKind)
@@ -77,7 +77,7 @@ func TestPipelineInstallDispatchesPackageKindToExtensionKind(t *testing.T) {
 		Kind:         extKind,
 		PackageKinds: []string{packageKind},
 		Decode: func(pkg pkgmeta.Package) (json.RawMessage, extreg.Backend, error) {
-			return json.RawMessage(`{"packageKind":` + strconv.Quote(pkg.Kind) + `}`), extreg.BackendNative, nil
+			return json.RawMessage(`{"packageKind":` + strconv.Quote(pkg.Kind) + `}`), extreg.BackendManifest, nil
 		},
 		Probe: func(context.Context, Record, extgov.Guard) error { return nil },
 		Activate: func(_ context.Context, rec Record, _ extgov.Guard) (any, error) {

@@ -30,7 +30,7 @@ func LoadManifests(raws [][]byte) (registered []string, errs []error) {
 		// one instance across callers; optional capabilities are reported by
 		// Provider.Supports from the manifest's declared ops.
 		m := prov.m
-		desc := core.CoreExtension{Backend: core.BackendManifest, Source: core.SourceInstalled, Removable: true, Instance: &m}
+		desc := core.CoreExtension{Backend: core.BackendManifest, Instance: &m}
 		if err := core.Reregister(name, func() core.Provider { p, _ := New(m); return p }, desc); err != nil {
 			errs = append(errs, indexErr(i, err))
 			continue

@@ -94,7 +94,8 @@ drift apart. Before adding code, search for the thing you are about to write and
   daemon dialect must share one client, not hand-copy `do`/`get`/`post` and the
   session/message decoding.
 - **Reuse the existing seam, don't fork it.** New cores go through
-  `core.Register` + `coreset.FromEnv` (never a parallel core list); new
+  the extension registry (`core.Reregister`, from an installed package) +
+  `coreset.FromEnv` (never a parallel core list); new
   wire/DTO shapes live in `internal/wire`; borrow/authorization goes through
   `internal/shareagent`; SSE/roster through `internal/realtime`. If the seam
   can't express the new case, **extend the seam once** (a shared helper, a new
@@ -511,8 +512,9 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   (`coreset.FromEnv`). A typo or not-yet-loaded manifest name in user-editable
   settings must never crash-loop the bridge/gateway — do not "fix" it back to
   fail-fast. `GET /v1/cores` lists every registered core with
-  `{available,backend,removable}` for UI validation (no core is compiled in,
-  so there is no "built-in" flag).
+  `{available,backend}` for UI validation (no core is compiled in, so there
+  is no "built-in" or "removable" flag, and the registry has no built-in
+  source: every extension is installed at runtime).
 - **Core availability truth is `GET /v1/cores`, NOT the discover probe.**
   `/v1/local-agent/discover` is dev-gated (404 in production, SEC6), so the web
   MUST NOT use it to decide "is a core connected" — that caused a prod dead-end

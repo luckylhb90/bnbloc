@@ -57,7 +57,7 @@ func TestProductionWithoutOIDCServesSSOAndRefusesDirectLogin(t *testing.T) {
 	idp := httptest.NewServer(provider)
 	defer idp.Close()
 	const name = "prod-login-test-provider"
-	if err := extreg.Reregister(extreg.Extension{Kind: extreg.KindAuthProvider, Name: name, Removable: true,
+	if err := extreg.Reregister(extreg.Extension{Kind: extreg.KindAuthProvider, Name: name,
 		Instance: authprovider.Endpoint{Name: name, BaseURL: idp.URL, Client: http.DefaultClient}}); err != nil {
 		t.Fatal(err)
 	}

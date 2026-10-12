@@ -320,10 +320,10 @@ func (fakeCoreProvider) PollTurn(context.Context, core.Endpoint, string, string)
 
 // GET /v1/cores lists every registered core: a configured core with a resolved
 // endpoint is available, a registered-but-unconfigured manifest core is not,
-// and a registry-registered (builtin-style) core is flagged builtin.
+// and a configured core with a resolved endpoint is available.
 func TestCoresListsRegisteredWithAvailability(t *testing.T) {
 	const manifestName = "test-manifest-core"
-	if err := core.Reregister(manifestName, func() core.Provider { return fakeCoreProvider{name: manifestName} }, core.CoreExtension{Backend: core.BackendManifest, Source: core.SourceInstalled, Removable: true}); err != nil {
+	if err := core.Reregister(manifestName, func() core.Provider { return fakeCoreProvider{name: manifestName} }, core.CoreExtension{Backend: core.BackendManifest}); err != nil {
 		t.Fatalf("reregister: %v", err)
 	}
 	t.Cleanup(func() { _ = core.Unregister(manifestName) })
@@ -332,7 +332,7 @@ func TestCoresListsRegisteredWithAvailability(t *testing.T) {
 	// A registered fake with a resolved endpoint is available; the manifest
 	// core is registered but not in s.Cores (not available).
 	const wired = "wired-core"
-	core.Register(wired, func() core.Provider { return fakeCoreProvider{name: wired} })
+	registerTestCore(t, wired)
 	t.Cleanup(func() { _ = core.Unregister(wired) })
 	wiredProvider, err := core.New(wired)
 	if err != nil {
@@ -390,7 +390,7 @@ func TestCoresListsRegisteredWithAvailability(t *testing.T) {
 func TestCoresHidesInstalledRegistryEntry_withoutPersistedComponentRecord(t *testing.T) {
 	// Given
 	const name = "registry-only-sidecar"
-	if err := core.Reregister(name, func() core.Provider { return fakeCoreProvider{name: name} }, core.CoreExtension{Backend: core.BackendSidecar, Source: core.SourceInstalled, Removable: true}); err != nil {
+	if err := core.Reregister(name, func() core.Provider { return fakeCoreProvider{name: name} }, core.CoreExtension{Backend: core.BackendSidecar}); err != nil {
 		t.Fatalf("reregister: %v", err)
 	}
 	t.Cleanup(func() { _ = core.Unregister(name) })
@@ -427,7 +427,7 @@ func TestCoresHidesInstalledRegistryEntry_withoutPersistedComponentRecord(t *tes
 
 // GET /v1/cores filters an installed core by its per-tenant enablement overlay:
 // a core scoped to tenant t1 is visible to a t1 caller and hidden from a t2
-// caller; a builtin (no overlay) is visible to both.
+// caller; a configured core (no overlay) is visible to both.
 func TestCoresTenantEnablementFilter(t *testing.T) {
 	const scoped = "tenant-scoped-core"
 
@@ -439,7 +439,7 @@ func TestCoresTenantEnablementFilter(t *testing.T) {
 	// An operator-configured core (no install record, so no tenant overlay)
 	// stays visible to both tenants while the scoped core filters.
 	const builtinName = "configured-no-overlay"
-	core.Register(builtinName, func() core.Provider { return fakeCoreProvider{name: builtinName} })
+	registerTestCore(t, builtinName)
 	t.Cleanup(func() { _ = core.Unregister(builtinName) })
 	gw.Cores = append(gw.Cores, coreset.Entry{Name: builtinName, Provider: fakeCoreProvider{name: builtinName}})
 

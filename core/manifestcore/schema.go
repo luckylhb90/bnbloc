@@ -3,8 +3,9 @@ package manifestcore
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/luckylhb90/bnbloc/core"
 	"strings"
+
+	"github.com/luckylhb90/bnbloc/core"
 )
 
 // Manifest is the declarative description of one REST-daemon core.

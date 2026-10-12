@@ -63,8 +63,8 @@ func sidecarPackageBodyWithArtifact(t *testing.T, name string, artifact pkgmeta.
 }
 
 func fetchCores(t *testing.T, baseURL, token string) map[string]struct {
-	available, builtin, removable bool
-	backend                       string
+	available bool
+	backend   string
 } {
 	t.Helper()
 	req, _ := http.NewRequest(http.MethodGet, baseURL+"/v1/cores", nil)
@@ -78,23 +78,21 @@ func fetchCores(t *testing.T, baseURL, token string) map[string]struct {
 		Cores []struct {
 			Name      string `json:"name"`
 			Available bool   `json:"available"`
-			Builtin   bool   `json:"builtin"`
 			Backend   string `json:"backend"`
-			Removable bool   `json:"removable"`
 		} `json:"cores"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
 		t.Fatalf("decode cores: %v", err)
 	}
 	m := map[string]struct {
-		available, builtin, removable bool
-		backend                       string
+		available bool
+		backend   string
 	}{}
 	for _, c := range out.Cores {
 		m[c.Name] = struct {
-			available, builtin, removable bool
-			backend                       string
-		}{c.Available, c.Builtin, c.Removable, c.Backend}
+			available bool
+			backend   string
+		}{c.Available, c.Backend}
 	}
 	return m
 }
@@ -154,12 +152,6 @@ func TestSidecarPackageInstall_listsButGatewayNeverDrives(t *testing.T) {
 	}
 	if got.backend != string(core.BackendSidecar) {
 		t.Fatalf("backend = %q, want %q", got.backend, core.BackendSidecar)
-	}
-	if got.builtin {
-		t.Fatalf("sidecar core marked builtin, want installed")
-	}
-	if !got.removable {
-		t.Fatalf("sidecar core not removable, want removable")
 	}
 	if got.available {
 		t.Fatalf("sidecar core marked available; the gateway has no endpoint for it (client drives it)")
@@ -232,8 +224,8 @@ func TestSidecarPackageRehydratesFromStore(t *testing.T) {
 	if !ok {
 		t.Fatalf("sidecar core %q not in registry after rehydrate", name)
 	}
-	if d.Backend != core.BackendSidecar || d.Source != core.SourceInstalled {
-		t.Fatalf("rehydrated sidecar = {backend:%s source:%s}, want {sidecar installed}", d.Backend, d.Source)
+	if d.Backend != core.BackendSidecar {
+		t.Fatalf("rehydrated sidecar backend = %s, want sidecar", d.Backend)
 	}
 	pkgs, err := svc.listInstalledComponents(t.Context())
 	if err != nil {

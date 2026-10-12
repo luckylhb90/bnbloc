@@ -29,7 +29,7 @@ func newSwitchablePipeline(t *testing.T) (*Pipeline, *switchable) {
 	p.Installers = map[extreg.Kind]KindInstaller{switchableKind: {
 		Kind: switchableKind,
 		Decode: func(pkgmeta.Package) (json.RawMessage, extreg.Backend, error) {
-			return json.RawMessage(`{}`), extreg.BackendNative, nil
+			return json.RawMessage(`{}`), extreg.BackendManifest, nil
 		},
 		Probe: func(_ context.Context, rec Record, _ extgov.Guard) error {
 			if sw.failProbe[rec.Version] {

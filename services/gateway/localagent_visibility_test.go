@@ -140,8 +140,8 @@ func installConfiguredEndpointCore(t *testing.T, srv *httptest.Server, adminToke
 
 func TestLocalAgentRun_allowsConfiguredBuiltinWithoutComponentRecord(t *testing.T) {
 	// Given
-	const name = "configured-builtin-run-core"
-	core.Register(name, func() core.Provider { return fakeCoreProvider{name: name} })
+	const name = "configured-run-core"
+	registerTestCore(t, name)
 	t.Cleanup(func() { _ = core.Unregister(name) })
 	gw := newGateway(t, "")
 	provider, err := core.New(name)
@@ -165,7 +165,7 @@ func TestLocalAgentRun_allowsConfiguredBuiltinWithoutComponentRecord(t *testing.
 	// Then
 	raw := readBodyString(t, resp)
 	if !strings.Contains(raw, name) {
-		t.Fatalf("configured builtin core missing from /v1/cores: %s", raw)
+		t.Fatalf("configured core missing from /v1/cores: %s", raw)
 	}
 }
 
@@ -173,7 +173,7 @@ func TestExplicitConfiguredInstalledCore_visibleWithoutComponentRecord(t *testin
 	// Given
 	const name = "explicit-installed-core"
 	provider := explicitInstalledProvider{fakeCoreProvider{name: name}}
-	if err := core.Reregister(name, func() core.Provider { return provider }, core.CoreExtension{Backend: core.BackendSidecar, Source: core.SourceInstalled, Removable: true}); err != nil {
+	if err := core.Reregister(name, func() core.Provider { return provider }, core.CoreExtension{Backend: core.BackendSidecar}); err != nil {
 		t.Fatalf("reregister: %v", err)
 	}
 	t.Cleanup(func() { _ = core.Unregister(name) })

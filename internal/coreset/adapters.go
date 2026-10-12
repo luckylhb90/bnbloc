@@ -30,12 +30,10 @@ func registerEnvAdapters(entries []Entry) {
 		// empty: a nil Factory would type-assert successfully in core.New and
 		// panic when called.
 		_ = extreg.Reregister(extreg.Extension{
-			Kind:      core.KindCore,
-			Name:      e.Name,
-			Backend:   core.BackendSidecar,
-			Source:    core.SourceInstalled,
-			Removable: true,
-			Instance:  adapterDescriptor{},
+			Kind:     core.KindCore,
+			Name:     e.Name,
+			Backend:  core.BackendSidecar,
+			Instance: adapterDescriptor{},
 		})
 	}
 }

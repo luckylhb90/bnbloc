@@ -118,7 +118,7 @@ func TestPipelineInstallLeavesNoRecord_whenActivationFails(t *testing.T) {
 		failKind: {
 			Kind: failKind,
 			Decode: func(pkgmeta.Package) (json.RawMessage, extreg.Backend, error) {
-				return json.RawMessage(`{}`), extreg.BackendNative, nil
+				return json.RawMessage(`{}`), extreg.BackendManifest, nil
 			},
 			Probe: func(context.Context, Record, extgov.Guard) error { return nil },
 			Activate: func(context.Context, Record, extgov.Guard) (any, error) {
@@ -176,7 +176,7 @@ func TestPipelineListNormalizesLegacyEmptyRollout(t *testing.T) {
 	// Given
 	p := newTestPipeline()
 	ctx := context.Background()
-	legacy := Record{Kind: string(fakeKind), Name: "legacy", Backend: string(extreg.BackendNative)}
+	legacy := Record{Kind: string(fakeKind), Name: "legacy", Backend: string(extreg.BackendManifest)}
 	raw, err := json.Marshal(legacy)
 	if err != nil {
 		t.Fatalf("marshal legacy record: %v", err)

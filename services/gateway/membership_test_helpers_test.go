@@ -8,6 +8,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/luckylhb90/bnbloc/core"
 	"github.com/luckylhb90/bnbloc/internal/coreset"
 	"github.com/luckylhb90/bnbloc/internal/membership"
 	"github.com/luckylhb90/bnbloc/internal/store"
@@ -94,4 +95,13 @@ func (s *Service) coreByName(name string) *coreset.Entry {
 		}
 	}
 	return nil
+}
+
+// registerTestCore registers a fake core under name for the test (cores
+// are registered at runtime; none is compiled in).
+func registerTestCore(t *testing.T, name string) {
+	t.Helper()
+	if err := core.Reregister(name, func() core.Provider { return fakeCoreProvider{name: name} }, core.CoreExtension{Backend: core.BackendManifest}); err != nil {
+		t.Fatal(err)
+	}
 }

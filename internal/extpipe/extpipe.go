@@ -314,13 +314,11 @@ func (p *Pipeline) activate(ctx context.Context, in KindInstaller, rec Record, g
 		return nil
 	}
 	if err := extreg.Reregister(extreg.Extension{
-		Kind:      extreg.Kind(rec.Kind),
-		Name:      rec.Name,
-		Backend:   extreg.Backend(rec.Backend),
-		Source:    extreg.SourceInstalled,
-		Removable: true,
-		Version:   rec.Version,
-		Instance:  instance,
+		Kind:     extreg.Kind(rec.Kind),
+		Name:     rec.Name,
+		Backend:  extreg.Backend(rec.Backend),
+		Version:  rec.Version,
+		Instance: instance,
 	}); err != nil {
 		if in.Deactivate != nil {
 			_ = in.Deactivate(ctx, rec)

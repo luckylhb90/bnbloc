@@ -10,7 +10,6 @@
 package extreg
 
 import (
-	"fmt"
 	"sort"
 	"sync"
 )
@@ -34,7 +33,6 @@ type Kind string
 type Backend string
 
 const (
-	BackendNative   Backend = "native"
 	BackendManifest Backend = "manifest"
 	BackendSidecar  Backend = "sidecar"
 	// BackendBundle is a static web bundle served to a sandboxed frame
@@ -42,31 +40,19 @@ const (
 	BackendBundle Backend = "bundle"
 )
 
-// Source is WHERE an extension came from: compiled into the binary (a
-// pre-installed, non-removable extension) or installed at runtime via the API.
-// Orthogonal to Backend — a shipped manifest is {manifest,builtin}, a third-party manifest
-// is {manifest,installed}.
-type Source string
-
-const (
-	SourceBuiltin   Source = "builtin"
-	SourceInstalled Source = "installed"
-)
-
 // Extension is the unified registry record for one extension of any kind.
-// Removable gates uninstall; Backend/Source classify it for the API. Config is
+// Every extension is installed at runtime (no extension is compiled in);
+// Backend classifies it for the API. Config is
 // the decoded per-kind typed config (e.g. a *manifestcore.Manifest or a Factory
 // for a native core); Instance is the live driver once activated. Both are
 // `any` so the registry stays independent of every kind's package.
 type Extension struct {
-	Kind      Kind
-	Name      string
-	Backend   Backend
-	Source    Source
-	Removable bool
-	Version   string
-	Config    any
-	Instance  any
+	Kind     Kind
+	Name     string
+	Backend  Backend
+	Version  string
+	Config   any
+	Instance any
 }
 
 func key(kind Kind, name string) string { return string(kind) + "\x00" + name }
@@ -121,41 +107,18 @@ func Kinds() []Kind {
 	return out
 }
 
-// RegisterBuiltin records a compiled-in, non-removable extension. It panics on a
-// duplicate (kind,name) so blank-import wiring mistakes fail at startup.
-func RegisterBuiltin(ext Extension) {
-	ext.Source = SourceBuiltin
-	ext.Removable = false
-	mu.Lock()
-	defer mu.Unlock()
-	if _, dup := exts[key(ext.Kind, ext.Name)]; dup {
-		panic(fmt.Sprintf("extreg: duplicate registration: %s/%s", ext.Kind, ext.Name))
-	}
-	exts[key(ext.Kind, ext.Name)] = ext
-}
-
-// Reregister installs or replaces an extension at runtime without panicking on a
-// duplicate. It refuses to overwrite a non-removable built-in, so a runtime
-// install can never shadow a built-in. Returns an error (not a panic) so a bad
-// install is a handled result.
+// Reregister installs or replaces an extension at runtime.
 func Reregister(ext Extension) error {
 	mu.Lock()
 	defer mu.Unlock()
-	if existing, ok := exts[key(ext.Kind, ext.Name)]; ok && !existing.Removable {
-		return fmt.Errorf("extreg: %s/%s is a built-in and cannot be replaced", ext.Kind, ext.Name)
-	}
 	exts[key(ext.Kind, ext.Name)] = ext
 	return nil
 }
 
-// Unregister removes a runtime-installed (removable) extension. Removing a
-// non-removable built-in is refused; a missing entry is a no-op.
+// Unregister removes an installed extension; a missing entry is a no-op.
 func Unregister(kind Kind, name string) error {
 	mu.Lock()
 	defer mu.Unlock()
-	if existing, ok := exts[key(kind, name)]; ok && !existing.Removable {
-		return fmt.Errorf("extreg: %s/%s is a built-in and cannot be removed", kind, name)
-	}
 	delete(exts, key(kind, name))
 	return nil
 }

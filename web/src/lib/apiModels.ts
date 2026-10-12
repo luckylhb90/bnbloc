@@ -290,7 +290,6 @@ export interface Core {
   name: string;
   available: boolean;
   backend?: string;
-  removable?: boolean;
   // "sidecar" cores are driven by the client's own bridge (not the gateway);
   // the Agents page uses this to count a running managed sidecar as usable.
   runtime?: string;

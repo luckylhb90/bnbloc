@@ -255,7 +255,6 @@ func (s *Service) handleCores(w http.ResponseWriter, r *http.Request, claims aut
 		Name            string `json:"name"`
 		Available       bool   `json:"available"`
 		Backend         string `json:"backend"`
-		Removable       bool   `json:"removable"`
 		Runtime         string `json:"runtime,omitempty"`
 		RequiresDesktop bool   `json:"requiresDesktop,omitempty"`
 		Rollout         string `json:"rollout,omitempty"`
@@ -269,7 +268,6 @@ func (s *Service) handleCores(w http.ResponseWriter, r *http.Request, claims aut
 		info := coreInfo{Name: n, Available: avail[n]}
 		if d, ok := core.Describe(n); ok {
 			info.Backend = string(d.Backend)
-			info.Removable = d.Removable
 		}
 		if rec, ok := view.record(core.KindCore, n); ok {
 			component, err := componentFromExtRecord(rec)

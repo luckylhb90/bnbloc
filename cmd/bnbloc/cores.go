@@ -209,16 +209,15 @@ func coresList(args []string) error {
 		Cores []struct {
 			Name      string `json:"name"`
 			Available bool   `json:"available"`
-			Builtin   bool   `json:"builtin"`
 			Backend   string `json:"backend"`
 		} `json:"cores"`
 	}
 	if err := c.call(context.Background(), apiTimeout, http.MethodGet, "/v1/cores", nil, &out); err != nil {
 		return err
 	}
-	fmt.Printf("%-24s %-10s %-9s %s\n", "NAME", "BACKEND", "BUILTIN", "AVAILABLE")
+	fmt.Printf("%-24s %-10s %s\n", "NAME", "BACKEND", "AVAILABLE")
 	for _, c := range out.Cores {
-		fmt.Printf("%-24s %-10s %-9v %v\n", c.Name, c.Backend, c.Builtin, c.Available)
+		fmt.Printf("%-24s %-10s %v\n", c.Name, c.Backend, c.Available)
 	}
 	return nil
 }

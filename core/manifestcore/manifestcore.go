@@ -47,7 +47,7 @@ type Provider struct {
 	// requires auth; injected by the composition root from config.
 	ProbeToken string
 	// ProbeURLOverride, when set, replaces the manifest's baked-in
-	// discover.probeUrl so an operator can repoint the daemon (e.g. a builtin
+	// discover.probeUrl so an operator can repoint the daemon (an installed
 	// manifest core) via BNBLOC_CORE_<NAME>_URL without editing the manifest.
 	ProbeURLOverride string
 }

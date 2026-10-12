@@ -275,38 +275,8 @@ func TestManifestIdlePredicate(t *testing.T) {
 	}
 }
 
-// LoadManifests registers a manifest by bytes and refuses to shadow a built-in.
-// registerFakeBuiltin installs a non-removable core the way built-ins are
-// registered, so shadow protection is testable without any real built-in.
-func registerFakeBuiltin(t *testing.T, name string) {
-	t.Helper()
-	core.Register(name, func() core.Provider { return fakeBuiltinProvider{} })
-}
-
-type fakeBuiltinProvider struct{}
-
-func (fakeBuiltinProvider) Name() string { return "fake" }
-func (fakeBuiltinProvider) CreateWorkspace(ctx context.Context, ep core.Endpoint) (string, error) {
-	return "", nil
-}
-func (fakeBuiltinProvider) CreateSession(ctx context.Context, ep core.Endpoint, req core.SessionRequest) (core.SessionResult, error) {
-	return core.SessionResult{}, nil
-}
-func (fakeBuiltinProvider) SendInput(ctx context.Context, ep core.Endpoint, workspaceID, sessionID, text string, opts core.SessionOptions) error {
-	return nil
-}
-func (fakeBuiltinProvider) ListTargets(ctx context.Context, ep core.Endpoint) ([]core.Target, error) {
-	return nil, nil
-}
-func (fakeBuiltinProvider) Messages(ctx context.Context, ep core.Endpoint, workspaceID, sessionID string, after int64) ([]core.Message, int64, error) {
-	return nil, 0, nil
-}
-func (fakeBuiltinProvider) PollTurn(ctx context.Context, ep core.Endpoint, workspaceID, sessionID string) (core.TurnStatus, error) {
-	return core.TurnStatus{}, nil
-}
-
+// LoadManifests registers a manifest by bytes.
 func TestLoadManifestsRegisters(t *testing.T) {
-	registerFakeBuiltin(t, "fakebuiltin")
 	myrest := []byte(`{
       "name": "myrest",
       "createWorkspace": {"method":"POST","path":"/w"},
@@ -316,23 +286,11 @@ func TestLoadManifestsRegisters(t *testing.T) {
       "messages": {"method":"GET","path":"/m","items":{"list":"messages","fields":{"text":"text"}}},
       "pollTurn": {"method":"GET","path":"/turn"}
     }`)
-	shadow := []byte(`{
-      "name": "fakebuiltin",
-      "createWorkspace": {"method":"POST","path":"/w"},
-      "createSession": {"method":"POST","path":"/s"},
-      "sendInput": {"method":"POST","path":"/i"},
-      "listTargets": {"method":"GET","path":"/t"},
-      "messages": {"method":"GET","path":"/m","items":{"list":"messages","fields":{"text":"text"}}},
-      "pollTurn": {"method":"GET","path":"/turn"}
-    }`)
-	reg, errs := LoadManifests([][]byte{myrest, shadow})
+	reg, errs := LoadManifests([][]byte{myrest})
 	foundMyrest := false
 	for _, n := range reg {
 		if n == "myrest" {
 			foundMyrest = true
-		}
-		if n == "fakebuiltin" {
-			t.Fatal("manifest must not register a built-in name")
 		}
 	}
 	if !foundMyrest {
@@ -341,9 +299,10 @@ func TestLoadManifestsRegisters(t *testing.T) {
 	if _, err := core.New("myrest"); err != nil {
 		t.Fatalf("registered core not constructible: %v", err)
 	}
-	if len(errs) == 0 {
-		t.Fatal("expected a duplicate-name error for the fakebuiltin shadow")
+	if len(errs) != 0 {
+		t.Fatalf("errs = %v", errs)
 	}
+	t.Cleanup(func() { _ = core.Unregister("myrest") })
 }
 
 // LoadManifests skips a malformed manifest and reports it, without blocking a
@@ -371,8 +330,5 @@ func TestLoadManifestsMalformedAndReregister(t *testing.T) {
 	}
 	if err := core.Unregister("reg2"); err != nil {
 		t.Fatalf("Unregister: %v", err)
-	}
-	if err := core.Unregister("fakebuiltin"); err == nil {
-		t.Fatal("unregistering a built-in must fail")
 	}
 }
