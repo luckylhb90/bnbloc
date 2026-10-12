@@ -373,6 +373,10 @@ func Allows(p store.NotificationPrefs, typ, roomID string) bool {
 		return p.AgentFailed
 	case wire.NotificationBorrowRequest:
 		return p.BorrowRequests
+	case wire.NotificationContentShared, wire.NotificationContentReview:
+		// Addressed to one member about content shared with them or their
+		// own review work; there is no preference switch for them yet.
+		return true
 	}
 	return false
 }

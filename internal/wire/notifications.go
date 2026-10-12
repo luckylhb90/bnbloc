@@ -26,6 +26,15 @@ const (
 	// warning threshold or was reached (R12). Room-less and operational,
 	// like an admin alert: sent once per threshold per month.
 	NotificationBudgetWarning = "budget_warning"
+	// NotificationContentShared tells a member that an author shared an
+	// expert, skill pack or prompt pack with them (a copy in their Library).
+	// Room-less; it links to the Library.
+	NotificationContentShared = "content_shared"
+	// NotificationContentReview tells an organization's admins that a
+	// content component waits for their approval, and its author how they
+	// decided. Room-less; it links to the Organization console or the
+	// Library.
+	NotificationContentReview = "content_review"
 )
 
 // AdminAlertRequest is the body of POST /v1/platform/alerts. Recipients
