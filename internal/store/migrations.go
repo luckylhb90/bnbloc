@@ -1029,6 +1029,16 @@ WHERE r.channel_id = '' AND d.user_id IS NULL`)
 			return nil
 		},
 	},
+	{
+		// Per-expert usage counts (docs/prd/2026-10-12-experts-and-teams.md,
+		// step 6: the Library's runs and members of an expert) read the jobs
+		// that wore it and their requesters on this index.
+		id: "2026_10_agent_jobs_expert_usage",
+		run: func(ctx context.Context, db sqlConn) error {
+			return addIndexIfMissing(ctx, db, "agent_jobs", "idx_agent_jobs_expert",
+				"ADD KEY idx_agent_jobs_expert (tenant_id, expert_id, requester_user_id)")
+		},
+	},
 }
 
 // sqlConn is the statement surface a migration runs on. runMigrations passes

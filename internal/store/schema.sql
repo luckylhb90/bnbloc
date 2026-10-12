@@ -137,7 +137,8 @@ CREATE TABLE IF NOT EXISTS agent_jobs (
   KEY idx_agent_jobs_owner_created (tenant_id, owner_user_id, created_at_ms),
   KEY idx_agent_jobs_requester_created (tenant_id, requester_user_id, created_at_ms),
   KEY idx_agent_jobs_owner_status (owner_user_id, status, core, provider),
-  KEY idx_agent_jobs_dispatched_by (tenant_id, dispatched_by_job_id)
+  KEY idx_agent_jobs_dispatched_by (tenant_id, dispatched_by_job_id),
+  KEY idx_agent_jobs_expert (tenant_id, expert_id, requester_user_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS bridge_heartbeats (

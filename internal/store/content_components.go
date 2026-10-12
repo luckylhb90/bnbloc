@@ -167,6 +167,9 @@ type ContentComponentStore interface {
 	ListContentUses(ctx context.Context, scopeKind ContentUseScope, scopeID string) ([]ContentUse, error)
 	// CountContentUses returns, per component, how many scopes use it.
 	CountContentUses(ctx context.Context, componentIDs []string) (map[string]int, error)
+	// CountMemberUses returns, per component, how many members turned it
+	// on for themselves (capped at MaxUsageCount; content_usage.go).
+	CountMemberUses(ctx context.Context, componentIDs []string) (map[string]int, error)
 
 	PutContentAck(ctx context.Context, a ContentAck) error
 	// ListContentAcks returns a member's acks of the given components.
@@ -421,7 +424,7 @@ func (s *MemoryContentComponents) CountContentUses(_ context.Context, componentI
 	}
 	out := map[string]int{}
 	for _, u := range s.uses {
-		if want[u.ComponentID] {
+		if want[u.ComponentID] && u.ScopeKind != ContentUseRoomExpert {
 			out[u.ComponentID]++
 		}
 	}

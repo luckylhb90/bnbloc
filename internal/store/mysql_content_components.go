@@ -273,7 +273,7 @@ func (s *MySQLContentComponents) CountContentUses(ctx context.Context, component
 	for i, id := range componentIDs {
 		args[i] = id
 	}
-	rows, err := s.DB.QueryContext(ctx, `SELECT component_id, COUNT(*) FROM content_component_uses WHERE component_id IN (`+inPlaceholders(len(args))+`) GROUP BY component_id`, args...)
+	rows, err := s.DB.QueryContext(ctx, `SELECT component_id, COUNT(*) FROM content_component_uses WHERE component_id IN (`+inPlaceholders(len(args))+`) AND scope_kind <> '`+string(ContentUseRoomExpert)+`' GROUP BY component_id`, args...)
 	if err != nil {
 		return nil, err
 	}
