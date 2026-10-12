@@ -51,6 +51,35 @@ expert its first `agents/<name>.md` body becomes the instructions). It drops
 OS/VCS junk, refuses links and unsafe file names, declares `scripts` when a
 skill ships scripts, and stops an archive bomb at the cap.
 
+## Built-in content
+
+Some content ships with the release: today the **Expert builder**
+(`cc_builtin_expert-builder`), which authors experts and skill packs by
+conversation (PRD §5). It is a content source, not a second library:
+
+- **Source.** `internal/contentbuiltin` embeds package directories
+  (`packages/<name>/`, the directory is the package name), packs each with
+  `tarbundle.PackFiles` and validates it with `contentpkg` when the process
+  starts; an invalid built-in refuses to start (its test fails first). It is
+  versioned with the release: changing a built-in's files means bumping its
+  `component.json` version, so a pinned job or room use never sees other
+  bytes under one version.
+- **Overlay.** `contentbuiltin.Overlay(store)` wraps the content store the
+  gateway and realtime use (their `cmd` mains): reads of a `cc_builtin_<name>`
+  id answer from the binary, listings include built-ins when the query asks
+  for scope `builtin` or names their ids (built-ins have no tenant and no
+  owner), writes are refused (`ErrReadOnly`). Uses and acks of a built-in are
+  ordinary rows (a room may pin the builder; `PutContentUse` stores a
+  `cc_builtin_` id without a component row, the overlay vouches for it).
+- **Visibility.** Scope `builtin` in `extpipe.MemberVisibility`: visible
+  and usable by every signed-in member, owned by nobody (read-only in the
+  Library). The chat path (`contentuse.Usable`), `contentuse.Effective` and
+  the bundle entitlement treat it like any other component.
+- **Bundle.** Its artifact key is `builtin/<sha256>`; `GET /v1/artifacts/{key}`
+  serves it from the binary after the usual entitlement, and the gateway's
+  own views read it the same way. The blob store and its collection never
+  hold it.
+
 ## Storage
 
 Tables (migration `2026_10_content_components`):
@@ -147,7 +176,7 @@ store and the artifact entitlement). JSON shapes: `internal/wire/content_compone
 | Route | What |
 |---|---|
 | `GET /v1/content-components?kind=expert\|skill` | The caller's Library: their own components plus org/platform ones visible to them, at the latest version |
-| `POST /v1/content-components` | Save a new component: `{form, version?}` (JSON) or a package archive (`component.json` names it). 201 detail; 409 duplicate name; 400 validator message |
+| `POST /v1/content-components` | Save a new component: `{form, version?}` (JSON) or a package archive (`component.json` names it). 201 detail; 409 duplicate name; 400 validator message. With `?job=&room=`: a save by the bridge running the job, as its requester (below) |
 | `POST /v1/content-components/import?kind=&name=` | Import an archive (tar, tar.gz, zip) as a new component; `?id=` imports a new version of the caller's component |
 | `GET /v1/content-components/{id}[?room=]` | Detail with versions (readable when visible, or used by a room of the caller's) |
 | `DELETE /v1/content-components/{id}` | Delete (owner) |
@@ -159,6 +188,30 @@ store and the artifact entitlement). JSON shapes: `internal/wire/content_compone
 | `DELETE /v1/content-uses?scope=&roomId=&componentId=` | Remove a use |
 | `GET /v1/content-components/effective?job=&room=` | The bridge running a job: what its turn wears |
 | `GET /v1/artifacts/{key}[?room=\|?job=&room=]` | Bundle download (`artifactEntitled`) |
+
+**Requests on behalf of a job's requester.** The room tools
+(`save_component`, `get_component`, `list_components`; see
+[`room-tools.md`](room-tools.md)) call `POST /v1/content-components`,
+`POST …/{id}/versions`, `GET …/{id}`, `GET …/{id}/versions/{v}` and
+`GET /v1/content-components` with a `?job=&room=` grant
+(`services/gateway/content_requester.go`). The grant follows dispatch's
+authority model: it is admitted only while the job is live and leased by a
+bridge of the caller (`store.JobLeasedBy`) and the job's requester is still a
+human member of the room; the request then acts as the requester (their
+Library, personal scope, owner = requester). When the agent is not the
+requester's own (borrowed or platform), a package that ships scripts is
+refused (403): someone else's machine may not plant executable content
+into a member's own Library, where own content runs unsandboxed. Every
+granted save is an `extension_audit` row (kind `content`, action `save`,
+actor = requester, detail naming the agent and the bridge). No other route
+honors the grant.
+
+**Saving deliverables.** Without room tools the drafted files are ordinary
+deliverables: the web offers "Save as expert" / "Save as skill pack" under a
+turn's files when they include a `component.json` of a content kind, packs
+the room's latest files under that directory as a tar and calls
+`POST /v1/content-components` (or `…/{id}/versions` for one of the member's
+own) as the clicking member; the validator's message shows inline.
 
 `GET /v1/components` also lists the member's content components through the
 same visibility function, in a separate `contentComponents` array (the

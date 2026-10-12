@@ -1,7 +1,8 @@
 # Content components: experts, skill packs, prompt packs; room tools and expert teams
 
 Status: approved, in development (2026-10-12): steps 1 and 2 implemented,
-step 3 in development (see "Status" below). Feasibility verified in code and by experiments (see
+step 3 in development, step 5 implemented for experts and skill packs (see
+"Status" below). Feasibility verified in code and by experiments (see
 "Evidence").
 
 ## Why
@@ -549,7 +550,43 @@ clean cutover of the old prompt library. Decisions:
 
 ## Status: step 5 (builder, experts and skill packs)
 
-**2026-10-12: in development.** Scope of this pass: the builder for
+**2026-10-12: implemented for experts and skill packs** (architecture:
+`docs/architecture/content-components.md` "Built-in content" and "Requests
+on behalf of a job's requester", `docs/architecture/room-tools.md`).
+Commits: e6b2dd8 (this design), a105077 (built-in content source and the
+Expert builder), 7cd5875 (gateway: saves and reads on behalf of a running
+job's requester), 5a1e9dd (bridge: `save_component`, `get_component`,
+`list_components`, `publish_component`), 385aeab (report the assigned
+version); web: 3ba8ac8 (Create with AI, the workshop room, Improve with
+AI, built-in items read-only), 467d8b8 (save toasts with "Open in Library"
+and "Try it now"), f64479d ("Save as expert" / "Save as skill pack" on a
+turn's deliverables).
+
+**Verified end to end** (local services on MySQL 8.4, a bridge driving
+bnbloc-acp → OpenCode with `opencode/big-pickle`, through the routes the
+web calls): in a private "Expert workshop" room pinning the builder, "help
+me create a release-notes writer expert …" made the builder draft
+`drafts/release-notes-writer/` (manifest, instructions, two embedded
+skills, README), explain it and offer a try; "looks good, save it" made it
+call `save_component`, which saved v1.0.0 into the member's Library (audit:
+"saved by agent maya/acp/opencode for maya"). The next turn, wearing the
+new expert, turned five merged PRs into New / Improved / Fixed notes and
+left out the two internal ones. "Improve … (id cc_…)" made the builder
+call `get_component` and save a new version through `save_component(id)`.
+The drafted deliverables, packed and posted to the version route as the
+member (the "Save as" path), validated and saved as well. The run showed
+the builder reporting its draft's version instead of the assigned one,
+fixed in 385aeab.
+
+**Open in step 5:** the builder for prompt packs (after step 3's kind
+lands); "it tries the draft by dispatching to an agent wearing it" (the
+builder answers a sample task in the draft's role instead: an unsaved
+draft cannot be worn); org/platform publishing (step 4); a pushed "saved"
+event (the web learns of a save by re-listing the Library after each agent
+reply in the workshop); the workshop's web flows were not exercised in a
+real browser.
+
+Scope of this pass: the builder for
 experts and skill packs (prompt packs follow step 3), "Create with AI" and
 "Improve with AI" in the Library, and two save paths that work on any
 agent. Decisions:

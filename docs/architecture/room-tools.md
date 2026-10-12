@@ -62,8 +62,7 @@ reply in the room; deliverables published with sourceSeq = the dispatch's seq
   relay: one POST per stdin line, every JSON-RPC message of the answer as
   one stdout line, headers mirrored from the body, `notifications/cancelled`
   aborting the matching request.
-- **Tools** (a registry: step 5's `save_component` / `publish_component`
-  register the same way):
+- **Tools** (one registry: dispatch, step 2; content authoring, step 5):
 
 | Tool | Reads / writes |
 | --- | --- |
@@ -71,6 +70,17 @@ reply in the room; deliverables published with sourceSeq = the dispatch's seq
 | `ask_agent(handle, task, expert?, wait_seconds?)` | `POST /v1/rooms/{room}/dispatch` with the bound job as parent, then polls `GET /v1/rooms/{room}/jobs/{jobId}` (default 10 min, at most 20, below the bridge's 30-minute turn cap). Settled: the reply text (the run's session replies in the channel history, up to the run's finish) and the deliverables `GET …/artifacts?sourceSeq=<dispatch seq>` as `[{name, kind, link}]`. Still running: the handle. |
 | `room_status(handle?)` | The run record of one task this session dispatched (with reply and deliverables once settled), or all of them. |
 | `read_room(since?, limit?)` | History of the bound job's channel. That channel is never the people chat (no agent job exists there), so agents never read it. |
+| `save_component(dir, id?)` | Reads every file under `dir` (workspace-relative, e.g. `drafts/reviewer`) through the core's session-files seam (`core.SessionFiles`, handed to the tools per turn as `TurnInfo.Workspace`), packs them (`tarbundle`, content limits) and posts the archive to `POST /v1/content-components` (or `…/{id}/versions`) with the bound job's `?job=&room=` grant: the gateway validates it and saves it as the job's requester. The validator's message comes back as the tool error. A core without session files cannot save; the agent points the member at "Save as expert" under its reply's files. |
+| `get_component(id, version?)` | `GET /v1/content-components/{id}[/versions/{v}]` with the grant: the manifest and every text file, as the requester may read it (the "Improve" flow). |
+| `list_components(kind?)` | `GET /v1/content-components` with the grant: the requester's Library. |
+| `publish_component(id, scope)` | Personal scope only until sharing and approval (PRD step 4); any other scope answers that it is not available yet. |
+
+**Content tools' authority** is the dispatch model applied to the content
+routes (`docs/architecture/content-components.md`, "Requests on behalf of a
+job's requester"): the grant is admitted only while the bound job runs on a
+bridge of the caller and its requester is a human member of the room; the
+save lands in the requester's Library; a borrowed or platform agent saves
+no script-bearing package.
 
 Room tools need the bridge and the agent CLI on the same host (the desktop
 sidecar case). A sandboxed drive still works: the agent CLI and its MCP
