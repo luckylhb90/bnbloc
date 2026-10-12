@@ -2,7 +2,7 @@ import type { AgentJob } from "@/lib/api";
 import { cn } from "@/lib/cn";
 import { AgentHandle } from "@/views/UserName";
 import { isLiveJob } from "@/lib/agentRuns";
-import { agentJobStatusLabel, jobWearing } from "@/views/room/agentJobLabels";
+import { agentJobStatusLabel, jobWearing, retryNote } from "@/views/room/agentJobLabels";
 
 // The job's raw diagnostics stay with its owner and admins (the run record);
 // a row shows the projection's failure text, what the turn wore and what it
@@ -29,6 +29,7 @@ export function AgentJobStatus({
         const live = isLiveJob(j);
         const wearing = live ? jobWearing(j) : [];
         const missing = live ? (j.contentMissing ?? []) : [];
+        const retry = retryNote(j);
         return (
           <div
             key={j.jobId}
@@ -48,6 +49,7 @@ export function AgentJobStatus({
                 {agentJobStatusLabel(j, queueAhead?.(j))}
               </span>
               {j.attempt > 1 && <span>attempt {j.attempt}</span>}
+              {retry && <span className="min-w-0 truncate" title={retry}>{retry}</span>}
               {live && onCancel && (
                 <button
                   type="button"

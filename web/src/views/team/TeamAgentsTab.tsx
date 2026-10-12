@@ -19,7 +19,7 @@ import { Badge, Card, Skeleton, StatTile } from "@/ui/Card";
 import { ErrorBox } from "@/ui/ErrorBox";
 import { EmptyState } from "@/ui/Page";
 import { Segment } from "@/ui/Segment";
-import { AGENT_JOB_FAILURE_LABELS, AGENT_JOB_STATUS_LABELS } from "@/views/room/agentJobLabels";
+import { AGENT_JOB_STATUS_LABELS, failureLabel } from "@/views/room/agentJobLabels";
 import { AgentHandle, UserName, useAgentHandle } from "@/views/UserName";
 import { errorText } from "@/lib/errors";
 import { agentIdentity } from "@/lib/roomAgents";
@@ -76,9 +76,7 @@ function statusLine(a: TeamAgent): string {
 
 function lastJobLine(j: TeamJob): string {
   const at = j.finishedAtMs || j.createdAtMs;
-  const reason = j.failureReason
-    ? ` (${AGENT_JOB_FAILURE_LABELS[j.failureReason] ?? j.failureReason.replace(/_/g, " ")})`
-    : "";
+  const reason = j.failureReason ? ` (${failureLabel(j.failureReason)})` : "";
   return `${jobStatusLabel(j.status)}${reason} · ${relativeTime(at)}`;
 }
 

@@ -4,7 +4,7 @@ import { cn } from "@/lib/cn";
 import { relativeTime } from "@/lib/format";
 import { ActorLabel } from "@/views/room/ActorLabel";
 import { isLiveJob } from "@/lib/agentRuns";
-import { agentJobStatusLabel } from "@/views/room/agentJobLabels";
+import { agentJobStatusLabel, retryNote } from "@/views/room/agentJobLabels";
 import { agentHandle } from "@/lib/roomAgents";
 
 export type RecentArtifactChange = {
@@ -100,6 +100,7 @@ export function ActivityRail({
         ))}
         {visibleJobs.map((job) => {
           const live = isLiveJob(job);
+          const retry = retryNote(job);
           return (
             <span
               key={job.jobId}
@@ -108,6 +109,11 @@ export function ActivityRail({
               <ActorLabel actor={agentHandle({ ownerId: job.ownerUserId, core: job.core || undefined, provider: job.provider })} />
               <span className="shrink-0">{agentJobStatusLabel(job, queueAhead?.(job))}</span>
               {job.attempt > 1 && <span className="shrink-0 text-[var(--color-fg-subtle)]">attempt {job.attempt}</span>}
+              {retry && (
+                <span className="min-w-0 truncate text-[var(--color-fg-subtle)]" title={retry}>
+                  {retry}
+                </span>
+              )}
               {live && (
                 <button
                   type="button"

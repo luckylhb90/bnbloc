@@ -32,7 +32,7 @@ import { ErrorBox } from "@/ui/ErrorBox";
 import { Input } from "@/ui/Input";
 import { EmptyState } from "@/ui/Page";
 import { Segment } from "@/ui/Segment";
-import { AGENT_JOB_FAILURE_LABELS, AGENT_JOB_STATUS_LABELS } from "@/views/room/agentJobLabels";
+import { AGENT_JOB_STATUS_LABELS, failureLabel } from "@/views/room/agentJobLabels";
 import { AgentHandle, UserName } from "@/views/UserName";
 import { useDisplayNames } from "@/lib/useDisplayName";
 import { errorText } from "@/lib/errors";
@@ -60,7 +60,7 @@ function statusText(r: AgentRun): string {
 }
 
 function failureText(r: AgentRun): string {
-  const reason = r.failureReason ? AGENT_JOB_FAILURE_LABELS[r.failureReason] ?? r.failureReason.replace(/_/g, " ") : "";
+  const reason = r.failureReason ? failureLabel(r.failureReason) : "";
   if (r.error && reason) return `${reason}: ${r.error}`;
   return r.error || reason;
 }
@@ -399,10 +399,21 @@ function RunDetail({
             </dd>
           </>
         )}
-        {(run.attempt ?? 0) > 1 && (
+        {((run.attempt ?? 0) > 1 || (run.attempts?.length ?? 0) > 0) && (
           <>
             <dt className="text-[var(--color-fg-subtle)]">Attempts</dt>
-            <dd className="tabular">{run.attempt}</dd>
+            <dd className="flex flex-col gap-0.5">
+              <span className="tabular">{run.attempt}</span>
+              {(run.attempts ?? []).map((a) => (
+                <span key={a.attempt} className="text-[var(--color-fg-muted)]" data-run-attempt>
+                  <span className="tabular">#{a.attempt}</span> {failureLabel(a.reason)}
+                  <span className="tabular text-[var(--color-fg-subtle)]" title={exactTime(a.atMs)}>
+                    {" "}
+                    · {formatClock(a.atMs)}
+                  </span>
+                </span>
+              ))}
+            </dd>
           </>
         )}
         <dt className="text-[var(--color-fg-subtle)]">Usage</dt>
