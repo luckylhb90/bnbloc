@@ -8,6 +8,7 @@ import { Field, Input, Textarea } from "@/ui/Input";
 import type { ArtifactUploadStates } from "@/views/ComponentArtifactUploadSection";
 import { ComponentRolloutOptions } from "@/views/ComponentRolloutOptions";
 import type { ReviewPackage } from "@/views/componentPublishTypes";
+import { componentKindLabel } from "@/lib/componentKinds";
 
 export function ComponentUploadReviewPanel(props: {
   readonly review: ReviewPackage;
@@ -35,7 +36,7 @@ export function ComponentUploadReviewPanel(props: {
         <h4 className="mt-1 text-base font-semibold text-[var(--color-fg)]">Review before publishing</h4>
         <p className="mt-1 text-sm text-[var(--color-fg-muted)]">Check the summary, sign these exact package bytes, then publish.</p>
       </div>
-      <div className="flex flex-wrap items-center gap-2"><h3 className="text-base font-semibold text-[var(--color-fg)]">{envelope.name}</h3><Badge tone="neutral" className="tabular">v{envelope.version}</Badge><Badge tone="accent">{kindName(envelope.kind)}</Badge><Badge tone="neutral">{envelope.runtime}</Badge></div>
+      <div className="flex flex-wrap items-center gap-2"><h3 className="text-base font-semibold text-[var(--color-fg)]">{envelope.name}</h3><Badge tone="neutral" className="tabular">v{envelope.version}</Badge><Badge tone="accent">{componentKindLabel(envelope.kind)}</Badge><Badge tone="neutral">{envelope.runtime}</Badge></div>
       <p className="text-sm text-[var(--color-fg-muted)]">{envelope.description || "No description provided."}</p>
       <div className="grid gap-2 text-xs sm:grid-cols-2"><Fact label="Publisher" value={envelope.publisher} /><Fact label="Contract" value={contractFact(envelope)} /><Fact label="Artifacts" value={artifactDetail(envelope)} /><Fact label="Signature" value={props.signature.trim() ? "Detached signature attached" : !artifactsReady ? "Upload artifacts first" : props.signatureRequired ? "Required — not attached yet" : "Not signed (allowed on this gateway)"} /></div>
       <Field label="Rollout policy"><ComponentRolloutOptions value={props.rollout} onChange={props.setRollout} disabled={props.publishing} /></Field>
@@ -55,7 +56,6 @@ export function ComponentUploadReviewPanel(props: {
   );
 }
 
-function kindName(kind: ComponentPackageEnvelope["kind"]): string { return kind === "bnbloc.core.package/v1" ? "Core" : kind === "bnbloc.plugin.package/v1" ? "Plugin" : kind === "bnbloc.notifier.package/v1" ? "Notifier" : kind === "bnbloc.mcp.package/v1" ? "MCP tool" : "Auth provider"; }
 function contractFact(envelope: ComponentPackageEnvelope): string { return envelope.contract ?? (envelope.protocol ? `Core Protocol ${envelope.protocol.min}–${envelope.protocol.max}` : "No contract declared"); }
 function artifactDetail(envelope: ComponentPackageEnvelope): string { const count = Object.keys(envelope.artifacts ?? {}).length; return envelope.runtime === "sidecar" || envelope.runtime === "stdio" ? `${count} platform binary${count === 1 ? "" : "ies"} required` : "No binary required"; }
 function Fact({ label, value }: { readonly label: string; readonly value: string }) { return <div className="rounded-[var(--radius)] border border-[var(--color-border)] bg-[var(--color-surface-2)] px-3 py-2"><div className="text-[0.65rem] font-medium uppercase tracking-wide text-[var(--color-fg-subtle)]">{label}</div><div className="mt-0.5 break-words text-[var(--color-fg)]">{value}</div></div>; }

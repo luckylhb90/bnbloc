@@ -131,22 +131,6 @@ export function MCPFacts({ component }: { readonly component: PlatformComponent 
   );
 }
 
-export function kindLabel(kind: string): string {
-  return kind === "core"
-    ? "Core"
-    : kind === "plugin"
-      ? "Plugin"
-      : kind === "notifier"
-        ? "Notifier"
-        : kind === "sandbox"
-          ? "Sandbox"
-          : kind === "previewer"
-            ? "Previewer"
-            : kind === "mcp"
-              ? "MCP tool"
-              : "Auth provider";
-}
-
 export function memberMeta(component: MemberComponent): string {
   const facts = [
     component.kind,

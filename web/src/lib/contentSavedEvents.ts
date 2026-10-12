@@ -4,7 +4,7 @@
 // view forwards it here and the workshop toasts the member's own saves, so
 // nothing re-lists the Library after every agent reply.
 
-import type { ContentKind } from "./contentComponents.ts";
+import { contentKindWord, type ContentKind } from "./contentComponents.ts";
 
 export type { ContentSaved } from "./wire.gen.ts";
 import type { ContentSaved } from "./wire.gen.ts";
@@ -40,7 +40,7 @@ export function isOwnSave(s: ContentSaved, subject: string | null): boolean {
 
 // submittedMessage is the toast of a publish request the room tools opened.
 export function submittedMessage(s: Pick<ContentSaved, "kind" | "name" | "displayName" | "version">): string {
-  const word = s.kind === "skill" ? "skill pack" : s.kind === "prompt" ? "prompt pack" : "expert";
+  const word = contentKindWord(s.kind);
   return `Asked your organization's admins to publish the ${word} ${s.displayName || s.name} v${s.version}`;
 }
 

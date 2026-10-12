@@ -1,14 +1,6 @@
 import { useEffect, useState } from "react";
 import { DownloadSimpleIcon, ShieldWarningIcon, SparkleIcon } from "@phosphor-icons/react";
-import {
-  contentLabel,
-  isTeam,
-  permissionLabel,
-  usageLine,
-  type ContentComponent,
-  type ContentComponentDetail,
-  type ContentVersionDetail,
-} from "@/lib/contentComponents";
+import { CONTENT_KINDS, contentLabel, isTeam, permissionLabel, usageLine, type ContentComponent, type ContentComponentDetail, type ContentVersionDetail } from "@/lib/contentComponents";
 import { contentApi } from "@/lib/contentComponentsApi";
 import { formatBytes, relativeTime } from "@/lib/format";
 import { saveBlob } from "@/lib/saveBlob";
@@ -114,7 +106,7 @@ export function ContentViewDialog({
       {c && (
         <div className="flex flex-col gap-4 text-sm">
           <div className="flex flex-wrap items-center gap-2 text-xs text-[var(--color-fg-subtle)]">
-            <Badge>{c.kind === "expert" ? "Expert" : "Skill pack"}</Badge>
+            <Badge>{CONTENT_KINDS[c.kind].label}</Badge>
             <span className="font-mono">{c.name}</span>
             <span>
               <ContentByline component={c} />

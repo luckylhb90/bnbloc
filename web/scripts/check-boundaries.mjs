@@ -118,6 +118,15 @@ export const RULES = [
     sample: { file: "lib/xApi.ts", text: "req(`/v1/rooms/${encodeURIComponent(id)}/members`)" },
   },
   {
+    id: 12,
+    name: "what the client says about a kind lives in its Record table (COMPONENT_KINDS, CONTENT_KINDS)",
+    // Label chains per kind drifted: a sandbox read "Auth provider" in
+    // review, a prompt pack had no word (web M24, L5).
+    pattern: /kind === "skill" \? "skill pack"|=== "bnbloc\.[\w-]+\.package\/v1" \? "[A-Z]/,
+    allowed: ["lib/componentKinds.ts", "lib/contentComponents.ts"],
+    sample: { file: "views/X.tsx", text: 'return kind === "bnbloc.core.package/v1" ? "Core" : "Auth provider";' },
+  },
+  {
     id: 6,
     name: "the session token rides a URL only on the room event stream",
     // EventSource cannot set headers, so sse.ts passes the session as

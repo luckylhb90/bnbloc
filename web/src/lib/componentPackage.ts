@@ -1,4 +1,5 @@
 import type { ComponentMCP, ComponentPackageEnvelope, ComponentPreviewer, ComponentSidecarFile } from "./apiTypes";
+import { COMPONENT_KINDS, componentKindOfPackage } from "./componentKinds.ts";
 
 type ParseResult =
   | { readonly ok: true; readonly value: ComponentPackageEnvelope }
@@ -81,36 +82,17 @@ function packageShapeError(
   sidecar: ComponentPackageEnvelope["sidecar"] | undefined,
   hooks: readonly string[] | undefined,
 ): string | null {
-  if (kind === "bnbloc.plugin.package/v1") {
-    if (typeof record["contract"] !== "string") return "plugin package requires contract";
-    if (record["contract"] !== "bnbloc.plugin.contract/v1") return `plugin package contract ${String(record["contract"])} is not supported`;
-    if (runtime !== "sidecar") return "plugin package runtime must be sidecar";
-    if (!hooks || hooks.length === 0) return "plugin package requires at least one hook";
+  const short = componentKindOfPackage(kind);
+  const meta = short ? COMPONENT_KINDS[short] : undefined;
+  if (meta?.contract) {
+    if (typeof record["contract"] !== "string") return `${meta.noun} package requires contract`;
+    if (record["contract"] !== meta.contract) return `${meta.noun} package contract ${String(record["contract"])} is not supported`;
   }
-  if (kind === "bnbloc.auth-provider.package/v1") {
-    if (typeof record["contract"] !== "string") return "auth-provider package requires contract";
-    if (record["contract"] !== "bnbloc.auth-provider.contract/v1") return `auth-provider package contract ${String(record["contract"])} is not supported`;
-    if (runtime !== "endpoint") return "auth-provider package runtime must be endpoint";
-  }
-  if (kind === "bnbloc.notifier.package/v1") {
-    if (record["contract"] !== "bnbloc.notifier.contract/v1") return `notifier package contract ${String(record["contract"])} is not supported`;
-    if (runtime !== "endpoint") return "notifier package runtime must be endpoint";
-  }
-  if (kind === "bnbloc.sandbox.package/v1") {
-    if (record["contract"] !== "bnbloc.sandbox.contract/v1") return `sandbox package contract ${String(record["contract"])} is not supported`;
-    if (runtime !== "sidecar" && runtime !== "endpoint") return "sandbox package runtime must be sidecar or endpoint";
-    if (runtime === "sidecar" && !sidecar?.tokenEnv) return "sandbox sidecar requires sidecar.tokenEnv";
-  }
-  if (kind === "bnbloc.previewer.package/v1") {
-    if (record["contract"] !== "bnbloc.previewer.contract/v1") return `previewer package contract ${String(record["contract"])} is not supported`;
-    if (runtime !== "bundle") return "previewer package runtime must be bundle";
-    if (!("previewer" in record)) return "previewer package requires previewer";
-  }
-  if (kind === "bnbloc.mcp.package/v1") {
-    if (record["contract"] !== "bnbloc.mcp.contract/v1") return `MCP package contract ${String(record["contract"])} is not supported`;
-    if (runtime !== "stdio" && runtime !== "endpoint") return "MCP package runtime must be stdio or endpoint";
-    if (!("mcp" in record)) return "MCP package requires mcp (its tools)";
-  }
+  if (meta?.runtimes && !meta.runtimes.includes(runtime)) return `${meta.noun} package runtime must be ${meta.runtimes.join(" or ")}`;
+  if (short === "plugin" && (!hooks || hooks.length === 0)) return "plugin package requires at least one hook";
+  if (short === "sandbox" && runtime === "sidecar" && !sidecar?.tokenEnv) return "sandbox sidecar requires sidecar.tokenEnv";
+  if (short === "previewer" && !("previewer" in record)) return "previewer package requires previewer";
+  if (short === "mcp" && !("mcp" in record)) return "MCP package requires mcp (its tools)";
   if (runtime === "stdio" && Object.keys(artifacts ?? {}).length === 0) return "stdio runtime requires one binary artifact per platform";
   if (runtime === "bundle" && (Object.keys(artifacts ?? {}).length !== 1 || !artifacts?.["bundle"])) return "bundle runtime requires exactly one artifact named bundle";
   if (runtime === "endpoint" && !readEndpoint(record["endpoint"])) return "endpoint runtime requires endpoint.baseUrl";
@@ -122,15 +104,8 @@ function packageShapeError(
 }
 
 function readPackageKind(value: unknown): ComponentPackageEnvelope["kind"] | null {
-  return value === "bnbloc.core.package/v1" ||
-    value === "bnbloc.plugin.package/v1" ||
-    value === "bnbloc.auth-provider.package/v1" ||
-    value === "bnbloc.notifier.package/v1" ||
-    value === "bnbloc.sandbox.package/v1" ||
-    value === "bnbloc.previewer.package/v1" ||
-    value === "bnbloc.mcp.package/v1"
-    ? value
-    : null;
+  const kind = componentKindOfPackage(value);
+  return kind ? COMPONENT_KINDS[kind].packageKind : null;
 }
 
 function readRuntime(value: unknown): ComponentPackageEnvelope["runtime"] | null {

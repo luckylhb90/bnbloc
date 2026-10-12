@@ -6,7 +6,8 @@ import { Button } from "@/ui/Button";
 import { Badge, Card } from "@/ui/Card";
 import { ConfirmDialog } from "@/ui/Dialog";
 import { Segment } from "@/ui/Segment";
-import { AdoptionBar, ArtifactFacts, ChipGroup, FactBlock, KindIcon, MCPFacts, PreviewerFacts, RolloutBadge, TrustBlock, kindLabel, memberMeta } from "@/views/componentFacts";
+import { AdoptionBar, ArtifactFacts, ChipGroup, FactBlock, KindIcon, MCPFacts, PreviewerFacts, RolloutBadge, TrustBlock, memberMeta } from "@/views/componentFacts";
+import { componentKindLabel } from "@/lib/componentKinds";
 
 const ROLLOUT_SEGMENTS = [
   { value: "auto", label: "Auto" },
@@ -85,7 +86,7 @@ function AdminComponentCard({
       <div className="mt-4 grid gap-3 md:grid-cols-2">
         <TrustBlock trust={component.trust} />
         <FactBlock label="Publisher" value={component.publisher || "unknown publisher"} />
-        <FactBlock label="Kind" value={kindLabel(component.kind)} />
+        <FactBlock label="Kind" value={componentKindLabel(component.kind)} />
         <FactBlock label="Runtime" value={component.runtime} />
         {component.protocol && <FactBlock label="Protocol" value={`${component.protocol.min}-${component.protocol.max}`} />}
         {component.installedAtMs && <FactBlock label="Installed" value={new Date(component.installedAtMs).toLocaleString()} />}
@@ -190,7 +191,7 @@ function ComponentHeader({ component }: { readonly component: PlatformComponent 
           <div className="flex flex-wrap items-center gap-2">
             <h3 className="truncate text-base font-semibold text-[var(--color-fg)]">{component.name}</h3>
             <Badge tone="neutral" className="tabular">v{component.version}</Badge>
-            <Badge tone={component.kind === "plugin" ? "neutral" : "accent"}>{kindLabel(component.kind)}</Badge>
+            <Badge tone={component.kind === "plugin" ? "neutral" : "accent"}>{componentKindLabel(component.kind)}</Badge>
             {component.requiresDesktop && <Badge tone="warning">Desktop sidecar</Badge>}
             <RolloutBadge rollout={component.rollout} />
           </div>

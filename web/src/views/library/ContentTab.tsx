@@ -10,7 +10,7 @@ import {
   UploadSimpleIcon,
   WrenchIcon,
 } from "@phosphor-icons/react";
-import { contentLabel, isBuiltin, isTeam, matchesContent, usageLine, type ContentComponent } from "@/lib/contentComponents";
+import { contentKindWord, contentLabel, isBuiltin, isTeam, matchesContent, usageLine, type ContentComponent } from "@/lib/contentComponents";
 import { contentApi } from "@/lib/contentComponentsApi";
 import { relativeTime } from "@/lib/format";
 import { improvePrompt, workshopPrompt } from "@/lib/workshop";
@@ -246,7 +246,7 @@ export function ContentTab({
         open={!!deleting}
         onClose={() => setDeleting(null)}
         onConfirm={() => deleting && void remove(deleting)}
-        title={kind === "expert" ? "Delete expert?" : "Delete skill pack?"}
+        title={`Delete ${contentKindWord(kind)}?`}
         description={
           deleting
             ? deleting.scope === "shared"

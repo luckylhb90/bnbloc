@@ -7,6 +7,7 @@ import { BINARY_PLATFORMS } from "@/lib/mcpPackageForm";
 import { Button } from "@/ui/Button";
 import { Field, Input, Textarea } from "@/ui/Input";
 import { ComponentRolloutOptions } from "@/views/ComponentRolloutOptions";
+import { componentKindLabel } from "@/lib/componentKinds";
 
 const PLATFORMS = BINARY_PLATFORMS;
 
@@ -36,7 +37,7 @@ export function ComponentPackageBuilderForm({ initialDraft, initialEnvelope, onB
   const [rollout, setRollout] = useState<ComponentRollout>("auto");
   const [advanced, setAdvanced] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const descriptionLine = useMemo(() => `${packageKindLabel(initialDraft.kind)} · ${runtimeLabel(initialDraft.runtime)}`, [initialDraft.kind, initialDraft.runtime]);
+  const descriptionLine = useMemo(() => `${componentKindLabel(initialDraft.kind)} · ${runtimeLabel(initialDraft.runtime)}`, [initialDraft.kind, initialDraft.runtime]);
   const isCore = initialDraft.kind === "bnbloc.core.package/v1";
   const isPlugin = initialDraft.kind === "bnbloc.plugin.package/v1";
 
@@ -86,5 +87,4 @@ export function ComponentPackageBuilderForm({ initialDraft, initialEnvelope, onB
 }
 
 function splitLines(value: string): string[] { return value.split(/\r?\n/).map((line) => line.trim()).filter((line) => line !== ""); }
-function packageKindLabel(kind: PackageDraftFields["kind"]): string { return kind === "bnbloc.core.package/v1" ? "Core" : kind === "bnbloc.plugin.package/v1" ? "Plugin" : kind === "bnbloc.notifier.package/v1" ? "Notifier" : kind === "bnbloc.mcp.package/v1" ? "MCP tool" : "Authentication provider"; }
 function runtimeLabel(runtime: PackageDraftFields["runtime"]): string { return runtime === "endpoint" ? "Service URL" : runtime === "manifest" ? "Core manifest" : runtime === "stdio" ? "stdio server binary" : "Local sidecar binary"; }

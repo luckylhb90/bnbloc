@@ -1,4 +1,5 @@
 import type { ComponentMCP, ComponentPackageEnvelope, ComponentPackageKind, ComponentRuntime, LocalSettingField } from "./apiTypes";
+import { COMPONENT_KINDS, componentKindOfPackage } from "./componentKinds.ts";
 
 export type PublishWizardStep = "source" | "configure" | "artifacts" | "publish";
 
@@ -55,12 +56,8 @@ export function previousPublishWizardStep(step: PublishWizardStep, runtime: Comp
 }
 
 export function createPackageDraft(kind: ComponentPackageKind, runtime: ComponentRuntime): PackageDraftFields {
-  const contract =
-    kind === "bnbloc.plugin.package/v1" ? "bnbloc.plugin.contract/v1"
-    : kind === "bnbloc.auth-provider.package/v1" ? "bnbloc.auth-provider.contract/v1"
-    : kind === "bnbloc.notifier.package/v1" ? "bnbloc.notifier.contract/v1"
-    : kind === "bnbloc.mcp.package/v1" ? "bnbloc.mcp.contract/v1"
-    : undefined;
+  const short = componentKindOfPackage(kind);
+  const contract = short ? COMPONENT_KINDS[short].contract : undefined;
   return {
     kind, runtime, name: "", version: "0.1.0", publisher: "", protocolMin: "1.0", protocolMax: "1.0",
     platformArtifacts: takesBinaries(runtime) ? [] : undefined, contract, hooks: kind === "bnbloc.plugin.package/v1" ? [] : undefined,

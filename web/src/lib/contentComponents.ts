@@ -23,15 +23,22 @@ export function isBuiltin(c: Pick<ContentComponent, "scope">): boolean {
   return c.scope === "builtin";
 }
 
-// The manifest kinds of content packages, by short kind.
-export const CONTENT_PACKAGE_KINDS: Readonly<Record<string, ContentKind>> = {
-  "bnbloc.expert.package/v1": "expert",
-  "bnbloc.skill.package/v1": "skill",
-  "bnbloc.prompt.package/v1": "prompt",
+// CONTENT_KINDS is everything the client says about a content kind, one row
+// per kind (web L5): a Record over the generated ContentKind, so a kind the
+// server registers (contentpkg) fails to compile until it has its row.
+export const CONTENT_KINDS: Readonly<Record<ContentKind, { readonly word: string; readonly label: string; readonly libraryTab: "experts" | "skills" | "prompts"; readonly packageKind: string }>> = {
+  expert: { word: "expert", label: "Expert", libraryTab: "experts", packageKind: "bnbloc.expert.package/v1" },
+  skill: { word: "skill pack", label: "Skill pack", libraryTab: "skills", packageKind: "bnbloc.skill.package/v1" },
+  prompt: { word: "prompt pack", label: "Prompt pack", libraryTab: "prompts", packageKind: "bnbloc.prompt.package/v1" },
 };
 
+// The short kind of a content package's manifest kind.
+export const CONTENT_PACKAGE_KINDS: Readonly<Record<string, ContentKind>> = Object.fromEntries(
+  (Object.entries(CONTENT_KINDS) as [ContentKind, (typeof CONTENT_KINDS)[ContentKind]][]).map(([k, m]) => [m.packageKind, k]),
+);
+
 export function contentKindWord(kind: ContentKind): string {
-  return kind === "skill" ? "skill pack" : kind === "prompt" ? "prompt pack" : "expert";
+  return CONTENT_KINDS[kind].word;
 }
 
 // "room-expert" is a room's expert: one of its pinned experts that every
