@@ -426,6 +426,12 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
     and Sandbox Protocol clients and conformance use it
     (`TestProtocolRequestsBuiltByREST`). An envelope's `retryable` is an
     optional `*bool`: absent, `core.Retryable` decides from the status.
+  - **Secret-bearing types log through `core.LogRedacted`** (`core/logvalue.go`:
+    tokens and secret values redacted, env and headers as names, content as
+    size). Every type in `core`, `core/protocol` and `sandbox/protocol` with
+    such a field, directly or nested, implements `LogValue` with it;
+    `TestSecretsRedacted` derives that set from the sources and logs a fully
+    populated value of each.
   - **Optional capabilities go through `core.As[T](ctx, p, ep, cap)`**, never
     a bare type assertion: a manifest or protocol provider implements every
     optional method but `As` consults its `CapabilityReporter` (declared ops /
