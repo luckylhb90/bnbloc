@@ -50,7 +50,9 @@ mean "persist the health-check discussion").
 - `README.md` — how the room works: every agent has its own workspace,
   deliverables are stored by bnbloc and named by their producer, the Library
   is bnbloc's and shared, how to verify with or without room tools
-  (`roomlog.ReadmeFile`; the push model's first prompt carries the same model)
+  (`roomlog.ReadmeFile`). Written only when its content changes (once per
+  session); the session itself is told the same model once, in its agent
+  profile or its first prompt (`sessionGuidance`), never per turn
 - `artifacts.md` — the room's newest deliverables (live state, distinct from
   conversation records), each with its latest version, id and the agent that
   produced it (`owner/provider` and core, from the version's source job), and
@@ -59,9 +61,11 @@ mean "persist the health-check discussion").
   job's grant (`GET /v1/components?job=&room=`)
 - `live.md` — what members did in running deliverables
 
-The records besides the history are rewritten every turn
+`artifacts.md`, `library.md` and `live.md` are rewritten every turn
 (`roomRecordFiles`); a read that fails renders as unreadable, never as
-empty.
+empty. The per-turn pointer prompt is a plain file list
+(`roomlog.ComposePointer`, golden `testdata/golden/pointer.txt`): static
+guidance never rides a turn.
 
 The fetch pages **every** channel of the room (the old push model only read the
 default channel, so most of a multi-channel room's conversation never reached

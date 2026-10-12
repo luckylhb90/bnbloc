@@ -48,12 +48,17 @@ and an agent without room tools has no read-only view of the facts it needs:
 Every point applies to every core, with or without room tools, one owner per
 rule:
 
-1. `.room/README.md`: the room model in a few lines (own workspaces,
-   deliverables stored by bnbloc and named by their producer, the Library is
-   bnbloc's and shared, how to verify with or without room tools). Owner:
-   `roomlog` (the agent-facing room reader), written by the bridge's
-   materialization every turn; the push model's first prompt carries the same
-   text.
+1. The room model in a few lines (own workspaces, deliverables stored by
+   bnbloc and named by their producer, the Library is bnbloc's and shared,
+   how to verify with or without room tools). Owner: `roomlog`
+   (`SessionGuidance`). It is static, so it is stated **once per session**,
+   never per turn: the bridge's `sessionGuidance` puts it at the head of the
+   agent profile a session is created with on a core advertising
+   `agentProfile` (the seam that carries an expert's instructions, outside
+   the binding sum like the session contributors' parts), else at the head
+   of the session's first prompt (the expert fallback's prefix).
+   `.room/README.md` keeps the same text in the workspace, written only when
+   it differs from what the session's workspace holds.
 2. `.room/artifacts.md` names each deliverable's producer as
    `owner/provider` and core (from the version's source job, the run record),
    its latest version and id, and says plainly it is not in this workspace.
@@ -86,3 +91,30 @@ Tests: `TestReadmeGolden`, `TestArtifactsGoldenNamesProducers`,
 `TestGrantedCatalogIsTheRequestersLibrary` (gateway: another member's
 private component never appears); `TestReadArtifact*` against the real room
 service (non-member, another room, size cap); `TestListComponents…`.
+
+### Follow-up: static guidance once per session (2026-10-13)
+
+7f42349 rewrote `.room/README.md` every turn and added a README line with a
+behavioural clause ("read it before saying another agent's file or
+component is missing") to every pull turn's prompt (`ComposePointer`):
+static guidance riding every turn. Now (01b2c3f):
+
+- the room model is session guidance (fix point 1): in the profile of an
+  `agentProfile` core's session, else in the session's first prompt only;
+  the push model's `Compose` no longer inlines it;
+- `ComposePointer` is a plain file list again (INDEX, recent, artifacts,
+  library), one short line over the prompt before the room model, pinned by
+  `testdata/golden/pointer.txt`; `.room/INDEX.md` points at `README.md`;
+- `.room/README.md` is written when its content changes
+  (`CtxState.ReadmeSum`, `roomlog.ReadmeUpdate`): once per session;
+  `artifacts.md` and `library.md` stay per turn (their data changes).
+
+Per-turn pull prompt framing (`ComposePointer("maya/codex", "MSG", nil)`,
+chars/4): 143 tokens before 7f42349, 207 at 5cd8f08, 156 now (626 chars).
+The room model itself (about 254 tokens) is paid once per session, and the
+1.5 KB README write once per session instead of every turn.
+
+Tests: `TestComposePointerGolden`, `TestReadmeUpdateOnlyWhenChanged`,
+`TestComposeCarriesNoSessionGuidance` (roomlog);
+`TestRoomModelRidesTheProfile`, `TestRoomModelInFirstPromptOnlyWithoutProfile`
+(pull and push), `TestDriveClaimPullWritesReadmeOnlyWhenChanged` (bridge).

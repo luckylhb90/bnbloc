@@ -1074,12 +1074,18 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   (`TestHistoryReadsOnlyAgentChannels`, `TestDecodeRowSkipsNotices`). The
   bridge reads with its owner's human session, so realtime does not guard
   it: never add an agent-facing history read beside it.
-- **Every agent is told the room model, with or without room tools.**
-  `roomlog` owns what an agent reads about the room besides history
-  (`docs/architecture/room-tools.md`, "What every agent is told"):
-  `.room/README.md` (`ReadmeFile`; the push prompt carries the same
-  `RoomModel`: own workspaces, deliverables stored by bnbloc, the Library is
-  bnbloc's and shared, how to verify), `.room/artifacts.md` (each
+- **Every agent is told the room model, with or without room tools,
+  once per session.** `roomlog` owns what an agent reads about the room
+  besides history (`docs/architecture/room-tools.md`, "What every agent is
+  told"): the room model (`SessionGuidance`: own workspaces, deliverables
+  stored by bnbloc, the Library is bnbloc's and shared, how to verify) is
+  static session guidance; the bridge's `sessionGuidance` is the one owner
+  of where it goes: the head of the agent profile on an `agentProfile` core
+  (outside the binding sum), else the head of the session's first prompt
+  (the expert fallback's prefix). Never put static guidance in a per-turn
+  prompt: `ComposePointer` is a plain file list pinned by its golden.
+  `.room/README.md` (`ReadmeFile`) is written only when its content changes
+  (`ReadmeUpdate`); `.room/artifacts.md` (each
   deliverable's producer by `VersionProducer`, the source job's agent from
   the run record, marked not in this workspace) and `.room/library.md`
   (`ReadLibrary`: `GET /v1/components?job=&room=`, the requester's Library

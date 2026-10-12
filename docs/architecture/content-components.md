@@ -376,13 +376,16 @@ Design: PRD §1 "Sources, scopes and trust" and "Status: step 4".
    (`artifactEntitled` admits a bundle in effect for a job the caller's
    bridge runs), verified against its sha256 and validated again.
 4. **Profile.** A core advertising `agentProfile` receives the profile
-   (instructions + skills + the MCP tools the content requires + the
-   session contributors' MCP servers) on
+   (the room model, `roomlog.SessionGuidance`, first; instructions +
+   skills + the MCP tools the content requires + the session contributors'
+   MCP servers) on
    session create and maps it natively (see
    [`core-providers.md`](core-providers.md)). Any other core gets the
-   fallback: the instructions and a skill summary prefixed to the session's
-   first prompt, the skill files under `.agents/skills/` when it accepts
-   workspace files, the bodies inlined otherwise.
+   fallback: the room model, the instructions and a skill summary prefixed
+   to the session's first prompt, the skill files under `.agents/skills/`
+   when it accepts workspace files, the bodies inlined otherwise. One owner
+   places this session guidance (the bridge's `sessionGuidance`); no
+   per-turn prompt repeats it.
 5. **Sessions.** The profile's content checksum (instructions + skill
    files; MCP servers and env excluded), plus the MCP tool set's non-secret
    identity, is part of the session binding: a turn wearing different

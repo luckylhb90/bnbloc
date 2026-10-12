@@ -97,13 +97,22 @@ written (`docs/bugs/2026-10-12-agent-misreads-other-agents-work.md`). The
 room model is therefore stated to every agent, on every core, whether its
 targets advertise `mcpTransports` (and get these tools) or not:
 
-- **`.room/README.md`** (`roomlog.ReadmeFile`, the push model's first
-  prompt carries the same `roomlog.RoomModel`): every agent works in its
-  own workspace; deliverables are stored by bnbloc and named by their
-  producer, never files of the reader's workspace; the Library is bnbloc's
-  Library of the person who asked (experts, skill packs, prompt packs, MCP
-  tools), shared by every agent and core in the room; how to verify, with
-  these tools or without them.
+- **The room model, once per session** (`roomlog.SessionGuidance`):
+  every agent works in its own workspace; deliverables are stored by
+  bnbloc and named by their producer, never files of the reader's
+  workspace; the Library is bnbloc's Library of the person who asked
+  (experts, skill packs, prompt packs, MCP tools), shared by every agent and
+  core in the room; how to verify, with these tools or without them. It is
+  static guidance, so it never rides a turn's prompt: the bridge's
+  `sessionGuidance` (`services/bridge/profile.go`, the one owner of where
+  session guidance goes) puts it at the head of the agent profile the
+  session is created with on a core advertising `agentProfile` (a stable
+  prefix providers cache; outside the binding sum, like the session
+  contributors' parts), else at the head of the session's first prompt,
+  through the expert fallback's prefix. `.room/README.md`
+  (`roomlog.ReadmeFile`) keeps the same text in a pull workspace, written
+  only when it differs from what the session's workspace holds
+  (`roomlog.ReadmeUpdate`, `CtxState.ReadmeSum`).
 - **`.room/artifacts.md`** (`roomlog.ReadDeliverables`,
   `DeliverablesFile`): the room's `roomlog.MaxListedDeliverables` newest
   deliverables, each with kind, latest version, id and producer, marked
@@ -118,9 +127,12 @@ targets advertise `mcpTransports` (and get these tools) or not:
   scope, updated time). The gateway's visibility owners decide what is in
   it (content-components.md, "The Library as an agent reads it").
 
-The bridge rewrites these every turn (`roomRecordFiles`, beside the history
-and `live.md`); a read that fails renders as unreadable, never as empty, and
-never fails the turn. `.room/` is a bnbloc-owned path
+The bridge rewrites `artifacts.md` and `library.md` every turn
+(`roomRecordFiles`, beside the history and `live.md`: their data changes);
+a read that fails renders as unreadable, never as empty, and never fails the
+turn. The per-turn pull prompt (`roomlog.ComposePointer`) is a plain list of
+these files with no guidance in it, pinned by its golden
+(`testdata/golden/pointer.txt`). `.room/` is a bnbloc-owned path
 (`core.BnblocOwnedPath`): never a deliverable, synced or packed.
 
 **`read_artifact`** (`services/bridge/roomtools/artifact.go`) lets an agent
