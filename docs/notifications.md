@@ -69,7 +69,8 @@ realtime; a full queue drops observations rather than slowing chat).
   member ids. Omitted `recipients` = every entry of the gateway's
   `BNBLOC_SUPER_ADMINS`, used as-is as `userId` (configure it with the ids
   the notifier can map, typically emails).
-- The alert is queued in the caller's session tenant like every
+- The alert is queued in the tenant the request acts in (the caller's
+  session tenant, or the acting tenant they switched to) like every
   notification: through every notifier visible to that tenant, to a
   recipient's desktop notification plugin when they run one
   ([Routing](#routing-desktop-plugin-or-server-notifiers)), and to their

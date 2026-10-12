@@ -310,8 +310,8 @@ func (s *Service) auditAPIToken(ctx context.Context, id, action, outcome, actor,
 
 // handlePlatformAlert queues an admin_alert notification (super-admin):
 // recipients default to every configured platform super-admin. It is queued
-// in the caller's session tenant through every notifier component visible
-// there; delivery is asynchronous (realtime's outbox worker).
+// in the tenant the request acts in (a super admin's acting tenant,
+// tenant_scope.go) through every notifier component visible there; delivery is asynchronous (realtime's outbox worker).
 func (s *Service) handlePlatformAlert(w http.ResponseWriter, r *http.Request) {
 	claims, ok := s.requireSuperAdminClaims(w, r)
 	if !ok {

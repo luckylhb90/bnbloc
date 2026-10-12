@@ -11,13 +11,17 @@ import (
 
 // adoptRoom: a fresh id is created and the daemon added; an existing id (409
 // from the room service, BE-1) is adopted only when the caller is already a
-// member — never re-created, never taken over.
+// member — never re-created, never taken over. Every room call carries the
+// request's effective tenant (signed), so the room lands in that tenant.
 func TestAdoptRoomHandlesExistingRoomID(t *testing.T) {
 	var mu sync.Mutex
 	var calls []string
 	room := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		mu.Lock()
 		calls = append(calls, r.Method+" "+r.URL.Path)
+		if got := r.Header.Get("X-Bnbloc-Tenant"); got != "t" {
+			t.Errorf("%s %s tenant = %q, want t", r.Method, r.URL.Path, got)
+		}
 		mu.Unlock()
 		if r.Method == http.MethodPost && r.URL.Path == "/v1/rooms" {
 			w.WriteHeader(http.StatusConflict)

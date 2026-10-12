@@ -587,7 +587,7 @@ func (s *Service) handleProxy(w http.ResponseWriter, r *http.Request) {
 		// joined after login is not in it, so on a miss fall back to a live
 		// membership lookup instead of forcing re-login (the stale-scope desync).
 		// The fallback only fires on the miss path, so the common case stays free.
-		if !isJoin && !isAdminRevoke && !claims.HasRoom(p.RoomID) && !s.subjectInRoom(claims.Subject, p.RoomID, claims.Tenant) {
+		if !isJoin && !isAdminRevoke && !s.roomReachable(claims, p.RoomID) {
 			http.Error(w, "room scope not authorized", http.StatusForbidden)
 			return
 		}
@@ -614,39 +614,17 @@ func (s *Service) handleProxy(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "rate limit exceeded", http.StatusTooManyRequests)
 		return
 	}
-	// Cross-tenant scope for platform super-admins. A super_admin may act inside
-	// any tenant two ways, both honored ONLY for super_admins (a non-super-admin
-	// is always bound to their own tenant; the header/param are ignored):
-	//   1. X-Bnbloc-Acting-Tenant header — the GLOBAL switch: the client sets it
-	//      so the whole session (rooms, agents, admin) acts as that tenant.
-	//   2. ?tenantId= query — a per-call override (the Platform console uses it
-	//      to scope one panel), which wins over the header when both are set.
+	// The effective tenant (tenant_scope.go): proxyClaims already applied a
+	// super admin's acting tenant; a room-scoped path acts in the room's own
+	// tenant (the caller's reach of the room was checked above). Strip the
+	// client-supplied acting-tenant header so it never reaches a backend as
+	// an unsigned scope hint; proxyAs sets the authoritative, signed
+	// X-Bnbloc-Tenant from effectiveTenant.
 	effectiveTenant := claims.Tenant
-	if rbac.Can(claims.Role, rbac.PermManagePlatform) {
-		if h := strings.TrimSpace(r.Header.Get(actingTenantHeader)); h != "" {
-			effectiveTenant = h
-		}
-		if t := strings.TrimSpace(r.URL.Query().Get("tenantId")); t != "" {
-			effectiveTenant = t
-		}
+	if p.roomScoped() {
+		effectiveTenant = s.roomTenantOr(p.RoomID, effectiveTenant)
 	}
-	// Strip the client-supplied acting-tenant header so it never reaches a
-	// backend as an unsigned scope hint; proxyAs sets the authoritative,
-	// signed X-Bnbloc-Tenant from effectiveTenant.
 	r.Header.Del(actingTenantHeader)
-	// Room-scoped tenant derivation (the origin fix for cross-tenant access):
-	// a room carries its own authoritative tenant (rooms.tenant_id), and the
-	// caller was already authorized for the room by membership above. So a
-	// room-scoped request executes in the ROOM's tenant, not the session's —
-	// letting a multi-tenant member (or the bridge acting as one) transact in a
-	// room that lives in their non-primary org. Tenant-level paths keep the
-	// session tenant. A super-admin acting-tenant override (set above) wins, so
-	// the platform console can still target a specific org.
-	if p.roomScoped() && s.RoomTenant != nil {
-		if rt := s.RoomTenant(p.RoomID); rt != "" {
-			effectiveTenant = rt
-		}
-	}
 	if p.isRoomDispatch(r.Method) {
 		// The only route the edge maps onto an internal one (isRoomDispatch).
 		r.URL.Path = "/internal/v1/rooms/" + p.RoomID + "/dispatch"
@@ -660,7 +638,7 @@ func (s *Service) handleProxy(w http.ResponseWriter, r *http.Request) {
 // MEMBER rights: it goes through the same room scope, org RBAC (so platform and
 // tenant-admin paths are refused), and tenant derivation as every session —
 // the shared secret is a credential, never a bypass. Otherwise the caller needs
-// a valid session token.
+// a valid session token, acting in its effective tenant (actingTenant).
 func (s *Service) proxyClaims(r *http.Request, p apiPath) (auth.Claims, bool) {
 	if c, ok := s.daemonClaims(r); ok {
 		return c, true
@@ -675,7 +653,11 @@ func (s *Service) proxyClaims(r *http.Request, p apiPath) (auth.Claims, bool) {
 		token = strings.TrimSpace(r.URL.Query().Get("access_token"))
 	}
 	c, err := s.Signer.Verify(token)
-	return c, err == nil
+	if err != nil {
+		return auth.Claims{}, false
+	}
+	c.Tenant = actingTenant(r, c)
+	return c, true
 }
 
 // daemonClaims recognizes the trusted local daemon's bearer (constant-time
@@ -854,10 +836,18 @@ func headerBearer(r *http.Request) string {
 }
 
 // authenticate verifies the request's session token from the Authorization
-// header. Query-string tokens are accepted only by the proxy for the SSE and
+// header and resolves the tenant the request acts in (actingTenant,
+// tenant_scope.go): every handler the gateway serves itself reads
+// claims.Tenant as the effective tenant, never the bare session claim.
+// Query-string tokens are accepted only by the proxy for the SSE and
 // attachment-download endpoints (see proxyClaims).
 func (s *Service) authenticate(r *http.Request) (auth.Claims, error) {
-	return s.Signer.Verify(headerBearer(r))
+	c, err := s.Signer.Verify(headerBearer(r))
+	if err != nil {
+		return auth.Claims{}, err
+	}
+	c.Tenant = actingTenant(r, c)
+	return c, nil
 }
 
 // NewRoomMembershipResolver returns a Rooms resolver that queries bnbloc-room for

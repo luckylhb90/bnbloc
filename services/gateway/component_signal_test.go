@@ -87,7 +87,9 @@ func adminCall(t *testing.T, srv *httptest.Server, token, method, path, body str
 
 // Every change of a member's executable catalog signals realtime, which
 // pushes the components_changed hint to the desktops: platform changes for
-// everyone, an opt-in for the one member.
+// everyone, an opt-in for the one member in every organization (the row is
+// the member's, and their desktop streams in its own session tenant, not
+// the web's acting tenant).
 func TestComponentChanges_signalRealtime(t *testing.T) {
 	t.Setenv("BNBLOC_INTERNAL_KEY", "signal-test-internal-key")
 	svc, srv, adminToken, memberToken := rolloutTestGateway(t)
@@ -110,7 +112,7 @@ func TestComponentChanges_signalRealtime(t *testing.T) {
 	if status := memberInstallStatus(t, srv, memberToken, "signal-core", http.MethodDelete); status != http.StatusNoContent {
 		t.Fatalf("member uninstall = %d", status)
 	}
-	if got := rec.take(); strings.Join(got, ",") != "home/member,home/member" {
+	if got := rec.take(); strings.Join(got, ",") != "/member,/member" {
 		t.Fatalf("opt-in signals = %v", got)
 	}
 	if status := adminCall(t, srv, adminToken, http.MethodPut, "/v1/platform/components/signal-core/tenants", `{"enabledTenants":["home"]}`); status != http.StatusNoContent {

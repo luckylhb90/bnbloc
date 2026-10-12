@@ -162,20 +162,15 @@ func (s *Service) contentSaved(ctx context.Context, actor contentActor, c store.
 // contentUsesChanged tells a room's clients that its content uses changed
 // (a transient content_uses_changed event): the composer and the room
 // settings refetch the room's uses without reopening the room. A member
-// scope change concerns no room. Best-effort, like every cross-process
-// publish: the write already succeeded.
+// scope change concerns no room. claims act in the room's tenant
+// (contentUseScope). Best-effort, like every cross-process publish: the
+// write already succeeded.
 func (s *Service) contentUsesChanged(ctx context.Context, claims auth.Claims, scope store.ContentUseScope, roomID, componentID string) {
 	if scope == store.ContentUseMember || roomID == "" || s.Backends.Realtime == "" {
 		return
 	}
-	tid := claims.Tenant
-	if s.RoomTenant != nil {
-		if t := s.RoomTenant(roomID); t != "" {
-			tid = t
-		}
-	}
 	pub := realtime.NewHTTPPublisher(s.Backends.Realtime, "gateway")
-	pub.Publish(tenant.NewContext(ctx, tid), wire.Event{
+	pub.Publish(tenant.NewContext(ctx, claims.Tenant), wire.Event{
 		RoomID: roomID, Kind: wire.EventContentUsesChanged,
 		Payload:  wire.ContentUsesChanged{Scope: string(scope), ComponentID: componentID},
 		AtUnixMs: s.nowTime().UnixMilli(),

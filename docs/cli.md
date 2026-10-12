@@ -142,7 +142,8 @@ subject is yourself (default) or a service subject `svc:<name>` (lowercase
 letters, digits, `.`, `_`, `-`); a token can never act as another person.
 Each exchange (`POST /v1/auth/api-token {"token"}`, rate-limited per client
 IP like login) mints a 1-hour session and re-resolves the subject's tenant
-(`--tenant`, default the issuer's session tenant) and role, so a service
+(`--tenant`, default the tenant the issuing request acts in: the session
+tenant, or a super admin's acting tenant) and role, so a service
 subject is a super-admin only while listed in `BNBLOC_SUPER_ADMINS`.
 `revoke` stops further exchanges (a session already minted lives out its
 hour). `list` shows every token with its state, expiry and last use, never

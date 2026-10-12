@@ -203,11 +203,9 @@ func (s *Service) shareRecipients(w http.ResponseWriter, r *http.Request, claims
 			http.Error(w, "you can share only with a room you are a member of", http.StatusForbidden)
 			return nil, nil, false
 		}
-		if s.RoomTenant != nil {
-			if rt := s.RoomTenant(room); rt != "" && rt != claims.Tenant {
-				http.Error(w, "that room belongs to another organization", http.StatusForbidden)
-				return nil, nil, false
-			}
+		if s.roomTenantOr(room, claims.Tenant) != claims.Tenant {
+			http.Error(w, "that room belongs to another organization", http.StatusForbidden)
+			return nil, nil, false
 		}
 		if s.RoomMembers == nil {
 			obs.ServerError(w, "room members unavailable", nil)

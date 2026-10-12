@@ -79,12 +79,24 @@ func (s *Service) registerContentComponents(mux *http.ServeMux) {
 }
 
 // contentCaller authenticates a content request; write needs a role that
-// may drive agents (viewers are read-only). It answers 401/403/503 itself.
+// may drive agents (viewers are read-only). A request naming a room
+// (?room=: a room's pins, a job grant) needs the caller's reach of that
+// room and acts in the room's tenant, like the job grant and the proxied
+// room routes (tenant_scope.go); otherwise it acts in the caller's
+// effective tenant (a super admin's acting tenant). It answers
+// 401/403/503 itself.
 func (s *Service) contentCaller(w http.ResponseWriter, r *http.Request, write bool) (auth.Claims, bool) {
 	claims, err := s.authenticate(r)
 	if err != nil {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return auth.Claims{}, false
+	}
+	if room := strings.TrimSpace(r.URL.Query().Get("room")); room != "" {
+		var ok bool
+		if claims, ok = s.roomClaims(claims, room); !ok {
+			http.Error(w, "room scope not authorized", http.StatusForbidden)
+			return auth.Claims{}, false
+		}
 	}
 	if s.ContentComponents == nil {
 		obs.ServerError(w, "content components unavailable", nil)
@@ -148,7 +160,7 @@ func (s *Service) readableContent(ctx context.Context, claims auth.Claims, id, r
 // contentInRoom reports whether a room the caller belongs to uses the
 // component.
 func (s *Service) contentInRoom(ctx context.Context, claims auth.Claims, roomID, id string) bool {
-	if !claims.HasRoom(roomID) && !s.subjectInRoom(claims.Subject, roomID, claims.Tenant) {
+	if !s.roomReachable(claims, roomID) {
 		return false
 	}
 	uses, err := s.ContentComponents.ListContentUses(ctx, store.ContentUseRoom, roomID)
@@ -940,10 +952,7 @@ func (s *Service) handleListContentUses(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	if room := strings.TrimSpace(r.URL.Query().Get("room")); room != "" {
-		if !claims.HasRoom(room) && !s.subjectInRoom(claims.Subject, room, claims.Tenant) {
-			http.Error(w, "room scope not authorized", http.StatusForbidden)
-			return
-		}
+		// contentCaller checked the caller's reach of the room.
 		if out.Room, err = s.contentUseViews(ctx, claims, store.ContentUseRoom, room); err != nil {
 			obs.ServerError(w, "list content uses failed", err)
 			http.Error(w, "list content uses failed", http.StatusInternalServerError)
@@ -1029,7 +1038,7 @@ func (s *Service) handlePutContentUse(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid json body", http.StatusBadRequest)
 		return
 	}
-	scope, scopeID, ok := s.contentUseScope(w, claims, req.Scope, req.RoomID)
+	claims, scope, scopeID, ok := s.contentUseScope(w, claims, req.Scope, req.RoomID)
 	if !ok {
 		return
 	}
@@ -1066,25 +1075,29 @@ func (s *Service) handlePutContentUse(w http.ResponseWriter, r *http.Request) {
 }
 
 // contentUseScope validates a use scope: "member" is the caller; "room"
-// and "room-expert" need the room's owner or an admin.
-func (s *Service) contentUseScope(w http.ResponseWriter, claims auth.Claims, scope, roomID string) (store.ContentUseScope, string, bool) {
+// and "room-expert" need the room's owner or an admin, and act in the
+// room's tenant (tenant_scope.go): the returned claims are the ones the
+// use is written and announced with.
+func (s *Service) contentUseScope(w http.ResponseWriter, claims auth.Claims, scope, roomID string) (auth.Claims, store.ContentUseScope, string, bool) {
 	switch scope {
 	case wire.ContentUseMember:
-		return store.ContentUseMember, claims.Subject, true
+		return claims, store.ContentUseMember, claims.Subject, true
 	case wire.ContentUseRoom, wire.ContentUseRoomExpert:
 		roomID = strings.TrimSpace(roomID)
 		if roomID == "" {
 			http.Error(w, "roomId required", http.StatusBadRequest)
-			return "", "", false
+			return claims, "", "", false
 		}
 		if !s.roomEditor(claims, roomID) {
 			http.Error(w, "only the room's owner or admins change its experts and skills", http.StatusForbidden)
-			return "", "", false
+			return claims, "", "", false
 		}
-		return store.ContentUseScope(scope), roomID, true
+		// A room editor is a human member of the room: it is in reach.
+		claims.Tenant = s.roomTenantOr(roomID, claims.Tenant)
+		return claims, store.ContentUseScope(scope), roomID, true
 	default:
 		http.Error(w, "scope must be member, room or room-expert", http.StatusBadRequest)
-		return "", "", false
+		return claims, "", "", false
 	}
 }
 
@@ -1094,7 +1107,7 @@ func (s *Service) handleDeleteContentUse(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	q := r.URL.Query()
-	scope, scopeID, ok := s.contentUseScope(w, claims, q.Get("scope"), q.Get("roomId"))
+	claims, scope, scopeID, ok := s.contentUseScope(w, claims, q.Get("scope"), q.Get("roomId"))
 	if !ok {
 		return
 	}
@@ -1129,16 +1142,12 @@ func (s *Service) contentJob(w http.ResponseWriter, r *http.Request, claims auth
 		http.Error(w, "job and room required", http.StatusBadRequest)
 		return store.AgentJob{}, false
 	}
-	if !claims.HasRoom(roomID) && !s.subjectInRoom(claims.Subject, roomID, claims.Tenant) {
+	claims, ok := s.roomClaims(claims, roomID)
+	if !ok {
 		http.Error(w, "room scope not authorized", http.StatusForbidden)
 		return store.AgentJob{}, false
 	}
 	tid := claims.Tenant
-	if s.RoomTenant != nil {
-		if rt := s.RoomTenant(roomID); rt != "" {
-			tid = rt
-		}
-	}
 	ctx := tenant.NewContext(r.Context(), tid)
 	job, err := s.ContentJobs.GetAgentRun(ctx, jobID)
 	if errors.Is(err, store.ErrAgentJobNotFound) || (err == nil && job.RoomID != roomID) {
@@ -1265,12 +1274,9 @@ func (s *Service) contentBundleEntitled(ctx context.Context, claims auth.Claims,
 	if jobID == "" || roomID == "" || s.ContentJobs == nil {
 		return false, nil
 	}
-	tid := claims.Tenant
-	if s.RoomTenant != nil {
-		if rt := s.RoomTenant(roomID); rt != "" {
-			tid = rt
-		}
-	}
+	// The job lease below is the authority here: the job must be in this
+	// room and leased by the caller's bridge.
+	tid := s.roomTenantOr(roomID, claims.Tenant)
 	jctx := tenant.NewContext(ctx, tid)
 	job, err := s.ContentJobs.GetAgentRun(jctx, jobID)
 	if errors.Is(err, store.ErrAgentJobNotFound) || (err == nil && job.RoomID != roomID) {

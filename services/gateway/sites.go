@@ -120,16 +120,12 @@ func (s *Service) handleSiteTicket(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid site version path", http.StatusBadRequest)
 		return
 	}
-	if !claims.HasRoom(roomID) && !s.subjectInRoom(claims.Subject, roomID, claims.Tenant) {
+	claims, ok := s.roomClaims(claims, roomID)
+	if !ok {
 		http.Error(w, "room scope not authorized", http.StatusForbidden)
 		return
 	}
 	tenantID := claims.Tenant
-	if s.RoomTenant != nil {
-		if rt := s.RoomTenant(roomID); rt != "" {
-			tenantID = rt
-		}
-	}
 	scope := siteTicketScope(roomID, artifactID, version)
 	sv, err := s.memberSiteVersion(r.Context(), claims.Subject, tenantID, scope)
 	if errors.Is(err, errSiteNotFound) {

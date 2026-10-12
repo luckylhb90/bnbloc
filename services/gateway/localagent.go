@@ -297,7 +297,7 @@ func (s *Service) handleLocalAgentTargets(w http.ResponseWriter, r *http.Request
 // belongs to someone else is refused rather than taken over.
 func (s *Service) adoptRoom(ctx context.Context, roomID, subject, tenantID string) error {
 	create, _ := json.Marshal(map[string]any{"roomId": roomID, "name": "Local agent room"})
-	err := s.roomBackendCall(ctx, http.MethodPost, "/v1/rooms", subject, create)
+	err := s.roomBackendCall(ctx, http.MethodPost, "/v1/rooms", subject, tenantID, create)
 	var rbe *roomBackendError
 	switch {
 	case err == nil:
@@ -312,7 +312,7 @@ func (s *Service) adoptRoom(ctx context.Context, roomID, subject, tenantID strin
 		return err
 	}
 	addMember, _ := json.Marshal(map[string]any{"userId": daemonServiceSubject, "role": "member"})
-	return s.roomBackendCall(ctx, http.MethodPost, "/v1/rooms/"+url.PathEscape(roomID)+"/members", subject, addMember)
+	return s.roomBackendCall(ctx, http.MethodPost, "/v1/rooms/"+url.PathEscape(roomID)+"/members", subject, tenantID, addMember)
 }
 
 // roomBackendError is a non-2xx answer from the room service, kept structured
@@ -327,7 +327,9 @@ func (e *roomBackendError) Error() string {
 	return fmt.Sprintf("room %s status %d: %s", e.Path, e.Status, e.Body)
 }
 
-func (s *Service) roomBackendCall(ctx context.Context, method, path, subject string, body []byte) error {
+// roomBackendCall calls the room service as subject in tenantID (the
+// request's effective tenant), both signed like a proxied request.
+func (s *Service) roomBackendCall(ctx context.Context, method, path, subject, tenantID string, body []byte) error {
 	if s.Backends.Room == "" {
 		return fmt.Errorf("room backend not configured")
 	}
@@ -337,6 +339,9 @@ func (s *Service) roomBackendCall(ctx context.Context, method, path, subject str
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Bnbloc-User", subject)
+	if tenantID != "" {
+		req.Header.Set(svcauth.HeaderTenant, tenantID)
+	}
 	svcauth.Sign(req, svcauth.KeyFromEnv(), subject)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
