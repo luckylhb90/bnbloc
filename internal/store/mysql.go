@@ -149,14 +149,16 @@ type rowScanner interface{ Scan(dest ...any) error }
 
 // queryAll runs a list read and scans every row with scan. It is the one
 // list-read shape: a query, scan or iteration (rows.Err) failure is returned,
-// never a short or empty list. No rows is a nil slice.
+// never a short or empty list. No rows is an empty, non-nil slice: a list
+// that feeds JSON encodes as [], never null (the memory stores answer the
+// same).
 func queryAll[T any](ctx context.Context, db sqlConn, q string, scan func(rowScanner) (T, error), args ...any) ([]T, error) {
 	rows, err := db.QueryContext(ctx, q, args...)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var out []T
+	out := []T{}
 	for rows.Next() {
 		v, err := scan(rows)
 		if err != nil {
