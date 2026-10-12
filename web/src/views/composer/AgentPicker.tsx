@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
   CaretDownIcon,
@@ -8,6 +8,7 @@ import {
   WarningCircleIcon,
   } from "@phosphor-icons/react";
 import { cn } from "@/lib/cn";
+import { useDismissOnOutside } from "@/ui/useDismissOnOutside";
 import { hostsLabel, samePlatformAgent, type PlatformChoice } from "@/lib/platformAgents";
 import { agentDisplayLabel, defaultDisplayName } from "@/lib/displayNames";
 import { useDisplayNames } from "@/lib/useDisplayName";
@@ -46,14 +47,7 @@ export function AgentPicker({
   const [confirmAdd, setConfirmAdd] = useState<PlatformChoice | null>(null);
   const ref = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
-    if (!open) return;
-    const onDoc = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
-    };
-    document.addEventListener("mousedown", onDoc);
-    return () => document.removeEventListener("mousedown", onDoc);
-  }, [open]);
+  useDismissOnOutside(open, ref, () => setOpen(false));
 
   // ONE list, grouped by core — identical presentation on every surface.
   const groups = useMemo(

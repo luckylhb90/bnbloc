@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ChatTextIcon, MagnifyingGlassIcon } from "@phosphor-icons/react";
 import { cn } from "@/lib/cn";
+import { useDismissOnOutside } from "@/ui/useDismissOnOutside";
 import {
   fillPrompt,
   initialValues,
@@ -80,15 +81,8 @@ export function PromptPickerButton({
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
   const ref = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (!open) return;
-    const onDoc = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
-    };
-    document.addEventListener("mousedown", onDoc);
-    return () => document.removeEventListener("mousedown", onDoc);
-  }, [open]);
-  const shown = useMemo(() => promptMatches(choices, q), [choices, q]);
+  useDismissOnOutside(open, ref, () => setOpen(false));
+  const shown =useMemo(() => promptMatches(choices, q), [choices, q]);
   const pick = (c: PromptChoice) => {
     setOpen(false);
     setQ("");

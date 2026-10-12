@@ -15,6 +15,7 @@ import { NO_ROOM_CATALOGS, resolveModelCatalog, type RoomModelCatalogs } from "@
 import { PLATFORM_OFFLINE_MESSAGE, routeSend } from "@/lib/platformAgents";
 import { useAgentPrefs } from "@/views/composer/useAgentPrefs";
 import { isImeKey, isSubmitEnter } from "@/lib/keys";
+import { useDismissOnOutside } from "@/ui/useDismissOnOutside";
 import { Button } from "@/ui/Button";
 import { useToast } from "@/ui/Toast";
 import { AttachmentChips } from "@/views/AttachmentChips";
@@ -126,14 +127,7 @@ export function Composer({
   // The narrow toolbar's "+" menu (attach / reference).
   const [showMore, setShowMore] = useState(false);
   const moreRef = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (!showMore) return;
-    const onDoc = (e: MouseEvent) => {
-      if (moreRef.current && !moreRef.current.contains(e.target as Node)) setShowMore(false);
-    };
-    document.addEventListener("mousedown", onDoc);
-    return () => document.removeEventListener("mousedown", onDoc);
-  }, [showMore]);
+  useDismissOnOutside(showMore, moreRef, () => setShowMore(false));
   const attachments = useComposerAttachments(roomId);
   // @-mention autocomplete: when the caret is inside an "@partial" token, show a
   // filtered member list; selecting one inserts "@name ".

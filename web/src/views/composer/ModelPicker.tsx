@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { CaretDownIcon, SlidersHorizontalIcon } from "@phosphor-icons/react";
 import { cn } from "@/lib/cn";
+import { useDismissOnOutside } from "@/ui/useDismissOnOutside";
 import { prettyModel } from "@/lib/modelLabel";
 
 // ModelPicker selects the model + reasoning effort for the effective agent.
@@ -29,14 +30,7 @@ export function ModelPicker({
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
-    if (!open) return;
-    const onDoc = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
-    };
-    document.addEventListener("mousedown", onDoc);
-    return () => document.removeEventListener("mousedown", onDoc);
-  }, [open]);
+  useDismissOnOutside(open, ref, () => setOpen(false));
 
   // The label shows the effective selection: an explicit pick, else the agent's
   // discovered default (so the composer reflects the CLI config at a glance).

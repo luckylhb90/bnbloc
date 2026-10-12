@@ -33,6 +33,13 @@ export const RULES = [
     allowed: ["lib/clipboard.ts"],
     sample: { file: "views/X.tsx", text: "void navigator.clipboard?.writeText(url);" },
   },
+  {
+    id: "L8",
+    name: "click-outside dismissal goes through ui/useDismissOnOutside",
+    pattern: /addEventListener\("mousedown"/,
+    allowed: ["ui/useDismissOnOutside.ts"],
+    sample: { file: "views/X.tsx", text: 'document.addEventListener("mousedown", onDoc);' },
+  },
 ];
 
 // violations returns "<file>: rule <id> (<name>)" for every source file (a

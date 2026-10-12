@@ -1,6 +1,7 @@
-import { useEffect, useId, useRef, useState } from "react";
+import { useId, useRef, useState } from "react";
 import { CloudIcon, ShieldCheckIcon } from "@phosphor-icons/react";
 import { cn } from "@/lib/cn";
+import { useDismissOnOutside } from "@/ui/useDismissOnOutside";
 import type { RoomPlatformAgent } from "@/lib/platformAgents";
 import { UserName } from "@/views/UserName";
 
@@ -14,21 +15,7 @@ export function PlatformAgentsIndicator({ agents }: { readonly agents: readonly 
   const ref = useRef<HTMLDivElement>(null);
   const panelId = useId();
 
-  useEffect(() => {
-    if (!open) return;
-    const onDoc = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setOpen(false);
-    };
-    document.addEventListener("mousedown", onDoc);
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("mousedown", onDoc);
-      document.removeEventListener("keydown", onKey);
-    };
-  }, [open]);
+  useDismissOnOutside(open, ref, () => setOpen(false), { escape: true });
 
   if (agents.length === 0) return null;
   const label = agents.length === 1 ? "Platform agent" : `${agents.length} platform agents`;

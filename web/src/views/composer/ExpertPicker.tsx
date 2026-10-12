@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { BrainIcon, CaretDownIcon, PushPinIcon, ShieldWarningIcon, XIcon } from "@phosphor-icons/react";
 import { cn } from "@/lib/cn";
+import { useDismissOnOutside } from "@/ui/useDismissOnOutside";
 import { contentLabel, isTeam, permissionLabel, type ContentQuickPrompt, type ExpertChoice } from "@/lib/contentComponents";
 import { TeamBadge } from "@/views/library/ContentFormExtras";
 import { Button } from "@/ui/Button";
@@ -21,14 +22,7 @@ export function ExpertPicker({
 }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (!open) return;
-    const onDoc = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
-    };
-    document.addEventListener("mousedown", onDoc);
-    return () => document.removeEventListener("mousedown", onDoc);
-  }, [open]);
+  useDismissOnOutside(open, ref, () => setOpen(false));
   const label = expert ? contentLabel(expert.component) : "Expert";
   const pick = (e: ExpertChoice | null) => {
     onPick(e);

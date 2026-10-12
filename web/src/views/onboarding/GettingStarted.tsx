@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { CaretDownIcon, CaretUpIcon, CheckCircleIcon, CircleIcon, CompassIcon, SealCheckIcon, XIcon } from "@phosphor-icons/react";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/cn";
+import { useDismissOnOutside } from "@/ui/useDismissOnOutside";
 import { CHECKLIST, checklistPhase, doneCount, TOUR_IN_ROOM, type OnboardingState, type TourStart } from "@/lib/onboardingTour";
 import { dispatchOnboarding, useOnboarding } from "@/lib/useOnboarding";
 import { Button } from "@/ui/Button";
@@ -45,14 +46,7 @@ export function GettingStarted({
     const t = window.setTimeout(() => dispatchOnboarding({ type: "celebrated" }), CELEBRATE_MS);
     return () => window.clearTimeout(t);
   }, [phase]);
-  useEffect(() => {
-    if (!popover) return;
-    const onDown = (e: MouseEvent) => {
-      if (!wrapRef.current?.contains(e.target as Node)) setPopover(false);
-    };
-    document.addEventListener("mousedown", onDown);
-    return () => document.removeEventListener("mousedown", onDown);
-  }, [popover]);
+  useDismissOnOutside(popover, wrapRef, () => setPopover(false));
 
   if (phase === "hidden") return null;
 
