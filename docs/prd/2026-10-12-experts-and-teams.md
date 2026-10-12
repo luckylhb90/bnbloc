@@ -1140,3 +1140,111 @@ gaps (bridge, room tools, feed, desktop) are a separate pass. Decisions:
     install --package <file>` signs with the publisher key and installs,
     or a detached signature goes with the file into Components → Publish),
     like content promote.
+
+## Runtime gap closure
+
+**2026-10-12: recorded, in development.** The runtime gaps the step
+status notes above leave open, closed in one pass. Content and sharing
+gaps (Library, notifications, the workshop flow) are a separate pass.
+
+1. **A team turn nests in the feed.** Today a dispatch is a top-level
+   chat row with a role label, and its reply lands wherever it arrives.
+   - **Payload chain, no lookups.** `payload.dispatchedBy` gains
+     `parentSeq` (the room sequence of the parent job's request), and
+     every agent row a job writes (replies, notices, failure notices)
+     carries `jobId` and `sourceSeq` (its job's request). Realtime sets
+     `parentSeq` on the dispatch; the bridge and activity set the other
+     two. The feed needs nothing else: a row's request is `sourceSeq`, a
+     dispatch's parent is `parentSeq`, so live events and history pages
+     group the same way.
+   - **Rendering.** A pure function in the feed model groups a request's
+     subtree: the request, then one collapsible block ("Team" when any
+     dispatch staffs a role, "Delegated work" otherwise) with each
+     dispatch followed by its replies, notices and nested dispatches
+     (indented per depth) and the lead's progress notices, then the
+     lead's own replies. A row whose request is not loaded stays where it
+     is. The block is open while a job in it runs and folds when all have
+     settled; a click overrides.
+2. **The room expert on the job and run record.** The gateway's job
+   resolution (`GET /v1/content-components/effective`) is where the room
+   expert of a turn is decided; it records it on the job
+   (`room_expert_id/version/name`, migration
+   `2026_10_agent_jobs_room_expert`) and, when it changes, appends the
+   `content`/`use` audit row the chat's expert gets ("room expert X v1 on
+   agent Y"). Run records carry `roomExpert` beside `expert`; the run
+   list shows both.
+3. **A platform lead's plan names the host.** The composer's team plan
+   staffs the lead the send would use: the recipient routed through the
+   same `platformAgents.route` the send calls (one helper for both), so
+   the plan, the estimate and the confirmation key follow the host
+   chosen at send; the card names the lead and its host. If routing
+   picks another host at send, the confirmation no longer matches and
+   the member confirms again.
+4. **A real quick try: `try_draft(dir, task, handle?)`.** A room tool
+   that packs `dir` and validates it with `contentpkg` (errors go back to
+   the agent), stages it as an **ephemeral draft** (expert or skill pack)
+   and dispatches `task` through the existing dispatch path to an agent
+   wearing it, then waits and answers like `ask_agent`.
+   - **Storage.** `POST /v1/content-drafts?job=&room=` (the content
+     grant: job live and leased by the caller's bridge, requester a human
+     member) validates again and stores the bundle in the blob store and a
+     `content_drafts` row (requester, room, parent job, kind, name,
+     version, manifest, bundle key, `expires_at_ms` = 1 hour). No
+     content component row exists, so no Library, listing, search or
+     usage count ever sees it. Expired rows are purged by retention;
+     `ReferencedBlobKeys` keeps the bundle while a row exists.
+   - **Dispatch.** `wire.DispatchRequest.draft` names it; realtime admits
+     it only for a draft staged by the parent job in that room and not
+     expired, then posts the dispatch with an expert marker
+     (`payload.expert.draft`) and pins it on the job (`expert_id` = the
+     draft id); every dispatch guard applies unchanged, as does the
+     `content`/`try` audit row.
+   - **Wearing.** `contentuse.Effective` resolves a draft expert id only
+     for the job its parent staged it for, before expiry; the bundle is
+     entitled through the job grant like any effective bundle. Trust is
+     the requester's (a borrowed or platform agent's draft with scripts
+     still forces the sandbox on someone else's agent).
+   - **Target.** `handle` names the agent; without it the first online
+     room agent other than the dispatching one (the requester's own
+     first, then platform agents). Self-dispatch stays refused (the
+     drive lock would deadlock), so a room with one agent answers that
+     no other agent can try it.
+   - **Builder** 1.0.3 (only the quick-try step changes): try with
+     `try_draft`, and role-play only when the tool is missing or reports
+     no agent, saying so.
+5. **Linux confinement protects paths that do not exist yet.** Under
+   bubblewrap a read-only bind needs an existing mount point, so
+   `vmexec confine` skipped a missing `CLAUDE.md` or `.claude/skills`.
+   The deny-write contract now marks directories with a trailing `/`
+   (`agentConfigDenyWrite` keeps it); before binding, confine creates
+   each missing deny-write path inside a writable tree as an empty
+   placeholder (a directory, or an empty file; `{}` for a `.json` file)
+   and binds it read-only. The placeholders are bnbloc-owned
+   agent-config paths (never published or synced). Tested on Linux in a
+   container.
+6. **MCP tools appear without waiting for the poll.** Realtime's member
+   stream (`GET /v1/my/plugin-events`) also carries a
+   `components_changed` hint. The gateway signals realtime
+   (`POST /internal/v1/components/changed`, svcauth) after every change
+   of the member catalog (install, uninstall, rollout, tenants, a
+   member's opt-in), realtime delivers it to its member streams (the
+   members of the tenant, or the one member) and hands it to every peer.
+   The desktop holds the stream whenever its manager runs (not only with
+   plugin sidecars) and refreshes the catalog on the hint (debounced);
+   the 60 s poll stays the safety net.
+7. **Per-member OAuth sign-in for http MCP tools.** An endpoint MCP
+   component may declare `mcp.http.auth: {scheme: "oauth", clientId?,
+   scopes?}`; its credentials are always the member's. The desktop runs
+   the MCP authorization flow (spec 2026-07-28): protected resource
+   metadata (the 401 `WWW-Authenticate resource_metadata`, then the
+   well-known paths), authorization server metadata (RFC 8414, then OIDC
+   discovery, in the spec's order), PKCE S256 (refused when the server
+   does not advertise it), `resource` (RFC 8707) on the authorization and
+   token requests, `iss` validation (RFC 9207), a loopback redirect on
+   127.0.0.1 with `state`, and client registration in the spec's
+   priority (the package's `clientId`, a client metadata document served
+   by an https gateway, dynamic registration). Tokens are stored 0600
+   beside the member's tool settings and refreshed before expiry; the
+   bridge attaches `Authorization: Bearer <access token>` from them, and
+   a missing or expired sign-in shows as missing ("sign in to X in
+   Settings → Tools"). Never lent to a borrowed or platform drive.
