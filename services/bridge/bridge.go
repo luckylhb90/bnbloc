@@ -109,6 +109,13 @@ type Config struct {
 	// Sandbox is the desktop's agent sandbox (BNBLOC_SANDBOX_*): memory
 	// only, its admin token never logged nor handed to a core.
 	Sandbox SandboxConfig
+	// MCPToolsDir is where the desktop materializes stdio MCP tool binaries
+	// (index.json lists them with their sha256), and MCPSettingsDir holds
+	// the member's own MCP tool credentials (<tool>.json, 0600), both set by
+	// the desktop (BNBLOC_MCP_TOOLS_DIR / BNBLOC_MCP_SETTINGS_DIR). Empty:
+	// stdio tools and member credentials are unavailable (mcp_tools.go).
+	MCPToolsDir    string
+	MCPSettingsDir string
 }
 
 // CoreConfig describes one configured local-agent core: its name, the provider
@@ -741,6 +748,10 @@ func (b *Bridge) runBridgeJob(ctx context.Context, job bridgeJob) {
 	target := b.resolveTarget(ctx, coreName, job.Provider)
 	if jt := strings.TrimSpace(job.TargetID); jt != "" && jt != job.Provider && jt != coreName+"/"+job.Provider {
 		target = jt
+	}
+	if len(content.mcp.servers) > 0 {
+		profileOK, transports := b.mcpAttach(ctx, coreName, target, job.Provider)
+		content.fitMCPToTarget(profileOK, transports)
 	}
 	running := map[string]any{"core": coreName, "provider": job.Provider, "targetId": target, "sandboxed": prepareExec != nil}
 	if content.expert != nil {

@@ -1,0 +1,280 @@
+package bridge
+
+import (
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	corepkg "github.com/luckylhb90/bnbloc/core"
+	"github.com/luckylhb90/bnbloc/internal/wire"
+)
+
+// mcpFixture is a member's machine: the desktop's tools dir with one
+// materialized stdio binary (index.json) and the member's settings dir.
+type mcpFixture struct {
+	tools, settings, binary, sha string
+}
+
+func newMCPFixture(t *testing.T) mcpFixture {
+	t.Helper()
+	f := mcpFixture{tools: t.TempDir(), settings: t.TempDir()}
+	content := []byte("#!/bin/sh\necho codeword\n")
+	sum := sha256.Sum256(content)
+	f.sha = hex.EncodeToString(sum[:])
+	f.binary = filepath.Join(f.tools, "mcp-codeword-"+f.sha)
+	if err := os.WriteFile(f.binary, content, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	idx, _ := json.Marshal(mcpIndex{Tools: []mcpIndexEntry{{Name: "codeword", SHA256: f.sha, Path: f.binary}}})
+	if err := os.WriteFile(filepath.Join(f.tools, mcpIndexFile), idx, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return f
+}
+
+func (f mcpFixture) setMember(t *testing.T, tool string, values map[string]string) {
+	t.Helper()
+	raw, _ := json.Marshal(values)
+	if err := os.WriteFile(filepath.Join(f.settings, tool+".json"), raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func (f mcpFixture) bridge(g *contentFixtureGateway, prov corepkg.Provider, transports ...string) *Bridge {
+	b := New(Config{GatewayBaseURL: g.srv.URL, GatewayToken: "t", OwnerSubject: "maya", MCPToolsDir: f.tools, MCPSettingsDir: f.settings,
+		Cores: []CoreConfig{{Name: "core-a", Provider: prov, Endpoint: corepkg.Endpoint{BaseURL: g.srv.URL}}}})
+	b.rosterMu.Lock()
+	if b.targetCache == nil {
+		b.targetCache = map[string][]corepkg.Target{}
+	}
+	b.targetCache["core-a"] = []corepkg.Target{{ID: "agent-a", Provider: "agent-a", MCPTransports: transports}}
+	b.rosterMu.Unlock()
+	return b
+}
+
+func codewordTool(sha string) wire.ContentMCPTool {
+	return wire.ContentMCPTool{
+		Name: "codeword", Version: "1.0.0", Transport: wire.MCPTransportStdio,
+		Artifacts: map[string]string{mcpPlatform(): sha}, Args: []string{"serve"},
+		Env:         []wire.ContentMCPEnv{{Name: "CODEWORD_SALT", Secret: true, Required: true}, {Name: "CODEWORD_LANG"}},
+		Credentials: "member", RequiredBy: []string{"cc_reviewer"},
+	}
+}
+
+func searchTool() wire.ContentMCPTool {
+	return wire.ContentMCPTool{
+		Name: "search", Version: "2.0.0", Transport: wire.MCPTransportHTTP, URL: "https://tools.example.com/mcp",
+		Auth: &wire.ContentMCPAuth{Scheme: "bearer", Env: "TOOLS_TOKEN"}, Env: []wire.ContentMCPEnv{{Name: "TOOLS_TOKEN", Secret: true, Required: true}},
+		Credentials: "org", Values: map[string]string{"TOOLS_TOKEN": "org-token"}, RequiredBy: []string{"cc_reviewer"},
+	}
+}
+
+func runningDiagnostics(g *contentFixtureGateway) map[string]any {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	for _, st := range g.statuses {
+		if st["status"] == "running" {
+			d, _ := st["diagnostics"].(map[string]any)
+			return d
+		}
+	}
+	return nil
+}
+
+func serverNamed(p *corepkg.AgentProfile, name string) *corepkg.MCPServer {
+	for i := range p.MCPServers {
+		if p.MCPServers[i].Name == name {
+			return &p.MCPServers[i]
+		}
+	}
+	return nil
+}
+
+// An own drive gets a stdio server from the desktop's verified binary with
+// the member's own values as its env, and an http server with the org
+// connector's bearer.
+func TestMCPToolsReachTheSession(t *testing.T) {
+	g := newContentFixtureGateway(t)
+	f := newMCPFixture(t)
+	f.setMember(t, "codeword", map[string]string{"CODEWORD_SALT": "member-salt", "OTHER": "ignored"})
+	expert := g.pkg(reviewerForm("Use the tools."), "1.0.0")
+	expert.Source = wire.ContentSourceExpert
+	g.setEffective("job-1", wire.ContentEffective{Expert: &expert, MCP: []wire.ContentMCPTool{codewordTool(f.sha), searchTool()}})
+	prov := &profileProv{}
+	f.bridge(g, prov, "stdio", "http").runBridgeJob(context.Background(), contentJob("job-1", expert.ComponentID))
+
+	ps := prov.recordedProfiles()
+	if len(ps) != 1 || ps[0] == nil {
+		t.Fatalf("profiles = %+v", ps)
+	}
+	cw := serverNamed(ps[0], "codeword")
+	if cw == nil || cw.Transport() != corepkg.MCPStdio || cw.Command != f.binary || strings.Join(cw.Args, " ") != "serve" ||
+		len(cw.Env) != 1 || cw.Env[0] != (corepkg.NameValue{Name: "CODEWORD_SALT", Value: "member-salt"}) {
+		t.Fatalf("codeword = %+v", cw)
+	}
+	s := serverNamed(ps[0], "search")
+	if s == nil || s.Transport() != corepkg.MCPHTTP || s.URL != "https://tools.example.com/mcp" || len(s.Headers) != 1 || s.Headers[0].Value != "Bearer org-token" {
+		t.Fatalf("search = %+v", s)
+	}
+	if d := runningDiagnostics(g); d["contentMissing"] != nil {
+		t.Fatalf("diagnostics = %+v", d)
+	}
+	// Secrets never reach the job's persisted status.
+	g.mu.Lock()
+	raw, _ := json.Marshal(g.statuses)
+	g.mu.Unlock()
+	if strings.Contains(string(raw), "member-salt") || strings.Contains(string(raw), "org-token") {
+		t.Fatalf("a secret reached job data: %s", raw)
+	}
+}
+
+// What cannot be attached shows as missing; the turn still runs.
+func TestMCPToolsMissingDoNotFailTheTurn(t *testing.T) {
+	g := newContentFixtureGateway(t)
+	f := newMCPFixture(t)
+	f.setMember(t, "codeword", map[string]string{"CODEWORD_SALT": "s"})
+	expert := g.pkg(reviewerForm("Use the tools."), "1.0.0")
+	expert.Source = wire.ContentSourceExpert
+	stale := codewordTool(strings.Repeat("0", 64)) // the gateway pins a newer binary than the desktop holds
+	stale.Name = "codeword"
+	unset := codewordTool(f.sha)
+	unset.Name = "salted"
+	g.setEffective("job-1", wire.ContentEffective{Expert: &expert, MCP: []wire.ContentMCPTool{stale, unset, searchTool()}, Missing: []string{"MCP tool ghost"}})
+	prov := &profileProv{}
+	f.bridge(g, prov /* stdio only */).runBridgeJob(context.Background(), contentJob("job-1", expert.ComponentID))
+
+	ps := prov.recordedProfiles()
+	if len(ps) != 1 || ps[0] == nil || len(ps[0].MCPServers) != 0 {
+		t.Fatalf("profiles = %+v", ps)
+	}
+	missing := strings.Join(toStrings(runningDiagnostics(g)["contentMissing"]), "; ")
+	for _, want := range []string{"MCP tool ghost", "codeword (not downloaded on this computer yet)", "salted (set CODEWORD_SALT in Settings → Tools)", "search (the agent accepts no http MCP server)"} {
+		if !strings.Contains(missing, want) {
+			t.Fatalf("missing %q in %q", want, missing)
+		}
+	}
+}
+
+// A core without agentProfile cannot attach MCP tools: they are missing.
+func TestMCPToolsMissingOnACoreWithoutProfile(t *testing.T) {
+	g := newContentFixtureGateway(t)
+	f := newMCPFixture(t)
+	f.setMember(t, "codeword", map[string]string{"CODEWORD_SALT": "s"})
+	expert := g.pkg(reviewerForm("Use the tools."), "1.0.0")
+	expert.Source = wire.ContentSourceExpert
+	g.setEffective("job-1", wire.ContentEffective{Expert: &expert, MCP: []wire.ContentMCPTool{codewordTool(f.sha)}})
+	prov := &bytesProfileProv{profileProv: profileProv{noProfile: true}}
+	f.bridge(g, prov).runBridgeJob(context.Background(), contentJob("job-1", expert.ComponentID))
+	missing := strings.Join(toStrings(runningDiagnostics(g)["contentMissing"]), "; ")
+	if !strings.Contains(missing, "codeword (the agent's core cannot attach MCP tools)") {
+		t.Fatalf("missing = %q", missing)
+	}
+}
+
+// A borrowed drive never lends the owner's member credentials; an org
+// connector still applies.
+func TestMCPMemberCredentialsAreNotLent(t *testing.T) {
+	f := newMCPFixture(t)
+	f.setMember(t, "codeword", map[string]string{"CODEWORD_SALT": "owner-salt"})
+	b := &Bridge{cfg: Config{MCPToolsDir: f.tools, MCPSettingsDir: f.settings}}
+	refs := []wire.ContentRef{{ComponentID: "cc_reviewer", Owner: "maya", Name: "reviewer"}}
+	mcp, missing, foreign := b.resolveMCP([]wire.ContentMCPTool{codewordTool(f.sha), searchTool()}, refs, "maya", false)
+	if len(mcp.servers) != 1 || mcp.servers[0].Name != "search" || len(foreign) != 0 {
+		t.Fatalf("servers = %+v foreign = %v", mcp.servers, foreign)
+	}
+	if len(missing) != 1 || !strings.Contains(missing[0], "not lent") {
+		t.Fatalf("missing = %v", missing)
+	}
+	// A tool taking no env runs for anyone.
+	open := codewordTool(f.sha)
+	open.Env, open.Credentials = nil, ""
+	if mcp, missing, _ := b.resolveMCP([]wire.ContentMCPTool{open}, refs, "maya", false); len(mcp.servers) != 1 || len(missing) != 0 {
+		t.Fatalf("servers = %+v missing = %v", mcp.servers, missing)
+	}
+}
+
+// A binary outside the tools dir, or an index entry for another pin, is
+// never used.
+func TestMCPBinaryMustBeTheVerifiedOne(t *testing.T) {
+	f := newMCPFixture(t)
+	b := &Bridge{cfg: Config{MCPToolsDir: f.tools}}
+	tool := codewordTool(f.sha)
+	outside := &mcpIndex{Tools: []mcpIndexEntry{{Name: "codeword", SHA256: f.sha, Path: "/usr/bin/env"}}}
+	if _, why := b.mcpBinary(outside, tool); !strings.Contains(why, "outside") {
+		t.Fatalf("why = %q", why)
+	}
+	other := &mcpIndex{Tools: []mcpIndexEntry{{Name: "codeword", SHA256: strings.Repeat("1", 64), Path: f.binary}}}
+	if _, why := b.mcpBinary(other, tool); why == "" {
+		t.Fatal("an entry for another pin was used")
+	}
+	tool.Artifacts = map[string]string{"plan9-mips": f.sha}
+	if _, why := b.mcpBinary(b.loadMCPIndex(), tool); !strings.Contains(why, "not published for") {
+		t.Fatalf("why = %q", why)
+	}
+	if path, why := b.mcpBinary(b.loadMCPIndex(), codewordTool(f.sha)); why != "" || path != f.binary {
+		t.Fatalf("path = %q why = %q", path, why)
+	}
+}
+
+// Someone else's content requiring a stdio tool forces the sandbox even
+// when it did not declare mcp.stdio: with none available the turn is
+// refused before anything runs.
+func TestForeignContentRequiringStdioMCPRequiresTheSandbox(t *testing.T) {
+	g := newContentFixtureGateway(t)
+	f := newMCPFixture(t)
+	pack := g.pkg(lintPackForm(), "1.0.0")
+	pack.Source, pack.Owner = wire.ContentSourceRoom, "kim"
+	if pack.NeedsSandbox {
+		t.Fatal("fixture pack declares a sandboxed permission")
+	}
+	tool := codewordTool(f.sha)
+	tool.Env, tool.Credentials, tool.RequiredBy = nil, "", []string{pack.ComponentID}
+	g.setEffective("job-1", wire.ContentEffective{SkillPacks: []wire.ContentRef{pack}, MCP: []wire.ContentMCPTool{tool}})
+	prov := &profileProv{}
+	f.bridge(g, prov).runBridgeJob(context.Background(), contentJob("job-1", ""))
+	if len(prov.recordedProfiles()) != 0 {
+		t.Fatal("foreign content's stdio tool ran on the host")
+	}
+	if st := g.lastStatus(); st["status"] != "failed" || st["failureReason"] != "sandbox_required" {
+		t.Fatalf("status = %+v", st)
+	}
+	if n := g.allNotices(); !strings.Contains(n, "This turn uses lint-kit from someone else") {
+		t.Fatalf("notices = %q", n)
+	}
+}
+
+// The session binding covers the tool set (adding a tool or newly
+// configured credentials start a new session), never the values.
+func TestMCPBindingSum(t *testing.T) {
+	base := jobMCP{servers: []corepkg.MCPServer{{Name: "codeword", Command: "/t/mcp-codeword-aa", Env: []corepkg.NameValue{{Name: "SALT", Value: "one"}}}}}
+	sameNames := jobMCP{servers: []corepkg.MCPServer{{Name: "codeword", Command: "/t/mcp-codeword-aa", Env: []corepkg.NameValue{{Name: "SALT", Value: "two"}}}}}
+	if base.bindingSum("c") != sameNames.bindingSum("c") {
+		t.Fatal("a value change must not churn the session")
+	}
+	upgraded := jobMCP{servers: []corepkg.MCPServer{{Name: "codeword", Command: "/t/mcp-codeword-bb", Env: base.servers[0].Env}}}
+	unset := jobMCP{servers: []corepkg.MCPServer{{Name: "codeword", Command: "/t/mcp-codeword-aa"}}}
+	for _, other := range []jobMCP{upgraded, unset, {}} {
+		if other.bindingSum("c") == base.bindingSum("c") {
+			t.Fatalf("%+v binds like %+v", other, base)
+		}
+	}
+	if (jobMCP{}).bindingSum("c") != "c" || strings.Contains(base.bindingSum("c"), "one") {
+		t.Fatal("bindingSum")
+	}
+}
+
+func toStrings(v any) []string {
+	list, _ := v.([]any)
+	out := make([]string, 0, len(list))
+	for _, x := range list {
+		s, _ := x.(string)
+		out = append(out, s)
+	}
+	return out
+}
+

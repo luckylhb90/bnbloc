@@ -114,6 +114,10 @@ func main() {
 		SyncEngine:        config.FromEnvRaw("BNBLOC_BRIDGE_SYNC_ENGINE"),
 		SyncSecret:        config.FromEnvRaw("BNBLOC_SYNC_SECRET"),
 		Cores:             entries,
+		// MCP tools: the desktop's materialized stdio binaries and the
+		// member's own tool credentials (never sent to the gateway).
+		MCPToolsDir:    strings.TrimSpace(config.FromEnvRaw("BNBLOC_MCP_TOOLS_DIR")),
+		MCPSettingsDir: strings.TrimSpace(config.FromEnvRaw("BNBLOC_MCP_SETTINGS_DIR")),
 		// Deployment tuning floors for per-drive context (0 => built-in default).
 		WindowChars:       config.GetInt("BNBLOC_BRIDGE_CONTEXT_WINDOW_CHARS", 0),
 		ContextRecentRows: config.GetInt("BNBLOC_BRIDGE_CONTEXT_RECENT_ROWS", 0),

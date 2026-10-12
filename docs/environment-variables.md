@@ -341,6 +341,8 @@ standalone bridge (compose `bridge` profile) reads them from the environment.
 | `BNBLOC_SANDBOX_MACHINE` | — | The one machine the desktop prepared (`bnbloc`); the bridge never creates or deletes machines. Set with `BNBLOC_SANDBOX_URL`. |
 | `BNBLOC_SANDBOX_VMEXEC` | — | Absolute path of the `bnbloc-vmexec` helper from the sandbox package. Set with `BNBLOC_SANDBOX_URL`. |
 | `BNBLOC_SANDBOX_WORKSPACES_ROOT` | — | The host directory shared into the machine at the identical guest path (`<home>/bnbloc-workspaces`); sandboxed room workspaces live under it. Set with `BNBLOC_SANDBOX_URL`. |
+| `BNBLOC_MCP_TOOLS_DIR` | — | Set by the desktop: the directory it materializes stdio MCP tool binaries into (sha256-verified, one per installed tool for this platform), with `index.json` listing `{name, sha256, path}`. The bridge attaches a stdio tool only from an entry carrying the gateway's pin for this platform. Unset (a standalone bridge) = stdio MCP tools show as missing. |
+| `BNBLOC_MCP_SETTINGS_DIR` | — | Set by the desktop: the member's own MCP tool credentials (`<tool>.json`, 0600, entered in Settings → Tools, never sent to the gateway). Read only for drives the member asked for themselves. Unset = tools with member credentials show as missing. |
 
 ### Room tools stdio shim (`bnbloc-bridge roomtools-stdio`)
 

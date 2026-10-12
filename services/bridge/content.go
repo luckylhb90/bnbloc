@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -64,8 +65,12 @@ type jobContent struct {
 	// files); "" for no content.
 	sum string
 	// foreign names content that is not the agent owner's own and declares
-	// scripts or stdio MCP: it forces a sandboxed drive.
+	// scripts or stdio MCP, or requires a stdio MCP tool: it forces a
+	// sandboxed drive.
 	foreign []string
+	// mcp are the MCP servers of the tools the content requires
+	// (mcp_tools.go).
+	mcp jobMCP
 }
 
 type skillSummary struct {
@@ -79,20 +84,27 @@ func (c *jobContent) empty() bool {
 	return c == nil || (strings.TrimSpace(c.instructions) == "" && len(c.skills) == 0)
 }
 
-// profile is the agent profile of the content (nil when empty).
+// profile is the agent profile of the content and its MCP tools (nil when
+// there is neither).
 func (c *jobContent) profile() *corepkg.AgentProfile {
-	if c.empty() {
+	if c.empty() && (c == nil || len(c.mcp.servers) == 0) {
 		return nil
 	}
-	return &corepkg.AgentProfile{Instructions: c.instructions, Skills: append([]corepkg.ProfileSkill(nil), c.skills...)}
+	return &corepkg.AgentProfile{
+		Instructions: c.instructions, Skills: append([]corepkg.ProfileSkill(nil), c.skills...),
+		MCPServers: append([]corepkg.MCPServer(nil), c.mcp.servers...),
+	}
 }
 
-// contentSum is the session binding checksum ("" for none).
+// contentSum is the session binding checksum ("" for none): the profile's
+// content checksum, plus the MCP tool set's non-secret identity (a tool
+// added, upgraded or newly configured starts a new session; values never
+// enter it).
 func (c *jobContent) contentSum() string {
 	if c == nil {
 		return ""
 	}
-	return c.sum
+	return c.mcp.bindingSum(c.sum)
 }
 
 // expertLabel names the expert for notices and the prompt prefix.
@@ -236,6 +248,14 @@ func (b *Bridge) resolveJobContent(ctx context.Context, job bridgeJob, owner str
 	}
 	if !c.empty() {
 		c.sum = c.profile().ContentSum()
+	}
+	mcp, unmet, stdioForeign := b.resolveMCP(eff.MCP, refs, owner, sameUserID(job.RequesterUserID, owner))
+	c.mcp = mcp
+	c.missing = append(c.missing, unmet...)
+	for _, name := range stdioForeign {
+		if !slices.Contains(c.foreign, name) {
+			c.foreign = append(c.foreign, name)
+		}
 	}
 	if len(c.missing) > 0 {
 		slog.Info("bnbloc bridge content requirements unmet",
