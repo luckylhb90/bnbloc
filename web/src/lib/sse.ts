@@ -83,7 +83,8 @@ export function subscribeRoom(
     try {
       ev = JSON.parse(raw);
     } catch {
-      onEvent({ text: raw });
+      // Not an event (a proxy's error page, a truncated frame): dropped,
+      // never rendered as a kindless row the feed takes for an agent reply.
       return;
     }
     normalizeRoomEvent(ev, onEvent);
