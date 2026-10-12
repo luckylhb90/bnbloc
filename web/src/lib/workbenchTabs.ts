@@ -1,12 +1,14 @@
 // Pure tab model of the preview workbench (no React, no DOM; unit-tested
 // under node). useWorkbench wires it to React state and per-room
-// localStorage.
+// browser storage (lib/storageKeys.ts).
 //
 // A tab is either one artifact (optionally pinned to a version, optionally
 // opened with a specific viewer — the "Open with…" choice) or the room's
 // "All deliverables" list. Pinned tabs form a group at the front: they are
 // skipped by "close others", never evicted, and reorder only among
 // themselves.
+
+import { StorageKey, keyFor } from "./storageKeys.ts";
 
 export const DELIVERABLES_TAB = "deliverables";
 /** Upper bound of open tabs; the oldest unpinned, inactive tab is evicted. */
@@ -156,7 +158,7 @@ export function workbenchReducer(state: WorkbenchState, action: WorkbenchAction)
 
 /** localStorage key of a room's workbench. */
 export function workbenchStorageKey(roomId: string): string {
-  return `bnbloc.workbench.${roomId}`;
+  return keyFor(StorageKey.workbench, roomId);
 }
 
 /** Serializes the persisted part of the state. */

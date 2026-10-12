@@ -6,6 +6,7 @@ import { usePlatformAgents } from "@/lib/usePlatformAgents";
 import { Button } from "@/ui/Button";
 import { Dialog } from "@/ui/Dialog";
 import { DesktopHandoffCard } from "@/views/DesktopHandoffCard";
+import { StorageKey, keyFor, readStored, writeStored } from "@/lib/storageKeys";
 
 // DesktopConnectNotice is the persistent sidebar entry shown in a browser while
 // the member's own desktop app is not connected; it opens the open/install
@@ -41,7 +42,7 @@ export function DesktopConnectNotice({ collapsed }: { readonly collapsed: boolea
   );
 }
 
-const dismissKey = (subject: string) => `bnbloc.desktopHint.dismissed.${subject}`;
+const dismissKey = (subject: string) => keyFor(StorageKey.desktopHintDismissed, subject);
 
 // DesktopConnectBanner is the in-room hint for a browser member whose desktop
 // app is not connected. Dismissible per member; the sidebar entry stays. A room
@@ -56,10 +57,10 @@ export function DesktopConnectBanner({
 }) {
   const presence = useDesktopPresence();
   const platform = usePlatformAgents();
-  const [dismissed, setDismissed] = useState(() => !!subject && localStorage.getItem(dismissKey(subject)) === "1");
+  const [dismissed, setDismissed] = useState(() => !!subject && readStored(dismissKey(subject)) === "1");
   if (!presence.disconnected || dismissed || !subject || hasPlatformAgent) return null;
   const dismiss = () => {
-    localStorage.setItem(dismissKey(subject), "1");
+    writeStored(dismissKey(subject), "1");
     setDismissed(true);
   };
   return (

@@ -20,7 +20,7 @@ import {
   welcomeStart,
 } from "@/lib/onboarding";
 import { platformAgentsApi } from "@/lib/platformAgentsApi";
-import { browserStorage } from "@/lib/platformRouting";
+import { browserStorage } from "@/lib/storageKeys";
 import { composerAgentPicks } from "@/lib/team";
 import { routeHash } from "@/lib/useHashRoute";
 import { usePlatformAgents } from "@/lib/usePlatformAgents";

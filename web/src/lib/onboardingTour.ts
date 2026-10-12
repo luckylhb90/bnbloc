@@ -4,6 +4,7 @@
 // node-tested; useOnboarding wires it to storage and the event bus, and
 // views/onboarding renders it.
 import type { OnboardingEvent } from "./onboardingEvents.ts";
+import { StorageKey, keyFor } from "./storageKeys.ts";
 
 type Storage = Pick<globalThis.Storage, "getItem" | "setItem">;
 
@@ -288,7 +289,7 @@ export function shouldAutoStartTour(s: OnboardingState, priorRoomCount: number |
 
 // ---- persistence
 
-export const onboardingKey = (subject: string) => `bnbloc.onboarding.v1:${subject}`;
+export const onboardingKey = (subject: string) => keyFor(StorageKey.onboarding, subject);
 
 const ITEM_IDS = new Set<string>(CHECKLIST.map((i) => i.id));
 const STATUSES = new Set<string>(["never", "active", "skipped", "done"]);

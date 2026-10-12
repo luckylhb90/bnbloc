@@ -1,18 +1,15 @@
 import { useSyncExternalStore } from "react";
 import { maskEmailsInText } from "./displayNames.ts";
+import { StorageKey, readStored, writeStored } from "./storageKeys.ts";
 
 // Privacy mode (PRD 2026-10-10 §2): "Hide email addresses" for demos and
 // screenshots. A presentation setting of this browser only (localStorage);
 // nothing is hidden from the server.
-const KEY = "bnbloc.privacyMode";
+const KEY = StorageKey.privacyMode;
 const listeners = new Set<() => void>();
 
 function read(): boolean {
-  try {
-    return typeof localStorage !== "undefined" && localStorage.getItem(KEY) === "1";
-  } catch {
-    return false;
-  }
+  return readStored(KEY) === "1";
 }
 
 let current = read();
@@ -35,12 +32,7 @@ export function privacyModeOn(): boolean {
 
 export function setPrivacyMode(on: boolean): void {
   current = on;
-  try {
-    if (on) localStorage.setItem(KEY, "1");
-    else localStorage.removeItem(KEY);
-  } catch {
-    // Storage unavailable: the toggle still applies to this tab.
-  }
+  writeStored(KEY, on ? "1" : ""); // unavailable storage: the toggle still applies to this tab
   emit();
 }
 

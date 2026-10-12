@@ -11,6 +11,7 @@
 import type { PlatformAgentRef, PlatformHost } from "./platformAgents.ts";
 import { sameUser } from "./format.ts";
 import { agentIdentity } from "./roomAgents.ts";
+import { StorageKey } from "./storageKeys.ts";
 
 export const BUSIER_BY = 3;
 
@@ -27,7 +28,7 @@ export function pickHost(hosts: readonly PlatformHost[], lastHost: string | null
   return leastBusy;
 }
 
-const STORAGE_KEY = "bnbloc.platformHosts";
+const STORAGE_KEY = StorageKey.platformHosts;
 // Bounded: the oldest remembered rooms are dropped first.
 const MAX_ENTRIES = 200;
 
@@ -71,11 +72,4 @@ export function rememberHost(storage: Storage | null, subject: string | null, ro
   }
 }
 
-// browserStorage is localStorage when the page may use it.
-export function browserStorage(): Storage | null {
-  try {
-    return typeof localStorage === "undefined" ? null : localStorage;
-  } catch {
-    return null;
-  }
-}
+

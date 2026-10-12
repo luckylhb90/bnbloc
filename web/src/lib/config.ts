@@ -10,6 +10,8 @@
 // (window.__BNBLOC_GATEWAY__). Everywhere else the base is empty and behavior
 // is byte-for-byte what it was before this indirection.
 
+import { StorageKey, readStored, writeStored } from "./storageKeys.ts";
+
 declare global {
   interface Window {
     __BNBLOC_GATEWAY__?: string;
@@ -23,7 +25,6 @@ function normalizeBase(raw: string): string {
   return trimmed;
 }
 
-const gatewayOverrideKey = "bnbloc.gatewayOverride";
 
 function injectedGatewayBase(): string {
   return normalizeBase(
@@ -31,25 +32,9 @@ function injectedGatewayBase(): string {
   );
 }
 
-function browserStorage(): Storage | null {
-  if (typeof window === "undefined") return null;
-  try {
-    return window.localStorage;
-  } catch (error) {
-    if (error instanceof DOMException) return null;
-    throw error;
-  }
-}
 
 function persistedGatewayOverride(): string {
-  const storage = browserStorage();
-  if (!storage) return "";
-  try {
-    return normalizeBase(storage.getItem(gatewayOverrideKey) || "");
-  } catch (error) {
-    if (error instanceof DOMException) return "";
-    throw error;
-  }
+  return normalizeBase(readStored(StorageKey.gatewayOverride));
 }
 
 let apiBase = persistedGatewayOverride() || injectedGatewayBase();
@@ -67,26 +52,12 @@ export function setGatewayBase(url: string) {
 
 export function setGatewayOverride(url: string) {
   const next = normalizeBase(url);
-  const storage = browserStorage();
-  if (storage) {
-    try {
-      storage.setItem(gatewayOverrideKey, next);
-    } catch (error) {
-      if (!(error instanceof DOMException)) throw error;
-    }
-  }
+  writeStored(StorageKey.gatewayOverride, next);
   apiBase = next;
 }
 
 export function clearGatewayOverride() {
-  const storage = browserStorage();
-  if (storage) {
-    try {
-      storage.removeItem(gatewayOverrideKey);
-    } catch (error) {
-      if (!(error instanceof DOMException)) throw error;
-    }
-  }
+  writeStored(StorageKey.gatewayOverride, "");
   apiBase = injectedGatewayBase();
 }
 

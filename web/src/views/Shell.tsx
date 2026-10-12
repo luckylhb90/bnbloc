@@ -25,6 +25,7 @@ import { notify, requestNotificationPermission } from "@/lib/notify";
 import { openGlobalSearch } from "@/lib/team";
 import { onRoomGone, withoutRoom } from "@/lib/roomGone";
 import { can } from "@/lib/permissions";
+import { StorageKey, readStored, writeStored } from "@/lib/storageKeys";
 
 export type View = "plaza" | "myrooms" | "agents" | "team" | "components" | "org" | "directory" | "releases" | "library" | "settings";
 
@@ -68,7 +69,7 @@ export function Shell({
   // there (medium stage, or a preview docked inline) — honouring "expanded"
   // then would crush the chat column the sidebar sits next to.
   const [userCollapsed, setUserCollapsed] = useState(() => {
-    return localStorage.getItem("bnbloc.sidebarCollapsed") === "1";
+    return readStored(StorageKey.sidebarCollapsed) === "1";
   });
   const forcedCollapsed = previewDocked || shellStage === "medium";
   // Compact: the sidebar is a full-label drawer over the page, never a rail.
@@ -79,7 +80,7 @@ export function Shell({
   const toggleSidebar = () => {
     setUserCollapsed((prev) => {
       const next = !prev;
-      localStorage.setItem("bnbloc.sidebarCollapsed", next ? "1" : "0");
+      writeStored(StorageKey.sidebarCollapsed, next ? "1" : "0");
       return next;
     });
   };

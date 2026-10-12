@@ -17,6 +17,7 @@ import {
   type SidecarSnapshot,
 } from "@/lib/sidecarState";
 import { errorReason } from "./errors.ts";
+import { StorageKey, readStored, writeStored } from "./storageKeys.ts";
 
 // One app-wide poller for the desktop's managed sidecars, shared by every view
 // that lists local agents (Agents page, composer agent picker, run dialog) so
@@ -36,13 +37,13 @@ let unsettledStreak = 0;
 const inflightTargets = new Set<string>();
 const inflightAuth = new Set<string>();
 
-const SIGN_IN_KEY = "bnbloc.sidecarSignInStarted";
+const SIGN_IN_KEY = StorageKey.sidecarSignInStarted;
 
 // Auto sign-in happens at most once per app session per sidecar, surviving a
 // webview reload (sessionStorage) but not an app restart.
 function signInStarted(name: string): boolean {
   try {
-    return (JSON.parse(sessionStorage.getItem(SIGN_IN_KEY) || "[]") as string[]).includes(name);
+    return (JSON.parse(readStored(SIGN_IN_KEY, "session") || "[]") as string[]).includes(name);
   } catch {
     return false;
   }
@@ -50,8 +51,8 @@ function signInStarted(name: string): boolean {
 
 function markSignInStarted(name: string): void {
   try {
-    const started = JSON.parse(sessionStorage.getItem(SIGN_IN_KEY) || "[]") as string[];
-    if (!started.includes(name)) sessionStorage.setItem(SIGN_IN_KEY, JSON.stringify([...started, name]));
+    const started = JSON.parse(readStored(SIGN_IN_KEY, "session") || "[]") as string[];
+    if (!started.includes(name)) writeStored(SIGN_IN_KEY, JSON.stringify([...started, name]), "session");
   } catch {
     // sessionStorage unavailable: the in-memory signIn state still prevents repeats.
   }

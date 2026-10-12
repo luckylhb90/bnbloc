@@ -5,7 +5,7 @@ import { BUILDER_EXPERT_ID, contentLabel, type ContentComponent } from "@/lib/co
 import { contentApi } from "@/lib/contentComponentsApi";
 import { platformAgentsApi } from "@/lib/platformAgentsApi";
 import { announcePromptPacksChanged } from "@/lib/promptPacksApi";
-import { browserStorage } from "@/lib/platformRouting";
+import { browserStorage } from "@/lib/storageKeys";
 import { composerAgentPicks, composerDrafts, composerExpertPicks, queueLibraryTab } from "@/lib/team";
 import { routeHash } from "@/lib/useHashRoute";
 import {

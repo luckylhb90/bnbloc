@@ -221,7 +221,7 @@ export function AddToRoomDialog({ pack, onClose }: { readonly pack: ContentCompo
         if (!live) return;
         const list = r.rooms ?? [];
         setRooms(list);
-        const last = lastRoom();
+        const last = lastRoom(subject);
         setRoomId(list.some((x) => x.roomId === last) ? (last as string) : (list[0]?.roomId ?? ""));
       })
       .catch(() => live && setRooms([]));

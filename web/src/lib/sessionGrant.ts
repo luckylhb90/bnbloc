@@ -9,7 +9,8 @@
 // grants through POST /v1/auth/refresh, each carrying a rotated refresh token
 // that replaces the stored one.
 
-export const SESSION_KEY = "bnbloc.session";
+import { StorageKey } from "./storageKeys.ts";
+export const SESSION_KEY = StorageKey.session;
 
 export interface Grant {
   sessionToken: string;

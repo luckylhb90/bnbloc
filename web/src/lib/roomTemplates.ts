@@ -8,6 +8,7 @@ import type { RoomTemplateBody, RoomTemplateInstance, TemplateAgent } from "./wi
 export type { TemplateVisibility } from "./wire.gen.ts";
 import type { TemplateVisibility } from "./wire.gen.ts";
 import { parseAgentHandle } from "./roomAgents.ts";
+import { StorageKey, keyFor } from "./storageKeys.ts";
 
 export interface RoomTemplateInput {
   name: string;
@@ -74,7 +75,7 @@ export function agentFollowUps(
 
 // Starter prompts of a freshly created room, kept for the room's first
 // visits (the instantiate response is the only place they are returned).
-const starterKey = (roomId: string) => `bnbloc.templateStart.${roomId}`;
+const starterKey = (roomId: string) => keyFor(StorageKey.templateStart, roomId);
 
 export function rememberTemplateStart(inst: RoomTemplateInstance, storage: Pick<Storage, "setItem"> = localStorage): void {
   try {

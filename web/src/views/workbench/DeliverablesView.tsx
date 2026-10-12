@@ -9,6 +9,7 @@ import { FileCard, FileRow } from "./FileCard";
 import { versionFacts } from "./artifactData";
 import { useDisplayNames } from "@/lib/useDisplayName";
 import { errorText } from "@/lib/errors";
+import { StorageKey, readStored, writeStored } from "@/lib/storageKeys";
 
 // DeliverablesView: every artifact of the room as a filterable grid or list
 // (type, author, date, search; optionally only one message's deliverables).
@@ -37,11 +38,11 @@ const DATES: readonly { value: DateFilter; label: string; ms: number }[] = [
   { value: "month", label: "Last 30 days", ms: 30 * 86_400_000 },
 ];
 const PAGE_SIZE = 60;
-const LAYOUT_KEY = "bnbloc.deliverables.layout";
+const LAYOUT_KEY = StorageKey.deliverablesLayout;
 
 function readLayout(): Layout {
   try {
-    return localStorage.getItem(LAYOUT_KEY) === "list" ? "list" : "grid";
+    return readStored(LAYOUT_KEY) === "list" ? "list" : "grid";
   } catch {
     return "grid";
   }
@@ -145,7 +146,7 @@ export function DeliverablesView({
   const switchLayout = (next: Layout) => {
     setLayout(next);
     try {
-      localStorage.setItem(LAYOUT_KEY, next);
+      writeStored(LAYOUT_KEY, next);
     } catch {
       /* preference only */
     }

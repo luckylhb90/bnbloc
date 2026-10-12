@@ -11,7 +11,8 @@ import {
   type RoomPlatformAgent,
 } from "@/lib/platformAgents";
 import { platformAgentsApi } from "@/lib/platformAgentsApi";
-import { browserStorage, pickHost, readLastHost, rememberHost } from "@/lib/platformRouting";
+import { pickHost, readLastHost, rememberHost } from "@/lib/platformRouting";
+import { browserStorage } from "@/lib/storageKeys";
 import { usePlatformAgents } from "@/lib/usePlatformAgents";
 import { useVisiblePoll } from "@/lib/useVisiblePoll";
 import { useToast } from "@/ui/Toast";

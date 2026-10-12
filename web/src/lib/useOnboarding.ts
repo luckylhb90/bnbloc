@@ -10,7 +10,7 @@ import {
   type OnboardingAction,
   type OnboardingState,
 } from "@/lib/onboardingTour";
-import { browserStorage } from "@/lib/platformRouting";
+import { browserStorage } from "@/lib/storageKeys";
 
 // The signed-in member's onboarding state (tour + checklist): one in-tab
 // store, persisted per member in localStorage (onboardingKey) and fed by the

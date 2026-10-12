@@ -7,6 +7,7 @@ import {
 } from "react";
 import type { Stage } from "@/lib/capability";
 import { startPointerDrag } from "@/lib/pointerDrag";
+import { StorageKey, readStored, writeStored } from "./storageKeys.ts";
 
 export type DockStyle = CSSProperties & {
   readonly "--dock-w": string;
@@ -34,7 +35,7 @@ export interface UseDock {
 const DEFAULT_DOCK_SHARE = 0.36;
 
 function dockShareFromStorage(): number {
-  const saved = Number(localStorage.getItem("bnbloc.dockShare"));
+  const saved = Number(readStored(StorageKey.dockShare));
   return Number.isFinite(saved) && saved > 0 ? saved : DEFAULT_DOCK_SHARE;
 }
 
@@ -80,7 +81,7 @@ export function useDock(
         },
         () => {
           setDraggingDock(false);
-          if (last >= 0) localStorage.setItem("bnbloc.dockShare", last.toFixed(4));
+          if (last >= 0) writeStored(StorageKey.dockShare, last.toFixed(4));
         },
       );
     },

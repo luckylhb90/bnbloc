@@ -14,8 +14,9 @@ import { useToast } from "@/ui/Toast";
 import { displayNameOf } from "@/lib/useDisplayName";
 import { UserWithEmail } from "@/views/UserName";
 import { errorText } from "@/lib/errors";
+import { StorageKey, keyFor, readStored, writeStored } from "@/lib/storageKeys";
 
-const dismissKey = (roomId: string) => `bnbloc.handoffBanner.${roomId}`;
+const dismissKey = (roomId: string) => keyFor(StorageKey.handoffBanner, roomId);
 
 // HandoffBanner shows, in a room created from a handoff package, where the
 // history came from and — for the owner/admins, who may add members — offers
@@ -31,7 +32,7 @@ export function HandoffBanner({
   readonly members: readonly string[];
 }) {
   const [info, setInfo] = useState<RoomHandoffInfo | null>(null);
-  const [dismissed, setDismissed] = useState(() => localStorage.getItem(dismissKey(roomId)) === "1");
+  const [dismissed, setDismissed] = useState(() => readStored(dismissKey(roomId)) === "1");
   const [inviting, setInviting] = useState(false);
   const [added, setAdded] = useState<string[]>([]);
   const toast = useToast();
@@ -51,7 +52,7 @@ export function HandoffBanner({
   if (!info || dismissed) return null;
   const pending = pendingSuggestions(info.suggestedMembers, [...members, ...added]);
   const dismiss = () => {
-    localStorage.setItem(dismissKey(roomId), "1");
+    writeStored(dismissKey(roomId), "1");
     setDismissed(true);
   };
   const add = async (m: HandoffMember) => {

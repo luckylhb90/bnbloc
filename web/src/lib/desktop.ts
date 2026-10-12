@@ -12,6 +12,7 @@ import type { McpToolSettings } from "./mcpTools";
 import type { PluginLocalSettings } from "./pluginSettings";
 import type { SandboxMode, SandboxStatus } from "./sandboxStatus";
 import { SESSION_KEY, parseSessionRecord, type SessionRecord } from "./sessionGrant";
+import { StorageKey, readStored, writeStored } from "./storageKeys.ts";
 
 export type BridgeState = "stopped" | "starting" | "running" | "failed";
 
@@ -113,7 +114,7 @@ function tauri(): { invoke: InvokeFn; listen: ListenFn } | null {
 function storedSession(): SessionRecord | null {
   if (typeof window === "undefined") return null;
   try {
-    return parseSessionRecord(window.localStorage.getItem(SESSION_KEY));
+    return parseSessionRecord(readStored(SESSION_KEY) || null);
   } catch {
     return null;
   }
@@ -478,20 +479,20 @@ export async function ensureBridgeRunning(subject: string, gatewayUrl: string, t
 // code it returns (via the bnbloc://sso deep link) to that nonce. Only the app
 // that started the flow holds the nonce, so a deep link crafted from someone
 // else's login cannot sign this app in (login CSRF). Single use, short-lived.
-const SSO_NONCE_KEY = "bnbloc.ssoNonce";
+const SSO_NONCE_KEY = StorageKey.ssoNonce;
 const SSO_NONCE_TTL_MS = 10 * 60 * 1000;
 
 export function beginDesktopSso(): string {
   const bytes = new Uint8Array(32);
   crypto.getRandomValues(bytes);
   const nonce = Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
-  localStorage.setItem(SSO_NONCE_KEY, JSON.stringify({ nonce, at: Date.now() }));
+  writeStored(SSO_NONCE_KEY, JSON.stringify({ nonce, at: Date.now() }));
   return nonce;
 }
 
 export function takeDesktopSsoNonce(): string | null {
-  const raw = localStorage.getItem(SSO_NONCE_KEY);
-  localStorage.removeItem(SSO_NONCE_KEY);
+  const raw = readStored(SSO_NONCE_KEY) || null;
+  writeStored(SSO_NONCE_KEY, "");
   if (!raw) return null;
   try {
     const { nonce, at } = JSON.parse(raw) as { nonce?: string; at?: number };

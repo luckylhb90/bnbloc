@@ -7,6 +7,7 @@
 import { useCallback, useSyncExternalStore } from "react";
 import { gatewayBase } from "./config.ts";
 import { statusText } from "./errors.ts";
+import { StorageKey, memberKey, readStored, writeStored } from "./storageKeys.ts";
 
 let token: string | null = null;
 
@@ -26,22 +27,13 @@ export function getToken(): string | null {
 // reload keeps it while another member, or another gateway, never inherits
 // it; signing out clears it. Views read and change it through
 // useActingTenant().
-const ACTING_KEY = "bnbloc.actingTenant";
 
 let actingTenant: string | null = null;
-let actingScope: string | null = null; // "<gateway>|<subject>" of the stored value
+let actingScope: { readonly gateway: string; readonly subject: string } | null = null; // whose stored value
 const actingListeners = new Set<() => void>();
 
-function actingStorage(): Storage | null {
-  try {
-    return typeof localStorage === "undefined" ? null : localStorage;
-  } catch {
-    return null;
-  }
-}
-
-function actingKey(scope: string): string {
-  return `${ACTING_KEY}:${scope}`;
+function actingKey(scope: { readonly gateway: string; readonly subject: string }): string {
+  return memberKey(StorageKey.actingTenant, scope);
 }
 
 function emitActing() {
@@ -52,8 +44,8 @@ function emitActing() {
 // gateway; the auth layer calls it whenever the signed-in subject changes
 // (null: nobody is signed in, nothing is acted as).
 export function bindActingTenant(subject: string | null) {
-  actingScope = subject ? `${gatewayBase() || "same-origin"}|${subject}` : null;
-  actingTenant = actingScope ? (actingStorage()?.getItem(actingKey(actingScope)) ?? null) : null;
+  actingScope = subject ? { gateway: gatewayBase(), subject } : null;
+  actingTenant = actingScope ? readStored(actingKey(actingScope)) || null : null;
   emitActing();
 }
 
@@ -61,15 +53,8 @@ export function bindActingTenant(subject: string | null) {
 // signed-in subject and persists it.
 export function setActingTenant(next: string | null) {
   actingTenant = next || null;
-  const store = actingStorage();
-  if (store && actingScope) {
-    try {
-      if (actingTenant) store.setItem(actingKey(actingScope), actingTenant);
-      else store.removeItem(actingKey(actingScope));
-    } catch {
-      // storage full or blocked: the switch lasts until reload
-    }
-  }
+  // Storage full or blocked: the switch lasts until reload.
+  if (actingScope) writeStored(actingKey(actingScope), actingTenant ?? "");
   emitActing();
 }
 

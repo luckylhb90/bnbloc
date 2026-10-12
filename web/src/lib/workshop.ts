@@ -9,6 +9,7 @@ import { contentKindWord, contentLabel, type ContentComponent, type ContentKind 
 import { defaultPlatformChoice, type OwnAgent } from "./onboarding.ts";
 import type { PlatformAgent, PlatformChoice } from "./platformAgents.ts";
 import { isOwner } from "./roomRoles.ts";
+import { StorageKey, keyFor } from "./storageKeys.ts";
 
 export const WORKSHOP_ROOM_NAME = "Expert workshop";
 
@@ -111,7 +112,7 @@ export function workshopRoomId(random: () => number = Math.random): string {
 // The workshop room id is cached per member in local storage (a fast path;
 // the server state — an owned private room pinning the builder — decides).
 export function workshopStorageKey(subject: string): string {
-  return `bnbloc.workshopRoom.${subject}`;
+  return keyFor(StorageKey.workshopRoom, subject);
 }
 
 export function cachedWorkshop(storage: Pick<Storage, "getItem"> | null, subject: string | null): string | null {

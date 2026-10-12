@@ -10,6 +10,7 @@ import {
   type WorkbenchAction,
   type WorkbenchState,
 } from "@/lib/workbenchTabs";
+import { readStored, writeStored } from "@/lib/storageKeys";
 
 // useWorkbench owns a room's preview workbench: its tabs (persisted per room
 // in localStorage, so a member coming back finds the same set) and whether
@@ -26,24 +27,16 @@ export interface Workbench {
   readonly closeWorkbench: () => void;
 }
 
-function readStored(roomId: string): WorkbenchState {
-  try {
-    return parseWorkbench(localStorage.getItem(workbenchStorageKey(roomId)));
-  } catch {
-    return parseWorkbench(null);
-  }
+function storedWorkbench(roomId: string): WorkbenchState {
+  return parseWorkbench(readStored(workbenchStorageKey(roomId)) || null);
 }
 
 export function useWorkbench(roomId: string): Workbench {
-  const [state, dispatch] = useReducer(workbenchReducer, roomId, readStored);
+  const [state, dispatch] = useReducer(workbenchReducer, roomId, storedWorkbench);
   const [open, setOpen] = useState(false);
 
   useEffect(() => {
-    try {
-      localStorage.setItem(workbenchStorageKey(roomId), serializeWorkbench(state));
-    } catch {
-      /* storage full or disabled: tabs just do not persist */
-    }
+    writeStored(workbenchStorageKey(roomId), serializeWorkbench(state)); // full or disabled storage: tabs just do not persist
   }, [roomId, state]);
 
   useEffect(() => {

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import type { RoomEvent } from "@/lib/roomEvents";
 import { rememberLastRoom } from "@/lib/team";
+import { useAuth } from "@/lib/auth";
 import type { PromptDraft } from "@/lib/promptPacks";
 import { PromptPackEditorDialog, type PromptPackTarget } from "@/views/library/PromptPackEditorDialog";
 import type { MessageExtras } from "@/views/room/messageExtras";
@@ -44,7 +45,10 @@ export function useRoomTeam({
   // Several messages saved as prompts continue in the prompt pack form.
   const [packing, setPacking] = useState<PromptPackTarget | null>(null);
 
-  useEffect(() => rememberLastRoom(roomId), [roomId]);
+  const { subject } = useAuth();
+  useEffect(() => {
+    if (subject) rememberLastRoom(subject, roomId);
+  }, [subject, roomId]);
 
   const { bySeq, mark, unmark, setStatus } = tasks;
   const extras = useMemo<MessageExtras>(

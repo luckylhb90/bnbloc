@@ -23,6 +23,7 @@ import { takeDesktopSsoNonce } from "@/lib/desktop";
 import { forgetBrowserPush } from "@/lib/webPush";
 import { clearQueryCache } from "@/lib/useQuery";
 import { forgetLocalAgent } from "@/lib/useLocalAgent";
+import { readStored, writeStored } from "@/lib/storageKeys";
 
 interface AuthState {
   subject: string | null;
@@ -51,21 +52,13 @@ export const useAuth = () => useContext(AuthCtx);
 // sessionStore: the session persists in localStorage everywhere — reopening
 // the app or the browser lands you signed-in. The 1h session bearer is renewed
 // from the stored ~30d refresh token; Sign Out clears both.
-const sessionStore = (): Storage | null => {
-  try {
-    if (typeof window === "undefined") return null;
-    return window.localStorage;
-  } catch {
-    return null;
-  }
-};
 
 function storedSession(): SessionRecord | null {
-  return parseSessionRecord(sessionStore()?.getItem(SESSION_KEY));
+  return parseSessionRecord(readStored(SESSION_KEY) || null);
 }
 
 function persistSession(record: SessionRecord) {
-  sessionStore()?.setItem(SESSION_KEY, JSON.stringify(record));
+  writeStored(SESSION_KEY, JSON.stringify(record));
 }
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
@@ -193,7 +186,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setSubject(null);
     setTenant(null);
     setRole(null);
-    sessionStore()?.removeItem(SESSION_KEY);
+    writeStored(SESSION_KEY, "");
     // Revoke the sign-in server-side so the refresh token cannot renew a
     // session again. Best-effort: the local sign-out above never waits on it.
     if (refreshToken) void api.logout(refreshToken).catch(() => {});

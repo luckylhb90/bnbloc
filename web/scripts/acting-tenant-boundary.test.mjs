@@ -24,7 +24,7 @@ function sources(dir) {
 
 const rules = [
   { what: "the acting-tenant header", pattern: /X-Bnbloc-Acting-Tenant/, owners: ["lib/session.ts"] },
-  { what: "the acting-tenant storage key", pattern: /bnbloc\.actingTenant/, owners: ["lib/session.ts"] },
+  { what: "the acting-tenant storage key", pattern: /bnbloc\.actingTenant/, owners: ["lib/storageKeys.ts"] },
   { what: "a ?tenantId= override", pattern: /[?&]tenantId=/, owners: [] },
   { what: "the acting-tenant state", pattern: /\b(getActingTenant|setActingTenant)\b/, owners: ["lib/session.ts"] },
   { what: "the acting-tenant binding", pattern: /\b(bindActingTenant|clearActingTenant)\b/, owners: ["lib/session.ts", "lib/auth.tsx"] },

@@ -13,6 +13,7 @@ import { useFeedScroll } from "@/views/room/useFeedScroll";
 import { useMessageJump } from "@/views/room/useMessageJump";
 import { useRoomFeed } from "@/views/room/useRoomFeed";
 import { useRoomMessageActions } from "@/views/room/useRoomMessageActions";
+import { StorageKey, readStored, writeStored } from "@/lib/storageKeys";
 
 const NO_WORKING = new Map<string, string>();
 const NO_JOBS = {};
@@ -214,7 +215,7 @@ export function PeopleChatPanel({
   );
 }
 
-const WIDTH_KEY = "bnbloc.peopleChatWidth";
+const WIDTH_KEY = StorageKey.peopleChatWidth;
 const DEFAULT_WIDTH = 360;
 const MIN_WIDTH = 280;
 const MAX_WIDTH = 720;
@@ -225,7 +226,7 @@ export function clampPanelWidth(px: number): number {
 }
 
 function storedWidth(): number {
-  const saved = Number(localStorage.getItem(WIDTH_KEY));
+  const saved = Number(readStored(WIDTH_KEY));
   return saved > 0 ? clampPanelWidth(saved) : DEFAULT_WIDTH;
 }
 
@@ -252,7 +253,7 @@ export function PeopleChatDock({ children }: { readonly children: React.ReactNod
       },
       () => {
         setDragging(false);
-        if (last > 0) localStorage.setItem(WIDTH_KEY, String(last));
+        if (last > 0) writeStored(WIDTH_KEY, String(last));
       },
     );
   };

@@ -3,10 +3,13 @@ import { api, type AgentTarget, type Core } from "@/lib/api";
 import { desktop, type DesktopSettings } from "@/lib/desktop";
 import { sidecarsPending, sidecarTargets } from "@/lib/sidecarState";
 import { sidecarAgents, useSidecarAgents } from "@/lib/useSidecarAgents";
+import { StorageKey, readStored, writeStored } from "@/lib/storageKeys";
 
-const LS_URL = "bnbloc.localAgentUrl";
-const LS_TOKEN = "bnbloc.localAgentToken";
-const LS_TARGET = "bnbloc.agentTarget";
+// The selected target is this machine's (its local cores), not a member's:
+// unscoped. The address/token are dev-only.
+const LS_URL = StorageKey.localAgentUrl;
+const LS_TOKEN = StorageKey.localAgentToken;
+const LS_TARGET = StorageKey.agentTarget;
 
 export interface LocalAgent {
   url: string;
@@ -71,22 +74,7 @@ let state: LocalAgentState = {
 let loading: Promise<void> | null = null;
 const listeners = new Set<() => void>();
 
-function readStored(key: string): string {
-  try {
-    return localStorage.getItem(key) || "";
-  } catch {
-    return "";
-  }
-}
 
-function writeStored(key: string, value: string): void {
-  try {
-    if (value) localStorage.setItem(key, value);
-    else localStorage.removeItem(key);
-  } catch {
-    /* storage unavailable: the in-memory value still applies */
-  }
-}
 
 function setState(patch: Partial<LocalAgentState>): void {
   state = { ...state, ...patch };

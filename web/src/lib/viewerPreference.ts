@@ -5,7 +5,9 @@
 // (selectViewer ignores a preference that is no longer a candidate, e.g. an
 // uninstalled previewer), so a stale entry is harmless.
 
-export const VIEWER_PREFERENCE_KEY = "bnbloc.viewerChoice.v1";
+import { StorageKey, browserStorage } from "./storageKeys.ts";
+
+export const VIEWER_PREFERENCE_KEY = StorageKey.viewerChoice;
 const MAX_ENTRIES = 200;
 
 export interface PreferenceStorage {
@@ -49,11 +51,7 @@ function write(storage: PreferenceStorage | null, prefs: Record<string, string>)
 }
 
 function defaultStorage(): PreferenceStorage | null {
-  try {
-    return typeof localStorage === "undefined" ? null : localStorage;
-  } catch {
-    return null;
-  }
+  return browserStorage();
 }
 
 /** The remembered viewer id for a file type (MIME first, then extension). */

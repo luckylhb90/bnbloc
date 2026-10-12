@@ -5,6 +5,8 @@
 // consumes them on mount, or immediately when it is already open.
 import type { MessageTask, SearchResult, TaskUpdate } from "./teamModels.ts";
 import type { Referenceable } from "../views/composer/types.ts";
+import { StorageKey, memberKey, readStored, writeStored } from "./storageKeys.ts";
+import { gatewayBase } from "./config.ts";
 
 // parseTags splits a comma/whitespace separated tag field into normalized,
 // de-duplicated tags (the server applies the same normalization).
@@ -125,7 +127,7 @@ export function queueComposerRef(roomId: string, ref: Referenceable): void {
 // asked from there reaches the main window's composer through a storage
 // event (same origin, shared localStorage). The key is written then removed
 // at once — only the event carries the payload, nothing lingers.
-const SHARED_REF_KEY = "bnbloc.composerRef";
+const SHARED_REF_KEY = StorageKey.composerRef;
 
 interface SharedRef {
   readonly roomId: string;
@@ -148,12 +150,9 @@ export function parseSharedRef(raw: string | null): SharedRef | null {
 // every other window of the app.
 export function shareComposerRef(roomId: string, ref: Referenceable): void {
   queueComposerRef(roomId, ref);
-  try {
-    localStorage.setItem(SHARED_REF_KEY, JSON.stringify({ roomId, ref }));
-    localStorage.removeItem(SHARED_REF_KEY);
-  } catch {
-    // storage unavailable: only this window's composer receives it
-  }
+  // Storage unavailable: only this window's composer receives it.
+  writeStored(SHARED_REF_KEY, JSON.stringify({ roomId, ref }));
+  writeStored(SHARED_REF_KEY, "");
 }
 
 // listenForSharedComposerRefs queues references announced by other windows.
@@ -168,22 +167,14 @@ export function listenForSharedComposerRefs(): () => void {
   return () => window.removeEventListener("storage", onStorage);
 }
 
-// The last room the member opened: the default room a prompt pack is turned
-// on for from the Library.
-const LAST_ROOM_KEY = "bnbloc.lastRoom";
-export function rememberLastRoom(roomId: string): void {
-  try {
-    localStorage.setItem(LAST_ROOM_KEY, roomId);
-  } catch {
-    // storage unavailable (private mode); the picker falls back to the first room
-  }
+// The last room the member opened (on this gateway): the default room a
+// prompt pack is turned on for from the Library. Unavailable storage: the
+// picker falls back to the first room.
+export function rememberLastRoom(subject: string, roomId: string): void {
+  writeStored(memberKey(StorageKey.lastRoom, { gateway: gatewayBase(), subject }), roomId);
 }
-export function lastRoom(): string | null {
-  try {
-    return localStorage.getItem(LAST_ROOM_KEY);
-  } catch {
-    return null;
-  }
+export function lastRoom(subject: string): string | null {
+  return readStored(memberKey(StorageKey.lastRoom, { gateway: gatewayBase(), subject })) || null;
 }
 
 // The Library tab to open (a save toast's "Open in Library"). Taken once on
