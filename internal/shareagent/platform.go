@@ -85,7 +85,7 @@ func RoomPlatformGrants(ctx context.Context, grants RoomGrantLister, policy wire
 // GET /v1/my/agents): an agent is online while its owner's live bridge
 // advertises it. store.BridgeJobStore satisfies it.
 type AgentAdvertisements interface {
-	ListBridgeAgentsForOwner(ctx context.Context, ownerUserID string) ([]store.BridgeAgent, error)
+	ListBridgeAgentsForOwner(ctx context.Context, ownerUserID string, nowMs int64) ([]store.BridgeAgent, error)
 }
 
 // OnlineAgents indexes an owner's live advertised agents by (core, provider)
@@ -133,7 +133,7 @@ func ReadPlatformDrive(ctx context.Context, grants RoomGrantLister, policy wire.
 	if !platform {
 		return PlatformDrive{}, nil
 	}
-	advertised, err := ads.ListBridgeAgentsForOwner(ctx, owner)
+	advertised, err := ads.ListBridgeAgentsForOwner(ctx, owner, nowMs)
 	if err != nil {
 		return PlatformDrive{}, err
 	}

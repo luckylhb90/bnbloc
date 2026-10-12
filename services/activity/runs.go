@@ -170,22 +170,10 @@ func (s *Service) writeRuns(w http.ResponseWriter, r *http.Request, scope string
 	for _, j := range jobs {
 		out.Runs = append(out.Runs, v.record(j, false))
 	}
-	if n := len(jobs); n > 0 && n == effectiveRunLimit(q.Limit) {
+	if n := len(jobs); n > 0 && n == q.PageSize() {
 		out.NextBefore = runCursor(jobs[n-1])
 	}
 	httpx.WriteJSON(w, http.StatusOK, out)
-}
-
-// effectiveRunLimit mirrors the store's page clamp so a full page is known to
-// have a successor.
-func effectiveRunLimit(n int) int {
-	switch {
-	case n <= 0:
-		return store.MaxAgentRunsPage / 2
-	case n > store.MaxAgentRunsPage:
-		return store.MaxAgentRunsPage
-	}
-	return n
 }
 
 // handleRoomRun returns one run of a room (room members) with its

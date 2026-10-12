@@ -19,34 +19,19 @@ import (
 // entry whose count dropped must be lowered (or removed) with the change
 // that removed the copy. Batch 4.3 of the code-health plan empties it.
 var storeRuleCopies = map[string]map[string]int{
-	"bridge-live": {
-		"mysql_bridge_jobs.go": 3,
-		"mysql_team_agents.go": 1,
-		"ops_stats.go":         2,
-		"team_agents.go":       1,
-	},
 	"expiry-inline": {
 		"api_tokens.go":              1,
-		"bridge_jobs.go":             2,
 		"content_drafts.go":          1,
 		"notification_replies.go":    1,
 		"notification_reply_refs.go": 1,
 		"refresh_tokens.go":          4,
 		"sso_handoffs.go":            2,
 	},
-	"job-status": {
-		"mysql_bridge_jobs.go": 11,
-		"mysql_retention.go":   1,
-		"mysql_team_agents.go": 1,
-	},
 	"limit-clamp": {
-		"agent_runs.go":               1,
 		"audit_log.go":                2,
-		"bridge_jobs.go":              1,
 		"content_components.go":       1,
 		"content_publish_requests.go": 1,
 		"grants.go":                   2,
-		"mysql_bridge_jobs.go":        1,
 		"mysql_grant.go":              2,
 		"mysql_notifications.go":      2,
 		"notification_replies.go":     1,
@@ -60,9 +45,8 @@ var storeRuleCopies = map[string]map[string]int{
 		"sso_handoffs.go":         1,
 	},
 	"null-helper": {
-		"mysql.go":             1,
-		"mysql_bridge_jobs.go": 1,
-		"mysql_grant.go":       4,
+		"mysql.go":       1,
+		"mysql_grant.go": 4,
 	},
 }
 

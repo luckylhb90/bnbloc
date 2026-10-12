@@ -98,7 +98,7 @@ func TestRoomPlatformGrantsMultiHost(t *testing.T) {
 
 type fixedAds map[string][]store.BridgeAgent
 
-func (f fixedAds) ListBridgeAgentsForOwner(_ context.Context, owner string) ([]store.BridgeAgent, error) {
+func (f fixedAds) ListBridgeAgentsForOwner(_ context.Context, owner string, _ int64) ([]store.BridgeAgent, error) {
 	return f[owner], nil
 }
 

@@ -1216,6 +1216,14 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   UPDATE that rewrites the values a row holds is a match. "No row matched
   means not found" is `requireMatched(res, ErrX)`; never re-read to tell a
   no-op from a miss.
+- **Bridge liveness and job statuses are spelled once**
+  (`internal/store/bridge_jobs.go`). Go asks `BridgeLive(hb, nowMs)` and
+  `AgentJobStatus.Terminal/Live/Pending`; SQL uses `liveBridgePred` and the
+  IN-lists generated from the same status slices (`sqlTerminalJobStatuses`,
+  …); a store takes `nowMs` from its caller, never the clock, to decide
+  liveness. Job and bridge ids are global: claim, status, lease and the
+  owner-wide reads are cross-tenant, and `BridgeOwner` is the one answer to
+  "whose bridge is this" (`TestStoreRulesSingleSource`).
 - **A key without a tenant is written insert-only.** `artifact_id`,
   `channel_id`, `(room_id, user_id)` carry no tenant, so their writes never
   upsert another tenant's or room's row: `PutArtifact` is INSERT IGNORE +

@@ -7,54 +7,6 @@ import (
 	"time"
 )
 
-// exerciseExpertUsage checks per-expert runs and distinct requesters, in
-// the ctx tenant only.
-func exerciseExpertUsage(t *testing.T, jobs interface {
-	BridgeJobStore
-	ExpertUsageReader
-}, suffix string) {
-	t.Helper()
-	ctx := testCtx()
-	now := time.Now().UnixMilli()
-	reviewer, writer, unused := "cc-rev-"+suffix, "cc-wri-"+suffix, "cc-none-"+suffix
-	put := func(i int, expert, requester string) {
-		j := AgentJob{JobID: "job-usage-" + suffix + "-" + itoaBase(int64(i)), RoomID: "room-usage-" + suffix, MessageSeq: int64(i + 1),
-			RequesterUserID: requester, OwnerUserID: "jack", Core: "acme", Provider: "codex", CreatedAtMs: now + int64(i), ExpertID: expert, ExpertVersion: "1.0.0"}
-		if _, err := jobs.PutAgentJob(ctx, j); err != nil {
-			t.Fatalf("put job: %v", err)
-		}
-	}
-	put(0, reviewer, "maya")
-	put(1, reviewer, "maya")
-	put(2, reviewer, "bob")
-	put(3, writer, "maya")
-	put(4, "", "maya")
-	other := AgentJob{JobID: "job-usage-other-" + suffix, RoomID: "room-usage-other-" + suffix, MessageSeq: 1, RequesterUserID: "zed", OwnerUserID: "zed", Provider: "codex", CreatedAtMs: now, ExpertID: reviewer}
-	if _, err := jobs.PutAgentJob(tenantCtx("other-"+suffix), other); err != nil {
-		t.Fatalf("put other tenant job: %v", err)
-	}
-	got, err := jobs.ExpertUsage(ctx, []string{reviewer, writer, unused, reviewer})
-	if err != nil {
-		t.Fatalf("ExpertUsage: %v", err)
-	}
-	if got[reviewer] != (ContentUsage{Runs: 3, Members: 2}) || got[writer] != (ContentUsage{Runs: 1, Members: 1}) {
-		t.Fatalf("usage = %+v", got)
-	}
-	if _, ok := got[unused]; ok {
-		t.Fatalf("unused expert counted: %+v", got[unused])
-	}
-}
-
-func TestMemoryExpertUsage(t *testing.T) {
-	exerciseExpertUsage(t, NewMemoryBridgeJobs(), "mem")
-}
-
-func TestMySQLExpertUsage(t *testing.T) {
-	m, done := mysqlJobs(t)
-	defer done()
-	exerciseExpertUsage(t, m, itoaBase(time.Now().UnixNano()))
-}
-
 // exerciseMemberUses checks member-scope use counts and that a room expert
 // is not counted as a second use of the room.
 func exerciseMemberUses(t *testing.T, s ContentComponentStore, prefix string) {

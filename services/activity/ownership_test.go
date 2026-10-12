@@ -65,9 +65,9 @@ func TestHeartbeatCannotReownAnotherMembersBridge(t *testing.T) {
 	if resp.StatusCode != http.StatusForbidden {
 		t.Fatalf("heartbeat steal status = %d, want 403", resp.StatusCode)
 	}
-	hb, err := jobs.LookupBridge(tenant.NewContext(context.Background(), tenant.Default), "bridge-maya")
-	if err != nil || hb.OwnerUserID != "maya" {
-		t.Fatalf("bridge after steal attempt = %+v, %v; want still owned by maya", hb, err)
+	owner, err := jobs.BridgeOwner(tenant.NewContext(context.Background(), tenant.Default), "bridge-maya")
+	if err != nil || owner != "maya" {
+		t.Fatalf("bridge after steal attempt = %q, %v; want still owned by maya", owner, err)
 	}
 }
 

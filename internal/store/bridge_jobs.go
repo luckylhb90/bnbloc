@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -16,6 +17,10 @@ import (
 var ErrAgentJobNotFound = errors.New("store: agent job not found")
 var ErrAgentJobLeaseMismatch = errors.New("store: agent job lease mismatch")
 var ErrBridgeNotFound = errors.New("store: bridge not found")
+
+// ErrAgentJobIDTaken refuses a new job whose id another job (of another
+// origin, in any tenant) already holds: job ids are global.
+var ErrAgentJobIDTaken = errors.New("store: agent job id is taken")
 
 // ErrBridgeOwnerMismatch rejects a heartbeat for a bridge id already registered
 // to a different owner. A bridge id is bound to the member who first registered
@@ -36,14 +41,56 @@ const (
 	AgentJobCancelled AgentJobStatus = "cancelled"
 )
 
+// The job status sets, each spelled once. Go asks the methods below; SQL
+// uses the IN-lists generated from the same slices (sqlJobStatuses), so a
+// new status cannot be terminal in one backend and live in the other.
+var (
+	// terminalJobStatuses are final: never claimed, renewed, swept or
+	// overwritten again.
+	terminalJobStatuses = []AgentJobStatus{AgentJobReplied, AgentJobFailed, AgentJobTimedOut, AgentJobCancelled}
+	// liveJobStatuses are the leased phases: a bridge holds the job.
+	liveJobStatuses = []AgentJobStatus{AgentJobClaimed, AgentJobRunning, AgentJobReflowing}
+	// pendingJobStatuses have not started yet: queued, or claimed by a
+	// bridge that has not reported it running.
+	pendingJobStatuses = []AgentJobStatus{AgentJobQueued, AgentJobClaimed}
+	// activeJobStatuses are every status that is not terminal.
+	activeJobStatuses = append([]AgentJobStatus{AgentJobQueued}, liveJobStatuses...)
+)
+
+// The SQL IN-lists of the status sets ('a','b',…).
+var (
+	sqlTerminalJobStatuses = sqlJobStatuses(terminalJobStatuses)
+	sqlLiveJobStatuses     = sqlJobStatuses(liveJobStatuses)
+	sqlPendingJobStatuses  = sqlJobStatuses(pendingJobStatuses)
+	sqlActiveJobStatuses   = sqlJobStatuses(activeJobStatuses)
+	// sqlClaimableJob is claimableJob over agent_jobs columns; its one
+	// argument is the claim's nowMs.
+	sqlClaimableJob = "(status = '" + string(AgentJobQueued) + "' OR (status IN (" + sqlLiveJobStatuses + ") AND lease_expires_at_ms <= ?))"
+)
+
+// sqlJobStatuses renders a status set as a SQL IN-list body.
+func sqlJobStatuses(set []AgentJobStatus) string {
+	quoted := make([]string, len(set))
+	for i, s := range set {
+		quoted[i] = "'" + string(s) + "'"
+	}
+	return strings.Join(quoted, ",")
+}
+
 // Terminal reports whether a job reached a final state. A terminal job is never
 // claimed, renewed, swept, or overwritten again.
-func (s AgentJobStatus) Terminal() bool {
-	switch s {
-	case AgentJobReplied, AgentJobFailed, AgentJobTimedOut, AgentJobCancelled:
-		return true
-	}
-	return false
+func (s AgentJobStatus) Terminal() bool { return slices.Contains(terminalJobStatuses, s) }
+
+// Live reports a leased phase (claimed, running or reflowing).
+func (s AgentJobStatus) Live() bool { return slices.Contains(liveJobStatuses, s) }
+
+// Pending reports a job not started yet (queued, or claimed and not running).
+func (s AgentJobStatus) Pending() bool { return slices.Contains(pendingJobStatuses, s) }
+
+// claimableJob reports whether a bridge may take j at nowMs: it is queued,
+// or live with a lease that expired (liveAt; SQL sqlClaimableJob).
+func claimableJob(j AgentJob, nowMs int64) bool {
+	return j.Status == AgentJobQueued || (j.Status.Live() && !liveAt(j.LeaseExpiresAtMs, nowMs))
 }
 
 type AgentJobFailureReason string
@@ -142,6 +189,36 @@ const (
 	BridgeDraining BridgeStatus = "draining"
 )
 
+// ErrBridgeStatusInvalid refuses a heartbeat whose status is none of
+// BridgeOnline, BridgeOffline, BridgeDraining.
+var ErrBridgeStatusInvalid = errors.New("store: unknown bridge status")
+
+// valid reports a known bridge status.
+func (s BridgeStatus) valid() bool {
+	switch s {
+	case BridgeOnline, BridgeOffline, BridgeDraining:
+		return true
+	}
+	return false
+}
+
+// BridgeLive is the one bridge-liveness rule: a bridge is live at nowMs when
+// it reports online (not draining or offline) and its last heartbeat has not
+// expired; a heartbeat expires BridgeOfflineAfterMs after it was seen
+// (liveAt). A bridge with no heartbeat row is never live. SQL spells it
+// liveBridgePred.
+func BridgeLive(hb BridgeHeartbeat, nowMs int64) bool {
+	return hb.Status == BridgeOnline && liveAt(hb.LastSeenAtMs+BridgeOfflineAfterMs, nowMs)
+}
+
+// liveBridgePred is BridgeLive over bridge_heartbeats aliased h; its one
+// argument is bridgeLiveSince(nowMs). The caller always passes nowMs: a
+// store never reads the clock to decide liveness.
+const liveBridgePred = "(h.status = '" + string(BridgeOnline) + "' AND h.last_seen_at_ms > ?)"
+
+// bridgeLiveSince is liveBridgePred's argument at nowMs.
+func bridgeLiveSince(nowMs int64) int64 { return nowMs - BridgeOfflineAfterMs }
+
 // AgentJob is a durable request for a bridge to drive one agent turn.
 type AgentJob struct {
 	JobID            string                `json:"jobId"`
@@ -218,13 +295,52 @@ type BridgeAgent struct {
 	LastSeenAtMs     int64
 }
 
+// ClaimRequest takes up to MaxJobs claimable jobs (oldest first) for a live
+// bridge of OwnerUserID.
 type ClaimRequest struct {
-	BridgeID       string
-	OwnerUserID    string
-	MaxJobs        int
-	NowMs          int64
+	BridgeID    string
+	OwnerUserID string
+	// MaxJobs is clamped to 1..MaxJobsPerClaim (0 = 1).
+	MaxJobs int
+	NowMs   int64
+	// LeaseMs 0 = DefaultLeaseMs.
 	LeaseMs        int64
 	ServeAllOwners bool
+}
+
+// MaxJobsPerClaim bounds one claim.
+const MaxJobsPerClaim = 32
+
+// normalize applies the request defaults, once for both backends.
+func (r ClaimRequest) normalize() ClaimRequest {
+	r.MaxJobs = clampLimit(r.MaxJobs, 1, MaxJobsPerClaim)
+	r.LeaseMs = leaseMs(r.LeaseMs)
+	return r
+}
+
+// through reports whether the claim may go through hb: the bridge belongs to
+// the claiming owner (a bridge id is not a credential) and is live.
+func (r ClaimRequest) through(hb BridgeHeartbeat) bool {
+	return hb.OwnerUserID == r.OwnerUserID && BridgeLive(hb, r.NowMs)
+}
+
+// claimed is j leased to the claiming bridge (both backends write it).
+func (r ClaimRequest) claimed(j AgentJob) AgentJob {
+	j.Status = AgentJobClaimed
+	j.LeaseBridgeID = r.BridgeID
+	j.LeaseExpiresAtMs = r.NowMs + r.LeaseMs
+	j.Attempt++
+	j.UpdatedAtMs = r.NowMs
+	j.ClaimedAtMs = r.NowMs
+	return j
+}
+
+// leaseMs resolves a caller's lease length, falling back to DefaultLeaseMs.
+func leaseMs(ms int64) int64 {
+	if ms <= 0 {
+		return DefaultLeaseMs
+	}
+	return ms
 }
 
 type JobStatusUpdate struct {
@@ -236,10 +352,33 @@ type JobStatusUpdate struct {
 	NowMs           int64
 	// LeaseMs extends the lease when the new status is non-terminal, so a turn
 	// that keeps reporting progress is never reclaimed under its own worker.
+	// 0 = DefaultLeaseMs (a progress report always renews the lease).
 	LeaseMs int64
 	// MaxAttempts bounds how often a retryable failure is requeued instead of
 	// becoming terminal. 0 uses DefaultMaxJobAttempts.
 	MaxAttempts int
+}
+
+// normalize applies the update defaults, once for both backends.
+func (u JobStatusUpdate) normalize() JobStatusUpdate {
+	u.LeaseMs = leaseMs(u.LeaseMs)
+	u.MaxAttempts = maxAttempts(u.MaxAttempts)
+	return u
+}
+
+// requeues reports a retryable failure: it goes back on the queue while the
+// job has attempts left.
+func (u JobStatusUpdate) requeues() bool {
+	return u.Status == AgentJobFailed && u.FailureReason.Retryable()
+}
+
+// leaseExpiresAt is the job's lease after the update: none once terminal,
+// else renewed from NowMs.
+func (u JobStatusUpdate) leaseExpiresAt() int64 {
+	if u.Status.Terminal() {
+		return 0
+	}
+	return u.NowMs + u.LeaseMs
 }
 
 // LeaseRenewal extends a running job's lease without changing its status. A
@@ -249,17 +388,65 @@ type LeaseRenewal struct {
 	JobID    string
 	BridgeID string
 	NowMs    int64
-	LeaseMs  int64
+	// LeaseMs 0 = DefaultLeaseMs.
+	LeaseMs int64
+}
+
+// normalize applies the renewal defaults, once for both backends.
+func (r LeaseRenewal) normalize() LeaseRenewal {
+	r.LeaseMs = leaseMs(r.LeaseMs)
+	return r
 }
 
 // SweepRequest fails jobs no worker can finish: queued past QueuedTimeoutMs
 // (nothing advertised the agent) and expired leases past MaxAttempts. Sweeping
 // is cross-tenant maintenance and carries no tenant scope.
 type SweepRequest struct {
-	NowMs           int64
+	NowMs int64
+	// QueuedTimeoutMs 0 = DefaultQueuedTimeoutMs; MaxAttempts 0 =
+	// DefaultMaxJobAttempts.
 	QueuedTimeoutMs int64
 	MaxAttempts     int
 }
+
+// normalize applies the sweep defaults, once for both backends.
+func (r SweepRequest) normalize() SweepRequest {
+	if r.QueuedTimeoutMs <= 0 {
+		r.QueuedTimeoutMs = DefaultQueuedTimeoutMs
+	}
+	r.MaxAttempts = maxAttempts(r.MaxAttempts)
+	return r
+}
+
+// sweepReason is why a sweep fails j at the (normalized) request's time, or
+// "" when j stays: queued past the queue timeout (no bridge took it), or
+// live with an expired lease on its last attempt (its worker died).
+func (r SweepRequest) sweepReason(j AgentJob) AgentJobFailureReason {
+	switch {
+	case j.Status == AgentJobQueued && j.CreatedAtMs <= r.queuedBefore():
+		return FailureNoBridgeOnline
+	case j.Status.Live() && !liveAt(j.LeaseExpiresAtMs, r.NowMs) && j.Attempt >= r.MaxAttempts:
+		return FailureTurnTimeout
+	}
+	return ""
+}
+
+// failed is a stuck job as the sweep fails it (both backends write it).
+func (r SweepRequest) failed(j AgentJob) AgentJob {
+	j.FailureReason = r.sweepReason(j)
+	j.Status = AgentJobFailed
+	j.UpdatedAtMs = r.NowMs
+	j.FinishedAtMs = r.NowMs
+	j.LeaseExpiresAtMs = 0
+	return j
+}
+
+// queuedBefore: a job queued at or before it has waited out the queue.
+func (r SweepRequest) queuedBefore() int64 { return r.NowMs - r.QueuedTimeoutMs }
+
+// MaxSweptJobs bounds the jobs one SweepAgentJobs call fails (oldest first);
+// the next pass takes the rest.
+const MaxSweptJobs = 200
 
 const (
 	// DefaultLeaseMs bounds how long a claim survives without progress before
@@ -273,29 +460,63 @@ const (
 	DefaultMaxJobAttempts = 3
 )
 
+// BridgeJobStore is the durable job queue the desktop bridges drain. Job ids
+// and bridge ids are global: a job lives in its room's tenant, and a bridge
+// (bound to its first owner) claims and reports jobs of every tenant its
+// owner is in, so the bridge-driven calls (claim, status, lease, the
+// owner-wide reads) carry no tenant scope; the room-facing calls (put, list,
+// cancel) are tenant-scoped.
 type BridgeJobStore interface {
+	// PutAgentJob enqueues a job, idempotently by origin (tenant, room,
+	// message, owner, core, provider): a re-put of an origin returns the
+	// stored job. A job id held by another origin is ErrAgentJobIDTaken.
 	PutAgentJob(ctx context.Context, j AgentJob) (AgentJob, error)
+	// ListAgentJobs returns the ctx tenant's newest jobs of a room (and
+	// channel, when set), newest first (created_at_ms, then job id,
+	// descending); limit is clamped to 1..MaxAgentJobsListed (0 =
+	// DefaultAgentJobsListed).
 	ListAgentJobs(ctx context.Context, roomID, channelID string, limit int) ([]AgentJob, error)
+	// ClaimAgentJobs leases up to req.MaxJobs claimable jobs to a live bridge
+	// of req.OwnerUserID (ClaimRequest.through), oldest first (created_at_ms,
+	// then job id), matching what the bridge advertises (core, provider).
+	// Nothing (an empty list) when the bridge is not the owner's or not live.
 	ClaimAgentJobs(ctx context.Context, req ClaimRequest) ([]AgentJob, error)
+	// UpdateAgentJobStatus moves a job the reporting bridge holds:
+	// ErrAgentJobNotFound for an unknown job, ErrAgentJobLeaseMismatch when
+	// another bridge holds it or it is terminal.
 	UpdateAgentJobStatus(ctx context.Context, upd JobStatusUpdate) (AgentJob, error)
+	// CancelAgentJob cancels a live job of the ctx tenant (and room, when
+	// set): ErrAgentJobNotFound / ErrAgentJobLeaseMismatch (terminal).
 	CancelAgentJob(ctx context.Context, req CancelRequest) (AgentJob, error)
+	// RenewAgentJobLease extends the lease the bridge holds (errors as
+	// UpdateAgentJobStatus).
 	RenewAgentJobLease(ctx context.Context, ren LeaseRenewal) error
+	// SweepAgentJobs fails up to MaxSweptJobs stuck jobs (oldest first) of
+	// every tenant (SweepRequest.sweepReason) and returns them.
 	SweepAgentJobs(ctx context.Context, req SweepRequest) ([]AgentJob, error)
+	// PutBridgeHeartbeat records a bridge's liveness (the bridge moves to the
+	// ctx tenant); ErrBridgeOwnerMismatch when another owner holds the id,
+	// ErrBridgeStatusInvalid for an unknown status.
 	PutBridgeHeartbeat(ctx context.Context, hb BridgeHeartbeat) error
-	LookupBridge(ctx context.Context, bridgeID string) (BridgeHeartbeat, error)
+	// BridgeOwner is the one answer to "whose bridge is this": the member a
+	// bridge id is registered to, from any tenant (ErrBridgeNotFound when it
+	// never heartbeat).
+	BridgeOwner(ctx context.Context, bridgeID string) (string, error)
+	// ReplaceBridgeAgents replaces what a bridge advertises; one row per
+	// (core, provider, target id).
 	ReplaceBridgeAgents(ctx context.Context, bridgeID string, agents []BridgeAgent) error
-	ListBridgeAgents(ctx context.Context, roomID string) ([]BridgeAgent, error)
-	// ListBridgeAgentsForOwner returns one owner's advertised agents across
-	// all rooms/tenants (owner identity is global), liveness-joined — the
-	// "my agents" surface for a member's own view.
-	ListBridgeAgentsForOwner(ctx context.Context, ownerUserID string) ([]BridgeAgent, error)
+	// ListBridgeAgentsForOwner returns one owner's enabled agents advertised
+	// by a bridge live at nowMs, across all rooms/tenants (owner identity is
+	// global), ordered by (core, provider, target id, bridge id): the "my
+	// agents" surface for a member's own view.
+	ListBridgeAgentsForOwner(ctx context.Context, ownerUserID string, nowMs int64) ([]BridgeAgent, error)
 	// LatestBridgeForOwner returns the owner's most recently seen bridge
 	// heartbeat across tenants (owner identity is global), and false when no
 	// desktop bridge of theirs ever connected. Heartbeat rows are never
 	// deleted, so this tells "installed but closed" from "never installed".
 	LatestBridgeForOwner(ctx context.Context, ownerUserID string) (BridgeHeartbeat, bool, error)
-	// CountOnlineBridges counts bridges of every tenant online at nowMs
-	// (metrics).
+	// CountOnlineBridges counts bridges of every tenant live at nowMs
+	// (BridgeLive; metrics).
 	CountOnlineBridges(ctx context.Context, nowMs int64) (int, error)
 	// PendingAgentJobs counts one owner's jobs not started yet (queued, or
 	// claimed and not running), per (core, provider), across every tenant (a
@@ -309,12 +530,6 @@ type AgentJobCount struct {
 	Core     string
 	Provider string
 	Count    int
-}
-
-// pendingJob reports whether a job has not started yet: queued, or claimed
-// by a bridge that has not reported it running.
-func pendingJob(j AgentJob) bool {
-	return j.Status == AgentJobQueued || j.Status == AgentJobClaimed
 }
 
 // maxAttempts resolves a caller's attempt budget, falling back to the default.
@@ -335,12 +550,74 @@ type CancelRequest struct {
 	NowMs           int64
 }
 
+// The ListAgentJobs page size.
+const (
+	DefaultAgentJobsListed = 100
+	MaxAgentJobsListed     = 200
+)
+
+// normalize fills a new job's defaults for tenant tid, once for both
+// backends. Queue lifetime is decided from CreatedAtMs, so a missing one is
+// the server clock: a zero value would read as "queued since the epoch" and
+// be swept the moment it is enqueued.
+func (j AgentJob) normalize(tid string) AgentJob {
+	j.TenantID = tid
+	if j.Status == "" {
+		j.Status = AgentJobQueued
+	}
+	if j.CreatedAtMs <= 0 {
+		j.CreatedAtMs = time.Now().UnixMilli()
+	}
+	if j.UpdatedAtMs <= 0 {
+		j.UpdatedAtMs = j.CreatedAtMs
+	}
+	return j
+}
+
+// sortJobsOldestFirst orders jobs by (created_at_ms, job_id) ascending: the
+// claim and sweep order.
+func sortJobsOldestFirst(js []AgentJob) {
+	sort.Slice(js, func(i, k int) bool {
+		if js[i].CreatedAtMs != js[k].CreatedAtMs {
+			return js[i].CreatedAtMs < js[k].CreatedAtMs
+		}
+		return js[i].JobID < js[k].JobID
+	})
+}
+
+// sortJobsNewestFirst orders jobs by (created_at_ms, job_id) descending: the
+// listing order.
+func sortJobsNewestFirst(js []AgentJob) {
+	sort.Slice(js, func(i, k int) bool {
+		if js[i].CreatedAtMs != js[k].CreatedAtMs {
+			return js[i].CreatedAtMs > js[k].CreatedAtMs
+		}
+		return js[i].JobID > js[k].JobID
+	})
+}
+
+// sortBridgeAgents orders advertised agents by (owner, core, provider,
+// target id, bridge id): the order of every advertisement listing.
+func sortBridgeAgents(as []BridgeAgent) {
+	sort.Slice(as, func(i, k int) bool {
+		a, b := as[i], as[k]
+		for _, c := range [][2]string{{a.OwnerUserID, b.OwnerUserID}, {a.Core, b.Core}, {a.Provider, b.Provider}, {a.TargetID, b.TargetID}} {
+			if c[0] != c[1] {
+				return c[0] < c[1]
+			}
+		}
+		return a.BridgeID < b.BridgeID
+	})
+}
+
 type MemoryBridgeJobs struct {
 	mu         sync.Mutex
 	jobs       map[string]AgentJob
 	heartbeats map[string]BridgeHeartbeat
-	agents     map[string]map[string]BridgeAgent
-	origin     map[string]string
+	// agents is each bridge's advertisement by bridgeAgentKey (the
+	// bridge_agents primary key after the bridge id).
+	agents map[string]map[string]BridgeAgent
+	origin map[string]string
 }
 
 func NewMemoryBridgeJobs() *MemoryBridgeJobs {
@@ -353,6 +630,12 @@ func jobOrigin(tid string, j AgentJob) string {
 	return tid + "\x00" + j.RoomID + "\x00" + strconv.FormatInt(j.MessageSeq, 10) + "\x00" + j.OwnerUserID + "\x00" + j.Core + "\x00" + j.Provider
 }
 
+// bridgeAgentKey is one advertised target of a bridge: several targets share
+// a core/provider (codex, claude-code, opencode all run on one core).
+func bridgeAgentKey(a BridgeAgent) string {
+	return a.Core + "\x00" + a.Provider + "\x00" + a.TargetID
+}
+
 func (s *MemoryBridgeJobs) PutAgentJob(ctx context.Context, j AgentJob) (AgentJob, error) {
 	tid, err := tenant.Require(ctx)
 	if err != nil {
@@ -360,22 +643,13 @@ func (s *MemoryBridgeJobs) PutAgentJob(ctx context.Context, j AgentJob) (AgentJo
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	j.TenantID = tid
-	if j.Status == "" {
-		j.Status = AgentJobQueued
-	}
-	// Queue lifetime is decided from CreatedAtMs, so it must be a real server
-	// clock. A zero/absent value would otherwise read as "queued since the
-	// epoch" and be swept the moment it is enqueued.
-	if j.CreatedAtMs <= 0 {
-		j.CreatedAtMs = time.Now().UnixMilli()
-	}
-	if j.UpdatedAtMs <= 0 {
-		j.UpdatedAtMs = j.CreatedAtMs
-	}
+	j = j.normalize(tid)
 	key := jobOrigin(tid, j)
 	if existingID := s.origin[key]; existingID != "" {
 		return s.jobs[existingID], nil
+	}
+	if _, taken := s.jobs[j.JobID]; taken {
+		return AgentJob{}, ErrAgentJobIDTaken
 	}
 	s.jobs[j.JobID] = j
 	s.origin[key] = j.JobID
@@ -387,12 +661,10 @@ func (s *MemoryBridgeJobs) ListAgentJobs(ctx context.Context, roomID, channelID 
 	if err != nil {
 		return nil, err
 	}
-	if limit <= 0 {
-		limit = 100
-	}
+	limit = clampLimit(limit, DefaultAgentJobsListed, MaxAgentJobsListed)
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	var out []AgentJob
+	out := []AgentJob{}
 	for _, j := range s.jobs {
 		if j.TenantID != tid || j.RoomID != roomID {
 			continue
@@ -402,9 +674,9 @@ func (s *MemoryBridgeJobs) ListAgentJobs(ctx context.Context, roomID, channelID 
 		}
 		out = append(out, j)
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAtMs < out[j].CreatedAtMs })
+	sortJobsNewestFirst(out)
 	if len(out) > limit {
-		out = out[len(out)-limit:]
+		out = out[:limit]
 	}
 	return out, nil
 }
@@ -413,6 +685,9 @@ func (s *MemoryBridgeJobs) PutBridgeHeartbeat(ctx context.Context, hb BridgeHear
 	tid, err := tenant.Require(ctx)
 	if err != nil {
 		return err
+	}
+	if !hb.Status.valid() {
+		return ErrBridgeStatusInvalid
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -435,119 +710,80 @@ func (s *MemoryBridgeJobs) ReplaceBridgeAgents(ctx context.Context, bridgeID str
 	for _, a := range agents {
 		a.TenantID = tid
 		a.BridgeID = bridgeID
-		m[a.OwnerUserID+"\x00"+a.Core+"\x00"+a.Provider] = a
+		m[bridgeAgentKey(a)] = a
 	}
 	s.agents[bridgeID] = m
 	return nil
 }
 
-// ListBridgeAgents returns capabilities advertised by bridges that are still
-// alive. A bridge that stopped heartbeating leaves its rows behind, and serving
-// them would offer members an agent nobody can drive: the composer lists it and
-// the job then waits out the queue timeout instead of being refused up front.
-func (s *MemoryBridgeJobs) ListBridgeAgents(ctx context.Context, roomID string) ([]BridgeAgent, error) {
-	tid, err := tenant.Require(ctx)
-	if err != nil {
-		return nil, err
-	}
-	_ = roomID
+// ClaimAgentJobs leases claimable jobs to a live bridge (see BridgeJobStore).
+// Capability + job matching is cross-tenant: a job lives in its room's
+// tenant, which may differ from the tenant the bridge advertised in. Bridge
+// ids are global, so ownership + liveness (not tenant) authorize the claim;
+// the returned job carries its own tenant for the bridge to drive in.
+func (s *MemoryBridgeJobs) ClaimAgentJobs(_ context.Context, req ClaimRequest) ([]AgentJob, error) {
+	req = req.normalize()
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	cutoff := time.Now().UnixMilli() - BridgeOfflineAfterMs
-	var out []BridgeAgent
-	for bridgeID, byAgent := range s.agents {
-		if hb, ok := s.heartbeats[bridgeID]; ok && hb.LastSeenAtMs < cutoff {
-			continue // bridge is gone; its advertisement is stale
-		}
-		for _, a := range byAgent {
-			if a.TenantID == tid && !a.Disabled {
-				out = append(out, a)
-			}
-		}
+	out := []AgentJob{}
+	if hb, ok := s.heartbeats[req.BridgeID]; !ok || !req.through(hb) {
+		return out, nil
 	}
-	return out, nil
-}
-
-func (s *MemoryBridgeJobs) ClaimAgentJobs(ctx context.Context, req ClaimRequest) ([]AgentJob, error) {
-	if req.MaxJobs <= 0 {
-		req.MaxJobs = 1
-	}
-	if req.LeaseMs <= 0 {
-		req.LeaseMs = 60000
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	// A bridge must be currently alive to take work. Its rows outlive it, so
-	// without this a dead bridge keeps winning jobs it can never run.
-	// It must also belong to the claiming owner: a bridge id is not a
-	// credential, so claiming through someone else's bridge yields nothing.
-	if hb, ok := s.heartbeats[req.BridgeID]; !ok || hb.OwnerUserID != req.OwnerUserID || hb.LastSeenAtMs < req.NowMs-BridgeOfflineAfterMs {
-		return nil, nil
-	}
-	// Capability + job matching is CROSS-TENANT: a job lives in its room's
-	// tenant, which may differ from the tenant the bridge advertised in. bridge
-	// id is globally unique, so ownership + liveness (not tenant) authorize the
-	// claim; the returned job carries its own tenant for the bridge to drive in.
 	capable := map[string]bool{}
 	for _, a := range s.agents[req.BridgeID] {
 		if a.OwnerUserID == req.OwnerUserID && !a.Disabled {
 			capable[a.Core+"\x00"+a.Provider] = true
 		}
 	}
-	var ids []string
-	for id, j := range s.jobs {
-		if len(ids) >= req.MaxJobs {
-			break
-		}
-		if !req.ServeAllOwners && j.OwnerUserID != req.OwnerUserID {
-			continue
-		}
-		if !capable[j.Core+"\x00"+j.Provider] {
-			continue
-		}
-		claimable := j.Status == AgentJobQueued || ((j.Status == AgentJobClaimed || j.Status == AgentJobRunning || j.Status == AgentJobReflowing) && j.LeaseExpiresAtMs < req.NowMs)
-		if claimable {
-			ids = append(ids, id)
+	var cands []AgentJob
+	for _, j := range s.jobs {
+		if (req.ServeAllOwners || j.OwnerUserID == req.OwnerUserID) && capable[j.Core+"\x00"+j.Provider] && claimableJob(j, req.NowMs) {
+			cands = append(cands, j)
 		}
 	}
-	out := make([]AgentJob, 0, len(ids))
-	for _, id := range ids {
-		j := s.jobs[id]
-		j.Status = AgentJobClaimed
-		j.LeaseBridgeID = req.BridgeID
-		j.LeaseExpiresAtMs = req.NowMs + req.LeaseMs
-		j.Attempt++
-		j.UpdatedAtMs = req.NowMs
-		j.ClaimedAtMs = req.NowMs
-		s.jobs[id] = j
+	sortJobsOldestFirst(cands)
+	if len(cands) > req.MaxJobs {
+		cands = cands[:req.MaxJobs]
+	}
+	for _, j := range cands {
+		j = req.claimed(j)
+		s.jobs[j.JobID] = j
 		out = append(out, j)
 	}
 	return out, nil
 }
 
-func (s *MemoryBridgeJobs) UpdateAgentJobStatus(ctx context.Context, upd JobStatusUpdate) (AgentJob, error) {
-	tid, err := tenant.Require(ctx)
-	if err != nil {
-		return AgentJob{}, err
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	j, ok := s.jobs[upd.JobID]
-	if !ok || j.TenantID != tid {
+// heldJobLocked returns the job a bridge-driven write may move: any tenant's
+// (job ids are global; the lease authorizes), held by bridgeID and not
+// terminal. Caller holds s.mu.
+func (s *MemoryBridgeJobs) heldJobLocked(jobID, bridgeID string) (AgentJob, error) {
+	j, ok := s.jobs[jobID]
+	if !ok {
 		return AgentJob{}, ErrAgentJobNotFound
 	}
 	// Only the bridge holding the lease may move a job, and a terminal job is
 	// never rewritten: a late report from a superseded worker must not overwrite
 	// the outcome the current worker already recorded.
-	if j.LeaseBridgeID != upd.BridgeID || j.Status.Terminal() {
+	if j.LeaseBridgeID != bridgeID || j.Status.Terminal() {
 		return AgentJob{}, ErrAgentJobLeaseMismatch
+	}
+	return j, nil
+}
+
+func (s *MemoryBridgeJobs) UpdateAgentJobStatus(_ context.Context, upd JobStatusUpdate) (AgentJob, error) {
+	upd = upd.normalize()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	j, err := s.heldJobLocked(upd.JobID, upd.BridgeID)
+	if err != nil {
+		return AgentJob{}, err
 	}
 	// A retryable cause (the runner died, the core blipped, the turn timed out)
 	// goes back on the queue while attempts remain: the next worker may well
 	// succeed. A non-retryable cause — an unauthorized borrow, an agent nobody
 	// advertises, an explicit cancel — is final on the first report, because no
 	// retry can change the outcome.
-	if upd.Status == AgentJobFailed && upd.FailureReason.Retryable() && j.Attempt < maxAttempts(upd.MaxAttempts) {
+	if upd.requeues() && j.Attempt < upd.MaxAttempts {
 		j.Status = AgentJobQueued
 		j.FailureReason = upd.FailureReason
 		j.DiagnosticsJSON = upd.DiagnosticsJSON
@@ -564,33 +800,21 @@ func (s *MemoryBridgeJobs) UpdateAgentJobStatus(ctx context.Context, upd JobStat
 	if upd.Status == AgentJobRunning && j.StartedAtMs == 0 {
 		j.StartedAtMs = upd.NowMs
 	}
-	switch {
-	case upd.Status.Terminal():
+	if upd.Status.Terminal() {
 		j.FinishedAtMs = upd.NowMs
-		j.LeaseExpiresAtMs = 0
-	case upd.LeaseMs > 0:
-		j.LeaseExpiresAtMs = upd.NowMs + upd.LeaseMs
 	}
+	j.LeaseExpiresAtMs = upd.leaseExpiresAt()
 	s.jobs[upd.JobID] = j
 	return j, nil
 }
 
-func (s *MemoryBridgeJobs) RenewAgentJobLease(ctx context.Context, ren LeaseRenewal) error {
-	tid, err := tenant.Require(ctx)
-	if err != nil {
-		return err
-	}
-	if ren.LeaseMs <= 0 {
-		ren.LeaseMs = DefaultLeaseMs
-	}
+func (s *MemoryBridgeJobs) RenewAgentJobLease(_ context.Context, ren LeaseRenewal) error {
+	ren = ren.normalize()
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	j, ok := s.jobs[ren.JobID]
-	if !ok || j.TenantID != tid {
-		return ErrAgentJobNotFound
-	}
-	if j.LeaseBridgeID != ren.BridgeID || j.Status.Terminal() {
-		return ErrAgentJobLeaseMismatch
+	j, err := s.heldJobLocked(ren.JobID, ren.BridgeID)
+	if err != nil {
+		return err
 	}
 	j.LeaseExpiresAtMs = ren.NowMs + ren.LeaseMs
 	j.UpdatedAtMs = ren.NowMs
@@ -628,66 +852,36 @@ func (s *MemoryBridgeJobs) CancelAgentJob(ctx context.Context, req CancelRequest
 }
 
 func (s *MemoryBridgeJobs) SweepAgentJobs(_ context.Context, req SweepRequest) ([]AgentJob, error) {
-	if req.QueuedTimeoutMs <= 0 {
-		req.QueuedTimeoutMs = DefaultQueuedTimeoutMs
-	}
-	if req.MaxAttempts <= 0 {
-		req.MaxAttempts = DefaultMaxJobAttempts
-	}
+	req = req.normalize()
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	var out []AgentJob
-	for id, j := range s.jobs {
-		if j.Status.Terminal() {
-			continue
+	var stuck []AgentJob
+	for _, j := range s.jobs {
+		if req.sweepReason(j) != "" {
+			stuck = append(stuck, j)
 		}
-		var reason AgentJobFailureReason
-		switch {
-		case j.Status == AgentJobQueued && j.CreatedAtMs+req.QueuedTimeoutMs <= req.NowMs:
-			reason = FailureNoBridgeOnline
-		case j.Status != AgentJobQueued && j.LeaseExpiresAtMs < req.NowMs && j.Attempt >= req.MaxAttempts:
-			reason = FailureTurnTimeout
-		default:
-			continue
-		}
-		j.Status = AgentJobFailed
-		j.FailureReason = reason
-		j.UpdatedAtMs = req.NowMs
-		j.FinishedAtMs = req.NowMs
-		j.LeaseExpiresAtMs = 0
-		s.jobs[id] = j
+	}
+	sortJobsOldestFirst(stuck)
+	if len(stuck) > MaxSweptJobs {
+		stuck = stuck[:MaxSweptJobs]
+	}
+	out := make([]AgentJob, 0, len(stuck))
+	for _, j := range stuck {
+		j = req.failed(j)
+		s.jobs[j.JobID] = j
 		out = append(out, j)
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAtMs < out[j].CreatedAtMs })
 	return out, nil
 }
 
-func (s *MemoryBridgeJobs) LookupBridge(ctx context.Context, bridgeID string) (BridgeHeartbeat, error) {
-	tid, err := tenant.Require(ctx)
-	if err != nil {
-		return BridgeHeartbeat{}, err
-	}
+// ListBridgeAgentsForOwner returns the owner's advertised agents of live
+// bridges (memory impl; see BridgeJobStore).
+func (s *MemoryBridgeJobs) ListBridgeAgentsForOwner(_ context.Context, ownerUserID string, nowMs int64) ([]BridgeAgent, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	hb, ok := s.heartbeats[bridgeID]
-	if !ok || hb.TenantID != tid {
-		return BridgeHeartbeat{}, ErrBridgeNotFound
-	}
-	return hb, nil
-}
-
-// ListBridgeAgentsForOwner returns the owner's advertised agents joined to a
-// live heartbeat (memory impl; see MySQLBridgeJobs for the contract).
-func (s *MemoryBridgeJobs) ListBridgeAgentsForOwner(ctx context.Context, ownerUserID string) ([]BridgeAgent, error) {
-	if _, err := tenant.Require(ctx); err != nil {
-		return nil, err
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	cutoff := time.Now().UnixMilli() - BridgeOfflineAfterMs
-	var out []BridgeAgent
+	out := []BridgeAgent{}
 	for bridgeID, byAgent := range s.agents {
-		if hb, ok := s.heartbeats[bridgeID]; !ok || hb.LastSeenAtMs < cutoff {
+		if hb, ok := s.heartbeats[bridgeID]; !ok || !BridgeLive(hb, nowMs) {
 			continue
 		}
 		for _, a := range byAgent {
@@ -696,6 +890,7 @@ func (s *MemoryBridgeJobs) ListBridgeAgentsForOwner(ctx context.Context, ownerUs
 			}
 		}
 	}
+	sortBridgeAgents(out)
 	return out, nil
 }
 
@@ -707,17 +902,15 @@ func (s *MemoryBridgeJobs) LatestBridgeForOwner(_ context.Context, ownerUserID s
 	var latest BridgeHeartbeat
 	found := false
 	for _, hb := range s.heartbeats {
-		if hb.OwnerUserID == ownerUserID && (!found || hb.LastSeenAtMs > latest.LastSeenAtMs) {
+		if hb.OwnerUserID != ownerUserID {
+			continue
+		}
+		// Latest seen, then the greatest bridge id (MySQL's ORDER BY).
+		if !found || hb.LastSeenAtMs > latest.LastSeenAtMs || (hb.LastSeenAtMs == latest.LastSeenAtMs && hb.BridgeID > latest.BridgeID) {
 			latest, found = hb, true
 		}
 	}
 	return latest, found, nil
-}
-
-// BridgeLive reports whether hb is a live bridge at nowMs: reported online
-// and seen within BridgeOfflineAfterMs (the same rule the agent listings use).
-func BridgeLive(hb BridgeHeartbeat, nowMs int64) bool {
-	return hb.Status == BridgeOnline && hb.LastSeenAtMs >= nowMs-BridgeOfflineAfterMs
 }
 
 // PendingAgentJobs counts the owner's not-yet-started jobs (memory impl; see
@@ -727,7 +920,7 @@ func (s *MemoryBridgeJobs) PendingAgentJobs(_ context.Context, ownerUserID strin
 	defer s.mu.Unlock()
 	counts := map[[2]string]int{}
 	for _, j := range s.jobs {
-		if j.OwnerUserID == ownerUserID && pendingJob(j) {
+		if j.OwnerUserID == ownerUserID && j.Status.Pending() {
 			counts[[2]string{j.Core, j.Provider}]++
 		}
 	}

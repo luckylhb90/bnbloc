@@ -40,7 +40,8 @@ type AgentRunQuery struct {
 	FromMs int64
 	ToMs   int64
 	Before AgentRunCursor
-	// Limit is clamped to 1..MaxAgentRunsPage (0 = MaxAgentRunsPage/2).
+	// Limit is clamped to 1..MaxAgentRunsPage (0 = MaxAgentRunsPage/2;
+	// PageSize).
 	Limit int
 }
 
@@ -55,14 +56,10 @@ type AgentRunReader interface {
 
 var _ AgentRunReader = (*MemoryBridgeJobs)(nil)
 
-func (q AgentRunQuery) limit() int {
-	switch {
-	case q.Limit <= 0:
-		return MaxAgentRunsPage / 2
-	case q.Limit > MaxAgentRunsPage:
-		return MaxAgentRunsPage
-	}
-	return q.Limit
+// PageSize is the page q reads: Limit clamped to 1..MaxAgentRunsPage (0 =
+// MaxAgentRunsPage/2). A page of exactly PageSize runs may have a successor.
+func (q AgentRunQuery) PageSize() int {
+	return clampLimit(q.Limit, MaxAgentRunsPage/2, MaxAgentRunsPage)
 }
 
 // matches applies q to one job (memory store; the MySQL WHERE mirrors it).
@@ -119,7 +116,7 @@ func (s *MemoryBridgeJobs) ListAgentRuns(ctx context.Context, q AgentRunQuery) (
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	var out []AgentJob
+	out := []AgentJob{}
 	for _, j := range s.jobs {
 		if j.TenantID == tid && q.matches(j) {
 			out = append(out, j)
@@ -128,7 +125,7 @@ func (s *MemoryBridgeJobs) ListAgentRuns(ctx context.Context, q AgentRunQuery) (
 	sort.Slice(out, func(i, k int) bool {
 		return runOlder(out[k], AgentRunCursor{CreatedAtMs: out[i].CreatedAtMs, JobID: out[i].JobID})
 	})
-	if n := q.limit(); len(out) > n {
+	if n := q.PageSize(); len(out) > n {
 		out = out[:n]
 	}
 	return out, nil

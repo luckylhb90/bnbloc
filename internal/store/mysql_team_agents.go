@@ -22,20 +22,24 @@ func (m *MySQLBridgeJobs) TenantTeamAgents(ctx context.Context, ownerUserID stri
 	}
 	q := `SELECT a.owner_user_id, a.core, a.provider, a.target_id,
        COALESCE(h.last_seen_at_ms, a.last_seen_at_ms),
-       COALESCE(h.status = 'online' AND h.last_seen_at_ms >= ?, 0)
+       COALESCE(` + liveBridgePred + `, 0)
 FROM bridge_agents a
 LEFT JOIN bridge_heartbeats h ON h.bridge_id = a.bridge_id
 WHERE a.tenant_id = ? AND a.disabled = 0`
-	args := []any{nowMs - BridgeOfflineAfterMs, tid}
+	args := []any{bridgeLiveSince(nowMs), tid}
 	if ownerUserID != "" {
 		q += ` AND a.owner_user_id = ?`
 		args = append(args, ownerUserID)
 	}
-	return queryAll(ctx, m.DB, q, func(r rowScanner) (TeamAgent, error) {
+	out, err := queryAll(ctx, m.DB, q+` ORDER BY `+bridgeAgentOrder, func(r rowScanner) (TeamAgent, error) {
 		var a TeamAgent
 		err := r.Scan(&a.OwnerUserID, &a.Core, &a.Provider, &a.TargetID, &a.LastSeenAtMs, &a.Online)
 		return a, err
 	}, args...)
+	if out == nil && err == nil {
+		out = []TeamAgent{}
+	}
+	return out, err
 }
 
 // TenantTeamJobs implements TeamAgentReader as two indexed reads, not one OR
@@ -56,15 +60,15 @@ func (m *MySQLBridgeJobs) TenantTeamJobs(ctx context.Context, ownerUserID string
 	}
 	read := func(where string, args []any, limit int) ([]AgentJob, error) {
 		args = append(append(args, ownerArgs...), limit)
-		return queryAll(ctx, m.DB, `SELECT `+agentJobColumns+`
-FROM agent_jobs WHERE `+where+owner+` ORDER BY created_at_ms DESC LIMIT ?`, scanAgentJobRow, args...)
+		return agentJobList(ctx, m.DB, `SELECT `+agentJobColumns+`
+FROM agent_jobs WHERE `+where+owner+` ORDER BY created_at_ms DESC, job_id DESC LIMIT ?`, args...)
 	}
 	out, err := read(`tenant_id = ? AND created_at_ms >= ?`, []any{tid, sinceMs}, MaxTeamJobs)
 	if err != nil {
 		return nil, err
 	}
 	if room := MaxTeamJobs - len(out); room > 0 {
-		active, err := read(`status IN ('queued','claimed','running','reflowing') AND tenant_id = ? AND created_at_ms < ?`, []any{tid, sinceMs}, room)
+		active, err := read(`status IN (`+sqlActiveJobStatuses+`) AND tenant_id = ? AND created_at_ms < ?`, []any{tid, sinceMs}, room)
 		if err != nil {
 			return nil, err
 		}
@@ -91,12 +95,16 @@ WHERE tenant_id = ? AND created_at_ms >= ? AND usage_reported = 1`
 		q += ` AND usage_owner_user_id = ?`
 		args = append(args, ownerUserID)
 	}
-	q += ` GROUP BY usage_owner_user_id, usage_provider`
-	return queryAll(ctx, m.DB, q, func(r rowScanner) (AgentTurnUsage, error) {
+	q += ` GROUP BY usage_owner_user_id, usage_provider ORDER BY usage_owner_user_id, usage_provider`
+	out, err := queryAll(ctx, m.DB, q, func(r rowScanner) (AgentTurnUsage, error) {
 		var u AgentTurnUsage
 		var cost sql.NullFloat64
 		err := r.Scan(&u.OwnerUserID, &u.Provider, &u.ReportedTurns, &u.InputTokens, &u.OutputTokens, &cost, &u.CostReportedBy)
 		u.CostUsd = cost.Float64
 		return u, err
 	}, args...)
+	if out == nil && err == nil {
+		out = []AgentTurnUsage{}
+	}
+	return out, err
 }

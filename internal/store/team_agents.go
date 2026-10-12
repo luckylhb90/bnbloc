@@ -12,8 +12,9 @@ import (
 // bridge/job/activity paths already persist. Nothing here writes.
 
 // TeamAgent is one agent a bridge advertised in the ctx tenant, joined to that
-// bridge's liveness. Unlike ListBridgeAgents it keeps offline agents (with the
-// last time their bridge was seen), because the dashboard shows them.
+// bridge's liveness. Unlike ListBridgeAgentsForOwner it keeps offline agents
+// (with the last time their bridge was seen), because the dashboard shows
+// them.
 type TeamAgent struct {
 	OwnerUserID  string
 	Core         string
@@ -29,12 +30,14 @@ const MaxTeamJobs = 5_000
 // TeamAgentReader is the bridge-job store's tenant-wide dashboard read side.
 type TeamAgentReader interface {
 	// TenantTeamAgents returns every non-disabled agent advertised in the ctx
-	// tenant (ownerUserID "" = all owners), online when its bridge heartbeated
-	// within BridgeOfflineAfterMs of nowMs.
+	// tenant (ownerUserID "" = all owners), online when its bridge is live at
+	// nowMs (BridgeLive), ordered by (owner, core, provider, target id,
+	// bridge id).
 	TenantTeamAgents(ctx context.Context, ownerUserID string, nowMs int64) ([]TeamAgent, error)
 	// TenantTeamJobs returns the ctx tenant's jobs created at/after sinceMs plus
 	// every still-active job regardless of age (ownerUserID "" = all owners),
-	// newest-first, at most MaxTeamJobs.
+	// newest first (created_at_ms, then job id, descending), at most
+	// MaxTeamJobs.
 	TenantTeamJobs(ctx context.Context, ownerUserID string, sinceMs int64) ([]AgentJob, error)
 }
 
@@ -54,7 +57,8 @@ type AgentTurnUsage struct {
 // AgentUsageReader is the activity store's reported-metrics aggregation.
 type AgentUsageReader interface {
 	// AgentUsage sums reported reply metrics in the ctx tenant for replies
-	// created at/after sinceMs (ownerUserID "" = all owners).
+	// created at/after sinceMs (ownerUserID "" = all owners), one row per
+	// (owner, provider) in that order.
 	AgentUsage(ctx context.Context, ownerUserID string, sinceMs int64) ([]AgentTurnUsage, error)
 }
 
@@ -71,24 +75,22 @@ func (s *MemoryBridgeJobs) TenantTeamAgents(ctx context.Context, ownerUserID str
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	var out []TeamAgent
-	for bridgeID, byAgent := range s.agents {
-		hb, hasHB := s.heartbeats[bridgeID]
+	var ads []BridgeAgent
+	for _, byAgent := range s.agents {
 		for _, a := range byAgent {
-			if a.TenantID != tid || a.Disabled {
-				continue
+			if a.TenantID == tid && !a.Disabled && (ownerUserID == "" || a.OwnerUserID == ownerUserID) {
+				ads = append(ads, a)
 			}
-			if ownerUserID != "" && a.OwnerUserID != ownerUserID {
-				continue
-			}
-			seen := a.LastSeenAtMs
-			online := false
-			if hasHB {
-				seen = hb.LastSeenAtMs
-				online = hb.Status != BridgeOffline && hb.Status != BridgeDraining && hb.LastSeenAtMs >= nowMs-BridgeOfflineAfterMs
-			}
-			out = append(out, TeamAgent{OwnerUserID: a.OwnerUserID, Core: a.Core, Provider: a.Provider, TargetID: a.TargetID, Online: online, LastSeenAtMs: seen})
 		}
+	}
+	sortBridgeAgents(ads)
+	out := make([]TeamAgent, 0, len(ads))
+	for _, a := range ads {
+		seen, online := a.LastSeenAtMs, false
+		if hb, ok := s.heartbeats[a.BridgeID]; ok {
+			seen, online = hb.LastSeenAtMs, BridgeLive(hb, nowMs)
+		}
+		out = append(out, TeamAgent{OwnerUserID: a.OwnerUserID, Core: a.Core, Provider: a.Provider, TargetID: a.TargetID, Online: online, LastSeenAtMs: seen})
 	}
 	return out, nil
 }
@@ -101,7 +103,7 @@ func (s *MemoryBridgeJobs) TenantTeamJobs(ctx context.Context, ownerUserID strin
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	var out []AgentJob
+	out := []AgentJob{}
 	for _, j := range s.jobs {
 		if j.TenantID != tid {
 			continue
@@ -114,7 +116,7 @@ func (s *MemoryBridgeJobs) TenantTeamJobs(ctx context.Context, ownerUserID strin
 		}
 		out = append(out, j)
 	}
-	sort.Slice(out, func(i, k int) bool { return out[i].CreatedAtMs > out[k].CreatedAtMs })
+	sortJobsNewestFirst(out)
 	if len(out) > MaxTeamJobs {
 		out = out[:MaxTeamJobs]
 	}
@@ -178,8 +180,7 @@ func (m *Memory) AgentUsage(ctx context.Context, ownerUserID string, sinceMs int
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	byKey := map[string]*AgentTurnUsage{}
-	var order []string
+	byKey := map[[2]string]*AgentTurnUsage{}
 	for _, s := range m.usage {
 		if s.tenant != tnt || s.createdAtMs < sinceMs {
 			continue
@@ -187,12 +188,11 @@ func (m *Memory) AgentUsage(ctx context.Context, ownerUserID string, sinceMs int
 		if ownerUserID != "" && s.usage.Owner != ownerUserID {
 			continue
 		}
-		key := s.usage.Owner + "\x00" + s.usage.Provider
+		key := [2]string{s.usage.Owner, s.usage.Provider}
 		u := byKey[key]
 		if u == nil {
 			u = &AgentTurnUsage{OwnerUserID: s.usage.Owner, Provider: s.usage.Provider}
 			byKey[key] = u
-			order = append(order, key)
 		}
 		tu := s.usage.TurnUsage
 		u.ReportedTurns++
@@ -203,10 +203,16 @@ func (m *Memory) AgentUsage(ctx context.Context, ownerUserID string, sinceMs int
 			u.CostReportedBy++
 		}
 	}
-	out := make([]AgentTurnUsage, 0, len(order))
-	for _, k := range order {
-		out = append(out, *byKey[k])
+	out := make([]AgentTurnUsage, 0, len(byKey))
+	for _, u := range byKey {
+		out = append(out, *u)
 	}
+	sort.Slice(out, func(i, k int) bool {
+		if out[i].OwnerUserID != out[k].OwnerUserID {
+			return out[i].OwnerUserID < out[k].OwnerUserID
+		}
+		return out[i].Provider < out[k].Provider
+	})
 	return out, nil
 }
 

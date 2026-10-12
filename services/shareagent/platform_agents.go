@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/luckylhb90/bnbloc/internal/httpx"
 	"github.com/luckylhb90/bnbloc/internal/membership"
@@ -196,7 +197,7 @@ func (h *hostStates) load(host string) {
 	if h.s.Bridges == nil {
 		return
 	}
-	advertised, err := h.s.Bridges.ListBridgeAgentsForOwner(h.ctx, host)
+	advertised, err := h.s.Bridges.ListBridgeAgentsForOwner(h.ctx, host, time.Now().UnixMilli())
 	if err != nil {
 		// A presentation read with no 500 path: this response shows the
 		// host's agents offline, and the failure is logged (as for the

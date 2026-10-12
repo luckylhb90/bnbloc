@@ -68,26 +68,25 @@ func (m *MySQLNotifications) NotificationOutboxStats(ctx context.Context) (Notif
 	return st, nil
 }
 
-// CountOnlineBridges counts bridges (every tenant) whose last heartbeat is
-// within BridgeOfflineAfterMs of nowMs and whose status is online — the same
-// liveness rule the team dashboard and job routing apply.
+// CountOnlineBridges counts bridges (every tenant) live at nowMs
+// (BridgeLive) — the same liveness rule the team dashboard and job routing
+// apply.
 func (s *MemoryBridgeJobs) CountOnlineBridges(_ context.Context, nowMs int64) (int, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	n := 0
 	for _, hb := range s.heartbeats {
-		if hb.Status == BridgeOnline && hb.LastSeenAtMs >= nowMs-BridgeOfflineAfterMs {
+		if BridgeLive(hb, nowMs) {
 			n++
 		}
 	}
 	return n, nil
 }
 
-// CountOnlineBridges counts bridges (every tenant) online at nowMs.
+// CountOnlineBridges counts bridges (every tenant) live at nowMs.
 func (m *MySQLBridgeJobs) CountOnlineBridges(ctx context.Context, nowMs int64) (int, error) {
+	// cross-tenant: a metrics snapshot of every tenant's bridges.
 	var n int
-	err := m.DB.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM bridge_heartbeats WHERE status = 'online' AND last_seen_at_ms >= ?`,
-		nowMs-BridgeOfflineAfterMs).Scan(&n)
+	err := m.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM bridge_heartbeats h WHERE `+liveBridgePred, bridgeLiveSince(nowMs)).Scan(&n)
 	return n, err
 }

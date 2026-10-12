@@ -143,7 +143,7 @@ func (s *Service) handleBridgeJobClaim(w http.ResponseWriter, r *http.Request) {
 	if !s.requireBridgeOwner(w, r, body.BridgeID, caller) {
 		return
 	}
-	jobs, err := s.BridgeJobs.ClaimAgentJobs(r.Context(), store.ClaimRequest{BridgeID: body.BridgeID, OwnerUserID: caller, MaxJobs: body.MaxJobs, NowMs: time.Now().UnixMilli(), LeaseMs: 60000, ServeAllOwners: body.ServeAllOwners && s.AllowServeAllOwners})
+	jobs, err := s.BridgeJobs.ClaimAgentJobs(r.Context(), store.ClaimRequest{BridgeID: body.BridgeID, OwnerUserID: caller, MaxJobs: body.MaxJobs, NowMs: time.Now().UnixMilli(), LeaseMs: store.DefaultLeaseMs, ServeAllOwners: body.ServeAllOwners && s.AllowServeAllOwners})
 	if err != nil {
 		obs.ServerError(w, "bridge job claim failed", err)
 		httpx.Error(w, err.Error(), http.StatusInternalServerError)
@@ -366,13 +366,13 @@ func writeJobStoreError(w http.ResponseWriter, what string, err error) {
 // requireBridgeOwner refuses (403) a bridge the caller did not register, and
 // reports a failed lookup as a 500 rather than as a refusal.
 func (s *Service) requireBridgeOwner(w http.ResponseWriter, r *http.Request, bridgeID, caller string) bool {
-	hb, err := s.BridgeJobs.LookupBridge(r.Context(), bridgeID)
+	owner, err := s.BridgeJobs.BridgeOwner(r.Context(), bridgeID)
 	if err != nil && !errors.Is(err, store.ErrBridgeNotFound) {
 		obs.ServerError(w, "bridge lookup failed", err)
 		httpx.Error(w, "bridge lookup failed", http.StatusInternalServerError)
 		return false
 	}
-	if err != nil || hb.OwnerUserID != caller {
+	if err != nil || owner != caller {
 		httpx.Error(w, "bridge owner mismatch", http.StatusForbidden)
 		return false
 	}
@@ -411,7 +411,8 @@ func (s *Service) handleMyAgents(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, "missing authenticated subject", http.StatusUnauthorized)
 		return
 	}
-	agents, err := s.BridgeJobs.ListBridgeAgentsForOwner(r.Context(), caller)
+	now := time.Now().UnixMilli()
+	agents, err := s.BridgeJobs.ListBridgeAgentsForOwner(r.Context(), caller, now)
 	if err != nil {
 		obs.ServerError(w, "list bridge agents failed", err)
 		httpx.Error(w, "list bridge agents failed", http.StatusInternalServerError)
@@ -443,7 +444,7 @@ func (s *Service) handleMyAgents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if found {
-		d = desktop{Online: store.BridgeLive(hb, time.Now().UnixMilli()), LastSeenAtMs: hb.LastSeenAtMs}
+		d = desktop{Online: store.BridgeLive(hb, now), LastSeenAtMs: hb.LastSeenAtMs}
 	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"agents": rows, "desktop": d})
 }

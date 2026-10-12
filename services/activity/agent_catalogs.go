@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"net/http"
 	"sort"
+	"time"
 
 	"github.com/luckylhb90/bnbloc/internal/httpx"
 	"github.com/luckylhb90/bnbloc/internal/obs"
@@ -94,7 +95,7 @@ func (s *Service) roomAddressableAgents(r *http.Request, roomID string) ([]addre
 				continue
 			}
 		}
-		advertised, err := s.BridgeJobs.ListBridgeAgentsForOwner(ctx, m.UserID)
+		advertised, err := s.BridgeJobs.ListBridgeAgentsForOwner(ctx, m.UserID, time.Now().UnixMilli())
 		if err != nil {
 			return nil, err
 		}

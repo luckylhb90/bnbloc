@@ -55,22 +55,9 @@ func (m *MySQLBridgeJobs) ListAgentRuns(ctx context.Context, q AgentRunQuery) ([
 	if q.Before.CreatedAtMs > 0 {
 		add("(created_at_ms < ? OR (created_at_ms = ? AND job_id < ?))", q.Before.CreatedAtMs, q.Before.CreatedAtMs, q.Before.JobID)
 	}
-	args = append(args, q.limit())
-	rows, err := m.DB.QueryContext(ctx, `SELECT `+agentJobColumns+` FROM agent_jobs WHERE `+
+	args = append(args, q.PageSize())
+	return agentJobList(ctx, m.DB, `SELECT `+agentJobColumns+` FROM agent_jobs WHERE `+
 		strings.Join(where, " AND ")+` ORDER BY created_at_ms DESC, job_id DESC LIMIT ?`, args...)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var out []AgentJob
-	for rows.Next() {
-		j, err := scanAgentJobRows(rows)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, j)
-	}
-	return out, rows.Err()
 }
 
 // GetAgentRun implements AgentRunReader.

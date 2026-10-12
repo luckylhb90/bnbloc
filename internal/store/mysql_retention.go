@@ -73,7 +73,7 @@ func (s *MySQLRetention) Purge(ctx context.Context, req PurgeRequest) (PurgeResu
 		// scan; a terminal job without a finish stamp counts by creation.
 		err = s.deleteBatches(ctx, out, PurgedAgentJobs, `DELETE FROM agent_jobs
 WHERE tenant_id = ? AND created_at_ms < ? AND finished_at_ms < ?
-  AND status IN ('replied','failed','timed_out','cancelled') LIMIT ?`, req.TenantID, req.BeforeMs, req.BeforeMs, req.batch())
+  AND status IN (`+sqlTerminalJobStatuses+`) LIMIT ?`, req.TenantID, req.BeforeMs, req.BeforeMs, req.batch())
 	default:
 		err = fmt.Errorf("retention: unknown kind %q", req.Kind)
 	}

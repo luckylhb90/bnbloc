@@ -56,7 +56,7 @@ func (s *MemoryBridgeJobs) ExpertUsage(ctx context.Context, expertIDs []string) 
 	runs := map[string]int{}
 	members := map[string]map[string]bool{}
 	for _, j := range s.jobs {
-		if j.TenantID != tid || !want[j.ExpertID] || runs[j.ExpertID] >= MaxUsageCount {
+		if j.TenantID != tid || !want[j.ExpertID] {
 			continue
 		}
 		runs[j.ExpertID]++
@@ -65,9 +65,10 @@ func (s *MemoryBridgeJobs) ExpertUsage(ctx context.Context, expertIDs []string) 
 		}
 		members[j.ExpertID][j.RequesterUserID] = true
 	}
+	// Each count is capped on its own, as MySQL's two bounded reads are.
 	out := map[string]ContentUsage{}
 	for id, n := range runs {
-		out[id] = ContentUsage{Runs: n, Members: len(members[id])}
+		out[id] = ContentUsage{Runs: min(n, MaxUsageCount), Members: min(len(members[id]), MaxUsageCount)}
 	}
 	return out, nil
 }

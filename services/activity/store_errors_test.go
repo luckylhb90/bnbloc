@@ -42,11 +42,11 @@ func (f *failingJobs) CancelAgentJob(ctx context.Context, r store.CancelRequest)
 	return f.BridgeJobStore.CancelAgentJob(ctx, r)
 }
 
-func (f *failingJobs) LookupBridge(ctx context.Context, id string) (store.BridgeHeartbeat, error) {
+func (f *failingJobs) BridgeOwner(ctx context.Context, id string) (string, error) {
 	if f.lookupFail != nil {
-		return store.BridgeHeartbeat{}, f.lookupFail
+		return "", f.lookupFail
 	}
-	return f.BridgeJobStore.LookupBridge(ctx, id)
+	return f.BridgeJobStore.BridgeOwner(ctx, id)
 }
 
 // TestStoreErrorsNotConflict: only the store's lease sentinel is a 409 (the

@@ -24,13 +24,7 @@ var (
 
 // JobLive reports whether a job is in a live phase (claimed, running or
 // reflowing).
-func JobLive(j AgentJob) bool {
-	switch j.Status {
-	case AgentJobClaimed, AgentJobRunning, AgentJobReflowing:
-		return true
-	}
-	return false
-}
+func JobLive(j AgentJob) bool { return j.Status.Live() }
 
 // jobLeasedBy checks that job is live and leased by a bridge registered to
 // caller: ErrJobNotLive, ErrJobNotCallers, or a store error reading the

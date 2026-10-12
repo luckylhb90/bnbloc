@@ -19,17 +19,8 @@ import (
 // `cross-tenant: <reason>` comment yet. The list only shrinks; Batch 4.3 of
 // the code-health plan empties it.
 var tenantFilterPending = map[string]bool{
-	"agent_dispatch.go:MySQLBridgeJobs.BridgeOwner":                                  true,
 	"content_prompt_uses.go:MySQLContentComponents.RecordContentPromptUse":           true,
 	"content_usage.go:MySQLContentComponents.CountMemberUses":                        true,
-	"mysql_bridge_jobs.go:MySQLBridgeJobs.ClaimAgentJobs":                            true,
-	"mysql_bridge_jobs.go:MySQLBridgeJobs.ListBridgeAgents":                          true,
-	"mysql_bridge_jobs.go:MySQLBridgeJobs.ListBridgeAgentsForOwner":                  true,
-	"mysql_bridge_jobs.go:MySQLBridgeJobs.PendingAgentJobs":                          true,
-	"mysql_bridge_jobs.go:MySQLBridgeJobs.RenewAgentJobLease":                        true,
-	"mysql_bridge_jobs.go:MySQLBridgeJobs.UpdateAgentJobStatus":                      true,
-	"mysql_bridge_jobs.go:MySQLBridgeJobs.jobMiss":                                   true,
-	"mysql_bridge_jobs.go:scanAgentJobTxByID":                                        true,
 	"mysql_content_components.go:MySQLContentComponents.AddContentComponentVersion":  true,
 	"mysql_content_components.go:MySQLContentComponents.CountContentUses":            true,
 	"mysql_content_components.go:MySQLContentComponents.DeleteContentComponent":      true,
@@ -46,7 +37,6 @@ var tenantFilterPending = map[string]bool{
 	"mysql_retention.go:MySQLRetention.ReferencedBlobKeys":                           true,
 	"notification_replies.go:MySQLNotificationReplies.DeleteNotificationReplyTokens": true,
 	"notification_replies.go:MySQLNotificationReplies.PruneNotificationReplyTokens":  true,
-	"ops_stats.go:MySQLBridgeJobs.CountOnlineBridges":                                true,
 	"ops_stats.go:MySQLNotifications.NotificationOutboxStats":                        true,
 	"refresh_tokens.go:MySQLRefreshToken.GetRefreshFamily":                           true,
 	"refresh_tokens.go:MySQLRefreshToken.ListRefreshFamilies":                        true,

@@ -24,7 +24,7 @@ type fakeBridges struct {
 	queued map[string][]store.AgentJobCount
 }
 
-func (f *fakeBridges) ListBridgeAgentsForOwner(_ context.Context, owner string) ([]store.BridgeAgent, error) {
+func (f *fakeBridges) ListBridgeAgentsForOwner(_ context.Context, owner string, _ int64) ([]store.BridgeAgent, error) {
 	return f.ads[owner], nil
 }
 

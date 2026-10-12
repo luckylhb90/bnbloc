@@ -18,7 +18,7 @@ import (
 
 type fixedAdvertisements map[string][]store.BridgeAgent
 
-func (f fixedAdvertisements) ListBridgeAgentsForOwner(_ context.Context, owner string) ([]store.BridgeAgent, error) {
+func (f fixedAdvertisements) ListBridgeAgentsForOwner(_ context.Context, owner string, _ int64) ([]store.BridgeAgent, error) {
 	return f[owner], nil
 }
 
