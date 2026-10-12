@@ -24,8 +24,8 @@ import { useToast } from "@/ui/Toast";
 import { ContentEditorDialog, ImportDialog, type EditorTarget } from "@/views/library/ContentEditorDialog";
 import { ContentViewDialog, PermissionBadges } from "@/views/library/ContentViewDialog";
 import { TeamBadge, TeamRoster } from "@/views/library/ContentFormExtras";
+import { ContentByline, PublishDialog, ShareDialog, SharingActions, SharingStatus } from "@/views/library/ContentSharing";
 import { useOpenWorkshop } from "@/views/library/workshopFlow";
-import { UserName } from "@/views/UserName";
 
 const COPY: Record<"expert" | "skill", { subtitle: string; empty: string; hint: string; search: string }> = {
   expert: {
@@ -63,6 +63,8 @@ export function ContentTab({
   const [editing, setEditing] = useState<EditorTarget | null>(null);
   const [viewing, setViewing] = useState<ContentComponent | null>(null);
   const [deleting, setDeleting] = useState<ContentComponent | null>(null);
+  const [sharing, setSharing] = useState<ContentComponent | null>(null);
+  const [publishing, setPublishing] = useState<ContentComponent | null>(null);
   const [importing, setImporting] = useState(false);
   const [epoch, setEpoch] = useState(0);
   const reload = useCallback(() => setEpoch((n) => n + 1), []);
@@ -184,18 +186,14 @@ export function ContentTab({
                 {c.needsSandbox && (
                   <p className="text-xs text-[var(--color-fg-subtle)]">Runs in the agent sandbox when someone else uses it</p>
                 )}
-                {kind === "skill" && c.mine && (
+                {kind === "skill" && (
                   <Switch checked={enabled.has(c.id)} onChange={(on) => void toggleForMe(c, on)} label="On for all my agents" />
                 )}
+                <SharingStatus component={c} onChanged={reload} />
                 <div className="mt-auto flex items-center gap-2 pt-1 text-xs text-[var(--color-fg-subtle)]">
                   <span className="min-w-0 flex-1 truncate">
-                    {isBuiltin(c) ? (
-                      "Built-in · bnbloc"
-                    ) : (
-                      <>
-                        {c.mine ? "You" : <UserName id={c.owner} />} · {relativeTime(c.updatedAtMs)}
-                      </>
-                    )}
+                    <ContentByline component={c} />
+                    {!isBuiltin(c) && ` · ${relativeTime(c.updatedAtMs)}`}
                     {c.uses > 0 ? ` · in use ${c.uses}×` : ""}
                     {usageLine(c) ? ` · ${usageLine(c)}` : ""}
                   </span>
@@ -219,7 +217,8 @@ export function ContentTab({
                       <PencilSimpleIcon size={15} />
                     </button>
                   )}
-                  {c.mine && (
+                  <SharingActions component={c} onShare={setSharing} onPublish={setPublishing} />
+                  {c.removable && (
                     <button type="button" onClick={() => setDeleting(c)} title="Delete" aria-label={`Delete ${c.name}`} className="tactile hover:text-[var(--color-danger)]">
                       <TrashIcon size={15} />
                     </button>
@@ -240,12 +239,20 @@ export function ContentTab({
         }}
       />
       <ImportDialog kind={kind} open={importing} mine={mine} onClose={() => setImporting(false)} onImported={reload} />
+      <ShareDialog component={sharing} onClose={() => setSharing(null)} />
+      <PublishDialog component={publishing} onClose={() => setPublishing(null)} onChanged={reload} />
       <ConfirmDialog
         open={!!deleting}
         onClose={() => setDeleting(null)}
         onConfirm={() => deleting && void remove(deleting)}
         title={kind === "expert" ? "Delete expert?" : "Delete skill pack?"}
-        description={deleting ? `${contentLabel(deleting)} and all its versions will be removed, and rooms using it lose it.` : undefined}
+        description={
+          deleting
+            ? deleting.scope === "shared"
+              ? `Your copy of ${contentLabel(deleting)} is removed, and rooms using it lose it. Its author keeps theirs.`
+              : `${contentLabel(deleting)} and all its versions will be removed, and rooms using it lose it. Copies you shared stay with their holders.`
+            : undefined
+        }
         confirmLabel="Delete"
         danger
       />

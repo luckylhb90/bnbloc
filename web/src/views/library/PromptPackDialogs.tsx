@@ -12,7 +12,7 @@ import { Dialog } from "@/ui/Dialog";
 import { Field, Input } from "@/ui/Input";
 import { Select } from "@/ui/Select";
 import { useToast } from "@/ui/Toast";
-import { UserName } from "@/views/UserName";
+import { ContentByline } from "@/views/library/ContentSharing";
 
 // PromptPackViewDialog shows a pack's prompts at a version: title, /command,
 // tags, variables, body and how often each was inserted. roomId reads a pack
@@ -68,7 +68,9 @@ export function PromptPackViewDialog({
           <div className="flex flex-wrap items-center gap-2 text-xs text-[var(--color-fg-subtle)]">
             <Badge>Prompt pack</Badge>
             <span className="font-mono">{c.name}</span>
-            <span>by {c.mine ? "you" : <UserName id={c.owner} />}</span>
+            <span>
+              <ContentByline component={c} />
+            </span>
             {detail && detail.versions.length > 1 ? (
               <Select value={version} onChange={(e) => setVersion(e.target.value)} className="h-8 w-36 text-xs" aria-label="Version">
                 {detail.versions.map((v) => (

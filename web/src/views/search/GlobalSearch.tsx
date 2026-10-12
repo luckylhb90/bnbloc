@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ChatTextIcon, FileTextIcon, MagnifyingGlassIcon } from "@phosphor-icons/react";
+import { BooksIcon, ChatTextIcon, FileTextIcon, MagnifyingGlassIcon } from "@phosphor-icons/react";
 import { api, type SearchResult } from "@/lib/api";
 import { cn } from "@/lib/cn";
 import { relativeTime } from "@/lib/format";
@@ -8,6 +8,8 @@ import {
   highlightParts,
   messageJumps,
   OPEN_SEARCH_EVENT,
+  queueLibraryQuery,
+  queueLibraryTab,
   SEARCH_KIND_LABELS,
 } from "@/lib/team";
 import { useModalLayer } from "@/ui/useModalLayer";
@@ -15,7 +17,7 @@ import { ActorName } from "@/views/UserName";
 
 const MIN_QUERY = 2;
 
-const KIND_ICONS = { message: ChatTextIcon, artifact: FileTextIcon };
+const KIND_ICONS = { message: ChatTextIcon, artifact: FileTextIcon, prompt: BooksIcon };
 
 function Highlighted({ text, query }: { text: string; query: string }) {
   return (
@@ -114,6 +116,13 @@ export function GlobalSearch({ onOpenRoom }: { onOpenRoom: (roomId: string) => v
 
   const choose = (r: SearchResult) => {
     setOpen(false);
+    if (r.kind === "prompt") {
+      // A prompt belongs to no room: the Library's prompts, searched for it.
+      queueLibraryTab("prompts");
+      queueLibraryQuery(r.title ?? "");
+      window.location.hash = "#/library";
+      return;
+    }
     if (!r.roomId) return;
     if (r.kind === "message" && r.seq) messageJumps.queue(r.roomId, { seq: r.seq, channelId: r.channelId || undefined });
     onOpenRoom(r.roomId);
@@ -178,7 +187,7 @@ export function GlobalSearch({ onOpenRoom }: { onOpenRoom: (roomId: string) => v
                   const Icon = KIND_ICONS[r.kind];
                   return (
                     <button
-                      key={`${r.kind}:${r.roomId ?? ""}:${r.seq ?? r.artifactId}:${i}`}
+                      key={`${r.kind}:${r.roomId ?? ""}:${r.seq ?? r.artifactId ?? `${r.componentId}/${r.promptId}`}:${i}`}
                       type="button"
                       data-result-index={i}
                       onMouseMove={() => setActive(i)}
@@ -192,7 +201,7 @@ export function GlobalSearch({ onOpenRoom }: { onOpenRoom: (roomId: string) => v
                       <span className="min-w-0 flex-1">
                         <span className="flex items-center gap-2 text-xs text-[var(--color-fg-subtle)]">
                           <span className="truncate font-medium text-[var(--color-fg-muted)]">
-                            {r.roomName || r.roomId}
+                            {r.kind === "prompt" ? r.title : r.roomName || r.roomId}
                           </span>
                           {r.channelKind === "people" && (
                             <span

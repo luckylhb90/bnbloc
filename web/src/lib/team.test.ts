@@ -52,10 +52,11 @@ eq(applyTaskUpdate([t(2), t(5)], { seq: 2, removed: true }).map((x) => x.seq), [
 
 const r = (kind: SearchResult["kind"], snippet: string): SearchResult => ({ kind, snippet, atMs: 0 });
 eq(
-  groupResults([r("artifact", "a"), r("message", "m1"), r("message", "m2")]).map((g) => [g.kind, g.items.length]),
+  groupResults([r("prompt", "p"), r("artifact", "a"), r("message", "m1"), r("message", "m2")]).map((g) => [g.kind, g.items.length]),
   [
     ["message", 2],
     ["artifact", 1],
+    ["prompt", 1],
   ],
   "grouped by kind, messages first",
 );

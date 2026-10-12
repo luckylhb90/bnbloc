@@ -12,7 +12,7 @@ import { useToast } from "@/ui/Toast";
 import { ContentViewDialog, PermissionBadges } from "@/views/library/ContentViewDialog";
 import { PromptPackViewDialog } from "@/views/library/PromptPackDialogs";
 import { useMyRoomRole } from "@/views/room/useMyRoomRole";
-import { UserName } from "@/views/UserName";
+import { ContentByline } from "@/views/library/ContentSharing";
 
 type PinMode = "latest" | "pinned";
 const PIN_MODES = [
@@ -132,7 +132,7 @@ export function RoomContentSection({ roomId }: { readonly roomId: string }) {
           {u.updateAvailable && <Badge tone="accent">v{c.latestVersion} available</Badge>}
           {u.componentId === roomExpert && <Badge tone="accent">Room expert</Badge>}
           <span className="min-w-0 flex-1 truncate text-xs text-[var(--color-fg-subtle)]">
-            by {c.mine ? "you" : <UserName id={c.owner} />}
+            <ContentByline component={c} />
           </span>
           {canEdit && u.updateAvailable && (
             <Button size="sm" variant="outline" onClick={() => void put(u.componentId, c.latestVersion, `Moved to v${c.latestVersion}`)}>

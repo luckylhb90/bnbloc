@@ -14,6 +14,7 @@ import { apiErrorText, contentApi } from "@/lib/contentComponentsApi";
 import { announcePromptPacksChanged } from "@/lib/promptPacksApi";
 import { relativeTime } from "@/lib/format";
 import { packUses, PERSONAL_PROMPT_PACK } from "@/lib/promptPacks";
+import { takeLibraryQuery } from "@/lib/team";
 import { Button } from "@/ui/Button";
 import { Badge, Card, Skeleton } from "@/ui/Card";
 import { ConfirmDialog } from "@/ui/Dialog";
@@ -23,7 +24,7 @@ import { Switch } from "@/ui/Segment";
 import { useToast } from "@/ui/Toast";
 import { AddToRoomDialog, PromptImportDialog, PromptPackViewDialog } from "@/views/library/PromptPackDialogs";
 import { PromptPackEditorDialog, type PromptPackTarget } from "@/views/library/PromptPackEditorDialog";
-import { UserName } from "@/views/UserName";
+import { ContentByline, PublishDialog, ShareDialog, SharingActions, SharingStatus } from "@/views/library/ContentSharing";
 
 // PromptsTab is the Library's prompt packs: the member's packs (and those
 // published to them) with search, view, create by form, import, new
@@ -32,11 +33,13 @@ export function PromptsTab({ tabs }: { readonly tabs: React.ReactNode }) {
   const toast = useToast();
   const [items, setItems] = useState<ContentComponent[] | null>(null);
   const [enabled, setEnabled] = useState<ReadonlySet<string>>(new Set());
-  const [q, setQ] = useState("");
+  const [q, setQ] = useState(takeLibraryQuery);
   const [editing, setEditing] = useState<PromptPackTarget | null>(null);
   const [viewing, setViewing] = useState<ContentComponent | null>(null);
   const [deleting, setDeleting] = useState<ContentComponent | null>(null);
   const [rooming, setRooming] = useState<ContentComponent | null>(null);
+  const [sharing, setSharing] = useState<ContentComponent | null>(null);
+  const [publishing, setPublishing] = useState<ContentComponent | null>(null);
   const [importing, setImporting] = useState(false);
   const [epoch, setEpoch] = useState(0);
   const reload = useCallback(() => setEpoch((n) => n + 1), []);
@@ -161,9 +164,10 @@ export function PromptsTab({ tabs }: { readonly tabs: React.ReactNode }) {
                     </div>
                   )}
                   <Switch checked={enabled.has(c.id)} onChange={(on) => void toggleForMe(c, on)} label="On in my composer" />
+                  <SharingStatus component={c} onChanged={reload} />
                   <div className="mt-auto flex items-center gap-2 pt-1 text-xs text-[var(--color-fg-subtle)]">
                     <span className="min-w-0 flex-1 truncate">
-                      {c.mine ? "You" : <UserName id={c.owner} />} · {relativeTime(c.updatedAtMs)}
+                      <ContentByline component={c} /> · {relativeTime(c.updatedAtMs)}
                       {used > 0 ? ` · used ${used}×` : ""}
                     </span>
                     <button type="button" onClick={() => setViewing(c)} title="View" aria-label={`View ${c.name}`} className="tactile hover:text-[var(--color-fg)]">
@@ -177,7 +181,8 @@ export function PromptsTab({ tabs }: { readonly tabs: React.ReactNode }) {
                         <PencilSimpleIcon size={15} />
                       </button>
                     )}
-                    {c.mine && (
+                    <SharingActions component={c} onShare={setSharing} onPublish={setPublishing} />
+                    {c.removable && (
                       <button type="button" onClick={() => setDeleting(c)} title="Delete" aria-label={`Delete ${c.name}`} className="tactile hover:text-[var(--color-danger)]">
                         <TrashIcon size={15} />
                       </button>
@@ -193,6 +198,8 @@ export function PromptsTab({ tabs }: { readonly tabs: React.ReactNode }) {
       <PromptPackViewDialog pack={viewing} onClose={() => setViewing(null)} />
       <PromptImportDialog open={importing} mine={mine} onClose={() => setImporting(false)} onImported={(c) => void saved(c, !mine.some((m) => m.id === c.id))} />
       <AddToRoomDialog pack={rooming} onClose={() => setRooming(null)} />
+      <ShareDialog component={sharing} onClose={() => setSharing(null)} />
+      <PublishDialog component={publishing} onClose={() => setPublishing(null)} onChanged={reload} />
       <ConfirmDialog
         open={!!deleting}
         onClose={() => setDeleting(null)}

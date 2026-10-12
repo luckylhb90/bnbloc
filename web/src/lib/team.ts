@@ -59,13 +59,14 @@ export function applyTaskUpdate(tasks: readonly MessageTask[], update: TaskUpdat
 export const SEARCH_KIND_LABELS: Record<SearchResult["kind"], string> = {
   message: "Messages",
   artifact: "Documents",
+  prompt: "Prompts",
 };
 
-// groupResults orders search hits by kind (messages, then documents),
+// groupResults orders search hits by kind (messages, documents, prompts),
 // keeping the server's order within a kind. The flat order is the keyboard
 // navigation order.
 export function groupResults(results: readonly SearchResult[]): { kind: SearchResult["kind"]; items: SearchResult[] }[] {
-  const kinds: SearchResult["kind"][] = ["message", "artifact"];
+  const kinds: SearchResult["kind"][] = ["message", "artifact", "prompt"];
   return kinds
     .map((kind) => ({ kind, items: results.filter((r) => r.kind === kind) }))
     .filter((g) => g.items.length > 0);
@@ -203,6 +204,18 @@ export function takeLibraryTab(): LibraryTabName | null {
   const t = pendingLibraryTab;
   pendingLibraryTab = null;
   return t;
+}
+
+// The search a Library tab opens with (a global search prompt hit). Taken
+// once on the tab's mount.
+let pendingLibraryQuery = "";
+export function queueLibraryQuery(q: string): void {
+  pendingLibraryQuery = q;
+}
+export function takeLibraryQuery(): string {
+  const q = pendingLibraryQuery;
+  pendingLibraryQuery = "";
+  return q;
 }
 
 // Global search is opened from anywhere (sidebar button, Cmd/Ctrl+K) through

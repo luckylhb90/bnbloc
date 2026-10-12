@@ -3,7 +3,6 @@ import { DownloadSimpleIcon, ShieldWarningIcon, SparkleIcon } from "@phosphor-ic
 import {
   contentLabel,
   formatSize,
-  isBuiltin,
   isTeam,
   permissionLabel,
   usageLine,
@@ -19,7 +18,7 @@ import { Badge } from "@/ui/Card";
 import { Dialog } from "@/ui/Dialog";
 import { Select } from "@/ui/Select";
 import { useToast } from "@/ui/Toast";
-import { UserName } from "@/views/UserName";
+import { ContentByline } from "@/views/library/ContentSharing";
 import { TeamBadge, TeamRoster } from "@/views/library/ContentFormExtras";
 
 // PermissionBadges shows what a component declares (scripts, local tools,
@@ -117,13 +116,9 @@ export function ContentViewDialog({
           <div className="flex flex-wrap items-center gap-2 text-xs text-[var(--color-fg-subtle)]">
             <Badge>{c.kind === "expert" ? "Expert" : "Skill pack"}</Badge>
             <span className="font-mono">{c.name}</span>
-            {isBuiltin(c) ? (
-              <span>built in · bnbloc</span>
-            ) : (
-              <span>
-                by {c.mine ? "you" : <UserName id={c.owner} />}
-              </span>
-            )}
+            <span>
+              <ContentByline component={c} />
+            </span>
             {detail && detail.versions.length > 1 ? (
               <Select value={version} onChange={(e) => setVersion(e.target.value)} className="h-8 w-36 text-xs" aria-label="Version">
                 {detail.versions.map((v) => (

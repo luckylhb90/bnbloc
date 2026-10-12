@@ -23,7 +23,8 @@ export interface TaskUpdate {
   removed?: boolean;
 }
 
-export type SearchKind = "message" | "artifact";
+// A prompt hit is a prompt of a prompt pack the member can see (no room).
+export type SearchKind = "message" | "artifact" | "prompt";
 
 export interface SearchResult {
   kind: SearchKind;
@@ -34,6 +35,9 @@ export interface SearchResult {
   channelKind?: "people";
   seq?: number;
   artifactId?: string;
+  // A prompt hit's pack and prompt.
+  componentId?: string;
+  promptId?: string;
   title?: string;
   snippet: string;
   author?: string;

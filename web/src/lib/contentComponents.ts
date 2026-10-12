@@ -81,7 +81,19 @@ export interface ContentComponent {
   // A prompt pack's prompts (lib/promptPacks.ts).
   readonly prompts?: readonly ContentPrompt[];
   readonly welcome?: string;
+  // mine: the caller authors it (a personal component of theirs: new
+  // versions, sharing, publishing). removable: they may delete it (theirs,
+  // or a copy someone shared with them).
   readonly mine: boolean;
+  readonly removable?: boolean;
+  // A shared copy: its author (owner is the holder), the author's
+  // component it came from, and the author's newer version when there is
+  // one (lib/contentSharing.ts).
+  readonly sharedBy?: string;
+  readonly sourceId?: string;
+  readonly sourceLatestVersion?: string;
+  // The author's own component: its organization publication.
+  readonly publication?: ContentPublication;
   readonly acked: boolean;
   readonly uses: number;
   // Usage: an expert's runs and their distinct requesters; a pack's
@@ -92,6 +104,31 @@ export interface ContentComponent {
   readonly team?: ContentTeam;
   readonly createdAtMs: number;
   readonly updatedAtMs: number;
+}
+
+export interface ContentPublishRequest {
+  readonly id: string;
+  readonly componentId: string;
+  readonly kind: ContentKind;
+  readonly name: string;
+  readonly displayName?: string;
+  readonly version: string;
+  readonly requestedBy: string;
+  readonly note?: string;
+  readonly status: "pending" | "approved" | "declined" | "withdrawn";
+  readonly decidedBy?: string;
+  readonly decisionNote?: string;
+  readonly decidedAtMs?: number;
+  readonly createdAtMs: number;
+  // The version the organization uses now ("" before a first approval).
+  readonly approvedVersion?: string;
+}
+
+export interface ContentPublication {
+  readonly orgComponentId?: string;
+  readonly orgVersion?: string;
+  readonly orgStatus?: string;
+  readonly request?: ContentPublishRequest;
 }
 
 export interface ContentVersion {

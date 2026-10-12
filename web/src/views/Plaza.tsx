@@ -16,6 +16,7 @@ import { Segment } from "@/ui/Segment";
 import { Dialog } from "@/ui/Dialog";
 import { PageHeader, EmptyState } from "@/ui/Page";
 import { useToast } from "@/ui/Toast";
+import { SharedPrompts } from "@/views/library/SharedPrompts";
 import { InstantiateTemplateDialog } from "@/views/library/TemplateDialogs";
 import { WelcomeCard } from "@/views/WelcomeCard";
 
@@ -116,6 +117,7 @@ export function Plaza({ onOpen }: { onOpen: (id: string) => void }) {
             ))}
           </div>
         )}
+        <SharedPrompts />
       </div>
 
       <CreateRoomDialog
