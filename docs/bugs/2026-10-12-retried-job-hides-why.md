@@ -73,15 +73,19 @@ starting".
 
 Status: fixed.
 
-- `2872a8b` store: every requeue records its attempt; the sweep owns lease
+- `d09318a` store: every requeue records its attempt; the sweep owns lease
   loss (migration `2026_10_agent_jobs_attempts`, wire `attempts`)
-- `f37795f` bridge: a sandbox not up yet at prepare is `sandbox_starting`
-- `b169c98` web: a retried job says why; the run detail lists its attempts
-- `cac0754` ci: the isolated web build's cleanup trap fires once (found
-  while verifying: `scripts/ci.sh web` exited 1 after every check passed)
+- `d1ce036` bridge: a sandbox not up yet at prepare is `sandbox_starting`
+- `f276a7f` web: a retried job says why; the run detail lists its attempts
+- `26c77e7` store: a requeued job waits out a retry delay before its next
+  claim (`not_before_ms`, `retryBackoffs`)
+- `7059ef7` web: the retry note counts down the retry delay
+- The `scripts/ci.sh` cleanup-trap failure found while verifying is fixed
+  on main (`821ace8`).
 
 Tests: `TestContractBridgeJobStoreAttemptHistory`,
-`TestContractBridgeJobStoreLapsedLeaseRequeuedBySweep`, the updated sweep,
+`TestContractBridgeJobStoreLapsedLeaseRequeuedBySweep`,
+`TestContractBridgeJobStoreRetryDelay`, the updated sweep,
 retry and renewal contract cases (memory and MySQL), `TestJobRequeueOwned`,
 `TestAgentJobViewCarriesAttempts`, `TestRoomRunDetailResolvesReplySeq`,
 `TestSweepRequeuesLapsedLeaseWithoutNotice`,
