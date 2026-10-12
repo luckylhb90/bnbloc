@@ -130,10 +130,12 @@ to a core.
   Organization → Settings) is on: then it is refused BEFORE any quota is
   reserved, with a `sandbox-required` notice telling the member why (sandbox
   off / not ready / core unsupported) and job failure `sandbox_required`. A
-  policy that cannot be read never refuses on its own (borrowing is a core
-  flow that works without any sandbox): the last known answer is used, else
-  the default (not required), with a `bnbloc.sandbox.policy_unreadable`
-  warning. A platform agent (docs/prd/2026-10-10-zero-install-onboarding.md
+  policy that cannot be read (and has no answer cached within 30 s) refuses
+  the same way, fail closed, with a notice saying the policy could not be
+  checked and a `bnbloc.sandbox.policy_unreadable` warning: running the
+  drive on the host would bypass a requirement nobody could check
+  (2026-10-12). Only a borrowed drive the sandbox cannot take reads the
+  policy. A platform agent (docs/prd/2026-10-10-zero-install-onboarding.md
   §2) always runs sandboxed: the bridge tells the reservation whether the
   drive is sandboxed (`sandboxed`), and the authority refuses an unsandboxed
   one with `sandbox_required` (`sandboxRequired: true`) before anything is

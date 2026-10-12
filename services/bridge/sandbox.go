@@ -285,6 +285,9 @@ type sandboxDecision struct {
 const (
 	tenantSandboxPrefix   = "Your organization requires borrowed agents to run in their owner's agent sandbox, and "
 	platformSandboxPrefix = "Platform agents always run in their host's agent sandbox, and "
+	// policyUnreadablePrefix: the tenant's requirement could not be read, so
+	// the borrowed drive is held to it (fail closed).
+	policyUnreadablePrefix = "Your organization's sandbox policy for borrowed agents could not be checked right now, so this borrowed run must use its owner's agent sandbox, and "
 )
 
 // contentSandboxPrefix is the refusal of a turn wearing someone else's
@@ -297,11 +300,13 @@ func contentSandboxPrefix(foreign []string) string {
 // all; borrowed drives whenever the sandbox is ready and the core supports
 // sandboxExec (mode borrowed or all). A borrowed drive that cannot be
 // sandboxed runs on the host as before — unless the tenant requires the
-// sandbox for borrowing, then it is refused (fail closed, visible notice).
-// A drive wearing someone else's script-bearing content (foreign, the
-// content's names) is sandboxed like a borrowed one, and refused when it
-// cannot be: such content never runs on the owner's host.
-func decideSandbox(borrowed bool, foreign []string, mode SandboxMode, ready bool, notReadyReason string, coreSupports bool, requirePolicy func() bool, owner, provider string) sandboxDecision {
+// sandbox for borrowing, or its policy cannot be read, then it is refused
+// (fail closed, visible notice). requirePolicy answers the tenant's switch
+// and an error when it is unreadable. A drive wearing someone else's
+// script-bearing content (foreign, the content's names) is sandboxed like a
+// borrowed one, and refused when it cannot be: such content never runs on
+// the owner's host.
+func decideSandbox(borrowed bool, foreign []string, mode SandboxMode, ready bool, notReadyReason string, coreSupports bool, requirePolicy func() (bool, error), owner, provider string) sandboxDecision {
 	forced := len(foreign) > 0
 	if ready && coreSupports && (mode == SandboxAll || ((borrowed || forced) && mode == SandboxBorrowed)) {
 		return sandboxDecision{sandboxed: true}
@@ -314,10 +319,14 @@ func decideSandbox(borrowed bool, foreign []string, mode SandboxMode, ready bool
 		return sandboxDecision{}
 	}
 	unavailable := sandboxUnavailable(mode, ready, notReadyReason, coreSupports, owner, provider)
-	if !requirePolicy() {
-		return sandboxDecision{unavailable: unavailable}
+	require, err := requirePolicy()
+	switch {
+	case err != nil:
+		return sandboxDecision{refuse: policyUnreadablePrefix + unavailable, unavailable: unavailable}
+	case require:
+		return sandboxDecision{refuse: tenantSandboxPrefix + unavailable, unavailable: unavailable}
 	}
-	return sandboxDecision{refuse: tenantSandboxPrefix + unavailable, unavailable: unavailable}
+	return sandboxDecision{unavailable: unavailable}
 }
 
 // sandboxUnavailable explains why a borrowed drive cannot run sandboxed.
@@ -338,38 +347,31 @@ func sandboxUnavailable(mode SandboxMode, ready bool, notReadyReason string, cor
 	}
 }
 
-// requireSandboxForBorrow reads (and caches) the tenant's sandbox switch from
-// the gateway's tenant policy: GET /v1/my/tenant-policy?tenant=. Borrowing is a core flow
-// that works without any sandbox, so an unreadable policy must not refuse it
-// on its own: a failed read falls back to the last known answer (however
-// old), and to the policy's default (not required) when none was ever read.
-// Only a policy known to require the sandbox refuses a borrowed drive.
-func (b *Bridge) requireSandboxForBorrow(ctx context.Context, tenantID string) bool {
+// requireSandboxForBorrow reads (and caches for sandboxPolicyTTL) the
+// tenant's sandbox switch from the gateway's tenant policy: GET
+// /v1/my/tenant-policy?tenant=. It is consulted only for a borrowed drive
+// that cannot run sandboxed; a read that fails returns the error and the
+// drive is refused (fail closed): running it on the host would bypass a
+// requirement nobody could check.
+func (b *Bridge) requireSandboxForBorrow(ctx context.Context, tenantID string) (bool, error) {
 	s := b.sandbox
 	key := strings.TrimSpace(tenantID)
 	s.policyMu.Lock()
 	prev, known := s.policy[key]
 	s.policyMu.Unlock()
 	if known && s.now().Sub(prev.at) < sandboxPolicyTTL {
-		return prev.require
+		return prev.require, nil
 	}
 	require, err := b.fetchSandboxPolicy(ctx, key)
 	if err != nil {
-		fallback := policyFallback(prev, known)
-		slog.Warn("bnbloc bridge: sandbox policy unreadable; using the last known answer",
-			"event", "bnbloc.sandbox.policy_unreadable", "tenant", key, "known", known, "require", fallback, "error", err)
-		return fallback
+		slog.Warn("bnbloc bridge: sandbox policy unreadable; refusing the unsandboxed borrowed drive",
+			"event", "bnbloc.sandbox.policy_unreadable", "tenant", key, "error", err)
+		return false, err
 	}
 	s.policyMu.Lock()
 	s.policy[key] = sandboxPolicyEntry{require: require, at: s.now()}
 	s.policyMu.Unlock()
-	return require
-}
-
-// policyFallback is the answer when the policy cannot be read: the last known
-// one, else the default (not required).
-func policyFallback(prev sandboxPolicyEntry, known bool) bool {
-	return known && prev.require
+	return require, nil
 }
 
 func (b *Bridge) fetchSandboxPolicy(ctx context.Context, tenantKey string) (bool, error) {
@@ -400,7 +402,7 @@ func (b *Bridge) planSandbox(ctx context.Context, job bridgeJob, owner, coreName
 	if entry, ok := b.coreEntry(coreName); ok && entry.endpoint.OK() {
 		supports = corepkg.Supports(ctx, entry.provider, entry.endpoint, corepkg.CapabilitySandboxExec)
 	}
-	d := decideSandbox(borrowed, foreign, s.cfg.Mode, ready, reason, supports, func() bool {
+	d := decideSandbox(borrowed, foreign, s.cfg.Mode, ready, reason, supports, func() (bool, error) {
 		return b.requireSandboxForBorrow(ctx, job.TenantID)
 	}, owner, job.Provider)
 	if d.refuse != "" {

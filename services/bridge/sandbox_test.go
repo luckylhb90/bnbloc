@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -137,6 +138,8 @@ type sandboxGateway struct {
 	*activityGateway
 	srv     *httptest.Server
 	require bool
+	// policyDown makes the tenant policy unreadable (503).
+	policyDown bool
 	// platform makes the reservation authority answer as for a platform
 	// agent's grant: sandboxRequired, and sandbox_required (nothing reserved)
 	// for a drive the bridge does not run sandboxed.
@@ -159,6 +162,10 @@ func newSandboxGateway(t *testing.T, room string, require bool) *sandboxGateway 
 			g.mu.Lock()
 			g.tenants = append(g.tenants, r.URL.Query().Get("tenant"))
 			g.mu.Unlock()
+			if g.policyDown {
+				http.Error(w, "unavailable", http.StatusServiceUnavailable)
+				return
+			}
 			_ = json.NewEncoder(w).Encode(map[string]any{"tenantId": "t1", "requireSandboxForBorrow": g.require, "publicSharesDisabled": false})
 		case strings.HasSuffix(r.URL.Path, "/authorization/reserve"):
 			var body map[string]any
@@ -333,6 +340,39 @@ func TestSandbox_requiredPolicyRefusesVisibly_whenTheSandboxCannotTakeTheDrive(t
 	}
 }
 
+// An unreadable tenant policy fails closed: a borrowed drive the sandbox
+// cannot take is refused visibly, before anything is reserved or driven
+// (docs/prd/2026-10-09-agent-vm-sandbox.md, decision O2 of the 2026-10-12
+// remediation plan).
+func TestSandbox_unreadablePolicyRefusesTheUnsandboxedBorrow(t *testing.T) {
+	gw := newSandboxGateway(t, "room-1", false)
+	gw.policyDown = true
+	prov := &sandboxProv{supports: true}
+	b, _ := sandboxBridge(t, gw, nil, SandboxBorrowed, prov)
+
+	b.runBridgeJob(context.Background(), job("job-1", "bob"))
+
+	if prov.prompt != "" || prov.hostWorkspace != 0 {
+		t.Fatal("a drive whose policy could not be read ran on the host")
+	}
+	if len(gw.reserves) != 0 {
+		t.Fatalf("a refused drive reserved quota: %v", gw.reserves)
+	}
+	if st := gw.lastStatus(); st["status"] != "failed" || st["failureReason"] != "sandbox_required" {
+		t.Fatalf("status = %v", st)
+	}
+	_, fresh := gw.stored()
+	if len(fresh) != 1 || !strings.Contains(payloadText(fresh[0]), "could not be checked") {
+		t.Fatalf("notice = %+v", fresh)
+	}
+
+	// The owner's own drive never reads the policy and still runs.
+	b.runBridgeJob(context.Background(), job("job-2", "alice"))
+	if prov.hostWorkspace != 1 || len(gw.tenants) != 1 {
+		t.Fatalf("own drive: host workspaces %d, policy reads %v", prov.hostWorkspace, gw.tenants)
+	}
+}
+
 func TestSandbox_borrowingWithoutTheSandboxStillWorks_whenNotRequired(t *testing.T) {
 	gw := newSandboxGateway(t, "room-1", false)
 	prov := &sandboxProv{supports: true}
@@ -368,18 +408,25 @@ func TestSandbox_spaceFailureFailsTheDrive_neverFallsBackToTheHost(t *testing.T)
 }
 
 func TestDecideSandbox(t *testing.T) {
-	never := func() bool { t.Fatal("policy read when not needed"); return false }
-	off := func() bool { return false }
-	on := func() bool { return true }
+	never := func() (bool, error) { t.Fatal("policy read when not needed"); return false, nil }
+	off := func() (bool, error) { return false, nil }
+	on := func() (bool, error) { return true, nil }
+	unreadable := func() (bool, error) { return false, errors.New("gateway down") }
 	cases := []struct {
 		name                     string
 		borrowed                 bool
 		foreign                  []string
 		mode                     SandboxMode
 		ready, supports          bool
-		policy                   func() bool
+		policy                   func() (bool, error)
 		wantSandboxed, wantRefus bool
 	}{
+		// An unreadable policy refuses an unsandboxed borrowed drive (fail
+		// closed); a drive the sandbox takes never reads it.
+		{"borrowed, mode off, policy unreadable", true, nil, SandboxOff, true, true, unreadable, false, true},
+		{"borrowed, unsupported, policy unreadable", true, nil, SandboxBorrowed, true, false, unreadable, false, true},
+		{"borrowed sandboxed, policy unreadable", true, nil, SandboxBorrowed, true, true, never, true, false},
+		{"own, policy unreadable", false, nil, SandboxOff, true, true, never, false, false},
 		{"borrowed sandboxed", true, nil, SandboxBorrowed, true, true, never, true, false},
 		{"borrowed in mode all", true, nil, SandboxAll, true, true, never, true, false},
 		{"own in mode borrowed", false, nil, SandboxBorrowed, true, true, never, false, false},
@@ -404,19 +451,6 @@ func TestDecideSandbox(t *testing.T) {
 	}
 }
 
-// An unreadable policy never refuses borrowing on its own: it keeps the last
-// known answer, and defaults to "not required" when none was ever read.
-func TestPolicyFallback(t *testing.T) {
-	if policyFallback(sandboxPolicyEntry{}, false) {
-		t.Error("never-read policy must default to not required")
-	}
-	if !policyFallback(sandboxPolicyEntry{require: true}, true) {
-		t.Error("a known requirement must survive a failed refresh")
-	}
-	if policyFallback(sandboxPolicyEntry{require: false}, true) {
-		t.Error("a known non-requirement must survive a failed refresh")
-	}
-}
 
 func TestParseSandboxMode(t *testing.T) {
 	for in, want := range map[string]SandboxMode{"": SandboxBorrowed, "off": SandboxOff, " ALL ": SandboxAll, "borrowed": SandboxBorrowed} {

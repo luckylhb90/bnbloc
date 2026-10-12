@@ -310,9 +310,12 @@ Policy (must not break borrowing for members without the VM component):
 - borrowed drives run sandboxed whenever the owner's machine has a ready
   sandbox and the core supports `sandboxExec` (member mode `borrowed`, the
   default, or `all`);
-- they are REFUSED (fail closed, visible job notice) only when the tenant
-  policy `requireSandboxForBorrow` is on (org admin switch, default off) and
-  the sandbox or the capability is missing;
+- they are REFUSED (fail closed, visible job notice) only when the sandbox
+  or the capability is missing and the tenant policy
+  `requireSandboxForBorrow` is on (org admin switch, default off) or cannot
+  be read (decided 2026-10-12, remediation plan O2: an unreadable
+  requirement is held to, not skipped; this applies to borrowed and
+  platform drives alike);
 - own drives follow the member setting (`all` = sandboxed, otherwise host).
 
 **Core responsibilities** (per CLI): route shell commands through `vmexec`
@@ -463,7 +466,7 @@ Landed in this repo (public, generic):
   tick (discover with spaces+shares+execTokens, machine running). Policy per
   drive exactly as the contract; refusal happens before any borrow quota is
   reserved, posts a `sandbox-required` notice and fails the job with
-  `sandbox_required`; an unreadable tenant policy falls back to the last known answer, else to "not required" (it must not block borrowing on its own). Per
+  `sandbox_required`; an unreadable tenant policy (no answer cached within 30 s) refuses the same way, fail closed (2026-10-12; it used to fall back to "not required"). Per
   sandboxed turn under the drive lock: workdir `<root>/<space>` (0700),
   space re-ensure (shared mount at the identical path, env allowlist, labels),
   4 h exec token; sessions/locks keyed by execution kind. Roster: `&sandboxed=`
