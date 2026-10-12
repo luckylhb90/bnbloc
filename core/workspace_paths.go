@@ -95,14 +95,10 @@ func MayHoldProtectedPath(relDir string) bool {
 // directory, never the directory itself). Cores enforce it on every write;
 // callers never write anywhere else.
 func WorkspaceFileAllowed(rel string) bool {
-	if rel == "" || strings.Contains(rel, "\\") || strings.HasPrefix(rel, "/") {
+	if clean, ok := CleanRelPath(rel); !ok || clean != rel {
 		return false
 	}
-	clean := path.Clean(rel)
-	if clean != rel || clean == "." || clean == ".." || strings.HasPrefix(clean, "../") {
-		return false
-	}
-	return matchWorkspacePath(BnblocOwnedPaths, strings.ToLower(clean), false)
+	return matchWorkspacePath(BnblocOwnedPaths, strings.ToLower(rel), false)
 }
 
 // ErrWorkspacePathNotAllowed is the refusal of a workspace file write

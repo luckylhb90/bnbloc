@@ -15,11 +15,11 @@ import (
 	"log"
 	"mime"
 	"net/http"
-	"path"
 	"sort"
 	"strings"
 	"unicode/utf8"
 
+	"github.com/luckylhb90/bnbloc/core"
 	"github.com/luckylhb90/bnbloc/internal/ids"
 	"github.com/luckylhb90/bnbloc/internal/obs"
 	"github.com/luckylhb90/bnbloc/internal/realtime"
@@ -141,7 +141,7 @@ func readHandoffPackage(zr *zip.Reader, artifactMaxBytes int64) (*handoffPackage
 	var expanded uint64
 	for _, f := range zr.File {
 		name := f.Name
-		if name == "" || strings.HasPrefix(name, "/") || strings.Contains(name, "\\") || path.Clean(name) != name || strings.HasPrefix(name, "../") || name == ".." {
+		if clean, ok := core.CleanRelPath(name); !ok || clean != name {
 			return nil, badPackage("invalid archive entry name %q", name)
 		}
 		if _, dup := pkg.files[name]; dup {

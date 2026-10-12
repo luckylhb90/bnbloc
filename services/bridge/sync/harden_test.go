@@ -9,35 +9,6 @@ import (
 	"time"
 )
 
-func TestSafeRel(t *testing.T) {
-	cases := []struct {
-		in   string
-		want string
-		ok   bool
-	}{
-		{"a/b.txt", "a/b.txt", true},
-		{"./a/b.txt", "a/b.txt", true},
-		{"a//b.txt", "a/b.txt", true},
-		{"nested/deep/file.go", "nested/deep/file.go", true},
-		{"", "", false},
-		{"..", "", false},
-		{"a/../b", "", false}, // any ".." segment is rejected outright
-		{"a/../../escape", "", false},
-		{"/abs/path", "", false},
-		{"/etc/passwd", "", false},
-		{`..\windows`, "", false},
-		{`a\..\..\escape`, "", false},
-		{`C:\Windows\system32`, "", false},
-		{`\\host\share\x`, "", false},
-	}
-	for _, c := range cases {
-		got, ok := safeRel(c.in)
-		if ok != c.ok || (ok && got != c.want) {
-			t.Errorf("safeRel(%q) = (%q,%v), want (%q,%v)", c.in, got, ok, c.want, c.ok)
-		}
-	}
-}
-
 // TestSyncRejectsTraversalPath proves a peer cannot write outside the mirrored
 // directory: a hand-crafted file frame with a traversal path is dropped, and no
 // file lands above the sync root.

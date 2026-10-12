@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/url"
-	"path"
 	"strings"
 
 	"github.com/luckylhb90/bnbloc/core"
@@ -130,11 +129,10 @@ func cleanDir(dir string) (string, error) {
 	if dir == "" || strings.HasPrefix(dir, "/") {
 		return "", fmt.Errorf("dir must be a directory relative to your workspace, e.g. drafts/my-expert")
 	}
-	clean := path.Clean(dir)
-	if clean != dir || clean == "." || strings.HasPrefix(clean, "../") || clean == ".." {
+	if clean, ok := core.CleanRelPath(dir); !ok || clean != dir {
 		return "", fmt.Errorf("dir %q is not a plain workspace-relative directory", dir)
 	}
-	return clean, nil
+	return dir, nil
 }
 
 // packDir packs every file under dir in the workspace (paths relative to

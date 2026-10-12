@@ -882,7 +882,11 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   sends one raw to check the daemon refuses it too. Every consumer is checked against one table
   (`core/testdata/workspace_paths.json`, `TestBnblocOwnedPathAgreesEverywhere`
   and its sync/packer siblings); `TestWorkspacePathPolicySingleOwner`
-  forbids a local prefix check.
+  forbids a local prefix check. A relative path someone else supplies (a
+  sync peer, an agent's `dir`, a handoff entry, a core file write) is
+  checked only by `core.CleanRelPath` (no `..` segment, not absolute, no
+  drive letter; strict callers compare the result with their input);
+  `TestCleanRelPathSingleOwner`.
 - **Agent profiles are per session.** A profile goes only to a core
   advertising `agentProfile` (`core.Supports`); its
   `core.AgentProfile.BindingSum` (instructions, skill files, the MCP

@@ -13,6 +13,8 @@ import (
 	"path/filepath"
 	"sync"
 	"time"
+
+	corepkg "github.com/luckylhb90/bnbloc/core"
 )
 
 func init() { Register("gosync", func() SyncEngine { return &goSync{} }) }
@@ -101,7 +103,7 @@ func (g *goSync) isAuthority() bool {
 // traversal/absolute paths and ignored paths, returning the cleaned relative
 // path when safe. Incoming frames that fail this are dropped.
 func (g *goSync) acceptPath(rel string) (string, bool) {
-	clean, ok := safeRel(rel)
+	clean, ok := corepkg.CleanRelPath(rel)
 	if !ok {
 		return "", false
 	}
