@@ -2,6 +2,7 @@ package bridge
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"strings"
 	"sync"
@@ -52,7 +53,57 @@ type TurnInfo struct {
 	RequesterUserID string
 	ChannelID       string
 	MessageSeq      int64
+	// Workspace reads the session's workspace through the core's
+	// session-files seam; it reports an error when the core offers none.
+	Workspace SessionWorkspace
 }
+
+// SessionWorkspace reads one driven session's workspace files.
+type SessionWorkspace interface {
+	ListFiles(ctx context.Context) ([]corepkg.SessionFile, error)
+	ReadFile(ctx context.Context, rel string) ([]byte, error)
+}
+
+// sessionWorkspace is a session's workspace as the core exposes it
+// (core.SessionFiles). The session id is read at call time: the first
+// turn starts before its session exists.
+type sessionWorkspace struct {
+	b  *Bridge
+	rs *roomSession
+}
+
+func (w sessionWorkspace) ids() (core, ws, sess string) {
+	w.rs.mu.Lock()
+	defer w.rs.mu.Unlock()
+	return w.rs.core, w.rs.workspaceID, w.rs.sessionID
+}
+
+func (w sessionWorkspace) ListFiles(ctx context.Context) ([]corepkg.SessionFile, error) {
+	coreName, ws, sess := w.ids()
+	files, ep, _, ok := w.b.sessionFiles(ctx, coreName)
+	if !ok {
+		return nil, errNoSessionFiles
+	}
+	if ws == "" || sess == "" {
+		return nil, errors.New("the session has not started yet")
+	}
+	return files.ListSessionFiles(ctx, ep, ws, sess)
+}
+
+func (w sessionWorkspace) ReadFile(ctx context.Context, rel string) ([]byte, error) {
+	coreName, ws, sess := w.ids()
+	files, ep, _, ok := w.b.sessionFiles(ctx, coreName)
+	if !ok {
+		return nil, errNoSessionFiles
+	}
+	if ws == "" || sess == "" {
+		return nil, errors.New("the session has not started yet")
+	}
+	return files.ReadSessionFile(ctx, ep, ws, sess, rel)
+}
+
+// errNoSessionFiles: the session's core does not expose workspace files.
+var errNoSessionFiles = errors.New("the agent's core does not expose its workspace files")
 
 // SessionContribution is what a contributor adds to one session.
 type SessionContribution struct {

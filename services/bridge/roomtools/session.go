@@ -87,6 +87,9 @@ type Job struct {
 	RequesterUserID string
 	ChannelID       string
 	MessageSeq      int64
+	// Workspace reads the session's workspace files (save_component); nil
+	// when the core offers no session files.
+	Workspace Workspace
 }
 
 // maxTrackedDispatches bounds the dispatches a session remembers for
@@ -122,6 +125,13 @@ func (s *Session) Bind(j Job) {
 
 // Scope is the session's agent.
 func (s *Session) Scope() Scope { return s.scope }
+
+// workspace is the bound job's workspace reader (nil = none).
+func (s *Session) workspace() Workspace {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.job.Workspace
+}
 
 func (s *Session) current() Job {
 	s.mu.Lock()

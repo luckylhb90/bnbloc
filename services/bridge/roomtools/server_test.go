@@ -175,7 +175,7 @@ func TestLegacyProtocol(t *testing.T) {
 	for _, tl := range tools {
 		names = append(names, tl.(map[string]any)["name"].(string))
 	}
-	if strings.Join(names, ",") != "list_room_agents,ask_agent,room_status,read_room" {
+	if strings.Join(names, ",") != "list_room_agents,ask_agent,room_status,read_room,save_component,get_component,list_components,publish_component" {
 		t.Fatalf("tools = %v", names)
 	}
 

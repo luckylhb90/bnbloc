@@ -1,6 +1,7 @@
 package bridge
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -32,7 +33,13 @@ func (b *Bridge) EnableRoomTools(shimCommand string) (stop func(), err error) {
 type roomToolsGateway struct{ b *Bridge }
 
 func (g roomToolsGateway) Do(ctx context.Context, method, path string, body any) ([]byte, error) {
-	raw, err := g.b.do(ctx, method, g.b.cfg.GatewayBaseURL+path, g.b.gatewayAuth(ctx), body)
+	var raw []byte
+	var err error
+	if rb, ok := body.(roomtools.RawBody); ok {
+		raw, err = g.b.doRaw(ctx, g.b.http, method, g.b.cfg.GatewayBaseURL+path, g.b.gatewayAuth(ctx), rb.ContentType, bytes.NewReader(rb.Data))
+	} else {
+		raw, err = g.b.do(ctx, method, g.b.cfg.GatewayBaseURL+path, g.b.gatewayAuth(ctx), body)
+	}
 	var ge *gatewayError
 	if errors.As(err, &ge) {
 		return nil, &roomtools.StatusError{Status: ge.Status, Body: ge.Body}
@@ -77,7 +84,7 @@ func (c *roomToolsContributor) ContributeSession(_ context.Context, info Session
 		MCPServers:   []corepkg.MCPServer{server},
 		Instructions: roomtools.Instructions,
 		Turn: func(t TurnInfo) {
-			sess.Bind(roomtools.Job{JobID: t.JobID, RequesterUserID: t.RequesterUserID, ChannelID: t.ChannelID, MessageSeq: t.MessageSeq})
+			sess.Bind(roomtools.Job{JobID: t.JobID, RequesterUserID: t.RequesterUserID, ChannelID: t.ChannelID, MessageSeq: t.MessageSeq, Workspace: t.Workspace})
 		},
 		Release: func() { c.srv.Revoke(sess) },
 	}, nil

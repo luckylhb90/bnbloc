@@ -1557,7 +1557,7 @@ func (b *Bridge) driveClaim(ctx context.Context, job jobRef, room, owner, core, 
 	// send follow-up input for an existing session.
 	if !rs.freshlyCreated {
 		entry, _ := b.coreEntry(core)
-		rs.roomSession.startTurn(TurnInfo{JobID: job.ID, RequesterUserID: job.RequesterUserID, ChannelID: channelID, MessageSeq: job.MessageSeq})
+		rs.roomSession.startTurn(TurnInfo{JobID: job.ID, RequesterUserID: job.RequesterUserID, ChannelID: channelID, MessageSeq: job.MessageSeq, Workspace: sessionWorkspace{b, rs.roomSession}})
 		prompt := b.drivePrompt(ctx, room, owner, core, provider, rs.workspaceID, rs.sessionID, text, rs.written, &rs.roomSession.ctx, false)
 		if err := b.sendInput(ctx, entry, rs.workspaceID, rs.sessionID, prompt, opts); err != nil {
 			b.postDriveFailed(ctx, jobID, room, owner, provider, cleanDriveError(err), channelID)
@@ -1686,14 +1686,18 @@ func (b *Bridge) ensureSession(ctx context.Context, job jobRef, room, owner, cor
 		initialPrompt = job.content.promptPrefix(written) + initialPrompt
 	}
 	rs := &roomSession{owner: owner, provider: provider, core: core, workspaceID: workspaceID, ctx: st, hooks: hooks, profileSum: contentSum}
-	rs.startTurn(TurnInfo{JobID: job.ID, RequesterUserID: job.RequesterUserID, ChannelID: channelID, MessageSeq: job.MessageSeq})
+	rs.startTurn(TurnInfo{JobID: job.ID, RequesterUserID: job.RequesterUserID, ChannelID: channelID, MessageSeq: job.MessageSeq, Workspace: sessionWorkspace{b, rs}})
 	sessionID, err := b.createSession(ctx, entry, workspaceID, target, initialPrompt, opts, profile)
 	if err != nil {
 		rs.release()
 		b.deleteWorkspace(ctx, entry, workspaceID)
 		return nil, fmt.Errorf("create session: %w", err)
 	}
+	// Under mu: the session's workspace reader (a room tool call during
+	// this first turn) reads it concurrently.
+	rs.mu.Lock()
 	rs.sessionID = sessionID
+	rs.mu.Unlock()
 	b.mu.Lock()
 	b.sessions[key] = rs
 	b.mu.Unlock()
