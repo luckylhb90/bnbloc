@@ -63,7 +63,7 @@ web_install_build() {
 web_isolated_build() {
   local tmp
   tmp="$(mktemp -d)"
-  trap 'rm -rf "$tmp"' RETURN
+  trap 'rm -rf "$tmp"; trap - RETURN' RETURN
   mkdir -p "$tmp/apps/desktop"
   cp apps/desktop/package.json "$tmp/apps/desktop/package.json"
   (cd web && tar --exclude=node_modules --exclude='*.tsbuildinfo' -cf - .) | (mkdir -p "$tmp/web" && cd "$tmp/web" && tar -xf -)
