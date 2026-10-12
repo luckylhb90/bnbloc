@@ -250,3 +250,25 @@ func TestLibraryGolden(t *testing.T) {
 		t.Fatalf("failed read renders:\n%s", got)
 	}
 }
+
+// Every .room/ history file is pinned: INDEX.md, recent.md and a chunk,
+// their record lines attributed (Line).
+func TestHistoryFilesGolden(t *testing.T) {
+	files, _ := Materialize(attributedEntries, true, CtxState{})
+	byName := map[string]string{}
+	for _, f := range files {
+		byName[f.Name] = f.Content
+	}
+	golden(t, "recent.md", byName[".room/recent.md"])
+	golden(t, "chunk.md", byName[".room/chunk-0000000010-0000000012.md"])
+	golden(t, "INDEX.md", byName[".room/INDEX.md"])
+}
+
+// The push model's prompts are pinned: a session's first (records, then the
+// message with its attachment) and a follow-up's delta.
+func TestComposeGolden(t *testing.T) {
+	now := Now{From: Sender(attributedEntries[1]), Text: "go", Attachments: []Attachment{{Path: ".room/attachments/att_1.png", Filename: "shot.png", ContentType: "image/png"}}}
+	older := []Entry{{Seq: 1, Speaker: "jack", Text: "earlier plan"}, {Seq: 2, Speaker: "jack/codex", Kind: KindAgent, Text: "drafted it"}}
+	golden(t, "compose-fresh.txt", Compose(append(older, attributedEntries...), now, Options{WindowChars: 120, Summarizer: StructuredSummarizer{}}))
+	golden(t, "compose-delta.txt", ComposeDelta(attributedEntries, now, Options{}))
+}

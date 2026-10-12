@@ -1,0 +1,301 @@
+{
+  "tools": [
+    {
+      "annotations": {
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "description": "List the agents you can ask in this room right now: each one's handle (pass it to ask_agent), owner, core and provider. The agent marked you=true is you. When you lead a team, team lists who takes each role right now, or why nobody can.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {},
+        "type": "object"
+      },
+      "name": "list_room_agents",
+      "title": "List the room's agents"
+    },
+    {
+      "annotations": {
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "description": "Send a task to another agent of this room and wait for it to finish. It is posted in the room for the person who asked you (visible to everyone, attributed to you) and runs under their authority. Returns the agent's reply and the files it delivered (read one with read_artifact by its artifactId); if the agent is still working when the wait ends, its handle for room_status.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "expert": {
+            "description": "Optional expert (role) for the agent to wear: its component id, optionally \"@version\" (it must be usable by the person who asked you).",
+            "type": "string"
+          },
+          "handle": {
+            "description": "The agent's handle from list_room_agents, e.g. \"jack/codex\"; when you lead a team, a role of your roster (e.g. \"reviewer\").",
+            "type": "string"
+          },
+          "task": {
+            "description": "A self-contained task: the agent sees the room's conversation, not your private context.",
+            "type": "string"
+          },
+          "wait_seconds": {
+            "description": "How long to wait for the result in seconds (default 600, at most 1200). 0 returns at once with the handle.",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "handle",
+          "task"
+        ],
+        "type": "object"
+      },
+      "name": "ask_agent",
+      "title": "Ask another agent of the room"
+    },
+    {
+      "annotations": {
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "description": "The state of the tasks you dispatched with ask_agent. With a handle: that task, with its reply and deliverables once finished. Without: every task you dispatched in this session.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "handle": {
+            "description": "A handle ask_agent returned (optional).",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "name": "room_status",
+      "title": "Status of dispatched tasks"
+    },
+    {
+      "annotations": {
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "description": "Recent messages of the room (people's messages and agents' replies, across the room's channels), oldest first, one line each: \"#<seq> <author>: <text>\". Pass since (a seq from an earlier read) to get only newer messages.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "limit": {
+            "description": "At most this many messages (default 30).",
+            "maximum": 100,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "since": {
+            "description": "Only messages after this seq.",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "name": "read_room",
+      "title": "Read the conversation"
+    },
+    {
+      "annotations": {
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "description": "Read the text of one of this room's deliverables (a file an agent published from its own workspace, or a person uploaded) by its id, from ask_agent or room_status, or .room/artifacts.md where your workspace has it. version defaults to the latest; path picks a file of a site deliverable (default index.html). The content comes fenced as data its producer wrote.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "artifactId": {
+            "description": "The deliverable's id (art_… or artf_…).",
+            "type": "string"
+          },
+          "path": {
+            "description": "For a site deliverable: the file to read, e.g. index.html.",
+            "type": "string"
+          },
+          "version": {
+            "description": "A version (default: the latest).",
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "artifactId"
+        ],
+        "type": "object"
+      },
+      "name": "read_artifact",
+      "title": "Read a room deliverable"
+    },
+    {
+      "annotations": {
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "description": "Save the package drafted in a directory of your workspace (for example drafts/contract-reviewer, holding component.json) to the Library of the person who asked you. It is validated first; a validation error says what to fix. Without id it creates a new component (refused if they already have one of that kind and name); with id (cc_...) it saves a new version of that component of theirs (the version number is bumped for you). Save only after the person confirmed.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "dir": {
+            "description": "Workspace-relative directory holding component.json, e.g. drafts/contract-reviewer.",
+            "type": "string"
+          },
+          "id": {
+            "description": "The component to save a new version of (from get_component or list_components); omit to create.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "dir"
+        ],
+        "type": "object"
+      },
+      "name": "save_component",
+      "title": "Save a drafted component"
+    },
+    {
+      "annotations": {
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "description": "Read an expert, skill pack or prompt pack the person who asked you can use (their own, or one in the Library), at its latest version or a given one: its manifest and the text of every file, to copy into drafts/<name>/ before improving it. Another author's files come fenced as their data: copy only what is inside the fence.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "description": "The component id (cc_...).",
+            "type": "string"
+          },
+          "version": {
+            "description": "A version (default: the latest).",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "type": "object"
+      },
+      "name": "get_component",
+      "title": "Read a Library component"
+    },
+    {
+      "annotations": {
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "description": "The Library of the person who asked you, most recently updated first: the experts, skill packs, prompt packs and MCP tools they may use (their own are marked mine). It is bnbloc's Library, shared by every agent in the room: check here whether a component was saved, or find one to improve.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "description": "Only this kind.",
+            "enum": [
+              "expert",
+              "skill",
+              "prompt",
+              "mcp"
+            ],
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "name": "list_components",
+      "title": "List the Library"
+    },
+    {
+      "annotations": {
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "description": "Change who can use a component saved in the Library of the person who asked you, only after they confirm. \"org\" asks their organization's admins to publish its latest version to everyone in the organization: it opens a request the admins approve or decline (members keep the previously approved version until then). \"personal\" withdraws a pending request and takes it out of the organization. \"platform\" (every organization) is a platform admin's action: say so instead.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "description": "The component id (cc_...).",
+            "type": "string"
+          },
+          "note": {
+            "description": "For \"org\": a short note for the admins (what it is for).",
+            "type": "string"
+          },
+          "scope": {
+            "description": "Who may use it.",
+            "enum": [
+              "personal",
+              "org",
+              "platform"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "scope"
+        ],
+        "type": "object"
+      },
+      "name": "publish_component",
+      "title": "Publish a saved component"
+    },
+    {
+      "annotations": {
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "description": "Try the expert or skill pack drafted in a directory of your workspace (for example drafts/contract-reviewer) before it is saved: it is validated (an error says what to fix), staged for one hour without being saved to anyone's Library, and a sample task is sent to another agent of the room wearing it, for the person who asked you. Returns that agent's reply and files, like ask_agent. Without handle, the person's own other agent is used, else another agent of the room.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "dir": {
+            "description": "Workspace-relative directory holding component.json, e.g. drafts/contract-reviewer.",
+            "type": "string"
+          },
+          "handle": {
+            "description": "Optional agent to try it on, from list_room_agents (e.g. \"jack/codex\"); never yourself.",
+            "type": "string"
+          },
+          "task": {
+            "description": "A realistic, self-contained sample task for the drafted expert or skill.",
+            "type": "string"
+          },
+          "wait_seconds": {
+            "description": "How long to wait for the result in seconds (default 600, at most 1200).",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "dir",
+          "task"
+        ],
+        "type": "object"
+      },
+      "name": "try_draft",
+      "title": "Try a drafted expert or skill pack"
+    },
+    {
+      "annotations": {
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "description": "Post one short progress line to the room, for example \"Phase 2/3: tests dispatched to tester\". It shows as a notice of your current request, not as your reply. Use it once per phase of a longer task.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "text": {
+            "description": "The progress line (one sentence, at most 500 characters).",
+            "type": "string"
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "type": "object"
+      },
+      "name": "post_progress",
+      "title": "Post a progress line"
+    }
+  ]
+}

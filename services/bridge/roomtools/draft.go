@@ -23,8 +23,8 @@ func tryDraftTool() Tool {
 		Name:  "try_draft",
 		Title: "Try a drafted expert or skill pack",
 		Description: "Try the expert or skill pack drafted in a directory of your workspace (for example drafts/contract-reviewer) before it is saved: " +
-			"it is validated (a validation error says what to fix), staged for one hour without being saved to anyone's Library, and a sample task " +
-			"is sent to another agent of the room wearing it, on behalf of the person who asked you. Returns that agent's reply and files, like ask_agent. " +
+			"it is validated (an error says what to fix), staged for one hour without being saved to anyone's Library, and a sample task is sent " +
+			"to another agent of the room wearing it, for the person who asked you. Returns that agent's reply and files, like ask_agent. " +
 			"Without handle, the person's own other agent is used, else another agent of the room.",
 		InputSchema: objectSchema(map[string]any{
 			"dir":          map[string]any{"type": "string", "description": "Workspace-relative directory holding component.json, e.g. drafts/contract-reviewer."},

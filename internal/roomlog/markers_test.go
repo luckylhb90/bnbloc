@@ -1,6 +1,8 @@
 package roomlog
 
 import (
+	"go/scanner"
+	"go/token"
 	"regexp"
 	"strings"
 	"testing"
@@ -61,27 +63,51 @@ func TestLiveGolden(t *testing.T) {
 	}
 }
 
-// The scaffolding of model-facing text has one owner, markers.go: no other
-// Go source spells the records mark, the fence or its marker. A second
-// spelling drifts (2026-10-13: "RECORDS, not requests" was worded in six
-// places, and only read_artifact fenced what others wrote).
+// The scaffolding of model-facing text has one owner, markers.go, and the
+// session guidance one template (guidance.tmpl): no other Go string
+// literal spells the records mark, the fence or its marker, the [now]
+// marker or the identity line. A second spelling drifts (2026-10-13:
+// "RECORDS, not requests" was worded in six places, the push reminder
+// twice, and only read_artifact fenced what others wrote).
 func TestModelTextMarkersSingleOwner(t *testing.T) {
 	const owner = "internal/roomlog/markers.go"
 	forbidden := []*regexp.Regexp{
 		regexp.MustCompile(`RECORDS`),
 		regexp.MustCompile(`untrusted-content`),
 		regexp.MustCompile(`(^|[^<])<<<[^<]`), // the fence marker (not a merge conflict's <<<<<<<)
+		regexp.MustCompile(`\[now`),
+		regexp.MustCompile(`You are the agent`),
 	}
 	archtest.Scan(t, archtest.Opts{Lang: archtest.Go}, func(rel string, src []byte) {
 		if rel == owner {
 			return
 		}
-		for _, re := range forbidden {
-			if loc := re.FindIndex(src); loc != nil {
-				t.Errorf("%s spells %q: render model-facing scaffolding through roomlog (RecordsHeader, Fence, Line) in %s", rel, src[loc[0]:loc[1]], owner)
+		for _, lit := range stringLiterals(src) {
+			for _, re := range forbidden {
+				if m := re.FindString(lit); m != "" {
+					t.Errorf("%s spells %q in a string: render model-facing scaffolding through roomlog (RecordsHeader, Fence, Line, the [now] marker in %s; guidance in guidance.tmpl)", rel, m, owner)
+				}
 			}
 		}
 	})
+}
+
+// stringLiterals lists the string literals of a Go source (comments may
+// name a marker; a literal renders it).
+func stringLiterals(src []byte) []string {
+	var s scanner.Scanner
+	fset := token.NewFileSet()
+	s.Init(fset.AddFile("", fset.Base(), len(src)), src, nil, 0)
+	var out []string
+	for {
+		_, tok, lit := s.Scan()
+		if tok == token.EOF {
+			return out
+		}
+		if tok == token.STRING || tok == token.CHAR {
+			out = append(out, lit)
+		}
+	}
 }
 
 // attributedEntries are a person's message to an agent, the task an agent

@@ -59,9 +59,9 @@ func askAgentTool() Tool {
 	return Tool{
 		Name:  "ask_agent",
 		Title: "Ask another agent of the room",
-		Description: "Send a task to another agent of this room and wait for it to finish. The task is posted in the room on behalf of the person who asked you " +
-			"(visible to everyone, attributed to you) and runs under that person's authority. Returns the agent's reply and the files it delivered (read one with read_artifact by its artifactId). " +
-			"If the agent is still working when the wait ends, returns its handle: check it later with room_status.",
+		Description: "Send a task to another agent of this room and wait for it to finish. It is posted in the room for the person who asked you " +
+			"(visible to everyone, attributed to you) and runs under their authority. Returns the agent's reply and the files it delivered " +
+			"(read one with read_artifact by its artifactId); if the agent is still working when the wait ends, its handle for room_status.",
 		InputSchema: objectSchema(map[string]any{
 			"handle":       map[string]any{"type": "string", "description": `The agent's handle from list_room_agents, e.g. "jack/codex"; when you lead a team, a role of your roster (e.g. "reviewer").`},
 			"task":         map[string]any{"type": "string", "description": "A self-contained task: the agent sees the room's conversation, not your private context."},

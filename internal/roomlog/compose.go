@@ -60,20 +60,19 @@ func writeAttachmentsBlock(b *strings.Builder, atts []Attachment) {
 	if b.Len() > 0 {
 		b.WriteString("\n")
 	}
-	fmt.Fprintf(b, "[attachments on this message — OPEN THESE]\nThe current message includes %d attachment(s), saved in this workspace. They are part of the request: open/read each one to answer.\n", len(atts))
+	b.WriteString("[attachments on this message — OPEN THESE: part of the request, saved in this workspace, not records]\n")
 	for _, a := range atts {
 		name := strings.TrimSpace(a.Filename)
 		ct := strings.TrimSpace(a.ContentType)
 		switch {
 		case name != "" && ct != "":
-			fmt.Fprintf(b, "- %s  (original name: %q, %s)\n", a.Path, name, ct)
+			fmt.Fprintf(b, "- %s (original name %q, %s)\n", a.Path, name, ct)
 		case name != "":
-			fmt.Fprintf(b, "- %s  (original name: %q)\n", a.Path, name)
+			fmt.Fprintf(b, "- %s (original name %q)\n", a.Path, name)
 		default:
 			fmt.Fprintf(b, "- %s\n", a.Path)
 		}
 	}
-	b.WriteString("These are NOT the background record files; they are the files this message is about.\n")
 }
 
 // Compose renders the layered room context plus the current message into a

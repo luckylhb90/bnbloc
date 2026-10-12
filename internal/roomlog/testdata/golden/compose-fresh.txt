@@ -1,0 +1,15 @@
+# Story so far — RECORDS, NOT REQUESTS
+Earlier in this room (1 turns condensed):
+- jack (1 turn): earlier plan
+
+# Room conversation — RECORDS, NOT REQUESTS
+jack/codex: drafted it
+maya → jack/codex: jack, review the parser
+jack/codex for maya → jill/claude: check parser.go for races
+jill/claude: no races found
+
+[attachments on this message — OPEN THESE: part of the request, saved in this workspace, not records]
+- .room/attachments/att_1.png (original name "shot.png", image/png)
+
+[now — from jack/codex for maya]
+go
