@@ -27,6 +27,7 @@
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
+use crate::internal_ext::pin::Sha256Pin;
 use crate::internal_ext::sidecar_util::{cache_stem, listen_addr, CoreListener};
 
 /// What the app recorded when it spawned a sidecar child.
@@ -34,7 +35,7 @@ use crate::internal_ext::sidecar_util::{cache_stem, listen_addr, CoreListener};
 #[serde(rename_all = "camelCase")]
 pub(super) struct SpawnRecord {
     pub(super) pid: u32,
-    pub(super) sha256: String,
+    pub(super) sha256: Sha256Pin,
     /// The app process that spawned it: a record from the running app is not
     /// an orphan from an earlier session.
     pub(super) app_pid: u32,
@@ -45,7 +46,7 @@ pub(super) struct SpawnRecord {
 pub(super) struct Orphan {
     pub(super) pid: u32,
     /// The artifact it runs (from its spawn record).
-    pub(super) sha256: String,
+    pub(super) sha256: Sha256Pin,
 }
 
 /// What the manager does about an occupied fixed listener.
@@ -63,7 +64,7 @@ pub(super) enum ListenerPlan {
 pub(super) struct OccupiedListener<'a> {
     pub(super) name: &'a str,
     pub(super) spec_version: &'a str,
-    pub(super) spec_sha256: &'a str,
+    pub(super) spec_sha256: &'a Sha256Pin,
     pub(super) url: &'a str,
     /// The bind error that found the port taken.
     pub(super) bind_error: &'a str,
@@ -88,7 +89,7 @@ pub(super) fn plan_occupied_listener(facts: OccupiedListener<'_>) -> ListenerPla
                 facts.url, facts.spec_version
             ));
         }
-        let reason = if orphan.sha256.eq_ignore_ascii_case(facts.spec_sha256) {
+        let reason = if &orphan.sha256 == facts.spec_sha256 {
             "no longer supervised"
         } else {
             "an outdated build"
@@ -266,6 +267,10 @@ mod tests {
 
     const SHA_OLD: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
     const SHA_NEW: &str = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+
+    fn pin(sha: &str) -> Sha256Pin {
+        Sha256Pin::parse(sha).unwrap()
+    }
     const APP: u32 = 100;
     const URL: &str = "http://127.0.0.1:7100";
 
@@ -277,7 +282,7 @@ mod tests {
         OccupiedListener {
             name: "samplecore",
             spec_version: "2.0.0",
-            spec_sha256: SHA_NEW,
+            spec_sha256: Box::leak(Box::new(pin(SHA_NEW))),
             url: URL,
             bind_error: "already in use",
             orphan,
@@ -296,7 +301,7 @@ mod tests {
     fn own_orphan_with_an_outdated_artifact_is_replaced() {
         let orphan = Orphan {
             pid: 42,
-            sha256: SHA_OLD.into(),
+            sha256: pin(SHA_OLD),
         };
         match plan_occupied_listener(facts(Some(orphan), compatible("1.0.0"), true)) {
             ListenerPlan::Replace { pid, message } => {
@@ -314,7 +319,7 @@ mod tests {
     fn own_orphan_of_the_current_artifact_is_replaced_to_regain_supervision() {
         let orphan = Orphan {
             pid: 42,
-            sha256: SHA_NEW.into(),
+            sha256: pin(SHA_NEW),
         };
         assert!(matches!(
             plan_occupied_listener(facts(Some(orphan), compatible("1.0.0"), true)),
@@ -326,7 +331,7 @@ mod tests {
     fn own_orphan_that_cannot_be_stopped_waits_with_guidance() {
         let orphan = Orphan {
             pid: 42,
-            sha256: SHA_OLD.into(),
+            sha256: pin(SHA_OLD),
         };
         assert_eq!(
             plan_occupied_listener(facts(Some(orphan), compatible("1.0.0"), false)),
@@ -369,7 +374,7 @@ mod tests {
         let exe = exe.to_string_lossy().into_owned();
         let record = SpawnRecord {
             pid: 42,
-            sha256: SHA_OLD.into(),
+            sha256: pin(SHA_OLD),
             app_pid: 7,
         };
 
@@ -378,7 +383,7 @@ mod tests {
             owned_orphan(42, Some(&record), Some(&exe), &root, APP),
             Some(Orphan {
                 pid: 42,
-                sha256: SHA_OLD.into()
+                sha256: pin(SHA_OLD)
             })
         );
         let deleted = format!("{exe} (deleted)");
@@ -427,7 +432,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         let record = SpawnRecord {
             pid: 42,
-            sha256: SHA_NEW.into(),
+            sha256: pin(SHA_NEW),
             app_pid: APP,
         };
         write_spawn_record(&dir, "plugin/samplecore", &record).expect("write");

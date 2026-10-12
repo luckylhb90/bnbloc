@@ -22,12 +22,11 @@ use std::path::{Path, PathBuf};
 
 use sha2::{Digest, Sha256};
 
+use crate::internal_ext::pin::Sha256Pin;
 use crate::internal_ext::sidecar_cache::{fetch_verified, FetchProgress};
 use crate::internal_ext::sidecar_fetch::FetchError;
 use crate::internal_ext::sidecar_model::{GatewayAccess, SidecarSpec};
-use crate::internal_ext::sidecar_util::{
-    binary_ready, cache_stem, exe_suffix, hex_lower, set_executable,
-};
+use crate::internal_ext::sidecar_util::{cache_stem, exe_suffix, hex_lower, set_executable};
 
 /// The declared sidecar file that is the command router the cores use
 /// (`BNBLOC_SANDBOX_VMEXEC`). A contract name (docs/prd/2026-10-09-agent-vm-
@@ -40,7 +39,7 @@ pub(super) struct BundleEntry {
     /// The file name inside the bundle directory.
     pub(super) rel: String,
     pub(super) url: String,
-    pub(super) sha256: String,
+    pub(super) sha256: Sha256Pin,
     pub(super) executable: bool,
 }
 
@@ -65,28 +64,20 @@ impl BundlePlan {
 }
 
 /// The bundle plan of sandbox `spec` under `base` (`<app cache>/sandbox`).
+/// File names are package names, checked when the catalog was decoded
+/// (sidecar_model::valid_package_name).
 pub(super) fn bundle_plan(base: &Path, spec: &SidecarSpec) -> Result<BundlePlan, String> {
+    let artifact = spec
+        .artifact
+        .as_ref()
+        .ok_or_else(|| format!("{} has no sidecar artifact", spec.name))?;
     let mut entries = vec![BundleEntry {
         rel: format!("{}{}", spec.name, exe_suffix()),
-        url: spec.url.clone(),
-        sha256: spec.sha256.to_ascii_lowercase(),
+        url: artifact.url.clone(),
+        sha256: artifact.sha256.clone(),
         executable: true,
     }];
     for file in &spec.sandbox.files {
-        // pkgmeta restricts names to [a-z0-9][a-z0-9._-]*; refuse anything
-        // else rather than trusting a catalog entry with a path.
-        if file.name.is_empty()
-            || file.name.starts_with('.')
-            || !file
-                .name
-                .chars()
-                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || "._-".contains(c))
-        {
-            return Err(format!(
-                "sidecar file name {:?} is not a plain file name",
-                file.name
-            ));
-        }
         if entries.iter().any(|e| e.rel == file.name) {
             return Err(format!(
                 "sidecar file {:?} collides with another file of {}",
@@ -96,7 +87,7 @@ pub(super) fn bundle_plan(base: &Path, spec: &SidecarSpec) -> Result<BundlePlan,
         entries.push(BundleEntry {
             rel: file.name.clone(),
             url: file.url.clone(),
-            sha256: file.sha256.to_ascii_lowercase(),
+            sha256: file.sha256.clone(),
             executable: file.executable,
         });
     }
@@ -129,7 +120,7 @@ pub(super) fn bundle_plan(base: &Path, spec: &SidecarSpec) -> Result<BundlePlan,
 /// Whether every file of the bundle is in place and hashes to its pin.
 pub(super) async fn bundle_ready(plan: &BundlePlan) -> bool {
     for entry in &plan.entries {
-        if !binary_ready(&plan.dir.join(&entry.rel), &entry.sha256).await {
+        if !entry.sha256.file_matches(&plan.dir.join(&entry.rel)).await {
             return false;
         }
     }
@@ -154,7 +145,7 @@ pub(super) async fn prepare_bundle(
         .map_err(|e| FetchError::Retry(format!("create sandbox bundle dir: {e}")))?;
     for entry in &plan.entries {
         let dest = plan.staging.join(&entry.rel);
-        if !binary_ready(&dest, &entry.sha256).await {
+        if !entry.sha256.file_matches(&dest).await {
             fetch_verified(
                 client,
                 gateway,
@@ -256,11 +247,13 @@ pub(super) fn vmexec_path(spec: &SidecarSpec, exe: &Path) -> Option<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::internal_ext::sidecar_model::{ComponentKind, SandboxLaunch, SidecarFileSpec};
+    use crate::internal_ext::sidecar_model::{
+        ComponentArtifact, ComponentKind, SandboxLaunch, SidecarFileSpec,
+    };
     use crate::internal_ext::sidecar_orphan::SpawnRecord;
 
-    fn sha(bytes: &[u8]) -> String {
-        hex_lower(&Sha256::digest(bytes))
+    fn sha(bytes: &[u8]) -> Sha256Pin {
+        Sha256Pin::of(bytes)
     }
 
     fn spec(base_url: &str, files: &[(&str, &[u8], bool)], main: &[u8]) -> SidecarSpec {
@@ -268,14 +261,15 @@ mod tests {
             kind: ComponentKind::Sandbox,
             name: "vmrt".into(),
             version: "0.1.0".into(),
-            sha256: sha(main),
-            url: format!("{base_url}/v1/artifacts/main"),
+            artifact: Some(ComponentArtifact {
+                url: format!("{base_url}/v1/artifacts/main"),
+                sha256: sha(main),
+            }),
             manifest: None,
             local_url: "http://127.0.0.1:7311".into(),
             listen_env: "VMRT_LISTEN".into(),
             supervised_env: "VMRT_SUPERVISED".into(),
             args: Vec::new(),
-            binary: true,
             plugin: Default::default(),
             sandbox: SandboxLaunch {
                 token_env: "VMRT_TOKEN".into(),
@@ -490,7 +484,7 @@ mod tests {
     async fn prepare_bundle_refuses_artifacts_off_the_gateway_origin() {
         let main = b"sidecar".to_vec();
         let mut spec = spec("http://127.0.0.1:9", &[], &main);
-        spec.url = "https://elsewhere.example/v1/artifacts/main".into();
+        spec.artifact.as_mut().unwrap().url = "https://elsewhere.example/v1/artifacts/main".into();
         let base = temp_base("origin");
         let plan = bundle_plan(&base, &spec).expect("plan");
         let gateway = GatewayAccess {
@@ -505,10 +499,7 @@ mod tests {
     }
 
     #[test]
-    fn bundle_plan_refuses_paths_and_collisions() {
-        let mut bad = spec("http://gw", &[("vmm", b"x", true)], b"y");
-        bad.sandbox.files[0].name = "../vmm".into();
-        assert!(bundle_plan(Path::new("/tmp/x"), &bad).is_err());
+    fn bundle_plan_refuses_collisions() {
         let mut clash = spec("http://gw", &[("vmm", b"x", true)], b"y");
         clash.sandbox.files[0].name = format!("vmrt{}", exe_suffix());
         assert!(bundle_plan(Path::new("/tmp/x"), &clash).is_err());
@@ -556,7 +547,7 @@ mod tests {
         let exe = exe.to_string_lossy().into_owned();
         let record = SpawnRecord {
             pid: 4242,
-            sha256: "a".repeat(64),
+            sha256: sha(b"a"),
             app_pid: 1,
         };
         assert_eq!(

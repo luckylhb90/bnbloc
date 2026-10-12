@@ -10,6 +10,7 @@ mod sandbox_live_tests;
 
 pub(super) mod mcp_tools;
 pub(super) mod member_dir;
+pub(super) mod pin;
 pub(super) mod plugin_events;
 pub(super) mod plugin_host;
 pub(super) mod plugin_settings;

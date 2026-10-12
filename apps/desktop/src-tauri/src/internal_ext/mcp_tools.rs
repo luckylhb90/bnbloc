@@ -30,13 +30,14 @@ use std::sync::Arc;
 
 use parking_lot::Mutex;
 
+use crate::internal_ext::pin::Sha256Pin;
 use crate::internal_ext::plugin_settings::{
     load, merge, missing_required, save, settings_path, views, LocalSettingView, Values,
 };
 use crate::internal_ext::sidecar_cache::ensure_verified;
 use crate::internal_ext::sidecar_fetch::FetchError;
 use crate::internal_ext::sidecar_model::{
-    ComponentKind, ComponentsResponse, LocalSettingField, McpToolEntry,
+    ComponentArtifact, ComponentKind, ComponentsResponse, LocalSettingField, McpToolEntry,
 };
 use crate::internal_ext::sidecar_status::component_id;
 use crate::internal_ext::sidecar_util::{cache_file_name, current_platform};
@@ -64,8 +65,8 @@ pub(super) struct McpTool {
     /// The member-credential schema (empty unless credentials are "member").
     pub(super) fields: Vec<LocalSettingField>,
     pub(super) tools: Vec<McpToolEntry>,
-    /// A stdio tool's binary for this platform: (url, sha256).
-    pub(super) binary: Option<(String, String)>,
+    /// A stdio tool's binary for this platform.
+    pub(super) binary: Option<ComponentArtifact>,
     /// An http tool each member signs in to (auth scheme "oauth").
     pub(super) oauth: Option<OAuthSpec>,
 }
@@ -159,7 +160,7 @@ pub(super) fn installed_mcp_tools(catalog: &ComponentsResponse, platform: &str) 
             let binary = (c.runtime.as_deref() == Some("stdio"))
                 .then(|| c.artifacts.as_ref()?.get(platform))
                 .flatten()
-                .map(|a| (a.url.clone(), a.sha256.to_ascii_lowercase()));
+                .cloned();
             let fields = if mcp.credentials == "member" {
                 mcp.env
                     .iter()
@@ -207,7 +208,7 @@ pub(super) fn installed_mcp_tools(catalog: &ComponentsResponse, platform: &str) 
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub(super) struct IndexEntry {
     pub(super) name: String,
-    pub(super) sha256: String,
+    pub(super) sha256: Sha256Pin,
     pub(super) path: String,
 }
 
@@ -217,11 +218,11 @@ struct Index {
 }
 
 /// The cache file of a tool's binary in the tools dir: the sidecar cache
-/// naming (`mcp-<name>-<sha256>[.exe]`).
-pub(super) fn tool_file(dir: &Path, name: &str, sha256: &str) -> PathBuf {
+/// naming (`mcp@<name>-<sha256>[.exe]`).
+pub(super) fn tool_file(dir: &Path, name: &str, sha256: &Sha256Pin) -> PathBuf {
     dir.join(cache_file_name(
         &component_id(ComponentKind::Mcp, name),
-        sha256,
+        sha256.as_str(),
     ))
 }
 
@@ -301,7 +302,7 @@ impl Adapter {
             if tool.transport != "stdio" {
                 continue;
             }
-            let Some((url, sha)) = &tool.binary else {
+            let Some(ComponentArtifact { url, sha256: sha }) = &tool.binary else {
                 self.set_mcp_local(
                     &tool.name,
                     "unavailable",

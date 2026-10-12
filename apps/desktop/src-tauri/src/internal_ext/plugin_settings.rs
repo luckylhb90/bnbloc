@@ -162,18 +162,13 @@ impl Adapter {
     }
 }
 
-/// `dir/<plugin>.json`, refusing a name that is not a package name (never a
-/// path: no separators, no leading dot).
-pub(super) fn settings_path(dir: &Path, plugin: &str) -> Result<PathBuf, String> {
-    let valid = !plugin.is_empty()
-        && !plugin.starts_with('.')
-        && plugin
-            .chars()
-            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, '.' | '_' | '-'));
-    if !valid {
-        return Err(format!("invalid plugin name {plugin:?}"));
+/// `dir/<name>.json`, refusing a name that is not a package name (the one
+/// rule, sidecar_model::valid_package_name; never a path).
+pub(super) fn settings_path(dir: &Path, name: &str) -> Result<PathBuf, String> {
+    if !crate::internal_ext::sidecar_model::valid_package_name(name) {
+        return Err(format!("invalid component name {name:?}"));
     }
-    Ok(dir.join(format!("{plugin}.json")))
+    Ok(dir.join(format!("{name}.json")))
 }
 
 /// The component files stored in `dir`: `(name, path)` of every

@@ -11,10 +11,6 @@
 
 use std::collections::HashMap;
 
-use sha2::{Digest, Sha256};
-
-use crate::internal_ext::sidecar_util::hex_lower;
-
 /// Upper bound on the summed file bytes of one bundle.
 pub(crate) const MAX_BUNDLE_BYTES: usize = 16 * 1024 * 1024;
 /// Upper bound on regular files in one bundle.
@@ -57,16 +53,6 @@ pub(crate) fn valid_bundle_path(path: &str) -> bool {
     !path.is_empty() && path.len() <= MAX_PATH_LEN && path.split('/').all(valid_segment)
 }
 
-/// A package name (`pkgmeta` packageNameRE): `^[a-z0-9][a-z0-9._-]*$`.
-pub(crate) fn valid_package_name(name: &str) -> bool {
-    let mut bytes = name.bytes();
-    matches!(bytes.next(), Some(b) if b.is_ascii_lowercase() || b.is_ascii_digit())
-        && name.len() <= 128
-        && bytes.all(|b| {
-            b.is_ascii_lowercase() || b.is_ascii_digit() || matches!(b, b'.' | b'_' | b'-')
-        })
-}
-
 /// A package version (`pkgmeta` semverRE):
 /// `^[0-9]+\.[0-9]+\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?$`.
 pub(crate) fn valid_package_version(version: &str) -> bool {
@@ -90,16 +76,6 @@ pub(crate) fn valid_package_version(version: &str) -> bool {
                         .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'-'))
             }
         }
-}
-
-/// Refuses bytes whose sha256 is not the catalog's pin.
-pub(crate) fn verify_sha256(bytes: &[u8], expected: &str) -> Result<(), String> {
-    let got = hex_lower(&Sha256::digest(bytes));
-    if got.eq_ignore_ascii_case(expected.trim()) {
-        Ok(())
-    } else {
-        Err(format!("sha256 mismatch: got {got}, want {expected}"))
-    }
 }
 
 /// NUL-terminated ASCII field (name / prefix / magic).

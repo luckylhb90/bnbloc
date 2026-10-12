@@ -161,18 +161,20 @@ fn enforces_the_file_count_and_size_caps() {
 
 #[test]
 fn sha256_pin_must_match() {
+    use crate::internal_ext::pin::Sha256Pin;
     let raw = tar_files(&[("index.html", b"hi")]);
-    let pin = crate::internal_ext::sidecar_util::hex_lower(&Sha256::digest(&raw));
-    assert!(verify_sha256(&raw, &pin).is_ok());
-    assert!(verify_sha256(&raw, &pin.to_ascii_uppercase()).is_ok());
+    let pin = Sha256Pin::of(&raw);
+    assert!(pin.check(&raw).is_ok());
+    let upper = Sha256Pin::parse(&pin.as_str().to_ascii_uppercase()).unwrap();
+    assert!(upper.check(&raw).is_ok());
     let mut tampered = raw.clone();
     tampered[600] ^= 1;
-    assert!(verify_sha256(&tampered, &pin).is_err());
-    assert!(verify_sha256(&raw, "").is_err());
+    assert!(pin.check(&tampered).is_err());
 }
 
 #[test]
 fn package_name_version_and_path_rules() {
+    use crate::internal_ext::sidecar_model::valid_package_name;
     assert!(valid_package_name("sprite-sheet") && valid_package_name("a.b_c-1"));
     for bad in ["", "Sprite", "-x", ".x", "a/b", "a%2f"] {
         assert!(!valid_package_name(bad), "{bad}");

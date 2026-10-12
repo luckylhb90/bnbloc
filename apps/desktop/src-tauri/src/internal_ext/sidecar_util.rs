@@ -1,4 +1,3 @@
-use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -23,40 +22,19 @@ fn human_bytes(n: u64) -> String {
     }
 }
 
-/// Whether the cached binary at `path` exists and hashes to `sha256`. The
-/// file is hashed with streaming reads on a blocking thread, never on the
-/// async runtime.
-pub(super) async fn binary_ready(path: &Path, sha256: &str) -> bool {
-    let path = path.to_path_buf();
-    let want = sha256.to_string();
-    tauri::async_runtime::spawn_blocking(move || file_sha256(&path).is_ok_and(|got| got == want))
-        .await
-        .unwrap_or(false)
-}
-
-fn file_sha256(path: &Path) -> std::io::Result<String> {
-    use sha2::{Digest, Sha256};
-    let mut file = std::fs::File::open(path)?;
-    let mut hasher = Sha256::new();
-    let mut buf = vec![0_u8; 64 * 1024];
-    loop {
-        let n = file.read(&mut buf)?;
-        if n == 0 {
-            break;
-        }
-        hasher.update(&buf[..n]);
-    }
-    Ok(hex_lower(&hasher.finalize()))
-}
-
 /// The cache file name for component `id` at artifact `sha256`:
-/// `<id with / as ->-<sha256>[.exe]`.
+/// `<cache stem>-<sha256>[.exe]`.
 pub(super) fn cache_file_name(id: &str, sha256: &str) -> String {
     format!("{}-{sha256}{}", cache_stem(id), exe_suffix())
 }
 
+/// The file-name stem of component `id` (binary cache, spawn records,
+/// sandbox dirs): the id with its kind separator `/` written as `@`. A
+/// package name never contains `@` (sidecar_model::valid_package_name), so
+/// two components never share a stem: core `plugin-foo` is `plugin-foo`,
+/// plugin `foo` is `plugin@foo`.
 pub(super) fn cache_stem(id: &str) -> String {
-    id.replace('/', "-")
+    id.replace('/', "@")
 }
 
 /// The owner stem and pinned sha256 of a cache file name
@@ -451,15 +429,36 @@ mod tests {
         );
     }
 
-    #[tokio::test]
-    async fn binary_ready_hashes_the_file_contents() {
-        let path = std::env::temp_dir().join(format!("bnbloc-hash-test-{}", std::process::id()));
-        std::fs::write(&path, b"abc").expect("write");
-        let abc = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";
-        assert!(binary_ready(&path, abc).await);
-        assert!(!binary_ready(&path, SHA_A).await);
-        std::fs::remove_file(&path).expect("cleanup");
-        assert!(!binary_ready(&path, abc).await);
+    /// No two components share a cache stem, whatever their kinds and
+    /// names: one never deletes the other's binary, spawn record or dirs.
+    #[test]
+    fn cache_stem_is_injective() {
+        use crate::internal_ext::sidecar_model::ComponentKind;
+        use crate::internal_ext::sidecar_status::component_id;
+        let kinds = [
+            ComponentKind::Core,
+            ComponentKind::Plugin,
+            ComponentKind::Sandbox,
+            ComponentKind::Previewer,
+            ComponentKind::Mcp,
+        ];
+        let names = [
+            "foo",
+            "plugin-foo",
+            "sandbox-foo",
+            "mcp-foo",
+            "previewer-foo",
+            "plugin.foo",
+        ];
+        let mut seen = std::collections::HashMap::new();
+        for kind in kinds {
+            for name in names {
+                let stem = cache_stem(&component_id(kind, name));
+                if let Some(other) = seen.insert(stem.clone(), (kind, name)) {
+                    panic!("{stem} names both {other:?} and {:?}", (kind, name));
+                }
+            }
+        }
     }
 
     #[test]
@@ -563,7 +562,7 @@ mod tests {
         );
         assert_eq!(
             parse_cache_file(&cache_file_name("plugin/foo", SHA_B)),
-            Some(("plugin-foo", SHA_B.to_string()))
+            Some(("plugin@foo", SHA_B.to_string()))
         );
         let part = format!(".{}.0123456789abcdef.part", cache_file_name("foo", SHA_A));
         assert_eq!(parse_cache_file(&part), Some(("foo", SHA_A.to_string())));

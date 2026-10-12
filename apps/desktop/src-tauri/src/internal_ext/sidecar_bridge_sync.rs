@@ -108,7 +108,7 @@ fn bridge_core_set(sidecars: &HashMap<String, ManagedSidecar>) -> HashMap<String
             if spec.kind != ComponentKind::Core {
                 return None;
             }
-            if !spec.binary {
+            if spec.artifact.is_none() {
                 let content = spec.manifest.as_ref().map(manifest_fingerprint);
                 return Some((name.clone(), content.unwrap_or_default()));
             }
@@ -129,14 +129,12 @@ mod tests {
             kind: ComponentKind::Core,
             name: name.to_string(),
             version: "1.0.0".to_string(),
-            sha256: String::new(),
-            url: String::new(),
+            artifact: None,
             manifest: Some(manifest),
             local_url: String::new(),
             listen_env: String::new(),
             supervised_env: String::new(),
             args: Vec::new(),
-            binary: false,
             plugin: Default::default(),
             sandbox: Default::default(),
         };
@@ -186,7 +184,10 @@ mod tests {
         }
         let mut idle_binary = manifest_core("samplecore", serde_json::json!({}));
         if let Some(spec) = idle_binary.spec.as_mut() {
-            spec.binary = true;
+            spec.artifact = Some(crate::internal_ext::sidecar_model::ComponentArtifact {
+                url: "/v1/artifacts/x".into(),
+                sha256: crate::internal_ext::pin::Sha256Pin::of(b"x"),
+            });
             spec.manifest = None;
         }
         idle_binary.runtime_url = Some("http://127.0.0.1:7190".to_string());

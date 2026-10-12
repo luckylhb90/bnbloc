@@ -24,10 +24,9 @@ use std::borrow::Cow;
 use tauri::http::{header, Method, Request, Response, StatusCode};
 use tauri::{AppHandle, Manager, UriSchemeResponder};
 
-use crate::internal_ext::previewer_bundle::{
-    valid_bundle_path, valid_package_name, valid_package_version, Bundle,
-};
+use crate::internal_ext::previewer_bundle::{valid_bundle_path, valid_package_version, Bundle};
 use crate::internal_ext::previewer_cache::PreviewerError;
+use crate::internal_ext::sidecar_model::valid_package_name;
 use crate::internal_ext::Adapter;
 
 /// Scheme name; the web side (web/src/lib/previewerFrame.ts) resolves it via

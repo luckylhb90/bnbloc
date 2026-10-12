@@ -1,6 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::child_process::Child;
+use crate::internal_ext::pin::Sha256Pin;
 
 pub(super) struct Inner {
     pub(super) desired_up: bool,
@@ -73,7 +74,7 @@ impl AdapterStatus {
     }
 
     pub(super) fn ready(spec: &SidecarSpec) -> Self {
-        let what = if spec.binary {
+        let what = if spec.artifact.is_some() {
             "sidecar resolved"
         } else {
             "manifest installed"
@@ -100,8 +101,9 @@ pub(super) struct SidecarSpec {
     pub(super) kind: ComponentKind,
     pub(super) name: String,
     pub(super) version: String,
-    pub(super) sha256: String,
-    pub(super) url: String,
+    /// This platform's binary; None for a manifest core: no binary to
+    /// download or supervise, the manifest alone is the installable content.
+    pub(super) artifact: Option<ComponentArtifact>,
     pub(super) manifest: Option<serde_json::Value>,
     pub(super) local_url: String,
     pub(super) listen_env: String,
@@ -109,9 +111,6 @@ pub(super) struct SidecarSpec {
     /// supervised and exits when its desktop-owned stdin closes.
     pub(super) supervised_env: String,
     pub(super) args: Vec<String>,
-    /// false for a manifest core: no binary to download or supervise — the
-    /// manifest alone is the installable content.
-    pub(super) binary: bool,
     /// Plugin launch metadata (empty for cores).
     pub(super) plugin: PluginLaunch,
     /// Sandbox launch metadata (empty for cores and plugins).
@@ -139,7 +138,7 @@ pub(super) struct SidecarFileSpec {
     pub(super) env: String,
     pub(super) executable: bool,
     pub(super) url: String,
-    pub(super) sha256: String,
+    pub(super) sha256: Sha256Pin,
 }
 
 /// A sandbox package's machine profile (pkgmeta.Guest).
@@ -180,6 +179,11 @@ pub struct LocalSettingField {
 impl SidecarSpec {
     pub(super) fn id(&self) -> String {
         super::sidecar_status::component_id(self.kind, &self.name)
+    }
+
+    /// The pinned sha256 of this platform's binary (None: a manifest core).
+    pub(super) fn pin(&self) -> Option<&Sha256Pin> {
+        self.artifact.as_ref().map(|a| &a.sha256)
     }
 }
 
@@ -235,6 +239,19 @@ impl<'de> serde::Deserialize<'de> for ComponentsResponse {
     }
 }
 
+/// A package name (`pkgmeta` packageNameRE, `^[a-z0-9][a-z0-9._-]*$`, at
+/// most 128 bytes): the one rule for every name the desktop turns into a
+/// path (a component's files, settings and data dirs, a sandbox bundle's
+/// files) or a scheme route. Catalog entries are checked when decoded.
+pub(crate) fn valid_package_name(name: &str) -> bool {
+    let mut bytes = name.bytes();
+    matches!(bytes.next(), Some(b) if b.is_ascii_lowercase() || b.is_ascii_digit())
+        && name.len() <= 128
+        && bytes.all(|b| {
+            b.is_ascii_lowercase() || b.is_ascii_digit() || matches!(b, b'.' | b'_' | b'-')
+        })
+}
+
 fn decode_entry(raw: serde_json::Value) -> Option<ComponentEntry> {
     let label = format!(
         "{} {}",
@@ -248,7 +265,15 @@ fn decode_entry(raw: serde_json::Value) -> Option<ComponentEntry> {
             );
             None
         }
-        Ok(entry) => Some(entry),
+        Ok(entry) => match entry.invalid_name() {
+            Some(name) => {
+                eprintln!(
+                    "[sidecar-manager] skipping catalog entry {label}: {name:?} is not a package name"
+                );
+                None
+            }
+            None => Some(entry),
+        },
         Err(e) => {
             eprintln!("[sidecar-manager] skipping unreadable catalog entry {label}: {e}");
             None
@@ -290,7 +315,7 @@ pub(super) struct ComponentEntry {
     pub(super) local_settings: Option<Vec<LocalSettingField>>,
     #[serde(default)]
     pub(super) guest: Option<GuestProfile>,
-    /// Present for an installed previewer: its verified bundle pin.
+    /// Present for an installed previewer: its bundle pin.
     #[serde(default)]
     pub(super) previewer: Option<PreviewerEntry>,
     /// Present for an installed MCP tool: its tools, env and credentials.
@@ -381,7 +406,7 @@ pub(super) struct PreviewerEntry {
     #[serde(default)]
     pub(super) bundle_url: String,
     #[serde(default)]
-    pub(super) bundle_sha256: String,
+    pub(super) bundle_sha256: Option<Sha256Pin>,
 }
 
 #[derive(Clone, Default, serde::Deserialize)]
@@ -390,10 +415,12 @@ pub(super) struct ComponentPermissions {
     pub(super) host: Option<Vec<String>>,
 }
 
-#[derive(Clone, serde::Deserialize)]
+/// One artifact of a catalog entry: its gateway URL and sha256 pin (a
+/// malformed pin drops the entry when the catalog is decoded).
+#[derive(Clone, Debug, PartialEq, Eq, serde::Deserialize)]
 pub(super) struct ComponentArtifact {
     pub(super) url: String,
-    pub(super) sha256: String,
+    pub(super) sha256: Sha256Pin,
 }
 
 /// The catalog entries this desktop runs or keeps (installed, rollout not
@@ -459,6 +486,19 @@ pub(super) fn resolve_component_specs(
 impl ComponentEntry {
     fn id(&self) -> String {
         super::sidecar_status::component_id(self.kind, &self.name)
+    }
+
+    /// The first name of this entry that is not a package name (its own, a
+    /// declared sidecar file's).
+    fn invalid_name(&self) -> Option<&str> {
+        std::iter::once(self.name.as_str())
+            .chain(
+                self.sidecar
+                    .iter()
+                    .flat_map(|s| s.files.iter().flatten())
+                    .map(|f| f.name.as_str()),
+            )
+            .find(|name| !valid_package_name(name))
     }
 
     /// Plugin launch metadata from the catalog entry (cores get none).
@@ -532,14 +572,12 @@ impl ComponentEntry {
                 kind: self.kind,
                 name: self.name.clone(),
                 version: self.version.clone(),
-                sha256: String::new(),
-                url: String::new(),
+                artifact: None,
                 manifest: self.manifest.clone(),
                 local_url: String::new(),
                 listen_env: String::new(),
                 supervised_env: String::new(),
                 args: Vec::new(),
-                binary: false,
                 plugin: PluginLaunch::default(),
                 sandbox: SandboxLaunch::default(),
             }),
@@ -557,14 +595,12 @@ impl ComponentEntry {
                     kind: self.kind,
                     name: self.name.clone(),
                     version: self.version.clone(),
-                    sha256: artifact.sha256.clone(),
-                    url: artifact.url.clone(),
+                    artifact: Some(artifact.clone()),
                     manifest: self.manifest.clone(),
                     local_url: sidecar.local_url.clone().unwrap_or_default(),
                     listen_env: sidecar.listen_env.clone().unwrap_or_default(),
                     supervised_env: sidecar.supervised_env.clone().unwrap_or_default(),
                     args: sidecar.args.clone().unwrap_or_default(),
-                    binary: true,
                     plugin: self.plugin_launch(),
                     sandbox: self.sandbox_launch(sidecar, platform)?,
                 })

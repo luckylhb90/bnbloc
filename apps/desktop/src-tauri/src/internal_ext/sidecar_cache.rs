@@ -4,27 +4,32 @@ use futures_util::StreamExt;
 use sha2::{Digest, Sha256};
 use tokio::io::AsyncWriteExt;
 
+use crate::internal_ext::pin::Sha256Pin;
 use crate::internal_ext::sidecar_fetch::FetchError;
 use crate::internal_ext::sidecar_model::{GatewayAccess, SidecarSpec};
 use crate::internal_ext::sidecar_util::{
-    artifact_download_url, binary_ready, cache_file_name, direct_download_url, download_message,
-    hex_lower, set_executable, stale_cache_files,
+    artifact_download_url, cache_file_name, direct_download_url, download_message, hex_lower,
+    set_executable, stale_cache_files,
 };
 use crate::internal_ext::Adapter;
 
 impl Adapter {
     pub(super) async fn ensure_binary(&self, spec: &SidecarSpec) -> Result<PathBuf, FetchError> {
         let id = spec.id();
+        let artifact = spec
+            .artifact
+            .as_ref()
+            .ok_or_else(|| FetchError::Refused(format!("{} has no binary artifact", spec.name)))?;
         let cache_path = self
-            .cache_path(&id, &spec.sha256)
+            .cache_path(&id, &artifact.sha256)
             .map_err(FetchError::Retry)?;
         let gateway = self.gateway.lock().clone();
         let client = self.http().map_err(FetchError::Retry)?;
         let downloaded = ensure_verified(
             &client,
             &gateway,
-            &spec.url,
-            &spec.sha256,
+            &artifact.url,
+            &artifact.sha256,
             &cache_path,
             true,
             |progress| {
@@ -40,7 +45,7 @@ impl Adapter {
         };
         self.set_status(&id, "ready", message, None);
         // Only the verified binary for the current spec stays cached.
-        let keep = cache_file_name(&id, &spec.sha256);
+        let keep = cache_file_name(&id, artifact.sha256.as_str());
         self.remove_cached_binaries(&id, &keep);
         Ok(cache_path)
     }
@@ -70,8 +75,11 @@ impl Adapter {
         });
     }
 
-    fn cache_path(&self, id: &str, sha256: &str) -> Result<PathBuf, String> {
-        Ok(self.dirs()?.binaries().join(cache_file_name(id, sha256)))
+    fn cache_path(&self, id: &str, sha256: &Sha256Pin) -> Result<PathBuf, String> {
+        Ok(self
+            .dirs()?
+            .binaries()
+            .join(cache_file_name(id, sha256.as_str())))
     }
 }
 
@@ -101,12 +109,12 @@ pub(super) async fn ensure_verified(
     client: &reqwest::Client,
     gateway: &GatewayAccess,
     url: &str,
-    sha256: &str,
+    sha256: &Sha256Pin,
     dest: &Path,
     executable: bool,
     progress: impl FnMut(FetchProgress),
 ) -> Result<bool, FetchError> {
-    if binary_ready(dest, sha256).await {
+    if sha256.file_matches(dest).await {
         return Ok(false);
     }
     fetch_verified(client, gateway, url, sha256, dest, executable, progress).await?;
@@ -137,7 +145,7 @@ pub(super) async fn fetch_verified(
     client: &reqwest::Client,
     gateway: &GatewayAccess,
     url: &str,
-    sha256: &str,
+    sha256: &Sha256Pin,
     dest: &Path,
     executable: bool,
     mut progress: impl FnMut(FetchProgress),
@@ -194,7 +202,7 @@ pub(super) async fn fetch_verified(
     }
     let got = hex_lower(&hasher.finalize());
     progress(FetchProgress::Verifying);
-    if !got.eq_ignore_ascii_case(sha256) {
+    if got != sha256.as_str() {
         let _ = tokio::fs::remove_file(&tmp).await;
         return Err(FetchError::Mismatch(format!(
             "sha256 mismatch: got {got}, want {sha256} — refusing to run"
@@ -210,6 +218,7 @@ pub(super) async fn fetch_verified(
         let _ = tokio::fs::remove_file(&tmp).await;
         return Err(FetchError::Retry(format!("cache rename: {e}")));
     }
+    sha256.verified(dest);
     Ok(())
 }
 
@@ -291,7 +300,7 @@ mod tests {
         let dest = std::env::temp_dir().join(format!("bnbloc-direct-{}-{tag}", std::process::id()));
         let _ = std::fs::remove_file(&dest);
         let client = reqwest::Client::new();
-        let sha = hex_lower(&Sha256::digest(pin));
+        let sha = Sha256Pin::of(pin);
         let result = fetch_verified(
             &client,
             &access,

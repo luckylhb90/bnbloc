@@ -1,11 +1,8 @@
 use std::collections::HashSet;
 use std::io::{BufRead, BufReader, Write};
 
-use sha2::{Digest, Sha256};
-
 use super::*;
 use crate::internal_ext::sidecar_model::GatewayAccess;
-use crate::internal_ext::sidecar_util::hex_lower;
 
 fn catalog(json: serde_json::Value) -> ComponentsResponse {
     serde_json::from_value(json).expect("catalog decodes")
@@ -14,7 +11,7 @@ fn catalog(json: serde_json::Value) -> ComponentsResponse {
 fn sample_catalog() -> ComponentsResponse {
     catalog(serde_json::json!({"components": [
         {"kind": "mcp", "name": "codeword", "version": "1.0.0", "runtime": "stdio", "rollout": "auto", "installed": true,
-         "artifacts": {"darwin-arm64": {"url": "/v1/artifacts/sha256/AA", "sha256": "AA"}, "linux-amd64": {"url": "/v1/artifacts/sha256/bb", "sha256": "bb"}},
+         "artifacts": {"darwin-arm64": {"url": "/v1/artifacts/sha256/AA", "sha256": "AA00000000000000000000000000000000000000000000000000000000000000"}, "linux-amd64": {"url": "/v1/artifacts/sha256/bb", "sha256": "bb00000000000000000000000000000000000000000000000000000000000000"}},
          "mcp": {"transport": "stdio", "credentials": "member",
                  "tools": [{"name": "get_codeword", "description": "the codeword"}],
                  "env": [{"name": "CODEWORD_SALT", "description": "salt", "secret": true, "required": true}, {"name": "CODEWORD_LANG"}]}},
@@ -33,9 +30,12 @@ fn installed_tools_follow_the_catalog_gate() {
     let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
     assert_eq!(names, vec!["codeword", "search"]);
     let cw = &tools[0];
+    let binary = cw.binary.as_ref().expect("binary");
+    assert_eq!(binary.url, "/v1/artifacts/sha256/AA");
     assert_eq!(
-        cw.binary,
-        Some(("/v1/artifacts/sha256/AA".into(), "aa".into()))
+        binary.sha256.as_str(),
+        "aa00000000000000000000000000000000000000000000000000000000000000",
+        "pins are normalized"
     );
     assert_eq!(cw.tools[0].name, "get_codeword");
     assert_eq!(cw.tools[0].description.as_deref(), Some("the codeword"));
@@ -83,9 +83,10 @@ fn temp_dir(tag: &str) -> PathBuf {
 #[test]
 fn index_is_replaced_atomically_and_garbage_is_collected() {
     let dir = temp_dir("gc");
-    let keep = tool_file(&dir, "codeword", &"a".repeat(64));
-    let old = tool_file(&dir, "codeword", &"b".repeat(64));
-    let removed = tool_file(&dir, "gone", &"c".repeat(64));
+    let pin = |c: &str| Sha256Pin::parse(&c.repeat(64)).unwrap();
+    let keep = tool_file(&dir, "codeword", &pin("a"));
+    let old = tool_file(&dir, "codeword", &pin("b"));
+    let removed = tool_file(&dir, "gone", &pin("c"));
     for p in [&keep, &old, &removed] {
         std::fs::write(p, b"bin").unwrap();
     }
@@ -93,14 +94,14 @@ fn index_is_replaced_atomically_and_garbage_is_collected() {
     assert_eq!(
         keep.file_name().unwrap().to_string_lossy(),
         format!(
-            "mcp-codeword-{}{}",
+            "mcp@codeword-{}{}",
             "a".repeat(64),
             crate::internal_ext::sidecar_util::exe_suffix()
         )
     );
     let entries = vec![IndexEntry {
         name: "codeword".into(),
-        sha256: "a".repeat(64),
+        sha256: pin("a"),
         path: keep.to_string_lossy().into_owned(),
     }];
     write_index(&dir, &entries).unwrap();
@@ -167,7 +168,7 @@ async fn binaries_are_downloaded_verified_and_cached() {
     };
     let client = reqwest::Client::new();
     let dir = temp_dir("fetch");
-    let sha = hex_lower(&Sha256::digest(BIN));
+    let sha = Sha256Pin::of(BIN);
     let dest = tool_file(&dir, "codeword", &sha);
     let url = format!("/v1/artifacts/sha256/{sha}");
     let first = ensure_verified(&client, &gateway, &url, &sha, &dest, true, |_| {})
@@ -188,17 +189,9 @@ async fn binaries_are_downloaded_verified_and_cached() {
         .expect("cached");
     assert!(!again, "a verified binary is kept");
     assert_eq!(hits.load(std::sync::atomic::Ordering::SeqCst), 1);
-    let wrong = tool_file(&dir, "codeword", &"0".repeat(64));
-    let refused = ensure_verified(
-        &client,
-        &gateway,
-        &url,
-        &"0".repeat(64),
-        &wrong,
-        true,
-        |_| {},
-    )
-    .await;
+    let zero = Sha256Pin::parse(&"0".repeat(64)).unwrap();
+    let wrong = tool_file(&dir, "codeword", &zero);
+    let refused = ensure_verified(&client, &gateway, &url, &zero, &wrong, true, |_| {}).await;
     assert!(matches!(refused, Err(FetchError::Mismatch(_))));
     assert!(!wrong.exists(), "mismatched bytes never land");
     let _ = std::fs::remove_dir_all(&dir);

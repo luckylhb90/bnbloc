@@ -2,6 +2,7 @@ use std::path::Path;
 use std::time::{Duration, Instant};
 
 use crate::child_process::{self, Backoff, ChildEvent, STOP_GRACE};
+use crate::internal_ext::pin::Sha256Pin;
 use crate::internal_ext::sidecar_fetch::FetchError;
 use crate::internal_ext::sidecar_model::{ComponentKind, SidecarSpec};
 use crate::internal_ext::sidecar_orphan::{
@@ -34,10 +35,7 @@ impl Adapter {
                         return None;
                     }
                     let spec = sidecar.spec.clone()?;
-                    if !spec.binary {
-                        return None;
-                    }
-                    Some(spec)
+                    spec.artifact.is_some().then_some(spec)
                 })
                 .collect::<Vec<_>>()
         };
@@ -205,6 +203,9 @@ impl Adapter {
         sidecar_generation: u64,
     ) {
         let id = spec.id();
+        let Some(pin) = spec.pin() else {
+            return;
+        };
         let orphan = self.find_orphan(spec).await;
         let probe = if speaks_core_protocol(spec) {
             Some(probe_core_protocol_listener(&spec.local_url, &spec.name).await)
@@ -214,7 +215,7 @@ impl Adapter {
         let plan = plan_occupied_listener(OccupiedListener {
             name: &spec.name,
             spec_version: &spec.version,
-            spec_sha256: &spec.sha256,
+            spec_sha256: pin,
             url: &spec.local_url,
             bind_error,
             orphan,
@@ -298,13 +299,13 @@ impl Adapter {
         self.dirs().ok().map(crate::dirs::Dirs::spawn_records)
     }
 
-    fn record_spawn(&self, id: &str, pid: u32, sha256: &str) {
-        let Some(dir) = self.spawn_record_dir() else {
+    fn record_spawn(&self, id: &str, pid: u32, sha256: Option<&Sha256Pin>) {
+        let (Some(dir), Some(sha256)) = (self.spawn_record_dir(), sha256) else {
             return;
         };
         let record = SpawnRecord {
             pid,
-            sha256: sha256.to_string(),
+            sha256: sha256.clone(),
             app_pid: std::process::id(),
         };
         if let Err(error) = write_spawn_record(&dir, id, &record) {
@@ -382,7 +383,7 @@ impl Adapter {
                 return Ok(());
             }
         }
-        self.record_spawn(&id, pid, &spec.sha256);
+        self.record_spawn(&id, pid, spec.pin());
         let sandbox_seq =
             sandbox_token.map(|token| self.sandbox_spawned(spec, runtime_url, token, path));
         let mut tail = String::new();

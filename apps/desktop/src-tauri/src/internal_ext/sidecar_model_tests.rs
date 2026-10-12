@@ -1,6 +1,7 @@
 use std::collections::HashSet;
 
 use super::*;
+use crate::internal_ext::pin::Sha256Pin;
 
 #[test]
 fn resolve_component_specs_returns_empty_when_member_catalog_is_empty() {
@@ -26,7 +27,7 @@ fn resolve_component_specs_selects_auto_core_sidecar_for_current_platform() {
             "rollout":"auto",
             "installed":true,
             "managed":true,
-            "artifacts":{"darwin-arm64":{"url":"http://gw/v1/artifacts/sha256/abc","sha256":"abc"}},
+            "artifacts":{"darwin-arm64":{"url":"http://gw/v1/artifacts/sha256/abc","sha256":"abc0000000000000000000000000000000000000000000000000000000000000"}},
             "sidecar":{"localUrl":"http://127.0.0.1:7190","listenEnv":"BNBLOC_SAMPLECORE_LISTEN","supervisedEnv":"BNBLOC_SAMPLECORE_SUPERVISED","args":["serve"]}
         }]
     }"#).expect("Given an auto sidecar core in the member catalog");
@@ -42,9 +43,12 @@ fn resolve_component_specs_selects_auto_core_sidecar_for_current_platform() {
     let spec = &resolved.specs[0];
     assert_eq!(spec.name, "samplecore");
     assert_eq!(spec.kind, ComponentKind::Core);
-    assert!(spec.binary);
-    assert_eq!(spec.url, "http://gw/v1/artifacts/sha256/abc");
-    assert_eq!(spec.sha256, "abc");
+    let artifact = spec.artifact.as_ref().expect("binary");
+    assert_eq!(artifact.url, "http://gw/v1/artifacts/sha256/abc");
+    assert_eq!(
+        artifact.sha256.as_str(),
+        "abc0000000000000000000000000000000000000000000000000000000000000"
+    );
     assert_eq!(spec.local_url, "http://127.0.0.1:7190");
     assert_eq!(spec.listen_env, "BNBLOC_SAMPLECORE_LISTEN");
     assert_eq!(spec.supervised_env, "BNBLOC_SAMPLECORE_SUPERVISED");
@@ -90,7 +94,7 @@ fn resolve_component_specs_selects_installed_opt_in_plugin_sidecar() {
             "installed":true,
             "managed":false,
             "hooks":["chat_message.v1"],
-            "artifacts":{"darwin-arm64":{"url":"http://gw/v1/artifacts/sha256/def","sha256":"def"}},
+            "artifacts":{"darwin-arm64":{"url":"http://gw/v1/artifacts/sha256/def","sha256":"def0000000000000000000000000000000000000000000000000000000000000"}},
             "sidecar":{"localUrl":"http://127.0.0.1:7191"}
         }]
     }"#,
@@ -121,7 +125,7 @@ fn resolve_component_specs_does_not_activate_off_components_even_if_sent() {
             "rollout":"off",
             "installed":true,
             "managed":false,
-            "artifacts":{"darwin-arm64":{"url":"http://gw/v1/artifacts/sha256/aaa","sha256":"aaa"}},
+            "artifacts":{"darwin-arm64":{"url":"http://gw/v1/artifacts/sha256/aaa","sha256":"aaa0000000000000000000000000000000000000000000000000000000000000"}},
             "sidecar":{"localUrl":"http://127.0.0.1:7192"}
         }]
     }"#,
@@ -148,7 +152,7 @@ fn resolve_component_specs_records_artifact_failure_without_spec() {
             "rollout":"auto",
             "installed":true,
             "managed":true,
-            "artifacts":{"linux-amd64":{"url":"http://gw/v1/artifacts/sha256/aaa","sha256":"aaa"}},
+            "artifacts":{"linux-amd64":{"url":"http://gw/v1/artifacts/sha256/aaa","sha256":"aaa0000000000000000000000000000000000000000000000000000000000000"}},
             "sidecar":{"localUrl":"http://127.0.0.1:7192"}
         }]
     }"#,
@@ -189,7 +193,7 @@ fn resolve_component_specs_selects_manifest_core_data_without_binary() {
 
     assert_eq!(resolved.specs.len(), 1);
     assert_eq!(resolved.specs[0].kind, ComponentKind::Core);
-    assert!(!resolved.specs[0].binary);
+    assert!(resolved.specs[0].artifact.is_none());
     assert!(resolved.specs[0].manifest.is_some());
 }
 
@@ -203,13 +207,13 @@ fn plugin_spec_carries_host_permissions_and_local_settings() {
             "hooks":["notification.v1"],
             "permissions":{"network":["127.0.0.1"],"host":["chat"]},
             "localSettings":[{"key":"appKey","label":"App key","secret":true,"required":true},{"key":"note","label":"Note"}],
-            "artifacts":{"darwin-arm64":{"url":"http://gw/v1/artifacts/sha256/abc","sha256":"abc"}},
+            "artifacts":{"darwin-arm64":{"url":"http://gw/v1/artifacts/sha256/abc","sha256":"abc0000000000000000000000000000000000000000000000000000000000000"}},
             "sidecar":{"localUrl":"http://127.0.0.1:7193","supervisedEnv":"PB_SUPERVISED"}
         },{
             "kind":"core","name":"samplecore","version":"1.0.0","runtime":"sidecar",
             "requiresDesktop":true,"rollout":"auto","installed":true,"managed":true,
             "permissions":{"host":["chat"]},
-            "artifacts":{"darwin-arm64":{"url":"http://gw/x","sha256":"def"}},
+            "artifacts":{"darwin-arm64":{"url":"http://gw/x","sha256":"def0000000000000000000000000000000000000000000000000000000000000"}},
             "sidecar":{"localUrl":"http://127.0.0.1:7190"}
         }]
     }"#,
@@ -253,9 +257,9 @@ fn sandbox_entry(name: &str) -> String {
             "protocol":{{"min":"1.0","max":"1.0"}},
             "guest":{{"image":"registry.example/toolbox:1","cpus":2,"memoryMiB":2048}},
             "artifacts":{{
-                "darwin-arm64":{{"url":"http://gw/v1/artifacts/sha256/aaa","sha256":"aaa"}},
-                "darwin-arm64/vmm":{{"url":"http://gw/v1/artifacts/sha256/bbb","sha256":"bbb"}},
-                "darwin-arm64/bnbloc-vmexec":{{"url":"http://gw/v1/artifacts/sha256/ccc","sha256":"ccc"}}
+                "darwin-arm64":{{"url":"http://gw/v1/artifacts/sha256/aaa","sha256":"aaa0000000000000000000000000000000000000000000000000000000000000"}},
+                "darwin-arm64/vmm":{{"url":"http://gw/v1/artifacts/sha256/bbb","sha256":"bbb0000000000000000000000000000000000000000000000000000000000000"}},
+                "darwin-arm64/bnbloc-vmexec":{{"url":"http://gw/v1/artifacts/sha256/ccc","sha256":"ccc0000000000000000000000000000000000000000000000000000000000000"}}
             }},
             "sidecar":{{"localUrl":"http://127.0.0.1:7311","listenEnv":"SBX_LISTEN","supervisedEnv":"SBX_SUPERVISED",
                 "tokenEnv":"SBX_TOKEN","dataDirEnv":"SBX_DATA_DIR",
@@ -271,7 +275,7 @@ fn resolve_component_specs_supervises_one_sandbox_runtime_with_its_files() {
         r#"{{"components":[{},{},{{
             "kind":"core","name":"samplecore","version":"1.2.3","runtime":"sidecar",
             "requiresDesktop":true,"rollout":"auto","installed":true,"managed":true,
-            "artifacts":{{"darwin-arm64":{{"url":"http://gw/v1/artifacts/sha256/abc","sha256":"abc"}}}},
+            "artifacts":{{"darwin-arm64":{{"url":"http://gw/v1/artifacts/sha256/abc","sha256":"abc0000000000000000000000000000000000000000000000000000000000000"}}}},
             "sidecar":{{"localUrl":"http://127.0.0.1:7190"}}
         }}]}}"#,
         sandbox_entry("zeta-vm"),
@@ -303,7 +307,10 @@ fn resolve_component_specs_supervises_one_sandbox_runtime_with_its_files() {
         .expect("the lexically first sandbox runs");
     assert_eq!(sandbox.name, "alpha-vm");
     assert_eq!(sandbox.id(), "sandbox/alpha-vm");
-    assert_eq!(sandbox.sha256, "aaa");
+    assert_eq!(
+        sandbox.pin().unwrap().as_str(),
+        "aaa0000000000000000000000000000000000000000000000000000000000000"
+    );
     assert_eq!(sandbox.sandbox.token_env, "SBX_TOKEN");
     assert_eq!(sandbox.sandbox.data_dir_env, "SBX_DATA_DIR");
     assert_eq!(
@@ -314,14 +321,20 @@ fn resolve_component_specs_supervises_one_sandbox_runtime_with_its_files() {
                 env: "SBX_VMM_PATH".into(),
                 executable: true,
                 url: "http://gw/v1/artifacts/sha256/bbb".into(),
-                sha256: "bbb".into(),
+                sha256: Sha256Pin::parse(
+                    "bbb0000000000000000000000000000000000000000000000000000000000000"
+                )
+                .unwrap(),
             },
             SidecarFileSpec {
                 name: "bnbloc-vmexec".into(),
                 env: "SBX_VMEXEC_PATH".into(),
                 executable: true,
                 url: "http://gw/v1/artifacts/sha256/ccc".into(),
-                sha256: "ccc".into(),
+                sha256: Sha256Pin::parse(
+                    "ccc0000000000000000000000000000000000000000000000000000000000000"
+                )
+                .unwrap(),
             },
         ]
     );
@@ -348,7 +361,7 @@ fn resolve_component_specs_supervises_one_sandbox_runtime_with_its_files() {
 #[test]
 fn resolve_component_specs_refuses_a_sandbox_missing_a_platform_file() {
     let raw = format!(r#"{{"components":[{}]}}"#, sandbox_entry("vm")).replace(
-        r#""darwin-arm64/vmm":{"url":"http://gw/v1/artifacts/sha256/bbb","sha256":"bbb"},"#,
+        r#""darwin-arm64/vmm":{"url":"http://gw/v1/artifacts/sha256/bbb","sha256":"bbb0000000000000000000000000000000000000000000000000000000000000"},"#,
         "",
     );
     let response: ComponentsResponse = serde_json::from_str(&raw).expect("catalog");
@@ -373,7 +386,7 @@ const PREVIEWER_ENTRY: &str = r#"{
     "rollout":"auto",
     "installed":true,
     "managed":true,
-    "artifacts":{"bundle":{"url":"http://gw/v1/artifacts/sha256/abc","sha256":"abc"}},
+    "artifacts":{"bundle":{"url":"http://gw/v1/artifacts/sha256/abc","sha256":"abc0000000000000000000000000000000000000000000000000000000000000"}},
     "previewer":{
         "entry":"index.html",
         "match":{"mimeTypes":["image/*"],"extensions":[".atlas.json"]},
@@ -381,7 +394,7 @@ const PREVIEWER_ENTRY: &str = r#"{
         "capabilities":["thumbnail","toolbar"],
         "toolbar":[{"id":"grid","icon":"grid","label":"Grid","kind":"toggle"}],
         "bundleUrl":"http://gw/v1/artifacts/sha256/abc",
-        "bundleSha256":"abc",
+        "bundleSha256":"abc0000000000000000000000000000000000000000000000000000000000000",
         "frameUrl":"/v1/previewers/sprite-sheet/1.0.0/t/",
         "frameExpiresAtMs":1
     }
@@ -393,7 +406,7 @@ fn a_previewer_in_the_catalog_is_never_supervised_and_breaks_nothing() {
         r#"{{"components":[{PREVIEWER_ENTRY},{{
             "kind":"core","name":"samplecore","version":"1.2.3","runtime":"sidecar",
             "requiresDesktop":true,"rollout":"auto","installed":true,
-            "artifacts":{{"darwin-arm64":{{"url":"http://gw/v1/artifacts/sha256/def","sha256":"def"}}}},
+            "artifacts":{{"darwin-arm64":{{"url":"http://gw/v1/artifacts/sha256/def","sha256":"def0000000000000000000000000000000000000000000000000000000000000"}}}},
             "sidecar":{{"localUrl":"http://127.0.0.1:7190"}}
         }}]}}"#
     );
@@ -413,7 +426,10 @@ fn a_previewer_in_the_catalog_is_never_supervised_and_breaks_nothing() {
         .previewer
         .as_ref()
         .expect("previewer block");
-    assert_eq!(previewer.bundle_sha256, "abc");
+    assert_eq!(
+        previewer.bundle_sha256.as_ref().map(Sha256Pin::as_str),
+        Some("abc0000000000000000000000000000000000000000000000000000000000000")
+    );
 }
 
 #[test]
@@ -455,4 +471,87 @@ fn catalog_tolerates_unknown_kind() {
     // The variant itself decodes from any kind name this desktop lacks.
     let kind: ComponentKind = serde_json::from_str(r#""future""#).expect("kind");
     assert_eq!(kind, ComponentKind::Unknown);
+}
+
+/// Every kind's pin is read once at decode, whatever its case: an upper-case
+/// pin names the same artifact as its lower-case form, and a malformed pin
+/// drops only its own entry.
+#[test]
+fn sha256_pins_normalized_for_every_kind() {
+    let upper = "ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789";
+    let lower = upper.to_ascii_lowercase();
+    let raw = serde_json::json!({"components": [
+        {"kind": "core", "name": "c", "version": "1.0.0", "runtime": "sidecar", "requiresDesktop": true,
+         "rollout": "auto", "installed": true, "sidecar": {"localUrl": "http://127.0.0.1:7190"},
+         "artifacts": {"darwin-arm64": {"url": "/v1/artifacts/c", "sha256": upper}}},
+        {"kind": "plugin", "name": "p", "version": "1.0.0", "runtime": "sidecar", "requiresDesktop": true,
+         "rollout": "auto", "installed": true, "sidecar": {"localUrl": "http://127.0.0.1:7191"},
+         "artifacts": {"darwin-arm64": {"url": "/v1/artifacts/p", "sha256": upper}}},
+        {"kind": "sandbox", "name": "s", "version": "1.0.0", "runtime": "sidecar", "requiresDesktop": true,
+         "rollout": "auto", "installed": true,
+         "sidecar": {"localUrl": "http://127.0.0.1:7192", "tokenEnv": "T",
+                     "files": [{"name": "vmm", "env": "V", "executable": true}]},
+         "artifacts": {"darwin-arm64": {"url": "/v1/artifacts/s", "sha256": upper},
+                       "darwin-arm64/vmm": {"url": "/v1/artifacts/v", "sha256": upper}}},
+        {"kind": "mcp", "name": "m", "version": "1.0.0", "runtime": "stdio", "rollout": "auto", "installed": true,
+         "mcp": {"transport": "stdio"},
+         "artifacts": {"darwin-arm64": {"url": "/v1/artifacts/m", "sha256": upper}}},
+        {"kind": "previewer", "name": "v", "version": "1.0.0", "runtime": "bundle", "rollout": "auto",
+         "installed": true, "previewer": {"bundleUrl": "/v1/artifacts/b", "bundleSha256": upper}},
+        {"kind": "core", "name": "bad", "version": "1.0.0", "runtime": "sidecar", "requiresDesktop": true,
+         "rollout": "auto", "installed": true, "sidecar": {"localUrl": "http://127.0.0.1:7193"},
+         "artifacts": {"darwin-arm64": {"url": "/v1/artifacts/x", "sha256": "abc"}}}
+    ]});
+    let catalog: ComponentsResponse = serde_json::from_value(raw).expect("catalog");
+    assert_eq!(
+        catalog.components.len(),
+        5,
+        "the malformed pin drops its entry only"
+    );
+    let resolved = resolve_component_specs(&catalog, "darwin-arm64");
+    assert_eq!(resolved.specs.len(), 3);
+    for spec in &resolved.specs {
+        assert_eq!(
+            spec.pin().map(Sha256Pin::as_str),
+            Some(lower.as_str()),
+            "{}",
+            spec.name
+        );
+        for file in &spec.sandbox.files {
+            assert_eq!(file.sha256.as_str(), lower);
+        }
+    }
+    let mcp = crate::internal_ext::mcp_tools::installed_mcp_tools(&catalog, "darwin-arm64");
+    assert_eq!(
+        mcp[0].binary.as_ref().map(|a| a.sha256.as_str()),
+        Some(lower.as_str())
+    );
+    let previewers = crate::internal_ext::previewer_cache::installed_previewers(&catalog);
+    assert_eq!(
+        previewers.values().next().map(|p| p.sha256.as_str()),
+        Some(lower.as_str())
+    );
+}
+
+/// Names become paths and routes: a catalog entry whose own name or a
+/// declared file's name is not a package name is dropped when decoded.
+#[test]
+fn names_are_validated_when_the_catalog_is_decoded() {
+    let pin = "a".repeat(64);
+    let raw = serde_json::json!({"components": [
+        {"kind": "plugin", "name": "../evil", "version": "1.0.0", "runtime": "manifest",
+         "rollout": "auto", "installed": true},
+        {"kind": "plugin", "name": "Upper", "version": "1.0.0", "runtime": "manifest",
+         "rollout": "auto", "installed": true},
+        {"kind": "sandbox", "name": "s", "version": "1.0.0", "runtime": "sidecar", "requiresDesktop": true,
+         "rollout": "auto", "installed": true,
+         "sidecar": {"localUrl": "http://127.0.0.1:7192", "tokenEnv": "T",
+                     "files": [{"name": "../vmm", "env": "V"}]},
+         "artifacts": {"darwin-arm64": {"url": "/v1/artifacts/s", "sha256": pin}}},
+        {"kind": "core", "name": "fine.core-1", "version": "1.0.0", "runtime": "manifest",
+         "rollout": "auto", "installed": true, "manifest": {}}
+    ]});
+    let catalog: ComponentsResponse = serde_json::from_value(raw).expect("catalog");
+    let names: Vec<&str> = catalog.components.iter().map(|c| c.name.as_str()).collect();
+    assert_eq!(names, vec!["fine.core-1"]);
 }

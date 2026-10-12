@@ -114,7 +114,7 @@ impl Adapter {
             sidecar
                 .spec
                 .as_ref()
-                .is_some_and(|spec| spec.kind == ComponentKind::Plugin && spec.binary)
+                .is_some_and(|spec| spec.kind == ComponentKind::Plugin && spec.artifact.is_some())
         })
     }
 
@@ -477,14 +477,15 @@ mod tests {
             kind: ComponentKind::Plugin,
             name: name.into(),
             version: "1.0.0".into(),
-            sha256: "0".repeat(64),
-            url: "/v1/artifacts/x".into(),
+            artifact: Some(crate::internal_ext::sidecar_model::ComponentArtifact {
+                url: "/v1/artifacts/x".into(),
+                sha256: crate::internal_ext::pin::Sha256Pin::of(b"x"),
+            }),
             manifest: None,
             local_url: "http://127.0.0.1:7191".into(),
             listen_env: String::new(),
             supervised_env: String::new(),
             args: Vec::new(),
-            binary: true,
             plugin: Default::default(),
             sandbox: Default::default(),
         };

@@ -17,14 +17,15 @@ fn core_spec(name: &str) -> SidecarSpec {
         kind: ComponentKind::Core,
         name: name.to_string(),
         version: "1.0.0".to_string(),
-        sha256: "abc".to_string(),
-        url: "http://gateway/v1/artifacts/sha256/abc".to_string(),
+        artifact: Some(sidecar_model::ComponentArtifact {
+            url: "http://gateway/v1/artifacts/sha256/abc".to_string(),
+            sha256: pin::Sha256Pin::of(b"abc"),
+        }),
         manifest: None,
         local_url: "http://127.0.0.1:7190".to_string(),
         listen_env: "BNBLOC_CORE_LISTEN".to_string(),
         supervised_env: String::new(),
         args: Vec::new(),
-        binary: true,
         plugin: Default::default(),
         sandbox: Default::default(),
     }
