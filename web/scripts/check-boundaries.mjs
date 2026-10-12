@@ -24,6 +24,15 @@ export const RULES = [
     allowed: ["lib/sse.ts"],
     sample: { file: "lib/api.ts", text: "return `${base}?access_token=${token}`;" },
   },
+  {
+    id: 10,
+    name: "clipboard writes go through lib/clipboard.ts (ui/useCopy for the toast)",
+    // navigator.clipboard is missing on an http gateway; hand-rolled copies
+    // reported "copied" when nothing was (web M23).
+    pattern: /navigator\.clipboard/,
+    allowed: ["lib/clipboard.ts"],
+    sample: { file: "views/X.tsx", text: "void navigator.clipboard?.writeText(url);" },
+  },
 ];
 
 // violations returns "<file>: rule <id> (<name>)" for every source file (a

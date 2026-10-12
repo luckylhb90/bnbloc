@@ -3,7 +3,7 @@ import { MAC_APP_PATH, QUARANTINE_COMMAND } from "@/lib/macInstall";
 import { cn } from "@/lib/cn";
 import { Button } from "@/ui/Button";
 import { Dialog } from "@/ui/Dialog";
-import { useToast } from "@/ui/Toast";
+import { useCopy } from "@/ui/useCopy";
 
 const STEPS = [
   {
@@ -24,13 +24,8 @@ const STEPS = [
 // app on macOS: the same three steps as the DMG window, an illustration of
 // the "Open Anyway" row, and the Terminal alternative.
 export function MacInstallGuideDialog({ open, onClose }: { readonly open: boolean; readonly onClose: () => void }) {
-  const toast = useToast();
-  const copy = () => {
-    void (navigator.clipboard ? navigator.clipboard.writeText(QUARANTINE_COMMAND) : Promise.reject(new Error("no clipboard"))).then(
-      () => toast.success("Command copied"),
-      () => toast.error("Could not copy the command"),
-    );
-  };
+  const copyText = useCopy();
+  const copy = () => void copyText(QUARANTINE_COMMAND, "command");
   return (
     <Dialog
       open={open}

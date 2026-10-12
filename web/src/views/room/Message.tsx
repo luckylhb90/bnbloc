@@ -28,6 +28,7 @@ import { MessageExtraActions, TaskBadge } from "@/views/room/messageExtras";
 import { dispatchLine, type DispatchAttribution } from "@/lib/dispatch";
 import { ExpertTag } from "@/views/room/ExpertTag";
 import { isSubmitEnter } from "@/lib/keys";
+import { copyText } from "@/lib/clipboard";
 
 // sameSender groups consecutive messages from the same author on the same side,
 // so a run of agent replies stacks without repeating the avatar and name.
@@ -62,7 +63,7 @@ export function CopyButton({ text }: { text: string }) {
   const [copied, setCopied] = useState(false);
   const copy = async () => {
     try {
-      await navigator.clipboard.writeText(text);
+      await copyText(text);
       setCopied(true);
       window.setTimeout(() => setCopied(false), 1200);
     } catch {

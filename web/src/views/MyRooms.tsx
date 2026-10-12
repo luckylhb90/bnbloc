@@ -17,6 +17,7 @@ import { Card, Badge, Skeleton } from "@/ui/Card";
 import { Dialog } from "@/ui/Dialog";
 import { PageHeader, EmptyState } from "@/ui/Page";
 import { useToast } from "@/ui/Toast";
+import { useCopy } from "@/ui/useCopy";
 import { RunAgentDialog } from "@/views/RunAgentDialog";
 import { HandoffImportButton } from "@/views/HandoffImportButton";
 import { useLocalAgent } from "@/lib/useLocalAgent";
@@ -180,7 +181,7 @@ export function MyRooms({ onOpen }: { onOpen: (id: string) => void }) {
 
 function PhoneDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
   const url = window.location.origin;
-  const toast = useToast();
+  const copy = useCopy();
   return (
     <Dialog
       open={open}
@@ -191,10 +192,7 @@ function PhoneDialog({ open, onClose }: { open: boolean; onClose: () => void }) 
       footer={
         <Button
           variant="primary"
-          onClick={() => {
-            navigator.clipboard?.writeText(url).catch(() => {});
-            toast.success("URL copied");
-          }}
+          onClick={() => void copy(url, "URL")}
         >
           Copy URL
         </Button>

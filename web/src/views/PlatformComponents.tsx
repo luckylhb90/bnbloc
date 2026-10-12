@@ -8,6 +8,7 @@ import { Card } from "@/ui/Card";
 import { ErrorBox } from "@/ui/ErrorBox";
 import { Segment } from "@/ui/Segment";
 import { useToast } from "@/ui/Toast";
+import { useCopy } from "@/ui/useCopy";
 import { ComponentCard } from "@/views/ComponentCard";
 import { ComponentUploadFlow } from "@/views/ComponentUploadFlow";
 import { PlatformMCPForm } from "@/views/PlatformMCPForm";
@@ -253,7 +254,7 @@ function summarizeComponents(components: readonly PlatformComponent[]) {
 // SecretReveal shows a notifier's signing secret once (after install or
 // rotation) with a copy button; it is never retrievable again.
 function SecretReveal({ name, secret, onDismiss }: { readonly name: string; readonly secret: string; readonly onDismiss: () => void }) {
-  const toast = useToast();
+  const copy = useCopy();
   return (
     <Card className="flex flex-col gap-2 border-[var(--color-warning)]/50 px-4 py-3">
       <span className="text-xs font-medium uppercase tracking-wide text-[var(--color-fg-muted)]">
@@ -265,12 +266,7 @@ function SecretReveal({ name, secret, onDismiss }: { readonly name: string; read
         <Button
           size="sm"
           variant="outline"
-          onClick={() => {
-            void navigator.clipboard?.writeText(secret).then(
-              () => toast.success("Secret copied"),
-              () => toast.error("Could not copy the secret"),
-            );
-          }}
+          onClick={() => void copy(secret, "secret")}
         >
           Copy
         </Button>

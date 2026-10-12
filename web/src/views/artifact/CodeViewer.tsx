@@ -3,6 +3,7 @@ import { highlightLines } from "@/lib/highlight";
 import { cn } from "@/lib/cn";
 import type { ArtifactViewerProps } from "./registry";
 import { useViewerToolbar } from "./toolbar";
+import { copyText } from "@/lib/clipboard";
 
 // CodeViewer: source text with line numbers, a wrap toggle and syntax
 // coloring. Coloring reuses the app's own dependency-free tokenizer
@@ -34,7 +35,7 @@ function TextLines({ content, colored, toolbar }: { content: string; colored: bo
     (id, value) => {
       if (id === "wrap") setWrap(value === true);
       else if (id === "numbers") setNumbers(value === true);
-      else if (id === "copy") void navigator.clipboard?.writeText(content).catch(() => {});
+      else if (id === "copy") void copyText(content).catch(() => {});
     },
   );
   const gutter = `${String(lines.length).length + 1}ch`;

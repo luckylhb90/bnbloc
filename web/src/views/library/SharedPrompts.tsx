@@ -5,7 +5,7 @@ import { sharedPrompts, type SharedPrompt } from "@/lib/contentSharing";
 import { queueLibraryTab } from "@/lib/team";
 import { Button } from "@/ui/Button";
 import { Card } from "@/ui/Card";
-import { useToast } from "@/ui/Toast";
+import { useCopy } from "@/ui/useCopy";
 import { UserName } from "@/views/UserName";
 
 // SharedPrompts shows the organization's (and the platform's) prompts on the
@@ -13,7 +13,7 @@ import { UserName } from "@/views/UserName";
 // recently updated few, with a link to the Library's prompts. Hidden when
 // nothing is published.
 export function SharedPrompts() {
-  const toast = useToast();
+  const copy = useCopy();
   const [prompts, setPrompts] = useState<SharedPrompt[]>([]);
 
   useEffect(() => {
@@ -64,10 +64,7 @@ export function SharedPrompts() {
               <Button
                 size="sm"
                 variant="outline"
-                onClick={() => {
-                  void navigator.clipboard?.writeText(p.body);
-                  toast.success("Prompt copied");
-                }}
+                onClick={() => void copy(p.body, "prompt")}
               >
                 <CopyIcon size={13} />
                 Copy

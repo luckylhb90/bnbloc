@@ -6,6 +6,7 @@ import { Input, Field } from "@/ui/Input";
 import { Segment, type SegmentOption } from "@/ui/Segment";
 import { Dialog, ConfirmDialog } from "@/ui/Dialog";
 import { useToast } from "@/ui/Toast";
+import { useCopy } from "@/ui/useCopy";
 import { displayNameOf } from "@/lib/useDisplayName";
 import { EmailInput } from "@/views/UserName";
 import { RoomContentSection } from "@/views/room/RoomContentSection";
@@ -53,6 +54,7 @@ export function RoomSettings({
   const [transferTo, setTransferTo] = useState("");
   const [confirmTransfer, setConfirmTransfer] = useState(false);
   const toast = useToast();
+  const copy = useCopy();
 
   const save = async () => {
     setBusy(true);
@@ -227,10 +229,7 @@ export function RoomSettings({
               <Button
                 variant="secondary"
                 size="icon"
-                onClick={() => {
-                  navigator.clipboard?.writeText(invite);
-                  toast.success("Invite copied");
-                }}
+                onClick={() => void copy(invite, "invite")}
               >
                 <CopyIcon size={16} />
               </Button>

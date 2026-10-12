@@ -11,6 +11,7 @@ import { ConfirmDialog, Dialog } from "@/ui/Dialog";
 import { ErrorBox } from "@/ui/ErrorBox";
 import { Field, Input } from "@/ui/Input";
 import { useToast } from "@/ui/Toast";
+import { useCopy } from "@/ui/useCopy";
 import { PermissionBadges } from "@/views/library/ContentViewDialog";
 import { UserName } from "@/views/UserName";
 
@@ -161,6 +162,7 @@ function ContentTitle({ component: c, tenantId }: { readonly component: ContentC
 // downloads the exact package to sign.
 function PromoteDialog({ component: c, onClose }: { readonly component: ContentComponent | null; readonly onClose: () => void }) {
   const toast = useToast();
+  const copy = useCopy();
   const [publisher, setPublisher] = useState("");
   const [busy, setBusy] = useState(false);
   if (!c) return null;
@@ -192,10 +194,7 @@ function PromoteDialog({ component: c, onClose }: { readonly component: ContentC
         <>
           <Button
             variant="ghost"
-            onClick={() => {
-              void navigator.clipboard?.writeText(commands);
-              toast.success("Commands copied");
-            }}
+            onClick={() => void copy(commands, "commands")}
           >
             <CopyIcon size={14} />
             Copy commands

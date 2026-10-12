@@ -21,7 +21,7 @@ import { ErrorBox } from "@/ui/ErrorBox";
 import { Field, Input, Textarea } from "@/ui/Input";
 import { Segment, Switch } from "@/ui/Segment";
 import { Select } from "@/ui/Select";
-import { useToast } from "@/ui/Toast";
+import { useCopy } from "@/ui/useCopy";
 
 // PlatformMCPForm builds an MCP tool package from a form (docs/prd/2026-10-
 // 12-experts-and-teams.md, "Gap closure" 10). Binaries go through the
@@ -52,7 +52,6 @@ export function PlatformMCPForm() {
 }
 
 function McpFormBody() {
-  const toast = useToast();
   const [form, setForm] = useState<McpForm>(emptyMcpForm);
   const [platform, setPlatform] = useState<string>(BINARY_PLATFORMS[0]);
   const [uploading, setUploading] = useState<string | null>(null);
@@ -108,12 +107,9 @@ function McpFormBody() {
     a.click();
     window.setTimeout(() => URL.revokeObjectURL(url), 1000);
   };
+  const copyText = useCopy();
   const copy = () => {
-    if (!result) return;
-    navigator.clipboard.writeText(result.json).then(
-      () => toast.success("Package copied"),
-      () => toast.error("Could not copy the package"),
-    );
+    if (result) void copyText(result.json, "package");
   };
 
   return (

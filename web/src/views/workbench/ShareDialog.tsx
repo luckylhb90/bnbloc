@@ -21,6 +21,7 @@ import { Button } from "@/ui/Button";
 import { Dialog } from "@/ui/Dialog";
 import { Segment } from "@/ui/Segment";
 import { useToast } from "@/ui/Toast";
+import { useCopy } from "@/ui/useCopy";
 import { UserName } from "@/views/UserName";
 import { displayNameOf } from "@/lib/useDisplayName";
 
@@ -33,10 +34,6 @@ import { displayNameOf } from "@/lib/useDisplayName";
 
 const SELECT =
   "h-9 w-full rounded-[var(--radius)] border border-[var(--color-border)] bg-[var(--color-surface)] px-2 text-sm text-[var(--color-fg)]";
-
-function copy(text: string): Promise<void> {
-  return navigator.clipboard ? navigator.clipboard.writeText(text) : Promise.reject(new Error("no clipboard"));
-}
 
 export function ShareDialog({
   open,
@@ -78,11 +75,8 @@ export function ShareDialog({
     void reload();
   }, [open, reload]);
 
-  const copyLink = (url: string) =>
-    copy(url).then(
-      () => toast.success("Link copied"),
-      () => toast.error("Could not copy the link"),
-    );
+  const copy = useCopy();
+  const copyLink = (url: string) => copy(url, "link");
 
   const create = async () => {
     setBusy(true);

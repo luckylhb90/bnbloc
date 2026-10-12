@@ -22,6 +22,7 @@ import { saveBlob } from "@/lib/saveBlob";
 import { sharesApi } from "@/lib/sharesApi";
 import { useSharingEnabled } from "@/lib/tenantPolicy";
 import { useToast } from "@/ui/Toast";
+import { useCopy } from "@/ui/useCopy";
 import "@/views/artifact/builtin";
 import { ArtifactBody, resolveViewer, useViewerRegistry } from "@/views/artifact/ArtifactBody";
 import { OpenWithMenu } from "@/views/artifact/OpenWithMenu";
@@ -155,6 +156,7 @@ export function ArtifactTabView({
   readonly onToggleFullscreen?: () => void;
 }) {
   const toast = useToast();
+  const copy = useCopy();
   useViewerRegistry();
   const { detail, error } = useArtifactDetail(roomId, artifactId);
   const nameOf = useDisplayNames((detail?.versions ?? []).map((v) => v.authorUserId ?? ""));
@@ -224,11 +226,7 @@ export function ArtifactTabView({
     }
   };
   const copyLink = () => {
-    const url = artifactShareUrl(roomId, artifactId, version);
-    void navigator.clipboard?.writeText(url).then(
-      () => toast.success("Link copied"),
-      () => toast.error("Could not copy the link"),
-    );
+    void copy(artifactShareUrl(roomId, artifactId, version), "link");
   };
   const openWindow = () => {
     if (onOpenWindow) onOpenWindow();
