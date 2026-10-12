@@ -119,6 +119,22 @@ policy fails closed): eb77683. Desktop and dev-discovery rows: other agents.
 - **Deploy:** bridge and `bnbloc-vmexec` (shipped in the desktop release),
   desktop app, gateway image.
 - **Migration:** none.
+- **Status (desktop rows, 2026-10-12): landed.**
+  - desk H3 (3c19ed8): `member_dir` keyed by sha256(gateway origin,
+    subject); the manager keys it by its session token's `sub`, the bridge
+    env by the bridge's own gateway and owner; a member switch restarts the
+    plugins that read local settings; the unkeyed dirs are deleted at
+    startup.
+  - desk H4 (0160e60): `SignIns` (per-tool lock, `replace_if_current`);
+    `sign_out_and_refresh_do_not_race`.
+  - desk H2 (6f24923): `sidecar_sweep` after every successful reconcile;
+    the in-memory uninstall paths are deleted;
+    `uninstalled_while_closed_is_forgotten`.
+  - desk H6 (1fbae0a): `owned_orphan` for fixed-port sidecars and the
+    sandbox; the exe-only path and `recorded_orphan` are deleted;
+    `orphan_requires_exe_evidence`.
+  - Owners named in AGENTS.md and pinned by `internal_ext/owners_tests.rs`
+    (b3f99f1).
 
 #### 1B. Authorization, membership and tenant scope (L)
 
@@ -253,6 +269,13 @@ desktop agent.
   - `catalog_tolerates_unknown_kind`
 - **Deploy:** gateway, CLI, desktop app.
 - **Migration:** none.
+- **Status (desktop rows, 2026-10-12): landed.**
+  - desk H1 (61719ea): `coreset.EnvKey` exported; the desktop names core
+    env vars only through `core_env_var`/`env_key` (b3f99f1);
+    `internal/coreset/testdata/core_env_keys.json` pins both
+    (`TestEnvKeyMatchesSharedFixture`, `core_env_key_matches_go`).
+  - desk H5 (5e4bf22): `#[serde(other)] Unknown`, catalog entries decoded
+    one by one; `catalog_tolerates_unknown_kind`.
 
 ### Batch 2: gateway and backend rule owners (L)
 
