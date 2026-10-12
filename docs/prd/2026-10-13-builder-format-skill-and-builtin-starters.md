@@ -1,7 +1,16 @@
 # Builder format skill and built-in starter prompts (2026-10-13)
 
-Status: in progress. Items 8 and 10 of the 2026-10-13 prompt audit (every
+Status: landed. Items 8 and 10 of the 2026-10-13 prompt audit (every
 piece of model-facing text, its owner and its size).
+
+Landing commits: e60f988 (`contentpkg.Limits`), 6c5d782 (the builder's
+format skill; 3,549 → 1,128 always-on tokens), 5030d41 (the workshop
+prefills read the builder's quick prompts), 97dd10c (the built-in
+`starters` pack; `STARTER_PROMPTS` deleted; the boundary rule).
+
+Follow-ups noticed, not in scope: a room template's `starterPrompts`
+(`TemplateStartCard`) is a third starter list; prompt-use counts of a
+built-in pack (`content_prompt_uses`) are one row across organizations.
 
 ## Intent
 

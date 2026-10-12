@@ -1100,6 +1100,19 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   `internal/contentbuiltin`, wrapped over the content store at gateway and
   realtime startup, scope `builtin`, artifact key `builtin/<sha256>`.
   Changing a built-in's files means bumping its `component.json` version.
+  A built-in prompt text lives only in its package: the web reads the
+  builder's quick prompts (`workshopDraft`) and the starters through the
+  content API, never a copy (`TestBuiltinPromptsStayOutOfTheWeb`).
+- **The validator's bounds are one table, `contentpkg.Limits()`.** Text
+  that states a limit renders it from there: the builder's
+  `package-format` skill (`TestBuilderLimitsMatchValidator`, `-update`
+  rewrites its table). The builder's always-on `INSTRUCTIONS.md` stays
+  under 1,500 tokens (`TestBuilderAlwaysOnBudget`): what it needs only
+  while drafting goes into that skill. Built-in text names no workspace
+  path (core's lists own them) and no language.
+- **Every starter prompt is a prompt pack's** (`starterChoices`): the
+  room's packs' starters, then the built-in packs' (`starters`). Never add
+  a starter list of the web's own.
 - **Content requests on behalf of a job** (room tools `save_component`,
   `get_component`, …) use the `?job=&room=` grant and act as the job's human
   requester under the dispatch authority rules. Never save content as the

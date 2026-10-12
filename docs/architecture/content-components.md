@@ -51,6 +51,10 @@ uploads, imports, the bridge's materialization):
 - `SKILL.md` frontmatter must carry `name` (= the skill directory) and a
   `description` (the agent loads the skill from it).
 
+Every bound the validator enforces (lengths, counts, sizes) is one table,
+`contentpkg.Limits()`, read from the constants its checks use; guidance
+that states a limit renders it from there (the builder's format skill).
+
 The kind registry (`contentpkg.KindSpec`: short name, limit profile, the
 kind's checks, its form layout, its import of foreign formats, and
 `MemberUse` — whether a member turns it on for themselves) is how a new
@@ -104,12 +108,15 @@ prompts: [{id, title, body, variables: [{name, label?, default?, options?}], tag
   a message that starts with `/word` lists matching slash commands, and a
   prompt with variables asks for them in a small form before its text is
   inserted.
-- **Starter prompts.** An empty room's starter prompts (above the composer)
-  lead with the prompts flagged `starter` in the packs turned on for the
-  room (at most 6, each pack once, in the room's order), then the generic
-  examples. The pack's author flags them; the room's owner chooses by
-  turning the pack on, so a room keeps no second list of its own. A member's
-  own packs add no starters.
+- **Starter prompts.** Every starter prompt of an empty room (above the
+  composer) is a prompt pack's prompt flagged `starter`
+  (`starterChoices`, `web/src/lib/promptPacks.ts`): first those of the
+  packs turned on for the room (at most 6, each pack once, in the room's
+  order), then those of the built-in packs (at most 6; the built-in
+  `starters` pack holds the general-purpose ones). The pack's author flags
+  them; the room's owner chooses by turning the pack on, so a room keeps no
+  second list of its own, and the web keeps none either. A member's own
+  packs add no starters.
 - **The personal pack.** "Save as prompt" on a message
   (`POST /v1/content-components/prompts`) appends the prompt to the
   member's own pack `my-prompts` ("My prompts") as a new version (patch
@@ -129,12 +136,32 @@ prompts: [{id, title, body, variables: [{name, label?, default?, options?}], tag
 
 ## Built-in content
 
-Some content ships with the release: today the **Expert builder**
-(`cc_builtin_expert-builder`, 1.1.0), which authors experts, skill packs and
-prompt packs by conversation (PRD §5): the Library's Experts, Skills and
-Prompts tabs open the workshop with "Create with AI" and "Improve with AI"
-(`views/library/workshopFlow.ts`), and its instructions carry one example
-package per kind, validated by the builder's test. It is a content source, not a second library:
+Some content ships with the release:
+
+- The **Expert builder** (`cc_builtin_expert-builder`, 1.2.0) authors
+  experts, skill packs and prompt packs by conversation (PRD §5). The
+  Library's Experts, Skills and Prompts tabs open the workshop with "Create
+  with AI" and "Improve with AI" (`views/library/workshopFlow.ts`), prefilled
+  with the builder's own quick prompts read through the content API
+  (`workshopDraft`; the titles are pinned by
+  `TestBuilderQuickPromptsServeTheWorkshop`). Its always-on
+  `INSTRUCTIONS.md` holds the method, the quality bar and the rules (at most
+  1,500 tokens, `TestBuilderAlwaysOnBudget`). The package format,
+  requirements (prompt packs, MCP tools), teams, scripts and limits are its
+  embedded skill `package-format`, loaded on demand. The skill's limit table
+  is rendered from `contentpkg.Limits` (`TestBuilderLimitsMatchValidator`,
+  `-update` rewrites it; a limit stated elsewhere in the builder fails it),
+  and `references/examples.md` beside it holds one valid package per kind,
+  team included (`TestBuilderExamplesValidate`). It names no workspace path
+  (`TestBuilderNamesNoWorkspacePaths`) and no language: it answers in the
+  person's.
+- The **starter prompts** (`cc_builtin_starters`), a prompt pack whose
+  prompts are all starters: an empty room's general-purpose examples (see
+  "Prompt packs").
+
+A built-in prompt text lives only in its package:
+`TestBuiltinPromptsStayOutOfTheWeb` fails on a copy in `web/src`. Built-in
+content is a content source, not a second library:
 
 - **Source.** `internal/contentbuiltin` embeds package directories
   (`packages/<name>/`, the directory is the package name), packs each with
