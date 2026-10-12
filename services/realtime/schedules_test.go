@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/luckylhb90/bnbloc/internal/membership"
 	"github.com/luckylhb90/bnbloc/internal/realtime"
 	"github.com/luckylhb90/bnbloc/internal/schedule"
 	"github.com/luckylhb90/bnbloc/internal/store"
@@ -32,15 +33,17 @@ func (s *schedMembers) set(room, user string, member bool) {
 	s.m[room+"\x00"+user] = member
 }
 
-func (s *schedMembers) IsHumanMember(room, user, tenantID string) bool {
-	return s.IsMember(room, user, tenantID)
-}
-
-func (s *schedMembers) IsMember(room, user, _ string) bool {
+func (s *schedMembers) Lookup(room, user string) (membership.Member, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.m[room+"\x00"+user]
+	return membership.Member{Role: store.RoleMember}, s.m[room+"\x00"+user]
 }
+
+func (s *schedMembers) Fresh(room, user string) (membership.Member, bool) {
+	return s.Lookup(room, user)
+}
+
+func (s *schedMembers) Forget(string, string) {}
 
 // schedRoles answers room roles; a room absent from rooms reads as deleted.
 type schedRoles struct {
@@ -263,7 +266,7 @@ func TestScheduleAutoPausesWhenCreatorLeaves(t *testing.T) {
 		t.Fatalf("posted %d messages for a removed creator", len(msgs))
 	}
 	got := f.get(sc.ScheduleID)
-	if got.Enabled || got.NextRunAtMs != 0 || got.LastStatus != wire.ScheduleRunSkipped || !strings.Contains(got.LastError, "no longer a member") {
+	if got.Enabled || got.NextRunAtMs != 0 || got.LastStatus != wire.ScheduleRunSkipped || !strings.Contains(got.LastError, "may no longer post") {
 		t.Fatalf("after removed creator = %+v", got)
 	}
 }

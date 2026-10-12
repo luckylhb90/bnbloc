@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/luckylhb90/bnbloc/internal/contentshare"
+	"github.com/luckylhb90/bnbloc/internal/membership"
 	"github.com/luckylhb90/bnbloc/internal/notify"
 	"github.com/luckylhb90/bnbloc/internal/store"
 	"github.com/luckylhb90/bnbloc/internal/tenant"
@@ -44,7 +45,7 @@ func (s *Service) onMemberJoined(ctx context.Context, ev wire.Event) {
 // grantRoomShares copies the room's standing shares to member (a human
 // member of the room), then notifies and audits each copy created or moved.
 func (s *Service) grantRoomShares(ctx context.Context, tid, roomID, member string) {
-	human := func(user string) bool { return s.Membership != nil && s.Membership.IsHumanMember(roomID, user, tid) }
+	human := func(user string) bool { return membership.HumanMember(s.Membership, roomID, user) }
 	if !human(member) {
 		return
 	}

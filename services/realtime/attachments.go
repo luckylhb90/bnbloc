@@ -13,10 +13,10 @@ import (
 	"github.com/luckylhb90/bnbloc/internal/httpx"
 	"github.com/luckylhb90/bnbloc/internal/ids"
 
+	"github.com/luckylhb90/bnbloc/internal/membership"
 	"github.com/luckylhb90/bnbloc/internal/obs"
 	"github.com/luckylhb90/bnbloc/internal/roomctx"
 	"github.com/luckylhb90/bnbloc/internal/store"
-	"github.com/luckylhb90/bnbloc/internal/tenant"
 )
 
 const (
@@ -104,8 +104,7 @@ func (s *Service) handleUploadAttachment(w http.ResponseWriter, r *http.Request)
 		http.Error(w, "missing authenticated subject", http.StatusUnauthorized)
 		return
 	}
-	if s.Membership == nil || !s.Membership.IsMember(roomID, userID, tenant.FromContext(r.Context())) {
-		http.Error(w, "caller is not a member of room", http.StatusForbidden)
+	if _, ok := s.member(w, r, roomID, userID, membership.AnyMember); !ok {
 		return
 	}
 	if !s.attachmentsReady() {
@@ -181,8 +180,7 @@ func (s *Service) handleDownloadAttachment(w http.ResponseWriter, r *http.Reques
 		http.Error(w, "missing authenticated subject", http.StatusUnauthorized)
 		return
 	}
-	if s.Membership == nil || !s.Membership.IsMember(roomID, userID, tenant.FromContext(r.Context())) {
-		http.Error(w, "caller is not a member of room", http.StatusForbidden)
+	if _, ok := s.member(w, r, roomID, userID, membership.AnyMember); !ok {
 		return
 	}
 	if !s.attachmentsReady() {

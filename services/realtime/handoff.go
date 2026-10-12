@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/luckylhb90/bnbloc/internal/membership"
 	"github.com/luckylhb90/bnbloc/internal/obs"
 	"github.com/luckylhb90/bnbloc/internal/realtime"
 	"github.com/luckylhb90/bnbloc/internal/roomctx"
@@ -211,8 +212,9 @@ func (s *Service) handoffRoom(w http.ResponseWriter, r *http.Request) (string, b
 		return "", false
 	}
 	userID := strings.TrimSpace(r.Header.Get("X-Bnbloc-User"))
-	if s.Membership == nil || !s.Membership.IsMember(roomID, userID, tenant.FromContext(r.Context())) {
-		http.Error(w, "caller is not a member of room", http.StatusForbidden)
+	// A handoff exports or imports the whole feed, the people chat included:
+	// a person's action, never an agent host's.
+	if _, ok := s.member(w, r, roomID, userID, membership.Human); !ok {
 		return "", false
 	}
 	return roomID, true

@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/luckylhb90/bnbloc/internal/membership"
 	"github.com/luckylhb90/bnbloc/internal/notify"
 	"github.com/luckylhb90/bnbloc/internal/obs"
 	"github.com/luckylhb90/bnbloc/internal/roomctx"
@@ -448,12 +449,15 @@ const (
 	scheduledPostUnknownChannel = "unknown_channel"
 	scheduledPostEmpty          = "empty_message"
 	scheduledPostTooLong        = "message_too_long"
+	scheduledPostNotPermitted   = "not_permitted"
 )
 
 var scheduledPostErrs = map[string]error{
 	scheduledPostUnknownChannel: errUnknownChannel,
 	scheduledPostEmpty:          errEmptyMessage,
 	scheduledPostTooLong:        errMessageTooLong,
+	// Every membership refusal of the creator (membership.IsRefusal).
+	scheduledPostNotPermitted: membership.ErrMayNotChat,
 }
 
 // handleInternalScheduledPost makes a claimed schedule's post on the room's
@@ -482,6 +486,10 @@ func (s *Service) handleInternalScheduledPost(w http.ResponseWriter, r *http.Req
 	}
 	seq, err := s.postScheduled(r.Context(), sc, time.UnixMilli(body.SlotMs))
 	if err != nil {
+		if membership.IsRefusal(err) {
+			writeJSON(w, http.StatusUnprocessableEntity, map[string]string{"code": scheduledPostNotPermitted, "error": err.Error()})
+			return
+		}
 		for code, sentinel := range scheduledPostErrs {
 			if errors.Is(err, sentinel) {
 				writeJSON(w, http.StatusUnprocessableEntity, map[string]string{"code": code, "error": err.Error()})

@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/luckylhb90/bnbloc/internal/membership"
 	"github.com/luckylhb90/bnbloc/internal/obs"
 	"github.com/luckylhb90/bnbloc/internal/roomctx"
 	"github.com/luckylhb90/bnbloc/internal/store"
@@ -64,7 +65,7 @@ func (s *Service) handleRecordBorrow(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	caller := callerSubject(r)
-	if !s.requireMember(w, roomID, caller, tenant.FromContext(r.Context())) {
+	if _, ok := s.requireMember(w, r, roomID, caller, membership.AnyMember); !ok {
 		return
 	}
 	owner := strings.TrimSpace(r.URL.Query().Get("owner"))
@@ -97,9 +98,15 @@ func (s *Service) handleRecordBorrow(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	err = s.Grants.SettleRun(r.Context(), roomAuthGrantID(r.Context(), roomID, owner, provider), reservationID, store.RunUsage{
-		Model: clipModel(body.Model), Cost: body.Cost, InputTokens: body.InputTokens, OutputTokens: body.OutputTokens,
-	}, s.Now())
+	usage := store.RunUsage{Model: clipModel(body.Model), Cost: body.Cost, InputTokens: body.InputTokens, OutputTokens: body.OutputTokens}
+	// The reservation was made under the platform grant or the room
+	// authorization (borrowGrant), which may have changed since (a platform
+	// agent removed mid-run): try both; a reservation id is unique.
+	for _, id := range []string{platformGrantID(r.Context(), roomID, owner, provider), roomAuthGrantID(r.Context(), roomID, owner, provider)} {
+		if err = s.Grants.SettleRun(r.Context(), id, reservationID, usage, s.Now()); !errors.Is(err, store.ErrReservationNotFound) {
+			break
+		}
+	}
 	switch {
 	case err == nil:
 		writeJSON(w, http.StatusOK, map[string]any{"recorded": true})
@@ -177,7 +184,7 @@ func (s *Service) handleOwnerAuthorizations(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	owner := callerSubject(r)
-	if !s.requireMember(w, roomID, owner, tenant.FromContext(r.Context())) {
+	if _, ok := s.requireMember(w, r, roomID, owner, membership.AnyMember); !ok {
 		return
 	}
 	// Recent borrowers per grant from the room's audit trail. AuditRecords is

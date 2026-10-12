@@ -4,9 +4,9 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/luckylhb90/bnbloc/internal/membership"
 	"github.com/luckylhb90/bnbloc/internal/roomctx"
 	"github.com/luckylhb90/bnbloc/internal/store"
-	"github.com/luckylhb90/bnbloc/internal/tenant"
 )
 
 // sharedAccess is the credential-free access snapshot projected to clients. It
@@ -35,7 +35,7 @@ func (s *Service) handleAccess(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	if !s.requireMember(w, roomID, callerSubject(r), tenant.FromContext(r.Context())) {
+	if _, ok := s.requireMember(w, r, roomID, callerSubject(r), membership.AnyMember); !ok {
 		return
 	}
 	grantID := r.URL.Query().Get("grantId")

@@ -148,7 +148,7 @@ func byProvider(t *testing.T, out map[string]any) map[string]map[string]any {
 }
 
 func (e *platformEnv) isAgentHost(room, user string) bool {
-	m, ok := e.members.Lookup(room, user, "")
+	m, ok := e.members.Lookup(room, user)
 	return ok && m.AgentHost
 }
 
@@ -307,7 +307,7 @@ func TestPlatformAgentAddListRemove(t *testing.T) {
 	if !e.isAgentHost("room-1", "root") {
 		t.Fatal("adding must give the host an agent-host membership")
 	}
-	g, err := e.grants.GetGrant(dctx(), roomAuthGrantID(dctx(), "room-1", "root", "nimbus:codex"))
+	g, err := e.grants.GetGrant(dctx(), platformGrantID(dctx(), "room-1", "root", "nimbus:codex"))
 	if err != nil || g.Source != store.GrantSourcePlatform || g.RunQuota != nil || g.CostAllowance != nil || g.ExpiresAtMs != nil ||
 		len(g.AllowedModels) != 0 || g.TargetID != "shared-agent:nimbus:codex" || g.OwnerUserID != "root" || g.CreatedBy != "bob" {
 		t.Fatalf("platform grant = %+v %v", g, err)
@@ -374,7 +374,7 @@ func TestPlatformAgentHostAlreadyHumanMember(t *testing.T) {
 	if code, _ := e.call(t, http.MethodPost, "/v1/rooms/room-1/platform-agents", "bob", "", map[string]string{"core": "nimbus", "provider": "codex"}); code != http.StatusCreated {
 		t.Fatalf("add = %d", code)
 	}
-	if e.call(t, http.MethodDelete, "/v1/rooms/room-1/platform-agents/codex?core=nimbus", "bob", "", nil); !e.members.IsHumanMember("room-1", "root", "") {
+	if e.call(t, http.MethodDelete, "/v1/rooms/room-1/platform-agents/codex?core=nimbus", "bob", "", nil); !membership.HumanMember(e.members, "room-1", "root") {
 		t.Fatal("removing the platform agent removed its host's human membership")
 	}
 }
@@ -425,7 +425,7 @@ func TestPlatformAgentReserve(t *testing.T) {
 	if code != http.StatusForbidden || out["denyReason"] != shareagent.DenySandboxRequired || out["sandboxRequired"] != true {
 		t.Fatalf("unsandboxed reserve = %d %v", code, out)
 	}
-	g, _ := e.grants.GetGrant(dctx(), roomAuthGrantID(dctx(), "room-1", "root", "nimbus:codex"))
+	g, _ := e.grants.GetGrant(dctx(), platformGrantID(dctx(), "room-1", "root", "nimbus:codex"))
 	if g.RunsUsed != 3 {
 		t.Fatalf("runs used = %d, want 3 (a refused drive reserves nothing)", g.RunsUsed)
 	}
@@ -520,7 +520,7 @@ func TestPlatformAgentMultiHostAddListReconcile(t *testing.T) {
 	if len(agents) != 2 || len(hostsOf(t, agents["claude"])) != 2 || agents["claude"]["addedBy"] != "bob" || len(hostsOf(t, agents["codex"])) != 2 {
 		t.Fatalf("room list after root2 published claude = %v", out)
 	}
-	g, err := e.grants.GetGrant(dctx(), roomAuthGrantID(dctx(), "room-1", "root2", "nimbus:claude"))
+	g, err := e.grants.GetGrant(dctx(), platformGrantID(dctx(), "room-1", "root2", "nimbus:claude"))
 	if err != nil || g.Source != store.GrantSourcePlatform || g.CreatedBy != "bob" {
 		t.Fatalf("extended grant = %+v %v", g, err)
 	}
@@ -590,7 +590,7 @@ func TestPlatformAgentReserveDefaultModel(t *testing.T) {
 	}
 	var models []string
 	for _, rec := range e.grants.AuditRecords(dctx(), "room-1", 0, 0) {
-		if rec.Decision == "allow" && rec.GrantID == roomAuthGrantID(dctx(), "room-1", "root", "nimbus:codex") {
+		if rec.Decision == "allow" && rec.GrantID == platformGrantID(dctx(), "room-1", "root", "nimbus:codex") {
 			models = append(models, rec.Model)
 		}
 	}
@@ -621,8 +621,12 @@ func TestPlatformAgentsUsage(t *testing.T) {
 		t.Helper()
 		ctx := tctx(tid)
 		c, in := cost, tokens
+		grant := roomAuthGrantID(ctx, room, owner, provider)
+		if owner == "root" { // the platform host
+			grant = platformGrantID(ctx, room, owner, provider)
+		}
 		if err := e.grants.AppendAudit(ctx, store.AuditRecord{
-			RoomID: room, GrantID: roomAuthGrantID(ctx, room, owner, provider), ActorUserID: borrower, OwnerUserID: owner,
+			RoomID: room, GrantID: grant, ActorUserID: borrower, OwnerUserID: owner,
 			Action: "turn", Decision: "allow", Model: "m-" + borrower, AtMs: atMs, Cost: &c, InputTokens: &in,
 		}); err != nil {
 			t.Fatal(err)

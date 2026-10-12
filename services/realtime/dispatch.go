@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/luckylhb90/bnbloc/internal/contentpkg"
+	"github.com/luckylhb90/bnbloc/internal/membership"
 	"github.com/luckylhb90/bnbloc/internal/obs"
 	"github.com/luckylhb90/bnbloc/internal/roomctx"
 	"github.com/luckylhb90/bnbloc/internal/store"
@@ -232,12 +233,13 @@ func (s *Service) checkDispatchAuthority(ctx context.Context, roomID, caller str
 	case err != nil:
 		return failed("read bridge owner: %w", err)
 	}
-	tid := tenant.FromContext(ctx)
-	if s.Membership == nil || !s.Membership.IsMember(roomID, caller, tid) {
-		return refuse(http.StatusForbidden, wire.DispatchNotParentBridge, "caller is not a member of room")
+	if _, err := membership.RoomScope(ctx, s.Membership, roomID, caller, membership.AnyMember); err != nil {
+		return refuse(http.StatusForbidden, wire.DispatchNotParentBridge, "%s", err.Error())
 	}
-	if parent.RequesterUserID == "" || !s.Membership.IsHumanMember(roomID, parent.RequesterUserID, tid) {
-		return refuse(http.StatusForbidden, wire.DispatchRequesterGone, "the parent job's requester is no longer a member of the room")
+	// The dispatch posts as the requester (PostChat checks the same rule);
+	// checked here too so the refusal names the requester.
+	if _, err := membership.RoomScope(ctx, s.Membership, roomID, parent.RequesterUserID, membership.Chat); err != nil {
+		return refuse(http.StatusForbidden, wire.DispatchRequesterGone, "the parent job's requester may no longer post in the room")
 	}
 	return nil
 }

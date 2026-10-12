@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/luckylhb90/bnbloc/internal/membership"
 	"github.com/luckylhb90/bnbloc/internal/notify"
 	"github.com/luckylhb90/bnbloc/internal/obs"
 	"github.com/luckylhb90/bnbloc/internal/realtime"
@@ -53,15 +54,14 @@ var errUnknownChannel = errors.New("channel not found in room")
 // room's people chat: it is a human-only conversation agents never see.
 var errAgentInPeopleChat = errors.New("agents cannot be addressed in the people chat")
 
-// Membership authorizes a caller for a room (fail closed). IsMember admits
-// any membership, a platform agent host's included (its bridge streams the
-// room and reads history); IsHumanMember admits only a human membership, and
-// gates every human-only surface: posting chat, typing, presence, roster
-// advertisement, the people chat, plugin events, mentions, and schedules.
-type Membership interface {
-	IsMember(roomID, userID, tenantID string) bool
-	IsHumanMember(roomID, userID, tenantID string) bool
-}
+// Membership authorizes a caller for a room (fail closed), through
+// membership.RoomScope (s.member): any membership, a platform agent host's
+// included, reads the room (its bridge streams it and reads history);
+// Member.IsHuman gates the human-only surfaces (presence, roster
+// advertisement, the people chat, plugin events, mentions) and
+// Member.MayChat everything that acts in the conversation (chat, typing,
+// schedules, dispatch requesters: PostChat enforces it for every post).
+type Membership = membership.Directory
 
 // Service holds the realtime handler dependencies.
 type Service struct {
@@ -133,6 +133,16 @@ type Service struct {
 	// here for such keys crosses over internal peer routes. Nil is a single
 	// node (every key owned here).
 	Peers *Peers
+	// HeartbeatEvery is the room stream's keep-alive and membership re-check
+	// interval (0 = 15s).
+	HeartbeatEvery time.Duration
+}
+
+func (s *Service) heartbeatEvery() time.Duration {
+	if s.HeartbeatEvery > 0 {
+		return s.HeartbeatEvery
+	}
+	return 15 * time.Second
 }
 
 // ChatStore persists room-feed messages, reads history pages, and tracks
@@ -323,26 +333,34 @@ func (f *peopleFilter) skip(ev wire.Event) bool {
 	return people
 }
 
-// accessRevoked reports whether ev ends the stream of subject: the room was
-// deleted, or subject was removed from it. The payload is a typed
-// wire.MemberRemovedPayload in-process and a decoded JSON map when it arrived
-// through the internal ingest.
-func accessRevoked(ev wire.Event, subject string) bool {
+// revocation reports whether ev ends access to its room: the room was
+// deleted (user "", every member) or one member was removed. The payload is
+// a typed wire.MemberRemovedPayload in-process and a decoded JSON map when
+// it arrived through the internal ingest.
+func revocation(ev wire.Event) (user string, revoked bool) {
 	switch ev.Kind {
 	case wire.EventRoomDeleted:
-		return true
+		return "", true
 	case wire.EventMemberRemoved:
 		switch p := ev.Payload.(type) {
 		case wire.MemberRemovedPayload:
-			return p.UserID == subject
+			return p.UserID, p.UserID != ""
 		case *wire.MemberRemovedPayload:
-			return p != nil && p.UserID == subject
+			if p != nil {
+				return p.UserID, p.UserID != ""
+			}
 		case map[string]any:
 			u, _ := p["userId"].(string)
-			return u == subject
+			return u, u != ""
 		}
 	}
-	return false
+	return "", false
+}
+
+// accessRevoked reports whether ev ends the stream of subject.
+func accessRevoked(ev wire.Event, subject string) bool {
+	user, revoked := revocation(ev)
+	return revoked && (user == "" || user == subject)
 }
 
 // handleEvents streams room events as SSE, delivering the replay snapshot first
@@ -358,14 +376,18 @@ func (s *Service) handleEvents(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "missing authenticated subject", http.StatusUnauthorized)
 		return
 	}
-	if s.Membership == nil || !s.Membership.IsMember(roomID, userID, tenant.FromContext(r.Context())) {
-		http.Error(w, "caller is not a member of room", http.StatusForbidden)
+	// A stream outlives any cache entry: it opens on the room service's
+	// current answer (never a cached one, which could still admit a member
+	// removed seconds ago) and re-checks at every heartbeat below.
+	m, err := membership.FreshRoomScope(r.Context(), s.Membership, roomID, userID, membership.AnyMember)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusForbidden)
 		return
 	}
 	// A platform agent host's stream (its bridge driving the hosted agent)
 	// is an agent's: never present, never advertising a roster, and never
 	// shown the people chat.
-	human := s.Membership.IsHumanMember(roomID, userID, tenant.FromContext(r.Context()))
+	human := m.IsHuman()
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		obs.ServerError(w, "streaming unsupported", nil)
@@ -445,7 +467,7 @@ func (s *Service) handleEvents(w http.ResponseWriter, r *http.Request) {
 	// then reconnects — churning presence join/leave and, worse, missing any
 	// agent reply produced during the dead window. A comment line every 15s
 	// keeps the stream alive without emitting a spurious event.
-	heartbeat := time.NewTicker(15 * time.Second)
+	heartbeat := time.NewTicker(s.heartbeatEvery())
 	defer heartbeat.Stop()
 	// write streams one event; it reports whether the subscriber's access
 	// ended (member removed / room deleted): the client has been told why, so
@@ -474,6 +496,12 @@ func (s *Service) handleEvents(w http.ResponseWriter, r *http.Request) {
 		case <-ctx.Done():
 			return
 		case <-heartbeat.C:
+			// The revocation event is live-only and may never reach this
+			// replica (an ownership move, a failed ingest): the stream
+			// re-checks the membership it opened on, and ends once it is gone.
+			if _, err := membership.RoomScope(ctx, s.Membership, roomID, userID, membership.AnyMember); err != nil {
+				return
+			}
 			fmt.Fprint(w, ": keep-alive\n\n")
 			flusher.Flush()
 		case ev, open := <-sub.Events():
@@ -515,8 +543,7 @@ func (s *Service) handleAgents(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "missing authenticated subject", http.StatusUnauthorized)
 		return
 	}
-	if s.Membership == nil || !s.Membership.IsMember(roomID, userID, tenant.FromContext(r.Context())) {
-		http.Error(w, "caller is not a member of room", http.StatusForbidden)
+	if _, ok := s.member(w, r, roomID, userID, membership.AnyMember); !ok {
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -568,12 +595,9 @@ func (s *Service) handleChat(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "missing authenticated subject", http.StatusUnauthorized)
 		return
 	}
-	// Chat is a human's: a platform agent host's membership never posts as
-	// the host (its agent's replies go through activity).
-	if s.Membership == nil || !s.Membership.IsHumanMember(roomID, userID, tenant.FromContext(r.Context())) {
-		http.Error(w, "caller is not a member of room", http.StatusForbidden)
-		return
-	}
+	// Only a member who may chat posts (PostChat checks it): never a visitor,
+	// and never a platform agent host's membership (its agent's replies go
+	// through activity).
 	var body struct {
 		Text     string `json:"text"`
 		AtUnixMs int64  `json:"atUnixMs"`
@@ -624,6 +648,8 @@ func writeChatPostErr(w http.ResponseWriter, err error) {
 	var bad errBadAttachment
 	var offline errPlatformAgentOffline
 	switch {
+	case membership.IsRefusal(err):
+		http.Error(w, err.Error(), http.StatusForbidden)
 	case errors.As(err, &offline):
 		writePlatformAgentOffline(w, offline)
 	case errors.Is(err, errMessageTooLong):
@@ -655,6 +681,11 @@ func (s *Service) handleInternalPublish(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	ev.RoomID = roomID
+	// A removal or room deletion drops the cached membership before the
+	// event goes out: a client that reconnects on it is refused at once.
+	if user, revoked := revocation(ev); revoked && s.Membership != nil {
+		s.Membership.Forget(roomID, user)
+	}
 	if ev.Kind == wire.KindAgentMessages {
 		people, err := s.isPeopleChannel(r.Context(), roomID, ev.ChannelID)
 		if err != nil {
@@ -772,8 +803,8 @@ func (s *Service) handleHistory(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "missing authenticated subject", http.StatusUnauthorized)
 		return
 	}
-	if s.Membership == nil || !s.Membership.IsMember(roomID, userID, tenant.FromContext(r.Context())) {
-		http.Error(w, "caller is not a member of room", http.StatusForbidden)
+	m, ok := s.member(w, r, roomID, userID, membership.AnyMember)
+	if !ok {
 		return
 	}
 	if s.Chat == nil {
@@ -791,7 +822,7 @@ func (s *Service) handleHistory(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusNotFound)
 		return
 	}
-	if !s.Membership.IsHumanMember(roomID, userID, tenant.FromContext(r.Context())) && !s.agentMayReadChannel(w, r.Context(), roomID, channelID) {
+	if !m.IsHuman() && !s.agentMayReadChannel(w, r.Context(), roomID, channelID) {
 		return
 	}
 	msgs, err := s.Chat.RoomHistory(r.Context(), roomID, channelID, before, limit)
@@ -840,8 +871,7 @@ func (s *Service) handleMarkRead(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "missing authenticated subject", http.StatusUnauthorized)
 		return
 	}
-	if s.Membership == nil || !s.Membership.IsMember(roomID, userID, tenant.FromContext(r.Context())) {
-		http.Error(w, "caller is not a member of room", http.StatusForbidden)
+	if _, ok := s.member(w, r, roomID, userID, membership.AnyMember); !ok {
 		return
 	}
 	var body struct {
@@ -895,8 +925,7 @@ func (s *Service) handleDeleteMessage(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "missing authenticated subject", http.StatusUnauthorized)
 		return
 	}
-	if s.Membership == nil || !s.Membership.IsMember(roomID, userID, tenant.FromContext(r.Context())) {
-		http.Error(w, "caller is not a member of room", http.StatusForbidden)
+	if _, ok := s.member(w, r, roomID, userID, membership.AnyMember); !ok {
 		return
 	}
 	seq := parseInt(r.PathValue("seq"))
@@ -951,8 +980,7 @@ func (s *Service) handleEditMessage(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "missing authenticated subject", http.StatusUnauthorized)
 		return
 	}
-	if s.Membership == nil || !s.Membership.IsMember(roomID, userID, tenant.FromContext(r.Context())) {
-		http.Error(w, "caller is not a member of room", http.StatusForbidden)
+	if _, ok := s.member(w, r, roomID, userID, membership.AnyMember); !ok {
 		return
 	}
 	seq := parseInt(r.PathValue("seq"))
@@ -1042,10 +1070,19 @@ func (s *Service) handleUnread(w http.ResponseWriter, r *http.Request) {
 	}
 	out := map[string]int{}
 	perChannel := map[string][]map[string]any{}
-	if s.Chat != nil {
+	if s.Chat != nil && s.Membership != nil {
 		for _, roomID := range rooms {
-			if s.Membership == nil || !s.Membership.IsMember(roomID, userID, tenant.FromContext(r.Context())) {
+			// A read across rooms the caller names: each room is read in its own
+			// tenant (the membership probe answers it), so a member of rooms in
+			// several organizations gets every room's count whatever tenant the
+			// request is signed for.
+			m, member := s.Membership.Lookup(roomID, userID)
+			if !member {
 				continue
+			}
+			ctx := r.Context()
+			if m.Tenant != "" {
+				ctx = tenant.NewContext(ctx, m.Tenant)
 			}
 			total := 0
 			// The legacy empty channel holds rows written before channels existed.
@@ -1054,17 +1091,17 @@ func (s *Service) handleUnread(w http.ResponseWriter, r *http.Request) {
 			// channel shows a room badge nobody can locate or clear, because every
 			// channel view reads its own id and never the empty bucket.
 			legacy := 0
-			if n, err := s.Chat.UnreadCount(r.Context(), roomID, "", userID); err == nil {
+			if n, err := s.Chat.UnreadCount(ctx, roomID, "", userID); err == nil {
 				legacy = n
 				total += n
 			}
 			if s.Channels != nil {
 				defaultID := ""
-				if def, ok := s.Channels.DefaultChannel(r.Context(), roomID); ok {
+				if def, ok := s.Channels.DefaultChannel(ctx, roomID); ok {
 					defaultID = def.ChannelID
 				}
-				for _, ch := range s.Channels.ListChannels(r.Context(), roomID) {
-					n, err := s.Chat.UnreadCount(r.Context(), roomID, ch.ChannelID, userID)
+				for _, ch := range s.Channels.ListChannels(ctx, roomID) {
+					n, err := s.Chat.UnreadCount(ctx, roomID, ch.ChannelID, userID)
 					if err != nil {
 						continue
 					}
@@ -1105,8 +1142,7 @@ func (s *Service) handleTyping(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "missing authenticated subject", http.StatusUnauthorized)
 		return
 	}
-	if s.Membership == nil || !s.Membership.IsHumanMember(roomID, userID, tenant.FromContext(r.Context())) {
-		http.Error(w, "caller is not a member of room", http.StatusForbidden)
+	if _, ok := s.member(w, r, roomID, userID, membership.Chat); !ok {
 		return
 	}
 	var body struct {

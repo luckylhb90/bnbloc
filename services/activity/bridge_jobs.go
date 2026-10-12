@@ -422,14 +422,12 @@ func (s *Service) handleRoomAgentJobs(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusNotImplemented, "bridge jobs not configured")
 		return
 	}
-	roomID := r.PathValue("roomId")
-	userID := strings.TrimSpace(r.Header.Get("X-Bnbloc-User"))
-	if userID == "" {
-		writeErr(w, http.StatusUnauthorized, "missing authenticated subject")
+	roomID, err := roomctx.Normalize(r.PathValue("roomId"))
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	if s.Membership != nil && !s.Membership.IsMember(roomID, userID, tenant.FromContext(r.Context())) {
-		writeErr(w, http.StatusForbidden, "caller is not a member of room")
+	if !s.authorize(w, r, roomID) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"jobs": s.BridgeJobs.ListAgentJobs(r.Context(), roomID, r.URL.Query().Get("channelId"), 100)})

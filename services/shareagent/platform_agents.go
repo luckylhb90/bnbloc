@@ -293,7 +293,7 @@ func roomPlatformAgents(pgs []shareagent.RoomPlatformGrant, p wire.PlatformAgent
 // and does not serve the room yet, and each host's agent-host membership
 // converges on whether it has an available agent here.
 func (s *Service) handleListRoomPlatformAgents(w http.ResponseWriter, r *http.Request) {
-	roomID, ok := s.platformRoom(w, r)
+	roomID, _, ok := s.platformRoom(w, r)
 	if !ok {
 		return
 	}
@@ -368,7 +368,7 @@ func (s *Service) putPlatformHost(ctx context.Context, tid, roomID, host string,
 		return store.Grant{}, err
 	}
 	g := store.Grant{
-		GrantID:       roomAuthGrantID(ctx, roomID, host, platformProvider(ref)),
+		GrantID:       platformGrantID(ctx, roomID, host, platformProvider(ref)),
 		RoomID:        roomID,
 		TargetID:      shareagent.PlatformTarget(ref),
 		OwnerUserID:   host,
@@ -385,12 +385,12 @@ func (s *Service) putPlatformHost(ctx context.Context, tid, roomID, host string,
 // want. Best-effort (the listing is still right; the next one retries); a
 // human membership is never touched (the room service enforces it too).
 func (s *Service) reconcileAgentHost(ctx context.Context, tid, roomID, host string, want bool) {
-	m, member := s.Membership.Lookup(roomID, host, tid)
+	m, member := s.Membership.Lookup(roomID, host)
 	var err error
 	switch {
 	case want && !member:
 		err = s.AgentHosts.PutAgentHost(ctx, tid, roomID, host)
-	case !want && member && m.AgentHost:
+	case !want && member && !m.IsHuman():
 		err = s.AgentHosts.DeleteAgentHost(ctx, tid, roomID, host)
 	}
 	if err != nil {
@@ -400,31 +400,28 @@ func (s *Service) reconcileAgentHost(ctx context.Context, tid, roomID, host stri
 }
 
 // platformRoom validates a room-scoped platform-agent request: configured,
-// authenticated, and the caller a member of the room.
-func (s *Service) platformRoom(w http.ResponseWriter, r *http.Request) (string, bool) {
+// authenticated, and the caller a member of the room (any membership: the
+// caller's, for the route to ask MayChat of).
+func (s *Service) platformRoom(w http.ResponseWriter, r *http.Request) (string, membership.Member, bool) {
+	var none membership.Member
 	if !s.platformAgentsReady(w) {
-		return "", false
+		return "", none, false
 	}
 	if s.AgentHosts == nil {
 		obs.ServerError(w, "agent-host memberships not configured", nil)
 		writeErr(w, http.StatusNotImplemented, "platform agents not configured")
-		return "", false
+		return "", none, false
 	}
 	roomID, err := roomctx.Normalize(r.PathValue("roomId"))
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, err.Error())
-		return "", false
+		return "", none, false
 	}
-	if !s.requireMember(w, roomID, callerSubject(r), tenant.FromContext(r.Context())) {
-		return "", false
+	m, ok := s.requireMember(w, r, roomID, callerSubject(r), membership.AnyMember)
+	if !ok {
+		return "", none, false
 	}
-	return roomID, true
-}
-
-// mayChat reports whether the caller is a member who may chat in the room:
-// a human member who is not a visitor.
-func mayChat(m membership.Member, ok bool) bool {
-	return ok && !m.AgentHost && m.Role != store.RoleVisitor
+	return roomID, m, true
 }
 
 // handleAddRoomPlatformAgent is POST /v1/rooms/{roomId}/platform-agents
@@ -432,14 +429,14 @@ func mayChat(m membership.Member, ok bool) bool {
 // every host publishing it. 201 {agent} when a host was added, 200 {agent}
 // when every publishing host already served the room (idempotent).
 func (s *Service) handleAddRoomPlatformAgent(w http.ResponseWriter, r *http.Request) {
-	roomID, ok := s.platformRoom(w, r)
+	roomID, m, ok := s.platformRoom(w, r)
 	if !ok {
 		return
 	}
 	ctx := r.Context()
 	tid := tenant.FromContext(ctx)
 	caller := callerSubject(r)
-	if !mayChat(s.Membership.Lookup(roomID, caller, tid)) {
+	if !m.MayChat() {
 		writeErr(w, http.StatusForbidden, "only a room member who may chat can add a platform agent")
 		return
 	}
@@ -495,7 +492,7 @@ func (s *Service) handleAddRoomPlatformAgent(w http.ResponseWriter, r *http.Requ
 // grants in the room (every host's); a host's agent-host membership goes
 // once none of its agents is left here. 204, also when it was not there.
 func (s *Service) handleRemoveRoomPlatformAgent(w http.ResponseWriter, r *http.Request) {
-	roomID, ok := s.platformRoom(w, r)
+	roomID, m, ok := s.platformRoom(w, r)
 	if !ok {
 		return
 	}
@@ -530,7 +527,7 @@ func (s *Service) handleRemoveRoomPlatformAgent(w http.ResponseWriter, r *http.R
 	for _, g := range targets {
 		isHost = isHost || g.OwnerUserID == caller
 	}
-	if !mayChat(s.Membership.Lookup(roomID, caller, tid)) && !isHost {
+	if !m.MayChat() && !isHost {
 		writeErr(w, http.StatusForbidden, "only a room member who may chat or the host can remove a platform agent")
 		return
 	}

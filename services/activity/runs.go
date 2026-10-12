@@ -9,10 +9,10 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/luckylhb90/bnbloc/internal/membership"
 	"github.com/luckylhb90/bnbloc/internal/obs"
 	"github.com/luckylhb90/bnbloc/internal/roomctx"
 	"github.com/luckylhb90/bnbloc/internal/store"
-	"github.com/luckylhb90/bnbloc/internal/tenant"
 	"github.com/luckylhb90/bnbloc/internal/wire"
 )
 
@@ -299,7 +299,8 @@ func (v *runViewer) canRead(roomID string) bool {
 	}
 	ok, seen := v.members[roomID]
 	if !seen {
-		ok = v.s.Membership != nil && v.s.Membership.IsMember(roomID, v.caller, tenant.FromContext(v.r.Context()))
+		_, err := membership.RoomScope(v.r.Context(), v.s.Membership, roomID, v.caller, membership.AnyMember)
+		ok = err == nil
 		v.members[roomID] = ok
 	}
 	return ok

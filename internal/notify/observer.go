@@ -9,17 +9,16 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/luckylhb90/bnbloc/internal/membership"
 	"github.com/luckylhb90/bnbloc/internal/store"
 	"github.com/luckylhb90/bnbloc/internal/tenant"
 	"github.com/luckylhb90/bnbloc/internal/wire"
 )
 
-// Membership reports human membership of a room (the realtime/room
-// contract). A platform agent host's hidden membership is not one: room
-// notifications only ever reach the room's people.
-type Membership interface {
-	IsHumanMember(roomID, userID, tenantID string) bool
-}
+// Membership reads room membership (the realtime/room contract). A platform
+// agent host's hidden membership is not a person's: room notifications only
+// ever reach the room's people (membership.HumanMember).
+type Membership = membership.Reader
 
 // DefaultQueueSize bounds the observation queue between the publish tap and
 // the notification producer. A full queue drops (and counts) observations:
@@ -194,8 +193,8 @@ func (o *Observer) emit(parent context.Context, tenantID string, events []Event)
 		// A borrow request goes to the agent's owner only while they are one
 		// of the room's people: a platform agent's host (an agent-host
 		// membership) is not asked to authorize anything.
-		if ev.Type == wire.NotificationBorrowRequest && o.Membership != nil &&
-			(len(ev.Recipients) != 1 || !o.Membership.IsHumanMember(ev.RoomID, ev.Recipients[0], tenantID)) {
+		if ev.Type == wire.NotificationBorrowRequest &&
+			(len(ev.Recipients) != 1 || !membership.HumanMember(o.Membership, ev.RoomID, ev.Recipients[0])) {
 			continue
 		}
 		if _, err := o.Emitter.Emit(ctx, ev); err != nil {
@@ -233,7 +232,7 @@ func (o *Observer) mentionEvents(obs observation) []Event {
 		if c == obs.author {
 			continue
 		}
-		if o.Membership.IsHumanMember(obs.roomID, c, obs.tenantID) {
+		if membership.HumanMember(o.Membership, obs.roomID, c) {
 			recipients = append(recipients, c)
 		}
 	}

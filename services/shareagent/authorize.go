@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/luckylhb90/bnbloc/internal/membership"
 	"github.com/luckylhb90/bnbloc/internal/obs"
 	"github.com/luckylhb90/bnbloc/internal/roomctx"
 	"github.com/luckylhb90/bnbloc/internal/store"
@@ -29,8 +30,33 @@ import (
 // grant_id is the table's sole primary key. Parts are NUL-separated; none of
 // them can contain NUL, so the encoding is unambiguous.
 func roomAuthGrantID(ctx context.Context, roomID, owner, provider string) string {
+	return grantID(ctx, "roomauth_", roomID, owner, provider)
+}
+
+// platformGrantID is the id of a platform grant: host serving a platform
+// agent ("<core>:<provider>") in a room. It is its own namespace, so an
+// owner's room authorization of the same agent (PUT/DELETE .../authorization)
+// can neither overwrite nor revoke it.
+func platformGrantID(ctx context.Context, roomID, host, provider string) string {
+	return grantID(ctx, "platauth_", roomID, host, provider)
+}
+
+func grantID(ctx context.Context, prefix, roomID, owner, provider string) string {
 	sum := sha256.Sum256([]byte(tenant.FromContext(ctx) + "\x00" + roomID + "\x00" + owner + "\x00" + provider))
-	return "roomauth_" + base64.RawURLEncoding.EncodeToString(sum[:])
+	return prefix + base64.RawURLEncoding.EncodeToString(sum[:])
+}
+
+// borrowGrant is the grant a borrow of owner's agent (provider, the target's
+// "<core>:<provider>" suffix) runs under: the platform grant while the room
+// holds a live one for it (a platform drive, always sandboxed), else the
+// owner's room authorization. It is the one place reserve, record and the
+// authorization reads pick between the two.
+func (s *Service) borrowGrant(ctx context.Context, roomID, owner, provider string) (id string, platform store.Grant, isPlatform bool) {
+	pid := platformGrantID(ctx, roomID, owner, provider)
+	if g, err := s.Grants.GetGrant(ctx, pid); err == nil && g.Source == store.GrantSourcePlatform && g.RevokedAtMs == nil {
+		return pid, g, true
+	}
+	return roomAuthGrantID(ctx, roomID, owner, provider), store.Grant{}, false
 }
 
 // providerFromTarget extracts the provider from a "shared-agent:<provider>"
@@ -60,8 +86,11 @@ func (s *Service) handleAuthorize(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	// Authorizing a borrow is a person's act in the conversation: never an
+	// agent host's membership (a platform agent is served by its platform
+	// grant), never a visitor's (visitors are read-only).
 	owner := callerSubject(r)
-	if !s.requireMember(w, roomID, owner, tenant.FromContext(r.Context())) {
+	if _, ok := s.requireMember(w, r, roomID, owner, membership.Chat); !ok {
 		return
 	}
 	provider := providerFromTarget(r.PathValue("targetId"))
@@ -134,8 +163,11 @@ func (s *Service) handleDeauthorize(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	// Any person may withdraw their own authorization (a member made a
+	// visitor included); an agent host has none: its platform grant is
+	// another id (platformGrantID) this route never reaches.
 	owner := callerSubject(r)
-	if !s.requireMember(w, roomID, owner, tenant.FromContext(r.Context())) {
+	if _, ok := s.requireMember(w, r, roomID, owner, membership.Human); !ok {
 		return
 	}
 	provider := providerFromTarget(r.PathValue("targetId"))
@@ -162,7 +194,7 @@ func (s *Service) handleAuthorization(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	if !s.requireMember(w, roomID, callerSubject(r), tenant.FromContext(r.Context())) {
+	if _, ok := s.requireMember(w, r, roomID, callerSubject(r), membership.AnyMember); !ok {
 		return
 	}
 	owner := strings.TrimSpace(r.URL.Query().Get("owner"))

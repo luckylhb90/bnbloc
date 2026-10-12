@@ -11,20 +11,19 @@ import (
 	"strings"
 	"time"
 
+	"github.com/luckylhb90/bnbloc/internal/membership"
 	"github.com/luckylhb90/bnbloc/internal/obs"
 	"github.com/luckylhb90/bnbloc/internal/realtime"
 	"github.com/luckylhb90/bnbloc/internal/roomctx"
 	"github.com/luckylhb90/bnbloc/internal/store"
 	"github.com/luckylhb90/bnbloc/internal/svcauth"
-	"github.com/luckylhb90/bnbloc/internal/tenant"
 	"github.com/luckylhb90/bnbloc/internal/wire"
 )
 
-// Membership authorizes a caller for a room. bnbloc-activity never accepts a
-// report for a room the caller is not a member of (fail closed).
-type Membership interface {
-	IsMember(roomID, userID, tenantID string) bool
-}
+// Membership authorizes a caller for a room through membership.RoomScope.
+// bnbloc-activity never accepts a report for a room the caller is not a
+// member of, in the room's own tenant (fail closed).
+type Membership = membership.Directory
 
 // Service holds the activity handler dependencies.
 type Service struct {
@@ -245,8 +244,8 @@ func (s *Service) authorize(w http.ResponseWriter, r *http.Request, roomID strin
 		writeErr(w, http.StatusUnauthorized, "missing authenticated subject")
 		return false
 	}
-	if s.Membership == nil || !s.Membership.IsMember(roomID, userID, tenant.FromContext(r.Context())) {
-		writeErr(w, http.StatusForbidden, "caller is not a member of room")
+	if _, err := membership.RoomScope(r.Context(), s.Membership, roomID, userID, membership.AnyMember); err != nil {
+		writeErr(w, http.StatusForbidden, err.Error())
 		return false
 	}
 	return true
@@ -263,7 +262,10 @@ func (s *Service) attributeOwner(r *http.Request, roomID, asserted string) (stri
 	if asserted == "" || asserted == caller {
 		return caller, true
 	}
-	if s.AllowServeAllOwners && s.Membership != nil && s.Membership.IsMember(roomID, asserted, tenant.FromContext(r.Context())) {
+	if !s.AllowServeAllOwners {
+		return "", false
+	}
+	if _, err := membership.RoomScope(r.Context(), s.Membership, roomID, asserted, membership.AnyMember); err == nil {
 		return asserted, true
 	}
 	return "", false

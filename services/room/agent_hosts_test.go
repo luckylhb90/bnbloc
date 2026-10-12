@@ -60,11 +60,11 @@ func TestAgentHostRoutesViaMembershipClient(t *testing.T) {
 	if err := rc.PutAgentHost(ctx, tenant.Default, "nope", "root"); err == nil {
 		t.Fatal("agent host of a missing room must fail")
 	}
-	m, ok := rc.Lookup("room-1", "root", tenant.Default)
-	if !ok || !m.AgentHost || m.Role != store.RoleVisitor || !rc.IsMember("room-1", "root", tenant.Default) || rc.IsHumanMember("room-1", "root", tenant.Default) {
+	m, ok := rc.Lookup("room-1", "root")
+	if !ok || !m.AgentHost || m.Role != store.RoleVisitor || m.IsHuman() || m.Tenant != tenant.Default {
 		t.Fatalf("probe of the agent host = %+v %v", m, ok)
 	}
-	if !rc.IsHumanMember("room-1", "bob", tenant.Default) {
+	if !membership.HumanMember(rc, "room-1", "bob") {
 		t.Fatal("a human member is a human member")
 	}
 	// A human member is never turned into (or removed as) an agent host.
@@ -80,7 +80,7 @@ func TestAgentHostRoutesViaMembershipClient(t *testing.T) {
 	if err := rc.DeleteAgentHost(ctx, tenant.Default, "room-1", "root"); err != nil {
 		t.Fatalf("delete: %v", err)
 	}
-	if rc.IsMember("room-1", "root", tenant.Default) || svc.Store.IsMember(dctx(), "room-1", "root") {
+	if _, member := rc.Lookup("room-1", "root"); member || svc.Store.IsMember(dctx(), "room-1", "root") {
 		t.Fatal("the agent host survived its removal (the client cache must be dropped too)")
 	}
 	if err := rc.DeleteAgentHost(ctx, tenant.Default, "room-1", "root"); err != nil {

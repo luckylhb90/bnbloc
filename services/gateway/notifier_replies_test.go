@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/luckylhb90/bnbloc/core/pkgmeta"
+	"github.com/luckylhb90/bnbloc/internal/membership"
 	"github.com/luckylhb90/bnbloc/internal/notify"
 	"github.com/luckylhb90/bnbloc/internal/realtime"
 	"github.com/luckylhb90/bnbloc/internal/store"
@@ -28,15 +29,17 @@ type replyMembers struct {
 	members map[string]bool // room/user
 }
 
-func (m *replyMembers) IsHumanMember(roomID, userID, tenantID string) bool {
-	return m.IsMember(roomID, userID, tenantID)
-}
-
-func (m *replyMembers) IsMember(roomID, userID, _ string) bool {
+func (m *replyMembers) Lookup(roomID, userID string) (membership.Member, bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return m.members[roomID+"/"+userID]
+	return membership.Member{Role: store.RoleMember}, m.members[roomID+"/"+userID]
 }
+
+func (m *replyMembers) Fresh(roomID, userID string) (membership.Member, bool) {
+	return m.Lookup(roomID, userID)
+}
+
+func (*replyMembers) Forget(string, string) {}
 
 func (m *replyMembers) set(roomID, userID string, member bool) {
 	m.mu.Lock()

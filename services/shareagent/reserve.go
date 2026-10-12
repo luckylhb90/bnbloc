@@ -6,11 +6,11 @@ import (
 	"strings"
 
 	"github.com/luckylhb90/bnbloc/internal/ids"
+	"github.com/luckylhb90/bnbloc/internal/membership"
 	"github.com/luckylhb90/bnbloc/internal/obs"
 	"github.com/luckylhb90/bnbloc/internal/roomctx"
 	"github.com/luckylhb90/bnbloc/internal/shareagent"
 	"github.com/luckylhb90/bnbloc/internal/store"
-	"github.com/luckylhb90/bnbloc/internal/tenant"
 	"github.com/luckylhb90/bnbloc/internal/wire"
 )
 
@@ -61,9 +61,8 @@ func (s *Service) handleReserveBorrow(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	tid := tenant.FromContext(r.Context())
 	caller := callerSubject(r)
-	if !s.requireMember(w, roomID, caller, tid) {
+	if _, ok := s.requireMember(w, r, roomID, caller, membership.AnyMember); !ok {
 		return
 	}
 	owner := strings.TrimSpace(r.URL.Query().Get("owner"))
@@ -85,19 +84,19 @@ func (s *Service) handleReserveBorrow(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "borrower must be a member other than the owner")
 		return
 	}
-	if !s.Membership.IsMember(roomID, borrower, tid) {
-		writeErr(w, http.StatusForbidden, "borrower is not a member of room")
+	// The borrower drives the agent: a member who may chat (never a visitor
+	// or an agent host).
+	if _, err := membership.RoomScope(r.Context(), s.Membership, roomID, borrower, membership.Chat); err != nil {
+		writeErr(w, http.StatusForbidden, "borrower: "+err.Error())
 		return
 	}
-	grantID := roomAuthGrantID(r.Context(), roomID, owner, provider)
 	channelID := strings.TrimSpace(body.ChannelId)
 	model := clipModel(body.Model)
 	// A platform grant (docs/prd/2026-10-10-zero-install-onboarding.md §2)
 	// is unlimited and outside the org's borrow ceilings, but usable only
 	// while its agent is still published here, and only for a sandboxed
 	// drive.
-	current, getErr := s.Grants.GetGrant(r.Context(), grantID)
-	platform := getErr == nil && current.Source == store.GrantSourcePlatform
+	grantID, current, platform := s.borrowGrant(r.Context(), roomID, owner, provider)
 	var spec wire.PlatformAgentSpec
 	published := false
 	if platform {
@@ -112,8 +111,8 @@ func (s *Service) handleReserveBorrow(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusForbidden, map[string]any{"reserved": false, "denyReason": reason, "sandboxRequired": platform})
 	}
 	switch {
-	case platform && (current.RevokedAtMs != nil || current.ExpiresAtMs != nil):
-		// Removed from the room (platform grants never expire).
+	case platform && current.ExpiresAtMs != nil:
+		// Platform grants never expire: a malformed one authorizes nothing.
 		deny(DenyOwnerNotAuthorized)
 		return
 	case platform && !published:

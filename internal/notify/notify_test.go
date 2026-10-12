@@ -17,6 +17,7 @@ import (
 	"github.com/luckylhb90/bnbloc/core/pkgmeta"
 	"github.com/luckylhb90/bnbloc/internal/extpipe"
 	"github.com/luckylhb90/bnbloc/internal/extreg"
+	"github.com/luckylhb90/bnbloc/internal/membership"
 	"github.com/luckylhb90/bnbloc/internal/store"
 	"github.com/luckylhb90/bnbloc/internal/tenant"
 	"github.com/luckylhb90/bnbloc/internal/wire"
@@ -279,7 +280,9 @@ func TestEmitterOneItemPerNotifierAndOptInFiltersRecipients(t *testing.T) {
 // fakeMembership is a static (room, user) member set.
 type fakeMembership map[string]bool
 
-func (m fakeMembership) IsHumanMember(roomID, userID, _ string) bool { return m[roomID+"/"+userID] }
+func (m fakeMembership) Lookup(roomID, userID string) (membership.Member, bool) {
+	return membership.Member{Role: store.RoleMember}, m[roomID+"/"+userID]
+}
 
 func TestObserverMentionAndJobEvents(t *testing.T) {
 	f := newFixture(t)

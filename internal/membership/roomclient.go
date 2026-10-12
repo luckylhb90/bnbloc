@@ -15,8 +15,9 @@ import (
 )
 
 // RoomClient authorizes room membership by calling bnbloc-room's member probe.
-// A positive result is cached with a short TTL; any non-200 fails closed
-// (returns false), never granting access on error.
+// A positive result is cached with a short TTL (Forget clears it on a
+// revocation signal); any non-200 fails closed (not a member) and is never
+// cached.
 type RoomClient struct {
 	BaseURL string
 	HTTP    *http.Client
@@ -24,7 +25,7 @@ type RoomClient struct {
 	Now     func() time.Time
 
 	mu    sync.Mutex
-	cache map[string]cachedMember // "tenant\x00roomID\x00userID" -> membership
+	cache map[string]cachedMember // memberKey(room, user) -> membership
 }
 
 type cachedMember struct {
@@ -43,36 +44,26 @@ func NewRoomClient(baseURL string) *RoomClient {
 	}
 }
 
-// IsMember reports whether the user belongs to the room in any way, an
-// agent-host membership included (see Lookup).
-func (c *RoomClient) IsMember(roomID, userID, tenantID string) bool {
-	_, ok := c.Lookup(roomID, userID, tenantID)
-	return ok
-}
+func memberKey(roomID, userID string) string { return roomID + "\x00" + userID }
 
-// IsHumanMember reports whether the user is a human member of the room: a
-// member whose membership is not an agent host's (see store.Membership).
-func (c *RoomClient) IsHumanMember(roomID, userID, tenantID string) bool {
-	m, ok := c.Lookup(roomID, userID, tenantID)
-	return ok && !m.AgentHost
-}
-
-// Lookup returns the user's membership of the room, consulting the cache
-// first and then bnbloc-room's tenant-agnostic membership probe. Room ids are
-// globally unique (the room's own tenant is authoritative), so membership is
-// keyed on (room, user) alone — a caller whose token was minted in a different
-// tenant than the room (a multi-tenant member, or the bridge acting as one) is
-// still correctly authorized. The tenantID arg is retained for the interface
-// and cache key but does not scope the probe. Fails closed on any error.
-func (c *RoomClient) Lookup(roomID, userID, tenantID string) (Member, bool) {
-	key := tenantID + "\x00" + roomID + "\x00" + userID
+// Lookup returns the user's membership of the room, from the cache while a
+// positive answer is fresh, else from Fresh. Room ids are globally unique:
+// the probe is keyed on (room, user) alone and answers the room's own
+// tenant, which RoomScope compares with the request's.
+func (c *RoomClient) Lookup(roomID, userID string) (Member, bool) {
 	c.mu.Lock()
-	if hit, ok := c.cache[key]; ok && c.Now().Before(hit.exp) {
+	if hit, ok := c.cache[memberKey(roomID, userID)]; ok && c.Now().Before(hit.exp) {
 		c.mu.Unlock()
 		return hit.m, true
 	}
 	c.mu.Unlock()
+	return c.Fresh(roomID, userID)
+}
 
+// Fresh asks bnbloc-room's tenant-agnostic membership probe, bypassing the
+// cache, and caches a positive answer. Fails closed on any error, and on an
+// answer without the room's tenant.
+func (c *RoomClient) Fresh(roomID, userID string) (Member, bool) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	endpoint := c.BaseURL + "/v1/rooms/" + url.PathEscape(roomID) + "/membership/" + url.PathEscape(userID)
@@ -81,7 +72,7 @@ func (c *RoomClient) Lookup(roomID, userID, tenantID string) (Member, bool) {
 		return Member{}, false
 	}
 	// The membership probe authorizes on the queried subject itself.
-	req.Header.Set("X-Bnbloc-User", userID)
+	req.Header.Set(svcauth.HeaderUser, userID)
 	svcauth.Sign(req, svcauth.KeyFromEnv(), userID)
 	resp, err := c.HTTP.Do(req)
 	if err != nil {
@@ -95,11 +86,12 @@ func (c *RoomClient) Lookup(roomID, userID, tenantID string) (Member, bool) {
 		Member    bool   `json:"member"`
 		Role      string `json:"role"`
 		AgentHost bool   `json:"agentHost"`
+		TenantID  string `json:"tenantId"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil || !out.Member {
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil || !out.Member || out.TenantID == "" {
 		return Member{}, false
 	}
-	m := Member{Role: store.Role(out.Role), AgentHost: out.AgentHost}
+	m := Member{Role: store.Role(out.Role), AgentHost: out.AgentHost, Tenant: out.TenantID}
 	c.mu.Lock()
 	now := c.Now()
 	// Opportunistically evict expired entries so the cache cannot grow unbounded
@@ -110,9 +102,27 @@ func (c *RoomClient) Lookup(roomID, userID, tenantID string) (Member, bool) {
 			delete(c.cache, k)
 		}
 	}
-	c.cache[key] = cachedMember{m: m, exp: now.Add(c.TTL)}
+	c.cache[memberKey(roomID, userID)] = cachedMember{m: m, exp: now.Add(c.TTL)}
 	c.mu.Unlock()
 	return m, true
+}
+
+// Forget drops the cached answer for (room, user), or every cached answer of
+// the room when userID is "". realtime calls it when it delivers
+// member_removed / room_deleted, so a removed member's next request (a
+// reconnect, a post) is refused at once instead of after the TTL.
+func (c *RoomClient) Forget(roomID, userID string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if userID != "" {
+		delete(c.cache, memberKey(roomID, userID))
+		return
+	}
+	for k := range c.cache {
+		if strings.HasPrefix(k, roomID+"\x00") {
+			delete(c.cache, k)
+		}
+	}
 }
 
 // AgentHostSubject is the service identity the room service accepts on its
@@ -153,12 +163,6 @@ func (c *RoomClient) agentHost(ctx context.Context, method, tenantID, roomID, us
 		return fmt.Errorf("membership: agent-host %s answered %d", method, resp.StatusCode)
 	}
 	// The cached probe answer for this user is stale now.
-	c.mu.Lock()
-	for k := range c.cache {
-		if strings.HasSuffix(k, "\x00"+roomID+"\x00"+userID) {
-			delete(c.cache, k)
-		}
-	}
-	c.mu.Unlock()
+	c.Forget(roomID, userID)
 	return nil
 }

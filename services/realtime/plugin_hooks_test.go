@@ -120,15 +120,23 @@ type scopedMembers struct {
 	rows map[string]map[string]map[string]bool
 }
 
-func (s *scopedMembers) IsHumanMember(roomID, userID, tenantID string) bool {
-	return s.IsMember(roomID, userID, tenantID)
-}
-
-func (s *scopedMembers) IsMember(roomID, userID, tenantID string) bool {
+// Lookup finds the tenant that holds the room (room ids are global).
+func (s *scopedMembers) Lookup(roomID, userID string) (membership.Member, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.rows[tenantID] != nil && s.rows[tenantID][roomID] != nil && s.rows[tenantID][roomID][userID]
+	for tid, rooms := range s.rows {
+		if rooms[roomID][userID] {
+			return membership.Member{Role: store.RoleMember, Tenant: tid}, true
+		}
+	}
+	return membership.Member{}, false
 }
+
+func (s *scopedMembers) Fresh(roomID, userID string) (membership.Member, bool) {
+	return s.Lookup(roomID, userID)
+}
+
+func (s *scopedMembers) Forget(string, string) {}
 
 func chatEvent(room, author, text string) wire.Event {
 	return wire.Event{RoomID: room, Kind: "chat_message", Payload: map[string]any{"userId": author, "text": text}}

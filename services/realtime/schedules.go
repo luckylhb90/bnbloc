@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/luckylhb90/bnbloc/internal/ids"
+	"github.com/luckylhb90/bnbloc/internal/membership"
 	"github.com/luckylhb90/bnbloc/internal/obs"
 	"github.com/luckylhb90/bnbloc/internal/schedule"
 	"github.com/luckylhb90/bnbloc/internal/store"
@@ -138,7 +139,7 @@ func writeScheduleErr(w http.ResponseWriter, err error) {
 }
 
 func (s *Service) handleListSchedules(w http.ResponseWriter, r *http.Request) {
-	roomID, _, ok := s.requireRoomMember(w, r)
+	roomID, _, _, ok := s.requireRoomMember(w, r, membership.AnyMember)
 	if !ok || !s.schedulesReady(w) {
 		return
 	}
@@ -151,13 +152,9 @@ func (s *Service) handleListSchedules(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Service) handleCreateSchedule(w http.ResponseWriter, r *http.Request) {
-	roomID, userID, ok := s.requireRoomMember(w, r)
+	// A schedule posts as its creator, which only a member who may chat may.
+	roomID, userID, _, ok := s.requireRoomMember(w, r, membership.Chat)
 	if !ok || !s.schedulesReady(w) {
-		return
-	}
-	// A schedule posts as its creator, which only a human member may.
-	if !s.Membership.IsHumanMember(roomID, userID, tenant.FromContext(r.Context())) {
-		http.Error(w, "caller is not a member of room", http.StatusForbidden)
 		return
 	}
 	var in scheduleInput
@@ -263,7 +260,7 @@ func (s *Service) checkScheduleSpec(ctx context.Context, sc *wire.RoomSchedule, 
 // room owner or an admin may only pause another member's schedule (resuming
 // would post as someone else, so only the creator resumes).
 func (s *Service) handlePatchSchedule(w http.ResponseWriter, r *http.Request) {
-	roomID, userID, ok := s.requireRoomMember(w, r)
+	roomID, userID, _, ok := s.requireRoomMember(w, r, membership.AnyMember)
 	if !ok || !s.schedulesReady(w) {
 		return
 	}
@@ -330,7 +327,7 @@ func (s *Service) handlePatchSchedule(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Service) handleDeleteSchedule(w http.ResponseWriter, r *http.Request) {
-	roomID, userID, ok := s.requireRoomMember(w, r)
+	roomID, userID, _, ok := s.requireRoomMember(w, r, membership.AnyMember)
 	if !ok || !s.schedulesReady(w) {
 		return
 	}
@@ -353,7 +350,7 @@ func (s *Service) handleDeleteSchedule(w http.ResponseWriter, r *http.Request) {
 // handleRunSchedule posts a schedule's message now (creator only: it posts as
 // the creator). It does not move the planned next run.
 func (s *Service) handleRunSchedule(w http.ResponseWriter, r *http.Request) {
-	roomID, userID, ok := s.requireRoomMember(w, r)
+	roomID, userID, _, ok := s.requireRoomMember(w, r, membership.AnyMember)
 	if !ok || !s.schedulesReady(w) {
 		return
 	}
@@ -475,10 +472,17 @@ func (s *Service) runClaimedSchedule(ctx context.Context, sc wire.RoomSchedule, 
 		finish()
 		return
 	}
-	// The creator must still be able to post here, exactly like a typed
-	// message. A room deleted or a creator removed pauses the schedule.
-	if s.Membership == nil || !s.Membership.IsHumanMember(sc.RoomID, sc.CreatedBy, sc.TenantID) {
-		why := "the creator is no longer a member of the room"
+	// Only the room's owner sequences its messages: a slot claimed here for a
+	// room another replica owns is posted there (scaleout.go).
+	seq, err := s.postScheduledAtOwner(tctx, sc, slot)
+	switch {
+	case err == nil:
+		res.Status, res.Seq = wire.ScheduleRunOK, seq
+	case membership.IsRefusal(err):
+		// The creator must still be able to post here, exactly like a typed
+		// message (PostChat checks it). A room deleted, or a creator removed
+		// or made a visitor, pauses the schedule.
+		why := "the creator may no longer post in the room"
 		if s.RoomRoles != nil {
 			if _, err := s.RoomRoles.GetRoom(tctx, sc.RoomID); err != nil {
 				why = "the room no longer exists"
@@ -486,13 +490,6 @@ func (s *Service) runClaimedSchedule(ctx context.Context, sc wire.RoomSchedule, 
 		}
 		pause(wire.ScheduleRunSkipped, why)
 		return
-	}
-	// Only the room's owner sequences its messages: a slot claimed here for a
-	// room another replica owns is posted there (scaleout.go).
-	seq, err := s.postScheduledAtOwner(tctx, sc, slot)
-	switch {
-	case err == nil:
-		res.Status, res.Seq = wire.ScheduleRunOK, seq
 	case errors.Is(err, errUnknownChannel):
 		pause(wire.ScheduleRunError, "the schedule's channel no longer exists")
 		return

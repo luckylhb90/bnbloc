@@ -16,6 +16,7 @@ import (
 	"testing"
 
 	"github.com/luckylhb90/bnbloc/internal/blobstore"
+	"github.com/luckylhb90/bnbloc/internal/membership"
 	"github.com/luckylhb90/bnbloc/internal/realtime"
 	"github.com/luckylhb90/bnbloc/internal/store"
 	"github.com/luckylhb90/bnbloc/internal/tenant"
@@ -27,14 +28,16 @@ import (
 // the two in-process services agree on who is in which room.
 type roomStoreMembership struct{ rooms *store.MemoryRoom }
 
-func (m roomStoreMembership) IsHumanMember(roomID, userID, tenantID string) bool {
-	mem, ok := m.rooms.GetMember(tenant.NewContext(context.Background(), tenantID), roomID, userID)
-	return ok && !mem.AgentHost
+func (m roomStoreMembership) Lookup(roomID, userID string) (membership.Member, bool) {
+	mem, ok := m.rooms.MembershipAnyTenant(context.Background(), roomID, userID)
+	return membership.Member{Role: mem.Role, AgentHost: mem.AgentHost, Tenant: mem.TenantID}, ok
 }
 
-func (m roomStoreMembership) IsMember(roomID, userID, tenantID string) bool {
-	return m.rooms.IsMember(tenant.NewContext(context.Background(), tenantID), roomID, userID)
+func (m roomStoreMembership) Fresh(roomID, userID string) (membership.Member, bool) {
+	return m.Lookup(roomID, userID)
 }
+
+func (roomStoreMembership) Forget(string, string) {}
 
 // handoffEnv runs the real room and realtime services in-process over HTTP,
 // wired exactly like production (room -> realtime via the handoff client).

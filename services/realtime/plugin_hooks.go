@@ -12,6 +12,7 @@ import (
 	"github.com/luckylhb90/bnbloc/internal/extgov"
 	"github.com/luckylhb90/bnbloc/internal/extpipe"
 	"github.com/luckylhb90/bnbloc/internal/extreg"
+	"github.com/luckylhb90/bnbloc/internal/membership"
 	"github.com/luckylhb90/bnbloc/internal/pluginruntime"
 	"github.com/luckylhb90/bnbloc/internal/store"
 	"github.com/luckylhb90/bnbloc/internal/tenant"
@@ -429,7 +430,7 @@ func (d *PluginHookDispatcher) fanOut(item pluginEvent) {
 			if !probed {
 				// A platform agent host's membership is not the member's
 				// own room: its desktop's plugins get no events from it.
-				isMember = item.members != nil && item.members.IsHumanMember(item.ev.RoomID, st.subject, item.tenantID)
+				isMember = membership.HumanMember(item.members, item.ev.RoomID, st.subject)
 				memberOf[st.subject] = isMember
 			}
 			if !isMember {

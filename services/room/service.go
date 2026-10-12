@@ -369,16 +369,18 @@ func (s *Service) handleGetMember(w http.ResponseWriter, r *http.Request) {
 // caller's own tenant-scoped membership — the signed X-Bnbloc-User (verified by
 // svcauth middleware) and the requested subject are the authorization.
 //
-// It answers {member, role, agentHost}: an agent-host membership is a member
-// (the host's bridge reads the room) that every human-only surface refuses
-// (membership.RoomClient.IsHumanMember).
+// It answers {member, role, agentHost, tenantId}: an agent-host membership
+// is a member (the host's bridge reads the room) that every human-only
+// surface refuses (membership.Member.IsHuman), and tenantId is the room's
+// own tenant, which a backend compares with the tenant a request is signed
+// for (membership.RoomScope).
 func (s *Service) handleMembershipProbe(w http.ResponseWriter, r *http.Request) {
 	m, member := s.Store.MembershipAnyTenant(r.Context(), r.PathValue("roomId"), r.PathValue("userId"))
 	if !member {
 		writeJSON(w, http.StatusOK, map[string]any{"member": false})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"member": true, "role": string(m.Role), "agentHost": m.AgentHost})
+	writeJSON(w, http.StatusOK, map[string]any{"member": true, "role": string(m.Role), "agentHost": m.AgentHost, "tenantId": m.TenantID})
 }
 
 // isHumanMember reports whether user is a member of the room whose

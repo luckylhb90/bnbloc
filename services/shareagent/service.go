@@ -20,7 +20,6 @@ import (
 	"github.com/luckylhb90/bnbloc/internal/shareagent"
 	"github.com/luckylhb90/bnbloc/internal/store"
 	"github.com/luckylhb90/bnbloc/internal/svcauth"
-	"github.com/luckylhb90/bnbloc/internal/tenant"
 )
 
 // OwnerResolver returns the base URL of an owner daemon's proxy endpoint for a
@@ -29,14 +28,11 @@ type OwnerResolver interface {
 	OwnerEndpoint(roomID, ownerUserID string) (string, bool)
 }
 
-// Membership authorizes a caller for a room (fail closed). It mirrors the
-// realtime service's membership dependency so every shareagent action is gated
-// on the caller actually belonging to the room. Lookup also reports the role
-// and whether the membership is a platform agent host's (membership.Member).
-type Membership interface {
-	IsMember(roomID, userID, tenantID string) bool
-	Lookup(roomID, userID, tenantID string) (membership.Member, bool)
-}
+// Membership authorizes a caller for a room (fail closed) through
+// membership.RoomScope (requireMember), like every backend: the role, and
+// whether the membership is a platform agent host's, come with it
+// (membership.Member).
+type Membership = membership.Directory
 
 // Service holds the shareagent handler dependencies.
 type Service struct {
@@ -88,19 +84,21 @@ type Service struct {
 	RoomName func(ctx context.Context, roomID string) string
 }
 
-// requireMember resolves the authenticated caller from X-Bnbloc-User and
-// verifies room membership, failing closed. It writes the error response and
-// returns ok=false when the caller is missing or not a member.
-func (s *Service) requireMember(w http.ResponseWriter, roomID, caller, tenantID string) bool {
+// requireMember verifies the authenticated caller's room membership with the
+// ability need (membership.RoomScope, in the request's tenant), failing
+// closed. It writes the error response and returns ok=false when the caller
+// is missing or refused.
+func (s *Service) requireMember(w http.ResponseWriter, r *http.Request, roomID, caller string, need membership.Need) (membership.Member, bool) {
 	if caller == "" {
 		writeErr(w, http.StatusUnauthorized, "missing authenticated subject")
-		return false
+		return membership.Member{}, false
 	}
-	if s.Membership == nil || !s.Membership.IsMember(roomID, caller, tenantID) {
-		writeErr(w, http.StatusForbidden, "caller is not a member of room")
-		return false
+	m, err := membership.RoomScope(r.Context(), s.Membership, roomID, caller, need)
+	if err != nil {
+		writeErr(w, http.StatusForbidden, err.Error())
+		return membership.Member{}, false
 	}
-	return true
+	return m, true
 }
 
 // Handler builds the HTTP mux for the shareagent service.
@@ -220,7 +218,7 @@ func (s *Service) handleAction(action string) http.HandlerFunc {
 			return
 		}
 		actor := strings.TrimSpace(r.Header.Get("X-Bnbloc-User"))
-		if !s.requireMember(w, roomID, actor, tenant.FromContext(r.Context())) {
+		if _, ok := s.requireMember(w, r, roomID, actor, membership.AnyMember); !ok {
 			return
 		}
 		var body actionBody

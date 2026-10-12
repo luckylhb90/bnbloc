@@ -37,19 +37,16 @@ func tctx() context.Context {
 // staticMembers is a shared membership set for the in-process backends.
 type staticMembers struct{ *store.MemoryRoom }
 
-func (s staticMembers) Lookup(roomID, userID, _ string) (membership.Member, bool) {
-	m, ok := s.MemoryRoom.GetMember(tctx(), roomID, userID)
-	return membership.Member{Role: m.Role, AgentHost: m.AgentHost}, ok
+func (s staticMembers) Lookup(roomID, userID string) (membership.Member, bool) {
+	m, ok := s.MemoryRoom.MembershipAnyTenant(tctx(), roomID, userID)
+	return membership.Member{Role: m.Role, AgentHost: m.AgentHost, Tenant: m.TenantID}, ok
 }
 
-func (s staticMembers) IsHumanMember(roomID, userID, _ string) bool {
-	m, ok := s.MemoryRoom.GetMember(tctx(), roomID, userID)
-	return ok && !m.AgentHost
+func (s staticMembers) Fresh(roomID, userID string) (membership.Member, bool) {
+	return s.Lookup(roomID, userID)
 }
 
-func (s staticMembers) IsMember(roomID, userID, _ string) bool {
-	return s.MemoryRoom.IsMember(tctx(), roomID, userID)
-}
+func (staticMembers) Forget(string, string) {}
 
 type onlinePresence struct{}
 

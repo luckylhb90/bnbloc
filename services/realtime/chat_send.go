@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/luckylhb90/bnbloc/internal/ids"
+	"github.com/luckylhb90/bnbloc/internal/membership"
 	"github.com/luckylhb90/bnbloc/internal/store"
 	"github.com/luckylhb90/bnbloc/internal/wire"
 )
@@ -49,8 +50,8 @@ type ChatRecipient struct {
 	AgentOptions *ChatAgentOptions `json:"agentOptions,omitempty"`
 }
 
-// ChatPost is one chat message posted as Author. The caller has already
-// authorized Author as a member of RoomID.
+// ChatPost is one chat message posted as Author (PostChat checks Author may
+// chat in RoomID).
 type ChatPost struct {
 	RoomID string
 	Author string
@@ -91,10 +92,17 @@ type ChatPosted struct {
 // PostChat validates, persists, and publishes a chat message, then creates
 // the agent job for an agent recipient. It returns the message's sequence
 // (the original one for a clientMsgId already seen) and the queued job.
-// Errors: errEmptyMessage, errMessageTooLong, errBadAttachment,
-// errUnknownChannel, errAgentInPeopleChat, errPlatformAgentOffline, or a
-// persistence failure.
+// Errors: a membership refusal (membership.IsRefusal), errEmptyMessage,
+// errMessageTooLong, errBadAttachment, errUnknownChannel,
+// errAgentInPeopleChat, errPlatformAgentOffline, or a persistence failure.
+//
+// The author must be a member who may chat (membership.Member.MayChat), in
+// the tenant ctx is signed for: checked here, once, so no caller (a typed
+// message, a scheduled or dispatched post) can skip it.
 func (s *Service) PostChat(ctx context.Context, p ChatPost) (ChatPosted, error) {
+	if _, err := membership.RoomScope(ctx, s.Membership, p.RoomID, p.Author, membership.Chat); err != nil {
+		return ChatPosted{}, err
+	}
 	if len(p.Text) > maxChatTextBytes {
 		return ChatPosted{}, errMessageTooLong
 	}

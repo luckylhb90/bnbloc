@@ -8,10 +8,10 @@ import (
 	"unicode/utf8"
 
 	"github.com/luckylhb90/bnbloc/internal/ids"
+	"github.com/luckylhb90/bnbloc/internal/membership"
 	"github.com/luckylhb90/bnbloc/internal/obs"
 	"github.com/luckylhb90/bnbloc/internal/roomctx"
 	"github.com/luckylhb90/bnbloc/internal/store"
-	"github.com/luckylhb90/bnbloc/internal/tenant"
 	"github.com/luckylhb90/bnbloc/internal/wire"
 )
 
@@ -72,8 +72,8 @@ func (s *Service) handleCreateQuotaRequest(w http.ResponseWriter, r *http.Reques
 		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	tid := tenant.FromContext(r.Context())
-	if !s.requireMember(w, roomID, requester, tid) {
+	// Asking for more runs is part of borrowing: a member who may chat.
+	if _, ok := s.requireMember(w, r, roomID, requester, membership.Chat); !ok {
 		return
 	}
 	owner := strings.TrimSpace(in.Owner)
@@ -298,7 +298,8 @@ func (s *Service) writeDecideErr(w http.ResponseWriter, err error) {
 // grant also still published by its host). It is the one
 // liveness rule: roomAuthorized and the quota request paths all read it.
 func (s *Service) liveAuthorization(ctx context.Context, roomID, owner, provider string) (store.Grant, bool) {
-	g, err := s.Grants.GetGrant(ctx, roomAuthGrantID(ctx, roomID, owner, provider))
+	id, _, _ := s.borrowGrant(ctx, roomID, owner, provider)
+	g, err := s.Grants.GetGrant(ctx, id)
 	if err != nil || g.RevokedAtMs != nil || (g.ExpiresAtMs != nil && s.Now() >= *g.ExpiresAtMs) {
 		return store.Grant{}, false
 	}

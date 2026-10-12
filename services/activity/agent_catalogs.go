@@ -11,7 +11,6 @@ import (
 	"github.com/luckylhb90/bnbloc/internal/roomctx"
 	"github.com/luckylhb90/bnbloc/internal/shareagent"
 	"github.com/luckylhb90/bnbloc/internal/store"
-	"github.com/luckylhb90/bnbloc/internal/tenant"
 	"github.com/luckylhb90/bnbloc/internal/wire"
 )
 
@@ -48,9 +47,7 @@ func (s *Service) handleRoomAgentCatalogs(w http.ResponseWriter, r *http.Request
 		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	ctx := r.Context()
-	if s.Membership == nil || !s.Membership.IsMember(roomID, caller, tenant.FromContext(ctx)) {
-		writeErr(w, http.StatusForbidden, "caller is not a member of room")
+	if !s.authorize(w, r, roomID) {
 		return
 	}
 	agents := []wire.RoomAgentCatalog{}

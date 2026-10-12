@@ -12,7 +12,6 @@ import (
 	"github.com/luckylhb90/bnbloc/internal/obs"
 	"github.com/luckylhb90/bnbloc/internal/roomctx"
 	"github.com/luckylhb90/bnbloc/internal/store"
-	"github.com/luckylhb90/bnbloc/internal/tenant"
 	"github.com/luckylhb90/bnbloc/internal/wire"
 )
 
@@ -51,8 +50,7 @@ func (s *Service) handleTeamPlan(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
-	if s.Membership == nil || !s.Membership.IsMember(roomID, caller, tenant.FromContext(ctx)) {
-		writeErr(w, http.StatusForbidden, "caller is not a member of room")
+	if !s.authorize(w, r, roomID) {
 		return
 	}
 	var in wire.TeamPlanRequest
