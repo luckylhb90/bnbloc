@@ -75,9 +75,10 @@ type sidecarSpec struct {
 	Binaries                 multiFlag
 }
 
-// sidecarPackage maps the publish-sidecar flags onto the package (artifacts
-// are filled in after upload). It validates everything that can be checked
-// before any byte is uploaded.
+// sidecarPackage maps the publish-sidecar flags onto the package: each
+// --binary's platform is an upload placeholder until uploaded. It holds the
+// draft to the install gate (pkgmeta.ValidatePackage) before any byte is
+// uploaded, so a bad name or URL leaves no orphan upload.
 func sidecarPackage(spec sidecarSpec) (pkgmeta.Package, error) {
 	if spec.Name == "" {
 		return pkgmeta.Package{}, fmt.Errorf("--name is required")
@@ -101,7 +102,7 @@ func sidecarPackage(spec sidecarSpec) (pkgmeta.Package, error) {
 	if localURL == "" {
 		return pkgmeta.Package{}, fmt.Errorf("--local-url is required (no manifest to derive it from)")
 	}
-	return pkgmeta.Package{
+	pkg := pkgmeta.Package{
 		Kind:      pkgmeta.KindCorePackageV1,
 		Name:      spec.Name,
 		Version:   spec.Version,
@@ -109,8 +110,17 @@ func sidecarPackage(spec sidecarSpec) (pkgmeta.Package, error) {
 		Protocol:  protocol.ProtocolRange{Min: protocol.SupportedMinVersion, Max: protocol.SupportedMaxVersion},
 		Manifest:  m,
 		Sidecar:   &pkgmeta.Sidecar{LocalURL: localURL, ListenEnv: strings.TrimSpace(spec.ListenEnv), SupervisedEnv: strings.TrimSpace(spec.SupervisedEnv)},
+		Artifacts: map[string]pkgmeta.Artifact{},
 		Publisher: spec.Publisher,
-	}, nil
+	}
+	for _, b := range spec.Binaries {
+		platform, _, _ := parseBinarySpec(b)
+		pkg.Artifacts[platform] = pkgmeta.Artifact{}
+	}
+	if err := pkgmeta.ValidatePackage(pkg); err != nil {
+		return pkgmeta.Package{}, fmt.Errorf("package invalid: %w", err)
+	}
+	return pkg, nil
 }
 
 // parseBinarySpec splits a --binary <platform>=<path> value.
@@ -143,7 +153,7 @@ func readOptionalManifest(manifestFile string) (*manifestcore.Manifest, error) {
 	if strings.TrimSpace(manifestFile) == "" {
 		return nil, nil
 	}
-	rawManifest, err := os.ReadFile(manifestFile)
+	rawManifest, err := os.ReadFile(expandHome(manifestFile))
 	if err != nil {
 		return nil, err
 	}

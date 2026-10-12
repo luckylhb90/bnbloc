@@ -32,7 +32,8 @@ func contentGateway(t *testing.T, pkg string) (*httptest.Server, *map[string]str
 	return srv, &published, &query
 }
 
-const contentPkg = `{"kind":"bnbloc.expert.package/v1","name":"reviewer","version":"1.2.0","publisher":"acme","runtime":"bundle"}`
+const contentPkg = `{"kind":"bnbloc.expert.package/v1","name":"reviewer","version":"1.2.0","publisher":"acme","runtime":"bundle",` +
+	`"artifacts":{"bundle":{"url":"https://gw.example.com/v1/artifacts/sha256/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}}}`
 
 // export writes the exact package bytes; promote signs those bytes with the
 // default publisher key and installs them through the component route.
@@ -61,8 +62,7 @@ func TestContentExportAndPromote(t *testing.T) {
 	if (*published)["package"] != contentPkg || (*published)["signature"] == "" {
 		t.Fatalf("published = %v", *published)
 	}
-	// The signature covers exactly the exported bytes (the CLI does not
-	// link the content kinds, so parsing stops after the signature check).
+	// The signature covers exactly the exported bytes.
 	pub, _ := os.ReadFile(filepath.Join(home, ".bnbloc", "component-publisher.pub"))
 	lines := strings.Split(strings.TrimSpace(string(pub)), "\n")
 	keyID, _, err := pkgmeta.DecodeMinisignPublicKey(lines[len(lines)-1])
@@ -70,7 +70,7 @@ func TestContentExportAndPromote(t *testing.T) {
 		t.Fatal(err)
 	}
 	trusted := []pkgmeta.TrustedKey{{KeyID: keyID, PublicKey: lines[len(lines)-1]}}
-	if _, err := pkgmeta.VerifySignedPackage([]byte(contentPkg), []byte((*published)["signature"]), trusted); err != nil && !strings.Contains(err.Error(), "unknown package kind") {
+	if _, err := pkgmeta.VerifySignedPackage([]byte(contentPkg), []byte((*published)["signature"]), trusted); err != nil {
 		t.Fatalf("signature does not verify: %v", err)
 	}
 	if _, err := pkgmeta.VerifySignedPackage([]byte(strings.Replace(contentPkg, "acme", "evil", 1)), []byte((*published)["signature"]), trusted); err == nil || !strings.Contains(err.Error(), "verification failed") {

@@ -12,6 +12,9 @@ import (
 	"github.com/luckylhb90/bnbloc/core/manifestcore"
 	"github.com/luckylhb90/bnbloc/core/pkgmeta"
 	"github.com/luckylhb90/bnbloc/core/protocol"
+	// The content kinds register their install validators with pkgmeta, so
+	// a content platform package is held to the gateway's gate here too.
+	_ "github.com/luckylhb90/bnbloc/internal/contentpkg"
 	"github.com/luckylhb90/bnbloc/internal/extpipe"
 )
 
@@ -61,6 +64,9 @@ func coresInstall(args []string) error {
 	if err != nil {
 		return err
 	}
+	if _, err := pkgmeta.ParsePackage(pkgBody); err != nil {
+		return fmt.Errorf("package invalid: %w", err)
+	}
 	var signature string
 	if *packageFile != "" && *signatureFile != "" {
 		// A pre-built package keeps the signature its publisher produced.
@@ -89,9 +95,14 @@ func coresInstall(args []string) error {
 // publishComponent is the ONE component publish call (install, publish-sidecar, publish-mcp):
 // POST /v1/platform/components with the package, its signature, and an
 // optional rollout the gateway applies atomically with the publish (the same
-// request the platform console sends). A notifier's first install answers
-// with its signing secret: it is printed here, the only time it is shown.
+// request the platform console sends). The package is held to the install
+// gate (pkgmeta.ParsePackage) before it is sent. A notifier's first install
+// answers with its signing secret: it is printed here, the only time it is
+// shown.
 func publishComponent(c *client, pkgBody []byte, signature, rollout string) error {
+	if _, err := pkgmeta.ParsePackage(pkgBody); err != nil {
+		return fmt.Errorf("package invalid: %w", err)
+	}
 	req := map[string]string{"package": string(pkgBody), "signature": signature}
 	if rollout != "" {
 		req["rollout"] = rollout
@@ -132,9 +143,9 @@ func validRolloutFlag(rollout string) error {
 func buildPackage(daemonURL, manifestFile, packageFile, name, version, publisher string) ([]byte, error) {
 	switch {
 	case packageFile != "":
-		return os.ReadFile(packageFile)
+		return os.ReadFile(expandHome(packageFile))
 	case manifestFile != "":
-		raw, err := os.ReadFile(manifestFile)
+		raw, err := os.ReadFile(expandHome(manifestFile))
 		if err != nil {
 			return nil, err
 		}

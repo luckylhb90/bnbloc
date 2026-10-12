@@ -19,6 +19,7 @@ import (
 type publishGateway struct {
 	*httptest.Server
 	published map[string]string
+	uploads   int
 }
 
 func newPublishGateway(t *testing.T) *publishGateway {
@@ -26,6 +27,7 @@ func newPublishGateway(t *testing.T) *publishGateway {
 	g.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method + " " + r.URL.Path {
 		case "POST /v1/platform/artifacts":
+			g.uploads++
 			raw, _ := io.ReadAll(r.Body)
 			if r.ContentLength != int64(len(raw)) {
 				http.Error(w, "upload must carry its length", http.StatusLengthRequired)
@@ -111,11 +113,20 @@ func TestPublishSidecarRefusesBeforeUpload(t *testing.T) {
 		"no local url": {[]string{"--name", "acme", "--binary", "darwin-arm64=" + bin, "--unsigned"}, "--local-url is required"},
 		"no binary":    {[]string{"--name", "acme", "--local-url", "http://x", "--unsigned"}, "at least one --binary"},
 		"no name":      {[]string{"--binary", "darwin-arm64=" + bin, "--unsigned"}, "--name is required"},
+		// The package is held to the install gate before any upload, so a
+		// bad name, version or URL leaves no orphan binary behind.
+		"bad name":     {append(append([]string{}, base...), "--unsigned", "--name", "Acme!"), "package invalid"},
+		"bad version":  {append(append([]string{}, base...), "--unsigned", "--version", "1.0"), "semver"},
+		"remote url":   {append(append([]string{}, base...), "--unsigned", "--local-url", "http://example.com:7099"), "loopback"},
+		"bad env name": {append(append([]string{}, base...), "--unsigned", "--listen-env", "acme-listen"), "upper-case identifier"},
 	} {
 		err := coresPublishSidecar(c.args)
 		if err == nil || !strings.Contains(err.Error(), c.want) {
 			t.Errorf("%s: err = %v, want %q", name, err, c.want)
 		}
+	}
+	if gw.uploads != 0 {
+		t.Fatalf("%d binaries uploaded for refused input", gw.uploads)
 	}
 	if gw.published != nil {
 		t.Fatal("published despite refused input")
@@ -127,12 +138,18 @@ func TestPublishSidecarRefusesBeforeUpload(t *testing.T) {
 func TestInstallPrebuiltPackageWithRollout(t *testing.T) {
 	isolateHome(t)
 	gw := newPublishGateway(t)
-	pkg := writeTemp(t, "pkg.json", `{"kind":"bnbloc.core.package/v1","name":"acme"}`)
+	body := `{"kind":"bnbloc.core.package/v1","name":"acme","version":"1.0.0","runtime":"endpoint","endpoint":{"baseUrl":"https://acme.example.com"},"protocol":{"min":"1.0","max":"1.0"},"publisher":"self","description":"","permissions":{}}`
+	pkg := writeTemp(t, "pkg.json", body)
 	sig := writeTemp(t, "pkg.sig", "signature-bytes\n")
+	// An invalid package is refused locally, before anything is sent.
+	bad := writeTemp(t, "bad.json", `{"kind":"bnbloc.core.package/v1","name":"acme"}`)
+	if err := coresInstall([]string{"--gateway", gw.URL, "--token", "admin", "--package", bad, "--signature", sig}); err == nil || gw.published != nil {
+		t.Fatalf("an invalid package was sent: err = %v", err)
+	}
 	if err := coresInstall([]string{"--gateway", gw.URL, "--token", "admin", "--package", pkg, "--signature", sig, "--rollout", "off"}); err != nil {
 		t.Fatal(err)
 	}
-	if gw.published["package"] != `{"kind":"bnbloc.core.package/v1","name":"acme"}` || gw.published["signature"] != "signature-bytes\n" || gw.published["rollout"] != "off" {
+	if gw.published["package"] != body || gw.published["signature"] != "signature-bytes\n" || gw.published["rollout"] != "off" {
 		t.Fatalf("publish request = %v", gw.published)
 	}
 }

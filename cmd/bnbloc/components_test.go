@@ -43,7 +43,9 @@ func TestNotifierSecretIsPrintedOnInstallAndRotate(t *testing.T) {
 		}
 	}))
 	defer gw.Close()
-	pkg := writeTemp(t, "pkg.json", `{"kind":"bnbloc.notifier.package/v1","name":"corp"}`)
+	pkg := writeTemp(t, "pkg.json", `{"kind":"bnbloc.notifier.package/v1","name":"corp","version":"1.0.0","runtime":"endpoint",`+
+		`"contract":"bnbloc.notifier.contract/v1","endpoint":{"baseUrl":"https://notify.example.com"},`+
+		`"permissions":{"network":["notify.example.com"]},"publisher":"corp","description":""}`)
 	sig := writeTemp(t, "pkg.sig", "sig\n")
 	out, err := captureStdout(t, func() error {
 		return coresInstall([]string{"--gateway", gw.URL, "--token", "admin", "--package", pkg, "--signature", sig})
