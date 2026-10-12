@@ -1,4 +1,3 @@
-import { buildComponentPackageModes, type ComponentPackageBuildMode } from "./componentPackageModes.ts";
 import { buildComponentPackage, type ComponentPackageDraft } from "./componentPackageBuilder.ts";
 import { buildFinalComponentPackageJSON } from "./componentArtifactRequirements.ts";
 
@@ -78,19 +77,6 @@ function testFinalSignatureBytesContainUploadedArtifactMetadata(): void {
   assert(!("manifest" in parsed), "final protocol sidecar bytes still omit manifest");
 }
 
-function testBuilderModesStayScopedToExecutablePackages(): void {
-  const modes: readonly ComponentPackageBuildMode[] = [
-    { kind: "bnbloc.core.package/v1", runtime: "endpoint", label: "Core endpoint", key: "bnbloc.core.package/v1:endpoint" },
-    { kind: "bnbloc.core.package/v1", runtime: "manifest", label: "Core manifest", key: "bnbloc.core.package/v1:manifest" },
-    { kind: "bnbloc.core.package/v1", runtime: "sidecar", label: "Core sidecar", key: "bnbloc.core.package/v1:sidecar" },
-    { kind: "bnbloc.plugin.package/v1", runtime: "sidecar", label: "Plugin sidecar", key: "bnbloc.plugin.package/v1:sidecar" },
-    { kind: "bnbloc.auth-provider.package/v1", runtime: "endpoint", label: "Auth-provider endpoint", key: "bnbloc.auth-provider.package/v1:endpoint" },
-  ];
-  const options = buildComponentPackageModes();
-  assert(options.length === modes.length, "builder exposes supported kind/runtime pairs only");
-  assert(options.map((option) => option.key).join(",") === modes.map((mode) => mode.key).join(","), "builder modes have stable package keys");
-}
-
 testEndpointCoreBuildsWithoutArtifacts();
 testManifestCoreRequiresAndPreservesManifest();
 testProtocolSidecarBuildsWithoutManifest();
@@ -99,4 +85,3 @@ testPluginSidecarCarriesHookContractAndArtifacts();
 testAuthProviderEndpointCarriesItsContract();
 testRuntimeRestrictionsAndRequiredFields();
 testFinalSignatureBytesContainUploadedArtifactMetadata();
-testBuilderModesStayScopedToExecutablePackages();

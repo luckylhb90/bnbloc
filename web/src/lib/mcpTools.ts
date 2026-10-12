@@ -120,11 +120,6 @@ export function toolUsers(tool: string, content: readonly ContentComponent[]): C
   return content.filter((c) => (c.requires.mcp ?? []).some((r) => r.name === tool));
 }
 
-// isMcpTool narrows a member catalog entry to an MCP tool.
-export function isMcpTool(c: MemberComponent): boolean {
-  return c.kind === "mcp";
-}
-
 // connectorFieldsAsSettings maps connector fields onto the local-settings
 // form model, so the same form helpers (pluginSettings.ts) drive both.
 export function connectorFieldsAsSettings(fields: readonly McpConnectorField[]): LocalSettingView[] {

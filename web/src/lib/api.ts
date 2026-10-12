@@ -86,13 +86,6 @@ export type {
   LocalSettingField,
   PlatformComponent,
   PublishedComponent,
-  CorePackageRuntime,
-  CorePackageProtocolRange,
-  CorePackageEndpoint,
-  CorePackageArtifact,
-  CorePackagePermissions,
-  CorePackageKey,
-  CorePackage,
 } from "./apiTypes";
 export type * from "./apiModels";
 export type * from "./teamModels";

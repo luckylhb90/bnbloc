@@ -216,27 +216,3 @@ export interface ComponentValidationStep {
   readonly state: ComponentValidationStepState;
   readonly detail: string;
 }
-
-export type CorePackageRuntime = ComponentRuntime;
-export type CorePackageProtocolRange = ComponentProtocolRange;
-export type CorePackageEndpoint = ComponentEndpoint;
-export type CorePackageArtifact = ComponentArtifact;
-export type CorePackagePermissions = ComponentPermissions;
-
-export interface CorePackageKey {
-  readonly keyId: string;
-  readonly publicKey: string;
-  readonly label?: string;
-  readonly addedAtMs?: number;
-  readonly addedBy?: string;
-}
-
-export interface CorePackage {
-  readonly name: string;
-  readonly version: string;
-  readonly publisher: string;
-  readonly kind?: "core";
-  readonly description?: string;
-  readonly core: unknown;
-  readonly installedAtMs?: number;
-}

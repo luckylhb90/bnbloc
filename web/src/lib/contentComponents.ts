@@ -465,13 +465,6 @@ export function expertChoices(mine: readonly ContentComponent[], roomUses: reado
   return out;
 }
 
-// The @-mention handle of an expert ("@reviewer"): agent handles always
-// carry a "/", member ids are chosen by people, so an expert's handle is
-// its bare component name and is resolved before members.
-export function expertHandle(c: Pick<ContentComponent, "name">): string {
-  return c.name;
-}
-
 // expertMentionMatches filters expert choices whose name or display name
 // starts with the typed query (case-insensitive), at most `limit`.
 export function expertMentionMatches(choices: readonly ExpertChoice[], query: string, limit = 5): ExpertChoice[] {

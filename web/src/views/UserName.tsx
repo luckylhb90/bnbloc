@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { cn } from "@/lib/cn";
-import { formatAgentHandle, maskEmail, maskEmailsInText } from "@/lib/displayNames";
+import { formatAgentHandle, maskEmailsInText } from "@/lib/displayNames";
 import { Input } from "@/ui/Input";
 import { usePrivacyMode } from "@/lib/privacyMode";
 import { useDisplayName, useDisplayNames } from "@/lib/useDisplayName";
@@ -45,15 +45,6 @@ export function AgentHandle({
 }) {
   const handle = useAgentHandle(owner, provider);
   return <span className={cn("min-w-0 truncate", className)}>{handle}</span>;
-}
-
-// Email renders an address only where the address itself is the point (org
-// member administration, invites). In privacy mode it shows the person's
-// display name (or, for an address that is not a user yet, its default).
-export function Email({ address, className }: { readonly address: string; readonly className?: string }) {
-  const privacy = usePrivacyMode();
-  const name = useDisplayName(privacy ? address : null);
-  return <span className={cn("min-w-0 truncate", className)}>{privacy ? name || maskEmail(address) : address}</span>;
 }
 
 // UserWithEmail is the member-administration rendering: the display name with
