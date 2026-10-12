@@ -107,13 +107,12 @@ func testArchive() uploadedArchive {
 }
 
 // The hub entry keeps the previous version's other files and replaces this
-// target's (including a legacy file without a target); creation metadata of
-// the previous row is preserved.
+// target's; creation metadata of the previous row is preserved.
 func TestPrepareDesktopReleaseMergesHubFiles(t *testing.T) {
 	hub := []wire.ReleaseEntry{{
 		Version: "0.1.3", Channel: "internal", CreatedAtMs: 7, CreatedBy: "ops",
 		Files: []wire.ReleaseFile{
-			{Platform: "macOS", Arch: "Apple Silicon", Name: "old", URL: "https://gw/legacy"},
+			{Platform: "macOS", Arch: "Apple Silicon", Target: "darwin-aarch64", Name: "old", URL: "https://gw/old"},
 			{Platform: "Windows", Arch: "x64", Target: "windows-x86_64", Name: "win", URL: "https://gw/win"},
 		},
 	}}

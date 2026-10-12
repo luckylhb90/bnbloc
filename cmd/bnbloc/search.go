@@ -38,8 +38,7 @@ func runSearch(args []string) error {
 	}
 	sub := args[0]
 	fs := flag.NewFlagSet("search "+sub, flag.ContinueOnError)
-	gateway := fs.String("gateway", "", "gateway base URL")
-	token := fs.String("token", "", "session token")
+	gw := addGatewayFlags(fs)
 	var cursor *string
 	var batches *int
 	switch sub {
@@ -56,7 +55,7 @@ func runSearch(args []string) error {
 	if fs.NArg() > 0 {
 		return fmt.Errorf("search %s: unexpected argument %q", sub, fs.Arg(0))
 	}
-	c := newClient(resolveConfig(*gateway, *token))
+	c := gw.client()
 	if sub == "status" {
 		return searchStatus(context.Background(), c, os.Stdout)
 	}
@@ -70,7 +69,7 @@ func searchReindex(ctx context.Context, c *client, cursor string, batches int, o
 	backend := ""
 	for {
 		var res wire.SearchReindexResponse
-		err := smokeCall(ctx, c, reindexCallTimeout, http.MethodPost, "/v1/platform/search/reindex",
+		err := c.call(ctx, reindexCallTimeout, http.MethodPost, "/v1/platform/search/reindex",
 			wire.SearchReindexRequest{Cursor: cursor, MaxBatches: batches}, &res)
 		if err != nil {
 			if cursor != "" {
@@ -96,7 +95,7 @@ func searchReindex(ctx context.Context, c *client, cursor string, batches int, o
 // searchStatus prints the backend's status, failing when it is not ready.
 func searchStatus(ctx context.Context, c *client, out io.Writer) error {
 	var st wire.SearchStatus
-	if err := smokeCall(ctx, c, 30*time.Second, http.MethodGet, "/v1/platform/search/status", nil, &st); err != nil {
+	if err := c.call(ctx, 30*time.Second, http.MethodGet, "/v1/platform/search/status", nil, &st); err != nil {
 		return fmt.Errorf("search status: %w", err)
 	}
 	fmt.Fprintf(out, "backend:   %s\n", st.Backend)

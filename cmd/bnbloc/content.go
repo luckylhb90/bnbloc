@@ -1,8 +1,11 @@
 package main
 
 import (
+	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
+	"net/http"
 	"net/url"
 	"os"
 	"strings"
@@ -47,13 +50,16 @@ func exportContentPackage(c *client, id, version, publisher string) ([]byte, err
 	if len(q) > 0 {
 		path += "?" + q.Encode()
 	}
-	return c.do("GET", path, nil)
+	var raw json.RawMessage
+	if err := c.call(context.Background(), apiTimeout, http.MethodGet, path, nil, &raw); err != nil {
+		return nil, err
+	}
+	return raw, nil
 }
 
 func contentExport(args []string) error {
 	fs := flag.NewFlagSet("content export", flag.ContinueOnError)
-	gateway := fs.String("gateway", "", "gateway base URL")
-	token := fs.String("token", "", "super-admin session token")
+	gw := addGatewayFlags(fs)
 	version := fs.String("version", "", "the version to export (default: the latest)")
 	publisher := fs.String("publisher", "self", "publisher id written into the package")
 	out := fs.String("out", "", "write the package to this file (default: print it)")
@@ -64,7 +70,7 @@ func contentExport(args []string) error {
 	if id == "" {
 		return fmt.Errorf("content export: the component id (cc_...) is required")
 	}
-	body, err := exportContentPackage(newClient(resolveConfig(*gateway, *token)), id, *version, *publisher)
+	body, err := exportContentPackage(gw.client(), id, *version, *publisher)
 	if err != nil {
 		return err
 	}
@@ -81,13 +87,10 @@ func contentExport(args []string) error {
 
 func contentPromote(args []string) error {
 	fs := flag.NewFlagSet("content promote", flag.ContinueOnError)
-	gateway := fs.String("gateway", "", "gateway base URL")
-	token := fs.String("token", "", "super-admin session token")
+	gw := addGatewayFlags(fs)
 	version := fs.String("version", "", "the version to promote (default: the latest)")
 	publisher := fs.String("publisher", "self", "publisher id written into the package")
-	rollout := fs.String("rollout", "", "auto (default) or off (installed unpublished)")
-	seckey := fs.String("seckey", "", "ed25519 private key file for signing (default "+defaultSeckeyHint+" when it exists)")
-	unsigned := fs.Bool("unsigned", false, "install without a signature (dev; gateway must allow it)")
+	sign := addSigningFlags(fs, "auto (default) or off (installed unpublished)")
 	id, err := parseNamed(fs, args)
 	if err != nil {
 		return err
@@ -95,15 +98,15 @@ func contentPromote(args []string) error {
 	if id == "" {
 		return fmt.Errorf("content promote: the component id (cc_...) is required")
 	}
-	if r := strings.TrimSpace(*rollout); r != "" && r != "auto" && r != "off" {
+	if r := strings.TrimSpace(*sign.rollout); r != "" && r != "auto" && r != "off" {
 		return fmt.Errorf("--rollout must be auto or off for content (members turn content on themselves)")
 	}
 	// The key is loaded before anything is fetched or installed.
-	priv, err := packageSigningKey(*seckey, *unsigned)
+	priv, err := sign.key()
 	if err != nil {
 		return err
 	}
-	c := newClient(resolveConfig(*gateway, *token))
+	c := gw.client()
 	body, err := exportContentPackage(c, id, *version, *publisher)
 	if err != nil {
 		return err
@@ -112,7 +115,7 @@ func contentPromote(args []string) error {
 	if err != nil {
 		return err
 	}
-	if err := publishComponent(c, body, signature, *rollout); err != nil {
+	if err := publishComponent(c, body, signature, *sign.rollout); err != nil {
 		return err
 	}
 	fmt.Println("promoted to every organization")

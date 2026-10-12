@@ -40,19 +40,17 @@ var (
 )
 
 // desktopTarget describes where a published archive lands in the Release Hub.
-// legacyArchKeyword matches hub files written before files carried a target.
 type desktopTarget struct {
-	Platform          string
-	Arch              string
-	legacyArchKeyword string
+	Platform string
+	Arch     string
 }
 
 // desktopPublishTargets are the targets whose updater payload is the signed
 // bnbloc.app.tar.gz (macOS). The web wizard publishes darwin-aarch64 only;
 // its hub file shape is the darwin-aarch64 row here.
 var desktopPublishTargets = map[string]desktopTarget{
-	"darwin-aarch64": {Platform: "macOS", Arch: "Apple Silicon", legacyArchKeyword: "silicon"},
-	"darwin-x86_64":  {Platform: "macOS", Arch: "Intel", legacyArchKeyword: "intel"},
+	"darwin-aarch64": {Platform: "macOS", Arch: "Apple Silicon"},
+	"darwin-x86_64":  {Platform: "macOS", Arch: "Intel"},
 }
 
 // isDesktopReleaseVersion mirrors desktopRelease.ts isDesktopReleaseVersion.
@@ -194,8 +192,7 @@ func prepareDesktopRelease(cfg wire.UpdateConfig, hub []wire.ReleaseEntry, a upl
 	files := []wire.ReleaseFile{}
 	if previous != nil {
 		for _, f := range previous.Files {
-			legacySameTarget := strings.EqualFold(f.Platform, target.Platform) && strings.Contains(strings.ToLower(f.Arch), target.legacyArchKeyword)
-			if f.Target != a.Target && !legacySameTarget {
+			if f.Target != a.Target {
 				files = append(files, f)
 			}
 		}

@@ -58,18 +58,15 @@ func previewersPack(args []string) error {
 
 func previewersPublish(args []string) error {
 	fs := flag.NewFlagSet("previewers publish", flag.ContinueOnError)
-	gateway := fs.String("gateway", "", "gateway base URL")
-	token := fs.String("token", "", "super-admin session token")
+	gw := addGatewayFlags(fs)
 	packageFile := fs.String("package", "", "previewer package JSON (artifacts.bundle may be a {url:\"\",sha256:\"\"} placeholder)")
 	bundleFile := fs.String("bundle", "", "built bundle archive (.tar)")
 	dir := fs.String("dir", "", "built previewer directory to pack instead of --bundle")
-	seckey := fs.String("seckey", "", "ed25519 private key file for signing (default "+defaultSeckeyHint+" when it exists)")
-	unsigned := fs.Bool("unsigned", false, "install without a signature (dev; gateway must allow it)")
-	rollout := fs.String("rollout", "", "rollout set atomically with the publish: auto | optin | off (default: gateway default, auto)")
+	sign := addSigningFlags(fs, "rollout set atomically with the publish: auto | optin | off (default: gateway default, auto)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	if err := validRolloutFlag(*rollout); err != nil {
+	if err := validRolloutFlag(*sign.rollout); err != nil {
 		return err
 	}
 	pkg, bundlePath, cleanup, err := previewerPublishInputs(*packageFile, *bundleFile, *dir)
@@ -77,11 +74,11 @@ func previewersPublish(args []string) error {
 		return err
 	}
 	defer cleanup()
-	priv, err := packageSigningKey(*seckey, *unsigned)
+	priv, err := sign.key()
 	if err != nil {
 		return err
 	}
-	c := newClient(resolveConfig(*gateway, *token))
+	c := gw.client()
 	up, err := uploadArtifactFile(c, bundlePath)
 	if err != nil {
 		return fmt.Errorf("upload bundle: %w", err)
@@ -98,7 +95,7 @@ func previewersPublish(args []string) error {
 	if err != nil {
 		return err
 	}
-	if err := publishComponent(c, body, signature, *rollout); err != nil {
+	if err := publishComponent(c, body, signature, *sign.rollout); err != nil {
 		return err
 	}
 	fmt.Printf("published previewer %q %s (bundle %s)\n", pkg.Name, pkg.Version, up.Key)

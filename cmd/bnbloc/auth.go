@@ -58,16 +58,12 @@ func runLogin(args []string) error {
 
 // ssoLogin runs the browser sign-in against c's gateway and returns the grant.
 func ssoLogin(c *client, out io.Writer) (*sessionGrant, error) {
-	body, err := c.do(http.MethodGet, "/v1/auth/sso-config", nil)
-	if err != nil {
-		return nil, fmt.Errorf("read sign-in options: %w", err)
-	}
 	var ssoCfg struct {
 		AuthProviderAvailable bool   `json:"authProviderAvailable"`
 		AuthProviderStartPath string `json:"authProviderStartPath"`
 	}
-	if err := json.Unmarshal(body, &ssoCfg); err != nil {
-		return nil, fmt.Errorf("sign-in options invalid: %w", err)
+	if err := c.call(context.Background(), apiTimeout, http.MethodGet, "/v1/auth/sso-config", nil, &ssoCfg); err != nil {
+		return nil, fmt.Errorf("read sign-in options: %w", err)
 	}
 	if !ssoCfg.AuthProviderAvailable || strings.TrimSpace(ssoCfg.AuthProviderStartPath) == "" {
 		return nil, fmt.Errorf("%s has no SSO sign-in configured; use --token / BNBLOC_TOKEN", c.cfg.Gateway)
@@ -201,25 +197,21 @@ func revokeStoredLogin(stored storedLogin) error {
 	return nil
 }
 
+// runWhoami reports the identity every other command of this shell acts
+// as: the same credential precedence (--token / BNBLOC_TOKEN, then
+// BNBLOC_API_TOKEN, then the stored sign-in), and which one it is.
 func runWhoami(args []string) error {
 	fs := flag.NewFlagSet("whoami", flag.ContinueOnError)
-	gateway := fs.String("gateway", "", "gateway base URL")
+	gw := addGatewayFlags(fs)
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	cfg := resolveConfig(*gateway, "")
-	if os.Getenv("BNBLOC_TOKEN") != "" {
-		fmt.Fprintln(os.Stderr, "note: BNBLOC_TOKEN is set and takes precedence for other commands; whoami reports the stored sign-in")
-	}
-	cfg.Token = ""
-	if cfg.RefreshToken == "" {
-		return errNotSignedIn(cfg.Gateway, "not signed in to "+cfg.Gateway)
-	}
-	c := newClient(cfg)
-	if _, err := c.bearer(); err != nil {
+	c := gw.client()
+	id, err := c.identity()
+	if err != nil {
 		return err
 	}
-	fmt.Printf("gateway  %s\nsubject  %s\ntenant   %s\nrole     %s\n", cfg.Gateway, c.grant.Subject, c.grant.Tenant, roleOrNone(c.grant.Role))
+	fmt.Printf("gateway  %s\nvia      %s\nsubject  %s\ntenant   %s\nrole     %s\n", c.cfg.Gateway, id.Source, id.Subject, id.Tenant, roleOrNone(id.Role))
 	return nil
 }
 

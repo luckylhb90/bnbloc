@@ -65,8 +65,7 @@ func runAPITokens(args []string) error {
 		return errors.New("api-tokens: want create | list | revoke <id>")
 	}
 	fs := flag.NewFlagSet("api-tokens "+args[0], flag.ContinueOnError)
-	gateway := fs.String("gateway", "", "gateway base URL")
-	token := fs.String("token", "", "session token")
+	gw := addGatewayFlags(fs)
 	label := fs.String("label", "", "what the token is for (create)")
 	subject := fs.String("subject", "", "svc:<name> service subject (create; default: yourself)")
 	ttlDays := fs.Int("ttl-days", 0, "lifetime in days, 1-365 (create; default 90)")
@@ -74,7 +73,7 @@ func runAPITokens(args []string) error {
 	if err := fs.Parse(args[1:]); err != nil {
 		return err
 	}
-	c := newClient(resolveConfig(*gateway, *token))
+	c := gw.client()
 	switch args[0] {
 	case "create":
 		if fs.NArg() > 0 {
@@ -83,28 +82,23 @@ func runAPITokens(args []string) error {
 		if strings.TrimSpace(*label) == "" {
 			return errors.New("api-tokens create: --label is required")
 		}
-		body, _ := json.Marshal(map[string]any{"label": *label, "subject": *subject, "ttlDays": *ttlDays, "tenantId": *tenantID})
-		raw, err := c.do(http.MethodPost, "/v1/platform/api-tokens", body)
-		if err != nil {
+		var row apiTokenRow
+		in := map[string]any{"label": *label, "subject": *subject, "ttlDays": *ttlDays, "tenantId": *tenantID}
+		if err := c.call(context.Background(), apiTimeout, http.MethodPost, "/v1/platform/api-tokens", in, &row); err != nil {
 			return err
 		}
-		var row apiTokenRow
-		if err := json.Unmarshal(raw, &row); err != nil || row.Token == "" {
-			return errors.New("api-tokens create: invalid response")
+		if row.Token == "" {
+			return errors.New("api-tokens create: the answer carries no token")
 		}
 		fmt.Printf("id       %s\nsubject  %s\nexpires  %s\n\n%s\n\nThe token is shown once. Store it as a secret (%s); revoke with `bnbloc api-tokens revoke %s`.\n",
 			row.ID, row.Subject, msTime(row.ExpiresAtMs), row.Token, apiTokenEnv, row.ID)
 		return nil
 	case "list":
-		raw, err := c.do(http.MethodGet, "/v1/platform/api-tokens", nil)
-		if err != nil {
-			return err
-		}
 		var out struct {
 			Tokens []apiTokenRow `json:"tokens"`
 		}
-		if err := json.Unmarshal(raw, &out); err != nil {
-			return fmt.Errorf("api-tokens list: invalid response: %w", err)
+		if err := c.call(context.Background(), apiTimeout, http.MethodGet, "/v1/platform/api-tokens", nil, &out); err != nil {
+			return err
 		}
 		tw := tabwriter.NewWriter(os.Stdout, 0, 2, 2, ' ', 0)
 		fmt.Fprintln(tw, "ID\tSUBJECT\tLABEL\tSTATE\tEXPIRES\tLAST USED\tCREATED BY")
@@ -123,7 +117,7 @@ func runAPITokens(args []string) error {
 		if fs.NArg() != 1 {
 			return errors.New("api-tokens revoke: want exactly one token id")
 		}
-		if _, err := c.do(http.MethodDelete, "/v1/platform/api-tokens/"+url.PathEscape(fs.Arg(0)), nil); err != nil {
+		if err := c.call(context.Background(), apiTimeout, http.MethodDelete, "/v1/platform/api-tokens/"+url.PathEscape(fs.Arg(0)), nil, nil); err != nil {
 			return err
 		}
 		fmt.Printf("revoked %s\n", fs.Arg(0))

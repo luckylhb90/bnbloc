@@ -1261,6 +1261,12 @@ agent's staged files).
   `BNBLOC_TEST_MYSQL_DSN` enables the MySQL integration tests.
 - Web: `cd web && pnpm build` (`tsc -b && vite build`); unit tests:
   `node --test 'src/**/*.test.ts' 'scripts/*.test.mjs'` (Node 24).
+- CLI (`cmd/bnbloc`): every gateway JSON call is `client.call` (returns
+  every failure; a 401 carries the one sign-in hint, `responseError`), the
+  gateway and signing flags come from `addGatewayFlags`/`addSigningFlags`,
+  `whoami` reports `client.identity` (the session every command uses), and
+  a package is held to `pkgmeta` before any upload
+  (`TestOneCallHelperAndFlagSet`).
 - Lockfiles are tracked (`web/pnpm-lock.yaml`, `apps/desktop/pnpm-lock.yaml`,
   `apps/desktop/src-tauri/Cargo.lock`, `go.sum`); CI
   installs with `--frozen-lockfile` / `--locked`.

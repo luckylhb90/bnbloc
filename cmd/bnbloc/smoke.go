@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
@@ -18,7 +17,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/luckylhb90/bnbloc/internal/auth"
 	"github.com/luckylhb90/bnbloc/internal/sse"
 )
 
@@ -53,8 +51,7 @@ type smokeOptions struct {
 
 func runSmoke(args []string) error {
 	fs := flag.NewFlagSet("smoke", flag.ContinueOnError)
-	gateway := fs.String("gateway", "", "gateway base URL")
-	token := fs.String("token", "", "session token")
+	gw := addGatewayFlags(fs)
 	agent := fs.String("agent", "", "also wait for a reply from this agent: provider | core/provider | target id of your own agent, or owner/provider | owner/core/provider")
 	timeout := fs.Duration("timeout", 120*time.Second, "how long to wait for the agent reply")
 	keep := fs.Bool("keep", false, "keep the smoke room (skip the cleanup)")
@@ -69,7 +66,7 @@ func runSmoke(args []string) error {
 	// Ctrl-C aborts the current wait; the deferred cleanup still deletes the room.
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	c := newClient(resolveConfig(*gateway, *token))
+	c := gw.client()
 	fmt.Printf("smoke against %s\n", c.cfg.Gateway)
 	opts := smokeOptions{Agent: strings.TrimSpace(*agent), AgentTimeout: *timeout, StepTimeout: apiTimeout, Keep: *keep, Now: time.Now}
 	run := &smokeRun{out: os.Stdout}
@@ -166,7 +163,7 @@ func smokeChecks(ctx context.Context, c *client, opts smokeOptions, run *smokeRu
 		return err
 	}
 	if !run.step("create room", func() (string, error) {
-		return roomID, smokeCall(ctx, c, opts.StepTimeout, http.MethodPost, "/v1/rooms",
+		return roomID, c.call(ctx, opts.StepTimeout, http.MethodPost, "/v1/rooms",
 			map[string]string{"roomId": roomID, "name": roomID, "description": "bnbloc smoke (safe to delete)", "visibility": "private"}, nil)
 	}) {
 		return errSmokeFailed
@@ -178,7 +175,7 @@ func smokeChecks(ctx context.Context, c *client, opts smokeOptions, run *smokeRu
 		}
 		// Cleanup runs even after an interrupt, so it gets its own context.
 		if !run.step("delete room", func() (string, error) {
-			return "", smokeCall(context.Background(), c, opts.StepTimeout, http.MethodDelete, "/v1/rooms/"+url.PathEscape(roomID), nil, nil)
+			return "", c.call(context.Background(), opts.StepTimeout, http.MethodDelete, "/v1/rooms/"+url.PathEscape(roomID), nil, nil)
 		}) && result == nil {
 			result = errSmokeFailed
 		}
@@ -205,7 +202,7 @@ func smokeChecks(ctx context.Context, c *client, opts smokeOptions, run *smokeRu
 		var sent struct {
 			Sequence int64 `json:"sequence"`
 		}
-		if err := smokeCall(ctx, c, opts.StepTimeout, http.MethodPost, "/v1/rooms/"+url.PathEscape(roomID)+"/chat", map[string]any{
+		if err := c.call(ctx, opts.StepTimeout, http.MethodPost, "/v1/rooms/"+url.PathEscape(roomID)+"/chat", map[string]any{
 			"text": "bnbloc smoke " + opts.Now().UTC().Format(time.RFC3339), "atUnixMs": opts.Now().UnixMilli(), "clientMsgId": clientMsgID,
 		}, &sent); err != nil {
 			return "", err
@@ -228,7 +225,7 @@ func smokeChecks(ctx context.Context, c *client, opts smokeOptions, run *smokeRu
 		var page struct {
 			Messages []smokeEvent `json:"messages"`
 		}
-		if err := smokeCall(ctx, c, opts.StepTimeout, http.MethodGet, "/v1/rooms/"+url.PathEscape(roomID)+"/history?limit=50", nil, &page); err != nil {
+		if err := c.call(ctx, opts.StepTimeout, http.MethodGet, "/v1/rooms/"+url.PathEscape(roomID)+"/history?limit=50", nil, &page); err != nil {
 			return "", err
 		}
 		for _, m := range page.Messages {
@@ -257,69 +254,15 @@ func smokeChecks(ctx context.Context, c *client, opts smokeOptions, run *smokeRu
 // smokeAuth resolves the session subject and proves the gateway accepts the
 // session for it with an authenticated, subject-scoped read.
 func smokeAuth(ctx context.Context, c *client, timeout time.Duration) (string, error) {
-	var subject string
-	if c.cfg.Token != "" {
-		s, err := sessionSubject(c.cfg.Token)
-		if err != nil {
-			return "", err
-		}
-		subject = s
-	} else {
-		if c.cfg.RefreshToken == "" && c.cfg.APIToken == "" {
-			return "", errNotSignedIn(c.cfg.Gateway, "not signed in to "+c.cfg.Gateway)
-		}
-		if _, err := c.bearer(); err != nil {
-			return "", err
-		}
-		subject = c.grant.Subject
+	id, err := c.identity()
+	if err != nil {
+		return "", err
 	}
-	if subject == "" {
-		return "", errors.New("the session carries no subject")
-	}
-	if err := smokeCall(ctx, c, timeout, http.MethodGet, "/v1/users/"+url.PathEscape(subject)+"/rooms", nil, nil); err != nil {
+	subject := id.Subject
+	if err := c.call(ctx, timeout, http.MethodGet, "/v1/users/"+url.PathEscape(subject)+"/rooms", nil, nil); err != nil {
 		return "", err
 	}
 	return subject, nil
-}
-
-// sessionSubject reads the subject of a static session bearer. The gateway
-// verifies the signature on every call; this only labels the run and scopes
-// the auth probe to the token's own subject.
-func sessionSubject(token string) (string, error) {
-	claims, err := auth.PeekSession(token)
-	if err != nil {
-		return "", err
-	}
-	if claims.ExpiresAtUnix != 0 && time.Now().Unix() > claims.ExpiresAtUnix {
-		return "", errNotSignedIn("the gateway", "the session token expired")
-	}
-	return claims.Subject, nil
-}
-
-// smokeCall sends one JSON control-plane call (body in, optional JSON out)
-// through the CLI client, bounded by timeout and cancelled with ctx.
-func smokeCall(ctx context.Context, c *client, timeout time.Duration, method, path string, in, out any) error {
-	var body io.Reader
-	if in != nil {
-		raw, err := json.Marshal(in)
-		if err != nil {
-			return err
-		}
-		body = bytes.NewReader(raw)
-	}
-	ctx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-	raw, err := c.doReader(ctx, method, path, body, "application/json")
-	if err != nil {
-		return err
-	}
-	if out == nil {
-		return nil
-	}
-	if err := json.Unmarshal(raw, out); err != nil {
-		return fmt.Errorf("%s %s: invalid response: %w", method, path, err)
-	}
-	return nil
 }
 
 // smokeRoomID is "smoke-<utc yyyymmdd-hhmmss>-<4 hex>": recognizable, sortable,
@@ -515,7 +458,7 @@ func smokeAgentReply(ctx context.Context, c *client, w *smokeWaiter, roomID, sub
 	var mine struct {
 		Agents []myAgent `json:"agents"`
 	}
-	if err := smokeCall(ctx, c, opts.StepTimeout, http.MethodGet, "/v1/my/agents", nil, &mine); err != nil {
+	if err := c.call(ctx, opts.StepTimeout, http.MethodGet, "/v1/my/agents", nil, &mine); err != nil {
 		return "", err
 	}
 	rcpt, err := resolveSmokeAgent(opts.Agent, subject, mine.Agents)
@@ -526,7 +469,7 @@ func smokeAgentReply(ctx context.Context, c *client, w *smokeWaiter, roomID, sub
 	if err != nil {
 		return "", err
 	}
-	if err := smokeCall(ctx, c, opts.StepTimeout, http.MethodPost, "/v1/rooms/"+url.PathEscape(roomID)+"/chat", map[string]any{
+	if err := c.call(ctx, opts.StepTimeout, http.MethodPost, "/v1/rooms/"+url.PathEscape(roomID)+"/chat", map[string]any{
 		"text":        "bnbloc smoke: reply with the single word OK.",
 		"atUnixMs":    opts.Now().UnixMilli(),
 		"clientMsgId": msgID,

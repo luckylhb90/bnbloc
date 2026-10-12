@@ -1,9 +1,10 @@
 package main
 
 import (
-	"encoding/json"
+	"context"
 	"flag"
 	"fmt"
+	"net/http"
 	"net/url"
 )
 
@@ -31,8 +32,7 @@ func notifierComponentPath(name, suffix string) string {
 
 func componentsRotateSecret(args []string) error {
 	fs := flag.NewFlagSet("components rotate-secret", flag.ContinueOnError)
-	gateway := fs.String("gateway", "", "gateway base URL")
-	token := fs.String("token", "", "super-admin session token")
+	gw := addGatewayFlags(fs)
 	name, err := parseNamed(fs, args)
 	if err != nil {
 		return err
@@ -40,16 +40,15 @@ func componentsRotateSecret(args []string) error {
 	if name == "" {
 		return fmt.Errorf("usage: components rotate-secret <name>")
 	}
-	c := newClient(resolveConfig(*gateway, *token))
-	raw, err := c.do("POST", notifierComponentPath(name, "/secret/rotate"), nil)
-	if err != nil {
-		return err
-	}
+	c := gw.client()
 	var out struct {
 		Secret string `json:"secret"`
 	}
-	if err := json.Unmarshal(raw, &out); err != nil || out.Secret == "" {
-		return fmt.Errorf("components rotate-secret: unexpected response %s", raw)
+	if err := c.call(context.Background(), apiTimeout, http.MethodPost, notifierComponentPath(name, "/secret/rotate"), nil, &out); err != nil {
+		return err
+	}
+	if out.Secret == "" {
+		return fmt.Errorf("components rotate-secret: the answer carries no secret")
 	}
 	printSigningSecret(name, out.Secret)
 	return nil
@@ -57,8 +56,7 @@ func componentsRotateSecret(args []string) error {
 
 func componentsTest(args []string) error {
 	fs := flag.NewFlagSet("components test", flag.ContinueOnError)
-	gateway := fs.String("gateway", "", "gateway base URL")
-	token := fs.String("token", "", "super-admin session token")
+	gw := addGatewayFlags(fs)
 	name, err := parseNamed(fs, args)
 	if err != nil {
 		return err
@@ -66,19 +64,15 @@ func componentsTest(args []string) error {
 	if name == "" {
 		return fmt.Errorf("usage: components test <name>")
 	}
-	c := newClient(resolveConfig(*gateway, *token))
-	raw, err := c.do("POST", notifierComponentPath(name, "/test"), nil)
-	if err != nil {
-		return err
-	}
+	c := gw.client()
 	var out struct {
 		Delivered bool   `json:"delivered"`
 		Status    int    `json:"status"`
 		Error     string `json:"error"`
 		EventID   string `json:"eventId"`
 	}
-	if err := json.Unmarshal(raw, &out); err != nil {
-		return fmt.Errorf("components test: unexpected response %s", raw)
+	if err := c.call(context.Background(), apiTimeout, http.MethodPost, notifierComponentPath(name, "/test"), nil, &out); err != nil {
+		return err
 	}
 	if !out.Delivered {
 		return fmt.Errorf("test notification %s failed (HTTP %d): %s", out.EventID, out.Status, out.Error)

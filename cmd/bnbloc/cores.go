@@ -1,10 +1,12 @@
 package main
 
 import (
+	"context"
 	"crypto/ed25519"
 	"encoding/json"
 	"flag"
 	"fmt"
+	"net/http"
 	"net/url"
 	"os"
 	"strings"
@@ -12,6 +14,7 @@ import (
 	"github.com/luckylhb90/bnbloc/core/manifestcore"
 	"github.com/luckylhb90/bnbloc/core/pkgmeta"
 	"github.com/luckylhb90/bnbloc/core/protocol"
+
 	// The content kinds register their install validators with pkgmeta, so
 	// a content platform package is held to the gateway's gate here too.
 	_ "github.com/luckylhb90/bnbloc/internal/contentpkg"
@@ -42,8 +45,7 @@ func runCores(args []string) error {
 
 func coresInstall(args []string) error {
 	fs := flag.NewFlagSet("cores install", flag.ContinueOnError)
-	gateway := fs.String("gateway", "", "gateway base URL")
-	token := fs.String("token", "", "super-admin session token")
+	gw := addGatewayFlags(fs)
 	daemonURL := fs.String("url", "", "protocol-conforming daemon URL (zero-JSON install)")
 	manifestFile := fs.String("manifest", "", "manifest JSON file (legacy REST daemon)")
 	packageFile := fs.String("package", "", "pre-built package JSON file")
@@ -51,13 +53,11 @@ func coresInstall(args []string) error {
 	name := fs.String("name", "", "core name")
 	version := fs.String("version", "0.1.0", "core version (semver)")
 	publisher := fs.String("publisher", "self", "publisher id")
-	seckey := fs.String("seckey", "", "ed25519 private key file for signing (default "+defaultSeckeyHint+" when it exists)")
-	unsigned := fs.Bool("unsigned", false, "install without a signature (dev; gateway must allow it)")
-	rollout := fs.String("rollout", "", "rollout set atomically with the install: auto | optin | off (default: gateway default, auto)")
+	sign := addSigningFlags(fs, "rollout set atomically with the install: auto | optin | off (default: gateway default, auto)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	if err := validRolloutFlag(*rollout); err != nil {
+	if err := validRolloutFlag(*sign.rollout); err != nil {
 		return err
 	}
 	pkgBody, err := buildPackage(*daemonURL, *manifestFile, *packageFile, *name, *version, *publisher)
@@ -76,7 +76,7 @@ func coresInstall(args []string) error {
 		}
 		signature = string(raw)
 	} else {
-		priv, err := packageSigningKey(*seckey, *unsigned)
+		priv, err := sign.key()
 		if err != nil {
 			return err
 		}
@@ -84,8 +84,8 @@ func coresInstall(args []string) error {
 			return err
 		}
 	}
-	c := newClient(resolveConfig(*gateway, *token))
-	if err := publishComponent(c, pkgBody, signature, *rollout); err != nil {
+	c := gw.client()
+	if err := publishComponent(c, pkgBody, signature, *sign.rollout); err != nil {
 		return err
 	}
 	fmt.Println("installed")
@@ -107,16 +107,14 @@ func publishComponent(c *client, pkgBody []byte, signature, rollout string) erro
 	if rollout != "" {
 		req["rollout"] = rollout
 	}
-	body, _ := json.Marshal(req)
-	raw, err := c.do("POST", "/v1/platform/components", body)
-	if err != nil {
-		return err
-	}
 	var out struct {
 		Name   string `json:"name"`
 		Secret string `json:"secret"`
 	}
-	if json.Unmarshal(raw, &out) == nil && out.Secret != "" {
+	if err := c.call(context.Background(), apiTimeout, http.MethodPost, "/v1/platform/components", req, &out); err != nil {
+		return err
+	}
+	if out.Secret != "" {
 		printSigningSecret(out.Name, out.Secret)
 	}
 	return nil
@@ -192,29 +190,21 @@ func probeDaemon(daemonURL string) (protocol.Discovery, string, error) {
 	if err != nil || u.Host == "" {
 		return protocol.Discovery{}, "", fmt.Errorf("invalid --url")
 	}
-	body, err := (&client{cfg: config{Gateway: strings.TrimRight(daemonURL, "/")}, http: defaultDaemonClient()}).do("GET", protocol.PathDiscover, nil)
-	if err != nil {
-		return protocol.Discovery{}, "", err
-	}
+	daemon := &client{cfg: config{Gateway: strings.TrimRight(daemonURL, "/")}, http: defaultDaemonClient()}
 	var disc protocol.Discovery
-	if err := json.Unmarshal(body, &disc); err != nil {
-		return protocol.Discovery{}, "", fmt.Errorf("discovery response invalid: %w", err)
+	if err := daemon.call(context.Background(), apiTimeout, http.MethodGet, protocol.PathDiscover, nil, &disc); err != nil {
+		return protocol.Discovery{}, "", err
 	}
 	return disc, u.Hostname(), nil
 }
 
 func coresList(args []string) error {
 	fs := flag.NewFlagSet("cores list", flag.ContinueOnError)
-	gateway := fs.String("gateway", "", "")
-	token := fs.String("token", "", "")
+	gw := addGatewayFlags(fs)
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	c := newClient(resolveConfig(*gateway, *token))
-	body, err := c.do("GET", "/v1/cores", nil)
-	if err != nil {
-		return err
-	}
+	c := gw.client()
 	var out struct {
 		Cores []struct {
 			Name      string `json:"name"`
@@ -223,7 +213,7 @@ func coresList(args []string) error {
 			Backend   string `json:"backend"`
 		} `json:"cores"`
 	}
-	if err := json.Unmarshal(body, &out); err != nil {
+	if err := c.call(context.Background(), apiTimeout, http.MethodGet, "/v1/cores", nil, &out); err != nil {
 		return err
 	}
 	fmt.Printf("%-24s %-10s %-9s %s\n", "NAME", "BACKEND", "BUILTIN", "AVAILABLE")
@@ -235,8 +225,7 @@ func coresList(args []string) error {
 
 func coresUninstall(args []string) error {
 	fs := flag.NewFlagSet("cores uninstall", flag.ContinueOnError)
-	gateway := fs.String("gateway", "", "")
-	token := fs.String("token", "", "")
+	gw := addGatewayFlags(fs)
 	name, err := parseNamed(fs, args)
 	if err != nil {
 		return err
@@ -244,8 +233,8 @@ func coresUninstall(args []string) error {
 	if name == "" {
 		return fmt.Errorf("usage: cores uninstall <name>")
 	}
-	c := newClient(resolveConfig(*gateway, *token))
-	if _, err := c.do("DELETE", coreComponentPath(name, ""), nil); err != nil {
+	c := gw.client()
+	if err := c.call(context.Background(), apiTimeout, http.MethodDelete, coreComponentPath(name, ""), nil, nil); err != nil {
 		return err
 	}
 	fmt.Println("uninstalled")
@@ -254,8 +243,7 @@ func coresUninstall(args []string) error {
 
 func coresEnable(args []string) error {
 	fs := flag.NewFlagSet("cores enable", flag.ContinueOnError)
-	gateway := fs.String("gateway", "", "")
-	token := fs.String("token", "", "")
+	gw := addGatewayFlags(fs)
 	allTenants := fs.Bool("all-tenants", false, "enable for all tenants (clears the overlay)")
 	var tenants multiFlag
 	fs.Var(&tenants, "tenant", "tenant id to enable (repeatable)")
@@ -271,9 +259,9 @@ func coresEnable(args []string) error {
 		// or a non-empty list, never both and never an empty list.
 		return fmt.Errorf("cores enable: exactly one of --tenant <id>... or --all-tenants is required")
 	}
-	c := newClient(resolveConfig(*gateway, *token))
-	req, _ := json.Marshal(map[string]any{"enabledTenants": []string(tenants), "allTenants": *allTenants})
-	if _, err := c.do("PUT", coreComponentPath(name, "/tenants"), req); err != nil {
+	c := gw.client()
+	req := map[string]any{"enabledTenants": []string(tenants), "allTenants": *allTenants}
+	if err := c.call(context.Background(), apiTimeout, http.MethodPut, coreComponentPath(name, "/tenants"), req, nil); err != nil {
 		return err
 	}
 	fmt.Println("updated")

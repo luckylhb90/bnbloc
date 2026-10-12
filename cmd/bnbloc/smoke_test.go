@@ -348,17 +348,20 @@ func TestSmokeNotSignedIn(t *testing.T) {
 	}
 }
 
-func TestSessionSubject(t *testing.T) {
-	if s, err := sessionSubject(testSession("alice", nil)); err != nil || s != "alice" {
-		t.Fatalf("subject = %q, %v", s, err)
+func TestStaticSessionIdentity(t *testing.T) {
+	id := func(token string) (identity, error) {
+		return newClient(config{Gateway: "http://gw", Token: token}).identity()
 	}
-	if _, err := sessionSubject(testSession("alice", map[string]any{"kind": "refresh"})); err == nil {
+	if got, err := id(testSession("alice", nil)); err != nil || got.Subject != "alice" {
+		t.Fatalf("identity = %+v, %v", got, err)
+	}
+	if _, err := id(testSession("alice", map[string]any{"kind": "refresh"})); err == nil {
 		t.Fatal("a refresh token must not pass as a session")
 	}
-	if _, err := sessionSubject(testSession("alice", map[string]any{"exp": time.Now().Add(-time.Minute).Unix()})); err == nil {
+	if _, err := id(testSession("alice", map[string]any{"exp": time.Now().Add(-time.Minute).Unix()})); err == nil {
 		t.Fatal("an expired session must be refused")
 	}
-	if _, err := sessionSubject("opaque"); err == nil {
+	if _, err := id("opaque"); err == nil {
 		t.Fatal("a non-session token must be refused")
 	}
 }

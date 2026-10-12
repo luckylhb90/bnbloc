@@ -14,8 +14,7 @@ import (
 
 func coresPublishSidecar(args []string) error {
 	fs := flag.NewFlagSet("cores publish-sidecar", flag.ContinueOnError)
-	gateway := fs.String("gateway", "", "gateway base URL")
-	token := fs.String("token", "", "super-admin session token")
+	gw := addGatewayFlags(fs)
 	name := fs.String("name", "", "core name")
 	version := fs.String("version", "0.1.0", "core version (semver)")
 	publisher := fs.String("publisher", "self", "publisher id")
@@ -23,9 +22,7 @@ func coresPublishSidecar(args []string) error {
 	localURL := fs.String("local-url", "", "loopback URL the desktop bridge reaches after launch")
 	listenEnv := fs.String("listen-env", "", "environment variable used to tell the sidecar where to listen")
 	supervisedEnv := fs.String("supervised-env", "", "environment variable the desktop sets to 1 so the sidecar exits when its stdin closes")
-	seckey := fs.String("seckey", "", "ed25519 private key file for signing (default "+defaultSeckeyHint+" when it exists)")
-	unsigned := fs.Bool("unsigned", false, "install without a signature (dev; gateway must allow it)")
-	rollout := fs.String("rollout", "", "rollout set atomically with the publish: auto | optin | off (default: gateway default, auto)")
+	sign := addSigningFlags(fs, "rollout set atomically with the publish: auto | optin | off (default: gateway default, auto)")
 	var binaries multiFlag
 	fs.Var(&binaries, "binary", "platform binary as <goos-goarch>=<path> (repeatable)")
 	if err := fs.Parse(args); err != nil {
@@ -38,14 +35,14 @@ func coresPublishSidecar(args []string) error {
 	if err != nil {
 		return err
 	}
-	if err := validRolloutFlag(*rollout); err != nil {
+	if err := validRolloutFlag(*sign.rollout); err != nil {
 		return err
 	}
-	priv, err := packageSigningKey(*seckey, *unsigned)
+	priv, err := sign.key()
 	if err != nil {
 		return err
 	}
-	c := newClient(resolveConfig(*gateway, *token))
+	c := gw.client()
 	artifacts, err := uploadArtifacts(c, binaries)
 	if err != nil {
 		return err
@@ -59,7 +56,7 @@ func coresPublishSidecar(args []string) error {
 	if err != nil {
 		return err
 	}
-	if err := publishComponent(c, pkgBody, signature, *rollout); err != nil {
+	if err := publishComponent(c, pkgBody, signature, *sign.rollout); err != nil {
 		return err
 	}
 	fmt.Printf("published sidecar core %q %s (%d platform(s))\n", pkg.Name, pkg.Version, len(artifacts))

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"crypto/ed25519"
 	"encoding/base64"
 	"encoding/hex"
@@ -93,8 +94,7 @@ func keysGenVAPID(args []string) error {
 
 func keysAdd(args []string) error {
 	fs := flag.NewFlagSet("keys add", flag.ContinueOnError)
-	gateway := fs.String("gateway", "", "")
-	token := fs.String("token", "", "")
+	gw := addGatewayFlags(fs)
 	pubFile := fs.String("pubkey", "", "minisign public key file")
 	label := fs.String("label", "", "optional label")
 	if err := fs.Parse(args); err != nil {
@@ -107,9 +107,9 @@ func keysAdd(args []string) error {
 	if err != nil {
 		return err
 	}
-	c := newClient(resolveConfig(*gateway, *token))
-	req, _ := json.Marshal(map[string]string{"publicKey": strings.TrimSpace(string(raw)), "label": *label})
-	if _, err := c.do("POST", "/v1/platform/component-keys", req); err != nil {
+	c := gw.client()
+	req := map[string]string{"publicKey": strings.TrimSpace(string(raw)), "label": *label}
+	if err := c.call(context.Background(), apiTimeout, http.MethodPost, "/v1/platform/component-keys", req, nil); err != nil {
 		return err
 	}
 	fmt.Println("added")
@@ -118,14 +118,13 @@ func keysAdd(args []string) error {
 
 func keysList(args []string) error {
 	fs := flag.NewFlagSet("keys list", flag.ContinueOnError)
-	gateway := fs.String("gateway", "", "")
-	token := fs.String("token", "", "")
+	gw := addGatewayFlags(fs)
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	c := newClient(resolveConfig(*gateway, *token))
-	body, err := c.do("GET", "/v1/platform/component-keys", nil)
-	if err != nil {
+	c := gw.client()
+	var body json.RawMessage
+	if err := c.call(context.Background(), apiTimeout, http.MethodGet, "/v1/platform/component-keys", nil, &body); err != nil {
 		return err
 	}
 	fmt.Println(string(body))
@@ -134,8 +133,7 @@ func keysList(args []string) error {
 
 func keysRm(args []string) error {
 	fs := flag.NewFlagSet("keys rm", flag.ContinueOnError)
-	gateway := fs.String("gateway", "", "")
-	token := fs.String("token", "", "")
+	gw := addGatewayFlags(fs)
 	keyID, err := parseNamed(fs, args)
 	if err != nil {
 		return err
@@ -143,8 +141,8 @@ func keysRm(args []string) error {
 	if keyID == "" {
 		return fmt.Errorf("usage: keys rm <keyId>")
 	}
-	c := newClient(resolveConfig(*gateway, *token))
-	if _, err := c.do("DELETE", "/v1/platform/component-keys/"+url.PathEscape(keyID), nil); err != nil {
+	c := gw.client()
+	if err := c.call(context.Background(), apiTimeout, http.MethodDelete, "/v1/platform/component-keys/"+url.PathEscape(keyID), nil, nil); err != nil {
 		return err
 	}
 	fmt.Println("removed")

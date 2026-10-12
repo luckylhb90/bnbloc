@@ -13,6 +13,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/luckylhb90/bnbloc/internal/auth"
 )
 
 // defaultGateway is the local development gateway (compose.yml's public edge).
@@ -123,8 +125,7 @@ func readStoredLogin(path string) (storedLogin, error) {
 
 // writeStoredLogin merges login into the config file atomically (temp file in
 // the same directory, 0600, then rename), keeping every other key. Empty
-// login fields delete their keys. The legacy static "token" key is dropped:
-// static tokens come only from --token / BNBLOC_TOKEN.
+// login fields delete their keys.
 func writeStoredLogin(path string, login storedLogin) error {
 	doc := map[string]json.RawMessage{}
 	if raw, err := os.ReadFile(path); err == nil {
@@ -134,7 +135,6 @@ func writeStoredLogin(path string, login storedLogin) error {
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
-	delete(doc, "token")
 	for key, value := range map[string]string{"gateway": login.Gateway, "refreshToken": login.RefreshToken, "subject": login.Subject} {
 		if value == "" {
 			delete(doc, key)
@@ -236,6 +236,47 @@ func (c *client) bearer() (string, error) {
 	return c.grant.SessionToken, nil
 }
 
+// identity is who the CLI acts as: the session the credential precedence
+// (bearer) selects, and which credential selected it.
+type identity struct {
+	Source                string
+	Subject, Tenant, Role string
+}
+
+// identity reports the session every command of this process uses: a
+// static bearer's own claims (the gateway verifies the signature on every
+// call; this only reads them), else the session minted from the API token
+// or the stored sign-in.
+func (c *client) identity() (identity, error) {
+	if c.cfg.Token != "" {
+		claims, err := auth.PeekSession(c.cfg.Token)
+		if err != nil {
+			return identity{}, err
+		}
+		if claims.ExpiresAtUnix != 0 && time.Now().Unix() > claims.ExpiresAtUnix {
+			return identity{}, errNotSignedIn(c.cfg.Gateway, "the session token expired")
+		}
+		if claims.Subject == "" {
+			return identity{}, errors.New("the session carries no subject")
+		}
+		return identity{Source: "session token (--token / BNBLOC_TOKEN)", Subject: claims.Subject, Tenant: claims.Tenant, Role: claims.Role}, nil
+	}
+	if c.cfg.APIToken == "" && c.cfg.RefreshToken == "" {
+		return identity{}, errNotSignedIn(c.cfg.Gateway, "not signed in to "+c.cfg.Gateway)
+	}
+	if _, err := c.bearer(); err != nil {
+		return identity{}, err
+	}
+	source := "stored sign-in"
+	if c.cfg.APIToken != "" {
+		source = apiTokenEnv
+	}
+	if c.grant.Subject == "" {
+		return identity{}, errors.New("the session carries no subject")
+	}
+	return identity{Source: source, Subject: c.grant.Subject, Tenant: c.grant.Tenant, Role: c.grant.Role}, nil
+}
+
 // refresh exchanges the stored refresh token for a session and persists the
 // rotated refresh token before anything else uses the session.
 func (c *client) refresh() (*sessionGrant, error) {
@@ -265,16 +306,58 @@ func (c *client) refresh() (*sessionGrant, error) {
 	return &g, nil
 }
 
-// do sends an authenticated request to the gateway and returns the response body
-// for 2xx, or a formatted error carrying the status + body for non-2xx.
-func (c *client) do(method, path string, body []byte) ([]byte, error) {
-	var r io.Reader
-	if body != nil {
-		r = bytes.NewReader(body)
+// call is the CLI's one JSON control-plane call: in (nil for none) is sent
+// as the JSON body, and a 2xx answer is decoded into out (nil discards it;
+// a *json.RawMessage keeps the bytes). It is bounded by timeout and
+// cancelled with ctx, and every failure is returned: encoding, transport,
+// a non-2xx status (responseError) and an undecodable answer.
+func (c *client) call(ctx context.Context, timeout time.Duration, method, path string, in, out any) error {
+	var body io.Reader
+	if in != nil {
+		raw, err := json.Marshal(in)
+		if err != nil {
+			return fmt.Errorf("%s %s: encode request: %w", method, path, err)
+		}
+		body = bytes.NewReader(raw)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), apiTimeout)
+	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	return c.doReader(ctx, method, path, r, "application/json")
+	raw, err := c.doReader(ctx, method, path, body, "application/json")
+	if err != nil {
+		return err
+	}
+	if out == nil || len(bytes.TrimSpace(raw)) == 0 {
+		return nil // no body (204) leaves out as it is
+	}
+	if err := json.Unmarshal(raw, out); err != nil {
+		return fmt.Errorf("%s %s: invalid response: %w", method, path, err)
+	}
+	return nil
+}
+
+// statusError is a gateway answer outside 2xx.
+type statusError struct {
+	Method, Path string
+	Status       int
+	Body         string
+}
+
+func (e *statusError) Error() string {
+	return fmt.Sprintf("%s %s: %d %s: %s", e.Method, e.Path, e.Status, http.StatusText(e.Status), e.Body)
+}
+
+// responseError maps an answer outside 2xx: a 401 is the one sign-in hint
+// (not signed in, or the session was refused), anything else a
+// statusError.
+func (c *client) responseError(method, path string, status int, body []byte, token string) error {
+	if status == http.StatusUnauthorized {
+		why := "not signed in"
+		if token != "" {
+			why = "the session was refused (expired, revoked, or the tenant is suspended)"
+		}
+		return errNotSignedIn(c.cfg.Gateway, fmt.Sprintf("%s %s: %s", method, path, why))
+	}
+	return &statusError{Method: method, Path: path, Status: status, Body: strings.TrimSpace(string(body))}
 }
 
 // doReader sends an authenticated request with an arbitrary body reader and
@@ -290,11 +373,8 @@ func (c *client) doReader(ctx context.Context, method, path string, r io.Reader,
 	if err != nil {
 		return nil, fmt.Errorf("%s %s: %w", method, path, err)
 	}
-	if status == http.StatusUnauthorized && token == "" {
-		return nil, errNotSignedIn(c.cfg.Gateway, fmt.Sprintf("%s %s: not signed in", method, path))
-	}
 	if status < 200 || status >= 300 {
-		return nil, fmt.Errorf("%s %s: %d %s: %s", method, path, status, http.StatusText(status), strings.TrimSpace(string(out)))
+		return nil, c.responseError(method, path, status, out, token)
 	}
 	return out, nil
 }
@@ -351,7 +431,7 @@ func (c *client) stream(ctx context.Context, path string, consume func(io.Reader
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return fmt.Errorf("GET %s: %d %s: %s", path, resp.StatusCode, http.StatusText(resp.StatusCode), strings.TrimSpace(string(raw)))
+		return c.responseError(http.MethodGet, path, resp.StatusCode, raw, token)
 	}
 	return consume(resp.Body)
 }

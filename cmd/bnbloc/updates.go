@@ -1,7 +1,7 @@
 package main
 
 import (
-	"encoding/json"
+	"context"
 	"flag"
 	"fmt"
 	"io"
@@ -41,8 +41,7 @@ type desktopPublishInput struct {
 
 func updatesPublish(args []string) error {
 	fs := flag.NewFlagSet("updates publish", flag.ContinueOnError)
-	gateway := fs.String("gateway", "", "gateway base URL")
-	token := fs.String("token", "", "super-admin session token")
+	gw := addGatewayFlags(fs)
 	archive := fs.String("archive", "", "signed updater archive (bnbloc.app.tar.gz)")
 	signature := fs.String("signature", "", "Tauri signature file generated for the archive (.sig)")
 	version := fs.String("version", "", "release version (semver, e.g. 1.2.3)")
@@ -70,7 +69,7 @@ func updatesPublish(args []string) error {
 	if err != nil {
 		return err
 	}
-	c := newClient(resolveConfig(*gateway, *token))
+	c := gw.client()
 	_, err = publishDesktopUpdate(c, desktopPublishInput{
 		ArchivePath: expandHome(*archive), Signature: string(sig), Version: *version, Notes: releaseNotes, Target: *target, Now: time.Now,
 	}, os.Stdout)
@@ -152,26 +151,21 @@ func publishDesktopUpdate(c *client, in desktopPublishInput, out io.Writer) (wir
 	if err != nil {
 		return wire.UpdateConfig{}, fmt.Errorf("artifact uploaded (%s), but the release was not published: %w", uploaded.Key, err)
 	}
-	hubBody, _ := json.Marshal(struct {
+	hubBody := struct {
 		Channel     string             `json:"channel"`
 		ReleaseDate string             `json:"releaseDate"`
 		Notes       string             `json:"notes"`
 		Files       []wire.ReleaseFile `json:"files"`
-	}{entry.Channel, entry.ReleaseDate, entry.Notes, entry.Files})
-	if _, err := c.do(http.MethodPut, "/v1/platform/app-releases/"+url.PathEscape(entry.Version), hubBody); err != nil {
+	}{entry.Channel, entry.ReleaseDate, entry.Notes, entry.Files}
+	if err := c.call(context.Background(), apiTimeout, http.MethodPut, "/v1/platform/app-releases/"+url.PathEscape(entry.Version), hubBody, nil); err != nil {
 		return wire.UpdateConfig{}, fmt.Errorf("artifact uploaded (%s), but Release Hub save failed. Auto-update is not activated. %w", uploaded.Key, err)
 	}
 	step(5, "saved Release Hub entry %s (%s channel, %d file(s))", entry.Version, entry.Channel, len(entry.Files))
 
 	// Stage 6: activate the updater.
-	cfgBody, _ := json.Marshal(candidate)
-	raw, err := c.do(http.MethodPut, "/v1/platform/update-config", cfgBody)
-	if err != nil {
-		return wire.UpdateConfig{}, fmt.Errorf("Release Hub saved, but updater configuration failed. Update rollout is not activated. %w", err)
-	}
 	var saved wire.UpdateConfig
-	if err := json.Unmarshal(raw, &saved); err != nil {
-		return wire.UpdateConfig{}, fmt.Errorf("Release Hub saved and updater configured, but the response was unreadable: %w", err)
+	if err := c.call(context.Background(), apiTimeout, http.MethodPut, "/v1/platform/update-config", candidate, &saved); err != nil {
+		return wire.UpdateConfig{}, fmt.Errorf("Release Hub saved, but updater configuration failed or its answer was unreadable. Check the update rollout. %w", err)
 	}
 	step(6, "activated the %s updater: v%s for %s. Existing clients discover it on their next check.", saved.Policy.Channel, saved.Release.Version, in.Target)
 	for _, t := range wire.UpdateTargets {
@@ -184,37 +178,24 @@ func publishDesktopUpdate(c *client, in desktopPublishInput, out io.Writer) (wir
 }
 
 func getUpdateConfig(c *client) (wire.UpdateConfig, error) {
-	raw, err := c.do(http.MethodGet, "/v1/platform/update-config", nil)
-	if err != nil {
-		return wire.UpdateConfig{}, err
-	}
 	var cfg wire.UpdateConfig
-	if err := json.Unmarshal(raw, &cfg); err != nil {
-		return wire.UpdateConfig{}, fmt.Errorf("update config response invalid: %w", err)
-	}
-	return cfg, nil
+	err := c.call(context.Background(), apiTimeout, http.MethodGet, "/v1/platform/update-config", nil, &cfg)
+	return cfg, err
 }
 
 func getReleaseHub(c *client) (wire.ReleaseHub, error) {
-	raw, err := c.do(http.MethodGet, "/v1/platform/app-releases", nil)
-	if err != nil {
-		return wire.ReleaseHub{}, err
-	}
 	var hub wire.ReleaseHub
-	if err := json.Unmarshal(raw, &hub); err != nil {
-		return wire.ReleaseHub{}, fmt.Errorf("release hub response invalid: %w", err)
-	}
-	return hub, nil
+	err := c.call(context.Background(), apiTimeout, http.MethodGet, "/v1/platform/app-releases", nil, &hub)
+	return hub, err
 }
 
 func updatesStatus(args []string) error {
 	fs := flag.NewFlagSet("updates status", flag.ContinueOnError)
-	gateway := fs.String("gateway", "", "gateway base URL")
-	token := fs.String("token", "", "super-admin session token")
+	gw := addGatewayFlags(fs)
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	c := newClient(resolveConfig(*gateway, *token))
+	c := gw.client()
 	cfg, err := getUpdateConfig(c)
 	if err != nil {
 		return err

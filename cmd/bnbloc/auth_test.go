@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -90,11 +91,11 @@ func newRefreshGateway(t *testing.T) *refreshGateway {
 func TestStoredLoginRefreshesOnceAndPersistsRotation(t *testing.T) {
 	home := isolateHome(t)
 	gw := newRefreshGateway(t)
-	path := writeConfigFile(t, home, map[string]any{"gateway": gw.URL, "refreshToken": "rt-1", "subject": "admin@example.com", "token": "stale-static", "extra": "keep-me"})
+	path := writeConfigFile(t, home, map[string]any{"gateway": gw.URL, "refreshToken": "rt-1", "subject": "admin@example.com", "extra": "keep-me"})
 
 	c := newClient(resolveConfig("", ""))
 	for i := 0; i < 3; i++ {
-		if _, err := c.do(http.MethodGet, "/v1/platform/update-config", nil); err != nil {
+		if err := c.call(context.Background(), apiTimeout, http.MethodGet, "/v1/platform/update-config", nil, nil); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -110,9 +111,6 @@ func TestStoredLoginRefreshesOnceAndPersistsRotation(t *testing.T) {
 	if doc["refreshToken"] != "rt-2" || doc["gateway"] != gw.URL || doc["extra"] != "keep-me" {
 		t.Fatalf("config after refresh = %v, want rotated token + preserved keys", doc)
 	}
-	if _, ok := doc["token"]; ok {
-		t.Fatal("legacy static token key kept in config")
-	}
 	st, _ := os.Stat(path)
 	if st.Mode().Perm() != 0o600 {
 		t.Fatalf("config mode = %v, want 0600", st.Mode().Perm())
@@ -125,10 +123,10 @@ func TestStaticTokenTakesPrecedence(t *testing.T) {
 	gw := newRefreshGateway(t)
 	writeConfigFile(t, home, map[string]any{"gateway": gw.URL, "refreshToken": "rt-1"})
 	t.Setenv("BNBLOC_TOKEN", "env-token")
-	if _, err := newClient(resolveConfig("", "")).do(http.MethodGet, "/x", nil); err != nil {
+	if err := newClient(resolveConfig("", "")).call(context.Background(), apiTimeout, http.MethodGet, "/x", nil, nil); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := newClient(resolveConfig("", "flag-token")).do(http.MethodGet, "/x", nil); err != nil {
+	if err := newClient(resolveConfig("", "flag-token")).call(context.Background(), apiTimeout, http.MethodGet, "/x", nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	if gw.refreshes.Load() != 0 || gw.bearers[0] != "Bearer env-token" || gw.bearers[1] != "Bearer flag-token" {
@@ -142,7 +140,7 @@ func TestRefusedRefreshSaysRunLogin(t *testing.T) {
 	gw := newRefreshGateway(t)
 	gw.refuse = true
 	writeConfigFile(t, home, map[string]any{"gateway": gw.URL, "refreshToken": "rt-1"})
-	_, err := newClient(resolveConfig("", "")).do(http.MethodGet, "/x", nil)
+	err := newClient(resolveConfig("", "")).call(context.Background(), apiTimeout, http.MethodGet, "/x", nil, nil)
 	if err == nil || !strings.Contains(err.Error(), "bnbloc login") {
 		t.Fatalf("err = %v, want a run-bnbloc-login hint", err)
 	}
@@ -157,7 +155,7 @@ func TestStoredLoginIsBoundToItsGateway(t *testing.T) {
 	gw := newRefreshGateway(t)
 	other := newRefreshGateway(t)
 	writeConfigFile(t, home, map[string]any{"gateway": gw.URL, "refreshToken": "rt-1"})
-	_, err := newClient(resolveConfig(other.URL, "")).do(http.MethodGet, "/x", nil)
+	err := newClient(resolveConfig(other.URL, "")).call(context.Background(), apiTimeout, http.MethodGet, "/x", nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -18,29 +18,26 @@ import (
 // pinned in the package, signed and installed through the one publish call.
 func coresPublishMCP(args []string) error {
 	fs := flag.NewFlagSet("cores publish-mcp", flag.ContinueOnError)
-	gateway := fs.String("gateway", "", "gateway base URL")
-	token := fs.String("token", "", "super-admin session token")
+	gw := addGatewayFlags(fs)
 	packageFile := fs.String("package", "", "MCP package JSON (kind/contract default to the MCP kind; a stdio package's artifacts come from --binary)")
-	seckey := fs.String("seckey", "", "ed25519 private key file for signing (default "+defaultSeckeyHint+" when it exists)")
-	unsigned := fs.Bool("unsigned", false, "install without a signature (dev; gateway must allow it)")
-	rollout := fs.String("rollout", "", "rollout set atomically with the publish: auto | optin | off (default: gateway default, auto)")
+	sign := addSigningFlags(fs, "rollout set atomically with the publish: auto | optin | off (default: gateway default, auto)")
 	var binaries multiFlag
 	fs.Var(&binaries, "binary", "stdio server binary as <goos-goarch>=<path> (repeatable)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	if err := validRolloutFlag(*rollout); err != nil {
+	if err := validRolloutFlag(*sign.rollout); err != nil {
 		return err
 	}
 	pkg, err := mcpPublishInputs(*packageFile, binaries)
 	if err != nil {
 		return err
 	}
-	priv, err := packageSigningKey(*seckey, *unsigned)
+	priv, err := sign.key()
 	if err != nil {
 		return err
 	}
-	c := newClient(resolveConfig(*gateway, *token))
+	c := gw.client()
 	var pins map[string]pkgmeta.Artifact
 	if len(binaries) > 0 {
 		if pins, err = uploadArtifacts(c, binaries); err != nil {
@@ -58,7 +55,7 @@ func coresPublishMCP(args []string) error {
 	if err != nil {
 		return err
 	}
-	if err := publishComponent(c, body, signature, *rollout); err != nil {
+	if err := publishComponent(c, body, signature, *sign.rollout); err != nil {
 		return err
 	}
 	fmt.Printf("published MCP tool %q %s (%s, %d tool(s))\n", pkg.Name, pkg.Version, pkg.Runtime, len(pkg.MCP.Tools))

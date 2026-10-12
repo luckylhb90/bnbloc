@@ -29,8 +29,7 @@ type adminAlertResult struct {
 
 func runAlert(args []string) error {
 	fs := flag.NewFlagSet("alert", flag.ContinueOnError)
-	gateway := fs.String("gateway", "", "gateway base URL")
-	token := fs.String("token", "", "session token")
+	gw := addGatewayFlags(fs)
 	title := fs.String("title", "", "alert headline (required, at most 200 characters)")
 	text := fs.String("text", "", "alert body (at most 500 characters)")
 	link := fs.String("url", "", "link the alert points at (absolute http(s) URL)")
@@ -44,7 +43,7 @@ func runAlert(args []string) error {
 	if strings.TrimSpace(*title) == "" {
 		return errors.New("alert: --title is required")
 	}
-	c := newClient(resolveConfig(*gateway, *token))
+	c := gw.client()
 	res, err := sendAlert(context.Background(), c, adminAlert{Title: *title, Text: *text, URL: *link, Recipients: splitList(*to)})
 	if err != nil {
 		return err
@@ -57,7 +56,7 @@ func runAlert(args []string) error {
 // delivery is asynchronous (the notifier's outbox).
 func sendAlert(ctx context.Context, c *client, a adminAlert) (adminAlertResult, error) {
 	var res adminAlertResult
-	if err := smokeCall(ctx, c, apiTimeout, http.MethodPost, "/v1/platform/alerts", a, &res); err != nil {
+	if err := c.call(ctx, apiTimeout, http.MethodPost, "/v1/platform/alerts", a, &res); err != nil {
 		return res, err
 	}
 	if res.ID == "" {

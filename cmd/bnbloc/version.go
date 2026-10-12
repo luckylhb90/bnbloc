@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -33,8 +32,7 @@ var errNotSuperAdmin = errors.New("GET /v1/platform/versions needs a platform su
 
 func runVersion(args []string) error {
 	fs := flag.NewFlagSet("version", flag.ContinueOnError)
-	gateway := fs.String("gateway", "", "gateway base URL")
-	token := fs.String("token", "", "session token")
+	gw := addGatewayFlags(fs)
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -43,7 +41,7 @@ func runVersion(args []string) error {
 	}
 	self := buildinfo.Get("bnbloc-cli")
 	fmt.Printf("cli commit %s\n", orUnknown(self.Commit))
-	c := newClient(resolveConfig(*gateway, *token))
+	c := gw.client()
 	d, err := fetchDeploymentVersions(context.Background(), c, versionSamples)
 	if err != nil {
 		return err
@@ -61,27 +59,14 @@ func fetchDeploymentVersions(ctx context.Context, c *client, samples int) (wire.
 	var merged wire.DeploymentVersions
 	seen := map[string]bool{}
 	unreachable := map[string]wire.UnreachableService{}
-	token, err := c.bearer()
-	if err != nil {
-		return merged, err
-	}
 	for i := 0; i < samples; i++ {
-		callCtx, cancel := context.WithTimeout(ctx, apiTimeout)
-		raw, status, err := c.send(callCtx, http.MethodGet, "/v1/platform/versions", nil, "", token)
-		cancel()
-		switch {
-		case err != nil:
-			return merged, fmt.Errorf("GET /v1/platform/versions: %w", err)
-		case status == http.StatusUnauthorized && token == "":
-			return merged, errNotSignedIn(c.cfg.Gateway, "GET /v1/platform/versions: not signed in")
-		case status == http.StatusForbidden:
-			return merged, errNotSuperAdmin
-		case status != http.StatusOK:
-			return merged, fmt.Errorf("GET /v1/platform/versions: %d %s: %s", status, http.StatusText(status), strings.TrimSpace(string(raw)))
-		}
 		var d wire.DeploymentVersions
-		if err := json.Unmarshal(raw, &d); err != nil {
-			return merged, fmt.Errorf("GET /v1/platform/versions: invalid response: %w", err)
+		if err := c.call(ctx, apiTimeout, http.MethodGet, "/v1/platform/versions", nil, &d); err != nil {
+			var se *statusError
+			if errors.As(err, &se) && se.Status == http.StatusForbidden {
+				return merged, errNotSuperAdmin
+			}
+			return merged, err
 		}
 		for _, s := range d.Services {
 			if key := s.Service + "\x00" + s.Instance; !seen[key] {

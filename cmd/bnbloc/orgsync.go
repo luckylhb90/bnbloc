@@ -30,8 +30,7 @@ func runOrgSync(args []string) error {
 		return errors.New(orgSyncUsage)
 	}
 	fs := flag.NewFlagSet("org-sync "+args[0], flag.ContinueOnError)
-	gateway := fs.String("gateway", "", "gateway base URL")
-	token := fs.String("token", "", "session token")
+	gw := addGatewayFlags(fs)
 	file := fs.String("file", "", "input file (- for stdin)")
 	email := fs.String("email", "", "preview: the member's email")
 	user := fs.String("user", "", "preview: the member's subject id (default: the email)")
@@ -42,11 +41,11 @@ func runOrgSync(args []string) error {
 		return err
 	}
 	ctx := context.Background()
-	c := newClient(resolveConfig(*gateway, *token))
+	c := gw.client()
 	switch args[0] {
 	case "rules":
 		var out json.RawMessage
-		if err := smokeCall(ctx, c, apiTimeout, http.MethodGet, "/v1/platform/org-sync/rules", nil, &out); err != nil {
+		if err := c.call(ctx, apiTimeout, http.MethodGet, "/v1/platform/org-sync/rules", nil, &out); err != nil {
 			return err
 		}
 		return printJSON(out)
@@ -60,7 +59,7 @@ func runOrgSync(args []string) error {
 			return err
 		}
 		var out json.RawMessage
-		if err := smokeCall(ctx, c, apiTimeout, http.MethodPut, "/v1/platform/org-sync/rules", body, &out); err != nil {
+		if err := c.call(ctx, apiTimeout, http.MethodPut, "/v1/platform/org-sync/rules", body, &out); err != nil {
 			return err
 		}
 		return printJSON(out)
@@ -70,7 +69,7 @@ func runOrgSync(args []string) error {
 		}
 		var out json.RawMessage
 		in := map[string]any{"userId": *user, "email": *email, "groups": []string(groups), "department": *department}
-		if err := smokeCall(ctx, c, apiTimeout, http.MethodPost, "/v1/platform/org-sync/preview", in, &out); err != nil {
+		if err := c.call(ctx, apiTimeout, http.MethodPost, "/v1/platform/org-sync/preview", in, &out); err != nil {
 			return err
 		}
 		return printJSON(out)
@@ -93,7 +92,7 @@ func runOrgSync(args []string) error {
 				RevokedSessions int      `json:"revokedSessions"`
 			} `json:"results"`
 		}
-		if err := smokeCall(ctx, c, apiTimeout, http.MethodPost, "/v1/platform/org-sync/deprovision", map[string]any{"userIds": ids}, &out); err != nil {
+		if err := c.call(ctx, apiTimeout, http.MethodPost, "/v1/platform/org-sync/deprovision", map[string]any{"userIds": ids}, &out); err != nil {
 			return err
 		}
 		for _, r := range out.Results {
@@ -103,7 +102,7 @@ func runOrgSync(args []string) error {
 		return nil
 	case "resync":
 		var out json.RawMessage
-		if err := smokeCall(ctx, c, apiTimeout, http.MethodPost, "/v1/platform/org-sync/resync", map[string]any{}, &out); err != nil {
+		if err := c.call(ctx, apiTimeout, http.MethodPost, "/v1/platform/org-sync/resync", map[string]any{}, &out); err != nil {
 			return err
 		}
 		return printJSON(out)
@@ -132,7 +131,7 @@ func readInput(path string) ([]byte, error) {
 	if path == "-" {
 		return io.ReadAll(os.Stdin)
 	}
-	return os.ReadFile(path)
+	return os.ReadFile(expandHome(path))
 }
 
 // lines returns the non-empty, non-comment lines of raw.
