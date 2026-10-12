@@ -88,6 +88,9 @@ func BumpPatch(v string) (string, error) {
 // parsePartial parses "1", "1.2" or "1.2.3" (missing parts are zero) and
 // reports how many parts were given.
 func parsePartial(s string) (Version, int, error) {
+	if v, err := Parse(s); err == nil && !strings.HasPrefix(s, "v") {
+		return v, 3, nil
+	}
 	parts := strings.Split(s, ".")
 	if len(parts) == 0 || len(parts) > 3 {
 		return Version{}, 0, fmt.Errorf("invalid range version %q", s)
