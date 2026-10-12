@@ -44,7 +44,7 @@ use crate::internal_ext::Adapter;
 
 #[path = "mcp_oauth.rs"]
 mod mcp_oauth;
-use mcp_oauth::{OAuthSpec, TokenFailure};
+use mcp_oauth::{OAuthSpec, RefreshOutcome};
 
 /// The env var naming the tools dir the bridge reads.
 pub(super) const TOOLS_DIR_ENV: &str = "BNBLOC_MCP_TOOLS_DIR";
@@ -87,8 +87,11 @@ pub(super) struct McpState {
     pass: tokio::sync::Mutex<()>,
     /// Tools with a sign-in open in the browser.
     signing_in: Mutex<HashSet<String>>,
-    /// Serializes sign-in refreshes (a rotated refresh token is used once).
+    /// Serializes sign-in refresh passes (a rotated refresh token is used
+    /// once).
     refresh: tokio::sync::Mutex<()>,
+    /// The stored sign-ins: every write and delete goes through it.
+    pub(super) sign_ins: mcp_oauth::SignIns,
 }
 
 /// One installed MCP tool as Settings → Tools renders it. Secret values are
@@ -448,7 +451,7 @@ impl Adapter {
             .find(|t| t.name == tool)
             .and_then(|t| t.oauth.clone())
             .ok_or_else(|| format!("MCP tool {tool} is not installed or takes no sign-in"))?;
-        let path = mcp_oauth::sign_in_path(&self.mcp_settings_dir()?, tool)?;
+        let dir = self.mcp_settings_dir()?;
         if !self.mcp.signing_in.lock().insert(tool.to_string()) {
             return Err(format!(
                 "A sign-in to {tool} is already open in your browser"
@@ -461,7 +464,7 @@ impl Adapter {
             };
             let signed =
                 mcp_oauth::sign_in(&http, tool, &spec, open, mcp_oauth::SIGN_IN_TIMEOUT).await?;
-            mcp_oauth::save_sign_in(&path, &signed)
+            self.mcp.sign_ins.save(&dir, tool, &signed)
         }
         .await;
         self.mcp.signing_in.lock().remove(tool);
@@ -481,12 +484,13 @@ impl Adapter {
                 "MCP tool {tool} is not installed or takes no sign-in"
             ));
         }
-        mcp_oauth::forget_sign_in(&mcp_oauth::sign_in_path(&self.mcp_settings_dir()?, tool)?)
+        self.mcp.sign_ins.forget(&self.mcp_settings_dir()?, tool)
     }
 
     /// Refresh the sign-ins about to expire. A refresh the server refuses
     /// forgets the sign-in (the member signs in again); a failed request is
-    /// retried on the next catalog refresh.
+    /// retried on the next catalog refresh; a sign-in that changed while the
+    /// request ran (signed out, signed in again) is left as it is.
     async fn refresh_mcp_sign_ins(&self, tools: &[McpTool]) {
         let Ok(dir) = self.mcp_settings_dir() else {
             return;
@@ -496,26 +500,18 @@ impl Adapter {
         };
         let _pass = self.mcp.refresh.lock().await;
         for tool in tools.iter().filter(|t| t.oauth.is_some()) {
-            let Ok(path) = mcp_oauth::sign_in_path(&dir, &tool.name) else {
-                continue;
-            };
-            let Some(current) = mcp_oauth::load_sign_in(&path) else {
-                continue;
-            };
-            if !current.needs_refresh(mcp_oauth::now_ms()) {
-                continue;
-            }
-            match mcp_oauth::refresh(&http, &current).await {
-                Ok(next) => {
-                    if let Err(e) = mcp_oauth::save_sign_in(&path, &next) {
-                        eprintln!("[mcp-tools:{}] store refreshed sign-in: {e}", tool.name);
-                    }
-                }
-                Err(TokenFailure::Refused(m)) => {
+            match mcp_oauth::refresh_stored(&http, &self.mcp.sign_ins, &dir, &tool.name).await {
+                RefreshOutcome::NotDue | RefreshOutcome::Refreshed => {}
+                RefreshOutcome::Forgotten(m) => {
                     eprintln!("[mcp-tools:{}] sign-in no longer valid: {m}", tool.name);
-                    let _ = mcp_oauth::forget_sign_in(&path);
                 }
-                Err(TokenFailure::Failed(m)) => {
+                RefreshOutcome::Superseded => {
+                    eprintln!(
+                        "[mcp-tools:{}] sign-in changed during its refresh; kept as is",
+                        tool.name
+                    );
+                }
+                RefreshOutcome::Failed(m) => {
                     eprintln!("[mcp-tools:{}] refresh failed: {m}", tool.name);
                 }
             }
@@ -523,11 +519,10 @@ impl Adapter {
     }
 
     fn forget_mcp_sign_in(&self, tool: &str) {
-        if let Ok(path) = self
-            .mcp_settings_dir()
-            .and_then(|dir| mcp_oauth::sign_in_path(&dir, tool))
-        {
-            let _ = mcp_oauth::forget_sign_in(&path);
+        if let Ok(dir) = self.mcp_settings_dir() {
+            if let Err(e) = self.mcp.sign_ins.forget(&dir, tool) {
+                eprintln!("[mcp-tools:{tool}] {e}");
+            }
         }
     }
 

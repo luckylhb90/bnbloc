@@ -517,7 +517,8 @@ fn sign_in_is_stored_owner_only_beside_the_tool_settings() {
         issuer: "https://auth.example.com".into(),
         ..SignIn::default()
     };
-    save_sign_in(&path, &s).unwrap();
+    let store = SignIns::default();
+    store.save(&dir, "drive", &s).unwrap();
     assert_eq!(load_sign_in(&path), Some(s.clone()));
     #[cfg(unix)]
     {
@@ -530,9 +531,118 @@ fn sign_in_is_stored_owner_only_beside_the_tool_settings() {
     assert_eq!(raw["accessToken"], "secret-at");
     assert_eq!(raw["expiresAtMs"], 42);
     assert_eq!(s.issuer_host(), "auth.example.com");
-    forget_sign_in(&path).unwrap();
-    forget_sign_in(&path).unwrap();
+    store.forget(&dir, "drive").unwrap();
+    store.forget(&dir, "drive").unwrap();
     assert!(load_sign_in(&path).is_none());
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A token endpoint that answers one refresh only when the test releases
+/// it: `arrived` fires once the request is in, `release` lets it answer.
+async fn gated_token_endpoint() -> (
+    String,
+    tokio::sync::oneshot::Receiver<()>,
+    tokio::sync::oneshot::Sender<()>,
+) {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let endpoint = format!("http://{}/token", listener.local_addr().unwrap());
+    let (arrived_tx, arrived_rx) = tokio::sync::oneshot::channel();
+    let (release_tx, release_rx) = tokio::sync::oneshot::channel::<()>();
+    tokio::spawn(async move {
+        let (mut sock, _) = listener.accept().await.unwrap();
+        let mut buf = Vec::new();
+        let mut chunk = [0u8; 4096];
+        loop {
+            let n = sock.read(&mut chunk).await.unwrap_or(0);
+            buf.extend_from_slice(&chunk[..n]);
+            let text = String::from_utf8_lossy(&buf);
+            if n == 0 || text.contains("refresh_token=rt-1") {
+                break;
+            }
+        }
+        let _ = arrived_tx.send(());
+        let _ = release_rx.await;
+        let body = r#"{"access_token":"at-2","token_type":"Bearer","expires_in":3600,"refresh_token":"rt-2"}"#;
+        let resp = format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+            body.len()
+        );
+        let _ = sock.write_all(resp.as_bytes()).await;
+        let _ = sock.shutdown().await;
+    });
+    (endpoint, arrived_rx, release_tx)
+}
+
+fn due_sign_in(token_endpoint: &str) -> SignIn {
+    SignIn {
+        access_token: "at-1".into(),
+        // Inside the refresh window.
+        expires_at_ms: now_ms() + 1_000,
+        refresh_token: "rt-1".into(),
+        issuer: "http://127.0.0.1".into(),
+        token_endpoint: token_endpoint.into(),
+        resource: "http://127.0.0.1/mcp".into(),
+        client_id: "c".into(),
+        token_auth: "none".into(),
+        ..SignIn::default()
+    }
+}
+
+/// A sign-out, or a fresh sign-in, while a refresh's token request is in
+/// flight wins: the refresh never re-creates the deleted file or overwrites
+/// the new grant with the old one.
+#[tokio::test]
+async fn sign_out_and_refresh_do_not_race() {
+    let dir = std::env::temp_dir().join(format!("bnbloc-mcp-race-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let path = sign_in_path(&dir, "drive").unwrap();
+    let http = oauth_client().unwrap();
+    let store = SignIns::default();
+
+    // Sign-out during the refresh: stays signed out.
+    let (endpoint, arrived, release) = gated_token_endpoint().await;
+    store.save(&dir, "drive", &due_sign_in(&endpoint)).unwrap();
+    let (outcome, ()) = tokio::join!(refresh_stored(&http, &store, &dir, "drive"), async {
+        arrived.await.unwrap();
+        store.forget(&dir, "drive").unwrap();
+        release.send(()).unwrap();
+    });
+    assert_eq!(outcome, RefreshOutcome::Superseded);
+    assert!(
+        !path.exists(),
+        "a sign-out during a refresh must stay signed out"
+    );
+
+    // A fresh sign-in during the refresh: kept, not overwritten.
+    let (endpoint, arrived, release) = gated_token_endpoint().await;
+    store.save(&dir, "drive", &due_sign_in(&endpoint)).unwrap();
+    let fresh = SignIn {
+        access_token: "at-fresh".into(),
+        refresh_token: "rt-fresh".into(),
+        expires_at_ms: now_ms() + 3_600_000,
+        ..due_sign_in(&endpoint)
+    };
+    let (outcome, ()) = tokio::join!(refresh_stored(&http, &store, &dir, "drive"), async {
+        arrived.await.unwrap();
+        store.save(&dir, "drive", &fresh).unwrap();
+        release.send(()).unwrap();
+    });
+    assert_eq!(outcome, RefreshOutcome::Superseded);
+    assert_eq!(load_sign_in(&path), Some(fresh));
+
+    // Undisturbed, the refresh commits over the sign-in it started from.
+    let (endpoint, arrived, release) = gated_token_endpoint().await;
+    store.save(&dir, "drive", &due_sign_in(&endpoint)).unwrap();
+    let (outcome, ()) = tokio::join!(refresh_stored(&http, &store, &dir, "drive"), async {
+        arrived.await.unwrap();
+        release.send(()).unwrap();
+    });
+    assert_eq!(outcome, RefreshOutcome::Refreshed);
+    let stored = load_sign_in(&path).expect("refreshed sign-in");
+    assert_eq!(
+        (stored.access_token.as_str(), stored.refresh_token.as_str()),
+        ("at-2", "rt-2")
+    );
     let _ = std::fs::remove_dir_all(&dir);
 }
 

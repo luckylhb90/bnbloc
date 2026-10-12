@@ -28,9 +28,14 @@
 //!
 //! Tokens are refreshed shortly before they expire (the refresh token
 //! rotates when the server returns a new one); a refused refresh forgets
-//! the sign-in. Removing the tool forgets it too. Token values are never
-//! logged and never returned to the web view.
+//! the sign-in. Removing the tool forgets it too. Every write and delete of
+//! a sign-in file goes through `SignIns` (a per-tool lock; a refresh commits
+//! only over the sign-in it started from, so a sign-out or a new sign-in
+//! during a refresh wins). Token values are never logged and never returned
+//! to the web view.
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::Duration;
 
 use reqwest::header::{ACCEPT, CONTENT_TYPE, WWW_AUTHENTICATE};
@@ -129,17 +134,115 @@ pub(super) fn load_sign_in(path: &Path) -> Option<SignIn> {
         .filter(|s| !s.access_token.is_empty())
 }
 
-/// Store owner-only (0600) through the shared credential writer.
-pub(super) fn save_sign_in(path: &Path, sign_in: &SignIn) -> Result<(), String> {
+/// The member's stored sign-ins: the one owner of every write and delete of
+/// a sign-in file. Each takes the tool's lock, so a sign-in, a sign-out, the
+/// uninstall sweep and a refresh's commit never interleave. A refresh talks
+/// to the sign-in server WITHOUT the lock and commits only over the exact
+/// sign-in it started from (re-read and compared under the lock): a
+/// sign-out or a fresh sign-in meanwhile wins.
+#[derive(Default)]
+pub(in crate::internal_ext) struct SignIns {
+    locks: parking_lot::Mutex<HashMap<String, Arc<parking_lot::Mutex<()>>>>,
+}
+
+impl SignIns {
+    fn lock(&self, tool: &str) -> Arc<parking_lot::Mutex<()>> {
+        Arc::clone(self.locks.lock().entry(tool.to_string()).or_default())
+    }
+
+    /// Store `tool`'s sign-in owner-only (0600).
+    pub(super) fn save(&self, dir: &Path, tool: &str, sign_in: &SignIn) -> Result<(), String> {
+        let path = sign_in_path(dir, tool)?;
+        let lock = self.lock(tool);
+        let _held = lock.lock();
+        write_sign_in(&path, sign_in)
+    }
+
+    /// Forget `tool`'s sign-in (sign-out).
+    pub(super) fn forget(&self, dir: &Path, tool: &str) -> Result<(), String> {
+        let path = sign_in_path(dir, tool)?;
+        let lock = self.lock(tool);
+        let _held = lock.lock();
+        remove_sign_in(&path)
+    }
+
+    /// Replace `tool`'s sign-in with `next` (None: forget it) only while the
+    /// stored one is still exactly `from`. Returns whether it did.
+    pub(super) fn replace_if_current(
+        &self,
+        dir: &Path,
+        tool: &str,
+        from: &SignIn,
+        next: Option<&SignIn>,
+    ) -> Result<bool, String> {
+        let path = sign_in_path(dir, tool)?;
+        let lock = self.lock(tool);
+        let _held = lock.lock();
+        if load_sign_in(&path).as_ref() != Some(from) {
+            return Ok(false);
+        }
+        match next {
+            Some(next) => write_sign_in(&path, next)?,
+            None => remove_sign_in(&path)?,
+        }
+        Ok(true)
+    }
+}
+
+/// Owner-only (0600) through the shared credential writer. Only `SignIns`
+/// calls it, under the tool's lock.
+fn write_sign_in(path: &Path, sign_in: &SignIn) -> Result<(), String> {
     let raw = serde_json::to_vec(sign_in).map_err(|e| e.to_string())?;
     crate::settings::write_owner_only(path, &raw)
 }
 
-pub(super) fn forget_sign_in(path: &Path) -> Result<(), String> {
+fn remove_sign_in(path: &Path) -> Result<(), String> {
     match std::fs::remove_file(path) {
         Ok(()) => Ok(()),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
         Err(e) => Err(format!("forget sign-in: {e}")),
+    }
+}
+
+/// What a refresh of one stored sign-in did.
+#[derive(Debug, PartialEq)]
+pub(super) enum RefreshOutcome {
+    /// Nothing stored, or not due yet.
+    NotDue,
+    Refreshed,
+    /// The server refused the grant: the sign-in was forgotten.
+    Forgotten(String),
+    /// The stored sign-in changed while the request ran (signed out, signed
+    /// in again, refreshed elsewhere): the result was dropped.
+    Superseded,
+    /// The request failed; retried on the next catalog refresh.
+    Failed(String),
+}
+
+/// Refresh `tool`'s stored sign-in when it is due. The token request runs
+/// without the tool's lock; its result is committed only over the sign-in it
+/// started from.
+pub(super) async fn refresh_stored(
+    http: &reqwest::Client,
+    store: &SignIns,
+    dir: &Path,
+    tool: &str,
+) -> RefreshOutcome {
+    let Some(current) = sign_in_path(dir, tool).ok().and_then(|p| load_sign_in(&p)) else {
+        return RefreshOutcome::NotDue;
+    };
+    if !current.needs_refresh(now_ms()) {
+        return RefreshOutcome::NotDue;
+    }
+    let (next, outcome) = match refresh(http, &current).await {
+        Ok(next) => (Some(next), RefreshOutcome::Refreshed),
+        Err(TokenFailure::Refused(m)) => (None, RefreshOutcome::Forgotten(m)),
+        Err(TokenFailure::Failed(m)) => return RefreshOutcome::Failed(m),
+    };
+    match store.replace_if_current(dir, tool, &current, next.as_ref()) {
+        Ok(true) => outcome,
+        Ok(false) => RefreshOutcome::Superseded,
+        Err(e) => RefreshOutcome::Failed(e),
     }
 }
 
