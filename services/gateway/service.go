@@ -4,6 +4,7 @@
 package gateway
 
 import (
+	"context"
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
@@ -67,6 +68,12 @@ type Service struct {
 	// not a member. It gates room content settings (owner/admin). nil
 	// refuses them.
 	RoomRole func(subject, roomID string) (role string, human bool)
+	// RoomMembers lists a room's human members (content shares with a
+	// room); ctx carries the room's tenant. nil refuses room shares.
+	RoomMembers func(ctx context.Context, roomID string) ([]string, error)
+	// OrgAdmins lists an organization's org admins (content publish
+	// requests notify them). nil notifies nobody.
+	OrgAdmins func(tenantID string) []string
 	// RoomTenant resolves a room's authoritative tenant (rooms.tenant_id) so a
 	// room-scoped request executes in the ROOM's tenant, not the caller's
 	// session tenant. Empty result leaves the session tenant in force. nil
@@ -268,6 +275,9 @@ func (s *Service) Handler() http.Handler {
 	mux.HandleFunc("DELETE /v1/tenant/mcp-connectors/{name}", s.handleDeleteMCPConnector)
 	s.registerContentComponents(mux)
 	s.registerContentPrompts(mux)
+	s.registerContentSharing(mux)
+	s.registerContentReview(mux)
+	s.registerContentPlatform(mux)
 	s.registerAPITokens(mux)
 	s.registerSSO(mux)
 	s.registerOrgSync(mux)

@@ -11,6 +11,17 @@ import (
 	"github.com/luckylhb90/bnbloc/internal/store"
 )
 
+// VerifyPackage is the pipeline's first step for a package kind the
+// pipeline does not install itself (a content component's platform
+// package, installed into the content tables): the signature checked
+// against the trusted keys (or an unsigned package admitted only when
+// AllowUnsigned), then the package parsed and validated. It returns the
+// signing key id ("" when unsigned).
+func (p *Pipeline) VerifyPackage(ctx context.Context, body, signature []byte) (pkgmeta.Package, string, error) {
+	pkg, keyID, _, err := p.verify(ctx, body, signature)
+	return pkg, keyID, err
+}
+
 func (p *Pipeline) verify(ctx context.Context, body, signature []byte) (pkgmeta.Package, string, string, error) {
 	if len(strings.TrimSpace(string(signature))) == 0 {
 		if !p.AllowUnsigned {

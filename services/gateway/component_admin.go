@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/luckylhb90/bnbloc/internal/contentpkg"
 	"github.com/luckylhb90/bnbloc/internal/extpipe"
 	"github.com/luckylhb90/bnbloc/internal/obs"
 )
@@ -54,6 +55,15 @@ func (s *Service) handleInstallComponent(w http.ResponseWriter, r *http.Request)
 	}
 	if req.Rollout != "" && !extpipe.ValidRollout(req.Rollout) {
 		http.Error(w, "rollout must be auto, optin, or off", http.StatusBadRequest)
+		return
+	}
+	// A content component's signed platform package installs into the
+	// content tables (content_platform.go), not as an extension record.
+	var shell struct {
+		Kind string `json:"kind"`
+	}
+	if json.Unmarshal([]byte(req.Package), &shell) == nil && contentpkg.IsContentKind(shell.Kind) {
+		s.installPlatformContent(w, r, claims, req)
 		return
 	}
 	rec, err := s.corePipeline().Install(r.Context(), extpipe.InstallRequest{

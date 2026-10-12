@@ -33,10 +33,25 @@ type ContentComponent struct {
 	Welcome      string               `json:"welcome,omitempty"`
 	// Prompts are a prompt pack's prompts (content_prompts.go).
 	Prompts []ContentPrompt `json:"prompts,omitempty"`
-	// Mine is true for the caller's own component.
+	// Mine is true for the caller's own personal component: they author it
+	// (new versions, sharing, publishing).
 	Mine bool `json:"mine"`
+	// Removable is true when the caller may delete it: their own personal
+	// component or a shared copy they hold.
+	Removable bool `json:"removable"`
+	// SharedBy is the author of a shared copy (Owner is its holder).
+	SharedBy string `json:"sharedBy,omitempty"`
+	// SourceID is the author's component a shared copy or an org
+	// publication was made from.
+	SourceID string `json:"sourceId,omitempty"`
+	// SourceLatestVersion is, on a shared copy, the author's latest version
+	// when it is newer than the copy's ("update to the author's latest").
+	SourceLatestVersion string `json:"sourceLatestVersion,omitempty"`
+	// Publication is, on the caller's own personal component, its
+	// organization publication and latest publish request.
+	Publication *ContentPublication `json:"publication,omitempty"`
 	// Acked is true when the caller confirmed this version's declared
-	// permissions (always true for their own component and for one that
+	// permissions (always true for content they authored and for one that
 	// declares none).
 	Acked bool `json:"acked"`
 	// Uses counts the members and rooms that enabled or pinned it.
@@ -211,4 +226,158 @@ type ContentEffective struct {
 	// requester may use (mcp_tools.go).
 	MCP     []ContentMCPTool `json:"mcp,omitempty"`
 	Missing []string         `json:"missing,omitempty"`
+}
+
+// Content scopes on the wire (ContentComponent.Scope, publish requests).
+const (
+	ContentScopePersonal = "personal"
+	ContentScopeShared   = "shared"
+	ContentScopeOrg      = "org"
+	ContentScopePlatform = "platform"
+)
+
+// ContentPublication is an author's view of their component's
+// organization publication: the org copy members use (its version and
+// status, absent until a first approval) and the latest publish request.
+type ContentPublication struct {
+	OrgComponentID string                 `json:"orgComponentId,omitempty"`
+	OrgVersion     string                 `json:"orgVersion,omitempty"`
+	OrgStatus      string                 `json:"orgStatus,omitempty"`
+	Request        *ContentPublishRequest `json:"request,omitempty"`
+}
+
+// ContentPublishRequest is a request to publish a version of an author's
+// component to the organization (status pending, approved, declined or
+// withdrawn).
+type ContentPublishRequest struct {
+	ID           string `json:"id"`
+	ComponentID  string `json:"componentId"`
+	Kind         string `json:"kind"`
+	Name         string `json:"name"`
+	DisplayName  string `json:"displayName,omitempty"`
+	Version      string `json:"version"`
+	RequestedBy  string `json:"requestedBy"`
+	Note         string `json:"note,omitempty"`
+	Status       string `json:"status"`
+	DecidedBy    string `json:"decidedBy,omitempty"`
+	DecisionNote string `json:"decisionNote,omitempty"`
+	DecidedAtMs  int64  `json:"decidedAtMs,omitempty"`
+	CreatedAtMs  int64  `json:"createdAtMs"`
+	// ApprovedVersion is the version the organization uses now ("" before
+	// a first approval).
+	ApprovedVersion string `json:"approvedVersion,omitempty"`
+}
+
+// ContentShareRequest is POST /v1/content-components/{id}/shares: named
+// members of the author's organization and/or a room (its human members),
+// at a version (default: the latest), with an optional note for the
+// notification.
+type ContentShareRequest struct {
+	Members []string `json:"members,omitempty"`
+	RoomID  string   `json:"roomId,omitempty"`
+	Version string   `json:"version,omitempty"`
+	Note    string   `json:"note,omitempty"`
+}
+
+// ContentShareReply answers a share: per recipient, the copy and whether it
+// was created, moved to the version (updated) or already had it
+// (unchanged); recipients skipped with the reason.
+type ContentShareReply struct {
+	Version string               `json:"version"`
+	Shared  []ContentShareResult `json:"shared"`
+	Skipped []ContentShareSkip   `json:"skipped"`
+}
+
+// Share outcomes (ContentShareResult.Status).
+const (
+	ContentShareCreated   = "created"
+	ContentShareUpdated   = "updated"
+	ContentShareUnchanged = "unchanged"
+)
+
+// ContentShareResult is one recipient's copy.
+type ContentShareResult struct {
+	Member      string `json:"member"`
+	ComponentID string `json:"componentId"`
+	Version     string `json:"version"`
+	Status      string `json:"status"`
+}
+
+// ContentShareSkip is a recipient a share did not reach.
+type ContentShareSkip struct {
+	Member string `json:"member"`
+	Reason string `json:"reason"`
+}
+
+// ContentCopy is one shared copy of an author's component
+// (GET /v1/content-components/{id}/shares).
+type ContentCopy struct {
+	Member      string `json:"member"`
+	ComponentID string `json:"componentId"`
+	Version     string `json:"version"`
+	UpdatedAtMs int64  `json:"updatedAtMs"`
+}
+
+// ContentPublishInput is POST /v1/content-components/{id}/publish: scope
+// "org" opens a publish request for Version (default: the latest);
+// "personal" withdraws a pending request and takes the component out of
+// the organization; "platform" is refused with what a platform admin does.
+type ContentPublishInput struct {
+	Scope   string `json:"scope"`
+	Version string `json:"version,omitempty"`
+	Note    string `json:"note,omitempty"`
+}
+
+// ContentPublishReply answers a publish: the scope now in effect and the
+// request it opened (org).
+type ContentPublishReply struct {
+	Scope   string                 `json:"scope"`
+	Request *ContentPublishRequest `json:"request,omitempty"`
+	Note    string                 `json:"note"`
+}
+
+// ContentDecisionInput approves or declines a publish request.
+type ContentDecisionInput struct {
+	Note string `json:"note,omitempty"`
+}
+
+// ContentReview is GET /v1/tenant/content-requests/{id}: what an org admin
+// reviews before approving. Component is the requested version (declared
+// permissions, requirements with MCP tools, a team's roster, skills);
+// ScriptFiles are the files that execute; Previous is the version the
+// organization uses now (nil for a first publication) and Files the
+// changes from it, file by file (every file is "added" for a first one).
+type ContentReview struct {
+	Request     ContentPublishRequest `json:"request"`
+	Component   ContentComponent      `json:"component"`
+	ScriptFiles []string              `json:"scriptFiles"`
+	Previous    *ContentComponent     `json:"previous,omitempty"`
+	Files       []ContentFileChange   `json:"files"`
+}
+
+// File changes of a review (ContentFileChange.Change).
+const (
+	ContentFileAdded   = "added"
+	ContentFileRemoved = "removed"
+	ContentFileChanged = "changed"
+)
+
+// ContentFileChange is one file that differs between two versions: its
+// text before and after (bounded; Truncated when a side was cut), or
+// Binary.
+type ContentFileChange struct {
+	Path      string `json:"path"`
+	Change    string `json:"change"`
+	Binary    bool   `json:"binary,omitempty"`
+	Before    string `json:"before,omitempty"`
+	After     string `json:"after,omitempty"`
+	Truncated bool   `json:"truncated,omitempty"`
+}
+
+// ContentAdminComponent is an organization's or the platform's published
+// component as an admin manages it: the component (any status) and its
+// author.
+type ContentAdminComponent struct {
+	Component ContentComponent `json:"component"`
+	TenantID  string           `json:"tenantId,omitempty"`
 }

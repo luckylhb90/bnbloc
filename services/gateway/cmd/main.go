@@ -134,6 +134,10 @@ type tenantWiring struct {
 	OrgSync *orgsync.Syncer
 	// MemberCount counts distinct members across tenants (adoption stats).
 	MemberCount func() int
+	// RoomMembers lists a room's human members and OrgAdmins an
+	// organization's org admins (content sharing and approval).
+	RoomMembers func(ctx context.Context, roomID string) ([]string, error)
+	OrgAdmins   func(tenantID string) []string
 	// Health pings the control-plane store for the readiness probe; nil when no
 	// DB is configured (dev/in-memory), which reads as always-ready.
 	Health func() error
@@ -196,7 +200,27 @@ func resolveTenantWiring() tenantWiring {
 		}
 		return len(seen)
 	}
-	return tenantWiring{Resolve: res.Resolve, Suspended: suspended, MemberRole: memberRole, Settings: backends.Settings, ExtAudit: backends.ExtAudit, ComponentInstalls: backends.ComponentInstalls, NotifierReplies: backends.ReplyTokens, SSOHandoffs: backends.SSOHandoffs, RefreshTokens: backends.RefreshTokens, MemberCount: memberCount, Health: backends.HealthCheck(),
+	// A room's human members (a content share with a room); ctx carries the
+	// room's tenant.
+	roomMembers := func(ctx context.Context, roomID string) ([]string, error) {
+		var out []string
+		for _, m := range backends.Room.Members(ctx, roomID) {
+			if !m.AgentHost {
+				out = append(out, m.UserID)
+			}
+		}
+		return out, nil
+	}
+	orgAdmins := func(tenantID string) []string {
+		var out []string
+		for _, m := range tenants.ListMembers(context.Background(), tenantID) {
+			if m.Role == store.OrgRoleAdmin {
+				out = append(out, m.UserID)
+			}
+		}
+		return out
+	}
+	return tenantWiring{Resolve: res.Resolve, RoomMembers: roomMembers, OrgAdmins: orgAdmins, Suspended: suspended, MemberRole: memberRole, Settings: backends.Settings, ExtAudit: backends.ExtAudit, ComponentInstalls: backends.ComponentInstalls, NotifierReplies: backends.ReplyTokens, SSOHandoffs: backends.SSOHandoffs, RefreshTokens: backends.RefreshTokens, MemberCount: memberCount, Health: backends.HealthCheck(),
 		APITokens: backends.APITokens,
 		// Built-in content (the Expert builder) overlays the stored components.
 		ContentComponents: contentbuiltin.Overlay(backends.ContentComponents),
@@ -266,6 +290,8 @@ func main() {
 		ContentJobs:       tw.ContentJobs,
 		NotifierReplies:   tw.NotifierReplies,
 		MemberCount:       tw.MemberCount,
+		RoomMembers:       tw.RoomMembers,
+		OrgAdmins:         tw.OrgAdmins,
 		AllowedOrigins:    splitCSV(config.FromEnvRaw("BNBLOC_ALLOWED_ORIGINS")),
 		TrustedProxies:    resolveTrustedProxies(),
 		TenantResolver:    tw.Resolve,

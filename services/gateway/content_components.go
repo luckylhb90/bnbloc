@@ -106,6 +106,10 @@ func contentStoreErr(w http.ResponseWriter, what string, err error) {
 		http.Error(w, "content component not found", http.StatusNotFound)
 		return
 	}
+	if errors.Is(err, errContentReadOnly) {
+		http.Error(w, err.Error(), http.StatusConflict)
+		return
+	}
 	obs.ServerError(w, what, err)
 	http.Error(w, what, http.StatusInternalServerError)
 }
@@ -151,18 +155,38 @@ func (s *Service) contentInRoom(ctx context.Context, claims auth.Claims, roomID,
 	return false
 }
 
-// ownContent loads a component the caller owns (writes: new versions,
-// delete). Someone else's is a 404, like a missing one.
+// ownContent loads a personal component the caller authors (new versions,
+// sharing, publishing). Someone else's is a 404, like a missing one; a
+// shared copy or an org publication is not authored here (409).
 func (s *Service) ownContent(ctx context.Context, claims auth.Claims, id string) (store.ContentComponent, error) {
+	c, err := s.heldContent(ctx, claims, id)
+	if err != nil {
+		return store.ContentComponent{}, err
+	}
+	if c.Scope != store.ContentScopePersonal {
+		return store.ContentComponent{}, errContentReadOnly
+	}
+	return c, nil
+}
+
+// heldContent loads a component the caller holds in their own Library: a
+// personal one or a shared copy (delete). An org publication belongs to
+// the organization (its admins remove it).
+func (s *Service) heldContent(ctx context.Context, claims auth.Claims, id string) (store.ContentComponent, error) {
 	c, err := s.ContentComponents.GetContentComponent(ctx, id)
 	if err != nil {
 		return store.ContentComponent{}, err
 	}
-	if c.Owner != claims.Subject || c.TenantID != claims.Tenant {
+	if c.Owner != claims.Subject || c.TenantID != claims.Tenant ||
+		(c.Scope != store.ContentScopePersonal && c.Scope != store.ContentScopeShared) {
 		return store.ContentComponent{}, store.ErrContentNotFound
 	}
 	return c, nil
 }
+
+// errContentReadOnly: a shared copy is read-only (update it to the author's
+// latest instead).
+var errContentReadOnly = errors.New("a shared copy is read-only: update it to the author's latest version, or ask its author for changes")
 
 // contentView turns a component at one version into its wire form.
 func contentView(c store.ContentComponent, v store.ContentComponentVersion, claims auth.Claims, acked map[string]bool, uses int) (wire.ContentComponent, error) {
@@ -175,10 +199,14 @@ func contentView(c store.ContentComponent, v store.ContentComponentVersion, clai
 		Category: m.Category, Tags: m.Tags, Icon: m.Icon, Owner: c.Owner, Scope: string(c.Scope), Status: string(c.Status),
 		LatestVersion: c.LatestVersion, Version: v.Version, Permissions: m.Permissions(), NeedsSandbox: m.NeedsSandbox(),
 		Requires: wire.ContentRequires{Skills: m.Requires.Skills, Prompts: m.Requires.Prompts, Permissions: m.Requires.Permissions},
-		Welcome:  m.Welcome, Mine: c.Owner == claims.Subject && c.TenantID == claims.Tenant, Uses: uses,
-		Team:        contentuse.TeamRoster(m.Team),
+		Welcome:  m.Welcome, Uses: uses,
+		Team:     contentuse.TeamRoster(m.Team),
+		SharedBy: c.SharedBy, SourceID: c.SourceID,
 		CreatedAtMs: c.CreatedAtMs, UpdatedAtMs: c.UpdatedAtMs,
 	}
+	held := c.Owner == claims.Subject && c.TenantID == claims.Tenant
+	out.Mine = held && c.Scope == store.ContentScopePersonal
+	out.Removable = held && (c.Scope == store.ContentScopePersonal || c.Scope == store.ContentScopeShared)
 	if out.Permissions == nil {
 		out.Permissions = []string{}
 	}
@@ -189,7 +217,10 @@ func contentView(c store.ContentComponent, v store.ContentComponentVersion, clai
 		out.QuickPrompts = append(out.QuickPrompts, wire.ContentQuickPrompt{Title: q.Title, Prompt: q.Prompt})
 	}
 	promptFields(m, &out)
-	out.Acked = out.Mine || len(out.Permissions) == 0 || acked[c.ID+"@"+v.Version]
+	// Content the caller wrote needs no confirmation; a copy someone shared
+	// with them does (the author is the trust owner).
+	authored := c.Author() != "" && c.Author() == claims.Subject && c.TenantID == claims.Tenant
+	out.Acked = authored || len(out.Permissions) == 0 || acked[c.ID+"@"+v.Version]
 	return out, nil
 }
 
@@ -221,25 +252,24 @@ func (s *Service) memberContent(ctx context.Context, claims auth.Claims, kind st
 		}
 		full = k.Kind
 	}
-	viewer := viewerOf(claims)
-	seen := map[string]bool{}
-	var comps []store.ContentComponent
-	for _, q := range []store.ContentComponentQuery{
-		{TenantID: claims.Tenant, Owner: claims.Subject, Kind: full, Scopes: []store.ContentScope{store.ContentScopePersonal, store.ContentScopeShared}},
-		{TenantID: claims.Tenant, Kind: full, Scopes: []store.ContentScope{store.ContentScopeOrg}},
-		{Kind: full, Scopes: []store.ContentScope{store.ContentScopePlatform}},
-		{Kind: full, Scopes: []store.ContentScope{store.ContentScopeBuiltin}},
-	} {
-		list, err := s.ContentComponents.ListContentComponents(ctx, q)
-		if err != nil {
-			return nil, err
+	visible, err := contentuse.Visible(ctx, s.ContentComponents, viewerOf(claims), full)
+	if err != nil {
+		return nil, err
+	}
+	// The author sees their own organization publication on their personal
+	// component (its publication), not as a second card.
+	authored := map[string]bool{}
+	for _, c := range visible {
+		if c.Scope == store.ContentScopePersonal && c.Owner == claims.Subject {
+			authored[c.ID] = true
 		}
-		for _, c := range list {
-			if !seen[c.ID] && extpipe.MemberVisibility(viewer, extpipe.GateForContent(c), 0).Visible {
-				seen[c.ID] = true
-				comps = append(comps, c)
-			}
+	}
+	comps := visible[:0:0]
+	for _, c := range visible {
+		if c.Scope == store.ContentScopeOrg && c.Owner == claims.Subject && authored[c.SourceID] {
+			continue
 		}
+		comps = append(comps, c)
 	}
 	views, err := s.contentViews(ctx, claims, comps, nil)
 	if err != nil {
@@ -295,6 +325,9 @@ func (s *Service) contentViews(ctx context.Context, claims auth.Claims, comps []
 		return nil, err
 	}
 	if err := s.applyContentUsage(ctx, claims, out); err != nil {
+		return nil, err
+	}
+	if err := s.applyContentSharing(ctx, claims, comps, out); err != nil {
 		return nil, err
 	}
 	return out, nil
@@ -825,7 +858,7 @@ func (s *Service) handleDeleteContent(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	c, err := s.ownContent(r.Context(), claims, r.PathValue("id"))
+	c, err := s.heldContent(r.Context(), claims, r.PathValue("id"))
 	if err != nil {
 		contentStoreErr(w, "load content component failed", err)
 		return
