@@ -553,6 +553,10 @@ func TestClaimOnceDrivesJobPayloadAndReportsStatuses(t *testing.T) {
 		case r.Method == http.MethodPost && r.URL.Path == "/v1/rooms/room-1/agent-activity/session-state":
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"ok":true}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/content-components/effective":
+			// No expert or skill packs in effect for this job.
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"skillPacks":[]}`))
 		case r.Method == http.MethodPost && r.URL.Path == "/v1/rooms/room-1/agent-activity/messages":
 			postedReply.Store(true)
 			w.Header().Set("Content-Type", "application/json")

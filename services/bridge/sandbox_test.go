@@ -374,23 +374,30 @@ func TestDecideSandbox(t *testing.T) {
 	cases := []struct {
 		name                     string
 		borrowed                 bool
+		foreign                  []string
 		mode                     SandboxMode
 		ready, supports          bool
 		policy                   func() bool
 		wantSandboxed, wantRefus bool
 	}{
-		{"borrowed sandboxed", true, SandboxBorrowed, true, true, never, true, false},
-		{"borrowed in mode all", true, SandboxAll, true, true, never, true, false},
-		{"own in mode borrowed", false, SandboxBorrowed, true, true, never, false, false},
-		{"own in mode all", false, SandboxAll, true, true, never, true, false},
-		{"own, sandbox down", false, SandboxAll, false, true, never, false, false},
-		{"borrowed, mode off, not required", true, SandboxOff, true, true, off, false, false},
-		{"borrowed, mode off, required", true, SandboxOff, true, true, on, false, true},
-		{"borrowed, not ready, required", true, SandboxBorrowed, false, true, on, false, true},
-		{"borrowed, unsupported, not required", true, SandboxBorrowed, true, false, off, false, false},
+		{"borrowed sandboxed", true, nil, SandboxBorrowed, true, true, never, true, false},
+		{"borrowed in mode all", true, nil, SandboxAll, true, true, never, true, false},
+		{"own in mode borrowed", false, nil, SandboxBorrowed, true, true, never, false, false},
+		{"own in mode all", false, nil, SandboxAll, true, true, never, true, false},
+		{"own, sandbox down", false, nil, SandboxAll, false, true, never, false, false},
+		{"borrowed, mode off, not required", true, nil, SandboxOff, true, true, off, false, false},
+		{"borrowed, mode off, required", true, nil, SandboxOff, true, true, on, false, true},
+		{"borrowed, not ready, required", true, nil, SandboxBorrowed, false, true, on, false, true},
+		{"borrowed, unsupported, not required", true, nil, SandboxBorrowed, true, false, off, false, false},
+		// Someone else's script-bearing content forces the sandbox, own
+		// drive or not, and is refused where the sandbox cannot take it.
+		{"foreign content, own drive", false, []string{"lint kit"}, SandboxBorrowed, true, true, never, true, false},
+		{"foreign content, mode off", false, []string{"lint kit"}, SandboxOff, false, true, never, false, true},
+		{"foreign content, unsupported", true, []string{"lint kit"}, SandboxBorrowed, true, false, never, false, true},
+		{"foreign content, not ready", false, []string{"lint kit"}, SandboxAll, false, true, never, false, true},
 	}
 	for _, tc := range cases {
-		d := decideSandbox(tc.borrowed, tc.mode, tc.ready, "", tc.supports, tc.policy, "alice", "codex")
+		d := decideSandbox(tc.borrowed, tc.foreign, tc.mode, tc.ready, "", tc.supports, tc.policy, "alice", "codex")
 		if d.sandboxed != tc.wantSandboxed || (d.refuse != "") != tc.wantRefus {
 			t.Errorf("%s: %+v", tc.name, d)
 		}

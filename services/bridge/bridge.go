@@ -558,6 +558,9 @@ type jobRef struct {
 	MessageSeq      int64
 	RequesterUserID string
 	TenantID        string
+	// content is what the turn wears (experts, skill packs: content.go);
+	// nil = none.
+	content *jobContent
 }
 
 type bridgeJob struct {
@@ -575,6 +578,11 @@ type bridgeJob struct {
 	AttachmentIDs   []string
 	Model           string
 	ReasoningEffort string
+	// ExpertID / ExpertVersion / ExpertName: the expert the chat asked the
+	// agent to wear, pinned on the job (content.go).
+	ExpertID      string
+	ExpertVersion string
+	ExpertName    string
 }
 
 func (j *bridgeJob) UnmarshalJSON(data []byte) error {
@@ -600,6 +608,9 @@ func (j *bridgeJob) UnmarshalJSON(data []byte) error {
 	}
 	j.Model = jsonString(raw, "model", "Model")
 	j.ReasoningEffort = jsonString(raw, "reasoningEffort", "ReasoningEffort")
+	j.ExpertID = jsonString(raw, "expertId")
+	j.ExpertVersion = jsonString(raw, "expertVersion")
+	j.ExpertName = jsonString(raw, "expertName")
 	return nil
 }
 
@@ -683,11 +694,19 @@ func (b *Bridge) runBridgeJob(ctx context.Context, job bridgeJob) {
 		b.reportJobStatus(ctx, job.JobID, store.AgentJobFailed, store.FailureAgentNotAdvertised, map[string]any{"core": coreName, "provider": job.Provider})
 		return
 	}
+	// The expert and skill packs the turn wears are resolved and verified
+	// before anything else: content from someone else that runs scripts
+	// forces the sandbox, decided next.
+	content, ok := b.jobContentOrRefuse(ctx, job, owner, coreName)
+	if !ok {
+		return
+	}
 	// Where the drive runs (host or agent sandbox) is decided before any
 	// quota is reserved: a borrowed drive the tenant requires to be
-	// sandboxed is refused here when the sandbox cannot take it.
+	// sandboxed, or a turn wearing someone else's script-bearing content,
+	// is refused here when the sandbox cannot take it.
 	borrowed := isBorrow(job.RequesterUserID, owner)
-	prepareExec, refuse, unsandboxed := b.planSandbox(ctx, job, owner, coreName, borrowed)
+	prepareExec, refuse, unsandboxed := b.planSandbox(ctx, job, owner, coreName, borrowed, content.foreign)
 	if refuse != "" {
 		b.refuseUnsandboxed(ctx, job, owner, coreName, refuse)
 		return
@@ -723,12 +742,19 @@ func (b *Bridge) runBridgeJob(ctx context.Context, job bridgeJob) {
 	if jt := strings.TrimSpace(job.TargetID); jt != "" && jt != job.Provider && jt != coreName+"/"+job.Provider {
 		target = jt
 	}
-	if err := b.reportJobStatus(ctx, job.JobID, store.AgentJobRunning, "", map[string]any{"core": coreName, "provider": job.Provider, "targetId": target, "sandboxed": prepareExec != nil}); err != nil {
+	running := map[string]any{"core": coreName, "provider": job.Provider, "targetId": target, "sandboxed": prepareExec != nil}
+	if content.expert != nil {
+		running["expert"] = expertLabel(content.expert)
+	}
+	if len(content.missing) > 0 {
+		running["contentMissing"] = content.missing
+	}
+	if err := b.reportJobStatus(ctx, job.JobID, store.AgentJobRunning, "", running); err != nil {
 		slog.Debug("bnbloc bridge job running status failed", "event", "bnbloc.bridge.job_status_failed", "job", job.JobID, "error", err)
 	}
 	opts := corepkg.SessionOptions{Model: job.Model, ReasoningEffort: job.ReasoningEffort}
 	reflowReported := false
-	res, err := b.driveClaim(ctx, jobRef{ID: job.JobID, MessageSeq: job.MessageSeq, RequesterUserID: job.RequesterUserID, TenantID: job.TenantID}, job.RoomID, owner, coreName, job.Provider, target, text, job.AttachmentIDs, opts, prepareExec, job.ChannelID, func(rs *roomSession) {
+	res, err := b.driveClaim(ctx, jobRef{ID: job.JobID, MessageSeq: job.MessageSeq, RequesterUserID: job.RequesterUserID, TenantID: job.TenantID, content: content}, job.RoomID, owner, coreName, job.Provider, target, text, job.AttachmentIDs, opts, prepareExec, job.ChannelID, func(rs *roomSession) {
 		// Publish the bound session so a cancel arriving mid-turn can interrupt it.
 		rj.bind(coreName, rs)
 		reflowReported = true
@@ -1588,8 +1614,18 @@ func (b *Bridge) ensureSession(ctx context.Context, job jobRef, room, owner, cor
 		return nil, fmt.Errorf("the %s core is not running on this machine yet", core)
 	}
 	key := driveSessionKey(room, core, provider, opts.Execution != nil)
+	contentSum := job.content.contentSum()
 	b.mu.Lock()
 	existing := b.sessions[key]
+	if existing != nil && existing.profileSum != contentSum {
+		// The turn wears different content (another expert, a new version,
+		// a changed skill pack): a new session, whose files the core (or
+		// the fallback below) materializes from scratch.
+		slog.Info("bnbloc bridge content changed, starting a new session",
+			"event", "bnbloc.bridge.session_content_changed", "room", room, "core", core, "provider", provider, "session", existing.sessionID)
+		b.unbindLocked(key)
+		existing = nil
+	}
 	b.mu.Unlock()
 	if existing != nil {
 		if err := b.sessionReachable(ctx, entry, existing.workspaceID, existing.sessionID); err != nil {
@@ -1609,6 +1645,11 @@ func (b *Bridge) ensureSession(ctx context.Context, job jobRef, room, owner, cor
 			return &ensureResult{roomSession: existing, freshlyCreated: false, written: written}, nil
 		}
 	}
+	if opts.Execution != nil {
+		// The sandbox workdir outlives sessions: clear the previous
+		// session's agent config before this one materializes its own.
+		resetAgentConfig(opts.Execution.Sandbox.Workdir)
+	}
 	workspaceID, err := b.createWorkspace(ctx, entry, room, opts.Execution)
 	if err != nil {
 		return nil, fmt.Errorf("create workspace: %w", err)
@@ -1620,12 +1661,18 @@ func (b *Bridge) ensureSession(ctx context.Context, job jobRef, room, owner, cor
 	written := b.materializeAttachments(ctx, core, room, workspaceID, attachmentIDs)
 	var st roomlog.CtxState
 	initialPrompt := prompt(workspaceID, &st, written)
-	// The profile the session wears: only a core advertising agentProfile
-	// receives one, with the session contributors' parts merged in.
+	// The profile the session wears: a core advertising agentProfile
+	// receives the content's profile with the session contributors' parts
+	// merged in; any other core gets the content as a prefix of the first
+	// prompt (its skill files written under .agents/skills/ when it accepts
+	// workspace files).
 	var profile *corepkg.AgentProfile
 	var hooks sessionHooks
 	if corepkg.Supports(ctx, entry.provider, entry.endpoint, corepkg.CapabilityAgentProfile) {
-		profile = &corepkg.AgentProfile{}
+		profile = job.content.profile()
+		if profile == nil {
+			profile = &corepkg.AgentProfile{}
+		}
 		hooks = b.contribute(ctx, SessionInfo{
 			Key: key, TenantID: job.TenantID, RoomID: room, ChannelID: channelID, Owner: owner, Core: core, Provider: provider,
 			Sandboxed: opts.Execution != nil, MCPTransports: b.targetTransports(core, target, provider),
@@ -1634,8 +1681,11 @@ func (b *Bridge) ensureSession(ctx context.Context, job jobRef, room, owner, cor
 		if profile.Empty() {
 			profile = nil
 		}
+	} else if !job.content.empty() {
+		written := b.writeFallbackSkills(ctx, core, workspaceID, job.content)
+		initialPrompt = job.content.promptPrefix(written) + initialPrompt
 	}
-	rs := &roomSession{owner: owner, provider: provider, core: core, workspaceID: workspaceID, ctx: st, hooks: hooks}
+	rs := &roomSession{owner: owner, provider: provider, core: core, workspaceID: workspaceID, ctx: st, hooks: hooks, profileSum: contentSum}
 	rs.startTurn(TurnInfo{JobID: job.ID, RequesterUserID: job.RequesterUserID, ChannelID: channelID, MessageSeq: job.MessageSeq})
 	sessionID, err := b.createSession(ctx, entry, workspaceID, target, initialPrompt, opts, profile)
 	if err != nil {

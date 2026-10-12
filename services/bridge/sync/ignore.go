@@ -3,6 +3,8 @@ package sync
 import (
 	"path/filepath"
 	"strings"
+
+	corepkg "github.com/luckylhb90/bnbloc/core"
 )
 
 // defaultIgnore are always excluded from sync: VCS internals, dependency and
@@ -31,6 +33,12 @@ func newIgnoreMatcher(extra []string) *ignoreMatcher {
 // base name or the full relative path.
 func (m *ignoreMatcher) match(rel string) bool {
 	rel = filepath.ToSlash(rel)
+	// The agent-config paths (an expert's instructions and skills, MCP
+	// config) are bnbloc-owned per session: never part of the code a room
+	// shares.
+	if corepkg.IsAgentConfigPath(rel) {
+		return true
+	}
 	segments := strings.Split(rel, "/")
 	base := segments[len(segments)-1]
 	for _, g := range m.globs {

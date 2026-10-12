@@ -252,7 +252,10 @@ func (s *sandboxRuntime) prepare(ctx context.Context, room, core, provider, owne
 		VMExec:      s.cfg.VMExec,
 		Workdir:     workdir,
 		Mounts:      []corepkg.PathMount{{Host: workdir, Guest: workdir}},
-		HostConfine: corepkg.HostConfine{Workspace: workdir},
+		// The agent-config paths (an expert's instructions, skills, MCP
+		// config) are the role the session wears: the agent must not
+		// rewrite them, so a borrowed prompt cannot plant one.
+		HostConfine: corepkg.HostConfine{Workspace: workdir, DenyWrite: agentConfigDenyWrite(workdir)},
 	}}, nil
 }
 
@@ -283,14 +286,28 @@ const (
 	platformSandboxPrefix = "Platform agents always run in their host's agent sandbox, and "
 )
 
+// contentSandboxPrefix is the refusal of a turn wearing someone else's
+// content that runs scripts or a stdio tool (names listed).
+func contentSandboxPrefix(foreign []string) string {
+	return "This turn uses " + strings.Join(foreign, ", ") + " from someone else, which runs scripts or tools and so runs only in the agent sandbox, and "
+}
+
 // decideSandbox applies the PRD policy. Own drives are sandboxed only in mode
 // all; borrowed drives whenever the sandbox is ready and the core supports
 // sandboxExec (mode borrowed or all). A borrowed drive that cannot be
 // sandboxed runs on the host as before — unless the tenant requires the
 // sandbox for borrowing, then it is refused (fail closed, visible notice).
-func decideSandbox(borrowed bool, mode SandboxMode, ready bool, notReadyReason string, coreSupports bool, requirePolicy func() bool, owner, provider string) sandboxDecision {
-	if ready && coreSupports && (mode == SandboxAll || (borrowed && mode == SandboxBorrowed)) {
+// A drive wearing someone else's script-bearing content (foreign, the
+// content's names) is sandboxed like a borrowed one, and refused when it
+// cannot be: such content never runs on the owner's host.
+func decideSandbox(borrowed bool, foreign []string, mode SandboxMode, ready bool, notReadyReason string, coreSupports bool, requirePolicy func() bool, owner, provider string) sandboxDecision {
+	forced := len(foreign) > 0
+	if ready && coreSupports && (mode == SandboxAll || ((borrowed || forced) && mode == SandboxBorrowed)) {
 		return sandboxDecision{sandboxed: true}
+	}
+	if forced {
+		unavailable := sandboxUnavailable(mode, ready, notReadyReason, coreSupports, owner, provider)
+		return sandboxDecision{refuse: contentSandboxPrefix(foreign) + unavailable, unavailable: unavailable}
 	}
 	if !borrowed {
 		return sandboxDecision{}
@@ -375,14 +392,14 @@ func (b *Bridge) fetchSandboxPolicy(ctx context.Context, tenantKey string) (bool
 // planSandbox decides how a job runs. prepare is non-nil for a sandboxed
 // drive; refuse is set when the drive must not run at all; unavailable says
 // why a borrowed drive is not sandboxed (sandboxDecision.unavailable).
-func (b *Bridge) planSandbox(ctx context.Context, job bridgeJob, owner, coreName string, borrowed bool) (prepare func(context.Context) (*corepkg.Execution, error), refuse, unavailable string) {
+func (b *Bridge) planSandbox(ctx context.Context, job bridgeJob, owner, coreName string, borrowed bool, foreign []string) (prepare func(context.Context) (*corepkg.Execution, error), refuse, unavailable string) {
 	s := b.sandbox
 	ready, reason := s.status(ctx)
 	supports := false
 	if entry, ok := b.coreEntry(coreName); ok && entry.endpoint.OK() {
 		supports = corepkg.Supports(ctx, entry.provider, entry.endpoint, corepkg.CapabilitySandboxExec)
 	}
-	d := decideSandbox(borrowed, s.cfg.Mode, ready, reason, supports, func() bool {
+	d := decideSandbox(borrowed, foreign, s.cfg.Mode, ready, reason, supports, func() bool {
 		return b.requireSandboxForBorrow(ctx, job.TenantID)
 	}, owner, job.Provider)
 	if d.refuse != "" {

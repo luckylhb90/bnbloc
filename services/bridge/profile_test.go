@@ -17,6 +17,19 @@ type profileProv struct {
 	pmu      sync.Mutex
 	profiles []*corepkg.AgentProfile
 	inputs   []string
+	// started reports a just-started turn busy once, so the drive does not
+	// wait out waitTurnStart's deadline.
+	started bool
+}
+
+func (p *profileProv) PollTurn(context.Context, corepkg.Endpoint, string, string) (corepkg.TurnStatus, error) {
+	p.pmu.Lock()
+	defer p.pmu.Unlock()
+	if p.started {
+		p.started = false
+		return corepkg.TurnStatus{}, nil
+	}
+	return corepkg.TurnStatus{Idle: true}, nil
 }
 
 func (p *profileProv) Supports(_ context.Context, _ corepkg.Endpoint, c corepkg.Capability) bool {
@@ -33,6 +46,7 @@ func (p *profileProv) CreateSession(ctx context.Context, ep corepkg.Endpoint, re
 	p.pmu.Lock()
 	p.profiles = append(p.profiles, req.Profile)
 	n := len(p.profiles)
+	p.started = true
 	p.pmu.Unlock()
 	if _, err := p.fakeCoreProvider.CreateSession(ctx, ep, req); err != nil {
 		return corepkg.SessionResult{}, err
@@ -43,6 +57,7 @@ func (p *profileProv) CreateSession(ctx context.Context, ep corepkg.Endpoint, re
 func (p *profileProv) SendInput(ctx context.Context, ep corepkg.Endpoint, w, s, text string, opts corepkg.SessionOptions) error {
 	p.pmu.Lock()
 	p.inputs = append(p.inputs, text)
+	p.started = true
 	p.pmu.Unlock()
 	return nil
 }
