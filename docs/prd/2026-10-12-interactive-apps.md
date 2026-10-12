@@ -160,6 +160,34 @@ operational.
 | Operations | Nothing new: same backups, migrations, retention, `DeleteRoom`, tenant isolation, memory-store parity | A new cluster to run, back up and secure on every deploy surface (compose, prod overlay, EKS; AWS DocumentDB has compatibility gaps). Room deletion and retention then span two databases |
 | Arbitrary per-field indexes, heavy aggregation | Limited | Strong |
 
+**Layout: one shared table for every app, never a table per app.**
+
+```
+app_docs(
+  app_id, collection, doc_id,          -- PRIMARY KEY, in this order
+  tenant_id, room_id, by_key, private,
+  version, body JSON, created_at_ms, updated_at_ms)
+INDEX (app_id, collection, by_key, doc_id)   -- "mine" / dedupe reads
+```
+
+- InnoDB clusters rows by primary key. One app's documents are stored
+  contiguously, and every query is a range scan inside that app's prefix, so
+  in practice each app behaves like its own table. One app's size doesn't slow
+  another app.
+- A table per app would mean DDL at runtime: thousands of tables against the
+  table cache and file handles, outside `migrations.lock` and the schema
+  fingerprint, invisible to `roomOwnedTables`/retention, and an `ALTER` per
+  app for any change. All of that is ruled out.
+- What the shared table gives up is arbitrary per-app indexes. A filter on a
+  non-key field scans only that app's range, which the per-app cap bounds
+  (100k docs). The same `body` can later get generated-column indexes for
+  common fields, if needed.
+- Growth path, without changing the API: `PARTITION BY KEY(app_id)`, then move
+  hot apps to another database instance by `app_id`. In a MongoDB backend
+  this is one collection with `app_id` leading every index; it is not a
+  collection per app either.
+- Deleting an app or a room is a batched range delete on the key prefix.
+
 **Recommendation:** define one interface, `store.AppDocs` (insert, find with
 the filter subset, get, update, delete, change feed), and ship the MySQL JSON
 backend first. Filters translate to parameterized `JSON_EXTRACT` predicates
