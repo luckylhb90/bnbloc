@@ -176,13 +176,16 @@ const (
 
 // ContentRef is one resolved package in effect for a turn.
 type ContentRef struct {
-	ComponentID  string   `json:"componentId"`
-	Kind         string   `json:"kind"`
-	Name         string   `json:"name"`
-	DisplayName  string   `json:"displayName,omitempty"`
-	Version      string   `json:"version"`
-	SHA256       string   `json:"sha256"`
-	BundleKey    string   `json:"bundleKey"`
+	ComponentID string `json:"componentId"`
+	Kind        string `json:"kind"`
+	Name        string `json:"name"`
+	DisplayName string `json:"displayName,omitempty"`
+	Version     string `json:"version"`
+	SHA256      string `json:"sha256"`
+	BundleKey   string `json:"bundleKey"`
+	// Owner is the package's author (a shared copy's author, not its
+	// holder; "" for platform content): content that is not the agent
+	// owner's own and needs the sandbox forces a sandboxed drive.
 	Owner        string   `json:"owner"`
 	Source       string   `json:"source"`
 	Permissions  []string `json:"permissions,omitempty"`

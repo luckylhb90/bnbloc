@@ -49,10 +49,13 @@ func GateForRecord(rec Record) Gate {
 	return Gate{Scope: store.ContentScopePlatform, Tenants: rec.EnabledTenants, Rollout: rec.Rollout}
 }
 
-// GateForContent is a content component's gate. Personal and shared
-// content belongs to its owner; org and platform scopes take the rollout
-// gate (their rollout and tenant records arrive with org approval and
-// platform publishing; until then they distribute to every member).
+// GateForContent is a content component's gate. Personal content and a
+// shared copy belong to their owner (the copy's recipient); org content
+// reaches its organization and platform content every organization, both
+// with rollout auto: an org admin's approval or a super admin's signed
+// install is the publication, unpublishing retires it, and members opt in
+// per use (an expert per message, a pack turned on), so content has no
+// second opt-in switch (docs/prd/2026-10-12-experts-and-teams.md, step 4).
 func GateForContent(c store.ContentComponent) Gate {
 	return Gate{Scope: c.Scope, Owner: c.Owner, TenantID: c.TenantID, Status: c.Status}
 }

@@ -85,7 +85,11 @@ func Manifest(v store.ContentComponentVersion) (contentpkg.Manifest, error) {
 	return m, nil
 }
 
-// Ref describes one resolved package for the bridge.
+// Ref describes one resolved package for the bridge. Its Owner is the
+// component's author (ContentComponent.Author): a shared copy is held by the
+// recipient but is the author's content, so the bridge's "someone else's
+// content" rule (scripts and stdio MCP force the sandbox) follows the
+// author, never the holder.
 func Ref(c store.ContentComponent, v store.ContentComponentVersion, source string) (wire.ContentRef, error) {
 	m, err := Manifest(v)
 	if err != nil {
@@ -97,7 +101,7 @@ func Ref(c store.ContentComponent, v store.ContentComponentVersion, source strin
 	}
 	ref := wire.ContentRef{
 		ComponentID: c.ID, Kind: short, Name: c.Name, DisplayName: m.DisplayName, Version: v.Version,
-		SHA256: v.SHA256, BundleKey: v.BundleBlobKey, Owner: c.Owner, Source: source,
+		SHA256: v.SHA256, BundleKey: v.BundleBlobKey, Owner: c.Author(), Source: source,
 		Permissions: m.Permissions(), NeedsSandbox: m.NeedsSandbox(),
 	}
 	for _, t := range m.Requires.MCP {
@@ -298,11 +302,11 @@ func resolveReference(ctx context.Context, st store.ContentComponentStore, v ext
 			cands = append(cands, cand{c, u.PinnedVersion})
 		}
 	}
-	own, err := st.ListContentComponents(ctx, store.ContentComponentQuery{TenantID: tenantID, Kind: kind})
+	visible, err := Visible(ctx, st, extpipe.Viewer{Subject: v.Subject, Tenant: tenantID}, kind)
 	if err != nil {
 		return store.ContentComponent{}, store.ContentComponentVersion{}, false, err
 	}
-	for _, c := range own {
+	for _, c := range visible {
 		if c.Name == ref.Name && extpipe.MemberVisibility(v, extpipe.GateForContent(c), 0).Installed {
 			cands = append(cands, cand{c, ""})
 		}
@@ -336,6 +340,38 @@ func resolveReference(ctx context.Context, st store.ContentComponentStore, v ext
 		}
 	}
 	return best, bestV, found, nil
+}
+
+// Visible lists the content components of a kind ("" = every kind) the
+// viewer may see, each once: their own (personal and the shared copies they
+// hold), their organization's, the platform's and the built-in ones, all
+// through the one visibility function. It is the Library's listing and the
+// candidate set of name@range references.
+func Visible(ctx context.Context, st store.ContentComponentStore, v extpipe.Viewer, kind string) ([]store.ContentComponent, error) {
+	seen := map[string]bool{}
+	var out []store.ContentComponent
+	queries := []store.ContentComponentQuery{
+		{TenantID: v.Tenant, Kind: kind, Scopes: []store.ContentScope{store.ContentScopeOrg}},
+		{Kind: kind, Scopes: []store.ContentScope{store.ContentScopePlatform}},
+		{Kind: kind, Scopes: []store.ContentScope{store.ContentScopeBuiltin}},
+	}
+	if v.Subject != "" {
+		own := store.ContentComponentQuery{TenantID: v.Tenant, Owner: v.Subject, Kind: kind, Scopes: []store.ContentScope{store.ContentScopePersonal, store.ContentScopeShared}}
+		queries = append([]store.ContentComponentQuery{own}, queries...)
+	}
+	for _, q := range queries {
+		list, err := st.ListContentComponents(ctx, q)
+		if err != nil {
+			return nil, err
+		}
+		for _, c := range list {
+			if !seen[c.ID] && extpipe.MemberVisibility(v, extpipe.GateForContent(c), 0).Visible {
+				seen[c.ID] = true
+				out = append(out, c)
+			}
+		}
+	}
+	return out, nil
 }
 
 func firstNonEmpty(vals ...string) string {
