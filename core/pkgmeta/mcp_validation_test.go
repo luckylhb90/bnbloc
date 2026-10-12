@@ -81,6 +81,19 @@ func TestMCPPackageValid(t *testing.T) {
 	})); err != nil {
 		t.Fatalf("header auth: %v", err)
 	}
+	// A member OAuth sign-in: no env, no credentials.
+	pkg, err = ParsePackage(mcpEndpointBody(t, func(b map[string]any) {
+		b["mcp"] = map[string]any{
+			"tools": []map[string]any{{"name": "search"}},
+			"http":  map[string]any{"auth": map[string]any{"scheme": "oauth", "clientId": "bnbloc-desktop", "scopes": []string{"files:read", "files:write"}}},
+		}
+	}))
+	if err != nil {
+		t.Fatalf("oauth auth: %v", err)
+	}
+	if a := pkg.MCP.HTTP.Auth; a.Scheme != MCPAuthOAuth || a.ClientID != "bnbloc-desktop" || len(a.Scopes) != 2 {
+		t.Fatalf("oauth payload = %+v", a)
+	}
 }
 
 func TestMCPPackageRefusals(t *testing.T) {
@@ -132,6 +145,21 @@ func TestMCPPackageRefusals(t *testing.T) {
 		{"endpoint bad header", mcpEndpointBody, func(b map[string]any) {
 			mcpBlock(b)["http"] = map[string]any{"auth": map[string]any{"scheme": "header", "header": "X Bad", "env": "TOOLS_TOKEN"}}
 		}, "header name"},
+		{"oauth with org credentials", mcpEndpointBody, func(b map[string]any) {
+			mcpBlock(b)["http"] = map[string]any{"auth": map[string]any{"scheme": "oauth"}}
+		}, "never through an organization connector"},
+		{"oauth with env", mcpEndpointBody, func(b map[string]any) {
+			mcpBlock(b)["http"] = map[string]any{"auth": map[string]any{"scheme": "oauth", "env": "TOOLS_TOKEN"}}
+		}, "takes no env or header"},
+		{"oauth bad scope", mcpEndpointBody, func(b map[string]any) {
+			b["mcp"] = map[string]any{"tools": []map[string]any{{"name": "t"}}, "http": map[string]any{"auth": map[string]any{"scheme": "oauth", "scopes": []string{"a b"}}}}
+		}, "is not an OAuth scope"},
+		{"oauth bad client id", mcpEndpointBody, func(b map[string]any) {
+			b["mcp"] = map[string]any{"tools": []map[string]any{{"name": "t"}}, "http": map[string]any{"auth": map[string]any{"scheme": "oauth", "clientId": "has space"}}}
+		}, "clientId must be"},
+		{"scopes without oauth", mcpEndpointBody, func(b map[string]any) {
+			mcpBlock(b)["http"] = map[string]any{"auth": map[string]any{"scheme": "bearer", "env": "TOOLS_TOKEN", "scopes": []string{"x"}}}
+		}, `belong to scheme "oauth"`},
 		{"unknown runtime", mcpStdioBody, func(b map[string]any) { b["runtime"] = "sidecar" }, `must be "stdio" or "endpoint"`},
 	}
 	for _, c := range cases {

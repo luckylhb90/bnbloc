@@ -42,7 +42,9 @@ type ContentMCPTool struct {
 }
 
 // ContentMCPAuth is the header an http MCP server expects (scheme none,
-// bearer or header; Env names the value's variable).
+// bearer or header, Env naming the value's variable; or oauth: the
+// requester's own sign-in from their desktop, attached as a bearer token by
+// their bridge and never lent to someone else's drive).
 type ContentMCPAuth struct {
 	Scheme string `json:"scheme"`
 	Header string `json:"header,omitempty"`

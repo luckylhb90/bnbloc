@@ -46,6 +46,12 @@ const (
 	MCPAuthNone   = "none"
 	MCPAuthBearer = "bearer"
 	MCPAuthHeader = "header"
+	// MCPAuthOAuth: each member signs in to the server's authorization
+	// server from their desktop (the MCP authorization flow: protected
+	// resource metadata, PKCE, a loopback redirect); the access token is
+	// the member's own and never leaves their machine. The authorization
+	// server is discovered from the server at sign-in, never declared.
+	MCPAuthOAuth = "oauth"
 )
 
 // MCP is an MCP component's payload (Package.MCP).
@@ -88,11 +94,19 @@ type MCPHTTP struct {
 }
 
 // MCPHTTPAuth is the header an endpoint server expects: none, a bearer token
-// (Authorization: Bearer <Env>) or a named header (<Header>: <Env>).
+// (Authorization: Bearer <Env>), a named header (<Header>: <Env>), or a
+// member's OAuth sign-in (Authorization: Bearer <their access token>).
 type MCPHTTPAuth struct {
 	Scheme string `json:"scheme"`
 	Header string `json:"header,omitempty"`
 	Env    string `json:"env,omitempty"`
+	// ClientID (oauth, optional) is a client the publisher registered with
+	// the server's authorization server; without it the desktop registers
+	// itself where the authorization server allows it.
+	ClientID string `json:"clientId,omitempty"`
+	// Scopes (oauth, optional) are requested when the server's challenge
+	// names none.
+	Scopes []string `json:"scopes,omitempty"`
 }
 
 // MCP bounds: a display catalog, not the server's schema.
@@ -104,11 +118,16 @@ const (
 	maxMCPArgs         = 32
 	maxMCPArgLen       = 1024
 	mcpReservedEnvPref = "BNBLOC_"
+	maxMCPOAuthScopes  = 32
+	maxMCPOAuthScope   = 128
+	maxMCPClientID     = 256
 )
 
 var (
 	mcpToolNameRE = regexp.MustCompile(`^[A-Za-z0-9_.-]{1,64}$`)
 	mcpHeaderRE   = regexp.MustCompile(`^[A-Za-z0-9-]{1,64}$`)
+	// mcpScopeRE is an OAuth scope token (RFC 6749 §3.3 NQCHAR).
+	mcpScopeRE = regexp.MustCompile(`^[\x21\x23-\x5B\x5D-\x7E]+$`)
 )
 
 func validateMCPPackage(pkg Package) error {
@@ -259,7 +278,12 @@ func validateMCPHTTP(m MCP) error {
 	if m.HTTP != nil {
 		auth = m.HTTP.Auth
 	}
+	if auth.Scheme != MCPAuthOAuth && (auth.ClientID != "" || len(auth.Scopes) > 0) {
+		return fmt.Errorf(`mcp.http.auth clientId and scopes belong to scheme "oauth"`)
+	}
 	switch auth.Scheme {
+	case MCPAuthOAuth:
+		return validateMCPOAuth(m, auth)
 	case MCPAuthNone:
 		if auth.Env != "" || auth.Header != "" {
 			return fmt.Errorf(`mcp.http.auth scheme "none" takes no env or header`)
@@ -277,10 +301,40 @@ func validateMCPHTTP(m MCP) error {
 			return fmt.Errorf("mcp.http.auth.header %q must be a header name", auth.Header)
 		}
 	default:
-		return fmt.Errorf("mcp.http.auth.scheme must be none, bearer or header, got %q", auth.Scheme)
+		return fmt.Errorf("mcp.http.auth.scheme must be none, bearer, header or oauth, got %q", auth.Scheme)
 	}
 	if len(m.Env) != 1 || m.Env[0].Name != auth.Env {
 		return fmt.Errorf("mcp.http.auth.env must name the one declared mcp.env variable (an endpoint server's only credential is its auth header)")
+	}
+	return nil
+}
+
+// validateMCPOAuth checks an oauth endpoint: each member signs in for
+// themselves, so it takes no env, header or org connector (credentials are
+// always the member's own), and the optional client id and scopes are
+// plain OAuth values.
+func validateMCPOAuth(m MCP, auth MCPHTTPAuth) error {
+	if auth.Env != "" || auth.Header != "" {
+		return fmt.Errorf(`mcp.http.auth scheme "oauth" takes no env or header (each member signs in)`)
+	}
+	if m.Credentials != "" || len(m.Env) > 0 {
+		return fmt.Errorf(`mcp.http.auth scheme "oauth" takes no mcp.env or mcp.credentials: each member signs in for themselves, never through an organization connector`)
+	}
+	if len(auth.ClientID) > maxMCPClientID || (auth.ClientID != "" && !mcpScopeRE.MatchString(auth.ClientID)) {
+		return fmt.Errorf("mcp.http.auth.clientId must be printable text of at most %d characters without spaces", maxMCPClientID)
+	}
+	if len(auth.Scopes) > maxMCPOAuthScopes {
+		return fmt.Errorf("mcp.http.auth.scopes: at most %d scopes", maxMCPOAuthScopes)
+	}
+	seen := map[string]bool{}
+	for i, sc := range auth.Scopes {
+		if len(sc) > maxMCPOAuthScope || !mcpScopeRE.MatchString(sc) {
+			return fmt.Errorf("mcp.http.auth.scopes[%d] %q is not an OAuth scope", i, sc)
+		}
+		if seen[sc] {
+			return fmt.Errorf("mcp.http.auth.scopes: duplicate scope %q", sc)
+		}
+		seen[sc] = true
 	}
 	return nil
 }

@@ -246,6 +246,23 @@ func TestResolve(t *testing.T) {
 	}
 }
 
+func TestResolveOAuthNeedsNoConnector(t *testing.T) {
+	pkg := httpPackage("drive", "https://tools.example.com/mcp")
+	pkg.MCP.Env, pkg.MCP.Credentials = nil, ""
+	pkg.MCP.HTTP = &pkgmeta.MCPHTTP{Auth: pkgmeta.MCPHTTPAuth{Scheme: pkgmeta.MCPAuthOAuth, ClientID: "c", Scopes: []string{"files:read"}}}
+	refs := []wire.ContentRef{{ComponentID: "cc", MCP: []wire.ContentMCPRequirement{{Name: "drive"}}}}
+	tools, missing, err := Resolve(refs, lookupOf(t, candidate(t, pkg, true)), func(string) (map[string]string, bool, error) {
+		t.Fatal("an oauth tool has no organization connector")
+		return nil, false, nil
+	})
+	if err != nil || len(missing) != 0 || len(tools) != 1 {
+		t.Fatalf("tools=%+v missing=%v err=%v", tools, missing, err)
+	}
+	if a := tools[0].Auth; a == nil || a.Scheme != pkgmeta.MCPAuthOAuth || a.Env != "" || tools[0].Credentials != "" || tools[0].Values != nil {
+		t.Fatalf("drive = %+v auth=%+v", tools[0], tools[0].Auth)
+	}
+}
+
 func TestResolveMissingConnectorAndUndeclaredEnv(t *testing.T) {
 	refs := []wire.ContentRef{{ComponentID: "cc", MCP: []wire.ContentMCPRequirement{{Name: "search"}, {Name: "codeword", Env: []string{"GONE"}}}}}
 	lookup := lookupOf(t, candidate(t, httpPackage("search", "https://tools.example.com/mcp"), true), candidate(t, stdioPackage("codeword"), true))
