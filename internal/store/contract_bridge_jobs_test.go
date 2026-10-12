@@ -88,6 +88,14 @@ func (r *bjRig) claim(t *testing.T, nowMs int64, maxJobs int) []AgentJob {
 	return got
 }
 
+// claimLive heartbeats r.bridge at nowMs, then claims: a retry delay
+// outlasts a heartbeat's liveness.
+func (r *bjRig) claimLive(t *testing.T, nowMs int64, maxJobs int) []AgentJob {
+	t.Helper()
+	r.beat(t, BridgeOnline, nowMs)
+	return r.claim(t, nowMs, maxJobs)
+}
+
 // claimedRig is a rig whose one job is claimed by its live bridge at 20
 // with a 1000ms lease.
 func claimedRig(t *testing.T, b *Backends) (*bjRig, AgentJob) {
@@ -322,13 +330,16 @@ func TestContractBridgeJobStoreLapsedLeaseRequeuedBySweep(t *testing.T) {
 		}
 		requeued, ok := sweepAll(t, b.BridgeJobs, SweepRequest{NowMs: 1020})[job.JobID]
 		want := []AgentJobAttempt{{Attempt: 1, Reason: FailureLeaseExpired, AtMs: 1020}}
-		if !ok || requeued.Status != AgentJobQueued || requeued.FailureReason != FailureLeaseExpired || requeued.LeaseBridgeID != "" || requeued.FinishedAtMs != 0 || !slices.Equal(requeued.Attempts, want) {
+		if !ok || requeued.Status != AgentJobQueued || requeued.FailureReason != FailureLeaseExpired || requeued.LeaseBridgeID != "" || requeued.FinishedAtMs != 0 || !slices.Equal(requeued.Attempts, want) || requeued.NotBeforeMs != 1020+5000 {
 			t.Fatalf("lapsed lease at expiry = %+v (swept %v)", requeued, ok)
 		}
 		if got := must(b.AgentRuns().GetAgentRun(r.ctx, job.JobID))(t); got.Status != AgentJobQueued || !slices.Equal(got.Attempts, want) {
 			t.Fatalf("stored requeue = %+v", got)
 		}
-		got := other.claim(t, 1020, 1)
+		if got := other.claim(t, 1020, 1); len(got) != 0 {
+			t.Fatalf("claimed a requeued job inside its retry delay: %v", jobIDs(got))
+		}
+		got := other.claimLive(t, requeued.NotBeforeMs, 1)
 		if len(got) != 1 || got[0].JobID != job.JobID || got[0].Attempt != 2 || got[0].LeaseBridgeID != other.bridge || !slices.Equal(got[0].Attempts, want) {
 			t.Fatalf("reclaim after the requeue = %+v", got)
 		}
@@ -445,6 +456,10 @@ func TestContractBridgeJobStoreRetryClassification(t *testing.T) {
 				}
 				again := r.claim(t, 40, 1)
 				if tc.want == AgentJobQueued {
+					if got.NotBeforeMs <= 30 || len(again) != 0 {
+						t.Fatalf("requeued job claimable at once: not before %d, re-claimed %d", got.NotBeforeMs, len(again))
+					}
+					again = r.claimLive(t, got.NotBeforeMs, 1)
 					if got.LeaseBridgeID != "" || got.LeaseExpiresAtMs != 0 || got.FinishedAtMs != 0 {
 						t.Fatalf("requeued job still leased or finished: %+v", got)
 					}
@@ -475,8 +490,7 @@ func TestContractBridgeJobStoreAttemptHistory(t *testing.T) {
 		var want []AgentJobAttempt
 		now := int64(20)
 		for attempt := 1; attempt <= MaxRecordedAttempts+2; attempt++ {
-			now += 10
-			got := r.claim(t, now, 1)
+			got := r.claimLive(t, now, 1)
 			if len(got) != 1 || got[0].Attempt != attempt {
 				t.Fatalf("claim of attempt %d = %+v", attempt, got)
 			}
@@ -499,11 +513,12 @@ func TestContractBridgeJobStoreAttemptHistory(t *testing.T) {
 			if stored.Status != AgentJobQueued || !slices.Equal(stored.Attempts, want) {
 				t.Fatalf("after attempt %d: %s %+v, want queued %+v", attempt, stored.Status, stored.Attempts, want)
 			}
+			now = stored.NotBeforeMs
 		}
 		if len(want) != MaxRecordedAttempts || want[0].Attempt != 3 {
 			t.Fatalf("test drove %+v; want the cap reached with the oldest dropped", want)
 		}
-		r.claim(t, now+10, 1)
+		r.claimLive(t, now, 1)
 		final, err := r.jobs().UpdateAgentJobStatus(r.ctx, JobStatusUpdate{JobID: job.JobID, BridgeID: r.bridge, Status: AgentJobFailed, FailureReason: FailureRunnerFailed, NowMs: now + 20, MaxAttempts: maxAttempts})
 		if err != nil || final.Status != AgentJobFailed || !slices.Equal(final.Attempts, want) {
 			t.Fatalf("terminal failure = %+v, %v; want the history %+v kept", final, err, want)
@@ -511,6 +526,58 @@ func TestContractBridgeJobStoreAttemptHistory(t *testing.T) {
 		listed, err := r.jobs().ListAgentJobs(r.ctx, r.room, "", 0)
 		if err != nil || len(listed) != 1 || !slices.Equal(listed[0].Attempts, want) {
 			t.Fatalf("listed = %+v, %v", listed, err)
+		}
+	})
+}
+
+// A requeued job waits out its retry delay (retryBackoffs: per reason, a
+// base that doubles each attempt, capped) before any bridge may claim it:
+// not a millisecond before, at once after. A booting sandbox thus gets
+// 15 s, 30 s, … instead of every attempt in a few seconds.
+func TestContractBridgeJobStoreRetryDelay(t *testing.T) {
+	forEachBackend(t, func(t *testing.T, b *Backends) {
+		r := newBJRig(b)
+		job := r.put(t, 1, 1)
+		r.advertise(t, "t1")
+		now := int64(20)
+		for _, step := range []struct {
+			reason AgentJobFailureReason
+			delay  int64
+		}{
+			{FailureSandboxStarting, 15_000},
+			{FailureSandboxStarting, 30_000},
+			{FailureCoreUnavailable, 40_000}, // attempt 3: 10 s doubled twice
+			{FailureSandboxStarting, 60_000}, // attempt 4: capped at a minute
+		} {
+			got := r.claimLive(t, now, 1)
+			if len(got) != 1 {
+				t.Fatalf("claim at %d = %+v", now, got)
+			}
+			requeued, err := r.jobs().UpdateAgentJobStatus(r.ctx, JobStatusUpdate{JobID: job.JobID, BridgeID: r.bridge, Status: AgentJobFailed, FailureReason: step.reason, NowMs: now + 10, MaxAttempts: 10})
+			if err != nil || requeued.Status != AgentJobQueued || requeued.NotBeforeMs != now+10+step.delay {
+				t.Fatalf("attempt %d (%s) requeued = not before %d, %v; want %d", got[0].Attempt, step.reason, requeued.NotBeforeMs, err, now+10+step.delay)
+			}
+			if stored := must(b.AgentRuns().GetAgentRun(r.ctx, job.JobID))(t); stored.NotBeforeMs != requeued.NotBeforeMs {
+				t.Fatalf("stored not before %d, returned %d", stored.NotBeforeMs, requeued.NotBeforeMs)
+			}
+			if early := r.claimLive(t, requeued.NotBeforeMs-1, 1); len(early) != 0 {
+				t.Fatal("claimed 1ms before the retry delay ended")
+			}
+			now = requeued.NotBeforeMs
+		}
+		if got := r.claimLive(t, now, 1); len(got) != 1 || got[0].Attempt != 5 {
+			t.Fatalf("claim when the delay ends = %+v", got)
+		}
+		// A lapsed lease waits 5 s.
+		lapsed, ok := sweepAll(t, b.BridgeJobs, SweepRequest{NowMs: now + 1000, MaxAttempts: 10})[job.JobID]
+		if !ok || lapsed.Status != AgentJobQueued || lapsed.NotBeforeMs != now+1000+5000 {
+			t.Fatalf("lapsed lease requeued = %+v (swept %v)", lapsed, ok)
+		}
+		if got := r.claimLive(t, lapsed.NotBeforeMs-1, 1); len(got) != 0 {
+			t.Fatal("claimed a lapsed job inside its retry delay")
+		}
+		if got := r.claimLive(t, lapsed.NotBeforeMs, 1); len(got) != 1 {
+			t.Fatal("a lapsed job was not claimable when its delay ended")
 		}
 	})
 }
@@ -539,15 +606,16 @@ func TestContractBridgeJobStoreRenewLease(t *testing.T) {
 		if got := other.claim(t, 1500, 1); len(got) != 0 {
 			t.Fatalf("renewed job re-claimed: %v", jobIDs(got))
 		}
-		sweepAll(t, b.BridgeJobs, SweepRequest{NowMs: 1900})
-		if got := other.claim(t, 1900, 1); len(got) != 1 {
+		requeued := sweepAll(t, b.BridgeJobs, SweepRequest{NowMs: 1900})[job.JobID]
+		if got := other.claimLive(t, requeued.NotBeforeMs, 1); len(got) != 1 {
 			t.Fatal("a lapsed renewal was not re-claimable after the sweep")
 		}
 		// LeaseMs 0 renews by DefaultLeaseMs.
-		if err := r.jobs().RenewAgentJobLease(r.ctx, LeaseRenewal{JobID: job.JobID, BridgeID: other.bridge, NowMs: 2000}); err != nil {
+		renewAt := requeued.NotBeforeMs + 100
+		if err := r.jobs().RenewAgentJobLease(r.ctx, LeaseRenewal{JobID: job.JobID, BridgeID: other.bridge, NowMs: renewAt}); err != nil {
 			t.Fatal(err)
 		}
-		if got := must(b.AgentRuns().GetAgentRun(r.ctx, job.JobID))(t); got.LeaseExpiresAtMs != 2000+DefaultLeaseMs || got.UpdatedAtMs != 2000 {
+		if got := must(b.AgentRuns().GetAgentRun(r.ctx, job.JobID))(t); got.LeaseExpiresAtMs != renewAt+DefaultLeaseMs || got.UpdatedAtMs != renewAt {
 			t.Fatalf("default renewal = %+v", got)
 		}
 	})
@@ -614,9 +682,9 @@ func TestContractBridgeJobStoreSweep(t *testing.T) {
 		l.advertise(t, "t1")
 		l.claim(t, 100, 5) // attempt 1, lease to 1100
 		sweepAll(t, b.BridgeJobs, SweepRequest{NowMs: 1100, MaxAttempts: 2})
-		l.claim(t, 1100, 5) // requeued: attempt 2, lease to 2100
-		retry := l.put(t, 2, 1200)
-		l.claim(t, 1200, 5) // attempt 1, lease to 2200
+		l.claimLive(t, 6100, 5) // requeued, claimable after 5s: attempt 2, lease to 7100
+		retry := l.put(t, 2, 6200)
+		l.claim(t, 6200, 5) // attempt 1, lease to 7200
 
 		swept := sweepAll(t, b.BridgeJobs, SweepRequest{NowMs: now, QueuedTimeoutMs: 120_000, MaxAttempts: 2})
 		if j, ok := swept[stuck.JobID]; !ok || j.Status != AgentJobFailed || j.FailureReason != FailureNoBridgeOnline || j.FinishedAtMs != now || j.UpdatedAtMs != now {
@@ -643,7 +711,11 @@ func TestContractBridgeJobStoreSweep(t *testing.T) {
 		if got := must(b.AgentRuns().GetAgentRun(l.ctx, retry.JobID))(t); got.Status != AgentJobQueued {
 			t.Fatalf("requeued job = %+v, want still queued", got)
 		}
-		if j, ok := sweepAll(t, b.BridgeJobs, SweepRequest{NowMs: now + 120_000, QueuedTimeoutMs: 120_000, MaxAttempts: 2})[retry.JobID]; !ok || j.FailureReason != FailureNoBridgeOnline {
+		// ...and from when its retry delay ends (claimable from now+5s).
+		if _, ok := sweepAll(t, b.BridgeJobs, SweepRequest{NowMs: now + 120_000, QueuedTimeoutMs: 120_000, MaxAttempts: 2})[retry.JobID]; ok {
+			t.Fatal("a requeued job's queue timeout ran during its retry delay")
+		}
+		if j, ok := sweepAll(t, b.BridgeJobs, SweepRequest{NowMs: now + 5_000 + 120_000, QueuedTimeoutMs: 120_000, MaxAttempts: 2})[retry.JobID]; !ok || j.FailureReason != FailureNoBridgeOnline {
 			t.Fatalf("requeued job unclaimed for the queue timeout = %+v (swept %v)", j, ok)
 		}
 	})

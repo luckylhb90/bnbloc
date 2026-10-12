@@ -25,12 +25,15 @@ type AgentJob struct {
 	// Attempts are the earlier attempts that failed and were retried,
 	// oldest first (the newest store.MaxRecordedAttempts): why a job is on
 	// attempt 2.
-	Attempts     []AgentJobAttempt `json:"attempts,omitempty"`
-	CreatedAtMs  int64             `json:"createdAtMs"`
-	UpdatedAtMs  int64             `json:"updatedAtMs"`
-	ClaimedAtMs  int64             `json:"claimedAtMs,omitempty"`
-	StartedAtMs  int64             `json:"startedAtMs,omitempty"`
-	FinishedAtMs int64             `json:"finishedAtMs,omitempty"`
+	Attempts []AgentJobAttempt `json:"attempts,omitempty"`
+	// NotBeforeMs is when a requeued job may run again (its retry delay);
+	// absent = now.
+	NotBeforeMs  int64 `json:"notBeforeMs,omitempty"`
+	CreatedAtMs  int64 `json:"createdAtMs"`
+	UpdatedAtMs  int64 `json:"updatedAtMs"`
+	ClaimedAtMs  int64 `json:"claimedAtMs,omitempty"`
+	StartedAtMs  int64 `json:"startedAtMs,omitempty"`
+	FinishedAtMs int64 `json:"finishedAtMs,omitempty"`
 	// DispatchedByJobID / DispatchDepth: the job whose agent dispatched this
 	// one through the room tools, and the hops from the person's message.
 	DispatchedByJobID string `json:"dispatchedByJobId,omitempty"`

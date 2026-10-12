@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"math"
 	"slices"
 	"sort"
 	"strconv"
@@ -63,8 +65,11 @@ var (
 	sqlLiveJobStatuses     = sqlJobStatuses(liveJobStatuses)
 	sqlPendingJobStatuses  = sqlJobStatuses(pendingJobStatuses)
 	sqlActiveJobStatuses   = sqlJobStatuses(activeJobStatuses)
-	// sqlClaimableJob is claimableJob over agent_jobs columns.
-	sqlClaimableJob = "status = '" + string(AgentJobQueued) + "'"
+	// sqlClaimableJob is claimableJob over agent_jobs columns; its one
+	// argument is the claim's nowMs. idx_agent_jobs_owner_status (owner,
+	// status, core, provider, not_before_ms) serves it for an owner's
+	// bridge; the queued set a serve-all claim reads is small.
+	sqlClaimableJob = "status = '" + string(AgentJobQueued) + "' AND not_before_ms <= ?"
 )
 
 // sqlJobStatuses renders a status set as a SQL IN-list body.
@@ -86,11 +91,12 @@ func (s AgentJobStatus) Live() bool { return slices.Contains(liveJobStatuses, s)
 // Pending reports a job not started yet (queued, or claimed and not running).
 func (s AgentJobStatus) Pending() bool { return slices.Contains(pendingJobStatuses, s) }
 
-// claimableJob reports whether a bridge may take j: it is queued (SQL
-// sqlClaimableJob). A live job whose lease lapsed is not: the sweep puts it
-// back on the queue first and records the lost attempt (SweepRequest.swept).
-func claimableJob(j AgentJob) bool {
-	return j.Status == AgentJobQueued
+// claimableJob reports whether a bridge may take j at nowMs: it is queued
+// and its retry delay has passed (NotBeforeMs; SQL sqlClaimableJob). A live
+// job whose lease lapsed is not: the sweep puts it back on the queue first
+// and records the lost attempt (SweepRequest.swept).
+func claimableJob(j AgentJob, nowMs int64) bool {
+	return j.Status == AgentJobQueued && j.NotBeforeMs <= nowMs
 }
 
 type AgentJobFailureReason string
@@ -142,20 +148,62 @@ const (
 	FailureInvalidJob AgentJobFailureReason = "invalid_job"
 )
 
-// Retryable reports whether a failed job may be attempted again: only when
-// no agent work can have started (the core was unreachable, the sandbox was
-// still starting, the start request provably never took effect, the budget
-// could not be checked) or the lease lapsed without a report.
-// Everything else is terminal on the first failure: a deterministic refusal
-// fails the same way again, and a started or ambiguous turn would run the
-// member's prompt twice.
+// retryBackoff is how long a requeued job waits before its next attempt:
+// Base after the first failed attempt, doubling each attempt, at most Max.
+type retryBackoff struct{ Base, Max time.Duration }
+
+// retryBackoffs is the one retry table: a reason retries exactly when it
+// has a row here (Retryable), and its row is the wait before the next
+// attempt (retryDelayMs). Only reasons where no agent work can have started
+// are listed: the core was unreachable, the sandbox was still starting (a
+// booting machine takes about a minute), the start request provably never
+// took effect, the budget could not be checked, or the lease lapsed without
+// a report. Everything else is terminal on the first failure: a
+// deterministic refusal fails the same way again, and a started or
+// ambiguous turn would run the member's prompt twice.
+var retryBackoffs = map[AgentJobFailureReason]retryBackoff{
+	FailureSandboxStarting:   {Base: 15 * time.Second, Max: time.Minute},
+	FailureCoreUnavailable:   {Base: 10 * time.Second, Max: time.Minute},
+	FailureRunnerStartFailed: {Base: 10 * time.Second, Max: time.Minute},
+	FailureBudgetUnavailable: {Base: 10 * time.Second, Max: time.Minute},
+	FailureLeaseExpired:      {Base: 5 * time.Second, Max: 5 * time.Second},
+}
+
+// Retryable reports whether a failed job may be attempted again
+// (retryBackoffs).
 func (r AgentJobFailureReason) Retryable() bool {
-	switch r {
-	case FailureRunnerStartFailed, FailureCoreUnavailable, FailureSandboxStarting, FailureLeaseExpired, FailureBudgetUnavailable:
-		return true
-	default:
-		return false
+	_, ok := retryBackoffs[r]
+	return ok
+}
+
+// retryDelayMs is how long a job whose attempt-th attempt failed for reason
+// waits before it may be claimed again (retryBackoffs; 0 for a reason that
+// does not retry). SQL reads it through sqlRetryDelay.
+func retryDelayMs(reason AgentJobFailureReason, attempt int) int64 {
+	b, ok := retryBackoffs[reason]
+	if !ok {
+		return 0
 	}
+	d := b.Base
+	for i := 1; i < attempt && d < b.Max; i++ {
+		d *= 2
+	}
+	return min(d, b.Max).Milliseconds()
+}
+
+// sqlRetryDelay is retryDelayMs(reason, attempt) over the agent_jobs
+// attempt column, generated from the same table: a CASE over the attempts
+// before the delay reaches its cap.
+func sqlRetryDelay(reason AgentJobFailureReason) string {
+	capMs := retryDelayMs(reason, math.MaxInt32)
+	var b strings.Builder
+	for k := 1; retryDelayMs(reason, k) < capMs; k++ {
+		fmt.Fprintf(&b, " WHEN attempt <= %d THEN %d", k, retryDelayMs(reason, k))
+	}
+	if b.Len() == 0 {
+		return strconv.FormatInt(capMs, 10)
+	}
+	return "(CASE" + b.String() + " ELSE " + strconv.FormatInt(capMs, 10) + " END)"
 }
 
 // Text is the ONE sentence a member reads about a failed job (a room
@@ -286,6 +334,9 @@ type AgentJob struct {
 	// Attempts are the job's earlier attempts that failed and were
 	// requeued, oldest first, at most MaxRecordedAttempts (requeued).
 	Attempts []AgentJobAttempt `json:"attempts,omitempty"`
+	// NotBeforeMs is when a requeued job may be claimed again (its retry
+	// delay, retryDelayMs); 0 = at once.
+	NotBeforeMs int64 `json:"notBeforeMs,omitempty"`
 }
 
 // BridgeHeartbeat records one desktop bridge's liveness in a tenant.
@@ -411,17 +462,19 @@ type AgentJobAttempt struct {
 const MaxRecordedAttempts = 5
 
 // requeued is j put back on the queue after its current attempt failed for
-// reason at nowMs: queued, lease released, the attempt recorded (the last
-// MaxRecordedAttempts kept). It is the one requeue, for a bridge's
-// retryable report and the sweep's lapsed lease alike; the MySQL store
-// writes it with sqlRequeue in the statement that requeues
-// (TestJobRequeueOwned). Diagnostics are the caller's.
+// reason at nowMs: queued, lease released, not claimable before its retry
+// delay (retryDelayMs), the attempt recorded (the last MaxRecordedAttempts
+// kept). It is the one requeue, for a bridge's retryable report and the
+// sweep's lapsed lease alike; the MySQL store writes it with sqlRequeue in
+// the statement that requeues (TestJobRequeueOwned). Diagnostics are the
+// caller's.
 func (j AgentJob) requeued(reason AgentJobFailureReason, nowMs int64) AgentJob {
 	j.Status = AgentJobQueued
 	j.FailureReason = reason
 	j.UpdatedAtMs = nowMs
 	j.LeaseBridgeID = ""
 	j.LeaseExpiresAtMs = 0
+	j.NotBeforeMs = nowMs + retryDelayMs(reason, j.Attempt)
 	kept := j.Attempts
 	if len(kept) >= MaxRecordedAttempts {
 		kept = kept[len(kept)-MaxRecordedAttempts+1:]
@@ -431,16 +484,20 @@ func (j AgentJob) requeued(reason AgentJobFailureReason, nowMs int64) AgentJob {
 }
 
 // sqlRequeue is AgentJob.requeued over agent_jobs columns: the SET list of
-// a requeue, its arguments requeueArgs. The attempt is appended to
-// attempts_json in the same statement (the oldest dropped at the cap), so
-// no report can slip between the requeue and its record.
-var sqlRequeue = "status='" + string(AgentJobQueued) + "', failure_reason=?, updated_at_ms=?, lease_bridge_id='', lease_expires_at_ms=0, " +
-	"attempts_json=JSON_ARRAY_APPEND(IF(JSON_LENGTH(COALESCE(attempts_json, JSON_ARRAY())) >= " + strconv.Itoa(MaxRecordedAttempts) +
-	", JSON_REMOVE(attempts_json, '$[0]'), COALESCE(attempts_json, JSON_ARRAY())), '$', JSON_OBJECT('attempt', attempt, 'reason', ?, 'atMs', ?))"
+// a requeue for reason, its arguments requeueArgs. The retry delay (from
+// the attempt column, sqlRetryDelay) and the attempt record (appended to
+// attempts_json, the oldest dropped at the cap) are written in the same
+// statement, so no claim or report can slip between the requeue and them.
+func sqlRequeue(reason AgentJobFailureReason) string {
+	return "status='" + string(AgentJobQueued) + "', failure_reason=?, updated_at_ms=?, lease_bridge_id='', lease_expires_at_ms=0, " +
+		"not_before_ms=? + " + sqlRetryDelay(reason) + ", " +
+		"attempts_json=JSON_ARRAY_APPEND(IF(JSON_LENGTH(COALESCE(attempts_json, JSON_ARRAY())) >= " + strconv.Itoa(MaxRecordedAttempts) +
+		", JSON_REMOVE(attempts_json, '$[0]'), COALESCE(attempts_json, JSON_ARRAY())), '$', JSON_OBJECT('attempt', attempt, 'reason', ?, 'atMs', ?))"
+}
 
 // requeueArgs are sqlRequeue's arguments.
 func requeueArgs(reason AgentJobFailureReason, nowMs int64) []any {
-	return []any{string(reason), nowMs, string(reason), nowMs}
+	return []any{string(reason), nowMs, nowMs, string(reason), nowMs}
 }
 
 // leaseExpiresAt is the job's lease after the update: none once terminal,
@@ -492,11 +549,12 @@ func (r SweepRequest) normalize() SweepRequest {
 
 // sweepReason is why a sweep takes j at the (normalized) request's time,
 // or "" when j stays: queued for the queue timeout (no bridge took it since
-// it entered the queue, its UpdatedAtMs: created or requeued), or live with
-// an expired lease (its worker stopped renewing it).
+// it became claimable: entered the queue, created or requeued, and its
+// retry delay passed), or live with an expired lease (its worker stopped
+// renewing it).
 func (r SweepRequest) sweepReason(j AgentJob) AgentJobFailureReason {
 	switch {
-	case j.Status == AgentJobQueued && j.UpdatedAtMs <= r.queuedBefore():
+	case j.Status == AgentJobQueued && max(j.UpdatedAtMs, j.NotBeforeMs) <= r.queuedBefore():
 		return FailureNoBridgeOnline
 	case j.Status.Live() && !liveAt(j.LeaseExpiresAtMs, r.NowMs):
 		return FailureLeaseExpired
@@ -818,7 +876,7 @@ func (s *MemoryBridgeJobs) ClaimAgentJobs(_ context.Context, req ClaimRequest) (
 	}
 	var cands []AgentJob
 	for _, j := range s.jobs {
-		if (req.ServeAllOwners || j.OwnerUserID == req.OwnerUserID) && capable[j.Core+"\x00"+j.Provider] && claimableJob(j) {
+		if (req.ServeAllOwners || j.OwnerUserID == req.OwnerUserID) && capable[j.Core+"\x00"+j.Provider] && claimableJob(j, req.NowMs) {
 			cands = append(cands, j)
 		}
 	}

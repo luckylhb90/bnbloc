@@ -911,9 +911,11 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   content package that cannot be loaded is `missing`, except the expert
   the chat picked (refused).
 - **A job retries only when no agent work can have started.**
-  `store.AgentJobFailureReason.Retryable` owns what retries
-  (`core_unavailable`, `sandbox_starting`, `runner_start_failed`,
-  `budget_unavailable`, the lease sweep's `lease_expired`);
+  `store.retryBackoffs` is the one retry table: a reason retries
+  (`AgentJobFailureReason.Retryable`) exactly when it has a row, and the
+  row is its backoff before the next claim (`core_unavailable`,
+  `sandbox_starting`, `runner_start_failed`, `budget_unavailable`, the
+  lease sweep's `lease_expired`);
   `services/bridge/job_failure.go` owns which reason a
   failure gets and the notice that says why (a sandbox prepare failure that
   means the sandbox is not up yet is `sandbox_starting`: `sandboxStarting`
@@ -931,13 +933,19 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
 - **Every requeue records its attempt, in the statement that requeues.**
   The one requeue is `AgentJob.requeued` (memory) and its SQL twin
   `sqlRequeue` (`internal/store/bridge_jobs.go`): queued, lease released,
-  `{attempt, reason, atMs}` appended to `agent_jobs.attempts_json` (the
-  newest `MaxRecordedAttempts`; a terminal failure keeps them). A bridge's
-  retryable report and the sweep's lapsed lease both go through it, under
-  the one rule `retries` (`TestJobRequeueOwned`). The sweep owns lease
-  loss: only a queued job is claimable, a lapsed lease is requeued as
+  `not_before_ms` set to the retry delay (`retryDelayMs`: the reason's
+  base, doubling each attempt, capped; SQL `sqlRetryDelay`, generated from
+  the same table), `{attempt, reason, atMs}` appended to
+  `agent_jobs.attempts_json` (the newest `MaxRecordedAttempts`; a terminal
+  failure keeps them). A bridge's retryable report and the sweep's lapsed
+  lease both go through it, under the one rule `retries`
+  (`TestJobRequeueOwned` also keeps the backoff table in its owner). The
+  sweep owns lease loss: only a queued job past its `not_before_ms` is
+  claimable (`claimableJob`/`sqlClaimableJob`, served by
+  `idx_agent_jobs_owner_status`), a lapsed lease is requeued as
   `lease_expired` (failed on the last attempt), and a queued job's timeout
-  counts from when it entered the queue (`updated_at_ms`). Members read
+  counts from when it became claimable. The activity service's job routes
+  and sweep read one clock (`Service.clock`). Members read
   the attempts as reason codes (`wire.AgentJobAttempt`, decision O4) in the
   job events, the room's job list and the run record
   (docs/bugs/2026-10-12-retried-job-hides-why.md).

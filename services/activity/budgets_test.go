@@ -374,6 +374,11 @@ func TestBudgetHardStopFailsClosed(t *testing.T) {
 		t.Fatalf("refused job = %s/%s, want queued for a retry with %s", job.Status, job.FailureReason, store.FailureBudgetUnavailable)
 	}
 	f.svc.Budgets = healthy
+	// The requeue waits out its retry delay first.
+	if got := f.claimAs(t, "alice"); len(got) != 0 {
+		t.Fatalf("claimed %+v inside the retry delay", got)
+	}
+	f.setNow(time.UnixMilli(job.NotBeforeMs))
 	if got := f.claimAs(t, "alice"); len(got) != 1 || got[0].JobID != "j-unread" {
 		t.Fatalf("after the budget reads again, claimed %+v; want the requeued job", got)
 	}

@@ -42,7 +42,7 @@ func TestAgentJobViewCarriesAttempts(t *testing.T) {
 	j.Attempt = 2
 	j = j.requeued(FailureLeaseExpired, 90)
 	v := j.View()
-	want := `"attempts":[{"attempt":1,"reason":"sandbox_starting","atMs":40},{"attempt":2,"reason":"lease_expired","atMs":90}]`
+	want := `"attempts":[{"attempt":1,"reason":"sandbox_starting","atMs":40},{"attempt":2,"reason":"lease_expired","atMs":90}],"notBeforeMs":5090`
 	raw, err := json.Marshal(v)
 	if err != nil {
 		t.Fatal(err)

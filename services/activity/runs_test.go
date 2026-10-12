@@ -73,9 +73,16 @@ func runsFixture(t *testing.T) *Service {
 	}
 	post("/v1/bridge/heartbeat", `{"bridgeId":"b-alice","agents":[{"core":"c1","provider":"codex"}]}`)
 	post("/v1/bridge/jobs/claim", `{"bridgeId":"b-alice","maxJobs":5}`)
-	// The borrowed run's first attempt finds the core down and is retried.
+	// The borrowed run's first attempt finds the core down and is retried
+	// once its retry delay has passed (claimed past it, through the store).
 	post("/v1/bridge/jobs/j-borrow/status", `{"bridgeId":"b-alice","status":"failed","failureReason":"core_unavailable","diagnostics":{"error":"dial tcp: connection refused"}}`)
-	post("/v1/bridge/jobs/claim", `{"bridgeId":"b-alice","maxJobs":5}`)
+	requeued, err := jobs.GetAgentRun(ctx, "j-borrow")
+	if err != nil || requeued.NotBeforeMs == 0 {
+		t.Fatalf("requeued = %+v, %v", requeued, err)
+	}
+	if got, err := jobs.ClaimAgentJobs(ctx, store.ClaimRequest{BridgeID: "b-alice", OwnerUserID: "alice", MaxJobs: 5, NowMs: requeued.NotBeforeMs}); err != nil || len(got) != 1 {
+		t.Fatalf("re-claim after the delay = %+v, %v", got, err)
+	}
 	post("/v1/bridge/jobs/j-borrow/status", `{"bridgeId":"b-alice","status":"running"}`)
 	post("/v1/bridge/jobs/j-borrow/status", `{"bridgeId":"b-alice","status":"replied","diagnostics":{"sessionId":"s1",
 		"reply":{"messageId":"m-reply","text":"done","atMs":5000,"count":2},

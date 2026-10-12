@@ -1405,11 +1405,18 @@ WHERE r.channel_id = '' AND d.user_id IS NULL`)
 		},
 	},
 	{
-		// Each requeued attempt of a job, kept with the requeue
-		// (docs/bugs/2026-10-12-retried-job-hides-why.md).
+		// Each requeued attempt of a job, kept with the requeue, and the
+		// retry delay before its next claim, which the owner's claim index
+		// serves (docs/bugs/2026-10-12-retried-job-hides-why.md).
 		id: "2026_10_agent_jobs_attempts",
 		run: func(ctx context.Context, db sqlConn) error {
-			return addColumnIfMissing(ctx, db, "agent_jobs", "attempts_json", "JSON NULL AFTER room_expert_name")
+			if err := addColumnIfMissing(ctx, db, "agent_jobs", "attempts_json", "JSON NULL AFTER room_expert_name"); err != nil {
+				return err
+			}
+			if err := addColumnIfMissing(ctx, db, "agent_jobs", "not_before_ms", "BIGINT NOT NULL DEFAULT 0 AFTER attempts_json"); err != nil {
+				return err
+			}
+			return ensureIndexColumns(ctx, db, "agent_jobs", "idx_agent_jobs_owner_status", []string{"owner_user_id", "status", "core", "provider", "not_before_ms"})
 		},
 	},
 }

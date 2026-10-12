@@ -56,11 +56,18 @@ next claim's `running` report clears `failure_reason`. To a member,
   earlier attempt with its reason and time. The text comes from the web's
   one reason table (`AGENT_JOB_FAILURES`, `views/room/agentJobLabels.ts`).
 
-## Follow-up (not in this change)
+## Follow-up: a retry delay (landed)
 
-- A requeued job is claimed again within the bridge's 2 s claim tick. A
-  sandbox that takes a minute to boot can use up all attempts. A per-job
-  "not before" delay for `sandbox_starting` would fix that.
+A requeued job was claimed again within the bridge's 2 s claim tick, so a
+sandbox that takes a minute to boot used up all 3 attempts in seconds and
+the member saw a failed job. Now every requeue sets `not_before_ms` in the
+same statement, and claims skip the job until then. The delay comes from
+one backoff table, `store.retryBackoffs`, which also decides what retries:
+`sandbox_starting` 15 s, 30 s, 60 s (cap); `core_unavailable`,
+`runner_start_failed`, `budget_unavailable` 10 s, 20 s, 40 s, 60 s;
+`lease_expired` 5 s. A queued job's timeout counts from when its delay
+ends. The indicator counts down: "retrying in 12s — the agent sandbox was
+starting".
 
 ## Landing
 

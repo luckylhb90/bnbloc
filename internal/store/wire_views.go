@@ -40,6 +40,7 @@ func (j AgentJob) View() wire.AgentJob {
 		FailureReason:     string(j.FailureReason),
 		Attempt:           j.Attempt,
 		Attempts:          j.AttemptViews(),
+		NotBeforeMs:       j.NotBeforeMs,
 		CreatedAtMs:       j.CreatedAtMs,
 		UpdatedAtMs:       j.UpdatedAtMs,
 		ClaimedAtMs:       j.ClaimedAtMs,

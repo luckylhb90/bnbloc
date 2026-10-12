@@ -8,7 +8,6 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
-	"time"
 
 	"github.com/luckylhb90/bnbloc/internal/httpx"
 	"github.com/luckylhb90/bnbloc/internal/obs"
@@ -58,7 +57,7 @@ func (s *Service) handleBridgeHeartbeat(w http.ResponseWriter, r *http.Request) 
 		httpx.Error(w, "bridge owner mismatch", http.StatusForbidden)
 		return
 	}
-	now := time.Now().UnixMilli()
+	now := s.clock().UnixMilli()
 	body.BridgeID = resolveBridgeID(body.BridgeID, caller)
 	serveAll := s.serveAll(body.ServeAllOwners, caller)
 	if err := s.BridgeJobs.PutBridgeHeartbeat(r.Context(), store.BridgeHeartbeat{BridgeID: body.BridgeID, OwnerUserID: body.OwnerUserID, AppInstanceID: body.AppInstanceID, Version: body.Version, Status: store.BridgeOnline, LastSeenAtMs: now, MetadataJSON: body.Metadata, ServeAllOwners: serveAll}); err != nil {
@@ -143,7 +142,7 @@ func (s *Service) handleBridgeJobClaim(w http.ResponseWriter, r *http.Request) {
 	if !s.requireBridgeOwner(w, r, body.BridgeID, caller) {
 		return
 	}
-	jobs, err := s.BridgeJobs.ClaimAgentJobs(r.Context(), store.ClaimRequest{BridgeID: body.BridgeID, OwnerUserID: caller, MaxJobs: body.MaxJobs, NowMs: time.Now().UnixMilli(), LeaseMs: store.DefaultLeaseMs, ServeAllOwners: body.ServeAllOwners && s.AllowServeAllOwners})
+	jobs, err := s.BridgeJobs.ClaimAgentJobs(r.Context(), store.ClaimRequest{BridgeID: body.BridgeID, OwnerUserID: caller, MaxJobs: body.MaxJobs, NowMs: s.clock().UnixMilli(), LeaseMs: store.DefaultLeaseMs, ServeAllOwners: body.ServeAllOwners && s.AllowServeAllOwners})
 	if err != nil {
 		obs.ServerError(w, "bridge job claim failed", err)
 		httpx.Error(w, err.Error(), http.StatusInternalServerError)
@@ -200,7 +199,7 @@ func (s *Service) handleBridgeJobStatus(w http.ResponseWriter, r *http.Request) 
 	if !s.requireBridgeOwner(w, r, body.BridgeID, caller) {
 		return
 	}
-	now := time.Now().UnixMilli()
+	now := s.clock().UnixMilli()
 	job, err := s.BridgeJobs.UpdateAgentJobStatus(r.Context(), store.JobStatusUpdate{JobID: jobID, BridgeID: body.BridgeID, Status: body.Status, FailureReason: body.FailureReason, DiagnosticsJSON: body.DiagnosticsJSON, NowMs: now, LeaseMs: store.DefaultLeaseMs, MaxAttempts: store.DefaultMaxJobAttempts})
 	if err != nil {
 		writeJobStoreError(w, "job status update failed", err)
@@ -239,7 +238,7 @@ func (s *Service) handleBridgeJobLease(w http.ResponseWriter, r *http.Request) {
 	if !s.requireBridgeOwner(w, r, body.BridgeID, caller) {
 		return
 	}
-	now := time.Now().UnixMilli()
+	now := s.clock().UnixMilli()
 	if err := s.BridgeJobs.RenewAgentJobLease(r.Context(), store.LeaseRenewal{JobID: jobID, BridgeID: body.BridgeID, NowMs: now, LeaseMs: store.DefaultLeaseMs}); err != nil {
 		writeJobStoreError(w, "job lease renewal failed", err)
 		return
@@ -266,7 +265,7 @@ func (s *Service) SweepAgentJobs(ctx context.Context) {
 	if s.BridgeJobs == nil {
 		return
 	}
-	now := time.Now().UnixMilli()
+	now := s.clock().UnixMilli()
 	jobs, err := s.BridgeJobs.SweepAgentJobs(ctx, store.SweepRequest{NowMs: now, QueuedTimeoutMs: store.DefaultQueuedTimeoutMs, MaxAttempts: store.DefaultMaxJobAttempts})
 	if err != nil {
 		return
@@ -335,7 +334,7 @@ func (s *Service) handleCancelAgentJob(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, "jobId required", http.StatusBadRequest)
 		return
 	}
-	now := time.Now().UnixMilli()
+	now := s.clock().UnixMilli()
 	job, err := s.BridgeJobs.CancelAgentJob(r.Context(), store.CancelRequest{
 		JobID:           jobID,
 		RoomID:          roomID,
@@ -414,7 +413,7 @@ func (s *Service) handleMyAgents(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, "missing authenticated subject", http.StatusUnauthorized)
 		return
 	}
-	now := time.Now().UnixMilli()
+	now := s.clock().UnixMilli()
 	agents, err := s.BridgeJobs.ListBridgeAgentsForOwner(r.Context(), caller, now)
 	if err != nil {
 		obs.ServerError(w, "list bridge agents failed", err)

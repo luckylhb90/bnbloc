@@ -60,6 +60,9 @@ export interface AgentJob {
   // oldest first (the newest store.MaxRecordedAttempts): why a job is on
   // attempt 2.
   attempts?: AgentJobAttempt[];
+  // NotBeforeMs is when a requeued job may run again (its retry delay);
+  // absent = now.
+  notBeforeMs?: number;
   createdAtMs: number;
   updatedAtMs: number;
   claimedAtMs?: number;

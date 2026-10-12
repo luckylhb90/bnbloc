@@ -130,7 +130,7 @@ func (m *MySQLBridgeJobs) ClaimAgentJobs(ctx context.Context, req ClaimRequest) 
 	q := `SELECT ` + agentJobColumns + ` FROM agent_jobs j
 WHERE ` + sqlClaimableJob + ` AND EXISTS (SELECT 1 FROM bridge_agents a
   WHERE a.bridge_id = ? AND a.owner_user_id = ? AND a.core = j.core AND a.provider = j.provider AND a.disabled = 0)`
-	args := []any{req.BridgeID, req.OwnerUserID}
+	args := []any{req.NowMs, req.BridgeID, req.OwnerUserID}
 	if !req.ServeAllOwners {
 		q += ` AND j.owner_user_id = ?`
 		args = append(args, req.OwnerUserID)
@@ -164,7 +164,7 @@ func (m *MySQLBridgeJobs) UpdateAgentJobStatus(ctx context.Context, upd JobStatu
 	upd = upd.normalize()
 	if upd.requeues() {
 		args := append(requeueArgs(upd.FailureReason, upd.NowMs), nullIfZero(string(upd.DiagnosticsJSON)), upd.JobID, upd.BridgeID, upd.MaxAttempts)
-		res, err := m.DB.ExecContext(ctx, `UPDATE agent_jobs SET `+sqlRequeue+`, diagnostics_json=?
+		res, err := m.DB.ExecContext(ctx, `UPDATE agent_jobs SET `+sqlRequeue(upd.FailureReason)+`, diagnostics_json=?
 WHERE job_id=? AND lease_bridge_id=? AND status NOT IN (`+sqlTerminalJobStatuses+`) AND attempt < ?`, args...)
 		if err != nil {
 			return AgentJob{}, err
@@ -282,7 +282,7 @@ func (m *MySQLBridgeJobs) SweepAgentJobs(ctx context.Context, req SweepRequest) 
 	// jobs whose lease lapsed (idx_agent_jobs_status_lease). Oldest first,
 	// at most MaxSweptJobs; SweepRequest.swept decides each one.
 	queued, err := queryAll(ctx, m.DB, `SELECT `+agentJobColumns+` FROM agent_jobs
-WHERE status = ? AND updated_at_ms <= ? ORDER BY created_at_ms, job_id LIMIT ?`, scanAgentJobRow,
+WHERE status = ? AND GREATEST(updated_at_ms, not_before_ms) <= ? ORDER BY created_at_ms, job_id LIMIT ?`, scanAgentJobRow,
 		string(AgentJobQueued), req.queuedBefore(), MaxSweptJobs)
 	if err != nil {
 		return nil, err
@@ -310,7 +310,7 @@ WHERE status IN (`+sqlLiveJobStatuses+`) AND lease_expires_at_ms <= ? ORDER BY c
 		q, args := `UPDATE agent_jobs SET status=?, failure_reason=?, updated_at_ms=?, finished_at_ms=?, lease_expires_at_ms=? `+guard,
 			append([]any{string(f.Status), string(f.FailureReason), f.UpdatedAtMs, f.FinishedAtMs, f.LeaseExpiresAtMs}, guardArgs...)
 		if f.Status == AgentJobQueued {
-			q, args = `UPDATE agent_jobs SET `+sqlRequeue+` `+guard, append(requeueArgs(f.FailureReason, f.UpdatedAtMs), guardArgs...)
+			q, args = `UPDATE agent_jobs SET `+sqlRequeue(f.FailureReason)+` `+guard, append(requeueArgs(f.FailureReason, f.UpdatedAtMs), guardArgs...)
 		}
 		res, err := m.DB.ExecContext(ctx, q, args...)
 		if err != nil {
@@ -406,7 +406,7 @@ func (m *MySQLBridgeJobs) scanAgentJob(ctx context.Context, q string, args ...an
 
 // agentJobColumns is the one column list every agent_jobs read selects, in
 // scanAgentJobRow's order.
-const agentJobColumns = `job_id, tenant_id, room_id, channel_id, message_seq, client_msg_id, requester_user_id, owner_user_id, core, provider, target_id, message_text, attachment_ids, model, reasoning_effort, status, failure_reason, attempt, lease_bridge_id, lease_expires_at_ms, created_at_ms, updated_at_ms, started_at_ms, finished_at_ms, diagnostics_json, claimed_at_ms, dispatched_by_job_id, dispatch_depth, expert_id, expert_version, expert_name, room_expert_id, room_expert_version, room_expert_name, attempts_json`
+const agentJobColumns = `job_id, tenant_id, room_id, channel_id, message_seq, client_msg_id, requester_user_id, owner_user_id, core, provider, target_id, message_text, attachment_ids, model, reasoning_effort, status, failure_reason, attempt, lease_bridge_id, lease_expires_at_ms, created_at_ms, updated_at_ms, started_at_ms, finished_at_ms, diagnostics_json, claimed_at_ms, dispatched_by_job_id, dispatch_depth, expert_id, expert_version, expert_name, room_expert_id, room_expert_version, room_expert_name, attempts_json, not_before_ms`
 
 func scanAgentJobRow(row rowScanner) (AgentJob, error) {
 	var j AgentJob
@@ -414,7 +414,7 @@ func scanAgentJobRow(row rowScanner) (AgentJob, error) {
 	var messageText, model, reasoningEffort sql.NullString
 	var attachmentIDs []byte
 	var diag, attempts []byte
-	err := row.Scan(&j.JobID, &j.TenantID, &j.RoomID, &j.ChannelID, &j.MessageSeq, &j.ClientMsgID, &j.RequesterUserID, &j.OwnerUserID, &j.Core, &j.Provider, &j.TargetID, &messageText, &attachmentIDs, &model, &reasoningEffort, &status, &reason, &j.Attempt, &j.LeaseBridgeID, &j.LeaseExpiresAtMs, &j.CreatedAtMs, &j.UpdatedAtMs, &j.StartedAtMs, &j.FinishedAtMs, &diag, &j.ClaimedAtMs, &j.DispatchedByJobID, &j.DispatchDepth, &j.ExpertID, &j.ExpertVersion, &j.ExpertName, &j.RoomExpertID, &j.RoomExpertVersion, &j.RoomExpertName, &attempts)
+	err := row.Scan(&j.JobID, &j.TenantID, &j.RoomID, &j.ChannelID, &j.MessageSeq, &j.ClientMsgID, &j.RequesterUserID, &j.OwnerUserID, &j.Core, &j.Provider, &j.TargetID, &messageText, &attachmentIDs, &model, &reasoningEffort, &status, &reason, &j.Attempt, &j.LeaseBridgeID, &j.LeaseExpiresAtMs, &j.CreatedAtMs, &j.UpdatedAtMs, &j.StartedAtMs, &j.FinishedAtMs, &diag, &j.ClaimedAtMs, &j.DispatchedByJobID, &j.DispatchDepth, &j.ExpertID, &j.ExpertVersion, &j.ExpertName, &j.RoomExpertID, &j.RoomExpertVersion, &j.RoomExpertName, &attempts, &j.NotBeforeMs)
 	if errors.Is(err, sql.ErrNoRows) {
 		return AgentJob{}, ErrAgentJobNotFound
 	}
