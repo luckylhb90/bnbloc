@@ -16,10 +16,18 @@ import (
 	"github.com/luckylhb90/bnbloc/internal/config"
 	"github.com/luckylhb90/bnbloc/internal/coreset"
 	"github.com/luckylhb90/bnbloc/services/bridge"
+	"github.com/luckylhb90/bnbloc/services/bridge/roomtools"
 )
 
 func main() {
-	// The bridge serves no HTTP, so its build identity goes to the log the
+	// `bnbloc-bridge roomtools-stdio --url <endpoint>` is the room tools
+	// stdio shim an agent without http MCP launches (bearer in
+	// BNBLOC_ROOMTOOLS_TOKEN). Its stdout is the MCP channel, so it runs
+	// before anything else writes.
+	if len(os.Args) > 1 && os.Args[1] == "roomtools-stdio" {
+		os.Exit(roomtools.RunStdioMain(os.Args[2:]))
+	}
+	// The bridge serves no public HTTP, so its build identity goes to the log the
 	// desktop collects (internal/buildinfo; stamped by build-bridge-sidecar.mjs).
 	bi := buildinfo.Get("bnbloc-bridge")
 	log.Printf("bnbloc-bridge: build commit=%q builtAt=%q", bi.Commit, bi.BuiltAt)
@@ -110,6 +118,21 @@ func main() {
 		WindowChars:       config.GetInt("BNBLOC_BRIDGE_CONTEXT_WINDOW_CHARS", 0),
 		ContextRecentRows: config.GetInt("BNBLOC_BRIDGE_CONTEXT_RECENT_ROWS", 0),
 	})
+
+	// Room tools: the loopback MCP server every driven agent session gets
+	// (list the room's agents, dispatch work to them). The stdio shim is this
+	// executable. A server that cannot listen leaves agents without room
+	// tools; driving is unaffected.
+	shim, err := os.Executable()
+	if err != nil {
+		log.Printf("bnbloc-bridge: room tools stdio shim unavailable: %v", err)
+		shim = ""
+	}
+	if stopRoomTools, err := b.EnableRoomTools(shim); err != nil {
+		log.Printf("bnbloc-bridge: room tools disabled: %v", err)
+	} else {
+		defer stopRoomTools()
+	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
