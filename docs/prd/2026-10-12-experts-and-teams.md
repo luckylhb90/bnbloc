@@ -400,7 +400,12 @@ transports), d7487b4 + 2fbc527 (shared semver), f3a6a76 (`contentpkg`
 validator/builder/importer), 55c06fb (content tables), 1b39dd0 (one
 visibility function), e6233e7 (shared live-lease rule), 1a67c55 (chat and
 jobs carry the expert), fe0574c (gateway routes), 9302fab (bridge
-materialization, fallback, exclusions, forced sandbox). bnbloc-acp:
+materialization, fallback, exclusions, forced sandbox); web: dcf75a0
+(Library Experts and Skills tabs: list, view, form create, import, new
+version, delete, "on for all my agents"), e85aba0 (composer expert picker
+beside the agent picker, `@expert` mentions, welcome and quick prompts,
+first-use permission confirmation, the expert on messages and run rows),
+d86eb64 (room settings: pinned experts and room skill packs). bnbloc-acp:
 e4643e7 (profile mapping per agent), 38f282a (`mcpTransports`). Decisions
 made while building:
 
@@ -449,7 +454,9 @@ on the next turn, in a new session (content changed).
 
 **Open in step 1:** an optional room expert applied to every agent turn
 (only pinned experts are offered in the composer); usage counts beyond
-`uses` (runs/members per component); org/platform scopes (step 4).
+`uses` (runs/members per component); editing requirements, tags and icons in
+the Library form (they carry over unchanged); the live job-status line does
+not show `contentMissing` yet; org/platform scopes (step 4).
 
 ## Status: step 2 (room tools)
 
