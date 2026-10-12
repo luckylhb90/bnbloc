@@ -4,7 +4,7 @@ import { buildComponentPackage } from "./componentPackageBuilder.ts";
 import { artifactRequirementsForPackage } from "./componentArtifactRequirements.ts";
 import { parseComponentPackage } from "./componentPackage.ts";
 import { nextPublishWizardStep, packageDraftFromEnvelope, previousPublishWizardStep } from "./componentPublishWizard.ts";
-import { connectorFieldsAsSettings, credentialStatus, envSummary, toolUsers, type McpToolSettings } from "./mcpTools.ts";
+import { connectorFieldsAsSettings, credentialStatus, envSummary, signInLine, signsIn, toolUsers, type McpToolSettings } from "./mcpTools.ts";
 import { initialValues, missingRequired, settingsUpdate } from "./pluginSettings.ts";
 
 // The web tsconfig has no node types, so the tests use a local runner (same
@@ -28,7 +28,20 @@ function tool(mcp: MemberComponent["mcp"]): MemberComponent {
 
 const member = tool({ tools: [{ name: "get_codeword" }], env: [{ name: "SALT", secret: true, required: true }], credentials: "member", transport: "stdio" });
 const local = (configured: boolean): McpToolSettings => ({
-  tool: "codeword", version: "1.0.0", transport: "stdio", credentials: "member", tools: [], configured, state: "ready", message: "", fields: [],
+  tool: "codeword", version: "1.0.0", transport: "stdio", credentials: "member", tools: [], configured, auth: "", state: "ready", message: "", fields: [],
+});
+
+test("an OAuth tool is signed in to, not configured", () => {
+  const oauth = tool({ tools: [{ name: "list" }], transport: "http", http: { auth: { scheme: "oauth", scopes: ["files:read"] } } });
+  equal(signsIn(oauth), true);
+  equal(signsIn(member), false);
+  equal(credentialStatus(oauth).state, "elsewhere");
+  const signedIn = { ...local(true), auth: "oauth", signIn: { server: "auth.example.com", signedInAtMs: 1, expiresAtMs: 0, valid: true } };
+  equal(credentialStatus(oauth, signedIn).text, "Signed in on this computer");
+  equal(credentialStatus(oauth, { ...local(false), auth: "oauth" }).text, "Missing: sign in from Settings → Tools");
+  equal(signInLine(signedIn), "Signed in with auth.example.com.");
+  equal(signInLine({ signIn: { ...signedIn.signIn, valid: false } }), "Your sign-in with auth.example.com expired. Sign in again.");
+  equal(signInLine({}), "Not signed in. Sign in to use it in your runs.");
 });
 
 test("credentials: none, org and member", () => {

@@ -320,6 +320,25 @@ export const desktop = {
     });
   },
 
+  // Sign in to an MCP tool that takes an OAuth sign-in: its sign-in page
+  // opens in the browser and this resolves once it is done (the tokens stay
+  // on this computer).
+  async signInMcpTool(tool: string): Promise<void> {
+    const t = tauri();
+    if (!t) return;
+    await t.invoke("mcp_tool_sign_in", { tool }).catch((e: unknown) => {
+      throw new Error(e instanceof Error ? e.message : String(e));
+    });
+  },
+
+  async signOutMcpTool(tool: string): Promise<void> {
+    const t = tauri();
+    if (!t) return;
+    await t.invoke("mcp_tool_sign_out", { tool }).catch((e: unknown) => {
+      throw new Error(e instanceof Error ? e.message : String(e));
+    });
+  },
+
   // The local agent sandbox (Settings → Agent sandbox). Null outside the shell.
   async sandboxStatus(): Promise<SandboxStatus | null> {
     const t = tauri();

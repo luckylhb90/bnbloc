@@ -20,9 +20,37 @@ export interface McpToolSettings {
   credentials: string;
   tools: { name: string; description?: string }[];
   configured: boolean;
+  // "oauth" when the member signs in to the tool ("" otherwise).
+  auth: string;
+  // The member's sign-in on this computer (oauth tools; never a token).
+  signIn?: McpSignIn;
   state: string;
   message: string;
   fields: LocalSettingView[];
+}
+
+export interface McpSignIn {
+  // The sign-in server's host.
+  server: string;
+  signedInAtMs: number;
+  // 0 when the server stated no expiry.
+  expiresAtMs: number;
+  // Usable now, or refreshable.
+  valid: boolean;
+}
+
+// signsIn reports a tool each member signs in to (OAuth) instead of
+// entering credentials.
+export function signsIn(tool: MemberComponent): boolean {
+  return tool.mcp?.http?.auth.scheme === "oauth";
+}
+
+// signInLine is Settings → Tools' status of an OAuth tool on this computer.
+export function signInLine(t: Pick<McpToolSettings, "signIn">): string {
+  const s = t.signIn;
+  if (!s) return "Not signed in. Sign in to use it in your runs.";
+  if (!s.valid) return `Your sign-in${s.server ? ` with ${s.server}` : ""} expired. Sign in again.`;
+  return `Signed in${s.server ? ` with ${s.server}` : ""}.`;
 }
 
 // One variable of an organization connector as an org admin sees it.
@@ -63,6 +91,12 @@ export interface CredentialStatus {
 // on this desktop (local: the shell's report; undefined in a browser).
 export function credentialStatus(tool: MemberComponent, local?: McpToolSettings): CredentialStatus {
   const mcp = tool.mcp;
+  if (mcp && signsIn(tool)) {
+    if (!local) return { state: "elsewhere", text: "Your own sign-in: sign in from the desktop app (Settings → Tools)" };
+    return local.configured
+      ? { state: "ready", text: "Signed in on this computer" }
+      : { state: "missing", text: "Missing: sign in from Settings → Tools" };
+  }
   if (!mcp || !mcp.credentials || (mcp.env ?? []).length === 0) return { state: "ready", text: "No credentials needed" };
   if (mcp.credentials === "org") {
     return mcp.orgConfigured

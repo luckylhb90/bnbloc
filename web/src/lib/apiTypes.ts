@@ -87,7 +87,11 @@ export interface ComponentMCP {
   readonly env?: readonly ComponentMCPEnv[];
   readonly credentials?: "member" | "org";
   readonly stdio?: { readonly args?: readonly string[] };
-  readonly http?: { readonly auth: { readonly scheme: string; readonly header?: string; readonly env?: string } };
+  // scheme "oauth": each member signs in from their desktop (clientId and
+  // scopes are optional hints for the sign-in server).
+  readonly http?: {
+    readonly auth: { readonly scheme: string; readonly header?: string; readonly env?: string; readonly clientId?: string; readonly scopes?: readonly string[] };
+  };
 }
 
 // The member catalog adds the transport and, for org credentials, whether
