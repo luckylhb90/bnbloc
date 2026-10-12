@@ -167,7 +167,8 @@ type ArtifactThumbnailWrite struct {
 }
 
 // ArtifactQuery selects a room's artifacts, newest-updated first, with keyset
-// paging on (UpdatedAtMs, ArtifactID).
+// paging on (UpdatedAtMs, ArtifactID). A page holds clampLimit(Limit,
+// DefaultArtifactListPage, MaxArtifactListPage) artifacts.
 type ArtifactQuery struct {
 	RoomID    string
 	ChannelID string
@@ -178,7 +179,8 @@ type ArtifactQuery struct {
 	Author string
 	// SourceSeq selects artifacts with a version produced by that message.
 	SourceSeq int64
-	// Text substring-matches the title or file name (case-insensitive).
+	// Text substring-matches the title or file name (case-insensitive,
+	// taken literally).
 	Text string
 	// BeforeUpdatedMs + BeforeID: return only artifacts strictly after this
 	// cursor in (updatedAtMs desc, artifactId desc) order. Zero = first page.
@@ -213,6 +215,10 @@ type ArtifactStore interface {
 	// SizeBytes. A non-empty MimeType becomes the artifact's current MIME type.
 	PublishArtifactVersion(ctx context.Context, artifactID string, v ArtifactVersion, baseVersion int) (Artifact, ArtifactVersion, error)
 	GetArtifactVersion(ctx context.Context, artifactID string, version int) (ArtifactVersion, error)
+	// ListArtifactVersions returns the newest clampLimit(limit,
+	// DefaultArtifactVersionPage, MaxArtifactVersionPage) versions,
+	// metadata only (no Content), newest first; [] for an artifact not in
+	// the ctx tenant.
 	ListArtifactVersions(ctx context.Context, artifactID string, limit int) ([]ArtifactVersion, error)
 	// SetArtifactThumbnail stores a version thumbnail when none is stored or
 	// the stored one has a lower rank. It returns the version as stored and
@@ -284,11 +290,21 @@ func artifactMatches(a Artifact, q ArtifactQuery) bool {
 	return true
 }
 
+// Artifact page sizes, the same on both backends.
+const (
+	DefaultArtifactListPage    = 100
+	MaxArtifactListPage        = 200
+	DefaultArtifactVersionPage = 50
+	// MaxArtifactVersionPage covers the handoff export's whole history read.
+	MaxArtifactVersionPage = 1000
+)
+
 func artifactListLimit(n int) int {
-	if n <= 0 || n > 200 {
-		return 100
-	}
-	return n
+	return clampLimit(n, DefaultArtifactListPage, MaxArtifactListPage)
+}
+
+func artifactVersionLimit(n int) int {
+	return clampLimit(n, DefaultArtifactVersionPage, MaxArtifactVersionPage)
 }
 
 // MemoryArtifacts is the in-memory ArtifactStore (dev / tests).
@@ -491,16 +507,14 @@ func (s *MemoryArtifacts) ListArtifactVersions(ctx context.Context, artifactID s
 	if err != nil {
 		return nil, err
 	}
-	if limit <= 0 {
-		limit = 50
-	}
+	limit = artifactVersionLimit(limit)
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	out := []ArtifactVersion{}
 	a, ok := s.artifacts[artifactID]
 	if !ok || a.TenantID != tid {
-		return nil, nil
+		return out, nil
 	}
-	var out []ArtifactVersion
 	for _, v := range s.versions[artifactID] {
 		meta := v
 		meta.Content = "" // metadata only: content is fetched per version

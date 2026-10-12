@@ -112,21 +112,7 @@ func (m *MySQLArtifacts) ListArtifacts(ctx context.Context, q ArtifactQuery) ([]
 		args = append(args, q.BeforeUpdatedMs, q.BeforeUpdatedMs, q.BeforeID)
 	}
 	sqlq += ` ORDER BY updated_at_ms DESC, artifact_id DESC LIMIT ?`
-	args = append(args, artifactListLimit(q.Limit))
-	rows, err := m.DB.QueryContext(ctx, sqlq, args...)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	out := []Artifact{}
-	for rows.Next() {
-		a, err := scanArtifact(rows)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, a)
-	}
-	return out, rows.Err()
+	return queryAll(ctx, m.DB, sqlq, scanArtifact, append(args, artifactListLimit(q.Limit))...)
 }
 
 // ArtifactAnchors returns the room's version links in a seq range (see
@@ -232,13 +218,10 @@ func (m *MySQLArtifacts) ListArtifactVersions(ctx context.Context, artifactID st
 	if err != nil {
 		return nil, err
 	}
-	if limit <= 0 {
-		limit = 50
-	}
 	return queryAll(ctx, m.DB, `
 SELECT `+versionCols(false)+`
 FROM artifact_versions WHERE tenant_id=? AND artifact_id=?
-ORDER BY version DESC LIMIT ?`, scanArtifactVersion, tid, artifactID, limit)
+ORDER BY version DESC LIMIT ?`, scanArtifactVersion, tid, artifactID, artifactVersionLimit(limit))
 }
 
 // SetArtifactThumbnail is one conditional UPDATE: it lands only when no

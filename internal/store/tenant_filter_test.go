@@ -23,7 +23,6 @@ var tenantFilterPending = map[string]bool{
 	"attachment.go:MySQLAttachments.GetAttachment":                                   true,
 	"content_prompt_uses.go:MySQLContentComponents.RecordContentPromptUse":           true,
 	"content_usage.go:MySQLContentComponents.CountMemberUses":                        true,
-	"mysql_artifact_shares.go:MySQLArtifacts.ResolveArtifactShare":                   true,
 	"mysql_bridge_jobs.go:MySQLBridgeJobs.ClaimAgentJobs":                            true,
 	"mysql_bridge_jobs.go:MySQLBridgeJobs.ListBridgeAgents":                          true,
 	"mysql_bridge_jobs.go:MySQLBridgeJobs.ListBridgeAgentsForOwner":                  true,

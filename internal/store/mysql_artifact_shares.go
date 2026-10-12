@@ -13,7 +13,7 @@ var _ ArtifactShareStore = (*MySQLArtifacts)(nil)
 const artifactShareCols = `s.share_id, s.token_hash, s.tenant_id, s.room_id, s.artifact_id, s.version, s.created_by, s.created_at_ms, s.expires_at_ms, s.revoked_at_ms, s.revoked_by, s.view_count, s.last_viewed_at_ms`
 
 // shareEndedAt is when a link stopped working: its revocation or expiry,
-// whichever came first.
+// whichever came first (ArtifactShare.endedAtMs in Go).
 const shareEndedAt = `LEAST(s.expires_at_ms, COALESCE(s.revoked_at_ms, s.expires_at_ms))`
 
 func (m *MySQLArtifacts) CreateArtifactShare(ctx context.Context, sh ArtifactShare) (ArtifactShare, error) {
@@ -27,7 +27,7 @@ func (m *MySQLArtifacts) CreateArtifactShare(ctx context.Context, sh ArtifactSha
 INSERT INTO artifact_shares (share_id, token_hash, tenant_id, room_id, artifact_id, version, created_by, created_at_ms, expires_at_ms)
 VALUES (?,?,?,?,?,?,?,?,?)`,
 		sh.ShareID, sh.TokenHash, tid, sh.RoomID, sh.ArtifactID, sh.Version, sh.CreatedBy, sh.CreatedAtMs, sh.ExpiresAtMs); err != nil {
-		return ArtifactShare{}, err
+		return ArtifactShare{}, dupAs(err, ErrArtifactShareExists)
 	}
 	return sh, nil
 }
@@ -73,6 +73,7 @@ func (m *MySQLArtifacts) ListTenantArtifactShares(ctx context.Context, q TenantS
 	where := `s.tenant_id=? AND ` + shareEndedAt + ` > ?`
 	args := []any{tid, q.EndedAfterMs}
 	if q.ActiveAtMs > 0 {
+		// ArtifactShare.Active: not revoked, and live (liveAt) at ActiveAtMs.
 		where += ` AND s.revoked_at_ms IS NULL AND s.expires_at_ms > ?`
 		args = append(args, q.ActiveAtMs)
 	}
@@ -104,6 +105,9 @@ func (m *MySQLArtifacts) RevokeArtifactShare(ctx context.Context, shareID, by st
 	if err != nil {
 		return ArtifactShare{}, err
 	}
+	if atMs <= 0 {
+		return ArtifactShare{}, ErrArtifactShareRevokeTime
+	}
 	if _, err := m.DB.ExecContext(ctx, `
 UPDATE artifact_shares SET revoked_at_ms=?, revoked_by=?
 WHERE tenant_id=? AND share_id=? AND revoked_at_ms IS NULL`, atMs, by, tid, shareID); err != nil {
@@ -113,6 +117,8 @@ WHERE tenant_id=? AND share_id=? AND revoked_at_ms IS NULL`, atMs, by, tid, shar
 }
 
 func (m *MySQLArtifacts) ResolveArtifactShare(ctx context.Context, shareID string) (ArtifactShare, error) {
+	// cross-tenant: a share token carries no tenant; the caller verifies the
+	// secret, then works in the row's tenant.
 	return scanArtifactShare(m.DB.QueryRowContext(ctx, `
 SELECT `+artifactShareCols+` FROM artifact_shares s WHERE s.share_id=?`, shareID))
 }
@@ -128,10 +134,7 @@ WHERE tenant_id=? AND share_id=?`, atMs, tid, shareID)
 	if err != nil {
 		return err
 	}
-	if n, _ := res.RowsAffected(); n == 0 {
-		return ErrArtifactShareNotFound
-	}
-	return nil
+	return requireMatched(res, ErrArtifactShareNotFound)
 }
 
 // scanArtifactShare reads artifactShareCols, then any extra columns.

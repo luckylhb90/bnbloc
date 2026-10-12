@@ -12,6 +12,13 @@ import (
 // context tenant).
 var ErrArtifactShareNotFound = errors.New("store: artifact share not found")
 
+// ErrArtifactShareExists refuses a share id already taken (ids are global).
+var ErrArtifactShareExists = errors.New("store: artifact share id already exists")
+
+// ErrArtifactShareRevokeTime refuses a revocation without a time (atMs <=
+// 0): RevokedAtMs 0 means "not revoked", so such a revoke cannot be stored.
+var ErrArtifactShareRevokeTime = errors.New("store: artifact share revocation needs a time")
+
 // ArtifactShare is one public share link of an artifact
 // (docs/prd/2026-10-09-artifact-shares-and-site-previews.md). The token
 // "bsh_<ShareID>_<secret>" is shown once at create; only TokenHash (the
@@ -35,17 +42,17 @@ type ArtifactShare struct {
 }
 
 // Active reports whether the link itself is live at nowMs (not revoked, not
-// expired). Tenant policy and the artifact's existence are checked by the
-// caller.
+// expired: liveAt, so at nowMs == ExpiresAtMs it has expired). Tenant policy
+// and the artifact's existence are checked by the caller.
 func (s ArtifactShare) Active(nowMs int64) bool {
-	return s.RevokedAtMs == 0 && nowMs < s.ExpiresAtMs
+	return s.RevokedAtMs == 0 && liveAt(s.ExpiresAtMs, nowMs)
 }
 
 // endedAtMs is when the link stopped working: its revocation or expiry,
-// whichever came first.
+// whichever came first (shareEndedAt in SQL).
 func (s ArtifactShare) endedAtMs() int64 {
-	if s.RevokedAtMs != 0 && s.RevokedAtMs < s.ExpiresAtMs {
-		return s.RevokedAtMs
+	if s.RevokedAtMs != 0 {
+		return min(s.RevokedAtMs, s.ExpiresAtMs)
 	}
 	return s.ExpiresAtMs
 }
@@ -63,14 +70,16 @@ type TenantShareQuery struct {
 	ActiveAtMs int64
 	// EndedAfterMs drops links that stopped working at or before it.
 	EndedAfterMs int64
-	// Limit bounds the result (1..500, default 500).
+	// Limit bounds the result: clampLimit(Limit, maxTenantArtifactShareList,
+	// maxTenantArtifactShareList).
 	Limit int
 }
 
 // ArtifactShareStore persists share links. Every method except
 // ResolveArtifactShare is scoped to the context tenant.
 type ArtifactShareStore interface {
-	// CreateArtifactShare stores a new link in the context tenant.
+	// CreateArtifactShare stores a new link in the context tenant;
+	// ErrArtifactShareExists when the id is taken in any tenant.
 	CreateArtifactShare(ctx context.Context, sh ArtifactShare) (ArtifactShare, error)
 	// GetArtifactShare returns one link of the context tenant.
 	GetArtifactShare(ctx context.Context, shareID string) (ArtifactShare, error)
@@ -80,8 +89,9 @@ type ArtifactShareStore interface {
 	// ListTenantArtifactShares lists the context tenant's links of artifacts
 	// that still exist, with their titles.
 	ListTenantArtifactShares(ctx context.Context, q TenantShareQuery) ([]TenantArtifactShare, error)
-	// RevokeArtifactShare revokes a link (idempotent: the first revocation
-	// is kept) and returns it as stored.
+	// RevokeArtifactShare revokes a link at atMs (idempotent: the first
+	// revocation is kept) and returns it as stored. atMs <= 0 is
+	// ErrArtifactShareRevokeTime on both backends.
 	RevokeArtifactShare(ctx context.Context, shareID, by string, atMs int64) (ArtifactShare, error)
 	// ResolveArtifactShare looks a link up by id in ANY tenant: the token
 	// carries no tenant, and share ids are globally unique (the primary
@@ -99,10 +109,7 @@ const (
 )
 
 func tenantShareLimit(n int) int {
-	if n <= 0 || n > maxTenantArtifactShareList {
-		return maxTenantArtifactShareList
-	}
-	return n
+	return clampLimit(n, maxTenantArtifactShareList, maxTenantArtifactShareList)
 }
 
 var _ ArtifactShareStore = (*MemoryArtifacts)(nil)
@@ -115,7 +122,7 @@ func (s *MemoryArtifacts) CreateArtifactShare(ctx context.Context, sh ArtifactSh
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if _, dup := s.shares[sh.ShareID]; dup {
-		return ArtifactShare{}, errors.New("store: duplicate share id")
+		return ArtifactShare{}, ErrArtifactShareExists
 	}
 	sh.TenantID = tid
 	sh.RevokedAtMs, sh.RevokedBy, sh.ViewCount, sh.LastViewedAtMs = 0, "", 0, 0
@@ -199,6 +206,9 @@ func (s *MemoryArtifacts) RevokeArtifactShare(ctx context.Context, shareID, by s
 	if err != nil {
 		return ArtifactShare{}, err
 	}
+	if atMs <= 0 {
+		return ArtifactShare{}, ErrArtifactShareRevokeTime
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	sh, ok := s.shares[shareID]
@@ -212,6 +222,7 @@ func (s *MemoryArtifacts) RevokeArtifactShare(ctx context.Context, shareID, by s
 	return sh, nil
 }
 
+// ResolveArtifactShare is cross-tenant: a share token carries no tenant.
 func (s *MemoryArtifacts) ResolveArtifactShare(_ context.Context, shareID string) (ArtifactShare, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

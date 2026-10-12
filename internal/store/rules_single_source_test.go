@@ -27,7 +27,6 @@ var storeRuleCopies = map[string]map[string]int{
 	},
 	"expiry-inline": {
 		"api_tokens.go":              1,
-		"artifact_shares.go":         2,
 		"bridge_jobs.go":             2,
 		"content_drafts.go":          1,
 		"notification_replies.go":    1,
@@ -42,14 +41,11 @@ var storeRuleCopies = map[string]map[string]int{
 	},
 	"limit-clamp": {
 		"agent_runs.go":               1,
-		"artifact_shares.go":          1,
-		"artifacts.go":                2,
 		"audit_log.go":                2,
 		"bridge_jobs.go":              1,
 		"content_components.go":       1,
 		"content_publish_requests.go": 1,
 		"grants.go":                   2,
-		"mysql_artifacts.go":          1,
 		"mysql_bridge_jobs.go":        1,
 		"mysql_grant.go":              2,
 		"mysql_notifications.go":      2,
