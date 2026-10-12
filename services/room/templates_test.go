@@ -1,7 +1,9 @@
 package room
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -9,7 +11,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/luckylhb90/bnbloc/internal/contentbuiltin"
+	"github.com/luckylhb90/bnbloc/internal/contentpkg"
 	"github.com/luckylhb90/bnbloc/internal/store"
+	"github.com/luckylhb90/bnbloc/internal/tenant"
 	"github.com/luckylhb90/bnbloc/internal/wire"
 )
 
@@ -18,6 +23,7 @@ type tplFixture struct {
 	srv   *httptest.Server
 	svc   *Service
 	sched *store.MemoryRoomSchedules
+	seq   int
 }
 
 func newTplFixture(t *testing.T) *tplFixture {
@@ -26,6 +32,7 @@ func newTplFixture(t *testing.T) *tplFixture {
 	f := &tplFixture{t: t, srv: srv, svc: svc, sched: store.NewMemoryRoomSchedules()}
 	svc.Templates = store.NewMemoryRoomTemplates()
 	svc.Schedules = f.sched
+	svc.Content = contentbuiltin.Overlay(store.NewMemoryContentComponents())
 	return f
 }
 
@@ -54,7 +61,7 @@ func sampleTemplateBody() map[string]any {
 		"body": map[string]any{
 			"roomDescription": "Design reviews",
 			"channels":        []string{"design", "General", "design", "ops"},
-			"starterPrompts":  []string{"Summarize open PRs", ""},
+			"promptPacks":     []map[string]any{{"componentId": starterPack}, {"componentId": " "}, {"componentId": starterPack}},
 			"suggestedAgents": []map[string]any{{"ownerId": "dave", "provider": "codex", "core": "c1"}},
 			"defaultMembers":  []string{"bob", "carol", "bob"},
 			"schedules": []map[string]any{{
@@ -70,7 +77,7 @@ func TestTemplateCreateNormalizesAndValidates(t *testing.T) {
 	f := newTplFixture(t)
 	tpl := f.createTemplate("alice", sampleTemplateBody())
 	b := tpl.Body
-	if strings.Join(b.Channels, ",") != "design,ops" || len(b.StarterPrompts) != 1 || strings.Join(b.DefaultMembers, ",") != "bob,carol" {
+	if strings.Join(b.Channels, ",") != "design,ops" || len(b.PromptPacks) != 1 || strings.Join(b.DefaultMembers, ",") != "bob,carol" {
 		t.Fatalf("normalized body = %+v", b)
 	}
 	bad := []map[string]any{
@@ -254,9 +261,14 @@ func TestTemplateFromRoom(t *testing.T) {
 		Recipient: wire.ScheduleRecipient{Kind: wire.ScheduleRecipientRoom}, Timezone: "UTC",
 		Recurrence: wire.ScheduleRecurrence{Kind: wire.RecurDaily, Time: "08:00"}, Enabled: true, NextRunAtMs: 5,
 	})
+	// The room's prompt packs the saver may use are captured: not another
+	// member's personal pack, not a skill pack.
+	olgas, amysSkills := f.component("olga", contentpkg.KindPrompt), f.component("amy", contentpkg.KindSkill)
+	for _, id := range []string{starterPack, olgas, amysSkills} {
+		f.roomUse("src", id, "")
+	}
 	req := map[string]any{
 		"visibility": "tenant", "includeMembers": true, "includeSchedules": true,
-		"starterPrompts":  []string{"What broke overnight?"},
 		"suggestedAgents": []map[string]any{{"ownerId": "bob", "provider": "codex"}},
 	}
 	// A plain member may not capture the room.
@@ -273,8 +285,9 @@ func TestTemplateFromRoom(t *testing.T) {
 	b := tpl.Body
 	sort.Strings(b.DefaultMembers)
 	if tpl.Name != "Source" || tpl.CreatedBy != "amy" || b.RoomDescription != "the source" || strings.Join(b.Channels, ",") != "triage" ||
-		strings.Join(b.DefaultMembers, ",") != "bob,olga" || len(b.StarterPrompts) != 1 || len(b.SuggestedAgents) != 1 ||
-		len(b.Schedules) != 1 || b.Schedules[0].Channel != "triage" || b.Schedules[0].Text != "triage now" {
+		strings.Join(b.DefaultMembers, ",") != "bob,olga" || len(b.SuggestedAgents) != 1 ||
+		len(b.Schedules) != 1 || b.Schedules[0].Channel != "triage" || b.Schedules[0].Text != "triage now" ||
+		len(b.PromptPacks) != 1 || b.PromptPacks[0].ComponentID != starterPack {
 		t.Fatalf("captured = %+v", tpl)
 	}
 	if code, _ := f.call(http.MethodPost, "/v1/room-templates/from-room/src/extra", "amy", req); code != http.StatusNotFound {
@@ -282,5 +295,108 @@ func TestTemplateFromRoom(t *testing.T) {
 	}
 	if code, _ := f.call(http.MethodPost, "/v1/room-templates/tpl_x/explode", "amy", nil); code != http.StatusNotFound {
 		t.Fatalf("unknown action = %d", code)
+	}
+}
+
+// starterPack is the built-in starters prompt pack, in every member's reach.
+const starterPack = contentbuiltin.IDPrefix + "starters"
+
+// component creates owner's personal content component of kind (version
+// 1.0.0) and returns its id.
+func (f *tplFixture) component(owner, kind string) string {
+	f.t.Helper()
+	f.seq++
+	id := fmt.Sprintf("cc_%s_%d", owner, f.seq)
+	c := store.ContentComponent{ID: id, Kind: kind, Name: id, TenantID: tenant.Default, Owner: owner,
+		Scope: store.ContentScopePersonal, Status: store.ContentStatusActive, LatestVersion: "1.0.0", CreatedAtMs: 1, UpdatedAtMs: 1}
+	v := store.ContentComponentVersion{ComponentID: id, Version: "1.0.0", ManifestJSON: json.RawMessage(`{}`),
+		BundleBlobKey: "sha256/" + strings.Repeat("a", 64), SHA256: strings.Repeat("a", 64), CreatedBy: owner, CreatedAtMs: 1}
+	if err := f.svc.Content.CreateContentComponent(context.Background(), c, v); err != nil {
+		f.t.Fatal(err)
+	}
+	return id
+}
+
+// roomUse turns a component on in a room, as the gateway's content-use
+// route does.
+func (f *tplFixture) roomUse(roomID, id, version string) {
+	f.t.Helper()
+	c, err := f.svc.Content.GetContentComponent(context.Background(), id)
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	if err := f.svc.Content.PutContentUse(context.Background(), store.ContentUse{TenantID: tenant.Default, ScopeKind: store.ContentUseRoom,
+		ScopeID: roomID, ComponentID: id, Kind: c.Kind, PinnedVersion: version, CreatedBy: "olga", CreatedAtMs: 1}); err != nil {
+		f.t.Fatal(err)
+	}
+}
+
+// roomPacks lists the components (with their pins) a room uses.
+func (f *tplFixture) roomPacks(roomID string) []string {
+	f.t.Helper()
+	uses, err := f.svc.Content.ListContentUses(context.Background(), store.ContentUseRoom, roomID)
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	var out []string
+	for _, u := range uses {
+		out = append(out, u.ComponentID+"@"+u.PinnedVersion)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// A template's starters are its prompt packs': a room made from it gets
+// them as room content uses (by the creator), a pack the creator may not
+// use is reported and left out, and a template names only prompt packs
+// its author may use.
+func TestTemplatePromptPacksBecomeRoomUses(t *testing.T) {
+	f := newTplFixture(t)
+	alices := f.component("alice", contentpkg.KindPrompt)
+	tpl := f.createTemplate("alice", map[string]any{"name": "Packs", "visibility": "tenant", "body": map[string]any{
+		"promptPacks": []map[string]any{{"componentId": starterPack}, {"componentId": alices, "version": "1.0.0"}},
+	}})
+	code, out := f.call(http.MethodPost, "/v1/room-templates/"+tpl.TemplateID+"/instantiate", "alice", map[string]any{"roomId": "packs-a"})
+	if code != http.StatusOK {
+		t.Fatalf("instantiate = %d %s", code, out)
+	}
+	var res wire.RoomTemplateInstance
+	_ = json.Unmarshal(out, &res)
+	if len(res.PromptPacks) != 2 || len(res.FailedPromptPacks) != 0 {
+		t.Fatalf("alice's instance = %+v", res)
+	}
+	if got := strings.Join(f.roomPacks("packs-a"), ","); got != alices+"@1.0.0,"+starterPack+"@" {
+		t.Fatalf("room uses = %s", got)
+	}
+	// Bob may not use alice's personal pack: the room gets the rest.
+	code, out = f.call(http.MethodPost, "/v1/room-templates/"+tpl.TemplateID+"/instantiate", "bob", map[string]any{"roomId": "packs-b"})
+	if code != http.StatusOK {
+		t.Fatalf("bob instantiate = %d %s", code, out)
+	}
+	res = wire.RoomTemplateInstance{}
+	_ = json.Unmarshal(out, &res)
+	if strings.Join(res.PromptPacks, ",") != starterPack || strings.Join(res.FailedPromptPacks, ",") != alices {
+		t.Fatalf("bob's instance = %+v", res)
+	}
+	if got := strings.Join(f.roomPacks("packs-b"), ","); got != starterPack+"@" {
+		t.Fatalf("bob's room uses = %s", got)
+	}
+	// Only prompt packs the author may use, at a version that exists.
+	skills, bobs := f.component("alice", contentpkg.KindSkill), f.component("bob", contentpkg.KindPrompt)
+	for _, p := range []map[string]any{{"componentId": skills}, {"componentId": bobs}, {"componentId": "cc_missing"}, {"componentId": alices, "version": "9.9.9"}} {
+		body := map[string]any{"name": "Bad", "body": map[string]any{"promptPacks": []map[string]any{p}}}
+		if code, out := f.call(http.MethodPost, "/v1/room-templates", "alice", body); code != http.StatusBadRequest {
+			t.Errorf("pack %v = %d %s, want 400", p, code, out)
+		}
+	}
+	if code, out := f.call(http.MethodPatch, "/v1/room-templates/"+tpl.TemplateID, "alice", map[string]any{"body": map[string]any{
+		"promptPacks": []map[string]any{{"componentId": bobs}}}}); code != http.StatusBadRequest {
+		t.Fatalf("patch to bob's pack = %d %s, want 400", code, out)
+	}
+	// Without a content store a template cannot name packs.
+	f.svc.Content = nil
+	if code, out := f.call(http.MethodPost, "/v1/room-templates", "alice", map[string]any{"name": "No store", "body": map[string]any{
+		"promptPacks": []map[string]any{{"componentId": starterPack}}}}); code != http.StatusServiceUnavailable {
+		t.Fatalf("no content store = %d %s, want 503", code, out)
 	}
 }

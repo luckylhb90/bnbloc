@@ -127,14 +127,24 @@ type TemplateSchedule struct {
 	Timezone   string             `json:"timezone"`
 }
 
-// RoomTemplateBody is what a template sets up in a new room.
+// TemplateContentUse is a content component a template turns on in every
+// room made from it: a room content use, pinned to Version or following the
+// latest when empty.
+type TemplateContentUse struct {
+	ComponentID string `json:"componentId"`
+	Version     string `json:"version,omitempty"`
+}
+
+// RoomTemplateBody is what a template sets up in a new room. A template's
+// starters are its prompt packs' (PromptPacks become the new room's prompt
+// pack uses); it has no starter list of its own.
 type RoomTemplateBody struct {
-	RoomDescription string             `json:"roomDescription,omitempty"`
-	Channels        []string           `json:"channels"`
-	StarterPrompts  []string           `json:"starterPrompts"`
-	SuggestedAgents []TemplateAgent    `json:"suggestedAgents"`
-	DefaultMembers  []string           `json:"defaultMembers"`
-	Schedules       []TemplateSchedule `json:"schedules"`
+	RoomDescription string               `json:"roomDescription,omitempty"`
+	Channels        []string             `json:"channels"`
+	PromptPacks     []TemplateContentUse `json:"promptPacks"`
+	SuggestedAgents []TemplateAgent      `json:"suggestedAgents"`
+	DefaultMembers  []string             `json:"defaultMembers"`
+	Schedules       []TemplateSchedule   `json:"schedules"`
 }
 
 // RoomTemplate is one template in the tenant's template library.
@@ -152,16 +162,19 @@ type RoomTemplate struct {
 }
 
 // RoomTemplateInstance is the instantiate response: the new room and what
-// the template set up in it. SuggestedAgents and StarterPrompts are returned
-// for the UI's follow-up offers; no grant is created for any agent.
+// the template set up in it. SuggestedAgents are returned for the UI's
+// follow-up offers; no grant is created for any agent. PromptPacks are the
+// component ids turned on in the room; FailedPromptPacks the template's
+// packs the creator may not use, left out.
 type RoomTemplateInstance struct {
-	RoomID          string          `json:"roomId"`
-	Name            string          `json:"name"`
-	TemplateID      string          `json:"templateId"`
-	Channels        []string        `json:"channels"`
-	AddedMembers    []string        `json:"addedMembers"`
-	FailedMembers   []string        `json:"failedMembers,omitempty"`
-	Schedules       []string        `json:"schedules"`
-	StarterPrompts  []string        `json:"starterPrompts"`
-	SuggestedAgents []TemplateAgent `json:"suggestedAgents"`
+	RoomID            string          `json:"roomId"`
+	Name              string          `json:"name"`
+	TemplateID        string          `json:"templateId"`
+	Channels          []string        `json:"channels"`
+	AddedMembers      []string        `json:"addedMembers"`
+	FailedMembers     []string        `json:"failedMembers,omitempty"`
+	Schedules         []string        `json:"schedules"`
+	PromptPacks       []string        `json:"promptPacks"`
+	FailedPromptPacks []string        `json:"failedPromptPacks,omitempty"`
+	SuggestedAgents   []TemplateAgent `json:"suggestedAgents"`
 }

@@ -98,8 +98,8 @@ func normalizeTemplateBody(b wire.RoomTemplateBody) wire.RoomTemplateBody {
 	if b.Channels == nil {
 		b.Channels = []string{}
 	}
-	if b.StarterPrompts == nil {
-		b.StarterPrompts = []string{}
+	if b.PromptPacks == nil {
+		b.PromptPacks = []wire.TemplateContentUse{}
 	}
 	if b.SuggestedAgents == nil {
 		b.SuggestedAgents = []wire.TemplateAgent{}

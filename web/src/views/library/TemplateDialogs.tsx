@@ -13,9 +13,12 @@ import {
   templateSummary,
   type RoomTemplate,
   type RoomTemplateBody,
+  type TemplateContentUse,
   type TemplateSchedule,
   type TemplateVisibility,
 } from "@/lib/roomTemplates";
+import { contentLabel, type ContentComponent } from "@/lib/contentComponents";
+import { contentApi } from "@/lib/contentComponentsApi";
 import { roomTemplatesApi } from "@/lib/roomTemplatesApi";
 import { describeRecurrence, recipientLabel } from "@/lib/schedules";
 import { Button } from "@/ui/Button";
@@ -36,8 +39,10 @@ const selectClass =
   "h-10 w-full rounded-[var(--radius)] border border-[var(--color-border)] bg-[var(--color-surface-2)] px-3 text-sm text-[var(--color-fg)] focus:outline-none focus:border-[var(--color-accent)]";
 
 // TemplateEditorDialog creates a template (template = "new") or edits the
-// author's own template. Lists are edited one entry per line; schedules come
-// only from "Save as template" and can be removed here, not authored.
+// author's own template. Lists are edited one entry per line; prompt packs
+// (the new room's starters come from them) are picked from the member's
+// Library; schedules come only from "Save as template" and can be removed
+// here, not authored.
 export function TemplateEditorDialog({
   template,
   onClose,
@@ -55,7 +60,8 @@ export function TemplateEditorDialog({
   const [visibility, setVisibility] = useState<TemplateVisibility>("private");
   const [roomDescription, setRoomDescription] = useState("");
   const [channels, setChannels] = useState("");
-  const [prompts, setPrompts] = useState("");
+  const [packs, setPacks] = useState<TemplateContentUse[]>([]);
+  const [library, setLibrary] = useState<ContentComponent[] | null>(null);
   const [members, setMembers] = useState("");
   const [agents, setAgents] = useState("");
   const [schedules, setSchedules] = useState<TemplateSchedule[]>([]);
@@ -70,13 +76,34 @@ export function TemplateEditorDialog({
     setVisibility(editing?.visibility ?? "private");
     setRoomDescription(b.roomDescription ?? "");
     setChannels(b.channels.join("\n"));
-    // Starter prompts may span lines; they are separated by a blank line.
-    setPrompts(b.starterPrompts.join("\n\n"));
+    setPacks(b.promptPacks);
     setMembers(b.defaultMembers.join("\n"));
     setAgents(b.suggestedAgents.map(agentHandle).join("\n"));
     setSchedules(b.schedules);
     setErr("");
   }, [open, editing]);
+
+  useEffect(() => {
+    if (!open) return;
+    let live = true;
+    setLibrary(null);
+    contentApi
+      .list("prompt")
+      .then((r) => live && setLibrary(r.components ?? []))
+      .catch(() => live && setLibrary([]));
+    return () => {
+      live = false;
+    };
+  }, [open]);
+
+  // The packs offered: the member's Library, then any the template names
+  // that the Library no longer lists (shown by id, so they can be removed).
+  const packOptions = [
+    ...(library ?? []).map((c) => ({ id: c.id, label: contentLabel(c) })),
+    ...packs.filter((p) => library && !library.some((c) => c.id === p.componentId)).map((p) => ({ id: p.componentId, label: p.componentId })),
+  ];
+  const togglePack = (id: string, on: boolean) =>
+    setPacks((list) => (on ? [...list, { componentId: id }] : list.filter((p) => p.componentId !== id)));
 
   const submit = async () => {
     if (busy) return;
@@ -92,10 +119,7 @@ export function TemplateEditorDialog({
     const body: RoomTemplateBody = {
       roomDescription: roomDescription.trim(),
       channels: parseLines(channels),
-      starterPrompts: prompts
-        .split(/\n\s*\n/)
-        .map((p) => p.trim())
-        .filter(Boolean),
+      promptPacks: packs,
       suggestedAgents: parsedAgents.agents,
       defaultMembers: parseLines(members),
       schedules,
@@ -156,9 +180,30 @@ export function TemplateEditorDialog({
             <Textarea rows={4} value={members} onChange={(e) => setMembers(e.target.value)} />
           </Field>
         </div>
-        <Field label="Starter prompts" hint="Separate prompts with a blank line">
-          <Textarea rows={5} value={prompts} onChange={(e) => setPrompts(e.target.value)} />
-        </Field>
+        <div className="flex flex-col gap-1">
+          <span className="text-xs font-medium uppercase tracking-wide text-[var(--color-fg-muted)]">
+            Prompt packs · turned on in new rooms, their starter prompts included
+          </span>
+          {library === null ? (
+            <p className="text-sm text-[var(--color-fg-subtle)]">Loading prompt packs…</p>
+          ) : packOptions.length === 0 ? (
+            <p className="text-sm text-[var(--color-fg-subtle)]">No prompt packs in your Library.</p>
+          ) : (
+            <div className="flex max-h-48 flex-col overflow-y-auto">
+              {packOptions.map((o) => (
+                <label key={o.id} className="flex items-start gap-2 rounded-[var(--radius)] px-2 py-1.5 text-sm hover:bg-[var(--color-surface-2)]">
+                  <input
+                    type="checkbox"
+                    className="mt-1"
+                    checked={packs.some((p) => p.componentId === o.id)}
+                    onChange={(e) => togglePack(o.id, e.target.checked)}
+                  />
+                  <span className="min-w-0 truncate">{o.label}</span>
+                </label>
+              ))}
+            </div>
+          )}
+        </div>
         <Field label="Suggested agents" hint="owner/provider (or core/owner/provider), one per line — offered after creation, never authorized">
           <Textarea rows={3} value={agents} onChange={(e) => setAgents(e.target.value)} placeholder="jack/codex" className="font-mono text-xs" />
         </Field>
@@ -281,7 +326,7 @@ export function InstantiateTemplateDialog({
       open={open}
       onClose={onClose}
       title="New room from template"
-      description="You own the new room. Channels, members and paused schedules are set up from the template."
+      description="You own the new room. Channels, prompt packs, members and paused schedules are set up from the template."
       footer={
         <>
           <Button variant="ghost" onClick={onClose}>

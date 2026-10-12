@@ -20,7 +20,7 @@ func TestContractRoomTemplateStore(t *testing.T) {
 			TemplateID: uniq("tpl-p-"), Name: "Standup", Visibility: wire.TemplatePrivate, CreatedBy: "maya",
 			Body: wire.RoomTemplateBody{
 				Channels:        []string{"design"},
-				StarterPrompts:  []string{"what changed?"},
+				PromptPacks:     []wire.TemplateContentUse{{ComponentID: "cc_builtin_starters", Version: "1.0.0"}},
 				SuggestedAgents: []wire.TemplateAgent{{OwnerID: "jack", Provider: "codex"}},
 				Schedules: []wire.TemplateSchedule{{Text: "daily", Recipient: wire.ScheduleRecipient{Kind: wire.ScheduleRecipientRoom},
 					Recurrence: wire.ScheduleRecurrence{Kind: wire.RecurDaily, Time: "09:00"}, Timezone: "UTC"}},
@@ -41,10 +41,11 @@ func TestContractRoomTemplateStore(t *testing.T) {
 			t.Fatalf("re-create from another tenant = %v, want ErrTemplateExists", err)
 		}
 		got, err := s.GetTemplate(ctx, priv.TemplateID, "maya")
-		if err != nil || got.Body.Channels[0] != "design" || got.Body.Schedules[0].Recurrence.Time != "09:00" || got.Body.DefaultMembers == nil || got.Name != "Standup" {
+		if err != nil || got.Body.Channels[0] != "design" || got.Body.Schedules[0].Recurrence.Time != "09:00" || got.Body.DefaultMembers == nil || got.Name != "Standup" ||
+			len(got.Body.PromptPacks) != 1 || got.Body.PromptPacks[0].Version != "1.0.0" {
 			t.Fatalf("round trip = %+v, %v", got, err)
 		}
-		if got, _ := s.GetTemplate(ctx, shared.TemplateID, "maya"); got.Body.Channels == nil || got.Body.SuggestedAgents == nil {
+		if got, _ := s.GetTemplate(ctx, shared.TemplateID, "maya"); got.Body.Channels == nil || got.Body.SuggestedAgents == nil || got.Body.PromptPacks == nil {
 			t.Fatalf("empty body lists = %+v, want []", got.Body)
 		}
 		// Visibility and tenant scope.

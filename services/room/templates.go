@@ -19,10 +19,11 @@ import (
 )
 
 // Room templates (N3). A template is a reusable room setup: description,
-// channels, starter prompts, suggested agents, default members, and
+// channels, prompt packs, suggested agents, default members, and
 // schedules. Instantiating one creates the room through the same createRoom
 // path as POST /v1/rooms, adds channels and members through the same helpers
-// as their routes, and creates the schedules DISABLED and owned by the
+// as their routes, turns the prompt packs on as room content uses
+// (template_packs.go), and creates the schedules DISABLED and owned by the
 // member who instantiated (nothing posts until they enable it).
 //
 // Suggested agents are hints only. bnbloc's borrow model is per-room,
@@ -97,6 +98,25 @@ func writeTemplateErr(w http.ResponseWriter, err error) {
 	}
 }
 
+// templatePacksOK answers a template whose prompt packs the author may not
+// use with 400 (503 without a content store) and reports whether to go on.
+func (s *Service) templatePacksOK(w http.ResponseWriter, r *http.Request, user string, packs []wire.TemplateContentUse) bool {
+	badRequest, err := s.checkTemplatePacks(r.Context(), user, packs)
+	switch {
+	case err == nil:
+		return true
+	case badRequest:
+		httpx.Error(w, err.Error(), http.StatusBadRequest)
+	case errors.Is(err, errTemplateContentUnavailable):
+		obs.ServerError(w, "room template prompt packs unavailable", err)
+		httpx.Error(w, err.Error(), http.StatusServiceUnavailable)
+	default:
+		obs.ServerError(w, "check template prompt packs failed", err)
+		httpx.Error(w, "check template prompt packs failed", http.StatusInternalServerError)
+	}
+	return false
+}
+
 func runesIn(s string, max int) bool { return utf8.RuneCountInString(s) <= max }
 
 func validTemplateName(name string) error {
@@ -126,7 +146,7 @@ func normalizeTemplateBody(b wire.RoomTemplateBody) (wire.RoomTemplateBody, erro
 	out := wire.RoomTemplateBody{
 		RoomDescription: strings.TrimSpace(b.RoomDescription),
 		Channels:        []string{},
-		StarterPrompts:  []string{},
+		PromptPacks:     []wire.TemplateContentUse{},
 		SuggestedAgents: []wire.TemplateAgent{},
 		DefaultMembers:  []string{},
 		Schedules:       []wire.TemplateSchedule{},
@@ -150,18 +170,11 @@ func normalizeTemplateBody(b wire.RoomTemplateBody) (wire.RoomTemplateBody, erro
 	if len(out.Channels) > maxTemplateChannels {
 		return out, fmt.Errorf("at most %d channels", maxTemplateChannels)
 	}
-	for _, p := range b.StarterPrompts {
-		if p = strings.TrimSpace(p); p == "" {
-			continue
-		}
-		if len(p) > wire.MaxStarterPromptBytes {
-			return out, errors.New("starter prompt too long")
-		}
-		out.StarterPrompts = append(out.StarterPrompts, p)
+	packs, err := normalizeTemplatePacks(b.PromptPacks)
+	if err != nil {
+		return out, err
 	}
-	if len(out.StarterPrompts) > wire.MaxStarterPrompts {
-		return out, fmt.Errorf("at most %d starter prompts", wire.MaxStarterPrompts)
-	}
+	out.PromptPacks = packs
 	agentSeen := map[string]bool{}
 	for _, a := range b.SuggestedAgents {
 		a = wire.TemplateAgent{OwnerID: strings.TrimSpace(a.OwnerID), Provider: strings.TrimSpace(a.Provider), Core: strings.TrimSpace(a.Core)}
@@ -306,6 +319,9 @@ func (s *Service) saveNewTemplate(w http.ResponseWriter, r *http.Request, user s
 		httpx.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+	if !s.templatePacksOK(w, r, user, t.Body.PromptPacks) {
+		return
+	}
 	created, err := s.Templates.CreateTemplate(r.Context(), t)
 	if err != nil {
 		writeTemplateErr(w, err)
@@ -354,6 +370,9 @@ func (s *Service) handlePatchTemplate(w http.ResponseWriter, r *http.Request) {
 			httpx.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
+		if !s.templatePacksOK(w, r, user, b.PromptPacks) {
+			return
+		}
 		patch.Body = &b
 	}
 	t, err := s.Templates.UpdateTemplate(r.Context(), r.PathValue("templateId"), user, patch, s.Now())
@@ -386,9 +405,9 @@ func (s *Service) deleteTemplate(w http.ResponseWriter, r *http.Request, moderat
 
 // handleTemplateFromRoom saves a room as a template (room owner or admin).
 // The server captures what it owns — the room description, its channels,
-// its members (includeMembers), and its schedules (includeSchedules); the
-// client supplies what the member picks: starter prompts (recent messages
-// they chose) and suggested agents (from the room's agent roster).
+// its prompt packs (those the saver may use), its members (includeMembers),
+// and its schedules (includeSchedules); the client supplies what the member
+// picks: suggested agents (from the room's agent roster).
 func (s *Service) handleTemplateFromRoom(w http.ResponseWriter, r *http.Request, rawRoomID string) {
 	user, ok := s.templatesReady(w, r)
 	if !ok {
@@ -411,7 +430,6 @@ func (s *Service) handleTemplateFromRoom(w http.ResponseWriter, r *http.Request,
 	}
 	var in struct {
 		templateInput
-		StarterPrompts   []string             `json:"starterPrompts"`
 		SuggestedAgents  []wire.TemplateAgent `json:"suggestedAgents"`
 		IncludeMembers   bool                 `json:"includeMembers"`
 		IncludeSchedules bool                 `json:"includeSchedules"`
@@ -424,9 +442,15 @@ func (s *Service) handleTemplateFromRoom(w http.ResponseWriter, r *http.Request,
 		httpx.Error(w, "room not found", http.StatusNotFound)
 		return
 	}
+	packs, err := s.roomPromptPacks(r.Context(), roomID, user)
+	if err != nil {
+		obs.ServerError(w, "could not read the room's prompt packs", err)
+		httpx.Error(w, "could not read the room's prompt packs", http.StatusInternalServerError)
+		return
+	}
 	body := wire.RoomTemplateBody{
 		RoomDescription: rm.Description,
-		StarterPrompts:  in.StarterPrompts,
+		PromptPacks:     packs,
 		SuggestedAgents: in.SuggestedAgents,
 	}
 	channels, err := s.Channels.ListChannels(r.Context(), roomID)
@@ -557,8 +581,8 @@ func (s *Service) instantiate(ctx context.Context, user string, t wire.RoomTempl
 	}()
 	res = wire.RoomTemplateInstance{
 		RoomID: room.RoomID, Name: room.Name, TemplateID: t.TemplateID,
-		Channels: []string{}, AddedMembers: []string{}, Schedules: []string{},
-		StarterPrompts: body.StarterPrompts, SuggestedAgents: body.SuggestedAgents,
+		Channels: []string{}, AddedMembers: []string{}, Schedules: []string{}, PromptPacks: []string{},
+		SuggestedAgents: body.SuggestedAgents,
 	}
 	channelIDs := map[string]string{}
 	for _, name := range body.Channels {
@@ -598,6 +622,9 @@ func (s *Service) instantiate(ctx context.Context, user string, t wire.RoomTempl
 			return res, fmt.Errorf("create schedule: %w", serr)
 		}
 		res.Schedules = append(res.Schedules, sc.ScheduleID)
+	}
+	if err := s.applyTemplatePacks(ctx, user, room.RoomID, body.PromptPacks, &res); err != nil {
+		return res, err
 	}
 	return res, nil
 }

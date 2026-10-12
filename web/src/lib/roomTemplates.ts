@@ -1,8 +1,6 @@
 // Room templates (N3): wire shapes of the room service's /v1/room-templates
 // (internal/wire/schedules.go) and pure helpers for the template UI.
-import { MaxStarterPromptBytes, MaxStarterPrompts } from "./wire.gen.ts";
-
-export type { RoomTemplate, RoomTemplateBody, RoomTemplateInstance, TemplateAgent, TemplateSchedule } from "./wire.gen.ts";
+export type { RoomTemplate, RoomTemplateBody, RoomTemplateInstance, TemplateAgent, TemplateContentUse, TemplateSchedule } from "./wire.gen.ts";
 import type { RoomTemplateBody, RoomTemplateInstance, TemplateAgent } from "./wire.gen.ts";
 
 export type { TemplateVisibility } from "./wire.gen.ts";
@@ -18,13 +16,12 @@ export interface RoomTemplateInput {
 }
 
 // Save-a-room-as-template request: the server captures description,
-// channels, members (includeMembers) and schedules (includeSchedules); the
-// member picks starter prompts and suggested agents.
+// channels, the room's prompt packs, members (includeMembers) and schedules
+// (includeSchedules); the member picks suggested agents.
 export interface TemplateFromRoomInput {
   name?: string;
   description?: string;
   visibility: TemplateVisibility;
-  starterPrompts: string[];
   suggestedAgents: TemplateAgent[];
   includeMembers: boolean;
   includeSchedules: boolean;
@@ -37,7 +34,7 @@ export interface InstantiateInput {
 }
 
 export function emptyTemplateBody(): RoomTemplateBody {
-  return { roomDescription: "", channels: [], starterPrompts: [], suggestedAgents: [], defaultMembers: [], schedules: [] };
+  return { roomDescription: "", channels: [], promptPacks: [], suggestedAgents: [], defaultMembers: [], schedules: [] };
 }
 
 // templateSummary is a one-line description of what a template sets up.
@@ -45,7 +42,7 @@ export function templateSummary(b: RoomTemplateBody): string {
   const parts: string[] = [];
   const n = (count: number, one: string) => `${count} ${one}${count === 1 ? "" : "s"}`;
   if (b.channels.length) parts.push(n(b.channels.length, "channel"));
-  if (b.starterPrompts.length) parts.push(n(b.starterPrompts.length, "starter prompt"));
+  if (b.promptPacks.length) parts.push(n(b.promptPacks.length, "prompt pack"));
   if (b.suggestedAgents.length) parts.push(n(b.suggestedAgents.length, "suggested agent"));
   if (b.defaultMembers.length) parts.push(n(b.defaultMembers.length, "member"));
   if (b.schedules.length) parts.push(n(b.schedules.length, "schedule"));
@@ -73,13 +70,13 @@ export function agentFollowUps(
   return { invite, requestBorrow };
 }
 
-// Starter prompts of a freshly created room, kept for the room's first
-// visits (the instantiate response is the only place they are returned).
-const starterKey = (roomId: string) => keyFor(StorageKey.templateStart, roomId);
+// The instantiate reply of a freshly created room, kept for the follow-ups
+// of its first visits (the reply is the only place they are returned).
+const startKey = (roomId: string) => keyFor(StorageKey.templateStart, roomId);
 
 export function rememberTemplateStart(inst: RoomTemplateInstance, storage: Pick<Storage, "setItem"> = localStorage): void {
   try {
-    storage.setItem(starterKey(inst.roomId), JSON.stringify(inst));
+    storage.setItem(startKey(inst.roomId), JSON.stringify(inst));
   } catch {
     // Best-effort: storage full or unavailable just skips the follow-ups.
   }
@@ -87,7 +84,7 @@ export function rememberTemplateStart(inst: RoomTemplateInstance, storage: Pick<
 
 export function takeTemplateStart(roomId: string, storage: Pick<Storage, "getItem"> = localStorage): RoomTemplateInstance | undefined {
   try {
-    const raw = storage.getItem(starterKey(roomId));
+    const raw = storage.getItem(startKey(roomId));
     return raw ? (JSON.parse(raw) as RoomTemplateInstance) : undefined;
   } catch {
     return undefined;
@@ -96,7 +93,7 @@ export function takeTemplateStart(roomId: string, storage: Pick<Storage, "getIte
 
 export function clearTemplateStart(roomId: string, storage: Pick<Storage, "removeItem"> = localStorage): void {
   try {
-    storage.removeItem(starterKey(roomId));
+    storage.removeItem(startKey(roomId));
   } catch {
     // ignore
   }
@@ -127,23 +124,4 @@ export function parseAgentLines(text: string): { agents: TemplateAgent[]; invali
     agents.push(ref.core ? { core: ref.core, ownerId: ref.ownerId, provider: ref.provider } : { ownerId: ref.ownerId, provider: ref.provider });
   }
   return { agents, invalid };
-}
-
-// starterCandidates picks starter-prompt candidates from a room feed: the
-// newest human chat texts (no agent output, no imported history), unique,
-// non-empty, within the starter-prompt size cap.
-export function starterCandidates(
-  feed: readonly { text: string; agentLabel?: string; importedFrom?: string }[],
-  max = MaxStarterPrompts,
-): string[] {
-  const out: string[] = [];
-  const enc = new TextEncoder();
-  for (let i = feed.length - 1; i >= 0 && out.length < max; i--) {
-    const m = feed[i];
-    if (m.agentLabel || m.importedFrom) continue;
-    const text = m.text.trim();
-    if (!text || out.includes(text) || enc.encode(text).length > MaxStarterPromptBytes) continue;
-    out.push(text);
-  }
-  return out;
 }

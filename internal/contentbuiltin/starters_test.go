@@ -1,6 +1,9 @@
 package contentbuiltin
 
 import (
+	"os"
+	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -32,6 +35,43 @@ func TestStartersShipAsStarterPromptPack(t *testing.T) {
 			t.Errorf("starter %s asks for variables: a first message should need no form", pr.ID)
 		}
 	}
+}
+
+// Every starter prompt is a prompt pack's prompt flagged starter (the web's
+// starterChoices: the room's packs, then the built-in ones). A room
+// template names prompt packs; nothing else keeps a starter list: no Go
+// field or JSON tag of starter texts, no starter column, no starter list
+// in the web (docs/bugs/2026-10-13-starters-and-shared-use-counts.md).
+func TestOneStarterMechanism(t *testing.T) {
+	goList := regexp.MustCompile(`(?i)\w*starter\w*\s*(:=|=)?\s*\[\]string\b`)
+	goTag := regexp.MustCompile(`(?i)json:"(\w*starter\w*)`)
+	tsList := regexp.MustCompile(`(?i)\w*starter\w*\??\s*[:=]\s*(readonly\s+)?(\[|string\[\]|Array<string>)`)
+	archtest.Scan(t, archtest.Opts{Lang: archtest.Go}, func(path string, src []byte) {
+		for _, m := range goList.FindAll(src, -1) {
+			t.Errorf("%s: %q keeps a starter list: starters are prompt packs' (flag a pack's prompt starter)", path, m)
+		}
+		for _, m := range goTag.FindAllSubmatch(src, -1) {
+			if string(m[1]) != "starter" {
+				t.Errorf("%s: JSON field %q: the only starter field is a prompt's starter flag", path, m[1])
+			}
+		}
+	})
+	for _, schema := range []string{"internal/store/schema.sql", "deploy/schema.sql"} {
+		src, err := os.ReadFile(filepath.Join(archtest.Root(t), schema))
+		if err != nil {
+			t.Fatal(err)
+		}
+		for i, line := range strings.Split(string(src), "\n") {
+			if !strings.HasPrefix(strings.TrimSpace(line), "--") && strings.Contains(strings.ToLower(line), "starter") {
+				t.Errorf("%s:%d stores starters: %s", schema, i+1, strings.TrimSpace(line))
+			}
+		}
+	}
+	archtest.Scan(t, archtest.Opts{Lang: archtest.TS, Roots: []string{"web/src"}}, func(path string, src []byte) {
+		for _, m := range tsList.FindAll(src, -1) {
+			t.Errorf("%s: %q keeps a starter list: read starters through starterChoices", path, m)
+		}
+	})
 }
 
 // Built-in prompt texts live only in their packages: the web reads the

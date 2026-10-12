@@ -1,6 +1,6 @@
 // Pure helpers for the team features (message tasks, global search) plus the
 // cross-view hand-offs they need: a composer draft queued for a room (a
-// template's starter prompt) and a message jump queued for a room (search /
+// borrow request to an agent's owner) and a message jump queued for a room (search /
 // task "jump to message"). Both hand-offs are in-memory: the target room view
 // consumes them on mount, or immediately when it is already open.
 import type { MessageTask, SearchResult, TaskUpdate } from "./teamModels.ts";

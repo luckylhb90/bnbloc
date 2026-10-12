@@ -1778,10 +1778,6 @@ export const MaxBlobBytes = 268435456;
 // state is transient but fans out to every room subscriber on each
 // change, so it stays gesture-sized.
 export const MaxArtifactStateBytes = 16384;
-// MaxStarterPrompts and MaxStarterPromptBytes bound a room template's
-// starter prompts (count, and bytes of one prompt).
-export const MaxStarterPrompts = 20;
-export const MaxStarterPromptBytes = 4096;
 // MaxDisplayNameRunes is the longest display name accepted, in
 // characters after trimming (Unicode code points, which is also how
 // MySQL sizes the VARCHAR(40) column).
@@ -2726,11 +2722,21 @@ export interface TemplateSchedule {
   timezone: string;
 }
 
-// RoomTemplateBody is what a template sets up in a new room.
+// TemplateContentUse is a content component a template turns on in every
+// room made from it: a room content use, pinned to Version or following the
+// latest when empty.
+export interface TemplateContentUse {
+  componentId: string;
+  version?: string;
+}
+
+// RoomTemplateBody is what a template sets up in a new room. A template's
+// starters are its prompt packs' (PromptPacks become the new room's prompt
+// pack uses); it has no starter list of its own.
 export interface RoomTemplateBody {
   roomDescription?: string;
   channels: string[];
-  starterPrompts: string[];
+  promptPacks: TemplateContentUse[];
   suggestedAgents: TemplateAgent[];
   defaultMembers: string[];
   schedules: TemplateSchedule[];
@@ -2751,8 +2757,10 @@ export interface RoomTemplate {
 }
 
 // RoomTemplateInstance is the instantiate response: the new room and what
-// the template set up in it. SuggestedAgents and StarterPrompts are returned
-// for the UI's follow-up offers; no grant is created for any agent.
+// the template set up in it. SuggestedAgents are returned for the UI's
+// follow-up offers; no grant is created for any agent. PromptPacks are the
+// component ids turned on in the room; FailedPromptPacks the template's
+// packs the creator may not use, left out.
 export interface RoomTemplateInstance {
   roomId: string;
   name: string;
@@ -2761,7 +2769,8 @@ export interface RoomTemplateInstance {
   addedMembers: string[];
   failedMembers?: string[];
   schedules: string[];
-  starterPrompts: string[];
+  promptPacks: string[];
+  failedPromptPacks?: string[];
   suggestedAgents: TemplateAgent[];
 }
 

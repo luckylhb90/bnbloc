@@ -5,7 +5,6 @@ import {
   parseAgentLines,
   parseLines,
   rememberTemplateStart,
-  starterCandidates,
   takeTemplateStart,
   templateSummary,
   type RoomTemplateInstance,
@@ -22,8 +21,8 @@ function eq(a: unknown, b: unknown, message: string): void {
 
 eq(templateSummary(emptyTemplateBody()), "Empty room", "empty summary");
 eq(
-  templateSummary({ ...emptyTemplateBody(), channels: ["a", "b"], starterPrompts: ["x"], schedules: [] }),
-  "2 channels · 1 starter prompt",
+  templateSummary({ ...emptyTemplateBody(), channels: ["a", "b"], promptPacks: [{ componentId: "cc_1" }], schedules: [] }),
+  "2 channels · 1 prompt pack",
   "summary",
 );
 
@@ -54,11 +53,11 @@ const inst: RoomTemplateInstance = {
   channels: [],
   addedMembers: [],
   schedules: [],
-  starterPrompts: ["hello"],
+  promptPacks: ["cc_1"],
   suggestedAgents: [],
 };
 rememberTemplateStart(inst, storage);
-eq(takeTemplateStart("r1", storage)?.starterPrompts, ["hello"], "remembered");
+eq(takeTemplateStart("r1", storage)?.promptPacks, ["cc_1"], "remembered");
 clearTemplateStart("r1", storage);
 eq(takeTemplateStart("r1", storage), undefined, "cleared");
 
@@ -75,16 +74,3 @@ eq(
   },
   "agent lines",
 );
-eq(
-  starterCandidates([
-    { text: "first" },
-    { text: "agent reply", agentLabel: "bob/codex" },
-    { text: "old", importedFrom: "src" },
-    { text: "  second  " },
-    { text: "first" },
-    { text: "" },
-  ]),
-  ["first", "second"],
-  "starter candidates newest first, humans only",
-);
-eq(starterCandidates([{ text: "a" }, { text: "b" }, { text: "c" }], 2), ["c", "b"], "starter cap");

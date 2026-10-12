@@ -20,10 +20,6 @@ const (
 	// state is transient but fans out to every room subscriber on each
 	// change, so it stays gesture-sized.
 	MaxArtifactStateBytes = 16 << 10
-	// MaxStarterPrompts and MaxStarterPromptBytes bound a room template's
-	// starter prompts (count, and bytes of one prompt).
-	MaxStarterPrompts     = 20
-	MaxStarterPromptBytes = 4 << 10
 	// MaxDisplayNameRunes is the longest display name accepted, in
 	// characters after trimming (Unicode code points, which is also how
 	// MySQL sizes the VARCHAR(40) column).

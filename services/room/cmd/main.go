@@ -5,6 +5,7 @@ import (
 	"log"
 
 	"github.com/luckylhb90/bnbloc/internal/config"
+	"github.com/luckylhb90/bnbloc/internal/contentbuiltin"
 	"github.com/luckylhb90/bnbloc/internal/obs"
 	"github.com/luckylhb90/bnbloc/internal/realtime"
 	"github.com/luckylhb90/bnbloc/internal/store"
@@ -44,6 +45,9 @@ func main() {
 	svc.RoomImports = backends.RoomImports
 	svc.Templates = backends.Templates
 	svc.Schedules = backends.Schedules
+	// A template's prompt packs: the content store under the built-in
+	// overlay, as the gateway and realtime read it.
+	svc.Content = contentbuiltin.Overlay(backends.ContentComponents)
 	if err := obs.ServeWithHealth("bnbloc-room", cfg.ListenAddr, svcauth.Middleware(svcauth.KeyFromEnv(), svc.Handler()), backends.HealthCheck()); err != nil {
 		log.Fatalf("bnbloc-room: %v", err)
 	}

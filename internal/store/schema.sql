@@ -652,8 +652,8 @@ CREATE TABLE IF NOT EXISTS room_schedules (
   KEY idx_room_schedules_claim (claim_token)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
--- Room templates (N3): a reusable room setup (description, channels, starter
--- prompts, suggested agents, default members, disabled schedules). visibility
+-- Room templates (N3): a reusable room setup (description, channels, prompt
+-- packs, suggested agents, default members, disabled schedules). visibility
 -- is 'private' (author only) or 'tenant'. Suggested agents are hints only:
 -- instantiating never grants borrow authorization.
 CREATE TABLE IF NOT EXISTS room_templates (

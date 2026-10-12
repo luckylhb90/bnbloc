@@ -10,11 +10,12 @@ import { displayNameOf } from "@/lib/useDisplayName";
 import { UserName, UserNames } from "@/views/UserName";
 import { errorText } from "@/lib/errors";
 
-// TemplateStartCard follows up a room just created from a template: starter
-// prompts drop into the composer, suggested agents' owners can be invited
-// (owner/admin, the normal add-member path), and agents the member does not
-// own need their owner's authorization — the card only helps ask for it.
-// Nothing here grants or requests anything on its own.
+// TemplateStartCard follows up a room just created from a template:
+// suggested agents' owners can be invited (owner/admin, the normal
+// add-member path), and agents the member does not own need their owner's
+// authorization — the card only helps ask for it. Nothing here grants or
+// requests anything on its own. The template's starters are its prompt
+// packs', turned on in the room and shown by the composer like any room's.
 export function TemplateStartCard({
   roomId,
   subject,
@@ -32,10 +33,10 @@ export function TemplateStartCard({
   if (!inst || !subject) return null;
 
   const { invite, requestBorrow } = agentFollowUps(inst.suggestedAgents ?? [], subject, [...members, ...added]);
-  const prompts = inst.starterPrompts ?? [];
   const failed = (inst.failedMembers ?? []).filter((m) => !members.includes(m) && !added.includes(m));
+  const missingPacks = inst.failedPromptPacks?.length ?? 0;
   const pausedSchedules = inst.schedules?.length ?? 0;
-  if (!prompts.length && !invite.length && !requestBorrow.length && !failed.length && !pausedSchedules) return null;
+  if (!invite.length && !requestBorrow.length && !failed.length && !pausedSchedules && !missingPacks) return null;
 
   const dismiss = () => {
     clearTemplateStart(roomId);
@@ -72,22 +73,6 @@ export function TemplateStartCard({
           <XIcon size={14} />
         </button>
       </div>
-      {prompts.length > 0 && (
-        <div className="flex flex-wrap items-center gap-1.5">
-          <span className="text-xs text-[var(--color-fg-subtle)]">Starter prompts:</span>
-          {prompts.map((p, i) => (
-            <button
-              key={i}
-              type="button"
-              onClick={() => composerDrafts.queue(roomId, p)}
-              title={p}
-              className="tactile max-w-[18rem] truncate rounded-full border border-[var(--color-border)] px-2.5 py-0.5 text-xs text-[var(--color-fg-muted)] hover:text-[var(--color-fg)]"
-            >
-              {p}
-            </button>
-          ))}
-        </div>
-      )}
       {invite.length > 0 && (
         <div className="flex flex-wrap items-center gap-1.5">
           <span className="text-xs text-[var(--color-fg-subtle)]">Suggested agent owners not in the room:</span>
@@ -120,6 +105,12 @@ export function TemplateStartCard({
         <p className="text-xs text-[var(--color-fg-muted)]">
           {pausedSchedules} schedule{pausedSchedules === 1 ? " was" : "s were"} created paused — open Schedules to enable{" "}
           {pausedSchedules === 1 ? "it" : "them"}.
+        </p>
+      )}
+      {missingPacks > 0 && (
+        <p className="text-xs text-[var(--color-fg-muted)]">
+          {missingPacks} prompt pack{missingPacks === 1 ? " of the template is" : "s of the template are"} not available to you and{" "}
+          {missingPacks === 1 ? "was" : "were"} left out.
         </p>
       )}
       {failed.length > 0 && (

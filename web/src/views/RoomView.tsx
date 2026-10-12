@@ -613,7 +613,6 @@ export function RoomView({
         open={savingTemplate}
         roomId={roomId}
         roomName={room?.name || roomId}
-        feed={feed}
         roomAgents={roomAgents}
         onClose={() => setSavingTemplate(false)}
       />
