@@ -118,6 +118,22 @@ type Config struct {
 	MCPSettingsDir string
 }
 
+// LogValue keeps the config's credentials out of every log line: the gateway
+// and refresh tokens and the sync secret are reported only as present, the
+// sandbox through its own redacting LogValue.
+func (c Config) LogValue() slog.Value {
+	return slog.GroupValue(
+		slog.String("gateway", c.GatewayBaseURL),
+		slog.String("owner", c.OwnerSubject),
+		slog.String("tenant", c.Tenant),
+		slog.Bool("gatewayToken", c.GatewayToken != ""),
+		slog.Bool("refreshToken", c.RefreshToken != ""),
+		slog.Bool("syncSecret", c.SyncSecret != ""),
+		slog.Int("cores", len(c.Cores)),
+		slog.Any("sandbox", c.Sandbox),
+	)
+}
+
 // CoreConfig describes one configured local-agent core: its name, the provider
 // implementation that drives it, the endpoint of the member's local daemon
 // (zero until discovered), and whether that endpoint is an explicit,
@@ -2309,24 +2325,12 @@ func (b *Bridge) gatewayGET(ctx context.Context, path string) ([]byte, error) {
 // Content-Disposition headers), so the bridge can write it with a real
 // extension and name it in the prompt without a separate metadata call.
 func (b *Bridge) gatewayGETAttachment(ctx context.Context, path string) (data []byte, contentType, filename string, err error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, b.cfg.GatewayBaseURL+path, nil)
+	raw, header, err := b.send(ctx, b.http, http.MethodGet, b.cfg.GatewayBaseURL+path, b.gatewayAuth(ctx), "", nil)
 	if err != nil {
 		return nil, "", "", err
 	}
-	if tok := b.gatewayAuth(ctx); tok != "" {
-		req.Header.Set("Authorization", "Bearer "+tok)
-	}
-	resp, err := b.http.Do(req)
-	if err != nil {
-		return nil, "", "", err
-	}
-	defer resp.Body.Close()
-	raw, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, "", "", fmt.Errorf("GET %s: status %d", path, resp.StatusCode)
-	}
-	ct := strings.TrimSpace(resp.Header.Get("Content-Type"))
-	fn := filenameFromContentDisposition(resp.Header.Get("Content-Disposition"))
+	ct := strings.TrimSpace(header.Get("Content-Type"))
+	fn := filenameFromContentDisposition(header.Get("Content-Disposition"))
 	return raw, ct, fn, nil
 }
 
@@ -2383,26 +2387,15 @@ func (b *Bridge) gatewayAuth(ctx context.Context) string {
 		// stay signed out rather than replaying the stale handed-over token.
 		return b.ownerTok
 	}
-	body, _ := json.Marshal(payload)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, b.cfg.GatewayBaseURL+path, bytes.NewReader(body))
+	raw, err := b.do(ctx, http.MethodPost, b.cfg.GatewayBaseURL+path, "", payload)
 	if err != nil {
-		return b.ownerTok
-	}
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := b.http.Do(req)
-	if err != nil {
-		return b.ownerTok
-	}
-	defer resp.Body.Close()
-	raw, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return b.ownerTok
-	}
-	if resp.StatusCode != http.StatusOK {
-		slog.Warn("bnbloc bridge could not mint an owner session", "event", "bnbloc.bridge.session_failed", "path", path, "status", resp.StatusCode)
-		if path == "/v1/auth/refresh" && resp.StatusCode == http.StatusUnauthorized {
-			// Our family is revoked or expired; a retry can never succeed.
-			b.refreshTok = ""
+		var ge *gatewayError
+		if errors.As(err, &ge) {
+			slog.Warn("bnbloc bridge could not mint an owner session", "event", "bnbloc.bridge.session_failed", "path", path, "status", ge.Status)
+			if path == "/v1/auth/refresh" && ge.Status == http.StatusUnauthorized {
+				// Our family is revoked or expired; a retry can never succeed.
+				b.refreshTok = ""
+			}
 		}
 		return b.ownerTok
 	}
@@ -2444,15 +2437,7 @@ func (b *Bridge) releaseSession() {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	body, _ := json.Marshal(map[string]string{"refreshToken": tok})
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, b.cfg.GatewayBaseURL+"/v1/auth/logout", bytes.NewReader(body))
-	if err != nil {
-		return
-	}
-	req.Header.Set("Content-Type", "application/json")
-	if resp, err := b.http.Do(req); err == nil {
-		resp.Body.Close()
-	}
+	_, _ = b.do(ctx, http.MethodPost, b.cfg.GatewayBaseURL+"/v1/auth/logout", "", map[string]string{"refreshToken": tok})
 }
 
 // switchTenantToken re-scopes a freshly-minted owner token to the tenant the
@@ -2460,22 +2445,7 @@ func (b *Bridge) releaseSession() {
 // tenants would run the bridge in their primary tenant while the UI is looking
 // at another tenant's rooms, so agent chat is never consumed.
 func (b *Bridge) switchTenantToken(ctx context.Context, token, tenantID string) string {
-	body, _ := json.Marshal(map[string]string{"tenantId": tenantID})
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, b.cfg.GatewayBaseURL+"/v1/auth/switch-tenant", bytes.NewReader(body))
-	if err != nil {
-		return ""
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+token)
-	resp, err := b.http.Do(req)
-	if err != nil {
-		return ""
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return ""
-	}
-	raw, err := io.ReadAll(resp.Body)
+	raw, err := b.do(ctx, http.MethodPost, b.cfg.GatewayBaseURL+"/v1/auth/switch-tenant", token, map[string]string{"tenantId": tenantID})
 	if err != nil {
 		return ""
 	}
@@ -2510,9 +2480,18 @@ func (b *Bridge) do(ctx context.Context, method, url, token string, body any) ([
 // doRaw sends one request with a raw body (contentType empty = no body) and
 // returns the response body, or a *gatewayError for a non-2xx answer.
 func (b *Bridge) doRaw(ctx context.Context, client *http.Client, method, url, token, contentType string, body io.Reader) ([]byte, error) {
+	raw, _, err := b.send(ctx, client, method, url, token, contentType, body)
+	return raw, err
+}
+
+// send is every gateway request the bridge makes outside the room stream:
+// the bearer (token "" = none), the content type, a response body read up
+// to maxGatewayBody, and a *gatewayError for a non-2xx answer. It returns
+// the response headers too (an attachment's type and name).
+func (b *Bridge) send(ctx context.Context, client *http.Client, method, url, token, contentType string, body io.Reader) ([]byte, http.Header, error) {
 	req, err := http.NewRequestWithContext(ctx, method, url, body)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if contentType != "" {
 		req.Header.Set("Content-Type", contentType)
@@ -2522,21 +2501,28 @@ func (b *Bridge) doRaw(ctx context.Context, client *http.Client, method, url, to
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	defer resp.Body.Close()
-	raw, err := io.ReadAll(resp.Body)
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, maxGatewayBody+1))
 	if err != nil {
-		return nil, fmt.Errorf("%s %s: read response: %w", method, url, err)
+		return nil, nil, fmt.Errorf("%s %s: read response: %w", method, url, err)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		if len(raw) > maxGatewayErrorBody {
 			raw = raw[:maxGatewayErrorBody]
 		}
-		return nil, &gatewayError{Method: method, URL: url, Status: resp.StatusCode, Body: raw}
+		return nil, nil, &gatewayError{Method: method, URL: url, Status: resp.StatusCode, Body: raw}
 	}
-	return raw, nil
+	if len(raw) > maxGatewayBody {
+		return nil, nil, fmt.Errorf("%s %s: response over %d bytes", method, url, maxGatewayBody)
+	}
+	return raw, resp.Header, nil
 }
+
+// maxGatewayBody bounds a gateway response the bridge reads (the largest is
+// a content bundle or an artifact, well under it).
+const maxGatewayBody = 256 << 20
 
 // maxGatewayErrorBody bounds the response body a gatewayError keeps.
 const maxGatewayErrorBody = 4 << 10
