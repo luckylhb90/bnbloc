@@ -191,6 +191,8 @@ var routeWords = map[string]bool{
 	"desktop": true, "notifications": true, "post": true,
 	// agent dispatch (room tools): /v1 + /internal/v1 rooms/{id}/dispatch.
 	"dispatch": true,
+	// expert teams: which agent takes each role, and its estimate.
+	"team-plan": true,
 }
 
 // idCollections name segments whose NEXT segment is always an identifier, even

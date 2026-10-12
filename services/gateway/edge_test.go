@@ -45,6 +45,7 @@ func TestRouteUsesRoomSubresourceSegment(t *testing.T) {
 		"/v1/rooms/chat/agent-jobs":           "act",
 		"/v1/rooms/r/agent-activity/messages": "act",
 		"/v1/rooms/r/agent-catalogs":          "act",
+		"/v1/rooms/r/team-plan":               "act",
 		"/v1/rooms/r/shared-agents":           "share",
 		"/v1/rooms/r/shared-agents-usage":     "share",
 		"/v1/rooms-unread":                    "rt",

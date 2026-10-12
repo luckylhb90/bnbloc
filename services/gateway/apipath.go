@@ -168,9 +168,11 @@ func (s *Service) route(p apiPath) string {
 		return s.Backends.Realtime
 	case "rooms":
 		switch p.RoomSub {
-		case "agent-jobs", "agent-activity", "jobs", "agent-catalogs":
+		case "agent-jobs", "agent-activity", "jobs", "agent-catalogs", "team-plan":
 			// "jobs" are the room's agent run records (R10); "agent-catalogs"
-			// the model catalogs of the agents addressable in the room.
+			// the model catalogs of the agents addressable in the room;
+			// "team-plan" staffs an expert team from those agents and
+			// estimates it from their runs.
 			return s.Backends.Activity
 		case "shared-agents", "shared-agents-usage", "platform-agents":
 			// A room's platform agents are platform grants (shareagent).

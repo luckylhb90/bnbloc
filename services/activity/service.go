@@ -71,6 +71,9 @@ type Service struct {
 	// platform-agent policy); nil leaves hosts' agents out (fail closed).
 	Grants   store.GrantStore
 	Settings store.PlatformSettingsStore
+	// Leases admits a bridge's team plan for the job it runs
+	// (store.JobLeasedBy); nil refuses the ?job= form.
+	Leases store.AgentDispatchReader
 }
 
 // Handler builds the HTTP mux for the activity service.
@@ -84,6 +87,8 @@ func (s *Service) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/my/agents", s.handleMyAgents)
 	// The model catalogs of the agents a member may address in a room.
 	mux.HandleFunc("GET /v1/rooms/{roomId}/agent-catalogs", s.handleRoomAgentCatalogs)
+	// Which agent takes each role of an expert team, and its estimate.
+	mux.HandleFunc("POST /v1/rooms/{roomId}/team-plan", s.handleTeamPlan)
 	mux.HandleFunc("POST /v1/bridge/jobs/claim", s.handleBridgeJobClaim)
 	mux.HandleFunc("POST /v1/bridge/jobs/{jobId}/status", s.handleBridgeJobStatus)
 	mux.HandleFunc("POST /v1/bridge/jobs/{jobId}/lease", s.handleBridgeJobLease)

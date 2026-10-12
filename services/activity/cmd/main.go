@@ -39,6 +39,8 @@ func main() {
 		// room's platform agents (platform grants + policy, shared DB).
 		Grants:   backends.Grant,
 		Settings: backends.Settings,
+		// Team plans for a bridge's job are admitted by its lease.
+		Leases: dispatchReader(backends.BridgeJobs),
 		// Agent run records (R10) over the job queue; the feed resolves a
 		// run's reply to its room sequence.
 		Runs: backends.AgentRuns(),
@@ -64,6 +66,13 @@ func main() {
 	if err := obs.ServeWithHealth("bnbloc-activity", cfg.ListenAddr, svcauth.Middleware(svcauth.KeyFromEnv(), svc.Handler()), backends.HealthCheck(), obs.WithMetrics(metrics)); err != nil {
 		log.Fatalf("bnbloc-activity: %v", err)
 	}
+}
+
+// dispatchReader is the job store's lease read side (nil when the
+// configured store has none).
+func dispatchReader(jobs store.BridgeJobStore) store.AgentDispatchReader {
+	d, _ := jobs.(store.AgentDispatchReader)
+	return d
 }
 
 // allowServeAll reads the dev-only BNBLOC_ACTIVITY_ALLOW_SERVE_ALL gate. It is

@@ -53,8 +53,28 @@ func (s *Service) handleRoomAgentCatalogs(w http.ResponseWriter, r *http.Request
 		writeErr(w, http.StatusForbidden, "caller is not a member of room")
 		return
 	}
-	var hosted map[string]map[wire.PlatformAgentRef]bool // host -> added + published agents
 	agents := []wire.RoomAgentCatalog{}
+	for _, a := range s.roomAddressableAgents(r, roomID) {
+		agents = append(agents, a.RoomAgentCatalog)
+	}
+	writeJSON(w, http.StatusOK, wire.RoomAgentCatalogsReply{Agents: agents})
+}
+
+// addressableAgent is one agent a member may address in a room; Platform
+// marks a platform agent (an agent-host member's).
+type addressableAgent struct {
+	wire.RoomAgentCatalog
+	Platform bool
+}
+
+// roomAddressableAgents lists the agents a room's members may address: its
+// human members' live agents and the room's available platform agents
+// (never an agent-host member's other agents), sorted by owner, core and
+// provider. The room agent catalogs and the team plan both read it.
+func (s *Service) roomAddressableAgents(r *http.Request, roomID string) []addressableAgent {
+	ctx := r.Context()
+	var hosted map[string]map[wire.PlatformAgentRef]bool // host -> added + published agents
+	agents := []addressableAgent{}
 	for _, m := range s.Rooms.Members(ctx, roomID) {
 		var allowed map[wire.PlatformAgentRef]bool
 		if m.AgentHost {
@@ -65,7 +85,9 @@ func (s *Service) handleRoomAgentCatalogs(w http.ResponseWriter, r *http.Request
 				continue
 			}
 		}
-		agents = append(agents, ownerCatalogs(s.BridgeJobs.ListBridgeAgentsForOwner(ctx, m.UserID), allowed)...)
+		for _, c := range ownerCatalogs(s.BridgeJobs.ListBridgeAgentsForOwner(ctx, m.UserID), allowed) {
+			agents = append(agents, addressableAgent{RoomAgentCatalog: c, Platform: m.AgentHost})
+		}
 	}
 	sort.Slice(agents, func(i, k int) bool {
 		a, b := agents[i], agents[k]
@@ -77,7 +99,7 @@ func (s *Service) handleRoomAgentCatalogs(w http.ResponseWriter, r *http.Request
 		}
 		return a.Provider < b.Provider
 	})
-	writeJSON(w, http.StatusOK, wire.RoomAgentCatalogsReply{Agents: agents})
+	return agents
 }
 
 // roomPlatformAgents indexes the room's available platform agents by host.
