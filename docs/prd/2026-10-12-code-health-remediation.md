@@ -599,10 +599,13 @@ Status (2026-10-12): landed on the Batch 4 branch (not yet on `main`).
   (`blobKeySources`); budget cost at the column's precision; SSO issuers
   compared exactly. Tests: `TestStoreRulesSingleSource`,
   `TestTenantTablesFilterTenant` (with `// cross-tenant: <reason>`),
-  `TestBlobKeyColumnsReferenced`, the contract cases. Left: id columns other
-  than identities (job, bridge, core, provider ids, setting keys) keep the
-  case-insensitive collation on MySQL; every writer generates or validates
-  them lowercase, so no case variant can reach the store.
+  `TestBlobKeyColumnsReferenced`, the contract cases. Bridge, core,
+  provider and target keys are `utf8mb4_bin` (`2026_10_bridge_keys_bin`: a
+  bridge id embeds its owner's subject, so case-variant subjects shared one
+  heartbeat row). Left: job ids (lowercase hex from `ids.New`) and platform
+  setting keys (code constants) keep the default collation, since no case
+  variant can reach them; `shared_agent_grants` stays keyed by `grant_id`
+  alone (ids derive from the tenant).
 - **4.4 Status:** done. Migrations `2026_10_store_indexes`,
   `2026_10_tenant_issuer_unique` (issuer `utf8mb4_bin`, `''` to NULL,
   unique; `ErrSSOIssuerTaken`). `SweepAgentJobs` is two indexed reads,
