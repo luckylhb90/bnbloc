@@ -3,7 +3,7 @@
 // helpers of the composer (prompt choices, /slash matching, variable
 // filling, insertion) and the Library form (drafts <-> payload, variables
 // kept in step with the body, prompts drafted from messages). Unit-tested.
-import type { ContentComponent, ContentUse } from "./contentComponents.ts";
+import { isBuiltin, type ContentComponent, type ContentUse } from "./contentComponents.ts";
 
 export type { ContentPrompt } from "./wire.gen.ts";
 import type { ContentPrompt } from "./wire.gen.ts";
@@ -17,14 +17,15 @@ export const PERSONAL_PROMPT_PACK = "my-prompts";
 // ---------------------------------------------------------------- composer
 
 // A prompt the composer offers: the prompt and the pack it comes from (its
-// version in effect, and the room it is on in when it came from the room).
+// version in effect, and where the pack is on: the member's, the room's, or
+// a built-in pack's starter).
 export interface PromptChoice {
   readonly prompt: ContentPrompt;
   readonly componentId: string;
   readonly pack: string;
   readonly packLabel: string;
   readonly version: string;
-  readonly source: "mine" | "room";
+  readonly source: "mine" | "room" | "builtin";
 }
 
 function packLabel(c: Pick<ContentComponent, "displayName" | "name">): string {
@@ -51,27 +52,36 @@ export function promptChoices(member: readonly ContentUse[], room: readonly Cont
   return out;
 }
 
-// MAX_PACK_STARTERS bounds the pack prompts above an empty room's composer.
+// MAX_PACK_STARTERS bounds each part of an empty room's starters: the room
+// packs' and the built-in packs'.
 export const MAX_PACK_STARTERS = 6;
 
-// roomStarters are the starter prompts of the prompt packs turned on for
-// the room (prompts their author flagged starter), in the room's order,
-// at most MAX_PACK_STARTERS. Callers pass the room's uses only: a member's
-// own packs add no starters, the room's owner chose the room's packs.
-export function roomStarters(room: readonly ContentUse[], limit = MAX_PACK_STARTERS): PromptChoice[] {
+// packStarters are the prompts flagged starter of prompt packs, each pack
+// once, in order, at most limit.
+function packStarters(packs: readonly ContentComponent[], source: PromptChoice["source"], limit: number): PromptChoice[] {
   const out: PromptChoice[] = [];
   const seen = new Set<string>();
-  for (const u of room) {
-    const c = u.component;
-    if (u.kind !== "prompt" || !c || seen.has(u.componentId)) continue;
-    seen.add(u.componentId);
+  for (const c of packs) {
+    if (c.kind !== "prompt" || seen.has(c.id)) continue;
+    seen.add(c.id);
     for (const p of c.prompts ?? []) {
       if (!p.starter) continue;
-      out.push({ prompt: p, componentId: c.id, pack: c.name, packLabel: packLabel(c), version: c.version || c.latestVersion, source: "room" });
+      out.push({ prompt: p, componentId: c.id, pack: c.name, packLabel: packLabel(c), version: c.version || c.latestVersion, source });
       if (out.length >= limit) return out;
     }
   }
   return out;
+}
+
+// starterChoices are an empty room's starter prompts, every one a prompt
+// pack's prompt its author flagged starter: first the packs turned on for
+// the room (the room's uses, in its order), then the built-in packs of the
+// Library (in every member's reach, like all built-in content), each part
+// at most MAX_PACK_STARTERS. A member's own packs add no starters: the
+// room's owner chose the room's.
+export function starterChoices(room: readonly ContentUse[], library: readonly ContentComponent[], limit = MAX_PACK_STARTERS): PromptChoice[] {
+  const roomPacks = room.flatMap((u) => (u.kind === "prompt" && u.component ? [u.component] : []));
+  return [...packStarters(roomPacks, "room", limit), ...packStarters(library.filter(isBuiltin), "builtin", limit)];
 }
 
 // choiceFromRef turns an expert quick prompt's resolved reference into a

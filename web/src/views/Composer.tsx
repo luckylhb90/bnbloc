@@ -521,20 +521,10 @@ export function Composer({
         )}
         {showStarters && !people && (
           <StarterPrompts
-            packStarters={prompts.starters}
-            onPickPack={(c) => {
+            starters={prompts.starters}
+            onPick={(c) => {
               setPeopleOnly(false);
               prompts.pick(c);
-            }}
-            onPick={(prompt) => {
-              setText(prompt);
-              setPeopleOnly(false);
-              requestAnimationFrame(() => {
-                const el = taRef.current;
-                if (!el) return;
-                el.focus();
-                el.setSelectionRange(el.value.length, el.value.length);
-              });
             }}
           />
         )}

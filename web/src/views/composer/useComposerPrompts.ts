@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useState, type Dispatch, type KeyboardEvent, type RefObject, type SetStateAction } from "react";
+import { isBuiltin, type ContentComponent } from "@/lib/contentComponents";
 import { contentApi } from "@/lib/contentComponentsApi";
 import {
   choiceFromRef,
   fillPrompt,
   insertPrompt,
   promptChoices,
-  roomStarters,
+  starterChoices,
   slashMatches,
   slashQuery,
   type PromptChoice,
@@ -16,7 +17,8 @@ import { PROMPT_PACKS_CHANGED, promptPacksApi } from "@/lib/promptPacksApi";
 export interface ComposerPrompts {
   // The prompts of the member's packs and the room's.
   readonly choices: readonly PromptChoice[];
-  // The starter prompts of the room's packs (an empty room's examples).
+  // An empty room's starter prompts: the room's packs', then the built-in
+  // packs' (starterChoices).
   readonly starters: readonly PromptChoice[];
   // The /command menu: its matches (empty when closed) and highlight.
   readonly slashMatches: readonly PromptChoice[];
@@ -39,6 +41,21 @@ export interface ComposerPrompts {
   readonly submitFill: (values: Readonly<Record<string, string>>) => void;
 }
 
+// builtinPromptPacks are the Library's built-in prompt packs (the
+// general-purpose starters): built-in content changes only with a release,
+// so one load serves every room of the page; a failed load is retried.
+let builtinPacks: Promise<readonly ContentComponent[]> | null = null;
+function builtinPromptPacks(): Promise<readonly ContentComponent[]> {
+  builtinPacks ??= contentApi
+    .list("prompt")
+    .then((r) => (r.components ?? []).filter(isBuiltin))
+    .catch(() => {
+      builtinPacks = null;
+      return [];
+    });
+  return builtinPacks;
+}
+
 // useComposerPrompts loads the prompts a room's composer offers and inserts
 // them into the draft (counting each insertion once). Disabled (the people
 // chat) it offers none.
@@ -58,12 +75,11 @@ export function useComposerPrompts(
   useEffect(() => {
     if (!enabled) return;
     let live = true;
-    contentApi
-      .uses(roomId)
-      .then((r) => {
+    Promise.all([contentApi.uses(roomId), builtinPromptPacks()])
+      .then(([r, builtin]) => {
         if (!live) return;
         setChoices(promptChoices(r.member ?? [], r.room ?? []));
-        setStarters(roomStarters(r.room ?? []));
+        setStarters(starterChoices(r.room ?? [], builtin));
       })
       .catch(() => {
         // prompts are optional: the composer works without them

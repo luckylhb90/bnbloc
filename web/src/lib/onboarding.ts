@@ -141,20 +141,10 @@ export function welcomeStart(
   return { kind: "none", reason: offered.length > 0 ? "offline" : "unpublished" };
 }
 
-export interface StarterPrompt {
-  readonly label: string;
-  readonly text: string;
-}
-
-// The empty room's example prompts: each shows a part of the product (a
-// previewable web app, a Markdown deliverable, a quick answer, a diagram).
-export const STARTER_PROMPTS: readonly StarterPrompt[] = [
-  { label: "Build a landing page", text: "Build a one-page landing page for a coffee shop" },
-  { label: "Write a project plan", text: "Write a project plan for launching a community podcast as a Markdown doc" },
-  { label: "Explain an idea", text: "Explain this idea in 5 bullet points: " },
-  { label: "Draw a diagram", text: "Draw a simple diagram of how an online order reaches the kitchen" },
-];
-
+// The empty room's starter prompts are prompt packs' (starterChoices in
+// promptPacks.ts): the room's packs, then the built-in general-purpose
+// pack (internal/contentbuiltin/packages/starters).
+//
 // showStarterPrompts: only on the room composer of an empty feed (nothing
 // sent, nothing working) with an agent to send to. They vanish with the
 // first message.

@@ -15,7 +15,7 @@ import {
   promptPackPayload,
   promptPackProblem,
   promptsFromMessages,
-  roomStarters,
+  starterChoices,
   slashMatches,
   slashQuery,
   slugify,
@@ -207,10 +207,10 @@ console.log("promptPacks tests passed");
   const other = prompt("other");
   const roomPack = pack("room-kit", [other, starter]);
   const skills = { ...pack("skills", [prompt("x", { starter: true })]), kind: "skill" as const };
-  const got = roomStarters([use(skills, "room"), use(roomPack, "room"), use(roomPack, "room")]);
+  const got = starterChoices([use(skills, "room"), use(roomPack, "room"), use(roomPack, "room")], []);
   eq(got.map((c) => [c.pack, c.prompt.id, c.source]), [["room-kit", "kickoff", "room"]], "room starters");
   const many = pack("many", Array.from({ length: 9 }, (_, i) => prompt(`p${i}`, { starter: true })));
-  eq(roomStarters([use(many, "room")]).length, 6, "starters are bounded");
+  eq(starterChoices([use(many, "room")], []).length, 6, "starters are bounded");
   // The flag round-trips through the form.
   const back = promptPackPayload(formFromPack(pack("kit", [starter, other])));
   eq((back.prompts as { starter?: boolean }[]).map((p) => !!p.starter), [true, false], "starter round trip");

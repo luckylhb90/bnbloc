@@ -6,13 +6,14 @@ import {
   firstRoomName,
   showStarterPrompts,
   showWelcome,
-  STARTER_PROMPTS,
   WELCOME_DESKTOP_HINT,
   welcomeDesktopAction,
   welcomeStart,
   welcomeDismissed,
 } from "./onboarding.ts";
 import type { PlatformAgent } from "./platformAgents.ts";
+import type { ContentComponent, ContentUse } from "./contentComponents.ts";
+import { starterChoices } from "./promptPacks.ts";
 
 function assert(condition: boolean, message: string): void {
   if (!condition) throw new Error(message);
@@ -61,8 +62,45 @@ function testDefaultPlatformAgent(): void {
   assert(defaultPlatformChoice([], "jack") === null, "platform agents off");
 }
 
+function promptPack(id: string, scope: string, prompts: { id: string; starter?: boolean }[]): ContentComponent {
+  return {
+    id,
+    kind: "prompt",
+    name: id,
+    displayName: id,
+    owner: scope === "builtin" ? "" : "maya",
+    scope,
+    status: "active",
+    latestVersion: "1.0.0",
+    version: "1.0.0",
+    permissions: [],
+    requires: {},
+    prompts: prompts.map((p) => ({ id: p.id, title: `Title ${p.id}`, body: `Body ${p.id}`, uses: 0, ...(p.starter ? { starter: true } : {}) })),
+    mine: false,
+    removable: false,
+    acked: true,
+    runs: 0,
+    members: 0,
+    uses: 0,
+    createdAtMs: 1,
+    updatedAtMs: 1,
+  } as ContentComponent;
+}
+
 function testStarterPrompts(): void {
-  assert(STARTER_PROMPTS.length >= 3 && STARTER_PROMPTS.length <= 4, "3–4 prompts");
+  // Every starter is a prompt pack's: the room's packs first, then the
+  // built-in packs of the Library; a member's own pack in the Library adds
+  // none, and only prompts flagged starter count.
+  const builtin = promptPack("cc_builtin_starters", "builtin", [{ id: "plan", starter: true }, { id: "hidden" }, { id: "sketch", starter: true }]);
+  const personal = promptPack("cc_mine", "personal", [{ id: "mine", starter: true }]);
+  const roomPack = promptPack("cc_room", "org", [{ id: "kickoff", starter: true }]);
+  const roomUse = { componentId: roomPack.id, kind: "prompt", component: roomPack } as ContentUse;
+  const got = starterChoices([roomUse], [personal, builtin]);
+  const ids = got.map((c) => `${c.source}:${c.prompt.id}`).join(",");
+  assert(ids === "room:kickoff,builtin:plan,builtin:sketch", `starters from the packs: ${ids}`);
+  const empty = starterChoices([], [builtin]);
+  assert(empty.length === 2 && empty.every((c) => c.source === "builtin" && c.componentId === builtin.id), "an empty room without packs shows the built-in pack's starters");
+  assert(starterChoices([], [personal]).length === 0, "no built-in pack, no starters: there is no list of the web's own");
   const base = { feedLength: 0, working: 0, agentAvailable: true, people: false };
   assert(showStarterPrompts(base), "an empty feed with an agent");
   assert(!showStarterPrompts({ ...base, feedLength: 1 }), "gone after the first message");
