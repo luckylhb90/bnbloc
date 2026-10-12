@@ -113,20 +113,17 @@ func (s *Service) contentGrant(r *http.Request, caller auth.Claims) (contentActo
 		return contentActor{}, &grantError{status: http.StatusServiceUnavailable, msg: "agent jobs unavailable"}
 	}
 	ctx := tenant.NewContext(r.Context(), claims.Tenant)
-	job, err := s.ContentJobs.GetAgentRun(ctx, jobID)
-	if errors.Is(err, store.ErrAgentJobNotFound) || (err == nil && job.RoomID != roomID) {
-		return contentActor{}, refuseGrant(http.StatusNotFound, "job not found")
-	}
-	if err != nil {
-		return contentActor{}, &grantError{status: http.StatusInternalServerError, msg: "load agent job failed", cause: err}
-	}
-	switch err := store.JobLeasedBy(ctx, s.ContentJobs, job, caller.Subject); {
+	job, err := store.LoadLeasedJob(ctx, s.ContentJobs, jobID, roomID, caller.Subject)
+	switch status := store.LeasedJobStatus(err); {
+	case err == nil:
+	case errors.Is(err, store.ErrJobNotInRoom):
+		return contentActor{}, refuseGrant(status, "job not found")
 	case errors.Is(err, store.ErrJobNotLive):
-		return contentActor{}, refuseGrant(http.StatusConflict, "job is not running")
+		return contentActor{}, refuseGrant(status, "job is not running")
 	case errors.Is(err, store.ErrJobNotCallers):
-		return contentActor{}, refuseGrant(http.StatusForbidden, "job is not running on your bridge")
-	case err != nil:
-		return contentActor{}, &grantError{status: http.StatusInternalServerError, msg: "load bridge owner failed", cause: err}
+		return contentActor{}, refuseGrant(status, "job is not running on your bridge")
+	default:
+		return contentActor{}, &grantError{status: status, msg: "load agent job failed", cause: err}
 	}
 	if job.TenantID == "" {
 		job.TenantID = claims.Tenant

@@ -141,12 +141,18 @@ func (s *Service) Dispatch(ctx context.Context, roomID, caller string, in wire.D
 		return reply, refuse(http.StatusBadRequest, wire.DispatchInvalid, "a dispatch wears an expert or a draft, not both")
 	}
 
-	parent, err = s.Dispatches.GetAgentRun(ctx, in.ParentJobID)
-	if errors.Is(err, store.ErrAgentJobNotFound) || (err == nil && parent.RoomID != roomID) {
-		parent = store.AgentJob{}
-		return reply, refuse(http.StatusNotFound, wire.DispatchParentNotFound, "parent job not found in this room")
-	}
-	if err != nil {
+	// The parent must be live and driven by a bridge of the caller: the
+	// caller can only spend authority running on its own machine right now.
+	parent, err = store.LoadLeasedJob(ctx, s.Dispatches, in.ParentJobID, roomID, caller)
+	switch status := store.LeasedJobStatus(err); {
+	case err == nil:
+	case errors.Is(err, store.ErrJobNotInRoom):
+		return reply, refuse(status, wire.DispatchParentNotFound, "parent job not found in this room")
+	case errors.Is(err, store.ErrJobNotLive):
+		return reply, refuse(status, wire.DispatchParentNotRunning, "parent job is %s and not running on a bridge", parent.Status)
+	case errors.Is(err, store.ErrJobNotCallers):
+		return reply, refuse(status, wire.DispatchNotParentBridge, "the parent job is not running on the caller's bridge")
+	default:
 		return reply, failed("read parent job: %w", err)
 	}
 	if err := s.checkDispatchAuthority(ctx, roomID, caller, parent); err != nil {
@@ -213,19 +219,10 @@ func (s *Service) Dispatch(ctx context.Context, roomID, caller string, in wire.D
 	return wire.DispatchReply{Sequence: posted.Sequence, JobID: posted.Job.JobID, Depth: depth}, nil
 }
 
-// checkDispatchAuthority admits a dispatch only while its parent job is
-// being driven by a bridge of the caller, on behalf of a requester who is
-// still a person in the room: the caller can only spend authority that is
-// running on its own machine right now.
+// checkDispatchAuthority admits a dispatch of a leased parent only from a
+// member of the room, on behalf of a requester who is still a person who
+// may post there.
 func (s *Service) checkDispatchAuthority(ctx context.Context, roomID, caller string, parent store.AgentJob) error {
-	switch err := store.JobLeasedBy(ctx, s.Dispatches, parent, caller); {
-	case errors.Is(err, store.ErrJobNotLive):
-		return refuse(http.StatusConflict, wire.DispatchParentNotRunning, "parent job is %s and not running on a bridge", parent.Status)
-	case errors.Is(err, store.ErrJobNotCallers):
-		return refuse(http.StatusForbidden, wire.DispatchNotParentBridge, "the parent job is not running on the caller's bridge")
-	case err != nil:
-		return failed("read bridge owner: %w", err)
-	}
 	if _, err := membership.RoomScope(ctx, s.Membership, roomID, caller, membership.AnyMember); err != nil {
 		return refuse(http.StatusForbidden, wire.DispatchNotParentBridge, "%s", err.Error())
 	}

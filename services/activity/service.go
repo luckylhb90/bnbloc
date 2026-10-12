@@ -70,7 +70,7 @@ type Service struct {
 	Settings store.PlatformSettingsStore
 	// Leases admits a bridge's team plan for the job it runs
 	// (store.JobLeasedBy); nil refuses the ?job= form.
-	Leases store.AgentDispatchReader
+	Leases store.LeasedJobReader
 }
 
 // Handler builds the HTTP mux for the activity service.

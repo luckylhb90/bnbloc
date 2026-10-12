@@ -366,7 +366,7 @@ Design: PRD §1 "Sources, scopes and trust" and "Status: step 4".
    ("expert Reviewer v1.1.0 on agent jack/acme/codex (job …, room …)").
 2. **Resolution.** The bridge running the job asks
    `GET /v1/content-components/effective?job=&room=` (authorized by
-   `store.JobLeasedBy`: the job is live and leased by the caller's
+   `store.LoadLeasedJob`: the job is live and leased by the caller's
    bridge). `contentuse.Effective` returns the job's expert at its pinned
    version, the skill packs the expert requires (highest version satisfying
    `name@range` among what the requester may use and the room's packs),
@@ -457,7 +457,7 @@ core?, provider}, members: [{role, defaultAgent}]}` and answers
 reason?, cost?}], estimate: {costUsd?, runs, unknown?}}`. Without `?job=`
 the caller is the requester and `lead` is required (a room member); with
 `?job=` the job must be in the room, live and leased by a bridge of the
-caller (`store.JobLeasedBy`), and the lead and requester are the job's.
+caller (`store.LoadLeasedJob`), and the lead and requester are the job's.
 
 ## MCP tool components
 
@@ -646,7 +646,7 @@ save.
 `?job=&room=` grant
 (`services/gateway/content_requester.go`). The grant follows dispatch's
 authority model: it is admitted only while the job is live and leased by a
-bridge of the caller (`store.JobLeasedBy`) and the job's requester is still a
+bridge of the caller (`store.LoadLeasedJob`) and the job's requester is still a
 human member of the room; the request then acts as the requester (their
 Library, personal scope, owner = requester). When the agent is not the
 requester's own (borrowed or platform), a package that ships scripts is

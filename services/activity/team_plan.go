@@ -144,28 +144,13 @@ func (s *Service) handleTeamPlan(w http.ResponseWriter, r *http.Request) {
 // planJob reads the lead's job for a bridge's team plan: it must be in the
 // room, live and leased by a bridge of the caller.
 func (s *Service) planJob(w http.ResponseWriter, r *http.Request, roomID, caller, jobID string) (store.AgentJob, bool) {
-	ctx := r.Context()
-	job, err := s.Runs.GetAgentRun(ctx, jobID)
-	switch {
-	case errors.Is(err, store.ErrAgentJobNotFound) || (err == nil && job.RoomID != roomID):
-		httpx.Error(w, "job not found in this room", http.StatusNotFound)
-		return store.AgentJob{}, false
-	case err != nil:
-		obs.ServerError(w, "team plan job read", err)
-		httpx.Error(w, "job read failed", http.StatusInternalServerError)
-		return store.AgentJob{}, false
-	}
 	if s.Leases == nil {
 		httpx.Unavailable(w, "team plan for a job")
 		return store.AgentJob{}, false
 	}
-	switch err := store.JobLeasedBy(ctx, s.Leases, job, caller); {
-	case errors.Is(err, store.ErrJobNotLive), errors.Is(err, store.ErrJobNotCallers):
-		httpx.Error(w, "the job is not running on the caller's bridge", http.StatusForbidden)
-		return store.AgentJob{}, false
-	case err != nil:
-		obs.ServerError(w, "team plan lease check", err)
-		httpx.Error(w, "lease check failed", http.StatusInternalServerError)
+	job, err := store.LoadLeasedJob(r.Context(), s.Leases, jobID, roomID, caller)
+	if err != nil {
+		httpx.WriteStatus(w, store.LeasedJobStatus(err), leasedJobRefusal(err), err)
 		return store.AgentJob{}, false
 	}
 	return job, true
@@ -200,4 +185,18 @@ func (s *Service) agentCost(ctx context.Context, a wire.PlanAgent) (*wire.AgentC
 		out.AvgCostUsd = &avg
 	}
 	return out, nil
+}
+
+// leasedJobRefusal is the message of a LoadLeasedJob refusal.
+func leasedJobRefusal(err error) string {
+	switch {
+	case errors.Is(err, store.ErrJobNotInRoom):
+		return "job not found in this room"
+	case errors.Is(err, store.ErrJobNotLive):
+		return "the job is not running"
+	case errors.Is(err, store.ErrJobNotCallers):
+		return "the job is not running on the caller's bridge"
+	default:
+		return "job read failed"
+	}
 }

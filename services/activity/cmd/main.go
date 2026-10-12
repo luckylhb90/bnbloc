@@ -75,8 +75,8 @@ func main() {
 
 // dispatchReader is the job store's lease read side (nil when the
 // configured store has none).
-func dispatchReader(jobs store.BridgeJobStore) store.AgentDispatchReader {
-	d, _ := jobs.(store.AgentDispatchReader)
+func dispatchReader(jobs store.BridgeJobStore) store.LeasedJobReader {
+	d, _ := jobs.(store.LeasedJobReader)
 	return d
 }
 
