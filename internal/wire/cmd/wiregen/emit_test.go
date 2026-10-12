@@ -57,3 +57,22 @@ func TestUnionCollisionRefused(t *testing.T) {
 		t.Fatal("want an error for a union named like a type")
 	}
 }
+
+// A union on a variable names the row field its members come from, and the
+// variable must be a constant registry.
+func TestRegistryUnionNeedsFieldAndConstants(t *testing.T) {
+	for name, src := range map[string]string{
+		"no field":        "package x\ntype R struct{ N string }\n\n//wire:union K\nvar Rs = []R{{N: \"a\"}}\n",
+		"missing field":   "package x\ntype R struct{ N, M string }\n\n//wire:union K N\nvar Rs = []R{{N: \"a\"}, {M: \"b\"}}\n",
+		"computed":        "package x\nimport \"strings\"\ntype R struct{ N string }\n\n//wire:union K N\nvar Rs = []R{{N: strings.ToLower(\"A\")}}\n",
+		"field on consts": "package x\n\n//wire:union K N\nconst A = \"a\"\n",
+	} {
+		dir := t.TempDir()
+		if err := os.WriteFile(filepath.Join(dir, "x.go"), []byte(src), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := emitPackage(dir, "example.com/x", nil); err == nil {
+			t.Errorf("%s: want an error", name)
+		}
+	}
+}

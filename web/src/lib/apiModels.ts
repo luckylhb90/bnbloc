@@ -7,6 +7,7 @@ export type {
   AgentTarget,
   Artifact,
   ArtifactVersion,
+  ChatAttachment,
   Core,
   PlazaRoom,
   RoomDetail,
@@ -33,13 +34,6 @@ export interface Channel {
   // The channel list never contains it — it is reached via peopleChat.
   kind?: "people";
   createdBy: string;
-}
-
-export interface ChatAttachment {
-  readonly id: string;
-  readonly filename: string;
-  readonly contentType: string;
-  readonly size: number;
 }
 
 export interface TurnMetrics {

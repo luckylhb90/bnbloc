@@ -40,7 +40,7 @@ const (
 // EventKindSpec is one registered room event kind.
 type EventKindSpec struct {
 	// Name is the kind string (wire.Event.Kind).
-	Name string `json:"name"`
+	Name string `json:"name" tstype:"RoomEventKind"`
 	// Durable kinds take a per-room sequence and are persisted to the room
 	// feed (room_messages): the only kinds history and a handoff package
 	// hold. Every other kind is transient, with sequence 0.
@@ -59,7 +59,11 @@ type EventKindSpec struct {
 	ChannelScoped bool `json:"channelScoped,omitempty"`
 }
 
-// RoomEventKinds is the registry of room event kinds.
+// RoomEventKinds is the registry of room event kinds. The web's
+// RoomEventKind union (and RoomEventKindValues) is generated from the Name
+// of each row: a kind registered here is a kind the web listens for.
+//
+//wire:union RoomEventKind Name
 var RoomEventKinds = []EventKindSpec{
 	{Name: KindChatMessage, Durable: true, Replay: true, ChannelScoped: true},
 	{Name: KindAgentMessages, Durable: true, Replay: true, ChannelScoped: true},

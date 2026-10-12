@@ -73,12 +73,12 @@ func emitPackage(dir, importPath string, foreign []string) ([]byte, error) {
 	// Union names are known before any field names one.
 	for _, f := range files {
 		for _, decl := range f.Decls {
-			if gd, ok := decl.(*ast.GenDecl); ok && gd.Tok == token.CONST {
-				if u := directive(gd.Doc); u != "" {
+			if gd, ok := decl.(*ast.GenDecl); ok && (gd.Tok == token.CONST || gd.Tok == token.VAR) {
+				if u, _ := directive(gd.Doc); u != "" {
 					e.foreign[u] = true
 				}
 				for _, spec := range gd.Specs {
-					if u := directive(spec.(*ast.ValueSpec).Doc); u != "" {
+					if u, _ := directive(spec.(*ast.ValueSpec).Doc); u != "" {
 						e.foreign[u] = true
 					}
 				}
@@ -128,13 +128,16 @@ func (e *emitter) file(f *ast.File) error {
 				}
 			}
 		case token.CONST:
-			blockUnion := directive(gd.Doc)
+			blockUnion, blockField := directive(gd.Doc)
 			wroteBlockDoc := false
 			for _, spec := range gd.Specs {
 				vs := spec.(*ast.ValueSpec)
-				union := directive(vs.Doc)
+				union, field := directive(vs.Doc)
 				if union == "" {
-					union = blockUnion
+					union, field = blockUnion, blockField
+				}
+				if field != "" {
+					return fmt.Errorf("//wire:union %s %s: a field names a registry variable, not constants", union, field)
 				}
 				for _, name := range vs.Names {
 					if !name.IsExported() {
@@ -160,23 +163,40 @@ func (e *emitter) file(f *ast.File) error {
 					comment(&e.b, "", d)
 					fmt.Fprintf(&e.b, "export const %s = %s;\n", name.Name, lit)
 					if union != "" {
-						if _, ok := e.unions[union]; !ok {
-							e.unionOrder = append(e.unionOrder, union)
-						}
-						e.unions[union] = append(e.unions[union], lit)
+						e.addUnion(union, lit)
 					}
 				}
 			}
 		case token.VAR:
 			for _, spec := range gd.Specs {
 				vs := spec.(*ast.ValueSpec)
+				d := vs.Doc
+				if d == nil && len(gd.Specs) == 1 {
+					d = gd.Doc
+				}
+				union, field := directive(d)
+				if union != "" && (field == "" || len(vs.Names) != 1) {
+					return fmt.Errorf("//wire:union %s on a variable needs one registry variable and the field naming its members", union)
+				}
 				for i, name := range vs.Names {
 					if !name.IsExported() || i >= len(vs.Values) {
 						continue
 					}
 					lit, ok := e.literal(vs.Values[i], 0)
 					if !ok {
+						if union != "" {
+							return fmt.Errorf("//wire:union %s: %s is not a constant registry", union, name.Name)
+						}
 						continue // computed at runtime: not part of the contract
+					}
+					if union != "" {
+						vals, err := e.registryField(vs.Values[i], field)
+						if err != nil {
+							return fmt.Errorf("//wire:union %s %s: %w", union, field, err)
+						}
+						for _, v := range vals {
+							e.addUnion(union, v)
+						}
 					}
 					v := e.info.Defs[name].(*types.Var)
 					ts, err := e.tsType(v.Type(), "")
@@ -185,10 +205,6 @@ func (e *emitter) file(f *ast.File) error {
 					}
 					section()
 					e.b.WriteString("\n")
-					d := vs.Doc
-					if d == nil && len(gd.Specs) == 1 {
-						d = gd.Doc
-					}
 					comment(&e.b, "", d)
 					fmt.Fprintf(&e.b, "export const %s: %s = %s;\n", name.Name, readonly(ts), lit)
 				}
@@ -511,6 +527,57 @@ func (e *emitter) literal(x ast.Expr, depth int) (string, bool) {
 	return "", false
 }
 
+// addUnion appends one member to a `//wire:union`.
+func (e *emitter) addUnion(name, lit string) {
+	if _, ok := e.unions[name]; !ok {
+		e.unionOrder = append(e.unionOrder, name)
+	}
+	e.unions[name] = append(e.unions[name], lit)
+}
+
+// registryField lists, in order, the constant value of field in every
+// element of a slice-of-struct literal (the members a registry variable
+// names: `//wire:union RoomEventKind Name` on wire.RoomEventKinds).
+func (e *emitter) registryField(x ast.Expr, field string) ([]string, error) {
+	cl, ok := x.(*ast.CompositeLit)
+	if !ok {
+		return nil, fmt.Errorf("not a composite literal")
+	}
+	if _, ok := e.info.Types[cl].Type.Underlying().(*types.Slice); !ok {
+		return nil, fmt.Errorf("not a slice literal")
+	}
+	var out []string
+	for _, el := range cl.Elts {
+		row, ok := el.(*ast.CompositeLit)
+		if !ok {
+			return nil, fmt.Errorf("an element is not a struct literal")
+		}
+		found := false
+		for _, f := range row.Elts {
+			kv, ok := f.(*ast.KeyValueExpr)
+			if !ok {
+				return nil, fmt.Errorf("an element is not keyed")
+			}
+			if id, ok := kv.Key.(*ast.Ident); ok && id.Name == field {
+				tv := e.info.Types[kv.Value]
+				if tv.Value == nil || tv.Value.Kind() != constant.String {
+					return nil, fmt.Errorf("an element's %s is not a string constant", field)
+				}
+				lit, err := constLiteral(tv.Value)
+				if err != nil {
+					return nil, err
+				}
+				out = append(out, lit)
+				found = true
+			}
+		}
+		if !found {
+			return nil, fmt.Errorf("an element has no %s", field)
+		}
+	}
+	return out, nil
+}
+
 func (e *emitter) renderUnions() error {
 	if len(e.unionOrder) == 0 {
 		return nil
@@ -527,19 +594,21 @@ func (e *emitter) renderUnions() error {
 	return nil
 }
 
-var directiveRE = regexp.MustCompile(`^//wire:union ([A-Za-z_][A-Za-z0-9_]*)\s*$`)
+var directiveRE = regexp.MustCompile(`^//wire:union ([A-Za-z_][A-Za-z0-9_]*)(?: ([A-Za-z_][A-Za-z0-9_]*))?\s*$`)
 
-// directive returns the union a `//wire:union <Name>` comment names.
-func directive(g *ast.CommentGroup) string {
+// directive returns the union a `//wire:union <Name> [<Field>]` comment
+// names: on constants, the union of their values; on a registry variable (a
+// slice of struct rows), the union of each row's <Field>.
+func directive(g *ast.CommentGroup) (union, field string) {
 	if g == nil {
-		return ""
+		return "", ""
 	}
 	for _, c := range g.List {
 		if m := directiveRE.FindStringSubmatch(c.Text); m != nil {
-			return m[1]
+			return m[1], m[2]
 		}
 	}
-	return ""
+	return "", ""
 }
 
 // comment writes a Go doc comment as TypeScript line comments (directives

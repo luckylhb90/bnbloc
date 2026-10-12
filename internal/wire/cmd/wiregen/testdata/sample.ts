@@ -56,7 +56,7 @@ export interface Spec {
   durable: boolean;
 }
 
-// Specs is a registry of constant rows.
+// Specs is a registry of constant rows; its Kind fields are a union.
 export const Specs: readonly Spec[] = [{ kind: "one", durable: true }, { kind: "two", durable: false }];
 
 // ByName is a constant map.
@@ -68,3 +68,5 @@ export type Alias = Item[];
 // ---- sample unions (//wire:union) ----
 export type EventKind = "one" | "two" | "three";
 export const EventKindValues: readonly EventKind[] = ["one", "two", "three"];
+export type SpecKind = "one" | "two";
+export const SpecKindValues: readonly SpecKind[] = ["one", "two"];

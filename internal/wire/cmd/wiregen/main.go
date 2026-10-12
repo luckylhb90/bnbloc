@@ -7,8 +7,10 @@
 //     field, an embedded struct `extends`, a named string type the union of
 //     its constants, a variable holding only constants a readonly value);
 //   - `//wire:union <Name>` on a block (or one spec) of untyped constants:
-//     the union of their values, collected across files (the room event
-//     kinds);
+//     the union of their values, collected across files;
+//   - `//wire:union <Name> <Field>` on a registry variable (a slice of
+//     struct rows): the union of each row's <Field> (the room event kinds,
+//     from wire.RoomEventKinds);
 //   - enums owned by other packages (store.AgentJobStatus, store.Role, …),
 //     which a wire field names with a `tstype:"<Name>"` tag;
 //   - tables the owners compute at generation time (the org role grants of

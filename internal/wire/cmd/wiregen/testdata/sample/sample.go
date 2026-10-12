@@ -70,7 +70,9 @@ type Spec struct {
 	Durable bool   `json:"durable"`
 }
 
-// Specs is a registry of constant rows.
+// Specs is a registry of constant rows; its Kind fields are a union.
+//
+//wire:union SpecKind Kind
 var Specs = []Spec{{Kind: EventOne, Durable: true}, {Kind: EventTwo}}
 
 // ByName is a constant map.

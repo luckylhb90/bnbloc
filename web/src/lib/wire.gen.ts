@@ -1128,7 +1128,7 @@ export const EventArtifactState = "artifact_state";
 // EventKindSpec is one registered room event kind.
 export interface EventKindSpec {
   // Name is the kind string (wire.Event.Kind).
-  name: string;
+  name: RoomEventKind;
   // Durable kinds take a per-room sequence and are persisted to the room
   // feed (room_messages): the only kinds history and a handoff package
   // hold. Every other kind is transient, with sequence 0.
@@ -1147,7 +1147,9 @@ export interface EventKindSpec {
   channelScoped?: boolean;
 }
 
-// RoomEventKinds is the registry of room event kinds.
+// RoomEventKinds is the registry of room event kinds. The web's
+// RoomEventKind union (and RoomEventKindValues) is generated from the Name
+// of each row: a kind registered here is a kind the web listens for.
 export const RoomEventKinds: readonly EventKindSpec[] = [{ name: "chat_message", durable: true, replay: true, channelScoped: true }, { name: "agent_messages", durable: true, replay: true, channelScoped: true }, { name: "agent_job_created", channelScoped: true }, { name: "agent_job_updated", channelScoped: true }, { name: "agent_session_state" }, { name: "agent_roster" }, { name: "presence_join" }, { name: "presence_leave" }, { name: "presence_snapshot" }, { name: "presence_typing", channelScoped: true }, { name: "message_deleted", channelScoped: true }, { name: "message_edited", channelScoped: true }, { name: "task_updated", channelScoped: true }, { name: "artifact_updated" }, { name: "artifact_state" }, { name: "member_joined" }, { name: "member_removed", revocation: true }, { name: "room_deleted", revocation: true }, { name: "content_saved" }, { name: "content_uses_changed" }];
 
 // ---- wire/handoff.go ----
@@ -3148,6 +3150,8 @@ export type RunScope = "room" | "self" | "tenant";
 export const RunScopeValues: readonly RunScope[] = ["room", "self", "tenant"];
 export type ContentUseScope = "member" | "room" | "room-expert";
 export const ContentUseScopeValues: readonly ContentUseScope[] = ["member", "room", "room-expert"];
+export type RoomEventKind = "chat_message" | "agent_messages" | "agent_job_created" | "agent_job_updated" | "agent_session_state" | "agent_roster" | "presence_join" | "presence_leave" | "presence_snapshot" | "presence_typing" | "message_deleted" | "message_edited" | "task_updated" | "artifact_updated" | "artifact_state" | "member_joined" | "member_removed" | "room_deleted" | "content_saved" | "content_uses_changed";
+export const RoomEventKindValues: readonly RoomEventKind[] = ["chat_message", "agent_messages", "agent_job_created", "agent_job_updated", "agent_session_state", "agent_roster", "presence_join", "presence_leave", "presence_snapshot", "presence_typing", "message_deleted", "message_edited", "task_updated", "artifact_updated", "artifact_state", "member_joined", "member_removed", "room_deleted", "content_saved", "content_uses_changed"];
 export type ScheduleRecipientKind = "room" | "agent";
 export const ScheduleRecipientKindValues: readonly ScheduleRecipientKind[] = ["room", "agent"];
 export type RecurrenceKind = "once" | "daily" | "weekly" | "cron";

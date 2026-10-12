@@ -1,4 +1,5 @@
 import { onboardingEventFromRoomEvent, onboardingEvents, tapOnboarding, type OnboardingEvent } from "./onboardingEvents.ts";
+import type { RoomEvent } from "./roomEvents.ts";
 import {
   CHECKLIST,
   checklistPhase,
@@ -145,7 +146,7 @@ function testChecklistTicks(): void {
 }
 
 function testRoomEventMapping(): void {
-  const chat = { kind: "chat_message", text: "hi", author: "jack", sequence: 4, toAgent: true };
+  const chat: RoomEvent = { kind: "chat_message", text: "hi", author: "jack", sequence: 4, toAgent: true };
   const own = onboardingEventFromRoomEvent(chat, "jack", ROOM, "stream");
   assert(own?.kind === "message_sent" && own.seq === 4 && own.toAgent, "own echo is a send");
   assert(onboardingEventFromRoomEvent({ ...chat, author: "Jack" }, "jack", ROOM, "stream") === null, "Jack is another member");

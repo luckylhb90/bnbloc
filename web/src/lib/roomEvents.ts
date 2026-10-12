@@ -5,6 +5,7 @@
 // unit-tested; sse.ts owns the live subscription.
 import type { ChatAttachment, TurnMetrics } from "./api";
 import type { TaskUpdate } from "./teamModels";
+import type { RoomEventKind } from "./wire.gen.ts";
 import { importedEditedAtMs, importedFrom } from "./handoff.ts";
 import { scheduledMarker } from "./schedules.ts";
 import { dispatchAttribution, type DispatchAttribution } from "./dispatch.ts";
@@ -12,7 +13,7 @@ import { expertMarker, type ExpertMarker } from "./contentComponents.ts";
 import { agentHandle, agentIdentity } from "./roomAgents.ts";
 
 export interface RoomEvent {
-  kind?: string;
+  kind?: RoomEventKind;
   // The room (hub) sequence: always an integer, the same space as chat.
   sequence?: number;
   // For agent_messages: the message's index within its batch. A batch
