@@ -111,6 +111,39 @@ This is not premature abstraction: extract on the **second** real occurrence,
 not in anticipation of one. But once a second occurrence exists, sharing is the
 default, not an afterthought.
 
+## One rule, one owner (enforced)
+
+Every rule the system decides on (who the caller is and which tenant they act
+in, whether they may see or do something, what is valid, how an id or
+version is parsed, what a failure maps to) has **exactly one owner**: one
+function or package that all callers go through. A second implementation of
+a rule is a defect even when it is correct today, because the copies drift
+(2026-10-12: the effective tenant lived in several gateway handlers; only some
+honored the acting-tenant switch, and saved content vanished from the
+Library).
+
+- **Before writing a check, find its owner** (`git grep` the concept, read the
+  "Hard-won traps" below). Use it; if it can't express the case, extend it
+  once. Never inline a "simpler" local version.
+- **When you find two copies, collapse them in the same change** you are
+  making, and delete the loser.
+- **Name the owner in AGENTS.md** when it is a cross-cutting rule, and add an
+  **architecture test** that fails if the rule is re-implemented elsewhere
+  (the pattern of `TestNoSilent5xx`: scan the sources for the forbidden
+  construct outside the owner's file). A rule that matters and has no test
+  will be re-implemented.
+- **Memory and MySQL stores share one contract test suite** per interface; a
+  behaviour only one implementation has is a bug in the other.
+- **Use a design pattern when it removes duplication or makes a rule
+  explicit**, never for its own sake: a registry/strategy for per-kind
+  behaviour (`contentpkg.KindSpec`), middleware for per-request policy,
+  table-driven definitions for routes and limits, a pipeline of named stages
+  for long flows (the drive path). Prefer the smallest construct that leaves
+  one place to change.
+- **Leave code simpler than you found it.** A change that adds a branch to a
+  large function should first extract the part it touches. Delete dead code
+  and obsolete paths in the same change.
+
 ## Shape
 
 - `services/*` — the control-plane, one Go binary per service, composed by
