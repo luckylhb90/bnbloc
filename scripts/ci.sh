@@ -4,7 +4,8 @@
 # developer before pushing) calls the same stages, so the check list lives in
 # exactly one place.
 #
-#   scripts/ci.sh go        generated-file drift checks, go vet, go test
+#   scripts/ci.sh go        generated-file drift checks (Dockerfiles, schema copy,
+#                           wire.gen.ts), go vet, go test
 #                           (MySQL integration tests run when
 #                           BNBLOC_TEST_MYSQL_DSN is set, skip otherwise;
 #                           they need CREATE/DROP DATABASE on its server)
@@ -39,6 +40,8 @@ stage_go() {
   deploy/prod/gen-dockerfiles.sh --check
   log "deploy/schema.sql is a verbatim copy of internal/store/schema.sql"
   cmp deploy/schema.sql internal/store/schema.sql
+  log "web/src/lib/wire.gen.ts generated from internal/wire (go generate ./internal/wire)"
+  go run ./internal/wire/cmd/wiregen -check
   ensure_webui_placeholder
   log "go vet ./..."
   go vet ./...

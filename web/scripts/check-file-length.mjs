@@ -52,7 +52,8 @@ function walk(dir) {
     const p = join(dir, name);
     const s = statSync(p);
     if (s.isDirectory()) out.push(...walk(p));
-    else if (EXTS.has(extname(name))) out.push(p);
+    // A generated file (*.gen.ts) is reviewed at its Go source.
+    else if (EXTS.has(extname(name)) && !name.endsWith(".gen.ts")) out.push(p);
   }
   return out;
 }
