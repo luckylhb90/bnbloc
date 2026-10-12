@@ -169,8 +169,6 @@ type Backends struct {
 	// ComponentInstalls persists per-member opt-in installs of distributed
 	// components (rollout=optin extension records).
 	ComponentInstalls ComponentInstallStore
-	// Prompts is the tenant prompt library (F2).
-	Prompts PromptStore
 	// MessageTasks holds room messages marked as tasks (F6).
 	MessageTasks MessageTaskStore
 	// QuotaRequests holds borrowers' requests for more runs on an owner's
@@ -247,7 +245,6 @@ func NewBackends(dsn string) (*Backends, error) {
 			ExtAudit:          NewMemoryExtensionAudit(),
 			AgentPrefs:        NewMemoryAgentPrefs(),
 			ComponentInstalls: NewMemoryComponentInstall(),
-			Prompts:           NewMemoryPrompts(),
 			MessageTasks:      NewMemoryMessageTasks(),
 			QuotaRequests:     NewMemoryQuotaRequests(),
 			Notifications:     NewMemoryNotifications(),
@@ -285,7 +282,6 @@ func NewBackends(dsn string) (*Backends, error) {
 		ExtAudit:          NewMySQLExtensionAudit(db),
 		AgentPrefs:        NewMySQLAgentPrefs(db),
 		ComponentInstalls: NewMySQLComponentInstall(db),
-		Prompts:           NewMySQLPrompts(db),
 		MessageTasks:      NewMySQLMessageTasks(db),
 		QuotaRequests:     NewMySQLQuotaRequests(db),
 		Notifications:     NewMySQLNotifications(db),

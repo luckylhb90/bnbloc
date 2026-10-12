@@ -3,17 +3,15 @@ package store
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"os"
 	"strconv"
-	"strings"
 	"testing"
 	"time"
 
 	"github.com/luckylhb90/bnbloc/internal/wire"
 )
 
-// Contract tests for the team-feature stores (prompt library, message tasks,
+// Contract tests for the team-feature stores (message tasks,
 // message/artifact search). Each runs against the memory backend and, when
 // BNBLOC_TEST_MYSQL_DSN is set, the MySQL backend (incl. the ngram FULLTEXT
 // index), so both behave identically.
@@ -41,98 +39,6 @@ func teamBackends(t *testing.T) map[string]*Backends {
 func uniqueTenant(t *testing.T) context.Context {
 	t.Helper()
 	return tenantCtx("tt-" + strconv.FormatInt(time.Now().UnixNano(), 36))
-}
-
-func TestTeamPromptStoreContract(t *testing.T) {
-	for name, b := range teamBackends(t) {
-		t.Run(name, func(t *testing.T) {
-			ctx := uniqueTenant(t)
-			s := b.Prompts
-			// prompt_id is a global key: suffix the fixture ids per run.
-			run := "-" + strconv.FormatInt(time.Now().UnixNano(), 36)
-			mk := func(id, author, title, body, vis string, tags []string, at int64) {
-				t.Helper()
-				if _, err := s.CreatePrompt(ctx, wire.Prompt{PromptID: id + run, Author: author, Title: title, Body: body, Tags: tags, Visibility: vis, CreatedAtMs: at, UpdatedAtMs: at}); err != nil {
-					t.Fatalf("create %s: %v", id, err)
-				}
-			}
-			mk("p1", "alice", "Release notes", "Summarise 50% of the diff", wire.PromptTenant, []string{"writing", "ops"}, 1)
-			mk("p2", "alice", "Private plan", "secret body", wire.PromptPrivate, nil, 2)
-			mk("p3", "bob", "部署清单", "检查回滚步骤", wire.PromptTenant, []string{"ops"}, 3)
-
-			ids := func(ps []wire.Prompt) []string {
-				out := []string{}
-				for _, p := range ps {
-					out = append(out, strings.TrimSuffix(p.PromptID, run))
-				}
-				return out
-			}
-			list := func(q PromptQuery) []string {
-				t.Helper()
-				ps, err := s.ListPrompts(ctx, q)
-				if err != nil {
-					t.Fatalf("list %+v: %v", q, err)
-				}
-				return ids(ps)
-			}
-			if got := list(PromptQuery{Viewer: "bob"}); !equalStrings(got, []string{"p3", "p1"}) {
-				t.Fatalf("bob sees %v, want [p3 p1]", got)
-			}
-			if got := list(PromptQuery{Viewer: "alice", MineOnly: true}); !equalStrings(got, []string{"p2", "p1"}) {
-				t.Fatalf("alice mine %v", got)
-			}
-			if got := list(PromptQuery{Viewer: "alice", Tag: "ops"}); !equalStrings(got, []string{"p3", "p1"}) {
-				t.Fatalf("tag ops %v", got)
-			}
-			if got := list(PromptQuery{Viewer: "alice", Text: "50%"}); !equalStrings(got, []string{"p1"}) {
-				t.Fatalf("text 50%% (LIKE metachar) %v", got)
-			}
-			if got := list(PromptQuery{Viewer: "alice", Text: "回滚"}); !equalStrings(got, []string{"p3"}) {
-				t.Fatalf("CJK text %v", got)
-			}
-			if got := list(PromptQuery{Viewer: "bob", Text: "secret"}); len(got) != 0 {
-				t.Fatalf("bob found private prompt %v", got)
-			}
-
-			title := "Release notes v2"
-			if _, err := s.UpdatePrompt(ctx, "p1"+run, "bob", PromptPatch{Title: &title}, 10); !errors.Is(err, ErrPromptForbidden) {
-				t.Fatalf("bob update = %v, want forbidden", err)
-			}
-			if _, err := s.UpdatePrompt(ctx, "p2"+run, "bob", PromptPatch{Title: &title}, 10); !errors.Is(err, ErrPromptNotFound) {
-				t.Fatalf("bob update private = %v, want not found", err)
-			}
-			tags := []string{"docs"}
-			p, err := s.UpdatePrompt(ctx, "p1"+run, "alice", PromptPatch{Title: &title, Tags: &tags}, 10)
-			if err != nil || p.Title != title || !equalStrings(p.Tags, tags) || p.UpdatedAtMs != 10 {
-				t.Fatalf("alice update = %+v, %v", p, err)
-			}
-			if p, err := s.UsePrompt(ctx, "p1"+run, "bob"); err != nil || p.UseCount != 1 {
-				t.Fatalf("use = %+v, %v", p, err)
-			}
-			if _, err := s.UsePrompt(ctx, "p2"+run, "bob"); !errors.Is(err, ErrPromptNotFound) {
-				t.Fatalf("use private = %v", err)
-			}
-			if err := s.DeletePrompt(ctx, "p1"+run, "bob", false); !errors.Is(err, ErrPromptForbidden) {
-				t.Fatalf("bob delete = %v", err)
-			}
-			if err := s.DeletePrompt(ctx, "p2"+run, "bob", true); !errors.Is(err, ErrPromptNotFound) {
-				t.Fatalf("moderator delete private = %v", err)
-			}
-			if err := s.DeletePrompt(ctx, "p1"+run, "bob", true); err != nil {
-				t.Fatalf("moderator delete tenant prompt: %v", err)
-			}
-			if err := s.DeletePrompt(ctx, "p2"+run, "alice", false); err != nil {
-				t.Fatalf("author delete: %v", err)
-			}
-			if got := list(PromptQuery{Viewer: "alice"}); !equalStrings(got, []string{"p3"}) {
-				t.Fatalf("after deletes %v", got)
-			}
-			// Another tenant sees nothing.
-			if ps, _ := s.ListPrompts(tenantCtx("other-"+name), PromptQuery{Viewer: "bob"}); len(ps) != 0 {
-				t.Fatalf("cross-tenant leak: %v", ids(ps))
-			}
-		})
-	}
 }
 
 func TestTeamMessageTaskStoreContract(t *testing.T) {

@@ -90,7 +90,7 @@ replica**. One replica (no peers) owns everything. With more, set
 request and forwards room-scoped routes (`/v1/rooms/{id}/…`,
 `/internal/v1/rooms/{id}/…`) to the room's owner and the member plugin stream
 (`/v1/my/plugin-events` + ack) to the member's owner, in one hop; store-backed
-reads (unread, search, prompts, blobs) are served anywhere. Callers keep using
+reads (unread, search, blobs) are served anywhere. Callers keep using
 the `bnbloc-realtime` Service. A replica joining or leaving moves only its own
 keys: those streams close, reconnect to the new owner, and catch up from
 history. Kubernetes runs it as a StatefulSet behind the headless

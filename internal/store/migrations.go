@@ -1039,6 +1039,19 @@ WHERE r.channel_id = '' AND d.user_id IS NULL`)
 				"ADD KEY idx_agent_jobs_expert (tenant_id, expert_id, requester_user_id)")
 		},
 	},
+	{
+		// Prompt packs replace the prompt library (docs/prd/2026-10-12-
+		// experts-and-teams.md §4, decided: start empty): its table is
+		// dropped with no conversion, and per-prompt use counts of the packs
+		// get their table.
+		id: "2026_10_prompt_packs",
+		run: func(ctx context.Context, db sqlConn) error {
+			if _, err := db.ExecContext(ctx, "DROP TABLE IF EXISTS prompts"); err != nil {
+				return err
+			}
+			return createSchemaTable(ctx, db, "content_prompt_uses")
+		},
+	},
 }
 
 // sqlConn is the statement surface a migration runs on. runMigrations passes

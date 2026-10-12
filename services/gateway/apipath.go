@@ -163,9 +163,8 @@ func (s *Service) route(p apiPath) string {
 	case "push":
 		// The browser push channel's public VAPID key (N4).
 		return s.Backends.Realtime
-	case "prompts", "search":
-		// Prompt library (F2) and global search (F7) live beside the room
-		// feed they build on.
+	case "search":
+		// Global search (F7) lives beside the room feed it builds on.
 		return s.Backends.Realtime
 	case "rooms":
 		switch p.RoomSub {
@@ -216,11 +215,6 @@ func (s *Service) route(p apiPath) string {
 		// are measured against and the job claim that enforces them.
 		if p.is("v1", "tenant", "budgets") {
 			return s.Backends.Activity
-		}
-		// Org-admin moderation of the tenant prompt library (manage_org,
-		// like every /v1/tenant/* path) is served by the library's owner.
-		if p.section() == "tenant" && len(p.segs) >= 3 && p.segs[2] == "prompts" {
-			return s.Backends.Realtime
 		}
 		// Search reindex and status (super-admin) run where the room feed
 		// and its search backend live.

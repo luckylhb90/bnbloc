@@ -208,6 +208,7 @@ func (s *MySQLContentComponents) DeleteContentComponent(ctx context.Context, id 
 	}
 	defer tx.Rollback()
 	for _, q := range []string{
+		`DELETE FROM content_prompt_uses WHERE component_id = ?`,
 		`DELETE FROM content_permission_acks WHERE component_id = ?`,
 		`DELETE FROM content_component_uses WHERE component_id = ?`,
 		`DELETE FROM content_component_versions WHERE component_id = ?`,

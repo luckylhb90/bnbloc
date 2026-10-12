@@ -93,10 +93,9 @@ type Service struct {
 	// can presign (S3); off, every download streams through bnbloc.
 	DirectDownloads bool
 	PluginHooks     *PluginHookDispatcher
-	// Team features (team.go): the prompt library, message tasks, and global
-	// search. A nil store answers its routes 503 (search skips that kind);
-	// Rooms is the server-side membership listing search is scoped to.
-	Prompts   store.PromptStore
+	// Team features (team.go): message tasks and global search. A nil
+	// store answers its routes 503 (search skips that kind); Rooms is the
+	// server-side membership listing search is scoped to.
 	Tasks     store.MessageTaskStore
 	Artifacts store.ArtifactIndex
 	Rooms     RoomDirectory

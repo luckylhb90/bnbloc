@@ -354,25 +354,6 @@ CREATE TABLE IF NOT EXISTS room_messages (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 SET SESSION innodb_ft_enable_stopword = DEFAULT;
 
--- Prompt library (F2): prompts saved from room messages. body is a copy taken
--- at save time. visibility is 'private' (author only) or 'tenant'.
-CREATE TABLE IF NOT EXISTS prompts (
-  prompt_id      VARCHAR(64) PRIMARY KEY,
-  tenant_id      VARCHAR(64) NOT NULL,
-  author         VARCHAR(128) NOT NULL,
-  title          VARCHAR(256) NOT NULL,
-  body           MEDIUMTEXT NOT NULL,
-  tags_json      JSON NOT NULL,
-  visibility     VARCHAR(16) NOT NULL,
-  source_room_id VARCHAR(64) NOT NULL DEFAULT '',
-  source_seq     BIGINT NOT NULL DEFAULT 0,
-  use_count      BIGINT NOT NULL DEFAULT 0,
-  created_at_ms  BIGINT NOT NULL,
-  updated_at_ms  BIGINT NOT NULL,
-  KEY idx_prompts_tenant_updated (tenant_id, updated_at_ms),
-  KEY idx_prompts_tenant_author (tenant_id, author)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-
 -- Message tasks (F6): a persisted room message (by room sequence) marked as a
 -- task. title/message_author are snapshots taken when the task was marked.
 CREATE TABLE IF NOT EXISTS message_tasks (
@@ -806,4 +787,15 @@ CREATE TABLE IF NOT EXISTS content_permission_acks (
   acked_at_ms     BIGINT NOT NULL,
   PRIMARY KEY (subject, component_id, version),
   KEY idx_content_acks_component (component_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Per-prompt use counts of prompt packs: bumped once each time a member
+-- inserts the prompt in the composer (never per keystroke); deleted with
+-- the component.
+CREATE TABLE IF NOT EXISTS content_prompt_uses (
+  component_id    VARCHAR(64) NOT NULL,
+  prompt_id       VARCHAR(64) NOT NULL,
+  use_count       BIGINT NOT NULL DEFAULT 0,
+  last_used_at_ms BIGINT NOT NULL,
+  PRIMARY KEY (component_id, prompt_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

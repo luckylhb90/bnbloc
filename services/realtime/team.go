@@ -3,7 +3,6 @@ package realtimehttp
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"log"
 	"net/http"
 	"strconv"
@@ -11,7 +10,6 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/luckylhb90/bnbloc/internal/ids"
 	"github.com/luckylhb90/bnbloc/internal/membership"
 	"github.com/luckylhb90/bnbloc/internal/obs"
 	"github.com/luckylhb90/bnbloc/internal/roomctx"
@@ -21,23 +19,16 @@ import (
 )
 
 // Team features served by realtime, which owns the room feed they build on:
-//   - F2 prompt library: /v1/prompts (tenant-scoped, author-owned), plus the
-//     org-admin moderation delete /v1/tenant/prompts/{id} (the gateway
-//     enforces manage_org on /v1/tenant/*, as for every org-admin route).
 //   - F6 message tasks: /v1/rooms/{roomId}/tasks (any room member), announced
 //     live by the transient task_updated event.
 //   - F7 global search: /v1/search across the caller's rooms, resolved
 //     server-side from bnbloc-room — never from the request.
 
-// Prompt and task input bounds.
+// Task and search input bounds.
 const (
-	maxPromptTitleRunes = 256
-	maxPromptBodyBytes  = 64 * 1024
-	maxPromptTags       = 12
-	maxPromptTagRunes   = 40
-	maxTaskTitleRunes   = 200
-	maxSearchLimit      = 50
-	defaultSearchLimit  = 20
+	maxTaskTitleRunes  = 200
+	maxSearchLimit     = 50
+	defaultSearchLimit = 20
 )
 
 // RoomDirectory lists the rooms a member belongs to (bnbloc-room is the
@@ -47,12 +38,6 @@ type RoomDirectory interface {
 }
 
 func (s *Service) registerTeamRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("GET /v1/prompts", s.handleListPrompts)
-	mux.HandleFunc("POST /v1/prompts", s.handleCreatePrompt)
-	mux.HandleFunc("PATCH /v1/prompts/{promptId}", s.handleUpdatePrompt)
-	mux.HandleFunc("DELETE /v1/prompts/{promptId}", s.handleDeletePrompt)
-	mux.HandleFunc("POST /v1/prompts/{promptId}/use", s.handleUsePrompt)
-	mux.HandleFunc("DELETE /v1/tenant/prompts/{promptId}", s.handleModeratePrompt)
 	mux.HandleFunc("GET /v1/rooms/{roomId}/tasks", s.handleListTasks)
 	mux.HandleFunc("PUT /v1/rooms/{roomId}/tasks/{seq}", s.handlePutTask)
 	mux.HandleFunc("DELETE /v1/rooms/{roomId}/tasks/{seq}", s.handleDeleteTask)
@@ -94,258 +79,6 @@ func (s *Service) requireRoomMember(w http.ResponseWriter, r *http.Request) (roo
 		return "", "", false
 	}
 	return roomID, userID, true
-}
-
-// ---------------------------------------------------------------- prompts
-
-// normalizeTags trims, lowercases and de-duplicates tags, rejecting too many
-// or too long ones.
-func normalizeTags(raw []string) ([]string, error) {
-	out := []string{}
-	seen := map[string]bool{}
-	for _, t := range raw {
-		t = strings.ToLower(strings.TrimSpace(t))
-		if t == "" || seen[t] {
-			continue
-		}
-		if utf8.RuneCountInString(t) > maxPromptTagRunes {
-			return nil, errors.New("tag too long")
-		}
-		seen[t] = true
-		out = append(out, t)
-	}
-	if len(out) > maxPromptTags {
-		return nil, errors.New("too many tags")
-	}
-	return out, nil
-}
-
-func validPromptTitle(title string) error {
-	switch n := utf8.RuneCountInString(title); {
-	case n == 0:
-		return errors.New("title is required")
-	case n > maxPromptTitleRunes:
-		return errors.New("title too long")
-	}
-	return nil
-}
-
-func validPromptBody(body string) error {
-	if strings.TrimSpace(body) == "" {
-		return errors.New("body is required")
-	}
-	if len(body) > maxPromptBodyBytes {
-		return errors.New("body too long")
-	}
-	return nil
-}
-
-func validVisibility(v string) bool { return v == wire.PromptPrivate || v == wire.PromptTenant }
-
-// promptsReady answers 503 when the prompt store is not configured.
-func (s *Service) promptsReady(w http.ResponseWriter) bool {
-	if s.Prompts == nil {
-		obs.ServerError(w, "prompt library unavailable", nil)
-		http.Error(w, "prompt library unavailable", http.StatusServiceUnavailable)
-		return false
-	}
-	return true
-}
-
-// writePromptErr maps prompt store errors: an invisible prompt reads as
-// missing, a visible one the caller may not change is forbidden.
-func writePromptErr(w http.ResponseWriter, err error) {
-	switch {
-	case errors.Is(err, store.ErrPromptNotFound):
-		http.Error(w, "prompt not found", http.StatusNotFound)
-	case errors.Is(err, store.ErrPromptForbidden):
-		http.Error(w, "only the author may change this prompt", http.StatusForbidden)
-	default:
-		log.Printf("realtime: prompt store: %v", err)
-		http.Error(w, "prompt library error", http.StatusInternalServerError)
-	}
-}
-
-func (s *Service) handleListPrompts(w http.ResponseWriter, r *http.Request) {
-	userID, ok := requireSubject(w, r)
-	if !ok || !s.promptsReady(w) {
-		return
-	}
-	q := r.URL.Query()
-	limit := int(parseInt(q.Get("limit")))
-	if limit <= 0 || limit > 100 {
-		limit = 100
-	}
-	prompts, err := s.Prompts.ListPrompts(r.Context(), store.PromptQuery{
-		Viewer:   userID,
-		Text:     strings.TrimSpace(q.Get("q")),
-		Tag:      strings.ToLower(strings.TrimSpace(q.Get("tag"))),
-		MineOnly: q.Get("mine") == "1",
-		Limit:    limit,
-	})
-	if err != nil {
-		writePromptErr(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"prompts": prompts})
-}
-
-func (s *Service) handleCreatePrompt(w http.ResponseWriter, r *http.Request) {
-	userID, ok := requireSubject(w, r)
-	if !ok || !s.promptsReady(w) {
-		return
-	}
-	var body struct {
-		Title        string   `json:"title"`
-		Body         string   `json:"body"`
-		Tags         []string `json:"tags"`
-		Visibility   string   `json:"visibility"`
-		SourceRoomID string   `json:"sourceRoomId"`
-		SourceSeq    int64    `json:"sourceSeq"`
-	}
-	r.Body = http.MaxBytesReader(w, r.Body, maxPromptBodyBytes+maxSmallBodyBytes)
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		http.Error(w, "invalid json body", http.StatusBadRequest)
-		return
-	}
-	title := strings.TrimSpace(body.Title)
-	if err := validPromptTitle(title); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-	if err := validPromptBody(body.Body); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-	tags, err := normalizeTags(body.Tags)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-	visibility := body.Visibility
-	if visibility == "" {
-		visibility = wire.PromptPrivate
-	}
-	if !validVisibility(visibility) {
-		http.Error(w, "visibility must be private or tenant", http.StatusBadRequest)
-		return
-	}
-	// Provenance may only name a room the author can read: a prompt must not
-	// advertise (or probe) another room's messages.
-	sourceRoom := strings.TrimSpace(body.SourceRoomID)
-	if sourceRoom != "" && (s.Membership == nil || !s.Membership.IsMember(sourceRoom, userID, tenant.FromContext(r.Context()))) {
-		http.Error(w, "caller is not a member of the source room", http.StatusForbidden)
-		return
-	}
-	sourceSeq := body.SourceSeq
-	if sourceRoom == "" || sourceSeq < 0 {
-		sourceSeq = 0
-	}
-	now := time.Now().UnixMilli()
-	p, err := s.Prompts.CreatePrompt(r.Context(), wire.Prompt{
-		PromptID:     ids.New("pr_"),
-		Author:       userID,
-		Title:        title,
-		Body:         body.Body,
-		Tags:         tags,
-		Visibility:   visibility,
-		SourceRoomID: sourceRoom,
-		SourceSeq:    sourceSeq,
-		CreatedAtMs:  now,
-		UpdatedAtMs:  now,
-	})
-	if err != nil {
-		writePromptErr(w, err)
-		return
-	}
-	writeJSON(w, http.StatusCreated, p)
-}
-
-func (s *Service) handleUpdatePrompt(w http.ResponseWriter, r *http.Request) {
-	userID, ok := requireSubject(w, r)
-	if !ok || !s.promptsReady(w) {
-		return
-	}
-	var body struct {
-		Title      *string   `json:"title"`
-		Body       *string   `json:"body"`
-		Tags       *[]string `json:"tags"`
-		Visibility *string   `json:"visibility"`
-	}
-	r.Body = http.MaxBytesReader(w, r.Body, maxPromptBodyBytes+maxSmallBodyBytes)
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		http.Error(w, "invalid json body", http.StatusBadRequest)
-		return
-	}
-	patch := store.PromptPatch{Body: body.Body, Visibility: body.Visibility}
-	if body.Title != nil {
-		t := strings.TrimSpace(*body.Title)
-		if err := validPromptTitle(t); err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-		patch.Title = &t
-	}
-	if body.Body != nil {
-		if err := validPromptBody(*body.Body); err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-	}
-	if body.Tags != nil {
-		tags, err := normalizeTags(*body.Tags)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-		patch.Tags = &tags
-	}
-	if body.Visibility != nil && !validVisibility(*body.Visibility) {
-		http.Error(w, "visibility must be private or tenant", http.StatusBadRequest)
-		return
-	}
-	p, err := s.Prompts.UpdatePrompt(r.Context(), r.PathValue("promptId"), userID, patch, time.Now().UnixMilli())
-	if err != nil {
-		writePromptErr(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, p)
-}
-
-func (s *Service) handleDeletePrompt(w http.ResponseWriter, r *http.Request) {
-	s.deletePrompt(w, r, false)
-}
-
-// handleModeratePrompt is the org-admin delete of any tenant-visible prompt.
-// It is reachable only through /v1/tenant/*, which the gateway gates on the
-// manage_org permission before signing the request.
-func (s *Service) handleModeratePrompt(w http.ResponseWriter, r *http.Request) {
-	s.deletePrompt(w, r, true)
-}
-
-func (s *Service) deletePrompt(w http.ResponseWriter, r *http.Request, moderator bool) {
-	userID, ok := requireSubject(w, r)
-	if !ok || !s.promptsReady(w) {
-		return
-	}
-	if err := s.Prompts.DeletePrompt(r.Context(), r.PathValue("promptId"), userID, moderator); err != nil {
-		writePromptErr(w, err)
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
-}
-
-func (s *Service) handleUsePrompt(w http.ResponseWriter, r *http.Request) {
-	userID, ok := requireSubject(w, r)
-	if !ok || !s.promptsReady(w) {
-		return
-	}
-	p, err := s.Prompts.UsePrompt(r.Context(), r.PathValue("promptId"), userID)
-	if err != nil {
-		writePromptErr(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, p)
 }
 
 // ------------------------------------------------------------------ tasks
@@ -515,9 +248,8 @@ func (s *Service) searchChannelKind(ctx context.Context, memo map[string]string,
 // handleSearch is the global search: GET /v1/search?q=&rooms=&limit=&before=.
 // The rooms searched are the caller's memberships as bnbloc-room reports them;
 // the optional rooms param can only narrow that set. Messages page by the
-// before cursor (created_at_ms of the oldest hit); artifact and prompt hits
-// come with the first page only, and prompts only when no room filter is set
-// (they belong to no room).
+// before cursor (created_at_ms of the oldest hit); artifact hits come with
+// the first page only.
 func (s *Service) handleSearch(w http.ResponseWriter, r *http.Request) {
 	userID, ok := requireSubject(w, r)
 	if !ok {
@@ -609,23 +341,6 @@ func (s *Service) handleSearch(w http.ResponseWriter, r *http.Request) {
 				Snippet:      a.Title,
 				Author:       a.CreatedBy,
 				AtMs:         a.UpdatedAtMs,
-			})
-		}
-	}
-	if before <= 0 && len(filter) == 0 && s.Prompts != nil {
-		prompts, err := s.Prompts.ListPrompts(ctx, store.PromptQuery{Viewer: userID, Text: text, Limit: limit})
-		if err != nil {
-			log.Printf("realtime: search prompts: %v", err)
-		}
-		for _, p := range prompts {
-			snippet := snippetAround(p.Body, text)
-			resp.Results = append(resp.Results, wire.SearchResult{
-				Kind:     wire.SearchPrompt,
-				PromptID: p.PromptID,
-				Title:    p.Title,
-				Snippet:  snippet,
-				Author:   p.Author,
-				AtMs:     p.UpdatedAtMs,
 			})
 		}
 	}

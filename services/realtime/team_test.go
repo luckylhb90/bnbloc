@@ -39,7 +39,6 @@ func newTeamFixture(t *testing.T) *teamFixture {
 		Hub:        hub,
 		Membership: mem,
 		Chat:       chat,
-		Prompts:    store.NewMemoryPrompts(),
 		Tasks:      store.NewMemoryMessageTasks(),
 		Search:     search.NewStore(chat),
 		Artifacts:  store.NewMemoryArtifacts(),
@@ -80,102 +79,6 @@ func (f *teamFixture) chatAs(t *testing.T, user, room, text string) int64 {
 	var out struct{ Sequence int64 }
 	_ = json.Unmarshal(body, &out)
 	return out.Sequence
-}
-
-func TestPromptAuthorOnlyEditsAndVisibility(t *testing.T) {
-	f := newTeamFixture(t)
-	code, body := f.do(t, "alice", http.MethodPost, "/v1/prompts", map[string]any{
-		"title": "Release notes", "body": "Summarise the diff", "tags": []string{" Writing ", "writing", "ops"}, "visibility": "tenant",
-	})
-	if code != http.StatusCreated {
-		t.Fatalf("create = %d (%s)", code, body)
-	}
-	var shared wire.Prompt
-	_ = json.Unmarshal(body, &shared)
-	if len(shared.Tags) != 2 || shared.Tags[0] != "writing" || shared.Author != "alice" {
-		t.Fatalf("created prompt = %+v, want normalized tags and author alice", shared)
-	}
-	code, body = f.do(t, "alice", http.MethodPost, "/v1/prompts", map[string]any{"title": "Mine", "body": "secret"})
-	if code != http.StatusCreated {
-		t.Fatalf("create private = %d (%s)", code, body)
-	}
-	var private wire.Prompt
-	_ = json.Unmarshal(body, &private)
-	if private.Visibility != wire.PromptPrivate {
-		t.Fatalf("default visibility = %q, want private", private.Visibility)
-	}
-
-	// bob sees the tenant prompt only.
-	code, body = f.do(t, "bob", http.MethodGet, "/v1/prompts", nil)
-	var list struct{ Prompts []wire.Prompt }
-	_ = json.Unmarshal(body, &list)
-	if code != http.StatusOK || len(list.Prompts) != 1 || list.Prompts[0].PromptID != shared.PromptID {
-		t.Fatalf("bob list = %d %+v, want only the tenant prompt", code, list.Prompts)
-	}
-	// Tag + mine filters.
-	_, body = f.do(t, "alice", http.MethodGet, "/v1/prompts?tag=ops", nil)
-	_ = json.Unmarshal(body, &list)
-	if len(list.Prompts) != 1 || list.Prompts[0].PromptID != shared.PromptID {
-		t.Fatalf("tag filter = %+v", list.Prompts)
-	}
-	_, body = f.do(t, "bob", http.MethodGet, "/v1/prompts?mine=1", nil)
-	_ = json.Unmarshal(body, &list)
-	if len(list.Prompts) != 0 {
-		t.Fatalf("bob mine = %+v, want none", list.Prompts)
-	}
-
-	// Non-authors cannot edit or delete; another member's private prompt is
-	// indistinguishable from a missing one.
-	if code, _ := f.do(t, "bob", http.MethodPatch, "/v1/prompts/"+shared.PromptID, map[string]any{"title": "hijack"}); code != http.StatusForbidden {
-		t.Fatalf("bob patch = %d, want 403", code)
-	}
-	if code, _ := f.do(t, "bob", http.MethodDelete, "/v1/prompts/"+shared.PromptID, nil); code != http.StatusForbidden {
-		t.Fatalf("bob delete = %d, want 403", code)
-	}
-	if code, _ := f.do(t, "bob", http.MethodPatch, "/v1/prompts/"+private.PromptID, map[string]any{"title": "x"}); code != http.StatusNotFound {
-		t.Fatalf("bob patch private = %d, want 404", code)
-	}
-	if code, _ := f.do(t, "bob", http.MethodPost, "/v1/prompts/"+private.PromptID+"/use", nil); code != http.StatusNotFound {
-		t.Fatalf("bob use private = %d, want 404", code)
-	}
-	// The author edits; anyone who sees it may use it.
-	code, body = f.do(t, "alice", http.MethodPatch, "/v1/prompts/"+shared.PromptID, map[string]any{"title": "Release notes v2"})
-	if code != http.StatusOK || !strings.Contains(string(body), "Release notes v2") {
-		t.Fatalf("alice patch = %d (%s)", code, body)
-	}
-	code, body = f.do(t, "bob", http.MethodPost, "/v1/prompts/"+shared.PromptID+"/use", nil)
-	var used wire.Prompt
-	_ = json.Unmarshal(body, &used)
-	if code != http.StatusOK || used.UseCount != 1 {
-		t.Fatalf("bob use = %d %+v, want useCount 1", code, used)
-	}
-	// Org-admin moderation (gateway-gated /v1/tenant/*) removes tenant prompts
-	// but never another member's private one.
-	if code, _ := f.do(t, "bob", http.MethodDelete, "/v1/tenant/prompts/"+private.PromptID, nil); code != http.StatusNotFound {
-		t.Fatalf("moderate private = %d, want 404", code)
-	}
-	if code, _ := f.do(t, "bob", http.MethodDelete, "/v1/tenant/prompts/"+shared.PromptID, nil); code != http.StatusNoContent {
-		t.Fatalf("moderate tenant prompt = %d, want 204", code)
-	}
-}
-
-func TestPromptValidationAndSourceRoomMembership(t *testing.T) {
-	f := newTeamFixture(t)
-	for name, body := range map[string]map[string]any{
-		"no title":       {"title": " ", "body": "x"},
-		"no body":        {"title": "t", "body": "  "},
-		"bad visibility": {"title": "t", "body": "x", "visibility": "public"},
-	} {
-		if code, _ := f.do(t, "alice", http.MethodPost, "/v1/prompts", body); code != http.StatusBadRequest {
-			t.Fatalf("%s: status = %d, want 400", name, code)
-		}
-	}
-	if code, _ := f.do(t, "alice", http.MethodPost, "/v1/prompts", map[string]any{"title": "t", "body": "x", "sourceRoomId": "room-2", "sourceSeq": 1}); code != http.StatusForbidden {
-		t.Fatalf("foreign source room = %d, want 403", code)
-	}
-	if code, _ := f.do(t, "", http.MethodGet, "/v1/prompts", nil); code != http.StatusUnauthorized {
-		t.Fatalf("anonymous list = %d, want 401", code)
-	}
 }
 
 func TestTasksMembershipToggleAndTransientEvent(t *testing.T) {
@@ -254,7 +157,6 @@ func TestSearchScopesToMemberRooms(t *testing.T) {
 		t.Fatalf("delete = %d", code)
 	}
 	f.chatAs(t, "bob", "room-1", "部署窗口在周五")
-	f.do(t, "alice", http.MethodPost, "/v1/prompts", map[string]any{"title": "Deploy checklist", "body": "steps", "visibility": "tenant"})
 
 	search := func(user, query string) wire.SearchResponse {
 		t.Helper()
@@ -267,7 +169,7 @@ func TestSearchScopesToMemberRooms(t *testing.T) {
 		return out
 	}
 	res := search("alice", "DEPLOY")
-	var msgs, prompts int
+	var msgs int
 	for _, r := range res.Results {
 		switch r.Kind {
 		case wire.SearchMessage:
@@ -282,12 +184,12 @@ func TestSearchScopesToMemberRooms(t *testing.T) {
 			if r.AtMs <= 0 {
 				t.Fatalf("message hit atMs = %d, want the server-stamped time", r.AtMs)
 			}
-		case wire.SearchPrompt:
-			prompts++
+		default:
+			t.Fatalf("unexpected %s hit %+v", r.Kind, r)
 		}
 	}
-	if msgs != 1 || prompts != 1 {
-		t.Fatalf("alice results = %+v, want 1 message + 1 prompt", res.Results)
+	if msgs != 1 {
+		t.Fatalf("alice results = %+v, want 1 message", res.Results)
 	}
 	// The rooms param only narrows: naming a foreign room yields nothing.
 	code, body := f.do(t, "alice", http.MethodGet, "/v1/search?q=deploy&rooms=room-2", nil)

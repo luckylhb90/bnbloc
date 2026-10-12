@@ -1,33 +1,8 @@
 package wire
 
-// Team-feature DTOs: the prompt library (F2), chat messages marked as tasks
-// (F6), and global search (F7). realtime serves all three; the JSON tags are
-// the public contract the web client reads.
-
-// Prompt visibility values. A private prompt is visible to its author only; a
-// tenant prompt to every member of the author's tenant.
-const (
-	PromptPrivate = "private"
-	PromptTenant  = "tenant"
-)
-
-// Prompt is one prompt-library entry. Body is a copy taken at save time, never
-// a reference to the source message (editing or deleting the message does not
-// change the prompt).
-type Prompt struct {
-	PromptID     string   `json:"promptId"`
-	TenantID     string   `json:"tenantId"`
-	Author       string   `json:"author"`
-	Title        string   `json:"title"`
-	Body         string   `json:"body"`
-	Tags         []string `json:"tags"`
-	Visibility   string   `json:"visibility"`
-	SourceRoomID string   `json:"sourceRoomId,omitempty"`
-	SourceSeq    int64    `json:"sourceSeq,omitempty"`
-	UseCount     int64    `json:"useCount"`
-	CreatedAtMs  int64    `json:"createdAtMs"`
-	UpdatedAtMs  int64    `json:"updatedAtMs"`
-}
+// Team-feature DTOs: chat messages marked as tasks (F6) and global search
+// (F7). realtime serves both; the JSON tags are the public contract the web
+// client reads.
 
 // Message task status values.
 const (
@@ -68,12 +43,11 @@ type TaskUpdatedPayload struct {
 const (
 	SearchMessage  = "message"
 	SearchArtifact = "artifact"
-	SearchPrompt   = "prompt"
 )
 
 // SearchResult is one global-search hit. Snippet is plain text (the client
 // highlights the query); RoomID/RoomName/Seq/ChannelID locate a message hit,
-// ArtifactID an artifact hit, PromptID a prompt hit.
+// ArtifactID an artifact hit.
 type SearchResult struct {
 	Kind      string `json:"kind"`
 	RoomID    string `json:"roomId,omitempty"`
@@ -88,7 +62,6 @@ type SearchResult struct {
 	ArtifactKind string `json:"artifactKind,omitempty"`
 	MimeType     string `json:"mimeType,omitempty"`
 	FileName     string `json:"fileName,omitempty"`
-	PromptID     string `json:"promptId,omitempty"`
 	Title        string `json:"title,omitempty"`
 	Snippet      string `json:"snippet"`
 	Author       string `json:"author,omitempty"`

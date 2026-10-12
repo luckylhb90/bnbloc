@@ -91,11 +91,11 @@ type ScheduledMarker struct {
 	ScheduleID string `json:"scheduleId"`
 }
 
-// Room template visibility values (same semantics as prompts: private is the
-// author only, tenant is every member of the author's tenant).
+// Room template visibility values: private is the author only, tenant is
+// every member of the author's tenant.
 const (
-	TemplatePrivate = PromptPrivate
-	TemplateTenant  = PromptTenant
+	TemplatePrivate = "private"
+	TemplateTenant  = "tenant"
 )
 
 // TemplateAgent is a suggested agent of a template: a HINT only. After a

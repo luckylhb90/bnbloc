@@ -72,9 +72,8 @@ func main() {
 	// job exists (shared grants, policy and bridge advertisements).
 	svc.PlatformAgents = &realtimehttp.PlatformAgentGuard{Grants: backends.Grant, Settings: backends.Settings, Bridges: backends.BridgeJobs}
 	svc.Attachments = backends.Attachments
-	// Team features: prompt library, message tasks, and global search over
-	// the room feed this service persists.
-	svc.Prompts = backends.Prompts
+	// Team features: message tasks and global search over the room feed
+	// this service persists.
 	svc.Tasks = backends.MessageTasks
 	svc.Artifacts = backends.Artifacts
 	// Message search backend (docs/prd/2026-10-10-enterprise-scale.md §4):

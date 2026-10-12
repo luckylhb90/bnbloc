@@ -22,8 +22,21 @@ func schemaTableDDL(table string) (string, error) {
 	return schemaSQL[start : start+end], nil
 }
 
-// createSchemaTable runs schemaTableDDL(table) (idempotent: IF NOT EXISTS).
+// retiredTables are tables a later migration drops (and schema.sql no
+// longer holds). The locked migration that created one still runs on a
+// fresh database (the ledger replays every migration in order): creating a
+// retired table is skipped there, and the dropping migration removes it
+// from databases that have it.
+var retiredTables = map[string]string{
+	"prompts": "2026_10_prompt_packs",
+}
+
+// createSchemaTable runs schemaTableDDL(table) (idempotent: IF NOT EXISTS);
+// a retired table is not created.
 func createSchemaTable(ctx context.Context, db sqlConn, table string) error {
+	if _, retired := retiredTables[table]; retired {
+		return nil
+	}
 	ddl, err := schemaTableDDL(table)
 	if err != nil {
 		return err

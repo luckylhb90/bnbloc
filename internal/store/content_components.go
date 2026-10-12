@@ -16,8 +16,9 @@ import (
 // content_components (one row per component), content_component_versions
 // (immutable versions; the bundle is a blob addressed by sha256),
 // content_component_uses (where a component is enabled or pinned: for a
-// member, for a room) and content_permission_acks (a member confirmed a
-// version's declared permissions).
+// member, for a room), content_permission_acks (a member confirmed a
+// version's declared permissions) and content_prompt_uses (how often each
+// prompt of a prompt pack was inserted).
 
 // ContentScope is who sees a content component.
 type ContentScope string
@@ -183,6 +184,8 @@ type ContentComponentStore interface {
 	PutContentAck(ctx context.Context, a ContentAck) error
 	// ListContentAcks returns a member's acks of the given components.
 	ListContentAcks(ctx context.Context, subject string, componentIDs []string) ([]ContentAck, error)
+
+	ContentPromptUseStore
 }
 
 func contentLimit(n int) int {
@@ -230,11 +233,13 @@ type MemoryContentComponents struct {
 	versions   map[string][]ContentComponentVersion // component -> oldest first
 	uses       map[string]ContentUse                // scope kind\x00scope id\x00component
 	acks       map[string]ContentAck                // subject\x00component\x00version
+	promptUses map[string]map[string]int64          // component -> prompt -> uses
 }
 
 // NewMemoryContentComponents returns an empty in-memory store.
 func NewMemoryContentComponents() *MemoryContentComponents {
-	return &MemoryContentComponents{components: map[string]ContentComponent{}, versions: map[string][]ContentComponentVersion{}, uses: map[string]ContentUse{}, acks: map[string]ContentAck{}}
+	return &MemoryContentComponents{components: map[string]ContentComponent{}, versions: map[string][]ContentComponentVersion{}, uses: map[string]ContentUse{}, acks: map[string]ContentAck{},
+		promptUses: map[string]map[string]int64{}}
 }
 
 var _ ContentComponentStore = (*MemoryContentComponents)(nil)
@@ -378,6 +383,7 @@ func (s *MemoryContentComponents) DeleteContentComponent(_ context.Context, id s
 			delete(s.acks, k)
 		}
 	}
+	delete(s.promptUses, id)
 	return nil
 }
 

@@ -12,9 +12,9 @@ import (
 	"github.com/luckylhb90/bnbloc/internal/wire"
 )
 
-// Room templates (N3): tenant-scoped, author-owned room setups. Visibility
-// follows the prompt library: a template is visible to the viewer when the
-// viewer authored it or it is shared with the tenant.
+// Room templates (N3): tenant-scoped, author-owned room setups. A template
+// is visible to the viewer when the viewer authored it or it is shared with
+// the tenant.
 
 // ErrTemplateNotFound reports a template that does not exist or that the
 // viewer cannot see (another member's private template reads as missing).
