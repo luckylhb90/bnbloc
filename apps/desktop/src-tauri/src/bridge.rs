@@ -29,6 +29,7 @@ use tauri::async_runtime::JoinHandle;
 use tauri::AppHandle;
 
 use crate::child_process::{self, Backoff, Child, ChildEvent, STOP_GRACE};
+use crate::internal_ext::sidecar_util::env_key;
 use crate::settings::Settings;
 
 const MAX_LOG_LINES: usize = 200;
@@ -440,8 +441,9 @@ fn env_for(
         env.insert("BNBLOC_BRIDGE_TENANT".into(), s.tenant.clone());
     }
     // Cores → BNBLOC_CORES (comma-joined names) plus per-core endpoint
-    // overrides BNBLOC_CORE_<UPPER>_URL / _TOKEN. Empty url/token are omitted
-    // so the bridge's per-core auto-discovery fills them.
+    // overrides BNBLOC_CORE_<KEY>_URL / _TOKEN (env_key: the rule the
+    // bridge's coreset.EnvKey reads). Empty url/token are omitted so the
+    // bridge's per-core auto-discovery fills them.
     let names: Vec<String> = s
         .cores
         .iter()
@@ -455,12 +457,12 @@ fn env_for(
         if name.is_empty() {
             continue;
         }
-        let upper = name.to_ascii_uppercase();
+        let key = env_key(name);
         if let Some(url) = c.url.as_deref().map(str::trim).filter(|v| !v.is_empty()) {
-            env.insert(format!("BNBLOC_CORE_{upper}_URL"), url.to_string());
+            env.insert(format!("BNBLOC_CORE_{key}_URL"), url.to_string());
         }
         if let Some(token) = c.token.as_deref().map(str::trim).filter(|v| !v.is_empty()) {
-            env.insert(format!("BNBLOC_CORE_{upper}_TOKEN"), token.to_string());
+            env.insert(format!("BNBLOC_CORE_{key}_TOKEN"), token.to_string());
         }
     }
     // Desktop builds wire managed sidecar cores after user settings so
@@ -534,6 +536,52 @@ mod tests {
         // An empty disabled list omits the key entirely.
         let env = env_for(&Settings::default(), None, None);
         assert!(!env.contains_key("BNBLOC_BRIDGE_DISABLED_PROVIDERS"));
+    }
+
+    /// The env keys the shell writes are the ones the bridge reads: env_key
+    /// and Go's coreset.EnvKey are pinned to one fixture, and every core
+    /// override env_for emits goes through env_key.
+    #[test]
+    fn core_env_key_matches_go() {
+        #[derive(serde::Deserialize)]
+        struct Fixture {
+            cases: Vec<Case>,
+        }
+        #[derive(serde::Deserialize)]
+        struct Case {
+            name: String,
+            key: String,
+        }
+        let fixture: Fixture = serde_json::from_str(include_str!(
+            "../../../../internal/coreset/testdata/core_env_keys.json"
+        ))
+        .expect("fixture");
+        assert!(!fixture.cases.is_empty());
+        for case in fixture.cases {
+            assert_eq!(env_key(&case.name), case.key, "env_key({:?})", case.name);
+            let s = Settings {
+                cores: vec![crate::settings::CoreConfig {
+                    name: case.name.clone(),
+                    kind: "local".into(),
+                    url: Some("http://127.0.0.1:7000".into()),
+                    token: Some("t".into()),
+                }],
+                ..Default::default()
+            };
+            let env = env_for(&s, None, None);
+            assert_eq!(
+                env.get(&format!("BNBLOC_CORE_{}_URL", case.key))
+                    .map(String::as_str),
+                Some("http://127.0.0.1:7000"),
+                "{}: {env:?}",
+                case.name
+            );
+            assert_eq!(
+                env.get(&format!("BNBLOC_CORE_{}_TOKEN", case.key))
+                    .map(String::as_str),
+                Some("t")
+            );
+        }
     }
 
     #[test]

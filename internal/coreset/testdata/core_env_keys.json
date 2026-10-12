@@ -1,0 +1,12 @@
+{
+  "comment": "The core env-key rule shared by Go (coreset.EnvKey) and the desktop shell (env_key): BNBLOC_CORE_<key>_URL / _TOKEN.",
+  "cases": [
+    { "name": "acme", "key": "ACME" },
+    { "name": "Nimbus", "key": "NIMBUS" },
+    { "name": "my-core", "key": "MY_CORE" },
+    { "name": "a.b", "key": "A_B" },
+    { "name": "core_2", "key": "CORE_2" },
+    { "name": "x y", "key": "X_Y" },
+    { "name": "café", "key": "CAF_" }
+  ]
+}

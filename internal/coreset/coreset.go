@@ -117,7 +117,7 @@ func EntryFor(name string, p core.Provider, declared core.Endpoint) Entry {
 
 // envEndpoint reads a core's BNBLOC_CORE_<NAME>_URL / _TOKEN overrides.
 func envEndpoint(name string) (url, token string) {
-	upper := envKey(name)
+	upper := EnvKey(name)
 	return strings.TrimSpace(config.FromEnvRaw("BNBLOC_CORE_" + upper + "_URL")),
 		strings.TrimSpace(config.FromEnvRaw("BNBLOC_CORE_" + upper + "_TOKEN"))
 }
@@ -196,7 +196,11 @@ func splitCSV(v string) []string {
 	return out
 }
 
-func envKey(name string) string {
+// EnvKey is the one rule naming a core's env overrides: the core name
+// upper-cased with every character outside [A-Za-z0-9] replaced by '_', as in
+// BNBLOC_CORE_<EnvKey(name)>_URL. The desktop shell writes the same keys
+// (env_key in apps/desktop); testdata/core_env_keys.json pins both.
+func EnvKey(name string) string {
 	return strings.Map(func(r rune) rune {
 		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') {
 			return r
