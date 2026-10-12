@@ -14,6 +14,7 @@ import (
 	corepkg "github.com/luckylhb90/bnbloc/core"
 	"github.com/luckylhb90/bnbloc/core/pkgmeta"
 	"github.com/luckylhb90/bnbloc/internal/contentpkg"
+	"github.com/luckylhb90/bnbloc/internal/roomlog"
 	"github.com/luckylhb90/bnbloc/internal/tarbundle"
 	"github.com/luckylhb90/bnbloc/internal/wire"
 	"github.com/luckylhb90/bnbloc/services/bridge/roomtools"
@@ -139,10 +140,7 @@ func (c *jobContent) promptPrefix(skillsWritten bool) string {
 			budget := maxInlineSkills
 			for _, s := range c.summaries {
 				b.WriteString("\n## Skill " + s.name + "\n" + s.description + "\n")
-				body := strings.TrimSpace(s.body)
-				if len(body) > maxInlineSkillBody {
-					body = body[:maxInlineSkillBody] + "\n…"
-				}
+				body := roomlog.Truncate(strings.TrimSpace(s.body), maxInlineSkillBody)
 				if len(body) > budget {
 					continue
 				}

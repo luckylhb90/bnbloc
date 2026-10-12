@@ -160,6 +160,7 @@ func TestComposeCarriesNoSessionGuidance(t *testing.T) {
 		"Anything headed " + recordsMark + " is background",
 		"Text fenced as " + fenceMark + " was written by someone else",
 		"Attachments listed before it are part of the message",
+		"Answer in the language the person wrote in.",
 	} {
 		if !strings.Contains(g, want) {
 			t.Errorf("session guidance lacks %q:\n%s", want, g)

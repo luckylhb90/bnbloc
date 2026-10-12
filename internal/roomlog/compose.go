@@ -155,8 +155,9 @@ func entryCost(e Entry) int { return len(e.Text) + len(e.Speaker) + 2 }
 // shared persistence or single-writer coordination is required. A configurable
 // LLM-backed Summarizer can replace it later behind the same interface.
 type StructuredSummarizer struct {
-	// MaxLineChars truncates each speaker's quoted line. 0 uses a default.
-	MaxLineChars int
+	// MaxLineBytes bounds each speaker's quoted line (Truncate). 0 uses a
+	// default.
+	MaxLineBytes int
 }
 
 // Summarize implements Summarizer.
@@ -164,9 +165,9 @@ func (s StructuredSummarizer) Summarize(entries []Entry) string {
 	if len(entries) == 0 {
 		return ""
 	}
-	maxLine := s.MaxLineChars
+	maxLine := s.MaxLineBytes
 	if maxLine <= 0 {
-		maxLine = 160
+		maxLine = defaultSummaryLineBytes
 	}
 	type agg struct {
 		order    int
@@ -208,7 +209,7 @@ func (s StructuredSummarizer) Summarize(entries []Entry) string {
 	fmt.Fprintf(&b, "Earlier in this room (%d turns condensed):\n", len(entries))
 	for _, sp := range speakers {
 		a := bySpeaker[sp]
-		fmt.Fprintf(&b, "- %s (%s): %s\n", sp, turns(a.count), truncate(a.lastText, maxLine))
+		fmt.Fprintf(&b, "- %s (%s): %s\n", sp, turns(a.count), Truncate(a.lastText, maxLine))
 	}
 	return strings.TrimRight(b.String(), "\n")
 }
@@ -220,14 +221,5 @@ func turns(n int) string {
 	return fmt.Sprintf("%d turns", n)
 }
 
-// truncate shortens s to at most n runes, appending an ellipsis when cut.
-func truncate(s string, n int) string {
-	r := []rune(s)
-	if len(r) <= n {
-		return s
-	}
-	if n <= 1 {
-		return string(r[:n])
-	}
-	return string(r[:n-1]) + "…"
-}
+// defaultSummaryLineBytes bounds a speaker's quoted line in the summary.
+const defaultSummaryLineBytes = 400

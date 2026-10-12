@@ -116,7 +116,7 @@ func readArtifact(ctx context.Context, env *Env, args json.RawMessage) Result {
 	}
 	text := string(data)
 	if len(text) > maxArtifactText {
-		text = truncateBytes(text, maxArtifactText)
+		text = roomlog.Truncate(text, maxArtifactText)
 		out["truncated"] = true
 	}
 	out["content"] = roomlog.Fence(producer.String(), text)

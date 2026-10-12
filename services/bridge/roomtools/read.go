@@ -72,7 +72,7 @@ func readRoom(ctx context.Context, env *Env, args json.RawMessage) Result {
 		if e.Seq <= in.Since {
 			continue
 		}
-		e.Text = truncateBytes(strings.TrimSpace(e.Text), maxReadTextBytes)
+		e.Text = roomlog.Truncate(strings.TrimSpace(e.Text), maxReadTextBytes)
 		lines = append(lines, e)
 	}
 	more := len(lines) > in.Limit

@@ -17,9 +17,19 @@ type LiveGesture struct {
 	AtMs     int64
 	Actor    string
 	Artifact string
-	// State is the deliverable's compact live state (JSON), bounded by the
-	// bridge when it records the gesture.
+	// State is the deliverable's compact live state (JSON), bounded by
+	// MaxLiveStateBytes (BoundState) when the bridge records the gesture.
 	State string
+}
+
+// MaxLiveStateBytes bounds one gesture's live state in .room/live.md.
+const MaxLiveStateBytes = 2048
+
+// BoundState clamps an oversize live state rather than dropping it: the
+// agent should still see that something happened.
+func (g LiveGesture) BoundState() LiveGesture {
+	g.State = Truncate(g.State, MaxLiveStateBytes)
+	return g
 }
 
 // liveAuthor names who wrote the trail inside its fence.

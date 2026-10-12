@@ -1255,18 +1255,14 @@ func (b *Bridge) consumeRoom(ctx context.Context, room string) error {
 	}
 }
 
-const (
-	maxLiveGestures     = 32 // per room, newest kept
-	maxLiveGestureBytes = 2048
-)
+// maxLiveGestures bounds a room's trail: the newest kept.
+const maxLiveGestures = 32
 
 // recordGesture appends a member's live-artifact interaction to the room's
 // trail (bounded ring). Malformed or oversize states are clamped, not dropped:
 // the agent should still see THAT something happened.
 func (b *Bridge) recordGesture(room string, g roomlog.LiveGesture) {
-	if len(g.State) > maxLiveGestureBytes {
-		g.State = g.State[:maxLiveGestureBytes] + "…(truncated)"
-	}
+	g = g.BoundState()
 	b.liveMu.Lock()
 	defer b.liveMu.Unlock()
 	if b.live == nil {

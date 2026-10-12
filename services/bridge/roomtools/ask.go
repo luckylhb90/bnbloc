@@ -289,7 +289,7 @@ func replyText(ctx context.Context, env *Env, run wire.AgentRun) string {
 	if b.Len() == 0 {
 		return preview
 	}
-	return truncateBytes(b.String(), maxReplyBytes)
+	return roomlog.Truncate(b.String(), maxReplyBytes)
 }
 
 // deliverables lists what the dispatched agent published for the request
@@ -385,16 +385,4 @@ func toMap(v any) map[string]any {
 	out := map[string]any{}
 	_ = json.Unmarshal(raw, &out)
 	return out
-}
-
-// truncateBytes cuts s to at most n bytes on a rune boundary.
-func truncateBytes(s string, n int) string {
-	if len(s) <= n {
-		return s
-	}
-	cut := n
-	for cut > 0 && (s[cut]&0xC0) == 0x80 {
-		cut--
-	}
-	return s[:cut] + "…(truncated)"
 }

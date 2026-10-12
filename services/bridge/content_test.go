@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"unicode/utf8"
 
 	corepkg "github.com/luckylhb90/bnbloc/core"
 	"github.com/luckylhb90/bnbloc/internal/contentpkg"
@@ -251,6 +252,12 @@ func TestContentFallbackPrefixesThePrompt(t *testing.T) {
 	inline := (&jobContent{instructions: "x", summaries: []skillSummary{{name: "checklist", description: "d", body: "Run the tests."}}, skills: []corepkg.ProfileSkill{{Name: "checklist"}}}).promptPrefix(false)
 	if !strings.Contains(inline, "## Skill checklist") || !strings.Contains(inline, "Run the tests.") {
 		t.Fatalf("inline prefix = %s", inline)
+	}
+	// An inlined body over the bound is cut on a rune boundary: a
+	// multi-byte character is never split.
+	long := (&jobContent{instructions: "x", summaries: []skillSummary{{name: "c", description: "d", body: strings.Repeat("写", maxInlineSkillBody)}}}).promptPrefix(false)
+	if !utf8.ValidString(long) || !strings.Contains(long, "写…") {
+		t.Fatalf("an inlined body was cut inside a character (valid UTF-8: %v)", utf8.ValidString(long))
 	}
 }
 

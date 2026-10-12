@@ -41,6 +41,8 @@ const (
 	maxComponentFileText = 64 << 10
 	// maxComponentText bounds all of them.
 	maxComponentText = 512 << 10
+	// maxListedDescription bounds each description list_components shows.
+	maxListedDescription = 300
 )
 
 // Publish scopes (publish_component).
@@ -404,7 +406,7 @@ func listComponents(ctx context.Context, env *Env, args json.RawMessage) Result 
 		return refusal("listing the Library", err)
 	}
 	for i := range items {
-		items[i].Description = truncateBytes(items[i].Description, 300)
+		items[i].Description = roomlog.Truncate(items[i].Description, maxListedDescription)
 	}
 	return Result{Value: map[string]any{"components": items}}
 }
