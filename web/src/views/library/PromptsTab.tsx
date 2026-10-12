@@ -6,6 +6,7 @@ import {
   MagnifyingGlassIcon,
   PencilSimpleIcon,
   PlusIcon,
+  SparkleIcon,
   TrashIcon,
   UploadSimpleIcon,
 } from "@phosphor-icons/react";
@@ -15,6 +16,7 @@ import { announcePromptPacksChanged } from "@/lib/promptPacksApi";
 import { relativeTime } from "@/lib/format";
 import { packUses, PERSONAL_PROMPT_PACK } from "@/lib/promptPacks";
 import { takeLibraryQuery } from "@/lib/team";
+import { improvePrompt, workshopPrompt } from "@/lib/workshop";
 import { Button } from "@/ui/Button";
 import { Badge, Card, Skeleton } from "@/ui/Card";
 import { ConfirmDialog } from "@/ui/Dialog";
@@ -25,12 +27,14 @@ import { useToast } from "@/ui/Toast";
 import { AddToRoomDialog, PromptImportDialog, PromptPackViewDialog } from "@/views/library/PromptPackDialogs";
 import { PromptPackEditorDialog, type PromptPackTarget } from "@/views/library/PromptPackEditorDialog";
 import { ContentByline, PublishDialog, ShareDialog, SharingActions, SharingStatus } from "@/views/library/ContentSharing";
+import { useOpenWorkshop } from "@/views/library/workshopFlow";
 
 // PromptsTab is the Library's prompt packs: the member's packs (and those
 // published to them) with search, view, create by form, import, new
 // version, delete, "on for me" (their composer) and "turn on for a room".
-export function PromptsTab({ tabs }: { readonly tabs: React.ReactNode }) {
+export function PromptsTab({ tabs, onOpenRoom }: { readonly tabs: React.ReactNode; readonly onOpenRoom: (roomId: string) => void }) {
   const toast = useToast();
+  const workshop = useOpenWorkshop(onOpenRoom);
   const [items, setItems] = useState<ContentComponent[] | null>(null);
   const [enabled, setEnabled] = useState<ReadonlySet<string>>(new Set());
   const [q, setQ] = useState(takeLibraryQuery);
@@ -117,9 +121,13 @@ export function PromptsTab({ tabs }: { readonly tabs: React.ReactNode }) {
             <UploadSimpleIcon size={16} />
             Import
           </Button>
-          <Button variant="primary" onClick={() => setEditing({ kind: "new" })}>
+          <Button variant="outline" onClick={() => setEditing({ kind: "new" })}>
             <PlusIcon size={16} />
-            New prompt pack
+            Create manually
+          </Button>
+          <Button variant="primary" onClick={() => void workshop.open(workshopPrompt("prompt"))} disabled={workshop.busy}>
+            <SparkleIcon size={16} weight="fill" />
+            {workshop.busy ? "Opening…" : "Create with AI"}
           </Button>
         </div>
         {items === null ? (
@@ -135,7 +143,7 @@ export function PromptsTab({ tabs }: { readonly tabs: React.ReactNode }) {
             hint={
               q
                 ? undefined
-                : "Save a message as a prompt (it goes to My prompts), create a pack, or import a markdown or json file of prompts. Turn a pack on for yourself or for a room."
+                : "Save a message as a prompt (it goes to My prompts), create a pack with AI or by hand, or import a markdown or json file of prompts. Turn a pack on for yourself or for a room."
             }
           />
         ) : (
@@ -176,6 +184,18 @@ export function PromptsTab({ tabs }: { readonly tabs: React.ReactNode }) {
                     <button type="button" onClick={() => setRooming(c)} title="Turn on for a room" aria-label={`Turn ${c.name} on for a room`} className="tactile hover:text-[var(--color-fg)]">
                       <DoorOpenIcon size={15} />
                     </button>
+                    {c.mine && (
+                      <button
+                        type="button"
+                        onClick={() => void workshop.open(improvePrompt(c))}
+                        disabled={workshop.busy}
+                        title="Improve with AI"
+                        aria-label={`Improve ${c.name} with AI`}
+                        className="tactile hover:text-[var(--color-fg)]"
+                      >
+                        <SparkleIcon size={15} />
+                      </button>
+                    )}
                     {c.mine && (
                       <button type="button" onClick={() => setEditing({ base: c })} title="New version" aria-label={`New version of ${c.name}`} className="tactile hover:text-[var(--color-fg)]">
                         <PencilSimpleIcon size={15} />

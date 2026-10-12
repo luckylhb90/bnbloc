@@ -24,7 +24,7 @@ export function Library({ onOpenRoom }: { onOpenRoom: (roomId: string) => void }
   const tabs = <Segment options={LIBRARY_TABS} value={tab} onChange={setTab} className="w-[32rem] max-w-full" />;
   if (tab === "experts") return <ContentTab key="expert" kind="expert" tabs={tabs} onOpenRoom={onOpenRoom} />;
   if (tab === "skills") return <ContentTab key="skill" kind="skill" tabs={tabs} onOpenRoom={onOpenRoom} />;
-  if (tab === "prompts") return <PromptsTab tabs={tabs} />;
+  if (tab === "prompts") return <PromptsTab tabs={tabs} onOpenRoom={onOpenRoom} />;
   if (tab === "tools") return <ToolsTab tabs={tabs} />;
   return <TemplatesTab tabs={tabs} onOpenRoom={onOpenRoom} />;
 }

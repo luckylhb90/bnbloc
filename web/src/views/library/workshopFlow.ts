@@ -4,12 +4,14 @@ import { useAuth } from "@/lib/auth";
 import { BUILDER_EXPERT_ID, contentLabel, type ContentComponent } from "@/lib/contentComponents";
 import { contentApi } from "@/lib/contentComponentsApi";
 import { platformAgentsApi } from "@/lib/platformAgentsApi";
+import { announcePromptPacksChanged } from "@/lib/promptPacksApi";
 import { browserStorage } from "@/lib/platformRouting";
 import { composerAgentPicks, composerDrafts, composerExpertPicks, queueLibraryTab } from "@/lib/team";
 import { routeHash } from "@/lib/useHashRoute";
 import {
   WORKSHOP_ROOM_NAME,
   cachedWorkshop,
+  libraryTabOf,
   rememberWorkshop,
   tryItDraft,
   workshopAgent,
@@ -106,13 +108,15 @@ export function useOpenWorkshop(onOpenRoom: (roomId: string) => void): { readonl
 
 // openInLibrary shows the Library tab of a component's kind.
 export function openInLibrary(c: Pick<ContentComponent, "kind">): void {
-  queueLibraryTab(c.kind === "skill" ? "skills" : "experts");
+  queueLibraryTab(libraryTabOf(c.kind));
   window.location.hash = routeHash({ kind: "view", view: "library" });
 }
 
 // tryInRoom puts a saved component to use in a room: an expert is picked in
-// the composer (with its first quick prompt); a skill pack is turned on for
-// the room (its owner or admins may), so the next turn loads it.
+// the composer (with its first quick prompt); a skill pack or a prompt pack
+// is turned on for the room (its owner or admins may), so the next turn
+// loads the skills, or the composer offers the prompts (a pack's first
+// slash command is put in the composer).
 export async function tryInRoom(roomId: string, c: ContentComponent): Promise<string | null> {
   if (c.kind === "expert") {
     composerExpertPicks.queue(roomId, { id: c.id });
@@ -122,7 +126,11 @@ export async function tryInRoom(roomId: string, c: ContentComponent): Promise<st
   }
   try {
     await contentApi.putUse("room", c.id, { roomId });
-    composerDrafts.queue(roomId, `Use the ${c.name} skill to `);
+    if (c.kind === "prompt") {
+      announcePromptPacksChanged();
+      const draft = tryItDraft(c);
+      if (draft) composerDrafts.queue(roomId, draft);
+    } else composerDrafts.queue(roomId, `Use the ${c.name} skill to `);
     return null;
   } catch {
     return `Turn ${contentLabel(c)} on in the Library to try it`;

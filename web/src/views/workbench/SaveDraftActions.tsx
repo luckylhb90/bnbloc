@@ -17,7 +17,7 @@ interface DraftPackage {
 }
 
 // draftPackages finds the content packages among a turn's deliverables: a
-// component.json of an expert or skill pack inside a directory (a package at
+// component.json of an expert, skill pack or prompt pack inside a directory (a package at
 // the workspace root is not offered: it would sweep every deliverable in).
 async function draftPackages(roomId: string, artifactIds: readonly string[]): Promise<DraftPackage[]> {
   const out: DraftPackage[] = [];
@@ -58,8 +58,9 @@ async function packDraft(roomId: string, dir: string): Promise<Blob> {
   return new Blob([tarArchive(entries)], { type: "application/x-tar" });
 }
 
-// SaveDraftActions offers "Save as expert" / "Save as skill pack" under a
-// turn's deliverables when they hold a drafted package: it packs the drafted
+// SaveDraftActions offers "Save as expert" / "Save as skill pack" / "Save as
+// prompt pack" under a turn's deliverables when they hold a drafted
+// package: it packs the drafted
 // files and saves them as the clicking member (a new component, or a new
 // version of theirs with that name). The server's validator message shows
 // inline.

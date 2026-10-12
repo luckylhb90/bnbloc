@@ -15,9 +15,9 @@ export const WORKSHOP_ROOM_NAME = "Expert workshop";
 // The UI strings are English (the web has no i18n layer); the builder itself
 // answers in the member's language.
 export function workshopPrompt(kind: ContentKind): string {
-  return kind === "skill"
-    ? "Help me create a skill pack that teaches an agent to ___. It is used when ___. Example task: [an example]"
-    : "Help me create a ___ expert that is good at ___. My background: [your field and experience]";
+  if (kind === "skill") return "Help me create a skill pack that teaches an agent to ___. It is used when ___. Example task: [an example]";
+  if (kind === "prompt") return "Help me create a prompt pack for ___: prompts my team reuses when ___. Examples of what we ask: [an example]";
+  return "Help me create a ___ expert that is good at ___. My background: [your field and experience]";
 }
 
 // improvePrompt is the prefilled request of "Improve with AI": it names the
@@ -26,11 +26,19 @@ export function improvePrompt(c: Pick<ContentComponent, "id" | "kind" | "name" |
   return `Improve the ${contentKindWord(c.kind)} "${contentLabel(c)}" (id ${c.id}): ___`;
 }
 
-// tryItDraft is the composer text of "Try it now": the component's first
-// quick prompt when it has one.
-export function tryItDraft(c: Pick<ContentComponent, "quickPrompts">): string {
-  const first = c.quickPrompts?.find((q) => q.prompt.trim());
-  return first ? first.prompt.trim() : "";
+// tryItDraft is the composer text of "Try it now": an expert's first quick
+// prompt, a prompt pack's first slash command (a pack is turned on for the
+// room first, so the command works), else nothing.
+export function tryItDraft(c: Pick<ContentComponent, "quickPrompts" | "prompts">): string {
+  const first = c.quickPrompts?.find((q) => q.prompt?.trim());
+  if (first?.prompt) return first.prompt.trim();
+  const slash = c.prompts?.find((p) => p.slash)?.slash;
+  return slash ? `${slash} ` : "";
+}
+
+// libraryTabOf is the Library tab that lists a kind.
+export function libraryTabOf(kind: ContentKind): "experts" | "skills" | "prompts" {
+  return kind === "skill" ? "skills" : kind === "prompt" ? "prompts" : "experts";
 }
 
 // WorkshopAgent is the agent the builder runs on: the member's own agent

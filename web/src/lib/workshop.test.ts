@@ -5,6 +5,7 @@ import {
   WORKSHOP_ROOM_NAME,
   cachedWorkshop,
   improvePrompt,
+  libraryTabOf,
   librarySaves,
   librarySnapshot,
   rememberWorkshop,
@@ -54,6 +55,11 @@ eq(improvePrompt(comp({ id: "cc_9" })), 'Improve the expert "Reviewer" (id cc_9)
 eq(improvePrompt(comp({ id: "cc_8", kind: "skill", name: "csv", displayName: "" })), 'Improve the skill pack "csv" (id cc_8): ___', "improve a skill pack");
 eq(tryItDraft(comp({ quickPrompts: [{ title: "Review", prompt: " Review this diff " }] })), "Review this diff", "first quick prompt");
 eq(tryItDraft(comp({})), "", "no quick prompt");
+eq(tryItDraft(comp({ kind: "prompt", prompts: [{ id: "a", title: "A", body: "b", uses: 0 }, { id: "n", title: "Notes", body: "c", slash: "/notes", uses: 0 }] })), "/notes ", "a pack's first slash command");
+// Prompt packs are authored by the same builder.
+assert(workshopPrompt("prompt").startsWith("Help me create a prompt pack for ___"), "prompt pack prefill");
+eq(improvePrompt(comp({ id: "cc_7", kind: "prompt", name: "kit", displayName: "Kit" })), 'Improve the prompt pack "Kit" (id cc_7): ___', "improve a prompt pack");
+eq([libraryTabOf("expert"), libraryTabOf("skill"), libraryTabOf("prompt")], ["experts", "skills", "prompts"], "library tabs");
 
 // The builder runs on the member's own online agent first, else a platform
 // agent, else none.
