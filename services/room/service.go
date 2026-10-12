@@ -504,6 +504,9 @@ func (s *Service) handleRedeem(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
+	// A redeem by someone already in the room announces a join again;
+	// what listens is idempotent (an existing copy is left unchanged).
+	s.publishMemberJoined(r.Context(), m.RoomID, m.UserID)
 	writeJSON(w, http.StatusOK, map[string]any{"roomId": m.RoomID, "membership": map[string]string{"userId": m.UserID, "role": string(m.Role)}})
 }
 
@@ -571,6 +574,7 @@ func (s *Service) handleJoinRoom(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	s.publishMemberJoined(r.Context(), roomID, caller)
 	writeJSON(w, http.StatusOK, map[string]any{"roomId": roomID, "role": string(store.RoleMember)})
 }
 

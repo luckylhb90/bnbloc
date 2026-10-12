@@ -689,6 +689,7 @@ func (s *Service) handleInternalPublish(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	s.deliverPluginEvent(r.Context(), published)
+	s.onMemberJoined(r.Context(), published)
 	w.WriteHeader(http.StatusOK)
 }
 

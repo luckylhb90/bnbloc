@@ -108,3 +108,41 @@ func TestRefusedRemovalPublishesNothing(t *testing.T) {
 		t.Fatalf("refused kick = %d with %d events, want 403 and none", resp.StatusCode, len(pub.events))
 	}
 }
+
+// Every way a person becomes a member publishes member_joined (realtime
+// hands them the room's standing content shares); a re-role does not.
+func TestJoinsPublishMemberJoined(t *testing.T) {
+	srv, svc := newTestServer(t)
+	pub := &capturePublisher{}
+	svc.Publisher = pub
+	resp := do(t, http.MethodPost, srv.URL+"/v1/rooms", "alice", map[string]string{"roomId": "room-1", "name": "Team", "visibility": "shared"})
+	resp.Body.Close()
+	pub.events = nil
+	steps := []struct {
+		user, method, path string
+		body               any
+	}{
+		{"alice", http.MethodPost, "/v1/rooms/room-1/members", map[string]string{"userId": "bob"}},
+		{"alice", http.MethodPost, "/v1/rooms/room-1/members", map[string]string{"userId": "bob", "role": "admin"}}, // a re-role
+		{"carol", http.MethodPost, "/v1/rooms/room-1/join", nil},
+		{"dave", http.MethodPost, "/v1/invites/inv1/redeem", nil},
+	}
+	_ = svc.Store.CreateInvite(dctx(), store.Invite{Code: "inv1", RoomID: "room-1", Role: store.RoleMember, ExpiresAtMs: 1 << 50, Capacity: 5})
+	for _, st := range steps {
+		resp := do(t, st.method, srv.URL+st.path, st.user, st.body)
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("%s %s = %d", st.method, st.path, resp.StatusCode)
+		}
+	}
+	var joined []string
+	for _, ev := range pub.events {
+		if ev.Kind != wire.EventMemberJoined || ev.RoomID != "room-1" {
+			t.Fatalf("event = %+v", ev)
+		}
+		joined = append(joined, ev.Payload.(wire.MemberJoinedPayload).UserID)
+	}
+	if strings.Join(joined, ",") != "bob,carol,dave" {
+		t.Fatalf("joined = %v, want bob,carol,dave", joined)
+	}
+}

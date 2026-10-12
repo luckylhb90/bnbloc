@@ -110,6 +110,18 @@ type MemberRemovedPayload struct {
 	UserID string `json:"userId"`
 }
 
+// EventMemberJoined (MemberJoinedPayload) is published by bnbloc-room,
+// transient, when a person becomes a member of a room (added, joined a
+// shared room, redeemed an invite, a template's default member). Realtime's
+// publish tap gives the new member the room's standing content shares
+// (internal/contentshare); clients may refresh their member lists on it.
+const EventMemberJoined = "member_joined"
+
+// MemberJoinedPayload is the payload of an EventMemberJoined event.
+type MemberJoinedPayload struct {
+	UserID string `json:"userId"`
+}
+
 // Job notices. A synthetic assistant row about a job (a refused borrow, a
 // failed or swept turn) is reported under the job's OWN activity session,
 // never a real agent session: activity dedupes replies per

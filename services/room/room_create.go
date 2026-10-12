@@ -10,6 +10,7 @@ import (
 	"github.com/luckylhb90/bnbloc/internal/obs"
 	"github.com/luckylhb90/bnbloc/internal/store"
 	"github.com/luckylhb90/bnbloc/internal/tenant"
+	"github.com/luckylhb90/bnbloc/internal/wire"
 )
 
 // The one room-creation and member-add paths. POST /v1/rooms, a handoff
@@ -68,7 +69,29 @@ func (s *Service) addMember(ctx context.Context, roomID, userID string, role sto
 	if role == store.RoleOwner {
 		return errMemberPolicy{http.StatusBadRequest, "use ownership transfer to grant owner"}
 	}
-	return s.Store.AddMember(ctx, store.Membership{RoomID: roomID, UserID: userID, Role: role, JoinedAtMs: s.Now()})
+	prev, had := s.Store.GetMember(ctx, roomID, userID)
+	if err := s.Store.AddMember(ctx, store.Membership{RoomID: roomID, UserID: userID, Role: role, JoinedAtMs: s.Now()}); err != nil {
+		return err
+	}
+	if !had || prev.AgentHost {
+		s.publishMemberJoined(ctx, roomID, userID)
+	}
+	return nil
+}
+
+// publishMemberJoined announces that userID became a (human) member of
+// roomID: a re-role is not a join, an agent host turned member is.
+// Realtime hands the new member the room's standing content shares.
+func (s *Service) publishMemberJoined(ctx context.Context, roomID, userID string) {
+	if s.Publisher == nil {
+		return
+	}
+	s.Publisher.Publish(ctx, wire.Event{
+		RoomID:   roomID,
+		Kind:     wire.EventMemberJoined,
+		Payload:  wire.MemberJoinedPayload{UserID: userID},
+		AtUnixMs: s.Now(),
+	})
 }
 
 // writeMemberErr maps an addMember error to its HTTP status.
