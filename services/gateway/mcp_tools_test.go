@@ -290,3 +290,53 @@ func TestContentEffectiveResolvesMCP(t *testing.T) {
 		t.Fatalf("mcp = %+v missing = %v", eff.MCP, eff.Missing)
 	}
 }
+
+// An http tool declaring a member OAuth sign-in reaches the member catalog
+// with its server URL and sign-in hints (the desktop signs in from them);
+// it has no org connector.
+func TestMemberCatalogListsOAuthMCPTool(t *testing.T) {
+	g, host := mcpGateway(t, true)
+	pkg := pkgmeta.Package{
+		Kind: pkgmeta.KindMCPPackageV1, Name: "drive", Version: "1.0.0", Publisher: "acme",
+		Contract: pkgmeta.MCPContractV1, Runtime: pkgmeta.RuntimeEndpoint,
+		Endpoint: &pkgmeta.Endpoint{BaseURL: "http://" + host + "/drive"}, Permissions: pkgmeta.Permissions{Network: []string{strings.Split(host, ":")[0]}},
+		MCP: &pkgmeta.MCP{
+			Tools: []pkgmeta.MCPTool{{Name: "list_files"}},
+			HTTP:  &pkgmeta.MCPHTTP{Auth: pkgmeta.MCPHTTPAuth{Scheme: pkgmeta.MCPAuthOAuth, ClientID: "bnbloc", Scopes: []string{"files:read"}}},
+		},
+	}
+	raw, _ := json.Marshal(pkg)
+	if _, err := g.svc.corePipeline().Install(context.Background(), extpipe.InstallRequest{Body: raw, Actor: "root"}); err != nil {
+		t.Fatalf("install: %v", err)
+	}
+	code, body := g.do("maya", http.MethodGet, "/v1/components?kind=mcp", "", nil)
+	if code != http.StatusOK {
+		t.Fatalf("catalog = %d %s", code, body)
+	}
+	var out struct {
+		Components []struct {
+			Name     string            `json:"name"`
+			Endpoint *pkgmeta.Endpoint `json:"endpoint"`
+			MCP      *struct {
+				Transport     string           `json:"transport"`
+				Credentials   string           `json:"credentials"`
+				HTTP          *pkgmeta.MCPHTTP `json:"http"`
+				OrgConfigured *bool            `json:"orgConfigured"`
+			} `json:"mcp"`
+		} `json:"components"`
+	}
+	if err := json.Unmarshal(body, &out); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range out.Components {
+		if c.Name != "drive" {
+			continue
+		}
+		if c.Endpoint == nil || c.Endpoint.BaseURL != "http://"+host+"/drive" || c.MCP == nil || c.MCP.Transport != "http" ||
+			c.MCP.HTTP == nil || c.MCP.HTTP.Auth.Scheme != "oauth" || c.MCP.HTTP.Auth.ClientID != "bnbloc" || c.MCP.Credentials != "" || c.MCP.OrgConfigured != nil {
+			t.Fatalf("drive = %s", body)
+		}
+		return
+	}
+	t.Fatalf("drive not listed: %s", body)
+}
