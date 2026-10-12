@@ -133,6 +133,18 @@ Library).
   (the pattern of `TestNoSilent5xx`: scan the sources for the forbidden
   construct outside the owner's file). A rule that matters and has no test
   will be re-implemented.
+- **An architecture test reads the repo only through `internal/archtest`**:
+  `archtest.Scan(t, archtest.Opts{Lang: archtest.Go, Roots: …}, fn)` (or
+  `archtest.Files`) hands it each source file as a repo-relative slash path
+  with its contents. archtest owns what the repo's sources are: the tree
+  under `go.mod` without dot directories (git worktrees nested under
+  `.claude/` once made a scan read other branches' copies), `node_modules`,
+  `target`, `dist`, `testdata` or the embedded web build. A scan picks the
+  language (Go, TS, Rust), whether test files count (`Tests`), and its
+  sub-roots; a root asked for by name (`.github`) is read.
+  `TestRepoScannersUseArchtest` fails on a `filepath.Walk`/`WalkDir`/
+  `fs.WalkDir` in a test whose root is not a tree the test made
+  (`t.TempDir()`, `os.MkdirTemp`, a `testdata` path, an `fstest.MapFS`).
 - **Memory and MySQL stores share one contract test suite** per interface; a
   behaviour only one implementation has is a bug in the other. The rig is
   `forEachBackend` (`internal/store/store_contract_test.go`): memory, plus
