@@ -403,7 +403,7 @@ export function Agents() {
                   <div className="flex items-center gap-2">
                     {state === "running" || state === "starting" ? (
                       <>
-                        <Button size="sm" variant="outline" onClick={() => desktop.restart()}>
+                        <Button size="sm" variant="outline" onClick={() => desktop.start()}>
                           <ArrowClockwiseIcon size={15} /> Restart
                         </Button>
                         <Button size="sm" variant="danger" onClick={() => desktop.stop()}>

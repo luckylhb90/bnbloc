@@ -138,17 +138,32 @@ pub(super) fn hex_lower(bytes: &[u8]) -> String {
     s
 }
 
+/// This build's catalog platform (`<goos>-<goarch>`, the artifact key), from
+/// the one Rust → Go table the sidecar build script reads too
+/// (`apps/desktop/go-platforms.json`). A value the table lacks maps to
+/// `unsupported`, which names no artifact: the same refusal as the build
+/// script's.
 pub(super) fn current_platform() -> String {
-    let goos = match std::env::consts::OS {
-        "macos" => "darwin",
-        other => other,
+    platform_for(std::env::consts::OS, std::env::consts::ARCH)
+}
+
+fn platform_for(os: &str, arch: &str) -> String {
+    #[derive(serde::Deserialize)]
+    struct Table {
+        goos: std::collections::HashMap<String, String>,
+        goarch: std::collections::HashMap<String, String>,
+    }
+    static TABLE: std::sync::OnceLock<Table> = std::sync::OnceLock::new();
+    let table = TABLE.get_or_init(|| {
+        serde_json::from_str(include_str!("../../../go-platforms.json"))
+            .expect("go-platforms.json is valid")
+    });
+    let go = |map: &std::collections::HashMap<String, String>, key: &str| {
+        map.get(key)
+            .cloned()
+            .unwrap_or_else(|| "unsupported".to_string())
     };
-    let goarch = match std::env::consts::ARCH {
-        "x86_64" => "amd64",
-        "aarch64" => "arm64",
-        other => other,
-    };
-    format!("{goos}-{goarch}")
+    format!("{}-{}", go(&table.goos, os), go(&table.goarch, arch))
 }
 
 pub(super) fn exe_suffix() -> &'static str {
@@ -448,6 +463,17 @@ mod tests {
         assert!(!binary_ready(&path, SHA_A).await);
         std::fs::remove_file(&path).expect("cleanup");
         assert!(!binary_ready(&path, abc).await);
+    }
+
+    #[test]
+    fn platforms_come_from_the_shared_table() {
+        assert_eq!(platform_for("macos", "aarch64"), "darwin-arm64");
+        assert_eq!(platform_for("linux", "x86_64"), "linux-amd64");
+        assert_eq!(platform_for("windows", "x86_64"), "windows-amd64");
+        assert_eq!(platform_for("windows", "x86"), "windows-386");
+        // Unknown on either side: no artifact can match.
+        assert_eq!(platform_for("linux", "riscv64"), "linux-unsupported");
+        assert!(!current_platform().contains("unsupported"), "this build is mapped");
     }
 
     #[test]

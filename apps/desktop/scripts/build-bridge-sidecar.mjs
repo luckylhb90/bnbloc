@@ -22,7 +22,7 @@
 // the platform stop semantics.
 
 import { execFileSync } from "node:child_process";
-import { mkdirSync } from "node:fs";
+import { mkdirSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -39,19 +39,19 @@ const PKG = "./services/bridge/cmd";
 export const UNIVERSAL_MAC = "universal-apple-darwin";
 export const MAC_ARCH_TRIPLES = ["aarch64-apple-darwin", "x86_64-apple-darwin"];
 
-// Map a Rust target triple to Go's GOOS/GOARCH and the executable suffix.
-// An unrecognized triple is an error: silently building linux/amd64 for it
-// would ship a sidecar that cannot run.
-export function goEnvForTriple(triple) {
-  let goos;
-  if (triple.includes("apple") || triple.includes("darwin")) goos = "darwin";
-  else if (triple.includes("windows")) goos = "windows";
-  else if (triple.includes("linux")) goos = "linux";
+// The one Rust → Go platform table, shared with the shell's
+// sidecar_util::current_platform (apps/desktop/go-platforms.json).
+export const PLATFORMS = JSON.parse(readFileSync(resolve(desktopDir, "go-platforms.json"), "utf8"));
 
-  let goarch;
-  if (triple.startsWith("aarch64") || triple.startsWith("arm64")) goarch = "arm64";
-  else if (triple.startsWith("x86_64")) goarch = "amd64";
-  else if (triple.startsWith("i686") || triple.startsWith("i586")) goarch = "386";
+// Map a Rust target triple to Go's GOOS/GOARCH and the executable suffix:
+// the triple's first component is the arch, any later component naming an OS
+// in the table is the OS. An unrecognized triple is an error: silently
+// building linux/amd64 for it would ship a sidecar that cannot run.
+export function goEnvForTriple(triple) {
+  const [arch, ...rest] = triple.split("-");
+  const goarch = Object.hasOwn(PLATFORMS.goarch, arch) ? PLATFORMS.goarch[arch] : undefined;
+  const os = rest.find((part) => Object.hasOwn(PLATFORMS.goos, part));
+  const goos = os ? PLATFORMS.goos[os] : undefined;
 
   if (!goos || !goarch) {
     throw new Error(`unsupported target triple for the bridge sidecar: ${triple}`);

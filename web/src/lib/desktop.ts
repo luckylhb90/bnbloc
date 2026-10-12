@@ -155,6 +155,8 @@ export const desktop = {
     return (await t.invoke("bridge_status")) as BridgeStatus;
   },
 
+  // Start the bridge; a running one is restarted (the shell stops the
+  // current run first).
   async start(): Promise<void> {
     const t = tauri();
     if (!t) return;
@@ -165,12 +167,6 @@ export const desktop = {
     const t = tauri();
     if (!t) return;
     await t.invoke("bridge_stop");
-  },
-
-  async restart(): Promise<void> {
-    const t = tauri();
-    if (!t) return;
-    await t.invoke("bridge_restart");
   },
 
   async getSettings(): Promise<DesktopSettings | null> {

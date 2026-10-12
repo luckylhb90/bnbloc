@@ -59,6 +59,8 @@ fn bridge_status(state: State<'_, AppState>) -> Status {
     state.supervisor.status()
 }
 
+/// Start the bridge, or restart it when it runs (the supervisor stops the
+/// current run first): the one start/restart command.
 #[tauri::command]
 fn bridge_start(state: State<'_, AppState>) -> Result<(), String> {
     let settings = state.settings.lock().clone();
@@ -69,12 +71,6 @@ fn bridge_start(state: State<'_, AppState>) -> Result<(), String> {
 fn bridge_stop(state: State<'_, AppState>) -> Result<(), String> {
     state.supervisor.stop();
     Ok(())
-}
-
-#[tauri::command]
-fn bridge_restart(state: State<'_, AppState>) -> Result<(), String> {
-    let settings = state.settings.lock().clone();
-    state.supervisor.start(settings)
 }
 
 #[tauri::command]
@@ -380,7 +376,6 @@ pub fn run() {
             bridge_status,
             bridge_start,
             bridge_stop,
-            bridge_restart,
             get_settings,
             set_settings,
             internal_adapter_session,
