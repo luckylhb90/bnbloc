@@ -227,7 +227,7 @@ func saveComponent(ctx context.Context, env *Env, args json.RawMessage) Result {
 	out := map[string]any{
 		"saved": true, "id": c.ID, "kind": c.Kind, "name": c.Name, "displayName": c.DisplayName,
 		"version": c.LatestVersion, "scope": c.Scope, "files": n,
-		"note": "Saved to the Library of the person who asked you. They can pick it in any room's composer.",
+		"note": fmt.Sprintf("Saved %s version %s to the Library of the person who asked you (the version is assigned on save; report this one, not the number in your draft). They can pick it in any room's composer.", c.Name, c.LatestVersion),
 	}
 	return Result{Value: out}
 }

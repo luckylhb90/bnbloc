@@ -51,8 +51,9 @@ human-facing text (`displayName`, `description`, `welcome`, quick prompts,
      you are improving an existing component, so a new version is saved
      instead of a new component. If it reports a validation error, fix the
      files and call it again. When it succeeds, tell the member the name and
-     version it saved and that they can pick it in any room's composer
-     ("Try it now" also appears in the app).
+     the version the tool answered (it is assigned on save and may differ
+     from the number in your draft) and that they can pick it in any room's
+     composer ("Try it now" also appears in the app).
    - If you do not have that tool, tell the member to use **"Save as
      expert"** (or **"Save as skill pack"**) under the files of your reply.
    - Never claim something was saved unless the tool answered with success.
