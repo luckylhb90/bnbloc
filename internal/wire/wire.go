@@ -11,9 +11,14 @@ type ReportSessionStateInput struct {
 	AgentSessionID    string `json:"agentSessionId"`
 	ProviderSessionID string `json:"providerSessionId,omitempty"`
 	OwnerUserID       string `json:"ownerUserId"`
-	State             any    `json:"state"`
-	MessageVersion    int64  `json:"messageVersion"`
-	OccurredAtUnixMs  int64  `json:"occurredAtUnixMs"`
+	// Provider and Core name WHICH agent of the owner this state is for, so
+	// a room with several agents shows one working indicator per agent
+	// (the web keys it by agentIdentity: owner, core, provider).
+	Provider         string `json:"provider,omitempty"`
+	Core             string `json:"core,omitempty"`
+	State            any    `json:"state"`
+	MessageVersion   int64  `json:"messageVersion"`
+	OccurredAtUnixMs int64  `json:"occurredAtUnixMs"`
 }
 
 // ReportSessionStateReply acknowledges a persisted session-state report.

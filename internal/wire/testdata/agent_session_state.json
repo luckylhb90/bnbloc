@@ -1,0 +1,18 @@
+{
+  "sequence": 0,
+  "roomId": "room-1",
+  "kind": "agent_session_state",
+  "payload": {
+    "workspaceId": "room-1",
+    "agentSessionId": "sess-1",
+    "ownerUserId": "maya",
+    "provider": "codex",
+    "core": "acme",
+    "state": {
+      "phase": "working"
+    },
+    "messageVersion": 1760000000000,
+    "occurredAtUnixMs": 1760000000000
+  },
+  "atUnixMs": 1760000000000
+}

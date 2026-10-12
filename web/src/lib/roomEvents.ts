@@ -9,6 +9,7 @@ import { importedEditedAtMs, importedFrom } from "./handoff.ts";
 import { scheduledMarker } from "./schedules.ts";
 import { dispatchAttribution, type DispatchAttribution } from "./dispatch.ts";
 import { expertMarker, type ExpertMarker } from "./contentComponents.ts";
+import { agentIdentity } from "./roomAgents.ts";
 
 export interface RoomEvent {
   kind?: string;
@@ -30,9 +31,10 @@ export interface RoomEvent {
   // For agent_session_state: the agent's working/idle phase, so the UI can
   // show a live "agent is working…" indicator.
   agentPhase?: "working" | "idle";
-  // For agent_session_state / agent_messages: which agent this concerns, as an
-  // "<owner>/<provider>" key + a display label, so a room with several agents
-  // shows a per-agent working indicator instead of one ambiguous bubble.
+  // For agent_session_state / agent_messages: which agent this concerns, as
+  // its agentIdentity (owner, core, provider) + a display label, so a room
+  // with several agents shows a per-agent working indicator instead of one
+  // ambiguous bubble.
   agentKey?: string;
   // For presence_*: the full member list (snapshot) or the single member
   // (join/leave) the event concerns, so the UI can show who is online.
@@ -129,7 +131,7 @@ export function normalizeRoomEvent(ev: RoomEvent, emit: (e: RoomEvent) => void):
   const p = ev.payload || {};
   if (ev.kind === "agent_messages") {
     const list = Array.isArray(p.messages) ? (p.messages as Record<string, unknown>[]) : [];
-    // Agent replies must use the room (hub) sequence — the same space as chat —
+    // Agent replies use the room (hub) sequence — the same space as chat —
     // for dedup and read-tracking. The per-message `m.seq` is the local core's
     // message sequence (a different, much larger space); mixing it into the feed
     // poisons the read cursor (unread breaks). A batch shares one envelope seq,
@@ -143,6 +145,7 @@ export function normalizeRoomEvent(ev: RoomEvent, emit: (e: RoomEvent) => void):
       const role = (mp.role as string) || "assistant";
       const provider = (mp.provider as string) || "";
       const owner = (mp.ownerUserId as string) || "";
+      const core = typeof mp.core === "string" ? mp.core : "";
       const handle = provider ? (owner ? `${owner}/${provider}` : provider) : undefined;
       const metrics = isTurnMetrics(mp.metrics) ? mp.metrics : undefined;
       const thinking = typeof mp.thinking === "string" && mp.thinking ? mp.thinking : undefined;
@@ -163,7 +166,8 @@ export function normalizeRoomEvent(ev: RoomEvent, emit: (e: RoomEvent) => void):
         metrics,
         thinking,
         // An assistant reply clears its own agent's working indicator.
-        agentKey: role === "assistant" && handle && !notice ? handle.toLowerCase() : undefined,
+        agentKey:
+          role === "assistant" && owner && provider && !notice ? agentIdentity({ ownerId: owner, core, provider }) : undefined,
         ...(notice ? { notice } : {}),
         ...(jobId ? { jobId } : {}),
         ...(sourceSeq ? { sourceSeq } : {}),
@@ -198,11 +202,13 @@ export function normalizeRoomEvent(ev: RoomEvent, emit: (e: RoomEvent) => void):
     ev.agentPhase = phase === "working" ? "working" : "idle";
     const owner = (p.ownerUserId as string) || "";
     const provider = (p.provider as string) || "";
-    // Key + label the agent this state is for, so multiple agents in one room
-    // each get their own indicator. Fall back to "agent" when unlabeled.
+    const core = typeof p.core === "string" ? p.core : "";
+    // Key + label the agent this state is for (the reply that ends its turn
+    // clears the same key), so multiple agents in one room each get their
+    // own indicator. Fall back to "agent" when unlabeled.
     if (owner && provider) {
       ev.agentLabel = `${owner}/${provider}`;
-      ev.agentKey = ev.agentLabel.toLowerCase();
+      ev.agentKey = agentIdentity({ ownerId: owner, core, provider });
     }
     ev.text = "";
   } else if (ev.kind === "agent_roster") {

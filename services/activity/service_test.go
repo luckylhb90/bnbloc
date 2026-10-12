@@ -115,8 +115,13 @@ func TestSessionStatePublishesEvent(t *testing.T) {
 	srv := httptest.NewServer(svc.Handler())
 	defer srv.Close()
 
-	resp := post(t, srv, "/v1/rooms/room-1/agent-activity/session-state", "alice",
-		wire.ReportSessionStateInput{WorkspaceID: "room-1", AgentSessionID: "s1", MessageVersion: 1})
+	// The bridge's body names the agent (provider + core); the republished
+	// event must keep both, or every agent's working indicator collapses
+	// into one (the web keys it by owner, core and provider).
+	resp := post(t, srv, "/v1/rooms/room-1/agent-activity/session-state", "alice", map[string]any{
+		"workspaceId": "room-1", "agentSessionId": "s1", "ownerUserId": "alice",
+		"provider": "codex", "core": "acme", "state": map[string]any{"phase": "working"}, "messageVersion": 1,
+	})
 	resp.Body.Close()
 
 	if len(captured.events) != 1 || captured.events[0].Kind != "agent_session_state" {
@@ -124,6 +129,10 @@ func TestSessionStatePublishesEvent(t *testing.T) {
 	}
 	if captured.events[0].RoomID != "room-1" {
 		t.Fatalf("published roomId = %q, want room-1", captured.events[0].RoomID)
+	}
+	got, ok := captured.events[0].Payload.(wire.ReportSessionStateInput)
+	if !ok || got.OwnerUserID != "alice" || got.Provider != "codex" || got.Core != "acme" {
+		t.Fatalf("published payload = %+v, want owner alice, provider codex, core acme", captured.events[0].Payload)
 	}
 }
 

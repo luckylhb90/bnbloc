@@ -2146,9 +2146,11 @@ func (b *Bridge) postRoomMessage(ctx context.Context, room string, rs *roomSessi
 		"role":        "assistant",
 		"text":        m.Text,
 		"ownerUserId": firstNonEmpty(rs.owner, b.cfg.OwnerSubject),
-		// The agent that produced this reply, so the feed can label it
-		// (e.g. "codex") and distinguish multiple agents in one room.
+		// The agent that produced this reply (provider + core), so the feed
+		// can label it (e.g. "codex"), tell multiple agents in one room
+		// apart, and clear exactly that agent's working indicator.
 		"provider": rs.provider,
+		"core":     rs.core,
 	}
 	// Turn observability rides the reply payload, additively: a core that
 	// reports thinking/metrics (claude via stream-json) carries them into the
@@ -2539,20 +2541,20 @@ func (b *Bridge) postSessionState(ctx context.Context, room string, rs *roomSess
 	}
 	rs.stateVersion = now
 	rs.mu.Unlock()
-	body := map[string]any{
-		"workspaceId":    room,
-		"agentSessionId": rs.sessionID,
+	body := wire.ReportSessionStateInput{
+		WorkspaceID:    room,
+		AgentSessionID: rs.sessionID,
 		// The agent's owner (matches how replies are attributed), so the
 		// indicator lines up with a borrowed agent's <owner>/<provider> label.
-		"ownerUserId": firstNonEmpty(rs.owner, b.cfg.OwnerSubject),
+		OwnerUserID: firstNonEmpty(rs.owner, b.cfg.OwnerSubject),
 		// provider + core identify WHICH agent this state is for, so a room with
 		// several agents running at once can show a per-agent indicator instead
 		// of one ambiguous "working" bubble.
-		"provider":         rs.provider,
-		"core":             rs.core,
-		"state":            map[string]any{"phase": phase},
-		"messageVersion":   now,
-		"occurredAtUnixMs": now,
+		Provider:         rs.provider,
+		Core:             rs.core,
+		State:            map[string]any{"phase": phase},
+		MessageVersion:   now,
+		OccurredAtUnixMs: now,
 	}
 	if _, err := b.gatewayPOST(ctx, "/v1/rooms/"+room+"/agent-activity/session-state", body); err != nil {
 		slog.Debug("bnbloc bridge post session-state failed",
