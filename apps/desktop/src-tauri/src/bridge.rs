@@ -398,7 +398,9 @@ impl Supervisor {
 /// running from a test harness's `deps/` directory).
 fn sidecar_path() -> Result<PathBuf, String> {
     let exe = tauri::utils::platform::current_exe().map_err(|e| format!("resolve sidecar: {e}"))?;
-    let dir = exe.parent().ok_or("resolve sidecar: executable has no parent")?;
+    let dir = exe
+        .parent()
+        .ok_or("resolve sidecar: executable has no parent")?;
     let dir = if dir.ends_with("deps") {
         dir.parent().unwrap_or(dir)
     } else {
@@ -596,7 +598,10 @@ mod tests {
             ..Default::default()
         };
         let env = env_for(&s, None, None);
-        assert_eq!(env.get("BNBLOC_SANDBOX_MODE").map(String::as_str), Some("all"));
+        assert_eq!(
+            env.get("BNBLOC_SANDBOX_MODE").map(String::as_str),
+            Some("all")
+        );
         assert!(!env.contains_key("BNBLOC_SANDBOX_URL"));
         assert!(!env.contains_key("BNBLOC_SANDBOX_TOKEN"));
         assert_eq!(
@@ -613,7 +618,8 @@ mod tests {
         // the host), so the shell injects no per-core listener/rewrite env.
         let env = env_for(&Settings::default(), None, None);
         assert!(
-            !env.keys().any(|k| k.contains("LISTENER") || k.contains("HOST_REWRITE")),
+            !env.keys()
+                .any(|k| k.contains("LISTENER") || k.contains("HOST_REWRITE")),
             "unexpected core-specific discovery env: {:?}",
             env.keys().collect::<Vec<_>>()
         );

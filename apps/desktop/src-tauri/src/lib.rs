@@ -9,8 +9,8 @@ mod bridge;
 mod child_process;
 mod internal_ext;
 mod previewer_scheme;
-mod site_scheme;
 mod settings;
+mod site_scheme;
 mod sso_deep_link;
 mod updater_client;
 
@@ -253,14 +253,18 @@ pub fn run() {
         // Installed previewer bundles, sha256-verified from the member
         // catalog, each from this scheme's origin (see previewer_scheme).
         .manage(internal_ext::previewer_cache::PreviewerBundles::default())
-        .register_asynchronous_uri_scheme_protocol(previewer_scheme::SCHEME, |ctx, request, responder| {
-            previewer_scheme::handle(ctx.app_handle(), request, responder)
-        })
+        .register_asynchronous_uri_scheme_protocol(
+            previewer_scheme::SCHEME,
+            |ctx, request, responder| {
+                previewer_scheme::handle(ctx.app_handle(), request, responder)
+            },
+        )
         // Web-app (site) artifacts: the gateway's ticketed site route,
         // proxied without a session (see site_scheme).
-        .register_asynchronous_uri_scheme_protocol(site_scheme::SCHEME, |ctx, request, responder| {
-            site_scheme::handle(ctx.app_handle(), request, responder)
-        })
+        .register_asynchronous_uri_scheme_protocol(
+            site_scheme::SCHEME,
+            |ctx, request, responder| site_scheme::handle(ctx.app_handle(), request, responder),
+        )
         .setup(|app| {
             let handle = app.handle().clone();
             let supervisor = Supervisor::new(handle.clone());

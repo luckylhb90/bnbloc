@@ -96,7 +96,10 @@ pub(super) fn stale_cache_files(names: &[String], id: &str, keep: Option<&str>) 
 /// the result to be on the gateway's own origin (scheme, host, port). The
 /// member's session bearer is attached to the download, so it must never be
 /// sent to a URL a package (or a tampered catalog entry) points elsewhere.
-pub(super) fn artifact_download_url(gateway_base: &str, artifact_url: &str) -> Result<String, String> {
+pub(super) fn artifact_download_url(
+    gateway_base: &str,
+    artifact_url: &str,
+) -> Result<String, String> {
     let base = tauri::Url::parse(gateway_base.trim())
         .map_err(|e| format!("gateway url {gateway_base:?} is invalid: {e}"))?;
     let resolved = base
@@ -277,7 +280,11 @@ pub(super) async fn probe_core_protocol_listener(
     }
 }
 
-pub(super) fn protocol_range_contains(min: Option<&str>, max: Option<&str>, version: (u32, u32)) -> bool {
+pub(super) fn protocol_range_contains(
+    min: Option<&str>,
+    max: Option<&str>,
+    version: (u32, u32),
+) -> bool {
     let parse = |raw: Option<&str>| {
         let (major, minor) = raw?.trim().split_once('.')?;
         Some((major.parse::<u32>().ok()?, minor.parse::<u32>().ok()?))
@@ -350,12 +357,12 @@ mod tests {
     fn stale_cache_selection_keeps_current_and_other_components() {
         let keep = cache_file_name("foo", SHA_B);
         let names: Vec<String> = vec![
-            cache_file_name("foo", SHA_A),             // old foo build: stale
-            keep.clone(),                              // current foo build: kept
+            cache_file_name("foo", SHA_A), // old foo build: stale
+            keep.clone(),                  // current foo build: kept
             format!(".{}.part", cache_file_name("foo", SHA_A)), // stale partial
-            cache_file_name("foo-bar", SHA_A),         // another component
-            cache_file_name("plugin/foo", SHA_A),      // the plugin namesake
-            format!("foo-{}", &SHA_A[..10]),           // not a cache name
+            cache_file_name("foo-bar", SHA_A), // another component
+            cache_file_name("plugin/foo", SHA_A), // the plugin namesake
+            format!("foo-{}", &SHA_A[..10]), // not a cache name
             "foo-notes.txt".into(),
         ];
 
@@ -389,7 +396,7 @@ mod tests {
         );
         for foreign in [
             "https://evil.example.com/v1/artifacts/x",
-            "http://gw.example.com/v1/artifacts/x",       // scheme downgrade
+            "http://gw.example.com/v1/artifacts/x", // scheme downgrade
             "https://gw.example.com:8443/v1/artifacts/x", // other port
             "https://gw.example.com.evil.net/x",
             "//evil.example.com/x",

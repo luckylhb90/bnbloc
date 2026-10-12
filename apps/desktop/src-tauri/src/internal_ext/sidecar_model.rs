@@ -290,7 +290,9 @@ pub(super) fn resolve_component_specs(
             continue;
         }
         discovered.insert(component.id());
-        if component.kind == ComponentKind::Sandbox && Some(component.name.as_str()) != active_sandbox {
+        if component.kind == ComponentKind::Sandbox
+            && Some(component.name.as_str()) != active_sandbox
+        {
             inactive.push(SpecFailure {
                 kind: component.kind,
                 name: component.name.clone(),
@@ -341,7 +343,11 @@ impl ComponentEntry {
 
     /// Sandbox launch metadata from the catalog entry (other kinds get none).
     /// Every declared file must have this platform's artifact.
-    fn sandbox_launch(&self, sidecar: &ArtifactSidecar, platform: &str) -> Result<SandboxLaunch, String> {
+    fn sandbox_launch(
+        &self,
+        sidecar: &ArtifactSidecar,
+        platform: &str,
+    ) -> Result<SandboxLaunch, String> {
         if self.kind != ComponentKind::Sandbox {
             return Ok(SandboxLaunch::default());
         }

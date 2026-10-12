@@ -333,21 +333,35 @@ fn resolve_component_specs_supervises_one_sandbox_runtime_with_its_files() {
             memory_mib: 2048
         })
     );
-    let core = resolved.specs.iter().find(|s| s.kind == ComponentKind::Core).expect("core");
-    assert_eq!(core.sandbox, SandboxLaunch::default(), "cores get no sandbox launch inputs");
+    let core = resolved
+        .specs
+        .iter()
+        .find(|s| s.kind == ComponentKind::Core)
+        .expect("core");
+    assert_eq!(
+        core.sandbox,
+        SandboxLaunch::default(),
+        "cores get no sandbox launch inputs"
+    );
 }
 
 #[test]
 fn resolve_component_specs_refuses_a_sandbox_missing_a_platform_file() {
-    let raw = format!(r#"{{"components":[{}]}}"#, sandbox_entry("vm"))
-        .replace(r#""darwin-arm64/vmm":{"url":"http://gw/v1/artifacts/sha256/bbb","sha256":"bbb"},"#, "");
+    let raw = format!(r#"{{"components":[{}]}}"#, sandbox_entry("vm")).replace(
+        r#""darwin-arm64/vmm":{"url":"http://gw/v1/artifacts/sha256/bbb","sha256":"bbb"},"#,
+        "",
+    );
     let response: ComponentsResponse = serde_json::from_str(&raw).expect("catalog");
 
     let resolved = resolve_component_specs(&response, "darwin-arm64");
 
     assert!(resolved.specs.is_empty());
     assert_eq!(resolved.failures.len(), 1);
-    assert!(resolved.failures[0].message.contains("darwin-arm64/vmm"), "{}", resolved.failures[0].message);
+    assert!(
+        resolved.failures[0].message.contains("darwin-arm64/vmm"),
+        "{}",
+        resolved.failures[0].message
+    );
 }
 
 const PREVIEWER_ENTRY: &str = r#"{
@@ -383,16 +397,22 @@ fn a_previewer_in_the_catalog_is_never_supervised_and_breaks_nothing() {
             "sidecar":{{"localUrl":"http://127.0.0.1:7190"}}
         }}]}}"#
     );
-    let response: ComponentsResponse =
-        serde_json::from_str(&raw).expect("Given a catalog with a previewer bundle and a sidecar core");
+    let response: ComponentsResponse = serde_json::from_str(&raw)
+        .expect("Given a catalog with a previewer bundle and a sidecar core");
 
     let resolved = resolve_component_specs(&response, "darwin-arm64");
 
     assert_eq!(resolved.specs.len(), 1);
     assert_eq!(resolved.specs[0].name, "samplecore");
-    assert_eq!(resolved.discovered, HashSet::from(["samplecore".to_string()]));
+    assert_eq!(
+        resolved.discovered,
+        HashSet::from(["samplecore".to_string()])
+    );
     assert!(resolved.failures.is_empty() && resolved.inactive.is_empty());
-    let previewer = response.components[0].previewer.as_ref().expect("previewer block");
+    let previewer = response.components[0]
+        .previewer
+        .as_ref()
+        .expect("previewer block");
     assert_eq!(previewer.bundle_sha256, "abc");
 }
 
@@ -401,5 +421,7 @@ fn a_malformed_previewer_block_does_not_fail_the_catalog() {
     let raw = r#"{"components":[{"kind":"previewer","name":"p","version":"1.0.0","runtime":"bundle",
         "rollout":"auto","installed":true,"previewer":{"entry":"index.html"}}]}"#;
     let response: ComponentsResponse = serde_json::from_str(raw).expect("decodes");
-    assert!(resolve_component_specs(&response, "darwin-arm64").specs.is_empty());
+    assert!(resolve_component_specs(&response, "darwin-arm64")
+        .specs
+        .is_empty());
 }

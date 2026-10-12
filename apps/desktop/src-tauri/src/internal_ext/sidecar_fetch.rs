@@ -51,7 +51,12 @@ impl Adapter {
         }
         for skipped in &resolved.inactive {
             eprintln!("[sidecar-manager:{}] {}", skipped.name, skipped.message);
-            self.set_initial_status(skipped.kind, &skipped.name, "inactive", skipped.message.clone());
+            self.set_initial_status(
+                skipped.kind,
+                &skipped.name,
+                "inactive",
+                skipped.message.clone(),
+            );
         }
         let mut specs = Vec::new();
         for spec in resolved.specs {

@@ -136,7 +136,8 @@ mod tests {
     #[test]
     fn manifest_content_change_under_the_same_name_changes_the_bridge_core_set() {
         let v1 = serde_json::json!({"name": "acme", "ops": {"listSessions": {}}});
-        let v2 = serde_json::json!({"name": "acme", "ops": {"listSessions": {}, "readSessionFile": {}}});
+        let v2 =
+            serde_json::json!({"name": "acme", "ops": {"listSessions": {}, "readSessionFile": {}}});
         let before = bridge_core_set(&HashMap::from([(
             "acme".to_string(),
             manifest_core("acme", v1.clone()),

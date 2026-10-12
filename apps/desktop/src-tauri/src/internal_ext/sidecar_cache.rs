@@ -9,15 +9,16 @@ use crate::internal_ext::sidecar_fetch::FetchError;
 use crate::internal_ext::sidecar_model::{GatewayAccess, SidecarSpec};
 use crate::internal_ext::sidecar_util::{
     artifact_download_url, binary_ready, cache_file_name, direct_download_url, download_message,
-    hex_lower,
-    set_executable, stale_cache_files,
+    hex_lower, set_executable, stale_cache_files,
 };
 use crate::internal_ext::Adapter;
 
 impl Adapter {
     pub(super) async fn ensure_binary(&self, spec: &SidecarSpec) -> Result<PathBuf, FetchError> {
         let id = spec.id();
-        let cache_path = self.cache_path(&id, &spec.sha256).map_err(FetchError::Retry)?;
+        let cache_path = self
+            .cache_path(&id, &spec.sha256)
+            .map_err(FetchError::Retry)?;
         if binary_ready(&cache_path, &spec.sha256).await {
             self.set_status(
                 &id,
@@ -40,14 +41,26 @@ impl Adapter {
         Ok(cache_path)
     }
 
-    async fn download_verify_cache(&self, spec: &SidecarSpec, dest: &Path) -> Result<(), FetchError> {
+    async fn download_verify_cache(
+        &self,
+        spec: &SidecarSpec,
+        dest: &Path,
+    ) -> Result<(), FetchError> {
         let gateway = self.gateway.lock().clone();
         let client = self.http().map_err(FetchError::Retry)?;
         let id = spec.id();
-        fetch_verified(&client, &gateway, &spec.url, &spec.sha256, dest, true, |progress| {
-            let (state, message) = progress.status(&spec.name);
-            self.set_status(&id, state, message, None);
-        })
+        fetch_verified(
+            &client,
+            &gateway,
+            &spec.url,
+            &spec.sha256,
+            dest,
+            true,
+            |progress| {
+                let (state, message) = progress.status(&spec.name);
+                self.set_status(&id, state, message, None);
+            },
+        )
         .await?;
         self.set_status(
             &id,
@@ -151,10 +164,15 @@ pub(super) async fn fetch_verified(
         .await
         .map_err(|e| FetchError::Retry(format!("download: {e}")))?;
     if !resp.status().is_success() {
-        return Err(FetchError::Retry(format!("download: status {}", resp.status())));
+        return Err(FetchError::Retry(format!(
+            "download: status {}",
+            resp.status()
+        )));
     }
     let total = resp.content_length();
-    let dir = dest.parent().ok_or(FetchError::Retry("download path has no parent".into()))?;
+    let dir = dest
+        .parent()
+        .ok_or(FetchError::Retry("download path has no parent".into()))?;
     let file_name = dest
         .file_name()
         .ok_or(FetchError::Retry("download path has no file name".into()))?
@@ -214,7 +232,10 @@ mod tests {
     /// response. Records every request it answers.
     fn serve(host: &str, respond: impl Fn(&str) -> Vec<u8> + Send + 'static) -> (String, Seen) {
         let server = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
-        let base = format!("http://{host}:{}", server.local_addr().expect("addr").port());
+        let base = format!(
+            "http://{host}:{}",
+            server.local_addr().expect("addr").port()
+        );
         let seen: Seen = Arc::default();
         let log = Arc::clone(&seen);
         std::thread::spawn(move || {
@@ -255,7 +276,11 @@ mod tests {
         headers.iter().any(|h| h.starts_with("authorization:"))
     }
 
-    async fn download(tag: &str, redirect_body: &'static [u8], pin: &[u8]) -> (Result<(), FetchError>, Seen, Seen) {
+    async fn download(
+        tag: &str,
+        redirect_body: &'static [u8],
+        pin: &[u8],
+    ) -> (Result<(), FetchError>, Seen, Seen) {
         // The "blob store" answers on another host name than the gateway, as
         // a presigned S3 URL does.
         let (store, store_seen) = serve("localhost", move |_| ok(redirect_body));
@@ -272,7 +297,16 @@ mod tests {
         let _ = std::fs::remove_file(&dest);
         let client = reqwest::Client::new();
         let sha = hex_lower(&Sha256::digest(pin));
-        let result = fetch_verified(&client, &access, "/v1/artifacts/sha256/k", &sha, &dest, false, |_| {}).await;
+        let result = fetch_verified(
+            &client,
+            &access,
+            "/v1/artifacts/sha256/k",
+            &sha,
+            &dest,
+            false,
+            |_| {},
+        )
+        .await;
         if result.is_ok() {
             assert_eq!(std::fs::read(&dest).expect("downloaded"), redirect_body);
         }
@@ -282,7 +316,8 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn direct_downloads_follow_the_redirect_without_the_session() {
-        let (result, gateway_seen, store_seen) = download("ok", b"binary bytes", b"binary bytes").await;
+        let (result, gateway_seen, store_seen) =
+            download("ok", b"binary bytes", b"binary bytes").await;
         assert!(result.is_ok(), "download failed: {:?}", result.err());
         let gateway_seen = gateway_seen.lock().expect("log").clone();
         let store_seen = store_seen.lock().expect("log").clone();
@@ -291,12 +326,19 @@ mod tests {
         assert!(has_auth(&gateway_seen[0].1), "the gateway gets the session");
         assert_eq!(store_seen.len(), 1);
         assert_eq!(store_seen[0].0, "/bucket/obj?X-Amz-Signature=abc");
-        assert!(!has_auth(&store_seen[0].1), "the presigned hop must not carry the session");
+        assert!(
+            !has_auth(&store_seen[0].1),
+            "the presigned hop must not carry the session"
+        );
     }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn redirected_bytes_are_still_checked_against_the_pin() {
         let (result, _, _) = download("tampered", b"tampered", b"binary bytes").await;
-        assert!(matches!(result, Err(FetchError::Mismatch(_))), "got {:?}", result.err());
+        assert!(
+            matches!(result, Err(FetchError::Mismatch(_))),
+            "got {:?}",
+            result.err()
+        );
     }
 }

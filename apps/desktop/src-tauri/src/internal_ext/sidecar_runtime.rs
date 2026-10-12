@@ -405,7 +405,8 @@ impl Adapter {
             }
         }
         self.record_spawn(&id, pid, &spec.sha256);
-        let sandbox_seq = sandbox_token.map(|token| self.sandbox_spawned(spec, runtime_url, token, path));
+        let sandbox_seq =
+            sandbox_token.map(|token| self.sandbox_spawned(spec, runtime_url, token, path));
         let mut tail = String::new();
         let mut exit_code = None;
         while let Some(event) = rx.recv().await {

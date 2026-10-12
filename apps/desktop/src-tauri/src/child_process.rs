@@ -54,7 +54,9 @@ pub(crate) struct Child {
 }
 
 /// Spawn `cmd` with piped stdio. Returns the event stream and the handle.
-pub(crate) fn spawn(mut cmd: Command) -> std::io::Result<(mpsc::UnboundedReceiver<ChildEvent>, Child)> {
+pub(crate) fn spawn(
+    mut cmd: Command,
+) -> std::io::Result<(mpsc::UnboundedReceiver<ChildEvent>, Child)> {
     cmd.stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
@@ -115,7 +117,8 @@ fn pump_lines<R: Read + Send + 'static>(
                 Ok(_) => {
                     let line = String::from_utf8_lossy(&buf);
                     let line = line.trim_end_matches(['\r', '\n']);
-                    if !line.trim().is_empty() && tx.send(ChildEvent::Line(line.to_string())).is_err()
+                    if !line.trim().is_empty()
+                        && tx.send(ChildEvent::Line(line.to_string())).is_err()
                     {
                         return;
                     }
@@ -266,13 +269,19 @@ mod windows_tests {
         cmd.args(["/C", "ping -n 60 127.0.0.1 >NUL"]);
         let (_rx, mut child) = spawn(cmd).expect("spawn cmd");
         assert!(
-            wait_for(|| child.job.active_processes().unwrap_or(0) >= 2, Duration::from_secs(10)),
+            wait_for(
+                || child.job.active_processes().unwrap_or(0) >= 2,
+                Duration::from_secs(10)
+            ),
             "cmd and its ping grandchild run inside the job"
         );
         child.request_stop();
         child.force_kill();
         assert!(
-            wait_for(|| child.job.active_processes().ok() == Some(0), Duration::from_secs(5)),
+            wait_for(
+                || child.job.active_processes().ok() == Some(0),
+                Duration::from_secs(5)
+            ),
             "the job is empty after a force kill"
         );
         assert!(wait_for(|| child.exited(), Duration::from_secs(5)));
@@ -321,7 +330,10 @@ mod tests {
                 _ => None,
             })
             .collect();
-        assert!(lines.contains(&"one") && lines.contains(&"two"), "{events:?}");
+        assert!(
+            lines.contains(&"one") && lines.contains(&"two"),
+            "{events:?}"
+        );
         assert_eq!(events.last(), Some(&ChildEvent::Exited(Some(3))));
     }
 
@@ -364,7 +376,9 @@ mod tests {
             Duration::from_secs(60),
         );
         // A crash-loop (each run lasts 2s, past any settle window) keeps growing.
-        let delays: Vec<u64> = (0..7).map(|_| b.next(Duration::from_secs(2)).as_secs()).collect();
+        let delays: Vec<u64> = (0..7)
+            .map(|_| b.next(Duration::from_secs(2)).as_secs())
+            .collect();
         assert_eq!(delays, vec![1, 2, 4, 8, 16, 30, 30]);
         // A run that stayed up past the stability window starts over.
         assert_eq!(b.next(Duration::from_secs(120)).as_secs(), 1);

@@ -304,16 +304,23 @@ mod tests {
 
     #[test]
     fn sandbox_mode_defaults_to_borrowed_and_round_trips() {
-        let s: Settings = serde_json::from_str(r#"{"gatewayUrl":"http://g","owner":"me"}"#).unwrap();
+        let s: Settings =
+            serde_json::from_str(r#"{"gatewayUrl":"http://g","owner":"me"}"#).unwrap();
         assert_eq!(s.sandbox_mode, SandboxMode::Borrowed);
-        for (raw, mode) in [("off", SandboxMode::Off), ("borrowed", SandboxMode::Borrowed), ("all", SandboxMode::All)] {
-            let s: Settings = serde_json::from_str(&format!(r#"{{"sandboxMode":"{raw}"}}"#)).unwrap();
+        for (raw, mode) in [
+            ("off", SandboxMode::Off),
+            ("borrowed", SandboxMode::Borrowed),
+            ("all", SandboxMode::All),
+        ] {
+            let s: Settings =
+                serde_json::from_str(&format!(r#"{{"sandboxMode":"{raw}"}}"#)).unwrap();
             assert_eq!(s.sandbox_mode, mode);
             assert_eq!(mode.as_str(), raw);
         }
         assert!(serde_json::from_str::<Settings>(r#"{"sandboxMode":"sometimes"}"#).is_err());
 
-        let dir = std::env::temp_dir().join(format!("bnbloc-settings-sandbox-{}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("bnbloc-settings-sandbox-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         let path = dir.join(SETTINGS_FILE);
         let settings = Settings {
