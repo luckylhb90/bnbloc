@@ -192,6 +192,14 @@ type componentDetail struct {
 		Version       string `json:"version"`
 		Mine          bool   `json:"mine"`
 	} `json:"component"`
+	// Resubmitted is the publish request the save opened by itself: the
+	// organization uses the component, so the new version waits for an
+	// org admin's approval.
+	Resubmitted *struct {
+		ID              string `json:"id"`
+		Version         string `json:"version"`
+		ApprovedVersion string `json:"approvedVersion"`
+	} `json:"resubmitted"`
 }
 
 func saveComponent(ctx context.Context, env *Env, args json.RawMessage) Result {
@@ -235,6 +243,14 @@ func saveComponent(ctx context.Context, env *Env, args json.RawMessage) Result {
 		"saved": true, "id": c.ID, "kind": c.Kind, "name": c.Name, "displayName": c.DisplayName,
 		"version": c.LatestVersion, "scope": c.Scope, "files": n,
 		"note": fmt.Sprintf("Saved %s version %s to the Library of the person who asked you (the version is assigned on save; report this one, not the number in your draft). They can pick it in any room's composer.", c.Name, c.LatestVersion),
+	}
+	if rs := d.Resubmitted; rs != nil {
+		keep := ""
+		if rs.ApprovedVersion != "" {
+			keep = "; members keep using version " + rs.ApprovedVersion + " until then"
+		}
+		out["resubmitted"] = map[string]any{"request": rs.ID, "version": rs.Version, "approvedVersion": rs.ApprovedVersion}
+		out["note"] = out["note"].(string) + fmt.Sprintf(" Their organization uses this component, so version %s was sent to its admins for approval%s. Tell them.", rs.Version, keep)
 	}
 	return Result{Value: out}
 }
