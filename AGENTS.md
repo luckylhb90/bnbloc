@@ -418,7 +418,10 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   - **Installed sidecars** speak the protocol directly.
   - **The Core Protocol wire format is the explicit camelCase JSON tags in
     `core/protocol/types.go`.** That file is the contract; every wire field
-    carries a tag (an untagged field silently serializes PascalCase).
+    carries a tag (an untagged field silently serializes PascalCase;
+    `TestWireTypesEveryFieldTagged` parses the file, so non-wire types live
+    elsewhere), and every core ↔ wire mapper pair is lossless for a value
+    with every field set (`TestWireMappersRoundTrip`).
   - **Every protocol client goes through `core.REST`** (`core/rest.go`):
     `Request` is the one place a bearer goes on the wire, `Send` the one
     bounded read and error mapping (`DecodeEnvelope` keeps each protocol's
