@@ -47,6 +47,7 @@ import { SaveTemplateDialog } from "@/views/room/SaveTemplateDialog";
 import { TemplateStartCard } from "@/views/room/TemplateStartCard";
 import { SchedulesDialog } from "@/views/room/SchedulesDialog";
 import { RunsDialog } from "@/views/room/RunsDialog";
+import { useWorkshopSaves } from "@/views/room/useWorkshopSaves";
 
 type Panel = "chat" | "artifacts";
 type RoomDialog = "settings" | "members" | "borrow" | "leave" | null;
@@ -166,6 +167,8 @@ export function RoomView({
   });
   const { feed, setFeed } = conversation;
   useLayoutEffect(scroller.settle, [feed, scroller.settle]);
+  // In the expert workshop, what the builder saves is announced as it lands.
+  useWorkshopSaves(roomId, subject, feed);
 
   // Stream events dispatch through the latest handlers (activity first, then
   // the roster, then the feed) without resubscribing.
