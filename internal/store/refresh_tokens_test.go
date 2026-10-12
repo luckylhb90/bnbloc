@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -15,93 +16,176 @@ func newTestFamily(id, subject, tenantID, role string, nowMs int64) RefreshFamil
 	}
 }
 
-func TestRefreshFamilyRotationAndReuse(t *testing.T) {
-	ctx := context.Background()
-	s := NewMemoryRefreshToken()
-	if err := s.CreateRefreshFamily(ctx, newTestFamily("f1", "ann", "t1", "member", 1000)); err != nil {
-		t.Fatal(err)
-	}
-	// Rotating the current jti moves the family forward.
-	f, err := s.UseRefreshFamily(ctx, RefreshUse{FamilyID: "f1", PresentedJTI: "f1-j1", NewJTI: "f1-j2", NowMs: 2000, GraceMs: 60_000, ExpiresAtMs: 5_000_000})
-	if err != nil || f.CurrentJTI != "f1-j2" || f.PreviousJTI != "f1-j1" || f.ExpiresAtMs != 5_000_000 {
-		t.Fatalf("rotate = %+v, %v", f, err)
-	}
-	// Within the grace window the previous jti is a normal use that yields
-	// the CURRENT jti (two tabs refreshing at once), without rotating again.
-	f, err = s.UseRefreshFamily(ctx, RefreshUse{FamilyID: "f1", PresentedJTI: "f1-j1", NewJTI: "f1-j3", NowMs: 30_000, GraceMs: 60_000})
-	if err != nil || f.CurrentJTI != "f1-j2" {
-		t.Fatalf("grace use = %+v, %v; want current f1-j2", f, err)
-	}
-	// After the grace window the previous jti is reuse: the family is revoked.
-	_, err = s.UseRefreshFamily(ctx, RefreshUse{FamilyID: "f1", PresentedJTI: "f1-j1", NewJTI: "f1-j4", NowMs: 100_000, GraceMs: 60_000})
-	if !errors.Is(err, ErrRefreshReuse) {
-		t.Fatalf("stale jti err = %v; want reuse", err)
-	}
-	// ...and the current jti no longer works either.
-	if _, err := s.UseRefreshFamily(ctx, RefreshUse{FamilyID: "f1", PresentedJTI: "f1-j2", NewJTI: "f1-j5", NowMs: 100_001, GraceMs: 60_000}); !errors.Is(err, ErrRefreshInvalid) {
-		t.Fatalf("revoked family err = %v; want invalid", err)
-	}
-	if fams, _ := s.ListRefreshFamilies(ctx, "ann", 100_002); len(fams) != 0 {
-		t.Fatalf("revoked family still listed: %+v", fams)
-	}
-}
-
-func TestRefreshFamilyUnknownAndExpired(t *testing.T) {
-	ctx := context.Background()
-	s := NewMemoryRefreshToken()
-	if _, err := s.UseRefreshFamily(ctx, RefreshUse{FamilyID: "nope", PresentedJTI: "x", NowMs: 1}); !errors.Is(err, ErrRefreshInvalid) {
-		t.Fatalf("unknown err = %v", err)
-	}
-	f := newTestFamily("f1", "ann", "t1", "", 1000)
-	f.ExpiresAtMs = 2000
-	_ = s.CreateRefreshFamily(ctx, f)
-	if _, err := s.UseRefreshFamily(ctx, RefreshUse{FamilyID: "f1", PresentedJTI: "f1-j1", NowMs: 3000}); !errors.Is(err, ErrRefreshInvalid) {
-		t.Fatalf("expired err = %v", err)
-	}
-	// Creating a later family prunes the expired one.
-	_ = s.CreateRefreshFamily(ctx, newTestFamily("f2", "ann", "t1", "", 5000))
-	if _, ok, _ := s.GetRefreshFamily(ctx, "f1"); ok {
-		t.Fatal("expired family not pruned")
-	}
-}
-
-func TestRefreshFamilyRevocation(t *testing.T) {
-	ctx := context.Background()
-	s := NewMemoryRefreshToken()
-	for _, f := range []RefreshFamily{
-		newTestFamily("a1", "ann", "t1", "member", 1000),
-		newTestFamily("a2", "ann", "t2", "member", 1000),
-		newTestFamily("b1", "bob", "t1", "org_admin", 1000),
-		newTestFamily("r1", "root", "t1", "super_admin", 1000),
-	} {
+// Rotation, the concurrent-tab grace, reuse revocation and listing; a taken
+// family id is ErrRefreshFamilyExists.
+func TestContractRefreshTokenStoreRotationAndReuse(t *testing.T) {
+	forEachBackend(t, func(t *testing.T, b *Backends) {
+		s := b.RefreshTokens
+		ctx := context.Background()
+		id, subject := uniq("fam-"), uniq("ann-")
+		f := newTestFamily(id, subject, "t1", "member", 1000)
+		f.Email, f.TenantHint, f.UserAgent, f.ParentFamilyID = "ann@example.com", "hint", "ua", "parent-"+id
 		if err := s.CreateRefreshFamily(ctx, f); err != nil {
 			t.Fatal(err)
 		}
-	}
-	// Single revoke is subject-scoped and idempotent.
-	if ok, _ := s.RevokeRefreshFamily(ctx, "bob", "a1", 2000); ok {
-		t.Fatal("bob revoked ann's family")
-	}
-	if ok, _ := s.RevokeRefreshFamily(ctx, "ann", "a1", 2000); !ok {
-		t.Fatal("ann could not revoke her family")
-	}
-	if ok, _ := s.RevokeRefreshFamily(ctx, "ann", "a1", 2001); ok {
-		t.Fatal("second revoke reported a change")
-	}
-	// Member removal: subject in one tenant only.
-	if n, _ := s.RevokeRefreshFamilies(ctx, RefreshRevokeFilter{Subject: "ann", TenantID: "t2"}, 3000); n != 1 {
-		t.Fatalf("subject+tenant revoked %d; want 1", n)
-	}
-	// Tenant suspension spares super-admins.
-	if n, _ := s.RevokeRefreshFamilies(ctx, RefreshRevokeFilter{TenantID: "t1", ExceptRole: "super_admin"}, 4000); n != 1 {
-		t.Fatalf("tenant revoke = %d; want 1 (bob)", n)
-	}
-	if fams, _ := s.ListRefreshFamilies(ctx, "root", 4001); len(fams) != 1 {
-		t.Fatalf("super-admin family revoked by suspension: %+v", fams)
-	}
-	if _, err := s.RevokeRefreshFamilies(ctx, RefreshRevokeFilter{}, 5000); err == nil {
-		t.Fatal("empty filter must be refused")
-	}
+		if err := s.CreateRefreshFamily(ctx, f); !errors.Is(err, ErrRefreshFamilyExists) {
+			t.Fatalf("duplicate create = %v, want ErrRefreshFamilyExists", err)
+		}
+		if got, ok := must2(s.GetRefreshFamily(ctx, id))(t); !ok || got != f {
+			t.Fatalf("get = %+v %v, want %+v", got, ok, f)
+		}
+		// Rotating the current jti moves the family forward.
+		got, err := s.UseRefreshFamily(ctx, RefreshUse{FamilyID: id, PresentedJTI: id + "-j1", NewJTI: id + "-j2", NowMs: 2000, GraceMs: 60_000, ExpiresAtMs: 5_000_000, TenantID: "t2", Role: "org_admin"})
+		if err != nil || got.CurrentJTI != id+"-j2" || got.PreviousJTI != id+"-j1" || got.ExpiresAtMs != 5_000_000 || got.TenantID != "t2" || got.Role != "org_admin" {
+			t.Fatalf("rotate = %+v, %v", got, err)
+		}
+		if stored, _ := must2(s.GetRefreshFamily(ctx, id))(t); stored != got {
+			t.Fatalf("stored after rotate = %+v, want %+v", stored, got)
+		}
+		// Within the grace window the previous jti is a normal use that
+		// yields the CURRENT jti (two tabs refreshing at once), without
+		// rotating again.
+		got, err = s.UseRefreshFamily(ctx, RefreshUse{FamilyID: id, PresentedJTI: id + "-j1", NewJTI: id + "-j3", NowMs: 30_000, GraceMs: 60_000})
+		if err != nil || got.CurrentJTI != id+"-j2" {
+			t.Fatalf("grace use = %+v, %v; want current %s-j2", got, err, id)
+		}
+		if fams := must(s.ListRefreshFamilies(ctx, subject, 30_001))(t); len(fams) != 1 || fams[0].FamilyID != id {
+			t.Fatalf("list = %+v", fams)
+		}
+		// After the grace window the previous jti is reuse: the family is revoked.
+		if _, err := s.UseRefreshFamily(ctx, RefreshUse{FamilyID: id, PresentedJTI: id + "-j1", NewJTI: id + "-j4", NowMs: 100_000, GraceMs: 60_000}); !errors.Is(err, ErrRefreshReuse) {
+			t.Fatalf("stale jti err = %v; want reuse", err)
+		}
+		// ...and the current jti no longer works either.
+		if _, err := s.UseRefreshFamily(ctx, RefreshUse{FamilyID: id, PresentedJTI: id + "-j2", NewJTI: id + "-j5", NowMs: 100_001, GraceMs: 60_000}); !errors.Is(err, ErrRefreshInvalid) {
+			t.Fatalf("revoked family err = %v; want invalid", err)
+		}
+		if fams := must(s.ListRefreshFamilies(ctx, subject, 100_002))(t); fams == nil || len(fams) != 0 {
+			t.Fatalf("revoked family still listed: %#v (want [])", fams)
+		}
+	})
+}
+
+// Concurrent rotations of the current token: one rotates, the other lands in
+// the grace window; neither is reuse.
+func TestContractRefreshTokenStoreConcurrentRotation(t *testing.T) {
+	forEachBackend(t, func(t *testing.T, b *Backends) {
+		s := b.RefreshTokens
+		ctx := context.Background()
+		id := uniq("fam-")
+		if err := s.CreateRefreshFamily(ctx, newTestFamily(id, uniq("ann-"), "t1", "member", 1000)); err != nil {
+			t.Fatal(err)
+		}
+		var wg sync.WaitGroup
+		errs := make([]error, 2)
+		for i := range errs {
+			wg.Add(1)
+			go func(i int) {
+				defer wg.Done()
+				_, errs[i] = s.UseRefreshFamily(ctx, RefreshUse{FamilyID: id, PresentedJTI: id + "-j1", NewJTI: id + "-n" + string(rune('a'+i)), NowMs: 1010, GraceMs: 60_000, ExpiresAtMs: 2_000_000})
+			}(i)
+		}
+		wg.Wait()
+		if errs[0] != nil || errs[1] != nil {
+			t.Fatalf("concurrent rotations = %v; want both accepted", errs)
+		}
+		if got, _ := must2(s.GetRefreshFamily(ctx, id))(t); got.PreviousJTI != id+"-j1" || got.ExpiresAtMs != 2_000_000 {
+			t.Fatalf("after rotation = %+v", got)
+		}
+	})
+}
+
+// An unknown family and an expired one are invalid; a family is live
+// strictly before its expiry (valid at expires-1, invalid at expires), and
+// creating a family prunes the ones expired at its creation.
+func TestContractRefreshTokenStoreExpiry(t *testing.T) {
+	forEachBackend(t, func(t *testing.T, b *Backends) {
+		s := b.RefreshTokens
+		ctx := context.Background()
+		if _, err := s.UseRefreshFamily(ctx, RefreshUse{FamilyID: uniq("nope-"), PresentedJTI: "x", NowMs: 1}); !errors.Is(err, ErrRefreshInvalid) {
+			t.Fatalf("unknown err = %v", err)
+		}
+		subject := uniq("ann-")
+		edge := newTestFamily(uniq("fam-"), subject, "t1", "", 1000)
+		edge.ExpiresAtMs = 2000
+		if err := s.CreateRefreshFamily(ctx, edge); err != nil {
+			t.Fatal(err)
+		}
+		if fams := must(s.ListRefreshFamilies(ctx, subject, 1999))(t); len(fams) != 1 {
+			t.Fatalf("listed at expiry-1 = %+v", fams)
+		}
+		if fams := must(s.ListRefreshFamilies(ctx, subject, 2000))(t); len(fams) != 0 {
+			t.Fatalf("listed at expiry = %+v", fams)
+		}
+		if _, err := s.UseRefreshFamily(ctx, RefreshUse{FamilyID: edge.FamilyID, PresentedJTI: edge.CurrentJTI, NowMs: 2000}); !errors.Is(err, ErrRefreshInvalid) {
+			t.Fatalf("use at expiry = %v, want invalid", err)
+		}
+		if _, err := s.UseRefreshFamily(ctx, RefreshUse{FamilyID: edge.FamilyID, PresentedJTI: edge.CurrentJTI, NowMs: 1999}); err != nil {
+			t.Fatalf("use just before expiry = %v", err)
+		}
+		// A family created at 2000 prunes the one expired then.
+		if err := s.CreateRefreshFamily(ctx, newTestFamily(uniq("fam-"), subject, "t1", "", 2000)); err != nil {
+			t.Fatal(err)
+		}
+		if _, ok := must2(s.GetRefreshFamily(ctx, edge.FamilyID))(t); ok {
+			t.Fatal("expired family not pruned")
+		}
+	})
+}
+
+// Single revoke is subject-scoped and idempotent; bulk revoke selects by
+// subject and/or tenant and spares an excepted role; an empty filter and a
+// revoke without its time are refused.
+func TestContractRefreshTokenStoreRevocation(t *testing.T) {
+	forEachBackend(t, func(t *testing.T, b *Backends) {
+		s := b.RefreshTokens
+		ctx := context.Background()
+		ann, bob, root := uniq("ann-"), uniq("bob-"), uniq("root-")
+		t1, t2 := uniq("t1-"), uniq("t2-")
+		a1, a2, b1, r1 := uniq("a1-"), uniq("a2-"), uniq("b1-"), uniq("r1-")
+		for _, f := range []RefreshFamily{
+			newTestFamily(a1, ann, t1, "member", 1000),
+			newTestFamily(a2, ann, t2, "member", 1000),
+			newTestFamily(b1, bob, t1, "org_admin", 1000),
+			newTestFamily(r1, root, t1, "super_admin", 1000),
+		} {
+			if err := s.CreateRefreshFamily(ctx, f); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if ok, err := s.RevokeRefreshFamily(ctx, bob, a1, 2000); err != nil || ok {
+			t.Fatalf("bob revoking ann's family = %v, %v", ok, err)
+		}
+		if _, err := s.RevokeRefreshFamily(ctx, ann, a1, 0); !errors.Is(err, ErrRevokeTimeRequired) {
+			t.Fatalf("revoke at 0 = %v, want ErrRevokeTimeRequired", err)
+		}
+		if ok, err := s.RevokeRefreshFamily(ctx, ann, a1, 2000); err != nil || !ok {
+			t.Fatalf("ann revoking her family = %v, %v", ok, err)
+		}
+		if got, _ := must2(s.GetRefreshFamily(ctx, a1))(t); got.RevokedAtMs != 2000 {
+			t.Fatalf("revoked at = %d", got.RevokedAtMs)
+		}
+		if ok, err := s.RevokeRefreshFamily(ctx, ann, a1, 2001); err != nil || ok {
+			t.Fatalf("second revoke = %v, %v; want false", ok, err)
+		}
+		// Member removal: subject in one tenant only.
+		if n, err := s.RevokeRefreshFamilies(ctx, RefreshRevokeFilter{Subject: ann, TenantID: t2}, 3000); err != nil || n != 1 {
+			t.Fatalf("subject+tenant revoked %d, %v; want 1", n, err)
+		}
+		if _, err := s.RevokeRefreshFamilies(ctx, RefreshRevokeFilter{TenantID: t1}, 0); !errors.Is(err, ErrRevokeTimeRequired) {
+			t.Fatalf("bulk revoke at 0 = %v, want ErrRevokeTimeRequired", err)
+		}
+		// Tenant suspension spares super-admins.
+		if n, err := s.RevokeRefreshFamilies(ctx, RefreshRevokeFilter{TenantID: t1, ExceptRole: "super_admin"}, 4000); err != nil || n != 1 {
+			t.Fatalf("tenant revoke = %d, %v; want 1 (bob)", n, err)
+		}
+		if fams := must(s.ListRefreshFamilies(ctx, root, 4001))(t); len(fams) != 1 {
+			t.Fatalf("super-admin family revoked by suspension: %+v", fams)
+		}
+		if _, err := s.RevokeRefreshFamilies(ctx, RefreshRevokeFilter{}, 5000); err == nil {
+			t.Fatal("empty filter must be refused")
+		}
+	})
 }
 
 func TestSchemaTableDDLExtractsNewTables(t *testing.T) {
@@ -116,33 +200,5 @@ func TestSchemaTableDDLExtractsNewTables(t *testing.T) {
 	}
 	if _, err := schemaTableDDL("no_such_table"); err == nil {
 		t.Fatal("missing table must error")
-	}
-}
-
-func TestMemorySSOHandoffSingleUse(t *testing.T) {
-	ctx := context.Background()
-	s := NewMemorySSOHandoff()
-	h := SSOHandoff{KeyHash: "k1", NonceHash: "n1", Subject: "ann", ExpiresAtMs: 2000}
-	if err := s.PutSSOHandoff(ctx, h, 1000); err != nil {
-		t.Fatal(err)
-	}
-	if err := s.PutSSOHandoff(ctx, h, 1000); !errors.Is(err, ErrSSOHandoffPending) {
-		t.Fatalf("second put err = %v; want pending", err)
-	}
-	got, ok, err := s.TakeSSOHandoff(ctx, "k1", 1500)
-	if err != nil || !ok || got.Subject != "ann" {
-		t.Fatalf("take = %+v %v %v", got, ok, err)
-	}
-	if _, ok, _ := s.TakeSSOHandoff(ctx, "k1", 1500); ok {
-		t.Fatal("hand-off redeemed twice")
-	}
-	_ = s.PutSSOHandoff(ctx, SSOHandoff{KeyHash: "k2", ExpiresAtMs: 2000}, 1000)
-	if _, ok, _ := s.TakeSSOHandoff(ctx, "k2", 2001); ok {
-		t.Fatal("expired hand-off redeemed")
-	}
-	// An expired entry under a key is replaced, not "pending".
-	_ = s.PutSSOHandoff(ctx, SSOHandoff{KeyHash: "k3", ExpiresAtMs: 2000}, 1000)
-	if err := s.PutSSOHandoff(ctx, SSOHandoff{KeyHash: "k3", ExpiresAtMs: 9000}, 3000); err != nil {
-		t.Fatalf("put over expired = %v", err)
 	}
 }

@@ -5,8 +5,6 @@ import (
 	"database/sql"
 	"errors"
 	"sync"
-
-	"github.com/go-sql-driver/mysql"
 )
 
 // SSOHandoff is a pending SSO sign-in parked for a client that did not start
@@ -35,11 +33,12 @@ var ErrSSOHandoffPending = errors.New("sso hand-off already pending")
 // redeem a hand-off another replica parked. Implementations must make Take
 // single-use under concurrency (exactly one caller wins a key).
 type SSOHandoffStore interface {
-	// PutSSOHandoff parks h, first pruning expired hand-offs. A live entry
-	// under the same key fails with ErrSSOHandoffPending.
+	// PutSSOHandoff parks h, first pruning the hand-offs expired at nowMs. A
+	// live entry under the same key fails with ErrSSOHandoffPending.
 	PutSSOHandoff(ctx context.Context, h SSOHandoff, nowMs int64) error
-	// TakeSSOHandoff atomically consumes the live hand-off under keyHash.
-	// found=false when it is absent, expired, or already consumed.
+	// TakeSSOHandoff atomically consumes the live hand-off under keyHash
+	// (live strictly before ExpiresAtMs: liveAt). found=false when it is
+	// absent, expired, or already consumed.
 	TakeSSOHandoff(ctx context.Context, keyHash string, nowMs int64) (SSOHandoff, bool, error)
 }
 
@@ -68,7 +67,7 @@ func (s *MemorySSOHandoff) PutSSOHandoff(_ context.Context, h SSOHandoff, nowMs 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for k, v := range s.rows {
-		if v.ExpiresAtMs < nowMs {
+		if !liveAt(v.ExpiresAtMs, nowMs) {
 			delete(s.rows, k)
 		}
 	}
@@ -87,7 +86,7 @@ func (s *MemorySSOHandoff) TakeSSOHandoff(_ context.Context, keyHash string, now
 	defer s.mu.Unlock()
 	h, ok := s.rows[keyHash]
 	delete(s.rows, keyHash)
-	if !ok || h.ExpiresAtMs < nowMs {
+	if !ok || !liveAt(h.ExpiresAtMs, nowMs) {
 		return SSOHandoff{}, false, nil
 	}
 	return h, true, nil
@@ -104,18 +103,14 @@ var _ SSOHandoffStore = (*MySQLSSOHandoff)(nil)
 func (s *MySQLSSOHandoff) PutSSOHandoff(ctx context.Context, h SSOHandoff, nowMs int64) error {
 	// Prune first: it also clears an expired row under this key, so the insert
 	// below only collides with a LIVE (or consumed-but-unexpired) hand-off.
-	if _, err := s.DB.ExecContext(ctx, `DELETE FROM sso_handoff_codes WHERE expires_at_ms < ?`, nowMs); err != nil {
+	if _, err := s.DB.ExecContext(ctx, `DELETE FROM sso_handoff_codes WHERE expires_at_ms <= ?`, nowMs); err != nil {
 		return err
 	}
 	_, err := s.DB.ExecContext(ctx, `INSERT INTO sso_handoff_codes
   (key_hash, nonce_hash, subject, email, tenant_hint, expires_at_ms)
   VALUES (?, ?, ?, ?, ?, ?)`,
 		h.KeyHash, h.NonceHash, h.Subject, h.Email, h.TenantHint, h.ExpiresAtMs)
-	var me *mysql.MySQLError
-	if errors.As(err, &me) && me.Number == mysqlErrDupEntry {
-		return ErrSSOHandoffPending
-	}
-	return err
+	return dupAs(err, ErrSSOHandoffPending)
 }
 
 func (s *MySQLSSOHandoff) TakeSSOHandoff(ctx context.Context, keyHash string, nowMs int64) (SSOHandoff, bool, error) {
@@ -124,7 +119,7 @@ func (s *MySQLSSOHandoff) TakeSSOHandoff(ctx context.Context, keyHash string, no
 	// deletes its row; a crash in between leaves a consumed row that the
 	// expiry prune removes.
 	res, err := s.DB.ExecContext(ctx, `UPDATE sso_handoff_codes SET consumed_at_ms = ?
-  WHERE key_hash = ? AND consumed_at_ms IS NULL AND expires_at_ms >= ?`, nowMs, keyHash, nowMs)
+  WHERE key_hash = ? AND consumed_at_ms IS NULL AND expires_at_ms > ?`, nowMs, keyHash, nowMs)
 	if err != nil {
 		return SSOHandoff{}, false, err
 	}

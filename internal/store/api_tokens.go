@@ -6,8 +6,6 @@ import (
 	"errors"
 	"sort"
 	"sync"
-
-	"github.com/go-sql-driver/mysql"
 )
 
 // APIToken is a super-admin-issued, long-lived credential for an unattended
@@ -35,9 +33,10 @@ type APIToken struct {
 	RevokedBy   string
 }
 
-// Active reports whether the token may be exchanged at nowMs.
+// Active reports whether the token may be exchanged at nowMs (live strictly
+// before its expiry: liveAt).
 func (t APIToken) Active(nowMs int64) bool {
-	return t.RevokedAtMs == 0 && t.ExpiresAtMs > nowMs
+	return t.RevokedAtMs == 0 && liveAt(t.ExpiresAtMs, nowMs)
 }
 
 // maxListedAPITokens bounds one listing (newest first).
@@ -45,6 +44,11 @@ const maxListedAPITokens = 500
 
 // ErrAPITokenExists rejects a duplicate token id.
 var ErrAPITokenExists = errors.New("api token exists")
+
+// ErrRevokeTimeRequired refuses a revocation without its time: a revoked
+// time of 0 reads as "not revoked" (API tokens, refresh families), so a
+// revoke at 0 would report success and change nothing.
+var ErrRevokeTimeRequired = errors.New("store: a revocation needs its time (nowMs > 0)")
 
 // APITokenStore persists API tokens platform-wide (not tenant-scoped: the
 // issuer is a platform super-admin). Implementations must be safe for
@@ -58,6 +62,7 @@ type APITokenStore interface {
 	ListAPITokens(ctx context.Context) ([]APIToken, error)
 	// RevokeAPIToken revokes a not-yet-revoked token; revoked=false when no
 	// such token exists or it was already revoked (idempotent).
+	// ErrRevokeTimeRequired when nowMs <= 0.
 	RevokeAPIToken(ctx context.Context, tokenID, by string, nowMs int64) (revoked bool, err error)
 	// TouchAPIToken records a successful exchange.
 	TouchAPIToken(ctx context.Context, tokenID string, nowMs int64) error
@@ -111,6 +116,9 @@ func (s *MemoryAPITokens) ListAPITokens(_ context.Context) ([]APIToken, error) {
 }
 
 func (s *MemoryAPITokens) RevokeAPIToken(_ context.Context, tokenID, by string, nowMs int64) (bool, error) {
+	if nowMs <= 0 {
+		return false, ErrRevokeTimeRequired
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	t, ok := s.rows[tokenID]
@@ -143,7 +151,7 @@ var _ APITokenStore = (*MySQLAPITokens)(nil)
 const apiTokenColumns = `token_id, secret_hash, subject, email, tenant_hint, label, created_by,
   created_at_ms, expires_at_ms, last_used_at_ms, COALESCE(revoked_at_ms, 0), revoked_by`
 
-func scanAPIToken(sc interface{ Scan(...any) error }) (APIToken, error) {
+func scanAPIToken(sc rowScanner) (APIToken, error) {
 	var t APIToken
 	err := sc.Scan(&t.TokenID, &t.SecretHash, &t.Subject, &t.Email, &t.TenantHint, &t.Label, &t.CreatedBy,
 		&t.CreatedAtMs, &t.ExpiresAtMs, &t.LastUsedAtMs, &t.RevokedAtMs, &t.RevokedBy)
@@ -155,11 +163,7 @@ func (m *MySQLAPITokens) CreateAPIToken(ctx context.Context, t APIToken) error {
   (token_id, secret_hash, subject, email, tenant_hint, label, created_by, created_at_ms, expires_at_ms)
   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		t.TokenID, t.SecretHash, t.Subject, t.Email, t.TenantHint, t.Label, t.CreatedBy, t.CreatedAtMs, t.ExpiresAtMs)
-	var me *mysql.MySQLError
-	if errors.As(err, &me) && me.Number == mysqlErrDupEntry {
-		return ErrAPITokenExists
-	}
-	return err
+	return dupAs(err, ErrAPITokenExists)
 }
 
 func (m *MySQLAPITokens) GetAPIToken(ctx context.Context, tokenID string) (APIToken, bool, error) {
@@ -174,24 +178,14 @@ func (m *MySQLAPITokens) GetAPIToken(ctx context.Context, tokenID string) (APITo
 }
 
 func (m *MySQLAPITokens) ListAPITokens(ctx context.Context) ([]APIToken, error) {
-	rows, err := m.DB.QueryContext(ctx, `SELECT `+apiTokenColumns+` FROM api_tokens
-  ORDER BY created_at_ms DESC, token_id LIMIT ?`, maxListedAPITokens)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var out []APIToken
-	for rows.Next() {
-		t, err := scanAPIToken(rows)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, t)
-	}
-	return out, rows.Err()
+	return queryAll(ctx, m.DB, `SELECT `+apiTokenColumns+` FROM api_tokens
+  ORDER BY created_at_ms DESC, token_id LIMIT ?`, scanAPIToken, maxListedAPITokens)
 }
 
 func (m *MySQLAPITokens) RevokeAPIToken(ctx context.Context, tokenID, by string, nowMs int64) (bool, error) {
+	if nowMs <= 0 {
+		return false, ErrRevokeTimeRequired
+	}
 	res, err := m.DB.ExecContext(ctx,
 		`UPDATE api_tokens SET revoked_at_ms = ?, revoked_by = ? WHERE token_id = ? AND revoked_at_ms IS NULL`,
 		nowMs, by, tokenID)

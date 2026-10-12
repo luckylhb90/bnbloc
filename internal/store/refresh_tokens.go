@@ -75,15 +75,22 @@ var (
 	// ErrRefreshReuse: a rotated-away token was presented; the family has
 	// been revoked by this call.
 	ErrRefreshReuse = errors.New("refresh token reuse detected; family revoked")
+	// ErrRefreshFamilyExists rejects a duplicate family id.
+	ErrRefreshFamilyExists = errors.New("refresh token family exists")
 	// errEmptyRevokeFilter refuses a bulk revocation with no selector.
 	errEmptyRevokeFilter = errors.New("refresh revoke filter needs a subject or tenant")
 )
 
 // RefreshTokenStore tracks refresh-token families server-side so refresh
 // tokens are rotatable, revocable, and reuse-detecting. Implementations must
-// make UseRefreshFamily atomic per family.
+// make UseRefreshFamily atomic per family. Families are global (a sign-in of
+// a subject, keyed by family id), not tenant-scoped: TenantID records the
+// scope of the last session. A family is live strictly before ExpiresAtMs
+// (liveAt). A revocation needs its time: nowMs <= 0 is
+// ErrRevokeTimeRequired (0 reads as "not revoked").
 type RefreshTokenStore interface {
-	// CreateRefreshFamily records a new family (first pruning expired ones).
+	// CreateRefreshFamily records a new family (first pruning the families
+	// expired at f.CreatedAtMs); a taken id is ErrRefreshFamilyExists.
 	CreateRefreshFamily(ctx context.Context, f RefreshFamily) error
 	// GetRefreshFamily returns a family regardless of state.
 	GetRefreshFamily(ctx context.Context, familyID string) (RefreshFamily, bool, error)
@@ -135,7 +142,7 @@ func decideRefreshSwitch(f RefreshFamily, sw RefreshSwitch) (RefreshFamily, erro
 // loaded family. It returns the updated family, or an error; reuse=true means
 // the caller must persist f with RevokedAtMs set (the returned family).
 func decideRefreshUse(f RefreshFamily, u RefreshUse) (out RefreshFamily, reuse bool, err error) {
-	if f.RevokedAtMs != 0 || f.ExpiresAtMs < u.NowMs || u.PresentedJTI == "" {
+	if !f.active(u.NowMs) || u.PresentedJTI == "" {
 		return f, false, ErrRefreshInvalid
 	}
 	switch {
@@ -153,9 +160,7 @@ func decideRefreshUse(f RefreshFamily, u RefreshUse) (out RefreshFamily, reuse b
 		return f, true, ErrRefreshReuse
 	}
 	f.LastUsedAtMs = u.NowMs
-	if u.ExpiresAtMs > f.ExpiresAtMs {
-		f.ExpiresAtMs = u.ExpiresAtMs
-	}
+	f.ExpiresAtMs = max(f.ExpiresAtMs, u.ExpiresAtMs) // a use only slides the expiry later
 	if u.TenantID != "" {
 		f.TenantID = u.TenantID
 	}
@@ -164,7 +169,7 @@ func decideRefreshUse(f RefreshFamily, u RefreshUse) (out RefreshFamily, reuse b
 }
 
 func (f RefreshFamily) active(nowMs int64) bool {
-	return f.RevokedAtMs == 0 && f.ExpiresAtMs >= nowMs
+	return f.RevokedAtMs == 0 && liveAt(f.ExpiresAtMs, nowMs)
 }
 
 func (r RefreshRevokeFilter) matches(f RefreshFamily) bool {
@@ -198,12 +203,12 @@ func (s *MemoryRefreshToken) CreateRefreshFamily(_ context.Context, f RefreshFam
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for k, v := range s.rows {
-		if v.ExpiresAtMs < f.CreatedAtMs {
+		if !liveAt(v.ExpiresAtMs, f.CreatedAtMs) {
 			delete(s.rows, k)
 		}
 	}
 	if _, dup := s.rows[f.FamilyID]; dup {
-		return errors.New("refresh family exists")
+		return ErrRefreshFamilyExists
 	}
 	s.rows[f.FamilyID] = f
 	return nil
@@ -264,6 +269,9 @@ func (s *MemoryRefreshToken) ListRefreshFamilies(_ context.Context, subject stri
 }
 
 func (s *MemoryRefreshToken) RevokeRefreshFamily(_ context.Context, subject, familyID string, nowMs int64) (bool, error) {
+	if nowMs <= 0 {
+		return false, ErrRevokeTimeRequired
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	f, ok := s.rows[familyID]
@@ -278,6 +286,9 @@ func (s *MemoryRefreshToken) RevokeRefreshFamily(_ context.Context, subject, fam
 func (s *MemoryRefreshToken) RevokeRefreshFamilies(_ context.Context, filter RefreshRevokeFilter, nowMs int64) (int, error) {
 	if filter.empty() {
 		return 0, errEmptyRevokeFilter
+	}
+	if nowMs <= 0 {
+		return 0, ErrRevokeTimeRequired
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -304,7 +315,7 @@ const refreshFamilyColumns = `family_id, subject, email, tenant_hint, tenant_id,
   current_jti, previous_jti, rotated_at_ms, created_at_ms, last_used_at_ms, expires_at_ms, COALESCE(revoked_at_ms, 0),
   parent_family_id`
 
-func scanRefreshFamily(row interface{ Scan(...any) error }) (RefreshFamily, error) {
+func scanRefreshFamily(row rowScanner) (RefreshFamily, error) {
 	var f RefreshFamily
 	err := row.Scan(&f.FamilyID, &f.Subject, &f.Email, &f.TenantHint, &f.TenantID, &f.Role, &f.Client, &f.UserAgent,
 		&f.CurrentJTI, &f.PreviousJTI, &f.RotatedAtMs, &f.CreatedAtMs, &f.LastUsedAtMs, &f.ExpiresAtMs, &f.RevokedAtMs,
@@ -313,7 +324,7 @@ func scanRefreshFamily(row interface{ Scan(...any) error }) (RefreshFamily, erro
 }
 
 func (s *MySQLRefreshToken) CreateRefreshFamily(ctx context.Context, f RefreshFamily) error {
-	if _, err := s.DB.ExecContext(ctx, `DELETE FROM refresh_token_families WHERE expires_at_ms < ?`, f.CreatedAtMs); err != nil {
+	if _, err := s.DB.ExecContext(ctx, `DELETE FROM refresh_token_families WHERE expires_at_ms <= ?`, f.CreatedAtMs); err != nil {
 		return err
 	}
 	_, err := s.DB.ExecContext(ctx, `INSERT INTO refresh_token_families
@@ -322,10 +333,11 @@ func (s *MySQLRefreshToken) CreateRefreshFamily(ctx context.Context, f RefreshFa
   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		f.FamilyID, f.Subject, f.Email, f.TenantHint, f.TenantID, f.Role, f.Client, f.UserAgent,
 		f.CurrentJTI, f.PreviousJTI, f.RotatedAtMs, f.CreatedAtMs, f.LastUsedAtMs, f.ExpiresAtMs, f.ParentFamilyID)
-	return err
+	return dupAs(err, ErrRefreshFamilyExists)
 }
 
 func (s *MySQLRefreshToken) GetRefreshFamily(ctx context.Context, familyID string) (RefreshFamily, bool, error) {
+	// cross-tenant: a family is a subject's global sign-in, keyed by its id.
 	f, err := scanRefreshFamily(s.DB.QueryRowContext(ctx,
 		`SELECT `+refreshFamilyColumns+` FROM refresh_token_families WHERE family_id = ?`, familyID))
 	if errors.Is(err, sql.ErrNoRows) {
@@ -357,16 +369,12 @@ func (s *MySQLRefreshToken) UseRefreshFamily(ctx context.Context, u RefreshUse) 
 	if useErr != nil && !reuse {
 		return out, useErr
 	}
-	var revokedAt any
-	if out.RevokedAtMs != 0 {
-		revokedAt = out.RevokedAtMs
-	}
 	if _, err := tx.ExecContext(ctx, `UPDATE refresh_token_families SET
   current_jti = ?, previous_jti = ?, rotated_at_ms = ?, last_used_at_ms = ?, expires_at_ms = ?,
   tenant_id = ?, role = ?, revoked_at_ms = ?
   WHERE family_id = ?`,
 		out.CurrentJTI, out.PreviousJTI, out.RotatedAtMs, out.LastUsedAtMs, out.ExpiresAtMs,
-		out.TenantID, out.Role, revokedAt, out.FamilyID); err != nil {
+		out.TenantID, out.Role, nullIfZero(out.RevokedAtMs), out.FamilyID); err != nil {
 		return RefreshFamily{}, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -405,25 +413,17 @@ func (s *MySQLRefreshToken) SwitchRefreshFamily(ctx context.Context, sw RefreshS
 }
 
 func (s *MySQLRefreshToken) ListRefreshFamilies(ctx context.Context, subject string, nowMs int64) ([]RefreshFamily, error) {
-	rows, err := s.DB.QueryContext(ctx, `SELECT `+refreshFamilyColumns+` FROM refresh_token_families
-  WHERE subject = ? AND revoked_at_ms IS NULL AND expires_at_ms >= ?
-  ORDER BY last_used_at_ms DESC, family_id`, subject, nowMs)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	out := []RefreshFamily{}
-	for rows.Next() {
-		f, err := scanRefreshFamily(rows)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, f)
-	}
-	return out, rows.Err()
+	// cross-tenant: a subject's sign-ins span every tenant they belong to.
+	return queryAll(ctx, s.DB, `SELECT `+refreshFamilyColumns+` FROM refresh_token_families
+  WHERE subject = ? AND revoked_at_ms IS NULL AND expires_at_ms > ?
+  ORDER BY last_used_at_ms DESC, family_id`, scanRefreshFamily, subject, nowMs)
 }
 
 func (s *MySQLRefreshToken) RevokeRefreshFamily(ctx context.Context, subject, familyID string, nowMs int64) (bool, error) {
+	// cross-tenant: a family is a subject's global sign-in, keyed by its id.
+	if nowMs <= 0 {
+		return false, ErrRevokeTimeRequired
+	}
 	res, err := s.DB.ExecContext(ctx, `UPDATE refresh_token_families SET revoked_at_ms = ?
   WHERE family_id = ? AND subject = ? AND revoked_at_ms IS NULL`, nowMs, familyID, subject)
 	if err != nil {
@@ -436,6 +436,9 @@ func (s *MySQLRefreshToken) RevokeRefreshFamily(ctx context.Context, subject, fa
 func (s *MySQLRefreshToken) RevokeRefreshFamilies(ctx context.Context, filter RefreshRevokeFilter, nowMs int64) (int, error) {
 	if filter.empty() {
 		return 0, errEmptyRevokeFilter
+	}
+	if nowMs <= 0 {
+		return 0, ErrRevokeTimeRequired
 	}
 	q := `UPDATE refresh_token_families SET revoked_at_ms = ? WHERE revoked_at_ms IS NULL`
 	args := []any{nowMs}

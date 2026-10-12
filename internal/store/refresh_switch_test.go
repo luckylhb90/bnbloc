@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"testing"
-	"time"
 )
 
 // A tenant switch moves an active family (its hint and scope) without
@@ -43,12 +42,8 @@ func testRefreshSwitch(t *testing.T, s RefreshTokenStore, id, subject string, no
 	}
 }
 
-func TestRefreshFamilySwitch(t *testing.T) {
-	testRefreshSwitch(t, NewMemoryRefreshToken(), "f1", "ann", 1000)
-}
-
-func TestMySQLRefreshFamilySwitch(t *testing.T) {
-	_, refresh := mysqlAuthState(t)
-	id := uniqueHex(t, "fam")[:24]
-	testRefreshSwitch(t, refresh, id, "subj-"+id[:12], time.Now().UnixMilli())
+func TestContractRefreshTokenStoreSwitch(t *testing.T) {
+	forEachBackend(t, func(t *testing.T, b *Backends) {
+		testRefreshSwitch(t, b.RefreshTokens, uniq("fam-"), uniq("ann-"), 1000)
+	})
 }
