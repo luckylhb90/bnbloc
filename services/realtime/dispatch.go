@@ -49,10 +49,6 @@ const AgentDispatchAuditKind = "agent_dispatch"
 // namespaced under the parent job before it reaches the room feed).
 var dispatchClientMsgIDShape = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
 
-// maxDispatchExpertBytes bounds the expert reference a dispatch may name
-// ("name" or "name@range").
-const maxDispatchExpertBytes = 128
-
 // dispatchRefusal is a guard's refusal: an HTTP status and a wire code.
 type dispatchRefusal struct {
 	status int
@@ -137,7 +133,6 @@ func (s *Service) Dispatch(ctx context.Context, roomID, caller string, in wire.D
 	in.Recipient.OwnerID = strings.TrimSpace(in.Recipient.OwnerID)
 	in.Recipient.Provider = strings.TrimSpace(in.Recipient.Provider)
 	in.Recipient.Core = strings.TrimSpace(in.Recipient.Core)
-	in.Expert = strings.TrimSpace(in.Expert)
 	switch {
 	case in.ParentJobID == "":
 		return reply, refuse(http.StatusBadRequest, wire.DispatchInvalid, "parentJobId is required")
@@ -145,8 +140,6 @@ func (s *Service) Dispatch(ctx context.Context, roomID, caller string, in wire.D
 		return reply, refuse(http.StatusBadRequest, wire.DispatchInvalid, "recipient ownerId and provider are required")
 	case in.ClientMsgID != "" && !dispatchClientMsgIDShape.MatchString(in.ClientMsgID):
 		return reply, refuse(http.StatusBadRequest, wire.DispatchInvalid, "clientMsgId must be 1-64 letters, digits, '-' or '_'")
-	case len(in.Expert) > maxDispatchExpertBytes:
-		return reply, refuse(http.StatusBadRequest, wire.DispatchInvalid, "expert reference too long")
 	}
 
 	parent, err = s.Dispatches.GetAgentRun(ctx, in.ParentJobID)
@@ -200,10 +193,14 @@ func (s *Service) Dispatch(ctx context.Context, roomID, caller string, in wire.D
 		ClientMsgID: clientMsgID,
 		ChannelID:   parent.ChannelID,
 		Recipient:   &ChatRecipient{OwnerID: in.Recipient.OwnerID, Provider: in.Recipient.Provider, Core: in.Recipient.Core},
-		Dispatched:  &wire.DispatchMarker{JobID: parent.JobID, Depth: depth, Via: agentHandle(parent.OwnerUserID, parent.Provider), Expert: in.Expert},
+		Dispatched:  &wire.DispatchMarker{JobID: parent.JobID, Depth: depth, Via: agentHandle(parent.OwnerUserID, parent.Provider)},
+		Expert:      in.Expert,
 	})
-	if errors.Is(err, errAgentInPeopleChat) {
+	switch {
+	case errors.Is(err, errAgentInPeopleChat):
 		return reply, refuse(http.StatusBadRequest, wire.DispatchPeopleChat, "agents cannot be addressed in the people chat")
+	case errors.Is(err, errExpertNotAvailable):
+		return reply, refuse(http.StatusBadRequest, wire.DispatchExpertUnusable, "the expert does not exist or the requester may not use it here")
 	}
 	if err != nil {
 		return reply, err
@@ -302,8 +299,8 @@ func (s *Service) auditDispatch(ctx context.Context, caller string, parent store
 	if reply.JobID != "" {
 		detail = append(detail, "job="+reply.JobID, fmt.Sprintf("depth=%d", reply.Depth))
 	}
-	if in.Expert != "" {
-		detail = append(detail, "expert="+in.Expert)
+	if in.Expert != nil && in.Expert.ID != "" {
+		detail = append(detail, "expert="+in.Expert.ID)
 	}
 	switch {
 	case refusal != nil:

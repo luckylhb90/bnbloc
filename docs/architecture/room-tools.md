@@ -79,7 +79,8 @@ servers stay on the host; only shell commands run in the microVM.
 ## The dispatch route (realtime)
 
 `POST /internal/v1/rooms/{room}/dispatch` (`svcauth.RequireSigned`) with
-`wire.DispatchRequest {parentJobId, recipient, text, expert?, clientMsgId?}`.
+`wire.DispatchRequest {parentJobId, recipient, text, expert?, clientMsgId?}`
+(`expert` is a `wire.ChatExpert {id, version?}`).
 The gateway's public door `POST /v1/rooms/{room}/dispatch` is the only edge
 route rewritten onto an internal one. `RouteKey` keys the path to the room,
 so the post (which touches the room's hub) runs on the room's owner replica.
@@ -100,6 +101,7 @@ the detail):
 | recipient not an agent higher up the parent chain | 409 `dispatch_cycle` |
 | ≤ 8 persisted dispatches per parent (`wire.MaxDispatchFanOut`) | 409 `fan_out_exceeded` |
 | not the people chat | 400 `people_chat` |
+| the expert, if any, is usable by the requester (`ChatPost.Expert`) | 400 `expert_not_available` |
 | the dispatching member's chat rate limit (gateway) | 429 |
 
 The fan-out count and the post are serialized per parent job (striped
@@ -108,7 +110,8 @@ owner). A `clientMsgId` retry answers the original job. The depth and
 fan-out limits are protocol safety constants, not deployment data.
 
 **Attribution.** The message's author is the parent job's requester;
-`payload.dispatchedBy {jobId, depth, via, expert?}` marks it (the feed
-shows "maya → via jack/codex → bob/claude"), and the job persists
+`payload.dispatchedBy {jobId, depth, via}` marks it (the feed shows
+"maya → via jack/codex → bob/claude", plus "(as <expert>)" from the
+message's `payload.expert`), and the job persists
 `dispatched_by_job_id` / `dispatch_depth` (run records show
 `dispatchedBy`).

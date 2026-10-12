@@ -20,7 +20,6 @@ const (
 	replyHistoryPages  = 5
 	maxDeliverables    = 50
 	maxTaskBytes       = wire.MaxChatTextBytes
-	maxExpertRefBytes  = 128
 	maxStatusDispatchs = 20
 )
 
@@ -62,7 +61,7 @@ func askAgentTool() Tool {
 		InputSchema: objectSchema(map[string]any{
 			"handle":       map[string]any{"type": "string", "description": `The agent's handle from list_room_agents, e.g. "jack/codex".`},
 			"task":         map[string]any{"type": "string", "description": "A self-contained task: the agent sees the room's conversation, not your private context."},
-			"expert":       map[string]any{"type": "string", "description": "Optional expert (role) for the agent to wear, by name."},
+			"expert":       map[string]any{"type": "string", "description": `Optional expert (role) for the agent to wear: its component id, optionally "@version" (it must be usable by the person who asked you).`},
 			"wait_seconds": map[string]any{"type": "integer", "minimum": 0, "description": "How long to wait for the result (default 600, at most 1200). 0 returns at once with the handle."},
 		}, "handle", "task"),
 		Call: askAgent,
@@ -86,8 +85,6 @@ func askAgent(ctx context.Context, env *Env, args json.RawMessage) Result {
 		return toolError("task is required")
 	case len(in.Task) > maxTaskBytes:
 		return toolError("task is too long (at most %d bytes)", maxTaskBytes)
-	case len(in.Expert) > maxExpertRefBytes:
-		return toolError("expert reference is too long")
 	}
 	job := env.Session.current()
 	if job.JobID == "" {
@@ -109,7 +106,7 @@ func askAgent(ctx context.Context, env *Env, args json.RawMessage) Result {
 		ParentJobID: job.JobID,
 		Recipient:   wire.DispatchRecipient{OwnerID: target.Owner, Provider: target.Provider, Core: target.Core},
 		Text:        in.Task,
-		Expert:      in.Expert,
+		Expert:      expertRef(in.Expert),
 		ClientMsgID: newClientMsgID(),
 	})
 	if err != nil {
@@ -136,6 +133,15 @@ func askAgent(ctx context.Context, env *Env, args json.RawMessage) Result {
 		}}
 	}
 	return Result{Value: toMap(describe(ctx, env, run, target.Handle))}
+}
+
+// expertRef parses "id" or "id@version" (nil for none).
+func expertRef(s string) *wire.ChatExpert {
+	if s == "" {
+		return nil
+	}
+	id, version, _ := strings.Cut(s, "@")
+	return &wire.ChatExpert{ID: strings.TrimSpace(id), Version: strings.TrimSpace(version)}
 }
 
 // waitSettled polls the dispatched job until it settles or wait ends,

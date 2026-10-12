@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/luckylhb90/bnbloc/internal/contentpkg"
 	"github.com/luckylhb90/bnbloc/internal/membership"
 	"github.com/luckylhb90/bnbloc/internal/realtime"
 	"github.com/luckylhb90/bnbloc/internal/store"
@@ -342,5 +343,42 @@ func TestDispatchStoreFailureIs500(t *testing.T) {
 	recs, _ := f.audit.ExtAuditRecords(dctx(), AgentDispatchAuditKind, 10, 0)
 	if len(recs) != 1 || recs[0].Outcome != "failed" {
 		t.Fatalf("audit = %+v; want one failed row", recs)
+	}
+}
+
+// A dispatch's expert resolves as the requester's, exactly like a typed
+// chat: maya's expert is pinned on the dispatched job, while an expert only
+// the bridge owner (jack) may use is refused.
+func TestDispatchExpertIsTheRequesters(t *testing.T) {
+	f := newDispatchFixture(t)
+	content := store.NewMemoryContentComponents()
+	manifest := func(name string) json.RawMessage {
+		return json.RawMessage(`{"kind":"` + contentpkg.KindExpert + `","name":"` + name + `","version":"1.0.0","displayName":"` + name + `"}`)
+	}
+	for _, c := range []store.ContentComponent{
+		{ID: "cc_maya", Kind: contentpkg.KindExpert, Name: "reviewer", TenantID: tenant.Default, Owner: "maya", Scope: store.ContentScopePersonal, Status: store.ContentStatusActive},
+		{ID: "cc_jack", Kind: contentpkg.KindExpert, Name: "auditor", TenantID: tenant.Default, Owner: "jack", Scope: store.ContentScopePersonal, Status: store.ContentStatusActive},
+	} {
+		if err := content.CreateContentComponent(dctx(), c, store.ContentComponentVersion{Version: "1.0.0", ManifestJSON: manifest(c.Name), BundleBlobKey: "sha256/" + c.ID}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	f.svc.Content = content
+	p := f.parent("job_expert")
+
+	in := toBob(p.JobID)
+	in.Expert = &wire.ChatExpert{ID: "cc_maya"}
+	code, out := f.dispatch("jack", in)
+	if code != http.StatusOK {
+		t.Fatalf("dispatch with the requester's expert = %d %v", code, out)
+	}
+	child, err := f.jobs.GetAgentRun(dctx(), out["jobId"].(string))
+	if err != nil || child.ExpertID != "cc_maya" || child.ExpertVersion != "1.0.0" {
+		t.Fatalf("child = %+v, %v; want maya's expert pinned", child, err)
+	}
+
+	in.Expert = &wire.ChatExpert{ID: "cc_jack"}
+	if code, out := f.dispatch("jack", in); code != http.StatusBadRequest || out["code"] != wire.DispatchExpertUnusable {
+		t.Fatalf("dispatch with the bridge owner's expert = %d %v; want 400 %s", code, out, wire.DispatchExpertUnusable)
 	}
 }

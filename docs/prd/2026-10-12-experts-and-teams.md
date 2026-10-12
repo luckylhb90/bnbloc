@@ -490,6 +490,8 @@ through the step-1 session contributor hook), 6f1bb5b (gateway door),
   chat bucket (the bridge owner, who is the requester for their own agent;
   for a borrowed agent the owner's bridge pays). Fan-out and depth bound
   what one request can spend.
-- **Open:** `expert` is carried to the dispatched message
-  (`dispatchedBy.expert`) and the audit; applying it on the target's
-  session waits for the experts-on-jobs work of step 1.
+- **Experts:** a dispatch's `expert` (`{id, version?}`; `ask_agent` takes
+  `id[@version]`) goes through `ChatPost.Expert` like a typed chat's, so it
+  resolves as the requester's (their own or one pinned in the room), is
+  pinned on the dispatched job and applied by the target bridge; an expert
+  the requester may not use is refused (`expert_not_available`).

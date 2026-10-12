@@ -1,7 +1,8 @@
 // Agent dispatch attribution (room tools). A chat_message an agent dispatched
-// on a person's behalf carries payload.dispatchedBy {jobId, depth, via,
-// expert?} (internal/wire/dispatch.go): the parent job, the hop depth, the
-// dispatching agent's handle and the expert the target was asked to wear.
+// on a person's behalf carries payload.dispatchedBy {jobId, depth, via}
+// (internal/wire/dispatch.go): the parent job, the hop depth and the
+// dispatching agent's handle. The expert the target was asked to wear is the
+// message's ordinary payload.expert.
 // The message's author is the person whose request it serves; the feed shows
 // the chain as "maya → via jack/codex → bob/claude".
 
@@ -21,7 +22,9 @@ export function dispatchAttribution(payload: unknown): DispatchAttribution | und
   if (!payload || typeof payload !== "object") return undefined;
   const d = (payload as { dispatchedBy?: unknown }).dispatchedBy;
   if (!d || typeof d !== "object") return undefined;
-  const { jobId, depth, via, expert } = d as { jobId?: unknown; depth?: unknown; via?: unknown; expert?: unknown };
+  const { jobId, depth, via } = d as { jobId?: unknown; depth?: unknown; via?: unknown };
+  const e = (payload as { expert?: { name?: unknown; displayName?: unknown } }).expert;
+  const expert = typeof e?.displayName === "string" && e.displayName ? e.displayName : typeof e?.name === "string" && e.name ? e.name : undefined;
   if (typeof jobId !== "string" || !jobId) return undefined;
   const recipient = (payload as { recipient?: { ownerId?: unknown; provider?: unknown } }).recipient;
   const to =
@@ -35,7 +38,7 @@ export function dispatchAttribution(payload: unknown): DispatchAttribution | und
     depth: typeof depth === "number" && depth > 0 ? depth : 1,
     via: typeof via === "string" && via ? via : "an agent",
     to,
-    expert: typeof expert === "string" && expert ? expert : undefined,
+    expert,
   };
 }
 

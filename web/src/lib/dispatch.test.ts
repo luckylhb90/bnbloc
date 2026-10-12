@@ -18,7 +18,7 @@ const d = dispatchAttribution(payload);
 eq(d, { jobId: "job_parent", depth: 2, via: "jack/codex", to: "bob/claude" }, "marker with recipient");
 eq(dispatchLine("maya", d!), "maya → via jack/codex → bob/claude", "chain line");
 eq(
-  dispatchLine("maya", dispatchAttribution({ ...payload, dispatchedBy: { ...payload.dispatchedBy, expert: "reviewer" } })!),
+  dispatchLine("maya", dispatchAttribution({ ...payload, expert: { id: "cc_rev", name: "reviewer", version: "1.0.0" } })!),
   "maya → via jack/codex → bob/claude (as reviewer)",
   "expert",
 );

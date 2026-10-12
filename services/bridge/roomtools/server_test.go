@@ -514,3 +514,15 @@ func postStream(t *testing.T, srv *Server, token string, msg map[string]any) []m
 	}
 	return out
 }
+
+func TestExpertRef(t *testing.T) {
+	if expertRef("") != nil {
+		t.Fatal("no expert")
+	}
+	if got := expertRef("cc_rev@1.2.0"); got == nil || *got != (wire.ChatExpert{ID: "cc_rev", Version: "1.2.0"}) {
+		t.Fatalf("expertRef = %+v", got)
+	}
+	if got := expertRef("cc_rev"); got == nil || *got != (wire.ChatExpert{ID: "cc_rev"}) {
+		t.Fatalf("expertRef = %+v", got)
+	}
+}

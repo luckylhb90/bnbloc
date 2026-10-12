@@ -23,14 +23,14 @@ const (
 )
 
 // DispatchMarker is payload.dispatchedBy on a chat_message an agent
-// dispatched: the parent job, the new job's depth, the dispatching agent's
-// handle ("jack/codex") and the expert the dispatch asked the target to
-// wear, if any. Clients render "maya → via jack/codex → bob/claude".
+// dispatched: the parent job, the new job's depth and the dispatching
+// agent's handle ("jack/codex"). Clients render "maya → via jack/codex →
+// bob/claude". An expert the dispatch asked the target to wear is the
+// message's ordinary payload.expert.
 type DispatchMarker struct {
-	JobID  string `json:"jobId"`
-	Depth  int    `json:"depth"`
-	Via    string `json:"via,omitempty"`
-	Expert string `json:"expert,omitempty"`
+	JobID string `json:"jobId"`
+	Depth int    `json:"depth"`
+	Via   string `json:"via,omitempty"`
 }
 
 // DispatchRecipient names the agent a dispatch addresses, in the chat
@@ -42,13 +42,15 @@ type DispatchRecipient struct {
 }
 
 // DispatchRequest is the body of POST /v1/rooms/{roomId}/dispatch (and of
-// realtime's POST /internal/v1/rooms/{roomId}/dispatch). ClientMsgID makes
-// a retried dispatch idempotent.
+// realtime's POST /internal/v1/rooms/{roomId}/dispatch). Expert asks the
+// target to wear an expert exactly as a typed chat does (it must be usable
+// by the requester, who authors the post). ClientMsgID makes a retried
+// dispatch idempotent.
 type DispatchRequest struct {
 	ParentJobID string            `json:"parentJobId"`
 	Recipient   DispatchRecipient `json:"recipient"`
 	Text        string            `json:"text"`
-	Expert      string            `json:"expert,omitempty"`
+	Expert      *ChatExpert       `json:"expert,omitempty"`
 	ClientMsgID string            `json:"clientMsgId,omitempty"`
 }
 
@@ -72,6 +74,7 @@ const (
 	DispatchSelf             = "self_dispatch"
 	DispatchCycle            = "dispatch_cycle"
 	DispatchPeopleChat       = "people_chat"
+	DispatchExpertUnusable   = "expert_not_available"
 	DispatchInvalid          = "invalid_dispatch"
 )
 
