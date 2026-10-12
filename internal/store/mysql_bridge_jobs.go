@@ -191,12 +191,30 @@ WHERE job_id=? AND lease_bridge_id=? AND status NOT IN ('replied','failed','time
 	if err != nil {
 		return AgentJob{}, err
 	}
-	if n, _ := res.RowsAffected(); n == 0 {
-		return AgentJob{}, ErrAgentJobLeaseMismatch
+	if n, err := res.RowsAffected(); err != nil {
+		return AgentJob{}, err
+	} else if n == 0 {
+		return AgentJob{}, m.jobMiss(ctx, `job_id=?`, upd.JobID)
 	}
 	return m.scanAgentJob(ctx, `
 SELECT `+agentJobColumns+`
 FROM agent_jobs WHERE job_id=?`, upd.JobID)
+}
+
+// jobMiss classifies a guarded job update that matched no row the way the
+// memory store does: ErrAgentJobNotFound when no job matches where, else
+// ErrAgentJobLeaseMismatch (another bridge holds the lease, or the job is
+// already terminal).
+func (m *MySQLBridgeJobs) jobMiss(ctx context.Context, where string, args ...any) error {
+	var one int
+	err := m.DB.QueryRowContext(ctx, `SELECT 1 FROM agent_jobs WHERE `+where, args...).Scan(&one)
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+		return ErrAgentJobNotFound
+	case err != nil:
+		return err
+	}
+	return ErrAgentJobLeaseMismatch
 }
 
 func (m *MySQLBridgeJobs) RenewAgentJobLease(ctx context.Context, ren LeaseRenewal) error {
@@ -208,8 +226,10 @@ func (m *MySQLBridgeJobs) RenewAgentJobLease(ctx context.Context, ren LeaseRenew
 	if err != nil {
 		return err
 	}
-	if n, _ := res.RowsAffected(); n == 0 {
-		return ErrAgentJobLeaseMismatch
+	if n, err := res.RowsAffected(); err != nil {
+		return err
+	} else if n == 0 {
+		return m.jobMiss(ctx, `job_id=?`, ren.JobID)
 	}
 	return nil
 }
@@ -233,8 +253,13 @@ func (m *MySQLBridgeJobs) CancelAgentJob(ctx context.Context, req CancelRequest)
 	if err != nil {
 		return AgentJob{}, err
 	}
-	if n, _ := res.RowsAffected(); n == 0 {
-		return AgentJob{}, ErrAgentJobLeaseMismatch
+	if n, err := res.RowsAffected(); err != nil {
+		return AgentJob{}, err
+	} else if n == 0 {
+		if req.RoomID != "" {
+			return AgentJob{}, m.jobMiss(ctx, `tenant_id=? AND job_id=? AND room_id=?`, tid, req.JobID, req.RoomID)
+		}
+		return AgentJob{}, m.jobMiss(ctx, `tenant_id=? AND job_id=?`, tid, req.JobID)
 	}
 	return m.scanAgentJob(ctx, `
 SELECT `+agentJobColumns+`

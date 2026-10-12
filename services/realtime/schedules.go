@@ -190,7 +190,7 @@ func (s *Service) handleCreateSchedule(w http.ResponseWriter, r *http.Request) {
 		sc.ChannelID = strings.TrimSpace(*in.ChannelID)
 	}
 	if status, err := s.checkScheduleSpec(r.Context(), &sc, now); err != nil {
-		http.Error(w, err.Error(), status)
+		writeScheduleSpecErr(w, status, err)
 		return
 	}
 	room, mine, err := s.Schedules.CountSchedules(r.Context(), roomID, userID)
@@ -216,6 +216,17 @@ func (s *Service) handleCreateSchedule(w http.ResponseWriter, r *http.Request) {
 
 // checkScheduleSpec validates text, recipient, channel, recurrence and
 // timezone, normalizing sc and planning its next run.
+// writeScheduleSpecErr writes checkScheduleSpec's refusal. Its 5xx (a failed
+// channel lookup) is logged and never echoes the store error to the caller.
+func writeScheduleSpecErr(w http.ResponseWriter, status int, err error) {
+	if status >= http.StatusInternalServerError {
+		obs.ServerError(w, "schedule channel lookup failed", err)
+		http.Error(w, "schedule channel lookup failed", status)
+		return
+	}
+	http.Error(w, err.Error(), status)
+}
+
 func (s *Service) checkScheduleSpec(ctx context.Context, sc *wire.RoomSchedule, now time.Time) (int, error) {
 	if err := validScheduleText(sc.Text); err != nil {
 		if len(sc.Text) > maxChatTextBytes {
@@ -302,7 +313,7 @@ func (s *Service) handlePatchSchedule(w http.ResponseWriter, r *http.Request) {
 	}
 	saved := next.NextRunAtMs
 	if status, err := s.checkScheduleSpec(r.Context(), &next, now); err != nil {
-		http.Error(w, err.Error(), status)
+		writeScheduleSpecErr(w, status, err)
 		return
 	}
 	if !timing && next.Enabled && saved > 0 {

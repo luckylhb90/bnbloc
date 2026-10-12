@@ -238,6 +238,55 @@ func TestMySQLTenantReadsReportFailures(t *testing.T) {
 	}
 }
 
+// A guarded job write answers with the same sentinel on both backends: an
+// unknown job is ErrAgentJobNotFound, a job another bridge holds (or one
+// already terminal) is ErrAgentJobLeaseMismatch.
+func TestContractJobWriteSentinels(t *testing.T) {
+	forEachBackend(t, func(t *testing.T, b *Backends) {
+		ctx := tenantCtx(uniq("t-job-"))
+		owner, bridge, room := uniq("o-"), uniq("br-"), uniq("room-")
+		job, err := b.BridgeJobs.PutAgentJob(ctx, AgentJob{JobID: uniq("job-"), RoomID: room, MessageSeq: 1, RequesterUserID: owner, OwnerUserID: owner,
+			Core: "c", Provider: "p", Status: AgentJobQueued, CreatedAtMs: 1, UpdatedAtMs: 1})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := b.BridgeJobs.PutBridgeHeartbeat(ctx, BridgeHeartbeat{BridgeID: bridge, OwnerUserID: owner, Status: BridgeOnline, LastSeenAtMs: 10}); err != nil {
+			t.Fatal(err)
+		}
+		if err := b.BridgeJobs.ReplaceBridgeAgents(ctx, bridge, []BridgeAgent{{BridgeID: bridge, OwnerUserID: owner, Core: "c", Provider: "p", TargetID: "c/p", LastSeenAtMs: 10}}); err != nil {
+			t.Fatal(err)
+		}
+		if got, err := b.BridgeJobs.ClaimAgentJobs(ctx, ClaimRequest{BridgeID: bridge, OwnerUserID: owner, MaxJobs: 1, NowMs: 20, LeaseMs: 60000}); err != nil || len(got) != 1 {
+			t.Fatalf("claim = %d jobs, %v", len(got), err)
+		}
+		missing := uniq("nope-")
+		if _, err := b.BridgeJobs.UpdateAgentJobStatus(ctx, JobStatusUpdate{JobID: missing, BridgeID: bridge, Status: AgentJobRunning, NowMs: 30}); !errors.Is(err, ErrAgentJobNotFound) {
+			t.Fatalf("update of an unknown job = %v, want ErrAgentJobNotFound", err)
+		}
+		if err := b.BridgeJobs.RenewAgentJobLease(ctx, LeaseRenewal{JobID: missing, BridgeID: bridge, NowMs: 30}); !errors.Is(err, ErrAgentJobNotFound) {
+			t.Fatalf("renew of an unknown job = %v, want ErrAgentJobNotFound", err)
+		}
+		if _, err := b.BridgeJobs.CancelAgentJob(ctx, CancelRequest{JobID: missing, RoomID: room, NowMs: 30}); !errors.Is(err, ErrAgentJobNotFound) {
+			t.Fatalf("cancel of an unknown job = %v, want ErrAgentJobNotFound", err)
+		}
+		if _, err := b.BridgeJobs.UpdateAgentJobStatus(ctx, JobStatusUpdate{JobID: job.JobID, BridgeID: "other", Status: AgentJobRunning, NowMs: 30}); !errors.Is(err, ErrAgentJobLeaseMismatch) {
+			t.Fatalf("update by another bridge = %v, want ErrAgentJobLeaseMismatch", err)
+		}
+		// A renewal in the same millisecond rewrites the same lease: it matched.
+		for i := 0; i < 2; i++ {
+			if err := b.BridgeJobs.RenewAgentJobLease(ctx, LeaseRenewal{JobID: job.JobID, BridgeID: bridge, NowMs: 40, LeaseMs: 1000}); err != nil {
+				t.Fatalf("renew #%d in the same millisecond: %v", i, err)
+			}
+		}
+		if _, err := b.BridgeJobs.CancelAgentJob(ctx, CancelRequest{JobID: job.JobID, RoomID: room, NowMs: 50}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := b.BridgeJobs.CancelAgentJob(ctx, CancelRequest{JobID: job.JobID, RoomID: room, NowMs: 60}); !errors.Is(err, ErrAgentJobLeaseMismatch) {
+			t.Fatalf("cancel of a terminal job = %v, want ErrAgentJobLeaseMismatch", err)
+		}
+	})
+}
+
 // Two reporters racing on one session publish each reply once: the reply is
 // fresh only for the append that stored it.
 func TestContractConcurrentAppendPublishesOnce(t *testing.T) {

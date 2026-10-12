@@ -142,9 +142,7 @@ func (s *Service) handleBridgeJobClaim(w http.ResponseWriter, r *http.Request) {
 	// bridge id is not a credential: claiming through another member's bridge
 	// would hand over that member's queued prompts.
 	body.BridgeID = resolveBridgeID(body.BridgeID, caller)
-	hb, err := s.BridgeJobs.LookupBridge(r.Context(), body.BridgeID)
-	if err != nil || hb.OwnerUserID != caller {
-		writeErr(w, http.StatusForbidden, "bridge owner mismatch")
+	if !s.requireBridgeOwner(w, r, body.BridgeID, caller) {
 		return
 	}
 	jobs, err := s.BridgeJobs.ClaimAgentJobs(r.Context(), store.ClaimRequest{BridgeID: body.BridgeID, OwnerUserID: caller, MaxJobs: body.MaxJobs, NowMs: time.Now().UnixMilli(), LeaseMs: 60000, ServeAllOwners: body.ServeAllOwners && s.AllowServeAllOwners})
@@ -202,15 +200,13 @@ func (s *Service) handleBridgeJobStatus(w http.ResponseWriter, r *http.Request) 
 	// A status report may only come from the member who registered that bridge.
 	// Without this any room member knowing a bridgeId could drive another
 	// member's job to a terminal state.
-	hb, err := s.BridgeJobs.LookupBridge(r.Context(), body.BridgeID)
-	if err != nil || hb.OwnerUserID != caller {
-		writeErr(w, http.StatusForbidden, "bridge owner mismatch")
+	if !s.requireBridgeOwner(w, r, body.BridgeID, caller) {
 		return
 	}
 	now := time.Now().UnixMilli()
 	job, err := s.BridgeJobs.UpdateAgentJobStatus(r.Context(), store.JobStatusUpdate{JobID: jobID, BridgeID: body.BridgeID, Status: body.Status, FailureReason: body.FailureReason, DiagnosticsJSON: body.DiagnosticsJSON, NowMs: now, LeaseMs: store.DefaultLeaseMs, MaxAttempts: store.DefaultMaxJobAttempts})
 	if err != nil {
-		writeErr(w, http.StatusConflict, err.Error())
+		writeJobStoreError(w, "job status update failed", err)
 		return
 	}
 	s.publishJob(r.Context(), job, now)
@@ -244,14 +240,12 @@ func (s *Service) handleBridgeJobLease(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "bridgeId and jobId required")
 		return
 	}
-	hb, err := s.BridgeJobs.LookupBridge(r.Context(), body.BridgeID)
-	if err != nil || hb.OwnerUserID != caller {
-		writeErr(w, http.StatusForbidden, "bridge owner mismatch")
+	if !s.requireBridgeOwner(w, r, body.BridgeID, caller) {
 		return
 	}
 	now := time.Now().UnixMilli()
 	if err := s.BridgeJobs.RenewAgentJobLease(r.Context(), store.LeaseRenewal{JobID: jobID, BridgeID: body.BridgeID, NowMs: now, LeaseMs: store.DefaultLeaseMs}); err != nil {
-		writeErr(w, http.StatusConflict, err.Error())
+		writeJobStoreError(w, "job lease renewal failed", err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"jobId": jobID, "leaseExpiresAtMs": now + store.DefaultLeaseMs})
@@ -383,15 +377,43 @@ func (s *Service) handleCancelAgentJob(w http.ResponseWriter, r *http.Request) {
 		NowMs:           now,
 	})
 	if err != nil {
-		if errors.Is(err, store.ErrAgentJobNotFound) {
-			writeErr(w, http.StatusNotFound, err.Error())
-			return
-		}
-		writeErr(w, http.StatusConflict, err.Error())
+		writeJobStoreError(w, "job cancel failed", err)
 		return
 	}
 	s.publishJob(r.Context(), job, now)
 	writeJSON(w, http.StatusOK, map[string]any{"jobId": job.JobID, "status": job.Status})
+}
+
+// writeJobStoreError is the one mapping of a bridge-job store error: only the
+// lease sentinel is a 409 (the job is no longer the caller's to move), an
+// unknown job is a 404, and anything else is a logged 500 — a database failure
+// must never read as "lease lost" or leak its text to the caller.
+func writeJobStoreError(w http.ResponseWriter, what string, err error) {
+	switch {
+	case errors.Is(err, store.ErrAgentJobLeaseMismatch):
+		writeErr(w, http.StatusConflict, err.Error())
+	case errors.Is(err, store.ErrAgentJobNotFound):
+		writeErr(w, http.StatusNotFound, err.Error())
+	default:
+		obs.ServerError(w, what, err)
+		writeErr(w, http.StatusInternalServerError, what)
+	}
+}
+
+// requireBridgeOwner refuses (403) a bridge the caller did not register, and
+// reports a failed lookup as a 500 rather than as a refusal.
+func (s *Service) requireBridgeOwner(w http.ResponseWriter, r *http.Request, bridgeID, caller string) bool {
+	hb, err := s.BridgeJobs.LookupBridge(r.Context(), bridgeID)
+	if err != nil && !errors.Is(err, store.ErrBridgeNotFound) {
+		obs.ServerError(w, "bridge lookup failed", err)
+		writeErr(w, http.StatusInternalServerError, "bridge lookup failed")
+		return false
+	}
+	if err != nil || hb.OwnerUserID != caller {
+		writeErr(w, http.StatusForbidden, "bridge owner mismatch")
+		return false
+	}
+	return true
 }
 
 func (s *Service) handleRoomAgentJobs(w http.ResponseWriter, r *http.Request) {
