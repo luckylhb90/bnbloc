@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, type AgentJob } from "@/lib/api";
-import type { RoomEvent } from "@/lib/sse";
+import type { RoomEvent } from "@/lib/roomEvents";
 import { onboardingEventFromRoomEvent, onboardingEvents } from "@/lib/onboardingEvents";
 import { useScopedState } from "@/lib/useScopedState";
 import type { RecentArtifactChange } from "@/views/room/ActivityRail";

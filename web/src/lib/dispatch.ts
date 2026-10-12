@@ -1,5 +1,5 @@
 // Agent dispatch attribution (room tools). A chat_message an agent dispatched
-// on a person's behalf carries payload.dispatchedBy {jobId, depth, via}
+// on a person's behalf carries payload.dispatchedBy {jobId, parentSeq, depth, via}
 // (internal/wire/dispatch.go): the parent job, the hop depth and the
 // dispatching agent's handle. The expert the target was asked to wear is the
 // message's ordinary payload.expert.
@@ -8,6 +8,9 @@
 
 export interface DispatchAttribution {
   readonly jobId: string;
+  // The room sequence of the parent job's request: the feed nests the
+  // dispatch under that message.
+  readonly parentSeq?: number;
   readonly depth: number;
   // The dispatching agent's handle ("jack/codex").
   readonly via: string;
@@ -24,7 +27,7 @@ export function dispatchAttribution(payload: unknown): DispatchAttribution | und
   if (!payload || typeof payload !== "object") return undefined;
   const d = (payload as { dispatchedBy?: unknown }).dispatchedBy;
   if (!d || typeof d !== "object") return undefined;
-  const { jobId, depth, via, role } = d as { jobId?: unknown; depth?: unknown; via?: unknown; role?: unknown };
+  const { jobId, depth, via, role, parentSeq } = d as { jobId?: unknown; depth?: unknown; via?: unknown; role?: unknown; parentSeq?: unknown };
   const e = (payload as { expert?: { name?: unknown; displayName?: unknown } }).expert;
   const expert = typeof e?.displayName === "string" && e.displayName ? e.displayName : typeof e?.name === "string" && e.name ? e.name : undefined;
   if (typeof jobId !== "string" || !jobId) return undefined;
@@ -42,6 +45,7 @@ export function dispatchAttribution(payload: unknown): DispatchAttribution | und
     to,
     expert,
     ...(typeof role === "string" && role ? { role } : {}),
+    ...(typeof parentSeq === "number" && parentSeq > 0 ? { parentSeq } : {}),
   };
 }
 

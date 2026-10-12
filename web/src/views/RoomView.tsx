@@ -8,7 +8,7 @@ import { useCoarsePointer, useStage } from "@/lib/capability";
 import { useDock } from "@/lib/useDock";
 import { useRoomStream } from "@/lib/useRoomStream";
 import { reportRoomGone, type RoomAccessEnd } from "@/lib/roomGone";
-import type { RoomEvent } from "@/lib/sse";
+import type { RoomEvent } from "@/lib/roomEvents";
 import { LazyDeliverablesView } from "@/views/workbench/LazyWorkbench";
 import { useWorkbench } from "@/views/workbench/useWorkbench";
 import { desktop } from "@/lib/desktop";

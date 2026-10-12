@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api, ApiError, type MessageTask, type TaskStatus } from "@/lib/api";
-import type { RoomEvent } from "@/lib/sse";
+import type { RoomEvent } from "@/lib/roomEvents";
 import { applyTaskUpdate } from "@/lib/team";
 import { useToast } from "@/ui/Toast";
 

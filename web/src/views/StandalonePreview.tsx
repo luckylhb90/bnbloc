@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { api, ApiError } from "@/lib/api";
-import { subscribeRoom, type RoomEvent } from "@/lib/sse";
+import { subscribeRoom } from "@/lib/sse";
+import type { RoomEvent } from "@/lib/roomEvents";
 import { isRoomGoneStatus, reportRoomGone, roomAccessEnded, type RoomAccessEnd } from "@/lib/roomGone";
 import { ArtifactTabView } from "@/views/workbench/ArtifactTabView";
 import { invalidateArtifacts } from "@/views/workbench/artifactData";

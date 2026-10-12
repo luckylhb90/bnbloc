@@ -1,4 +1,4 @@
-import type { RoomEvent } from "./sse.ts";
+import type { RoomEvent } from "./roomEvents.ts";
 import type { FeedItem } from "../views/room/types.ts";
 import {
   ackSent,

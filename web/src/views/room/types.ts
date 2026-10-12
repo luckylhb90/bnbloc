@@ -69,6 +69,11 @@ export interface FeedItem {
   // An agent's notice line (a team lead's progress, a member timeout):
   // rendered as a compact line, not a reply.
   notice?: string;
+  // An agent row's job and the room sequence of that job's request
+  // (payload.jobId / payload.sourceSeq): delegated work nests under the
+  // request that started it (feedTurns.ts).
+  jobId?: string;
+  sourceSeq?: number;
   // A member's message addressed to people only (no agent recipient): no
   // agent reply is coming. Agents still read it as room context.
   peopleOnly?: boolean;

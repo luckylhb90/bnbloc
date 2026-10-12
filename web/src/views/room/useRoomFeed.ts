@@ -1,6 +1,6 @@
 import { useCallback, useEffect, type Dispatch, type SetStateAction } from "react";
 import { api, ApiError } from "@/lib/api";
-import { normalizeRoomEvent, type RoomEvent } from "@/lib/sse";
+import { normalizeRoomEvent, type RoomEvent } from "@/lib/roomEvents";
 import { onboardingEventFromRoomEvent, onboardingEvents } from "@/lib/onboardingEvents";
 import { useScopedState } from "@/lib/useScopedState";
 import { applyIncoming, feedItemFromEvent, mergeHistory } from "@/views/room/feedModel";

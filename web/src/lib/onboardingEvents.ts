@@ -6,7 +6,7 @@
 // preview workbench, and the share / invite / add-member API calls. The bus
 // is in-tab and synchronous; consumers (useOnboarding) map events onto the
 // signed-in member's persisted state. Pure: node-tested.
-import type { RoomEvent } from "./sse.ts";
+import type { RoomEvent } from "./roomEvents.ts";
 
 // Where an event was seen. "action" is the member's own request succeeding
 // (the send POST answered); "stream" is the live room stream (it may replay

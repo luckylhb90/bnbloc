@@ -1,6 +1,6 @@
 // People chat (2026-10-08 §3): the pop-out route, the cross-window
 // "Ask the agent about this" hand-off, and the people-only feed marker.
-import type { RoomEvent } from "./sse.ts";
+import type { RoomEvent } from "./roomEvents.ts";
 import { peopleChatRoomFromHash } from "./previewRoute.ts";
 import { composerRefs, parseSharedRef, queueComposerRef } from "./team.ts";
 import { feedItemFromEvent } from "../views/room/feedModel.ts";

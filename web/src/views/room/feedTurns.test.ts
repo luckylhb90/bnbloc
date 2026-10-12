@@ -1,0 +1,146 @@
+import { normalizeRoomEvent, type RoomEvent } from "../../lib/roomEvents.ts";
+import type { FeedItem } from "./types.ts";
+import { applyIncoming, feedItemFromEvent, mergeHistory } from "./feedModel.ts";
+import { blockProgress, blockTitle, layoutTurns, renderOrder, type FeedEntry } from "./feedTurns.ts";
+
+function assert(condition: boolean, message: string): void {
+  if (!condition) throw new Error(message);
+}
+
+function eq(a: unknown, b: unknown, message: string): void {
+  assert(JSON.stringify(a) === JSON.stringify(b), `${message}: got ${JSON.stringify(a)}, want ${JSON.stringify(b)}`);
+}
+
+const me = "maya";
+
+// The room's events of one team turn, as the server publishes them (and as
+// history returns them): maya asks the lead (jack/codex) with a team; the
+// lead posts a progress line, dispatches to the writer (bob/claude) and the
+// critic (ann/opencode), each replies, the critic's dispatch fails a nested
+// dispatch, and the lead answers.
+const chat = (seq: number, text: string, extra: Record<string, unknown> = {}): RoomEvent => ({
+  kind: "chat_message",
+  sequence: seq,
+  payload: { userId: me, text, recipient: { ownerId: "jack", provider: "codex" }, ...extra },
+});
+const dispatch = (seq: number, parentSeq: number, to: [string, string], role?: string, depth = 1): RoomEvent =>
+  chat(seq, `task ${seq}`, {
+    recipient: { ownerId: to[0], provider: to[1] },
+    dispatchedBy: { jobId: `job_${parentSeq}`, parentSeq, depth, via: "jack/codex", ...(role ? { role } : {}) },
+  });
+const agent = (seq: number, owner: string, provider: string, sourceSeq: number, text: string, notice?: string): RoomEvent => ({
+  kind: "agent_messages",
+  sequence: seq,
+  payload: {
+    messages: [{ payload: { role: "assistant", text, ownerUserId: owner, provider, jobId: `job_${sourceSeq}`, sourceSeq, ...(notice ? { notice } : {}) } }],
+  },
+});
+
+const events: RoomEvent[] = [
+  chat(10, "write a haiku about rain"),
+  agent(11, "jack", "codex", 10, "Phase 1/2: writer", "progress"),
+  dispatch(12, 10, ["bob", "claude"], "writer"),
+  agent(13, "bob", "claude", 12, "rain on a tin roof"),
+  dispatch(14, 10, ["ann", "opencode"], "critic"),
+  dispatch(15, 14, ["bob", "claude"], undefined, 2),
+  agent(16, "bob", "claude", 15, "nested answer"),
+  agent(17, "ann", "opencode", 14, "9/10"),
+  chat(18, "an unrelated question", { recipient: { ownerId: "zoe", provider: "codex" } }),
+  agent(19, "jack", "codex", 10, "Here is the haiku. Critic: 9/10"),
+  agent(20, "zoe", "codex", 18, "unrelated answer"),
+];
+
+function items(evs: readonly RoomEvent[], live: boolean): FeedItem[] {
+  const out: FeedItem[] = [];
+  for (const raw of evs) {
+    normalizeRoomEvent(structuredClone(raw), (e) => {
+      const it = feedItemFromEvent(e, me, live);
+      if (it) out.push(it);
+    });
+  }
+  return out;
+}
+
+// Live: each event arrives on the stream in order.
+let live: FeedItem[] = [];
+for (const it of items(events, true)) live = applyIncoming(live, it);
+// Reload: the same events come back as history pages, newest page first.
+let reloaded: FeedItem[] = [];
+reloaded = mergeHistory(reloaded, items(events.slice(6), false));
+reloaded = mergeHistory(reloaded, items(events.slice(0, 6), false));
+
+// The layout in sequence terms: rows by seq, blocks as [anchorSeq, [[seq, level]...]].
+function shape(feed: readonly FeedItem[], entries: readonly FeedEntry[]): unknown[] {
+  const s = (i: number) => Math.floor(feed[i].seq ?? 0);
+  return entries.map((e) => (e.kind === "row" ? s(e.index) : [s(e.block.anchor), e.block.rows.map((r) => [s(r.index), r.level])]));
+}
+
+const want = [
+  10,
+  [
+    10,
+    [
+      [11, 0], // the lead's progress line
+      [12, 0], // writer dispatch
+      [13, 1], // its reply
+      [14, 0], // critic dispatch
+      [15, 1], // the critic's own dispatch
+      [16, 2], // its reply
+      [17, 1], // the critic's reply
+    ],
+  ],
+  18,
+  19, // the lead's answer, after the block
+  20,
+];
+eq(shape(live, layoutTurns(live)), want, "live layout");
+eq(shape(reloaded, layoutTurns(reloaded)), want, "reloaded layout matches live");
+
+const block = layoutTurns(live).find((e) => e.kind === "block");
+assert(block?.kind === "block", "a block exists");
+if (block?.kind === "block") {
+  eq(block.block.roles, ["writer", "critic"], "team roles");
+  eq(block.block.agents, ["bob/claude", "ann/opencode"], "agents");
+  eq(blockTitle(block.block), "Team · writer, critic", "team title");
+  const statuses: Record<number, string> = { 12: "replied", 14: "running", 15: "replied" };
+  const p = blockProgress(block.block, (i) => statuses[Math.floor(live[i].seq ?? 0)]);
+  eq(p, { done: 2, total: 3, active: true }, "progress while the critic runs");
+  eq(renderOrder(layoutTurns(live)).map((i) => Math.floor(live[i].seq ?? 0)), [10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20], "render order");
+}
+
+// A plain dispatch (no team role) nests the same way, titled by its agent.
+{
+  const plain = items([chat(1, "check this"), dispatch(2, 1, ["bob", "claude"]), agent(3, "bob", "claude", 2, "checked"), agent(4, "jack", "codex", 1, "done")], true);
+  const entries = layoutTurns(plain);
+  eq(shape(plain, entries), [1, [1, [[2, 0], [3, 1]]], 4], "plain delegation");
+  const b = entries.find((e) => e.kind === "block");
+  if (b?.kind === "block") eq(blockTitle(b.block), "Delegated to bob/claude", "plain title");
+}
+
+// A request without dispatches renders flat, notices included.
+{
+  const flat = items([chat(1, "hi"), agent(2, "jack", "codex", 1, "Phase 1", "progress"), agent(3, "jack", "codex", 1, "hello")], true);
+  eq(shape(flat, layoutTurns(flat)), [1, 2, 3], "nothing delegated");
+}
+
+// A history page without the request keeps its rows in place; loading the
+// earlier page groups them.
+{
+  let feed: FeedItem[] = mergeHistory([], items(events.slice(2, 5), false));
+  eq(shape(feed, layoutTurns(feed)), [12, 13, 14], "request not loaded: flat");
+  feed = mergeHistory(feed, items(events.slice(0, 2), false));
+  eq(shape(feed, layoutTurns(feed)), [10, [10, [[11, 0], [12, 0], [13, 1], [14, 0]]]], "earlier page loaded: grouped");
+}
+
+// Rows without the payload chain (no parentSeq / sourceSeq) stay flat.
+{
+  const old = items(
+    [
+      chat(1, "go"),
+      { kind: "chat_message", sequence: 2, payload: { userId: me, text: "task", recipient: { ownerId: "bob", provider: "claude" }, dispatchedBy: { jobId: "job_1", depth: 1, via: "jack/codex" } } },
+      { kind: "agent_messages", sequence: 3, payload: { messages: [{ payload: { role: "assistant", text: "ok", ownerUserId: "bob", provider: "claude" } }] } },
+    ],
+    true,
+  );
+  eq(shape(old, layoutTurns(old)), [1, 2, 3], "no chain: flat");
+}

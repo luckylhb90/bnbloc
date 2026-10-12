@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import type { RoomEvent } from "@/lib/sse";
+import type { RoomEvent } from "@/lib/roomEvents";
 import { rememberLastRoom } from "@/lib/team";
 import type { PromptDraft } from "@/lib/promptPacks";
 import { PromptPackEditorDialog, type PromptPackTarget } from "@/views/library/PromptPackEditorDialog";

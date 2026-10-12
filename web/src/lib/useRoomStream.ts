@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "@/lib/api";
 import { refreshSession } from "@/lib/session";
-import { subscribeRoom, type RoomEvent, type RoomStreamScope } from "@/lib/sse";
+import { subscribeRoom, type RoomStreamScope } from "@/lib/sse";
+import type { RoomEvent } from "@/lib/roomEvents";
 import { dedupeMembers, sameUser } from "@/lib/format";
 import { useScopedState } from "@/lib/useScopedState";
 import { maxSequence } from "@/views/room/feedModel";

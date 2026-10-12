@@ -2,7 +2,7 @@
 // changes — a live stream event, a history page, the optimistic send, the
 // POST ack — goes through these functions, so reconciliation rules live in
 // one place and are unit-tested (feedModel.test.ts).
-import type { RoomEvent } from "../../lib/sse.ts";
+import type { RoomEvent } from "../../lib/roomEvents.ts";
 import type { RoomAgent } from "../composer/types.ts";
 import { type FeedItem, type OutgoingMessage, isSelf, nextFeedId } from "./types.ts";
 import type { ChatExpert } from "../../lib/contentComponents.ts";
@@ -33,6 +33,8 @@ export function feedItemFromEvent(e: RoomEvent, subject: string | null, live: bo
     dispatch: e.dispatch,
     expert: e.expert,
     notice: e.notice,
+    jobId: e.jobId,
+    sourceSeq: e.sourceSeq,
     peopleOnly: e.kind === "chat_message" && e.toAgent === false ? true : undefined,
     status: self ? "sent" : undefined,
     animate: live && author === "agent" ? true : undefined,
