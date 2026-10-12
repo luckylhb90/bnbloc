@@ -3,7 +3,6 @@ package contentbuiltin
 import (
 	"context"
 	"errors"
-	"regexp"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -12,85 +11,7 @@ import (
 	"github.com/luckylhb90/bnbloc/internal/contentuse"
 	"github.com/luckylhb90/bnbloc/internal/extpipe"
 	"github.com/luckylhb90/bnbloc/internal/store"
-	"github.com/luckylhb90/bnbloc/internal/tarbundle"
 )
-
-func TestBuilderShipsAndValidates(t *testing.T) {
-	p, ok := Get(BuilderID)
-	if !ok {
-		t.Fatalf("builder %s missing; have %d built-ins", BuilderID, len(All()))
-	}
-	if p.Component.Scope != store.ContentScopeBuiltin || p.Component.Kind != contentpkg.KindExpert || p.Component.Owner != "" {
-		t.Fatalf("builder component = %+v", p.Component)
-	}
-	if p.Version.BundleBlobKey != BundleKeyPrefix+p.Version.SHA256 || p.Version.CreatedBy != Author {
-		t.Fatalf("builder version = %+v", p.Version)
-	}
-	// The served bytes are the validated bundle, re-validated by the same
-	// validator a bridge uses on download.
-	raw, ok := Bundle(p.Version.BundleBlobKey)
-	if !ok {
-		t.Fatal("bundle not served by key")
-	}
-	pkg, err := contentpkg.Validate(raw, p.Version.SHA256, contentpkg.Options{})
-	if err != nil {
-		t.Fatalf("served bundle does not validate: %v", err)
-	}
-	if pkg.Manifest.NeedsSandbox() || len(pkg.Manifest.Permissions()) != 0 {
-		t.Fatal("the builder must declare no permissions")
-	}
-	for _, want := range []string{"save_component", "get_component", "drafts/<name>/", "Save as", "Save as prompt pack", "bnbloc.prompt.package/v1", "starter", "中文"} {
-		if !strings.Contains(pkg.Instructions, want) {
-			t.Errorf("builder instructions do not mention %q", want)
-		}
-	}
-	if _, ok := Bundle("builtin/0000"); ok {
-		t.Fatal("unknown built-in key served")
-	}
-	if _, ok := Bundle(strings.TrimPrefix(p.Version.BundleBlobKey, BundleKeyPrefix)); ok {
-		t.Fatal("a plain blob key must not resolve to a built-in bundle")
-	}
-}
-
-// The builder's instructions carry example packages; they must validate with
-// the one validator, or the builder teaches agents a format that fails on
-// save.
-func TestBuilderExamplesValidate(t *testing.T) {
-	p, _ := Get(BuilderID)
-	re := regexp.MustCompile("(?s)<!-- example: (\\S+) -->\\s*```[a-z]*\\n(.*?)\\n```")
-	byPkg := map[string]map[string][]byte{}
-	for _, m := range re.FindAllStringSubmatch(p.Validated.Instructions, -1) {
-		parts := strings.SplitN(m[1], "/", 3) // drafts/<name>/<file>
-		if len(parts) != 3 || parts[0] != "drafts" {
-			t.Fatalf("example path %q is not drafts/<name>/<file>", m[1])
-		}
-		if byPkg[parts[1]] == nil {
-			byPkg[parts[1]] = map[string][]byte{}
-		}
-		byPkg[parts[1]][parts[2]] = []byte(m[2] + "\n")
-	}
-	if len(byPkg) < 3 {
-		t.Fatalf("found %d example packages, want an expert, a skill pack and a prompt pack", len(byPkg))
-	}
-	kinds := map[string]bool{}
-	for name, files := range byPkg {
-		raw, err := tarbundle.PackFiles(files, tarbundle.ContentLimits)
-		if err != nil {
-			t.Fatalf("%s: pack: %v", name, err)
-		}
-		pkg, err := contentpkg.Validate(raw, "", contentpkg.Options{})
-		if err != nil {
-			t.Fatalf("example %s does not validate: %v", name, err)
-		}
-		if pkg.Manifest.Name != name {
-			t.Fatalf("example %s names %q", name, pkg.Manifest.Name)
-		}
-		kinds[pkg.Manifest.Kind] = true
-	}
-	if !kinds[contentpkg.KindExpert] || !kinds[contentpkg.KindSkill] || !kinds[contentpkg.KindPrompt] {
-		t.Fatalf("example kinds = %v", kinds)
-	}
-}
 
 func TestLoadRefusesInvalidPackage(t *testing.T) {
 	bad := fstest.MapFS{

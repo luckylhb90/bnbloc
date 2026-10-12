@@ -1,7 +1,7 @@
 {
   "kind": "bnbloc.expert.package/v1",
   "name": "expert-builder",
-  "version": "1.1.1",
+  "version": "1.2.0",
   "displayName": "Expert builder",
   "description": "Creates and improves experts, skill packs and prompt packs with you in a short conversation: it asks a few questions, drafts the package where you can read it, lets you try it, and saves it to your Library when you say so.",
   "category": "authoring",
@@ -22,8 +22,8 @@
     },
     {
       "title": "Improve one of mine",
-      "prompt": "Improve my expert ___: ___"
+      "prompt": "Improve my ___: ___"
     }
   ],
-  "welcome": "I build experts, skill packs and prompt packs with you. Tell me what the expert should be good at, what the skill should teach, or which prompts your team reuses, and a little about your own background. I ask a few questions, draft it where you can read it, let you try it, and save it to your Library when you are happy. 我也可以用中文和你一起创建专家、技能包或提示词包。"
+  "welcome": "I build experts, skill packs and prompt packs with you. Tell me what the expert should be good at, what the skill should teach, or which prompts your team reuses, and a little about your own background. I ask a few questions, draft it where you can read it, let you try it, and save it to your Library when you are happy. Write in whatever language you like; I answer in yours."
 }
