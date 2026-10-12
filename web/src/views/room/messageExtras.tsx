@@ -2,7 +2,6 @@ import { createContext, useContext } from "react";
 import { BookmarkSimpleIcon, CheckSquareIcon, ListChecksIcon } from "@phosphor-icons/react";
 import type { MessageTask, TaskStatus } from "@/lib/api";
 import { cn } from "@/lib/cn";
-import { taskSeq } from "@/lib/team";
 import type { FeedItem } from "@/views/room/types";
 import { useDisplayName } from "@/lib/useDisplayName";
 
@@ -26,7 +25,7 @@ export const MessageExtrasProvider = MessageExtrasContext.Provider;
 // marked: a task points at a stored message.
 function persistedSeq(item: FeedItem): number | null {
   if (item.status === "pending" || item.status === "failed") return null;
-  return taskSeq(item.seq);
+  return item.seq ?? null;
 }
 
 const iconButton =

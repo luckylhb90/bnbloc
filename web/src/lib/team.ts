@@ -41,13 +41,6 @@ export function mergeDraft(current: string, injected: string): string {
   return current.trim() ? `${current.replace(/\s+$/, "")}\n\n${injected}` : injected;
 }
 
-// taskSeq maps a feed row's sequence to its task key: agent replies in one
-// batch carry fractional sequences (base + i/1000) and share the batch's room
-// sequence, which is what the server stores.
-export function taskSeq(seq: number | undefined): number | null {
-  return typeof seq === "number" ? Math.floor(seq) : null;
-}
-
 // applyTaskUpdate folds one task_updated event into a room's task list
 // (ordered by message sequence).
 export function applyTaskUpdate(tasks: readonly MessageTask[], update: TaskUpdate): MessageTask[] {

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { messageJumps, taskSeq, type MessageJump } from "@/lib/team";
+import { messageJumps, type MessageJump } from "@/lib/team";
 import { useToast } from "@/ui/Toast";
 import type { FeedItem } from "@/views/room/types";
 
@@ -89,7 +89,7 @@ export function useMessageJump({
       return;
     }
     if (!channelId || !history.loaded) return;
-    if (feed.some((m) => taskSeq(m.seq) === target.seq)) {
+    if (feed.some((m) => m.seq === target.seq)) {
       const seq = target.seq;
       setTarget(null);
       window.requestAnimationFrame(() => flashMessage(seq));

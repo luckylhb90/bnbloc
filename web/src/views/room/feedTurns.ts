@@ -51,7 +51,7 @@ export interface TurnBlock {
 export type FeedEntry = { readonly kind: "row"; readonly index: number } | { readonly kind: "block"; readonly block: TurnBlock };
 
 const isAgentRow = (r: TurnRow) => r.author === "agent";
-const seqOf = (r: TurnRow) => (typeof r.seq === "number" ? Math.floor(r.seq) : 0);
+const seqOf = (r: TurnRow) => r.seq ?? 0;
 
 // layoutTurns groups delegated work under its request. Rows keep their feed
 // order inside a block, depth-first per dispatch: a dispatch, then its
@@ -67,7 +67,7 @@ export function layoutTurns(feed: readonly TurnRow[]): FeedEntry[] {
   const parent = feed.map((r, i) => {
     const up = isAgentRow(r) ? r.sourceSeq : r.dispatch?.parentSeq;
     if (typeof up !== "number" || up <= 0) return -1;
-    const at = requestAt.get(Math.floor(up));
+    const at = requestAt.get(up);
     return at === undefined || at === i ? -1 : at;
   });
   const children = new Map<number, number[]>();

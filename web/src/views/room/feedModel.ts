@@ -18,6 +18,7 @@ export function feedItemFromEvent(e: RoomEvent, subject: string | null, live: bo
   return {
     id: nextFeedId(),
     seq: e.sequence,
+    ...(e.part ? { part: e.part } : {}),
     author,
     agentLabel: e.agentLabel,
     text,
@@ -63,7 +64,8 @@ function confirm(row: FeedItem, echo: FeedItem): FeedItem {
 // (from the ack) or the clientMsgId (from the echo), never content.
 export function applyIncoming(feed: readonly FeedItem[], item: FeedItem): FeedItem[] {
   if (item.seq != null) {
-    const at = feed.findIndex((m) => m.seq === item.seq);
+    const key = feedKey(item);
+    const at = feed.findIndex((m) => feedKey(m) === key);
     if (at !== -1) {
       const row = feed[at];
       if (row.status !== "pending") return feed as FeedItem[];
@@ -93,7 +95,7 @@ export function applyIncoming(feed: readonly FeedItem[], item: FeedItem): FeedIt
 export function ackSent(feed: readonly FeedItem[], localId: number, seq: number): FeedItem[] {
   const row = feed.find((m) => m.id === localId);
   if (!row) return feed as FeedItem[];
-  const echo = feed.find((m) => m.id !== localId && m.seq === seq);
+  const echo = feed.find((m) => m.id !== localId && feedKey(m) === feedKey({ seq }));
   const next: FeedItem[] = [];
   for (const m of feed) {
     if (m === echo) continue;
@@ -114,20 +116,34 @@ export function markStatus(feed: readonly FeedItem[], localId: number, status: F
 // Rows without a sequence yet (unacknowledged sends) stay after them, in
 // their existing order.
 export function mergeHistory(feed: readonly FeedItem[], page: readonly FeedItem[]): FeedItem[] {
-  const known = new Set(feed.map((m) => m.seq).filter((s) => s != null));
-  const fresh = page.filter((m) => m.seq == null || !known.has(m.seq));
+  const known = new Set(feed.map(feedKey));
+  const fresh = page.filter((m) => m.seq == null || !known.has(feedKey(m)));
   if (fresh.length === 0) return feed as FeedItem[];
   const all = [...fresh, ...feed];
-  const sequenced = all.filter((m) => m.seq != null).sort((a, b) => (a.seq as number) - (b.seq as number));
+  const sequenced = all.filter((m) => m.seq != null).sort(compareFeedRows);
   const unsequenced = all.filter((m) => m.seq == null);
   return [...sequenced, ...unsequenced];
+}
+
+// feedKey is a sequenced row's identity: its room sequence plus its part in
+// an agent batch (null until a sequence is known).
+export function feedKey(m: { readonly seq?: number; readonly part?: number }): string | null {
+  return m.seq == null ? null : `${m.seq}:${m.part ?? 0}`;
+}
+
+// compareFeedRows orders sequenced rows by (seq, part).
+export function compareFeedRows(
+  a: { readonly seq?: number; readonly part?: number },
+  b: { readonly seq?: number; readonly part?: number },
+): number {
+  return (a.seq ?? 0) - (b.seq ?? 0) || (a.part ?? 0) - (b.part ?? 0);
 }
 
 // maxSequence is the newest sequence present in the feed (0 when none).
 export function maxSequence(feed: readonly { readonly seq?: number }[]): number {
   let max = 0;
   for (const m of feed) if (typeof m.seq === "number" && m.seq > max) max = m.seq;
-  return Math.floor(max);
+  return max;
 }
 
 // outgoingMessage captures the exact request for a send: the recipient (null

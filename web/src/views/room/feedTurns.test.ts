@@ -71,7 +71,7 @@ reloaded = mergeHistory(reloaded, items(events.slice(0, 6), false));
 
 // The layout in sequence terms: rows by seq, blocks as [anchorSeq, [[seq, level]...]].
 function shape(feed: readonly FeedItem[], entries: readonly FeedEntry[]): unknown[] {
-  const s = (i: number) => Math.floor(feed[i].seq ?? 0);
+  const s = (i: number) => feed[i].seq ?? 0;
   return entries.map((e) => (e.kind === "row" ? s(e.index) : [s(e.block.anchor), e.block.rows.map((r) => [s(r.index), r.level])]));
 }
 
@@ -103,7 +103,7 @@ if (block?.kind === "block") {
   eq(block.block.agents, ["bob/claude", "ann/opencode"], "agents");
   eq(blockTitle(block.block), "Team · writer, critic", "team title");
   const statuses: Record<number, string> = { 12: "replied", 14: "running", 15: "replied" };
-  const p = blockProgress(block.block, (i) => statuses[Math.floor(live[i].seq ?? 0)]);
+  const p = blockProgress(block.block, (i) => statuses[live[i].seq ?? 0]);
   eq(p, { done: 2, total: 3, active: true }, "progress while the critic runs");
   eq(progressText(p), "2 of 3 done", "progress text while running");
   const settled = blockProgress(block.block, () => "replied");
@@ -113,7 +113,7 @@ if (block?.kind === "block") {
   const unknown = blockProgress(block.block, () => undefined);
   eq(unknown, { done: 0, total: 3, active: false }, "unknown jobs");
   eq(progressText(unknown), "3 tasks", "unknown jobs text");
-  eq(renderOrder(layoutTurns(live)).map((i) => Math.floor(live[i].seq ?? 0)), [10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20], "render order");
+  eq(renderOrder(layoutTurns(live)).map((i) => live[i].seq ?? 0), [10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20], "render order");
 }
 
 // A plain dispatch (no team role) nests the same way, titled by its agent.

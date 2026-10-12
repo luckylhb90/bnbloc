@@ -29,7 +29,11 @@ export interface OutgoingMessage {
 
 export interface FeedItem {
   id: number;
+  // The room sequence (an integer; absent until an own send is acked).
   seq?: number;
+  // The row's index within an agent_messages batch, which shares one room
+  // sequence: rows order and dedupe on (seq, part) (feedModel.ts).
+  part?: number;
   author: string;
   agentLabel?: string;
   text: string;

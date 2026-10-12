@@ -13,7 +13,12 @@ import { agentIdentity } from "./roomAgents.ts";
 
 export interface RoomEvent {
   kind?: string;
+  // The room (hub) sequence: always an integer, the same space as chat.
   sequence?: number;
+  // For agent_messages: the message's index within its batch. A batch
+  // shares one room sequence, so (sequence, part) orders and identifies a
+  // fanned-out reply; absent for every other kind.
+  part?: number;
   roomId?: string;
   // The channel the event is scoped to; "" (absent) is room-wide. The room
   // subscription is allChannels, so feed kinds arriving for a channel other
@@ -134,10 +139,8 @@ export function normalizeRoomEvent(ev: RoomEvent, emit: (e: RoomEvent) => void):
     // Agent replies use the room (hub) sequence — the same space as chat —
     // for dedup and read-tracking. The per-message `m.seq` is the local core's
     // message sequence (a different, much larger space); mixing it into the feed
-    // poisons the read cursor (unread breaks). A batch shares one envelope seq,
-    // so offset each message by its index to keep them distinct and ordered
-    // within the room space.
-    const base = ev.sequence ?? 0;
+    // poisons the read cursor (unread breaks). A batch shares one envelope seq;
+    // `part` (the message's index) keeps its messages distinct and ordered.
     list.forEach((m, i) => {
       const mp = (m.payload as Record<string, unknown>) || {};
       const text = (mp.text as string) || "";
@@ -156,7 +159,8 @@ export function normalizeRoomEvent(ev: RoomEvent, emit: (e: RoomEvent) => void):
       const sourceSeq = typeof mp.sourceSeq === "number" && mp.sourceSeq > 0 ? mp.sourceSeq : undefined;
       emit({
         kind: "agent_messages",
-        sequence: base + i / 1000, // fractional offset preserves in-batch order
+        sequence: ev.sequence,
+        part: i,
         roomId: ev.roomId,
         channelId: ev.channelId,
         text,

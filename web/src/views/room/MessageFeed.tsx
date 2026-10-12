@@ -218,10 +218,10 @@ function FeedRows({ feed, unreadFromSeq, deliverablesAfter, ...actions }: RowAct
   const [toggled, setToggled] = useState<Record<number, boolean>>({});
   const row = (i: number) => {
     const m = feed[i];
-    const seq = typeof m.seq === "number" ? Math.floor(m.seq) : 0;
+    const seq = m.seq ?? 0;
     const p = prevOf.get(i) ?? -1;
     const prev = p >= 0 ? feed[p] : null;
-    const prevSeq = prev && typeof prev.seq === "number" ? Math.floor(prev.seq) : 0;
+    const prevSeq = prev?.seq ?? 0;
     // The divider sits above the first message at or past the baseline, so
     // a member landing in the channel sees where they stopped reading
     // instead of guessing.
@@ -245,7 +245,7 @@ function FeedRows({ feed, unreadFromSeq, deliverablesAfter, ...actions }: RowAct
         const anchor = feed[e.block.anchor];
         const statusOf = (i: number) => {
           const s = feed[i].seq;
-          return typeof s === "number" ? actions.agentJobs[Math.floor(s)]?.[0]?.status : undefined;
+          return s != null ? actions.agentJobs[s]?.[0]?.status : undefined;
         };
         const progress = blockProgress(e.block, statusOf);
         const open = toggled[e.block.anchor] ?? progress.active;
@@ -319,7 +319,7 @@ function FeedRow({
       />
       {typeof m.seq === "number" && (
         <AgentJobStatus
-          jobs={agentJobs[Math.floor(m.seq)] || []}
+          jobs={agentJobs[m.seq] || []}
           showDiagnostics={showJobDiagnostics}
           onCancel={onCancelJob}
           queueAhead={queueAhead}

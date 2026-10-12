@@ -7,7 +7,6 @@ import {
   mergeDraft,
   messageJumps,
   parseTags,
-  taskSeq,
 } from "./team.ts";
 
 function assert(condition: boolean, message: string): void {
@@ -34,9 +33,6 @@ eq(highlightParts("abc", ""), [{ text: "abc", match: false }], "empty query");
 
 eq(mergeDraft("", "prompt"), "prompt", "empty draft replaced");
 eq(mergeDraft("hello  \n", "prompt"), "hello\n\nprompt", "draft kept, prompt appended");
-
-eq(taskSeq(12.002), 12, "agent batch row maps to the batch sequence");
-eq(taskSeq(undefined), null, "unsequenced row has no task");
 
 const t = (seq: number, status: "open" | "done" = "open"): MessageTask => ({
   roomId: "r",

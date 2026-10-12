@@ -28,7 +28,7 @@ export interface PlacedDeliverables {
 }
 
 const isAgentReply = (row: PlacementRow) => row.author === "agent";
-const rowSeq = (row: PlacementRow) => (typeof row.seq === "number" ? Math.floor(row.seq) : 0);
+const rowSeq = (row: PlacementRow) => row.seq ?? 0;
 const jobHandle = (job: PlacementJob | undefined) =>
   job && job.provider ? (job.ownerUserId ? `${job.ownerUserId}/${job.provider}` : job.provider) : "";
 

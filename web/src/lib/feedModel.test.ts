@@ -121,7 +121,9 @@ function testUnreadBaseline(): void {
   assert(unreadBaseline(feed, 2) === 3, "divider above the first of the last N messages");
   assert(unreadBaseline(feed, 9) === 1, "unread beyond the loaded page starts at the oldest loaded");
   assert(unreadBaseline([], 3) === null, "no loaded rows, no divider");
-  assert(maxSequence([{ seq: 2 }, { seq: 7.002 }, {}]) === 7, "latest sequence floors fractional agent offsets");
+  const batch = [{ seq: 1 }, { seq: 2 }, { seq: 3, part: 0 }, { seq: 3, part: 1 }];
+  assert(unreadBaseline(batch, 2) === 2, "an agent batch's parts count as one sequence");
+  assert(maxSequence([{ seq: 2 }, { seq: 7 }, {}]) === 7, "latest sequence");
 }
 
 testAckThenEchoConfirmsOneRow();
