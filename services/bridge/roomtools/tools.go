@@ -1,6 +1,7 @@
 package roomtools
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -58,16 +59,20 @@ func toolError(format string, args ...any) Result {
 }
 
 // wire renders the MCP CallToolResult: the value as structured content plus
-// its JSON text for clients that read only text content.
+// its JSON text for clients that read only text content. The text is not
+// HTML-escaped: an agent reads it, and "<" spelled "\u003c" would garble the
+// fences (roomlog.Fence) and cost tokens.
 func (r Result) wire() map[string]any {
 	if r.Err != "" {
 		return map[string]any{"content": []any{map[string]any{"type": "text", "text": r.Err}}, "isError": true}
 	}
-	text, err := json.Marshal(r.Value)
-	if err != nil {
+	var text bytes.Buffer
+	enc := json.NewEncoder(&text)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(r.Value); err != nil {
 		return map[string]any{"content": []any{map[string]any{"type": "text", "text": "result encoding failed"}}, "isError": true}
 	}
-	out := map[string]any{"content": []any{map[string]any{"type": "text", "text": string(text)}}, "isError": false}
+	out := map[string]any{"content": []any{map[string]any{"type": "text", "text": strings.TrimRight(text.String(), "\n")}}, "isError": false}
 	if _, isObject := r.Value.(map[string]any); isObject {
 		out["structuredContent"] = r.Value
 	}

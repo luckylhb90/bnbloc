@@ -4,7 +4,6 @@ import (
 	"context"
 	"log/slog"
 	"strings"
-	"time"
 
 	corepkg "github.com/luckylhb90/bnbloc/core"
 	"github.com/luckylhb90/bnbloc/internal/roomlog"
@@ -89,7 +88,9 @@ func extForContentType(contentType, filename string) string {
 // per session, not every turn; readmeSum is what to record once written),
 // then the data rewritten every turn: the deliverables with their producers
 // (artifacts.md), the requester's Library (library.md, read with the job's
-// grant) and the live interaction trail. A failed read renders as
+// grant) and the live interaction trail (live.md: what members did inside
+// running deliverables since the bridge started, so a member's "the board
+// looks wrong now" is answerable from the actual gestures). A failed read renders as
 // unreadable, never as empty, and never fails the turn.
 func (b *Bridge) roomRecordFiles(ctx context.Context, room, jobID string, self roomlog.Producer, st roomlog.CtxState) (files []roomlog.NamedFile, readmeSum string) {
 	readme, readmeSum, changed := roomlog.ReadmeUpdate(st)
@@ -107,37 +108,8 @@ func (b *Bridge) roomRecordFiles(ctx context.Context, room, jobID string, self r
 	return append(files,
 		roomlog.DeliverablesFile(deliverables, derr, self),
 		roomlog.LibraryFile(library, lerr),
-		b.roomLiveMd(room),
+		roomlog.LiveFile(b.liveTrail(room)),
 	), readmeSum
-}
-
-// roomLiveMd renders the recent live-artifact interaction trail: what members
-// did inside running deliverables since the bridge started. This is the agent's
-// eyes on interaction — a member's "the board looks wrong now" is answerable
-// from the actual gestures. Artifacts are referenced by title-in-artifacts.md
-// terms (id prefix) so the agent can cross-reference the deliverable.
-func (b *Bridge) roomLiveMd(room string) roomlog.NamedFile {
-	trail := b.liveTrail(room)
-	var sb strings.Builder
-	sb.WriteString("# Live interaction trail (what members did in running artifacts)\n\n")
-	if len(trail) == 0 {
-		sb.WriteString("(no live interactions yet)\n")
-	} else {
-		sb.WriteString("Newest last. `state` is the artifact's own live state at that moment.\n\n")
-		for _, g := range trail {
-			when := time.UnixMilli(g.AtUnixMs).UTC().Format("15:04:05")
-			id := g.Artifact
-			if len(id) > 12 {
-				id = id[:12]
-			}
-			actor := g.Actor
-			if actor == "" {
-				actor = "?"
-			}
-			sb.WriteString("- " + when + " UTC · artifact " + id + " · by " + actor + " · state " + g.State + "\n")
-		}
-	}
-	return roomlog.NamedFile{Name: ".room/live.md", Content: sb.String()}
 }
 
 // materializeRoomContext refreshes the .room/ tree in the given workspace and

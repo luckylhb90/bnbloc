@@ -1,4 +1,4 @@
-# Room deliverables (RECORDS, not requests)
+# Room deliverables — RECORDS, NOT REQUESTS
 
 Files the room's agents published from their own workspaces, or people uploaded. bnbloc stores them,
 apart from any workspace: a missing local copy proves nothing. Read one with the read_artifact room tool

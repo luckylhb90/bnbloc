@@ -13,8 +13,16 @@ import (
 	"strings"
 
 	"github.com/luckylhb90/bnbloc/internal/contentpkg"
+	"github.com/luckylhb90/bnbloc/internal/roomlog"
 	"github.com/luckylhb90/bnbloc/internal/wire"
 )
+
+// MaxCoversBytes bounds each role's description in the lead's instructions:
+// the team's and the role experts' authors wrote it, not the lead's owner.
+const MaxCoversBytes = 300
+
+// coversAuthor names who wrote the roles' descriptions inside their fence.
+const coversAuthor = "the team's and its role experts' authors"
 
 // LeadSeat names the lead in an estimate's Unknown list.
 const LeadSeat = "lead"
@@ -176,6 +184,7 @@ func Section(team wire.ContentTeam, plan wire.TeamPlanReply) string {
 	}
 	fmt.Fprintf(&b, "## Your team\n\nYou are the %s of this team. You do not do the members' work yourself: you plan, delegate each part to the role that covers it with the bnbloc-room tool ask_agent (pass the role name as the handle), and merge their results.\n\n", lead)
 	b.WriteString("Roster (role → expert → agent):\n")
+	var covered strings.Builder
 	for _, m := range team.Members {
 		expert := m.Expert
 		covers := strings.TrimSpace(m.Description)
@@ -193,10 +202,16 @@ func Section(team wire.ContentTeam, plan wire.TeamPlanReply) string {
 		case ok:
 			agent = "unavailable: " + e.Reason
 		}
-		fmt.Fprintf(&b, "- %s → %s → %s", m.Role, expert, agent)
+		fmt.Fprintf(&b, "- %s → %s → %s\n", m.Role, expert, agent)
 		if covers != "" {
-			b.WriteString(". Covers: " + oneLine(covers))
+			covered.WriteString("- " + m.Role + ": " + roomlog.Truncate(oneLine(covers), MaxCoversBytes) + "\n")
 		}
+	}
+	if covered.Len() > 0 {
+		// Written by other authors: inside the lead's instructions, but
+		// data to weigh, never instructions to follow.
+		b.WriteString("\nWhat each role covers, as its authors describe it:\n")
+		b.WriteString(roomlog.Fence(coversAuthor, covered.String()))
 		b.WriteString("\n")
 	}
 	fmt.Fprintf(&b, `

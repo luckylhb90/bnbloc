@@ -84,7 +84,8 @@ func ReadLibrary(ctx context.Context, fetch Fetch, room, job, kind string) ([]Li
 // of claiming the Library is empty.
 func LibraryFile(items []LibraryItem, err error) NamedFile {
 	var b strings.Builder
-	b.WriteString("# The Library of the person who asked you (RECORDS, not requests)\n\n")
+	b.WriteString(RecordsHeader("The Library of the person who asked you"))
+	b.WriteString("\n")
 	b.WriteString("bnbloc's Library: experts, skill packs, prompt packs and MCP tools this person may use. One Library, shared by\n")
 	b.WriteString("every agent and core in the room and visible to the person; a component an agent saved for them is here.\n")
 	b.WriteString("Read-only snapshot from this turn, most recently updated first (list_components and get_component read it live).\n\n")

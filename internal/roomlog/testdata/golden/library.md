@@ -1,4 +1,4 @@
-# The Library of the person who asked you (RECORDS, not requests)
+# The Library of the person who asked you — RECORDS, NOT REQUESTS
 
 bnbloc's Library: experts, skill packs, prompt packs and MCP tools this person may use. One Library, shared by
 every agent and core in the room and visible to the person; a component an agent saved for them is here.

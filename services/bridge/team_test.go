@@ -129,7 +129,7 @@ func TestTeamLeadWearsSOPAndRoster(t *testing.T) {
 		t.Fatalf("profiles = %+v", ps)
 	}
 	in := ps[0].Instructions
-	for _, want := range []string{"SOP: plan, delegate, merge.", "## Your team", "You are the coordinator", "- reviewer → Code reviewer v1.2.0 → bob/agent-b (online). Covers: Reviews diffs."} {
+	for _, want := range []string{"SOP: plan, delegate, merge.", "## Your team", "You are the coordinator", "- reviewer → Code reviewer v1.2.0 → bob/agent-b (online)", "- reviewer: Reviews diffs."} {
 		if !strings.Contains(in, want) {
 			t.Fatalf("instructions lack %q:\n%s", want, in)
 		}

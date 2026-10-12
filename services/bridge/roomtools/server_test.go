@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/luckylhb90/bnbloc/internal/roomlog"
 	"github.com/luckylhb90/bnbloc/internal/wire"
 )
 
@@ -391,7 +392,8 @@ func TestAskAgentFlow(t *testing.T) {
 	if sc["status"] != "replied" || sc["handle"] != dispatchJobID || sc["agent"] != "bob/claude" {
 		t.Fatalf("outcome = %v", sc)
 	}
-	if sc["reply"] != "Found two issues.\n\nBoth fixed in parser.go." {
+	// Another agent's output reaches the caller fenced as its data.
+	if sc["reply"] != roomlog.Fence("bob/claude", "Found two issues.\n\nBoth fixed in parser.go.") {
 		t.Fatalf("reply = %q", sc["reply"])
 	}
 	dl, _ := sc["deliverables"].([]any)
@@ -473,14 +475,15 @@ func TestAskAgentRefusals(t *testing.T) {
 
 // read_room reads every channel an agent may read (decision O1: the room's
 // listing, never the people chat) and renders people, agents and dispatch
-// attribution.
+// attribution as record lines (roomlog.Line), fenced as what others wrote.
 func TestReadRoom(t *testing.T) {
 	f := newAskFixture(0)
 	srv, token, sess := startServer(t, f.gw)
 	sess.Bind(Job{JobID: "job_parent", ChannelID: "ch_general"})
 	r := post(t, srv, token, rpc(1, "tools/call", map[string]any{"name": "read_room", "arguments": map[string]any{"since": 40}}), nil)
 	text, isErr := toolText(t, r)
-	if isErr || strings.Contains(text, "earlier") || !strings.Contains(text, `"via":"jack/codex"`) || !strings.Contains(text, `"to":"bob/claude"`) || !strings.Contains(text, `"author":"bob/claude"`) {
+	if isErr || strings.Contains(text, "earlier") || !strings.Contains(text, `#41 jack/codex for maya → bob/claude: review it\n`) ||
+		!strings.Contains(text, `#43 bob/claude: Found two issues.`) || !strings.Contains(text, `"transcript":"<<<untrusted-content `) || !strings.Contains(text, `"latestSeq":45`) {
 		t.Fatalf("read_room = %s", text)
 	}
 	read := map[string]bool{}

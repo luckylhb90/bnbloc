@@ -56,14 +56,15 @@ func TestComposeSummarizesOverflow(t *testing.T) {
 		WindowChars: 60, // fits only the newest short entry
 		Summarizer:  StructuredSummarizer{},
 	})
-	if !strings.Contains(got, "[story so far]") {
+	story, window := RecordsHeader("Story so far"), RecordsHeader("Room conversation")
+	if !strings.Contains(got, story) {
 		t.Fatalf("overflow must produce a story-so-far section\n---\n%s", got)
 	}
-	if !strings.Contains(got, "[room conversation]") || !strings.Contains(got, "the newest thing") {
+	if !strings.Contains(got, window) || !strings.Contains(got, "the newest thing") {
 		t.Fatal("newest entry must remain verbatim in the window")
 	}
 	// The story-so-far section precedes the verbatim window.
-	if strings.Index(got, "[story so far]") > strings.Index(got, "[room conversation]") {
+	if strings.Index(got, story) > strings.Index(got, window) {
 		t.Fatal("summary must precede the verbatim window")
 	}
 }
@@ -166,10 +167,10 @@ func TestComposeFencesHistoryFromInstruction(t *testing.T) {
 		Summarizer:  StructuredSummarizer{},
 	})
 	for _, want := range []string{
-		"SHARED HISTORY",            // history is labeled as background
-		"NOT requests",              // ...and explicitly not instructions
-		"records of past turns",     // the summary header repeats the framing
-		"respond ONLY to the [now]", // the closing reminder binds the reply to now
+		"SHARED HISTORY",              // history is labeled as background
+		"NOT requests",                // ...and explicitly not instructions
+		RecordsHeader("Story so far"), // the summary is a records section
+		"respond ONLY to the [now]",   // the closing reminder binds the reply to now
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("Compose output missing fence %q:\n%s", want, out)

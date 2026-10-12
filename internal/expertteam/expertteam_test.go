@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/luckylhb90/bnbloc/internal/roomlog"
 	"github.com/luckylhb90/bnbloc/internal/wire"
 )
 
@@ -101,9 +102,10 @@ func TestSection(t *testing.T) {
 	s := Section(team, plan)
 	for _, want := range []string{
 		"You are the coordinator of this team",
-		"- reviewer → Code reviewer v1.2.0 → jack/codex (online). Covers: Reviews diffs.",
+		"- reviewer → Code reviewer v1.2.0 → jack/codex (online)\n",
 		"- tester → tester@^1 → unavailable: no expert tester@^1 you may use",
-		"- writer → writer v1.0.0 → unavailable: bob's agent is not online in this room. Covers: Writes notes.",
+		"- writer → writer v1.0.0 → unavailable: bob's agent is not online in this room\n",
+		roomlog.Fence(coversAuthor, "- reviewer: Reviews diffs.\n- writer: Writes notes.\n"),
 		"refuse that part",
 		"post_progress",
 		"After 3 failed member tasks",
@@ -111,5 +113,12 @@ func TestSection(t *testing.T) {
 		if !strings.Contains(s, want) {
 			t.Errorf("section lacks %q:\n%s", want, s)
 		}
+	}
+	// Another author's description is bounded inside the lead's
+	// instructions.
+	long := team
+	long.Members = []wire.ContentTeamMember{{Role: "writer", Expert: "writer", Description: strings.Repeat("写", 400), Resolved: &wire.ContentTeamExpert{Name: "writer", Version: "1.0.0"}}}
+	if got := Section(long, plan); strings.Contains(got, strings.Repeat("写", 101)) || !strings.Contains(got, "写…") {
+		t.Errorf("an unbounded role description reached the instructions:\n%s", got)
 	}
 }

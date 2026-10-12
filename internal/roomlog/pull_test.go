@@ -218,7 +218,7 @@ func TestMaterializeChunksAndDeltas(t *testing.T) {
 // instruction is never diluted.
 func TestComposePointerHasNoHistory(t *testing.T) {
 	out := ComposePointer("maya/nimbus", Now{From: "maya", Text: "存到文件里"})
-	for _, want := range []string{".room/INDEX.md", ".room/recent.md", ".room/artifacts.md", "RECORDS, not requests", "[now — from maya]\n存到文件里"} {
+	for _, want := range []string{".room/INDEX.md", ".room/recent.md", ".room/artifacts.md", recordsMark, "[now — from maya]\n存到文件里"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("pointer prompt missing %q:\n%s", want, out)
 		}
@@ -354,7 +354,7 @@ func TestComposeDelta(t *testing.T) {
 		{Seq: 2, Speaker: "jill/codex", Kind: KindAgent, Text: "second new line"},
 	}
 	out := ComposeDelta(entries, Now{From: "maya", Text: "act now"}, Options{WindowChars: 10 << 10})
-	for _, want := range []string{"since your last turn", "RECORDS, NOT REQUESTS", "jack: first new line", "jill/codex: second new line", "[now — from maya]\nact now"} {
+	for _, want := range []string{RecordsHeader("New room messages since your last turn"), "jack: first new line", "jill/codex: second new line", "[now — from maya]\nact now"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("ComposeDelta missing %q:\n%s", want, out)
 		}

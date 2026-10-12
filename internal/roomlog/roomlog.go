@@ -14,10 +14,11 @@
 // Both models share the same semantics: every channel an agent may read
 // (never the people chat: History), never the agent's own past replies (its
 // session memory already holds them), never the current instruction twice
-// (it is the [now] section), and every history section is labeled RECORDS,
-// NOT REQUESTS so background never competes with the instruction. The underlying log is a single-writer, monotonic-seq feed
-// (History); if it ever becomes a decentralized log, a CRDT-backed fetch
-// can replace it without touching the composition above.
+// (it is the [now] section), and every history section is headed as
+// records, never requests (RecordsHeader), so background never competes
+// with the instruction. The underlying log is a single-writer, monotonic-seq
+// feed (History); if it ever becomes a decentralized log, a CRDT-backed
+// fetch can replace it without touching the composition above.
 package roomlog
 
 // Entry is one room-log line, attributed to its speaker in chronological order.

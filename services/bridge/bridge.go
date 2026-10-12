@@ -231,7 +231,7 @@ type Bridge struct {
 	// instead of guesses. Bounded per room; transient by design (a restart
 	// starts a fresh trail — artifact versions remain the durable record).
 	liveMu sync.Mutex
-	live   map[string][]liveGesture
+	live   map[string][]roomlog.LiveGesture
 
 	// running tracks in-flight jobs so a cancellation arriving over the room
 	// stream interrupts the local turn immediately, rather than waiting for the
@@ -1252,14 +1252,6 @@ func (b *Bridge) consumeRoom(ctx context.Context, room string) error {
 	}
 }
 
-// liveGesture is one observed artifact interaction (from artifact_state).
-type liveGesture struct {
-	AtUnixMs int64
-	Actor    string
-	Artifact string
-	State    string // compact JSON, bounded by maxLiveGestureBytes
-}
-
 const (
 	maxLiveGestures     = 32 // per room, newest kept
 	maxLiveGestureBytes = 2048
@@ -1268,14 +1260,14 @@ const (
 // recordGesture appends a member's live-artifact interaction to the room's
 // trail (bounded ring). Malformed or oversize states are clamped, not dropped:
 // the agent should still see THAT something happened.
-func (b *Bridge) recordGesture(room string, g liveGesture) {
+func (b *Bridge) recordGesture(room string, g roomlog.LiveGesture) {
 	if len(g.State) > maxLiveGestureBytes {
 		g.State = g.State[:maxLiveGestureBytes] + "…(truncated)"
 	}
 	b.liveMu.Lock()
 	defer b.liveMu.Unlock()
 	if b.live == nil {
-		b.live = make(map[string][]liveGesture)
+		b.live = make(map[string][]roomlog.LiveGesture)
 	}
 	trail := append(b.live[room], g)
 	if len(trail) > maxLiveGestures {
@@ -1285,10 +1277,10 @@ func (b *Bridge) recordGesture(room string, g liveGesture) {
 }
 
 // liveTrail returns a copy of the room's recent gestures (oldest first).
-func (b *Bridge) liveTrail(room string) []liveGesture {
+func (b *Bridge) liveTrail(room string) []roomlog.LiveGesture {
 	b.liveMu.Lock()
 	defer b.liveMu.Unlock()
-	out := make([]liveGesture, len(b.live[room]))
+	out := make([]roomlog.LiveGesture, len(b.live[room]))
 	copy(out, b.live[room])
 	return out
 }
@@ -1305,7 +1297,7 @@ type jobUpdateEnvelope struct {
 }
 
 // parseGesture extracts the gesture trail entry from an artifact_state event.
-func parseGesture(data string) liveGesture {
+func parseGesture(data string) roomlog.LiveGesture {
 	var ev struct {
 		AtUnixMs int64 `json:"atUnixMs"`
 		Payload  struct {
@@ -1315,14 +1307,14 @@ func parseGesture(data string) liveGesture {
 		} `json:"payload"`
 	}
 	if json.Unmarshal([]byte(data), &ev) != nil {
-		return liveGesture{}
+		return roomlog.LiveGesture{}
 	}
 	state := string(ev.Payload.State)
 	if state == "" {
 		state = "{}"
 	}
-	return liveGesture{
-		AtUnixMs: ev.AtUnixMs,
+	return roomlog.LiveGesture{
+		AtMs:     ev.AtUnixMs,
 		Actor:    ev.Payload.Actor,
 		Artifact: ev.Payload.ArtifactID,
 		State:    state,

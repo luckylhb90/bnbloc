@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/luckylhb90/bnbloc/internal/roomlog"
@@ -18,26 +19,15 @@ const (
 	readHistoryPageMax = 100
 )
 
-// roomLine is one message as read_room shows it.
-type roomLine struct {
-	Seq    int64  `json:"seq"`
-	Author string `json:"author"`
-	// Agent is set for an agent's reply.
-	Agent bool `json:"agent,omitempty"`
-	// To is the agent a person's message addressed ("" = people only).
-	To string `json:"to,omitempty"`
-	// Via is the agent that dispatched this message on the author's behalf.
-	Via  string `json:"via,omitempty"`
-	Text string `json:"text"`
-	AtMs int64  `json:"atMs,omitempty"`
-}
+// readAuthor names who wrote read_room's transcript inside its fence.
+const readAuthor = "the room's people and agents (each line names its author)"
 
 func readRoomTool() Tool {
 	return Tool{
 		Name:  "read_room",
 		Title: "Read the conversation",
-		Description: "Recent messages of the room (people's messages and agents' replies, across the room's channels), oldest first. " +
-			"Pass since (a seq from an earlier read) to get only newer messages.",
+		Description: "Recent messages of the room (people's messages and agents' replies, across the room's channels), oldest first, " +
+			"one line each: \"#<seq> <author>: <text>\". Pass since (a seq from an earlier read) to get only newer messages.",
 		InputSchema: objectSchema(map[string]any{
 			"since": map[string]any{"type": "integer", "minimum": 0, "description": "Only messages after this seq."},
 			"limit": map[string]any{"type": "integer", "minimum": 1, "maximum": maxReadLimit, "description": "At most this many messages (default 30)."},
@@ -77,15 +67,13 @@ func readRoom(ctx context.Context, env *Env, args json.RawMessage) Result {
 	if err != nil {
 		return refusal("reading the room", err)
 	}
-	var lines []roomLine
+	var lines []roomlog.Entry
 	for _, e := range entries {
 		if e.Seq <= in.Since {
 			continue
 		}
-		lines = append(lines, roomLine{
-			Seq: e.Seq, Author: e.Speaker, Agent: e.Kind == roomlog.KindAgent, To: e.To, Via: e.Via,
-			Text: truncateBytes(strings.TrimSpace(e.Text), maxReadTextBytes), AtMs: e.AtMs,
-		})
+		e.Text = truncateBytes(strings.TrimSpace(e.Text), maxReadTextBytes)
+		lines = append(lines, e)
 	}
 	more := len(lines) > in.Limit
 	switch {
@@ -97,10 +85,17 @@ func readRoom(ctx context.Context, env *Env, args json.RawMessage) Result {
 		lines = lines[len(lines)-in.Limit:]
 	}
 	latest := in.Since
-	for _, l := range lines {
-		latest = max(latest, l.Seq)
+	var transcript strings.Builder
+	for _, e := range lines {
+		latest = max(latest, e.Seq)
+		transcript.WriteString("#" + strconv.FormatInt(e.Seq, 10) + " " + roomlog.Line(e))
 	}
-	return Result{Value: map[string]any{"messages": lines, "latestSeq": latest, "more": more && in.Since > 0}}
+	out := map[string]any{"latestSeq": latest, "more": more && in.Since > 0}
+	if transcript.Len() > 0 {
+		// What people and other agents wrote: data, never instructions.
+		out["transcript"] = roomlog.Fence(readAuthor, transcript.String())
+	}
+	return Result{Value: out}
 }
 
 // gatewayFetch reads gateway paths for roomlog through the tools' gateway

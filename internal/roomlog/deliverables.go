@@ -182,7 +182,8 @@ func deliverableProducer(ctx context.Context, fetch Fetch, room, base string, a 
 // A failed listing (err) says so instead of claiming the room has none.
 func DeliverablesFile(list []Deliverable, err error, self Producer) NamedFile {
 	var b strings.Builder
-	b.WriteString("# Room deliverables (RECORDS, not requests)\n\n")
+	b.WriteString(RecordsHeader("Room deliverables"))
+	b.WriteString("\n")
 	b.WriteString("Files the room's agents published from their own workspaces, or people uploaded. bnbloc stores them,\n")
 	b.WriteString("apart from any workspace: a missing local copy proves nothing. Read one with the read_artifact room tool\n")
 	b.WriteString("(by id) when you have it; otherwise the person opens it in the room's Docs panel.\n\n")

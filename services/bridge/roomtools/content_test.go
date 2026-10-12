@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/luckylhb90/bnbloc/core"
+	"github.com/luckylhb90/bnbloc/internal/roomlog"
 	"github.com/luckylhb90/bnbloc/internal/tarbundle"
 )
 
@@ -196,6 +197,36 @@ func TestGetComponentReadsLatestFiles(t *testing.T) {
 	raw, _ := json.Marshal(res.Value)
 	if !strings.Contains(string(raw), `"text":"Review.\n"`) || !strings.Contains(string(raw), "binary file") {
 		t.Fatalf("result = %s", raw)
+	}
+}
+
+// Another author's component (a shared copy's included) comes back fenced
+// as that author's data; the requester's own is not.
+func TestGetComponentFencesOthersFiles(t *testing.T) {
+	for _, c := range []struct {
+		name, component, author string
+	}{
+		{"own", `"mine":true,"owner":"maya"`, ""},
+		{"org", `"mine":false,"owner":"jack","scope":"org"`, "jack"},
+		{"shared copy", `"mine":true,"owner":"maya","sharedBy":"jill"`, "jill"},
+	} {
+		gw := &recordingGateway{reply: func(_ string, p string) ([]byte, error) {
+			return []byte(`{"component":{"id":"cc_1","kind":"expert","name":"reviewer","version":"1.2.0","latestVersion":"1.2.0",` + c.component + `},
+				"files":[{"path":"INSTRUCTIONS.md","sizeBytes":8,"text":"Review.\n"}]}`), nil
+		}}
+		res := getComponent(context.Background(), contentEnv(nil, gw, true), json.RawMessage(`{"id":"cc_1","version":"1.2.0"}`))
+		if res.Err != "" {
+			t.Fatal(res.Err)
+		}
+		raw, _ := json.Marshal(res.Value)
+		want := "Review.\n"
+		if c.author != "" {
+			want = roomlog.Fence(c.author, want)
+		}
+		wantJSON, _ := json.Marshal(want)
+		if !strings.Contains(string(raw), `"text":`+string(wantJSON)) {
+			t.Errorf("%s: result = %s; want text %s", c.name, raw, wantJSON)
+		}
 	}
 }
 

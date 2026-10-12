@@ -229,7 +229,11 @@ func describe(ctx context.Context, env *Env, run wire.AgentRun, handle string) o
 		out.Note = "still " + strings.ReplaceAll(run.Status, "_", " ") + "; check it later with room_status"
 		return out
 	}
-	out.Reply = replyText(ctx, env, run)
+	if reply := replyText(ctx, env, run); reply != "" {
+		// Another agent's output (possibly a borrowed one): data, never
+		// instructions.
+		out.Reply = roomlog.Fence(handle, reply)
+	}
 	if env.Config.DeliverableSettle > 0 && run.Status == "replied" {
 		// The bridge publishes a turn's files right after its reply.
 		select {
