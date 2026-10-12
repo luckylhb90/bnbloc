@@ -69,6 +69,32 @@ and isolation pass that test. Business rules do not.
 - The server stamps every document with `_id`, `_by`, `_byName`,
   `_createdAt` and `_updatedAt`. The client cannot set or change them.
 
+### 4.1a Concurrency: per-document, like any document database
+
+The concurrency model is the same whichever backend is used (MongoDB is also
+atomic per document):
+
+- **One row per document, never a shared JSON blob.** Concurrent inserts are
+  independent rows (time-ordered `_id`), so a thousand people voting at once
+  never contend.
+- **Every write to one document is atomic.** `PUT`/`PATCH`/`DELETE` is a
+  single `UPDATE … WHERE id=?` under its row lock; a `PATCH` applies its
+  `JSON_SET` paths in that one statement.
+- **Optimistic concurrency.** Each document carries a server-incremented
+  `_version`. A write with `ifVersion` (`If-Match`) that no longer matches gets
+  409, and the SDK returns it so the app can re-read and retry. Without
+  `ifVersion`, the last writer wins.
+- **Atomic counters.** `PATCH` supports `$inc` on numeric fields
+  (`UPDATE … SET body = JSON_SET(body, '$.n', COALESCE(JSON_EXTRACT(body, '$.n'), 0) + ?)`),
+  so a shared counter never loses an update.
+- **Create-only with the app's own id.** `PUT ~app/c/{collection}/{id}` with
+  `ifAbsent` (`If-None-Match: *`) succeeds once and returns 409 afterwards,
+  enforced by the primary key. An app gets race-free "one record per key" by
+  choosing the key, e.g. `id = me().id`, with no platform rule about votes.
+
+The recommended pattern for tallies is still one document per action, counted
+on read. There's no hot row at all.
+
 ### 4.2 Identity: a fact the app can trust
 
 - `_by` and `me()` are the caller as the server knows it. A member who opens
@@ -154,6 +180,9 @@ outgrow MySQL. Apps and the SDK don't change when the backend does.
 Tests:
 - A capability for app A never reads app B.
 - The client can't set `_by`.
+- `ifVersion` conflicts return 409.
+- `$inc` loses no update under concurrency.
+- `ifAbsent` creates exactly once under concurrency.
 - A non-author can't update or delete a document.
 - A private document is hidden from other visitors.
 - A revoked link stops writes.
