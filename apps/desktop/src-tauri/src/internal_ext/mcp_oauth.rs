@@ -436,7 +436,9 @@ pub(super) fn auth_server_metadata_urls(issuer: &str) -> Result<Vec<String>, Str
 /// on this machine) may use http.
 fn secure_endpoint(raw: &str, what: &str) -> Result<Url, String> {
     let url = Url::parse(raw).map_err(|_| format!("the sign-in server's {what} is not a URL"))?;
-    let loopback = matches!(url.host_str(), Some("127.0.0.1" | "localhost" | "[::1]"));
+    let loopback = url
+        .host_str()
+        .is_some_and(crate::internal_ext::loopback::is_loopback_host);
     match url.scheme() {
         "https" => Ok(url),
         "http" if loopback => Ok(url),
@@ -764,7 +766,8 @@ async fn wait_callback(listener: TcpListener, timeout: Duration) -> Result<Callb
                 .and_then(|l| l.split(' ').next())
                 .unwrap_or_default()
                 .to_string();
-            let Ok(url) = Url::parse(&format!("http://127.0.0.1{target}")) else {
+            // Only the path and query matter; the host is a placeholder.
+            let Ok(url) = Url::parse(&format!("http://callback{target}")) else {
                 let _ = respond(&mut sock, "400 Bad Request", "Bad request.").await;
                 continue;
             };
@@ -922,14 +925,16 @@ pub(super) async fn sign_in(
     timeout: Duration,
 ) -> Result<SignIn, String> {
     let found = discover(http, spec).await?;
-    let listener = TcpListener::bind("127.0.0.1:0")
+    let listener = crate::internal_ext::loopback::bind_ephemeral_async()
         .await
         .map_err(|e| format!("open the sign-in callback: {e}"))?;
-    let port = listener
+    let addr = listener
         .local_addr()
-        .map_err(|e| format!("open the sign-in callback: {e}"))?
-        .port();
-    let redirect_uri = format!("http://127.0.0.1:{port}{CALLBACK_PATH}");
+        .map_err(|e| format!("open the sign-in callback: {e}"))?;
+    let redirect_uri = format!(
+        "{}{CALLBACK_PATH}",
+        crate::internal_ext::loopback::LoopbackHttp::of_addr(addr)
+    );
     let client = client_for(http, spec, &found.server, &redirect_uri, tool).await?;
     let verifier = random_token(32)?;
     let state = random_token(16)?;

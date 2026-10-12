@@ -55,15 +55,6 @@ impl Adapter {
         }
     }
 
-    pub(super) fn local_url(&self, name: &str) -> Option<String> {
-        self.inner.lock().sidecars.get(name).and_then(|sidecar| {
-            sidecar
-                .runtime_url
-                .clone()
-                .or_else(|| sidecar.spec.as_ref().map(|spec| spec.local_url.clone()))
-        })
-    }
-
     pub(super) fn manifest_dir(&self) -> Option<String> {
         self.manifest_dir_path()
             .map(|dir| dir.to_string_lossy().into_owned())

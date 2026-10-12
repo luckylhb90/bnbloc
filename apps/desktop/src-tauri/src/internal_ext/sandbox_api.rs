@@ -219,23 +219,12 @@ pub(super) struct SandboxApi {
 
 impl SandboxApi {
     fn client() -> Result<reqwest::Client, ApiError> {
-        static CLIENT: std::sync::OnceLock<Result<reqwest::Client, String>> =
-            std::sync::OnceLock::new();
         // No read-idle bound: an image pull answers only when done. Every
         // request carries its own total timeout instead.
-        CLIENT
-            .get_or_init(|| {
-                reqwest::Client::builder()
-                    .connect_timeout(Duration::from_secs(2))
-                    .redirect(reqwest::redirect::Policy::none())
-                    .build()
-                    .map_err(|e| format!("build sandbox client: {e}"))
-            })
-            .clone()
-            .map_err(|message| ApiError {
-                code: String::new(),
-                message,
-            })
+        crate::internal_ext::loopback::client().map_err(|message| ApiError {
+            code: String::new(),
+            message,
+        })
     }
 
     async fn call(

@@ -258,14 +258,15 @@ impl Adapter {
         &self,
         spec: &SidecarSpec,
     ) -> Result<crate::internal_ext::sidecar_util::RuntimeListener, String> {
+        use crate::internal_ext::loopback;
         self.replace_sandbox_orphan(spec).await;
-        let listener = std::net::TcpListener::bind("127.0.0.1:0")
-            .map_err(|e| format!("reserve sandbox port: {e}"))?;
+        let listener =
+            loopback::bind_ephemeral().map_err(|e| format!("reserve sandbox port: {e}"))?;
         let addr = listener
             .local_addr()
             .map_err(|e| format!("reserve sandbox port: {e}"))?;
         Ok(crate::internal_ext::sidecar_util::RuntimeListener {
-            url: format!("http://{addr}"),
+            url: loopback::LoopbackHttp::of_addr(addr),
             listener: Some(listener),
         })
     }

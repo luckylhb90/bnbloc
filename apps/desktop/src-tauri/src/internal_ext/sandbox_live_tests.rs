@@ -19,17 +19,18 @@ use std::time::{Duration, Instant};
 
 use sha2::{Digest, Sha256};
 
+use crate::internal_ext::loopback::{self, LoopbackHttp};
 use crate::internal_ext::sandbox_api::{create_machine_request, SandboxApi};
 use crate::internal_ext::sandbox_bundle;
 use crate::internal_ext::sidecar_model::{
     resolve_component_specs, ComponentsResponse, GatewayAccess, GuestProfile,
 };
-use crate::internal_ext::sidecar_util::{current_platform, hex_lower, listen_addr};
+use crate::internal_ext::sidecar_util::{current_platform, hex_lower};
 use crate::secret::Secret;
 
 fn serve_files(files: HashMap<String, Vec<u8>>) -> String {
     use std::io::{BufRead, BufReader, Write};
-    let server = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+    let server = loopback::bind_ephemeral().expect("bind");
     let base = format!("http://{}", server.local_addr().expect("addr"));
     std::thread::spawn(move || {
         for stream in server.incoming() {
@@ -135,17 +136,17 @@ async fn sandbox_live_bundle_launch_discover_prewarm_restart() {
     );
 
     // Launch, like spawn_once + sandbox_launch_env.
-    let port = std::net::TcpListener::bind("127.0.0.1:0")
-        .unwrap()
-        .local_addr()
-        .unwrap();
+    let port = loopback::bind_ephemeral().unwrap().local_addr().unwrap();
     let url = format!("http://{port}");
     let token = Secret::generate().unwrap();
     let data_dir = root.join("data");
     std::fs::create_dir_all(&data_dir).unwrap();
     let mut cmd = std::process::Command::new(plan.exe());
     cmd.env(&spec.supervised_env, "1");
-    cmd.env(&spec.listen_env, listen_addr(&url).unwrap());
+    cmd.env(
+        &spec.listen_env,
+        LoopbackHttp::parse(&url).unwrap().authority(),
+    );
     for (k, v) in sandbox_bundle::launch_env(&spec, &plan.exe(), token.expose(), &data_dir) {
         cmd.env(k, v);
     }

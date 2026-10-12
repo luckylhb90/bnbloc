@@ -1,6 +1,8 @@
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+use crate::internal_ext::loopback::{self, LoopbackHttp};
+
 pub(super) fn download_message(name: &str, written: u64, total: Option<u64>) -> String {
     match total {
         Some(total) if total > 0 => format!(
@@ -164,44 +166,17 @@ pub(super) fn set_executable(_path: &Path) -> Result<(), String> {
     Ok(())
 }
 
-pub(super) fn listen_addr(local_url: &str) -> Result<String, String> {
-    let trimmed = local_url.trim();
-    let without_scheme = trimmed
-        .split_once("://")
-        .map(|(_, rest)| rest)
-        .unwrap_or(trimmed);
-    let authority = without_scheme
-        .split('/')
-        .next()
-        .unwrap_or(without_scheme)
-        .trim();
-    if authority.is_empty() {
-        return Err(format!("sidecar localUrl has no host:port: {local_url}"));
-    }
-    Ok(authority.to_string())
-}
-
 pub(super) struct RuntimeListener {
     pub(super) url: String,
     pub(super) listener: Option<std::net::TcpListener>,
 }
+
+/// Reserve a sidecar's fixed `localUrl` (loopback::LoopbackHttp) until the
+/// manager launches it.
 pub(super) fn runtime_listener_for(local_url: &str) -> Result<RuntimeListener, String> {
     let trimmed = local_url.trim();
-    let (scheme, rest) = trimmed
-        .split_once("://")
-        .ok_or_else(|| format!("sidecar localUrl must include a scheme: {local_url}"))?;
-    if scheme != "http" {
-        return Err(format!("sidecar localUrl must use http: {local_url}"));
-    }
-    let (authority, _) = rest.split_once('/').unwrap_or((rest, ""));
-    let host = authority
-        .rsplit_once(':')
-        .map(|(host, _)| host)
-        .ok_or_else(|| format!("sidecar localUrl has no port: {local_url}"))?;
-    if host != "127.0.0.1" && host != "localhost" {
-        return Err(format!("sidecar localUrl must be loopback: {local_url}"));
-    }
-    let listener = std::net::TcpListener::bind(authority).map_err(|error| {
+    let url = LoopbackHttp::parse(trimmed).map_err(|e| format!("sidecar localUrl {e}"))?;
+    let listener = std::net::TcpListener::bind(url.authority()).map_err(|error| {
         if error.kind() == std::io::ErrorKind::AddrInUse {
             format!("sidecar listener {trimmed} is already in use; stop the stale process before retrying")
         } else {
@@ -234,12 +209,11 @@ pub(super) async fn probe_core_protocol_listener(
     name: &str,
 ) -> Result<Option<CoreListener>, String> {
     let endpoint = format!("{}/core/v1/discover", local_url.trim_end_matches('/'));
-    let client = reqwest::Client::builder()
-        .connect_timeout(Duration::from_millis(250))
+    let response = loopback::client()?
+        .get(&endpoint)
         .timeout(Duration::from_millis(500))
-        .build()
-        .map_err(|e| format!("build sidecar listener probe: {e}"))?;
-    let response = client.get(&endpoint).send().await;
+        .send()
+        .await;
     match response {
         Ok(response) if response.status().is_success() => {
             let bytes = response
@@ -486,7 +460,7 @@ mod tests {
 
     #[test]
     fn occupied_fixed_port_without_listener_override_fails_without_reassignment() {
-        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("reserve test port");
+        let listener = loopback::bind_ephemeral().expect("reserve test port");
         let requested = format!("http://{}", listener.local_addr().expect("test address"));
 
         let err = match runtime_listener_for(&requested) {
@@ -498,7 +472,7 @@ mod tests {
     }
 
     fn serve_once(body: &'static str) -> String {
-        let server = std::net::TcpListener::bind("127.0.0.1:0").expect("bind test listener");
+        let server = loopback::bind_ephemeral().expect("bind test listener");
         let address = server.local_addr().expect("listener address");
         std::thread::spawn(move || {
             let (mut stream, _) = server.accept().expect("accept discovery request");
@@ -572,7 +546,7 @@ mod tests {
 
     #[test]
     fn selected_listener_stays_reserved_until_manager_launches_child() {
-        let probe = std::net::TcpListener::bind("127.0.0.1:0").expect("select test port");
+        let probe = loopback::bind_ephemeral().expect("select test port");
         let address = probe.local_addr().expect("selected address");
         drop(probe);
         let runtime =

@@ -36,6 +36,7 @@ use parking_lot::Mutex;
 use reqwest::header::CONTENT_TYPE;
 use sha2::{Digest, Sha256};
 
+use crate::internal_ext::loopback::{self, LoopbackHttp};
 use crate::internal_ext::sidecar_model::GatewayAccess;
 use crate::internal_ext::sidecar_util::hex_lower;
 use crate::secret::Secret;
@@ -98,9 +99,9 @@ impl PluginHost {
     pub(super) async fn ensure_started(self: &Arc<Self>) -> Result<String, String> {
         let mut addr = self.addr.lock().await;
         if let Some(addr) = *addr {
-            return Ok(format!("http://{addr}"));
+            return Ok(LoopbackHttp::of_addr(addr));
         }
-        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+        let listener = loopback::bind_ephemeral_async()
             .await
             .map_err(|e| format!("bind plugin host API: {e}"))?;
         let bound = listener
@@ -109,7 +110,7 @@ impl PluginHost {
         let host = Arc::clone(self);
         tokio::spawn(async move { host.serve(listener).await });
         *addr = Some(bound);
-        Ok(format!("http://{bound}"))
+        Ok(LoopbackHttp::of_addr(bound))
     }
 
     async fn serve(self: Arc<Self>, listener: tokio::net::TcpListener) {
@@ -410,7 +411,7 @@ mod tests {
         status: &'static str,
         body: &'static str,
     ) -> (String, std::sync::mpsc::Receiver<String>) {
-        let server = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+        let server = loopback::bind_ephemeral().expect("bind");
         let address = server.local_addr().expect("addr");
         let (tx, rx) = std::sync::mpsc::channel();
         std::thread::spawn(move || {

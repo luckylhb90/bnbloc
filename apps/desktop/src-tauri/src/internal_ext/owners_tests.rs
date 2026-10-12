@@ -125,6 +125,15 @@ fn secrets_are_generated_and_compared_only_by_secret() {
     only_in("fold(0u8", "secret.rs");
 }
 
+/// What counts as this machine is decided once (loopback.rs): no other
+/// source names a loopback host.
+#[test]
+fn loopback_hosts_are_named_only_by_loopback() {
+    for needle in ["\"127.0.0.1", "\"localhost\"", "[::1]", "is_loopback()"] {
+        only_in(needle, "internal_ext/loopback.rs");
+    }
+}
+
 #[test]
 fn sign_in_files_are_reached_only_through_sign_ins() {
     // Every read, write and delete of a sign-in file goes through SignIns

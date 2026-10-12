@@ -2,6 +2,7 @@ use std::path::Path;
 use std::time::{Duration, Instant};
 
 use crate::child_process::{self, Backoff, ChildEvent, STOP_GRACE};
+use crate::internal_ext::loopback::LoopbackHttp;
 use crate::internal_ext::pin::Sha256Pin;
 use crate::internal_ext::sidecar_fetch::FetchError;
 use crate::internal_ext::sidecar_model::{ComponentKind, SidecarSpec};
@@ -11,7 +12,7 @@ use crate::internal_ext::sidecar_orphan::{
     OccupiedListener, Orphan, SpawnRecord, CAN_TERMINATE,
 };
 use crate::internal_ext::sidecar_util::{
-    home_env, listen_addr, probe_core_protocol_listener, runtime_listener_for, sidecar_path_env,
+    home_env, probe_core_protocol_listener, runtime_listener_for, sidecar_path_env,
 };
 use crate::internal_ext::{plugin_host, plugin_settings, Adapter};
 
@@ -243,9 +244,13 @@ impl Adapter {
                     spec.name
                 );
             }
-            ListenerPlan::Wait(message) => self.set_status(&id, "waiting", message, None),
+            ListenerPlan::Wait(message) => {
+                self.lost_endpoint(&id, sidecar_generation);
+                self.set_status(&id, "waiting", message, None)
+            }
             ListenerPlan::Replace { pid, message } => {
                 eprintln!("[sidecar-manager:{}] {message} (pid {pid})", spec.name);
+                self.lost_endpoint(&id, sidecar_generation);
                 self.set_status(&id, "waiting", message, None);
                 let stopped =
                     tauri::async_runtime::spawn_blocking(move || terminate_orphan(pid, STOP_GRACE))
@@ -270,6 +275,19 @@ impl Adapter {
                     }
                 }
             }
+        }
+    }
+
+    /// A listener reused in place stopped answering as the sidecar: it is no
+    /// longer the sidecar's endpoint.
+    fn lost_endpoint(&self, id: &str, sidecar_generation: u64) {
+        let mut inner = self.inner.lock();
+        if let Some(sidecar) = inner
+            .sidecars
+            .get_mut(id)
+            .filter(|s| s.generation == sidecar_generation)
+        {
+            sidecar.runtime_url = None;
         }
     }
 
@@ -335,7 +353,10 @@ impl Adapter {
             cmd.env(&spec.supervised_env, "1");
         }
         if !spec.listen_env.trim().is_empty() {
-            cmd.env(&spec.listen_env, listen_addr(runtime_url)?);
+            cmd.env(
+                &spec.listen_env,
+                LoopbackHttp::parse(runtime_url)?.authority(),
+            );
         }
         let home = home_env();
         if let Some((home_key, home)) = home.clone() {
@@ -472,6 +493,8 @@ impl Adapter {
         if let Some(sidecar) = inner.sidecars.get_mut(name) {
             if sidecar.generation == sidecar_generation {
                 sidecar.child = None;
+                sidecar.runtime_url = None;
+                sidecar.status.state = "waiting".into();
                 let detail = if tail.trim().is_empty() {
                     exit_code
                         .map(|code| format!("exit {code}"))

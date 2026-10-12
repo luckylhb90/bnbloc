@@ -16,6 +16,9 @@ pub(super) struct Inner {
 
 pub(super) struct ManagedSidecar {
     pub(super) spec: Option<SidecarSpec>,
+    /// Where the sidecar answers while it runs (its spawned child, or a
+    /// compatible listener reused in place); None otherwise. Read it through
+    /// `endpoint`.
     pub(super) runtime_url: Option<String>,
     pub(super) child: Option<Child>,
     pub(super) generation: u64,
@@ -28,6 +31,13 @@ pub(super) struct ManagedSidecar {
 }
 
 impl ManagedSidecar {
+    /// The one answer to "may this sidecar be used now": where it answers
+    /// while it runs. The bridge env, the bridge watcher's fingerprint, the
+    /// local API calls and plugin deliveries all read it.
+    pub(super) fn endpoint(&self) -> Option<&str> {
+        self.runtime_url.as_deref()
+    }
+
     pub(super) fn pending(status: AdapterStatus) -> Self {
         Self {
             spec: None,

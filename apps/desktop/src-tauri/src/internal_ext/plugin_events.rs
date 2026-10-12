@@ -26,6 +26,7 @@ use futures_util::StreamExt;
 use reqwest::header::{ACCEPT, CONTENT_TYPE};
 
 use crate::child_process::Backoff;
+use crate::internal_ext::loopback::{self, LoopbackHttp};
 use crate::internal_ext::sidecar_model::{ComponentKind, GatewayAccess, Inner};
 use crate::internal_ext::sidecar_status::component_id;
 use crate::internal_ext::Adapter;
@@ -216,7 +217,7 @@ impl Adapter {
 
     async fn forward_to_sidecar(&self, delivery: &PluginDelivery) -> Result<(), String> {
         let base = plugin_target(&self.inner.lock(), &delivery.plugin)?;
-        post_envelope(&self.http()?, &base, &delivery.envelope).await
+        post_envelope(&loopback::client()?, &base, &delivery.envelope).await
     }
 
     async fn ack_plugin_event(
@@ -281,9 +282,9 @@ fn ack_body(outcome: Result<(), String>) -> String {
 }
 
 /// The loopback base URL of a running plugin sidecar. The desktop is the
-/// only party that dials a plugin, and only on loopback: a runtime URL that is
-/// not a loopback http URL is refused (the package validator already demands
-/// one; this keeps the guarantee where the request is actually made).
+/// only party that dials a plugin, and only on loopback: an endpoint that is
+/// not a loopback http URL (loopback::LoopbackHttp, the rule its launch
+/// passed) is refused where the request is actually made.
 fn plugin_target(inner: &Inner, plugin: &str) -> Result<String, String> {
     let sidecar = inner
         .sidecars
@@ -291,24 +292,11 @@ fn plugin_target(inner: &Inner, plugin: &str) -> Result<String, String> {
         .filter(|sidecar| sidecar.spec.is_some())
         .ok_or_else(|| format!("plugin {plugin} is not installed on this desktop"))?;
     let url = sidecar
-        .runtime_url
-        .as_deref()
+        .endpoint()
         .ok_or_else(|| format!("plugin {plugin} sidecar is not running on this desktop"))?;
-    loopback_http_base(url)
-        .ok_or_else(|| format!("plugin {plugin} runtime URL {url} is not loopback http"))
-}
-
-fn loopback_http_base(raw: &str) -> Option<String> {
-    let url = reqwest::Url::parse(raw.trim()).ok()?;
-    let host = url
-        .host_str()?
-        .trim_start_matches('[')
-        .trim_end_matches(']');
-    let loopback = host == "localhost"
-        || host
-            .parse::<std::net::IpAddr>()
-            .is_ok_and(|ip| ip.is_loopback());
-    (url.scheme() == "http" && loopback).then(|| raw.trim().trim_end_matches('/').to_string())
+    LoopbackHttp::parse(url)
+        .map(|url| url.base())
+        .map_err(|_| format!("plugin {plugin} runtime URL {url} is not loopback http"))
 }
 
 /// POST the envelope verbatim to the sidecar's `/events`; any non-2xx is a
@@ -519,6 +507,7 @@ mod tests {
             "http://evil.example:7191",
             "https://127.0.0.1:7191",
             "http://10.0.0.5:7191",
+            "http://[::1]:7191",
         ] {
             assert!(
                 plugin_target(&plugin_inner("auditor", Some(url)), "auditor")
@@ -527,8 +516,14 @@ mod tests {
                 "{url} accepted"
             );
         }
-        assert!(loopback_http_base("http://localhost:7191").is_some());
-        assert!(loopback_http_base("http://[::1]:7191").is_some());
+        assert_eq!(
+            plugin_target(
+                &plugin_inner("auditor", Some("http://localhost:7191")),
+                "auditor"
+            )
+            .as_deref(),
+            Ok("http://localhost:7191")
+        );
     }
 
     #[test]
@@ -543,7 +538,7 @@ mod tests {
     /// A one-shot sidecar answering `status`; returns its base URL and the
     /// raw request it received.
     fn sidecar_once(status: &'static str) -> (String, std::sync::mpsc::Receiver<String>) {
-        let server = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+        let server = loopback::bind_ephemeral().expect("bind");
         let address = server.local_addr().expect("addr");
         let (tx, rx) = std::sync::mpsc::channel();
         std::thread::spawn(move || {

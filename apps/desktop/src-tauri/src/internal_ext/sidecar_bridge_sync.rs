@@ -24,6 +24,11 @@ use crate::internal_ext::Adapter;
 const CHECK_INTERVAL: Duration = Duration::from_secs(2);
 
 impl Adapter {
+    /// The managed cores the bridge env carries now (bridge_cores).
+    pub(super) fn bridge_cores(&self) -> Vec<BridgeCore> {
+        bridge_cores(&self.inner.lock().sidecars)
+    }
+
     pub(super) async fn stabilize_bridge(&self, generation: u64) {
         let mut previous: Option<HashMap<String, String>> = None;
         loop {
@@ -94,14 +99,26 @@ impl Adapter {
     }
 }
 
-/// The core set the bridge env should carry: binary core sidecars with a live
-/// child, keyed by their actual runtime URL (a respawn may have moved a daemon
-/// to a different loopback port), plus manifest cores keyed by the content
-/// fingerprint of the manifest file the bridge will read — installing,
-/// removing, or changing one alters the bridge's cores, so each must trigger
-/// the same stabilizing restart.
-fn bridge_core_set(sidecars: &HashMap<String, ManagedSidecar>) -> HashMap<String, String> {
-    sidecars
+/// One core the bridge env carries.
+pub(super) struct BridgeCore {
+    pub(super) name: String,
+    /// A daemon core's endpoint (`BNBLOC_CORE_<KEY>_URL`); None for a
+    /// manifest core.
+    pub(super) url: Option<String>,
+    /// What the bridge would see change: the endpoint, or the manifest
+    /// content.
+    fingerprint: String,
+}
+
+/// The cores the bridge env carries (internal_ext::extend_core_env) and the
+/// watcher compares, from one list: daemon cores that answer now
+/// (`ManagedSidecar::endpoint`: a respawn may have moved a daemon to another
+/// loopback port, a reused listener counts too), keyed by that endpoint, and
+/// manifest cores keyed by the content fingerprint of the manifest file the
+/// bridge will read. Installing, removing or changing one alters the
+/// bridge's cores, so each triggers the same stabilizing restart.
+fn bridge_cores(sidecars: &HashMap<String, ManagedSidecar>) -> Vec<BridgeCore> {
+    let mut cores: Vec<BridgeCore> = sidecars
         .iter()
         .filter_map(|(name, sidecar)| {
             let spec = sidecar.spec.as_ref()?;
@@ -110,12 +127,28 @@ fn bridge_core_set(sidecars: &HashMap<String, ManagedSidecar>) -> HashMap<String
             }
             if spec.artifact.is_none() {
                 let content = spec.manifest.as_ref().map(manifest_fingerprint);
-                return Some((name.clone(), content.unwrap_or_default()));
+                return Some(BridgeCore {
+                    name: name.clone(),
+                    url: None,
+                    fingerprint: content.unwrap_or_default(),
+                });
             }
-            sidecar.child.as_ref()?;
-            let url = sidecar.runtime_url.clone()?;
-            Some((name.clone(), url))
+            let url = sidecar.endpoint()?.to_string();
+            Some(BridgeCore {
+                name: name.clone(),
+                fingerprint: url.clone(),
+                url: Some(url),
+            })
         })
+        .collect();
+    cores.sort_by(|a, b| a.name.cmp(&b.name));
+    cores
+}
+
+fn bridge_core_set(sidecars: &HashMap<String, ManagedSidecar>) -> HashMap<String, String> {
+    bridge_cores(sidecars)
+        .into_iter()
+        .map(|core| (core.name, core.fingerprint))
         .collect()
 }
 
@@ -176,26 +209,43 @@ mod tests {
         assert!(before["acme"].starts_with("manifest:sha256:"));
     }
 
+    /// The env and the watcher read one list: a daemon core is in it exactly
+    /// while it has an endpoint (its own child or a reused listener), with
+    /// that endpoint as its URL.
     #[test]
-    fn plugins_and_binary_cores_without_a_live_child_are_not_bridge_cores() {
+    fn daemon_cores_are_bridge_cores_exactly_while_they_answer() {
         let mut plugin = manifest_core("hook", serde_json::json!({}));
         if let Some(spec) = plugin.spec.as_mut() {
             spec.kind = ComponentKind::Plugin;
         }
-        let mut idle_binary = manifest_core("samplecore", serde_json::json!({}));
-        if let Some(spec) = idle_binary.spec.as_mut() {
-            spec.artifact = Some(crate::internal_ext::sidecar_model::ComponentArtifact {
-                url: "/v1/artifacts/x".into(),
-                sha256: crate::internal_ext::pin::Sha256Pin::of(b"x"),
-            });
-            spec.manifest = None;
-        }
-        idle_binary.runtime_url = Some("http://127.0.0.1:7190".to_string());
-        let set = bridge_core_set(&HashMap::from([
+        let daemon = |name: &str, endpoint: Option<&str>| {
+            let mut sidecar = manifest_core(name, serde_json::json!({}));
+            if let Some(spec) = sidecar.spec.as_mut() {
+                spec.artifact = Some(crate::internal_ext::sidecar_model::ComponentArtifact {
+                    url: "/v1/artifacts/x".into(),
+                    sha256: crate::internal_ext::pin::Sha256Pin::of(b"x"),
+                });
+                spec.manifest = None;
+            }
+            sidecar.runtime_url = endpoint.map(str::to_string);
+            sidecar
+        };
+        let sidecars = HashMap::from([
             ("plugin/hook".to_string(), plugin),
-            ("samplecore".to_string(), idle_binary),
-        ]));
-        assert!(set.is_empty(), "{set:?}");
+            ("idle".to_string(), daemon("idle", None)),
+            (
+                "reused".to_string(),
+                daemon("reused", Some("http://127.0.0.1:7190")),
+            ),
+        ]);
+        let cores = bridge_cores(&sidecars);
+        assert_eq!(cores.len(), 1);
+        assert_eq!(cores[0].name, "reused");
+        assert_eq!(cores[0].url.as_deref(), Some("http://127.0.0.1:7190"));
+        assert_eq!(
+            bridge_core_set(&sidecars),
+            HashMap::from([("reused".to_string(), "http://127.0.0.1:7190".to_string())])
+        );
     }
 
     #[test]

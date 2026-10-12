@@ -73,8 +73,7 @@ impl Adapter {
             .running_local_url(name)
             .ok_or_else(|| format!("managed sidecar {name} is not running"))?;
         let url = format!("{}{path}", local_url.trim_end_matches('/'));
-        let response = self
-            .http()?
+        let response = crate::internal_ext::loopback::client()?
             .request(method, &url)
             .timeout(API_TIMEOUT)
             .send()
@@ -89,13 +88,11 @@ impl Adapter {
     }
 
     fn running_local_url(&self, name: &str) -> Option<String> {
-        self.inner.lock().sidecars.get(name).and_then(|sidecar| {
-            if sidecar.status.state == "running" {
-                sidecar.runtime_url.clone()
-            } else {
-                None
-            }
-        })
+        self.inner
+            .lock()
+            .sidecars
+            .get(name)
+            .and_then(|sidecar| sidecar.endpoint().map(str::to_string))
     }
 }
 

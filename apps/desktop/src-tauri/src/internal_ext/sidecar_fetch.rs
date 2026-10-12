@@ -62,18 +62,17 @@ impl Adapter {
         let mut specs = Vec::new();
         for spec in resolved.specs {
             let spec_id = spec.id();
-            // A sidecar with a live child must not have its status clobbered by
-            // this background refresh: the "resolving/Checking…" placeholder
-            // would overwrite "running", and the same-spec branch of apply_specs
-            // never restores it while the child stays alive — the card froze on
-            // "Checking samplecore artifact" forever even with the daemon healthy.
-            // Manifest cores have no child, so their placeholder is harmless.
-            // A refused spec keeps its "failed" status for the same reason.
+            // A supervised sidecar's status is its supervisor's: this
+            // background refresh must not clobber it with the
+            // "resolving/Checking…" placeholder (the card froze on "Checking
+            // samplecore artifact" with the daemon healthy). A refused spec
+            // keeps its "failed" status for the same reason. Manifest cores
+            // have no supervisor, so their placeholder is harmless.
             let keep_status = {
                 let inner = self.inner.lock();
                 inner.sidecars.get(&spec_id).is_some_and(|sidecar| {
-                    sidecar.child.is_some()
-                        || (sidecar.refused.is_some() && sidecar.spec.as_ref() == Some(&spec))
+                    sidecar.spec.as_ref() == Some(&spec)
+                        && (sidecar.supervisor_active || sidecar.refused.is_some())
                 })
             };
             if !keep_status {

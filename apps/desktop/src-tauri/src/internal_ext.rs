@@ -8,6 +8,7 @@ mod reconcile_tests;
 #[cfg(test)]
 mod sandbox_live_tests;
 
+pub(super) mod loopback;
 pub(super) mod mcp_tools;
 pub(super) mod member_dir;
 pub(super) mod pin;
@@ -312,6 +313,7 @@ impl Adapter {
             inner.generation += 1;
             for sidecar in inner.sidecars.values_mut() {
                 sidecar.supervisor_active = false;
+                sidecar.runtime_url = None;
                 if sidecar.refused.is_none() {
                     sidecar.status.state = "stopped".into();
                     sidecar.status.message = "Stopped".into();
@@ -436,15 +438,10 @@ fn apply_specs_to_inner(
         match inner.sidecars.get_mut(&id) {
             Some(sidecar) if sidecar.spec.as_ref() == Some(&spec) => {
                 sidecar.status.version = Some(spec.version.clone());
-                if sidecar.refused.is_some() {
-                    // Refused artifact for this exact spec: stays failed until
-                    // the catalog publishes a different one.
-                } else if sidecar.child.is_some() || sidecar.supervisor_active {
-                    sidecar.status.state = "running".into();
-                    if let Some(url) = &sidecar.runtime_url {
-                        sidecar.status.message = format!("{} is running at {url}", spec.name);
-                    }
-                } else if sidecar.status.state != "running" {
+                // A supervised sidecar's status is its supervisor's; a
+                // refused one stays failed until the catalog publishes a
+                // different spec. Only an idle one reads "ready" again.
+                if sidecar.refused.is_none() && !sidecar.supervisor_active {
                     sidecar.status = status;
                 }
             }
@@ -513,20 +510,16 @@ pub fn extend_core_env(
             dir.to_string_lossy().into_owned(),
         );
     }
-    for status in adapter.status() {
-        if status.kind != sidecar_model::ComponentKind::Core {
-            continue;
+    // The managed cores: exactly the set the bridge-stabilizing watcher
+    // compares (sidecar_bridge_sync::bridge_cores), so the env and the
+    // restart decision never disagree. A URL only for a daemon that answers
+    // now; manifest cores resolve their own endpoint via discovery.
+    for core in adapter.bridge_cores() {
+        if let Some(url) = &core.url {
+            env.insert(core_env_var(&core.name, "URL"), url.clone());
         }
-        // A URL env is only for cores with a local daemon the manager runs;
-        // manifest cores resolve their own endpoint via discovery.
-        if let Some(local_url) = adapter
-            .local_url(&status.name)
-            .filter(|url| !url.trim().is_empty())
-        {
-            env.insert(core_env_var(&status.name, "URL"), local_url);
-        }
-        if !out.iter().any(|name| name == &status.name) {
-            out.push(status.name);
+        if !out.contains(&core.name) {
+            out.push(core.name);
         }
     }
     out

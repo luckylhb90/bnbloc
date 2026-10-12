@@ -27,8 +27,9 @@
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
+use crate::internal_ext::loopback::LoopbackHttp;
 use crate::internal_ext::pin::Sha256Pin;
-use crate::internal_ext::sidecar_util::{cache_stem, listen_addr, CoreListener};
+use crate::internal_ext::sidecar_util::{cache_stem, CoreListener};
 
 /// What the app recorded when it spawned a sidecar child.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -163,12 +164,7 @@ pub(super) fn remove_spawn_record(dir: &Path, id: &str, pid: u32) {
 
 /// The TCP port of a sidecar `localUrl`.
 pub(super) fn listener_port(local_url: &str) -> Option<u16> {
-    listen_addr(local_url)
-        .ok()?
-        .rsplit_once(':')?
-        .1
-        .parse()
-        .ok()
+    LoopbackHttp::parse(local_url).ok().map(|url| url.port())
 }
 
 /// Whether this platform can find and stop a listener's process.
