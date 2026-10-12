@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { ApiError } from "@/lib/api";
-import { formatAgentLine, starterCandidates, type TemplateAgent, type TemplateVisibility } from "@/lib/roomTemplates";
+import { starterCandidates, type TemplateAgent, type TemplateVisibility } from "@/lib/roomTemplates";
+import { agentHandle } from "@/lib/roomAgents";
 import { roomTemplatesApi } from "@/lib/roomTemplatesApi";
 import { Button } from "@/ui/Button";
 import { Dialog } from "@/ui/Dialog";
@@ -12,7 +13,7 @@ import { TEMPLATE_VISIBILITY } from "@/views/library/TemplateDialogs";
 import type { FeedItem } from "@/views/room/types";
 import { errorText } from "@/lib/errors";
 
-const agentKey = (a: TemplateAgent) => formatAgentLine(a);
+const agentKey = (a: TemplateAgent) => agentHandle(a);
 
 // SaveTemplateDialog saves the room as a template (owner/admin). The server
 // captures the description, channels, and — when chosen — members and

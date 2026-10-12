@@ -10,6 +10,8 @@
 //
 // Until a reply arrives (a live turn), the cards stay under the request.
 
+import { agentHandle } from "./roomAgents.ts";
+
 export interface PlacementRow {
   readonly seq?: number;
   readonly author: string;
@@ -18,6 +20,7 @@ export interface PlacementRow {
 
 export interface PlacementJob {
   readonly ownerUserId: string;
+  readonly core: string;
   readonly provider: string;
 }
 
@@ -30,7 +33,7 @@ export interface PlacedDeliverables {
 const isAgentReply = (row: PlacementRow) => row.author === "agent";
 const rowSeq = (row: PlacementRow) => row.seq ?? 0;
 const jobHandle = (job: PlacementJob | undefined) =>
-  job && job.provider ? (job.ownerUserId ? `${job.ownerUserId}/${job.provider}` : job.provider) : "";
+  job && job.provider ? agentHandle({ ownerId: job.ownerUserId, core: job.core || undefined, provider: job.provider }) : "";
 
 /** Row index → the deliverables rendered after that row. */
 export function placeDeliverables(

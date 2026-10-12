@@ -2,7 +2,6 @@ import {
   agentFollowUps,
   clearTemplateStart,
   emptyTemplateBody,
-  formatAgentLine,
   parseAgentLines,
   parseLines,
   rememberTemplateStart,
@@ -11,6 +10,7 @@ import {
   templateSummary,
   type RoomTemplateInstance,
 } from "./roomTemplates.ts";
+import { agentHandle } from "./roomAgents.ts";
 
 function assert(condition: boolean, message: string): void {
   if (!condition) throw new Error(message);
@@ -63,7 +63,7 @@ clearTemplateStart("r1", storage);
 eq(takeTemplateStart("r1", storage), undefined, "cleared");
 
 eq(parseLines(" a \n\nb\na\n"), ["a", "b"], "lines");
-eq(formatAgentLine({ ownerId: "bob", provider: "codex", core: "c1" }), "c1/bob/codex", "agent line with core");
+eq(agentHandle({ ownerId: "bob", provider: "codex", core: "c1" }), "c1/bob/codex", "agent line with core");
 eq(
   parseAgentLines("bob/codex\nc1/carol/claude\nnope\na//b\n"),
   {

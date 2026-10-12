@@ -9,13 +9,22 @@ const at = (m: Map<number, { seq: number; artifactIds: readonly string[] }[]>) =
 
 const ask = (seq: number): PlacementRow => ({ seq, author: "maya" });
 const reply = (seq: number, label = "maya/claude-code"): PlacementRow => ({ seq, author: "agent", agentLabel: label });
-const job = { ownerUserId: "maya", provider: "claude-code" };
+const job = { ownerUserId: "maya", core: "", provider: "claude-code" };
 
 // Regression: cards rendered under the request, above the agent's reply.
 {
   const feed = [ask(10), reply(11), reply(11.001)];
   const placed = placeDeliverables(feed, { 10: ["a", "b"] }, { 10: [job] });
   assert(at(placed) === "2:10=a+b", `under the turn's last reply, got ${at(placed)}`);
+}
+
+// The same owner/provider under two cores is two agents: the cards follow
+// the core that ran the turn (web M12).
+{
+  const acme = { ownerUserId: "maya", core: "acme", provider: "codex" };
+  const feed = [ask(10), reply(11, "acme/maya/codex"), reply(12, "nimbus/maya/codex")];
+  const placed = placeDeliverables(feed, { 10: ["a"] }, { 10: [acme] });
+  assert(at(placed) === "1:10=a", `the acme reply, not nimbus's, got ${at(placed)}`);
 }
 
 // No reply yet (live turn): the cards stay under the request.

@@ -5,6 +5,7 @@ import { relativeTime } from "@/lib/format";
 import { ActorLabel } from "@/views/room/ActorLabel";
 import { isLiveJob } from "@/lib/agentRuns";
 import { agentJobStatusLabel } from "@/views/room/agentJobLabels";
+import { agentHandle } from "@/lib/roomAgents";
 
 export type RecentArtifactChange = {
   readonly artifactId: string;
@@ -104,7 +105,7 @@ export function ActivityRail({
               key={job.jobId}
               className={cn("inline-flex max-w-full items-center gap-1.5 rounded-full border px-2 py-1", railJobTone(job))}
             >
-              <ActorLabel actor={`${job.ownerUserId}/${job.provider}`} />
+              <ActorLabel actor={agentHandle({ ownerId: job.ownerUserId, core: job.core || undefined, provider: job.provider })} />
               <span className="shrink-0">{agentJobStatusLabel(job, queueAhead?.(job))}</span>
               {job.attempt > 1 && <span className="shrink-0 text-[var(--color-fg-subtle)]">attempt {job.attempt}</span>}
               {live && (

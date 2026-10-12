@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState, type Dispatch, type SetStateActio
 import { api } from "@/lib/api";
 import { restoreAgent, savedAgent } from "@/lib/agentPrefs";
 import { defaultPlatformRecipient } from "@/lib/platformAgents";
+import { agentIdentity } from "@/lib/roomAgents";
 import type { LocalAgent } from "@/lib/useLocalAgent";
 import type { RoomAgent } from "@/views/composer/types";
 
@@ -109,7 +110,7 @@ export function useAgentPrefs({
   // when the composer unmounts (leaving the room or channel) is flushed
   // instead of dropped.
   const pick = enabled && settled ? savedAgent(recipient, targets.find((t) => t.id === target), subject) : null;
-  const snapshot = pick ? `${pick.ownerId}/${pick.core}/${pick.provider}/${model}/${reasoning}` : "";
+  const snapshot = pick ? `${agentIdentity({ ...pick, core: pick.core || undefined })}/${model}/${reasoning}` : "";
   const lastSaved = useRef("");
   const pendingSave = useRef<{ readonly flush: () => void } | null>(null);
   useEffect(() => {

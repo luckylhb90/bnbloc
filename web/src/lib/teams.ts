@@ -9,6 +9,7 @@ import type { ContentTeam, TeamCostEstimate, TeamPlanEntry, TeamPlanRequest } fr
 
 export type { TeamPlanReply as TeamPlan } from "./wire.gen.ts";
 import type { TeamPlanReply as TeamPlan } from "./wire.gen.ts";
+import { agentHandle, agentIdentity } from "./roomAgents.ts";
 
 // A role's default agent, as the team block names it.
 export type DefaultAgentKind = "requester" | "platform" | "member";
@@ -62,7 +63,7 @@ export function estimateText(e: TeamCostEstimate): string {
 // seatLine is one roster row of a plan: "reviewer → bob/claude" or why the
 // role has no agent.
 export function seatLine(e: TeamPlanEntry): string {
-  const who = e.agent ? e.agent.handle || `${e.agent.ownerId}/${e.agent.provider}` : `unavailable (${e.reason || "no agent"})`;
+  const who = e.agent ? e.agent.handle || agentHandle(e.agent) : `unavailable (${e.reason || "no agent"})`;
   return `${e.role ?? "lead"} → ${who}`;
 }
 
@@ -72,7 +73,7 @@ export function seatLine(e: TeamPlanEntry): string {
 export function leadLine(plan: Pick<TeamPlan, "lead">, nameOf: (id: string) => string = (id) => id): string {
   const a = plan.lead.agent;
   if (!a) return "Lead: unavailable";
-  const who = a.platform ? `${a.provider}, a platform agent on ${nameOf(a.ownerId)}'s machine` : a.handle || `${a.ownerId}/${a.provider}`;
+  const who = a.platform ? `${a.provider}, a platform agent on ${nameOf(a.ownerId)}'s machine` : a.handle || agentHandle(a);
   return plan.lead.online ? `Lead: ${who}` : `Lead: ${who} (${plan.lead.reason || "not online"})`;
 }
 
@@ -84,5 +85,5 @@ export function unstaffedRoles(plan: TeamPlan): string[] {
 // teamConfirmKey identifies what a member confirmed: the team (and
 // version) on one lead agent. Picking another team or agent asks again.
 export function teamConfirmKey(teamId: string, version: string, lead: { ownerId: string; core?: string; provider: string } | null): string {
-  return lead ? `${teamId}@${version}:${lead.ownerId}/${lead.core ?? ""}/${lead.provider}` : "";
+  return lead ? `${teamId}@${version}:${agentIdentity(lead)}` : "";
 }

@@ -107,7 +107,7 @@ function platformRef(a: { readonly core?: string; readonly provider: string }): 
 
 // A platform row is one (core, provider) whichever host serves it.
 function platformRowKey(a: { readonly core?: string; readonly provider: string }): string {
-  return `platform:${(a.core ?? "").toLowerCase()}/${a.provider.toLowerCase()}`;
+  return `platform:${agentIdentity({ ownerId: "", core: a.core || undefined, provider: a.provider })}`;
 }
 
 // rowIsActive reports whether a row is the current selection: an explicit

@@ -24,7 +24,8 @@ import { AgentPicker } from "@/views/composer/AgentPicker";
 import { ModelPicker } from "@/views/composer/ModelPicker";
 import { SendModeToggle } from "@/views/composer/SendModeToggle";
 import { StarterPrompts } from "@/views/composer/StarterPrompts";
-import { agentHandle, type Referenceable, type RoomAgent } from "@/views/composer/types";
+import type { Referenceable, RoomAgent } from "@/views/composer/types";
+import { agentHandle } from "@/lib/roomAgents";
 import type { SendOptions } from "@/views/room/useRoomMessageActions";
 import type { RoomPlatformAgents } from "@/views/room/useRoomPlatformAgents";
 import { useDisplayNames } from "@/lib/useDisplayName";
@@ -35,17 +36,7 @@ import { ExpertBanner, ExpertPermissionDialog, ExpertPicker } from "@/views/comp
 import { TeamPlanCard, useTeamPlan } from "@/views/composer/TeamPlanCard";
 import { useComposerPrompts } from "@/views/composer/useComposerPrompts";
 import { PromptPickerButton, PromptVariablesDialog, SlashMenu } from "@/views/composer/PromptPicker";
-
-// mentionedAgent finds an in-text "@owner/provider" (core-qualified when the
-// agent advertises a core) naming a known room agent. Tokens are matched as
-// exact handles — never interpolated into a RegExp — so providers with
-// regex-special characters (acp:hermes) cannot break or falsely match.
-function mentionedAgent(text: string, roomAgents: readonly RoomAgent[]): RoomAgent | undefined {
-  const handles = new Set(
-    (text.match(/(?:^|\s)@([\w/:.-]+)/g) || []).map((tok) => tok.trim().slice(1).toLowerCase()),
-  );
-  return roomAgents.find((a) => handles.has(agentHandle(a).toLowerCase()));
-}
+import { explicitRecipient, resolveRecipient } from "@/views/composer/recipient";
 
 const toolButton =
   "tactile grid size-10 shrink-0 place-items-center rounded-[var(--radius)] text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-2)] hover:text-[var(--color-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/60";
@@ -161,7 +152,7 @@ export function Composer({
   const effTarget = useMemo(
     () =>
       resolveModelCatalog({
-        pick: mentionedAgent(text, roomAgents) ?? recipient,
+        pick: explicitRecipient(text, roomAgents, recipient),
         subject: subject ?? null,
         localTargets: agent.targets,
         selectedTargetId: agent.target,
@@ -237,7 +228,7 @@ export function Composer({
 
   // The agent a picked expert runs on: the same precedence send() uses (an
   // in-text @agent, the picked recipient, my selected local target).
-  const runsOnAgent = mentionedAgent(text, roomAgents) ?? recipient;
+  const runsOnAgent = explicitRecipient(text, roomAgents, recipient);
   const myRunsOn = agent.targets.find((x) => x.id === agent.target);
   const runsOn = runsOnAgent
     ? mentionLabel(agentHandle(runsOnAgent), roomAgents, nameOf)
@@ -296,17 +287,13 @@ export function Composer({
       })
       .join("\n\n");
     const composed = quoted ? (t ? `${quoted}\n\n${t}` : quoted) : t;
-    // Recipient precedence (per design): an in-text @<owner>/<provider> that
-    // names a known room agent wins over the composer selector; else the
-    // explicitly picked recipient; else my selected local target as my own
-    // agent; else null.
-    const myTarget = agent.targets.find((x) => x.id === agent.target);
-    const picked: RoomAgent | null =
-      mentionedAgent(t, roomAgents) ||
-      recipient ||
-      (myTarget?.provider
-        ? { ownerId: subject || "", provider: myTarget.provider, core: myTarget.core || undefined, self: true }
-        : null);
+    const picked = resolveRecipient({
+      text: t,
+      roomAgents,
+      recipient,
+      localTarget: agent.targets.find((x) => x.id === agent.target),
+      subject: subject ?? null,
+    });
     const toPeople = people || peopleOnly;
     // An expert runs on an agent: it is never sent to people only, and is
     // confirmed on first use when someone else's declares permissions.

@@ -7,7 +7,6 @@ import { useAuth } from "@/lib/auth";
 import { roomIdProblem } from "@/lib/roomId";
 import {
   emptyTemplateBody,
-  formatAgentLine,
   parseAgentLines,
   parseLines,
   rememberTemplateStart,
@@ -26,6 +25,7 @@ import { Segment } from "@/ui/Segment";
 import { useToast } from "@/ui/Toast";
 import { useDisplayNames } from "@/lib/useDisplayName";
 import { errorText } from "@/lib/errors";
+import { agentHandle } from "@/lib/roomAgents";
 
 export const TEMPLATE_VISIBILITY = [
   { value: "private" as const, label: "Only me" },
@@ -73,7 +73,7 @@ export function TemplateEditorDialog({
     // Starter prompts may span lines; they are separated by a blank line.
     setPrompts(b.starterPrompts.join("\n\n"));
     setMembers(b.defaultMembers.join("\n"));
-    setAgents(b.suggestedAgents.map(formatAgentLine).join("\n"));
+    setAgents(b.suggestedAgents.map(agentHandle).join("\n"));
     setSchedules(b.schedules);
     setErr("");
   }, [open, editing]);

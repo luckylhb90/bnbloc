@@ -32,7 +32,7 @@ const reply = (core: string, notice?: string): RoomEvent =>
 function testSessionStateFixtureKeysTheAgent(): void {
   const [ev] = normalized(sessionState as RoomEvent);
   assert(ev.agentPhase === "working", "the fixture is a working state");
-  assert(ev.agentLabel === "maya/codex", `label ${ev.agentLabel}`);
+  assert(ev.agentLabel === "acme/maya/codex", `label ${ev.agentLabel}`);
   assert(
     ev.agentKey === agentIdentity({ ownerId: "maya", core: "acme", provider: "codex" }),
     `the indicator is keyed by the agent's identity, got ${ev.agentKey}`,

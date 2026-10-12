@@ -10,6 +10,7 @@
 // session) while it is healthy.
 import type { PlatformAgentRef, PlatformHost } from "./platformAgents.ts";
 import { sameUser } from "./format.ts";
+import { agentIdentity } from "./roomAgents.ts";
 
 export const BUSIER_BY = 3;
 
@@ -33,7 +34,7 @@ const MAX_ENTRIES = 200;
 type Storage = Pick<globalThis.Storage, "getItem" | "setItem">;
 
 function entryKey(subject: string, roomId: string, agent: PlatformAgentRef): string {
-  return `${subject}|${roomId}|${(agent.core ?? "").toLowerCase()}/${agent.provider.toLowerCase()}`;
+  return `${subject}|${roomId}|${agentIdentity({ ownerId: "", core: agent.core || undefined, provider: agent.provider })}`;
 }
 
 function readAll(storage: Storage): Record<string, string> {

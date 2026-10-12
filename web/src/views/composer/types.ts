@@ -1,4 +1,4 @@
-// Shared composer types + the agent-handle helper. Extracted from Composer.tsx
+// Shared composer types. Extracted from Composer.tsx
 // so the composer's sub-pickers (AgentPicker, ModelPicker) can import them
 // without a circular dependency on the Composer module.
 
@@ -40,10 +40,3 @@ export interface RoomAgent {
   agentOptions?: AgentOptions;
 }
 
-// A mention handle is core-qualified when the agent advertises a core, so two
-// cores exposing the same owner/provider (e.g. both "maya/codex") stay distinct
-// in the mention list and in recipient resolution. Legacy agents without a core
-// keep the bare owner/provider form.
-export function agentHandle(a: { ownerId: string; provider: string; core?: string }): string {
-  return a.core ? `${a.core}/${a.ownerId}/${a.provider}` : `${a.ownerId}/${a.provider}`;
-}

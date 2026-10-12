@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { SquaresFourIcon, XIcon } from "@phosphor-icons/react";
 import { api } from "@/lib/api";
-import { agentFollowUps, agentHandle, clearTemplateStart, takeTemplateStart, type RoomTemplateInstance } from "@/lib/roomTemplates";
+import { agentFollowUps, clearTemplateStart, takeTemplateStart, type RoomTemplateInstance } from "@/lib/roomTemplates";
+import { agentIdentity } from "@/lib/roomAgents";
 import { composerDrafts } from "@/lib/team";
 import { Button } from "@/ui/Button";
 import { useToast } from "@/ui/Toast";
@@ -108,7 +109,7 @@ export function TemplateStartCard({
           </span>
           <div className="flex flex-wrap items-center gap-1.5">
             {requestBorrow.map((a) => (
-              <Button key={agentHandle(a) + (a.core ?? "")} size="sm" variant="ghost" onClick={() => askOwner(a.ownerId, a.provider)} title="Puts a request into your message box — nothing is sent until you send it">
+              <Button key={agentIdentity(a)} size="sm" variant="ghost" onClick={() => askOwner(a.ownerId, a.provider)} title="Puts a request into your message box — nothing is sent until you send it">
                 Ask <UserName id={a.ownerId} /> about their {a.provider}
               </Button>
             ))}

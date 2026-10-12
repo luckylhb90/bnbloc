@@ -32,9 +32,45 @@ export function borrowKey(a: { readonly core?: string; readonly provider: string
   return a.core ? `${a.core}:${a.provider}` : a.provider;
 }
 
-// agentIdentity is the stable (owner, core, provider) key of a room agent.
-export function agentIdentity(a: { readonly ownerId: string; readonly core?: string; readonly provider: string }): string {
+// AgentRef names one member's agent. Owner, core and provider compare
+// exactly (subjects are case-sensitive; core and provider names are ids).
+export interface AgentRef {
+  readonly ownerId: string;
+  readonly core?: string;
+  readonly provider: string;
+}
+
+// agentIdentity is the stable (owner, core, provider) key of an agent: the
+// one key for maps, React keys and change detection.
+export function agentIdentity(a: AgentRef): string {
   return `${a.ownerId}/${a.core ?? ""}/${a.provider}`;
+}
+
+// sameAgent reports whether a and b are the same agent (owner, core and
+// provider alike).
+export function sameAgent(a: AgentRef, b: AgentRef): boolean {
+  return agentIdentity(a) === agentIdentity(b);
+}
+
+// agentHandle is an agent's text handle: "core/owner/provider" when it has a
+// core (two cores exposing the same owner/provider stay distinct in
+// mentions, templates and recipient resolution), "owner/provider" without
+// one, the bare provider when no owner is known. parseAgentHandle reads it
+// back.
+export function agentHandle(a: AgentRef): string {
+  if (!a.ownerId) return a.provider;
+  return a.core ? `${a.core}/${a.ownerId}/${a.provider}` : `${a.ownerId}/${a.provider}`;
+}
+
+// parseAgentHandle reads an agentHandle ("owner/provider" or
+// "core/owner/provider"); anything else (a bare user id, an empty part) is
+// not an agent handle.
+export function parseAgentHandle(handle: string): AgentRef | null {
+  const parts = handle.trim().split("/").map((p) => p.trim());
+  if (parts.some((p) => !p)) return null;
+  if (parts.length === 2) return { ownerId: parts[0], provider: parts[1] };
+  if (parts.length === 3) return { core: parts[0], ownerId: parts[1], provider: parts[2] };
+  return null;
 }
 
 // mergeRoomAgents builds the room's selectable agents: the live roster (the

@@ -71,6 +71,15 @@ export const RULES = [
     sample: { file: "views/X.tsx", text: 'const isAdmin = role === "org_admin" || role === "super_admin";' },
   },
   {
+    id: 9,
+    name: "an agent's handle and identity come from lib/roomAgents.ts (agentHandle, parseAgentHandle, agentIdentity, sameAgent)",
+    // Four parsers split on different slashes and the builders dropped the
+    // core, so two cores' agents collapsed (web M12, M13).
+    pattern: /\$\{[A-Za-z_.]*[Oo]wner[A-Za-z_.]*\}\//,
+    allowed: ["lib/roomAgents.ts"],
+    sample: { file: "views/X.tsx", text: "<ActorLabel actor={`${job.ownerUserId}/${job.provider}`} />" },
+  },
+  {
     id: 6,
     name: "the session token rides a URL only on the room event stream",
     // EventSource cannot set headers, so sse.ts passes the session as

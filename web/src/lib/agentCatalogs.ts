@@ -10,6 +10,7 @@ import { sameUser } from "./format.ts";
 
 export type { RoomAgentCatalog } from "./wire.gen.ts";
 import type { RoomAgentCatalog } from "./wire.gen.ts";
+import { agentIdentity, sameAgent } from "./roomAgents.ts";
 
 // A model catalog as the picker reads it (AgentTarget's picker fields).
 export interface ModelCatalog {
@@ -42,13 +43,10 @@ export interface CatalogPick {
   readonly defaultModel?: string;
 }
 
-function sameAgent(a: { readonly core?: string; readonly provider: string }, b: { readonly core?: string; readonly provider: string }): boolean {
-  return a.provider === b.provider && (a.core || "") === (b.core || "");
-}
 
 // roomCatalog finds the owner's catalog for (core, provider) in the room.
 export function roomCatalog(catalogs: readonly RoomAgentCatalog[], pick: CatalogPick): ModelCatalog | null {
-  const row = catalogs.find((c) => sameUser(c.ownerUserId, pick.ownerId) && sameAgent(c, pick));
+  const row = catalogs.find((c) => sameAgent({ ownerId: c.ownerUserId, core: c.core || undefined, provider: c.provider }, { ...pick, core: pick.core || undefined }));
   if (!row) return null;
   return { core: row.core || undefined, provider: row.provider, ...(row.modelOptions ?? {}) };
 }
@@ -100,7 +98,7 @@ export function resolveModelCatalog(input: {
   const { pick, subject, localTargets, room } = input;
   if (!pick) return localTargets.find((t) => t.id === input.selectedTargetId) ?? null;
   if (sameUser(pick.ownerId, subject)) {
-    return localTargets.find((t) => sameAgent(t, pick)) ?? roomCatalog(room.catalogs, pick);
+    return localTargets.find((t) => sameAgent({ ownerId: pick.ownerId, core: t.core || undefined, provider: t.provider }, { ...pick, core: pick.core || undefined })) ?? roomCatalog(room.catalogs, pick);
   }
   const catalog = roomCatalog(room.catalogs, pick);
   if (pick.platform) return platformCatalog(catalog, pick);
@@ -122,7 +120,7 @@ function platformCatalog(catalog: ModelCatalog | null, pick: CatalogPick): Model
 // (roster, grants, platform agents), so the catalogs are re-read then.
 export function catalogRefreshKey(agents: readonly { readonly ownerId: string; readonly core?: string; readonly provider: string }[]): string {
   return agents
-    .map((a) => `${a.ownerId}/${a.core ?? ""}/${a.provider}`)
+    .map(agentIdentity)
     .sort()
     .join(",");
 }

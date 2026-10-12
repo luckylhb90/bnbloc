@@ -4,6 +4,7 @@ import { formatAgentHandle, maskEmailsInText } from "@/lib/displayNames";
 import { Input } from "@/ui/Input";
 import { usePrivacyMode } from "@/lib/privacyMode";
 import { useDisplayName, useDisplayNames } from "@/lib/useDisplayName";
+import { parseAgentHandle } from "@/lib/roomAgents";
 
 // The single rendering of a person (PRD 2026-10-10 §1): the display name, never
 // the id — not even as a hover title, so a screenshot or a demo recording
@@ -75,11 +76,8 @@ export function UserWithEmail({
 // ActorName renders a canonical actor without decoration: an agent
 // ("<ownerId>/<provider>") as its handle, anyone else as their name.
 export function ActorName({ actor, className }: { readonly actor: string; readonly className?: string }) {
-  const slash = actor.lastIndexOf("/");
-  if (slash > 0 && slash < actor.length - 1) {
-    const owner = actor.slice(0, slash);
-    return <AgentHandle owner={owner.slice(owner.lastIndexOf("/") + 1)} provider={actor.slice(slash + 1)} className={className} />;
-  }
+  const agent = parseAgentHandle(actor);
+  if (agent) return <AgentHandle owner={agent.ownerId} provider={agent.provider} className={className} />;
   return <UserName id={actor} className={className} />;
 }
 

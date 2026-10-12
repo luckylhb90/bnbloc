@@ -11,7 +11,7 @@
 // This file is the one place the platform-agent wire shapes live.
 import type { AgentJob, Member } from "./apiModels.ts";
 import { defaultDisplayName } from "./displayNames.ts";
-import { agentIdentity, borrowKey, mergeRoomAgents, type RosterAgent, type SharedAgent } from "./roomAgents.ts";
+import { agentIdentity, borrowKey, mergeRoomAgents, sameAgent, type RosterAgent, type SharedAgent } from "./roomAgents.ts";
 import { pickHost } from "./platformRouting.ts";
 import type { RoomAgent } from "../views/composer/types.ts";
 import { sameUser } from "./format.ts";
@@ -69,7 +69,7 @@ export const PLATFORM_OFFLINE_MESSAGE =
 const noLastHost: LastHostLookup = () => null;
 
 export function samePlatformAgent(a: PlatformAgentRef, b: PlatformAgentRef): boolean {
-  return (a.core ?? "").toLowerCase() === (b.core ?? "").toLowerCase() && a.provider.toLowerCase() === b.provider.toLowerCase();
+  return sameAgent({ ownerId: "", core: a.core || undefined, provider: a.provider }, { ownerId: "", core: b.core || undefined, provider: b.provider });
 }
 
 export function platformAgentOnline(a: PlatformAgent): boolean {
@@ -270,7 +270,7 @@ export function samePolicyInput(a: PlatformAgentsPolicyInput, b: PlatformAgentsP
     JSON.stringify({
       enabled: x.enabled,
       agents: x.agents
-        .map((p) => `${p.core.toLowerCase()}/${p.provider.toLowerCase()}=${p.defaultModel ?? ""}`)
+        .map((p) => `${agentIdentity({ ownerId: "", core: p.core, provider: p.provider })}=${p.defaultModel ?? ""}`)
         .sort(),
     });
   return norm(a) === norm(b);

@@ -6,6 +6,7 @@
 // The message's author is the person whose request it serves; the feed shows
 // the chain as "maya → via jack/codex → bob/claude".
 
+import { agentHandle } from "./roomAgents.ts";
 export interface DispatchAttribution {
   readonly jobId: string;
   // The room sequence of the parent job's request: the feed nests the
@@ -31,12 +32,14 @@ export function dispatchAttribution(payload: unknown): DispatchAttribution | und
   const e = (payload as { expert?: { name?: unknown; displayName?: unknown } }).expert;
   const expert = typeof e?.displayName === "string" && e.displayName ? e.displayName : typeof e?.name === "string" && e.name ? e.name : undefined;
   if (typeof jobId !== "string" || !jobId) return undefined;
-  const recipient = (payload as { recipient?: { ownerId?: unknown; provider?: unknown } }).recipient;
+  const recipient = (payload as { recipient?: { ownerId?: unknown; core?: unknown; provider?: unknown } }).recipient;
   const to =
     recipient && typeof recipient.provider === "string" && recipient.provider
-      ? typeof recipient.ownerId === "string" && recipient.ownerId
-        ? `${recipient.ownerId}/${recipient.provider}`
-        : recipient.provider
+      ? agentHandle({
+          ownerId: typeof recipient.ownerId === "string" ? recipient.ownerId : "",
+          core: typeof recipient.core === "string" && recipient.core ? recipient.core : undefined,
+          provider: recipient.provider,
+        })
       : undefined;
   return {
     jobId,

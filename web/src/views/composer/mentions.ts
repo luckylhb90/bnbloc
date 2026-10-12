@@ -1,5 +1,5 @@
 import { agentDisplayLabel, defaultDisplayName } from "../../lib/displayNames.ts";
-import { agentHandle } from "./types.ts";
+import { agentHandle, parseAgentHandle } from "../../lib/roomAgents.ts";
 
 // The @-mention list shows display names but inserts the canonical handle
 // (PRD 2026-10-10 §1): a person's user id, or an agent's
@@ -16,10 +16,8 @@ export function mentionLabel(
   if (!candidate.includes("/")) return nameOf(candidate);
   const agent = agents.find((a) => agentHandle(a) === candidate);
   if (agent) return agentDisplayLabel(agent, nameOf);
-  const parts = candidate.split("/");
-  const provider = parts.pop() ?? "";
-  const owner = parts.pop() ?? "";
-  return agentDisplayLabel({ ownerId: owner, provider }, nameOf);
+  const ref = parseAgentHandle(candidate);
+  return ref ? agentDisplayLabel(ref, nameOf) : nameOf(candidate);
 }
 
 // mentionMatches filters candidates whose handle OR display label starts with

@@ -187,13 +187,15 @@ function testConsoleRows(): void {
   assert(rows.find((r) => r.provider === "gemini")?.mine === false, "flagged as not advertised");
   assert(rows.find((r) => r.provider === "codex")?.models.join(",") === "x-free,gpt-5", "the host's own catalog");
   assert(consoleAgentRows(mine, myHostPolicy(policy, "nobody")?.agents ?? []).every((r) => !r.published), "no entry yet");
-  const next = togglePolicyAgent(togglePolicyAgent([], { core: "a", provider: "b" }, true), { core: "A", provider: "B" }, false);
-  assert(next.length === 0, "toggle matches case-insensitively");
+  const on = togglePolicyAgent([], { core: "a", provider: "b" }, true);
+  assert(togglePolicyAgent(on, { core: "A", provider: "B" }, false).length === 1, "core and provider names are exact ids");
+  const next = togglePolicyAgent(on, { core: "a", provider: "b" }, false);
+  assert(next.length === 0, "toggle off");
   const withDefault = setPolicyDefaultModel([{ core: "a", provider: "b" }], { core: "a", provider: "b" }, "x-free");
   assert(withDefault[0].defaultModel === "x-free", "a default model is set");
   assert(setPolicyDefaultModel(withDefault, { core: "a", provider: "b" }, "")[0].defaultModel === undefined, "cleared");
   assert(
-    samePolicyInput({ enabled: true, agents: [{ core: "a", provider: "b" }, { core: "c", provider: "d" }] }, { enabled: true, agents: [{ core: "c", provider: "d" }, { core: "A", provider: "B" }] }),
+    samePolicyInput({ enabled: true, agents: [{ core: "a", provider: "b" }, { core: "c", provider: "d" }] }, { enabled: true, agents: [{ core: "c", provider: "d" }, { core: "a", provider: "b" }] }),
     "order-insensitive",
   );
   assert(!samePolicyInput({ enabled: true, agents: withDefault }, { enabled: true, agents: [{ core: "a", provider: "b" }] }), "a default change is a change");

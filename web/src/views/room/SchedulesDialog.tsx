@@ -42,6 +42,7 @@ import type { RoomAgent } from "@/views/composer/types";
 import { useDisplayNames } from "@/lib/useDisplayName";
 import { UserName } from "@/views/UserName";
 import { errorText } from "@/lib/errors";
+import { agentIdentity } from "@/lib/roomAgents";
 
 const SELECT =
   "h-9 w-full rounded-[var(--radius)] border border-[var(--color-border)] bg-[var(--color-surface-2)] px-3 text-sm text-[var(--color-fg)] focus:outline-none focus:border-[var(--color-accent)]";
@@ -249,7 +250,7 @@ export function SchedulesDialog({
 
 // recipientKey identifies a recipient option ("room" or the agent identity).
 function recipientKey(r: ScheduleRecipient): string {
-  return r.kind === "room" ? "room" : `${r.ownerId}\x00${r.core ?? ""}\x00${r.provider}`;
+  return r.kind === "room" ? "room" : agentIdentity({ ownerId: r.ownerId ?? "", core: r.core || undefined, provider: r.provider ?? "" });
 }
 
 // ScheduleEditor creates or edits one schedule. The recipient choices are the

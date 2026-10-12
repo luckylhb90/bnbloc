@@ -22,6 +22,7 @@ import { Segment } from "@/ui/Segment";
 import { AGENT_JOB_FAILURE_LABELS, AGENT_JOB_STATUS_LABELS } from "@/views/room/agentJobLabels";
 import { AgentHandle, UserName, useAgentHandle } from "@/views/UserName";
 import { errorText } from "@/lib/errors";
+import { agentIdentity } from "@/lib/roomAgents";
 
 const RANGES = [
   { value: "today" as const, label: "Today" },
@@ -193,7 +194,7 @@ export function TeamAgentsTab({
               </thead>
               <tbody>
                 {agents.map((a) => (
-                  <tr key={`${a.owner}/${a.core}/${a.provider}`} className="border-t border-[var(--color-border)] align-top">
+                  <tr key={agentIdentity({ ownerId: a.owner, core: a.core || undefined, provider: a.provider })} className="border-t border-[var(--color-border)] align-top">
                     <td className="px-3 py-2">
                       <div className="flex items-center gap-2">
                         <OnlineDot online={a.online} />
@@ -251,7 +252,7 @@ export function TeamAgentsTab({
           {/* Narrow screens: one card per agent. */}
           <div className="flex flex-col gap-2 md:hidden">
             {agents.map((a) => (
-              <Card key={`${a.owner}/${a.core}/${a.provider}`} className="flex flex-col gap-2 p-3">
+              <Card key={agentIdentity({ ownerId: a.owner, core: a.core || undefined, provider: a.provider })} className="flex flex-col gap-2 p-3">
                 <div className="flex items-center gap-2">
                   <OnlineDot online={a.online} />
                   <AgentHandle owner={a.owner} provider={a.provider} className="font-medium" />

@@ -9,7 +9,7 @@ import { importedEditedAtMs, importedFrom } from "./handoff.ts";
 import { scheduledMarker } from "./schedules.ts";
 import { dispatchAttribution, type DispatchAttribution } from "./dispatch.ts";
 import { expertMarker, type ExpertMarker } from "./contentComponents.ts";
-import { agentIdentity } from "./roomAgents.ts";
+import { agentHandle, agentIdentity } from "./roomAgents.ts";
 
 export interface RoomEvent {
   kind?: string;
@@ -156,7 +156,7 @@ export function normalizeRoomEvent(ev: RoomEvent, emit: (e: RoomEvent) => void):
       const provider = (mp.provider as string) || "";
       const owner = (mp.ownerUserId as string) || "";
       const core = typeof mp.core === "string" ? mp.core : "";
-      const handle = provider ? (owner ? `${owner}/${provider}` : provider) : undefined;
+      const handle = provider ? agentHandle({ ownerId: owner, core, provider }) : undefined;
       const metrics = readTurnMetrics(mp.metrics);
       const thinking = typeof mp.thinking === "string" && mp.thinking ? mp.thinking : undefined;
       // A notice line (a team lead's progress) is no reply: it leaves the
@@ -218,7 +218,7 @@ export function normalizeRoomEvent(ev: RoomEvent, emit: (e: RoomEvent) => void):
     // clears the same key), so multiple agents in one room each get their
     // own indicator. Fall back to "agent" when unlabeled.
     if (owner && provider) {
-      ev.agentLabel = `${owner}/${provider}`;
+      ev.agentLabel = agentHandle({ ownerId: owner, core, provider });
       ev.agentKey = agentIdentity({ ownerId: owner, core, provider });
     }
     ev.text = "";

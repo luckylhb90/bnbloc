@@ -35,7 +35,8 @@ function testLastHostStorage(): void {
   assert(readLastHost(s, "jack", "r1", codex) === null, "nothing remembered");
   rememberHost(s, "jack", "r1", codex, "rose");
   assert(readLastHost(s, "Jack", "r1", codex) === null, "Jack is another member");
-  assert(readLastHost(s, "jack", "r1", { core: "Nimbus", provider: "Codex" }) === "rose", "per member, room and agent");
+  assert(readLastHost(s, "jack", "r1", codex) === "rose", "per member, room and agent");
+  assert(readLastHost(s, "jack", "r1", { core: "Nimbus", provider: "Codex" }) === null, "core and provider names are exact ids");
   assert(readLastHost(s, "jack", "r2", codex) === null, "another room has its own host");
   assert(readLastHost(s, "bob", "r1", codex) === null, "another member has their own host");
   assert(readLastHost(null, "jack", "r1", codex) === null, "no storage");

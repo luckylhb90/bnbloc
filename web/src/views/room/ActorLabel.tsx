@@ -1,6 +1,7 @@
 import { RobotIcon } from "@phosphor-icons/react";
 import { cn } from "@/lib/cn";
 import { AgentHandle, UserName } from "@/views/UserName";
+import { agentHandle, parseAgentHandle } from "@/lib/roomAgents";
 
 export type ActorKind = "human" | "agent";
 
@@ -11,17 +12,13 @@ export type ActorParts = {
   readonly provider?: string;
 };
 
-// parseActor splits a canonical actor ("<ownerId>/<provider>" for an agent, a
-// bare user id for a person). `display` is the canonical form; rendering goes
+// parseActor splits a canonical actor (an agentHandle for an agent, a bare
+// user id for a person). `display` is the canonical form; rendering goes
 // through ActorLabel, which shows display names.
 export function parseActor(actor: string): ActorParts {
   const trimmed = actor.trim();
-  const slash = trimmed.indexOf("/");
-  if (slash > 0 && slash < trimmed.length - 1) {
-    const owner = trimmed.slice(0, slash);
-    const provider = trimmed.slice(slash + 1);
-    return { kind: "agent", display: `${owner}/${provider}`, owner, provider };
-  }
+  const agent = parseAgentHandle(trimmed);
+  if (agent) return { kind: "agent", display: agentHandle(agent), owner: agent.ownerId, provider: agent.provider };
   return { kind: "human", display: trimmed || "unknown" };
 }
 

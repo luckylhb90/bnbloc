@@ -1,4 +1,4 @@
-import { agentIdentity, borrowKey, borrowTarget, mergeRoomAgents } from "./roomAgents.ts";
+import { agentHandle, agentIdentity, borrowKey, borrowTarget, mergeRoomAgents, parseAgentHandle, sameAgent } from "./roomAgents.ts";
 import { agentRows, rowIsActive } from "../views/composer/agentRows.ts";
 import { roomIdProblem } from "./roomId.ts";
 
@@ -80,3 +80,17 @@ testMergeRoomAgentsDedupesGrantsAgainstTheRoster();
 testMergeRoomAgentsCarriesTheSandboxBadge();
 testPickerKeepsOwnersApart();
 testRoomIdRule();
+
+// One handle syntax, read back by one parser: the core keeps two cores' agents
+// apart, and owner/core/provider compare exactly (web M12, M13).
+function testHandleRoundTrip(): void {
+  for (const a of [{ ownerId: "maya", provider: "codex" }, { ownerId: "maya", core: "acme", provider: "codex" }]) {
+    const back = parseAgentHandle(agentHandle(a));
+    assert(back !== null && sameAgent(back, a), `round trip ${agentHandle(a)}`);
+  }
+  assert(agentHandle({ ownerId: "maya", core: "acme", provider: "codex" }) === "acme/maya/codex", "core first");
+  assert(parseAgentHandle("maya") === null && parseAgentHandle("a/b/c/d") === null && parseAgentHandle("maya/") === null, "not handles");
+  assert(!sameAgent({ ownerId: "maya", core: "acme", provider: "codex" }, { ownerId: "maya", core: "nimbus", provider: "codex" }), "two cores");
+  assert(!sameAgent({ ownerId: "maya", provider: "codex" }, { ownerId: "Maya", provider: "codex" }), "exact owner");
+}
+testHandleRoundTrip();

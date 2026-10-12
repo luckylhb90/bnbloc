@@ -7,6 +7,7 @@ import type { RoomTemplateBody, RoomTemplateInstance, TemplateAgent } from "./wi
 
 export type { TemplateVisibility } from "./wire.gen.ts";
 import type { TemplateVisibility } from "./wire.gen.ts";
+import { parseAgentHandle } from "./roomAgents.ts";
 
 export interface RoomTemplateInput {
   name: string;
@@ -50,10 +51,6 @@ export function templateSummary(b: RoomTemplateBody): string {
   return parts.length ? parts.join(" · ") : "Empty room";
 }
 
-// agentHandle renders a suggested agent as its room handle ("jack/codex").
-export function agentHandle(a: TemplateAgent): string {
-  return `${a.ownerId}/${a.provider}`;
-}
 
 // agentFollowUps splits a new room's suggested agents for the post-create
 // offers: owners to invite (not yet members, not me) and agents whose
@@ -114,11 +111,6 @@ export function parseLines(text: string): string[] {
   return out;
 }
 
-// formatAgentLine renders a suggested agent for the editor: "owner/provider",
-// or "core/owner/provider" when it names a core (the composer's handle form).
-export function formatAgentLine(a: TemplateAgent): string {
-  return a.core ? `${a.core}/${a.ownerId}/${a.provider}` : `${a.ownerId}/${a.provider}`;
-}
 
 // parseAgentLines parses editor lines back into suggested agents. Lines that
 // are not "owner/provider" or "core/owner/provider" are returned as invalid.
@@ -126,12 +118,12 @@ export function parseAgentLines(text: string): { agents: TemplateAgent[]; invali
   const agents: TemplateAgent[] = [];
   const invalid: string[] = [];
   for (const line of parseLines(text)) {
-    const parts = line.split("/").map((p) => p.trim());
-    if (parts.some((p) => !p) || parts.length < 2 || parts.length > 3) {
+    const ref = parseAgentHandle(line);
+    if (!ref) {
       invalid.push(line);
       continue;
     }
-    agents.push(parts.length === 3 ? { core: parts[0], ownerId: parts[1], provider: parts[2] } : { ownerId: parts[0], provider: parts[1] });
+    agents.push(ref.core ? { core: ref.core, ownerId: ref.ownerId, provider: ref.provider } : { ownerId: ref.ownerId, provider: ref.provider });
   }
   return { agents, invalid };
 }
