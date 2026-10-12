@@ -17,15 +17,16 @@ export const PERSONAL_PROMPT_PACK = "my-prompts";
 // ---------------------------------------------------------------- composer
 
 // A prompt the composer offers: the prompt and the pack it comes from (its
-// version in effect, and where the pack is on: the member's, the room's, or
-// a built-in pack's starter).
+// version in effect, and where it comes from: a pack turned on for the
+// member or the room, any other pack of the member's Library, or a
+// built-in pack's starter).
 export interface PromptChoice {
   readonly prompt: ContentPrompt;
   readonly componentId: string;
   readonly pack: string;
   readonly packLabel: string;
   readonly version: string;
-  readonly source: "mine" | "room" | "builtin";
+  readonly source: "mine" | "room" | "library" | "builtin";
 }
 
 function packLabel(c: Pick<ContentComponent, "displayName" | "name">): string {
@@ -33,22 +34,29 @@ function packLabel(c: Pick<ContentComponent, "displayName" | "name">): string {
 }
 
 // promptChoices lists the prompts of the packs turned on for the member,
-// then the room's; a pack on in both is listed once (as the member's).
-export function promptChoices(member: readonly ContentUse[], room: readonly ContentUse[]): PromptChoice[] {
+// then the room's, then every other prompt pack the member's Library holds
+// (library: contentuse.Visible — the org's and the platform's published
+// packs, the built-in ones, the member's own). Picking a prompt is the
+// opt-in, as picking an expert is: a published pack needs no second "turn
+// on" before its /commands work. Each pack is listed once, at its first
+// source.
+export function promptChoices(
+  member: readonly ContentUse[],
+  room: readonly ContentUse[],
+  library: readonly ContentComponent[] = [],
+): PromptChoice[] {
   const out: PromptChoice[] = [];
   const seen = new Set<string>();
-  const add = (uses: readonly ContentUse[], source: PromptChoice["source"]) => {
-    for (const u of uses) {
-      const c = u.component;
-      if (u.kind !== "prompt" || !c || seen.has(u.componentId)) continue;
-      seen.add(u.componentId);
-      for (const p of c.prompts ?? []) {
-        out.push({ prompt: p, componentId: c.id, pack: c.name, packLabel: packLabel(c), version: c.version || c.latestVersion, source });
-      }
+  const add = (c: ContentComponent | undefined, source: PromptChoice["source"]) => {
+    if (!c || c.kind !== "prompt" || seen.has(c.id)) return;
+    seen.add(c.id);
+    for (const p of c.prompts ?? []) {
+      out.push({ prompt: p, componentId: c.id, pack: c.name, packLabel: packLabel(c), version: c.version || c.latestVersion, source });
     }
   };
-  add(member, "mine");
-  add(room, "room");
+  for (const u of member) if (u.kind === "prompt") add(u.component, "mine");
+  for (const u of room) if (u.kind === "prompt") add(u.component, "room");
+  for (const c of library) add(c, "library");
   return out;
 }
 

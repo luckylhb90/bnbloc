@@ -74,11 +74,12 @@ const plain = prompt("plain", { title: "Summarize", body: "Summarize the thread"
 const mine = pack("writing", [notes, plain]);
 const room = pack("team", [nudge]);
 const expert = { ...pack("x", []), kind: "expert" } as ContentComponent;
-const choices = promptChoices([use(mine), use(expert)], [use(room, "room"), use(mine, "room")]);
+const published = pack("office", [prompt("polish", { slash: "/polish" })]);
+const choices = promptChoices([use(mine), use(expert)], [use(room, "room"), use(mine, "room")], [mine, published, expert]);
 eq(
   choices.map((c) => `${c.pack}/${c.prompt.id}:${c.source}`),
-  ["writing/notes:mine", "writing/plain:mine", "team/nudge:room"],
-  "choices",
+  ["writing/notes:mine", "writing/plain:mine", "team/nudge:room", "office/polish:library"],
+  "choices: turned-on packs first, then the rest of the Library, each pack once",
 );
 eq(choices[0].packLabel, "Pack writing", "pack label");
 
@@ -94,7 +95,7 @@ eq(slashMatches(choices, "zz"), [], "no match");
 eq(slashMatches(choices, "", 1).length, 1, "limit");
 
 // ---- picker search.
-eq(promptMatches(choices, "").map((c) => c.prompt.id), ["nudge", "notes", "plain"], "no query: most used");
+eq(promptMatches(choices, "").map((c) => c.prompt.id), ["nudge", "notes", "plain", "polish"], "no query: most used");
 eq(promptMatches(choices, "WRITING").map((c) => c.prompt.id), ["notes", "plain"], "pack label and tags match");
 eq(promptMatches(choices, "thread").map((c) => c.prompt.id), ["plain"], "body matches");
 

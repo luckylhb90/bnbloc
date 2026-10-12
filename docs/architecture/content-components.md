@@ -104,7 +104,11 @@ prompts: [{id, title, body, variables: [{name, label?, default?, options?}], tag
 - **Uses.** Like every content kind: a member turns a pack on for
   themselves (member use) and a room's owner or admins turn it on for the
   room (room use). The composer offers the prompts of the member's packs,
-  then the room's (`GET /v1/content-uses?room=`); its picker searches them,
+  then the room's (`GET /v1/content-uses?room=`), then every other prompt
+  pack of the member's Library (`contentuse.Visible`: the org's and the
+  platform's published packs, the built-in ones): picking a prompt is the
+  opt-in, as picking an expert is, so a published pack's /commands work
+  without turning it on first. Its picker searches them,
   a message that starts with `/word` lists matching slash commands, and a
   prompt with variables asks for them in a small form before its text is
   inserted.

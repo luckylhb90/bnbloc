@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState, type Dispatch, type KeyboardEvent, type RefObject, type SetStateAction } from "react";
-import { isBuiltin, type ContentComponent } from "@/lib/contentComponents";
+import type { ContentComponent } from "@/lib/contentComponents";
 import { contentApi } from "@/lib/contentComponentsApi";
 import {
   choiceFromRef,
@@ -41,19 +41,20 @@ export interface ComposerPrompts {
   readonly submitFill: (values: Readonly<Record<string, string>>) => void;
 }
 
-// builtinPromptPacks are the Library's built-in prompt packs (the
-// general-purpose starters): built-in content changes only with a release,
-// so one load serves every room of the page; a failed load is retried.
-let builtinPacks: Promise<readonly ContentComponent[]> | null = null;
-function builtinPromptPacks(): Promise<readonly ContentComponent[]> {
-  builtinPacks ??= contentApi
+// libraryPromptPacks are the prompt packs of the member's Library (their
+// own, the org's and the platform's published ones, the built-in ones):
+// loaded once per page and again when packs change (PROMPT_PACKS_CHANGED);
+// a failed load is retried.
+let libraryPacks: Promise<readonly ContentComponent[]> | null = null;
+function libraryPromptPacks(): Promise<readonly ContentComponent[]> {
+  libraryPacks ??= contentApi
     .list("prompt")
-    .then((r) => (r.components ?? []).filter(isBuiltin))
+    .then((r) => r.components ?? [])
     .catch(() => {
-      builtinPacks = null;
+      libraryPacks = null;
       return [];
     });
-  return builtinPacks;
+  return libraryPacks;
 }
 
 // useComposerPrompts loads the prompts a room's composer offers and inserts
@@ -75,11 +76,11 @@ export function useComposerPrompts(
   useEffect(() => {
     if (!enabled) return;
     let live = true;
-    Promise.all([contentApi.uses(roomId), builtinPromptPacks()])
-      .then(([r, builtin]) => {
+    Promise.all([contentApi.uses(roomId), libraryPromptPacks()])
+      .then(([r, library]) => {
         if (!live) return;
-        setChoices(promptChoices(r.member ?? [], r.room ?? []));
-        setStarters(starterChoices(r.room ?? [], builtin));
+        setChoices(promptChoices(r.member ?? [], r.room ?? [], library));
+        setStarters(starterChoices(r.room ?? [], library));
       })
       .catch(() => {
         // prompts are optional: the composer works without them
@@ -92,7 +93,10 @@ export function useComposerPrompts(
     };
   }, [roomId, enabled, epoch]);
   useEffect(() => {
-    const reload = () => setEpoch((n) => n + 1);
+    const reload = () => {
+      libraryPacks = null;
+      setEpoch((n) => n + 1);
+    };
     window.addEventListener(PROMPT_PACKS_CHANGED, reload);
     return () => window.removeEventListener(PROMPT_PACKS_CHANGED, reload);
   }, []);
