@@ -1409,9 +1409,12 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   `internal/wire/limits.go`; a rule table the web needs (org role grants,
   terminal job statuses, inviting room roles) is computed by wiregen from
   its Go owner. The web re-exports these types (`export type { X } from
-  "./wire.gen.ts"`) and never redeclares one (web boundary rule T8). A free-form payload (a reply's metrics map, a
-  history row) is pinned by a golden fixture in `internal/wire/testdata/`
-  that both test suites read (`readTurnMetrics` ≡ `TurnUsageFromMetrics`).
+  "./wire.gen.ts"`) and never redeclares one (web boundary rule T8). A
+  free-form payload (a reply's metrics map, a history row) is pinned by a
+  golden fixture in `internal/wire/testdata/` that both test suites read
+  (`readTurnMetrics` ≡ `TurnUsageFromMetrics`). The room stream listens for
+  every kind of the Go union (`lib/roomEventKinds.ts`; a kind not yet in
+  the registry is listed there until it is).
 
 - **Requests, failures and org permissions have one owner each in the
   web.** `req` (`lib/api.ts`: `as: "json" | "none" | "text" | "blob" |
@@ -1423,6 +1426,31 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   `can(role, perm)` (`lib/permissions.ts`, grants generated from
   `rbac.Can`; role literals only there and in `lib/roomRoles.ts`, rule 8):
   a viewer is offered no room creation and gets a read-only composer.
+
+- **The other web owners** (each guarded by a rule of
+  `web/scripts/check-boundaries.mjs` or a test; knip runs in
+  `scripts/ci.sh web` and fails on an unused export):
+  - an agent's handle and identity: `lib/roomAgents.ts` (`agentHandle`,
+    `parseAgentHandle`, `agentIdentity`, `sameAgent`, `groupByCore`; exact
+    owner/core/provider, rule 9); the composer's recipient precedence:
+    `views/composer/recipient.ts`;
+  - shared server state: `useQuery` keyed only by `queryKey(name, {subject,
+    tenant})` / `publicQueryKey` (rule M10), cleared at sign-out and tenant
+    switch; the shared lists in `lib/queries.ts` (`useMyAgents`,
+    `useTenants`, `useQuotaRequests`, refreshed with `invalidateQueries`);
+    the local-agent state is one module store (`lib/useLocalAgent.ts`);
+  - polling: `useVisiblePoll` / `visiblePoll` only (rule 5);
+  - browser storage: `lib/storageKeys.ts` (`StorageKey`, `memberKey`,
+    `readStored`/`writeStored`, rule 3);
+  - room API paths: `roomPath` (`lib/roomId.ts`, rule L2);
+  - per-kind words and labels: `COMPONENT_KINDS` (`lib/componentKinds.ts`)
+    and `CONTENT_KINDS` (`lib/contentComponents.ts`), `Record` tables over
+    the kind unions (rule 12);
+  - dates, money and bytes: `lib/format.ts` (rule 11); the room-gone
+    wording: `roomGoneText` (`lib/roomGone.ts`);
+  - list states: `ui/QueryState` (a load error is shown with Retry, never as
+    an empty list); a destructive action: `ConfirmDialog` (rule 10b); a
+    mutation's result is a toast, a load error stays inline.
 
 - **`Dialog` caps height at `max-h-[85vh]` with a scrollable body.** A dialog
   with more content than the viewport must scroll its body while header/footer
@@ -1456,7 +1484,9 @@ agent's staged files).
   `BNBLOC_TEST_MYSQL_DSN` enables the MySQL integration tests (its user
   needs CREATE/DROP DATABASE: they run in throwaway databases).
 - Web: `cd web && pnpm build` (`tsc -b && vite build`); unit tests:
-  `node --test 'src/**/*.test.ts' 'scripts/*.test.mjs'` (Node 24).
+  `node --test 'src/**/*.test.ts' 'scripts/*.test.mjs'` (Node 24); unused
+  code: `pnpm --dir web exec knip`. After changing `internal/wire`, run
+  `go generate ./internal/wire` and commit `web/src/lib/wire.gen.ts`.
 - CLI (`cmd/bnbloc`): every gateway JSON call is `client.call` (returns
   every failure; a 401 carries the one sign-in hint, `responseError`), the
   gateway and signing flags come from `addGatewayFlags`/`addSigningFlags`,

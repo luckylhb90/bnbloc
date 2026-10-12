@@ -3,8 +3,7 @@ package wire
 // Desktop update + release hub DTOs. The gateway serves and stores them
 // (GET/PUT /v1/platform/update-config, /v1/platform/app-releases) and the
 // operator CLI (`bnbloc updates publish`) writes them, so both use these one
-// shapes. The web client's TypeScript mirror is web/src/lib/api.ts
-// (UpdateConfig, ReleaseEntry); keep the JSON field names in step.
+// shapes, and the web reads them from wire.gen.ts (generated).
 
 // Update channels a desktop build can follow.
 const (

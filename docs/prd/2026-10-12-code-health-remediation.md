@@ -650,12 +650,59 @@ Status (2026-10-12): landed on the Batch 4 branch (not yet on `main`).
 
 ### Batch 5: Go→TS wire generation and web owners (L)
 
-Status: partial, web-only items landed on branch
-`worktree-agent-a7a5bfbb8064292e7` with 1E: formatters in `format.ts`
-(M25, L3), `isSubmitEnter` (M18), `lib/clipboard.ts` + `ui/useCopy`
-(M23), unparsable SSE data dropped (L12), `useDismissOnOutside` (L8), dead
-exports (5.3, without knip). Boundary rules 6, 10 and L8 live in
-`web/scripts/check-boundaries.mjs`. Everything else here is still open.
+Status: landed (2026-10-12), on top of the 1E web items (formatters,
+`isSubmitEnter`, `lib/clipboard.ts`, unparsable SSE data dropped,
+`useDismissOnOutside`, the first dead exports).
+
+- **Status 5.1:** done. `internal/wire/cmd/wiregen` writes
+  `web/src/lib/wire.gen.ts` from every exported type, constant and
+  constant-valued variable of `internal/wire`, the `//wire:union` groups,
+  the store/rbac enums a field names with `tstype`, the content kinds of
+  the `contentpkg` registry and tables computed by their owners
+  (`OrgRolePermissions`, `AgentJobTerminalStatuses`,
+  `RoomRolesThatInvite`); `go generate ./internal/wire` regenerates and
+  `scripts/ci.sh go` runs `wiregen -check` (`TestEmitGolden` pins the
+  rendering). Projections: `RoomSummary`/`RoomDetail`/`RoomPreview`,
+  `RoomMembersReply`, `PlazaReply`, the history page is `FeedPage`,
+  `UnreadReply`, `AgentTargetsReply`, `CoresReply`, `MyAgentsReply`, the
+  job (`store.AgentJob.View`) and artifact (`Artifact.View`,
+  `ArtifactVersion.View`) projections without tenant, lease, raw
+  diagnostics or blob key (O4; `TestProjectionsOmitServerFields`). Limits
+  in `internal/wire/limits.go`. About ninety hand-written TS mirrors
+  re-export the generated types (rule T8). Golden fixtures
+  (`agent_messages`, `history_page`, `agent_job_updated`, `turn_usage`)
+  run through `normalizeRoomEvent` / `readTurnMetrics`. The room event
+  kind union comes from `//wire:union RoomEventKind` until Batch 2's
+  registry lands (then `lib/roomEventKinds.ts` reads the registry and its
+  `UNREGISTERED_ROOM_EVENT_KINDS` list goes).
+- **Status 5.2:** done except as noted. Owners: `req` (`as:`,
+  `downloadCsv`), `lib/errors.ts` (`ApiError`, `errorText`, `statusText`),
+  `lib/permissions.ts` (generated grants; viewers get no room creation and a
+  read-only composer), `lib/roomRoles.ts` (`canInvite`, `isOwner`, `mayChat`;
+  role from the member list only; visitors read-only), `lib/roomAgents.ts`
+  (`agentHandle`, `parseAgentHandle`, `agentIdentity`, `sameAgent`,
+  `groupByCore`), `views/composer/recipient.ts`, `lib/queries.ts`
+  (`useMyAgents`, `useTenants`, `useQuotaRequests`) over `queryKey` with
+  `clearQueryCache` at sign-out, the `useLocalAgent` module store,
+  `useVisiblePoll`/`visiblePoll`, `lib/storageKeys.ts`, `roomPath`,
+  `COMPONENT_KINDS`/`CONTENT_KINDS`, `ui/QueryState`, `ConfirmDialog` for
+  every destructive action, one mutation-feedback rule in the console,
+  `useContentLibrary`, `roomGoneText`, `<ActorLabel>` in notices, plaza
+  paging, `member_joined`/`member_removed` refresh the member list,
+  shared `EmptyCard`/`StatTile`. Boundary rules 1, 1b, 2, 3, 4, 5, 8, 9,
+  10b, 11, 12, L2, M10 and T8 join 6, 7, 10 and L8. Partial: L6 (the core
+  grouping is one; the few "yours"/"your X" label variants stay), L13 (the
+  sidebar keeps its last list; other background first loads stay best
+  effort).
+- **Status 5.3:** done. knip runs in `scripts/ci.sh web`
+  (`web/knip.json`); the unused re-exports it found are gone (the named
+  dead files and helpers were removed with 1E).
+- **Open (outside this batch):** the room run detail still returns raw
+  diagnostics to any member; gating it to the job's owner and org admins
+  (O4) needs Batch 2.4's signed org permission. Component types
+  (`lib/apiTypes.ts`) stay hand-written until the gateway's component
+  projections move into `internal/wire` (Batch 2.6 removes their dual
+  adoption fields first).
 
 | # | Item | Refs | Size |
 |---|---|---|---|
