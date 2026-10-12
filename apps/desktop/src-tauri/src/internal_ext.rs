@@ -58,11 +58,10 @@ const RECONCILE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60
 #[derive(Clone)]
 pub struct Adapter {
     app: AppHandle,
+    /// The session the manager runs with. Its token also names the member
+    /// scope (subject and tenant) whose directory holds that scope's state
+    /// (member_dir; `session_scope`).
     gateway: Arc<Mutex<GatewayAccess>>,
-    /// The private directory of the member whose session `gateway` carries
-    /// (member_dir); None before one is known. Their plugin settings, MCP
-    /// credentials and sign-ins live there.
-    member: Arc<Mutex<Option<std::path::PathBuf>>>,
     inner: Arc<Mutex<Inner>>,
     /// Serializes reconciles: the boot-time session handoff, the poll loop,
     /// and a post-update resume may all trigger one, and interleaved runs
@@ -82,10 +81,9 @@ pub struct Adapter {
 
 impl Adapter {
     pub fn new(app: AppHandle, gateway_url: String, gateway_token: String) -> Self {
-        if let Ok(config) = app.path().app_config_dir() {
-            member_dir::remove_unkeyed_dirs(&config);
+        if let (Ok(config), Ok(data)) = (app.path().app_config_dir(), app.path().app_data_dir()) {
+            member_dir::remove_unkeyed_dirs(&config, &data);
         }
-        let member = Self::member_for(&app, &gateway_url, &gateway_token);
         let gateway = Arc::new(Mutex::new(GatewayAccess {
             base_url: gateway_url.trim_end_matches('/').to_string(),
             token: gateway_token,
@@ -94,7 +92,6 @@ impl Adapter {
             app,
             host: plugin_host::PluginHost::new(Arc::clone(&gateway)),
             gateway,
-            member: Arc::new(Mutex::new(member)),
             inner: Arc::new(Mutex::new(Inner {
                 desired_up: false,
                 generation: 0,
@@ -108,43 +105,72 @@ impl Adapter {
         }
     }
 
-    /// Take over the web's session. A session of another member (or another
-    /// gateway) switches the member directory, and the plugin sidecars that
-    /// read their member's settings restart with the new member's.
+    /// Take over the web's session. A session of another member scope
+    /// (member, tenant or gateway) switches the member directory, and the
+    /// sidecars that read their scope's state (plugins with local settings,
+    /// the sandbox with its data dir) restart with the new scope's.
     pub fn update_gateway(&self, gateway_url: String, gateway_token: String) {
-        let member = Self::member_for(&self.app, &gateway_url, &gateway_token);
+        let before = self.member_dir().ok();
         {
             let mut gateway = self.gateway.lock();
             gateway.base_url = gateway_url.trim_end_matches('/').to_string();
             gateway.token = gateway_token;
         }
-        let switched = {
-            let mut current = self.member.lock();
-            let switched = *current != member;
-            *current = member;
-            switched
-        };
-        if switched {
+        if self.member_dir().ok() != before {
             self.restart_member_sidecars();
         }
     }
 
-    /// The member directory of the session `token` (member_dir).
-    fn member_for(app: &AppHandle, gateway_url: &str, token: &str) -> Option<std::path::PathBuf> {
-        let config = app.path().app_config_dir().ok()?;
-        member_dir::member_dir(&config, gateway_url, &member_dir::token_subject(token)?)
+    /// The member scope a session acts in (subject and tenant from its
+    /// token) and that scope's directory (member_dir). None when the token
+    /// names no subject or no tenant.
+    fn session_scope(
+        &self,
+        gateway: &GatewayAccess,
+    ) -> Option<(member_dir::SessionMember, std::path::PathBuf)> {
+        let config = self.app.path().app_config_dir().ok()?;
+        let member = member_dir::token_member(&gateway.token)?;
+        let dir =
+            member_dir::member_dir(&config, &gateway.base_url, &member.subject, &member.tenant)?;
+        Some((member, dir))
     }
 
-    /// The signed-in member's private directory.
+    /// The private directory of the member scope the manager's session acts
+    /// in.
     pub(super) fn member_dir(&self) -> Result<std::path::PathBuf, String> {
-        self.member
-            .lock()
-            .clone()
+        let gateway = self.gateway.lock().clone();
+        self.session_scope(&gateway)
+            .map(|(_, dir)| dir)
             .ok_or_else(|| "no member is signed in on this computer yet".to_string())
     }
 
-    /// Restart every plugin sidecar that reads its member's local settings
-    /// (they were launched with the previous member's file).
+    /// The member directory a bridge with these `settings` may read: the
+    /// manager's, only when its session is the bridge's owner on the
+    /// bridge's gateway, in the bridge's tenant (an empty one is the
+    /// session's own). Anything else gets none: a bridge never reads another
+    /// member's or another tenant's credentials.
+    pub(super) fn bridge_member_dir_for(
+        &self,
+        settings: &crate::settings::Settings,
+    ) -> Option<std::path::PathBuf> {
+        let gateway = self.gateway.lock().clone();
+        let (member, dir) = self.session_scope(&gateway)?;
+        let tenant = settings.tenant.trim();
+        if !tenant.is_empty() && tenant != member.tenant {
+            return None;
+        }
+        let config = self.app.path().app_config_dir().ok()?;
+        let bridge = member_dir::member_dir(
+            &config,
+            &settings.gateway_url,
+            &settings.owner,
+            &member.tenant,
+        )?;
+        (bridge == dir).then_some(dir)
+    }
+
+    /// Restart every sidecar that reads its member scope's state: plugins
+    /// with local settings and the sandbox (its data dir).
     fn restart_member_sidecars(&self) {
         let ids: Vec<String> = self
             .inner
@@ -152,9 +178,10 @@ impl Adapter {
             .sidecars
             .iter()
             .filter(|(_, sidecar)| {
-                sidecar.spec.as_ref().is_some_and(|spec| {
-                    spec.kind == sidecar_model::ComponentKind::Plugin
-                        && !spec.plugin.local_settings.is_empty()
+                sidecar.spec.as_ref().is_some_and(|spec| match spec.kind {
+                    sidecar_model::ComponentKind::Plugin => !spec.plugin.local_settings.is_empty(),
+                    sidecar_model::ComponentKind::Sandbox => true,
+                    _ => false,
                 })
             })
             .map(|(id, _)| id.clone())
@@ -177,19 +204,25 @@ impl Adapter {
         let (specs, discovered) = self.resolve_specs(&catalog);
         self.write_manifests(&specs).await?;
         self.apply_specs(specs, discovered);
-        self.sweep_uninstalled(&catalog).await;
+        self.sweep_uninstalled(&gateway, &catalog).await;
         Ok(())
     }
 
     /// Forget what this desktop keeps for components the live catalog no
-    /// longer has (sidecar_sweep).
-    async fn sweep_uninstalled(&self, catalog: &sidecar_model::ComponentsResponse) {
+    /// longer has (sidecar_sweep). Member-scoped state is judged only
+    /// against the catalog of its own scope: the member directory comes from
+    /// the same session (`gateway`) the catalog was fetched with, never from
+    /// the session current by the time the sweep runs.
+    async fn sweep_uninstalled(
+        &self,
+        gateway: &GatewayAccess,
+        catalog: &sidecar_model::ComponentsResponse,
+    ) {
         let live = sidecar_sweep::Live::of(catalog, &sidecar_util::current_platform());
         let dirs = sidecar_sweep::SweepDirs {
             binaries: self.cache_dir().ok(),
-            sandboxes: self.sandbox_bases(),
-            plugin_settings: self.plugin_settings_dir().ok(),
-            mcp_settings: self.mcp_settings_dir().ok(),
+            sandbox_bundles: self.sandbox_bundle_base().ok(),
+            member: self.session_scope(gateway).map(|(_, dir)| dir),
         };
         let mcp = Arc::clone(&self.mcp);
         let swept = tauri::async_runtime::spawn_blocking(move || {
@@ -429,15 +462,14 @@ struct AppliedSpecs {
 }
 
 /// Extend the bridge env (bridge::env_for) with the managed cores and MCP
-/// tools. `gateway_url` and `owner` are the bridge's own: its MCP
-/// credentials are its owner's (member_dir), whoever the manager's session
-/// belongs to.
+/// tools. The bridge's MCP credentials are its owner's in its tenant
+/// (`Adapter::bridge_member_dir`); the bridge-stabilizing watcher restarts
+/// the bridge when that directory changes (a member or tenant switch).
 pub fn extend_core_env(
     app: Option<&AppHandle>,
     env: &mut std::collections::HashMap<String, String>,
     names: Vec<String>,
-    gateway_url: &str,
-    owner: &str,
+    settings: &crate::settings::Settings,
 ) -> Vec<String> {
     let Some(app) = app else {
         return names;
@@ -457,12 +489,10 @@ pub fn extend_core_env(
             dir.to_string_lossy().into_owned(),
         );
     }
-    let owner_dir = app
-        .path()
-        .app_config_dir()
-        .ok()
-        .and_then(|config| member_dir::member_dir(&config, gateway_url, owner));
-    if let Some(dir) = owner_dir.map(|dir| dir.join(member_dir::MCP_SETTINGS_DIR)) {
+    if let Some(dir) = adapter
+        .bridge_member_dir_for(settings)
+        .map(|dir| dir.join(member_dir::MCP_SETTINGS_DIR))
+    {
         env.insert(
             mcp_tools::SETTINGS_DIR_ENV.into(),
             dir.to_string_lossy().into_owned(),

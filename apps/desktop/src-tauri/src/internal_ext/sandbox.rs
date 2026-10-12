@@ -195,22 +195,27 @@ pub struct SandboxTimings {
 impl Adapter {
     // ---------------------------------------------------------------- launch
 
-    fn sandbox_base(&self, cache: bool) -> Result<PathBuf, String> {
-        let path = self.app.path();
-        let base = if cache {
-            path.app_cache_dir()
-        } else {
-            path.app_data_dir()
-        };
-        base.map(|dir| dir.join("sandbox"))
+    /// The machine-wide bundle cache (`<app cache>/sandbox`, one directory
+    /// per sandbox component): rebuildable, re-downloaded when missing.
+    pub(super) fn sandbox_bundle_base(&self) -> Result<PathBuf, String> {
+        self.app
+            .path()
+            .app_cache_dir()
+            .map(|dir| dir.join("sandbox"))
             .map_err(|e| format!("sandbox dir: {e}"))
     }
 
-    /// The private data dir of sandbox `name`, created owner-only. Kept short
-    /// (the runtime derives Unix socket paths from its home; macOS caps them
-    /// at 104 bytes and the sidecar shortens them through a /tmp link).
+    /// The private data dir of sandbox `name` (its VM disks), created
+    /// owner-only in the signed-in member's own directory (member_dir:
+    /// member and tenant), so another member or tenant never uses it and
+    /// the uninstall sweep judges it only against its own scope's catalog.
+    /// The runtime derives Unix socket paths from it; macOS caps them at 104
+    /// bytes and the sidecar shortens them through a /tmp link.
     fn sandbox_data_dir(&self, name: &str) -> Result<PathBuf, String> {
-        let dir = self.sandbox_base(false)?.join(cache_stem(name));
+        let dir = self
+            .member_dir()?
+            .join(crate::internal_ext::member_dir::SANDBOX_DATA_DIR)
+            .join(cache_stem(name));
         create_private_dir(&dir)?;
         Ok(dir)
     }
@@ -223,7 +228,7 @@ impl Adapter {
     ) -> Result<PathBuf, crate::internal_ext::sidecar_fetch::FetchError> {
         use crate::internal_ext::sidecar_fetch::FetchError;
         let id = spec.id();
-        let base = self.sandbox_base(true).map_err(FetchError::Retry)?;
+        let base = self.sandbox_bundle_base().map_err(FetchError::Retry)?;
         let plan = sandbox_bundle::bundle_plan(&base, spec).map_err(FetchError::Refused)?;
         let gateway = self.gateway.lock().clone();
         let client = self.http().map_err(FetchError::Retry)?;
@@ -275,7 +280,7 @@ impl Adapter {
     }
 
     async fn replace_sandbox_orphan(&self, spec: &SidecarSpec) {
-        let (Some(record_dir), Ok(base)) = (self.spawn_record_dir(), self.sandbox_base(true))
+        let (Some(record_dir), Ok(base)) = (self.spawn_record_dir(), self.sandbox_bundle_base())
         else {
             return;
         };
@@ -850,16 +855,6 @@ impl Adapter {
         };
         status.message = message;
         status
-    }
-
-    /// The bundle and data bases, one directory per sandbox component under
-    /// each: the reconcile's sweep removes an uninstalled sandbox's bundles
-    /// and data from them (sidecar_sweep).
-    pub(super) fn sandbox_bases(&self) -> Vec<PathBuf> {
-        [true, false]
-            .into_iter()
-            .filter_map(|cache| self.sandbox_base(cache).ok())
-            .collect()
     }
 }
 

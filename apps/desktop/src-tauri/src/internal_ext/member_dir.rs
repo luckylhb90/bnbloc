@@ -1,20 +1,25 @@
 //! The signed-in member's private directory on this computer.
 //!
-//! Desktop-local secrets (plugin `localSettings`, MCP tool member
-//! credentials, MCP OAuth sign-ins) belong to one member of one gateway, and
-//! several members may sign in on the same desktop one after the other. They
-//! live under `<app config>/members/<key>/`, `<key>` a hash of the gateway
-//! origin and the member's subject, so member B never launches a plugin with
-//! A's bot credentials or drives with A's MCP tokens, and A finds their
-//! sign-ins again when they come back.
+//! What a member keeps on a desktop (plugin `localSettings`, MCP tool member
+//! credentials, MCP OAuth sign-ins, the sandbox's data dir with its VM
+//! disks) belongs to one member acting in one tenant of one gateway, and the
+//! catalog that installs those components is scoped the same way: a
+//! super-admin's tenant switch hands the desktop a whole other catalog.
+//! Several members, or one member in several tenants, may use the same
+//! desktop one after the other. Their state lives under
+//! `<app config>/members/<key>/`, `<key>` a hash of the gateway origin, the
+//! member's subject and the tenant, so member B never launches a plugin with
+//! A's bot credentials or drives with A's MCP tokens, and the uninstall sweep
+//! (sidecar_sweep) only ever judges a scope's state against that same
+//! scope's catalog: switching tenants and back loses nothing.
 //!
-//! `member_dir` is the one rule for that directory. The sidecar manager uses
-//! the subject of the session it runs with; the bridge env uses the bridge's
-//! own owner, so a bridge only ever reads its owner's credentials.
+//! `member_dir` is the one rule for that directory. The sidecar manager
+//! takes subject and tenant from the session token it runs with; the bridge
+//! gets the manager's directory only when it runs for that same member.
 //!
-//! The directories that predate this layout (`<app config>/plugin-settings`,
-//! `<app config>/mcp-settings`) held the secrets of whichever member signed
-//! in; they are deleted at startup, not migrated.
+//! The locations that predate this layout (`<app config>/plugin-settings`,
+//! `<app config>/mcp-settings`, `<app data>/sandbox`) held the state of
+//! whichever member signed in; they are deleted at startup, not migrated.
 use std::path::{Path, PathBuf};
 
 use reqwest::Url;
@@ -22,51 +27,82 @@ use sha2::{Digest, Sha256};
 
 use crate::internal_ext::sidecar_util::hex_lower;
 
-/// `<app config>/members`: one directory per (gateway, member).
+/// `<app config>/members`: one directory per (gateway, member, tenant).
 const MEMBERS_DIR: &str = "members";
 /// A member's plugin `localSettings` (`<member>/plugin-settings/<plugin>.json`).
 pub(super) const PLUGIN_SETTINGS_DIR: &str = "plugin-settings";
 /// A member's MCP tool credentials and sign-ins (`<member>/mcp-settings/`).
 pub(super) const MCP_SETTINGS_DIR: &str = "mcp-settings";
+/// A member's sandbox data dirs (`<member>/sandbox/<name>`: VM disks).
+pub(super) const SANDBOX_DATA_DIR: &str = "sandbox";
 
-/// The private directory of `subject` on the gateway at `gateway_url`, under
-/// the app config dir. None without a gateway origin or a subject.
-pub(crate) fn member_dir(config_dir: &Path, gateway_url: &str, subject: &str) -> Option<PathBuf> {
+/// The bridge-stabilizing watcher's key for the bridge's member directory
+/// (a slash never appears in a core name, so it cannot collide with one).
+pub(super) const BRIDGE_KEY: &str = "member/dir";
+
+/// Who a session acts as: the subject and the tenant its token names.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) struct SessionMember {
+    pub(super) subject: String,
+    pub(super) tenant: String,
+}
+
+/// The private directory of `subject` acting in `tenant` on the gateway at
+/// `gateway_url`, under the app config dir. None without a gateway origin,
+/// a subject or a tenant.
+pub(crate) fn member_dir(
+    config_dir: &Path,
+    gateway_url: &str,
+    subject: &str,
+    tenant: &str,
+) -> Option<PathBuf> {
     let url = Url::parse(gateway_url.trim()).ok()?;
     if !matches!(url.scheme(), "http" | "https") || url.host_str().is_none() {
         return None;
     }
-    let subject = subject.trim();
-    if subject.is_empty() {
+    let (subject, tenant) = (subject.trim(), tenant.trim());
+    if subject.is_empty() || tenant.is_empty() {
         return None;
     }
     let mut hasher = Sha256::new();
-    hasher.update(url.origin().ascii_serialization().as_bytes());
-    hasher.update(b"\n");
-    hasher.update(subject.as_bytes());
+    for part in [url.origin().ascii_serialization().as_str(), subject, tenant] {
+        hasher.update(part.as_bytes());
+        hasher.update(b"\n");
+    }
     let key = hex_lower(&hasher.finalize());
     Some(config_dir.join(MEMBERS_DIR).join(&key[..32]))
 }
 
-/// The subject (`sub`) a gateway session token names. The token is
-/// `<base64url JSON claims>.<signature>`; it is not verified here (the
-/// gateway does that on every call): the subject only picks which member's
-/// directory this desktop uses for the catalog fetched with that token.
-pub(super) fn token_subject(token: &str) -> Option<String> {
+/// The subject (`sub`) and tenant (`tenant`) a gateway session token names
+/// (auth.Claims). The token is `<base64url JSON claims>.<signature>`; it is
+/// not verified here (the gateway does that on every call): the claims only
+/// pick which member directory this desktop uses for the catalog fetched
+/// with that token. None when either claim is missing.
+pub(super) fn token_member(token: &str) -> Option<SessionMember> {
     let (payload, _) = token.trim().split_once('.')?;
     let claims: serde_json::Value = serde_json::from_slice(&b64url_decode(payload)?).ok()?;
-    claims["sub"]
-        .as_str()
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .map(str::to_string)
+    let claim = |name: &str| {
+        claims[name]
+            .as_str()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string)
+    };
+    Some(SessionMember {
+        subject: claim("sub")?,
+        tenant: claim("tenant")?,
+    })
 }
 
-/// Delete the member-unkeyed secret directories of earlier builds. Blocking,
-/// best-effort.
-pub(super) fn remove_unkeyed_dirs(config_dir: &Path) {
-    for name in [PLUGIN_SETTINGS_DIR, MCP_SETTINGS_DIR] {
-        let dir = config_dir.join(name);
+/// Delete the member-unkeyed state of earlier builds: the secret dirs under
+/// the app config dir and the sandbox data base under the app data dir.
+/// Blocking, best-effort.
+pub(super) fn remove_unkeyed_dirs(config_dir: &Path, data_dir: &Path) {
+    for dir in [
+        config_dir.join(PLUGIN_SETTINGS_DIR),
+        config_dir.join(MCP_SETTINGS_DIR),
+        data_dir.join(SANDBOX_DATA_DIR),
+    ] {
         match std::fs::remove_dir_all(&dir) {
             Ok(()) => eprintln!("[sidecar-manager] removed unkeyed {}", dir.display()),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
@@ -123,67 +159,87 @@ mod tests {
     }
 
     #[test]
-    fn the_session_token_names_the_member() {
+    fn the_session_token_names_the_member_and_tenant() {
         for sub in ["maya", "jack@example.com", "a", "ab", "abc"] {
-            let t = token(serde_json::json!({"sub": sub, "tenant": "default", "exp": 1}));
-            assert_eq!(token_subject(&t).as_deref(), Some(sub));
+            let t = token(serde_json::json!({"sub": sub, "tenant": "acme-org", "exp": 1}));
+            assert_eq!(
+                token_member(&t),
+                Some(SessionMember {
+                    subject: sub.into(),
+                    tenant: "acme-org".into()
+                })
+            );
         }
-        assert_eq!(token_subject(""), None);
-        assert_eq!(token_subject("opaque-api-token"), None);
-        assert_eq!(token_subject("not*base64.sig"), None);
+        assert_eq!(token_member(""), None);
+        assert_eq!(token_member("opaque-api-token"), None);
+        assert_eq!(token_member("not*base64.sig"), None);
+        // Both claims are required: no tenant, no member dir.
         assert_eq!(
-            token_subject(&token(serde_json::json!({"tenant": "default"}))),
+            token_member(&token(serde_json::json!({"tenant": "acme-org"}))),
+            None
+        );
+        assert_eq!(
+            token_member(&token(serde_json::json!({"sub": "maya"}))),
+            None
+        );
+        assert_eq!(
+            token_member(&token(serde_json::json!({"sub": "maya", "tenant": " "}))),
             None
         );
     }
 
     #[test]
-    fn each_member_of_each_gateway_has_its_own_directory() {
+    fn each_member_and_tenant_of_each_gateway_has_its_own_directory() {
         let config = Path::new("/config");
-        let maya = member_dir(config, "https://gw.example.com", "maya").expect("dir");
+        let gw = "https://gw.example.com";
+        let maya = member_dir(config, gw, "maya", "t1").expect("dir");
         assert!(maya.starts_with("/config/members"));
         // One gateway origin, however it is written.
         assert_eq!(
-            member_dir(config, " https://GW.example.com/app/ ", " maya "),
+            member_dir(config, " https://GW.example.com/app/ ", " maya ", " t1 "),
             Some(maya.clone())
         );
-        // Another member, another gateway: another directory.
-        assert_ne!(
-            member_dir(config, "https://gw.example.com", "jack"),
-            Some(maya.clone())
-        );
-        assert_ne!(
-            member_dir(config, "https://other.example.com", "maya"),
-            Some(maya.clone())
-        );
-        // Subjects are case-sensitive.
-        assert_ne!(
-            member_dir(config, "https://gw.example.com", "Maya"),
-            Some(maya)
-        );
-        assert_eq!(member_dir(config, "", "maya"), None);
-        assert_eq!(member_dir(config, "file:///x", "maya"), None);
-        assert_eq!(member_dir(config, "https://gw.example.com", " "), None);
+        // Another member, tenant or gateway: another directory.
+        for other in [
+            member_dir(config, gw, "jack", "t1"),
+            member_dir(config, gw, "maya", "t2"),
+            member_dir(config, "https://other.example.com", "maya", "t1"),
+            // Subjects are case-sensitive.
+            member_dir(config, gw, "Maya", "t1"),
+        ] {
+            assert!(other.is_some());
+            assert_ne!(other, Some(maya.clone()));
+        }
+        assert_eq!(member_dir(config, "", "maya", "t1"), None);
+        assert_eq!(member_dir(config, "file:///x", "maya", "t1"), None);
+        assert_eq!(member_dir(config, gw, " ", "t1"), None);
+        assert_eq!(member_dir(config, gw, "maya", ""), None);
     }
 
     #[test]
-    fn unkeyed_secret_dirs_are_deleted() {
-        let config =
+    fn unkeyed_state_dirs_are_deleted() {
+        // One dir for config and data, as on macOS: the keyed members/ tree
+        // under it stays.
+        let base =
             std::env::temp_dir().join(format!("bnbloc-member-dir-test-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&config);
-        for dir in [PLUGIN_SETTINGS_DIR, MCP_SETTINGS_DIR] {
-            std::fs::create_dir_all(config.join(dir).join("oauth")).unwrap();
-            std::fs::write(config.join(dir).join("x.json"), b"{}").unwrap();
+        let _ = std::fs::remove_dir_all(&base);
+        for dir in [PLUGIN_SETTINGS_DIR, MCP_SETTINGS_DIR, SANDBOX_DATA_DIR] {
+            std::fs::create_dir_all(base.join(dir).join("sub")).unwrap();
+            std::fs::write(base.join(dir).join("x.json"), b"{}").unwrap();
         }
-        let member = member_dir(&config, "https://gw.example.com", "maya").unwrap();
-        std::fs::create_dir_all(member.join(PLUGIN_SETTINGS_DIR)).unwrap();
+        let member = member_dir(&base, "https://gw.example.com", "maya", "t1").unwrap();
+        for dir in [PLUGIN_SETTINGS_DIR, SANDBOX_DATA_DIR] {
+            std::fs::create_dir_all(member.join(dir)).unwrap();
+        }
 
-        remove_unkeyed_dirs(&config);
-        remove_unkeyed_dirs(&config);
+        remove_unkeyed_dirs(&base, &base);
+        remove_unkeyed_dirs(&base, &base);
 
-        assert!(!config.join(PLUGIN_SETTINGS_DIR).exists());
-        assert!(!config.join(MCP_SETTINGS_DIR).exists());
+        for dir in [PLUGIN_SETTINGS_DIR, MCP_SETTINGS_DIR, SANDBOX_DATA_DIR] {
+            assert!(!base.join(dir).exists(), "{dir} survived");
+        }
         assert!(member.join(PLUGIN_SETTINGS_DIR).exists(), "keyed dirs stay");
-        std::fs::remove_dir_all(&config).unwrap();
+        assert!(member.join(SANDBOX_DATA_DIR).exists(), "keyed dirs stay");
+        std::fs::remove_dir_all(&base).unwrap();
     }
 }

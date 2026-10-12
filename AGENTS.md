@@ -461,8 +461,9 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   desktop's session (per-plugin rate limit, namespaced `clientMsgId`).
   `localSettings` (plugin packages only) are entered in Settings →
   Notifications via Tauri commands, stored 0600 in the signed-in member's
-  own directory (`member_dir`: `<app config>/members/<hash of gateway origin
-  and subject>/`, `internal_ext/member_dir.rs`; never a shared dir), passed as
+  own directory (`member_dir`: `<app config>/members/<hash of gateway origin,
+  subject and tenant>/`, `internal_ext/member_dir.rs`; never a shared dir),
+  passed as
   `BNBLOC_PLUGIN_SETTINGS_FILE`, and NEVER sent to the gateway; a plugin
   missing required settings is not launched, saving restarts it. Do not
   reintroduce member secrets on the server (the old
@@ -607,13 +608,19 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   reconcile against the live catalog (never an in-memory diff, which is
   empty after a restart); "this process is our orphan from an earlier
   session" is `owned_orphan` (spawn record from another app pid AND an
-  executable under the component's cache root, never either alone); member
-  secrets live only under `member_dir`.
+  executable under the component's cache root, never either alone); a
+  member's state (settings, credentials, sign-ins, sandbox data) lives only
+  under `member_dir`, keyed by gateway, member AND tenant, because the
+  catalog is: never judge state against a catalog of another scope. The
+  sweep takes the member dir from the session the catalog was fetched
+  with; only rebuildable machine-wide caches (sidecar binaries, sandbox
+  bundles) are swept against whichever catalog is current.
 - **The desktop owns the sandbox VM, the bridge only uses it.** At most one
   sandbox component (`bnbloc.sandbox.package/v1`) runs per desktop. Its
   executable and declared files live in one sha256-verified per-version
   bundle dir. It gets a fresh loopback port, a per-launch bearer (`tokenEnv`,
-  memory only, never logged) and an owner-only data dir. Once discover
+  memory only, never logged) and an owner-only data dir in the signed-in
+  member's `member_dir` (a member or tenant switch restarts it). Once discover
   answers, the desktop prewarms the one machine `bnbloc` from the package's
   `guest` image. Only `<home>/bnbloc-workspaces` is shared into it, never
   the home dir. Only then does the desktop hand the bridge

@@ -120,11 +120,19 @@ policy fails closed): eb77683. Desktop and dev-discovery rows: other agents.
   desktop app, gateway image.
 - **Migration:** none.
 - **Status (desktop rows, 2026-10-12): landed.**
-  - desk H3 (3c19ed8): `member_dir` keyed by sha256(gateway origin,
-    subject); the manager keys it by its session token's `sub`, the bridge
-    env by the bridge's own gateway and owner; a member switch restarts the
-    plugins that read local settings; the unkeyed dirs are deleted at
-    startup.
+  - desk H3 (3c19ed8, scope fix in the follow-up commit): `member_dir`
+    keyed by sha256(gateway origin, subject, tenant), from the session
+    token's `sub` and `tenant` claims (no tenant claim, no member dir). It
+    holds plugin settings, MCP settings and sign-ins, and the sandbox data
+    dirs. The bridge gets the manager's dir only when it runs for that
+    same member and tenant; a dir change restarts the bridge (stabilizing
+    watcher), the plugins with local settings and the sandbox. The unkeyed
+    dirs (`<app config>/plugin-settings`, `mcp-settings`,
+    `<app data>/sandbox`) are deleted at startup.
+  - desk H2 scope rule: the sweep judges member state only against the
+    catalog of the session it was fetched with (same member dir);
+    machine-wide sweeping is limited to rebuildable caches (`cores/`,
+    sandbox bundles). Test: `a_tenant_switch_never_sweeps_the_other_tenants_state`.
   - desk H4 (0160e60): `SignIns` (per-tool lock, `replace_if_current`);
     `sign_out_and_refresh_do_not_race`.
   - desk H2 (6f24923): `sidecar_sweep` after every successful reconcile;

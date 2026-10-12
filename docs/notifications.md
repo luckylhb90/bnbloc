@@ -331,11 +331,12 @@ The desktop does not start a plugin whose required local settings are not
 all set (its status says so; its notifications fall back to the server
 notifiers). Saving or removing the settings restarts the sidecar; an
 uninstalled plugin's settings file is deleted (every catalog refresh sweeps
-the files of plugins no longer installed). The values are stored per member
-and gateway under the app config dir
-(`members/<hash of gateway origin and subject>/plugin-settings/<plugin>.json`),
-so another member signing in on the same desktop never gets them; a member
-switch restarts the plugin with the new member's file.
+the files of plugins no longer installed in that member's tenant). The
+values are stored per gateway, member and tenant under the app config dir
+(`members/<hash of gateway origin, subject and tenant>/plugin-settings/<plugin>.json`),
+so another member signing in on the same desktop never gets them and a
+tenant switch never deletes them; a member or tenant switch restarts the
+plugin with the new scope's file.
 
 ### The desktop host API
 

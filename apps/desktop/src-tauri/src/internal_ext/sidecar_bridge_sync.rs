@@ -60,6 +60,18 @@ impl Adapter {
         {
             set.insert(super::sandbox::BRIDGE_KEY.to_string(), fingerprint);
         }
+        // So is the member directory the bridge reads its owner's MCP
+        // credentials from: a member or tenant switch restarts the bridge.
+        let member = self.app.try_state::<crate::AppState>().and_then(|state| {
+            let settings = state.settings.lock().clone();
+            self.bridge_member_dir_for(&settings)
+        });
+        if let Some(dir) = member {
+            set.insert(
+                super::member_dir::BRIDGE_KEY.to_string(),
+                dir.to_string_lossy().into_owned(),
+            );
+        }
         set
     }
 
