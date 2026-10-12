@@ -54,9 +54,10 @@ func (m *Memory) PutSessionState(ctx context.Context, in wire.ReportSessionState
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	key := sessionKey{tnt, in.WorkspaceID, in.AgentSessionID}
-	if in.MessageVersion <= m.versions[key] && m.versions[key] != 0 {
-		// Stale or equal write: keep the newer stored version.
-		return m.versions[key], nil
+	if stored, ok := m.versions[key]; ok && in.MessageVersion <= stored {
+		// Stale or equal write: keep the newer stored version (MySQL's
+		// GREATEST).
+		return stored, nil
 	}
 	m.versions[key] = in.MessageVersion
 	return in.MessageVersion, nil

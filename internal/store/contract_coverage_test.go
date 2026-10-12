@@ -17,8 +17,6 @@ import (
 // 4.1 of the code-health plan empties it.
 var contractPending = map[string]bool{
 	"APITokenStore":               true,
-	"ActivityStore":               true,
-	"AgentUsageReader":            true,
 	"AuditLogReader":              true,
 	"ComponentInstallStore":       true,
 	"ContentComponentStore":       true,
@@ -50,7 +48,6 @@ var rigPending = map[string]bool{
 	"content_usage_test.go":                 true,
 	"grant_usage_test.go":                   true,
 	"mysql_auth_state_test.go":              true,
-	"mysql_test.go":                         true,
 	"notification_dispatch_test.go":         true,
 	"notification_outbox_migration_test.go": true,
 	"notification_replies_test.go":          true,
@@ -59,7 +56,6 @@ var rigPending = map[string]bool{
 	"retention_test.go":                     true,
 	"run_reservations_test.go":              true,
 	"team_billing_test.go":                  true,
-	"team_test.go":                          true,
 	"usage_budgets_test.go":                 true,
 	"web_push_test.go":                      true,
 }

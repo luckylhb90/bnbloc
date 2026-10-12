@@ -45,7 +45,6 @@ var storeRuleCopies = map[string]map[string]int{
 		"sso_handoffs.go":         1,
 	},
 	"null-helper": {
-		"mysql.go":       1,
 		"mysql_grant.go": 4,
 	},
 }

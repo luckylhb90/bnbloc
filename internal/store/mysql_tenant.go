@@ -48,7 +48,7 @@ func (m *MySQLTenant) PutTenant(ctx context.Context, t Tenant) error {
 	// Update, else insert: not INSERT ... ON DUPLICATE KEY UPDATE, which on
 	// a clash of the issuer key would update the tenant holding the issuer.
 	// An empty issuer is NULL (uq_tenant_issuer admits any number of those).
-	issuer := nullString(t.SSOIssuer)
+	issuer := nullIfZero(t.SSOIssuer)
 	update := func() (bool, error) {
 		res, err := m.DB.ExecContext(ctx, `UPDATE tenants SET name = ?, status = ?, sso_issuer = ? WHERE tenant_id = ?`,
 			t.Name, string(t.Status), issuer, t.TenantID)

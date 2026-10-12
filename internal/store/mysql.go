@@ -102,7 +102,7 @@ WHERE tenant_id = ? AND room_id = ? AND agent_session_id = ? FOR UPDATE`,
 INSERT IGNORE INTO agent_messages (tenant_id, room_id, agent_session_id, seq, client_submit_id, payload_json, created_at_ms,
   usage_reported, usage_owner_user_id, usage_provider, usage_input_tokens, usage_output_tokens, usage_cost_usd)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			tnt, roomID, in.AgentSessionID, msg.Seq, nullString(msg.ClientSubmitID), payload, msg.CreatedAtUnixMs,
+			tnt, roomID, in.AgentSessionID, msg.Seq, nullIfZero(msg.ClientSubmitID), payload, msg.CreatedAtUnixMs,
 			reported, u.Owner, u.Provider, u.InputTokens, u.OutputTokens, cost)
 		if err != nil {
 			return nil, 0, err
@@ -177,13 +177,6 @@ func scanString(r rowScanner) (string, error) {
 	var s string
 	err := r.Scan(&s)
 	return s, err
-}
-
-func nullString(s string) any {
-	if s == "" {
-		return nil
-	}
-	return s
 }
 
 // compile-time assertion that MySQL satisfies ActivityStore.
