@@ -50,7 +50,7 @@ assert(bad({ team: { lead: "", members: [{ role: "a", expert: "x", defaultAgent:
 const back = formFromVersion({
   component: {
     id: "cc_t", kind: "expert", name: "release-team", owner: "maya", scope: "personal", status: "active", latestVersion: "1.0.0", version: "1.0.0",
-    permissions: [], requires: {}, mine: true, acked: true, uses: 0, createdAtMs: 0, updatedAtMs: 0, tags: ["release"], icon: "rocket",
+    permissions: [], requires: {}, mine: true, removable: false, acked: true, uses: 0, runs: 0, members: 0, createdAtMs: 0, updatedAtMs: 0, tags: ["release"], icon: "rocket",
     team: { lead: "lead", members: [{ role: "reviewer", expert: "code-reviewer@^1", defaultAgent: "requester" }] },
   },
   version: { version: "1.0.0", sha256: "", bundleKey: "", bundleUrl: "", sizeBytes: 0, createdBy: "maya", createdAtMs: 0 },
@@ -68,4 +68,4 @@ eq(isTeam({ team: { lead: "lead", members: [{ role: "a", expert: "x", defaultAge
 eq(usageLine({ kind: "expert", runs: 12, members: 1 }), "12 runs · 1 member", "expert usage");
 eq(usageLine({ kind: "skill", runs: 0, members: 4 }), "4 members", "pack usage");
 eq(usageLine({ kind: "expert", runs: 9999, members: 9999 }), "9999+ runs · 9999+ members", "capped usage");
-eq(usageLine({ kind: "expert" }), "", "unused");
+eq(usageLine({ kind: "expert", runs: 0, members: 0 }), "", "unused");

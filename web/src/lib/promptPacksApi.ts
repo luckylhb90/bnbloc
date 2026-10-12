@@ -1,9 +1,12 @@
 import { ApiError, req } from "./api.ts";
 import { apiUrl } from "./config.ts";
 import { authedFetch, errorDetail } from "./session.ts";
-import type { ContentComponent, ContentComponentDetail } from "./contentComponents.ts";
+import type { ContentComponentDetail } from "./contentComponents.ts";
 import { noteSaved } from "./contentComponentsApi.ts";
 import { promptImportContentType, promptPackPayload, type PromptPackForm } from "./promptPacks.ts";
+
+export type { SavePromptReply } from "./wire.gen.ts";
+import type { SavePromptReply } from "./wire.gen.ts";
 
 const enc = encodeURIComponent;
 
@@ -13,12 +16,6 @@ export const PROMPT_PACKS_CHANGED = "bnbloc:prompt-packs-changed";
 
 export function announcePromptPacksChanged(): void {
   window.dispatchEvent(new Event(PROMPT_PACKS_CHANGED));
-}
-
-export interface SavePromptReply {
-  readonly component: ContentComponent;
-  readonly promptId: string;
-  readonly created: boolean;
 }
 
 // Prompt packs over the content routes (services/gateway/content_prompts.go

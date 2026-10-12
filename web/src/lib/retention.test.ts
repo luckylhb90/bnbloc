@@ -89,7 +89,7 @@ test("descriptions", () => {
 
 test("describeStatus", () => {
   const now = Date.UTC(2026, 9, 11, 12, 0, 0);
-  assert.equal(describeStatus({ lastRunAtMs: 0, lastBlobGcAtMs: 0, lastDeleted: null }, now), "The cleanup has not run yet.");
+  assert.equal(describeStatus({ lastRunAtMs: 0, lastBlobGcAtMs: 0, lastDeleted: {} }, now), "The cleanup has not run yet.");
   assert.equal(
     describeStatus({ lastRunAtMs: now - 2 * 3600_000, lastBlobGcAtMs: 0, lastDeleted: { room_messages: 1204, blobs: 3, attachments: 0 } }, now),
     "The last cleanup ran 2 hours ago and removed 3 stored files, 1,204 messages.",

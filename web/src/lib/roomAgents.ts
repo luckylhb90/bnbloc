@@ -5,14 +5,8 @@
 import type { RoomAgent } from "../views/composer/types.ts";
 import { sameUser } from "./format.ts";
 
-// An agent a member's bridge advertises as reachable in the room.
-export interface RosterAgent {
-  readonly ownerUserId: string;
-  readonly core?: string;
-  readonly provider: string;
-  // Borrowed drives of this agent run in its owner's agent sandbox.
-  readonly sandboxed?: boolean;
-}
+export type { RosterAgent } from "./wire.gen.ts";
+import type { RosterAgent } from "./wire.gen.ts";
 
 // A live borrow authorization listed by the shareagent authority. Its
 // `provider` is the authorized identity: "<core>:<provider>" for a
@@ -23,7 +17,6 @@ export interface SharedAgent {
   // The models the owner authorized for this borrow; empty = unrestricted.
   readonly allowedModels?: readonly string[];
 }
-
 
 // borrowTarget is the shared-agent identity the authority keys grants by,
 // matching the bridge's borrowTarget (services/bridge): a colon separates core

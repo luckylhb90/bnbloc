@@ -4,24 +4,8 @@
 // Served by shareagent: GET /v1/tenant/audit-log (an org admin's own tenant)
 // and GET /v1/platform/audit-log (super-admin, every tenant or ?tenant=).
 
-export interface AuditLogEntry {
-  readonly id: string;
-  readonly source: "extension" | "borrow";
-  readonly kind: string;
-  readonly name: string;
-  readonly action: string;
-  readonly actor?: string;
-  readonly tenantId?: string;
-  readonly outcome?: string;
-  readonly detail?: string;
-  readonly roomId?: string;
-  readonly atMs: number;
-}
-
-export interface AuditLogReply {
-  readonly entries: readonly AuditLogEntry[];
-  readonly nextCursor?: string;
-}
+export type { AuditLogEntry, AuditLogReply } from "./wire.gen.ts";
+import type { AuditLogEntry } from "./wire.gen.ts";
 
 // The console the log is read from: an org admin's tenant, or the platform
 // (all tenants, optionally narrowed to one).

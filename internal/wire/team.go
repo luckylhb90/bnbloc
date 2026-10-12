@@ -5,6 +5,8 @@ package wire
 // client reads.
 
 // Message task status values.
+//
+//wire:union TaskStatus
 const (
 	TaskOpen = "open"
 	TaskDone = "done"
@@ -22,7 +24,7 @@ type MessageTask struct {
 	RoomID        string `json:"roomId"`
 	ChannelID     string `json:"channelId,omitempty"`
 	Seq           int64  `json:"seq"`
-	Status        string `json:"status"`
+	Status        string `json:"status" tstype:"TaskStatus"`
 	Title         string `json:"title"`
 	MessageAuthor string `json:"messageAuthor,omitempty"`
 	CreatedBy     string `json:"createdBy"`
@@ -40,6 +42,8 @@ type TaskUpdatedPayload struct {
 }
 
 // Search result kinds.
+//
+//wire:union SearchResultKind
 const (
 	SearchMessage  = "message"
 	SearchArtifact = "artifact"
@@ -52,7 +56,7 @@ const (
 // highlights the query); RoomID/RoomName/Seq/ChannelID locate a message hit,
 // ArtifactID an artifact hit.
 type SearchResult struct {
-	Kind      string `json:"kind"`
+	Kind      string `json:"kind" tstype:"SearchResultKind"`
 	RoomID    string `json:"roomId,omitempty"`
 	RoomName  string `json:"roomName,omitempty"`
 	ChannelID string `json:"channelId,omitempty"`

@@ -8,7 +8,7 @@ package wire
 // latest version (or the version a detail names).
 type ContentComponent struct {
 	ID            string   `json:"id"`
-	Kind          string   `json:"kind"`
+	Kind          string   `json:"kind" tstype:"ContentKind"`
 	Name          string   `json:"name"`
 	DisplayName   string   `json:"displayName,omitempty"`
 	Description   string   `json:"description,omitempty"`
@@ -135,6 +135,8 @@ type ContentVersionDetail struct {
 }
 
 // Content use scopes (ContentUse.Scope).
+//
+//wire:union ContentUseScope
 const (
 	ContentUseMember = "member"
 	ContentUseRoom   = "room"
@@ -146,10 +148,10 @@ const (
 // ContentUse is where a component is enabled (a member's skill packs, a
 // room's skill packs) or pinned (a room's experts).
 type ContentUse struct {
-	Scope         string            `json:"scope"`
+	Scope         string            `json:"scope" tstype:"ContentUseScope"`
 	ScopeID       string            `json:"scopeId"`
 	ComponentID   string            `json:"componentId"`
-	Kind          string            `json:"kind"`
+	Kind          string            `json:"kind" tstype:"ContentKind"`
 	PinnedVersion string            `json:"pinnedVersion,omitempty"`
 	CreatedBy     string            `json:"createdBy"`
 	CreatedAtMs   int64             `json:"createdAtMs"`
@@ -197,7 +199,7 @@ const (
 // ContentRef is one resolved package in effect for a turn.
 type ContentRef struct {
 	ComponentID string `json:"componentId"`
-	Kind        string `json:"kind"`
+	Kind        string `json:"kind" tstype:"ContentKind"`
 	Name        string `json:"name"`
 	DisplayName string `json:"displayName,omitempty"`
 	Version     string `json:"version"`
@@ -257,7 +259,7 @@ type ContentPublication struct {
 type ContentPublishRequest struct {
 	ID           string `json:"id"`
 	ComponentID  string `json:"componentId"`
-	Kind         string `json:"kind"`
+	Kind         string `json:"kind" tstype:"ContentKind"`
 	Name         string `json:"name"`
 	DisplayName  string `json:"displayName,omitempty"`
 	Version      string `json:"version"`

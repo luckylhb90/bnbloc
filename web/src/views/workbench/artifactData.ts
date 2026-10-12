@@ -4,6 +4,9 @@ import { inferMime, type ArtifactFileFacts } from "@/lib/artifactFiles";
 import { fileInfoFromFacts } from "@/views/artifact/fileInfo";
 import type { ArtifactFileInfo } from "@/views/artifact/registry";
 
+export type { ArtifactDetail } from "../../lib/wire.gen.ts";
+import type { ArtifactDetail } from "../../lib/wire.gen.ts";
+
 // Shared artifact data for the workbench, chat file cards and the
 // deliverables view:
 //   - artifact detail (metadata + version list), cached per artifact and
@@ -14,11 +17,6 @@ import type { ArtifactFileInfo } from "@/views/artifact/registry";
 //   - card images (stored thumbnail or the image itself) as object URLs.
 // Everything is fetched through the authenticated transport; nothing here
 // puts a credential into a URL.
-
-export interface ArtifactDetail {
-  readonly artifact: Artifact;
-  readonly versions: readonly ArtifactVersion[];
-}
 
 const MAX_DETAILS = 300;
 const details = new Map<string, Promise<ArtifactDetail>>();

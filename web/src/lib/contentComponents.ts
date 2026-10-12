@@ -1,12 +1,15 @@
 // Content components (docs/prd/2026-10-12-experts-and-teams.md): experts and
-// skill packs. The shapes mirror internal/wire/content_components.go; the
+// skill packs. The shapes are internal/wire/content_components.go's (wire.gen.ts); the
 // helpers here are pure (form <-> payload mapping, version and update logic,
 // expert mentions, the chat payload marker) so they are unit-tested.
 
-import type { ContentPrompt, PromptRef } from "./promptPacks.ts";
-import { parseDefaultAgent, type ContentTeam } from "./teams.ts";
+import { parseDefaultAgent } from "./teams.ts";
 
-export type ContentKind = "expert" | "skill" | "prompt";
+export type { ChatExpert, ContentComponent, ContentComponentDetail, ContentFile, ContentMCPRequirement, ContentPublication, ContentPublishRequest, ContentQuickPrompt, ContentRequires, ContentSkill, ContentUse, ContentUsesReply, ContentVersion, ContentVersionDetail } from "./wire.gen.ts";
+import type { ChatExpert, ContentComponent, ContentQuickPrompt, ContentRequires, ContentUse, ContentVersionDetail } from "./wire.gen.ts";
+
+export type { ContentKind } from "./wire.gen.ts";
+import type { ContentKind } from "./wire.gen.ts";
 
 // The built-in builder expert (shipped with the release, read-only, listed
 // for every member with scope "builtin"): it interviews the member, drafts
@@ -31,161 +34,9 @@ export function contentKindWord(kind: ContentKind): string {
   return kind === "skill" ? "skill pack" : kind === "prompt" ? "prompt pack" : "expert";
 }
 
-export interface ContentSkill {
-  readonly name: string;
-  readonly description: string;
-}
-
-// A quick prompt is its text, or ref ("pack/prompt-id") to a prompt of a
-// pack the expert requires, resolved for the viewer when they may use it.
-export interface ContentQuickPrompt {
-  readonly title: string;
-  readonly prompt: string;
-  readonly ref?: string;
-  readonly resolved?: PromptRef;
-}
-
-// An MCP tool component a package requires, and the tool's variables it
-// needs set (docs/architecture/content-components.md, MCP tool components).
-export interface ContentMCPRequirement {
-  readonly name: string;
-  readonly env?: readonly string[];
-}
-
-export interface ContentRequires {
-  readonly skills?: readonly string[];
-  readonly prompts?: readonly string[];
-  readonly mcp?: readonly ContentMCPRequirement[];
-  readonly permissions?: readonly string[];
-}
-
-export interface ContentComponent {
-  readonly id: string;
-  readonly kind: ContentKind;
-  readonly name: string;
-  readonly displayName?: string;
-  readonly description?: string;
-  readonly category?: string;
-  readonly tags?: readonly string[];
-  readonly icon?: string;
-  readonly owner: string;
-  readonly scope: string;
-  readonly status: string;
-  readonly latestVersion: string;
-  readonly version: string;
-  readonly permissions: readonly string[];
-  readonly needsSandbox?: boolean;
-  readonly requires: ContentRequires;
-  readonly skills?: readonly ContentSkill[];
-  readonly quickPrompts?: readonly ContentQuickPrompt[];
-  // A prompt pack's prompts (lib/promptPacks.ts).
-  readonly prompts?: readonly ContentPrompt[];
-  readonly welcome?: string;
-  // mine: the caller authors it (a personal component of theirs: new
-  // versions, sharing, publishing). removable: they may delete it (theirs,
-  // or a copy someone shared with them).
-  readonly mine: boolean;
-  readonly removable?: boolean;
-  // A shared copy: its author (owner is the holder), the author's
-  // component it came from, and the author's newer version when there is
-  // one (lib/contentSharing.ts).
-  readonly sharedBy?: string;
-  readonly sourceId?: string;
-  readonly sourceLatestVersion?: string;
-  // The author's own component: its organization publication.
-  readonly publication?: ContentPublication;
-  readonly acked: boolean;
-  readonly uses: number;
-  // Usage: an expert's runs and their distinct requesters; a pack's
-  // members who turned it on (capped server-side).
-  readonly runs?: number;
-  readonly members?: number;
-  // A team expert's roster (lib/teams.ts).
-  readonly team?: ContentTeam;
-  readonly createdAtMs: number;
-  readonly updatedAtMs: number;
-}
-
-export interface ContentPublishRequest {
-  readonly id: string;
-  readonly componentId: string;
-  readonly kind: ContentKind;
-  readonly name: string;
-  readonly displayName?: string;
-  readonly version: string;
-  readonly requestedBy: string;
-  readonly note?: string;
-  readonly status: "pending" | "approved" | "declined" | "withdrawn";
-  readonly decidedBy?: string;
-  readonly decisionNote?: string;
-  readonly decidedAtMs?: number;
-  readonly createdAtMs: number;
-  // The version the organization uses now ("" before a first approval).
-  readonly approvedVersion?: string;
-}
-
-export interface ContentPublication {
-  readonly orgComponentId?: string;
-  readonly orgVersion?: string;
-  readonly orgStatus?: string;
-  readonly request?: ContentPublishRequest;
-}
-
-export interface ContentVersion {
-  readonly version: string;
-  readonly sha256: string;
-  readonly bundleKey: string;
-  readonly bundleUrl: string;
-  readonly sizeBytes: number;
-  readonly createdBy: string;
-  readonly createdAtMs: number;
-}
-
-export interface ContentComponentDetail {
-  readonly component: ContentComponent;
-  readonly versions: readonly ContentVersion[];
-  // The publish request a new version opened by itself: the organization
-  // uses the component, so the version waits for an admin's approval.
-  readonly resubmitted?: ContentPublishRequest;
-}
-
-export interface ContentFile {
-  readonly path: string;
-  readonly sizeBytes: number;
-  readonly text?: string;
-  readonly binary?: boolean;
-}
-
-export interface ContentVersionDetail {
-  readonly component: ContentComponent;
-  readonly version: ContentVersion;
-  readonly instructions?: string;
-  readonly skillBodies?: Readonly<Record<string, string>>;
-  readonly files: readonly ContentFile[];
-}
-
 // "room-expert" is a room's expert: one of its pinned experts that every
 // agent turn in the room wears.
-export type ContentUseScope = "member" | "room" | "room-expert";
-
-export interface ContentUse {
-  readonly scope: ContentUseScope;
-  readonly scopeId: string;
-  readonly componentId: string;
-  readonly kind: ContentKind;
-  readonly pinnedVersion?: string;
-  readonly createdBy: string;
-  readonly createdAtMs: number;
-  readonly component?: ContentComponent;
-  readonly updateAvailable?: boolean;
-}
-
-export interface ContentUsesReply {
-  readonly member: readonly ContentUse[];
-  readonly room?: readonly ContentUse[];
-  // The id of the room's expert, when it has one.
-  readonly roomExpert?: string;
-}
+export type { ContentUseScope } from "./wire.gen.ts";
 
 // ContentForm is the Library form (both kinds); the server lays it out into
 // the kind's files (component.json, INSTRUCTIONS.md, <skill>/SKILL.md).
@@ -473,12 +324,6 @@ export function expertMentionMatches(choices: readonly ExpertChoice[], query: st
   return choices
     .filter((e) => e.component.name.toLowerCase().startsWith(q) || contentLabel(e.component).toLowerCase().startsWith(q))
     .slice(0, limit);
-}
-
-// The chat send's expert field.
-export interface ChatExpert {
-  readonly id: string;
-  readonly version?: string;
 }
 
 export function chatExpert(choice: ExpertChoice): ChatExpert {

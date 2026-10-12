@@ -407,7 +407,7 @@ function ScheduleEditor({
           <p className="flex items-start gap-2 rounded-[var(--radius)] border border-[var(--color-warning)]/30 bg-[var(--color-warning)]/10 px-3 py-2 text-xs text-[var(--color-fg-muted)]">
             <WarningIcon size={14} className="mt-0.5 shrink-0 text-[var(--color-warning)]" />
             <span>
-              This posts to another member's agent. It runs only while <UserName id={recipient.ownerId} /> has authorized you in this room;
+              This posts to another member's agent. It runs only while <UserName id={recipient.ownerId ?? ""} /> has authorized you in this room;
               otherwise the run is refused at drive time.
             </span>
           </p>

@@ -9,6 +9,9 @@ import type { ComponentMCPEnv, MemberComponent } from "./apiTypes.ts";
 import type { ContentComponent } from "./contentComponents.ts";
 import type { LocalSettingView } from "./pluginSettings.ts";
 
+export type { MCPConnector as McpConnector, MCPConnectorField as McpConnectorField, MCPConnectorsReply as McpConnectorsReply } from "./wire.gen.ts";
+import type { MCPConnectorField as McpConnectorField } from "./wire.gen.ts";
+
 // McpToolSettings is one installed MCP tool as the desktop shell reports it
 // (apps/desktop/src-tauri/src/internal_ext/mcp_tools.rs): the stdio binary's
 // state on this computer and the member's settings (secret values never
@@ -51,32 +54,6 @@ export function signInLine(t: Pick<McpToolSettings, "signIn">): string {
   if (!s) return "Not signed in. Sign in to use it in your runs.";
   if (!s.valid) return `Your sign-in${s.server ? ` with ${s.server}` : ""} expired. Sign in again.`;
   return `Signed in${s.server ? ` with ${s.server}` : ""}.`;
-}
-
-// One variable of an organization connector as an org admin sees it.
-export interface McpConnectorField {
-  readonly name: string;
-  readonly description?: string;
-  readonly secret?: boolean;
-  readonly required?: boolean;
-  readonly set: boolean;
-  readonly value?: string;
-}
-
-export interface McpConnector {
-  readonly name: string;
-  readonly version: string;
-  readonly description?: string;
-  readonly transport: string;
-  readonly configured: boolean;
-  readonly fields: readonly McpConnectorField[];
-  readonly updatedBy?: string;
-  readonly updatedAtMs?: number;
-}
-
-export interface McpConnectorsReply {
-  readonly available: boolean;
-  readonly connectors: readonly McpConnector[];
 }
 
 export type CredentialState = "ready" | "missing" | "elsewhere";

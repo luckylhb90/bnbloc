@@ -466,7 +466,7 @@ export interface MyBudgetReply extends BudgetPeriod {
 // latest version (or the version a detail names).
 export interface ContentComponent {
   id: string;
-  kind: string;
+  kind: ContentKind;
   name: string;
   displayName?: string;
   description?: string;
@@ -602,10 +602,10 @@ export const ContentUseRoomExpert = "room-expert";
 // ContentUse is where a component is enabled (a member's skill packs, a
 // room's skill packs) or pinned (a room's experts).
 export interface ContentUse {
-  scope: string;
+  scope: ContentUseScope;
   scopeId: string;
   componentId: string;
-  kind: string;
+  kind: ContentKind;
   pinnedVersion?: string;
   createdBy: string;
   createdAtMs: number;
@@ -651,7 +651,7 @@ export const ContentSourceRoomExpert = "room-expert";
 // ContentRef is one resolved package in effect for a turn.
 export interface ContentRef {
   componentId: string;
-  kind: string;
+  kind: ContentKind;
   name: string;
   displayName?: string;
   version: string;
@@ -709,7 +709,7 @@ export interface ContentPublication {
 export interface ContentPublishRequest {
   id: string;
   componentId: string;
-  kind: string;
+  kind: ContentKind;
   name: string;
   displayName?: string;
   version: string;
@@ -868,7 +868,7 @@ export interface ContentAdminComponent {
 // Library. Dispatch it with DispatchRequest.Draft = ID.
 export interface ContentDraft {
   id: string;
-  kind: string;
+  kind: ContentKind;
   name: string;
   displayName?: string;
   version: string;
@@ -905,7 +905,7 @@ export const ContentSavedSubmitted = "submitted";
 // ContentSaved is the payload of EventContentSaved.
 export interface ContentSaved {
   componentId: string;
-  kind: string;
+  kind: ContentKind;
   name: string;
   displayName?: string;
   version: string;
@@ -2279,7 +2279,7 @@ export const ScheduleRunSkipped = "skipped";
 // agent; kind "agent" carries the target agent's owner + provider (+ core
 // when the owner exposes more than one).
 export interface ScheduleRecipient {
-  kind: string;
+  kind: ScheduleRecipientKind;
   ownerId?: string;
   provider?: string;
   core?: string;
@@ -2289,7 +2289,7 @@ export interface ScheduleRecipient {
 // are meaningful: AtMs (once), Time (daily, weekly), Days (weekly), Cron
 // (cron).
 export interface ScheduleRecurrence {
-  kind: string;
+  kind: RecurrenceKind;
   atMs?: number;
   time?: string;
   days?: number[];
@@ -2313,7 +2313,7 @@ export interface RoomSchedule {
   enabled: boolean;
   nextRunAtMs?: number;
   lastRunAtMs?: number;
-  lastStatus?: string;
+  lastStatus?: ScheduleRunStatus;
   lastError?: string;
   lastSeq?: number;
   runCount: number;
@@ -2369,7 +2369,7 @@ export interface RoomTemplate {
   tenantId: string;
   name: string;
   description?: string;
-  visibility: string;
+  visibility: TemplateVisibility;
   createdBy: string;
   body: RoomTemplateBody;
   useCount: number;
@@ -2528,7 +2528,7 @@ export interface MessageTask {
   roomId: string;
   channelId?: string;
   seq: number;
-  status: string;
+  status: TaskStatus;
   title: string;
   messageAuthor?: string;
   createdBy: string;
@@ -2556,7 +2556,7 @@ export const SearchPrompt = "prompt";
 // highlights the query); RoomID/RoomName/Seq/ChannelID locate a message hit,
 // ArtifactID an artifact hit.
 export interface SearchResult {
-  kind: string;
+  kind: SearchResultKind;
   roomId?: string;
   roomName?: string;
   channelId?: string;
@@ -2640,14 +2640,16 @@ export interface TeamAgent {
 // GET /v1/tenant/team/agents (scope "tenant").
 export interface TeamAgentsReply {
   scope: string;
-  range: string;
+  range: TeamRange;
   sinceMs: number;
   agents: TeamAgent[];
 }
 
-// Borrow usage report grouping and perspective values.
+// Borrow usage report grouping values.
 export const UsageGroupDay = "day";
 export const UsageGroupMonth = "month";
+
+// Borrow usage report perspectives.
 export const UsageAsOwner = "owner";
 export const UsageAsBorrower = "borrower";
 export const UsageAsTenant = "tenant";
@@ -2671,8 +2673,8 @@ export interface BorrowUsageRow {
 // BorrowUsageReport is GET /v1/borrow/usage-report (and the tenant variant).
 // Truncated is set when the scan hit its row cap.
 export interface BorrowUsageReport {
-  as: string;
-  groupBy: string;
+  as: UsageAs;
+  groupBy: UsageGroupBy;
   fromMs: number;
   toMs: number;
   rows: BorrowUsageRow[];
@@ -2701,7 +2703,7 @@ export interface QuotaRequest {
   provider: string;
   requestedRuns?: number;
   note?: string;
-  status: string;
+  status: QuotaRequestStatus;
   grantedRuns?: number;
   createdAtMs: number;
   decidedAtMs?: number;
@@ -3117,6 +3119,28 @@ export const JobNoticeSeq = 1;
 // ---- wire unions (//wire:union) ----
 export type RunScope = "room" | "self" | "tenant";
 export const RunScopeValues: readonly RunScope[] = ["room", "self", "tenant"];
+export type ContentUseScope = "member" | "room" | "room-expert";
+export const ContentUseScopeValues: readonly ContentUseScope[] = ["member", "room", "room-expert"];
+export type ScheduleRecipientKind = "room" | "agent";
+export const ScheduleRecipientKindValues: readonly ScheduleRecipientKind[] = ["room", "agent"];
+export type RecurrenceKind = "once" | "daily" | "weekly" | "cron";
+export const RecurrenceKindValues: readonly RecurrenceKind[] = ["once", "daily", "weekly", "cron"];
+export type ScheduleRunStatus = "ok" | "error" | "skipped";
+export const ScheduleRunStatusValues: readonly ScheduleRunStatus[] = ["ok", "error", "skipped"];
+export type TemplateVisibility = "private" | "tenant";
+export const TemplateVisibilityValues: readonly TemplateVisibility[] = ["private", "tenant"];
+export type TaskStatus = "open" | "done";
+export const TaskStatusValues: readonly TaskStatus[] = ["open", "done"];
+export type SearchResultKind = "message" | "artifact" | "prompt";
+export const SearchResultKindValues: readonly SearchResultKind[] = ["message", "artifact", "prompt"];
+export type TeamRange = "today" | "7d";
+export const TeamRangeValues: readonly TeamRange[] = ["today", "7d"];
+export type UsageGroupBy = "day" | "month";
+export const UsageGroupByValues: readonly UsageGroupBy[] = ["day", "month"];
+export type UsageAs = "owner" | "borrower" | "tenant";
+export const UsageAsValues: readonly UsageAs[] = ["owner", "borrower", "tenant"];
+export type QuotaRequestStatus = "pending" | "approved" | "declined";
+export const QuotaRequestStatusValues: readonly QuotaRequestStatus[] = ["pending", "approved", "declined"];
 
 // ---- enums owned outside internal/wire ----
 // An agent job's lifecycle status (store.AgentJobStatus).
@@ -3140,6 +3164,9 @@ export const OrgRoleValues: readonly OrgRole[] = ["super_admin", "org_admin", "m
 // A coarse organization permission (rbac.Permission).
 export type OrgPermission = "manage_platform" | "manage_org" | "create_room" | "drive_agent" | "read";
 export const OrgPermissionValues: readonly OrgPermission[] = ["manage_platform", "manage_org", "create_room", "drive_agent", "read"];
+// A content component kind's short name (the contentpkg registry).
+export type ContentKind = "expert" | "prompt" | "skill";
+export const ContentKindValues: readonly ContentKind[] = ["expert", "prompt", "skill"];
 
 // ---- tables computed by their Go owners ----
 // The job statuses store.AgentJobStatus.Terminal reports finished; every

@@ -5,6 +5,8 @@ package wire
 // data source backs them — a missing cost means "not reported", never zero.
 
 // Team dashboard ranges.
+//
+//wire:union TeamRange
 const (
 	TeamRangeToday = "today"
 	TeamRange7d    = "7d"
@@ -59,15 +61,23 @@ type TeamAgent struct {
 // GET /v1/tenant/team/agents (scope "tenant").
 type TeamAgentsReply struct {
 	Scope   string      `json:"scope"`
-	Range   string      `json:"range"`
+	Range   string      `json:"range" tstype:"TeamRange"`
 	SinceMs int64       `json:"sinceMs"`
 	Agents  []TeamAgent `json:"agents"`
 }
 
-// Borrow usage report grouping and perspective values.
+// Borrow usage report grouping values.
+//
+//wire:union UsageGroupBy
 const (
 	UsageGroupDay   = "day"
 	UsageGroupMonth = "month"
+)
+
+// Borrow usage report perspectives.
+//
+//wire:union UsageAs
+const (
 	UsageAsOwner    = "owner"
 	UsageAsBorrower = "borrower"
 	UsageAsTenant   = "tenant"
@@ -92,8 +102,8 @@ type BorrowUsageRow struct {
 // BorrowUsageReport is GET /v1/borrow/usage-report (and the tenant variant).
 // Truncated is set when the scan hit its row cap.
 type BorrowUsageReport struct {
-	As        string           `json:"as"`
-	GroupBy   string           `json:"groupBy"`
+	As        string           `json:"as" tstype:"UsageAs"`
+	GroupBy   string           `json:"groupBy" tstype:"UsageGroupBy"`
 	FromMs    int64            `json:"fromMs"`
 	ToMs      int64            `json:"toMs"`
 	Rows      []BorrowUsageRow `json:"rows"`
@@ -107,6 +117,8 @@ type BorrowUsageReport struct {
 }
 
 // Quota request statuses.
+//
+//wire:union QuotaRequestStatus
 const (
 	QuotaPending  = "pending"
 	QuotaApproved = "approved"
@@ -124,7 +136,7 @@ type QuotaRequest struct {
 	Provider      string `json:"provider"`
 	RequestedRuns *int   `json:"requestedRuns,omitempty"`
 	Note          string `json:"note,omitempty"`
-	Status        string `json:"status"`
+	Status        string `json:"status" tstype:"QuotaRequestStatus"`
 	GrantedRuns   *int   `json:"grantedRuns,omitempty"`
 	CreatedAtMs   int64  `json:"createdAtMs"`
 	DecidedAtMs   int64  `json:"decidedAtMs,omitempty"`

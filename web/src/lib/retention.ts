@@ -8,39 +8,8 @@
 // forever. The server validates too; the accepted range comes from the
 // server's `limits`, never from this file.
 
-export type RetentionKind = "messages" | "artifactVersions" | "audit" | "agentJobs";
-
-export interface RetentionPolicy {
-  messagesDays: number | null;
-  artifactVersionsDays: number | null;
-  auditDays: number | null;
-  agentJobsDays: number | null;
-}
-
-export interface RetentionLimits {
-  minDays: number;
-  maxDays: number;
-}
-
-export interface RetentionStatus {
-  lastRunAtMs: number;
-  lastBlobGcAtMs: number;
-  lastDeleted: Record<string, number> | null;
-}
-
-export interface PlatformRetentionView {
-  default: RetentionPolicy;
-  limits: RetentionLimits;
-  status: RetentionStatus;
-}
-
-export interface TenantRetentionView {
-  tenantId: string;
-  override: RetentionPolicy;
-  default: RetentionPolicy;
-  effective: RetentionPolicy;
-  limits: RetentionLimits;
-}
+export type { PlatformRetentionView, RetentionKind, RetentionLimits, RetentionPolicy, RetentionStatus, TenantRetentionView } from "./wire.gen.ts";
+import type { RetentionKind, RetentionLimits, RetentionPolicy, RetentionStatus, TenantRetentionView } from "./wire.gen.ts";
 
 export type RetentionLayer = "platform" | "tenant";
 

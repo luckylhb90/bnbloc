@@ -17,6 +17,10 @@ export type {
 } from "./wire.gen.ts";
 import type { RoomDetail, RoomPreview } from "./wire.gen.ts";
 
+export type { UpdatePlatform as UpdatePlatformArtifact } from "./wire.gen.ts";
+
+export type { ReleaseEntry, ReleaseFile, ReleaseHub, ReleaseHubMeta, UpdateConfig, UpdatePolicy, UpdateRelease } from "./wire.gen.ts";
+
 // Room is GET /v1/rooms/{id}: a member's detail, or a non-member's preview
 // of a shared room (`"preview" in room` tells them apart).
 export type Room = RoomDetail | RoomPreview;
@@ -107,63 +111,6 @@ export interface PlatformTenant {
   runQuota: number;
   costAllowance: number;
   createdAtMs: number;
-}
-
-export interface UpdatePolicy {
-  readonly enabled: boolean;
-  readonly channel: "stable" | "internal";
-  readonly autoCheck: boolean;
-  readonly checkIntervalHours: number;
-  readonly autoInstall: boolean;
-  readonly minSupportedVersion: string;
-}
-
-export interface UpdatePlatformArtifact {
-  readonly url: string;
-  readonly signature: string;
-}
-
-export interface UpdateRelease {
-  readonly version: string;
-  readonly notes: string;
-  readonly pubDate: string;
-  readonly platforms: Readonly<Record<string, UpdatePlatformArtifact>>;
-}
-
-export interface UpdateConfig {
-  readonly policy: UpdatePolicy;
-  readonly release: UpdateRelease;
-}
-
-export interface ReleaseFile {
-  readonly platform: string;
-  readonly arch: string;
-  readonly target?: string;
-  readonly name: string;
-  readonly url: string;
-  readonly sha256?: string;
-  readonly size?: number;
-}
-
-export interface ReleaseEntry {
-  readonly version: string;
-  readonly channel: string;
-  readonly releaseDate: string;
-  readonly notes: string;
-  readonly files: readonly ReleaseFile[];
-  readonly createdAtMs?: number;
-  readonly createdBy?: string;
-}
-
-export interface ReleaseHubMeta {
-  readonly name: string;
-  readonly tagline: string;
-  readonly intro: string;
-}
-
-export interface ReleaseHub {
-  readonly project: ReleaseHubMeta;
-  readonly releases: readonly ReleaseEntry[];
 }
 
 export interface DirectoryTenant {

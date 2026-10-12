@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/luckylhb90/bnbloc/internal/contentpkg"
 	"github.com/luckylhb90/bnbloc/internal/rbac"
 	"github.com/luckylhb90/bnbloc/internal/store"
 )
@@ -58,6 +59,16 @@ func (es enums) values(ts string) []string {
 		}
 	}
 	panic("wiregen: unknown enum " + ts)
+}
+
+// registryEnums are value sets a Go registry holds at runtime (no constant
+// group to read): the content kinds contentpkg registers.
+func registryEnums() enums {
+	var kinds []string
+	for _, k := range contentpkg.Kinds() {
+		kinds = append(kinds, k.Short)
+	}
+	return enums{{enumSource{goType: "contentpkg.Kinds()", ts: "ContentKind", doc: "A content component kind's short name (the contentpkg registry)."}, kinds}}
 }
 
 // externalEnums reads every enumSource's constants from its package source.

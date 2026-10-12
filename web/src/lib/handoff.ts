@@ -3,33 +3,11 @@
 // internal/wire/handoff.go; the package format is docs/room-export-format.md.
 // Everything here is pure so it is unit-tested (handoff.test.ts).
 
-export interface HandoffMember {
-  readonly userId: string;
-  readonly role: string;
-}
+export type { RoomHandoffInfo, RoomImportResult } from "./wire.gen.ts";
+import type { RoomHandoffInfo, RoomImportResult } from "./wire.gen.ts";
 
-// A room's import provenance (GET /v1/rooms/{id}/handoff).
-export interface RoomHandoffInfo {
-  readonly roomId: string;
-  readonly sourceRoomId: string;
-  readonly sourceRoomName: string;
-  readonly sourceExportedAtMs: number;
-  readonly sourceExportedBy: string;
-  readonly importedBy: string;
-  readonly importedAtMs: number;
-  readonly suggestedMembers: readonly HandoffMember[];
-}
-
-// POST /v1/rooms/import answer.
-export interface RoomImportResult {
-  readonly roomId: string;
-  readonly name: string;
-  readonly importedMessages: number;
-  readonly importedArtifacts: number;
-  readonly importedAttachments: number;
-  readonly skippedAttachments: readonly string[];
-  readonly handoff: RoomHandoffInfo;
-}
+export type { RoomExportMember as HandoffMember } from "./wire.gen.ts";
+import type { RoomExportMember as HandoffMember } from "./wire.gen.ts";
 
 // importedFrom reads the server-stamped payload.imported marker of a history
 // row and returns the source room's display name (falling back to its id), or

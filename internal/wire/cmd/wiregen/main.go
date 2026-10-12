@@ -68,6 +68,7 @@ func generate(root string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	enums = append(enums, registryEnums()...)
 	pkg, err := emitPackage(filepath.Join(root, "internal", "wire"), "github.com/luckylhb90/bnbloc/internal/wire", enums.names())
 	if err != nil {
 		return nil, err

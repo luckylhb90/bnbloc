@@ -10,10 +10,8 @@
 
 import { MaxDisplayNameRunes } from "./wire.gen.ts";
 
-export interface Profile {
-  readonly userId: string;
-  readonly displayName: string;
-}
+export type { UserProfile as Profile } from "./wire.gen.ts";
+import type { UserProfile as Profile } from "./wire.gen.ts";
 
 // defaultDisplayName is the local part of the id (before '@'), or the id
 // itself when it has no '@' (or the local part would be empty).

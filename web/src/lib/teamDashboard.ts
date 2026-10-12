@@ -1,97 +1,19 @@
-// Wire shapes and pure helpers for the team agent dashboard (F1) and borrow
-// billing (F3), mirroring internal/wire/team_agents.go. Optional fields are
-// absent when the server has no source for them (a missing cost means "not
-// reported", never zero).
+// Pure helpers for the team agent dashboard (F1) and borrow billing (F3);
+// the shapes are internal/wire/team_agents.go's (wire.gen.ts). Optional
+// fields are absent when the server has no source for them (a missing cost
+// means "not reported", never zero).
 
 import { compactNumber } from "./format.ts";
 
-export type TeamRange = "today" | "7d";
 export type TeamScope = "self" | "tenant";
 
-export type { TeamJob } from "./wire.gen.ts";
-import type { TeamJob } from "./wire.gen.ts";
+export type { QuotaRequestStatus, TeamJob, TeamRange, UsageAs, UsageGroupBy } from "./wire.gen.ts";
+import type { QuotaRequestStatus, TeamRange, UsageAs, UsageGroupBy } from "./wire.gen.ts";
 
-export interface TeamAgentUsage {
-  reportedTurns: number;
-  inputTokens: number;
-  outputTokens: number;
-  costUsd?: number;
-  shared?: boolean;
-}
+export type { BorrowUsageReport, BorrowUsageRow, CreateQuotaRequestInput, QuotaRequest, TeamAgent, TeamAgentUsage, TeamAgentsReply } from "./wire.gen.ts";
+import type { QuotaRequest, TeamAgent } from "./wire.gen.ts";
 
-export interface TeamAgent {
-  owner: string;
-  core: string;
-  provider: string;
-  targetId?: string;
-  online: boolean;
-  lastSeenAtMs?: number;
-  currentJob?: TeamJob;
-  lastJob?: TeamJob;
-  turns: number;
-  failedTurns: number;
-  borrowedRuns: number;
-  usage?: TeamAgentUsage;
-}
 
-export interface TeamAgentsReply {
-  scope: TeamScope;
-  range: TeamRange;
-  sinceMs: number;
-  agents: TeamAgent[];
-}
-
-export type UsageGroupBy = "day" | "month";
-export type UsageAs = "owner" | "borrower" | "tenant";
-
-export interface BorrowUsageRow {
-  period: string;
-  owner: string;
-  borrower: string;
-  provider: string;
-  roomId: string;
-  runs: number;
-  cost?: number;
-  inputTokens?: number;
-  outputTokens?: number;
-}
-
-export interface BorrowUsageReport {
-  as: UsageAs;
-  groupBy: UsageGroupBy;
-  fromMs: number;
-  toMs: number;
-  rows: BorrowUsageRow[];
-  totalRuns: number;
-  totalCost?: number;
-  totalInputTokens?: number;
-  totalOutputTokens?: number;
-  truncated?: boolean;
-}
-
-export type QuotaRequestStatus = "pending" | "approved" | "declined";
-
-export interface QuotaRequest {
-  requestId: string;
-  roomId: string;
-  owner: string;
-  requester: string;
-  provider: string;
-  requestedRuns?: number;
-  note?: string;
-  status: QuotaRequestStatus;
-  grantedRuns?: number;
-  createdAtMs: number;
-  decidedAtMs?: number;
-}
-
-export interface CreateQuotaRequestInput {
-  roomId: string;
-  owner: string;
-  provider: string;
-  requestedRuns?: number;
-  note: string;
-}
 
 export interface UsageReportQuery {
   as: UsageAs;
@@ -151,7 +73,6 @@ export function formatTokens(input: number | undefined, output: number | undefin
   const n = (v: number | undefined) => (v === undefined ? "—" : compactNumber(v));
   return `${n(input)} in / ${n(output)} out`;
 }
-
 
 // summarizeTeam totals the dashboard rows for the header strip.
 export function summarizeTeam(agents: readonly TeamAgent[]): {

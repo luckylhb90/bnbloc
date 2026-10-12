@@ -3,11 +3,8 @@
 // internal/wire/webpush.go; the contract is documented in docs/notifications.md.
 // Browser glue (service worker, PushManager, API calls) lives in webPush.ts.
 
-// The POST /v1/my/push-subscriptions body (PushSubscription.toJSON()).
-export interface PushSubscriptionBody {
-  endpoint: string;
-  keys: { p256dh: string; auth: string };
-}
+export type { WebPushSubscriptionInput as PushSubscriptionBody } from "./wire.gen.ts";
+import type { WebPushSubscriptionInput as PushSubscriptionBody } from "./wire.gen.ts";
 
 // What this runtime can do. The desktop shell never registers the push
 // worker: it is not a browser tab, and the member gets notifications there

@@ -1,30 +1,14 @@
 // Expert teams (docs/prd/2026-10-12-experts-and-teams.md §8): an expert with
-// a roster. The shapes mirror internal/wire/teams.go; the helpers are pure
+// a roster. The shapes are internal/wire/teams.go's (wire.gen.ts); the helpers are pure
 // (roster wording, the plan request, the estimate sentence) so they are
 // unit-tested.
 import { formatUsd } from "./format.ts";
 
-export interface ContentTeamExpert {
-  readonly componentId: string;
-  readonly name: string;
-  readonly displayName?: string;
-  readonly description?: string;
-  readonly version: string;
-}
+export type { AgentCostSample, ContentTeam, ContentTeamExpert, ContentTeamMember, PlanAgent, TeamCostEstimate, TeamPlanEntry, TeamPlanRequest } from "./wire.gen.ts";
+import type { ContentTeam, TeamCostEstimate, TeamPlanEntry, TeamPlanRequest } from "./wire.gen.ts";
 
-export interface ContentTeamMember {
-  readonly role: string;
-  readonly expert: string; // name@range
-  readonly defaultAgent: string;
-  readonly description?: string;
-  readonly resolved?: ContentTeamExpert;
-  readonly missing?: string;
-}
-
-export interface ContentTeam {
-  readonly lead: string;
-  readonly members: readonly ContentTeamMember[];
-}
+export type { TeamPlanReply as TeamPlan } from "./wire.gen.ts";
+import type { TeamPlanReply as TeamPlan } from "./wire.gen.ts";
 
 // A role's default agent, as the team block names it.
 export type DefaultAgentKind = "requester" | "platform" | "member";
@@ -57,47 +41,6 @@ export function defaultAgentLabel(spec: string, nameOf: (id: string) => string =
   if (d.kind === "requester") return "your own agent";
   if (d.kind === "platform") return "a platform agent";
   return d.provider ? `${nameOf(d.owner!)}'s ${d.provider}` : `${nameOf(d.owner!)}'s agent`;
-}
-
-// The team plan (POST /v1/rooms/{room}/team-plan): which agent takes each
-// role, and the pre-flight estimate.
-export interface PlanAgent {
-  readonly ownerId: string;
-  readonly core?: string;
-  readonly provider: string;
-  readonly handle?: string;
-  readonly platform?: boolean;
-}
-
-export interface AgentCostSample {
-  readonly runs: number;
-  readonly avgCostUsd?: number;
-}
-
-export interface TeamPlanEntry {
-  readonly role?: string;
-  readonly defaultAgent?: string;
-  readonly agent?: PlanAgent;
-  readonly online: boolean;
-  readonly reason?: string;
-  readonly cost?: AgentCostSample;
-}
-
-export interface TeamCostEstimate {
-  readonly costUsd?: number;
-  readonly runs: number;
-  readonly unknown?: readonly string[];
-}
-
-export interface TeamPlan {
-  readonly lead: TeamPlanEntry;
-  readonly roles: readonly TeamPlanEntry[];
-  readonly estimate: TeamCostEstimate;
-}
-
-export interface TeamPlanRequest {
-  readonly lead: { ownerId: string; core?: string; provider: string };
-  readonly members: readonly { role: string; defaultAgent: string }[];
 }
 
 export function planRequest(team: ContentTeam, lead: { ownerId: string; core?: string; provider: string }): TeamPlanRequest {

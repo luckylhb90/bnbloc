@@ -14,12 +14,16 @@ const MaxChatTextBytes = 16 * 1024
 // addressed to one member's agent (the bridge serving that agent claims it,
 // and enforces borrow authorization at drive time exactly as for a typed
 // message).
+//
+//wire:union ScheduleRecipientKind
 const (
 	ScheduleRecipientRoom  = "room"
 	ScheduleRecipientAgent = "agent"
 )
 
 // Schedule recurrence kinds.
+//
+//wire:union RecurrenceKind
 const (
 	// RecurOnce runs once at AtMs.
 	RecurOnce = "once"
@@ -33,6 +37,8 @@ const (
 )
 
 // Schedule run outcomes recorded on the schedule (LastStatus).
+//
+//wire:union ScheduleRunStatus
 const (
 	ScheduleRunOK      = "ok"
 	ScheduleRunError   = "error"
@@ -43,7 +49,7 @@ const (
 // agent; kind "agent" carries the target agent's owner + provider (+ core
 // when the owner exposes more than one).
 type ScheduleRecipient struct {
-	Kind     string `json:"kind"`
+	Kind     string `json:"kind" tstype:"ScheduleRecipientKind"`
 	OwnerID  string `json:"ownerId,omitempty"`
 	Provider string `json:"provider,omitempty"`
 	Core     string `json:"core,omitempty"`
@@ -53,7 +59,7 @@ type ScheduleRecipient struct {
 // are meaningful: AtMs (once), Time (daily, weekly), Days (weekly), Cron
 // (cron).
 type ScheduleRecurrence struct {
-	Kind string `json:"kind"`
+	Kind string `json:"kind" tstype:"RecurrenceKind"`
 	AtMs int64  `json:"atMs,omitempty"`
 	Time string `json:"time,omitempty"`
 	Days []int  `json:"days,omitempty"`
@@ -77,7 +83,7 @@ type RoomSchedule struct {
 	Enabled     bool               `json:"enabled"`
 	NextRunAtMs int64              `json:"nextRunAtMs,omitempty"`
 	LastRunAtMs int64              `json:"lastRunAtMs,omitempty"`
-	LastStatus  string             `json:"lastStatus,omitempty"`
+	LastStatus  string             `json:"lastStatus,omitempty" tstype:"ScheduleRunStatus"`
 	LastError   string             `json:"lastError,omitempty"`
 	LastSeq     int64              `json:"lastSeq,omitempty"`
 	RunCount    int64              `json:"runCount"`
@@ -93,6 +99,8 @@ type ScheduledMarker struct {
 
 // Room template visibility values: private is the author only, tenant is
 // every member of the author's tenant.
+//
+//wire:union TemplateVisibility
 const (
 	TemplatePrivate = "private"
 	TemplateTenant  = "tenant"
@@ -135,7 +143,7 @@ type RoomTemplate struct {
 	TenantID    string           `json:"tenantId"`
 	Name        string           `json:"name"`
 	Description string           `json:"description,omitempty"`
-	Visibility  string           `json:"visibility"`
+	Visibility  string           `json:"visibility" tstype:"TemplateVisibility"`
 	CreatedBy   string           `json:"createdBy"`
 	Body        RoomTemplateBody `json:"body"`
 	UseCount    int64            `json:"useCount"`

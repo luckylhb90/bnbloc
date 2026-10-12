@@ -30,7 +30,7 @@ const (
 // ContentSaved is the payload of EventContentSaved.
 type ContentSaved struct {
 	ComponentID string `json:"componentId"`
-	Kind        string `json:"kind"`
+	Kind        string `json:"kind" tstype:"ContentKind"`
 	Name        string `json:"name"`
 	DisplayName string `json:"displayName,omitempty"`
 	Version     string `json:"version"`

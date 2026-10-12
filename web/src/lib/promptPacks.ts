@@ -5,32 +5,11 @@
 // kept in step with the body, prompts drafted from messages). Unit-tested.
 import type { ContentComponent, ContentUse } from "./contentComponents.ts";
 
-export interface PromptVariable {
-  readonly name: string;
-  readonly label?: string;
-  readonly default?: string;
-  readonly options?: readonly string[];
-}
+export type { ContentPrompt } from "./wire.gen.ts";
+import type { ContentPrompt } from "./wire.gen.ts";
 
-export interface ContentPrompt {
-  readonly id: string;
-  readonly title: string;
-  readonly body: string;
-  readonly variables?: readonly PromptVariable[];
-  readonly tags?: readonly string[];
-  readonly slash?: string;
-  // Offered among a room's starter prompts when the pack is on for the room.
-  readonly starter?: boolean;
-  readonly uses: number;
-}
-
-// A pack's prompt an expert quick prompt resolved to.
-export interface PromptRef {
-  readonly componentId: string;
-  readonly pack: string;
-  readonly version: string;
-  readonly prompt: ContentPrompt;
-}
+export type { ContentPromptRef as PromptRef, ContentPromptVariable as PromptVariable } from "./wire.gen.ts";
+import type { ContentPromptRef as PromptRef, ContentPromptVariable as PromptVariable } from "./wire.gen.ts";
 
 // The member's personal pack (created by their first "Save as prompt").
 export const PERSONAL_PROMPT_PACK = "my-prompts";

@@ -1,17 +1,10 @@
 // Member notification preferences (GET/PUT /v1/my/notification-prefs) and
 // the notifier components a member is reached through (/v1/my/notifiers).
-// Shapes mirror internal/wire notifications.go; the contract is documented in
+// Shapes are internal/wire/notifications.go's (wire.gen.ts); the contract is documented in
 // docs/notifications.md.
 
-export interface NotificationPrefs {
-  mentions: boolean;
-  agentFinished: boolean;
-  agentFailed: boolean;
-  borrowRequests: boolean;
-  contentShared: boolean;
-  contentReview: boolean;
-  quietRooms: string[];
-}
+export type { MemberNotifier, NotificationPrefs, NotificationRecipientResult, NotificationTestResult } from "./wire.gen.ts";
+import type { NotificationPrefs, NotificationTestResult } from "./wire.gen.ts";
 
 // NotificationToggle is a per-type switch of the member's preferences.
 export type NotificationToggle = "mentions" | "agentFinished" | "agentFailed" | "borrowRequests" | "contentShared" | "contentReview";
@@ -26,30 +19,6 @@ export const NOTIFICATION_TOGGLES: readonly { readonly key: NotificationToggle; 
   { key: "contentShared", label: "Shared with you", hint: "Someone shares an expert, skill pack or prompt pack with you, or with a room you join." },
   { key: "contentReview", label: "Content reviews", hint: "Content waits for your approval as an organization admin, or an admin decided on content you asked to publish." },
 ];
-
-// A notifier component as the member sees it (the organization's delivery).
-// An opt-in notifier reaches the member only once they turned it on.
-export interface MemberNotifier {
-  name: string;
-  description?: string;
-  optIn: boolean;
-  installed: boolean;
-}
-
-export interface NotificationRecipientResult {
-  userId: string;
-  ok: boolean;
-  error?: string;
-  retryable?: boolean;
-}
-
-export interface NotificationTestResult {
-  delivered: boolean;
-  status?: number;
-  error?: string;
-  eventId: string;
-  results?: NotificationRecipientResult[];
-}
 
 // The server default for a member who never saved preferences.
 export const DEFAULT_NOTIFICATION_PREFS: NotificationPrefs = {

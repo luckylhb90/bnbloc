@@ -5,7 +5,7 @@ function assert(condition: boolean, message: string): void {
 }
 
 const saved = parseContentSaved({ componentId: "cc_1", kind: "prompt", name: "kit", displayName: "Kit", version: "1.0.0", action: "saved", created: true, owner: "maya" });
-assert(saved !== null && saved.kind === "prompt" && saved.created && saved.displayName === "Kit", `parsed: ${JSON.stringify(saved)}`);
+assert(saved !== null && saved.kind === "prompt" && saved.created === true && saved.displayName === "Kit", `parsed: ${JSON.stringify(saved)}`);
 assert(parseContentSaved({ componentId: "cc_1", kind: "core", name: "x", version: "1", action: "saved", owner: "maya" }) === null, "unknown kind refused");
 assert(parseContentSaved({ componentId: "cc_1", kind: "expert", name: "x", version: "1", action: "deleted", owner: "maya" }) === null, "unknown action refused");
 assert(parseContentSaved({ kind: "expert", version: "1", action: "saved", owner: "maya" }) === null, "no component refused");

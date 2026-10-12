@@ -1,27 +1,8 @@
 // Deployment build identity (GET /v1/platform/versions, super-admin): wire
-// shapes mirror internal/wire/versions.go.
+// shapes are internal/wire/versions.go's (wire.gen.ts).
 
-export interface ServiceVersion {
-  service: string;
-  commit: string;
-  builtAt?: string;
-  instance: string;
-}
-
-export interface WebBundleVersion {
-  version: string;
-  commit: string;
-}
-
-export interface DeploymentVersions {
-  services: ServiceVersion[];
-  web?: WebBundleVersion;
-  unreachable?: { service: string; error: string }[];
-  consistent: boolean;
-  problems?: string[];
-  // Components built without a commit stamp: unverifiable, not skew.
-  warnings?: string[];
-}
+export type { DeploymentVersions, ServiceVersion, WebBundleVersion } from "./wire.gen.ts";
+import type { DeploymentVersions } from "./wire.gen.ts";
 
 export interface DeploymentRow {
   service: string;

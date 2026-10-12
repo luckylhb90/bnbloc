@@ -1408,8 +1408,8 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   wiregen reads); a limit a client checks is a constant in
   `internal/wire/limits.go`; a rule table the web needs (org role grants,
   terminal job statuses, inviting room roles) is computed by wiregen from
-  its Go owner. The web re-exports these types (`lib/apiModels.ts`) and
-  never redeclares one. A free-form payload (a reply's metrics map, a
+  its Go owner. The web re-exports these types (`export type { X } from
+  "./wire.gen.ts"`) and never redeclares one (web boundary rule T8). A free-form payload (a reply's metrics map, a
   history row) is pinned by a golden fixture in `internal/wire/testdata/`
   that both test suites read (`readTurnMetrics` ≡ `TurnUsageFromMetrics`).
 

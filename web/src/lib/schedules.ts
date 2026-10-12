@@ -4,42 +4,11 @@
 // that member, through the normal chat path.
 import { defaultDisplayName, formatAgentHandle } from "./displayNames.ts";
 
-export type ScheduleRecipient =
-  | { kind: "room" }
-  | { kind: "agent"; ownerId: string; provider: string; core?: string };
+export type { RoomSchedule, ScheduleRecipient, ScheduleRecurrence, ScheduledMarker } from "./wire.gen.ts";
+import type { RoomSchedule, ScheduleRecipient, ScheduleRecurrence, ScheduledMarker } from "./wire.gen.ts";
 
-export type RecurrenceKind = "once" | "daily" | "weekly" | "cron";
-
-export interface ScheduleRecurrence {
-  kind: RecurrenceKind;
-  atMs?: number; // once
-  time?: string; // daily, weekly: "HH:MM"
-  days?: number[]; // weekly: 0 = Sunday … 6 = Saturday
-  cron?: string; // cron: "minute hour day-of-month month day-of-week"
-}
-
-export type ScheduleRunStatus = "ok" | "error" | "skipped";
-
-export interface RoomSchedule {
-  scheduleId: string;
-  tenantId: string;
-  roomId: string;
-  channelId?: string;
-  createdBy: string;
-  text: string;
-  recipient: ScheduleRecipient;
-  recurrence: ScheduleRecurrence;
-  timezone: string;
-  enabled: boolean;
-  nextRunAtMs?: number;
-  lastRunAtMs?: number;
-  lastStatus?: ScheduleRunStatus;
-  lastError?: string;
-  lastSeq?: number;
-  runCount: number;
-  createdAtMs: number;
-  updatedAtMs: number;
-}
+export type { RecurrenceKind, ScheduleRunStatus } from "./wire.gen.ts";
+import type { RecurrenceKind } from "./wire.gen.ts";
 
 export interface ScheduleInput {
   text: string;
@@ -48,12 +17,6 @@ export interface ScheduleInput {
   recurrence: ScheduleRecurrence;
   timezone: string;
   enabled?: boolean;
-}
-
-// The scheduled marker a chat_message payload carries when the scheduler
-// posted it (payload.scheduled).
-export interface ScheduledMarker {
-  scheduleId: string;
 }
 
 export const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"] as const;
@@ -186,7 +149,7 @@ export function isBorrowedRecipient(r: ScheduleRecipient, me: string): boolean {
 // recipientLabel renders the recipient by display name ("room",
 // "Jack · codex"); the canonical handle stays recipientHandle's job.
 export function recipientLabel(r: ScheduleRecipient, nameOf: (id: string) => string = defaultDisplayName): string {
-  return r.kind === "agent" ? formatAgentHandle(nameOf(r.ownerId), r.provider) : "room";
+  return r.kind === "agent" ? formatAgentHandle(nameOf(r.ownerId ?? ""), r.provider ?? "") : "room";
 }
 
 // scheduleStatus summarizes a schedule's state for the list.

@@ -6,22 +6,11 @@
 
 import type { ContentKind } from "./contentComponents.ts";
 
+export type { ContentSaved } from "./wire.gen.ts";
+import type { ContentSaved } from "./wire.gen.ts";
+
 // The room event kind.
 export const CONTENT_SAVED = "content_saved";
-
-export interface ContentSaved {
-  readonly componentId: string;
-  readonly kind: ContentKind;
-  readonly name: string;
-  readonly displayName?: string;
-  readonly version: string;
-  // saved: a new component or version; submitted: a publish request to the
-  // organization.
-  readonly action: "saved" | "submitted";
-  readonly created: boolean;
-  // The member it was saved for (the job's requester).
-  readonly owner: string;
-}
 
 const KINDS: readonly ContentKind[] = ["expert", "skill", "prompt"];
 

@@ -1,59 +1,16 @@
 import { compactNumber, formatUsd } from "./format.ts";
 
+export type { BudgetPeriod, BudgetView, MemberBurn, TenantBudgetsUpdate, UsageBurn } from "./wire.gen.ts";
+import type { BudgetView, TenantBudgetsUpdate, UsageBurn } from "./wire.gen.ts";
+
+export type { UsageBudgetLimits as BudgetLimits, MyBudgetReply as MyBudget, TenantBudgetsReply as TenantBudgets } from "./wire.gen.ts";
+import type { UsageBudgetLimits as BudgetLimits } from "./wire.gen.ts";
+
 // Monthly usage budgets (R12): org admins set token/cost budgets per member
 // and for the organization (GET/PUT /v1/tenant/budgets); a member reads their
 // own (GET /v1/my/budget). The month is the UTC calendar month; burn is the
 // usage the member's agents reported on their replies (a borrowed run counts
 // against the agent's owner).
-
-export interface BudgetLimits {
-  tokens?: number;
-  cost?: number;
-  warnAtPercent: number;
-  hardStop: boolean;
-}
-
-export interface UsageBurn {
-  tokens: number;
-  cost: number;
-}
-
-export interface BudgetView extends BudgetLimits {
-  userId?: string;
-  burn: UsageBurn;
-  percent: number;
-  reached: boolean;
-  updatedBy?: string;
-  updatedAtMs?: number;
-}
-
-export interface BudgetPeriod {
-  period: string;
-  periodStartMs: number;
-  periodEndMs: number;
-}
-
-export interface MemberBurn extends UsageBurn {
-  userId: string;
-}
-
-export interface TenantBudgets extends BudgetPeriod {
-  tenant: BudgetView | null;
-  members: BudgetView[];
-  usage: MemberBurn[];
-}
-
-export interface MyBudget extends BudgetPeriod {
-  budget: BudgetView | null;
-  burn: UsageBurn;
-  blocked: boolean;
-  blockedBy?: "member" | "tenant";
-}
-
-export interface TenantBudgetsUpdate {
-  tenant: BudgetLimits | null;
-  members: (BudgetLimits & { userId: string })[];
-}
 
 // BudgetDraft is one budget row being edited (form strings).
 export interface BudgetDraft {

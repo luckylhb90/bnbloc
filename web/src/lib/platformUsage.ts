@@ -6,55 +6,8 @@
 import { compactNumber, formatUsd } from "./format.ts";
 import { prettyModel } from "./modelLabel.ts";
 
-export interface PlatformUsageTotals {
-  readonly runs: number;
-  readonly members: number;
-  readonly rooms: number;
-  readonly tokens: number;
-  readonly cost: number;
-}
-
-export interface PlatformUsageMember {
-  readonly memberId: string;
-  readonly runs: number;
-  readonly tokens: number;
-  readonly cost: number;
-}
-
-export interface PlatformUsageRoom {
-  readonly roomId: string;
-  readonly roomName: string;
-  readonly tenantId: string;
-  readonly runs: number;
-  readonly tokens: number;
-  readonly cost: number;
-}
-
-export interface PlatformUsageRun {
-  readonly atMs: number;
-  readonly memberId: string;
-  readonly roomId: string;
-  readonly roomName: string;
-  readonly tenantId: string;
-  // "<core>/<provider>"
-  readonly agent: string;
-  readonly hostUserId: string;
-  // Empty: the run used the agent's default model.
-  readonly model: string;
-  readonly cost: number;
-}
-
-export interface PlatformAgentsUsage {
-  readonly today: PlatformUsageTotals;
-  readonly month: PlatformUsageTotals;
-  // Top 5 of the month.
-  readonly topMembers: readonly PlatformUsageMember[];
-  readonly topRooms: readonly PlatformUsageRoom[];
-  // The last 20 runs, newest first.
-  readonly recent: readonly PlatformUsageRun[];
-  // The server hit its row cap: the figures cover the newest rows only.
-  readonly truncated: boolean;
-}
+export type { PlatformAgentUsageReply as PlatformAgentsUsage, PlatformAgentUsageMember as PlatformUsageMember, PlatformAgentUsageRoom as PlatformUsageRoom, PlatformAgentUsageRun as PlatformUsageRun, PlatformAgentUsageTotals as PlatformUsageTotals } from "./wire.gen.ts";
+import type { PlatformAgentUsageReply as PlatformAgentsUsage, PlatformAgentUsageTotals as PlatformUsageTotals } from "./wire.gen.ts";
 
 const ZERO: PlatformUsageTotals = { runs: 0, members: 0, rooms: 0, tokens: 0, cost: 0 };
 

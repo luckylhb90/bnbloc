@@ -1,50 +1,12 @@
 // Wire shapes of the team features served by realtime (internal/wire/team.go):
 // chat messages marked as tasks and global search.
 
-export type TaskStatus = "open" | "done";
+export type { MessageTask, SearchResponse, SearchResult } from "./wire.gen.ts";
 
-export interface MessageTask {
-  roomId: string;
-  channelId?: string;
-  seq: number;
-  status: TaskStatus;
-  title: string;
-  messageAuthor?: string;
-  createdBy: string;
-  createdAtMs: number;
-  doneBy?: string;
-  doneAtMs?: number;
-}
+export type { TaskUpdatedPayload as TaskUpdate } from "./wire.gen.ts";
 
-// Payload of the transient task_updated room event.
-export interface TaskUpdate {
-  seq: number;
-  task?: MessageTask;
-  removed?: boolean;
-}
+export type { TaskStatus } from "./wire.gen.ts";
 
 // A prompt hit is a prompt of a prompt pack the member can see (no room).
-export type SearchKind = "message" | "artifact" | "prompt";
+export type { SearchResultKind as SearchKind } from "./wire.gen.ts";
 
-export interface SearchResult {
-  kind: SearchKind;
-  roomId?: string;
-  roomName?: string;
-  channelId?: string;
-  // "people" when a message hit is in the room's people chat.
-  channelKind?: "people";
-  seq?: number;
-  artifactId?: string;
-  // A prompt hit's pack and prompt.
-  componentId?: string;
-  promptId?: string;
-  title?: string;
-  snippet: string;
-  author?: string;
-  atMs: number;
-}
-
-export interface SearchResponse {
-  results: SearchResult[];
-  nextBefore?: number;
-}

@@ -16,28 +16,22 @@ import { pickHost } from "./platformRouting.ts";
 import type { RoomAgent } from "../views/composer/types.ts";
 import { sameUser } from "./format.ts";
 
-export interface PlatformAgentRef {
-  readonly core: string;
-  readonly provider: string;
-}
-
-// One published agent of a host's policy entry. defaultModel (optional) is
-// the model a platform turn runs with when the member picked none.
-export interface PolicyAgent extends PlatformAgentRef {
-  readonly defaultModel?: string;
-}
-
-// One super admin's entry of the policy (GET /v1/platform/platform-agents).
-export interface PlatformHostPolicy {
-  readonly hostUserId: string;
-  readonly enabled: boolean;
-  readonly agents: readonly PolicyAgent[];
-}
-
-// The whole policy: every host's entry. Each super admin edits only their own.
-export interface PlatformAgentsPolicy {
-  readonly hosts: readonly PlatformHostPolicy[];
-}
+export type {
+  PlatformAgent,
+  PlatformAgentHost as PlatformHostPolicy,
+  PlatformAgentHostState as PlatformHost,
+  PlatformAgentRef,
+  PlatformAgentsPolicy,
+  PlatformAgentSpec as PolicyAgent,
+} from "./wire.gen.ts";
+import type {
+  PlatformAgent,
+  PlatformAgentHost as PlatformHostPolicy,
+  PlatformAgentHostState as PlatformHost,
+  PlatformAgentRef,
+  PlatformAgentsPolicy,
+  PlatformAgentSpec as PolicyAgent,
+} from "./wire.gen.ts";
 
 // PUT /v1/platform/platform-agents: the caller's entry only.
 export interface PlatformAgentsPolicyInput {
@@ -45,30 +39,9 @@ export interface PlatformAgentsPolicyInput {
   readonly agents: readonly PolicyAgent[];
 }
 
-// One host of a platform agent as members see it. queued counts the host's
-// claimable jobs not yet started; targetId is "" while offline. defaultModel
-// (optional) is that host's policy default for the agent.
-export interface PlatformHost {
-  readonly hostUserId: string;
-  readonly online: boolean;
-  readonly queued: number;
-  readonly targetId: string;
-  readonly defaultModel?: string;
-}
-
-// A platform agent offered to the caller's organization (GET
-// /v1/platform-agents): one entry per (core, provider). online = any host
-// online (the client re-derives it from merged host states).
-export interface PlatformAgent extends PlatformAgentRef {
-  readonly online: boolean;
-  readonly hosts: readonly PlatformHost[];
-}
-
-// A platform agent added to one room (GET /v1/rooms/{id}/platform-agents).
-export interface RoomPlatformAgent extends PlatformAgent {
-  readonly addedBy: string;
-  readonly addedAtMs: number;
-}
+// A platform agent added to one room (GET /v1/rooms/{id}/platform-agents):
+// the room answer always names who added it and when.
+export type RoomPlatformAgent = PlatformAgent & { readonly addedBy: string; readonly addedAtMs: number };
 
 // One "Platform agents" row of the composer's picker.
 export interface PlatformChoice {
@@ -97,7 +70,6 @@ const noLastHost: LastHostLookup = () => null;
 export function samePlatformAgent(a: PlatformAgentRef, b: PlatformAgentRef): boolean {
   return (a.core ?? "").toLowerCase() === (b.core ?? "").toLowerCase() && a.provider.toLowerCase() === b.provider.toLowerCase();
 }
-
 
 export function platformAgentOnline(a: PlatformAgent): boolean {
   return a.hosts.some((h) => h.online);

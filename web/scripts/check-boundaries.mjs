@@ -13,7 +13,19 @@ import { fileURLToPath } from "node:url";
 
 export const SRC = join(fileURLToPath(new URL(".", import.meta.url)), "..", "src");
 
+// The type names internal/wire/cmd/wiregen generates (lib/wire.gen.ts).
+const WIRE_TYPES = [...readFileSync(join(SRC, "lib", "wire.gen.ts"), "utf8").matchAll(/^export (?:interface|type) (\w+)/gm)].map((m) => m[1]);
+
 export const RULES = [
+  {
+    id: "T8",
+    name: "a server shape is generated from internal/wire (wire.gen.ts), never redeclared",
+    // A hand-written mirror drifts from Go (web M26-M28): re-export the
+    // generated type (export type { X } from "./wire.gen.ts") instead.
+    pattern: new RegExp(`^export (?:interface|type) (?:${WIRE_TYPES.join("|")})\\b`, "m"),
+    allowed: ["lib/wire.gen.ts"],
+    sample: { file: "lib/api.ts", text: "export interface AgentJob {\n  jobId: string;\n}" },
+  },
   {
     id: 6,
     name: "the session token rides a URL only on the room event stream",

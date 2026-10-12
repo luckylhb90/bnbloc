@@ -1,48 +1,12 @@
 // Room templates (N3): wire shapes of the room service's /v1/room-templates
 // (internal/wire/schedules.go) and pure helpers for the template UI.
-import type { ScheduleRecipient, ScheduleRecurrence } from "./schedules.ts";
 import { MaxStarterPromptBytes, MaxStarterPrompts } from "./wire.gen.ts";
 
-export type TemplateVisibility = "private" | "tenant";
+export type { RoomTemplate, RoomTemplateBody, RoomTemplateInstance, TemplateAgent, TemplateSchedule } from "./wire.gen.ts";
+import type { RoomTemplateBody, RoomTemplateInstance, TemplateAgent } from "./wire.gen.ts";
 
-// A suggested agent is a HINT: after creating a room from the template the
-// UI offers to invite its owner and to request their borrow authorization.
-// Nothing is ever granted automatically.
-export interface TemplateAgent {
-  ownerId: string;
-  provider: string;
-  core?: string;
-}
-
-export interface TemplateSchedule {
-  channel?: string; // channel NAME in the template; empty = default channel
-  text: string;
-  recipient: ScheduleRecipient;
-  recurrence: ScheduleRecurrence;
-  timezone: string;
-}
-
-export interface RoomTemplateBody {
-  roomDescription?: string;
-  channels: string[];
-  starterPrompts: string[];
-  suggestedAgents: TemplateAgent[];
-  defaultMembers: string[];
-  schedules: TemplateSchedule[];
-}
-
-export interface RoomTemplate {
-  templateId: string;
-  tenantId: string;
-  name: string;
-  description?: string;
-  visibility: TemplateVisibility;
-  createdBy: string;
-  body: RoomTemplateBody;
-  useCount: number;
-  createdAtMs: number;
-  updatedAtMs: number;
-}
+export type { TemplateVisibility } from "./wire.gen.ts";
+import type { TemplateVisibility } from "./wire.gen.ts";
 
 export interface RoomTemplateInput {
   name: string;
@@ -68,18 +32,6 @@ export interface InstantiateInput {
   roomId: string;
   name?: string;
   visibility?: "private" | "shared";
-}
-
-export interface RoomTemplateInstance {
-  roomId: string;
-  name: string;
-  templateId: string;
-  channels: string[];
-  addedMembers: string[];
-  failedMembers?: string[];
-  schedules: string[];
-  starterPrompts: string[];
-  suggestedAgents: TemplateAgent[];
 }
 
 export function emptyTemplateBody(): RoomTemplateBody {

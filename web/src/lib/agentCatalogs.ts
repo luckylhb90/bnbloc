@@ -8,6 +8,9 @@ import type { AgentTarget } from "./apiModels.ts";
 import { borrowKey, type SharedAgent } from "./roomAgents.ts";
 import { sameUser } from "./format.ts";
 
+export type { RoomAgentCatalog } from "./wire.gen.ts";
+import type { RoomAgentCatalog } from "./wire.gen.ts";
+
 // A model catalog as the picker reads it (AgentTarget's picker fields).
 export interface ModelCatalog {
   readonly core?: string;
@@ -17,21 +20,6 @@ export interface ModelCatalog {
   readonly reasoningByModel?: Record<string, string[]>;
   readonly defaultModel?: string;
   readonly defaultReasoning?: string;
-}
-
-// One row of GET /v1/rooms/{id}/agent-catalogs (wire.RoomAgentCatalog).
-export interface RoomAgentCatalog {
-  readonly ownerUserId: string;
-  readonly core: string;
-  readonly provider: string;
-  readonly online: boolean;
-  readonly modelOptions?: {
-    readonly models?: string[];
-    readonly reasoningEfforts?: string[];
-    readonly reasoningByModel?: Record<string, string[]>;
-    readonly defaultModel?: string;
-    readonly defaultReasoning?: string;
-  };
 }
 
 // Everything the composer resolves a room recipient's catalog from: the
@@ -53,7 +41,6 @@ export interface CatalogPick {
   // A platform agent's server-side default model (its host's policy).
   readonly defaultModel?: string;
 }
-
 
 function sameAgent(a: { readonly core?: string; readonly provider: string }, b: { readonly core?: string; readonly provider: string }): boolean {
   return a.provider === b.provider && (a.core || "") === (b.core || "");

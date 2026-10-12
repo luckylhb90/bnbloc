@@ -4,77 +4,8 @@
 // consoles render them with. Calls are in contentSharingApi.ts.
 import { contentLabel, isBuiltin, type ContentComponent, type ContentPublishRequest } from "./contentComponents.ts";
 
-export interface ContentShareResult {
-  readonly member: string;
-  readonly componentId: string;
-  readonly version: string;
-  readonly status: "created" | "updated" | "unchanged";
-}
-
-export interface ContentShareSkip {
-  readonly member: string;
-  readonly reason: string;
-}
-
-export interface ContentShareReply {
-  readonly version: string;
-  readonly shared: readonly ContentShareResult[];
-  readonly skipped: readonly ContentShareSkip[];
-  // The room whose share now stands: people who join it later get a copy.
-  readonly room?: string;
-}
-
-// A standing share with a room: members who join it get a copy at version
-// until the author revokes it.
-export interface ContentRoomShare {
-  readonly roomId: string;
-  readonly version: string;
-  readonly note?: string;
-  readonly createdAtMs: number;
-  readonly updatedAtMs: number;
-}
-
-export interface ContentShares {
-  readonly copies: readonly ContentCopy[];
-  readonly rooms: readonly ContentRoomShare[];
-}
-
-export interface ContentCopy {
-  readonly member: string;
-  readonly componentId: string;
-  readonly version: string;
-  readonly updatedAtMs: number;
-}
-
-export interface ContentPublishReply {
-  readonly scope: string;
-  readonly request?: ContentPublishRequest;
-  readonly note: string;
-}
-
-export interface ContentFileChange {
-  readonly path: string;
-  readonly change: "added" | "removed" | "changed";
-  readonly binary?: boolean;
-  readonly before?: string;
-  readonly after?: string;
-  readonly truncated?: boolean;
-}
-
-export interface ContentReview {
-  readonly request: ContentPublishRequest;
-  readonly component: ContentComponent;
-  readonly scriptFiles: readonly string[];
-  readonly previous?: ContentComponent;
-  readonly files: readonly ContentFileChange[];
-}
-
-export interface ContentAdminComponent {
-  readonly component: ContentComponent;
-  readonly tenantId?: string;
-  // Platform content limited to these organizations (absent: every one).
-  readonly enabledTenants?: readonly string[];
-}
+export type { ContentAdminComponent, ContentCopy, ContentFileChange, ContentPublishReply, ContentReview, ContentRoomShare, ContentShareReply, ContentShareResult, ContentShareSkip, ContentShares } from "./wire.gen.ts";
+import type { ContentFileChange, ContentShareReply } from "./wire.gen.ts";
 
 // tenantScopeLabel describes where platform content reaches.
 export function tenantScopeLabel(tenants: readonly string[] | undefined): string {

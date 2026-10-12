@@ -3,22 +3,8 @@
 // public share page format with. No React, no DOM; unit-tested under node.
 // The endpoints live in sharesApi.ts.
 
-/** One share link of a deliverable (the secret token is never listed; it is
- *  returned once, at create). */
-export interface ShareView {
-  readonly shareId: string;
-  readonly artifactId: string;
-  /** 0 = always the latest version. */
-  readonly version: number;
-  readonly createdBy: string;
-  readonly createdAtMs: number;
-  readonly expiresAtMs: number;
-  readonly revokedAtMs?: number;
-  readonly revokedBy?: string;
-  readonly viewCount: number;
-  readonly lastViewedAtMs?: number;
-  readonly active: boolean;
-}
+export type { ShareView } from "./wire.gen.ts";
+import type { ShareView } from "./wire.gen.ts";
 
 /** A share as the org-admin list returns it (every room of the tenant). */
 export interface TenantShareView extends ShareView {
