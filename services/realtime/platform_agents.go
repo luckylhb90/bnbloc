@@ -44,9 +44,11 @@ func (e errPlatformAgentOffline) Error() string {
 }
 
 // checkPlatformAgentOnline returns errPlatformAgentOffline for a chat by
-// author to an offline platform agent. An unreadable policy, grant or
-// advertisement does not refuse the chat: the host's reserve is the
-// authority and fails closed anyway.
+// author to an offline platform agent. Fail-open by design: this is a
+// courtesy pre-check that spares a member a job no host will take, not an
+// access decision. An unreadable policy, grant or advertisement does not
+// refuse the chat (that would block chat on a read blip), because the
+// host's reserve is the authority and fails closed anyway.
 func (s *Service) checkPlatformAgentOnline(ctx context.Context, roomID, author string, rc *ChatRecipient) error {
 	g := s.PlatformAgents
 	if g == nil || rc == nil {

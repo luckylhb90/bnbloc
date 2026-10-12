@@ -505,7 +505,10 @@ func (s *Service) openPublishRequest(ctx context.Context, r *http.Request, actor
 		if s.OrgAdmins != nil {
 			var err error
 			if admins, err = s.OrgAdmins(claims.Tenant); err != nil {
-				// The request is stored; only its notification is lost.
+				// Fail-open by design: the request is stored and shows in
+				// the Organization console's review queue, so only its
+				// notification is lost; refusing the request over a
+				// notification read would lose the member's submission.
 				slog.Warn("bnbloc gateway: org admins unreadable; review notification skipped",
 					"event", "bnbloc.content.notify_failed", "request", req.ID, "error", err)
 			}

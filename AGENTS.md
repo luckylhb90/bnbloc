@@ -1164,7 +1164,11 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   activity fails a claimed job `budget_exhausted` (room notice) when the
   owner's — or the tenant's — hard-stop monthly budget is reached. Burn is
   the reported reply usage attributed to the agent's OWNER, so borrowed runs
-  count against the owner's budget.
+  count against the owner's budget. The hard stop fails closed: an
+  unreadable budget or usage refuses the job with the retryable
+  `budget_unavailable` (a logged server error), and a refusal that cannot be
+  recorded keeps the job off the bridge; never run a job unbudgeted
+  (`TestBudgetHardStopFailsClosed`).
 - **`PutGrant`'s upsert must clear `revoked_at_ms` and reset usage** on
   re-authorize, or a re-enabled provider stays revoked (the upsert originally
   omitted these columns — re-authorizing silently did nothing).

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -342,5 +343,43 @@ func TestReplyIngestTriggersBudgetWarning(t *testing.T) {
 	}
 	if evs := f.notifier.all(); len(evs) != 1 || evs[0].Recipients[0] != "alice" {
 		t.Fatalf("events = %+v", evs)
+	}
+}
+
+// failingBudgets is a budget store whose reads fail.
+type failingBudgets struct{ store.UsageBudgetStore }
+
+func (failingBudgets) GetUsageBudget(context.Context, string) (store.UsageBudget, bool, error) {
+	return store.UsageBudget{}, false, errBudgetRead
+}
+
+var errBudgetRead = errors.New("budget table unavailable")
+
+// The hard stop fails closed: when the budget cannot be read the claimed job
+// is not handed to the bridge (it would run unbudgeted); it is refused with
+// the retryable budget_unavailable and requeued, so it runs once the budget
+// reads again.
+func TestBudgetHardStopFailsClosed(t *testing.T) {
+	f := newBudgetFixture(t)
+	healthy := f.svc.Budgets
+	f.svc.Budgets = failingBudgets{healthy}
+	if got := f.claimAs(t, "alice", "j-unread"); len(got) != 0 {
+		t.Fatalf("claimed %d jobs with an unreadable budget, want 0", len(got))
+	}
+	job, err := f.jobs.GetAgentRun(bctx(), "j-unread")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if job.Status != store.AgentJobQueued || job.FailureReason != store.FailureBudgetUnavailable {
+		t.Fatalf("refused job = %s/%s, want queued for a retry with %s", job.Status, job.FailureReason, store.FailureBudgetUnavailable)
+	}
+	f.svc.Budgets = healthy
+	if got := f.claimAs(t, "alice"); len(got) != 1 || got[0].JobID != "j-unread" {
+		t.Fatalf("after the budget reads again, claimed %+v; want the requeued job", got)
+	}
+	// The member's own budget view reports the failure instead of "not blocked".
+	f.svc.Budgets = failingBudgets{healthy}
+	if code, raw := f.do(t, http.MethodGet, "/v1/my/budget", "alice", nil); code != http.StatusInternalServerError {
+		t.Fatalf("my budget with an unreadable budget = %d %s, want 500", code, raw)
 	}
 }

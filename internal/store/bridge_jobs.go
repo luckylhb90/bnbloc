@@ -116,6 +116,10 @@ const (
 	// FailureBudgetExhausted: the agent owner's (or the tenant's) monthly
 	// usage budget is reached with hard stop on (R12); final, not retried.
 	FailureBudgetExhausted AgentJobFailureReason = "budget_exhausted"
+	// FailureBudgetUnavailable: the hard-stop budget could not be read at
+	// claim time, so the job was refused rather than run unbudgeted;
+	// retryable (nothing ran).
+	FailureBudgetUnavailable AgentJobFailureReason = "budget_unavailable"
 	// FailureSandboxRequired: the tenant requires borrowed drives to run in
 	// the owner's agent sandbox and it is off / not ready / unsupported by
 	// the agent's core; final (a new message retries once the owner fixes it).
@@ -133,13 +137,14 @@ const (
 
 // Retryable reports whether a failed job may be attempted again: only when
 // no agent work can have started (the core was unreachable, the start
-// request provably never took effect) or the lease lapsed without a report.
+// request provably never took effect, the budget could not be checked) or
+// the lease lapsed without a report.
 // Everything else is terminal on the first failure: a deterministic refusal
 // fails the same way again, and a started or ambiguous turn would run the
 // member's prompt twice.
 func (r AgentJobFailureReason) Retryable() bool {
 	switch r {
-	case FailureRunnerStartFailed, FailureCoreUnavailable, FailureTurnTimeout:
+	case FailureRunnerStartFailed, FailureCoreUnavailable, FailureTurnTimeout, FailureBudgetUnavailable:
 		return true
 	default:
 		return false
@@ -167,6 +172,8 @@ func (r AgentJobFailureReason) Text(agent string) string {
 		return the + " stopped responding."
 	case FailureBudgetExhausted:
 		return the + " did not run: a monthly budget is reached."
+	case FailureBudgetUnavailable:
+		return the + " did not run: its usage budget could not be checked."
 	case FailureSandboxRequired:
 		return the + " did not run: this organization requires a sandbox for borrowed agents."
 	case FailureCancelled:

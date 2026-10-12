@@ -22,6 +22,7 @@ export const AGENT_JOB_FAILURE_LABELS: Record<string, string> = {
   reply_timeout: "reply timed out",
   cancelled: "cancelled",
   budget_exhausted: "monthly budget reached",
+  budget_unavailable: "budget could not be checked",
   sandbox_required: "agent sandbox required",
   content_unavailable: "expert unavailable",
   team_unsupported: "team needs the room tools",

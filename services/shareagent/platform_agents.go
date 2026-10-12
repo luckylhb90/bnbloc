@@ -197,9 +197,11 @@ func (h *hostStates) load(host string) {
 	}
 	advertised, err := h.s.Bridges.ListBridgeAgentsForOwner(h.ctx, host, time.Now().UnixMilli())
 	if err != nil {
-		// A presentation read with no 500 path: this response shows the
-		// host's agents offline, and the failure is logged (as for the
-		// pending count below).
+		// Fail-open by design (presentation only): a listing has no 500
+		// path per host, so this response shows the host's agents offline
+		// and the failure is logged (as for the pending count below). No
+		// access follows from it: a borrow still goes through the host's
+		// reserve, which fails closed.
 		slog.Warn("bnbloc shareagent: advertised agents read failed",
 			"event", "bnbloc.shareagent.advertised_agents_failed", "host", host, "error", err)
 		return

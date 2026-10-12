@@ -38,9 +38,11 @@ import (
 //   - Hard stop: the job claim — the call every bridge makes before it drives
 //     a job — refuses the jobs of an owner whose hard-stop budget (or the
 //     tenant's) is reached: the job fails with budget_exhausted and the room
-//     gets a visible notice. A budget read error lets the job run: budgets
-//     are a cost control, not an access boundary, and an outage of the
-//     budget read must not stop every agent.
+//     gets a visible notice. The hard stop fails closed: when the budget or
+//     the usage cannot be read, the job is refused with the retryable
+//     budget_unavailable (logged as a server error), never run unbudgeted,
+//     and a refusal that cannot be recorded keeps the job off the bridge
+//     (its lease lapses and the sweep retries it).
 
 // BudgetNotifier sends a budget warning (notify.Emitter implements it).
 type BudgetNotifier interface {
@@ -354,7 +356,13 @@ func (s *Service) handleMyBudget(w http.ResponseWriter, r *http.Request) {
 		v := budgetView(b, burn)
 		out.Budget = &v
 	}
-	out.BlockedBy = s.budgetBlock(r.Context(), caller, period.PeriodStartMs)
+	blockedBy, err := s.budgetBlock(r.Context(), caller, period.PeriodStartMs)
+	if err != nil {
+		obs.ServerError(w, "budget read failed", err)
+		httpx.Error(w, "budget read failed", http.StatusInternalServerError)
+		return
+	}
+	out.BlockedBy = blockedBy
 	out.Blocked = out.BlockedBy != ""
 	httpx.WriteJSON(w, http.StatusOK, out)
 }
@@ -373,71 +381,87 @@ func (s *Service) budgetsReady(w http.ResponseWriter, r *http.Request) bool {
 }
 
 // budgetBlock reports which reached hard-stop budget refuses owner's agent
-// drives ("" = none): the owner's own, else the tenant's. A read error
-// refuses nothing (see the package comment).
-func (s *Service) budgetBlock(ctx context.Context, owner string, sinceMs int64) string {
+// drives ("" = none): the owner's own, else the tenant's. A budget or usage
+// read error is returned: the hard stop fails closed (see the package
+// comment), so a caller never treats it as "not blocked".
+func (s *Service) budgetBlock(ctx context.Context, owner string, sinceMs int64) (string, error) {
 	if s.Budgets == nil {
-		return ""
+		return "", nil
 	}
-	if b, ok, err := s.Budgets.GetUsageBudget(ctx, owner); err == nil && ok && b.HardStop {
-		burn, _, err := s.periodBurn(ctx, owner, sinceMs)
+	for _, scope := range []struct{ owner, by string }{{owner, budgetByMember}, {"", budgetByTenant}} {
+		b, ok, err := s.Budgets.GetUsageBudget(ctx, scope.owner)
 		if err != nil {
-			slog.Warn("bnbloc activity usage read failed", "event", "bnbloc.activity.budgets_failed", "owner", owner, "error", err)
-		} else if _, reached := budgetPercent(b, burn); reached {
-			return budgetByMember
+			return "", fmt.Errorf("read %s budget: %w", scope.by, err)
 		}
-	} else if err != nil {
-		slog.Warn("bnbloc activity budget read failed", "event", "bnbloc.activity.budgets_failed", "owner", owner, "error", err)
-	}
-	if b, ok, err := s.Budgets.GetUsageBudget(ctx, ""); err == nil && ok && b.HardStop {
-		burn, _, err := s.periodBurn(ctx, "", sinceMs)
+		if !ok || !b.HardStop {
+			continue
+		}
+		burn, _, err := s.periodBurn(ctx, scope.owner, sinceMs)
 		if err != nil {
-			slog.Warn("bnbloc activity usage read failed", "event", "bnbloc.activity.budgets_failed", "error", err)
-		} else if _, reached := budgetPercent(b, burn); reached {
-			return budgetByTenant
+			return "", fmt.Errorf("read %s usage: %w", scope.by, err)
 		}
-	} else if err != nil {
-		slog.Warn("bnbloc activity budget read failed", "event", "bnbloc.activity.budgets_failed", "error", err)
+		if _, reached := budgetPercent(b, burn); reached {
+			return scope.by, nil
+		}
 	}
-	return ""
+	return "", nil
+}
+
+// budgetDecision is one owner's hard-stop answer at claim time.
+type budgetDecision struct {
+	by  string // the reached budget ("" = none)
+	err error  // the budget could not be read: refuse, retryably
 }
 
 // refuseOverBudget fails, at claim time, the claimed jobs whose owner a
-// reached hard-stop budget stops, and returns the jobs the bridge may drive.
-// A refused job gets a visible room notice. A job that cannot be failed
-// (store error) is handed to the bridge rather than stranded.
+// reached hard-stop budget stops (budget_exhausted, final, with a visible
+// room notice) or whose budget cannot be read (budget_unavailable,
+// retryable, logged as a server error), and returns the jobs the bridge may
+// drive. It fails closed: a job whose refusal cannot be recorded is not
+// handed to the bridge either; its lease lapses and the sweep retries it.
 func (s *Service) refuseOverBudget(ctx context.Context, bridgeID string, jobs []store.AgentJob) []store.AgentJob {
 	if s.Budgets == nil || len(jobs) == 0 {
 		return jobs
 	}
 	now := s.clock()
 	since := budgetPeriod(now).PeriodStartMs
-	blocked := map[string]string{}
+	decided := map[string]budgetDecision{}
 	kept := make([]store.AgentJob, 0, len(jobs))
 	for _, j := range jobs {
-		key := j.OwnerUserID
-		by, seen := blocked[key]
+		d, seen := decided[j.OwnerUserID]
 		if !seen {
-			by = s.budgetBlock(ctx, j.OwnerUserID, since)
-			blocked[key] = by
+			d.by, d.err = s.budgetBlock(ctx, j.OwnerUserID, since)
+			if d.err != nil {
+				obs.ServerError(nil, "budget read failed; the owner's claimed jobs are refused for a retry", d.err)
+			}
+			decided[j.OwnerUserID] = d
 		}
-		if by == "" {
+		if d.by == "" && d.err == nil {
 			kept = append(kept, j)
 			continue
 		}
-		diag, _ := json.Marshal(map[string]any{"budget": by, "period": budgetPeriod(now).Period})
+		reason, diag := store.FailureBudgetExhausted, map[string]any{"budget": d.by, "period": budgetPeriod(now).Period}
+		if d.err != nil {
+			reason, diag = store.FailureBudgetUnavailable, map[string]any{"budget": "unreadable", "period": budgetPeriod(now).Period}
+		}
+		diagJSON, _ := json.Marshal(diag)
 		failed, err := s.BridgeJobs.UpdateAgentJobStatus(ctx, store.JobStatusUpdate{
-			JobID: j.JobID, BridgeID: bridgeID, Status: store.AgentJobFailed, FailureReason: store.FailureBudgetExhausted,
-			DiagnosticsJSON: diag, NowMs: now.UnixMilli(), LeaseMs: store.DefaultLeaseMs, MaxAttempts: store.DefaultMaxJobAttempts,
+			JobID: j.JobID, BridgeID: bridgeID, Status: store.AgentJobFailed, FailureReason: reason,
+			DiagnosticsJSON: diagJSON, NowMs: now.UnixMilli(), LeaseMs: store.DefaultLeaseMs, MaxAttempts: store.DefaultMaxJobAttempts,
 		})
 		if err != nil {
-			slog.Warn("bnbloc activity budget refusal not recorded; job handed to the bridge",
-				"event", "bnbloc.activity.budget_refusal_failed", "job", j.JobID, "error", err)
-			kept = append(kept, j)
+			obs.ServerError(nil, "budget refusal not recorded; the job stays off the bridge until its lease lapses", err)
 			continue
 		}
 		s.publishJob(ctx, failed, now.UnixMilli())
-		s.postJobNotice(ctx, failed, budgetRefusalText(failed, by), now.UnixMilli())
+		if failed.Status != store.AgentJobFailed {
+			continue // requeued for a retry (budget_unavailable): no notice yet
+		}
+		text := budgetRefusalText(failed, d.by)
+		if reason == store.FailureBudgetUnavailable {
+			text = reason.Text(failed.Provider)
+		}
+		s.postJobNotice(ctx, failed, text, now.UnixMilli())
 	}
 	return kept
 }

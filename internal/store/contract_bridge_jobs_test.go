@@ -416,6 +416,7 @@ func TestContractBridgeJobStoreRetryClassification(t *testing.T) {
 			{"runner start failure retries", FailureRunnerStartFailed, 0, AgentJobQueued},
 			{"core unavailable retries", FailureCoreUnavailable, 0, AgentJobQueued},
 			{"turn timeout retries", FailureTurnTimeout, 0, AgentJobQueued},
+			{"an unreadable budget retries", FailureBudgetUnavailable, 0, AgentJobQueued},
 			{"a started turn is final", FailureRunnerFailed, 0, AgentJobFailed},
 			{"no reply is final", FailureReplyTimeout, 0, AgentJobFailed},
 			{"unauthorized borrow is final", FailureBorrowNotAuthorized, 0, AgentJobFailed},
