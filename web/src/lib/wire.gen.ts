@@ -1211,6 +1211,36 @@ export const NoticeTimeout = "member-timeout";
 // refusal at claim).
 export const NoticeJobFailed = "job-failed";
 
+// ---- wire/limits.go ----
+
+// Limits a service enforces and a client checks before it sends, so the
+// client can say why instead of meeting a 4xx. Each is the one value the
+// service enforces (and the web reads it from wire.gen.ts): a limit is
+// changed here, never in a second copy.
+// MaxUnreadRooms bounds one GET /v1/rooms-unread?rooms= query: each
+// room costs a membership lookup and a count per channel. A longer list
+// is refused (400), never cut, so a client never reads "no unread" into
+// a truncated answer.
+export const MaxUnreadRooms = 200;
+// MaxAttachmentBytes bounds one chat attachment upload.
+export const MaxAttachmentBytes = 26214400;
+// MaxBlobBytes bounds one object in the blob store: realtime's blob put,
+// so also an artifact version file (BNBLOC_ARTIFACT_MAX_BYTES may only
+// lower it) and a super-admin artifact upload at the gateway.
+export const MaxBlobBytes = 268435456;
+// MaxArtifactStateBytes bounds one live collaboration-state payload. The
+// state is transient but fans out to every room subscriber on each
+// change, so it stays gesture-sized.
+export const MaxArtifactStateBytes = 16384;
+// MaxStarterPrompts and MaxStarterPromptBytes bound a room template's
+// starter prompts (count, and bytes of one prompt).
+export const MaxStarterPrompts = 20;
+export const MaxStarterPromptBytes = 4096;
+// MaxDisplayNameRunes is the longest display name accepted, in
+// characters after trimming (Unicode code points, which is also how
+// MySQL sizes the VARCHAR(40) column).
+export const MaxDisplayNameRunes = 40;
+
 // ---- wire/mcp_tools.go ----
 
 // ContentMCPRequirement is one requires.mcp entry of a package: an MCP tool

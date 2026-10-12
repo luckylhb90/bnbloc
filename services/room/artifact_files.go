@@ -15,14 +15,14 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/luckylhb90/bnbloc/internal/config"
 	"github.com/luckylhb90/bnbloc/internal/digest"
 	"github.com/luckylhb90/bnbloc/internal/httpx"
-
-	"github.com/luckylhb90/bnbloc/internal/config"
 	"github.com/luckylhb90/bnbloc/internal/obs"
 	"github.com/luckylhb90/bnbloc/internal/realtime"
 	"github.com/luckylhb90/bnbloc/internal/store"
 	"github.com/luckylhb90/bnbloc/internal/tarbundle"
+	"github.com/luckylhb90/bnbloc/internal/wire"
 )
 
 // Binary-capable artifacts (docs/prd/2026-10-09-preview-workbench-and-
@@ -44,10 +44,6 @@ type ArtifactBlobs interface {
 // DefaultArtifactMaxBytes is the documented default blob version cap.
 const DefaultArtifactMaxBytes int64 = 100 << 20
 
-// maxArtifactBlobBytes is the largest object realtime's blob store accepts in
-// one put; a configured cap above it could never be honoured.
-const maxArtifactBlobBytes int64 = 256 << 20
-
 // ArtifactMaxBytesFromEnv reads BNBLOC_ARTIFACT_MAX_BYTES (bytes; unset =
 // DefaultArtifactMaxBytes). A malformed value or one outside
 // 1..256 MiB is a startup error, not a silent fallback.
@@ -57,8 +53,8 @@ func ArtifactMaxBytesFromEnv() (int64, error) {
 		return DefaultArtifactMaxBytes, nil
 	}
 	n, err := strconv.ParseInt(raw, 10, 64)
-	if err != nil || n <= 0 || n > maxArtifactBlobBytes {
-		return 0, fmt.Errorf("BNBLOC_ARTIFACT_MAX_BYTES=%q: want a byte count in 1..%d", raw, maxArtifactBlobBytes)
+	if err != nil || n <= 0 || n > wire.MaxBlobBytes {
+		return 0, fmt.Errorf("BNBLOC_ARTIFACT_MAX_BYTES=%q: want a byte count in 1..%d", raw, wire.MaxBlobBytes)
 	}
 	return n, nil
 }

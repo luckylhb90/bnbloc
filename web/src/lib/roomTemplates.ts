@@ -1,6 +1,7 @@
 // Room templates (N3): wire shapes of the room service's /v1/room-templates
 // (internal/wire/schedules.go) and pure helpers for the template UI.
 import type { ScheduleRecipient, ScheduleRecurrence } from "./schedules.ts";
+import { MaxStarterPromptBytes, MaxStarterPrompts } from "./wire.gen.ts";
 
 export type TemplateVisibility = "private" | "tenant";
 
@@ -183,16 +184,12 @@ export function parseAgentLines(text: string): { agents: TemplateAgent[]; invali
   return { agents, invalid };
 }
 
-// Byte cap of one starter prompt (the room service rejects longer ones).
-export const MAX_STARTER_PROMPT_BYTES = 4 * 1024;
-export const MAX_STARTER_PROMPTS = 20;
-
 // starterCandidates picks starter-prompt candidates from a room feed: the
 // newest human chat texts (no agent output, no imported history), unique,
 // non-empty, within the starter-prompt size cap.
 export function starterCandidates(
   feed: readonly { text: string; agentLabel?: string; importedFrom?: string }[],
-  max = MAX_STARTER_PROMPTS,
+  max = MaxStarterPrompts,
 ): string[] {
   const out: string[] = [];
   const enc = new TextEncoder();
@@ -200,7 +197,7 @@ export function starterCandidates(
     const m = feed[i];
     if (m.agentLabel || m.importedFrom) continue;
     const text = m.text.trim();
-    if (!text || out.includes(text) || enc.encode(text).length > MAX_STARTER_PROMPT_BYTES) continue;
+    if (!text || out.includes(text) || enc.encode(text).length > MaxStarterPromptBytes) continue;
     out.push(text);
   }
   return out;

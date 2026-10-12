@@ -12,17 +12,13 @@ import (
 
 	"github.com/luckylhb90/bnbloc/internal/httpx"
 	"github.com/luckylhb90/bnbloc/internal/ids"
-	"github.com/luckylhb90/bnbloc/internal/wire"
-
 	"github.com/luckylhb90/bnbloc/internal/membership"
 	"github.com/luckylhb90/bnbloc/internal/obs"
 	"github.com/luckylhb90/bnbloc/internal/store"
+	"github.com/luckylhb90/bnbloc/internal/wire"
 )
 
-const (
-	maxAttachmentBytes = 25 * 1024 * 1024
-	maxAttachmentField = 512
-)
+const maxAttachmentField = 512
 
 // allowedAttachmentTypes gates uploads to passive images and common documents,
 // mapping each accepted client-declared type to the check its server-sniffed
@@ -102,7 +98,7 @@ func (s *Service) handleUploadAttachment(w http.ResponseWriter, r *http.Request)
 		httpx.Unavailable(w, "attachments")
 		return
 	}
-	r.Body = http.MaxBytesReader(w, r.Body, maxAttachmentBytes+maxAttachmentField)
+	r.Body = http.MaxBytesReader(w, r.Body, wire.MaxAttachmentBytes+maxAttachmentField)
 	file, header, err := r.FormFile("file")
 	if err != nil {
 		httpx.Error(w, "expected a multipart 'file' field", http.StatusBadRequest)
@@ -128,13 +124,13 @@ func (s *Service) handleUploadAttachment(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	body := io.MultiReader(bytes.NewReader(head), file)
-	key, size, sha, err := s.Blobs.Put(r.Context(), io.LimitReader(body, maxAttachmentBytes+1))
+	key, size, sha, err := s.Blobs.Put(r.Context(), io.LimitReader(body, wire.MaxAttachmentBytes+1))
 	if err != nil {
 		obs.ServerError(w, "attachment store failed", err)
 		httpx.Error(w, "attachment store failed", http.StatusInternalServerError)
 		return
 	}
-	if size > maxAttachmentBytes {
+	if size > wire.MaxAttachmentBytes {
 		httpx.Error(w, "attachment too large", http.StatusRequestEntityTooLarge)
 		return
 	}

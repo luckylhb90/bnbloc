@@ -22,12 +22,8 @@ import (
 	"github.com/luckylhb90/bnbloc/internal/rbac"
 	"github.com/luckylhb90/bnbloc/internal/realtime"
 	"github.com/luckylhb90/bnbloc/internal/svcauth"
+	"github.com/luckylhb90/bnbloc/internal/wire"
 )
-
-// maxArtifactUploadBytes bounds a super-admin artifact upload at the gateway
-// edge. It mirrors the realtime blob cap; the gateway streams the body straight
-// through (never buffered), so this only guards against an unbounded request.
-const maxArtifactUploadBytes = 256 * 1024 * 1024
 
 type artifactCapability struct {
 	Enabled bool   `json:"enabled"`
@@ -68,7 +64,7 @@ func (s *Service) handleArtifactUpload(w http.ResponseWriter, r *http.Request, c
 		httpx.Unavailable(w, "artifact store")
 		return
 	}
-	r.Body = http.MaxBytesReader(w, r.Body, maxArtifactUploadBytes)
+	r.Body = http.MaxBytesReader(w, r.Body, wire.MaxBlobBytes) // streamed, never buffered: only a bound
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Minute)
 	defer cancel()
 	req, err := svcauth.NewRequest(ctx, http.MethodPost, base+"/internal/v1/blobs", r.Body, gatewayServiceSubject, claims.Tenant)

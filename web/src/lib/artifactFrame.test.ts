@@ -1,12 +1,12 @@
 import {
   ARTIFACT_CSP,
-  ARTIFACT_STATE_LIMIT,
   artifactRunnerUrl,
   composeArtifactDocument,
   contentKey,
   loadMessage,
   readGuestMessage,
 } from "./artifactFrame.ts";
+import { MaxArtifactStateBytes } from "./wire.gen.ts";
 
 function assert(condition: boolean, message: string): void {
   if (!condition) throw new Error(message);
@@ -73,7 +73,7 @@ function testStateIntentsAreBoundedJson(): void {
   const frame = {};
   const ok = readGuestMessage({ origin: "null", source: frame, data: { type: "artifact-state", state: { a: 1 } } }, frame);
   assert(ok?.kind === "state" && ok.key === '{"a":1}', "state carries its serialized dedupe key");
-  const big = "x".repeat(ARTIFACT_STATE_LIMIT);
+  const big = "\u00e9".repeat(MaxArtifactStateBytes / 2);
   assert(
     readGuestMessage({ origin: "null", source: frame, data: { type: "artifact-state", state: big } }, frame) === null,
     "oversized state is dropped",

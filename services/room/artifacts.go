@@ -475,11 +475,6 @@ func decodeArtifactBody(w http.ResponseWriter, r *http.Request, dst any) bool {
 	return true
 }
 
-// maxArtifactStateBytes bounds one collaboration-state payload. The state is
-// transient (never persisted) but fans out to every room subscriber on each
-// change, so it must stay gesture-sized, not document-sized.
-const maxArtifactStateBytes = 16 * 1024
-
 type artifactStateBody struct {
 	ArtifactID string          `json:"artifactId"`
 	State      json.RawMessage `json:"state"`
@@ -507,7 +502,7 @@ func (s *Service) handleArtifactState(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body artifactStateBody
-	if !httpx.DecodeJSON(w, r, maxArtifactStateBytes+(4<<10), &body) {
+	if !httpx.DecodeJSON(w, r, wire.MaxArtifactStateBytes+(4<<10), &body) {
 		return
 	}
 	// The path carries the artifact id (the client already knows it there); a
@@ -517,7 +512,7 @@ func (s *Service) handleArtifactState(w http.ResponseWriter, r *http.Request) {
 	} else {
 		body.ArtifactID = strings.TrimSpace(body.ArtifactID)
 	}
-	if body.ArtifactID == "" || len(body.State) == 0 || len(body.State) > maxArtifactStateBytes {
+	if body.ArtifactID == "" || len(body.State) == 0 || len(body.State) > wire.MaxArtifactStateBytes {
 		httpx.Error(w, "artifactId and state (<=16KiB) required", http.StatusBadRequest)
 		return
 	}

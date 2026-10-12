@@ -292,8 +292,8 @@ func TestInternalPublishGuards(t *testing.T) {
 // rooms-unread is bounded and de-duplicated.
 func TestUnreadRoomListBounded(t *testing.T) {
 	srv, _ := newChannelTestServer(t)
-	ids := make([]string, 0, maxUnreadRooms+1)
-	for i := 0; i <= maxUnreadRooms; i++ {
+	ids := make([]string, 0, wire.MaxUnreadRooms+1)
+	for i := 0; i <= wire.MaxUnreadRooms; i++ {
 		ids = append(ids, fmt.Sprintf("room-%d", i))
 	}
 	req, _ := http.NewRequest(http.MethodGet, srv.URL+"/v1/rooms-unread?rooms="+strings.Join(ids, ","), nil)
@@ -307,7 +307,7 @@ func TestUnreadRoomListBounded(t *testing.T) {
 		t.Fatalf("over-limit unread: %d, want 400", resp.StatusCode)
 	}
 	// Duplicates collapse, so a repeated list within the cap is fine.
-	dup := strings.TrimSuffix(strings.Repeat("room-1,", maxUnreadRooms+5), ",")
+	dup := strings.TrimSuffix(strings.Repeat("room-1,", wire.MaxUnreadRooms+5), ",")
 	if body := channelGet(t, srv, "/v1/rooms-unread?rooms="+dup, "alice"); !strings.Contains(body, "unread") {
 		t.Fatalf("dedup unread body = %q", body)
 	}

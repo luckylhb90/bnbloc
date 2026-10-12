@@ -28,14 +28,12 @@
 //   host   -> guest: { type: "artifact-state", state, actor, broadcast }
 
 import { schemeUrl, type ConvertFileSrc } from "./schemeUrl.ts";
+import { MaxArtifactStateBytes } from "./wire.gen.ts";
 
 /** Desktop URI scheme serving the runner (registered in the Tauri shell). */
 export const ARTIFACT_SCHEME = "bnbloc-artifact";
 /** The runner page, at the web bundle root and at the scheme root. */
 export const ARTIFACT_RUNNER_PAGE = "artifact-runner.html";
-/** Upper bound on one serialized state intent (the room stream carries it). */
-export const ARTIFACT_STATE_LIMIT = 16 * 1024;
-
 /** The artifact's own policy, applied inside the written document. Everything
  *  the artifact needs must already be in its content: ALL external loads are
  *  refused (no CDN pulls, no beacon exfiltration); data:/blob: stay open only
@@ -114,7 +112,8 @@ export function readGuestMessage(
       } catch {
         return null;
       }
-      if (typeof key !== "string" || key.length > ARTIFACT_STATE_LIMIT) return null;
+      // The room service refuses a state over MaxArtifactStateBytes (bytes).
+      if (typeof key !== "string" || new TextEncoder().encode(key).length > MaxArtifactStateBytes) return null;
       return { kind: "state", state: data.state, key };
     }
     default:

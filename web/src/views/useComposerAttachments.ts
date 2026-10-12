@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api, ApiError, type ChatAttachment } from "@/lib/api";
+import { formatBytes } from "@/lib/format";
+import { MaxAttachmentBytes } from "@/lib/wire.gen";
 import { useToast } from "@/ui/Toast";
 import type { AttachmentChipItem, AttachmentChipStatus } from "@/views/AttachmentChips";
-
-const MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024;
 
 // Raster images only: SVG (active content) is refused by the gateway (415).
 export const ATTACHMENT_ACCEPT = [
@@ -49,8 +49,8 @@ export function useComposerAttachments(roomId: string) {
   const addFiles = (selected: readonly File[]) => {
     const accepted: PendingAttachment[] = [];
     for (const file of selected) {
-      if (file.size > MAX_ATTACHMENT_BYTES) {
-        toast.error(`${file.name} is larger than 25 MB`);
+      if (file.size > MaxAttachmentBytes) {
+        toast.error(`${file.name} is larger than ${formatBytes(MaxAttachmentBytes)}`);
         continue;
       }
       const previewUrl = file.type.startsWith("image/")

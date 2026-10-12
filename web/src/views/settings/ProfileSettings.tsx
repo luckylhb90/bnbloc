@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import { ApiError } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
-import { DISPLAY_NAME_MAX, defaultDisplayName, validateDisplayName } from "@/lib/displayNames";
+import { defaultDisplayName, validateDisplayName } from "@/lib/displayNames";
+import { MaxDisplayNameRunes } from "@/lib/wire.gen";
 import { setPrivacyMode, usePrivacyMode } from "@/lib/privacyMode";
 import { profilesApi } from "@/lib/profilesApi";
 import { nameResolver } from "@/lib/useDisplayName";
@@ -91,7 +92,7 @@ export function ProfileSettings() {
               <Input
                 id="profile-display-name"
                 value={draft}
-                maxLength={DISPLAY_NAME_MAX * 2}
+                maxLength={MaxDisplayNameRunes * 2}
                 placeholder={subject ? defaultDisplayName(subject) : ""}
                 disabled={saved === null || saving}
                 onChange={(e) => setDraft(e.target.value)}
@@ -102,7 +103,7 @@ export function ProfileSettings() {
               </Button>
             </div>
             <p className={problem ? "text-xs text-[var(--color-danger)]" : "text-xs text-[var(--color-fg-subtle)]"}>
-              {problem ?? `Up to ${DISPLAY_NAME_MAX} characters. Leave it empty to use the part of your sign-in before the @.`}
+              {problem ?? `Up to ${MaxDisplayNameRunes} characters. Leave it empty to use the part of your sign-in before the @.`}
             </p>
           </form>
         </Card>

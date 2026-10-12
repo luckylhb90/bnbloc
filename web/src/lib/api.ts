@@ -4,6 +4,7 @@ import { saveBlob } from "./saveBlob.ts";
 import { tapOnboarding } from "./onboardingEvents.ts";
 import { splitAgentHosts } from "./platformAgents.ts";
 import { apiUrl } from "./config";
+import { MaxUnreadRooms } from "./wire.gen.ts";
 import { authedFetch, errorDetail } from "./session.ts";
 import { downloadFilename, type RoomHandoffInfo, type RoomImportResult } from "./handoff.ts";
 import type { Grant } from "./sessionGrant.ts";
@@ -131,9 +132,6 @@ type ComponentRef = { readonly name: string; readonly kind: ComponentKind };
 function componentPath(base: string, c: ComponentRef, suffix = ""): string {
   return `${base}/${encodeURIComponent(c.name)}${suffix}?kind=${encodeURIComponent(c.kind)}`;
 }
-
-// Upper bound of room ids per GET /v1/rooms-unread (the gateway rejects more).
-const UNREAD_CHUNK = 200;
 
 export class ApiError extends Error {
   constructor(
@@ -419,11 +417,11 @@ export const api = {
       // default first).
       channels: Record<string, { channelId: string; count: number }[]>;
     } = { unread: {}, channels: {} };
-    for (let i = 0; i < roomIds.length; i += UNREAD_CHUNK) {
+    for (let i = 0; i < roomIds.length; i += MaxUnreadRooms) {
       const part = await req<{
         unread?: Record<string, number>;
         channels?: Record<string, { channelId: string; count: number }[]>;
-      }>(`/v1/rooms-unread?rooms=${encodeURIComponent(roomIds.slice(i, i + UNREAD_CHUNK).join(","))}`);
+      }>(`/v1/rooms-unread?rooms=${encodeURIComponent(roomIds.slice(i, i + MaxUnreadRooms).join(","))}`);
       Object.assign(merged.unread, part.unread ?? {});
       Object.assign(merged.channels, part.channels ?? {});
     }

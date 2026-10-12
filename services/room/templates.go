@@ -39,8 +39,6 @@ const (
 	maxRoomDescriptionRunes = 500 // rooms.description is VARCHAR(500)
 	maxTemplateChannels     = 20
 	maxChannelNameRunes     = 80
-	maxStarterPrompts       = 20
-	maxStarterPromptBytes   = 4 * 1024
 	maxSuggestedAgents      = 20
 	maxDefaultMembers       = 50
 	maxTemplateSchedules    = 20
@@ -156,13 +154,13 @@ func normalizeTemplateBody(b wire.RoomTemplateBody) (wire.RoomTemplateBody, erro
 		if p = strings.TrimSpace(p); p == "" {
 			continue
 		}
-		if len(p) > maxStarterPromptBytes {
+		if len(p) > wire.MaxStarterPromptBytes {
 			return out, errors.New("starter prompt too long")
 		}
 		out.StarterPrompts = append(out.StarterPrompts, p)
 	}
-	if len(out.StarterPrompts) > maxStarterPrompts {
-		return out, fmt.Errorf("at most %d starter prompts", maxStarterPrompts)
+	if len(out.StarterPrompts) > wire.MaxStarterPrompts {
+		return out, fmt.Errorf("at most %d starter prompts", wire.MaxStarterPrompts)
 	}
 	agentSeen := map[string]bool{}
 	for _, a := range b.SuggestedAgents {

@@ -9,6 +9,8 @@ import (
 	"sync"
 	"unicode"
 	"unicode/utf8"
+
+	"github.com/luckylhb90/bnbloc/internal/wire"
 )
 
 // Display names (docs/prd/2026-10-10-display-names-and-guided-onboarding.md
@@ -17,10 +19,6 @@ import (
 // person is shown as. It is global per user (not per tenant), optional, and
 // answered for any id, never with more than the name itself.
 
-// MaxDisplayNameRunes is the longest display name accepted, in characters
-// (Unicode code points, which is also how MySQL sizes VARCHAR(40)).
-const MaxDisplayNameRunes = 40
-
 // ErrInvalidDisplayName is a display name NormalizeDisplayName refuses; the
 // wrapped message says why and is safe to show the user.
 var ErrInvalidDisplayName = errors.New("invalid display name")
@@ -28,14 +26,14 @@ var ErrInvalidDisplayName = errors.New("invalid display name")
 // NormalizeDisplayName validates a user-entered display name and returns it
 // trimmed. An empty (or all-space) value is valid and means "no display
 // name" (the default applies). Otherwise it must be at most
-// MaxDisplayNameRunes characters of valid UTF-8 with no control characters.
+// wire.MaxDisplayNameRunes characters of valid UTF-8 with no control characters.
 func NormalizeDisplayName(raw string) (string, error) {
 	name := strings.TrimSpace(raw)
 	if !utf8.ValidString(name) {
 		return "", fmt.Errorf("%w: not valid UTF-8", ErrInvalidDisplayName)
 	}
-	if utf8.RuneCountInString(name) > MaxDisplayNameRunes {
-		return "", fmt.Errorf("%w: at most %d characters", ErrInvalidDisplayName, MaxDisplayNameRunes)
+	if utf8.RuneCountInString(name) > wire.MaxDisplayNameRunes {
+		return "", fmt.Errorf("%w: at most %d characters", ErrInvalidDisplayName, wire.MaxDisplayNameRunes)
 	}
 	if strings.IndexFunc(name, unicode.IsControl) >= 0 {
 		return "", fmt.Errorf("%w: control characters are not allowed", ErrInvalidDisplayName)

@@ -8,13 +8,12 @@
 // Pure logic only (default rule, handle formatting, masking, the batching
 // resolver); the React binding is useDisplayName.ts.
 
+import { MaxDisplayNameRunes } from "./wire.gen.ts";
+
 export interface Profile {
   readonly userId: string;
   readonly displayName: string;
 }
-
-// The longest display name the server accepts (trimmed, no control chars).
-export const DISPLAY_NAME_MAX = 40;
 
 // defaultDisplayName is the local part of the id (before '@'), or the id
 // itself when it has no '@' (or the local part would be empty).
@@ -40,7 +39,7 @@ export function formatAgentHandle(ownerName: string, provider: string): string {
 // control characters. An empty value is valid — it clears the name.
 export function validateDisplayName(raw: string): string | null {
   const v = raw.trim();
-  if ([...v].length > DISPLAY_NAME_MAX) return `Use at most ${DISPLAY_NAME_MAX} characters.`;
+  if ([...v].length > MaxDisplayNameRunes) return `Use at most ${MaxDisplayNameRunes} characters.`;
   if (/[\u0000-\u001f\u007f]/.test(v)) return "Remove control characters.";
   return null;
 }

@@ -10,13 +10,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/luckylhb90/bnbloc/internal/httpx"
-
 	"github.com/luckylhb90/bnbloc/internal/blobstore"
+	"github.com/luckylhb90/bnbloc/internal/httpx"
 	"github.com/luckylhb90/bnbloc/internal/obs"
+	"github.com/luckylhb90/bnbloc/internal/wire"
 )
-
-const maxBlobUploadBytes = 256 * 1024 * 1024
 
 // blobPutResult is the response of a successful generic blob upload: the
 // content-addressed key the caller stores, plus the size and sha256 the blob
@@ -58,7 +56,7 @@ func (s *Service) handleInternalBlobPut(w http.ResponseWriter, r *http.Request) 
 		httpx.Error(w, s.blobUnavailableMessage(), http.StatusServiceUnavailable)
 		return
 	}
-	r.Body = http.MaxBytesReader(w, r.Body, maxBlobUploadBytes)
+	r.Body = http.MaxBytesReader(w, r.Body, wire.MaxBlobBytes)
 	key, size, sha, err := s.Blobs.Put(r.Context(), r.Body)
 	if err != nil {
 		var tooLarge *http.MaxBytesError

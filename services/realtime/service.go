@@ -39,11 +39,6 @@ const (
 	// maxInternalPublishBytes caps one event posted to the internal ingest (an
 	// agent_messages batch is the largest legitimate payload).
 	maxInternalPublishBytes = 1 << 20
-	// maxUnreadRooms bounds one rooms-unread query: each room costs a
-	// membership probe plus per-channel counts, so an unbounded list is a
-	// request-amplification vector. Larger lists are rejected (400), never
-	// silently truncated, so a client cannot mistake a cut list for "no unread".
-	maxUnreadRooms = 200
 )
 
 // errUnknownChannel rejects an explicit channelId that is not a live channel of
@@ -996,8 +991,8 @@ func (s *Service) handleUnread(w http.ResponseWriter, r *http.Request) {
 		seen[roomID] = true
 		rooms = append(rooms, roomID)
 	}
-	if len(rooms) > maxUnreadRooms {
-		httpx.Error(w, fmt.Sprintf("too many rooms (max %d per request)", maxUnreadRooms), http.StatusBadRequest)
+	if len(rooms) > wire.MaxUnreadRooms {
+		httpx.Error(w, fmt.Sprintf("too many rooms (max %d per request)", wire.MaxUnreadRooms), http.StatusBadRequest)
 		return
 	}
 	out := map[string]int{}
