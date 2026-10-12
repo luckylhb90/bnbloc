@@ -4,7 +4,8 @@ Status: approved, in development (2026-10-12): steps 1 and 2 implemented,
 step 3 implemented, step 5 implemented for experts and skill packs (prompt
 packs in the gap closure), step 6 expert teams and MCP tool components
 implemented, step 4 sharing and approval implemented, and the content gap
-closure implemented (see "Status" and "Gap closure" below). Feasibility verified in code and by experiments (see
+closure implemented (see "Status" and "Gap closure" below), and the
+runtime gap closure implemented (see "Runtime gap closure"). Feasibility verified in code and by experiments (see
 "Evidence").
 
 ## Why
@@ -1189,7 +1190,7 @@ Decisions:
 
 ## Runtime gap closure
 
-**2026-10-12: recorded, in development.** The runtime gaps the step
+**2026-10-12: implemented** (status below the list). The runtime gaps the step
 status notes above leave open, closed in one pass. Content and sharing
 gaps (Library, notifications, the workshop flow) are a separate pass.
 
@@ -1255,7 +1256,7 @@ gaps (Library, notifications, the workshop flow) are a separate pass.
      first, then platform agents). Self-dispatch stays refused (the
      drive lock would deadlock), so a room with one agent answers that
      no other agent can try it.
-   - **Builder** 1.0.3 (only the quick-try step changes): try with
+   - **Builder** 1.1.1 (only the quick-try step changes): try with
      `try_draft`, and role-play only when the tool is missing or reports
      no agent, saying so.
 5. **Linux confinement protects paths that do not exist yet.** Under
@@ -1294,3 +1295,73 @@ gaps (Library, notifications, the workshop flow) are a separate pass.
    bridge attaches `Authorization: Bearer <access token>` from them, and
    a missing or expired sign-in shows as missing ("sign in to X in
    Settings → Tools"). Never lent to a borrowed or platform drive.
+
+### Status: runtime gap closure
+
+**2026-10-12: implemented.** Architecture: `docs/architecture/room-tools.md`
+("Quick tries of drafts", "Nesting in the feed"),
+`docs/architecture/content-components.md` (room expert, `content_drafts`,
+MCP `oauth` credentials, the catalog push),
+`docs/prd/2026-10-09-agent-vm-sandbox.md` (confine placeholders).
+
+1. **Feed nesting:** 76c5f8b (every agent row a job writes carries
+   `jobId`/`sourceSeq`; `dispatchedBy.parentSeq`), 93531a4 (web:
+   `layoutTurns`, the collapsible "Team" / "Delegated to …" block; room
+   event normalization moved to the pure `lib/roomEvents.ts` so live and
+   reloaded feeds are unit-tested alike). Rows written before this pass
+   carry no chain and stay flat.
+2. **Room expert on the job:** 7d3dadb (`agent_jobs.room_expert_*`,
+   migration `2026_10_agent_jobs_room_expert`; recorded by the gateway's
+   effective resolution with a content `use` audit row when it changes;
+   run records' `roomExpert`), 1923c0e (web run records). Usage counts
+   still count only the chat's expert (`expert_id`).
+3. **Platform lead:** be663b7 (`routeSend`, shared by the send and the
+   team plan; the plan card names the lead and its host).
+4. **`try_draft`:** 5206611 (`content_drafts`, migration
+   `2026_10_content_drafts`, expiry purge, blob references), e521809
+   (staging route, `DispatchRequest.draft`, `draft_not_available`,
+   `contentuse` resolution for the dispatched job only, bundle through the
+   job grant, content `try` audit), c844092 (the room tool; `dispatchTask`
+   shared with `ask_agent`), 99c5bf8 (web: "draft X" on the message),
+   895d715 (builder 1.1.1). The draft's trust owner is its author (the
+   staging agent's owner), so a borrowed or platform builder's
+   script-bearing draft forces the sandbox on the member's own agent.
+   Drafts of teams and prompt packs are refused (a prompt pack is not
+   worn).
+5. **Linux confinement:** a1eaf52. Beyond the record: a mount moves with
+   its parent, so the directories between a writable tree and a
+   deny-write path (`<workspace>/.claude` for `.claude/skills/`) are bound
+   onto themselves, still writable, and cannot be renamed away; a
+   placeholder that cannot be created refuses the run. Verified with the
+   real bwrap in a Linux container (`confine_linux_test.go`): creating,
+   editing, removing or renaming-and-recreating any agent-config path
+   fails while the workspace stays writable. Placeholders stay in the
+   workspace afterwards (empty files, `{}` in `.mcp.json`, empty
+   directories): bnbloc-owned paths, never published or synced.
+6. **Catalog push:** 0c62eea. The desktop holds the member stream whenever
+   its manager runs, with `?plugins=1` only while it runs a plugin sidecar;
+   only those streams get plugin deliveries and count for notification
+   routing, so notification delivery is unchanged. Hints are coalesced per
+   stream and per peer; the desktop refreshes within ~2 s (and once after
+   a reconnect).
+7. **MCP OAuth:** 7ffbb3d (`mcp.http.auth` scheme `oauth`), 7830cb7
+   (bridge: the member's token from `<mcp-settings>/oauth/<tool>.json`,
+   own drives only), 9cf3304 (desktop: the flow, storage, refresh,
+   sign-out, commands), 687cebc (Settings → Tools), c66e1fc (catalog
+   hints). Registration is the package's `clientId`, else dynamic
+   registration, else a plain error.
+
+**Verified** by unit, store (memory and MySQL 8.4), route and room tool
+tests, Linux confinement tests in a container, desktop Rust tests and web
+tests (`scripts/ci.sh go` with MySQL 8.4, `scripts/ci.sh web`,
+`scripts/ci.sh desktop`). Not yet verified against running services, a
+real authorization server or in a browser.
+
+**Open:** client ID metadata documents for MCP OAuth (the gateway would
+serve the document at its public https URL, which no setting names
+today: a new public-URL setting on every deploy surface); token
+revocation on sign-out and step-up on `insufficient_scope`; a running
+agent session keeps the MCP token it started with until its next session;
+`bnbloc cores publish-mcp` has no flags for the oauth fields (package
+JSON sets them); room expert runs are not in the Library's usage counts.
+

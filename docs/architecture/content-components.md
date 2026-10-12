@@ -207,11 +207,21 @@ Tables (migration `2026_10_content_components`):
   `withdrawn`), with the note, the decision, its note and who took it;
   `pending_key` (the component id while pending) admits one pending request
   per component. Deleted with the component.
+- `content_drafts`: unsaved experts and skill packs staged for one quick
+  try (`cd_…`; the room tools' `try_draft`, "Quick tries of drafts" in
+  [room-tools.md](room-tools.md)): tenant, room, the staging job,
+  requester, author (the staging agent's owner), kind, name, version,
+  manifest, bundle key, `expires_at_ms` (one hour; migration
+  `2026_10_content_drafts`). Not a component: nothing lists it. Each
+  retention pass deletes expired rows (`idx_content_drafts_expires`).
+- `agent_jobs.room_expert_id/version/name`: the room expert a job's turn
+  wore (migration `2026_10_agent_jobs_room_expert`), below.
 
 Bundles live in realtime's content-addressed blob store, like sidecar and
 previewer artifacts; `RetentionStore.ReferencedBlobKeys` includes
-`content_component_versions.bundle_blob_key`, so blob collection never
-deletes a version's bundle. Deleting a component deletes its rows; the
+`content_component_versions.bundle_blob_key` and
+`content_drafts.bundle_blob_key`, so blob collection never deletes a
+version's bundle (or a draft's while its row exists). Deleting a component deletes its rows; the
 collection reclaims the bundle. Content components and their publish
 requests are user content (like room templates): no retention purge applies
 to them. A shared copy, an org publication and a platform row reference the
@@ -383,8 +393,13 @@ Design: PRD §1 "Sources, scopes and trust" and "Status: step 4".
    (with the skill packs it requires, its bundle granted) unless the chat
    picked it, and reports it missing once the room no longer pins it. The
    bridge puts its instructions first and the chat expert's after; the
-   running job's diagnostics name both (`roomExpert`, `expert`). It is not
-   pinned on the job.
+   running job's diagnostics name both (`roomExpert`, `expert`). The
+   gateway records it on the job when it answers the resolution
+   (`room_expert_id/version/name`, `store.RoomExpertRecorder`), so the run
+   record carries `roomExpert` beside `expert`, and appends the same
+   `content`/`use` audit row the chat's expert gets ("room expert House
+   style v1.2.0 on agent jack/acme/codex (job …, room …)") when the
+   recorded expert changes (a retried resolution records nothing new).
 7. **What is missing** (an unmet requirement, a room expert gone) is in the
    running job's `contentMissing`; the live job line shows it ("Running
    without …").
@@ -495,6 +510,23 @@ tool by name and can never inline a command.
     reads them (`BNBLOC_MCP_SETTINGS_DIR/<tool>.json`) only for drives the
     member asked for themselves: a borrowed or platform drive never lends
     the agent owner's accounts (the tool shows missing).
+  - `oauth` (`mcp.http.auth: {scheme: "oauth", clientId?, scopes?}`,
+    endpoint tools only, no `env` and no org connector): each member signs
+    in on their desktop (Settings → Tools). The desktop
+    (`internal_ext/mcp_oauth.rs`) runs the MCP authorization flow against
+    the tool's own server: protected resource metadata (the 401
+    `WWW-Authenticate resource_metadata`, else the well-known URIs; its
+    `resource` must be the tool's URL), authorization server metadata
+    (RFC 8414, then OIDC discovery, in the specification's order; `issuer`
+    checked; refused without PKCE S256), the package's `clientId` else
+    dynamic registration, PKCE, `state`, RFC 9207 `iss` and `resource`
+    (RFC 8707) on a 127.0.0.1 loopback redirect. Tokens are stored 0600 in
+    `<mcp-settings>/oauth/<tool>.json`, refreshed before expiry (rotating
+    the refresh token) and forgotten with the tool or when a refresh is
+    refused. The bridge sends the access token as `Authorization: Bearer`
+    on the member's own drives only; a missing or expired sign-in is
+    `contentMissing`. Nothing about the authorization server is declared
+    or stored server-side.
   - `org`: an org admin configures one connector per (organization, tool)
     at `/v1/tenant/mcp-connectors` (Organization → Tool connectors). Values
     are sealed with AES-256-GCM under `BNBLOC_SECRET_STORE_KEY`
@@ -512,7 +544,10 @@ tool by name and can never inline a command.
   `index.json` (`{tools: [{name, sha256, path}]}`) atomically, and deletes
   binaries of tools that left the catalog or changed pin (their member
   credentials are forgotten too). The bridge gets `BNBLOC_MCP_TOOLS_DIR`
-  and reads the index per session; nothing restarts.
+  and reads the index per session; nothing restarts. A just-published tool
+  appears within seconds: a catalog change pushes `components_changed` on
+  the member stream and the desktop refreshes its catalog then (the 60 s
+  poll is the safety net).
 - **Use time.** `GET …/effective` lists, for every `requires.mcp` of the
   expert, the room expert and the skill packs in effect, the installed
   tool the requester may use (`extpipe.MemberVisibility`): transport,
@@ -559,6 +594,7 @@ store and the artifact entitlement). JSON shapes: `internal/wire/content_compone
 | `GET /v1/content-components?kind=expert\|skill\|prompt` | The caller's Library (`contentuse.Visible`): their own components and the copies they hold plus org/platform ones visible to them, at the latest version, with usage counts (`runs`, `members`), a team's roster (`team`), `mine`/`removable`, a copy's `sharedBy`/`sourceId`/`sourceLatestVersion` and the author's `publication` |
 | `POST /v1/content-components` | Save a new component: `{form, version?}` (JSON) or a package archive (`component.json` names it). 201 detail; 409 duplicate name; 400 validator message. With `?job=&room=`: a save by the bridge running the job, as its requester (below) |
 | `POST /v1/content-components/import?kind=&name=` | Import an archive (tar, tar.gz, zip) or a single markdown/json file of prompts as a new component; `?id=` imports a new version of the caller's component |
+| `POST /v1/content-drafts?job=&room=` | The bridge running a job stages an unsaved expert or skill pack for a quick try (archive body; as the job's requester; 201 `wire.ContentDraft`); see [room-tools.md](room-tools.md), "Quick tries of drafts" |
 | `POST /v1/content-components/prompts` | "Save as prompt": `{title?, body, tags?}` into the caller's personal prompt pack (created on the first save); 201 `{component, promptId, created}` |
 | `POST /v1/content-components/{id}/prompts/{promptId}/use[?room=&version=]` | Count one insertion of a pack's prompt (204) |
 | `GET /v1/content-components/{id}[?room=]` | Detail with versions (readable when visible, or used by a room of the caller's) |
@@ -602,11 +638,12 @@ in Library", "Try it now") from it. Nothing re-lists the Library to find a
 save.
 
 **Requests on behalf of a job's requester.** The room tools
-(`save_component`, `get_component`, `list_components`, `publish_component`;
-see [`room-tools.md`](room-tools.md)) call `POST /v1/content-components`,
-`POST …/{id}/versions`, `GET …/{id}`, `GET …/{id}/versions/{v}`,
-`POST …/{id}/publish` and `GET /v1/content-components` with a `?job=&room=`
-grant
+(`save_component`, `get_component`, `list_components`, `publish_component`,
+`try_draft`; see [`room-tools.md`](room-tools.md)) call
+`POST /v1/content-components`, `POST …/{id}/versions`, `GET …/{id}`,
+`GET …/{id}/versions/{v}`, `POST …/{id}/publish`,
+`GET /v1/content-components` and `POST /v1/content-drafts` with a
+`?job=&room=` grant
 (`services/gateway/content_requester.go`). The grant follows dispatch's
 authority model: it is admitted only while the job is live and leased by a
 bridge of the caller (`store.JobLeasedBy`) and the job's requester is still a
@@ -617,8 +654,10 @@ refused (403): someone else's machine may not plant executable content
 into a member's own Library, where own content runs unsandboxed. Every
 granted save is an `extension_audit` row (kind `content`, action `save`,
 actor = requester, detail naming the agent and the bridge); a granted
-publish is a `request` row naming the agent. No other route honors the
-grant (sharing and the admin routes never do).
+publish is a `request` row naming the agent. A staged draft is not saved:
+it is no component, and the try's dispatch is audited as a content `try`
+(the draft's author, the staging agent's owner, is its trust owner). No
+other route honors the grant (sharing and the admin routes never do).
 
 **Saving deliverables.** Without room tools the drafted files are ordinary
 deliverables: the web offers "Save as expert" / "Save as skill pack" /

@@ -75,6 +75,7 @@ reply in the room; deliverables published with sourceSeq = the dispatch's seq
 | `list_components(kind?)` | `GET /v1/content-components` with the grant: the requester's Library. |
 | `publish_component(id, scope, note?)` | Posts to `POST /v1/content-components/{id}/publish` with the job's grant, as the requester: `org` opens a publish request an organization admin approves (the reply carries the request and the version members keep meanwhile), `personal` withdraws it and takes the component out of the organization; `platform` is answered locally as a platform admin's action ([content-components.md](content-components.md), "Sharing and publishing"). |
 | `post_progress(text)` | Posts one progress line of the bound job as a room notice (below): at most 20 per job, 500 characters each. |
+| `try_draft(dir, task, handle?, wait_seconds?)` | A real quick try of an unsaved expert or skill pack (below): packs `dir` like `save_component`, validates it with `contentpkg` (the error goes back to the agent), stages it with the job grant (`POST /v1/content-drafts`) and dispatches `task` to another agent wearing it through the same door, guards and wait as `ask_agent`. |
 
 **Content tools' authority** is the dispatch model applied to the content
 routes (`docs/architecture/content-components.md`, "Requests on behalf of a
@@ -120,10 +121,47 @@ guards hold in the tool layer (`services/bridge/roomtools/team.go`):
 The per-job state (failures, progress lines) resets when the session binds
 another job.
 
+## Quick tries of drafts (`try_draft`)
+
+The Expert builder tries what it drafted before the member saves it
+(PRD "Runtime gap closure" 4). An unsaved draft cannot be a content
+component (that would list it in a Library), so it is staged as an
+**ephemeral draft** instead:
+
+- **Staging.** `POST /v1/content-drafts?job=&room=` (gateway, the content
+  grant of [content-components.md](content-components.md), "Requests on
+  behalf of a job's requester") validates the archive like a save (an
+  expert or a skill pack; a team is refused), stores the bundle in the
+  blob store and a `content_drafts` row: the staging job, its room, the
+  requester, the author (the staging agent's owner) and an expiry
+  (`store.ContentDraftTTL`, one hour). It answers `wire.ContentDraft
+  {id, kind, name, displayName?, version, expiresAtMs}`.
+- **Dispatch.** `wire.DispatchRequest.draft` names it (never with
+  `expert`). Realtime admits only a draft the parent job staged, in this
+  room and tenant, before it expires (400 `draft_not_available`
+  otherwise), after every guard below; the job records it as its expert
+  (`expert_id` = the draft id, name "X (draft)"), the message's
+  `payload.expert` carries `draft: true` and the audit row is a content
+  `try`.
+- **Wearing.** `contentuse.Effective` resolves a draft expert id only for
+  that dispatched job (`DispatchedByJobID` = the staging job), before
+  expiry, with the draft's author as trust owner (someone else's
+  script-bearing draft forces the sandbox); the bundle is granted through
+  the job grant only. An expired draft is reported missing and the turn is
+  refused like an unavailable expert.
+- **Target.** `handle`, else the requester's own other agent, else another
+  online agent of the room. The session's own agent is never one (a
+  self-dispatch is refused and its drive lock is held by this turn), so a
+  room with one agent answers that no other agent can try it; the builder
+  then role-plays and says so.
+- **Expiry.** Each retention pass deletes expired drafts
+  (`RetentionStore.PurgeExpiredDrafts`) before the blob collection;
+  `ReferencedBlobKeys` keeps a draft's bundle while its row exists.
+
 ## The dispatch route (realtime)
 
 `POST /internal/v1/rooms/{room}/dispatch` (`svcauth.RequireSigned`) with
-`wire.DispatchRequest {parentJobId, recipient, text, expert?, clientMsgId?, role?}`
+`wire.DispatchRequest {parentJobId, recipient, text, expert?, draft?, clientMsgId?, role?}`
 (`expert` is a `wire.ChatExpert {id, version?}`).
 The gateway's public door `POST /v1/rooms/{room}/dispatch` is the only edge
 route rewritten onto an internal one. `RouteKey` keys the path to the room,
@@ -146,6 +184,7 @@ the detail):
 | ≤ 8 persisted dispatches per parent (`wire.MaxDispatchFanOut`) | 409 `fan_out_exceeded` |
 | not the people chat | 400 `people_chat` |
 | the expert, if any, is usable by the requester (`ChatPost.Expert`) | 400 `expert_not_available` |
+| the draft, if any, was staged by the parent job in this room and has not expired (`ChatPost.Draft`) | 400 `draft_not_available` |
 | the dispatching member's chat rate limit (gateway) | 429 |
 
 The fan-out count and the post are serialized per parent job (striped
@@ -154,9 +193,22 @@ owner). A `clientMsgId` retry answers the original job. The depth and
 fan-out limits are protocol safety constants, not deployment data.
 
 **Attribution.** The message's author is the parent job's requester;
-`payload.dispatchedBy {jobId, depth, via, role?}` marks it (the feed shows
-"maya → via jack/codex → bob/claude", the team role as a label, plus
-"(as <expert>)" from the message's `payload.expert`; the audit detail
-carries `role=`), and the job persists
-`dispatched_by_job_id` / `dispatch_depth` (run records show
-`dispatchedBy`).
+`payload.dispatchedBy {jobId, parentSeq, depth, via, role?}` marks it
+(`parentSeq` is the room sequence of the parent job's request; the feed
+shows "maya → via jack/codex → bob/claude", the team role as a label,
+plus "(as <expert>)" from the message's `payload.expert`; the audit
+detail carries `role=`), and the job persists `dispatched_by_job_id` /
+`dispatch_depth` (run records show `dispatchedBy`).
+
+**Nesting in the feed.** Every agent row a job writes (the bridge's
+replies and notices, a lead's progress lines, activity's failure notice)
+carries `payload.jobId` and `payload.sourceSeq` (the job's request). The
+web groups a turn from these alone (`web/src/views/room/feedTurns.ts`,
+`layoutTurns`): the request, then one collapsible block ("Team · writer,
+critic", or "Delegated to bob/claude" for plain dispatches) holding each
+dispatch with its replies, notices and nested dispatches (indented per
+depth) and the lead's progress lines, then the lead's own replies. A live
+feed and one rebuilt from history group the same way; a row whose request
+is not loaded stays in place until "Load earlier" brings it in. The block
+is open while a dispatched job runs (from the room's job list) and folds
+when all have settled.
