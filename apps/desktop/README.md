@@ -104,8 +104,9 @@ The shell contributes **process supervision and thin config/status IPC only** �
 no business logic. IPC commands (Rust ↔ web):
 
 - `bridge_status() -> { state, pid?, lastExitCode?, logsTail }`
-- `bridge_start()` / `bridge_stop()` / `bridge_restart()`
-- `get_settings()` / `set_settings(Settings)`
+- `bridge_start()` (starts, or restarts a running bridge) / `bridge_stop()`
+- `get_settings()` / `set_settings(Settings)` (every field but the
+  shell-owned sandbox mode, which `sandbox_mode_set` changes)
 - `internal_adapter_session(gatewayUrl, sessionToken)` (+ status/targets/login)
 - `check_update(sessionToken)` / `install_update(sessionToken)`
 - `open_url(url)` / `pop_out_preview(roomId, artifactId)`
@@ -115,8 +116,11 @@ Process lifecycle: every child (bridge and component sidecars) gets a stdin
 pipe the shell holds open; a stop closes it (supervised children exit on EOF),
 SIGTERMs the child's process group on Unix, and force-kills the child's whole
 tree after a grace period (process group on Unix, Job Object on Windows). Children stop only at app exit (quit, main window closed, updater
-restart) — closing a preview pop-out never touches them. The settings file
-holds credentials and is written owner-only (0600) via temp + rename.
+restart) — closing a preview pop-out never touches them. A restart waits for
+the run it replaces to stop. The settings file holds credentials and is
+written owner-only (0600) through a temp file unique to each write; an
+unreadable settings file is moved aside (`settings.json.corrupt-<ms>`) and
+reported in the bridge log, never reset and overwritten.
 
 Settings map one-to-one to the bridge's environment (see `docs/bridge.md`). The
 web bundle feature-detects the shell (`window.__TAURI__`) and renders a **Local

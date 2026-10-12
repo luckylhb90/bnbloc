@@ -481,12 +481,43 @@ activity and gateway images (projections).
 **Deploy:** the desktop release only. Old cache stems are swept on the first
 reconcile, with no migration.
 
-**Status (2026-10-12):** 6.4 partly landed (79ae59f): the stale
-"at least one core" error (L3), file-naming errors in `write_owner_only`
-(L4), and `GOFLAGS=-mod=readonly` for the sidecar build (L13, flag half).
-Still open: `bridge_restart` (removing it needs the web's `restart()` to
-call `bridge_start`), the previewer re-hash, `listen_addr` re-parsing, the
-build script's arch table, and 6.1–6.3.
+**Status (2026-10-12):** done.
+- 6.1 landed: `kind_runtime.rs` (`KindRuntime`, `runtime(kind)` the one
+  dispatch; `sync`/`sweep` for every kind, the launch hooks for core,
+  plugin, sandbox; the batch-1 sweep is the shared binary-cache step plus
+  each kind's `sweep`; "forget" is subsumed by `sweep`). `LaunchGuard`
+  revokes a plugin's host grant on a failed, stale or ended launch (M10).
+- 6.2 landed: `child_process::Stopping` (M1), `RestartPolicy` (M15),
+  `AppState::update_settings` + `Settings::apply_web` (M2),
+  `files::read_json` quarantine (M3), bounded child output (M14).
+  Deviation: bridge log lines are throttled (one status per 250 ms)
+  rather than emitted one by one, because emitting only the new line needs
+  the web to append lines (outside this batch's web budget).
+- 6.3 landed: `Sha256Pin` (M4), `LoopbackHttp` + `loopback::client` (M5,
+  L2), `files::atomic_write` + one previewer fetch per bundle (M6),
+  `ManagedSidecar::endpoint` + `bridge_cores` (M7), `GatewayAccess::send`
+  / `GatewayClient` with no session until the web hands one and none after
+  sign-out (M8; no web event for `SessionExpired`, the web has no listener),
+  `cache_stem` with `@` (M11), names checked at decode (M12), coalesced MCP
+  passes with cached verification (M13), `secret.rs` (L1), OAuth issuer,
+  origin and callback timeout (L5, L6), previewer disk cleanup off the
+  async runtime (L7), one fetch-failure reading (L8), `Dirs` (L9),
+  download and site-file caps (L11), `settings::gateway_url` (L12; the
+  manager's session origin is still the one the web hands with the
+  session, normalized the same way).
+- 6.4 landed: `bridge_restart` removed (the web's Restart calls
+  `bridge_start`), previewer re-hash, `listen_addr`, one Rust→Go platform
+  table (`apps/desktop/go-platforms.json`); L3, L4, L13 `-mod=readonly`
+  landed earlier.
+- Tests: the seven listed above, plus `materialization_passes_coalesce`,
+  `gateway_answers_are_read_once`, `output_is_bounded_and_the_exit_always_arrives`,
+  `names_are_validated_when_the_catalog_is_decoded`,
+  `an_idle_connection_never_holds_up_the_callback`,
+  `daemon_cores_are_bridge_cores_exactly_while_they_answer`, and owner scans
+  in `owners_tests.rs` (one writer, dirs, secrets, loopback, gateway calls,
+  stops, restart policy, settings writer, no kind branches, grant revoke).
+  `relaunch_waits_for_previous_stop` exercises `Stopping` directly: the
+  bridge `Supervisor` needs a Tauri `AppHandle` the unit tests do not have.
 
 ## 4. Enforcement tests (deduplicated)
 

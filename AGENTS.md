@@ -650,7 +650,8 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   source of truth). Neither the gateway nor realtime may start, stop, or
   exec a component process — they only deliver signed metadata and events.
   Owners in the shell (`internal_ext/owners_tests.rs` scans for copies):
-  uninstall cleanup is `sidecar_sweep`, run after every successful
+  uninstall cleanup is `sidecar_sweep` (the shared binary cache, then each
+  kind's `KindRuntime::sweep`), run after every successful
   reconcile against the live catalog (never an in-memory diff, which is
   empty after a restart); "this process is our orphan from an earlier
   session" is `owned_orphan` (spawn record from another app pid AND an
@@ -660,7 +661,33 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   catalog is: never judge state against a catalog of another scope. The
   sweep takes the member dir from the session the catalog was fetched
   with; only rebuildable machine-wide caches (sidecar binaries, sandbox
-  bundles) are swept against whichever catalog is current.
+  bundles, previewer archives) are swept against whichever catalog is
+  current.
+- **The desktop shell has one owner per rule** (`owners_tests.rs`,
+  `docs/prd/2026-10-12-code-health-remediation.md` Batch 6). Per kind:
+  `kind_runtime::runtime(kind)` is the one dispatch; the reconcile,
+  supervisor and sweep never branch on a kind (a new kind or a new
+  per-kind step extends `KindRuntime`). What a launch hands out (a
+  plugin's host grant, the sandbox's launch) lives in its `LaunchGuard`,
+  released on every exit path. Processes: every stop goes through
+  `child_process::Stopping` and every launch awaits its key's stops (no
+  two bridges, no relaunch onto a dying sidecar's port);
+  `RestartPolicy::BRIDGE`/`SIDECAR` is the one backoff (a clean bridge exit
+  is final, a sidecar always restarts); child output is bounded.
+  "Is this sidecar usable" is `ManagedSidecar::endpoint`, and the bridge
+  env and its restart watcher read one list (`bridge_cores`). Values:
+  `Sha256Pin` (parsed once at catalog decode, every kind),
+  `valid_package_name` (every name that becomes a path or route, checked
+  at decode), `cache_stem` (`@` separator, injective), `LoopbackHttp`
+  plus `loopback::client` (what counts as this machine, no redirects),
+  `Secret`/`ct_eq` (random values and their comparison), `Dirs` (every
+  app path), `files::atomic_write`/`read_json` (the one state-file writer;
+  an unreadable file is moved aside and reported, never reset),
+  `AppState::update_settings` (the one settings writer; the web's form
+  never reverts the shell-owned sandbox mode), `GatewayAccess::send`
+  (every call as the member; 401 is `SessionExpired`, never a refusal or a
+  retry-forever; the manager has no session until the web hands one and
+  loses it at sign-out), `settings::gateway_url` (the one gateway URL).
 - **The desktop owns the sandbox VM, the bridge only uses it.** At most one
   sandbox component (`bnbloc.sandbox.package/v1`) runs per desktop. Its
   executable and declared files live in one sha256-verified per-version
