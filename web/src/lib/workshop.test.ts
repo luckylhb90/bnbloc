@@ -4,14 +4,13 @@ import {
   MAX_WORKSHOP_PROBES,
   WORKSHOP_ROOM_NAME,
   cachedWorkshop,
-  improvePrompt,
   libraryTabOf,
   rememberWorkshop,
   tryItDraft,
   workshopAgent,
   workshopAgentPick,
   workshopCandidates,
-  workshopPrompt,
+  workshopDraft,
   workshopRoomId,
 } from "./workshop.ts";
 
@@ -48,18 +47,31 @@ function comp(over: Partial<ContentComponent>): ContentComponent {
   };
 }
 
-// Prefills: editable placeholders per kind; improve names the id.
-assert(workshopPrompt("expert").startsWith("Help me create a ___ expert that is good at ___."), "expert prefill");
-assert(workshopPrompt("expert").includes("[your field and experience]"), "expert prefill asks for background");
-assert(workshopPrompt("skill").startsWith("Help me create a skill pack"), "skill prefill");
-eq(improvePrompt(comp({ id: "cc_9" })), 'Improve the expert "Reviewer" (id cc_9): ___', "improve an expert");
-eq(improvePrompt(comp({ id: "cc_8", kind: "skill", name: "csv", displayName: "" })), 'Improve the skill pack "csv" (id cc_8): ___', "improve a skill pack");
+// Prefills are the builder's own quick prompts (a stand-in builder here; the
+// real one's titles are pinned by TestBuilderQuickPromptsServeTheWorkshop):
+// per kind the "Create … <kind>" one; improve fills the first blank with the
+// component and its id.
+const builder = comp({
+  quickPrompts: [
+    { title: "Create an expert", prompt: " Make me an expert for ___ " },
+    { title: "Create a skill pack", prompt: "Make me a skill pack for ___" },
+    { title: "Create a prompt pack", prompt: "Make me a prompt pack for ___" },
+    { title: "Improve one of mine", prompt: "Make my ___ better: ___" },
+  ],
+});
+eq(workshopDraft(builder, { create: "expert" }), "Make me an expert for ___", "expert prefill");
+eq(workshopDraft(builder, { create: "skill" }), "Make me a skill pack for ___", "skill prefill");
+eq(workshopDraft(builder, { improve: comp({ id: "cc_9" }) }), 'Make my expert "Reviewer" (id cc_9) better: ___', "improve an expert");
+eq(workshopDraft(builder, { improve: comp({ id: "cc_8", kind: "skill", name: "csv", displayName: "" }) }), 'Make my skill pack "csv" (id cc_8) better: ___', "improve a skill pack");
+// The builder unreadable: create opens empty; improve still names the component.
+eq(workshopDraft(null, { create: "expert" }), "", "no builder, no prefill");
+eq(workshopDraft(null, { improve: comp({ id: "cc_9" }) }), 'expert "Reviewer" (id cc_9)', "no builder: the component alone");
 eq(tryItDraft(comp({ quickPrompts: [{ title: "Review", prompt: " Review this diff " }] })), "Review this diff", "first quick prompt");
 eq(tryItDraft(comp({})), "", "no quick prompt");
 eq(tryItDraft(comp({ kind: "prompt", prompts: [{ id: "a", title: "A", body: "b", uses: 0 }, { id: "n", title: "Notes", body: "c", slash: "/notes", uses: 0 }] })), "/notes ", "a pack's first slash command");
 // Prompt packs are authored by the same builder.
-assert(workshopPrompt("prompt").startsWith("Help me create a prompt pack for ___"), "prompt pack prefill");
-eq(improvePrompt(comp({ id: "cc_7", kind: "prompt", name: "kit", displayName: "Kit" })), 'Improve the prompt pack "Kit" (id cc_7): ___', "improve a prompt pack");
+eq(workshopDraft(builder, { create: "prompt" }), "Make me a prompt pack for ___", "prompt pack prefill");
+eq(workshopDraft(builder, { improve: comp({ id: "cc_7", kind: "prompt", name: "kit", displayName: "Kit" }) }), 'Make my prompt pack "Kit" (id cc_7) better: ___', "improve a prompt pack");
 eq([libraryTabOf("expert"), libraryTabOf("skill"), libraryTabOf("prompt")], ["experts", "skills", "prompts"], "library tabs");
 
 // The builder runs on the member's own online agent first, else a platform

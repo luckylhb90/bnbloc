@@ -12,7 +12,6 @@ import {
 } from "@phosphor-icons/react";
 import { contentKindWord, contentLabel, isBuiltin, isTeam, matchesContent, usageLine, type ContentComponent } from "@/lib/contentComponents";
 import { relativeTime } from "@/lib/format";
-import { improvePrompt, workshopPrompt } from "@/lib/workshop";
 import { Button } from "@/ui/Button";
 import { Badge, Card, Skeleton } from "@/ui/Card";
 import { ConfirmDialog } from "@/ui/Dialog";
@@ -94,7 +93,7 @@ export function ContentTab({
             <PlusIcon size={16} />
             Create manually
           </Button>
-          <Button variant="primary" onClick={() => void workshop.open(workshopPrompt(kind))} disabled={workshop.busy}>
+          <Button variant="primary" onClick={() => void workshop.open({ create: kind })} disabled={workshop.busy}>
             <SparkleIcon size={16} weight="fill" />
             {workshop.busy ? "Opening…" : "Create with AI"}
           </Button>
@@ -163,7 +162,7 @@ export function ContentTab({
                   {c.mine && (
                     <button
                       type="button"
-                      onClick={() => void workshop.open(improvePrompt(c))}
+                      onClick={() => void workshop.open({ improve: c })}
                       disabled={workshop.busy}
                       title="Improve with AI"
                       aria-label={`Improve ${c.name} with AI`}
@@ -195,7 +194,7 @@ export function ContentTab({
         onClose={() => setViewing(null)}
         onImprove={(c) => {
           setViewing(null);
-          void workshop.open(improvePrompt(c));
+          void workshop.open({ improve: c });
         }}
       />
       <ImportDialog kind={kind} open={importing} mine={mine} onClose={() => setImporting(false)} onImported={reload} />

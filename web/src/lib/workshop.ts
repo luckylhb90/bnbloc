@@ -1,7 +1,7 @@
 // The expert workshop (docs/prd/2026-10-12-experts-and-teams.md §5,
 // authoring by conversation): "Create with AI" opens the member's private
 // workshop room with the built-in builder expert picked and an editable
-// prompt prefilled. The helpers here are pure (prefill texts, which agent
+// prompt prefilled. The helpers here are pure (the prefill, which agent
 // runs the builder, which room is the workshop) so they
 // are unit-tested; the view wiring lives in views/library/workshopFlow.ts.
 
@@ -13,19 +13,30 @@ import { StorageKey, keyFor } from "./storageKeys.ts";
 
 export const WORKSHOP_ROOM_NAME = "Expert workshop";
 
-// workshopPrompt is the prefilled, editable request of "Create with AI".
-// The UI strings are English (the web has no i18n layer); the builder itself
-// answers in the member's language.
-export function workshopPrompt(kind: ContentKind): string {
-  if (kind === "skill") return "Help me create a skill pack that teaches an agent to ___. It is used when ___. Example task: [an example]";
-  if (kind === "prompt") return "Help me create a prompt pack for ___: prompts my team reuses when ___. Examples of what we ask: [an example]";
-  return "Help me create a ___ expert that is good at ___. My background: [your field and experience]";
-}
+// WorkshopRequest is what the workshop opens for: "Create with AI" of a
+// kind, or "Improve with AI" of a component.
+export type WorkshopRequest =
+  | { readonly create: ContentKind }
+  | { readonly improve: Pick<ContentComponent, "id" | "kind" | "name" | "displayName"> };
 
-// improvePrompt is the prefilled request of "Improve with AI": it names the
-// component id so the builder loads the current version.
-export function improvePrompt(c: Pick<ContentComponent, "id" | "kind" | "name" | "displayName">): string {
-  return `Improve the ${contentKindWord(c.kind)} "${contentLabel(c)}" (id ${c.id}): ___`;
+// workshopDraft is the prefilled, editable request: one of the builder's own
+// quick prompts (the built-in component's, read through the content API, so
+// the builder owns the wording): per kind the one titled "Create … <kind>",
+// and for a component the one titled "Improve …", whose first ___ names it
+// with its id so the builder loads the current version
+// (TestBuilderQuickPromptsServeTheWorkshop pins those titles).
+export function workshopDraft(builder: Pick<ContentComponent, "quickPrompts"> | null, req: WorkshopRequest): string {
+  const quick = builder?.quickPrompts ?? [];
+  const titled = (prefix: string, word = "") =>
+    quick.find((q) => {
+      const t = (q.title ?? "").trim().toLowerCase();
+      return t.startsWith(prefix) && t.includes(word);
+    })?.prompt?.trim() ?? "";
+  if ("create" in req) return titled("create", req.create);
+  const c = req.improve;
+  const named = `${contentKindWord(c.kind)} "${contentLabel(c)}" (id ${c.id})`;
+  const improve = titled("improve");
+  return improve.includes("___") ? improve.replace("___", named) : [improve, named].filter(Boolean).join(" ");
 }
 
 // tryItDraft is the composer text of "Try it now": an expert's first quick

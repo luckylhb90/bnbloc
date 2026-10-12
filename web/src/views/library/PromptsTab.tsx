@@ -16,7 +16,6 @@ import { announcePromptPacksChanged } from "@/lib/promptPacksApi";
 import { relativeTime } from "@/lib/format";
 import { packUses, PERSONAL_PROMPT_PACK } from "@/lib/promptPacks";
 import { takeLibraryQuery } from "@/lib/team";
-import { improvePrompt, workshopPrompt } from "@/lib/workshop";
 import { Button } from "@/ui/Button";
 import { Badge, Card, Skeleton } from "@/ui/Card";
 import { ConfirmDialog } from "@/ui/Dialog";
@@ -85,7 +84,7 @@ export function PromptsTab({ tabs, onOpenRoom }: { readonly tabs: React.ReactNod
             <PlusIcon size={16} />
             Create manually
           </Button>
-          <Button variant="primary" onClick={() => void workshop.open(workshopPrompt("prompt"))} disabled={workshop.busy}>
+          <Button variant="primary" onClick={() => void workshop.open({ create: "prompt" })} disabled={workshop.busy}>
             <SparkleIcon size={16} weight="fill" />
             {workshop.busy ? "Opening…" : "Create with AI"}
           </Button>
@@ -149,7 +148,7 @@ export function PromptsTab({ tabs, onOpenRoom }: { readonly tabs: React.ReactNod
                     {c.mine && (
                       <button
                         type="button"
-                        onClick={() => void workshop.open(improvePrompt(c))}
+                        onClick={() => void workshop.open({ improve: c })}
                         disabled={workshop.busy}
                         title="Improve with AI"
                         aria-label={`Improve ${c.name} with AI`}

@@ -17,7 +17,9 @@ import {
   workshopAgent,
   workshopAgentPick,
   workshopCandidates,
+  workshopDraft,
   workshopRoomId,
+  type WorkshopRequest,
 } from "@/lib/workshop";
 import type { ToastAction } from "@/ui/Toast";
 import { useToast } from "@/ui/Toast";
@@ -69,22 +71,35 @@ async function findOrCreateWorkshop(subject: string, reauth: () => Promise<void>
   return roomId;
 }
 
+// builderComponent is the built-in builder as the content API serves it
+// (its quick prompts are the workshop's prefills), or null when it cannot
+// be read: the workshop still opens, with an empty draft.
+async function builderComponent(): Promise<ContentComponent | null> {
+  try {
+    return (await contentApi.get(BUILDER_EXPERT_ID)).component;
+  } catch {
+    return null;
+  }
+}
+
 // useOpenWorkshop opens the expert workshop with the builder picked, the
-// member's own agent (else a platform agent) selected and `draft` in the
-// composer. Without any agent the room still opens, with guidance.
-export function useOpenWorkshop(onOpenRoom: (roomId: string) => void): { readonly open: (draft: string) => Promise<void>; readonly busy: boolean } {
+// member's own agent (else a platform agent) selected and the builder's
+// quick prompt for the request in the composer (workshopDraft). Without any
+// agent the room still opens, with guidance.
+export function useOpenWorkshop(onOpenRoom: (roomId: string) => void): { readonly open: (req: WorkshopRequest) => Promise<void>; readonly busy: boolean } {
   const { subject, reauth } = useAuth();
   const toast = useToast();
   const [busy, setBusy] = useState(false);
   const open = useCallback(
-    async (draft: string) => {
+    async (req: WorkshopRequest) => {
       if (!subject || busy) return;
       setBusy(true);
       try {
-        const [roomId, offered, own] = await Promise.all([
+        const [roomId, offered, own, builder] = await Promise.all([
           findOrCreateWorkshop(subject, reauth),
           platformAgentsApi.available().then((r) => r.agents).catch(() => []),
           api.myAgents().then((r) => r.agents ?? []).catch(() => []),
+          builderComponent(),
         ]);
         const pick = workshopAgentPick(workshopAgent(offered, own, subject));
         if (pick && !pick.own) {
@@ -94,7 +109,8 @@ export function useOpenWorkshop(onOpenRoom: (roomId: string) => void): { readonl
         if (pick) composerAgentPicks.queue(roomId, pick);
         else toast.info("Connect an agent to use the builder: install the desktop app or ask your admin for a platform agent");
         composerExpertPicks.queue(roomId, { id: BUILDER_EXPERT_ID });
-        composerDrafts.queue(roomId, draft);
+        const draft = workshopDraft(builder, req);
+        if (draft) composerDrafts.queue(roomId, draft);
         onOpenRoom(roomId);
       } catch (e) {
         toast.error(errorText(e, "Could not open the workshop"));
