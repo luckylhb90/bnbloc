@@ -495,7 +495,7 @@ func (s *Service) handleRedeem(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, "missing authenticated subject", http.StatusUnauthorized)
 		return
 	}
-	m, err := s.Store.RedeemInvite(r.Context(), r.PathValue("code"), caller, s.Now())
+	m, err := s.redeemInvite(r.Context(), r.PathValue("code"), caller)
 	if err != nil {
 		switch {
 		case errors.Is(err, store.ErrInviteNotFound):
@@ -508,9 +508,6 @@ func (s *Service) handleRedeem(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
-	// A redeem by someone already in the room announces a join again;
-	// what listens is idempotent (an existing copy is left unchanged).
-	s.publishMemberJoined(r.Context(), m.RoomID, m.UserID)
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"roomId": m.RoomID, "membership": map[string]string{"userId": m.UserID, "role": string(m.Role)}})
 }
 
@@ -564,7 +561,7 @@ func (s *Service) handleJoinRoom(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// An agent-host membership is not one: joining makes the host a human
-	// member (AddMember converts the row).
+	// member (addMember converts the row and announces the join).
 	if m, ok := s.Store.GetMember(r.Context(), roomID, caller); ok && !m.AgentHost {
 		httpx.WriteJSON(w, http.StatusOK, map[string]any{"roomId": roomID, "role": string(m.Role)})
 		return
@@ -573,12 +570,10 @@ func (s *Service) handleJoinRoom(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, "room is private; an invite code is required", http.StatusForbidden)
 		return
 	}
-	if err := s.Store.AddMember(r.Context(), store.Membership{RoomID: roomID, UserID: caller, Role: store.RoleMember, JoinedAtMs: s.Now()}); err != nil {
-		obs.ServerError(w, "join room failed", err)
-		httpx.Error(w, err.Error(), http.StatusInternalServerError)
+	if err := s.addMember(r.Context(), roomID, caller, store.RoleMember); err != nil {
+		writeMemberErr(w, err)
 		return
 	}
-	s.publishMemberJoined(r.Context(), roomID, caller)
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"roomId": roomID, "role": string(store.RoleMember)})
 }
 

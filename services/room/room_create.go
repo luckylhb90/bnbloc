@@ -14,11 +14,13 @@ import (
 	"github.com/luckylhb90/bnbloc/internal/wire"
 )
 
-// The one room-creation and member-add paths. POST /v1/rooms, a handoff
-// import, and a template instantiation all create rooms through createRoom;
-// POST .../members and a template's default members both add through
-// addMember, so their invariants (default channel created atomically, owner
-// never granted or changed by an add) hold for every caller.
+// The one room-creation and join paths. POST /v1/rooms, a handoff import,
+// and a template instantiation all create rooms through createRoom; every
+// other membership a person gains (POST .../members, a template's default
+// members, joining a shared room, redeeming an invite) goes through
+// addMember or redeemInvite, so their invariants (default channel created
+// atomically, owner never granted or changed by an add) hold for every
+// caller and each join announces member_joined (TestJoinsAnnounced).
 
 // createRoom atomically creates room with owner as its owner and its default
 // channel (named defaultChannel, "general" when empty). It returns the
@@ -78,6 +80,18 @@ func (s *Service) addMember(ctx context.Context, roomID, userID string, role sto
 		s.publishMemberJoined(ctx, roomID, userID)
 	}
 	return nil
+}
+
+// redeemInvite redeems an invite code for userID and announces the join.
+// A redeem by someone already in the room announces it again; what listens
+// is idempotent (an existing copy is left unchanged).
+func (s *Service) redeemInvite(ctx context.Context, code, userID string) (store.Membership, error) {
+	m, err := s.Store.RedeemInvite(ctx, code, userID, s.Now())
+	if err != nil {
+		return m, err
+	}
+	s.publishMemberJoined(ctx, m.RoomID, m.UserID)
+	return m, nil
 }
 
 // publishMemberJoined announces that userID became a (human) member of
