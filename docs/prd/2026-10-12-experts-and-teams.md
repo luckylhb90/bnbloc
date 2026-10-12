@@ -681,3 +681,83 @@ Decisions:
 - **Left to others:** the desktop, and confining a borrowed drive on Linux
   without a sandbox (bubblewrap): someone else's script-bearing content is
   refused there until it exists.
+
+## Status: step 6 (MCP tool components)
+
+**2026-10-12: in development.** Scope: the executable kind
+`bnbloc.mcp.package/v1` (section 6), `requires.mcp` resolution at use
+time, member and org credentials, the desktop's stdio materialization and
+its Settings → Tools, the Library's Tools tab, org connectors and
+`bnbloc cores publish-mcp`. Decisions:
+
+- **An executable kind, the existing pipeline.** Platform-signed, installed
+  by a super admin through `POST /v1/platform/components` (rollout, tenants
+  and opt-in unchanged), contract `bnbloc.mcp.contract/v1`. The payload is
+  `mcp: {tools: [{name, description}], env: [{name, description, secret,
+  required}], credentials: member|org, stdio?: {args}, http?: {auth}}` and
+  one of two runtimes:
+  - `stdio`: per-platform `artifacts` staged through
+    `POST /v1/platform/artifacts` and pinned by sha256, exactly like sidecar
+    binaries. The artifact is the command; `mcp.stdio.args` are its
+    arguments. No endpoint, no network permission.
+  - `endpoint`: `endpoint.baseUrl` is the MCP (streamable HTTP) URL, held to
+    `permissions.network` and probed through `internal/endpointpkg`. MCP's
+    own discover is `initialize`, so the kind's probe posts it and accepts a
+    JSON-RPC answer or 401/403 (the endpoint wants the credentials it
+    declares; the platform holds none). `mcp.http.auth` is `none`,
+    `bearer` (`Authorization: Bearer <env>`) or `header` (`<header>: <env>`),
+    the value read from one declared env.
+  Nothing runs server-side: the gateway owns the record and the member
+  catalog (`GET /v1/components`, kind `mcp`), activation registers nothing.
+- **Credentials.** A component declares env names (secret or not,
+  required or not) and where their values come from:
+  - `member`: entered on the member's desktop (Settings → Tools), stored
+    0600 under the app config dir like plugin `localSettings`, read by the
+    member's own bridge, never sent to the gateway. They are the member's
+    own: used only for drives the member asked for themselves. A borrowed
+    or platform drive does not lend the agent owner's credentials (the tool
+    shows missing), so a borrower never acts with someone else's account.
+  - `org`: an org admin configures one connector per (organization,
+    component) (`/v1/tenant/mcp-connectors`, `manage_org`). Values are
+    sealed with AES-256-GCM under `BNBLOC_SECRET_STORE_KEY` (gateway only;
+    the settings key is the additional data, so a sealed row cannot be
+    moved to another organization) and stored in platform settings. They
+    are opened only into the effective resolution of a job in that
+    organization, answered to the bridge holding the job's lease. Without
+    the key org connectors are off (409), never stored in clear. No existing
+    seam encrypted at rest (notifier secrets are plain platform settings),
+    so `internal/sealbox` is new and generic.
+- **References.** `requires.mcp: [{name, env?}]` names an MCP component;
+  `env` lists the component's env names the content needs set (required
+  ones are always needed). On save the gateway checks that the name is an
+  MCP component visible to the author, that the env names are declared, and
+  that the content declares the matching permission (`mcp.stdio`, or
+  `mcp.http:<host>` of its URL), so cards show what really runs. Reading or
+  materializing stored content checks syntax only: a component uninstalled
+  later never makes stored content invalid.
+- **Use time.** The effective resolution of a job lists each required MCP
+  component with what the bridge needs (transport, the platform's sha256
+  pins, args, URL and auth, declared env, org values when configured) and
+  reports unknown, invisible or unconfigured ones in `missing`
+  (`contentMissing` on the job line); the turn still runs. Visibility is the
+  requester's, through `extpipe.MemberVisibility`.
+- **Bridge.** It builds the MCP servers of the session profile: a stdio
+  server from the desktop's materialized binary (`BNBLOC_MCP_TOOLS_DIR`,
+  its `index.json` entry must carry the gateway's sha256 pin for this
+  platform) with the env values as process env; an http server with its
+  URL and auth header. Missing binaries, member credentials (from
+  `BNBLOC_MCP_SETTINGS_DIR`), a core without `agentProfile` or a target
+  without http MCP show as missing. A stdio tool required by content that is
+  not the agent owner's own forces the sandboxed drive (with or without the
+  declared `mcp.stdio`). The session binding covers the tool set by name,
+  version and transport (never values); secrets stay out of logs, the
+  checksum and job data.
+- **Desktop.** MCP components are not supervised: the sidecar manager
+  materializes each installed stdio tool's binary for this platform through
+  the shared verified download (`fetch_verified`, same cache naming and GC)
+  into the tools dir, writes `index.json`, and removes binaries (and member
+  settings) of components that leave the catalog. The agent spawns the
+  binary per session.
+- **CLI.** `bnbloc cores publish-mcp --package <mcp.json> [--binary
+  <platform>=<path>...]` uploads the binaries, pins them, signs and installs
+  through the shared publish path.
