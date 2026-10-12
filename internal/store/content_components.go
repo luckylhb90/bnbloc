@@ -216,7 +216,8 @@ type ContentComponentStore interface {
 	DeleteContentUse(ctx context.Context, scopeKind ContentUseScope, scopeID, componentID string) error
 	// ListContentUses returns a scope's uses, oldest first.
 	ListContentUses(ctx context.Context, scopeKind ContentUseScope, scopeID string) ([]ContentUse, error)
-	// CountContentUses returns, per component, how many scopes use it.
+	// CountContentUses returns, per component, how many scopes use it
+	// (room experts excluded; capped at MaxUsageCount, a badge count).
 	CountContentUses(ctx context.Context, componentIDs []string) (map[string]int, error)
 	// CountMemberUses returns, per component, how many members turned it
 	// on for themselves (capped at MaxUsageCount; content_usage.go).
@@ -533,7 +534,7 @@ func (s *MemoryContentComponents) CountContentUses(_ context.Context, componentI
 	}
 	out := map[string]int{}
 	for _, u := range s.uses {
-		if want[u.ComponentID] && u.ScopeKind != ContentUseRoomExpert {
+		if want[u.ComponentID] && u.ScopeKind != ContentUseRoomExpert && out[u.ComponentID] < MaxUsageCount {
 			out[u.ComponentID]++
 		}
 	}

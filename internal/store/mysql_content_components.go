@@ -344,29 +344,26 @@ func (s *MySQLContentComponents) ListContentUses(ctx context.Context, scopeKind 
 	return out, rows.Err()
 }
 
+// CountContentUses counts on idx_content_uses_component, bounded per
+// component at MaxUsageCount (a badge count, like CountMemberUses).
 func (s *MySQLContentComponents) CountContentUses(ctx context.Context, componentIDs []string) (map[string]int, error) {
 	out := map[string]int{}
-	if len(componentIDs) == 0 {
-		return out, nil
-	}
-	args := make([]any, len(componentIDs))
-	for i, id := range componentIDs {
-		args[i] = id
-	}
-	rows, err := s.DB.QueryContext(ctx, `SELECT component_id, COUNT(*) FROM content_component_uses WHERE component_id IN (`+inPlaceholders(len(args))+`) AND scope_kind <> '`+string(ContentUseRoomExpert)+`' GROUP BY component_id`, args...)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var id string
+	seen := map[string]bool{}
+	for _, id := range componentIDs {
+		if id == "" || seen[id] {
+			continue
+		}
+		seen[id] = true
 		var n int
-		if err := rows.Scan(&id, &n); err != nil {
+		if err := s.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM (SELECT 1 FROM content_component_uses WHERE component_id = ? AND scope_kind <> ? LIMIT ?) u`,
+			id, string(ContentUseRoomExpert), MaxUsageCount).Scan(&n); err != nil {
 			return nil, err
 		}
-		out[id] = n
+		if n > 0 {
+			out[id] = n
+		}
 	}
-	return out, rows.Err()
+	return out, nil
 }
 
 func (s *MySQLContentComponents) PutContentAck(ctx context.Context, a ContentAck) error {

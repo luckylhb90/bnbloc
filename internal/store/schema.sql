@@ -76,7 +76,8 @@ CREATE TABLE IF NOT EXISTS component_installs (
   kind             VARCHAR(64) NOT NULL,
   name             VARCHAR(255) NOT NULL,
   installed_at_ms  BIGINT NOT NULL,
-  PRIMARY KEY (subject, kind, name)
+  PRIMARY KEY (subject, kind, name),
+  KEY idx_component_installs_kind (kind, name, subject)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 
@@ -141,7 +142,9 @@ CREATE TABLE IF NOT EXISTS agent_jobs (
   KEY idx_agent_jobs_requester_created (tenant_id, requester_user_id, created_at_ms),
   KEY idx_agent_jobs_owner_status (owner_user_id, status, core, provider),
   KEY idx_agent_jobs_dispatched_by (tenant_id, dispatched_by_job_id),
-  KEY idx_agent_jobs_expert (tenant_id, expert_id, requester_user_id)
+  KEY idx_agent_jobs_expert (tenant_id, expert_id, requester_user_id),
+  KEY idx_agent_jobs_status_created (status, created_at_ms),
+  KEY idx_agent_jobs_status_lease (status, lease_expires_at_ms)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS bridge_heartbeats (
@@ -154,7 +157,8 @@ CREATE TABLE IF NOT EXISTS bridge_heartbeats (
   serve_all_owners TINYINT(1) NOT NULL DEFAULT 0,
   last_seen_at_ms BIGINT NOT NULL,
   metadata_json   JSON NULL,
-  KEY idx_bridge_owner (tenant_id, owner_user_id, last_seen_at_ms)
+  KEY idx_bridge_owner (tenant_id, owner_user_id, last_seen_at_ms),
+  KEY idx_bridge_heartbeats_owner_seen (owner_user_id, last_seen_at_ms)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS bridge_agents (
@@ -168,7 +172,8 @@ CREATE TABLE IF NOT EXISTS bridge_agents (
   disabled           TINYINT(1) NOT NULL DEFAULT 0,
   last_seen_at_ms    BIGINT NOT NULL,
   PRIMARY KEY (bridge_id, core, provider, target_id),
-  KEY idx_bridge_agents_lookup (tenant_id, owner_user_id, core, provider, disabled)
+  KEY idx_bridge_agents_lookup (tenant_id, owner_user_id, core, provider, disabled),
+  KEY idx_bridge_agents_owner (owner_user_id, disabled, core, provider)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS user_agent_prefs (
@@ -221,7 +226,8 @@ CREATE TABLE IF NOT EXISTS room_members (
   joined_at_ms   BIGINT NOT NULL,
   agent_host     TINYINT(1) NOT NULL DEFAULT 0,
   PRIMARY KEY (room_id, user_id),
-  KEY idx_member_user (tenant_id, user_id)
+  KEY idx_member_user (tenant_id, user_id),
+  KEY idx_member_user_host (user_id, agent_host)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS room_invites (
@@ -582,7 +588,7 @@ CREATE TABLE IF NOT EXISTS notification_outbox (
   last_error         VARCHAR(512) NOT NULL DEFAULT '',
   created_at_ms      BIGINT NOT NULL,
   PRIMARY KEY (tenant_id, id, notifier),
-  KEY idx_notification_outbox_due (next_attempt_at_ms),
+  KEY idx_notification_outbox_due (delivered_at_ms, failed_at_ms, next_attempt_at_ms),
   KEY idx_notification_outbox_claim (claim_token),
   KEY idx_notification_outbox_created (created_at_ms)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
@@ -661,7 +667,8 @@ CREATE TABLE IF NOT EXISTS room_schedules (
   created_at_ms    BIGINT NOT NULL,
   updated_at_ms    BIGINT NOT NULL,
   KEY idx_room_schedules_room (tenant_id, room_id),
-  KEY idx_room_schedules_due (enabled, next_run_at_ms)
+  KEY idx_room_schedules_due (enabled, next_run_at_ms),
+  KEY idx_room_schedules_claim (claim_token)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- Room templates (N3): a reusable room setup (description, channels, starter
@@ -766,6 +773,7 @@ CREATE TABLE IF NOT EXISTS content_components (
   UNIQUE KEY uq_content_components_org_name (tenant_id, kind, org_name),
   KEY idx_content_components_owner (owner, kind, updated_at_ms),
   KEY idx_content_components_scope (tenant_id, scope, kind, updated_at_ms),
+  KEY idx_content_components_platform (scope, kind, updated_at_ms),
   KEY idx_content_components_source (source_id, scope)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 

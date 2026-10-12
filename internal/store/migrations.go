@@ -1260,6 +1260,35 @@ WHERE r.channel_id = '' AND d.user_id IS NULL`)
 			return nil
 		},
 	},
+	{
+		// Indexes for the scans that walked whole tables (docs/prd/2026-10-12-
+		// code-health-remediation.md, 4.4): the job sweep (queued by age,
+		// claimed by lease), the outbox claim (pending rows only), platform
+		// content listings, install counts by kind, and the owner-only lookups
+		// (cross-tenant by design, so not tenant-leading).
+		id: "2026_10_store_indexes",
+		run: func(ctx context.Context, db sqlConn) error {
+			for _, ix := range []struct {
+				table, name string
+				cols        []string
+			}{
+				{"agent_jobs", "idx_agent_jobs_status_created", []string{"status", "created_at_ms"}},
+				{"agent_jobs", "idx_agent_jobs_status_lease", []string{"status", "lease_expires_at_ms"}},
+				{"notification_outbox", "idx_notification_outbox_due", []string{"delivered_at_ms", "failed_at_ms", "next_attempt_at_ms"}},
+				{"content_components", "idx_content_components_platform", []string{"scope", "kind", "updated_at_ms"}},
+				{"component_installs", "idx_component_installs_kind", []string{"kind", "name", "subject"}},
+				{"room_members", "idx_member_user_host", []string{"user_id", "agent_host"}},
+				{"bridge_heartbeats", "idx_bridge_heartbeats_owner_seen", []string{"owner_user_id", "last_seen_at_ms"}},
+				{"bridge_agents", "idx_bridge_agents_owner", []string{"owner_user_id", "disabled", "core", "provider"}},
+				{"room_schedules", "idx_room_schedules_claim", []string{"claim_token"}},
+			} {
+				if err := ensureIndexColumns(ctx, db, ix.table, ix.name, ix.cols); err != nil {
+					return err
+				}
+			}
+			return nil
+		},
+	},
 }
 
 // sqlConn is the statement surface a migration runs on. runMigrations passes

@@ -350,6 +350,14 @@ move to OpenSearch when searches get slow at hundreds of millions of
 messages. Nothing else changes for members: results are the same, ranked
 newest first, and pass the same membership and people-chat rules.
 
+**When OpenSearch is required.** MySQL evaluates the FULLTEXT match over the
+whole table's ngram index first and applies the organization and room
+filters afterwards, so one search costs in proportion to every message in the
+deployment that contains the phrase, not to the caller's rooms. Plan the move
+to OpenSearch once `room_messages` holds about 50 million rows across all
+organizations, or earlier when searches for short, common phrases (two or
+three characters) take longer than a second.
+
 - **Settings.** `BNBLOC_SEARCH_OPENSEARCH_URL` (http or https; a private CA
   through `SSL_CERT_FILE`), optional basic auth
   (`BNBLOC_SEARCH_OPENSEARCH_USERNAME` / `_PASSWORD`, both or neither), and

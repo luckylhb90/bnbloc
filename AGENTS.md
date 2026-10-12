@@ -1278,9 +1278,10 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   secrets, codes and tokens stay fully random. Hot tables key on their access
   path instead (`room_messages (room_id, seq)`: a room's history is one
   contiguous range read).
-- **Counts shown as badges are bounded** (`store.MaxUnreadCount`: an inner
-  `LIMIT` stops the scan). A new count over an unbounded range must be capped
-  the same way.
+- **Counts shown as badges are bounded** (`store.MaxUnreadCount` for unread,
+  `store.MaxUsageCount` for the Library usage counts: an inner `LIMIT` stops
+  the scan, per component). A new count over an unbounded range must be
+  capped the same way.
 - **Live schema needs ALTER, not just the schema file.**
   `CREATE TABLE IF NOT EXISTS` does not alter an existing table, so a new
   column (e.g. `client_msg_id`, `deleted_at_ms`) must be `ALTER TABLE`'d

@@ -220,6 +220,9 @@ func (m *MemoryNotifications) ClaimNotifications(_ context.Context, c Notificati
 		if due[i].item.NextAttemptAtMs != due[j].item.NextAttemptAtMs {
 			return due[i].item.NextAttemptAtMs < due[j].item.NextAttemptAtMs
 		}
+		if due[i].item.TenantID != due[j].item.TenantID {
+			return due[i].item.TenantID < due[j].item.TenantID
+		}
 		if due[i].item.ID != due[j].item.ID {
 			return due[i].item.ID < due[j].item.ID
 		}

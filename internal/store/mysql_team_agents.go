@@ -38,24 +38,39 @@ WHERE a.tenant_id = ? AND a.disabled = 0`
 	}, args...)
 }
 
-// TenantTeamJobs implements TeamAgentReader over idx_agent_jobs_tenant_created
-// (recent jobs) plus idx_agent_jobs_claim's status prefix (active jobs).
+// TenantTeamJobs implements TeamAgentReader as two indexed reads, not one OR
+// that defeats both indexes: the jobs created at/after sinceMs
+// (idx_agent_jobs_tenant_created, or idx_agent_jobs_owner_created for one
+// owner), then, while the page has room, the still-active jobs created
+// before it (idx_agent_jobs_status_created: live jobs are few). Every row of
+// the first read is newer than every row of the second, so appending keeps
+// the newest-first order.
 func (m *MySQLBridgeJobs) TenantTeamJobs(ctx context.Context, ownerUserID string, sinceMs int64) ([]AgentJob, error) {
 	tid, err := tenant.Require(ctx)
 	if err != nil {
 		return nil, err
 	}
-	q := `SELECT ` + agentJobColumns + `
-FROM agent_jobs
-WHERE tenant_id = ? AND (created_at_ms >= ? OR status IN ('queued','claimed','running','reflowing'))`
-	args := []any{tid, sinceMs}
+	owner, ownerArgs := "", []any(nil)
 	if ownerUserID != "" {
-		q += ` AND owner_user_id = ?`
-		args = append(args, ownerUserID)
+		owner, ownerArgs = ` AND owner_user_id = ?`, []any{ownerUserID}
 	}
-	q += ` ORDER BY created_at_ms DESC LIMIT ?`
-	args = append(args, MaxTeamJobs)
-	return queryAll(ctx, m.DB, q, scanAgentJobRow, args...)
+	read := func(where string, args []any, limit int) ([]AgentJob, error) {
+		args = append(append(args, ownerArgs...), limit)
+		return queryAll(ctx, m.DB, `SELECT `+agentJobColumns+`
+FROM agent_jobs WHERE `+where+owner+` ORDER BY created_at_ms DESC LIMIT ?`, scanAgentJobRow, args...)
+	}
+	out, err := read(`tenant_id = ? AND created_at_ms >= ?`, []any{tid, sinceMs}, MaxTeamJobs)
+	if err != nil {
+		return nil, err
+	}
+	if room := MaxTeamJobs - len(out); room > 0 {
+		active, err := read(`status IN ('queued','claimed','running','reflowing') AND tenant_id = ? AND created_at_ms < ?`, []any{tid, sinceMs}, room)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, active...)
+	}
+	return out, nil
 }
 
 // AgentUsage implements AgentUsageReader: sums the usage columns AppendMessages

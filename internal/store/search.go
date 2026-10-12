@@ -292,7 +292,9 @@ func (s *MySQLChat) GetRoomMessage(ctx context.Context, roomID string, seq int64
 }
 
 // SearchRoomMessages runs a FULLTEXT (ngram) phrase match over search_text in
-// the given rooms, newest first.
+// the given rooms, newest first. MySQL evaluates the MATCH over the whole
+// table before the tenant and room filters, so its cost grows with the
+// deployment; docs/production-deployment.md says when OpenSearch is required.
 func (s *MySQLChat) SearchRoomMessages(ctx context.Context, q MessageSearch) ([]RoomMessage, error) {
 	tid, err := tenant.Require(ctx)
 	if err != nil {

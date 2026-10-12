@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"sort"
 	"time"
 
 	"github.com/luckylhb90/bnbloc/internal/tenant"
@@ -255,6 +256,9 @@ SELECT `+agentJobColumns+`
 FROM agent_jobs WHERE tenant_id=? AND job_id=?`, tid, req.JobID)
 }
 
+// sweepBatch bounds the jobs one SweepAgentJobs call fails.
+const sweepBatch = 200
+
 // SweepAgentJobs fails jobs no worker can finish. It runs as cross-tenant
 // maintenance, so it carries no tenant scope and returns the affected jobs for
 // per-room notification.
@@ -265,20 +269,44 @@ func (m *MySQLBridgeJobs) SweepAgentJobs(ctx context.Context, req SweepRequest) 
 	if req.MaxAttempts <= 0 {
 		req.MaxAttempts = DefaultMaxJobAttempts
 	}
-	rows, err := m.DB.QueryContext(ctx, `SELECT job_id, tenant_id, IF(status='queued', ?, ?) FROM agent_jobs WHERE status NOT IN ('replied','failed','timed_out','cancelled') AND ((status='queued' AND created_at_ms + ? <= ?) OR (status<>'queued' AND lease_expires_at_ms < ? AND attempt >= ?)) ORDER BY created_at_ms ASC LIMIT 200`,
-		string(FailureNoBridgeOnline), string(FailureTurnTimeout), req.QueuedTimeoutMs, req.NowMs, req.NowMs, req.MaxAttempts)
-	if err != nil {
-		return nil, err
+	// Two indexed reads instead of one OR over the whole table: queued jobs
+	// past the queue timeout (idx_agent_jobs_status_created) and live jobs
+	// whose last lease lapsed on the final attempt
+	// (idx_agent_jobs_status_lease). Oldest first, at most sweepBatch.
+	type candidate struct {
+		id, tid, reason string
+		createdAtMs     int64
 	}
-	type candidate struct{ id, tid, reason string }
 	var cands []candidate
-	for rows.Next() {
-		var c candidate
-		if rows.Scan(&c.id, &c.tid, &c.reason) == nil {
+	read := func(reason AgentJobFailureReason, q string, args ...any) error {
+		rows, err := m.DB.QueryContext(ctx, q, args...)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			c := candidate{reason: string(reason)}
+			if err := rows.Scan(&c.id, &c.tid, &c.createdAtMs); err != nil {
+				return err
+			}
 			cands = append(cands, c)
 		}
+		return rows.Err()
 	}
-	rows.Close()
+	if err := read(FailureNoBridgeOnline, `SELECT job_id, tenant_id, created_at_ms FROM agent_jobs
+WHERE status='queued' AND created_at_ms <= ? ORDER BY created_at_ms ASC LIMIT ?`,
+		req.NowMs-req.QueuedTimeoutMs, sweepBatch); err != nil {
+		return nil, err
+	}
+	if err := read(FailureTurnTimeout, `SELECT job_id, tenant_id, created_at_ms FROM agent_jobs
+WHERE status IN ('claimed','running','reflowing') AND lease_expires_at_ms < ? AND attempt >= ? ORDER BY created_at_ms ASC LIMIT ?`,
+		req.NowMs, req.MaxAttempts, sweepBatch); err != nil {
+		return nil, err
+	}
+	sort.SliceStable(cands, func(i, j int) bool { return cands[i].createdAtMs < cands[j].createdAtMs })
+	if len(cands) > sweepBatch {
+		cands = cands[:sweepBatch]
+	}
 	var out []AgentJob
 	for _, c := range cands {
 		res, err := m.DB.ExecContext(ctx, `UPDATE agent_jobs SET status='failed', failure_reason=?, updated_at_ms=?, finished_at_ms=?, lease_expires_at_ms=0 WHERE tenant_id=? AND job_id=? AND status NOT IN ('replied','failed','timed_out','cancelled')`, c.reason, req.NowMs, req.NowMs, c.tid, c.id)
@@ -485,13 +513,8 @@ func nullJSON(raw json.RawMessage) any {
 	return raw // JSON text, never []byte (see jsonArg)
 }
 
-// ListBridgeAgentsForOwner returns the owner's advertised agents across all
-// rooms and tenants, joined to a live heartbeat on bridge_id (the globally
-// unique PK). The owner identity is global, so no tenant filter applies —
-// a member's own agents are their own agents wherever their bridge runs.
 // LatestBridgeForOwner returns the owner's latest heartbeat across tenants
-// (see BridgeJobStore). The table holds one row per bridge, so the owner
-// filter needs no index of its own.
+// (see BridgeJobStore), on idx_bridge_heartbeats_owner_seen.
 func (m *MySQLBridgeJobs) LatestBridgeForOwner(ctx context.Context, ownerUserID string) (BridgeHeartbeat, bool, error) {
 	var hb BridgeHeartbeat
 	var status string
@@ -508,6 +531,11 @@ FROM bridge_heartbeats WHERE owner_user_id=? ORDER BY last_seen_at_ms DESC LIMIT
 	return hb, true, nil
 }
 
+// ListBridgeAgentsForOwner returns the owner's advertised agents across all
+// rooms and tenants, joined to a live heartbeat on bridge_id (the globally
+// unique PK). The owner identity is global, so no tenant filter applies —
+// a member's own agents are their own agents wherever their bridge runs.
+// It reads idx_bridge_agents_owner.
 func (m *MySQLBridgeJobs) ListBridgeAgentsForOwner(ctx context.Context, ownerUserID string) ([]BridgeAgent, error) {
 	return queryAll(ctx, m.DB, `SELECT `+bridgeAgentColumns+`
 FROM bridge_agents a

@@ -88,6 +88,8 @@ func (m *MySQLNotifications) EnqueueNotification(ctx context.Context, item Notif
 // across replicas: two workers never claim the same row), then reads back the
 // rows carrying this claim's token. The lease is the pushed-out
 // next_attempt_at_ms, so no transaction is held open during HTTP delivery.
+// The claim walks pending rows only (idx_notification_outbox_due leads with
+// delivered_at_ms, failed_at_ms), in a total order: due time, then the key.
 func (m *MySQLNotifications) ClaimNotifications(ctx context.Context, c NotificationClaim) ([]NotificationOutboxItem, error) {
 	if c.Limit <= 0 {
 		c.Limit = 1
@@ -95,13 +97,14 @@ func (m *MySQLNotifications) ClaimNotifications(ctx context.Context, c Notificat
 	if _, err := m.DB.ExecContext(ctx,
 		`UPDATE notification_outbox SET claim_token=?, next_attempt_at_ms=?
 		 WHERE delivered_at_ms IS NULL AND failed_at_ms IS NULL AND next_attempt_at_ms <= ?
-		 ORDER BY next_attempt_at_ms LIMIT ?`,
+		 ORDER BY next_attempt_at_ms, tenant_id, id, notifier LIMIT ?`,
 		c.Token, c.NowMs+c.LeaseMs, c.NowMs, c.Limit); err != nil {
 		return nil, err
 	}
 	rows, err := m.DB.QueryContext(ctx,
 		`SELECT tenant_id, id, notifier, event_json, attempts, next_attempt_at_ms, last_error, created_at_ms
-		 FROM notification_outbox WHERE claim_token=? AND delivered_at_ms IS NULL AND failed_at_ms IS NULL`, c.Token)
+		 FROM notification_outbox WHERE claim_token=? AND delivered_at_ms IS NULL AND failed_at_ms IS NULL
+		 ORDER BY next_attempt_at_ms, tenant_id, id, notifier`, c.Token)
 	if err != nil {
 		return nil, err
 	}
