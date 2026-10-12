@@ -1157,6 +1157,14 @@ WHERE r.channel_id = '' AND d.user_id IS NULL`)
 			return nil
 		},
 	},
+	{
+		// Staged drafts a quick try wears (docs/prd/2026-10-12-experts-and-
+		// teams.md, "Runtime gap closure" 4).
+		id: "2026_10_content_drafts",
+		run: func(ctx context.Context, db sqlConn) error {
+			return createSchemaTable(ctx, db, "content_drafts")
+		},
+	},
 }
 
 // sqlConn is the statement surface a migration runs on. runMigrations passes

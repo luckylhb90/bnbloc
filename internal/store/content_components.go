@@ -229,6 +229,7 @@ type ContentComponentStore interface {
 	ContentPromptUseStore
 	ContentPublishRequestStore
 	ContentRoomShareStore
+	ContentDraftStore
 }
 
 func contentLimit(n int) int {
@@ -285,6 +286,7 @@ type MemoryContentComponents struct {
 	promptUses map[string]map[string]int64          // component -> prompt -> uses
 	requests   map[string]ContentPublishRequest     // request id -> request
 	roomShares map[string]ContentRoomShare          // room\x00component -> share
+	drafts     map[string]ContentDraft              // draft id -> staged draft (content_drafts.go)
 }
 
 // NewMemoryContentComponents returns an empty in-memory store.

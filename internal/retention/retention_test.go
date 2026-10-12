@@ -388,3 +388,32 @@ func TestWorkerPurgesSearchIndex(t *testing.T) {
 		t.Fatalf("rows after a failed index purge = %v, want the purge done anyway", got)
 	}
 }
+
+// A pass deletes expired content drafts (a quick try's staging, no policy)
+// before the blob collection, so a bundle only an expired draft held goes
+// in the same pass while a live draft's stays.
+func TestWorkerPurgesExpiredDrafts(t *testing.T) {
+	r := newRig(t)
+	ctx := context.Background()
+	live := r.blob(t, "live draft bundle", 90*day)
+	expired := r.blob(t, "expired draft bundle", 90*day)
+	for _, d := range []store.ContentDraft{
+		{ID: "cd_live", BundleBlobKey: live, ExpiresAtMs: r.now.Add(time.Hour).UnixMilli()},
+		{ID: "cd_expired", BundleBlobKey: expired, ExpiresAtMs: r.now.Add(-time.Minute).UnixMilli()},
+	} {
+		d.TenantID, d.RoomID, d.JobID, d.Kind, d.Name, d.Version, d.ManifestJSON = "acme", "r1", "job-1", "bnbloc.expert.package/v1", "x", "1.0.0", json.RawMessage(`{}`)
+		if err := r.b.ContentComponents.PutContentDraft(ctx, d); err != nil {
+			t.Fatal(err)
+		}
+	}
+	rep, err := r.w.RunOnce(ctx)
+	if err != nil || rep.Deleted[store.PurgedContentDrafts] != 1 {
+		t.Fatalf("RunOnce = %+v, %v", rep, err)
+	}
+	if _, err := r.b.ContentComponents.GetContentDraft(ctx, "cd_expired"); err == nil {
+		t.Fatal("the expired draft is still stored")
+	}
+	if !r.exists(live) || r.exists(expired) {
+		t.Fatalf("blobs: live=%v expired=%v; want only the live draft's bundle kept", r.exists(live), r.exists(expired))
+	}
+}

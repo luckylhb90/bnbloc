@@ -779,6 +779,32 @@ CREATE TABLE IF NOT EXISTS content_component_versions (
   KEY idx_content_versions_blob (bundle_blob_key)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+-- Staged drafts of content components (an expert or skill pack an agent
+-- drafted and another agent of the room wears for one quick try, the room
+-- tools' try_draft). Never listed: no content component row exists. Scoped
+-- to the job that staged it (job_id) and its room; expired rows are deleted
+-- by the retention pass, then blob collection reclaims the bundle.
+CREATE TABLE IF NOT EXISTS content_drafts (
+  id              VARCHAR(64) PRIMARY KEY,
+  tenant_id       VARCHAR(64) NOT NULL,
+  room_id         VARCHAR(128) NOT NULL,
+  job_id          VARCHAR(64) NOT NULL,
+  requester       VARCHAR(128) NOT NULL,
+  author          VARCHAR(128) NOT NULL,
+  kind            VARCHAR(64) NOT NULL,
+  name            VARCHAR(64) NOT NULL,
+  display_name    VARCHAR(256) NOT NULL DEFAULT '',
+  version         VARCHAR(64) NOT NULL,
+  manifest_json   JSON NOT NULL,
+  bundle_blob_key VARCHAR(128) NOT NULL,
+  sha256          CHAR(64) NOT NULL,
+  size_bytes      BIGINT NOT NULL,
+  created_at_ms   BIGINT NOT NULL,
+  expires_at_ms   BIGINT NOT NULL,
+  KEY idx_content_drafts_expires (expires_at_ms),
+  KEY idx_content_drafts_blob (bundle_blob_key)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 -- Where a content component is enabled or pinned: scope_kind member (a
 -- member's skill packs, for all their agents) or room (room skill packs and
 -- pinned experts). pinned_version '' follows the latest version.

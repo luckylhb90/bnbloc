@@ -158,6 +158,14 @@ func (w *Worker) RunOnce(ctx context.Context) (Report, error) {
 	rep.Ran = true
 	start := w.now()
 	firstErr := w.purgeAll(ctx, start, rep.Deleted)
+	// Staged content drafts expire instead of following a policy: delete
+	// them before the blob collection so their bundles can go.
+	drafts, err := w.Store.PurgeExpiredDrafts(ctx, store.PurgeRequest{NowMs: start.UnixMilli(), Batch: w.Batch})
+	rep.Deleted.Add(drafts)
+	if err != nil {
+		slog.Error("bnbloc retention: purge failed", "event", "bnbloc.retention.error", "what", "content_drafts", "error", err)
+		firstErr = errors.Join(firstErr, err)
+	}
 	status, err := store.LoadRetentionStatus(ctx, w.Settings)
 	if err != nil {
 		firstErr = errors.Join(firstErr, err)

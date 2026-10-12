@@ -92,6 +92,7 @@ const (
 	PurgedExtensionAudit   = "extension_audit"
 	PurgedAgentJobs        = "agent_jobs"
 	PurgedBlobs            = "blobs"
+	PurgedContentDrafts    = "content_drafts"
 	// PurgedSearchDocuments counts documents removed from an external
 	// message search index (internal/search) after the message purge.
 	PurgedSearchDocuments = "search_documents"
@@ -151,11 +152,16 @@ type RetentionStore interface {
 	// ReferencedBlobKeys returns the subset of keys some row still
 	// references. The reference sources are all listed here, in one place:
 	// attachments.blob_key, artifact_versions.blob_key and .thumb_blob_key,
-	// content_component_versions.bundle_blob_key, and every "sha256/<hex>" a
+	// content_component_versions.bundle_blob_key,
+	// content_drafts.bundle_blob_key, and every "sha256/<hex>" a
 	// platform setting mentions (component packages, desktop releases, the
 	// update config). A new table that stores a blob key must be added to
 	// both implementations.
 	ReferencedBlobKeys(ctx context.Context, keys []string) (map[string]bool, error)
+	// PurgeExpiredDrafts deletes the content drafts expired at req.NowMs
+	// (staged for a quick try, they expire instead of following a policy),
+	// in batches of req.Batch.
+	PurgeExpiredDrafts(ctx context.Context, req PurgeRequest) (PurgeResult, error)
 	// TryRetentionLock takes the cluster-wide retention lock without
 	// waiting; ok=false when another replica holds it. release frees it.
 	TryRetentionLock(ctx context.Context) (release func(), ok bool, err error)
@@ -477,6 +483,21 @@ func (m *MemoryRetention) ReferencedBlobKeys(ctx context.Context, keys []string)
 			want[k] = true
 		}
 		c.referencedBlobs(want, out)
+		c.draftBlobKeys(want, out)
+	}
+	return out, nil
+}
+
+// PurgeExpiredDrafts deletes expired content drafts (see RetentionStore).
+func (m *MemoryRetention) PurgeExpiredDrafts(ctx context.Context, req PurgeRequest) (PurgeResult, error) {
+	out := PurgeResult{}
+	if err := ctx.Err(); err != nil {
+		return out, err
+	}
+	if c := m.Content; c != nil {
+		if n := c.purgeExpiredDrafts(req.NowMs); n > 0 {
+			out[PurgedContentDrafts] = n
+		}
 	}
 	return out, nil
 }
