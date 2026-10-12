@@ -125,9 +125,12 @@ func checkOptionalCapabilities(ctx context.Context, provider core.Provider, cfg 
 		}
 	}
 	if writer, ok := core.As[core.WorkspaceFileWriter](ctx, provider, cfg.Endpoint, core.CapabilityWriteFile); ok {
-		if err := writer.WriteWorkspaceFile(ctx, cfg.Endpoint, workspaceID, filePath(cfg), fileContent(cfg)); err != nil {
-			return fmt.Errorf("WriteWorkspaceFile advertised but failed: %w", err)
+		if err := checkWorkspaceFileWriter(ctx, writer, cfg, workspaceID); err != nil {
+			return err
 		}
+	}
+	if err := checkAgentProfile(ctx, provider, cfg, workspaceID); err != nil {
+		return err
 	}
 	if err := checkSessionFiles(ctx, provider, cfg, workspaceID, sessionID); err != nil {
 		return err
@@ -141,6 +144,51 @@ func checkOptionalCapabilities(ctx context.Context, provider core.Provider, cfg 
 		if ep, found := discoverer.Discover(ctx); found && ep.BaseURL == "" {
 			return fmt.Errorf("Discover advertised found=true with empty BaseURL")
 		}
+	}
+	return nil
+}
+
+// checkWorkspaceFileWriter exercises the writeFile path contract
+// (core.WorkspaceFileAllowed): a .room/ file and an agent-config file are
+// written; a path outside both is refused.
+func checkWorkspaceFileWriter(ctx context.Context, writer core.WorkspaceFileWriter, cfg Config, workspaceID string) error {
+	if err := writer.WriteWorkspaceFile(ctx, cfg.Endpoint, workspaceID, filePath(cfg), fileContent(cfg)); err != nil {
+		return fmt.Errorf("WriteWorkspaceFile advertised but failed: %w", err)
+	}
+	if err := writer.WriteWorkspaceFile(ctx, cfg.Endpoint, workspaceID, ".agents/skills/conformance/SKILL.md", "---\nname: conformance\ndescription: conformance check\n---\n"); err != nil {
+		return fmt.Errorf("WriteWorkspaceFile refused an agent-config path: %w", err)
+	}
+	if err := writer.WriteWorkspaceFile(ctx, cfg.Endpoint, workspaceID, "conformance-outside.txt", "x"); err == nil {
+		return fmt.Errorf("WriteWorkspaceFile accepted a path outside .room/ and the agent-config paths")
+	}
+	return nil
+}
+
+// checkAgentProfile exercises agentProfile when offered: a session created
+// with a profile (instructions, a skill, an env var) must start.
+func checkAgentProfile(ctx context.Context, provider core.Provider, cfg Config, workspaceID string) error {
+	if !core.Supports(ctx, provider, cfg.Endpoint, core.CapabilityAgentProfile) {
+		return nil
+	}
+	targetID := cfg.TargetID
+	if targetID == "" {
+		if targets, err := provider.ListTargets(ctx, cfg.Endpoint); err == nil && len(targets) > 0 {
+			targetID = targets[0].ID
+		}
+	}
+	profile := &core.AgentProfile{
+		Instructions: "Conformance profile: answer briefly.",
+		Skills: []core.ProfileSkill{{Name: "conformance", Files: []core.ProfileFile{
+			{Path: "SKILL.md", Content: []byte("---\nname: conformance\ndescription: Use when asked about conformance.\n---\nReply OK.\n")},
+		}}},
+		Env: map[string]string{"BNBLOC_CONFORMANCE": "1"},
+	}
+	res, err := provider.CreateSession(ctx, cfg.Endpoint, core.SessionRequest{WorkspaceID: workspaceID, TargetID: targetID, Prompt: prompt(cfg), Profile: profile})
+	if err != nil {
+		return fmt.Errorf("CreateSession with a profile (agentProfile advertised) failed: %w", err)
+	}
+	if res.SessionID == "" {
+		return fmt.Errorf("CreateSession with a profile returned empty session id")
 	}
 	return nil
 }

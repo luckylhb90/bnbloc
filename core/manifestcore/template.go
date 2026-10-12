@@ -107,6 +107,30 @@ func omitLeaf(s string, v vars) (string, bool) {
 	return v[name], true
 }
 
+// jsonLeaf resolves the exact form "{var|json}": the var holds JSON text
+// (the agent profile and its parts, see profileVars), substituted as a raw
+// JSON value instead of a string. An empty var resolves to null. ok=false for
+// every other string.
+func jsonLeaf(s string, v vars) (any, bool) {
+	if len(s) < 8 || s[0] != '{' || s[len(s)-1] != '}' {
+		return nil, false
+	}
+	name := s[1 : len(s)-1]
+	k := strings.IndexByte(name, '|')
+	if k < 0 || name[k+1:] != "json" {
+		return nil, false
+	}
+	raw := strings.TrimSpace(v[name[:k]])
+	if raw == "" {
+		return nil, true
+	}
+	var out any
+	if err := json.Unmarshal([]byte(raw), &out); err != nil {
+		return nil, true
+	}
+	return out, true
+}
+
 // renderJSON walks a JSON body template and substitutes {var} placeholders that
 // appear as whole string values (e.g. "project_id": "{workspaceId}"). Nested
 // objects/arrays are walked recursively; non-string leaves pass through. The
@@ -127,12 +151,16 @@ func renderJSON(raw json.RawMessage, v vars) []byte {
 // substitute replaces {var} placeholders inside string leaves of a decoded JSON
 // value. A string that is exactly one placeholder is replaced by the value; a
 // string with embedded placeholders is rendered inline. The exact form
-// "{var|omit}" deletes the key when the var is empty.
+// "{var|omit}" deletes the key when the var is empty; "{var|json}" inserts the
+// var's JSON value (an object or array, not a string).
 func substitute(doc any, v vars) any {
 	switch t := doc.(type) {
 	case string:
 		if s, ok := omitLeaf(t, v); ok {
 			return s
+		}
+		if raw, ok := jsonLeaf(t, v); ok {
+			return raw
 		}
 		return renderTemplate(t, v)
 	case map[string]any:

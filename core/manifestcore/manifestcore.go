@@ -229,6 +229,9 @@ func (p *Provider) CreateSession(ctx context.Context, ep core.Endpoint, req core
 		"model":           req.Options.Model,
 		"reasoningEffort": req.Options.ReasoningEffort,
 	}
+	for k, val := range profileVars(req.Profile) {
+		v[k] = val
+	}
 	out, err := p.call(ctx, ep, p.m.CreateSession, v)
 	if err != nil {
 		return core.SessionResult{}, err
@@ -488,6 +491,8 @@ func (p *Provider) Supports(_ context.Context, _ core.Endpoint, c core.Capabilit
 			p.m.ReadSessionFile.extractPath("contentBase64") != ""
 	case core.CapabilitySessionWorkdir:
 		return p.m.SessionWorkdir.declared()
+	case core.CapabilityAgentProfile:
+		return createSessionTakesProfile(p.m.CreateSession.Body)
 	default:
 		return false
 	}

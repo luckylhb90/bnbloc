@@ -28,3 +28,11 @@ method, protocol error-envelope parsing for live daemons, and every optional
 capability the implementation advertises or exposes through Go optional
 interfaces. Not advertising an optional capability is acceptable; advertising it
 and failing it is a conformance failure.
+
+Two optional capabilities carry contract checks beyond "it answers":
+
+- `writeFile`: a `.room/` file and an agent-config file
+  (`.agents/skills/…`) are written, and a path outside `.room/` and
+  `core.AgentConfigPaths` must be refused (`core.WorkspaceFileAllowed`).
+- `agentProfile`: a session created with a profile (instructions, a skill,
+  an env var) must start.

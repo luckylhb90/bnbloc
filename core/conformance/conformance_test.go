@@ -3,6 +3,7 @@ package conformance
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -168,4 +169,56 @@ func TestRunLive_againstLocalCoreProtocolDaemon(t *testing.T) {
 		Prompt:   "Core Protocol conformance: reply with the single word OK.",
 		Timeout:  120 * time.Second,
 	})
+}
+
+// writerProvider is a fakeProvider offering writeFile (and, optionally,
+// agentProfile); enforce makes it apply core.WorkspaceFileAllowed.
+type writerProvider struct {
+	fakeProvider
+	enforce  bool
+	profile  bool
+	profiles []*core.AgentProfile
+}
+
+func (p *writerProvider) Supports(_ context.Context, _ core.Endpoint, c core.Capability) bool {
+	return c == core.CapabilityWriteFile || (p.profile && c == core.CapabilityAgentProfile)
+}
+
+func (p *writerProvider) WriteWorkspaceFile(_ context.Context, _ core.Endpoint, _, relPath, _ string) error {
+	if p.enforce && !core.WorkspaceFileAllowed(relPath) {
+		return errors.New("path not allowed")
+	}
+	return nil
+}
+
+func (p *writerProvider) CreateSession(ctx context.Context, ep core.Endpoint, req core.SessionRequest) (core.SessionResult, error) {
+	p.profiles = append(p.profiles, req.Profile)
+	return p.fakeProvider.CreateSession(ctx, ep, req)
+}
+
+func TestCheckProvider_writeFile_enforcesThePathContract(t *testing.T) {
+	base := fakeProvider{name: "fake", workspace: "ws-1", session: "s-1", targets: []core.Target{{ID: "local:codex", Provider: "codex"}}}
+	if err := CheckProvider(context.Background(), &writerProvider{fakeProvider: base, enforce: true}, Config{}); err != nil {
+		t.Fatalf("enforcing writer = %v, want pass", err)
+	}
+	err := CheckProvider(context.Background(), &writerProvider{fakeProvider: base}, Config{})
+	if err == nil || !strings.Contains(err.Error(), "outside") {
+		t.Fatalf("permissive writer = %v, want the path contract failure", err)
+	}
+}
+
+func TestCheckProvider_agentProfile_createsASessionWithAProfile(t *testing.T) {
+	p := &writerProvider{fakeProvider: fakeProvider{name: "fake", workspace: "ws-1", session: "s-1"}, enforce: true, profile: true}
+	if err := CheckProvider(context.Background(), p, Config{}); err != nil {
+		t.Fatal(err)
+	}
+	var withProfile int
+	for _, prof := range p.profiles {
+		if prof != nil && prof.Instructions != "" && len(prof.Skills) == 1 {
+			withProfile++
+		}
+	}
+	if withProfile != 1 {
+		t.Fatalf("profiles = %+v", p.profiles)
+	}
 }
