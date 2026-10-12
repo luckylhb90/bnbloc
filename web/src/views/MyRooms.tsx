@@ -9,6 +9,7 @@ import {
   DeviceMobileIcon,
 } from "@phosphor-icons/react";
 import { api, ApiError, type Room } from "@/lib/api";
+import { isSubmitEnter } from "@/lib/keys";
 import { useAuth } from "@/lib/auth";
 import { Button } from "@/ui/Button";
 import { Input, Field } from "@/ui/Input";
@@ -350,7 +351,7 @@ function RedeemDialog({
           placeholder="XXXX-XXXX"
           value={code}
           onChange={(e) => setCode(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && submit()}
+          onKeyDown={(e) => isSubmitEnter(e) && submit()}
         />
       </Field>
     </Dialog>

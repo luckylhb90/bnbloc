@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { HashIcon, PlusIcon } from "@phosphor-icons/react";
 import { api, type Channel } from "@/lib/api";
+import { isSubmitEnter } from "@/lib/keys";
 import { cn } from "@/lib/cn";
 
 // ChannelRail is the in-room left rail listing the room's channels (default
@@ -133,7 +134,7 @@ export function ChannelRail({
           disabled={busy}
           onChange={(e) => setName(e.target.value)}
           onKeyDown={(e) => {
-            if (e.key === "Enter") void create();
+            if (isSubmitEnter(e)) void create();
             if (e.key === "Escape") setCreating(false);
           }}
           onBlur={() => name.trim() === "" && setCreating(false)}

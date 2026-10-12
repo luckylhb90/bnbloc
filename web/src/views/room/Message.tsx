@@ -27,6 +27,7 @@ import { TurnMetricsFooter } from "@/views/room/TurnMetricsFooter";
 import { MessageExtraActions, TaskBadge } from "@/views/room/messageExtras";
 import { dispatchLine, type DispatchAttribution } from "@/lib/dispatch";
 import { ExpertTag } from "@/views/room/ExpertTag";
+import { isSubmitEnter } from "@/lib/keys";
 
 // sameSender groups consecutive messages from the same author on the same side,
 // so a run of agent replies stacks without repeating the avatar and name.
@@ -234,7 +235,7 @@ export const Message = memo(function Message({
                   e.preventDefault();
                   setDraft(item.text);
                   setEditing(false);
-                } else if (e.key === "Enter" && !e.shiftKey) {
+                } else if (isSubmitEnter(e)) {
                   e.preventDefault();
                   submitEdit();
                 }

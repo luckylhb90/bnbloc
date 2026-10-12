@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Select } from "@/ui/Select";
 import { TrashIcon } from "@phosphor-icons/react";
 import { ApiError } from "@/lib/api";
+import { isSubmitEnter } from "@/lib/keys";
 import { useAuth } from "@/lib/auth";
 import { roomIdProblem } from "@/lib/roomId";
 import {
@@ -325,7 +326,7 @@ export function InstantiateTemplateDialog({
               setRoomId(e.target.value);
               if (err) setErr("");
             }}
-            onKeyDown={(e) => e.key === "Enter" && void submit()}
+            onKeyDown={(e) => isSubmitEnter(e) && void submit()}
           />
         </Field>
         <Field label="Visibility">

@@ -14,6 +14,7 @@ import type { LocalAgent } from "@/lib/useLocalAgent";
 import { NO_ROOM_CATALOGS, resolveModelCatalog, type RoomModelCatalogs } from "@/lib/agentCatalogs";
 import { PLATFORM_OFFLINE_MESSAGE, routeSend } from "@/lib/platformAgents";
 import { useAgentPrefs } from "@/views/composer/useAgentPrefs";
+import { isImeKey, isSubmitEnter } from "@/lib/keys";
 import { Button } from "@/ui/Button";
 import { useToast } from "@/ui/Toast";
 import { AttachmentChips } from "@/views/AttachmentChips";
@@ -609,6 +610,8 @@ export function Composer({
           aria-controls={mention && optionCount > 0 ? mentionListId : undefined}
           aria-activedescendant={highlighted >= 0 && mention ? `${mentionListId}-${highlighted}` : undefined}
           onKeyDown={(e) => {
+            // Keys during an IME composition (CJK input) are the IME's.
+            if (isImeKey(e)) return;
             // The /command menu, when open, takes the keys first.
             if (prompts.onKeyDown(e)) return;
             // While the mention list is open, arrows move the highlight and
@@ -630,7 +633,7 @@ export function Composer({
               setMention(null);
               return;
             }
-            if (e.key === "Enter" && !e.shiftKey) {
+            if (isSubmitEnter(e)) {
               e.preventDefault();
               void send();
             }

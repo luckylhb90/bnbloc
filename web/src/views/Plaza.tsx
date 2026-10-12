@@ -7,6 +7,7 @@ import {
   LockIcon,
 } from "@phosphor-icons/react";
 import { api, ApiError, type Room } from "@/lib/api";
+import { isSubmitEnter } from "@/lib/keys";
 import { roomIdProblem } from "@/lib/roomId";
 import { useAuth } from "@/lib/auth";
 import { Button } from "@/ui/Button";
@@ -303,7 +304,7 @@ function CreateRoomDialog({
               setId(e.target.value);
               if (err) setErr("");
             }}
-            onKeyDown={(e) => e.key === "Enter" && void submit()}
+            onKeyDown={(e) => isSubmitEnter(e) && void submit()}
           />
         </Field>
         <Field label="Description" hint="Optional — what is this room for?">
