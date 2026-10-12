@@ -23,11 +23,13 @@ var storeRuleOwners = map[string][]string{
 	"human-member":  {"rules.go"},
 	"null-helper":   {"rules.go"},
 	"expiry-inline": {"rules.go"},
+	"grant-live":    {"grants.go"},
 }
 
 var (
 	jobStatusSQL   = regexp.MustCompile(`IN\s*\(\s*'(queued|claimed|running|reflowing|replied|failed|timed_out|cancelled)'`)
 	humanMemberSQL = regexp.MustCompile(`agent_host\s*=\s*0`)
+	grantLiveSQL   = regexp.MustCompile(`expires_at_ms\s+IS\s+NULL\s+OR\s+expires_at_ms`)
 )
 
 // TestStoreRulesSingleSource fails when a store rule is spelled outside its
@@ -35,8 +37,8 @@ var (
 // dupAs), bridge liveness (BridgeLive / liveBridgePred), a job-status SQL
 // IN-list literal (the lists generated from the Go status sets), the soft-delete and human-member
 // predicates (sqlNotDeleted / sqlHumanMember), a hand-rolled NULL helper
-// (nullIfZero / nullPtr) or an inline expiry comparison on an ExpiresAtMs
-// field (liveAt).
+// (nullIfZero / nullPtr), an inline expiry comparison on an ExpiresAtMs
+// field (liveAt) or grant liveness in SQL (sqlGrantLive, beside Grant.Live).
 func TestStoreRulesSingleSource(t *testing.T) {
 	got := map[string]map[string]int{}
 	add := func(rule, file string) {
@@ -121,6 +123,9 @@ func TestStoreRulesSingleSource(t *testing.T) {
 				}
 				for range humanMemberSQL.FindAllString(v, -1) {
 					add("human-member", f)
+				}
+				for range grantLiveSQL.FindAllString(v, -1) {
+					add("grant-live", f)
 				}
 			}
 			return true

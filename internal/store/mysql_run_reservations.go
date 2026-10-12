@@ -53,8 +53,7 @@ func (s *MySQLGrant) reserveOnce(ctx context.Context, tnt string, r RunReservati
 	defer func() { _ = tx.Rollback() }()
 	res, err := tx.ExecContext(ctx,
 		`UPDATE shared_agent_grants SET runs_used = runs_used + 1
-		 WHERE grant_id = ? AND tenant_id = ? AND revoked_at_ms IS NULL
-		   AND (expires_at_ms IS NULL OR expires_at_ms > ?)
+		 WHERE grant_id = ? AND tenant_id = ? AND `+sqlGrantLive+`
 		   AND (run_quota IS NULL OR runs_used < run_quota)
 		   AND (cost_allowance IS NULL OR cost_used < cost_allowance)`,
 		r.GrantID, tnt, r.AtMs)

@@ -70,8 +70,7 @@ func (s *MySQLGrant) RaiseRunQuota(ctx context.Context, grantID string, add int,
 	}
 	res, err := s.DB.ExecContext(ctx,
 		`UPDATE shared_agent_grants SET run_quota = run_quota + ?
-		 WHERE grant_id = ? AND tenant_id = ? AND run_quota IS NOT NULL AND revoked_at_ms IS NULL
-		   AND (expires_at_ms IS NULL OR expires_at_ms > ?)`,
+		 WHERE grant_id = ? AND tenant_id = ? AND run_quota IS NOT NULL AND `+sqlGrantLive,
 		add, grantID, tnt, atMs)
 	if err != nil {
 		return Grant{}, err

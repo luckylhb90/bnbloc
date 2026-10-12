@@ -66,12 +66,16 @@ type Grant struct {
 }
 
 // Live reports whether the grant is in force at atMs: not revoked and not
-// expired. It is the one liveness rule for a grant (TestGrantLivenessOwned):
-// every reader — the reservation, a quota raise, the room listings, the
-// policy-aware liveAuthorization — asks it, never the fields.
+// expired (liveAt). It is the one liveness rule for a grant
+// (TestGrantLivenessOwned): every reader — the reservation, a quota raise,
+// the room listings, the policy-aware liveAuthorization — asks it, never the
+// fields; a MySQL write conditioned on it uses sqlGrantLive.
 func (g Grant) Live(atMs int64) bool {
-	return g.RevokedAtMs == nil && (g.ExpiresAtMs == nil || atMs < *g.ExpiresAtMs)
+	return g.RevokedAtMs == nil && (g.ExpiresAtMs == nil || liveAt(*g.ExpiresAtMs, atMs))
 }
+
+// sqlGrantLive is Grant.Live in SQL, bound to one argument: atMs.
+const sqlGrantLive = "revoked_at_ms IS NULL AND (expires_at_ms IS NULL OR expires_at_ms > ?)"
 
 // GrantSourcePlatform marks a platform-agent room grant: unlimited, no
 // expiry, valid only while the platform policy still publishes the agent
