@@ -14,8 +14,9 @@
 //!
 //! Member credentials (`credentials: "member"`) are entered in Settings →
 //! Tools and stored like plugin `localSettings` (one 0600 JSON object per
-//! tool under the app config dir, `BNBLOC_MCP_SETTINGS_DIR` for the bridge);
-//! they never leave this machine. They are forgotten with the tool.
+//! tool in the member's own directory, member_dir.rs;
+//! `BNBLOC_MCP_SETTINGS_DIR` hands the bridge its owner's); they never leave
+//! this machine. They are forgotten with the tool.
 //!
 //! An http tool declaring `auth.scheme = "oauth"` takes a sign-in instead:
 //! the member signs in from Settings → Tools (mcp_oauth.rs runs the MCP
@@ -250,13 +251,12 @@ impl Adapter {
             .map_err(|e| format!("cache dir: {e}"))
     }
 
-    /// The directory holding the member's MCP tool credentials.
+    /// The directory holding the signed-in member's MCP tool credentials
+    /// and sign-ins (member_dir).
     pub(super) fn mcp_settings_dir(&self) -> Result<PathBuf, String> {
-        self.app
-            .path()
-            .app_config_dir()
-            .map(|dir| dir.join("mcp-settings"))
-            .map_err(|e| format!("resolve app config dir: {e}"))
+        Ok(self
+            .member_dir()?
+            .join(crate::internal_ext::member_dir::MCP_SETTINGS_DIR))
     }
 
     /// Follow a freshly fetched catalog: remember its MCP tools, forget the

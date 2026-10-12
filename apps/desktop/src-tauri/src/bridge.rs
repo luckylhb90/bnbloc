@@ -467,7 +467,7 @@ fn env_for(
     }
     // Desktop builds wire managed sidecar cores after user settings so
     // the verified package contract remains the source of truth for localUrl.
-    names = crate::internal_ext::extend_core_env(app, &mut env, names);
+    names = crate::internal_ext::extend_core_env(app, &mut env, names, &s.gateway_url, &s.owner);
     if !names.is_empty() {
         env.insert("BNBLOC_CORES".into(), names.join(","));
     }

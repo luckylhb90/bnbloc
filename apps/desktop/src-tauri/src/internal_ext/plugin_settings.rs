@@ -3,9 +3,10 @@
 //! A plugin package may declare `localSettings` (e.g. the member's own bot
 //! credentials). The values belong to the member's machine: they are entered
 //! in Settings → Notifications through the Tauri commands below, stored here
-//! as one owner-only (0600) JSON object per plugin under the app config dir,
-//! and handed to the sidecar at launch through `BNBLOC_PLUGIN_SETTINGS_FILE`
-//! (the path of that same file). They are never sent to the gateway.
+//! as one owner-only (0600) JSON object per plugin in the signed-in member's
+//! own directory (member_dir.rs), and handed to the sidecar at launch through
+//! `BNBLOC_PLUGIN_SETTINGS_FILE` (the path of that same file). They are never
+//! sent to the gateway.
 //!
 //! A plugin whose required settings are not all set is not launched (its
 //! notifications then fall back to the server notifiers); saving or clearing
@@ -17,11 +18,9 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use tauri::Manager;
-
 use crate::internal_ext::sidecar_model::{ComponentKind, LocalSettingField};
 use crate::internal_ext::sidecar_status::component_id;
-use crate::internal_ext::Adapter;
+use crate::internal_ext::{member_dir, Adapter};
 
 /// The env var naming the settings file a plugin sidecar reads at launch.
 pub(super) const SETTINGS_FILE_ENV: &str = "BNBLOC_PLUGIN_SETTINGS_FILE";
@@ -62,13 +61,10 @@ pub struct PluginLocalSettings {
 pub(super) type Values = BTreeMap<String, String>;
 
 impl Adapter {
-    /// The directory holding the per-plugin settings files.
-    fn plugin_settings_dir(&self) -> Result<PathBuf, String> {
-        self.app
-            .path()
-            .app_config_dir()
-            .map(|dir| dir.join("plugin-settings"))
-            .map_err(|e| format!("resolve app config dir: {e}"))
+    /// The directory holding the signed-in member's per-plugin settings
+    /// files (member_dir).
+    pub(super) fn plugin_settings_dir(&self) -> Result<PathBuf, String> {
+        Ok(self.member_dir()?.join(member_dir::PLUGIN_SETTINGS_DIR))
     }
 
     /// The settings file of `plugin` (it need not exist yet).

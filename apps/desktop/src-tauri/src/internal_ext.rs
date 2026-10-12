@@ -7,6 +7,7 @@ mod reconcile_tests;
 mod sandbox_live_tests;
 
 pub(super) mod mcp_tools;
+pub(super) mod member_dir;
 pub(super) mod plugin_events;
 pub(super) mod plugin_host;
 pub(super) mod plugin_settings;
@@ -55,6 +56,10 @@ const RECONCILE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60
 pub struct Adapter {
     app: AppHandle,
     gateway: Arc<Mutex<GatewayAccess>>,
+    /// The private directory of the member whose session `gateway` carries
+    /// (member_dir); None before one is known. Their plugin settings, MCP
+    /// credentials and sign-ins live there.
+    member: Arc<Mutex<Option<std::path::PathBuf>>>,
     inner: Arc<Mutex<Inner>>,
     /// Serializes reconciles: the boot-time session handoff, the poll loop,
     /// and a post-update resume may all trigger one, and interleaved runs
@@ -74,6 +79,10 @@ pub struct Adapter {
 
 impl Adapter {
     pub fn new(app: AppHandle, gateway_url: String, gateway_token: String) -> Self {
+        if let Ok(config) = app.path().app_config_dir() {
+            member_dir::remove_unkeyed_dirs(&config);
+        }
+        let member = Self::member_for(&app, &gateway_url, &gateway_token);
         let gateway = Arc::new(Mutex::new(GatewayAccess {
             base_url: gateway_url.trim_end_matches('/').to_string(),
             token: gateway_token,
@@ -82,6 +91,7 @@ impl Adapter {
             app,
             host: plugin_host::PluginHost::new(Arc::clone(&gateway)),
             gateway,
+            member: Arc::new(Mutex::new(member)),
             inner: Arc::new(Mutex::new(Inner {
                 desired_up: false,
                 generation: 0,
@@ -95,10 +105,60 @@ impl Adapter {
         }
     }
 
+    /// Take over the web's session. A session of another member (or another
+    /// gateway) switches the member directory, and the plugin sidecars that
+    /// read their member's settings restart with the new member's.
     pub fn update_gateway(&self, gateway_url: String, gateway_token: String) {
-        let mut gateway = self.gateway.lock();
-        gateway.base_url = gateway_url.trim_end_matches('/').to_string();
-        gateway.token = gateway_token;
+        let member = Self::member_for(&self.app, &gateway_url, &gateway_token);
+        {
+            let mut gateway = self.gateway.lock();
+            gateway.base_url = gateway_url.trim_end_matches('/').to_string();
+            gateway.token = gateway_token;
+        }
+        let switched = {
+            let mut current = self.member.lock();
+            let switched = *current != member;
+            *current = member;
+            switched
+        };
+        if switched {
+            self.restart_member_sidecars();
+        }
+    }
+
+    /// The member directory of the session `token` (member_dir).
+    fn member_for(app: &AppHandle, gateway_url: &str, token: &str) -> Option<std::path::PathBuf> {
+        let config = app.path().app_config_dir().ok()?;
+        member_dir::member_dir(&config, gateway_url, &member_dir::token_subject(token)?)
+    }
+
+    /// The signed-in member's private directory.
+    pub(super) fn member_dir(&self) -> Result<std::path::PathBuf, String> {
+        self.member
+            .lock()
+            .clone()
+            .ok_or_else(|| "no member is signed in on this computer yet".to_string())
+    }
+
+    /// Restart every plugin sidecar that reads its member's local settings
+    /// (they were launched with the previous member's file).
+    fn restart_member_sidecars(&self) {
+        let ids: Vec<String> = self
+            .inner
+            .lock()
+            .sidecars
+            .iter()
+            .filter(|(_, sidecar)| {
+                sidecar.spec.as_ref().is_some_and(|spec| {
+                    spec.kind == sidecar_model::ComponentKind::Plugin
+                        && !spec.plugin.local_settings.is_empty()
+                })
+            })
+            .map(|(id, _)| id.clone())
+            .collect();
+        for id in ids {
+            self.restart_sidecar(&id);
+        }
     }
 
     /// The configured gateway origin (no trailing slash; "" before one is
@@ -356,10 +416,16 @@ struct AppliedSpecs {
     uninstalled: Vec<String>,
 }
 
+/// Extend the bridge env (bridge::env_for) with the managed cores and MCP
+/// tools. `gateway_url` and `owner` are the bridge's own: its MCP
+/// credentials are its owner's (member_dir), whoever the manager's session
+/// belongs to.
 pub fn extend_core_env(
     app: Option<&AppHandle>,
     env: &mut std::collections::HashMap<String, String>,
     names: Vec<String>,
+    gateway_url: &str,
+    owner: &str,
 ) -> Vec<String> {
     let Some(app) = app else {
         return names;
@@ -379,7 +445,12 @@ pub fn extend_core_env(
             dir.to_string_lossy().into_owned(),
         );
     }
-    if let Ok(dir) = adapter.mcp_settings_dir() {
+    let owner_dir = app
+        .path()
+        .app_config_dir()
+        .ok()
+        .and_then(|config| member_dir::member_dir(&config, gateway_url, owner));
+    if let Some(dir) = owner_dir.map(|dir| dir.join(member_dir::MCP_SETTINGS_DIR)) {
         env.insert(
             mcp_tools::SETTINGS_DIR_ENV.into(),
             dir.to_string_lossy().into_owned(),
