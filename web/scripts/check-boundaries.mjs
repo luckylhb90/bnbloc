@@ -146,6 +146,14 @@ export const RULES = [
     sample: { file: "views/X.tsx", text: "void navigator.clipboard?.writeText(url);" },
   },
   {
+    id: "10b",
+    name: "a destructive action asks through ui/Dialog ConfirmDialog, never window.confirm or alert",
+    // Removals were one click or a native prompt (web M22).
+    pattern: /\bwindow\.confirm\(|\balert\(/,
+    allowed: [],
+    sample: { file: "views/X.tsx", text: 'if (!window.confirm("Remove?")) return;' },
+  },
+  {
     id: "L8",
     name: "click-outside dismissal goes through ui/useDismissOnOutside",
     pattern: /addEventListener\("mousedown"/,

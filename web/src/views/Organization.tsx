@@ -32,6 +32,8 @@ import { invalidateTenantPolicy } from "@/lib/tenantPolicy";
 import { UserWithEmail } from "@/views/UserName";
 import { can } from "@/lib/permissions";
 import { errorText } from "@/lib/errors";
+import { ConfirmDialog } from "@/ui/Dialog";
+import { displayNameOf } from "@/lib/useDisplayName";
 
 type Tab =
   | "overview"
@@ -288,6 +290,7 @@ function MembersTab({ selfId }: { selfId: string | null }) {
   const [busy, setBusy] = useState<string | null>(null);
   const [newId, setNewId] = useState("");
   const [newRole, setNewRole] = useState<TenantMember["role"]>("member");
+  const [removing, setRemoving] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setError(null);
@@ -303,14 +306,17 @@ function MembersTab({ selfId }: { selfId: string | null }) {
     void load();
   }, [load]);
 
-  const run = async (key: string, fn: () => Promise<unknown>, failMsg: string) => {
+  // run reports whether fn succeeded, so a failed add keeps what was typed.
+  const run = async (key: string, fn: () => Promise<unknown>, failMsg: string): Promise<boolean> => {
     setBusy(key);
     setError(null);
     try {
       await fn();
       await load();
+      return true;
     } catch (e) {
       setError(errorText(e, failMsg));
+      return false;
     } finally {
       setBusy(null);
     }
@@ -319,8 +325,7 @@ function MembersTab({ selfId }: { selfId: string | null }) {
   const addMember = async () => {
     const id = newId.trim();
     if (!id) return;
-    await run("__add__", () => api.addTenantMember(id, newRole), "failed to add member");
-    setNewId("");
+    if (await run("__add__", () => api.addTenantMember(id, newRole), "failed to add member")) setNewId("");
   };
 
   return (
@@ -413,9 +418,7 @@ function MembersTab({ selfId }: { selfId: string | null }) {
                     </td>
                     <td className="px-3 py-2 text-right">
                       <button
-                        onClick={() =>
-                          void run(m.userId, () => api.removeTenantMember(m.userId), "failed to remove member")
-                        }
+                        onClick={() => setRemoving(m.userId)}
                         disabled={isSelf || busy === m.userId}
                         className="tactile rounded-[var(--radius)] border border-[var(--color-border)] px-2 py-1 text-xs text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-2)] disabled:opacity-40"
                         title={isSelf ? "You cannot remove yourself" : "Remove member"}
@@ -436,6 +439,15 @@ function MembersTab({ selfId }: { selfId: string | null }) {
           </tbody>
         </table>
       </div>
+      <ConfirmDialog
+        open={removing !== null}
+        onClose={() => setRemoving(null)}
+        onConfirm={() => removing && run(removing, () => api.removeTenantMember(removing), "failed to remove member")}
+        title="Remove this member?"
+        description={`${removing ? displayNameOf(removing) : ""} loses access to the organization and its rooms.`}
+        confirmLabel="Remove"
+        danger
+      />
     </section>
   );
 }

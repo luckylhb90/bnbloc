@@ -16,6 +16,7 @@ import { useToast } from "@/ui/Toast";
 import { UserName } from "@/views/UserName";
 import { errorText } from "@/lib/errors";
 import { useTenants } from "@/lib/queries";
+import { ConfirmDialog } from "@/ui/Dialog";
 
 // Platform super-admin: organization sync. Rules map the groups, department
 // or email domain an auth provider asserts at sign-in onto a tenant
@@ -357,11 +358,11 @@ function DeprovisionPanel() {
   const [ids, setIds] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [confirming, setConfirming] = useState(false);
 
   const run = async () => {
     const list = splitList(ids);
     if (list.length === 0) return;
-    if (!window.confirm(`Remove ${list.length} user(s) from every tenant and end their sign-ins?`)) return;
     setBusy(true);
     setError(null);
     try {
@@ -392,10 +393,19 @@ function DeprovisionPanel() {
       />
       {error && <ErrorBox>{error}</ErrorBox>}
       <div>
-        <button onClick={() => void run()} disabled={busy || splitList(ids).length === 0} className={button}>
+        <button onClick={() => setConfirming(true)} disabled={busy || splitList(ids).length === 0} className={button}>
           {busy ? "Deprovisioning…" : "Deprovision"}
         </button>
       </div>
+      <ConfirmDialog
+        open={confirming}
+        onClose={() => setConfirming(false)}
+        onConfirm={run}
+        title={`Deprovision ${splitList(ids).length} user(s)?`}
+        description="They are removed from every tenant and all their sign-ins end."
+        confirmLabel="Deprovision"
+        danger
+      />
     </div>
   );
 }

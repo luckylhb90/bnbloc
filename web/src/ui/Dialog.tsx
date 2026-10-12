@@ -1,4 +1,4 @@
-import { useId, useRef } from "react";
+import { useId, useRef, useState } from "react";
 import { XIcon } from "@phosphor-icons/react";
 import { cn } from "@/lib/cn";
 import { Button } from "./Button";
@@ -92,6 +92,9 @@ export function Dialog({
   );
 }
 
+// ConfirmDialog asks before a destructive action (every one goes through it:
+// no window.confirm, no one-click removal). An onConfirm that returns a
+// promise keeps the dialog open, its button busy, until the action settles.
 export function ConfirmDialog({
   open,
   onClose,
@@ -103,12 +106,13 @@ export function ConfirmDialog({
 }: {
   open: boolean;
   onClose: () => void;
-  onConfirm: () => void;
+  onConfirm: () => unknown;
   title: string;
   description?: string;
   confirmLabel?: string;
   danger?: boolean;
 }) {
+  const [busy, setBusy] = useState(false);
   return (
     <Dialog
       open={open}
@@ -123,12 +127,21 @@ export function ConfirmDialog({
           </Button>
           <Button
             variant={danger ? "danger" : "primary"}
-            onClick={() => {
-              onConfirm();
+            disabled={busy}
+            onClick={async () => {
+              const pending = onConfirm();
+              if (pending instanceof Promise) {
+                setBusy(true);
+                try {
+                  await pending;
+                } finally {
+                  setBusy(false);
+                }
+              }
               onClose();
             }}
           >
-            {confirmLabel}
+            {busy ? "Working…" : confirmLabel}
           </Button>
         </>
       }

@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { ShieldCheckIcon, TrashIcon, WarningCircleIcon } from "@phosphor-icons/react";
 import { api, type ComponentKey } from "@/lib/api";
 import { Button } from "@/ui/Button";
-import { Dialog } from "@/ui/Dialog";
+import { ConfirmDialog } from "@/ui/Dialog";
 import { useToast } from "@/ui/Toast";
 import { UserName } from "@/views/UserName";
 import { errorText } from "@/lib/errors";
@@ -18,7 +18,6 @@ export function TrustedKeysPanel() {
   const [addError, setAddError] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
   const [pendingRemove, setPendingRemove] = useState<ComponentKey | null>(null);
-  const [removing, setRemoving] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -51,17 +50,13 @@ export function TrustedKeysPanel() {
   };
 
   const remove = async () => {
-    if (!pendingRemove || removing) return;
-    setRemoving(true);
+    if (!pendingRemove) return;
     try {
       await api.removeComponentKey(pendingRemove.keyId);
       setKeys((prev) => (prev ?? []).filter((k) => k.keyId !== pendingRemove.keyId));
       toast.success("Publisher key removed");
-      setPendingRemove(null);
-    } catch {
-      toast.error("Failed to remove key");
-    } finally {
-      setRemoving(false);
+    } catch (e) {
+      toast.error(errorText(e, "Failed to remove key"));
     }
   };
 
@@ -146,27 +141,15 @@ export function TrustedKeysPanel() {
         </div>
       </div>
 
-      <Dialog
+      <ConfirmDialog
         open={pendingRemove !== null}
         onClose={() => setPendingRemove(null)}
+        onConfirm={remove}
         title="Remove trusted key"
-        footer={
-          <>
-            <Button variant="ghost" onClick={() => setPendingRemove(null)}>
-              Cancel
-            </Button>
-            <Button variant="danger" onClick={remove} disabled={removing}>
-              {removing ? "Removing…" : "Remove"}
-            </Button>
-          </>
-        }
-      >
-        <p className="text-sm leading-relaxed text-[var(--color-fg-muted)]">
-          Remove publisher key <span className="tabular text-[var(--color-fg)]">{pendingRemove?.keyId}</span>? New
-          packages signed by it will be refused. Packages already installed stay installed — they were verified when
-          they were added.
-        </p>
-      </Dialog>
+        description={`Remove publisher key ${pendingRemove?.keyId ?? ""}? New packages signed by it will be refused. Packages already installed stay installed — they were verified when they were added.`}
+        confirmLabel="Remove"
+        danger
+      />
     </div>
   );
 }
