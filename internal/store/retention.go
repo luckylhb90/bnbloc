@@ -243,7 +243,7 @@ func platformBlobKeys(ctx context.Context, st PlatformSettingsStore) (map[string
 	}
 	for _, row := range rows {
 		for _, k := range blobKeyInText.FindAllString(row.Value, -1) {
-			out[strings.ToLower(k)] = true
+			out[k] = true
 		}
 	}
 	return out, nil

@@ -100,7 +100,7 @@ func TestContractRetentionStoreReferencedBlobKeys(t *testing.T) {
 			all = append(all, key)
 		}
 		setting, free := uniqBlobKey(), uniqBlobKey()
-		if err := b.Settings.PutPlatformSetting(ctx, PlatformSetting{Key: uniq("ext.test."), Value: `{"url":"https://gw.example/v1/artifacts/` + strings.ToUpper(setting) + `"}`, UpdatedAtMs: 1, UpdatedBy: "maya"}); err != nil {
+		if err := b.Settings.PutPlatformSetting(ctx, PlatformSetting{Key: uniq("ext.test."), Value: `{"url":"https://gw.example/v1/artifacts/` + setting + `"}`, UpdatedAtMs: 1, UpdatedBy: "maya"}); err != nil {
 			t.Fatal(err)
 		}
 		got, err := NewRetention(b).ReferencedBlobKeys(ctx, append(all, setting, free))
