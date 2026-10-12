@@ -2,7 +2,8 @@
 
 Status: approved, in development (2026-10-12): steps 1 and 2 implemented,
 step 3 implemented, step 5 implemented for experts and skill packs, step 6
-expert teams and MCP tool components implemented (see "Status" below). Feasibility verified in code and by experiments (see
+expert teams and MCP tool components implemented, step 4 sharing and
+approval in development (see "Status" below). Feasibility verified in code and by experiments (see
 "Evidence").
 
 ## Why
@@ -906,3 +907,85 @@ entries over unchanged; packages and imports set them); an http tool's
 OAuth-style per-member sign-in is not modelled (a member's own token in
 Settings → Tools is); the desktop materializes on each catalog refresh
 (60 s), so a just-published tool is missing for up to a minute.
+
+## Status: step 4 (sharing and approval)
+
+**2026-10-12: in development.** Scope: section 1's shared, organization
+and platform scopes for every content kind (experts, teams, skill packs,
+prompt packs), the builder's `publish_component` for them, and what the
+prompt-library cutover left to this step (org-shared prompts on the Plaza
+and in global search). Executable components are unchanged. Decisions:
+
+- **A shared copy is a component row, not a grant.** Sharing creates (or
+  moves forward) a component of scope `shared` owned by the recipient, with
+  `source_id` (the author's component) and `shared_by` (the author); its
+  versions are the author's version rows cloned (same manifest, same
+  content-addressed bundle, so no bytes are copied). Why not a pinned
+  read-only grant: every existing read path (`extpipe.MemberVisibility`'s
+  owner rule for `shared`, `contentuse.Usable`/`Effective`, the Library
+  listing, the bundle entitlement, member uses, acks) already handles an
+  owned row, while a grant would add a second visibility input to all of
+  them; and a grant dies with the author's component, where a copy keeps
+  working when the author deletes or rewrites theirs ("later edits by the
+  author don't change it"). A copy is read-only (no new versions, no
+  re-sharing); the recipient may delete it or **update it to the author's
+  latest** explicitly, which appends the author's current version.
+- **Trust follows the author, not the row.** A copy is owned by the
+  recipient but was written by someone else: the trust owner of a
+  component (`ContentComponent.Author()`: `shared_by` when set, else the
+  owner) is what `contentuse.Ref` reports to the bridge, so someone else's
+  script-bearing or stdio-MCP content still forces the sandbox, and the
+  Library still asks the recipient to confirm its permissions on first use.
+- **Rooms.** Sharing with a room copies to each current human member of
+  the room (the author must be one). Pinning a component in a room (step 1)
+  stays the room-wide alternative for owners and admins.
+- **Recipients** are members of the author's organization (at most 100 per
+  share). A recipient already holding a copy of the same component gets the
+  newer version appended (never an older one). The unique name key of
+  `content_components` gains `source_id`, so copies of two authors'
+  same-named components coexist.
+- **Organization scope is a second row, approved version by version.**
+  `publish_component(id, "org")` (or the Library's "Publish to
+  organization") opens a request for the author's current version
+  (`content_publish_requests`, the request/approve pattern of
+  `shared_agent_quota_requests`: one pending request per component, a newer
+  request supersedes it). An org admin (`manage_org`, own organization only;
+  a super admin may act in any) reviews it in the Organization console:
+  declared permissions, the files that run (scripts), MCP requirements,
+  a team's roster, and a file-by-file diff from the version the
+  organization uses now. Approving creates (or moves forward) the org row
+  (scope `org`, owner = author, `source_id` = the author's component) with
+  that version; members see it in their Library and keep using that version
+  until a newer request is approved. Declining records the note. The author
+  is notified either way.
+- **No opt-in rollout for content.** Org and platform content is listed to
+  every member it reaches (rollout auto). A second switch would duplicate
+  the one members already have: they pick an expert per message and turn a
+  pack on for themselves. Admins control reach by approving, unpublishing
+  (status `retired`: hidden from the Library and new use; rooms that pinned
+  it keep their version, as section 1 says) and removing (the row and its
+  uses are deleted). An author may take their own component out of the
+  organization too (`publish_component(id, "personal")`).
+- **Platform scope is the existing signed install.** A super admin exports
+  any content component version as a package
+  (`GET /v1/platform/content-components/{id}/package`, or
+  `bnbloc content export`): a `pkgmeta` envelope of the content kind whose
+  one artifact is the bundle on the gateway (`/v1/artifacts/sha256/…`,
+  pinned by sha256). It is signed offline and installed with the existing
+  `bnbloc cores install --package … --signature …` (or `bnbloc content
+  promote`, which exports, signs and installs). `POST
+  /v1/platform/components` recognizes a content kind, verifies the
+  signature against the trusted keys, re-validates the bundle and stores a
+  platform row (no tenant, no owner) with the signature on the version.
+  The console's Content page lists platform and org content and shows the
+  commands; it never signs.
+- **Notifications** go through the existing emitter (the gateway's
+  producer): `content_shared` to each recipient, `content_review` to the
+  organization's admins for a request and to the author for a decision.
+  Both are room-less and link to the Library or the Organization console.
+- **Audit:** `extension_audit` kind `content`, actions `share`, `update`,
+  `request`, `approve`, `decline`, `unpublish`, `restore`, `remove`,
+  `install` (platform).
+- **Org-shared prompts are back** through org-scoped prompt packs: the
+  Plaza shows the organization's prompts again, and global search returns
+  prompt hits from the packs the member can see.
