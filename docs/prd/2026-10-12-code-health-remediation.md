@@ -376,6 +376,84 @@ desktop agent.
 | 3.3 | **Package and artifact owners**: `tarbundle.Cache.LoadPinned` refuses an empty or mismatching pin. One digest package. One MCP tool-name rule, with the reserved name refused at install. One "required env set" check. A field-to-kinds table plus `requireEndpointRuntime` / `requireSidecarRuntime`. `contentpkg` reads archives through `tarbundle`. One clean-relative-path check. One directory packer using the 1A exclusions, with `contentbuiltin` ignoring junk files. The CLI validates packages before upload. One semver and one env-name rule. One vmexec harness list, cwd check and shell. | bridge 25, 26, 28–34, 48, 50 | M–L |
 | 3.4 | **CLI**: one JSON call helper that returns errors. `whoami` reports the session identity. `addGatewayFlags` / `addSigningFlags`. One 401 hint. `~` expansion. | bridge 37, 49 | S–M |
 
+- **Status 3.1:** landed. `services/bridge/drive.go` is the pipeline
+  (stages 1–6 return a `refusal`; `driveTurn`, `settle`); `job_failure.go`
+  owns `refusalKind`, `b.refuse` and `b.fail`: every refusal and every drive
+  failure posts one notice (`wire.JobNotice`). `driveCaps` snapshots the
+  core's capabilities once; an unloadable skill pack or room expert is
+  `missing`; `driveKey` (no package-global locks), `b.detached`,
+  `shareagent.PlatformTarget`, `core.AgentProfile.BindingSum`, one usage
+  projection, the sync conflict as a notice, the job `TargetID` through
+  `QualifyTargetID`/`SplitTargetID` (realtime too). Removed: `serveRecipient`,
+  the PascalCase `bridgeJob` decode, the duplicate `roomctx` filters. Tests:
+  `TestDriveRefusalsAreFinal`, `TestEveryStageRefusalPostsItsNotice`,
+  `TestDriveCapabilitiesAskedOncePerDrive`, `TestUnloadableSkillPackIsMissing`,
+  `TestNoHandRolledAgentRefs`. Defined `wire.JobNotice` (and
+  `wire.IsJobNoticeSession`) here, ahead of 2.5: merge with Batch 2's.
+- **Status O1:** landed. `roomlog.History` (scope: `roomlog.AgentChannels`,
+  the listing realtime's `agentMayReadChannel` admits; a narrowed read
+  outside it is refused) and the one decoder `roomlog.DecodeRow` (notices
+  skipped) serve `.room/`, the pushed context, `read_room` (now every
+  agent channel) and `ask_agent`'s reply poller. Tests:
+  `TestHistoryReadsOnlyAgentChannels`, `TestDecodeRowSkipsNotices`,
+  `TestReplyTextReadsOnlyAgentChannels`.
+- **Status, VM shell gap:** landed. The turn fence
+  (`services/bridge/sandbox_fence.go`): after every sandboxed turn the
+  space is deleted without purge (processes killed, tokens revoked; a space
+  the bridge has not quiesced is quiesced before its ensure or the drive
+  does not run), and the protected paths' fingerprint is checked against
+  the session's baseline (before a follow-up's input, after a fresh
+  create); a change drops the session and resets the tree. Read-only guest
+  mounts were rejected (runtimes refuse overlapping mounts; a
+  case-insensitive host bypasses a per-file bind). Conformance step
+  `spaceRestart` pins what the fence relies on. Tests: `TestSandboxFence_*`.
+- **Status 3.2:** landed (bridge parts here, core parts on the sub-branch
+  merged in). `core.REST` `Request`/`Send`/`JSON` + `DecodeEnvelope` for the
+  Core Protocol and Sandbox clients, the manifest probe and conformance;
+  the bridge's own gateway calls go through one `b.send`. `retryable *bool`
+  in both protocols. `core.CapabilityMissingError` from both clients, which
+  refuse a disallowed workspace path before the wire
+  (`core.CheckWorkspaceFile`). `discover`/`resolveTarget` capabilities and
+  `coreset.Discover` (one 3 s bound); no bare capability assertion is left.
+  `core.LogRedacted` on every secret-bearing type, `bridge.Config.LogValue`.
+  The sandbox path mounts are derived from the space mounts. Removed:
+  `SessionIdle`/`LatestSession` (and their paths, conformance cases and the
+  manifestcore fallbacks; manifests now require `messages` and `pollTurn`),
+  `core.ShortID`, `coreset.FromEnv`'s nil error, sandbox `Resize`/`ListPools`.
+  Tests: `TestWorkspaceWriterEnforcesPolicy`, `TestCapabilityMissingReportedAlike`,
+  `TestNoBareCapabilityAssertion`, `TestSecretsRedacted`,
+  `TestConfigLogRedactsSecrets`, `TestWireTypesEveryFieldTagged`,
+  `TestWireMappersRoundTrip`, `TestRESTSendMapsFailures`,
+  `TestProtocolRequestsBuiltByREST`, `TestGatewayRequestsShareOneSender`.
+  Installed adapters and manifest cores must drop the idle/latest routes and
+  declare `messages`/`pollTurn` before they are re-installed. vmexec env:
+  `protocol.HostConfineFromEnv`/`PassthroughFromEnv` are the only parsers
+  (a confine list in the environment is honored even with `--workspace`;
+  `TestVMExecEnvNamesOnlyInProtocol`).
+- **Status 3.3:** landed. `internal/digest` (lower case, exact compare;
+  `TestDigestRuleSingleOwner`); `tarbundle.Cache.LoadPinned` is the only
+  bundle load and refuses an empty or mismatching pin (`Put`/`Get`/
+  `GetOrLoad` removed; `TestBundleLoadsArePinned`); `tarbundle.ReadArchive`
+  and `PackEntries`/`PackFS` are the one archive reader and directory packer
+  (protected workspace paths, hidden and junk files skipped; contentbuiltin
+  ignores junk; `TestOnlyTarbundleReadsArchives`, `TestPackerExclusions`,
+  `TestLoadIgnoresJunkFiles`); `core.CleanRelPath` (`TestCleanRelPathSingleOwner`);
+  `pkgmeta.ValidMCPToolName` (the reserved room tools name refused at
+  install), `UnsetEnv`, `ValidEnvName`, `semver.Valid`
+  (`TestPackageRulesSingleOwner`); a field-to-kinds table with
+  `RequireEndpointRuntime`/`requireSidecarRuntime` (`TestKindOnlyFieldsRefused`);
+  the CLI validates every package before any upload; vmexec has one
+  `harnesses` table, one guest-cwd mapping and one host shell. Left: the
+  Go/desktop bundle-path cap (Batch 6) and the artifact URL→key parsers
+  (2.7). Stricter now: endpoint hosts must be in `permissions.network` at
+  install, upload names like `../x` are refused, package versions are
+  strict semver, a blank env value counts as unset.
+- **Status 3.4:** landed. `client.call` is the one JSON helper (errors
+  returned), `addGatewayFlags`/`addSigningFlags`, one 401 hint, `whoami`
+  reports the identity commands use, `~` expansion; removed the legacy
+  `"token"` key and `legacyArchKeyword` (`TestOneCallHelperAndFlagSet`,
+  `TestWhoamiReportsTheSessionCommandsUse`).
+
 **Removals (D3):**
 - `SessionIdle` / `LatestSession` from `core.Provider`, the manifestcore "older manifests" fallbacks, and the matching adapter routes and conformance cases (bridge 38).
 - `serveRecipient`.
