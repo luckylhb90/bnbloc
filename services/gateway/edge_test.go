@@ -343,33 +343,6 @@ func TestBrowserSSOKeepsFragmentSession(t *testing.T) {
 	}
 }
 
-// BE-18: the membership fallback caches positive results only, and both edge
-// caches are bounded.
-func TestSubjectInRoomCachesPositiveOnly(t *testing.T) {
-	calls := 0
-	member := false
-	s := &Service{Rooms: func(string, string) []string {
-		calls++
-		if member {
-			return []string{"r"}
-		}
-		return nil
-	}}
-	if s.subjectInRoom("alice", "r", "t") || s.subjectInRoom("alice", "r", "t") {
-		t.Fatal("non-member admitted")
-	}
-	if calls != 2 {
-		t.Fatalf("denials must not be cached: calls=%d", calls)
-	}
-	member = true
-	if !s.subjectInRoom("alice", "r", "t") || !s.subjectInRoom("alice", "r", "t") {
-		t.Fatal("member refused")
-	}
-	if calls != 3 {
-		t.Fatalf("positive result should be cached: calls=%d", calls)
-	}
-}
-
 func TestBoundedCacheStaysBoundedAndExpires(t *testing.T) {
 	c := newBoundedCache[int](time.Minute, 100)
 	now := time.Now()

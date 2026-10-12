@@ -14,6 +14,7 @@ import (
 	"github.com/luckylhb90/bnbloc/internal/realtime"
 	"github.com/luckylhb90/bnbloc/internal/roomctx"
 	"github.com/luckylhb90/bnbloc/internal/store"
+	"github.com/luckylhb90/bnbloc/internal/svcauth"
 	"github.com/luckylhb90/bnbloc/internal/tenant"
 	"github.com/luckylhb90/bnbloc/internal/wire"
 )
@@ -204,7 +205,7 @@ func (s *Service) handoffRoom(w http.ResponseWriter, r *http.Request) (string, b
 		httpx.Error(w, err.Error(), http.StatusBadRequest)
 		return "", false
 	}
-	userID := strings.TrimSpace(r.Header.Get("X-Bnbloc-User"))
+	userID := svcauth.Subject(r)
 	// A handoff exports or imports the whole feed, the people chat included:
 	// a person's action, never an agent host's.
 	if _, ok := s.member(w, r, roomID, userID, membership.Human); !ok {

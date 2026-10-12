@@ -101,17 +101,11 @@ func newSiteEnv(t *testing.T) *siteEnv {
 
 	e.svc = newGateway(t, roomSrv.URL)
 	e.svc.Backends.Realtime = rtSrv.URL
-	e.svc.Rooms = func(subject, _ string) []string {
+	e.svc.Membership = memberOf(func(subject, room string) bool {
 		e.mu.Lock()
 		defer e.mu.Unlock()
-		var out []string
-		for k := range e.members {
-			if room, user, _ := strings.Cut(k, "/"); user == subject {
-				out = append(out, room)
-			}
-		}
-		return out
-	}
+		return e.members[room+"/"+subject]
+	})
 	e.gw = httptest.NewServer(e.svc.Handler())
 	t.Cleanup(e.gw.Close)
 	return e

@@ -21,6 +21,7 @@ import (
 	"github.com/luckylhb90/bnbloc/internal/coreset"
 	"github.com/luckylhb90/bnbloc/internal/extpipe"
 	"github.com/luckylhb90/bnbloc/internal/httpx"
+	"github.com/luckylhb90/bnbloc/internal/membership"
 	"github.com/luckylhb90/bnbloc/internal/notify"
 	"github.com/luckylhb90/bnbloc/internal/obs"
 	"github.com/luckylhb90/bnbloc/internal/orgsync"
@@ -31,7 +32,6 @@ import (
 	"github.com/luckylhb90/bnbloc/internal/store"
 	"github.com/luckylhb90/bnbloc/internal/svcauth"
 	"github.com/luckylhb90/bnbloc/internal/tarbundle"
-	"github.com/luckylhb90/bnbloc/internal/tenant"
 	"github.com/luckylhb90/bnbloc/internal/wire"
 )
 
@@ -54,16 +54,13 @@ type Service struct {
 	// Rooms resolves a subject's room memberships at login; production reads
 	// bnbloc-room, tests inject a fake.
 	Rooms func(subject, tenantID string) []string
-	// InRoom answers "is subject a member of roomID in ANY tenant", used by the
-	// room-scope fallback for a multi-tenant member whose room lives outside
-	// their token's tenant. nil disables the cross-tenant fallback (the baked
-	// claim + same-tenant Rooms lookup still apply).
-	InRoom func(subject, roomID string) bool
-	// RoomRole answers a subject's role in a room (any tenant) and whether
-	// the membership is a human's (not a platform agent host's); "" when
-	// not a member. It gates room content settings (owner/admin). nil
-	// refuses them.
-	RoomRole func(subject, roomID string) (role string, human bool)
+	// Membership answers a subject's membership of a room in any tenant
+	// (role, human or agent host): bnbloc-room's probe behind
+	// membership.RoomClient, positive answers cached briefly and forgotten
+	// on a removal this edge proxies. It is the gateway's one live source
+	// for room reach (after the token's baked list), human membership and
+	// room roles (roomMember). nil refuses every live lookup.
+	Membership membership.Directory
 	// RoomMembers lists a room's human members (content shares with a
 	// room); ctx carries the room's tenant. nil refuses room shares.
 	RoomMembers func(ctx context.Context, roomID string) ([]string, error)
@@ -192,10 +189,6 @@ type Service struct {
 	// backs /v1/platform/org-sync/*. nil (no tenant store) skips sync at
 	// sign-in and answers the routes 501.
 	OrgSync *orgsync.Syncer
-	// memberCache remembers recent positive live room-membership lookups so
-	// the post-login room-scope fallback does not hit bnbloc-room per request.
-	memberCacheOnce sync.Once
-	memberCache     *boundedCache[bool]
 }
 
 // Handler builds the gateway HTTP mux.
@@ -601,11 +594,11 @@ func (s *Service) handleProxy(w http.ResponseWriter, r *http.Request) {
 		r.URL.Path = "/internal/v1/rooms/" + p.RoomID + "/dispatch"
 		r.URL.RawPath = "/internal/v1/rooms/" + url.PathEscape(p.RoomID) + "/dispatch"
 	}
-	s.proxyAs(w, r, p, claims.Subject, claims.Tenant)
+	s.proxyAs(w, r, p, claims)
 	// A membership this request may have ended (a removal, a leave, the
 	// room's deletion) leaves no cached positive answer at this edge.
-	if user, ok := p.endsMembership(r.Method, claims.Subject); ok {
-		s.forgetRoomMember(p.RoomID, user)
+	if user, ok := p.endsMembership(r.Method, claims.Subject); ok && s.Membership != nil {
+		s.Membership.Forget(p.RoomID, user)
 	}
 }
 
@@ -736,9 +729,10 @@ func (s *Service) trustedProxy(ip string) bool {
 	return false
 }
 
-// proxyAs reverse-proxies to the owning backend, injecting the authoritative
-// X-Bnbloc-User and X-Bnbloc-Tenant. Scope enforcement happens in the caller.
-func (s *Service) proxyAs(w http.ResponseWriter, r *http.Request, p apiPath, subject, tenantID string) {
+// proxyAs reverse-proxies to the owning backend, asserting the session's
+// subject, effective tenant and org role. Scope enforcement happens in the
+// caller.
+func (s *Service) proxyAs(w http.ResponseWriter, r *http.Request, p apiPath, claims auth.Claims) {
 	target := s.route(p)
 	if target == "" {
 		httpx.Error(w, "no route", http.StatusNotFound)
@@ -750,24 +744,14 @@ func (s *Service) proxyAs(w http.ResponseWriter, r *http.Request, p apiPath, sub
 		httpx.Error(w, "bad upstream", http.StatusInternalServerError)
 		return
 	}
-	r.Header.Del("X-Bnbloc-User")
-	r.Header.Del(svcauth.HeaderTenant)
-	r.Header.Del(svcauth.HeaderSig)
-	r.Header.Del(svcauth.HeaderTs)
 	// The ownership-forward marker is replica-to-replica only: a client that
 	// set it would pin its request to whichever replica it landed on.
 	r.Header.Del(shard.ForwardedHeader)
-	r.Header.Set("X-Bnbloc-User", subject)
-	// Every authenticated request carries a tenant; default for legacy tokens
-	// so backends always have a scope to enforce.
-	if tenantID == "" {
-		tenantID = tenant.Default
-	}
-	r.Header.Set(svcauth.HeaderTenant, tenantID)
-	// Sign the identity assertion (user + tenant) so the backend can verify it
-	// originated from the gateway and was not spoofed by another workload on the
-	// internal network (no-op when BNBLOC_INTERNAL_KEY is unset — dev mode).
-	svcauth.Sign(r, svcauth.KeyFromEnv(), subject)
+	// Assert the session's identity (subject, effective tenant, org role)
+	// in place of anything the client sent, signed so the backend can verify
+	// it originated here and was not spoofed by another workload on the
+	// internal network (unsigned when BNBLOC_INTERNAL_KEY is unset — dev).
+	svcauth.Key(svcauth.KeyFromEnv()).Assert(r, claims.Subject, claims.Tenant, claims.Role)
 	proxy := httputil.NewSingleHostReverseProxy(upstream)
 	// Flush immediately so Server-Sent Events (room /events) stream to the
 	// client as they arrive instead of being buffered by the reverse proxy;
@@ -803,11 +787,8 @@ func (s *Service) authenticate(r *http.Request) (auth.Claims, error) {
 
 // NewRoomMembershipResolver returns a Rooms resolver that queries bnbloc-room for
 // a subject's room memberships at login. It fails soft (empty list) so login
-// still succeeds; room-scoped requests then fail closed until membership loads.
-func NewRoomMembershipResolver(roomBaseURL string, client *http.Client) func(string, string) []string {
-	if client == nil {
-		client = &http.Client{Timeout: 5 * time.Second}
-	}
+// still succeeds; room-scoped requests then fall back to the live lookup.
+func NewRoomMembershipResolver(roomBaseURL string) func(string, string) []string {
 	// The resolver must carry the caller's tenant: rooms are tenant-scoped, so
 	// a membership lookup without it would search the default tenant and fail
 	// closed for any user whose workspace lives in another org.
@@ -815,16 +796,9 @@ func NewRoomMembershipResolver(roomBaseURL string, client *http.Client) func(str
 		if roomBaseURL == "" {
 			return nil
 		}
-		req, err := http.NewRequest(http.MethodGet, roomBaseURL+"/v1/users/"+url.PathEscape(subject)+"/rooms", nil)
-		if err != nil {
-			return nil
-		}
-		req.Header.Set("X-Bnbloc-User", subject)
-		if tenantID != "" {
-			req.Header.Set(svcauth.HeaderTenant, tenantID)
-		}
-		svcauth.Sign(req, svcauth.KeyFromEnv(), subject)
-		resp, err := client.Do(req)
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		resp, err := callBackend(ctx, http.MethodGet, roomBaseURL+"/v1/users/"+url.PathEscape(subject)+"/rooms", nil, subject, tenantID)
 		if err != nil {
 			return nil
 		}
@@ -842,71 +816,6 @@ func NewRoomMembershipResolver(roomBaseURL string, client *http.Client) func(str
 	}
 }
 
-// NewRoomMembershipProbe returns an InRoom resolver that asks bnbloc-room
-// whether subject is a member of roomID in ANY tenant (the cross-tenant
-// room-scope fallback). It signs the request as the subject so the room service
-// trusts the identity. Fails closed (false) on any error or when unconfigured.
-func NewRoomMembershipProbe(roomBaseURL string, client *http.Client) func(string, string) bool {
-	probe := newRoomMembershipLookup(roomBaseURL, client)
-	return func(subject, roomID string) bool {
-		m, ok := probe(subject, roomID)
-		return ok && m.Member
-	}
-}
-
-// NewRoomRoleProbe returns a RoomRole resolver over the same tenant-agnostic
-// membership probe: the subject's room role and whether the membership is
-// a human's. Fails closed ("" on any error).
-func NewRoomRoleProbe(roomBaseURL string, client *http.Client) func(string, string) (string, bool) {
-	probe := newRoomMembershipLookup(roomBaseURL, client)
-	return func(subject, roomID string) (string, bool) {
-		m, ok := probe(subject, roomID)
-		if !ok || !m.Member {
-			return "", false
-		}
-		return m.Role, !m.AgentHost
-	}
-}
-
-// roomMembershipProbe is bnbloc-room's membership probe answer.
-type roomMembershipProbe struct {
-	Member    bool   `json:"member"`
-	Role      string `json:"role"`
-	AgentHost bool   `json:"agentHost"`
-}
-
-// newRoomMembershipLookup asks bnbloc-room for a subject's membership of a
-// room in any tenant (GET /v1/rooms/{room}/membership/{subject}).
-func newRoomMembershipLookup(roomBaseURL string, client *http.Client) func(string, string) (roomMembershipProbe, bool) {
-	if client == nil {
-		client = &http.Client{Timeout: 5 * time.Second}
-	}
-	return func(subject, roomID string) (roomMembershipProbe, bool) {
-		if roomBaseURL == "" {
-			return roomMembershipProbe{}, false
-		}
-		req, err := http.NewRequest(http.MethodGet, roomBaseURL+"/v1/rooms/"+url.PathEscape(roomID)+"/membership/"+url.PathEscape(subject), nil)
-		if err != nil {
-			return roomMembershipProbe{}, false
-		}
-		req.Header.Set("X-Bnbloc-User", subject)
-		svcauth.Sign(req, svcauth.KeyFromEnv(), subject)
-		resp, err := client.Do(req)
-		if err != nil {
-			return roomMembershipProbe{}, false
-		}
-		defer resp.Body.Close()
-		if resp.StatusCode != http.StatusOK {
-			return roomMembershipProbe{}, false
-		}
-		var out roomMembershipProbe
-		if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
-			return roomMembershipProbe{}, false
-		}
-		return out, true
-	}
-}
-
 // NewRoomTenantResolver returns a RoomTenant resolver that asks bnbloc-room for
 // a room's authoritative tenant (tenant-agnostic, keyed on room id). A short
 // positive cache keeps the per-request lookup cheap; a room's tenant is
@@ -914,10 +823,7 @@ func newRoomMembershipLookup(roomBaseURL string, client *http.Client) func(strin
 // keeps the caller's tenant, which a backend refuses for the room
 // (membership.RoomScope) — never a wrong tenant. Signs as the gateway's own
 // service subject: an internal, non-user-specific lookup.
-func NewRoomTenantResolver(roomBaseURL string, client *http.Client) func(string) string {
-	if client == nil {
-		client = &http.Client{Timeout: 5 * time.Second}
-	}
+func NewRoomTenantResolver(roomBaseURL string) func(string) string {
 	// Bounded + expiring: a room id can be freed by deletion and re-created in
 	// another tenant, and the set of rooms ever seen must not grow forever.
 	cache := newBoundedCache[string](roomTenantCacheTTL, roomCacheMaxEntries)
@@ -928,13 +834,9 @@ func NewRoomTenantResolver(roomBaseURL string, client *http.Client) func(string)
 		if t, ok := cache.get(roomID); ok {
 			return t
 		}
-		req, err := http.NewRequest(http.MethodGet, roomBaseURL+"/v1/rooms/"+url.PathEscape(roomID)+"/tenant", nil)
-		if err != nil {
-			return ""
-		}
-		req.Header.Set(svcauth.HeaderUser, gatewayServiceSubject)
-		svcauth.Sign(req, svcauth.KeyFromEnv(), gatewayServiceSubject)
-		resp, err := client.Do(req)
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		resp, err := callBackend(ctx, http.MethodGet, roomBaseURL+"/v1/rooms/"+url.PathEscape(roomID)+"/tenant", nil, gatewayServiceSubject, "")
 		if err != nil {
 			return ""
 		}
@@ -951,57 +853,4 @@ func NewRoomTenantResolver(roomBaseURL string, client *http.Client) func(string)
 		cache.put(roomID, out.TenantID)
 		return out.TenantID
 	}
-}
-
-// forgetRoomMember drops this edge's cached positive membership answers for
-// user in roomID (every member's when user is ""), after a request that ended
-// them. Other replicas keep theirs until memberCacheTTL; every backend
-// re-checks membership itself (membership.RoomScope) and a removed member's
-// stream ends on the room service's own signal.
-func (s *Service) forgetRoomMember(roomID, user string) {
-	s.memberCacheOnce.Do(func() { s.memberCache = newBoundedCache[bool](memberCacheTTL, roomCacheMaxEntries) })
-	s.memberCache.deleteWhere(func(key string) bool {
-		subject, rest, _ := strings.Cut(key, "\x00")
-		room, _, _ := strings.Cut(rest, "\x00")
-		return room == roomID && (user == "" || subject == user)
-	})
-}
-
-// subjectInRoom reports whether subject is currently a member of roomID via a
-// live lookup, used as the room-scope fallback when the baked token claim
-// predates the membership (room created or joined after login). Fails closed
-// (false) when no resolver is configured or the lookup errors.
-func (s *Service) subjectInRoom(subject, roomID, tenantID string) bool {
-	s.memberCacheOnce.Do(func() { s.memberCache = newBoundedCache[bool](memberCacheTTL, roomCacheMaxEntries) })
-	key := subject + "\x00" + roomID + "\x00" + tenantID
-	if _, ok := s.memberCache.get(key); ok {
-		return true
-	}
-	if s.lookupSubjectInRoom(subject, roomID, tenantID) {
-		// Positive results only: a denial is never cached, so a fresh join
-		// takes effect immediately. A removal can lag by at most memberCacheTTL
-		// at the edge; every backend re-checks membership itself.
-		s.memberCache.put(key, true)
-		return true
-	}
-	return false
-}
-
-// lookupSubjectInRoom performs the live membership lookup behind subjectInRoom.
-func (s *Service) lookupSubjectInRoom(subject, roomID, tenantID string) bool {
-	if s.Rooms != nil {
-		for _, id := range s.Rooms(subject, tenantID) {
-			if id == roomID {
-				return true
-			}
-		}
-	}
-	// Cross-tenant fallback: a member whose room lives in a tenant other than
-	// their token's (a multi-tenant user, or the bridge acting as one) is not
-	// found by the tenant-scoped Rooms lookup above. Room ids are globally
-	// unique, so a tenant-agnostic membership probe is authoritative.
-	if s.InRoom != nil && s.InRoom(subject, roomID) {
-		return true
-	}
-	return false
 }

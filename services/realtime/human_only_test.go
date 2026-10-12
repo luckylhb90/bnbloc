@@ -15,6 +15,7 @@ import (
 	"github.com/luckylhb90/bnbloc/internal/membership"
 	"github.com/luckylhb90/bnbloc/internal/realtime"
 	"github.com/luckylhb90/bnbloc/internal/store"
+	"github.com/luckylhb90/bnbloc/internal/svcauth"
 	"github.com/luckylhb90/bnbloc/internal/tenant"
 	"github.com/luckylhb90/bnbloc/internal/wire"
 )
@@ -188,7 +189,7 @@ func TestRevocationClosesAccess(t *testing.T) {
 	// She is removed: the room service publishes member_removed.
 	room.set("maya", false)
 	ev, _ := json.Marshal(wire.Event{Kind: wire.EventMemberRemoved, Payload: map[string]any{"userId": "maya"}})
-	if code := status(srv, http.MethodPost, "/internal/v1/rooms/room-1/publish", "room-service", string(ev)); code != http.StatusOK {
+	if code := status(srv, http.MethodPost, "/internal/v1/rooms/room-1/publish", svcauth.ServiceSubject("room"), string(ev)); code != http.StatusOK {
 		t.Fatalf("publish = %d", code)
 	}
 	if !ended(stream) {

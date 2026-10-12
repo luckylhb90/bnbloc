@@ -32,6 +32,10 @@ func TestNoMembershipFailOpen(t *testing.T) {
 		"services/realtime/service.go": "handleUnread",
 		// Converging a host's agent-host membership, not authorizing a caller.
 		"services/shareagent/platform_agents.go": "reconcileAgentHost",
+		// The edge's one live lookup (any tenant): it decides reach and room
+		// roles before the request has a room tenant; backends re-check with
+		// RoomScope.
+		"services/gateway/tenant_scope.go": "roomMember",
 	}
 	roleOwners := []string{"internal/store/", "internal/membership/", "services/room/"}
 	var problems []string

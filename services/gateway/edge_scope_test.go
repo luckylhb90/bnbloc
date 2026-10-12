@@ -118,9 +118,10 @@ func TestRoomRemovalForgetsEdgeMembership(t *testing.T) {
 	defer backend.Close()
 	gw := newGateway(t, backend.URL)
 	gw.Rooms = nil
-	member := map[string]bool{"maya": true, "jack": true}
-	probes := 0
-	gw.InRoom = func(subject, room string) bool { probes++; return room == "room-1" && member[subject] }
+	probe, client := newProbeServer(t)
+	probe.set("room-1", "maya", true)
+	probe.set("room-1", "jack", true)
+	gw.Membership = client
 	srv := httptest.NewServer(gw.Handler())
 	defer srv.Close()
 	tok := func(sub string) string {
@@ -135,18 +136,18 @@ func TestRoomRemovalForgetsEdgeMembership(t *testing.T) {
 	if status := doJSON(t, srv, http.MethodDelete, "/v1/rooms/room-1/members/maya", tok("jack"), ""); status != http.StatusOK {
 		t.Fatalf("remove = %d", status)
 	}
-	member["maya"] = false
+	probe.set("room-1", "maya", false)
 	if status := doJSON(t, srv, http.MethodGet, "/v1/rooms/room-1/members", tok("maya"), ""); status != http.StatusForbidden {
 		t.Fatalf("maya after removal = %d, want 403", status)
 	}
-	before := probes
+	before := probe.count()
 	doJSON(t, srv, http.MethodGet, "/v1/rooms/room-1/members", tok("jack"), "")
-	if probes != before {
+	if probe.count() != before {
 		t.Fatal("jack's cached membership was dropped by maya's removal")
 	}
 	// The room is deleted: every cached answer for it goes.
 	doJSON(t, srv, http.MethodDelete, "/v1/rooms/room-1", tok("jack"), "")
-	member["jack"] = false
+	probe.set("room-1", "jack", false)
 	if status := doJSON(t, srv, http.MethodGet, "/v1/rooms/room-1/members", tok("jack"), ""); status != http.StatusForbidden {
 		t.Fatalf("jack after the room's deletion = %d, want 403", status)
 	}

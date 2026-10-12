@@ -30,7 +30,7 @@ func newHandoffServer(t *testing.T) (*Service, *store.MemoryChat, *realtime.Hand
 	svc.Hub.SeedSeq = func(roomID string) (int64, error) { return chat.MaxRoomSeq(context.Background(), roomID, "") }
 	srv := httptest.NewServer(svcauth.Middleware(key, svc.Handler()))
 	t.Cleanup(srv.Close)
-	return svc, chat, realtime.NewHandoffClient(srv.URL), tenant.NewContext(context.Background(), tenant.Default)
+	return svc, chat, realtime.NewHandoffClient(srv.URL, "room"), tenant.NewContext(context.Background(), tenant.Default)
 }
 
 func importRows(rows ...wire.FeedMessage) wire.RoomImportBatch {

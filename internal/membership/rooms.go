@@ -24,15 +24,10 @@ type RoomRef struct {
 // Any error fails closed (no rooms) and is returned.
 func (c *RoomClient) MemberRooms(ctx context.Context, userID, tenantID string) ([]RoomRef, error) {
 	endpoint := c.BaseURL + "/v1/users/" + url.PathEscape(userID) + "/rooms?detail=1"
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	req, err := svcauth.NewRequest(ctx, http.MethodGet, endpoint, nil, userID, tenantID)
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set(svcauth.HeaderUser, userID)
-	if tenantID != "" {
-		req.Header.Set(svcauth.HeaderTenant, tenantID)
-	}
-	svcauth.Sign(req, svcauth.KeyFromEnv(), userID)
 	resp, err := c.HTTP.Do(req)
 	if err != nil {
 		return nil, err

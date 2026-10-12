@@ -2,12 +2,12 @@ package shareagenthttp
 
 import (
 	"net/http"
-	"strings"
 
 	"github.com/luckylhb90/bnbloc/internal/httpx"
 	"github.com/luckylhb90/bnbloc/internal/membership"
 	"github.com/luckylhb90/bnbloc/internal/roomctx"
 	"github.com/luckylhb90/bnbloc/internal/store"
+	"github.com/luckylhb90/bnbloc/internal/svcauth"
 )
 
 // sharedAccess is the credential-free access snapshot projected to clients. It
@@ -69,5 +69,5 @@ func (s *Service) handleAccess(w http.ResponseWriter, r *http.Request) {
 }
 
 func callerSubject(r *http.Request) string {
-	return strings.TrimSpace(r.Header.Get("X-Bnbloc-User"))
+	return svcauth.Subject(r)
 }

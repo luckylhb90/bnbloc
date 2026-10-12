@@ -16,6 +16,7 @@ import (
 	"github.com/luckylhb90/bnbloc/internal/obs"
 	"github.com/luckylhb90/bnbloc/internal/roomctx"
 	"github.com/luckylhb90/bnbloc/internal/store"
+	"github.com/luckylhb90/bnbloc/internal/svcauth"
 	"github.com/luckylhb90/bnbloc/internal/tenant"
 	"github.com/luckylhb90/bnbloc/internal/wire"
 )
@@ -51,7 +52,7 @@ func (s *Service) registerTeamRoutes(mux *http.ServeMux) {
 
 // requireSubject returns the authenticated caller, answering 401 when absent.
 func requireSubject(w http.ResponseWriter, r *http.Request) (string, bool) {
-	userID := strings.TrimSpace(r.Header.Get("X-Bnbloc-User"))
+	userID := svcauth.Subject(r)
 	if userID == "" {
 		httpx.Error(w, "missing authenticated subject", http.StatusUnauthorized)
 		return "", false

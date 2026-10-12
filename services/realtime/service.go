@@ -220,27 +220,39 @@ func (s *Service) Handler() http.Handler {
 	s.registerPluginRoutes(mux)
 	s.Notifications.Register(mux)
 	// Internal-only routes: callable exclusively by a signed control-plane
-	// identity (svcauth.RequireSigned). An anonymous or forged publish could
-	// otherwise inject a chat_message that drives any member's agent.
-	internal := func(h http.HandlerFunc) http.Handler { return svcauth.RequireSigned(svcauth.KeyFromEnv(), h) }
-	mux.Handle("POST /internal/v1/rooms/{roomId}/publish", internal(s.handleInternalPublish))
-	// Generic content-addressed blob store, room-less: the gateway proxies here
-	// (svcauth-signed) to distribute sidecar-core artifact binaries. Distinct
+	// identity. An anonymous or forged publish could otherwise inject a
+	// chat_message that drives any member's agent. A route only services
+	// call names them (svcauth.RequireService); only the routes that act for
+	// a member (the handoff feed and import, which the room service calls
+	// as the member, and dispatch, which the gateway signs as the bridge
+	// owner) accept a member identity (svcauth.RequireSigned).
+	key := svcauth.KeyFromEnv()
+	services := func(names ...string) func(http.HandlerFunc) http.Handler {
+		return func(h http.HandlerFunc) http.Handler { return svcauth.RequireService(key, names, h) }
+	}
+	forMember := func(h http.HandlerFunc) http.Handler { return svcauth.RequireSigned(key, h) }
+	publishers := services("room", "activity", "gateway")
+	mux.Handle("POST /internal/v1/rooms/{roomId}/publish", publishers(s.handleInternalPublish))
+	// Generic content-addressed blob store, room-less: the gateway (artifact
+	// distribution, content bundles) and the room service (blob artifact
+	// versions) call it after authorizing the read themselves. Distinct
 	// from the room-scoped, type-gated attachment path above.
-	mux.Handle("POST /internal/v1/blobs", internal(s.handleInternalBlobPut))
-	mux.Handle("GET /internal/v1/blobs", internal(s.handleInternalBlobCapability))
-	mux.Handle("GET /internal/v1/blobs/{key...}", internal(s.handleInternalBlobGet))
-	mux.Handle("POST /internal/v1/blobs/presign", internal(s.handleInternalBlobPresign))
+	blobs := services("gateway", "room")
+	mux.Handle("POST /internal/v1/blobs", blobs(s.handleInternalBlobPut))
+	mux.Handle("GET /internal/v1/blobs", blobs(s.handleInternalBlobCapability))
+	mux.Handle("GET /internal/v1/blobs/{key...}", blobs(s.handleInternalBlobGet))
+	mux.Handle("POST /internal/v1/blobs/presign", blobs(s.handleInternalBlobPresign))
 	// Handoff package (room service orchestrates export/import): the whole
 	// feed as a forward cursor, and the history-only import write.
-	mux.Handle("GET /internal/v1/rooms/{roomId}/feed", internal(s.handleInternalFeed))
-	mux.Handle("POST /internal/v1/rooms/{roomId}/import", internal(s.handleInternalImport))
+	mux.Handle("GET /internal/v1/rooms/{roomId}/feed", forMember(s.handleInternalFeed))
+	mux.Handle("POST /internal/v1/rooms/{roomId}/import", forMember(s.handleInternalImport))
 	// Agent dispatch (room tools): a bridge, signed as its owner by the
 	// gateway, posts a task for another agent on behalf of the requester of
 	// the job it is running. Room-keyed, so it runs on the room's owner.
-	mux.Handle("POST /internal/v1/rooms/{roomId}/dispatch", internal(s.handleInternalDispatch))
-	// Replica-to-replica routes (scaleout.go).
-	s.registerPeerRoutes(mux, internal)
+	mux.Handle("POST /internal/v1/rooms/{roomId}/dispatch", forMember(s.handleInternalDispatch))
+	// Replica-to-replica routes (scaleout.go); the gateway also signals a
+	// component catalog change.
+	s.registerPeerRoutes(mux, services("realtime"), services("realtime", "gateway"))
 	// Scale-out: release the state of keys this replica stops owning after
 	// every peer-set refresh, and route each keyed request to its owner.
 	s.Peers.Set().OnRefresh(s.reconcileOwnership)
@@ -372,7 +384,7 @@ func (s *Service) handleEvents(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	userID := strings.TrimSpace(r.Header.Get("X-Bnbloc-User"))
+	userID := svcauth.Subject(r)
 	if userID == "" {
 		httpx.Error(w, "missing authenticated subject", http.StatusUnauthorized)
 		return
@@ -539,7 +551,7 @@ func (s *Service) handleAgents(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	userID := strings.TrimSpace(r.Header.Get("X-Bnbloc-User"))
+	userID := svcauth.Subject(r)
 	if userID == "" {
 		httpx.Error(w, "missing authenticated subject", http.StatusUnauthorized)
 		return
@@ -588,7 +600,7 @@ func (s *Service) handleChat(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	userID := strings.TrimSpace(r.Header.Get("X-Bnbloc-User"))
+	userID := svcauth.Subject(r)
 	if userID == "" {
 		httpx.Error(w, "missing authenticated subject", http.StatusUnauthorized)
 		return
@@ -792,7 +804,7 @@ func (s *Service) handleHistory(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	userID := strings.TrimSpace(r.Header.Get("X-Bnbloc-User"))
+	userID := svcauth.Subject(r)
 	if userID == "" {
 		httpx.Error(w, "missing authenticated subject", http.StatusUnauthorized)
 		return
@@ -860,7 +872,7 @@ func (s *Service) handleMarkRead(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	userID := strings.TrimSpace(r.Header.Get("X-Bnbloc-User"))
+	userID := svcauth.Subject(r)
 	if userID == "" {
 		httpx.Error(w, "missing authenticated subject", http.StatusUnauthorized)
 		return
@@ -912,7 +924,7 @@ func (s *Service) handleDeleteMessage(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	userID := strings.TrimSpace(r.Header.Get("X-Bnbloc-User"))
+	userID := svcauth.Subject(r)
 	if userID == "" {
 		httpx.Error(w, "missing authenticated subject", http.StatusUnauthorized)
 		return
@@ -967,7 +979,7 @@ func (s *Service) handleEditMessage(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	userID := strings.TrimSpace(r.Header.Get("X-Bnbloc-User"))
+	userID := svcauth.Subject(r)
 	if userID == "" {
 		httpx.Error(w, "missing authenticated subject", http.StatusUnauthorized)
 		return
@@ -1039,7 +1051,7 @@ func (s *Service) handleEditMessage(w http.ResponseWriter, r *http.Request) {
 // plus each live channel), and the per-channel list carries only channels with
 // unread messages, default channel first.
 func (s *Service) handleUnread(w http.ResponseWriter, r *http.Request) {
-	userID := strings.TrimSpace(r.Header.Get("X-Bnbloc-User"))
+	userID := svcauth.Subject(r)
 	if userID == "" {
 		httpx.Error(w, "missing authenticated subject", http.StatusUnauthorized)
 		return
@@ -1127,7 +1139,7 @@ func (s *Service) handleTyping(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	userID := strings.TrimSpace(r.Header.Get("X-Bnbloc-User"))
+	userID := svcauth.Subject(r)
 	if userID == "" {
 		httpx.Error(w, "missing authenticated subject", http.StatusUnauthorized)
 		return

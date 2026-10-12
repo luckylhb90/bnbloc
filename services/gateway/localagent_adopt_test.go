@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -31,7 +32,7 @@ func TestAdoptRoomHandlesExistingRoomID(t *testing.T) {
 	}))
 	defer room.Close()
 	members := map[string][]string{} // subject -> rooms
-	s := &Service{Rooms: func(subject, _ string) []string { return members[subject] }}
+	s := &Service{Membership: memberOf(func(subject, room string) bool { return slices.Contains(members[subject], room) })}
 	s.Backends.Room = room.URL
 	ctx := context.Background()
 

@@ -20,18 +20,16 @@ import (
 // internal routes (svcauth-signed as membership.AgentHostSubject). The
 // request's tenant (signed) is the room's.
 func (s *Service) registerAgentHostRoutes(mux *http.ServeMux) {
-	internal := func(h http.HandlerFunc) http.Handler { return svcauth.RequireSigned(svcauth.KeyFromEnv(), h) }
+	internal := func(h http.HandlerFunc) http.Handler {
+		return svcauth.RequireService(svcauth.KeyFromEnv(), []string{membership.AgentHostService}, h)
+	}
 	mux.Handle("PUT /internal/v1/rooms/{roomId}/agent-hosts/{userId}", internal(s.handlePutAgentHost))
 	mux.Handle("DELETE /internal/v1/rooms/{roomId}/agent-hosts/{userId}", internal(s.handleDeleteAgentHost))
 }
 
-// agentHostTarget checks the internal caller and returns the path's room and
-// user; ok=false when it wrote an error.
+// agentHostTarget returns the path's room and user; ok=false when it wrote
+// an error.
 func agentHostTarget(w http.ResponseWriter, r *http.Request) (roomID, userID string, ok bool) {
-	if caller(r) != membership.AgentHostSubject {
-		httpx.Error(w, "agent-host memberships are managed by shareagent only", http.StatusForbidden)
-		return "", "", false
-	}
 	roomID, userID = r.PathValue("roomId"), strings.TrimSpace(r.PathValue("userId"))
 	if roomID == "" || userID == "" {
 		httpx.Error(w, "room and user are required", http.StatusBadRequest)

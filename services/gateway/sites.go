@@ -20,9 +20,7 @@ import (
 	"github.com/luckylhb90/bnbloc/internal/obs"
 	"github.com/luckylhb90/bnbloc/internal/roomctx"
 	"github.com/luckylhb90/bnbloc/internal/store"
-	"github.com/luckylhb90/bnbloc/internal/svcauth"
 	"github.com/luckylhb90/bnbloc/internal/tarbundle"
-	"github.com/luckylhb90/bnbloc/internal/tenant"
 )
 
 // Site snapshots (PRD 2026-10-09 "Public share links and live web-app
@@ -212,18 +210,8 @@ func (s *Service) memberSiteVersion(ctx context.Context, subject, tenantID, scop
 	}
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, base+"/v1/rooms/"+url.PathEscape(roomID)+
-		"/artifacts/"+url.PathEscape(artifactID)+"/versions/"+strconv.Itoa(version), nil)
-	if err != nil {
-		return siteVersion{}, err
-	}
-	if tenantID == "" {
-		tenantID = tenant.Default
-	}
-	req.Header.Set(svcauth.HeaderUser, subject)
-	req.Header.Set(svcauth.HeaderTenant, tenantID)
-	svcauth.Sign(req, svcauth.KeyFromEnv(), subject)
-	resp, err := backendClient.Do(req)
+	resp, err := callBackend(ctx, http.MethodGet, base+"/v1/rooms/"+url.PathEscape(roomID)+
+		"/artifacts/"+url.PathEscape(artifactID)+"/versions/"+strconv.Itoa(version), nil, subject, tenantID)
 	if err != nil {
 		return siteVersion{}, fmt.Errorf("room service unreachable: %w", err)
 	}
@@ -247,9 +235,6 @@ func (s *Service) memberSiteVersion(ctx context.Context, subject, tenantID, scop
 	}
 	return sv, nil
 }
-
-// backendClient performs the gateway's own short JSON calls to backends.
-var backendClient = &http.Client{Timeout: 15 * time.Second}
 
 // siteBundle returns the verified, parsed snapshot of sv from the cache or
 // the blob store (read on the gateway's own behalf: the caller authorized).

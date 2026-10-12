@@ -481,7 +481,7 @@ func (s *Service) storeBundle(ctx context.Context, pkg *contentpkg.Package, bund
 	if strings.TrimSpace(s.Backends.Realtime) == "" {
 		return "", errors.New("artifact store not configured")
 	}
-	ref, err := s.blobs().PutBlob(ctx, gatewayServiceSubject, bytes.NewReader(bundle))
+	ref, err := s.blobs().PutBlob(ctx, bytes.NewReader(bundle))
 	if err != nil {
 		return "", err
 	}

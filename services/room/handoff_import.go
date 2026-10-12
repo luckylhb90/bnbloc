@@ -640,7 +640,7 @@ func (s *Service) importArtifactVersion(ctx context.Context, user string, f *zip
 		return store.ArtifactVersion{}, badPackage("%s: %v", f.Name, err)
 	}
 	defer rc.Close()
-	ref, err := s.Blobs.PutBlob(ctx, user, rc)
+	ref, err := s.Blobs.PutBlob(ctx, rc)
 	if err != nil {
 		return store.ArtifactVersion{}, err
 	}

@@ -70,7 +70,7 @@ func newHandoffEnv(t *testing.T) *handoffEnv {
 	svc := New(rooms, rooms.Channels())
 	svc.Artifacts = store.NewMemoryArtifacts()
 	svc.RoomImports = store.NewMemoryRoomImports()
-	client := realtime.NewHandoffClient(rtSrv.URL)
+	client := realtime.NewHandoffClient(rtSrv.URL, "room")
 	svc.Handoff = client
 	svc.Blobs = client
 	roomSrv := httptest.NewServer(svc.Handler())

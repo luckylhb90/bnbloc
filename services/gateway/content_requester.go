@@ -9,7 +9,6 @@ import (
 	"github.com/luckylhb90/bnbloc/internal/auth"
 	"github.com/luckylhb90/bnbloc/internal/contentpkg"
 	"github.com/luckylhb90/bnbloc/internal/httpx"
-	"github.com/luckylhb90/bnbloc/internal/membership"
 	"github.com/luckylhb90/bnbloc/internal/obs"
 	"github.com/luckylhb90/bnbloc/internal/rbac"
 	"github.com/luckylhb90/bnbloc/internal/store"
@@ -179,20 +178,6 @@ func (s *Service) contentCaller(w http.ResponseWriter, r *http.Request, write bo
 		}
 	}
 	return actor, true
-}
-
-// roomMember reads subject's membership of a room (any tenant) through the
-// room role probe, as the membership owner's Member: its IsHuman / MayChat
-// are the rules the backends apply.
-func (s *Service) roomMember(subject, roomID string) (membership.Member, bool) {
-	if s.RoomRole == nil {
-		return membership.Member{}, false
-	}
-	role, human := s.RoomRole(subject, roomID)
-	if role == "" {
-		return membership.Member{}, false
-	}
-	return membership.Member{Role: store.Role(role), AgentHost: !human}, true
 }
 
 // jobSaveAllowed applies the save rule of a granted request: a borrowed or

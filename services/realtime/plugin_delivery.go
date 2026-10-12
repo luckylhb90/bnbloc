@@ -14,6 +14,7 @@ import (
 	"github.com/luckylhb90/bnbloc/internal/httpx"
 	"github.com/luckylhb90/bnbloc/internal/obs"
 	"github.com/luckylhb90/bnbloc/internal/store"
+	"github.com/luckylhb90/bnbloc/internal/svcauth"
 	"github.com/luckylhb90/bnbloc/internal/tenant"
 	"github.com/luckylhb90/bnbloc/internal/wire"
 )
@@ -36,7 +37,7 @@ func (s *Service) registerPluginRoutes(mux *http.ServeMux) {
 // holds it open while its sidecar manager runs, with ?plugins=1 while it
 // runs a plugin sidecar.
 func (s *Service) handlePluginEvents(w http.ResponseWriter, r *http.Request) {
-	subject := strings.TrimSpace(r.Header.Get("X-Bnbloc-User"))
+	subject := svcauth.Subject(r)
 	if subject == "" {
 		httpx.Error(w, "missing authenticated subject", http.StatusUnauthorized)
 		return
@@ -97,7 +98,7 @@ func (s *Service) handlePluginEvents(w http.ResponseWriter, r *http.Request) {
 // the member the delivery was sent to may acknowledge it; an unknown, expired
 // or foreign id is 404.
 func (s *Service) handlePluginEventAck(w http.ResponseWriter, r *http.Request) {
-	subject := strings.TrimSpace(r.Header.Get("X-Bnbloc-User"))
+	subject := svcauth.Subject(r)
 	if subject == "" {
 		httpx.Error(w, "missing authenticated subject", http.StatusUnauthorized)
 		return

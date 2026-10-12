@@ -475,7 +475,7 @@ func (e *roomExporter) writeArtifactVersion(file string, v store.ArtifactVersion
 	if e.svc.Blobs == nil {
 		return fmt.Errorf("artifact blob store not configured")
 	}
-	rc, _, err := e.svc.Blobs.OpenBlob(e.ctx, e.user, v.BlobKey)
+	rc, _, err := e.svc.Blobs.OpenBlob(e.ctx, v.BlobKey)
 	if err != nil {
 		return err
 	}

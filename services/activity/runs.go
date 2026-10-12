@@ -13,6 +13,7 @@ import (
 	"github.com/luckylhb90/bnbloc/internal/obs"
 	"github.com/luckylhb90/bnbloc/internal/roomctx"
 	"github.com/luckylhb90/bnbloc/internal/store"
+	"github.com/luckylhb90/bnbloc/internal/svcauth"
 	"github.com/luckylhb90/bnbloc/internal/wire"
 )
 
@@ -134,7 +135,7 @@ func (s *Service) handleRoomRuns(w http.ResponseWriter, r *http.Request) {
 // tenant, behind the gateway's manage_org gate).
 func (s *Service) handleRuns(scope string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		caller := strings.TrimSpace(r.Header.Get("X-Bnbloc-User"))
+		caller := svcauth.Subject(r)
 		if caller == "" {
 			httpx.Error(w, "missing authenticated subject", http.StatusUnauthorized)
 			return
@@ -283,7 +284,7 @@ func (s *Service) runViewer(r *http.Request, scope string) *runViewer {
 		s:       s,
 		r:       r,
 		scope:   scope,
-		caller:  strings.TrimSpace(r.Header.Get("X-Bnbloc-User")),
+		caller:  svcauth.Subject(r),
 		rooms:   roomNamer{s: s, r: r, names: map[string]string{}},
 		members: map[string]bool{},
 	}

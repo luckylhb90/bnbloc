@@ -45,13 +45,12 @@ func newContentGateway(t *testing.T) *contentGateway {
 	}
 	members := map[string]string{"maya": "owner", "jack": "member", "bob": "member", "vic": "member"}
 	svc.Rooms = func(string, string) []string { return nil }
-	svc.InRoom = func(subject, room string) bool { _, ok := members[subject]; return ok && room == "room-1" }
-	svc.RoomRole = func(subject, room string) (string, bool) {
+	svc.Membership = roleMembership(func(subject, room string) (string, bool) {
 		if room != "room-1" {
 			return "", false
 		}
 		return members[subject], members[subject] != ""
-	}
+	})
 	svc.RoomTenant = func(string) string { return "home" }
 	blobs, err := blobstore.NewDiskStore(t.TempDir())
 	if err != nil {

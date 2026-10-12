@@ -68,7 +68,7 @@ func RouteKey(r *http.Request) (string, bool) {
 		}
 	}
 	if path == "/v1/my/plugin-events" || strings.HasPrefix(path, "/v1/my/plugin-events/") {
-		if member := strings.TrimSpace(r.Header.Get(svcauth.HeaderUser)); member != "" {
+		if member := svcauth.Subject(r); member != "" {
 			return MemberKey(member), true
 		}
 		return "", false
@@ -184,13 +184,10 @@ func (p *Peers) call(ctx context.Context, method, peer, path, tenantID string, i
 	if err != nil {
 		return 0, nil, err
 	}
-	subject := svcauth.ServiceSubject("realtime")
 	if in != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
-	req.Header.Set(svcauth.HeaderUser, subject)
-	req.Header.Set(svcauth.HeaderTenant, tenantID)
-	svcauth.Sign(req, p.key, subject)
+	svcauth.Key(p.key).Assert(req, realtimeServiceSubject, tenantID, "")
 	resp, err := p.client.Do(req)
 	if err != nil {
 		return 0, nil, err
@@ -367,12 +364,16 @@ func (s *Service) publishOwned(ev wire.Event) {
 
 // ---------------------------------------------------------------- internal peer routes
 
-func (s *Service) registerPeerRoutes(mux *http.ServeMux, internal func(http.HandlerFunc) http.Handler) {
-	mux.Handle("POST /internal/v1/plugin-events", internal(s.handleInternalPluginEvent))
-	mux.Handle("GET /internal/v1/members/{member}/desktop", internal(s.handleInternalMemberDesktop))
-	mux.Handle("POST /internal/v1/members/{member}/notifications", internal(s.handleInternalMemberNotification))
-	mux.Handle("POST /internal/v1/rooms/{roomId}/schedules/{scheduleId}/post", internal(s.handleInternalScheduledPost))
-	mux.Handle("POST /internal/v1/components/changed", internal(s.handleInternalComponentsChanged))
+// realtimeServiceSubject is the identity a replica asserts on its calls to
+// a peer.
+var realtimeServiceSubject = svcauth.ServiceSubject("realtime")
+
+func (s *Service) registerPeerRoutes(mux *http.ServeMux, peers, catalog func(http.HandlerFunc) http.Handler) {
+	mux.Handle("POST /internal/v1/plugin-events", peers(s.handleInternalPluginEvent))
+	mux.Handle("GET /internal/v1/members/{member}/desktop", peers(s.handleInternalMemberDesktop))
+	mux.Handle("POST /internal/v1/members/{member}/notifications", peers(s.handleInternalMemberNotification))
+	mux.Handle("POST /internal/v1/rooms/{roomId}/schedules/{scheduleId}/post", peers(s.handleInternalScheduledPost))
+	mux.Handle("POST /internal/v1/components/changed", catalog(s.handleInternalComponentsChanged))
 }
 
 // handleInternalComponentsChanged queues a catalog hint

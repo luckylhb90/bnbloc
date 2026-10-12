@@ -14,6 +14,7 @@ import (
 	"github.com/luckylhb90/bnbloc/internal/obs"
 	"github.com/luckylhb90/bnbloc/internal/roomctx"
 	"github.com/luckylhb90/bnbloc/internal/store"
+	"github.com/luckylhb90/bnbloc/internal/svcauth"
 	"github.com/luckylhb90/bnbloc/internal/tenant"
 	"github.com/luckylhb90/bnbloc/internal/wire"
 )
@@ -42,7 +43,7 @@ func (s *Service) handleBridgeHeartbeat(w http.ResponseWriter, r *http.Request) 
 		httpx.Unavailable(w, "bridge jobs")
 		return
 	}
-	caller := strings.TrimSpace(r.Header.Get("X-Bnbloc-User"))
+	caller := svcauth.Subject(r)
 	if caller == "" {
 		httpx.Error(w, "missing authenticated subject", http.StatusUnauthorized)
 		return
@@ -121,7 +122,7 @@ func (s *Service) handleBridgeJobClaim(w http.ResponseWriter, r *http.Request) {
 		httpx.Unavailable(w, "bridge jobs")
 		return
 	}
-	caller := strings.TrimSpace(r.Header.Get("X-Bnbloc-User"))
+	caller := svcauth.Subject(r)
 	if caller == "" {
 		httpx.Error(w, "missing authenticated subject", http.StatusUnauthorized)
 		return
@@ -177,7 +178,7 @@ func (s *Service) handleBridgeJobStatus(w http.ResponseWriter, r *http.Request) 
 		httpx.Unavailable(w, "bridge jobs")
 		return
 	}
-	caller := strings.TrimSpace(r.Header.Get("X-Bnbloc-User"))
+	caller := svcauth.Subject(r)
 	if caller == "" {
 		httpx.Error(w, "missing authenticated subject", http.StatusUnauthorized)
 		return
@@ -223,7 +224,7 @@ func (s *Service) handleBridgeJobLease(w http.ResponseWriter, r *http.Request) {
 		httpx.Unavailable(w, "bridge jobs")
 		return
 	}
-	caller := strings.TrimSpace(r.Header.Get("X-Bnbloc-User"))
+	caller := svcauth.Subject(r)
 	if caller == "" {
 		httpx.Error(w, "missing authenticated subject", http.StatusUnauthorized)
 		return
@@ -369,7 +370,7 @@ func (s *Service) handleCancelAgentJob(w http.ResponseWriter, r *http.Request) {
 	job, err := s.BridgeJobs.CancelAgentJob(r.Context(), store.CancelRequest{
 		JobID:           jobID,
 		RoomID:          roomID,
-		RequestedByUser: strings.TrimSpace(r.Header.Get("X-Bnbloc-User")),
+		RequestedByUser: svcauth.Subject(r),
 		NowMs:           now,
 	})
 	if err != nil {
@@ -433,7 +434,7 @@ func (s *Service) handleRoomAgentJobs(w http.ResponseWriter, r *http.Request) {
 // browser Agents page: the same member sees the same agent list as their
 // desktop app, because both render what their bridge advertises.
 func (s *Service) handleMyAgents(w http.ResponseWriter, r *http.Request) {
-	caller := strings.TrimSpace(r.Header.Get("X-Bnbloc-User"))
+	caller := svcauth.Subject(r)
 	if caller == "" {
 		httpx.Error(w, "missing authenticated subject", http.StatusUnauthorized)
 		return

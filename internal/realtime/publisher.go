@@ -104,16 +104,12 @@ func (p *HTTPPublisher) post(ctx context.Context, path, tenantID string, buf []b
 	// deliver the event.
 	pctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	defer cancel()
-	req, err := http.NewRequestWithContext(pctx, http.MethodPost, p.BaseURL+path, bytes.NewReader(buf))
+	req, err := svcauth.Key(p.Key).NewRequest(pctx, http.MethodPost, p.BaseURL+path, bytes.NewReader(buf), svcauth.ServiceSubject(p.Service), tenantID)
 	if err != nil {
 		log.Printf("realtime publisher(%s): request: %v", p.Service, err)
 		return
 	}
-	subject := svcauth.ServiceSubject(p.Service)
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set(svcauth.HeaderUser, subject)
-	req.Header.Set(svcauth.HeaderTenant, tenantID)
-	svcauth.Sign(req, p.Key, subject)
 	client := p.HTTP
 	if client == nil {
 		client = http.DefaultClient

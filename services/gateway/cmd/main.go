@@ -17,6 +17,7 @@ import (
 	"github.com/luckylhb90/bnbloc/internal/contentbuiltin"
 	"github.com/luckylhb90/bnbloc/internal/coreset"
 	"github.com/luckylhb90/bnbloc/internal/extreg"
+	"github.com/luckylhb90/bnbloc/internal/membership"
 	"github.com/luckylhb90/bnbloc/internal/notify"
 	"github.com/luckylhb90/bnbloc/internal/obs"
 	"github.com/luckylhb90/bnbloc/internal/orgsync"
@@ -268,10 +269,9 @@ func main() {
 			Realtime:   config.FromEnvRaw("BNBLOC_REALTIME_BASE_URL"),
 			Relay:      config.FromEnvRaw("BNBLOC_RELAY_BASE_URL"),
 		},
-		Rooms:             gateway.NewRoomMembershipResolver(config.FromEnvRaw("BNBLOC_ROOM_BASE_URL"), nil),
-		InRoom:            gateway.NewRoomMembershipProbe(config.FromEnvRaw("BNBLOC_ROOM_BASE_URL"), nil),
-		RoomRole:          gateway.NewRoomRoleProbe(config.FromEnvRaw("BNBLOC_ROOM_BASE_URL"), nil),
-		RoomTenant:        gateway.NewRoomTenantResolver(config.FromEnvRaw("BNBLOC_ROOM_BASE_URL"), nil),
+		Rooms:             gateway.NewRoomMembershipResolver(config.FromEnvRaw("BNBLOC_ROOM_BASE_URL")),
+		Membership:        membership.NewRoomClient(config.FromEnvRaw("BNBLOC_ROOM_BASE_URL")),
+		RoomTenant:        gateway.NewRoomTenantResolver(config.FromEnvRaw("BNBLOC_ROOM_BASE_URL")),
 		SessionTTL:        time.Hour,
 		AuthACSPath:       resolveACSPath(),
 		WebUI:             webui.Handler(),

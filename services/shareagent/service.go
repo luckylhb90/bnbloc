@@ -10,7 +10,6 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/luckylhb90/bnbloc/internal/httpx"
@@ -217,7 +216,7 @@ func (s *Service) handleAction(action string) http.HandlerFunc {
 			httpx.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-		actor := strings.TrimSpace(r.Header.Get("X-Bnbloc-User"))
+		actor := svcauth.Subject(r)
 		if _, ok := s.requireMember(w, r, roomID, actor, membership.AnyMember); !ok {
 			return
 		}

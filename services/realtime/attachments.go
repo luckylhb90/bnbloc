@@ -12,6 +12,7 @@ import (
 
 	"github.com/luckylhb90/bnbloc/internal/httpx"
 	"github.com/luckylhb90/bnbloc/internal/ids"
+	"github.com/luckylhb90/bnbloc/internal/svcauth"
 
 	"github.com/luckylhb90/bnbloc/internal/membership"
 	"github.com/luckylhb90/bnbloc/internal/obs"
@@ -99,7 +100,7 @@ func (s *Service) handleUploadAttachment(w http.ResponseWriter, r *http.Request)
 		httpx.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	userID := strings.TrimSpace(r.Header.Get("X-Bnbloc-User"))
+	userID := svcauth.Subject(r)
 	if userID == "" {
 		httpx.Error(w, "missing authenticated subject", http.StatusUnauthorized)
 		return
@@ -174,7 +175,7 @@ func (s *Service) handleDownloadAttachment(w http.ResponseWriter, r *http.Reques
 		httpx.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	userID := strings.TrimSpace(r.Header.Get("X-Bnbloc-User"))
+	userID := svcauth.Subject(r)
 	if userID == "" {
 		httpx.Error(w, "missing authenticated subject", http.StatusUnauthorized)
 		return

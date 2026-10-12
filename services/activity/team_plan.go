@@ -13,6 +13,7 @@ import (
 	"github.com/luckylhb90/bnbloc/internal/obs"
 	"github.com/luckylhb90/bnbloc/internal/roomctx"
 	"github.com/luckylhb90/bnbloc/internal/store"
+	"github.com/luckylhb90/bnbloc/internal/svcauth"
 	"github.com/luckylhb90/bnbloc/internal/wire"
 )
 
@@ -35,7 +36,7 @@ const costSampleRuns = 20
 
 // handleTeamPlan serves POST /v1/rooms/{roomId}/team-plan.
 func (s *Service) handleTeamPlan(w http.ResponseWriter, r *http.Request) {
-	caller := strings.TrimSpace(r.Header.Get("X-Bnbloc-User"))
+	caller := svcauth.Subject(r)
 	if caller == "" {
 		httpx.Error(w, "missing authenticated subject", http.StatusUnauthorized)
 		return

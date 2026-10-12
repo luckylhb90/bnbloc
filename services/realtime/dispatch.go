@@ -19,6 +19,7 @@ import (
 	"github.com/luckylhb90/bnbloc/internal/obs"
 	"github.com/luckylhb90/bnbloc/internal/roomctx"
 	"github.com/luckylhb90/bnbloc/internal/store"
+	"github.com/luckylhb90/bnbloc/internal/svcauth"
 	"github.com/luckylhb90/bnbloc/internal/tenant"
 	"github.com/luckylhb90/bnbloc/internal/wire"
 )
@@ -94,7 +95,7 @@ func (s *Service) handleInternalDispatch(w http.ResponseWriter, r *http.Request)
 		httpx.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	caller := strings.TrimSpace(r.Header.Get("X-Bnbloc-User"))
+	caller := svcauth.Subject(r)
 	if caller == "" {
 		httpx.Error(w, "missing authenticated subject", http.StatusUnauthorized)
 		return

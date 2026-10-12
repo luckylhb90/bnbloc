@@ -17,6 +17,7 @@ import (
 	"github.com/luckylhb90/bnbloc/internal/notify"
 	"github.com/luckylhb90/bnbloc/internal/obs"
 	"github.com/luckylhb90/bnbloc/internal/store"
+	"github.com/luckylhb90/bnbloc/internal/svcauth"
 	"github.com/luckylhb90/bnbloc/internal/tenant"
 	"github.com/luckylhb90/bnbloc/internal/wire"
 )
@@ -209,7 +210,7 @@ func (s *Service) handlePutTenantBudgets(w http.ResponseWriter, r *http.Request)
 	if !httpx.DecodeJSON(w, r, maxBodyBytes, &in) {
 		return
 	}
-	caller := strings.TrimSpace(r.Header.Get("X-Bnbloc-User"))
+	caller := svcauth.Subject(r)
 	budgets, err := s.validateBudgets(r.Context(), in, caller, s.clock().UnixMilli())
 	var readErr budgetReadError
 	if errors.As(err, &readErr) {
@@ -327,7 +328,7 @@ func (s *Service) handleMyBudget(w http.ResponseWriter, r *http.Request) {
 	if !s.budgetsReady(w, r) {
 		return
 	}
-	caller := strings.TrimSpace(r.Header.Get("X-Bnbloc-User"))
+	caller := svcauth.Subject(r)
 	period := budgetPeriod(s.clock())
 	burn, _ := s.periodBurn(r.Context(), caller, period.PeriodStartMs)
 	out := wire.MyBudgetReply{BudgetPeriod: period, Burn: burn}
@@ -348,7 +349,7 @@ func (s *Service) handleMyBudget(w http.ResponseWriter, r *http.Request) {
 
 // budgetsReady answers 401 / 501 when the request cannot be served.
 func (s *Service) budgetsReady(w http.ResponseWriter, r *http.Request) bool {
-	if strings.TrimSpace(r.Header.Get("X-Bnbloc-User")) == "" {
+	if svcauth.Subject(r) == "" {
 		httpx.Error(w, "missing authenticated subject", http.StatusUnauthorized)
 		return false
 	}

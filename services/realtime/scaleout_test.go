@@ -139,13 +139,10 @@ func (c *cluster) request(r *replica, method, path, user string, body any) *http
 		buf, _ := json.Marshal(body)
 		rd = bytes.NewReader(buf)
 	}
-	req, err := http.NewRequest(method, r.srv.URL+path, rd)
+	req, err := svcauth.Key(scaleoutKey).NewRequest(context.Background(), method, r.srv.URL+path, rd, user, tenant.Default)
 	if err != nil {
 		c.t.Fatal(err)
 	}
-	req.Header.Set(svcauth.HeaderUser, user)
-	req.Header.Set(svcauth.HeaderTenant, tenant.Default)
-	svcauth.Sign(req, scaleoutKey, user)
 	return req
 }
 

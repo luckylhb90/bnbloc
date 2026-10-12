@@ -14,7 +14,6 @@ import (
 	"github.com/luckylhb90/bnbloc/internal/notify"
 	"github.com/luckylhb90/bnbloc/internal/obs"
 	"github.com/luckylhb90/bnbloc/internal/store"
-	"github.com/luckylhb90/bnbloc/internal/tenant"
 )
 
 // notifierInstaller is the gateway's notifier lifecycle: the shared
@@ -143,9 +142,6 @@ func (s *Service) handleTestComponent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	tid := claims.Tenant
-	if tid == "" {
-		tid = tenant.Default
-	}
 	now := s.nowTime()
 	res := notify.SendTest(r.Context(), ep, secret, notify.TestPayload(tid, claims.Subject, "", now), now)
 	outcome := "delivered"

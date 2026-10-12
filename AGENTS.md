@@ -297,14 +297,27 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
 ### Internal identity (svcauth) + room scope
 
 - **Internal services verify `X-Bnbloc-User` via `internal/svcauth`.** The
-  gateway (and internal callers — the membership probe, local-agent room calls)
-  sign `HMAC(BNBLOC_INTERNAL_KEY, ts+user)`; room/realtime/activity/shareagent
-  verify it before any handler. Any NEW internal caller that sets
-  `X-Bnbloc-User` MUST also call `svcauth.Sign(req, svcauth.KeyFromEnv(), user)`
-  or the target returns 401. Unset key = dev-permissive (loud warning) in
-  development, fatal at startup under `BNBLOC_ENV=production`. Symptom
-  of a missing Sign: intermittent/total 401 from a backend while the gateway path
-  works.
+  assertion is the subject, its tenant (`tenant.Default` when empty), its
+  org role and `HMAC(BNBLOC_INTERNAL_KEY, ts+user+tenant+role)`, written only
+  by `svcauth.Key.Assert`: an internal call is built with
+  `svcauth.NewRequest(ctx, method, url, body, subject, tenant)` (the
+  gateway's own calls through `callBackend`, `backend_client.go`), and the
+  proxy asserts the session's subject, effective tenant and role on the
+  forwarded request with `Assert`. Handlers read the caller with
+  `svcauth.Subject(r)` and an org role with `svcauth.Role(r)` (authorize an
+  org action with `rbac.Can(svcauth.Role(r), perm)`, never by re-reading the
+  tenant store; the gateway drops a non-platform role when a room moves the
+  request into another organization). `TestSignedRequestsUseNewRequest` and
+  `TestSubjectReadOnlyViaSvcauth` forbid hand-set or hand-read headers. An
+  internal route only services call is guarded by
+  `svcauth.RequireService(key, services, h)` (realtime publish, blobs, peer
+  routes; room agent hosts and share resolution); only the routes that act
+  for a member (realtime dispatch, the handoff feed and import) use
+  `RequireSigned`. Blob calls assert the calling service
+  (`HandoffClient.Service`). Unset key = dev-permissive (loud warning) in
+  development, fatal at startup under `BNBLOC_ENV=production`. Symptom of a
+  hand-built request: intermittent/total 401 from a backend while the
+  gateway path works.
 - **A new service that reads `X-Bnbloc-User` MUST wrap its handler in
   `svcauth.Middleware(svcauth.KeyFromEnv(), h)`** in its `cmd/main.go`, and its
   compose entry needs `BNBLOC_INTERNAL_KEY`. A service doing room-membership
@@ -348,7 +361,7 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   handler (2026-10-12: the Library ignored the acting tenant while job-grant
   saves landed in the room's tenant); `TestEffectiveTenantSingleOwner`
   enforces it. A gateway call to a backend on a member's behalf signs the
-  effective tenant (`svcauth.HeaderTenant` before `svcauth.Sign`), and every
+  effective tenant (`callBackend` → `svcauth.NewRequest`), and every
   backend refuses a room request signed for another tenant than the room's
   (`membership.RoomScope`). The web's one owner is `useActingTenant()` in
   `web/src/lib/session.ts` (per gateway and subject, cleared at sign-out; web

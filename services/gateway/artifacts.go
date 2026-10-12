@@ -45,15 +45,7 @@ func (s *Service) handleArtifactCapability(w http.ResponseWriter, r *http.Reques
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, base+"/internal/v1/blobs", nil)
-	if err != nil {
-		obs.ServerError(w, "artifact store check failed", err)
-		httpx.Error(w, "artifact store check failed", http.StatusInternalServerError)
-		return
-	}
-	req.Header.Set("X-Bnbloc-User", claims.Subject)
-	svcauth.Sign(req, svcauth.KeyFromEnv(), claims.Subject)
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := callBackend(ctx, http.MethodGet, base+"/internal/v1/blobs", nil, gatewayServiceSubject, claims.Tenant)
 	if err != nil {
 		obs.ServerError(w, "artifact store unreachable", err)
 		httpx.Error(w, "artifact store unreachable", http.StatusBadGateway)
@@ -86,7 +78,7 @@ func (s *Service) handleArtifactUpload(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, maxArtifactUploadBytes)
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Minute)
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, base+"/internal/v1/blobs", r.Body)
+	req, err := svcauth.NewRequest(ctx, http.MethodPost, base+"/internal/v1/blobs", r.Body, gatewayServiceSubject, claims.Tenant)
 	if err != nil {
 		obs.ServerError(w, "artifact upload failed", err)
 		httpx.Error(w, "artifact upload failed", http.StatusInternalServerError)
@@ -94,11 +86,9 @@ func (s *Service) handleArtifactUpload(w http.ResponseWriter, r *http.Request) {
 	}
 	req.Header.Set("Content-Type", "application/octet-stream")
 	req.ContentLength = r.ContentLength
-	req.Header.Set("X-Bnbloc-User", claims.Subject)
-	svcauth.Sign(req, svcauth.KeyFromEnv(), claims.Subject)
 	// The upload answers only after realtime has stored the whole blob, so
 	// the exchange keeps its overall deadline instead of a header timeout.
-	s.proxyArtifact(w, req, http.DefaultClient)
+	s.proxyArtifact(w, req, backendStreamHTTP)
 }
 
 // handleArtifactDownload streams a stored artifact back from realtime by its
@@ -158,7 +148,7 @@ func (s *Service) handleArtifactDownload(w http.ResponseWriter, r *http.Request)
 	}
 	// No deadline on the exchange: a large artifact over a slow link may take
 	// longer than any fixed bound. The client's own disconnect cancels it.
-	rc, size, err := s.blobs().OpenBlob(r.Context(), gatewayServiceSubject, key)
+	rc, size, err := s.blobs().OpenBlob(r.Context(), key)
 	if err != nil {
 		writeBlobStoreErr(w, err)
 		return
@@ -174,7 +164,7 @@ func (s *Service) handleArtifactDownload(w http.ResponseWriter, r *http.Request)
 // owner). Reads assert gatewayServiceSubject: the gateway has already
 // authorized them.
 func (s *Service) blobs() *realtime.HandoffClient {
-	s.blobClientOnce.Do(func() { s.blobClient = realtime.NewHandoffClient(s.Backends.Realtime) })
+	s.blobClientOnce.Do(func() { s.blobClient = realtime.NewHandoffClient(s.Backends.Realtime, "gateway") })
 	return s.blobClient
 }
 
@@ -184,7 +174,7 @@ func (s *Service) blobs() *realtime.HandoffClient {
 // nothing and reports false: the caller streams. Any other failure is
 // answered (502) and reported true.
 func (s *Service) redirectToPresignedBlob(w http.ResponseWriter, r *http.Request, key, fileName, contentType string) bool {
-	p, err := s.blobs().PresignBlob(r.Context(), gatewayServiceSubject, key, fileName, contentType)
+	p, err := s.blobs().PresignBlob(r.Context(), key, fileName, contentType)
 	if errors.Is(err, realtime.ErrDirectDownloadsDisabled) {
 		return false
 	}
@@ -369,7 +359,7 @@ func (s *Service) probeUploadedArtifacts(ctx context.Context, pkg pkgmeta.Packag
 func (s *Service) probeUploadedArtifact(ctx context.Context, key, wantSHA string) error {
 	probeCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	rc, _, err := s.blobs().OpenBlob(probeCtx, gatewayServiceSubject, key)
+	rc, _, err := s.blobs().OpenBlob(probeCtx, key)
 	if err != nil {
 		return blobOpenErr(err)
 	}
@@ -392,9 +382,3 @@ func copySHA256(r io.Reader) (string, int64, error) {
 	}
 	return hex.EncodeToString(h.Sum(nil)), n, nil
 }
-
-// gatewayServiceSubject is the identity the gateway asserts when it calls a
-// backend on its OWN behalf (blob reads it has already authorized, public
-// share resolution) — the svcauth service-subject convention, not the local
-// daemon's identity it used to borrow.
-var gatewayServiceSubject = svcauth.ServiceSubject("gateway")

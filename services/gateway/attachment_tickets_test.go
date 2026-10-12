@@ -26,12 +26,7 @@ func TestAttachmentTicketReadsOneAttachment(t *testing.T) {
 	gw := newGateway(t, backend.URL)
 	gw.Backends.Realtime = backend.URL
 	var member atomic.Bool
-	gw.Rooms = func(string, string) []string {
-		if member.Load() {
-			return []string{"room-1"}
-		}
-		return nil
-	}
+	gw.Membership = memberOf(func(_, room string) bool { return member.Load() && room == "room-1" })
 	srv := httptest.NewServer(gw.Handler())
 	defer srv.Close()
 	session := gw.Signer.Issue(auth.Claims{Subject: "alice", Rooms: []string{"room-1"}, ExpiresAtUnix: time.Now().Add(time.Hour).Unix()})

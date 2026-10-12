@@ -31,7 +31,7 @@ func main() {
 	svc.Publisher = realtime.NewHTTPPublisher(config.FromEnvRaw("BNBLOC_REALTIME_BASE_URL"), "room")
 	// Handoff packages: export reads the feed + attachment blobs from realtime,
 	// import writes history-only rows and re-uploads attachments there.
-	rt := realtime.NewHandoffClient(config.FromEnvRaw("BNBLOC_REALTIME_BASE_URL"))
+	rt := realtime.NewHandoffClient(config.FromEnvRaw("BNBLOC_REALTIME_BASE_URL"), "room")
 	svc.Handoff = rt
 	// Blob artifact versions and thumbnails live in realtime's blob store
 	// (realtime is its single owner), reached through the same signed client.

@@ -239,7 +239,7 @@ func (s *Service) handleSyncStates(w http.ResponseWriter, r *http.Request) {
 // gateway-verified subject forwarded in X-Bnbloc-User; a missing subject or a
 // non-member is rejected.
 func (s *Service) authorize(w http.ResponseWriter, r *http.Request, roomID string) bool {
-	userID := strings.TrimSpace(r.Header.Get("X-Bnbloc-User"))
+	userID := svcauth.Subject(r)
 	if userID == "" {
 		httpx.Error(w, "missing authenticated subject", http.StatusUnauthorized)
 		return false
@@ -257,7 +257,7 @@ func (s *Service) authorize(w http.ResponseWriter, r *http.Request, roomID strin
 // server-side serve-all gate, and only to a member of the room — never from a
 // body field alone.
 func (s *Service) attributeOwner(r *http.Request, roomID, asserted string) (string, bool) {
-	caller := strings.TrimSpace(r.Header.Get("X-Bnbloc-User"))
+	caller := svcauth.Subject(r)
 	asserted = strings.TrimSpace(asserted)
 	if asserted == "" || asserted == caller {
 		return caller, true

@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/luckylhb90/bnbloc/internal/rbac"
 	"github.com/luckylhb90/bnbloc/internal/wire"
 
 	"github.com/luckylhb90/bnbloc/internal/store"
@@ -258,9 +259,21 @@ func TestShareRevokeAuthorization(t *testing.T) {
 		_, rep := e.share(http.MethodPost, sharesPath(art.ArtifactID), user, map[string]any{})
 		return rep.Share.ShareID
 	}
+	// The gateway signs each caller's org role in the room's tenant; only
+	// olga is an org admin.
 	revoke := func(user, artifactID, shareID string) int {
-		code, _ := e.do(e.roomSrv, http.MethodDelete, sharesPath(artifactID)+"/"+shareID, user, nil)
-		return code
+		req, _ := http.NewRequest(http.MethodDelete, e.roomSrv.URL+sharesPath(artifactID)+"/"+shareID, nil)
+		role := string(rbac.RoleMember)
+		if user == "olga" {
+			role = string(rbac.RoleAdmin)
+		}
+		svcauth.Key("").Assert(req, user, tenant.Default, role)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		return resp.StatusCode
 	}
 	bobs := mk("bob")
 	if code := revoke("dave", art.ArtifactID, bobs); code != http.StatusForbidden {

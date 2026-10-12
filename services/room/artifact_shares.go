@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/luckylhb90/bnbloc/internal/httpx"
+	"github.com/luckylhb90/bnbloc/internal/rbac"
 	"github.com/luckylhb90/bnbloc/internal/wire"
 
 	"github.com/luckylhb90/bnbloc/internal/obs"
@@ -38,10 +39,6 @@ const (
 // errPublicSharesDisabled is the contract's refusal text.
 const errPublicSharesDisabled = "public share links are disabled for this organization"
 
-// shareResolverSubject is the only identity the internal resolve route
-// answers: the gateway's own service subject (the svcauth convention).
-var shareResolverSubject = svcauth.ServiceSubject("gateway")
-
 func (s *Service) registerShareRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /v1/rooms/{roomId}/artifacts/{artifactId}/shares", s.handleCreateShare)
 	mux.HandleFunc("GET /v1/rooms/{roomId}/artifacts/{artifactId}/shares", s.handleListShares)
@@ -50,7 +47,7 @@ func (s *Service) registerShareRoutes(mux *http.ServeMux) {
 	// gates on manage_org before signing the request.
 	mux.HandleFunc("GET /v1/tenant/shares", s.handleTenantShares)
 	// Internal, gateway-only: token → link, artifact and version.
-	mux.Handle("POST /internal/v1/shares/resolve", svcauth.RequireSigned(svcauth.KeyFromEnv(), http.HandlerFunc(s.handleResolveShare)))
+	mux.Handle("POST /internal/v1/shares/resolve", svcauth.RequireService(svcauth.KeyFromEnv(), []string{"gateway"}, http.HandlerFunc(s.handleResolveShare)))
 }
 
 func viewShare(sh store.ArtifactShare, nowMs int64) wire.ShareView {
@@ -206,12 +203,8 @@ func (s *Service) handleRevokeShare(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	roomID, user := r.PathValue("roomId"), caller(r)
 	role, member := s.Store.MemberRole(ctx, roomID, user)
-	orgAdmin, err := s.isOrgAdmin(ctx, user)
-	if err != nil {
-		obs.ServerError(w, "read org role failed", err)
-		httpx.Error(w, "read org role failed", http.StatusInternalServerError)
-		return
-	}
+	// The caller's org role in the room's tenant, as the gateway signed it.
+	orgAdmin := rbac.Can(svcauth.Role(r), rbac.PermManageOrg)
 	if !member && !orgAdmin {
 		httpx.Error(w, "caller is not a member of room", http.StatusForbidden)
 		return
@@ -236,20 +229,6 @@ func (s *Service) handleRevokeShare(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
-}
-
-// isOrgAdmin reports whether user is an org admin of the context tenant
-// (for a room route, the room's tenant).
-func (s *Service) isOrgAdmin(ctx context.Context, user string) (bool, error) {
-	tid, err := tenant.Require(ctx)
-	if err != nil {
-		return false, err
-	}
-	m, ok, err := s.Tenants.GetMember(ctx, tid, user)
-	if err != nil {
-		return false, err
-	}
-	return ok && m.Role == store.OrgRoleAdmin, nil
 }
 
 // handleTenantShares is the org-admin list of the tenant's links
@@ -287,10 +266,6 @@ func (s *Service) handleTenantShares(w http.ResponseWriter, r *http.Request) {
 // revoked, public links disabled, artifact or room gone — is the same 404,
 // so a token holder learns nothing about a dead link.
 func (s *Service) handleResolveShare(w http.ResponseWriter, r *http.Request) {
-	if caller(r) != shareResolverSubject {
-		httpx.Error(w, "share resolution is gateway-only", http.StatusForbidden)
-		return
-	}
 	if !s.sharesReady(w) || !s.profilesReady(w) {
 		return
 	}

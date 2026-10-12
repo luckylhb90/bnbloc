@@ -22,6 +22,7 @@ import (
 	"github.com/luckylhb90/bnbloc/internal/search"
 	"github.com/luckylhb90/bnbloc/internal/search/searchtest"
 	"github.com/luckylhb90/bnbloc/internal/store"
+	"github.com/luckylhb90/bnbloc/internal/svcauth"
 	"github.com/luckylhb90/bnbloc/internal/tenant"
 	"github.com/luckylhb90/bnbloc/internal/wire"
 )
@@ -147,7 +148,7 @@ func (r *parityRig) chat(user, room, channel, text string, at int64) int64 {
 // agentReply publishes an agent reply the way activity does.
 func (r *parityRig) agentReply(room, channel, text string, at int64) {
 	r.t.Helper()
-	code, body := r.do(r.writer, "activity", http.MethodPost, "/internal/v1/rooms/"+room+"/publish", map[string]any{
+	code, body := r.do(r.writer, svcauth.ServiceSubject("activity"), http.MethodPost, "/internal/v1/rooms/"+room+"/publish", map[string]any{
 		"kind": "agent_messages", "channelId": channel, "atUnixMs": at,
 		"payload": map[string]any{"messages": []any{map[string]any{"payload": map[string]any{"text": text, "ownerUserId": "jack", "provider": "codex"}}}},
 	})

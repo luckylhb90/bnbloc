@@ -734,7 +734,7 @@ func randomCode() string {
 	return hex.EncodeToString(buf)
 }
 
-func caller(r *http.Request) string { return strings.TrimSpace(r.Header.Get("X-Bnbloc-User")) }
+func caller(r *http.Request) string { return svcauth.Subject(r) }
 
 // maxJSONBodyBytes caps the small JSON control bodies (room/member/invite/
 // channel create and patch) decode accepts, so a client cannot stream an

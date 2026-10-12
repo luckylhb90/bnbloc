@@ -20,10 +20,12 @@
 package svcauth
 
 import (
+	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -44,7 +46,13 @@ const (
 	// user, it is covered by the signature so an internal workload cannot forge
 	// a cross-tenant assertion.
 	HeaderTenant = "X-Bnbloc-Tenant"
-	// HeaderSig carries the hex HMAC over the timestamp, user, and tenant.
+	// HeaderRole carries the caller's effective org role in the asserted
+	// tenant (the gateway's session claim), covered by the signature like
+	// the tenant. Backends authorize an org-level action with
+	// rbac.Can(svcauth.Role(r), perm), never by re-reading the tenant store
+	// (which knows nothing of a super admin acting in the tenant).
+	HeaderRole = "X-Bnbloc-Role"
+	// HeaderSig carries the hex HMAC over the timestamp, user, tenant and role.
 	HeaderSig = "X-bnbloc-Sig"
 	// HeaderTs carries the unix-milliseconds timestamp the signature covers.
 	HeaderTs = "X-bnbloc-Ts"
@@ -78,31 +86,85 @@ const servicePrefix = "service:"
 // and handlers can tell a service call from a user-forwarded one.
 func ServiceSubject(name string) string { return servicePrefix + name }
 
-// compute returns the hex HMAC-SHA256 over "<ts>\n<user>\n<tenant>". Tenant is
-// included so the assertion binds identity AND organization; a legacy empty
-// tenant hashes as "" and stays compatible with single-tenant callers.
-func compute(key string, tsMs int64, user, tenant string) string {
+// compute returns the hex HMAC-SHA256 over "<ts>\n<user>\n<tenant>\n<role>",
+// so the assertion binds the identity, its organization and its org role.
+func compute(key string, tsMs int64, user, tenant, role string) string {
 	mac := hmac.New(sha256.New, []byte(key))
 	mac.Write([]byte(strconv.FormatInt(tsMs, 10)))
 	mac.Write([]byte("\n"))
 	mac.Write([]byte(user))
 	mac.Write([]byte("\n"))
 	mac.Write([]byte(tenant))
+	mac.Write([]byte("\n"))
+	mac.Write([]byte(role))
 	return hex.EncodeToString(mac.Sum(nil))
 }
 
-// Sign stamps req with a fresh internal identity assertion for user. It is a
-// no-op when key is empty (dev mode), so callers can pass KeyFromEnv()
-// unconditionally. Any caller that also sets X-Bnbloc-User MUST call Sign with
-// the same user so the pair is consistent.
-func Sign(req *http.Request, key, user string) {
-	if key == "" {
+// Key is an internal signing key ("" = dev mode: assertions go unsigned).
+// Services hold one (KeyFromEnv at startup); package-level NewRequest uses
+// the environment's.
+type Key string
+
+// Assert stamps req with the one internal identity assertion: the subject,
+// its tenant (tenant.Default when empty, so a backend always has a scope),
+// the subject's org role in it ("" for a service or a member without one)
+// and a fresh signature over all three, in that order. Any assertion
+// headers already on req (a client's forgery, a forwarded request's) are
+// replaced. It is the only writer of these headers: callers build requests
+// with NewRequest, and the gateway's proxy asserts the session's identity
+// on the forwarded request with Assert.
+func (k Key) Assert(req *http.Request, subject, tenantID, role string) {
+	if tenantID = strings.TrimSpace(tenantID); tenantID == "" {
+		tenantID = tenant.Default
+	}
+	req.Header.Del(HeaderTs)
+	req.Header.Del(HeaderSig)
+	req.Header.Set(HeaderUser, subject)
+	req.Header.Set(HeaderTenant, tenantID)
+	req.Header.Del(HeaderRole)
+	if role != "" {
+		req.Header.Set(HeaderRole, role)
+	}
+	if k == "" {
 		return
 	}
 	ts := time.Now().UnixMilli()
-	tenant := strings.TrimSpace(req.Header.Get(HeaderTenant))
 	req.Header.Set(HeaderTs, strconv.FormatInt(ts, 10))
-	req.Header.Set(HeaderSig, compute(key, ts, user, tenant))
+	req.Header.Set(HeaderSig, compute(string(k), ts, subject, tenantID, role))
+}
+
+// NewRequest builds an internal request asserting subject in tenantID
+// (Assert, without a role), signed with k.
+func (k Key) NewRequest(ctx context.Context, method, url string, body io.Reader, subject, tenantID string) (*http.Request, error) {
+	req, err := http.NewRequestWithContext(ctx, method, url, body)
+	if err != nil {
+		return nil, err
+	}
+	k.Assert(req, subject, tenantID, "")
+	return req, nil
+}
+
+// NewRequest builds an internal request asserting subject in tenantID,
+// signed with the environment's key (KeyFromEnv).
+func NewRequest(ctx context.Context, method, url string, body io.Reader, subject, tenantID string) (*http.Request, error) {
+	return Key(KeyFromEnv()).NewRequest(ctx, method, url, body, subject, tenantID)
+}
+
+// Subject is the verified caller of a request that passed Middleware (or
+// RequireSigned / RequireService): a member the gateway authenticated, or a
+// service's ServiceSubject. "" when none was asserted. Handlers read the
+// caller only here.
+func Subject(r *http.Request) string {
+	return strings.TrimSpace(r.Header.Get(HeaderUser))
+}
+
+// Role is the verified caller's org role in the asserted tenant, as the
+// gateway signed it ("" for a service call or a member without a role).
+func Role(r *http.Request) string {
+	if Subject(r) == "" {
+		return ""
+	}
+	return strings.TrimSpace(r.Header.Get(HeaderRole))
 }
 
 var warnOnce sync.Once
@@ -170,6 +232,25 @@ func RequireSigned(key string, next http.Handler) http.Handler {
 	})
 }
 
+// RequireService guards an internal route that only control-plane services
+// call: like RequireSigned, plus the asserted identity must be the
+// ServiceSubject of one of services. A member's identity, even one the
+// gateway signed, is refused (403); only the routes that act for a member
+// (dispatch, the handoff feed and import) use RequireSigned.
+func RequireService(key string, services []string, next http.Handler) http.Handler {
+	allowed := make(map[string]bool, len(services))
+	for _, s := range services {
+		allowed[ServiceSubject(s)] = true
+	}
+	return RequireSigned(key, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !allowed[Subject(r)] {
+			httpx.Error(w, "internal endpoint not open to this caller", http.StatusForbidden)
+			return
+		}
+		next.ServeHTTP(w, r)
+	}))
+}
+
 // injectTenant binds the request's tenant assertion into the context so the
 // store layer (tenant.Require) can enforce it without every handler re-reading
 // the header. Defaults to the default tenant when none is asserted, so a
@@ -215,7 +296,8 @@ func verify(key string, r *http.Request, user string) bool {
 		return false
 	}
 	tenant := strings.TrimSpace(r.Header.Get(HeaderTenant))
-	want := compute(key, tsMs, user, tenant)
+	role := strings.TrimSpace(r.Header.Get(HeaderRole))
+	want := compute(key, tsMs, user, tenant, role)
 	return hmac.Equal([]byte(want), []byte(sig))
 }
 

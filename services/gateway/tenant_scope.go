@@ -5,9 +5,11 @@ import (
 	"strings"
 
 	"github.com/luckylhb90/bnbloc/internal/auth"
+	"github.com/luckylhb90/bnbloc/internal/membership"
 	"github.com/luckylhb90/bnbloc/internal/rbac"
 	"github.com/luckylhb90/bnbloc/internal/roomctx"
 	"github.com/luckylhb90/bnbloc/internal/store"
+	"github.com/luckylhb90/bnbloc/internal/tenant"
 )
 
 // The effective tenant of a request: the ONE rule the reverse proxy and
@@ -37,9 +39,14 @@ import (
 // stripped before proxying so a backend only ever sees the signed tenant.
 const actingTenantHeader = "X-Bnbloc-Acting-Tenant"
 
-// actingTenant applies steps 1 and 2 to verified session claims.
+// actingTenant applies steps 1 and 2 to verified session claims. A token
+// always acts in a tenant: one minted without a tenant claim acts in the
+// default tenant (the only place the gateway defaults it).
 func actingTenant(r *http.Request, claims auth.Claims) string {
 	t := claims.Tenant
+	if t == "" {
+		t = tenant.Default
+	}
 	if !rbac.Can(claims.Role, rbac.PermManagePlatform) {
 		return t
 	}
@@ -66,7 +73,22 @@ func (s *Service) roomTenantOr(roomID, fallback string) string {
 // baked room list, else a live membership lookup (a room created or joined
 // after sign-in).
 func (s *Service) roomReachable(claims auth.Claims, roomID string) bool {
-	return claims.HasRoom(roomID) || s.subjectInRoom(claims.Subject, roomID, claims.Tenant)
+	if claims.HasRoom(roomID) {
+		return true
+	}
+	_, ok := s.roomMember(claims.Subject, roomID)
+	return ok
+}
+
+// roomMember is subject's live membership of a room in any tenant (role,
+// human or agent host), the membership owner's Member: its IsHuman /
+// MayChat are the rules the backends apply. Fails closed without a
+// Membership source.
+func (s *Service) roomMember(subject, roomID string) (membership.Member, bool) {
+	if s.Membership == nil || subject == "" || roomID == "" {
+		return membership.Member{}, false
+	}
+	return s.Membership.Lookup(roomID, subject)
 }
 
 // inRoomTenant returns the claims acting in the room's tenant (step 3) for a
@@ -74,7 +96,14 @@ func (s *Service) roomReachable(claims auth.Claims, roomID string) bool {
 // sub-resources need the caller's reach and the room itself, a join, or an
 // org admin's share-link revocation do not (the room service decides).
 func (s *Service) inRoomTenant(claims auth.Claims, roomID string) auth.Claims {
-	claims.Tenant = s.roomTenantOr(roomID, claims.Tenant)
+	rt := s.roomTenantOr(roomID, claims.Tenant)
+	if rt != claims.Tenant && !rbac.Can(claims.Role, rbac.PermManagePlatform) {
+		// An org role holds in the caller's own organization only: in the
+		// room's other organization the caller has none, and the backends
+		// authorize org actions on the role the gateway signs (svcauth.Role).
+		claims.Role = ""
+	}
+	claims.Tenant = rt
 	return claims
 }
 

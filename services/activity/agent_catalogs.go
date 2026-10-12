@@ -5,12 +5,12 @@ import (
 	"log/slog"
 	"net/http"
 	"sort"
-	"strings"
 
 	"github.com/luckylhb90/bnbloc/internal/httpx"
 	"github.com/luckylhb90/bnbloc/internal/roomctx"
 	"github.com/luckylhb90/bnbloc/internal/shareagent"
 	"github.com/luckylhb90/bnbloc/internal/store"
+	"github.com/luckylhb90/bnbloc/internal/svcauth"
 	"github.com/luckylhb90/bnbloc/internal/wire"
 )
 
@@ -32,7 +32,7 @@ import (
 
 // handleRoomAgentCatalogs is GET /v1/rooms/{roomId}/agent-catalogs.
 func (s *Service) handleRoomAgentCatalogs(w http.ResponseWriter, r *http.Request) {
-	caller := strings.TrimSpace(r.Header.Get("X-Bnbloc-User"))
+	caller := svcauth.Subject(r)
 	if caller == "" {
 		httpx.Error(w, "missing authenticated subject", http.StatusUnauthorized)
 		return

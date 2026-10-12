@@ -336,9 +336,6 @@ func (s *Service) handlePlatformAlert(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	tid := claims.Tenant
-	if tid == "" {
-		tid = tenant.Default
-	}
 	res, err := s.Alerts.SendAlert(tenant.NewContext(r.Context(), tid), notify.Alert{
 		Title: body.Title, Text: body.Text, URL: body.URL, Recipients: recipients, Actor: claims.Subject, DedupKey: dedup,
 	})

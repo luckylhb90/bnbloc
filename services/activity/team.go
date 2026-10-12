@@ -4,11 +4,11 @@ import (
 	"net/http"
 	"sort"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/luckylhb90/bnbloc/internal/httpx"
 	"github.com/luckylhb90/bnbloc/internal/store"
+	"github.com/luckylhb90/bnbloc/internal/svcauth"
 	"github.com/luckylhb90/bnbloc/internal/wire"
 )
 
@@ -61,7 +61,7 @@ func teamSince(rng, tz string, now time.Time) (string, int64, bool) {
 
 func (s *Service) handleTeamAgents(scope string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		caller := strings.TrimSpace(r.Header.Get("X-Bnbloc-User"))
+		caller := svcauth.Subject(r)
 		if caller == "" {
 			httpx.Error(w, "missing authenticated subject", http.StatusUnauthorized)
 			return

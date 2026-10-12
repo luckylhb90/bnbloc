@@ -1,7 +1,6 @@
 package gateway
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -19,7 +18,6 @@ import (
 	"github.com/luckylhb90/bnbloc/internal/obs"
 	"github.com/luckylhb90/bnbloc/internal/rbac"
 	"github.com/luckylhb90/bnbloc/internal/store"
-	"github.com/luckylhb90/bnbloc/internal/svcauth"
 	"github.com/luckylhb90/bnbloc/internal/tenant"
 	"github.com/luckylhb90/bnbloc/internal/wire"
 )
@@ -171,22 +169,14 @@ func (s *Service) postNotifierReply(ctx context.Context, tok store.NotificationR
 	ctx, cancel := context.WithTimeout(ctx, notifierReplyTimeout)
 	defer cancel()
 	target := strings.TrimRight(s.Backends.Realtime, "/") + "/v1/rooms/" + url.PathEscape(tok.RoomID) + "/chat"
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, target, bytes.NewReader(raw))
-	if err != nil {
-		return 0, http.StatusInternalServerError, "build chat request failed", err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Bnbloc-User", tok.UserID)
-	req.Header.Set(svcauth.HeaderTenant, tok.TenantID)
-	svcauth.Sign(req, svcauth.KeyFromEnv(), tok.UserID)
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := callBackend(ctx, http.MethodPost, target, raw, tok.UserID, tok.TenantID)
 	if err != nil {
 		return 0, http.StatusBadGateway, "realtime unreachable", err
 	}
 	defer resp.Body.Close()
 	answer, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 	if resp.StatusCode != http.StatusOK {
-		msg := strings.TrimSpace(string(answer))
+		msg := httpx.ErrorText(answer)
 		switch {
 		case resp.StatusCode == http.StatusForbidden:
 			return 0, http.StatusForbidden, "member is no longer in the room", nil

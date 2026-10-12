@@ -622,28 +622,3 @@ func TestSwitchTenantReissuesScopedToken(t *testing.T) {
 		t.Fatalf("switch to non-member tenant = %d, want 403", status)
 	}
 }
-
-// subjectInRoom's cross-tenant fallback: the tenant-scoped Rooms lookup misses
-// a room in another tenant, but the tenant-agnostic InRoom probe finds it, so a
-// multi-tenant member (or the bridge acting as one) is authorized. Without
-// InRoom, the miss stays a miss (guard stays strict for real non-members).
-func TestSubjectInRoomCrossTenantFallback(t *testing.T) {
-	svc := &Service{
-		Rooms:  func(subject, tenantID string) []string { return []string{"acme-room"} },
-		InRoom: func(subject, roomID string) bool { return roomID == "demo-clean" && subject == "maya" },
-	}
-	if !svc.subjectInRoom("maya", "acme-room", "acme") {
-		t.Fatal("same-tenant member must pass via Rooms")
-	}
-	if !svc.subjectInRoom("maya", "demo-clean", "acme") {
-		t.Fatal("cross-tenant member must pass via InRoom fallback")
-	}
-	if svc.subjectInRoom("maya", "other-room", "acme") {
-		t.Fatal("genuine non-member must still be refused")
-	}
-	// With no InRoom hook, the cross-tenant room stays a miss.
-	noProbe := &Service{Rooms: func(string, string) []string { return []string{"acme-room"} }}
-	if noProbe.subjectInRoom("maya", "demo-clean", "acme") {
-		t.Fatal("without InRoom, cross-tenant room must not pass")
-	}
-}

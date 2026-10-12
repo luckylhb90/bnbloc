@@ -21,15 +21,20 @@ import (
 	"github.com/luckylhb90/bnbloc/internal/wire"
 )
 
-// HandoffClient is the room service's client onto realtime: its side of a
-// room handoff package (reading the whole feed, reading/writing attachment
-// blobs through realtime's own type-gated, size-capped attachment routes, the
-// history-only import write) and the content-addressed blob store that backs
-// blob artifact versions (PutBlob / OpenBlob). Every call forwards the END USER's identity
-// (X-Bnbloc-User), carries ctx's tenant, and is svcauth-signed, so realtime
-// applies the same membership checks it applies to that user's own requests.
+// HandoffClient is a service's client onto realtime: the room service's side
+// of a room handoff package (reading the whole feed, reading/writing
+// attachment blobs through realtime's own type-gated, size-capped attachment
+// routes, the history-only import write), and the content-addressed blob
+// store (PutBlob / OpenBlob / PresignBlob) that backs blob artifact versions,
+// content bundles and distributed artifacts. A handoff call forwards the END
+// USER's identity, so realtime applies the same membership checks it applies
+// to that user's own requests; a blob call asserts the calling service (the
+// blob routes are service-only: the caller has already authorized the read).
+// Every call carries ctx's tenant and is svcauth-signed.
 type HandoffClient struct {
 	BaseURL string
+	// Service names the calling service, asserted on blob calls.
+	Service string
 	// Key signs the assertion; empty only in dev (svcauth dev mode).
 	Key string
 	// HTTP has no global timeout: an export streams a whole room. Callers
@@ -37,12 +42,13 @@ type HandoffClient struct {
 	HTTP *http.Client
 }
 
-// NewHandoffClient builds the client for realtime at baseURL, signing with the
-// configured internal key. An empty baseURL leaves the client unconfigured
-// (every call fails with ErrHandoffUnconfigured).
-func NewHandoffClient(baseURL string) *HandoffClient {
+// NewHandoffClient builds service's client for realtime at baseURL, signing
+// with the configured internal key. An empty baseURL leaves the client
+// unconfigured (every call fails with ErrHandoffUnconfigured).
+func NewHandoffClient(baseURL, service string) *HandoffClient {
 	return &HandoffClient{
 		BaseURL: strings.TrimRight(strings.TrimSpace(baseURL), "/"),
+		Service: service,
 		Key:     svcauth.KeyFromEnv(),
 		HTTP:    &http.Client{},
 	}
@@ -66,20 +72,13 @@ func (c *HandoffClient) do(ctx context.Context, method, path, user string, body 
 	if c == nil || c.BaseURL == "" {
 		return nil, ErrHandoffUnconfigured
 	}
-	req, err := http.NewRequestWithContext(ctx, method, c.BaseURL+path, body)
+	req, err := svcauth.Key(c.Key).NewRequest(ctx, method, c.BaseURL+path, body, user, tenant.FromContext(ctx))
 	if err != nil {
 		return nil, err
 	}
 	if contentType != "" {
 		req.Header.Set("Content-Type", contentType)
 	}
-	req.Header.Set(svcauth.HeaderUser, user)
-	tid := tenant.FromContext(ctx)
-	if tid == "" {
-		tid = tenant.Default
-	}
-	req.Header.Set(svcauth.HeaderTenant, tid)
-	svcauth.Sign(req, c.Key, user)
 	client := c.HTTP
 	if client == nil {
 		client = http.DefaultClient
@@ -191,8 +190,8 @@ type BlobRef struct {
 // PutBlob streams content into realtime's content-addressed blob store (the
 // single owner of blob storage) and returns its reference. Realtime caps one
 // blob at 256 MiB. The same bytes always yield the same key.
-func (c *HandoffClient) PutBlob(ctx context.Context, user string, content io.Reader) (BlobRef, error) {
-	resp, err := c.do(ctx, http.MethodPost, "/internal/v1/blobs", user, content, "application/octet-stream")
+func (c *HandoffClient) PutBlob(ctx context.Context, content io.Reader) (BlobRef, error) {
+	resp, err := c.do(ctx, http.MethodPost, "/internal/v1/blobs", c.serviceSubject(), content, "application/octet-stream")
 	if err != nil {
 		return BlobRef{}, err
 	}
@@ -206,8 +205,8 @@ func (c *HandoffClient) PutBlob(ctx context.Context, user string, content io.Rea
 
 // OpenBlob streams a stored blob by key and reports its size (-1 when
 // unknown). The caller closes the reader.
-func (c *HandoffClient) OpenBlob(ctx context.Context, user, key string) (io.ReadCloser, int64, error) {
-	resp, err := c.do(ctx, http.MethodGet, "/internal/v1/blobs/"+key, user, nil, "")
+func (c *HandoffClient) OpenBlob(ctx context.Context, key string) (io.ReadCloser, int64, error) {
+	resp, err := c.do(ctx, http.MethodGet, "/internal/v1/blobs/"+key, c.serviceSubject(), nil, "")
 	if err != nil {
 		return nil, 0, err
 	}
@@ -229,12 +228,12 @@ var ErrDirectDownloadsDisabled = errors.New("realtime blob presign: direct downl
 // response carries contentType and an attachment disposition naming
 // fileName (both optional). The caller must already have authorized the
 // read. ErrDirectDownloadsDisabled means: stream instead.
-func (c *HandoffClient) PresignBlob(ctx context.Context, user, key, fileName, contentType string) (BlobPresign, error) {
+func (c *HandoffClient) PresignBlob(ctx context.Context, key, fileName, contentType string) (BlobPresign, error) {
 	buf, err := json.Marshal(map[string]string{"key": key, "fileName": fileName, "contentType": contentType})
 	if err != nil {
 		return BlobPresign{}, err
 	}
-	resp, err := c.do(ctx, http.MethodPost, "/internal/v1/blobs/presign", user, bytes.NewReader(buf), "application/json")
+	resp, err := c.do(ctx, http.MethodPost, "/internal/v1/blobs/presign", c.serviceSubject(), bytes.NewReader(buf), "application/json")
 	var se *StatusError
 	if errors.As(err, &se) && se.Status == http.StatusNotFound {
 		return BlobPresign{}, ErrDirectDownloadsDisabled
@@ -249,3 +248,5 @@ func (c *HandoffClient) PresignBlob(ctx context.Context, user, key, fileName, co
 	}
 	return out, nil
 }
+
+func (c *HandoffClient) serviceSubject() string { return svcauth.ServiceSubject(c.Service) }

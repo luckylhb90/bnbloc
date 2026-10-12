@@ -1,7 +1,6 @@
 package gateway
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -19,7 +18,6 @@ import (
 	"github.com/luckylhb90/bnbloc/internal/coreset"
 	"github.com/luckylhb90/bnbloc/internal/httpx"
 	"github.com/luckylhb90/bnbloc/internal/obs"
-	"github.com/luckylhb90/bnbloc/internal/svcauth"
 )
 
 // agentEndpoint identifies one member's local agent core daemon. Each
@@ -313,7 +311,7 @@ func (s *Service) adoptRoom(ctx context.Context, roomID, subject, tenantID strin
 	case err == nil:
 		return nil
 	case errors.As(err, &rbe) && rbe.Status == http.StatusConflict:
-		if !s.subjectInRoom(subject, roomID, tenantID) {
+		if _, ok := s.roomMember(subject, roomID); !ok {
 			return fmt.Errorf("room %q already exists and the caller is not a member", roomID)
 		}
 		return nil
@@ -340,33 +338,16 @@ func (s *Service) roomBackendCall(ctx context.Context, method, path, subject, te
 	if s.Backends.Room == "" {
 		return fmt.Errorf("room backend not configured")
 	}
-	req, err := http.NewRequestWithContext(ctx, method, strings.TrimRight(s.Backends.Room, "/")+path, bytes.NewReader(body))
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Bnbloc-User", subject)
-	if tenantID != "" {
-		req.Header.Set(svcauth.HeaderTenant, tenantID)
-	}
-	svcauth.Sign(req, svcauth.KeyFromEnv(), subject)
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := callBackend(ctx, method, strings.TrimRight(s.Backends.Room, "/")+path, body, subject, tenantID)
 	if err != nil {
 		return err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
-		return &roomBackendError{Path: path, Status: resp.StatusCode, Body: truncate(raw, 200)}
+		return &roomBackendError{Path: path, Status: resp.StatusCode, Body: httpx.ErrorText(raw)}
 	}
 	return nil
-}
-
-func truncate(b []byte, n int) string {
-	if len(b) > n {
-		return string(b[:n])
-	}
-	return string(b)
 }
 
 // handleLocalAgentDiscover auto-detects a core's local daemon on the caller's

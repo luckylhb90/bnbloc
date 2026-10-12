@@ -7,6 +7,7 @@ import (
 	"github.com/luckylhb90/bnbloc/internal/httpx"
 	"github.com/luckylhb90/bnbloc/internal/obs"
 	"github.com/luckylhb90/bnbloc/internal/store"
+	"github.com/luckylhb90/bnbloc/internal/svcauth"
 	"github.com/luckylhb90/bnbloc/internal/tenant"
 )
 
@@ -33,7 +34,7 @@ func (s *Service) handleMyTenantPolicy(w http.ResponseWriter, r *http.Request) {
 		httpx.Unavailable(w, "tenant registry")
 		return
 	}
-	caller := strings.TrimSpace(r.Header.Get("X-Bnbloc-User"))
+	caller := svcauth.Subject(r)
 	if caller == "" {
 		httpx.Error(w, "missing authenticated subject", http.StatusUnauthorized)
 		return

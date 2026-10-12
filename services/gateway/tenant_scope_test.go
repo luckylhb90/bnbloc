@@ -25,19 +25,13 @@ func actingContentGateway(t *testing.T) *contentGateway {
 	g := newContentGateway(t)
 	g.tokens["root"] = g.svc.Signer.Issue(auth.Claims{Subject: "root", Tenant: "org-a", Role: string(rbac.RoleSuperAdmin), ExpiresAtUnix: time.Now().Add(time.Hour).Unix()})
 	roomB := map[string]string{"root": "owner", "jack": "member"}
-	inRoom, roomRole := g.svc.InRoom, g.svc.RoomRole
-	g.svc.InRoom = func(subject, room string) bool {
-		if room == "room-b" {
-			return roomB[subject] != ""
-		}
-		return inRoom(subject, room)
-	}
-	g.svc.RoomRole = func(subject, room string) (string, bool) {
+	base := g.svc.Membership.(roleMembership)
+	g.svc.Membership = roleMembership(func(subject, room string) (string, bool) {
 		if room == "room-b" {
 			return roomB[subject], roomB[subject] != ""
 		}
-		return roomRole(subject, room)
-	}
+		return base(subject, room)
+	})
 	g.svc.RoomTenant = func(room string) string {
 		if room == "room-b" {
 			return "org-b"

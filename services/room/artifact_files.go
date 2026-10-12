@@ -32,13 +32,13 @@ import (
 
 // ArtifactBlobs is the room service's port onto the blob store
 // (internal/realtime.HandoffClient implements it over realtime's signed
-// internal blob route). Every call acts as the end user.
+// internal blob route) as the room service, after the room service has authorized the member.
 type ArtifactBlobs interface {
-	PutBlob(ctx context.Context, user string, content io.Reader) (realtime.BlobRef, error)
-	OpenBlob(ctx context.Context, user, key string) (io.ReadCloser, int64, error)
+	PutBlob(ctx context.Context, content io.Reader) (realtime.BlobRef, error)
+	OpenBlob(ctx context.Context, key string) (io.ReadCloser, int64, error)
 	// PresignBlob returns a short-lived direct download URL, or
 	// realtime.ErrDirectDownloadsDisabled when the store hands out none.
-	PresignBlob(ctx context.Context, user, key, fileName, contentType string) (realtime.BlobPresign, error)
+	PresignBlob(ctx context.Context, key, fileName, contentType string) (realtime.BlobPresign, error)
 }
 
 // DefaultArtifactMaxBytes is the documented default blob version cap.
@@ -267,7 +267,7 @@ func (s *Service) storeFilePart(ctx context.Context, userID string, art store.Ar
 	}
 	up.mimeType = mimeType
 	capped := &cappedReader{r: io.MultiReader(bytes.NewReader(head), part), max: max}
-	ref, err := s.Blobs.PutBlob(ctx, userID, capped)
+	ref, err := s.Blobs.PutBlob(ctx, capped)
 	if capped.exceeded {
 		return http.StatusRequestEntityTooLarge, fmt.Sprintf("file exceeds the %d byte limit", max)
 	}
@@ -341,7 +341,7 @@ func (s *Service) handleArtifactContent(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	if r.URL.Query().Get("download") == "1" && v.Storage == store.ArtifactStorageBlob && s.Blobs != nil {
-		p, err := s.Blobs.PresignBlob(r.Context(), caller(r), v.BlobKey, store.ArtifactDownloadName(art.Kind, art.FileName, art.Title), v.MimeType)
+		p, err := s.Blobs.PresignBlob(r.Context(), v.BlobKey, store.ArtifactDownloadName(art.Kind, art.FileName, art.Title), v.MimeType)
 		switch {
 		case err == nil:
 			w.Header().Set("Cache-Control", "no-store")
@@ -364,7 +364,7 @@ func (s *Service) handleArtifactContent(w http.ResponseWriter, r *http.Request) 
 			httpx.Unavailable(w, "artifact blob store")
 			return
 		}
-		rc, n, err := s.Blobs.OpenBlob(r.Context(), caller(r), v.BlobKey)
+		rc, n, err := s.Blobs.OpenBlob(r.Context(), v.BlobKey)
 		if err != nil {
 			writeBlobReadErr(w, err)
 			return
@@ -467,7 +467,7 @@ func (s *Service) handlePutArtifactThumbnail(w http.ResponseWriter, r *http.Requ
 		httpx.Unavailable(w, "artifact blob store")
 		return
 	}
-	ref, err := s.Blobs.PutBlob(r.Context(), caller(r), bytes.NewReader(raw))
+	ref, err := s.Blobs.PutBlob(r.Context(), bytes.NewReader(raw))
 	if err != nil {
 		obs.ServerError(w, "thumbnail store failed", err)
 		httpx.Error(w, "thumbnail store failed", http.StatusBadGateway)
@@ -508,7 +508,7 @@ func (s *Service) handleGetArtifactThumbnail(w http.ResponseWriter, r *http.Requ
 		httpx.Unavailable(w, "artifact blob store")
 		return
 	}
-	rc, n, err := s.Blobs.OpenBlob(r.Context(), caller(r), v.ThumbnailBlobKey)
+	rc, n, err := s.Blobs.OpenBlob(r.Context(), v.ThumbnailBlobKey)
 	if err != nil {
 		writeBlobReadErr(w, err)
 		return

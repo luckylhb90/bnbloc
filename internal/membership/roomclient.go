@@ -67,13 +67,12 @@ func (c *RoomClient) Fresh(roomID, userID string) (Member, bool) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	endpoint := c.BaseURL + "/v1/rooms/" + url.PathEscape(roomID) + "/membership/" + url.PathEscape(userID)
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	// The membership probe authorizes on the queried subject itself; it is
+	// tenant-agnostic (the answer names the room's tenant).
+	req, err := svcauth.NewRequest(ctx, http.MethodGet, endpoint, nil, userID, "")
 	if err != nil {
 		return Member{}, false
 	}
-	// The membership probe authorizes on the queried subject itself.
-	req.Header.Set(svcauth.HeaderUser, userID)
-	svcauth.Sign(req, svcauth.KeyFromEnv(), userID)
 	resp, err := c.HTTP.Do(req)
 	if err != nil {
 		return Member{}, false
@@ -125,10 +124,13 @@ func (c *RoomClient) Forget(roomID, userID string) {
 	}
 }
 
-// AgentHostSubject is the service identity the room service accepts on its
-// agent-host routes: only shareagent (the platform-agent authority) adds or
-// removes agent-host memberships.
-var AgentHostSubject = svcauth.ServiceSubject("shareagent")
+// AgentHostService is the only service the room service accepts on its
+// agent-host routes: shareagent (the platform-agent authority) adds and
+// removes agent-host memberships, asserting AgentHostSubject.
+const AgentHostService = "shareagent"
+
+// AgentHostSubject is the identity shareagent asserts on those routes.
+var AgentHostSubject = svcauth.ServiceSubject(AgentHostService)
 
 // PutAgentHost gives userID an agent-host membership of roomID (in tenantID,
 // the room's tenant) through the room service's internal route. Idempotent;
@@ -145,15 +147,10 @@ func (c *RoomClient) DeleteAgentHost(ctx context.Context, tenantID, roomID, user
 
 func (c *RoomClient) agentHost(ctx context.Context, method, tenantID, roomID, userID string) error {
 	endpoint := c.BaseURL + "/internal/v1/rooms/" + url.PathEscape(roomID) + "/agent-hosts/" + url.PathEscape(userID)
-	req, err := http.NewRequestWithContext(ctx, method, endpoint, nil)
+	req, err := svcauth.NewRequest(ctx, method, endpoint, nil, AgentHostSubject, tenantID)
 	if err != nil {
 		return err
 	}
-	req.Header.Set(svcauth.HeaderUser, AgentHostSubject)
-	if tenantID != "" {
-		req.Header.Set(svcauth.HeaderTenant, tenantID)
-	}
-	svcauth.Sign(req, svcauth.KeyFromEnv(), AgentHostSubject)
 	resp, err := c.HTTP.Do(req)
 	if err != nil {
 		return err

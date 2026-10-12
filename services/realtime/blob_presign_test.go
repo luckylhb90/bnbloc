@@ -21,7 +21,7 @@ func presignServer(t *testing.T, blobs BlobStore, direct bool) *realtime.Handoff
 	svc := &Service{Hub: realtime.NewHub(4, 4), Blobs: blobs, DirectDownloads: direct}
 	srv := httptest.NewServer(svc.Handler())
 	t.Cleanup(srv.Close)
-	return realtime.NewHandoffClient(srv.URL)
+	return realtime.NewHandoffClient(srv.URL, "gateway")
 }
 
 func newPresignS3(t *testing.T) *blobstore.S3Store {
@@ -40,7 +40,7 @@ func TestBlobPresign_returns_a_public_presigned_url_when_enabled(t *testing.T) {
 	client := presignServer(t, newPresignS3(t), true)
 	before := time.Now()
 
-	got, err := client.PresignBlob(context.Background(), "service:gateway", presignKey, "Q3 report.pdf", "application/pdf")
+	got, err := client.PresignBlob(context.Background(), presignKey, "Q3 report.pdf", "application/pdf")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -74,7 +74,7 @@ func TestBlobPresign_is_404_disabled_when_switched_off_or_not_s3(t *testing.T) {
 		"disk store": presignServer(t, disk, true),
 		"no store":   presignServer(t, nil, true),
 	} {
-		_, err := client.PresignBlob(context.Background(), "service:gateway", presignKey, "", "")
+		_, err := client.PresignBlob(context.Background(), presignKey, "", "")
 		if !errors.Is(err, realtime.ErrDirectDownloadsDisabled) {
 			t.Fatalf("%s: err = %v", name, err)
 		}
@@ -83,12 +83,12 @@ func TestBlobPresign_is_404_disabled_when_switched_off_or_not_s3(t *testing.T) {
 
 func TestBlobPresign_refuses_bad_input_and_unsigned_callers(t *testing.T) {
 	client := presignServer(t, newPresignS3(t), true)
-	_, err := client.PresignBlob(context.Background(), "service:gateway", "../etc/passwd", "", "")
+	_, err := client.PresignBlob(context.Background(), "../etc/passwd", "", "")
 	var se *realtime.StatusError
 	if !errors.As(err, &se) || se.Status != http.StatusBadRequest {
 		t.Fatalf("bad key err = %v", err)
 	}
-	_, err = client.PresignBlob(context.Background(), "service:gateway", presignKey, "", "not a type;;")
+	_, err = client.PresignBlob(context.Background(), presignKey, "", "not a type;;")
 	if !errors.As(err, &se) || se.Status != http.StatusBadRequest {
 		t.Fatalf("bad type err = %v", err)
 	}

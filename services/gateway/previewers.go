@@ -201,7 +201,7 @@ func (s *Service) readArtifactBlob(ctx context.Context, key string, limit int64)
 	}
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
-	rc, _, err := s.blobs().OpenBlob(ctx, gatewayServiceSubject, key)
+	rc, _, err := s.blobs().OpenBlob(ctx, key)
 	if err != nil {
 		return nil, blobOpenErr(err)
 	}

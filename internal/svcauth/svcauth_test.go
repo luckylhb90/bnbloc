@@ -8,8 +8,7 @@ import (
 
 func signedReq(key, user string) *http.Request {
 	r := httptest.NewRequest(http.MethodGet, "/v1/rooms/r1/history", nil)
-	r.Header.Set(HeaderUser, user)
-	Sign(r, key, user)
+	Key(key).Assert(r, user, "", "")
 	return r
 }
 
@@ -76,7 +75,7 @@ func TestMiddlewareRejectsStaleTimestamp(t *testing.T) {
 	r.Header.Set(HeaderUser, "alice")
 	staleMs := int64(1) // ~epoch, far outside the window
 	r.Header.Set(HeaderTs, "1")
-	r.Header.Set(HeaderSig, compute(key, staleMs, "alice", ""))
+	r.Header.Set(HeaderSig, compute(key, staleMs, "alice", "", ""))
 	h := Middleware(key, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
 		t.Fatal("handler must not run for a stale timestamp")
 	}))
@@ -149,9 +148,7 @@ func TestRequireSignedGuardsInternalRoutes(t *testing.T) {
 // into another tenant.
 func TestRequireSignedRejectsTamperedTenant(t *testing.T) {
 	r := httptest.NewRequest(http.MethodPost, "/internal/x", nil)
-	r.Header.Set(HeaderUser, ServiceSubject("activity"))
-	r.Header.Set(HeaderTenant, "acme")
-	Sign(r, "k", ServiceSubject("activity"))
+	Key("k").Assert(r, ServiceSubject("activity"), "acme", "")
 	r.Header.Set(HeaderTenant, "globex")
 	rec := httptest.NewRecorder()
 	RequireSigned("k", http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
@@ -174,5 +171,66 @@ func TestCheckKeyRequiresKeyInProduction(t *testing.T) {
 	t.Setenv("BNBLOC_ENV", "")
 	if err := CheckKey(""); err != nil {
 		t.Fatalf("CheckKey(\"\") in dev = %v, want nil", err)
+	}
+}
+
+// The org role is signed like the tenant: a member cannot raise the role
+// the gateway asserted for them.
+func TestTamperedRoleRejected(t *testing.T) {
+	r := httptest.NewRequest(http.MethodGet, "/v1/tenant/x", nil)
+	Key("k").Assert(r, "maya", "acme", "member")
+	r.Header.Set(HeaderRole, "org_admin")
+	rec := httptest.NewRecorder()
+	Middleware("k", http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		t.Fatal("tampered role must not reach the handler")
+	})).ServeHTTP(rec, r)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("code=%d, want 401", rec.Code)
+	}
+}
+
+// Assert replaces any assertion already on the request and defaults the
+// tenant, so a forwarded or forged header never survives.
+func TestAssertReplacesForgedHeaders(t *testing.T) {
+	r := httptest.NewRequest(http.MethodGet, "/x", nil)
+	r.Header.Set(HeaderUser, "mallory")
+	r.Header.Set(HeaderTenant, "globex")
+	r.Header.Set(HeaderRole, "super_admin")
+	Key("k").Assert(r, "maya", "", "")
+	if Subject(r) != "maya" || r.Header.Get(HeaderTenant) != "default" || r.Header.Get(HeaderRole) != "" {
+		t.Fatalf("assertion = %q %q %q", Subject(r), r.Header.Get(HeaderTenant), r.Header.Get(HeaderRole))
+	}
+	rec := httptest.NewRecorder()
+	Middleware("k", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if Role(r) != "" {
+			t.Errorf("role = %q", Role(r))
+		}
+	})).ServeHTTP(rec, r)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("code=%d", rec.Code)
+	}
+}
+
+// RequireService admits only the named services, never a member identity
+// the gateway signed.
+func TestRequireServiceAdmitsOnlyNamedServices(t *testing.T) {
+	ok := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) })
+	h := RequireService("k", []string{"room", "activity"}, ok)
+	for subject, want := range map[string]int{
+		ServiceSubject("room"):     http.StatusNoContent,
+		ServiceSubject("activity"): http.StatusNoContent,
+		ServiceSubject("gateway"):  http.StatusForbidden,
+		"maya":                     http.StatusForbidden,
+	} {
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, signedReq("k", subject))
+		if rec.Code != want {
+			t.Errorf("%s: code=%d want %d", subject, rec.Code, want)
+		}
+	}
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, signedReq("other", ServiceSubject("room")))
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("wrong key: code=%d want 401", rec.Code)
 	}
 }

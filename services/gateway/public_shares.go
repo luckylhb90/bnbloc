@@ -1,7 +1,6 @@
 package gateway
 
 import (
-	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -20,7 +19,6 @@ import (
 
 	"github.com/luckylhb90/bnbloc/internal/obs"
 	"github.com/luckylhb90/bnbloc/internal/store"
-	"github.com/luckylhb90/bnbloc/internal/svcauth"
 )
 
 // Public share links (PRD 2026-10-09 "Gateway"): unauthenticated reads of
@@ -136,14 +134,7 @@ func (s *Service) resolveShare(ctx context.Context, token string, countView bool
 	}
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, base+"/internal/v1/shares/resolve", bytes.NewReader(body))
-	if err != nil {
-		return wire.ShareResolution{}, err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set(svcauth.HeaderUser, gatewayServiceSubject)
-	svcauth.Sign(req, svcauth.KeyFromEnv(), gatewayServiceSubject)
-	resp, err := backendClient.Do(req)
+	resp, err := callBackend(ctx, http.MethodPost, base+"/internal/v1/shares/resolve", body, gatewayServiceSubject, "")
 	if err != nil {
 		return wire.ShareResolution{}, fmt.Errorf("room service unreachable: %w", err)
 	}
@@ -221,7 +212,7 @@ func (s *Service) handlePublicShareContent(w http.ResponseWriter, r *http.Reques
 	var body io.Reader
 	size := int64(-1)
 	if res.Version.Storage == store.ArtifactStorageBlob {
-		rc, n, err := s.blobs().OpenBlob(r.Context(), gatewayServiceSubject, res.Version.BlobKey)
+		rc, n, err := s.blobs().OpenBlob(r.Context(), res.Version.BlobKey)
 		if err != nil {
 			writeBlobStoreErr(w, err)
 			return
