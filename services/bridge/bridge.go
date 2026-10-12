@@ -1583,7 +1583,7 @@ func (b *Bridge) resolveTarget(ctx context.Context, coreName, provider string) s
 	if !ok {
 		return provider
 	}
-	if resolver, ok := entry.provider.(corepkg.TargetResolver); ok {
+	if resolver, ok := corepkg.As[corepkg.TargetResolver](ctx, entry.provider, entry.endpoint, corepkg.CapabilityResolveTarget); ok {
 		if target, ok := resolver.ResolveTarget(provider); ok && strings.TrimSpace(target) != "" {
 			return target
 		}

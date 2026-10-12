@@ -18,9 +18,7 @@ const corePkgPath = "github.com/luckylhb90/bnbloc/core"
 // bareAssertionPending lists files that still assert an optional capability
 // directly, each with the change that converts it. The list only shrinks: an
 // entry whose file no longer asserts fails the test until it is deleted.
-var bareAssertionPending = map[string]string{
-	"services/bridge/bridge.go": "TargetResolver: becomes core.As[core.TargetResolver](ctx, p, ep, core.CapabilityResolveTarget) in the 3.1 bridge restructuring",
-}
+var bareAssertionPending = map[string]string{}
 
 // Optional capabilities are reached only through core.As (or Supports), which
 // consults a data-described provider's CapabilityReporter: a bare type
