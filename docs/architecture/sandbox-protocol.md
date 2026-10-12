@@ -189,7 +189,10 @@ Requirements every implementation must meet:
 - `disk` mounts are guest-local directories owned by the space user;
 - deleting a space kills its processes, unmounts its shares and removes its
   user; `purge=1` also removes its home and disk directories. Host share
-  content is never deleted.
+  content is never deleted. Ensuring a space deleted without purge brings
+  back the same user (uid) over its kept home and disks (`spaceRestart` in
+  the suite): the bridge deletes a space after every sandboxed turn so no
+  guest process outlives its turn, and re-ensures it for the next.
 
 **Host path translation** (`hostWorkdir`, `?hostPath=`): the longest mount
 whose `hostPath` contains the cleaned host path wins; `..` cannot escape a

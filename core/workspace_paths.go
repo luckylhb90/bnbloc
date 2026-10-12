@@ -74,6 +74,20 @@ func ProtectedWorkspacePaths() []string {
 	return append(out, HostExecutableProjectConfigPaths...)
 }
 
+// MayHoldProtectedPath reports whether a workspace-relative directory that
+// is not itself protected may hold a protected path below it (".agents"
+// holds ".agents/skills/"): a walker over a workspace descends only into
+// such directories.
+func MayHoldProtectedPath(relDir string) bool {
+	rel := normalizeWorkspacePath(relDir)
+	for _, p := range ProtectedWorkspacePaths() {
+		if strings.HasPrefix(strings.ToLower(p), rel+"/") {
+			return true
+		}
+	}
+	return false
+}
+
 // WorkspaceFileAllowed is the WorkspaceFileWriter path contract: a clean
 // relative file path that is a BnblocOwnedPath (a file inside a listed
 // directory, never the directory itself). Cores enforce it on every write;

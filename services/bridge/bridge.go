@@ -260,7 +260,12 @@ type roomSession struct {
 	// hooks are the session contributors' turn/release callbacks (guarded
 	// by mu).
 	hooks sessionHooks
-	mu    sync.Mutex
+	// workdir is a sandboxed session's shared workdir ("" on the host), and
+	// fence the fingerprint of its protected paths its turns must find
+	// (guarded by mu; the turn fence, sandbox_fence.go).
+	workdir string
+	fence   string
+	mu      sync.Mutex
 }
 
 func (rs *roomSession) markTurn(t deliverableTurn) {
@@ -1336,12 +1341,14 @@ func (b *Bridge) driveClaim(ctx context.Context, d *drive, beforeReflow func(*ro
 	defer lock.Unlock()
 
 	opts := corepkg.SessionOptions{Model: d.job.Model, ReasoningEffort: d.job.ReasoningEffort}
+	var turn *roomSession // the session a sandboxed turn ran in (its fence)
 	if d.prepareExec != nil {
 		exec, err := d.prepareExec(ctx)
 		if err != nil {
 			return driveResult{}, atStage(stagePrepare, fmt.Errorf("the agent sandbox could not be prepared: %w", err))
 		}
 		opts.Execution = exec
+		defer func() { b.endSandboxedTurn(ctx, key, exec.Sandbox, turn) }()
 	}
 
 	// Fresh sessions materialize attachments + build their prompt inside
@@ -1356,12 +1363,16 @@ func (b *Bridge) driveClaim(ctx context.Context, d *drive, beforeReflow func(*ro
 		// ensureSession tags its session create (the turn's start) itself.
 		return driveResult{}, atStage(stagePrepare, err)
 	}
+	turn = rs.roomSession
 	// If the session was freshly created, the initial prompt already ran; only
 	// send follow-up input for an existing session.
 	if !rs.freshlyCreated {
 		entry, _ := b.coreEntry(d.core)
 		rs.roomSession.startTurn(b.turnInfo(d, rs.roomSession))
 		prompt := b.drivePrompt(ctx, d, rs.workspaceID, rs.written, &rs.roomSession.ctx, false)
+		// The fence baseline: the space has no process yet, so everything
+		// there is bnbloc's own, this turn's .room/ refresh included.
+		rs.roomSession.fenceBaseline()
 		if err := b.sendInput(ctx, entry, rs.workspaceID, rs.sessionID, prompt, opts); err != nil {
 			return driveResult{workspaceID: rs.workspaceID, sessionID: rs.sessionID}, atStage(stageStart, err)
 		}
@@ -1436,6 +1447,19 @@ func (b *Bridge) ensureSession(ctx context.Context, d *drive, key driveKey, prom
 		existing = nil
 	}
 	b.mu.Unlock()
+	if existing != nil && !existing.fenceIntact() {
+		// A sandboxed session whose protected paths changed since its last
+		// turn's fence (a quiesce that failed, a write from outside): not
+		// reused; the fresh session below starts from a reset tree.
+		slog.Warn("bnbloc bridge sandboxed session's protected paths changed; starting a new session",
+			"event", "bnbloc.bridge.sandbox_fence_breached", "room", room, "core", d.core, "provider", provider, "session", existing.sessionID)
+		b.mu.Lock()
+		if b.sessions[key] == existing {
+			b.unbindLocked(key)
+		}
+		b.mu.Unlock()
+		existing = nil
+	}
 	if existing != nil {
 		if err := b.sessionReachable(ctx, entry, existing.workspaceID, existing.sessionID); err != nil {
 			slog.Warn("bnbloc bridge rebinding stale session",
@@ -1457,7 +1481,7 @@ func (b *Bridge) ensureSession(ctx context.Context, d *drive, key driveKey, prom
 	if opts.Execution != nil {
 		// The sandbox workdir outlives sessions: clear the previous
 		// session's agent config before this one materializes its own.
-		resetAgentConfig(opts.Execution.Sandbox.Workdir)
+		resetProtectedPaths(opts.Execution.Sandbox.Workdir)
 	}
 	workspaceID, err := b.createWorkspace(ctx, entry, d.caps, opts.Execution)
 	if err != nil {
@@ -1494,6 +1518,9 @@ func (b *Bridge) ensureSession(ctx context.Context, d *drive, key driveKey, prom
 		initialPrompt = d.content.promptPrefix(written) + initialPrompt
 	}
 	rs := &roomSession{owner: d.owner, provider: provider, core: d.core, workspaceID: workspaceID, ctx: st, hooks: hooks, profileSum: bindingSum}
+	if opts.Execution != nil {
+		rs.workdir = opts.Execution.Sandbox.Workdir
+	}
 	rs.startTurn(b.turnInfo(d, rs))
 	sessionID, err := b.createSession(ctx, entry, workspaceID, d.target, initialPrompt, opts, profile)
 	if err != nil {
@@ -1507,6 +1534,9 @@ func (b *Bridge) ensureSession(ctx context.Context, d *drive, key driveKey, prom
 	rs.mu.Lock()
 	rs.sessionID = sessionID
 	rs.mu.Unlock()
+	// The fence baseline: everything there is what bnbloc and the core
+	// wrote for this session.
+	rs.fenceBaseline()
 	b.mu.Lock()
 	b.sessions[key] = rs
 	b.mu.Unlock()

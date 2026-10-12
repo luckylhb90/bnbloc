@@ -103,6 +103,9 @@ type sandboxRuntime struct {
 	ready     bool
 	reason    string // why it is not ready (member-readable)
 	checkedAt time.Time
+	// quiesced holds the spaces the bridge stopped every process of since
+	// their last use (the turn fence: sandbox_fence.go).
+	quiesced map[string]bool
 
 	policyMu sync.Mutex
 	policy   map[string]sandboxPolicyEntry // tenant -> cached policy
@@ -116,7 +119,7 @@ type sandboxPolicyEntry struct {
 func newSandboxRuntime(cfg SandboxConfig) *sandboxRuntime {
 	c := sandbox.NewClient(nil)
 	c.REST.Timeout = 30 * time.Second
-	return &sandboxRuntime{cfg: cfg, client: c, now: time.Now, policy: map[string]sandboxPolicyEntry{}}
+	return &sandboxRuntime{cfg: cfg, client: c, now: time.Now, policy: map[string]sandboxPolicyEntry{}, quiesced: map[string]bool{}}
 }
 
 func (s *sandboxRuntime) endpoint() corepkg.Endpoint {
@@ -217,16 +220,29 @@ func slugPart(s string, max int) string {
 	return out
 }
 
-// prepare readies one sandboxed turn: the room workspace directory, the space
-// (re-ensured every turn: the runtime hands host-created entries to the space
-// user only on ensure), and a fresh space-scoped exec token. The returned
-// descriptor carries no admin credential.
+// prepare readies one sandboxed turn: the room workspace directory, a space
+// with no process left from before (the turn fence, sandbox_fence.go), the
+// space (re-ensured every turn: the runtime hands host-created entries to
+// the space user only on ensure), and a fresh space-scoped exec token. The
+// returned descriptor carries no admin credential.
 func (s *sandboxRuntime) prepare(ctx context.Context, room, core, provider, owner string) (*corepkg.Execution, error) {
 	space := sandboxSpaceName(room, core, provider)
 	workdir := filepath.Join(s.cfg.WorkspacesRoot, space)
 	if err := os.MkdirAll(workdir, 0o700); err != nil {
 		return nil, fmt.Errorf("agent sandbox workspace: %w", err)
 	}
+	if !s.takeQuiesced(space) {
+		// Not quiesced by this bridge since its last use (a bridge restart,
+		// a failed quiesce): a process left there could still write the
+		// workdir, so it is stopped first, or the drive does not run.
+		if err := s.quiesce(ctx, space); err != nil {
+			s.invalidate()
+			return nil, fmt.Errorf("agent sandbox space: stop its processes: %w", err)
+		}
+		s.takeQuiesced(space)
+	}
+	// The workspace is mounted at the identical guest path; the core's path
+	// mounts are derived from the space's.
 	mounts := []sandbox.SpaceMount{{Kind: sandbox.MountShared, HostPath: workdir, GuestPath: workdir}}
 	if _, err := s.client.EnsureSpace(ctx, s.endpoint(), s.cfg.Machine, space, sandbox.SpaceRequest{
 		Workdir:      workdir,
@@ -250,13 +266,25 @@ func (s *sandboxRuntime) prepare(ctx context.Context, room, core, provider, owne
 		Space:       space,
 		VMExec:      s.cfg.VMExec,
 		Workdir:     workdir,
-		Mounts:      []corepkg.PathMount{{Host: workdir, Guest: workdir}},
+		Mounts:      pathMounts(mounts),
 		// The protected paths (the role the session wears, the room
 		// context, host-executed project config) are write-denied: a
 		// borrowed prompt can neither rewrite its role nor plant config a
-		// harness would execute on the host.
+		// harness would execute on the host. Guest commands write the
+		// shared workdir directly; the turn fence covers those.
 		HostConfine: corepkg.HostConfine{Workspace: workdir, DenyWrite: protectedDenyWrite(workdir)},
 	}}, nil
+}
+
+// pathMounts is a core's host→guest path mapping of a space's shared mounts.
+func pathMounts(mounts []sandbox.SpaceMount) []corepkg.PathMount {
+	out := make([]corepkg.PathMount, 0, len(mounts))
+	for _, m := range mounts {
+		if m.Kind == sandbox.MountShared {
+			out = append(out, corepkg.PathMount{Host: m.HostPath, Guest: m.GuestPath})
+		}
+	}
+	return out
 }
 
 // invalidate forces the next status call to probe again (a failed ensure or

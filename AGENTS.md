@@ -715,9 +715,21 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   reserved, with a `sandbox-required` notice (job failure `sandbox_required`).
   An unreadable policy refuses too. A failed ensure/mint fails the drive; it
   never falls back to the host. Sessions and locks are keyed by execution
-  kind (`driveSessionKey`): switching host↔sandbox starts a new session and
+  kind (`driveKey`): switching host↔sandbox starts a new session and
   workspace (created IN the sandbox workdir via `CreateWorkspaceAt`). Nothing
   is moved.
+- **Guest commands write the shared workdir past the host deny-write; the
+  turn fence covers it** (`services/bridge/sandbox_fence.go`). After every
+  sandboxed turn the bridge deletes the space without purge (its processes
+  die, its tokens are revoked; the next prepare re-ensures it, quiescing
+  first a space it has not quiesced itself and refusing the drive when it
+  cannot), then checks the protected paths' fingerprint against the
+  session's baseline (taken before a follow-up turn's input, or after a
+  fresh session's create); a change drops the session and removes every
+  protected path (`resetProtectedPaths`), so no harness starts on config a
+  guest wrote (`TestSandboxFence_*`). Never skip the quiesce to keep a
+  guest process alive between turns, and never trust a protected path a
+  sandboxed turn could have written.
 - **`bnbloc-vmexec` confine: write-deny by default.** Only the workspace,
   temp, allowWrite and the listed harnesses' explicit STATE paths are
   writable. Anything that executes on the host later (settings, hooks,
@@ -818,8 +830,8 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   case-insensitively. Neither is the room's project
   (`core.ProtectedWorkspacePath`): never a deliverable, site content,
   code sync (either direction) or packed component; write-denied in
-  sandboxed drives and cleared from the sandbox workdir before a fresh
-  session. A core's file writer accepts only `core.WorkspaceFileAllowed`
+  sandboxed drives, fenced at every sandboxed turn and cleared from the
+  sandbox workdir before a fresh session. A core's file writer accepts only `core.WorkspaceFileAllowed`
   (owned) paths. Every consumer is checked against one table
   (`core/testdata/workspace_paths.json`, `TestBnblocOwnedPathAgreesEverywhere`
   and its sync/packer siblings); `TestWorkspacePathPolicySingleOwner`

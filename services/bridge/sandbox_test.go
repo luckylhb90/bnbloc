@@ -29,6 +29,18 @@ type fakeSandboxd struct {
 	spaces  []string
 	minted  int
 	state   sandbox.State
+	// calls is every space call in order: "ensure", "delete", "delete?purge".
+	calls []string
+	// deleteFails makes a space delete answer 500; deleteMissing answers
+	// space_not_found (a space that does not exist has no process).
+	deleteFails, deleteMissing bool
+}
+
+// spaceCalls is the fake's space call log.
+func (f *fakeSandboxd) spaceCalls() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.calls...)
 }
 
 func newFakeSandboxd(t *testing.T) *fakeSandboxd {
@@ -53,9 +65,27 @@ func newFakeSandboxd(t *testing.T) *fakeSandboxd {
 		case strings.HasPrefix(p, sandbox.SpacesPath("bnbloc")+"/") && strings.HasSuffix(p, "/exec-tokens"):
 			f.minted++
 			_ = json.NewEncoder(w).Encode(sandbox.ExecToken{Token: "tok-" + string(rune('0'+f.minted)), ExpiresAtMs: 99})
+		case strings.HasPrefix(p, sandbox.SpacesPath("bnbloc")+"/") && r.Method == http.MethodDelete:
+			call := "delete"
+			if r.URL.Query().Get("purge") == "1" {
+				call += "?purge"
+			}
+			f.calls = append(f.calls, call)
+			if f.deleteFails {
+				w.WriteHeader(http.StatusInternalServerError)
+				_, _ = w.Write([]byte(`{"error":{"code":"internal","message":"down"}}`))
+				return
+			}
+			if f.deleteMissing {
+				w.WriteHeader(http.StatusNotFound)
+				_, _ = w.Write([]byte(`{"error":{"code":"space_not_found","message":"no such space"}}`))
+				return
+			}
+			w.WriteHeader(http.StatusNoContent)
 		case strings.HasPrefix(p, sandbox.SpacesPath("bnbloc")+"/") && r.Method == http.MethodPut:
 			var req sandbox.SpaceRequest
 			_ = json.NewDecoder(r.Body).Decode(&req)
+			f.calls = append(f.calls, "ensure")
 			f.ensures = append(f.ensures, req)
 			f.spaces = append(f.spaces, strings.TrimPrefix(p, sandbox.SpacesPath("bnbloc")+"/"))
 			_ = json.NewEncoder(w).Encode(sandbox.Space{Name: "s", User: "sp-s", UID: 20001})

@@ -146,6 +146,7 @@ func Run(t *testing.T, cfg Config) {
 		{"snapshotRestore", s.snapshotRestore, false},
 		{"fork", s.fork, false},
 		{"warmPool", s.warmPool, false},
+		{"spaceRestart", s.spaceRestart, false},
 		{"deleteSpace", s.deleteSpace, false},
 		{"deleteMachine", s.deleteMachine, false},
 	}
@@ -1314,6 +1315,38 @@ func (s *suite) waitReady(t *testing.T, name string, ready int, within time.Dura
 	}
 	t.Fatalf("pool %s not ready (%d) within %s: %+v %v", name, ready, within, pool, err)
 	return pool
+}
+
+// spaceRestart: deleting a space without purge stops every one of its
+// processes, and ensuring it again brings back the same user (uid) over its
+// kept home. The bridge relies on both after every sandboxed turn: no guest
+// process outlives the turn that started it, and the next turn finds the
+// space as it left it.
+func (s *suite) spaceRestart(t *testing.T) {
+	s.need(t, protocol.CapabilitySpaces)
+	const name = "room-restart"
+	first, err := s.c.EnsureSpace(s.ctx, s.ep, s.main.ID, name, protocol.SpaceRequest{Labels: protocol.Labels{Room: name}})
+	if err != nil {
+		t.Fatalf("ensure %s: %v", name, err)
+	}
+	defer func() { _ = s.c.DeleteSpace(s.ctx, s.ep, s.main.ID, name, true) }()
+	pid := strings.TrimSpace(out(t, s.spaceSh(t, name, "echo kept > \"$HOME/.restart-marker\"; sleep 3600 </dev/null >/dev/null 2>&1 & echo $!")))
+	if pid == "" {
+		t.Fatal("no background process started")
+	}
+	if err := s.c.DeleteSpace(s.ctx, s.ep, s.main.ID, name, false); err != nil {
+		t.Fatalf("delete %s without purge: %v", name, err)
+	}
+	if res := s.sh(t, s.main.ID, "test -d /proc/"+pid+" && echo alive; echo checked"); out(t, res) != "checked\n" {
+		t.Fatalf("a process of the deleted space survived: %q", out(t, res))
+	}
+	again, err := s.c.EnsureSpace(s.ctx, s.ep, s.main.ID, name, protocol.SpaceRequest{Labels: protocol.Labels{Room: name}})
+	if err != nil || again.UID != first.UID || again.User != first.User {
+		t.Fatalf("re-ensure after delete: %+v %v, want user %s/%d back", again, err, first.User, first.UID)
+	}
+	if got := out(t, s.spaceSh(t, name, "cat \"$HOME/.restart-marker\"")); got != "kept\n" {
+		t.Fatalf("home after a delete without purge = %q, want it kept", got)
+	}
 }
 
 func (s *suite) deleteSpace(t *testing.T) {

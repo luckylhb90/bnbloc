@@ -469,7 +469,21 @@ Landed in this repo (public, generic):
   `sandbox_required`; an unreadable tenant policy (no answer cached within 30 s) refuses the same way, fail closed (2026-10-12; it used to fall back to "not required"). Per
   sandboxed turn under the drive lock: workdir `<root>/<space>` (0700),
   space re-ensure (shared mount at the identical path, env allowlist, labels),
-  4 h exec token; sessions/locks keyed by execution kind. Roster: `&sandboxed=`
+  4 h exec token; sessions/locks keyed by execution kind. Guest commands
+  write the shared workdir directly, past the host deny-write, so the turn
+  fence (`services/bridge/sandbox_fence.go`, 2026-10-12) guards the
+  protected paths at every turn boundary: after every sandboxed turn the
+  space is deleted without purge (its processes die, its tokens are revoked;
+  prepare re-ensures it, and quiesces first a space this bridge has not,
+  refusing the drive when it cannot); the protected paths' fingerprint is
+  the session's baseline, taken while every write there is bnbloc's (before
+  a follow-up turn's input, after a fresh session's create) and checked
+  after the quiesce and before a reuse; a mismatch drops the session and
+  removes every protected path, so the next harness starts fresh. Read-only
+  guest mounts were rejected: runtimes refuse overlapping mounts, and a
+  case-insensitive host lets another spelling of a file name through the
+  writable parent. Residual: the window between a fresh session's create
+  and its baseline, and a harness re-reading config mid-turn. Roster: `&sandboxed=`
   on the room subscription → realtime `sandboxed` → shield badge in the web
   picker and members dialog.
 - **Tenant policy** — `tenants.require_sandbox_for_borrow` (migration

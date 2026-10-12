@@ -7,10 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/url"
-	"os"
-	"path/filepath"
 	"slices"
-	"sort"
 	"strings"
 	"sync"
 
@@ -308,46 +305,6 @@ func (b *Bridge) writeFallbackSkills(ctx context.Context, w corepkg.WorkspaceFil
 		}
 	}
 	return true
-}
-
-// resetAgentConfig removes the protected paths (core.ProtectedWorkspacePaths:
-// the .room/ context, the agent config a session wears, host-executed
-// project config) from a sandbox workdir before a fresh session is created
-// in it. The workdir is reused across sessions of a (room, core, provider):
-// a profile's files and the room context are re-materialized from scratch,
-// and nothing a previous session left there (in particular project config
-// written from inside the sandbox, which the host-side deny-write cannot
-// see) is loaded by the next one.
-func resetAgentConfig(workdir string) {
-	if strings.TrimSpace(workdir) == "" {
-		return
-	}
-	for _, p := range corepkg.ProtectedWorkspacePaths() {
-		target := filepath.Join(workdir, filepath.FromSlash(strings.TrimSuffix(p, "/")))
-		if err := os.RemoveAll(target); err != nil {
-			slog.Warn("bnbloc bridge agent config reset failed",
-				"event", "bnbloc.bridge.agent_config_reset_failed", "path", target, "error", err)
-		}
-	}
-}
-
-// protectedDenyWrite lists a workdir's protected paths for the host
-// confinement's DenyWrite: the agent must not edit the role it wears or the
-// room context, nor plant project config a harness would execute on the
-// host, nor create any of them. A directory keeps its trailing "/" (the
-// DenyWrite contract), so confinement can protect it before it exists.
-func protectedDenyWrite(workdir string) []string {
-	paths := corepkg.ProtectedWorkspacePaths()
-	out := make([]string, 0, len(paths))
-	for _, p := range paths {
-		path := filepath.Join(workdir, filepath.FromSlash(strings.TrimSuffix(p, "/")))
-		if strings.HasSuffix(p, "/") {
-			path += "/"
-		}
-		out = append(out, path)
-	}
-	sort.Strings(out)
-	return out
 }
 
 // contentUnavailableText is the notice of a job whose expert could not be

@@ -42,8 +42,9 @@ func onDisk(c workspacePathCase) (string, bool) {
 
 // One path table gives one verdict everywhere in the bridge: a protected
 // path (core.ProtectedWorkspacePath) is never a deliverable or site content,
-// is covered by the sandbox's deny-write list, and is cleared from a sandbox
-// workdir before a fresh session; an ordinary project file is none of those.
+// is covered by the sandbox's deny-write list, is part of the turn fence's
+// fingerprint, and is cleared from a sandbox workdir by its reset; an
+// ordinary project file is none of those.
 // The sync ignore and save_component's packer read the same table in their
 // own packages.
 func TestBnblocOwnedPathAgreesEverywhere(t *testing.T) {
@@ -61,6 +62,36 @@ func TestBnblocOwnedPathAgreesEverywhere(t *testing.T) {
 	}
 	scratch := t.TempDir()
 	rows := loadWorkspacePathTable(t)
+	// The fence fingerprint moves when a protected path is written, never
+	// for a project file.
+	fenced := t.TempDir()
+	for _, c := range rows {
+		p, disk := onDisk(c)
+		if !disk {
+			continue
+		}
+		before, err := protectedFingerprint(fenced)
+		if err != nil {
+			t.Fatal(err)
+		}
+		full := filepath.Join(fenced, filepath.FromSlash(p))
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(full, []byte("planted"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		after, err := protectedFingerprint(fenced)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if c.Protected && after == before {
+			t.Errorf("%s: writing it left the sandbox fence fingerprint unchanged", c.Path)
+		}
+		if c.Project && after != before {
+			t.Errorf("%s: a project file moved the sandbox fence fingerprint", c.Path)
+		}
+	}
 	for _, c := range rows {
 		if p, ok := onDisk(c); ok {
 			full := filepath.Join(scratch, filepath.FromSlash(p))
@@ -72,7 +103,7 @@ func TestBnblocOwnedPathAgreesEverywhere(t *testing.T) {
 			}
 		}
 	}
-	resetAgentConfig(scratch)
+	resetProtectedPaths(scratch)
 
 	for _, c := range rows {
 		_, site := siteContentPath("", c.Path)
