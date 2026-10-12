@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/luckylhb90/bnbloc/internal/contentpkg"
 	"github.com/luckylhb90/bnbloc/internal/obs"
 	"github.com/luckylhb90/bnbloc/internal/roomctx"
 	"github.com/luckylhb90/bnbloc/internal/store"
@@ -140,6 +141,8 @@ func (s *Service) Dispatch(ctx context.Context, roomID, caller string, in wire.D
 		return reply, refuse(http.StatusBadRequest, wire.DispatchInvalid, "recipient ownerId and provider are required")
 	case in.ClientMsgID != "" && !dispatchClientMsgIDShape.MatchString(in.ClientMsgID):
 		return reply, refuse(http.StatusBadRequest, wire.DispatchInvalid, "clientMsgId must be 1-64 letters, digits, '-' or '_'")
+	case in.Role != "" && !contentpkg.ValidName(in.Role):
+		return reply, refuse(http.StatusBadRequest, wire.DispatchInvalid, "role must be lower-case letters, digits and hyphens")
 	}
 
 	parent, err = s.Dispatches.GetAgentRun(ctx, in.ParentJobID)
@@ -193,7 +196,7 @@ func (s *Service) Dispatch(ctx context.Context, roomID, caller string, in wire.D
 		ClientMsgID: clientMsgID,
 		ChannelID:   parent.ChannelID,
 		Recipient:   &ChatRecipient{OwnerID: in.Recipient.OwnerID, Provider: in.Recipient.Provider, Core: in.Recipient.Core},
-		Dispatched:  &wire.DispatchMarker{JobID: parent.JobID, Depth: depth, Via: agentHandle(parent.OwnerUserID, parent.Provider)},
+		Dispatched:  &wire.DispatchMarker{JobID: parent.JobID, Depth: depth, Via: agentHandle(parent.OwnerUserID, parent.Provider), Role: in.Role},
 		Expert:      in.Expert,
 	})
 	switch {
@@ -301,6 +304,9 @@ func (s *Service) auditDispatch(ctx context.Context, caller string, parent store
 	}
 	if in.Expert != nil && in.Expert.ID != "" {
 		detail = append(detail, "expert="+in.Expert.ID)
+	}
+	if in.Role != "" {
+		detail = append(detail, "role="+in.Role)
 	}
 	switch {
 	case refusal != nil:
