@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { BrainIcon, CaretDownIcon, PushPinIcon, ShieldWarningIcon, XIcon } from "@phosphor-icons/react";
 import { cn } from "@/lib/cn";
-import { contentLabel, permissionLabel, type ExpertChoice } from "@/lib/contentComponents";
+import { contentLabel, permissionLabel, type ContentQuickPrompt, type ExpertChoice } from "@/lib/contentComponents";
 import { Button } from "@/ui/Button";
 import { Dialog } from "@/ui/Dialog";
 import { UserName } from "@/views/UserName";
@@ -89,7 +89,9 @@ export function ExpertBanner({
 }: {
   readonly expert: ExpertChoice;
   readonly runsOn: string | null;
-  readonly onQuickPrompt: (prompt: string) => void;
+  // A quick prompt's text fills the draft; one that points at a pack's
+  // prompt is inserted like a picked prompt.
+  readonly onQuickPrompt: (q: ContentQuickPrompt) => void;
   readonly onClear: () => void;
 }) {
   const c = expert.component;
@@ -110,13 +112,14 @@ export function ExpertBanner({
         <div className="-mx-1 mt-1.5 flex gap-1.5 overflow-x-auto px-1 pb-1 @md:flex-wrap @md:overflow-visible">
           {c.quickPrompts?.map((q) => (
             <button
-              key={q.title}
+              key={q.title || q.ref}
               type="button"
-              onClick={() => onQuickPrompt(q.prompt)}
-              title={q.prompt}
-              className="tactile max-w-[18rem] shrink-0 truncate rounded-full border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-1.5 text-xs text-[var(--color-fg-muted)] hover:border-[var(--color-accent)]/40 hover:bg-[var(--color-accent-soft)] hover:text-[var(--color-fg)]"
+              onClick={() => onQuickPrompt(q)}
+              disabled={!!q.ref && !q.resolved}
+              title={q.ref && !q.resolved ? `Needs the prompt pack ${q.ref.split("/")[0]}` : q.resolved?.prompt.body ?? q.prompt}
+              className="tactile max-w-[18rem] shrink-0 truncate rounded-full border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-1.5 text-xs text-[var(--color-fg-muted)] hover:border-[var(--color-accent)]/40 hover:bg-[var(--color-accent-soft)] hover:text-[var(--color-fg)] disabled:opacity-50"
             >
-              {q.title}
+              {q.title || q.ref}
             </button>
           ))}
         </div>

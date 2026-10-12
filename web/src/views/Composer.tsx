@@ -30,6 +30,8 @@ import { mentionLabel, mentionMatches } from "@/views/composer/mentions";
 import { contentLabel, type ExpertChoice } from "@/lib/contentComponents";
 import { useComposerExpert } from "@/views/composer/useComposerExpert";
 import { ExpertBanner, ExpertPermissionDialog, ExpertPicker } from "@/views/composer/ExpertPicker";
+import { useComposerPrompts } from "@/views/composer/useComposerPrompts";
+import { PromptPickerButton, PromptVariablesDialog, SlashMenu } from "@/views/composer/PromptPicker";
 
 // mentionedAgent finds an in-text "@owner/provider" (core-qualified when the
 // agent advertises a core) naming a known room agent. Tokens are matched as
@@ -145,6 +147,10 @@ export function Composer({
   // Experts (the room's pinned ones and the member's own) answer @name too:
   // picking one sets the expert, which runs on the selected agent.
   const exp = useComposerExpert(roomId, !people);
+  // Prompts of the member's packs and the room's: the picker, /commands
+  // and expert quick prompts that point at a pack's prompt.
+  const prompts = useComposerPrompts(roomId, !people, setText, taRef);
+  const slashListId = useId();
   const expertMatches = mention ? exp.mentionMatches(mention.query) : [];
   const optionCount = expertMatches.length + matches.length;
   // Keyboard-highlighted mention option (Arrow keys move it, Enter/Tab pick).
@@ -301,6 +307,7 @@ export function Composer({
   const applyText = (value: string, caret: number) => {
     setText(value);
     detectMention(value, caret);
+    prompts.detect(value, caret);
     if (onTyping && value.trim()) {
       const now = Date.now();
       if (now - lastTypingRef.current > 2000) {
@@ -444,6 +451,13 @@ export function Composer({
 
   return (
     <div className="relative w-full">
+      <SlashMenu
+        matches={prompts.slashMatches}
+        active={prompts.active}
+        listId={slashListId}
+        onPick={prompts.pickSlash}
+        onHover={prompts.setActive}
+      />
       {mention && optionCount > 0 && (
         <div className="absolute bottom-full left-0 z-20 mb-2 w-56 overflow-hidden rounded-[var(--radius)] border border-[var(--color-border-strong)] bg-[var(--color-elevated)] shadow-[var(--shadow-pop)]">
           <div className="border-b border-[var(--color-border)] px-3 py-1.5 text-xs font-medium uppercase tracking-wide text-[var(--color-fg-subtle)]">
@@ -614,9 +628,13 @@ export function Composer({
             expert={exp.expert}
             runsOn={peopleOnly ? null : runsOn}
             onClear={() => exp.pick(null)}
-            onQuickPrompt={(prompt) => {
-              setText(prompt);
+            onQuickPrompt={(q) => {
               setPeopleOnly(false);
+              if (q.resolved) {
+                prompts.pickRef(q.resolved);
+                return;
+              }
+              setText(q.prompt);
               requestAnimationFrame(() => taRef.current?.focus());
             }}
           />
@@ -657,6 +675,8 @@ export function Composer({
           aria-controls={mention && optionCount > 0 ? mentionListId : undefined}
           aria-activedescendant={highlighted >= 0 && mention ? `${mentionListId}-${highlighted}` : undefined}
           onKeyDown={(e) => {
+            // The /command menu, when open, takes the keys first.
+            if (prompts.onKeyDown(e)) return;
             // While the mention list is open, arrows move the highlight and
             // Enter/Tab accept the highlighted option.
             if (mention && optionCount > 0) {
@@ -762,6 +782,9 @@ export function Composer({
             </button>
           )}
           {!people && (
+            <PromptPickerButton choices={prompts.choices} onPick={prompts.pick} disabled={disabled || sending} className={toolButton} />
+          )}
+          {!people && (
             <SendModeToggle value={peopleOnly ? "people" : "agent"} onChange={(m) => setPeopleOnly(m === "people")} />
           )}
           <div className="flex min-w-0 flex-1 items-center gap-1">
@@ -814,6 +837,7 @@ export function Composer({
         </div>
       </div>
       <ExpertPermissionDialog expert={exp.confirming} onAnswer={exp.resolveConfirm} />
+      <PromptVariablesDialog choice={prompts.filling} onCancel={prompts.cancelFill} onInsert={prompts.submitFill} />
     </div>
   );
 }
