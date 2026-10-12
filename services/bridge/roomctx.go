@@ -144,7 +144,9 @@ func (b *Bridge) roomLiveMd(room string) roomlog.NamedFile {
 // returns the updated state. dropText is the current turn's instruction: it is
 // delivered as the [now] section of the prompt, so it is removed from the
 // records (the newest matching entry only — an older identical message is
-// genuine history). jobID is the turn's job, whose grant reads the
+// genuine history), and its sender (roomlog.Sender: "jack/codex for maya"
+// for a dispatched task; "" when the fetch did not hold it) is returned for
+// the [now] marker. jobID is the turn's job, whose grant reads the
 // requester's Library. self is this agent, the speaker "owner/provider" of
 // its own replies; its replies from THIS session (Seq past the
 // session-creation boundary, which a fresh pass records) are dropped — the
@@ -157,13 +159,13 @@ func (b *Bridge) roomLiveMd(room string) roomlog.NamedFile {
 // last, so a partial write never advertises files that do not exist). State
 // is only advanced on full success, so a failed pass retries cleanly next
 // turn.
-func (b *Bridge) materializeRoomContext(ctx context.Context, w corepkg.WorkspaceFileWriter, ep corepkg.Endpoint, room, workspaceID, jobID, dropText string, self roomlog.Producer, fresh bool, st roomlog.CtxState) (roomlog.CtxState, error) {
+func (b *Bridge) materializeRoomContext(ctx context.Context, w corepkg.WorkspaceFileWriter, ep corepkg.Endpoint, room, workspaceID, jobID, dropText string, self roomlog.Producer, fresh bool, st roomlog.CtxState) (roomlog.CtxState, string, error) {
 	selfSpeaker := agentSpeakerLabel(self.Owner, self.Provider)
 	entries, complete, err := roomlog.History(ctx, b.gatewayGET, room, roomlog.HistoryQuery{After: st.EndSeq})
 	if err != nil {
-		return st, err
+		return st, "", err
 	}
-	entries = dropInstruction(entries, dropText)
+	entries, from := dropInstruction(entries, dropText)
 	bound := st.SelfAfterSeq
 	if fresh {
 		// A brand-new session: everything fetched predates it, so all of
@@ -188,24 +190,26 @@ func (b *Bridge) materializeRoomContext(ctx context.Context, w corepkg.Workspace
 	}
 	for _, f := range files {
 		if err := w.WriteWorkspaceFile(ctx, ep, workspaceID, f.Name, f.Content); err != nil {
-			return st, err
+			return st, "", err
 		}
 	}
-	return newState, nil
+	return newState, from, nil
 }
 
 // drivePrompt builds a turn's prompt. A pull-capable core gets the pointer
 // prompt over materialized .room/ files (fresh sessions seed the tree before
 // the session is created — the workspace exists, the session does not yet);
 // any materialization failure falls back to the push model for this turn. A
-// core without the writer capability uses the push model every turn.
+// core without the writer capability uses the push model every turn. The
+// [now] marker names the message's sender as the room history records it,
+// else the job's requester.
 func (b *Bridge) drivePrompt(ctx context.Context, d *drive, workspaceID string, atts []writtenAttachment, st *roomlog.CtxState, fresh bool) string {
 	room, owner, provider, text := d.job.RoomID, d.owner, d.job.Provider, d.text
 	self := agentSpeakerLabel(owner, provider)
-	pa := toPromptAttachments(atts)
+	now := roomlog.Now{From: d.job.RequesterUserID, Text: text, Attachments: toPromptAttachments(atts)}
 	entry, ok := b.coreEntry(d.core)
 	if d.caps.writer == nil || !ok {
-		return b.driveTextDelta(ctx, room, owner, provider, text, pa, st, fresh)
+		return b.driveTextDelta(ctx, room, owner, provider, now, st, fresh)
 	}
 	w, ep := d.caps.writer, entry.endpoint
 	// Materialize: fresh sessions start from an empty state.
@@ -213,14 +217,17 @@ func (b *Bridge) drivePrompt(ctx context.Context, d *drive, workspaceID string, 
 	if fresh {
 		start = roomlog.CtxState{}
 	}
-	newSt, err := b.materializeRoomContext(ctx, w, ep, room, workspaceID, d.job.JobID, text, roomlog.Producer{Owner: owner, Provider: provider, Core: d.core}, fresh, start)
+	newSt, from, err := b.materializeRoomContext(ctx, w, ep, room, workspaceID, d.job.JobID, text, roomlog.Producer{Owner: owner, Provider: provider, Core: d.core}, fresh, start)
 	if err != nil {
 		slog.Warn("bnbloc bridge room-context materialization failed; falling back to pushed context",
 			"event", "bnbloc.bridge.roomctx_failed", "room", room, "core", d.core, "error", err)
-		return b.driveTextDelta(ctx, room, owner, provider, text, pa, st, fresh)
+		return b.driveTextDelta(ctx, room, owner, provider, now, st, fresh)
 	}
 	*st = newSt
-	return roomlog.ComposePointer(self, text, pa)
+	if from != "" {
+		now.From = from
+	}
+	return roomlog.ComposePointer(self, now)
 }
 
 // toPromptAttachments maps the bridge's written descriptors to roomlog's prompt
@@ -255,17 +262,18 @@ func agentSpeakerLabel(owner, provider string) string {
 //
 // The delta boundary lives in st.PushSeenSeq: every fetched row counts as seen
 // the moment it is fetched, including rows then filtered out — the agent
-// authored the self replies, and the instruction is delivered as [now].
-func (b *Bridge) driveTextDelta(ctx context.Context, room, owner, provider, text string, atts []roomlog.Attachment, st *roomlog.CtxState, fresh bool) string {
+// authored the self replies, and the instruction is delivered as [now]
+// (now.From is the sender when the history does not name it).
+func (b *Bridge) driveTextDelta(ctx context.Context, room, owner, provider string, now roomlog.Now, st *roomlog.CtxState, fresh bool) string {
 	if st == nil {
-		return text
+		return roomlog.ComposeDelta(nil, now, roomlog.Options{})
 	}
 	self := agentSpeakerLabel(owner, provider)
 	entries, _, err := roomlog.History(ctx, b.gatewayGET, room, roomlog.HistoryQuery{After: st.PushSeenSeq, MaxRows: b.recentRows})
 	if err != nil {
-		slog.Debug("bnbloc bridge room-context unavailable, sending bare text",
+		slog.Debug("bnbloc bridge room-context unavailable, sending the message alone",
 			"event", "bnbloc.bridge.context_unavailable", "room", room, "error", err)
-		return text
+		return roomlog.ComposeDelta(nil, now, roomlog.Options{})
 	}
 	// History returns the newest-page tail, not the delta itself (pages
 	// crossing the boundary are how the recent window is reached). The delta
@@ -286,7 +294,10 @@ func (b *Bridge) driveTextDelta(ctx context.Context, room, owner, provider, text
 		}
 		entries = kept
 	}
-	entries = dropInstruction(entries, text)
+	entries, from := dropInstruction(entries, now.Text)
+	if from != "" {
+		now.From = from
+	}
 	// The agent's own replies from THIS session are in its CLI memory: on a
 	// follow-up they are dropped as redundancy (everything in the delta past
 	// the last push is this-session by construction — the session existed when
@@ -298,17 +309,15 @@ func (b *Bridge) driveTextDelta(ctx context.Context, room, owner, provider, text
 	}
 	entries = dropSelf(entries, self, boundary)
 	if fresh {
-		return roomlog.Compose(entries, text, roomlog.Options{
+		return roomlog.Compose(entries, now, roomlog.Options{
 			SelfSpeaker: self,
 			WindowChars: b.windowChars,
 			Summarizer:  b.summarizer,
-			Attachments: atts,
 		})
 	}
-	return roomlog.ComposeDelta(entries, text, roomlog.Options{
+	return roomlog.ComposeDelta(entries, now, roomlog.Options{
 		SelfSpeaker: self,
 		WindowChars: b.windowChars,
-		Attachments: atts,
 	})
 }
 
@@ -319,18 +328,20 @@ const noSelfBound = int64(1) << 62
 // dropInstruction removes the current instruction from the records: it is
 // delivered as the [now] section, so a copy would both duplicate it and
 // re-inject it as history on later turns. Only the newest matching entry
-// goes — an older identical message is genuine history.
-func dropInstruction(entries []roomlog.Entry, text string) []roomlog.Entry {
+// goes — an older identical message is genuine history. from is that
+// entry's sender (roomlog.Sender), "" when no entry matched.
+func dropInstruction(entries []roomlog.Entry, text string) (kept []roomlog.Entry, from string) {
 	trimmed := strings.TrimSpace(text)
 	if trimmed == "" {
-		return entries
+		return entries, ""
 	}
 	for i := len(entries) - 1; i >= 0; i-- {
 		if strings.TrimSpace(entries[i].Text) == trimmed {
-			return append(entries[:i], entries[i+1:]...)
+			from = roomlog.Sender(entries[i])
+			return append(entries[:i], entries[i+1:]...), from
 		}
 	}
-	return entries
+	return entries, ""
 }
 
 // dropSelf removes the agent's own replies (speaker self) newer than bound:

@@ -12,7 +12,7 @@ func TestComposeMultiPartyFormat(t *testing.T) {
 		{Seq: 1, Speaker: "jack", Kind: KindHuman, Text: "add login with JWT"},
 		{Seq: 2, Speaker: "jack/codex", Kind: KindAgent, Text: "wrote /api/login, 24h token"},
 	}
-	got := Compose(entries, "who wrote the login endpoint?", Options{SelfSpeaker: "maya/orbit"})
+	got := Compose(entries, Now{From: "jack", Text: "who wrote the login endpoint?"}, Options{SelfSpeaker: "maya/orbit"})
 
 	for _, want := range []string{
 		"maya/orbit",                    // self label present
@@ -29,16 +29,16 @@ func TestComposeMultiPartyFormat(t *testing.T) {
 	}
 	// The current message directly follows the [now] marker; a short reminder
 	// (fencing history off from the instruction) closes the prompt.
-	if !strings.Contains(got, "[now — respond to this]\nwho wrote the login endpoint?") {
+	if !strings.Contains(got, "[now — from jack]\nwho wrote the login endpoint?") {
 		t.Fatal("current message must directly follow the now marker")
 	}
 }
 
-// Empty history and no files is a first turn: Compose returns just the current
-// message so nothing changes for a brand-new conversation.
+// Empty history is a first turn: Compose returns just the current message,
+// under the [now] marker naming its sender.
 func TestComposeEmptyIsBareMessage(t *testing.T) {
-	if got := Compose(nil, "hello", Options{SelfSpeaker: "maya/orbit"}); got != "hello" {
-		t.Fatalf("empty history should return bare message, got %q", got)
+	if got := Compose(nil, Now{From: "maya", Text: "hello"}, Options{SelfSpeaker: "maya/orbit"}); got != "[now — from maya]\nhello" {
+		t.Fatalf("empty history should return the message alone, got %q", got)
 	}
 }
 
@@ -51,7 +51,7 @@ func TestComposeSummarizesOverflow(t *testing.T) {
 		{Seq: 2, Speaker: "mia", Kind: KindHuman, Text: strings.Repeat("old-b ", 40)},
 		{Seq: 3, Speaker: "jack", Kind: KindHuman, Text: "the newest thing"},
 	}
-	got := Compose(entries, "continue", Options{
+	got := Compose(entries, Now{Text: "continue"}, Options{
 		SelfSpeaker: "maya/orbit",
 		WindowChars: 60, // fits only the newest short entry
 		Summarizer:  StructuredSummarizer{},
@@ -160,7 +160,7 @@ func TestComposeFencesHistoryFromInstruction(t *testing.T) {
 		{Speaker: "maya", Text: "清理 claude-mem 插件缓存（~10.6GB）"},
 		{Speaker: "maya/nimbus", Text: "扫描完成，本地一共有 5593 个会话记录。"},
 	}
-	out := Compose(entries, "存到文件里", Options{
+	out := Compose(entries, Now{From: "maya", Text: "存到文件里"}, Options{
 		SelfSpeaker: "maya/nimbus",
 		WindowChars: 1, // push both entries past the verbatim window into the summary
 		Summarizer:  StructuredSummarizer{},
@@ -175,7 +175,7 @@ func TestComposeFencesHistoryFromInstruction(t *testing.T) {
 			t.Errorf("Compose output missing fence %q:\n%s", want, out)
 		}
 	}
-	if !strings.Contains(out, "[now — respond to this]\n存到文件里") {
+	if !strings.Contains(out, "[now — from maya]\n存到文件里") {
 		t.Errorf("current message must directly follow the [now] marker:\n%s", out)
 	}
 }

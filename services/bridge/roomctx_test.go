@@ -361,7 +361,7 @@ func TestMaterializeDropsCurrentInstructionFromRecords(t *testing.T) {
 	if !ok {
 		t.Fatal("fake provider must satisfy WorkspaceFileWriter")
 	}
-	_, err := b.materializeRoomContext(context.Background(), w, ep, "r1", "ws", "job-x", "create final_check.rs: print done", roomlog.Producer{Owner: "maya", Provider: "agent-a"}, true, roomlog.CtxState{})
+	_, _, err := b.materializeRoomContext(context.Background(), w, ep, "r1", "ws", "job-x", "create final_check.rs: print done", roomlog.Producer{Owner: "maya", Provider: "agent-a"}, true, roomlog.CtxState{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -421,7 +421,7 @@ func TestMaterializeSelfFilterIsSessionBounded(t *testing.T) {
 	g.setHistory("test", []int64{}, nil)
 	g.addAgentRow("test", 12, "maya", "opencode", "peer agent answers")
 	b, w, ep, prov := newBridge(g)
-	st, err := b.materializeRoomContext(context.Background(), w, ep, "r1", "ws", "job-x", "", roomlog.Producer{Owner: "maya", Provider: "agent-a"}, true, roomlog.CtxState{})
+	st, _, err := b.materializeRoomContext(context.Background(), w, ep, "r1", "ws", "job-x", "", roomlog.Producer{Owner: "maya", Provider: "agent-a"}, true, roomlog.CtxState{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -447,7 +447,7 @@ func TestMaterializeSelfFilterIsSessionBounded(t *testing.T) {
 	g2.addChatRow("test", 14, "jack", "new person line")
 	b2, w2, ep2, prov2 := newBridge(g2)
 	st2 := roomlog.CtxState{EndSeq: 12, Chunks: []string{".room/chunk-x.md"}, SelfAfterSeq: 12}
-	if _, err := b2.materializeRoomContext(context.Background(), w2, ep2, "r1", "ws", "job-x", "", roomlog.Producer{Owner: "maya", Provider: "agent-a"}, false, st2); err != nil {
+	if _, _, err := b2.materializeRoomContext(context.Background(), w2, ep2, "r1", "ws", "job-x", "", roomlog.Producer{Owner: "maya", Provider: "agent-a"}, false, st2); err != nil {
 		t.Fatal(err)
 	}
 	recent2 := recentOf(prov2)
@@ -478,7 +478,7 @@ func TestDriveTextDeltaFreshWindow(t *testing.T) {
 	b := New(Config{GatewayBaseURL: g.srv.URL, GatewayToken: "t", OwnerSubject: "maya"})
 
 	st := roomlog.CtxState{}
-	prompt := b.driveTextDelta(context.Background(), "r1", "maya", "agent-a", "do the thing", nil, &st, true)
+	prompt := b.driveTextDelta(context.Background(), "r1", "maya", "agent-a", roomlog.Now{From: "maya", Text: "do the thing"}, &st, true)
 
 	if !strings.Contains(prompt, "person asks") {
 		t.Fatalf("person's message (general channel) must inject:\n%s", prompt)
@@ -494,7 +494,7 @@ func TestDriveTextDeltaFreshWindow(t *testing.T) {
 	if strings.Count(prompt, "do the thing") != 1 {
 		t.Fatalf("instruction must appear exactly once as [now], never in records:\n%s", prompt)
 	}
-	if !strings.Contains(prompt, "[now — respond to this]\ndo the thing") {
+	if !strings.Contains(prompt, "[now — from jack]\ndo the thing") {
 		t.Fatalf("instruction must directly follow the now marker:\n%s", prompt)
 	}
 	if st.PushSeenSeq != 13 {
@@ -511,7 +511,7 @@ func TestDriveTextDeltaFollowUpOnlyDelta(t *testing.T) {
 	b := New(Config{GatewayBaseURL: g.srv.URL, GatewayToken: "t", OwnerSubject: "maya"})
 
 	st := roomlog.CtxState{}
-	first := b.driveTextDelta(context.Background(), "r1", "maya", "agent-a", "do the thing", nil, &st, true)
+	first := b.driveTextDelta(context.Background(), "r1", "maya", "agent-a", roomlog.Now{From: "maya", Text: "do the thing"}, &st, true)
 	_ = first
 
 	// New activity since the last push: a person question, a peer reply, and
@@ -519,7 +519,7 @@ func TestDriveTextDeltaFollowUpOnlyDelta(t *testing.T) {
 	g.setHistory("general", []int64{20}, map[int64]string{20: "new question"})
 	g.addAgentRow("test", 21, "maya", "opencode", "peer follow-up")
 	g.addAgentRow("general", 22, "maya", "agent-a", "my own this-session reply")
-	second := b.driveTextDelta(context.Background(), "r1", "maya", "agent-a", "next instruction", nil, &st, false)
+	second := b.driveTextDelta(context.Background(), "r1", "maya", "agent-a", roomlog.Now{From: "maya", Text: "next instruction"}, &st, false)
 
 	if !strings.Contains(second, "New room messages since your last turn") {
 		t.Fatalf("follow-up must be framed as a delta:\n%s", second)
@@ -537,9 +537,10 @@ func TestDriveTextDeltaFollowUpOnlyDelta(t *testing.T) {
 		t.Fatalf("PushSeenSeq = %d, want 22 (self replies count as seen — the session authored them)", st.PushSeenSeq)
 	}
 
-	// Nothing new: the bare instruction, no framing at all.
-	third := b.driveTextDelta(context.Background(), "r1", "maya", "agent-a", "nothing new at all", nil, &st, false)
-	if third != "nothing new at all" {
-		t.Fatalf("empty delta must send the bare instruction, got:\n%s", third)
+	// Nothing new: the instruction alone, under the marker naming its
+	// sender (the requester when the history does not hold it).
+	third := b.driveTextDelta(context.Background(), "r1", "maya", "agent-a", roomlog.Now{From: "maya", Text: "nothing new at all"}, &st, false)
+	if third != "[now — from maya]\nnothing new at all" {
+		t.Fatalf("empty delta must send the instruction alone, got:\n%s", third)
 	}
 }

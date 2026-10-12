@@ -19,10 +19,29 @@ type Options struct {
 	// Summarizer condenses the entries that fall outside the verbatim window.
 	// nil means older entries are dropped rather than summarized.
 	Summarizer Summarizer
-	// Attachments are files attached to the CURRENT message, materialized into
-	// the workspace. Unlike the history sections, these ARE part of the request
-	// and the agent must open them; rendered as an imperative block before [now].
+}
+
+// Now is the message a turn answers: its text, who sent it (the Sender of
+// its room entry) and the files attached to it. Unlike the history
+// sections, the attachments ARE part of the request and the agent must open
+// them; they render as an imperative block before the [now] marker.
+type Now struct {
+	From        string
+	Text        string
 	Attachments []Attachment
+}
+
+// writeNow renders the turn's message: its attachments, the [now] marker
+// naming the sender, and the text. Every prompt ends with it, even one with
+// nothing else: the sender tells a person's own words from a task an agent
+// dispatched for them.
+func writeNow(b *strings.Builder, now Now) {
+	writeAttachmentsBlock(b, now.Attachments)
+	if b.Len() > 0 {
+		b.WriteString("\n")
+	}
+	b.WriteString(nowMarker(now.From))
+	b.WriteString(strings.TrimSpace(now.Text))
 }
 
 // Attachment names a file attached to the current message: the workspace path
@@ -41,7 +60,10 @@ func writeAttachmentsBlock(b *strings.Builder, atts []Attachment) {
 	if len(atts) == 0 {
 		return
 	}
-	fmt.Fprintf(b, "\n[attachments on this message — OPEN THESE]\nThe current message includes %d attachment(s), saved in this workspace. They are part of the request: open/read each one to answer.\n", len(atts))
+	if b.Len() > 0 {
+		b.WriteString("\n")
+	}
+	fmt.Fprintf(b, "[attachments on this message — OPEN THESE]\nThe current message includes %d attachment(s), saved in this workspace. They are part of the request: open/read each one to answer.\n", len(atts))
 	for _, a := range atts {
 		name := strings.TrimSpace(a.Filename)
 		ct := strings.TrimSpace(a.ContentType)
@@ -66,14 +88,13 @@ func writeAttachmentsBlock(b *strings.Builder, atts []Attachment) {
 //	[room conversation] (L2 — recent turns verbatim, "speaker: message")
 //	[now]               (L3 — the current message)
 //
-// When there is no history, it returns just the current message so
-// a first turn is unchanged. This is the single place the injected context
+// When there is no history, it returns just the current message (and its
+// attachments). This is the single place the injected context
 // format is defined; a CRDT-backed Source feeds the same Entry slice here, so
 // the format is stable across storage implementations. The room model is not
 // here: the bridge states it once per session (SessionGuidance), in the agent
 // profile or ahead of this first prompt.
-func Compose(entries []Entry, current string, opts Options) string {
-	current = strings.TrimSpace(current)
+func Compose(entries []Entry, now Now, opts Options) string {
 	older, window := splitWindow(entries, opts.WindowChars)
 
 	var summary string
@@ -81,8 +102,10 @@ func Compose(entries []Entry, current string, opts Options) string {
 		summary = strings.TrimSpace(opts.Summarizer.Summarize(older))
 	}
 
-	if len(window) == 0 && summary == "" && len(opts.Attachments) == 0 {
-		return current
+	if len(window) == 0 && summary == "" {
+		var b strings.Builder
+		writeNow(&b, now)
+		return b.String()
 	}
 
 	var b strings.Builder
@@ -107,12 +130,10 @@ func Compose(entries []Entry, current string, opts Options) string {
 	if len(window) > 0 {
 		b.WriteString("\n[room conversation]\n")
 		for _, e := range window {
-			writeLine(&b, e)
+			b.WriteString(Line(e))
 		}
 	}
-	writeAttachmentsBlock(&b, opts.Attachments)
-	b.WriteString("\n[now — respond to this]\n")
-	b.WriteString(current)
+	writeNow(&b, now)
 	b.WriteString(nowReminder)
 	return b.String()
 }
@@ -123,15 +144,6 @@ const nowReminder = "\n\n(Reminder: respond ONLY to the [now] message above. Do 
 	"re-derive, or \"save to a document\" anything from the history sections unless " +
 	"the [now] message explicitly asks for it. The attachments listed above, if any, " +
 	"ARE part of this message — open them.)"
-
-// writeLine renders one entry as "speaker: text".
-func writeLine(b *strings.Builder, e Entry) {
-	speaker := e.Speaker
-	if speaker == "" {
-		speaker = "unknown"
-	}
-	fmt.Fprintf(b, "%s: %s\n", speaker, strings.TrimSpace(e.Text))
-}
 
 // splitWindow divides chronological entries into (older, window): the newest
 // entries whose combined cost fits windowChars form the verbatim window, and

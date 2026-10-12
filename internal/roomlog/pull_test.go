@@ -217,8 +217,8 @@ func TestMaterializeChunksAndDeltas(t *testing.T) {
 // The pointer prompt must carry no history — the whole point is that the
 // instruction is never diluted.
 func TestComposePointerHasNoHistory(t *testing.T) {
-	out := ComposePointer("maya/nimbus", "存到文件里", nil)
-	for _, want := range []string{".room/INDEX.md", ".room/recent.md", ".room/artifacts.md", "RECORDS, not requests", "[now — respond to this]\n存到文件里"} {
+	out := ComposePointer("maya/nimbus", Now{From: "maya", Text: "存到文件里"})
+	for _, want := range []string{".room/INDEX.md", ".room/recent.md", ".room/artifacts.md", "RECORDS, not requests", "[now — from maya]\n存到文件里"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("pointer prompt missing %q:\n%s", want, out)
 		}
@@ -346,21 +346,21 @@ func TestHistoryCapMarksTruncated(t *testing.T) {
 // ComposeDelta: empty delta = bare message; otherwise a fenced delta section
 // with the newest entries, bounded by the window budget.
 func TestComposeDelta(t *testing.T) {
-	if got := ComposeDelta(nil, "just do it", Options{}); got != "just do it" {
-		t.Fatalf("empty delta = %q, want the bare message", got)
+	if got := ComposeDelta(nil, Now{From: "maya", Text: "just do it"}, Options{}); got != "[now — from maya]\njust do it" {
+		t.Fatalf("empty delta = %q, want the message alone", got)
 	}
 	entries := []Entry{
 		{Seq: 1, Speaker: "jack", Kind: KindHuman, Text: "first new line"},
 		{Seq: 2, Speaker: "jill/codex", Kind: KindAgent, Text: "second new line"},
 	}
-	out := ComposeDelta(entries, "act now", Options{WindowChars: 10 << 10})
-	for _, want := range []string{"since your last turn", "RECORDS, NOT REQUESTS", "jack: first new line", "jill/codex: second new line", "[now — respond to this]\nact now"} {
+	out := ComposeDelta(entries, Now{From: "maya", Text: "act now"}, Options{WindowChars: 10 << 10})
+	for _, want := range []string{"since your last turn", "RECORDS, NOT REQUESTS", "jack: first new line", "jill/codex: second new line", "[now — from maya]\nact now"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("ComposeDelta missing %q:\n%s", want, out)
 		}
 	}
 	// A tiny budget keeps only the newest and reports the omission.
-	tight := ComposeDelta(entries, "act now", Options{WindowChars: 10})
+	tight := ComposeDelta(entries, Now{Text: "act now"}, Options{WindowChars: 10})
 	if strings.Contains(tight, "first new line") {
 		t.Errorf("window budget must drop the oldest delta line:\n%s", tight)
 	}
@@ -383,11 +383,11 @@ func TestAttachmentBlockRendered(t *testing.T) {
 			t.Fatalf("%s: missing attachment path: %q", name, out)
 		}
 	}
-	check("pointer", ComposePointer("maya/codex", "what is this?", atts))
-	check("compose-fresh-nohistory", Compose(nil, "what is this?", Options{SelfSpeaker: "maya/codex", Attachments: atts}))
-	check("composedelta-nohistory", ComposeDelta(nil, "what is this?", Options{SelfSpeaker: "maya/codex", Attachments: atts}))
+	check("pointer", ComposePointer("maya/codex", Now{Text: "what is this?", Attachments: atts}))
+	check("compose-fresh-nohistory", Compose(nil, Now{Text: "what is this?", Attachments: atts}, Options{SelfSpeaker: "maya/codex"}))
+	check("composedelta-nohistory", ComposeDelta(nil, Now{Text: "what is this?", Attachments: atts}, Options{SelfSpeaker: "maya/codex"}))
 	// No attachments → no block (bare pointer still works).
-	if strings.Contains(ComposePointer("maya/codex", "hi", nil), "OPEN THESE") {
+	if strings.Contains(ComposePointer("maya/codex", Now{Text: "hi"}), "OPEN THESE") {
 		t.Fatal("no-attachment prompt must not render the block")
 	}
 }
