@@ -654,6 +654,41 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   chat). An agent-facing read (`read_room`) reads only the bound job's
   channel.
 
+- **Built-in content is a content source**, not a second library:
+  `internal/contentbuiltin`, wrapped over the content store at gateway and
+  realtime startup, scope `builtin`, artifact key `builtin/<sha256>`.
+  Changing a built-in's files means bumping its `component.json` version.
+- **Content requests on behalf of a job** (room tools `save_component`,
+  `get_component`, …) use the `?job=&room=` grant and act as the job's human
+  requester under the dispatch authority rules. Never save content as the
+  bridge owner or the agent; a borrowed or platform agent saves no
+  script-bearing package.
+- **Prompt packs are content, not a library.** Prompts live in a
+  `bnbloc.prompt.package/v1` manifest; "Save as prompt" appends to the
+  member's `my-prompts` pack; count insertions with `RecordContentPromptUse`
+  (once per insertion). Never add a second prompt store or route.
+- **A dropped table stays creatable for locked migrations:** when a table
+  leaves `schema.sql`, add it to `retiredTables` (`schema_ddl.go`) with the
+  dropping migration's id; never edit the locked migration.
+- **Teams resolve in two places only:** member experts as the requester in
+  `contentuse` (`Effective.team`); member agents staffed only by
+  `internal/expertteam` (`POST /v1/rooms/{id}/team-plan`), never on the lead's
+  own agent. Team guards (roles, `wire.MaxTeamFailures`, timeout notices,
+  `post_progress`) live in the room tools, never in instructions alone. Job
+  notice lines go under `job-<id>…` activity sessions with `payload.notice`,
+  never a real agent session.
+- **MCP servers come only from MCP tool components**
+  (`bnbloc.mcp.package/v1`, platform-signed); content names a tool in
+  `requires.mcp`, never a command or URL. The desktop downloads stdio tool
+  binaries through the shared verified download into
+  `BNBLOC_MCP_TOOLS_DIR` and never runs them as services; the bridge attaches
+  only an index entry carrying the gateway's pin. Member tool credentials stay
+  on the member's desktop (0600) and are used only for their own runs, never a
+  borrowed one. Org connectors are sealed with `internal/sealbox` under
+  `BNBLOC_SECRET_STORE_KEY` and decrypted only into the per-job resolution for
+  a job in that org; no second secret store, no clear-text fallback.
+  Unattachable tools go to `contentMissing` and never fail the run.
+
 ### Borrow authorization
 
 - **Borrowing another member's agent requires that owner's per-room
@@ -821,6 +856,14 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   stay pinned; do not add dialogs that assume unbounded height.
 - This web app uses **plain English toast strings, no i18n layer**. Match the
   existing `useToast()` convention.
+
+## Concurrent agents in one working tree
+
+When several agents work in one checkout, commit through a private index
+(`GIT_INDEX_FILE=<tmp> git read-tree HEAD`, apply only your hunks, commit,
+then `git reset -- <your files>`). Never stage in the shared index and wait:
+another agent's `git commit` takes it (2026-10-12: one commit swept up another
+agent's staged files).
 
 ## Toolchain
 
