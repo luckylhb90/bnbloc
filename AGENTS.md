@@ -136,7 +136,12 @@ Library).
 - **Memory and MySQL stores share one contract test suite** per interface; a
   behaviour only one implementation has is a bug in the other. The rig is
   `forEachBackend` (`internal/store/store_contract_test.go`): memory, plus
-  MySQL when `BNBLOC_TEST_MYSQL_DSN` is set, with per-run ids (`uniq`).
+  MySQL when `BNBLOC_TEST_MYSQL_DSN` is set, with per-run ids (`uniq`). An
+  interface's suite is the test functions named `TestContract<Interface>…`
+  (`contract_*_test.go`); `TestEveryStoreInterfaceHasContract` fails on a
+  two-backend interface without one, and `TestStoreTestsUseOneRig` on a
+  store test that opens MySQL itself (only a schema-altering test takes
+  `testmysql.Fresh`).
 - **A MySQL test never uses the DSN's database.** `internal/testmysql` owns
   `BNBLOC_TEST_MYSQL_DSN`: `testmysql.Fresh(t)` is a database of the test's
   own, `testmysql.Shared()` one per test binary (the package's `TestMain`
@@ -1212,6 +1217,19 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   lookup maps only `sql.ErrNoRows` to found=false. Login
   provisioning writes through the insert-only `TenantStore.EnsureMember`, so
   a failed or racing read cannot rewrite an org role.
+- **The store's small rules live once, in `internal/store/rules.go`:**
+  page sizes (`clampLimit(n, def, max)`, same call on both backends),
+  expiry (`liveAt`: live strictly before `expires_at_ms`; SQL `> ?`), the
+  duplicate-key mapping (`isDupEntry`/`isDupKey`/`dupAs` to an exported
+  sentinel both backends return; nothing else reads a driver error),
+  NULL writes (`nullIfZero`, `nullPtr`) and the `sqlNotDeleted` /
+  `sqlHumanMember` predicates. `TestStoreRulesSingleSource` fails on a copy
+  outside its owner (bridge liveness and job-status IN lists included).
+- **Every SQL on a tenant table names `tenant_id`, or says why not.** A
+  store function reading or changing a table with a `tenant_id` column
+  without filtering on it carries a `// cross-tenant: <reason>` comment (a
+  claim across tenants, a global token, a retention pass);
+  `TestTenantTablesFilterTenant` fails otherwise.
 - **MySQL counts matched rows** (`clientFoundRows` in `mysqlConfig`): an
   UPDATE that rewrites the values a row holds is a match. "No row matched
   means not found" is `requireMatched(res, ErrX)`; never re-read to tell a

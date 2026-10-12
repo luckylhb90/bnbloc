@@ -376,25 +376,3 @@ func TestContractConcurrentAppendPublishesOnce(t *testing.T) {
 		}
 	})
 }
-
-// sharedMySQLDSN is the test binary's database (testmysql.Shared), or ""
-// when BNBLOC_TEST_MYSQL_DSN is unset.
-func sharedMySQLDSN(t *testing.T) string {
-	t.Helper()
-	dsn, err := testmysql.Shared()
-	if err != nil {
-		t.Fatal(err)
-	}
-	return dsn
-}
-
-// mysqlTestDSN is sharedMySQLDSN for a MySQL-only test: it skips without
-// BNBLOC_TEST_MYSQL_DSN.
-func mysqlTestDSN(t *testing.T) string {
-	t.Helper()
-	dsn := sharedMySQLDSN(t)
-	if dsn == "" {
-		t.Skipf("set %s to run the MySQL integration test", testmysql.EnvDSN)
-	}
-	return dsn
-}

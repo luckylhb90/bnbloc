@@ -13,13 +13,6 @@ import (
 	"testing"
 )
 
-// storeRuleCopies are the re-spellings of a rule owned in rules.go (or, for
-// bridge liveness and job statuses, in bridge_jobs.go) that still exist, per
-// rule and file. The list only shrinks: a new copy fails the test, and an
-// entry whose count dropped must be lowered (or removed) with the change
-// that removed the copy. Batch 4.3 of the code-health plan empties it.
-var storeRuleCopies = map[string]map[string]int{}
-
 // storeRuleOwners are the files allowed to spell each rule.
 var storeRuleOwners = map[string][]string{
 	"limit-clamp":   {"rules.go"},
@@ -136,16 +129,7 @@ func TestStoreRulesSingleSource(t *testing.T) {
 	var problems []string
 	for rule, byFile := range got {
 		for file, n := range byFile {
-			if allowed := storeRuleCopies[rule][file]; n > allowed {
-				problems = append(problems, fmt.Sprintf("%s: %d new copies of the %q rule (allowed %d); use its owner (%s)", file, n-allowed, rule, allowed, strings.Join(storeRuleOwners[rule], ", ")))
-			}
-		}
-	}
-	for rule, byFile := range storeRuleCopies {
-		for file, allowed := range byFile {
-			if n := got[rule][file]; n < allowed {
-				problems = append(problems, fmt.Sprintf("storeRuleCopies[%q][%q] = %d but only %d remain: lower it (the list only shrinks)", rule, file, allowed, n))
-			}
+			problems = append(problems, fmt.Sprintf("%s: %d copies of the %q rule; use its owner (%s)", file, n, rule, strings.Join(storeRuleOwners[rule], ", ")))
 		}
 	}
 	sort.Strings(problems)

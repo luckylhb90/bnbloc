@@ -14,12 +14,6 @@ import (
 	"testing"
 )
 
-// tenantFilterPending are the store functions that read or change a
-// tenant-scoped table without naming tenant_id and without a
-// `cross-tenant: <reason>` comment yet. The list only shrinks; Batch 4.3 of
-// the code-health plan empties it.
-var tenantFilterPending = map[string]bool{}
-
 var (
 	createTableRe = regexp.MustCompile("(?s)CREATE TABLE IF NOT EXISTS `?(\\w+)`?\\s*\\((.*?)\\n\\)")
 	tableRefRe    = regexp.MustCompile("(?i)\\b(?:FROM|JOIN|UPDATE)\\s+`?(\\w+)`?")
@@ -51,7 +45,6 @@ func TestTenantTablesFilterTenant(t *testing.T) {
 		t.Fatal(err)
 	}
 	fset := token.NewFileSet()
-	found := map[string]bool{}
 	var offenders []string
 	for _, f := range files {
 		if strings.HasSuffix(f, "_test.go") || f == "migrations.go" || f == "schema_ddl.go" {
@@ -89,26 +82,12 @@ func TestTenantTablesFilterTenant(t *testing.T) {
 			if len(tables) == 0 || hasCrossTenantNote(file, fd) {
 				continue
 			}
-			key := f + ":" + funcKey(fd)
-			found[key] = true
-			if !tenantFilterPending[key] {
-				offenders = append(offenders, fmt.Sprintf("%s (%s)", key, strings.Join(tables, ", ")))
-			}
+			offenders = append(offenders, fmt.Sprintf("%s:%s (%s)", f, funcKey(fd), strings.Join(tables, ", ")))
 		}
 	}
 	sort.Strings(offenders)
 	if len(offenders) > 0 {
 		t.Errorf("SQL on a tenant table without tenant_id; filter by tenant, or say why it is cross-tenant with a `// cross-tenant: <reason>` comment in the function:\n  %s", strings.Join(offenders, "\n  "))
-	}
-	var stale []string
-	for k := range tenantFilterPending {
-		if !found[k] {
-			stale = append(stale, k)
-		}
-	}
-	sort.Strings(stale)
-	if len(stale) > 0 {
-		t.Errorf("tenantFilterPending entries that now filter by tenant or carry a cross-tenant note; remove them:\n  %s", strings.Join(stale, "\n  "))
 	}
 }
 

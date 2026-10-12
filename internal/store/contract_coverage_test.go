@@ -12,15 +12,6 @@ import (
 	"testing"
 )
 
-// contractPending are store interfaces implemented by both a memory and a
-// MySQL store that have no contract test yet. The list only shrinks; Batch
-// 4.1 of the code-health plan empties it.
-var contractPending = map[string]bool{}
-
-// rigPending are store test files that still open MySQL outside the one rig.
-// The list only shrinks; Batch 4.1 empties it.
-var rigPending = map[string]bool{}
-
 // TestEveryStoreInterfaceHasContract fails when a store interface with a
 // memory and a MySQL implementation (a Backends field, or
 // `var _ X = (*Memory…)(nil)` and `var _ X = (*MySQL…)(nil)`) has no
@@ -83,38 +74,24 @@ func TestEveryStoreInterfaceHasContract(t *testing.T) {
 			return true
 		})
 	}
-	var missing, stale []string
-	seen := map[string]bool{}
+	var missing []string
 	for iface, kinds := range impls {
 		if !kinds["Memory"] || !kinds["MySQL"] {
 			continue
 		}
-		seen[iface] = true
 		covered := false
 		for name, rig := range contracts {
 			if rig && strings.HasPrefix(name, "TestContract"+iface) {
 				covered = true
 			}
 		}
-		switch {
-		case !covered && !contractPending[iface]:
+		if !covered {
 			missing = append(missing, iface)
-		case covered && contractPending[iface]:
-			stale = append(stale, iface)
-		}
-	}
-	for iface := range contractPending {
-		if !seen[iface] {
-			stale = append(stale, iface)
 		}
 	}
 	sort.Strings(missing)
-	sort.Strings(stale)
 	if len(missing) > 0 {
 		t.Errorf("store interfaces without a contract test (add TestContract<Interface>… running forEachBackend):\n  %s", strings.Join(missing, "\n  "))
-	}
-	if len(stale) > 0 {
-		t.Errorf("contractPending entries that now have a contract (or are gone); remove them:\n  %s", strings.Join(stale, "\n  "))
 	}
 }
 
@@ -129,7 +106,6 @@ func TestStoreTestsUseOneRig(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	found := map[string]bool{}
 	var offenders []string
 	for _, f := range files {
 		if f == "store_contract_test.go" || f == "main_test.go" {
@@ -163,7 +139,7 @@ func TestStoreTestsUseOneRig(t *testing.T) {
 					return true
 				}
 				switch name := calleeName(call.Fun); name {
-				case "sharedMySQL", "sharedMySQLDSN", "mysqlTestDSN", "Shared":
+				case "sharedMySQL", "Shared":
 					why = append(why, fmt.Sprintf("%s:%d %s", f, fset.Position(call.Pos()).Line, name))
 				case "NewBackends", "OpenMySQL":
 					if len(call.Args) != 1 || isEmptyString(call.Args[0]) || isFreshDB(call.Args[0]) {
@@ -177,27 +153,11 @@ func TestStoreTestsUseOneRig(t *testing.T) {
 				return true
 			})
 		}
-		if len(why) == 0 {
-			continue
-		}
-		found[f] = true
-		if !rigPending[f] {
-			offenders = append(offenders, strings.Join(why, ", "))
-		}
+		offenders = append(offenders, why...)
 	}
 	sort.Strings(offenders)
 	if len(offenders) > 0 {
 		t.Errorf("store tests open MySQL outside the rig; use forEachBackend (or testmysql.Fresh for a schema test):\n  %s", strings.Join(offenders, "\n  "))
-	}
-	var stale []string
-	for f := range rigPending {
-		if !found[f] {
-			stale = append(stale, f)
-		}
-	}
-	sort.Strings(stale)
-	if len(stale) > 0 {
-		t.Errorf("rigPending entries that now use the rig; remove them:\n  %s", strings.Join(stale, "\n  "))
 	}
 }
 
