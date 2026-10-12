@@ -381,8 +381,9 @@ desktop agent.
   `TestLoadLeasedJobStatuses`, `TestNoMembershipFailOpen` extended.
 - **Status 2.5: landed.** `wire.RoomEventKinds` (the hub replays only replay
   kinds; metric labels and `PersistedFeedKind` derive from it), typed
-  payloads + `DecodePayload`, `wire.JobNotice` for every notice writer (the
-  bridge's readers stay with Batch 3), `contentshare.Announce`, one
+  payloads + `DecodePayload`, `wire.JobNotice` for every notice writer
+  (unified on rebase with Batch 3's `internal/wire/job_notice.go`: one
+  struct, `Payload()` and `Report()`, read back by roomlog and notify), `contentshare.Announce`, one
   `Service.publish`. Deviation: the failure sentence is
   `store.AgentJobFailureReason.Text`, not `wire.FailureText` (wire cannot
   import the store's reason type); the audit helper landed with the 2.6

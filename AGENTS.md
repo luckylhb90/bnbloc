@@ -889,11 +889,15 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   notice. Never classify by error text, and never report a failed status
   or declare a refusal elsewhere (`TestDriveRefusalsAreFinal`,
   `TestEveryStageRefusalPostsItsNotice`).
-- **Every notice row is a `wire.JobNotice`** (`payload.notice` is its
-  kind) under the job's notice session (`wire.JobNoticeSessionID`,
-  `wire.IsJobNoticeSession`): refusals, drive failures, the room tools'
-  progress lines, sync conflicts. Never post a notice as chat or under a
-  real agent session.
+- **Every notice row is a `wire.JobNotice`** (`internal/wire/job_notice.go`:
+  `Payload()` is the one payload with `payload.notice` as its kind,
+  `Report()` the one recorded batch) under the job's notice session
+  (`wire.JobNoticeSessionID`, `wire.IsJobNoticeSession`): the bridge's
+  refusals, drive failures and sync conflicts, activity's swept and
+  budget-refused jobs, the room tools' progress and timeout lines. Nothing
+  else sets payload.notice (`TestNoticesCarryKind`), and every agent-facing
+  reader (roomlog `DecodeRow`, notify) skips notice rows by kind and by
+  session. Never post a notice as chat or under a real agent session.
 - **The bridge MUST send `agentSessionId` when posting a reply to
   `agent-activity/messages`.** Activity dedupes new messages by a
   per-`(room, agentSessionId)` cursor. With the field missing, every session's
@@ -1032,10 +1036,7 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   `internal/expertteam` (`POST /v1/rooms/{id}/team-plan`), never on the lead's
   own agent. Team guards (roles, `wire.MaxTeamFailures`, timeout notices,
   `post_progress`) live in the room tools, never in instructions alone.
-- **Every notice line is built by `wire.JobNotice`** (bridge, activity, room
-  tools): it carries `payload.notice`, the job tags and the job's
-  `job-<id>…` notice session, never a real agent session
-  (`TestNoticesCarryKind`). A failed job's member-facing sentence is
+- A failed job's member-facing sentence is
   `store.AgentJobFailureReason.Text`. A share's notification is
   `contentshare.Announce` (one dedup key per member and version), from the
   gateway and realtime alike.
