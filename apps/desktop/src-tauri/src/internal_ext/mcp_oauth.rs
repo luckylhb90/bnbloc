@@ -127,10 +127,12 @@ fn sign_in_path(settings_dir: &Path, tool: &str) -> Result<PathBuf, String> {
     settings_path(&settings_dir.join(OAUTH_DIR), tool)
 }
 
+/// The stored sign-in (an unreadable file is moved aside and reads as
+/// signed out, files::read_json).
 fn load_sign_in(path: &Path) -> Option<SignIn> {
-    std::fs::read(path)
+    crate::files::read_json::<SignIn>(path)
         .ok()
-        .and_then(|raw| serde_json::from_slice::<SignIn>(&raw).ok())
+        .flatten()
         .filter(|s| !s.access_token.is_empty())
 }
 
@@ -210,11 +212,11 @@ impl SignIns {
     }
 }
 
-/// Owner-only (0600) through the shared credential writer. Only `SignIns`
-/// calls it, under the tool's lock.
+/// Owner-only (0600) through the shared writer (files::atomic_write). Only
+/// `SignIns` calls it, under the tool's lock.
 fn write_sign_in(path: &Path, sign_in: &SignIn) -> Result<(), String> {
     let raw = serde_json::to_vec(sign_in).map_err(|e| e.to_string())?;
-    crate::settings::write_owner_only(path, &raw)
+    crate::files::atomic_write(path, &raw)
 }
 
 fn remove_sign_in(path: &Path) -> Result<(), String> {
@@ -307,9 +309,7 @@ fn b64url(data: &[u8]) -> String {
 }
 
 fn random_token(bytes: usize) -> Result<String, String> {
-    let mut raw = vec![0u8; bytes];
-    getrandom::fill(&mut raw).map_err(|e| format!("random: {e}"))?;
-    Ok(b64url(&raw))
+    Ok(b64url(&crate::secret::random_bytes(bytes)?))
 }
 
 /// The PKCE S256 challenge of a verifier.
@@ -716,7 +716,11 @@ pub(super) fn check_callback(
         }
         _ => {}
     }
-    if cb.state.as_deref() != Some(state) {
+    if !cb
+        .state
+        .as_deref()
+        .is_some_and(|got| crate::secret::ct_eq(got, state))
+    {
         return Err("the sign-in answer does not belong to this sign-in; it was ignored".into());
     }
     if let Some(error) = &cb.error {

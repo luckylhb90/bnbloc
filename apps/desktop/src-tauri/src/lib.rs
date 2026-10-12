@@ -7,8 +7,11 @@ mod app_commands;
 mod artifact_scheme;
 mod bridge;
 mod child_process;
+mod dirs;
+mod files;
 mod internal_ext;
 mod previewer_scheme;
+mod secret;
 mod settings;
 mod site_scheme;
 mod sso_deep_link;
@@ -310,17 +313,21 @@ pub fn run() {
         .setup(|app| {
             let handle = app.handle().clone();
             let supervisor = Supervisor::new(handle.clone());
-            let settings_path = match settings::settings_path(&handle) {
-                Ok(path) => Some(path),
-                Err(e) => {
-                    eprintln!("[shell] settings unavailable: {e}");
-                    None
+            let dirs = dirs::Dirs::resolve(&handle);
+            if let Err(e) = &dirs {
+                eprintln!("[shell] app dirs unavailable: {e}");
+            }
+            let settings_path = dirs.as_ref().ok().map(dirs::Dirs::settings_file);
+            let settings = match settings_path.as_deref().map(settings::load) {
+                Some(Ok(settings)) => settings,
+                Some(Err(e)) => {
+                    // Shown in the bridge log (Agents); the unreadable file
+                    // was moved aside, never overwritten.
+                    supervisor.note(format!("[settings] {e}; starting unconfigured"));
+                    Settings::default()
                 }
+                None => Settings::default(),
             };
-            let settings = settings_path
-                .as_deref()
-                .map(settings::load)
-                .unwrap_or_default();
             sso_deep_link::setup(&handle);
 
             // Inject the gateway URL before any page script runs, so the shared
@@ -350,8 +357,12 @@ pub fn run() {
 
             // Desktop builds supervise installed Components sidecars only; the
             // package catalog supplies names, artifacts, and launch metadata.
-            let adapter =
-                internal_ext::Adapter::new(handle.clone(), gateway, settings.gateway_token.clone());
+            let adapter = internal_ext::Adapter::new(
+                handle.clone(),
+                dirs,
+                gateway,
+                settings.gateway_token.clone(),
+            );
             adapter.start();
             app.manage(adapter);
 

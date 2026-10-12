@@ -373,6 +373,11 @@ impl Supervisor {
         Ok(clean)
     }
 
+    /// Add a shell line to the bridge log the Agents view shows.
+    pub fn note(&self, line: String) {
+        self.log_line(line);
+    }
+
     fn generation_current(&self, generation: u64) -> bool {
         self.inner.lock().generation == generation
     }

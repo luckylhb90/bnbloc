@@ -29,7 +29,6 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use parking_lot::Mutex;
-use tauri::Manager;
 
 use crate::internal_ext::plugin_settings::{
     load, merge, missing_required, save, settings_path, views, LocalSettingView, Values,
@@ -226,17 +225,18 @@ pub(super) fn tool_file(dir: &Path, name: &str, sha256: &str) -> PathBuf {
     ))
 }
 
-/// Write the index atomically (temp file + rename): the bridge may read it
-/// at any moment.
+/// Write the index atomically (files::atomic_write): the bridge may read it
+/// at any moment. An unchanged index is left alone.
 pub(super) fn write_index(dir: &Path, entries: &[IndexEntry]) -> Result<(), String> {
-    std::fs::create_dir_all(dir).map_err(|e| format!("create MCP tools dir: {e}"))?;
     let raw = serde_json::to_vec_pretty(&Index {
         tools: entries.to_vec(),
     })
     .map_err(|e| e.to_string())?;
-    let tmp = dir.join(format!(".{INDEX_FILE}.tmp"));
-    std::fs::write(&tmp, raw).map_err(|e| format!("write MCP tools index: {e}"))?;
-    std::fs::rename(&tmp, dir.join(INDEX_FILE)).map_err(|e| format!("replace MCP tools index: {e}"))
+    let path = dir.join(INDEX_FILE);
+    if std::fs::read(&path).is_ok_and(|current| current == raw) {
+        return Ok(());
+    }
+    crate::files::atomic_write(&path, &raw)
 }
 
 /// Delete everything in the tools dir but the index and `keep` (the current
@@ -258,15 +258,6 @@ pub(super) fn collect_garbage(dir: &Path, keep: &HashSet<PathBuf>) {
 }
 
 impl Adapter {
-    /// The directory stdio MCP binaries are materialized into.
-    pub(super) fn mcp_tools_dir(&self) -> Result<PathBuf, String> {
-        self.app
-            .path()
-            .app_cache_dir()
-            .map(|base| base.join("mcp-tools"))
-            .map_err(|e| format!("cache dir: {e}"))
-    }
-
     /// The directory holding the signed-in member's MCP tool credentials
     /// and sign-ins (member_dir).
     pub(super) fn mcp_settings_dir(&self) -> Result<PathBuf, String> {
@@ -298,7 +289,7 @@ impl Adapter {
     async fn materialize_mcp_tools(&self, tools: Vec<McpTool>) -> Result<(), String> {
         let state = Arc::clone(&self.mcp);
         let _pass = state.pass.lock().await;
-        let dir = self.mcp_tools_dir()?;
+        let dir = self.dirs()?.mcp_tools();
         tokio::fs::create_dir_all(&dir)
             .await
             .map_err(|e| format!("create MCP tools dir: {e}"))?;
@@ -371,10 +362,13 @@ impl Adapter {
         let local = self.mcp.local.lock().clone();
         let mut out = Vec::new();
         for tool in tools {
-            let values = if tool.fields.is_empty() {
-                Values::new()
+            let (values, unreadable) = if tool.fields.is_empty() {
+                (Values::new(), None)
             } else {
-                load(&settings_path(&dir, &tool.name)?)
+                match load(&settings_path(&dir, &tool.name)?) {
+                    Ok(values) => (values, None),
+                    Err(e) => (Values::new(), Some(e)),
+                }
             };
             let (state, message) = if tool.transport == "stdio" {
                 local
@@ -415,7 +409,7 @@ impl Adapter {
                 transport: tool.transport,
                 credentials: tool.credentials,
                 state,
-                message,
+                message: unreadable.unwrap_or(message),
             });
         }
         Ok(out)
@@ -431,7 +425,7 @@ impl Adapter {
     ) -> Result<(), String> {
         let schema = self.mcp_schema(tool)?;
         let path = settings_path(&self.mcp_settings_dir()?, tool)?;
-        let next = merge(&schema, &load(&path), update)?;
+        let next = merge(&schema, &load(&path).unwrap_or_default(), update)?;
         save(&path, &next)
     }
 

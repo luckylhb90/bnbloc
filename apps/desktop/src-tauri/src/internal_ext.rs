@@ -58,6 +58,9 @@ const RECONCILE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60
 #[derive(Clone)]
 pub struct Adapter {
     app: AppHandle,
+    /// Where everything on disk lives (dirs.rs); an error when the app dirs
+    /// could not be resolved.
+    dirs: Arc<Result<crate::dirs::Dirs, String>>,
     /// The session the manager runs with. Its token also names the member
     /// scope (subject and tenant) whose directory holds that scope's state
     /// (member_dir; `session_scope`).
@@ -80,9 +83,14 @@ pub struct Adapter {
 }
 
 impl Adapter {
-    pub fn new(app: AppHandle, gateway_url: String, gateway_token: String) -> Self {
-        if let (Ok(config), Ok(data)) = (app.path().app_config_dir(), app.path().app_data_dir()) {
-            member_dir::remove_unkeyed_dirs(&config, &data);
+    pub fn new(
+        app: AppHandle,
+        dirs: Result<crate::dirs::Dirs, String>,
+        gateway_url: String,
+        gateway_token: String,
+    ) -> Self {
+        if let Ok(dirs) = &dirs {
+            member_dir::remove_unkeyed_dirs(dirs.config(), dirs.data());
         }
         let gateway = Arc::new(Mutex::new(GatewayAccess {
             base_url: gateway_url.trim_end_matches('/').to_string(),
@@ -90,6 +98,7 @@ impl Adapter {
         }));
         Self {
             app,
+            dirs: Arc::new(dirs),
             host: plugin_host::PluginHost::new(Arc::clone(&gateway)),
             gateway,
             inner: Arc::new(Mutex::new(Inner {
@@ -121,6 +130,11 @@ impl Adapter {
         }
     }
 
+    /// Where everything on disk lives (dirs.rs).
+    pub(super) fn dirs(&self) -> Result<&crate::dirs::Dirs, String> {
+        self.dirs.as_ref().as_ref().map_err(String::clone)
+    }
+
     /// The member scope a session acts in (subject and tenant from its
     /// token) and that scope's directory (member_dir). None when the token
     /// names no subject or no tenant.
@@ -128,10 +142,10 @@ impl Adapter {
         &self,
         gateway: &GatewayAccess,
     ) -> Option<(member_dir::SessionMember, std::path::PathBuf)> {
-        let config = self.app.path().app_config_dir().ok()?;
+        let config = self.dirs().ok()?.config();
         let member = member_dir::token_member(&gateway.token)?;
         let dir =
-            member_dir::member_dir(&config, &gateway.base_url, &member.subject, &member.tenant)?;
+            member_dir::member_dir(config, &gateway.base_url, &member.subject, &member.tenant)?;
         Some((member, dir))
     }
 
@@ -159,9 +173,9 @@ impl Adapter {
         if !tenant.is_empty() && tenant != member.tenant {
             return None;
         }
-        let config = self.app.path().app_config_dir().ok()?;
+        let config = self.dirs().ok()?.config();
         let bridge = member_dir::member_dir(
-            &config,
+            config,
             &settings.gateway_url,
             &settings.owner,
             &member.tenant,
@@ -220,8 +234,8 @@ impl Adapter {
     ) {
         let live = sidecar_sweep::Live::of(catalog, &sidecar_util::current_platform());
         let dirs = sidecar_sweep::SweepDirs {
-            binaries: self.cache_dir().ok(),
-            sandbox_bundles: self.sandbox_bundle_base().ok(),
+            binaries: self.dirs().ok().map(crate::dirs::Dirs::binaries),
+            sandbox_bundles: self.dirs().ok().map(crate::dirs::Dirs::sandbox_bundles),
             member: self.session_scope(gateway).map(|(_, dir)| dir),
         };
         let mcp = Arc::clone(&self.mcp);
@@ -483,10 +497,10 @@ pub fn extend_core_env(
     }
     // MCP tools: the materialized stdio binaries and the member's own tool
     // credentials, read by the bridge per session (no restart on change).
-    if let Ok(dir) = adapter.mcp_tools_dir() {
+    if let Ok(dirs) = adapter.dirs() {
         env.insert(
             mcp_tools::TOOLS_DIR_ENV.into(),
-            dir.to_string_lossy().into_owned(),
+            dirs.mcp_tools().to_string_lossy().into_owned(),
         );
     }
     if let Some(dir) = adapter

@@ -142,16 +142,14 @@ fn record_path(dir: &Path, id: &str) -> PathBuf {
 }
 
 pub(super) fn write_spawn_record(dir: &Path, id: &str, record: &SpawnRecord) -> Result<(), String> {
-    std::fs::create_dir_all(dir).map_err(|e| format!("create spawn record dir: {e}"))?;
     let raw = serde_json::to_vec(record).map_err(|e| format!("encode spawn record: {e}"))?;
-    let tmp = dir.join(format!(".{}.json.tmp", cache_stem(id)));
-    std::fs::write(&tmp, raw).map_err(|e| format!("write spawn record: {e}"))?;
-    std::fs::rename(&tmp, record_path(dir, id)).map_err(|e| format!("replace spawn record: {e}"))
+    crate::files::atomic_write(&record_path(dir, id), &raw)
 }
 
 pub(super) fn read_spawn_record(dir: &Path, id: &str) -> Option<SpawnRecord> {
-    let raw = std::fs::read(record_path(dir, id)).ok()?;
-    serde_json::from_slice(&raw).ok()
+    crate::files::read_json(&record_path(dir, id))
+        .ok()
+        .flatten()
 }
 
 /// Remove `id`'s record only if it still names `pid`: a newer child of the

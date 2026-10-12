@@ -1,5 +1,3 @@
-use tauri::Manager;
-
 use crate::internal_ext::sidecar_model::{
     AdapterStatus, ComponentKind, ManagedSidecar, SidecarSpec,
 };
@@ -72,19 +70,15 @@ impl Adapter {
     }
 
     fn manifest_dir_path(&self) -> Option<std::path::PathBuf> {
-        self.app
-            .path()
-            .app_cache_dir()
-            .ok()
-            .map(|dir| dir.join("core-manifests"))
+        self.dirs().ok().map(crate::dirs::Dirs::manifests)
     }
 }
 
 /// Reconcile the manifest dir to exactly the current manifest cores. The
 /// bridge may read this dir at any moment (its start), so the dir is never
-/// emptied and rewritten: each manifest is replaced atomically (temp file +
-/// rename), unchanged ones are left alone, and only manifests of cores no
-/// longer installed are removed.
+/// emptied and rewritten: each manifest is replaced atomically
+/// (files::atomic_write), unchanged ones are left alone, and only manifests
+/// of cores no longer installed are removed.
 fn write_manifest_files(dir: &std::path::Path, specs: &[SidecarSpec]) -> Result<(), String> {
     std::fs::create_dir_all(dir).map_err(|e| format!("create core manifests dir: {e}"))?;
     let mut wanted = std::collections::HashSet::new();
@@ -103,9 +97,7 @@ fn write_manifest_files(dir: &std::path::Path, specs: &[SidecarSpec]) -> Result<
         if std::fs::read(&path).is_ok_and(|current| current == raw) {
             continue;
         }
-        let tmp = dir.join(format!(".{}.json.tmp", spec.name));
-        std::fs::write(&tmp, raw).map_err(|e| format!("write {} manifest: {e}", spec.name))?;
-        std::fs::rename(&tmp, &path).map_err(|e| format!("replace {} manifest: {e}", spec.name))?;
+        crate::files::atomic_write(&path, &raw)?;
     }
     for entry in std::fs::read_dir(dir).map_err(|e| format!("read core manifests dir: {e}"))? {
         let path = entry

@@ -26,12 +26,13 @@ use tauri::Manager;
 
 use crate::child_process::{self, STOP_GRACE};
 use crate::internal_ext::sandbox_api::{
-    create_machine_request, Discovery, MachineView, SandboxApi, Secret,
+    create_machine_request, Discovery, MachineView, SandboxApi,
 };
 use crate::internal_ext::sandbox_bundle;
 use crate::internal_ext::sidecar_model::{ComponentKind, GuestProfile, SidecarSpec};
 use crate::internal_ext::sidecar_util::{cache_stem, home_env};
 use crate::internal_ext::Adapter;
+use crate::secret::Secret;
 use crate::settings::SandboxMode;
 
 /// The machine the desktop owns (`BNBLOC_SANDBOX_MACHINE`).
@@ -195,16 +196,6 @@ pub struct SandboxTimings {
 impl Adapter {
     // ---------------------------------------------------------------- launch
 
-    /// The machine-wide bundle cache (`<app cache>/sandbox`, one directory
-    /// per sandbox component): rebuildable, re-downloaded when missing.
-    pub(super) fn sandbox_bundle_base(&self) -> Result<PathBuf, String> {
-        self.app
-            .path()
-            .app_cache_dir()
-            .map(|dir| dir.join("sandbox"))
-            .map_err(|e| format!("sandbox dir: {e}"))
-    }
-
     /// The private data dir of sandbox `name` (its VM disks), created
     /// owner-only in the signed-in member's own directory (member_dir:
     /// member and tenant), so another member or tenant never uses it and
@@ -228,7 +219,7 @@ impl Adapter {
     ) -> Result<PathBuf, crate::internal_ext::sidecar_fetch::FetchError> {
         use crate::internal_ext::sidecar_fetch::FetchError;
         let id = spec.id();
-        let base = self.sandbox_bundle_base().map_err(FetchError::Retry)?;
+        let base = self.dirs().map_err(FetchError::Retry)?.sandbox_bundles();
         let plan = sandbox_bundle::bundle_plan(&base, spec).map_err(FetchError::Refused)?;
         let gateway = self.gateway.lock().clone();
         let client = self.http().map_err(FetchError::Retry)?;
@@ -280,8 +271,10 @@ impl Adapter {
     }
 
     async fn replace_sandbox_orphan(&self, spec: &SidecarSpec) {
-        let (Some(record_dir), Ok(base)) = (self.spawn_record_dir(), self.sandbox_bundle_base())
-        else {
+        let (Some(record_dir), Ok(base)) = (
+            self.spawn_record_dir(),
+            self.dirs().map(crate::dirs::Dirs::sandbox_bundles),
+        ) else {
             return;
         };
         let id = spec.id();

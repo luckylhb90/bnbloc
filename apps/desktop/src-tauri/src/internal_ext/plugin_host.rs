@@ -5,7 +5,8 @@
 //! `BNBLOC_PLUGIN_HOST_URL` (this loopback listener, bound on 127.0.0.1 at a
 //! random port when the first such plugin starts) and
 //! `BNBLOC_PLUGIN_HOST_TOKEN` (random per launch, revoked when that process
-//! exits). The token identifies the plugin; it is compared in constant time.
+//! exits). The token identifies the plugin; it is compared in constant time
+//! (`Secret::matches`).
 //!
 //! Routes (JSON in, JSON out):
 //!
@@ -37,6 +38,7 @@ use sha2::{Digest, Sha256};
 
 use crate::internal_ext::sidecar_model::GatewayAccess;
 use crate::internal_ext::sidecar_util::hex_lower;
+use crate::secret::Secret;
 
 /// Env vars a host-permitted plugin is launched with.
 pub(super) const HOST_URL_ENV: &str = "BNBLOC_PLUGIN_HOST_URL";
@@ -57,7 +59,7 @@ const GATEWAY_TIMEOUT: Duration = Duration::from_secs(15);
 /// One launched plugin's grant: its token and declared host permissions.
 struct Grant {
     plugin: String,
-    token: String,
+    token: Secret,
     permissions: Vec<String>,
 }
 
@@ -139,10 +141,8 @@ impl PluginHost {
 
     /// Issue a fresh token for one launch of `plugin` (replacing any earlier
     /// launch's token).
-    pub(super) fn grant(&self, plugin: &str, permissions: &[String]) -> Result<String, String> {
-        let mut raw = [0u8; 32];
-        getrandom::fill(&mut raw).map_err(|e| format!("plugin host token: {e}"))?;
-        let token = hex_lower(&raw);
+    pub(super) fn grant(&self, plugin: &str, permissions: &[String]) -> Result<Secret, String> {
+        let token = Secret::generate()?;
         let mut grants = self.grants.lock();
         grants.retain(|g| g.plugin != plugin);
         grants.push(Grant {
@@ -154,8 +154,8 @@ impl PluginHost {
     }
 
     /// Revoke one launch's token (the process exited or was stopped).
-    pub(super) fn revoke(&self, token: &str) {
-        self.grants.lock().retain(|g| g.token != token);
+    pub(super) fn revoke(&self, token: &Secret) {
+        self.grants.lock().retain(|g| &g.token != token);
     }
 
     async fn handle(&self, req: Request<Incoming>) -> Response<Full<Bytes>> {
@@ -199,13 +199,10 @@ impl PluginHost {
     /// The plugin and permissions the token was issued to (constant-time
     /// comparison against every live grant).
     fn authenticate(&self, token: &str) -> Option<(String, Vec<String>)> {
-        if token.is_empty() {
-            return None;
-        }
         let grants = self.grants.lock();
         let mut found = None;
         for g in grants.iter() {
-            if constant_time_eq(g.token.as_bytes(), token.as_bytes()) {
+            if g.token.matches(token) {
                 found = Some((g.plugin.clone(), g.permissions.clone()));
             }
         }
@@ -388,13 +385,6 @@ fn plugin_client_msg_id(plugin: &str, id: &str) -> String {
     format!("plg_{}", &hex_lower(&h.finalize())[..48])
 }
 
-fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
-    if a.len() != b.len() {
-        return false;
-    }
-    a.iter().zip(b).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
-}
-
 fn json(status: StatusCode, value: serde_json::Value) -> Response<Full<Bytes>> {
     let mut resp = Response::new(Full::new(Bytes::from(value.to_string())));
     *resp.status_mut() = status;
@@ -496,7 +486,7 @@ mod tests {
         assert!(base.starts_with("http://127.0.0.1:"), "{base}");
         let token = host.grant("personal-bot", &["chat".into()]).expect("grant");
 
-        let (status, body) = post(&base, &token, CHAT).await;
+        let (status, body) = post(&base, token.expose(), CHAT).await;
         assert_eq!((status, body["sequence"].as_i64()), (200, Some(42)));
 
         let raw = request
@@ -534,15 +524,19 @@ mod tests {
         let token = host.grant("reader", &[]).expect("grant");
         assert_eq!(post(&base, "", CHAT).await.0, 401);
         assert_eq!(post(&base, "nope", CHAT).await.0, 401);
-        assert_eq!(post(&base, &token, CHAT).await.0, 403, "chat not declared");
+        assert_eq!(
+            post(&base, token.expose(), CHAT).await.0,
+            403,
+            "chat not declared"
+        );
 
         // A relaunch replaces the token; a revoked one stops working.
         let first = host.grant("writer", &["chat".into()]).expect("grant");
         let second = host.grant("writer", &["chat".into()]).expect("grant");
         assert_ne!(first, second);
-        assert_eq!(post(&base, &first, CHAT).await.0, 401);
+        assert_eq!(post(&base, first.expose(), CHAT).await.0, 401);
         host.revoke(&second);
-        assert_eq!(post(&base, &second, CHAT).await.0, 401);
+        assert_eq!(post(&base, second.expose(), CHAT).await.0, 401);
 
         let resp = reqwest::Client::new()
             .get(format!("{base}/v1/chat"))
@@ -562,11 +556,11 @@ mod tests {
     async fn bad_bodies_limits_and_missing_session() {
         let (host, base) = host_with("", "").await;
         let token = host.grant("p", &["chat".into()]).expect("grant");
-        assert_eq!(post(&base, &token, "{").await.0, 400);
+        assert_eq!(post(&base, token.expose(), "{").await.0, 400);
         assert_eq!(
             post(
                 &base,
-                &token,
+                token.expose(),
                 r#"{"roomId":"r","text":" ","clientMsgId":"m"}"#
             )
             .await
@@ -576,7 +570,7 @@ mod tests {
         assert_eq!(
             post(
                 &base,
-                &token,
+                token.expose(),
                 r#"{"roomId":"r","text":"hi","clientMsgId":""}"#
             )
             .await
@@ -584,17 +578,17 @@ mod tests {
             400
         );
         assert_eq!(
-            post(&base, &token, r#"{"roomId":"r","text":"hi","clientMsgId":"m","recipient":{"ownerId":"","provider":"codex"}}"#).await.0,
+            post(&base, token.expose(), r#"{"roomId":"r","text":"hi","clientMsgId":"m","recipient":{"ownerId":"","provider":"codex"}}"#).await.0,
             400
         );
         let long = format!(
             r#"{{"roomId":"r","text":"{}","clientMsgId":"m"}}"#,
             "x".repeat(MAX_TEXT_BYTES + 1)
         );
-        assert_eq!(post(&base, &token, &long).await.0, 413);
+        assert_eq!(post(&base, token.expose(), &long).await.0, 413);
         let (status, body) = post(
             &base,
-            &token,
+            token.expose(),
             r#"{"roomId":"r","text":"hi","clientMsgId":"m"}"#,
         )
         .await;
@@ -606,17 +600,17 @@ mod tests {
         let (gw, _r) = gateway_once("403 Forbidden", "caller is not a member of room");
         let (host, base) = host_with(&gw, "s").await;
         let token = host.grant("p", &["chat".into()]).expect("grant");
-        let (status, body) = post(&base, &token, CHAT).await;
+        let (status, body) = post(&base, token.expose(), CHAT).await;
         assert_eq!(status, 403);
         assert_eq!(body["error"], "caller is not a member of room");
 
         let (gw, _r) = gateway_once("401 Unauthorized", "unauthorized");
         host.gateway.lock().base_url = gw;
-        assert_eq!(post(&base, &token, CHAT).await.0, 503);
+        assert_eq!(post(&base, token.expose(), CHAT).await.0, 503);
 
         let (gw, _r) = gateway_once("500 Internal Server Error", "boom");
         host.gateway.lock().base_url = gw;
-        assert_eq!(post(&base, &token, CHAT).await.0, 502);
+        assert_eq!(post(&base, token.expose(), CHAT).await.0, 502);
     }
 
     #[test]
@@ -630,13 +624,5 @@ mod tests {
         }
         assert!(!host.admit("busy"), "burst exhausted");
         assert!(host.admit("quiet"), "another plugin has its own bucket");
-    }
-
-    #[test]
-    fn constant_time_eq_compares_whole_values() {
-        assert!(constant_time_eq(b"abc", b"abc"));
-        assert!(!constant_time_eq(b"abc", b"abd"));
-        assert!(!constant_time_eq(b"abc", b"abcd"));
-        assert!(!constant_time_eq(b"", b"a"));
     }
 }

@@ -72,14 +72,25 @@ impl Adapter {
         settings_path(&self.plugin_settings_dir()?, plugin)
     }
 
-    /// Whether `plugin` may be launched: every required local setting set.
-    pub(super) fn plugin_settings_ready(&self, plugin: &str, schema: &[LocalSettingField]) -> bool {
+    /// Why `plugin` may not be launched yet (None: every required local
+    /// setting is set).
+    pub(super) fn plugin_settings_blocker(
+        &self,
+        plugin: &str,
+        schema: &[LocalSettingField],
+    ) -> Option<String> {
         if schema.iter().all(|f| !f.required) {
-            return true;
+            return None;
         }
-        self.plugin_settings_file(plugin)
-            .map(|path| missing_required(schema, &load(&path)).is_empty())
-            .unwrap_or(false)
+        let ask = format!("{plugin} needs its settings: open Settings → Notifications");
+        let values = match self
+            .plugin_settings_file(plugin)
+            .and_then(|path| load(&path))
+        {
+            Ok(values) => values,
+            Err(e) => return Some(format!("{ask} ({e})")),
+        };
+        (!missing_required(schema, &values).is_empty()).then_some(ask)
     }
 
     /// Every installed plugin that declares local settings.
@@ -94,13 +105,16 @@ impl Adapter {
             if spec.kind != ComponentKind::Plugin || spec.plugin.local_settings.is_empty() {
                 continue;
             }
-            let values = load(&settings_path(&dir, &spec.name)?);
+            let (values, unreadable) = match load(&settings_path(&dir, &spec.name)?) {
+                Ok(values) => (values, None),
+                Err(e) => (Values::new(), Some(e)),
+            };
             out.push(PluginLocalSettings {
                 plugin: spec.name.clone(),
                 version: spec.version.clone(),
                 configured: missing_required(&spec.plugin.local_settings, &values).is_empty(),
                 state: sidecar.status.state.clone(),
-                message: sidecar.status.message.clone(),
+                message: unreadable.unwrap_or_else(|| sidecar.status.message.clone()),
                 fields: views(&spec.plugin.local_settings, &values),
             });
         }
@@ -116,7 +130,7 @@ impl Adapter {
     ) -> Result<(), String> {
         let schema = self.plugin_schema(plugin)?;
         let path = self.plugin_settings_file(plugin)?;
-        let next = merge(&schema, &load(&path), update)?;
+        let next = merge(&schema, &load(&path).unwrap_or_default(), update)?;
         save(&path, &next)?;
         self.restart_sidecar(&component_id(ComponentKind::Plugin, plugin));
         Ok(())
@@ -163,8 +177,9 @@ pub(super) fn settings_path(dir: &Path, plugin: &str) -> Result<PathBuf, String>
 }
 
 /// The component files stored in `dir`: `(name, path)` of every
-/// `<name>.json` and of every in-flight `.<name>.json.tmp`. Anything else
-/// in the dir (sub-directories, foreign files) is not listed.
+/// `<name>.json` and of its temps and quarantined copies
+/// (`files::owner_name`). Anything else in the dir (sub-directories, foreign
+/// files) is not listed.
 pub(super) fn stored_files(dir: &Path) -> Vec<(String, PathBuf)> {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return Vec::new();
@@ -174,10 +189,7 @@ pub(super) fn stored_files(dir: &Path) -> Vec<(String, PathBuf)> {
         .filter(|entry| entry.file_type().is_ok_and(|t| t.is_file()))
         .filter_map(|entry| {
             let file = entry.file_name().into_string().ok()?;
-            let name = file
-                .strip_prefix('.')
-                .and_then(|f| f.strip_suffix(".tmp"))
-                .unwrap_or(&file)
+            let name = crate::files::owner_name(&file)
                 .strip_suffix(".json")?
                 .to_string();
             Some((name, entry.path()))
@@ -198,18 +210,16 @@ pub(super) fn forget_unlisted(dir: &Path, keep: &HashSet<String>) {
     }
 }
 
-/// The stored values (missing or unreadable file: none).
-pub(super) fn load(path: &Path) -> Values {
-    std::fs::read(path)
-        .ok()
-        .and_then(|raw| serde_json::from_slice(&raw).ok())
-        .unwrap_or_default()
+/// The stored values (missing file: none). An unreadable file is moved
+/// aside and reported (files::read_json).
+pub(super) fn load(path: &Path) -> Result<Values, String> {
+    crate::files::read_json(path).map(Option::unwrap_or_default)
 }
 
-/// Write the values owner-only (0600) via temp file + rename.
+/// Write the values owner-only (files::atomic_write).
 pub(super) fn save(path: &Path, values: &Values) -> Result<(), String> {
     let raw = serde_json::to_vec(values).map_err(|e| e.to_string())?;
-    crate::settings::write_owner_only(path, &raw)
+    crate::files::atomic_write(path, &raw)
 }
 
 /// Apply a form update to the stored values: only schema keys, a secret left
@@ -376,7 +386,7 @@ mod tests {
         let values = update(&[("appKey", "s3cr3t")]);
         save(&path, &values).expect("save");
         save(&path, &values).expect("replace in place");
-        assert_eq!(load(&path), values);
+        assert_eq!(load(&path), Ok(values));
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;

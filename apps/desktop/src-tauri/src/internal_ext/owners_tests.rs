@@ -18,6 +18,7 @@ fn sources() -> Vec<(String, String)> {
     let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
     let mut files = Vec::new();
     walk(&src, &mut files);
+    files.sort();
     files
         .into_iter()
         .filter(|p| !p.to_string_lossy().ends_with("_tests.rs"))
@@ -80,6 +81,48 @@ fn member_secret_dirs_are_named_only_by_member_dir() {
 #[test]
 fn orphan_evidence_is_judged_only_by_owned_orphan() {
     only_in(".app_pid", "internal_ext/sidecar_orphan.rs");
+}
+
+/// The shell's state files have one writer (files::atomic_write, owner-only,
+/// unique temp, synced) and one reader that never resets an unreadable file;
+/// the only other file writes are the verified download (sidecar_cache) and
+/// moving a verified sandbox bundle into place (sandbox_bundle).
+#[test]
+fn secret_files_use_one_writer() {
+    for needle in ["fs::write(", "OpenOptions", "write_owner_only"] {
+        only_in(needle, "files.rs");
+    }
+    only_in("File::create(", "internal_ext/sidecar_cache.rs");
+    let renames: Vec<String> = sources()
+        .into_iter()
+        .filter(|(_, code)| code.contains("fs::rename("))
+        .map(|(rel, _)| rel)
+        .collect();
+    assert_eq!(
+        renames,
+        vec![
+            "files.rs".to_string(),
+            "internal_ext/sandbox_bundle.rs".to_string(),
+            "internal_ext/sidecar_cache.rs".to_string(),
+        ],
+        "a rename outside the writers"
+    );
+}
+
+/// App directories are resolved once (dirs.rs); every path below them is
+/// named there.
+#[test]
+fn app_dirs_are_resolved_only_by_dirs() {
+    for needle in ["app_cache_dir", "app_config_dir", "app_data_dir"] {
+        only_in(needle, "dirs.rs");
+    }
+}
+
+/// Random values and secret comparisons have one owner (secret.rs).
+#[test]
+fn secrets_are_generated_and_compared_only_by_secret() {
+    only_in("getrandom::", "secret.rs");
+    only_in("fold(0u8", "secret.rs");
 }
 
 #[test]

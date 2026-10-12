@@ -15,7 +15,6 @@
 //! poll.
 
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -192,8 +191,9 @@ impl Adapter {
             ));
         }
         let path = self
-            .previewer_cache_dir()
+            .dirs()
             .map_err(PreviewerError::Unavailable)?
+            .previewers()
             .join(format!("{}.tar", pin.sha256));
         if let Some(raw) = read_verified(&path, &pin.sha256).await {
             return Ok(raw);
@@ -221,14 +221,6 @@ impl Adapter {
         })
     }
 
-    fn previewer_cache_dir(&self) -> Result<PathBuf, String> {
-        self.app
-            .path()
-            .app_cache_dir()
-            .map(|base| base.join("previewers"))
-            .map_err(|e| format!("cache dir: {e}"))
-    }
-
     /// Reconcile hook: forget previewers no longer installed for this member
     /// and delete their cached archives.
     pub(super) fn retain_previewers(&self, catalog: &ComponentsResponse) {
@@ -236,7 +228,7 @@ impl Adapter {
             return;
         };
         let keep = state.retain(&installed_previewers(catalog));
-        let Ok(dir) = self.previewer_cache_dir() else {
+        let Ok(dir) = self.dirs().map(crate::dirs::Dirs::previewers) else {
             return;
         };
         let Ok(entries) = std::fs::read_dir(&dir) else {
@@ -244,12 +236,8 @@ impl Adapter {
         };
         for entry in entries.flatten() {
             let name = entry.file_name().to_string_lossy().into_owned();
-            // `<sha>.tar`, or an in-flight download's `.<sha>.tar.part`.
-            let stem = name
-                .strip_prefix('.')
-                .and_then(|n| n.strip_suffix(".part"))
-                .unwrap_or(&name);
-            let live = stem
+            // `<sha>.tar`, or an in-flight download of it.
+            let live = crate::files::owner_name(&name)
                 .strip_suffix(".tar")
                 .is_some_and(|sha| keep.contains(sha));
             if !live {

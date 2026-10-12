@@ -6,17 +6,12 @@
 //! lifecycle semantics, only the connection parameters the connector needs.
 //!
 //! The file carries credentials (gateway token, sync secret, core tokens), so
-//! it is written owner-only (0600 on Unix) via write-to-temp + rename — never
-//! world-readable, never half-written.
+//! it is written and read through `files` (owner-only, atomic; an unreadable
+//! file is moved aside, never reset and overwritten).
 
-use std::io::Write;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use serde::{Deserialize, Serialize};
-use tauri::Manager;
-
-/// The settings file name, under the app data dir.
-const SETTINGS_FILE: &str = "settings.json";
 
 /// One configured agent source (daemon backend). Empty `url`/`token` rely on
 /// the bridge's per-source auto-discovery.
@@ -130,62 +125,19 @@ impl Settings {
     }
 }
 
-/// The settings file path for this app.
-pub fn settings_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
-    app.path()
-        .app_data_dir()
-        .map(|dir| dir.join(SETTINGS_FILE))
-        .map_err(|e| format!("resolve settings dir: {e}"))
-}
-
-/// Load settings; a missing or unreadable file is a fresh, unconfigured
-/// client. An existing file is re-tightened to owner-only on load.
-pub fn load(path: &Path) -> Settings {
-    let Ok(raw) = std::fs::read(path) else {
-        return Settings::default();
-    };
+/// Load settings: a missing file is a fresh, unconfigured client; an
+/// unreadable one is moved aside and reported (`Err`), so the caller shows it
+/// instead of saving defaults over the member's credentials. An existing file
+/// is re-tightened to owner-only on load.
+pub fn load(path: &Path) -> Result<Settings, String> {
     let _ = restrict_to_owner(path);
-    serde_json::from_slice(&raw).unwrap_or_else(|e| {
-        eprintln!("[settings] ignoring unreadable {}: {e}", path.display());
-        Settings::default()
-    })
+    crate::files::read_json(path).map(Option::unwrap_or_default)
 }
 
 /// Persist settings atomically with owner-only permissions.
 pub fn save(path: &Path, settings: &Settings) -> Result<(), String> {
     let raw = serde_json::to_vec_pretty(settings).map_err(|e| e.to_string())?;
-    write_owner_only(path, &raw)
-}
-
-/// Write `raw` to `path` atomically (temp file + rename) and owner-only
-/// (0600 on Unix): the one writer of every credential-bearing file the shell
-/// keeps (these settings, plugin local settings).
-pub(crate) fn write_owner_only(path: &Path, raw: &[u8]) -> Result<(), String> {
-    let dir = path
-        .parent()
-        .ok_or_else(|| format!("{} has no parent dir", path.display()))?;
-    std::fs::create_dir_all(dir).map_err(|e| format!("create {}: {e}", dir.display()))?;
-    let name = path
-        .file_name()
-        .map(|n| n.to_string_lossy().into_owned())
-        .ok_or_else(|| format!("{} names no file", path.display()))?;
-    let tmp = dir.join(format!(".{name}.tmp"));
-    let _ = std::fs::remove_file(&tmp);
-    let mut options = std::fs::OpenOptions::new();
-    options.write(true).create_new(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        options.mode(0o600);
-    }
-    let mut file = options
-        .open(&tmp)
-        .map_err(|e| format!("write {}: {e}", path.display()))?;
-    file.write_all(raw)
-        .and_then(|_| file.sync_all())
-        .map_err(|e| format!("write {}: {e}", path.display()))?;
-    drop(file);
-    std::fs::rename(&tmp, path).map_err(|e| format!("replace {}: {e}", path.display()))
+    crate::files::atomic_write(path, &raw)
 }
 
 #[cfg(unix)]
@@ -203,6 +155,8 @@ fn restrict_to_owner(_path: &Path) -> std::io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    const SETTINGS_FILE: &str = "settings.json";
 
     #[test]
     fn empty_settings_stay_coreless() {
@@ -274,10 +228,14 @@ mod tests {
         // A second save replaces the file in place (temp + rename).
         save(&path, &settings).expect("re-save settings");
 
-        let loaded = load(&path);
+        let loaded = load(&path).expect("load");
         assert_eq!(loaded.gateway_url, "https://gw.example");
         assert_eq!(loaded.gateway_token, "secret");
-        assert!(!dir.join(format!(".{SETTINGS_FILE}.tmp")).exists());
+        assert_eq!(
+            std::fs::read_dir(&dir).expect("list").count(),
+            1,
+            "no temp left"
+        );
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
@@ -298,7 +256,7 @@ mod tests {
         std::fs::write(&path, br#"{"owner":"me"}"#).expect("write");
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).expect("chmod");
 
-        assert_eq!(load(&path).owner, "me");
+        assert_eq!(load(&path).expect("load").owner, "me");
         let mode = std::fs::metadata(&path).expect("stat").permissions().mode();
         assert_eq!(mode & 0o777, 0o600);
         std::fs::remove_dir_all(&dir).expect("cleanup");
@@ -330,13 +288,29 @@ mod tests {
             ..Default::default()
         };
         save(&path, &settings).expect("save settings");
-        assert_eq!(load(&path).sandbox_mode, SandboxMode::All);
+        assert_eq!(load(&path).expect("load").sandbox_mode, SandboxMode::All);
         std::fs::remove_dir_all(&dir).expect("cleanup");
     }
 
     #[test]
     fn missing_file_is_an_unconfigured_client() {
-        let s = load(Path::new("/nonexistent/bnbloc/settings.json"));
+        let s = load(Path::new("/nonexistent/bnbloc/settings.json")).expect("missing");
         assert!(!s.is_runnable());
+    }
+
+    /// A corrupt settings file is reported and kept (moved aside), never
+    /// reset to defaults and saved over: it carries the member's tokens.
+    #[test]
+    fn corrupt_settings_are_moved_aside_and_reported() {
+        let dir = std::env::temp_dir().join(format!("bnbloc-settings-bad-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("mkdir");
+        let path = dir.join(SETTINGS_FILE);
+        std::fs::write(&path, br#"{"gatewayToken":"keep"#).expect("write");
+        let err = load(&path).expect_err("corrupt");
+        assert!(err.contains("moved aside"), "{err}");
+        let kept = std::fs::read_dir(&dir).expect("list").count();
+        assert_eq!(kept, 1, "the corrupt copy is kept beside");
+        std::fs::remove_dir_all(&dir).expect("cleanup");
     }
 }

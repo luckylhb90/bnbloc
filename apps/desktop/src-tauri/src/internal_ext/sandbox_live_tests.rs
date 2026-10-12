@@ -19,12 +19,13 @@ use std::time::{Duration, Instant};
 
 use sha2::{Digest, Sha256};
 
-use crate::internal_ext::sandbox_api::{create_machine_request, SandboxApi, Secret};
+use crate::internal_ext::sandbox_api::{create_machine_request, SandboxApi};
 use crate::internal_ext::sandbox_bundle;
 use crate::internal_ext::sidecar_model::{
     resolve_component_specs, ComponentsResponse, GatewayAccess, GuestProfile,
 };
 use crate::internal_ext::sidecar_util::{current_platform, hex_lower, listen_addr};
+use crate::secret::Secret;
 
 fn serve_files(files: HashMap<String, Vec<u8>>) -> String {
     use std::io::{BufRead, BufReader, Write};

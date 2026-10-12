@@ -60,14 +60,11 @@ pub(super) fn cache_stem(id: &str) -> String {
 }
 
 /// The owner stem and pinned sha256 of a cache file name
-/// (`<stem>-<64 hex>[.exe]`) or of its partial download (`.<that>.part`),
-/// or None for any other name. Component `foo` never claims `foo-bar`'s
-/// files: the stem is everything before the final `-<sha>`.
+/// (`<stem>-<64 hex>[.exe]`) or of its partial download
+/// (`files::owner_name`), or None for any other name. Component `foo` never
+/// claims `foo-bar`'s files: the stem is everything before the final `-<sha>`.
 pub(super) fn parse_cache_file(name: &str) -> Option<(&str, String)> {
-    let name = name
-        .strip_prefix('.')
-        .and_then(|n| n.strip_suffix(".part"))
-        .unwrap_or(name);
+    let name = crate::files::owner_name(name);
     let base = name.strip_suffix(exe_suffix()).unwrap_or(name);
     let split = base.len().checked_sub(65)?;
     if !base.is_char_boundary(split) {
@@ -383,7 +380,7 @@ mod tests {
         let names: Vec<String> = vec![
             cache_file_name("foo", SHA_A), // old foo build: stale
             keep.clone(),                  // current foo build: kept
-            format!(".{}.part", cache_file_name("foo", SHA_A)), // stale partial
+            format!(".{}.0123456789abcdef.part", cache_file_name("foo", SHA_A)), // stale partial
             cache_file_name("foo-bar", SHA_A), // another component
             cache_file_name("plugin/foo", SHA_A), // the plugin namesake
             format!("foo-{}", &SHA_A[..10]), // not a cache name
@@ -394,7 +391,7 @@ mod tests {
         stale.sort();
         let mut want = vec![
             cache_file_name("foo", SHA_A),
-            format!(".{}.part", cache_file_name("foo", SHA_A)),
+            format!(".{}.0123456789abcdef.part", cache_file_name("foo", SHA_A)),
         ];
         want.sort();
         assert_eq!(stale, want);
@@ -473,7 +470,10 @@ mod tests {
         assert_eq!(platform_for("windows", "x86"), "windows-386");
         // Unknown on either side: no artifact can match.
         assert_eq!(platform_for("linux", "riscv64"), "linux-unsupported");
-        assert!(!current_platform().contains("unsupported"), "this build is mapped");
+        assert!(
+            !current_platform().contains("unsupported"),
+            "this build is mapped"
+        );
     }
 
     #[test]
@@ -565,7 +565,7 @@ mod tests {
             parse_cache_file(&cache_file_name("plugin/foo", SHA_B)),
             Some(("plugin-foo", SHA_B.to_string()))
         );
-        let part = format!(".{}.part", cache_file_name("foo", SHA_A));
+        let part = format!(".{}.0123456789abcdef.part", cache_file_name("foo", SHA_A));
         assert_eq!(parse_cache_file(&part), Some(("foo", SHA_A.to_string())));
         assert_eq!(parse_cache_file("foo-notes.txt"), None);
         assert_eq!(parse_cache_file(&format!("-{SHA_A}")), None);

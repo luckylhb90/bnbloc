@@ -214,12 +214,16 @@ mod tests {
         // uninstalled; the a* components are still installed.
         let gone = [
             member.join("plugin-settings/x.json"),
-            member.join("plugin-settings/.x.json.tmp"),
+            member.join("plugin-settings/.x.json.0123456789abcdef.tmp"),
+            member.join("plugin-settings/x.json.corrupt-1700000000000"),
             member.join("mcp-settings/y.json"),
             member.join("mcp-settings/oauth/y.json"),
             member.join("sandbox/s/disk.img"),
             cores.join(cache_file_name("z", SHA)),
-            cores.join(format!(".{}.part", cache_file_name("plugin/x", SHA))),
+            cores.join(format!(
+                ".{}.0123456789abcdef.part",
+                cache_file_name("plugin/x", SHA)
+            )),
             root.join("cache/sandbox/s/0.1.0-abc/s"),
         ];
         let mut stays = member_state(&member, "a");

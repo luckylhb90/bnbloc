@@ -47,16 +47,10 @@ impl Adapter {
             .into_iter()
             .filter_map(|spec| {
                 let id = spec.id();
-                if !self.plugin_settings_ready(&spec.name, &spec.plugin.local_settings) {
-                    self.set_status(
-                        &id,
-                        "waiting",
-                        format!(
-                            "{} needs its settings: open Settings → Notifications",
-                            spec.name
-                        ),
-                        None,
-                    );
+                if let Some(blocker) =
+                    self.plugin_settings_blocker(&spec.name, &spec.plugin.local_settings)
+                {
+                    self.set_status(&id, "waiting", blocker, None);
                     return None;
                 }
                 let mut inner = self.inner.lock();
@@ -282,7 +276,7 @@ impl Adapter {
     /// this app spawned it. Best-effort: lsof/ps run off the async runtime.
     async fn find_orphan(&self, spec: &SidecarSpec) -> Option<Orphan> {
         let port = listener_port(&spec.local_url)?;
-        let cache_dir = self.cache_dir().ok()?;
+        let cache_dir = self.dirs().ok()?.binaries();
         let record_dir = self.spawn_record_dir()?;
         let id = spec.id();
         tauri::async_runtime::spawn_blocking(move || {
@@ -301,12 +295,7 @@ impl Adapter {
     }
 
     pub(super) fn spawn_record_dir(&self) -> Option<std::path::PathBuf> {
-        use tauri::Manager;
-        self.app
-            .path()
-            .app_cache_dir()
-            .ok()
-            .map(|dir| dir.join("sidecar-pids"))
+        self.dirs().ok().map(crate::dirs::Dirs::spawn_records)
     }
 
     fn record_spawn(&self, id: &str, pid: u32, sha256: &str) {
@@ -358,13 +347,14 @@ impl Adapter {
         );
         cmd.args(&spec.args);
         let host_token = self.plugin_launch_env(spec, &mut cmd).await?;
+        let host_token = host_token.as_ref();
         let sandbox_token = self.sandbox_launch_env(spec, path, &mut cmd)?;
         drop(listener.take());
         let spawned = child_process::spawn(cmd).map_err(|e| format!("spawn sidecar: {e}"));
         let (mut rx, child) = match spawned {
             Ok(spawned) => spawned,
             Err(e) => {
-                if let Some(token) = &host_token {
+                if let Some(token) = host_token {
                     self.host.revoke(token);
                 }
                 return Err(e);
@@ -411,7 +401,7 @@ impl Adapter {
             }
         }
         self.forget_spawn(&id, pid);
-        if let Some(token) = &host_token {
+        if let Some(token) = host_token {
             self.host.revoke(token);
         }
         if let Some(seq) = sandbox_seq {
@@ -435,7 +425,7 @@ impl Adapter {
         &self,
         spec: &SidecarSpec,
         cmd: &mut std::process::Command,
-    ) -> Result<Option<String>, String> {
+    ) -> Result<Option<crate::secret::Secret>, String> {
         if spec.kind != crate::internal_ext::sidecar_model::ComponentKind::Plugin {
             return Ok(None);
         }
@@ -451,7 +441,7 @@ impl Adapter {
         let url = self.host.ensure_started().await?;
         let token = self.host.grant(&spec.name, &spec.plugin.host)?;
         cmd.env(plugin_host::HOST_URL_ENV, url);
-        cmd.env(plugin_host::HOST_TOKEN_ENV, &token);
+        cmd.env(plugin_host::HOST_TOKEN_ENV, token.expose());
         Ok(Some(token))
     }
 

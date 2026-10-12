@@ -21,40 +21,7 @@ const LIFECYCLE_TIMEOUT: Duration = Duration::from_secs(120);
 /// An image pull or a cold create may fetch hundreds of MB from a registry.
 const PREPARE_TIMEOUT: Duration = Duration::from_secs(30 * 60);
 
-/// The bearer of one sidecar launch. Never printed: Debug/Display redact it,
-/// so a status dump or an error log can never carry it.
-#[derive(Clone, PartialEq, Eq)]
-pub(crate) struct Secret(String);
-
-impl Secret {
-    /// A fresh 256-bit token from the OS CSPRNG.
-    pub(super) fn generate() -> Result<Self, String> {
-        let mut raw = [0_u8; 32];
-        getrandom::fill(&mut raw).map_err(|e| format!("sandbox token: {e}"))?;
-        Ok(Self(crate::internal_ext::sidecar_util::hex_lower(&raw)))
-    }
-
-    #[cfg(test)]
-    pub(super) fn from_test(value: &str) -> Self {
-        Self(value.to_string())
-    }
-
-    pub(super) fn expose(&self) -> &str {
-        &self.0
-    }
-}
-
-impl std::fmt::Debug for Secret {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("Secret(<redacted>)")
-    }
-}
-
-impl std::fmt::Display for Secret {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("<redacted>")
-    }
-}
+use crate::secret::Secret;
 
 /// What the desktop keeps from discovery.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -401,17 +368,6 @@ mod tests {
         "protocol":{"min":"1.0","max":"1.0"},
         "capabilities":["exec","spaces","shares","egressPolicy"],
         "backend":{"name":"x","version":"y","isolation":"microvm"}}"#;
-
-    #[test]
-    fn secret_never_prints_its_value() {
-        let secret = Secret::from_test("tok-very-secret");
-        assert!(!format!("{secret:?}").contains("tok-very-secret"));
-        assert!(!format!("{secret}").contains("tok-very-secret"));
-        assert_eq!(secret.expose(), "tok-very-secret");
-        let generated = Secret::generate().expect("csprng");
-        assert_eq!(generated.expose().len(), 64);
-        assert_ne!(generated, Secret::generate().unwrap());
-    }
 
     #[test]
     fn discovery_requires_contract_protocol_and_shared_machine_capabilities() {

@@ -2,7 +2,6 @@ use std::path::{Path, PathBuf};
 
 use futures_util::StreamExt;
 use sha2::{Digest, Sha256};
-use tauri::Manager;
 use tokio::io::AsyncWriteExt;
 
 use crate::internal_ext::sidecar_fetch::FetchError;
@@ -51,7 +50,7 @@ impl Adapter {
     /// reconcile's sweep, sidecar_sweep). Best-effort and off the async
     /// runtime.
     fn remove_cached_binaries(&self, id: &str, keep: &str) {
-        let Ok(dir) = self.cache_dir() else {
+        let Ok(dir) = self.dirs().map(crate::dirs::Dirs::binaries) else {
             return;
         };
         let id = id.to_string();
@@ -71,16 +70,8 @@ impl Adapter {
         });
     }
 
-    pub(super) fn cache_dir(&self) -> Result<PathBuf, String> {
-        self.app
-            .path()
-            .app_cache_dir()
-            .map(|base| base.join("cores"))
-            .map_err(|e| format!("cache dir: {e}"))
-    }
-
     fn cache_path(&self, id: &str, sha256: &str) -> Result<PathBuf, String> {
-        Ok(self.cache_dir()?.join(cache_file_name(id, sha256)))
+        Ok(self.dirs()?.binaries().join(cache_file_name(id, sha256)))
     }
 }
 
@@ -170,17 +161,14 @@ pub(super) async fn fetch_verified(
     let dir = dest
         .parent()
         .ok_or(FetchError::Retry("download path has no parent".into()))?;
-    let file_name = dest
-        .file_name()
-        .ok_or(FetchError::Retry("download path has no file name".into()))?
-        .to_string_lossy()
-        .into_owned();
     tokio::fs::create_dir_all(dir)
         .await
         .map_err(|e| FetchError::Retry(format!("create cache dir: {e}")))?;
-    let tmp = dir.join(format!(".{file_name}.part"));
+    // A temp of this download alone: two downloads of one file never write
+    // into each other's bytes; the verified one is renamed into place.
+    let tmp = crate::files::temp_path(dest, "part").map_err(FetchError::Retry)?;
     let mut hasher = Sha256::new();
-    {
+    let streamed = async {
         let mut file = tokio::fs::File::create(&tmp)
             .await
             .map_err(|e| FetchError::Retry(format!("create temp: {e}")))?;
@@ -195,9 +183,14 @@ pub(super) async fn fetch_verified(
             written += chunk.len() as u64;
             progress(FetchProgress::Downloading { written, total });
         }
-        file.flush()
+        file.sync_all()
             .await
-            .map_err(|e| FetchError::Retry(format!("flush temp: {e}")))?;
+            .map_err(|e| FetchError::Retry(format!("sync temp: {e}")))
+    }
+    .await;
+    if let Err(e) = streamed {
+        let _ = tokio::fs::remove_file(&tmp).await;
+        return Err(e);
     }
     let got = hex_lower(&hasher.finalize());
     progress(FetchProgress::Verifying);
@@ -208,11 +201,16 @@ pub(super) async fn fetch_verified(
         )));
     }
     if executable {
-        set_executable(&tmp).map_err(FetchError::Retry)?;
+        if let Err(e) = set_executable(&tmp) {
+            let _ = tokio::fs::remove_file(&tmp).await;
+            return Err(FetchError::Retry(e));
+        }
     }
-    tokio::fs::rename(&tmp, dest)
-        .await
-        .map_err(|e| FetchError::Retry(format!("cache rename: {e}")))
+    if let Err(e) = tokio::fs::rename(&tmp, dest).await {
+        let _ = tokio::fs::remove_file(&tmp).await;
+        return Err(FetchError::Retry(format!("cache rename: {e}")));
+    }
+    Ok(())
 }
 
 #[cfg(test)]
