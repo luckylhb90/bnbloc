@@ -1,4 +1,7 @@
-package gateway
+// Package semver is the one semantic-version parser and comparer: desktop
+// release ordering and update policy (gateway) and content component
+// versions and requirement ranges (contentpkg) share it.
+package semver
 
 import (
 	"fmt"
@@ -7,18 +10,21 @@ import (
 	"unicode"
 )
 
-type semverVersion struct {
-	major int
-	minor int
-	patch int
-	pre   []string
+// Version is a parsed semantic version (build metadata dropped).
+type Version struct {
+	Major int
+	Minor int
+	Patch int
+	Pre   []string
 }
 
-func parseSemver(raw string) (semverVersion, error) {
+// Parse parses major.minor.patch[-prerelease][+build] (a leading "v" is
+// accepted).
+func Parse(raw string) (Version, error) {
 	s := strings.TrimSpace(raw)
 	s = strings.TrimPrefix(s, "v")
 	if s == "" {
-		return semverVersion{}, fmt.Errorf("semver required")
+		return Version{}, fmt.Errorf("semver required")
 	}
 	if i := strings.IndexByte(s, '+'); i >= 0 {
 		s = s[:i]
@@ -29,31 +35,31 @@ func parseSemver(raw string) (semverVersion, error) {
 		core = s[:i]
 		pre = strings.Split(s[i+1:], ".")
 		for _, p := range pre {
-			if p == "" || !isSemverIdentifier(p) {
-				return semverVersion{}, fmt.Errorf("invalid semver prerelease")
+			if p == "" || !isIdentifier(p) {
+				return Version{}, fmt.Errorf("invalid semver prerelease")
 			}
 		}
 	}
 	parts := strings.Split(core, ".")
 	if len(parts) != 3 {
-		return semverVersion{}, fmt.Errorf("semver must be major.minor.patch")
+		return Version{}, fmt.Errorf("semver must be major.minor.patch")
 	}
-	major, err := parseSemverNumber(parts[0])
+	major, err := parseNumber(parts[0])
 	if err != nil {
-		return semverVersion{}, err
+		return Version{}, err
 	}
-	minor, err := parseSemverNumber(parts[1])
+	minor, err := parseNumber(parts[1])
 	if err != nil {
-		return semverVersion{}, err
+		return Version{}, err
 	}
-	patch, err := parseSemverNumber(parts[2])
+	patch, err := parseNumber(parts[2])
 	if err != nil {
-		return semverVersion{}, err
+		return Version{}, err
 	}
-	return semverVersion{major: major, minor: minor, patch: patch, pre: pre}, nil
+	return Version{Major: major, Minor: minor, Patch: patch, Pre: pre}, nil
 }
 
-func parseSemverNumber(s string) (int, error) {
+func parseNumber(s string) (int, error) {
 	if s == "" {
 		return 0, fmt.Errorf("semver number required")
 	}
@@ -72,7 +78,7 @@ func parseSemverNumber(s string) (int, error) {
 	return n, nil
 }
 
-func isSemverIdentifier(s string) bool {
+func isIdentifier(s string) bool {
 	for _, r := range s {
 		if r == '-' || unicode.IsDigit(r) || r >= 'A' && r <= 'Z' || r >= 'a' && r <= 'z' {
 			continue
@@ -82,25 +88,26 @@ func isSemverIdentifier(s string) bool {
 	return true
 }
 
-func compareSemver(a, b string) (int, error) {
-	av, err := parseSemver(a)
+// Compare orders two versions (semver precedence): -1, 0 or 1.
+func Compare(a, b string) (int, error) {
+	av, err := Parse(a)
 	if err != nil {
 		return 0, err
 	}
-	bv, err := parseSemver(b)
+	bv, err := Parse(b)
 	if err != nil {
 		return 0, err
 	}
-	if av.major != bv.major {
-		return cmpInt(av.major, bv.major), nil
+	if av.Major != bv.Major {
+		return cmpInt(av.Major, bv.Major), nil
 	}
-	if av.minor != bv.minor {
-		return cmpInt(av.minor, bv.minor), nil
+	if av.Minor != bv.Minor {
+		return cmpInt(av.Minor, bv.Minor), nil
 	}
-	if av.patch != bv.patch {
-		return cmpInt(av.patch, bv.patch), nil
+	if av.Patch != bv.Patch {
+		return cmpInt(av.Patch, bv.Patch), nil
 	}
-	return comparePrerelease(av.pre, bv.pre), nil
+	return comparePrerelease(av.Pre, bv.Pre), nil
 }
 
 func cmpInt(a, b int) int {
@@ -124,8 +131,8 @@ func comparePrerelease(a, b []string) int {
 		return -1
 	}
 	for i := 0; i < len(a) && i < len(b); i++ {
-		ai, aNum := semverIdentifierNumber(a[i])
-		bi, bNum := semverIdentifierNumber(b[i])
+		ai, aNum := identifierNumber(a[i])
+		bi, bNum := identifierNumber(b[i])
 		switch {
 		case aNum && bNum && ai != bi:
 			return cmpInt(ai, bi)
@@ -143,7 +150,7 @@ func comparePrerelease(a, b []string) int {
 	return cmpInt(len(a), len(b))
 }
 
-func semverIdentifierNumber(s string) (int, bool) {
+func identifierNumber(s string) (int, bool) {
 	if s == "" {
 		return 0, false
 	}

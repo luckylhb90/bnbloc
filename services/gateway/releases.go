@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/luckylhb90/bnbloc/internal/semver"
 	"net/http"
 	"sort"
 	"strings"
@@ -67,7 +68,7 @@ func loadReleaseHub(ctx context.Context, settings store.PlatformSettingsStore) (
 // compare when a version is not parseable so a bad entry never panics.
 func sortReleasesNewestFirst(entries []wire.ReleaseEntry) {
 	sort.SliceStable(entries, func(i, j int) bool {
-		cmp, err := compareSemver(entries[i].Version, entries[j].Version)
+		cmp, err := semver.Compare(entries[i].Version, entries[j].Version)
 		if err != nil {
 			return entries[i].Version > entries[j].Version
 		}
@@ -99,7 +100,7 @@ func saveReleaseHubMeta(ctx context.Context, settings store.PlatformSettingsStor
 }
 
 func validateReleaseEntry(entry wire.ReleaseEntry) error {
-	if _, err := parseSemver(entry.Version); err != nil {
+	if _, err := semver.Parse(entry.Version); err != nil {
 		return fmt.Errorf("release version must be valid semver")
 	}
 	if entry.Channel != wire.UpdateChannelStable && entry.Channel != wire.UpdateChannelInternal {

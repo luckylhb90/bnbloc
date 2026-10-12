@@ -3,6 +3,7 @@ package gateway
 import (
 	"context"
 	"fmt"
+	"github.com/luckylhb90/bnbloc/internal/semver"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -121,12 +122,12 @@ func validateUpdateConfig(cfg wire.UpdateConfig) error {
 		return fmt.Errorf("updates.check_interval_hours must be between 1 and %d", maxCheckIntervalHours)
 	}
 	if cfg.Policy.MinSupportedVersion != "" {
-		if _, err := parseSemver(cfg.Policy.MinSupportedVersion); err != nil {
+		if _, err := semver.Parse(cfg.Policy.MinSupportedVersion); err != nil {
 			return fmt.Errorf("updates.min_supported_version must be valid semver")
 		}
 	}
 	if cfg.Release.Version != "" {
-		if _, err := parseSemver(cfg.Release.Version); err != nil {
+		if _, err := semver.Parse(cfg.Release.Version); err != nil {
 			return fmt.Errorf("release.version must be valid semver")
 		}
 	}

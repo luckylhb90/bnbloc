@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"encoding/json"
+	"github.com/luckylhb90/bnbloc/internal/semver"
 	"net/http"
 
 	"github.com/luckylhb90/bnbloc/internal/auth"
@@ -134,13 +135,13 @@ func updateManifestForRequest(cfg wire.UpdateConfig, req updateRequest) (tauriUp
 	if !ok || platform.URL == "" || platform.Signature == "" || cfg.Release.Version == "" {
 		return tauriUpdateManifest{}, false
 	}
-	cmp, err := compareSemver(req.CurrentVersion, cfg.Release.Version)
+	cmp, err := semver.Compare(req.CurrentVersion, cfg.Release.Version)
 	if err != nil || cmp >= 0 {
 		return tauriUpdateManifest{}, false
 	}
 	forced := false
 	if cfg.Policy.MinSupportedVersion != "" {
-		minCmp, err := compareSemver(req.CurrentVersion, cfg.Policy.MinSupportedVersion)
+		minCmp, err := semver.Compare(req.CurrentVersion, cfg.Policy.MinSupportedVersion)
 		forced = err == nil && minCmp < 0
 	}
 	return tauriUpdateManifest{
