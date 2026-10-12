@@ -238,7 +238,7 @@ func NewBackends(dsn string) (*Backends, error) {
 		// view over MemoryRoom's channel table) so the default channel created
 		// transactionally with a room is immediately visible to channel reads.
 		rooms := NewMemoryRoom()
-		return &Backends{
+		b := &Backends{
 			Activity:          NewMemory(),
 			Room:              rooms,
 			Grant:             NewMemoryGrant(),
@@ -267,7 +267,14 @@ func NewBackends(dsn string) (*Backends, error) {
 			OrgSync:           NewMemoryOrgSync(),
 			Profiles:          NewMemoryUserProfiles(),
 			ContentComponents: NewMemoryContentComponents(),
-		}, nil
+		}
+		// DeleteRoom clears every memory store holding room-owned rows, as
+		// the MySQL DeleteRoom clears roomOwnedTables.
+		for _, s := range []any{b.Activity, b.Grant, b.Chat, b.BridgeJobs, b.Artifacts, b.Attachments, b.AgentPrefs,
+			b.MessageTasks, b.QuotaRequests, b.ReplyTokens, b.RoomImports, b.Schedules, b.OrgSync, b.ContentComponents} {
+			rooms.cascadeDeleteTo(s.(roomRowsOwner))
+		}
+		return b, nil
 	}
 	db, err := OpenMySQL(dsn)
 	if err != nil {

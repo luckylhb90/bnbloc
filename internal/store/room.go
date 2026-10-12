@@ -244,6 +244,8 @@ type MemoryRoom struct {
 	invites  map[string]Invite
 	deleted  map[string]bool                   // roomID -> soft-deleted
 	channels map[string]map[string]RoomChannel // channelKey -> channelID -> channel
+	// cascade are the memory stores DeleteRoom clears (cascadeDeleteTo).
+	cascade []roomRowsOwner
 }
 
 // NewMemoryRoom constructs an empty in-memory room store.
@@ -744,20 +746,19 @@ func (s *MemoryRoom) UpdateRoom(ctx context.Context, roomID string, patch RoomPa
 	return nil
 }
 
-// DeleteRoom soft-deletes a room and removes every row this store owns for it:
-// memberships, invites, and channels. The MySQL store clears every room-owned
-// table in one transaction; the other in-memory stores (chat, artifacts, jobs,
-// prefs) are per-process dev stores no other service shares, so there is no
-// cross-service state for this store to reach.
+// DeleteRoom soft-deletes a room and removes every row this store owns for it
+// (memberships, invites, channels), then has every memory store wired by
+// NewBackends (cascadeDeleteTo) clear its rows of the room: the same set the
+// MySQL DeleteRoom clears (roomOwnedTables).
 func (s *MemoryRoom) DeleteRoom(ctx context.Context, roomID string) error {
 	tid, err := tenant.Require(ctx)
 	if err != nil {
 		return err
 	}
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	rk := tkey(tid, roomID)
 	if _, ok := s.rooms[rk]; !ok || s.deleted[rk] {
+		s.mu.Unlock()
 		return ErrRoomNotFound
 	}
 	s.deleted[rk] = true
@@ -768,7 +769,19 @@ func (s *MemoryRoom) DeleteRoom(ctx context.Context, roomID string) error {
 			delete(s.invites, k)
 		}
 	}
+	owners := s.cascade
+	s.mu.Unlock()
+	for _, o := range owners {
+		o.deleteRoomRows(tid, roomID)
+	}
 	return nil
+}
+
+// cascadeDeleteTo wires the memory stores whose rows DeleteRoom clears.
+func (s *MemoryRoom) cascadeDeleteTo(owners ...roomRowsOwner) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.cascade = append(s.cascade, owners...)
 }
 
 // TransferOwner promotes newOwner to owner and demotes the prior owner(s).

@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -569,47 +570,12 @@ func (s *MySQLRoom) DeleteRoom(ctx context.Context, roomID string) error {
 	if err != nil {
 		return err
 	}
-	if n, _ := res.RowsAffected(); n == 0 {
-		return ErrRoomNotFound
-	}
-	// Tables keyed by a parent id rather than room_id are cleared through their
-	// parent before the parent rows go: leases via the room's grants, artifact
-	// versions via the room's artifacts.
-	if _, err := tx.ExecContext(ctx,
-		`DELETE FROM shared_agent_leases
-		 WHERE tenant_id = ? AND grant_id IN (SELECT grant_id FROM shared_agent_grants WHERE tenant_id = ? AND room_id = ?)`, tid, tid, roomID); err != nil {
+	if err := requireMatched(res, ErrRoomNotFound); err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx,
-		`DELETE FROM artifact_versions
-		 WHERE tenant_id = ? AND artifact_id IN (SELECT artifact_id FROM artifacts WHERE tenant_id = ? AND room_id = ?)`, tid, tid, roomID); err != nil {
-		return err
-	}
-	// Every remaining room-owned table keys on (tenant_id, room_id). Attachment
-	// rows are metadata; their bytes live in the content-addressed blob store,
-	// which is shared (artifact distribution) and not room-owned.
-	childTables := []string{
-		"room_members",
-		"room_messages",
-		"room_read_state",
-		"room_invites",
-		"room_channels",
-		"agent_sessions",
-		"agent_messages",
-		"agent_jobs",
-		"sync_states",
-		"shared_agent_grants",
-		"shared_agent_audit",
-		"attachments",
-		"artifacts",
-		"artifact_shares",
-		"user_agent_prefs",
-		"room_imports",
-		"room_schedules",
-	}
-	for _, t := range childTables {
-		if _, err := tx.ExecContext(ctx, `DELETE FROM `+t+` WHERE tenant_id = ? AND room_id = ?`, tid, roomID); err != nil {
-			return err
+	for _, t := range roomOwnedTables {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM `+t.table+` WHERE `+t.where, t.args(tid, roomID)...); err != nil {
+			return fmt.Errorf("delete room: %s: %w", t.table, err)
 		}
 	}
 	return tx.Commit()
