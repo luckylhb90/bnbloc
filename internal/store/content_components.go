@@ -26,8 +26,9 @@ type ContentScope string
 const (
 	// ContentScopePersonal: the author only.
 	ContentScopePersonal ContentScope = "personal"
-	// ContentScopeShared: a copy pinned to a version for named members or a
-	// room (a later delivery step).
+	// ContentScopeShared: a copy an author shared with a member, owned by
+	// the recipient (SourceID, SharedBy) and pinned to the versions it was
+	// given; the author's later edits do not change it.
 	ContentScopeShared ContentScope = "shared"
 	// ContentScopeOrg: the organization, after an org admin approved it.
 	ContentScopeOrg ContentScope = "org"
@@ -49,9 +50,11 @@ type ContentStatus string
 
 const (
 	ContentStatusActive ContentStatus = "active"
-	// ContentStatusPending: waiting for approval at org scope.
+	// ContentStatusPending: listed to its author alone (org approval is a
+	// request, content_publish_requests.go, not a row status).
 	ContentStatusPending ContentStatus = "pending"
-	// ContentStatusRetired: hidden from new use; pinned users keep theirs.
+	// ContentStatusRetired: unpublished; hidden from the Library and new
+	// use, rooms that pinned it keep their version.
 	ContentStatusRetired ContentStatus = "retired"
 )
 
@@ -69,8 +72,24 @@ type ContentComponent struct {
 	DisplayName   string
 	Description   string
 	Category      string
-	CreatedAtMs   int64
-	UpdatedAtMs   int64
+	// SourceID is the author's component a shared copy or an organization
+	// publication was made from ("" for an original).
+	SourceID string
+	// SharedBy is the author of a shared copy (its Owner is the recipient).
+	SharedBy    string
+	CreatedAtMs int64
+	UpdatedAtMs int64
+}
+
+// Author is whose content the component is: the author of a shared copy,
+// else its owner ("" for platform content). Trust decisions (someone
+// else's scripts force the sandbox, permissions are confirmed on first use)
+// follow the author, never the holder of a copy.
+func (c ContentComponent) Author() string {
+	if c.SharedBy != "" {
+		return c.SharedBy
+	}
+	return c.Owner
 }
 
 // ContentComponentVersion is one immutable version: its manifest and the
@@ -131,6 +150,8 @@ type ContentComponentQuery struct {
 	Kind     string
 	Scopes   []ContentScope
 	IDs      []string
+	// SourceID lists the copies and publications made from one component.
+	SourceID string
 	Limit    int
 }
 
@@ -166,9 +187,13 @@ type ContentComponentStore interface {
 	GetContentComponentVersion(ctx context.Context, componentID, version string) (ContentComponentVersion, error)
 	// ContentVersionsByBlob returns the versions whose bundle is key.
 	ContentVersionsByBlob(ctx context.Context, key string) ([]ContentComponentVersion, error)
-	// DeleteContentComponent removes a component, its versions, uses and
-	// acks (the bundles become unreferenced; blob GC collects them).
+	// DeleteContentComponent removes a component, its versions, uses, acks
+	// and publish requests (the bundles become unreferenced; blob GC
+	// collects them).
 	DeleteContentComponent(ctx context.Context, id string) error
+	// SetContentComponentStatus changes a component's status (unpublish,
+	// restore).
+	SetContentComponentStatus(ctx context.Context, id string, status ContentStatus, atMs int64) error
 
 	// PutContentUse upserts a use by (scope kind, scope id, component).
 	PutContentUse(ctx context.Context, u ContentUse) error
@@ -186,6 +211,7 @@ type ContentComponentStore interface {
 	ListContentAcks(ctx context.Context, subject string, componentIDs []string) ([]ContentAck, error)
 
 	ContentPromptUseStore
+	ContentPublishRequestStore
 }
 
 func contentLimit(n int) int {
@@ -223,6 +249,9 @@ func (q ContentComponentQuery) admits(c ContentComponent) bool {
 			return false
 		}
 	}
+	if q.SourceID != "" && c.SourceID != q.SourceID {
+		return false
+	}
 	return true
 }
 
@@ -234,18 +263,19 @@ type MemoryContentComponents struct {
 	uses       map[string]ContentUse                // scope kind\x00scope id\x00component
 	acks       map[string]ContentAck                // subject\x00component\x00version
 	promptUses map[string]map[string]int64          // component -> prompt -> uses
+	requests   map[string]ContentPublishRequest     // request id -> request
 }
 
 // NewMemoryContentComponents returns an empty in-memory store.
 func NewMemoryContentComponents() *MemoryContentComponents {
 	return &MemoryContentComponents{components: map[string]ContentComponent{}, versions: map[string][]ContentComponentVersion{}, uses: map[string]ContentUse{}, acks: map[string]ContentAck{},
-		promptUses: map[string]map[string]int64{}}
+		promptUses: map[string]map[string]int64{}, requests: map[string]ContentPublishRequest{}}
 }
 
 var _ ContentComponentStore = (*MemoryContentComponents)(nil)
 
 func contentNameKey(c ContentComponent) string {
-	return c.TenantID + "\x00" + string(c.Scope) + "\x00" + c.Owner + "\x00" + c.Kind + "\x00" + c.Name
+	return c.TenantID + "\x00" + string(c.Scope) + "\x00" + c.Owner + "\x00" + c.Kind + "\x00" + c.Name + "\x00" + c.SourceID
 }
 
 func (s *MemoryContentComponents) CreateContentComponent(_ context.Context, c ContentComponent, v ContentComponentVersion) error {
@@ -384,6 +414,23 @@ func (s *MemoryContentComponents) DeleteContentComponent(_ context.Context, id s
 		}
 	}
 	delete(s.promptUses, id)
+	for rid, r := range s.requests {
+		if r.ComponentID == id {
+			delete(s.requests, rid)
+		}
+	}
+	return nil
+}
+
+func (s *MemoryContentComponents) SetContentComponentStatus(_ context.Context, id string, status ContentStatus, atMs int64) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	c, ok := s.components[id]
+	if !ok {
+		return ErrContentNotFound
+	}
+	c.Status, c.UpdatedAtMs = status, atMs
+	s.components[id] = c
 	return nil
 }
 

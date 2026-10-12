@@ -723,9 +723,12 @@ CREATE TABLE IF NOT EXISTS user_profiles (
 
 -- Content components (docs/prd/2026-10-12-experts-and-teams.md): member- and
 -- platform-authored packages that are mostly text (experts, skill packs,
--- prompt packs). One row per component; (tenant, scope, owner, kind, name) is
--- unique. scope: personal | shared | org | platform; status: active | pending
--- | retired. display_name / description / category are the latest version's.
+-- prompt packs). One row per component; (tenant, scope, owner, kind, name,
+-- source_id) is unique. scope: personal | shared | org | platform; status:
+-- active | pending | retired. display_name / description / category are the
+-- latest version's. A shared copy (owner = the recipient, shared_by = the
+-- author) and an organization publication (owner = the author) name the
+-- author's component they were made from in source_id.
 CREATE TABLE IF NOT EXISTS content_components (
   id              VARCHAR(64) NOT NULL PRIMARY KEY,
   kind            VARCHAR(64) NOT NULL,
@@ -738,11 +741,14 @@ CREATE TABLE IF NOT EXISTS content_components (
   display_name    VARCHAR(256) NOT NULL DEFAULT '',
   description     VARCHAR(2048) NOT NULL DEFAULT '',
   category        VARCHAR(64) NOT NULL DEFAULT '',
+  source_id       VARCHAR(64) NOT NULL DEFAULT '',
+  shared_by       VARCHAR(128) NOT NULL DEFAULT '',
   created_at_ms   BIGINT NOT NULL,
   updated_at_ms   BIGINT NOT NULL,
-  UNIQUE KEY uq_content_components_name (tenant_id, scope, owner, kind, name),
+  UNIQUE KEY uq_content_components_name (tenant_id, scope, owner, kind, name, source_id),
   KEY idx_content_components_owner (owner, kind, updated_at_ms),
-  KEY idx_content_components_scope (tenant_id, scope, kind, updated_at_ms)
+  KEY idx_content_components_scope (tenant_id, scope, kind, updated_at_ms),
+  KEY idx_content_components_source (source_id, scope)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- Immutable versions of a content component: the manifest and the bundle
@@ -787,6 +793,30 @@ CREATE TABLE IF NOT EXISTS content_permission_acks (
   acked_at_ms     BIGINT NOT NULL,
   PRIMARY KEY (subject, component_id, version),
   KEY idx_content_acks_component (component_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Requests to publish a version of an author's content component to the
+-- organization, approved or declined by an org admin. pending_key is the
+-- component id while the request is pending (NULL after), so a component
+-- has at most one pending request. Deleted with the component.
+CREATE TABLE IF NOT EXISTS content_publish_requests (
+  request_id      VARCHAR(64) NOT NULL PRIMARY KEY,
+  tenant_id       VARCHAR(64) NOT NULL,
+  component_id    VARCHAR(64) NOT NULL,
+  kind            VARCHAR(64) NOT NULL,
+  name            VARCHAR(64) NOT NULL,
+  version         VARCHAR(64) NOT NULL,
+  requested_by    VARCHAR(128) NOT NULL,
+  note            VARCHAR(500) NOT NULL DEFAULT '',
+  status          VARCHAR(16) NOT NULL,
+  pending_key     VARCHAR(64) NULL,
+  decided_by      VARCHAR(128) NOT NULL DEFAULT '',
+  decision_note   VARCHAR(500) NOT NULL DEFAULT '',
+  decided_at_ms   BIGINT NOT NULL DEFAULT 0,
+  created_at_ms   BIGINT NOT NULL,
+  UNIQUE KEY uq_content_requests_pending (pending_key),
+  KEY idx_content_requests_tenant (tenant_id, status, created_at_ms),
+  KEY idx_content_requests_component (component_id, created_at_ms)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- Per-prompt use counts of prompt packs: bumped once each time a member

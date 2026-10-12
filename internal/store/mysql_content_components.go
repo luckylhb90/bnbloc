@@ -21,12 +21,12 @@ func NewMySQLContentComponents(db *sql.DB) *MySQLContentComponents {
 
 var _ ContentComponentStore = (*MySQLContentComponents)(nil)
 
-const contentComponentCols = `id, kind, name, tenant_id, owner, scope, status, latest_version, display_name, description, category, created_at_ms, updated_at_ms`
+const contentComponentCols = `id, kind, name, tenant_id, owner, scope, status, latest_version, display_name, description, category, source_id, shared_by, created_at_ms, updated_at_ms`
 
 func scanContentComponent(row interface{ Scan(...any) error }) (ContentComponent, error) {
 	var c ContentComponent
 	var scope, status string
-	if err := row.Scan(&c.ID, &c.Kind, &c.Name, &c.TenantID, &c.Owner, &scope, &status, &c.LatestVersion, &c.DisplayName, &c.Description, &c.Category, &c.CreatedAtMs, &c.UpdatedAtMs); err != nil {
+	if err := row.Scan(&c.ID, &c.Kind, &c.Name, &c.TenantID, &c.Owner, &scope, &status, &c.LatestVersion, &c.DisplayName, &c.Description, &c.Category, &c.SourceID, &c.SharedBy, &c.CreatedAtMs, &c.UpdatedAtMs); err != nil {
 		return ContentComponent{}, err
 	}
 	c.Scope, c.Status = ContentScope(scope), ContentStatus(status)
@@ -75,8 +75,8 @@ func (s *MySQLContentComponents) CreateContentComponent(ctx context.Context, c C
 		return err
 	}
 	defer tx.Rollback()
-	_, err = tx.ExecContext(ctx, `INSERT INTO content_components (`+contentComponentCols+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		c.ID, c.Kind, c.Name, c.TenantID, c.Owner, string(c.Scope), string(c.Status), v.Version, c.DisplayName, c.Description, c.Category, c.CreatedAtMs, c.UpdatedAtMs)
+	_, err = tx.ExecContext(ctx, `INSERT INTO content_components (`+contentComponentCols+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		c.ID, c.Kind, c.Name, c.TenantID, c.Owner, string(c.Scope), string(c.Status), v.Version, c.DisplayName, c.Description, c.Category, c.SourceID, c.SharedBy, c.CreatedAtMs, c.UpdatedAtMs)
 	if isDupEntry(err) {
 		return ErrContentExists
 	}
@@ -147,6 +147,9 @@ func (s *MySQLContentComponents) ListContentComponents(ctx context.Context, q Co
 			args = append(args, id)
 		}
 	}
+	if q.SourceID != "" {
+		where, args = append(where, "source_id = ?"), append(args, q.SourceID)
+	}
 	query := `SELECT ` + contentComponentCols + ` FROM content_components`
 	if len(where) > 0 {
 		query += " WHERE " + strings.Join(where, " AND ")
@@ -208,6 +211,7 @@ func (s *MySQLContentComponents) DeleteContentComponent(ctx context.Context, id 
 	}
 	defer tx.Rollback()
 	for _, q := range []string{
+		`DELETE FROM content_publish_requests WHERE component_id = ?`,
 		`DELETE FROM content_prompt_uses WHERE component_id = ?`,
 		`DELETE FROM content_permission_acks WHERE component_id = ?`,
 		`DELETE FROM content_component_uses WHERE component_id = ?`,
@@ -219,6 +223,22 @@ func (s *MySQLContentComponents) DeleteContentComponent(ctx context.Context, id 
 		}
 	}
 	return tx.Commit()
+}
+
+func (s *MySQLContentComponents) SetContentComponentStatus(ctx context.Context, id string, status ContentStatus, atMs int64) error {
+	res, err := s.DB.ExecContext(ctx, `UPDATE content_components SET status = ?, updated_at_ms = ? WHERE id = ?`, string(status), atMs, id)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		var one int
+		if err := s.DB.QueryRowContext(ctx, `SELECT 1 FROM content_components WHERE id = ?`, id).Scan(&one); errors.Is(err, sql.ErrNoRows) {
+			return ErrContentNotFound
+		} else if err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (s *MySQLContentComponents) PutContentUse(ctx context.Context, u ContentUse) error {

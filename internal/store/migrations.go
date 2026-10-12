@@ -1052,6 +1052,40 @@ WHERE r.channel_id = '' AND d.user_id IS NULL`)
 			return createSchemaTable(ctx, db, "content_prompt_uses")
 		},
 	},
+	{
+		// Sharing and approval of content components (docs/prd/2026-10-12-
+		// experts-and-teams.md, step 4): content_components gains the
+		// source of a shared copy or an org publication and the author of a
+		// copy, its unique name key gains source_id (copies of two authors'
+		// same-named components coexist), and org publish requests get
+		// their table.
+		id: "2026_10_content_sharing",
+		run: func(ctx context.Context, db sqlConn) error {
+			for _, c := range [][2]string{
+				{"source_id", "VARCHAR(64) NOT NULL DEFAULT '' AFTER category"},
+				{"shared_by", "VARCHAR(128) NOT NULL DEFAULT '' AFTER source_id"},
+			} {
+				if err := addColumnIfMissing(ctx, db, "content_components", c[0], c[1]); err != nil {
+					return err
+				}
+			}
+			want := []string{"tenant_id", "scope", "owner", "kind", "name", "source_id"}
+			have, err := indexColumns(ctx, db, "content_components", "uq_content_components_name")
+			if err != nil {
+				return err
+			}
+			if strings.Join(have, ",") != strings.Join(want, ",") {
+				if _, err := db.ExecContext(ctx, "ALTER TABLE content_components DROP INDEX uq_content_components_name, ADD UNIQUE KEY uq_content_components_name ("+strings.Join(want, ", ")+")"); err != nil {
+					return fmt.Errorf("rebuild uq_content_components_name: %w", err)
+				}
+			}
+			if err := addIndexIfMissing(ctx, db, "content_components", "idx_content_components_source",
+				"ADD KEY idx_content_components_source (source_id, scope)"); err != nil {
+				return err
+			}
+			return createSchemaTable(ctx, db, "content_publish_requests")
+		},
+	},
 }
 
 // sqlConn is the statement surface a migration runs on. runMigrations passes
