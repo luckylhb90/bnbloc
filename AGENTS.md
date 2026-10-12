@@ -280,6 +280,19 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   `handleProxy` falls back to a live `subjectInRoom` lookup on the claim miss.
   Do not "fix" a post-login 403 by forcing re-login — the fallback handles it.
 
+- **The effective tenant has one rule: `services/gateway/tenant_scope.go`.**
+  Session tenant; a super admin's `X-Bnbloc-Acting-Tenant`, then `?tenantId=`
+  (wins), ignored for everyone else, applied at authentication
+  (`authenticate`, `proxyClaims`), so `claims.Tenant` IS the effective tenant
+  in every handler. A request naming a room acts in the room's tenant through
+  `roomClaims` (reach check + `rooms.tenant_id`, which wins over the acting
+  tenant); content routes do this for `?room=`, consistent with the job grant.
+  Never read the acting header, `?tenantId=` or `RoomTenant` in a handler
+  (2026-10-12: the Library ignored the acting tenant while job-grant saves
+  landed in the room's tenant). A gateway call to a backend on a member's
+  behalf signs the effective tenant (`svcauth.HeaderTenant` before
+  `svcauth.Sign`).
+
 ### Local-agent cores (multi-core)
 
 - **Multiple cores run at once.** `BNBLOC_CORES` (comma list, e.g.
