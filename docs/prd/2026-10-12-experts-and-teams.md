@@ -918,7 +918,8 @@ migration `2026_10_content_sharing`), 4516b09 (`contentuse`: the author as
 the trust owner, `Visible`, prompt search), 88a7ff6 (`contentpkg`: the
 signable platform package), d5fc614 (`content_shared`/`content_review`
 notifications), 57eafc5 (gateway: shares, copy update, publish requests,
-org review and management, platform export and install), 2bd193e (realtime:
+org review and management, platform export and install; 84864ce a later
+share's notification), 2bd193e (realtime:
 prompt hits in global search), 40ac890 (room tools `publish_component`,
 Expert builder 1.0.2), 56a04e4 (`bnbloc content export|promote`); web:
 9978785 (Library: Share, Publish to organization, copies and their
