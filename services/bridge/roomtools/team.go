@@ -148,12 +148,11 @@ func postNotice(ctx context.Context, env *Env, job Job, kind, text string, count
 		"channelId":      job.ChannelID,
 		"messages": []map[string]any{{
 			"seq": seq,
-			"payload": map[string]any{
-				"messageId": kind + "-" + job.JobID + "-" + strconv.FormatInt(seq, 10), "role": "assistant", "notice": kind,
-				"text": text, "ownerUserId": scope.Owner, "provider": scope.Provider,
-				// The job and its request: the feed nests the line under it.
-				"jobId": job.JobID, "sourceSeq": job.MessageSeq,
-			},
+			// The job and its request: the feed nests the line under it.
+			"payload": wire.JobNotice{
+				Kind: kind, MessageID: kind + "-" + job.JobID + "-" + strconv.FormatInt(seq, 10),
+				JobID: job.JobID, SourceSeq: job.MessageSeq, Text: text, OwnerUserID: scope.Owner, Provider: scope.Provider,
+			}.Payload(),
 			"createdAtUnixMs": time.Now().UnixMilli(),
 		}},
 	}

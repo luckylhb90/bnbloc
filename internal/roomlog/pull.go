@@ -1,11 +1,7 @@
 package roomlog
 
 import (
-	"context"
-	"encoding/json"
 	"fmt"
-	"net/url"
-	"sort"
 	"strconv"
 	"strings"
 )
@@ -21,131 +17,13 @@ import (
 // pointer. History becomes something the agent consults on demand, not
 // something that competes with the instruction for attention.
 
-// Fetch retrieves a room-feed history page from the gateway. It is injected so
-// this package stays transport-neutral (the bridge supplies its authenticated
-// gateway GET). path is a gateway path like "/v1/rooms/<id>/history?limit=200".
-type Fetch func(ctx context.Context, path string) ([]byte, error)
-
-// historyPage is the gateway room history shape (services/realtime
-// handleHistory): the newest `limit` messages with seq < before, ascending.
-type historyPage struct {
-	Messages []struct {
-		Sequence int64           `json:"sequence"`
-		Kind     string          `json:"kind"`
-		Payload  json.RawMessage `json:"payload"`
-	} `json:"messages"`
-}
-
 const (
-	// fetchPageRows is the history page size per request.
-	fetchPageRows = 200
-	// maxFetchRows bounds one materialization pass across all channels.
-	maxFetchRows = 2400
 	// recentEntries is how many newest messages recent.md carries.
 	recentEntries = 40
 	// chunkMaxEntries / chunkMaxBytes pack history into grep-friendly chunks.
 	chunkMaxEntries = 200
 	chunkMaxBytes   = 12 * 1024
 )
-
-// FetchSince pulls the room's history across the given channels, returning
-// entries with Seq > afterSeq in chronological order.
-//
-// The history API's contract: one request returns the newest `limit` messages
-// with seq < before (or the newest overall when before is unset), in ASCENDING
-// order — page[0] is the page's oldest, page[last] its newest. Paging walks
-// backward: the next cursor is the current page's oldest seq. A channel is done
-// when a short/empty page arrives (channel exhausted), or its oldest fetched
-// seq crosses afterSeq (the delta boundary). The pass stops globally at
-// maxFetchRows; complete reports whether every channel was fully covered
-// (false means the cap truncated the pass).
-func FetchSince(ctx context.Context, fetch Fetch, room string, channels []string, afterSeq int64, maxRows int) (entries []Entry, complete bool, err error) {
-	if len(channels) == 0 {
-		channels = []string{""} // default channel
-	}
-	if maxRows <= 0 {
-		maxRows = maxFetchRows
-	}
-	type row struct {
-		seq     int64
-		kind    string
-		payload json.RawMessage
-	}
-	var rows []row
-	total := 0
-	truncated := false
-	for _, ch := range channels {
-		var before int64
-		done := false
-		for !done && total < maxRows {
-			q := url.Values{}
-			if ch != "" {
-				q.Set("channelId", ch)
-			}
-			q.Set("limit", strconv.Itoa(fetchPageRows))
-			if before > 0 {
-				q.Set("before", strconv.FormatInt(before, 10))
-			}
-			raw, err := fetch(ctx, fmt.Sprintf("/v1/rooms/%s/history?%s", room, q.Encode()))
-			if err != nil {
-				return nil, false, err
-			}
-			var page historyPage
-			if err := json.Unmarshal(raw, &page); err != nil {
-				return nil, false, fmt.Errorf("decode room history: %w", err)
-			}
-			if len(page.Messages) == 0 {
-				done = true // channel exhausted below the cursor
-				continue
-			}
-			for _, m := range page.Messages {
-				rows = append(rows, row{seq: m.Sequence, kind: m.Kind, payload: m.Payload})
-			}
-			total += len(page.Messages)
-			// Pages are ascending: page[0] is the oldest of this batch. Walk
-			// backward from it; a short page means the channel is exhausted.
-			oldest := page.Messages[0].Sequence
-			switch {
-			case oldest <= afterSeq:
-				done = true // crossed the delta boundary: coverage complete
-			case len(page.Messages) < fetchPageRows:
-				done = true // channel exhausted
-			case total >= maxRows:
-				done = true
-				truncated = true
-			default:
-				before = oldest
-			}
-		}
-	}
-	if len(rows) == 0 {
-		return nil, true, nil
-	}
-	// Newest-first merge across channels, then chronological, then keep only
-	// the delta past afterSeq (the pages that cross the boundary are needed to
-	// build recent.md but are not part of the delta).
-	sort.Slice(rows, func(i, j int) bool { return rows[i].seq > rows[j].seq })
-	seen := map[int64]bool{}
-	var dedup []row
-	for _, r := range rows {
-		if seen[r.seq] {
-			continue
-		}
-		seen[r.seq] = true
-		dedup = append(dedup, r)
-	}
-	if len(dedup) > maxRows {
-		dedup = dedup[:maxRows]
-	}
-	for i := len(dedup) - 1; i >= 0; i-- {
-		entries = append(entries, rowsToEntries(dedup[i].seq, dedup[i].kind, dedup[i].payload)...)
-	}
-	// The caller wants entries past afterSeq, but recent.md needs a window that
-	// may extend below it: return the full chronological tail; Materialize and
-	// its callers delta-filter by seq themselves.
-	complete = !truncated
-	return entries, complete, nil
-}
 
 // CtxState tracks a session's shared-context coverage for BOTH delivery
 // models. The pull model (materialized .room/ files) uses OldestSeq/EndSeq/
@@ -354,56 +232,6 @@ func ComposeDelta(entries []Entry, current string, opts Options) string {
 		"the [now] message explicitly asks for it. The attachments listed above, if any, " +
 		"ARE part of this message — open them.)")
 	return b.String()
-}
-
-// rowsToEntries maps one feed row into zero or more Entries. A chat_message is
-// one human line; an agent_messages row carries one or more assistant replies,
-// each attributed to its producing agent (ownerUserId/provider).
-func rowsToEntries(seq int64, kind string, payload json.RawMessage) []Entry {
-	switch kind {
-	case "chat_message":
-		var p struct {
-			UserID    string `json:"userId"`
-			Text      string `json:"text"`
-			Recipient *struct {
-				OwnerID  string `json:"ownerId"`
-				Provider string `json:"provider"`
-				Core     string `json:"core"`
-			} `json:"recipient"`
-		}
-		if json.Unmarshal(payload, &p) != nil || strings.TrimSpace(p.Text) == "" {
-			return nil
-		}
-		return []Entry{{Seq: seq, Speaker: p.UserID, Kind: KindHuman, Text: p.Text}}
-	case "agent_messages":
-		var p struct {
-			Messages []struct {
-				Payload struct {
-					Role        string `json:"role"`
-					Text        string `json:"text"`
-					OwnerUserID string `json:"ownerUserId"`
-					Provider    string `json:"provider"`
-				} `json:"payload"`
-			} `json:"messages"`
-		}
-		if json.Unmarshal(payload, &p) != nil {
-			return nil
-		}
-		out := make([]Entry, 0, len(p.Messages))
-		for _, mm := range p.Messages {
-			if strings.TrimSpace(mm.Payload.Text) == "" {
-				continue
-			}
-			out = append(out, Entry{
-				Seq:     seq,
-				Speaker: AgentSpeaker(mm.Payload.OwnerUserID, mm.Payload.Provider),
-				Kind:    KindAgent,
-				Text:    mm.Payload.Text,
-			})
-		}
-		return out
-	}
-	return nil
 }
 
 // AgentSpeaker renders an agent's speaker label as "owner/provider", or just

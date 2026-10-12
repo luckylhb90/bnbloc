@@ -12,7 +12,9 @@ import (
 
 // historyServer serves a paged, channel-scoped history over in-memory rows.
 type historyServer struct {
-	rows []struct {
+	// peopleChannel is never listed (the room's people chat).
+	peopleChannel string
+	rows          []struct {
 		seq     int64
 		channel string
 		kind    string
@@ -22,6 +24,24 @@ type historyServer struct {
 
 func (h *historyServer) handler(t *testing.T) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/channels") {
+			// The listing an agent reads: every channel holding rows, in
+			// order of appearance (the real listing never names the people
+			// chat; peopleChannel models it here).
+			type channel struct {
+				ChannelID string `json:"channelId"`
+			}
+			var out []channel
+			seen := map[string]bool{h.peopleChannel: true}
+			for _, row := range h.rows {
+				if !seen[row.channel] {
+					seen[row.channel] = true
+					out = append(out, channel{ChannelID: row.channel})
+				}
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"channels": out})
+			return
+		}
 		ch := r.URL.Query().Get("channelId")
 		before := int64(0)
 		if b := r.URL.Query().Get("before"); b != "" {
@@ -57,10 +77,10 @@ func chatRow(seq int64, ch, user, text string) (int64, string, string, string) {
 	return seq, ch, "chat_message", fmt.Sprintf(`{"userId":%q,"text":%q}`, user, text)
 }
 
-// FetchSince must merge channels chronologically and stop paging once it
+// History must merge channels chronologically and stop paging once it
 // passes the boundary — the push model only ever read the default channel, so
 // most of a multi-channel room's conversation never reached the agent.
-func TestFetchSinceMergesChannelsAndDeltas(t *testing.T) {
+func TestHistoryMergesChannelsAndDeltas(t *testing.T) {
 	h := &historyServer{}
 	h.rows = append(h.rows,
 		mkRow(chatRow(1, "general", "jack", "first in general")),
@@ -75,7 +95,7 @@ func TestFetchSinceMergesChannelsAndDeltas(t *testing.T) {
 		return httpGet(ctx, srv.URL+path)
 	}
 
-	all, complete, err := FetchSince(context.Background(), fetch, "room-1", []string{"general", "test"}, 0, 0)
+	all, complete, err := History(context.Background(), fetch, "room-1", HistoryQuery{})
 	if err != nil || !complete {
 		t.Fatalf("full fetch: %d entries, complete=%v, err=%v", len(all), complete, err)
 	}
@@ -86,7 +106,7 @@ func TestFetchSinceMergesChannelsAndDeltas(t *testing.T) {
 	// Delta fetch returns the chronological TAIL — it may extend below the
 	// boundary, because recent.md needs a window of the newest messages; the
 	// seq-past-boundary filter is the caller's (Materialize's) job.
-	tail, complete, err := FetchSince(context.Background(), fetch, "room-1", []string{"general", "test"}, 3, 0)
+	tail, complete, err := History(context.Background(), fetch, "room-1", HistoryQuery{After: 3})
 	if err != nil || !complete {
 		t.Fatalf("delta fetch: complete=%v, err=%v", complete, err)
 	}
@@ -106,7 +126,7 @@ func TestFetchSinceMergesChannelsAndDeltas(t *testing.T) {
 // and the pass terminates. Regression: the cursor once read the page's newest
 // seq, so each page dropped one message and re-fetched the rest until the row
 // cap — leaving later channels unfetched entirely.
-func TestFetchSincePagesLongChannelWithoutDuplicates(t *testing.T) {
+func TestHistoryPagesLongChannelWithoutDuplicates(t *testing.T) {
 	h := &historyServer{}
 	var rows []struct {
 		seq     int64
@@ -129,7 +149,7 @@ func TestFetchSincePagesLongChannelWithoutDuplicates(t *testing.T) {
 		return httpGet(ctx, srv.URL+path)
 	}
 
-	entries, complete, err := FetchSince(context.Background(), fetch, "room-1", []string{"a", "b"}, 0, 0)
+	entries, complete, err := History(context.Background(), fetch, "room-1", HistoryQuery{})
 	if err != nil || !complete {
 		t.Fatalf("fetch: %d entries, complete=%v, err=%v", len(entries), complete, err)
 	}
@@ -222,6 +242,45 @@ func mkRow(seq int64, ch, kind, payload string) struct {
 	}{seq, ch, kind, payload}
 }
 
+// Decision O1: an agent reads exactly the channels realtime admits for an
+// agent reader — every listed channel, never the people chat (which the
+// listing omits) — and a read narrowed to one channel refuses one outside
+// that set instead of fetching it with the owner's human session.
+func TestHistoryReadsOnlyAgentChannels(t *testing.T) {
+	h := &historyServer{peopleChannel: "people"}
+	h.rows = append(h.rows,
+		mkRow(chatRow(1, "general", "jack", "in general")),
+		mkRow(chatRow(2, "people", "maya", "people only")),
+		mkRow(chatRow(3, "design", "maya", "in design")),
+	)
+	srv := httptest.NewServer(h.handler(t))
+	defer srv.Close()
+	var paths []string
+	fetch := func(ctx context.Context, path string) ([]byte, error) {
+		paths = append(paths, path)
+		return httpGet(ctx, srv.URL+path)
+	}
+	all, _, err := History(context.Background(), fetch, "room-1", HistoryQuery{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(all) != 2 || all[0].Text != "in general" || all[1].Text != "in design" {
+		t.Fatalf("agent history = %+v, want general and design only", all)
+	}
+	for _, p := range paths {
+		if strings.Contains(p, "channelId=people") {
+			t.Fatalf("the people chat was fetched: %s", p)
+		}
+	}
+	if _, _, err := History(context.Background(), fetch, "room-1", HistoryQuery{Only: "people"}); err != ErrChannelNotReadable {
+		t.Fatalf("Only=people: err = %v, want ErrChannelNotReadable", err)
+	}
+	one, _, err := History(context.Background(), fetch, "room-1", HistoryQuery{Only: "design"})
+	if err != nil || len(one) != 1 || one[0].Text != "in design" {
+		t.Fatalf("Only=design = %+v, %v", one, err)
+	}
+}
+
 func httpGet(ctx context.Context, url string) ([]byte, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
@@ -250,7 +309,7 @@ func httpGet(ctx context.Context, url string) ([]byte, error) {
 // The row cap must mark the pass truncated (complete=false) instead of
 // silently starving the channels it never reached — a truncated pass tells
 // Materialize to record its true coverage boundary.
-func TestFetchSinceCapMarksTruncated(t *testing.T) {
+func TestHistoryCapMarksTruncated(t *testing.T) {
 	h := &historyServer{}
 	var rows []struct {
 		seq     int64
@@ -268,7 +327,7 @@ func TestFetchSinceCapMarksTruncated(t *testing.T) {
 	fetch := func(ctx context.Context, path string) ([]byte, error) {
 		return httpGet(ctx, srv.URL+path)
 	}
-	entries, complete, err := FetchSince(context.Background(), fetch, "room-1", []string{"a"}, 0, 0)
+	entries, complete, err := History(context.Background(), fetch, "room-1", HistoryQuery{})
 	if err != nil {
 		t.Fatal(err)
 	}

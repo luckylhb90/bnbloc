@@ -103,32 +103,6 @@ func extForContentType(contentType, filename string) string {
 	return ""
 }
 
-// roomChannelIDs lists the room's channel ids (all of them: the push model
-// only ever read the default channel, so most of a multi-channel room's
-// conversation never reached the agent). On failure the default channel alone
-// is used — a degraded fetch, not a failed turn.
-func (b *Bridge) roomChannelIDs(ctx context.Context, room string) []string {
-	raw, err := b.gatewayGET(ctx, "/v1/rooms/"+room+"/channels")
-	if err != nil {
-		return nil
-	}
-	var parsed struct {
-		Channels []struct {
-			ChannelID string `json:"channelId"`
-		} `json:"channels"`
-	}
-	if json.Unmarshal(raw, &parsed) != nil {
-		return nil
-	}
-	out := make([]string, 0, len(parsed.Channels))
-	for _, c := range parsed.Channels {
-		if id := strings.TrimSpace(c.ChannelID); id != "" {
-			out = append(out, id)
-		}
-	}
-	return out
-}
-
 // roomArtifactsMd renders the room's current deliverables as a compact record:
 // title, kind, version, last author. This is the room's live state (what
 // exists now), deliberately distinct from the conversation history.
@@ -208,35 +182,18 @@ func (b *Bridge) roomLiveMd(room string) roomlog.NamedFile {
 // write never advertises files that do not exist). State is only advanced on
 // full success, so a failed pass retries cleanly next turn.
 func (b *Bridge) materializeRoomContext(ctx context.Context, w corepkg.WorkspaceFileWriter, ep corepkg.Endpoint, room, workspaceID, dropText, selfSpeaker string, fresh bool, st roomlog.CtxState) (roomlog.CtxState, error) {
-	channels := b.roomChannelIDs(ctx, room)
-	entries, complete, err := roomlog.FetchSince(ctx, b.gatewayGET, room, channels, st.EndSeq, 0)
+	entries, complete, err := roomlog.History(ctx, b.gatewayGET, room, roomlog.HistoryQuery{After: st.EndSeq})
 	if err != nil {
 		return st, err
 	}
-	if trimmed := strings.TrimSpace(dropText); trimmed != "" {
-		for i := len(entries) - 1; i >= 0; i-- {
-			if strings.TrimSpace(entries[i].Text) == trimmed {
-				entries = append(entries[:i], entries[i+1:]...)
-				break
-			}
-		}
+	entries = dropInstruction(entries, dropText)
+	bound := st.SelfAfterSeq
+	if fresh {
+		// A brand-new session: everything fetched predates it, so all of
+		// its own replies are prior sessions' and must stay.
+		bound = noSelfBound
 	}
-	if self := strings.TrimSpace(selfSpeaker); self != "" {
-		bound := st.SelfAfterSeq
-		if fresh {
-			// A brand-new session: everything fetched predates it, so all of
-			// its own replies are prior sessions' and must stay.
-			bound = 1 << 62
-		}
-		kept := entries[:0]
-		for _, e := range entries {
-			if e.Speaker == self && e.Seq > bound {
-				continue
-			}
-			kept = append(kept, e)
-		}
-		entries = kept
-	}
+	entries = dropSelf(entries, selfSpeaker, bound)
 	files, newState := roomlog.Materialize(entries, complete, st)
 	if fresh {
 		// Record the session-creation boundary: everything materialized above
@@ -325,14 +282,13 @@ func (b *Bridge) driveTextDelta(ctx context.Context, room, owner, provider, text
 		return text
 	}
 	self := agentSpeakerLabel(owner, provider)
-	channels := b.roomChannelIDs(ctx, room)
-	entries, _, err := roomlog.FetchSince(ctx, b.gatewayGET, room, channels, st.PushSeenSeq, b.recentRows)
+	entries, _, err := roomlog.History(ctx, b.gatewayGET, room, roomlog.HistoryQuery{After: st.PushSeenSeq, MaxRows: b.recentRows})
 	if err != nil {
 		slog.Debug("bnbloc bridge room-context unavailable, sending bare text",
 			"event", "bnbloc.bridge.context_unavailable", "room", room, "error", err)
 		return text
 	}
-	// FetchSince returns the newest-page tail, not the delta itself (pages
+	// History returns the newest-page tail, not the delta itself (pages
 	// crossing the boundary are how the recent window is reached). The delta
 	// is the rows past the boundary; seen-coverage advances over everything
 	// fetched, filtered rows included.
@@ -351,32 +307,17 @@ func (b *Bridge) driveTextDelta(ctx context.Context, room, owner, provider, text
 		}
 		entries = kept
 	}
-	// Drop the current instruction (the newest matching entry): it is the
-	// [now] section, and a copy in the records would both duplicate it and
-	// re-inject it as history on later turns.
-	if trimmed := strings.TrimSpace(text); trimmed != "" {
-		for i := len(entries) - 1; i >= 0; i-- {
-			if strings.TrimSpace(entries[i].Text) == trimmed {
-				entries = append(entries[:i], entries[i+1:]...)
-				break
-			}
-		}
-	}
+	entries = dropInstruction(entries, text)
 	// The agent's own replies from THIS session are in its CLI memory: on a
 	// follow-up they are dropped as redundancy (everything in the delta past
 	// the last push is this-session by construction — the session existed when
 	// it was said). On a fresh session the opposite holds: a rebind starts a
 	// blank CLI, so its own PRIOR replies in the window are exactly the
 	// continuity it needs and must stay.
-	if !fresh && self != "" {
-		kept := entries[:0]
-		for _, e := range entries {
-			if e.Speaker != self {
-				kept = append(kept, e)
-			}
-		}
-		entries = kept
+	if fresh {
+		boundary = noSelfBound
 	}
+	entries = dropSelf(entries, self, boundary)
 	if fresh {
 		return roomlog.Compose(entries, text, roomlog.Options{
 			SelfSpeaker: self,
@@ -390,4 +331,42 @@ func (b *Bridge) driveTextDelta(ctx context.Context, room, owner, provider, text
 		WindowChars: b.windowChars,
 		Attachments: atts,
 	})
+}
+
+// noSelfBound keeps every one of the agent's own replies (dropSelf): a fresh
+// session's memory holds none of them.
+const noSelfBound = int64(1) << 62
+
+// dropInstruction removes the current instruction from the records: it is
+// delivered as the [now] section, so a copy would both duplicate it and
+// re-inject it as history on later turns. Only the newest matching entry
+// goes — an older identical message is genuine history.
+func dropInstruction(entries []roomlog.Entry, text string) []roomlog.Entry {
+	trimmed := strings.TrimSpace(text)
+	if trimmed == "" {
+		return entries
+	}
+	for i := len(entries) - 1; i >= 0; i-- {
+		if strings.TrimSpace(entries[i].Text) == trimmed {
+			return append(entries[:i], entries[i+1:]...)
+		}
+	}
+	return entries
+}
+
+// dropSelf removes the agent's own replies (speaker self) newer than bound:
+// those were said in the current session, whose CLI memory holds them.
+// Others' lines — people and other agents — always stay.
+func dropSelf(entries []roomlog.Entry, self string, bound int64) []roomlog.Entry {
+	if strings.TrimSpace(self) == "" {
+		return entries
+	}
+	kept := entries[:0]
+	for _, e := range entries {
+		if e.Speaker == self && e.Seq > bound {
+			continue
+		}
+		kept = append(kept, e)
+	}
+	return kept
 }

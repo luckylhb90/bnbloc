@@ -329,6 +329,11 @@ func newAskFixture(settleAfter int) *askFixture {
 				run.Diagnostics = map[string]any{"sessionId": "sess-bob"}
 			}
 			return 200, run
+		case method == http.MethodGet && path == "/v1/rooms/room-1/channels":
+			// The listing never names the people chat (ch_people).
+			return 200, map[string]any{"channels": []any{map[string]any{"channelId": "ch_general"}, map[string]any{"channelId": "ch_design"}}}
+		case method == http.MethodGet && strings.HasPrefix(path, "/v1/rooms/room-1/history") && !strings.Contains(path, "channelId=ch_general"):
+			return 200, map[string]any{"messages": []any{}}
 		case method == http.MethodGet && strings.HasPrefix(path, "/v1/rooms/room-1/history"):
 			batch := func(seq int64, session, owner, text string, at int64) map[string]any {
 				return map[string]any{"sequence": seq, "kind": "agent_messages", "atUnixMs": at, "payload": map[string]any{
@@ -466,8 +471,9 @@ func TestAskAgentRefusals(t *testing.T) {
 	}
 }
 
-// read_room reads the bound job's channel and renders people, agents and
-// dispatch attribution.
+// read_room reads every channel an agent may read (decision O1: the room's
+// listing, never the people chat) and renders people, agents and dispatch
+// attribution.
 func TestReadRoom(t *testing.T) {
 	f := newAskFixture(0)
 	srv, token, sess := startServer(t, f.gw)
@@ -477,9 +483,38 @@ func TestReadRoom(t *testing.T) {
 	if isErr || strings.Contains(text, "earlier") || !strings.Contains(text, `"via":"jack/codex"`) || !strings.Contains(text, `"to":"bob/claude"`) || !strings.Contains(text, `"author":"bob/claude"`) {
 		t.Fatalf("read_room = %s", text)
 	}
-	hist := f.gw.callsTo(http.MethodGet, "/v1/rooms/room-1/history")
-	if len(hist) == 0 || !strings.Contains(hist[0].Path, "channelId=ch_general") {
-		t.Fatalf("history calls = %+v; want the job's channel", hist)
+	read := map[string]bool{}
+	for _, c := range f.gw.callsTo(http.MethodGet, "/v1/rooms/room-1/history") {
+		for _, ch := range []string{"ch_general", "ch_design", "ch_people"} {
+			if strings.Contains(c.Path, "channelId="+ch) {
+				read[ch] = true
+			}
+		}
+	}
+	if !read["ch_general"] || !read["ch_design"] || read["ch_people"] {
+		t.Fatalf("channels read = %v; want every listed channel and never the people chat", read)
+	}
+}
+
+// ask_agent's reply poller reads the run's channel only when an agent may
+// read it: a run whose channel is not listed (the people chat) answers with
+// the run record's preview and never fetches that channel.
+func TestReplyTextReadsOnlyAgentChannels(t *testing.T) {
+	f := newAskFixture(0)
+	_, _, sess := startServer(t, f.gw)
+	env := &Env{Gateway: f.gw, Session: sess}
+	run := wire.AgentRun{JobID: dispatchJobID, ChannelID: "ch_people", Status: "replied",
+		Request: wire.AgentRunRequest{MessageSeq: dispatchSeq}, Agent: wire.AgentRunAgent{Owner: "bob", Provider: "claude"},
+		Reply: &wire.AgentRunReply{RoomSeq: 43, Text: "preview"}}
+	if got := replyText(context.Background(), env, run); got != "preview" {
+		t.Fatalf("reply from an unlisted channel = %q; want the preview", got)
+	}
+	if hist := f.gw.callsTo(http.MethodGet, "/v1/rooms/room-1/history"); len(hist) != 0 {
+		t.Fatalf("history read for an unlisted channel: %+v", hist)
+	}
+	run.ChannelID = "ch_general"
+	if got := replyText(context.Background(), env, run); got != "Found two issues.\n\nBoth fixed in parser.go.\n\na later turn" {
+		t.Fatalf("reply = %q", got)
 	}
 }
 

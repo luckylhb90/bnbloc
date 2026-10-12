@@ -546,7 +546,7 @@ func TestClaimOnceDrivesJobPayloadAndReportsStatuses(t *testing.T) {
 			_, _ = w.Write([]byte(`{"ok":true}`))
 		case r.Method == http.MethodGet && r.URL.Path == "/v1/rooms/room-1/channels":
 			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`{"channels":[]}`)) // empty: FetchSince falls back to the default channel
+			_, _ = w.Write([]byte(`{"channels":[]}`)) // empty: History falls back to the default channel
 		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/v1/rooms/room-1/history"):
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"items":[]}`))

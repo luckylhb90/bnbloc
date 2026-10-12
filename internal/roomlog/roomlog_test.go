@@ -135,20 +135,34 @@ func TestStructuredSummarizerDeterministic(t *testing.T) {
 	}
 }
 
-// rowsToEntries maps chat_message -> human line and agent_messages -> one
+// DecodeRow maps chat_message -> human line and agent_messages -> one
 // attributed agent line per reply.
-func TestRowsToEntriesSpeakers(t *testing.T) {
-	human := rowsToEntries(5, "chat_message", []byte(`{"userId":"jack","text":"hi"}`))
-	if len(human) != 1 || human[0].Speaker != "jack" || human[0].Kind != KindHuman {
+func TestDecodeRowSpeakers(t *testing.T) {
+	human := DecodeRow(Row{Sequence: 5, Kind: "chat_message", Payload: []byte(`{"userId":"jack","text":"hi","recipient":{"ownerId":"maya","provider":"orbit"},"dispatchedBy":{"jobId":"j1","via":"jack/codex"}}`)})
+	if len(human) != 1 || human[0].Speaker != "jack" || human[0].Kind != KindHuman || human[0].To != "maya/orbit" || human[0].Via != "jack/codex" {
 		t.Fatalf("bad human entry: %+v", human)
 	}
-	agent := rowsToEntries(6, "agent_messages", []byte(
-		`{"messages":[{"payload":{"role":"assistant","text":"done","ownerUserId":"maya","provider":"orbit"}}]}`))
-	if len(agent) != 1 || agent[0].Speaker != "maya/orbit" || agent[0].Kind != KindAgent {
+	agent := DecodeRow(Row{Sequence: 6, Kind: "agent_messages", Payload: []byte(
+		`{"agentSessionId":"s1","messages":[{"payload":{"role":"assistant","text":"done","ownerUserId":"maya","provider":"orbit"}}]}`)})
+	if len(agent) != 1 || agent[0].Speaker != "maya/orbit" || agent[0].Kind != KindAgent || agent[0].Session != "s1" || agent[0].Owner != "maya" {
 		t.Fatalf("bad agent entry: %+v", agent)
 	}
-	if got := rowsToEntries(7, "agent_messages", []byte(`{"messages":[{"payload":{"text":"  "}}]}`)); len(got) != 0 {
+	if got := DecodeRow(Row{Sequence: 7, Kind: "agent_messages", Payload: []byte(`{"messages":[{"payload":{"text":"  "}}]}`)}); len(got) != 0 {
 		t.Fatalf("blank reply should be dropped, got %+v", got)
+	}
+}
+
+// Notices are never read back to an agent: neither a row carrying
+// payload.notice (wire.JobNotice) nor any row of a job's notice session.
+func TestDecodeRowSkipsNotices(t *testing.T) {
+	for name, payload := range map[string]string{
+		"notice field":   `{"agentSessionId":"s1","messages":[{"payload":{"role":"assistant","notice":"turn-failed","text":"The agent could not complete this request","ownerUserId":"maya","provider":"orbit"}}]}`,
+		"notice session": `{"agentSessionId":"job-j1","messages":[{"payload":{"role":"assistant","text":"The orbit agent is offline","ownerUserId":"maya","provider":"orbit"}}]}`,
+		"progress":       `{"agentSessionId":"job-j1-progress","messages":[{"payload":{"role":"assistant","text":"Phase 2/3","ownerUserId":"maya","provider":"orbit"}}]}`,
+	} {
+		if got := DecodeRow(Row{Sequence: 8, Kind: "agent_messages", Payload: []byte(payload)}); len(got) != 0 {
+			t.Errorf("%s: a notice was decoded as speech: %+v", name, got)
+		}
 	}
 }
 

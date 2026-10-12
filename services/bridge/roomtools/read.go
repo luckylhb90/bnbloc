@@ -3,9 +3,10 @@ package roomtools
 import (
 	"context"
 	"encoding/json"
+	"net/http"
 	"strings"
 
-	"github.com/luckylhb90/bnbloc/internal/wire"
+	"github.com/luckylhb90/bnbloc/internal/roomlog"
 )
 
 // read_room bounds.
@@ -35,7 +36,7 @@ func readRoomTool() Tool {
 	return Tool{
 		Name:  "read_room",
 		Title: "Read the conversation",
-		Description: "Recent messages of the conversation you are answering in (people's messages and agents' replies), oldest first. " +
+		Description: "Recent messages of the room (people's messages and agents' replies, across the room's channels), oldest first. " +
 			"Pass since (a seq from an earlier read) to get only newer messages.",
 		InputSchema: objectSchema(map[string]any{
 			"since": map[string]any{"type": "integer", "minimum": 0, "description": "Only messages after this seq."},
@@ -60,24 +61,31 @@ func readRoom(ctx context.Context, env *Env, args json.RawMessage) Result {
 	if in.Limit > maxReadLimit {
 		in.Limit = maxReadLimit
 	}
-	// The conversation is the channel of the job being answered. It is never
-	// the people chat (no agent job exists there), so this read can never
-	// show agents the human-only conversation.
-	job := env.Session.current()
-	if job.JobID == "" {
+	if env.Session.current().JobID == "" {
 		return toolError("read_room works only while you are answering a request in the room")
 	}
+	// The room's agent-readable channels (roomlog.History: never the people
+	// chat), read back from the newest page.
 	pages := readHistoryPages
 	if in.Since <= 0 {
 		pages = 1
 	}
-	rows, err := historySince(ctx, env, job.ChannelID, in.Since, min(in.Limit, readHistoryPageMax), pages)
+	pageRows := min(in.Limit, readHistoryPageMax)
+	entries, _, err := roomlog.History(ctx, gatewayFetch(env), env.Session.Scope().RoomID, roomlog.HistoryQuery{
+		After: in.Since, PageRows: pageRows, Pages: pages, MaxRows: readHistoryPages * readHistoryPageMax,
+	})
 	if err != nil {
 		return refusal("reading the room", err)
 	}
 	var lines []roomLine
-	for _, row := range rows {
-		lines = append(lines, renderRow(row)...)
+	for _, e := range entries {
+		if e.Seq <= in.Since {
+			continue
+		}
+		lines = append(lines, roomLine{
+			Seq: e.Seq, Author: e.Speaker, Agent: e.Kind == roomlog.KindAgent, To: e.To, Via: e.Via,
+			Text: truncateBytes(strings.TrimSpace(e.Text), maxReadTextBytes), AtMs: e.AtMs,
+		})
 	}
 	more := len(lines) > in.Limit
 	switch {
@@ -95,57 +103,10 @@ func readRoom(ctx context.Context, env *Env, args json.RawMessage) Result {
 	return Result{Value: map[string]any{"messages": lines, "latestSeq": latest, "more": more && in.Since > 0}}
 }
 
-// renderRow turns one history row into the lines it shows.
-func renderRow(row historyRow) []roomLine {
-	switch row.Kind {
-	case "chat_message":
-		var p struct {
-			UserID    string `json:"userId"`
-			Text      string `json:"text"`
-			Recipient *struct {
-				OwnerID  string `json:"ownerId"`
-				Provider string `json:"provider"`
-			} `json:"recipient"`
-			DispatchedBy *wire.DispatchMarker `json:"dispatchedBy"`
-		}
-		if json.Unmarshal(row.Payload, &p) != nil {
-			return nil
-		}
-		line := roomLine{Seq: row.Sequence, Author: p.UserID, Text: truncateBytes(strings.TrimSpace(p.Text), maxReadTextBytes), AtMs: row.AtUnixMs}
-		if p.Recipient != nil && p.Recipient.Provider != "" {
-			line.To = p.Recipient.OwnerID + "/" + p.Recipient.Provider
-		}
-		if p.DispatchedBy != nil {
-			line.Via = p.DispatchedBy.Via
-		}
-		return []roomLine{line}
-	case wire.KindAgentMessages:
-		var batch struct {
-			Messages []struct {
-				Payload struct {
-					Role        string `json:"role"`
-					Text        string `json:"text"`
-					OwnerUserID string `json:"ownerUserId"`
-					Provider    string `json:"provider"`
-				} `json:"payload"`
-			} `json:"messages"`
-		}
-		if json.Unmarshal(row.Payload, &batch) != nil {
-			return nil
-		}
-		var out []roomLine
-		for _, m := range batch.Messages {
-			p := m.Payload
-			if strings.TrimSpace(p.Text) == "" {
-				continue
-			}
-			author := p.Provider
-			if p.OwnerUserID != "" {
-				author = p.OwnerUserID + "/" + p.Provider
-			}
-			out = append(out, roomLine{Seq: row.Sequence, Author: author, Agent: p.Role == "assistant", Text: truncateBytes(strings.TrimSpace(p.Text), maxReadTextBytes), AtMs: row.AtUnixMs})
-		}
-		return out
+// gatewayFetch reads gateway paths for roomlog through the tools' gateway
+// client (the bridge's session, never the agent's).
+func gatewayFetch(env *Env) roomlog.Fetch {
+	return func(ctx context.Context, path string) ([]byte, error) {
+		return env.Gateway.Do(ctx, http.MethodGet, path, nil)
 	}
-	return nil
 }

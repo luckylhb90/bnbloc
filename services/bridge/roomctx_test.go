@@ -92,7 +92,7 @@ func (g *pullGateway) addChatRow(ch string, seq int64, user, text string) {
 }
 
 // addAgentRow appends an agent_messages row (speaker owner/provider) to the
-// channel's page — the shape rowsToEntries produces agent replies from.
+// channel's page — the shape DecodeRow produces agent replies from.
 // Rows must be added in ascending seq order.
 func (g *pullGateway) addAgentRow(ch string, seq int64, owner, provider, text string) {
 	g.mu.Lock()

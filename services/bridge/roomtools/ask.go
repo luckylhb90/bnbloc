@@ -5,11 +5,11 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/url"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/luckylhb90/bnbloc/internal/roomlog"
 	"github.com/luckylhb90/bnbloc/internal/wire"
 )
 
@@ -242,9 +242,11 @@ func describe(ctx context.Context, env *Env, run wire.AgentRun, handle string) o
 }
 
 // replyText collects the dispatched agent's replies to the request from
-// the room history: agent_messages after the request (from the first
-// reply's sequence when known), from the run's agent session, up to the
-// run's finish. Falls back to the run record's reply preview.
+// the room history (roomlog.History, the agent-facing reader: only the
+// run's channel, and only if an agent may read it): the agent's replies
+// after the request (from the first reply's sequence when known), from the
+// run's agent session, up to the run's finish. Falls back to the run
+// record's reply preview.
 func replyText(ctx context.Context, env *Env, run wire.AgentRun) string {
 	preview := ""
 	start := run.Request.MessageSeq + 1
@@ -255,96 +257,31 @@ func replyText(ctx context.Context, env *Env, run wire.AgentRun) string {
 		}
 	}
 	sessionID, _ := run.Diagnostics["sessionId"].(string)
-	rows, err := historySince(ctx, env, run.ChannelID, start-1, replyHistoryPage, replyHistoryPages)
+	entries, _, err := roomlog.History(ctx, gatewayFetch(env), env.Session.Scope().RoomID, roomlog.HistoryQuery{
+		Only: run.ChannelID, After: start - 1,
+		PageRows: replyHistoryPage, Pages: replyHistoryPages, MaxRows: replyHistoryPage * replyHistoryPages,
+	})
 	if err != nil {
 		return preview
 	}
 	var b strings.Builder
-	for _, row := range rows {
-		if row.Kind != wire.KindAgentMessages || (run.Phases.FinishedAtMs > 0 && row.AtUnixMs > run.Phases.FinishedAtMs) {
+	for _, e := range entries {
+		switch {
+		case e.Seq < start, e.Kind != roomlog.KindAgent, e.Role != "assistant",
+			run.Phases.FinishedAtMs > 0 && e.AtMs > run.Phases.FinishedAtMs,
+			sessionID != "" && e.Session != sessionID,
+			e.Owner != run.Agent.Owner, e.Provider != run.Agent.Provider:
 			continue
 		}
-		var batch struct {
-			AgentSessionID string `json:"agentSessionId"`
-			Messages       []struct {
-				Payload struct {
-					Role        string `json:"role"`
-					Text        string `json:"text"`
-					OwnerUserID string `json:"ownerUserId"`
-					Provider    string `json:"provider"`
-				} `json:"payload"`
-			} `json:"messages"`
+		if b.Len() > 0 {
+			b.WriteString("\n\n")
 		}
-		if json.Unmarshal(row.Payload, &batch) != nil || (sessionID != "" && batch.AgentSessionID != sessionID) {
-			continue
-		}
-		for _, m := range batch.Messages {
-			p := m.Payload
-			if p.Role != "assistant" || p.OwnerUserID != run.Agent.Owner || p.Provider != run.Agent.Provider || strings.TrimSpace(p.Text) == "" {
-				continue
-			}
-			if b.Len() > 0 {
-				b.WriteString("\n\n")
-			}
-			b.WriteString(strings.TrimSpace(p.Text))
-		}
+		b.WriteString(strings.TrimSpace(e.Text))
 	}
 	if b.Len() == 0 {
 		return preview
 	}
 	return truncateBytes(b.String(), maxReplyBytes)
-}
-
-// historyRow is one room history row (GET /v1/rooms/{id}/history).
-type historyRow struct {
-	Sequence int64           `json:"sequence"`
-	Kind     string          `json:"kind"`
-	Payload  json.RawMessage `json:"payload"`
-	AtUnixMs int64           `json:"atUnixMs"`
-}
-
-// historySince pages a channel's history back from the newest page until
-// it reaches a sequence <= after, returning the rows after it, oldest
-// first (bounded by pages).
-func historySince(ctx context.Context, env *Env, channelID string, after int64, pageSize, pages int) ([]historyRow, error) {
-	scope := env.Session.Scope()
-	var out []historyRow
-	before := int64(0)
-	for page := 0; page < pages; page++ {
-		q := url.Values{"limit": {strconv.Itoa(pageSize)}}
-		if channelID != "" {
-			q.Set("channelId", channelID)
-		}
-		if before > 0 {
-			q.Set("before", strconv.FormatInt(before, 10))
-		}
-		raw, err := env.Gateway.Do(ctx, http.MethodGet, "/v1/rooms/"+url.PathEscape(scope.RoomID)+"/history?"+q.Encode(), nil)
-		if err != nil {
-			return nil, err
-		}
-		var parsed struct {
-			Messages []historyRow `json:"messages"`
-		}
-		if err := json.Unmarshal(raw, &parsed); err != nil {
-			return nil, err
-		}
-		done := len(parsed.Messages) < pageSize
-		for _, m := range parsed.Messages {
-			if m.Sequence > after {
-				out = append(out, m)
-			} else {
-				done = true
-			}
-			if before == 0 || m.Sequence < before {
-				before = m.Sequence
-			}
-		}
-		if done || before <= 1 {
-			break
-		}
-	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Sequence < out[j].Sequence })
-	return out, nil
 }
 
 // deliverables lists what the dispatched agent published for the request
