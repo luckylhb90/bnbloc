@@ -40,14 +40,6 @@ func (p *fakeProvider) ListTargets(context.Context, core.Endpoint) ([]core.Targe
 	return p.targets, nil
 }
 
-func (p *fakeProvider) SessionIdle(context.Context, core.Endpoint, string, string) (bool, error) {
-	return true, nil
-}
-
-func (p *fakeProvider) LatestSession(context.Context, core.Endpoint, string) (string, error) {
-	return p.session, nil
-}
-
 func (p *fakeProvider) Messages(context.Context, core.Endpoint, string, string, int64) ([]core.Message, int64, error) {
 	return []core.Message{{Version: 1, Role: "assistant", Text: "ok", UserVisible: true, Completed: true}}, 1, nil
 }
@@ -78,15 +70,11 @@ func TestRunLive_passes_whenProtocolDaemonConforms(t *testing.T) {
 			_ = json.NewEncoder(w).Encode(protocol.CreateSessionResponse{SessionID: "s-1", TurnID: "t-1", Phase: "running"})
 		case r.Method == http.MethodPost && r.URL.Path == "/core/v1/workspaces/ws-1/sessions/s-1/input":
 			w.WriteHeader(http.StatusNoContent)
-		case r.Method == http.MethodGet && r.URL.Path == "/core/v1/workspaces/ws-1/sessions/s-1/idle":
-			_ = json.NewEncoder(w).Encode(protocol.SessionIdleResponse{Idle: true})
-		case r.Method == http.MethodGet && r.URL.Path == "/core/v1/workspaces/ws-1/sessions/latest":
-			_ = json.NewEncoder(w).Encode(protocol.LatestSessionResponse{SessionID: "s-1"})
 		case r.Method == http.MethodGet && r.URL.Path == "/core/v1/workspaces/ws-1/sessions/s-1/messages":
 			_ = json.NewEncoder(w).Encode(protocol.MessagesResponse{Messages: []protocol.Message{{Version: 1, Role: "assistant", Text: "ok", UserVisible: true, Completed: true}}, LatestVersion: 1})
 		case r.Method == http.MethodGet && r.URL.Path == "/core/v1/workspaces/ws-1/sessions/s-1/turn":
 			_ = json.NewEncoder(w).Encode(protocol.PollTurnResponse{Idle: true})
-		case r.Method == http.MethodGet && r.URL.Path == "/core/v1/workspaces/__missing_workspace__/sessions/__missing_session__/idle":
+		case r.Method == http.MethodGet && r.URL.Path == "/core/v1/workspaces/__missing_workspace__/sessions/__missing_session__/turn":
 			w.WriteHeader(http.StatusNotFound)
 			_ = json.NewEncoder(w).Encode(protocol.ErrorEnvelope{Error: protocol.ProtocolError{Code: protocol.ErrorSessionNotFound, Message: "missing session", Retryable: false}})
 		default:
@@ -120,8 +108,8 @@ func sessionFilesDaemon(t *testing.T, caps []string, readBody []byte) *httptest.
 		case strings.HasPrefix(r.URL.Path, "/core/v1/workspaces/ws-1/files/"):
 			w.WriteHeader(http.StatusNotFound)
 			_ = json.NewEncoder(w).Encode(protocol.ErrorEnvelope{Error: protocol.ProtocolError{Code: protocol.ErrorFileNotFound, Message: "no such file"}})
-		case strings.HasPrefix(r.URL.Path, "/core/v1/workspaces/ws-1/sessions/s-1/"), r.URL.Path == "/core/v1/workspaces/ws-1/sessions/latest":
-			_, _ = w.Write([]byte(`{"idle":true,"sessionId":"s-1","messages":[],"latestVersion":0}`))
+		case strings.HasPrefix(r.URL.Path, "/core/v1/workspaces/ws-1/sessions/s-1/"):
+			_, _ = w.Write([]byte(`{"idle":true,"messages":[],"latestVersion":0}`))
 		default:
 			w.WriteHeader(http.StatusNotFound)
 			_ = json.NewEncoder(w).Encode(protocol.ErrorEnvelope{Error: protocol.ProtocolError{Code: protocol.ErrorSessionNotFound, Message: "missing session"}})

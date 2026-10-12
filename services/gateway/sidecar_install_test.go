@@ -25,8 +25,8 @@ func minimalManifest(name string) map[string]any {
 		"createSession":   verb("/v1/workspaces/{workspaceId}/sessions"),
 		"sendInput":       verb("/v1/workspaces/{workspaceId}/sessions/{sessionId}/input"),
 		"listTargets":     getVerb("/v1/targets"),
-		"sessionIdle":     getVerb("/v1/workspaces/{workspaceId}/sessions/{sessionId}/idle"),
-		"latestSession":   getVerb("/v1/workspaces/{workspaceId}/sessions/latest"),
+		"messages":        map[string]any{"method": "GET", "path": "/v1/workspaces/{workspaceId}/sessions/{sessionId}/messages", "items": map[string]any{"list": "messages", "fields": map[string]any{"text": "text"}}},
+		"pollTurn":        getVerb("/v1/workspaces/{workspaceId}/sessions/{sessionId}/turn"),
 	}
 }
 

@@ -43,8 +43,8 @@ func writeAcmeManifest(t *testing.T, dir string) {
 		"createSession":{"method":"POST","path":"/v1/workspaces/{workspaceId}/sessions"},
 		"sendInput":{"method":"POST","path":"/v1/workspaces/{workspaceId}/sessions/{sessionId}/input"},
 		"listTargets":{"method":"GET","path":"/v1/targets","targets":{"list":"targets","id":"id","provider":"provider"}},
-		"sessionIdle":{"method":"GET","path":"/v1/workspaces/{workspaceId}/sessions/{sessionId}"},
-		"latestSession":{"method":"GET","path":"/v1/workspaces/{workspaceId}/sessions"},
+		"messages":{"method":"GET","path":"/v1/workspaces/{workspaceId}/sessions/{sessionId}/messages","items":{"list":"messages","fields":{"text":"text"}}},
+		"pollTurn":{"method":"GET","path":"/v1/workspaces/{workspaceId}/sessions/{sessionId}"},
 		"listSessionFiles":{"method":"GET","path":"/v1/workspaces/{workspaceId}/sessions/{sessionId}/files","items":{"list":"files","fields":{"path":"path"}}},
 		"readSessionFile":{"method":"GET","path":"/v1/workspaces/{workspaceId}/sessions/{sessionId}/file?path={relPath}","extract":{"content":"content"}},
 		"sessionWorkdir":{"method":"GET","path":"/v1/workspaces/{workspaceId}/sessions/{sessionId}","extract":{"workdir":"session.cwd"}}
@@ -64,8 +64,8 @@ func TestFromEnvLoadsManifestDirectoryForDesktopSidecars(t *testing.T) {
 		"createSession":{"method":"POST","path":"/v1/workspaces/{workspaceId}/agent-sessions"},
 		"sendInput":{"method":"POST","path":"/v1/workspaces/{workspaceId}/agent-sessions/{sessionId}/input"},
 		"listTargets":{"method":"GET","path":"/v1/agent-targets","targets":{"list":"targets","id":"id","provider":"provider"}},
-		"sessionIdle":{"method":"GET","path":"/v1/workspaces/{workspaceId}/agent-sessions/{sessionId}"},
-		"latestSession":{"method":"GET","path":"/v1/workspaces/{workspaceId}/agent-sessions"}
+		"messages":{"method":"GET","path":"/v1/workspaces/{workspaceId}/agent-sessions/{sessionId}/messages","items":{"list":"messages","fields":{"text":"text"}}},
+		"pollTurn":{"method":"GET","path":"/v1/workspaces/{workspaceId}/agent-sessions/{sessionId}"}
 	}`)
 	if err := os.WriteFile(filepath.Join(dir, name+".json"), manifest, 0o644); err != nil {
 		t.Fatalf("write manifest: %v", err)
@@ -83,10 +83,7 @@ func TestFromEnvLoadsManifestDirectoryForDesktopSidecars(t *testing.T) {
 	t.Setenv("BNBLOC_CORES", name)
 	t.Setenv("BNBLOC_CORE_SIDECAR_MANIFEST_TEST_URL", srv.URL)
 
-	entries, err := FromEnv()
-	if err != nil {
-		t.Fatalf("FromEnv: %v", err)
-	}
+	entries := FromEnv()
 	if len(entries) != 1 || entries[0].Name != name || !entries[0].Explicit {
 		t.Fatalf("want explicit manifest entry, got %+v", entries)
 	}
@@ -104,10 +101,7 @@ func TestFromEnvLoadsManifestDirectoryForDesktopSidecars(t *testing.T) {
 
 func TestFromEnvEmptyWhenNoCoresConfigured(t *testing.T) {
 	clearCoreEnv(t)
-	entries, err := FromEnv()
-	if err != nil {
-		t.Fatalf("FromEnv: %v", err)
-	}
+	entries := FromEnv()
 	if len(entries) != 0 {
 		t.Fatalf("unset BNBLOC_CORES must yield no cores (no baked-in default), got %+v", entries)
 	}
@@ -122,10 +116,7 @@ func TestFromEnvExplicitCoreListed(t *testing.T) {
 	writeAcmeManifest(t, dir)
 	t.Setenv("BNBLOC_CORE_MANIFESTS_DIR", dir)
 	t.Setenv("BNBLOC_CORES", "acme")
-	entries, err := FromEnv()
-	if err != nil {
-		t.Fatalf("FromEnv: %v", err)
-	}
+	entries := FromEnv()
 	if len(entries) != 1 || entries[0].Name != "acme" {
 		t.Fatalf("want single acme entry, got %+v", entries)
 	}
@@ -165,10 +156,7 @@ func TestFromEnvMultiCoreOrderAndOverride(t *testing.T) {
 	t.Setenv("BNBLOC_CORE_REMOTE_URL", proto.URL)
 	t.Setenv("BNBLOC_CORE_REMOTE_TOKEN", "tok-remote")
 
-	entries, err := FromEnv()
-	if err != nil {
-		t.Fatalf("FromEnv: %v", err)
-	}
+	entries := FromEnv()
 	if len(entries) != 2 {
 		t.Fatalf("want 2 entries, got %d", len(entries))
 	}
@@ -196,10 +184,7 @@ func TestFromEnvUnknownCore(t *testing.T) {
 	writeAcmeManifest(t, dir)
 	t.Setenv("BNBLOC_CORE_MANIFESTS_DIR", dir)
 	t.Setenv("BNBLOC_CORES", "nope,acme")
-	entries, err := FromEnv()
-	if err != nil {
-		t.Fatalf("unknown core should be skipped, not error: %v", err)
-	}
+	entries := FromEnv()
 	if len(entries) != 1 || entries[0].Name != "acme" {
 		t.Fatalf("want only the known acme core, got %+v", entries)
 	}
@@ -208,10 +193,7 @@ func TestFromEnvUnknownCore(t *testing.T) {
 func TestFromEnvAllUnknownCores(t *testing.T) {
 	clearCoreEnv(t)
 	t.Setenv("BNBLOC_CORES", "nope,alsonope")
-	entries, err := FromEnv()
-	if err != nil {
-		t.Fatalf("all-unknown should not error: %v", err)
-	}
+	entries := FromEnv()
 	if len(entries) != 0 {
 		t.Fatalf("want no cores, got %+v", entries)
 	}
@@ -236,10 +218,7 @@ func TestFromEnvUsesProtocolClientForExplicitUnknownCore(t *testing.T) {
 	t.Setenv("BNBLOC_CORE_NIMBUS_URL", srv.URL)
 	t.Setenv("BNBLOC_CORE_NIMBUS_TOKEN", "tok")
 
-	entries, err := FromEnv()
-	if err != nil {
-		t.Fatalf("FromEnv: %v", err)
-	}
+	entries := FromEnv()
 	if len(entries) != 1 || entries[0].Name != "nimbus" || entries[0].Endpoint.Token != "tok" || !entries[0].Explicit {
 		t.Fatalf("want explicit protocol nimbus entry, got %+v", entries)
 	}
@@ -274,10 +253,7 @@ func TestFromEnvKeepsURLCoreWhoseDaemonIsDownAtBoot(t *testing.T) {
 	t.Setenv("BNBLOC_CORES", name)
 	t.Setenv("BNBLOC_CORE_LATECORE_URL", srv.URL)
 
-	entries, err := FromEnv()
-	if err != nil {
-		t.Fatalf("FromEnv: %v", err)
-	}
+	entries := FromEnv()
 	if len(entries) != 1 || entries[0].Name != name || !entries[0].Explicit {
 		t.Fatalf("down-at-boot URL core must stay configured, got %+v", entries)
 	}
@@ -349,10 +325,7 @@ func TestFromEnvRegistersAdapterDescriptorForURLDeclaredCore(t *testing.T) {
 	t.Setenv("BNBLOC_CORES", name)
 	t.Setenv("BNBLOC_CORE_URLDECLARED_URL", proto.URL)
 
-	entries, err := FromEnv()
-	if err != nil {
-		t.Fatalf("FromEnv: %v", err)
-	}
+	entries := FromEnv()
 	if len(entries) != 1 || !entries[0].Explicit {
 		t.Fatalf("want one explicit entry, got %+v", entries)
 	}

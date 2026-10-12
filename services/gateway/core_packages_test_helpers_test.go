@@ -108,15 +108,11 @@ func conformingCoreServer(t *testing.T, pass bool) *httptest.Server {
 			_ = json.NewEncoder(w).Encode(protocol.CreateSessionResponse{SessionID: "s-1"})
 		case r.Method == http.MethodPost && r.URL.Path == "/core/v1/workspaces/ws-1/sessions/s-1/input":
 			w.WriteHeader(http.StatusNoContent)
-		case r.Method == http.MethodGet && r.URL.Path == "/core/v1/workspaces/ws-1/sessions/s-1/idle":
-			_ = json.NewEncoder(w).Encode(protocol.SessionIdleResponse{Idle: true})
-		case r.Method == http.MethodGet && r.URL.Path == "/core/v1/workspaces/ws-1/sessions/latest":
-			_ = json.NewEncoder(w).Encode(protocol.LatestSessionResponse{SessionID: "s-1"})
 		case r.Method == http.MethodGet && r.URL.Path == "/core/v1/workspaces/ws-1/sessions/s-1/messages":
 			_ = json.NewEncoder(w).Encode(protocol.MessagesResponse{LatestVersion: 1})
 		case r.Method == http.MethodGet && r.URL.Path == "/core/v1/workspaces/ws-1/sessions/s-1/turn":
 			_ = json.NewEncoder(w).Encode(protocol.PollTurnResponse{Idle: true})
-		case r.Method == http.MethodGet && r.URL.Path == "/core/v1/workspaces/__missing_workspace__/sessions/__missing_session__/idle":
+		case r.Method == http.MethodGet && r.URL.Path == "/core/v1/workspaces/__missing_workspace__/sessions/__missing_session__/turn":
 			w.WriteHeader(http.StatusNotFound)
 			_ = json.NewEncoder(w).Encode(protocol.ErrorEnvelope{Error: protocol.ProtocolError{Code: protocol.ErrorSessionNotFound, Message: "missing session"}})
 		default:

@@ -69,10 +69,7 @@ func resolveVerifier() auth.IDPVerifier {
 // resolveCores builds the env-configured core list (BNBLOC_CORES, through
 // coreset.FromEnv) and logs which cores resolved an endpoint.
 func resolveCores() []coreset.Entry {
-	entries, err := coreset.FromEnv()
-	if err != nil {
-		log.Fatalf("bnbloc-gateway: %v", err)
-	}
+	entries := coreset.FromEnv()
 	for _, e := range entries {
 		if e.Endpoint.OK() {
 			log.Printf("bnbloc-gateway: core %q endpoint %s", e.Name, e.Endpoint.BaseURL)

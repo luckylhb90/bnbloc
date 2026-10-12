@@ -10,7 +10,7 @@ form.
 
 A core provider is the **outbound control seam** between bnbloc and one local
 agent daemon. It is defined by `core.Provider` in
-[`core/provider.go`](../../core/provider.go): six neutral verbs that translate
+[`core/provider.go`](../../core/provider.go): neutral verbs that translate
 onto some daemon's REST API.
 
 ```go
@@ -18,10 +18,10 @@ type Provider interface {
     Name() string
     CreateWorkspace(ctx context.Context, ep Endpoint) (workspaceID string, err error)
     CreateSession(ctx context.Context, ep Endpoint, req SessionRequest) (SessionResult, error)
-    SendInput(ctx context.Context, ep Endpoint, workspaceID, sessionID, text string) error
+    SendInput(ctx context.Context, ep Endpoint, workspaceID, sessionID, text string, opts SessionOptions) error
     ListTargets(ctx context.Context, ep Endpoint) ([]Target, error)
-    SessionIdle(ctx context.Context, ep Endpoint, workspaceID, sessionID string) (bool, error)
-    LatestSession(ctx context.Context, ep Endpoint, workspaceID string) (sessionID string, err error)
+    Messages(ctx context.Context, ep Endpoint, workspaceID, sessionID string, after int64) ([]Message, int64, error)
+    PollTurn(ctx context.Context, ep Endpoint, workspaceID, sessionID string) (TurnStatus, error)
 }
 ```
 
@@ -45,7 +45,7 @@ Key properties, all enforced by the interface:
 
 ### Optional capabilities
 
-Beyond the six verbs, a core may offer optional capabilities, each an
+Beyond these verbs, a core may offer optional capabilities, each an
 interface in `core/provider.go`: `TurnInterrupter` (`interrupt`),
 `WorkspaceFileWriter` / `WorkspaceFileBytesWriter` (`writeFile`),
 workspace deletion (`deleteWorkspace`), `SessionFiles` (`sessionFiles`: list
@@ -207,9 +207,12 @@ worked example further down are the reference.
 #### Manifest schema
 
 Types are in [`core/manifestcore/manifestcore.go`](../../core/manifestcore/manifestcore.go)
-(`Manifest`, `Op`, `TargetsSpec`, `IdlePredicate`, `DiscoverOp`). Every one of
-the six verbs is required and each needs a `method` and `path`, or the manifest
-fails validation at load (not at first agent call).
+(`Manifest`, `Op`, `TargetsSpec`, `IdlePredicate`, `DiscoverOp`). The six
+verbs `createWorkspace`, `createSession`, `sendInput`, `listTargets`,
+`messages` and `pollTurn` are required, each with a `method` and `path`, and
+`messages` needs `items.list` + `items.fields.text`, or the manifest fails
+validation at load (not at first agent call): a core whose replies cannot be
+read would time every turn out silently.
 
 | Field | Applies to | Meaning |
 | --- | --- | --- |
@@ -219,9 +222,8 @@ fails validation at load (not at first agent call).
 | `body` | request ops | Optional JSON request-body template (see template vars). |
 | `extract` | ops with a result | Map of result key → dotted JSON path in the response. Keys read: `workspaceId` (createWorkspace); `sessionId`, `turnId`, `phase` (createSession). |
 | `targets` | list ops | `{list, id, provider}`: `list` is the dotted path to the array; `id`/`provider` are field names within each element. |
-| `idleWhen` | sessionIdle | `{field, notIn}`: reads `field` and reports idle when its value is NOT in `notIn`. Absent ⇒ always idle. |
-| `items` | messages, listSessionFiles | `{list, fields}`: `list` is the dotted path to the array; `fields` maps each record field to a dotted path within one element. |
-| `pick` | latestSession | `"first"` selects the first listed item's id. |
+| `idleWhen` | pollTurn | `{field, notIn, unlessSet}`: reads `field` and reports idle when its value is NOT in `notIn` (or when `unlessSet` names a present field: a settled turn). Absent ⇒ always idle. |
+| `items` | messages, listSessionFiles | `{list, fields, completedWhen}`: `list` is the dotted path to the array; `fields` maps each record field to a dotted path within one element. |
 
 Response mapping per verb:
 
@@ -231,8 +233,12 @@ Response mapping per verb:
 - `sendInput` → no result (any 2xx is success).
 - `listTargets` → `targets` shapes the array into `{id, provider}` targets;
   elements with an empty id are dropped.
-- `sessionIdle` → `idleWhen` predicate over the response.
-- `latestSession` → first id from `targets`.
+- `messages` → `items` with `fields` `version`, `role`, `text`, `userVisible`,
+  `messageId`, `seq`, `createdAtMs`, `thinking`, `metrics` and
+  `completedWhen`; `extract.latestVersion` is the cursor.
+- `pollTurn` → `idleWhen` predicate over the response; a settled turn whose
+  `extract.failed` reads `failed` reports `extract.failMessage` (else
+  `extract.failCode`).
 
 Optional ops (absent ⇒ capability not offered; see Optional capabilities):
 
@@ -277,8 +283,8 @@ substituted verbatim. Available vars, per verb:
 | `createWorkspace` | `{shortid}` |
 | `createSession` | `{workspaceId}`, `{targetId}`, `{prompt}`, `{shortid}`, `{model}`, `{reasoningEffort}`, `{instructions}`, and the raw-JSON forms `"{agentProfile\|json}"`, `"{skills\|json}"`, `"{mcpServers\|json}"`, `"{env\|json}"` |
 | `sendInput` | `{workspaceId}`, `{sessionId}`, `{text}` |
-| `sessionIdle` | `{workspaceId}`, `{sessionId}` |
-| `latestSession` | `{workspaceId}` |
+| `messages` | `{workspaceId}`, `{sessionId}`, `{after}` |
+| `pollTurn` | `{workspaceId}`, `{sessionId}` |
 
 The `{targetId|firstTarget}` fallback form: when a `createSession` body
 references it and the request supplies no target, the provider calls
@@ -324,7 +330,7 @@ dotted path to the array; `id`/`provider` are keys read from each element
 
 #### Worked example (adapter-equivalent manifest)
 
-This manifest reproduces a protocol adapter's six verbs. Wrap it
+This manifest reproduces a protocol adapter's required verbs. Wrap it
 in a core package and install it
 (e.g. `bnbloc cores install --manifest myrest.json --name myrest`, then
 publish with rollout or add `myrest` to `BNBLOC_CORES` if you drive it by
@@ -381,16 +387,20 @@ explicit URL):
     "path": "/v1/agents",
     "targets": { "list": "data", "id": "id", "provider": "harness" }
   },
-  "sessionIdle": {
+  "messages": {
+    "method": "GET",
+    "path": "/v1/sessions/{sessionId}/messages?after={after}",
+    "items": {
+      "list": "data",
+      "fields": { "version": "version", "role": "role", "text": "text" },
+      "completedWhen": { "field": "status", "equalsAnyOf": ["completed"] }
+    },
+    "extract": { "latestVersion": "latest_version" }
+  },
+  "pollTurn": {
     "method": "GET",
     "path": "/v1/sessions/{sessionId}",
     "idleWhen": { "field": "status", "notIn": ["running"] }
-  },
-  "latestSession": {
-    "method": "GET",
-    "path": "/v1/sessions",
-    "targets": { "list": "data", "id": "id" },
-    "pick": "first"
   }
 }
 ```
@@ -417,7 +427,7 @@ The bridge/gateway drive it through the protocol client with
 `BNBLOC_CORE_<NAME>_URL` — no compile-time coupling, no recompile of bnbloc.
 
 1. Implement the protocol routes (`/core/v1/discover`, `targets`, `workspaces`,
-   `sessions`, `input`, `idle`, `latest`, `messages`, `turn`) with the exact
+   `sessions`, `input`, `messages`, `turn`) with the exact
    wire shapes and error envelope from `core/protocol/types.go`; import the
    package rather than redeclaring them. The wire format is the types' explicit
    camelCase JSON tags (`workspaceId`, `sessionId`, …) — that file IS the
@@ -530,7 +540,7 @@ Follow the existing patterns rather than inventing new harnesses:
   [`core/manifestcore/manifestcore_test.go`](../../core/manifestcore/manifestcore_test.go):
   `TestManifestReproducesRESTDaemon` drives a manifest against an `httptest` fake
   daemon and asserts the emitted method/path/body plus response extraction
-  for the six verbs; `TestManifestIdlePredicate` covers the idle predicate;
+  for the required verbs; `TestManifestIdlePredicate` covers the idle predicate;
   `TestLoadManifestsRegisters` / `TestLoadManifestsMalformedAndReregister`
   cover manifest loading, and `TestCapabilitiesFollowDeclaredOps` pins that capabilities follow the
   declared ops. `TestManifestSessionFileOps` / `TestManifestSessionFileOpsValidation`

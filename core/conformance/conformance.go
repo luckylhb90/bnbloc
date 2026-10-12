@@ -103,12 +103,6 @@ func checkSessionLifecycle(ctx context.Context, provider core.Provider, cfg Conf
 	if err := provider.SendInput(ctx, cfg.Endpoint, workspaceID, res.SessionID, input(cfg), core.SessionOptions{}); err != nil {
 		return "", fmt.Errorf("SendInput: %w", err)
 	}
-	if _, err := provider.SessionIdle(ctx, cfg.Endpoint, workspaceID, res.SessionID); err != nil {
-		return "", fmt.Errorf("SessionIdle: %w", err)
-	}
-	if _, err := provider.LatestSession(ctx, cfg.Endpoint, workspaceID); err != nil {
-		return "", fmt.Errorf("LatestSession: %w", err)
-	}
 	if _, _, err := provider.Messages(ctx, cfg.Endpoint, workspaceID, res.SessionID, 0); err != nil {
 		return "", fmt.Errorf("Messages: %w", err)
 	}
@@ -243,7 +237,7 @@ func checkDiscoveryCapabilities(d protocol.Discovery) error {
 }
 
 func checkLiveErrorEnvelope(ctx context.Context, cfg Config) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, cfg.Endpoint.BaseURL+protocol.SessionIdlePath("__missing_workspace__", "__missing_session__"), nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, cfg.Endpoint.BaseURL+protocol.SessionTurnPath("__missing_workspace__", "__missing_session__"), nil)
 	if err != nil {
 		return fmt.Errorf("build error-envelope request: %w", err)
 	}

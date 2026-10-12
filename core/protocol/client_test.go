@@ -60,10 +60,6 @@ func TestClient_ProviderMethods_useProtocolPaths_whenDiscoverySucceeds(t *testin
 			w.WriteHeader(http.StatusNoContent)
 		case r.Method == http.MethodGet && path == PathTargets:
 			_ = json.NewEncoder(w).Encode(ListTargetsResponse{Targets: []Target{{ID: "local:codex", Provider: "codex"}}})
-		case r.Method == http.MethodGet && path == "/core/v1/workspaces/ws-1/sessions/s-1/idle":
-			_ = json.NewEncoder(w).Encode(SessionIdleResponse{Idle: true})
-		case r.Method == http.MethodGet && path == "/core/v1/workspaces/ws-1/sessions/latest":
-			_ = json.NewEncoder(w).Encode(LatestSessionResponse{SessionID: "s-1"})
 		case r.Method == http.MethodGet && path == "/core/v1/workspaces/ws-1/sessions/s-1/messages":
 			_ = json.NewEncoder(w).Encode(MessagesResponse{Messages: []Message{{Version: 3, Role: "assistant", Text: "hi", UserVisible: true, Completed: true}}, LatestVersion: 3})
 		case r.Method == http.MethodGet && path == "/core/v1/workspaces/ws-1/sessions/s-1/turn":
@@ -92,14 +88,6 @@ func TestClient_ProviderMethods_useProtocolPaths_whenDiscoverySucceeds(t *testin
 	if err != nil {
 		t.Fatalf("ListTargets: %v", err)
 	}
-	idle, err := client.SessionIdle(ctx, ep, ws, res.SessionID)
-	if err != nil {
-		t.Fatalf("SessionIdle: %v", err)
-	}
-	latest, err := client.LatestSession(ctx, ep, ws)
-	if err != nil {
-		t.Fatalf("LatestSession: %v", err)
-	}
 	msgs, cursor, err := client.Messages(ctx, ep, ws, res.SessionID, 2)
 	if err != nil {
 		t.Fatalf("Messages: %v", err)
@@ -110,8 +98,8 @@ func TestClient_ProviderMethods_useProtocolPaths_whenDiscoverySucceeds(t *testin
 	}
 
 	// Then
-	if ws != "ws-1" || res.SessionID != "s-1" || len(targets) != 1 || !idle || latest != "s-1" || len(msgs) != 1 || cursor != 3 || !turn.Idle {
-		t.Fatalf("unexpected results: ws=%q res=%+v targets=%+v idle=%v latest=%q msgs=%+v cursor=%d turn=%+v", ws, res, targets, idle, latest, msgs, cursor, turn)
+	if ws != "ws-1" || res.SessionID != "s-1" || len(targets) != 1 || len(msgs) != 1 || cursor != 3 || !turn.Idle {
+		t.Fatalf("unexpected results: ws=%q res=%+v targets=%+v msgs=%+v cursor=%d turn=%+v", ws, res, targets, msgs, cursor, turn)
 	}
 	discoverCalls := 0
 	for _, call := range *calls {
@@ -237,7 +225,7 @@ func TestClient_ErrorEnvelope_mapsToProtocolError(t *testing.T) {
 	client := NewClient("proto", srv.Client())
 
 	// When
-	_, err := client.LatestSession(context.Background(), core.Endpoint{BaseURL: srv.URL}, "ws-404")
+	_, err := client.PollTurn(context.Background(), core.Endpoint{BaseURL: srv.URL}, "ws-404", "s-404")
 
 	// Then
 	var protoErr *ProtocolError

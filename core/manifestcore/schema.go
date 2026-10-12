@@ -22,10 +22,12 @@ type Manifest struct {
 	DeleteWksp    Op          `json:"deleteWorkspace,omitempty"`
 	Interrupt     Op          `json:"interrupt,omitempty"`
 	ListTargets   Op          `json:"listTargets"`
-	SessionIdle   Op          `json:"sessionIdle"`
-	LatestSession Op          `json:"latestSession"`
-	Messages      Op          `json:"messages,omitempty"`
-	PollTurn      Op          `json:"pollTurn,omitempty"`
+	// Messages reads the session's replies through items (the reflow
+	// path); PollTurn reports the active turn through idleWhen (plus the
+	// failed/failMessage/failCode extracts). Both are required: a core
+	// whose replies cannot be read would time every turn out silently.
+	Messages Op `json:"messages"`
+	PollTurn Op `json:"pollTurn"`
 	// ListSessionFiles + ReadSessionFile (declared together) offer
 	// core.SessionFiles: the agent session's workspace files, which the bridge
 	// publishes as room artifacts. listSessionFiles maps its list through
@@ -53,16 +55,12 @@ type Op struct {
 	Targets  *TargetsSpec      `json:"targets,omitempty"`
 	Items    *ItemsSpec        `json:"items,omitempty"`
 	IdleWhen *IdlePredicate    `json:"idleWhen,omitempty"`
-	// LatestBy, on a latestSession op, names a per-element numeric field to
-	// pick the maximum of instead of trusting list order (e.g. a daemon whose
-	// sessions carry createdAtUnixMs but come back unsorted).
-	LatestBy string `json:"latestBy,omitempty"`
 }
 
 // declared reports whether the manifest configures this op at all. Optional
-// ops (interrupt, writeWorkspaceFile, deleteWorkspace, messages, pollTurn,
-// listSessionFiles, readSessionFile, sessionWorkdir) are absent from manifests
-// that do not support them.
+// ops (interrupt, writeWorkspaceFile, deleteWorkspace, listSessionFiles,
+// readSessionFile, sessionWorkdir) are absent from manifests that do not
+// support them.
 func (o Op) declared() bool { return o.Method != "" && o.Path != "" }
 
 // TargetsSpec shapes a list response into targets.
@@ -190,11 +188,14 @@ func New(m Manifest) (*Provider, error) {
 	for label, op := range map[string]Op{
 		"createWorkspace": m.CreateWksp, "createSession": m.CreateSession,
 		"sendInput": m.SendInput, "listTargets": m.ListTargets,
-		"sessionIdle": m.SessionIdle, "latestSession": m.LatestSession,
+		"messages": m.Messages, "pollTurn": m.PollTurn,
 	} {
 		if strings.TrimSpace(op.Method) == "" || strings.TrimSpace(op.Path) == "" {
 			return nil, fmt.Errorf("manifestcore %q: verb %q missing method/path", m.Name, label)
 		}
+	}
+	if it := m.Messages.Items; it == nil || strings.TrimSpace(it.List) == "" || strings.TrimSpace(it.Fields["text"]) == "" {
+		return nil, fmt.Errorf("manifestcore %q: messages requires items.list and items.fields.text", m.Name)
 	}
 	if err := validateSessionFileOps(m); err != nil {
 		return nil, err

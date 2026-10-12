@@ -25,8 +25,8 @@ func TestComponentReconcileReachesOtherReplica(t *testing.T) {
       "createSession": {"method":"POST","path":"/s"},
       "sendInput": {"method":"POST","path":"/i"},
       "listTargets": {"method":"GET","path":"/t"},
-      "sessionIdle": {"method":"GET","path":"/idle"},
-      "latestSession": {"method":"GET","path":"/latest"}
+      "messages": {"method":"GET","path":"/m","items":{"list":"messages","fields":{"text":"text"}}},
+      "pollTurn": {"method":"GET","path":"/turn"}
     }`))
 	if err != nil {
 		t.Fatal(err)

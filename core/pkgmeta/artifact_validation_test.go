@@ -154,7 +154,7 @@ func minimalPackageManifest(name string) map[string]any {
 		"createSession":   verb("/s"),
 		"sendInput":       verb("/i"),
 		"listTargets":     getVerb("/t"),
-		"sessionIdle":     getVerb("/idle"),
-		"latestSession":   getVerb("/latest"),
+		"messages":        map[string]any{"method": "GET", "path": "/m", "items": map[string]any{"list": "messages", "fields": map[string]any{"text": "text"}}},
+		"pollTurn":        getVerb("/turn"),
 	}
 }

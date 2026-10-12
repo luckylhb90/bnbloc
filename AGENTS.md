@@ -400,8 +400,9 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
     port+token, a `defaultPath` for a host-side bridge, env-named path
     override, docker host-rewrite that is off unless its env is set),
     composer-options target enrichment, a target prefix (`local:`),
-    settled-turn idle predicate, latest-by-timestamp, and deleteWorkspace op
-    are all manifest schema. Distribution is install-only: the manifest is
+    settled-turn idle predicate (`pollTurn`), the reply reader (`messages`,
+    required: no silent reply timeout) and deleteWorkspace op are all
+    manifest schema. Distribution is install-only: the manifest is
     package source material — a super-admin installs it
     (`bnbloc cores install --manifest acme.json --name acme` or the platform
     console); the record persists in platform settings, rehydrates at gateway

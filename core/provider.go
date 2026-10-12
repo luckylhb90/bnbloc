@@ -1,7 +1,7 @@
 // Package core defines the pluggable seam for the local agent core that bnbloc
 // drives over HTTP (the outbound control path): create a workspace and session,
-// send follow-up input, list agent targets, poll idle, and find the latest
-// session. Each core registers under its own name and is selected per
+// send follow-up input, list agent targets, read the session's replies, and
+// poll its turn. Each core registers under its own name and is selected per
 // deployment without changing the gateway or bridge.
 //
 // This seam is outbound only. Inbound activity (core -> bnbloc) stays per-core
@@ -345,11 +345,6 @@ type Provider interface {
 	SendInput(ctx context.Context, ep Endpoint, workspaceID, sessionID, text string, opts SessionOptions) error
 	// ListTargets returns the enabled agent targets on the core.
 	ListTargets(ctx context.Context, ep Endpoint) ([]Target, error)
-	// SessionIdle reports whether the session has no active turn running.
-	SessionIdle(ctx context.Context, ep Endpoint, workspaceID, sessionID string) (bool, error)
-	// LatestSession returns the most recently created session id in a workspace,
-	// or "" when none is known.
-	LatestSession(ctx context.Context, ep Endpoint, workspaceID string) (sessionID string, err error)
 	// Messages returns assistant messages in the session with Version > after,
 	// ascending, plus the latest version cursor. This is the inbound (reply ->
 	// room) path the bridge reflows; each core maps its own message shape here.

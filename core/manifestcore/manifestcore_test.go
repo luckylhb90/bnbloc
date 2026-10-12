@@ -26,10 +26,11 @@ const restManifest = `{
     "body": { "text": "{text}" } },
   "listTargets": { "method": "GET", "path": "/v1/agents",
     "targets": { "list": "data", "id": "id", "provider": "harness" } },
-  "sessionIdle": { "method": "GET", "path": "/v1/sessions/{sessionId}",
-    "idleWhen": { "field": "status", "notIn": ["running"] } },
-  "latestSession": { "method": "GET", "path": "/v1/sessions",
-    "targets": { "list": "data", "id": "id" } }
+  "messages": { "method": "GET", "path": "/v1/sessions/{sessionId}/messages",
+    "items": { "list": "data", "fields": { "version": "v", "role": "role", "text": "text" } },
+    "extract": { "latestVersion": "latest" } },
+  "pollTurn": { "method": "GET", "path": "/v1/sessions/{sessionId}",
+    "idleWhen": { "field": "status", "notIn": ["running"] } }
 }`
 
 type capture struct {
@@ -60,15 +61,15 @@ func fakeRESTDaemon(t *testing.T, caps *[]capture) *httptest.Server {
 			}})
 		case r.Method == http.MethodGet && r.URL.Path == "/v1/sessions/sess-1":
 			_ = json.NewEncoder(w).Encode(map[string]any{"status": "idle"})
-		case r.Method == http.MethodGet && r.URL.Path == "/v1/sessions":
-			_ = json.NewEncoder(w).Encode(map[string]any{"data": []any{map[string]any{"id": "sess-1"}}})
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/sessions/sess-1/messages":
+			_ = json.NewEncoder(w).Encode(map[string]any{"latest": 4, "data": []any{map[string]any{"v": 4, "role": "assistant", "text": "done"}}})
 		default:
 			w.WriteHeader(http.StatusNotFound)
 		}
 	}))
 }
 
-// A manifest drives a real REST daemon through all six verbs with the correct
+// A manifest drives a real REST daemon through every required verb with the correct
 // method/path/body and extracts the right response fields.
 func TestManifestReproducesRESTDaemon(t *testing.T) {
 	var caps []capture
@@ -115,14 +116,14 @@ func TestManifestReproducesRESTDaemon(t *testing.T) {
 		t.Fatalf("SendInput: %v", err)
 	}
 
-	idle, err := p.SessionIdle(ctx, ep, ws, "sess-1")
-	if err != nil || !idle {
-		t.Fatalf("SessionIdle = %v, %v; want idle (status idle not in [running])", idle, err)
+	turn, err := p.PollTurn(ctx, ep, ws, "sess-1")
+	if err != nil || !turn.Idle {
+		t.Fatalf("PollTurn = %+v, %v; want idle (status idle not in [running])", turn, err)
 	}
 
-	latest, err := p.LatestSession(ctx, ep, ws)
-	if err != nil || latest != "sess-1" {
-		t.Fatalf("LatestSession = %q, %v", latest, err)
+	msgs, latest, err := p.Messages(ctx, ep, ws, "sess-1", 0)
+	if err != nil || latest != 4 || len(msgs) != 1 || msgs[0].Text != "done" || msgs[0].Version != 4 {
+		t.Fatalf("Messages = %+v, %d, %v", msgs, latest, err)
 	}
 }
 
@@ -261,16 +262,16 @@ func TestManifestSessionFileOpsValidation(t *testing.T) {
 	}
 }
 
-// SessionIdle returns false when the status is the running enum value.
+// PollTurn reports busy when the status is the running enum value.
 func TestManifestIdlePredicate(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]any{"status": "running"})
 	}))
 	defer srv.Close()
 	p, _ := Parse([]byte(restManifest))
-	idle, err := p.SessionIdle(context.Background(), core.Endpoint{BaseURL: srv.URL}, "w", "sess-1")
-	if err != nil || idle {
-		t.Fatalf("SessionIdle(running) = %v, %v; want busy", idle, err)
+	turn, err := p.PollTurn(context.Background(), core.Endpoint{BaseURL: srv.URL}, "w", "sess-1")
+	if err != nil || turn.Idle {
+		t.Fatalf("PollTurn(running) = %+v, %v; want busy", turn, err)
 	}
 }
 
@@ -297,12 +298,6 @@ func (fakeBuiltinProvider) SendInput(ctx context.Context, ep core.Endpoint, work
 func (fakeBuiltinProvider) ListTargets(ctx context.Context, ep core.Endpoint) ([]core.Target, error) {
 	return nil, nil
 }
-func (fakeBuiltinProvider) SessionIdle(ctx context.Context, ep core.Endpoint, workspaceID, sessionID string) (bool, error) {
-	return true, nil
-}
-func (fakeBuiltinProvider) LatestSession(ctx context.Context, ep core.Endpoint, workspaceID string) (string, error) {
-	return "", nil
-}
 func (fakeBuiltinProvider) Messages(ctx context.Context, ep core.Endpoint, workspaceID, sessionID string, after int64) ([]core.Message, int64, error) {
 	return nil, 0, nil
 }
@@ -318,8 +313,8 @@ func TestLoadManifestsRegisters(t *testing.T) {
       "createSession": {"method":"POST","path":"/s"},
       "sendInput": {"method":"POST","path":"/i"},
       "listTargets": {"method":"GET","path":"/t"},
-      "sessionIdle": {"method":"GET","path":"/idle"},
-      "latestSession": {"method":"GET","path":"/latest"}
+      "messages": {"method":"GET","path":"/m","items":{"list":"messages","fields":{"text":"text"}}},
+      "pollTurn": {"method":"GET","path":"/turn"}
     }`)
 	shadow := []byte(`{
       "name": "fakebuiltin",
@@ -327,8 +322,8 @@ func TestLoadManifestsRegisters(t *testing.T) {
       "createSession": {"method":"POST","path":"/s"},
       "sendInput": {"method":"POST","path":"/i"},
       "listTargets": {"method":"GET","path":"/t"},
-      "sessionIdle": {"method":"GET","path":"/idle"},
-      "latestSession": {"method":"GET","path":"/latest"}
+      "messages": {"method":"GET","path":"/m","items":{"list":"messages","fields":{"text":"text"}}},
+      "pollTurn": {"method":"GET","path":"/turn"}
     }`)
 	reg, errs := LoadManifests([][]byte{myrest, shadow})
 	foundMyrest := false
@@ -360,8 +355,8 @@ func TestLoadManifestsMalformedAndReregister(t *testing.T) {
       "createSession": {"method":"POST","path":"/s"},
       "sendInput": {"method":"POST","path":"/i"},
       "listTargets": {"method":"GET","path":"/t"},
-      "sessionIdle": {"method":"GET","path":"/idle"},
-      "latestSession": {"method":"GET","path":"/latest"}
+      "messages": {"method":"GET","path":"/m","items":{"list":"messages","fields":{"text":"text"}}},
+      "pollTurn": {"method":"GET","path":"/turn"}
     }`)
 	reg, errs := LoadManifests([][]byte{[]byte(`{bad json`), good})
 	if len(errs) != 1 {

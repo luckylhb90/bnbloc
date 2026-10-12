@@ -32,10 +32,6 @@ const fullProviderManifest = `{
     "body": {} },
   "listTargets": { "method": "GET", "path": "/v1/agent-targets",
     "targets": { "list": "targets", "id": "id", "provider": "provider" } },
-  "sessionIdle": { "method": "GET", "path": "/v1/workspaces/{workspaceId}/agent-sessions/{sessionId}",
-    "idleWhen": { "field": "session.activeTurn.phase", "notIn": ["running", "streaming", "working", "executing"] } },
-  "latestSession": { "method": "GET", "path": "/v1/workspaces/{workspaceId}/agent-sessions",
-    "targets": { "list": "sessions", "id": "id" } },
   "messages": { "method": "GET", "path": "/v1/workspaces/{workspaceId}/agent-sessions/{sessionId}/messages?order=asc&limit=100",
     "pathWhen": { "after": "&afterVersion={after}" },
     "items": {

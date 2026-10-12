@@ -159,28 +159,6 @@ func (c *Client) ListTargets(ctx context.Context, ep core.Endpoint) ([]core.Targ
 	return out.Core(), nil
 }
 
-func (c *Client) SessionIdle(ctx context.Context, ep core.Endpoint, workspaceID, sessionID string) (bool, error) {
-	if _, err := c.Discovery(ctx, ep); err != nil {
-		return false, err
-	}
-	var out SessionIdleResponse
-	if err := c.getJSON(ctx, ep, SessionIdlePath(workspaceID, sessionID), &out); err != nil {
-		return false, fmt.Errorf("session idle: %w", err)
-	}
-	return out.Idle, nil
-}
-
-func (c *Client) LatestSession(ctx context.Context, ep core.Endpoint, workspaceID string) (string, error) {
-	if _, err := c.Discovery(ctx, ep); err != nil {
-		return "", err
-	}
-	var out LatestSessionResponse
-	if err := c.getJSON(ctx, ep, LatestSessionPath(workspaceID), &out); err != nil {
-		return "", fmt.Errorf("latest session: %w", err)
-	}
-	return out.SessionID, nil
-}
-
 func (c *Client) Messages(ctx context.Context, ep core.Endpoint, workspaceID, sessionID string, after int64) ([]core.Message, int64, error) {
 	if _, err := c.Discovery(ctx, ep); err != nil {
 		return nil, 0, err

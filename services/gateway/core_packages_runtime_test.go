@@ -21,8 +21,8 @@ func validProbeManifest(t *testing.T, discover *manifestcore.DiscoverOp) manifes
 		CreateSession: manifestcore.Op{Method: "POST", Path: "/s"},
 		SendInput:     manifestcore.Op{Method: "POST", Path: "/i"},
 		ListTargets:   manifestcore.Op{Method: "GET", Path: "/t"},
-		SessionIdle:   manifestcore.Op{Method: "GET", Path: "/idle"},
-		LatestSession: manifestcore.Op{Method: "GET", Path: "/l"},
+		Messages:      manifestcore.Op{Method: "GET", Path: "/m", Items: &manifestcore.ItemsSpec{List: "messages", Fields: map[string]string{"text": "text"}}},
+		PollTurn:      manifestcore.Op{Method: "GET", Path: "/turn"},
 		Discover:      discover,
 	}
 	if _, err := manifestcore.New(m); err != nil {

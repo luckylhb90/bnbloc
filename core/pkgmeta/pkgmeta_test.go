@@ -121,8 +121,8 @@ func TestParsePackage_acceptsSessionFileManifest(t *testing.T) {
 			"createSession":{"method":"POST","path":"/v1/workspaces/{workspaceId}/sessions"},
 			"sendInput":{"method":"POST","path":"/v1/workspaces/{workspaceId}/sessions/{sessionId}/input"},
 			"listTargets":{"method":"GET","path":"/v1/targets","targets":{"list":"targets","id":"id","provider":"provider"}},
-			"sessionIdle":{"method":"GET","path":"/v1/workspaces/{workspaceId}/sessions/{sessionId}"},
-			"latestSession":{"method":"GET","path":"/v1/workspaces/{workspaceId}/sessions"},
+			"messages":{"method":"GET","path":"/v1/workspaces/{workspaceId}/sessions/{sessionId}/messages","items":{"list":"messages","fields":{"text":"text"}}},
+			"pollTurn":{"method":"GET","path":"/v1/workspaces/{workspaceId}/sessions/{sessionId}"},
 			"listSessionFiles":{"method":"GET","path":"/v1/workspaces/{workspaceId}/sessions/{sessionId}/files","items":{"list":"files","fields":{"path":"path"}}},
 			"readSessionFile":{"method":"GET","path":"/v1/workspaces/{workspaceId}/sessions/{sessionId}/file?path={relPath}","extract":{"content":"content"}},
 			"sessionWorkdir":{"method":"GET","path":"/v1/workspaces/{workspaceId}/sessions/{sessionId}","extract":{"workdir":"session.cwd"}}

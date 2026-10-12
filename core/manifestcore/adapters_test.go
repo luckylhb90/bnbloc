@@ -178,24 +178,6 @@ func TestExtractTargetsEnabledWhen(t *testing.T) {
 	}
 }
 
-// latestBy picks the element with the max numeric field, last-wins on ties —
-// not list order.
-func TestLatestBy(t *testing.T) {
-	doc := jsonDoc(t, `{"sessions":[
-		{"id":"s-old","createdAtUnixMs":10},
-		{"id":"s-new","createdAtUnixMs":42},
-		{"id":"s-mid","createdAtUnixMs":20}
-	]}`)
-	spec := &TargetsSpec{List: "sessions", ID: "id"}
-	if got, ok := latestByField(doc, spec, "createdAtUnixMs"); !ok || got != "s-new" {
-		t.Errorf("latestByField = %q,%v", got, ok)
-	}
-	tie := jsonDoc(t, `{"sessions":[{"id":"a","createdAtUnixMs":5},{"id":"b","createdAtUnixMs":5}]}`)
-	if got, _ := latestByField(tie, spec, "createdAtUnixMs"); got != "b" {
-		t.Errorf("tie should be last-wins, got %q", got)
-	}
-}
-
 // targetIdPrefix exposes TargetResolver; without it the provider must report
 // not-resolvable so the bridge falls back to live listing.
 func TestResolveTargetPrefix(t *testing.T) {
@@ -394,7 +376,7 @@ func jsonDoc(t *testing.T, raw string) any {
 	return doc
 }
 
-// validManifest fills the six required verbs so tests can focus on the field
+// validManifest fills the required verbs so tests can focus on the field
 // under test; New rejects a manifest missing any of them.
 func validManifest(name string) Manifest {
 	dummy := Op{Method: "GET", Path: "/dummy"}
@@ -404,8 +386,8 @@ func validManifest(name string) Manifest {
 		CreateSession: dummy,
 		SendInput:     dummy,
 		ListTargets:   dummy,
-		SessionIdle:   dummy,
-		LatestSession: dummy,
+		Messages:      Op{Method: "GET", Path: "/messages", Items: &ItemsSpec{List: "messages", Fields: map[string]string{"text": "text"}}},
+		PollTurn:      dummy,
 	}
 }
 

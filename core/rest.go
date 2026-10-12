@@ -118,13 +118,6 @@ func (c REST) DoRaw(ctx context.Context, method string, ep Endpoint, path string
 	return raw, nil
 }
 
-// ShortID returns a short random hex id for workspace/session names.
-func ShortID() string {
-	b := make([]byte, 4)
-	_, _ = rand.Read(b)
-	return fmt.Sprintf("%x", b)
-}
-
 // UUIDv4 returns a random RFC-4122 v4 UUID string.
 func UUIDv4() string {
 	b := make([]byte, 16)

@@ -28,7 +28,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"math"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -398,44 +397,8 @@ func (p *Provider) enrichTarget(ctx context.Context, ep core.Endpoint, t *core.T
 	}
 }
 
-// SessionIdle implements core.Provider using the manifest's idle predicate.
-func (p *Provider) SessionIdle(ctx context.Context, ep core.Endpoint, workspaceID, sessionID string) (bool, error) {
-	v := vars{"workspaceId": workspaceID, "sessionId": sessionID}
-	out, err := p.call(ctx, ep, p.m.SessionIdle, v)
-	if err != nil {
-		return false, err
-	}
-	return idleFromPredicate(out, p.m.SessionIdle.IdleWhen), nil
-}
-
-// LatestSession implements core.Provider. With latestBy it picks the element
-// whose numeric field is maximal (last one wins on ties, matching a stable
-// sort); otherwise it takes the first listed session id.
-func (p *Provider) LatestSession(ctx context.Context, ep core.Endpoint, workspaceID string) (string, error) {
-	v := vars{"workspaceId": workspaceID}
-	out, err := p.call(ctx, ep, p.m.LatestSession, v)
-	if err != nil {
-		return "", err
-	}
-	if by := p.m.LatestSession.LatestBy; by != "" && p.m.LatestSession.Targets != nil {
-		if best, ok := latestByField(out, p.m.LatestSession.Targets, by); ok {
-			return best, nil
-		}
-		return "", nil
-	}
-	ts := p.m.LatestSession.extractTargets(out)
-	if len(ts) == 0 {
-		return "", nil
-	}
-	return ts[0].ID, nil
-}
-
-// Messages implements core.Provider using an optional messages op. Older
-// manifests without the op keep the previous no-reflow behavior.
+// Messages implements core.Provider through the messages op's items.
 func (p *Provider) Messages(ctx context.Context, ep core.Endpoint, workspaceID, sessionID string, after int64) ([]core.Message, int64, error) {
-	if !p.m.Messages.declared() {
-		return nil, after, nil
-	}
 	v := vars{"workspaceId": workspaceID, "sessionId": sessionID, "after": fmt.Sprintf("%d", after)}
 	out, err := p.call(ctx, ep, p.m.Messages, v)
 	if err != nil {
@@ -445,31 +408,24 @@ func (p *Provider) Messages(ctx context.Context, ep core.Endpoint, workspaceID, 
 	return p.m.Messages.extractMessages(out), latest, nil
 }
 
-// PollTurn implements core.Provider. A pollTurn op can report structured
-// failures; older manifests fall back to the sessionIdle op.
+// PollTurn implements core.Provider: the pollTurn op's idleWhen predicate,
+// plus a structured failure of a settled turn.
 func (p *Provider) PollTurn(ctx context.Context, ep core.Endpoint, workspaceID, sessionID string) (core.TurnStatus, error) {
-	if p.m.PollTurn.declared() {
-		v := vars{"workspaceId": workspaceID, "sessionId": sessionID}
-		out, err := p.call(ctx, ep, p.m.PollTurn, v)
-		if err != nil {
-			return core.TurnStatus{}, err
-		}
-		idle := idleFromPredicate(out, p.m.PollTurn.IdleWhen)
-		status := core.TurnStatus{Idle: idle}
-		if idle && strings.EqualFold(p.m.PollTurn.extractString(out, "failed"), "failed") {
-			status.Failed = true
-			status.FailMessage = strings.TrimSpace(p.m.PollTurn.extractString(out, "failMessage"))
-			if status.FailMessage == "" {
-				status.FailMessage = strings.TrimSpace(p.m.PollTurn.extractString(out, "failCode"))
-			}
-		}
-		return status, nil
-	}
-	idle, err := p.SessionIdle(ctx, ep, workspaceID, sessionID)
+	v := vars{"workspaceId": workspaceID, "sessionId": sessionID}
+	out, err := p.call(ctx, ep, p.m.PollTurn, v)
 	if err != nil {
 		return core.TurnStatus{}, err
 	}
-	return core.TurnStatus{Idle: idle}, nil
+	idle := idleFromPredicate(out, p.m.PollTurn.IdleWhen)
+	status := core.TurnStatus{Idle: idle}
+	if idle && strings.EqualFold(p.m.PollTurn.extractString(out, "failed"), "failed") {
+		status.Failed = true
+		status.FailMessage = strings.TrimSpace(p.m.PollTurn.extractString(out, "failMessage"))
+		if status.FailMessage == "" {
+			status.FailMessage = strings.TrimSpace(p.m.PollTurn.extractString(out, "failCode"))
+		}
+	}
+	return status, nil
 }
 
 // Supports implements core.CapabilityReporter: a manifest core offers an
@@ -528,26 +484,4 @@ func shortID() string {
 	b := make([]byte, 6)
 	_, _ = rand.Read(b)
 	return hex.EncodeToString(b)
-}
-
-// latestByField picks the id of the list element whose numeric field is
-// maximal; the last maximum wins ties, matching a stable sort. ok=false when
-// the list resolves to nothing.
-func latestByField(doc any, spec *TargetsSpec, by string) (string, bool) {
-	arr, ok := jsonPath(doc, spec.List).([]any)
-	if !ok {
-		return "", false
-	}
-	best, bestVal := "", int64(math.MinInt64)
-	found := false
-	for _, el := range arr {
-		id := jsonPathString(el, spec.ID)
-		if id == "" {
-			continue
-		}
-		if val := int64FromPath(el, by); !found || val >= bestVal {
-			best, bestVal, found = id, val, true
-		}
-	}
-	return best, found
 }

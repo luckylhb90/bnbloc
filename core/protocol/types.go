@@ -370,14 +370,6 @@ type ListTargetsResponse struct {
 	Targets []Target `json:"targets"`
 }
 
-type SessionIdleResponse struct {
-	Idle bool `json:"idle"`
-}
-
-type LatestSessionResponse struct {
-	SessionID string `json:"sessionId"`
-}
-
 // Message is one session message on the wire (see core.Message). Version is
 // the session's monotonic message cursor; Seq is the message's stable,
 // strictly increasing sequence within the session.
@@ -807,16 +799,8 @@ func WorkspaceSessionsPath(workspaceID string) string {
 	return "/core/v1/workspaces/" + escapePath(workspaceID) + "/sessions"
 }
 
-func LatestSessionPath(workspaceID string) string {
-	return WorkspaceSessionsPath(workspaceID) + "/latest"
-}
-
 func SessionInputPath(workspaceID, sessionID string) string {
 	return WorkspaceSessionsPath(workspaceID) + "/" + escapePath(sessionID) + "/input"
-}
-
-func SessionIdlePath(workspaceID, sessionID string) string {
-	return WorkspaceSessionsPath(workspaceID) + "/" + escapePath(sessionID) + "/idle"
 }
 
 func SessionMessagesPath(workspaceID, sessionID string) string {

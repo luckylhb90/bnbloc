@@ -51,7 +51,7 @@ const discoverTimeout = 3 * time.Second
 // here: the gateway activates them from its durable records (through the
 // same EntryFor), and desktop-managed sidecar cores hand the bridge a
 // transient manifest directory through BNBLOC_CORE_MANIFESTS_DIR.
-func FromEnv() ([]Entry, error) {
+func FromEnv() []Entry {
 	loadEnvManifests()
 	names := splitCSV(config.FromEnvRaw("BNBLOC_CORES"))
 	entries := make([]Entry, 0, len(names))
@@ -76,7 +76,7 @@ func FromEnv() ([]Entry, error) {
 		entries = append(entries, EntryFor(name, p, core.Endpoint{}))
 	}
 	registerEnvAdapters(entries)
-	return entries, nil
+	return entries
 }
 
 // EntryFor is the one way a core's Entry is built, for env-configured and

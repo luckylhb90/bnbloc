@@ -204,11 +204,6 @@ func (c *Client) WriteStdin(ctx context.Context, ep core.Endpoint, machine, exec
 	return nil
 }
 
-// Resize changes a tty exec's terminal size.
-func (c *Client) Resize(ctx context.Context, ep core.Endpoint, machine, execID string, rows, cols int) error {
-	return c.doJSON(ctx, ep, http.MethodPost, ExecControlPath(machine, execID, "resize"), ResizeRequest{Rows: rows, Cols: cols}, nil)
-}
-
 // Signal delivers a POSIX signal to a running exec.
 func (c *Client) Signal(ctx context.Context, ep core.Endpoint, machine, execID string, signal int) error {
 	return c.doJSON(ctx, ep, http.MethodPost, ExecControlPath(machine, execID, "signal"), SignalRequest{Signal: signal}, nil)
@@ -309,12 +304,6 @@ func (c *Client) GetPool(ctx context.Context, ep core.Endpoint, name string) (Po
 	var out Pool
 	err := c.doJSON(ctx, ep, http.MethodGet, PoolPath(name), nil, &out)
 	return out, err
-}
-
-func (c *Client) ListPools(ctx context.Context, ep core.Endpoint) ([]Pool, error) {
-	var out ListPoolsResponse
-	err := c.doJSON(ctx, ep, http.MethodGet, PathPools, nil, &out)
-	return out.Pools, err
 }
 
 func (c *Client) DeletePool(ctx context.Context, ep core.Endpoint, name string) error {

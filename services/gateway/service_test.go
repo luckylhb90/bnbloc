@@ -447,8 +447,8 @@ func TestCoresTenantEnablementFilter(t *testing.T) {
 		CreateSession: manifestcore.Op{Method: "POST", Path: "/s"},
 		SendInput:     manifestcore.Op{Method: "POST", Path: "/i"},
 		ListTargets:   manifestcore.Op{Method: "GET", Path: "/t"},
-		SessionIdle:   manifestcore.Op{Method: "GET", Path: "/idle"},
-		LatestSession: manifestcore.Op{Method: "GET", Path: "/l"},
+		Messages:      manifestcore.Op{Method: "GET", Path: "/m", Items: &manifestcore.ItemsSpec{List: "messages", Fields: map[string]string{"text": "text"}}},
+		PollTurn:      manifestcore.Op{Method: "GET", Path: "/turn"},
 	}))
 	if _, err := gw.legacyManifestInstallPipeline().Install(t.Context(), extpipe.InstallRequest{Body: pkgBody, Actor: "root"}); err != nil {
 		t.Fatalf("install: %v", err)
