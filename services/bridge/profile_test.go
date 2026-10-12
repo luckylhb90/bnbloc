@@ -2,6 +2,7 @@ package bridge
 
 import (
 	"context"
+	"regexp"
 	"strings"
 	"sync"
 	"testing"
@@ -14,13 +15,21 @@ import (
 // (roomlog.SessionGuidance, under any facts) into the facts it was rendered
 // with and what follows.
 func cutGuidance(text string) (facts roomlog.Guidance, rest string, ok bool) {
+	self := ""
+	if m := guidanceSelf.FindStringSubmatch(text); m != nil {
+		self = m[1]
+	}
 	for _, g := range []roomlog.Guidance{{HasTools: true, HasRoomFiles: true}, {HasTools: true}, {HasRoomFiles: true}, {}} {
+		g.Self = self
 		if rest, ok := strings.CutPrefix(text, strings.TrimRight(roomlog.SessionGuidance(g), "\n")); ok {
 			return g, rest, true
 		}
 	}
 	return roomlog.Guidance{}, text, false
 }
+
+// guidanceSelf reads the agent a session's guidance names.
+var guidanceSelf = regexp.MustCompile(`^\[How this bnbloc room works\]\nYou are the agent "([^"]*)"`)
 
 // profileContent is a session profile's instructions after the guidance
 // every profile opens with (sessionGuidance); it fails when the guidance is
@@ -42,6 +51,8 @@ func profileContent(t *testing.T, p *corepkg.AgentProfile) string {
 type profileProv struct {
 	fakeCoreProvider
 	noProfile bool
+	// noFiles: the core takes no workspace files (the push model).
+	noFiles bool
 
 	pmu      sync.Mutex
 	profiles []*corepkg.AgentProfile
@@ -64,7 +75,7 @@ func (p *profileProv) PollTurn(context.Context, corepkg.Endpoint, string, string
 func (p *profileProv) Supports(_ context.Context, _ corepkg.Endpoint, c corepkg.Capability) bool {
 	switch c {
 	case corepkg.CapabilityWriteFile:
-		return true
+		return !p.noFiles
 	case corepkg.CapabilityAgentProfile:
 		return !p.noProfile
 	}
@@ -161,7 +172,7 @@ func TestSessionContributorReachesProfileCore(t *testing.T) {
 	// The room tools' usage is session guidance (HasTools), worded by
 	// roomlog alone: the contributor adds none of its own.
 	if facts, _, _ := cutGuidance(p.Instructions); len(p.MCPServers) != 1 || p.MCPServers[0].Name != "room" || profileContent(t, p) != "" ||
-		facts != (roomlog.Guidance{HasTools: true, HasRoomFiles: true}) {
+		facts != (roomlog.Guidance{Self: "maya/agent-a", HasTools: true, HasRoomFiles: true}) {
 		t.Fatalf("profile = %+v", p)
 	}
 	mu.Lock()
@@ -269,5 +280,26 @@ func TestRoomModelInFirstPromptOnlyWithoutProfile(t *testing.T) {
 				t.Fatalf("the follow-up turn's prompt carries the room model (or lost its message):\n%s", follow[0])
 			}
 		})
+	}
+}
+
+// A push session that starts in an empty room still gets its session
+// guidance (2026-10-13: Compose returned the bare message when there was no
+// history, and the guidance used to ride that composition): the first
+// prompt is the guidance, then the message under its [now] marker. No
+// .room/ legend: the core takes no workspace files.
+func TestPushSessionInEmptyRoomGetsGuidance(t *testing.T) {
+	prov := &profileProv{noProfile: true, noFiles: true}
+	b := newProfileBridge(t, prov) // an empty room
+	if _, err := b.driveClaim(context.Background(), testDrive(b, jobRef{ID: "job-1", RequesterUserID: "maya"}, "r1", "maya", "core-a", "agent-a", "t", "hello", "ch"), nil); err != nil {
+		t.Fatal(err)
+	}
+	first := prov.recordedPrompts()
+	if len(first) != 1 {
+		t.Fatalf("first prompts = %q", first)
+	}
+	want := roomlog.SessionGuidance(roomlog.Guidance{Self: "maya/agent-a"}) + "\n---\n\n[now — from maya]\nhello"
+	if first[0] != want {
+		t.Fatalf("first prompt in an empty room =\n%s\nwant\n%s", first[0], want)
 	}
 }

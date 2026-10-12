@@ -217,14 +217,11 @@ func TestMaterializeChunksAndDeltas(t *testing.T) {
 // The pointer prompt must carry no history — the whole point is that the
 // instruction is never diluted.
 func TestComposePointerHasNoHistory(t *testing.T) {
-	out := ComposePointer("maya/nimbus", Now{From: "maya", Text: "存到文件里"})
-	for _, want := range []string{".room/INDEX.md", ".room/recent.md", ".room/artifacts.md", recordsMark, "[now — from maya]\n存到文件里"} {
-		if !strings.Contains(out, want) {
-			t.Errorf("pointer prompt missing %q:\n%s", want, out)
-		}
+	if out := ComposePointer(Now{From: "maya", Text: "存到文件里"}, false); out != "[now — from maya]\n存到文件里" {
+		t.Errorf("pointer prompt = %q", out)
 	}
-	if len(out) > 900 {
-		t.Fatalf("pointer prompt is %d chars — history leaked in?\n%s", len(out), out)
+	if out := ComposePointer(Now{From: "maya", Text: "存到文件里"}, true); out != "(room records: .room/INDEX.md)\n\n[now — from maya]\n存到文件里" {
+		t.Errorf("pointer prompt with the records line = %q", out)
 	}
 }
 
@@ -383,11 +380,11 @@ func TestAttachmentBlockRendered(t *testing.T) {
 			t.Fatalf("%s: missing attachment path: %q", name, out)
 		}
 	}
-	check("pointer", ComposePointer("maya/codex", Now{Text: "what is this?", Attachments: atts}))
-	check("compose-fresh-nohistory", Compose(nil, Now{Text: "what is this?", Attachments: atts}, Options{SelfSpeaker: "maya/codex"}))
-	check("composedelta-nohistory", ComposeDelta(nil, Now{Text: "what is this?", Attachments: atts}, Options{SelfSpeaker: "maya/codex"}))
+	check("pointer", ComposePointer(Now{Text: "what is this?", Attachments: atts}, false))
+	check("compose-fresh-nohistory", Compose(nil, Now{Text: "what is this?", Attachments: atts}, Options{}))
+	check("composedelta-nohistory", ComposeDelta(nil, Now{Text: "what is this?", Attachments: atts}, Options{}))
 	// No attachments → no block (bare pointer still works).
-	if strings.Contains(ComposePointer("maya/codex", Now{Text: "hi"}), "OPEN THESE") {
+	if strings.Contains(ComposePointer(Now{Text: "hi"}, false), "OPEN THESE") {
 		t.Fatal("no-attachment prompt must not render the block")
 	}
 }

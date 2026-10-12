@@ -12,7 +12,6 @@ import (
 
 	corepkg "github.com/luckylhb90/bnbloc/core"
 	"github.com/luckylhb90/bnbloc/internal/contentpkg"
-	"github.com/luckylhb90/bnbloc/internal/roomlog"
 	"github.com/luckylhb90/bnbloc/internal/wire"
 )
 
@@ -234,7 +233,7 @@ func TestContentFallbackPrefixesThePrompt(t *testing.T) {
 		t.Fatalf("prompts = %q", prompts)
 	}
 	pr := prompts[0]
-	if !strings.HasPrefix(pr, roomlog.SessionGuidance(roomlog.Guidance{HasRoomFiles: true})+"\n[Expert: Reviewer (v1.0.0).") || !strings.Contains(pr, "MARKER-ALPHA") || !strings.Contains(pr, ".agents/skills/<name>/") ||
+	if _, rest, ok := cutGuidance(pr); !ok || !strings.HasPrefix(rest, "\n\n[Expert: Reviewer (v1.0.0).") || !strings.Contains(pr, "MARKER-ALPHA") || !strings.Contains(pr, ".agents/skills/<name>/") ||
 		!strings.Contains(pr, "- checklist: Use when reviewing a diff") || !strings.Contains(pr, "review my change") {
 		t.Fatalf("prompt = %s", pr)
 	}

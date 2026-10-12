@@ -178,7 +178,6 @@ func (b *Bridge) materializeRoomContext(ctx context.Context, w corepkg.Workspace
 // else the job's requester.
 func (b *Bridge) drivePrompt(ctx context.Context, d *drive, workspaceID string, atts []writtenAttachment, st *roomlog.CtxState, g roomlog.Guidance, fresh bool) string {
 	room, owner, provider, text := d.job.RoomID, d.owner, d.job.Provider, d.text
-	self := agentSpeakerLabel(owner, provider)
 	now := roomlog.Now{From: d.job.RequesterUserID, Text: text, Attachments: toPromptAttachments(atts)}
 	entry, ok := b.coreEntry(d.core)
 	if d.caps.writer == nil || !ok {
@@ -200,7 +199,10 @@ func (b *Bridge) drivePrompt(ctx context.Context, d *drive, workspaceID string, 
 	if from != "" {
 		now.From = from
 	}
-	return roomlog.ComposePointer(self, now)
+	// A session whose guidance rode its first prompt (no agentProfile) keeps
+	// one line pointing at the records: a harness may compact that prompt
+	// away.
+	return roomlog.ComposePointer(now, !d.caps.profile)
 }
 
 // toPromptAttachments maps the bridge's written descriptors to roomlog's prompt
@@ -283,13 +285,11 @@ func (b *Bridge) driveTextDelta(ctx context.Context, room, owner, provider strin
 	entries = dropSelf(entries, self, boundary)
 	if fresh {
 		return roomlog.Compose(entries, now, roomlog.Options{
-			SelfSpeaker: self,
 			WindowChars: b.windowChars,
 			Summarizer:  b.summarizer,
 		})
 	}
 	return roomlog.ComposeDelta(entries, now, roomlog.Options{
-		SelfSpeaker: self,
 		WindowChars: b.windowChars,
 	})
 }

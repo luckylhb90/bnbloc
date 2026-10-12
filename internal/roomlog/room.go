@@ -30,6 +30,8 @@ var guidanceTemplate = template.Must(template.New("guidance").Option("missingkey
 
 // Guidance is the facts a session's guidance is rendered with.
 type Guidance struct {
+	// Self is the agent the session drives ("maya/codex", AgentSpeaker).
+	Self string
 	// HasTools: the session has the bnbloc-room tools.
 	HasTools bool
 	// HasRoomFiles: bnbloc writes the room's records into the session's
@@ -37,12 +39,15 @@ type Guidance struct {
 	HasRoomFiles bool
 }
 
-// guidanceData is what the template reads: the facts and the limits, each
-// from its owner's constant.
+// guidanceData is what the template reads: the facts, the limits and the
+// scaffolding markers, each from its owner's constant.
 type guidanceData struct {
 	Guidance
 	MaxFanOut int
 	MaxDepth  int
+	Now       string
+	Records   string
+	Fence     string
 }
 
 // SessionGuidance is the guidance a session is told once, when the bridge
@@ -51,7 +56,10 @@ type guidanceData struct {
 // sessionGuidance decides which). Never part of a per-turn prompt.
 func SessionGuidance(g Guidance) string {
 	var b strings.Builder
-	if err := guidanceTemplate.Execute(&b, guidanceData{Guidance: g, MaxFanOut: wire.MaxDispatchFanOut, MaxDepth: wire.MaxDispatchDepth}); err != nil {
+	if err := guidanceTemplate.Execute(&b, guidanceData{
+		Guidance: g, MaxFanOut: wire.MaxDispatchFanOut, MaxDepth: wire.MaxDispatchDepth,
+		Now: strings.TrimSpace(nowMarker("<sender>")), Records: recordsMark, Fence: fenceMark,
+	}); err != nil {
 		panic("roomlog: session guidance template: " + err.Error()) // a static template bug
 	}
 	return strings.TrimSpace(b.String()) + "\n"

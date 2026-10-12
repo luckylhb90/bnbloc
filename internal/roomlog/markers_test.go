@@ -127,7 +127,7 @@ func TestAttributionEverywhere(t *testing.T) {
 	for name, out := range map[string]string{
 		"compose": Compose(nil, now, Options{}),
 		"delta":   ComposeDelta(nil, now, Options{}),
-		"pointer": ComposePointer("jill/claude", now),
+		"pointer": ComposePointer(now, false),
 	} {
 		if !strings.Contains(out, "[now — from jack/codex for maya]\ngo") {
 			t.Errorf("%s: the [now] marker does not name the sender:\n%s", name, out)

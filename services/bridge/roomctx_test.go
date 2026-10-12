@@ -222,7 +222,11 @@ func TestDriveClaimPullWritesRoomFilesAndPointerPrompt(t *testing.T) {
 		t.Fatal("no session prompt recorded")
 	}
 	prompt := prompts[0]
-	if !strings.Contains(prompt, ".room/INDEX.md") || !strings.Contains(prompt, ".room/library.md") || !strings.Contains(prompt, "write hello.rs") {
+	// The session's first prompt: its guidance (the .room/ legend included:
+	// the core takes workspace files), then the pointer, which keeps one
+	// line to the records on a core without agentProfile.
+	facts, rest, ok := cutGuidance(prompt)
+	if !ok || !facts.HasRoomFiles || !strings.HasSuffix(rest, "---\n\n(room records: .room/INDEX.md)\n\n[now]\nwrite hello.rs") {
 		t.Fatalf("pointer prompt malformed:\n%s", prompt)
 	}
 	// The whole point: history must NOT be in the prompt.

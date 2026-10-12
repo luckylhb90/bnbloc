@@ -237,6 +237,7 @@ func appendInstructions(base, more string) string {
 // the content's (jobContent.bindingSum).
 func (b *Bridge) sessionGuidance(ctx context.Context, d *drive, ep corepkg.Endpoint, workspaceID string, info SessionInfo) (profile *corepkg.AgentProfile, prefix string, hooks sessionHooks, facts roomlog.Guidance) {
 	_, pull := b.coreEntry(d.core)
+	facts.Self = agentSpeakerLabel(d.owner, d.job.Provider)
 	facts.HasRoomFiles = pull && d.caps.writer != nil
 	if d.caps.profile {
 		profile = d.content.profile()
