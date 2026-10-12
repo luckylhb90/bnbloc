@@ -424,6 +424,13 @@ activity and gateway images (projections).
 **Deploy:** the desktop release only. Old cache stems are swept on the first
 reconcile, with no migration.
 
+**Status (2026-10-12):** 6.4 partly landed (79ae59f): the stale
+"at least one core" error (L3), file-naming errors in `write_owner_only`
+(L4), and `GOFLAGS=-mod=readonly` for the sidecar build (L13, flag half).
+Still open: `bridge_restart` (removing it needs the web's `restart()` to
+call `bridge_start`), the previewer re-hash, `listen_addr` re-parsing, the
+build script's arch table, and 6.1–6.3.
+
 ## 4. Enforcement tests (deduplicated)
 
 | Test | Kind | From | Batch |
