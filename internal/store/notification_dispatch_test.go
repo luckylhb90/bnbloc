@@ -2,7 +2,6 @@ package store
 
 import (
 	"errors"
-	"os"
 	"testing"
 	"time"
 )
@@ -16,10 +15,7 @@ func TestMemoryNotificationDispatched(t *testing.T) {
 // so it uses a clock window (20000–30000 ms) no live row is due in and
 // removes its own rows afterwards.
 func TestMySQLNotificationDispatched(t *testing.T) {
-	dsn := os.Getenv("BNBLOC_TEST_MYSQL_DSN")
-	if dsn == "" {
-		t.Skip("set BNBLOC_TEST_MYSQL_DSN to run the MySQL integration test")
-	}
+	dsn := mysqlTestDSN(t)
 	b, err := NewBackends(dsn)
 	if err != nil {
 		t.Fatalf("NewBackends: %v", err)

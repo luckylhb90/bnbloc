@@ -2,7 +2,6 @@ package store
 
 import (
 	"context"
-	"os"
 	"testing"
 	"time"
 )
@@ -138,10 +137,7 @@ func TestAuditLogMergeOrderAndIsolation(t *testing.T) {
 }
 
 func TestMySQLAuditLog(t *testing.T) {
-	dsn := os.Getenv("BNBLOC_TEST_MYSQL_DSN")
-	if dsn == "" {
-		t.Skip("set BNBLOC_TEST_MYSQL_DSN to run the MySQL integration test")
-	}
+	dsn := mysqlTestDSN(t)
 	b, err := NewBackends(dsn)
 	if err != nil {
 		t.Fatalf("NewBackends: %v", err)

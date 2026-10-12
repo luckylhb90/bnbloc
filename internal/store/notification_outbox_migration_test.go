@@ -2,7 +2,6 @@ package store
 
 import (
 	"context"
-	"os"
 	"testing"
 	"time"
 
@@ -14,10 +13,7 @@ import (
 // The converging migration must replace it so enqueues work again, and must
 // leave a current-shape table alone.
 func TestNotificationOutboxPerNotifierMigrationConvergesOldShape(t *testing.T) {
-	dsn := os.Getenv("BNBLOC_TEST_MYSQL_DSN")
-	if dsn == "" {
-		t.Skip("set BNBLOC_TEST_MYSQL_DSN to run the MySQL integration test")
-	}
+	dsn := mysqlTestDSN(t)
 	b, err := NewBackends(dsn)
 	if err != nil {
 		t.Fatal(err)

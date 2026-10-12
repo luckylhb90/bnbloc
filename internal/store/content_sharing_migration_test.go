@@ -2,7 +2,6 @@ package store
 
 import (
 	"context"
-	"os"
 	"strings"
 	"testing"
 )
@@ -12,10 +11,7 @@ import (
 // name key, no content_publish_requests) converges on the current shape, and
 // a rerun is a no-op.
 func TestContentSharingMigrationConvergesOldShape(t *testing.T) {
-	dsn := os.Getenv("BNBLOC_TEST_MYSQL_DSN")
-	if dsn == "" {
-		t.Skip("set BNBLOC_TEST_MYSQL_DSN to run the MySQL integration test")
-	}
+	dsn := mysqlTestDSN(t)
 	b, err := NewBackends(dsn)
 	if err != nil {
 		t.Fatal(err)

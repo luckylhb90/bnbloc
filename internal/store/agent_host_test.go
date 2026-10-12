@@ -4,6 +4,8 @@ import (
 	"errors"
 	"slices"
 	"testing"
+
+	"github.com/luckylhb90/bnbloc/internal/testmysql"
 )
 
 // Platform agents (docs/prd/2026-10-10-zero-install-onboarding.md §2): an
@@ -14,7 +16,7 @@ func TestAgentHostMembership_memory(t *testing.T) {
 }
 
 func TestAgentHostMembership_mysql(t *testing.T) {
-	db, err := OpenMySQL(scratchDB(t, "agenthost"))
+	db, err := OpenMySQL(testmysql.Fresh(t))
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}

@@ -3,7 +3,6 @@ package store
 import (
 	"encoding/json"
 	"errors"
-	"os"
 	"testing"
 	"time"
 )
@@ -75,10 +74,7 @@ func TestMemoryChatReindexSearchTextWalksAllRows(t *testing.T) {
 // searchable after the reindex; already-indexed, empty-text and non-message
 // rows are left alone; a second pass updates nothing.
 func TestMySQLChatReindexSearchTextBackfills(t *testing.T) {
-	dsn := os.Getenv("BNBLOC_TEST_MYSQL_DSN")
-	if dsn == "" {
-		t.Skip("set BNBLOC_TEST_MYSQL_DSN to run the MySQL integration test")
-	}
+	dsn := mysqlTestDSN(t)
 	b, err := NewBackends(dsn)
 	if err != nil {
 		t.Fatalf("NewBackends: %v", err)

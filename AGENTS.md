@@ -137,6 +137,14 @@ Library).
   behaviour only one implementation has is a bug in the other. The rig is
   `forEachBackend` (`internal/store/store_contract_test.go`): memory, plus
   MySQL when `BNBLOC_TEST_MYSQL_DSN` is set, with per-run ids (`uniq`).
+- **A MySQL test never uses the DSN's database.** `internal/testmysql` owns
+  `BNBLOC_TEST_MYSQL_DSN`: `testmysql.Fresh(t)` is a database of the test's
+  own, `testmysql.Shared()` one per test binary (the package's `TestMain`
+  calls `testmysql.Main`, which drops it). `go test ./...` runs packages in
+  parallel, and a shared database made them race each other's migrations
+  and claims (`TestMySQLTestsUseTestmysql`). For the same reason an advisory
+  lock name is scoped to its database (`advisoryLock`,
+  `internal/store/advisory_lock.go`): GET_LOCK names are server-wide.
 - **Use a design pattern when it removes duplication or makes a rule
   explicit**, never for its own sake: a registry/strategy for per-kind
   behaviour (`contentpkg.KindSpec`), middleware for per-request policy,
@@ -1359,7 +1367,8 @@ agent's staged files).
   pushing; add new checks there, not in the workflow file.
 - Go services: `go build ./...`, `go vet ./...`, `go test ./...`. Per-area tests
   live beside the code (`internal/realtime`, `services/shareagent`, …).
-  `BNBLOC_TEST_MYSQL_DSN` enables the MySQL integration tests.
+  `BNBLOC_TEST_MYSQL_DSN` enables the MySQL integration tests (its user
+  needs CREATE/DROP DATABASE: they run in throwaway databases).
 - Web: `cd web && pnpm build` (`tsc -b && vite build`); unit tests:
   `node --test 'src/**/*.test.ts' 'scripts/*.test.mjs'` (Node 24).
 - CLI (`cmd/bnbloc`): every gateway JSON call is `client.call` (returns

@@ -4,16 +4,18 @@ import (
 	"errors"
 	"strings"
 	"testing"
+
+	"github.com/luckylhb90/bnbloc/internal/testmysql"
 )
 
-// MySQL room-store regressions, run in a scratch database (see scratchDB;
+// MySQL room-store regressions, run in a scratch database (see testmysql.Fresh;
 // skipped without BNBLOC_TEST_MYSQL_DSN).
 
 // BE-1: rooms' primary key is room_id alone, so the former create upsert let a
 // caller in ANY tenant re-"create" an existing room, rename it, and be stamped
 // its owner — which IsMemberAnyTenant then honored as cross-tenant access.
 func TestMySQLRoomCreateRejectsExistingIDAcrossTenants(t *testing.T) {
-	db, err := OpenMySQL(scratchDB(t, "roomcreate"))
+	db, err := OpenMySQL(testmysql.Fresh(t))
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
@@ -66,7 +68,7 @@ func TestMySQLRoomCreateRejectsExistingIDAcrossTenants(t *testing.T) {
 // roomOwnedTables entry is seeded for two rooms and counted with the entry's
 // own predicate: the deleted room keeps nothing, the other room loses nothing.
 func TestMySQLDeleteRoomRemovesEveryRoomOwnedRow(t *testing.T) {
-	db, err := OpenMySQL(scratchDB(t, "roomdelete"))
+	db, err := OpenMySQL(testmysql.Fresh(t))
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}

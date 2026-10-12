@@ -3,6 +3,8 @@ package store
 import (
 	"testing"
 
+	"github.com/luckylhb90/bnbloc/internal/testmysql"
+
 	"github.com/luckylhb90/bnbloc/internal/wire"
 )
 
@@ -11,7 +13,7 @@ import (
 func TestPlatformGrant_memory(t *testing.T) { testPlatformGrant(t, NewMemoryGrant()) }
 
 func TestPlatformGrant_mysql(t *testing.T) {
-	db, err := OpenMySQL(scratchDB(t, "platformgrant"))
+	db, err := OpenMySQL(testmysql.Fresh(t))
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}

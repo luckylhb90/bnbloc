@@ -2,7 +2,6 @@ package store
 
 import (
 	"context"
-	"os"
 	"testing"
 	"time"
 )
@@ -14,10 +13,7 @@ func TestMemoryNotificationReplyTokens(t *testing.T) {
 // TestMySQLNotificationReplyTokens runs the same contract against MySQL
 // (gated on BNBLOC_TEST_MYSQL_DSN) under a unique notifier it removes.
 func TestMySQLNotificationReplyTokens(t *testing.T) {
-	dsn := os.Getenv("BNBLOC_TEST_MYSQL_DSN")
-	if dsn == "" {
-		t.Skip("set BNBLOC_TEST_MYSQL_DSN to run the MySQL integration test")
-	}
+	dsn := mysqlTestDSN(t)
 	b, err := NewBackends(dsn)
 	if err != nil {
 		t.Fatalf("NewBackends: %v", err)

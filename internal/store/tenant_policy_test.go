@@ -2,7 +2,6 @@ package store
 
 import (
 	"context"
-	"os"
 	"strconv"
 	"testing"
 	"time"
@@ -13,7 +12,7 @@ import (
 // reset them), and a missing tenant is reported.
 func TestTenantPolicy(t *testing.T) {
 	stores := map[string]TenantStore{"memory": NewMemoryTenant()}
-	if dsn := os.Getenv("BNBLOC_TEST_MYSQL_DSN"); dsn != "" {
+	if dsn := sharedMySQLDSN(t); dsn != "" {
 		b, err := NewBackends(dsn)
 		if err != nil {
 			t.Fatal(err)

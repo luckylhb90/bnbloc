@@ -187,7 +187,9 @@ scripts/ci.sh            # everything CI runs: Go vet/test, web build + tests,
 scripts/ci.sh go         # one stage: go | web | desktop | secrets
 ```
 
-MySQL integration tests run when `BNBLOC_TEST_MYSQL_DSN` points at a MySQL 8.
+MySQL integration tests run when `BNBLOC_TEST_MYSQL_DSN` points at a MySQL 8
+server; they create and drop throwaway databases there, so its user needs
+CREATE and DROP DATABASE.
 
 ## Contributing
 

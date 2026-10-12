@@ -3,7 +3,6 @@ package store
 import (
 	"context"
 	"encoding/json"
-	"os"
 	"strconv"
 	"testing"
 	"time"
@@ -24,7 +23,7 @@ func teamBackends(t *testing.T) map[string]*Backends {
 		t.Fatalf("memory backends: %v", err)
 	}
 	out["memory"] = mem
-	if dsn := os.Getenv("BNBLOC_TEST_MYSQL_DSN"); dsn != "" {
+	if dsn := sharedMySQLDSN(t); dsn != "" {
 		my, err := NewBackends(dsn)
 		if err != nil {
 			t.Fatalf("mysql backends: %v", err)

@@ -1272,7 +1272,8 @@ type sqlConn interface {
 }
 
 // migrationLockName is the MySQL advisory lock serializing migration runs
-// across every service that starts against the shared DB.
+// across every service that starts against the shared DB (scoped to that
+// database by advisoryLock).
 const migrationLockName = "bnbloc_schema_migrations"
 
 // migrationLockWaitSeconds bounds how long a starter waits for another
@@ -1299,14 +1300,14 @@ func runMigrations(db *sql.DB) error {
 		return fmt.Errorf("pin migration connection: %w", err)
 	}
 	defer conn.Close()
-	var locked sql.NullInt64
-	if err := conn.QueryRowContext(ctx, "SELECT GET_LOCK(?, ?)", migrationLockName, migrationLockWaitSeconds).Scan(&locked); err != nil {
+	release, locked, err := advisoryLock(ctx, conn, migrationLockName, migrationLockWaitSeconds)
+	if err != nil {
 		return fmt.Errorf("acquire migration lock: %w", err)
 	}
-	if !locked.Valid || locked.Int64 != 1 {
+	if !locked {
 		return fmt.Errorf("acquire migration lock: timed out after %ds waiting for another migration run", migrationLockWaitSeconds)
 	}
-	defer func() { _, _ = conn.ExecContext(ctx, "SELECT RELEASE_LOCK(?)", migrationLockName) }()
+	defer release()
 	return applyMigrations(ctx, conn)
 }
 

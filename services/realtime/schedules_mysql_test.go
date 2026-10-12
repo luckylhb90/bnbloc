@@ -5,11 +5,12 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"strconv"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/luckylhb90/bnbloc/internal/testmysql"
 
 	"github.com/luckylhb90/bnbloc/internal/realtime"
 	"github.com/luckylhb90/bnbloc/internal/schedule"
@@ -23,20 +24,12 @@ import (
 // from MySQL, posted through PostChat into room_messages with its slot
 // clientMsgId, and two schedulers racing the same tick post it exactly once.
 func TestMySQLScheduledRunEndToEnd(t *testing.T) {
-	dsn := os.Getenv("BNBLOC_TEST_MYSQL_DSN")
-	if dsn == "" {
-		t.Skip("set BNBLOC_TEST_MYSQL_DSN to run the MySQL integration test")
-	}
-	b, err := store.NewBackends(dsn)
+	b, err := store.NewBackends(testmysql.Fresh(t))
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { _ = b.DB.Close() })
 	room := "sched-e2e-" + strconv.FormatInt(time.Now().UnixNano(), 36)
-	t.Cleanup(func() {
-		_, _ = b.DB.Exec(`DELETE FROM room_schedules WHERE room_id = ?`, room)
-		_, _ = b.DB.Exec(`DELETE FROM room_messages WHERE room_id = ?`, room)
-		_ = b.DB.Close()
-	})
 	members := &schedMembers{m: map[string]bool{}}
 	members.set(room, "alice", true)
 	newSvc := func() *Service {

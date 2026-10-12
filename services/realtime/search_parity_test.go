@@ -16,6 +16,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/luckylhb90/bnbloc/internal/testmysql"
+
 	"github.com/luckylhb90/bnbloc/internal/membership"
 	"github.com/luckylhb90/bnbloc/internal/realtime"
 	"github.com/luckylhb90/bnbloc/internal/retention"
@@ -56,7 +58,11 @@ type parityRig struct {
 
 func newParityRig(t *testing.T) *parityRig {
 	t.Helper()
-	backends, err := store.NewBackends(os.Getenv("BNBLOC_TEST_MYSQL_DSN"))
+	dsn := ""
+	if testmysql.Enabled() {
+		dsn = testmysql.Fresh(t)
+	}
+	backends, err := store.NewBackends(dsn)
 	if err != nil {
 		t.Fatal(err)
 	}

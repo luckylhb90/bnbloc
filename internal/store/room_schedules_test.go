@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"sync"
 	"testing"
 	"time"
@@ -26,10 +25,7 @@ func TestMemoryRoomScheduleClaimRace(t *testing.T) {
 // row is due at nowMs <= 1e6) and remove their own tenants' rows.
 func mysqlScheduleBackends(t *testing.T, prefix string) (*Backends, string) {
 	t.Helper()
-	dsn := os.Getenv("BNBLOC_TEST_MYSQL_DSN")
-	if dsn == "" {
-		t.Skip("set BNBLOC_TEST_MYSQL_DSN to run the MySQL integration test")
-	}
+	dsn := mysqlTestDSN(t)
 	b, err := NewBackends(dsn)
 	if err != nil {
 		t.Fatalf("NewBackends: %v", err)

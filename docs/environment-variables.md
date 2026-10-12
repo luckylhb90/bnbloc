@@ -405,7 +405,7 @@ service (profile `smoke`, `deploy/compose.prod.yml`) takes these
 | --- | --- | --- |
 | `BNBLOC_DEFAULT_GATEWAY` | desktop build (`option_env!`) | Gateway URL compiled into the desktop app's updater; see [the release runbook](./desktop-update-release-runbook.md). |
 | `BNBLOC_TEST_OPENSEARCH_URL` | `go test` | Runs the OpenSearch integration tests (`internal/search`) and the search parity test (`services/realtime`) against a real cluster, e.g. `opensearchproject/opensearch:2` single-node with the security plugin disabled; without it the parity test uses an in-process fake. Each run creates and deletes its own `bnbloc-test-*` / `bnbloc-itest-*` indexes. |
-| `BNBLOC_TEST_MYSQL_DSN` | `go test` | Enables the MySQL integration tests in `internal/store` (skipped otherwise); CI sets it against a MySQL service container. |
+| `BNBLOC_TEST_MYSQL_DSN` | `go test` | Enables the MySQL integration tests (skipped otherwise); CI sets it against a MySQL service container. The tests run in throwaway `<database>_t*` databases they create and drop on that server (`internal/testmysql`), so the user needs CREATE and DROP DATABASE. |
 
 ## Minimum production set
 

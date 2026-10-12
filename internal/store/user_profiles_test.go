@@ -3,7 +3,6 @@ package store
 import (
 	"context"
 	"errors"
-	"os"
 	"strconv"
 	"strings"
 	"testing"
@@ -98,10 +97,7 @@ func TestMemoryUserProfiles(t *testing.T) {
 }
 
 func TestMySQLUserProfiles(t *testing.T) {
-	dsn := os.Getenv("BNBLOC_TEST_MYSQL_DSN")
-	if dsn == "" {
-		t.Skip("set BNBLOC_TEST_MYSQL_DSN to run the MySQL integration test")
-	}
+	dsn := mysqlTestDSN(t)
 	db, err := OpenMySQL(dsn)
 	if err != nil {
 		t.Fatalf("open: %v", err)

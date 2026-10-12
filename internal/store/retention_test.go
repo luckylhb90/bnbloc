@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -29,7 +28,7 @@ func retentionRigs(t *testing.T) []retentionRig {
 		t.Fatal(err)
 	}
 	rigs := []retentionRig{{"memory", mem, NewRetention(mem)}}
-	if dsn := os.Getenv("BNBLOC_TEST_MYSQL_DSN"); dsn != "" {
+	if dsn := sharedMySQLDSN(t); dsn != "" {
 		b, err := NewBackends(dsn)
 		if err != nil {
 			t.Fatal(err)

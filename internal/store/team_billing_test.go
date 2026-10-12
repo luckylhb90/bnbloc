@@ -2,7 +2,6 @@ package store
 
 import (
 	"errors"
-	"os"
 	"testing"
 	"time"
 
@@ -20,10 +19,7 @@ func runSuffix() string { return itoaBase(time.Now().UnixNano()) }
 
 func mysqlBackendsForTest(t *testing.T) *Backends {
 	t.Helper()
-	dsn := os.Getenv("BNBLOC_TEST_MYSQL_DSN")
-	if dsn == "" {
-		t.Skip("set BNBLOC_TEST_MYSQL_DSN to run the MySQL team/billing store tests")
-	}
+	dsn := mysqlTestDSN(t)
 	b, err := NewBackends(dsn)
 	if err != nil {
 		t.Fatalf("NewBackends: %v", err)

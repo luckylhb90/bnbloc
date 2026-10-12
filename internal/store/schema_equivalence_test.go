@@ -1,24 +1,21 @@
 package store
 
 import (
-	"crypto/rand"
+	"context"
 	"database/sql"
-	"encoding/hex"
 	"fmt"
-	"os"
 	"sort"
 	"strings"
 	"sync"
 	"testing"
 
+	"github.com/luckylhb90/bnbloc/internal/testmysql"
+
 	"github.com/go-sql-driver/mysql"
 )
 
-// Schema equivalence and migration-lock tests, gated on BNBLOC_TEST_MYSQL_DSN
-// (the DSN's user needs CREATE/DROP DATABASE: each test works in throwaway
-// databases so it never touches the DSN's own schema):
-//
-//	BNBLOC_TEST_MYSQL_DSN='root:pw@tcp(127.0.0.1:3306)/bnbloc?parseTime=true' go test ./internal/store -run Schema
+// Schema equivalence and migration-lock tests, gated on BNBLOC_TEST_MYSQL_DSN;
+// each works in databases of its own (testmysql.Fresh).
 
 // baselineSchema is the control-plane schema as it stood just before the
 // migration ledger was introduced (git f373c80^): the oldest shape the
@@ -156,36 +153,6 @@ INSERT INTO room_members (room_id, user_id, role, joined_at_ms) VALUES ('legacy'
 INSERT INTO room_messages (room_id, seq, kind, author, payload_json, created_at_ms) VALUES ('legacy', 1, 'chat_message', 'alice', '{}', 1);
 `
 
-// scratchDB creates a throwaway database on the test server and returns a DSN
-// for it; the database is dropped when the test ends.
-func scratchDB(t *testing.T, tag string) string {
-	t.Helper()
-	raw := os.Getenv("BNBLOC_TEST_MYSQL_DSN")
-	if raw == "" {
-		t.Skip("set BNBLOC_TEST_MYSQL_DSN to run the MySQL schema tests")
-	}
-	cfg, err := mysql.ParseDSN(raw)
-	if err != nil {
-		t.Fatalf("parse dsn: %v", err)
-	}
-	b := make([]byte, 4)
-	_, _ = rand.Read(b)
-	name := fmt.Sprintf("bnbloc_%s_%s", tag, hex.EncodeToString(b))
-	admin := cfg.Clone()
-	admin.DBName = ""
-	adb, err := sql.Open("mysql", admin.FormatDSN())
-	if err != nil {
-		t.Fatalf("open admin: %v", err)
-	}
-	t.Cleanup(func() { _ = adb.Close() })
-	if _, err := adb.Exec("CREATE DATABASE " + name + " CHARACTER SET utf8mb4"); err != nil {
-		t.Skipf("cannot create scratch database (needs CREATE privilege): %v", err)
-	}
-	t.Cleanup(func() { _, _ = adb.Exec("DROP DATABASE IF EXISTS " + name) })
-	cfg.DBName = name
-	return cfg.FormatDSN()
-}
-
 // schemaSnapshot renders a database's columns and indexes as sorted lines, so
 // two databases compare by content regardless of column order (ALTER ADD
 // COLUMN appends, CREATE TABLE places tenant_id first).
@@ -236,8 +203,8 @@ func schemaSnapshot(t *testing.T, db *sql.DB) []string {
 // secondary indexes, a stale idx_room_visibility, and the original audit
 // action enum.
 func TestSchemaMigratedEqualsFresh(t *testing.T) {
-	freshDSN := scratchDB(t, "fresh")
-	migDSN := scratchDB(t, "migrated")
+	freshDSN := testmysql.Fresh(t)
+	migDSN := testmysql.Fresh(t)
 
 	fresh, err := OpenMySQL(freshDSN)
 	if err != nil {
@@ -312,7 +279,7 @@ func diffLines(a, b []string) (onlyA, onlyB []string) {
 // the lock is released afterwards (it is session-owned, so taking and
 // releasing it on different pooled connections leaked it).
 func TestRunMigrationsConcurrentStartersReleaseLock(t *testing.T) {
-	dsn := scratchDB(t, "lock")
+	dsn := testmysql.Fresh(t)
 	db, err := OpenMySQL(dsn)
 	if err != nil {
 		t.Fatalf("open: %v", err)
@@ -338,8 +305,12 @@ func TestRunMigrationsConcurrentStartersReleaseLock(t *testing.T) {
 			t.Fatalf("concurrent runMigrations: %v", err)
 		}
 	}
+	key, err := lockKey(context.Background(), db, migrationLockName)
+	if err != nil {
+		t.Fatal(err)
+	}
 	var free int
-	if err := db.QueryRow(`SELECT IS_FREE_LOCK(?)`, migrationLockName).Scan(&free); err != nil || free != 1 {
+	if err := db.QueryRow(`SELECT IS_FREE_LOCK(?)`, key).Scan(&free); err != nil || free != 1 {
 		t.Fatalf("migration lock free = %d (%v), want 1 (released)", free, err)
 	}
 	var n int

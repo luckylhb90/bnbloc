@@ -12,6 +12,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/luckylhb90/bnbloc/internal/testmysql"
+
 	"github.com/luckylhb90/bnbloc/internal/blobstore"
 	"github.com/luckylhb90/bnbloc/internal/obs"
 	"github.com/luckylhb90/bnbloc/internal/store"
@@ -272,16 +274,11 @@ func TestBlobCollectionRechecksBeforeDelete(t *testing.T) {
 	}
 }
 
-// The whole pass on MySQL (BNBLOC_TEST_MYSQL_DSN): a tenant override, the
-// purge with its fence, and the blob collection of the rows it removed. Only
-// a fresh tenant gets an override, so the shared test database's other rows
-// are untouched.
+// The whole pass on MySQL (BNBLOC_TEST_MYSQL_DSN, a database of its own): a
+// tenant override, the purge with its fence, and the blob collection of the
+// rows it removed.
 func TestWorkerMySQL(t *testing.T) {
-	dsn := os.Getenv("BNBLOC_TEST_MYSQL_DSN")
-	if dsn == "" {
-		t.Skip("set BNBLOC_TEST_MYSQL_DSN to run the MySQL integration test")
-	}
-	b, err := store.NewBackends(dsn)
+	b, err := store.NewBackends(testmysql.Fresh(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -310,17 +307,12 @@ func TestWorkerMySQL(t *testing.T) {
 	if err := b.Attachments.PutAttachment(tctx, store.Attachment{ID: tid + "-att", RoomID: room, Uploader: "maya", Filename: "f", ContentType: "text/plain", BlobKey: oldBlob, CreatedAtMs: r.now.Add(-60 * day).UnixMilli()}); err != nil {
 		t.Fatal(err)
 	}
-	var rep Report
-	for i := 0; i < 50 && !rep.Ran; i++ { // another test may hold the lock for a moment
-		if rep, err = r.w.RunOnce(ctx); err != nil {
-			t.Fatal(err)
-		}
-		if !rep.Ran {
-			time.Sleep(100 * time.Millisecond)
-		}
+	rep, err := r.w.RunOnce(ctx)
+	if err != nil {
+		t.Fatal(err)
 	}
 	if !rep.Ran {
-		t.Fatal("the retention lock never became free")
+		t.Fatal("the retention pass did not take its database's lock")
 	}
 	if got := r.history(t, tid, room); len(got) != 1 || got[0] != 2 {
 		t.Fatalf("history = %v", got)

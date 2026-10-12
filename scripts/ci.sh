@@ -6,7 +6,8 @@
 #
 #   scripts/ci.sh go        generated-file drift checks, go vet, go test
 #                           (MySQL integration tests run when
-#                           BNBLOC_TEST_MYSQL_DSN is set, skip otherwise)
+#                           BNBLOC_TEST_MYSQL_DSN is set, skip otherwise;
+#                           they need CREATE/DROP DATABASE on its server)
 #   scripts/ci.sh web       pnpm install --frozen-lockfile, build, node tests
 #   scripts/ci.sh desktop   web build + bridge sidecar + cargo test --locked
 #   scripts/ci.sh secrets   gitleaks over the git history (needs gitleaks)

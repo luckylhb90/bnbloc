@@ -2,7 +2,6 @@ package store
 
 import (
 	"context"
-	"os"
 	"strconv"
 	"testing"
 	"time"
@@ -17,7 +16,7 @@ func TestOrgSyncStoreAndMemberSource(t *testing.T) {
 		t.Fatal(err)
 	}
 	backends["memory"] = mem
-	if dsn := os.Getenv("BNBLOC_TEST_MYSQL_DSN"); dsn != "" {
+	if dsn := sharedMySQLDSN(t); dsn != "" {
 		my, err := NewBackends(dsn)
 		if err != nil {
 			t.Fatal(err)

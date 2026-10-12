@@ -33,7 +33,8 @@ func NewMySQLRetention(db *sql.DB) *MySQLRetention { return &MySQLRetention{DB: 
 var _ RetentionStore = (*MySQLRetention)(nil)
 
 // retentionLockName is the advisory lock one replica holds for a retention
-// pass (the work is safe concurrently; the lock only avoids doing it twice).
+// pass on its database (the work is safe concurrently; the lock only avoids
+// doing it twice).
 const retentionLockName = "bnbloc_retention"
 
 // TryRetentionLock takes the advisory lock on a pinned connection (GET_LOCK
@@ -43,17 +44,13 @@ func (s *MySQLRetention) TryRetentionLock(ctx context.Context) (func(), bool, er
 	if err != nil {
 		return nil, false, err
 	}
-	var got sql.NullInt64
-	if err := conn.QueryRowContext(ctx, "SELECT GET_LOCK(?, 0)", retentionLockName).Scan(&got); err != nil {
+	release, ok, err := advisoryLock(ctx, conn, retentionLockName, 0)
+	if err != nil || !ok {
 		conn.Close()
 		return nil, false, err
 	}
-	if !got.Valid || got.Int64 != 1 {
-		conn.Close()
-		return nil, false, nil
-	}
 	return func() {
-		_, _ = conn.ExecContext(context.Background(), "SELECT RELEASE_LOCK(?)", retentionLockName)
+		release()
 		conn.Close()
 	}, true, nil
 }

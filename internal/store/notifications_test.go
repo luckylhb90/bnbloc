@@ -2,7 +2,6 @@ package store
 
 import (
 	"errors"
-	"os"
 	"reflect"
 	"sort"
 	"sync"
@@ -24,10 +23,7 @@ func TestMemoryNotificationStores(t *testing.T) {
 // works with timestamps far in the past (no live row is due at NowMs<=10000)
 // and removes its own tenant's rows afterwards.
 func TestMySQLNotificationStores(t *testing.T) {
-	dsn := os.Getenv("BNBLOC_TEST_MYSQL_DSN")
-	if dsn == "" {
-		t.Skip("set BNBLOC_TEST_MYSQL_DSN to run the MySQL integration test")
-	}
+	dsn := mysqlTestDSN(t)
 	b, err := NewBackends(dsn)
 	if err != nil {
 		t.Fatalf("NewBackends: %v", err)

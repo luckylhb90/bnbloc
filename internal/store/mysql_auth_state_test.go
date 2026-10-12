@@ -5,7 +5,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
-	"os"
 	"sync"
 	"testing"
 	"time"
@@ -15,10 +14,7 @@ import (
 // other MySQL integration tests).
 func mysqlAuthState(t *testing.T) (*MySQLSSOHandoff, *MySQLRefreshToken) {
 	t.Helper()
-	dsn := os.Getenv("BNBLOC_TEST_MYSQL_DSN")
-	if dsn == "" {
-		t.Skip("set BNBLOC_TEST_MYSQL_DSN to run the MySQL auth-state tests")
-	}
+	dsn := mysqlTestDSN(t)
 	b, err := NewBackends(dsn)
 	if err != nil {
 		t.Fatalf("NewBackends: %v", err)

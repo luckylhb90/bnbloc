@@ -5,9 +5,10 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-	"os"
 	"sync"
 	"testing"
+
+	"github.com/luckylhb90/bnbloc/internal/testmysql"
 
 	"github.com/luckylhb90/bnbloc/internal/tenant"
 	"github.com/luckylhb90/bnbloc/internal/wire"
@@ -23,9 +24,12 @@ var (
 	mysqlBackendsErr  error
 )
 
-// forEachBackend runs fn as a subtest per backend. The MySQL backends are
-// opened once per test binary (schema + migrations run once); callers keep
-// their ids unique (uniq) because runs share the database.
+// forEachBackend runs fn as a subtest per backend: fresh memory backends,
+// and the MySQL backends when BNBLOC_TEST_MYSQL_DSN is set. The MySQL
+// backends are opened once per test binary, in the binary's own database
+// (testmysql.Shared: schema + migrations run once, no other package shares
+// it); callers keep their ids unique (uniq) because the package's tests
+// share that database.
 func forEachBackend(t *testing.T, fn func(t *testing.T, b *Backends)) {
 	t.Helper()
 	mem, err := NewBackends("")
@@ -33,15 +37,27 @@ func forEachBackend(t *testing.T, fn func(t *testing.T, b *Backends)) {
 		t.Fatal(err)
 	}
 	t.Run("memory", func(t *testing.T) { fn(t, mem) })
-	dsn := os.Getenv("BNBLOC_TEST_MYSQL_DSN")
-	if dsn == "" {
-		return
+	if my := sharedMySQL(t); my != nil {
+		t.Run("mysql", func(t *testing.T) { fn(t, my) })
 	}
-	mysqlBackendsOnce.Do(func() { mysqlBackends, mysqlBackendsErr = NewBackends(dsn) })
+}
+
+// sharedMySQL is the test binary's MySQL backends, or nil when
+// BNBLOC_TEST_MYSQL_DSN is unset.
+func sharedMySQL(t *testing.T) *Backends {
+	t.Helper()
+	mysqlBackendsOnce.Do(func() {
+		dsn, err := testmysql.Shared()
+		if err != nil || dsn == "" {
+			mysqlBackendsErr = err
+			return
+		}
+		mysqlBackends, mysqlBackendsErr = NewBackends(dsn)
+	})
 	if mysqlBackendsErr != nil {
 		t.Fatalf("mysql backends: %v", mysqlBackendsErr)
 	}
-	t.Run("mysql", func(t *testing.T) { fn(t, mysqlBackends) })
+	return mysqlBackends
 }
 
 // newContractRoom creates a fresh room owned by owner in the ctx tenant.
@@ -210,10 +226,7 @@ func TestContractEnsureMemberNeverChangesARole(t *testing.T) {
 // The login-path reads report a failed query as an error, never as "absent"
 // (a failed membership read used to re-provision the subject).
 func TestMySQLTenantReadsReportFailures(t *testing.T) {
-	dsn := os.Getenv("BNBLOC_TEST_MYSQL_DSN")
-	if dsn == "" {
-		t.Skip("set BNBLOC_TEST_MYSQL_DSN to run the MySQL integration test")
-	}
+	dsn := mysqlTestDSN(t)
 	cfg, err := mysqlConfig(dsn)
 	if err != nil {
 		t.Fatal(err)
@@ -393,4 +406,26 @@ func TestContractConcurrentAppendPublishesOnce(t *testing.T) {
 			t.Fatalf("duplicate in one report = %d fresh, cursor %d, %v; want 1, 4", len(fresh), cursor, err)
 		}
 	})
+}
+
+// sharedMySQLDSN is the test binary's database (testmysql.Shared), or ""
+// when BNBLOC_TEST_MYSQL_DSN is unset.
+func sharedMySQLDSN(t *testing.T) string {
+	t.Helper()
+	dsn, err := testmysql.Shared()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return dsn
+}
+
+// mysqlTestDSN is sharedMySQLDSN for a MySQL-only test: it skips without
+// BNBLOC_TEST_MYSQL_DSN.
+func mysqlTestDSN(t *testing.T) string {
+	t.Helper()
+	dsn := sharedMySQLDSN(t)
+	if dsn == "" {
+		t.Skipf("set %s to run the MySQL integration test", testmysql.EnvDSN)
+	}
+	return dsn
 }

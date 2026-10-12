@@ -1,7 +1,6 @@
 package store
 
 import (
-	"os"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -100,10 +99,7 @@ func TestMemoryUsageBudgets(t *testing.T) {
 }
 
 func TestMySQLUsageBudgets(t *testing.T) {
-	dsn := os.Getenv("BNBLOC_TEST_MYSQL_DSN")
-	if dsn == "" {
-		t.Skip("set BNBLOC_TEST_MYSQL_DSN to run the MySQL integration test")
-	}
+	dsn := mysqlTestDSN(t)
 	db, err := OpenMySQL(dsn)
 	if err != nil {
 		t.Fatalf("open: %v", err)

@@ -2,7 +2,6 @@ package store
 
 import (
 	"errors"
-	"os"
 	"sync"
 	"testing"
 	"time"
@@ -14,10 +13,7 @@ import (
 //	BNBLOC_TEST_MYSQL_DSN='bnbloc:bnbloc-pass@tcp(127.0.0.1:3306)/bnbloc?parseTime=true' go test ./internal/store -run MySQLBridgeJobs
 func mysqlJobs(t *testing.T) (*MySQLBridgeJobs, func()) {
 	t.Helper()
-	dsn := os.Getenv("BNBLOC_TEST_MYSQL_DSN")
-	if dsn == "" {
-		t.Skip("set BNBLOC_TEST_MYSQL_DSN to run the MySQL bridge-job tests")
-	}
+	dsn := mysqlTestDSN(t)
 	b, err := NewBackends(dsn)
 	if err != nil {
 		t.Fatalf("NewBackends: %v", err)

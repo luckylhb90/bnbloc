@@ -2,7 +2,6 @@ package store
 
 import (
 	"encoding/json"
-	"os"
 	"reflect"
 	"testing"
 	"time"
@@ -21,7 +20,7 @@ func handoffStores(t *testing.T) map[string]*Backends {
 		t.Fatal(err)
 	}
 	out := map[string]*Backends{"memory": mem}
-	if dsn := os.Getenv("BNBLOC_TEST_MYSQL_DSN"); dsn != "" {
+	if dsn := sharedMySQLDSN(t); dsn != "" {
 		b, err := NewBackends(dsn)
 		if err != nil {
 			t.Fatalf("NewBackends: %v", err)

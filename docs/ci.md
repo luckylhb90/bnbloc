@@ -79,7 +79,11 @@ the setup actions then resolve the cached versions.
 
 The `ci.yml` stages need **no secrets** (the nightly smoke needs one, below). `go` uses throwaway MySQL credentials local
 to the job, and the MySQL integration tests enable themselves from
-`BNBLOC_TEST_MYSQL_DSN` set in the workflow. A private registry for
+`BNBLOC_TEST_MYSQL_DSN` set in the workflow. The tests never use the DSN's
+database itself: each test binary (or test) creates its own throwaway
+`<database>_t*` database on that server and drops it afterwards
+(`internal/testmysql`), so the DSN's user needs CREATE and DROP DATABASE
+(the job uses the container's root). A private registry for
 `BNBLOC_CI_MYSQL_IMAGE` is expected to be reachable by the runner's own
 Docker credentials (`docker login` on the runner host).
 
