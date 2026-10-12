@@ -29,14 +29,6 @@ const maxOrgSyncBodyBytes = 256 * 1024
 // maxDeprovisionUsers bounds one deprovision call.
 const maxDeprovisionUsers = 1000
 
-func (s *Service) registerOrgSync(mux *http.ServeMux) {
-	mux.HandleFunc("GET /v1/platform/org-sync/rules", s.handleOrgSyncRules)
-	mux.HandleFunc("PUT /v1/platform/org-sync/rules", s.handleOrgSyncPutRules)
-	mux.HandleFunc("POST /v1/platform/org-sync/preview", s.handleOrgSyncPreview)
-	mux.HandleFunc("POST /v1/platform/org-sync/deprovision", s.handleOrgSyncDeprovision)
-	mux.HandleFunc("POST /v1/platform/org-sync/resync", s.handleOrgSyncResync)
-}
-
 // applyOrgSync converges the signing-in subject's memberships and returns
 // the landing tenant ("" when no rule matched or sync is not configured).
 func (s *Service) applyOrgSync(ctx context.Context, identity auth.Identity, a authprovider.Assertion) (string, error) {
@@ -57,20 +49,6 @@ func (s *Service) applyOrgSync(ctx context.Context, identity auth.Identity, a au
 	return res.Tenant, nil
 }
 
-// orgSyncAdmin authenticates a super-admin and checks sync is configured.
-func (s *Service) orgSyncAdmin(w http.ResponseWriter, r *http.Request) (auth.Claims, bool) {
-	claims, ok := s.requireSuperAdminClaims(w, r)
-	if !ok {
-		return auth.Claims{}, false
-	}
-	if s.OrgSync == nil {
-		obs.ServerError(w, "organization sync not configured (no tenant store)", nil)
-		httpx.Error(w, "organization sync not configured (no tenant store)", http.StatusNotImplemented)
-		return auth.Claims{}, false
-	}
-	return claims, true
-}
-
 func decodeOrgSyncBody(w http.ResponseWriter, r *http.Request, v any) bool {
 	if !httpx.DecodeJSON(w, r, maxOrgSyncBodyBytes, v) {
 		return false
@@ -84,10 +62,7 @@ func orgSyncFailed(w http.ResponseWriter, op string, err error) {
 	httpx.Error(w, "organization sync "+op+" failed", http.StatusInternalServerError)
 }
 
-func (s *Service) handleOrgSyncRules(w http.ResponseWriter, r *http.Request) {
-	if _, ok := s.orgSyncAdmin(w, r); !ok {
-		return
-	}
+func (s *Service) handleOrgSyncRules(w http.ResponseWriter, r *http.Request, claims auth.Claims) {
 	set, err := s.OrgSync.Rules(r.Context())
 	if err != nil {
 		orgSyncFailed(w, "read rules", err)
@@ -96,11 +71,7 @@ func (s *Service) handleOrgSyncRules(w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, http.StatusOK, set)
 }
 
-func (s *Service) handleOrgSyncPutRules(w http.ResponseWriter, r *http.Request) {
-	claims, ok := s.orgSyncAdmin(w, r)
-	if !ok {
-		return
-	}
+func (s *Service) handleOrgSyncPutRules(w http.ResponseWriter, r *http.Request, claims auth.Claims) {
 	var body struct {
 		Rules []orgsync.Rule `json:"rules"`
 	}
@@ -131,11 +102,7 @@ type orgSyncPreviewBody struct {
 
 // handleOrgSyncPreview is the dry run: what a sign-in with these attributes
 // would change, against the saved rules and the user's current memberships.
-func (s *Service) handleOrgSyncPreview(w http.ResponseWriter, r *http.Request) {
-	claims, ok := s.orgSyncAdmin(w, r)
-	if !ok {
-		return
-	}
+func (s *Service) handleOrgSyncPreview(w http.ResponseWriter, r *http.Request, claims auth.Claims) {
 	var body orgSyncPreviewBody
 	if !decodeOrgSyncBody(w, r, &body) {
 		return
@@ -161,11 +128,7 @@ func (s *Service) handleOrgSyncPreview(w http.ResponseWriter, r *http.Request) {
 // handleOrgSyncDeprovision is the directory feed's (or an operator's) way to
 // end a departed user's access: a sign-in protocol never learns that a user stopped
 // signing in.
-func (s *Service) handleOrgSyncDeprovision(w http.ResponseWriter, r *http.Request) {
-	claims, ok := s.orgSyncAdmin(w, r)
-	if !ok {
-		return
-	}
+func (s *Service) handleOrgSyncDeprovision(w http.ResponseWriter, r *http.Request, claims auth.Claims) {
 	var body struct {
 		UserIDs []string `json:"userIds"`
 	}
@@ -186,11 +149,7 @@ func (s *Service) handleOrgSyncDeprovision(w http.ResponseWriter, r *http.Reques
 
 // handleOrgSyncResync re-applies the saved rules to every subject a sign-in
 // recorded (after a rule change, or on a schedule).
-func (s *Service) handleOrgSyncResync(w http.ResponseWriter, r *http.Request) {
-	claims, ok := s.orgSyncAdmin(w, r)
-	if !ok {
-		return
-	}
+func (s *Service) handleOrgSyncResync(w http.ResponseWriter, r *http.Request, claims auth.Claims) {
 	res, err := s.OrgSync.Resync(r.Context(), claims.Subject)
 	if err != nil {
 		orgSyncFailed(w, "resync", err)

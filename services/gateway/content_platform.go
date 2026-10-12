@@ -39,35 +39,9 @@ import (
 // promote` does both with the publisher key. The platform row has no
 // tenant and no owner; its version carries the signature.
 
-func (s *Service) registerContentPlatform(mux *http.ServeMux) {
-	mux.HandleFunc("GET /v1/platform/content-components", s.handleListPlatformContent)
-	mux.HandleFunc("GET /v1/platform/content-components/{id}/package", s.handleExportContentPackage)
-	mux.HandleFunc("POST /v1/platform/content-components/{id}/unpublish", s.handlePlatformContentStatus(store.ContentStatusRetired))
-	mux.HandleFunc("POST /v1/platform/content-components/{id}/restore", s.handlePlatformContentStatus(store.ContentStatusActive))
-	mux.HandleFunc("DELETE /v1/platform/content-components/{id}", s.handleRemovePlatformContent)
-}
-
-// platformContentAdmin authenticates a super admin with the content store.
-func (s *Service) platformContentAdmin(w http.ResponseWriter, r *http.Request) (auth.Claims, bool) {
-	claims, ok := s.requireSuperAdminClaims(w, r)
-	if !ok {
-		return auth.Claims{}, false
-	}
-	if s.ContentComponents == nil {
-		obs.ServerError(w, "content components unavailable", nil)
-		httpx.Error(w, "content components unavailable", http.StatusServiceUnavailable)
-		return auth.Claims{}, false
-	}
-	return claims, true
-}
-
 // handleListPlatformContent lists platform content and, to promote,
 // organization content across organizations (any status).
-func (s *Service) handleListPlatformContent(w http.ResponseWriter, r *http.Request) {
-	claims, ok := s.platformContentAdmin(w, r)
-	if !ok {
-		return
-	}
+func (s *Service) handleListPlatformContent(w http.ResponseWriter, r *http.Request, claims auth.Claims) {
 	var scopes []store.ContentScope
 	switch scope := r.URL.Query().Get("scope"); scope {
 	case "":
@@ -90,10 +64,7 @@ func (s *Service) handleListPlatformContent(w http.ResponseWriter, r *http.Reque
 // handleExportContentPackage answers the signable package of one version
 // of any stored content component (a built-in already ships everywhere).
 // The response bytes are exactly what gets signed.
-func (s *Service) handleExportContentPackage(w http.ResponseWriter, r *http.Request) {
-	if _, ok := s.platformContentAdmin(w, r); !ok {
-		return
-	}
+func (s *Service) handleExportContentPackage(w http.ResponseWriter, r *http.Request, claims auth.Claims) {
 	ctx := r.Context()
 	id := r.PathValue("id")
 	if contentbuiltin.IsBuiltinID(id) {
@@ -306,12 +277,8 @@ func (s *Service) platformContent(w http.ResponseWriter, r *http.Request) (store
 	return c, true
 }
 
-func (s *Service) handlePlatformContentStatus(status store.ContentStatus) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		claims, ok := s.platformContentAdmin(w, r)
-		if !ok {
-			return
-		}
+func (s *Service) handlePlatformContentStatus(status store.ContentStatus) sessionHandler {
+	return func(w http.ResponseWriter, r *http.Request, claims auth.Claims) {
 		c, ok := s.platformContent(w, r)
 		if !ok {
 			return
@@ -320,11 +287,7 @@ func (s *Service) handlePlatformContentStatus(status store.ContentStatus) http.H
 	}
 }
 
-func (s *Service) handleRemovePlatformContent(w http.ResponseWriter, r *http.Request) {
-	claims, ok := s.platformContentAdmin(w, r)
-	if !ok {
-		return
-	}
+func (s *Service) handleRemovePlatformContent(w http.ResponseWriter, r *http.Request, claims auth.Claims) {
 	c, ok := s.platformContent(w, r)
 	if !ok {
 		return

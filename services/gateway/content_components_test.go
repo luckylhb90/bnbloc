@@ -36,6 +36,9 @@ type contentGateway struct {
 func newContentGateway(t *testing.T) *contentGateway {
 	t.Helper()
 	svc := newGateway(t, "")
+	// The content suites run many writes per member; the edge budget is
+	// tested on its own (ratelimit_test.go).
+	svc.limiter.get(1000, 1000, nil)
 	svc.Verifier = subjectVerifier{}
 	svc.TenantResolver = func(id auth.Identity, _ string) (string, string, error) {
 		if id.Subject == "vic" {

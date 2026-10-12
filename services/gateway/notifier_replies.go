@@ -127,17 +127,16 @@ func (s *Service) notifierReplyDenied(ctx context.Context, rec extpipe.Record, t
 		!notify.MemberInstalled(tenant.NewContext(ctx, tok.TenantID), s.ComponentInstalls, tok.UserID, rec.Name) {
 		return "member has not turned this notifier on"
 	}
-	if s.TenantSuspended != nil && s.TenantSuspended(tok.TenantID) {
+	role, err := s.memberRole(tok.TenantID, tok.UserID)
+	switch {
+	case errors.Is(err, errNotTenantMember):
+		return "member is no longer in the tenant"
+	case err != nil:
+		return "the member's organization cannot be checked"
+	case s.tenantClosed(tok.TenantID, role):
 		return "tenant suspended"
-	}
-	if s.TenantMemberRole != nil {
-		role, ok := s.TenantMemberRole(tok.TenantID, tok.UserID)
-		if !ok {
-			return "member is no longer in the tenant"
-		}
-		if !rbac.Can(role, rbac.PermDriveAgent) {
-			return "insufficient org role"
-		}
+	case !rbac.Can(role, rbac.PermDriveAgent):
+		return "insufficient org role"
 	}
 	return ""
 }

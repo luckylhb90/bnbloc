@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/luckylhb90/bnbloc/core"
+	"github.com/luckylhb90/bnbloc/internal/auth"
 	"github.com/luckylhb90/bnbloc/internal/config"
 	"github.com/luckylhb90/bnbloc/internal/coreset"
 	"github.com/luckylhb90/bnbloc/internal/httpx"
@@ -87,22 +88,7 @@ type localAgentRunResult struct {
 // adopts its workspace as a bnbloc room. The address dialed is always the
 // core's trusted, admin-installed endpoint; a caller-supplied address is only
 // honored on a single-host dev gateway (localAgentOverride).
-func (s *Service) handleLocalAgentRun(w http.ResponseWriter, r *http.Request) {
-	claims, err := s.authenticate(r)
-	if err != nil {
-		httpx.Error(w, "unauthorized", http.StatusUnauthorized)
-		return
-	}
-	// It creates a room and drives an agent: the proxy's org RBAC and rate
-	// limit apply (edgeGate), not just a session.
-	p, err := parseAPIPath(r)
-	if err != nil {
-		httpx.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-	if !s.edgeGate(w, r, p, claims) {
-		return
-	}
+func (s *Service) handleLocalAgentRun(w http.ResponseWriter, r *http.Request, claims auth.Claims) {
 	var body struct {
 		Prompt          string `json:"prompt"`
 		AgentTargetID   string `json:"agentTargetId"`
@@ -204,12 +190,7 @@ func localAgentRunFailed(w http.ResponseWriter, step, coreName string, err error
 // grouped by core. Each returned target id is core-qualified ("<core>/<rawid>")
 // and carries its core name. A core whose endpoint is empty or unreachable is
 // skipped (best-effort aggregation), so one dead core does not hide the others.
-func (s *Service) handleLocalAgentTargets(w http.ResponseWriter, r *http.Request) {
-	claims, err := s.authenticate(r)
-	if err != nil {
-		httpx.Error(w, "unauthorized", http.StatusUnauthorized)
-		return
-	}
+func (s *Service) handleLocalAgentTargets(w http.ResponseWriter, r *http.Request, claims auth.Claims) {
 	visibleEntries, err := s.visibleCoreEntries(r.Context(), claims)
 	if err != nil {
 		obs.ServerError(w, "load components failed", err)

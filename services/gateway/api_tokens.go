@@ -53,14 +53,6 @@ const (
 // serviceSubjectRe bounds a service subject: svc:<name>, lowercase.
 var serviceSubjectRe = regexp.MustCompile(`^svc:[a-z0-9][a-z0-9._-]{0,62}$`)
 
-func (s *Service) registerAPITokens(mux *http.ServeMux) {
-	mux.HandleFunc("POST /v1/auth/api-token", s.handleAPITokenExchange)
-	mux.HandleFunc("GET /v1/platform/api-tokens", s.handleListAPITokens)
-	mux.HandleFunc("POST /v1/platform/api-tokens", s.handleCreateAPIToken)
-	mux.HandleFunc("DELETE /v1/platform/api-tokens/{id}", s.handleRevokeAPIToken)
-	mux.HandleFunc("POST /v1/platform/alerts", s.handlePlatformAlert)
-}
-
 // apiTokens returns the token store (process-local memory when none was
 // wired: tests, a dev gateway without a database).
 func (s *Service) apiTokens() store.APITokenStore {
@@ -106,11 +98,7 @@ func viewAPIToken(t store.APIToken, nowMs int64) apiTokenView {
 }
 
 // handleCreateAPIToken issues a token (super-admin) and returns it ONCE.
-func (s *Service) handleCreateAPIToken(w http.ResponseWriter, r *http.Request) {
-	claims, ok := s.requireSuperAdminClaims(w, r)
-	if !ok {
-		return
-	}
+func (s *Service) handleCreateAPIToken(w http.ResponseWriter, r *http.Request, claims auth.Claims) {
 	var body createAPITokenBody
 	if !httpx.DecodeJSON(w, r, maxAuthBodyBytes, &body) {
 		return
@@ -184,10 +172,7 @@ func (s *Service) sessionEmail(ctx context.Context, claims auth.Claims) string {
 	return fam.Email
 }
 
-func (s *Service) handleListAPITokens(w http.ResponseWriter, r *http.Request) {
-	if _, ok := s.requireSuperAdminClaims(w, r); !ok {
-		return
-	}
+func (s *Service) handleListAPITokens(w http.ResponseWriter, r *http.Request, claims auth.Claims) {
 	rows, err := s.apiTokens().ListAPITokens(r.Context())
 	if err != nil {
 		obs.ServerError(w, "list tokens failed", err)
@@ -202,11 +187,7 @@ func (s *Service) handleListAPITokens(w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"tokens": out})
 }
 
-func (s *Service) handleRevokeAPIToken(w http.ResponseWriter, r *http.Request) {
-	claims, ok := s.requireSuperAdminClaims(w, r)
-	if !ok {
-		return
-	}
+func (s *Service) handleRevokeAPIToken(w http.ResponseWriter, r *http.Request, claims auth.Claims) {
 	id := strings.TrimSpace(r.PathValue("id"))
 	revoked, err := s.apiTokens().RevokeAPIToken(r.Context(), id, claims.Subject, s.nowTime().UnixMilli())
 	if err != nil {
@@ -237,10 +218,6 @@ var errAPITokenRejected = errors.New("invalid, expired or revoked api token")
 // handleAPITokenExchange trades an API token for a session. The token is
 // the credential (no bearer). Throttled per client IP like login.
 func (s *Service) handleAPITokenExchange(w http.ResponseWriter, r *http.Request) {
-	if !s.guessAllow("ip:" + s.clientIP(r)) {
-		httpx.Error(w, "rate limit exceeded", http.StatusTooManyRequests)
-		return
-	}
 	var body struct {
 		Token string `json:"token"`
 	}
@@ -280,12 +257,9 @@ func (s *Service) handleAPITokenExchange(w http.ResponseWriter, r *http.Request)
 	scope, err := s.resolveSession(auth.Identity{Subject: tok.Subject, Email: tok.Email, Tenant: tok.TenantHint})
 	if errors.Is(err, errTenantSuspended) {
 		s.auditAPIToken(r.Context(), id, "exchange", "deny", tok.Subject, "tenant suspended")
-		httpx.Error(w, "tenant suspended", http.StatusForbidden)
-		return
 	}
 	if err != nil {
-		obs.ServerError(w, "session issue failed", err)
-		httpx.Error(w, "session issue failed", http.StatusInternalServerError)
+		writeSessionErr(w, err)
 		return
 	}
 	_ = s.apiTokens().TouchAPIToken(r.Context(), id, now.UnixMilli())
@@ -311,11 +285,7 @@ func (s *Service) auditAPIToken(ctx context.Context, id, action, outcome, actor,
 // recipients default to every configured platform super-admin. It is queued
 // in the tenant the request acts in (a super admin's acting tenant,
 // tenant_scope.go) through every notifier component visible there; delivery is asynchronous (realtime's outbox worker).
-func (s *Service) handlePlatformAlert(w http.ResponseWriter, r *http.Request) {
-	claims, ok := s.requireSuperAdminClaims(w, r)
-	if !ok {
-		return
-	}
+func (s *Service) handlePlatformAlert(w http.ResponseWriter, r *http.Request, claims auth.Claims) {
 	if s.Alerts == nil {
 		obs.ServerError(w, "alerts unavailable (no notification store)", nil)
 		httpx.Error(w, "alerts unavailable (no notification store)", http.StatusServiceUnavailable)

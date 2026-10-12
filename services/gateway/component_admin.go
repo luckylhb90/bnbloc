@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/luckylhb90/bnbloc/internal/auth"
 	"github.com/luckylhb90/bnbloc/internal/contentpkg"
 	"github.com/luckylhb90/bnbloc/internal/extpipe"
 	"github.com/luckylhb90/bnbloc/internal/httpx"
@@ -15,21 +16,7 @@ import (
 
 const componentTrustedKeysKey = "component.trustedKeys"
 
-func (s *Service) handlePlatformComponents(w http.ResponseWriter, r *http.Request) {
-	switch r.Method {
-	case http.MethodGet:
-		s.handleListComponents(w, r)
-	case http.MethodPost:
-		s.handleInstallComponent(w, r)
-	default:
-		httpx.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-	}
-}
-
-func (s *Service) handleListComponents(w http.ResponseWriter, r *http.Request) {
-	if !s.requireSuperAdmin(w, r) {
-		return
-	}
+func (s *Service) handleListComponents(w http.ResponseWriter, r *http.Request, claims auth.Claims) {
 	components, err := s.listInstalledComponents(r.Context())
 	if err != nil {
 		obs.ServerError(w, "load components failed", err)
@@ -44,11 +31,7 @@ func (s *Service) handleListComponents(w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"components": components})
 }
 
-func (s *Service) handleInstallComponent(w http.ResponseWriter, r *http.Request) {
-	claims, ok := s.requireSuperAdminClaims(w, r)
-	if !ok {
-		return
-	}
+func (s *Service) handleInstallComponent(w http.ResponseWriter, r *http.Request, claims auth.Claims) {
 	var req componentInstallRequest
 	if !httpx.DecodeJSON(w, r, 512*1024, &req) {
 		return
@@ -116,11 +99,7 @@ func publicBaseURL(r *http.Request) string {
 	return scheme + "://" + host
 }
 
-func (s *Service) handleUninstallComponent(w http.ResponseWriter, r *http.Request) {
-	claims, ok := s.requireSuperAdminClaims(w, r)
-	if !ok {
-		return
-	}
+func (s *Service) handleUninstallComponent(w http.ResponseWriter, r *http.Request, claims auth.Claims) {
 	name := strings.TrimSpace(r.PathValue("name"))
 	if name == "" {
 		httpx.Error(w, "component name required", http.StatusBadRequest)
@@ -145,11 +124,7 @@ func (s *Service) handleUninstallComponent(w http.ResponseWriter, r *http.Reques
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func (s *Service) handleSetComponentRollout(w http.ResponseWriter, r *http.Request) {
-	claims, ok := s.requireSuperAdminClaims(w, r)
-	if !ok {
-		return
-	}
+func (s *Service) handleSetComponentRollout(w http.ResponseWriter, r *http.Request, claims auth.Claims) {
 	name := strings.TrimSpace(r.PathValue("name"))
 	if name == "" {
 		httpx.Error(w, "component name required", http.StatusBadRequest)
@@ -180,11 +155,7 @@ func (s *Service) handleSetComponentRollout(w http.ResponseWriter, r *http.Reque
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func (s *Service) handleSetComponentTenants(w http.ResponseWriter, r *http.Request) {
-	claims, ok := s.requireSuperAdminClaims(w, r)
-	if !ok {
-		return
-	}
+func (s *Service) handleSetComponentTenants(w http.ResponseWriter, r *http.Request, claims auth.Claims) {
 	name := strings.TrimSpace(r.PathValue("name"))
 	if name == "" {
 		httpx.Error(w, "component name required", http.StatusBadRequest)

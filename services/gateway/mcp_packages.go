@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/luckylhb90/bnbloc/core/pkgmeta"
+	"github.com/luckylhb90/bnbloc/internal/auth"
 	"github.com/luckylhb90/bnbloc/internal/digest"
 	"github.com/luckylhb90/bnbloc/internal/httpx"
 	"github.com/luckylhb90/bnbloc/internal/obs"
@@ -46,10 +47,7 @@ type mcpStagedBinary struct {
 	Key string `json:"key"`
 }
 
-func (s *Service) handleBuildMCPPackage(w http.ResponseWriter, r *http.Request) {
-	if _, ok := s.requireSuperAdminClaims(w, r); !ok {
-		return
-	}
+func (s *Service) handleBuildMCPPackage(w http.ResponseWriter, r *http.Request, claims auth.Claims) {
 	var draft mcpPackageDraft
 	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 256*1024))
 	dec.DisallowUnknownFields()

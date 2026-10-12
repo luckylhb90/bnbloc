@@ -6,6 +6,7 @@ import (
 
 	"github.com/luckylhb90/bnbloc/core"
 	"github.com/luckylhb90/bnbloc/core/pkgmeta"
+	"github.com/luckylhb90/bnbloc/internal/auth"
 	"github.com/luckylhb90/bnbloc/internal/coreset"
 	"github.com/luckylhb90/bnbloc/internal/httpx"
 	"github.com/luckylhb90/bnbloc/internal/obs"
@@ -23,12 +24,7 @@ import (
 //     load. The platform key is accepted and ignored (data is platform-free).
 //
 // 404 when the core or (for sidecars) its artifact/platform is absent.
-func (s *Service) handleCoreArtifact(w http.ResponseWriter, r *http.Request) {
-	claims, err := s.authenticate(r)
-	if err != nil {
-		httpx.Error(w, "unauthorized", http.StatusUnauthorized)
-		return
-	}
+func (s *Service) handleCoreArtifact(w http.ResponseWriter, r *http.Request, claims auth.Claims) {
 	name := r.PathValue("name")
 	platform := strings.TrimSpace(r.URL.Query().Get("platform"))
 	if platform == "" {

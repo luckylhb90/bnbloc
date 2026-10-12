@@ -48,14 +48,6 @@ const (
 	maxContentNoteRunes = 500
 )
 
-func (s *Service) registerContentSharing(mux *http.ServeMux) {
-	mux.HandleFunc("POST /v1/content-components/{id}/shares", s.handleShareContent)
-	mux.HandleFunc("GET /v1/content-components/{id}/shares", s.handleListContentShares)
-	mux.HandleFunc("DELETE /v1/content-components/{id}/shares/rooms/{room}", s.handleRevokeRoomShare)
-	mux.HandleFunc("POST /v1/content-components/{id}/update", s.handleUpdateContentCopy)
-	mux.HandleFunc("POST /v1/content-components/{id}/publish", s.handlePublishContent)
-}
-
 // contentNote trims a request note and checks its bound.
 func contentNote(w http.ResponseWriter, note string) (string, bool) {
 	note = strings.TrimSpace(note)
@@ -112,8 +104,8 @@ func (s *Service) orgMember(tenantID, subject string) bool {
 
 // ---------------------------------------------------------------- shares
 
-func (s *Service) handleShareContent(w http.ResponseWriter, r *http.Request) {
-	actor, ok := s.contentCaller(w, r, true, grantRefused)
+func (s *Service) handleShareContent(w http.ResponseWriter, r *http.Request, caller auth.Claims) {
+	actor, ok := s.contentCaller(w, r, caller, grantRefused)
 	if !ok {
 		return
 	}
@@ -254,8 +246,8 @@ func (s *Service) shareRecipients(w http.ResponseWriter, r *http.Request, claims
 }
 
 // handleListContentShares lists the copies of the caller's component.
-func (s *Service) handleListContentShares(w http.ResponseWriter, r *http.Request) {
-	actor, ok := s.contentCaller(w, r, false, grantRefused)
+func (s *Service) handleListContentShares(w http.ResponseWriter, r *http.Request, caller auth.Claims) {
+	actor, ok := s.contentCaller(w, r, caller, grantRefused)
 	if !ok {
 		return
 	}
@@ -293,8 +285,8 @@ func (s *Service) handleListContentShares(w http.ResponseWriter, r *http.Request
 
 // handleRevokeRoomShare ends the author's room share: members who join the
 // room later get no copy; the copies already given stay theirs.
-func (s *Service) handleRevokeRoomShare(w http.ResponseWriter, r *http.Request) {
-	actor, ok := s.contentCaller(w, r, true, grantRefused)
+func (s *Service) handleRevokeRoomShare(w http.ResponseWriter, r *http.Request, caller auth.Claims) {
+	actor, ok := s.contentCaller(w, r, caller, grantRefused)
 	if !ok {
 		return
 	}
@@ -340,8 +332,8 @@ func (s *Service) sourceOfCopy(ctx context.Context, cp store.ContentComponent) (
 // handleUpdateContentCopy moves the caller's shared copy to its author's
 // latest version (an explicit step: the author's edits never reach a copy
 // by themselves).
-func (s *Service) handleUpdateContentCopy(w http.ResponseWriter, r *http.Request) {
-	actor, ok := s.contentCaller(w, r, true, grantRefused)
+func (s *Service) handleUpdateContentCopy(w http.ResponseWriter, r *http.Request, caller auth.Claims) {
+	actor, ok := s.contentCaller(w, r, caller, grantRefused)
 	if !ok {
 		return
 	}
@@ -405,8 +397,8 @@ const errPlatformPublish = "publishing to every organization is a platform admin
 // opens a publish request, personal takes it out of the organization,
 // platform is a super admin's action. The room tools' publish_component
 // calls it with a job grant, acting as the job's requester.
-func (s *Service) handlePublishContent(w http.ResponseWriter, r *http.Request) {
-	actor, ok := s.contentCaller(w, r, true, grantHonored)
+func (s *Service) handlePublishContent(w http.ResponseWriter, r *http.Request, caller auth.Claims) {
+	actor, ok := s.contentCaller(w, r, caller, grantHonored)
 	if !ok {
 		return
 	}

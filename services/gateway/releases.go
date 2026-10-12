@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/luckylhb90/bnbloc/internal/auth"
 	"github.com/luckylhb90/bnbloc/internal/httpx"
 	"github.com/luckylhb90/bnbloc/internal/semver"
 
@@ -127,11 +128,7 @@ func validateReleaseEntry(entry wire.ReleaseEntry) error {
 // handleAppReleases is the public, session-authenticated hub payload: any
 // signed-in user can browse/download. Auth matches the updater endpoints (the
 // download URLs are admin-supplied and should not be exposed unauthenticated).
-func (s *Service) handleAppReleases(w http.ResponseWriter, r *http.Request) {
-	if _, err := s.authenticate(r); err != nil {
-		httpx.Error(w, "unauthorized", http.StatusUnauthorized)
-		return
-	}
+func (s *Service) handleAppReleases(w http.ResponseWriter, r *http.Request, claims auth.Claims) {
 	hub, err := loadReleaseHub(r.Context(), s.PlatformSettings)
 	if err != nil {
 		obs.ServerError(w, "load releases failed", err)
@@ -149,10 +146,7 @@ func (s *Service) handleAppReleases(w http.ResponseWriter, r *http.Request) {
 }
 
 // handlePlatformReleases is the super-admin editor read: full history + intro.
-func (s *Service) handlePlatformReleases(w http.ResponseWriter, r *http.Request) {
-	if !s.requireSuperAdmin(w, r) {
-		return
-	}
+func (s *Service) handlePlatformReleases(w http.ResponseWriter, r *http.Request, claims auth.Claims) {
 	hub, err := loadReleaseHub(r.Context(), s.PlatformSettings)
 	if err != nil {
 		obs.ServerError(w, "load releases failed", err)
@@ -163,11 +157,7 @@ func (s *Service) handlePlatformReleases(w http.ResponseWriter, r *http.Request)
 }
 
 // handlePlatformReleaseMetaPut updates the project intro (name/tagline/intro).
-func (s *Service) handlePlatformReleaseMetaPut(w http.ResponseWriter, r *http.Request) {
-	claims, ok := s.requireSuperAdminClaims(w, r)
-	if !ok {
-		return
-	}
+func (s *Service) handlePlatformReleaseMetaPut(w http.ResponseWriter, r *http.Request, claims auth.Claims) {
 	var meta wire.ReleaseHubMeta
 	if !httpx.DecodeJSON(w, r, 64*1024, &meta) {
 		return
@@ -185,11 +175,7 @@ func (s *Service) handlePlatformReleaseMetaPut(w http.ResponseWriter, r *http.Re
 }
 
 // handlePlatformReleasePut creates or updates one version entry.
-func (s *Service) handlePlatformReleasePut(w http.ResponseWriter, r *http.Request) {
-	claims, ok := s.requireSuperAdminClaims(w, r)
-	if !ok {
-		return
-	}
+func (s *Service) handlePlatformReleasePut(w http.ResponseWriter, r *http.Request, claims auth.Claims) {
 	var entry wire.ReleaseEntry
 	if !httpx.DecodeJSON(w, r, 256*1024, &entry) {
 		return
@@ -219,10 +205,7 @@ func (s *Service) handlePlatformReleasePut(w http.ResponseWriter, r *http.Reques
 // handlePlatformReleaseDelete removes a version entry. Deletion here is a hard
 // delete of the settings row; a dev instance has no external state to preserve,
 // and re-publishing the version simply writes it again.
-func (s *Service) handlePlatformReleaseDelete(w http.ResponseWriter, r *http.Request) {
-	if !s.requireSuperAdmin(w, r) {
-		return
-	}
+func (s *Service) handlePlatformReleaseDelete(w http.ResponseWriter, r *http.Request, claims auth.Claims) {
 	version := strings.TrimSpace(r.PathValue("version"))
 	if version == "" {
 		httpx.Error(w, "version required", http.StatusBadRequest)

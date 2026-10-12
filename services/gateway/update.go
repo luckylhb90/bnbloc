@@ -8,7 +8,6 @@ import (
 
 	"github.com/luckylhb90/bnbloc/internal/auth"
 	"github.com/luckylhb90/bnbloc/internal/obs"
-	"github.com/luckylhb90/bnbloc/internal/rbac"
 	"github.com/luckylhb90/bnbloc/internal/wire"
 )
 
@@ -21,13 +20,9 @@ type tauriUpdateManifest struct {
 	Forced    bool   `json:"forced,omitempty"`
 }
 
-func (s *Service) handleAppUpdate(w http.ResponseWriter, r *http.Request) {
+func (s *Service) handleAppUpdate(w http.ResponseWriter, r *http.Request, claims auth.Claims) {
 	// Session auth is required because the manifest contains admin-supplied
 	// download URLs; exposing those unauthenticated could leak internal artifacts.
-	if _, err := s.authenticate(r); err != nil {
-		httpx.Error(w, "unauthorized", http.StatusUnauthorized)
-		return
-	}
 	cfg, err := loadUpdateConfig(r.Context(), s.PlatformSettings)
 	if err != nil {
 		obs.ServerError(w, "load update config failed", err)
@@ -46,13 +41,9 @@ func (s *Service) handleAppUpdate(w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, http.StatusOK, manifest)
 }
 
-func (s *Service) handleUpdatePolicy(w http.ResponseWriter, r *http.Request) {
+func (s *Service) handleUpdatePolicy(w http.ResponseWriter, r *http.Request, claims auth.Claims) {
 	// Session auth matches the manifest endpoint: polling policy is only needed
 	// after sign-in, and keeping it authenticated avoids exposing rollout state.
-	if _, err := s.authenticate(r); err != nil {
-		httpx.Error(w, "unauthorized", http.StatusUnauthorized)
-		return
-	}
 	cfg, err := loadUpdateConfig(r.Context(), s.PlatformSettings)
 	if err != nil {
 		obs.ServerError(w, "load update policy failed", err)
@@ -62,10 +53,7 @@ func (s *Service) handleUpdatePolicy(w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, http.StatusOK, cfg.Policy)
 }
 
-func (s *Service) handlePlatformUpdateConfig(w http.ResponseWriter, r *http.Request) {
-	if !s.requireSuperAdmin(w, r) {
-		return
-	}
+func (s *Service) handlePlatformUpdateConfig(w http.ResponseWriter, r *http.Request, claims auth.Claims) {
 	cfg, err := loadUpdateConfig(r.Context(), s.PlatformSettings)
 	if err != nil {
 		obs.ServerError(w, "load update config failed", err)
@@ -75,11 +63,7 @@ func (s *Service) handlePlatformUpdateConfig(w http.ResponseWriter, r *http.Requ
 	httpx.WriteJSON(w, http.StatusOK, cfg)
 }
 
-func (s *Service) handlePlatformUpdateConfigPut(w http.ResponseWriter, r *http.Request) {
-	claims, ok := s.requireSuperAdminClaims(w, r)
-	if !ok {
-		return
-	}
+func (s *Service) handlePlatformUpdateConfigPut(w http.ResponseWriter, r *http.Request, claims auth.Claims) {
 	var cfg wire.UpdateConfig
 	if !httpx.DecodeJSON(w, r, 64*1024, &cfg) {
 		return
@@ -97,28 +81,6 @@ func (s *Service) handlePlatformUpdateConfigPut(w http.ResponseWriter, r *http.R
 		return
 	}
 	httpx.WriteJSON(w, http.StatusOK, cfg)
-}
-
-func (s *Service) requireSuperAdmin(w http.ResponseWriter, r *http.Request) bool {
-	_, ok := s.requireSuperAdminClaims(w, r)
-	return ok
-}
-
-func (s *Service) requireSuperAdminClaims(w http.ResponseWriter, r *http.Request) (auth.Claims, bool) {
-	claims, err := s.authenticate(r)
-	if err != nil {
-		httpx.Error(w, "unauthorized", http.StatusUnauthorized)
-		return auth.Claims{}, false
-	}
-	if !isSuperAdminRole(claims.Role) {
-		httpx.Error(w, "insufficient org role", http.StatusForbidden)
-		return auth.Claims{}, false
-	}
-	return claims, true
-}
-
-func isSuperAdminRole(role string) bool {
-	return rbac.Can(role, rbac.PermManagePlatform)
 }
 
 func updateManifestForRequest(cfg wire.UpdateConfig, req updateRequest) (tauriUpdateManifest, bool) {

@@ -30,27 +30,21 @@ const (
 	defaultPublicACSPath = "/api/auth/acs"
 )
 
-func (s *Service) registerSSO(mux *http.ServeMux) {
-	mux.HandleFunc("GET /v1/auth/sso-config", s.handleAuthProviderConfig)
-	mux.HandleFunc("GET "+publicAuthStartPath, func(w http.ResponseWriter, r *http.Request) {
-		s.rememberSSORelay(w, r)
-		s.proxyAuthProvider(w, r, authProviderInitPath)
-	})
-	mux.HandleFunc("GET /api/auth/metadata", func(w http.ResponseWriter, r *http.Request) {
-		s.proxyAuthProvider(w, r, authProviderMetaPath)
-	})
-	mux.HandleFunc("GET /api/auth/logout", func(w http.ResponseWriter, r *http.Request) {
-		s.proxyAuthProvider(w, r, authProviderSLOPath)
-	})
-	mux.HandleFunc("POST /api/auth/logout", func(w http.ResponseWriter, r *http.Request) {
-		s.proxyAuthProvider(w, r, authProviderSLOPath)
-	})
-	// The ACS path is whatever the deployment registered with its IdP (an
-	// IdP-hosted login page posts to the registered URL, not to one carried in
-	// a request), so it is configuration, not a constant.
-	mux.HandleFunc("POST "+s.publicACSPath(), s.handleAuthProviderACS)
-	mux.HandleFunc("POST /v1/auth/sso/exchange", s.handleSSOExchange)
-	mux.HandleFunc("POST /v1/auth/sso/claim", s.handleSSOClaim)
+// handleSSOStart begins an SSO sign-in at the active auth provider,
+// remembering where the browser returns.
+func (s *Service) handleSSOStart(w http.ResponseWriter, r *http.Request) {
+	s.rememberSSORelay(w, r)
+	s.proxyAuthProvider(w, r, authProviderInitPath)
+}
+
+// handleSSOMetadata serves the auth provider's SP metadata to the IdP.
+func (s *Service) handleSSOMetadata(w http.ResponseWriter, r *http.Request) {
+	s.proxyAuthProvider(w, r, authProviderMetaPath)
+}
+
+// handleSSOLogout passes the IdP's single logout to the auth provider.
+func (s *Service) handleSSOLogout(w http.ResponseWriter, r *http.Request) {
+	s.proxyAuthProvider(w, r, authProviderSLOPath)
 }
 
 // publicACSPath is the configured public assertion consumer path.
@@ -227,13 +221,8 @@ func (s *Service) completeSSO(w http.ResponseWriter, r *http.Request, identity a
 	// gate; the hand-off flows park only the verified identity and mint the
 	// session (and its refresh family) when the client redeems.
 	scope, err := s.resolveSession(identity)
-	if errors.Is(err, errTenantSuspended) {
-		httpx.Error(w, "tenant suspended", http.StatusForbidden)
-		return
-	}
 	if err != nil {
-		obs.ServerError(w, "session issue failed", err)
-		httpx.Error(w, "session issue failed", http.StatusInternalServerError)
+		writeSessionErr(w, err)
 		return
 	}
 	fragment := url.Values{}
@@ -433,13 +422,8 @@ func (s *Service) handleSSOClaim(w http.ResponseWriter, r *http.Request) {
 // sign-in and redemption).
 func (s *Service) writeHandoffGrant(w http.ResponseWriter, r *http.Request, identity auth.Identity, client string) {
 	grant, err := s.issueSession(r.Context(), identity, originFor(r, "", client))
-	if errors.Is(err, errTenantSuspended) {
-		httpx.Error(w, "tenant suspended", http.StatusForbidden)
-		return
-	}
 	if err != nil {
-		obs.ServerError(w, "session issue failed", err)
-		httpx.Error(w, "session issue failed", http.StatusInternalServerError)
+		writeSessionErr(w, err)
 		return
 	}
 	httpx.WriteJSON(w, http.StatusOK, grant)

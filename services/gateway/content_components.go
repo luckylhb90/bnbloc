@@ -61,22 +61,6 @@ const (
 	maxContentViewBytes = 2 << 20
 )
 
-func (s *Service) registerContentComponents(mux *http.ServeMux) {
-	mux.HandleFunc("GET /v1/content-components", s.handleListContent)
-	mux.HandleFunc("POST /v1/content-components", s.handleCreateContent)
-	mux.HandleFunc("POST /v1/content-components/import", s.handleImportContent)
-	mux.HandleFunc("GET /v1/content-components/effective", s.handleContentEffective)
-	mux.HandleFunc("POST /v1/content-drafts", s.handleStageContentDraft)
-	mux.HandleFunc("GET /v1/content-components/{id}", s.handleGetContent)
-	mux.HandleFunc("DELETE /v1/content-components/{id}", s.handleDeleteContent)
-	mux.HandleFunc("POST /v1/content-components/{id}/versions", s.handleNewContentVersion)
-	mux.HandleFunc("GET /v1/content-components/{id}/versions/{version}", s.handleGetContentVersion)
-	mux.HandleFunc("POST /v1/content-components/{id}/versions/{version}/ack", s.handleAckContent)
-	mux.HandleFunc("GET /v1/content-uses", s.handleListContentUses)
-	mux.HandleFunc("PUT /v1/content-uses", s.handlePutContentUse)
-	mux.HandleFunc("DELETE /v1/content-uses", s.handleDeleteContentUse)
-}
-
 // contentStoreErr answers a store failure (404 for a missing component).
 func contentStoreErr(w http.ResponseWriter, what string, err error) {
 	if errors.Is(err, store.ErrContentNotFound) {
@@ -306,8 +290,8 @@ func (s *Service) contentViews(ctx context.Context, claims auth.Claims, comps []
 	return out, nil
 }
 
-func (s *Service) handleListContent(w http.ResponseWriter, r *http.Request) {
-	actor, ok := s.contentCaller(w, r, false, grantHonored)
+func (s *Service) handleListContent(w http.ResponseWriter, r *http.Request, caller auth.Claims) {
+	actor, ok := s.contentCaller(w, r, caller, grantHonored)
 	if !ok {
 		return
 	}
@@ -368,8 +352,8 @@ func readBody(w http.ResponseWriter, r *http.Request, limit int64) ([]byte, bool
 // archive whose component.json names it. With a job grant (?job=&room=,
 // content_requester.go) the bridge running the job saves it as the job's
 // requester.
-func (s *Service) handleCreateContent(w http.ResponseWriter, r *http.Request) {
-	actor, ok := s.contentCaller(w, r, true, grantHonored)
+func (s *Service) handleCreateContent(w http.ResponseWriter, r *http.Request, caller auth.Claims) {
+	actor, ok := s.contentCaller(w, r, caller, grantHonored)
 	if !ok {
 		return
 	}
@@ -428,8 +412,8 @@ func contentOptions() contentpkg.Options { return contentpkg.Options{} }
 // handleImportContent imports an archive of an existing format as a new
 // component (?kind=expert|skill&name=) or, with ?id=, as a new version of
 // the caller's component.
-func (s *Service) handleImportContent(w http.ResponseWriter, r *http.Request) {
-	actor, ok := s.contentCaller(w, r, true, grantHonored)
+func (s *Service) handleImportContent(w http.ResponseWriter, r *http.Request, caller auth.Claims) {
+	actor, ok := s.contentCaller(w, r, caller, grantHonored)
 	if !ok {
 		return
 	}
@@ -558,8 +542,8 @@ func nextContentVersion(c store.ContentComponent, requested string) (string, err
 
 // handleNewContentVersion saves the caller's component as a new immutable
 // version: a JSON form (built on baseVersion's files) or a package archive.
-func (s *Service) handleNewContentVersion(w http.ResponseWriter, r *http.Request) {
-	actor, ok := s.contentCaller(w, r, true, grantHonored)
+func (s *Service) handleNewContentVersion(w http.ResponseWriter, r *http.Request, caller auth.Claims) {
+	actor, ok := s.contentCaller(w, r, caller, grantHonored)
 	if !ok {
 		return
 	}
@@ -712,8 +696,8 @@ func contentVersionView(v store.ContentComponentVersion) wire.ContentVersion {
 		SizeBytes: v.SizeBytes, CreatedBy: v.CreatedBy, CreatedAtMs: v.CreatedAtMs}
 }
 
-func (s *Service) handleGetContent(w http.ResponseWriter, r *http.Request) {
-	actor, ok := s.contentCaller(w, r, false, grantHonored)
+func (s *Service) handleGetContent(w http.ResponseWriter, r *http.Request, caller auth.Claims) {
+	actor, ok := s.contentCaller(w, r, caller, grantHonored)
 	if !ok {
 		return
 	}
@@ -750,8 +734,8 @@ func (s *Service) contentPackage(ctx context.Context, v store.ContentComponentVe
 // handleGetContentVersion answers one version: the component as of that
 // version, its instructions and skill bodies (the Library form) and its
 // files (text when viewable).
-func (s *Service) handleGetContentVersion(w http.ResponseWriter, r *http.Request) {
-	actor, ok := s.contentCaller(w, r, false, grantHonored)
+func (s *Service) handleGetContentVersion(w http.ResponseWriter, r *http.Request, caller auth.Claims) {
+	actor, ok := s.contentCaller(w, r, caller, grantHonored)
 	if !ok {
 		return
 	}
@@ -820,8 +804,8 @@ func (s *Service) handleGetContentVersion(w http.ResponseWriter, r *http.Request
 	httpx.WriteJSON(w, http.StatusOK, out)
 }
 
-func (s *Service) handleDeleteContent(w http.ResponseWriter, r *http.Request) {
-	actor, ok := s.contentCaller(w, r, true, grantRefused)
+func (s *Service) handleDeleteContent(w http.ResponseWriter, r *http.Request, caller auth.Claims) {
+	actor, ok := s.contentCaller(w, r, caller, grantRefused)
 	if !ok {
 		return
 	}
@@ -840,8 +824,8 @@ func (s *Service) handleDeleteContent(w http.ResponseWriter, r *http.Request) {
 
 // handleAckContent records that the caller confirmed a version's declared
 // permissions (first use).
-func (s *Service) handleAckContent(w http.ResponseWriter, r *http.Request) {
-	actor, ok := s.contentCaller(w, r, false, grantRefused)
+func (s *Service) handleAckContent(w http.ResponseWriter, r *http.Request, caller auth.Claims) {
+	actor, ok := s.contentCaller(w, r, caller, grantRefused)
 	if !ok {
 		return
 	}
@@ -865,8 +849,8 @@ func (s *Service) handleAckContent(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func (s *Service) handleListContentUses(w http.ResponseWriter, r *http.Request) {
-	actor, ok := s.contentCaller(w, r, false, grantHonored)
+func (s *Service) handleListContentUses(w http.ResponseWriter, r *http.Request, caller auth.Claims) {
+	actor, ok := s.contentCaller(w, r, caller, grantHonored)
 	if !ok {
 		return
 	}
@@ -951,8 +935,8 @@ func (s *Service) contentUseViews(ctx context.Context, claims auth.Claims, scope
 // agents), or a skill pack / expert for a room (its owner or admins), at a
 // pinned version or following the latest. The caller must be able to use
 // the component themselves.
-func (s *Service) handlePutContentUse(w http.ResponseWriter, r *http.Request) {
-	actor, ok := s.contentCaller(w, r, true, grantHonored)
+func (s *Service) handlePutContentUse(w http.ResponseWriter, r *http.Request, caller auth.Claims) {
+	actor, ok := s.contentCaller(w, r, caller, grantHonored)
 	if !ok {
 		return
 	}
@@ -1029,8 +1013,8 @@ func (s *Service) contentUseScope(w http.ResponseWriter, claims auth.Claims, sco
 	}
 }
 
-func (s *Service) handleDeleteContentUse(w http.ResponseWriter, r *http.Request) {
-	actor, ok := s.contentCaller(w, r, true, grantHonored)
+func (s *Service) handleDeleteContentUse(w http.ResponseWriter, r *http.Request, caller auth.Claims) {
+	actor, ok := s.contentCaller(w, r, caller, grantHonored)
 	if !ok {
 		return
 	}
@@ -1061,8 +1045,8 @@ func (s *Service) handleDeleteContentUse(w http.ResponseWriter, r *http.Request)
 // handleContentEffective answers the bridge driving a job: the expert and
 // skill packs its turn wears (contentuse.Effective). The bridge downloads
 // each bundle with GET /v1/artifacts/{key}?job=&room=.
-func (s *Service) handleContentEffective(w http.ResponseWriter, r *http.Request) {
-	actor, ok := s.contentCaller(w, r, false, grantHonored)
+func (s *Service) handleContentEffective(w http.ResponseWriter, r *http.Request, caller auth.Claims) {
+	actor, ok := s.contentCaller(w, r, caller, grantHonored)
 	if !ok {
 		return
 	}

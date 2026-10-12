@@ -16,7 +16,6 @@ import (
 	"github.com/luckylhb90/bnbloc/internal/httpx"
 	"github.com/luckylhb90/bnbloc/internal/mcptool"
 	"github.com/luckylhb90/bnbloc/internal/obs"
-	"github.com/luckylhb90/bnbloc/internal/rbac"
 	"github.com/luckylhb90/bnbloc/internal/store"
 	"github.com/luckylhb90/bnbloc/internal/wire"
 )
@@ -153,22 +152,6 @@ func (s *Service) mcpCatalog(ctx context.Context, claims auth.Claims, rec extpip
 
 // --- organization connectors (org admins) ---
 
-// orgAdmin authenticates an organization admin request: manage_org in the
-// tenant the request acts in (authenticate resolves a super admin's acting
-// tenant, tenant_scope.go).
-func (s *Service) orgAdmin(w http.ResponseWriter, r *http.Request) (auth.Claims, bool) {
-	claims, err := s.authenticate(r)
-	if err != nil {
-		httpx.Error(w, "unauthorized", http.StatusUnauthorized)
-		return auth.Claims{}, false
-	}
-	if !rbac.Can(claims.Role, rbac.PermManageOrg) {
-		httpx.Error(w, "insufficient org role", http.StatusForbidden)
-		return auth.Claims{}, false
-	}
-	return claims, true
-}
-
 // orgMCPRecord resolves {name} to an org-credential MCP component visible
 // to the caller's organization.
 func (s *Service) orgMCPRecord(w http.ResponseWriter, r *http.Request, claims auth.Claims) (extpipe.Record, extpipe.PackageConfig, bool) {
@@ -199,11 +182,7 @@ func (s *Service) orgMCPRecord(w http.ResponseWriter, r *http.Request, claims au
 // handleListMCPConnectors answers GET /v1/tenant/mcp-connectors: the
 // org-credential MCP tools visible to the organization with their
 // connector's state (secret values never returned).
-func (s *Service) handleListMCPConnectors(w http.ResponseWriter, r *http.Request) {
-	claims, ok := s.orgAdmin(w, r)
-	if !ok {
-		return
-	}
+func (s *Service) handleListMCPConnectors(w http.ResponseWriter, r *http.Request, claims auth.Claims) {
 	recs, err := s.corePipeline().List(r.Context(), extreg.KindMCP)
 	if err != nil {
 		obs.ServerError(w, "load MCP tools failed", err)
@@ -256,11 +235,7 @@ func (s *Service) handleListMCPConnectors(w http.ResponseWriter, r *http.Request
 
 // handlePutMCPConnector answers PUT /v1/tenant/mcp-connectors/{name}:
 // store the organization's values (an empty secret keeps the stored one).
-func (s *Service) handlePutMCPConnector(w http.ResponseWriter, r *http.Request) {
-	claims, ok := s.orgAdmin(w, r)
-	if !ok {
-		return
-	}
+func (s *Service) handlePutMCPConnector(w http.ResponseWriter, r *http.Request, claims auth.Claims) {
 	rec, cfg, ok := s.orgMCPRecord(w, r, claims)
 	if !ok {
 		return
@@ -295,11 +270,7 @@ func (s *Service) handlePutMCPConnector(w http.ResponseWriter, r *http.Request) 
 }
 
 // handleDeleteMCPConnector answers DELETE /v1/tenant/mcp-connectors/{name}.
-func (s *Service) handleDeleteMCPConnector(w http.ResponseWriter, r *http.Request) {
-	claims, ok := s.orgAdmin(w, r)
-	if !ok {
-		return
-	}
+func (s *Service) handleDeleteMCPConnector(w http.ResponseWriter, r *http.Request, claims auth.Claims) {
 	rec, _, ok := s.orgMCPRecord(w, r, claims)
 	if !ok {
 		return

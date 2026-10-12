@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/luckylhb90/bnbloc/core/pkgmeta"
+	"github.com/luckylhb90/bnbloc/internal/auth"
 	"github.com/luckylhb90/bnbloc/internal/httpx"
 	"github.com/luckylhb90/bnbloc/internal/obs"
 	"github.com/luckylhb90/bnbloc/internal/store"
@@ -26,31 +27,21 @@ type trustedKeyRecord struct {
 	trustedKeyView
 }
 
-func (s *Service) handleComponentTrustedKeys(w http.ResponseWriter, r *http.Request) {
-	claims, ok := s.requireSuperAdminClaims(w, r)
-	if !ok {
+func (s *Service) handleListComponentTrustedKeys(w http.ResponseWriter, r *http.Request, _ auth.Claims) {
+	keys, err := loadTrustedKeyRecords(r.Context(), s.PlatformSettings)
+	if err != nil {
+		obs.ServerError(w, "load trusted keys failed", err)
+		httpx.Error(w, "load trusted keys failed", http.StatusInternalServerError)
 		return
 	}
-	switch r.Method {
-	case http.MethodGet:
-		keys, err := loadTrustedKeyRecords(r.Context(), s.PlatformSettings)
-		if err != nil {
-			obs.ServerError(w, "load trusted keys failed", err)
-			httpx.Error(w, "load trusted keys failed", http.StatusInternalServerError)
-			return
-		}
-		// signatureRequired tells the publishing UI whether this gateway
-		// refuses unsigned packages, so it demands a signature exactly when
-		// the install would (the runtime decision, not a client guess).
-		httpx.WriteJSON(w, http.StatusOK, map[string]any{"keys": keys, "signatureRequired": !s.AllowExtUnsigned})
-	case http.MethodPost:
-		s.addComponentTrustedKey(w, r, claims.Subject)
-	default:
-		httpx.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-	}
+	// signatureRequired tells the publishing UI whether this gateway
+	// refuses unsigned packages, so it demands a signature exactly when
+	// the install would (the runtime decision, not a client guess).
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"keys": keys, "signatureRequired": !s.AllowExtUnsigned})
 }
 
-func (s *Service) addComponentTrustedKey(w http.ResponseWriter, r *http.Request, actor string) {
+func (s *Service) handleAddComponentTrustedKey(w http.ResponseWriter, r *http.Request, claims auth.Claims) {
+	actor := claims.Subject
 	var body struct {
 		PublicKey string `json:"publicKey"`
 		Label     string `json:"label"`
@@ -92,11 +83,7 @@ func (s *Service) addComponentTrustedKey(w http.ResponseWriter, r *http.Request,
 	httpx.WriteJSON(w, http.StatusOK, record.trustedKeyView)
 }
 
-func (s *Service) handleDeleteComponentTrustedKey(w http.ResponseWriter, r *http.Request) {
-	claims, ok := s.requireSuperAdminClaims(w, r)
-	if !ok {
-		return
-	}
+func (s *Service) handleDeleteComponentTrustedKey(w http.ResponseWriter, r *http.Request, claims auth.Claims) {
 	keyID := strings.TrimSpace(r.PathValue("keyId"))
 	existing, err := loadTrustedKeyRecords(r.Context(), s.PlatformSettings)
 	if err != nil {

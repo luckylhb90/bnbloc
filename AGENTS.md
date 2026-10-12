@@ -374,6 +374,21 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   `TestJobGrantHonoredOrRefused` fails on a route without a mode). The
   artifact download resolves the same actor, so a `?room=` detail's bundle
   URLs download with the same `?room=`.
+- **Every gateway-served route is a row of the route table**
+  (`services/gateway/routes.go`): its org permission (`member` = any
+  member, `gated(perm)`), the rate budget a call spends (`costBudget` per
+  subject, `guessBudget` per client IP), the deployment parts it needs
+  (`needContent`, … → 503) or, for a route without a session, why
+  (`open`: the credential its handler checks). `serve` authenticates and
+  gates before the handler runs, and the proxy's `edgeGate` uses the same
+  `permitted`/`spend`; a handler receives `claims` and never authenticates
+  or checks a route permission itself (`TestEveryGatewayRouteGated` walks
+  the table as a viewer, an org admin and a member;
+  `TestHandlersNeverAuthenticate`). The one suspended-tenant gate is
+  `tenantClosed`, the one tenant-membership read `memberRole`, the one
+  session-error mapping `writeSessionErr` (suspended/not a member 403,
+  rejected refresh 401). The gateway's one live room-membership source is
+  `Service.Membership` (`roomMember`, a cached `membership.RoomClient`).
 - **Every session bearer is minted by `mintSession`** (`session.go`): sign-in,
   refresh, fork, tenant switch, API-token exchange, `MintAdminToken`
   (`TestSessionsMintedOnlyByMintSession`). A tenant switch persists on the

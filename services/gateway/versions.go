@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/luckylhb90/bnbloc/internal/auth"
 	"github.com/luckylhb90/bnbloc/internal/buildinfo"
 	"github.com/luckylhb90/bnbloc/internal/httpx"
 	"github.com/luckylhb90/bnbloc/internal/wire"
@@ -41,10 +42,7 @@ var versionClient = &http.Client{
 	}(),
 }
 
-func (s *Service) handlePlatformVersions(w http.ResponseWriter, r *http.Request) {
-	if !s.requireSuperAdmin(w, r) {
-		return
-	}
+func (s *Service) handlePlatformVersions(w http.ResponseWriter, r *http.Request, claims auth.Claims) {
 	httpx.WriteJSON(w, http.StatusOK, s.deploymentVersions(r.Context()))
 }
 

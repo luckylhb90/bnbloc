@@ -2392,8 +2392,9 @@ func (b *Bridge) gatewayAuth(ctx context.Context) string {
 		var ge *gatewayError
 		if errors.As(err, &ge) {
 			slog.Warn("bnbloc bridge could not mint an owner session", "event", "bnbloc.bridge.session_failed", "path", path, "status", ge.Status)
-			if path == "/v1/auth/refresh" && ge.Status == http.StatusUnauthorized {
-				// Our family is revoked or expired; a retry can never succeed.
+			if path == "/v1/auth/refresh" && (ge.Status == http.StatusUnauthorized || ge.Status == http.StatusForbidden) {
+				// Our family is revoked or expired, or its tenant suspended; a
+				// retry can never succeed.
 				b.refreshTok = ""
 			}
 		}

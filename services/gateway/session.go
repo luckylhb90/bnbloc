@@ -129,7 +129,7 @@ func (s *Service) resolveSession(identity auth.Identity) (sessionScope, error) {
 // to its members; a platform super-admin is exempt (they must still reach
 // the suspended org to re-activate it).
 func (s *Service) landIn(subject, tenantID, role string) (sessionScope, error) {
-	if s.TenantSuspended != nil && !rbac.Can(role, rbac.PermManagePlatform) && s.TenantSuspended(tenantID) {
+	if s.tenantClosed(tenantID, role) {
 		return sessionScope{}, errTenantSuspended
 	}
 	rooms := []string{}
@@ -139,6 +139,12 @@ func (s *Service) landIn(subject, tenantID, role string) (sessionScope, error) {
 		}
 	}
 	return sessionScope{Tenant: tenantID, Role: role, Rooms: rooms}, nil
+}
+
+// tenantClosed is the one suspended-tenant gate: a suspended tenant is
+// closed to a member holding role there; a platform super admin is exempt.
+func (s *Service) tenantClosed(tenantID, role string) bool {
+	return s.TenantSuspended != nil && !rbac.Can(role, rbac.PermManagePlatform) && s.TenantSuspended(tenantID)
 }
 
 // errNotTenantMember refuses a switch into a tenant the caller does not
@@ -154,16 +160,27 @@ var errSwitchUnavailable = errors.New("tenant switching not available")
 func (s *Service) switchScope(claims auth.Claims, target string) (sessionScope, error) {
 	role := claims.Role
 	if !rbac.Can(claims.Role, rbac.PermManagePlatform) {
-		if s.TenantMemberRole == nil {
-			return sessionScope{}, errSwitchUnavailable
-		}
-		r, ok := s.TenantMemberRole(target, claims.Subject)
-		if !ok {
-			return sessionScope{}, errNotTenantMember
+		r, err := s.memberRole(target, claims.Subject)
+		if err != nil {
+			return sessionScope{}, err
 		}
 		role = r
 	}
 	return s.landIn(claims.Subject, target, role)
+}
+
+// memberRole is subject's org role in tenantID from the tenant directory:
+// errNotTenantMember when they do not belong to it, errSwitchUnavailable
+// without a directory (fail closed). It never provisions a membership.
+func (s *Service) memberRole(tenantID, subject string) (string, error) {
+	if s.TenantMemberRole == nil {
+		return "", errSwitchUnavailable
+	}
+	role, ok := s.TenantMemberRole(tenantID, subject)
+	if !ok {
+		return "", errNotTenantMember
+	}
+	return role, nil
 }
 
 // mintSession is the ONE way a session bearer is minted, for every path that
@@ -312,13 +329,20 @@ func (s *Service) useRefreshToken(ctx context.Context, raw string, rotate bool) 
 	return fam, identity, scope, nil
 }
 
-// writeRefreshError maps a refresh failure onto its status.
-func writeRefreshError(w http.ResponseWriter, err error) {
+// writeSessionErr answers a failure to issue a session — a sign-in, a
+// refresh or fork, an SSO hand-off, an API-token exchange, a tenant
+// switch: the one mapping of the session errors. A suspended tenant and a
+// tenant the caller does not belong to are 403 everywhere (a client
+// treats a 401 or 403 refresh as the end of the sign-in); a rejected
+// refresh token is 401.
+func writeSessionErr(w http.ResponseWriter, err error) {
 	switch {
-	case errors.Is(err, errTenantSuspended):
-		httpx.Error(w, "tenant suspended", http.StatusUnauthorized)
+	case errors.Is(err, errTenantSuspended), errors.Is(err, errNotTenantMember):
+		httpx.Error(w, err.Error(), http.StatusForbidden)
 	case errors.Is(err, errRefreshRejected):
-		httpx.Error(w, errRefreshRejected.Error(), http.StatusUnauthorized)
+		httpx.Error(w, err.Error(), http.StatusUnauthorized)
+	case errors.Is(err, errSwitchUnavailable):
+		httpx.Unavailable(w, "tenant switching")
 	default:
 		obs.ServerError(w, "session issue failed", err)
 		httpx.Error(w, "session issue failed", http.StatusInternalServerError)
@@ -357,7 +381,7 @@ func (s *Service) handleRefresh(w http.ResponseWriter, r *http.Request) {
 	}
 	fam, _, scope, err := s.useRefreshToken(r.Context(), body.RefreshToken, true)
 	if err != nil {
-		writeRefreshError(w, err)
+		writeSessionErr(w, err)
 		return
 	}
 	httpx.WriteJSON(w, http.StatusOK, s.grantFor(fam, scope))
@@ -376,7 +400,7 @@ func (s *Service) handleRefreshFork(w http.ResponseWriter, r *http.Request) {
 	}
 	parent, identity, scope, err := s.useRefreshToken(r.Context(), body.RefreshToken, false)
 	if err != nil {
-		writeRefreshError(w, err)
+		writeSessionErr(w, err)
 		return
 	}
 	// The fork remembers its parent so the member's session list nests the
@@ -386,7 +410,7 @@ func (s *Service) handleRefreshFork(w http.ResponseWriter, r *http.Request) {
 	origin.Parent = parent.FamilyID
 	grant, err := s.openFamily(r.Context(), identity, scope, origin)
 	if err != nil {
-		writeRefreshError(w, err)
+		writeSessionErr(w, err)
 		return
 	}
 	httpx.WriteJSON(w, http.StatusOK, grant)
@@ -433,12 +457,7 @@ type mySession struct {
 }
 
 // handleMySessions lists the caller's active refresh families.
-func (s *Service) handleMySessions(w http.ResponseWriter, r *http.Request) {
-	claims, err := s.authenticate(r)
-	if err != nil {
-		httpx.Error(w, "unauthorized", http.StatusUnauthorized)
-		return
-	}
+func (s *Service) handleMySessions(w http.ResponseWriter, r *http.Request, claims auth.Claims) {
 	fams, err := s.refreshTokens().ListRefreshFamilies(r.Context(), claims.Subject, s.nowTime().UnixMilli())
 	if err != nil {
 		obs.ServerError(w, "list sessions failed", err)
@@ -461,12 +480,7 @@ func (s *Service) handleMySessions(w http.ResponseWriter, r *http.Request) {
 // forked from it (the device's agent bridge). The family's session bearers
 // stay valid until they expire (at most SessionTTL); it can no longer be
 // refreshed.
-func (s *Service) handleRevokeMySession(w http.ResponseWriter, r *http.Request) {
-	claims, err := s.authenticate(r)
-	if err != nil {
-		httpx.Error(w, "unauthorized", http.StatusUnauthorized)
-		return
-	}
+func (s *Service) handleRevokeMySession(w http.ResponseWriter, r *http.Request, claims auth.Claims) {
 	id := r.PathValue("id")
 	revoked, err := s.refreshTokens().RevokeRefreshFamily(r.Context(), claims.Subject, id, s.nowTime().UnixMilli())
 	if err != nil {
@@ -494,12 +508,7 @@ func (s *Service) handleRevokeMySession(w http.ResponseWriter, r *http.Request) 
 // from and the sessions forked from it (this device's own agent bridge). The
 // explicit others=1 guards against a bare DELETE reading as "revoke all".
 // Answers {"revoked": n}.
-func (s *Service) handleRevokeOtherSessions(w http.ResponseWriter, r *http.Request) {
-	claims, err := s.authenticate(r)
-	if err != nil {
-		httpx.Error(w, "unauthorized", http.StatusUnauthorized)
-		return
-	}
+func (s *Service) handleRevokeOtherSessions(w http.ResponseWriter, r *http.Request, claims auth.Claims) {
 	if r.URL.Query().Get("others") != "1" {
 		httpx.Error(w, "others=1 required", http.StatusBadRequest)
 		return

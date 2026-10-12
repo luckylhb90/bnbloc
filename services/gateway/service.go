@@ -201,74 +201,11 @@ func (s *Service) Handler() http.Handler {
 	}
 	s.corePipeline()
 	mux := http.NewServeMux()
-	mux.HandleFunc("POST /v1/auth/login", s.handleLogin)
-	mux.HandleFunc("POST /v1/auth/refresh", s.handleRefresh)
-	mux.HandleFunc("POST /v1/auth/refresh/fork", s.handleRefreshFork)
-	mux.HandleFunc("POST /v1/auth/logout", s.handleLogout)
-	mux.HandleFunc("GET /v1/my/sessions", s.handleMySessions)
-	mux.HandleFunc("DELETE /v1/my/sessions/{id}", s.handleRevokeMySession)
-	mux.HandleFunc("DELETE /v1/my/sessions", s.handleRevokeOtherSessions)
-	mux.HandleFunc("POST /v1/auth/switch-tenant", s.handleSwitchTenant)
-	mux.HandleFunc("POST /v1/local-agent/run", s.handleLocalAgentRun)
-	mux.HandleFunc("GET /v1/local-agent/targets", s.handleLocalAgentTargets)
-	mux.HandleFunc("GET /v1/local-agent/discover", s.handleLocalAgentDiscover)
-	mux.HandleFunc("GET /v1/cores", s.handleCores)
-	mux.HandleFunc("GET /v1/cores/{name}/artifact", s.handleCoreArtifact)
-	// Member component surface: the rollout-filtered catalog + opt-in installs.
-	mux.HandleFunc("GET /v1/components", s.handleComponents)
-	mux.HandleFunc("POST /v1/components/{name}/install", s.handleComponentInstall)
-	mux.HandleFunc("DELETE /v1/components/{name}/install", s.handleComponentUninstall)
-	mux.HandleFunc("GET /v1/app/update/{target}/{currentVersion}", s.handleAppUpdate)
-	mux.HandleFunc("GET /v1/app/update-policy", s.handleUpdatePolicy)
-	mux.HandleFunc("GET /v1/platform/update-config", s.handlePlatformUpdateConfig)
-	mux.HandleFunc("PUT /v1/platform/update-config", s.handlePlatformUpdateConfigPut)
-	mux.HandleFunc("GET /v1/platform/components", s.handlePlatformComponents)
-	mux.HandleFunc("POST /v1/platform/components", s.handlePlatformComponents)
-	mux.HandleFunc("DELETE /v1/platform/components/{name}", s.handleUninstallComponent)
-	mux.HandleFunc("PUT /v1/platform/components/{name}/tenants", s.handleSetComponentTenants)
-	mux.HandleFunc("PUT /v1/platform/components/{name}/rollout", s.handleSetComponentRollout)
-	mux.HandleFunc("POST /v1/platform/components/{name}/secret/rotate", s.handleRotateComponentSecret)
-	mux.HandleFunc("POST /v1/platform/components/{name}/test", s.handleTestComponent)
-	// The console's MCP tool form: a draft in, the package JSON to sign out.
-	mux.HandleFunc("POST /v1/platform/mcp-packages", s.handleBuildMCPPackage)
-	// A notifier's signed reply on a member's behalf (no session: the
-	// component's signing secret authenticates it).
-	mux.HandleFunc("POST /v1/notifier/replies", s.handleNotifierReply)
-	mux.HandleFunc("POST /v1/notifier/reply-refs", s.handleNotifierReplyRef)
-	mux.HandleFunc("GET /v1/platform/component-keys", s.handleComponentTrustedKeys)
-	mux.HandleFunc("POST /v1/platform/component-keys", s.handleComponentTrustedKeys)
-	mux.HandleFunc("DELETE /v1/platform/component-keys/{keyId}", s.handleDeleteComponentTrustedKey)
-	mux.HandleFunc("GET /v1/platform/artifacts", s.handleArtifactCapability)
-	mux.HandleFunc("POST /v1/platform/artifacts", s.handleArtifactUpload)
-	mux.HandleFunc("GET /v1/artifacts/{key...}", s.handleArtifactDownload)
-	mux.HandleFunc("GET /v1/previewers/{name}/{version}/{ticket}/{path...}", s.handlePreviewerFile)
-	// Site snapshots (sites.go) and public share links (public_shares.go):
-	// tickets and share tokens travel in the path, never a session.
-	mux.HandleFunc("POST /v1/rooms/{roomId}/artifacts/{artifactId}/versions/{version}/site-ticket", s.handleSiteTicket)
-	mux.HandleFunc("POST /v1/rooms/{roomId}/attachments/{attachmentId}/ticket", s.handleAttachmentTicket)
-	mux.HandleFunc("GET /v1/sites/{ticket}", s.handleSiteRootRedirect)
-	mux.HandleFunc("GET /v1/sites/{ticket}/{path...}", s.handleMemberSite)
-	mux.HandleFunc("GET /v1/public/shares/{token}", s.handlePublicShare)
-	mux.HandleFunc("GET /v1/public/shares/{token}/content", s.handlePublicShareContent)
-	mux.HandleFunc("GET /v1/public/shares/{token}/site", s.handleSiteRootRedirect)
-	mux.HandleFunc("GET /v1/public/shares/{token}/site/{path...}", s.handlePublicShareSite)
-	mux.HandleFunc("GET /v1/app/releases", s.handleAppReleases)
-	mux.HandleFunc("GET /v1/platform/app-releases", s.handlePlatformReleases)
-	mux.HandleFunc("PUT /v1/platform/app-releases/meta", s.handlePlatformReleaseMetaPut)
-	mux.HandleFunc("PUT /v1/platform/app-releases/{version}", s.handlePlatformReleasePut)
-	mux.HandleFunc("DELETE /v1/platform/app-releases/{version}", s.handlePlatformReleaseDelete)
-	mux.HandleFunc("GET /v1/platform/versions", s.handlePlatformVersions)
-	mux.HandleFunc("GET /v1/tenant/mcp-connectors", s.handleListMCPConnectors)
-	mux.HandleFunc("PUT /v1/tenant/mcp-connectors/{name}", s.handlePutMCPConnector)
-	mux.HandleFunc("DELETE /v1/tenant/mcp-connectors/{name}", s.handleDeleteMCPConnector)
-	s.registerContentComponents(mux)
-	s.registerContentPrompts(mux)
-	s.registerContentSharing(mux)
-	s.registerContentReview(mux)
-	s.registerContentPlatform(mux)
-	s.registerAPITokens(mux)
-	s.registerSSO(mux)
-	s.registerOrgSync(mux)
+	// Every route the gateway serves itself, with its edge policy
+	// (routes.go).
+	for _, rt := range s.routes() {
+		mux.HandleFunc(rt.pattern, s.serve(rt))
+	}
 	// API traffic is authenticated and proxied to the owning backend.
 	mux.HandleFunc("/v1/", s.handleProxy)
 	// Everything else serves the collaboration web client when configured; the
@@ -309,12 +246,7 @@ func (s *Service) defaultCore() *coreset.Entry {
 // and management UI. It is a read of the gateway's own state (no backend, no
 // room scope) but requires a valid session like other reads. "available" means
 // the gateway has a configured core entry whose endpoint resolved.
-func (s *Service) handleCores(w http.ResponseWriter, r *http.Request) {
-	claims, err := s.authenticate(r)
-	if err != nil {
-		httpx.Error(w, "unauthorized", http.StatusUnauthorized)
-		return
-	}
+func (s *Service) handleCores(w http.ResponseWriter, r *http.Request, claims auth.Claims) {
 	view, err := s.loadMemberComponents(r.Context(), claims)
 	if err != nil {
 		obs.ServerError(w, "load components failed", err)
@@ -443,13 +375,6 @@ type loginBody struct {
 // handleLogin exchanges a verified IdP token for a signed bnbloc session token
 // carrying the subject and current room memberships.
 func (s *Service) handleLogin(w http.ResponseWriter, r *http.Request) {
-	// Login is unauthenticated: there is no trusted subject yet (keying on the
-	// claimed identity would let anyone lock a victim out), so the guess
-	// throttle is keyed on the client IP.
-	if !s.guessAllow("ip:" + s.clientIP(r)) {
-		httpx.Error(w, "rate limit exceeded", http.StatusTooManyRequests)
-		return
-	}
 	var body loginBody
 	if !httpx.DecodeJSON(w, r, maxAuthBodyBytes, &body) {
 		return
@@ -460,13 +385,8 @@ func (s *Service) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	grant, err := s.issueSession(r.Context(), identity, originFor(r, body.Client, clientWeb))
-	if errors.Is(err, errTenantSuspended) {
-		httpx.Error(w, "tenant suspended", http.StatusForbidden)
-		return
-	}
 	if err != nil {
-		obs.ServerError(w, "session issue failed", err)
-		httpx.Error(w, "session issue failed", http.StatusInternalServerError)
+		writeSessionErr(w, err)
 		return
 	}
 	httpx.WriteJSON(w, http.StatusOK, grant)
@@ -485,12 +405,7 @@ type switchTenantBody struct {
 // they are a member of (switchScope). The choice persists on the session's
 // refresh family (its tenant hint), so a refresh, and a bridge or CLI
 // session forked from it, land in the switched tenant too.
-func (s *Service) handleSwitchTenant(w http.ResponseWriter, r *http.Request) {
-	claims, err := s.authenticate(r)
-	if err != nil {
-		httpx.Error(w, "unauthorized", http.StatusUnauthorized)
-		return
-	}
+func (s *Service) handleSwitchTenant(w http.ResponseWriter, r *http.Request, claims auth.Claims) {
 	var body switchTenantBody
 	if !httpx.DecodeJSON(w, r, maxAuthBodyBytes, &body) {
 		return
@@ -501,13 +416,8 @@ func (s *Service) handleSwitchTenant(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	scope, err := s.switchScope(claims, target)
-	switch {
-	case errors.Is(err, errNotTenantMember), errors.Is(err, errTenantSuspended):
-		httpx.Error(w, err.Error(), http.StatusForbidden)
-		return
-	case err != nil:
-		obs.ServerError(w, "tenant switch failed", err)
-		httpx.Error(w, err.Error(), http.StatusServiceUnavailable)
+	if err != nil {
+		writeSessionErr(w, err)
 		return
 	}
 	now := s.nowTime()
@@ -602,16 +512,14 @@ func (s *Service) handleProxy(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// edgeGate applies the coarse org RBAC and rate-limit policy of a request
-// (requiredPermission, rateLimited): the proxy's, and every route the
-// gateway serves itself that creates or drives (POST /v1/local-agent/run).
-// It answers 403/429 itself.
+// edgeGate applies the coarse org RBAC and rate-limit policy of a proxied
+// request (requiredPermission, rateLimited) through the route table's own
+// checks (permitted, spend). It answers 403/429 itself.
 func (s *Service) edgeGate(w http.ResponseWriter, r *http.Request, p apiPath, claims auth.Claims) bool {
 	// A viewer is read-only, so a cost-bearing or org-admin write is refused
 	// at the edge before it reaches a backend. Room-role checks
 	// (owner/admin/member) remain the room/shareagent services' job.
-	if perm := requiredPermission(r.Method, p); perm != rbac.PermRead && !rbac.Can(claims.Role, perm) {
-		httpx.Error(w, "insufficient org role", http.StatusForbidden)
+	if !s.permitted(w, claims, requiredPermission(r.Method, p)) {
 		return false
 	}
 	// Invite redemption is authenticated, so the code-guessing throttle is keyed
@@ -624,11 +532,11 @@ func (s *Service) edgeGate(w http.ResponseWriter, r *http.Request, p apiPath, cl
 	// Throttle cost-bearing writes (chat, borrow, room creation) per subject
 	// so a client cannot spam messages or drive unbounded agent turns.
 	// Reads/SSE are never limited.
-	if rateLimited(r.Method, p) && !s.rateAllow(claims.Subject) {
-		httpx.Error(w, "rate limit exceeded", http.StatusTooManyRequests)
-		return false
+	budget := noBudget
+	if rateLimited(r.Method, p) {
+		budget = costBudget
 	}
-	return true
+	return s.spend(w, claims, budget)
 }
 
 // proxyClaims authenticates a proxied request: a valid session token, acting

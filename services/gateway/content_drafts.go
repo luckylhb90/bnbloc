@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 
+	"github.com/luckylhb90/bnbloc/internal/auth"
 	"github.com/luckylhb90/bnbloc/internal/contentpkg"
 	"github.com/luckylhb90/bnbloc/internal/httpx"
 	"github.com/luckylhb90/bnbloc/internal/ids"
@@ -25,8 +26,8 @@ import (
 // created, so no Library or listing ever shows a draft.
 
 // handleStageContentDraft serves POST /v1/content-drafts?job=&room=.
-func (s *Service) handleStageContentDraft(w http.ResponseWriter, r *http.Request) {
-	actor, ok := s.contentCaller(w, r, true, grantHonored)
+func (s *Service) handleStageContentDraft(w http.ResponseWriter, r *http.Request, caller auth.Claims) {
+	actor, ok := s.contentCaller(w, r, caller, grantHonored)
 	if !ok {
 		return
 	}

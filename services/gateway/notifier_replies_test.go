@@ -15,6 +15,7 @@ import (
 	"github.com/luckylhb90/bnbloc/core/pkgmeta"
 	"github.com/luckylhb90/bnbloc/internal/membership"
 	"github.com/luckylhb90/bnbloc/internal/notify"
+	"github.com/luckylhb90/bnbloc/internal/rbac"
 	"github.com/luckylhb90/bnbloc/internal/realtime"
 	"github.com/luckylhb90/bnbloc/internal/store"
 	"github.com/luckylhb90/bnbloc/internal/svcauth"
@@ -101,6 +102,10 @@ func newReplyFixture(t *testing.T) *replyFixture {
 	rtSrv := httptest.NewServer(svcauth.Middleware(svcauth.KeyFromEnv(), rt.Handler()))
 	t.Cleanup(rtSrv.Close)
 	svc.Backends.Realtime = rtSrv.URL
+	// alice is a member of tenant home (the reply checks her org role).
+	svc.TenantMemberRole = func(tenantID, userID string) (string, bool) {
+		return string(rbac.RoleMember), tenantID == "home" && userID == "alice"
+	}
 	replies := store.NewMemoryNotificationReplies()
 	svc.NotifierReplies = replies
 	f.tokens = &notify.ReplyTokens{Store: replies, Now: svc.nowTime}

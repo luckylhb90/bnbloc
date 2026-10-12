@@ -287,7 +287,7 @@ func (c *client) refresh() (*sessionGrant, error) {
 	if err != nil {
 		return nil, fmt.Errorf("refresh stored sign-in: %w", err)
 	}
-	if status == http.StatusUnauthorized || status == http.StatusBadRequest {
+	if status == http.StatusUnauthorized || status == http.StatusForbidden || status == http.StatusBadRequest {
 		return nil, errNotSignedIn(c.cfg.Gateway, "the stored sign-in was refused (expired, revoked, or the tenant is suspended)")
 	}
 	if status != http.StatusOK {

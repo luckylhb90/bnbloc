@@ -40,32 +40,6 @@ import (
 // the author, source_id the author's component) is created or moved
 // forward to it. Members keep using it until a newer request is approved.
 
-func (s *Service) registerContentReview(mux *http.ServeMux) {
-	mux.HandleFunc("GET /v1/tenant/content-requests", s.handleListContentRequests)
-	mux.HandleFunc("GET /v1/tenant/content-requests/{id}", s.handleReviewContentRequest)
-	mux.HandleFunc("POST /v1/tenant/content-requests/{id}/approve", s.handleApproveContentRequest)
-	mux.HandleFunc("POST /v1/tenant/content-requests/{id}/decline", s.handleDeclineContentRequest)
-	mux.HandleFunc("GET /v1/tenant/content-components", s.handleListOrgContent)
-	mux.HandleFunc("POST /v1/tenant/content-components/{id}/unpublish", s.handleOrgContentStatus(store.ContentStatusRetired))
-	mux.HandleFunc("POST /v1/tenant/content-components/{id}/restore", s.handleOrgContentStatus(store.ContentStatusActive))
-	mux.HandleFunc("DELETE /v1/tenant/content-components/{id}", s.handleRemoveOrgContent)
-}
-
-// contentAdmin authenticates an org admin content request (orgAdmin) with
-// the content store configured.
-func (s *Service) contentAdmin(w http.ResponseWriter, r *http.Request) (auth.Claims, bool) {
-	claims, ok := s.orgAdmin(w, r)
-	if !ok {
-		return auth.Claims{}, false
-	}
-	if s.ContentComponents == nil {
-		obs.ServerError(w, "content components unavailable", nil)
-		httpx.Error(w, "content components unavailable", http.StatusServiceUnavailable)
-		return auth.Claims{}, false
-	}
-	return claims, true
-}
-
 // approvedVersion is the version an organization uses now of an author's
 // component ("" when unpublished or never approved).
 func (s *Service) approvedVersion(ctx context.Context, tenantID, kind, sourceID string) (string, error) {
@@ -76,11 +50,7 @@ func (s *Service) approvedVersion(ctx context.Context, tenantID, kind, sourceID 
 	return org.LatestVersion, nil
 }
 
-func (s *Service) handleListContentRequests(w http.ResponseWriter, r *http.Request) {
-	claims, ok := s.contentAdmin(w, r)
-	if !ok {
-		return
-	}
+func (s *Service) handleListContentRequests(w http.ResponseWriter, r *http.Request, claims auth.Claims) {
 	ctx := r.Context()
 	q := store.ContentRequestQuery{TenantID: claims.Tenant, Status: store.ContentRequestPending}
 	switch status := r.URL.Query().Get("status"); status {
@@ -157,11 +127,7 @@ func (s *Service) requestedVersion(w http.ResponseWriter, r *http.Request, req s
 // requested version's declared permissions, requirements (MCP tools
 // included), roster and skills; the files that execute; and the changes
 // from the version the organization uses now.
-func (s *Service) handleReviewContentRequest(w http.ResponseWriter, r *http.Request) {
-	claims, ok := s.contentAdmin(w, r)
-	if !ok {
-		return
-	}
+func (s *Service) handleReviewContentRequest(w http.ResponseWriter, r *http.Request, claims auth.Claims) {
 	ctx := r.Context()
 	req, ok := s.orgRequest(w, r, claims)
 	if !ok {
@@ -373,28 +339,18 @@ func (s *Service) orgPublish(ctx context.Context, src store.ContentComponent, v 
 	return store.ContentComponent{}, fmt.Errorf("publish %s: organization copy changed concurrently", src.ID)
 }
 
-func (s *Service) handleApproveContentRequest(w http.ResponseWriter, r *http.Request) {
-	s.decideContentRequest(w, r, store.ContentRequestApproved)
-}
-
-func (s *Service) handleDeclineContentRequest(w http.ResponseWriter, r *http.Request) {
-	s.decideContentRequest(w, r, store.ContentRequestDeclined)
-}
-
 // decideContentRequest approves (publishing the version) or declines a
 // pending request of the admin's organization, with a note for its author.
 // The decision is claimed first (one decision per request); an approval
 // whose publication then fails is reopened, never left approved with no
 // effect.
-func (s *Service) decideContentRequest(w http.ResponseWriter, r *http.Request, status store.ContentRequestStatus) {
-	claims, ok := s.contentAdmin(w, r)
-	if !ok {
-		return
+func (s *Service) decideContentRequest(status store.ContentRequestStatus) sessionHandler {
+	return func(w http.ResponseWriter, r *http.Request, claims auth.Claims) {
+		s.decideContent(w, r, claims, status)
 	}
-	if !s.rateAllow(claims.Subject) {
-		httpx.Error(w, "rate limit exceeded", http.StatusTooManyRequests)
-		return
-	}
+}
+
+func (s *Service) decideContent(w http.ResponseWriter, r *http.Request, claims auth.Claims, status store.ContentRequestStatus) {
 	ctx := r.Context()
 	req, ok := s.orgRequest(w, r, claims)
 	if !ok {
@@ -492,11 +448,7 @@ func noteSuffix(note string) string {
 
 // handleListOrgContent lists the organization's published content (any
 // status) for its admins.
-func (s *Service) handleListOrgContent(w http.ResponseWriter, r *http.Request) {
-	claims, ok := s.contentAdmin(w, r)
-	if !ok {
-		return
-	}
+func (s *Service) handleListOrgContent(w http.ResponseWriter, r *http.Request, claims auth.Claims) {
 	ctx := r.Context()
 	comps, err := s.ContentComponents.ListContentComponents(ctx, store.ContentComponentQuery{TenantID: claims.Tenant, Scopes: []store.ContentScope{store.ContentScopeOrg}})
 	if err != nil {
@@ -544,12 +496,8 @@ func (s *Service) orgContent(w http.ResponseWriter, r *http.Request, claims auth
 // handleOrgContentStatus unpublishes (retired: hidden from the Library and
 // new use; rooms that pinned it keep their version) or restores an
 // organization component.
-func (s *Service) handleOrgContentStatus(status store.ContentStatus) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		claims, ok := s.contentAdmin(w, r)
-		if !ok {
-			return
-		}
+func (s *Service) handleOrgContentStatus(status store.ContentStatus) sessionHandler {
+	return func(w http.ResponseWriter, r *http.Request, claims auth.Claims) {
 		c, ok := s.orgContent(w, r, claims)
 		if !ok {
 			return
@@ -574,11 +522,7 @@ func (s *Service) setContentStatus(w http.ResponseWriter, r *http.Request, claim
 
 // handleRemoveOrgContent deletes an organization component with its
 // versions and uses (rooms lose it). The author keeps their own.
-func (s *Service) handleRemoveOrgContent(w http.ResponseWriter, r *http.Request) {
-	claims, ok := s.contentAdmin(w, r)
-	if !ok {
-		return
-	}
+func (s *Service) handleRemoveOrgContent(w http.ResponseWriter, r *http.Request, claims auth.Claims) {
 	c, ok := s.orgContent(w, r, claims)
 	if !ok {
 		return

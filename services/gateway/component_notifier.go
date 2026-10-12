@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/luckylhb90/bnbloc/internal/auth"
 	"github.com/luckylhb90/bnbloc/internal/extgov"
 	"github.com/luckylhb90/bnbloc/internal/extpipe"
 	"github.com/luckylhb90/bnbloc/internal/extreg"
@@ -95,11 +96,7 @@ func (s *Service) requestNotifierRecord(w http.ResponseWriter, r *http.Request) 
 // returns the new one once (POST /v1/platform/components/{name}/secret/rotate).
 // The receiver accepts a comma list of secrets, so an operator adds the new
 // one beside the old before removing it.
-func (s *Service) handleRotateComponentSecret(w http.ResponseWriter, r *http.Request) {
-	claims, ok := s.requireSuperAdminClaims(w, r)
-	if !ok {
-		return
-	}
+func (s *Service) handleRotateComponentSecret(w http.ResponseWriter, r *http.Request, claims auth.Claims) {
 	rec, ok := s.requestNotifierRecord(w, r)
 	if !ok {
 		return
@@ -117,11 +114,7 @@ func (s *Service) handleRotateComponentSecret(w http.ResponseWriter, r *http.Req
 // handleTestComponent sends one signed test notification through a notifier
 // to the calling super-admin and reports the notifier's answer
 // (POST /v1/platform/components/{name}/test).
-func (s *Service) handleTestComponent(w http.ResponseWriter, r *http.Request) {
-	claims, ok := s.requireSuperAdminClaims(w, r)
-	if !ok {
-		return
-	}
+func (s *Service) handleTestComponent(w http.ResponseWriter, r *http.Request, claims auth.Claims) {
 	rec, ok := s.requestNotifierRecord(w, r)
 	if !ok {
 		return

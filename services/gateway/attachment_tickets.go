@@ -34,12 +34,7 @@ func attachmentTicketScope(roomID, attachmentID string) string {
 // {url: "/v1/rooms/{roomId}/attachments/{attachmentId}?ticket=…",
 // expiresAtMs}. The caller must reach the room; whether the attachment
 // exists and the caller is still a member is decided when it is read.
-func (s *Service) handleAttachmentTicket(w http.ResponseWriter, r *http.Request) {
-	claims, err := s.authenticate(r)
-	if err != nil {
-		httpx.Error(w, "unauthorized", http.StatusUnauthorized)
-		return
-	}
+func (s *Service) handleAttachmentTicket(w http.ResponseWriter, r *http.Request, claims auth.Claims) {
 	roomID, attachmentID := r.PathValue("roomId"), r.PathValue("attachmentId")
 	if roomctx.ValidateID(roomID) != nil || attachmentID == "" || strings.Contains(attachmentID, "/") {
 		httpx.Error(w, "invalid attachment path", http.StatusBadRequest)

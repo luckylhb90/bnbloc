@@ -6,6 +6,7 @@ import (
 
 	"github.com/luckylhb90/bnbloc/core/pkgmeta"
 	"github.com/luckylhb90/bnbloc/core/protocol"
+	"github.com/luckylhb90/bnbloc/internal/auth"
 	"github.com/luckylhb90/bnbloc/internal/contentpkg"
 	"github.com/luckylhb90/bnbloc/internal/extpipe"
 	"github.com/luckylhb90/bnbloc/internal/extreg"
@@ -51,12 +52,7 @@ type componentInfo struct {
 	MCP *mcpCatalogInfo `json:"mcp,omitempty"`
 }
 
-func (s *Service) handleComponents(w http.ResponseWriter, r *http.Request) {
-	claims, err := s.authenticate(r)
-	if err != nil {
-		httpx.Error(w, "unauthorized", http.StatusUnauthorized)
-		return
-	}
+func (s *Service) handleComponents(w http.ResponseWriter, r *http.Request, claims auth.Claims) {
 	recs, err := s.corePipeline().List(r.Context(), "")
 	if err != nil {
 		obs.ServerError(w, "load components failed", err)
@@ -178,12 +174,7 @@ func contentKindFilter(kind string) string {
 	return ""
 }
 
-func (s *Service) handleComponentInstall(w http.ResponseWriter, r *http.Request) {
-	claims, err := s.authenticate(r)
-	if err != nil {
-		httpx.Error(w, "unauthorized", http.StatusUnauthorized)
-		return
-	}
+func (s *Service) handleComponentInstall(w http.ResponseWriter, r *http.Request, claims auth.Claims) {
 	if s.ComponentInstalls == nil {
 		obs.ServerError(w, "component installs unavailable", nil)
 		httpx.Error(w, "component installs unavailable", http.StatusServiceUnavailable)
@@ -219,12 +210,7 @@ func (s *Service) handleComponentInstall(w http.ResponseWriter, r *http.Request)
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func (s *Service) handleComponentUninstall(w http.ResponseWriter, r *http.Request) {
-	claims, err := s.authenticate(r)
-	if err != nil {
-		httpx.Error(w, "unauthorized", http.StatusUnauthorized)
-		return
-	}
+func (s *Service) handleComponentUninstall(w http.ResponseWriter, r *http.Request, claims auth.Claims) {
 	if s.ComponentInstalls == nil {
 		obs.ServerError(w, "component installs unavailable", nil)
 		httpx.Error(w, "component installs unavailable", http.StatusServiceUnavailable)

@@ -9,8 +9,6 @@ import (
 	"github.com/luckylhb90/bnbloc/internal/auth"
 	"github.com/luckylhb90/bnbloc/internal/contentpkg"
 	"github.com/luckylhb90/bnbloc/internal/httpx"
-	"github.com/luckylhb90/bnbloc/internal/obs"
-	"github.com/luckylhb90/bnbloc/internal/rbac"
 	"github.com/luckylhb90/bnbloc/internal/store"
 	"github.com/luckylhb90/bnbloc/internal/tenant"
 	"github.com/luckylhb90/bnbloc/internal/wire"
@@ -143,16 +141,11 @@ func (s *Service) contentGrant(r *http.Request, caller auth.Claims) (contentActo
 	return contentActor{Claims: acting, Room: roomID, Job: &job, Bridge: caller.Subject}, nil
 }
 
-// contentCaller authenticates a content request and resolves its actor
-// (contentGrant) under the route's grant mode; write needs a caller role
-// that may drive agents (viewers are read-only) and spends the caller's
-// rate budget. It answers 400/401/403/404/409/503 itself.
-func (s *Service) contentCaller(w http.ResponseWriter, r *http.Request, write bool, grant jobGrant) (contentActor, bool) {
-	caller, err := s.authenticate(r)
-	if err != nil {
-		httpx.Error(w, "unauthorized", http.StatusUnauthorized)
-		return contentActor{}, false
-	}
+// contentCaller resolves a content request's actor (contentGrant) under the
+// route's grant mode. The route table has already authenticated the caller,
+// applied the route's org permission and rate budget, and checked the
+// content store. It answers 400/403/404/409/503 itself.
+func (s *Service) contentCaller(w http.ResponseWriter, r *http.Request, caller auth.Claims, grant jobGrant) (contentActor, bool) {
 	if grant == grantRefused && strings.TrimSpace(r.URL.Query().Get("job")) != "" {
 		httpx.Error(w, "this content action is never taken on behalf of a job", http.StatusBadRequest)
 		return contentActor{}, false
@@ -161,21 +154,6 @@ func (s *Service) contentCaller(w http.ResponseWriter, r *http.Request, write bo
 	if err != nil {
 		writeGrantErr(w, err)
 		return contentActor{}, false
-	}
-	if s.ContentComponents == nil {
-		obs.ServerError(w, "content components unavailable", nil)
-		httpx.Error(w, "content components unavailable", http.StatusServiceUnavailable)
-		return contentActor{}, false
-	}
-	if write {
-		if !rbac.Can(caller.Role, rbac.PermDriveAgent) {
-			httpx.Error(w, "insufficient org role", http.StatusForbidden)
-			return contentActor{}, false
-		}
-		if !s.rateAllow(caller.Subject) {
-			httpx.Error(w, "rate limit exceeded", http.StatusTooManyRequests)
-			return contentActor{}, false
-		}
 	}
 	return actor, true
 }

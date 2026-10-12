@@ -120,7 +120,6 @@ func TestContentTeamAndUsageCounts(t *testing.T) {
 // every change of the room's uses is announced to the room.
 func TestContentRoomExpert(t *testing.T) {
 	g := newContentGateway(t)
-	g.svc.limiter.get(1000, 1000, nil) // more writes than one member's chat burst
 	events := captureRoomEvents(t, g)
 	house := g.create("maya", map[string]any{"kind": "expert", "name": "house-style", "instructions": "Write plainly."})
 	other := g.create("maya", map[string]any{"kind": "expert", "name": "other", "instructions": "Other."})

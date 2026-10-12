@@ -38,19 +38,14 @@ const (
 	maxSavePromptBytes = 64 << 10
 )
 
-func (s *Service) registerContentPrompts(mux *http.ServeMux) {
-	mux.HandleFunc("POST /v1/content-components/prompts", s.handleSavePrompt)
-	mux.HandleFunc("POST /v1/content-components/{id}/prompts/{promptId}/use", s.handlePromptUse)
-}
-
 // errPromptPackRaced: another save moved the personal pack meanwhile.
 var errPromptPackRaced = errors.New("prompt pack changed while saving")
 
 // handleSavePrompt appends a prompt to the caller's personal prompt pack
 // as a new version, creating the pack (and turning it on for the caller)
 // on the first save. Placeholders in the body become variables.
-func (s *Service) handleSavePrompt(w http.ResponseWriter, r *http.Request) {
-	actor, ok := s.contentCaller(w, r, true, grantHonored)
+func (s *Service) handleSavePrompt(w http.ResponseWriter, r *http.Request, caller auth.Claims) {
+	actor, ok := s.contentCaller(w, r, caller, grantHonored)
 	if !ok {
 		return
 	}
@@ -192,8 +187,8 @@ func (s *Service) savePrompt(ctx context.Context, claims auth.Claims, req wire.S
 // calls it once per insertion). The caller must be able to read the pack:
 // visible to them, or turned on in a room of theirs (?room=); the prompt
 // must be in its latest version or the one named (?version=, a room pin).
-func (s *Service) handlePromptUse(w http.ResponseWriter, r *http.Request) {
-	actor, ok := s.contentCaller(w, r, false, grantHonored)
+func (s *Service) handlePromptUse(w http.ResponseWriter, r *http.Request, caller auth.Claims) {
+	actor, ok := s.contentCaller(w, r, caller, grantHonored)
 	if !ok {
 		return
 	}

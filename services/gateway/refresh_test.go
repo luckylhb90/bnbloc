@@ -88,7 +88,7 @@ func TestRefreshRefusesSuspendedTenant(t *testing.T) {
 	var g sessionGrant
 	_ = json.Unmarshal(raw, &g)
 	suspended = true
-	if resp, _ := postJSON(t, srv.URL+"/v1/auth/refresh", map[string]string{"refreshToken": g.RefreshToken}); resp.StatusCode != http.StatusUnauthorized {
-		t.Fatalf("refresh into suspended tenant = %d, want 401", resp.StatusCode)
+	if resp, _ := postJSON(t, srv.URL+"/v1/auth/refresh", map[string]string{"refreshToken": g.RefreshToken}); resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("refresh into suspended tenant = %d, want 403", resp.StatusCode)
 	}
 }

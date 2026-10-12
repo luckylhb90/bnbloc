@@ -15,10 +15,12 @@ import (
 	"time"
 
 	"github.com/luckylhb90/bnbloc/core/pkgmeta"
+	"github.com/luckylhb90/bnbloc/internal/auth"
 	"github.com/luckylhb90/bnbloc/internal/contentbuiltin"
 	"github.com/luckylhb90/bnbloc/internal/extpipe"
 	"github.com/luckylhb90/bnbloc/internal/httpx"
 	"github.com/luckylhb90/bnbloc/internal/obs"
+	"github.com/luckylhb90/bnbloc/internal/rbac"
 	"github.com/luckylhb90/bnbloc/internal/realtime"
 	"github.com/luckylhb90/bnbloc/internal/svcauth"
 )
@@ -33,11 +35,7 @@ type artifactCapability struct {
 	Backend string `json:"backend"`
 }
 
-func (s *Service) handleArtifactCapability(w http.ResponseWriter, r *http.Request) {
-	claims, ok := s.requireSuperAdminClaims(w, r)
-	if !ok {
-		return
-	}
+func (s *Service) handleArtifactCapability(w http.ResponseWriter, r *http.Request, claims auth.Claims) {
 	base := strings.TrimRight(s.Backends.Realtime, "/")
 	if base == "" {
 		httpx.Unavailable(w, "artifact store")
@@ -65,11 +63,7 @@ func (s *Service) handleArtifactCapability(w http.ResponseWriter, r *http.Reques
 // and never buffers the bytes: it is a signed streaming reverse-proxy. Used by
 // `bnbloc cores publish-sidecar` to stage each platform's sidecar binary before
 // assembling the signed core package.
-func (s *Service) handleArtifactUpload(w http.ResponseWriter, r *http.Request) {
-	claims, ok := s.requireSuperAdminClaims(w, r)
-	if !ok {
-		return
-	}
+func (s *Service) handleArtifactUpload(w http.ResponseWriter, r *http.Request, claims auth.Claims) {
 	base := strings.TrimRight(s.Backends.Realtime, "/")
 	if base == "" {
 		httpx.Unavailable(w, "artifact store")
@@ -97,12 +91,7 @@ func (s *Service) handleArtifactUpload(w http.ResponseWriter, r *http.Request) {
 // (artifactEntitled); everything else is a 404, indistinguishable from a
 // missing key. The sha256 in the key plus the client-side pin against the
 // signed package remains the integrity gate.
-func (s *Service) handleArtifactDownload(w http.ResponseWriter, r *http.Request) {
-	claims, err := s.authenticate(r)
-	if err != nil {
-		httpx.Error(w, "unauthorized", http.StatusUnauthorized)
-		return
-	}
+func (s *Service) handleArtifactDownload(w http.ResponseWriter, r *http.Request, claims auth.Claims) {
 	key := strings.TrimPrefix(r.PathValue("key"), "/")
 	// A content bundle named with ?room= or ?job=&room= resolves its actor
 	// exactly as the Library route that listed it (contentGrant). A refused
@@ -234,7 +223,7 @@ func (s *Service) artifactEntitled(ctx context.Context, actor contentActor, key 
 		return false, nil
 	}
 	claims := actor.Claims
-	if isSuperAdminRole(claims.Role) {
+	if rbac.Can(claims.Role, rbac.PermManagePlatform) {
 		return true, nil
 	}
 	view, err := s.loadMemberComponents(ctx, claims)

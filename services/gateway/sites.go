@@ -96,12 +96,7 @@ func parseSiteTicketScope(id string) (roomID, artifactID string, version int, ok
 // → {siteUrl: "/v1/sites/<ticket>/", expiresAtMs}. The caller must be a room
 // member (the edge room scope, then the room service's own read check while
 // the version is fetched) and the version a site snapshot.
-func (s *Service) handleSiteTicket(w http.ResponseWriter, r *http.Request) {
-	claims, err := s.authenticate(r)
-	if err != nil {
-		httpx.Error(w, "unauthorized", http.StatusUnauthorized)
-		return
-	}
+func (s *Service) handleSiteTicket(w http.ResponseWriter, r *http.Request, claims auth.Claims) {
 	roomID, artifactID := r.PathValue("roomId"), r.PathValue("artifactId")
 	version, err := strconv.Atoi(r.PathValue("version"))
 	if roomctx.ValidateID(roomID) != nil || artifactID == "" || strings.Contains(artifactID, "/") || err != nil || version <= 0 {
