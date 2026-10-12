@@ -20,12 +20,19 @@ type pullGateway struct {
 	mu        sync.Mutex
 	history   map[string]string // channel -> rows json (pre-rendered pages)
 	artifacts string
-	srv       *httptest.Server
+	// versions / runs answer an artifact version and a run record by
+	// "<artifactId>/<version>" and job id; library is the granted member
+	// catalog, libraryQueries the query of each catalog read.
+	versions       map[string]string
+	runs           map[string]string
+	library        string
+	libraryQueries []string
+	srv            *httptest.Server
 }
 
 func newPullGateway(t *testing.T) *pullGateway {
 	t.Helper()
-	g := &pullGateway{history: map[string]string{}}
+	g := &pullGateway{history: map[string]string{}, versions: map[string]string{}, runs: map[string]string{}}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /v1/rooms/r1/channels", func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprint(w, `{"channels":[{"channelId":"general"},{"channelId":"test"}]}`)
@@ -49,6 +56,36 @@ func newPullGateway(t *testing.T) *pullGateway {
 		g.mu.Lock()
 		defer g.mu.Unlock()
 		fmt.Fprint(w, g.artifacts)
+	})
+	mux.HandleFunc("GET /v1/rooms/r1/artifacts/{id}/versions/{v}", func(w http.ResponseWriter, r *http.Request) {
+		g.mu.Lock()
+		defer g.mu.Unlock()
+		body, ok := g.versions[r.PathValue("id")+"/"+r.PathValue("v")]
+		if !ok {
+			http.NotFound(w, r)
+			return
+		}
+		fmt.Fprint(w, body)
+	})
+	mux.HandleFunc("GET /v1/rooms/r1/jobs/{job}", func(w http.ResponseWriter, r *http.Request) {
+		g.mu.Lock()
+		defer g.mu.Unlock()
+		body, ok := g.runs[r.PathValue("job")]
+		if !ok {
+			http.NotFound(w, r)
+			return
+		}
+		fmt.Fprint(w, body)
+	})
+	mux.HandleFunc("GET /v1/components", func(w http.ResponseWriter, r *http.Request) {
+		g.mu.Lock()
+		defer g.mu.Unlock()
+		g.libraryQueries = append(g.libraryQueries, r.URL.RawQuery)
+		if g.library == "" {
+			http.NotFound(w, r)
+			return
+		}
+		fmt.Fprint(w, g.library)
 	})
 	mux.HandleFunc("POST /v1/rooms/r1/agent-activity/session-state", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -117,7 +154,12 @@ func TestDriveClaimPullWritesRoomFilesAndPointerPrompt(t *testing.T) {
 	g.setHistory("general", []int64{1, 3}, map[int64]string{1: "first in general", 3: "third in general"})
 	g.setHistory("test", []int64{2, 4}, map[int64]string{2: "first in test", 4: "second in test"})
 	g.mu.Lock()
-	g.artifacts = `{"artifacts":[{"title":"Spec","kind":"markdown","currentVersion":2,"createdBy":"maya"}]}`
+	// The draft another agent (maya/opencode on core acme) published from its
+	// own workspace, and an expert it saved to the requester's Library.
+	g.artifacts = `{"artifacts":[{"artifactId":"artf_draft","title":"drafts/weekly-report-assistant/component.json","kind":"code","currentVersion":2,"createdBy":"maya"}]}`
+	g.versions["artf_draft/2"] = `{"version":{"artifactId":"artf_draft","version":2,"sourceJobId":"job-a","authorUserId":"maya"}}`
+	g.runs["job-a"] = `{"jobId":"job-a","agent":{"owner":"maya","core":"acme","provider":"opencode"}}`
+	g.library = `{"components":[],"contentComponents":[{"id":"cc_1","kind":"expert","name":"weekly-report-assistant","scope":"personal","latestVersion":"1.0.0","mine":true,"updatedAtMs":1760260000000}]}`
 	g.mu.Unlock()
 
 	prov := &fakeCoreProvider{url: g.srv.URL}
@@ -140,19 +182,39 @@ func TestDriveClaimPullWritesRoomFilesAndPointerPrompt(t *testing.T) {
 	if writes[len(writes)-1] != ".room/INDEX.md" {
 		t.Fatalf("INDEX must be written last, got order %v", writes)
 	}
-	var sawChunk, sawRecent, sawArtifacts bool
+	var sawChunk, sawRecent bool
 	for _, w := range writes {
 		switch {
 		case strings.HasPrefix(w, ".room/chunk-"):
 			sawChunk = true
 		case w == ".room/recent.md":
 			sawRecent = true
-		case w == ".room/artifacts.md":
-			sawArtifacts = true
 		}
 	}
-	if !sawChunk || !sawRecent || !sawArtifacts {
+	if !sawChunk || !sawRecent {
 		t.Fatalf("missing .room files: %v", writes)
+	}
+	// The records: the room model, each deliverable with the agent that
+	// produced it (not a file of this workspace), the requester's Library
+	// read with the job's grant.
+	written := map[string]string{}
+	for _, w := range prov.roomFileWrites() {
+		written[w.path] = w.content
+	}
+	for file, want := range map[string]string{
+		".room/README.md":    "Every agent works in its own workspace",
+		".room/artifacts.md": "drafts/weekly-report-assistant/component.json (code) v2, id artf_draft: from maya/opencode on core acme, in that agent's workspace; NOT in this workspace",
+		".room/library.md":   "weekly-report-assistant · expert · v1.0.0 · personal, theirs",
+	} {
+		if !strings.Contains(written[file], want) {
+			t.Errorf("%s lacks %q:\n%s", file, want, written[file])
+		}
+	}
+	g.mu.Lock()
+	queries := append([]string(nil), g.libraryQueries...)
+	g.mu.Unlock()
+	if len(queries) != 1 || queries[0] != "job=job-x&room=r1" {
+		t.Errorf("Library reads = %q, want one with the job's grant", queries)
 	}
 
 	prompts := prov.recordedPrompts()
@@ -160,7 +222,7 @@ func TestDriveClaimPullWritesRoomFilesAndPointerPrompt(t *testing.T) {
 		t.Fatal("no session prompt recorded")
 	}
 	prompt := prompts[0]
-	if !strings.Contains(prompt, ".room/INDEX.md") || !strings.Contains(prompt, "write hello.rs") {
+	if !strings.Contains(prompt, ".room/INDEX.md") || !strings.Contains(prompt, ".room/README.md") || !strings.Contains(prompt, "write hello.rs") {
 		t.Fatalf("pointer prompt malformed:\n%s", prompt)
 	}
 	// The whole point: history must NOT be in the prompt.
@@ -261,7 +323,7 @@ func TestMaterializeDropsCurrentInstructionFromRecords(t *testing.T) {
 	if !ok {
 		t.Fatal("fake provider must satisfy WorkspaceFileWriter")
 	}
-	_, err := b.materializeRoomContext(context.Background(), w, ep, "r1", "ws", "create final_check.rs: print done", "maya/agent-a", true, roomlog.CtxState{})
+	_, err := b.materializeRoomContext(context.Background(), w, ep, "r1", "ws", "job-x", "create final_check.rs: print done", roomlog.Producer{Owner: "maya", Provider: "agent-a"}, true, roomlog.CtxState{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -321,7 +383,7 @@ func TestMaterializeSelfFilterIsSessionBounded(t *testing.T) {
 	g.setHistory("test", []int64{}, nil)
 	g.addAgentRow("test", 12, "maya", "opencode", "peer agent answers")
 	b, w, ep, prov := newBridge(g)
-	st, err := b.materializeRoomContext(context.Background(), w, ep, "r1", "ws", "", "maya/agent-a", true, roomlog.CtxState{})
+	st, err := b.materializeRoomContext(context.Background(), w, ep, "r1", "ws", "job-x", "", roomlog.Producer{Owner: "maya", Provider: "agent-a"}, true, roomlog.CtxState{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -347,7 +409,7 @@ func TestMaterializeSelfFilterIsSessionBounded(t *testing.T) {
 	g2.addChatRow("test", 14, "jack", "new person line")
 	b2, w2, ep2, prov2 := newBridge(g2)
 	st2 := roomlog.CtxState{EndSeq: 12, Chunks: []string{".room/chunk-x.md"}, SelfAfterSeq: 12}
-	if _, err := b2.materializeRoomContext(context.Background(), w2, ep2, "r1", "ws", "", "maya/agent-a", false, st2); err != nil {
+	if _, err := b2.materializeRoomContext(context.Background(), w2, ep2, "r1", "ws", "job-x", "", roomlog.Producer{Owner: "maya", Provider: "agent-a"}, false, st2); err != nil {
 		t.Fatal(err)
 	}
 	recent2 := recentOf(prov2)

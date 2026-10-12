@@ -179,7 +179,10 @@ type Bridge struct {
 	// summarizer condenses conversation older than the verbatim window (L1). The
 	// default is deterministic and model-free; a configurable LLM-backed
 	// summarizer can replace it later behind the same interface.
-	summarizer  roomlog.Summarizer
+	summarizer roomlog.Summarizer
+	// producers caches who produced each deliverable version .room/
+	// artifacts.md lists (roomlog.ReadDeliverables).
+	producers   roomlog.ProducerCache
 	windowChars int // per-drive verbatim recent-turns budget (chars)
 	recentRows  int // how many recent feed rows to pull before layering
 

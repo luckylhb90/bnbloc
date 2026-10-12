@@ -3,6 +3,9 @@
   "paths": [
     {"path": ".room/INDEX.md", "protected": true, "writable": true},
     {"path": ".room/attachments/a.png", "protected": true, "writable": true},
+    {"path": ".room/README.md", "protected": true, "writable": true},
+    {"path": ".room/artifacts.md", "protected": true, "writable": true},
+    {"path": ".room/library.md", "protected": true, "writable": true},
     {"path": "./.room/chunk-1.md", "protected": true},
     {"path": "CLAUDE.md", "protected": true, "writable": true},
     {"path": "AGENTS.md", "protected": true, "writable": true},

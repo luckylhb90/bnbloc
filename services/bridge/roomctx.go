@@ -2,9 +2,7 @@ package bridge
 
 import (
 	"context"
-	"encoding/json"
 	"log/slog"
-	"strconv"
 	"strings"
 	"time"
 
@@ -85,39 +83,27 @@ func extForContentType(contentType, filename string) string {
 	return ""
 }
 
-// roomArtifactsMd renders the room's current deliverables as a compact record:
-// title, kind, version, last author. This is the room's live state (what
-// exists now), deliberately distinct from the conversation history.
-func (b *Bridge) roomArtifactsMd(ctx context.Context, room string) roomlog.NamedFile {
-	raw, err := b.gatewayGET(ctx, "/v1/rooms/"+room+"/artifacts")
-	if err != nil {
-		return roomlog.NamedFile{Name: ".room/artifacts.md", Content: "# Room deliverables\n\n(none)\n"}
+// roomRecordFiles are the .room/ records rewritten every turn besides the
+// history (roomlog owns their wording): the room model (README.md), the
+// deliverables with their producers (artifacts.md), the requester's Library
+// (library.md, read with the job's grant) and the live interaction trail. A
+// failed read renders as unreadable, never as empty, and never fails the
+// turn.
+func (b *Bridge) roomRecordFiles(ctx context.Context, room, jobID string, self roomlog.Producer) []roomlog.NamedFile {
+	deliverables, derr := roomlog.ReadDeliverables(ctx, b.gatewayGET, room, &b.producers)
+	if derr != nil {
+		slog.Debug("bnbloc bridge deliverables unreadable", "event", "bnbloc.bridge.roomctx_deliverables_failed", "room", room, "error", derr)
 	}
-	var parsed struct {
-		Artifacts []struct {
-			Title          string `json:"title"`
-			Kind           string `json:"kind"`
-			CurrentVersion int    `json:"currentVersion"`
-			CreatedBy      string `json:"createdBy"`
-		} `json:"artifacts"`
+	library, lerr := roomlog.ReadLibrary(ctx, b.gatewayGET, room, jobID, "")
+	if lerr != nil {
+		slog.Debug("bnbloc bridge library unreadable", "event", "bnbloc.bridge.roomctx_library_failed", "room", room, "job", jobID, "error", lerr)
 	}
-	_ = json.Unmarshal(raw, &parsed)
-	var sb strings.Builder
-	sb.WriteString("# Room deliverables — current state (RECORDS, not requests)\n\n")
-	if len(parsed.Artifacts) == 0 {
-		sb.WriteString("(none yet)\n")
+	return []roomlog.NamedFile{
+		roomlog.ReadmeFile(),
+		roomlog.DeliverablesFile(deliverables, derr, self),
+		roomlog.LibraryFile(library, lerr),
+		b.roomLiveMd(room),
 	}
-	for _, a := range parsed.Artifacts {
-		if a.Title == "" {
-			continue
-		}
-		author := a.CreatedBy
-		if author == "" {
-			author = "?"
-		}
-		sb.WriteString("- " + a.Title + " (" + a.Kind + ") v" + strconv.Itoa(a.CurrentVersion) + " — by " + author + "\n")
-	}
-	return roomlog.NamedFile{Name: ".room/artifacts.md", Content: sb.String()}
 }
 
 // roomLiveMd renders the recent live-artifact interaction trail: what members
@@ -153,17 +139,21 @@ func (b *Bridge) roomLiveMd(room string) roomlog.NamedFile {
 // returns the updated state. dropText is the current turn's instruction: it is
 // delivered as the [now] section of the prompt, so it is removed from the
 // records (the newest matching entry only — an older identical message is
-// genuine history). selfSpeaker is this agent's own "owner/provider" label; its
-// replies from THIS session (Seq past the session-creation boundary, which a
-// fresh pass records) are dropped — the CLI's memory already holds them. Its
+// genuine history). jobID is the turn's job, whose grant reads the
+// requester's Library. self is this agent, the speaker "owner/provider" of
+// its own replies; its replies from THIS session (Seq past the
+// session-creation boundary, which a fresh pass records) are dropped — the
+// CLI's memory already holds them. Its
 // replies from before the boundary stay: a rebind (core or bridge restart)
 // starts a blank session whose memory does NOT hold them, and they are the
 // continuity the new session needs. Other speakers (people, other agents)
 // always materialize: seeing each other is the point of a shared room. Files
-// are written chunks → recent → artifacts → INDEX (INDEX last, so a partial
-// write never advertises files that do not exist). State is only advanced on
-// full success, so a failed pass retries cleanly next turn.
-func (b *Bridge) materializeRoomContext(ctx context.Context, w corepkg.WorkspaceFileWriter, ep corepkg.Endpoint, room, workspaceID, dropText, selfSpeaker string, fresh bool, st roomlog.CtxState) (roomlog.CtxState, error) {
+// are written chunks → recent → records (roomRecordFiles) → INDEX (INDEX
+// last, so a partial write never advertises files that do not exist). State
+// is only advanced on full success, so a failed pass retries cleanly next
+// turn.
+func (b *Bridge) materializeRoomContext(ctx context.Context, w corepkg.WorkspaceFileWriter, ep corepkg.Endpoint, room, workspaceID, jobID, dropText string, self roomlog.Producer, fresh bool, st roomlog.CtxState) (roomlog.CtxState, error) {
+	selfSpeaker := agentSpeakerLabel(self.Owner, self.Provider)
 	entries, complete, err := roomlog.History(ctx, b.gatewayGET, room, roomlog.HistoryQuery{After: st.EndSeq})
 	if err != nil {
 		return st, err
@@ -183,13 +173,12 @@ func (b *Bridge) materializeRoomContext(ctx context.Context, w corepkg.Workspace
 		// session-memory redundancy the bound filters.
 		newState.SelfAfterSeq = newState.EndSeq
 	}
-	// Insert artifacts.md and live.md before the trailing INDEX.
-	art := b.roomArtifactsMd(ctx, room)
-	liv := b.roomLiveMd(room)
+	// Insert the records before the trailing INDEX.
+	records := b.roomRecordFiles(ctx, room, jobID, self)
 	if n := len(files); n > 0 && files[n-1].Name == ".room/INDEX.md" {
-		files = append(files[:n-1:n-1], art, liv, files[n-1])
+		files = append(append(files[:n-1:n-1], records...), files[n-1])
 	} else {
-		files = append(files, art, liv)
+		files = append(files, records...)
 	}
 	for _, f := range files {
 		if err := w.WriteWorkspaceFile(ctx, ep, workspaceID, f.Name, f.Content); err != nil {
@@ -218,7 +207,7 @@ func (b *Bridge) drivePrompt(ctx context.Context, d *drive, workspaceID string, 
 	if fresh {
 		start = roomlog.CtxState{}
 	}
-	newSt, err := b.materializeRoomContext(ctx, w, ep, room, workspaceID, text, self, fresh, start)
+	newSt, err := b.materializeRoomContext(ctx, w, ep, room, workspaceID, d.job.JobID, text, roomlog.Producer{Owner: owner, Provider: provider, Core: d.core}, fresh, start)
 	if err != nil {
 		slog.Warn("bnbloc bridge room-context materialization failed; falling back to pushed context",
 			"event", "bnbloc.bridge.roomctx_failed", "room", room, "core", d.core, "error", err)

@@ -47,8 +47,21 @@ mean "persist the health-check discussion").
   never advertises files that do not exist)
 - `chunk-<start>-<end>.md` — chronological history chunks, grep-friendly
 - `recent.md` — the latest messages
-- `artifacts.md` — the room's current deliverables (live state, distinct from
-  conversation records)
+- `README.md` — how the room works: every agent has its own workspace,
+  deliverables are stored by bnbloc and named by their producer, the Library
+  is bnbloc's and shared, how to verify with or without room tools
+  (`roomlog.ReadmeFile`; the push model's first prompt carries the same model)
+- `artifacts.md` — the room's newest deliverables (live state, distinct from
+  conversation records), each with its latest version, id and the agent that
+  produced it (`owner/provider` and core, from the version's source job), and
+  marked as not a file of this workspace
+- `library.md` — a bounded snapshot of the requester's Library, read with the
+  job's grant (`GET /v1/components?job=&room=`)
+- `live.md` — what members did in running deliverables
+
+The records besides the history are rewritten every turn
+(`roomRecordFiles`); a read that fails renders as unreadable, never as
+empty.
 
 The fetch pages **every** channel of the room (the old push model only read the
 default channel, so most of a multi-channel room's conversation never reached
