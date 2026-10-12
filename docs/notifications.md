@@ -27,8 +27,8 @@ deliver them.
 | `test` | A super-admin or a member presses "Send test". | The caller only. | The caller. |
 | `admin_alert` | A super-admin (or an unattended job with a super-admin API token, e.g. the nightly smoke) sends an operational alert ([Admin alerts](#admin-alerts)). No room. | Exactly the listed recipients; default every platform super-admin. | The sender. |
 | `budget_warning` | A monthly usage budget crosses its warning threshold, then 100% — each once per month (R12, `docs/prd/2026-10-08-batch-3-reliability-and-scale.md`). No room; `url` opens Settings (member budget) or Team (organization budget) when `BNBLOC_PUBLIC_URL` is set on activity. | The member (member budget) or the organization's org admins (organization budget). | None. |
-| `content_shared` | An author shares an expert, skill pack or prompt pack with a member, or moves their copy to a newer version (`docs/prd/2026-10-12-experts-and-teams.md`, step 4). No room; `url` opens the Library. | Each recipient whose copy was created or updated. | The author. |
-| `content_review` | An author asks to publish a content component to the organization; an org admin approves or declines it. No room; `url` opens the Organization console (request) or the Library (decision). | The organization's org admins (request); the author (decision). | The author (request); the deciding admin (decision). |
+| `content_shared` | An author shares an expert, skill pack or prompt pack with a member, or moves their copy to a newer version (`docs/prd/2026-10-12-experts-and-teams.md`, step 4); also a member who joins a room with a standing room share and gets a copy then (realtime, "Gap closure" 2). One version notifies a member once. No room; `url` opens the Library. | Each recipient whose copy was created or updated. | The author. |
+| `content_review` | An author asks to publish a content component to the organization, or saves a new version of one the organization uses (the request opens by itself; the admins are notified only when no request was pending); an org admin approves or declines it. No room; `url` opens the Organization console (request) or the Library (decision). | The organization's org admins (request); the author (decision). | The author (request); the deciding admin (decision). |
 
 Rules applied before anything is queued (`admin_alert` and `budget_warning`
 are operational and skip the first three: they reach exactly their
@@ -167,11 +167,19 @@ own settings; `PUT` replaces the whole object):
   "agentFinished": true,
   "agentFailed": true,
   "borrowRequests": true,
+  "contentShared": true,
+  "contentReview": true,
   "quietRooms": ["room-a"]
 }
 ```
 
-A member who never saved preferences has everything on and no quiet rooms.
+One switch per type a member can turn off: `mentions`, `agentFinished`,
+`agentFailed`, `borrowRequests` (`borrow_request`), `contentShared`
+(`content_shared`) and `contentReview` (`content_review`, the requests an
+org admin reviews and the decisions on the member's own requests).
+A member who never saved preferences has everything on and no quiet rooms
+(the stored columns default on, so prefs saved before a switch existed
+keep it on).
 `quietRooms` (max 500) mutes every type for those rooms; the web client
 manages it from the room header's bell button.
 

@@ -1,7 +1,7 @@
 # Content components: experts, skill packs and prompt packs
 
 Design: [`docs/prd/2026-10-12-experts-and-teams.md`](../prd/2026-10-12-experts-and-teams.md)
-(delivery steps 1, 3 and 4). This is the durable reference for how content components
+(delivery steps 1, 3 and 4, and the "Gap closure"). This is the durable reference for how content components
 are stored, who may use them, how they are shared and published, how a turn
 wears them, and the HTTP surface.
 
@@ -39,7 +39,15 @@ uploads, imports, the bridge's materialization):
   only its variables, and that the package declares its transport's
   permission (`mcp.stdio`, or `mcp.http:<host>` of its URL). Reading stored
   content checks the syntax only, so a tool uninstalled later never makes
-  content invalid (use time reports it missing);
+  content invalid (use time reports it missing). The Library form edits
+  `requires.mcp`: the author picks from the MCP tools visible to them,
+  ticks the optional env names the content needs (required ones are always
+  needed), and the form derives the matching `mcp.stdio` /
+  `mcp.http:<host>` permissions from the picked tools (other declared
+  permissions are kept); the save check stays the authority. The expert
+  form also edits a quick prompt's `ref`: picking a prompt of a pack the
+  author can see adds the pack to `requires.prompts` (`name@^major`, an
+  existing range kept);
 - `SKILL.md` frontmatter must carry `name` (= the skill directory) and a
   `description` (the agent loads the skill from it).
 
@@ -69,7 +77,7 @@ A curated, versioned set of prompts with variables, used from the composer
 the stored manifest without fetching the bundle:
 
 ```
-prompts: [{id, title, body, variables: [{name, label?, default?, options?}], tags?, slash?: "/name"}]
+prompts: [{id, title, body, variables: [{name, label?, default?, options?}], tags?, slash?: "/name", starter?: true}]
 ```
 
 - **Validator.** At least one and at most 100 prompts; ids (`[a-z0-9-]`)
@@ -77,15 +85,16 @@ prompts: [{id, title, body, variables: [{name, label?, default?, options?}], tag
   line, ≤ 120) and a body (≤ 8000 characters); every `{{name}}` in a body
   (spaces inside the braces allowed; anything else between braces is
   literal text) is a declared variable and every declared variable is
-  used; options unique, a default one of them; tags as in the envelope.
-  Experts and skill packs refuse `prompts`.
+  used; options unique, a default one of them; tags as in the envelope;
+  `starter` is a flag. Experts and skill packs refuse `prompts`.
 - **Import.** A markdown file holds one prompt per `##` heading (per `#`
   heading when it has no `##`; a top `#` then names the pack and the text
   under it describes it; `id:`, `slash:` and `tags:` lines right under a
-  heading set those fields; headings in code fences do not split); a json
+  heading set those fields, and `starter: yes` flags a starter; headings
+  in code fences do not split); a json
   file is a list of prompts or `{name?, displayName?, description?,
   prompts}` (`prompt`/`content`/`text` and `command` are read as `body` and
-  `slash`). Placeholders are declared as variables (labels from their
+  `slash`; `starter` is read as is). Placeholders are declared as variables (labels from their
   names), unused declarations dropped, ids made from titles and made
   unique (`NormalizePrompts`).
 - **Uses.** Like every content kind: a member turns a pack on for
@@ -95,6 +104,12 @@ prompts: [{id, title, body, variables: [{name, label?, default?, options?}], tag
   a message that starts with `/word` lists matching slash commands, and a
   prompt with variables asks for them in a small form before its text is
   inserted.
+- **Starter prompts.** An empty room's starter prompts (above the composer)
+  lead with the prompts flagged `starter` in the packs turned on for the
+  room (at most 6, each pack once, in the room's order), then the generic
+  examples. The pack's author flags them; the room's owner chooses by
+  turning the pack on, so a room keeps no second list of its own. A member's
+  own packs add no starters.
 - **The personal pack.** "Save as prompt" on a message
   (`POST /v1/content-components/prompts`) appends the prompt to the
   member's own pack `my-prompts` ("My prompts") as a new version (patch
@@ -115,8 +130,11 @@ prompts: [{id, title, body, variables: [{name, label?, default?, options?}], tag
 ## Built-in content
 
 Some content ships with the release: today the **Expert builder**
-(`cc_builtin_expert-builder`), which authors experts and skill packs by
-conversation (PRD §5). It is a content source, not a second library:
+(`cc_builtin_expert-builder`, 1.1.0), which authors experts, skill packs and
+prompt packs by conversation (PRD §5): the Library's Experts, Skills and
+Prompts tabs open the workshop with "Create with AI" and "Improve with AI"
+(`views/library/workshopFlow.ts`), and its instructions carry one example
+package per kind, validated by the builder's test. It is a content source, not a second library:
 
 - **Source.** `internal/contentbuiltin` embeds package directories
   (`packages/<name>/`, the directory is the package name), packs each with
@@ -151,7 +169,15 @@ Tables (migration `2026_10_content_components`):
   fields, `source_id` (the author's component a shared copy or an org
   publication was made from) and `shared_by` (a copy's author; its owner is
   the recipient); `(tenant, scope, owner, kind, name, source_id)` is unique
-  (migration `2026_10_content_sharing`).
+  (migration `2026_10_content_sharing`). `enabled_tenants` limits platform
+  content to some organizations (JSON, NULL = every one; migration
+  `2026_10_content_platform_tenants`). `org_name` is an organization row's
+  name (NULL for every other scope) under `UNIQUE (tenant_id, kind,
+  org_name)`: an organization has one component of a kind and name
+  (migration `2026_10_content_org_names`, which kept the oldest of any
+  duplicates and unpublished the others; restoring one claims the name or
+  fails with `ErrContentOrgNameTaken`). An unpublished org row keeps its
+  name; removing it frees the name.
 - `content_component_versions`: immutable versions with `manifest_json`,
   `bundle_blob_key` + `sha256` (+ `signature` for platform-signed
   versions). A new version is appended only while `latest_version` is
@@ -172,6 +198,10 @@ Tables (migration `2026_10_content_components`):
 - `content_prompt_uses`: per-prompt insertion counts of prompt packs
   (migration `2026_10_prompt_packs`, which also dropped the former prompt
   library's `prompts` table).
+- `content_room_shares (room_id, component_id)`: an author's standing share
+  with a room (tenant, version, author, note), moved forward (never back)
+  by a later share, deleted by its revocation or with the component
+  (migration `2026_10_content_room_shares`).
 - `content_publish_requests`: requests to publish a version of an author's
   component to the organization (`pending` | `approved` | `declined` |
   `withdrawn`), with the note, the decision, its note and who took it;
@@ -196,7 +226,9 @@ of them holds it.
 (`GateForRecord`: platform scope, rollout + tenants + opt-in) and content
 (`GateForContent`): personal content and a shared copy are their owner's
 (a copy's recipient) in its tenant, org content its tenant's, platform
-content every tenant's; org and platform content take rollout auto (an
+content every tenant's it allows (`enabled_tenants`, the component tenant
+scope executable records carry, passed as the gate's `Tenants`); org and
+platform content take rollout auto (an
 approval or a signed install is the publication, and members opt in per
 use: an expert per message, a pack turned on; there is no second opt-in);
 retired (unpublished) content is hidden, pending content is its author's
@@ -216,7 +248,9 @@ Design: PRD §1 "Sources, scopes and trust" and "Status: step 4".
 - **Shared copies.** The author of a personal component shares a version
   (`POST …/{id}/shares {members?, roomId?, version?, note?}`) with named
   members of their organization or with a room (its human members at that
-  moment; the author must be one), at most 100 at a time. Each recipient
+  moment; the author must be one), at most 100 at a time. The copy rule
+  lives in `internal/contentshare` (`Copy`), shared by the gateway's share
+  route and realtime's member-join step. Each recipient
   gets a component of scope `shared` they own, with `source_id` = the
   author's component and `shared_by` = the author, whose versions are the
   author's version rows cloned onto the same bundles. A recipient's
@@ -227,6 +261,20 @@ Design: PRD §1 "Sources, scopes and trust" and "Status: step 4".
   The author's later edits and deletion do not change it. Why a copy and
   not a grant: every read path already handles an owned row, and a grant
   would die with the author's component.
+- **Room shares stand.** A share with a room is recorded
+  (`content_room_shares`; the reply's `room`); a member who joins the room
+  later gets a copy too. Every human join in bnbloc-room (add member, join a
+  shared room, redeem an invite, a template's default members; never a
+  re-role) publishes a transient `member_joined` room event (`{userId}`);
+  realtime's internal publish tap (`services/realtime/content_shares.go`)
+  hands the joiner a copy of each standing room share
+  (`contentshare.GrantRoomShares`: never the author's own, never a share
+  whose author is no longer a human member of the room, never a source that
+  is no longer its author's personal component), with the `content_shared`
+  notification (one per version per member) and a `share` audit row naming
+  the room. `GET …/{id}/shares` lists the room shares beside the copies;
+  the author revokes one with `DELETE …/{id}/shares/rooms/{room}` (audit
+  `unshare`): later joiners get nothing, existing copies stay.
 - **Trust follows the author.** `ContentComponent.Author()` (the copy's
   `shared_by`, else the owner) is the owner `contentuse.Ref` reports to the
   bridge, so someone else's script-bearing or stdio-MCP content forces the
@@ -247,7 +295,20 @@ Design: PRD §1 "Sources, scopes and trust" and "Status: step 4".
   (scope `org`, owner = the author, `source_id` = the author's component)
   to that version and makes it active; if that fails the request is
   reopened. Members use the org row's latest version, so they stay on the
-  approved one until a newer request is approved. Admins unpublish
+  approved one until a newer request is approved. **An organization has one
+  component of a kind and name** (`org_name`): `name@range` stays the
+  reference syntax everywhere and is never ambiguous between two authors'
+  org components. A request, or an approval, of a name another author's org
+  row holds (published or unpublished) is a 409 that says who holds it and
+  to rename (the author saves it under a new name); the store refuses the
+  clash as well (`ErrContentOrgNameTaken`). **A new version resubmits
+  itself:** when the author saves a new version (form, archive, import or
+  the room tools) of a component the organization uses (an active org row)
+  or with a request pending, the gateway opens the request for it (one
+  pending per component: it supersedes the older one; the admins are
+  notified only when none was pending) and the save's reply carries it as
+  `resubmitted`; the web tells the author, `save_component` tells the
+  agent. An unpublished or withdrawn publication is not resubmitted. Admins unpublish
   (`retired`: hidden from the Library and new use; rooms that pinned it
   keep their version), restore or remove it (rows and uses deleted); the
   author's `publish {scope: "personal"}` withdraws a pending request and
@@ -269,13 +330,20 @@ Design: PRD §1 "Sources, scopes and trust" and "Status: step 4".
   then creates or moves forward the platform row (no tenant, no owner) with
   the signature on the version. Reinstalling a version with the same bundle
   is a no-op; other content under an installed version is refused. Rollout
-  `off` installs it unpublished; `optin` is refused.
+  `off` installs it unpublished; `optin` is refused. **Tenant scope:** the
+  component route `PUT /v1/platform/components/{name}/tenants` limits a
+  platform row to some organizations with its fail-closed semantics (an
+  empty list is a 400, `{"allTenants": true}` lifts the limit, both is a
+  400); `?kind=expert|skill|prompt` picks platform content, and without a
+  kind a name held by both an executable record and platform content is a
+  409. The console's Platform content page edits it ("Organizations").
 - **Notifications** (the gateway's emitter): `content_shared` to each
   recipient whose copy was created or moved; `content_review` to the
   organization's admins for a request and to the author for the decision.
-- **Audit** (`extension_audit`, kind `content`): `share`, `update`,
-  `request` (naming the agent when the room tools asked), `approve`,
-  `decline`, `unpublish`, `restore`, `remove`, `install`.
+- **Audit** (`extension_audit`, kind `content`): `share` (also a copy given
+  on join), `unshare` (a room share revoked), `update`, `request` (naming
+  the agent when the room tools asked), `approve`, `decline`, `unpublish`,
+  `restore`, `remove`, `install`, `set-tenants`.
 
 ## How a turn wears it
 
@@ -406,6 +474,19 @@ tool by name and can never inline a command.
   `internal/endpointpkg`'s `Discover` hook) posts MCP's `initialize` and
   accepts a JSON-RPC answer or 401/403. Nothing runs server-side;
   activation registers nothing.
+- **Assembly.** `pkgmeta.PrepareMCP` (before any upload: the kind and
+  contract filled in, stdio needs at least one platform, an endpoint none)
+  and `pkgmeta.AssembleMCP` (the staged binaries pinned, then validated)
+  are the one MCP package assembly. `bnbloc cores publish-mcp` uses them
+  and so does the super-admin `POST /v1/platform/mcp-packages`, which the
+  console's "Build an MCP tool" form posts to: name, version, publisher,
+  tools, env (secret, required), credentials source, and either stdio
+  binaries per platform (staged through `POST /v1/platform/artifacts`,
+  sent as `artifacts: {<platform>: {key}}`) with `args`, or an http URL
+  with its auth and network hosts. The route answers the exact package
+  JSON to sign; signing stays offline (`bnbloc cores install --package
+  <file>` signs with the publisher key and installs, or a detached
+  signature goes with the file into Components → Publish).
 - **Credentials.** `mcp.env` declares the variables (names, secret,
   required, a description); `mcp.credentials` says where values come from:
   - `member`: each member enters them on their desktop (Settings → Tools),
@@ -482,8 +563,9 @@ store and the artifact entitlement). JSON shapes: `internal/wire/content_compone
 | `POST /v1/content-components/{id}/prompts/{promptId}/use[?room=&version=]` | Count one insertion of a pack's prompt (204) |
 | `GET /v1/content-components/{id}[?room=]` | Detail with versions (readable when visible, or used by a room of the caller's) |
 | `DELETE /v1/content-components/{id}` | Delete (the author's own, or a copy the caller holds) |
-| `POST /v1/content-components/{id}/shares` | `{members?, roomId?, version?, note?}`: copies for named members of the author's organization and/or a room's human members; `{version, shared: [{member, componentId, version, status: created\|updated\|unchanged}], skipped: [{member, reason}]}` (the author only) |
-| `GET /v1/content-components/{id}/shares` | The copies made from the author's component (`{copies: [{member, componentId, version, updatedAtMs}]}`) |
+| `POST /v1/content-components/{id}/shares` | `{members?, roomId?, version?, note?}`: copies for named members of the author's organization and/or a room's human members, and a standing room share; `{version, shared: [{member, componentId, version, status: created\|updated\|unchanged}], skipped: [{member, reason}], room?}` (the author only) |
+| `GET /v1/content-components/{id}/shares` | The copies made from the author's component and its room shares (`{copies: [{member, componentId, version, updatedAtMs}], rooms: [{roomId, version, note?, createdAtMs, updatedAtMs}]}`) |
+| `DELETE /v1/content-components/{id}/shares/rooms/{room}` | Revoke a room share: later joiners get no copy, existing copies stay (the author only; 404 when there is none) |
 | `POST /v1/content-components/{id}/update` | A shared copy moves to its author's latest version (its holder; 409 when the author no longer has it) |
 | `POST /v1/content-components/{id}/publish` | `{scope: org\|personal\|platform, version?, note?}`: `org` opens a publish request (201 `{scope, request, note}`); `personal` withdraws it and unpublishes the org row; `platform` is a 403 saying what a platform admin does (the author; with `?job=&room=` as the job's requester) |
 | `GET /v1/tenant/content-requests[?status=all]` | Org admins: publish requests of the organization (pending by default) with the approved version |
@@ -491,10 +573,11 @@ store and the artifact entitlement). JSON shapes: `internal/wire/content_compone
 | `POST /v1/tenant/content-requests/{id}/approve\|decline` | Org admins: `{note?}`; approve publishes the version to the organization |
 | `GET /v1/tenant/content-components` | Org admins: the organization's published content, any status |
 | `POST /v1/tenant/content-components/{id}/unpublish\|restore`, `DELETE /v1/tenant/content-components/{id}` | Org admins: unpublish, restore, remove |
-| `GET /v1/platform/content-components[?scope=platform\|org]` | Super admins: platform content and every organization's, any status |
+| `GET /v1/platform/content-components[?scope=platform\|org]` | Super admins: platform content and every organization's, any status (a platform row with its `enabledTenants`) |
+| `PUT /v1/platform/components/{name}/tenants?kind=expert\|skill\|prompt` | Super admins: `{enabledTenants: [...]}` or `{allTenants: true}` for platform content (the component tenant scope route) |
 | `GET /v1/platform/content-components/{id}/package[?version=&publisher=]` | Super admins: the signable package of a version (install it with `POST /v1/platform/components`) |
 | `POST /v1/platform/content-components/{id}/unpublish\|restore`, `DELETE /v1/platform/content-components/{id}` | Super admins: platform content |
-| `POST /v1/content-components/{id}/versions` | New immutable version: `{form, baseVersion, version?}` (the base's extra files carry over) or an archive; owner only; strictly newer |
+| `POST /v1/content-components/{id}/versions` | New immutable version: `{form, baseVersion, version?}` (the base's extra files carry over) or an archive; owner only; strictly newer. The detail carries `resubmitted` (the publish request it opened) when the organization uses the component |
 | `GET /v1/content-components/{id}/versions/{v}[?room=]` | The version: component as of it, instructions, skill bodies, files (text when viewable) |
 | `POST /v1/content-components/{id}/versions/{v}/ack[?room=]` | Confirm the version's declared permissions |
 | `GET /v1/content-uses[?room=]` | The caller's member uses and a room's uses, each with its component at the version in effect and `updateAvailable`; `roomExpert` names the room's expert |
@@ -510,7 +593,13 @@ store and the artifact entitlement). JSON shapes: `internal/wire/content_compone
 Every change of a room's uses (a pin, the room expert, a room pack)
 publishes a transient `content_uses_changed` room event (`{scope,
 componentId}`) through realtime's internal publish; the composer's experts
-and the room settings refetch the room's uses on it.
+and the room settings refetch the room's uses on it. A save or a publish
+request made on behalf of a job (the room tools) publishes a transient
+`content_saved` event in the job's room (`wire.ContentSaved`:
+`{componentId, kind, name, displayName?, version, action: saved|submitted,
+created?, owner}`); the member it was saved for gets the save toast ("Open
+in Library", "Try it now") from it. Nothing re-lists the Library to find a
+save.
 
 **Requests on behalf of a job's requester.** The room tools
 (`save_component`, `get_component`, `list_components`, `publish_component`;
@@ -532,8 +621,9 @@ publish is a `request` row naming the agent. No other route honors the
 grant (sharing and the admin routes never do).
 
 **Saving deliverables.** Without room tools the drafted files are ordinary
-deliverables: the web offers "Save as expert" / "Save as skill pack" under a
-turn's files when they include a `component.json` of a content kind, packs
+deliverables: the web offers "Save as expert" / "Save as skill pack" /
+"Save as prompt pack" under a turn's files when they include a
+`component.json` of a content kind, packs
 the room's latest files under that directory as a tar and calls
 `POST /v1/content-components` (or `…/{id}/versions` for one of the member's
 own) as the clicking member; the validator's message shows inline.

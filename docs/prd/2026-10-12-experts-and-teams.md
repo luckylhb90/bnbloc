@@ -1,9 +1,10 @@
 # Content components: experts, skill packs, prompt packs; room tools and expert teams
 
 Status: approved, in development (2026-10-12): steps 1 and 2 implemented,
-step 3 implemented, step 5 implemented for experts and skill packs, step 6
-expert teams and MCP tool components implemented, step 4 sharing and
-approval implemented (see "Status" below). Feasibility verified in code and by experiments (see
+step 3 implemented, step 5 implemented for experts and skill packs (prompt
+packs in the gap closure), step 6 expert teams and MCP tool components
+implemented, step 4 sharing and approval implemented, and the content gap
+closure implemented (see "Status" and "Gap closure" below). Feasibility verified in code and by experiments (see
 "Evidence").
 
 ## Why
@@ -575,7 +576,8 @@ Not yet verified in a browser against running services.
 from a pack; org-shared packs on the Plaza and in global search (the
 former library's shared prompts and search hits are gone until step 4's
 org scope); editing a quick prompt's `ref` in the expert form (it is kept,
-not edited).
+not edited). All closed: the Plaza and search by step 4, the rest by the
+gap closure (items 6, 7, 8).
 
 ## Status: step 5 (builder, experts and skill packs)
 
@@ -613,7 +615,9 @@ builder answers a sample task in the draft's role instead: an unsaved
 draft cannot be worn); org/platform publishing (step 4); a pushed "saved"
 event (the web learns of a save by re-listing the Library after each agent
 reply in the workshop); the workshop's web flows were not exercised in a
-real browser.
+real browser. Closed since: publishing by step 4; the builder for prompt
+packs and the pushed `content_saved` event by the gap closure (items 6,
+9).
 
 Scope of this pass: the builder for
 experts and skill packs (prompt packs follow step 3), "Create with AI" and
@@ -903,7 +907,8 @@ With the member settings removed, the next turn reported
 started a new session (the tool set changed) and still ran.
 
 **Open:** the Library form does not edit `requires.mcp` (it carries the
-entries over unchanged; packages and imports set them); an http tool's
+entries over unchanged; packages and imports set them; closed by the gap
+closure, item 8, which also adds the console's MCP form, item 10); an http tool's
 OAuth-style per-member sign-in is not modelled (a member's own token in
 Settings → Tools is); the desktop materializes on each catalog refresh
 (60 s), so a just-published tool is missing for up to a minute.
@@ -942,6 +947,7 @@ unpublished, none); org rows of two authors may share a name (requirements
 resolve to the highest satisfying version among them); the publish
 endpoint does not auto-open a request when an author saves a new version
 (the Library shows the version the organization uses beside the latest).
+All closed by the gap closure (items 1 to 5).
 
 **Closed elsewhere:** step 3's open "org-shared packs on the Plaza and in
 global search", and step 6's "a built-in expert is not yet a team member"
@@ -1030,9 +1036,49 @@ and in global search). Executable components are unchanged. Decisions:
 
 ## Gap closure (content features)
 
-**2026-10-12: recorded, in development.** The gaps the steps above left
-open for content components, closed through the existing seams. Runtime
-gaps (bridge, room tools, feed, desktop) are a separate pass. Decisions:
+**2026-10-12: implemented** (architecture:
+`docs/architecture/content-components.md`, `docs/notifications.md`). The
+gaps the steps above left open for content components, closed through the
+existing seams. Runtime gaps (bridge, room tools, feed, desktop) are a
+separate pass. Commits: c423914 (this record); 3e6ea8d, 58f4576 (1);
+ec4e3cb (store: room shares, platform tenants, org names); 60fa2f8
+(2: `internal/contentshare`, `member_joined`, realtime's join step);
+c3b7732 (3: the tenant scope in the visibility gate); 0f6ef00 (7: the
+`starter` flag); 6192ebe (6: Expert builder 1.1.0); d6fbaa4 (gateway: 2,
+3, 4, 5, 9); 32aa7a0, 74d8519 (room tools: the resubmission note);
+037628c, dfb08bf (10: `pkgmeta.PrepareMCP`/`AssembleMCP`,
+`POST /v1/platform/mcp-packages`); web: 583ff24 (2, 3, 5), ea7a55e (6),
+5fc77f4 (7), 5199753 (8), b1a373d (9), 566f249 (10).
+
+**Verified** by store tests (memory and MySQL 8.4, including the org name
+migration over a database holding two same-named org rows), `contentuse`,
+`contentpkg` and builder tests, realtime (a `member_joined` through the
+signed internal publish gives the joiner a copy; a revoked share or one
+whose author left gives none), room (every join path publishes
+`member_joined`, a re-role does not), gateway route tests (room share
+record, list and author-only revoke; platform tenant scope: authz, the
+fail-closed bodies, `?kind=`, a name in both registries is a 409, the
+Library of each organization follows it; a clashing name refused at
+request and at approval; resubmission on new versions, one pending and
+admins notified once; `content_saved` on granted saves and publishes
+only; the MCP package assembly route), room tools, CLI and web unit tests
+(`scripts/ci.sh go` with MySQL 8.4, `scripts/ci.sh web`). Not verified
+against running services or in a browser.
+
+**Not closed:** a recipient holding shared copies of two authors'
+same-named components, or a personal component named like an org one,
+still resolves `name@range` to the highest satisfying version among them
+(item 4 makes organization names unique, which is the ambiguity members
+share; a member's own Library can still hold two of a name); "Save as
+prompt" into the personal `my-prompts` pack does not resubmit (it is
+rarely published, and the request would publish every saved message); the
+console's MCP form has no inputs for an http tool's OAuth sign-in (the
+route accepts the block); a room share's copies are not given to members
+who joined while the realtime replica was unreachable (the join event is
+best-effort like every transient publish; a later share of the room
+reaches them).
+
+Decisions:
 
 1. **Notification preferences.** `content_shared` and `content_review`
    get their switches in the existing prefs model: `contentShared` and
