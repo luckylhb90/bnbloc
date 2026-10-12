@@ -9,7 +9,8 @@ export const agentRunsApi = {
   room: (roomId: string, q: RunListQuery = {}) => req<AgentRunsReply>(runsPath("room", q, roomId)),
   mine: (q: RunListQuery = {}) => req<AgentRunsReply>(runsPath("self", q)),
   tenant: (q: RunListQuery = {}) => req<AgentRunsReply>(runsPath("tenant", q)),
-  // One room run with its diagnostics and the first reply's room sequence.
+  // One room run with the first reply's room sequence; its raw diagnostics
+  // only for the agent's owner and org admins (O4).
   detail: (roomId: string, jobId: string) =>
     req<AgentRun>(roomPath(roomId, "jobs", jobId)),
 };

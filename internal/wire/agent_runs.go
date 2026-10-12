@@ -133,7 +133,8 @@ type AgentRun struct {
 	// Redacted marks a run whose request/reply text and diagnostics are
 	// withheld because the viewer is not a member of the run's room.
 	Redacted bool `json:"redacted,omitempty"`
-	// Diagnostics is the bridge's last raw status report (detail route only).
+	// Diagnostics is the bridge's last raw status report: detail route only,
+	// and only to the agent's owner and org admins (O4).
 	Diagnostics map[string]any `json:"diagnostics,omitempty"`
 }
 

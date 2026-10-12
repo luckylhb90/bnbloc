@@ -11,6 +11,7 @@ import (
 
 	"github.com/luckylhb90/bnbloc/internal/membership"
 	"github.com/luckylhb90/bnbloc/internal/store"
+	"github.com/luckylhb90/bnbloc/internal/svcauth"
 	"github.com/luckylhb90/bnbloc/internal/tenant"
 	"github.com/luckylhb90/bnbloc/internal/wire"
 )
@@ -169,6 +170,39 @@ func TestRoomRunDetailResolvesReplySeq(t *testing.T) {
 	}
 	if code, _ := getRaw(t, svc, "/v1/rooms/room-2/jobs/j-queued", "bob"); code != http.StatusForbidden {
 		t.Fatalf("non-member detail = %d, want 403", code)
+	}
+}
+
+// O4: a run's raw diagnostics are its agent owner's and an org admin's
+// (the signed org role); any other member, the requester included, reads
+// the projection only.
+func TestRoomRunDetailDiagnosticsOwnerAndOrgAdminOnly(t *testing.T) {
+	svc := runsFixture(t)
+	detail := func(caller, role string) wire.AgentRun {
+		t.Helper()
+		r := httptest.NewRequest(http.MethodGet, "/v1/rooms/room-1/jobs/j-borrow", nil)
+		svcauth.Key("").Assert(r, caller, tenant.Default, role)
+		w := httptest.NewRecorder()
+		svc.Handler().ServeHTTP(w, r)
+		if w.Code != http.StatusOK {
+			t.Fatalf("detail as %s/%q = %d %s", caller, role, w.Code, w.Body.String())
+		}
+		var run wire.AgentRun
+		_ = json.Unmarshal(w.Body.Bytes(), &run)
+		return run
+	}
+	if run := detail("alice", "member"); run.Diagnostics["sessionId"] != "s1" {
+		t.Fatalf("the agent owner reads the diagnostics: %+v", run.Diagnostics)
+	}
+	run := detail("bob", "member")
+	if run.Diagnostics != nil {
+		t.Fatalf("the requester reads the projection only, got diagnostics %+v", run.Diagnostics)
+	}
+	if run.Reply == nil || run.Reply.RoomSeq != 11 || run.Usage == nil || run.Status != "replied" {
+		t.Fatalf("the projection stays whole for the requester: %+v", run)
+	}
+	if run := detail("bob", "org_admin"); run.Diagnostics["sessionId"] != "s1" {
+		t.Fatalf("an org admin reads the diagnostics: %+v", run.Diagnostics)
 	}
 }
 

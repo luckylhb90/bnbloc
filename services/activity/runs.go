@@ -11,6 +11,7 @@ import (
 	"github.com/luckylhb90/bnbloc/internal/httpx"
 	"github.com/luckylhb90/bnbloc/internal/membership"
 	"github.com/luckylhb90/bnbloc/internal/obs"
+	"github.com/luckylhb90/bnbloc/internal/rbac"
 	"github.com/luckylhb90/bnbloc/internal/roomctx"
 	"github.com/luckylhb90/bnbloc/internal/store"
 	"github.com/luckylhb90/bnbloc/internal/svcauth"
@@ -22,8 +23,9 @@ import (
 //
 //   - GET /v1/rooms/{roomId}/jobs[?before=&limit=&status=&from=&to=&owner=&core=&provider=]
 //     — a room's runs, room members only;
-//   - GET /v1/rooms/{roomId}/jobs/{jobId} — one run with diagnostics and the
-//     first reply's room sequence (jump target);
+//   - GET /v1/rooms/{roomId}/jobs/{jobId} — one run with the first reply's
+//     room sequence (jump target), and its raw diagnostics for the agent's
+//     owner and org admins only;
 //   - GET /v1/my/jobs — runs of the caller's agents plus runs the caller
 //     requested;
 //   - GET /v1/tenant/jobs[?member=] — every run in the ctx tenant. The gateway
@@ -32,6 +34,11 @@ import (
 // Outside the room scope a viewer may not be a member of a run's room (an
 // org admin, an owner who left): such runs keep their metadata, outcome and
 // usage but withhold the request/reply text (Redacted).
+//
+// Raw diagnostics (the bridge's session ids, error text, reply and usage
+// summaries as reported) are the agent owner's and an org admin's (the
+// signed org role, rbac.Can manage_org): every other viewer reads the
+// projection (error, warning, reply, usage) and never the raw map (O4).
 
 // RoomFeedReader pages the persisted room feed (the chat store's RoomFeed); the
 // run detail route reads it to find the first reply's room sequence.
@@ -176,8 +183,9 @@ func (s *Service) writeRuns(w http.ResponseWriter, r *http.Request, scope string
 	httpx.WriteJSON(w, http.StatusOK, out)
 }
 
-// handleRoomRun returns one run of a room (room members) with its
-// diagnostics and the first reply's room sequence.
+// handleRoomRun returns one run of a room (room members) with the first
+// reply's room sequence, and its raw diagnostics when the viewer may read
+// them (runViewer.seesDiagnostics).
 func (s *Service) handleRoomRun(w http.ResponseWriter, r *http.Request) {
 	roomID, err := roomctx.Normalize(r.PathValue("roomId"))
 	if err != nil {
@@ -253,22 +261,25 @@ func batchHasMessage(payload json.RawMessage, messageID string) bool {
 // and (outside the room scope) the viewer's membership per room decides
 // whether text is shown.
 type runViewer struct {
-	s       *Service
-	r       *http.Request
-	scope   string
-	caller  string
-	rooms   roomNamer
-	members map[string]bool
+	s      *Service
+	r      *http.Request
+	scope  string
+	caller string
+	// orgAdmin is the signed org role's manage_org grant.
+	orgAdmin bool
+	rooms    roomNamer
+	members  map[string]bool
 }
 
 func (s *Service) runViewer(r *http.Request, scope string) *runViewer {
 	return &runViewer{
-		s:       s,
-		r:       r,
-		scope:   scope,
-		caller:  svcauth.Subject(r),
-		rooms:   roomNamer{s: s, r: r, names: map[string]string{}},
-		members: map[string]bool{},
+		s:        s,
+		r:        r,
+		scope:    scope,
+		caller:   svcauth.Subject(r),
+		orgAdmin: rbac.Can(svcauth.Role(r), rbac.PermManageOrg),
+		rooms:    roomNamer{s: s, r: r, names: map[string]string{}},
+		members:  map[string]bool{},
 	}
 }
 
@@ -287,7 +298,14 @@ func (v *runViewer) canRead(roomID string) bool {
 	return ok
 }
 
-// record renders one job as a run record; detail adds the raw diagnostics.
+// seesDiagnostics reports whether the viewer may read a run's raw
+// diagnostics: the agent's owner and org admins only (O4).
+func (v *runViewer) seesDiagnostics(j store.AgentJob) bool {
+	return (v.caller != "" && v.caller == j.OwnerUserID) || v.orgAdmin
+}
+
+// record renders one job as a run record; detail adds the raw diagnostics
+// for a viewer who may read them.
 func (v *runViewer) record(j store.AgentJob, detail bool) wire.AgentRun {
 	diag := map[string]any{}
 	if len(j.DiagnosticsJSON) > 0 {
@@ -356,7 +374,7 @@ func (v *runViewer) record(j store.AgentJob, detail bool) wire.AgentRun {
 		}
 		return run
 	}
-	if detail && len(diag) > 0 {
+	if detail && len(diag) > 0 && v.seesDiagnostics(j) {
 		run.Diagnostics = diag
 	}
 	return run
