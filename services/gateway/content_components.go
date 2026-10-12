@@ -185,6 +185,7 @@ func contentView(c store.ContentComponent, v store.ContentComponentVersion, clai
 	for _, q := range m.QuickPrompts {
 		out.QuickPrompts = append(out.QuickPrompts, wire.ContentQuickPrompt{Title: q.Title, Prompt: q.Prompt})
 	}
+	promptFields(m, &out)
 	out.Acked = out.Mine || len(out.Permissions) == 0 || acked[c.ID+"@"+v.Version]
 	return out, nil
 }
@@ -286,6 +287,9 @@ func (s *Service) contentViews(ctx context.Context, claims auth.Claims, comps []
 		}
 		s.contentSkills(ctx, v, &view)
 		out = append(out, view)
+	}
+	if err := s.enrichPromptViews(ctx, claims, "", out); err != nil {
+		return nil, err
 	}
 	return out, nil
 }
@@ -444,7 +448,7 @@ func (s *Service) handleImportContent(w http.ResponseWriter, r *http.Request) {
 	}
 	kind := strings.TrimSpace(q.Get("kind"))
 	if _, ok := contentpkg.Lookup(kind); !ok {
-		http.Error(w, "kind must be expert or skill", http.StatusBadRequest)
+		http.Error(w, fmt.Sprintf("unknown kind %q", kind), http.StatusBadRequest)
 		return
 	}
 	version := firstNonEmpty(strings.TrimSpace(q.Get("version")), "1.0.0")
@@ -769,6 +773,13 @@ func (s *Service) handleGetContentVersion(w http.ResponseWriter, r *http.Request
 		http.Error(w, "decode content manifest failed", http.StatusInternalServerError)
 		return
 	}
+	enriched := []wire.ContentComponent{view}
+	if err := s.enrichPromptViews(ctx, claims, r.URL.Query().Get("room"), enriched); err != nil {
+		obs.ServerError(w, "load prompt fields failed", err)
+		http.Error(w, "load prompt fields failed", http.StatusInternalServerError)
+		return
+	}
+	view = enriched[0]
 	out := wire.ContentVersionDetail{Component: view, Version: contentVersionView(v), Instructions: pkg.Instructions, SkillBodies: map[string]string{}, Files: []wire.ContentFile{}}
 	for _, sk := range pkg.Skills {
 		out.Component.Skills = append(out.Component.Skills, wire.ContentSkill{Name: sk.Name, Description: sk.Description})
@@ -898,6 +909,12 @@ func (s *Service) contentUseViews(ctx context.Context, claims auth.Claims, scope
 	if err != nil {
 		return nil, err
 	}
+	if scope == store.ContentUseRoom {
+		// A room's experts may point at prompt packs turned on in it.
+		if err := s.enrichPromptViews(ctx, claims, scopeID, views); err != nil {
+			return nil, err
+		}
+	}
 	byID := map[string]wire.ContentComponent{}
 	for _, v := range views {
 		byID[v.ID] = v
@@ -950,8 +967,8 @@ func (s *Service) handlePutContentUse(w http.ResponseWriter, r *http.Request) {
 		contentStoreErr(w, "load content component failed", err)
 		return
 	}
-	if scope == store.ContentUseMember && c.Kind != contentpkg.KindSkill {
-		http.Error(w, "only skill packs are enabled for all your agents; pick an expert per message", http.StatusBadRequest)
+	if spec, _ := contentpkg.Lookup(c.Kind); scope == store.ContentUseMember && !spec.MemberUse {
+		http.Error(w, "only skill and prompt packs are turned on for you; pick an expert per message", http.StatusBadRequest)
 		return
 	}
 	if version := strings.TrimSpace(req.Version); version != "" {

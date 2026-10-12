@@ -260,6 +260,7 @@ func (s *Service) Handler() http.Handler {
 	mux.HandleFunc("DELETE /v1/platform/app-releases/{version}", s.handlePlatformReleaseDelete)
 	mux.HandleFunc("GET /v1/platform/versions", s.handlePlatformVersions)
 	s.registerContentComponents(mux)
+	s.registerContentPrompts(mux)
 	s.registerAPITokens(mux)
 	s.registerSSO(mux)
 	s.registerOrgSync(mux)

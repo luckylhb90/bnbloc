@@ -31,6 +31,8 @@ type ContentComponent struct {
 	Skills       []ContentSkill       `json:"skills,omitempty"`
 	QuickPrompts []ContentQuickPrompt `json:"quickPrompts,omitempty"`
 	Welcome      string               `json:"welcome,omitempty"`
+	// Prompts are a prompt pack's prompts (content_prompts.go).
+	Prompts []ContentPrompt `json:"prompts,omitempty"`
 	// Mine is true for the caller's own component.
 	Mine bool `json:"mine"`
 	// Acked is true when the caller confirmed this version's declared
@@ -64,10 +66,14 @@ type ContentSkill struct {
 	Description string `json:"description"`
 }
 
-// ContentQuickPrompt is one expert quick prompt.
+// ContentQuickPrompt is one expert quick prompt: its text, or Ref
+// ("pack/prompt-id") to a prompt of a pack the expert requires, Resolved
+// for the viewer when they may use such a pack (nil: the pack is missing).
 type ContentQuickPrompt struct {
-	Title  string `json:"title"`
-	Prompt string `json:"prompt"`
+	Title    string            `json:"title"`
+	Prompt   string            `json:"prompt"`
+	Ref      string            `json:"ref,omitempty"`
+	Resolved *ContentPromptRef `json:"resolved,omitempty"`
 }
 
 // ContentVersion is one immutable version.
