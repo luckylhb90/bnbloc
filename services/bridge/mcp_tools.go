@@ -13,6 +13,7 @@ import (
 	"runtime"
 	"sort"
 	"strings"
+	"time"
 
 	corepkg "github.com/luckylhb90/bnbloc/core"
 	"github.com/luckylhb90/bnbloc/core/pkgmeta"
@@ -30,7 +31,9 @@ import (
 //     (MCPToolsDir/index.json must carry the gateway's sha256 pin for this
 //     platform), with the tool's args; the env values become its process
 //     environment.
-//   - http: the tool's URL with its auth header.
+//   - http: the tool's URL with its auth header. An oauth tool's header is
+//     the member's own access token, from the sign-in their desktop ran
+//     (MCPSettingsDir/oauth/<tool>.json, 0600, refreshed by the desktop).
 //
 // Member credentials are read from the member's own desktop settings
 // (MCPSettingsDir/<tool>.json, written 0600 by Settings → Tools) and only
@@ -114,6 +117,9 @@ func (b *Bridge) resolveMCP(tools []wire.ContentMCPTool, refs []wire.ContentRef,
 			continue
 		}
 		values, why := b.mcpValues(t, own)
+		if why == "" && t.Auth != nil && t.Auth.Scheme == pkgmeta.MCPAuthOAuth {
+			values, why = b.mcpOAuthToken(t, own)
+		}
 		if why != "" {
 			missing = append(missing, "MCP tool "+t.Name+" ("+why+")")
 			continue
@@ -160,6 +166,8 @@ func (b *Bridge) resolveMCP(tools []wire.ContentMCPTool, refs []wire.ContentRef,
 					server.Headers = []corepkg.NameValue{{Name: "Authorization", Value: "Bearer " + values[t.Auth.Env]}}
 				case pkgmeta.MCPAuthHeader:
 					server.Headers = []corepkg.NameValue{{Name: t.Auth.Header, Value: values[t.Auth.Env]}}
+				case pkgmeta.MCPAuthOAuth:
+					server.Headers = []corepkg.NameValue{{Name: "Authorization", Value: "Bearer " + values[mcpOAuthAccessKey]}}
 				}
 			}
 		default:
@@ -201,6 +209,57 @@ func (b *Bridge) mcpValues(t wire.ContentMCPTool, own bool) (map[string]string, 
 		return nil, "its organization connector is not configured"
 	}
 	return values, ""
+}
+
+// mcpOAuthDir is the subdirectory of MCPSettingsDir holding the member's
+// OAuth sign-ins, one <tool>.json each (apart from the env settings files,
+// so no tool name can collide with another tool's sign-in).
+const mcpOAuthDir = "oauth"
+
+// mcpOAuthAccessKey keys the access token in the values mcpOAuthToken
+// returns (never an env name: env names are upper-case).
+const mcpOAuthAccessKey = "access_token"
+
+// mcpOAuthExpirySlack treats a token about to expire as expired: a session
+// created now must not start with a token that dies in its first request.
+const mcpOAuthExpirySlack = 30 * time.Second
+
+// mcpOAuthFile is the part of the desktop's sign-in record the bridge reads.
+type mcpOAuthFile struct {
+	AccessToken string `json:"accessToken"`
+	ExpiresAtMs int64  `json:"expiresAtMs"`
+}
+
+// mcpOAuthToken returns the member's access token of an oauth tool, or why
+// there is none. Like member credentials it is used only for drives the
+// member asked for themselves.
+func (b *Bridge) mcpOAuthToken(t wire.ContentMCPTool, own bool) (map[string]string, string) {
+	if !own {
+		return nil, "member sign-ins are not lent to someone else's drive"
+	}
+	signIn := "sign in to " + t.Name + " in Settings → Tools"
+	dir := strings.TrimSpace(b.cfg.MCPSettingsDir)
+	if dir == "" {
+		return nil, signIn
+	}
+	raw, err := os.ReadFile(filepath.Join(dir, mcpOAuthDir, t.Name+".json"))
+	if err != nil {
+		if !errors.Is(err, os.ErrNotExist) {
+			slog.Warn("bnbloc bridge MCP sign-in unreadable",
+				"event", "bnbloc.bridge.mcp_oauth_unreadable", "tool", t.Name, "error", err)
+		}
+		return nil, signIn
+	}
+	var f mcpOAuthFile
+	if err := json.Unmarshal(raw, &f); err != nil || strings.TrimSpace(f.AccessToken) == "" {
+		slog.Warn("bnbloc bridge MCP sign-in invalid",
+			"event", "bnbloc.bridge.mcp_oauth_invalid", "tool", t.Name)
+		return nil, signIn
+	}
+	if f.ExpiresAtMs > 0 && time.Now().Add(mcpOAuthExpirySlack).UnixMilli() >= f.ExpiresAtMs {
+		return nil, "its sign-in expired: sign in to " + t.Name + " again in Settings → Tools"
+	}
+	return map[string]string{mcpOAuthAccessKey: strings.TrimSpace(f.AccessToken)}, ""
 }
 
 // mcpMemberSettings reads the member's own values of a tool (none when the

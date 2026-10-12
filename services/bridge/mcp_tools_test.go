@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	corepkg "github.com/luckylhb90/bnbloc/core"
 	"github.com/luckylhb90/bnbloc/internal/wire"
@@ -278,3 +279,60 @@ func toStrings(v any) []string {
 	return out
 }
 
+func driveTool() wire.ContentMCPTool {
+	return wire.ContentMCPTool{
+		Name: "drive", Version: "1.0.0", Transport: wire.MCPTransportHTTP, URL: "https://tools.example.com/mcp",
+		Auth: &wire.ContentMCPAuth{Scheme: "oauth"}, RequiredBy: []string{"cc_reviewer"},
+	}
+}
+
+func (f mcpFixture) setSignIn(t *testing.T, tool, token string, expiresAtMs int64) {
+	t.Helper()
+	dir := filepath.Join(f.settings, mcpOAuthDir)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := json.Marshal(map[string]any{"accessToken": token, "expiresAtMs": expiresAtMs, "refreshToken": "never-read"})
+	if err := os.WriteFile(filepath.Join(dir, tool+".json"), raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// An oauth tool carries the member's own access token as a bearer header,
+// only on their own drives; a missing or expired sign-in shows as missing
+// and the turn still runs. The token never reaches the session checksum.
+func TestMCPOAuthSignIn(t *testing.T) {
+	f := newMCPFixture(t)
+	b := &Bridge{cfg: Config{MCPToolsDir: f.tools, MCPSettingsDir: f.settings}}
+	refs := []wire.ContentRef{{ComponentID: "cc_reviewer", Owner: "maya", Name: "reviewer"}}
+
+	_, missing, _ := b.resolveMCP([]wire.ContentMCPTool{driveTool()}, refs, "maya", true)
+	if len(missing) != 1 || !strings.Contains(missing[0], "sign in to drive in Settings → Tools") {
+		t.Fatalf("not signed in: missing = %v", missing)
+	}
+	f.setSignIn(t, "drive", "old-token", time.Now().Add(10*time.Second).UnixMilli())
+	if _, missing, _ := b.resolveMCP([]wire.ContentMCPTool{driveTool()}, refs, "maya", true); len(missing) != 1 || !strings.Contains(missing[0], "expired") {
+		t.Fatalf("expiring: missing = %v", missing)
+	}
+	f.setSignIn(t, "drive", "member-token", time.Now().Add(time.Hour).UnixMilli())
+	mcp, missing, _ := b.resolveMCP([]wire.ContentMCPTool{driveTool()}, refs, "maya", true)
+	if len(missing) != 0 || len(mcp.servers) != 1 {
+		t.Fatalf("servers = %+v missing = %v", mcp.servers, missing)
+	}
+	h := mcp.servers[0].Headers
+	if len(h) != 1 || h[0].Name != "Authorization" || h[0].Value != "Bearer member-token" {
+		t.Fatalf("headers = %+v", h)
+	}
+	if strings.Contains(mcp.bindingSum("c"), "member-token") {
+		t.Fatal("token in the checksum")
+	}
+	f.setSignIn(t, "drive", "rotated-token", 0)
+	again, _, _ := b.resolveMCP([]wire.ContentMCPTool{driveTool()}, refs, "maya", true)
+	if again.bindingSum("c") != mcp.bindingSum("c") {
+		t.Fatal("a refreshed token must not churn the session")
+	}
+	// Never lent: a borrowed or platform drive does not get it.
+	if mcp, missing, _ := b.resolveMCP([]wire.ContentMCPTool{driveTool()}, refs, "maya", false); len(mcp.servers) != 0 || len(missing) != 1 || !strings.Contains(missing[0], "not lent") {
+		t.Fatalf("lent: servers = %+v missing = %v", mcp.servers, missing)
+	}
+}
