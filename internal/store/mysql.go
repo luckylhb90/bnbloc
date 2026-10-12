@@ -61,9 +61,21 @@ ON DUPLICATE KEY UPDATE
 // AppendMessages inserts messages idempotently and returns the messages newer
 // than the prior stored cursor (so a reporter that re-drains from seq 0 does
 // not re-publish) along with the highest cursor for the session.
+//
+// Concurrent reports for one session serialize on its sync_states row (read
+// FOR UPDATE), and a message counts as fresh only when its own insert stored
+// it: two racing reporters can never both publish the same reply.
 func (m *MySQL) AppendMessages(ctx context.Context, roomID string, in wire.ReportMessagesInput) ([]wire.Message, int64, error) {
 	tnt, err := tenant.Require(ctx)
 	if err != nil {
+		return nil, 0, err
+	}
+	// The cursor row must exist before it can be locked. This insert runs on
+	// its own (autocommit): inside the transaction its shared lock on an
+	// existing row would deadlock two reporters upgrading to FOR UPDATE.
+	if _, err := m.DB.ExecContext(ctx, `
+INSERT IGNORE INTO sync_states (tenant_id, room_id, agent_session_id, message_cursor) VALUES (?, ?, ?, 0)`,
+		tnt, roomID, in.AgentSessionID); err != nil {
 		return nil, 0, err
 	}
 	tx, err := m.DB.BeginTx(ctx, nil)
@@ -73,9 +85,9 @@ func (m *MySQL) AppendMessages(ctx context.Context, roomID string, in wire.Repor
 	defer func() { _ = tx.Rollback() }()
 	var prior int64
 	if err := tx.QueryRowContext(ctx, `
-SELECT COALESCE(message_cursor, 0) FROM sync_states
-WHERE tenant_id = ? AND room_id = ? AND agent_session_id = ?`,
-		tnt, roomID, in.AgentSessionID).Scan(&prior); err != nil && !errors.Is(err, sql.ErrNoRows) {
+SELECT message_cursor FROM sync_states
+WHERE tenant_id = ? AND room_id = ? AND agent_session_id = ? FOR UPDATE`,
+		tnt, roomID, in.AgentSessionID).Scan(&prior); err != nil {
 		return nil, 0, err
 	}
 	cursor := prior
@@ -88,11 +100,26 @@ WHERE tenant_id = ? AND room_id = ? AND agent_session_id = ?`,
 		if err != nil {
 			return nil, 0, err
 		}
-		if _, err := tx.ExecContext(ctx, `
-INSERT IGNORE INTO agent_messages (tenant_id, room_id, agent_session_id, seq, client_submit_id, payload_json, created_at_ms)
-VALUES (?, ?, ?, ?, ?, ?, ?)`,
-			tnt, roomID, in.AgentSessionID, msg.Seq, nullString(msg.ClientSubmitID), payload, msg.CreatedAtUnixMs); err != nil {
+		// Reported usage is normalized once, here, into typed columns; the
+		// budget reads sum those (AgentUsage), never the raw payload.
+		u, reported := ReplyUsageOf(msg.Payload)
+		var cost any
+		if u.CostUsd != nil {
+			cost = *u.CostUsd
+		}
+		res, err := tx.ExecContext(ctx, `
+INSERT IGNORE INTO agent_messages (tenant_id, room_id, agent_session_id, seq, client_submit_id, payload_json, created_at_ms,
+  usage_reported, usage_owner_user_id, usage_provider, usage_input_tokens, usage_output_tokens, usage_cost_usd)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			tnt, roomID, in.AgentSessionID, msg.Seq, nullString(msg.ClientSubmitID), payload, msg.CreatedAtUnixMs,
+			reported, u.Owner, u.Provider, u.InputTokens, u.OutputTokens, cost)
+		if err != nil {
 			return nil, 0, err
+		}
+		if n, err := res.RowsAffected(); err != nil {
+			return nil, 0, err
+		} else if n != 1 {
+			continue // already stored (a duplicate in this report): not fresh
 		}
 		fresh = append(fresh, msg)
 		if msg.Seq > cursor {

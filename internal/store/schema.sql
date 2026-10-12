@@ -258,6 +258,12 @@ CREATE TABLE IF NOT EXISTS agent_messages (
   client_submit_id VARCHAR(128) NULL,
   payload_json     JSON NOT NULL,
   created_at_ms    BIGINT NOT NULL,
+  usage_reported      TINYINT(1) NOT NULL DEFAULT 0,
+  usage_owner_user_id VARCHAR(128) COLLATE utf8mb4_bin NOT NULL DEFAULT '',
+  usage_provider      VARCHAR(128) NOT NULL DEFAULT '',
+  usage_input_tokens  BIGINT NOT NULL DEFAULT 0,
+  usage_output_tokens BIGINT NOT NULL DEFAULT 0,
+  usage_cost_usd      DECIMAL(18,6) NULL,
   PRIMARY KEY (room_id, agent_session_id, seq),
   UNIQUE KEY uq_client_submit (room_id, agent_session_id, client_submit_id),
   KEY idx_agent_messages_tenant_time (tenant_id, created_at_ms)

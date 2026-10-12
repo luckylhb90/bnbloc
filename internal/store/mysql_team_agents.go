@@ -79,33 +79,25 @@ WHERE tenant_id = ? AND (created_at_ms >= ? OR status IN ('queued','claimed','ru
 	return out
 }
 
-// AgentUsage implements AgentUsageReader: sums the reported metrics carried in
-// agent_messages.payload_json (the bridge's reply record) per owner/provider,
-// over idx_agent_messages_tenant_time. Replies whose metrics say
-// reported=false, or carry none, do not count.
+// AgentUsage implements AgentUsageReader: sums the usage columns AppendMessages
+// stored for each reported reply (ReplyUsageOf, normalized once at append) per
+// owner/provider, over idx_agent_messages_tenant_time. Replies that reported
+// no usage have usage_reported = 0 and do not count.
 func (m *MySQL) AgentUsage(ctx context.Context, ownerUserID string, sinceMs int64) []AgentTurnUsage {
 	tnt, err := tenant.Require(ctx)
 	if err != nil {
 		return nil
 	}
-	q := `SELECT o, p, COUNT(*), COALESCE(SUM(inp), 0), COALESCE(SUM(outp), 0), COALESCE(SUM(cost), 0), COUNT(cost)
-FROM (
-  SELECT COALESCE(JSON_UNQUOTE(JSON_EXTRACT(payload_json, '$.ownerUserId')), '') AS o,
-         COALESCE(JSON_UNQUOTE(JSON_EXTRACT(payload_json, '$.provider')), '') AS p,
-         CAST(JSON_EXTRACT(payload_json, '$.metrics.inputTokens') AS DECIMAL(20,0)) AS inp,
-         CAST(JSON_EXTRACT(payload_json, '$.metrics.outputTokens') AS DECIMAL(20,0)) AS outp,
-         CAST(JSON_EXTRACT(payload_json, '$.metrics.costUsd') AS DECIMAL(18,6)) AS cost
-  FROM agent_messages
-  WHERE tenant_id = ? AND created_at_ms >= ?
-    AND JSON_TYPE(JSON_EXTRACT(payload_json, '$.metrics')) = 'OBJECT'
-    AND NOT (JSON_EXTRACT(payload_json, '$.metrics.reported') <=> CAST('false' AS JSON))
-) t`
+	q := `SELECT usage_owner_user_id, usage_provider, COUNT(*), COALESCE(SUM(usage_input_tokens), 0),
+  COALESCE(SUM(usage_output_tokens), 0), COALESCE(SUM(usage_cost_usd), 0), COUNT(usage_cost_usd)
+FROM agent_messages
+WHERE tenant_id = ? AND created_at_ms >= ? AND usage_reported = 1`
 	args := []any{tnt, sinceMs}
 	if ownerUserID != "" {
-		q += ` WHERE o = ?`
+		q += ` AND usage_owner_user_id = ?`
 		args = append(args, ownerUserID)
 	}
-	q += ` GROUP BY o, p`
+	q += ` GROUP BY usage_owner_user_id, usage_provider`
 	rows, err := m.DB.QueryContext(ctx, q, args...)
 	if err != nil {
 		return nil

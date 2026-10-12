@@ -583,19 +583,13 @@ func (s *Service) noteReplyBurn(ctx context.Context, fresh []wire.Message) {
 	tid := tenant.FromContext(ctx)
 	seen := map[string]bool{}
 	for _, m := range fresh {
-		p, ok := m.Payload.(map[string]any)
+		u, ok := store.ReplyUsageOf(m.Payload)
 		if !ok {
 			continue
 		}
-		metrics, ok := p["metrics"].(map[string]any)
-		if !ok || !wire.TurnUsageFromMetrics(metrics).Reported {
-			continue
+		if owner := strings.TrimSpace(u.Owner); owner != "" && !seen[owner] {
+			seen[owner] = true
+			s.noteBudgetBurn(tid, owner)
 		}
-		owner, _ := p["ownerUserId"].(string)
-		if owner = strings.TrimSpace(owner); owner == "" || seen[strings.ToLower(owner)] {
-			continue
-		}
-		seen[strings.ToLower(owner)] = true
-		s.noteBudgetBurn(tid, owner)
 	}
 }

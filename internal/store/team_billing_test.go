@@ -270,6 +270,11 @@ func agentUsageCases(t *testing.T, act ActivityStore, usage AgentUsageReader, tn
 		reply(4, "alice", nil, 6000), // no metrics
 		reply(5, "alice", map[string]any{"inputTokens": 7.0, "costUsd": 1.0, "reported": true}, 100), // before range
 		reply(6, "bob", map[string]any{"inputTokens": 1.0, "outputTokens": 1.0, "reported": true}, 6000),
+		// A negative report is a reported turn that burns nothing: it can
+		// never lower the owner's (or the organization's) budget burn.
+		reply(7, "alice", map[string]any{"inputTokens": -1000.0, "outputTokens": -50.0, "costUsd": -5.0, "reported": true}, 6000),
+		reply(8, "alice", map[string]any{}, 6000),                                     // empty metrics: not reported
+		reply(9, "Alice", map[string]any{"inputTokens": 3.0, "reported": true}, 6000), // another subject
 	}}
 	if _, _, err := act.AppendMessages(ctx, room, in); err != nil {
 		t.Fatalf("AppendMessages: %v", err)
@@ -279,11 +284,14 @@ func agentUsageCases(t *testing.T, act ActivityStore, usage AgentUsageReader, tn
 		t.Fatalf("alice usage = %+v, want one row", rows)
 	}
 	u := rows[0]
-	if u.Provider != "codex" || u.ReportedTurns != 2 || u.InputTokens != 150 || u.OutputTokens != 15 || u.CostUsd != 0.25 || u.CostReportedBy != 1 {
+	if u.Provider != "codex" || u.ReportedTurns != 3 || u.InputTokens != 150 || u.OutputTokens != 15 || u.CostUsd != 0.25 || u.CostReportedBy != 1 {
 		t.Fatalf("alice usage = %+v", u)
 	}
-	if all := usage.AgentUsage(ctx, "", 1000); len(all) != 2 {
-		t.Fatalf("tenant usage = %+v, want alice + bob", all)
+	if rows := usage.AgentUsage(ctx, "Alice", 1000); len(rows) != 1 || rows[0].InputTokens != 3 || rows[0].OwnerUserID != "Alice" {
+		t.Fatalf("Alice usage = %+v, want only her own turn (subjects are case-sensitive)", rows)
+	}
+	if all := usage.AgentUsage(ctx, "", 1000); len(all) != 3 {
+		t.Fatalf("tenant usage = %+v, want alice + Alice + bob", all)
 	}
 	if other := usage.AgentUsage(tenantCtx(tnt+"-other"), "", 0); len(other) != 0 {
 		t.Fatalf("cross-tenant usage = %+v", other)

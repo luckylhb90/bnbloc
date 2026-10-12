@@ -122,42 +122,52 @@ func (s *MemoryBridgeJobs) TenantTeamJobs(ctx context.Context, ownerUserID strin
 	return out
 }
 
-// usageSample is one reported reply's metrics, kept by the memory activity
-// store so AgentUsage matches the MySQL aggregation over agent_messages.
+// usageSample is one reported reply's normalized usage, kept by the memory
+// activity store as the MySQL store keeps it in agent_messages' usage columns.
 type usageSample struct {
 	tenant      string
-	owner       string
-	provider    string
+	room        string
+	usage       ReplyUsage
 	createdAtMs int64
-	metrics     map[string]any
 }
 
-// replyUsage extracts the attribution and reported metrics of one agent reply
-// payload (the bridge's room-record shape). ok=false when the reply carries no
-// reported metrics.
-func replyUsage(payload any) (owner, provider string, metrics map[string]any, ok bool) {
+// ReplyUsage is the usage one agent reply reported, attributed to its owner
+// and provider. It is read once, when the reply is appended (ReplyUsageOf),
+// and stored normalized: negative counts and costs are dropped, so no
+// reporter can lower the owner's or the organization's burn.
+type ReplyUsage struct {
+	Owner, Provider string
+	wire.TurnUsage
+}
+
+// ReplyUsageOf is the one reader of a reply's reported usage: the attribution
+// and wire.TurnUsageFromMetrics of an agent reply payload (the bridge's room
+// record). ok=false when the reply reports no usage.
+func ReplyUsageOf(payload any) (ReplyUsage, bool) {
 	p, isMap := payload.(map[string]any)
 	if !isMap {
-		return "", "", nil, false
+		return ReplyUsage{}, false
 	}
 	m, isMap := p["metrics"].(map[string]any)
-	if !isMap || !wire.TurnUsageFromMetrics(m).Reported {
-		return "", "", nil, false
+	if !isMap {
+		return ReplyUsage{}, false
 	}
-	owner, _ = p["ownerUserId"].(string)
-	provider, _ = p["provider"].(string)
-	return owner, provider, m, true
+	u := wire.TurnUsageFromMetrics(m)
+	if !u.Reported {
+		return ReplyUsage{}, false
+	}
+	owner, _ := p["ownerUserId"].(string)
+	provider, _ := p["provider"].(string)
+	return ReplyUsage{Owner: owner, Provider: provider, TurnUsage: u}, true
 }
 
-// recordUsageLocked keeps the reported metrics of genuinely new replies.
+// recordUsageLocked keeps the normalized usage of genuinely new replies.
 // Caller holds m.mu.
-func (m *Memory) recordUsageLocked(tnt string, fresh []wire.Message) {
+func (m *Memory) recordUsageLocked(tnt, room string, fresh []wire.Message) {
 	for _, msg := range fresh {
-		owner, provider, metrics, ok := replyUsage(msg.Payload)
-		if !ok {
-			continue
+		if u, ok := ReplyUsageOf(msg.Payload); ok {
+			m.usage = append(m.usage, usageSample{tenant: tnt, room: room, usage: u, createdAtMs: msg.CreatedAtUnixMs})
 		}
-		m.usage = append(m.usage, usageSample{tenant: tnt, owner: owner, provider: provider, createdAtMs: msg.CreatedAtUnixMs, metrics: metrics})
 	}
 }
 
@@ -175,17 +185,17 @@ func (m *Memory) AgentUsage(ctx context.Context, ownerUserID string, sinceMs int
 		if s.tenant != tnt || s.createdAtMs < sinceMs {
 			continue
 		}
-		if ownerUserID != "" && !strings.EqualFold(s.owner, ownerUserID) {
+		if ownerUserID != "" && s.usage.Owner != ownerUserID {
 			continue
 		}
-		key := s.owner + "\x00" + s.provider
+		key := s.usage.Owner + "\x00" + s.usage.Provider
 		u := byKey[key]
 		if u == nil {
-			u = &AgentTurnUsage{OwnerUserID: s.owner, Provider: s.provider}
+			u = &AgentTurnUsage{OwnerUserID: s.usage.Owner, Provider: s.usage.Provider}
 			byKey[key] = u
 			order = append(order, key)
 		}
-		tu := wire.TurnUsageFromMetrics(s.metrics)
+		tu := s.usage.TurnUsage
 		u.ReportedTurns++
 		u.InputTokens += tu.InputTokens
 		u.OutputTokens += tu.OutputTokens

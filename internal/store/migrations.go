@@ -1177,6 +1177,27 @@ WHERE r.channel_id = '' AND d.user_id IS NULL`)
 				"VARCHAR(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL DEFAULT '' AFTER channel_id")
 		},
 	},
+	{
+		// Reported reply usage, normalized once at append into typed columns
+		// that the budget reads sum (store.ReplyUsageOf); the raw-JSON sums
+		// let a negative report lower the burn. No backfill (pre-launch).
+		id: "2026_10_agent_messages_usage",
+		run: func(ctx context.Context, db sqlConn) error {
+			for _, c := range [][2]string{
+				{"usage_reported", "TINYINT(1) NOT NULL DEFAULT 0 AFTER created_at_ms"},
+				{"usage_owner_user_id", "VARCHAR(128) COLLATE utf8mb4_bin NOT NULL DEFAULT '' AFTER usage_reported"},
+				{"usage_provider", "VARCHAR(128) NOT NULL DEFAULT '' AFTER usage_owner_user_id"},
+				{"usage_input_tokens", "BIGINT NOT NULL DEFAULT 0 AFTER usage_provider"},
+				{"usage_output_tokens", "BIGINT NOT NULL DEFAULT 0 AFTER usage_input_tokens"},
+				{"usage_cost_usd", "DECIMAL(18,6) NULL AFTER usage_output_tokens"},
+			} {
+				if err := addColumnIfMissing(ctx, db, "agent_messages", c[0], c[1]); err != nil {
+					return err
+				}
+			}
+			return nil
+		},
+	},
 }
 
 // sqlConn is the statement surface a migration runs on. runMigrations passes

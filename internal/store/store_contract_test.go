@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/luckylhb90/bnbloc/internal/tenant"
+	"github.com/luckylhb90/bnbloc/internal/wire"
 )
 
 // The cross-backend contract cases: every case runs against the memory
@@ -99,7 +100,7 @@ func TestContractIdenticalUpdateSucceeds(t *testing.T) {
 				t.Fatalf("RevokeGrant #%d: %v", i, err)
 			}
 		}
-		sched, err := b.Schedules.CreateSchedule(ctx, sampleSchedule(uniq("s-"), room, "maya", 500))
+		sched, err := b.Schedules.CreateSchedule(ctx, sampleSchedule(uniq("s-"), room, "maya", 0))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -235,4 +236,58 @@ func TestMySQLTenantReadsReportFailures(t *testing.T) {
 	if _, _, err := NewMySQLGrant(db).TenantUsage(ctx); err == nil {
 		t.Fatal("TenantUsage on a failing database returned no error")
 	}
+}
+
+// Two reporters racing on one session publish each reply once: the reply is
+// fresh only for the append that stored it.
+func TestContractConcurrentAppendPublishesOnce(t *testing.T) {
+	forEachBackend(t, func(t *testing.T, b *Backends) {
+		ctx := tenantCtx(uniq("t-race-"))
+		room, session := uniq("room-"), uniq("s-")
+		batch := func(seqs ...int64) wire.ReportMessagesInput {
+			in := wire.ReportMessagesInput{WorkspaceID: room, AgentSessionID: session}
+			for _, s := range seqs {
+				in.Messages = append(in.Messages, wire.Message{Seq: s, Payload: map[string]any{"role": "assistant", "text": "r"}, CreatedAtUnixMs: 1})
+			}
+			return in
+		}
+		const reporters = 6
+		var wg sync.WaitGroup
+		published := make(chan int64, reporters*3)
+		errs := make(chan error, reporters)
+		for i := 0; i < reporters; i++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				fresh, _, err := b.Activity.AppendMessages(ctx, room, batch(1, 2, 3))
+				if err != nil {
+					errs <- err
+					return
+				}
+				for _, m := range fresh {
+					published <- m.Seq
+				}
+			}()
+		}
+		wg.Wait()
+		close(published)
+		close(errs)
+		for err := range errs {
+			t.Fatalf("AppendMessages: %v", err)
+		}
+		count := map[int64]int{}
+		for s := range published {
+			count[s]++
+		}
+		for _, s := range []int64{1, 2, 3} {
+			if count[s] != 1 {
+				t.Fatalf("seq %d published %d times, want once (all: %v)", s, count[s], count)
+			}
+		}
+		// A duplicate inside one report is fresh once.
+		fresh, cursor, err := b.Activity.AppendMessages(ctx, room, batch(4, 4))
+		if err != nil || len(fresh) != 1 || cursor != 4 {
+			t.Fatalf("duplicate in one report = %d fresh, cursor %d, %v; want 1, 4", len(fresh), cursor, err)
+		}
+	})
 }

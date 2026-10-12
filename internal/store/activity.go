@@ -95,17 +95,19 @@ func (m *Memory) AppendMessages(ctx context.Context, roomID string, in wire.Repo
 	cursor := m.cursors[key]
 	prior := cursor
 	var fresh []wire.Message
+	stored := map[int64]bool{}
 	for _, msg := range in.Messages {
-		if msg.Seq <= prior {
-			continue // replay at or below the durable cursor
+		if msg.Seq <= prior || stored[msg.Seq] {
+			continue // replay at or below the durable cursor, or a duplicate in this report
 		}
+		stored[msg.Seq] = true
 		fresh = append(fresh, msg)
 		if msg.Seq > cursor {
 			cursor = msg.Seq
 		}
 	}
 	m.cursors[key] = cursor
-	m.recordUsageLocked(tnt, fresh)
+	m.recordUsageLocked(tnt, roomID, fresh)
 	st := m.sync[key]
 	st.MessageCursor = cursor
 	m.sync[key] = st
