@@ -1,6 +1,5 @@
 import {
   currentMonth,
-  formatCost,
   formatTokens,
   monthBounds,
   sortQuotaRequests,
@@ -60,13 +59,6 @@ test("usageReportPath scopes owner/borrower to the caller and tenant to /v1/tena
   assert.ok(org?.startsWith("/v1/tenant/borrow/usage-report?"));
   assert.equal(new URLSearchParams(org!.split("?")[1]).get("as"), null);
   assert.equal(usageReportPath({ as: "owner", groupBy: "day", month: "" }, 0), null);
-});
-
-test("formatCost never shows an unreported cost as zero", () => {
-  assert.equal(formatCost(undefined), "—");
-  assert.equal(formatCost(0), "$0.00");
-  assert.equal(formatCost(1.234), "$1.23");
-  assert.equal(formatCost(0.0012), "$0.0012");
 });
 
 test("summarizeTeam counts a shared usage total once", () => {

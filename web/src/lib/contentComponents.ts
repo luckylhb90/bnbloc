@@ -533,10 +533,3 @@ export function archiveContentType(fileName: string): string {
 }
 
 export const ARCHIVE_ACCEPT = ".zip,.tar,.tar.gz,.tgz";
-
-// formatBytes for bundle and file sizes.
-export function formatSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}

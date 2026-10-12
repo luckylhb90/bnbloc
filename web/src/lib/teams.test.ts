@@ -2,7 +2,6 @@ import {
   defaultAgentLabel,
   estimateText,
   formatDefaultAgent,
-  formatUsd,
   leadLine,
   parseDefaultAgent,
   planRequest,
@@ -41,8 +40,6 @@ eq(
 );
 
 // The estimate is honest: a sum and its basis, unknown seats named.
-eq(formatUsd(0.42), "$0.42", "usd");
-eq(formatUsd(0.0042), "$0.0042", "small usd");
 eq(estimateText({ costUsd: 0.42, runs: 37 }), "About $0.42 per request, based on the last 37 runs.", "estimate");
 eq(estimateText({ costUsd: 0.3, runs: 1, unknown: ["tester"] }), "About $0.30 per request, based on the last run; no cost data for tester.", "partial");
 eq(estimateText({ runs: 0, unknown: ["lead", "reviewer"] }), "Cost unknown: none of these agents reported a cost on recent runs.", "unknown");

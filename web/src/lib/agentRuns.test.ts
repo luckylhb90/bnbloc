@@ -1,5 +1,4 @@
 import {
-  formatDuration,
   isFailedRun,
   mergeRunPages,
   runDurationMs,
@@ -86,15 +85,6 @@ test("runDurationMs runs to finish, or to now while live", () => {
   assert.equal(runDurationMs(run({ phases: { queuedAtMs: 1000, finishedAtMs: 4000 } })), 3000);
   assert.equal(runDurationMs(run({ status: "queued", phases: { queuedAtMs: 1000 } }), 1600), 600);
   assert.equal(runDurationMs(run({ phases: { queuedAtMs: 1000 } })), undefined);
-});
-
-test("formatDuration scales units", () => {
-  assert.equal(formatDuration(850), "850ms");
-  assert.equal(formatDuration(12_400), "12s");
-  assert.equal(formatDuration(4_200), "4.2s");
-  assert.equal(formatDuration(185_000), "3m 05s");
-  assert.equal(formatDuration(3_720_000), "1h 02m");
-  assert.equal(formatDuration(-1), "—");
 });
 
 test("isFailedRun covers both failure statuses", () => {

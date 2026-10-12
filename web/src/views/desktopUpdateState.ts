@@ -1,4 +1,5 @@
 import type { DesktopUpdateProgress } from "@/lib/desktop";
+import { formatBytes } from "@/lib/format";
 
 let updateInFlight = false;
 
@@ -20,5 +21,5 @@ export function progressLabel(progress: DesktopUpdateProgress | null): string | 
     const pct = Math.round((progress.downloaded / progress.total) * 100);
     return `${pct}% downloaded`;
   }
-  return `${Math.round(progress.downloaded / 1024 / 1024)} MB downloaded`;
+  return `${formatBytes(progress.downloaded)} downloaded`;
 }

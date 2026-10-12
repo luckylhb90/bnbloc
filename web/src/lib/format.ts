@@ -36,6 +36,27 @@ export function formatBytes(bytes: number): string {
   return `${value.toFixed(1)} ${units[unitIndex]}`;
 }
 
+// formatUsd renders a dollar amount with two decimals, or two significant
+// digits below a cent ($0.0042) so a small cost never reads $0.00. An
+// unreported amount (undefined) is "—", never $0.00.
+export function formatUsd(v: number | undefined): string {
+  if (v === undefined) return "—";
+  if (v > 0 && v < 0.01) return `$${v.toPrecision(2)}`;
+  return `$${v.toFixed(2)}`;
+}
+
+// formatDuration renders a millisecond span compactly: 850ms, 4.2s, 12s,
+// 3m 05s, 1h 02m.
+export function formatDuration(ms: number): string {
+  if (!Number.isFinite(ms) || ms < 0) return "—";
+  if (ms < 1000) return `${Math.round(ms)}ms`;
+  const s = ms / 1000;
+  if (s < 60) return `${s < 10 ? s.toFixed(1) : Math.round(s)}s`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m ${String(Math.floor(s % 60)).padStart(2, "0")}s`;
+  return `${Math.floor(m / 60)}h ${String(m % 60).padStart(2, "0")}m`;
+}
+
 export function compactNumber(value: number): string {
   if (value < 1000) return `${value}`;
   if (value < 1_000_000) return `${trimFixed(value / 1000)}k`;

@@ -3,9 +3,8 @@
 // server-side from the borrow accountability rows of platform grants. Cost is
 // what the bridge reports (0 for unpriced/trial models). Wire shapes and the
 // pure formatting the Platform card renders.
-import { compactNumber } from "./format.ts";
+import { compactNumber, formatUsd } from "./format.ts";
 import { prettyModel } from "./modelLabel.ts";
-import { formatCost } from "./teamDashboard.ts";
 
 export interface PlatformUsageTotals {
   readonly runs: number;
@@ -82,7 +81,7 @@ export function usageTiles(t: PlatformUsageTotals): { readonly label: string; re
     { label: "Members", value: compactNumber(t.members) },
     { label: "Rooms", value: compactNumber(t.rooms) },
     { label: "Tokens", value: compactNumber(t.tokens) },
-    { label: "Cost", value: formatCost(t.cost) },
+    { label: "Cost", value: formatUsd(t.cost) },
   ];
 }
 
@@ -94,7 +93,7 @@ export function usageQuery(date: Date = new Date()): string {
 
 // usageSummary is a one-line period summary ("3 runs · 2 members · $0.00").
 export function usageSummary(t: PlatformUsageTotals): string {
-  return `${plural(t.runs, "run", "runs")} · ${plural(t.members, "member", "members")} · ${formatCost(t.cost)}`;
+  return `${plural(t.runs, "run", "runs")} · ${plural(t.members, "member", "members")} · ${formatUsd(t.cost)}`;
 }
 
 // runModelLabel names the model of a run; an empty model ran on the agent's

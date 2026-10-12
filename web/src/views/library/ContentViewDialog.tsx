@@ -2,7 +2,6 @@ import { useEffect, useState } from "react";
 import { DownloadSimpleIcon, ShieldWarningIcon, SparkleIcon } from "@phosphor-icons/react";
 import {
   contentLabel,
-  formatSize,
   isTeam,
   permissionLabel,
   usageLine,
@@ -11,7 +10,7 @@ import {
   type ContentVersionDetail,
 } from "@/lib/contentComponents";
 import { apiErrorText, contentApi } from "@/lib/contentComponentsApi";
-import { relativeTime } from "@/lib/format";
+import { formatBytes, relativeTime } from "@/lib/format";
 import { saveBlob } from "@/lib/saveBlob";
 import { Button } from "@/ui/Button";
 import { Badge } from "@/ui/Card";
@@ -200,7 +199,7 @@ export function ContentViewDialog({
                   {view.files.map((f) => (
                     <li key={f.path} className="flex gap-2">
                       <span className="min-w-0 flex-1 truncate">{f.path}</span>
-                      <span className="text-[var(--color-fg-subtle)]">{formatSize(f.sizeBytes)}</span>
+                      <span className="text-[var(--color-fg-subtle)]">{formatBytes(f.sizeBytes)}</span>
                     </li>
                   ))}
                 </ul>
@@ -216,7 +215,7 @@ export function ContentViewDialog({
                     <span className="w-16 font-mono">v{v.version}</span>
                     <span className="min-w-0 flex-1 truncate text-[var(--color-fg-subtle)]">
                       {v.createdAtMs > 0 ? `${relativeTime(v.createdAtMs)} · ` : ""}
-                      {formatSize(v.sizeBytes)}
+                      {formatBytes(v.sizeBytes)}
                     </span>
                     <button
                       type="button"

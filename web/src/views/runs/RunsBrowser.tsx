@@ -10,7 +10,6 @@ import {
 } from "@phosphor-icons/react";
 import { ApiError } from "@/lib/api";
 import {
-  formatDuration,
   isFailedRun,
   isLiveRun,
   mergeRunPages,
@@ -25,8 +24,8 @@ import {
 } from "@/lib/agentRuns";
 import { agentRunsApi } from "@/lib/agentRunsApi";
 import { cn } from "@/lib/cn";
-import { exactTime, relativeTime } from "@/lib/format";
-import { formatCost, formatTokens } from "@/lib/teamDashboard";
+import { exactTime, formatDuration, formatUsd, relativeTime } from "@/lib/format";
+import { formatTokens } from "@/lib/teamDashboard";
 import { useVisiblePoll } from "@/lib/useVisiblePoll";
 import { Button } from "@/ui/Button";
 import { Badge, Skeleton } from "@/ui/Card";
@@ -76,7 +75,7 @@ function usageText(r: AgentRun): string {
   if (!u || (u.inputTokens === undefined && u.outputTokens === undefined && u.costUsd === undefined)) return "";
   const parts: string[] = [];
   if (u.inputTokens !== undefined || u.outputTokens !== undefined) parts.push(formatTokens(u.inputTokens, u.outputTokens));
-  if (u.costUsd !== undefined) parts.push(formatCost(u.costUsd));
+  if (u.costUsd !== undefined) parts.push(formatUsd(u.costUsd));
   return parts.join(" · ");
 }
 

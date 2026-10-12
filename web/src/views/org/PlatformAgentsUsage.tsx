@@ -1,10 +1,9 @@
 import type { ReactNode } from "react";
 import { CaretDownIcon } from "@phosphor-icons/react";
 import { useAuth } from "@/lib/auth";
-import { compactNumber, exactTime, relativeTime } from "@/lib/format";
+import { compactNumber, exactTime, formatUsd, relativeTime } from "@/lib/format";
 import { platformAgentsApi } from "@/lib/platformAgentsApi";
 import { roomLabel, runModelLabel, usageSummary, usageTiles, type PlatformUsageTotals } from "@/lib/platformUsage";
-import { formatCost } from "@/lib/teamDashboard";
 import { useQuery } from "@/lib/useQuery";
 import { Button } from "@/ui/Button";
 import { ErrorBox } from "@/ui/ErrorBox";
@@ -46,14 +45,14 @@ export function PlatformAgentsUsagePanel() {
           <Expandable title="Top members" hint="this month" count={usage.topMembers.length}>
             <Table
               head={["Member", "Runs", "Tokens", "Cost"]}
-              rows={usage.topMembers.map((m) => [<UserName key="m" id={m.memberId} />, compactNumber(m.runs), compactNumber(m.tokens), formatCost(m.cost)])}
+              rows={usage.topMembers.map((m) => [<UserName key="m" id={m.memberId} />, compactNumber(m.runs), compactNumber(m.tokens), formatUsd(m.cost)])}
               empty="No runs this month."
             />
           </Expandable>
           <Expandable title="Top rooms" hint="this month" count={usage.topRooms.length}>
             <Table
               head={["Room", "Organization", "Runs", "Tokens", "Cost"]}
-              rows={usage.topRooms.map((r) => [roomLabel(r), r.tenantId, compactNumber(r.runs), compactNumber(r.tokens), formatCost(r.cost)])}
+              rows={usage.topRooms.map((r) => [roomLabel(r), r.tenantId, compactNumber(r.runs), compactNumber(r.tokens), formatUsd(r.cost)])}
               empty="No runs this month."
             />
           </Expandable>
@@ -69,7 +68,7 @@ export function PlatformAgentsUsagePanel() {
                 r.agent,
                 <UserName key="h" id={r.hostUserId} />,
                 runModelLabel(r.model),
-                formatCost(r.cost),
+                formatUsd(r.cost),
               ])}
               empty="No runs yet."
             />

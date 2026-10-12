@@ -1,4 +1,4 @@
-import { compactNumber } from "./format.ts";
+import { compactNumber, formatUsd } from "./format.ts";
 
 // Monthly usage budgets (R12): org admins set token/cost budgets per member
 // and for the organization (GET/PUT /v1/tenant/budgets); a member reads their
@@ -144,7 +144,7 @@ export function budgetTone(v: Pick<BudgetView, "percent" | "reached" | "warnAtPe
 export function describeBurn(v: BudgetLimits & { burn: UsageBurn }): string {
   const parts: string[] = [];
   if (v.tokens !== undefined) parts.push(`${compactNumber(v.burn.tokens)} of ${compactNumber(v.tokens)} tokens`);
-  if (v.cost !== undefined) parts.push(`$${v.burn.cost.toFixed(2)} of $${v.cost.toFixed(2)}`);
+  if (v.cost !== undefined) parts.push(`${formatUsd(v.burn.cost)} of ${formatUsd(v.cost)}`);
   return parts.join(" · ");
 }
 
@@ -152,7 +152,7 @@ export function describeBurn(v: BudgetLimits & { burn: UsageBurn }): string {
 export function describeLimits(v: BudgetLimits): string {
   const parts: string[] = [];
   if (v.tokens !== undefined) parts.push(`${compactNumber(v.tokens)} tokens`);
-  if (v.cost !== undefined) parts.push(`$${v.cost.toFixed(2)}`);
+  if (v.cost !== undefined) parts.push(formatUsd(v.cost));
   return parts.length ? `${parts.join(" · ")} / month` : "";
 }
 

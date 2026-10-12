@@ -3,12 +3,12 @@ import { DownloadSimpleIcon, ReceiptIcon } from "@phosphor-icons/react";
 import { api, ApiError } from "@/lib/api";
 import {
   currentMonth,
-  formatCost,
   formatTokens,
   type BorrowUsageReport,
   type UsageAs,
   type UsageGroupBy,
 } from "@/lib/teamDashboard";
+import { formatUsd } from "@/lib/format";
 import { Button } from "@/ui/Button";
 import { Skeleton } from "@/ui/Card";
 import { ErrorBox } from "@/ui/ErrorBox";
@@ -159,7 +159,7 @@ export function UsageBillingTab({
                       {hasTokens && (
                         <td className="px-3 py-2 text-right tabular">{formatTokens(r.inputTokens, r.outputTokens)}</td>
                       )}
-                      {hasCost && <td className="px-3 py-2 text-right tabular">{formatCost(r.cost)}</td>}
+                      {hasCost && <td className="px-3 py-2 text-right tabular">{formatUsd(r.cost)}</td>}
                     </tr>
                   ))}
                 </tbody>
@@ -174,7 +174,7 @@ export function UsageBillingTab({
                         {formatTokens(report.totalInputTokens, report.totalOutputTokens)}
                       </td>
                     )}
-                    {hasCost && <td className="px-3 py-2 text-right tabular">{formatCost(report.totalCost)}</td>}
+                    {hasCost && <td className="px-3 py-2 text-right tabular">{formatUsd(report.totalCost)}</td>}
                   </tr>
                 </tfoot>
               </table>

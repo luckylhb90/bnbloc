@@ -5,6 +5,7 @@ import type { ArtifactRequirement } from "@/lib/componentArtifactRequirements";
 import { api } from "@/lib/api";
 import type { ArtifactUploadResult } from "@/lib/artifactUpload";
 import { cn } from "@/lib/cn";
+import { formatBytes } from "@/lib/format";
 import { Badge } from "@/ui/Card";
 import { Input } from "@/ui/Input";
 
@@ -159,10 +160,4 @@ function ArtifactStatusBadge({ state }: { readonly state?: ArtifactUploadState }
     return <Badge tone="neutral"><UploadSimpleIcon size={12} /> Uploading</Badge>;
   }
   return <Badge tone="warning"><WarningCircleIcon size={12} weight="fill" /> Required</Badge>;
-}
-
-function formatBytes(size: number): string {
-  if (size < 1024) return `${size} B`;
-  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
-  return `${(size / (1024 * 1024)).toFixed(1)} MB`;
 }

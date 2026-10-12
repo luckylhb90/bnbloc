@@ -1,16 +1,5 @@
 import type { TurnMetrics } from "@/lib/api";
-import { compactNumber } from "@/lib/format";
-
-function formatDuration(ms: number): string {
-  if (ms < 1000) return `${ms}ms`;
-  if (ms < 10_000) return `${(ms / 1000).toFixed(1)}s`;
-  return `${Math.round(ms / 1000)}s`;
-}
-
-function formatCost(costUsd: number): string {
-  if (costUsd < 0.001) return "<$0.001";
-  return `$${costUsd.toFixed(3)}`;
-}
+import { compactNumber, formatDuration, formatUsd } from "@/lib/format";
 
 function metricTitle(metrics: TurnMetrics): string {
   const parts = [
@@ -37,7 +26,7 @@ export function TurnMetricsFooter({ metrics }: { readonly metrics: TurnMetrics }
     metrics.ttftMs > 0 ? `TTFT ${formatDuration(metrics.ttftMs)}` : "",
     metrics.durationApiMs > 0 ? formatDuration(metrics.durationApiMs) : "",
   ].filter(Boolean);
-  const costPart = metrics.reported && metrics.costUsd > 0 ? [formatCost(metrics.costUsd)] : [];
+  const costPart = metrics.reported && metrics.costUsd > 0 ? [formatUsd(metrics.costUsd)] : [];
   return (
     <div
       title={metricTitle(metrics)}

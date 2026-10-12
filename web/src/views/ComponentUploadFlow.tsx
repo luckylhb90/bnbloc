@@ -5,6 +5,7 @@ import { artifactRequirementsForPackage, buildFinalComponentPackageJSON, uploade
 import { inspectComponentFile, type InspectedComponentFile } from "@/lib/componentPackageIntake";
 import { createPackageDraft, packageDraftFromEnvelope, nextPublishWizardStep, previousPublishWizardStep, type PackageDraftFields, type PublishWizardStep } from "@/lib/componentPublishWizard";
 import type { ComponentPackageEnvelope } from "@/lib/apiTypes";
+import { formatBytes } from "@/lib/format";
 import { Button } from "@/ui/Button";
 import { ErrorBox } from "@/ui/ErrorBox";
 import { useToast } from "@/ui/Toast";
@@ -74,7 +75,7 @@ export function ComponentUploadFlow({ onPublished }: { readonly onPublished?: (n
 
   const setPackage = (envelope: ComponentPackageEnvelope, fileName: string, fileSize: number) => {
     setChoice({ envelope, draft: packageDraftFromEnvelope(envelope), fileName, fileSize }); setReview(null); setStep("configure"); setPhase("idle"); setInspection({ type: "package", envelope, nextStep: "configure" }); setPendingBinary(null); setError(null); setUploads({}); setSignature("");
-    setChecks(withCheck(withCheck(INITIAL, "reading", "done", `${fileName} · ${bytes(fileSize)}`), "schema", "done", `${envelope.kind} · ${envelope.name} v${envelope.version}`));
+    setChecks(withCheck(withCheck(INITIAL, "reading", "done", `${fileName} · ${formatBytes(fileSize)}`), "schema", "done", `${envelope.kind} · ${envelope.name} v${envelope.version}`));
   };
 
   const inspectFile = async (file: File) => {
@@ -94,7 +95,7 @@ export function ComponentUploadFlow({ onPublished }: { readonly onPublished?: (n
   const startBinary = (file: File, mode: PublishSourceMode, platform?: string) => {
     setChoice({ draft: { ...createPackageDraft(mode.kind, mode.runtime), ...(platform ? { platformArtifacts: [platform] } : {}) }, fileName: file.name, fileSize: file.size, initialFile: file, ...(platform ? { initialPlatform: platform } : {}), mode });
     setInspection(null); setPendingBinary(null); setReview(null); setStep("configure"); setPhase("idle"); setError(null); setUploads({}); setSignature("");
-    setChecks(withCheck(INITIAL, "reading", "done", `${file.name} · ${bytes(file.size)}`));
+    setChecks(withCheck(INITIAL, "reading", "done", `${file.name} · ${formatBytes(file.size)}`));
   };
   const startManual = (mode: PublishSourceMode, prior?: InspectedComponentFile) => {
     setChoice({ draft: createPackageDraft(mode.kind, mode.runtime), fileName: "New package", fileSize: 0, mode }); setInspection(prior ?? null); setPendingBinary(null); setReview(null); setStep("configure"); setPhase("idle"); setError(null); setUploads({}); setSignature("");
@@ -139,7 +140,6 @@ function serverDone(checks: readonly ComponentValidationStep[], key: string, rol
 function failingCheck(message: string): ComponentValidationStepId { return /signature|publisher key/i.test(message) ? "signature" : /artifact|sha256/i.test(message) ? "artifact" : /probe|conformance/i.test(message) ? "probe" : "publishing"; }
 function artifactDetail(items: readonly ArtifactRequirement[]): string { return `${items.length} platform binary${items.length === 1 ? "" : "ies"} required before publishing.`; }
 function missingArtifacts(items: readonly ArtifactRequirement[], uploads: ArtifactUploadStates): string { const missing = items.filter((item) => !uploads[item.platform]?.uploaded).map((item) => item.platform); return missing.length ? `Upload a binary for each required platform: ${missing.join(", ")}.` : "Upload every required platform binary before continuing."; }
-function bytes(size: number): string { return size < 1024 ? `${size} B` : size < 1024 * 1024 ? `${(size / 1024).toFixed(1)} KB` : `${(size / (1024 * 1024)).toFixed(1)} MB`; }
 function PublishSuccess({ published, checks, onAnother }: { readonly published: Published; readonly checks: readonly ComponentValidationStep[]; readonly onAnother: () => void }) {
   return <section className="grid gap-3" aria-label="Component published">
     <p className="flex items-center gap-2 text-base font-semibold text-[var(--color-fg)]"><CheckCircleIcon size={20} weight="fill" className="text-[var(--color-accent)]" /> Published {published.name} v{published.version}</p>

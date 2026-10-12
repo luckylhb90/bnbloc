@@ -2,6 +2,7 @@
 // a roster. The shapes mirror internal/wire/teams.go; the helpers are pure
 // (roster wording, the plan request, the estimate sentence) so they are
 // unit-tested.
+import { formatUsd } from "./format.ts";
 
 export interface ContentTeamExpert {
   readonly componentId: string;
@@ -104,13 +105,6 @@ export function planRequest(team: ContentTeam, lead: { ownerId: string; core?: s
     lead: { ownerId: lead.ownerId, provider: lead.provider, ...(lead.core ? { core: lead.core } : {}) },
     members: team.members.map((m) => ({ role: m.role, defaultAgent: m.defaultAgent })),
   };
-}
-
-// formatUsd: cents below a dollar keep two significant decimals ($0.042),
-// larger amounts two decimals.
-export function formatUsd(v: number): string {
-  if (v > 0 && v < 0.01) return `$${v.toPrecision(2)}`;
-  return `$${v.toFixed(2)}`;
 }
 
 // estimateText is the honest pre-flight sentence: the sum and how many runs

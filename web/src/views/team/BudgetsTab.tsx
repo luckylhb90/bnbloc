@@ -11,7 +11,7 @@ import {
   type BudgetView,
   type TenantBudgets,
 } from "@/lib/budgets";
-import { compactNumber } from "@/lib/format";
+import { compactNumber, formatUsd } from "@/lib/format";
 import { Button } from "@/ui/Button";
 import { Card, Skeleton } from "@/ui/Card";
 import { ErrorBox } from "@/ui/ErrorBox";
@@ -228,7 +228,7 @@ export function BudgetsTab() {
                         <UserName id={u.userId} />
                       </td>
                       <td className="px-3 py-2 text-right tabular">{compactNumber(u.tokens)}</td>
-                      <td className="px-3 py-2 text-right tabular">${u.cost.toFixed(2)}</td>
+                      <td className="px-3 py-2 text-right tabular">{formatUsd(u.cost)}</td>
                       <td className="px-3 py-2 text-right tabular">{v ? `${v.percent}%` : "—"}</td>
                     </tr>
                   );

@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { ApiError } from "@/lib/api";
 import { budgetsApi } from "@/lib/budgetsApi";
 import { describeLimits, periodLabel, type MyBudget as MyBudgetData } from "@/lib/budgets";
-import { compactNumber } from "@/lib/format";
+import { compactNumber, formatUsd } from "@/lib/format";
 import { Card, Skeleton } from "@/ui/Card";
 import { ErrorBox } from "@/ui/ErrorBox";
 import { BudgetBar } from "@/views/team/BudgetBar";
@@ -55,7 +55,7 @@ export function MyBudget() {
             <p className="text-sm text-[var(--color-fg-muted)]">
               No monthly budget is set for you. Your agents used{" "}
               <span className="tabular">{compactNumber(data.burn.tokens)}</span> tokens
-              {data.burn.cost > 0 ? ` and $${data.burn.cost.toFixed(2)}` : ""} this month.
+              {data.burn.cost > 0 ? ` and ${formatUsd(data.burn.cost)}` : ""} this month.
             </p>
           )}
           {data.blocked && (

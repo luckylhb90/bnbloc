@@ -2,10 +2,9 @@ import { useCallback, useEffect, useState } from "react";
 import { ArrowClockwiseIcon, CpuIcon, ListChecksIcon } from "@phosphor-icons/react";
 import { api, ApiError } from "@/lib/api";
 import { cn } from "@/lib/cn";
-import { relativeTime } from "@/lib/format";
+import { formatUsd, relativeTime } from "@/lib/format";
 import {
   TEAM_REFRESH_MS,
-  formatCost,
   formatTokens,
   summarizeTeam,
   type TeamAgent,
@@ -86,7 +85,7 @@ function tokens(a: TeamAgent): string {
 }
 
 function costCell(a: TeamAgent): string {
-  const c = formatCost(a.usage?.costUsd);
+  const c = formatUsd(a.usage?.costUsd);
   return a.usage?.shared && a.usage.costUsd !== undefined ? `${c}*` : c;
 }
 
@@ -151,7 +150,7 @@ export function TeamAgentsTab({
           <Stat label="Working now" value={String(sum.busy)} />
           <Stat label="Turns" value={String(sum.turns)} />
           <Stat label="Borrowed runs" value={String(sum.borrowedRuns)} />
-          <Stat label="Reported cost" value={formatCost(sum.costUsd)} />
+          <Stat label="Reported cost" value={formatUsd(sum.costUsd)} />
         </section>
       )}
 

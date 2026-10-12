@@ -154,12 +154,6 @@ export function usageReportPath(q: UsageReportQuery, tzOffsetMin: number, format
   return `${base}?${params}`;
 }
 
-// formatCost renders a reported cost; undefined stays "—" (not reported).
-export function formatCost(cost: number | undefined): string {
-  if (cost === undefined) return "—";
-  return cost < 0.01 && cost > 0 ? `$${cost.toFixed(4)}` : `$${cost.toFixed(2)}`;
-}
-
 // formatTokens renders reported token usage as "1.2k in / 340 out"; "—" when
 // neither count was reported (an absent count is never shown as 0).
 export function formatTokens(input: number | undefined, output: number | undefined): string {
