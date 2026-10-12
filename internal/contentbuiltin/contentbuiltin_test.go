@@ -39,7 +39,7 @@ func TestBuilderShipsAndValidates(t *testing.T) {
 	if pkg.Manifest.NeedsSandbox() || len(pkg.Manifest.Permissions()) != 0 {
 		t.Fatal("the builder must declare no permissions")
 	}
-	for _, want := range []string{"save_component", "get_component", "drafts/<name>/", "Save as", "中文"} {
+	for _, want := range []string{"save_component", "get_component", "drafts/<name>/", "Save as", "Save as prompt pack", "bnbloc.prompt.package/v1", "starter", "中文"} {
 		if !strings.Contains(pkg.Instructions, want) {
 			t.Errorf("builder instructions do not mention %q", want)
 		}
@@ -69,8 +69,8 @@ func TestBuilderExamplesValidate(t *testing.T) {
 		}
 		byPkg[parts[1]][parts[2]] = []byte(m[2] + "\n")
 	}
-	if len(byPkg) < 2 {
-		t.Fatalf("found %d example packages, want an expert and a skill pack", len(byPkg))
+	if len(byPkg) < 3 {
+		t.Fatalf("found %d example packages, want an expert, a skill pack and a prompt pack", len(byPkg))
 	}
 	kinds := map[string]bool{}
 	for name, files := range byPkg {
@@ -87,7 +87,7 @@ func TestBuilderExamplesValidate(t *testing.T) {
 		}
 		kinds[pkg.Manifest.Kind] = true
 	}
-	if !kinds[contentpkg.KindExpert] || !kinds[contentpkg.KindSkill] {
+	if !kinds[contentpkg.KindExpert] || !kinds[contentpkg.KindSkill] || !kinds[contentpkg.KindPrompt] {
 		t.Fatalf("example kinds = %v", kinds)
 	}
 }

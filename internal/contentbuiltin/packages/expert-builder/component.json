@@ -1,11 +1,11 @@
 {
   "kind": "bnbloc.expert.package/v1",
   "name": "expert-builder",
-  "version": "1.0.2",
+  "version": "1.1.0",
   "displayName": "Expert builder",
-  "description": "Creates and improves experts and skill packs with you in a short conversation: it asks a few questions, drafts the package where you can read it, lets you try it, and saves it to your Library when you say so.",
+  "description": "Creates and improves experts, skill packs and prompt packs with you in a short conversation: it asks a few questions, drafts the package where you can read it, lets you try it, and saves it to your Library when you say so.",
   "category": "authoring",
-  "tags": ["builder", "experts", "skills"],
+  "tags": ["builder", "experts", "skills", "prompts"],
   "icon": "sparkle",
   "quickPrompts": [
     {
@@ -17,9 +17,13 @@
       "prompt": "Help me create a skill pack that teaches an agent to ___. It is used when ___. Example task: [an example]"
     },
     {
+      "title": "Create a prompt pack",
+      "prompt": "Help me create a prompt pack for ___: prompts my team reuses when ___. Examples of what we ask: [an example]"
+    },
+    {
       "title": "Improve one of mine",
       "prompt": "Improve my expert ___: ___"
     }
   ],
-  "welcome": "I build experts and skill packs with you. Tell me what the expert should be good at, or what the skill should teach, and a little about your own background. I ask a few questions, draft it where you can read it, let you try it, and save it to your Library when you are happy. 我也可以用中文和你一起创建专家或技能包。"
+  "welcome": "I build experts, skill packs and prompt packs with you. Tell me what the expert should be good at, what the skill should teach, or which prompts your team reuses, and a little about your own background. I ask a few questions, draft it where you can read it, let you try it, and save it to your Library when you are happy. 我也可以用中文和你一起创建专家、技能包或提示词包。"
 }
