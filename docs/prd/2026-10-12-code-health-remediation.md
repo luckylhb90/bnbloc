@@ -370,12 +370,33 @@ desktop agent.
   "not configured" answer moved over; blob failures map once; the web reads
   only `{"error"}`. Tests: `TestNoSilent5xx` (obs.ServerError only),
   `TestErrorStatusesThroughWriteStatus`, `TestOneErrorBodyOwner`.
+- **Status 2.6: landed.** `store.Grant.Live` plus shareagent's
+  `usableGrant`, one admission rule (`admitReservation`), `RaiseRunQuota`
+  refusing an expired grant; `extpipe.MemberVisibilityWith` and
+  `TenantDistribution` everywhere (realtime plugin streams, notify, plugin
+  runtime, the gateway catalog and notifier replies); one component
+  resolver (`requestComponent`, with gw L6), one tenant-scope check, one
+  install count; the dual adoption fields and the web's `?? x` reads gone
+  (`adoption{memberInstalls,totalMembers}`, `installedAtMs`). Tests:
+  `TestGrantLivenessOwned`, `TestVisibilityOwned`,
+  `TestAccountabilityDropsUnpublishedPlatformGrant`.
 - **Status 2.7: landed.** `publicOrigin` (the gateway now reads
   `BNBLOC_PUBLIC_URL`), `pkgmeta` artifact URL owner, CORS expose headers,
   `pickCore` over visible cores (dev discovery included), `corePipeline`
   once, `config.Bool`/`List`, startup-read env, `s.audit`, `ownedBy`, the
   room-id comment, and gw L4 (`builtin` gone from `/v1/cores` and the web).
   gw L6 (one component-name check) went with 2.6's resolver.
+
+- **Status removals (D3): landed.** The legacy borrow authority (with store
+  `AcquireLease`/`ReleaseLease`/`ActiveLeases`/`ConsumeRun`), activity
+  submit-provenance and sync-states (store `RecordSubmitProvenance`,
+  `SubmitQueryable`, `SyncStates`), relay rendezvous/ice-config and their
+  env, the unread `tenantId` fields (activity and the bridge's sender),
+  pre-channels compatibility (an omitted channel needs the room's default
+  channel, no legacy buckets, no create-on-GET, a typing body), and gw L4.
+  Left for 4.5: the `shared_agent_leases` table and the unread
+  `sync_states` columns. svc M19: `internal/audit.Record` and
+  `wire.AuditOutcome*` (`TestAuditThroughOneWriter`).
 
 **Removals (D3):**
 - The legacy borrow authority: shareagent start/resume/settings/turn/release/access, `handleAction`, `proxyTurn`, controller `Authorize`/`Release`, `staticPresence`/`unavailableOwners`, and store `AcquireLease`/`ConsumeRun` once unused (svc M1).

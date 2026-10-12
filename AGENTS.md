@@ -395,9 +395,9 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   every link to another member, published artifact URL and previewer CSP.
   The artifact URL is built and parsed only by `pkgmeta`
   (`GatewayArtifactURL`/`Path`, `ArtifactKeyOf`, `GatewayArtifactKey`;
-  `TestArtifactURLOneOwner`). An audit row is written only by `s.audit(ctx,
-  tenantID, rec)`, which always takes the tenant
-  (`TestAuditWrittenOnlyByAudit`). "Is this component mine" is `ownedBy`
+  `TestArtifactURLOneOwner`). A gateway audit row is written only by
+  `s.audit(ctx, tenantID, rec)` over the shared writer, which always takes
+  the tenant (`TestAuditWrittenOnlyByAudit`). "Is this component mine" is `ownedBy`
   (owner and tenant; `TestContentOwnershipOneRule`). Environment is read at
   startup (`config.Bool`, `config.List`; `Service.DevDiscovery`,
   `DesktopDownloadURL`, `PublicURL`), never per request.
@@ -916,8 +916,17 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   (the room handoff zip and the sandbox conformance suite are allowlisted).
 - **"May member M use component C" has one answer:**
   `extpipe.MemberVisibility`, for executable and content components alike
-  (room pins and uses come in through `internal/contentuse`). Never
-  re-derive visibility in a handler.
+  (room pins and uses come in through `internal/contentuse`);
+  `MemberVisibilityWith` when the opt-in install is read per component.
+  "Does record R reach tenant T" (events, notifier targets) is
+  `extpipe.TenantDistribution`. Never branch on a rollout or call
+  `AllowsTenant` outside extpipe (`TestVisibilityOwned`). In the gateway a
+  component route's `{name}` resolves only through `requestComponent` (the
+  409 ambiguity rule, the "name required" check) and a tenant scope
+  validates only through `setTenantsRequest.scope`.
+- **The shared audit trail has one writer: `internal/audit.Record`** (best
+  effort, a failed write logged as `bnbloc.audit.append_failed`); outcomes
+  come only from `wire.AuditOutcome*` (`TestAuditThroughOneWriter`).
 - **Workspace paths have one policy: `core/workspace_paths.go`.**
   `core.BnblocOwnedPath` is what bnbloc writes for the agent (`.room/`,
   `CLAUDE.md`, `AGENTS.md`, `.claude/skills/**`, `.agents/skills/**`,
@@ -1080,6 +1089,13 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   on `roomId`) and TTL-bounded.
 - The owner authorization surface is the in-room handshake icon (all clients,
   incl. browser owners with no local core), not the desktop-only bridge panel.
+- **A grant is in force by one rule: `store.Grant.Live(atMs)`.** The
+  policy-aware form is shareagent's `usableGrant` (Live, and a platform
+  grant only while published), read by `liveAuthorization` and every
+  listing; `admitReservation` is the one admission rule (used + 1 run <=
+  quota, settled cost below the allowance). Reserve-then-settle is the only
+  borrow authority: there are no leases and no start/turn/release routes
+  (`TestGrantLivenessOwned`).
 - **Borrowed runs are reserved, then settled (R8).** Before driving, the
   owner's bridge POSTs `.../authorization/reserve` (owner-only): ONE
   conditional UPDATE admits the run against liveness + run quota + cost
