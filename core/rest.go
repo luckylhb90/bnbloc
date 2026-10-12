@@ -22,20 +22,35 @@ import (
 // budget passes its own context deadline: the earlier deadline always wins.
 const DefaultRequestTimeout = 2 * time.Minute
 
-// REST is the shared bearer+JSON HTTP client every core provider that speaks a
-// plain REST daemon uses, so a new provider does not hand-copy the same
-// request/response plumbing (see AGENTS.md "Reuse before you add"). It is
-// stateless: the caller passes the member's Endpoint per request, matching the
-// Provider contract. Name identifies the core in error messages.
+// MaxResponseBytes bounds a buffered response body (a JSON document, a
+// session file read). A larger answer is a failed request, never a
+// truncated success.
+const MaxResponseBytes = 64 << 20
+
+// maxErrorBodyBytes bounds what a failed response keeps of its body: enough
+// for any error envelope and a legible message.
+const maxErrorBodyBytes = 64 << 10
+
+// REST is the one HTTP plumbing every bnbloc protocol client goes through: a
+// manifest core, the Core Protocol client and the Sandbox Protocol client
+// (see AGENTS.md "Reuse before you add"). Request is the one place the
+// endpoint's bearer is set, Send the one bounded read and error mapping of a
+// failed answer, JSON the one decode. It is stateless: the caller passes the
+// Endpoint per request, matching the Provider contract.
 type REST struct {
 	// Name prefixes errors, e.g. "acme". Required for legible failures.
 	Name string
 	// HTTP is the client to use; nil falls back to http.DefaultClient.
 	HTTP *http.Client
-	// Timeout bounds each request; zero uses DefaultRequestTimeout.
+	// Timeout bounds each buffered request (Do, DoRaw, JSON); zero uses
+	// DefaultRequestTimeout. Send (a stream) is bounded by its context only.
 	Timeout time.Duration
+	// DecodeError maps a failed answer onto the protocol's typed error (a
+	// protocol client sets DecodeEnvelope); nil keeps the *HTTPError.
+	DecodeError func(*HTTPError) error
 }
 
+// HTTPError is a non-2xx answer: the request and the (bounded) body.
 type HTTPError struct {
 	Core   string
 	Method string
@@ -48,6 +63,46 @@ func (e *HTTPError) Error() string {
 	return fmt.Sprintf("%s %s %s: status %d: %s", e.Core, e.Method, e.Path, e.Status, Truncate(e.Body, 256))
 }
 
+// EnvelopeError is a failed answer that carried a protocol error envelope:
+// Err is the protocol's typed error, HTTP the answer it arrived in.
+// errors.As reaches both, so a caller branches on the typed code while
+// Retryable still sees the status when the envelope states no retry hint.
+type EnvelopeError struct {
+	Err  error
+	HTTP *HTTPError
+}
+
+func (e *EnvelopeError) Error() string   { return e.Err.Error() }
+func (e *EnvelopeError) Unwrap() []error { return []error{e.Err, e.HTTP} }
+
+// DecodeEnvelope is the REST.DecodeError of a protocol whose failed answers
+// carry {"error": T} with a non-empty "code" (Core Protocol, Sandbox
+// Protocol): each protocol keeps its own error type and code set, the
+// decoding is shared. A body that is not such an envelope stays the
+// *HTTPError.
+func DecodeEnvelope[T any, PT interface {
+	*T
+	error
+}]() func(*HTTPError) error {
+	return func(he *HTTPError) error {
+		var probe struct {
+			Error struct {
+				Code string `json:"code"`
+			} `json:"error"`
+		}
+		if json.Unmarshal(he.Body, &probe) != nil || probe.Error.Code == "" {
+			return he
+		}
+		var env struct {
+			Error T `json:"error"`
+		}
+		if json.Unmarshal(he.Body, &env) != nil {
+			return he
+		}
+		return &EnvelopeError{Err: PT(&env.Error), HTTP: he}
+	}
+}
+
 func (c REST) client() *http.Client {
 	if c.HTTP != nil {
 		return c.HTTP
@@ -55,19 +110,53 @@ func (c REST) client() *http.Client {
 	return http.DefaultClient
 }
 
+// Request builds one request against ep: ep.BaseURL+path, the endpoint's
+// bearer, and contentType when set. It is the only place a bnbloc protocol
+// client puts a token on the wire.
+func (c REST) Request(ctx context.Context, method string, ep Endpoint, path string, body io.Reader, contentType string) (*http.Request, error) {
+	req, err := http.NewRequestWithContext(ctx, method, strings.TrimRight(ep.BaseURL, "/")+path, body)
+	if err != nil {
+		return nil, err
+	}
+	if contentType != "" {
+		req.Header.Set("Content-Type", contentType)
+	}
+	if ep.Token != "" {
+		req.Header.Set("Authorization", "Bearer "+ep.Token)
+	}
+	return req, nil
+}
+
+// Send performs req and returns a 2xx response for the caller to read and
+// close. Any other answer is read (bounded), closed and returned as an
+// error: the *HTTPError, mapped through DecodeError. Send adds no deadline
+// beyond req's context, so a stream (an exec, an archive) may outlive any
+// fixed bound.
+func (c REST) Send(req *http.Request) (*http.Response, error) {
+	resp, err := c.client().Do(req)
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		return resp, nil
+	}
+	defer resp.Body.Close()
+	raw, _ := io.ReadAll(io.LimitReader(resp.Body, maxErrorBodyBytes))
+	he := &HTTPError{Core: c.Name, Method: req.Method, Path: req.URL.RequestURI(), Status: resp.StatusCode, Body: raw}
+	if c.DecodeError != nil {
+		return nil, c.DecodeError(he)
+	}
+	return nil, he
+}
+
 // Get issues a GET against ep.BaseURL+path with the endpoint's bearer token.
 func (c REST) Get(ctx context.Context, ep Endpoint, path string) ([]byte, error) {
 	return c.Do(ctx, http.MethodGet, ep, path, nil)
 }
 
-// Post issues a POST with a JSON-encoded body (nil body sends no payload).
-func (c REST) Post(ctx context.Context, ep Endpoint, path string, body any) ([]byte, error) {
-	return c.Do(ctx, http.MethodPost, ep, path, body)
-}
-
-// Do performs one request against the endpoint. It JSON-encodes body, sets the
-// bearer token when present, and returns the response bytes — or a status-aware
-// error carrying the core name, method, path, and a truncated body snippet.
+// Do performs one buffered request against the endpoint: body is
+// JSON-encoded (nil sends none) and the answer's bytes are returned, or the
+// Send error.
 func (c REST) Do(ctx context.Context, method string, ep Endpoint, path string, body any) ([]byte, error) {
 	var reader io.Reader
 	if body != nil {
@@ -80,10 +169,25 @@ func (c REST) Do(ctx context.Context, method string, ep Endpoint, path string, b
 	return c.DoRaw(ctx, method, ep, path, reader, body != nil)
 }
 
+// JSON is Do plus decoding the answer into out (a nil out, or an empty
+// answer, decodes nothing).
+func (c REST) JSON(ctx context.Context, method string, ep Endpoint, path string, body, out any) error {
+	raw, err := c.Do(ctx, method, ep, path, body)
+	if err != nil {
+		return err
+	}
+	if out == nil || len(raw) == 0 {
+		return nil
+	}
+	if err := json.Unmarshal(raw, out); err != nil {
+		return fmt.Errorf("%s: decode %s %s: %w", c.Name, method, path, err)
+	}
+	return nil
+}
+
 // DoRaw is Do for a caller that renders its own request body (e.g. a manifest
-// template): jsonBody marks the body as application/json. The response
-// handling, bearer, timeout, and error shape are shared with Do so every core
-// client speaks to a daemon the same way.
+// template): jsonBody marks the body as application/json. The request is
+// bounded by Timeout and its answer by MaxResponseBytes.
 func (c REST) DoRaw(ctx context.Context, method string, ep Endpoint, path string, reader io.Reader, jsonBody bool) ([]byte, error) {
 	timeout := c.Timeout
 	if timeout <= 0 {
@@ -91,29 +195,27 @@ func (c REST) DoRaw(ctx context.Context, method string, ep Endpoint, path string
 	}
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, method, strings.TrimRight(ep.BaseURL, "/")+path, reader)
+	contentType := ""
+	if jsonBody {
+		contentType = "application/json"
+	}
+	req, err := c.Request(ctx, method, ep, path, reader, contentType)
 	if err != nil {
 		return nil, err
 	}
-	if jsonBody {
-		req.Header.Set("Content-Type", "application/json")
-	}
-	if ep.Token != "" {
-		req.Header.Set("Authorization", "Bearer "+ep.Token)
-	}
-	resp, err := c.client().Do(req)
+	resp, err := c.Send(req)
 	if err != nil {
 		return nil, err
 	}
 	defer resp.Body.Close()
-	raw, err := io.ReadAll(resp.Body)
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, MaxResponseBytes+1))
 	if err != nil {
 		// A body cut short (deadline, reset) is a failed request, not a short
 		// success: decoding a truncated document would be silently wrong.
 		return nil, fmt.Errorf("%s %s %s: read response: %w", c.Name, method, path, err)
 	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, &HTTPError{Core: c.Name, Method: method, Path: path, Status: resp.StatusCode, Body: raw}
+	if len(raw) > MaxResponseBytes {
+		return nil, fmt.Errorf("%s %s %s: response exceeds %d bytes", c.Name, method, path, MaxResponseBytes)
 	}
 	return raw, nil
 }

@@ -220,7 +220,8 @@ func TestClient_ErrorEnvelope_mapsToProtocolError(t *testing.T) {
 			return
 		}
 		w.WriteHeader(http.StatusNotFound)
-		_ = json.NewEncoder(w).Encode(ErrorEnvelope{Error: ProtocolError{Code: ErrorSessionNotFound, Message: "missing", Retryable: false}})
+		no := false
+		_ = json.NewEncoder(w).Encode(ErrorEnvelope{Error: ProtocolError{Code: ErrorSessionNotFound, Message: "missing", Retryable: &no}})
 	})
 	client := NewClient("proto", srv.Client())
 
@@ -232,8 +233,48 @@ func TestClient_ErrorEnvelope_mapsToProtocolError(t *testing.T) {
 	if !errors.As(err, &protoErr) {
 		t.Fatalf("err=%v want ProtocolError", err)
 	}
-	if protoErr.Code != ErrorSessionNotFound || protoErr.Retryable {
+	if protoErr.Code != ErrorSessionNotFound || protoErr.Retryable == nil || *protoErr.Retryable {
 		t.Fatalf("protocol error = %+v", protoErr)
+	}
+}
+
+// The envelope's retryable hint is optional: a 429/503 envelope without it
+// is retried by the status rule (the daemon did not process the request),
+// while a stated verdict wins either way.
+func TestClient_RetryHint_absentFallsBackToStatus(t *testing.T) {
+	yes, no := true, false
+	cases := []struct {
+		name   string
+		status int
+		hint   *bool
+		want   bool
+	}{
+		{"503 without a hint", http.StatusServiceUnavailable, nil, true},
+		{"429 without a hint", http.StatusTooManyRequests, nil, true},
+		{"503 stated not retryable", http.StatusServiceUnavailable, &no, false},
+		{"500 without a hint (ambiguous)", http.StatusInternalServerError, nil, false},
+		{"500 stated retryable", http.StatusInternalServerError, &yes, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			srv, _ := protocolServer(t, func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == PathDiscover {
+					writeDiscover(w)
+					return
+				}
+				w.WriteHeader(tc.status)
+				_ = json.NewEncoder(w).Encode(ErrorEnvelope{Error: ProtocolError{Code: ErrorCoreUnavailable, Message: "busy", Retryable: tc.hint}})
+			})
+			client := NewClient("proto", srv.Client())
+			_, err := client.CreateSession(context.Background(), core.Endpoint{BaseURL: srv.URL}, core.SessionRequest{WorkspaceID: "ws-1", Prompt: "hi"})
+			var protoErr *ProtocolError
+			if !errors.As(err, &protoErr) || protoErr.Code != ErrorCoreUnavailable {
+				t.Fatalf("err = %v, want the core_unavailable envelope", err)
+			}
+			if got := core.Retryable(err, false); got != tc.want {
+				t.Fatalf("Retryable(create session) = %v, want %v", got, tc.want)
+			}
+		})
 	}
 }
 

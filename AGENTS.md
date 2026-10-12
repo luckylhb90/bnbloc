@@ -417,6 +417,13 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   - **The Core Protocol wire format is the explicit camelCase JSON tags in
     `core/protocol/types.go`.** That file is the contract; every wire field
     carries a tag (an untagged field silently serializes PascalCase).
+  - **Every protocol client goes through `core.REST`** (`core/rest.go`):
+    `Request` is the one place a bearer goes on the wire, `Send` the one
+    bounded read and error mapping (`DecodeEnvelope` keeps each protocol's
+    error type), `JSON` the one decode. Manifest cores, the Core Protocol
+    and Sandbox Protocol clients and conformance use it
+    (`TestProtocolRequestsBuiltByREST`). An envelope's `retryable` is an
+    optional `*bool`: absent, `core.Retryable` decides from the status.
   - **Optional capabilities go through `core.As[T](ctx, p, ep, cap)`**, never
     a bare type assertion: a manifest or protocol provider implements every
     optional method but `As` consults its `CapabilityReporter` (declared ops /

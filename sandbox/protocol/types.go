@@ -150,10 +150,13 @@ type ErrorEnvelope struct {
 	Error ProtocolError `json:"error"`
 }
 
+// ProtocolError is the envelope's error. Retryable is the implementation's
+// optional verdict on repeating the request (absent: core.Retryable decides
+// from the status code), the same rule as the Core Protocol's.
 type ProtocolError struct {
 	Code      ErrorCode `json:"code"`
 	Message   string    `json:"message"`
-	Retryable bool      `json:"retryable,omitempty"`
+	Retryable *bool     `json:"retryable,omitempty"`
 }
 
 func (e *ProtocolError) Error() string {
@@ -166,9 +169,13 @@ func (e *ProtocolError) Error() string {
 	return fmt.Sprintf("sandbox protocol: %s: %s", e.Code, e.Message)
 }
 
-// RetryHint reports whether the implementation stated the request may be
-// repeated safely.
-func (e *ProtocolError) RetryHint() bool { return e != nil && e.Retryable }
+// RetryHint implements core.RetryHinter.
+func (e *ProtocolError) RetryHint() (retry, stated bool) {
+	if e == nil || e.Retryable == nil {
+		return false, false
+	}
+	return *e.Retryable, true
+}
 
 // --- discovery ---
 

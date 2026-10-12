@@ -35,7 +35,9 @@ Design record: [`docs/prd/2026-10-09-agent-vm-sandbox.md`](../prd/2026-10-09-age
   `stderrBase64`) are standard base64. File and archive bodies are raw
   (`application/octet-stream`, `application/x-tar`).
 - Errors: every non-2xx answer is `{"error":{"code":"…","message":"…","retryable":bool}}`.
-  Clients branch on `code`, never on the message or status.
+  Clients branch on `code`, never on the message or status. `retryable` is
+  optional: when absent, whether the request may be repeated follows the
+  status (429/503: not processed), the same rule as Core Protocol envelopes.
 
 | code | HTTP | meaning |
 |---|---|---|

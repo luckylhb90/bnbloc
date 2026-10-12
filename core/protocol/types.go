@@ -97,15 +97,22 @@ type ErrorEnvelope struct {
 	Error ProtocolError `json:"error"`
 }
 
+// ProtocolError is the envelope's error. Retryable is the daemon's optional
+// verdict on repeating the request: absent leaves it to the status code
+// (core.Retryable), so a 429/503 envelope without it is retried.
 type ProtocolError struct {
 	Code      ErrorCode `json:"code"`
 	Message   string    `json:"message"`
-	Retryable bool      `json:"retryable"`
+	Retryable *bool     `json:"retryable,omitempty"`
 }
 
-// RetryHint implements core.RetryHinter: the daemon states authoritatively
-// whether repeating the request is safe.
-func (e *ProtocolError) RetryHint() bool { return e != nil && e.Retryable }
+// RetryHint implements core.RetryHinter.
+func (e *ProtocolError) RetryHint() (retry, stated bool) {
+	if e == nil || e.Retryable == nil {
+		return false, false
+	}
+	return *e.Retryable, true
+}
 
 func (e *ProtocolError) Error() string {
 	if e == nil {

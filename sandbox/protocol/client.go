@@ -9,15 +9,15 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"strings"
 
 	"github.com/luckylhb90/bnbloc/core"
 )
 
-// Client drives one Sandbox Protocol v1 implementation. JSON calls go
-// through the shared core.REST plumbing (bearer, per-request timeout, status
-// errors); the streamed bodies (exec NDJSON, file bytes, tar archives) use
-// the same bearer over the raw HTTP client. The client is stateless: every
+// Client drives one Sandbox Protocol v1 implementation through the shared
+// core.REST plumbing: JSON calls and file reads are buffered (per-request
+// timeout, bounded body); the streamed bodies (exec NDJSON, file writes, tar
+// archives) use the same request builder and error mapping without a
+// deadline beyond ctx. The client is stateless: every
 // call takes the implementation's Endpoint {BaseURL, Token}. Machine
 // arguments accept the machine id or its name.
 type Client struct {
@@ -26,20 +26,13 @@ type Client struct {
 
 // NewClient returns a client; httpClient nil uses http.DefaultClient.
 func NewClient(httpClient *http.Client) *Client {
-	return &Client{REST: core.REST{Name: "sandbox", HTTP: httpClient}}
-}
-
-func (c *Client) http() *http.Client {
-	if c.REST.HTTP != nil {
-		return c.REST.HTTP
-	}
-	return http.DefaultClient
+	return &Client{REST: core.REST{Name: "sandbox", HTTP: httpClient, DecodeError: core.DecodeEnvelope[ProtocolError]()}}
 }
 
 // Discover fetches discovery and checks version compatibility.
 func (c *Client) Discover(ctx context.Context, ep core.Endpoint) (Discovery, error) {
 	var d Discovery
-	if err := c.doJSON(ctx, ep, http.MethodGet, PathDiscover, nil, &d); err != nil {
+	if err := c.REST.JSON(ctx, http.MethodGet, ep, PathDiscover, nil, &d); err != nil {
 		return Discovery{}, err
 	}
 	if err := Compatible(d.Protocol); err != nil {
@@ -50,62 +43,62 @@ func (c *Client) Discover(ctx context.Context, ep core.Endpoint) (Discovery, err
 
 func (c *Client) PullImage(ctx context.Context, ep core.Endpoint, ref string) (Image, error) {
 	var out Image
-	err := c.doJSON(ctx, ep, http.MethodPost, PathImages, PullImageRequest{Ref: ref}, &out)
+	err := c.REST.JSON(ctx, http.MethodPost, ep, PathImages, PullImageRequest{Ref: ref}, &out)
 	return out, err
 }
 
 func (c *Client) ListImages(ctx context.Context, ep core.Endpoint) ([]Image, error) {
 	var out ListImagesResponse
-	err := c.doJSON(ctx, ep, http.MethodGet, PathImages, nil, &out)
+	err := c.REST.JSON(ctx, http.MethodGet, ep, PathImages, nil, &out)
 	return out.Images, err
 }
 
 func (c *Client) CreateMachine(ctx context.Context, ep core.Endpoint, req CreateMachineRequest) (Machine, error) {
 	var out Machine
-	err := c.doJSON(ctx, ep, http.MethodPost, PathMachines, req, &out)
+	err := c.REST.JSON(ctx, http.MethodPost, ep, PathMachines, req, &out)
 	return out, err
 }
 
 // GetMachine looks a machine up by id or name.
 func (c *Client) GetMachine(ctx context.Context, ep core.Endpoint, machine string) (Machine, error) {
 	var out Machine
-	err := c.doJSON(ctx, ep, http.MethodGet, MachinePath(machine), nil, &out)
+	err := c.REST.JSON(ctx, http.MethodGet, ep, MachinePath(machine), nil, &out)
 	return out, err
 }
 
 func (c *Client) ListMachines(ctx context.Context, ep core.Endpoint, filter Labels) ([]Machine, error) {
 	var out ListMachinesResponse
-	err := c.doJSON(ctx, ep, http.MethodGet, ListMachinesPath(filter), nil, &out)
+	err := c.REST.JSON(ctx, http.MethodGet, ep, ListMachinesPath(filter), nil, &out)
 	return out.Machines, err
 }
 
 // Lifecycle runs one lifecycle action (ActionStart/Stop/Pause/Resume).
 func (c *Client) Lifecycle(ctx context.Context, ep core.Endpoint, machine, action string) (Machine, error) {
 	var out Machine
-	err := c.doJSON(ctx, ep, http.MethodPost, MachineActionPath(machine, action), struct{}{}, &out)
+	err := c.REST.JSON(ctx, http.MethodPost, ep, MachineActionPath(machine, action), struct{}{}, &out)
 	return out, err
 }
 
 func (c *Client) DeleteMachine(ctx context.Context, ep core.Endpoint, machine string) error {
-	return c.doJSON(ctx, ep, http.MethodDelete, MachinePath(machine), nil, nil)
+	return c.REST.JSON(ctx, http.MethodDelete, ep, MachinePath(machine), nil, nil)
 }
 
 // EnsureSpace creates or converges a space (idempotent PUT).
 func (c *Client) EnsureSpace(ctx context.Context, ep core.Endpoint, machine, space string, req SpaceRequest) (Space, error) {
 	var out Space
-	err := c.doJSON(ctx, ep, http.MethodPut, SpacePath(machine, space), req, &out)
+	err := c.REST.JSON(ctx, http.MethodPut, ep, SpacePath(machine, space), req, &out)
 	return out, err
 }
 
 func (c *Client) GetSpace(ctx context.Context, ep core.Endpoint, machine, space string) (Space, error) {
 	var out Space
-	err := c.doJSON(ctx, ep, http.MethodGet, SpacePath(machine, space), nil, &out)
+	err := c.REST.JSON(ctx, http.MethodGet, ep, SpacePath(machine, space), nil, &out)
 	return out, err
 }
 
 func (c *Client) ListSpaces(ctx context.Context, ep core.Endpoint, machine string, filter Labels) ([]Space, error) {
 	var out ListSpacesResponse
-	err := c.doJSON(ctx, ep, http.MethodGet, ListSpacesPath(machine, filter), nil, &out)
+	err := c.REST.JSON(ctx, http.MethodGet, ep, ListSpacesPath(machine, filter), nil, &out)
 	return out.Spaces, err
 }
 
@@ -117,14 +110,14 @@ func (c *Client) DeleteSpace(ctx context.Context, ep core.Endpoint, machine, spa
 	if purge {
 		path += "?purge=1"
 	}
-	return c.doJSON(ctx, ep, http.MethodDelete, path, nil, nil)
+	return c.REST.JSON(ctx, http.MethodDelete, ep, path, nil, nil)
 }
 
 // MintExecToken mints a space-scoped exec token (requires the execTokens
 // capability and the admin bearer). ttlSeconds 0 = the implementation default.
 func (c *Client) MintExecToken(ctx context.Context, ep core.Endpoint, machine, space string, ttlSeconds int64) (ExecToken, error) {
 	var out ExecToken
-	err := c.doJSON(ctx, ep, http.MethodPost, SpaceExecTokensPath(machine, space), ExecTokenRequest{TTLSeconds: ttlSeconds}, &out)
+	err := c.REST.JSON(ctx, http.MethodPost, ep, SpaceExecTokensPath(machine, space), ExecTokenRequest{TTLSeconds: ttlSeconds}, &out)
 	return out, err
 }
 
@@ -140,7 +133,7 @@ func (c *Client) SpaceRun(ctx context.Context, ep core.Endpoint, machine, space 
 
 func (c *Client) run(ctx context.Context, ep core.Endpoint, path string, req ExecRequest) (RunResult, error) {
 	var out RunResult
-	err := c.doJSON(ctx, ep, http.MethodPost, path, req, &out)
+	err := c.REST.JSON(ctx, http.MethodPost, ep, path, req, &out)
 	return out, err
 }
 
@@ -206,7 +199,7 @@ func (c *Client) WriteStdin(ctx context.Context, ep core.Endpoint, machine, exec
 
 // Signal delivers a POSIX signal to a running exec.
 func (c *Client) Signal(ctx context.Context, ep core.Endpoint, machine, execID string, signal int) error {
-	return c.doJSON(ctx, ep, http.MethodPost, ExecControlPath(machine, execID, "signal"), SignalRequest{Signal: signal}, nil)
+	return c.REST.JSON(ctx, http.MethodPost, ep, ExecControlPath(machine, execID, "signal"), SignalRequest{Signal: signal}, nil)
 }
 
 // PutFile writes one guest file at machine level (mode 0 = 0644).
@@ -238,12 +231,7 @@ func (c *Client) GetFile(ctx context.Context, ep core.Endpoint, machine, guestPa
 
 // GetFileAt reads a file through any files path (machine or space).
 func (c *Client) GetFileAt(ctx context.Context, ep core.Endpoint, filesPath string) ([]byte, error) {
-	resp, err := c.stream(ctx, ep, http.MethodGet, filesPath, nil, "")
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	return io.ReadAll(resp.Body)
+	return c.REST.DoRaw(ctx, http.MethodGet, ep, filesPath, nil, false)
 }
 
 // PutArchive extracts a tar stream into a guest directory (created if
@@ -268,106 +256,64 @@ func (c *Client) GetArchive(ctx context.Context, ep core.Endpoint, archivePath s
 
 func (c *Client) CreateSnapshot(ctx context.Context, ep core.Endpoint, machine string, req CreateSnapshotRequest) (Snapshot, error) {
 	var out Snapshot
-	err := c.doJSON(ctx, ep, http.MethodPost, MachineSnapshotsPath(machine), req, &out)
+	err := c.REST.JSON(ctx, http.MethodPost, ep, MachineSnapshotsPath(machine), req, &out)
 	return out, err
 }
 
 func (c *Client) ListSnapshots(ctx context.Context, ep core.Endpoint) ([]Snapshot, error) {
 	var out ListSnapshotsResponse
-	err := c.doJSON(ctx, ep, http.MethodGet, PathSnapshots, nil, &out)
+	err := c.REST.JSON(ctx, http.MethodGet, ep, PathSnapshots, nil, &out)
 	return out.Snapshots, err
 }
 
 func (c *Client) DeleteSnapshot(ctx context.Context, ep core.Endpoint, id string) error {
-	return c.doJSON(ctx, ep, http.MethodDelete, SnapshotPath(id), nil, nil)
+	return c.REST.JSON(ctx, http.MethodDelete, ep, SnapshotPath(id), nil, nil)
 }
 
 func (c *Client) RestoreSnapshot(ctx context.Context, ep core.Endpoint, id string, req RestoreRequest) (Machine, error) {
 	var out Machine
-	err := c.doJSON(ctx, ep, http.MethodPost, SnapshotRestorePath(id), req, &out)
+	err := c.REST.JSON(ctx, http.MethodPost, ep, SnapshotRestorePath(id), req, &out)
 	return out, err
 }
 
 func (c *Client) Fork(ctx context.Context, ep core.Endpoint, machine string, req ForkRequest) (Machine, error) {
 	var out Machine
-	err := c.doJSON(ctx, ep, http.MethodPost, MachineForkPath(machine), req, &out)
+	err := c.REST.JSON(ctx, http.MethodPost, ep, MachineForkPath(machine), req, &out)
 	return out, err
 }
 
 func (c *Client) CreatePool(ctx context.Context, ep core.Endpoint, req CreatePoolRequest) (Pool, error) {
 	var out Pool
-	err := c.doJSON(ctx, ep, http.MethodPost, PathPools, req, &out)
+	err := c.REST.JSON(ctx, http.MethodPost, ep, PathPools, req, &out)
 	return out, err
 }
 
 func (c *Client) GetPool(ctx context.Context, ep core.Endpoint, name string) (Pool, error) {
 	var out Pool
-	err := c.doJSON(ctx, ep, http.MethodGet, PoolPath(name), nil, &out)
+	err := c.REST.JSON(ctx, http.MethodGet, ep, PoolPath(name), nil, &out)
 	return out, err
 }
 
 func (c *Client) DeletePool(ctx context.Context, ep core.Endpoint, name string) error {
-	return c.doJSON(ctx, ep, http.MethodDelete, PoolPath(name), nil, nil)
+	return c.REST.JSON(ctx, http.MethodDelete, ep, PoolPath(name), nil, nil)
 }
 
 func (c *Client) Claim(ctx context.Context, ep core.Endpoint, pool string, req ClaimRequest) (Machine, error) {
 	var out Machine
-	err := c.doJSON(ctx, ep, http.MethodPost, PoolClaimPath(pool), req, &out)
+	err := c.REST.JSON(ctx, http.MethodPost, ep, PoolClaimPath(pool), req, &out)
 	return out, err
 }
 
-func (c *Client) doJSON(ctx context.Context, ep core.Endpoint, method, path string, body any, out any) error {
-	raw, err := c.REST.Do(ctx, method, ep, path, body)
-	if err != nil {
-		return mapError(err)
-	}
-	if out == nil || len(raw) == 0 {
-		return nil
-	}
-	if err := json.Unmarshal(raw, out); err != nil {
-		return fmt.Errorf("decode %s %s: %w", method, path, err)
-	}
-	return nil
-}
-
 // stream issues a request whose body (request and/or response) is not a
-// buffered JSON document. A non-2xx answer is decoded as the error envelope.
+// buffered JSON document, through the shared REST request and error mapping.
 // No client-side deadline is applied beyond ctx: an exec or archive may
 // legitimately outlive any fixed bound.
 func (c *Client) stream(ctx context.Context, ep core.Endpoint, method, path string, body io.Reader, contentType string) (*http.Response, error) {
-	req, err := http.NewRequestWithContext(ctx, method, strings.TrimRight(ep.BaseURL, "/")+path, body)
+	req, err := c.REST.Request(ctx, method, ep, path, body, contentType)
 	if err != nil {
 		return nil, err
 	}
-	if contentType != "" {
-		req.Header.Set("Content-Type", contentType)
-	}
-	if ep.Token != "" {
-		req.Header.Set("Authorization", "Bearer "+ep.Token)
-	}
-	resp, err := c.http().Do(req)
-	if err != nil {
-		return nil, err
-	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		defer resp.Body.Close()
-		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 64*1024))
-		return nil, mapError(&core.HTTPError{Core: "sandbox", Method: method, Path: path, Status: resp.StatusCode, Body: raw})
-	}
-	return resp, nil
-}
-
-// mapError surfaces the implementation's error envelope as *ProtocolError.
-func mapError(err error) error {
-	var restErr *core.HTTPError
-	if !errors.As(err, &restErr) {
-		return err
-	}
-	var env ErrorEnvelope
-	if json.Unmarshal(restErr.Body, &env) == nil && env.Error.Code != "" {
-		return &env.Error
-	}
-	return err
+	return c.REST.Send(req)
 }
 
 // ErrorCodeOf returns the protocol error code of err ("" when err is not a

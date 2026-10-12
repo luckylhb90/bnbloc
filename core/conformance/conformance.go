@@ -2,7 +2,7 @@ package conformance
 
 import (
 	"context"
-	"encoding/json"
+	"errors"
 	"fmt"
 	"io/fs"
 	"net/http"
@@ -46,7 +46,7 @@ func CheckLive(ctx context.Context, cfg Config) error {
 	if err := CheckProvider(ctx, provider, cfg); err != nil {
 		return err
 	}
-	return checkLiveErrorEnvelope(ctx, cfg)
+	return checkLiveErrorEnvelope(ctx, provider, cfg)
 }
 
 func RunProvider(t *testing.T, provider core.Provider, cfg Config) {
@@ -236,32 +236,20 @@ func checkDiscoveryCapabilities(d protocol.Discovery) error {
 	return nil
 }
 
-func checkLiveErrorEnvelope(ctx context.Context, cfg Config) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, cfg.Endpoint.BaseURL+protocol.SessionTurnPath("__missing_workspace__", "__missing_session__"), nil)
-	if err != nil {
-		return fmt.Errorf("build error-envelope request: %w", err)
+// checkLiveErrorEnvelope asks for a documented missing session through the
+// protocol client: the daemon must answer with an error envelope that names
+// a code and a message.
+func checkLiveErrorEnvelope(ctx context.Context, provider *protocol.Client, cfg Config) error {
+	_, err := provider.PollTurn(ctx, cfg.Endpoint, "__missing_workspace__", "__missing_session__")
+	if err == nil {
+		return fmt.Errorf("missing session answered 2xx; want a 4xx/5xx error envelope")
 	}
-	if cfg.Endpoint.Token != "" {
-		req.Header.Set("Authorization", "Bearer "+cfg.Endpoint.Token)
+	var pe *protocol.ProtocolError
+	if !errors.As(err, &pe) {
+		return fmt.Errorf("missing session error carries no error envelope: %w", err)
 	}
-	client := cfg.HTTPClient
-	if client == nil {
-		client = http.DefaultClient
-	}
-	resp, err := client.Do(req)
-	if err != nil {
-		return fmt.Errorf("request documented missing session error: %w", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode < 400 {
-		return fmt.Errorf("missing session returned status %d; want 4xx/5xx error envelope", resp.StatusCode)
-	}
-	var env protocol.ErrorEnvelope
-	if err := json.NewDecoder(resp.Body).Decode(&env); err != nil {
-		return fmt.Errorf("decode error envelope: %w", err)
-	}
-	if env.Error.Code == "" || env.Error.Message == "" {
-		return fmt.Errorf("error envelope missing code/message: %+v", env)
+	if pe.Code == "" || pe.Message == "" {
+		return fmt.Errorf("error envelope missing code/message: %+v", pe)
 	}
 	return nil
 }

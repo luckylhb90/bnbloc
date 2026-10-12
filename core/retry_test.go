@@ -12,10 +12,10 @@ import (
 	"time"
 )
 
-type hinted struct{ retry bool }
+type hinted struct{ retry, stated bool }
 
-func (h hinted) Error() string   { return "hinted" }
-func (h hinted) RetryHint() bool { return h.retry }
+func (h hinted) Error() string                   { return "hinted" }
+func (h hinted) RetryHint() (retry, stated bool) { return h.retry, h.stated }
 
 // A non-idempotent request (create session / send input) is repeated only when
 // it provably never took effect; an ambiguous failure could run the prompt
@@ -30,8 +30,11 @@ func TestRetryable(t *testing.T) {
 	}{
 		{"nil", nil, true, false},
 		{"canceled", context.Canceled, true, false},
-		{"daemon says retryable", fmt.Errorf("create: %w", hinted{true}), false, true},
-		{"daemon says not retryable", fmt.Errorf("create: %w", hinted{false}), true, false},
+		{"daemon says retryable", fmt.Errorf("create: %w", hinted{true, true}), false, true},
+		{"daemon says not retryable", fmt.Errorf("create: %w", hinted{false, true}), true, false},
+		{"no verdict, 503 envelope", &EnvelopeError{Err: hinted{}, HTTP: &HTTPError{Status: http.StatusServiceUnavailable}}, false, true},
+		{"no verdict, 502 envelope", &EnvelopeError{Err: hinted{}, HTTP: &HTTPError{Status: http.StatusBadGateway}}, false, false},
+		{"not retryable, 503 envelope", &EnvelopeError{Err: hinted{false, true}, HTTP: &HTTPError{Status: http.StatusServiceUnavailable}}, false, false},
 		{"503 not processed", &HTTPError{Status: http.StatusServiceUnavailable}, false, true},
 		{"429 not processed", &HTTPError{Status: http.StatusTooManyRequests}, false, true},
 		{"502 ambiguous, non-idempotent", &HTTPError{Status: http.StatusBadGateway}, false, false},

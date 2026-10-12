@@ -9,11 +9,12 @@ import (
 	"syscall"
 )
 
-// RetryHinter is implemented by errors that carry the daemon's own verdict on
-// whether repeating the request is safe (the Core Protocol error envelope's
-// "retryable" field). The daemon's verdict always wins over local heuristics.
+// RetryHinter is implemented by errors that may carry the daemon's own
+// verdict on whether repeating the request is safe (a protocol error
+// envelope's optional "retryable" field). A stated verdict wins over local
+// heuristics; stated=false (the field was absent) falls back to them.
 type RetryHinter interface {
-	RetryHint() bool
+	RetryHint() (retry, stated bool)
 }
 
 // Retryable reports whether a failed core request may be repeated.
@@ -22,8 +23,8 @@ type RetryHinter interface {
 // (reads and polls). A non-idempotent request — creating a session or sending
 // input, both of which start agent work — is repeated only when it provably
 // never took effect: the connection was never established (dial failure), the
-// daemon answered 429/503 (not processed), or the daemon itself marked the
-// error retryable. An ambiguous failure (reset/EOF mid-response, a timeout, a
+// daemon answered 429/503 (not processed) without stating otherwise, or the
+// daemon itself marked the error retryable. An ambiguous failure (reset/EOF mid-response, a timeout, a
 // 500/502/504) may mean the daemon already ran the turn, so retrying it would
 // run the prompt twice; those are retried only for idempotent requests.
 func Retryable(err error, idempotent bool) bool {
@@ -32,7 +33,9 @@ func Retryable(err error, idempotent bool) bool {
 	}
 	var hint RetryHinter
 	if errors.As(err, &hint) {
-		return hint.RetryHint()
+		if retry, stated := hint.RetryHint(); stated {
+			return retry
+		}
 	}
 	var he *HTTPError
 	if errors.As(err, &he) {

@@ -3,8 +3,6 @@ package protocol
 import (
 	"context"
 	"encoding/base64"
-	"encoding/json"
-	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -41,7 +39,7 @@ type discoveryEntry struct {
 }
 
 func NewClient(name string, httpClient *http.Client) *Client {
-	return &Client{REST: core.REST{Name: name, HTTP: httpClient}}
+	return &Client{REST: core.REST{Name: name, HTTP: httpClient, DecodeError: core.DecodeEnvelope[ProtocolError]()}}
 }
 
 func (c *Client) Name() string {
@@ -200,7 +198,7 @@ func (c *Client) WriteWorkspaceFile(ctx context.Context, ep core.Endpoint, works
 		return err
 	}
 	body := WriteWorkspaceFileRequest{Content: content}
-	if err := c.doJSON(ctx, ep, http.MethodPut, WorkspaceFilePath(workspaceID, relPath), body, nil); err != nil {
+	if err := c.REST.JSON(ctx, http.MethodPut, ep, WorkspaceFilePath(workspaceID, relPath), body, nil); err != nil {
 		return fmt.Errorf("write workspace file: %w", err)
 	}
 	return nil
@@ -212,7 +210,7 @@ func (c *Client) WriteWorkspaceFileBytes(ctx context.Context, ep core.Endpoint, 
 		return err
 	}
 	body := WriteWorkspaceFileRequest{ContentBase64: base64.StdEncoding.EncodeToString(content)}
-	if err := c.doJSON(ctx, ep, http.MethodPut, WorkspaceFilePath(workspaceID, relPath), body, nil); err != nil {
+	if err := c.REST.JSON(ctx, http.MethodPut, ep, WorkspaceFilePath(workspaceID, relPath), body, nil); err != nil {
 		return fmt.Errorf("write workspace file bytes: %w", err)
 	}
 	return nil
@@ -241,7 +239,7 @@ func (c *Client) ReadSessionFile(ctx context.Context, ep core.Endpoint, workspac
 	}
 	raw, err := c.REST.Do(ctx, http.MethodGet, ep, WorkspaceFilePath(workspaceID, relPath), nil)
 	if err != nil {
-		return nil, fmt.Errorf("read session file: %w", c.mapError(err))
+		return nil, fmt.Errorf("read session file: %w", err)
 	}
 	if raw == nil {
 		raw = []byte{}
@@ -254,7 +252,7 @@ func (c *Client) DeleteWorkspace(ctx context.Context, ep core.Endpoint, workspac
 	if err := c.requireCapability(ctx, ep, CapabilityDeleteWorkspace); err != nil {
 		return err
 	}
-	if err := c.doJSON(ctx, ep, http.MethodDelete, WorkspacePath(workspaceID), nil, nil); err != nil {
+	if err := c.REST.JSON(ctx, http.MethodDelete, ep, WorkspacePath(workspaceID), nil, nil); err != nil {
 		return fmt.Errorf("delete workspace: %w", err)
 	}
 	return nil
@@ -268,39 +266,13 @@ func (c *Client) requireCapability(ctx context.Context, ep core.Endpoint, cap st
 	if HasCapability(d, cap) {
 		return nil
 	}
-	return &ProtocolError{Code: ErrorCapabilityMissing, Message: fmt.Sprintf("core %s does not advertise %q", d.Name, cap), Retryable: false}
+	return &ProtocolError{Code: ErrorCapabilityMissing, Message: fmt.Sprintf("core %s does not advertise %q", d.Name, cap)}
 }
 
 func (c *Client) getJSON(ctx context.Context, ep core.Endpoint, path string, out any) error {
-	return c.doJSON(ctx, ep, http.MethodGet, path, nil, out)
+	return c.REST.JSON(ctx, http.MethodGet, ep, path, nil, out)
 }
 
 func (c *Client) postJSON(ctx context.Context, ep core.Endpoint, path string, body any, out any) error {
-	return c.doJSON(ctx, ep, http.MethodPost, path, body, out)
-}
-
-func (c *Client) doJSON(ctx context.Context, ep core.Endpoint, method, path string, body any, out any) error {
-	raw, err := c.REST.Do(ctx, method, ep, path, body)
-	if err != nil {
-		return c.mapError(err)
-	}
-	if out == nil || len(raw) == 0 {
-		return nil
-	}
-	if err := json.Unmarshal(raw, out); err != nil {
-		return fmt.Errorf("decode %s %s: %w", method, path, err)
-	}
-	return nil
-}
-
-func (c *Client) mapError(err error) error {
-	var restErr *core.HTTPError
-	if !errors.As(err, &restErr) {
-		return err
-	}
-	var env ErrorEnvelope
-	if json.Unmarshal(restErr.Body, &env) == nil && env.Error.Code != "" {
-		return &env.Error
-	}
-	return err
+	return c.REST.JSON(ctx, http.MethodPost, ep, path, body, out)
 }

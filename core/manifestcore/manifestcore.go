@@ -59,13 +59,6 @@ func (p *Provider) rest() core.REST {
 	return core.REST{Name: "manifestcore " + p.m.Name, HTTP: p.HTTP}
 }
 
-func (p *Provider) client() *http.Client {
-	if p.HTTP != nil {
-		return p.HTTP
-	}
-	return http.DefaultClient
-}
-
 // Discover implements core.Discoverer when the manifest declares a probe or a
 // listener descriptor (or an endpoint override supplies a probe URL).
 func (p *Provider) Discover(ctx context.Context) (core.Endpoint, bool) {
@@ -82,27 +75,17 @@ func (p *Provider) Discover(ctx context.Context) (core.Endpoint, bool) {
 	if probeURL == "" {
 		return core.Endpoint{}, false
 	}
-	base := strings.TrimRight(probeURL, "/")
+	ep := core.Endpoint{BaseURL: strings.TrimRight(probeURL, "/"), Token: p.ProbeToken}
 	path := "/"
 	if p.m.Discover.ProbePath != "" {
 		path = p.m.Discover.ProbePath
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, base+path, nil)
-	if err != nil {
+	// The probe is one more request through the shared REST client: the
+	// same bearer, per-request bound and answer bound as every call.
+	if _, err := p.rest().DoRaw(ctx, http.MethodGet, ep, path, nil, false); err != nil {
 		return core.Endpoint{}, false
 	}
-	if p.ProbeToken != "" {
-		req.Header.Set("Authorization", "Bearer "+p.ProbeToken)
-	}
-	resp, err := p.client().Do(req)
-	if err != nil {
-		return core.Endpoint{}, false
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return core.Endpoint{}, false
-	}
-	return core.Endpoint{BaseURL: base, Token: p.ProbeToken}, true
+	return ep, true
 }
 
 // discoverListener reads a daemon listener descriptor — the JSON file a daemon

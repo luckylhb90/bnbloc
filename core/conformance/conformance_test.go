@@ -76,7 +76,7 @@ func TestRunLive_passes_whenProtocolDaemonConforms(t *testing.T) {
 			_ = json.NewEncoder(w).Encode(protocol.PollTurnResponse{Idle: true})
 		case r.Method == http.MethodGet && r.URL.Path == "/core/v1/workspaces/__missing_workspace__/sessions/__missing_session__/turn":
 			w.WriteHeader(http.StatusNotFound)
-			_ = json.NewEncoder(w).Encode(protocol.ErrorEnvelope{Error: protocol.ProtocolError{Code: protocol.ErrorSessionNotFound, Message: "missing session", Retryable: false}})
+			_ = json.NewEncoder(w).Encode(protocol.ErrorEnvelope{Error: protocol.ProtocolError{Code: protocol.ErrorSessionNotFound, Message: "missing session"}})
 		default:
 			w.WriteHeader(http.StatusNotFound)
 		}

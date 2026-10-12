@@ -431,7 +431,10 @@ The bridge/gateway drive it through the protocol client with
    wire shapes and error envelope from `core/protocol/types.go`; import the
    package rather than redeclaring them. The wire format is the types' explicit
    camelCase JSON tags (`workspaceId`, `sessionId`, …) — that file IS the
-   contract, so every wire field carries a tag and an untagged field is a bug. Advertise only the optional
+   contract, so every wire field carries a tag and an untagged field is a bug.
+   The envelope's `retryable` is optional: state it only when you know;
+   absent, bnbloc retries a 429/503 that started no work (`core.Retryable`).
+   Advertise only the optional
    capabilities you actually serve (`interrupt`, `writeFile`,
    `deleteWorkspace`, `sandboxExec`, `agentProfile`, `sessionFiles` + `sessionFileBytes`) —
    clients degrade gracefully when a capability is absent.
