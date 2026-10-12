@@ -3,8 +3,10 @@ package store
 import (
 	"context"
 	"errors"
+	"sort"
 	"sync"
 
+	"github.com/luckylhb90/bnbloc/internal/tenant"
 	"github.com/luckylhb90/bnbloc/internal/wire"
 )
 
@@ -150,21 +152,25 @@ type JoinRequest struct {
 }
 
 // TenantStore persists tenants and their members, and resolves the tenant a
-// given IdP issuer/domain maps to. Implementations must be safe for concurrent
+// given IdP issuer/domain maps to. Implementations must be safe for
+// concurrent use. It is the registry that establishes tenancy, so it takes
+// tenant ids as arguments, not from the context.
 type TenantStore interface {
 	// PutTenant creates or updates a tenant. An issuer another tenant
 	// already maps is ErrSSOIssuerTaken; an empty issuer maps nothing.
 	PutTenant(ctx context.Context, t Tenant) error
 	// GetTenant returns a tenant or ErrTenantNotFound.
 	GetTenant(ctx context.Context, tenantID string) (Tenant, error)
-	// ListTenants returns every tenant, for the platform (super-admin) console.
+	// ListTenants returns every tenant, for the platform (super-admin)
+	// console, oldest first (then tenant id).
 	ListTenants(ctx context.Context) ([]Tenant, error)
 	// TenantForIssuer returns the tenant id mapped to an SSO issuer / email
 	// domain, or found=false when none is registered. A read failure is an
 	// error, never "not registered".
 	TenantForIssuer(ctx context.Context, issuer string) (tenantID string, found bool, err error)
 	// PutMember creates or updates a tenant membership (an admin decision:
-	// it overwrites the role).
+	// it overwrites the role and source; an existing row keeps its join
+	// time).
 	PutMember(ctx context.Context, m TenantMember) error
 	// EnsureMember inserts m unless the user is already a member, and returns
 	// the membership as stored (created=false: the existing row, its role
@@ -177,7 +183,8 @@ type TenantStore interface {
 	// MemberCount returns how many members a tenant has (to detect the first
 	// user, who is promoted to org_admin).
 	MemberCount(ctx context.Context, tenantID string) (int, error)
-	// ListMembers returns all members of a tenant (for the org-admin console).
+	// ListMembers returns all members of a tenant (for the org-admin
+	// console), in join order (then user id).
 	ListMembers(ctx context.Context, tenantID string) ([]TenantMember, error)
 	// RemoveMember deletes a membership. Removing an absent member is a no-op.
 	RemoveMember(ctx context.Context, tenantID, userID string) error
@@ -196,17 +203,22 @@ type TenantStore interface {
 	// GetJoinRequest returns a user's join request for a tenant, found=false when none.
 	GetJoinRequest(ctx context.Context, tenantID, userID string) (JoinRequest, bool, error)
 	// ListJoinRequests returns a tenant's join requests filtered by status
-	// (empty status = all), for the admin review queue.
+	// (empty status = all), for the admin review queue, oldest first (then
+	// user id).
 	ListJoinRequests(ctx context.Context, tenantID string, status JoinRequestStatus) ([]JoinRequest, error)
 	// ListJoinRequestsForUser returns all of a user's join requests across
-	// tenants, so a user can see the status of what they applied to.
+	// tenants, so a user can see the status of what they applied to, newest
+	// first (then tenant id).
 	ListJoinRequestsForUser(ctx context.Context, userID string) ([]JoinRequest, error)
 	// PrimaryTenantForUser returns the tenant a user should land in at login
-	// when neither an explicit IdP tenant nor an issuer mapping applies: their
-	// most-recently-joined membership. found=false when the user has none.
+	// when neither an explicit IdP tenant nor an issuer mapping applies
+	// (primaryTenant: a real org outranks the default tenant, then the
+	// most-recently-joined membership, then the smallest tenant id).
+	// found=false when the user has none.
 	PrimaryTenantForUser(ctx context.Context, userID string) (tenantID string, found bool, err error)
 	// ListMembershipsForUser returns every tenant membership of a user (any
-	// source), for organization sync and deprovisioning.
+	// source), for organization sync and deprovisioning, in join order (then
+	// tenant id).
 	ListMembershipsForUser(ctx context.Context, userID string) ([]TenantMember, error)
 }
 
@@ -272,6 +284,12 @@ func (s *MemoryTenant) ListTenants(_ context.Context) ([]Tenant, error) {
 	for _, t := range s.tenants {
 		out = append(out, t)
 	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].CreatedAtMs != out[j].CreatedAtMs {
+			return out[i].CreatedAtMs < out[j].CreatedAtMs
+		}
+		return out[i].TenantID < out[j].TenantID
+	})
 	return out, nil
 }
 
@@ -292,6 +310,10 @@ func (s *MemoryTenant) PutMember(_ context.Context, m TenantMember) error {
 		m.Role = OrgRoleMember
 	}
 	m.Source = normalizeMemberSource(m.Source)
+	// Like the MySQL upsert: a re-put changes the role and source only.
+	if cur, ok := s.members[m.TenantID][m.UserID]; ok {
+		m.JoinedAtMs = cur.JoinedAtMs
+	}
 	s.members[m.TenantID][m.UserID] = m
 	return nil
 }
@@ -316,13 +338,29 @@ func (s *MemoryTenant) EnsureMember(_ context.Context, m TenantMember) (TenantMe
 func (s *MemoryTenant) ListMembershipsForUser(_ context.Context, userID string) ([]TenantMember, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	var out []TenantMember
+	out := []TenantMember{}
 	for _, byUser := range s.members {
 		if m, ok := byUser[userID]; ok {
 			out = append(out, m)
 		}
 	}
+	sortMembers(out)
 	return out, nil
+}
+
+// sortMembers is the MySQL membership list order: joined_at_ms, then
+// tenant id, then user id.
+func sortMembers(out []TenantMember) {
+	sort.Slice(out, func(i, j int) bool {
+		a, b := out[i], out[j]
+		if a.JoinedAtMs != b.JoinedAtMs {
+			return a.JoinedAtMs < b.JoinedAtMs
+		}
+		if a.TenantID != b.TenantID {
+			return a.TenantID < b.TenantID
+		}
+		return a.UserID < b.UserID
+	})
 }
 
 func (s *MemoryTenant) GetMember(_ context.Context, tenantID, userID string) (TenantMember, bool, error) {
@@ -354,6 +392,7 @@ func (s *MemoryTenant) ListMembers(_ context.Context, tenantID string) ([]Tenant
 	for _, m := range s.members[tenantID] {
 		out = append(out, m)
 	}
+	sortMembers(out)
 	return out, nil
 }
 
@@ -432,42 +471,70 @@ func (s *MemoryTenant) ListJoinRequests(_ context.Context, tenantID string, stat
 			out = append(out, jr)
 		}
 	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].CreatedAtMs != out[j].CreatedAtMs {
+			return out[i].CreatedAtMs < out[j].CreatedAtMs
+		}
+		return out[i].UserID < out[j].UserID
+	})
 	return out, nil
 }
 
 func (s *MemoryTenant) ListJoinRequestsForUser(_ context.Context, userID string) ([]JoinRequest, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	var out []JoinRequest
+	out := []JoinRequest{}
 	for _, byUser := range s.requests {
 		if jr, ok := byUser[userID]; ok {
 			out = append(out, jr)
 		}
 	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].CreatedAtMs != out[j].CreatedAtMs {
+			return out[i].CreatedAtMs > out[j].CreatedAtMs
+		}
+		return out[i].TenantID < out[j].TenantID
+	})
 	return out, nil
 }
 
-func (s *MemoryTenant) PrimaryTenantForUser(_ context.Context, userID string) (string, bool, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	// A real org membership always outranks the "default" catch-all tenant,
-	// which is auto-provisioned on first login and would otherwise shadow the
-	// org a user was actually approved into. Within the same class, the
-	// most-recently-joined wins. ("default" is the literal fallback tenant id;
-	// the store layer does not import the tenant package.)
-	best, bestAt, bestDefault := "", int64(-1), true
-	for tid, byUser := range s.members {
-		m, ok := byUser[userID]
-		if !ok {
+func (s *MemoryTenant) PrimaryTenantForUser(ctx context.Context, userID string) (string, bool, error) {
+	ms, err := s.ListMembershipsForUser(ctx, userID)
+	if err != nil {
+		return "", false, err
+	}
+	return primaryTenant(ms)
+}
+
+// primaryTenant is the one login-landing rule over a user's memberships: a
+// real org membership outranks the default tenant (tenant.Default, which a
+// first sign-in without an org provisions and which would otherwise shadow
+// the org the user was later approved into), then the most-recently-joined
+// wins, then the smallest tenant id. found=false for no membership.
+func primaryTenant(ms []TenantMember) (string, bool, error) {
+	var best *TenantMember
+	for i := range ms {
+		m := &ms[i]
+		if best == nil {
+			best = m
 			continue
 		}
-		isDefault := tid == "default"
-		better := best == "" ||
-			(bestDefault && !isDefault) ||
-			(bestDefault == isDefault && m.JoinedAtMs >= bestAt)
-		if better {
-			best, bestAt, bestDefault = tid, m.JoinedAtMs, isDefault
+		mDefault, bestDefault := m.TenantID == tenant.Default, best.TenantID == tenant.Default
+		switch {
+		case mDefault != bestDefault:
+			if bestDefault {
+				best = m
+			}
+		case m.JoinedAtMs != best.JoinedAtMs:
+			if m.JoinedAtMs > best.JoinedAtMs {
+				best = m
+			}
+		case m.TenantID < best.TenantID:
+			best = m
 		}
 	}
-	return best, best != "", nil
+	if best == nil {
+		return "", false, nil
+	}
+	return best.TenantID, true, nil
 }

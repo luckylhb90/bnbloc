@@ -68,7 +68,6 @@ var storeRuleCopies = map[string]map[string]int{
 		"mysql.go":             1,
 		"mysql_bridge_jobs.go": 1,
 		"mysql_grant.go":       4,
-		"mysql_tenant.go":      2,
 		"room_schedules.go":    1,
 	},
 }

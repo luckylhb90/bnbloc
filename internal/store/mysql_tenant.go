@@ -94,20 +94,23 @@ SELECT `+tenantCols+` FROM tenants WHERE tenant_id = ?`, tenantID))
 
 // ListTenants returns every tenant, for the platform (super-admin) console.
 func (m *MySQLTenant) ListTenants(ctx context.Context) ([]Tenant, error) {
+	// cross-tenant: the platform console lists the tenant registry itself.
 	return queryAll(ctx, m.DB, `
-SELECT `+tenantCols+` FROM tenants ORDER BY created_at_ms ASC`, scanTenant)
+SELECT `+tenantCols+` FROM tenants ORDER BY created_at_ms ASC, tenant_id ASC`, scanTenant)
 }
 
 // ListMembers returns all members of a tenant.
 func (m *MySQLTenant) ListMembers(ctx context.Context, tenantID string) ([]TenantMember, error) {
 	return queryAll(ctx, m.DB, `
-SELECT `+tenantMemberCols+` FROM tenant_members WHERE tenant_id = ? ORDER BY joined_at_ms ASC`, scanTenantMember, tenantID)
+SELECT `+tenantMemberCols+` FROM tenant_members WHERE tenant_id = ? ORDER BY joined_at_ms ASC, user_id ASC`, scanTenantMember, tenantID)
 }
 
 // ListMembershipsForUser returns every tenant membership of a user.
 func (m *MySQLTenant) ListMembershipsForUser(ctx context.Context, userID string) ([]TenantMember, error) {
+	// cross-tenant: a user's memberships across tenants (login landing,
+	// organization sync, deprovisioning).
 	return queryAll(ctx, m.DB, `
-SELECT `+tenantMemberCols+` FROM tenant_members WHERE user_id = ? ORDER BY joined_at_ms ASC`, scanTenantMember, userID)
+SELECT `+tenantMemberCols+` FROM tenant_members WHERE user_id = ? ORDER BY joined_at_ms ASC, tenant_id ASC`, scanTenantMember, userID)
 }
 
 // tenantMemberCols is the column list scanTenantMember reads, in its order.
@@ -132,10 +135,7 @@ UPDATE tenants SET run_quota = ?, cost_allowance = ? WHERE tenant_id = ?`, runQu
 	if err != nil {
 		return err
 	}
-	if n, _ := res.RowsAffected(); n == 0 {
-		return ErrTenantNotFound
-	}
-	return nil
+	return requireMatched(res, ErrTenantNotFound)
 }
 
 // SetTenantPolicy persists the set policy switches in one statement (an
@@ -145,7 +145,7 @@ func (m *MySQLTenant) SetTenantPolicy(ctx context.Context, tenantID string, u Te
 UPDATE tenants SET
   require_sandbox_for_borrow = COALESCE(?, require_sandbox_for_borrow),
   public_shares_disabled = COALESCE(?, public_shares_disabled)
-WHERE tenant_id = ?`, nullableBool(u.RequireSandboxForBorrow), nullableBool(u.PublicSharesDisabled), tenantID); err != nil {
+WHERE tenant_id = ?`, nullPtr(u.RequireSandboxForBorrow), nullPtr(u.PublicSharesDisabled), tenantID); err != nil {
 		return Tenant{}, err
 	}
 	// The stored row is the result (ErrTenantNotFound when there is none).
@@ -161,26 +161,10 @@ UPDATE tenants SET
   retention_artifact_versions_days = ?,
   retention_audit_days = ?,
   retention_agent_jobs_days = ?
-WHERE tenant_id = ?`, nullableInt(p.MessagesDays), nullableInt(p.ArtifactVersionsDays), nullableInt(p.AuditDays), nullableInt(p.AgentJobsDays), tenantID); err != nil {
+WHERE tenant_id = ?`, nullPtr(p.MessagesDays), nullPtr(p.ArtifactVersionsDays), nullPtr(p.AuditDays), nullPtr(p.AgentJobsDays), tenantID); err != nil {
 		return Tenant{}, err
 	}
 	return m.GetTenant(ctx, tenantID)
-}
-
-// nullableInt maps an unset value to SQL NULL.
-func nullableInt(v *int) any {
-	if v == nil {
-		return nil
-	}
-	return *v
-}
-
-// nullableBool maps an unset switch to SQL NULL.
-func nullableBool(b *bool) any {
-	if b == nil {
-		return nil
-	}
-	return *b
 }
 
 func (m *MySQLTenant) TenantForIssuer(ctx context.Context, issuer string) (string, bool, error) {
@@ -315,28 +299,22 @@ FROM tenant_join_requests WHERE tenant_id = ?`
 		q += ` AND status = ?`
 		args = append(args, string(status))
 	}
-	q += ` ORDER BY created_at_ms ASC`
+	q += ` ORDER BY created_at_ms ASC, user_id ASC`
 	return queryAll(ctx, m.DB, q, scanJoinRequest, args...)
 }
 
 func (m *MySQLTenant) ListJoinRequestsForUser(ctx context.Context, userID string) ([]JoinRequest, error) {
+	// cross-tenant: a user sees what they applied to, in every tenant.
 	return queryAll(ctx, m.DB, `
 SELECT `+joinRequestCols+`
-FROM tenant_join_requests WHERE user_id = ? ORDER BY created_at_ms DESC`, scanJoinRequest, userID)
+FROM tenant_join_requests WHERE user_id = ? ORDER BY created_at_ms DESC, tenant_id ASC`, scanJoinRequest, userID)
 }
 
+// PrimaryTenantForUser applies primaryTenant to the user's memberships.
 func (m *MySQLTenant) PrimaryTenantForUser(ctx context.Context, userID string) (string, bool, error) {
-	var tid string
-	// A real org membership outranks the "default" catch-all (auto-provisioned
-	// on first login); within the same class the most-recently-joined wins.
-	err := m.DB.QueryRowContext(ctx, `
-SELECT tenant_id FROM tenant_members WHERE user_id = ?
-ORDER BY (tenant_id = 'default') ASC, joined_at_ms DESC LIMIT 1`, userID).Scan(&tid)
-	if errors.Is(err, sql.ErrNoRows) {
-		return "", false, nil
-	}
+	ms, err := m.ListMembershipsForUser(ctx, userID)
 	if err != nil {
 		return "", false, err
 	}
-	return tid, true, nil
+	return primaryTenant(ms)
 }
