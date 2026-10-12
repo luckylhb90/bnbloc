@@ -615,6 +615,11 @@ func (s *Service) handleProxy(w http.ResponseWriter, r *http.Request) {
 			effectiveTenant = rt
 		}
 	}
+	if p.isRoomDispatch(r.Method) {
+		// The only route the edge maps onto an internal one (isRoomDispatch).
+		r.URL.Path = "/internal/v1/rooms/" + p.RoomID + "/dispatch"
+		r.URL.RawPath = "/internal/v1/rooms/" + url.PathEscape(p.RoomID) + "/dispatch"
+	}
 	s.proxyAs(w, r, p, claims.Subject, effectiveTenant)
 }
 

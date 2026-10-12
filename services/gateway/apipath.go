@@ -178,6 +178,10 @@ func (s *Service) route(p apiPath) string {
 			return s.Backends.ShareAgent
 		case "events", "agents", "chat", "attachments", "history", "typing", "read", "messages", "tasks":
 			return s.Backends.Realtime
+		case "dispatch":
+			// Agent dispatch (room tools): realtime's internal route, see
+			// isRoomDispatch.
+			return s.Backends.Realtime
 		case "schedules":
 			// Scheduled prompts (N2) run beside the chat publish they use.
 			return s.Backends.Realtime
@@ -321,7 +325,19 @@ func rateLimited(method string, p apiPath) bool {
 	if method == http.MethodPost && p.RoomSub == "schedules" && len(p.segs) == 6 && p.segs[5] == "run" {
 		return true
 	}
-	return p.RoomSub == "chat" || p.RoomSub == "shared-agents"
+	// An agent dispatch posts chat on a member's behalf (and drives an
+	// agent): the dispatching member's chat budget.
+	return p.RoomSub == "chat" || p.RoomSub == "shared-agents" || p.isRoomDispatch(method)
+}
+
+// isRoomDispatch reports POST /v1/rooms/{id}/dispatch: a bridge's room tools
+// server asking another agent for work on behalf of the job it runs. It is
+// the public door of realtime's svcauth-only POST
+// /internal/v1/rooms/{id}/dispatch: after the ordinary edge checks (room
+// scope, drive_agent, the chat rate limit) the proxy rewrites the path and
+// signs the caller (the bridge's owner) like every proxied request.
+func (p apiPath) isRoomDispatch(method string) bool {
+	return method == http.MethodPost && len(p.segs) == 4 && p.RoomSub == "dispatch"
 }
 
 // isTemplateInstantiate reports /v1/room-templates/{id}/instantiate: it
