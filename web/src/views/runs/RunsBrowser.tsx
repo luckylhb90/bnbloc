@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { expertBadge } from "@/lib/contentComponents";
 import {
   ArrowClockwiseIcon,
   ArrowLeftIcon,
@@ -255,6 +256,7 @@ function RunRow({ run, showRoom, onOpen }: { readonly run: AgentRun; readonly sh
       <div className="flex min-w-0 items-center gap-2 text-sm">
         <StatusBadge run={run} />
         <span className="min-w-0 truncate font-medium text-[var(--color-fg)]">
+          {run.expert && <>expert {expertBadge({ name: run.expert.name || run.expert.id, version: run.expert.version })} on </>}
           <RunAgent agent={run.agent} />
         </span>
         {run.borrowed && (
@@ -357,6 +359,14 @@ function RunDetail({
             </span>
           )}
         </dd>
+        {run.expert && (
+          <>
+            <dt className="text-[var(--color-fg-subtle)]">Expert</dt>
+            <dd className="truncate">
+              {expertBadge({ name: run.expert.name || run.expert.id, version: run.expert.version })} on <RunAgent agent={run.agent} />
+            </dd>
+          </>
+        )}
         {run.dispatchedBy && (
           <>
             <dt className="text-[var(--color-fg-subtle)]">Dispatched by</dt>

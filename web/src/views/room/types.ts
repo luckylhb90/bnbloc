@@ -1,6 +1,7 @@
 import type { ChatAttachment, TurnMetrics } from "@/lib/api";
 import type { AgentOptions } from "@/views/composer/types";
 import type { DispatchAttribution } from "@/lib/dispatch";
+import type { ChatExpert, ExpertMarker } from "@/lib/contentComponents";
 
 // The routing of one chat send, exactly as it went (or will go) on the wire.
 export interface ChatRecipient {
@@ -22,6 +23,8 @@ export interface OutgoingMessage {
   // True when the recipient is another member's agent: every (re)send must
   // pass the owner's borrow authorization first.
   readonly borrow: boolean;
+  // The expert the agent is asked to wear (an agent recipient only).
+  readonly expert?: ChatExpert;
 }
 
 export interface FeedItem {
@@ -61,6 +64,8 @@ export interface FeedItem {
   // Set when an agent dispatched this message on its author's behalf (room
   // tools): the feed renders "maya → via jack/codex → bob/claude".
   dispatch?: DispatchAttribution;
+  // The expert the message asked its agent to wear (payload.expert).
+  expert?: ExpertMarker;
   // A member's message addressed to people only (no agent recipient): no
   // agent reply is coming. Agents still read it as room context.
   peopleOnly?: boolean;

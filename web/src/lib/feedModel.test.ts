@@ -149,3 +149,14 @@ function testDispatchAttributionReachesTheRow(): void {
   assert(echo(6, "typed").dispatch === undefined, "a typed message carries no dispatch attribution");
 }
 testDispatchAttributionReachesTheRow();
+
+function testExpertMarkerReachesTheRowAndTheSend(): void {
+  const expert = { id: "cc_rev", name: "reviewer", displayName: "Reviewer", version: "1.2.0" };
+  const row = feedItemFromEvent({ kind: "chat_message", sequence: 7, author: "maya", text: "review it", expert }, me, true);
+  assert(row?.expert?.version === "1.2.0", "a message carrying an expert keeps its marker");
+  assert(echo(8, "typed").expert === undefined, "a typed message carries no expert");
+  const agent = { ownerId: "jack", provider: "codex", self: false };
+  assert(outgoingMessage("x", agent, null, [], { id: "cc_rev" }).expert?.id === "cc_rev", "an agent send carries the expert");
+  assert(outgoingMessage("x", null, null, [], { id: "cc_rev" }).expert === undefined, "a people-only send carries no expert");
+}
+testExpertMarkerReachesTheRowAndTheSend();

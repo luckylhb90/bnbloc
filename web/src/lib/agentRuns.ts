@@ -68,6 +68,8 @@ export interface AgentRun {
   // Set when an agent dispatched this run through the room tools: the
   // parent job and the hop depth.
   dispatchedBy?: { jobId: string; depth: number };
+  // The expert the agent wore for this run, at the version the job pinned.
+  expert?: { id: string; name?: string; version?: string };
   redacted?: boolean;
   diagnostics?: Record<string, unknown>;
 }

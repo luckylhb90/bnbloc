@@ -759,6 +759,8 @@ export const api = {
       } | null;
       readonly channelId: string | null;
       readonly attachmentIds: readonly string[];
+      // The expert the agent recipient is asked to wear.
+      readonly expert?: { readonly id: string; readonly version?: string };
     },
     clientMsgId: string,
   ) =>
@@ -771,6 +773,7 @@ export const api = {
         ...(message.channelId ? { channelId: message.channelId } : {}),
         ...(message.recipient ? { recipient: message.recipient } : {}),
         ...(message.attachmentIds.length > 0 ? { attachmentIds: message.attachmentIds } : {}),
+        ...(message.recipient && message.expert ? { expert: message.expert } : {}),
       }),
     }),
   // The caller's own bridge-advertised agents (all rooms): the "my agents"

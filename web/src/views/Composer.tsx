@@ -7,6 +7,7 @@ import {
   PlusIcon,
   XIcon,
   RobotIcon,
+  BrainIcon,
 } from "@phosphor-icons/react";
 import { cn } from "@/lib/cn";
 import type { LocalAgent } from "@/lib/useLocalAgent";
@@ -26,6 +27,9 @@ import type { SendOptions } from "@/views/room/useRoomMessageActions";
 import type { RoomPlatformAgents } from "@/views/room/useRoomPlatformAgents";
 import { useDisplayNames } from "@/lib/useDisplayName";
 import { mentionLabel, mentionMatches } from "@/views/composer/mentions";
+import { contentLabel, type ExpertChoice } from "@/lib/contentComponents";
+import { useComposerExpert } from "@/views/composer/useComposerExpert";
+import { ExpertBanner, ExpertPermissionDialog, ExpertPicker } from "@/views/composer/ExpertPicker";
 
 // mentionedAgent finds an in-text "@owner/provider" (core-qualified when the
 // agent advertises a core) naming a known room agent. Tokens are matched as
@@ -138,10 +142,15 @@ export function Composer({
   const nameOf = useDisplayNames(members.map((m) => (m.includes("/") ? "" : m)).concat(roomAgents.map((a) => a.ownerId)));
   const labelOf = (m: string) => mentionLabel(m, roomAgents, nameOf);
   const matches = mention ? mentionMatches(members, mention.query, labelOf) : [];
+  // Experts (the room's pinned ones and the member's own) answer @name too:
+  // picking one sets the expert, which runs on the selected agent.
+  const exp = useComposerExpert(roomId, !people);
+  const expertMatches = mention ? exp.mentionMatches(mention.query) : [];
+  const optionCount = expertMatches.length + matches.length;
   // Keyboard-highlighted mention option (Arrow keys move it, Enter/Tab pick).
   const [activeMention, setActiveMention] = useState(0);
   const mentionListId = useId();
-  const highlighted = matches.length > 0 ? Math.min(activeMention, matches.length - 1) : -1;
+  const highlighted = optionCount > 0 ? Math.min(activeMention, optionCount - 1) : -1;
 
   // The catalog the model picker reflects, resolved with the same precedence
   // send() uses to choose the driving agent (an in-text @mention, else the
@@ -311,6 +320,32 @@ export function Composer({
     requestAnimationFrame(() => taRef.current?.focus());
   };
 
+  // The agent a picked expert runs on: the same precedence send() uses (an
+  // in-text @agent, the picked recipient, my selected local target).
+  const runsOnAgent = mentionedAgent(text, roomAgents) ?? recipient;
+  const myRunsOn = agent.targets.find((x) => x.id === agent.target);
+  const runsOn = runsOnAgent
+    ? mentionLabel(agentHandle(runsOnAgent), roomAgents, nameOf)
+    : myRunsOn
+      ? `your ${myRunsOn.provider}`
+      : null;
+
+  // pickExpertMention removes the typed "@partial" and picks the expert.
+  const pickExpertMention = (e: ExpertChoice) => {
+    if (!mention) return;
+    const before = text.slice(0, mention.start);
+    const after = text.slice(mention.start + 1 + mention.query.length).replace(/^\s+/, "");
+    setText(before + after);
+    setMention(null);
+    exp.pick(e);
+    setPeopleOnly(false);
+    requestAnimationFrame(() => taRef.current?.focus());
+  };
+  const pickOption = (index: number) => {
+    if (index < expertMatches.length) pickExpertMention(expertMatches[index]);
+    else pickMention(matches[index - expertMatches.length]);
+  };
+
   const addRef = (r: Referenceable) => {
     setRefs((cur) => (cur.some((x) => x.id === r.id) ? cur : [...cur, r]));
     setShowRefPicker(false);
@@ -347,6 +382,18 @@ export function Composer({
         ? { ownerId: subject || "", provider: myTarget.provider, core: myTarget.core || undefined, self: true }
         : null);
     const toPeople = people || peopleOnly;
+    // An expert runs on an agent: it is never sent to people only, and is
+    // confirmed on first use when someone else's declares permissions.
+    const expertSend = !toPeople ? exp.sendField() : undefined;
+    if (exp.expert && !toPeople && !picked) {
+      toast.error(`Pick an agent for ${contentLabel(exp.expert.component)} to run on`);
+      setSending(false);
+      return;
+    }
+    if (expertSend && !(await exp.confirm())) {
+      setSending(false);
+      return;
+    }
     // A platform agent goes to the host routing picks now (PRD v2 §4); with
     // every host offline nothing is sent (no dead job) and the draft stays.
     const platformRef = picked?.platform ? { core: picked.core ?? "", provider: picked.provider } : null;
@@ -380,6 +427,7 @@ export function Composer({
         recipient: toPeople ? null : withOpts,
         attachmentIds: uploaded.map((attachment) => attachment.id),
         attachments: uploaded,
+        ...(expertSend ? { expert: expertSend.expert, expertMarker: expertSend.marker } : {}),
       });
       // Clear only once the message is owned by the feed; a rejected send
       // (borrow not authorized, not a member…) keeps the draft for editing.
@@ -396,13 +444,39 @@ export function Composer({
 
   return (
     <div className="relative w-full">
-      {mention && matches.length > 0 && (
+      {mention && optionCount > 0 && (
         <div className="absolute bottom-full left-0 z-20 mb-2 w-56 overflow-hidden rounded-[var(--radius)] border border-[var(--color-border-strong)] bg-[var(--color-elevated)] shadow-[var(--shadow-pop)]">
           <div className="border-b border-[var(--color-border)] px-3 py-1.5 text-xs font-medium uppercase tracking-wide text-[var(--color-fg-subtle)]">
             Mention
           </div>
           <div id={mentionListId} role="listbox" aria-label="Mention suggestions">
-          {matches.map((m, index) => {
+          {expertMatches.map((e, index) => (
+            <div
+              key={`expert:${e.component.id}`}
+              id={`${mentionListId}-${index}`}
+              role="option"
+              aria-selected={index === highlighted}
+              onMouseDown={(ev) => ev.preventDefault()}
+              onMouseEnter={() => setActiveMention(index)}
+              onClick={() => pickExpertMention(e)}
+              className={cn(
+                "flex w-full cursor-pointer items-center gap-2 px-3 py-2 text-left text-sm",
+                index === highlighted
+                  ? "bg-[var(--color-surface-2)] text-[var(--color-fg)]"
+                  : "text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-2)] hover:text-[var(--color-fg)]",
+              )}
+            >
+              <span className="grid size-5 place-items-center rounded-full bg-[var(--color-accent-soft)] text-[var(--color-accent)]">
+                <BrainIcon size={11} weight="fill" />
+              </span>
+              <span className="min-w-0 flex-1 truncate">{contentLabel(e.component)}</span>
+              <span className="rounded-full border border-[var(--color-accent)]/30 bg-[var(--color-accent-soft)] px-1.5 text-[0.6rem] font-medium text-[var(--color-accent)]">
+                Expert
+              </span>
+            </div>
+          ))}
+          {matches.map((m, i) => {
+            const index = i + expertMatches.length;
             const isAgentHandle = m.includes("/");
             // A borrowable agent: an agent handle owned by someone other than me.
             // Resolve the owner from the roster (the handle may be core-qualified
@@ -535,6 +609,18 @@ export function Composer({
             }}
           />
         )}
+        {!people && exp.expert && (
+          <ExpertBanner
+            expert={exp.expert}
+            runsOn={peopleOnly ? null : runsOn}
+            onClear={() => exp.pick(null)}
+            onQuickPrompt={(prompt) => {
+              setText(prompt);
+              setPeopleOnly(false);
+              requestAnimationFrame(() => taRef.current?.focus());
+            }}
+          />
+        )}
         <AttachmentChips
           attachments={attachments.chipItems}
           onRemove={attachments.removeFile}
@@ -567,22 +653,22 @@ export function Composer({
           role="combobox"
           aria-label="Message"
           aria-autocomplete="list"
-          aria-expanded={!!mention && matches.length > 0}
-          aria-controls={mention && matches.length > 0 ? mentionListId : undefined}
+          aria-expanded={!!mention && optionCount > 0}
+          aria-controls={mention && optionCount > 0 ? mentionListId : undefined}
           aria-activedescendant={highlighted >= 0 && mention ? `${mentionListId}-${highlighted}` : undefined}
           onKeyDown={(e) => {
             // While the mention list is open, arrows move the highlight and
             // Enter/Tab accept the highlighted option.
-            if (mention && matches.length > 0) {
+            if (mention && optionCount > 0) {
               if (e.key === "ArrowDown" || e.key === "ArrowUp") {
                 e.preventDefault();
                 const delta = e.key === "ArrowDown" ? 1 : -1;
-                setActiveMention((highlighted + delta + matches.length) % matches.length);
+                setActiveMention((highlighted + delta + optionCount) % optionCount);
                 return;
               }
               if (e.key === "Enter" || e.key === "Tab") {
                 e.preventDefault();
-                pickMention(matches[Math.max(0, highlighted)]);
+                pickOption(Math.max(0, highlighted));
                 return;
               }
             }
@@ -690,6 +776,9 @@ export function Composer({
                 onAddPlatform={platformAgents?.add}
               />
             )}
+            {!people && !peopleOnly && (exp.choices.length > 0 || exp.expert) && (
+              <ExpertPicker choices={exp.choices} expert={exp.expert} onPick={exp.pick} />
+            )}
             {!people && !peopleOnly && (modelChoices.length > 0 || reasoningChoices.length > 0) && (
               <ModelPicker
                 models={modelChoices}
@@ -724,6 +813,7 @@ export function Composer({
           </Button>
         </div>
       </div>
+      <ExpertPermissionDialog expert={exp.confirming} onAnswer={exp.resolveConfirm} />
     </div>
   );
 }

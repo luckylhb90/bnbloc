@@ -8,12 +8,17 @@ import type { RoomAgent } from "@/views/composer/types";
 import { ackSent, markStatus, outgoingMessage } from "@/views/room/feedModel";
 import { type ChatRecipient, type FeedItem, type OutgoingMessage, nextFeedId } from "@/views/room/types";
 import { displayNameOf } from "@/lib/useDisplayName";
+import type { ChatExpert, ExpertMarker } from "@/lib/contentComponents";
 
 export interface SendOptions {
   readonly peopleOnly: boolean;
   readonly recipient: RoomAgent | null;
   readonly attachmentIds?: readonly string[];
   readonly attachments?: readonly ChatAttachment[];
+  // The expert the agent recipient wears, and its marker for the
+  // optimistic row.
+  readonly expert?: ChatExpert;
+  readonly expertMarker?: ExpertMarker;
 }
 
 export interface RoomMessageActions {
@@ -129,7 +134,7 @@ export function useRoomMessageActions({
 
   const send = useCallback(
     async (text: string, opts: SendOptions): Promise<boolean> => {
-      const out = outgoingMessage(text, opts.peopleOnly ? null : opts.recipient, channelId, opts.attachmentIds);
+      const out = outgoingMessage(text, opts.peopleOnly ? null : opts.recipient, channelId, opts.attachmentIds, opts.expert);
       if (out.borrow && out.recipient && !(await ensureBorrow(out.recipient))) return false;
       const localId = nextFeedId();
       const clientMsgId = crypto.randomUUID();
@@ -147,6 +152,7 @@ export function useRoomMessageActions({
           attachments: opts.attachments ? [...opts.attachments] : undefined,
           borrowedFrom: out.borrow ? out.recipient?.ownerId : undefined,
           peopleOnly: out.recipient ? undefined : true,
+          expert: out.expert ? opts.expertMarker : undefined,
         },
       ]);
       const result = await deliver(localId, clientMsgId, out);
