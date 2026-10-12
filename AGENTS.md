@@ -133,7 +133,9 @@ Library).
   construct outside the owner's file). A rule that matters and has no test
   will be re-implemented.
 - **Memory and MySQL stores share one contract test suite** per interface; a
-  behaviour only one implementation has is a bug in the other.
+  behaviour only one implementation has is a bug in the other. The rig is
+  `forEachBackend` (`internal/store/store_contract_test.go`): memory, plus
+  MySQL when `BNBLOC_TEST_MYSQL_DSN` is set, with per-run ids (`uniq`).
 - **Use a design pattern when it removes duplication or makes a rule
   explicit**, never for its own sake: a registry/strategy for per-kind
   behaviour (`contentpkg.KindSpec`), middleware for per-request policy,
@@ -906,6 +908,43 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   against a text column. Marshal through `store.jsonArg`. The DSN must stay
   utf8mb4 (`store.mysqlConfig` refuses others: client-side escaping is
   unsafe in some multibyte charsets).
+- **Subjects are case-sensitive: compare them with `==`, never fold.** User
+  ids, owners, authors, actors and requesters are byte-exact everywhere:
+  identity columns are `CHARACTER SET utf8mb4 COLLATE utf8mb4_bin` (a new one
+  too), Go compares with `==`, and the web uses `sameUser`
+  (`web/src/lib/format.ts`, the only copy). `TestNoIdentityFold`,
+  `TestIdentityColumnsBinary` and `web/scripts/no-identity-fold.test.mjs`
+  fail on a fold; an email address is the one legitimate fold and carries an
+  `identity-fold: <reason>` comment (2026-10-12: MySQL's default collation
+  let "José" edit "jose"'s message, memory did not).
+- **Store reads report failures; login provisioning never upserts a role.**
+  A store operation returns an `error`, and a failed read is never "absent"
+  (`TestStoreReadsReturnErrors`; its allowlist only shrinks). Login
+  provisioning writes through the insert-only `TenantStore.EnsureMember`, so
+  a failed or racing read cannot rewrite an org role.
+- **MySQL counts matched rows** (`clientFoundRows` in `mysqlConfig`): an
+  UPDATE that rewrites the values a row holds is a match. "No row matched
+  means not found" is `requireMatched(res, ErrX)`; never re-read to tell a
+  no-op from a miss.
+- **A key without a tenant is written insert-only.** `artifact_id`,
+  `channel_id`, `(room_id, user_id)` carry no tenant, so their writes never
+  upsert another tenant's or room's row: `PutArtifact` is INSERT IGNORE +
+  read back (`ErrArtifactIDTaken`), `AddMember` inserts from the ctx
+  tenant's live room (`ErrRoomNotFound`), `PutChannel` is a plain insert
+  (`ErrChannelExists`).
+- **A room's rows are listed once: `roomOwnedTables`**
+  (`internal/store/room_owned.go`). `DeleteRoom` clears exactly that list on
+  MySQL, and every memory store holding room rows implements
+  `deleteRoomRows`. A new table with a `room_id` joins it, or
+  `roomOwnedExempt` with a reason (`TestRoomOwnedTablesDeletedWithRoom`).
+- **Reply usage is read once, at append** (`store.ReplyUsageOf` over
+  `wire.TurnUsageFromMetrics`) into typed `agent_messages` usage columns;
+  budget burn sums those, never the raw payload (a negative report must not
+  lower a burn). A reply is fresh only for the append that stored it (the
+  session's `sync_states` row is locked first).
+- **A job store error maps in one place** (activity `writeJobStoreError`):
+  only `ErrAgentJobLeaseMismatch` is a 409, `ErrAgentJobNotFound` a 404,
+  anything else a logged 500 — never "lease lost" for a database blip.
 - **Data retention deletes; blob GC deletes what no row references.**
   Retention (`internal/retention`, run by realtime under the
   `bnbloc_retention` advisory lock) purges per tenant and kind through

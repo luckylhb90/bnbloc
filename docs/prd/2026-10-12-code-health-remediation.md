@@ -178,6 +178,33 @@ policy fails closed): eb77683. Desktop and dev-discovery rows: other agents.
 
 #### 1C. Store data correctness and identity (L)
 
+Status: done (2026-10-12). All ten rows landed:
+- [x] H1 tenant reads return errors, `EnsureMember`, login fails on a store
+  error, org ceiling fails closed (b8165b5);
+- [x] H2 `clientFoundRows`, workarounds deleted, `requireMatched` (b8165b5);
+- [x] H3 `PutArtifact` insert-only, `ErrArtifactIDTaken` (b8165b5);
+- [x] H7 `AddMember` from the tenant's room, `PutChannel` plain insert
+  (b8165b5);
+- [x] H5 usage normalized at append into typed columns,
+  `store.ReplyUsageOf` (7ce3307);
+- [x] H9 `sync_states` row locked, fresh only when stored (7ce3307);
+- [x] H4 `roomOwnedTables` registry, memory cascade (c501e25);
+- [x] H8 tenant-isolation suite over both backends (cd29e9e);
+- [x] svc H5 `writeJobStoreError`, unknown-job sentinel parity, realtime
+  schedule 5xx logged (41142f4);
+- [x] H6 / D2 exact identity in store, services, internal, bridge
+  (dfa237e) and web (795236a).
+
+Migrations: `2026_10_agent_messages_usage`, `2026_10_identity_columns_bin`.
+Deviations: the gateway's `TenantMemberRole` hook keeps its
+`(role, found)` shape (a read error is logged and refuses) so 1B's
+switch-tenant rework is not touched; realtime canonicalizes
+`recipient.ownerId` by trimming (exact ids have no other canonical form);
+agent-handle and core/provider folds in the web (`roomEvents` agentKey,
+composer handle matching, `samePlatformAgent`) are not subjects and stay
+for the 5.2 `agentHandle`/`agentIdentity` owner. `RoomStore` and the other
+allowlisted reads keep bool/no-error results until 4.2.
+
 | Item | Ref | Fix | Size |
 |---|---|---|---|
 | A DB error at login rewrites an org role | store H1 | `GetMember`, `MemberCount`, `TenantForIssuer` and `TenantUsage` return `error`. Provisioning fails the login on error. The new-member path uses an insert-only `EnsureMember` (`INSERT IGNORE`, then read back). The shareagent org-ceiling check fails closed. | M |
