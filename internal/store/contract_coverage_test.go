@@ -48,7 +48,6 @@ var contractPending = map[string]bool{
 	"RoomExpertRecorder":          true,
 	"RoomImportStore":             true,
 	"RoomScheduleStore":           true,
-	"RoomStore":                   true,
 	"RoomTemplateStore":           true,
 	"SSOHandoffStore":             true,
 	"TeamAgentReader":             true,

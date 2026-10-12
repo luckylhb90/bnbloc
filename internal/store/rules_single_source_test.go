@@ -30,15 +30,10 @@ var storeRuleCopies = map[string]map[string]int{
 		"artifact_shares.go":         2,
 		"bridge_jobs.go":             2,
 		"content_drafts.go":          1,
-		"mysql_room.go":              1,
 		"notification_replies.go":    1,
 		"notification_reply_refs.go": 1,
 		"refresh_tokens.go":          4,
-		"room.go":                    1,
 		"sso_handoffs.go":            2,
-	},
-	"human-member": {
-		"mysql_room.go": 9,
 	},
 	"job-status": {
 		"mysql_bridge_jobs.go": 11,
@@ -59,7 +54,6 @@ var storeRuleCopies = map[string]map[string]int{
 		"mysql_bridge_jobs.go":        1,
 		"mysql_grant.go":              2,
 		"mysql_notifications.go":      2,
-		"mysql_room.go":               1,
 		"notification_replies.go":     1,
 		"notifications.go":            1,
 		"quota_requests.go":           1,
@@ -71,13 +65,11 @@ var storeRuleCopies = map[string]map[string]int{
 		"api_tokens.go":           1,
 		"chat.go":                 2,
 		"mysql_quota_requests.go": 2,
-		"mysql_room.go":           1,
 		"sso_handoffs.go":         1,
 	},
 	"not-deleted": {
 		"chat.go":          6,
 		"mysql_channel.go": 5,
-		"mysql_room.go":    12,
 		"search.go":        2,
 	},
 	"null-helper": {

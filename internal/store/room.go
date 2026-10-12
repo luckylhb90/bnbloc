@@ -12,12 +12,18 @@ import (
 
 // Room domain errors.
 var (
-	ErrRoomNotFound     = errors.New("store: room not found")
-	ErrInviteNotFound   = errors.New("store: invite not found")
+	ErrRoomNotFound   = errors.New("store: room not found")
+	ErrInviteNotFound = errors.New("store: invite not found")
+	// ErrInviteExists refuses an invite code already taken (codes are
+	// global: the primary key carries no tenant).
+	ErrInviteExists     = errors.New("store: invite code already exists")
 	ErrInviteExpired    = errors.New("store: invite expired")
 	ErrInviteFull       = errors.New("store: invite capacity reached")
 	ErrNotShared        = errors.New("store: room is not shared")
 	ErrOwnerCannotLeave = errors.New("store: owner cannot leave; transfer or delete")
+	// ErrNewOwnerNotMember refuses TransferOwner to a user who is not a
+	// human member of the room.
+	ErrNewOwnerNotMember = errors.New("store: new owner is not a member")
 	// ErrRoomExists rejects creating a room whose id is already taken. Room
 	// ids are globally unique (rooms' primary key is room_id alone) and never
 	// reused, even after a delete, so a create can never adopt — and take
@@ -139,6 +145,10 @@ type Membership struct {
 	AgentHost bool
 }
 
+// Human reports a human membership (not an agent host's): the Go side of
+// sqlHumanMember.
+func (m Membership) Human() bool { return !m.AgentHost }
+
 // Invite is a room invite code with expiry and capacity.
 type Invite struct {
 	Code          string
@@ -188,16 +198,17 @@ type RoomStore interface {
 	// member whose room lives in a different tenant than their token. Only a
 	// membership in the room's own tenant, of a live room, counts.
 	MembershipAnyTenant(ctx context.Context, roomID, userID string) (Membership, bool, error)
-	// Members returns every membership of a room, agent hosts flagged.
+	// Members returns every membership of a room, agent hosts flagged, in
+	// join order (then user id).
 	Members(ctx context.Context, roomID string) ([]Membership, error)
 	// RoomsForUser returns the rooms the user is a human member of (agent-host
-	// memberships are not the user's rooms).
+	// memberships are not the user's rooms), by room id.
 	RoomsForUser(ctx context.Context, userID string) ([]string, error)
 	// RoomsForUserAllTenants returns every room the user is a human member of
 	// across all tenants — the bridge discovery shape. The bridge subscribes,
 	// advertises, and claims in each of the owner's rooms, so a session token
 	// minted in one tenant must not hide rooms in another. UI listings use the
-	// tenant-scoped RoomsForUser.
+	// tenant-scoped RoomsForUser. Ordered by room id.
 	RoomsForUserAllTenants(ctx context.Context, userID string) ([]string, error)
 	// AgentHostRoomsAllTenants returns the live rooms, across all tenants,
 	// where the user holds an agent-host membership (the bridge's
@@ -210,14 +221,21 @@ type RoomStore interface {
 	// RemoveAgentHost deletes userID's agent-host membership of roomID; a
 	// human membership is never touched. Absent is not an error.
 	RemoveAgentHost(ctx context.Context, roomID, userID string) error
+	// CreateInvite stores a new invite code; ErrInviteExists when the code is
+	// taken in any tenant (it is never rewritten).
 	CreateInvite(ctx context.Context, inv Invite) error
 	// RedeemInvite atomically validates and consumes an invite for a user,
 	// returning the created membership. Redeeming for an already-member user is
-	// idempotent and does not increment the redeemed count.
+	// idempotent and does not increment the redeemed count. An invite is
+	// live strictly before ExpiresAtMs (liveAt): at nowMs == ExpiresAtMs it
+	// is ErrInviteExpired.
 	RedeemInvite(ctx context.Context, code, userID string, nowMs int64) (Membership, error)
-	// SearchRooms returns non-deleted rooms whose name or description matches the
-	// (case-insensitive) query substring, newest-first, with member counts. An
-	// empty query returns all rooms. total is the match count before paging.
+	// SearchRooms returns non-deleted rooms whose name or description contains
+	// the query (case-insensitive, taken literally: % and _ are no
+	// wildcards), newest-first (then room id), with member counts. An empty
+	// query returns all rooms. total is the match count before paging; a page
+	// holds clampLimit(limit, DefaultSearchRoomsPage, MaxSearchRoomsPage)
+	// rooms.
 	SearchRooms(ctx context.Context, query string, limit, offset int) (rooms []RoomWithCount, total int, err error)
 	// UpdateRoom applies a partial patch (name/description/visibility).
 	UpdateRoom(ctx context.Context, roomID string, patch RoomPatch) error
@@ -227,13 +245,25 @@ type RoomStore interface {
 	// metadata, artifacts and their versions, and agent prefs.
 	DeleteRoom(ctx context.Context, roomID string) error
 	// TransferOwner makes newOwner the room owner and demotes the prior owner to
-	// member. newOwner must already be a human member (not an agent host).
+	// member. newOwner must already be a human member (not an agent host):
+	// ErrNewOwnerNotMember otherwise; ErrRoomNotFound for a room not live here.
 	TransferOwner(ctx context.Context, roomID, newOwner string) error
 	// RoomsForUserDetailed returns rich rows for the user's rooms (human
-	// memberships only).
+	// memberships only), newest room first (then room id).
 	RoomsForUserDetailed(ctx context.Context, userID string) ([]RoomMembershipDetail, error)
 	// MemberCount returns the number of human members in a room.
 	MemberCount(ctx context.Context, roomID string) (int, error)
+}
+
+// Plaza (SearchRooms) page sizes: clampLimit(limit, DefaultSearchRoomsPage,
+// MaxSearchRoomsPage) on both backends.
+const (
+	DefaultSearchRoomsPage = 50
+	MaxSearchRoomsPage     = 200
+)
+
+func searchRoomsPage(limit int) int {
+	return clampLimit(limit, DefaultSearchRoomsPage, MaxSearchRoomsPage)
 }
 
 // MemoryRoom is an in-memory RoomStore for M0/M1 and tests.
@@ -317,6 +347,15 @@ func (s *MemoryRoom) liveRoomKeyLocked(roomID string) (string, bool) {
 		return "", false
 	}
 	return key, true
+}
+
+// liveRoomLocked returns the map key of tid's live room roomID: the one
+// liveness check of the tenant-scoped methods (MySQL's tenant filter plus
+// sqlNotDeleted). Callers hold s.mu.
+func (s *MemoryRoom) liveRoomLocked(tid, roomID string) (string, bool) {
+	rk := tkey(tid, roomID)
+	_, ok := s.rooms[rk]
+	return rk, ok && !s.deleted[rk]
 }
 
 // CreateRoomWithOwner atomically creates a room and inserts its owner
@@ -403,12 +442,11 @@ func (s *MemoryRoom) GetRoom(ctx context.Context, roomID string) (Room, error) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	rk := tkey(tid, roomID)
-	r, ok := s.rooms[rk]
-	if !ok || s.deleted[rk] {
+	rk, ok := s.liveRoomLocked(tid, roomID)
+	if !ok {
 		return Room{}, ErrRoomNotFound
 	}
-	return r, nil
+	return s.rooms[rk], nil
 }
 
 // AddMember inserts or updates a human membership of a live room of the ctx
@@ -422,8 +460,8 @@ func (s *MemoryRoom) AddMember(ctx context.Context, m Membership) error {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	rk := tkey(tid, m.RoomID)
-	if _, ok := s.rooms[rk]; !ok || s.deleted[rk] {
+	rk, ok := s.liveRoomLocked(tid, m.RoomID)
+	if !ok {
 		return ErrRoomNotFound
 	}
 	if cur, ok := s.members[rk][m.UserID]; ok {
@@ -505,8 +543,8 @@ func (s *MemoryRoom) AddAgentHost(ctx context.Context, roomID, userID string, at
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	rk := tkey(tid, roomID)
-	if _, live := s.rooms[rk]; !live || s.deleted[rk] {
+	rk, live := s.liveRoomLocked(tid, roomID)
+	if !live {
 		return ErrRoomNotFound
 	}
 	if _, member := s.members[rk][userID]; member {
@@ -523,7 +561,7 @@ func (s *MemoryRoom) RemoveAgentHost(ctx context.Context, roomID, userID string)
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if set := s.members[tkey(tid, roomID)]; set != nil && set[userID].AgentHost {
+	if set := s.members[tkey(tid, roomID)]; set != nil && !set[userID].Human() {
 		delete(set, userID)
 	}
 	return nil
@@ -542,6 +580,12 @@ func (s *MemoryRoom) Members(ctx context.Context, roomID string) ([]Membership, 
 	for _, m := range set {
 		out = append(out, m)
 	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].JoinedAtMs != out[j].JoinedAtMs {
+			return out[i].JoinedAtMs < out[j].JoinedAtMs
+		}
+		return out[i].UserID < out[j].UserID
+	})
 	return out, nil
 }
 
@@ -553,12 +597,13 @@ func (s *MemoryRoom) RoomsForUser(ctx context.Context, userID string) ([]string,
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	var out []string
+	out := []string{}
 	for _, set := range s.members {
-		if m, ok := set[userID]; ok && m.TenantID == tid && !m.AgentHost {
+		if m, ok := set[userID]; ok && m.TenantID == tid && m.Human() {
 			out = append(out, m.RoomID)
 		}
 	}
+	sort.Strings(out)
 	return out, nil
 }
 
@@ -583,17 +628,19 @@ func (s *MemoryRoom) roomsAllTenants(ctx context.Context, userID string, agentHo
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	var out []string
-	for key, set := range s.members {
-		// Same rule as MembershipAnyTenant: only a membership in the room's
-		// own tenant, of a live room.
-		if _, live := s.rooms[key]; !live || s.deleted[key] {
+	out := []string{}
+	for _, set := range s.members {
+		m, ok := set[userID]
+		if !ok || m.AgentHost != agentHost {
 			continue
 		}
-		if m, ok := set[userID]; ok && m.AgentHost == agentHost {
+		// Same rule as MembershipAnyTenant: only a membership in the room's
+		// own tenant, of a live room.
+		if _, live := s.liveRoomLocked(m.TenantID, m.RoomID); live {
 			out = append(out, m.RoomID)
 		}
 	}
+	sort.Strings(out)
 	return out, nil
 }
 
@@ -605,6 +652,11 @@ func (s *MemoryRoom) CreateInvite(ctx context.Context, inv Invite) error {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	for _, cur := range s.invites {
+		if cur.Code == inv.Code {
+			return ErrInviteExists
+		}
+	}
 	inv.TenantID = tid
 	s.invites[tkey(tid, inv.Code)] = inv
 	return nil
@@ -622,9 +674,9 @@ func (s *MemoryRoom) RedeemInvite(ctx context.Context, code, userID string, nowM
 	if !ok {
 		return Membership{}, ErrInviteNotFound
 	}
-	rk := tkey(tid, inv.RoomID)
 	// A soft-deleted room cannot be joined.
-	if s.deleted[rk] {
+	rk, live := s.liveRoomLocked(tid, inv.RoomID)
+	if !live {
 		return Membership{}, ErrRoomNotFound
 	}
 	// Idempotent: an existing member redeeming again returns their membership
@@ -632,11 +684,11 @@ func (s *MemoryRoom) RedeemInvite(ctx context.Context, code, userID string, nowM
 	// An agent-host membership is not one: the invite makes the user a
 	// human member.
 	if set := s.members[rk]; set != nil {
-		if existing, isMember := set[userID]; isMember && !existing.AgentHost {
+		if existing, isMember := set[userID]; isMember && existing.Human() {
 			return existing, nil
 		}
 	}
-	if nowMs > inv.ExpiresAtMs {
+	if !liveAt(inv.ExpiresAtMs, nowMs) {
 		return Membership{}, ErrInviteExpired
 	}
 	if inv.RedeemedCount >= inv.Capacity {
@@ -653,7 +705,7 @@ func (s *MemoryRoom) RedeemInvite(ctx context.Context, code, userID string, nowM
 func (s *MemoryRoom) memberCountLocked(rk string) int {
 	n := 0
 	for _, m := range s.members[rk] {
-		if !m.AgentHost {
+		if m.Human() {
 			n++
 		}
 	}
@@ -679,15 +731,13 @@ func (s *MemoryRoom) SearchRooms(ctx context.Context, query string, limit, offse
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	q := strings.ToLower(strings.TrimSpace(query))
+	q := strings.TrimSpace(query)
 	var matched []Room
-	for id, r := range s.rooms {
-		if r.TenantID != tid || s.deleted[id] {
+	for _, r := range s.rooms {
+		if _, live := s.liveRoomLocked(tid, r.RoomID); !live || r.TenantID != tid {
 			continue
 		}
-		if q != "" &&
-			!strings.Contains(strings.ToLower(r.Name), q) &&
-			!strings.Contains(strings.ToLower(r.Description), q) {
+		if q != "" && !containsFold(r.Name, q) && !containsFold(r.Description, q) {
 			continue
 		}
 		matched = append(matched, r)
@@ -699,17 +749,8 @@ func (s *MemoryRoom) SearchRooms(ctx context.Context, query string, limit, offse
 		return matched[i].RoomID < matched[j].RoomID
 	})
 	total := len(matched)
-	if offset < 0 {
-		offset = 0
-	}
-	if offset > total {
-		offset = total
-	}
-	end := total
-	if limit > 0 && offset+limit < end {
-		end = offset + limit
-	}
-	page := matched[offset:end]
+	offset = min(max(offset, 0), total)
+	page := matched[offset:min(offset+searchRoomsPage(limit), total)]
 	out := make([]RoomWithCount, 0, len(page))
 	for _, r := range page {
 		out = append(out, RoomWithCount{Room: r, MemberCount: s.memberCountLocked(tkey(tid, r.RoomID))})
@@ -725,11 +766,11 @@ func (s *MemoryRoom) UpdateRoom(ctx context.Context, roomID string, patch RoomPa
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	rk := tkey(tid, roomID)
-	r, ok := s.rooms[rk]
-	if !ok || s.deleted[rk] {
+	rk, ok := s.liveRoomLocked(tid, roomID)
+	if !ok {
 		return ErrRoomNotFound
 	}
+	r := s.rooms[rk]
 	if patch.Name != nil {
 		r.Name = *patch.Name
 	}
@@ -756,8 +797,8 @@ func (s *MemoryRoom) DeleteRoom(ctx context.Context, roomID string) error {
 		return err
 	}
 	s.mu.Lock()
-	rk := tkey(tid, roomID)
-	if _, ok := s.rooms[rk]; !ok || s.deleted[rk] {
+	rk, ok := s.liveRoomLocked(tid, roomID)
+	if !ok {
 		s.mu.Unlock()
 		return ErrRoomNotFound
 	}
@@ -792,13 +833,14 @@ func (s *MemoryRoom) TransferOwner(ctx context.Context, roomID, newOwner string)
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	set := s.members[tkey(tid, roomID)]
-	if set == nil {
+	rk, live := s.liveRoomLocked(tid, roomID)
+	if !live {
 		return ErrRoomNotFound
 	}
+	set := s.members[rk]
 	target, ok := set[newOwner]
-	if !ok || target.AgentHost {
-		return errors.New("store: new owner is not a member")
+	if !ok || !target.Human() {
+		return ErrNewOwnerNotMember
 	}
 	for uid, m := range set {
 		if m.Role == RoleOwner {
@@ -819,14 +861,14 @@ func (s *MemoryRoom) RoomsForUserDetailed(ctx context.Context, userID string) ([
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	var out []RoomMembershipDetail
+	out := []RoomMembershipDetail{}
 	for _, set := range s.members {
 		m, ok := set[userID]
-		if !ok || m.TenantID != tid || m.AgentHost {
+		if !ok || m.TenantID != tid || !m.Human() {
 			continue
 		}
-		rk := tkey(tid, m.RoomID)
-		if s.deleted[rk] {
+		rk, live := s.liveRoomLocked(tid, m.RoomID)
+		if !live {
 			continue
 		}
 		r := s.rooms[rk]

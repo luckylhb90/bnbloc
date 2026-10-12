@@ -11,59 +11,6 @@ import (
 // MySQL room-store regressions, run in a scratch database (see testmysql.Fresh;
 // skipped without BNBLOC_TEST_MYSQL_DSN).
 
-// BE-1: rooms' primary key is room_id alone, so the former create upsert let a
-// caller in ANY tenant re-"create" an existing room, rename it, and be stamped
-// its owner — which IsMemberAnyTenant then honored as cross-tenant access.
-func TestMySQLRoomCreateRejectsExistingIDAcrossTenants(t *testing.T) {
-	db, err := OpenMySQL(testmysql.Fresh(t))
-	if err != nil {
-		t.Fatalf("open: %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	s := NewMySQLRoom(db)
-	ca, cb := tenantCtx(tenantA), tenantCtx(tenantB)
-
-	if err := s.CreateRoomWithOwnerAndChannel(ca, Room{RoomID: "r1", Name: "Alpha", CreatedBy: "alice", CreatedAtMs: 1},
-		Membership{RoomID: "r1", UserID: "alice", Role: RoleOwner, JoinedAtMs: 1},
-		RoomChannel{ChannelID: "ch-a", RoomID: "r1", Name: "general", IsDefault: true, CreatedBy: "alice", CreatedAtMs: 1}); err != nil {
-		t.Fatalf("create: %v", err)
-	}
-	err = s.CreateRoomWithOwnerAndChannel(cb, Room{RoomID: "r1", Name: "hijack", CreatedBy: "mallory", CreatedAtMs: 2},
-		Membership{RoomID: "r1", UserID: "mallory", Role: RoleOwner, JoinedAtMs: 2},
-		RoomChannel{ChannelID: "ch-m", RoomID: "r1", Name: "general", IsDefault: true, CreatedBy: "mallory", CreatedAtMs: 2})
-	if !errors.Is(err, ErrRoomExists) {
-		t.Fatalf("cross-tenant create of existing id = %v, want ErrRoomExists", err)
-	}
-	if err := s.CreateRoomWithOwner(ca, Room{RoomID: "r1", Name: "again", CreatedBy: "mallory", CreatedAtMs: 2},
-		Membership{RoomID: "r1", UserID: "mallory", Role: RoleOwner, JoinedAtMs: 2}); !errors.Is(err, ErrRoomExists) {
-		t.Fatalf("same-tenant create of existing id = %v, want ErrRoomExists", err)
-	}
-	if err := s.CreateRoom(ca, Room{RoomID: "r1", Name: "x"}); !errors.Is(err, ErrRoomExists) {
-		t.Fatalf("CreateRoom existing id = %v, want ErrRoomExists", err)
-	}
-	if got, err := s.GetRoom(ca, "r1"); err != nil || got.Name != "Alpha" {
-		t.Fatalf("room after failed creates = %+v, %v; want Alpha unchanged", got, err)
-	}
-	if memberAnyTenant(t, s, ca, "r1", "mallory") {
-		t.Fatal("a failed create must not leave the caller a member")
-	}
-
-	// A membership row filed under a foreign tenant (as the old upsert left
-	// behind) grants nothing.
-	if _, err := db.Exec(`INSERT INTO room_members (tenant_id, room_id, user_id, role, joined_at_ms) VALUES (?, 'r1', 'stray', 'owner', 3)`, tenantB); err != nil {
-		t.Fatalf("seed stray: %v", err)
-	}
-	if memberAnyTenant(t, s, cb, "r1", "stray") {
-		t.Fatal("foreign-tenant membership must not count")
-	}
-	if got := must(s.RoomsForUserAllTenants(cb, "stray"))(t); len(got) != 0 {
-		t.Fatalf("stray all-tenant rooms = %v, want none", got)
-	}
-	if !memberAnyTenant(t, s, cb, "r1", "alice") {
-		t.Fatal("the real member resolves from any tenant context")
-	}
-}
-
 // BE-24: DeleteRoom removes every room-owned row in one transaction. Every
 // roomOwnedTables entry is seeded for two rooms and counted with the entry's
 // own predicate: the deleted room keeps nothing, the other room loses nothing.

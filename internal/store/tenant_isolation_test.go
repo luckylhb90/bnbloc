@@ -48,7 +48,7 @@ func plantMember(t *testing.T, b *Backends, tenantID string, m Membership) {
 // rooms primary key is room_id alone), so a second tenant cannot create a room
 // with an id another tenant already holds — that create must fail rather than
 // adopt the room (BE-1: room takeover via create-upsert).
-func TestRoomIsolationAcrossTenants(t *testing.T) {
+func TestContractRoomStoreTenantIsolation(t *testing.T) {
 	forEachBackend(t, func(t *testing.T, bk *Backends) {
 		s := bk.Room
 		ca, cb, _, _, id := isolationTenants()
@@ -106,7 +106,7 @@ func TestRoomIsolationAcrossTenants(t *testing.T) {
 // A membership filed under a tenant other than the room's own (as the
 // pre-BE-1 create upsert could leave behind) never grants cross-tenant access,
 // and AddMember never files one.
-func TestIsMemberAnyTenantIgnoresForeignTenantMembership(t *testing.T) {
+func TestContractRoomStoreForeignTenantMembership(t *testing.T) {
 	forEachBackend(t, func(t *testing.T, bk *Backends) {
 		s := bk.Room
 		ca, cb, _, b, id := isolationTenants()
@@ -147,7 +147,7 @@ func TestIsMemberAnyTenantIgnoresForeignTenantMembership(t *testing.T) {
 // An invite code minted in one tenant cannot be redeemed from another: the
 // code is a global primary key, so tenant scoping is the only thing preventing
 // a cross-org join.
-func TestInviteRedeemRejectsCrossTenant(t *testing.T) {
+func TestContractRoomStoreInviteCrossTenant(t *testing.T) {
 	forEachBackend(t, func(t *testing.T, bk *Backends) {
 		s := bk.Room
 		ca, cb, _, _, id := isolationTenants()
@@ -208,7 +208,7 @@ func TestStoreFailsClosedWithoutTenant(t *testing.T) {
 // across tenants (it subscribes/advertises/claims in each), even though the
 // session token it authenticates with was minted in just one tenant. The
 // tenant-scoped RoomsForUser stays scoped for UI listings.
-func TestRoomsForUserAllTenantsIsTheBridgeDiscoveryShape(t *testing.T) {
+func TestContractRoomStoreAllTenantsDiscovery(t *testing.T) {
 	forEachBackend(t, func(t *testing.T, bk *Backends) {
 		s := bk.Room
 		ca, cb, _, _, id := isolationTenants()
@@ -251,7 +251,7 @@ func TestRoomsForUserAllTenantsIsTheBridgeDiscoveryShape(t *testing.T) {
 // The UI "my rooms" listing is tenant-scoped: switching the acting tenant
 // switches the visible workspace. The cross-tenant shape exists ONLY for the
 // bridge's room discovery (allTenants), which no UI call ever uses.
-func TestRoomsForUserDetailedStaysTenantScoped(t *testing.T) {
+func TestContractRoomStoreDetailedTenantScoped(t *testing.T) {
 	forEachBackend(t, func(t *testing.T, bk *Backends) {
 		s := bk.Room
 		ca, cb, _, _, id := isolationTenants()

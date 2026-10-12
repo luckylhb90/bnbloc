@@ -8,8 +8,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/go-sql-driver/mysql"
-
 	"github.com/luckylhb90/bnbloc/internal/tenant"
 )
 
@@ -50,11 +48,7 @@ func insertRoom(ctx context.Context, q interface {
 		`INSERT INTO rooms (tenant_id, room_id, name, description, visibility, sync_mode, created_by, created_at_ms)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
 		tid, r.RoomID, r.Name, r.Description, string(r.Visibility), string(r.SyncMode), r.CreatedBy, r.CreatedAtMs)
-	var me *mysql.MySQLError
-	if errors.As(err, &me) && me.Number == mysqlErrDupEntry {
-		return ErrRoomExists
-	}
-	return err
+	return dupAs(err, ErrRoomExists)
 }
 
 // CreateRoomWithOwner atomically inserts a room and its owner membership in a
@@ -129,9 +123,10 @@ func (s *MySQLRoom) createRoomTx(ctx context.Context, tx *sql.Tx, r Room, owner 
 // resolves which tenant to execute in, independent of the caller's session
 // tenant. Returns false when the room does not exist or is deleted.
 func (s *MySQLRoom) RoomTenant(ctx context.Context, roomID string) (string, bool, error) {
+	// cross-tenant: the lookup that resolves a room's tenant (room ids are global).
 	var tid string
 	err := s.DB.QueryRowContext(ctx,
-		`SELECT tenant_id FROM rooms WHERE room_id = ? AND deleted_at_ms IS NULL`, roomID).Scan(&tid)
+		`SELECT tenant_id FROM rooms WHERE room_id = ? AND `+sqlNotDeleted, roomID).Scan(&tid)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", false, nil
 	}
@@ -155,7 +150,7 @@ func (s *MySQLRoom) GetRoom(ctx context.Context, roomID string) (Room, error) {
 	var visibility, syncMode string
 	err = s.DB.QueryRowContext(ctx,
 		`SELECT tenant_id, room_id, name, description, visibility, sync_mode, created_by, created_at_ms
-		 FROM rooms WHERE tenant_id = ? AND room_id = ? AND deleted_at_ms IS NULL`,
+		 FROM rooms WHERE tenant_id = ? AND room_id = ? AND `+sqlNotDeleted,
 		tid, roomID).Scan(&r.TenantID, &r.RoomID, &r.Name, &r.Description, &visibility, &syncMode, &r.CreatedBy, &r.CreatedAtMs)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Room{}, ErrRoomNotFound
@@ -177,8 +172,8 @@ func (s *MySQLRoom) AddMember(ctx context.Context, m Membership) error {
 	res, err := s.DB.ExecContext(ctx,
 		`INSERT INTO room_members (tenant_id, room_id, user_id, role, joined_at_ms, agent_host)
 		 SELECT tenant_id, room_id, ?, ?, ?, 0 FROM rooms
-		 WHERE tenant_id = ? AND room_id = ? AND deleted_at_ms IS NULL
-		 ON DUPLICATE KEY UPDATE role = VALUES(role), agent_host = 0`,
+		 WHERE tenant_id = ? AND room_id = ? AND `+sqlNotDeleted+`
+		 ON DUPLICATE KEY UPDATE role = VALUES(role), agent_host = VALUES(agent_host)`,
 		m.UserID, string(m.Role), m.JoinedAtMs, tid, m.RoomID)
 	if err != nil {
 		return err
@@ -207,7 +202,7 @@ func (s *MySQLRoom) AddAgentHost(ctx context.Context, roomID, userID string, atM
 	res, err := s.DB.ExecContext(ctx,
 		`INSERT IGNORE INTO room_members (tenant_id, room_id, user_id, role, joined_at_ms, agent_host)
 		 SELECT tenant_id, room_id, ?, 'visitor', ?, 1 FROM rooms
-		 WHERE tenant_id = ? AND room_id = ? AND deleted_at_ms IS NULL`,
+		 WHERE tenant_id = ? AND room_id = ? AND `+sqlNotDeleted,
 		userID, atMs, tid, roomID)
 	if err != nil {
 		return err
@@ -261,11 +256,11 @@ func (s *MySQLRoom) IsMember(ctx context.Context, roomID, userID string) (bool, 
 // whose room lives in a tenant other than the one their token was minted in
 // (a multi-tenant member). The membership must be filed under the room's own
 // tenant and the room must be live: a membership row under any other tenant
-// (e.g. one left by the pre-BE-1 create upsert) never grants access.
+// (e.g. a stray row planted by hand) never grants access.
 func (s *MySQLRoom) MembershipAnyTenant(ctx context.Context, roomID, userID string) (Membership, bool, error) {
 	return scanOneMembership(s.DB.QueryRowContext(ctx,
 		`SELECT m.tenant_id, m.room_id, m.user_id, m.role, m.joined_at_ms, m.agent_host FROM room_members m
-		 JOIN rooms r ON r.room_id = m.room_id AND r.tenant_id = m.tenant_id AND r.deleted_at_ms IS NULL
+		 JOIN rooms r ON r.room_id = m.room_id AND r.tenant_id = m.tenant_id AND r.`+sqlNotDeleted+`
 		 WHERE m.room_id = ? AND m.user_id = ? LIMIT 1`, roomID, userID))
 }
 
@@ -296,14 +291,16 @@ func scanOneMembership(row rowScanner) (Membership, bool, error) {
 	return m, true, nil
 }
 
-// Members returns all memberships for a room, agent hosts flagged.
+// Members returns all memberships for a room, agent hosts flagged, in join
+// order (then user id).
 func (s *MySQLRoom) Members(ctx context.Context, roomID string) ([]Membership, error) {
 	tid, err := tenant.Require(ctx)
 	if err != nil {
 		return nil, err
 	}
 	return queryAll(ctx, s.DB,
-		`SELECT `+membershipColumns+` FROM room_members WHERE tenant_id = ? AND room_id = ?`, scanMembership, tid, roomID)
+		`SELECT `+membershipColumns+` FROM room_members WHERE tenant_id = ? AND room_id = ?
+		 ORDER BY joined_at_ms, user_id`, scanMembership, tid, roomID)
 }
 
 // RoomsForUser returns the room ids the user is a member of in the caller's
@@ -314,7 +311,8 @@ func (s *MySQLRoom) RoomsForUser(ctx context.Context, userID string) ([]string, 
 	if err != nil {
 		return nil, err
 	}
-	return queryAll(ctx, s.DB, `SELECT room_id FROM room_members WHERE tenant_id = ? AND user_id = ? AND agent_host = 0`, scanString, tid, userID)
+	return queryAll(ctx, s.DB, `SELECT room_id FROM room_members WHERE tenant_id = ? AND user_id = ? AND `+sqlHumanMember+`
+		 ORDER BY room_id`, scanString, tid, userID)
 }
 
 // RoomsForUserAllTenants returns every room the user is a member of across
@@ -335,12 +333,13 @@ func (s *MySQLRoom) roomsAllTenants(ctx context.Context, userID string, agentHos
 	if _, err := tenant.Require(ctx); err != nil {
 		return nil, err
 	}
+	// cross-tenant: the bridge discovers its owner's rooms in every tenant.
 	// Same rule as MembershipAnyTenant: only memberships filed under the
 	// room's own tenant, of live rooms.
 	return queryAll(ctx, s.DB,
 		`SELECT m.room_id FROM room_members m
-		 JOIN rooms r ON r.room_id = m.room_id AND r.tenant_id = m.tenant_id AND r.deleted_at_ms IS NULL
-		 WHERE m.user_id = ? AND m.agent_host = ?`, scanString, userID, agentHost)
+		 JOIN rooms r ON r.room_id = m.room_id AND r.tenant_id = m.tenant_id AND r.`+sqlNotDeleted+`
+		 WHERE m.user_id = ? AND m.agent_host = ? ORDER BY m.room_id`, scanString, userID, agentHost)
 }
 
 // CreateInvite stores an invite code.
@@ -353,7 +352,7 @@ func (s *MySQLRoom) CreateInvite(ctx context.Context, inv Invite) error {
 		`INSERT INTO room_invites (code, tenant_id, room_id, role, expires_at_ms, capacity, redeemed_count, created_by)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
 		inv.Code, tid, inv.RoomID, string(inv.Role), inv.ExpiresAtMs, inv.Capacity, inv.RedeemedCount, inv.CreatedBy)
-	return err
+	return dupAs(err, ErrInviteExists)
 }
 
 // RedeemInvite atomically validates and consumes an invite for a user.
@@ -384,7 +383,7 @@ func (s *MySQLRoom) RedeemInvite(ctx context.Context, code, userID string, nowMs
 	// The target room must be active; a soft-deleted room cannot be joined.
 	var roomID string
 	roomErr := tx.QueryRowContext(ctx,
-		`SELECT room_id FROM rooms WHERE tenant_id = ? AND room_id = ? AND deleted_at_ms IS NULL FOR UPDATE`, tid, inv.RoomID).Scan(&roomID)
+		`SELECT room_id FROM rooms WHERE tenant_id = ? AND room_id = ? AND `+sqlNotDeleted+` FOR UPDATE`, tid, inv.RoomID).Scan(&roomID)
 	if errors.Is(roomErr, sql.ErrNoRows) {
 		return Membership{}, ErrRoomNotFound
 	}
@@ -395,17 +394,19 @@ func (s *MySQLRoom) RedeemInvite(ctx context.Context, code, userID string, nowMs
 	// Idempotent: an existing member redeeming again returns their membership.
 	// An agent-host membership is not one: the invite makes the user a human
 	// member (the insert below converts the row).
-	var existingRole string
-	memErr := tx.QueryRowContext(ctx,
-		`SELECT role FROM room_members WHERE tenant_id = ? AND room_id = ? AND user_id = ? AND agent_host = 0`, tid, inv.RoomID, userID).Scan(&existingRole)
-	if memErr == nil {
+	existing, isMember, err := scanOneMembership(tx.QueryRowContext(ctx,
+		`SELECT `+membershipColumns+` FROM room_members WHERE tenant_id = ? AND room_id = ? AND user_id = ? AND `+sqlHumanMember, tid, inv.RoomID, userID))
+	if err != nil {
+		return Membership{}, err
+	}
+	if isMember {
 		if err := tx.Commit(); err != nil {
 			return Membership{}, err
 		}
-		return Membership{TenantID: tid, RoomID: inv.RoomID, UserID: userID, Role: Role(existingRole)}, nil
+		return existing, nil
 	}
 
-	if nowMs > inv.ExpiresAtMs {
+	if !liveAt(inv.ExpiresAtMs, nowMs) {
 		return Membership{}, ErrInviteExpired
 	}
 	if inv.RedeemedCount >= inv.Capacity {
@@ -417,7 +418,7 @@ func (s *MySQLRoom) RedeemInvite(ctx context.Context, code, userID string, nowMs
 	m := Membership{TenantID: tid, RoomID: inv.RoomID, UserID: userID, Role: inv.Role, JoinedAtMs: nowMs}
 	if _, err := tx.ExecContext(ctx,
 		`INSERT INTO room_members (tenant_id, room_id, user_id, role, joined_at_ms, agent_host) VALUES (?, ?, ?, ?, ?, 0)
-		 ON DUPLICATE KEY UPDATE role = VALUES(role), agent_host = 0`,
+		 ON DUPLICATE KEY UPDATE role = VALUES(role), agent_host = VALUES(agent_host)`,
 		tid, m.RoomID, m.UserID, string(m.Role), m.JoinedAtMs); err != nil {
 		return Membership{}, err
 	}
@@ -434,63 +435,48 @@ func (s *MySQLRoom) MemberCount(ctx context.Context, roomID string) (int, error)
 		return 0, err
 	}
 	var n int
-	if err := s.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM room_members WHERE tenant_id = ? AND room_id = ? AND agent_host = 0`, tid, roomID).Scan(&n); err != nil {
+	if err := s.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM room_members WHERE tenant_id = ? AND room_id = ? AND `+sqlHumanMember, tid, roomID).Scan(&n); err != nil {
 		return 0, err
 	}
 	return n, nil
 }
 
-// SearchRooms returns non-deleted rooms matching the query, newest-first, with
-// member counts. An empty query returns all rooms. total is the pre-page count.
+// SearchRooms returns non-deleted rooms whose name or description contains
+// the query literally (LIKE wildcards escaped by likePattern), newest-first,
+// with member counts. An empty query returns all rooms. total is the
+// pre-page count; the page size is searchRoomsPage(limit).
 func (s *MySQLRoom) SearchRooms(ctx context.Context, query string, limit, offset int) ([]RoomWithCount, int, error) {
 	tid, err := tenant.Require(ctx)
 	if err != nil {
 		return nil, 0, err
 	}
-	q := strings.TrimSpace(query)
-	like := "%" + q + "%"
-	where := "tenant_id = ? AND deleted_at_ms IS NULL"
+	where := "r.tenant_id = ? AND r." + sqlNotDeleted
 	args := []any{tid}
-	if q != "" {
-		where += " AND (name LIKE ? OR description LIKE ?)"
-		args = append(args, like, like)
+	if q := strings.TrimSpace(query); q != "" {
+		where += " AND (r.name LIKE ? OR r.description LIKE ?)"
+		args = append(args, likePattern(q), likePattern(q))
 	}
 	var total int
-	if err := s.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM rooms WHERE `+where, args...).Scan(&total); err != nil {
+	if err := s.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM rooms r WHERE `+where, args...).Scan(&total); err != nil {
 		return nil, 0, err
 	}
-	if limit <= 0 {
-		limit = 50
-	}
-	if offset < 0 {
-		offset = 0
-	}
-	rows, err := s.DB.QueryContext(ctx,
+	rooms, err := queryAll(ctx, s.DB,
 		`SELECT r.tenant_id, r.room_id, r.name, r.description, r.visibility, r.sync_mode, r.created_by, r.created_at_ms,
-		        COUNT(m.user_id) AS member_count
+		        (SELECT COUNT(*) FROM room_members m WHERE m.tenant_id = r.tenant_id AND m.room_id = r.room_id AND m.`+sqlHumanMember+`)
 		 FROM rooms r
-		 LEFT JOIN room_members m ON m.tenant_id = r.tenant_id AND m.room_id = r.room_id AND m.agent_host = 0
-		 WHERE `+strings.ReplaceAll(where, "tenant_id", "r.tenant_id")+`
-		 GROUP BY r.tenant_id, r.room_id, r.name, r.description, r.visibility, r.sync_mode, r.created_by, r.created_at_ms
+		 WHERE `+where+`
 		 ORDER BY r.created_at_ms DESC, r.room_id ASC
-		 LIMIT ? OFFSET ?`,
-		append(append([]any{}, args...), limit, offset)...)
-	if err != nil {
-		return nil, 0, err
-	}
-	defer rows.Close()
-	var out []RoomWithCount
-	for rows.Next() {
-		var rc RoomWithCount
-		var visibility, syncMode string
-		if err := rows.Scan(&rc.TenantID, &rc.RoomID, &rc.Name, &rc.Description, &visibility, &syncMode, &rc.CreatedBy, &rc.CreatedAtMs, &rc.MemberCount); err != nil {
-			continue
-		}
-		rc.Visibility = NormalizeVisibility(visibility)
-		rc.SyncMode = NormalizeSyncMode(syncMode)
-		out = append(out, rc)
-	}
-	return out, total, nil
+		 LIMIT ? OFFSET ?`, func(row rowScanner) (RoomWithCount, error) {
+			var rc RoomWithCount
+			var visibility, syncMode string
+			if err := row.Scan(&rc.TenantID, &rc.RoomID, &rc.Name, &rc.Description, &visibility, &syncMode, &rc.CreatedBy, &rc.CreatedAtMs, &rc.MemberCount); err != nil {
+				return rc, err
+			}
+			rc.Visibility = NormalizeVisibility(visibility)
+			rc.SyncMode = NormalizeSyncMode(syncMode)
+			return rc, nil
+		}, append(args, searchRoomsPage(limit), max(offset, 0))...)
+	return rooms, total, err
 }
 
 // UpdateRoom applies a partial patch (name/description/visibility).
@@ -518,17 +504,16 @@ func (s *MySQLRoom) UpdateRoom(ctx context.Context, roomID string, patch RoomPat
 		args = append(args, string(*patch.SyncMode))
 	}
 	if len(sets) == 0 {
-		return nil
+		// Nothing to write: still a miss when the room is not live here.
+		_, err := s.GetRoom(ctx, roomID)
+		return err
 	}
 	args = append(args, tid, roomID)
-	res, err := s.DB.ExecContext(ctx, `UPDATE rooms SET `+strings.Join(sets, ", ")+` WHERE tenant_id = ? AND room_id = ? AND deleted_at_ms IS NULL`, args...)
+	res, err := s.DB.ExecContext(ctx, `UPDATE rooms SET `+strings.Join(sets, ", ")+` WHERE tenant_id = ? AND room_id = ? AND `+sqlNotDeleted, args...)
 	if err != nil {
 		return err
 	}
-	if n, _ := res.RowsAffected(); n == 0 {
-		return ErrRoomNotFound
-	}
-	return nil
+	return requireMatched(res, ErrRoomNotFound)
 }
 
 // DeleteRoom soft-deletes a room and hard-deletes every room-owned row in one
@@ -543,7 +528,7 @@ func (s *MySQLRoom) DeleteRoom(ctx context.Context, roomID string) error {
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
-	res, err := tx.ExecContext(ctx, `UPDATE rooms SET deleted_at_ms = ? WHERE tenant_id = ? AND room_id = ? AND deleted_at_ms IS NULL`, time.Now().UnixMilli(), tid, roomID)
+	res, err := tx.ExecContext(ctx, `UPDATE rooms SET deleted_at_ms = ? WHERE tenant_id = ? AND room_id = ? AND `+sqlNotDeleted, time.Now().UnixMilli(), tid, roomID)
 	if err != nil {
 		return err
 	}
@@ -570,7 +555,7 @@ func (s *MySQLRoom) TransferOwner(ctx context.Context, roomID, newOwner string) 
 	}
 	defer func() { _ = tx.Rollback() }()
 	var exists string
-	roomErr := tx.QueryRowContext(ctx, `SELECT room_id FROM rooms WHERE tenant_id = ? AND room_id = ? AND deleted_at_ms IS NULL`, tid, roomID).Scan(&exists)
+	roomErr := tx.QueryRowContext(ctx, `SELECT room_id FROM rooms WHERE tenant_id = ? AND room_id = ? AND `+sqlNotDeleted, tid, roomID).Scan(&exists)
 	if errors.Is(roomErr, sql.ErrNoRows) {
 		return ErrRoomNotFound
 	}
@@ -578,9 +563,9 @@ func (s *MySQLRoom) TransferOwner(ctx context.Context, roomID, newOwner string) 
 		return roomErr
 	}
 	var role string
-	err = tx.QueryRowContext(ctx, `SELECT role FROM room_members WHERE tenant_id = ? AND room_id = ? AND user_id = ? AND agent_host = 0`, tid, roomID, newOwner).Scan(&role)
+	err = tx.QueryRowContext(ctx, `SELECT role FROM room_members WHERE tenant_id = ? AND room_id = ? AND user_id = ? AND `+sqlHumanMember, tid, roomID, newOwner).Scan(&role)
 	if errors.Is(err, sql.ErrNoRows) {
-		return errors.New("store: new owner is not a member")
+		return ErrNewOwnerNotMember
 	}
 	if err != nil {
 		return err
@@ -605,10 +590,10 @@ func (s *MySQLRoom) RoomsForUserDetailed(ctx context.Context, userID string) ([]
 	}
 	return queryAll(ctx, s.DB,
 		`SELECT r.tenant_id, r.room_id, r.name, r.description, r.visibility, r.sync_mode, r.created_by, r.created_at_ms, m.role,
-		        (SELECT COUNT(*) FROM room_members mm WHERE mm.tenant_id = r.tenant_id AND mm.room_id = r.room_id AND mm.agent_host = 0) AS member_count
+		        (SELECT COUNT(*) FROM room_members mm WHERE mm.tenant_id = r.tenant_id AND mm.room_id = r.room_id AND mm.`+sqlHumanMember+`) AS member_count
 		 FROM room_members m
 		 JOIN rooms r ON r.tenant_id = m.tenant_id AND r.room_id = m.room_id
-		 WHERE m.tenant_id = ? AND m.user_id = ? AND m.agent_host = 0 AND r.deleted_at_ms IS NULL
+		 WHERE m.tenant_id = ? AND m.user_id = ? AND m.`+sqlHumanMember+` AND r.`+sqlNotDeleted+`
 		 ORDER BY r.created_at_ms DESC, r.room_id ASC`, func(r rowScanner) (RoomMembershipDetail, error) {
 			var d RoomMembershipDetail
 			var visibility, syncMode, role string
