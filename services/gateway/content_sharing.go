@@ -199,7 +199,9 @@ func (s *Service) handleShareContent(w http.ResponseWriter, r *http.Request) {
 	s.notifyContent(ctx, claims.Tenant, notify.Event{
 		Type: wire.NotificationContentShared, Recipients: reached, Actor: claims.Subject,
 		Title: claims.Subject + " shared the " + contentLabel(src) + " with you", Text: text,
-		URL: appLink(r, "library"), DedupKey: "share:" + src.ID + "@" + v.Version,
+		// One event per share call: a later share of the same version to
+		// someone else is a new notification, a retried one is not.
+		URL: appLink(r, "library"), DedupKey: "share:" + src.ID + "@" + v.Version + ":" + strings.Join(reached, ","),
 	})
 	writeJSON(w, http.StatusOK, out)
 }

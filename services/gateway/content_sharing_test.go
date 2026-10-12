@@ -162,7 +162,7 @@ func TestContentShareCopies(t *testing.T) {
 	if rep.Version != "1.0.0" || len(rep.Shared) != 1 || rep.Shared[0].Member != "jack" || rep.Shared[0].Status != wire.ContentShareCreated || len(rep.Skipped) != 3 {
 		t.Fatalf("share reply = %+v", rep)
 	}
-	p := g.queued(wire.NotificationContentShared, "share:"+src.ID+"@1.0.0")
+	p := g.queued(wire.NotificationContentShared, "share:"+src.ID+"@1.0.0:jack")
 	if p.Actor != "maya" || !strings.Contains(p.Title, `maya shared the expert "Reviewer"`) || p.Text != "for your reviews" || !strings.HasSuffix(p.URL, "/#/library") {
 		t.Fatalf("notification = %+v", p)
 	}
@@ -217,6 +217,10 @@ func TestContentShareCopies(t *testing.T) {
 	}
 	if code != http.StatusOK || got["bob"] != "created@1.0.0" || got["jack"] != "unchanged@1.0.1" || len(rep.Shared) != 2 {
 		t.Fatalf("room share = %d %+v", code, rep)
+	}
+	// A later share of the same version notifies its new recipient (only).
+	if p := g.queued(wire.NotificationContentShared, "share:"+src.ID+"@1.0.0:bob"); len(p.Recipients) != 1 || p.Recipients[0].UserID != "bob" {
+		t.Fatalf("room share notification = %+v", p)
 	}
 	if code, _ := g.json("maya", http.MethodPost, "/v1/content-components/"+src.ID+"/shares", wire.ContentShareRequest{RoomID: "room-9"}); code != http.StatusForbidden {
 		t.Fatalf("share with a foreign room = %d", code)
