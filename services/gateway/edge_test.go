@@ -241,11 +241,11 @@ func ssoGateway(t *testing.T) *Service {
 		Signer:     auth.NewSigner([]byte("k")),
 		Now:        time.Now,
 		SessionTTL: time.Hour,
-		TenantResolver: func(id auth.Identity, def string) (string, string) {
+		TenantResolver: func(id auth.Identity, def string) (string, string, error) {
 			if id.Subject == "carol" {
-				return "frozen", "member"
+				return "frozen", "member", nil
 			}
-			return def, "member"
+			return def, "member", nil
 		},
 		TenantSuspended: func(tenantID string) bool { return tenantID == "frozen" },
 	}

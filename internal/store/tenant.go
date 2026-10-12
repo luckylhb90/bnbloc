@@ -156,15 +156,23 @@ type TenantStore interface {
 	// ListTenants returns every tenant, for the platform (super-admin) console.
 	ListTenants(ctx context.Context) []Tenant
 	// TenantForIssuer returns the tenant id mapped to an SSO issuer / email
-	// domain, or found=false when none is registered.
-	TenantForIssuer(ctx context.Context, issuer string) (tenantID string, found bool)
-	// PutMember creates or updates a tenant membership.
+	// domain, or found=false when none is registered. A read failure is an
+	// error, never "not registered".
+	TenantForIssuer(ctx context.Context, issuer string) (tenantID string, found bool, err error)
+	// PutMember creates or updates a tenant membership (an admin decision:
+	// it overwrites the role).
 	PutMember(ctx context.Context, m TenantMember) error
-	// GetMember returns a user's membership in a tenant, found=false when none.
-	GetMember(ctx context.Context, tenantID, userID string) (TenantMember, bool)
+	// EnsureMember inserts m unless the user is already a member, and returns
+	// the membership as stored (created=false: the existing row, its role
+	// untouched). It is the login path's write: a failed or racing read can
+	// never turn into a role change.
+	EnsureMember(ctx context.Context, m TenantMember) (stored TenantMember, created bool, err error)
+	// GetMember returns a user's membership in a tenant, found=false when
+	// none. A read failure is an error, never "not a member".
+	GetMember(ctx context.Context, tenantID, userID string) (TenantMember, bool, error)
 	// MemberCount returns how many members a tenant has (to detect the first
 	// user, who is promoted to org_admin).
-	MemberCount(ctx context.Context, tenantID string) int
+	MemberCount(ctx context.Context, tenantID string) (int, error)
 	// ListMembers returns all members of a tenant (for the org-admin console).
 	ListMembers(ctx context.Context, tenantID string) []TenantMember
 	// RemoveMember deletes a membership. Removing an absent member is a no-op.
@@ -257,11 +265,11 @@ func (s *MemoryTenant) ListTenants(_ context.Context) []Tenant {
 	return out
 }
 
-func (s *MemoryTenant) TenantForIssuer(_ context.Context, issuer string) (string, bool) {
+func (s *MemoryTenant) TenantForIssuer(_ context.Context, issuer string) (string, bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	id, ok := s.byIssue[issuer]
-	return id, ok
+	return id, ok, nil
 }
 
 func (s *MemoryTenant) PutMember(_ context.Context, m TenantMember) error {
@@ -278,6 +286,23 @@ func (s *MemoryTenant) PutMember(_ context.Context, m TenantMember) error {
 	return nil
 }
 
+func (s *MemoryTenant) EnsureMember(_ context.Context, m TenantMember) (TenantMember, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if cur, ok := s.members[m.TenantID][m.UserID]; ok {
+		return cur, false, nil
+	}
+	if s.members[m.TenantID] == nil {
+		s.members[m.TenantID] = map[string]TenantMember{}
+	}
+	if m.Role == "" {
+		m.Role = OrgRoleMember
+	}
+	m.Source = normalizeMemberSource(m.Source)
+	s.members[m.TenantID][m.UserID] = m
+	return m, true, nil
+}
+
 func (s *MemoryTenant) ListMembershipsForUser(_ context.Context, userID string) []TenantMember {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -290,17 +315,17 @@ func (s *MemoryTenant) ListMembershipsForUser(_ context.Context, userID string) 
 	return out
 }
 
-func (s *MemoryTenant) GetMember(_ context.Context, tenantID, userID string) (TenantMember, bool) {
+func (s *MemoryTenant) GetMember(_ context.Context, tenantID, userID string) (TenantMember, bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	m, ok := s.members[tenantID][userID]
-	return m, ok
+	return m, ok, nil
 }
 
-func (s *MemoryTenant) MemberCount(_ context.Context, tenantID string) int {
+func (s *MemoryTenant) MemberCount(_ context.Context, tenantID string) (int, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return len(s.members[tenantID])
+	return len(s.members[tenantID]), nil
 }
 
 func (s *MemoryTenant) RemoveMember(_ context.Context, tenantID, userID string) error {

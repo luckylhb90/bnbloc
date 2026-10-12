@@ -126,8 +126,20 @@ func (s *Service) handleReserveBorrow(w http.ResponseWriter, r *http.Request) {
 		// Org-level ceilings: on top of the per-grant quota, refuse once the
 		// tenant's aggregate borrow runs or cost reach the tenant's configured
 		// ceilings (0 = unlimited). Reserved runs are already in runs_used.
-		if runQuota, costAllowance := s.tenantCeilings(r.Context()); runQuota > 0 || costAllowance > 0 {
-			runs, cost := s.Grants.TenantUsage(r.Context())
+		// A failed read refuses the reservation (fails closed).
+		runQuota, costAllowance, err := s.tenantCeilings(r.Context())
+		if err != nil {
+			obs.ServerError(w, "reserve borrow failed", err)
+			writeErr(w, http.StatusInternalServerError, "reserve borrow failed")
+			return
+		}
+		if runQuota > 0 || costAllowance > 0 {
+			runs, cost, err := s.Grants.TenantUsage(r.Context())
+			if err != nil {
+				obs.ServerError(w, "reserve borrow failed", err)
+				writeErr(w, http.StatusInternalServerError, "reserve borrow failed")
+				return
+			}
 			if (runQuota > 0 && runs >= runQuota) || (costAllowance > 0 && cost >= costAllowance) {
 				deny(DenyOrgQuotaExhausted)
 				return

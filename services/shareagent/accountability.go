@@ -120,8 +120,18 @@ func (s *Service) handleRecordBorrow(w http.ResponseWriter, r *http.Request) {
 // show remaining allowance. It requires no room membership: usage is org-wide
 // and the tenant is already bound to the request context by svcauth.
 func (s *Service) handleTenantUsage(w http.ResponseWriter, r *http.Request) {
-	runs, cost := s.Grants.TenantUsage(r.Context())
-	runQuota, costAllowance := s.tenantCeilings(r.Context())
+	runs, cost, err := s.Grants.TenantUsage(r.Context())
+	if err != nil {
+		obs.ServerError(w, "read tenant usage failed", err)
+		writeErr(w, http.StatusInternalServerError, "read tenant usage failed")
+		return
+	}
+	runQuota, costAllowance, err := s.tenantCeilings(r.Context())
+	if err != nil {
+		obs.ServerError(w, "read tenant ceilings failed", err)
+		writeErr(w, http.StatusInternalServerError, "read tenant ceilings failed")
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"runsUsed":      runs,
 		"costUsed":      cost,
@@ -134,16 +144,19 @@ func (s *Service) handleTenantUsage(w http.ResponseWriter, r *http.Request) {
 // PERSISTED tenant registry, the only source of org quota (0 = unlimited). No
 // registry, or a tenant with no registry row, has no org ceiling. There is no
 // process-wide fallback: a shared value would leak one tenant's ceiling onto
-// every other tenant.
-func (s *Service) tenantCeilings(ctx context.Context) (runQuota int, costAllowance float64) {
+// every other tenant. A failed read is an error, never "unlimited".
+func (s *Service) tenantCeilings(ctx context.Context) (runQuota int, costAllowance float64, err error) {
 	if s.Tenants == nil {
-		return 0, 0
+		return 0, 0, nil
 	}
 	t, err := s.Tenants.GetTenant(ctx, tenant.FromContext(ctx))
-	if err != nil {
-		return 0, 0
+	if errors.Is(err, store.ErrTenantNotFound) {
+		return 0, 0, nil
 	}
-	return t.RunQuota, t.CostAllowance
+	if err != nil {
+		return 0, 0, err
+	}
+	return t.RunQuota, t.CostAllowance, nil
 }
 
 type authorizationView struct {

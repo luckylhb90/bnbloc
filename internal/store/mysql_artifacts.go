@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"strings"
 	"time"
 
@@ -44,16 +45,22 @@ func (m *MySQLArtifacts) PutArtifact(ctx context.Context, a Artifact) (Artifact,
 	if a.UpdatedAtMs <= 0 {
 		a.UpdatedAtMs = a.CreatedAtMs
 	}
+	// artifact_id alone is the key, so an existing row is never written: an
+	// upsert would let a caller-chosen id rewrite another room's artifact.
 	if _, err := m.DB.ExecContext(ctx, `
-INSERT INTO artifacts (artifact_id, tenant_id, room_id, channel_id, kind, title, language, mime_type, file_name, current_version, created_by, created_at_ms, updated_at_ms)
-VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
-ON DUPLICATE KEY UPDATE title=VALUES(title), updated_at_ms=VALUES(updated_at_ms)`,
+INSERT IGNORE INTO artifacts (artifact_id, tenant_id, room_id, channel_id, kind, title, language, mime_type, file_name, current_version, created_by, created_at_ms, updated_at_ms)
+VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		a.ArtifactID, tid, a.RoomID, a.ChannelID, a.Kind, a.Title, a.Language, a.MimeType, a.FileName, a.CurrentVersion, a.CreatedBy, a.CreatedAtMs, a.UpdatedAtMs); err != nil {
 		return Artifact{}, err
 	}
 	// Return the stored row: a re-put (bridge attach) must see the existing
-	// version history, not the caller's initial copy.
-	return m.GetArtifact(ctx, a.ArtifactID)
+	// version history, not the caller's initial copy. The read is
+	// tenant-scoped, so a row held by another tenant reads as missing.
+	stored, err := m.GetArtifact(ctx, a.ArtifactID)
+	if errors.Is(err, ErrArtifactNotFound) || (err == nil && stored.RoomID != a.RoomID) {
+		return Artifact{}, ErrArtifactIDTaken
+	}
+	return stored, err
 }
 
 func (m *MySQLArtifacts) GetArtifact(ctx context.Context, artifactID string) (Artifact, error) {

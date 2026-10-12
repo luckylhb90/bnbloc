@@ -34,7 +34,7 @@ func artifactGateway(t *testing.T, role rbac.Role) (*httptest.Server, string) {
 
 	svc := newGateway(t, "")
 	svc.Backends.Realtime = rtSrv.URL
-	svc.TenantResolver = func(auth.Identity, string) (string, string) { return "home", string(role) }
+	svc.TenantResolver = func(auth.Identity, string) (string, string, error) { return "home", string(role), nil }
 	gwSrv := httptest.NewServer(svc.Handler())
 	t.Cleanup(gwSrv.Close)
 	token, _ := login(t, gwSrv, "good")
@@ -116,7 +116,7 @@ func TestArtifactDownloadForwardsLengthAndAbortsOnUpstreamCut(t *testing.T) {
 
 	svc := newGateway(t, "")
 	svc.Backends.Realtime = upstream.URL
-	svc.TenantResolver = func(auth.Identity, string) (string, string) { return "home", string(rbac.RoleSuperAdmin) }
+	svc.TenantResolver = func(auth.Identity, string) (string, string, error) { return "home", string(rbac.RoleSuperAdmin), nil }
 	gw := httptest.NewServer(svc.Handler())
 	t.Cleanup(gw.Close)
 	token, _ := login(t, gw, "good")

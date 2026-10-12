@@ -227,20 +227,20 @@ func (s *MySQLGrant) ConsumeRun(ctx context.Context, grantID string, cost float6
 
 // TenantUsage sums runs_used and cost_used across the ctx tenant's
 // owner-issued grants (platform grants are outside the org's borrow
-// ceilings). A missing tenant or query error yields zero usage.
-func (s *MySQLGrant) TenantUsage(ctx context.Context) (int, float64) {
+// ceilings).
+func (s *MySQLGrant) TenantUsage(ctx context.Context) (int, float64, error) {
 	tnt, err := tenant.Require(ctx)
 	if err != nil {
-		return 0, 0
+		return 0, 0, err
 	}
 	var runs int
 	var cost float64
 	if err := s.DB.QueryRowContext(ctx,
 		`SELECT COALESCE(SUM(runs_used),0), COALESCE(SUM(cost_used),0) FROM shared_agent_grants WHERE tenant_id = ? AND source <> 'platform'`,
 		tnt).Scan(&runs, &cost); err != nil {
-		return 0, 0
+		return 0, 0, err
 	}
-	return runs, cost
+	return runs, cost, nil
 }
 
 // AppendAudit records a decision, returning any persistence error.

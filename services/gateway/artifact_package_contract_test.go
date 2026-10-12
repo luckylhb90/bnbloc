@@ -104,7 +104,7 @@ func TestSidecarPackageInstall_rejectsUploadedArtifactBytesHashMismatch(t *testi
 	t.Cleanup(rtSrv.Close)
 	svc, srv, token, key := signedPackageGatewayWithArtifactStore(t, true, false)
 	svc.Backends.Realtime = rtSrv.URL
-	svc.TenantResolver = func(auth.Identity, string) (string, string) { return "home", string(rbac.RoleSuperAdmin) }
+	svc.TenantResolver = func(auth.Identity, string) (string, string, error) { return "home", string(rbac.RoleSuperAdmin), nil }
 	artifact := uploadComponentArtifact(t, srv.URL, token, []byte("declared sidecar bytes"))
 	artifactKey := strings.TrimPrefix(artifact.URL, srv.URL+"/v1/artifacts/sha256/")
 	if err := os.WriteFile(filepath.Join(blobDir, artifactKey[:2], artifactKey), []byte("corrupted sidecar bytes"), 0o644); err != nil {

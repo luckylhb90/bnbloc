@@ -19,7 +19,8 @@ func TestResolveVerifierNeverDevInProduction(t *testing.T) {
 		t.Fatal("production accepted a dev login")
 	}
 	t.Setenv("BNBLOC_ENV", "")
-	if id, err := resolveVerifier().Verify("Alice"); err != nil || id.Subject != "alice" {
+	// Subjects are case-sensitive: the dev subject is the token as typed.
+	if id, err := resolveVerifier().Verify(" Alice "); err != nil || id.Subject != "Alice" {
 		t.Fatalf("dev verifier = %+v %v", id, err)
 	}
 }
@@ -28,7 +29,7 @@ func TestResolveVerifierNeverDevInProduction(t *testing.T) {
 // a listed subject, signed with the gateway's stable key.
 func TestMintAdminToken(t *testing.T) {
 	now := time.Now()
-	tok, err := mintAdminToken("Admin@Corp.example", []string{"admin@corp.example"}, "signing-key", now)
+	tok, err := mintAdminToken("admin@corp.example", []string{" admin@corp.example"}, "signing-key", now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -38,6 +39,11 @@ func TestMintAdminToken(t *testing.T) {
 	}
 	if _, err := mintAdminToken("mallory", []string{"admin@corp.example"}, "signing-key", now); err == nil {
 		t.Fatal("minted a token for an unlisted subject")
+	}
+	// Subjects are case-sensitive: a case variant of a listed subject is
+	// another identity.
+	if _, err := mintAdminToken("Admin@Corp.example", []string{"admin@corp.example"}, "signing-key", now); err == nil {
+		t.Fatal("minted a token for a case variant of a listed subject")
 	}
 	if _, err := mintAdminToken("admin@corp.example", []string{"admin@corp.example"}, "", now); err == nil {
 		t.Fatal("minted a token without a stable signing key")

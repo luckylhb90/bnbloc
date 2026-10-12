@@ -146,6 +146,10 @@ func (s *Service) handleCreateArtifact(w http.ResponseWriter, r *http.Request) {
 		CreatedAtMs: now,
 		UpdatedAtMs: now,
 	})
+	if errors.Is(err, store.ErrArtifactIDTaken) {
+		writeErr(w, http.StatusConflict, "artifactId is taken by another room")
+		return
+	}
 	if err != nil {
 		obs.ServerError(w, "create artifact failed", err)
 		writeErr(w, http.StatusInternalServerError, err.Error())

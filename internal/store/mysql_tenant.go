@@ -146,8 +146,7 @@ UPDATE tenants SET
 WHERE tenant_id = ?`, nullableBool(u.RequireSandboxForBorrow), nullableBool(u.PublicSharesDisabled), tenantID); err != nil {
 		return Tenant{}, err
 	}
-	// RowsAffected is 0 for an unchanged value too: the read tells a missing
-	// tenant (ErrTenantNotFound) apart from a no-op update.
+	// The stored row is the result (ErrTenantNotFound when there is none).
 	return m.GetTenant(ctx, tenantID)
 }
 
@@ -182,17 +181,20 @@ func nullableBool(b *bool) any {
 	return *b
 }
 
-func (m *MySQLTenant) TenantForIssuer(ctx context.Context, issuer string) (string, bool) {
+func (m *MySQLTenant) TenantForIssuer(ctx context.Context, issuer string) (string, bool, error) {
 	if issuer == "" {
-		return "", false
+		return "", false, nil
 	}
 	var id string
 	err := m.DB.QueryRowContext(ctx, `
 SELECT tenant_id FROM tenants WHERE sso_issuer = ? LIMIT 1`, issuer).Scan(&id)
-	if err != nil || id == "" {
-		return "", false
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", false, nil
 	}
-	return id, true
+	if err != nil {
+		return "", false, err
+	}
+	return id, id != "", nil
 }
 
 func (m *MySQLTenant) PutMember(ctx context.Context, mem TenantMember) error {
@@ -207,27 +209,61 @@ ON DUPLICATE KEY UPDATE role = VALUES(role), source = VALUES(source)`,
 	return err
 }
 
-func (m *MySQLTenant) GetMember(ctx context.Context, tenantID, userID string) (TenantMember, bool) {
+// EnsureMember is insert-only (INSERT IGNORE) and reads the stored row back,
+// so an existing membership keeps its role whatever the caller passed.
+func (m *MySQLTenant) EnsureMember(ctx context.Context, mem TenantMember) (TenantMember, bool, error) {
+	if mem.Role == "" {
+		mem.Role = OrgRoleMember
+	}
+	res, err := m.DB.ExecContext(ctx, `
+INSERT IGNORE INTO tenant_members (tenant_id, user_id, role, joined_at_ms, source)
+VALUES (?, ?, ?, ?, ?)`,
+		mem.TenantID, mem.UserID, string(mem.Role), mem.JoinedAtMs, string(normalizeMemberSource(mem.Source)))
+	if err != nil {
+		return TenantMember{}, false, err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return TenantMember{}, false, err
+	}
+	stored, ok, err := m.GetMember(ctx, mem.TenantID, mem.UserID)
+	if err != nil {
+		return TenantMember{}, false, err
+	}
+	if !ok {
+		return TenantMember{}, false, errMemberVanished
+	}
+	return stored, n == 1, nil
+}
+
+// errMemberVanished: the membership EnsureMember just inserted or found was
+// removed before it could be read back.
+var errMemberVanished = errors.New("store: tenant membership removed concurrently")
+
+func (m *MySQLTenant) GetMember(ctx context.Context, tenantID, userID string) (TenantMember, bool, error) {
 	var mem TenantMember
 	var role, source string
 	err := m.DB.QueryRowContext(ctx, `
 SELECT tenant_id, user_id, role, joined_at_ms, source FROM tenant_members WHERE tenant_id = ? AND user_id = ?`,
 		tenantID, userID).Scan(&mem.TenantID, &mem.UserID, &role, &mem.JoinedAtMs, &source)
+	if errors.Is(err, sql.ErrNoRows) {
+		return TenantMember{}, false, nil
+	}
 	if err != nil {
-		return TenantMember{}, false
+		return TenantMember{}, false, err
 	}
 	mem.Role = OrgRole(role)
 	mem.Source = MemberSource(source)
-	return mem, true
+	return mem, true, nil
 }
 
-func (m *MySQLTenant) MemberCount(ctx context.Context, tenantID string) int {
+func (m *MySQLTenant) MemberCount(ctx context.Context, tenantID string) (int, error) {
 	var n int
 	if err := m.DB.QueryRowContext(ctx, `
 SELECT COUNT(*) FROM tenant_members WHERE tenant_id = ?`, tenantID).Scan(&n); err != nil {
-		return 0
+		return 0, err
 	}
-	return n
+	return n, nil
 }
 
 func (m *MySQLTenant) RemoveMember(ctx context.Context, tenantID, userID string) error {

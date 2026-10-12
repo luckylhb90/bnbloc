@@ -9,6 +9,7 @@ import (
 	"database/sql"
 	"errors"
 
+	"github.com/go-sql-driver/mysql"
 	"github.com/luckylhb90/bnbloc/internal/tenant"
 	"github.com/luckylhb90/bnbloc/internal/wire"
 )
@@ -195,6 +196,29 @@ FROM sync_states WHERE tenant_id = ? AND room_id = ?`, tnt, roomID)
 		out[id] = st
 	}
 	return out
+}
+
+// mysqlErrDupEntry is MySQL's ER_DUP_ENTRY (duplicate key on insert).
+const mysqlErrDupEntry = 1062
+
+// isDupEntry reports a duplicate-key error.
+func isDupEntry(err error) bool {
+	var me *mysql.MySQLError
+	return errors.As(err, &me) && me.Number == mysqlErrDupEntry
+}
+
+// requireMatched maps an UPDATE that matched no row to notFound. The
+// connection runs with clientFoundRows (mysqlConfig), so an UPDATE that
+// rewrites a row with the values it already holds still counts as matched.
+func requireMatched(res sql.Result, notFound error) error {
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return notFound
+	}
+	return nil
 }
 
 func nullString(s string) any {

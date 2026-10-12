@@ -14,14 +14,9 @@ func (s *MySQLContentComponents) PutContentRoomShare(ctx context.Context, sh Con
 	if err != nil {
 		return err
 	}
-	if n, _ := res.RowsAffected(); n == 0 {
-		// Nothing inserted or changed: either the component is gone or the
-		// share already says exactly this.
-		if _, err := s.GetContentComponent(ctx, sh.ComponentID); err != nil {
-			return err
-		}
-	}
-	return nil
+	// The INSERT ... SELECT inserts nothing only when the component is gone
+	// (an unchanged duplicate still counts: clientFoundRows).
+	return requireMatched(res, ErrContentNotFound)
 }
 
 func (s *MySQLContentComponents) ListContentRoomShares(ctx context.Context, q ContentRoomShareQuery) ([]ContentRoomShare, error) {

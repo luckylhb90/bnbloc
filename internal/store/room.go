@@ -171,6 +171,10 @@ type RoomStore interface {
 	// (design lock: a room always exists with exactly one default channel). If
 	// any insert fails the whole create is rolled back.
 	CreateRoomWithOwnerAndChannel(ctx context.Context, r Room, owner Membership, defaultChannel RoomChannel) error
+	// AddMember inserts or updates a human membership of a live room of the
+	// ctx tenant; ErrRoomNotFound when the tenant has no such room. A re-add
+	// changes only the role (the join time stays) and turns an agent-host
+	// membership into a human one.
 	AddMember(ctx context.Context, m Membership) error
 	RemoveMember(ctx context.Context, roomID, userID string) error
 	// MemberRole is GetMember's role (an agent host reads as a visitor).
@@ -405,7 +409,10 @@ func (s *MemoryRoom) GetRoom(ctx context.Context, roomID string) (Room, error) {
 	return r, nil
 }
 
-// AddMember inserts or updates a membership.
+// AddMember inserts or updates a human membership of a live room of the ctx
+// tenant (ErrRoomNotFound otherwise). Like the MySQL upsert, a re-add changes
+// only the role, keeps the original join time, and turns an agent-host row
+// into a human one.
 func (s *MemoryRoom) AddMember(ctx context.Context, m Membership) error {
 	tid, err := tenant.Require(ctx)
 	if err != nil {
@@ -413,6 +420,14 @@ func (s *MemoryRoom) AddMember(ctx context.Context, m Membership) error {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	rk := tkey(tid, m.RoomID)
+	if _, ok := s.rooms[rk]; !ok || s.deleted[rk] {
+		return ErrRoomNotFound
+	}
+	if cur, ok := s.members[rk][m.UserID]; ok {
+		m.JoinedAtMs = cur.JoinedAtMs
+	}
+	m.AgentHost = false
 	return s.addMemberLocked(tid, m)
 }
 

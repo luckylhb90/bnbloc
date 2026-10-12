@@ -96,11 +96,6 @@ func insertContentVersion(ctx context.Context, tx *sql.Tx, v ContentComponentVer
 	return err
 }
 
-func isDupEntry(err error) bool {
-	var me *mysql.MySQLError
-	return errors.As(err, &me) && me.Number == mysqlErrDupEntry
-}
-
 func (s *MySQLContentComponents) CreateContentComponent(ctx context.Context, c ContentComponent, v ContentComponentVersion) error {
 	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
@@ -280,7 +275,7 @@ func (s *MySQLContentComponents) SetContentComponentStatus(ctx context.Context, 
 	if err != nil {
 		return err
 	}
-	return s.requireUpdated(ctx, res, id)
+	return requireMatched(res, ErrContentNotFound)
 }
 
 func (s *MySQLContentComponents) SetContentComponentTenants(ctx context.Context, id string, tenants []string, atMs int64) error {
@@ -292,21 +287,7 @@ func (s *MySQLContentComponents) SetContentComponentTenants(ctx context.Context,
 	if err != nil {
 		return err
 	}
-	return s.requireUpdated(ctx, res, id)
-}
-
-// requireUpdated maps an UPDATE that matched no row to ErrContentNotFound
-// (an UPDATE that changed nothing still matched).
-func (s *MySQLContentComponents) requireUpdated(ctx context.Context, res sql.Result, id string) error {
-	if n, _ := res.RowsAffected(); n == 0 {
-		var one int
-		if err := s.DB.QueryRowContext(ctx, `SELECT 1 FROM content_components WHERE id = ?`, id).Scan(&one); errors.Is(err, sql.ErrNoRows) {
-			return ErrContentNotFound
-		} else if err != nil {
-			return err
-		}
-	}
-	return nil
+	return requireMatched(res, ErrContentNotFound)
 }
 
 func (s *MySQLContentComponents) PutContentUse(ctx context.Context, u ContentUse) error {

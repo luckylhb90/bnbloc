@@ -28,9 +28,9 @@ func mcpGateway(t *testing.T, withKey bool) (*contentGateway, string) {
 	t.Helper()
 	g := newContentGateway(t)
 	resolve := g.svc.TenantResolver
-	g.svc.TenantResolver = func(id auth.Identity, hint string) (string, string) {
+	g.svc.TenantResolver = func(id auth.Identity, hint string) (string, string, error) {
 		if id.Subject == "ada" {
-			return "home", string(rbac.RoleAdmin)
+			return "home", string(rbac.RoleAdmin), nil
 		}
 		return resolve(id, hint)
 	}
@@ -220,9 +220,9 @@ func TestOrgMCPConnectors(t *testing.T) {
 func superAdminToken(t *testing.T, g *contentGateway) string {
 	t.Helper()
 	resolve := g.svc.TenantResolver
-	g.svc.TenantResolver = func(id auth.Identity, hint string) (string, string) {
+	g.svc.TenantResolver = func(id auth.Identity, hint string) (string, string, error) {
 		if id.Subject == "root" {
-			return "home", string(rbac.RoleSuperAdmin)
+			return "home", string(rbac.RoleSuperAdmin), nil
 		}
 		return resolve(id, hint)
 	}

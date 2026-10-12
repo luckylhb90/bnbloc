@@ -28,11 +28,15 @@ func (m *MySQLChannel) PutChannel(ctx context.Context, c RoomChannel) error {
 	// The context tenant is authoritative; c.TenantID from the caller is not
 	// trusted for row ownership.
 	c.TenantID = tnt
+	// A plain insert: channel_id is the whole key (no tenant), so an upsert
+	// could rewrite another tenant's channel.
 	_, err = m.DB.ExecContext(ctx, `
 INSERT INTO room_channels (channel_id, tenant_id, room_id, name, is_default, kind, created_by, created_at_ms, deleted_at_ms)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-ON DUPLICATE KEY UPDATE name = VALUES(name), is_default = VALUES(is_default), deleted_at_ms = VALUES(deleted_at_ms)`,
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		c.ChannelID, c.TenantID, c.RoomID, c.Name, c.IsDefault, c.Kind, c.CreatedBy, c.CreatedAtMs, c.DeletedAtMs)
+	if isDupEntry(err) {
+		return ErrChannelExists
+	}
 	return err
 }
 

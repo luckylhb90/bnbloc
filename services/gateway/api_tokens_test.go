@@ -28,11 +28,11 @@ func tokenGateway(t *testing.T) (*Service, *httptest.Server) {
 	t.Helper()
 	gw := newGateway(t, "")
 	gw.ExtAudit = store.NewMemoryExtensionAudit()
-	gw.TenantResolver = func(id auth.Identity, def string) (string, string) {
+	gw.TenantResolver = func(id auth.Identity, def string) (string, string, error) {
 		if id.Subject == "root" || id.Subject == "svc:smoke" {
-			return "home", string(rbac.RoleSuperAdmin)
+			return "home", string(rbac.RoleSuperAdmin), nil
 		}
-		return "home", string(rbac.RoleMember)
+		return "home", string(rbac.RoleMember), nil
 	}
 	srv := httptest.NewServer(gw.Handler())
 	t.Cleanup(srv.Close)

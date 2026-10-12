@@ -16,9 +16,9 @@ func mcpFormGateway(t *testing.T) *contentGateway {
 	t.Helper()
 	g := newContentGateway(t)
 	prev := g.svc.TenantResolver
-	g.svc.TenantResolver = func(id auth.Identity, hint string) (string, string) {
+	g.svc.TenantResolver = func(id auth.Identity, hint string) (string, string, error) {
 		if id.Subject == "sam" {
-			return "home", string(rbac.RoleSuperAdmin)
+			return "home", string(rbac.RoleSuperAdmin), nil
 		}
 		return prev(id, hint)
 	}

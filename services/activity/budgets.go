@@ -3,6 +3,7 @@ package activity
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"math"
@@ -209,6 +210,12 @@ func (s *Service) handlePutTenantBudgets(w http.ResponseWriter, r *http.Request)
 	}
 	caller := strings.TrimSpace(r.Header.Get("X-Bnbloc-User"))
 	budgets, err := s.validateBudgets(r.Context(), in, caller, s.clock().UnixMilli())
+	var readErr budgetReadError
+	if errors.As(err, &readErr) {
+		obs.ServerError(w, "budgets membership read failed", readErr.err)
+		writeErr(w, http.StatusInternalServerError, "budgets membership read failed")
+		return
+	}
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, err.Error())
 		return
@@ -237,6 +244,12 @@ func (s *Service) handlePutTenantBudgets(w http.ResponseWriter, r *http.Request)
 	}
 }
 
+// budgetReadError is validateBudgets' store failure, kept apart from the
+// caller's validation errors (a 500, not a 400).
+type budgetReadError struct{ err error }
+
+func (e budgetReadError) Error() string { return e.err.Error() }
+
 // validateBudgets checks a PUT body and returns the store rows (the tenant
 // budget first). A member budget must name a member of the tenant when the
 // tenant registry is wired.
@@ -264,7 +277,11 @@ func (s *Service) validateBudgets(ctx context.Context, in wire.TenantBudgetsUpda
 		}
 		seen[strings.ToLower(user)] = true
 		if s.Tenants != nil {
-			if _, ok := s.Tenants.GetMember(ctx, tid, user); !ok {
+			_, member, err := s.Tenants.GetMember(ctx, tid, user)
+			if err != nil {
+				return nil, budgetReadError{err}
+			}
+			if !member {
 				return nil, fmt.Errorf("member budget: %s is not a member of this organization", user)
 			}
 		}

@@ -39,11 +39,9 @@ func (devVerifier) Verify(token string) (auth.Identity, error) {
 	if token == "" {
 		return auth.Identity{}, auth.ErrInvalidToken
 	}
-	// Normalize the derived subject to lower case so the same person signing in
-	// as "maya" and "Maya" is one identity. Production OIDC subjects are already
-	// stable unique ids; this only affects the dev verifier, which derives the
-	// subject from the raw token.
-	return auth.Identity{Subject: strings.ToLower(strings.TrimSpace(token))}, nil
+	// The subject is the token as typed: subjects are case-sensitive
+	// everywhere, so "maya" and "Maya" are two identities.
+	return auth.Identity{Subject: strings.TrimSpace(token)}, nil
 }
 
 // resolveVerifier returns the verifier behind POST /v1/auth/login: a real OIDC
@@ -107,7 +105,7 @@ func resolveSigningKey() []byte {
 // tenantWiring bundles the login-time tenant hooks that share one tenant store:
 // the org mapping/provisioning resolver and the suspended-tenant gate.
 type tenantWiring struct {
-	Resolve    func(auth.Identity, string) (string, string)
+	Resolve    func(auth.Identity, string) (string, string, error)
 	Suspended  func(tenantID string) bool
 	MemberRole func(tenantID, userID string) (role string, found bool)
 	Settings   store.PlatformSettingsStore
@@ -160,18 +158,15 @@ func resolveTenantWiring() tenantWiring {
 	}
 	// Platform super-admins (cross-tenant) are configured, not provisioned:
 	// BNBLOC_SUPER_ADMINS is a comma-separated list of verified subject ids or
-	// emails (an email is the natural choice for an operator). Each entry is
-	// stored as-is (matches an opaque OIDC subject) and lowercased (matches an
-	// email case-insensitively), so either form of config works.
+	// emails (an email is the natural choice for an operator). A subject
+	// matches exactly; an email entry matches the identity's email
+	// case-insensitively (provisioning.Resolver.isSuperAdmin).
 	if admins := splitCSV(config.FromEnvRaw("BNBLOC_SUPER_ADMINS")); len(admins) > 0 {
-		res.SuperAdmins = make(map[string]bool, len(admins)*2)
+		res.SuperAdmins = make(map[string]bool, len(admins))
 		for _, a := range admins {
-			a = strings.TrimSpace(a)
-			if a == "" {
-				continue
+			if a = strings.TrimSpace(a); a != "" {
+				res.SuperAdmins[a] = true
 			}
-			res.SuperAdmins[a] = true
-			res.SuperAdmins[strings.ToLower(a)] = true
 		}
 	}
 	tenants := backends.Tenant
@@ -179,8 +174,13 @@ func resolveTenantWiring() tenantWiring {
 		t, err := tenants.GetTenant(context.Background(), tenantID)
 		return err == nil && t.Status == store.TenantSuspended
 	}
+	// A failed read refuses (found=false, logged): never a role.
 	memberRole := func(tenantID, userID string) (string, bool) {
-		m, ok := tenants.GetMember(context.Background(), tenantID, userID)
+		m, ok, err := tenants.GetMember(context.Background(), tenantID, userID)
+		if err != nil {
+			log.Printf("gateway: read membership of %s in %s: %v", userID, tenantID, err)
+			return "", false
+		}
 		if !ok {
 			return "", false
 		}
@@ -373,9 +373,9 @@ func runMintAdminToken(args []string) {
 }
 
 // mintAdminToken issues a short-lived platform super-admin session for subject,
-// which must be listed in superAdmins (case-insensitive) — the same list login
-// consults. The signing key must be the running gateway's stable key, or the
-// token would not verify there.
+// which must be listed in superAdmins (exactly: subjects are case-sensitive)
+// — the same list login consults. The signing key must be the running
+// gateway's stable key, or the token would not verify there.
 func mintAdminToken(subject string, superAdmins []string, signingKey string, now time.Time) (string, error) {
 	subject = strings.TrimSpace(subject)
 	if signingKey == "" {
@@ -383,7 +383,7 @@ func mintAdminToken(subject string, superAdmins []string, signingKey string, now
 	}
 	listed := false
 	for _, a := range superAdmins {
-		if strings.EqualFold(strings.TrimSpace(a), subject) {
+		if strings.TrimSpace(a) == subject {
 			listed = true
 		}
 	}

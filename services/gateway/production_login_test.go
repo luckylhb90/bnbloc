@@ -22,11 +22,11 @@ func productionGateway() *Service {
 	return &Service{
 		Verifier: auth.DisabledVerifier{},
 		Signer:   auth.NewSigner([]byte("k")),
-		TenantResolver: func(id auth.Identity, def string) (string, string) {
+		TenantResolver: func(id auth.Identity, def string) (string, string, error) {
 			if strings.EqualFold(id.Email, "admin@corp.example") {
-				return def, string(rbac.RoleSuperAdmin)
+				return def, string(rbac.RoleSuperAdmin), nil
 			}
-			return def, "member"
+			return def, "member", nil
 		},
 	}
 }

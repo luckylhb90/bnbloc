@@ -95,7 +95,13 @@ func OpenMySQL(dsn string) (*sql.DB, error) {
 //     sets a character_set_* session variable, is refused here, and the
 //     negotiated session charset is verified once connected
 //     (requireUTF8MB4Session). The driver's default is the utf8mb4_general_ci
-//     handshake collation.
+//     handshake collation;
+//   - clientFoundRows, so an UPDATE's RowsAffected counts the rows it
+//     MATCHED, not the rows it changed. Every "n == 0 means not found" check
+//     relies on it: without it, saving a value that is already stored reads
+//     as a miss (a 404 or a false lease mismatch), which the memory store
+//     never reports. An INSERT ... ON DUPLICATE KEY UPDATE then reports 1 for
+//     an insert or an unchanged row and 2 for a changed row.
 func mysqlConfig(dsn string) (*mysql.Config, error) {
 	cfg, err := mysql.ParseDSN(strings.TrimSpace(dsn))
 	if err != nil {
@@ -116,6 +122,7 @@ func mysqlConfig(dsn string) (*mysql.Config, error) {
 	}
 	cfg.MultiStatements = true
 	cfg.InterpolateParams = true
+	cfg.ClientFoundRows = true
 	return cfg, nil
 }
 

@@ -57,13 +57,17 @@ func peopleChannelID(tenantID, roomID string) string {
 // racing a delete can never resurrect the row the delete just retired.
 var ErrChannelNotFound = errors.New("store: channel not found")
 
+// ErrChannelExists is returned by PutChannel when the channel id is already
+// taken, in any room of any tenant.
+var ErrChannelExists = errors.New("store: channel id already exists")
+
 // ChannelStore persists a room's channels. Implementations must be safe for
 // concurrent use and must scope every operation by the tenant bound to the
 // context (room ids may be reused across tenants), failing closed when the
 // context carries none.
 type ChannelStore interface {
-	// PutChannel creates or updates a channel (an upsert: it overwrites a
-	// soft-deleted row, so it is only for creating channels).
+	// PutChannel creates a channel; ErrChannelExists when the id is taken
+	// (channel ids are global, so it never rewrites an existing row).
 	PutChannel(ctx context.Context, c RoomChannel) error
 	// GetChannel returns a live channel by id within a room, found=false when
 	// absent or soft-deleted.
@@ -117,6 +121,11 @@ func (s *MemoryChannel) PutChannel(ctx context.Context, c RoomChannel) error {
 	}
 	s.room.mu.Lock()
 	defer s.room.mu.Unlock()
+	for _, byID := range s.room.channels {
+		if _, taken := byID[c.ChannelID]; taken {
+			return ErrChannelExists
+		}
+	}
 	return s.room.putChannelLocked(tnt, c)
 }
 

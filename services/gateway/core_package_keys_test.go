@@ -13,7 +13,7 @@ import (
 func TestComponentKeys_requireSuperAdmin(t *testing.T) {
 	svc := newGateway(t, "")
 	svc.PlatformSettings = store.NewMemoryPlatformSettings()
-	svc.TenantResolver = func(auth.Identity, string) (string, string) { return "home", "org_admin" }
+	svc.TenantResolver = func(auth.Identity, string) (string, string, error) { return "home", "org_admin", nil }
 	srv := httptest.NewServer(svc.Handler())
 	defer srv.Close()
 	token, _ := login(t, srv, "good")
@@ -59,7 +59,7 @@ func TestComponentKeys_returnNotFoundForLegacyCorePackageKeyRoutes(t *testing.T)
 	// Given
 	svc := newGateway(t, "")
 	svc.PlatformSettings = store.NewMemoryPlatformSettings()
-	svc.TenantResolver = func(auth.Identity, string) (string, string) { return "home", "super_admin" }
+	svc.TenantResolver = func(auth.Identity, string) (string, string, error) { return "home", "super_admin", nil }
 	srv := httptest.NewServer(svc.Handler())
 	defer srv.Close()
 	token, _ := login(t, srv, "good")
@@ -94,7 +94,7 @@ func TestComponentKeys_returnNotFoundForLegacyCorePackageKeyRoutes(t *testing.T)
 func TestComponentKeys_addRejectsUnparseableKey(t *testing.T) {
 	svc := newGateway(t, "")
 	svc.PlatformSettings = store.NewMemoryPlatformSettings()
-	svc.TenantResolver = func(auth.Identity, string) (string, string) { return "home", "super_admin" }
+	svc.TenantResolver = func(auth.Identity, string) (string, string, error) { return "home", "super_admin", nil }
 	srv := httptest.NewServer(svc.Handler())
 	defer srv.Close()
 	token, _ := login(t, srv, "good")
@@ -115,7 +115,7 @@ func TestComponentKeys_addRejectsUnparseableKey(t *testing.T) {
 func TestComponentKeys_addThenListThenDelete(t *testing.T) {
 	svc := newGateway(t, "")
 	svc.PlatformSettings = store.NewMemoryPlatformSettings()
-	svc.TenantResolver = func(auth.Identity, string) (string, string) { return "home", "super_admin" }
+	svc.TenantResolver = func(auth.Identity, string) (string, string, error) { return "home", "super_admin", nil }
 	srv := httptest.NewServer(svc.Handler())
 	defer srv.Close()
 	token, _ := login(t, srv, "good")

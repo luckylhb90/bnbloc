@@ -33,7 +33,13 @@ func (s *Service) handleTenantRevokeMemberSessions(w http.ResponseWriter, r *htt
 		return
 	}
 	tid := tenant.FromContext(r.Context())
-	if _, ok := s.Tenants.GetMember(r.Context(), tid, userID); !ok {
+	_, member, err := s.Tenants.GetMember(r.Context(), tid, userID)
+	if err != nil {
+		obs.ServerError(w, "read membership failed", err)
+		writeErr(w, http.StatusInternalServerError, "read membership failed")
+		return
+	}
+	if !member {
 		writeErr(w, http.StatusNotFound, "member not found")
 		return
 	}

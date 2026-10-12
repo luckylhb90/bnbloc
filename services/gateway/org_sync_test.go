@@ -84,7 +84,7 @@ func TestOrgSyncRoutesAreSuperAdminOnlyAndValidateRules(t *testing.T) {
 	if resp.StatusCode != http.StatusOK || !preview.DryRun || preview.Tenant != "labs" || len(preview.Changes) != 1 || preview.Changes[0].Action != orgsync.ActionAdd {
 		t.Fatalf("preview = %d %s", resp.StatusCode, body)
 	}
-	if _, ok := tenants.GetMember(context.Background(), "labs", "pat@corp.example"); ok {
+	if _, ok, _ := tenants.GetMember(context.Background(), "labs", "pat@corp.example"); ok {
 		t.Fatal("preview applied a membership")
 	}
 
@@ -94,7 +94,7 @@ func TestOrgSyncRoutesAreSuperAdminOnlyAndValidateRules(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("deprovision = %d %s", resp.StatusCode, body)
 	}
-	if _, ok := tenants.GetMember(context.Background(), "acme", "gone"); ok {
+	if _, ok, _ := tenants.GetMember(context.Background(), "acme", "gone"); ok {
 		t.Fatal("deprovisioned user kept a membership")
 	}
 }
@@ -142,7 +142,7 @@ func TestSSOSignInAppliesOrgSyncRules(t *testing.T) {
 	if claims.Tenant != "labs" || claims.Role != string(store.OrgRoleAdmin) {
 		t.Fatalf("session scope = %s/%s, want labs/org_admin", claims.Tenant, claims.Role)
 	}
-	m, ok := tenants.GetMember(context.Background(), "labs", "kim@corp.example")
+	m, ok, _ := tenants.GetMember(context.Background(), "labs", "kim@corp.example")
 	if !ok || m.Source != store.MemberSourceSync {
 		t.Fatalf("labs membership = %+v ok=%v, want a sync row", m, ok)
 	}

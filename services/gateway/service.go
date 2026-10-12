@@ -92,7 +92,7 @@ type Service struct {
 	// and the default-resolved tenant, and returns the tenant + role to stamp
 	// into the session token. nil keeps the resolved/default tenant with no
 	// role. It must never block login on error (fail soft to the input tenant).
-	TenantResolver func(id auth.Identity, defaultTenant string) (tenantID, role string)
+	TenantResolver func(id auth.Identity, defaultTenant string) (tenantID, role string, err error)
 	// TenantSuspended optionally reports whether a tenant is suspended. When it
 	// returns true, login is refused for that tenant's members; a super_admin is
 	// exempt (they must still administer suspended orgs). nil disables the gate.

@@ -508,11 +508,11 @@ func TestLoginRejectsSuspendedTenantExceptSuperAdmin(t *testing.T) {
 	// Resolver maps "boss" -> org_admin of the suspended tenant, "root" ->
 	// super_admin. The suspended check reports acme as suspended.
 	svc.Verifier = fakeVerifier{subject: "boss"}
-	svc.TenantResolver = func(id auth.Identity, _ string) (string, string) {
+	svc.TenantResolver = func(id auth.Identity, _ string) (string, string, error) {
 		if id.Subject == "root" {
-			return "acme", "super_admin"
+			return "acme", "super_admin", nil
 		}
-		return "acme", "org_admin"
+		return "acme", "org_admin", nil
 	}
 	svc.TenantSuspended = func(tenantID string) bool { return tenantID == "acme" }
 	srv := httptest.NewServer(svc.Handler())
@@ -543,7 +543,7 @@ func TestActingTenantHeaderHonoredOnlyForSuperAdmin(t *testing.T) {
 	svc := newGateway(t, "")
 	svc.Backends.ShareAgent = backend.URL
 	role := "super_admin"
-	svc.TenantResolver = func(id auth.Identity, _ string) (string, string) { return "home", role }
+	svc.TenantResolver = func(id auth.Identity, _ string) (string, string, error) { return "home", role, nil }
 	srv := httptest.NewServer(svc.Handler())
 	defer srv.Close()
 
@@ -576,7 +576,7 @@ func TestActingTenantHeaderHonoredOnlyForSuperAdmin(t *testing.T) {
 // the ordinary-user counterpart to the super-admin acting-tenant header.
 func TestSwitchTenantReissuesScopedToken(t *testing.T) {
 	svc := newGateway(t, "")
-	svc.TenantResolver = func(_ auth.Identity, _ string) (string, string) { return "home", "member" }
+	svc.TenantResolver = func(_ auth.Identity, _ string) (string, string, error) { return "home", "member", nil }
 	svc.TenantMemberRole = func(tenantID, userID string) (string, bool) {
 		if tenantID == "acme" && userID == "alice" {
 			return "org_admin", true

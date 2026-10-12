@@ -48,7 +48,7 @@ func TestOrgSyncStoreAndMemberSource(t *testing.T) {
 			if err := b.Tenant.PutMember(ctx, TenantMember{TenantID: tid, UserID: user, Role: OrgRoleAdmin, JoinedAtMs: 1, Source: MemberSourceManual}); err != nil {
 				t.Fatal(err)
 			}
-			if m, _ := b.Tenant.GetMember(ctx, tid, user); m.Source != MemberSourceManual || m.Role != OrgRoleAdmin {
+			if m, _, _ := b.Tenant.GetMember(ctx, tid, user); m.Source != MemberSourceManual || m.Role != OrgRoleAdmin {
 				t.Fatalf("after manual upsert = %+v", m)
 			}
 			if ms := b.Tenant.ListMembers(ctx, tid); len(ms) != 1 || ms[0].Source != MemberSourceManual {

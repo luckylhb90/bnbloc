@@ -84,10 +84,14 @@ func TestIsMemberAnyTenantIgnoresForeignTenantMembership(t *testing.T) {
 	if err := s.CreateRoomWithOwner(ca, Room{RoomID: "r", Name: "r", CreatedBy: "alice", CreatedAtMs: 1}, Membership{RoomID: "r", UserID: "alice", Role: RoleOwner, JoinedAtMs: 1}); err != nil {
 		t.Fatalf("create: %v", err)
 	}
-	// A stray row under tenant B for A's room.
-	if err := s.AddMember(cb, Membership{RoomID: "r", UserID: "mallory", Role: RoleOwner, JoinedAtMs: 2}); err != nil {
-		t.Fatalf("add: %v", err)
+	// AddMember never files a row under a tenant that does not hold the room.
+	if err := s.AddMember(cb, Membership{RoomID: "r", UserID: "mallory", Role: RoleOwner, JoinedAtMs: 2}); !errors.Is(err, ErrRoomNotFound) {
+		t.Fatalf("add into another tenant's room = %v, want ErrRoomNotFound", err)
 	}
+	// A stray row under tenant B for A's room, planted directly.
+	s.mu.Lock()
+	_ = s.addMemberLocked(tenantB, Membership{RoomID: "r", UserID: "mallory", Role: RoleOwner, JoinedAtMs: 2})
+	s.mu.Unlock()
 	if memberAnyTenant(s, cb, "r", "mallory") {
 		t.Fatal("a membership under a foreign tenant must not count")
 	}

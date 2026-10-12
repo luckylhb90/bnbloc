@@ -37,9 +37,9 @@ func newSharingGateway(t *testing.T) *sharingGateway {
 		"eve": {"other", string(rbac.RoleAdmin)}, "kim": {"other", string(rbac.RoleMember)},
 	}
 	prev := g.svc.TenantResolver
-	g.svc.TenantResolver = func(id auth.Identity, def string) (string, string) {
+	g.svc.TenantResolver = func(id auth.Identity, def string) (string, string, error) {
 		if r, ok := roles[id.Subject]; ok {
-			return r[0], r[1]
+			return r[0], r[1], nil
 		}
 		return prev(id, def)
 	}

@@ -244,7 +244,10 @@ func (s *Service) isOrgAdmin(ctx context.Context, user string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	m, ok := s.Tenants.GetMember(ctx, tid, user)
+	m, ok, err := s.Tenants.GetMember(ctx, tid, user)
+	if err != nil {
+		return false, err
+	}
 	return ok && m.Role == store.OrgRoleAdmin, nil
 }
 

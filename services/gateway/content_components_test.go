@@ -37,11 +37,11 @@ func newContentGateway(t *testing.T) *contentGateway {
 	t.Helper()
 	svc := newGateway(t, "")
 	svc.Verifier = subjectVerifier{}
-	svc.TenantResolver = func(id auth.Identity, _ string) (string, string) {
+	svc.TenantResolver = func(id auth.Identity, _ string) (string, string, error) {
 		if id.Subject == "vic" {
-			return "home", string(rbac.RoleViewer)
+			return "home", string(rbac.RoleViewer), nil
 		}
-		return "home", string(rbac.RoleMember)
+		return "home", string(rbac.RoleMember), nil
 	}
 	members := map[string]string{"maya": "owner", "jack": "member", "bob": "member", "vic": "member"}
 	svc.Rooms = func(string, string) []string { return nil }

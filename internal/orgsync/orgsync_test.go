@@ -68,7 +68,11 @@ func (f *fixture) apply(t *testing.T, a Attributes) Result {
 
 func (f *fixture) member(t *testing.T, tenantID, userID string) (store.TenantMember, bool) {
 	t.Helper()
-	return f.tenants.GetMember(context.Background(), tenantID, userID)
+	m, ok, err := f.tenants.GetMember(context.Background(), tenantID, userID)
+	if err != nil {
+		t.Fatalf("GetMember: %v", err)
+	}
+	return m, ok
 }
 
 func TestPlan_firstMatchingRulePerTenantWins(t *testing.T) {

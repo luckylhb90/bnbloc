@@ -49,15 +49,15 @@ func TestMySQLConfigInterpolatesOnlyUTF8MB4(t *testing.T) {
 		"u:p@tcp(db:3306)/bnbloc?parseTime=true",
 		"u:p@tcp(db:3306)/bnbloc?parseTime=true&charset=utf8mb4",
 		"u:p@tcp(db:3306)/bnbloc?parseTime=true&collation=utf8mb4_unicode_ci",
-		"u:p@tcp(db:3306)/bnbloc?parseTime=true&multiStatements=false&interpolateParams=false",
+		"u:p@tcp(db:3306)/bnbloc?parseTime=true&multiStatements=false&interpolateParams=false&clientFoundRows=false",
 	} {
 		cfg, err := mysqlConfig(dsn)
 		if err != nil {
 			t.Fatalf("mysqlConfig(%q) = %v, want accepted", dsn, err)
 		}
-		if !cfg.InterpolateParams || !cfg.MultiStatements || !cfg.ParseTime {
-			t.Fatalf("mysqlConfig(%q): interpolate=%v multiStatements=%v parseTime=%v, want all true",
-				dsn, cfg.InterpolateParams, cfg.MultiStatements, cfg.ParseTime)
+		if !cfg.InterpolateParams || !cfg.MultiStatements || !cfg.ParseTime || !cfg.ClientFoundRows {
+			t.Fatalf("mysqlConfig(%q): interpolate=%v multiStatements=%v parseTime=%v clientFoundRows=%v, want all true",
+				dsn, cfg.InterpolateParams, cfg.MultiStatements, cfg.ParseTime, cfg.ClientFoundRows)
 		}
 	}
 	for _, dsn := range []string{

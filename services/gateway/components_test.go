@@ -38,11 +38,11 @@ func rolloutTestGateway(t *testing.T) (*Service, *httptest.Server, string, strin
 	svc, srv, adminToken, _ := signedPackageGatewayConfigured(t, true, true, true)
 	svc.Verifier = subjectVerifier{}
 	svc.ComponentInstalls = store.NewMemoryComponentInstall()
-	svc.TenantResolver = func(id auth.Identity, _ string) (string, string) {
+	svc.TenantResolver = func(id auth.Identity, _ string) (string, string, error) {
 		if id.Subject == "admin" {
-			return "home", string(rbac.RoleSuperAdmin)
+			return "home", string(rbac.RoleSuperAdmin), nil
 		}
-		return "home", string(rbac.RoleMember)
+		return "home", string(rbac.RoleMember), nil
 	}
 	svc.MemberCount = func() int { return 3 }
 	memberToken, _ := login(t, srv, "member")

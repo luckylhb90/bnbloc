@@ -45,7 +45,13 @@ func (s *Service) handleTenantDirectory(w http.ResponseWriter, r *http.Request) 
 			continue
 		}
 		relation := "none"
-		if _, ok := s.Tenants.GetMember(r.Context(), t.TenantID, caller); ok {
+		_, member, err := s.Tenants.GetMember(r.Context(), t.TenantID, caller)
+		if err != nil {
+			obs.ServerError(w, "read membership failed", err)
+			writeErr(w, http.StatusInternalServerError, "read membership failed")
+			return
+		}
+		if member {
 			relation = "member"
 		} else if jr, ok := s.Tenants.GetJoinRequest(r.Context(), t.TenantID, caller); ok {
 			relation = string(jr.Status)
@@ -85,7 +91,13 @@ func (s *Service) handleCreateJoinRequest(w http.ResponseWriter, r *http.Request
 		writeErr(w, http.StatusConflict, "tenant is not accepting requests")
 		return
 	}
-	if _, ok := s.Tenants.GetMember(r.Context(), tid, caller); ok {
+	_, member, err := s.Tenants.GetMember(r.Context(), tid, caller)
+	if err != nil {
+		obs.ServerError(w, "read membership failed", err)
+		writeErr(w, http.StatusInternalServerError, "read membership failed")
+		return
+	}
+	if member {
 		writeErr(w, http.StatusConflict, "already a member")
 		return
 	}

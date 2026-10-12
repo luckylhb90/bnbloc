@@ -122,7 +122,7 @@ type GrantStore interface {
 	// TenantUsage sums runs_used and cost_used across the ctx tenant's
 	// owner-issued grants (platform grants are outside the org's borrow
 	// ceilings), for org-level usage accounting and ceiling enforcement.
-	TenantUsage(ctx context.Context) (runsUsed int, costUsed float64)
+	TenantUsage(ctx context.Context) (runsUsed int, costUsed float64, err error)
 	// AppendAudit records a decision, returning any persistence error.
 	AppendAudit(ctx context.Context, rec AuditRecord) error
 	// AuditRecords returns audit records for a room newest-first. limit<=0
@@ -317,11 +317,11 @@ func (g Grant) admitRun(cost float64) error {
 }
 
 // TenantUsage sums runs_used and cost_used across the ctx tenant's
-// owner-issued grants. A missing tenant yields zero usage.
-func (s *MemoryGrant) TenantUsage(ctx context.Context) (int, float64) {
+// owner-issued grants.
+func (s *MemoryGrant) TenantUsage(ctx context.Context) (int, float64, error) {
 	tnt, err := tenant.Require(ctx)
 	if err != nil {
-		return 0, 0
+		return 0, 0, err
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -334,7 +334,7 @@ func (s *MemoryGrant) TenantUsage(ctx context.Context) (int, float64) {
 		runs += g.RunsUsed
 		cost += g.CostUsed
 	}
-	return runs, cost
+	return runs, cost, nil
 }
 
 // AppendAudit records a decision. The in-memory store never fails.

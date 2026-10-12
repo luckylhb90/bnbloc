@@ -156,7 +156,7 @@ func TestAddMemberCannotDemoteLastAdmin(t *testing.T) {
 	if w.Code != http.StatusConflict {
 		t.Fatalf("demote last admin via add-member = %d, want 409", w.Code)
 	}
-	if m, _ := tenants.GetMember(dctx(), tenant.Default, "root"); m.Role != store.OrgRoleAdmin {
+	if m, _, _ := tenants.GetMember(dctx(), tenant.Default, "root"); m.Role != store.OrgRoleAdmin {
 		t.Fatalf("root role = %q, want org_admin preserved", m.Role)
 	}
 	// With a second admin present the same demotion is allowed.
@@ -188,7 +188,7 @@ func TestSetQuotaIsPerTenantAndRaceFree(t *testing.T) {
 				r := httptest.NewRequest(http.MethodPut, "/v1/tenant/quota", bytes.NewReader(body)).WithContext(tctx(id))
 				r.Header.Set("X-Bnbloc-User", "admin")
 				svc.handleTenantSetQuota(httptest.NewRecorder(), r)
-				_, _ = svc.tenantCeilings(tctx(id))
+				_, _, _ = svc.tenantCeilings(tctx(id))
 			}(id, i+1)
 		}
 	}
@@ -199,10 +199,10 @@ func TestSetQuotaIsPerTenantAndRaceFree(t *testing.T) {
 	body, _ = json.Marshal(quotaBody{RunQuota: 0})
 	r = httptest.NewRequest(http.MethodPut, "/v1/tenant/quota", bytes.NewReader(body)).WithContext(tctx("globex"))
 	svc.handleTenantSetQuota(httptest.NewRecorder(), r)
-	if q, _ := svc.tenantCeilings(tctx("acme")); q != 7 {
+	if q, _, _ := svc.tenantCeilings(tctx("acme")); q != 7 {
 		t.Fatalf("acme run quota = %d, want 7", q)
 	}
-	if q, _ := svc.tenantCeilings(tctx("globex")); q != 0 {
+	if q, _, _ := svc.tenantCeilings(tctx("globex")); q != 0 {
 		t.Fatalf("globex run quota = %d, want 0 (acme's quota leaked)", q)
 	}
 }

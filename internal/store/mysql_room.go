@@ -56,9 +56,6 @@ func insertRoom(ctx context.Context, q interface {
 	return err
 }
 
-// mysqlErrDupEntry is MySQL's ER_DUP_ENTRY (duplicate key on insert).
-const mysqlErrDupEntry = 1062
-
 // CreateRoomWithOwner atomically inserts a room and its owner membership in a
 // single transaction. If the owner insert fails the room insert is rolled back.
 func (s *MySQLRoom) CreateRoomWithOwner(ctx context.Context, r Room, owner Membership) error {
@@ -166,17 +163,24 @@ func (s *MySQLRoom) GetRoom(ctx context.Context, roomID string) (Room, error) {
 }
 
 // AddMember inserts or updates a membership. It is always a human
-// membership: an agent-host row of the same user becomes a human one.
+// membership: an agent-host row of the same user becomes a human one. The row
+// is selected from the ctx tenant's live room, so the key (room_id, user_id),
+// which carries no tenant, can never be written for another tenant's room.
 func (s *MySQLRoom) AddMember(ctx context.Context, m Membership) error {
 	tid, err := tenant.Require(ctx)
 	if err != nil {
 		return err
 	}
-	_, err = s.DB.ExecContext(ctx,
-		`INSERT INTO room_members (tenant_id, room_id, user_id, role, joined_at_ms, agent_host) VALUES (?, ?, ?, ?, ?, 0)
+	res, err := s.DB.ExecContext(ctx,
+		`INSERT INTO room_members (tenant_id, room_id, user_id, role, joined_at_ms, agent_host)
+		 SELECT tenant_id, room_id, ?, ?, ?, 0 FROM rooms
+		 WHERE tenant_id = ? AND room_id = ? AND deleted_at_ms IS NULL
 		 ON DUPLICATE KEY UPDATE role = VALUES(role), agent_host = 0`,
-		tid, m.RoomID, m.UserID, string(m.Role), m.JoinedAtMs)
-	return err
+		m.UserID, string(m.Role), m.JoinedAtMs, tid, m.RoomID)
+	if err != nil {
+		return err
+	}
+	return requireMatched(res, ErrRoomNotFound)
 }
 
 // RemoveMember deletes a membership.

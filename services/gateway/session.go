@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log"
 	"net/http"
 	"strings"
@@ -113,8 +114,12 @@ func (s *Service) resolveSession(identity auth.Identity) (sessionScope, error) {
 	role := ""
 	if s.TenantResolver != nil {
 		// Optional hook: map/provision the tenant + resolve the subject's org
-		// role (RBAC). Returns the effective tenant + role; never fails login.
-		tenantID, role = s.TenantResolver(identity, tenantID)
+		// role (RBAC). A store failure fails the sign-in rather than landing
+		// it with a guessed role.
+		var err error
+		if tenantID, role, err = s.TenantResolver(identity, tenantID); err != nil {
+			return sessionScope{}, fmt.Errorf("resolve tenant: %w", err)
+		}
 	}
 	// A suspended tenant is closed to its members; a platform super-admin is
 	// exempt (they must still reach the suspended org to re-activate it).

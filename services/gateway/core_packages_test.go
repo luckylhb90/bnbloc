@@ -123,7 +123,7 @@ func TestComponentsAdminEndpoints_requireSuperAdmin(t *testing.T) {
 			// Given
 			svc := newGateway(t, "")
 			svc.PlatformSettings = store.NewMemoryPlatformSettings()
-			svc.TenantResolver = func(auth.Identity, string) (string, string) { return "home", string(rbac.RoleAdmin) }
+			svc.TenantResolver = func(auth.Identity, string) (string, string, error) { return "home", string(rbac.RoleAdmin), nil }
 			srv := httptest.NewServer(svc.Handler())
 			defer srv.Close()
 			token, _ := login(t, srv, "good")
@@ -156,7 +156,7 @@ func TestComponentsAdminEndpoints_returnNotFoundForLegacyCorePackageRoutes(t *te
 	// Given
 	svc := newGateway(t, "")
 	svc.PlatformSettings = store.NewMemoryPlatformSettings()
-	svc.TenantResolver = func(auth.Identity, string) (string, string) { return "home", string(rbac.RoleSuperAdmin) }
+	svc.TenantResolver = func(auth.Identity, string) (string, string, error) { return "home", string(rbac.RoleSuperAdmin), nil }
 	srv := httptest.NewServer(svc.Handler())
 	defer srv.Close()
 	token, _ := login(t, srv, "good")
@@ -220,7 +220,7 @@ func signedPackageGatewayConfigured(t *testing.T, trustKey bool, artifacts bool,
 	svc := newGateway(t, "")
 	svc.PlatformSettings = settings
 	svc.AllowExtUnsigned = allowUnsigned
-	svc.TenantResolver = func(auth.Identity, string) (string, string) { return "home", string(rbac.RoleSuperAdmin) }
+	svc.TenantResolver = func(auth.Identity, string) (string, string, error) { return "home", string(rbac.RoleSuperAdmin), nil }
 	if artifacts {
 		blobs, err := blobstore.NewDiskStore(t.TempDir())
 		if err != nil {

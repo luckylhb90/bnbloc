@@ -42,7 +42,7 @@ func TestTenantUsageAggregatesAndIsolates(t *testing.T) {
 		}
 	}
 
-	runs, cost := g.TenantUsage(ca)
+	runs, cost, _ := g.TenantUsage(ca)
 	if runs != 3 {
 		t.Fatalf("tenant A runs = %d, want 3", runs)
 	}
@@ -50,7 +50,7 @@ func TestTenantUsageAggregatesAndIsolates(t *testing.T) {
 		t.Fatalf("tenant A cost = %v, want 3.25", cost)
 	}
 
-	bruns, bcost := g.TenantUsage(cb)
+	bruns, bcost, _ := g.TenantUsage(cb)
 	if bruns != 5 {
 		t.Fatalf("tenant B runs = %d, want 5", bruns)
 	}
@@ -58,9 +58,9 @@ func TestTenantUsageAggregatesAndIsolates(t *testing.T) {
 		t.Fatalf("tenant B cost = %v, want 10.0", bcost)
 	}
 
-	// No tenant in context yields zero, never a cross-tenant leak.
-	if runs, cost := g.TenantUsage(bg()); runs != 0 || cost != 0 {
-		t.Fatalf("usage without tenant = (%d,%v), want (0,0)", runs, cost)
+	// No tenant in context is an error, never a cross-tenant leak.
+	if runs, cost, err := g.TenantUsage(bg()); err == nil || runs != 0 || cost != 0 {
+		t.Fatalf("usage without tenant = (%d,%v), want (0,0) and an error", runs, cost)
 	}
 }
 

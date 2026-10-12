@@ -7,6 +7,8 @@ package provisioning
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -27,16 +29,17 @@ type Resolver struct {
 	// SuperAdmins is the set of PLATFORM super-admins (cross-tenant). Membership
 	// here is configuration-driven (not a tenant membership row) and takes
 	// precedence over any org role. A key matches either the identity's verified
-	// subject id OR its email (case-insensitively), so an operator can configure
+	// subject id (exactly: subjects are case-sensitive) OR its email (an email
+	// address compares case-insensitively), so an operator can configure
 	// admins by the human-readable email (the natural choice) or by the opaque
 	// OIDC subject — whichever they have.
 	SuperAdmins map[string]bool
 }
 
 // isSuperAdmin reports whether a verified identity is a configured platform
-// super-admin, matching on either the subject id or the email (emails are
-// compared case-insensitively). This is why configuring BNBLOC_SUPER_ADMINS
-// with an email works even though the OIDC subject is an opaque id.
+// super-admin, matching on either the subject id or the email. This is why
+// configuring BNBLOC_SUPER_ADMINS with an email works even though the OIDC
+// subject is an opaque id.
 func (r *Resolver) isSuperAdmin(id auth.Identity) bool {
 	if r.SuperAdmins == nil {
 		return false
@@ -44,8 +47,14 @@ func (r *Resolver) isSuperAdmin(id auth.Identity) bool {
 	if id.Subject != "" && r.SuperAdmins[id.Subject] {
 		return true
 	}
-	if e := strings.ToLower(strings.TrimSpace(id.Email)); e != "" && r.SuperAdmins[e] {
-		return true
+	email := strings.TrimSpace(id.Email)
+	if email == "" {
+		return false
+	}
+	for k := range r.SuperAdmins {
+		if strings.Contains(k, "@") && strings.EqualFold(k, email) { // identity-fold: an email address, not a subject
+			return true
+		}
 	}
 	return false
 }
@@ -56,8 +65,9 @@ func New(ts store.TenantStore) *Resolver {
 }
 
 // Resolve maps a verified identity to its effective tenant + org role, matching
-// the gateway's TenantResolver signature. It never fails login: on any error it
-// falls back to the provided defaultTenant with an empty role.
+// the gateway's TenantResolver signature. A store failure fails the login
+// (err != nil): a read that failed is never taken for "not a member", which
+// would re-provision the subject and rewrite their org role.
 //
 // Mapping precedence:
 //  1. identity.Tenant, when the IdP/verifier already resolved one (SAML issuer
@@ -69,18 +79,28 @@ func New(ts store.TenantStore) *Resolver {
 // member keeps its role; a new member is provisioned (the FIRST member of a
 // tenant becomes org_admin, everyone after is a member). The returned role is
 // the member's org role, stamped into the session token for coarse RBAC.
-func (r *Resolver) Resolve(id auth.Identity, defaultTenant string) (tenantID, role string) {
+func (r *Resolver) Resolve(id auth.Identity, defaultTenant string) (tenantID, role string, err error) {
 	ctx := context.Background()
-	tenantID = r.resolveTenant(ctx, id, defaultTenant)
+	tenantID, err = r.resolveTenant(ctx, id, defaultTenant)
+	if err != nil {
+		return "", "", err
+	}
 
 	// Ensure the tenant row exists (auto-provision) so membership + issuer
-	// mapping have a home. Best-effort; never blocks login.
+	// mapping have a home.
 	issuer := issuerFor(id)
-	if _, err := r.Tenants.GetTenant(ctx, tenantID); err != nil && r.AutoProvision {
-		_ = r.Tenants.PutTenant(ctx, store.Tenant{
-			TenantID: tenantID, Name: tenantID, Status: store.TenantActive,
-			SSOIssuer: issuer, CreatedAtMs: r.Now(),
-		})
+	if _, err := r.Tenants.GetTenant(ctx, tenantID); err != nil {
+		if !errors.Is(err, store.ErrTenantNotFound) {
+			return "", "", fmt.Errorf("read tenant %s: %w", tenantID, err)
+		}
+		if r.AutoProvision {
+			if err := r.Tenants.PutTenant(ctx, store.Tenant{
+				TenantID: tenantID, Name: tenantID, Status: store.TenantActive,
+				SSOIssuer: issuer, CreatedAtMs: r.Now(),
+			}); err != nil {
+				return "", "", fmt.Errorf("provision tenant %s: %w", tenantID, err)
+			}
+		}
 	}
 
 	// Platform super-admin takes precedence over any org role: a configured
@@ -88,42 +108,59 @@ func (r *Resolver) Resolve(id auth.Identity, defaultTenant string) (tenantID, ro
 	// membership role. They still get a home tenant (resolved above) as the
 	// default scope for their session; cross-tenant access is via ?tenantId.
 	if r.isSuperAdmin(id) {
-		return tenantID, string(store.OrgRoleSuperAdmin)
+		return tenantID, string(store.OrgRoleSuperAdmin), nil
 	}
 	// Existing member keeps their role.
-	if m, ok := r.Tenants.GetMember(ctx, tenantID, id.Subject); ok {
-		return tenantID, string(m.Role)
+	m, ok, err := r.Tenants.GetMember(ctx, tenantID, id.Subject)
+	if err != nil {
+		return "", "", fmt.Errorf("read membership: %w", err)
+	}
+	if ok {
+		return tenantID, string(m.Role), nil
 	}
 	if !r.AutoProvision {
 		// Not a member and provisioning disabled: no role (viewer-equivalent).
-		return tenantID, string(store.OrgRoleViewer)
+		return tenantID, string(store.OrgRoleViewer), nil
 	}
 	// New member: the first user of a tenant bootstraps as org_admin so an org
 	// is never left without an administrator; everyone after is a member.
 	newRole := store.OrgRoleMember
-	if r.Tenants.MemberCount(ctx, tenantID) == 0 {
+	n, err := r.Tenants.MemberCount(ctx, tenantID)
+	if err != nil {
+		return "", "", fmt.Errorf("count members: %w", err)
+	}
+	if n == 0 {
 		newRole = store.OrgRoleAdmin
 	}
-	_ = r.Tenants.PutMember(ctx, store.TenantMember{
+	// Insert-only: a membership that appeared since the read above (a racing
+	// login, an admin) keeps its role, and that stored role is the answer.
+	stored, _, err := r.Tenants.EnsureMember(ctx, store.TenantMember{
 		TenantID: tenantID, UserID: id.Subject, Role: newRole, JoinedAtMs: r.Now(),
 	})
-	return tenantID, string(newRole)
+	if err != nil {
+		return "", "", fmt.Errorf("provision membership: %w", err)
+	}
+	return tenantID, string(stored.Role), nil
 }
 
 // resolveTenant applies the mapping precedence to pick the tenant id.
-func (r *Resolver) resolveTenant(ctx context.Context, id auth.Identity, defaultTenant string) string {
+func (r *Resolver) resolveTenant(ctx context.Context, id auth.Identity, defaultTenant string) (string, error) {
 	if t := strings.TrimSpace(id.Tenant); t != "" {
-		return t
+		return t, nil
 	}
 	if issuer := issuerFor(id); issuer != "" {
-		if t, ok := r.Tenants.TenantForIssuer(ctx, issuer); ok {
-			return t
+		t, ok, err := r.Tenants.TenantForIssuer(ctx, issuer)
+		if err != nil {
+			return "", fmt.Errorf("resolve issuer %s: %w", issuer, err)
+		}
+		if ok {
+			return t, nil
 		}
 		if r.AutoProvision {
 			// A fresh org signing in via SSO for the first time: derive a stable
 			// tenant id from its issuer/domain so the whole org converges on one
 			// tenant without pre-registration.
-			return "org-" + sanitize(issuer)
+			return "org-" + sanitize(issuer), nil
 		}
 	}
 	// No IdP tenant and no issuer mapping: fall back to the user's existing
@@ -132,12 +169,12 @@ func (r *Resolver) resolveTenant(ctx context.Context, id auth.Identity, defaultT
 	// membership row, so their next login lands in that tenant instead of the
 	// default. A user with no membership falls through to the default.
 	if t, ok := r.Tenants.PrimaryTenantForUser(ctx, id.Subject); ok {
-		return t
+		return t, nil
 	}
 	if defaultTenant == "" {
-		return tenant.Default
+		return tenant.Default, nil
 	}
-	return defaultTenant
+	return defaultTenant, nil
 }
 
 // issuerFor derives the org-identifying issuer for an identity: the explicit

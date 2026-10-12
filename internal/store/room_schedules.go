@@ -392,13 +392,7 @@ func (m *MySQLRoomSchedules) UpdateSchedule(ctx context.Context, s wire.RoomSche
 	if err != nil {
 		return err
 	}
-	if n, _ := res.RowsAffected(); n == 0 {
-		// Zero rows also means "no column changed"; disambiguate.
-		if _, gerr := m.GetSchedule(ctx, s.RoomID, s.ScheduleID); gerr != nil {
-			return gerr
-		}
-	}
-	return nil
+	return requireMatched(res, ErrScheduleNotFound)
 }
 
 func (m *MySQLRoomSchedules) DeleteSchedule(ctx context.Context, roomID, scheduleID string) error {

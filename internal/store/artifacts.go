@@ -16,6 +16,11 @@ import (
 var ErrArtifactNotFound = errors.New("store: artifact not found")
 var ErrArtifactVersionConflict = errors.New("store: artifact version conflict")
 
+// ErrArtifactIDTaken is PutArtifact's refusal of an id another room (or
+// another tenant) already holds: a caller-chosen id never reaches a row
+// outside the caller's room.
+var ErrArtifactIDTaken = errors.New("store: artifact id is taken by another room")
+
 // ErrInvalidArtifactVersion reports a version whose storage fields contradict
 // each other (a blob version without a blob key, an inline one with one).
 var ErrInvalidArtifactVersion = errors.New("store: invalid artifact version")
@@ -189,6 +194,10 @@ func HashArtifactContent(content string) string {
 }
 
 type ArtifactStore interface {
+	// PutArtifact creates an artifact, or returns the stored one unchanged
+	// when the id already exists in the same tenant and room (an idempotent
+	// attach keeps the version history). ErrArtifactIDTaken when the id
+	// belongs to another room or tenant.
 	PutArtifact(ctx context.Context, a Artifact) (Artifact, error)
 	GetArtifact(ctx context.Context, artifactID string) (Artifact, error)
 	ListArtifacts(ctx context.Context, q ArtifactQuery) ([]Artifact, error)
@@ -304,6 +313,9 @@ func (s *MemoryArtifacts) PutArtifact(ctx context.Context, a Artifact) (Artifact
 	defer s.mu.Unlock()
 	a.TenantID = tid
 	if existing, ok := s.artifacts[a.ArtifactID]; ok {
+		if existing.TenantID != tid || existing.RoomID != a.RoomID {
+			return Artifact{}, ErrArtifactIDTaken
+		}
 		// Idempotent attach: a re-put with the same id keeps the artifact's
 		// version history instead of resetting it.
 		return existing, nil

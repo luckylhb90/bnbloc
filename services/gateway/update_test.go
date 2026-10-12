@@ -279,7 +279,7 @@ func TestAppUpdateRoute_whenUnauthenticated(t *testing.T) {
 func TestPlatformUpdateConfigPut_whenRoleIsNotSuperAdmin(t *testing.T) {
 	svc := newGateway(t, "")
 	svc.PlatformSettings = store.NewMemoryPlatformSettings()
-	svc.TenantResolver = func(auth.Identity, string) (string, string) { return "home", "org_admin" }
+	svc.TenantResolver = func(auth.Identity, string) (string, string, error) { return "home", "org_admin", nil }
 	srv := httptest.NewServer(svc.Handler())
 	defer srv.Close()
 	token, _ := login(t, srv, "good")
@@ -302,7 +302,7 @@ func TestPlatformUpdateConfigPut_whenRoleIsSuperAdmin(t *testing.T) {
 	settings := store.NewMemoryPlatformSettings()
 	svc := newGateway(t, "")
 	svc.PlatformSettings = settings
-	svc.TenantResolver = func(auth.Identity, string) (string, string) { return "home", "super_admin" }
+	svc.TenantResolver = func(auth.Identity, string) (string, string, error) { return "home", "super_admin", nil }
 	srv := httptest.NewServer(svc.Handler())
 	defer srv.Close()
 	token, _ := login(t, srv, "good")

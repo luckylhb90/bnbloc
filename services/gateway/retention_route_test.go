@@ -24,7 +24,7 @@ func TestRetentionRoutesAuthorization(t *testing.T) {
 	svc := newGateway(t, "")
 	svc.Backends.ShareAgent = backend.URL
 	role := "member"
-	svc.TenantResolver = func(auth.Identity, string) (string, string) { return "home", role }
+	svc.TenantResolver = func(auth.Identity, string) (string, string, error) { return "home", role, nil }
 	srv := httptest.NewServer(svc.Handler())
 	defer srv.Close()
 

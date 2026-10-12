@@ -40,7 +40,13 @@ func (s *Service) handleMyTenantPolicy(w http.ResponseWriter, r *http.Request) {
 	}
 	tid := tenant.FromContext(r.Context())
 	if q := strings.TrimSpace(r.URL.Query().Get("tenant")); q != "" && q != tid {
-		if _, ok := s.Tenants.GetMember(r.Context(), q, caller); !ok {
+		_, member, err := s.Tenants.GetMember(r.Context(), q, caller)
+		if err != nil {
+			obs.ServerError(w, "read membership failed", err)
+			writeErr(w, http.StatusInternalServerError, "read membership failed")
+			return
+		}
+		if !member {
 			writeErr(w, http.StatusForbidden, "not a member of that tenant")
 			return
 		}

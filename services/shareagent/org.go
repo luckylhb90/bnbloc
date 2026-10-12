@@ -70,7 +70,12 @@ func (s *Service) handleTenantSetMemberRole(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	tid := tenant.FromContext(r.Context())
-	existing, ok := s.Tenants.GetMember(r.Context(), tid, userID)
+	existing, ok, err := s.Tenants.GetMember(r.Context(), tid, userID)
+	if err != nil {
+		obs.ServerError(w, "read membership failed", err)
+		writeErr(w, http.StatusInternalServerError, "read membership failed")
+		return
+	}
 	if !ok {
 		writeErr(w, http.StatusNotFound, "member not found")
 		return
@@ -123,7 +128,12 @@ func (s *Service) handleTenantAddMember(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	tid := tenant.FromContext(r.Context())
-	existing, ok := s.Tenants.GetMember(r.Context(), tid, userID)
+	existing, ok, err := s.Tenants.GetMember(r.Context(), tid, userID)
+	if err != nil {
+		obs.ServerError(w, "read membership failed", err)
+		writeErr(w, http.StatusInternalServerError, "read membership failed")
+		return
+	}
 	joined := existing.JoinedAtMs
 	if !ok {
 		joined = s.Now()
@@ -173,7 +183,12 @@ func (s *Service) handleTenantRemoveMember(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	tid := tenant.FromContext(r.Context())
-	target, ok := s.Tenants.GetMember(r.Context(), tid, userID)
+	target, ok, err := s.Tenants.GetMember(r.Context(), tid, userID)
+	if err != nil {
+		obs.ServerError(w, "read membership failed", err)
+		writeErr(w, http.StatusInternalServerError, "read membership failed")
+		return
+	}
 	if !ok {
 		writeErr(w, http.StatusNotFound, "member not found")
 		return

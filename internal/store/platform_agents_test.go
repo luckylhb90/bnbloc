@@ -56,7 +56,7 @@ func testPlatformGrant(t *testing.T, g GrantStore) {
 	if _, err := g.ReserveRun(ctx, RunReservation{ReservationID: "rsv_o", GrantID: "own", RoomID: "r1", OwnerUserID: "alice", BorrowerUserID: "bob", AtMs: 7}); err != nil {
 		t.Fatal(err)
 	}
-	if runs, _ := g.TenantUsage(ctx); runs != 1 {
+	if runs, _, _ := g.TenantUsage(ctx); runs != 1 {
 		t.Fatalf("tenant borrow runs = %d, want 1 (platform runs are outside the org ceilings)", runs)
 	}
 	// Usage accountability: the platform runs are audited as borrowed turns.
