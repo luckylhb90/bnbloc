@@ -144,6 +144,9 @@ export interface ContentVersion {
 export interface ContentComponentDetail {
   readonly component: ContentComponent;
   readonly versions: readonly ContentVersion[];
+  // The publish request a new version opened by itself: the organization
+  // uses the component, so the version waits for an admin's approval.
+  readonly resubmitted?: ContentPublishRequest;
 }
 
 export interface ContentFile {

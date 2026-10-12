@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import "./styles.css";
 import { AuthProvider } from "@/lib/auth";
 import { ToastProvider } from "@/ui/Toast";
+import { ResubmissionToasts } from "@/views/ResubmissionToasts";
 import { ErrorBoundary } from "@/ui/ErrorBoundary";
 import { App } from "@/App";
 import { seedPreviewSession } from "@/lib/desktop";
@@ -83,6 +84,7 @@ createRoot(document.getElementById("root")!).render(
       <ErrorBoundary>
         <ToastProvider>
           <Root />
+          <ResubmissionToasts />
         </ToastProvider>
       </ErrorBoundary>
     )}

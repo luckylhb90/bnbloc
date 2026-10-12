@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { CopyIcon, DownloadSimpleIcon, GlobeIcon } from "@phosphor-icons/react";
 import { contentLabel, type ContentComponent } from "@/lib/contentComponents";
 import { apiErrorText } from "@/lib/contentComponentsApi";
-import { promoteCommands, type ContentAdminComponent } from "@/lib/contentSharing";
+import { promoteCommands, tenantScopeBody, tenantScopeLabel, type ContentAdminComponent } from "@/lib/contentSharing";
 import { contentSharingApi } from "@/lib/contentSharingApi";
 import { relativeTime } from "@/lib/format";
 import { Button } from "@/ui/Button";
@@ -26,6 +26,7 @@ export function PlatformContentTab() {
   const [error, setError] = useState<string | null>(null);
   const [promoting, setPromoting] = useState<ContentComponent | null>(null);
   const [removing, setRemoving] = useState<ContentComponent | null>(null);
+  const [scoping, setScoping] = useState<ContentAdminComponent | null>(null);
 
   const load = useCallback(async () => {
     setError(null);
@@ -74,11 +75,17 @@ export function PlatformContentTab() {
           </p>
         </div>
         {items && platform.length === 0 && <p className="text-sm text-[var(--color-fg-subtle)]">None yet. Promote one of the organizations' below.</p>}
-        {platform.map(({ component: c }) => (
+        {platform.map((item) => {
+          const c = item.component;
+          return (
           <Card key={c.id} className="flex flex-wrap items-center gap-3 p-3">
             <ContentTitle component={c} />
             <PermissionBadges component={c} />
             {c.status === "retired" ? <Badge>Unpublished</Badge> : <Badge tone="accent">Published</Badge>}
+            <Badge title="The organizations whose members get it">{tenantScopeLabel(item.enabledTenants)}</Badge>
+            <Button size="sm" variant="ghost" onClick={() => setScoping(item)}>
+              Organizations
+            </Button>
             <Button size="sm" variant="ghost" onClick={() => setPromoting(c)}>
               New version
             </Button>
@@ -95,7 +102,8 @@ export function PlatformContentTab() {
               Remove
             </Button>
           </Card>
-        ))}
+          );
+        })}
       </div>
       <div className="flex flex-col gap-3">
         <div>
@@ -115,6 +123,7 @@ export function PlatformContentTab() {
         ))}
       </div>
       <PromoteDialog component={promoting} onClose={() => setPromoting(null)} />
+      <TenantScopeDialog item={scoping} onClose={() => setScoping(null)} onSaved={() => void load()} />
       <ConfirmDialog
         open={!!removing}
         onClose={() => setRemoving(null)}
@@ -208,6 +217,53 @@ function PromoteDialog({ component: c, onClose }: { readonly component: ContentC
           Members of every organization find it in their Library once installed. Someone else's scripts or local tools still run sandboxed.
         </p>
       </div>
+    </Dialog>
+  );
+}
+
+// TenantScopeDialog limits platform content to some organizations, or
+// gives it to every organization again (the component tenant scope).
+function TenantScopeDialog({ item, onClose, onSaved }: { readonly item: ContentAdminComponent | null; readonly onClose: () => void; readonly onSaved: () => void }) {
+  const toast = useToast();
+  const [text, setText] = useState("");
+  const [busy, setBusy] = useState(false);
+  useEffect(() => setText((item?.enabledTenants ?? []).join(", ")), [item]);
+  if (!item) return null;
+  const c = item.component;
+  const body = tenantScopeBody(text);
+  const save = async () => {
+    setBusy(true);
+    try {
+      await contentSharingApi.setPlatformTenants(c.name, c.kind, body);
+      toast.success("allTenants" in body ? `${contentLabel(c)} reaches every organization` : `${contentLabel(c)} reaches ${tenantScopeLabel(body.enabledTenants).toLowerCase()}`);
+      onSaved();
+      onClose();
+    } catch (e) {
+      toast.error(apiErrorText(e, "Could not change its organizations"));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <Dialog
+      open
+      onClose={onClose}
+      title={`Organizations for ${contentLabel(c)}`}
+      description="Members of these organizations find it in their Library and can use it. Leave the list empty to give it to every organization."
+      footer={
+        <>
+          <Button variant="ghost" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button variant="primary" onClick={() => void save()} disabled={busy}>
+            {busy ? "Saving…" : "allTenants" in body ? "Give to every organization" : "Limit to these"}
+          </Button>
+        </>
+      }
+    >
+      <Field label="Organization ids" hint="Separated by commas. Rooms that already use it keep their pinned version.">
+        <Input value={text} onChange={(e) => setText(e.target.value)} placeholder="Every organization" autoFocus />
+      </Field>
     </Dialog>
   );
 }

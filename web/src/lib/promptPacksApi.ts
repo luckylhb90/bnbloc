@@ -2,6 +2,7 @@ import { ApiError, req } from "./api.ts";
 import { apiUrl } from "./config.ts";
 import { authedFetch, errorDetail } from "./session.ts";
 import type { ContentComponent, ContentComponentDetail } from "./contentComponents.ts";
+import { noteSaved } from "./contentComponentsApi.ts";
 import { promptImportContentType, promptPackPayload, type PromptPackForm } from "./promptPacks.ts";
 
 const enc = encodeURIComponent;
@@ -30,7 +31,7 @@ export const promptPacksApi = {
     req<ContentComponentDetail>(`/v1/content-components/${enc(id)}/versions`, {
       method: "POST",
       body: JSON.stringify({ form: promptPackPayload(form), baseVersion }),
-    }),
+    }).then(noteSaved),
   // Import a markdown or json file of prompts (or an archive of them) as a
   // new pack, or (existingId) as a new version of one of the caller's.
   importFile: async (file: File, opts: { name?: string; existingId?: string }): Promise<ContentComponentDetail> => {
@@ -46,7 +47,7 @@ export const promptPacksApi = {
       body: file,
     });
     if (!res.ok) throw new ApiError(res.status, await errorDetail(res));
-    return (await res.json()) as ContentComponentDetail;
+    return noteSaved((await res.json()) as ContentComponentDetail);
   },
   // "Save as prompt": into the caller's personal pack (created on the
   // first save, as a new version after).

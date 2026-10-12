@@ -6,8 +6,11 @@ import {
   promoteCommands,
   publicationStatus,
   requestTitle,
+  resubmittedMessage,
   sharedPrompts,
   shareSummary,
+  tenantScopeBody,
+  tenantScopeLabel,
   updateAvailable,
 } from "./contentSharing.ts";
 
@@ -127,4 +130,32 @@ assert(cmds[3] === "bnbloc cores install --package reviewer-1.1.0.package.json -
   );
   eq(sharedPrompts(packs, 2).length, 2, "sharedPrompts limit");
   eq(sharedPrompts(packs, 1)[0].packName, "House", "pack name");
+}
+
+// A room share stands: the summary says later joiners get it too.
+{
+  const msg = shareSummary({ version: "1.0.0", shared: [{ member: "bob", componentId: "c", version: "1.0.0", status: "created" }], skipped: [], room: "room-1" });
+  assert(msg === "Shared version 1.0.0 with bob; people who join the room later get it too.", `room share summary: ${msg}`);
+  const none = shareSummary({ version: "1.0.0", shared: [], skipped: [], room: "room-1" });
+  assert(none === "people who join the room later get it too.", `empty room share summary: ${none}`);
+}
+
+// Platform content's organizations: an empty field lifts the limit
+// explicitly (allTenants), never an empty list the gateway refuses.
+{
+  eq(tenantScopeBody(" "), { allTenants: true }, "empty field");
+  eq(tenantScopeBody("acme, nimbus acme"), { enabledTenants: ["acme", "nimbus"] }, "list");
+  assert(tenantScopeLabel(undefined) === "Every organization", "no limit");
+  assert(tenantScopeLabel(["acme"]) === "Only acme", "one");
+  assert(tenantScopeLabel(["acme", "nimbus"]) === "2 organizations: acme, nimbus", "two");
+}
+
+// A new version of content the organization uses was sent for approval.
+{
+  assert(resubmittedMessage(null) === null, "no resubmission");
+  assert(
+    resubmittedMessage({ version: "1.2.0", approvedVersion: "1.1.0" }) === "Version 1.2.0 was sent to your organization's admins for approval; members keep using 1.1.0 until then.",
+    "resubmission message",
+  );
+  assert(resubmittedMessage({ version: "1.2.0" }) === "Version 1.2.0 was sent to your organization's admins for approval.", "resubmission without approved version");
 }

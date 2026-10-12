@@ -13,6 +13,7 @@ import {
   shareSummary,
   updateAvailable,
   type ContentCopy,
+  type ContentRoomShare,
 } from "@/lib/contentSharing";
 import { contentSharingApi } from "@/lib/contentSharingApi";
 import { relativeTime } from "@/lib/format";
@@ -134,7 +135,8 @@ export function ShareDialog({
   const [rooms, setRooms] = useState<Room[] | null>(null);
   const [roomId, setRoomId] = useState("");
   const [note, setNote] = useState("");
-  const [copies, setCopies] = useState<ContentCopy[] | null>(null);
+  const [copies, setCopies] = useState<readonly ContentCopy[] | null>(null);
+  const [roomShares, setRoomShares] = useState<readonly ContentRoomShare[]>([]);
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
@@ -144,9 +146,14 @@ export function ShareDialog({
     setMembers("");
     setNote("");
     setCopies(null);
+    setRoomShares([]);
     contentSharingApi
-      .copies(c.id)
-      .then((r) => live && setCopies(r.copies ?? []))
+      .shares(c.id)
+      .then((r) => {
+        if (!live) return;
+        setCopies(r.copies ?? []);
+        setRoomShares(r.rooms ?? []);
+      })
       .catch(() => live && setCopies([]));
     if (subject) {
       api
@@ -173,13 +180,25 @@ export function ShareDialog({
         ...(target === "people" ? { members: names } : { roomId }),
         ...(note.trim() ? { note: note.trim() } : {}),
       });
-      if (reply.shared.length === 0) toast.error(shareSummary(reply));
+      if (reply.shared.length === 0 && !reply.room) toast.error(shareSummary(reply));
       else toast.success(shareSummary(reply));
       onClose();
     } catch (e) {
       toast.error(apiErrorText(e, "Could not share it"));
     } finally {
       setBusy(false);
+    }
+  };
+
+  const roomName = (id: string) => rooms?.find((r) => r.roomId === id)?.name || id;
+  const revoke = async (roomId: string) => {
+    if (!c) return;
+    try {
+      await contentSharingApi.revokeRoomShare(c.id, roomId);
+      setRoomShares((cur) => cur.filter((r) => r.roomId !== roomId));
+      toast.success(`People who join ${roomName(roomId)} no longer get a copy. Copies already given stay.`);
+    } catch (e) {
+      toast.error(apiErrorText(e, "Could not stop sharing with the room"));
     }
   };
 
@@ -223,7 +242,7 @@ export function ShareDialog({
         ) : rooms.length === 0 ? (
           <p className="text-sm text-[var(--color-fg-muted)]">You are not in a room yet.</p>
         ) : (
-          <Field label="Room" hint="Its members get a copy now; people who join later do not.">
+          <Field label="Room" hint="Its members get a copy now, and people who join later get one too until you stop sharing with the room.">
             <Select value={roomId} onChange={(e) => setRoomId(e.target.value)}>
               {rooms.map((r) => (
                 <option key={r.roomId} value={r.roomId}>
@@ -236,6 +255,24 @@ export function ShareDialog({
         <Field label="Note (optional)" hint="Sent with the notification.">
           <Textarea value={note} onChange={(e) => setNote(e.target.value)} rows={2} maxLength={500} />
         </Field>
+        {roomShares.length > 0 && (
+          <div className="flex flex-col gap-1">
+            <span className="text-xs font-medium uppercase tracking-wide text-[var(--color-fg-muted)]">Shared with rooms</span>
+            <ul className="flex flex-col gap-0.5 text-sm">
+              {roomShares.map((rs) => (
+                <li key={rs.roomId} className="flex items-center gap-2">
+                  <span className="min-w-0 truncate">{roomName(rs.roomId)}</span>
+                  <span className="text-xs text-[var(--color-fg-subtle)]">
+                    version {rs.version} · new members get it
+                  </span>
+                  <Button size="sm" variant="ghost" className="ml-auto" onClick={() => void revoke(rs.roomId)}>
+                    Stop
+                  </Button>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
         {copies && copies.length > 0 && (
           <div className="flex flex-col gap-1">
             <span className="text-xs font-medium uppercase tracking-wide text-[var(--color-fg-muted)]">Shared with</span>

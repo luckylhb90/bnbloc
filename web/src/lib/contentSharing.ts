@@ -20,6 +20,23 @@ export interface ContentShareReply {
   readonly version: string;
   readonly shared: readonly ContentShareResult[];
   readonly skipped: readonly ContentShareSkip[];
+  // The room whose share now stands: people who join it later get a copy.
+  readonly room?: string;
+}
+
+// A standing share with a room: members who join it get a copy at version
+// until the author revokes it.
+export interface ContentRoomShare {
+  readonly roomId: string;
+  readonly version: string;
+  readonly note?: string;
+  readonly createdAtMs: number;
+  readonly updatedAtMs: number;
+}
+
+export interface ContentShares {
+  readonly copies: readonly ContentCopy[];
+  readonly rooms: readonly ContentRoomShare[];
 }
 
 export interface ContentCopy {
@@ -55,6 +72,22 @@ export interface ContentReview {
 export interface ContentAdminComponent {
   readonly component: ContentComponent;
   readonly tenantId?: string;
+  // Platform content limited to these organizations (absent: every one).
+  readonly enabledTenants?: readonly string[];
+}
+
+// tenantScopeLabel describes where platform content reaches.
+export function tenantScopeLabel(tenants: readonly string[] | undefined): string {
+  if (!tenants || tenants.length === 0) return "Every organization";
+  return tenants.length === 1 ? `Only ${tenants[0]}` : `${tenants.length} organizations: ${tenants.join(", ")}`;
+}
+
+// tenantScopeBody is the PUT /v1/platform/components/{name}/tenants body
+// for a list typed into a field: an empty list lifts the limit explicitly
+// (allTenants), never an empty enabledTenants, which the gateway refuses.
+export function tenantScopeBody(text: string): { allTenants: true } | { enabledTenants: string[] } {
+  const ids = parseMembers(text);
+  return ids.length === 0 ? { allTenants: true } : { enabledTenants: ids };
 }
 
 // A Library card's actions: only the author shares and publishes their
@@ -96,7 +129,16 @@ export function shareSummary(r: ContentShareReply): string {
   if (given.length > 0) parts.push(`Shared version ${r.version} with ${listNames(given)}`);
   if (had.length > 0) parts.push(`${listNames(had)} already ${had.length === 1 ? "has" : "have"} it`);
   if (r.skipped.length > 0) parts.push(`skipped ${r.skipped.map((s) => `${s.member} (${s.reason})`).join(", ")}`);
+  if (r.room) parts.push("people who join the room later get it too");
   return parts.length > 0 ? `${parts.join("; ")}.` : "Nobody to share with.";
+}
+
+// resubmittedMessage is the toast after saving a new version of a
+// component the organization uses: the gateway sent it for approval.
+export function resubmittedMessage(r: Pick<ContentPublishRequest, "version" | "approvedVersion"> | undefined | null): string | null {
+  if (!r) return null;
+  const keep = r.approvedVersion ? `; members keep using ${r.approvedVersion} until then` : "";
+  return `Version ${r.version} was sent to your organization's admins for approval${keep}.`;
 }
 
 export type PublicationTone = "accent" | "warning" | "muted";
