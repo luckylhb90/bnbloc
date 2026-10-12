@@ -50,7 +50,7 @@ func TestRouteLabel(t *testing.T) {
 		"/":                             "/",
 		"/v1/invites/SECRETCODE/redeem": "/v1/invites/:id/redeem",
 		"/relay/stream/session-key-123": "/relay/stream/:id",
-		"/v1/rooms/r/shared-agents/acme/codex/access":      "/v1/rooms/:id/shared-agents/:id/:id/access",
+		"/v1/rooms/r/shared-agents/acme/codex/reserve":     "/v1/rooms/:id/shared-agents/:id/:id/reserve",
 		"/v1/rooms/r/messages/42":                          "/v1/rooms/:id/messages/:id",
 		"/v1/app/update/darwin-aarch64/1.2.3":              "/v1/app/update/:id/:id",
 		"/v1/rooms/r/zzz-invented":                         "/v1/rooms/:id/:id",

@@ -17,11 +17,11 @@ import (
 var roomPathRe = regexp.MustCompile(`/v1/rooms/([^/]+)`)
 
 // inviteCodeRe and relayKeyRe match path segments that carry secrets: the
-// invite redemption code and the relay stream/rendezvous session key. They are
+// invite redemption code and the relay stream session key. They are
 // redacted before a path is logged so request logs never leak them (SEC-9).
 var (
 	inviteCodeRe = regexp.MustCompile(`(/v1/invites/)[^/]+(/redeem)`)
-	relayKeyRe   = regexp.MustCompile(`(/relay/(?:stream|rendezvous)/)[^/]+`)
+	relayKeyRe   = regexp.MustCompile(`(/relay/stream/)[^/]+`)
 )
 
 // redactPath replaces secret path segments with [REDACTED] for logging. It does

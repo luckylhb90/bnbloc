@@ -21,8 +21,7 @@ bnbloc drives agents two ways, with different remote behavior:
   `@`-message an agent in a room.
 
 `bnbloc-relay` / `device-link` are NOT the agent path — relay carries only
-peer-to-peer file sync (`gosync` in mutagen mode) and mobile Trickle ICE
-rendezvous.
+peer-to-peer file sync (`gosync` in mutagen mode).
 
 ## Room agent roster
 

@@ -161,18 +161,15 @@ Shared-agent (borrow) authorization, audit, usage.
 
 ## relay (`:8085`) — scales out by session-key ownership
 
-ICE config, rendezvous, and the WebSocket byte-stream relay for desktop file
-sync. No database, no svcauth (endpoints are authorized by the sync-layer
+The WebSocket byte-stream relay for desktop file sync. No database, no svcauth (endpoints are authorized by the sync-layer
 HMAC). Pairing state is in process memory, so both halves of a session must
 meet on one replica: with more than one, set `BNBLOC_RELAY_PEERS` +
-`BNBLOC_RELAY_SELF` and every rendezvous/stream request is forwarded to its
+`BNBLOC_RELAY_SELF` and every stream request is forwarded to its
 session key's owner (WebSocket upgrades pass through). Kubernetes runs it as
 a StatefulSet behind the headless `bnbloc-relay-peers` Service.
 
 | Variable | Required | Notes |
 | --- | --- | --- |
-| `BNBLOC_RELAY_STUN_SERVERS` | optional | Comma-separated STUN servers (only for real p2p). |
-| `BNBLOC_RELAY_ENDPOINTS` | optional | Comma-separated advertised endpoints. |
 | `BNBLOC_RELAY_PEERS` / `BNBLOC_RELAY_SELF` | with >1 replica | Same forms as realtime's (Helm: `bnbloc-relay-peers:8085` and `$(POD_IP)`). Unset = single node. |
 
 Deployment-layer requirements: the edge routes `https://<host>/relay/*` to it

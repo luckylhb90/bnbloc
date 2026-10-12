@@ -3,8 +3,6 @@ package relay
 import (
 	"context"
 	"fmt"
-	"io"
-	"net/http"
 	"net/http/httptest"
 	"strings"
 	"sync"
@@ -47,7 +45,7 @@ func relayCluster(t *testing.T) ([]*relayReplica, func(addr string, down bool)) 
 		}
 		set.Refresh(context.Background())
 		r.set = set
-		r.svc = New(ICEConfig{})
+		r.svc = New()
 		r.svc.Peers = set
 		r.srv.Config.Handler = r.svc.Handler()
 		r.srv.Start()
@@ -68,28 +66,11 @@ func sessionOwnedBy(t *testing.T, r *relayReplica) string {
 	return ""
 }
 
-// Two peers of one session that reach different replicas still pair: both
-// stream upgrades (WebSocket) and the rendezvous exchange are forwarded to
-// the session key's owner.
+// Two peers of one session that reach different replicas still pair: the
+// stream upgrades (WebSocket) are forwarded to the session key's owner.
 func TestRelayPairsAcrossReplicas(t *testing.T) {
 	reps, _ := relayCluster(t)
 	key := sessionOwnedBy(t, reps[1])
-
-	// Rendezvous: publish via one replica, poll via the other.
-	resp, err := http.Post(reps[0].srv.URL+"/relay/rendezvous/"+key, "application/json", strings.NewReader(`{"peerId":"maya","candidate":"Y2FuZGlkYXRl"}`))
-	if err != nil || resp.StatusCode != http.StatusOK {
-		t.Fatalf("publish: %v %v", resp, err)
-	}
-	resp.Body.Close()
-	resp, err = http.Get(reps[1].srv.URL + "/relay/rendezvous/" + key + "?peerId=jack")
-	if err != nil {
-		t.Fatal(err)
-	}
-	body, _ := io.ReadAll(resp.Body)
-	resp.Body.Close()
-	if !strings.Contains(string(body), "Y2FuZGlkYXRl") {
-		t.Fatalf("poll on the other replica = %s", body)
-	}
 
 	first, err := wsconn.Dial(reps[0].srv.URL+"/relay/stream/"+key, 2*time.Second)
 	if err != nil {
@@ -127,8 +108,7 @@ func TestRelayPairsAcrossReplicas(t *testing.T) {
 }
 
 // When the session key moves, the parked first peer is closed so it
-// reconnects to the new owner (where its partner will meet it), and queued
-// rendezvous candidates of moved keys are dropped.
+// reconnects to the new owner (where its partner will meet it).
 func TestRelayReleasesMovedKeys(t *testing.T) {
 	reps, setDown := relayCluster(t)
 	owner := reps[1]
@@ -138,11 +118,6 @@ func TestRelayReleasesMovedKeys(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer parked.Close()
-	resp, err := http.Post(owner.srv.URL+"/relay/rendezvous/"+key, "application/json", strings.NewReader(`{"peerId":"maya","candidate":"eA=="}`))
-	if err != nil {
-		t.Fatal(err)
-	}
-	resp.Body.Close()
 	deadline := time.Now().Add(2 * time.Second)
 	for {
 		owner.svc.streamMu.Lock()
@@ -165,11 +140,5 @@ func TestRelayReleasesMovedKeys(t *testing.T) {
 	_ = parked.SetReadDeadline(time.Now().Add(2 * time.Second))
 	if _, err := parked.Read(make([]byte, 8)); err == nil {
 		t.Fatal("parked peer of a moved key was not closed")
-	}
-	owner.svc.mu.Lock()
-	sessions := len(owner.svc.rendezvous)
-	owner.svc.mu.Unlock()
-	if sessions != 0 {
-		t.Fatalf("%d rendezvous sessions kept for moved keys", sessions)
 	}
 }

@@ -15,7 +15,7 @@ import (
 // startRelay boots a real bnbloc-relay on a loopback port and returns its base URL.
 func startRelay(t *testing.T) string {
 	t.Helper()
-	svc := relaysvc.New(relaysvc.ICEConfig{})
+	svc := relaysvc.New()
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)

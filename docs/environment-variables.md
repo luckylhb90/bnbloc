@@ -317,8 +317,6 @@ halves of a session meet on the session key's owner.
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
-| `BNBLOC_RELAY_STUN_SERVERS` | — | Comma-separated STUN servers advertised for peer reachability. |
-| `BNBLOC_RELAY_ENDPOINTS` | — | Comma-separated advertised relay endpoints. |
 
 ## Bridge (member daemon / desktop sidecar)
 

@@ -202,12 +202,6 @@ spec:
               valueFrom:
                 secretKeyRef: { name: {{ required "webPush.privateKeySecretRef.name is required when webPush.publicKey is set" $.Values.webPush.privateKeySecretRef.name }}, key: {{ $.Values.webPush.privateKeySecretRef.key }} }
             {{- end }}
-            {{- if eq $name "relay" }}
-            - name: BNBLOC_RELAY_STUN_SERVERS
-              value: {{ join "," ($cfg.stunServers | default list) | quote }}
-            - name: BNBLOC_RELAY_ENDPOINTS
-              value: {{ join "," ($cfg.endpoints | default list) | quote }}
-            {{- end }}
             {{- with $cfg.extraEnv }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
