@@ -552,6 +552,8 @@ CREATE TABLE IF NOT EXISTS notification_prefs (
   agent_finished  TINYINT(1) NOT NULL,
   agent_failed    TINYINT(1) NOT NULL,
   borrow_requests TINYINT(1) NOT NULL,
+  content_shared  TINYINT(1) NOT NULL DEFAULT 1,
+  content_review  TINYINT(1) NOT NULL DEFAULT 1,
   quiet_rooms     TEXT NOT NULL,
   updated_at_ms   BIGINT NOT NULL,
   PRIMARY KEY (tenant_id, user_id)

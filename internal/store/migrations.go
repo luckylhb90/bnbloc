@@ -1086,6 +1086,23 @@ WHERE r.channel_id = '' AND d.user_id IS NULL`)
 			return createSchemaTable(ctx, db, "content_publish_requests")
 		},
 	},
+	{
+		// Notification preference switches for the content notifications
+		// (docs/prd/2026-10-12-experts-and-teams.md, "Gap closure" 1),
+		// on for every member who saved prefs before.
+		id: "2026_10_notification_prefs_content",
+		run: func(ctx context.Context, db sqlConn) error {
+			for _, c := range [][2]string{
+				{"content_shared", "TINYINT(1) NOT NULL DEFAULT 1 AFTER borrow_requests"},
+				{"content_review", "TINYINT(1) NOT NULL DEFAULT 1 AFTER content_shared"},
+			} {
+				if err := addColumnIfMissing(ctx, db, "notification_prefs", c[0], c[1]); err != nil {
+					return err
+				}
+			}
+			return nil
+		},
+	},
 }
 
 // sqlConn is the statement surface a migration runs on. runMigrations passes

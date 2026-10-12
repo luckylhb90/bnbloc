@@ -51,7 +51,7 @@ func testNotificationStores(t *testing.T, s notificationStores, tid string) {
 	if _, ok, err := s.GetNotificationPrefs(ctx, "alice"); err != nil || ok {
 		t.Fatalf("absent prefs = ok %v err %v", ok, err)
 	}
-	want := NotificationPrefs{Mentions: true, AgentFinished: false, AgentFailed: true, BorrowRequests: false, QuietRooms: []string{"r1", "r2"}, UpdatedAtMs: 42}
+	want := NotificationPrefs{Mentions: true, AgentFinished: false, AgentFailed: true, BorrowRequests: false, ContentShared: false, ContentReview: true, QuietRooms: []string{"r1", "r2"}, UpdatedAtMs: 42}
 	if err := s.PutNotificationPrefs(ctx, "alice", want); err != nil {
 		t.Fatalf("put prefs: %v", err)
 	}

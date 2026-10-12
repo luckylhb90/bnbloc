@@ -63,14 +63,14 @@ func TestPrefsEndpoints(t *testing.T) {
 	if code := call(t, srv, "GET", "/v1/my/notification-prefs", "bob", nil, &p); code != 200 {
 		t.Fatalf("get = %d", code)
 	}
-	if !(p.Mentions && p.AgentFinished && p.AgentFailed && p.BorrowRequests) || p.QuietRooms == nil || len(p.QuietRooms) != 0 {
+	if !(p.Mentions && p.AgentFinished && p.AgentFailed && p.BorrowRequests && p.ContentShared && p.ContentReview) || p.QuietRooms == nil || len(p.QuietRooms) != 0 {
 		t.Fatalf("defaults = %+v, want all on and empty quietRooms", p)
 	}
-	put := wire.NotificationPrefs{Mentions: true, AgentFailed: true, QuietRooms: []string{"r1", "r1", " r2 "}}
+	put := wire.NotificationPrefs{Mentions: true, AgentFailed: true, ContentReview: true, QuietRooms: []string{"r1", "r1", " r2 "}}
 	if code := call(t, srv, "PUT", "/v1/my/notification-prefs", "bob", put, &p); code != 200 {
 		t.Fatalf("put = %d", code)
 	}
-	if p.AgentFinished || p.BorrowRequests || !reflect.DeepEqual(p.QuietRooms, []string{"r1", "r2"}) {
+	if p.AgentFinished || p.BorrowRequests || p.ContentShared || !p.ContentReview || !reflect.DeepEqual(p.QuietRooms, []string{"r1", "r2"}) {
 		t.Fatalf("saved = %+v", p)
 	}
 	var again wire.NotificationPrefs

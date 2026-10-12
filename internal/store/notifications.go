@@ -18,13 +18,18 @@ type NotificationPrefs struct {
 	AgentFinished  bool
 	AgentFailed    bool
 	BorrowRequests bool
-	QuietRooms     []string
-	UpdatedAtMs    int64
+	// ContentShared: an author shared content with the member.
+	ContentShared bool
+	// ContentReview: content waits for the member's approval (org
+	// admins), or an admin decided the member's publish request.
+	ContentReview bool
+	QuietRooms    []string
+	UpdatedAtMs   int64
 }
 
 // DefaultNotificationPrefs is the setting of a member who never saved any.
 func DefaultNotificationPrefs() NotificationPrefs {
-	return NotificationPrefs{Mentions: true, AgentFinished: true, AgentFailed: true, BorrowRequests: true, QuietRooms: []string{}}
+	return NotificationPrefs{Mentions: true, AgentFinished: true, AgentFailed: true, BorrowRequests: true, ContentShared: true, ContentReview: true, QuietRooms: []string{}}
 }
 
 // NotificationPrefsStore persists per-member notification settings keyed

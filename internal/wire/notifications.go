@@ -72,6 +72,8 @@ type NotificationPrefs struct {
 	AgentFinished  bool     `json:"agentFinished"`
 	AgentFailed    bool     `json:"agentFailed"`
 	BorrowRequests bool     `json:"borrowRequests"`
+	ContentShared  bool     `json:"contentShared"`
+	ContentReview  bool     `json:"contentReview"`
 	QuietRooms     []string `json:"quietRooms"`
 }
 

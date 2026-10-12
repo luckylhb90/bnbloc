@@ -554,3 +554,21 @@ func TestObserverSkipsAgentHosts(t *testing.T) {
 		t.Fatal("the requester must still hear that the run failed")
 	}
 }
+
+// The content notifications follow their own preference switches.
+func TestAllowsContentPrefs(t *testing.T) {
+	p := store.DefaultNotificationPrefs()
+	for _, typ := range []string{wire.NotificationContentShared, wire.NotificationContentReview} {
+		if !Allows(p, typ, "") {
+			t.Fatalf("%s off by default", typ)
+		}
+	}
+	p.ContentShared = false
+	if Allows(p, wire.NotificationContentShared, "") || !Allows(p, wire.NotificationContentReview, "") {
+		t.Fatal("contentShared off must silence content_shared only")
+	}
+	p.ContentShared, p.ContentReview = true, false
+	if !Allows(p, wire.NotificationContentShared, "") || Allows(p, wire.NotificationContentReview, "") {
+		t.Fatal("contentReview off must silence content_review only")
+	}
+}

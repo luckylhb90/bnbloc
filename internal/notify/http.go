@@ -101,7 +101,8 @@ func (h *Handlers) handlePutPrefs(w http.ResponseWriter, r *http.Request) {
 	}
 	p := store.NotificationPrefs{
 		Mentions: body.Mentions, AgentFinished: body.AgentFinished, AgentFailed: body.AgentFailed,
-		BorrowRequests: body.BorrowRequests, QuietRooms: quiet, UpdatedAtMs: h.now().UnixMilli(),
+		BorrowRequests: body.BorrowRequests, ContentShared: body.ContentShared, ContentReview: body.ContentReview,
+		QuietRooms: quiet, UpdatedAtMs: h.now().UnixMilli(),
 	}
 	if err := h.Prefs.PutNotificationPrefs(r.Context(), user, p); err != nil {
 		obs.ServerError(w, "save notification prefs failed", err)
@@ -138,7 +139,7 @@ func prefsDTO(p store.NotificationPrefs) wire.NotificationPrefs {
 	}
 	return wire.NotificationPrefs{
 		Mentions: p.Mentions, AgentFinished: p.AgentFinished, AgentFailed: p.AgentFailed,
-		BorrowRequests: p.BorrowRequests, QuietRooms: quiet,
+		BorrowRequests: p.BorrowRequests, ContentShared: p.ContentShared, ContentReview: p.ContentReview, QuietRooms: quiet,
 	}
 }
 
