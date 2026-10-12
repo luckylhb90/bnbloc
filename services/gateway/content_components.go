@@ -9,7 +9,6 @@ import (
 	"io"
 	"mime"
 	"net/http"
-	"net/url"
 	"sort"
 	"strings"
 	"sync"
@@ -22,7 +21,6 @@ import (
 	"github.com/luckylhb90/bnbloc/internal/extpipe"
 	"github.com/luckylhb90/bnbloc/internal/ids"
 	"github.com/luckylhb90/bnbloc/internal/obs"
-	"github.com/luckylhb90/bnbloc/internal/rbac"
 	"github.com/luckylhb90/bnbloc/internal/semver"
 	"github.com/luckylhb90/bnbloc/internal/store"
 	"github.com/luckylhb90/bnbloc/internal/tarbundle"
@@ -76,44 +74,6 @@ func (s *Service) registerContentComponents(mux *http.ServeMux) {
 	mux.HandleFunc("GET /v1/content-uses", s.handleListContentUses)
 	mux.HandleFunc("PUT /v1/content-uses", s.handlePutContentUse)
 	mux.HandleFunc("DELETE /v1/content-uses", s.handleDeleteContentUse)
-}
-
-// contentCaller authenticates a content request; write needs a role that
-// may drive agents (viewers are read-only). A request naming a room
-// (?room=: a room's pins, a job grant) needs the caller's reach of that
-// room and acts in the room's tenant, like the job grant and the proxied
-// room routes (tenant_scope.go); otherwise it acts in the caller's
-// effective tenant (a super admin's acting tenant). It answers
-// 401/403/503 itself.
-func (s *Service) contentCaller(w http.ResponseWriter, r *http.Request, write bool) (auth.Claims, bool) {
-	claims, err := s.authenticate(r)
-	if err != nil {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
-		return auth.Claims{}, false
-	}
-	if room := strings.TrimSpace(r.URL.Query().Get("room")); room != "" {
-		var ok bool
-		if claims, ok = s.roomClaims(claims, room); !ok {
-			http.Error(w, "room scope not authorized", http.StatusForbidden)
-			return auth.Claims{}, false
-		}
-	}
-	if s.ContentComponents == nil {
-		obs.ServerError(w, "content components unavailable", nil)
-		http.Error(w, "content components unavailable", http.StatusServiceUnavailable)
-		return auth.Claims{}, false
-	}
-	if write {
-		if !rbac.Can(claims.Role, rbac.PermDriveAgent) {
-			http.Error(w, "insufficient org role", http.StatusForbidden)
-			return auth.Claims{}, false
-		}
-		if !s.rateAllow(claims.Subject) {
-			http.Error(w, "rate limit exceeded", http.StatusTooManyRequests)
-			return auth.Claims{}, false
-		}
-	}
-	return claims, true
 }
 
 // contentStoreErr answers a store failure (404 for a missing component).
@@ -354,11 +314,7 @@ func (s *Service) contentViews(ctx context.Context, claims auth.Claims, comps []
 }
 
 func (s *Service) handleListContent(w http.ResponseWriter, r *http.Request) {
-	caller, ok := s.contentCaller(w, r, false)
-	if !ok {
-		return
-	}
-	actor, ok := s.contentActing(w, r, caller)
+	actor, ok := s.contentCaller(w, r, false, grantHonored)
 	if !ok {
 		return
 	}
@@ -415,11 +371,7 @@ func readBody(w http.ResponseWriter, r *http.Request, limit int64) ([]byte, bool
 // content_requester.go) the bridge running the job saves it as the job's
 // requester.
 func (s *Service) handleCreateContent(w http.ResponseWriter, r *http.Request) {
-	caller, ok := s.contentCaller(w, r, true)
-	if !ok {
-		return
-	}
-	actor, ok := s.contentActing(w, r, caller)
+	actor, ok := s.contentCaller(w, r, true, grantHonored)
 	if !ok {
 		return
 	}
@@ -479,10 +431,11 @@ func contentOptions() contentpkg.Options { return contentpkg.Options{} }
 // component (?kind=expert|skill&name=) or, with ?id=, as a new version of
 // the caller's component.
 func (s *Service) handleImportContent(w http.ResponseWriter, r *http.Request) {
-	claims, ok := s.contentCaller(w, r, true)
+	actor, ok := s.contentCaller(w, r, true, grantHonored)
 	if !ok {
 		return
 	}
+	claims := actor.Claims
 	q := r.URL.Query()
 	opts, ok := s.saveContentOptions(w, r, claims)
 	if !ok {
@@ -608,11 +561,7 @@ func nextContentVersion(c store.ContentComponent, requested string) (string, err
 // handleNewContentVersion saves the caller's component as a new immutable
 // version: a JSON form (built on baseVersion's files) or a package archive.
 func (s *Service) handleNewContentVersion(w http.ResponseWriter, r *http.Request) {
-	caller, ok := s.contentCaller(w, r, true)
-	if !ok {
-		return
-	}
-	actor, ok := s.contentActing(w, r, caller)
+	actor, ok := s.contentCaller(w, r, true, grantHonored)
 	if !ok {
 		return
 	}
@@ -766,11 +715,7 @@ func contentVersionView(v store.ContentComponentVersion) wire.ContentVersion {
 }
 
 func (s *Service) handleGetContent(w http.ResponseWriter, r *http.Request) {
-	caller, ok := s.contentCaller(w, r, false)
-	if !ok {
-		return
-	}
-	actor, ok := s.contentActing(w, r, caller)
+	actor, ok := s.contentCaller(w, r, false, grantHonored)
 	if !ok {
 		return
 	}
@@ -812,11 +757,7 @@ func (s *Service) contentPackage(ctx context.Context, v store.ContentComponentVe
 // version, its instructions and skill bodies (the Library form) and its
 // files (text when viewable).
 func (s *Service) handleGetContentVersion(w http.ResponseWriter, r *http.Request) {
-	caller, ok := s.contentCaller(w, r, false)
-	if !ok {
-		return
-	}
-	actor, ok := s.contentActing(w, r, caller)
+	actor, ok := s.contentCaller(w, r, false, grantHonored)
 	if !ok {
 		return
 	}
@@ -886,10 +827,11 @@ func (s *Service) handleGetContentVersion(w http.ResponseWriter, r *http.Request
 }
 
 func (s *Service) handleDeleteContent(w http.ResponseWriter, r *http.Request) {
-	claims, ok := s.contentCaller(w, r, true)
+	actor, ok := s.contentCaller(w, r, true, grantRefused)
 	if !ok {
 		return
 	}
+	claims := actor.Claims
 	c, err := s.heldContent(r.Context(), claims, r.PathValue("id"))
 	if err != nil {
 		contentStoreErr(w, "load content component failed", err)
@@ -905,10 +847,11 @@ func (s *Service) handleDeleteContent(w http.ResponseWriter, r *http.Request) {
 // handleAckContent records that the caller confirmed a version's declared
 // permissions (first use).
 func (s *Service) handleAckContent(w http.ResponseWriter, r *http.Request) {
-	claims, ok := s.contentCaller(w, r, false)
+	actor, ok := s.contentCaller(w, r, false, grantRefused)
 	if !ok {
 		return
 	}
+	claims := actor.Claims
 	ctx := r.Context()
 	c, err := s.readableContent(ctx, claims, r.PathValue("id"), r.URL.Query().Get("room"))
 	if err != nil {
@@ -928,21 +871,12 @@ func (s *Service) handleAckContent(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// roomEditor reports whether the caller may change a room's content
-// settings (pinned experts, room skill packs): its owner or an admin.
-func (s *Service) roomEditor(claims auth.Claims, roomID string) bool {
-	if s.RoomRole == nil {
-		return false
-	}
-	role, human := s.RoomRole(claims.Subject, roomID)
-	return human && (role == string(store.RoleOwner) || role == string(store.RoleAdmin))
-}
-
 func (s *Service) handleListContentUses(w http.ResponseWriter, r *http.Request) {
-	claims, ok := s.contentCaller(w, r, false)
+	actor, ok := s.contentCaller(w, r, false, grantHonored)
 	if !ok {
 		return
 	}
+	claims := actor.Claims
 	ctx := r.Context()
 	out := wire.ContentUsesReply{}
 	var err error
@@ -951,8 +885,8 @@ func (s *Service) handleListContentUses(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, "list content uses failed", http.StatusInternalServerError)
 		return
 	}
-	if room := strings.TrimSpace(r.URL.Query().Get("room")); room != "" {
-		// contentCaller checked the caller's reach of the room.
+	if room := actor.Room; room != "" {
+		// contentGrant checked the caller's reach of the room.
 		if out.Room, err = s.contentUseViews(ctx, claims, store.ContentUseRoom, room); err != nil {
 			obs.ServerError(w, "list content uses failed", err)
 			http.Error(w, "list content uses failed", http.StatusInternalServerError)
@@ -1024,10 +958,11 @@ func (s *Service) contentUseViews(ctx context.Context, claims auth.Claims, scope
 // pinned version or following the latest. The caller must be able to use
 // the component themselves.
 func (s *Service) handlePutContentUse(w http.ResponseWriter, r *http.Request) {
-	claims, ok := s.contentCaller(w, r, true)
+	actor, ok := s.contentCaller(w, r, true, grantHonored)
 	if !ok {
 		return
 	}
+	claims := actor.Claims
 	ctx := r.Context()
 	raw, ok := readBody(w, r, 64<<10)
 	if !ok {
@@ -1088,13 +1023,12 @@ func (s *Service) contentUseScope(w http.ResponseWriter, claims auth.Claims, sco
 			http.Error(w, "roomId required", http.StatusBadRequest)
 			return claims, "", "", false
 		}
-		if !s.roomEditor(claims, roomID) {
+		editor, ok := s.roomEditorClaims(claims, roomID)
+		if !ok {
 			http.Error(w, "only the room's owner or admins change its experts and skills", http.StatusForbidden)
 			return claims, "", "", false
 		}
-		// A room editor is a human member of the room: it is in reach.
-		claims.Tenant = s.roomTenantOr(roomID, claims.Tenant)
-		return claims, store.ContentUseScope(scope), roomID, true
+		return editor, store.ContentUseScope(scope), roomID, true
 	default:
 		http.Error(w, "scope must be member, room or room-expert", http.StatusBadRequest)
 		return claims, "", "", false
@@ -1102,10 +1036,11 @@ func (s *Service) contentUseScope(w http.ResponseWriter, claims auth.Claims, sco
 }
 
 func (s *Service) handleDeleteContentUse(w http.ResponseWriter, r *http.Request) {
-	claims, ok := s.contentCaller(w, r, true)
+	actor, ok := s.contentCaller(w, r, true, grantHonored)
 	if !ok {
 		return
 	}
+	claims := actor.Claims
 	q := r.URL.Query()
 	claims, scope, scopeID, ok := s.contentUseScope(w, claims, q.Get("scope"), q.Get("roomId"))
 	if !ok {
@@ -1129,67 +1064,19 @@ func (s *Service) handleDeleteContentUse(w http.ResponseWriter, r *http.Request)
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// contentJob loads the job a bridge resolves content for: in the room's
-// tenant, in that room, live and leased by the caller's bridge
-// (store.JobLeasedBy). It answers the failure itself.
-func (s *Service) contentJob(w http.ResponseWriter, r *http.Request, claims auth.Claims, jobID, roomID string) (store.AgentJob, bool) {
-	if s.ContentJobs == nil {
-		obs.ServerError(w, "agent jobs unavailable", nil)
-		http.Error(w, "agent jobs unavailable", http.StatusServiceUnavailable)
-		return store.AgentJob{}, false
-	}
-	if jobID == "" || roomID == "" {
-		http.Error(w, "job and room required", http.StatusBadRequest)
-		return store.AgentJob{}, false
-	}
-	claims, ok := s.roomClaims(claims, roomID)
-	if !ok {
-		http.Error(w, "room scope not authorized", http.StatusForbidden)
-		return store.AgentJob{}, false
-	}
-	tid := claims.Tenant
-	ctx := tenant.NewContext(r.Context(), tid)
-	job, err := s.ContentJobs.GetAgentRun(ctx, jobID)
-	if errors.Is(err, store.ErrAgentJobNotFound) || (err == nil && job.RoomID != roomID) {
-		http.Error(w, "job not found", http.StatusNotFound)
-		return store.AgentJob{}, false
-	}
-	if err != nil {
-		obs.ServerError(w, "load agent job failed", err)
-		http.Error(w, "load agent job failed", http.StatusInternalServerError)
-		return store.AgentJob{}, false
-	}
-	switch err := store.JobLeasedBy(ctx, s.ContentJobs, job, claims.Subject); {
-	case errors.Is(err, store.ErrJobNotLive):
-		http.Error(w, "job is not running", http.StatusConflict)
-		return store.AgentJob{}, false
-	case errors.Is(err, store.ErrJobNotCallers):
-		http.Error(w, "job is not running on your bridge", http.StatusForbidden)
-		return store.AgentJob{}, false
-	case err != nil:
-		obs.ServerError(w, "load bridge owner failed", err)
-		http.Error(w, "load bridge owner failed", http.StatusInternalServerError)
-		return store.AgentJob{}, false
-	}
-	if job.TenantID == "" {
-		job.TenantID = tid
-	}
-	return job, true
-}
-
 // handleContentEffective answers the bridge driving a job: the expert and
 // skill packs its turn wears (contentuse.Effective). The bridge downloads
 // each bundle with GET /v1/artifacts/{key}?job=&room=.
 func (s *Service) handleContentEffective(w http.ResponseWriter, r *http.Request) {
-	claims, ok := s.contentCaller(w, r, false)
+	actor, ok := s.contentCaller(w, r, false, grantHonored)
 	if !ok {
 		return
 	}
-	q := r.URL.Query()
-	job, ok := s.contentJob(w, r, claims, strings.TrimSpace(q.Get("job")), strings.TrimSpace(q.Get("room")))
-	if !ok {
+	if actor.Job == nil {
+		http.Error(w, "job and room required", http.StatusBadRequest)
 		return
 	}
+	job := *actor.Job
 	eff, err := contentuse.Effective(r.Context(), s.ContentComponents, job)
 	if err != nil {
 		obs.ServerError(w, "resolve job content failed", err)
@@ -1241,12 +1128,12 @@ func (s *Service) recordRoomExpert(ctx context.Context, job store.AgentJob, ref 
 	return nil
 }
 
-// contentBundleEntitled reports whether the caller may download a content
-// bundle: a version of a component visible to them, of one their room
-// uses (?room=), or one in effect for a job their bridge runs (?job=; a
-// staged draft the job wears has no version row and is granted this way
-// only).
-func (s *Service) contentBundleEntitled(ctx context.Context, claims auth.Claims, key string, grant url.Values) (bool, error) {
+// contentBundleEntitled reports whether the actor (contentGrant, as the
+// Library resolved it) may download a content bundle: a version of a
+// component visible to them, of one the room they name uses (?room=), or
+// one in effect for the job a granted request runs (?job=&room=; a staged
+// draft the job wears has no version row and is granted this way only).
+func (s *Service) contentBundleEntitled(ctx context.Context, actor contentActor, key string) (bool, error) {
 	if s.ContentComponents == nil {
 		return false, nil
 	}
@@ -1254,7 +1141,6 @@ func (s *Service) contentBundleEntitled(ctx context.Context, claims auth.Claims,
 	if err != nil {
 		return false, err
 	}
-	roomID := strings.TrimSpace(grant.Get("room"))
 	for _, v := range versions {
 		c, err := s.ContentComponents.GetContentComponent(ctx, v.ComponentID)
 		if errors.Is(err, store.ErrContentNotFound) {
@@ -1263,37 +1149,17 @@ func (s *Service) contentBundleEntitled(ctx context.Context, claims auth.Claims,
 		if err != nil {
 			return false, err
 		}
-		if extpipe.MemberVisibility(viewerOf(claims), extpipe.GateForContent(c), 0).Visible {
+		if extpipe.MemberVisibility(viewerOf(actor.Claims), extpipe.GateForContent(c), 0).Visible {
 			return true, nil
 		}
-		if roomID != "" && s.contentInRoom(ctx, claims, roomID, c.ID) {
+		if actor.Room != "" && s.contentInRoom(ctx, actor.Claims, actor.Room, c.ID) {
 			return true, nil
 		}
 	}
-	jobID := strings.TrimSpace(grant.Get("job"))
-	if jobID == "" || roomID == "" || s.ContentJobs == nil {
+	if actor.Job == nil {
 		return false, nil
 	}
-	// The job lease below is the authority here: the job must be in this
-	// room and leased by the caller's bridge.
-	tid := s.roomTenantOr(roomID, claims.Tenant)
-	jctx := tenant.NewContext(ctx, tid)
-	job, err := s.ContentJobs.GetAgentRun(jctx, jobID)
-	if errors.Is(err, store.ErrAgentJobNotFound) || (err == nil && job.RoomID != roomID) {
-		return false, nil
-	}
-	if err != nil {
-		return false, err
-	}
-	if err := store.JobLeasedBy(jctx, s.ContentJobs, job, claims.Subject); errors.Is(err, store.ErrJobNotLive) || errors.Is(err, store.ErrJobNotCallers) {
-		return false, nil
-	} else if err != nil {
-		return false, err
-	}
-	if job.TenantID == "" {
-		job.TenantID = tid
-	}
-	eff, err := contentuse.Effective(ctx, s.ContentComponents, job)
+	eff, err := contentuse.Effective(ctx, s.ContentComponents, *actor.Job)
 	if err != nil {
 		return false, err
 	}

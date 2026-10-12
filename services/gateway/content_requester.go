@@ -2,12 +2,17 @@ package gateway
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"strings"
 
 	"github.com/luckylhb90/bnbloc/internal/auth"
 	"github.com/luckylhb90/bnbloc/internal/contentpkg"
+	"github.com/luckylhb90/bnbloc/internal/membership"
+	"github.com/luckylhb90/bnbloc/internal/obs"
+	"github.com/luckylhb90/bnbloc/internal/rbac"
 	"github.com/luckylhb90/bnbloc/internal/store"
+	"github.com/luckylhb90/bnbloc/internal/tenant"
 	"github.com/luckylhb90/bnbloc/internal/wire"
 )
 
@@ -18,9 +23,17 @@ import (
 // a job, with a ?job=&room= grant. The authority model is dispatch's: the
 // bridge never acts as itself or its owner; a grant is admitted only while
 // the job is live and leased by a bridge of the caller (store.JobLeasedBy)
-// and its requester is still a human member of the room, and the request
-// then acts as that requester: what they may read is read, and a save lands
-// in their own Library (personal scope, owner = the requester).
+// and its requester may still post in the room (membership.Member.MayChat),
+// and the request then acts as that requester: what they may read is read,
+// and a save lands in their own Library (personal scope, owner = the
+// requester).
+//
+// contentGrant is the ONE resolution of who a content request acts as; every
+// content route (contentCaller) and the bundle download (artifactEntitled)
+// go through it. Each route declares its jobGrant mode
+// (docs/prd/2026-10-12-code-health-remediation.md O6): the actions a room
+// tool performs honor the grant, organization-visible or destructive ones
+// refuse ?job= with a 400, so no route can silently act as the bridge owner.
 //
 // One extra rule applies to saves: when the agent is not the requester's
 // own (a borrowed or platform agent), a package that ships scripts is
@@ -30,8 +43,12 @@ import (
 
 // contentActor is who a content request acts as.
 type contentActor struct {
-	// Claims is the acting member: the caller, or a job's requester.
+	// Claims is the acting member: the caller, or a job's requester, in the
+	// tenant the request acts in (the named room's, tenant_scope.go).
 	auth.Claims
+	// Room is the room the request names (?room=), checked in reach; "" for
+	// none.
+	Room string
 	// Job is the job of a granted bridge request (nil for a member's own
 	// request).
 	Job *store.AgentJob
@@ -39,38 +56,145 @@ type contentActor struct {
 	Bridge string
 }
 
-// contentActing resolves the actor of a content request. Without a job
-// grant the caller acts as themselves. It answers refusals itself.
-func (s *Service) contentActing(w http.ResponseWriter, r *http.Request, caller auth.Claims) (contentActor, bool) {
-	q := r.URL.Query()
-	jobID := strings.TrimSpace(q.Get("job"))
-	if jobID == "" {
-		return contentActor{Claims: caller}, true
-	}
-	roomID := strings.TrimSpace(q.Get("room"))
-	job, ok := s.contentJob(w, r, caller, jobID, roomID)
-	if !ok {
-		return contentActor{}, false
-	}
-	if job.RequesterUserID == "" {
-		http.Error(w, "the job has no human requester", http.StatusConflict)
-		return contentActor{}, false
-	}
-	if !s.humanRoomMember(job.RequesterUserID, roomID) {
-		http.Error(w, "the job's requester is no longer a member of the room", http.StatusForbidden)
-		return contentActor{}, false
-	}
-	acting := auth.Claims{Subject: job.RequesterUserID, Tenant: job.TenantID, Rooms: []string{roomID}}
-	return contentActor{Claims: acting, Job: &job, Bridge: caller.Subject}, true
+// jobGrant is how a content route treats a ?job=&room= grant.
+type jobGrant int
+
+const (
+	// grantHonored: a bridge running the job acts as its requester (the
+	// actions room tools perform: list, read, save, import, publish, stage
+	// a draft, prompt save/use, content uses).
+	grantHonored jobGrant = iota
+	// grantRefused: ?job= answers 400 (delete, ack, share, list or revoke
+	// shares, update a copy: organization-visible or destructive actions a
+	// job never performs).
+	grantRefused
+)
+
+// grantError is a refused grant: its status and the reason a client reads.
+type grantError struct {
+	status int
+	msg    string
+	cause  error // a 5xx's underlying failure
 }
 
-// humanRoomMember reports whether subject is a human member of the room.
-func (s *Service) humanRoomMember(subject, roomID string) bool {
+func (e *grantError) Error() string { return e.msg }
+
+func refuseGrant(status int, msg string) error { return &grantError{status: status, msg: msg} }
+
+// writeGrantErr answers a contentGrant failure.
+func writeGrantErr(w http.ResponseWriter, err error) {
+	var ge *grantError
+	if !errors.As(err, &ge) {
+		ge = &grantError{status: http.StatusInternalServerError, msg: "resolve content grant failed", cause: err}
+	}
+	if ge.status >= 500 {
+		obs.ServerError(w, ge.msg, ge.cause)
+	}
+	http.Error(w, ge.msg, ge.status)
+}
+
+// contentGrant resolves who a content request acts as. Without ?job= the
+// caller acts as themselves, in the room's tenant when the request names a
+// room (?room=) they can reach. With ?job=&room= the bridge running the job
+// acts as the job's requester (see above).
+func (s *Service) contentGrant(r *http.Request, caller auth.Claims) (contentActor, error) {
+	q := r.URL.Query()
+	roomID := strings.TrimSpace(q.Get("room"))
+	jobID := strings.TrimSpace(q.Get("job"))
+	if roomID == "" {
+		if jobID != "" {
+			return contentActor{}, refuseGrant(http.StatusBadRequest, "job and room required")
+		}
+		return contentActor{Claims: caller}, nil
+	}
+	claims, ok := s.roomClaims(caller, roomID)
+	if !ok {
+		return contentActor{}, refuseGrant(http.StatusForbidden, "room scope not authorized")
+	}
+	if jobID == "" {
+		return contentActor{Claims: claims, Room: roomID}, nil
+	}
+	if s.ContentJobs == nil {
+		return contentActor{}, &grantError{status: http.StatusServiceUnavailable, msg: "agent jobs unavailable"}
+	}
+	ctx := tenant.NewContext(r.Context(), claims.Tenant)
+	job, err := s.ContentJobs.GetAgentRun(ctx, jobID)
+	if errors.Is(err, store.ErrAgentJobNotFound) || (err == nil && job.RoomID != roomID) {
+		return contentActor{}, refuseGrant(http.StatusNotFound, "job not found")
+	}
+	if err != nil {
+		return contentActor{}, &grantError{status: http.StatusInternalServerError, msg: "load agent job failed", cause: err}
+	}
+	switch err := store.JobLeasedBy(ctx, s.ContentJobs, job, caller.Subject); {
+	case errors.Is(err, store.ErrJobNotLive):
+		return contentActor{}, refuseGrant(http.StatusConflict, "job is not running")
+	case errors.Is(err, store.ErrJobNotCallers):
+		return contentActor{}, refuseGrant(http.StatusForbidden, "job is not running on your bridge")
+	case err != nil:
+		return contentActor{}, &grantError{status: http.StatusInternalServerError, msg: "load bridge owner failed", cause: err}
+	}
+	if job.TenantID == "" {
+		job.TenantID = claims.Tenant
+	}
+	if job.RequesterUserID == "" {
+		return contentActor{}, refuseGrant(http.StatusConflict, "the job has no human requester")
+	}
+	if m, ok := s.roomMember(job.RequesterUserID, roomID); !ok || !m.MayChat() {
+		return contentActor{}, refuseGrant(http.StatusForbidden, "the job's requester may no longer post in the room")
+	}
+	acting := auth.Claims{Subject: job.RequesterUserID, Tenant: job.TenantID, Rooms: []string{roomID}}
+	return contentActor{Claims: acting, Room: roomID, Job: &job, Bridge: caller.Subject}, nil
+}
+
+// contentCaller authenticates a content request and resolves its actor
+// (contentGrant) under the route's grant mode; write needs a caller role
+// that may drive agents (viewers are read-only) and spends the caller's
+// rate budget. It answers 400/401/403/404/409/503 itself.
+func (s *Service) contentCaller(w http.ResponseWriter, r *http.Request, write bool, grant jobGrant) (contentActor, bool) {
+	caller, err := s.authenticate(r)
+	if err != nil {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return contentActor{}, false
+	}
+	if grant == grantRefused && strings.TrimSpace(r.URL.Query().Get("job")) != "" {
+		http.Error(w, "this content action is never taken on behalf of a job", http.StatusBadRequest)
+		return contentActor{}, false
+	}
+	actor, err := s.contentGrant(r, caller)
+	if err != nil {
+		writeGrantErr(w, err)
+		return contentActor{}, false
+	}
+	if s.ContentComponents == nil {
+		obs.ServerError(w, "content components unavailable", nil)
+		http.Error(w, "content components unavailable", http.StatusServiceUnavailable)
+		return contentActor{}, false
+	}
+	if write {
+		if !rbac.Can(caller.Role, rbac.PermDriveAgent) {
+			http.Error(w, "insufficient org role", http.StatusForbidden)
+			return contentActor{}, false
+		}
+		if !s.rateAllow(caller.Subject) {
+			http.Error(w, "rate limit exceeded", http.StatusTooManyRequests)
+			return contentActor{}, false
+		}
+	}
+	return actor, true
+}
+
+// roomMember reads subject's membership of a room (any tenant) through the
+// room role probe, as the membership owner's Member: its IsHuman / MayChat
+// are the rules the backends apply.
+func (s *Service) roomMember(subject, roomID string) (membership.Member, bool) {
 	if s.RoomRole == nil {
-		return false
+		return membership.Member{}, false
 	}
 	role, human := s.RoomRole(subject, roomID)
-	return human && role != ""
+	if role == "" {
+		return membership.Member{}, false
+	}
+	return membership.Member{Role: store.Role(role), AgentHost: !human}, true
 }
 
 // jobSaveAllowed applies the save rule of a granted request: a borrowed or

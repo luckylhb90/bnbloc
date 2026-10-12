@@ -15,7 +15,6 @@ import (
 	"time"
 
 	"github.com/luckylhb90/bnbloc/core/pkgmeta"
-	"github.com/luckylhb90/bnbloc/internal/auth"
 	"github.com/luckylhb90/bnbloc/internal/contentbuiltin"
 	"github.com/luckylhb90/bnbloc/internal/extpipe"
 	"github.com/luckylhb90/bnbloc/internal/obs"
@@ -117,7 +116,20 @@ func (s *Service) handleArtifactDownload(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	key := strings.TrimPrefix(r.PathValue("key"), "/")
-	entitled, err := s.artifactEntitled(r.Context(), claims, key, r.URL.Query())
+	// A content bundle named with ?room= or ?job=&room= resolves its actor
+	// exactly as the Library route that listed it (contentGrant). A refused
+	// grant is a 404 like any key the caller is not entitled to.
+	actor, err := s.contentGrant(r, claims)
+	var refused *grantError
+	if errors.As(err, &refused) && refused.status < 500 {
+		http.Error(w, "artifact not found", http.StatusNotFound)
+		return
+	}
+	if err != nil {
+		writeGrantErr(w, err)
+		return
+	}
+	entitled, err := s.artifactEntitled(r.Context(), actor, key)
 	if err != nil {
 		obs.ServerError(w, "load artifact entitlement failed", err)
 		http.Error(w, "load artifact entitlement failed", http.StatusInternalServerError)
@@ -232,11 +244,12 @@ func streamBlob(w http.ResponseWriter, body io.Reader, size int64) {
 //     current desktop update (/v1/app/update), which every member may read;
 //   - the bundle of a content component version visible to them, used by a
 //     room they are in (?room=), or in effect for a job their bridge runs
-//     (?job=&room=; contentBundleEntitled).
-func (s *Service) artifactEntitled(ctx context.Context, claims auth.Claims, key string, grant url.Values) (bool, error) {
+//     (?job=&room=; contentBundleEntitled over the contentGrant actor).
+func (s *Service) artifactEntitled(ctx context.Context, actor contentActor, key string) (bool, error) {
 	if key == "" {
 		return false, nil
 	}
+	claims := actor.Claims
 	if isSuperAdminRole(claims.Role) {
 		return true, nil
 	}
@@ -278,7 +291,7 @@ func (s *Service) artifactEntitled(ctx context.Context, claims auth.Claims, key 
 			return true, nil
 		}
 	}
-	return s.contentBundleEntitled(ctx, claims, key, grant)
+	return s.contentBundleEntitled(ctx, actor, key)
 }
 
 // artifactURLKey extracts the blob key from a gateway artifact URL

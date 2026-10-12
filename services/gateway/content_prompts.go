@@ -49,10 +49,11 @@ var errPromptPackRaced = errors.New("prompt pack changed while saving")
 // as a new version, creating the pack (and turning it on for the caller)
 // on the first save. Placeholders in the body become variables.
 func (s *Service) handleSavePrompt(w http.ResponseWriter, r *http.Request) {
-	claims, ok := s.contentCaller(w, r, true)
+	actor, ok := s.contentCaller(w, r, true, grantHonored)
 	if !ok {
 		return
 	}
+	claims := actor.Claims
 	raw, ok := readBody(w, r, maxSavePromptBytes)
 	if !ok {
 		return
@@ -191,10 +192,11 @@ func (s *Service) savePrompt(ctx context.Context, claims auth.Claims, req wire.S
 // visible to them, or turned on in a room of theirs (?room=); the prompt
 // must be in its latest version or the one named (?version=, a room pin).
 func (s *Service) handlePromptUse(w http.ResponseWriter, r *http.Request) {
-	claims, ok := s.contentCaller(w, r, false)
+	actor, ok := s.contentCaller(w, r, false, grantHonored)
 	if !ok {
 		return
 	}
+	claims := actor.Claims
 	if !s.rateAllow(claims.Subject) {
 		http.Error(w, "rate limit exceeded", http.StatusTooManyRequests)
 		return

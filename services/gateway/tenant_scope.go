@@ -6,6 +6,8 @@ import (
 
 	"github.com/luckylhb90/bnbloc/internal/auth"
 	"github.com/luckylhb90/bnbloc/internal/rbac"
+	"github.com/luckylhb90/bnbloc/internal/roomctx"
+	"github.com/luckylhb90/bnbloc/internal/store"
 )
 
 // The effective tenant of a request: the ONE rule the reverse proxy and
@@ -20,13 +22,20 @@ import (
 //     tenant. Applied at authentication (authenticate, proxyClaims), so a
 //     handler's claims.Tenant already is the acting tenant.
 //  3. A request that names a room acts in the room's own tenant
-//     (rooms.tenant_id), once the caller's reach of the room is checked
-//     (roomClaims): a member of a room in another organization, or a super
-//     admin acting elsewhere, transacts where the room lives, exactly as a
-//     job grant does (contentActing). This wins over 2. Whether a route
-//     names a room is the handler's decision: the proxy's room-scoped paths,
-//     content routes with ?room= (contentCaller), room content uses, site
-//     tickets.
+//     (rooms.tenant_id): a member of a room in another organization, or a
+//     super admin acting elsewhere, transacts where the room lives. This
+//     wins over 2. The named variants below are the only ways to apply it,
+//     each with the check its callers need: inRoomTenant (the proxy, whose
+//     routes decide reach), roomClaims (the caller's reach: content ?room=,
+//     the job grant, site tickets), roomEditorClaims (the room's owner or an
+//     admin: room content uses) and roomInTenant (a share that must stay in
+//     the caller's organization). Backends refuse a request signed for any
+//     other tenant than the room's (membership.RoomScope).
+
+// actingTenantHeader is the client-supplied global tenant switch for platform
+// super-admins. It is advisory (honored only for super_admins) and is always
+// stripped before proxying so a backend only ever sees the signed tenant.
+const actingTenantHeader = "X-Bnbloc-Acting-Tenant"
 
 // actingTenant applies steps 1 and 2 to verified session claims.
 func actingTenant(r *http.Request, claims auth.Claims) string {
@@ -43,10 +52,9 @@ func actingTenant(r *http.Request, claims auth.Claims) string {
 	return t
 }
 
-// roomTenantOr applies step 3: the room's own tenant, else fallback (the
-// tenant the request acts in) when the room's tenant cannot be resolved.
-// The caller checks the request is entitled to name the room (roomClaims,
-// or a job lease that pins the job to the room).
+// roomTenantOr is the room's own tenant, else fallback when it cannot be
+// resolved (the backend then refuses the room, membership.RoomScope). Only
+// the variants below call it.
 func (s *Service) roomTenantOr(roomID, fallback string) string {
 	if roomID == "" || s.RoomTenant == nil {
 		return fallback
@@ -64,15 +72,6 @@ func (s *Service) roomReachable(claims auth.Claims, roomID string) bool {
 	return claims.HasRoom(roomID) || s.subjectInRoom(claims.Subject, roomID, claims.Tenant)
 }
 
-// roomClaims checks the caller may reach roomID and returns their claims
-// acting in the room's tenant (step 3). false when the room is out of reach.
-func (s *Service) roomClaims(claims auth.Claims, roomID string) (auth.Claims, bool) {
-	if !s.roomReachable(claims, roomID) {
-		return claims, false
-	}
-	return s.inRoomTenant(claims, roomID), true
-}
-
 // inRoomTenant returns the claims acting in the room's tenant (step 3) for a
 // request whose right to name the room its route decides: the proxy, where
 // sub-resources need the caller's reach and the room itself, a join, or an
@@ -80,4 +79,36 @@ func (s *Service) roomClaims(claims auth.Claims, roomID string) (auth.Claims, bo
 func (s *Service) inRoomTenant(claims auth.Claims, roomID string) auth.Claims {
 	claims.Tenant = s.roomTenantOr(roomID, claims.Tenant)
 	return claims
+}
+
+// roomClaims checks the caller may reach roomID and returns their claims
+// acting in the room's tenant (step 3). false when the room is out of reach
+// (an invalid room id included).
+func (s *Service) roomClaims(claims auth.Claims, roomID string) (auth.Claims, bool) {
+	if roomctx.ValidateID(roomID) != nil || !s.roomReachable(claims, roomID) {
+		return claims, false
+	}
+	return s.inRoomTenant(claims, roomID), true
+}
+
+// roomEditorClaims checks the caller may change the room's settings (its
+// owner or an admin, a person) and returns their claims acting in the room's
+// tenant. An editor is a member: the room is in reach.
+func (s *Service) roomEditorClaims(claims auth.Claims, roomID string) (auth.Claims, bool) {
+	m, ok := s.roomMember(claims.Subject, roomID)
+	if !ok || !m.IsHuman() || (m.Role != store.RoleOwner && m.Role != store.RoleAdmin) {
+		return claims, false
+	}
+	return s.inRoomTenant(claims, roomID), true
+}
+
+// roomInTenant reports whether the room lives in the tenant the caller acts
+// in (a share reaches only the caller's own organization). A room whose
+// tenant cannot be resolved is not (fail closed); without a resolver the
+// deployment is single-tenant.
+func (s *Service) roomInTenant(claims auth.Claims, roomID string) bool {
+	if s.RoomTenant == nil {
+		return true
+	}
+	return s.RoomTenant(roomID) == claims.Tenant
 }

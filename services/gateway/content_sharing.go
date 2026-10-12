@@ -112,10 +112,11 @@ func (s *Service) orgMember(tenantID, subject string) bool {
 // ---------------------------------------------------------------- shares
 
 func (s *Service) handleShareContent(w http.ResponseWriter, r *http.Request) {
-	claims, ok := s.contentCaller(w, r, true)
+	actor, ok := s.contentCaller(w, r, true, grantRefused)
 	if !ok {
 		return
 	}
+	claims := actor.Claims
 	ctx := r.Context()
 	src, err := s.ownContent(ctx, claims, r.PathValue("id"))
 	if err != nil {
@@ -199,11 +200,11 @@ func (s *Service) handleShareContent(w http.ResponseWriter, r *http.Request) {
 func (s *Service) shareRecipients(w http.ResponseWriter, r *http.Request, claims auth.Claims, req wire.ContentShareRequest) ([]string, []wire.ContentShareSkip, bool) {
 	candidates := append([]string(nil), req.Members...)
 	if room := strings.TrimSpace(req.RoomID); room != "" {
-		if !s.humanRoomMember(claims.Subject, room) {
+		if m, ok := s.roomMember(claims.Subject, room); !ok || !m.IsHuman() {
 			http.Error(w, "you can share only with a room you are a member of", http.StatusForbidden)
 			return nil, nil, false
 		}
-		if s.roomTenantOr(room, claims.Tenant) != claims.Tenant {
+		if !s.roomInTenant(claims, room) {
 			http.Error(w, "that room belongs to another organization", http.StatusForbidden)
 			return nil, nil, false
 		}
@@ -253,10 +254,11 @@ func (s *Service) shareRecipients(w http.ResponseWriter, r *http.Request, claims
 
 // handleListContentShares lists the copies of the caller's component.
 func (s *Service) handleListContentShares(w http.ResponseWriter, r *http.Request) {
-	claims, ok := s.contentCaller(w, r, false)
+	actor, ok := s.contentCaller(w, r, false, grantRefused)
 	if !ok {
 		return
 	}
+	claims := actor.Claims
 	ctx := r.Context()
 	src, err := s.ownContent(ctx, claims, r.PathValue("id"))
 	if err != nil {
@@ -291,10 +293,11 @@ func (s *Service) handleListContentShares(w http.ResponseWriter, r *http.Request
 // handleRevokeRoomShare ends the author's room share: members who join the
 // room later get no copy; the copies already given stay theirs.
 func (s *Service) handleRevokeRoomShare(w http.ResponseWriter, r *http.Request) {
-	claims, ok := s.contentCaller(w, r, true)
+	actor, ok := s.contentCaller(w, r, true, grantRefused)
 	if !ok {
 		return
 	}
+	claims := actor.Claims
 	ctx := r.Context()
 	src, err := s.ownContent(ctx, claims, r.PathValue("id"))
 	if err != nil {
@@ -337,10 +340,11 @@ func (s *Service) sourceOfCopy(ctx context.Context, cp store.ContentComponent) (
 // latest version (an explicit step: the author's edits never reach a copy
 // by themselves).
 func (s *Service) handleUpdateContentCopy(w http.ResponseWriter, r *http.Request) {
-	claims, ok := s.contentCaller(w, r, true)
+	actor, ok := s.contentCaller(w, r, true, grantRefused)
 	if !ok {
 		return
 	}
+	claims := actor.Claims
 	ctx := r.Context()
 	cp, err := s.heldContent(ctx, claims, r.PathValue("id"))
 	if err != nil {
@@ -401,11 +405,7 @@ const errPlatformPublish = "publishing to every organization is a platform admin
 // platform is a super admin's action. The room tools' publish_component
 // calls it with a job grant, acting as the job's requester.
 func (s *Service) handlePublishContent(w http.ResponseWriter, r *http.Request) {
-	caller, ok := s.contentCaller(w, r, true)
-	if !ok {
-		return
-	}
-	actor, ok := s.contentActing(w, r, caller)
+	actor, ok := s.contentCaller(w, r, true, grantHonored)
 	if !ok {
 		return
 	}

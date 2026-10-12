@@ -3,7 +3,6 @@ package gateway
 import (
 	"encoding/json"
 	"net/http"
-	"strings"
 
 	"github.com/luckylhb90/bnbloc/internal/contentpkg"
 	"github.com/luckylhb90/bnbloc/internal/ids"
@@ -26,16 +25,12 @@ import (
 
 // handleStageContentDraft serves POST /v1/content-drafts?job=&room=.
 func (s *Service) handleStageContentDraft(w http.ResponseWriter, r *http.Request) {
-	caller, ok := s.contentCaller(w, r, true)
+	actor, ok := s.contentCaller(w, r, true, grantHonored)
 	if !ok {
 		return
 	}
-	if strings.TrimSpace(r.URL.Query().Get("job")) == "" {
+	if actor.Job == nil {
 		http.Error(w, "a draft is staged by the bridge running a job (?job=&room=)", http.StatusBadRequest)
-		return
-	}
-	actor, ok := s.contentActing(w, r, caller)
-	if !ok {
 		return
 	}
 	opts, ok := s.saveContentOptions(w, r, actor.Claims)

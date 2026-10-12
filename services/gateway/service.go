@@ -412,7 +412,7 @@ func (s *Service) withCORS(next http.Handler) http.Handler {
 			// X-Bnbloc-Acting-Tenant is the super-admin global tenant switch the
 			// client may send on any request; it must be allowed here or the
 			// browser/webview preflight blocks every request that carries it.
-			h.Set("Access-Control-Allow-Headers", "Authorization, Content-Type, X-Bnbloc-Acting-Tenant")
+			h.Set("Access-Control-Allow-Headers", "Authorization, Content-Type, "+actingTenantHeader)
 			h.Set("Access-Control-Max-Age", "600")
 		}
 		if r.Method == http.MethodOptions {
@@ -746,11 +746,6 @@ func (s *Service) trustedProxy(ip string) bool {
 	}
 	return false
 }
-
-// actingTenantHeader is the client-supplied global tenant switch for platform
-// super-admins. It is advisory (honored only for super_admins) and is always
-// stripped before proxying so a backend only ever sees the signed tenant.
-const actingTenantHeader = "X-Bnbloc-Acting-Tenant"
 
 // proxyAs reverse-proxies to the owning backend, injecting the authoritative
 // X-Bnbloc-User and X-Bnbloc-Tenant. Scope enforcement happens in the caller.
