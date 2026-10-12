@@ -32,6 +32,7 @@ func componentFromExtRecord(rec extpipe.Record) (installedComponent, error) {
 		RequiresDesktop: componentRequiresDesktop(cfg.Runtime, rec.Kind),
 		Manifest:        cfg.Manifest,
 		Previewer:       cfg.Previewer,
+		MCP:             cfg.MCP,
 		Rollout:         extpipe.NormalizeRollout(rec.Rollout),
 		Trust:           componentTrust{KeyID: rec.KeyID, ContentHash: rec.ContentHash, Signed: rec.KeyID != ""},
 	}, nil

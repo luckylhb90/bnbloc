@@ -54,10 +54,10 @@ type ContentComponent struct {
 
 // ContentRequires mirrors a manifest's requires.
 type ContentRequires struct {
-	Skills      []string `json:"skills,omitempty"`
-	Prompts     []string `json:"prompts,omitempty"`
-	MCP         []string `json:"mcp,omitempty"`
-	Permissions []string `json:"permissions,omitempty"`
+	Skills      []string                `json:"skills,omitempty"`
+	Prompts     []string                `json:"prompts,omitempty"`
+	MCP         []ContentMCPRequirement `json:"mcp,omitempty"`
+	Permissions []string                `json:"permissions,omitempty"`
 }
 
 // ContentSkill is one skill of a package.

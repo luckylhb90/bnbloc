@@ -107,7 +107,7 @@ func TestContentSaveChecksMCPReferences(t *testing.T) {
 	var d wire.ContentComponentDetail
 	_, raw := g.do("maya", http.MethodGet, "/v1/content-components?kind=expert", "", nil)
 	_ = json.Unmarshal(raw, &d)
-	if !strings.Contains(string(raw), `"mcp":["search"]`) {
+	if !strings.Contains(string(raw), `"mcp":[{"name":"search"}]`) {
 		t.Fatalf("the card lists its MCP tools: %s", raw)
 	}
 }
@@ -196,13 +196,23 @@ func TestOrgMCPConnectors(t *testing.T) {
 	if _, raw := g.do("maya", http.MethodGet, "/v1/components?kind=mcp", "", nil); !strings.Contains(string(raw), `"orgConfigured":true`) {
 		t.Fatalf("catalog = %s", raw)
 	}
-	// Uninstalling the component deletes every organization's connector.
+	// A super admin administers another organization's connector with
+	// ?tenantId=, like every tenant route.
 	g.tokens["root"] = superAdminToken(t, g)
+	if code, raw := g.json("root", http.MethodPut, "/v1/tenant/mcp-connectors/search?tenantId=other", map[string]any{"values": map[string]string{"TOOLS_TOKEN": "other-token"}}); code != http.StatusNoContent {
+		t.Fatalf("super admin put = %d %s", code, raw)
+	}
+	if c, ok, _ := g.svc.mcpConnectors().Get(context.Background(), "other", "search"); !ok || c.Values["TOOLS_TOKEN"] != "other-token" {
+		t.Fatalf("other tenant connector = %+v %v", c, ok)
+	}
+	// Uninstalling the component deletes every organization's connector.
 	if code, raw := g.do("root", http.MethodDelete, "/v1/platform/components/search?kind=mcp", "", nil); code != http.StatusNoContent {
 		t.Fatalf("uninstall = %d %s", code, raw)
 	}
-	if _, ok, _ := g.svc.mcpConnectors().Get(context.Background(), "home", "search"); ok {
-		t.Fatal("connector survived its component")
+	for _, tid := range []string{"home", "other"} {
+		if _, ok, _ := g.svc.mcpConnectors().Get(context.Background(), tid, "search"); ok {
+			t.Fatalf("%s connector survived its component", tid)
+		}
 	}
 }
 

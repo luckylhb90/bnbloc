@@ -34,6 +34,7 @@ type installedComponent struct {
 	RequiresDesktop bool                        `json:"requiresDesktop,omitempty"`
 	Manifest        *manifestcore.Manifest      `json:"manifest,omitempty"`
 	Previewer       *pkgmeta.Previewer          `json:"previewer,omitempty"`
+	MCP             *pkgmeta.MCP                `json:"mcp,omitempty"`
 	Rollout         string                      `json:"rollout"`
 	Trust           componentTrust              `json:"trust"`
 	Adoption        componentAdoption           `json:"adoption"`

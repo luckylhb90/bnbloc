@@ -154,7 +154,9 @@ func (s *Service) mcpCatalog(ctx context.Context, claims auth.Claims, rec extpip
 // --- organization connectors (org admins) ---
 
 // orgAdmin authenticates an organization connector request: manage_org in
-// the caller's tenant.
+// the caller's tenant. A super admin may act in another tenant exactly as on
+// the proxied tenant routes (the acting-tenant header, or ?tenantId= which
+// wins); everyone else is bound to their own.
 func (s *Service) orgAdmin(w http.ResponseWriter, r *http.Request) (auth.Claims, bool) {
 	claims, err := s.authenticate(r)
 	if err != nil {
@@ -164,6 +166,14 @@ func (s *Service) orgAdmin(w http.ResponseWriter, r *http.Request) (auth.Claims,
 	if !rbac.Can(claims.Role, rbac.PermManageOrg) {
 		http.Error(w, "insufficient org role", http.StatusForbidden)
 		return auth.Claims{}, false
+	}
+	if rbac.Can(claims.Role, rbac.PermManagePlatform) {
+		if h := strings.TrimSpace(r.Header.Get(actingTenantHeader)); h != "" {
+			claims.Tenant = h
+		}
+		if t := strings.TrimSpace(r.URL.Query().Get("tenantId")); t != "" {
+			claims.Tenant = t
+		}
 	}
 	return claims, true
 }
