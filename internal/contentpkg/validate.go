@@ -109,6 +109,19 @@ func ValidateBundle(b *tarbundle.Bundle, opts Options) (*Package, error) {
 	return p, nil
 }
 
+// ScriptFiles lists the bundle's files that execute (a scripts/ or bin/
+// directory, or a script extension), sorted: what an approver reviews.
+func (p *Package) ScriptFiles() []string {
+	out := []string{}
+	for _, f := range p.Bundle.Paths() {
+		if isScript(f) {
+			out = append(out, f)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
 func (m Manifest) declares(perm string) bool {
 	for _, p := range m.Requires.Permissions {
 		if p == perm {

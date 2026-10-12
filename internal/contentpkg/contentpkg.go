@@ -18,6 +18,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/luckylhb90/bnbloc/core/pkgmeta"
 	"github.com/luckylhb90/bnbloc/internal/tarbundle"
 )
 
@@ -169,6 +170,9 @@ func register(k KindSpec) {
 		panic("contentpkg: duplicate kind " + k.Kind)
 	}
 	kinds[k.Kind] = k
+	// A content kind is also a pkgmeta package kind: its signed platform
+	// package (platform.go) installs through the component pipeline.
+	pkgmeta.RegisterKindValidator(k.Kind, validatePlatformPackage)
 }
 
 // Lookup returns the registered kind by manifest kind or short name.
