@@ -24,8 +24,7 @@ func validateSandboxPackage(pkg Package) error {
 	if pkg.Contract != SandboxContractV1 {
 		return fmt.Errorf("unknown sandbox contract %q", pkg.Contract)
 	}
-	local := sandboxprotocol.ProtocolRange{Min: sandboxprotocol.SupportedMinVersion, Max: sandboxprotocol.SupportedMaxVersion}
-	if err := compatibleProtocolRange("sandbox protocol", local, pkg.Protocol); err != nil {
+	if err := sandboxprotocol.Compatible(pkg.Protocol); err != nil {
 		return err
 	}
 	hasExec := false

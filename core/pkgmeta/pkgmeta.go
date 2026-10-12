@@ -257,14 +257,13 @@ func validatePackageShell(pkg Package) error {
 	return validateArtifactMap(pkg.Artifacts)
 }
 
-// validateCapabilities rejects any capability not in the Core Protocol set. It
-// is the one capability gate for every package kind (core and plugin), applied
-// by the shared shell so a kind validator never re-checks it.
+// validateCoreCapabilities rejects any capability the Core Protocol does not
+// define. protocol.KnownCapability is the one list, so a package built from
+// a daemon's discovery document declares exactly what the runtime
+// negotiates.
 func validateCoreCapabilities(caps []string) error {
 	for _, cap := range caps {
-		switch cap {
-		case protocol.CapabilityInterrupt, protocol.CapabilityWriteFile, protocol.CapabilityDeleteWorkspace, protocol.CapabilityDiscover:
-		default:
+		if !protocol.KnownCapability(cap) {
 			return fmt.Errorf("unknown capability %q", cap)
 		}
 	}
@@ -276,7 +275,9 @@ func validateCorePackage(pkg Package) error {
 	if err := validateCoreCapabilities(pkg.Capabilities); err != nil {
 		return err
 	}
-	if err := compatibleProtocolRange("core protocol", protocol.ProtocolRange{Min: protocol.SupportedMinVersion, Max: protocol.SupportedMaxVersion}, pkg.Protocol); err != nil {
+	// The runtime's own negotiation rule (protocol.CompatibleRange): an
+	// installable package is one the runtime will talk to.
+	if err := protocol.Compatible(pkg.Protocol); err != nil {
 		return err
 	}
 	switch pkg.Runtime {
@@ -331,40 +332,6 @@ func validateCorePackage(pkg Package) error {
 }
 
 func init() { RegisterKindValidator(KindCorePackageV1, validateCorePackage) }
-
-// compatibleProtocolRange checks that a package's declared protocol range
-// overlaps the local [min,max] of the protocol its kind speaks (Core Protocol
-// for cores, Sandbox Protocol for sandboxes). label names that protocol in
-// the mismatch error.
-func compatibleProtocolRange(label string, local, remote protocol.ProtocolRange) error {
-	localMin, err := protocol.ParseVersion(local.Min)
-	if err != nil {
-		return err
-	}
-	localMax, err := protocol.ParseVersion(local.Max)
-	if err != nil {
-		return err
-	}
-	remoteMin, err := protocol.ParseVersion(remote.Min)
-	if err != nil {
-		return fmt.Errorf("remote min: %w", err)
-	}
-	remoteMax, err := protocol.ParseVersion(remote.Max)
-	if err != nil {
-		return fmt.Errorf("remote max: %w", err)
-	}
-	if compareProtocolVersion(remoteMax, localMin) < 0 || compareProtocolVersion(remoteMin, localMax) > 0 {
-		return &protocol.VersionMismatchError{Protocol: label, LocalMin: local.Min, LocalMax: local.Max, RemoteMin: remote.Min, RemoteMax: remote.Max}
-	}
-	return nil
-}
-
-func compareProtocolVersion(a, b protocol.Version) int {
-	if a.Major != b.Major {
-		return a.Major - b.Major
-	}
-	return a.Minor - b.Minor
-}
 
 // ValidateLoopbackHTTPURL accepts only an absolute http URL on a loopback
 // host: a sidecar listens on the machine of the desktop that supervises it.

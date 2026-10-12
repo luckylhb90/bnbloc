@@ -51,6 +51,24 @@ const (
 	CapabilityDiscover = "discover"
 )
 
+// Capabilities lists every Core Protocol capability name: the one registry
+// package validation and the runtime share (a Capability* constant missing
+// here fails TestCoreCapabilitiesAcceptEveryProtocolCapability).
+var Capabilities = []string{
+	CapabilityInterrupt, CapabilityWriteFile, CapabilityDeleteWorkspace, CapabilitySandboxExec,
+	CapabilitySessionFiles, CapabilitySessionFileBytes, CapabilityAgentProfile, CapabilityDiscover,
+}
+
+// KnownCapability reports whether name is a Core Protocol capability.
+func KnownCapability(name string) bool {
+	for _, c := range Capabilities {
+		if c == name {
+			return true
+		}
+	}
+	return false
+}
+
 type ErrorCode string
 
 const (
