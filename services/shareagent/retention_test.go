@@ -12,7 +12,7 @@ import (
 
 func retentionService(t *testing.T) (*Service, *store.MemoryExtensionAudit) {
 	t.Helper()
-	svc, _ := newService(t, "")
+	svc, _ := newService(t)
 	tenants := store.NewMemoryTenant()
 	for _, id := range []string{"acme", "globex"} {
 		_ = tenants.PutTenant(tctx(id), store.Tenant{TenantID: id, Name: id, Status: store.TenantActive})

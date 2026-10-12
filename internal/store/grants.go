@@ -11,8 +11,7 @@ import (
 
 // Shared-agent domain errors.
 var (
-	ErrGrantNotFound   = errors.New("store: grant not found")
-	ErrConcurrencyFull = errors.New("store: concurrency lease unavailable")
+	ErrGrantNotFound = errors.New("store: grant not found")
 	// ErrRunQuotaExhausted: consuming a run would exceed the grant's RunQuota.
 	ErrRunQuotaExhausted = errors.New("store: grant run quota exhausted")
 	// ErrCostAllowanceExhausted: the run's cost would exceed the grant's
@@ -66,6 +65,14 @@ type Grant struct {
 	Source string
 }
 
+// Live reports whether the grant is in force at atMs: not revoked and not
+// expired. It is the one liveness rule for a grant (TestGrantLivenessOwned):
+// every reader — the reservation, a quota raise, the room listings, the
+// policy-aware liveAuthorization — asks it, never the fields.
+func (g Grant) Live(atMs int64) bool {
+	return g.RevokedAtMs == nil && (g.ExpiresAtMs == nil || atMs < *g.ExpiresAtMs)
+}
+
 // GrantSourcePlatform marks a platform-agent room grant: unlimited, no
 // expiry, valid only while the platform policy still publishes the agent
 // (checked at reserve time), and outside the tenant's borrow ceilings.
@@ -101,24 +108,12 @@ type AuditRecord struct {
 	SettledAtMs   *int64
 }
 
-// GrantStore persists shared-agent grants, concurrency leases, and audit
-// records. Implementations must be safe for concurrent use.
+// GrantStore persists shared-agent grants and audit records.
+// Implementations must be safe for concurrent use.
 type GrantStore interface {
 	PutGrant(ctx context.Context, g Grant) error
 	GetGrant(ctx context.Context, grantID string) (Grant, error)
 	RevokeGrant(ctx context.Context, grantID string, atMs int64) error
-	// AcquireLease atomically checks live concurrency against MaxConcurrent and
-	// records a lease. Returns ErrConcurrencyFull when the ceiling is reached.
-	AcquireLease(ctx context.Context, grantID, leaseID string, atMs int64) error
-	ReleaseLease(ctx context.Context, leaseID string, atMs int64) error
-	ActiveLeases(ctx context.Context, grantID string) int
-	// ConsumeRun atomically enforces the grant's RunQuota and CostAllowance and,
-	// only when both still admit the run, increments the run counter and cost.
-	// It returns ErrRunQuotaExhausted / ErrCostAllowanceExhausted (nothing
-	// consumed) when a ceiling would be exceeded, ErrGrantNotFound for an absent
-	// grant, and the updated grant on success. The check and the increment are
-	// one atomic step, so concurrent consumers can never overrun a ceiling.
-	ConsumeRun(ctx context.Context, grantID string, cost float64) (Grant, error)
 	// TenantUsage sums runs_used and cost_used across the ctx tenant's
 	// owner-issued grants (platform grants are outside the org's borrow
 	// ceilings), for org-level usage accounting and ceiling enforcement.
@@ -142,33 +137,20 @@ type GrantStore interface {
 	RunReservationStore
 }
 
-// leaseTTLms bounds how long a lease counts as active. A lease older than this
-// is treated as released when enforcing MaxConcurrent, so a crashed borrower
-// that never released cannot permanently consume a concurrency slot.
-const leaseTTLms int64 = 5 * 60 * 1000
-
-// memLease is an in-memory active lease with its acquisition time for TTL.
-type memLease struct {
-	tenant       string
-	grantID      string
-	acquiredAtMs int64
-}
-
-// grantKey namespaces the in-memory grant/lease maps by tenant so two tenants
-// that reuse the same grant or lease id can never collide or cross-read.
+// grantKey namespaces the in-memory grant map by tenant so two tenants that
+// reuse the same grant id can never collide or cross-read.
 func grantKey(tenant, id string) string { return tenant + "\x00" + id }
 
 // MemoryGrant is an in-memory GrantStore for M2 and tests.
 type MemoryGrant struct {
 	mu     sync.Mutex
 	grants map[string]Grant
-	leases map[string]memLease // leaseID -> lease (active only)
 	audit  []AuditRecord
 }
 
 // NewMemoryGrant constructs an empty in-memory grant store.
 func NewMemoryGrant() *MemoryGrant {
-	return &MemoryGrant{grants: map[string]Grant{}, leases: map[string]memLease{}}
+	return &MemoryGrant{grants: map[string]Grant{}}
 }
 
 // PutGrant stores or replaces a grant.
@@ -214,105 +196,6 @@ func (s *MemoryGrant) RevokeGrant(ctx context.Context, grantID string, atMs int6
 	}
 	g.RevokedAtMs = &atMs
 	s.grants[key] = g
-	return nil
-}
-
-// AcquireLease atomically enforces the concurrency ceiling. Leases older than
-// leaseTTLms are treated as released when counting active leases.
-func (s *MemoryGrant) AcquireLease(ctx context.Context, grantID, leaseID string, atMs int64) error {
-	tnt, err := tenant.Require(ctx)
-	if err != nil {
-		return err
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	g, ok := s.grants[grantKey(tnt, grantID)]
-	if !ok {
-		return ErrGrantNotFound
-	}
-	if s.activeLeasesLocked(tnt, grantID, atMs) >= g.MaxConcurrent {
-		return ErrConcurrencyFull
-	}
-	s.leases[grantKey(tnt, leaseID)] = memLease{tenant: tnt, grantID: grantID, acquiredAtMs: atMs}
-	return nil
-}
-
-// ReleaseLease drops an active lease.
-func (s *MemoryGrant) ReleaseLease(ctx context.Context, leaseID string, atMs int64) error {
-	tnt, err := tenant.Require(ctx)
-	if err != nil {
-		return err
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	delete(s.leases, grantKey(tnt, leaseID))
-	return nil
-}
-
-// activeLeasesLocked counts non-expired active leases for a grant relative to
-// nowMs. Caller holds s.mu.
-func (s *MemoryGrant) activeLeasesLocked(tnt, grantID string, nowMs int64) int {
-	active := 0
-	for _, l := range s.leases {
-		if l.tenant == tnt && l.grantID == grantID && l.acquiredAtMs > nowMs-leaseTTLms {
-			active++
-		}
-	}
-	return active
-}
-
-// ActiveLeases counts held (non-released) leases for a grant. Like the MySQL
-// impl it does not apply the TTL window; the TTL only governs admission in
-// AcquireLease, whose caller supplies the authoritative clock. Applying a
-// wall-clock TTL here would diverge from the injected acquisition clock.
-func (s *MemoryGrant) ActiveLeases(ctx context.Context, grantID string) int {
-	tnt, err := tenant.Require(ctx)
-	if err != nil {
-		return 0
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	active := 0
-	for _, l := range s.leases {
-		if l.tenant == tnt && l.grantID == grantID {
-			active++
-		}
-	}
-	return active
-}
-
-// ConsumeRun increments the run and cost counters.
-func (s *MemoryGrant) ConsumeRun(ctx context.Context, grantID string, cost float64) (Grant, error) {
-	tnt, err := tenant.Require(ctx)
-	if err != nil {
-		return Grant{}, err
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	key := grantKey(tnt, grantID)
-	g, ok := s.grants[key]
-	if !ok {
-		return Grant{}, ErrGrantNotFound
-	}
-	if err := g.admitRun(cost); err != nil {
-		return Grant{}, err
-	}
-	g.RunsUsed++
-	g.CostUsed += cost
-	s.grants[key] = g
-	return g, nil
-}
-
-// admitRun reports whether one more run of the given cost fits the grant's
-// ceilings (nil ceiling = unlimited). Shared by the memory store and the MySQL
-// store's post-miss classification so both report the same error.
-func (g Grant) admitRun(cost float64) error {
-	if g.RunQuota != nil && g.RunsUsed >= *g.RunQuota {
-		return ErrRunQuotaExhausted
-	}
-	if g.CostAllowance != nil && g.CostUsed+cost > *g.CostAllowance {
-		return ErrCostAllowanceExhausted
-	}
 	return nil
 }
 

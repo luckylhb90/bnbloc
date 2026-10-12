@@ -243,7 +243,7 @@ func (s *Service) handleApproveQuotaRequest(w http.ResponseWriter, r *http.Reque
 		s.writeDecideErr(w, err)
 		return
 	}
-	grant, err := s.Grants.RaiseRunQuota(r.Context(), roomAuthGrantID(r.Context(), req.RoomID, owner, req.Provider), *runs)
+	grant, err := s.Grants.RaiseRunQuota(r.Context(), roomAuthGrantID(r.Context(), req.RoomID, owner, req.Provider), *runs, s.Now())
 	if err != nil {
 		// The authorization was revoked (or made unlimited) between the check
 		// and the raise: return the request to pending rather than leave it
@@ -293,21 +293,27 @@ func (s *Service) writeDecideErr(w http.ResponseWriter, err error) {
 }
 
 // liveAuthorization returns the owner's room authorization grant for the
-// provider when it is live (present, not revoked, not expired; a platform
-// grant also still published by its host). It is the one
-// liveness rule: roomAuthorized and the quota request paths all read it.
+// provider when it is usable (usableGrant). roomAuthorized and the quota
+// request paths all read it.
 func (s *Service) liveAuthorization(ctx context.Context, roomID, owner, provider string) (store.Grant, bool) {
 	id, _, _ := s.borrowGrant(ctx, roomID, owner, provider)
 	g, err := s.Grants.GetGrant(ctx, id)
-	if err != nil || g.RevokedAtMs != nil || (g.ExpiresAtMs != nil && s.Now() >= *g.ExpiresAtMs) {
+	if err != nil || !s.usableGrant(ctx, g) {
 		return store.Grant{}, false
 	}
-	// A platform grant lives only while its host still publishes the agent
-	// (unpublishing takes effect at read time).
-	if g.Source == store.GrantSourcePlatform {
-		if _, published := s.platformGrantSpec(ctx, g); !published {
-			return store.Grant{}, false
-		}
-	}
 	return g, true
+}
+
+// usableGrant is the one policy-aware liveness rule of a grant: live now
+// (store.Grant.Live), and a platform grant only while its host still
+// publishes the agent (unpublishing takes effect at read time).
+func (s *Service) usableGrant(ctx context.Context, g store.Grant) bool {
+	if !g.Live(s.Now()) {
+		return false
+	}
+	if g.Source == store.GrantSourcePlatform {
+		_, published := s.platformGrantSpec(ctx, g)
+		return published
+	}
+	return true
 }

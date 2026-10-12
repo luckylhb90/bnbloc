@@ -13,7 +13,7 @@ import (
 // A caller who is not a member of the room is refused (SEC3): membership is
 // verified before any shared-agent action, failing closed with 403.
 func TestNonMemberIsForbidden(t *testing.T) {
-	svc, _ := newService(t, "")
+	svc, _ := newService(t)
 	srv := httptest.NewServer(svc.Handler())
 	defer srv.Close()
 
@@ -32,7 +32,7 @@ func TestNonMemberIsForbidden(t *testing.T) {
 // shared-agent authorizations, projecting the discovery shape without leaking a
 // credential or an owner endpoint.
 func TestListSharedAgentsReturnsActiveOnly(t *testing.T) {
-	svc, gs := newService(t, "")
+	svc, gs := newService(t)
 	quota := 5
 	// Active room authorization for alice/codex with a quota.
 	_ = gs.PutGrant(dctx(), store.Grant{
@@ -86,7 +86,7 @@ func TestListSharedAgentsReturnsActiveOnly(t *testing.T) {
 
 // Listing requires room membership: a stranger is refused.
 func TestListSharedAgentsNonMemberForbidden(t *testing.T) {
-	svc, _ := newService(t, "")
+	svc, _ := newService(t)
 	srv := httptest.NewServer(svc.Handler())
 	defer srv.Close()
 	req, _ := http.NewRequest(http.MethodGet, srv.URL+"/v1/rooms/room-1/shared-agents", nil)

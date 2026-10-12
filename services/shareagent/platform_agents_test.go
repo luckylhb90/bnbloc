@@ -48,7 +48,7 @@ type platformEnv struct {
 
 func newPlatformEnv(t *testing.T) *platformEnv {
 	t.Helper()
-	svc, grants := newService(t, "")
+	svc, grants := newService(t)
 	members := membership.NewStatic()
 	members.AddRole("room-1", "alice", store.RoleOwner)
 	members.Add("room-1", "bob")
@@ -461,7 +461,7 @@ func TestPlatformAgentReserve(t *testing.T) {
 // An owner-issued grant still answers sandboxRequired false (the tenant
 // policy, not the authority, decides its sandbox).
 func TestOwnerGrantReserveNotSandboxRequired(t *testing.T) {
-	svc, gs := newService(t, "")
+	svc, gs := newService(t)
 	future := int64(1_000_000_000_000)
 	_ = gs.PutGrant(dctx(), store.Grant{
 		GrantID: roomAuthGrantID(dctx(), "room-1", "alice", "codex"), RoomID: "room-1",
@@ -481,7 +481,7 @@ func TestPlatformAgentReserveAfterRemoval(t *testing.T) {
 	e.call(t, http.MethodPost, "/v1/rooms/room-1/platform-agents", "bob", "", map[string]string{"core": "nimbus", "provider": "codex"})
 	e.call(t, http.MethodDelete, "/v1/rooms/room-1/platform-agents/codex?core=nimbus", "bob", "", nil)
 	code, out := borrowCall(t, e.svc, tenant.Default, "root", "root", "nimbus:codex", "reserve", reserveBorrowBody{Borrower: "bob"})
-	if code != http.StatusForbidden || out["denyReason"] != DenyOwnerNotAuthorized {
+	if code != http.StatusForbidden || out["denyReason"] != shareagent.DenyOwnerNotAuthorized {
 		t.Fatalf("reserve after removal = %d %v", code, out)
 	}
 }
@@ -666,5 +666,29 @@ func TestPlatformAgentsUsage(t *testing.T) {
 	}
 	if code, _ := e.call(t, http.MethodGet, "/v1/platform/platform-agents/usage?tzOffsetMin=9999", "root", "", nil); code != http.StatusBadRequest {
 		t.Fatalf("bad tzOffsetMin = %d, want 400", code)
+	}
+}
+
+// The owner's accountability view lists only usable grants: a platform
+// grant whose agent is no longer published is gone from it at read time,
+// like every other reader of liveAuthorization / usableGrant.
+func TestAccountabilityDropsUnpublishedPlatformGrant(t *testing.T) {
+	e := newPlatformEnv(t)
+	e.call(t, http.MethodPost, "/v1/rooms/room-1/platform-agents", "bob", "", map[string]string{"core": "nimbus", "provider": "codex"})
+	usage := func() []any {
+		t.Helper()
+		code, out := e.call(t, http.MethodGet, "/v1/rooms/room-1/shared-agents-usage", "root", "", nil)
+		if code != http.StatusOK {
+			t.Fatalf("usage = %d %v", code, out)
+		}
+		list, _ := out["authorizations"].([]any)
+		return list
+	}
+	if n := len(usage()); n != 1 {
+		t.Fatalf("published platform grant: %d authorizations, want 1", n)
+	}
+	e.call(t, http.MethodPut, "/v1/platform/platform-agents", "root", "", map[string]any{"enabled": true, "agents": []map[string]string{{"core": "nimbus", "provider": "claude"}}})
+	if n := len(usage()); n != 0 {
+		t.Fatalf("unpublished platform grant: %d authorizations, want 0", n)
 	}
 }

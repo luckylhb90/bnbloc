@@ -146,23 +146,23 @@ func borrowUsageCases(t *testing.T, g GrantStore, tnt, room string) {
 	}
 
 	// Raising keeps usage; unlimited and revoked grants refuse.
-	if _, err := g.ConsumeRun(ctx, gid, 0); err != nil {
-		t.Fatalf("ConsumeRun: %v", err)
+	if _, err := g.ReserveRun(ctx, RunReservation{ReservationID: "rsv-" + gid, GrantID: gid, RoomID: room, OwnerUserID: "alice", BorrowerUserID: "bob", AtMs: 5}); err != nil {
+		t.Fatalf("ReserveRun: %v", err)
 	}
-	raised, err := g.RaiseRunQuota(ctx, gid, 3)
+	raised, err := g.RaiseRunQuota(ctx, gid, 3, 5)
 	if err != nil || raised.RunQuota == nil || *raised.RunQuota != 5 || raised.RunsUsed != 1 {
 		t.Fatalf("raise = %+v, %v; want quota 5 runsUsed 1", raised, err)
 	}
-	if _, err := g.RaiseRunQuota(ctx, "missing-"+gid, 1); !errors.Is(err, ErrGrantNotFound) {
+	if _, err := g.RaiseRunQuota(ctx, "missing-"+gid, 1, 5); !errors.Is(err, ErrGrantNotFound) {
 		t.Fatalf("raise missing err = %v", err)
 	}
 	unlimited := "u-" + room
 	_ = g.PutGrant(ctx, Grant{GrantID: unlimited, RoomID: room, TargetID: "shared-agent:claude", OwnerUserID: "alice", GranteeUserID: "*", MaxConcurrent: 1, CreatedAtMs: 1})
-	if _, err := g.RaiseRunQuota(ctx, unlimited, 1); !errors.Is(err, ErrRunQuotaUnlimited) {
+	if _, err := g.RaiseRunQuota(ctx, unlimited, 1, 5); !errors.Is(err, ErrRunQuotaUnlimited) {
 		t.Fatalf("raise unlimited err = %v", err)
 	}
 	_ = g.RevokeGrant(ctx, gid, 10)
-	if _, err := g.RaiseRunQuota(ctx, gid, 1); !errors.Is(err, ErrGrantNotFound) {
+	if _, err := g.RaiseRunQuota(ctx, gid, 1, 5); !errors.Is(err, ErrGrantNotFound) {
 		t.Fatalf("raise revoked err = %v", err)
 	}
 }

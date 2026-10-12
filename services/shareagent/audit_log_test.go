@@ -19,7 +19,7 @@ import (
 // audit rows in both, one platform (tenantless) row, and borrow decisions.
 func auditFixture(t *testing.T) (*Service, http.Handler) {
 	t.Helper()
-	svc, grants := newService(t, "")
+	svc, grants := newService(t)
 	tenants := store.NewMemoryTenant()
 	for _, m := range []store.TenantMember{
 		{TenantID: tenant.Default, UserID: "root", Role: store.OrgRoleAdmin, JoinedAtMs: 1},

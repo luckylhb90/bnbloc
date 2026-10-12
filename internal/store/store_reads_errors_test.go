@@ -33,7 +33,6 @@ var readsWithoutError = map[string]bool{
 	"ChannelStore.GetChannel":                 true,
 	"ChannelStore.ListChannels":               true,
 	"ChatStore.LookupClientMsg":               true,
-	"GrantStore.ActiveLeases":                 true,
 	"GrantStore.AuditRecords":                 true,
 	"GrantStore.RoomGrants":                   true,
 	"GrantStore.TenantAuditRecords":           true,

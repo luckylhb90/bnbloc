@@ -48,10 +48,6 @@ func (s staticMembers) Fresh(roomID, userID string) (membership.Member, bool) {
 
 func (staticMembers) Forget(string, string) {}
 
-type onlinePresence struct{}
-
-func (onlinePresence) IsOwnerOnline(string, string) bool { return true }
-
 // harness holds the composed control-plane for the test.
 type harness struct {
 	gateway *httptest.Server
@@ -67,20 +63,8 @@ func newHarness(t *testing.T) *harness {
 	// activity + realtime share one hub so a report fans out to subscribers.
 	realtimeService := &realtimesvc.Service{Hub: hub, Membership: members}
 	activity := &activitysvc.Service{Store: store.NewMemory(), Publisher: realtime.HubPublisher{Hub: hub}, Membership: members}
-	grants := store.NewMemoryGrant()
-	seq := 0
-	controller := &shareagent.Controller{
-		Grants: grants, Presence: onlinePresence{}, Audit: grants,
-		NewLeaseID: func() string { seq++; return "lease" }, Now: func() int64 { return 1000 },
-	}
-	// Fake owner daemon holds a secret and returns a result without echoing it.
-	ownerDaemon := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = w.Write([]byte(`{"text":"borrowed turn complete"}`))
-	}))
-	t.Cleanup(ownerDaemon.Close)
 	shareService := &shareagentsvc.Service{
-		Controller: controller, Grants: grants, Presence: onlinePresence{},
-		Owners: fixedOwner{ownerDaemon.URL}, Now: func() int64 { return 1000 },
+		Grants: store.NewMemoryGrant(), Now: func() int64 { return 1000 },
 		Membership: members,
 	}
 
@@ -112,14 +96,6 @@ func newHarness(t *testing.T) *harness {
 	}
 	gwSrv := httptest.NewServer(gw.Handler())
 	t.Cleanup(gwSrv.Close)
-
-	// Grant seed for US-3.
-	_ = grants.PutGrant(tctx(), store.Grant{
-		GrantID: "g1", RoomID: "room-1", TargetID: "shared-agent:codex",
-		OwnerUserID: "alice", GranteeUserID: "bob",
-		AllowedModels: []store.AllowedModel{{Model: "gpt-5"}},
-		Capabilities:  store.Capabilities{Consult: true}, MaxConcurrent: 2,
-	})
 
 	return &harness{gateway: gwSrv, rooms: rooms}
 }
@@ -188,32 +164,47 @@ func TestE2EActivityVisibility(t *testing.T) {
 	}
 }
 
-// US-3: member B borrows member A's shared agent through the gateway; the owner
-// credential never appears in the response.
+// US-3: member A authorizes room-wide borrowing of their agent, member B's
+// composer sees the authorization, and A's bridge reserves B's borrowed run
+// through the gateway (the reserve-then-settle borrow authority).
 func TestE2EAgentBorrowing(t *testing.T) {
 	h := newHarness(t)
 	_ = h.rooms.CreateRoom(tctx(), store.Room{RoomID: "room-1"})
+	_ = h.rooms.AddMember(tctx(), store.Membership{RoomID: "room-1", UserID: "alice", Role: store.RoleOwner})
 	_ = h.rooms.AddMember(tctx(), store.Membership{RoomID: "room-1", UserID: "bob", Role: store.RoleMember})
-	bobToken := h.login(t, "bob")
+	aliceToken, bobToken := h.login(t, "alice"), h.login(t, "bob")
+	const auth = "/v1/rooms/room-1/shared-agents/shared-agent:codex/authorization"
 
-	c := adapter.NewSharedAgentAccessClient(adapter.Config{GatewayBaseURL: h.gateway.URL, SessionToken: bobToken})
-	result, lease, err := c.Turn(tctx(), adapter.TurnRequest{
-		RoomID: "room-1", TargetID: "shared-agent:codex", GrantID: "g1",
-		Model: "gpt-5", TurnCapability: "consult",
-	})
+	if code, out := h.call(t, http.MethodPut, auth, aliceToken, `{"runQuota":1}`); code != http.StatusOK {
+		t.Fatalf("US-3 authorize = %d %s", code, out)
+	}
+	code, out := h.call(t, http.MethodGet, auth+"?owner=alice", bobToken, "")
+	if code != http.StatusOK || !strings.Contains(out, `"authorized":true`) {
+		t.Fatalf("US-3 borrower's authorization read = %d %s", code, out)
+	}
+	code, out = h.call(t, http.MethodPost, auth+"/reserve?owner=alice", aliceToken, `{"borrower":"bob"}`)
+	if code != http.StatusOK || !strings.Contains(out, `"reserved":true`) {
+		t.Fatalf("US-3 reserve = %d %s", code, out)
+	}
+	// The quota of one run is spent: the next borrow is refused.
+	code, out = h.call(t, http.MethodPost, auth+"/reserve?owner=alice", aliceToken, `{"borrower":"bob"}`)
+	if code != http.StatusForbidden || !strings.Contains(out, shareagent.DenyQuotaExhausted) {
+		t.Fatalf("US-3 reserve past quota = %d %s", code, out)
+	}
+}
+
+// call makes one request through the gateway and returns its status and body.
+func (h *harness) call(t *testing.T, method, path, token, body string) (int, string) {
+	t.Helper()
+	req, _ := http.NewRequest(method, h.gateway.URL+path, strings.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+token)
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		t.Fatalf("US-3 borrow turn: %v", err)
+		t.Fatal(err)
 	}
-	if lease == "" {
-		t.Fatal("US-3: expected a concurrency lease")
-	}
-	raw, _ := json.Marshal(result)
-	if strings.Contains(strings.ToLower(string(raw)), "secret") || strings.Contains(strings.ToLower(string(raw)), "credential") {
-		t.Fatalf("US-3: credential leaked in borrowed result: %s", raw)
-	}
-	if !strings.Contains(string(raw), "borrowed turn complete") {
-		t.Fatalf("US-3: expected proxied owner result, got %s", raw)
-	}
+	defer resp.Body.Close()
+	raw, _ := io.ReadAll(resp.Body)
+	return resp.StatusCode, string(raw)
 }
 
 func readSSEEvents(r io.Reader, out chan<- string) {
@@ -240,10 +231,6 @@ func readSSEEvents(r io.Reader, out chan<- string) {
 		}
 	}
 }
-
-type fixedOwner struct{ url string }
-
-func (o fixedOwner) OwnerEndpoint(string, string) (string, bool) { return o.url, true }
 
 type devVerifier struct{}
 

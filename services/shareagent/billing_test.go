@@ -16,7 +16,7 @@ func costOf(v float64) *float64 { return &v }
 // billingService is newService plus a quota request store.
 func billingService(t *testing.T) (*Service, *store.MemoryGrant) {
 	t.Helper()
-	svc, gs := newService(t, "")
+	svc, gs := newService(t)
 	svc.QuotaRequests = store.NewMemoryQuotaRequests()
 	return svc, gs
 }

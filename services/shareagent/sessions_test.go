@@ -15,7 +15,7 @@ import (
 // super-admin family there.
 func sessionsFixture(t *testing.T) (*Service, *store.MemoryRefreshToken) {
 	t.Helper()
-	svc, _ := newService(t, "")
+	svc, _ := newService(t)
 	tenants := store.NewMemoryTenant()
 	for _, m := range []store.TenantMember{
 		{TenantID: tenant.Default, UserID: "root", Role: store.OrgRoleAdmin, JoinedAtMs: 1},

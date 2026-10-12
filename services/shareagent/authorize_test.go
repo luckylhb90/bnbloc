@@ -12,7 +12,7 @@ import (
 // never a request-body field, so a grantee can never authorize itself. This is
 // the security-critical invariant of the pre-authorization model.
 func TestAuthorizeUsesCallerNotBodyAsOwner(t *testing.T) {
-	svc, grants := newService(t, "")
+	svc, grants := newService(t)
 	srv := httptest.NewServer(svc.Handler())
 	defer srv.Close()
 
@@ -41,7 +41,7 @@ func TestAuthorizeUsesCallerNotBodyAsOwner(t *testing.T) {
 
 // A missing authenticated subject fails closed (no anonymous authorization).
 func TestAuthorizeRequiresAuthenticatedCaller(t *testing.T) {
-	svc, _ := newService(t, "")
+	svc, _ := newService(t)
 	srv := httptest.NewServer(svc.Handler())
 	defer srv.Close()
 
@@ -58,7 +58,7 @@ func TestAuthorizeRequiresAuthenticatedCaller(t *testing.T) {
 // The authorization read reports authorized only while a live authorization
 // exists, and reflects a revoke.
 func TestAuthorizationReadReflectsLifecycle(t *testing.T) {
-	svc, _ := newService(t, "")
+	svc, _ := newService(t)
 	srv := httptest.NewServer(svc.Handler())
 	defer srv.Close()
 	base := srv.URL + "/v1/rooms/room-1/shared-agents/shared-agent:codex/authorization"
@@ -85,7 +85,7 @@ func TestAuthorizationReadReflectsLifecycle(t *testing.T) {
 
 // An expired authorization reads as not authorized (TTL lapse is enforced).
 func TestAuthorizationExpires(t *testing.T) {
-	svc, _ := newService(t, "")
+	svc, _ := newService(t)
 	// Freeze "now" past the created authorization's expiry via a moving clock.
 	now := int64(1000)
 	svc.Now = func() int64 { return now }

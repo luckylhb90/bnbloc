@@ -47,7 +47,7 @@ func recordBorrow(t *testing.T, svc *Service, tenantID string, cost float64, cha
 // code enforced only a run ceiling and only from a process-global field, so a
 // cost-only ceiling would never trigger — this fails against that bug.
 func TestRecordBorrowEnforcesTenantCostCeiling(t *testing.T) {
-	svc, gs := newService(t, "")
+	svc, gs := newService(t)
 	tenants := store.NewMemoryTenant()
 	_ = tenants.PutTenant(tctx(tenant.Default), store.Tenant{
 		TenantID: tenant.Default, Name: "Default", Status: store.TenantActive,
@@ -79,7 +79,7 @@ func TestRecordBorrowEnforcesTenantCostCeiling(t *testing.T) {
 // wrongly gate every other tenant. Here tenant "acme" has a run ceiling of 1
 // and is exhausted, while tenant "globex" has no ceiling and must still borrow.
 func TestRecordBorrowQuotaIsPerTenant(t *testing.T) {
-	svc, gs := newService(t, "")
+	svc, gs := newService(t)
 	tenants := store.NewMemoryTenant()
 	for _, id := range []string{"acme", "globex"} {
 		_ = tenants.PutTenant(tctx(id), store.Tenant{TenantID: id, Name: id, Status: store.TenantActive})

@@ -29,7 +29,7 @@ func tenantPolicyReq(t *testing.T, svc *Service, method, path, ctxTenant, caller
 // are readable by members (the owner's bridge, the web) for any tenant they
 // belong to.
 func TestTenantPolicy_settingsAndMemberRead(t *testing.T) {
-	svc, _ := newService(t, "")
+	svc, _ := newService(t)
 	tenants := store.NewMemoryTenant()
 	for _, id := range []string{"acme", "globex"} {
 		_ = tenants.PutTenant(tctx(id), store.Tenant{TenantID: id, Name: id, Status: store.TenantActive})

@@ -21,14 +21,6 @@ import (
 // borrow the authority does not reserve is not driven, and reserved runs count
 // against the quota immediately, so concurrent borrows can never exceed it.
 
-// DenyOwnerNotAuthorized is a reservation refused because the owner holds no
-// live room authorization for the agent (none, revoked, or expired).
-const DenyOwnerNotAuthorized = "owner_not_authorized"
-
-// DenyOrgQuotaExhausted is a reservation refused by the tenant's org-level
-// run/cost ceiling.
-const DenyOrgQuotaExhausted = "org_quota_exhausted"
-
 type reserveBorrowBody struct {
 	// Borrower is the member who borrowed the agent (the chat author). The
 	// owner's bridge reports it explicitly because the driven turn is not
@@ -112,10 +104,6 @@ func (s *Service) handleReserveBorrow(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteJSON(w, http.StatusForbidden, map[string]any{"reserved": false, "denyReason": reason, "sandboxRequired": platform})
 	}
 	switch {
-	case platform && current.ExpiresAtMs != nil:
-		// Platform grants never expire: a malformed one authorizes nothing.
-		deny(DenyOwnerNotAuthorized)
-		return
 	case platform && !published:
 		deny(shareagent.DenyPlatformAgentUnavailable)
 		return
@@ -141,7 +129,7 @@ func (s *Service) handleReserveBorrow(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			if (runQuota > 0 && runs >= runQuota) || (costAllowance > 0 && cost >= costAllowance) {
-				deny(DenyOrgQuotaExhausted)
+				deny(shareagent.DenyOrgQuotaExhausted)
 				return
 			}
 		}
@@ -159,10 +147,10 @@ func (s *Service) handleReserveBorrow(w http.ResponseWriter, r *http.Request) {
 	})
 	switch {
 	case errors.Is(err, store.ErrGrantNotFound):
-		deny(DenyOwnerNotAuthorized)
+		deny(shareagent.DenyOwnerNotAuthorized)
 		return
 	case errors.Is(err, store.ErrRunQuotaExhausted), errors.Is(err, store.ErrCostAllowanceExhausted):
-		deny(shareagent.ConsumeDenyReason(err))
+		deny(shareagent.ReserveDenyReason(err))
 		return
 	case err != nil:
 		obs.ServerError(w, "reserve borrow failed", err)

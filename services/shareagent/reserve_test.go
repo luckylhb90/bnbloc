@@ -9,6 +9,7 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/luckylhb90/bnbloc/internal/shareagent"
 	"github.com/luckylhb90/bnbloc/internal/store"
 	"github.com/luckylhb90/bnbloc/internal/tenant"
 )
@@ -61,7 +62,7 @@ func borrowRun(t *testing.T, svc *Service, tenantID, owner, provider, borrower, 
 // R8: concurrent borrows reserve against the quota atomically; never more
 // runs than the quota are admitted, and every refusal says quota_exhausted.
 func TestReserveBorrowConcurrentNeverExceedsQuota(t *testing.T) {
-	svc, gs := newService(t, "")
+	svc, gs := newService(t)
 	quota := 3
 	future := int64(1_000_000_000_000)
 	if err := gs.PutGrant(dctx(), store.Grant{
@@ -100,7 +101,7 @@ func TestReserveBorrowConcurrentNeverExceedsQuota(t *testing.T) {
 // R8: only the owner reserves; the borrower must be another room member; an
 // absent or revoked authorization is refused (audited, nothing counted).
 func TestReserveBorrowRefusals(t *testing.T) {
-	svc, gs := newService(t, "")
+	svc, gs := newService(t)
 	seedAuthorizedBorrow(t, gs, tenant.Default)
 	if code, _ := borrowCall(t, svc, tenant.Default, "bob", "alice", "codex", "reserve", reserveBorrowBody{Borrower: "jack"}); code != http.StatusForbidden {
 		t.Fatalf("non-owner reserve = %d, want 403", code)
@@ -117,13 +118,13 @@ func TestReserveBorrowRefusals(t *testing.T) {
 			t.Errorf("%s: code = %d, want %d", name, code, tc.want)
 		}
 	}
-	if code, out := reserveRun(t, svc, tenant.Default, "alice", "claude", "bob", ""); code != http.StatusForbidden || out["denyReason"] != DenyOwnerNotAuthorized {
+	if code, out := reserveRun(t, svc, tenant.Default, "alice", "claude", "bob", ""); code != http.StatusForbidden || out["denyReason"] != shareagent.DenyOwnerNotAuthorized {
 		t.Fatalf("unauthorized provider = %d %v, want 403 owner_not_authorized", code, out)
 	}
 	if err := gs.RevokeGrant(dctx(), roomAuthGrantID(dctx(), "room-1", "alice", "codex"), 500); err != nil {
 		t.Fatal(err)
 	}
-	if code, out := reserveRun(t, svc, tenant.Default, "alice", "codex", "bob", ""); code != http.StatusForbidden || out["denyReason"] != DenyOwnerNotAuthorized {
+	if code, out := reserveRun(t, svc, tenant.Default, "alice", "codex", "bob", ""); code != http.StatusForbidden || out["denyReason"] != shareagent.DenyOwnerNotAuthorized {
 		t.Fatalf("revoked authorization = %d %v, want 403 owner_not_authorized", code, out)
 	}
 	if n := runsUsed(t, gs); n != 0 {
@@ -131,7 +132,7 @@ func TestReserveBorrowRefusals(t *testing.T) {
 	}
 	var denies int
 	for _, rec := range gs.AuditRecords(dctx(), "room-1", 50, 0) {
-		if rec.Decision == "deny" && rec.DenyReason == DenyOwnerNotAuthorized {
+		if rec.Decision == "deny" && rec.DenyReason == shareagent.DenyOwnerNotAuthorized {
 			denies++
 		}
 	}
@@ -143,7 +144,7 @@ func TestReserveBorrowRefusals(t *testing.T) {
 // R8: the settle attaches usage to the reserved run; it is owner-only,
 // validates the usage, and applies once.
 func TestRecordSettlesReservation(t *testing.T) {
-	svc, gs := newService(t, "")
+	svc, gs := newService(t)
 	seedAuthorizedBorrow(t, gs, tenant.Default)
 	code, out := reserveRun(t, svc, tenant.Default, "alice", "codex", "bob", "ch_1")
 	if code != http.StatusOK || out["reserved"] != true {
@@ -191,7 +192,7 @@ func TestRecordSettlesReservation(t *testing.T) {
 
 // R8: a reservation that is never settled expires but keeps counting.
 func TestRecordAfterReservationExpiry(t *testing.T) {
-	svc, gs := newService(t, "")
+	svc, gs := newService(t)
 	seedAuthorizedBorrow(t, gs, tenant.Default)
 	_, out := reserveRun(t, svc, tenant.Default, "alice", "codex", "bob", "")
 	svc.Now = func() int64 { return 1000 + store.RunReservationTTLms }

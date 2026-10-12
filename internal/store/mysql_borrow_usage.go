@@ -78,15 +78,16 @@ func (s *MySQLGrant) BorrowTurns(ctx context.Context, q BorrowTurnQuery) []Audit
 // RaiseRunQuota adds runs to a live grant's run quota in one conditional
 // UPDATE that never touches runs_used/cost_used (see BorrowUsageStore). A miss
 // is classified by reading the grant back.
-func (s *MySQLGrant) RaiseRunQuota(ctx context.Context, grantID string, add int) (Grant, error) {
+func (s *MySQLGrant) RaiseRunQuota(ctx context.Context, grantID string, add int, atMs int64) (Grant, error) {
 	tnt, err := tenant.Require(ctx)
 	if err != nil {
 		return Grant{}, err
 	}
 	res, err := s.DB.ExecContext(ctx,
 		`UPDATE shared_agent_grants SET run_quota = run_quota + ?
-		 WHERE grant_id = ? AND tenant_id = ? AND run_quota IS NOT NULL AND revoked_at_ms IS NULL`,
-		add, grantID, tnt)
+		 WHERE grant_id = ? AND tenant_id = ? AND run_quota IS NOT NULL AND revoked_at_ms IS NULL
+		   AND (expires_at_ms IS NULL OR expires_at_ms > ?)`,
+		add, grantID, tnt, atMs)
 	if err != nil {
 		return Grant{}, err
 	}
@@ -95,7 +96,7 @@ func (s *MySQLGrant) RaiseRunQuota(ctx context.Context, grantID string, add int)
 		if err != nil {
 			return Grant{}, err
 		}
-		if g.RevokedAtMs != nil {
+		if !g.Live(atMs) {
 			return Grant{}, ErrGrantNotFound
 		}
 		if g.RunQuota == nil {

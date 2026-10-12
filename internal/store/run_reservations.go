@@ -75,14 +75,17 @@ type RunReservationStore interface {
 	SettleRun(ctx context.Context, grantID, reservationID string, u RunUsage, nowMs int64) error
 }
 
-// admitReservation reports whether a live grant admits one more reserved run
-// (nil ceiling = unlimited). The cost allowance admits while some allowance
-// is left; the run's own cost is unknown until settle.
+// admitReservation is the one admission rule of a borrowed run: the grant is
+// live at atMs (Grant.Live), and each ceiling admits used + cost <= allowance
+// (nil = unlimited) where a reservation costs one run and the cost settled
+// so far — the run's own cost is unknown until settle, so some allowance must
+// be left (cost_used < allowance). The MySQL ReserveRun's conditional UPDATE
+// is this rule in SQL; a miss is classified by it.
 func (g Grant) admitReservation(atMs int64) error {
-	if g.RevokedAtMs != nil || (g.ExpiresAtMs != nil && atMs >= *g.ExpiresAtMs) {
+	if !g.Live(atMs) {
 		return ErrGrantNotFound
 	}
-	if g.RunQuota != nil && g.RunsUsed >= *g.RunQuota {
+	if g.RunQuota != nil && g.RunsUsed+1 > *g.RunQuota {
 		return ErrRunQuotaExhausted
 	}
 	if g.CostAllowance != nil && g.CostUsed >= *g.CostAllowance {

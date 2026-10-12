@@ -54,7 +54,7 @@ func grantID(ctx context.Context, prefix, roomID, owner, provider string) string
 // authorization reads pick between the two.
 func (s *Service) borrowGrant(ctx context.Context, roomID, owner, provider string) (id string, platform store.Grant, isPlatform bool) {
 	pid := platformGrantID(ctx, roomID, owner, provider)
-	if g, err := s.Grants.GetGrant(ctx, pid); err == nil && g.Source == store.GrantSourcePlatform && g.RevokedAtMs == nil {
+	if g, err := s.Grants.GetGrant(ctx, pid); err == nil && g.Source == store.GrantSourcePlatform && g.Live(s.Now()) {
 		return pid, g, true
 	}
 	return roomAuthGrantID(ctx, roomID, owner, provider), store.Grant{}, false

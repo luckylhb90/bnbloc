@@ -1,11 +1,9 @@
 package store
 
 import (
-	"errors"
-	"os"
+	"context"
 	"strconv"
 	"testing"
-	"time"
 )
 
 // TenantUsage sums runs_used and cost_used across every grant of a tenant,
@@ -27,19 +25,23 @@ func TestTenantUsageAggregatesAndIsolates(t *testing.T) {
 	}
 
 	// A: 2 runs @1.50 in r1, 1 run @0.25 in r2 -> 3 runs, 3.25 cost.
-	if _, err := g.ConsumeRun(ca, "A1", 1.50); err != nil {
-		t.Fatalf("consume A1 #1: %v", err)
-	}
-	if _, err := g.ConsumeRun(ca, "A1", 1.50); err != nil {
-		t.Fatalf("consume A1 #2: %v", err)
-	}
-	if _, err := g.ConsumeRun(ca, "A2", 0.25); err != nil {
-		t.Fatalf("consume A2: %v", err)
-	}
-	for range 5 {
-		if _, err := g.ConsumeRun(cb, "B1", 2.00); err != nil {
-			t.Fatalf("consume B1: %v", err)
+	n := 0
+	run := func(ctx context.Context, grantID string, cost float64) {
+		t.Helper()
+		n++
+		rid := "rsv-" + strconv.Itoa(n)
+		if _, err := g.ReserveRun(ctx, RunReservation{ReservationID: rid, GrantID: grantID, RoomID: "r1", OwnerUserID: "o", BorrowerUserID: "b", AtMs: 1}); err != nil {
+			t.Fatalf("reserve %s: %v", grantID, err)
 		}
+		if err := g.SettleRun(ctx, grantID, rid, RunUsage{Cost: &cost}, 2); err != nil {
+			t.Fatalf("settle %s: %v", grantID, err)
+		}
+	}
+	run(ca, "A1", 1.50)
+	run(ca, "A1", 1.50)
+	run(ca, "A2", 0.25)
+	for range 5 {
+		run(cb, "B1", 2.00)
 	}
 
 	runs, cost, _ := g.TenantUsage(ca)
@@ -62,62 +64,4 @@ func TestTenantUsageAggregatesAndIsolates(t *testing.T) {
 	if runs, cost, err := g.TenantUsage(bg()); err == nil || runs != 0 || cost != 0 {
 		t.Fatalf("usage without tenant = (%d,%v), want (0,0) and an error", runs, cost)
 	}
-}
-
-// consumeCeilingCases exercises ConsumeRun's ceiling enforcement against any
-// GrantStore: RunQuota and CostAllowance are enforced atomically by the store
-// (they used to be stored but never checked on consume, so a borrow-record path
-// that did not pre-check ran past both). An exhausted ceiling consumes nothing.
-func consumeCeilingCases(t *testing.T, g GrantStore, prefix string) {
-	t.Helper()
-	ctx := tenantCtx(tenantA)
-	quota := 2
-	allowance := 1.0
-	runID, costID := prefix+"-runq", prefix+"-cost"
-	if err := g.PutGrant(ctx, Grant{GrantID: runID, RoomID: "r1", TargetID: "shared-agent:x", OwnerUserID: "o", GranteeUserID: "*", RunQuota: &quota, MaxConcurrent: 1, CreatedAtMs: 1}); err != nil {
-		t.Fatalf("put run grant: %v", err)
-	}
-	if err := g.PutGrant(ctx, Grant{GrantID: costID, RoomID: "r1", TargetID: "shared-agent:y", OwnerUserID: "o", GranteeUserID: "*", CostAllowance: &allowance, MaxConcurrent: 1, CreatedAtMs: 1}); err != nil {
-		t.Fatalf("put cost grant: %v", err)
-	}
-	for i := 0; i < quota; i++ {
-		if _, err := g.ConsumeRun(ctx, runID, 0); err != nil {
-			t.Fatalf("consume %d within quota: %v", i, err)
-		}
-	}
-	if _, err := g.ConsumeRun(ctx, runID, 0); !errors.Is(err, ErrRunQuotaExhausted) {
-		t.Fatalf("consume past quota err = %v, want ErrRunQuotaExhausted", err)
-	}
-	if got, _ := g.GetGrant(ctx, runID); got.RunsUsed != quota {
-		t.Fatalf("runsUsed = %d, want %d (an exhausted consume must not count)", got.RunsUsed, quota)
-	}
-	if _, err := g.ConsumeRun(ctx, costID, 0.75); err != nil {
-		t.Fatalf("consume within allowance: %v", err)
-	}
-	if _, err := g.ConsumeRun(ctx, costID, 0.5); !errors.Is(err, ErrCostAllowanceExhausted) {
-		t.Fatalf("consume past allowance err = %v, want ErrCostAllowanceExhausted", err)
-	}
-	if got, _ := g.GetGrant(ctx, costID); got.CostUsed != 0.75 || got.RunsUsed != 1 {
-		t.Fatalf("cost grant = runs %d cost %v, want 1 / 0.75", got.RunsUsed, got.CostUsed)
-	}
-	if _, err := g.ConsumeRun(ctx, prefix+"-missing", 0); !errors.Is(err, ErrGrantNotFound) {
-		t.Fatalf("consume missing err = %v, want ErrGrantNotFound", err)
-	}
-}
-
-func TestMemoryConsumeRunEnforcesCeilings(t *testing.T) {
-	consumeCeilingCases(t, NewMemoryGrant(), "mem")
-}
-
-func TestMySQLConsumeRunEnforcesCeilings(t *testing.T) {
-	dsn := os.Getenv("BNBLOC_TEST_MYSQL_DSN")
-	if dsn == "" {
-		t.Skip("set BNBLOC_TEST_MYSQL_DSN to run the MySQL integration test")
-	}
-	db, err := OpenMySQL(dsn)
-	if err != nil {
-		t.Fatalf("open: %v", err)
-	}
-	defer db.Close()
-	consumeCeilingCases(t, NewMySQLGrant(db), "it"+strconv.FormatInt(time.Now().UnixNano(), 36))
 }

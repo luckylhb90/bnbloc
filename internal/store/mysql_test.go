@@ -69,16 +69,13 @@ func TestMySQLBackendsRoundTrip(t *testing.T) {
 		t.Fatalf("stale write advanced version to %d, want 5", cur)
 	}
 
-	// Grant + concurrency lease persist and enforce the ceiling.
+	// A grant persists.
 	g := Grant{GrantID: "g-" + itoaBase(now), RoomID: roomID, TargetID: "shared-agent:codex", OwnerUserID: "alice", GranteeUserID: "bob", MaxConcurrent: 1, CreatedAtMs: now}
 	if err := b.Grant.PutGrant(testCtx(), g); err != nil {
 		t.Fatalf("PutGrant: %v", err)
 	}
-	if err := b.Grant.AcquireLease(testCtx(), g.GrantID, "lease-a-"+itoaBase(now), now); err != nil {
-		t.Fatalf("AcquireLease: %v", err)
-	}
-	if err := b.Grant.AcquireLease(testCtx(), g.GrantID, "lease-b-"+itoaBase(now), now); err == nil {
-		t.Fatal("second lease should hit the concurrency ceiling")
+	if got, err := b.Grant.GetGrant(testCtx(), g.GrantID); err != nil || got.OwnerUserID != "alice" {
+		t.Fatalf("GetGrant = %+v, %v", got, err)
 	}
 
 	// Platform settings persist independent of tenant scope.

@@ -39,11 +39,12 @@ type BorrowUsageStore interface {
 	// q.AllTenants) recorded borrow turns matching q, oldest-first, at most
 	// MaxBorrowTurnRows.
 	BorrowTurns(ctx context.Context, q BorrowTurnQuery) []AuditRecord
-	// RaiseRunQuota atomically adds `add` runs to a live (not revoked) grant's
-	// RunQuota without touching its usage counters, so an approved request
-	// extends the window instead of resetting history. ErrGrantNotFound for an
-	// absent/revoked grant, ErrRunQuotaUnlimited when RunQuota is nil.
-	RaiseRunQuota(ctx context.Context, grantID string, add int) (Grant, error)
+	// RaiseRunQuota atomically adds `add` runs to a grant live at atMs
+	// (Grant.Live) without touching its usage counters, so an approved
+	// request extends the window instead of resetting history.
+	// ErrGrantNotFound for an absent, revoked or expired grant,
+	// ErrRunQuotaUnlimited when RunQuota is nil.
+	RaiseRunQuota(ctx context.Context, grantID string, add int, atMs int64) (Grant, error)
 }
 
 // isBorrowTurn reports whether an audit record is an allowed borrow turn: the
@@ -89,7 +90,7 @@ func (s *MemoryGrant) BorrowTurns(ctx context.Context, q BorrowTurnQuery) []Audi
 }
 
 // RaiseRunQuota raises a live grant's run quota (see BorrowUsageStore).
-func (s *MemoryGrant) RaiseRunQuota(ctx context.Context, grantID string, add int) (Grant, error) {
+func (s *MemoryGrant) RaiseRunQuota(ctx context.Context, grantID string, add int, atMs int64) (Grant, error) {
 	tnt, err := tenant.Require(ctx)
 	if err != nil {
 		return Grant{}, err
@@ -98,7 +99,7 @@ func (s *MemoryGrant) RaiseRunQuota(ctx context.Context, grantID string, add int
 	defer s.mu.Unlock()
 	key := grantKey(tnt, grantID)
 	g, ok := s.grants[key]
-	if !ok || g.RevokedAtMs != nil {
+	if !ok || !g.Live(atMs) {
 		return Grant{}, ErrGrantNotFound
 	}
 	if g.RunQuota == nil {

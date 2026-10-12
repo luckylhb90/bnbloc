@@ -65,8 +65,13 @@ func reservationCases(t *testing.T, g GrantStore, prefix string) {
 			t.Fatalf("recorded borrow turns = %d, want %d (one per admitted reservation)", n, quota)
 		}
 		// An approved quota request raises the window; usage is kept.
-		if _, err := g.RaiseRunQuota(ctx, id, 1); err != nil {
+		if _, err := g.RaiseRunQuota(ctx, id, 1, 1000); err != nil {
 			t.Fatalf("raise: %v", err)
+		}
+		// A quota raise is for a live grant only: at its expiry the grant
+		// takes no more runs (Grant.Live).
+		if _, err := g.RaiseRunQuota(ctx, id, 1, future); !errors.Is(err, ErrGrantNotFound) {
+			t.Fatalf("raise at expiry err = %v, want ErrGrantNotFound", err)
 		}
 		if err := reserve(id, id+"-after-raise", 1000); err != nil {
 			t.Fatalf("reserve after raise: %v", err)

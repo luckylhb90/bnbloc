@@ -26,7 +26,7 @@ func runsUsed(t *testing.T, gs *store.MemoryGrant) int {
 // BE-8: the grant's RunQuota is enforced when a run is reserved. It used to be
 // stored and displayed but never enforced, so a borrow ran past its quota.
 func TestReserveBorrowEnforcesGrantRunQuota(t *testing.T) {
-	svc, gs := newService(t, "")
+	svc, gs := newService(t)
 	quota := 1
 	future := int64(1_000_000_000_000)
 	if err := gs.PutGrant(dctx(), store.Grant{
@@ -64,7 +64,7 @@ func TestRoomAuthGrantIDFitsColumnAndRoundTrips(t *testing.T) {
 		t.Fatal("grant ids collide across tenants (grant_id is the table's sole primary key)")
 	}
 
-	svc, _ := newService(t, "")
+	svc, _ := newService(t)
 	room := "room-" + strings.Repeat("x", 120)
 	owner := "owner-" + strings.Repeat("y", 100) + "@example.com"
 	members := svc.Membership.(interface{ Add(string, string) })
@@ -89,7 +89,7 @@ func TestRoomAuthGrantIDFitsColumnAndRoundTrips(t *testing.T) {
 // BE-21: an authorization that names no models stores an empty range; the
 // service never invents a hardcoded default model name.
 func TestAuthorizeWithoutModelsHasNoHardcodedDefault(t *testing.T) {
-	svc, gs := newService(t, "")
+	svc, gs := newService(t)
 	srv := httptest.NewServer(svc.Handler())
 	defer srv.Close()
 	put, _ := http.NewRequest(http.MethodPut,
@@ -109,7 +109,7 @@ func TestAuthorizeWithoutModelsHasNoHardcodedDefault(t *testing.T) {
 // grants, without depending on a client-supplied provider hint or on parsing
 // the (now opaque) grant id.
 func TestOwnerUsageListsAuthorizationsWithoutHints(t *testing.T) {
-	svc, gs := newService(t, "")
+	svc, gs := newService(t)
 	seedAuthorizedBorrow(t, gs, tenant.Default)
 	srv := httptest.NewServer(svc.Handler())
 	defer srv.Close()
@@ -146,7 +146,7 @@ func tenantReq(method, path, caller, body string) *http.Request {
 // BE-23: add-member upserts, so re-adding the only org_admin with a lower role
 // is a demotion and must be refused like the role-change path.
 func TestAddMemberCannotDemoteLastAdmin(t *testing.T) {
-	svc, _ := newService(t, "")
+	svc, _ := newService(t)
 	tenants := store.NewMemoryTenant()
 	_ = tenants.PutMember(dctx(), store.TenantMember{TenantID: tenant.Default, UserID: "root", Role: store.OrgRoleAdmin, JoinedAtMs: 1})
 	svc.Tenants = tenants
@@ -173,7 +173,7 @@ func TestAddMemberCannotDemoteLastAdmin(t *testing.T) {
 // shared process state. The old handler wrote a Service-wide field (a data race
 // under concurrent admins, and a cross-tenant leak); run with -race.
 func TestSetQuotaIsPerTenantAndRaceFree(t *testing.T) {
-	svc, _ := newService(t, "")
+	svc, _ := newService(t)
 	tenants := store.NewMemoryTenant()
 	for _, id := range []string{"acme", "globex"} {
 		_ = tenants.PutTenant(tctx(id), store.Tenant{TenantID: id, Name: id, Status: store.TenantActive})
@@ -210,7 +210,7 @@ func TestSetQuotaIsPerTenantAndRaceFree(t *testing.T) {
 
 // BE-17: shareagent JSON bodies are size-capped (413), not streamed unbounded.
 func TestShareagentRejectsOversizedBody(t *testing.T) {
-	svc, _ := newService(t, "")
+	svc, _ := newService(t)
 	srv := httptest.NewServer(svc.Handler())
 	defer srv.Close()
 	huge := `{"allowedModels":["` + strings.Repeat("m", httpx.DefaultBodyLimit) + `"]}`

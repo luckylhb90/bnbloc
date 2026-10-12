@@ -11,7 +11,7 @@ import (
 // A recorded borrow carries the originating channel into the audit trail, so an
 // admin can see which topic drove each borrow turn.
 func TestRecordBorrowCarriesChannel(t *testing.T) {
-	svc, gs := newService(t, "")
+	svc, gs := newService(t)
 	seedAuthorizedBorrow(t, gs, tenant.Default)
 	code, body := recordBorrow(t, svc, tenant.Default, 0, "ch_x")
 	if code != http.StatusOK || body["recorded"] != true {
@@ -28,7 +28,7 @@ func TestRecordBorrowCarriesChannel(t *testing.T) {
 
 // A denied borrow (org quota exhausted) also records the channel.
 func TestDeniedBorrowCarriesChannel(t *testing.T) {
-	svc, gs := newService(t, "")
+	svc, gs := newService(t)
 	tenants := store.NewMemoryTenant()
 	_ = tenants.PutTenant(tctx(tenant.Default), store.Tenant{TenantID: tenant.Default, Name: "D", Status: store.TenantActive})
 	if err := tenants.SetQuota(tctx(tenant.Default), tenant.Default, 1, 0); err != nil { // run ceiling 1

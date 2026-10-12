@@ -212,12 +212,8 @@ func (s *Service) handleOwnerAuthorizations(w http.ResponseWriter, r *http.Reque
 	}
 	// One view per live room authorization the caller owns in this room.
 	views := []authorizationView{}
-	now := s.Now()
 	for _, grant := range s.Grants.RoomGrants(r.Context(), roomID) {
-		if grant.OwnerUserID != owner || grant.GranteeUserID != "*" || grant.RevokedAtMs != nil {
-			continue
-		}
-		if grant.ExpiresAtMs != nil && now >= *grant.ExpiresAtMs {
+		if grant.OwnerUserID != owner || grant.GranteeUserID != "*" || !s.usableGrant(r.Context(), grant) {
 			continue
 		}
 		provider := providerFromTarget(grant.TargetID)

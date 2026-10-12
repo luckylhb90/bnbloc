@@ -1,31 +1,20 @@
-// Package shareagenthttp exposes the bnbloc-shareagent HTTP service: the
-// shared-agent access controller endpoints, the credential-free access
-// snapshot, and the turn proxy to the owner daemon. The owner credential never
-// enters a bnbloc response or log.
+// Package shareagenthttp exposes the bnbloc-shareagent HTTP service: owner
+// room authorizations, the reserve-then-settle borrow authority, platform
+// agents, the borrow accounting and the tenant administration routes. An
+// owner credential never enters a bnbloc response or log.
 package shareagenthttp
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
-	"io"
 	"net/http"
 	"time"
 
 	"github.com/luckylhb90/bnbloc/internal/httpx"
 	"github.com/luckylhb90/bnbloc/internal/membership"
 	"github.com/luckylhb90/bnbloc/internal/obs"
-	"github.com/luckylhb90/bnbloc/internal/roomctx"
-	"github.com/luckylhb90/bnbloc/internal/shareagent"
 	"github.com/luckylhb90/bnbloc/internal/store"
 	"github.com/luckylhb90/bnbloc/internal/svcauth"
 )
-
-// OwnerResolver returns the base URL of an owner daemon's proxy endpoint for a
-// room+owner. Presence/device registries implement it.
-type OwnerResolver interface {
-	OwnerEndpoint(roomID, ownerUserID string) (string, bool)
-}
 
 // Membership authorizes a caller for a room (fail closed) through
 // membership.RoomScope (requireMember), like every backend: the role, and
@@ -35,12 +24,8 @@ type Membership = membership.Directory
 
 // Service holds the shareagent handler dependencies.
 type Service struct {
-	Controller *shareagent.Controller
 	Grants     store.GrantStore
-	Presence   shareagent.PresenceChecker
-	Owners     OwnerResolver
 	Membership Membership
-	HTTP       *http.Client
 	Now        func() int64
 	// Tenants is the tenant registry, used by the org-admin console for member
 	// management, quota get/set, and tenant settings. Its persisted per-tenant
@@ -102,20 +87,13 @@ func (s *Service) requireMember(w http.ResponseWriter, r *http.Request, roomID, 
 
 // Handler builds the HTTP mux for the shareagent service.
 func (s *Service) Handler() http.Handler {
-	if s.HTTP == nil {
-		s.HTTP = &http.Client{Timeout: 30 * time.Second}
-	}
 	if s.Now == nil {
 		s.Now = func() int64 { return time.Now().UnixMilli() }
 	}
 	mux := http.NewServeMux()
-	for _, action := range []string{"start", "resume", "settings", "turn", "release"} {
-		mux.HandleFunc("POST /v1/rooms/{roomId}/shared-agents/{targetId}/"+action, s.handleAction(action))
-	}
-	mux.HandleFunc("GET /v1/rooms/{roomId}/shared-agents/{targetId}/access", s.handleAccess)
 	// Owner pre-authorization: an owner authorizes room-wide borrowing of their
-	// agent; the driver (bridge) and borrower client consult it. The legacy
-	// self-grant create path is removed: a grantee must never authorize itself.
+	// agent; the driver (bridge) and borrower client consult it. A grantee
+	// never authorizes itself.
 	mux.HandleFunc("PUT /v1/rooms/{roomId}/shared-agents/{targetId}/authorization", s.handleAuthorize)
 	mux.HandleFunc("DELETE /v1/rooms/{roomId}/shared-agents/{targetId}/authorization", s.handleDeauthorize)
 	mux.HandleFunc("GET /v1/rooms/{roomId}/shared-agents/{targetId}/authorization", s.handleAuthorization)
@@ -199,112 +177,6 @@ func (s *Service) Handler() http.Handler {
 	return svcauth.EnsureTenant(mux)
 }
 
-type actionBody struct {
-	GrantID        string  `json:"grantId"`
-	ModelPlanID    string  `json:"modelPlanId"`
-	Model          string  `json:"model"`
-	TurnCapability string  `json:"turnCapability"`
-	Cost           float64 `json:"cost"`
-	LeaseID        string  `json:"leaseId"`
-	PayloadRef     any     `json:"payloadRef"`
+func callerSubject(r *http.Request) string {
+	return svcauth.Subject(r)
 }
-
-func (s *Service) handleAction(action string) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		roomID, err := roomctx.Normalize(r.PathValue("roomId"))
-		if err != nil {
-			httpx.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-		actor := svcauth.Subject(r)
-		if _, ok := s.requireMember(w, r, roomID, actor, membership.AnyMember); !ok {
-			return
-		}
-		var body actionBody
-		if !httpx.DecodeJSON(w, r, httpx.DefaultBodyLimit, &body) {
-			return
-		}
-		req := shareagent.Request{
-			RoomID:         roomID,
-			TargetID:       r.PathValue("targetId"),
-			GrantID:        body.GrantID,
-			ActorUserID:    actor,
-			Action:         shareagent.Action(action),
-			ModelPlanID:    body.ModelPlanID,
-			Model:          body.Model,
-			TurnCapability: body.TurnCapability,
-			Cost:           body.Cost,
-		}
-		// Release drops the prior lease and audits.
-		if req.Action == shareagent.ActionRelease {
-			decision := s.Controller.Authorize(r.Context(), req)
-			if body.LeaseID != "" {
-				s.Controller.Release(r.Context(), body.LeaseID)
-			}
-			httpx.WriteJSON(w, http.StatusOK, map[string]any{"accepted": decision.Allowed})
-			return
-		}
-
-		decision := s.Controller.Authorize(r.Context(), req)
-		if !decision.Allowed {
-			// Fail closed with the stable deny reason.
-			httpx.WriteJSON(w, http.StatusForbidden, map[string]string{"denyReason": decision.DenyReason})
-			return
-		}
-		// For a turn, proxy to the owner daemon. The request carries model/
-		// capability only; no credential is ever forwarded from or returned by
-		// bnbloc.
-		if req.Action == shareagent.ActionTurn {
-			result, proxyErr := s.proxyTurn(r.Context(), roomID, decision.OwnerUserID, body)
-			if proxyErr != nil {
-				s.Controller.Release(r.Context(), decision.LeaseID)
-				obs.ServerError(w, "grant action failed", proxyErr)
-				httpx.Error(w, "owner turn proxy failed", http.StatusBadGateway)
-				return
-			}
-			httpx.WriteJSON(w, http.StatusOK, map[string]any{"accepted": true, "leaseId": decision.LeaseID, "result": result})
-			return
-		}
-		httpx.WriteJSON(w, http.StatusOK, map[string]any{"accepted": true, "leaseId": decision.LeaseID})
-	}
-}
-
-// proxyTurn forwards the turn to the owner daemon and returns its opaque
-// result. It forwards only model/capability/payloadRef and never a credential.
-func (s *Service) proxyTurn(ctx context.Context, roomID, ownerUserID string, body actionBody) (any, error) {
-	endpoint, ok := s.Owners.OwnerEndpoint(roomID, ownerUserID)
-	if !ok {
-		return nil, errOwnerUnavailable
-	}
-	forward := map[string]any{
-		"roomId":         roomID,
-		"modelPlanId":    body.ModelPlanID,
-		"model":          body.Model,
-		"turnCapability": body.TurnCapability,
-		"payloadRef":     body.PayloadRef,
-	}
-	buf, _ := json.Marshal(forward)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(buf))
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := s.HTTP.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return nil, errOwnerUnavailable
-	}
-	var out any
-	raw, _ := io.ReadAll(resp.Body)
-	_ = json.Unmarshal(raw, &out)
-	return out, nil
-}
-
-var errOwnerUnavailable = &proxyError{"owner endpoint unavailable"}
-
-type proxyError struct{ msg string }
-
-func (e *proxyError) Error() string { return e.msg }

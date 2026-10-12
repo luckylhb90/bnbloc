@@ -35,10 +35,7 @@ func (s *Service) handleListSharedAgents(w http.ResponseWriter, r *http.Request)
 	now := s.Now()
 	entries := []sharedAgentEntry{}
 	for _, g := range s.Grants.RoomGrants(r.Context(), roomID) {
-		if g.RevokedAtMs != nil {
-			continue
-		}
-		if g.ExpiresAtMs != nil && now >= *g.ExpiresAtMs {
+		if !g.Live(now) {
 			continue
 		}
 		provider := providerFromTarget(g.TargetID)

@@ -1,5 +1,6 @@
-// Command bnbloc-shareagent runs the shared-agent access controller, audit, and
-// turn-proxy service.
+// Command bnbloc-shareagent runs the borrow authority (owner room
+// authorizations, reserve-then-settle), platform agents and the tenant
+// administration service.
 package main
 
 import (
@@ -8,7 +9,6 @@ import (
 	"time"
 
 	"github.com/luckylhb90/bnbloc/internal/config"
-	"github.com/luckylhb90/bnbloc/internal/ids"
 	"github.com/luckylhb90/bnbloc/internal/membership"
 	"github.com/luckylhb90/bnbloc/internal/notify"
 	"github.com/luckylhb90/bnbloc/internal/obs"
@@ -18,12 +18,6 @@ import (
 	shareagenthttp "github.com/luckylhb90/bnbloc/services/shareagent"
 )
 
-// staticPresence treats every owner as online for local development; production
-// injects a realtime-backed presence checker.
-type staticPresence struct{}
-
-func (staticPresence) IsOwnerOnline(string, string) bool { return true }
-
 func main() {
 	cfg := config.FromEnv("BNBLOC_SHAREAGENT", ":8083")
 	backends, err := store.NewBackends(config.FromEnvRaw("BNBLOC_MYSQL_DSN"))
@@ -31,17 +25,8 @@ func main() {
 		log.Fatalf("bnbloc-shareagent: store: %v", err)
 	}
 	grants := backends.Grant
-	presence := staticPresence{}
 	metrics := obs.NewMetrics("bnbloc-shareagent")
 	shareagent.RegisterMetrics(metrics)
-	controller := &shareagent.Controller{
-		Metrics:    metrics,
-		Grants:     grants,
-		Presence:   presence,
-		Audit:      grants,
-		NewLeaseID: func() string { return ids.New("lease-") },
-		Now:        nowMs,
-	}
 	rooms := membershipFor(cfg.RoomBaseURL)
 	roomName := func(ctx context.Context, roomID string) string {
 		if r, err := backends.Room.GetRoom(ctx, roomID); err == nil {
@@ -51,10 +36,7 @@ func main() {
 	}
 	svc := &shareagenthttp.Service{
 		Metrics:    metrics,
-		Controller: controller,
 		Grants:     grants,
-		Presence:   presence,
-		Owners:     unavailableOwners{},
 		Membership: rooms,
 		Tenants:    backends.Tenant,
 		// Platform agents: the policy (platform setting), the hosts' live
@@ -89,12 +71,6 @@ func main() {
 		log.Fatalf("bnbloc-shareagent: %v", err)
 	}
 }
-
-// unavailableOwners is the default owner resolver; production wires a
-// presence/device registry that maps owners to their daemon proxy endpoints.
-type unavailableOwners struct{}
-
-func (unavailableOwners) OwnerEndpoint(string, string) (string, bool) { return "", false }
 
 // roomMembership is the room service as shareagent uses it: membership
 // lookups and agent-host membership writes.

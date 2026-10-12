@@ -65,7 +65,7 @@ func RoomPlatformGrants(ctx context.Context, grants RoomGrantLister, policy wire
 		if g.Source != store.GrantSourcePlatform {
 			continue
 		}
-		live := g.RevokedAtMs == nil && (g.ExpiresAtMs == nil || nowMs < *g.ExpiresAtMs)
+		live := g.Live(nowMs)
 		ref, valid := PlatformAgentOfTarget(g.TargetID)
 		out = append(out, RoomPlatformGrant{
 			Grant:     g,

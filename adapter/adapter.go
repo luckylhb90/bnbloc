@@ -1,13 +1,8 @@
-// Package adapter is the daemon-side host adapter for bnbloc. It contains the
-// HTTP clients a member's local agent runtime wires into its own ports:
-//
-//   - ActivityReporter posts session-state, messages, and the submit-provenance
-//     admission barrier to bnbloc-activity. A runtime integration adapts this to
-//     the durable activity-reporter hook its daemon config requires; it edits
-//     no runtime core source.
-//   - SharedAgentAccessClient calls bnbloc-shareagent for every shared-agent
-//     lifecycle action and fails closed on denial. A runtime integration installs
-//     it as its shared-agent access controller/auditor hooks.
+// Package adapter is the daemon-side host adapter for bnbloc: the
+// ActivityReporter a member's local agent runtime wires into its own ports to
+// post session-state and messages to bnbloc-activity. A runtime integration
+// adapts it to the durable activity-reporter hook its daemon config requires;
+// it edits no runtime core source.
 //
 // roomId is always the daemon's workspaceId (roomId ≡ workspaceId).
 package adapter
@@ -16,7 +11,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -64,12 +58,6 @@ func (a *ActivityReporter) ReportMessages(ctx context.Context, in wire.ReportMes
 	return reply, err
 }
 
-// ReportSubmitProvenance drives the atomic admission barrier. It returns only
-// after bnbloc-activity acks that the client-submit id is durably queryable.
-func (a *ActivityReporter) ReportSubmitProvenance(ctx context.Context, in wire.SubmitProvenanceInput) error {
-	return a.post(ctx, "/v1/rooms/"+in.WorkspaceID+"/agent-activity/submit-provenance", in, nil)
-}
-
 func (a *ActivityReporter) post(ctx context.Context, path string, body, out any) error {
 	buf, _ := json.Marshal(body)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, a.cfg.GatewayBaseURL+path, bytes.NewReader(buf))
@@ -93,75 +81,4 @@ func (a *ActivityReporter) post(ctx context.Context, path string, body, out any)
 		return json.NewDecoder(resp.Body).Decode(out)
 	}
 	return nil
-}
-
-// ErrSharedAgentDenied is returned when bnbloc-shareagent denies an action. It
-// carries the stable deny reason so the daemon fails closed with a UI reason.
-type ErrSharedAgentDenied struct {
-	Reason string
-}
-
-func (e *ErrSharedAgentDenied) Error() string {
-	return "shared agent access denied: " + e.Reason
-}
-
-// SharedAgentAccessClient calls bnbloc-shareagent for shared-agent lifecycle
-// actions. It never receives or forwards an owner credential.
-type SharedAgentAccessClient struct {
-	cfg Config
-}
-
-// NewSharedAgentAccessClient constructs a shared-agent access client.
-func NewSharedAgentAccessClient(cfg Config) *SharedAgentAccessClient {
-	return &SharedAgentAccessClient{cfg: cfg}
-}
-
-// TurnRequest is the daemon-side shared-agent turn request. It carries the
-// selected plan/model/capability, never a credential.
-type TurnRequest struct {
-	RoomID         string  `json:"-"`
-	TargetID       string  `json:"-"`
-	GrantID        string  `json:"grantId"`
-	ModelPlanID    string  `json:"modelPlanId"`
-	Model          string  `json:"model"`
-	TurnCapability string  `json:"turnCapability"`
-	Cost           float64 `json:"cost"`
-	PayloadRef     any     `json:"payloadRef"`
-}
-
-// Turn authorizes and runs one shared-agent turn through bnbloc. On denial it
-// returns *ErrSharedAgentDenied (fail closed); on allow it returns the opaque
-// proxied result and the concurrency lease id.
-func (c *SharedAgentAccessClient) Turn(ctx context.Context, req TurnRequest) (result any, leaseID string, err error) {
-	path := "/v1/rooms/" + req.RoomID + "/shared-agents/" + req.TargetID + "/turn"
-	buf, _ := json.Marshal(req)
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.cfg.GatewayBaseURL+path, bytes.NewReader(buf))
-	if err != nil {
-		return nil, "", err
-	}
-	httpReq.Header.Set("Content-Type", "application/json")
-	if c.cfg.SessionToken != "" {
-		httpReq.Header.Set("Authorization", "Bearer "+c.cfg.SessionToken)
-	}
-	resp, err := c.cfg.httpClient().Do(httpReq)
-	if err != nil {
-		return nil, "", err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode == http.StatusForbidden {
-		var deny struct {
-			DenyReason string `json:"denyReason"`
-		}
-		_ = json.NewDecoder(resp.Body).Decode(&deny)
-		return nil, "", &ErrSharedAgentDenied{Reason: deny.DenyReason}
-	}
-	if resp.StatusCode != http.StatusOK {
-		return nil, "", errors.New("bnbloc shareagent turn: unexpected status")
-	}
-	var ok struct {
-		LeaseID string `json:"leaseId"`
-		Result  any    `json:"result"`
-	}
-	_ = json.NewDecoder(resp.Body).Decode(&ok)
-	return ok.Result, ok.LeaseID, nil
 }
