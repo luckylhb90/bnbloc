@@ -3,6 +3,7 @@ import { api, type JoinRequest } from "@/lib/api";
 import { ErrorBox } from "@/ui/ErrorBox";
 import { UserWithEmail } from "@/views/UserName";
 import { errorText } from "@/lib/errors";
+import { listPlaceholder } from "@/ui/QueryState";
 
 // Org-admin: self-service join requests for the tenant (split from
 // Organization.tsx).
@@ -86,7 +87,7 @@ export function RequestsTab() {
             ) : (
               <tr>
                 <td colSpan={4} className="px-3 py-8 text-center text-[var(--color-fg-subtle)]">
-                  {requests ? "No pending requests." : "Loading…"}
+                  {listPlaceholder(requests, !!error, "No pending requests.")}
                 </td>
               </tr>
             )}

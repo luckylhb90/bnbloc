@@ -13,6 +13,8 @@ import { useToast } from "@/ui/Toast";
 import { InstantiateTemplateDialog, TemplateEditorDialog } from "@/views/library/TemplateDialogs";
 import { UserName } from "@/views/UserName";
 import { can } from "@/lib/permissions";
+import { LoadFailed } from "@/ui/QueryState";
+import { errorText } from "@/lib/errors";
 
 type Scope = "all" | "mine";
 const SCOPES = [
@@ -28,6 +30,7 @@ export function TemplatesTab({ tabs, onOpenRoom }: { tabs: React.ReactNode; onOp
   const toast = useToast();
   const [scope, setScope] = useState<Scope>("all");
   const [templates, setTemplates] = useState<RoomTemplate[] | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [editing, setEditing] = useState<RoomTemplate | "new" | null>(null);
   const [using, setUsing] = useState<RoomTemplate | null>(null);
   const [deleting, setDeleting] = useState<RoomTemplate | null>(null);
@@ -37,18 +40,15 @@ export function TemplatesTab({ tabs, onOpenRoom }: { tabs: React.ReactNode; onOp
 
   useEffect(() => {
     let live = true;
+    setLoadError(null);
     roomTemplatesApi
       .list(scope === "mine")
       .then((r) => live && setTemplates(r.templates ?? []))
-      .catch(() => {
-        if (!live) return;
-        setTemplates([]);
-        toast.error("Could not load templates");
-      });
+      .catch((e) => live && setLoadError(errorText(e, "Could not load templates")));
     return () => {
       live = false;
     };
-  }, [scope, epoch, toast]);
+  }, [scope, epoch]);
 
   const remove = async (t: RoomTemplate) => {
     try {
@@ -73,7 +73,9 @@ export function TemplatesTab({ tabs, onOpenRoom }: { tabs: React.ReactNode; onOp
             New template
           </Button>
         </div>
-        {templates === null ? (
+        {loadError ? (
+          <LoadFailed message={loadError} onRetry={reload} />
+        ) : templates === null ? (
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
             {[0, 1, 2].map((i) => (
               <Skeleton key={i} className="h-36" />

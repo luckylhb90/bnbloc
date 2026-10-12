@@ -34,6 +34,7 @@ import { can } from "@/lib/permissions";
 import { errorText } from "@/lib/errors";
 import { ConfirmDialog } from "@/ui/Dialog";
 import { displayNameOf } from "@/lib/useDisplayName";
+import { listPlaceholder } from "@/ui/QueryState";
 
 type Tab =
   | "overview"
@@ -432,7 +433,7 @@ function MembersTab({ selfId }: { selfId: string | null }) {
             ) : (
               <tr>
                 <td colSpan={4} className="px-3 py-8 text-center text-[var(--color-fg-subtle)]">
-                  {members ? "No members." : "Loading…"}
+                  {listPlaceholder(members, !!error, "No members.")}
                 </td>
               </tr>
             )}

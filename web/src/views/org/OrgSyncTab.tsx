@@ -17,6 +17,7 @@ import { UserName } from "@/views/UserName";
 import { errorText } from "@/lib/errors";
 import { useTenants } from "@/lib/queries";
 import { ConfirmDialog } from "@/ui/Dialog";
+import { listPlaceholder } from "@/ui/QueryState";
 
 // Platform super-admin: organization sync. Rules map the groups, department
 // or email domain an auth provider asserts at sign-in onto a tenant
@@ -240,7 +241,7 @@ export function OrgSyncTab() {
             ) : (
               <tr>
                 <td colSpan={6} className="px-3 py-8 text-center text-[var(--color-fg-subtle)]">
-                  {rows ? "No rules: organization sync is off." : "Loading…"}
+                  {listPlaceholder(rows, !!error, "No rules: organization sync is off.")}
                 </td>
               </tr>
             )}

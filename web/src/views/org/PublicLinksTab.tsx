@@ -7,6 +7,7 @@ import { ErrorBox } from "@/ui/ErrorBox";
 import { useToast } from "@/ui/Toast";
 import { UserName } from "@/views/UserName";
 import { errorText } from "@/lib/errors";
+import { listPlaceholder } from "@/ui/QueryState";
 
 // Org-admin: every active public share link of the tenant — room, artifact,
 // creator, expiry, views — with revoke. Switching public links off for the
@@ -101,7 +102,7 @@ export function PublicLinksTab() {
             ) : (
               <tr>
                 <td colSpan={6} className="px-3 py-6 text-center text-[var(--color-fg-subtle)]">
-                  {shares ? "No active public links." : "Loading…"}
+                  {listPlaceholder(shares, !!error, "No active public links.")}
                 </td>
               </tr>
             )}

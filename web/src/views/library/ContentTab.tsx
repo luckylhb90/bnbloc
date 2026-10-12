@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import {
   BrainIcon,
   EyeIcon,
@@ -11,7 +11,6 @@ import {
   WrenchIcon,
 } from "@phosphor-icons/react";
 import { contentKindWord, contentLabel, isBuiltin, isTeam, matchesContent, usageLine, type ContentComponent } from "@/lib/contentComponents";
-import { contentApi } from "@/lib/contentComponentsApi";
 import { relativeTime } from "@/lib/format";
 import { improvePrompt, workshopPrompt } from "@/lib/workshop";
 import { Button } from "@/ui/Button";
@@ -20,13 +19,13 @@ import { ConfirmDialog } from "@/ui/Dialog";
 import { Input } from "@/ui/Input";
 import { EmptyState, PageHeader } from "@/ui/Page";
 import { Switch } from "@/ui/Segment";
-import { useToast } from "@/ui/Toast";
 import { ContentEditorDialog, ImportDialog, type EditorTarget } from "@/views/library/ContentEditorDialog";
 import { ContentViewDialog, PermissionBadges } from "@/views/library/ContentViewDialog";
 import { TeamBadge, TeamRoster } from "@/views/library/ContentFormExtras";
 import { ContentByline, PublishDialog, ShareDialog, SharingActions, SharingStatus } from "@/views/library/ContentSharing";
 import { useOpenWorkshop } from "@/views/library/workshopFlow";
-import { errorText } from "@/lib/errors";
+import { useContentLibrary } from "@/views/library/useContentLibrary";
+import { LoadFailed } from "@/ui/QueryState";
 
 const COPY: Record<"expert" | "skill", { subtitle: string; empty: string; hint: string; search: string }> = {
   expert: {
@@ -47,6 +46,11 @@ const COPY: Record<"expert" | "skill", { subtitle: string; empty: string; hint: 
 // components of one kind with search, view, create (with AI in the expert
 // workshop, or manually), import, new version and delete; a skill pack can be
 // turned on for all the member's agents. Built-in content is read-only.
+// skillOnText is the toast of turning a skill pack on or off for me.
+function skillOnText(c: ContentComponent, on: boolean): string {
+  return on ? `${contentLabel(c)} is on for all your agents` : `${contentLabel(c)} is off for your agents`;
+}
+
 export function ContentTab({
   kind,
   tabs,
@@ -56,10 +60,8 @@ export function ContentTab({
   readonly tabs: React.ReactNode;
   readonly onOpenRoom: (roomId: string) => void;
 }) {
-  const toast = useToast();
   const workshop = useOpenWorkshop(onOpenRoom);
-  const [items, setItems] = useState<ContentComponent[] | null>(null);
-  const [enabled, setEnabled] = useState<Set<string>>(new Set());
+  const { items, error, enabled, reload, remove, toggleForMe } = useContentLibrary(kind, { onText: skillOnText });
   const [q, setQ] = useState("");
   const [editing, setEditing] = useState<EditorTarget | null>(null);
   const [viewing, setViewing] = useState<ContentComponent | null>(null);
@@ -67,57 +69,12 @@ export function ContentTab({
   const [sharing, setSharing] = useState<ContentComponent | null>(null);
   const [publishing, setPublishing] = useState<ContentComponent | null>(null);
   const [importing, setImporting] = useState(false);
-  const [epoch, setEpoch] = useState(0);
-  const reload = useCallback(() => setEpoch((n) => n + 1), []);
   const copy = COPY[kind];
-
-  useEffect(() => {
-    let live = true;
-    setItems(null);
-    Promise.all([contentApi.list(kind), kind === "skill" ? contentApi.uses() : Promise.resolve({ member: [] })])
-      .then(([list, uses]) => {
-        if (!live) return;
-        setItems(list.components ?? []);
-        setEnabled(new Set(uses.member.map((u) => u.componentId)));
-      })
-      .catch((e) => {
-        if (!live) return;
-        setItems([]);
-        toast.error(errorText(e, "Could not load the library"));
-      });
-    return () => {
-      live = false;
-    };
-  }, [kind, epoch, toast]);
 
   const shown = useMemo(() => (items ?? []).filter((c) => matchesContent(c, q)), [items, q]);
   const mine = useMemo(() => (items ?? []).filter((c) => c.mine), [items]);
   const closeEditor = useCallback(() => setEditing(null), []);
 
-  const remove = async (c: ContentComponent) => {
-    try {
-      await contentApi.remove(c.id);
-      toast.success(`Deleted ${c.name}`);
-      reload();
-    } catch (e) {
-      toast.error(errorText(e, "Could not delete it"));
-    }
-  };
-  const toggleForMe = async (c: ContentComponent, on: boolean) => {
-    try {
-      if (on) await contentApi.putUse("member", c.id);
-      else await contentApi.removeUse("member", c.id);
-      setEnabled((cur) => {
-        const next = new Set(cur);
-        if (on) next.add(c.id);
-        else next.delete(c.id);
-        return next;
-      });
-      toast.success(on ? `${contentLabel(c)} is on for all your agents` : `${contentLabel(c)} is off for your agents`);
-    } catch (e) {
-      toast.error(errorText(e, "Could not change it"));
-    }
-  };
 
   return (
     <>
@@ -142,7 +99,9 @@ export function ContentTab({
             {workshop.busy ? "Opening…" : "Create with AI"}
           </Button>
         </div>
-        {items === null ? (
+        {error ? (
+          <LoadFailed message={error} onRetry={reload} />
+        ) : items === null ? (
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
             {[0, 1, 2].map((i) => (
               <Skeleton key={i} className="h-40" />

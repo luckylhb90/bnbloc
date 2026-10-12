@@ -4,6 +4,7 @@ import { refreshTenants, useTenants } from "@/lib/queries";
 import { cn } from "@/lib/cn";
 import { ErrorBox } from "@/ui/ErrorBox";
 import { errorText } from "@/lib/errors";
+import { listPlaceholder } from "@/ui/QueryState";
 
 // Platform super-admin: the cross-tenant registry (split from
 // Organization.tsx).
@@ -130,7 +131,7 @@ export function TenantsTab() {
             ) : (
               <tr>
                 <td colSpan={4} className="px-3 py-8 text-center text-[var(--color-fg-subtle)]">
-                  {tenants ? "No tenants." : "Loading…"}
+                  {listPlaceholder(tenants, !!error, "No tenants.")}
                 </td>
               </tr>
             )}

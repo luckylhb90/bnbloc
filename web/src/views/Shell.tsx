@@ -112,7 +112,9 @@ export function Shell({
     api
       .myRooms(subject)
       .then((r) => setRooms(r.rooms || []))
-      .catch(() => setRooms([]));
+      // A failed refresh keeps the last list: blanking it would claim the
+      // member has no rooms (web L13).
+      .catch(() => {});
   }, [subject, view, activeRoom]);
 
   // A room another surface found gone (detail 404/403, stream revoked) leaves

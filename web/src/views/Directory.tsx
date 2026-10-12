@@ -3,6 +3,7 @@ import { BuildingsIcon } from "@phosphor-icons/react";
 import { api, type DirectoryTenant, type JoinRequest } from "@/lib/api";
 import { cn } from "@/lib/cn";
 import { errorText } from "@/lib/errors";
+import { listPlaceholder } from "@/ui/QueryState";
 
 // Directory is the self-service surface for a user to find and request to join
 // an organization (tenant). It lists active tenants with the caller's current
@@ -80,7 +81,7 @@ export function Directory() {
           ))
         ) : (
           <div className="rounded-[var(--radius)] border border-[var(--color-border)] px-4 py-8 text-center text-sm text-[var(--color-fg-subtle)]">
-            {tenants ? "No organizations available." : "Loading…"}
+            {listPlaceholder(tenants, !!error, "No organizations available.")}
           </div>
         )}
       </div>

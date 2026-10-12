@@ -12,6 +12,7 @@ import { Input } from "@/ui/Input";
 import { EmptyState, PageHeader } from "@/ui/Page";
 import { useToast } from "@/ui/Toast";
 import { errorText } from "@/lib/errors";
+import { LoadFailed } from "@/ui/QueryState";
 
 // ToolsTab is the Library's MCP tools: the tool servers published by the
 // platform that experts and skill packs can require, as the member may use
@@ -23,6 +24,7 @@ import { errorText } from "@/lib/errors";
 export function ToolsTab({ tabs }: { readonly tabs: React.ReactNode }) {
   const toast = useToast();
   const [tools, setTools] = useState<MemberComponent[] | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [content, setContent] = useState<ContentComponent[]>([]);
   const [local, setLocal] = useState<Map<string, McpToolSettings> | null>(null);
   const [q, setQ] = useState("");
@@ -32,6 +34,7 @@ export function ToolsTab({ tabs }: { readonly tabs: React.ReactNode }) {
   useEffect(() => {
     let live = true;
     setTools(null);
+    setLoadError(null);
     Promise.all([mcpToolsApi.list(), contentApi.list("expert"), contentApi.list("skill"), desktop.mcpToolSettings().catch(() => null)])
       .then(([list, experts, skills, settings]) => {
         if (!live) return;
@@ -39,15 +42,11 @@ export function ToolsTab({ tabs }: { readonly tabs: React.ReactNode }) {
         setContent([...(experts.components ?? []), ...(skills.components ?? [])]);
         setLocal(settings ? new Map(settings.map((s) => [s.tool, s])) : null);
       })
-      .catch((e) => {
-        if (!live) return;
-        setTools([]);
-        toast.error(errorText(e, "Could not load the tools"));
-      });
+      .catch((e) => live && setLoadError(errorText(e, "Could not load the tools")));
     return () => {
       live = false;
     };
-  }, [epoch, toast]);
+  }, [epoch]);
 
   const shown = useMemo(() => {
     const needle = q.trim().toLowerCase();
@@ -77,7 +76,9 @@ export function ToolsTab({ tabs }: { readonly tabs: React.ReactNode }) {
             <Input className="pl-9" placeholder="Search tools…" value={q} onChange={(e) => setQ(e.target.value)} />
           </div>
         </div>
-        {tools === null ? (
+        {loadError ? (
+          <LoadFailed message={loadError} onRetry={reload} />
+        ) : tools === null ? (
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
             {[0, 1, 2].map((i) => (
               <Skeleton key={i} className="h-40" />
