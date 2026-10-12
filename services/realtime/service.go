@@ -126,6 +126,9 @@ type Service struct {
 	// agent_dispatch); nil records nothing.
 	Dispatches DispatchStore
 	Audit      store.ExtensionAuditStore
+	// Content resolves the expert a chat asks its agent to wear (content
+	// components). Nil refuses a chat that names an expert.
+	Content store.ContentComponentStore
 	// Peers is the scale-out replica set (scaleout.go): requests for a room
 	// or member another replica owns are forwarded there, and work produced
 	// here for such keys crosses over internal peer routes. Nil is a single
@@ -587,6 +590,9 @@ func (s *Service) handleChat(w http.ResponseWriter, r *http.Request) {
 		// AttachmentIds reference uploaded attachments (via POST .../attachments)
 		// to embed in this message; validated to belong to the room.
 		AttachmentIds []string `json:"attachmentIds,omitempty"`
+		// Expert asks the agent recipient to wear an expert (content
+		// component id, optional version).
+		Expert *wire.ChatExpert `json:"expert,omitempty"`
 	}
 	// Cap the request body so a client cannot stream an unbounded payload; the
 	// text limit in PostChat is the product bound, this is defense-in-depth.
@@ -604,6 +610,7 @@ func (s *Service) handleChat(w http.ResponseWriter, r *http.Request) {
 		AtUnixMs:      body.AtUnixMs,
 		Recipient:     body.Recipient,
 		AttachmentIDs: body.AttachmentIds,
+		Expert:        body.Expert,
 	})
 	if err != nil {
 		writeChatPostErr(w, err)
@@ -622,7 +629,8 @@ func writeChatPostErr(w http.ResponseWriter, err error) {
 		writePlatformAgentOffline(w, offline)
 	case errors.Is(err, errMessageTooLong):
 		http.Error(w, err.Error(), http.StatusRequestEntityTooLarge)
-	case errors.Is(err, errEmptyMessage), errors.Is(err, errAgentInPeopleChat), errors.As(err, &bad):
+	case errors.Is(err, errEmptyMessage), errors.Is(err, errAgentInPeopleChat), errors.As(err, &bad),
+		errors.Is(err, errExpertNotAvailable), errors.Is(err, errExpertWithoutAgent):
 		http.Error(w, err.Error(), http.StatusBadRequest)
 	case errors.Is(err, errUnknownChannel):
 		http.Error(w, err.Error(), http.StatusNotFound)

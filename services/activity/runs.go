@@ -346,6 +346,9 @@ func (v *runViewer) record(j store.AgentJob, detail bool) wire.AgentRun {
 	if j.DispatchedByJobID != "" {
 		run.DispatchedBy = &wire.AgentRunDispatch{JobID: j.DispatchedByJobID, Depth: j.DispatchDepth}
 	}
+	if j.ExpertID != "" {
+		run.Expert = &wire.AgentRunExpert{ID: j.ExpertID, Name: j.ExpertName, Version: j.ExpertVersion}
+	}
 	// A failure's diagnostics say why; a replied job may carry a warning
 	// (the drive ended in error after a reply was already posted). A requeued
 	// retry keeps the last attempt's error while it waits.

@@ -71,6 +71,9 @@ type ChatPost struct {
 	// (payload.dispatchedBy); the agent job it creates records the parent
 	// job and depth. Never set for a typed message.
 	Dispatched *wire.DispatchMarker
+	// Expert asks the agent recipient to wear an expert (a content
+	// component the author may use here); the job pins its version.
+	Expert *wire.ChatExpert
 }
 
 // ChatPosted is what PostChat did: the message's sequence and, for an agent
@@ -126,6 +129,10 @@ func (s *Service) PostChat(ctx context.Context, p ChatPost) (ChatPosted, error) 
 			return ChatPosted{}, err
 		}
 	}
+	expert, err := s.resolveChatExpert(ctx, p, agent)
+	if err != nil {
+		return ChatPosted{}, err
+	}
 	payload := map[string]any{"userId": p.Author, "text": text}
 	if p.ClientMsgID != "" {
 		// Echo the sender's idempotency id so a client whose send response was
@@ -141,6 +148,9 @@ func (s *Service) PostChat(ctx context.Context, p ChatPost) (ChatPosted, error) 
 	}
 	if p.Dispatched != nil {
 		payload["dispatchedBy"] = *p.Dispatched
+	}
+	if expert != nil {
+		payload["expert"] = expert.payload()
 	}
 	if agent {
 		rp := map[string]any{
@@ -205,7 +215,7 @@ func (s *Service) PostChat(ctx context.Context, p ChatPost) (ChatPosted, error) 
 		if p.Dispatched != nil {
 			parentJobID, depth = p.Dispatched.JobID, p.Dispatched.Depth
 		}
-		job, err := s.BridgeJobs.PutAgentJob(ctx, store.AgentJob{
+		aj := store.AgentJob{
 			JobID:             ids.New("job_"),
 			RoomID:            p.RoomID,
 			ChannelID:         channelID,
@@ -225,11 +235,16 @@ func (s *Service) PostChat(ctx context.Context, p ChatPost) (ChatPosted, error) 
 			UpdatedAtMs:       nowMs,
 			DispatchedByJobID: parentJobID,
 			DispatchDepth:     depth,
-		})
+		}
+		if expert != nil {
+			aj.ExpertID, aj.ExpertVersion, aj.ExpertName = expert.ID, expert.Version, expert.label()
+		}
+		job, err := s.BridgeJobs.PutAgentJob(ctx, aj)
 		if err != nil {
 			log.Printf("realtime: agent job room=%s seq=%d: %v", p.RoomID, ev.Sequence, err)
 		} else {
 			posted.Job = &job
+			s.auditExpertUse(ctx, expert, job)
 			s.Hub.Publish(wire.Event{RoomID: p.RoomID, ChannelID: channelID, Kind: "agent_job_created", Payload: job, AtUnixMs: nowMs})
 		}
 	}

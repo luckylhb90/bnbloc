@@ -1012,6 +1012,23 @@ WHERE r.channel_id = '' AND d.user_id IS NULL`)
 			return nil
 		},
 	},
+	{
+		// The expert a chat asked its agent to wear, pinned on the job
+		// (docs/prd/2026-10-12-experts-and-teams.md §2 "Records").
+		id: "2026_10_agent_job_expert",
+		run: func(ctx context.Context, db sqlConn) error {
+			for _, c := range [][2]string{
+				{"expert_id", "VARCHAR(64) NOT NULL DEFAULT ''"},
+				{"expert_version", "VARCHAR(64) NOT NULL DEFAULT ''"},
+				{"expert_name", "VARCHAR(256) NOT NULL DEFAULT ''"},
+			} {
+				if err := addColumnIfMissing(ctx, db, "agent_jobs", c[0], c[1]); err != nil {
+					return err
+				}
+			}
+			return nil
+		},
+	},
 }
 
 // sqlConn is the statement surface a migration runs on. runMigrations passes

@@ -129,6 +129,13 @@ type AgentJob struct {
 	// (0 = not dispatched). See agent_dispatch.go.
 	DispatchedByJobID string `json:"dispatchedByJobId,omitempty"`
 	DispatchDepth     int    `json:"dispatchDepth,omitempty"`
+	// ExpertID / ExpertVersion / ExpertName are the expert the chat asked
+	// the agent to wear (docs/prd/2026-10-12-experts-and-teams.md): the
+	// version is pinned when the chat is posted, and the name is kept for
+	// the run record ("expert X v1.2 on agent Y"). Empty = no expert.
+	ExpertID      string `json:"expertId,omitempty"`
+	ExpertVersion string `json:"expertVersion,omitempty"`
+	ExpertName    string `json:"expertName,omitempty"`
 }
 
 // BridgeHeartbeat records one desktop bridge's liveness in a tenant.

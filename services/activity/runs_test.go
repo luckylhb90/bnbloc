@@ -44,8 +44,12 @@ func runsFixture(t *testing.T) *Service {
 		}
 	}
 	put := func(id, room, owner, requester string, seq, created int64) {
-		if _, err := jobs.PutAgentJob(ctx, store.AgentJob{JobID: id, RoomID: room, MessageSeq: seq, RequesterUserID: requester,
-			OwnerUserID: owner, Core: "c1", Provider: "codex", MessageText: "please fix " + strings.Repeat("x", 400), Model: "m-large", CreatedAtMs: created}); err != nil {
+		j := store.AgentJob{JobID: id, RoomID: room, MessageSeq: seq, RequesterUserID: requester,
+			OwnerUserID: owner, Core: "c1", Provider: "codex", MessageText: "please fix " + strings.Repeat("x", 400), Model: "m-large", CreatedAtMs: created}
+		if id == "j-borrow" {
+			j.ExpertID, j.ExpertName, j.ExpertVersion = "cc_rev", "Reviewer", "1.2.0"
+		}
+		if _, err := jobs.PutAgentJob(ctx, j); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -128,8 +132,11 @@ func TestRoomRunsRecordPhasesReplyAndUsage(t *testing.T) {
 	if b.Diagnostics != nil {
 		t.Fatal("list rows must not carry raw diagnostics")
 	}
+	if b.Expert == nil || b.Expert.ID != "cc_rev" || b.Expert.Name != "Reviewer" || b.Expert.Version != "1.2.0" {
+		t.Fatalf("expert = %+v", b.Expert)
+	}
 	f := out.Runs[0]
-	if f.Status != "failed" || f.FailureReason != "borrow_not_authorized" || f.Error != "core exploded" || f.Borrowed || f.Usage != nil {
+	if f.Status != "failed" || f.FailureReason != "borrow_not_authorized" || f.Error != "core exploded" || f.Borrowed || f.Usage != nil || f.Expert != nil {
 		t.Fatalf("failed run = %+v", f)
 	}
 

@@ -84,6 +84,13 @@ type AgentRunReply struct {
 	Count     int    `json:"count,omitempty"`
 }
 
+// AgentRunExpert is the expert of a run at the version the job pinned.
+type AgentRunExpert struct {
+	ID      string `json:"id"`
+	Name    string `json:"name,omitempty"`
+	Version string `json:"version,omitempty"`
+}
+
 // AgentRunUsage is the usage the run's replies reported, summed. Tokens and
 // cost are present only when reported.
 type AgentRunUsage struct {
@@ -115,6 +122,9 @@ type AgentRun struct {
 	// DispatchedBy is set when an agent dispatched this run through the room
 	// tools (the parent job and the hop depth).
 	DispatchedBy *AgentRunDispatch `json:"dispatchedBy,omitempty"`
+	// Expert is the expert the agent wore for this run ("expert X v1.2 on
+	// agent Y"); absent when the chat picked none.
+	Expert *AgentRunExpert `json:"expert,omitempty"`
 	// Redacted marks a run whose request/reply text and diagnostics are
 	// withheld because the viewer is not a member of the run's room.
 	Redacted bool `json:"redacted,omitempty"`

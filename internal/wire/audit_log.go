@@ -23,6 +23,9 @@ const (
 	// a tenant override) or a retention pass deleting a tenant's expired
 	// data (docs/prd/2026-10-10-enterprise-scale.md §3).
 	AuditKindRetention = "retention"
+	// AuditKindContent: a content component used for a run (an expert a
+	// chat asked an agent to wear).
+	AuditKindContent = "content"
 )
 
 // AuditLogEntry is one normalized audit record. ID is unique across sources
