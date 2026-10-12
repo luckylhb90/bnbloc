@@ -6,6 +6,7 @@ mod reconcile_tests;
 #[cfg(test)]
 mod sandbox_live_tests;
 
+pub(super) mod mcp_tools;
 pub(super) mod plugin_events;
 pub(super) mod plugin_host;
 pub(super) mod plugin_settings;
@@ -30,6 +31,7 @@ use std::sync::Arc;
 use parking_lot::Mutex;
 use tauri::{AppHandle, Manager};
 
+pub use mcp_tools::McpToolSettings;
 pub use plugin_settings::PluginLocalSettings;
 pub use sidecar_model::AdapterStatus;
 use sidecar_model::{GatewayAccess, Inner, ManagedSidecar, SidecarSpec};
@@ -61,6 +63,9 @@ pub struct Adapter {
     host: Arc<plugin_host::PluginHost>,
     /// The active sandbox component's launch and machine (sandbox.rs).
     sandbox: Arc<Mutex<sandbox::SandboxState>>,
+    /// The installed MCP tools and their materialized binaries
+    /// (mcp_tools.rs).
+    mcp: Arc<mcp_tools::McpState>,
 }
 
 impl Adapter {
@@ -81,6 +86,7 @@ impl Adapter {
             })),
             reconcile_lock: Arc::new(tokio::sync::Mutex::new(())),
             sandbox: Arc::new(Mutex::new(sandbox::SandboxState::default())),
+            mcp: Arc::new(mcp_tools::McpState::default()),
         }
     }
 
@@ -359,6 +365,20 @@ pub fn extend_core_env(
     let mut out = names;
     if let Some(manifest_dir) = adapter.manifest_dir() {
         env.insert("BNBLOC_CORE_MANIFESTS_DIR".into(), manifest_dir);
+    }
+    // MCP tools: the materialized stdio binaries and the member's own tool
+    // credentials, read by the bridge per session (no restart on change).
+    if let Ok(dir) = adapter.mcp_tools_dir() {
+        env.insert(
+            mcp_tools::TOOLS_DIR_ENV.into(),
+            dir.to_string_lossy().into_owned(),
+        );
+    }
+    if let Ok(dir) = adapter.mcp_settings_dir() {
+        env.insert(
+            mcp_tools::SETTINGS_DIR_ENV.into(),
+            dir.to_string_lossy().into_owned(),
+        );
     }
     for status in adapter.status() {
         if status.kind != sidecar_model::ComponentKind::Core {

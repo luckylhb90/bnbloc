@@ -197,6 +197,11 @@ pub enum ComponentKind {
     /// is fetched on demand by the `bnbloc-previewer` scheme
     /// (internal_ext/previewer_cache.rs).
     Previewer,
+    /// An MCP tool (`bnbloc.mcp.package/v1`): never a supervised process. A
+    /// stdio tool's binary for this platform is materialized into the tools
+    /// dir the bridge reads and spawned by the agent per session; an http
+    /// tool needs nothing here (internal_ext/mcp_tools.rs).
+    Mcp,
 }
 
 #[derive(serde::Deserialize)]
@@ -241,6 +246,47 @@ pub(super) struct ComponentEntry {
     /// Present for an installed previewer: its verified bundle pin.
     #[serde(default)]
     pub(super) previewer: Option<PreviewerEntry>,
+    /// Present for an installed MCP tool: its tools, env and credentials.
+    #[serde(default)]
+    pub(super) mcp: Option<McpEntry>,
+}
+
+/// The part of a catalog MCP block the desktop needs (pkgmeta.MCP plus the
+/// gateway's transport). Every field is defaulted so one malformed entry
+/// never fails the whole catalog decode.
+#[derive(Clone, Default, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct McpEntry {
+    #[serde(default)]
+    pub(super) transport: String,
+    #[serde(default)]
+    pub(super) credentials: String,
+    #[serde(default)]
+    pub(super) env: Vec<McpEnvEntry>,
+    #[serde(default)]
+    pub(super) tools: Vec<McpToolEntry>,
+}
+
+/// One variable an MCP tool needs (pkgmeta.MCPEnv).
+#[derive(Clone, Default, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct McpEnvEntry {
+    pub(super) name: String,
+    #[serde(default)]
+    pub(super) description: Option<String>,
+    #[serde(default)]
+    pub(super) secret: bool,
+    #[serde(default)]
+    pub(super) required: bool,
+}
+
+/// One tool an MCP server offers (display only).
+#[derive(Clone, Debug, Default, PartialEq, serde::Deserialize, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct McpToolEntry {
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
 }
 
 /// The part of a catalog previewer block the desktop needs: the gateway

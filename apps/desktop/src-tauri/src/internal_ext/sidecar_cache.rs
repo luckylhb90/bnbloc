@@ -19,42 +19,14 @@ impl Adapter {
         let cache_path = self
             .cache_path(&id, &spec.sha256)
             .map_err(FetchError::Retry)?;
-        if binary_ready(&cache_path, &spec.sha256).await {
-            self.set_status(
-                &id,
-                "ready",
-                format!("{} is already downloaded", spec.name),
-                None,
-            );
-        } else {
-            self.set_status(
-                &id,
-                "downloading",
-                format!("Downloading {}", spec.name),
-                None,
-            );
-            self.download_verify_cache(spec, &cache_path).await?;
-        }
-        // Only the verified binary for the current spec stays cached.
-        let keep = cache_file_name(&id, &spec.sha256);
-        self.remove_cached_binaries(&id, Some(&keep));
-        Ok(cache_path)
-    }
-
-    async fn download_verify_cache(
-        &self,
-        spec: &SidecarSpec,
-        dest: &Path,
-    ) -> Result<(), FetchError> {
         let gateway = self.gateway.lock().clone();
         let client = self.http().map_err(FetchError::Retry)?;
-        let id = spec.id();
-        fetch_verified(
+        let downloaded = ensure_verified(
             &client,
             &gateway,
             &spec.url,
             &spec.sha256,
-            dest,
+            &cache_path,
             true,
             |progress| {
                 let (state, message) = progress.status(&spec.name);
@@ -62,13 +34,16 @@ impl Adapter {
             },
         )
         .await?;
-        self.set_status(
-            &id,
-            "ready",
-            format!("{} downloaded and verified", spec.name),
-            None,
-        );
-        Ok(())
+        let message = if downloaded {
+            format!("{} downloaded and verified", spec.name)
+        } else {
+            format!("{} is already downloaded", spec.name)
+        };
+        self.set_status(&id, "ready", message, None);
+        // Only the verified binary for the current spec stays cached.
+        let keep = cache_file_name(&id, &spec.sha256);
+        self.remove_cached_binaries(&id, Some(&keep));
+        Ok(cache_path)
     }
 
     /// Delete cached binaries (and stale partial downloads) of component `id`
@@ -123,6 +98,27 @@ impl FetchProgress {
             FetchProgress::Verifying => ("verifying", format!("Verifying {label} checksum")),
         }
     }
+}
+
+/// Make `dest` hold the bytes pinned by `sha256`: kept when the file there
+/// already hashes to the pin, else downloaded through `fetch_verified`.
+/// Reports whether a download happened. The one cache-or-fetch step of every
+/// pinned component binary (supervised sidecars, materialized stdio MCP
+/// tools).
+pub(super) async fn ensure_verified(
+    client: &reqwest::Client,
+    gateway: &GatewayAccess,
+    url: &str,
+    sha256: &str,
+    dest: &Path,
+    executable: bool,
+    progress: impl FnMut(FetchProgress),
+) -> Result<bool, FetchError> {
+    if binary_ready(dest, sha256).await {
+        return Ok(false);
+    }
+    fetch_verified(client, gateway, url, sha256, dest, executable, progress).await?;
+    Ok(true)
 }
 
 /// Download one component artifact to `dest`, verifying it against the

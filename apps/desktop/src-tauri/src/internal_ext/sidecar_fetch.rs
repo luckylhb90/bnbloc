@@ -40,6 +40,8 @@ impl Adapter {
         let components = self.fetch_components(&gateway).await?;
         // Previewer bundles follow the same catalog: drop uninstalled ones.
         self.retain_previewers(&components);
+        // So do MCP tools: materialize stdio binaries, drop removed ones.
+        self.sync_mcp_tools(&components);
         let resolved = resolve_component_specs(&components, &platform);
         for failure in &resolved.failures {
             self.set_initial_status(

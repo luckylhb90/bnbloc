@@ -10,6 +10,10 @@
 //! A plugin whose required settings are not all set is not launched (its
 //! notifications then fall back to the server notifiers); saving or clearing
 //! the settings restarts it.
+//!
+//! The store itself (one 0600 JSON object per component, the schema merge,
+//! the secret-free views) is shared with the member credentials of MCP tools
+//! (internal_ext/mcp_tools.rs, Settings → Tools).
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
@@ -55,7 +59,7 @@ pub struct PluginLocalSettings {
     pub fields: Vec<LocalSettingView>,
 }
 
-type Values = BTreeMap<String, String>;
+pub(super) type Values = BTreeMap<String, String>;
 
 impl Adapter {
     /// The directory holding the per-plugin settings files.
@@ -157,7 +161,7 @@ impl Adapter {
 
 /// `dir/<plugin>.json`, refusing a name that is not a package name (never a
 /// path: no separators, no leading dot).
-fn settings_path(dir: &Path, plugin: &str) -> Result<PathBuf, String> {
+pub(super) fn settings_path(dir: &Path, plugin: &str) -> Result<PathBuf, String> {
     let valid = !plugin.is_empty()
         && !plugin.starts_with('.')
         && plugin
@@ -170,7 +174,7 @@ fn settings_path(dir: &Path, plugin: &str) -> Result<PathBuf, String> {
 }
 
 /// The stored values (missing or unreadable file: none).
-fn load(path: &Path) -> Values {
+pub(super) fn load(path: &Path) -> Values {
     std::fs::read(path)
         .ok()
         .and_then(|raw| serde_json::from_slice(&raw).ok())
@@ -178,14 +182,14 @@ fn load(path: &Path) -> Values {
 }
 
 /// Write the values owner-only (0600) via temp file + rename.
-fn save(path: &Path, values: &Values) -> Result<(), String> {
+pub(super) fn save(path: &Path, values: &Values) -> Result<(), String> {
     let raw = serde_json::to_vec(values).map_err(|e| e.to_string())?;
     crate::settings::write_owner_only(path, &raw)
 }
 
 /// Apply a form update to the stored values: only schema keys, a secret left
 /// empty keeps its stored value, required fields must end up set.
-fn merge(
+pub(super) fn merge(
     schema: &[LocalSettingField],
     current: &Values,
     update: BTreeMap<String, String>,
@@ -219,7 +223,7 @@ fn merge(
 }
 
 /// Labels of required fields without a value.
-fn missing_required(schema: &[LocalSettingField], values: &Values) -> Vec<String> {
+pub(super) fn missing_required(schema: &[LocalSettingField], values: &Values) -> Vec<String> {
     schema
         .iter()
         .filter(|f| f.required && !values.get(&f.key).is_some_and(|v| !v.is_empty()))
@@ -227,7 +231,7 @@ fn missing_required(schema: &[LocalSettingField], values: &Values) -> Vec<String
         .collect()
 }
 
-fn views(schema: &[LocalSettingField], values: &Values) -> Vec<LocalSettingView> {
+pub(super) fn views(schema: &[LocalSettingField], values: &Values) -> Vec<LocalSettingView> {
     schema
         .iter()
         .map(|f| {

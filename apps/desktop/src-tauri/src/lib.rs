@@ -180,6 +180,36 @@ fn plugin_local_settings_clear(
     state.clear_plugin_local_settings(&plugin)
 }
 
+/// Installed MCP tools with this desktop's state (Settings → Tools): the
+/// stdio binary's download state and the member credentials. Secret values
+/// are never returned.
+#[tauri::command]
+fn mcp_tool_settings(
+    state: State<'_, internal_ext::Adapter>,
+) -> Result<Vec<internal_ext::McpToolSettings>, String> {
+    state.mcp_tool_settings()
+}
+
+/// Store the member's credentials for an MCP tool on this machine (an empty
+/// secret keeps the stored one). Never sent to the gateway.
+#[tauri::command]
+fn mcp_tool_settings_save(
+    state: State<'_, internal_ext::Adapter>,
+    tool: String,
+    values: std::collections::BTreeMap<String, String>,
+) -> Result<(), String> {
+    state.save_mcp_tool_settings(&tool, values)
+}
+
+/// Forget the member's credentials for an MCP tool.
+#[tauri::command]
+fn mcp_tool_settings_clear(
+    state: State<'_, internal_ext::Adapter>,
+    tool: String,
+) -> Result<(), String> {
+    state.clear_mcp_tool_settings(&tool)
+}
+
 #[tauri::command]
 fn app_info(app: tauri::AppHandle) -> serde_json::Value {
     json!({
@@ -345,6 +375,9 @@ pub fn run() {
             plugin_local_settings,
             plugin_local_settings_save,
             plugin_local_settings_clear,
+            mcp_tool_settings,
+            mcp_tool_settings_save,
+            mcp_tool_settings_clear,
             app_info,
             updater_client::check_update,
             updater_client::install_update,
