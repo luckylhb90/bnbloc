@@ -63,12 +63,21 @@ export function jobWearing(job: Pick<AgentJob, "roomExpertName" | "roomExpertVer
 }
 
 // retryNote says why a live job is being retried: its last failed attempt's
-// reason ("retrying — the agent sandbox was starting"). Empty for a job
-// that never failed an attempt, and for a finished job (its outcome says
-// the rest).
-export function retryNote(job: Pick<AgentJob, "status" | "attempts">): string {
+// reason ("retrying — the agent sandbox was starting"), and while it waits
+// out its retry delay, when ("retrying in 12s — …"). Empty for a job that
+// never failed an attempt, and for a finished job (its outcome says the
+// rest).
+export function retryNote(job: Pick<AgentJob, "status" | "attempts" | "notBeforeMs">, nowMs: number): string {
   const last = job.attempts?.at(-1);
-  return last && isLiveJob(job) ? `retrying — ${failureWhy(last.reason)}` : "";
+  if (!last || !isLiveJob(job)) return "";
+  const waitS = job.status === "queued" ? Math.ceil(((job.notBeforeMs ?? 0) - nowMs) / 1000) : 0;
+  return `retrying${waitS > 0 ? ` in ${waitS}s` : ""} — ${failureWhy(last.reason)}`;
+}
+
+// retryWaiting reports a job still inside its retry delay at nowMs (the
+// indicator's countdown ticks only then).
+export function retryWaiting(job: Pick<AgentJob, "status" | "notBeforeMs">, nowMs: number): boolean {
+  return job.status === "queued" && (job.notBeforeMs ?? 0) > nowMs;
 }
 
 // agentJobStatusLabel is a job row's status. `ahead` is how many of the

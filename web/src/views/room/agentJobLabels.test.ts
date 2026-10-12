@@ -1,4 +1,4 @@
-import { agentJobStatusLabel, failureLabel, failureWhy, retryNote } from "./agentJobLabels.ts";
+import { agentJobStatusLabel, failureLabel, failureWhy, retryNote, retryWaiting } from "./agentJobLabels.ts";
 import type { AgentJob } from "../../lib/apiModels.ts";
 
 function assert(condition: boolean, message: string): void {
@@ -34,17 +34,22 @@ const starting = { attempt: 1, reason: "sandbox_starting" as const, atMs: 5 };
 const lapsed = { attempt: 2, reason: "lease_expired" as const, atMs: 9 };
 const retried = job({ status: "reflowing", attempt: 2, attempts: [starting] });
 assert(agentJobStatusLabel(retried) === "collecting reply", "the phase, not the earlier attempt's reason, labels a live job");
-assert(retryNote(retried) === "retrying — the agent sandbox was starting", `retry note = ${retryNote(retried)}`);
+assert(retryNote(retried, 0) === "retrying — the agent sandbox was starting", `retry note = ${retryNote(retried, 0)}`);
 assert(
-  retryNote(job({ status: "running", attempt: 3, attempts: [starting, lapsed] })) === "retrying — the agent's bridge stopped responding",
+  retryNote(job({ status: "running", attempt: 3, attempts: [starting, lapsed] }), 0) === "retrying — the agent's bridge stopped responding",
   "the newest attempt says why",
 );
 // Requeued and waiting for its next claim: queued, the reason recorded.
-const requeued = job({ status: "queued", failureReason: "core_unavailable", attempts: [{ attempt: 1, reason: "core_unavailable", atMs: 3 }] });
+const requeued = job({ status: "queued", failureReason: "core_unavailable", attempts: [{ attempt: 1, reason: "core_unavailable", atMs: 3 }], notBeforeMs: 10_003 });
 assert(agentJobStatusLabel(requeued, 2) === "waiting for bridge", "a requeued job is not 'Queued — N ahead'");
-assert(retryNote(requeued) === "retrying — the agent's core was unreachable", `requeued note = ${retryNote(requeued)}`);
-assert(retryNote(job({ status: "running" })) === "", "a first attempt has no retry note");
-assert(retryNote(job({ status: "failed", attempt: 2, attempts: [starting] })) === "", "a finished job has no retry note");
+// Inside its retry delay the note counts down (whole seconds, rounded up).
+assert(retryNote(requeued, 3) === "retrying in 10s — the agent's core was unreachable", `requeued note = ${retryNote(requeued, 3)}`);
+assert(retryNote(requeued, 9_500) === "retrying in 1s — the agent's core was unreachable", `last second = ${retryNote(requeued, 9_500)}`);
+assert(retryWaiting(requeued, 3) && !retryWaiting(requeued, 10_003), "waiting until notBeforeMs");
+assert(retryNote(requeued, 10_003) === "retrying — the agent's core was unreachable", `delay over = ${retryNote(requeued, 10_003)}`);
+assert(retryNote({ ...retried, notBeforeMs: 99_999 }, 0) === "retrying — the agent sandbox was starting", "a claimed retry no longer counts down");
+assert(retryNote(job({ status: "running" }), 0) === "", "a first attempt has no retry note");
+assert(retryNote(job({ status: "failed", attempt: 2, attempts: [starting] }), 0) === "", "a finished job has no retry note");
 // A reason this bundle does not know reads as words, never as a blank.
 assert(failureWhy("brand_new_reason") === "brand new reason", "unknown reason fallback");
 assert(failureLabel("sandbox_starting") === "sandbox starting", "label");

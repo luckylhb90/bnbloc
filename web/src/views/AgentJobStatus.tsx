@@ -3,6 +3,7 @@ import { cn } from "@/lib/cn";
 import { AgentHandle } from "@/views/UserName";
 import { isLiveJob } from "@/lib/agentRuns";
 import { agentJobStatusLabel, jobWearing, retryNote } from "@/views/room/agentJobLabels";
+import { useRetryClock } from "@/views/room/useRetryClock";
 
 // The job's raw diagnostics stay with its owner and admins (the run record);
 // a row shows the projection's failure text, what the turn wore and what it
@@ -18,6 +19,7 @@ export function AgentJobStatus({
   queueAhead?: (job: AgentJob) => number;
 }) {
   const visible = jobs.filter((j) => j.status !== "replied");
+  const now = useRetryClock(visible);
   if (visible.length === 0) return null;
   return (
     <div className="mt-1 flex flex-col gap-1 text-xs text-[var(--color-fg-subtle)]">
@@ -29,7 +31,7 @@ export function AgentJobStatus({
         const live = isLiveJob(j);
         const wearing = live ? jobWearing(j) : [];
         const missing = live ? (j.contentMissing ?? []) : [];
-        const retry = retryNote(j);
+        const retry = retryNote(j, now);
         return (
           <div
             key={j.jobId}

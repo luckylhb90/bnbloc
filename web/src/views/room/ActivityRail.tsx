@@ -5,6 +5,7 @@ import { relativeTime } from "@/lib/format";
 import { ActorLabel } from "@/views/room/ActorLabel";
 import { isLiveJob } from "@/lib/agentRuns";
 import { agentJobStatusLabel, retryNote } from "@/views/room/agentJobLabels";
+import { useRetryClock } from "@/views/room/useRetryClock";
 import { agentHandle } from "@/lib/roomAgents";
 
 export type RecentArtifactChange = {
@@ -56,6 +57,7 @@ export function ActivityRail({
     .flat()
     .filter((job) => job.status !== "replied");
   const activeCount = workingAgents.length + visibleJobs.length + recentArtifactChanges.length;
+  const now = useRetryClock(visibleJobs);
 
   if (activeCount === 0) {
     return (
@@ -100,7 +102,7 @@ export function ActivityRail({
         ))}
         {visibleJobs.map((job) => {
           const live = isLiveJob(job);
-          const retry = retryNote(job);
+          const retry = retryNote(job, now);
           return (
             <span
               key={job.jobId}
