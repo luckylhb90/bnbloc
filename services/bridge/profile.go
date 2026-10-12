@@ -13,10 +13,10 @@ import (
 )
 
 // Agent profiles (docs/prd/2026-10-12-experts-and-teams.md): the role an
-// agent session wears — the room model, an expert's instructions, the skill
-// packs in effect, and MCP servers. A core advertising agentProfile receives
-// the profile on session create and maps it natively; any other core gets
-// the room model and the instructions prefixed to its first prompt
+// agent session wears — the session guidance, an expert's instructions, the
+// skill packs in effect, and MCP servers. A core advertising agentProfile
+// receives the profile on session create and maps it natively; any other
+// core gets the guidance and the instructions prefixed to its first prompt
 // (sessionGuidance decides which).
 //
 // Session contributors extend the profile of every session the bridge
@@ -113,9 +113,10 @@ type SessionContribution struct {
 	MCPServers []corepkg.MCPServer
 	// Env is extra agent environment (secret values).
 	Env map[string]string
-	// Instructions are appended to the profile's instructions (e.g. how to
-	// use the contributed tools). Keep them stable across sessions.
-	Instructions string
+	// RoomTools reports that the contribution attaches the bnbloc-room
+	// tools: the session guidance then says how to use them
+	// (roomlog.Guidance.HasTools). No contributor words guidance itself.
+	RoomTools bool
 	// Turn, when set, is called at the start of every turn driven in the
 	// session (the first one included), before the turn's input reaches
 	// the core.
@@ -173,9 +174,8 @@ type sessionHooks struct {
 
 // contribute asks every contributor for its part of a new session's profile
 // and merges it into p (which must be non-nil). It returns the hooks to
-// keep with the session.
-func (b *Bridge) contribute(ctx context.Context, info SessionInfo, p *corepkg.AgentProfile) sessionHooks {
-	var hooks sessionHooks
+// keep with the session and whether a contribution attached the room tools.
+func (b *Bridge) contribute(ctx context.Context, info SessionInfo, p *corepkg.AgentProfile) (hooks sessionHooks, roomTools bool) {
 	for _, c := range b.sessionContributors() {
 		part, err := c.ContributeSession(ctx, info)
 		if err != nil {
@@ -192,7 +192,7 @@ func (b *Bridge) contribute(ctx context.Context, info SessionInfo, p *corepkg.Ag
 				p.Env[k] = v
 			}
 		}
-		p.Instructions = appendInstructions(p.Instructions, part.Instructions)
+		roomTools = roomTools || part.RoomTools
 		if part.Turn != nil {
 			hooks.turn = append(hooks.turn, part.Turn)
 		}
@@ -200,7 +200,7 @@ func (b *Bridge) contribute(ctx context.Context, info SessionInfo, p *corepkg.Ag
 			hooks.release = append(hooks.release, part.Release)
 		}
 	}
-	return hooks
+	return hooks, roomTools
 }
 
 // appendInstructions appends one block of profile instructions to another,
@@ -218,39 +218,44 @@ func appendInstructions(base, more string) string {
 
 // sessionGuidance is the one place that decides where a new session's
 // guidance goes: what the session is told once, before its first turn, and
-// never again per turn. The guidance is the room model
-// (roomlog.SessionGuidance, first, so it is a stable prefix providers
-// cache), the content the turn wears (the expert's instructions and skills)
-// and, on a core advertising agentProfile, the session contributors' parts.
+// never again per turn. The guidance is roomlog.SessionGuidance rendered
+// with the session's facts (first, so it is a stable prefix providers
+// cache), then the content the turn wears (the expert's instructions and
+// skills) and, on a core advertising agentProfile, the session
+// contributors' MCP servers and env.
 //
 //   - A core advertising agentProfile gets it all in the profile its session
 //     is created with (profile; prefix is empty).
-//   - Any other core gets the room model and the content as the head of the
+//   - Any other core gets the guidance and the content as the head of the
 //     session's first prompt (prefix; profile is nil), the skill files
 //     written under .agents/skills/ when it accepts workspace files. Its
 //     follow-up turns carry none of it.
 //
-// The room model and the contributors' parts are bnbloc's own, stable text:
-// like the contributors' per-session servers they stay out of the session's
-// binding sum, which is the content's (jobContent.bindingSum).
-func (b *Bridge) sessionGuidance(ctx context.Context, d *drive, ep corepkg.Endpoint, workspaceID string, info SessionInfo) (profile *corepkg.AgentProfile, prefix string, hooks sessionHooks) {
+// The facts are kept with the session (the .room/README.md it is written
+// with). The guidance is bnbloc's own, stable text: like the contributors'
+// per-session servers it stays out of the session's binding sum, which is
+// the content's (jobContent.bindingSum).
+func (b *Bridge) sessionGuidance(ctx context.Context, d *drive, ep corepkg.Endpoint, workspaceID string, info SessionInfo) (profile *corepkg.AgentProfile, prefix string, hooks sessionHooks, facts roomlog.Guidance) {
+	_, pull := b.coreEntry(d.core)
+	facts.HasRoomFiles = pull && d.caps.writer != nil
 	if d.caps.profile {
 		profile = d.content.profile()
 		if profile == nil {
 			profile = &corepkg.AgentProfile{}
 		}
-		profile.Instructions = appendInstructions(roomlog.SessionGuidance(), profile.Instructions)
-		return profile, "", b.contribute(ctx, info, profile)
+		hooks, facts.HasTools = b.contribute(ctx, info, profile)
+		profile.Instructions = appendInstructions(roomlog.SessionGuidance(facts), profile.Instructions)
+		return profile, "", hooks, facts
 	}
 	var sb strings.Builder
-	sb.WriteString(roomlog.SessionGuidance())
+	sb.WriteString(roomlog.SessionGuidance(facts))
 	sb.WriteString("\n")
 	if !d.content.empty() {
 		written := b.writeFallbackSkills(ctx, d.caps.bytesWriter, ep, d.core, workspaceID, d.content)
 		sb.WriteString(d.content.promptPrefix(written))
 	}
 	sb.WriteString("---\n\n")
-	return nil, sb.String(), sessionHooks{}
+	return nil, sb.String(), sessionHooks{}, facts
 }
 
 // startTurn runs the session's turn hooks.

@@ -163,6 +163,11 @@ func TestLegacyProtocol(t *testing.T) {
 	if caps, _ := init.Result["capabilities"].(map[string]any); caps["tools"] == nil {
 		t.Fatalf("capabilities = %v; want tools", init.Result["capabilities"])
 	}
+	// The MCP instructions are one line pointing to the session guidance:
+	// a harness that surfaces them must not show the usage twice.
+	if ins, _ := init.Result["instructions"].(string); ins != serverInstructions || strings.Contains(ins, "\n") || strings.Contains(ins, "ask_agent") {
+		t.Fatalf("instructions = %q", init.Result["instructions"])
+	}
 	if r := post(t, srv, token, rpc(2, "initialize", map[string]any{"protocolVersion": "1999-01-01"}), nil); r.Result["protocolVersion"] != LatestLegacyVersion {
 		t.Fatalf("unknown version negotiates %v; want %s", r.Result["protocolVersion"], LatestLegacyVersion)
 	}

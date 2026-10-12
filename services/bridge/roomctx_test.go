@@ -361,7 +361,7 @@ func TestMaterializeDropsCurrentInstructionFromRecords(t *testing.T) {
 	if !ok {
 		t.Fatal("fake provider must satisfy WorkspaceFileWriter")
 	}
-	_, _, err := b.materializeRoomContext(context.Background(), w, ep, "r1", "ws", "job-x", "create final_check.rs: print done", roomlog.Producer{Owner: "maya", Provider: "agent-a"}, true, roomlog.CtxState{})
+	_, _, err := b.materializeRoomContext(context.Background(), w, ep, "r1", "ws", "job-x", "create final_check.rs: print done", roomlog.Producer{Owner: "maya", Provider: "agent-a"}, true, roomlog.CtxState{}, roomlog.Guidance{HasRoomFiles: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -421,7 +421,7 @@ func TestMaterializeSelfFilterIsSessionBounded(t *testing.T) {
 	g.setHistory("test", []int64{}, nil)
 	g.addAgentRow("test", 12, "maya", "opencode", "peer agent answers")
 	b, w, ep, prov := newBridge(g)
-	st, _, err := b.materializeRoomContext(context.Background(), w, ep, "r1", "ws", "job-x", "", roomlog.Producer{Owner: "maya", Provider: "agent-a"}, true, roomlog.CtxState{})
+	st, _, err := b.materializeRoomContext(context.Background(), w, ep, "r1", "ws", "job-x", "", roomlog.Producer{Owner: "maya", Provider: "agent-a"}, true, roomlog.CtxState{}, roomlog.Guidance{HasRoomFiles: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -447,7 +447,7 @@ func TestMaterializeSelfFilterIsSessionBounded(t *testing.T) {
 	g2.addChatRow("test", 14, "jack", "new person line")
 	b2, w2, ep2, prov2 := newBridge(g2)
 	st2 := roomlog.CtxState{EndSeq: 12, Chunks: []string{".room/chunk-x.md"}, SelfAfterSeq: 12}
-	if _, _, err := b2.materializeRoomContext(context.Background(), w2, ep2, "r1", "ws", "job-x", "", roomlog.Producer{Owner: "maya", Provider: "agent-a"}, false, st2); err != nil {
+	if _, _, err := b2.materializeRoomContext(context.Background(), w2, ep2, "r1", "ws", "job-x", "", roomlog.Producer{Owner: "maya", Provider: "agent-a"}, false, st2, roomlog.Guidance{HasRoomFiles: true}); err != nil {
 		t.Fatal(err)
 	}
 	recent2 := recentOf(prov2)

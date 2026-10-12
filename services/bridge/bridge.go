@@ -276,6 +276,9 @@ type roomSession struct {
 	// was created with ("" = none); a turn whose profile differs gets a new
 	// session (profile.go).
 	profileSum string
+	// guidance is the facts the session's guidance was rendered with
+	// (sessionGuidance); its .room/README.md is written with them.
+	guidance roomlog.Guidance
 	// hooks are the session contributors' turn/release callbacks (guarded
 	// by mu).
 	hooks sessionHooks
@@ -1363,8 +1366,8 @@ func (b *Bridge) driveClaim(ctx context.Context, d *drive, beforeReflow func(*ro
 	// ensureSession (workspace exists, session does not yet); a reused session
 	// materializes there too and returns the written descriptors so the
 	// follow-up prompt below can name them.
-	promptFn := func(workspaceID string, st *roomlog.CtxState, atts []writtenAttachment) string {
-		return b.drivePrompt(ctx, d, workspaceID, atts, st, true)
+	promptFn := func(workspaceID string, st *roomlog.CtxState, atts []writtenAttachment, g roomlog.Guidance) string {
+		return b.drivePrompt(ctx, d, workspaceID, atts, st, g, true)
 	}
 	rs, err := b.ensureSession(ctx, d, key, promptFn, opts)
 	if err != nil {
@@ -1377,7 +1380,7 @@ func (b *Bridge) driveClaim(ctx context.Context, d *drive, beforeReflow func(*ro
 	if !rs.freshlyCreated {
 		entry, _ := b.coreEntry(d.core)
 		rs.roomSession.startTurn(b.turnInfo(d, rs.roomSession))
-		prompt := b.drivePrompt(ctx, d, rs.workspaceID, rs.written, &rs.roomSession.ctx, false)
+		prompt := b.drivePrompt(ctx, d, rs.workspaceID, rs.written, &rs.roomSession.ctx, rs.roomSession.guidance, false)
 		// The fence baseline: the space has no process yet, so everything
 		// there is bnbloc's own, this turn's .room/ refresh included.
 		rs.roomSession.fenceBaseline()
@@ -1420,10 +1423,10 @@ type ensureResult struct {
 
 // promptFn composes a fresh session's initial prompt once its workspace
 // exists AND the turn's attachments are materialized: pull-capable cores
-// materialize .room/ context first, so the prompt may depend on the
-// workspace id, reports the materialized state through st, and names the
-// written attachments.
-type promptFn func(workspaceID string, st *roomlog.CtxState, atts []writtenAttachment) string
+// materialize .room/ context first (its README written with the session's
+// guidance facts g), so the prompt may depend on the workspace id, reports
+// the materialized state through st, and names the written attachments.
+type promptFn func(workspaceID string, st *roomlog.CtxState, atts []writtenAttachment, g roomlog.Guidance) string
 
 // ensureSession binds a drive slot to a local workspace+session, creating
 // them on the first message for that slot and reusing them afterward. Each
@@ -1499,17 +1502,16 @@ func (b *Bridge) ensureSession(ctx context.Context, d *drive, key driveKey, prom
 	// initial prompt runs (createSession below executes it), so the agent's very
 	// first turn can open the files.
 	written := b.materializeAttachments(ctx, d.caps.bytesWriter, entry.endpoint, room, workspaceID, d.job.AttachmentIDs)
-	var st roomlog.CtxState
-	initialPrompt := prompt(workspaceID, &st, written)
-	// What the session is told once (the room model, the content, the
-	// session contributors' parts): its profile or its first prompt's head.
-	profile, prefix, hooks := b.sessionGuidance(ctx, d, entry.endpoint, workspaceID, SessionInfo{
+	// What the session is told once (the guidance, the content, the session
+	// contributors' servers): its profile or its first prompt's head.
+	profile, prefix, hooks, facts := b.sessionGuidance(ctx, d, entry.endpoint, workspaceID, SessionInfo{
 		TenantID: d.job.TenantID, RoomID: room, ChannelID: d.job.ChannelID, Owner: d.owner, Core: d.core, Provider: provider,
 		Sandboxed: opts.Execution != nil, MCPTransports: b.targetTransports(d.core, d.target, provider),
 		JobID: d.job.JobID, RequesterUserID: d.job.RequesterUserID,
 	})
-	initialPrompt = prefix + initialPrompt
-	rs := &roomSession{owner: d.owner, provider: provider, core: d.core, workspaceID: workspaceID, ctx: st, hooks: hooks, profileSum: bindingSum}
+	var st roomlog.CtxState
+	initialPrompt := prefix + prompt(workspaceID, &st, written, facts)
+	rs := &roomSession{owner: d.owner, provider: provider, core: d.core, workspaceID: workspaceID, ctx: st, hooks: hooks, profileSum: bindingSum, guidance: facts}
 	if opts.Execution != nil {
 		rs.workdir = opts.Execution.Sandbox.Workdir
 	}

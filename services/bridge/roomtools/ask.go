@@ -62,7 +62,7 @@ func askAgentTool() Tool {
 			"handle":       map[string]any{"type": "string", "description": `The agent's handle from list_room_agents, e.g. "jack/codex"; when you lead a team, a role of your roster (e.g. "reviewer").`},
 			"task":         map[string]any{"type": "string", "description": "A self-contained task: the agent sees the room's conversation, not your private context."},
 			"expert":       map[string]any{"type": "string", "description": `Optional expert (role) for the agent to wear: its component id, optionally "@version" (it must be usable by the person who asked you).`},
-			"wait_seconds": map[string]any{"type": "integer", "minimum": 0, "description": "How long to wait for the result (default 600, at most 1200). 0 returns at once with the handle."},
+			"wait_seconds": map[string]any{"type": "integer", "minimum": 0, "description": waitDescription(" 0 returns at once with the handle.")},
 		}, "handle", "task"),
 		Call: askAgent,
 	}

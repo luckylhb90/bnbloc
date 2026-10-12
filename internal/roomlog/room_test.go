@@ -4,10 +4,13 @@ import (
 	"context"
 	"errors"
 	"flag"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/luckylhb90/bnbloc/internal/wire"
 )
 
 var updateGolden = flag.Bool("update", false, "rewrite the golden .room/ files in testdata")
@@ -65,28 +68,55 @@ func roomFetch() *fakeFetch {
 	}}
 }
 
-// .room/README.md states the room model: own workspaces, deliverables stored
-// by bnbloc, the shared Library, how to verify.
+// pullTools are the facts of a session with the room tools and .room/.
+var pullTools = Guidance{HasTools: true, HasRoomFiles: true}
+
+// Session guidance states the room model (own workspaces, deliverables
+// stored by bnbloc, the shared Library, how to verify), the .room/ legend
+// only where bnbloc writes .room/, and the room tools' usage only where
+// they are attached, every limit from its owner's constant.
+func TestSessionGuidanceGolden(t *testing.T) {
+	for name, g := range map[string]Guidance{
+		"guidance-tools.txt": pullTools,
+		"guidance-plain.txt": {},
+	} {
+		golden(t, name, SessionGuidance(g))
+	}
+	plain, tools := SessionGuidance(Guidance{}), SessionGuidance(pullTools)
+	for _, s := range []string{".room/", "[The bnbloc-room tools]", "read_artifact"} {
+		if strings.Contains(plain, s) {
+			t.Errorf("guidance without tools or .room/ mentions %q:\n%s", s, plain)
+		}
+		if !strings.Contains(tools, s) {
+			t.Errorf("guidance with tools and .room/ lacks %q:\n%s", s, tools)
+		}
+	}
+	if want := fmt.Sprintf("at most %d tasks per request you are working on, at most %d hops deep", wire.MaxDispatchFanOut, wire.MaxDispatchDepth); !strings.Contains(tools, want) {
+		t.Errorf("the dispatch limits are not the wire constants (%q):\n%s", want, tools)
+	}
+}
+
+// .room/README.md is the session's guidance, kept beside the records.
 func TestReadmeGolden(t *testing.T) {
-	f := ReadmeFile()
-	if f.Name != ".room/README.md" {
-		t.Fatalf("name = %s", f.Name)
+	f := ReadmeFile(pullTools)
+	if f.Name != ".room/README.md" || !strings.HasSuffix(f.Content, SessionGuidance(pullTools)) {
+		t.Fatalf("README = %s:\n%s", f.Name, f.Content)
 	}
 	golden(t, "README.md", f.Content)
 }
 
-// The README is static: a fresh session's first pass writes it, a pass whose
-// workspace already holds its current text does not, and a changed wording
-// (a stale sum) writes it again.
+// The README is static per session: a fresh session's first pass writes it,
+// a pass whose workspace already holds its current text does not, and a
+// changed wording (a stale sum) writes it again.
 func TestReadmeUpdateOnlyWhenChanged(t *testing.T) {
-	f, sum, changed := ReadmeUpdate(CtxState{})
-	if !changed || f.Name != ".room/README.md" || f.Content != ReadmeFile().Content || sum == "" {
+	f, sum, changed := ReadmeUpdate(CtxState{}, pullTools)
+	if !changed || f.Name != ".room/README.md" || f.Content != ReadmeFile(pullTools).Content || sum == "" {
 		t.Fatalf("fresh session: changed=%v name=%s sum=%q", changed, f.Name, sum)
 	}
-	if _, again, changed := ReadmeUpdate(CtxState{ReadmeSum: sum}); changed || again != sum {
+	if _, again, changed := ReadmeUpdate(CtxState{ReadmeSum: sum}, pullTools); changed || again != sum {
 		t.Fatalf("unchanged README reported changed (sum %q -> %q)", sum, again)
 	}
-	if _, _, changed := ReadmeUpdate(CtxState{ReadmeSum: "sum-of-an-older-wording"}); !changed {
+	if _, _, changed := ReadmeUpdate(CtxState{ReadmeSum: "sum-of-an-older-wording"}, pullTools); !changed {
 		t.Fatal("a README whose wording changed is not rewritten")
 	}
 }
@@ -97,8 +127,8 @@ func TestReadmeUpdateOnlyWhenChanged(t *testing.T) {
 func TestComposePointerGolden(t *testing.T) {
 	p := ComposePointer("maya/codex", Now{From: "maya", Text: "MSG"})
 	golden(t, "pointer.txt", p)
-	for _, line := range strings.Split(strings.TrimSpace(SessionGuidance()), "\n") {
-		if strings.Contains(p, line) {
+	for _, line := range strings.Split(strings.TrimSpace(SessionGuidance(pullTools)), "\n") {
+		if line != "" && strings.Contains(p, line) {
 			t.Fatalf("the per-turn prompt carries session guidance %q:\n%s", line, p)
 		}
 	}
@@ -131,8 +161,8 @@ func TestComposeCarriesNoSessionGuidance(t *testing.T) {
 	if strings.Contains(p, "Every agent works in its own workspace") {
 		t.Fatalf("the push prompt carries the room model:\n%s", p)
 	}
-	if !strings.HasPrefix(SessionGuidance(), "[How this bnbloc room works]\n- Every agent works in its own workspace") {
-		t.Fatalf("session guidance = %q", SessionGuidance())
+	if !strings.HasPrefix(SessionGuidance(Guidance{}), "[How this bnbloc room works]\n- Every agent works in its own workspace") {
+		t.Fatalf("session guidance = %q", SessionGuidance(Guidance{}))
 	}
 }
 

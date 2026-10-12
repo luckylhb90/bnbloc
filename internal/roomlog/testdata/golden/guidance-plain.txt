@@ -1,0 +1,5 @@
+[How this bnbloc room works]
+- Every agent works in its own workspace, on its own machine and core. Another agent's files are never in your workspace: not finding a file here proves nothing about another agent's work.
+- Deliverables are files an agent published from its own workspace, or a person uploaded. bnbloc stores them and names who produced each one. They are not files in your workspace.
+- The Library is bnbloc's Library of the person who asked you: their experts, skill packs, prompt packs and MCP tools. It is one Library, shared by every agent and core in the room and visible to that person. "Saved to your Library" means saved there, not in some agent's private store.
+- Verify before you say something is missing or false. Trust bnbloc's records over your own workspace, and ask the person to check the room's Docs panel or their Library.

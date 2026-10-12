@@ -73,8 +73,8 @@ func TestRoomToolsContribution(t *testing.T) {
 			t.Fatal("the bearer leaked into argv")
 		}
 	}
-	if stdio.Instructions == "" || stdio.Turn == nil || stdio.Release == nil {
-		t.Fatalf("contribution = %+v; want instructions, a turn hook and a release", stdio)
+	if !stdio.RoomTools || stdio.Turn == nil || stdio.Release == nil {
+		t.Fatalf("contribution = %+v; want the room tools, a turn hook and a release", stdio)
 	}
 
 	info.MCPTransports = []string{corepkg.MCPStdio, corepkg.MCPHTTP}

@@ -83,17 +83,18 @@ func extForContentType(contentType, filename string) string {
 }
 
 // roomRecordFiles are the .room/ records of a pass besides the history
-// (roomlog owns their wording): the room model (README.md) when the
-// workspace does not hold its current text yet (roomlog.ReadmeUpdate: once
-// per session, not every turn; readmeSum is what to record once written),
+// (roomlog owns their wording): the session's guidance (README.md, rendered
+// with its facts g) when the workspace does not hold its current text yet
+// (roomlog.ReadmeUpdate: once per session, not every turn; readmeSum is
+// what to record once written),
 // then the data rewritten every turn: the deliverables with their producers
 // (artifacts.md), the requester's Library (library.md, read with the job's
 // grant) and the live interaction trail (live.md: what members did inside
 // running deliverables since the bridge started, so a member's "the board
 // looks wrong now" is answerable from the actual gestures). A failed read renders as
 // unreadable, never as empty, and never fails the turn.
-func (b *Bridge) roomRecordFiles(ctx context.Context, room, jobID string, self roomlog.Producer, st roomlog.CtxState) (files []roomlog.NamedFile, readmeSum string) {
-	readme, readmeSum, changed := roomlog.ReadmeUpdate(st)
+func (b *Bridge) roomRecordFiles(ctx context.Context, room, jobID string, self roomlog.Producer, st roomlog.CtxState, g roomlog.Guidance) (files []roomlog.NamedFile, readmeSum string) {
+	readme, readmeSum, changed := roomlog.ReadmeUpdate(st, g)
 	if changed {
 		files = append(files, readme)
 	}
@@ -131,7 +132,7 @@ func (b *Bridge) roomRecordFiles(ctx context.Context, room, jobID string, self r
 // last, so a partial write never advertises files that do not exist). State
 // is only advanced on full success, so a failed pass retries cleanly next
 // turn.
-func (b *Bridge) materializeRoomContext(ctx context.Context, w corepkg.WorkspaceFileWriter, ep corepkg.Endpoint, room, workspaceID, jobID, dropText string, self roomlog.Producer, fresh bool, st roomlog.CtxState) (roomlog.CtxState, string, error) {
+func (b *Bridge) materializeRoomContext(ctx context.Context, w corepkg.WorkspaceFileWriter, ep corepkg.Endpoint, room, workspaceID, jobID, dropText string, self roomlog.Producer, fresh bool, st roomlog.CtxState, g roomlog.Guidance) (roomlog.CtxState, string, error) {
 	selfSpeaker := agentSpeakerLabel(self.Owner, self.Provider)
 	entries, complete, err := roomlog.History(ctx, b.gatewayGET, room, roomlog.HistoryQuery{After: st.EndSeq})
 	if err != nil {
@@ -153,7 +154,7 @@ func (b *Bridge) materializeRoomContext(ctx context.Context, w corepkg.Workspace
 		newState.SelfAfterSeq = newState.EndSeq
 	}
 	// Insert the records before the trailing INDEX.
-	records, readmeSum := b.roomRecordFiles(ctx, room, jobID, self, st)
+	records, readmeSum := b.roomRecordFiles(ctx, room, jobID, self, st, g)
 	newState.ReadmeSum = readmeSum
 	if n := len(files); n > 0 && files[n-1].Name == ".room/INDEX.md" {
 		files = append(append(files[:n-1:n-1], records...), files[n-1])
@@ -175,7 +176,7 @@ func (b *Bridge) materializeRoomContext(ctx context.Context, w corepkg.Workspace
 // core without the writer capability uses the push model every turn. The
 // [now] marker names the message's sender as the room history records it,
 // else the job's requester.
-func (b *Bridge) drivePrompt(ctx context.Context, d *drive, workspaceID string, atts []writtenAttachment, st *roomlog.CtxState, fresh bool) string {
+func (b *Bridge) drivePrompt(ctx context.Context, d *drive, workspaceID string, atts []writtenAttachment, st *roomlog.CtxState, g roomlog.Guidance, fresh bool) string {
 	room, owner, provider, text := d.job.RoomID, d.owner, d.job.Provider, d.text
 	self := agentSpeakerLabel(owner, provider)
 	now := roomlog.Now{From: d.job.RequesterUserID, Text: text, Attachments: toPromptAttachments(atts)}
@@ -189,7 +190,7 @@ func (b *Bridge) drivePrompt(ctx context.Context, d *drive, workspaceID string, 
 	if fresh {
 		start = roomlog.CtxState{}
 	}
-	newSt, from, err := b.materializeRoomContext(ctx, w, ep, room, workspaceID, d.job.JobID, text, roomlog.Producer{Owner: owner, Provider: provider, Core: d.core}, fresh, start)
+	newSt, from, err := b.materializeRoomContext(ctx, w, ep, room, workspaceID, d.job.JobID, text, roomlog.Producer{Owner: owner, Provider: provider, Core: d.core}, fresh, start, g)
 	if err != nil {
 		slog.Warn("bnbloc bridge room-context materialization failed; falling back to pushed context",
 			"event", "bnbloc.bridge.roomctx_failed", "room", room, "core", d.core, "error", err)

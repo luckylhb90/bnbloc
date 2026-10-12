@@ -372,7 +372,7 @@ func (c *call) dispatch(ctx context.Context) (any, *rpcError) {
 			"protocolVersion": version,
 			"capabilities":    map[string]any{"tools": map[string]any{"listChanged": false}},
 			"serverInfo":      serverInfo(),
-			"instructions":    Instructions,
+			"instructions":    serverInstructions,
 		}, nil
 	case "server/discover":
 		if !c.modern {
@@ -381,7 +381,7 @@ func (c *call) dispatch(ctx context.Context) (any, *rpcError) {
 		return c.complete(map[string]any{
 			"supportedVersions": append(append([]string{}, modernVersions...), legacyVersions...),
 			"capabilities":      map[string]any{"tools": map[string]any{}},
-			"instructions":      Instructions,
+			"instructions":      serverInstructions,
 		}), nil
 	case "ping":
 		return c.complete(map[string]any{}), nil

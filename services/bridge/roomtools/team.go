@@ -3,6 +3,7 @@ package roomtools
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/url"
 	"sort"
@@ -171,7 +172,7 @@ func postProgressTool() Tool {
 		Description: "Post one short progress line to the room, for example \"Phase 2/3: tests dispatched to tester\". " +
 			"It shows as a notice of your current request, not as your reply. Use it once per phase of a longer task.",
 		InputSchema: objectSchema(map[string]any{
-			"text": map[string]any{"type": "string", "description": "The progress line (one sentence, at most 500 characters)."},
+			"text": map[string]any{"type": "string", "description": fmt.Sprintf("The progress line (one sentence, at most %d characters).", maxProgressRunes)},
 		}, "text"),
 		Call: func(ctx context.Context, env *Env, args json.RawMessage) Result {
 			var in struct {

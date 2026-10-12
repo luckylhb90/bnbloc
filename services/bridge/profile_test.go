@@ -10,18 +10,29 @@ import (
 	"github.com/luckylhb90/bnbloc/internal/roomlog"
 )
 
-// profileContent is a session profile's instructions after the room model
-// every profile opens with (sessionGuidance); it fails when the room model
-// is not there.
+// cutGuidance splits text that opens with session guidance
+// (roomlog.SessionGuidance, under any facts) into the facts it was rendered
+// with and what follows.
+func cutGuidance(text string) (facts roomlog.Guidance, rest string, ok bool) {
+	for _, g := range []roomlog.Guidance{{HasTools: true, HasRoomFiles: true}, {HasTools: true}, {HasRoomFiles: true}, {}} {
+		if rest, ok := strings.CutPrefix(text, strings.TrimRight(roomlog.SessionGuidance(g), "\n")); ok {
+			return g, rest, true
+		}
+	}
+	return roomlog.Guidance{}, text, false
+}
+
+// profileContent is a session profile's instructions after the guidance
+// every profile opens with (sessionGuidance); it fails when the guidance is
+// not there.
 func profileContent(t *testing.T, p *corepkg.AgentProfile) string {
 	t.Helper()
 	if p == nil {
 		t.Fatal("no profile")
 	}
-	head := strings.TrimRight(roomlog.SessionGuidance(), "\n")
-	rest, ok := strings.CutPrefix(p.Instructions, head)
+	_, rest, ok := cutGuidance(p.Instructions)
 	if !ok {
-		t.Fatalf("the profile does not open with the room model:\n%s", p.Instructions)
+		t.Fatalf("the profile does not open with the session guidance:\n%s", p.Instructions)
 	}
 	return strings.TrimSpace(rest)
 }
@@ -121,8 +132,8 @@ func TestSessionContributorReachesProfileCore(t *testing.T) {
 		infos = append(infos, s)
 		mu.Unlock()
 		return SessionContribution{
-			MCPServers:   []corepkg.MCPServer{{Name: "room", Type: corepkg.MCPHTTP, URL: "http://127.0.0.1:1/mcp", Headers: []corepkg.NameValue{{Name: "Authorization", Value: "Bearer per-session"}}}},
-			Instructions: "Use the room tools to reach other agents.",
+			MCPServers: []corepkg.MCPServer{{Name: "room", Type: corepkg.MCPHTTP, URL: "http://127.0.0.1:1/mcp", Headers: []corepkg.NameValue{{Name: "Authorization", Value: "Bearer per-session"}}}},
+			RoomTools:  true,
 			Turn: func(t TurnInfo) {
 				mu.Lock()
 				turns = append(turns, t)
@@ -147,7 +158,10 @@ func TestSessionContributorReachesProfileCore(t *testing.T) {
 		t.Fatalf("profiles = %+v", profiles)
 	}
 	p := profiles[0]
-	if len(p.MCPServers) != 1 || p.MCPServers[0].Name != "room" || profileContent(t, p) != "Use the room tools to reach other agents." {
+	// The room tools' usage is session guidance (HasTools), worded by
+	// roomlog alone: the contributor adds none of its own.
+	if facts, _, _ := cutGuidance(p.Instructions); len(p.MCPServers) != 1 || p.MCPServers[0].Name != "room" || profileContent(t, p) != "" ||
+		facts != (roomlog.Guidance{HasTools: true, HasRoomFiles: true}) {
 		t.Fatalf("profile = %+v", p)
 	}
 	mu.Lock()
@@ -245,7 +259,7 @@ func TestRoomModelInFirstPromptOnlyWithoutProfile(t *testing.T) {
 			if len(first) != 1 || len(follow) != 1 {
 				t.Fatalf("first prompts %q, follow-ups %q", first, follow)
 			}
-			if !strings.HasPrefix(first[0], roomlog.SessionGuidance()) || strings.Count(first[0], roomModelMarker) != 1 {
+			if _, _, ok := cutGuidance(first[0]); !ok || strings.Count(first[0], roomModelMarker) != 1 {
 				t.Fatalf("the first prompt does not open with the room model (once):\n%s", first[0])
 			}
 			if !strings.Contains(first[0], "first") {

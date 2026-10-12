@@ -81,8 +81,8 @@ func (c *roomToolsContributor) ContributeSession(_ context.Context, info Session
 		server.Env = []corepkg.NameValue{{Name: roomtools.TokenEnv, Value: token}}
 	}
 	return SessionContribution{
-		MCPServers:   []corepkg.MCPServer{server},
-		Instructions: roomtools.Instructions,
+		MCPServers: []corepkg.MCPServer{server},
+		RoomTools:  true,
 		Turn: func(t TurnInfo) {
 			sess.Bind(roomtools.Job{JobID: t.JobID, RequesterUserID: t.RequesterUserID, ChannelID: t.ChannelID, MessageSeq: t.MessageSeq, Workspace: t.Workspace, Team: t.Team})
 		},

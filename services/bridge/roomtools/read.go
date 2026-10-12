@@ -30,7 +30,7 @@ func readRoomTool() Tool {
 			"one line each: \"#<seq> <author>: <text>\". Pass since (a seq from an earlier read) to get only newer messages.",
 		InputSchema: objectSchema(map[string]any{
 			"since": map[string]any{"type": "integer", "minimum": 0, "description": "Only messages after this seq."},
-			"limit": map[string]any{"type": "integer", "minimum": 1, "maximum": maxReadLimit, "description": "At most this many messages (default 30)."},
+			"limit": map[string]any{"type": "integer", "minimum": 1, "maximum": maxReadLimit, "description": "At most this many messages (default " + strconv.Itoa(defaultReadLimit) + ")."},
 		}),
 		ReadOnly: true,
 		Call:     readRoom,

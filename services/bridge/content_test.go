@@ -234,7 +234,7 @@ func TestContentFallbackPrefixesThePrompt(t *testing.T) {
 		t.Fatalf("prompts = %q", prompts)
 	}
 	pr := prompts[0]
-	if !strings.HasPrefix(pr, roomlog.SessionGuidance()+"\n[Expert: Reviewer (v1.0.0).") || !strings.Contains(pr, "MARKER-ALPHA") || !strings.Contains(pr, ".agents/skills/<name>/") ||
+	if !strings.HasPrefix(pr, roomlog.SessionGuidance(roomlog.Guidance{HasRoomFiles: true})+"\n[Expert: Reviewer (v1.0.0).") || !strings.Contains(pr, "MARKER-ALPHA") || !strings.Contains(pr, ".agents/skills/<name>/") ||
 		!strings.Contains(pr, "- checklist: Use when reviewing a diff") || !strings.Contains(pr, "review my change") {
 		t.Fatalf("prompt = %s", pr)
 	}

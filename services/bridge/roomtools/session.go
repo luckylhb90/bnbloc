@@ -2,6 +2,7 @@ package roomtools
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"time"
 )
@@ -49,6 +50,12 @@ const (
 	defaultMaxWait           = 20 * time.Minute
 	defaultDeliverableSettle = 3 * time.Second
 )
+
+// waitDescription is the wait_seconds parameter's description, from the
+// default waits.
+func waitDescription(more string) string {
+	return fmt.Sprintf("How long to wait for the result in seconds (default %d, at most %d).%s", int(defaultWait/time.Second), int(defaultMaxWait/time.Second), more)
+}
 
 func (c Config) withDefaults() Config {
 	if c.PollInterval <= 0 {

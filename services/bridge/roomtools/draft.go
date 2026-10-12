@@ -30,7 +30,7 @@ func tryDraftTool() Tool {
 			"dir":          map[string]any{"type": "string", "description": "Workspace-relative directory holding component.json, e.g. drafts/contract-reviewer."},
 			"task":         map[string]any{"type": "string", "description": "A realistic, self-contained sample task for the drafted expert or skill."},
 			"handle":       map[string]any{"type": "string", "description": `Optional agent to try it on, from list_room_agents (e.g. "jack/codex"); never yourself.`},
-			"wait_seconds": map[string]any{"type": "integer", "minimum": 0, "description": "How long to wait for the result (default 600, at most 1200)."},
+			"wait_seconds": map[string]any{"type": "integer", "minimum": 0, "description": waitDescription("")},
 		}, "dir", "task"),
 		Call: tryDraft,
 	}

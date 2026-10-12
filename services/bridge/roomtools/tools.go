@@ -13,19 +13,11 @@ import (
 	"github.com/luckylhb90/bnbloc/internal/httpx"
 )
 
-// Instructions tell the agent what the room tools are for. They ride the
-// MCP initialize/discover answer and the session profile, and stay the same
-// for every session.
-const Instructions = `You are working in a bnbloc room shared by people and their agents. The bnbloc-room tools let you see the room's agents and ask one of them to take part of your task:
-- list_room_agents: who you can ask (handles such as "jack/codex").
-- ask_agent: send a task to one agent and wait for its reply and deliverables. The task is posted in the room on behalf of the person who asked you, so it runs under their authority (another member's agent may refuse without their authorization). Give a self-contained task.
-- room_status: the state of tasks you dispatched (use the handle ask_agent returns when it stops waiting).
-- read_room: recent messages of this conversation.
-- read_artifact: the content of a room deliverable (ids in .room/artifacts.md). Every agent has its own workspace: another agent's files are never in yours, so check its work here.
-- post_progress: post a short progress line of your current request to the room (once per phase of a longer task).
-- save_component, get_component, list_components: save an expert, skill pack or prompt pack you drafted in your workspace (a directory with component.json) to the Library of the person who asked you, only after they confirm; read or list theirs (list_components also lists their MCP tools) to improve one or to check what was saved. The Library is bnbloc's, shared by every agent in the room.
-- publish_component: after they confirm, ask their organization's admins to publish one of theirs to the organization (scope org; the admins approve it), or take it back (scope personal).
-Dispatching is bounded: at most 8 tasks per request you are working on, at most 3 hops deep, never to yourself or to an agent already working on this request.`
+// serverInstructions is the MCP initialize/discover instructions: one line.
+// How to use the tools is session guidance (roomlog.SessionGuidance, told
+// once in the session's profile), and tools/list describes each tool; a
+// harness that surfaces MCP instructions must not show either twice.
+const serverInstructions = "The tools of the bnbloc room you are working in. How to use them is in your session guidance; each tool's description says what it does."
 
 // Tool is one room tool: its MCP descriptor and its implementation.
 type Tool struct {
