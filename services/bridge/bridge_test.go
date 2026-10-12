@@ -16,34 +16,8 @@ import (
 	"time"
 
 	corepkg "github.com/luckylhb90/bnbloc/core"
+	"github.com/luckylhb90/bnbloc/internal/wire"
 )
-
-// serveRecipient decides whether this bridge drives a chat addressed to a given
-// owner's agent: only its own owner in production, anyone under ServeAllOwners,
-// and always an empty (legacy/self) recipient owner.
-func TestServeRecipient(t *testing.T) {
-	cases := []struct {
-		name           string
-		serveAll       bool
-		recipientOwner string
-		bridgeOwner    string
-		serve          bool
-	}{
-		{"own agent served", false, "maya", "maya", true},
-		{"other agent not served in prod", false, "jack", "maya", false},
-		{"other agent served under serve-all", true, "jack", "maya", true},
-		{"empty recipient owner always served", false, "", "maya", true},
-		{"a case variant is another owner", false, "Maya", "maya", false},
-	}
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			if got := serveRecipient(c.serveAll, c.recipientOwner, c.bridgeOwner); got != c.serve {
-				t.Fatalf("serveRecipient(%v, %q, %q) = %v, want %v",
-					c.serveAll, c.recipientOwner, c.bridgeOwner, got, c.serve)
-			}
-		})
-	}
-}
 
 // isBorrow flags a chat whose author differs from the agent's owner (borrowing);
 // a self-addressed or unattributed chat is not a borrow.
@@ -230,13 +204,13 @@ func TestDisabledProviderFiltering(t *testing.T) {
 // Refusing a locally-disabled provider must be side-effect-free: a borrowed job
 // (requester != owner) naming a disabled (core, provider) must resolve+refuse
 // BEFORE the borrow gate, so it never checks authorization, records a borrow, or
-// posts a borrow-denied message. Only the job's own status report may leave the
-// bridge. Regression guard: the disabled guard sat after the borrow block, so a
-// disabled borrow still hit the gateway.
+// posts a borrow-denied message. Only the job's own status report and its
+// refusal notice may leave the bridge. Regression guard: the disabled guard
+// sat after the borrow block, so a disabled borrow still hit the gateway.
 func TestDisabledRecipientNotDrivenBeforeBorrow(t *testing.T) {
 	var borrowHits int64
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !strings.HasSuffix(r.URL.Path, "/status") {
+		if !strings.HasSuffix(r.URL.Path, "/status") && !strings.HasSuffix(r.URL.Path, "/agent-activity/messages") {
 			atomic.AddInt64(&borrowHits, 1)
 		}
 		w.WriteHeader(http.StatusOK)
@@ -368,7 +342,7 @@ func TestRefreshRosterFollowsEndpointChange(t *testing.T) {
 		Cores:          []CoreConfig{{Name: "core-a", Provider: prov, Endpoint: prov.ep}},
 	})
 	// A live bound session on the discovery-capable core.
-	key := sessionKey("room1", "core-a", "codex")
+	key := driveKey{room: "room1", core: "core-a", provider: "codex"}
 	b.sessions[key] = &roomSession{core: "core-a", workspaceID: "w", sessionID: "s"}
 
 	// Same endpoint: refresh must NOT evict the session.
@@ -589,8 +563,16 @@ func TestClaimOnceDrivesJobPayloadAndReportsStatuses(t *testing.T) {
 func TestClaimOnceFailsJobWithMissingPromptWithoutDriving(t *testing.T) {
 	rec := newStatusRecorder()
 	var createCalls int64
+	var notice atomic.Value
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/rooms/room-1/agent-activity/messages":
+			var in wire.ReportMessagesInput
+			_ = json.NewDecoder(r.Body).Decode(&in)
+			if p, ok := in.Messages[0].Payload.(map[string]any); ok {
+				notice.Store(p["notice"])
+			}
+			_, _ = w.Write([]byte(`{}`))
 		case r.Method == http.MethodPost && r.URL.Path == "/v1/bridge/jobs/claim":
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"jobs":[{"jobId":"job-empty","roomId":"room-1","requesterUserId":"alice","ownerUserId":"alice","core":"core-a","provider":"codex","messageText":"   "}]}`))
@@ -619,6 +601,9 @@ func TestClaimOnceFailsJobWithMissingPromptWithoutDriving(t *testing.T) {
 	}
 	if got := rec.wait(t); got != "failed:invalid_job" {
 		t.Fatalf("statuses = %s, want failed:invalid_job", got)
+	}
+	if got := notice.Load(); got != "invalid-job" {
+		t.Fatalf("notice = %v, want the invalid-job notice (every refusal says why)", got)
 	}
 	if atomic.LoadInt64(&createCalls) != 0 {
 		t.Fatal("job with empty messageText drove the local core")

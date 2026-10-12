@@ -67,30 +67,39 @@ func TestWorkspacePathKinds(t *testing.T) {
 	}
 }
 
-func TestContentSumIgnoresCredentials(t *testing.T) {
+func TestBindingSumIgnoresCredentials(t *testing.T) {
 	base := &AgentProfile{Instructions: "Be terse.", Skills: []ProfileSkill{{Name: "review", Files: []ProfileFile{
 		{Path: "SKILL.md", Content: []byte("---\nname: review\n---\n")},
 		{Path: "scripts/a.sh", Content: []byte("echo")},
 	}}}}
+	base.MCPServers = []MCPServer{{Name: "room", Type: MCPHTTP, URL: "http://127.0.0.1:1", Headers: []NameValue{{Name: "Authorization", Value: "Bearer one"}}}}
 	withSecrets := *base
 	withSecrets.MCPServers = []MCPServer{{Name: "room", Type: MCPHTTP, URL: "http://127.0.0.1:1", Headers: []NameValue{{Name: "Authorization", Value: "Bearer s3cret"}}}}
 	withSecrets.Env = map[string]string{"TOKEN": "s3cret"}
-	if base.ContentSum() != withSecrets.ContentSum() {
-		t.Fatal("credentials changed the content sum")
+	if base.BindingSum() != withSecrets.BindingSum() {
+		t.Fatal("credentials changed the binding sum")
+	}
+	if strings.Contains(withSecrets.BindingSum(), "s3cret") {
+		t.Fatal("a credential in the binding sum")
+	}
+	added := *base
+	added.MCPServers = append(append([]MCPServer(nil), base.MCPServers...), MCPServer{Name: "lint", Command: "/t/lint"})
+	if added.BindingSum() == base.BindingSum() {
+		t.Fatal("adding an MCP server kept the binding sum")
 	}
 	reordered := &AgentProfile{Instructions: "Be terse.", Skills: []ProfileSkill{{Name: "review", Files: []ProfileFile{
 		{Path: "scripts/a.sh", Content: []byte("echo")},
 		{Path: "SKILL.md", Content: []byte("---\nname: review\n---\n")},
-	}}}}
-	if base.ContentSum() != reordered.ContentSum() {
+	}}}, MCPServers: base.MCPServers}
+	if base.BindingSum() != reordered.BindingSum() {
 		t.Fatal("file order changed the content sum")
 	}
-	changed := &AgentProfile{Instructions: "Be verbose.", Skills: base.Skills}
-	if base.ContentSum() == changed.ContentSum() {
+	changed := &AgentProfile{Instructions: "Be verbose.", Skills: base.Skills, MCPServers: base.MCPServers}
+	if base.BindingSum() == changed.BindingSum() {
 		t.Fatal("instructions change kept the content sum")
 	}
 	var nilProfile *AgentProfile
-	if nilProfile.ContentSum() != "" || !nilProfile.Empty() {
+	if nilProfile.BindingSum() != "" || !nilProfile.Empty() {
 		t.Fatal("nil profile")
 	}
 }

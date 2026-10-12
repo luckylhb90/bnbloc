@@ -57,7 +57,7 @@ func TestRoomToolsContribution(t *testing.T) {
 	if len(contribs) != 1 {
 		t.Fatalf("contributors = %d", len(contribs))
 	}
-	info := SessionInfo{Key: "k", RoomID: "room-1", ChannelID: "ch", Owner: "alice", Core: "core-a", Provider: "codex", JobID: "job-1", RequesterUserID: "bob"}
+	info := SessionInfo{RoomID: "room-1", ChannelID: "ch", Owner: "alice", Core: "core-a", Provider: "codex", JobID: "job-1", RequesterUserID: "bob"}
 
 	stdio, err := contribs[0].ContributeSession(context.Background(), info)
 	if err != nil {

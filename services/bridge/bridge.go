@@ -174,7 +174,8 @@ type Bridge struct {
 	driveCtx context.Context
 	mu       sync.Mutex
 	rooms    map[string]context.CancelFunc // roomId -> stream canceller
-	sessions map[string]*roomSession       // "roomId\x00core\x00provider" -> bound session
+	sessions map[driveKey]*roomSession     // drive slot -> bound session
+	locks    map[driveKey]*sync.Mutex      // drive slot -> drive lock
 	syncs    map[string]context.CancelFunc // roomId -> sync engine canceller
 	// gone holds rooms the gateway answered 404/403 for (deleted, or the owner
 	// lost access) and when: reconcile does not re-subscribe them while they
@@ -389,7 +390,8 @@ func New(cfg Config) *Bridge {
 		http:        &http.Client{Timeout: 20 * time.Second},
 		stream:      &http.Client{},
 		rooms:       map[string]context.CancelFunc{},
-		sessions:    map[string]*roomSession{},
+		sessions:    map[driveKey]*roomSession{},
+		locks:       map[driveKey]*sync.Mutex{},
 		syncs:       map[string]context.CancelFunc{},
 		gone:        map[string]time.Time{},
 		claimSem:    make(chan struct{}, maxConcurrentClaims),
@@ -565,77 +567,33 @@ type jobRef struct {
 	MessageSeq      int64
 	RequesterUserID string
 	TenantID        string
+	RoomID          string
+	ChannelID       string
 	// content is what the turn wears (experts, skill packs: content.go);
 	// nil = none.
 	content *jobContent
 }
 
-// ref is the job's drive identity.
-func (j bridgeJob) ref() jobRef {
-	return jobRef{ID: j.JobID, MessageSeq: j.MessageSeq, RequesterUserID: j.RequesterUserID, TenantID: j.TenantID}
-}
-
 type bridgeJob struct {
-	JobID           string
-	TenantID        string
-	RoomID          string
-	ChannelID       string
-	MessageSeq      int64 // the prompting chat message
-	RequesterUserID string
-	OwnerUserID     string
-	Core            string
-	Provider        string
-	TargetID        string
-	MessageText     string
-	AttachmentIDs   []string
-	Model           string
-	ReasoningEffort string
+	JobID           string   `json:"jobId"`
+	TenantID        string   `json:"tenantId"`
+	RoomID          string   `json:"roomId"`
+	ChannelID       string   `json:"channelId"`
+	MessageSeq      int64    `json:"messageSeq"` // the prompting chat message
+	RequesterUserID string   `json:"requesterUserId"`
+	OwnerUserID     string   `json:"ownerUserId"`
+	Core            string   `json:"core"`
+	Provider        string   `json:"provider"`
+	TargetID        string   `json:"targetId"`
+	MessageText     string   `json:"messageText"`
+	AttachmentIDs   []string `json:"attachmentIds"`
+	Model           string   `json:"model"`
+	ReasoningEffort string   `json:"reasoningEffort"`
 	// ExpertID / ExpertVersion / ExpertName: the expert the chat asked the
 	// agent to wear, pinned on the job (content.go).
-	ExpertID      string
-	ExpertVersion string
-	ExpertName    string
-}
-
-func (j *bridgeJob) UnmarshalJSON(data []byte) error {
-	var raw map[string]json.RawMessage
-	if err := json.Unmarshal(data, &raw); err != nil {
-		return err
-	}
-	j.JobID = jsonString(raw, "jobId", "JobID")
-	j.TenantID = jsonString(raw, "tenantId", "TenantID")
-	j.RoomID = jsonString(raw, "roomId", "RoomID")
-	j.ChannelID = jsonString(raw, "channelId", "ChannelID")
-	if rawSeq, ok := raw["messageSeq"]; ok {
-		_ = json.Unmarshal(rawSeq, &j.MessageSeq)
-	}
-	j.RequesterUserID = jsonString(raw, "requesterUserId", "RequesterUserID")
-	j.OwnerUserID = jsonString(raw, "ownerUserId", "OwnerUserID")
-	j.Core = jsonString(raw, "core", "Core")
-	j.Provider = jsonString(raw, "provider", "Provider")
-	j.TargetID = jsonString(raw, "targetId", "TargetID")
-	j.MessageText = jsonString(raw, "messageText", "MessageText")
-	if rawIDs, ok := raw["attachmentIds"]; ok {
-		_ = json.Unmarshal(rawIDs, &j.AttachmentIDs)
-	}
-	j.Model = jsonString(raw, "model", "Model")
-	j.ReasoningEffort = jsonString(raw, "reasoningEffort", "ReasoningEffort")
-	j.ExpertID = jsonString(raw, "expertId")
-	j.ExpertVersion = jsonString(raw, "expertVersion")
-	j.ExpertName = jsonString(raw, "expertName")
-	return nil
-}
-
-func jsonString(raw map[string]json.RawMessage, names ...string) string {
-	for _, name := range names {
-		if b, ok := raw[name]; ok {
-			var v string
-			if json.Unmarshal(b, &v) == nil {
-				return v
-			}
-		}
-	}
-	return ""
+	ExpertID      string `json:"expertId"`
+	ExpertVersion string `json:"expertVersion"`
+	ExpertName    string `json:"expertName"`
 }
 
 func (b *Bridge) claimOnce(ctx context.Context) bool {
@@ -655,10 +613,7 @@ func (b *Bridge) claimOnce(ctx context.Context) bool {
 	}
 	// Drives run under the Bridge root context, not the claim caller's: a roster
 	// change cancels stream contexts and must never abort a running turn.
-	driveCtx := b.driveCtx
-	if driveCtx == nil {
-		driveCtx = ctx
-	}
+	driveCtx := b.detached(ctx)
 	for _, job := range resp.Jobs {
 		select {
 		case b.claimSem <- struct{}{}:
@@ -671,160 +626,6 @@ func (b *Bridge) claimOnce(ctx context.Context) bool {
 		}(job)
 	}
 	return len(resp.Jobs) > 0
-}
-
-func (b *Bridge) runBridgeJob(ctx context.Context, job bridgeJob) {
-	// Hold the lease for as long as the turn actually runs. Without renewal a
-	// turn longer than the server lease is reclaimed by another bridge and the
-	// same prompt executes twice.
-	ctx, stopDrive := context.WithCancel(ctx)
-	defer stopDrive()
-	// When this turn began: scopes deliverable publishing to what this turn
-	// actually wrote (a cold-start session must not dump its older history).
-	turnStartMs := time.Now().UnixMilli()
-	// Register the job so a cancellation arriving over the room stream can
-	// interrupt this turn at once. The lease loop is the fallback for when the
-	// stream is down: slower, but it still stops the work.
-	rj := &runningJob{stop: stopDrive}
-	release := b.trackJob(job.JobID, rj)
-	defer release()
-	go b.renewLeaseLoop(ctx, job.JobID, func() { b.abortJob(job.JobID, "lease_lost") })
-	text := strings.TrimSpace(job.MessageText)
-	owner := firstNonEmpty(job.OwnerUserID, b.cfg.OwnerSubject)
-	if text == "" && len(job.AttachmentIDs) == 0 {
-		b.refuse(ctx, job, owner, refuseInvalidJob, "missing messageText", nil)
-		return
-	}
-	coreName, ok := b.resolveCore(job.Core)
-	if !ok {
-		// A job naming a core this bridge does not run must not be driven on a
-		// different core: that silently answers with the wrong agent.
-		b.refuse(ctx, job, owner, refuseNotAdvertised, "", map[string]any{"core": job.Core, "provider": job.Provider})
-		return
-	}
-	if b.providerDisabled(coreName, job.Provider) {
-		b.refuse(ctx, job, owner, refuseNotAdvertised, "", map[string]any{"core": coreName, "provider": job.Provider})
-		return
-	}
-	// The expert and skill packs the turn wears are resolved and verified
-	// before anything else: content from someone else that runs scripts
-	// forces the sandbox, decided next.
-	content, ok := b.jobContentOrRefuse(ctx, job, owner, coreName)
-	if !ok {
-		return
-	}
-	// Where the drive runs (host or agent sandbox) is decided before any
-	// quota is reserved: a borrowed drive the tenant requires to be
-	// sandboxed, or a turn wearing someone else's script-bearing content,
-	// is refused here when the sandbox cannot take it.
-	borrowed := isBorrow(job.RequesterUserID, owner)
-	prepareExec, refuse, unsandboxed := b.planSandbox(ctx, job, owner, coreName, borrowed, content.foreign)
-	if refuse != "" {
-		b.refuseUnsandboxed(ctx, job, owner, coreName, refuse)
-		return
-	}
-	// A borrow runs only on a positive authorization. When this bridge acts
-	// as the owner it reserves the run (R8: the reservation counts against
-	// the quota before anything is driven) and settles it after the drive.
-	// The reservation says whether the drive must be sandboxed (a platform
-	// agent): one that is not is refused like the tenant policy's, before
-	// anything runs.
-	var reservationID string
-	if borrowed {
-		rsv := b.authorizeBorrow(ctx, job, owner, coreName, prepareExec != nil)
-		reservationID = rsv.ID
-		denyReason := rsv.DenyReason
-		if denyReason == shareagent.DenySandboxRequired {
-			b.refuseUnsandboxed(ctx, job, owner, coreName, platformSandboxPrefix+unsandboxed)
-			return
-		}
-		if denyReason != "" {
-			b.postBorrowDenied(ctx, job.ref(), job.RoomID, owner, job.Provider, job.ChannelID, denyReason)
-			b.refuse(ctx, job, owner, refuseBorrowDenied, "", map[string]any{"core": coreName, "provider": job.Provider, "requesterUserId": job.RequesterUserID, "denyReason": denyReason})
-			return
-		}
-		// A platform agent's turn that named no model runs with its host's
-		// default model, exactly as if the member had picked it: the session
-		// options, the run report and the settle all read job.Model.
-		if job.Model == "" {
-			job.Model = rsv.DefaultModel
-		}
-	}
-	target := b.resolveTarget(ctx, coreName, job.Provider)
-	if jt := strings.TrimSpace(job.TargetID); jt != "" && jt != job.Provider && jt != coreName+"/"+job.Provider {
-		target = jt
-	}
-	if len(content.mcp.servers) > 0 {
-		profileOK, transports := b.mcpAttach(ctx, coreName, target, job.Provider)
-		content.fitMCPToTarget(profileOK, transports)
-	}
-	running := map[string]any{"core": coreName, "provider": job.Provider, "targetId": target, "sandboxed": prepareExec != nil}
-	if content.expert != nil {
-		running["expert"] = expertLabel(content.expert)
-	}
-	if content.roomExpert != nil {
-		running["roomExpert"] = expertLabel(content.roomExpert)
-	}
-	if len(content.missing) > 0 {
-		running["contentMissing"] = content.missing
-	}
-	if err := b.reportJobStatus(ctx, job.JobID, store.AgentJobRunning, "", running); err != nil {
-		slog.Debug("bnbloc bridge job running status failed", "event", "bnbloc.bridge.job_status_failed", "job", job.JobID, "error", err)
-	}
-	opts := corepkg.SessionOptions{Model: job.Model, ReasoningEffort: job.ReasoningEffort}
-	reflowReported := false
-	res, err := b.driveClaim(ctx, jobRef{ID: job.JobID, MessageSeq: job.MessageSeq, RequesterUserID: job.RequesterUserID, TenantID: job.TenantID, content: content}, job.RoomID, owner, coreName, job.Provider, target, text, job.AttachmentIDs, opts, prepareExec, job.ChannelID, func(rs *roomSession) {
-		// Publish the bound session so a cancel arriving mid-turn can interrupt it.
-		rj.bind(coreName, rs)
-		reflowReported = true
-		b.reportJobStatus(ctx, job.JobID, store.AgentJobReflowing, "", map[string]any{"core": coreName, "provider": job.Provider, "workspaceId": rs.workspaceID, "sessionId": rs.sessionID})
-	})
-	// A reserved borrow is settled once the drive ends — whatever its
-	// outcome; the run was counted at reserve time — with the usage the
-	// turn's replies reported. Detached context: ctx is cancelled the moment
-	// this function returns (or the job is aborted).
-	if reservationID != "" {
-		recordCtx := b.driveCtx
-		if recordCtx == nil {
-			recordCtx = context.WithoutCancel(ctx)
-		}
-		go b.settleBorrow(recordCtx, job.RoomID, owner, coreName, job.Provider, reservationID, res.usage.recordFields(job.Model))
-	}
-	// An aborted job is no longer ours: the server already recorded the cancel and
-	// cleared the lease, so any outcome report would be rejected. Stop reporting
-	// rather than arguing with the server about a turn nobody wants.
-	if rj.aborted() {
-		slog.Info("bnbloc bridge job abandoned after abort",
-			"event", "bnbloc.bridge.job_abandoned", "job", job.JobID)
-		return
-	}
-	if err != nil {
-		if res.replied {
-			b.reportJobStatus(ctx, job.JobID, store.AgentJobReplied, "", res.usage.withRunReport(map[string]any{"core": coreName, "provider": job.Provider, "workspaceId": res.workspaceID, "sessionId": res.sessionID, "warning": cleanDriveError(err)}, job.Model))
-			return
-		}
-		b.failJob(ctx, job.JobID, driveFailureReason(err), res.usage.withRunReport(map[string]any{"core": coreName, "provider": job.Provider, "targetId": target, "error": cleanDriveError(err)}, job.Model))
-		return
-	}
-	if !reflowReported {
-		b.reportJobStatus(ctx, job.JobID, store.AgentJobReflowing, "", map[string]any{"core": coreName, "provider": job.Provider})
-	}
-	if res.replied {
-		b.reportJobStatus(ctx, job.JobID, store.AgentJobReplied, "", res.usage.withRunReport(map[string]any{"core": coreName, "provider": job.Provider, "workspaceId": res.workspaceID, "sessionId": res.sessionID}, job.Model))
-		// The turn's changed files become artifact versions so the room's Docs
-		// panel reflects the agent's work. Presentation only: a failure never
-		// marks the turn failed.
-		if _, boundRS := rj.bound(); boundRS != nil {
-			// Detached context: runBridgeJob's ctx is cancelled the moment this
-			// function returns (defer stopDrive), which would abort the publish
-			// goroutine's very first request. The bridge root keeps it alive.
-			go b.publishDeliverables(b.driveCtx, job.RoomID, job.ChannelID, boundRS,
-				deliverableTurn{StartMs: turnStartMs, JobID: job.JobID, SourceSeq: job.MessageSeq})
-		}
-		return
-	}
-	// The turn ran (it may have acted) without a visible reply: final.
-	b.failJob(ctx, job.JobID, store.FailureReplyTimeout, res.usage.withRunReport(map[string]any{"core": coreName, "provider": job.Provider, "workspaceId": res.workspaceID, "sessionId": res.sessionID, "error": "agent turn completed without a visible reply"}, job.Model))
 }
 
 // renewLeaseLoop keeps this bridge's lease on a running job alive until the
@@ -973,8 +774,8 @@ func (b *Bridge) reconcile(ctx context.Context) {
 	}
 	// Drop rooms that disappeared (deleted, or the owner left): cancel their
 	// stream + sync contexts and delete the map entries so the bridge stops
-	// reconnecting to dead rooms. Also prune their per-provider claim locks so
-	// roomLocks does not grow without bound across a long-lived bridge.
+	// reconnecting to dead rooms. Also prune their drive locks so they do not
+	// grow without bound across a long-lived bridge.
 	for room, cancel := range b.rooms {
 		if _, ok := want[room]; ok {
 			continue
@@ -1089,23 +890,19 @@ func (b *Bridge) refreshTargets(ctx context.Context) {
 	}
 }
 
-// forgetRoom drops per-room state for a room the bridge no longer watches: its
-// bound sessions and the per-(core,provider) claim locks in roomLocks. Both are
-// keyed "roomId\x00core\x00provider", so pruning by the "roomId\x00" prefix
-// clears every core+provider entry the room ever drove. Callers hold b.mu.
+// forgetRoom drops per-room state for a room the bridge no longer watches:
+// its bound sessions and drive locks. Callers hold b.mu.
 func (b *Bridge) forgetRoom(room string) {
-	prefix := room + "\x00"
 	for key := range b.sessions {
-		if strings.HasPrefix(key, prefix) {
+		if key.room == room {
 			b.unbindLocked(key)
 		}
 	}
-	roomLocks.Range(func(k, _ any) bool {
-		if key, ok := k.(string); ok && strings.HasPrefix(key, prefix) {
-			roomLocks.Delete(key)
+	for key := range b.locks {
+		if key.room == room {
+			delete(b.locks, key)
 		}
-		return true
-	})
+	}
 }
 
 // goneRoomCooldown is how long a room the gateway rejected as gone stays
@@ -1253,13 +1050,12 @@ func (b *Bridge) syncPlan(ctx context.Context, room string) (mode, dir string, e
 // Sessions are keyed per (room, core, provider), so a room can have several;
 // live sync mirrors the one the room used last.
 func (b *Bridge) latestRoomSession(room string) *roomSession {
-	prefix := room + "\x00"
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	var best *roomSession
 	var bestAt int64
 	for key, rs := range b.sessions {
-		if !strings.HasPrefix(key, prefix) {
+		if key.room != room {
 			continue
 		}
 		at := rs.lastTurnStart()
@@ -1293,11 +1089,13 @@ func (b *Bridge) runSync(ctx context.Context, room, dir string) error {
 		// fallback for authority election.
 		PeerID: "~peer:" + room,
 		OnConflict: func(e syncpkg.ConflictEvent) {
-			msg := "sync conflict on " + e.Path + " (" + e.Reason + ")"
+			msg := "Sync conflict on " + e.Path + " (" + e.Reason + ")"
 			if e.ConflictCopy != "" {
-				msg += "; peer version kept as " + e.ConflictCopy
+				msg += "; the peer's version was kept as " + e.ConflictCopy
 			}
-			_, _ = b.gatewayPOST(ctx, "/v1/rooms/"+room+"/chat", map[string]any{"text": msg, "atUnixMs": time.Now().UnixMilli()})
+			// A notice in the room's default channel, never chat authored by
+			// the owner (agents do not read notices back as speech).
+			b.postNotice(ctx, jobRef{RoomID: room}, wire.JobNotice{Kind: "sync-conflict", Text: msg, OwnerUserID: b.cfg.OwnerSubject})
 		},
 	})
 }
@@ -1526,27 +1324,22 @@ func (b *Bridge) handleJobUpdate(data string) {
 	b.abortJob(ev.Payload.JobID, ev.Payload.Status)
 }
 
-var roomLocks sync.Map // "roomId\x00core\x00provider" -> *sync.Mutex
-
-// driveClaim is the single execution entrypoint for a durable job. Drives are
-// serialized per (room, core, provider, execution kind) so consecutive turns
-// for one agent session queue instead of interleaving on the same core
-// session. prepareExec (nil = run on the host) readies a sandboxed turn under
-// that lock — space re-ensure + a fresh exec token — and its descriptor rides
-// the session create / input.
-func (b *Bridge) driveClaim(ctx context.Context, job jobRef, room, owner, core, provider, target, text string, attachmentIDs []string, opts corepkg.SessionOptions, prepareExec func(context.Context) (*corepkg.Execution, error), channelID string, beforeReflow func(*roomSession)) (driveResult, error) {
-	key := driveSessionKey(room, core, provider, prepareExec != nil)
-	lockAny, _ := roomLocks.LoadOrStore(key, &sync.Mutex{})
-	lock := lockAny.(*sync.Mutex)
+// driveClaim is stage 7's drive. Drives are serialized per drive slot
+// (room, core, provider, execution kind) so consecutive turns for one agent
+// session queue instead of interleaving on the same core session. A
+// sandboxed drive readies its turn under that lock — space re-ensure + a
+// fresh exec token — and the descriptor rides the session create / input.
+func (b *Bridge) driveClaim(ctx context.Context, d *drive, beforeReflow func(*roomSession)) (driveResult, error) {
+	key := d.key()
+	lock := b.driveLock(key)
 	lock.Lock()
 	defer lock.Unlock()
 
-	opts.Execution = nil
-	if prepareExec != nil {
-		exec, err := prepareExec(ctx)
+	opts := corepkg.SessionOptions{Model: d.job.Model, ReasoningEffort: d.job.ReasoningEffort}
+	if d.prepareExec != nil {
+		exec, err := d.prepareExec(ctx)
 		if err != nil {
-			b.postDriveFailed(ctx, job, room, owner, provider, "the agent sandbox could not be prepared: "+err.Error(), channelID)
-			return driveResult{}, atStage(stagePrepare, err)
+			return driveResult{}, atStage(stagePrepare, fmt.Errorf("the agent sandbox could not be prepared: %w", err))
 		}
 		opts.Execution = exec
 	}
@@ -1556,29 +1349,27 @@ func (b *Bridge) driveClaim(ctx context.Context, job jobRef, room, owner, core, 
 	// materializes there too and returns the written descriptors so the
 	// follow-up prompt below can name them.
 	promptFn := func(workspaceID string, st *roomlog.CtxState, atts []writtenAttachment) string {
-		return b.drivePrompt(ctx, room, owner, core, provider, workspaceID, "", text, atts, st, true)
+		return b.drivePrompt(ctx, d, workspaceID, atts, st, true)
 	}
-	rs, err := b.ensureSession(ctx, job, room, owner, core, provider, target, channelID, attachmentIDs, promptFn, opts)
+	rs, err := b.ensureSession(ctx, d, key, promptFn, opts)
 	if err != nil {
-		b.postDriveFailed(ctx, job, room, owner, provider, cleanDriveError(err), channelID)
 		// ensureSession tags its session create (the turn's start) itself.
 		return driveResult{}, atStage(stagePrepare, err)
 	}
 	// If the session was freshly created, the initial prompt already ran; only
 	// send follow-up input for an existing session.
 	if !rs.freshlyCreated {
-		entry, _ := b.coreEntry(core)
-		rs.roomSession.startTurn(TurnInfo{JobID: job.ID, RequesterUserID: job.RequesterUserID, ChannelID: channelID, MessageSeq: job.MessageSeq, Workspace: sessionWorkspace{b, rs.roomSession}, Team: job.content.teamRoster()})
-		prompt := b.drivePrompt(ctx, room, owner, core, provider, rs.workspaceID, rs.sessionID, text, rs.written, &rs.roomSession.ctx, false)
+		entry, _ := b.coreEntry(d.core)
+		rs.roomSession.startTurn(b.turnInfo(d, rs.roomSession))
+		prompt := b.drivePrompt(ctx, d, rs.workspaceID, rs.written, &rs.roomSession.ctx, false)
 		if err := b.sendInput(ctx, entry, rs.workspaceID, rs.sessionID, prompt, opts); err != nil {
-			b.postDriveFailed(ctx, job, room, owner, provider, cleanDriveError(err), channelID)
 			return driveResult{workspaceID: rs.workspaceID, sessionID: rs.sessionID}, atStage(stageStart, err)
 		}
 	}
-	rs.roomSession.markTurn(deliverableTurn{StartMs: time.Now().UnixMilli(), JobID: job.ID, SourceSeq: job.MessageSeq})
+	rs.roomSession.markTurn(deliverableTurn{StartMs: time.Now().UnixMilli(), JobID: d.job.JobID, SourceSeq: d.job.MessageSeq})
 	// Signal the room that the agent is working, so members see a live indicator
 	// while codex runs; clear it once the turn drains. Best-effort presentation.
-	b.postSessionState(ctx, room, rs.roomSession, "working")
+	b.postSessionState(ctx, d.job.RoomID, rs.roomSession, "working")
 	if beforeReflow != nil {
 		beforeReflow(rs.roomSession)
 	}
@@ -1589,9 +1380,15 @@ func (b *Bridge) driveClaim(ctx context.Context, job jobRef, room, owner, core, 
 	// reply would then surface only on the next message's reflow.
 	b.waitTurnStart(ctx, rs.roomSession)
 	var usage turnUsage
-	replied, err := b.reflow(ctx, job, room, rs.roomSession, channelID, &usage)
-	b.postSessionState(ctx, room, rs.roomSession, "idle")
+	replied, err := b.reflow(ctx, d.job.RoomID, rs.roomSession, d.job.ChannelID, &usage)
+	b.postSessionState(ctx, d.job.RoomID, rs.roomSession, "idle")
 	return driveResult{workspaceID: rs.workspaceID, sessionID: rs.sessionID, replied: replied, usage: usage}, atStage(stageRun, err)
+}
+
+// turnInfo is the turn this drive runs in session rs (the session
+// contributors' turn hooks: the room tools bind it).
+func (b *Bridge) turnInfo(d *drive, rs *roomSession) TurnInfo {
+	return TurnInfo{JobID: d.job.JobID, RequesterUserID: d.job.RequesterUserID, ChannelID: d.job.ChannelID, MessageSeq: d.job.MessageSeq, Workspace: sessionWorkspace{b, rs}, Team: d.content.teamRoster()}
 }
 
 type ensureResult struct {
@@ -1602,38 +1399,39 @@ type ensureResult struct {
 	written []writtenAttachment
 }
 
-// ensureSession binds a (room, provider) to a local workspace+session, creating
-// them on the first message for that provider and reusing them afterward. Each
-// provider in a room gets its own session, so codex and claude are independent
-// conversations. A core can mint its own workspace id (roomId != workspaceId), so
-// the binding is tracked here, not by shared id.
-// promptFn composes the session's initial prompt once its workspace exists AND
-// the turn's attachments are materialized: pull-capable cores materialize
-// .room/ context first, so the prompt may depend on the workspace id, reports
-// the materialized state through st, and names the written attachments.
+// promptFn composes a fresh session's initial prompt once its workspace
+// exists AND the turn's attachments are materialized: pull-capable cores
+// materialize .room/ context first, so the prompt may depend on the
+// workspace id, reports the materialized state through st, and names the
+// written attachments.
 type promptFn func(workspaceID string, st *roomlog.CtxState, atts []writtenAttachment) string
 
-func (b *Bridge) ensureSession(ctx context.Context, job jobRef, room, owner, core, provider, target, channelID string, attachmentIDs []string, prompt promptFn, opts corepkg.SessionOptions) (*ensureResult, error) {
-	entry, ok := b.coreEntry(core)
+// ensureSession binds a drive slot to a local workspace+session, creating
+// them on the first message for that slot and reusing them afterward. Each
+// provider in a room gets its own session, so codex and claude are
+// independent conversations. A core can mint its own workspace id
+// (roomId != workspaceId), so the binding is tracked here, not by shared id.
+func (b *Bridge) ensureSession(ctx context.Context, d *drive, key driveKey, prompt promptFn, opts corepkg.SessionOptions) (*ensureResult, error) {
+	entry, ok := b.coreEntry(d.core)
 	if !ok {
-		return nil, fmt.Errorf("unknown core %q", core)
+		return nil, fmt.Errorf("unknown core %q", d.core)
 	}
 	if !entry.endpoint.OK() {
 		// Configured but its daemon has not been found yet (it is resolved on
 		// the next roster tick once it is up). Say so instead of failing on an
 		// empty URL.
-		return nil, coreNotRunningError{core: core}
+		return nil, coreNotRunningError{core: d.core}
 	}
-	key := driveSessionKey(room, core, provider, opts.Execution != nil)
-	contentSum := job.content.contentSum()
+	room, provider := d.job.RoomID, d.job.Provider
+	bindingSum := d.content.bindingSum()
 	b.mu.Lock()
 	existing := b.sessions[key]
-	if existing != nil && existing.profileSum != contentSum {
+	if existing != nil && existing.profileSum != bindingSum {
 		// The turn wears different content (another expert, a new version,
 		// a changed skill pack): a new session, whose files the core (or
 		// the fallback below) materializes from scratch.
 		slog.Info("bnbloc bridge content changed, starting a new session",
-			"event", "bnbloc.bridge.session_content_changed", "room", room, "core", core, "provider", provider, "session", existing.sessionID)
+			"event", "bnbloc.bridge.session_content_changed", "room", room, "core", d.core, "provider", provider, "session", existing.sessionID)
 		b.unbindLocked(key)
 		existing = nil
 	}
@@ -1641,7 +1439,7 @@ func (b *Bridge) ensureSession(ctx context.Context, job jobRef, room, owner, cor
 	if existing != nil {
 		if err := b.sessionReachable(ctx, entry, existing.workspaceID, existing.sessionID); err != nil {
 			slog.Warn("bnbloc bridge rebinding stale session",
-				"event", "bnbloc.bridge.session_rebind", "room", room, "core", core,
+				"event", "bnbloc.bridge.session_rebind", "room", room, "core", d.core,
 				"provider", provider, "session", existing.sessionID, "error", err)
 			b.mu.Lock()
 			if b.sessions[key] == existing {
@@ -1652,7 +1450,7 @@ func (b *Bridge) ensureSession(ctx context.Context, job jobRef, room, owner, cor
 			// Reused session: materialize this turn's attachments into the
 			// existing workspace BEFORE the caller composes the follow-up prompt,
 			// so the prompt can name files that actually exist.
-			written := b.materializeAttachments(ctx, core, room, existing.workspaceID, attachmentIDs)
+			written := b.materializeAttachments(ctx, d.caps.bytesWriter, entry.endpoint, room, existing.workspaceID, d.job.AttachmentIDs)
 			return &ensureResult{roomSession: existing, freshlyCreated: false, written: written}, nil
 		}
 	}
@@ -1661,15 +1459,14 @@ func (b *Bridge) ensureSession(ctx context.Context, job jobRef, room, owner, cor
 		// session's agent config before this one materializes its own.
 		resetAgentConfig(opts.Execution.Sandbox.Workdir)
 	}
-	workspaceID, err := b.createWorkspace(ctx, entry, room, opts.Execution)
+	workspaceID, err := b.createWorkspace(ctx, entry, d.caps, opts.Execution)
 	if err != nil {
 		return nil, fmt.Errorf("create workspace: %w", err)
 	}
 	// Fresh session: materialize attachments into the new workspace BEFORE the
 	// initial prompt runs (createSession below executes it), so the agent's very
-	// first turn can open the files. This ordering is the whole fix — the old
-	// code materialized after the fresh turn had already started.
-	written := b.materializeAttachments(ctx, core, room, workspaceID, attachmentIDs)
+	// first turn can open the files.
+	written := b.materializeAttachments(ctx, d.caps.bytesWriter, entry.endpoint, room, workspaceID, d.job.AttachmentIDs)
 	var st roomlog.CtxState
 	initialPrompt := prompt(workspaceID, &st, written)
 	// The profile the session wears: a core advertising agentProfile
@@ -1679,26 +1476,26 @@ func (b *Bridge) ensureSession(ctx context.Context, job jobRef, room, owner, cor
 	// workspace files).
 	var profile *corepkg.AgentProfile
 	var hooks sessionHooks
-	if corepkg.Supports(ctx, entry.provider, entry.endpoint, corepkg.CapabilityAgentProfile) {
-		profile = job.content.profile()
+	if d.caps.profile {
+		profile = d.content.profile()
 		if profile == nil {
 			profile = &corepkg.AgentProfile{}
 		}
 		hooks = b.contribute(ctx, SessionInfo{
-			Key: key, TenantID: job.TenantID, RoomID: room, ChannelID: channelID, Owner: owner, Core: core, Provider: provider,
-			Sandboxed: opts.Execution != nil, MCPTransports: b.targetTransports(core, target, provider),
-			JobID: job.ID, RequesterUserID: job.RequesterUserID,
+			TenantID: d.job.TenantID, RoomID: room, ChannelID: d.job.ChannelID, Owner: d.owner, Core: d.core, Provider: provider,
+			Sandboxed: opts.Execution != nil, MCPTransports: b.targetTransports(d.core, d.target, provider),
+			JobID: d.job.JobID, RequesterUserID: d.job.RequesterUserID,
 		}, profile)
 		if profile.Empty() {
 			profile = nil
 		}
-	} else if !job.content.empty() {
-		written := b.writeFallbackSkills(ctx, core, workspaceID, job.content)
-		initialPrompt = job.content.promptPrefix(written) + initialPrompt
+	} else if !d.content.empty() {
+		written := b.writeFallbackSkills(ctx, d.caps.bytesWriter, entry.endpoint, d.core, workspaceID, d.content)
+		initialPrompt = d.content.promptPrefix(written) + initialPrompt
 	}
-	rs := &roomSession{owner: owner, provider: provider, core: core, workspaceID: workspaceID, ctx: st, hooks: hooks, profileSum: contentSum}
-	rs.startTurn(TurnInfo{JobID: job.ID, RequesterUserID: job.RequesterUserID, ChannelID: channelID, MessageSeq: job.MessageSeq, Workspace: sessionWorkspace{b, rs}, Team: job.content.teamRoster()})
-	sessionID, err := b.createSession(ctx, entry, workspaceID, target, initialPrompt, opts, profile)
+	rs := &roomSession{owner: d.owner, provider: provider, core: d.core, workspaceID: workspaceID, ctx: st, hooks: hooks, profileSum: bindingSum}
+	rs.startTurn(b.turnInfo(d, rs))
+	sessionID, err := b.createSession(ctx, entry, workspaceID, d.target, initialPrompt, opts, profile)
 	if err != nil {
 		rs.release()
 		b.deleteWorkspace(ctx, entry, workspaceID)
@@ -1714,31 +1511,11 @@ func (b *Bridge) ensureSession(ctx context.Context, job jobRef, room, owner, cor
 	b.sessions[key] = rs
 	b.mu.Unlock()
 	slog.Info("bnbloc bridge bound room to session",
-		"event", "bnbloc.bridge.session_bound", "room", room, "core", core, "provider", provider, "workspace", workspaceID, "session", sessionID)
+		"event", "bnbloc.bridge.session_bound", "room", room, "core", d.core, "provider", provider, "workspace", workspaceID, "session", sessionID)
 	return &ensureResult{roomSession: rs, freshlyCreated: true, written: written}, nil
 }
 
 // --- local agent core (via core.Provider) ---
-
-// sessionKey names a bound session and its claim lock by room, core, and
-// harness provider, so two cores' same-harness sessions in one room do not
-// collide.
-func sessionKey(room, core, provider string) string {
-	return room + "\x00" + core + "\x00" + provider
-}
-
-// driveSessionKey keys a sandboxed agent's session apart from its host one:
-// a session's workspace lives either on the host or under the sandbox
-// workspaces root, so a change of execution kind (mode switch, sandbox
-// ready/unavailable, own vs borrowed) starts a separate session and
-// workspace instead of moving one. The "roomId\x00" prefix is kept, so
-// forgetRoom prunes both.
-func driveSessionKey(room, core, provider string, sandboxed bool) string {
-	if sandboxed {
-		return sessionKey(room, core, provider) + "\x00sandbox"
-	}
-	return sessionKey(room, core, provider)
-}
 
 // resolveCore picks the core to drive: the named core when this bridge runs
 // it, or the default (first configured) core when the job names none. A named
@@ -1787,7 +1564,7 @@ func (b *Bridge) providerDisabled(core, provider string) bool {
 	if b.cfg.DisabledProviders == nil {
 		return false
 	}
-	return b.cfg.DisabledProviders[core+"/"+provider]
+	return b.cfg.DisabledProviders[corepkg.QualifyTargetID(core, provider)]
 }
 
 // advertiseParam builds the ?agents= value: the "core/provider" pairs this
@@ -1805,7 +1582,7 @@ func (b *Bridge) advertiseParam() string {
 			if b.providerDisabled(name, t.Provider) {
 				continue
 			}
-			pair := name + "/" + t.Provider
+			pair := corepkg.QualifyTargetID(name, t.Provider)
 			if _, ok := seen[pair]; ok {
 				continue
 			}
@@ -1826,7 +1603,7 @@ func (b *Bridge) sandboxedParam(ctx context.Context, adv string) string {
 	var out []string
 	supports := map[string]bool{}
 	for _, pair := range strings.Split(adv, ",") {
-		core, _, _ := strings.Cut(pair, "/")
+		core, _ := corepkg.SplitTargetID(pair)
 		ok, seen := supports[core]
 		if !seen {
 			ok = b.sandboxedAgent(ctx, core)
@@ -1876,18 +1653,18 @@ func (b *Bridge) coreEntry(name string) (coreEntry, bool) {
 
 // createWorkspace creates the core workspace of a new session. A sandboxed
 // session's workspace is created IN its sandbox workdir (capability
-// sandboxExec), so the .room/ context and attachments written before the
-// first turn land where the confined CLI and the guest see them.
-func (b *Bridge) createWorkspace(ctx context.Context, entry coreEntry, room string, exec *corepkg.Execution) (string, error) {
-	var create func() (string, error)
+// sandboxExec, from the drive's snapshot), so the .room/ context and
+// attachments written before the first turn land where the confined CLI and
+// the guest see them.
+func (b *Bridge) createWorkspace(ctx context.Context, entry coreEntry, caps driveCaps, exec *corepkg.Execution) (string, error) {
+	create := func() (string, error) { return entry.provider.CreateWorkspace(ctx, entry.endpoint) }
 	if exec != nil {
-		creator, ok := corepkg.As[corepkg.WorkdirWorkspaceCreator](ctx, entry.provider, entry.endpoint, corepkg.CapabilitySandboxExec)
-		if !ok {
-			return "", errors.New("the core no longer supports sandbox execution")
+		if caps.workdir == nil {
+			return "", errors.New("the core does not support sandbox execution")
 		}
-		create = func() (string, error) { return creator.CreateWorkspaceAt(ctx, entry.endpoint, exec.Sandbox.Workdir) }
-	} else {
-		create = func() (string, error) { return entry.provider.CreateWorkspace(ctx, entry.endpoint) }
+		create = func() (string, error) {
+			return caps.workdir.CreateWorkspaceAt(ctx, entry.endpoint, exec.Sandbox.Workdir)
+		}
 	}
 	var id string
 	err := retryCore(ctx, false, func() error {
@@ -1978,7 +1755,7 @@ func (b *Bridge) sessionReachable(ctx context.Context, entry coreEntry, workspac
 // new assistant replies into the room until the turn is idle and drained. It
 // returns whether a visible assistant reply was posted, and folds each consumed
 // reply's reported metrics into usage (nil = not tracked).
-func (b *Bridge) reflow(ctx context.Context, job jobRef, room string, rs *roomSession, channelID string, usage *turnUsage) (bool, error) {
+func (b *Bridge) reflow(ctx context.Context, room string, rs *roomSession, channelID string, usage *turnUsage) (bool, error) {
 	// idleDeadline is a sliding "no activity" window: the turn may run for a
 	// long time (codex can work for minutes), so a fixed cap would truncate a
 	// live reply. Each sign of progress — a new message, or a still-busy turn —
@@ -2068,11 +1845,9 @@ func (b *Bridge) reflow(ctx context.Context, job jobRef, room string, rs *roomSe
 			}
 		case ts.Idle:
 			// The turn is done and drained. If it failed and produced no visible
-			// reply, surface the error so the member sees why nothing came back
-			// instead of a silent no-op (mirrors postBorrowDenied).
+			// reply, the error says why nothing came back (its notice: fail).
 			if ts.Failed && !posted {
-				b.postTurnFailed(ctx, job, room, rs, ts.FailMessage, channelID)
-				return false, fmt.Errorf("turn failed: %s", ts.FailMessage)
+				return false, turnFailedError{detail: ts.FailMessage}
 			}
 			return posted, nil
 		default:
@@ -2184,20 +1959,11 @@ func (b *Bridge) postRoomMessage(ctx context.Context, room string, rs *roomSessi
 	return nil
 }
 
-// borrowTarget builds the shared-agent identity the authority is keyed by. It
-// is core-qualified (shared-agent:<core>:<provider>) so the same harness under
-// two cores is authorized independently — the owner controls exactly which
-// core's agent is borrowable. The authority treats the whole "<core>:<provider>"
-// suffix as an opaque grant discriminator. A colon (not a slash) separates core
-// and provider so the id stays a single URL path segment; core names carry no
-// colon, and a provider that itself contains ':' (e.g. "acp:hermes") is
-// unambiguous as the remainder after the core. An empty core falls back to the
-// bare provider (legacy/coreless), preserving older single-core authorizations.
+// borrowTarget is the shared-agent identity a borrow's authority is keyed
+// by (shareagent.PlatformTarget: shared-agent:<core>:<provider>): the same
+// harness under two cores is authorized independently.
 func borrowTarget(coreName, provider string) string {
-	if strings.TrimSpace(coreName) == "" {
-		return "shared-agent:" + provider
-	}
-	return "shared-agent:" + coreName + ":" + provider
+	return shareagent.PlatformTarget(wire.PlatformAgentRef{Core: coreName, Provider: provider})
 }
 
 // borrowDenyUnavailable is the deny reason when the authority could not be
@@ -2294,11 +2060,7 @@ func (b *Bridge) reserveBorrow(ctx context.Context, room, owner, coreName, provi
 	}
 	if parsed.Reserved && parsed.ReservationID != "" {
 		if parsed.SandboxRequired && !sandboxed {
-			settleCtx := b.driveCtx
-			if settleCtx == nil {
-				settleCtx = context.WithoutCancel(ctx)
-			}
-			go b.settleBorrow(settleCtx, room, owner, coreName, provider, parsed.ReservationID, nil)
+			go b.settleBorrow(b.detached(ctx), room, owner, coreName, provider, parsed.ReservationID, nil)
 			return borrowReservation{DenyReason: shareagent.DenySandboxRequired}
 		}
 		return borrowReservation{ID: parsed.ReservationID, DefaultModel: strings.TrimSpace(parsed.DefaultModel)}
@@ -2363,38 +2125,29 @@ func tagJob(payload map[string]any, jobID string, sourceSeq int64) {
 	}
 }
 
-// postNotice records one notice row for a job in the room feed.
-func (b *Bridge) postNotice(ctx context.Context, job jobRef, room, channelID, kind string, payload map[string]any) {
+// postNotice records one notice row in the room feed (wire.JobNotice):
+// under the job's notice session when it has a job, else under a session of
+// its own. The job fills in the notice's job tags.
+func (b *Bridge) postNotice(ctx context.Context, job jobRef, n wire.JobNotice) {
 	session := noticeSessionID(job.ID)
-	payload["messageId"] = kind + "-" + session
-	payload["role"] = "assistant"
-	tagJob(payload, job.ID, job.MessageSeq)
+	n.JobID, n.SourceSeq = job.ID, job.MessageSeq
+	if n.MessageID == "" {
+		n.MessageID = n.Kind + "-" + session
+	}
 	body := map[string]any{
-		"workspaceId":    room,
+		"workspaceId":    job.RoomID,
 		"agentSessionId": session,
-		"channelId":      channelID,
+		"channelId":      job.ChannelID,
 		"messages": []map[string]any{{
 			"seq":             wire.JobNoticeSeq,
-			"payload":         payload,
+			"payload":         n.Payload(),
 			"createdAtUnixMs": time.Now().UnixMilli(),
 		}},
 	}
-	if _, err := b.gatewayPOST(ctx, "/v1/rooms/"+room+"/agent-activity/messages", body); err != nil {
+	if _, err := b.gatewayPOST(ctx, "/v1/rooms/"+job.RoomID+"/agent-activity/messages", body); err != nil {
 		slog.Warn("bnbloc bridge post notice failed",
-			"event", "bnbloc.bridge.post_failed", "room", room, "kind", kind, "error", err)
+			"event", "bnbloc.bridge.post_failed", "room", job.RoomID, "kind", n.Kind, "error", err)
 	}
-}
-
-// postBorrowDenied surfaces a refused borrow in the room feed, attributed to the
-// requested agent handle, so the borrower sees why nothing ran instead of a
-// silent no-op. The denial is visible, matching the design's accountable model.
-func (b *Bridge) postBorrowDenied(ctx context.Context, job jobRef, room, owner, provider, channelID, denyReason string) {
-	b.postNotice(ctx, job, room, channelID, "borrow-denied", map[string]any{
-		"text":        borrowDeniedText(owner, provider, denyReason),
-		"ownerUserId": owner,
-		"provider":    provider,
-		"denyReason":  denyReason,
-	})
 }
 
 // borrowDeniedText explains a refused borrow to the borrower.
@@ -2413,37 +2166,6 @@ func borrowDeniedText(owner, provider, denyReason string) string {
 	default:
 		return owner + " has not authorized borrowing their " + provider + " in this room."
 	}
-}
-
-// postTurnFailed surfaces a failed agent turn in the room feed, attributed to
-// the driven agent. detail is the provider's error message (e.g. a missing API
-// key); a generic line is used when it is empty.
-func (b *Bridge) postTurnFailed(ctx context.Context, job jobRef, room string, rs *roomSession, detail string, channelID string) {
-	text := "The agent could not complete this request"
-	if d := strings.TrimSpace(detail); d != "" {
-		text += ": " + d
-	}
-	b.postNotice(ctx, job, room, channelID, "turn-failed", map[string]any{
-		"text":        text,
-		"ownerUserId": firstNonEmpty(rs.owner, b.cfg.OwnerSubject),
-		"provider":    rs.provider,
-		"failReason":  "turn_failed",
-	})
-}
-
-// postDriveFailed surfaces a failure to *start or send to* an agent (before any
-// turn runs). detail is the cleaned core error (see cleanDriveError).
-func (b *Bridge) postDriveFailed(ctx context.Context, job jobRef, room, owner, provider, detail, channelID string) {
-	text := "The " + provider + " agent could not be reached"
-	if d := strings.TrimSpace(detail); d != "" {
-		text += ": " + d
-	}
-	b.postNotice(ctx, job, room, channelID, "drive-failed", map[string]any{
-		"text":        text,
-		"ownerUserId": firstNonEmpty(owner, b.cfg.OwnerSubject),
-		"provider":    provider,
-		"failReason":  "drive_failed",
-	})
 }
 
 // cleanDriveError turns a core REST error into a short, member-readable reason.
@@ -2478,17 +2200,6 @@ func cleanDriveError(err error) string {
 		}
 	}
 	return corepkg.Truncate([]byte(raw), 200)
-}
-
-// serveRecipient reports whether this bridge should drive a chat addressed to
-// recipientOwner's agent. In production a bridge serves only its own owner's
-// agents; ServeAllOwners (single-host dev) serves any member from the one local
-// core. An empty recipientOwner (legacy/self) is always served.
-func serveRecipient(serveAll bool, recipientOwner, bridgeOwner string) bool {
-	if serveAll || recipientOwner == "" {
-		return true
-	}
-	return recipientOwner == bridgeOwner
 }
 
 // isBorrow reports whether a chat is a borrow: its author is a real, different

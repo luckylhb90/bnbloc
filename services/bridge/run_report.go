@@ -40,14 +40,7 @@ func (u turnUsage) withRunReport(diag map[string]any, requestedModel string) map
 		rep.Count = u.replies.count
 		diag[wire.RunDiagReply] = rep
 	}
-	usage := wire.AgentRunUsage{CostUsd: u.cost}
-	if m := firstNonEmpty(u.model, requestedModel); m != "" {
-		usage.Model = m
-	}
-	if u.tokensReported {
-		in, out := u.inputTokens, u.outputTokens
-		usage.InputTokens, usage.OutputTokens = &in, &out
-	}
+	usage := u.usage(requestedModel)
 	if usage.Model != "" || usage.InputTokens != nil || usage.CostUsd != nil {
 		diag[wire.RunDiagUsage] = usage
 	}

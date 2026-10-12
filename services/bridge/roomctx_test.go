@@ -128,7 +128,7 @@ func TestDriveClaimPullWritesRoomFilesAndPointerPrompt(t *testing.T) {
 		Cores:          []CoreConfig{{Name: "core-a", Provider: prov, Endpoint: corepkg.Endpoint{BaseURL: g.srv.URL}}},
 	})
 
-	_, err := b.driveClaim(context.Background(), jobRef{ID: "job-x"}, "r1", "maya", "core-a", "agent-a", "t", "write hello.rs", nil, corepkg.SessionOptions{}, nil, "ch", nil)
+	_, err := b.driveClaim(context.Background(), testDrive(b, jobRef{ID: "job-x"}, "r1", "maya", "core-a", "agent-a", "t", "write hello.rs", "ch"), nil)
 	if err != nil {
 		t.Fatalf("driveClaim: %v", err)
 	}
@@ -184,14 +184,14 @@ func TestDriveClaimPullDeltaOnReuse(t *testing.T) {
 		OwnerSubject:   "maya",
 		Cores:          []CoreConfig{{Name: "core-a", Provider: prov, Endpoint: corepkg.Endpoint{BaseURL: g.srv.URL}}},
 	})
-	if _, err := b.driveClaim(context.Background(), jobRef{ID: "job-x"}, "r1", "maya", "core-a", "agent-a", "t", "turn one", nil, corepkg.SessionOptions{}, nil, "ch", nil); err != nil {
+	if _, err := b.driveClaim(context.Background(), testDrive(b, jobRef{ID: "job-x"}, "r1", "maya", "core-a", "agent-a", "t", "turn one", "ch"), nil); err != nil {
 		t.Fatal(err)
 	}
 	firstWrites := len(prov.recordedWrites())
 
 	// New messages arrive before turn two.
 	g.setHistory("general", []int64{1, 5}, map[int64]string{1: "old message", 5: "new message"})
-	if _, err := b.driveClaim(context.Background(), jobRef{ID: "job-x"}, "r1", "maya", "core-a", "agent-a", "t", "turn two", nil, corepkg.SessionOptions{}, nil, "ch", nil); err != nil {
+	if _, err := b.driveClaim(context.Background(), testDrive(b, jobRef{ID: "job-x"}, "r1", "maya", "core-a", "agent-a", "t", "turn two", "ch"), nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -231,7 +231,7 @@ func TestDriveClaimPullFallsBackOnWriterFailure(t *testing.T) {
 		OwnerSubject:   "maya",
 		Cores:          []CoreConfig{{Name: "core-a", Provider: prov, Endpoint: corepkg.Endpoint{BaseURL: g.srv.URL}}},
 	})
-	if _, err := b.driveClaim(context.Background(), jobRef{ID: "job-x"}, "r1", "maya", "core-a", "agent-a", "t", "still drive", nil, corepkg.SessionOptions{}, nil, "ch", nil); err != nil {
+	if _, err := b.driveClaim(context.Background(), testDrive(b, jobRef{ID: "job-x"}, "r1", "maya", "core-a", "agent-a", "t", "still drive", "ch"), nil); err != nil {
 		t.Fatal(err)
 	}
 	prompt := prov.recordedPrompts()[0]
@@ -257,7 +257,7 @@ func TestMaterializeDropsCurrentInstructionFromRecords(t *testing.T) {
 		OwnerSubject:   "maya",
 		Cores:          []CoreConfig{{Name: "core-a", Provider: prov, Endpoint: corepkg.Endpoint{BaseURL: g.srv.URL}}},
 	})
-	w, ep, ok := b.pullWriter(context.Background(), "core-a")
+	w, ep, ok := testWriter(b, "core-a")
 	if !ok {
 		t.Fatal("fake provider must satisfy WorkspaceFileWriter")
 	}
@@ -298,7 +298,7 @@ func TestMaterializeSelfFilterIsSessionBounded(t *testing.T) {
 			OwnerSubject:   "maya",
 			Cores:          []CoreConfig{{Name: "core-a", Provider: prov, Endpoint: corepkg.Endpoint{BaseURL: g.srv.URL}}},
 		})
-		w, ep, ok := b.pullWriter(context.Background(), "core-a")
+		w, ep, ok := testWriter(b, "core-a")
 		if !ok {
 			t.Fatal("fake provider must satisfy WorkspaceFileWriter")
 		}

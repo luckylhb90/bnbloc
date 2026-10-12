@@ -2,8 +2,6 @@ package bridge
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"log/slog"
@@ -11,7 +9,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
-	"sort"
 	"strings"
 	"time"
 
@@ -67,34 +64,6 @@ func mcpPlatform() string { return runtime.GOOS + "-" + runtime.GOARCH }
 // jobMCP is a turn's resolved MCP servers.
 type jobMCP struct {
 	servers []corepkg.MCPServer
-}
-
-// bindingSum folds the tool set's non-secret identity into a content
-// checksum: each server's name, transport, command (a materialized
-// binary's path carries its sha256) or URL, args, and the names (never the
-// values) of the env and headers it gets. No tools = the checksum as is.
-func (m jobMCP) bindingSum(contentSum string) string {
-	if len(m.servers) == 0 {
-		return contentSum
-	}
-	ids := make([]string, 0, len(m.servers))
-	for _, s := range m.servers {
-		var names []string
-		for _, e := range s.Env {
-			names = append(names, "env:"+e.Name)
-		}
-		for _, h := range s.Headers {
-			names = append(names, "header:"+h.Name)
-		}
-		ids = append(ids, strings.Join([]string{s.Name, s.Transport(), s.Command, s.URL, strings.Join(s.Args, "\x00"), strings.Join(names, ",")}, "\x00"))
-	}
-	sort.Strings(ids)
-	h := sha256.New()
-	h.Write([]byte(contentSum))
-	for _, id := range ids {
-		h.Write([]byte("\x00mcp\x00" + id))
-	}
-	return hex.EncodeToString(h.Sum(nil))
 }
 
 // resolveMCP builds the MCP servers of a job's tools. refs are the packages

@@ -26,9 +26,6 @@ import (
 
 // SessionInfo describes the agent session the bridge is about to create.
 type SessionInfo struct {
-	// Key is the bridge's binding key of the session (room, core, provider,
-	// execution kind); stable for the session's lifetime.
-	Key       string
 	TenantID  string
 	RoomID    string
 	ChannelID string
@@ -249,7 +246,7 @@ func (b *Bridge) targetTransports(coreName, target, provider string) []string {
 
 // unbindLocked drops a session binding and releases what its contributors
 // granted (asynchronously: callers hold b.mu). Callers hold b.mu.
-func (b *Bridge) unbindLocked(key string) {
+func (b *Bridge) unbindLocked(key driveKey) {
 	rs := b.sessions[key]
 	delete(b.sessions, key)
 	if rs != nil {

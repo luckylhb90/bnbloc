@@ -23,9 +23,12 @@ import (
 // member's prompt twice (and reserve a borrow twice). The failure reason is
 // decided in job_failure.go only.
 func TestDriveRefusalsAreFinal(t *testing.T) {
-	for _, r := range driveRefusals {
-		if r.reason.Retryable() {
-			t.Errorf("refusal %s is retryable: a deterministic refusal fails the same way again", r.reason)
+	for _, k := range refusalKinds {
+		if k.reason.Retryable() {
+			t.Errorf("refusal %s is retryable: a deterministic refusal fails the same way again", k.reason)
+		}
+		if k.notice == "" {
+			t.Errorf("refusal %s posts no notice: the member would not see why nothing ran", k.reason)
 		}
 	}
 	if store.FailureReplyTimeout.Retryable() {
@@ -83,11 +86,13 @@ func TestDriveRefusalsAreFinal(t *testing.T) {
 		ast.Inspect(file, func(n ast.Node) bool {
 			switch n := n.(type) {
 			case *ast.CompositeLit:
-				if id, ok := n.Type.(*ast.Ident); ok && id.Name == "refusal" {
+				if id, ok := n.Type.(*ast.Ident); ok && (id.Name == "refusalKind" || id.Name == "refusal") {
 					if f != "job_failure.go" {
-						t.Errorf("%s: refusal declared outside job_failure.go", fset.Position(n.Pos()))
+						t.Errorf("%s: %s declared outside job_failure.go", fset.Position(n.Pos()), id.Name)
 					}
-					declared++
+					if id.Name == "refusalKind" {
+						declared++
+					}
 				}
 			case *ast.CallExpr:
 				fn, ok := n.Fun.(*ast.SelectorExpr)
@@ -103,8 +108,8 @@ func TestDriveRefusalsAreFinal(t *testing.T) {
 			return true
 		})
 	}
-	if declared != len(driveRefusals) {
-		t.Errorf("job_failure.go declares %d refusals, driveRefusals lists %d", declared, len(driveRefusals))
+	if declared != len(refusalKinds) {
+		t.Errorf("job_failure.go declares %d refusal kinds, refusalKinds lists %d", declared, len(refusalKinds))
 	}
 }
 

@@ -116,13 +116,17 @@ func (p *AgentProfile) LogValue() slog.Value {
 	)
 }
 
-// ContentSum is the checksum of the profile's content-derived parts:
-// instructions and skill files. MCP servers and env are excluded on purpose:
-// they carry per-session credentials (a room tools bearer) that change every
-// session, while the checksum decides whether an existing session still
-// wears the right content (the bridge re-creates a session, and
-// re-materializes its files, when it changes).
-func (p *AgentProfile) ContentSum() string {
+// BindingSum is the checksum that binds an agent session to the profile it
+// was created with: a session whose profile's BindingSum differs is
+// re-created (and its files re-materialized). It covers the instructions,
+// every skill file, and each MCP server's non-secret identity — name,
+// transport, command, URL, args, and the NAMES of its env and headers (a
+// tool added, upgraded or newly configured binds a new session). Env and
+// header values, and the profile's env, never enter it: they are secrets,
+// and a per-session credential (a room tools bearer) must not force a new
+// session. The bridge computes it on the content's profile, before session
+// contributors add their per-session servers.
+func (p *AgentProfile) BindingSum() string {
 	if p == nil {
 		return ""
 	}
@@ -137,6 +141,21 @@ func (p *AgentProfile) ContentSum() string {
 			sum := sha256.Sum256(f.Content)
 			h.Write([]byte("\x00" + f.Path + "\x00" + hex.EncodeToString(sum[:])))
 		}
+	}
+	ids := make([]string, 0, len(p.MCPServers))
+	for _, s := range p.MCPServers {
+		var names []string
+		for _, e := range s.Env {
+			names = append(names, "env:"+e.Name)
+		}
+		for _, hd := range s.Headers {
+			names = append(names, "header:"+hd.Name)
+		}
+		ids = append(ids, strings.Join([]string{s.Name, s.Transport(), s.Command, s.URL, strings.Join(s.Args, "\x00"), strings.Join(names, ",")}, "\x00"))
+	}
+	sort.Strings(ids)
+	for _, id := range ids {
+		h.Write([]byte("\x00mcp\x00" + id))
 	}
 	return hex.EncodeToString(h.Sum(nil))
 }

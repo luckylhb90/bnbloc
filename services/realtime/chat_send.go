@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/luckylhb90/bnbloc/core"
 	"github.com/luckylhb90/bnbloc/internal/ids"
 	"github.com/luckylhb90/bnbloc/internal/membership"
 	"github.com/luckylhb90/bnbloc/internal/store"
@@ -243,7 +244,7 @@ func (s *Service) PostChat(ctx context.Context, p ChatPost) (ChatPosted, error) 
 			OwnerUserID:       p.Recipient.OwnerID,
 			Core:              coreName,
 			Provider:          p.Recipient.Provider,
-			TargetID:          strings.Trim(strings.Join([]string{coreName, p.Recipient.Provider}, "/"), "/"),
+			TargetID:          agentTargetID(coreName, p.Recipient.Provider),
 			MessageText:       text,
 			AttachmentIDs:     p.AttachmentIDs,
 			Model:             model,
@@ -267,4 +268,14 @@ func (s *Service) PostChat(ctx context.Context, p ChatPost) (ChatPosted, error) 
 		}
 	}
 	return posted, nil
+}
+
+// agentTargetID is a job's target before the bridge resolves the core-local
+// one: the provider, qualified by its core when the chat named one
+// (core.QualifyTargetID; the bridge splits it with core.SplitTargetID).
+func agentTargetID(coreName, provider string) string {
+	if coreName == "" {
+		return provider
+	}
+	return core.QualifyTargetID(coreName, provider)
 }

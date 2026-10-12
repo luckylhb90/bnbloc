@@ -736,17 +736,40 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   `<vmexec> run [--stdio] -- <word>` as already routed and fail closed with
   exit 2 (the PreToolUse code that blocks; any other non-zero lets the tool
   run on the host).
+- **A claimed job runs one pipeline of named stages**
+  (`services/bridge/drive.go`): admit, resolve content, snapshot
+  capabilities, plan execution, authorize, bind target, drive, settle.
+  Stages 1–6 fill in the `drive` or return a `refusal`; the core's
+  capabilities are asked once (stage 3) and every later stage reads that
+  snapshot (`TestDriveCapabilitiesAskedOncePerDrive`). Own, borrowed,
+  platform, sandboxed and dispatched drives differ only in the inputs to
+  stages 4 and 5: never add a per-kind drive path. A drive slot (session
+  and drive lock) is a `driveKey` (room, core, provider, execution kind);
+  `TestNoHandRolledAgentRefs` forbids a hand-built key, a `"shared-agent:"`
+  literal (use `shareagent.PlatformTarget`) and a core/provider `+"/"+`
+  join (use `core.QualifyTargetID`/`SplitTargetID`) in the bridge. A
+  content package that cannot be loaded is `missing`, except the expert
+  the chat picked (refused).
 - **A job retries only when no agent work can have started.**
   `store.AgentJobFailureReason.Retryable` owns what retries
   (`core_unavailable`, `runner_start_failed`, the lease sweep's
   `turn_timeout`); `services/bridge/job_failure.go` owns which reason a
-  failure gets: deterministic refusals go through `b.refuse` with a final
-  reason (`invalid_job`, `content_unavailable`, `team_unsupported`,
-  `sandbox_required`, …), and a drive error is classified by the stage it
-  reached (`atStage`, `driveFailureReason`): a started or ambiguous turn,
-  and `reply_timeout`, are final, or the prompt runs twice and a borrow is
-  reserved twice. Never classify by error text, and never report a failed
-  status elsewhere (`TestDriveRefusalsAreFinal`).
+  failure gets and the notice that says why: a stage's `refusal` (a
+  `refusalKind`: notice kind + final reason, `invalid_job`,
+  `agent_not_advertised`, `content_unavailable`, `team_unsupported`,
+  `sandbox_required`, `borrow_not_authorized`) goes through `b.refuse`,
+  and a drive error through `b.fail`, classified by the stage it reached
+  (`atStage`, `driveFailureReason`): a started or ambiguous turn, and
+  `reply_timeout`, are final, or the prompt runs twice and a borrow is
+  reserved twice. Every refusal and every drive failure posts exactly one
+  notice. Never classify by error text, and never report a failed status
+  or declare a refusal elsewhere (`TestDriveRefusalsAreFinal`,
+  `TestEveryStageRefusalPostsItsNotice`).
+- **Every notice row is a `wire.JobNotice`** (`payload.notice` is its
+  kind) under the job's notice session (`wire.JobNoticeSessionID`,
+  `wire.IsJobNoticeSession`): refusals, drive failures, the room tools'
+  progress lines, sync conflicts. Never post a notice as chat or under a
+  real agent session.
 - **The bridge MUST send `agentSessionId` when posting a reply to
   `agent-activity/messages`.** Activity dedupes new messages by a
   per-`(room, agentSessionId)` cursor. With the field missing, every session's
@@ -802,8 +825,11 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   and its sync/packer siblings); `TestWorkspacePathPolicySingleOwner`
   forbids a local prefix check.
 - **Agent profiles are per session.** A profile goes only to a core
-  advertising `agentProfile` (`core.Supports`); its content checksum is part
-  of the bridge session key; contributed MCP servers and env stay out of it.
+  advertising `agentProfile` (`core.Supports`); its
+  `core.AgentProfile.BindingSum` (instructions, skill files, the MCP
+  servers' non-secret identity) binds the session: a turn whose sum differs
+  gets a new one; contributed MCP servers, env and every secret value stay
+  out of it.
   Never log profile secrets. Other cores get the prompt-prefix fallback.
   `Target.MCPTransports` says which MCP transports a target accepts (empty =
   stdio only).
@@ -824,8 +850,16 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   owner, and never bypass the guards (parent live and leased by the caller's
   bridge, requester still a human member, depth <= `wire.MaxDispatchDepth`,
   <= `wire.MaxDispatchFanOut` per parent, no self or cycle, never the people
-  chat). An agent-facing read (`read_room`) reads only the bound job's
-  channel.
+  chat).
+- **An agent reads the room only through `roomlog.History`** (decision
+  O1): `.room/`, the pushed context, `read_room` and `ask_agent`'s reply
+  poller read exactly the channels realtime's `agentMayReadChannel` admits
+  for an agent (`roomlog.AgentChannels`: the room's channel listing, never
+  the people chat; a read narrowed to another channel is refused), decoded
+  by the one `roomlog.DecodeRow`, which skips notices
+  (`TestHistoryReadsOnlyAgentChannels`, `TestDecodeRowSkipsNotices`). The
+  bridge reads with its owner's human session, so realtime does not guard
+  it: never add an agent-facing history read beside it.
 
 - **Built-in content is a content source**, not a second library:
   `internal/contentbuiltin`, wrapped over the content store at gateway and

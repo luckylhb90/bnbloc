@@ -60,9 +60,6 @@ type jobContent struct {
 	instructions string
 	skills       []corepkg.ProfileSkill
 	summaries    []skillSummary
-	// sum is the content checksum of the profile (instructions + skill
-	// files); "" for no content.
-	sum string
 	// foreign names content that is not the agent owner's own and declares
 	// scripts or stdio MCP, or requires a stdio MCP tool: it forces a
 	// sandboxed drive.
@@ -95,15 +92,14 @@ func (c *jobContent) profile() *corepkg.AgentProfile {
 	}
 }
 
-// contentSum is the session binding checksum ("" for none): the profile's
-// content checksum, plus the MCP tool set's non-secret identity (a tool
-// added, upgraded or newly configured starts a new session; values never
-// enter it).
-func (c *jobContent) contentSum() string {
+// bindingSum is the session binding checksum ("" for none): the profile's
+// core.AgentProfile.BindingSum (instructions, skill files, the MCP tool
+// set's non-secret identity).
+func (c *jobContent) bindingSum() string {
 	if c == nil {
 		return ""
 	}
-	return c.mcp.bindingSum(c.sum)
+	return c.profile().BindingSum()
 }
 
 // expertLabel names the expert for notices and the prompt prefix.
@@ -205,7 +201,17 @@ func (b *Bridge) resolveJobContent(ctx context.Context, job bridgeJob, owner str
 	for _, ref := range refs {
 		pkg, err := b.contentPackage(ctx, job, ref)
 		if err != nil {
-			return nil, fmt.Errorf("load %s %s: %w", ref.Kind, ref.Name, err)
+			if ref.Source == wire.ContentSourceExpert {
+				// The requester picked it: running without it would
+				// silently answer as someone else.
+				return nil, fmt.Errorf("load %s %s: %w", ref.Kind, ref.Name, err)
+			}
+			// A room expert or skill pack that cannot be loaded is unmet,
+			// like an unattachable MCP tool: the rest still applies.
+			slog.Warn("bnbloc bridge content package unloadable; driving without it",
+				"event", "bnbloc.bridge.content_package_failed", "job", job.JobID, "component", ref.Name, "error", err)
+			c.missing = append(c.missing, firstNonEmpty(ref.DisplayName, ref.Name)+" (could not be loaded)")
+			continue
 		}
 		if ref.NeedsSandbox && ref.Owner != owner {
 			c.foreign = append(c.foreign, firstNonEmpty(ref.DisplayName, ref.Name))
@@ -244,9 +250,6 @@ func (b *Bridge) resolveJobContent(ctx context.Context, job bridgeJob, owner str
 		if err := b.teamContent(ctx, job, c, eff.Team); err != nil {
 			return nil, err
 		}
-	}
-	if !c.empty() {
-		c.sum = c.profile().ContentSum()
 	}
 	mcp, unmet, stdioForeign := b.resolveMCP(eff.MCP, refs, owner, job.RequesterUserID == owner)
 	c.mcp = mcp
@@ -290,22 +293,14 @@ func (e *contentUnavailableError) Error() string {
 // writeFallbackSkills writes the skill files under .agents/skills/ for a
 // core without agentProfile that accepts workspace files; it reports
 // whether every file was written.
-func (b *Bridge) writeFallbackSkills(ctx context.Context, coreName, workspaceID string, c *jobContent) bool {
-	if c.empty() || len(c.skills) == 0 {
-		return false
-	}
-	entry, ok := b.coreEntry(coreName)
-	if !ok || !entry.endpoint.OK() {
-		return false
-	}
-	w, ok := corepkg.As[corepkg.WorkspaceFileBytesWriter](ctx, entry.provider, entry.endpoint, corepkg.CapabilityWriteFile)
-	if !ok {
+func (b *Bridge) writeFallbackSkills(ctx context.Context, w corepkg.WorkspaceFileBytesWriter, ep corepkg.Endpoint, coreName, workspaceID string, c *jobContent) bool {
+	if w == nil || c.empty() || len(c.skills) == 0 {
 		return false
 	}
 	for _, s := range c.skills {
 		for _, f := range s.Files {
 			rel := fallbackSkillsDir + "/" + s.Name + "/" + f.Path
-			if err := w.WriteWorkspaceFileBytes(ctx, entry.endpoint, workspaceID, rel, f.Content); err != nil {
+			if err := w.WriteWorkspaceFileBytes(ctx, ep, workspaceID, rel, f.Content); err != nil {
 				slog.Warn("bnbloc bridge skill file write failed; inlining skills",
 					"event", "bnbloc.bridge.skill_write_failed", "core", coreName, "path", rel, "error", err)
 				return false
@@ -355,28 +350,12 @@ func protectedDenyWrite(workdir string) []string {
 	return out
 }
 
-// jobContentOrRefuse resolves the job's content. A job that names an expert
-// it cannot wear is refused with a room notice (nothing runs). Any other
-// resolution failure drives the turn without content (logged): room and
-// member skill packs are best-effort, never a reason to drop a turn.
-func (b *Bridge) jobContentOrRefuse(ctx context.Context, job bridgeJob, owner, coreName string) (*jobContent, bool) {
-	content, err := b.resolveJobContent(ctx, job, owner)
-	if err == nil {
-		if b.refuseTeamWithoutTools(ctx, job, owner, coreName, content) {
-			return nil, false
-		}
-		return content, true
-	}
-	if job.ExpertID == "" {
-		slog.Warn("bnbloc bridge content resolution failed; driving without skill packs",
-			"event", "bnbloc.bridge.content_unresolved", "job", job.JobID, "error", err)
-		return &jobContent{}, true
-	}
-	text := "This message asked for an expert that could not be loaded: " + err.Error() + ". Nothing ran."
+// contentUnavailableText is the notice of a job whose expert could not be
+// worn (nothing ran).
+func contentUnavailableText(job bridgeJob, err error) string {
 	var unavailable *contentUnavailableError
 	if errors.As(err, &unavailable) {
-		text = "The expert " + unavailable.expert + " is no longer available to " + job.RequesterUserID + ". Nothing ran."
+		return "The expert " + unavailable.expert + " is no longer available to " + job.RequesterUserID + ". Nothing ran."
 	}
-	b.refuse(ctx, job, owner, refuseContentUnavailable, text, map[string]any{"core": coreName, "provider": job.Provider})
-	return nil, false
+	return "This message asked for an expert that could not be loaded: " + err.Error() + ". Nothing ran."
 }

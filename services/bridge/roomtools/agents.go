@@ -7,6 +7,8 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/luckylhb90/bnbloc/core"
+	"github.com/luckylhb90/bnbloc/internal/roomlog"
 	"github.com/luckylhb90/bnbloc/internal/wire"
 )
 
@@ -41,13 +43,13 @@ func roomAgents(ctx context.Context, env *Env) ([]roomAgent, error) {
 	}
 	pairs := map[string]int{}
 	for _, a := range parsed.Agents {
-		pairs[a.OwnerUserID+"/"+a.Provider]++
+		pairs[roomlog.AgentSpeaker(a.OwnerUserID, a.Provider)]++
 	}
 	out := make([]roomAgent, 0, len(parsed.Agents))
 	for _, a := range parsed.Agents {
-		handle := a.OwnerUserID + "/" + a.Provider
+		handle := roomlog.AgentSpeaker(a.OwnerUserID, a.Provider)
 		if pairs[handle] > 1 && a.Core != "" {
-			handle = a.OwnerUserID + "/" + a.Core + "/" + a.Provider
+			handle = roomlog.AgentSpeaker(a.OwnerUserID, core.QualifyTargetID(a.Core, a.Provider))
 		}
 		out = append(out, roomAgent{
 			Handle: handle, Owner: a.OwnerUserID, Core: a.Core, Provider: a.Provider,

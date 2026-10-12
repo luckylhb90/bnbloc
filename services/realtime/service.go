@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/luckylhb90/bnbloc/core"
 	"github.com/luckylhb90/bnbloc/internal/membership"
 	"github.com/luckylhb90/bnbloc/internal/notify"
 	"github.com/luckylhb90/bnbloc/internal/obs"
@@ -572,11 +573,8 @@ func parseAgentRefs(raw, sandboxedRaw string) []realtime.AgentRef {
 		if tok == "" {
 			continue
 		}
-		core, provider := "", tok
-		if i := strings.Index(tok, "/"); i >= 0 {
-			core, provider = tok[:i], tok[i+1:]
-		}
-		out = append(out, realtime.AgentRef{Core: core, Provider: provider, Sandboxed: sandboxed[strings.ToLower(tok)]})
+		coreName, provider := core.SplitTargetID(tok)
+		out = append(out, realtime.AgentRef{Core: coreName, Provider: provider, Sandboxed: sandboxed[strings.ToLower(tok)]})
 	}
 	return out
 }

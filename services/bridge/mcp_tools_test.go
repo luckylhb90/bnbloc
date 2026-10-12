@@ -249,22 +249,27 @@ func TestForeignContentRequiringStdioMCPRequiresTheSandbox(t *testing.T) {
 	}
 }
 
+// mcpSum is the binding checksum of a tool set alone.
+func mcpSum(m jobMCP) string {
+	return (&corepkg.AgentProfile{MCPServers: m.servers}).BindingSum()
+}
+
 // The session binding covers the tool set (adding a tool or newly
 // configured credentials start a new session), never the values.
 func TestMCPBindingSum(t *testing.T) {
 	base := jobMCP{servers: []corepkg.MCPServer{{Name: "codeword", Command: "/t/mcp-codeword-aa", Env: []corepkg.NameValue{{Name: "SALT", Value: "one"}}}}}
 	sameNames := jobMCP{servers: []corepkg.MCPServer{{Name: "codeword", Command: "/t/mcp-codeword-aa", Env: []corepkg.NameValue{{Name: "SALT", Value: "two"}}}}}
-	if base.bindingSum("c") != sameNames.bindingSum("c") {
+	if mcpSum(base) != mcpSum(sameNames) {
 		t.Fatal("a value change must not churn the session")
 	}
 	upgraded := jobMCP{servers: []corepkg.MCPServer{{Name: "codeword", Command: "/t/mcp-codeword-bb", Env: base.servers[0].Env}}}
 	unset := jobMCP{servers: []corepkg.MCPServer{{Name: "codeword", Command: "/t/mcp-codeword-aa"}}}
 	for _, other := range []jobMCP{upgraded, unset, {}} {
-		if other.bindingSum("c") == base.bindingSum("c") {
+		if mcpSum(other) == mcpSum(base) {
 			t.Fatalf("%+v binds like %+v", other, base)
 		}
 	}
-	if (jobMCP{}).bindingSum("c") != "c" || strings.Contains(base.bindingSum("c"), "one") {
+	if strings.Contains(mcpSum(base), "one") {
 		t.Fatal("bindingSum")
 	}
 }
@@ -323,12 +328,12 @@ func TestMCPOAuthSignIn(t *testing.T) {
 	if len(h) != 1 || h[0].Name != "Authorization" || h[0].Value != "Bearer member-token" {
 		t.Fatalf("headers = %+v", h)
 	}
-	if strings.Contains(mcp.bindingSum("c"), "member-token") {
+	if strings.Contains(mcpSum(mcp), "member-token") {
 		t.Fatal("token in the checksum")
 	}
 	f.setSignIn(t, "drive", "rotated-token", 0)
 	again, _, _ := b.resolveMCP([]wire.ContentMCPTool{driveTool()}, refs, "maya", true)
-	if again.bindingSum("c") != mcp.bindingSum("c") {
+	if mcpSum(again) != mcpSum(mcp) {
 		t.Fatal("a refreshed token must not churn the session")
 	}
 	// Never lent: a borrowed or platform drive does not get it.

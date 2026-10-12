@@ -23,16 +23,6 @@ import (
 // without the capability keep the push-based prompt (driveText), so behavior
 // degrades per-core rather than being removed.
 
-// pullWriter resolves the workspace-file writer and endpoint for a core.
-func (b *Bridge) pullWriter(ctx context.Context, coreName string) (corepkg.WorkspaceFileWriter, corepkg.Endpoint, bool) {
-	entry, ok := b.coreEntry(coreName)
-	if !ok || !entry.endpoint.OK() {
-		return nil, corepkg.Endpoint{}, false
-	}
-	w, ok := corepkg.As[corepkg.WorkspaceFileWriter](ctx, entry.provider, entry.endpoint, corepkg.CapabilityWriteFile)
-	return w, entry.endpoint, ok
-}
-
 // writtenAttachment describes an attachment materialized into the workspace: the
 // path the agent can open, plus its original name and type for the prompt.
 type writtenAttachment struct {
@@ -47,16 +37,8 @@ type writtenAttachment struct {
 // It uses the WorkspaceFileBytesWriter seam; a core without that capability
 // returns nil (nothing to open). Best-effort per attachment: a failed
 // fetch/write logs and is skipped rather than failing the turn.
-func (b *Bridge) materializeAttachments(ctx context.Context, coreName, room, workspaceID string, ids []string) []writtenAttachment {
-	if len(ids) == 0 {
-		return nil
-	}
-	entry, ok := b.coreEntry(coreName)
-	if !ok || !entry.endpoint.OK() {
-		return nil
-	}
-	w, ok := corepkg.As[corepkg.WorkspaceFileBytesWriter](ctx, entry.provider, entry.endpoint, corepkg.CapabilityWriteFile)
-	if !ok {
+func (b *Bridge) materializeAttachments(ctx context.Context, w corepkg.WorkspaceFileBytesWriter, ep corepkg.Endpoint, room, workspaceID string, ids []string) []writtenAttachment {
+	if len(ids) == 0 || w == nil {
 		return nil
 	}
 	var out []writtenAttachment
@@ -71,7 +53,7 @@ func (b *Bridge) materializeAttachments(ctx context.Context, coreName, room, wor
 			continue
 		}
 		path := ".room/attachments/" + id + extForContentType(contentType, filename)
-		if err := w.WriteWorkspaceFileBytes(ctx, entry.endpoint, workspaceID, path, blob); err != nil {
+		if err := w.WriteWorkspaceFileBytes(ctx, ep, workspaceID, path, blob); err != nil {
 			slog.Debug("bnbloc bridge attachment write failed", "event", "bnbloc.bridge.attachment_write_failed", "room", room, "attachment", id, "error", err)
 			continue
 		}
@@ -222,13 +204,15 @@ func (b *Bridge) materializeRoomContext(ctx context.Context, w corepkg.Workspace
 // the session is created — the workspace exists, the session does not yet);
 // any materialization failure falls back to the push model for this turn. A
 // core without the writer capability uses the push model every turn.
-func (b *Bridge) drivePrompt(ctx context.Context, room, owner, coreName, provider, workspaceID, sessionID, text string, atts []writtenAttachment, st *roomlog.CtxState, fresh bool) string {
+func (b *Bridge) drivePrompt(ctx context.Context, d *drive, workspaceID string, atts []writtenAttachment, st *roomlog.CtxState, fresh bool) string {
+	room, owner, provider, text := d.job.RoomID, d.owner, d.job.Provider, d.text
 	self := agentSpeakerLabel(owner, provider)
 	pa := toPromptAttachments(atts)
-	w, ep, ok := b.pullWriter(ctx, coreName)
-	if !ok {
+	entry, ok := b.coreEntry(d.core)
+	if d.caps.writer == nil || !ok {
 		return b.driveTextDelta(ctx, room, owner, provider, text, pa, st, fresh)
 	}
+	w, ep := d.caps.writer, entry.endpoint
 	// Materialize: fresh sessions start from an empty state.
 	start := *st
 	if fresh {
@@ -237,7 +221,7 @@ func (b *Bridge) drivePrompt(ctx context.Context, room, owner, coreName, provide
 	newSt, err := b.materializeRoomContext(ctx, w, ep, room, workspaceID, text, self, fresh, start)
 	if err != nil {
 		slog.Warn("bnbloc bridge room-context materialization failed; falling back to pushed context",
-			"event", "bnbloc.bridge.roomctx_failed", "room", room, "core", coreName, "error", err)
+			"event", "bnbloc.bridge.roomctx_failed", "room", room, "core", d.core, "error", err)
 		return b.driveTextDelta(ctx, room, owner, provider, text, pa, st, fresh)
 	}
 	*st = newSt

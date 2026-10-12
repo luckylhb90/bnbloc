@@ -116,11 +116,11 @@ func TestSessionContributorReachesProfileCore(t *testing.T) {
 
 	b.cacheTargets("core-a", []corepkg.Target{{ID: "t", Provider: "agent-a", MCPTransports: []string{corepkg.MCPStdio, corepkg.MCPHTTP}}})
 	job1 := jobRef{ID: "job-1", RequesterUserID: "jack", TenantID: "t1", MessageSeq: 4}
-	if _, err := b.driveClaim(context.Background(), job1, "r1", "maya", "core-a", "agent-a", "t", "first", nil, corepkg.SessionOptions{}, nil, "ch", nil); err != nil {
+	if _, err := b.driveClaim(context.Background(), testDrive(b, job1, "r1", "maya", "core-a", "agent-a", "t", "first", "ch"), nil); err != nil {
 		t.Fatal(err)
 	}
 	job2 := jobRef{ID: "job-2", RequesterUserID: "maya", TenantID: "t1", MessageSeq: 9}
-	if _, err := b.driveClaim(context.Background(), job2, "r1", "maya", "core-a", "agent-a", "t", "second", nil, corepkg.SessionOptions{}, nil, "ch", nil); err != nil {
+	if _, err := b.driveClaim(context.Background(), testDrive(b, job2, "r1", "maya", "core-a", "agent-a", "t", "second", "ch"), nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -136,7 +136,7 @@ func TestSessionContributorReachesProfileCore(t *testing.T) {
 	if len(infos) != 1 || len(infos[0].MCPTransports) != 2 || infos[0].MCPTransports[1] != corepkg.MCPHTTP {
 		t.Fatalf("session transports = %+v", infos)
 	}
-	if len(infos) != 1 || infos[0].JobID != "job-1" || infos[0].RequesterUserID != "jack" || infos[0].RoomID != "r1" || infos[0].Owner != "maya" || infos[0].Key == "" {
+	if len(infos) != 1 || infos[0].JobID != "job-1" || infos[0].RequesterUserID != "jack" || infos[0].RoomID != "r1" || infos[0].Owner != "maya" {
 		t.Fatalf("session info = %+v", infos)
 	}
 	if len(turns) != 2 || turns[0].JobID != "job-1" || turns[1].JobID != "job-2" || turns[1].RequesterUserID != "maya" || turns[1].MessageSeq != 9 {
@@ -160,7 +160,7 @@ func TestSessionContributorSkipsCoreWithoutProfile(t *testing.T) {
 		called = true
 		return SessionContribution{MCPServers: []corepkg.MCPServer{{Name: "x", Command: "x"}}}, nil
 	}))
-	if _, err := b.driveClaim(context.Background(), jobRef{ID: "job-1"}, "r1", "maya", "core-a", "agent-a", "t", "go", nil, corepkg.SessionOptions{}, nil, "ch", nil); err != nil {
+	if _, err := b.driveClaim(context.Background(), testDrive(b, jobRef{ID: "job-1"}, "r1", "maya", "core-a", "agent-a", "t", "go", "ch"), nil); err != nil {
 		t.Fatal(err)
 	}
 	if called {

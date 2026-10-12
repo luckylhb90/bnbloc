@@ -339,4 +339,3 @@ func TestForeignScriptContentRequiresTheSandbox(t *testing.T) {
 		t.Fatalf("own pack = %+v", ps)
 	}
 }
-

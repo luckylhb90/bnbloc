@@ -1,0 +1,373 @@
+package bridge
+
+import (
+	"context"
+	"log/slog"
+	"strings"
+	"sync"
+	"time"
+
+	corepkg "github.com/luckylhb90/bnbloc/core"
+	"github.com/luckylhb90/bnbloc/internal/shareagent"
+	"github.com/luckylhb90/bnbloc/internal/store"
+)
+
+// The drive pipeline. A claimed job runs through eight named stages, in
+// order:
+//
+//	1 admit                  text, core, disabled provider: owner and core
+//	2 resolve content        expert, skill packs, MCP tools (unmet: missing)
+//	3 snapshot capabilities  the core's capabilities, asked once per drive
+//	4 plan execution         a team needs the room tools; host or sandbox
+//	5 authorize              a borrow's reservation (a platform agent's
+//	                         sandbox requirement re-checked)
+//	6 bind target            the core-local target; MCP servers fitted to it
+//	7 drive                  under the drive lock: prepare the sandbox,
+//	                         ensure the session, send, reflow
+//	8 settle                 settle the borrow, report, publish deliverables
+//
+// Stages 1–6 fill in the drive or return a refusal (job_failure.go): nothing
+// ran, and the job fails final with a notice. Stage 7's error is a drive
+// failure, classified by the stage it reached (fail). The own, borrowed,
+// platform, sandboxed and dispatched drives all take this one path: they
+// differ only in the inputs to stages 4 and 5.
+
+// drive is one claimed job's plan, filled in stage by stage.
+type drive struct {
+	job   bridgeJob
+	owner string // the agent's owner
+	// run is the job's registration (a cancel interrupts the bound turn).
+	run *runningJob
+	// startMs is when the drive began: deliverable publishing is scoped to
+	// what this turn wrote.
+	startMs int64
+
+	text     string // stage 1
+	core     string // stage 1
+	borrowed bool   // stage 1: the requester is not the agent's owner
+
+	content *jobContent // stage 2
+	caps    driveCaps   // stage 3
+
+	// prepareExec readies a sandboxed turn (nil: the drive runs on the
+	// host); unsandboxed says why a borrowed drive is not sandboxed (stage 4).
+	prepareExec func(context.Context) (*corepkg.Execution, error)
+	unsandboxed string
+
+	reservationID string // stage 5: the borrow's reservation ("" = none)
+	target        string // stage 6
+}
+
+// stage is one refusable stage of the pipeline.
+type stage struct {
+	name string
+	run  func(*Bridge, context.Context, *drive) *refusal
+}
+
+// refusableStages are stages 1–6, in order.
+var refusableStages = []stage{
+	{"admit", (*Bridge).admit},
+	{"resolve content", (*Bridge).resolveContent},
+	{"snapshot capabilities", (*Bridge).snapshotCapabilities},
+	{"plan execution", (*Bridge).planExecution},
+	{"authorize", (*Bridge).authorize},
+	{"bind target", (*Bridge).bindTarget},
+}
+
+// ref is the job's drive identity.
+func (d *drive) ref() jobRef {
+	return jobRef{ID: d.job.JobID, MessageSeq: d.job.MessageSeq, RequesterUserID: d.job.RequesterUserID, TenantID: d.job.TenantID, RoomID: d.job.RoomID, ChannelID: d.job.ChannelID, content: d.content}
+}
+
+// key is the drive's slot: its session and drive lock.
+func (d *drive) key() driveKey {
+	return driveKey{room: d.job.RoomID, core: d.core, provider: d.job.Provider, sandboxed: d.prepareExec != nil}
+}
+
+// agent is the core/provider pair of the job's diagnostics.
+func (d *drive) agent() map[string]any {
+	return map[string]any{"core": firstNonEmpty(d.core, d.job.Core), "provider": d.job.Provider}
+}
+
+// runBridgeJob drives one claimed job through the pipeline.
+func (b *Bridge) runBridgeJob(ctx context.Context, job bridgeJob) {
+	// Hold the lease for as long as the turn actually runs. Without renewal a
+	// turn longer than the server lease is reclaimed by another bridge and the
+	// same prompt executes twice.
+	ctx, stopDrive := context.WithCancel(ctx)
+	defer stopDrive()
+	// Register the job so a cancellation arriving over the room stream can
+	// interrupt this turn at once. The lease loop is the fallback for when the
+	// stream is down: slower, but it still stops the work.
+	d := &drive{job: job, owner: firstNonEmpty(job.OwnerUserID, b.cfg.OwnerSubject), run: &runningJob{stop: stopDrive}, startMs: time.Now().UnixMilli()}
+	defer b.trackJob(job.JobID, d.run)()
+	go b.renewLeaseLoop(ctx, job.JobID, func() { b.abortJob(job.JobID, "lease_lost") })
+	for _, st := range refusableStages {
+		if r := st.run(b, ctx, d); r != nil {
+			slog.Info("bnbloc bridge job refused",
+				"event", "bnbloc.bridge.job_refused", "job", job.JobID, "stage", st.name, "reason", string(r.kind.reason))
+			b.refuse(ctx, d, r)
+			return
+		}
+	}
+	res, err := b.driveTurn(ctx, d)
+	b.settle(ctx, d, res, err)
+}
+
+// admit is stage 1: the job carries something to say, names a core this
+// bridge runs (a named core is never redirected to another: that would
+// answer with a different agent), and a provider the member did not turn
+// off.
+func (b *Bridge) admit(_ context.Context, d *drive) *refusal {
+	d.text = strings.TrimSpace(d.job.MessageText)
+	if d.text == "" && len(d.job.AttachmentIDs) == 0 {
+		return refuseInvalidJob.refused("This message to "+d.job.Provider+" has no text or attachments, so nothing ran.", nil)
+	}
+	core, ok := b.resolveCore(d.job.Core)
+	if ok && b.providerDisabled(core, d.job.Provider) {
+		ok = false
+	}
+	if !ok {
+		agent := d.job.Provider
+		if d.job.Core != "" {
+			agent = corepkg.QualifyTargetID(d.job.Core, d.job.Provider)
+		}
+		return refuseNotAdvertised.refused("The "+agent+" agent is not available on "+d.owner+"'s machine, so nothing ran.", d.agent())
+	}
+	d.core = core
+	d.borrowed = isBorrow(d.job.RequesterUserID, d.owner)
+	return nil
+}
+
+// resolveContent is stage 2: the expert and skill packs the turn wears,
+// resolved and verified before anything else (content from someone else
+// that runs scripts forces the sandbox, decided in stage 4). A job naming an
+// expert it cannot wear is refused; any other resolution failure drives the
+// turn without content (logged): room and member skill packs are
+// best-effort, never a reason to drop a turn.
+func (b *Bridge) resolveContent(ctx context.Context, d *drive) *refusal {
+	content, err := b.resolveJobContent(ctx, d.job, d.owner)
+	switch {
+	case err == nil:
+		d.content = content
+	case d.job.ExpertID == "":
+		slog.Warn("bnbloc bridge content resolution failed; driving without content",
+			"event", "bnbloc.bridge.content_unresolved", "job", d.job.JobID, "error", err)
+		d.content = &jobContent{}
+	default:
+		return refuseContentUnavailable.refused(contentUnavailableText(d.job, err), d.agent())
+	}
+	return nil
+}
+
+// driveCaps is the core's capability verdicts, asked once per drive (stage
+// 3): every later stage reads these, so a drive never sees a capability
+// appear or vanish halfway.
+type driveCaps struct {
+	// reachable: the core's endpoint is known, so the verdicts were asked.
+	reachable bool
+	// profile: agentProfile (an agent profile, MCP servers, room tools).
+	profile bool
+	// workdir: sandboxExec (a workspace created in the sandbox workdir).
+	workdir corepkg.WorkdirWorkspaceCreator
+	// writer / bytesWriter: writeFile (.room/ context, attachments,
+	// fallback skill files).
+	writer      corepkg.WorkspaceFileWriter
+	bytesWriter corepkg.WorkspaceFileBytesWriter
+}
+
+// snapshotCapabilities is stage 3.
+func (b *Bridge) snapshotCapabilities(ctx context.Context, d *drive) *refusal {
+	d.caps = b.coreCaps(ctx, d.core)
+	return nil
+}
+
+// coreCaps asks a core's capabilities once (zero when its endpoint is not
+// known yet).
+func (b *Bridge) coreCaps(ctx context.Context, coreName string) driveCaps {
+	entry, ok := b.coreEntry(coreName)
+	if !ok || !entry.endpoint.OK() {
+		return driveCaps{}
+	}
+	p, ep := entry.provider, entry.endpoint
+	caps := driveCaps{reachable: true, profile: corepkg.Supports(ctx, p, ep, corepkg.CapabilityAgentProfile)}
+	caps.workdir, _ = corepkg.As[corepkg.WorkdirWorkspaceCreator](ctx, p, ep, corepkg.CapabilitySandboxExec)
+	caps.writer, _ = corepkg.As[corepkg.WorkspaceFileWriter](ctx, p, ep, corepkg.CapabilityWriteFile)
+	caps.bytesWriter, _ = corepkg.As[corepkg.WorkspaceFileBytesWriter](ctx, p, ep, corepkg.CapabilityWriteFile)
+	return caps
+}
+
+// planExecution is stage 4: a team expert needs the room tools (its lead
+// dispatches to the roles), and where the drive runs — host or agent
+// sandbox — is decided before any quota is reserved: a borrowed drive the
+// tenant requires to be sandboxed, or a turn wearing someone else's
+// script-bearing content, is refused here when the sandbox cannot take it.
+func (b *Bridge) planExecution(ctx context.Context, d *drive) *refusal {
+	// An unreachable core's capabilities are unknown: the drive fails
+	// retryably as core_unavailable instead.
+	if team := d.content.teamRoster(); team != nil && d.caps.reachable && !d.caps.profile {
+		return refuseTeamUnsupported.refused("The team "+firstNonEmpty(team.Name, "expert")+" needs an agent that can use the room tools to ask its members; "+d.job.Provider+" cannot. Nothing ran.", d.agent())
+	}
+	prepare, refuse, unavailable := b.planSandbox(ctx, d)
+	if refuse != "" {
+		return refuseSandboxRequired.refused(refuse, b.sandboxDiagnostics(d))
+	}
+	d.prepareExec, d.unsandboxed = prepare, unavailable
+	return nil
+}
+
+func (b *Bridge) sandboxDiagnostics(d *drive) map[string]any {
+	diag := d.agent()
+	diag["requesterUserId"] = d.job.RequesterUserID
+	return diag
+}
+
+// authorize is stage 5: a borrow runs only on a positive authorization.
+// When this bridge acts as the owner it reserves the run (R8: the
+// reservation counts against the quota before anything is driven) and
+// settles it after the drive. The reservation says whether the drive must
+// be sandboxed (a platform agent): one that is not is refused like the
+// tenant policy's, before anything runs.
+func (b *Bridge) authorize(ctx context.Context, d *drive) *refusal {
+	if !d.borrowed {
+		return nil
+	}
+	rsv := b.authorizeBorrow(ctx, d.job, d.owner, d.core, d.prepareExec != nil)
+	switch rsv.DenyReason {
+	case "":
+	case shareagent.DenySandboxRequired:
+		return refuseSandboxRequired.refused(platformSandboxPrefix+d.unsandboxed, b.sandboxDiagnostics(d))
+	default:
+		diag := b.sandboxDiagnostics(d)
+		diag["denyReason"] = rsv.DenyReason
+		r := refuseBorrowDenied.refused(borrowDeniedText(d.owner, d.job.Provider, rsv.DenyReason), diag)
+		r.notice = map[string]any{"denyReason": rsv.DenyReason}
+		return r
+	}
+	d.reservationID = rsv.ID
+	// A platform agent's turn that named no model runs with its host's
+	// default model, exactly as if the member had picked it: the session
+	// options, the run report and the settle all read job.Model.
+	if d.job.Model == "" {
+		d.job.Model = rsv.DefaultModel
+	}
+	return nil
+}
+
+// bindTarget is stage 6: the core-local target the session is created for
+// (a qualified job target of this core names it; realtime's core/provider
+// placeholder resolves through the core), and the content's MCP servers
+// fitted to what that target can attach.
+func (b *Bridge) bindTarget(ctx context.Context, d *drive) *refusal {
+	d.target = b.resolveTarget(ctx, d.core, d.job.Provider)
+	if core, raw := corepkg.SplitTargetID(strings.TrimSpace(d.job.TargetID)); raw != "" && raw != d.job.Provider && (core == "" || core == d.core) {
+		d.target = raw
+	}
+	if len(d.content.mcp.servers) > 0 {
+		d.content.fitMCPToTarget(d.caps.profile, b.targetTransports(d.core, d.target, d.job.Provider))
+	}
+	return nil
+}
+
+// driveTurn is stage 7: report the job running, then drive it.
+func (b *Bridge) driveTurn(ctx context.Context, d *drive) (driveResult, error) {
+	running := d.agent()
+	running["targetId"], running["sandboxed"] = d.target, d.prepareExec != nil
+	if c := d.content; c.expert != nil {
+		running["expert"] = expertLabel(c.expert)
+	}
+	if c := d.content; c.roomExpert != nil {
+		running["roomExpert"] = expertLabel(c.roomExpert)
+	}
+	if len(d.content.missing) > 0 {
+		running["contentMissing"] = d.content.missing
+	}
+	if err := b.reportJobStatus(ctx, d.job.JobID, store.AgentJobRunning, "", running); err != nil {
+		slog.Debug("bnbloc bridge job running status failed", "event", "bnbloc.bridge.job_status_failed", "job", d.job.JobID, "error", err)
+	}
+	return b.driveClaim(ctx, d, func(rs *roomSession) {
+		// Publish the bound session so a cancel arriving mid-turn can interrupt it.
+		d.run.bind(d.core, rs)
+		diag := d.agent()
+		diag["workspaceId"], diag["sessionId"] = rs.workspaceID, rs.sessionID
+		b.reportJobStatus(ctx, d.job.JobID, store.AgentJobReflowing, "", diag)
+	})
+}
+
+// settle is stage 8. A reserved borrow is settled once the drive ends —
+// whatever its outcome; the run was counted at reserve time — with the
+// usage the turn's replies reported. An aborted job is no longer ours: the
+// server already recorded the cancel and cleared the lease, so no outcome
+// is reported. Otherwise the job reports replied (its changed files become
+// artifact versions) or fails by the stage its drive reached.
+func (b *Bridge) settle(ctx context.Context, d *drive, res driveResult, err error) {
+	if d.reservationID != "" {
+		go b.settleBorrow(b.detached(ctx), d.job.RoomID, d.owner, d.core, d.job.Provider, d.reservationID, res.usage.recordFields(d.job.Model))
+	}
+	if d.run.aborted() {
+		slog.Info("bnbloc bridge job abandoned after abort",
+			"event", "bnbloc.bridge.job_abandoned", "job", d.job.JobID)
+		return
+	}
+	diag := d.agent()
+	if res.sessionID != "" {
+		diag["workspaceId"], diag["sessionId"] = res.workspaceID, res.sessionID
+	}
+	if res.replied {
+		if err != nil {
+			diag["warning"] = cleanDriveError(err)
+		}
+		b.reportJobStatus(ctx, d.job.JobID, store.AgentJobReplied, "", res.usage.withRunReport(diag, d.job.Model))
+		// Presentation only: a failed publish never marks the turn failed.
+		if _, rs := d.run.bound(); rs != nil {
+			go b.publishDeliverables(b.detached(ctx), d.job.RoomID, d.job.ChannelID, rs,
+				deliverableTurn{StartMs: d.startMs, JobID: d.job.JobID, SourceSeq: d.job.MessageSeq})
+		}
+		return
+	}
+	if err == nil {
+		// The turn ran (it may have acted) without a visible reply: final.
+		err = errNoReply
+	}
+	diag["targetId"] = d.target
+	diag["error"] = cleanDriveError(err)
+	b.fail(ctx, d, err, res.usage.withRunReport(diag, d.job.Model))
+}
+
+// detached is the context for work that outlives a drive (a borrow settle,
+// a deliverable publish): the bridge's root context, never the drive's,
+// which is cancelled the moment the drive returns.
+func (b *Bridge) detached(ctx context.Context) context.Context {
+	if b.driveCtx != nil {
+		return b.driveCtx
+	}
+	return context.WithoutCancel(ctx)
+}
+
+// driveKey names one agent's drive slot in a room: its bound session and
+// its drive lock. A sandboxed drive has a slot apart from the host one: a
+// session's workspace lives either on the host or under the sandbox
+// workspaces root, so a change of execution kind (mode switch, sandbox
+// ready/unavailable, own vs borrowed) starts a separate session and
+// workspace instead of moving one.
+type driveKey struct {
+	room, core, provider string
+	sandboxed            bool
+}
+
+// agentID is the (room, core, provider) identity both execution kinds of
+// an agent share (its sandbox space is named from it).
+func (k driveKey) agentID() string { return k.room + "\x00" + k.core + "\x00" + k.provider }
+
+// driveLock returns the drive slot's lock: consecutive turns of one agent
+// session queue instead of interleaving on the same core session.
+func (b *Bridge) driveLock(k driveKey) *sync.Mutex {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	l := b.locks[k]
+	if l == nil {
+		l = &sync.Mutex{}
+		b.locks[k] = l
+	}
+	return l
+}

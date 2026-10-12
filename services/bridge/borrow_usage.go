@@ -46,20 +46,32 @@ func (u *turnUsage) add(metrics map[string]any) {
 	}
 }
 
-// recordFields are the usage fields of the borrow accountability record
-// (.../authorization/record). The model is the one the core reported, else
-// the model the job requested; tokens and cost appear only when reported.
-func (u turnUsage) recordFields(requestedModel string) map[string]any {
-	out := map[string]any{}
-	if m := firstNonEmpty(u.model, strings.TrimSpace(requestedModel)); m != "" {
-		out["model"] = m
-	}
+// usage is the turn's usage projection, the one both reports read (the
+// borrow record and the run report): the model the core reported, else the
+// model the job requested; tokens and cost only when reported.
+func (u turnUsage) usage(requestedModel string) wire.AgentRunUsage {
+	out := wire.AgentRunUsage{Model: firstNonEmpty(u.model, strings.TrimSpace(requestedModel)), CostUsd: u.cost}
 	if u.tokensReported {
-		out["inputTokens"] = u.inputTokens
-		out["outputTokens"] = u.outputTokens
+		in, outTok := u.inputTokens, u.outputTokens
+		out.InputTokens, out.OutputTokens = &in, &outTok
 	}
-	if u.cost != nil {
-		out["cost"] = *u.cost
+	return out
+}
+
+// recordFields are the usage fields of the borrow accountability record
+// (.../authorization/record), from the usage projection.
+func (u turnUsage) recordFields(requestedModel string) map[string]any {
+	use := u.usage(requestedModel)
+	out := map[string]any{}
+	if use.Model != "" {
+		out["model"] = use.Model
+	}
+	if use.InputTokens != nil {
+		out["inputTokens"] = *use.InputTokens
+		out["outputTokens"] = *use.OutputTokens
+	}
+	if use.CostUsd != nil {
+		out["cost"] = *use.CostUsd
 	}
 	return out
 }

@@ -152,10 +152,12 @@ type sandboxGateway struct {
 	// defaultModel is the platform agent's default model the reservation
 	// answers ("" = none).
 	defaultModel string
-	mu           sync.Mutex
-	statuses     []map[string]any
-	tenants      []string
-	reserves     []map[string]any
+	// deny makes the reservation authority refuse with this reason.
+	deny     string
+	mu       sync.Mutex
+	statuses []map[string]any
+	tenants  []string
+	reserves []map[string]any
 }
 
 func newSandboxGateway(t *testing.T, room string, require bool) *sandboxGateway {
@@ -179,6 +181,9 @@ func newSandboxGateway(t *testing.T, room string, require bool) *sandboxGateway 
 			g.reserves = append(g.reserves, body)
 			g.mu.Unlock()
 			switch {
+			case g.deny != "":
+				w.WriteHeader(http.StatusForbidden)
+				_ = json.NewEncoder(w).Encode(map[string]any{"reserved": false, "denyReason": g.deny})
 			case g.platform && body["sandboxed"] != true:
 				w.WriteHeader(http.StatusForbidden)
 				_, _ = w.Write([]byte(`{"reserved":false,"denyReason":"sandbox_required","sandboxRequired":true}`))
@@ -455,7 +460,6 @@ func TestDecideSandbox(t *testing.T) {
 		}
 	}
 }
-
 
 func TestParseSandboxMode(t *testing.T) {
 	for in, want := range map[string]SandboxMode{"": SandboxBorrowed, "off": SandboxOff, " ALL ": SandboxAll, "borrowed": SandboxBorrowed} {

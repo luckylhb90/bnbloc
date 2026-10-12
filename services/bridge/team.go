@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"net/url"
 
-	corepkg "github.com/luckylhb90/bnbloc/core"
 	"github.com/luckylhb90/bnbloc/internal/expertteam"
 	"github.com/luckylhb90/bnbloc/internal/wire"
 	"github.com/luckylhb90/bnbloc/services/bridge/roomtools"
@@ -63,27 +62,6 @@ func (b *Bridge) teamContent(ctx context.Context, job bridgeJob, c *jobContent, 
 	}
 	c.team = t
 	return nil
-}
-
-// refuseTeamWithoutTools refuses a team job on a core that cannot attach
-// the room tools (no agentProfile): its lead could not dispatch to any
-// role, so running it would silently answer without the team.
-func (b *Bridge) refuseTeamWithoutTools(ctx context.Context, job bridgeJob, owner, coreName string, c *jobContent) bool {
-	if c == nil || c.team == nil {
-		return false
-	}
-	entry, ok := b.coreEntry(coreName)
-	if !ok || !entry.endpoint.OK() {
-		// The core is not reachable: its capabilities are unknown, and the
-		// drive fails retryably as core_unavailable instead.
-		return false
-	}
-	if corepkg.Supports(ctx, entry.provider, entry.endpoint, corepkg.CapabilityAgentProfile) {
-		return false
-	}
-	text := "The team " + firstNonEmpty(c.team.Name, "expert") + " needs an agent that can use the room tools to ask its members; " + job.Provider + " cannot. Nothing ran."
-	b.refuse(ctx, job, owner, refuseTeamUnsupported, text, map[string]any{"core": coreName, "provider": job.Provider})
-	return true
 }
 
 // teamRoster is the roster the turn's room tools dispatch by (nil: no team).

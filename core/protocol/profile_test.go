@@ -49,7 +49,7 @@ func TestProfile_roundTripsThroughTheWire(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if req.Profile.ContentSum() != sampleProfile().ContentSum() {
+	if req.Profile.BindingSum() != sampleProfile().BindingSum() {
 		t.Fatal("content changed through the wire")
 	}
 	if got := req.Profile.MCPServers; len(got) != 2 || got[1].Type != core.MCPStdio || got[0].Headers[0].Value != "Bearer t" {

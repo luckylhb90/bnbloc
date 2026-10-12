@@ -141,17 +141,21 @@ func (p *turnScriptProv) Messages(_ context.Context, _ corepkg.Endpoint, _, _ st
 // agentSessionId with seq = UnixMilli, so the activity cursor jumped to ~1.8e12
 // and the next real reply (seq 2) was dropped as a replay.
 func TestReplyAfterFailedTurnIsStillStored(t *testing.T) {
-	g := newActivityGateway(t, "room-1")
+	g := newSandboxGateway(t, "room-1", false)
 	prov := &turnScriptProv{}
 	b := New(Config{GatewayBaseURL: g.srv.URL, GatewayToken: "t", OwnerSubject: "alice", Cores: newTestCore(prov)})
 	ctx := context.Background()
 
-	if _, err := b.driveClaim(ctx, jobRef{ID: "job-1"}, "room-1", "alice", "core-a", "codex", "t", "first", nil, corepkg.SessionOptions{}, nil, "ch", nil); err == nil {
-		t.Fatal("turn 1 must report the failed turn")
+	turn := func(id, text string) bridgeJob {
+		return bridgeJob{JobID: id, RoomID: "room-1", ChannelID: "ch", OwnerUserID: "alice", RequesterUserID: "alice", Core: "core-a", Provider: "codex", TargetID: "t", MessageText: text}
 	}
-	res, err := b.driveClaim(ctx, jobRef{ID: "job-2"}, "room-1", "alice", "core-a", "codex", "t", "second", nil, corepkg.SessionOptions{}, nil, "ch", nil)
-	if err != nil || !res.replied {
-		t.Fatalf("turn 2 = %+v, %v; want a posted reply", res, err)
+	b.runBridgeJob(ctx, turn("job-1", "first"))
+	if st := g.lastStatus(); st["status"] != "failed" || st["failureReason"] != "runner_failed" {
+		t.Fatalf("turn 1 status = %+v; want the failed turn reported", st)
+	}
+	b.runBridgeJob(ctx, turn("job-2", "second"))
+	if st := g.lastStatus(); st["status"] != "replied" {
+		t.Fatalf("turn 2 status = %+v; want a posted reply", st)
 	}
 
 	posts, fresh := g.stored()
@@ -170,15 +174,16 @@ func TestReplyAfterFailedTurnIsStillStored(t *testing.T) {
 	}
 }
 
-// BR-1: borrow-denied and drive-failed notices always carry their own
-// (per-job) agentSessionId and a channel.
+// BR-1: notices always carry their own (per-job) agentSessionId, a
+// channel, and their kind (payload.notice: readers skip them).
 func TestNoticesCarryPerJobAgentSession(t *testing.T) {
 	g := newActivityGateway(t, "room-1")
 	b := New(Config{GatewayBaseURL: g.srv.URL, GatewayToken: "t", OwnerSubject: "alice"})
 	ctx := context.Background()
-	b.postBorrowDenied(ctx, jobRef{ID: "job-7", MessageSeq: 3}, "room-1", "alice", "codex", "ch", "owner_not_authorized")
-	b.postDriveFailed(ctx, jobRef{ID: "job-8"}, "room-1", "alice", "codex", "daemon down", "ch")
-	b.postBorrowDenied(ctx, jobRef{ID: "job-7", MessageSeq: 3}, "room-1", "alice", "codex", "ch", "owner_not_authorized") // retry: idempotent
+	denied := jobRef{ID: "job-7", MessageSeq: 3, RoomID: "room-1", ChannelID: "ch"}
+	b.postNotice(ctx, denied, wire.JobNotice{Kind: "borrow-denied", Text: borrowDeniedText("alice", "codex", "owner_not_authorized"), OwnerUserID: "alice", Provider: "codex"})
+	b.postNotice(ctx, jobRef{ID: "job-8", RoomID: "room-1", ChannelID: "ch"}, wire.JobNotice{Kind: "drive-failed", Text: "daemon down", OwnerUserID: "alice", Provider: "codex"})
+	b.postNotice(ctx, denied, wire.JobNotice{Kind: "borrow-denied", Text: borrowDeniedText("alice", "codex", "owner_not_authorized"), OwnerUserID: "alice", Provider: "codex"}) // retry: idempotent
 
 	posts, fresh := g.stored()
 	if len(posts) != 3 || len(fresh) != 2 {
@@ -193,6 +198,11 @@ func TestNoticesCarryPerJobAgentSession(t *testing.T) {
 	}
 	if id, seq := payloadJob(fresh[1]); id != "job-8" || seq != nil {
 		t.Fatalf("drive notice job = %q/%v; want job-8 without a request seq", id, seq)
+	}
+	for _, m := range fresh {
+		if p, _ := m.Payload.(map[string]any); p["notice"] == "" || p["notice"] == nil {
+			t.Fatalf("a notice without its kind: %+v", m.Payload)
+		}
 	}
 }
 
@@ -217,7 +227,7 @@ func TestReplyPostFailureIsRetried(t *testing.T) {
 	prov.pollsBusy = 3 // stay busy long enough for the retries to happen mid-turn
 	b := New(Config{GatewayBaseURL: g.srv.URL, GatewayToken: "t", OwnerSubject: "alice", Cores: newTestCore(prov)})
 
-	res, err := b.driveClaim(context.Background(), jobRef{ID: "job-1", MessageSeq: 9}, "room-1", "alice", "core-a", "codex", "c", "go", nil, corepkg.SessionOptions{}, nil, "ch", nil)
+	res, err := b.driveClaim(context.Background(), testDrive(b, jobRef{ID: "job-1", MessageSeq: 9}, "room-1", "alice", "core-a", "codex", "c", "go", "ch"), nil)
 	if err != nil || !res.replied {
 		t.Fatalf("drive = %+v, %v; want the reply delivered after retries", res, err)
 	}
@@ -271,9 +281,9 @@ func TestSyncPlanUsesRoomSessionWorkspace(t *testing.T) {
 	older.markTurn(deliverableTurn{StartMs: 100})
 	newer := &roomSession{core: "core-a", workspaceID: "w2", sessionID: "s2"}
 	newer.markTurn(deliverableTurn{StartMs: 200})
-	b.sessions[sessionKey("room1", "core-a", "codex")] = older
-	b.sessions[sessionKey("room1", "core-a", "claude")] = newer
-	b.sessions[sessionKey("room10", "core-a", "codex")] = &roomSession{core: "core-a", workspaceID: "wx", sessionID: "sx"}
+	b.sessions[driveKey{room: "room1", core: "core-a", provider: "codex"}] = older
+	b.sessions[driveKey{room: "room1", core: "core-a", provider: "claude"}] = newer
+	b.sessions[driveKey{room: "room10", core: "core-a", provider: "codex"}] = &roomSession{core: "core-a", workspaceID: "wx", sessionID: "sx"}
 
 	mode, dir, _ := b.syncPlan(context.Background(), "room1")
 	if mode != "mutagen" || dir != "/proj/two" {

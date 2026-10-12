@@ -70,7 +70,7 @@ func decodeReply(payload any) (session, text string, ok bool) {
 		return "", "", false
 	}
 	session = strings.TrimSpace(in.AgentSessionID)
-	if session == "" || strings.HasPrefix(session, wire.JobNoticeSessionID("")) {
+	if session == "" || wire.IsJobNoticeSession(session) {
 		return "", "", false
 	}
 	for i := len(in.Messages) - 1; i >= 0; i-- {

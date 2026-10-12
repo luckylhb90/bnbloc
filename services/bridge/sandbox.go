@@ -194,7 +194,7 @@ func (s *sandboxRuntime) probe(ctx context.Context) (bool, string) {
 // guest user is "sp-<space>", so it stays well under 32 characters), and
 // collision-free through the hash of the full key.
 func sandboxSpaceName(room, core, provider string) string {
-	sum := sha256.Sum256([]byte(room + "\x00" + core + "\x00" + provider))
+	sum := sha256.Sum256([]byte(driveKey{room: room, core: core, provider: provider}.agentID()))
 	return slugPart(core, 8) + "-" + slugPart(provider, 8) + "-" + hex.EncodeToString(sum[:5])
 }
 
@@ -391,27 +391,26 @@ func (b *Bridge) fetchSandboxPolicy(ctx context.Context, tenantKey string) (bool
 	return *out.RequireSandboxForBorrow, nil
 }
 
-// planSandbox decides how a job runs. prepare is non-nil for a sandboxed
-// drive; refuse is set when the drive must not run at all; unavailable says
-// why a borrowed drive is not sandboxed (sandboxDecision.unavailable).
-func (b *Bridge) planSandbox(ctx context.Context, job bridgeJob, owner, coreName string, borrowed bool, foreign []string) (prepare func(context.Context) (*corepkg.Execution, error), refuse, unavailable string) {
+// planSandbox decides how a drive runs (stage 4). prepare is non-nil for a
+// sandboxed drive; refuse is set when the drive must not run at all;
+// unavailable says why a borrowed drive is not sandboxed
+// (sandboxDecision.unavailable). Whether the core can run sandboxed is the
+// drive's capability snapshot.
+func (b *Bridge) planSandbox(ctx context.Context, d *drive) (prepare func(context.Context) (*corepkg.Execution, error), refuse, unavailable string) {
 	s := b.sandbox
 	ready, reason := s.status(ctx)
-	supports := false
-	if entry, ok := b.coreEntry(coreName); ok && entry.endpoint.OK() {
-		supports = corepkg.Supports(ctx, entry.provider, entry.endpoint, corepkg.CapabilitySandboxExec)
+	dec := decideSandbox(d.borrowed, d.content.foreign, s.cfg.Mode, ready, reason, d.caps.workdir != nil, func() (bool, error) {
+		return b.requireSandboxForBorrow(ctx, d.job.TenantID)
+	}, d.owner, d.job.Provider)
+	if dec.refuse != "" {
+		return nil, dec.refuse, dec.unavailable
 	}
-	d := decideSandbox(borrowed, foreign, s.cfg.Mode, ready, reason, supports, func() (bool, error) {
-		return b.requireSandboxForBorrow(ctx, job.TenantID)
-	}, owner, job.Provider)
-	if d.refuse != "" {
-		return nil, d.refuse, d.unavailable
+	if !dec.sandboxed {
+		return nil, "", dec.unavailable
 	}
-	if !d.sandboxed {
-		return nil, "", d.unavailable
-	}
+	room, core, provider, owner := d.job.RoomID, d.core, d.job.Provider, d.owner
 	return func(ctx context.Context) (*corepkg.Execution, error) {
-		return s.prepare(ctx, job.RoomID, coreName, job.Provider, owner)
+		return s.prepare(ctx, room, core, provider, owner)
 	}, "", ""
 }
 
@@ -424,12 +423,4 @@ func (b *Bridge) sandboxedAgent(ctx context.Context, coreName string) bool {
 	}
 	entry, ok := b.coreEntry(coreName)
 	return ok && entry.endpoint.OK() && corepkg.Supports(ctx, entry.provider, entry.endpoint, corepkg.CapabilitySandboxExec)
-}
-
-// refuseUnsandboxed refuses a borrowed drive that must run sandboxed and
-// cannot — the tenant's requireSandboxForBorrow, or a platform agent (its
-// reservation answered sandboxRequired): a visible sandbox-required notice
-// and the final job failure sandbox_required. Nothing has run.
-func (b *Bridge) refuseUnsandboxed(ctx context.Context, job bridgeJob, owner, coreName, text string) {
-	b.refuse(ctx, job, owner, refuseSandboxRequired, text, map[string]any{"core": coreName, "provider": job.Provider, "requesterUserId": job.RequesterUserID})
 }
