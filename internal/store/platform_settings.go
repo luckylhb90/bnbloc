@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"errors"
 	"sort"
 	"sync"
 )
@@ -15,13 +16,56 @@ type PlatformSetting struct {
 	UpdatedBy   string
 }
 
+// ErrPlatformSettingChanged refuses a compare-and-set write whose expected
+// row is no longer the stored one: a concurrent writer won. The caller
+// re-reads and retries (UpdatePlatformSetting).
+var ErrPlatformSettingChanged = errors.New("store: platform setting changed concurrently")
+
 // PlatformSettingsStore persists platform-wide settings. Implementations must
 // be safe for concurrent use.
 type PlatformSettingsStore interface {
 	PutPlatformSetting(ctx context.Context, setting PlatformSetting) error
 	GetPlatformSetting(ctx context.Context, key string) (PlatformSetting, bool, error)
+	// ListPlatformSettings returns every setting by key ([] when none).
 	ListPlatformSettings(ctx context.Context) ([]PlatformSetting, error)
 	DeletePlatformSetting(ctx context.Context, key string) error
+	// SwapPlatformSetting writes next only while the stored row of next.Key
+	// is still prev (value, time and author exactly as read; prev nil: only
+	// while the key is unset), else ErrPlatformSettingChanged. It is the
+	// write of a read-modify-write: UpdatePlatformSetting.
+	SwapPlatformSetting(ctx context.Context, prev *PlatformSetting, next PlatformSetting) error
+}
+
+// maxSettingSwaps bounds UpdatePlatformSetting's retries: every lost round
+// is another writer's win, so N concurrent writers all land within N rounds.
+const maxSettingSwaps = 32
+
+// UpdatePlatformSetting is the one read-modify-write of a platform setting:
+// it reads key, lets change compute the next value from the current one
+// (found=false: unset), and writes it with SwapPlatformSetting, re-reading
+// and re-applying change when a concurrent writer won, so no concurrent
+// update is lost. change errors abort. It returns the written value.
+func UpdatePlatformSetting(ctx context.Context, st PlatformSettingsStore, key, actor string, atMs int64, change func(cur string, found bool) (string, error)) (string, error) {
+	for range maxSettingSwaps {
+		row, found, err := st.GetPlatformSetting(ctx, key)
+		if err != nil {
+			return "", err
+		}
+		next, err := change(row.Value, found)
+		if err != nil {
+			return "", err
+		}
+		var prev *PlatformSetting
+		if found {
+			prev = &row
+		}
+		err = st.SwapPlatformSetting(ctx, prev, PlatformSetting{Key: key, Value: next, UpdatedAtMs: atMs, UpdatedBy: actor})
+		if errors.Is(err, ErrPlatformSettingChanged) {
+			continue
+		}
+		return next, err
+	}
+	return "", ErrPlatformSettingChanged
 }
 
 // MemoryPlatformSettings is an in-memory PlatformSettingsStore for dev/tests.
@@ -60,6 +104,17 @@ func (s *MemoryPlatformSettings) ListPlatformSettings(_ context.Context) ([]Plat
 	}
 	sort.SliceStable(out, func(i, j int) bool { return out[i].Key < out[j].Key })
 	return out, nil
+}
+
+func (s *MemoryPlatformSettings) SwapPlatformSetting(_ context.Context, prev *PlatformSetting, next PlatformSetting) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	cur, found := s.settings[next.Key]
+	if found != (prev != nil) || (found && cur != *prev) {
+		return ErrPlatformSettingChanged
+	}
+	s.settings[next.Key] = next
+	return nil
 }
 
 func (s *MemoryPlatformSettings) DeletePlatformSetting(_ context.Context, key string) error {

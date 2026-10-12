@@ -42,20 +42,31 @@ func (s *MySQLPlatformSettings) GetPlatformSetting(ctx context.Context, key stri
 }
 
 func (s *MySQLPlatformSettings) ListPlatformSettings(ctx context.Context) ([]PlatformSetting, error) {
-	rows, err := s.DB.QueryContext(ctx, `SELECT setting_key, setting_value, updated_at_ms, updated_by FROM platform_settings ORDER BY setting_key`)
+	return queryAll(ctx, s.DB, `SELECT setting_key, setting_value, updated_at_ms, updated_by FROM platform_settings ORDER BY setting_key`,
+		func(r rowScanner) (PlatformSetting, error) {
+			var setting PlatformSetting
+			err := r.Scan(&setting.Key, &setting.Value, &setting.UpdatedAtMs, &setting.UpdatedBy)
+			return setting, err
+		})
+}
+
+// SwapPlatformSetting is an INSERT for an unset key (a concurrent insert is
+// the duplicate key) and otherwise one conditional UPDATE on the row as
+// read: the value compares byte-exact (the column's collation would fold
+// case), the time and author exactly.
+func (s *MySQLPlatformSettings) SwapPlatformSetting(ctx context.Context, prev *PlatformSetting, next PlatformSetting) error {
+	if prev == nil {
+		_, err := s.DB.ExecContext(ctx, `INSERT INTO platform_settings (setting_key, setting_value, updated_at_ms, updated_by)
+  VALUES (?, ?, ?, ?)`, next.Key, next.Value, next.UpdatedAtMs, next.UpdatedBy)
+		return dupAs(err, ErrPlatformSettingChanged)
+	}
+	res, err := s.DB.ExecContext(ctx, `UPDATE platform_settings SET setting_value = ?, updated_at_ms = ?, updated_by = ?
+  WHERE setting_key = ? AND CAST(setting_value AS BINARY) = CAST(? AS BINARY) AND updated_at_ms = ? AND updated_by = ?`,
+		next.Value, next.UpdatedAtMs, next.UpdatedBy, next.Key, prev.Value, prev.UpdatedAtMs, prev.UpdatedBy)
 	if err != nil {
-		return nil, err
+		return err
 	}
-	defer rows.Close()
-	var out []PlatformSetting
-	for rows.Next() {
-		var setting PlatformSetting
-		if err := rows.Scan(&setting.Key, &setting.Value, &setting.UpdatedAtMs, &setting.UpdatedBy); err != nil {
-			return nil, err
-		}
-		out = append(out, setting)
-	}
-	return out, rows.Err()
+	return requireMatched(res, ErrPlatformSettingChanged)
 }
 
 func (s *MySQLPlatformSettings) DeletePlatformSetting(ctx context.Context, key string) error {

@@ -126,12 +126,10 @@ func (s *Service) handlePutPlatformAgentsPolicy(w http.ResponseWriter, r *http.R
 			entry.Agents = append(entry.Agents, a)
 		}
 	}
-	current, ok := s.platformPolicy(w, r)
-	if !ok {
-		return
-	}
-	p := current.WithHost(entry)
-	if err := store.SavePlatformAgents(r.Context(), s.Settings, p, host, s.Now()); err != nil {
+	p, err := store.UpdatePlatformAgents(r.Context(), s.Settings, host, s.Now(), func(cur wire.PlatformAgentsPolicy) wire.PlatformAgentsPolicy {
+		return cur.WithHost(entry)
+	})
+	if err != nil {
 		obs.ServerError(w, "save platform agents policy failed", err)
 		httpx.Error(w, "save platform agents policy failed", http.StatusInternalServerError)
 		return

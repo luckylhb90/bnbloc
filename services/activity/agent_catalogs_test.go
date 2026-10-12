@@ -81,10 +81,12 @@ func newCatalogEnv(t *testing.T) *catalogEnv {
 	advertise("b-dave", "dave", store.BridgeAgent{Core: "acme", Provider: "codex", ModelOptionsJSON: catalog("dave-model"), LastSeenAtMs: now})
 
 	settings := store.NewMemoryPlatformSettings()
-	if err := store.SavePlatformAgents(ctx, settings, wire.PlatformAgentsPolicy{Hosts: []wire.PlatformAgentHost{{
-		HostUserID: "root", Enabled: true,
-		Agents: []wire.PlatformAgentSpec{{Core: "nimbus", Provider: "codex"}, {Core: "nimbus", Provider: "claude"}},
-	}}}, "root", now); err != nil {
+	if _, err := store.UpdatePlatformAgents(ctx, settings, "root", now, func(wire.PlatformAgentsPolicy) wire.PlatformAgentsPolicy {
+		return wire.PlatformAgentsPolicy{Hosts: []wire.PlatformAgentHost{{
+			HostUserID: "root", Enabled: true,
+			Agents: []wire.PlatformAgentSpec{{Core: "nimbus", Provider: "codex"}, {Core: "nimbus", Provider: "claude"}},
+		}}}
+	}); err != nil {
 		t.Fatal(err)
 	}
 	grants := store.NewMemoryGrant()
@@ -171,8 +173,10 @@ func TestRoomAgentCatalogsRequireMembership(t *testing.T) {
 func TestRoomAgentCatalogsHostAgentsFollowPolicy(t *testing.T) {
 	e := newCatalogEnv(t)
 	ctx := tenant.NewContext(context.Background(), tenant.Default)
-	if err := store.SavePlatformAgents(ctx, e.settings, wire.PlatformAgentsPolicy{Hosts: []wire.PlatformAgentHost{{HostUserID: "root", Enabled: false,
-		Agents: []wire.PlatformAgentSpec{{Core: "nimbus", Provider: "codex"}}}}}, "root", 1); err != nil {
+	if _, err := store.UpdatePlatformAgents(ctx, e.settings, "root", 1, func(wire.PlatformAgentsPolicy) wire.PlatformAgentsPolicy {
+		return wire.PlatformAgentsPolicy{Hosts: []wire.PlatformAgentHost{{HostUserID: "root", Enabled: false,
+			Agents: []wire.PlatformAgentSpec{{Core: "nimbus", Provider: "codex"}}}}}
+	}); err != nil {
 		t.Fatal(err)
 	}
 	members := "alice/acme/codex=gpt-5|o3,bob/acme/codex=bob-model"
@@ -225,10 +229,10 @@ func TestRoomAgentCatalogsMultiHost(t *testing.T) {
 		OwnerUserID: "root2", GranteeUserID: "*", Source: store.GrantSourcePlatform, CreatedAtMs: now}); err != nil {
 		t.Fatal(err)
 	}
-	policy, _ := store.LoadPlatformAgents(ctx, e.settings)
-	policy = policy.WithHost(wire.PlatformAgentHost{HostUserID: "root2", Enabled: true,
-		Agents: []wire.PlatformAgentSpec{{Core: "nimbus", Provider: "codex"}, {Core: "nimbus", Provider: "claude"}}})
-	if err := store.SavePlatformAgents(ctx, e.settings, policy, "root2", now); err != nil {
+	if _, err := store.UpdatePlatformAgents(ctx, e.settings, "root2", now, func(policy wire.PlatformAgentsPolicy) wire.PlatformAgentsPolicy {
+		return policy.WithHost(wire.PlatformAgentHost{HostUserID: "root2", Enabled: true,
+			Agents: []wire.PlatformAgentSpec{{Core: "nimbus", Provider: "codex"}, {Core: "nimbus", Provider: "claude"}}})
+	}); err != nil {
 		t.Fatal(err)
 	}
 	want := "alice/acme/codex=gpt-5|o3,bob/acme/codex=bob-model,root/nimbus/codex=host-model,root2/nimbus/codex=root2-model"

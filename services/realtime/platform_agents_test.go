@@ -37,8 +37,10 @@ func TestChatToOfflinePlatformAgentRefused(t *testing.T) {
 	future := int64(1) << 60
 	_ = grants.PutGrant(ctx, store.Grant{GrantID: "o", RoomID: "room-1", TargetID: "shared-agent:nimbus:claude", OwnerUserID: "alice", GranteeUserID: "*", ExpiresAtMs: &future})
 	settings := store.NewMemoryPlatformSettings()
-	_ = store.SavePlatformAgents(ctx, settings, wire.PlatformAgentsPolicy{Hosts: []wire.PlatformAgentHost{{HostUserID: "root", Enabled: true,
-		Agents: []wire.PlatformAgentSpec{{Core: "nimbus", Provider: "codex"}}}}}, "root", 1)
+	_, _ = store.UpdatePlatformAgents(ctx, settings, "root", 1, func(wire.PlatformAgentsPolicy) wire.PlatformAgentsPolicy {
+		return wire.PlatformAgentsPolicy{Hosts: []wire.PlatformAgentHost{{HostUserID: "root", Enabled: true,
+			Agents: []wire.PlatformAgentSpec{{Core: "nimbus", Provider: "codex"}}}}}
+	})
 	ads := fixedAdvertisements{}
 	jobs := &captureBridgeJobs{}
 	svc := &Service{Hub: hub, Membership: mem, BridgeJobs: jobs, PlatformAgents: &PlatformAgentGuard{Grants: grants, Settings: settings, Bridges: ads}}

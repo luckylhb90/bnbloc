@@ -8,86 +8,49 @@ import (
 	"testing"
 )
 
-func TestMemoryComponentInstallPutIsIdempotent_whenSubjectInstallsSameComponentTwice(t *testing.T) {
-	// Given
-	s := NewMemoryComponentInstall()
-	ctx := context.Background()
-
-	// When
-	if err := s.PutComponentInstall(ctx, "alice", "core", "acme", 100); err != nil {
-		t.Fatalf("first put: %v", err)
-	}
-	if err := s.PutComponentInstall(ctx, "alice", "core", "acme", 200); err != nil {
-		t.Fatalf("second put: %v", err)
-	}
-
-	// Then
-	installs, err := s.ListComponentInstalls(ctx, "alice")
-	if err != nil {
-		t.Fatalf("list: %v", err)
-	}
-	if len(installs) != 1 {
-		t.Fatalf("installs = %+v; want exactly one row", installs)
-	}
-	if installs[0].InstalledAtMs != 100 {
-		t.Fatalf("installed_at_ms = %d; want original timestamp for idempotent install", installs[0].InstalledAtMs)
-	}
-}
-
-func TestMemoryComponentInstallDeleteIsIdempotent_whenInstallIsAbsent(t *testing.T) {
-	// Given
-	s := NewMemoryComponentInstall()
-	ctx := context.Background()
-	if err := s.PutComponentInstall(ctx, "alice", "core", "acme", 100); err != nil {
-		t.Fatalf("put: %v", err)
-	}
-
-	// When
-	if err := s.DeleteComponentInstall(ctx, "alice", "core", "acme"); err != nil {
-		t.Fatalf("delete existing: %v", err)
-	}
-	if err := s.DeleteComponentInstall(ctx, "alice", "core", "acme"); err != nil {
-		t.Fatalf("delete missing: %v", err)
-	}
-
-	// Then
-	installs, err := s.ListComponentInstalls(ctx, "alice")
-	if err != nil {
-		t.Fatalf("list: %v", err)
-	}
-	if len(installs) != 0 {
-		t.Fatalf("installs = %+v; want empty after delete", installs)
-	}
-}
-
-func TestMemoryComponentInstallCountDistinctSubjectsByKind(t *testing.T) {
-	// Given
-	s := NewMemoryComponentInstall()
-	ctx := context.Background()
-	for _, install := range []ComponentInstall{
-		{Subject: "alice", Kind: "core", Name: "acme", InstalledAtMs: 100},
-		{Subject: "bob", Kind: "core", Name: "acme", InstalledAtMs: 101},
-		{Subject: "alice", Kind: "core", Name: "orbit", InstalledAtMs: 102},
-		{Subject: "alice", Kind: "plugin", Name: "auditor", InstalledAtMs: 103},
-	} {
-		if err := s.PutComponentInstall(ctx, install.Subject, install.Kind, install.Name, install.InstalledAtMs); err != nil {
-			t.Fatalf("put %+v: %v", install, err)
+// Installs on both backends: a put is idempotent (the first install time
+// stays), a delete of a missing row is a no-op, a listing is by kind then
+// name ([] when none), counts are distinct subjects per name of one kind,
+// and subjects are exact (case-variant ids are distinct).
+func TestContractComponentInstallStore(t *testing.T) {
+	forEachBackend(t, func(t *testing.T, b *Backends) {
+		s := b.ComponentInstalls
+		ctx := context.Background()
+		alice, bob := uniq("alice-"), uniq("bob-")
+		kind := uniq("kind-")
+		for _, in := range []ComponentInstall{
+			{Subject: alice, Kind: kind, Name: "orbit", InstalledAtMs: 102},
+			{Subject: alice, Kind: kind, Name: "acme", InstalledAtMs: 100},
+			{Subject: bob, Kind: kind, Name: "acme", InstalledAtMs: 101},
+			{Subject: alice, Kind: kind + "-plugin", Name: "auditor", InstalledAtMs: 103},
+		} {
+			if err := s.PutComponentInstall(ctx, in.Subject, in.Kind, in.Name, in.InstalledAtMs); err != nil {
+				t.Fatalf("put %+v: %v", in, err)
+			}
 		}
-	}
-	if err := s.PutComponentInstall(ctx, "alice", "core", "acme", 999); err != nil {
-		t.Fatalf("repeat put: %v", err)
-	}
-
-	// When
-	counts, err := s.CountComponentInstalls(ctx, "core")
-
-	// Then
-	if err != nil {
-		t.Fatalf("count: %v", err)
-	}
-	if counts["acme"] != 2 || counts["orbit"] != 1 || counts["auditor"] != 0 {
-		t.Fatalf("counts = %+v; want distinct core subjects only", counts)
-	}
+		if err := s.PutComponentInstall(ctx, alice, kind, "acme", 999); err != nil {
+			t.Fatalf("repeat put: %v", err)
+		}
+		got := must(s.ListComponentInstalls(ctx, alice))(t)
+		if len(got) != 3 || got[0].Kind != kind || got[0].Name != "acme" || got[0].InstalledAtMs != 100 || got[1].Name != "orbit" || got[2].Kind != kind+"-plugin" {
+			t.Fatalf("alice's installs = %+v; want kind, name order and the first install time", got)
+		}
+		counts := must(s.CountComponentInstalls(ctx, kind))(t)
+		if len(counts) != 2 || counts["acme"] != 2 || counts["orbit"] != 1 {
+			t.Fatalf("counts = %+v; want distinct subjects per name of the kind", counts)
+		}
+		if none := must(s.ListComponentInstalls(ctx, strings.ToUpper(alice)))(t); none == nil || len(none) != 0 {
+			t.Fatalf("a case-variant subject's installs = %#v, want []", none)
+		}
+		for i := 0; i < 2; i++ {
+			if err := s.DeleteComponentInstall(ctx, alice, kind, "acme"); err != nil {
+				t.Fatalf("delete #%d: %v", i, err)
+			}
+		}
+		if got := must(s.ListComponentInstalls(ctx, alice))(t); len(got) != 2 || got[0].Name != "orbit" {
+			t.Fatalf("after delete = %+v", got)
+		}
+	})
 }
 
 func TestComponentInstallsSchemaAndMigrationDeclareTable(t *testing.T) {
