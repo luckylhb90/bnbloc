@@ -23,6 +23,7 @@ pub(super) mod sidecar_model;
 pub(super) mod sidecar_orphan;
 pub(super) mod sidecar_runtime;
 pub(super) mod sidecar_status;
+pub(super) mod sidecar_sweep;
 pub(super) mod sidecar_targets;
 pub(super) mod sidecar_util;
 
@@ -169,10 +170,33 @@ impl Adapter {
 
     async fn reconcile(&self) -> Result<(), String> {
         let _serialized = self.reconcile_lock.lock().await;
-        let (specs, discovered) = self.resolve_specs().await?;
+        let gateway = self.gateway.lock().clone();
+        let catalog = self.fetch_components(&gateway).await?;
+        let (specs, discovered) = self.resolve_specs(&catalog);
         self.write_manifests(&specs).await?;
         self.apply_specs(specs, discovered);
+        self.sweep_uninstalled(&catalog).await;
         Ok(())
+    }
+
+    /// Forget what this desktop keeps for components the live catalog no
+    /// longer has (sidecar_sweep).
+    async fn sweep_uninstalled(&self, catalog: &sidecar_model::ComponentsResponse) {
+        let live = sidecar_sweep::Live::of(catalog, &sidecar_util::current_platform());
+        let dirs = sidecar_sweep::SweepDirs {
+            binaries: self.cache_dir().ok(),
+            sandboxes: self.sandbox_bases(),
+            plugin_settings: self.plugin_settings_dir().ok(),
+            mcp_settings: self.mcp_settings_dir().ok(),
+        };
+        let mcp = Arc::clone(&self.mcp);
+        let swept = tauri::async_runtime::spawn_blocking(move || {
+            sidecar_sweep::sweep(&dirs, &live, &mcp.sign_ins)
+        })
+        .await;
+        if let Err(e) = swept {
+            eprintln!("[sidecar-manager] sweep failed: {e}");
+        }
     }
 
     // reconcile_bounded is the only reconcile entrypoint callers should use:
@@ -316,19 +340,9 @@ impl Adapter {
             let mut inner = self.inner.lock();
             apply_specs_to_inner(&mut inner, specs, discovered)
         };
+        // What an uninstalled component leaves on disk goes with the
+        // reconcile's sweep (sidecar_sweep).
         child_process::terminate_detached(applied.removed, STOP_GRACE);
-        for id in applied.uninstalled {
-            self.remove_cached_binaries(&id, None);
-            // An uninstalled plugin's local settings (its credentials) go
-            // with it.
-            if let Some(plugin) = id.strip_prefix("plugin/") {
-                self.forget_plugin_settings(plugin);
-            }
-            // An uninstalled sandbox's bundles and data dir go with it.
-            if let Some(name) = id.strip_prefix("sandbox/") {
-                self.forget_sandbox(name);
-            }
-        }
         if let Some(generation) = applied.generation_to_start {
             self.start_known(generation);
         }
@@ -348,8 +362,8 @@ fn apply_specs_to_inner(
         .filter(|name| !discovered.contains(*name))
         .cloned()
         .collect::<Vec<_>>();
-    for name in &uninstalled {
-        if let Some(mut sidecar) = inner.sidecars.remove(name) {
+    for name in uninstalled {
+        if let Some(mut sidecar) = inner.sidecars.remove(&name) {
             sidecar.generation += 1;
             removed.extend(sidecar.child.take());
         }
@@ -403,7 +417,6 @@ fn apply_specs_to_inner(
     AppliedSpecs {
         generation_to_start: inner.desired_up.then_some(inner.generation),
         removed,
-        uninstalled,
     }
 }
 
@@ -411,9 +424,6 @@ struct AppliedSpecs {
     generation_to_start: Option<u64>,
     /// Children of removed/replaced sidecars, to stop.
     removed: Vec<Child>,
-    /// Component ids no longer in the member catalog: their cached binaries
-    /// are deleted.
-    uninstalled: Vec<String>,
 }
 
 /// Extend the bridge env (bridge::env_for) with the managed cores and MCP

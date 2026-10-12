@@ -227,7 +227,9 @@ fn an_oauth_tool_carries_its_sign_in_spec() {
             scopes: vec!["files:read".into()],
         })
     );
-    assert!(drive.fields.is_empty() && drive.holds_member_credentials());
-    // A bearer tool keeps member settings, not a sign-in.
-    assert!(tools[1].oauth.is_none() && tools[1].holds_member_credentials());
+    // The sweep keeps the oauth tool's sign-in; a bearer tool keeps member
+    // settings, not a sign-in.
+    let keep = mcp_keep(&tools);
+    assert!(keep.sign_ins.contains("drive") && !keep.settings.contains("drive"));
+    assert!(keep.settings.contains("search") && !keep.sign_ins.contains("search"));
 }

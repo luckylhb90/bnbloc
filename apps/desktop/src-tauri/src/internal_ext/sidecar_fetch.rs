@@ -32,17 +32,16 @@ pub(crate) enum FetchError {
 }
 
 impl Adapter {
-    pub(super) async fn resolve_specs(
+    pub(super) fn resolve_specs(
         &self,
-    ) -> Result<(Vec<SidecarSpec>, HashSet<String>), String> {
-        let gateway = self.gateway.lock().clone();
+        components: &ComponentsResponse,
+    ) -> (Vec<SidecarSpec>, HashSet<String>) {
         let platform = current_platform();
-        let components = self.fetch_components(&gateway).await?;
         // Previewer bundles follow the same catalog: drop uninstalled ones.
-        self.retain_previewers(&components);
+        self.retain_previewers(components);
         // So do MCP tools: materialize stdio binaries, drop removed ones.
-        self.sync_mcp_tools(&components);
-        let resolved = resolve_component_specs(&components, &platform);
+        self.sync_mcp_tools(components);
+        let resolved = resolve_component_specs(components, &platform);
         for failure in &resolved.failures {
             self.set_initial_status(
                 failure.kind,
@@ -87,7 +86,7 @@ impl Adapter {
             }
             specs.push(spec);
         }
-        Ok((specs, resolved.discovered))
+        (specs, resolved.discovered)
     }
 
     pub(super) async fn fetch_components(

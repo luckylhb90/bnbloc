@@ -852,20 +852,14 @@ impl Adapter {
         status
     }
 
-    /// An uninstalled sandbox component: its bundles and data go with it.
-    pub(super) fn forget_sandbox(&self, name: &str) {
-        let stem = cache_stem(name);
-        let dirs: Vec<PathBuf> = [true, false]
+    /// The bundle and data bases, one directory per sandbox component under
+    /// each: the reconcile's sweep removes an uninstalled sandbox's bundles
+    /// and data from them (sidecar_sweep).
+    pub(super) fn sandbox_bases(&self) -> Vec<PathBuf> {
+        [true, false]
             .into_iter()
             .filter_map(|cache| self.sandbox_base(cache).ok())
-            .map(|base| base.join(&stem))
-            .collect();
-        tauri::async_runtime::spawn_blocking(move || {
-            for dir in dirs {
-                sandbox_bundle::remove_stale_bundles(&dir, None);
-                let _ = std::fs::remove_dir_all(&dir);
-            }
-        });
+            .collect()
     }
 }
 

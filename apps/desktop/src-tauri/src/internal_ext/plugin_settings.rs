@@ -15,7 +15,7 @@
 //! The store itself (one 0600 JSON object per component, the schema merge,
 //! the secret-free views) is shared with the member credentials of MCP tools
 //! (internal_ext/mcp_tools.rs, Settings → Tools).
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use crate::internal_ext::sidecar_model::{ComponentKind, LocalSettingField};
@@ -136,13 +136,6 @@ impl Adapter {
         Ok(())
     }
 
-    /// Delete the settings of plugins no longer installed for this member.
-    pub(super) fn forget_plugin_settings(&self, plugin: &str) {
-        if let Ok(path) = self.plugin_settings_file(plugin) {
-            let _ = std::fs::remove_file(path);
-        }
-    }
-
     fn plugin_schema(&self, plugin: &str) -> Result<Vec<LocalSettingField>, String> {
         let inner = self.inner.lock();
         inner
@@ -167,6 +160,42 @@ pub(super) fn settings_path(dir: &Path, plugin: &str) -> Result<PathBuf, String>
         return Err(format!("invalid plugin name {plugin:?}"));
     }
     Ok(dir.join(format!("{plugin}.json")))
+}
+
+/// The component files stored in `dir`: `(name, path)` of every
+/// `<name>.json` and of every in-flight `.<name>.json.tmp`. Anything else
+/// in the dir (sub-directories, foreign files) is not listed.
+pub(super) fn stored_files(dir: &Path) -> Vec<(String, PathBuf)> {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    entries
+        .flatten()
+        .filter(|entry| entry.file_type().is_ok_and(|t| t.is_file()))
+        .filter_map(|entry| {
+            let file = entry.file_name().into_string().ok()?;
+            let name = file
+                .strip_prefix('.')
+                .and_then(|f| f.strip_suffix(".tmp"))
+                .unwrap_or(&file)
+                .strip_suffix(".json")?
+                .to_string();
+            Some((name, entry.path()))
+        })
+        .collect()
+}
+
+/// Delete the files of every component in `dir` not in `keep` (the
+/// uninstall sweep). Blocking.
+pub(super) fn forget_unlisted(dir: &Path, keep: &HashSet<String>) {
+    for (name, path) in stored_files(dir) {
+        if keep.contains(&name) {
+            continue;
+        }
+        if let Err(e) = std::fs::remove_file(&path) {
+            eprintln!("[sidecar-manager] could not forget {}: {e}", path.display());
+        }
+    }
 }
 
 /// The stored values (missing or unreadable file: none).

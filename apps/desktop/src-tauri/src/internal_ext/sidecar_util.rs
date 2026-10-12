@@ -59,10 +59,15 @@ pub(super) fn cache_stem(id: &str) -> String {
     id.replace('/', "-")
 }
 
-/// The pinned sha256 encoded in a cache file name of component `id`
-/// (`<stem>-<64 hex>[.exe]`), or None when `name` is not one of its cached
-/// binaries. Component `foo` never claims `foo-bar`'s files.
-pub(super) fn cache_file_sha(name: &str, id: &str) -> Option<String> {
+/// The owner stem and pinned sha256 of a cache file name
+/// (`<stem>-<64 hex>[.exe]`) or of its partial download (`.<that>.part`),
+/// or None for any other name. Component `foo` never claims `foo-bar`'s
+/// files: the stem is everything before the final `-<sha>`.
+pub(super) fn parse_cache_file(name: &str) -> Option<(&str, String)> {
+    let name = name
+        .strip_prefix('.')
+        .and_then(|n| n.strip_suffix(".part"))
+        .unwrap_or(name);
     let base = name.strip_suffix(exe_suffix()).unwrap_or(name);
     let split = base.len().checked_sub(65)?;
     if !base.is_char_boundary(split) {
@@ -70,24 +75,18 @@ pub(super) fn cache_file_sha(name: &str, id: &str) -> Option<String> {
     }
     let (owner, tail) = base.split_at(split);
     let sha = tail.strip_prefix('-')?;
-    (owner == cache_stem(id) && sha.chars().all(|c| c.is_ascii_hexdigit()))
-        .then(|| sha.to_ascii_lowercase())
+    (!owner.is_empty() && sha.chars().all(|c| c.is_ascii_hexdigit()))
+        .then(|| (owner, sha.to_ascii_lowercase()))
 }
 
 /// The cached binaries and partial downloads in `names` that belong to
-/// component `id` and are not `keep`: its cache files (see `cache_file_sha`)
-/// and their `.<…>.part` temps.
+/// component `id` and are not `keep`.
 pub(super) fn stale_cache_files(names: &[String], id: &str, keep: Option<&str>) -> Vec<String> {
+    let stem = cache_stem(id);
     names
         .iter()
         .filter(|name| Some(name.as_str()) != keep)
-        .filter(|name| {
-            let base = name
-                .strip_prefix('.')
-                .and_then(|n| n.strip_suffix(".part"))
-                .unwrap_or(name);
-            cache_file_sha(base, id).is_some()
-        })
+        .filter(|name| parse_cache_file(name).is_some_and(|(owner, _)| owner == stem))
         .cloned()
         .collect()
 }
@@ -521,20 +520,23 @@ mod tests {
     }
 
     #[test]
-    fn cache_file_sha_reads_only_this_components_names() {
+    fn parse_cache_file_reads_the_owner_and_pin() {
         assert_eq!(
-            cache_file_sha(&cache_file_name("foo", SHA_A), "foo").as_deref(),
-            Some(SHA_A)
+            parse_cache_file(&cache_file_name("foo", SHA_A)),
+            Some(("foo", SHA_A.to_string()))
         );
         assert_eq!(
-            cache_file_sha(&cache_file_name("foo-bar", SHA_A), "foo"),
-            None
+            parse_cache_file(&cache_file_name("foo-bar", SHA_A)),
+            Some(("foo-bar", SHA_A.to_string()))
         );
         assert_eq!(
-            cache_file_sha(&cache_file_name("plugin/foo", SHA_B), "plugin/foo").as_deref(),
-            Some(SHA_B)
+            parse_cache_file(&cache_file_name("plugin/foo", SHA_B)),
+            Some(("plugin-foo", SHA_B.to_string()))
         );
-        assert_eq!(cache_file_sha("foo-notes.txt", "foo"), None);
+        let part = format!(".{}.part", cache_file_name("foo", SHA_A));
+        assert_eq!(parse_cache_file(&part), Some(("foo", SHA_A.to_string())));
+        assert_eq!(parse_cache_file("foo-notes.txt"), None);
+        assert_eq!(parse_cache_file(&format!("-{SHA_A}")), None);
     }
 
     #[test]

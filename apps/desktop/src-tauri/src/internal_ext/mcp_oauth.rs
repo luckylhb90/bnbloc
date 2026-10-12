@@ -33,7 +33,7 @@
 //! only over the sign-in it started from, so a sign-out or a new sign-in
 //! during a refresh wins). Token values are never logged and never returned
 //! to the web view.
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
@@ -44,7 +44,7 @@ use sha2::{Digest, Sha256};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 
-use crate::internal_ext::plugin_settings::settings_path;
+use crate::internal_ext::plugin_settings::{settings_path, stored_files};
 
 /// Sub-directory of the MCP settings dir holding sign-ins (the bridge
 /// reads `<dir>/oauth/<tool>.json`; services/bridge/mcp_tools.go).
@@ -186,6 +186,21 @@ impl SignIns {
             None => remove_sign_in(&path)?,
         }
         Ok(true)
+    }
+
+    /// Forget every stored sign-in whose tool is not in `keep` (the tools of
+    /// the live catalog that take a sign-in). Blocking.
+    pub(in crate::internal_ext) fn retain(&self, dir: &Path, keep: &HashSet<String>) {
+        for (tool, path) in stored_files(&dir.join(OAUTH_DIR)) {
+            if keep.contains(&tool) {
+                continue;
+            }
+            let lock = self.lock(&tool);
+            let _held = lock.lock();
+            if let Err(e) = remove_sign_in(&path) {
+                eprintln!("[mcp-tools:{tool}] {e}");
+            }
+        }
     }
 }
 

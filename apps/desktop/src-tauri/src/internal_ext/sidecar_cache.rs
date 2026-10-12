@@ -42,19 +42,20 @@ impl Adapter {
         self.set_status(&id, "ready", message, None);
         // Only the verified binary for the current spec stays cached.
         let keep = cache_file_name(&id, &spec.sha256);
-        self.remove_cached_binaries(&id, Some(&keep));
+        self.remove_cached_binaries(&id, &keep);
         Ok(cache_path)
     }
 
     /// Delete cached binaries (and stale partial downloads) of component `id`
-    /// except `keep`; `None` deletes them all (component uninstalled).
-    /// Best-effort and off the async runtime.
-    pub(super) fn remove_cached_binaries(&self, id: &str, keep: Option<&str>) {
+    /// except `keep` (an uninstalled component's binaries go with the
+    /// reconcile's sweep, sidecar_sweep). Best-effort and off the async
+    /// runtime.
+    fn remove_cached_binaries(&self, id: &str, keep: &str) {
         let Ok(dir) = self.cache_dir() else {
             return;
         };
         let id = id.to_string();
-        let keep = keep.map(str::to_string);
+        let keep = Some(keep.to_string());
         tauri::async_runtime::spawn_blocking(move || {
             let Ok(entries) = std::fs::read_dir(&dir) else {
                 return;

@@ -330,8 +330,12 @@ member may answer (`mention`: `to: "room"`; `agent_finished`/`agent_failed`:
 The desktop does not start a plugin whose required local settings are not
 all set (its status says so; its notifications fall back to the server
 notifiers). Saving or removing the settings restarts the sidecar; an
-uninstalled plugin's settings file is deleted. The values are stored per
-desktop (OS user) under the app config dir (`plugin-settings/<plugin>.json`).
+uninstalled plugin's settings file is deleted (every catalog refresh sweeps
+the files of plugins no longer installed). The values are stored per member
+and gateway under the app config dir
+(`members/<hash of gateway origin and subject>/plugin-settings/<plugin>.json`),
+so another member signing in on the same desktop never gets them; a member
+switch restarts the plugin with the new member's file.
 
 ### The desktop host API
 

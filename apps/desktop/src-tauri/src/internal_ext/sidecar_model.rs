@@ -396,6 +396,18 @@ pub(super) struct ComponentArtifact {
     pub(super) sha256: String,
 }
 
+/// The catalog entries this desktop runs or keeps (installed, rollout not
+/// off, desktop-managed: manifest cores and desktop sidecars), including a
+/// second sandbox that stays inactive.
+pub(super) fn desktop_components(
+    response: &ComponentsResponse,
+) -> impl Iterator<Item = &ComponentEntry> {
+    response
+        .components
+        .iter()
+        .filter(|c| c.active_desktop_component())
+}
+
 pub(super) fn resolve_component_specs(
     response: &ComponentsResponse,
     platform: &str,
@@ -406,17 +418,12 @@ pub(super) fn resolve_component_specs(
     let mut inactive = Vec::new();
     // One sandbox runtime per desktop (it owns the one machine): the
     // lexically first installed name wins, deterministically.
-    let active_sandbox = response
-        .components
-        .iter()
-        .filter(|c| c.kind == ComponentKind::Sandbox && c.active_desktop_component())
+    let active_sandbox = desktop_components(response)
+        .filter(|c| c.kind == ComponentKind::Sandbox)
         .map(|c| c.name.as_str())
         .min();
 
-    for component in &response.components {
-        if !component.active_desktop_component() {
-            continue;
-        }
+    for component in desktop_components(response) {
         discovered.insert(component.id());
         if component.kind == ComponentKind::Sandbox
             && Some(component.name.as_str()) != active_sandbox

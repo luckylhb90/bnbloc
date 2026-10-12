@@ -45,6 +45,7 @@ use crate::internal_ext::Adapter;
 
 #[path = "mcp_oauth.rs"]
 mod mcp_oauth;
+pub(super) use mcp_oauth::SignIns;
 use mcp_oauth::{OAuthSpec, RefreshOutcome};
 
 /// The env var naming the tools dir the bridge reads.
@@ -70,11 +71,26 @@ pub(super) struct McpTool {
     pub(super) oauth: Option<OAuthSpec>,
 }
 
-impl McpTool {
-    /// The tool keeps something of the member's on this machine (settings
-    /// or a sign-in), forgotten when it leaves the catalog.
-    fn holds_member_credentials(&self) -> bool {
-        !self.fields.is_empty() || self.oauth.is_some()
+/// What the uninstall sweep (sidecar_sweep) keeps of the member's MCP
+/// files: the tools whose member settings, and those whose sign-ins, the
+/// catalog still asks for.
+pub(super) struct McpKeep {
+    pub(super) settings: HashSet<String>,
+    pub(super) sign_ins: HashSet<String>,
+}
+
+pub(super) fn mcp_keep(tools: &[McpTool]) -> McpKeep {
+    McpKeep {
+        settings: tools
+            .iter()
+            .filter(|t| !t.fields.is_empty())
+            .map(|t| t.name.clone())
+            .collect(),
+        sign_ins: tools
+            .iter()
+            .filter(|t| t.oauth.is_some())
+            .map(|t| t.name.clone())
+            .collect(),
     }
 }
 
@@ -259,22 +275,13 @@ impl Adapter {
             .join(crate::internal_ext::member_dir::MCP_SETTINGS_DIR))
     }
 
-    /// Follow a freshly fetched catalog: remember its MCP tools, forget the
-    /// credentials of tools no longer installed, and materialize the stdio
-    /// binaries in the background (a large download never holds up the
-    /// reconcile).
+    /// Follow a freshly fetched catalog: remember its MCP tools and
+    /// materialize the stdio binaries in the background (a large download
+    /// never holds up the reconcile). The credentials of tools no longer
+    /// installed are forgotten by the reconcile's sweep (sidecar_sweep).
     pub(super) fn sync_mcp_tools(&self, catalog: &ComponentsResponse) {
         let tools = installed_mcp_tools(catalog, &current_platform());
-        let previous = std::mem::replace(&mut *self.mcp.tools.lock(), tools.clone());
-        for gone in previous.iter().filter(|t| t.holds_member_credentials()) {
-            let now = tools.iter().find(|t| t.name == gone.name);
-            if !gone.fields.is_empty() && now.is_none_or(|t| t.fields.is_empty()) {
-                self.forget_mcp_settings(&gone.name);
-            }
-            if gone.oauth.is_some() && now.is_none_or(|t| t.oauth.is_none()) {
-                self.forget_mcp_sign_in(&gone.name);
-            }
-        }
+        *self.mcp.tools.lock() = tools.clone();
         let sup = self.clone();
         let signed = tools.clone();
         tauri::async_runtime::spawn(async move {
@@ -515,23 +522,6 @@ impl Adapter {
                     eprintln!("[mcp-tools:{}] refresh failed: {m}", tool.name);
                 }
             }
-        }
-    }
-
-    fn forget_mcp_sign_in(&self, tool: &str) {
-        if let Ok(dir) = self.mcp_settings_dir() {
-            if let Err(e) = self.mcp.sign_ins.forget(&dir, tool) {
-                eprintln!("[mcp-tools:{tool}] {e}");
-            }
-        }
-    }
-
-    fn forget_mcp_settings(&self, tool: &str) {
-        if let Ok(path) = self
-            .mcp_settings_dir()
-            .and_then(|dir| settings_path(&dir, tool))
-        {
-            let _ = std::fs::remove_file(path);
         }
     }
 
