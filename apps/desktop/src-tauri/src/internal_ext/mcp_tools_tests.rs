@@ -225,3 +225,27 @@ fn an_oauth_tool_carries_its_sign_in_spec() {
     assert!(keep.sign_ins.contains("drive") && !keep.settings.contains("drive"));
     assert!(keep.settings.contains("search") && !keep.sign_ins.contains("search"));
 }
+
+/// Catalog refreshes during a slow pass never queue passes: one runs, at
+/// most one (the newest) waits.
+#[test]
+fn materialization_passes_coalesce() {
+    let passes = Coalesced::default();
+    assert!(passes.request(1), "the first request starts the runner");
+    assert_eq!(passes.next(), Some(1));
+    // While the runner works, three catalogs arrive: only the newest waits.
+    assert!(!passes.request(2));
+    assert!(!passes.request(3));
+    assert!(!passes.request(4));
+    assert_eq!(passes.next(), Some(4));
+    assert_eq!(passes.next(), None);
+    assert!(!passes.finish(), "nothing waits: the runner stops");
+    assert!(passes.request(5), "the next request starts a runner again");
+    assert_eq!(passes.next(), Some(5));
+    assert!(
+        !passes.request(6),
+        "a request between the last next and finish"
+    );
+    assert!(passes.finish(), "keeps the runner going");
+    assert_eq!(passes.next(), Some(6));
+}

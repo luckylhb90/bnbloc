@@ -100,8 +100,9 @@ pub(super) fn mcp_keep(tools: &[McpTool]) -> McpKeep {
 pub(super) struct McpState {
     tools: Mutex<Vec<McpTool>>,
     local: Mutex<HashMap<String, (String, String)>>,
-    /// Serializes materializations: each pass owns the tools dir.
-    pass: tokio::sync::Mutex<()>,
+    /// Materialization passes: one at a time (each owns the tools dir), and
+    /// at most one waiting, for the newest catalog.
+    passes: Coalesced<Vec<McpTool>>,
     /// Tools with a sign-in open in the browser.
     signing_in: Mutex<HashSet<String>>,
     /// Serializes sign-in refresh passes (a rotated refresh token is used
@@ -279,17 +280,30 @@ impl Adapter {
         tauri::async_runtime::spawn(async move {
             sup.refresh_mcp_sign_ins(&signed).await;
         });
+        // A pass while one runs (a slow download) only replaces the waiting
+        // catalog: passes never pile up. Binaries verified before and
+        // unchanged since are not hashed again (pin.rs), so a pass over an
+        // unchanged catalog only stats them.
+        if !self.mcp.passes.request(tools) {
+            return;
+        }
         let sup = self.clone();
         tauri::async_runtime::spawn(async move {
-            if let Err(e) = sup.materialize_mcp_tools(tools).await {
-                eprintln!("[mcp-tools] materialize failed: {e}");
+            loop {
+                while let Some(tools) = sup.mcp.passes.next() {
+                    if let Err(e) = sup.materialize_mcp_tools(tools).await {
+                        eprintln!("[mcp-tools] materialize failed: {e}");
+                    }
+                }
+                if !sup.mcp.passes.finish() {
+                    return;
+                }
             }
         });
     }
 
     async fn materialize_mcp_tools(&self, tools: Vec<McpTool>) -> Result<(), String> {
         let state = Arc::clone(&self.mcp);
-        let _pass = state.pass.lock().await;
         let dir = self.dirs()?.mcp_tools();
         tokio::fs::create_dir_all(&dir)
             .await
@@ -537,6 +551,47 @@ impl Adapter {
             .map(|t| t.fields.clone())
             .filter(|fields| !fields.is_empty())
             .ok_or_else(|| format!("MCP tool {tool} is not installed or takes no member settings"))
+    }
+}
+
+/// Requests served by one runner at a time, newest wins: a request while the
+/// runner works replaces the one waiting (at most one), so slow work never
+/// queues up passes.
+pub(super) struct Coalesced<T> {
+    state: Mutex<(Option<T>, bool)>,
+}
+
+impl<T> Default for Coalesced<T> {
+    fn default() -> Self {
+        Self {
+            state: Mutex::new((None, false)),
+        }
+    }
+}
+
+impl<T> Coalesced<T> {
+    /// Queue `value` (replacing a waiting one). True when the caller must
+    /// start the runner (none runs).
+    pub(super) fn request(&self, value: T) -> bool {
+        let mut state = self.state.lock();
+        state.0 = Some(value);
+        !std::mem::replace(&mut state.1, true)
+    }
+
+    /// The runner's next value.
+    pub(super) fn next(&self) -> Option<T> {
+        self.state.lock().0.take()
+    }
+
+    /// The runner found nothing waiting: it stops, unless a request came in
+    /// since (then it goes on).
+    pub(super) fn finish(&self) -> bool {
+        let mut state = self.state.lock();
+        if state.0.is_some() {
+            return true;
+        }
+        state.1 = false;
+        false
     }
 }
 

@@ -56,6 +56,9 @@ pub(crate) struct BundlePin {
 #[derive(Default)]
 pub(crate) struct PreviewerBundles {
     inner: Mutex<CacheInner>,
+    /// One fetch per bundle at a time: frames opening the same uncached
+    /// bundle together wait for the first one's download.
+    fetching: Mutex<HashMap<Sha256Pin, Arc<tokio::sync::Mutex<()>>>>,
 }
 
 #[derive(Default)]
@@ -114,6 +117,7 @@ impl PreviewerBundles {
             .retain(|key, (pin, _)| live.get(key) == Some(pin));
         inner.bundles.retain(|sha, _| keep.contains(sha));
         inner.order.retain(|sha| keep.contains(sha));
+        self.fetching.lock().retain(|sha, _| keep.contains(sha));
         keep
     }
 }
@@ -168,6 +172,11 @@ impl Adapter {
                 pin
             }
         };
+        if let Some(bundle) = state.cached_bundle(&pin.sha256) {
+            return Ok(bundle);
+        }
+        let fetching = Arc::clone(state.fetching.lock().entry(pin.sha256.clone()).or_default());
+        let _one = fetching.lock().await;
         if let Some(bundle) = state.cached_bundle(&pin.sha256) {
             return Ok(bundle);
         }

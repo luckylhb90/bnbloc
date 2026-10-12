@@ -60,6 +60,9 @@ const REQUEST_TIMEOUT: Duration = Duration::from_secs(20);
 const MAX_BODY_BYTES: usize = 256 << 10;
 /// Bound on the browser's callback request head.
 const MAX_CALLBACK_BYTES: usize = 16 << 10;
+/// Bound on reading one connection's request head: an idle local connection
+/// never holds up the sign-in.
+const CALLBACK_READ_TIMEOUT: Duration = Duration::from_secs(5);
 /// The name this desktop registers under (dynamic registration).
 const CLIENT_NAME: &str = "bnbloc desktop";
 
@@ -391,19 +394,14 @@ pub(super) fn canonical_resource(raw: &str) -> Result<String, String> {
     Ok(s.strip_suffix('/').unwrap_or(&s).to_string())
 }
 
-fn origin(url: &Url) -> String {
-    let mut o = format!("{}://{}", url.scheme(), url.host_str().unwrap_or_default());
-    if let Some(port) = url.port() {
-        o.push_str(&format!(":{port}"));
-    }
-    o
-}
-
 /// Protected resource metadata URIs to try without a challenge: the
 /// path-inserted form, then the root (RFC 9728 §3.1).
 pub(super) fn resource_metadata_urls(resource: &str) -> Result<Vec<String>, String> {
     let url = Url::parse(resource).map_err(|e| format!("invalid MCP server URL: {e}"))?;
-    let base = format!("{}/.well-known/oauth-protected-resource", origin(&url));
+    let base = format!(
+        "{}/.well-known/oauth-protected-resource",
+        url.origin().ascii_serialization()
+    );
     let path = url.path().trim_end_matches('/');
     let mut out = Vec::new();
     if !path.is_empty() {
@@ -416,7 +414,7 @@ pub(super) fn resource_metadata_urls(resource: &str) -> Result<Vec<String>, Stri
 /// Authorization server metadata URIs in the specification's order.
 pub(super) fn auth_server_metadata_urls(issuer: &str) -> Result<Vec<String>, String> {
     let url = Url::parse(issuer).map_err(|_| format!("invalid authorization server {issuer:?}"))?;
-    let o = origin(&url);
+    let o = url.origin().ascii_serialization();
     let path = url.path().trim_end_matches('/');
     Ok(if path.is_empty() {
         vec![
@@ -575,7 +573,9 @@ pub(super) async fn discover(
         }
     }
     let server: AuthServer = server.ok_or("the sign-in server publishes no metadata")?;
-    if server.issuer.trim_end_matches('/') != issuer.trim_end_matches('/') {
+    // RFC 8414 §3.3: the metadata's issuer is identical to the one asked
+    // for (the callback's `iss` is compared to it the same way).
+    if server.issuer != issuer {
         return Err("the sign-in server's metadata names another issuer; not signing in".into());
     }
     if !server
@@ -752,11 +752,17 @@ async fn wait_callback(listener: TcpListener, timeout: Duration) -> Result<Callb
                 .map_err(|e| format!("sign-in callback: {e}"))?;
             let mut buf = Vec::new();
             let mut chunk = [0u8; 2048];
-            while !buf.windows(4).any(|w| w == b"\r\n\r\n") && buf.len() < MAX_CALLBACK_BYTES {
-                match sock.read(&mut chunk).await {
-                    Ok(0) | Err(_) => break,
-                    Ok(n) => buf.extend_from_slice(&chunk[..n]),
+            let head = tokio::time::timeout(CALLBACK_READ_TIMEOUT, async {
+                while !buf.windows(4).any(|w| w == b"\r\n\r\n") && buf.len() < MAX_CALLBACK_BYTES {
+                    match sock.read(&mut chunk).await {
+                        Ok(0) | Err(_) => break,
+                        Ok(n) => buf.extend_from_slice(&chunk[..n]),
+                    }
                 }
+            })
+            .await;
+            if head.is_err() {
+                continue;
             }
             let head = String::from_utf8_lossy(&buf);
             let target = head

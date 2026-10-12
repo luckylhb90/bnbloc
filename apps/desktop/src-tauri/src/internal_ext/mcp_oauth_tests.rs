@@ -725,3 +725,27 @@ fn refresh_is_due_shortly_before_expiry() {
     s.refresh_token.clear();
     assert!(!s.needs_refresh(now));
 }
+
+/// A local connection that never sends its request head does not hold up
+/// the sign-in: its read times out and the browser's callback is served.
+#[tokio::test]
+async fn an_idle_connection_never_holds_up_the_callback() {
+    let listener = crate::internal_ext::loopback::bind_ephemeral_async()
+        .await
+        .expect("bind");
+    let addr = listener.local_addr().expect("addr");
+    let waiting = tokio::spawn(wait_callback(listener, Duration::from_secs(60)));
+    let _idle = tokio::net::TcpStream::connect(addr).await.expect("idle");
+    let mut browser = tokio::net::TcpStream::connect(addr).await.expect("browser");
+    browser
+        .write_all(b"GET /callback?code=c1&state=s1 HTTP/1.1\r\nHost: x\r\n\r\n")
+        .await
+        .expect("write");
+    let cb = tokio::time::timeout(Duration::from_secs(20), waiting)
+        .await
+        .expect("the idle connection stalled the sign-in")
+        .expect("join")
+        .expect("callback");
+    assert_eq!(cb.code.as_deref(), Some("c1"));
+    assert_eq!(cb.state.as_deref(), Some("s1"));
+}
