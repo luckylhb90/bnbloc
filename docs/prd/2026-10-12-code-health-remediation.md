@@ -81,6 +81,19 @@ removals are folded into the batch that touches the area, per decision D3.
 
 #### 1A. Credential and sandbox boundary (M–L)
 
+Status (bridge/core/vmexec rows): landed. Workspace path policy 71eb791
+(`core/workspace_paths.go`: `BnblocOwnedPath`, `HostExecutableProjectConfig`,
+`ProtectedWorkspacePath`; the whole `.claude/` dir counts as host-executed,
+matched case-insensitively; one shared table
+`core/testdata/workspace_paths.json`). `~/.bnbloc` read-deny, vmexec hook
+exact parse, hooks exit 2: 67fea65 (the desktop cache dir stays readable: it
+holds the stdio MCP tool binaries a confined CLI spawns). Tests:
+`TestBnblocOwnedPathAgreesEverywhere`, `TestWorkspacePathTable`,
+`TestWorkspacePathPolicySingleOwner`, `TestIgnoreMatcherExcludesProtectedPaths`,
+`TestPackDirSkipsProtectedPaths`, `TestConfineDeniesBnblocCredentialPaths`,
+`TestHookRewritesCommandsMerelyPrefixedByVMExec`. O2 (unreadable sandbox
+policy fails closed): eb77683. Desktop and dev-discovery rows: other agents.
+
 | Item | Ref | Fix | Size |
 |---|---|---|---|
 | Host-executed project config can be planted, and is synced | bridge 3, 33 | Split `core.AgentConfigPaths` into `BnblocOwnedPath` (`.room/` plus the config bnbloc writes) and `HostExecutableProjectConfig` (`.claude/settings*.json`, `.claude/agents/`, `.claude/commands/`, `.codex/`, `opencode.json`, …). Both lists apply to: sandbox deny-write, the sync ignore (which also adds `.room/`), `resetAgentConfig`, publish/sites, and `save_component`'s `packDir`. Fix `core/profile_test.go:50`. | M |
@@ -176,6 +189,14 @@ removals are folded into the batch that touches the area, per decision D3.
 
 #### 1D. Job retry and refusal classification (M)
 
+Status: landed in 017ed7d. `services/bridge/job_failure.go` owns the
+classification (`refuse`, `failJob`, `atStage`, `driveFailureReason`);
+`Retryable()` is now only `core_unavailable`, `runner_start_failed`,
+`turn_timeout`; `runner_failed` and `reply_timeout` are final;
+`runner_killed` and the substring classifier are deleted. New final reasons
+`content_unavailable`, `team_unsupported`, `invalid_job`. Test:
+`TestDriveRefusalsAreFinal` (+ `TestDriveStartFailureClassification`).
+
 | Item | Ref | Fix | Size |
 |---|---|---|---|
 | A job retry re-runs a prompt that already started | bridge 1 | Classify failures by drive stage. A failure before start where `core.Retryable(err, false)` holds becomes `core_unavailable` / `runner_start_failed` (retryable). A started or ambiguous turn, and `reply_timeout`, get a non-retryable reason. Delete the substring classifier `classifyJobFailure` (`bridge.go:908`). Borrow quota is then reserved at most once per started turn. | M |
@@ -206,6 +227,16 @@ removals are folded into the batch that touches the area, per decision D3.
 - **Migration:** none.
 
 #### 1F. Core install and desktop contract (M)
+
+Status (Go rows): landed. `protocol.CompatibleRange` single owner and
+`protocol.KnownCapability` (`protocol.Capabilities`): 4c31ee2.
+`coreset.EntryFor(name, provider, declared)` builds every entry (env,
+gateway activation, install probe); `mergeCoreEntries` and FromEnv's
+`extraActivate` deleted: a007b26. Tests: `TestProtocolRangeMatchesRuntime`,
+`TestCoreCapabilitiesAcceptEveryProtocolCapability`,
+`TestEntryForAppliesEnvOverridesToEveryCore`,
+`TestCoreEntriesBuiltOnlyByEntryFor`. Desktop env-key and catalog rows:
+desktop agent.
 
 | Item | Ref | Fix | Size |
 |---|---|---|---|
