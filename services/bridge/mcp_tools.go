@@ -148,7 +148,7 @@ func (b *Bridge) resolveMCP(tools []wire.ContentMCPTool, refs []wire.ContentRef,
 			// declared mcp.stdio.
 			for _, id := range t.RequiredBy {
 				r, ok := byID[id]
-				if ok && !sameUserID(r.Owner, owner) && !foreignSeen[id] {
+				if ok && r.Owner != owner && !foreignSeen[id] {
 					foreignSeen[id] = true
 					foreign = append(foreign, firstNonEmpty(r.DisplayName, r.Name))
 				}

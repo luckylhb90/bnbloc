@@ -25,19 +25,20 @@ func TestSendAlertIgnoresPrefsAndKeepsSender(t *testing.T) {
 
 	res, err := f.emitter.SendAlert(ctx, Alert{
 		Title: "bnbloc smoke failed", Text: "FAIL chat echo: timeout", URL: "https://gw.example.com",
-		Recipients: []string{"root", " ops ", "ROOT"}, Actor: "root", DedupKey: "a1",
+		Recipients: []string{"root", " ops ", "root", "ROOT"}, Actor: "root", DedupKey: "a1",
 	})
 	if err != nil {
 		t.Fatalf("send alert: %v", err)
 	}
-	if !reflect.DeepEqual(res.Recipients, []string{"root", "ops"}) || !reflect.DeepEqual(res.Notifiers, []string{"n1"}) {
+	// Duplicates go; "ROOT" is another subject (subjects are case-sensitive).
+	if !reflect.DeepEqual(res.Recipients, []string{"root", "ops", "ROOT"}) || !reflect.DeepEqual(res.Notifiers, []string{"n1"}) {
 		t.Fatalf("response = %+v", res)
 	}
 	p, ok := f.payload(t, wire.NotificationAdminAlert, "alert:a1", "n1")
 	if !ok {
 		t.Fatal("no outbox item")
 	}
-	if res.ID != p.ID || !reflect.DeepEqual(userIDs(p), []string{"root", "ops"}) {
+	if res.ID != p.ID || !reflect.DeepEqual(userIDs(p), []string{"root", "ops", "ROOT"}) {
 		t.Fatalf("payload recipients = %v id %s (response id %s)", userIDs(p), p.ID, res.ID)
 	}
 	// Room-less: no " in <room>" suffix, and the sender's link.

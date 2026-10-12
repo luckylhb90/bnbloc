@@ -563,7 +563,7 @@ func (s *Service) importPackage(ctx context.Context, user string, pkg *handoffPa
 
 	suggested := make([]wire.RoomExportMember, 0, len(m.Members))
 	for _, mem := range m.Members {
-		if !strings.EqualFold(mem.UserID, user) {
+		if mem.UserID != user {
 			suggested = append(suggested, mem)
 		}
 	}

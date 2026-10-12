@@ -140,7 +140,7 @@ func (s *Service) handleUserProfiles(w http.ResponseWriter, r *http.Request) {
 }
 
 // profileLookupIDs splits the comma-separated ids values into trimmed,
-// non-empty ids, each distinct id (case-insensitively) once, in order. It
+// non-empty ids, each distinct id (exactly: ids are case-sensitive) once, in order. It
 // stops one past maxProfileLookupIDs: that many already refuses the call.
 func profileLookupIDs(values []string) []string {
 	var ids []string
@@ -148,11 +148,10 @@ func profileLookupIDs(values []string) []string {
 	for _, v := range values {
 		for _, id := range strings.Split(v, ",") {
 			id = strings.TrimSpace(id)
-			key := strings.ToLower(id)
-			if id == "" || seen[key] {
+			if id == "" || seen[id] {
 				continue
 			}
-			seen[key] = true
+			seen[id] = true
 			if ids = append(ids, id); len(ids) > maxProfileLookupIDs {
 				return ids
 			}

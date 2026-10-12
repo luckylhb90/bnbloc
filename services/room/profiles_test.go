@@ -119,6 +119,7 @@ func TestUserProfilesBatch(t *testing.T) {
 		{UserID: "alice@x.io", DisplayName: "Alice"},
 		{UserID: "bob@y.org", DisplayName: "bob"},
 		{UserID: "carol", DisplayName: "carol"},
+		{UserID: "ALICE@x.io", DisplayName: "ALICE"}, // another subject
 		{UserID: "dave@z", DisplayName: "dave"},
 	}
 	if len(got) != len(want) {

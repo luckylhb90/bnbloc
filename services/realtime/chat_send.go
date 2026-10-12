@@ -117,6 +117,12 @@ func (s *Service) PostChat(ctx context.Context, p ChatPost) (ChatPosted, error) 
 	if err != nil {
 		return ChatPosted{}, err
 	}
+	if p.Recipient != nil {
+		// The recipient owner is stored and compared exactly downstream
+		// (job owner, bridge claim, borrow checks): subjects are
+		// case-sensitive, so the only canonical form is the trimmed id.
+		p.Recipient.OwnerID = strings.TrimSpace(p.Recipient.OwnerID)
+	}
 	agent := p.Recipient != nil && p.Recipient.Provider != ""
 	if agent {
 		// The people chat is human-only: no agent is ever driven from it.

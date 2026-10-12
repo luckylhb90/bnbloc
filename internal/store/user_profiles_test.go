@@ -71,8 +71,11 @@ func profileCases(t *testing.T, s UserProfileStore, suffix string) {
 	if err != nil {
 		t.Fatalf("lookup: %v", err)
 	}
-	if len(got) != 3 || got[alice] != "Alice A" || got[bob] != "Bobby" || got[upper] != "Alice A" {
-		t.Fatalf("lookup = %v (want alice, bob and the case-folded alice; carol absent)", got)
+	if len(got) != 2 || got[alice] != "Alice A" || got[bob] != "Bobby" {
+		t.Fatalf("lookup = %v (want alice and bob; carol and the upper-case variant, another subject, absent)", got)
+	}
+	if _, ok := got[upper]; ok {
+		t.Fatalf("a case variant of alice is another subject, got %v", got)
 	}
 	if _, ok := got[carol]; ok {
 		t.Fatalf("carol has no stored name, got %v", got)

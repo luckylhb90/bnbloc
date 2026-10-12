@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"os"
 	"sync"
@@ -236,6 +237,59 @@ func TestMySQLTenantReadsReportFailures(t *testing.T) {
 	if _, _, err := NewMySQLGrant(db).TenantUsage(ctx); err == nil {
 		t.Fatal("TenantUsage on a failing database returned no error")
 	}
+}
+
+// Subjects are case-sensitive (and accent-sensitive): a case or accent
+// variant is another subject on both backends. MySQL's default collation
+// used to fold them, so "Maya" could edit "maya"'s message there and not in
+// memory.
+func TestContractCaseVariantIdsAreDistinct(t *testing.T) {
+	forEachBackend(t, func(t *testing.T, b *Backends) {
+		tid := uniq("t-case-")
+		ctx := tenantCtx(tid)
+		room := newContractRoom(t, ctx, b, "maya")
+		if b.Room.IsMember(ctx, room, "Maya") {
+			t.Fatal("Maya is a member of maya's room")
+		}
+		if err := b.Room.AddMember(ctx, Membership{RoomID: room, UserID: "Maya", Role: RoleVisitor, JoinedAtMs: 2}); err != nil {
+			t.Fatal(err)
+		}
+		if m, _ := b.Room.GetMember(ctx, room, "maya"); m.Role != RoleOwner {
+			t.Fatalf("adding Maya changed maya's membership: %+v", m)
+		}
+		if n := b.Room.MemberCount(ctx, room); n != 2 {
+			t.Fatalf("MemberCount = %d, want 2 (maya and Maya)", n)
+		}
+
+		if err := b.Chat.AppendRoomMessage(ctx, RoomMessage{TenantID: tid, RoomID: room, Seq: 1, Kind: "chat_message", Author: "josé",
+			Payload: json.RawMessage(`{"text":"hola"}`), CreatedAtMs: 1}); err != nil {
+			t.Fatal(err)
+		}
+		for _, other := range []string{"José", "jose"} {
+			if ok, err := b.Chat.EditRoomMessage(ctx, room, 1, other, "hijack", 2); err != nil || ok {
+				t.Fatalf("edit by %q = %v, %v; want refused (not the author)", other, ok, err)
+			}
+			if ok, err := b.Chat.DeleteRoomMessage(ctx, room, 1, other, 2); err != nil || ok {
+				t.Fatalf("delete by %q = %v, %v; want refused (not the author)", other, ok, err)
+			}
+		}
+		if ok, err := b.Chat.EditRoomMessage(ctx, room, 1, "josé", "edited", 3); err != nil || !ok {
+			t.Fatalf("edit by the author = %v, %v", ok, err)
+		}
+
+		if err := b.Tenant.PutMember(ctx, TenantMember{TenantID: tid, UserID: "maya", Role: OrgRoleAdmin, JoinedAtMs: 1}); err != nil {
+			t.Fatal(err)
+		}
+		if _, ok, err := b.Tenant.GetMember(ctx, tid, "MAYA"); err != nil || ok {
+			t.Fatalf("GetMember(MAYA) = %v, %v; want not a member", ok, err)
+		}
+		if _, created, err := b.Tenant.EnsureMember(ctx, TenantMember{TenantID: tid, UserID: "Maya", Role: OrgRoleMember, JoinedAtMs: 2}); err != nil || !created {
+			t.Fatalf("EnsureMember(Maya) = %v, %v; want a new membership", created, err)
+		}
+		if m, _, _ := b.Tenant.GetMember(ctx, tid, "maya"); m.Role != OrgRoleAdmin {
+			t.Fatalf("maya's org role = %q, want org_admin kept", m.Role)
+		}
+	})
 }
 
 // A guarded job write answers with the same sentinel on both backends: an

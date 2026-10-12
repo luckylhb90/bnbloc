@@ -100,7 +100,7 @@ func (s *Service) teamAgents(r *http.Request, owner string, since, nowMs int64) 
 	ctx := r.Context()
 	rows := map[string]*wire.TeamAgent{}
 	row := func(o, core, provider string) *wire.TeamAgent {
-		k := strings.ToLower(o) + "\x00" + core + "\x00" + provider
+		k := o + "\x00" + core + "\x00" + provider
 		if a := rows[k]; a != nil {
 			return a
 		}
@@ -140,7 +140,7 @@ func (s *Service) teamAgents(r *http.Request, owner string, since, nowMs int64) 
 		switch j.Status {
 		case store.AgentJobReplied:
 			a.Turns++
-			if !strings.EqualFold(j.RequesterUserID, j.OwnerUserID) {
+			if j.RequesterUserID != j.OwnerUserID {
 				a.BorrowedRuns++
 			}
 		case store.AgentJobFailed, store.AgentJobTimedOut:
@@ -155,8 +155,8 @@ func (s *Service) teamAgents(r *http.Request, owner string, since, nowMs int64) 
 		out = append(out, *a)
 	}
 	sort.Slice(out, func(i, k int) bool {
-		if !strings.EqualFold(out[i].Owner, out[k].Owner) {
-			return strings.ToLower(out[i].Owner) < strings.ToLower(out[k].Owner)
+		if out[i].Owner != out[k].Owner {
+			return out[i].Owner < out[k].Owner
 		}
 		if out[i].Core != out[k].Core {
 			return out[i].Core < out[k].Core
@@ -174,7 +174,7 @@ func (s *Service) attachUsage(rows map[string]*wire.TeamAgent, row func(o, core,
 	for _, u := range usage {
 		var matches []*wire.TeamAgent
 		for _, a := range rows {
-			if strings.EqualFold(a.Owner, u.OwnerUserID) && a.Provider == u.Provider {
+			if a.Owner == u.OwnerUserID && a.Provider == u.Provider {
 				matches = append(matches, a)
 			}
 		}

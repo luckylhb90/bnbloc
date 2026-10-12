@@ -27,7 +27,7 @@ CREATE TABLE IF NOT EXISTS tenants (
 
 CREATE TABLE IF NOT EXISTS tenant_members (
   tenant_id    VARCHAR(64) NOT NULL,
-  user_id      VARCHAR(128) NOT NULL,
+  user_id      VARCHAR(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
   role         ENUM('org_admin','member','viewer') NOT NULL DEFAULT 'member',
   joined_at_ms BIGINT NOT NULL,
   source       VARCHAR(16) NOT NULL DEFAULT 'manual',
@@ -36,7 +36,7 @@ CREATE TABLE IF NOT EXISTS tenant_members (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS org_sync_subjects (
-  user_id       VARCHAR(128) PRIMARY KEY,
+  user_id       VARCHAR(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin PRIMARY KEY,
   email         VARCHAR(255) NOT NULL DEFAULT '',
   display_name  VARCHAR(255) NOT NULL DEFAULT '',
   department    VARCHAR(255) NOT NULL DEFAULT '',
@@ -45,7 +45,7 @@ CREATE TABLE IF NOT EXISTS org_sync_subjects (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS org_sync_default_rooms (
-  user_id        VARCHAR(128) NOT NULL,
+  user_id        VARCHAR(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
   room_id        VARCHAR(64) NOT NULL,
   granted_at_ms  BIGINT NOT NULL,
   PRIMARY KEY (user_id, room_id)
@@ -53,12 +53,12 @@ CREATE TABLE IF NOT EXISTS org_sync_default_rooms (
 
 CREATE TABLE IF NOT EXISTS tenant_join_requests (
   tenant_id     VARCHAR(64) NOT NULL,
-  user_id       VARCHAR(128) NOT NULL,
+  user_id       VARCHAR(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
   message       VARCHAR(500) NOT NULL DEFAULT '',
   status        ENUM('pending','approved','rejected') NOT NULL DEFAULT 'pending',
   created_at_ms BIGINT NOT NULL,
   decided_at_ms BIGINT NOT NULL DEFAULT 0,
-  decided_by    VARCHAR(128) NOT NULL DEFAULT '',
+  decided_by    VARCHAR(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL DEFAULT '',
   PRIMARY KEY (tenant_id, user_id),
   KEY idx_join_req_status (tenant_id, status),
   KEY idx_join_req_user (user_id)
@@ -68,11 +68,11 @@ CREATE TABLE IF NOT EXISTS platform_settings (
   setting_key      VARCHAR(128) PRIMARY KEY,
   setting_value    TEXT NOT NULL,
   updated_at_ms    BIGINT NOT NULL,
-  updated_by       VARCHAR(128) NOT NULL
+  updated_by       VARCHAR(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS component_installs (
-  subject          VARCHAR(255) NOT NULL,
+  subject          VARCHAR(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
   kind             VARCHAR(64) NOT NULL,
   name             VARCHAR(255) NOT NULL,
   installed_at_ms  BIGINT NOT NULL,
@@ -85,7 +85,7 @@ CREATE TABLE IF NOT EXISTS extension_audit (
   kind       VARCHAR(64) NOT NULL,
   name       VARCHAR(128) NOT NULL,
   action     VARCHAR(32) NOT NULL,
-  actor      VARCHAR(128) NOT NULL DEFAULT '',
+  actor      VARCHAR(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL DEFAULT '',
   key_id     VARCHAR(128) NOT NULL DEFAULT '',
   tenant_id  VARCHAR(64) NOT NULL DEFAULT '',
   outcome    VARCHAR(32) NOT NULL DEFAULT '',
@@ -104,8 +104,8 @@ CREATE TABLE IF NOT EXISTS agent_jobs (
   channel_id          VARCHAR(64) NOT NULL DEFAULT '',
   message_seq         BIGINT NOT NULL,
   client_msg_id       VARCHAR(128) NOT NULL DEFAULT '',
-  requester_user_id   VARCHAR(128) NOT NULL,
-  owner_user_id       VARCHAR(128) NOT NULL,
+  requester_user_id   VARCHAR(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
+  owner_user_id       VARCHAR(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
   core                VARCHAR(64) NOT NULL,
   provider            VARCHAR(128) NOT NULL,
   target_id           VARCHAR(128) NOT NULL DEFAULT '',
@@ -147,7 +147,7 @@ CREATE TABLE IF NOT EXISTS agent_jobs (
 CREATE TABLE IF NOT EXISTS bridge_heartbeats (
   bridge_id       VARCHAR(128) PRIMARY KEY,
   tenant_id       VARCHAR(64) NOT NULL,
-  owner_user_id   VARCHAR(128) NOT NULL,
+  owner_user_id   VARCHAR(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
   app_instance_id VARCHAR(128) NOT NULL DEFAULT '',
   version         VARCHAR(64) NOT NULL DEFAULT '',
   status          ENUM('online','offline','draining') NOT NULL DEFAULT 'online',
@@ -160,7 +160,7 @@ CREATE TABLE IF NOT EXISTS bridge_heartbeats (
 CREATE TABLE IF NOT EXISTS bridge_agents (
   bridge_id          VARCHAR(128) NOT NULL,
   tenant_id          VARCHAR(64) NOT NULL,
-  owner_user_id      VARCHAR(128) NOT NULL,
+  owner_user_id      VARCHAR(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
   core               VARCHAR(64) NOT NULL,
   provider           VARCHAR(128) NOT NULL,
   target_id          VARCHAR(128) NOT NULL,
@@ -173,7 +173,7 @@ CREATE TABLE IF NOT EXISTS bridge_agents (
 
 CREATE TABLE IF NOT EXISTS user_agent_prefs (
   tenant_id        VARCHAR(64) NOT NULL,
-  user_id          VARCHAR(128) NOT NULL,
+  user_id          VARCHAR(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
   room_id          VARCHAR(64) NOT NULL,
   channel_id       VARCHAR(64) NOT NULL DEFAULT '',
   selected_owner   VARCHAR(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL DEFAULT '',
@@ -193,7 +193,7 @@ CREATE TABLE IF NOT EXISTS room_channels (
   name          VARCHAR(255) NOT NULL,
   is_default    TINYINT(1) NOT NULL DEFAULT 0,
   kind          VARCHAR(16) NOT NULL DEFAULT '',
-  created_by    VARCHAR(128) NOT NULL,
+  created_by    VARCHAR(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
   created_at_ms BIGINT NOT NULL,
   deleted_at_ms BIGINT NULL,
   KEY idx_channel_room (tenant_id, room_id, deleted_at_ms)
@@ -206,7 +206,7 @@ CREATE TABLE IF NOT EXISTS rooms (
   description    VARCHAR(500) NOT NULL DEFAULT '',
   visibility     ENUM('shared','private') NOT NULL DEFAULT 'private',
   sync_mode      ENUM('git','mutagen','none') NOT NULL DEFAULT 'git',
-  created_by     VARCHAR(128) NOT NULL,
+  created_by     VARCHAR(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
   created_at_ms  BIGINT NOT NULL,
   deleted_at_ms  BIGINT NULL,
   PRIMARY KEY (room_id),
@@ -216,7 +216,7 @@ CREATE TABLE IF NOT EXISTS rooms (
 CREATE TABLE IF NOT EXISTS room_members (
   tenant_id      VARCHAR(64) NOT NULL,
   room_id        VARCHAR(64) NOT NULL,
-  user_id        VARCHAR(128) NOT NULL,
+  user_id        VARCHAR(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
   role           ENUM('owner','admin','member','visitor') NOT NULL,
   joined_at_ms   BIGINT NOT NULL,
   agent_host     TINYINT(1) NOT NULL DEFAULT 0,
@@ -232,7 +232,7 @@ CREATE TABLE IF NOT EXISTS room_invites (
   expires_at_ms  BIGINT NOT NULL,
   capacity       INT NOT NULL,
   redeemed_count INT NOT NULL DEFAULT 0,
-  created_by     VARCHAR(128) NOT NULL,
+  created_by     VARCHAR(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
   KEY idx_invite_room (tenant_id, room_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
@@ -241,7 +241,7 @@ CREATE TABLE IF NOT EXISTS agent_sessions (
   room_id             VARCHAR(64) NOT NULL,
   agent_session_id    VARCHAR(128) NOT NULL,
   provider_session_id VARCHAR(128) NULL,
-  owner_user_id       VARCHAR(128) NOT NULL,
+  owner_user_id       VARCHAR(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
   state_json          JSON NOT NULL,
   message_version     BIGINT NOT NULL,
   updated_at_ms       BIGINT NOT NULL,
@@ -285,8 +285,8 @@ CREATE TABLE IF NOT EXISTS shared_agent_grants (
   tenant_id           VARCHAR(64) NOT NULL,
   room_id             VARCHAR(64) NOT NULL,
   target_id           VARCHAR(128) NOT NULL,
-  owner_user_id       VARCHAR(128) NOT NULL,
-  grantee_user_id     VARCHAR(128) NOT NULL,
+  owner_user_id       VARCHAR(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
+  grantee_user_id     VARCHAR(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
   allowed_models_json JSON NOT NULL,
   capabilities_json   JSON NOT NULL,
   run_quota           INT NULL,
@@ -299,7 +299,7 @@ CREATE TABLE IF NOT EXISTS shared_agent_grants (
   expires_at_ms       BIGINT NULL,
   created_at_ms       BIGINT NOT NULL,
   source              VARCHAR(16) NOT NULL DEFAULT '',
-  created_by          VARCHAR(128) NOT NULL DEFAULT '',
+  created_by          VARCHAR(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL DEFAULT '',
   KEY idx_grant_room (tenant_id, room_id),
   KEY idx_grant_grantee (tenant_id, grantee_user_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
@@ -318,8 +318,8 @@ CREATE TABLE IF NOT EXISTS shared_agent_audit (
   tenant_id     VARCHAR(64) NOT NULL,
   room_id       VARCHAR(64) NOT NULL,
   grant_id      VARCHAR(64) NULL,
-  actor_user_id VARCHAR(128) NOT NULL,
-  owner_user_id VARCHAR(128) NOT NULL,
+  actor_user_id VARCHAR(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
+  owner_user_id VARCHAR(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
   action        ENUM('start','resume','settings','turn','release','login','room_create','room_join','room_leave') NOT NULL,
   decision      ENUM('allow','deny') NOT NULL,
   deny_reason   VARCHAR(64) NULL,
@@ -349,7 +349,7 @@ CREATE TABLE IF NOT EXISTS room_messages (
   channel_id    VARCHAR(64) NOT NULL DEFAULT '',
   seq           BIGINT NOT NULL,
   kind          VARCHAR(32) NOT NULL,
-  author        VARCHAR(128) NULL,
+  author        VARCHAR(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NULL,
   client_msg_id VARCHAR(128) NULL,
   payload_json  JSON NOT NULL,
   search_text   MEDIUMTEXT NULL,
@@ -373,10 +373,10 @@ CREATE TABLE IF NOT EXISTS message_tasks (
   seq            BIGINT NOT NULL,
   status         VARCHAR(16) NOT NULL,
   title          VARCHAR(512) NOT NULL,
-  message_author VARCHAR(128) NOT NULL DEFAULT '',
-  created_by     VARCHAR(128) NOT NULL,
+  message_author VARCHAR(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL DEFAULT '',
+  created_by     VARCHAR(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
   created_at_ms  BIGINT NOT NULL,
-  done_by        VARCHAR(128) NULL,
+  done_by        VARCHAR(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NULL,
   done_at_ms     BIGINT NULL,
   PRIMARY KEY (room_id, seq),
   KEY idx_message_tasks_room (tenant_id, room_id, status)
@@ -386,7 +386,7 @@ CREATE TABLE IF NOT EXISTS attachments (
   id            VARCHAR(64) PRIMARY KEY,
   tenant_id     VARCHAR(64) NOT NULL,
   room_id       VARCHAR(64) NOT NULL,
-  uploader      VARCHAR(128) NOT NULL,
+  uploader      VARCHAR(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
   filename      VARCHAR(512) NOT NULL,
   content_type  VARCHAR(128) NOT NULL,
   size_bytes    BIGINT NOT NULL,
@@ -402,7 +402,7 @@ CREATE TABLE IF NOT EXISTS room_read_state (
   tenant_id     VARCHAR(64) NOT NULL,
   room_id       VARCHAR(64) NOT NULL,
   channel_id    VARCHAR(64) NOT NULL DEFAULT '',
-  user_id       VARCHAR(128) NOT NULL,
+  user_id       VARCHAR(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
   last_read_seq BIGINT NOT NULL DEFAULT 0,
   updated_at_ms BIGINT NOT NULL,
   PRIMARY KEY (room_id, channel_id, user_id)
@@ -417,7 +417,7 @@ CREATE TABLE IF NOT EXISTS artifacts (
   title           VARCHAR(256) NOT NULL,
   language        VARCHAR(64) NOT NULL DEFAULT '',
   current_version INT NOT NULL DEFAULT 0,
-  created_by      VARCHAR(128) NOT NULL,
+  created_by      VARCHAR(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
   created_at_ms   BIGINT NOT NULL,
   updated_at_ms   BIGINT NOT NULL,
   mime_type       VARCHAR(128) NOT NULL DEFAULT '',
@@ -433,7 +433,7 @@ CREATE TABLE IF NOT EXISTS artifact_versions (
   content_hash    CHAR(64) NOT NULL,
   content         MEDIUMTEXT NOT NULL,
   summary         VARCHAR(512) NOT NULL DEFAULT '',
-  author_user_id  VARCHAR(128) NOT NULL,
+  author_user_id  VARCHAR(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
   created_at_ms   BIGINT NOT NULL,
   storage         VARCHAR(8) NOT NULL DEFAULT 'inline',
   blob_key        VARCHAR(80) NOT NULL DEFAULT '',
@@ -465,11 +465,11 @@ CREATE TABLE IF NOT EXISTS artifact_shares (
   room_id           VARCHAR(64) NOT NULL,
   artifact_id       VARCHAR(64) NOT NULL,
   version           INT NOT NULL,
-  created_by        VARCHAR(128) NOT NULL,
+  created_by        VARCHAR(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
   created_at_ms     BIGINT NOT NULL,
   expires_at_ms     BIGINT NOT NULL,
   revoked_at_ms     BIGINT NULL,
-  revoked_by        VARCHAR(128) NULL,
+  revoked_by        VARCHAR(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NULL,
   view_count        BIGINT NOT NULL DEFAULT 0,
   last_viewed_at_ms BIGINT NULL,
   UNIQUE KEY uq_artifact_shares_token (token_hash),
@@ -485,8 +485,8 @@ CREATE TABLE IF NOT EXISTS room_imports (
   source_room_id         VARCHAR(64) NOT NULL,
   source_room_name       VARCHAR(255) NOT NULL DEFAULT '',
   source_exported_at_ms  BIGINT NOT NULL,
-  source_exported_by     VARCHAR(128) NOT NULL DEFAULT '',
-  imported_by            VARCHAR(128) NOT NULL,
+  source_exported_by     VARCHAR(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL DEFAULT '',
+  imported_by            VARCHAR(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
   imported_at_ms         BIGINT NOT NULL,
   suggested_members_json JSON NOT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
@@ -498,7 +498,7 @@ CREATE TABLE IF NOT EXISTS room_imports (
 CREATE TABLE IF NOT EXISTS sso_handoff_codes (
   key_hash        CHAR(64) PRIMARY KEY,
   nonce_hash      CHAR(64) NOT NULL,
-  subject         VARCHAR(255) NOT NULL,
+  subject         VARCHAR(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
   email           VARCHAR(255) NOT NULL DEFAULT '',
   tenant_hint     VARCHAR(64) NOT NULL DEFAULT '',
   expires_at_ms   BIGINT NOT NULL,
@@ -510,7 +510,7 @@ CREATE TABLE IF NOT EXISTS sso_handoff_codes (
 -- so rotation, reuse detection, logout and admin revocation are server-side.
 CREATE TABLE IF NOT EXISTS refresh_token_families (
   family_id        CHAR(32) PRIMARY KEY,
-  subject          VARCHAR(255) NOT NULL,
+  subject          VARCHAR(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
   email            VARCHAR(255) NOT NULL DEFAULT '',
   tenant_hint      VARCHAR(64) NOT NULL DEFAULT '',
   tenant_id        VARCHAR(64) NOT NULL DEFAULT '',
@@ -539,8 +539,8 @@ CREATE TABLE IF NOT EXISTS shared_agent_quota_requests (
   request_id        VARCHAR(64) PRIMARY KEY,
   tenant_id         VARCHAR(64) NOT NULL,
   room_id           VARCHAR(64) NOT NULL,
-  owner_user_id     VARCHAR(128) NOT NULL,
-  requester_user_id VARCHAR(128) NOT NULL,
+  owner_user_id     VARCHAR(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
+  requester_user_id VARCHAR(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
   provider          VARCHAR(128) NOT NULL,
   requested_runs    INT NULL,
   note              VARCHAR(500) NOT NULL DEFAULT '',
@@ -549,7 +549,7 @@ CREATE TABLE IF NOT EXISTS shared_agent_quota_requests (
   pending_key       VARCHAR(64) NULL,
   created_at_ms     BIGINT NOT NULL,
   decided_at_ms     BIGINT NOT NULL DEFAULT 0,
-  decided_by        VARCHAR(128) NOT NULL DEFAULT '',
+  decided_by        VARCHAR(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL DEFAULT '',
   UNIQUE KEY uq_quota_req_pending (pending_key),
   KEY idx_quota_req_owner (tenant_id, owner_user_id, status, created_at_ms),
   KEY idx_quota_req_requester (tenant_id, requester_user_id, created_at_ms)
@@ -557,7 +557,7 @@ CREATE TABLE IF NOT EXISTS shared_agent_quota_requests (
 
 CREATE TABLE IF NOT EXISTS notification_prefs (
   tenant_id       VARCHAR(64) NOT NULL,
-  user_id         VARCHAR(128) NOT NULL,
+  user_id         VARCHAR(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
   mentions        TINYINT(1) NOT NULL,
   agent_finished  TINYINT(1) NOT NULL,
   agent_failed    TINYINT(1) NOT NULL,
@@ -598,8 +598,8 @@ CREATE TABLE IF NOT EXISTS notification_reply_tokens (
   event_id       VARCHAR(64) NOT NULL,
   room_id        VARCHAR(64) NOT NULL,
   channel_id     VARCHAR(64) NOT NULL DEFAULT '',
-  user_id        VARCHAR(128) NOT NULL,
-  reply_owner_id VARCHAR(128) NOT NULL DEFAULT '',
+  user_id        VARCHAR(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
+  reply_owner_id VARCHAR(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL DEFAULT '',
   reply_provider VARCHAR(128) NOT NULL DEFAULT '',
   reply_core     VARCHAR(64) NOT NULL DEFAULT '',
   created_at_ms  BIGINT NOT NULL,
@@ -622,7 +622,7 @@ CREATE TABLE IF NOT EXISTS notification_reply_refs (
 CREATE TABLE IF NOT EXISTS web_push_subscriptions (
   tenant_id     VARCHAR(64) NOT NULL,
   id            CHAR(64) NOT NULL,
-  user_id       VARCHAR(128) NOT NULL,
+  user_id       VARCHAR(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
   endpoint      TEXT NOT NULL,
   p256dh        VARCHAR(255) NOT NULL,
   auth_secret   VARCHAR(255) NOT NULL,
@@ -644,7 +644,7 @@ CREATE TABLE IF NOT EXISTS room_schedules (
   tenant_id        VARCHAR(64) NOT NULL,
   room_id          VARCHAR(64) NOT NULL,
   channel_id       VARCHAR(64) NOT NULL DEFAULT '',
-  created_by       VARCHAR(128) NOT NULL,
+  created_by       VARCHAR(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
   text             MEDIUMTEXT NOT NULL,
   recipient_json   JSON NOT NULL,
   recurrence_json  JSON NOT NULL,
@@ -674,7 +674,7 @@ CREATE TABLE IF NOT EXISTS room_templates (
   name          VARCHAR(256) NOT NULL,
   description   VARCHAR(2048) NOT NULL DEFAULT '',
   visibility    VARCHAR(16) NOT NULL,
-  created_by    VARCHAR(128) NOT NULL,
+  created_by    VARCHAR(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
   body_json     JSON NOT NULL,
   use_count     BIGINT NOT NULL DEFAULT 0,
   created_at_ms BIGINT NOT NULL,
@@ -690,16 +690,16 @@ CREATE TABLE IF NOT EXISTS room_templates (
 CREATE TABLE IF NOT EXISTS api_tokens (
   token_id        CHAR(32) PRIMARY KEY,
   secret_hash     CHAR(64) NOT NULL,
-  subject         VARCHAR(255) NOT NULL,
+  subject         VARCHAR(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
   email           VARCHAR(255) NOT NULL DEFAULT '',
   tenant_hint     VARCHAR(64) NOT NULL DEFAULT '',
   label           VARCHAR(128) NOT NULL DEFAULT '',
-  created_by      VARCHAR(255) NOT NULL,
+  created_by      VARCHAR(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
   created_at_ms   BIGINT NOT NULL,
   expires_at_ms   BIGINT NOT NULL,
   last_used_at_ms BIGINT NOT NULL DEFAULT 0,
   revoked_at_ms   BIGINT NULL,
-  revoked_by      VARCHAR(255) NOT NULL DEFAULT '',
+  revoked_by      VARCHAR(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL DEFAULT '',
   KEY idx_api_tokens_created (created_at_ms)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
@@ -710,14 +710,14 @@ CREATE TABLE IF NOT EXISTS api_tokens (
 -- once per month whichever service replica evaluates it.
 CREATE TABLE IF NOT EXISTS usage_budgets (
   tenant_id       VARCHAR(64) NOT NULL,
-  user_id         VARCHAR(128) NOT NULL,
+  user_id         VARCHAR(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
   tokens          BIGINT NULL,
   cost            DECIMAL(18,6) NULL,
   warn_at_percent INT NOT NULL,
   hard_stop       TINYINT(1) NOT NULL DEFAULT 0,
   warned_period   CHAR(7) NOT NULL DEFAULT '',
   warned_level    INT NOT NULL DEFAULT 0,
-  updated_by      VARCHAR(128) NOT NULL DEFAULT '',
+  updated_by      VARCHAR(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL DEFAULT '',
   updated_at_ms   BIGINT NOT NULL,
   PRIMARY KEY (tenant_id, user_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
@@ -727,7 +727,7 @@ CREATE TABLE IF NOT EXISTS usage_budgets (
 -- e-mail address). Global per user, not per tenant: a person reads the same
 -- in every organization. No row = the default (store.DisplayName).
 CREATE TABLE IF NOT EXISTS user_profiles (
-  user_id        VARCHAR(128) NOT NULL,
+  user_id        VARCHAR(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
   display_name   VARCHAR(40) NOT NULL,
   updated_at_ms  BIGINT NOT NULL,
   PRIMARY KEY (user_id)
@@ -749,7 +749,7 @@ CREATE TABLE IF NOT EXISTS content_components (
   kind            VARCHAR(64) NOT NULL,
   name            VARCHAR(64) NOT NULL,
   tenant_id       VARCHAR(64) NOT NULL DEFAULT '',
-  owner           VARCHAR(128) NOT NULL DEFAULT '',
+  owner           VARCHAR(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL DEFAULT '',
   scope           VARCHAR(16) NOT NULL,
   status          VARCHAR(16) NOT NULL,
   latest_version  VARCHAR(64) NOT NULL,
@@ -757,7 +757,7 @@ CREATE TABLE IF NOT EXISTS content_components (
   description     VARCHAR(2048) NOT NULL DEFAULT '',
   category        VARCHAR(64) NOT NULL DEFAULT '',
   source_id       VARCHAR(64) NOT NULL DEFAULT '',
-  shared_by       VARCHAR(128) NOT NULL DEFAULT '',
+  shared_by       VARCHAR(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL DEFAULT '',
   enabled_tenants JSON NULL,
   org_name        VARCHAR(64) NULL,
   created_at_ms   BIGINT NOT NULL,
@@ -780,7 +780,7 @@ CREATE TABLE IF NOT EXISTS content_component_versions (
   sha256          CHAR(64) NOT NULL,
   size_bytes      BIGINT NOT NULL,
   signature       TEXT NULL,
-  created_by      VARCHAR(128) NOT NULL,
+  created_by      VARCHAR(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
   created_at_ms   BIGINT NOT NULL,
   PRIMARY KEY (component_id, version),
   KEY idx_content_versions_blob (bundle_blob_key)
@@ -796,8 +796,8 @@ CREATE TABLE IF NOT EXISTS content_drafts (
   tenant_id       VARCHAR(64) NOT NULL,
   room_id         VARCHAR(128) NOT NULL,
   job_id          VARCHAR(64) NOT NULL,
-  requester       VARCHAR(128) NOT NULL,
-  author          VARCHAR(128) NOT NULL,
+  requester       VARCHAR(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
+  author          VARCHAR(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
   kind            VARCHAR(64) NOT NULL,
   name            VARCHAR(64) NOT NULL,
   display_name    VARCHAR(256) NOT NULL DEFAULT '',
@@ -817,12 +817,12 @@ CREATE TABLE IF NOT EXISTS content_drafts (
 -- pinned experts). pinned_version '' follows the latest version.
 CREATE TABLE IF NOT EXISTS content_component_uses (
   scope_kind      VARCHAR(16) NOT NULL,
-  scope_id        VARCHAR(128) NOT NULL,
+  scope_id        VARCHAR(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
   component_id    VARCHAR(64) NOT NULL,
   tenant_id       VARCHAR(64) NOT NULL DEFAULT '',
   kind            VARCHAR(64) NOT NULL,
   pinned_version  VARCHAR(64) NOT NULL DEFAULT '',
-  created_by      VARCHAR(128) NOT NULL,
+  created_by      VARCHAR(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
   created_at_ms   BIGINT NOT NULL,
   PRIMARY KEY (scope_kind, scope_id, component_id),
   KEY idx_content_uses_component (component_id)
@@ -831,7 +831,7 @@ CREATE TABLE IF NOT EXISTS content_component_uses (
 -- A member confirmed the declared permissions of a content component
 -- version (shown and confirmed on first use).
 CREATE TABLE IF NOT EXISTS content_permission_acks (
-  subject         VARCHAR(128) NOT NULL,
+  subject         VARCHAR(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
   component_id    VARCHAR(64) NOT NULL,
   version         VARCHAR(64) NOT NULL,
   acked_at_ms     BIGINT NOT NULL,
@@ -850,11 +850,11 @@ CREATE TABLE IF NOT EXISTS content_publish_requests (
   kind            VARCHAR(64) NOT NULL,
   name            VARCHAR(64) NOT NULL,
   version         VARCHAR(64) NOT NULL,
-  requested_by    VARCHAR(128) NOT NULL,
+  requested_by    VARCHAR(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
   note            VARCHAR(500) NOT NULL DEFAULT '',
   status          VARCHAR(16) NOT NULL,
   pending_key     VARCHAR(64) NULL,
-  decided_by      VARCHAR(128) NOT NULL DEFAULT '',
+  decided_by      VARCHAR(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL DEFAULT '',
   decision_note   VARCHAR(500) NOT NULL DEFAULT '',
   decided_at_ms   BIGINT NOT NULL DEFAULT 0,
   created_at_ms   BIGINT NOT NULL,
@@ -872,7 +872,7 @@ CREATE TABLE IF NOT EXISTS content_room_shares (
   component_id    VARCHAR(64) NOT NULL,
   tenant_id       VARCHAR(64) NOT NULL,
   version         VARCHAR(64) NOT NULL,
-  shared_by       VARCHAR(128) NOT NULL,
+  shared_by       VARCHAR(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
   note            VARCHAR(500) NOT NULL DEFAULT '',
   created_at_ms   BIGINT NOT NULL,
   updated_at_ms   BIGINT NOT NULL,

@@ -225,13 +225,12 @@ func (s *Service) shareRecipients(w http.ResponseWriter, r *http.Request, claims
 	skipped := []wire.ContentShareSkip{}
 	for _, m := range candidates {
 		m = strings.TrimSpace(m)
-		key := strings.ToLower(m)
-		if m == "" || seen[key] {
+		if m == "" || seen[m] {
 			continue
 		}
-		seen[key] = true
+		seen[m] = true
 		switch {
-		case strings.EqualFold(m, claims.Subject):
+		case m == claims.Subject:
 			if req.RoomID == "" {
 				skipped = append(skipped, wire.ContentShareSkip{Member: m, Reason: "that is you"})
 			}

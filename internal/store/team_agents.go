@@ -3,7 +3,6 @@ package store
 import (
 	"context"
 	"sort"
-	"strings"
 
 	"github.com/luckylhb90/bnbloc/internal/tenant"
 	"github.com/luckylhb90/bnbloc/internal/wire"
@@ -79,7 +78,7 @@ func (s *MemoryBridgeJobs) TenantTeamAgents(ctx context.Context, ownerUserID str
 			if a.TenantID != tid || a.Disabled {
 				continue
 			}
-			if ownerUserID != "" && !strings.EqualFold(a.OwnerUserID, ownerUserID) {
+			if ownerUserID != "" && a.OwnerUserID != ownerUserID {
 				continue
 			}
 			seen := a.LastSeenAtMs
@@ -107,7 +106,7 @@ func (s *MemoryBridgeJobs) TenantTeamJobs(ctx context.Context, ownerUserID strin
 		if j.TenantID != tid {
 			continue
 		}
-		if ownerUserID != "" && !strings.EqualFold(j.OwnerUserID, ownerUserID) {
+		if ownerUserID != "" && j.OwnerUserID != ownerUserID {
 			continue
 		}
 		if j.CreatedAtMs < sinceMs && j.Status.Terminal() {

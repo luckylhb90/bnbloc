@@ -280,7 +280,7 @@ func replyText(ctx context.Context, env *Env, run wire.AgentRun) string {
 		}
 		for _, m := range batch.Messages {
 			p := m.Payload
-			if p.Role != "assistant" || !strings.EqualFold(p.OwnerUserID, run.Agent.Owner) || !strings.EqualFold(p.Provider, run.Agent.Provider) || strings.TrimSpace(p.Text) == "" {
+			if p.Role != "assistant" || p.OwnerUserID != run.Agent.Owner || p.Provider != run.Agent.Provider || strings.TrimSpace(p.Text) == "" {
 				continue
 			}
 			if b.Len() > 0 {

@@ -192,22 +192,22 @@ func scratchDB(t *testing.T, tag string) string {
 func schemaSnapshot(t *testing.T, db *sql.DB) []string {
 	t.Helper()
 	var out []string
-	rows, err := db.Query(`SELECT table_name, column_name, column_type, is_nullable, column_default
+	rows, err := db.Query(`SELECT table_name, column_name, column_type, is_nullable, column_default, collation_name
 		FROM information_schema.columns WHERE table_schema = DATABASE()`)
 	if err != nil {
 		t.Fatalf("columns: %v", err)
 	}
 	for rows.Next() {
 		var tbl, col, typ, nullable string
-		var def sql.NullString
-		if err := rows.Scan(&tbl, &col, &typ, &nullable, &def); err != nil {
+		var def, coll sql.NullString
+		if err := rows.Scan(&tbl, &col, &typ, &nullable, &def, &coll); err != nil {
 			t.Fatalf("scan column: %v", err)
 		}
 		d := "<none>"
 		if def.Valid {
 			d = "'" + def.String + "'"
 		}
-		out = append(out, fmt.Sprintf("column %s.%s %s null=%s default=%s", tbl, col, typ, nullable, d))
+		out = append(out, fmt.Sprintf("column %s.%s %s null=%s default=%s collation=%s", tbl, col, typ, nullable, d, coll.String))
 	}
 	_ = rows.Close()
 	rows, err = db.Query(`SELECT table_name, index_name, non_unique, GROUP_CONCAT(column_name ORDER BY seq_in_index)

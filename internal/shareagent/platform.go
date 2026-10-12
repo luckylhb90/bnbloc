@@ -112,7 +112,7 @@ type PlatformDrive struct {
 // same way.
 func ReadPlatformDrive(ctx context.Context, grants RoomGrantLister, policy wire.PlatformAgentsPolicy, ads AgentAdvertisements,
 	roomID, author, owner string, ref wire.PlatformAgentRef, nowMs int64) PlatformDrive {
-	if owner == "" || strings.EqualFold(author, owner) || ref.Core == "" || ref.Provider == "" {
+	if owner == "" || author == owner || ref.Core == "" || ref.Provider == "" {
 		return PlatformDrive{}
 	}
 	platform := false

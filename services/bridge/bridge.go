@@ -2480,11 +2480,6 @@ func cleanDriveError(err error) string {
 	return corepkg.Truncate([]byte(raw), 200)
 }
 
-// sameUserID compares two user ids case-insensitively (dev identities vary case).
-func sameUserID(a, b string) bool {
-	return strings.EqualFold(strings.TrimSpace(a), strings.TrimSpace(b))
-}
-
 // serveRecipient reports whether this bridge should drive a chat addressed to
 // recipientOwner's agent. In production a bridge serves only its own owner's
 // agents; ServeAllOwners (single-host dev) serves any member from the one local
@@ -2493,7 +2488,7 @@ func serveRecipient(serveAll bool, recipientOwner, bridgeOwner string) bool {
 	if serveAll || recipientOwner == "" {
 		return true
 	}
-	return sameUserID(recipientOwner, bridgeOwner)
+	return recipientOwner == bridgeOwner
 }
 
 // isBorrow reports whether a chat is a borrow: its author is a real, different
@@ -2501,7 +2496,7 @@ func serveRecipient(serveAll bool, recipientOwner, bridgeOwner string) bool {
 // unattributed one is not a borrow and needs no authorization.
 func isBorrow(author, owner string) bool {
 	a := strings.TrimSpace(author)
-	return a != "" && !sameUserID(a, owner)
+	return a != "" && a != owner
 }
 
 // firstNonEmpty returns the first non-empty string, else "".

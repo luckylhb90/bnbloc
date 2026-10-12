@@ -73,13 +73,13 @@ func ValidateAlert(a Alert) (Alert, error) {
 	var rs []string
 	for _, r := range a.Recipients {
 		r = strings.TrimSpace(r)
-		if r == "" || seen[strings.ToLower(r)] {
+		if r == "" || seen[r] {
 			continue
 		}
 		if len(r) > 255 {
 			return a, errors.Join(ErrAlertInvalid, errors.New("recipient id longer than 255 bytes"))
 		}
-		seen[strings.ToLower(r)] = true
+		seen[r] = true
 		rs = append(rs, r)
 	}
 	if len(rs) > MaxAlertRecipients {

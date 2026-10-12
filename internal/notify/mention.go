@@ -11,8 +11,9 @@ const maxMentionCandidates = 20
 // emails, so "@" and "." are part of the token); agent handles are
 // "@owner/provider" and are not member mentions, so tokens with "/" are
 // skipped. Trailing sentence punctuation is trimmed. Candidates are
-// de-duplicated (case-insensitively) and capped; membership is the caller's
-// check — a candidate is only a mention if it names a room member.
+// de-duplicated exactly (member ids are case-sensitive) and capped;
+// membership is the caller's check — a candidate is only a mention if it
+// names a room member.
 func MentionCandidates(text string) []string {
 	seen := map[string]bool{}
 	var out []string
@@ -29,11 +30,10 @@ func MentionCandidates(text string) []string {
 		if tok == "" || strings.Contains(tok, "/") {
 			continue
 		}
-		key := strings.ToLower(tok)
-		if seen[key] {
+		if seen[tok] {
 			continue
 		}
-		seen[key] = true
+		seen[tok] = true
 		out = append(out, tok)
 		if len(out) == maxMentionCandidates {
 			break

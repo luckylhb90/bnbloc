@@ -207,7 +207,7 @@ func (b *Bridge) resolveJobContent(ctx context.Context, job bridgeJob, owner str
 		if err != nil {
 			return nil, fmt.Errorf("load %s %s: %w", ref.Kind, ref.Name, err)
 		}
-		if ref.NeedsSandbox && !sameUserID(ref.Owner, owner) {
+		if ref.NeedsSandbox && ref.Owner != owner {
 			c.foreign = append(c.foreign, firstNonEmpty(ref.DisplayName, ref.Name))
 		}
 		switch ref.Source {
@@ -248,7 +248,7 @@ func (b *Bridge) resolveJobContent(ctx context.Context, job bridgeJob, owner str
 	if !c.empty() {
 		c.sum = c.profile().ContentSum()
 	}
-	mcp, unmet, stdioForeign := b.resolveMCP(eff.MCP, refs, owner, sameUserID(job.RequesterUserID, owner))
+	mcp, unmet, stdioForeign := b.resolveMCP(eff.MCP, refs, owner, job.RequesterUserID == owner)
 	c.mcp = mcp
 	c.missing = append(c.missing, unmet...)
 	for _, name := range stdioForeign {

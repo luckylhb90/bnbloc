@@ -81,7 +81,7 @@ func (s *Service) handleReserveBorrow(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	borrower := strings.TrimSpace(body.Borrower)
-	if borrower == "" || strings.EqualFold(borrower, owner) {
+	if borrower == "" || borrower == owner {
 		writeErr(w, http.StatusBadRequest, "borrower must be a member other than the owner")
 		return
 	}

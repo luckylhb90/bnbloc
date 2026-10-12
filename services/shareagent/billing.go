@@ -196,7 +196,7 @@ func (s *Service) groupBorrowTurns(ctx context.Context, p reportParams, turns []
 			Provider: provider(t.GrantID),
 			RoomID:   t.RoomID,
 		}
-		k := strings.Join([]string{row.Period, strings.ToLower(row.Owner), strings.ToLower(row.Borrower), row.Provider, row.RoomID}, "\x00")
+		k := strings.Join([]string{row.Period, row.Owner, row.Borrower, row.Provider, row.RoomID}, "\x00")
 		acc := rows[k]
 		if acc == nil {
 			acc = &row

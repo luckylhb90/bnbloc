@@ -317,7 +317,7 @@ func (v *runViewer) record(j store.AgentJob, detail bool) wire.AgentRun {
 		RoomName:      v.rooms.name(j.RoomID),
 		ChannelID:     j.ChannelID,
 		Requester:     j.RequesterUserID,
-		Borrowed:      j.RequesterUserID != "" && !strings.EqualFold(j.RequesterUserID, j.OwnerUserID),
+		Borrowed:      j.RequesterUserID != "" && j.RequesterUserID != j.OwnerUserID,
 		Status:        string(j.Status),
 		FailureReason: string(j.FailureReason),
 		Attempt:       j.Attempt,

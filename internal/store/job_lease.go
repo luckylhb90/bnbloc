@@ -3,7 +3,6 @@ package store
 import (
 	"context"
 	"errors"
-	"strings"
 )
 
 // The live-lease rule: work done on behalf of a running job (an agent
@@ -37,7 +36,7 @@ func JobLeasedBy(ctx context.Context, r AgentDispatchReader, job AgentJob, calle
 		return ErrJobNotLive
 	}
 	owner, err := r.BridgeOwner(ctx, job.LeaseBridgeID)
-	if errors.Is(err, ErrBridgeNotFound) || (err == nil && !strings.EqualFold(owner, caller)) {
+	if errors.Is(err, ErrBridgeNotFound) || (err == nil && owner != caller) {
 		return ErrJobNotCallers
 	}
 	return err

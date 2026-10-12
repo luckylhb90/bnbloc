@@ -107,7 +107,7 @@ func (s *Service) handleTeamPlan(w http.ResponseWriter, r *http.Request) {
 
 	costs := map[string]*wire.AgentCostSample{}
 	sample := func(a *wire.PlanAgent) (*wire.AgentCostSample, error) {
-		key := strings.ToLower(a.OwnerID + "\x00" + a.Core + "\x00" + a.Provider)
+		key := a.OwnerID + "\x00" + a.Core + "\x00" + a.Provider
 		if c, ok := costs[key]; ok {
 			return c, nil
 		}

@@ -2,7 +2,6 @@ package store
 
 import (
 	"context"
-	"strings"
 
 	"github.com/luckylhb90/bnbloc/internal/tenant"
 )
@@ -64,7 +63,7 @@ func (s *MemoryBridgeJobs) ExpertUsage(ctx context.Context, expertIDs []string) 
 		if members[j.ExpertID] == nil {
 			members[j.ExpertID] = map[string]bool{}
 		}
-		members[j.ExpertID][strings.ToLower(j.RequesterUserID)] = true
+		members[j.ExpertID][j.RequesterUserID] = true
 	}
 	out := map[string]ContentUsage{}
 	for id, n := range runs {

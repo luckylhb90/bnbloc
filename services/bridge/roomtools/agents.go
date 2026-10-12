@@ -41,25 +41,25 @@ func roomAgents(ctx context.Context, env *Env) ([]roomAgent, error) {
 	}
 	pairs := map[string]int{}
 	for _, a := range parsed.Agents {
-		pairs[strings.ToLower(a.OwnerUserID+"/"+a.Provider)]++
+		pairs[a.OwnerUserID+"/"+a.Provider]++
 	}
 	out := make([]roomAgent, 0, len(parsed.Agents))
 	for _, a := range parsed.Agents {
 		handle := a.OwnerUserID + "/" + a.Provider
-		if pairs[strings.ToLower(handle)] > 1 && a.Core != "" {
+		if pairs[handle] > 1 && a.Core != "" {
 			handle = a.OwnerUserID + "/" + a.Core + "/" + a.Provider
 		}
 		out = append(out, roomAgent{
 			Handle: handle, Owner: a.OwnerUserID, Core: a.Core, Provider: a.Provider,
 			Online: true, Sandboxed: a.Sandboxed,
-			You: strings.EqualFold(a.OwnerUserID, scope.Owner) && strings.EqualFold(a.Provider, scope.Provider) && (a.Core == "" || scope.Core == "" || strings.EqualFold(a.Core, scope.Core)),
+			You: a.OwnerUserID == scope.Owner && a.Provider == scope.Provider && (a.Core == "" || scope.Core == "" || a.Core == scope.Core),
 		})
 	}
 	return out, nil
 }
 
 // resolveHandle finds the agent a handle names ("owner/provider" or
-// "owner/core/provider", case-insensitive).
+// "owner/core/provider", exactly).
 func resolveHandle(agents []roomAgent, handle string) (roomAgent, bool) {
 	handle = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(handle), "@"))
 	parts := strings.Split(handle, "/")
@@ -67,11 +67,11 @@ func resolveHandle(agents []roomAgent, handle string) (roomAgent, bool) {
 	for _, a := range agents {
 		switch len(parts) {
 		case 2:
-			if strings.EqualFold(a.Owner, parts[0]) && strings.EqualFold(a.Provider, parts[1]) {
+			if a.Owner == parts[0] && a.Provider == parts[1] {
 				matches = append(matches, a)
 			}
 		case 3:
-			if strings.EqualFold(a.Owner, parts[0]) && strings.EqualFold(a.Core, parts[1]) && strings.EqualFold(a.Provider, parts[2]) {
+			if a.Owner == parts[0] && a.Core == parts[1] && a.Provider == parts[2] {
 				matches = append(matches, a)
 			}
 		}

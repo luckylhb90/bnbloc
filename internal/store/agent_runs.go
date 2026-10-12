@@ -3,7 +3,6 @@ package store
 import (
 	"context"
 	"sort"
-	"strings"
 
 	"github.com/luckylhb90/bnbloc/internal/tenant"
 )
@@ -71,10 +70,10 @@ func (q AgentRunQuery) matches(j AgentJob) bool {
 	if q.RoomID != "" && j.RoomID != q.RoomID {
 		return false
 	}
-	if q.Participant != "" && !strings.EqualFold(j.OwnerUserID, q.Participant) && !strings.EqualFold(j.RequesterUserID, q.Participant) {
+	if q.Participant != "" && j.OwnerUserID != q.Participant && j.RequesterUserID != q.Participant {
 		return false
 	}
-	if q.Owner != "" && !strings.EqualFold(j.OwnerUserID, q.Owner) {
+	if q.Owner != "" && j.OwnerUserID != q.Owner {
 		return false
 	}
 	if q.Core != "" && j.Core != q.Core {

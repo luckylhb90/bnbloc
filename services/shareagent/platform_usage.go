@@ -4,7 +4,6 @@ import (
 	"context"
 	"net/http"
 	"sort"
-	"strings"
 	"time"
 
 	"github.com/luckylhb90/bnbloc/internal/shareagent"
@@ -87,7 +86,7 @@ func newPeriodTotals() *periodTotals {
 
 func (p *periodTotals) add(t store.AuditRecord) {
 	p.usageAcc.add(t)
-	p.members[strings.ToLower(t.ActorUserID)] = true
+	p.members[t.ActorUserID] = true
 	p.rooms[t.TenantID+"\x00"+t.RoomID] = true
 }
 
@@ -107,7 +106,7 @@ func (s *Service) platformUsage(ctx context.Context, turns []store.AuditRecord, 
 		if t.AtMs >= dayStartMs {
 			today.add(t)
 		}
-		mk := strings.ToLower(t.ActorUserID)
+		mk := t.ActorUserID
 		if members[mk] == nil {
 			members[mk], memberIDs[mk] = &usageAcc{}, t.ActorUserID
 		}

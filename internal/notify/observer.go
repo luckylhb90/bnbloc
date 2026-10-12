@@ -230,7 +230,7 @@ func (o *Observer) mentionEvents(obs observation) []Event {
 	}
 	var recipients []string
 	for _, c := range MentionCandidates(obs.text) {
-		if strings.EqualFold(c, obs.author) {
+		if c == obs.author {
 			continue
 		}
 		if o.Membership.IsHumanMember(obs.roomID, c, obs.tenantID) {
@@ -299,7 +299,7 @@ func jobEvents(obs observation, reply agentReply) []Event {
 			DedupKey: "job:" + j.JobID, Seq: j.MessageSeq, ChannelID: channel, Reply: agentReplyTo(channel, j),
 		}}
 		if store.AgentJobFailureReason(j.FailureReason) == store.FailureBorrowNotAuthorized &&
-			j.OwnerUserID != "" && !strings.EqualFold(j.OwnerUserID, j.RequesterUserID) {
+			j.OwnerUserID != "" && j.OwnerUserID != j.RequesterUserID {
 			out = append(out, Event{
 				Type: wire.NotificationBorrowRequest, RoomID: obs.roomID, Recipients: []string{j.OwnerUserID},
 				Actor: j.RequesterUserID, Title: j.RequesterUserID + " asked to use your " + agent + " agent",

@@ -128,7 +128,7 @@ func draftTarget(ctx context.Context, env *Env, job Job, handle string) (roomAge
 		if a.You || !a.Online {
 			continue
 		}
-		if strings.EqualFold(a.Owner, job.RequesterUserID) {
+		if a.Owner == job.RequesterUserID {
 			return a, nil
 		}
 		if other == nil {

@@ -161,7 +161,7 @@ func (q AuditLogQuery) matches(r AuditLogRow) bool {
 	if !q.wantsKind(r.Kind) {
 		return false
 	}
-	if q.Actor != "" && !strings.EqualFold(r.Actor, q.Actor) {
+	if q.Actor != "" && r.Actor != q.Actor {
 		return false
 	}
 	if q.Outcome != "" && !strings.EqualFold(r.Outcome, q.Outcome) {

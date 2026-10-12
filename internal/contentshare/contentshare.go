@@ -13,7 +13,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 
 	"github.com/luckylhb90/bnbloc/internal/contentpkg"
 	"github.com/luckylhb90/bnbloc/internal/contentuse"
@@ -148,7 +147,7 @@ func GrantRoomShares(ctx context.Context, st store.ContentComponentStore, tenant
 	}
 	var out []Grant
 	for _, sh := range shares {
-		if sh.TenantID != tenantID || strings.EqualFold(sh.SharedBy, member) || !authorInRoom(sh.SharedBy) {
+		if sh.TenantID != tenantID || sh.SharedBy == member || !authorInRoom(sh.SharedBy) {
 			continue
 		}
 		src, err := st.GetContentComponent(ctx, sh.ComponentID)

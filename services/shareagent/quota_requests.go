@@ -82,7 +82,7 @@ func (s *Service) handleCreateQuotaRequest(w http.ResponseWriter, r *http.Reques
 		writeErr(w, http.StatusBadRequest, "owner and provider are required")
 		return
 	}
-	if strings.EqualFold(owner, requester) {
+	if owner == requester {
 		writeErr(w, http.StatusBadRequest, "you cannot request quota on your own agent")
 		return
 	}
@@ -196,7 +196,7 @@ func (s *Service) decidableRequest(w http.ResponseWriter, r *http.Request) (stor
 		writeErr(w, http.StatusNotFound, "quota request not found")
 		return store.QuotaRequest{}, false
 	}
-	if !strings.EqualFold(req.OwnerUserID, caller) {
+	if req.OwnerUserID != caller {
 		writeErr(w, http.StatusForbidden, "only the agent owner may decide this request")
 		return store.QuotaRequest{}, false
 	}

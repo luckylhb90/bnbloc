@@ -20,8 +20,12 @@ func TestJobLeasedBy(t *testing.T) {
 	ctx := context.Background()
 	r := fakeOwners{"br-maya": "maya"}
 	running := AgentJob{Status: AgentJobRunning, LeaseBridgeID: "br-maya"}
-	if err := JobLeasedBy(ctx, r, running, "Maya"); err != nil {
+	if err := JobLeasedBy(ctx, r, running, "maya"); err != nil {
 		t.Fatalf("owner = %v", err)
+	}
+	// Subjects are case-sensitive: "Maya" is another member.
+	if err := JobLeasedBy(ctx, r, running, "Maya"); !errors.Is(err, ErrJobNotCallers) {
+		t.Fatalf("case variant of the owner = %v, want ErrJobNotCallers", err)
 	}
 	if err := JobLeasedBy(ctx, r, running, "jack"); !errors.Is(err, ErrJobNotCallers) {
 		t.Fatalf("other member = %v", err)

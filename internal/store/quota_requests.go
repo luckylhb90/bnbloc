@@ -6,7 +6,6 @@ import (
 	"encoding/base64"
 	"errors"
 	"sort"
-	"strings"
 	"sync"
 
 	"github.com/luckylhb90/bnbloc/internal/tenant"
@@ -105,8 +104,8 @@ type QuotaRequestStore interface {
 // quotaPendingKey is the fixed-length digest admitting at most one open request
 // per (tenant, room, owner, provider, requester). Parts cannot contain NUL.
 func quotaPendingKey(tnt string, r QuotaRequest) string {
-	sum := sha256.Sum256([]byte(tnt + "\x00" + r.RoomID + "\x00" + strings.ToLower(r.OwnerUserID) + "\x00" +
-		r.Provider + "\x00" + strings.ToLower(r.RequesterUserID)))
+	sum := sha256.Sum256([]byte(tnt + "\x00" + r.RoomID + "\x00" + r.OwnerUserID + "\x00" +
+		r.Provider + "\x00" + r.RequesterUserID))
 	return "qp_" + base64.RawURLEncoding.EncodeToString(sum[:])
 }
 
@@ -182,10 +181,10 @@ func (s *MemoryQuotaRequests) ListQuotaRequests(ctx context.Context, q QuotaRequ
 		if r.TenantID != tnt {
 			continue
 		}
-		if q.OwnerUserID != "" && !strings.EqualFold(r.OwnerUserID, q.OwnerUserID) {
+		if q.OwnerUserID != "" && r.OwnerUserID != q.OwnerUserID {
 			continue
 		}
-		if q.RequesterUserID != "" && !strings.EqualFold(r.RequesterUserID, q.RequesterUserID) {
+		if q.RequesterUserID != "" && r.RequesterUserID != q.RequesterUserID {
 			continue
 		}
 		if q.RoomID != "" && r.RoomID != q.RoomID {
@@ -213,7 +212,7 @@ func (s *MemoryQuotaRequests) DecideQuotaRequest(ctx context.Context, d QuotaDec
 	defer s.mu.Unlock()
 	key := grantKey(tnt, d.RequestID)
 	r, ok := s.reqs[key]
-	if !ok || !strings.EqualFold(r.OwnerUserID, d.OwnerUserID) {
+	if !ok || r.OwnerUserID != d.OwnerUserID {
 		return QuotaRequest{}, ErrQuotaRequestNotFound
 	}
 	if r.Status != QuotaRequestPending {

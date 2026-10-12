@@ -301,12 +301,11 @@ func (e *Emitter) filter(ctx context.Context, tid string, ev Event, now time.Tim
 	var out []string
 	for _, r := range ev.Recipients {
 		r = strings.TrimSpace(r)
-		key := strings.ToLower(r)
 		operational := Operational(ev.Type)
-		if r == "" || seen[key] || (!operational && strings.EqualFold(r, ev.Actor)) {
+		if r == "" || seen[r] || (!operational && r == ev.Actor) {
 			continue
 		}
-		seen[key] = true
+		seen[r] = true
 		if operational {
 			// Explicit recipients only: no prefs, mutes, or collapsing.
 			out = append(out, r)

@@ -243,7 +243,7 @@ func (s *MemoryChat) DeleteRoomMessage(ctx context.Context, roomID string, seq i
 	rk := tid + "\x00" + roomID
 	for _, m := range s.msgs[rk] {
 		if m.Seq == seq {
-			if !strings.EqualFold(m.Author, requester) {
+			if m.Author != requester {
 				return false, nil
 			}
 			s.deleted[rk+"\x00"+strconv.FormatInt(seq, 10)] = true
@@ -269,7 +269,7 @@ func (s *MemoryChat) EditRoomMessage(ctx context.Context, roomID string, seq int
 		if m.Seq != seq {
 			continue
 		}
-		if !strings.EqualFold(m.Author, requester) {
+		if m.Author != requester {
 			return false, nil
 		}
 		if s.deleted[rk+"\x00"+strconv.FormatInt(seq, 10)] {

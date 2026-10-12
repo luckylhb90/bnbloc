@@ -312,7 +312,7 @@ func (s *Service) handleRemoveMember(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Removing yourself is the Leave flow, not a kick; keep the semantics clean.
-	if strings.EqualFold(target, caller(r)) {
+	if target == caller(r) {
 		writeErr(w, http.StatusBadRequest, "use leave to remove yourself")
 		return
 	}

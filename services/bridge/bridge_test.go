@@ -33,7 +33,7 @@ func TestServeRecipient(t *testing.T) {
 		{"other agent not served in prod", false, "jack", "maya", false},
 		{"other agent served under serve-all", true, "jack", "maya", true},
 		{"empty recipient owner always served", false, "", "maya", true},
-		{"case-insensitive own match", false, "Maya", "maya", true},
+		{"a case variant is another owner", false, "Maya", "maya", false},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -56,7 +56,7 @@ func TestIsBorrow(t *testing.T) {
 	}{
 		{"other user borrows", "maya", "jack", true},
 		{"self is not a borrow", "jack", "jack", false},
-		{"case-insensitive self", "Jack", "jack", false},
+		{"a case variant is another user", "Jack", "jack", true},
 		{"empty author is not a borrow", "", "jack", false},
 		{"whitespace author is not a borrow", "   ", "jack", false},
 	}

@@ -94,7 +94,7 @@ func (s *Service) periodBurn(ctx context.Context, owner string, sinceMs int64) (
 		tokens := u.InputTokens + u.OutputTokens
 		total.Tokens += tokens
 		total.Cost += u.CostUsd
-		key := strings.ToLower(u.OwnerUserID)
+		key := u.OwnerUserID
 		m := byOwner[key]
 		if m == nil {
 			m = &wire.MemberBurn{UserID: u.OwnerUserID}
@@ -135,7 +135,7 @@ func budgetView(b store.UsageBudget, burn wire.UsageBurn) wire.BudgetView {
 
 // burnOf returns owner's entry of a periodBurn map (zero when absent).
 func burnOf(byOwner map[string]*wire.MemberBurn, owner string) wire.UsageBurn {
-	if m := byOwner[strings.ToLower(owner)]; m != nil {
+	if m := byOwner[owner]; m != nil {
 		return m.UsageBurn
 	}
 	return wire.UsageBurn{}
@@ -181,7 +181,7 @@ func burnLess(a, b wire.MemberBurn) bool {
 	if a.Cost != b.Cost {
 		return a.Cost < b.Cost
 	}
-	return strings.ToLower(a.UserID) > strings.ToLower(b.UserID)
+	return a.UserID > b.UserID
 }
 
 // handleTenantBudgets is GET /v1/tenant/budgets.
@@ -272,10 +272,10 @@ func (s *Service) validateBudgets(ctx context.Context, in wire.TenantBudgetsUpda
 		if user == "" || len(user) > maxBudgetUserID {
 			return nil, fmt.Errorf("member budget: userId required (at most %d characters)", maxBudgetUserID)
 		}
-		if seen[strings.ToLower(user)] {
+		if seen[user] {
 			return nil, fmt.Errorf("member budget: %s listed twice", user)
 		}
-		seen[strings.ToLower(user)] = true
+		seen[user] = true
 		if s.Tenants != nil {
 			_, member, err := s.Tenants.GetMember(ctx, tid, user)
 			if err != nil {
@@ -398,7 +398,7 @@ func (s *Service) refuseOverBudget(ctx context.Context, bridgeID string, jobs []
 	blocked := map[string]string{}
 	kept := make([]store.AgentJob, 0, len(jobs))
 	for _, j := range jobs {
-		key := strings.ToLower(j.OwnerUserID)
+		key := j.OwnerUserID
 		by, seen := blocked[key]
 		if !seen {
 			by = s.budgetBlock(ctx, j.OwnerUserID, since)
@@ -451,7 +451,7 @@ func (s *Service) noteBudgetBurn(tenantID, owner string) {
 	if s.Budgets == nil || s.Notifications == nil {
 		return
 	}
-	key := tenantID + "\x00" + strings.ToLower(owner)
+	key := tenantID + "\x00" + owner
 	s.budgetWatch.mu.Lock()
 	if s.budgetWatch.pending == nil {
 		s.budgetWatch.pending = map[string]bool{}

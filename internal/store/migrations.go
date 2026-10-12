@@ -1198,6 +1198,68 @@ WHERE r.channel_id = '' AND d.user_id IS NULL`)
 			return nil
 		},
 	},
+	{
+		// Subjects are case-sensitive (docs/prd/2026-10-12-code-health-
+		// remediation.md, D2): every identity column compares byte-exact, as
+		// the Go code does. No backfill (pre-launch).
+		id: "2026_10_identity_columns_bin",
+		run: func(ctx context.Context, db sqlConn) error {
+			for _, tc := range []struct {
+				table string
+				cols  []string
+			}{
+				{"tenant_members", []string{"user_id"}},
+				{"org_sync_subjects", []string{"user_id"}},
+				{"org_sync_default_rooms", []string{"user_id"}},
+				{"tenant_join_requests", []string{"user_id", "decided_by"}},
+				{"platform_settings", []string{"updated_by"}},
+				{"component_installs", []string{"subject"}},
+				{"extension_audit", []string{"actor"}},
+				{"agent_jobs", []string{"requester_user_id", "owner_user_id"}},
+				{"bridge_heartbeats", []string{"owner_user_id"}},
+				{"bridge_agents", []string{"owner_user_id"}},
+				{"user_agent_prefs", []string{"user_id"}},
+				{"room_channels", []string{"created_by"}},
+				{"rooms", []string{"created_by"}},
+				{"room_members", []string{"user_id"}},
+				{"room_invites", []string{"created_by"}},
+				{"agent_sessions", []string{"owner_user_id"}},
+				{"shared_agent_grants", []string{"owner_user_id", "grantee_user_id", "created_by"}},
+				{"shared_agent_audit", []string{"actor_user_id", "owner_user_id"}},
+				{"room_messages", []string{"author"}},
+				{"message_tasks", []string{"message_author", "created_by", "done_by"}},
+				{"room_read_state", []string{"user_id"}},
+				{"attachments", []string{"uploader"}},
+				{"artifacts", []string{"created_by"}},
+				{"artifact_versions", []string{"author_user_id"}},
+				{"artifact_shares", []string{"created_by", "revoked_by"}},
+				{"room_imports", []string{"source_exported_by", "imported_by"}},
+				{"sso_handoff_codes", []string{"subject"}},
+				{"refresh_token_families", []string{"subject"}},
+				{"shared_agent_quota_requests", []string{"owner_user_id", "requester_user_id", "decided_by"}},
+				{"notification_prefs", []string{"user_id"}},
+				{"notification_reply_tokens", []string{"user_id", "reply_owner_id"}},
+				{"web_push_subscriptions", []string{"user_id"}},
+				{"room_schedules", []string{"created_by"}},
+				{"room_templates", []string{"created_by"}},
+				{"api_tokens", []string{"subject", "created_by", "revoked_by"}},
+				{"usage_budgets", []string{"user_id", "updated_by"}},
+				{"user_profiles", []string{"user_id"}},
+				{"content_components", []string{"owner", "shared_by"}},
+				{"content_component_versions", []string{"created_by"}},
+				{"content_drafts", []string{"requester", "author"}},
+				{"content_component_uses", []string{"scope_id", "created_by"}},
+				{"content_permission_acks", []string{"subject"}},
+				{"content_publish_requests", []string{"requested_by", "decided_by"}},
+				{"content_room_shares", []string{"shared_by"}},
+			} {
+				if err := ensureColumnsCollation(ctx, db, tc.table, "utf8mb4", "utf8mb4_bin", tc.cols...); err != nil {
+					return err
+				}
+			}
+			return nil
+		},
+	},
 }
 
 // sqlConn is the statement surface a migration runs on. runMigrations passes
@@ -1390,6 +1452,42 @@ func ensureIndexColumns(ctx context.Context, db sqlConn, table, indexName string
 	}
 	if _, err := db.ExecContext(ctx, fmt.Sprintf("ALTER TABLE %s %s", table, add)); err != nil {
 		return fmt.Errorf("rebuild index %s on %s: %w", indexName, table, err)
+	}
+	return nil
+}
+
+// ensureColumnsCollation rewrites the listed text columns of table to
+// charset/collation, keeping each column's type, nullability and default as
+// stored, in one ALTER; columns already in that collation are left alone.
+func ensureColumnsCollation(ctx context.Context, db sqlConn, table, charset, collation string, cols ...string) error {
+	var mods []string
+	for _, col := range cols {
+		var typ, nullable string
+		var def, have sql.NullString
+		err := db.QueryRowContext(ctx, `SELECT column_type, is_nullable, column_default, collation_name FROM information_schema.columns
+    WHERE table_schema = DATABASE() AND table_name = ? AND column_name = ?`, table, col).Scan(&typ, &nullable, &def, &have)
+		if err != nil {
+			return fmt.Errorf("inspect column %s.%s: %w", table, col, err)
+		}
+		if have.String == collation {
+			continue
+		}
+		m := fmt.Sprintf("MODIFY COLUMN %s %s CHARACTER SET %s COLLATE %s", col, typ, charset, collation)
+		if nullable == "YES" {
+			m += " NULL"
+		} else {
+			m += " NOT NULL"
+		}
+		if def.Valid {
+			m += " DEFAULT '" + strings.ReplaceAll(def.String, "'", "''") + "'"
+		}
+		mods = append(mods, m)
+	}
+	if len(mods) == 0 {
+		return nil
+	}
+	if _, err := db.ExecContext(ctx, fmt.Sprintf("ALTER TABLE %s %s", table, strings.Join(mods, ", "))); err != nil {
+		return fmt.Errorf("collate %s: %w", table, err)
 	}
 	return nil
 }

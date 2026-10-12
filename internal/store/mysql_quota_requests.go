@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"strings"
 
 	"github.com/go-sql-driver/mysql"
 
@@ -156,7 +155,7 @@ func (s *MySQLQuotaRequests) DecideQuotaRequest(ctx context.Context, d QuotaDeci
 		if err != nil {
 			return QuotaRequest{}, err
 		}
-		if !strings.EqualFold(r.OwnerUserID, d.OwnerUserID) {
+		if r.OwnerUserID != d.OwnerUserID {
 			return QuotaRequest{}, ErrQuotaRequestNotFound
 		}
 		return QuotaRequest{}, ErrQuotaRequestDecided

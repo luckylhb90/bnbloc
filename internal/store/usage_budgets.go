@@ -3,7 +3,6 @@ package store
 import (
 	"context"
 	"sort"
-	"strings"
 	"sync"
 
 	"github.com/luckylhb90/bnbloc/internal/tenant"
@@ -101,7 +100,7 @@ func (s *MemoryUsageBudgets) GetUsageBudget(ctx context.Context, userID string) 
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	r, ok := s.rows[tnt][strings.ToLower(userID)]
+	r, ok := s.rows[tnt][userID]
 	if !ok {
 		return UsageBudget{}, false, nil
 	}
@@ -119,7 +118,7 @@ func (s *MemoryUsageBudgets) ReplaceUsageBudgets(ctx context.Context, budgets []
 	old := s.rows[tnt]
 	next := make(map[string]*memBudget, len(budgets))
 	for _, b := range budgets {
-		key := strings.ToLower(b.UserID)
+		key := b.UserID
 		row := &memBudget{b: b}
 		if prev, ok := old[key]; ok && prev.b.sameLimits(b) {
 			row.warnedPeriod, row.warnedLevel = prev.warnedPeriod, prev.warnedLevel
@@ -138,7 +137,7 @@ func (s *MemoryUsageBudgets) ClaimBudgetWarning(ctx context.Context, userID, per
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	r, ok := s.rows[tnt][strings.ToLower(userID)]
+	r, ok := s.rows[tnt][userID]
 	if !ok || (r.warnedPeriod == period && r.warnedLevel >= level) {
 		return false, nil
 	}

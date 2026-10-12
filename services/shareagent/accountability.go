@@ -189,7 +189,7 @@ func (s *Service) handleOwnerAuthorizations(w http.ResponseWriter, r *http.Reque
 		if rec.OwnerUserID != owner || rec.Decision != "allow" || rec.ActorUserID == "" {
 			continue
 		}
-		if strings.EqualFold(rec.ActorUserID, owner) {
+		if rec.ActorUserID == owner {
 			continue // the owner's own turn, not a borrow
 		}
 		if seen[rec.GrantID] == nil {

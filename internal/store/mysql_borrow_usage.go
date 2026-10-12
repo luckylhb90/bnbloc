@@ -9,10 +9,10 @@ import (
 
 // BorrowTurns returns the ctx tenant's recorded borrow turns (see
 // BorrowUsageStore). The tenant+time scan uses idx_audit_tenant_time (the
-// all-tenants scan idx_audit_time). The actor<>owner comparison runs under
-// the column collation (case-insensitive), matching the memory store's
-// EqualFold. PlatformOnly joins the turn's grant (grant ids are globally
-// unique: the tenant is part of their hash).
+// all-tenants scan idx_audit_time). The actor<>owner comparison is exact (the
+// columns are utf8mb4_bin), matching the memory store's ==. PlatformOnly joins
+// the turn's grant (grant ids are globally unique: the tenant is part of their
+// hash).
 func (s *MySQLGrant) BorrowTurns(ctx context.Context, q BorrowTurnQuery) []AuditRecord {
 	where := "a.action = 'turn' AND a.decision = 'allow' AND a.actor_user_id <> '' AND a.actor_user_id <> a.owner_user_id AND a.at_ms >= ?"
 	args := []any{q.FromMs}

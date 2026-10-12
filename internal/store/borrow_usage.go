@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"sort"
-	"strings"
 
 	"github.com/luckylhb90/bnbloc/internal/tenant"
 )
@@ -52,7 +51,7 @@ type BorrowUsageStore interface {
 // owner's own turn shares the action; actor != owner is what marks a borrow).
 func isBorrowTurn(rec AuditRecord) bool {
 	return rec.Action == "turn" && rec.Decision == "allow" && rec.ActorUserID != "" &&
-		!strings.EqualFold(rec.ActorUserID, rec.OwnerUserID)
+		rec.ActorUserID != rec.OwnerUserID
 }
 
 // BorrowTurns scans the in-memory audit trail (see BorrowUsageStore).
@@ -74,10 +73,10 @@ func (s *MemoryGrant) BorrowTurns(ctx context.Context, q BorrowTurnQuery) []Audi
 		if q.PlatformOnly && s.grants[grantKey(rec.TenantID, rec.GrantID)].Source != GrantSourcePlatform {
 			continue
 		}
-		if q.OwnerUserID != "" && !strings.EqualFold(rec.OwnerUserID, q.OwnerUserID) {
+		if q.OwnerUserID != "" && rec.OwnerUserID != q.OwnerUserID {
 			continue
 		}
-		if q.BorrowerUserID != "" && !strings.EqualFold(rec.ActorUserID, q.BorrowerUserID) {
+		if q.BorrowerUserID != "" && rec.ActorUserID != q.BorrowerUserID {
 			continue
 		}
 		out = append(out, rec)

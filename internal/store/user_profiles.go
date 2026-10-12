@@ -89,7 +89,7 @@ func (s *MemoryUserProfiles) DisplayNames(_ context.Context, ids []string) (map[
 	defer s.mu.Unlock()
 	out := make(map[string]string, len(ids))
 	for _, id := range ids {
-		if name, ok := s.names[strings.ToLower(id)]; ok {
+		if name, ok := s.names[id]; ok {
 			out[id] = name
 		}
 	}
@@ -101,10 +101,10 @@ func (s *MemoryUserProfiles) SetDisplayName(_ context.Context, userID, name stri
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if name == "" {
-		delete(s.names, strings.ToLower(userID))
+		delete(s.names, userID)
 		return nil
 	}
-	s.names[strings.ToLower(userID)] = name
+	s.names[userID] = name
 	return nil
 }
 
@@ -116,19 +116,16 @@ func NewMySQLUserProfiles(db *sql.DB) *MySQLUserProfiles { return &MySQLUserProf
 
 var _ UserProfileStore = (*MySQLUserProfiles)(nil)
 
-// DisplayNames implements UserProfileStore in one query. Rows come back with
-// the stored id's case, so they are matched to the requested ids by folded
-// case (the collation already matched them case-insensitively).
+// DisplayNames implements UserProfileStore in one query (user ids compare
+// exactly: the column is utf8mb4_bin).
 func (s *MySQLUserProfiles) DisplayNames(ctx context.Context, ids []string) (map[string]string, error) {
 	out := make(map[string]string, len(ids))
 	if len(ids) == 0 {
 		return out, nil
 	}
 	args := make([]any, len(ids))
-	byFold := make(map[string][]string, len(ids))
 	for i, id := range ids {
 		args[i] = id
-		byFold[strings.ToLower(id)] = append(byFold[strings.ToLower(id)], id)
 	}
 	rows, err := s.DB.QueryContext(ctx,
 		`SELECT user_id, display_name FROM user_profiles WHERE user_id IN (`+inPlaceholders(len(ids))+`)`, args...)
@@ -141,9 +138,7 @@ func (s *MySQLUserProfiles) DisplayNames(ctx context.Context, ids []string) (map
 		if err := rows.Scan(&id, &name); err != nil {
 			return nil, err
 		}
-		for _, asked := range byFold[strings.ToLower(id)] {
-			out[asked] = name
-		}
+		out[id] = name
 	}
 	return out, rows.Err()
 }

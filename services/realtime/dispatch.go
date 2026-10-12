@@ -268,10 +268,10 @@ func (s *Service) checkDispatchChain(ctx context.Context, to wire.DispatchRecipi
 // so it matches any core of the same owner and provider (refusing a
 // possible self-dispatch rather than letting it through).
 func sameAgent(to wire.DispatchRecipient, job store.AgentJob) bool {
-	if !strings.EqualFold(to.OwnerID, job.OwnerUserID) || !strings.EqualFold(to.Provider, job.Provider) {
+	if to.OwnerID != job.OwnerUserID || to.Provider != job.Provider {
 		return false
 	}
-	return to.Core == "" || job.Core == "" || strings.EqualFold(to.Core, job.Core)
+	return to.Core == "" || job.Core == "" || to.Core == job.Core
 }
 
 // agentHandle is an agent's display handle, "owner/provider" (e.g.

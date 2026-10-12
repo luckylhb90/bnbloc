@@ -167,8 +167,8 @@ func TestSignVerify(t *testing.T) {
 }
 
 func TestMentionCandidates(t *testing.T) {
-	got := MentionCandidates("hey @bob, and @carol@corp.example.com! cc @Bob @jack/codex email@x.com (@dave) @")
-	want := []string{"bob", "carol@corp.example.com"}
+	got := MentionCandidates("hey @bob, and @carol@corp.example.com! cc @bob @Bob @jack/codex email@x.com (@dave) @")
+	want := []string{"bob", "carol@corp.example.com", "Bob"} // "Bob" is another subject
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("candidates = %v, want %v", got, want)
 	}
@@ -185,7 +185,7 @@ func TestEmitterFiltersPrefsQuietRoomsActorAndCollapses(t *testing.T) {
 	_ = f.mem.PutNotificationPrefs(ctx, "dave", store.NotificationPrefs{Mentions: true, AgentFinished: true, AgentFailed: true, BorrowRequests: true, QuietRooms: []string{"r1"}})
 
 	ok, err := f.emitter.Emit(ctx, Event{
-		Type: wire.NotificationMention, RoomID: "r1", Recipients: []string{"alice", "bob", "carol", "dave", "Bob"},
+		Type: wire.NotificationMention, RoomID: "r1", Recipients: []string{"alice", "bob", "carol", "dave", "bob", "Alice"},
 		Actor: "alice", Title: "alice mentioned you", Text: strings.Repeat("x", 900), DedupKey: "msg:r1:1",
 	})
 	if err != nil || !ok {
@@ -195,9 +195,10 @@ func TestEmitterFiltersPrefsQuietRoomsActorAndCollapses(t *testing.T) {
 	if !found {
 		t.Fatal("no outbox item")
 	}
-	// alice is the actor, carol turned mentions off, dave muted the room.
-	if !reflect.DeepEqual(userIDs(p), []string{"bob"}) {
-		t.Fatalf("recipients = %+v, want [bob]", p.Recipients)
+	// alice is the actor, carol turned mentions off, dave muted the room;
+	// "Alice" is another subject than the actor (subjects are case-sensitive).
+	if !reflect.DeepEqual(userIDs(p), []string{"bob", "Alice"}) {
+		t.Fatalf("recipients = %+v, want [bob Alice]", p.Recipients)
 	}
 	if p.Title != "alice mentioned you in Design" || p.RoomName != "Design" || p.TenantID != tid || p.Actor != "alice" {
 		t.Fatalf("payload = %+v", p)

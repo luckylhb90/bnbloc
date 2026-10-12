@@ -25,11 +25,11 @@ const LeadSeat = "lead"
 func Name(agents []wire.PlanAgent) {
 	pairs := map[string]int{}
 	for _, a := range agents {
-		pairs[strings.ToLower(a.OwnerID+"/"+a.Provider)]++
+		pairs[a.OwnerID+"/"+a.Provider]++
 	}
 	for i, a := range agents {
 		h := a.OwnerID + "/" + a.Provider
-		if pairs[strings.ToLower(h)] > 1 && a.Core != "" {
+		if pairs[h] > 1 && a.Core != "" {
 			h = a.OwnerID + "/" + a.Core + "/" + a.Provider
 		}
 		agents[i].Handle = h
@@ -40,10 +40,10 @@ func Name(agents []wire.PlanAgent) {
 // "the owner's default core" and matches any core of the same owner and
 // provider (the dispatch guard's rule, so a role never lands on the lead).
 func Same(a, b wire.PlanAgent) bool {
-	if !strings.EqualFold(a.OwnerID, b.OwnerID) || !strings.EqualFold(a.Provider, b.Provider) {
+	if a.OwnerID != b.OwnerID || a.Provider != b.Provider {
 		return false
 	}
-	return a.Core == "" || b.Core == "" || strings.EqualFold(a.Core, b.Core)
+	return a.Core == "" || b.Core == "" || a.Core == b.Core
 }
 
 // Resolve staffs each role from the room's addressable agents (all of them
@@ -76,11 +76,11 @@ func Resolve(requester string, lead wire.PlanAgent, agents []wire.PlanAgent, rol
 		match := func(a wire.PlanAgent) bool {
 			switch da.Kind {
 			case contentpkg.AgentRequester:
-				return !a.Platform && strings.EqualFold(a.OwnerID, requester)
+				return !a.Platform && a.OwnerID == requester
 			case contentpkg.AgentPlatform:
 				return a.Platform
 			default:
-				return !a.Platform && strings.EqualFold(a.OwnerID, da.Owner) && (da.Provider == "" || strings.EqualFold(a.Provider, da.Provider))
+				return !a.Platform && a.OwnerID == da.Owner && (da.Provider == "" || a.Provider == da.Provider)
 			}
 		}
 		leadOnly := false
@@ -144,7 +144,7 @@ func Estimate(lead wire.TeamPlanEntry, roles []wire.TeamPlanEntry) wire.TeamCost
 			return
 		}
 		total += *e.Cost.AvgCostUsd
-		if key := strings.ToLower(e.Agent.OwnerID + "/" + e.Agent.Core + "/" + e.Agent.Provider); !sampled[key] {
+		if key := e.Agent.OwnerID + "/" + e.Agent.Core + "/" + e.Agent.Provider; !sampled[key] {
 			sampled[key] = true
 			est.Runs += e.Cost.Runs
 		}
