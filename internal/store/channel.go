@@ -95,6 +95,28 @@ type ChannelStore interface {
 	ChannelKind(ctx context.Context, roomID, channelID string) (kind string, found bool, err error)
 }
 
+// ChannelKindReader is the read ChannelAdmitsAgents needs.
+type ChannelKindReader interface {
+	ChannelKind(ctx context.Context, roomID, channelID string) (kind string, found bool, err error)
+}
+
+// ChannelAdmitsAgents is the ONE people-chat rule: an agent may read and
+// write a channel of the room unless it is the room's people chat. The
+// room-wide "" is no channel, and a nil reader (in-memory dev) admits. A
+// read failure is returned, never "admits": every guard built on it fails
+// closed (realtime's delivery filters and agent ingests, the handoff import,
+// activity before it stores an agent reply).
+func ChannelAdmitsAgents(ctx context.Context, r ChannelKindReader, roomID, channelID string) (bool, error) {
+	if channelID == "" || r == nil {
+		return true, nil
+	}
+	kind, _, err := r.ChannelKind(ctx, roomID, channelID)
+	if err != nil {
+		return false, err
+	}
+	return kind != ChannelKindPeople, nil
+}
+
 // MemoryChannel is an in-memory ChannelStore. It is a view over a MemoryRoom's
 // channel table sharing that store's mutex, so CreateRoomWithOwnerAndChannel
 // inserts the room, its owner, and the default channel in one critical

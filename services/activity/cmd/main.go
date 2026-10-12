@@ -36,9 +36,10 @@ func main() {
 		Membership: members,
 		BridgeJobs: backends.BridgeJobs,
 		// Team agent dashboard read side (same shared DB).
-		Team:  backends.TeamAgents(),
-		Usage: backends.AgentUsage(),
-		Rooms: backends.Room,
+		Team:     backends.TeamAgents(),
+		Usage:    backends.AgentUsage(),
+		Rooms:    backends.Room,
+		Channels: backends.Channel,
 		// Room agent catalogs: an agent-host member contributes only the
 		// room's platform agents (platform grants + policy, shared DB).
 		Grants:   backends.Grant,

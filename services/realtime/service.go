@@ -274,20 +274,17 @@ func (s *Service) resolveChannel(ctx context.Context, roomID, channelID string) 
 	return def.ChannelID, nil
 }
 
-// isPeopleChannel reports whether channelID is the room's people chat. The
-// room-wide pseudo channel "" and a store-less (in-memory dev) service are
-// never people chat. A read failure is returned so every guard built on it
-// fails closed (a people-chat event is never delivered to an agent stream or
-// a plugin because a lookup blipped).
+// isPeopleChannel reports whether channelID is the room's people chat
+// (store.ChannelAdmitsAgents, the one rule). A read failure is returned so
+// every guard built on it fails closed (a people-chat event is never
+// delivered to an agent stream or a plugin because a lookup blipped).
 func (s *Service) isPeopleChannel(ctx context.Context, roomID, channelID string) (bool, error) {
-	if channelID == "" || s.Channels == nil {
-		return false, nil
+	var kinds store.ChannelKindReader
+	if s.Channels != nil {
+		kinds = s.Channels
 	}
-	kind, _, err := s.Channels.ChannelKind(ctx, roomID, channelID)
-	if err != nil {
-		return false, err
-	}
-	return kind == store.ChannelKindPeople, nil
+	admits, err := store.ChannelAdmitsAgents(ctx, kinds, roomID, channelID)
+	return !admits, err
 }
 
 // agentMayReadChannel refuses an agent-side reader (a platform agent host)

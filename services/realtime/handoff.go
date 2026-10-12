@@ -113,8 +113,11 @@ func (s *Service) handleInternalImport(w http.ResponseWriter, r *http.Request) {
 		row, err := s.importRow(r, roomID, batch, importedAt, m)
 		if err != nil {
 			status := http.StatusBadRequest
-			if errors.Is(err, errUnknownChannel) {
+			switch {
+			case errors.Is(err, errUnknownChannel):
 				status = http.StatusNotFound
+			case errors.Is(err, errChannelLookup):
+				status = http.StatusInternalServerError
 			}
 			httpx.WriteStatus(w, status, fmt.Sprintf("message %d: %v", i, err), err)
 			return
@@ -137,6 +140,10 @@ func (s *Service) handleInternalImport(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(reply)
 }
+
+// errChannelLookup marks an import refused because a channel's kind could
+// not be read (the people-chat guard fails closed).
+var errChannelLookup = errors.New("channel lookup failed")
 
 // importRow validates one imported message and builds its stored row. The
 // payload keeps the original attribution (chat userId, agent ownerUserId +
@@ -168,6 +175,15 @@ func (s *Service) importRow(r *http.Request, roomID string, batch wire.RoomImpor
 	channelID, err := s.resolveChannel(r.Context(), roomID, m.ChannelID)
 	if err != nil {
 		return store.RoomMessage{}, err
+	}
+	if m.Kind == wire.KindAgentMessages {
+		people, err := s.isPeopleChannel(r.Context(), roomID, channelID)
+		if err != nil {
+			return store.RoomMessage{}, fmt.Errorf("%w: %v", errChannelLookup, err)
+		}
+		if people {
+			return store.RoomMessage{}, errAgentInPeopleChat
+		}
 	}
 	marker, err := json.Marshal(wire.ImportedMarker{
 		FromRoomID:       batch.FromRoomID,

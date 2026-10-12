@@ -187,3 +187,18 @@ func TestPeopleChatUnread(t *testing.T) {
 		t.Fatalf("people unread = %d (room %d), want 2", got, res.Unread["room-1"])
 	}
 }
+
+// A handoff import never writes an agent reply into the people chat (the
+// people-chat rule, store.ChannelAdmitsAgents); people chat is imported.
+func TestImportRefusesAgentRepliesInPeopleChat(t *testing.T) {
+	srv, _, people := newPeopleChatServer(t)
+	batch := func(kind, payload string) string {
+		return fmt.Sprintf(`{"fromRoomId":"src","messages":[{"sequence":1,"kind":%q,"channelId":%q,"payload":%s}]}`, kind, people, payload)
+	}
+	if r := channelPost(t, srv, "/internal/v1/rooms/room-1/import", "alice", batch(wire.KindAgentMessages, `{"ownerUserId":"bob","provider":"codex","messages":[]}`)); r.StatusCode != http.StatusBadRequest {
+		t.Fatalf("agent reply into the people chat = %d, want 400", r.StatusCode)
+	}
+	if r := channelPost(t, srv, "/internal/v1/rooms/room-1/import", "alice", batch(wire.KindChatMessage, `{"userId":"bob","text":"hi"}`)); r.StatusCode != http.StatusOK {
+		t.Fatalf("people chat message = %d, want 200", r.StatusCode)
+	}
+}
