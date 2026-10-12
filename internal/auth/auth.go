@@ -74,6 +74,11 @@ const (
 	// one artifact version named in ID ("<roomId>/<artifactId>/<version>")
 	// for its subject and tenant, and the room-level read is re-checked.
 	KindSiteFrame = "site-frame"
+	// KindAttachment is a short-lived ticket in a chat attachment's URL (an
+	// <img src> or <a href> cannot carry the bearer): it authorizes only
+	// GET of the one attachment named in ID ("<roomId>/<attachmentId>") for
+	// its subject and tenant, and room membership is re-checked per read.
+	KindAttachment = "attachment"
 )
 
 // HasRoom reports whether the claims authorize the given room scope.

@@ -4,7 +4,7 @@ import { saveBlob } from "./saveBlob.ts";
 import { tapOnboarding } from "./onboardingEvents.ts";
 import { splitAgentHosts } from "./platformAgents.ts";
 import { apiUrl } from "./config";
-import { authedFetch, errorDetail, getToken } from "./session.ts";
+import { authedFetch, errorDetail } from "./session.ts";
 import { downloadFilename, type RoomHandoffInfo, type RoomImportResult } from "./handoff.ts";
 import type { Grant } from "./sessionGrant.ts";
 import type { TenantPolicy } from "./shares.ts";
@@ -700,16 +700,13 @@ export const api = {
   // A room's import provenance; 404 (ApiError) for a room that was not imported.
   roomHandoff: (roomId: string) =>
     req<RoomHandoffInfo>(`/v1/rooms/${encodeURIComponent(roomId)}/handoff`),
-  attachmentUrl: (roomId: string, attachmentId: string): string => {
-    // An <img>/<a download> request cannot set an Authorization header, so the
-    // session token rides as an access_token query param — the same scheme the
-    // gateway already accepts for EventSource stream endpoints.
-    const base = apiUrl(
-      `/v1/rooms/${encodeURIComponent(roomId)}/attachments/${encodeURIComponent(attachmentId)}`,
-    );
-    const token = getToken();
-    return token ? `${base}?access_token=${encodeURIComponent(token)}` : base;
-  },
+  // A short-lived ticket URL for one attachment (an <img>/<a download>
+  // cannot carry the bearer); lib/attachmentTickets.ts caches and renews it.
+  attachmentTicket: (roomId: string, attachmentId: string) =>
+    req<{ url: string; expiresAtMs: number }>(
+      `/v1/rooms/${encodeURIComponent(roomId)}/attachments/${encodeURIComponent(attachmentId)}/ticket`,
+      { method: "POST" },
+    ),
   // Set a member's role (owner/admin only; cannot target the owner or grant
   // owner). Reuses the add-member upsert, which updates role on conflict.
   setMemberRole: (id: string, userId: string, role: "admin" | "member" | "visitor") =>

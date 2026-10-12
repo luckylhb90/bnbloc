@@ -1008,6 +1008,14 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   stay pinned; do not add dialogs that assume unbounded height.
 - This web app uses **plain English toast strings, no i18n layer**. Match the
   existing `useToast()` convention.
+- **A URL never carries the session, except the room event stream.**
+  EventSource cannot set headers, so `lib/sse.ts` alone sends
+  `access_token=` (the gateway accepts it only on `GET …/events`). An
+  `<img>`/`<a download>` of an attachment carries a ticket for that one
+  attachment (`POST …/attachments/{id}/ticket`,
+  `services/gateway/attachment_tickets.go`; cached by
+  `lib/attachmentTickets.ts`). Web boundary rules live in
+  `web/scripts/check-boundaries.mjs` (run by its node test).
 
 ## Concurrent agents in one working tree
 

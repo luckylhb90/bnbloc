@@ -267,8 +267,9 @@ links.
   versions) and on the member `…/versions/{v}/content` (room service,
   `handleArtifactContent`) answer 302 + `Cache-Control: no-store` +
   `Referrer-Policy: no-referrer`; with direct downloads off they stream, as
-  an attachment. The member download route also accepts the session as
-  `access_token` (only with `download=1`), so a plain `<a href>` works.
+  an attachment. The member download route takes the bearer in the
+  Authorization header only (2026-10-12: the `access_token` query form had
+  no client and was removed; see the code-health remediation, web H10).
 - **Public routes** (`services/gateway/public_shares.go`): token sanity
   check (`bsh_` prefix, charset, ≤ 256) before any backend call; per-IP read
   limiter (10/s, burst 40) plus the guess limiter (`share-ip:<ip>`, spent

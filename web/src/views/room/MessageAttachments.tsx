@@ -1,9 +1,10 @@
 import { useCallback, useRef, useState } from "react";
 import { DownloadSimpleIcon, FileIcon, XIcon } from "@phosphor-icons/react";
-import { api, type ChatAttachment } from "@/lib/api";
+import type { ChatAttachment } from "@/lib/api";
 import { formatBytes } from "@/lib/format";
 import { cn } from "@/lib/cn";
 import { useModalLayer } from "@/ui/useModalLayer";
+import { useAttachmentUrl } from "@/views/room/useAttachmentUrl";
 
 const INLINE_IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/gif", "image/webp", "image/avif", "image/bmp"]);
 
@@ -11,11 +12,8 @@ export function isInlineImage(contentType: string): boolean {
   return INLINE_IMAGE_TYPES.has(contentType.split(";")[0].trim().toLowerCase());
 }
 
-type LightboxImage = {
-  readonly url: string;
-  readonly filename: string;
-};
-
+// Attachment links carry a per-attachment ticket, never the session
+// (useAttachmentUrl).
 export function MessageAttachments({
   roomId,
   attachments,
@@ -25,7 +23,7 @@ export function MessageAttachments({
   readonly attachments: readonly ChatAttachment[] | undefined;
   readonly className?: string;
 }) {
-  const [lightbox, setLightbox] = useState<LightboxImage | null>(null);
+  const [lightbox, setLightbox] = useState<ChatAttachment | null>(null);
   // The lightbox is a modal layer: closing it restores focus to its trigger.
   const closeLightbox = useCallback(() => setLightbox(null), []);
 
@@ -33,63 +31,81 @@ export function MessageAttachments({
   return (
     <>
       <div className={cn("flex flex-col gap-2", className)}>
-        {attachments.map((attachment) => {
-          const url = api.attachmentUrl(roomId, attachment.id);
-          // Only raster images render inline; everything else (SVG included,
-          // which the gateway serves as a download) is a download link.
-          if (isInlineImage(attachment.contentType)) {
-            return (
-              <button
-                key={attachment.id}
-                type="button"
-                onClick={() => setLightbox({ url, filename: attachment.filename })}
-                className="tactile block w-fit overflow-hidden rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-surface-2)] hover:border-[var(--color-border-strong)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/60"
-                title={`Open ${attachment.filename}`}
-                aria-label={`Open ${attachment.filename}`}
-              >
-                <img
-                  src={url}
-                  alt={attachment.filename}
-                  width={240}
-                  height={240}
-                  className="max-h-60 max-w-60 object-contain"
-                  loading="lazy"
-                />
-              </button>
-            );
-          }
-          return (
-            <a
-              key={attachment.id}
-              href={url}
-              download={attachment.filename}
-              className="tactile flex w-fit max-w-full items-center gap-2 rounded-[var(--radius)] border border-[var(--color-border)] bg-[var(--color-surface-2)] px-3 py-2 text-sm text-[var(--color-fg)] hover:border-[var(--color-border-strong)] hover:bg-[var(--color-elevated)]"
-            >
-              <FileIcon size={17} className="shrink-0 text-[var(--color-fg-subtle)]" />
-              <span className="min-w-0">
-                <span className="block truncate font-medium">{attachment.filename}</span>
-                <span className="block tabular text-xs text-[var(--color-fg-subtle)]">
-                  {formatBytes(attachment.size)}
-                </span>
-              </span>
-            </a>
-          );
-        })}
+        {attachments.map((attachment) => (
+          <AttachmentItem key={attachment.id} roomId={roomId} attachment={attachment} onOpen={setLightbox} />
+        ))}
       </div>
-      {lightbox && <AttachmentLightbox image={lightbox} onClose={closeLightbox} />}
+      {lightbox && <AttachmentLightbox roomId={roomId} attachment={lightbox} onClose={closeLightbox} />}
     </>
   );
 }
 
+function AttachmentItem({
+  roomId,
+  attachment,
+  onOpen,
+}: {
+  readonly roomId: string;
+  readonly attachment: ChatAttachment;
+  readonly onOpen: (a: ChatAttachment) => void;
+}) {
+  const { url, ensure, onDownload } = useAttachmentUrl(roomId, attachment.id, attachment.filename);
+  // Only raster images render inline; everything else (SVG included,
+  // which the gateway serves as a download) is a download link.
+  if (isInlineImage(attachment.contentType)) {
+    return (
+      <button
+        type="button"
+        // The lightbox opens on a valid ticket (renewed if this one expired).
+        onClick={() => void ensure().then(() => onOpen(attachment), () => {})}
+        className="tactile block w-fit overflow-hidden rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-surface-2)] hover:border-[var(--color-border-strong)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/60"
+        title={`Open ${attachment.filename}`}
+        aria-label={`Open ${attachment.filename}`}
+      >
+        {url ? (
+          <img
+            src={url}
+            alt={attachment.filename}
+            width={240}
+            height={240}
+            className="max-h-60 max-w-60 object-contain"
+            loading="lazy"
+          />
+        ) : (
+          <span className="block size-60" aria-hidden />
+        )}
+      </button>
+    );
+  }
+  return (
+    <a
+      href={url ?? undefined}
+      download={attachment.filename}
+      onClick={onDownload}
+      className="tactile flex w-fit max-w-full items-center gap-2 rounded-[var(--radius)] border border-[var(--color-border)] bg-[var(--color-surface-2)] px-3 py-2 text-sm text-[var(--color-fg)] hover:border-[var(--color-border-strong)] hover:bg-[var(--color-elevated)]"
+    >
+      <FileIcon size={17} className="shrink-0 text-[var(--color-fg-subtle)]" />
+      <span className="min-w-0">
+        <span className="block truncate font-medium">{attachment.filename}</span>
+        <span className="block tabular text-xs text-[var(--color-fg-subtle)]">{formatBytes(attachment.size)}</span>
+      </span>
+    </a>
+  );
+}
+
 function AttachmentLightbox({
-  image,
+  roomId,
+  attachment,
   onClose,
 }: {
-  readonly image: LightboxImage;
+  readonly roomId: string;
+  readonly attachment: ChatAttachment;
   readonly onClose: () => void;
 }) {
   const surfaceRef = useRef<HTMLDivElement | null>(null);
   useModalLayer(surfaceRef, { onEscape: onClose });
+  const { url, onDownload } = useAttachmentUrl(roomId, attachment.id, attachment.filename);
+  const image = { url: url ?? undefined, filename: attachment.filename };
 
   return (
     <div
@@ -120,6 +136,7 @@ function AttachmentLightbox({
           <a
             href={image.url}
             download={image.filename}
+            onClick={onDownload}
             className="tactile inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-1 font-medium text-[var(--color-accent)] hover:bg-[var(--color-accent-soft)]"
           >
             <DownloadSimpleIcon size={13} />

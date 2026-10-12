@@ -362,12 +362,3 @@ func (p apiPath) isEventStream(method string) bool {
 func (p apiPath) isAttachmentDownload(method string) bool {
 	return method == http.MethodGet && len(p.segs) == 5 && p.RoomSub == "attachments"
 }
-
-// isArtifactDownload reports GET
-// /v1/rooms/{id}/artifacts/{artifactId}/versions/{version}/content?download=1:
-// a deliverable download navigation (<a href>), which may answer 302 to a
-// presigned storage URL and so cannot be a fetch() carrying the bearer.
-func (p apiPath) isArtifactDownload(r *http.Request) bool {
-	return r.Method == http.MethodGet && len(p.segs) == 8 && p.RoomSub == "artifacts" &&
-		p.segs[5] == "versions" && p.segs[7] == "content" && r.URL.Query().Get("download") == "1"
-}

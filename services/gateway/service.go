@@ -260,6 +260,7 @@ func (s *Service) Handler() http.Handler {
 	// Site snapshots (sites.go) and public share links (public_shares.go):
 	// tickets and share tokens travel in the path, never a session.
 	mux.HandleFunc("POST /v1/rooms/{roomId}/artifacts/{artifactId}/versions/{version}/site-ticket", s.handleSiteTicket)
+	mux.HandleFunc("POST /v1/rooms/{roomId}/attachments/{attachmentId}/ticket", s.handleAttachmentTicket)
 	mux.HandleFunc("GET /v1/sites/{ticket}", s.handleSiteRootRedirect)
 	mux.HandleFunc("GET /v1/sites/{ticket}/{path...}", s.handleMemberSite)
 	mux.HandleFunc("GET /v1/public/shares/{token}", s.handlePublicShare)
@@ -644,11 +645,15 @@ func (s *Service) proxyClaims(r *http.Request, p apiPath) (auth.Claims, bool) {
 		return c, true
 	}
 	token := headerBearer(r)
-	if token == "" && (p.isEventStream(r.Method) || p.isAttachmentDownload(r.Method) || p.isArtifactDownload(r)) {
-		// Browsers' EventSource and <img>/<a download> cannot set headers, so
-		// ONLY these GET endpoints (the room event stream, an attachment, a
-		// deliverable download) accept the session token as an access_token
-		// query parameter. Everywhere else a URL-borne token (which leaks
+	if token == "" && p.isAttachmentDownload(r.Method) {
+		// An <img>/<a download> cannot set headers: an attachment read
+		// carries a ticket for that one attachment (attachment_tickets.go).
+		return s.attachmentTicketClaims(r, p)
+	}
+	if token == "" && p.isEventStream(r.Method) {
+		// A browser's EventSource cannot set headers either, so ONLY the
+		// room event stream accepts the session token as an access_token
+		// query parameter. Everywhere else a URL-borne session (which leaks
 		// into logs, history, and Referer) is not a credential.
 		token = strings.TrimSpace(r.URL.Query().Get("access_token"))
 	}

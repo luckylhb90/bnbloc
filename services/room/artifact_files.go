@@ -347,8 +347,7 @@ func (s *Service) handleArtifactContent(w http.ResponseWriter, r *http.Request) 
 		switch {
 		case err == nil:
 			w.Header().Set("Cache-Control", "no-store")
-			// The download URL may carry the session (access_token): never
-			// hand it to the storage host as a Referer.
+			// Never hand the app's URL to the storage host as a Referer.
 			w.Header().Set("Referrer-Policy", "no-referrer")
 			http.Redirect(w, r, p.URL, http.StatusFound)
 			return

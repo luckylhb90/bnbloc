@@ -45,13 +45,10 @@ func TestArtifactDownload_direct_redirects_to_presigned_url(t *testing.T) {
 	}
 }
 
-// A deliverable download navigation (?download=1) may carry the session as
-// access_token (an <a href> cannot set the bearer); the plain content read
-// may not.
-func TestArtifactDownload_accepts_access_token_only_with_download(t *testing.T) {
-	var gotUser string
-	room := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		gotUser = r.Header.Get("X-Bnbloc-User")
+// A deliverable read never takes the session from the URL, download
+// navigation or not: the bearer rides the Authorization header.
+func TestArtifactDownload_refuses_access_token(t *testing.T) {
+	room := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = io.WriteString(w, "bytes")
 	}))
 	defer room.Close()
@@ -60,21 +57,14 @@ func TestArtifactDownload_accepts_access_token_only_with_download(t *testing.T) 
 	defer gw.Close()
 	token := svc.Signer.Issue(auth.Claims{Subject: "alice", Rooms: []string{"room-1"}, Tenant: "default", ExpiresAtUnix: 1 << 40})
 	path := gw.URL + "/v1/rooms/room-1/artifacts/art_1/versions/2/content"
-
-	resp, err := http.Get(path + "?download=1&access_token=" + token)
-	if err != nil {
-		t.Fatal(err)
-	}
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusOK || gotUser != "alice" {
-		t.Fatalf("download with access_token: %d user %q", resp.StatusCode, gotUser)
-	}
-	resp, err = http.Get(path + "?access_token=" + token)
-	if err != nil {
-		t.Fatal(err)
-	}
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusUnauthorized {
-		t.Fatalf("viewer read with access_token: %d, want 401", resp.StatusCode)
+	for _, q := range []string{"?download=1&access_token=", "?access_token="} {
+		resp, err := http.Get(path + q + token)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusUnauthorized {
+			t.Fatalf("GET %s<token>: %d, want 401", q, resp.StatusCode)
+		}
 	}
 }

@@ -98,6 +98,10 @@ reference. Binaries do not belong in MySQL (the nearest precedent,
 - **Download** — `GET /v1/rooms/{roomId}/attachments/{id}` (member-scoped):
   streams the blob with the stored content-type; used by the feed image
   renderer and by anyone downloading. Membership-checked, never public.
+  An `<img src>`/`<a href>` cannot carry the bearer, so the web first mints
+  a ticket for that one attachment (`POST …/attachments/{id}/ticket`, 15 min,
+  `services/gateway/attachment_tickets.go`) and the URL carries `?ticket=`,
+  never the session (2026-10-12, code-health remediation web H10).
 - **Send with attachments** — extend `POST /v1/rooms/{id}/chat` body with an
   optional `attachmentIds: string[]`; realtime validates the ids belong to the
   room, embeds their metadata into the `chat_message` payload (`attachments`),

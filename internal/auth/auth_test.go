@@ -82,6 +82,7 @@ func TestPeekSession(t *testing.T) {
 		"not JSON":      "bm90IGpzb24.sig",
 		"refresh token": s.Issue(Claims{Subject: "maya", Kind: KindRefresh, ExpiresAtUnix: exp}),
 		"frame ticket":  s.Issue(Claims{Subject: "maya", Kind: KindSiteFrame, ExpiresAtUnix: exp}),
+		"attachment":    s.Issue(Claims{Subject: "maya", Kind: KindAttachment, ExpiresAtUnix: exp}),
 		"no subject":    s.Issue(Claims{ExpiresAtUnix: exp}),
 	} {
 		if _, err := PeekSession(tok); err == nil {
