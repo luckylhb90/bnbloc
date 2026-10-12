@@ -92,7 +92,7 @@ func (s *Service) handleComponents(w http.ResponseWriter, r *http.Request) {
 		if !componentKindVisibleInMemberCatalog(componentKindForName(rec)) || (onlyKind != "" && rec.Kind != onlyKind) {
 			continue
 		}
-		vis := memberComponentVisibility(claimsToComponentClaims(claims), rec, installedBy[componentKey(rec.Kind, rec.Name)])
+		vis := extpipe.MemberVisibility(viewerOf(claims), extpipe.GateForRecord(rec), installedBy[componentKey(rec.Kind, rec.Name)])
 		if !vis.Visible {
 			continue
 		}
@@ -160,7 +160,7 @@ func (s *Service) handleComponentInstall(w http.ResponseWriter, r *http.Request)
 	if !ok {
 		return
 	}
-	vis := memberComponentVisibility(claimsToComponentClaims(claims), rec, 0)
+	vis := extpipe.MemberVisibility(viewerOf(claims), extpipe.GateForRecord(rec), 0)
 	if !vis.Visible {
 		http.Error(w, "component not found", http.StatusNotFound)
 		return

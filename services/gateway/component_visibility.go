@@ -15,18 +15,6 @@ import (
 	"github.com/luckylhb90/bnbloc/internal/obs"
 )
 
-type componentClaims struct {
-	Subject string
-	Tenant  string
-}
-
-type componentVisibility struct {
-	Visible       bool
-	Installed     bool
-	Managed       bool
-	InstalledAtMs int64
-}
-
 func (s *Service) memberInstalledComponents(ctx context.Context, subject string) (map[string]int64, error) {
 	out := map[string]int64{}
 	if s.ComponentInstalls == nil || subject == "" {
@@ -112,7 +100,7 @@ func componentKindVisibleInMemberCatalog(kind extreg.Kind) bool {
 // run, artifacts) decides from it, so a listing costs two store reads instead
 // of a records scan per core.
 type memberComponents struct {
-	claims    componentClaims
+	viewer    extpipe.Viewer
 	records   map[string]extpipe.Record // componentKey(kind, name) -> record
 	installed map[string]int64          // componentKey(kind, name) -> opt-in install time
 }
@@ -126,7 +114,7 @@ func (s *Service) loadMemberComponents(ctx context.Context, claims auth.Claims) 
 	if err != nil {
 		return memberComponents{}, err
 	}
-	view := memberComponents{claims: claimsToComponentClaims(claims), records: make(map[string]extpipe.Record, len(recs)), installed: installed}
+	view := memberComponents{viewer: viewerOf(claims), records: make(map[string]extpipe.Record, len(recs)), installed: installed}
 	for _, rec := range recs {
 		view.records[componentKey(rec.Kind, rec.Name)] = rec
 	}
@@ -138,8 +126,8 @@ func (m memberComponents) record(kind extreg.Kind, name string) (extpipe.Record,
 	return rec, ok
 }
 
-func (m memberComponents) visibility(rec extpipe.Record) componentVisibility {
-	return memberComponentVisibility(m.claims, rec, m.installed[componentKey(rec.Kind, rec.Name)])
+func (m memberComponents) visibility(rec extpipe.Record) extpipe.Visibility {
+	return extpipe.MemberVisibility(m.viewer, extpipe.GateForRecord(rec), m.installed[componentKey(rec.Kind, rec.Name)])
 }
 
 // coreVisible reports whether a registered/configured core is usable by the
@@ -215,23 +203,10 @@ func installedRegistryCore(name string) bool {
 	return ok && desc.Source == core.SourceInstalled
 }
 
-func claimsToComponentClaims(claims auth.Claims) componentClaims {
-	return componentClaims{Subject: claims.Subject, Tenant: claims.Tenant}
-}
-
-// memberComponentVisibility is the one rollout + tenant gate for every member
-// surface: off → hidden; optin → listed, usable only once the member installed
-// it; auto → usable by everyone in an allowed tenant.
-func memberComponentVisibility(claims componentClaims, rec extpipe.Record, installedAt int64) componentVisibility {
-	if !rec.AllowsTenant(claims.Tenant) {
-		return componentVisibility{}
-	}
-	switch extpipe.NormalizeRollout(rec.Rollout) {
-	case extpipe.RolloutOff:
-		return componentVisibility{}
-	case extpipe.RolloutOptIn:
-		return componentVisibility{Visible: true, Installed: installedAt > 0, InstalledAtMs: installedAt}
-	default:
-		return componentVisibility{Visible: true, Installed: true, Managed: true}
-	}
+// viewerOf is the member a session acts as, for the one visibility gate
+// (extpipe.MemberVisibility) every member surface decides through: off →
+// hidden; optin → listed, usable only once the member installed it; auto →
+// usable by everyone in an allowed tenant; a member's own content → theirs.
+func viewerOf(claims auth.Claims) extpipe.Viewer {
+	return extpipe.Viewer{Subject: claims.Subject, Tenant: claims.Tenant}
 }
