@@ -202,11 +202,58 @@ pub enum ComponentKind {
     /// dir the bridge reads and spawned by the agent per session; an http
     /// tool needs nothing here (internal_ext/mcp_tools.rs).
     Mcp,
+    /// A kind added to the gateway after this desktop shipped. Such entries
+    /// are dropped when the catalog is decoded (`ComponentsResponse`), so
+    /// nothing downstream ever sees this variant.
+    #[serde(other)]
+    Unknown,
 }
 
-#[derive(serde::Deserialize)]
+/// The member catalog (`GET /v1/components`). Entries are decoded one at a
+/// time: an entry this desktop cannot read (a kind added after it shipped,
+/// a malformed block) is skipped and logged, and the rest of the catalog
+/// still reconciles. One bad entry never stops installs, stops, MCP or
+/// previewer updates for every other component.
 pub(super) struct ComponentsResponse {
     pub(super) components: Vec<ComponentEntry>,
+}
+
+impl<'de> serde::Deserialize<'de> for ComponentsResponse {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(serde::Deserialize)]
+        struct Raw {
+            components: Vec<serde_json::Value>,
+        }
+        let raw = Raw::deserialize(deserializer)?;
+        Ok(Self {
+            components: raw
+                .components
+                .into_iter()
+                .filter_map(decode_entry)
+                .collect(),
+        })
+    }
+}
+
+fn decode_entry(raw: serde_json::Value) -> Option<ComponentEntry> {
+    let label = format!(
+        "{} {}",
+        raw["kind"].as_str().unwrap_or("?"),
+        raw["name"].as_str().unwrap_or("?")
+    );
+    match serde_json::from_value::<ComponentEntry>(raw) {
+        Ok(entry) if entry.kind == ComponentKind::Unknown => {
+            eprintln!(
+                "[sidecar-manager] skipping catalog entry {label}: kind unknown to this desktop"
+            );
+            None
+        }
+        Ok(entry) => Some(entry),
+        Err(e) => {
+            eprintln!("[sidecar-manager] skipping unreadable catalog entry {label}: {e}");
+            None
+        }
+    }
 }
 
 pub(super) struct ResolvedSpecs {

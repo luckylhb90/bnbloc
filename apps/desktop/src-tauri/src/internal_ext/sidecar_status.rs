@@ -147,6 +147,7 @@ pub(super) fn component_id(kind: ComponentKind, name: &str) -> String {
         ComponentKind::Sandbox => format!("sandbox/{name}"),
         ComponentKind::Previewer => format!("previewer/{name}"),
         ComponentKind::Mcp => format!("mcp/{name}"),
+        ComponentKind::Unknown => format!("unknown/{name}"),
     }
 }
 
@@ -157,6 +158,7 @@ fn kind_rank(kind: ComponentKind) -> u8 {
         ComponentKind::Sandbox => 2,
         ComponentKind::Previewer => 3,
         ComponentKind::Mcp => 4,
+        ComponentKind::Unknown => 5,
     }
 }
 

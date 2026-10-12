@@ -425,3 +425,34 @@ fn a_malformed_previewer_block_does_not_fail_the_catalog() {
         .specs
         .is_empty());
 }
+
+/// A kind added to the gateway after this desktop shipped, or an entry this
+/// desktop cannot read, is skipped on its own: every other component of the
+/// catalog still reconciles.
+#[test]
+fn catalog_tolerates_unknown_kind() {
+    let raw = r#"{"components":[
+        {"kind":"future","name":"later","version":"1.0.0","runtime":"sidecar","requiresDesktop":true,
+         "rollout":"auto","installed":true,"newField":{"x":1}},
+        {"kind":"core","name":"broken","version":5,"rollout":"auto","installed":true},
+        {"kind":"core","name":"acme","version":"1.0.0","runtime":"manifest","rollout":"auto",
+         "installed":true,"manifest":{"name":"acme"}}
+    ]}"#;
+    let response: ComponentsResponse =
+        serde_json::from_str(raw).expect("an unknown kind never fails the catalog");
+
+    assert_eq!(
+        response.components.len(),
+        1,
+        "only the readable entry stays"
+    );
+    let resolved = resolve_component_specs(&response, "darwin-arm64");
+    assert_eq!(resolved.discovered, HashSet::from(["acme".to_string()]));
+    assert_eq!(resolved.specs.len(), 1);
+    assert_eq!(resolved.specs[0].name, "acme");
+    assert!(resolved.failures.is_empty());
+
+    // The variant itself decodes from any kind name this desktop lacks.
+    let kind: ComponentKind = serde_json::from_str(r#""future""#).expect("kind");
+    assert_eq!(kind, ComponentKind::Unknown);
+}
