@@ -95,11 +95,15 @@ func Ref(c store.ContentComponent, v store.ContentComponentVersion, source strin
 	if k, ok := contentpkg.Lookup(c.Kind); ok {
 		short = k.Short
 	}
-	return wire.ContentRef{
+	ref := wire.ContentRef{
 		ComponentID: c.ID, Kind: short, Name: c.Name, DisplayName: m.DisplayName, Version: v.Version,
 		SHA256: v.SHA256, BundleKey: v.BundleBlobKey, Owner: c.Owner, Source: source,
 		Permissions: m.Permissions(), NeedsSandbox: m.NeedsSandbox(),
-	}, nil
+	}
+	for _, t := range m.Requires.MCP {
+		ref.MCP = append(ref.MCP, wire.ContentMCPRequirement{Name: t.Name, Env: append([]string(nil), t.Env...)})
+	}
+	return ref, nil
 }
 
 // Effective resolves what a job's agent turn wears: the expert the chat

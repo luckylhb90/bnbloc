@@ -44,6 +44,11 @@ type Kind struct {
 	DiscoverPath string
 	// Timeout bounds every call through the endpoint's client (0 = DefaultTimeout).
 	Timeout time.Duration
+	// Discover, when set, replaces the health + discover document probe for
+	// a kind whose endpoints speak a foreign protocol with its own discovery
+	// (an MCP server answers initialize, not a bnbloc discover document). It
+	// runs under the same probe timeout and network guard.
+	Discover func(ctx context.Context, endpoint Endpoint) error
 	// Instance wraps an activated endpoint into the registry instance the
 	// kind's host type-asserts (nil = the Endpoint itself).
 	Instance func(Endpoint) any
@@ -156,6 +161,9 @@ func (k Kind) NewEndpoint(rec extpipe.Record, cfg extpipe.PackageConfig, guard e
 func (k Kind) ProbeEndpoint(ctx context.Context, endpoint Endpoint) error {
 	probeCtx, cancel := context.WithTimeout(ctx, probeTimeout)
 	defer cancel()
+	if k.Discover != nil {
+		return k.Discover(probeCtx, endpoint)
+	}
 	if k.HealthPath != "" {
 		if err := k.getOK(probeCtx, endpoint, k.HealthPath); err != nil {
 			return err

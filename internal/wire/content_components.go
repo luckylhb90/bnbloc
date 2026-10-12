@@ -187,6 +187,8 @@ type ContentRef struct {
 	Source       string   `json:"source"`
 	Permissions  []string `json:"permissions,omitempty"`
 	NeedsSandbox bool     `json:"needsSandbox,omitempty"`
+	// MCP are the MCP tool components the package requires.
+	MCP []ContentMCPRequirement `json:"mcp,omitempty"`
 }
 
 // ContentEffective answers GET /v1/content-components/effective?job=&room=
@@ -202,5 +204,8 @@ type ContentEffective struct {
 	// expert resolved as the requester.
 	Team       *ContentTeam `json:"team,omitempty"`
 	SkillPacks []ContentRef `json:"skillPacks"`
-	Missing    []string     `json:"missing,omitempty"`
+	// MCP are the MCP tool components the packages above require that the
+	// requester may use (mcp_tools.go).
+	MCP     []ContentMCPTool `json:"mcp,omitempty"`
+	Missing []string         `json:"missing,omitempty"`
 }
