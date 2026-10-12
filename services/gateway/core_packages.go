@@ -87,6 +87,27 @@ func (s *Service) addCoreEntry(entry coreset.Entry) {
 	s.Cores = append(s.Cores, entry)
 }
 
+// AddEnvCores puts the env-configured cores (coreset.FromEnv) ahead of the
+// installed ones activation already added. A name that is also installed
+// keeps its activated entry: the installed record owns that provider, and
+// both entries come from coreset.EntryFor, so the env overrides apply to it
+// either way.
+func (s *Service) AddEnvCores(env []coreset.Entry) {
+	s.coresMu.Lock()
+	defer s.coresMu.Unlock()
+	installed := make(map[string]bool, len(s.Cores))
+	for _, e := range s.Cores {
+		installed[e.Name] = true
+	}
+	out := make([]coreset.Entry, 0, len(env)+len(s.Cores))
+	for _, e := range env {
+		if !installed[e.Name] {
+			out = append(out, e)
+		}
+	}
+	s.Cores = append(out, s.Cores...)
+}
+
 func (s *Service) dropCoreEntry(name string) {
 	s.coresMu.Lock()
 	defer s.coresMu.Unlock()

@@ -10,6 +10,7 @@ import (
 	"github.com/luckylhb90/bnbloc/core/conformance"
 	"github.com/luckylhb90/bnbloc/core/manifestcore"
 	"github.com/luckylhb90/bnbloc/core/pkgmeta"
+	"github.com/luckylhb90/bnbloc/internal/coreset"
 	"github.com/luckylhb90/bnbloc/internal/extgov"
 )
 
@@ -36,14 +37,8 @@ func (s *Service) probeManifestCorePackage(ctx context.Context, pkg pkgmeta.Pack
 		return err
 	}
 	provider.HTTP = governedHTTPClient(guard)
-	ep := core.Endpoint{}
-	if pkg.Endpoint != nil {
-		ep = core.Endpoint{BaseURL: pkg.Endpoint.BaseURL}
-	} else if discoverer, ok := any(provider).(core.Discoverer); ok {
-		if found, ok := discoverer.Discover(ctx); ok {
-			ep = found
-		}
-	}
+	// The probe reaches the daemon activation will drive: the same entry.
+	ep := coreset.EntryFor(pkg.Name, provider, declaredEndpoint(pkg)).Endpoint
 	if !ep.OK() {
 		// A listener-discovery manifest points at a daemon on the USER's
 		// machine (random port+token per run, addressed by a local descriptor

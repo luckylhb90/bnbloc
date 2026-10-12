@@ -224,11 +224,9 @@ func TestSidecarPackageRehydratesFromStore(t *testing.T) {
 		t.Fatalf("core %q still registered after unregister; cannot prove rehydrate", name)
 	}
 
-	names := RehydrateInstalledComponents(t.Context(), svc.corePipeline(), extreg.ServiceGateway)
-	for _, n := range names {
-		if n == name {
-			t.Fatalf("sidecar core %q returned in coreset names; the gateway must not drive it (client does)", name)
-		}
+	RehydrateInstalledComponents(t.Context(), svc.corePipeline(), extreg.ServiceGateway)
+	if svc.coreByName(name) != nil {
+		t.Fatalf("sidecar core %q activated into the gateway's core list; the gateway must not drive it (client does)", name)
 	}
 	d, ok := core.Describe(name)
 	if !ok {

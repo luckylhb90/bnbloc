@@ -4,28 +4,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/luckylhb90/bnbloc/core"
 	"github.com/luckylhb90/bnbloc/internal/auth"
-	"github.com/luckylhb90/bnbloc/internal/coreset"
 	"github.com/luckylhb90/bnbloc/internal/rbac"
 )
-
-func TestMergeCoreEntries_whenRehydrateHasEndpoint(t *testing.T) {
-	// Given
-	base := []coreset.Entry{{Name: "installed"}, {Name: "acme"}}
-	overrides := []coreset.Entry{{Name: "installed", Endpoint: core.Endpoint{BaseURL: "http://127.0.0.1:7777"}}}
-
-	// When
-	merged := mergeCoreEntries(base, overrides)
-
-	// Then
-	if len(merged) != 2 {
-		t.Fatalf("len = %d; want 2", len(merged))
-	}
-	if merged[0].Name != "installed" || merged[0].Endpoint.BaseURL != "http://127.0.0.1:7777" {
-		t.Fatalf("merged[0] = %+v; want rehydrated endpoint override", merged[0])
-	}
-}
 
 // Production without OIDC never falls back to the dev verifier: direct login
 // refuses every identity (SSO through an installed auth-provider is the way

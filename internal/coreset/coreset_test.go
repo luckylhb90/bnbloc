@@ -83,7 +83,7 @@ func TestFromEnvLoadsManifestDirectoryForDesktopSidecars(t *testing.T) {
 	t.Setenv("BNBLOC_CORES", name)
 	t.Setenv("BNBLOC_CORE_SIDECAR_MANIFEST_TEST_URL", srv.URL)
 
-	entries, err := FromEnv(nil)
+	entries, err := FromEnv()
 	if err != nil {
 		t.Fatalf("FromEnv: %v", err)
 	}
@@ -104,7 +104,7 @@ func TestFromEnvLoadsManifestDirectoryForDesktopSidecars(t *testing.T) {
 
 func TestFromEnvEmptyWhenNoCoresConfigured(t *testing.T) {
 	clearCoreEnv(t)
-	entries, err := FromEnv(nil)
+	entries, err := FromEnv()
 	if err != nil {
 		t.Fatalf("FromEnv: %v", err)
 	}
@@ -122,7 +122,7 @@ func TestFromEnvExplicitCoreListed(t *testing.T) {
 	writeAcmeManifest(t, dir)
 	t.Setenv("BNBLOC_CORE_MANIFESTS_DIR", dir)
 	t.Setenv("BNBLOC_CORES", "acme")
-	entries, err := FromEnv(nil)
+	entries, err := FromEnv()
 	if err != nil {
 		t.Fatalf("FromEnv: %v", err)
 	}
@@ -165,7 +165,7 @@ func TestFromEnvMultiCoreOrderAndOverride(t *testing.T) {
 	t.Setenv("BNBLOC_CORE_REMOTE_URL", proto.URL)
 	t.Setenv("BNBLOC_CORE_REMOTE_TOKEN", "tok-remote")
 
-	entries, err := FromEnv(nil)
+	entries, err := FromEnv()
 	if err != nil {
 		t.Fatalf("FromEnv: %v", err)
 	}
@@ -196,7 +196,7 @@ func TestFromEnvUnknownCore(t *testing.T) {
 	writeAcmeManifest(t, dir)
 	t.Setenv("BNBLOC_CORE_MANIFESTS_DIR", dir)
 	t.Setenv("BNBLOC_CORES", "nope,acme")
-	entries, err := FromEnv(nil)
+	entries, err := FromEnv()
 	if err != nil {
 		t.Fatalf("unknown core should be skipped, not error: %v", err)
 	}
@@ -208,7 +208,7 @@ func TestFromEnvUnknownCore(t *testing.T) {
 func TestFromEnvAllUnknownCores(t *testing.T) {
 	clearCoreEnv(t)
 	t.Setenv("BNBLOC_CORES", "nope,alsonope")
-	entries, err := FromEnv(nil)
+	entries, err := FromEnv()
 	if err != nil {
 		t.Fatalf("all-unknown should not error: %v", err)
 	}
@@ -236,7 +236,7 @@ func TestFromEnvUsesProtocolClientForExplicitUnknownCore(t *testing.T) {
 	t.Setenv("BNBLOC_CORE_NIMBUS_URL", srv.URL)
 	t.Setenv("BNBLOC_CORE_NIMBUS_TOKEN", "tok")
 
-	entries, err := FromEnv(nil)
+	entries, err := FromEnv()
 	if err != nil {
 		t.Fatalf("FromEnv: %v", err)
 	}
@@ -274,7 +274,7 @@ func TestFromEnvKeepsURLCoreWhoseDaemonIsDownAtBoot(t *testing.T) {
 	t.Setenv("BNBLOC_CORES", name)
 	t.Setenv("BNBLOC_CORE_LATECORE_URL", srv.URL)
 
-	entries, err := FromEnv(nil)
+	entries, err := FromEnv()
 	if err != nil {
 		t.Fatalf("FromEnv: %v", err)
 	}
@@ -349,7 +349,7 @@ func TestFromEnvRegistersAdapterDescriptorForURLDeclaredCore(t *testing.T) {
 	t.Setenv("BNBLOC_CORES", name)
 	t.Setenv("BNBLOC_CORE_URLDECLARED_URL", proto.URL)
 
-	entries, err := FromEnv(nil)
+	entries, err := FromEnv()
 	if err != nil {
 		t.Fatalf("FromEnv: %v", err)
 	}

@@ -70,13 +70,10 @@ func resolveVerifier() auth.IDPVerifier {
 	return devVerifier{}
 }
 
-// resolveCores builds the ordered local-agent core list from the environment
-// (BNBLOC_CORES), wiring each core's discovery + endpoint. It fails fast on an
-// unknown core name so a misconfiguration is visible at startup rather than on
-// first agent call, and logs the resolved core names plus which resolved an
-// endpoint.
-func resolveCores(extraActivate []string) []coreset.Entry {
-	entries, err := coreset.FromEnv(extraActivate)
+// resolveCores builds the env-configured core list (BNBLOC_CORES, through
+// coreset.FromEnv) and logs which cores resolved an endpoint.
+func resolveCores() []coreset.Entry {
+	entries, err := coreset.FromEnv()
 	if err != nil {
 		log.Fatalf("bnbloc-gateway: %v", err)
 	}
@@ -306,12 +303,12 @@ func main() {
 	}
 	// Boot is the first component reconcile, on the SAME pipeline the
 	// periodic reconcile and the install/uninstall handlers use, so the live
-	// set it records is the one later reconciles diff against. It must run
-	// before coreset.FromEnv, which resolves installed core names against the
-	// registry; activation already put drivable installed cores in svc.Cores.
+	// set it records is the one later reconciles diff against. Activation
+	// puts the drivable installed cores in svc.Cores (coreset.EntryFor); the
+	// env-configured ones join them, built by the same EntryFor.
 	svc.ExtPipe = gateway.NewCorePipeline(svc, tw.ExtAudit)
-	installedNames := gateway.RehydrateInstalledComponents(context.Background(), svc.ExtPipe, extreg.ServiceGateway)
-	svc.Cores = mergeCoreEntries(resolveCores(installedNames), svc.Cores)
+	gateway.RehydrateInstalledComponents(context.Background(), svc.ExtPipe, extreg.ServiceGateway)
+	svc.AddEnvCores(resolveCores())
 	// Installs land on one replica; every replica converges on the durable
 	// records within one interval.
 	go svc.RunComponentReconcile(context.Background())
@@ -345,23 +342,6 @@ func truthy(raw string) bool {
 	default:
 		return false
 	}
-}
-
-func mergeCoreEntries(base, overrides []coreset.Entry) []coreset.Entry {
-	for _, override := range overrides {
-		matched := false
-		for i := range base {
-			if base[i].Name == override.Name {
-				base[i] = override
-				matched = true
-				break
-			}
-		}
-		if !matched {
-			base = append(base, override)
-		}
-	}
-	return base
 }
 
 // mintAdminTokenCmd is the operator bootstrap subcommand. A production gateway

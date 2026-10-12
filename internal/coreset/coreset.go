@@ -42,50 +42,28 @@ type Entry struct {
 // slow or absent daemon cannot stall composition-root startup.
 const discoverTimeout = 3 * time.Second
 
-// FromEnv builds the ordered core list. It reads BNBLOC_CORES (comma-separated
-// core names); when unset it yields no env-configured cores (no baked-in
-// default). For each name it constructs the provider (an unknown name with no
-// URL is skipped with a warning; an unknown name WITH a URL becomes a lazily
-// discovering Core Protocol client), wires the per-core discovery inputs from
-// the environment, and resolves the endpoint: an explicit
-// BNBLOC_CORE_<NAME>_URL/_TOKEN override wins; otherwise, when the provider can
-// self-discover, discovery fills it best-effort (an entry whose daemon is not
-// up yet is kept with a zero endpoint for Rediscover). Order follows the
-// configured list so the first entry is the default core.
-// extraActivate names manifest cores that were registered elsewhere (the
-// gateway rehydrates them from the platform_settings DB and re-registers them
-// before calling FromEnv) and should be active even if absent from BNBLOC_CORES.
-// The bridge, which has no DB, passes nil. Desktop-managed sidecar cores can
-// also hand the bridge a transient manifest directory through
-// BNBLOC_CORE_MANIFESTS_DIR; persistence still lives in the DB, owned by the
-// gateway.
-func FromEnv(extraActivate []string) ([]Entry, error) {
+// FromEnv builds the ordered core list of BNBLOC_CORES (comma-separated core
+// names); when unset it yields no env-configured cores (no baked-in default).
+// Each registered name becomes EntryFor(name, provider); an unknown name with
+// no URL is skipped with a warning, and an unknown name WITH a URL becomes a
+// lazily discovering Core Protocol client. Order follows the configured list
+// so the first entry is the default core. Installed cores are not listed
+// here: the gateway activates them from its durable records (through the
+// same EntryFor), and desktop-managed sidecar cores hand the bridge a
+// transient manifest directory through BNBLOC_CORE_MANIFESTS_DIR.
+func FromEnv() ([]Entry, error) {
 	loadEnvManifests()
 	names := splitCSV(config.FromEnvRaw("BNBLOC_CORES"))
-	// No hardcoded default core: an unset BNBLOC_CORES yields no env-configured
-	// cores. Cores arrive from the extension registry (rehydrated installs, via
-	// extraActivate) or explicit BNBLOC_CORES entries — never a baked-in name.
-	for _, m := range extraActivate {
-		if !contains(names, m) {
-			names = append(names, m)
-		}
-	}
-
 	entries := make([]Entry, 0, len(names))
 	for _, name := range names {
-		upper := envKey(name)
-		urlOverride := strings.TrimSpace(config.FromEnvRaw("BNBLOC_CORE_" + upper + "_URL"))
-		tokenOverride := strings.TrimSpace(config.FromEnvRaw("BNBLOC_CORE_" + upper + "_TOKEN"))
-
 		p, err := core.New(name)
 		if err != nil {
-			if urlOverride != "" {
+			if url, _ := envEndpoint(name); url != "" {
 				// A URL-declared Core Protocol adapter nothing registered. The
 				// client discovers lazily (and re-discovers), so a daemon that is
 				// not up yet at boot is still configured and is used as soon as
 				// it answers — dropping it here would lose it until a restart.
-				ep := core.Endpoint{BaseURL: urlOverride, Token: tokenOverride}
-				entries = append(entries, Entry{Name: name, Provider: protocol.NewClient(name, nil), Endpoint: ep, Explicit: true})
+				entries = append(entries, EntryFor(name, protocol.NewClient(name, nil), core.Endpoint{}))
 				continue
 			}
 			// A configured core that is not registered (a typo, or a not-yet-loaded
@@ -95,36 +73,53 @@ func FromEnv(extraActivate []string) ([]Entry, error) {
 			log.Printf("coreset: skipping unknown core %q (known: %v)", name, core.Names())
 			continue
 		}
-
-		// Wire per-core discovery inputs. These live at the composition root so
-		// the core packages keep no OS/container assumptions.
-		if mp, ok := p.(*manifestcore.Provider); ok {
-			// A manifest core's probe URL is baked into its manifest; the token
-			// is deployment config, so wire it from the per-core override env.
-			// A URL override repoints the daemon without editing the manifest.
-			mp.ProbeToken = tokenOverride
-			mp.ProbeURLOverride = urlOverride
-		}
-
-		ep := core.Endpoint{}
-		switch {
-		case urlOverride != "":
-			// Explicit configuration wins over discovery.
-			ep = core.Endpoint{BaseURL: urlOverride, Token: tokenOverride}
-		default:
-			if d, ok := p.(core.Discoverer); ok {
-				ctx, cancel := context.WithTimeout(context.Background(), discoverTimeout)
-				if found, ok := d.Discover(ctx); ok {
-					ep = found
-				}
-				cancel()
-			}
-		}
-
-		entries = append(entries, Entry{Name: name, Provider: p, Endpoint: ep, Explicit: urlOverride != ""})
+		entries = append(entries, EntryFor(name, p, core.Endpoint{}))
 	}
 	registerEnvAdapters(entries)
 	return entries, nil
+}
+
+// EntryFor is the one way a core's Entry is built, for env-configured and
+// installed cores alike, so BNBLOC_CORE_<NAME>_URL/_TOKEN means the same in
+// the gateway and the bridge. An explicit URL override wins (Explicit). Else
+// declared, the address an endpoint-runtime package names, is used as fixed
+// configuration (the token override still applies). Else a core that can
+// self-discover is discovered best-effort within discoverTimeout; an entry
+// whose daemon is not up yet keeps a zero endpoint for Rediscover. A manifest
+// core's probe inputs (its token, a repointed URL) are wired from the same
+// overrides: they live at the composition root, so the core packages keep no
+// OS or container assumptions.
+func EntryFor(name string, p core.Provider, declared core.Endpoint) Entry {
+	url, token := envEndpoint(name)
+	if mp, ok := p.(*manifestcore.Provider); ok {
+		mp.ProbeToken = token
+		mp.ProbeURLOverride = url
+	}
+	switch {
+	case url != "":
+		return Entry{Name: name, Provider: p, Endpoint: core.Endpoint{BaseURL: url, Token: token}, Explicit: true}
+	case strings.TrimSpace(declared.BaseURL) != "":
+		if token != "" {
+			declared.Token = token
+		}
+		return Entry{Name: name, Provider: p, Endpoint: declared, Explicit: true}
+	}
+	e := Entry{Name: name, Provider: p}
+	if d, ok := p.(core.Discoverer); ok {
+		ctx, cancel := context.WithTimeout(context.Background(), discoverTimeout)
+		if found, ok := d.Discover(ctx); ok {
+			e.Endpoint = found
+		}
+		cancel()
+	}
+	return e
+}
+
+// envEndpoint reads a core's BNBLOC_CORE_<NAME>_URL / _TOKEN overrides.
+func envEndpoint(name string) (url, token string) {
+	upper := envKey(name)
+	return strings.TrimSpace(config.FromEnvRaw("BNBLOC_CORE_" + upper + "_URL")),
+		strings.TrimSpace(config.FromEnvRaw("BNBLOC_CORE_" + upper + "_TOKEN"))
 }
 
 func loadEnvManifests() {
@@ -199,16 +194,6 @@ func splitCSV(v string) []string {
 		}
 	}
 	return out
-}
-
-// contains reports whether list already includes v.
-func contains(list []string, v string) bool {
-	for _, x := range list {
-		if x == v {
-			return true
-		}
-	}
-	return false
 }
 
 func envKey(name string) string {

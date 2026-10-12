@@ -332,11 +332,14 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   `acme,nimbus`) names them; per-core endpoint via
   `BNBLOC_CORE_<NAME>_URL`/`_TOKEN`, else auto-discovered.
   `internal/coreset.FromEnv()` parses this and is the ONE place gateway +
-  bridge cmd mains build their core list — do not re-parse core env
-  elsewhere. Unset `BNBLOC_CORES`
+  bridge cmd mains build their env core list — do not re-parse core env
+  elsewhere. Every core entry, env-configured or installed (gateway
+  activation), is built by `coreset.EntryFor(name, provider, declared)`:
+  the `_URL`/`_TOKEN` override, `Explicit` and the one discovery timeout
+  (`TestCoreEntriesBuiltOnlyByEntryFor`). Unset `BNBLOC_CORES`
   yields no env-configured cores — cores arrive from the extension registry
-  (rehydrated installs, via extraActivate) or explicit `BNBLOC_CORES` entries,
-  never a baked-in name. The composes now default it EMPTY with no manifests
+  (rehydrated installs, activated into the gateway's list) or explicit
+  `BNBLOC_CORES` entries, never a baked-in name. The composes now default it EMPTY with no manifests
   mount: install is the ONLY source of cores (see
   `docs/architecture/core-providers.md`).
 - **A target id is core-qualified: `<core>/<rawid>`** (e.g. `acme/local:codex`)

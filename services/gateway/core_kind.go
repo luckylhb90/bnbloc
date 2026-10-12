@@ -179,27 +179,27 @@ func endpointCoreInstance(_ context.Context, pkg pkgmeta.Package, guard extgov.G
 	// rehydrate) builds a lazily-discovering client, so an endpoint that is
 	// briefly down when the gateway boots stays installed and is used once it
 	// answers instead of vanishing until the next restart.
-	ep := core.Endpoint{BaseURL: pkg.Endpoint.BaseURL}
 	provider := protocol.NewClient(pkg.Name, governedHTTPClient(guard))
-	return provider, coreset.Entry{Name: pkg.Name, Provider: provider, Endpoint: ep, Explicit: true}, nil
+	return provider, coreset.EntryFor(pkg.Name, provider, declaredEndpoint(pkg)), nil
 }
 
-func manifestCoreInstance(ctx context.Context, activation coreActivation, guard extgov.Guard) (core.Provider, coreset.Entry, error) {
+func manifestCoreInstance(_ context.Context, activation coreActivation, guard extgov.Guard) (core.Provider, coreset.Entry, error) {
 	pkg := packageFromCoreRecord(activation.rec, activation.cfg)
 	provider, err := manifestcore.New(*pkg.Manifest)
 	if err != nil {
 		return nil, coreset.Entry{}, err
 	}
 	provider.HTTP = governedHTTPClient(guard)
-	ep := core.Endpoint{}
-	if d, ok := any(provider).(core.Discoverer); ok {
-		dctx, cancel := context.WithTimeout(ctx, 3*time.Second)
-		if found, ok := d.Discover(dctx); ok {
-			ep = found
-		}
-		cancel()
+	return provider, coreset.EntryFor(pkg.Name, provider, declaredEndpoint(pkg)), nil
+}
+
+// declaredEndpoint is the daemon address a core package names
+// (endpoint.baseUrl; optional for a manifest core, which may discover).
+func declaredEndpoint(pkg pkgmeta.Package) core.Endpoint {
+	if pkg.Endpoint == nil {
+		return core.Endpoint{}
 	}
-	return provider, coreset.Entry{Name: pkg.Name, Provider: provider, Endpoint: ep}, nil
+	return core.Endpoint{BaseURL: pkg.Endpoint.BaseURL}
 }
 
 func governedHTTPClient(guard extgov.Guard) *http.Client {

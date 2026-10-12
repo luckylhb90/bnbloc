@@ -50,7 +50,7 @@ func main() {
 	// left unconfigured. Both the bridge and the gateway consume the same
 	// coreset.FromEnv, so a member's cores are described once in the
 	// environment.
-	entries, err := coreset.FromEnv(nil)
+	entries, err := coreset.FromEnv()
 	if err != nil {
 		log.Fatalf("bnbloc-bridge: resolve cores: %v", err)
 	}
