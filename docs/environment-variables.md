@@ -209,9 +209,11 @@ set-to-empty disables it); those names belong to the manifest, not to bnbloc.
 
 ## Components and plugin packages (gateway, realtime)
 
-Typed packages (auth providers, cores, plugin sidecars) are installed by a
-super-admin through `POST /v1/platform/components` (signed package body) or
-the CLI (`bnbloc cores install`, `bnbloc cores publish-sidecar`). Production
+Typed packages (auth providers, cores, plugin sidecars, MCP tools) are
+installed by a super-admin through `POST /v1/platform/components` (signed
+package body) or the CLI (`bnbloc cores install`, `bnbloc cores
+publish-sidecar`, `bnbloc cores publish-mcp`). Organization MCP connectors
+need `BNBLOC_SECRET_STORE_KEY` on the gateway (see Gateway). Production
 requires a signature that verifies against a trusted publisher key
 (`POST /v1/platform/component-keys`).
 

@@ -104,8 +104,9 @@ it. Design:
 `agentProfile` is the second request-carrying capability (also asked through
 `core.Supports`): a core advertising it receives a `profile` on session
 create (`core/protocol` `AgentProfile`, in process `core.SessionRequest.Profile`),
-the role the session wears (an expert, the skill packs in effect, and MCP
-servers contributed per session such as room tools):
+the role the session wears (an expert, the skill packs in effect, the MCP
+tool components they require, and MCP servers contributed per session such
+as room tools):
 
 ```json
 {"profile": {
@@ -132,7 +133,12 @@ extra agent environment. Env values and MCP header/env values are secrets: a
 core never logs or persists them. A core that cannot honor a profile answers
 `bad_request`; the protocol client refuses to send one to a core that does not
 advertise the capability. A profile is per session: the bridge starts a new
-session when the content (instructions + skill files) changes. A core without
+session when the content (instructions + skill files) or the set of MCP tool
+components (name, transport, binary or URL, the names of the env and headers
+they get, never their values) changes. A stdio MCP tool's command is a binary
+the member's desktop materialized and verified
+([`content-components.md`](content-components.md#mcp-tool-components)): a
+profile never carries a command that content inlined. A core without
 `agentProfile` gets the bridge's fallback: the instructions (and a summary of
 the skills) prefixed to the first prompt of the session.
 

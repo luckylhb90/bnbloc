@@ -8,7 +8,8 @@ are stored, who may use them, how a turn wears them, and the HTTP surface.
 
 Content components are packages that are mostly text, authored by members
 (and later by the platform), beside the executable kinds (cores, plugins,
-sandboxes, previewers, notifiers, auth providers):
+sandboxes, previewers, notifiers, auth providers, MCP tools — the tool
+servers content requires, see "MCP tool components"):
 
 | Kind | Manifest kind | Files |
 |---|---|---|
@@ -31,9 +32,13 @@ uploads, imports, the bridge's materialization):
   teams"); every other kind refuses one;
 - declared permissions: `scripts`, `mcp.stdio`, `mcp.http:<host>`. A
   package that ships scripts (a `scripts/` or `bin/` dir, or a script
-  extension) must declare `scripts`. stdio MCP servers come only from MCP
-  tool components referenced by name; none exists yet, so every
-  `requires.mcp` is refused;
+  extension) must declare `scripts`. MCP servers come only from MCP tool
+  components: `requires.mcp: [{name, env?}]` names one, and a save checks
+  that it is an MCP tool component the author may use, that `env` names
+  only its variables, and that the package declares its transport's
+  permission (`mcp.stdio`, or `mcp.http:<host>` of its URL). Reading stored
+  content checks the syntax only, so a tool uninstalled later never makes
+  content invalid (use time reports it missing);
 - `SKILL.md` frontmatter must carry `name` (= the skill directory) and a
   `description` (the agent loads the skill from it).
 
@@ -208,16 +213,18 @@ and `contentuse.Effective` (a job's turn) both decide through it.
    (`artifactEntitled` admits a bundle in effect for a job the caller's
    bridge runs), verified against its sha256 and validated again.
 4. **Profile.** A core advertising `agentProfile` receives the profile
-   (instructions + skills + the session contributors' MCP servers) on
+   (instructions + skills + the MCP tools the content requires + the
+   session contributors' MCP servers) on
    session create and maps it natively (see
    [`core-providers.md`](core-providers.md)). Any other core gets the
    fallback: the instructions and a skill summary prefixed to the session's
    first prompt, the skill files under `.agents/skills/` when it accepts
    workspace files, the bodies inlined otherwise.
 5. **Sessions.** The profile's content checksum (instructions + skill
-   files; MCP servers and env excluded) is part of the session binding: a
-   turn wearing different content starts a new session; a reused sandbox
-   workdir has its agent-config paths cleared first.
+   files; MCP servers and env excluded), plus the MCP tool set's non-secret
+   identity, is part of the session binding: a turn wearing different
+   content or tools starts a new session; a reused sandbox workdir has its
+   agent-config paths cleared first.
 6. **Room expert.** A room's expert (a `room-expert` use) is resolved at
    turn time like room skill packs: `Effective` returns it as `roomExpert`
    (with the skill packs it requires, its bundle granted) unless the chat
@@ -284,14 +291,90 @@ the caller is the requester and `lead` is required (a room member); with
 `?job=` the job must be in the room, live and leased by a bridge of the
 caller (`store.JobLeasedBy`), and the lead and requester are the job's.
 
+## MCP tool components
+
+Design: PRD §6 and "Status: step 6 (MCP tool components)". An MCP tool
+(`bnbloc.mcp.package/v1`, contract `bnbloc.mcp.contract/v1`) is an
+**executable** kind: platform-signed, installed by a super admin through the
+shared component pipeline (`POST /v1/platform/components`, the console's
+Components page, `bnbloc cores publish-mcp`), with rollout, tenants and
+opt-in unchanged. It is the admin-approved tool catalog: content requires a
+tool by name and can never inline a command.
+
+```json
+{"kind": "bnbloc.mcp.package/v1", "contract": "bnbloc.mcp.contract/v1",
+ "name": "codeword", "version": "1.0.0", "publisher": "acme", "runtime": "stdio",
+ "artifacts": {"darwin-arm64": {"url": "…/v1/artifacts/sha256/…", "sha256": "…"}},
+ "mcp": {"tools": [{"name": "get_codeword", "description": "…"}],
+         "env": [{"name": "CODEWORD_SALT", "description": "…", "secret": true, "required": true}],
+         "credentials": "member",
+         "stdio": {"args": ["--stdio"]}}}
+```
+
+- **Runtimes.** `stdio`: one binary per platform (`artifacts`, staged
+  through `POST /v1/platform/artifacts` and pinned by sha256 like sidecar
+  binaries); the artifact is the command, `mcp.stdio.args` its arguments.
+  `endpoint`: `endpoint.baseUrl` is the MCP (streamable HTTP) URL, held to
+  `permissions.network`; `mcp.http.auth` is `none`, `bearer` or
+  `header` (`{scheme, header?, env}`), the value read from its one declared
+  variable. The install probe (`internal/mcptool`, through
+  `internal/endpointpkg`'s `Discover` hook) posts MCP's `initialize` and
+  accepts a JSON-RPC answer or 401/403. Nothing runs server-side;
+  activation registers nothing.
+- **Credentials.** `mcp.env` declares the variables (names, secret,
+  required, a description); `mcp.credentials` says where values come from:
+  - `member`: each member enters them on their desktop (Settings → Tools),
+    stored 0600 under the app config dir through the plugin settings store
+    (`internal_ext/mcp_tools.rs`), never sent to the gateway. The bridge
+    reads them (`BNBLOC_MCP_SETTINGS_DIR/<tool>.json`) only for drives the
+    member asked for themselves: a borrowed or platform drive never lends
+    the agent owner's accounts (the tool shows missing).
+  - `org`: an org admin configures one connector per (organization, tool)
+    at `/v1/tenant/mcp-connectors` (Organization → Tool connectors). Values
+    are sealed with AES-256-GCM under `BNBLOC_SECRET_STORE_KEY`
+    (`internal/sealbox`; the platform-settings key
+    `mcp.connector/<tenant>/<tool>` is the additional data, so a row moved
+    to another organization does not open), opened only into the effective
+    resolution of a job of that organization, and deleted with the tool.
+    Without the key connectors are off.
+- **Distribution (stdio).** The member catalog (`GET /v1/components`, kind
+  `mcp`) carries the pins; artifacts are entitled like every catalog
+  kind's. The desktop's sidecar manager does not supervise a tool: for each
+  installed stdio tool it fetches this platform's binary through the shared
+  verified download (`ensure_verified`, the sidecar cache naming
+  `mcp-<tool>-<sha256>`) into the app cache's `mcp-tools/`, writes
+  `index.json` (`{tools: [{name, sha256, path}]}`) atomically, and deletes
+  binaries of tools that left the catalog or changed pin (their member
+  credentials are forgotten too). The bridge gets `BNBLOC_MCP_TOOLS_DIR`
+  and reads the index per session; nothing restarts.
+- **Use time.** `GET …/effective` lists, for every `requires.mcp` of the
+  expert, the room expert and the skill packs in effect, the installed
+  tool the requester may use (`extpipe.MemberVisibility`): transport,
+  per-platform pins and args, or URL and auth; its env (required when
+  declared required or named by a requiring package); an org tool's values;
+  and the ids of the packages requiring it. Unknown, invisible,
+  unconfigured or undeclared-variable requirements go to `missing`. The
+  bridge (`services/bridge/mcp_tools.go`) builds the session's MCP servers:
+  a stdio server from the index entry carrying the gateway's pin for this
+  platform (inside the tools dir) with the env values as its environment;
+  an http server with its URL and auth header. A tool not downloaded yet,
+  member credentials not set (or not lent), a core without `agentProfile`
+  or a target without http MCP joins `contentMissing`; the turn still runs.
+  Someone else's content requiring a stdio tool forces the sandbox. Values
+  never reach logs, the session checksum or job data.
+
 ## Safety
 
 - Declared permissions show on cards and are confirmed on first use
   (`POST …/versions/{v}/ack`; the web asks before a member first sends with
   someone else's expert).
 - Content that is not the agent owner's own and declares `scripts` or
-  `mcp.stdio` forces a sandboxed drive (`decideSandbox`), and is refused with
-  a `sandbox-required` notice where the sandbox cannot take it.
+  `mcp.stdio`, or requires an MCP tool that resolves to stdio, forces a
+  sandboxed drive (`decideSandbox`), and is refused with a
+  `sandbox-required` notice where the sandbox cannot take it.
+- MCP servers come only from platform-signed MCP tool components; content
+  names them and can never inline a command or URL. A member's own tool
+  credentials are used only for drives they asked for themselves.
 - The agent-config paths (`CLAUDE.md`, `AGENTS.md`, `.claude/skills/**`,
   `.agents/skills/**`, `.opencode/**`, `.mcp.json`) are bnbloc-owned: never
   published as deliverables or site content, never code-synced, and
@@ -318,7 +401,11 @@ store and the artifact entitlement). JSON shapes: `internal/wire/content_compone
 | `GET /v1/content-uses[?room=]` | The caller's member uses and a room's uses, each with its component at the version in effect and `updateAvailable`; `roomExpert` names the room's expert |
 | `PUT /v1/content-uses` | `{scope: member\|room\|room-expert, roomId?, componentId, version?}`: member scope takes the kinds with `MemberUse` (skill and prompt packs); room scopes need the room's owner or an admin; `room-expert` takes one of the room's pinned experts (never a team) and replaces the previous one |
 | `DELETE /v1/content-uses?scope=&roomId=&componentId=` | Remove a use (unpinning the room expert clears it) |
-| `GET /v1/content-components/effective?job=&room=` | The bridge running a job: what its turn wears |
+| `GET /v1/content-components/effective?job=&room=` | The bridge running a job: what its turn wears, with the MCP tools its content requires (`mcp`, an org tool with its connector's values) |
+| `GET /v1/components?kind=mcp` | The MCP tools visible to the caller (rollout, tenants, opt-in) with their tools, env, credentials source and, for org credentials, `orgConfigured` |
+| `GET /v1/tenant/mcp-connectors` | Org admins (`manage_org`): the org-credential MCP tools visible to the organization with their connector's state (secret values never returned); `available: false` without the secret store key |
+| `PUT /v1/tenant/mcp-connectors/{name}` | `{values}`: store the organization's connector (an empty secret keeps the stored one; required variables must end set); 409 without the secret store key |
+| `DELETE /v1/tenant/mcp-connectors/{name}` | Remove the organization's connector |
 | `GET /v1/artifacts/{key}[?room=\|?job=&room=]` | Bundle download (`artifactEntitled`) |
 
 Every change of a room's uses (a pin, the room expert, a room pack)

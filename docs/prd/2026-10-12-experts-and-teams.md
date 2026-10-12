@@ -2,7 +2,7 @@
 
 Status: approved, in development (2026-10-12): steps 1 and 2 implemented,
 step 3 implemented, step 5 implemented for experts and skill packs, step 6
-expert teams implemented (see "Status" below). Feasibility verified in code and by experiments (see
+expert teams and MCP tool components implemented (see "Status" below). Feasibility verified in code and by experiments (see
 "Evidence").
 
 ## Why
@@ -794,7 +794,19 @@ Decisions:
 
 ## Status: step 6 (MCP tool components)
 
-**2026-10-12: in development.** Scope: the executable kind
+**2026-10-12: implemented** (architecture:
+`docs/architecture/content-components.md`, "MCP tool components").
+Commits: c86dd0f (this record), 2335ac8 (the kind in `pkgmeta`), 08834cc
+(`internal/mcptool`: installer, per-job resolution, sealed org connectors;
+`internal/sealbox`), 7a712e1 (references must name an MCP component),
+b413f50 (gateway: install, catalog, save check, effective resolution,
+connector routes, `BNBLOC_SECRET_STORE_KEY` on every deploy surface),
+6f3b4a1 (bridge: session MCP servers, missing, forced sandbox, binding),
+a017f0b (desktop: materialization through the shared verified download,
+Settings → Tools commands), f84de09 (`bnbloc cores publish-mcp`), 1530471
+(gateway views: the platform listing's MCP block, `requires.mcp` with env
+names, super-admin connector scope), 6b25165 (web: Library → Tools,
+Settings → Tools, Organization → Tool connectors, the console). Scope: the executable kind
 `bnbloc.mcp.package/v1` (section 6), `requires.mcp` resolution at use
 time, member and org credentials, the desktop's stdio materialization and
 its Settings → Tools, the Library's Tools tab, org connectors and
@@ -871,3 +883,26 @@ its Settings → Tools, the Library's Tools tab, org connectors and
 - **CLI.** `bnbloc cores publish-mcp --package <mcp.json> [--binary
   <platform>=<path>...]` uploads the binaries, pins them, signs and installs
   through the shared publish path.
+
+**Verified end to end** (local services on MySQL 8.4, a bridge driving
+bnbloc-acp → OpenCode 1.18.35 with `opencode/big-pickle`): a tiny Go stdio
+MCP server exposing `get_codeword` (its answer is a hash of
+`CODEWORD_SALT`, a member credential) was published with
+`bnbloc cores publish-mcp --binary darwin-arm64=…`; the member catalog
+listed it with its pin; the binary was downloaded as the member from
+`/v1/artifacts/sha256/…` into the tools dir with `index.json` (the
+desktop's materialization, covered by the desktop tests) and the salt was
+stored in the member settings dir. An expert requiring
+`codeword` was refused without `mcp.stdio` and saved with it. Asked "What
+is the codeword?" with the expert picked, the agent spawned
+`mcp-codeword-<sha256> --stdio` from the tools dir and answered
+`CW-b5f2ae80e6`, the hash of the salt it could only get from the tool.
+With the member settings removed, the next turn reported
+`contentMissing: MCP tool codeword (set CODEWORD_SALT in Settings → Tools)`,
+started a new session (the tool set changed) and still ran.
+
+**Open:** the Library form does not edit `requires.mcp` (it carries the
+entries over unchanged; packages and imports set them); an http tool's
+OAuth-style per-member sign-in is not modelled (a member's own token in
+Settings → Tools is); the desktop materializes on each catalog refresh
+(60 s), so a just-published tool is missing for up to a minute.

@@ -34,6 +34,9 @@ extend it" references.
   visibility function), how a chat's expert and the room's and member's skill
   packs reach an agent session (`agentProfile` or the prompt fallback), the
   safety rules and the HTTP surface.
+  MCP tool components (`bnbloc.mcp.package/v1`, platform-published stdio
+  binaries or http endpoints that content requires by name) are in the same
+  document: distribution to desktops, member and organization credentials.
 - [Room tools](room-tools.md) — how an agent lists the room's agents and
   dispatches work to them (`ask_agent`): the bridge's loopback MCP server and
   its per-session bearers, the realtime dispatch route, its authority (the
