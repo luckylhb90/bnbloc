@@ -578,13 +578,14 @@ Status (2026-10-12): landed on the Batch 4 branch (not yet on `main`).
   `TestStoreTestsUseOneRig`, `TestMySQLTestsUseTestmysql`,
   `TestAdvisoryLocksScopedByDatabase`. Also fixed: the flaky sealbox tamper
   case.
-- **4.2 Status:** done. Every allowlisted read returns an error except
-  `ActivityStore.SubmitQueryable`/`SyncStates` (removed with their endpoints
-  in Batch 2). One list-read helper `queryAll`/`rowScanner`;
-  `TestMySQLReadsReportFailures` calls every MySQL operation on a closed
-  database. Callers: logged 500 or fail closed; four places keep their
-  documented degrade-on-error behaviour (offline platform-agent guard,
-  platform-agent listing, content-review notification, budget hard stop).
+- **4.2 Status:** done. Every store read returns an error; the allowlist is
+  gone (`TestStoreReadsReturnErrors` is strict). One list-read helper
+  `queryAll`/`rowScanner`; `TestMySQLReadsReportFailures` calls every MySQL
+  operation on a closed database. Callers: logged 500 or fail closed. The
+  budget hard stop fails closed (`budget_unavailable`, retryable;
+  `TestBudgetHardStopFailsClosed`); three reads stay fail-open by design,
+  each with its reason in a comment (realtime's platform-agent offline
+  guard, the platform-agent listing, the content-review notification).
 - **4.3 Status:** done except M11 (`Grant.Live`, admission rule: Batch 2.6).
   Rule owners in `rules.go` (`clampLimit`, `liveAt`, `isDupEntry`/`dupAs`,
   `nullIfZero`/`nullPtr`, `sqlNotDeleted`/`sqlHumanMember`); bridge liveness
@@ -616,9 +617,11 @@ Status (2026-10-12): landed on the Batch 4 branch (not yet on `main`).
   `retiredTables`; `ExtAuditRecords`, the `search_text` backfill and
   `MaxRoomSeq`'s unused branches deleted (the reindex route and CLI stay for
   the OpenSearch repair); `agent_sessions` keeps only what is read.
-  `TestNoWriteOnlyColumns`. Not done: tables orphaned by the Batch 2
-  removals (concurrent batch) and `RecordSubmitProvenance`/`SubmitQueryable`
-  (Batch 2).
+  `TestNoWriteOnlyColumns`. After the Batch 2 removals,
+  `2026_10_drop_legacy_borrow_and_submit` drops `shared_agent_leases`
+  (`retiredTables`) and `agent_messages.client_submit_id` with its unique
+  key (`retiredColumns`). Grant liveness stays with Batch 2's `Grant.Live`;
+  its SQL twin is the one `sqlGrantLive`.
 
 | # | Item | Refs | Size |
 |---|---|---|---|
