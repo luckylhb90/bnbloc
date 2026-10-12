@@ -11,6 +11,7 @@ import (
 	"github.com/luckylhb90/bnbloc/core"
 	"github.com/luckylhb90/bnbloc/internal/ids"
 	"github.com/luckylhb90/bnbloc/internal/membership"
+	"github.com/luckylhb90/bnbloc/internal/realtime"
 	"github.com/luckylhb90/bnbloc/internal/store"
 	"github.com/luckylhb90/bnbloc/internal/wire"
 )
@@ -205,7 +206,7 @@ func (s *Service) PostChat(ctx context.Context, p ChatPost) (ChatPosted, error) 
 	if err != nil {
 		return ChatPosted{}, fmt.Errorf("message persistence failed: %w", err)
 	}
-	ev, err = s.Hub.PublishCommit(ev, d)
+	ev, err = s.publish(ctx, ev, d)
 	if errors.Is(err, store.ErrDuplicateClientMsg) {
 		// A concurrent send with the same client id won the race (in the same
 		// commit batch, or already in history): the hub answers its sequence,
@@ -216,7 +217,6 @@ func (s *Service) PostChat(ctx context.Context, p ChatPost) (ChatPosted, error) 
 		log.Printf("realtime: persist room=%s kind=%s: %v", p.RoomID, ev.Kind, err)
 		return ChatPosted{}, fmt.Errorf("message persistence failed: %w", err)
 	}
-	s.deliverPluginEvent(ctx, ev)
 	posted := ChatPosted{Sequence: ev.Sequence}
 	if agent && s.BridgeJobs != nil {
 		coreName := strings.TrimSpace(p.Recipient.Core)
@@ -264,7 +264,7 @@ func (s *Service) PostChat(ctx context.Context, p ChatPost) (ChatPosted, error) 
 		} else {
 			posted.Job = &job
 			s.auditExpertUse(ctx, expert, job)
-			s.Hub.Publish(wire.Event{RoomID: p.RoomID, ChannelID: channelID, Kind: wire.EventAgentJobCreated, Payload: job, AtUnixMs: nowMs})
+			_, _ = s.publish(ctx, wire.Event{RoomID: p.RoomID, ChannelID: channelID, Kind: wire.EventAgentJobCreated, Payload: job, AtUnixMs: nowMs}, realtime.Durable{})
 		}
 	}
 	return posted, nil

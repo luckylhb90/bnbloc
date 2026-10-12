@@ -665,8 +665,7 @@ func (s *Service) handleInternalPublish(w http.ResponseWriter, r *http.Request) 
 		httpx.Error(w, "publish failed", http.StatusInternalServerError)
 		return
 	}
-	published, err := s.Hub.PublishCommit(ev, d)
-	if err != nil {
+	if _, err := s.publish(r.Context(), ev, d); err != nil {
 		if !errors.Is(err, store.ErrDuplicateClientMsg) {
 			log.Printf("realtime: persist room=%s kind=%s: %v", ev.RoomID, ev.Kind, err)
 		}
@@ -674,21 +673,36 @@ func (s *Service) handleInternalPublish(w http.ResponseWriter, r *http.Request) 
 		httpx.Error(w, "publish failed", http.StatusInternalServerError)
 		return
 	}
-	s.deliverPluginEvent(r.Context(), published)
-	s.onMemberJoined(r.Context(), published)
 	w.WriteHeader(http.StatusOK)
 }
 
-// deliverPluginEvent is the post-publish tap: plugin hook delivery and the
+// publish is realtime's ONE publish of a room event it accepted (a post, an
+// internal ingest, a transient update): the hub's commit (durable kinds
+// stored first, wire.RoomEventKinds), then the post-publish taps on what was
+// delivered — plugin hooks, the notification observer, the member-join
+// share step. Only presence and the roster, which have no request and are
+// announced by the room's owner, publish to the hub directly
+// (publishOwned).
+func (s *Service) publish(ctx context.Context, ev wire.Event, d realtime.Durable) (wire.Event, error) {
+	published, err := s.Hub.PublishCommit(ev, d)
+	if err != nil {
+		return published, err
+	}
+	s.afterPublish(ctx, published)
+	s.onMemberJoined(ctx, published)
+	return published, nil
+}
+
+// afterPublish is the post-publish tap: plugin hook delivery and the
 // notification observer. Both are best-effort and never block the publisher.
 // The people chat never reaches plugin hooks (a plugin is agent-side code);
 // its mentions still notify members.
-func (s *Service) deliverPluginEvent(ctx context.Context, ev wire.Event) {
-	if s.PluginHooks != nil {
+func (s *Service) afterPublish(ctx context.Context, ev wire.Event) {
+	if s.PluginHooks != nil && s.PluginHooks.Hooked(ev.Kind) {
 		people, err := s.isPeopleChannel(ctx, ev.RoomID, ev.ChannelID)
 		if err != nil {
 			log.Printf("realtime: room=%s channel=%s kind lookup failed; skipping plugin hooks: %v", ev.RoomID, ev.ChannelID, err)
-		} else if !people && s.PluginHooks.Hooked(ev.Kind) {
+		} else if !people {
 			s.PluginHooks.Deliver(ctx, s.Membership, ev)
 			// Members owned by other replicas hold their plugin streams
 			// there: hand the event to every peer for its own fan-out.
@@ -868,13 +882,13 @@ func (s *Service) handleDeleteMessage(w http.ResponseWriter, r *http.Request) {
 	s.SearchUpdates.Enqueue(store.MessageKey{TenantID: tenant.FromContext(r.Context()), RoomID: roomID, Seq: seq})
 	// Transient: tell live clients to drop the message. Not persisted (it is not
 	// a chat/agent kind), so history simply omits the deleted row.
-	s.Hub.Publish(wire.Event{
+	_, _ = s.publish(r.Context(), wire.Event{
 		RoomID:    roomID,
 		ChannelID: channelID,
 		Kind:      wire.EventMessageDeleted,
 		Payload:   map[string]any{"sequence": seq},
 		AtUnixMs:  time.Now().UnixMilli(),
-	})
+	}, realtime.Durable{})
 	w.WriteHeader(http.StatusOK)
 }
 
@@ -932,13 +946,13 @@ func (s *Service) handleEditMessage(w http.ResponseWriter, r *http.Request) {
 	// is not a chat/agent kind); history reads the updated row directly.
 	// Scoped to the message's channel: the edited text must not reach a stream
 	// that may not see that channel (the people chat).
-	s.Hub.Publish(wire.Event{
+	_, _ = s.publish(r.Context(), wire.Event{
 		RoomID:    roomID,
 		ChannelID: channelID,
 		Kind:      wire.EventMessageEdited,
 		Payload:   map[string]any{"sequence": seq, "text": text, "editedAtMs": now},
 		AtUnixMs:  now,
-	})
+	}, realtime.Durable{})
 	w.WriteHeader(http.StatusOK)
 }
 
@@ -1035,12 +1049,12 @@ func (s *Service) handleTyping(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, err.Error(), http.StatusNotFound)
 		return
 	}
-	s.Hub.Publish(wire.Event{
+	_, _ = s.publish(r.Context(), wire.Event{
 		RoomID:    roomID,
 		ChannelID: channelID,
 		Kind:      wire.EventPresenceTyping,
 		Payload:   map[string]any{"userId": userID},
 		AtUnixMs:  time.Now().UnixMilli(),
-	})
+	}, realtime.Durable{})
 	w.WriteHeader(http.StatusOK)
 }

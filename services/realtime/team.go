@@ -14,6 +14,7 @@ import (
 	"github.com/luckylhb90/bnbloc/internal/httpx"
 	"github.com/luckylhb90/bnbloc/internal/membership"
 	"github.com/luckylhb90/bnbloc/internal/obs"
+	"github.com/luckylhb90/bnbloc/internal/realtime"
 	"github.com/luckylhb90/bnbloc/internal/store"
 	"github.com/luckylhb90/bnbloc/internal/tenant"
 	"github.com/luckylhb90/bnbloc/internal/wire"
@@ -147,7 +148,7 @@ func (s *Service) handlePutTask(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, "task write failed", http.StatusInternalServerError)
 		return
 	}
-	s.publishTaskUpdated(roomID, stored.ChannelID, wire.TaskUpdatedPayload{Seq: seq, Task: &stored}, now)
+	s.publishTaskUpdated(r.Context(), roomID, stored.ChannelID, wire.TaskUpdatedPayload{Seq: seq, Task: &stored}, now)
 	httpx.WriteJSON(w, http.StatusOK, stored)
 }
 
@@ -172,7 +173,7 @@ func (s *Service) handleDeleteTask(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, "message is not a task", http.StatusNotFound)
 		return
 	}
-	s.publishTaskUpdated(roomID, "", wire.TaskUpdatedPayload{Seq: seq, Removed: true}, time.Now().UnixMilli())
+	s.publishTaskUpdated(r.Context(), roomID, "", wire.TaskUpdatedPayload{Seq: seq, Removed: true}, time.Now().UnixMilli())
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -183,8 +184,8 @@ func (s *Service) handleDeleteTask(w http.ResponseWriter, r *http.Request) {
 // a removal carries only the sequence and is room-wide (channelID "").
 // Transient: persist() only stores chat_message and agent_messages, so it
 // never enters history.
-func (s *Service) publishTaskUpdated(roomID, channelID string, p wire.TaskUpdatedPayload, atMs int64) {
-	s.Hub.Publish(wire.Event{RoomID: roomID, ChannelID: channelID, Kind: wire.EventTaskUpdated, Payload: p, AtUnixMs: atMs})
+func (s *Service) publishTaskUpdated(ctx context.Context, roomID, channelID string, p wire.TaskUpdatedPayload, atMs int64) {
+	_, _ = s.publish(ctx, wire.Event{RoomID: roomID, ChannelID: channelID, Kind: wire.EventTaskUpdated, Payload: p, AtUnixMs: atMs}, realtime.Durable{})
 }
 
 // ----------------------------------------------------------------- search
