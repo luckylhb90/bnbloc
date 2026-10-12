@@ -1,6 +1,7 @@
 package store
 
 import (
+	"encoding/json"
 	"errors"
 	"reflect"
 	"sort"
@@ -140,7 +141,7 @@ func testNotificationStores(t *testing.T, s notificationStores, tid string) {
 	if got := ids(third); !reflect.DeepEqual(got, []string{tid + "-b"}) {
 		t.Fatalf("third claim = %v", got)
 	}
-	if third[0].Attempts != 1 || third[0].LastError != "HTTP 503" || string(third[0].EventJSON) != `{"narrowed":true}` {
+	if third[0].Attempts != 1 || third[0].LastError != "HTTP 503" || !sameJSON(third[0].EventJSON, `{"narrowed":true}`) {
 		t.Fatalf("retry bookkeeping = attempts %d err %q body %s", third[0].Attempts, third[0].LastError, third[0].EventJSON)
 	}
 	// t3 crashes: after the lease lapses another worker re-claims, and t3's
@@ -199,4 +200,14 @@ func testNotificationStores(t *testing.T, s notificationStores, tid string) {
 			t.Fatalf("item %s claimed %d times", id, n)
 		}
 	}
+}
+
+// sameJSON compares an event body semantically: a MySQL JSON column returns
+// it normalized (key order, spacing).
+func sameJSON(got []byte, want string) bool {
+	var a, b any
+	if json.Unmarshal(got, &a) != nil || json.Unmarshal([]byte(want), &b) != nil {
+		return false
+	}
+	return reflect.DeepEqual(a, b)
 }

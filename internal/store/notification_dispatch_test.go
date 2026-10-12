@@ -71,7 +71,7 @@ func testNotificationDispatched(t *testing.T, s NotificationOutboxStore, tid str
 		t.Fatalf("narrow under the kept claim: %v", err)
 	}
 	got := claim("t3", 25000)
-	if len(got) != 1 || string(got[0].EventJSON) != `{"v":3}` || got[0].Attempts != 0 {
+	if len(got) != 1 || !sameJSON(got[0].EventJSON, `{"v":3}`) || got[0].Attempts != 0 {
 		t.Fatalf("deadline claim = %+v", got)
 	}
 	if err := record("t1", NotificationDelivered, 0, ""); !errors.Is(err, ErrNotificationLeaseLost) {

@@ -1340,6 +1340,26 @@ WHERE r.channel_id = '' AND d.user_id IS NULL`)
 			return nil
 		},
 	},
+	{
+		// Schema consistency (docs/prd/2026-10-12-code-health-remediation.md,
+		// 4.5, store L21): room_id is VARCHAR(64) everywhere, and JSON held
+		// in TEXT columns becomes a JSON column (written through jsonArg).
+		id: "2026_10_room_id_width_json_columns",
+		run: func(ctx context.Context, db sqlConn) error {
+			for _, c := range []struct{ table, column, typ, ddl string }{
+				{"content_drafts", "room_id", "varchar(64)", "VARCHAR(64) NOT NULL"},
+				{"content_room_shares", "room_id", "varchar(64)", "VARCHAR(64) NOT NULL"},
+				{"org_sync_subjects", "groups_json", "json", "JSON NOT NULL"},
+				{"notification_prefs", "quiet_rooms", "json", "JSON NOT NULL"},
+				{"notification_outbox", "event_json", "json", "JSON NOT NULL"},
+			} {
+				if err := ensureColumnType(ctx, db, c.table, c.column, c.typ, c.ddl); err != nil {
+					return err
+				}
+			}
+			return nil
+		},
+	},
 }
 
 // sqlConn is the statement surface a migration runs on. runMigrations passes

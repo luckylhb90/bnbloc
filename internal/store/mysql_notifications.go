@@ -54,7 +54,7 @@ func (m *MySQLNotifications) PutNotificationPrefs(ctx context.Context, userID st
 	if p.QuietRooms == nil {
 		p.QuietRooms = []string{}
 	}
-	quiet, err := json.Marshal(p.QuietRooms)
+	quiet, err := jsonArg(p.QuietRooms)
 	if err != nil {
 		return err
 	}
@@ -64,7 +64,7 @@ func (m *MySQLNotifications) PutNotificationPrefs(ctx context.Context, userID st
 		 ON DUPLICATE KEY UPDATE mentions=VALUES(mentions), agent_finished=VALUES(agent_finished), agent_failed=VALUES(agent_failed),
 		   borrow_requests=VALUES(borrow_requests), content_shared=VALUES(content_shared), content_review=VALUES(content_review),
 		   quiet_rooms=VALUES(quiet_rooms), updated_at_ms=VALUES(updated_at_ms)`,
-		tid, userID, p.Mentions, p.AgentFinished, p.AgentFailed, p.BorrowRequests, p.ContentShared, p.ContentReview, string(quiet), p.UpdatedAtMs)
+		tid, userID, p.Mentions, p.AgentFinished, p.AgentFailed, p.BorrowRequests, p.ContentShared, p.ContentReview, quiet, p.UpdatedAtMs)
 	return err
 }
 
@@ -73,10 +73,14 @@ func (m *MySQLNotifications) EnqueueNotification(ctx context.Context, item Notif
 	if err != nil {
 		return false, err
 	}
+	event, err := jsonArg(json.RawMessage(item.EventJSON))
+	if err != nil {
+		return false, err
+	}
 	res, err := m.DB.ExecContext(ctx,
 		`INSERT IGNORE INTO notification_outbox (tenant_id, id, notifier, event_json, attempts, next_attempt_at_ms, claim_token, last_error, created_at_ms)
 		 VALUES (?,?,?,?,0,?,'','',?)`,
-		tid, item.ID, item.Notifier, string(item.EventJSON), item.NextAttemptAtMs, item.CreatedAtMs)
+		tid, item.ID, item.Notifier, event, item.NextAttemptAtMs, item.CreatedAtMs)
 	if err != nil {
 		return false, err
 	}
@@ -129,11 +133,17 @@ func (m *MySQLNotifications) RecordNotificationAttempt(ctx context.Context, a No
 	)
 	const guard = ` WHERE tenant_id=? AND id=? AND notifier=? AND claim_token=? AND delivered_at_ms IS NULL AND failed_at_ms IS NULL`
 	errText := truncateErr(a.Error)
+	var event json.RawMessage
+	if len(a.EventJSON) > 0 {
+		if event, err = jsonArg(json.RawMessage(a.EventJSON)); err != nil {
+			return err
+		}
+	}
 	switch {
 	case a.Outcome == NotificationDispatched && len(a.EventJSON) > 0:
 		// A hand-off keeps the claim (claim_token) and counts no attempt.
 		res, err = m.DB.ExecContext(ctx, `UPDATE notification_outbox SET next_attempt_at_ms=?, event_json=?, last_error=?`+guard,
-			a.NextAttemptAtMs, string(a.EventJSON), errText, a.TenantID, a.ID, a.Notifier, a.Token)
+			a.NextAttemptAtMs, event, errText, a.TenantID, a.ID, a.Notifier, a.Token)
 	case a.Outcome == NotificationDispatched:
 		res, err = m.DB.ExecContext(ctx, `UPDATE notification_outbox SET next_attempt_at_ms=?, last_error=?`+guard,
 			a.NextAttemptAtMs, errText, a.TenantID, a.ID, a.Notifier, a.Token)
@@ -145,7 +155,7 @@ func (m *MySQLNotifications) RecordNotificationAttempt(ctx context.Context, a No
 			a.AtMs, errText, a.TenantID, a.ID, a.Notifier, a.Token)
 	case len(a.EventJSON) > 0:
 		res, err = m.DB.ExecContext(ctx, `UPDATE notification_outbox SET attempts=attempts+1, next_attempt_at_ms=?, event_json=?, last_error=?, claim_token=''`+guard,
-			a.NextAttemptAtMs, string(a.EventJSON), errText, a.TenantID, a.ID, a.Notifier, a.Token)
+			a.NextAttemptAtMs, event, errText, a.TenantID, a.ID, a.Notifier, a.Token)
 	default:
 		res, err = m.DB.ExecContext(ctx, `UPDATE notification_outbox SET attempts=attempts+1, next_attempt_at_ms=?, last_error=?, claim_token=''`+guard,
 			a.NextAttemptAtMs, errText, a.TenantID, a.ID, a.Notifier, a.Token)

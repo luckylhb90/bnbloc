@@ -101,7 +101,7 @@ func (s *MySQLOrgSync) PutOrgSyncSubject(ctx context.Context, sub OrgSyncSubject
 	if groups == nil {
 		groups = []string{}
 	}
-	raw, err := json.Marshal(groups)
+	raw, err := jsonArg(groups)
 	if err != nil {
 		return err
 	}
@@ -110,7 +110,7 @@ INSERT INTO org_sync_subjects (user_id, email, display_name, department, groups_
 VALUES (?, ?, ?, ?, ?, ?)
 ON DUPLICATE KEY UPDATE email = VALUES(email), display_name = VALUES(display_name),
   department = VALUES(department), groups_json = VALUES(groups_json), synced_at_ms = VALUES(synced_at_ms)`,
-		sub.UserID, sub.Email, sub.DisplayName, sub.Department, string(raw), sub.SyncedAtMs)
+		sub.UserID, sub.Email, sub.DisplayName, sub.Department, raw, sub.SyncedAtMs)
 	return err
 }
 

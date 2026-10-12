@@ -40,7 +40,7 @@ CREATE TABLE IF NOT EXISTS org_sync_subjects (
   email         VARCHAR(255) NOT NULL DEFAULT '',
   display_name  VARCHAR(255) NOT NULL DEFAULT '',
   department    VARCHAR(255) NOT NULL DEFAULT '',
-  groups_json   TEXT NOT NULL,
+  groups_json   JSON NOT NULL,
   synced_at_ms  BIGINT NOT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
@@ -560,7 +560,7 @@ CREATE TABLE IF NOT EXISTS notification_prefs (
   borrow_requests TINYINT(1) NOT NULL,
   content_shared  TINYINT(1) NOT NULL DEFAULT 1,
   content_review  TINYINT(1) NOT NULL DEFAULT 1,
-  quiet_rooms     TEXT NOT NULL,
+  quiet_rooms     JSON NOT NULL,
   updated_at_ms   BIGINT NOT NULL,
   PRIMARY KEY (tenant_id, user_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
@@ -569,7 +569,7 @@ CREATE TABLE IF NOT EXISTS notification_outbox (
   tenant_id          VARCHAR(64) NOT NULL,
   id                 VARCHAR(64) NOT NULL,
   notifier           VARCHAR(255) NOT NULL,
-  event_json         TEXT NOT NULL,
+  event_json         JSON NOT NULL,
   attempts           INT NOT NULL DEFAULT 0,
   next_attempt_at_ms BIGINT NOT NULL,
   claim_token        VARCHAR(64) NOT NULL DEFAULT '',
@@ -792,7 +792,7 @@ CREATE TABLE IF NOT EXISTS content_component_versions (
 CREATE TABLE IF NOT EXISTS content_drafts (
   id              VARCHAR(64) PRIMARY KEY,
   tenant_id       VARCHAR(64) NOT NULL,
-  room_id         VARCHAR(128) NOT NULL,
+  room_id         VARCHAR(64) NOT NULL,
   job_id          VARCHAR(64) NOT NULL,
   requester       VARCHAR(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
   author          VARCHAR(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
@@ -866,7 +866,7 @@ CREATE TABLE IF NOT EXISTS content_publish_requests (
 -- gets one too until the author revokes the share. Deleted with the
 -- component.
 CREATE TABLE IF NOT EXISTS content_room_shares (
-  room_id         VARCHAR(128) NOT NULL,
+  room_id         VARCHAR(64) NOT NULL,
   component_id    VARCHAR(64) NOT NULL,
   tenant_id       VARCHAR(64) NOT NULL,
   version         VARCHAR(64) NOT NULL,
