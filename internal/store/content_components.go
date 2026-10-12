@@ -7,6 +7,8 @@ import (
 	"sort"
 	"strings"
 	"sync"
+
+	"github.com/luckylhb90/bnbloc/internal/tenant"
 )
 
 // Content components (docs/prd/2026-10-12-experts-and-teams.md): member-
@@ -18,7 +20,7 @@ import (
 // content_component_uses (where a component is enabled or pinned: for a
 // member, for a room), content_permission_acks (a member confirmed a
 // version's declared permissions) and content_prompt_uses (how often each
-// prompt of a prompt pack was inserted).
+// prompt of a prompt pack was inserted, per organization).
 
 // ContentScope is who sees a content component.
 type ContentScope string
@@ -224,12 +226,15 @@ type ContentComponentStore interface {
 	// ListContentUses returns a scope's uses, oldest first (then by
 	// component id), at most MaxContentList.
 	ListContentUses(ctx context.Context, scopeKind ContentUseScope, scopeID string) ([]ContentUse, error)
-	// CountContentUses returns, per component, how many scopes use it
-	// (room experts excluded; capped at MaxUsageCount, a badge count).
-	CountContentUses(ctx context.Context, componentIDs []string) (map[string]int, error)
-	// CountMemberUses returns, per component, how many members turned it
-	// on for themselves (capped at MaxUsageCount; content_usage.go).
-	CountMemberUses(ctx context.Context, componentIDs []string) (map[string]int, error)
+	// CountContentUses returns, per component, how many of tenant's scopes
+	// use it (room experts excluded; capped at MaxUsageCount, a badge
+	// count). Built-in and platform content is used across tenants; a
+	// count is always one tenant's.
+	CountContentUses(ctx context.Context, tenantID string, componentIDs []string) (map[string]int, error)
+	// CountMemberUses returns, per component, how many of tenant's members
+	// turned it on for themselves (capped at MaxUsageCount;
+	// content_usage.go).
+	CountMemberUses(ctx context.Context, tenantID string, componentIDs []string) (map[string]int, error)
 
 	PutContentAck(ctx context.Context, a ContentAck) error
 	// ListContentAcks returns a member's acks of the given components.
@@ -313,7 +318,7 @@ type MemoryContentComponents struct {
 	versions   map[string][]ContentComponentVersion // component -> oldest first
 	uses       map[string]ContentUse                // scope kind\x00scope id\x00component
 	acks       map[string]ContentAck                // subject\x00component\x00version
-	promptUses map[string]map[string]int64          // component -> prompt -> uses
+	promptUses map[string]map[string]int64          // component -> tenant\x00prompt -> uses
 	requests   map[string]ContentPublishRequest     // request id -> request
 	roomShares map[string]ContentRoomShare          // room\x00component -> share
 	drafts     map[string]ContentDraft              // draft id -> staged draft (content_drafts.go)
@@ -564,7 +569,10 @@ func (s *MemoryContentComponents) ListContentUses(_ context.Context, scopeKind C
 	return out, nil
 }
 
-func (s *MemoryContentComponents) CountContentUses(_ context.Context, componentIDs []string) (map[string]int, error) {
+func (s *MemoryContentComponents) CountContentUses(_ context.Context, tenantID string, componentIDs []string) (map[string]int, error) {
+	if tenantID == "" {
+		return nil, tenant.ErrNoTenant
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	want := map[string]bool{}
@@ -573,7 +581,7 @@ func (s *MemoryContentComponents) CountContentUses(_ context.Context, componentI
 	}
 	out := map[string]int{}
 	for _, u := range s.uses {
-		if want[u.ComponentID] && u.ScopeKind != ContentUseRoomExpert && out[u.ComponentID] < MaxUsageCount {
+		if want[u.ComponentID] && u.TenantID == tenantID && u.ScopeKind != ContentUseRoomExpert && out[u.ComponentID] < MaxUsageCount {
 			out[u.ComponentID]++
 		}
 	}

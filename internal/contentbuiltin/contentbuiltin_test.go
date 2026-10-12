@@ -126,6 +126,17 @@ func TestOverlayListsAndReadsBuiltins(t *testing.T) {
 	if err := st.PutContentUse(ctx, store.ContentUse{ScopeKind: store.ContentUseRoom, ScopeID: "r1", ComponentID: IDPrefix + "nope"}); !errors.Is(err, store.ErrContentNotFound) {
 		t.Fatalf("pin unknown builtin = %v", err)
 	}
+	// So are a built-in pack's prompt uses, counted per organization.
+	starters := IDPrefix + "starters"
+	if err := st.RecordContentPromptUse(ctx, "org-a", starters, "p1", 1); err != nil {
+		t.Fatalf("count a built-in prompt use = %v", err)
+	}
+	if got, err := st.ContentPromptUses(ctx, "org-a", []string{starters}); err != nil || got[starters]["p1"] != 1 {
+		t.Fatalf("built-in prompt uses = %+v, %v", got, err)
+	}
+	if err := st.RecordContentPromptUse(ctx, "org-a", IDPrefix+"nope", "p1", 1); !errors.Is(err, store.ErrContentNotFound) {
+		t.Fatalf("count an unknown built-in's prompt use = %v", err)
+	}
 
 	// Read-only.
 	if err := st.DeleteContentComponent(ctx, BuilderID); !errors.Is(err, ErrReadOnly) {

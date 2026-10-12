@@ -27,16 +27,16 @@ func exerciseMemberUses(t *testing.T, s ContentComponentStore, prefix string) {
 		{ScopeKind: ContentUseRoom, ScopeID: prefix + "-room", ComponentID: expert, Kind: "bnbloc.expert.package/v1"},
 		{ScopeKind: ContentUseRoomExpert, ScopeID: prefix + "-room", ComponentID: expert, Kind: "bnbloc.expert.package/v1"},
 	} {
-		u.CreatedBy, u.CreatedAtMs = "maya", 1
+		u.TenantID, u.CreatedBy, u.CreatedAtMs = prefix+"-t", "maya", 1
 		if err := s.PutContentUse(ctx, u); err != nil {
 			t.Fatalf("put use: %v", err)
 		}
 	}
-	members, err := s.CountMemberUses(ctx, []string{pack, expert})
+	members, err := s.CountMemberUses(ctx, prefix+"-t", []string{pack, expert})
 	if err != nil || members[pack] != 2 || members[expert] != 0 {
 		t.Fatalf("member uses = %+v, %v", members, err)
 	}
-	uses, err := s.CountContentUses(ctx, []string{pack, expert})
+	uses, err := s.CountContentUses(ctx, prefix+"-t", []string{pack, expert})
 	if err != nil || uses[pack] != 3 || uses[expert] != 1 {
 		t.Fatalf("uses = %+v, %v; the room expert is not a second use", uses, err)
 	}

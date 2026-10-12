@@ -814,7 +814,7 @@ CREATE TABLE IF NOT EXISTS content_component_uses (
   created_by      VARCHAR(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
   created_at_ms   BIGINT NOT NULL,
   PRIMARY KEY (scope_kind, scope_id, component_id),
-  KEY idx_content_uses_component (component_id)
+  KEY idx_content_uses_component (component_id, tenant_id, scope_kind)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- A member confirmed the declared permissions of a content component
@@ -869,13 +869,15 @@ CREATE TABLE IF NOT EXISTS content_room_shares (
   KEY idx_content_room_shares_component (component_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
--- Per-prompt use counts of prompt packs: bumped once each time a member
--- inserts the prompt in the composer (never per keystroke); deleted with
--- the component.
+-- Per-prompt use counts of prompt packs, per organization (built-in and
+-- platform packs are used by every organization, and one's counts are not
+-- another's): bumped once each time a member inserts the prompt in the
+-- composer (never per keystroke); deleted with the component.
 CREATE TABLE IF NOT EXISTS content_prompt_uses (
   component_id    VARCHAR(64) NOT NULL,
+  tenant_id       VARCHAR(64) NOT NULL,
   prompt_id       VARCHAR(64) NOT NULL,
   use_count       BIGINT NOT NULL DEFAULT 0,
   last_used_at_ms BIGINT NOT NULL,
-  PRIMARY KEY (component_id, prompt_id)
+  PRIMARY KEY (component_id, tenant_id, prompt_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

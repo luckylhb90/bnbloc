@@ -42,7 +42,7 @@ func (s *Service) applyContentUsage(ctx context.Context, claims auth.Claims, vie
 	members := map[string]int{}
 	if len(packs) > 0 {
 		var err error
-		if members, err = s.ContentComponents.CountMemberUses(ctx, packs); err != nil {
+		if members, err = s.ContentComponents.CountMemberUses(ctx, claims.Tenant, packs); err != nil {
 			return err
 		}
 	}

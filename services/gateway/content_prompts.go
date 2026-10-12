@@ -223,7 +223,7 @@ func (s *Service) handlePromptUse(w http.ResponseWriter, r *http.Request, caller
 		httpx.Error(w, "prompt not found", http.StatusNotFound)
 		return
 	}
-	if err := s.ContentComponents.RecordContentPromptUse(ctx, c.ID, promptID, s.nowTime().UnixMilli()); err != nil {
+	if err := s.ContentComponents.RecordContentPromptUse(ctx, claims.Tenant, c.ID, promptID, s.nowTime().UnixMilli()); err != nil {
 		contentStoreErr(w, "record prompt use failed", err)
 		return
 	}
@@ -255,7 +255,7 @@ func (s *Service) enrichPromptViews(ctx context.Context, claims auth.Claims, roo
 		}
 	}
 	if len(packs) > 0 {
-		counts, err := s.ContentComponents.ContentPromptUses(ctx, packs)
+		counts, err := s.ContentComponents.ContentPromptUses(ctx, claims.Tenant, packs)
 		if err != nil {
 			return fmt.Errorf("prompt use counts: %w", err)
 		}

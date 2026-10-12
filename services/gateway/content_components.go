@@ -263,7 +263,7 @@ func (s *Service) contentViews(ctx context.Context, claims auth.Claims, comps []
 	for _, a := range ackRows {
 		acked[a.ComponentID+"@"+a.Version] = true
 	}
-	counts, err := s.ContentComponents.CountContentUses(ctx, idList)
+	counts, err := s.ContentComponents.CountContentUses(ctx, claims.Tenant, idList)
 	if err != nil {
 		return nil, err
 	}

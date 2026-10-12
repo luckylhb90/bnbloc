@@ -104,7 +104,10 @@ func (s *MySQLBridgeJobs) ExpertUsage(ctx context.Context, expertIDs []string) (
 }
 
 // CountMemberUses implements ContentComponentStore for the memory store.
-func (s *MemoryContentComponents) CountMemberUses(_ context.Context, componentIDs []string) (map[string]int, error) {
+func (s *MemoryContentComponents) CountMemberUses(_ context.Context, tenantID string, componentIDs []string) (map[string]int, error) {
+	if tenantID == "" {
+		return nil, tenant.ErrNoTenant
+	}
 	want := map[string]bool{}
 	for _, id := range componentIDs {
 		want[id] = true
@@ -113,18 +116,19 @@ func (s *MemoryContentComponents) CountMemberUses(_ context.Context, componentID
 	defer s.mu.Unlock()
 	out := map[string]int{}
 	for _, u := range s.uses {
-		if u.ScopeKind == ContentUseMember && want[u.ComponentID] && out[u.ComponentID] < MaxUsageCount {
+		if u.ScopeKind == ContentUseMember && u.TenantID == tenantID && want[u.ComponentID] && out[u.ComponentID] < MaxUsageCount {
 			out[u.ComponentID]++
 		}
 	}
 	return out, nil
 }
 
-// CountMemberUses implements ContentComponentStore for MySQL (on
-// idx_content_uses_component, bounded per component).
-func (s *MySQLContentComponents) CountMemberUses(ctx context.Context, componentIDs []string) (map[string]int, error) {
-	// cross-tenant: content ids are global (platform content spans tenants);
-	// callers decide visibility (extpipe.MemberVisibility).
+// CountMemberUses implements ContentComponentStore for MySQL (tenant's
+// member uses on idx_content_uses_component, bounded per component).
+func (s *MySQLContentComponents) CountMemberUses(ctx context.Context, tenantID string, componentIDs []string) (map[string]int, error) {
+	if tenantID == "" {
+		return nil, tenant.ErrNoTenant
+	}
 	out := map[string]int{}
 	seen := map[string]bool{}
 	for _, id := range componentIDs {
@@ -133,8 +137,8 @@ func (s *MySQLContentComponents) CountMemberUses(ctx context.Context, componentI
 		}
 		seen[id] = true
 		var n int
-		if err := s.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM (SELECT 1 FROM content_component_uses WHERE component_id = ? AND scope_kind = ? LIMIT ?) u`,
-			id, string(ContentUseMember), MaxUsageCount).Scan(&n); err != nil {
+		if err := s.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM (SELECT 1 FROM content_component_uses WHERE component_id = ? AND tenant_id = ? AND scope_kind = ? LIMIT ?) u`,
+			id, tenantID, string(ContentUseMember), MaxUsageCount).Scan(&n); err != nil {
 			return nil, err
 		}
 		if n > 0 {

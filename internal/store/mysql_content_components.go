@@ -7,6 +7,8 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+
+	"github.com/luckylhb90/bnbloc/internal/tenant"
 )
 
 // MySQLContentComponents implements ContentComponentStore over database/sql.
@@ -320,11 +322,13 @@ func (s *MySQLContentComponents) ListContentUses(ctx context.Context, scopeKind 
 	}, string(scopeKind), scopeID, MaxContentList)
 }
 
-// CountContentUses counts on idx_content_uses_component, bounded per
-// component at MaxUsageCount (a badge count, like CountMemberUses).
-func (s *MySQLContentComponents) CountContentUses(ctx context.Context, componentIDs []string) (map[string]int, error) {
-	// cross-tenant: content ids are global (platform content spans tenants);
-	// callers decide visibility (extpipe.MemberVisibility).
+// CountContentUses counts tenant's uses on idx_content_uses_component,
+// bounded per component at MaxUsageCount (a badge count, like
+// CountMemberUses).
+func (s *MySQLContentComponents) CountContentUses(ctx context.Context, tenantID string, componentIDs []string) (map[string]int, error) {
+	if tenantID == "" {
+		return nil, tenant.ErrNoTenant
+	}
 	out := map[string]int{}
 	seen := map[string]bool{}
 	for _, id := range componentIDs {
@@ -333,8 +337,8 @@ func (s *MySQLContentComponents) CountContentUses(ctx context.Context, component
 		}
 		seen[id] = true
 		var n int
-		if err := s.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM (SELECT 1 FROM content_component_uses WHERE component_id = ? AND scope_kind <> ? LIMIT ?) u`,
-			id, string(ContentUseRoomExpert), MaxUsageCount).Scan(&n); err != nil {
+		if err := s.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM (SELECT 1 FROM content_component_uses WHERE component_id = ? AND tenant_id = ? AND scope_kind <> ? LIMIT ?) u`,
+			id, tenantID, string(ContentUseRoomExpert), MaxUsageCount).Scan(&n); err != nil {
 			return nil, err
 		}
 		if n > 0 {

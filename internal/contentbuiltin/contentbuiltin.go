@@ -163,8 +163,9 @@ func Bundle(key string) ([]byte, bool) {
 // Overlay presents the built-in packages on top of a content store. Reads
 // of a built-in id answer from the binary; listings include built-in
 // components when the query asks for the builtin scope or names their ids;
-// writes to a built-in id are refused (ErrReadOnly). Uses and permission
-// acks of built-in components are ordinary rows of the underlying store.
+// writes to a built-in id are refused (ErrReadOnly). Uses, prompt use counts
+// and permission acks of built-in components are ordinary rows of the
+// underlying store.
 func Overlay(st store.ContentComponentStore) store.ContentComponentStore {
 	if st == nil {
 		return nil
@@ -223,6 +224,17 @@ func (o *overlay) PutContentUse(ctx context.Context, u store.ContentUse) error {
 		}
 	}
 	return o.ContentComponentStore.PutContentUse(ctx, u)
+}
+
+// RecordContentPromptUse checks that a built-in pack exists before its
+// prompt use is counted (the store cannot, as for PutContentUse).
+func (o *overlay) RecordContentPromptUse(ctx context.Context, tenantID, componentID, promptID string, atMs int64) error {
+	if IsBuiltinID(componentID) {
+		if _, ok := builtins[componentID]; !ok {
+			return store.ErrContentNotFound
+		}
+	}
+	return o.ContentComponentStore.RecordContentPromptUse(ctx, tenantID, componentID, promptID, atMs)
 }
 
 func (o *overlay) GetContentComponent(ctx context.Context, id string) (store.ContentComponent, error) {

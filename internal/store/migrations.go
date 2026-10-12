@@ -1419,6 +1419,32 @@ WHERE r.channel_id = '' AND d.user_id IS NULL`)
 			return ensureIndexColumns(ctx, db, "agent_jobs", "idx_agent_jobs_owner_status", []string{"owner_user_id", "status", "core", "provider", "not_before_ms"})
 		},
 	},
+	{
+		// Use counts are per organization (docs/bugs/2026-10-13-starters-
+		// and-shared-use-counts.md): built-in and platform content is used
+		// by every organization. content_prompt_uses gains tenant_id in its
+		// key; its counters had none and cannot be attributed to one (that
+		// was the leak), so a table without tenant_id is recreated empty.
+		// The per-tenant counts of content_component_uses read its
+		// component index with the tenant and scope kind.
+		id: "2026_10_content_use_counts_tenant",
+		run: func(ctx context.Context, db sqlConn) error {
+			var n int
+			if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM information_schema.columns
+    WHERE table_schema = DATABASE() AND table_name = 'content_prompt_uses' AND column_name = 'tenant_id'`).Scan(&n); err != nil {
+				return fmt.Errorf("inspect content_prompt_uses: %w", err)
+			}
+			if n == 0 {
+				if _, err := db.ExecContext(ctx, "DROP TABLE IF EXISTS content_prompt_uses"); err != nil {
+					return fmt.Errorf("drop content_prompt_uses: %w", err)
+				}
+				if err := createSchemaTable(ctx, db, "content_prompt_uses"); err != nil {
+					return err
+				}
+			}
+			return ensureIndexColumns(ctx, db, "content_component_uses", "idx_content_uses_component", []string{"component_id", "tenant_id", "scope_kind"})
+		},
+	},
 }
 
 // sqlConn is the statement surface a migration runs on. runMigrations passes

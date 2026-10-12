@@ -142,7 +142,7 @@ func testContentComponentStore(t *testing.T, s ContentComponentStore, prefix str
 		uses[0].CreatedAtMs != 20 || uses[0].TenantID != tid {
 		t.Fatalf("uses after a re-put = %+v, %v; want only the pin changed", uses, err)
 	}
-	counts, err := s.CountContentUses(ctx, []string{c.ID, jack.ID})
+	counts, err := s.CountContentUses(ctx, tid, []string{c.ID, jack.ID})
 	if err != nil || counts[c.ID] != 2 || counts[jack.ID] != 0 {
 		t.Fatalf("counts = %+v, %v", counts, err)
 	}
