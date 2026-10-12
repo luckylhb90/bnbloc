@@ -1202,7 +1202,12 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   let "José" edit "jose"'s message, memory did not).
 - **Store reads report failures; login provisioning never upserts a role.**
   A store operation returns an `error`, and a failed read is never "absent"
-  (`TestStoreReadsReturnErrors`; its allowlist only shrinks). Login
+  (`TestStoreReadsReturnErrors`; its allowlist only shrinks).
+  `TestMySQLReadsReportFailures` calls every operation of every MySQL store
+  on a closed database and requires the error. A MySQL list read goes
+  through `queryAll` (`internal/store/mysql.go`, one `rowScanner` scan
+  func), which returns query, scan and `rows.Err()` failures; a single-row
+  lookup maps only `sql.ErrNoRows` to found=false. Login
   provisioning writes through the insert-only `TenantStore.EnsureMember`, so
   a failed or racing read cannot rewrite an org role.
 - **MySQL counts matched rows** (`clientFoundRows` in `mysqlConfig`): an
