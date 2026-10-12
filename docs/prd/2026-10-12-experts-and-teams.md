@@ -594,3 +594,90 @@ agent. Decisions:
   builder pinned and picked in the composer and the member's own agent
   (else a platform agent) selected. Drafts, tries and history stay out of
   shared rooms.
+
+## Status: step 6 (expert teams) and the step-1 gaps
+
+**2026-10-12: in development.** Scope of this pass: expert teams (section
+8) on the room tools, the expert a dispatch asks for, and the gaps step 1
+left open. MCP tool components (the other half of step 6) are not in it.
+Decisions:
+
+- **A dispatch's expert is already worn** (afa20f8): `ask_agent`'s
+  `expert` goes through `ChatPost.Expert`, resolves as the requester, is
+  pinned on the dispatched job and applied by the target bridge. A team
+  role brings its expert the same way.
+- **The team block.** `team: {lead?, members: [{role, expert,
+  defaultAgent, description?}]}` on an expert. `lead` is the lead's role
+  title (display only, default "lead"); the lead is whichever agent the
+  requester addresses with the team picked. `role` is a name
+  (`[a-z0-9-]`), unique, not the lead's. `expert` is `name@range`.
+  `defaultAgent` is `requester` (the requester's own agent), `platform`
+  (a platform agent added to the room) or `member:<id>` /
+  `member:<id>/<provider>` (that member's agent). 1 to 8 members (8 is
+  `wire.MaxDispatchFanOut`: a lead cannot dispatch more per request). The
+  team expert's `INSTRUCTIONS.md` is the SOP. A member expert that is itself
+  a team is refused when the team resolves (no nesting).
+- **Two resolutions, each in one place.** Member experts resolve as the
+  requester in `contentuse` (highest version satisfying the range among the
+  experts they may use and the room's pinned ones, the rule skill
+  requirements already follow); `GET …/effective` returns them as
+  `team`. Member agents resolve in `internal/expertteam` (pure) against the
+  room's addressable agents, which activity already computes for the agent
+  catalogs (members' live agents plus the room's published platform
+  agents): `requester` excludes the lead's own agent (a self-dispatch is
+  refused), several candidates pick the first by core and provider.
+  Activity serves it as `POST /v1/rooms/{room}/team-plan`, used by the
+  composer (as the caller) and by the lead's bridge (`?job=`, admitted by
+  `store.JobLeasedBy`, resolved as the job's requester).
+- **Run time.** The lead wears the team expert. Its instructions are the
+  SOP plus a generated section: the roster (role → expert → agent handle,
+  online or why not), the capability rule (refuse what no role covers;
+  never improvise a role) and the progress and failure rules. The roster is
+  part of the session's content checksum, so a changed roster starts a new
+  session. The turn binds the resolved roster to the room tools session:
+  `ask_agent(role, task)` dispatches to the role's agent wearing the role's
+  expert and marks the dispatch with the role (`dispatchedBy.role`); an
+  unknown role or an unstaffed one is a tool error naming the roles. A team
+  on a core without room tools is refused with a notice (it cannot
+  dispatch).
+- **Guards in the tool layer:**
+  - `post_progress(text)` posts a progress line as a room notice of the
+    job (its own activity session `job-<id>-progress`, so it never counts
+    as the agent's reply), at most 20 per job, 500 characters each;
+  - a member task still running when `ask_agent` stops waiting posts a
+    notice ("reviewer (jack/codex) has not finished after 10 minutes");
+  - after 3 failed member tasks of one request (refused, failed, timed
+    out or cancelled) `ask_agent` refuses further dispatches with a
+    message telling the lead to stop and report. 3 is a protocol safety
+    constant beside the depth and fan-out limits.
+- **Pre-flight cost estimate.** The team plan carries, per agent, the
+  average reported cost of its last 20 finished runs in the organization
+  (run records' reported usage; runs without a cost do not count) and a
+  total: the lead plus each staffed role once. The composer shows it as a
+  confirmation when a team expert is picked: "about $0.42 per request,
+  based on the last 37 runs"; "cost unknown" for an agent without data;
+  never a guess.
+- **Room expert.** A room's owner or admins may pick one of the room's
+  pinned experts (not a team) as the room expert, stored as a content use
+  of scope `room-expert` (no schema change). Every agent turn in the room
+  wears it, under the chat's own expert when there is one (the room
+  expert's instructions first). It is resolved at turn time like room
+  skill packs, so it is not pinned on the job; unpinning the expert clears
+  it.
+- **Usage counts.** Experts: runs (jobs that wore it) and members
+  (distinct requesters), counted from `agent_jobs` over a new
+  `(tenant_id, expert_id, requester_user_id)` index and capped at
+  `store.MaxUsageCount` per component like unread badges. Skill packs:
+  members who turned the pack on for themselves. Both show on Library
+  cards.
+- **Library form** edits requirements (skill packs and prompt packs by
+  `name@range`, declared permissions), tags, icon and a team's roster.
+- **Live refresh.** A content use change publishes a transient
+  `content_uses_changed` event to the room (the gateway through realtime's
+  internal publish); the composer and room settings refetch the room's
+  uses on it.
+- **`contentMissing`** (requirements no usable package satisfies, from
+  the bridge's job status) shows on the live job line.
+- **Left to others:** the desktop, and confining a borrowed drive on Linux
+  without a sandbox (bubblewrap): someone else's script-bearing content is
+  refused there until it exists.
