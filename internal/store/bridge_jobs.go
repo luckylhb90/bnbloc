@@ -63,9 +63,8 @@ var (
 	sqlLiveJobStatuses     = sqlJobStatuses(liveJobStatuses)
 	sqlPendingJobStatuses  = sqlJobStatuses(pendingJobStatuses)
 	sqlActiveJobStatuses   = sqlJobStatuses(activeJobStatuses)
-	// sqlClaimableJob is claimableJob over agent_jobs columns; its one
-	// argument is the claim's nowMs.
-	sqlClaimableJob = "(status = '" + string(AgentJobQueued) + "' OR (status IN (" + sqlLiveJobStatuses + ") AND lease_expires_at_ms <= ?))"
+	// sqlClaimableJob is claimableJob over agent_jobs columns.
+	sqlClaimableJob = "status = '" + string(AgentJobQueued) + "'"
 )
 
 // sqlJobStatuses renders a status set as a SQL IN-list body.
@@ -87,10 +86,11 @@ func (s AgentJobStatus) Live() bool { return slices.Contains(liveJobStatuses, s)
 // Pending reports a job not started yet (queued, or claimed and not running).
 func (s AgentJobStatus) Pending() bool { return slices.Contains(pendingJobStatuses, s) }
 
-// claimableJob reports whether a bridge may take j at nowMs: it is queued,
-// or live with a lease that expired (liveAt; SQL sqlClaimableJob).
-func claimableJob(j AgentJob, nowMs int64) bool {
-	return j.Status == AgentJobQueued || (j.Status.Live() && !liveAt(j.LeaseExpiresAtMs, nowMs))
+// claimableJob reports whether a bridge may take j: it is queued (SQL
+// sqlClaimableJob). A live job whose lease lapsed is not: the sweep puts it
+// back on the queue first and records the lost attempt (SweepRequest.swept).
+func claimableJob(j AgentJob) bool {
+	return j.Status == AgentJobQueued
 }
 
 type AgentJobFailureReason string
@@ -108,7 +108,14 @@ const (
 	// FailureRunnerFailed: the turn started, or may have (an ambiguous
 	// start); final: a retry would run the prompt twice.
 	FailureRunnerFailed AgentJobFailureReason = "runner_failed"
-	FailureTurnTimeout  AgentJobFailureReason = "turn_timeout"
+	// FailureLeaseExpired: the bridge holding the job stopped renewing its
+	// lease (it quit, restarted or lost the network) and the sweep took the
+	// job back; retryable, final once the attempts are spent.
+	FailureLeaseExpired AgentJobFailureReason = "lease_expired"
+	// FailureSandboxStarting: the agent sandbox the drive must run in was
+	// not up yet (the desktop is still starting its machine); nothing ran,
+	// so it retries.
+	FailureSandboxStarting AgentJobFailureReason = "sandbox_starting"
 	// FailureReplyTimeout: the turn ran and produced no visible reply;
 	// final for the same reason.
 	FailureReplyTimeout AgentJobFailureReason = "reply_timeout"
@@ -136,15 +143,15 @@ const (
 )
 
 // Retryable reports whether a failed job may be attempted again: only when
-// no agent work can have started (the core was unreachable, the start
-// request provably never took effect, the budget could not be checked) or
-// the lease lapsed without a report.
+// no agent work can have started (the core was unreachable, the sandbox was
+// still starting, the start request provably never took effect, the budget
+// could not be checked) or the lease lapsed without a report.
 // Everything else is terminal on the first failure: a deterministic refusal
 // fails the same way again, and a started or ambiguous turn would run the
 // member's prompt twice.
 func (r AgentJobFailureReason) Retryable() bool {
 	switch r {
-	case FailureRunnerStartFailed, FailureCoreUnavailable, FailureTurnTimeout, FailureBudgetUnavailable:
+	case FailureRunnerStartFailed, FailureCoreUnavailable, FailureSandboxStarting, FailureLeaseExpired, FailureBudgetUnavailable:
 		return true
 	default:
 		return false
@@ -166,8 +173,10 @@ func (r AgentJobFailureReason) Text(agent string) string {
 		return the + " is offline: no bridge picked up this request."
 	case FailureBorrowNotAuthorized:
 		return "The owner has not authorized borrowing the " + name + "."
-	case FailureTurnTimeout:
+	case FailureLeaseExpired:
 		return the + " stopped responding and the request was retried without success."
+	case FailureSandboxStarting:
+		return the + " did not run: its agent sandbox was still starting."
 	case FailureReplyTimeout:
 		return the + " stopped responding."
 	case FailureBudgetExhausted:
@@ -274,6 +283,9 @@ type AgentJob struct {
 	RoomExpertID      string `json:"roomExpertId,omitempty"`
 	RoomExpertVersion string `json:"roomExpertVersion,omitempty"`
 	RoomExpertName    string `json:"roomExpertName,omitempty"`
+	// Attempts are the job's earlier attempts that failed and were
+	// requeued, oldest first, at most MaxRecordedAttempts (requeued).
+	Attempts []AgentJobAttempt `json:"attempts,omitempty"`
 }
 
 // BridgeHeartbeat records one desktop bridge's liveness in a tenant.
@@ -374,9 +386,61 @@ func (u JobStatusUpdate) normalize() JobStatusUpdate {
 }
 
 // requeues reports a retryable failure: it goes back on the queue while the
-// job has attempts left.
+// job has attempts left (retries).
 func (u JobStatusUpdate) requeues() bool {
 	return u.Status == AgentJobFailed && u.FailureReason.Retryable()
+}
+
+// retries is the one requeue rule: a job that failed for reason on its
+// attempt-th attempt goes back on the queue when the reason is retryable
+// and the attempt budget is not spent. SQL guards the same budget with
+// "attempt < ?".
+func retries(reason AgentJobFailureReason, attempt, maxAttempts int) bool {
+	return reason.Retryable() && attempt < maxAttempts
+}
+
+// AgentJobAttempt is one earlier attempt of a job: the attempt number, why
+// it failed (a retryable reason) and when it was requeued.
+type AgentJobAttempt struct {
+	Attempt int                   `json:"attempt"`
+	Reason  AgentJobFailureReason `json:"reason"`
+	AtMs    int64                 `json:"atMs"`
+}
+
+// MaxRecordedAttempts bounds a job's attempt history (the newest are kept).
+const MaxRecordedAttempts = 5
+
+// requeued is j put back on the queue after its current attempt failed for
+// reason at nowMs: queued, lease released, the attempt recorded (the last
+// MaxRecordedAttempts kept). It is the one requeue, for a bridge's
+// retryable report and the sweep's lapsed lease alike; the MySQL store
+// writes it with sqlRequeue in the statement that requeues
+// (TestJobRequeueOwned). Diagnostics are the caller's.
+func (j AgentJob) requeued(reason AgentJobFailureReason, nowMs int64) AgentJob {
+	j.Status = AgentJobQueued
+	j.FailureReason = reason
+	j.UpdatedAtMs = nowMs
+	j.LeaseBridgeID = ""
+	j.LeaseExpiresAtMs = 0
+	kept := j.Attempts
+	if len(kept) >= MaxRecordedAttempts {
+		kept = kept[len(kept)-MaxRecordedAttempts+1:]
+	}
+	j.Attempts = append(slices.Clone(kept), AgentJobAttempt{Attempt: j.Attempt, Reason: reason, AtMs: nowMs})
+	return j
+}
+
+// sqlRequeue is AgentJob.requeued over agent_jobs columns: the SET list of
+// a requeue, its arguments requeueArgs. The attempt is appended to
+// attempts_json in the same statement (the oldest dropped at the cap), so
+// no report can slip between the requeue and its record.
+var sqlRequeue = "status='" + string(AgentJobQueued) + "', failure_reason=?, updated_at_ms=?, lease_bridge_id='', lease_expires_at_ms=0, " +
+	"attempts_json=JSON_ARRAY_APPEND(IF(JSON_LENGTH(COALESCE(attempts_json, JSON_ARRAY())) >= " + strconv.Itoa(MaxRecordedAttempts) +
+	", JSON_REMOVE(attempts_json, '$[0]'), COALESCE(attempts_json, JSON_ARRAY())), '$', JSON_OBJECT('attempt', attempt, 'reason', ?, 'atMs', ?))"
+
+// requeueArgs are sqlRequeue's arguments.
+func requeueArgs(reason AgentJobFailureReason, nowMs int64) []any {
+	return []any{string(reason), nowMs, string(reason), nowMs}
 }
 
 // leaseExpiresAt is the job's lease after the update: none once terminal,
@@ -405,9 +469,10 @@ func (r LeaseRenewal) normalize() LeaseRenewal {
 	return r
 }
 
-// SweepRequest fails jobs no worker can finish: queued past QueuedTimeoutMs
-// (nothing advertised the agent) and expired leases past MaxAttempts. Sweeping
-// is cross-tenant maintenance and carries no tenant scope.
+// SweepRequest takes back jobs no worker is finishing: queued past
+// QueuedTimeoutMs (nothing advertised the agent) fail, and an expired lease
+// goes back on the queue while attempts remain (else fails). Sweeping is
+// cross-tenant maintenance and carries no tenant scope.
 type SweepRequest struct {
 	NowMs int64
 	// QueuedTimeoutMs 0 = DefaultQueuedTimeoutMs; MaxAttempts 0 =
@@ -425,22 +490,28 @@ func (r SweepRequest) normalize() SweepRequest {
 	return r
 }
 
-// sweepReason is why a sweep fails j at the (normalized) request's time, or
-// "" when j stays: queued past the queue timeout (no bridge took it), or
-// live with an expired lease on its last attempt (its worker died).
+// sweepReason is why a sweep takes j at the (normalized) request's time,
+// or "" when j stays: queued for the queue timeout (no bridge took it since
+// it entered the queue, its UpdatedAtMs: created or requeued), or live with
+// an expired lease (its worker stopped renewing it).
 func (r SweepRequest) sweepReason(j AgentJob) AgentJobFailureReason {
 	switch {
-	case j.Status == AgentJobQueued && j.CreatedAtMs <= r.queuedBefore():
+	case j.Status == AgentJobQueued && j.UpdatedAtMs <= r.queuedBefore():
 		return FailureNoBridgeOnline
-	case j.Status.Live() && !liveAt(j.LeaseExpiresAtMs, r.NowMs) && j.Attempt >= r.MaxAttempts:
-		return FailureTurnTimeout
+	case j.Status.Live() && !liveAt(j.LeaseExpiresAtMs, r.NowMs):
+		return FailureLeaseExpired
 	}
 	return ""
 }
 
-// failed is a stuck job as the sweep fails it (both backends write it).
-func (r SweepRequest) failed(j AgentJob) AgentJob {
-	j.FailureReason = r.sweepReason(j)
+// swept is a stuck job as the sweep leaves it (both backends write it):
+// requeued while its reason retries, else failed.
+func (r SweepRequest) swept(j AgentJob) AgentJob {
+	reason := r.sweepReason(j)
+	if retries(reason, j.Attempt, r.MaxAttempts) {
+		return j.requeued(reason, r.NowMs)
+	}
+	j.FailureReason = reason
 	j.Status = AgentJobFailed
 	j.UpdatedAtMs = r.NowMs
 	j.FinishedAtMs = r.NowMs
@@ -459,11 +530,13 @@ const (
 	// DefaultLeaseMs bounds how long a claim survives without progress before
 	// another bridge may take the job over.
 	DefaultLeaseMs = 60_000
-	// DefaultQueuedTimeoutMs fails a job nothing ever claimed, so a member sees
+	// DefaultQueuedTimeoutMs fails a job no bridge claimed this long after it
+	// entered the queue (created or requeued), so a member sees
 	// no_bridge_online instead of a job queued forever.
 	DefaultQueuedTimeoutMs = 120_000
-	// DefaultMaxJobAttempts caps lease-expiry re-claims so a job that kills its
-	// worker every time fails instead of looping.
+	// DefaultMaxJobAttempts caps a job's attempts (retryable failures and
+	// lapsed leases), so a job that kills its worker every time fails
+	// instead of looping.
 	DefaultMaxJobAttempts = 3
 )
 
@@ -498,8 +571,9 @@ type BridgeJobStore interface {
 	// RenewAgentJobLease extends the lease the bridge holds (errors as
 	// UpdateAgentJobStatus).
 	RenewAgentJobLease(ctx context.Context, ren LeaseRenewal) error
-	// SweepAgentJobs fails up to MaxSweptJobs stuck jobs (oldest first) of
-	// every tenant (SweepRequest.sweepReason) and returns them.
+	// SweepAgentJobs takes back up to MaxSweptJobs stuck jobs (oldest
+	// first) of every tenant, requeued or failed (SweepRequest.swept), and
+	// returns them.
 	SweepAgentJobs(ctx context.Context, req SweepRequest) ([]AgentJob, error)
 	// PutBridgeHeartbeat records a bridge's liveness (the bridge moves to the
 	// ctx tenant); ErrBridgeOwnerMismatch when another owner holds the id,
@@ -744,7 +818,7 @@ func (s *MemoryBridgeJobs) ClaimAgentJobs(_ context.Context, req ClaimRequest) (
 	}
 	var cands []AgentJob
 	for _, j := range s.jobs {
-		if (req.ServeAllOwners || j.OwnerUserID == req.OwnerUserID) && capable[j.Core+"\x00"+j.Provider] && claimableJob(j, req.NowMs) {
+		if (req.ServeAllOwners || j.OwnerUserID == req.OwnerUserID) && capable[j.Core+"\x00"+j.Provider] && claimableJob(j) {
 			cands = append(cands, j)
 		}
 	}
@@ -790,13 +864,9 @@ func (s *MemoryBridgeJobs) UpdateAgentJobStatus(_ context.Context, upd JobStatus
 	// succeed. A non-retryable cause — an unauthorized borrow, an agent nobody
 	// advertises, an explicit cancel — is final on the first report, because no
 	// retry can change the outcome.
-	if upd.requeues() && j.Attempt < upd.MaxAttempts {
-		j.Status = AgentJobQueued
-		j.FailureReason = upd.FailureReason
+	if upd.requeues() && retries(upd.FailureReason, j.Attempt, upd.MaxAttempts) {
+		j = j.requeued(upd.FailureReason, upd.NowMs)
 		j.DiagnosticsJSON = upd.DiagnosticsJSON
-		j.UpdatedAtMs = upd.NowMs
-		j.LeaseBridgeID = ""
-		j.LeaseExpiresAtMs = 0
 		s.jobs[upd.JobID] = j
 		return j, nil
 	}
@@ -874,7 +944,7 @@ func (s *MemoryBridgeJobs) SweepAgentJobs(_ context.Context, req SweepRequest) (
 	}
 	out := make([]AgentJob, 0, len(stuck))
 	for _, j := range stuck {
-		j = req.failed(j)
+		j = req.swept(j)
 		s.jobs[j.JobID] = j
 		out = append(out, j)
 	}

@@ -73,6 +73,9 @@ func runsFixture(t *testing.T) *Service {
 	}
 	post("/v1/bridge/heartbeat", `{"bridgeId":"b-alice","agents":[{"core":"c1","provider":"codex"}]}`)
 	post("/v1/bridge/jobs/claim", `{"bridgeId":"b-alice","maxJobs":5}`)
+	// The borrowed run's first attempt finds the core down and is retried.
+	post("/v1/bridge/jobs/j-borrow/status", `{"bridgeId":"b-alice","status":"failed","failureReason":"core_unavailable","diagnostics":{"error":"dial tcp: connection refused"}}`)
+	post("/v1/bridge/jobs/claim", `{"bridgeId":"b-alice","maxJobs":5}`)
 	post("/v1/bridge/jobs/j-borrow/status", `{"bridgeId":"b-alice","status":"running"}`)
 	post("/v1/bridge/jobs/j-borrow/status", `{"bridgeId":"b-alice","status":"replied","diagnostics":{"sessionId":"s1",
 		"reply":{"messageId":"m-reply","text":"done","atMs":5000,"count":2},
@@ -160,6 +163,10 @@ func TestRoomRunDetailResolvesReplySeq(t *testing.T) {
 	_ = json.Unmarshal(body, &run)
 	if code != http.StatusOK || run.Reply == nil || run.Reply.RoomSeq != 11 || run.Diagnostics["sessionId"] != "s1" {
 		t.Fatalf("detail = %d %s", code, body)
+	}
+	// The retried first attempt says why, as a reason code.
+	if run.Attempt != 2 || len(run.Attempts) != 1 || run.Attempts[0].Attempt != 1 || run.Attempts[0].Reason != "core_unavailable" || run.Attempts[0].AtMs == 0 {
+		t.Fatalf("detail attempts = %d %+v", run.Attempt, run.Attempts)
 	}
 	// A job of another room is not reachable through this room.
 	if code, _ := getRaw(t, svc, "/v1/rooms/room-1/jobs/j-queued", "alice"); code != http.StatusNotFound {

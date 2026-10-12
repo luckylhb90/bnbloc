@@ -321,6 +321,7 @@ func (v *runViewer) record(j store.AgentJob, detail bool) wire.AgentRun {
 		Status:        string(j.Status),
 		FailureReason: string(j.FailureReason),
 		Attempt:       j.Attempt,
+		Attempts:      j.AttemptViews(),
 		Request: wire.AgentRunRequest{
 			MessageSeq:  j.MessageSeq,
 			ClientMsgID: j.ClientMsgID,

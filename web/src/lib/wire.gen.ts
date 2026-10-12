@@ -56,6 +56,10 @@ export interface AgentJob {
   status: AgentJobStatus;
   failureReason?: AgentJobFailureReason;
   attempt: number;
+  // Attempts are the earlier attempts that failed and were retried,
+  // oldest first (the newest store.MaxRecordedAttempts): why a job is on
+  // attempt 2.
+  attempts?: AgentJobAttempt[];
   createdAtMs: number;
   updatedAtMs: number;
   claimedAtMs?: number;
@@ -84,6 +88,15 @@ export interface AgentJob {
   // ReplySessionID is the activity session a replied job's reply was
   // posted under (notifications pair the reply with its job by it).
   replySessionId?: string;
+}
+
+// AgentJobAttempt is one earlier attempt of a job: its number, the
+// retryable reason it failed for (a code, never the raw diagnostics:
+// decision O4) and when it went back on the queue.
+export interface AgentJobAttempt {
+  attempt: number;
+  reason: AgentJobFailureReason;
+  atMs: number;
 }
 
 // AgentJobsReply is GET /v1/rooms/{id}/agent-jobs.
@@ -183,6 +196,8 @@ export interface AgentRun {
   error?: string;
   warning?: string;
   attempt?: number;
+  // Attempts are the run's earlier attempts and why each was retried.
+  attempts?: AgentJobAttempt[];
   request: AgentRunRequest;
   agent: AgentRunAgent;
   phases: AgentRunPhases;
@@ -3504,8 +3519,8 @@ export const QuotaRequestStatusValues: readonly QuotaRequestStatus[] = ["pending
 export type AgentJobStatus = "queued" | "claimed" | "running" | "reflowing" | "replied" | "failed" | "timed_out" | "cancelled";
 export const AgentJobStatusValues: readonly AgentJobStatus[] = ["queued", "claimed", "running", "reflowing", "replied", "failed", "timed_out", "cancelled"];
 // Why an agent job failed (store.AgentJobFailureReason).
-export type AgentJobFailureReason = "no_bridge_online" | "agent_not_advertised" | "borrow_not_authorized" | "core_unavailable" | "runner_start_failed" | "runner_failed" | "turn_timeout" | "reply_timeout" | "cancelled" | "budget_exhausted" | "budget_unavailable" | "sandbox_required" | "content_unavailable" | "team_unsupported" | "invalid_job";
-export const AgentJobFailureReasonValues: readonly AgentJobFailureReason[] = ["no_bridge_online", "agent_not_advertised", "borrow_not_authorized", "core_unavailable", "runner_start_failed", "runner_failed", "turn_timeout", "reply_timeout", "cancelled", "budget_exhausted", "budget_unavailable", "sandbox_required", "content_unavailable", "team_unsupported", "invalid_job"];
+export type AgentJobFailureReason = "no_bridge_online" | "agent_not_advertised" | "borrow_not_authorized" | "core_unavailable" | "runner_start_failed" | "runner_failed" | "lease_expired" | "sandbox_starting" | "reply_timeout" | "cancelled" | "budget_exhausted" | "budget_unavailable" | "sandbox_required" | "content_unavailable" | "team_unsupported" | "invalid_job";
+export const AgentJobFailureReasonValues: readonly AgentJobFailureReason[] = ["no_bridge_online", "agent_not_advertised", "borrow_not_authorized", "core_unavailable", "runner_start_failed", "runner_failed", "lease_expired", "sandbox_starting", "reply_timeout", "cancelled", "budget_exhausted", "budget_unavailable", "sandbox_required", "content_unavailable", "team_unsupported", "invalid_job"];
 // A member's role in a room (store.Role).
 export type RoomRole = "owner" | "admin" | "member" | "visitor";
 export const RoomRoleValues: readonly RoomRole[] = ["owner", "admin", "member", "visitor"];

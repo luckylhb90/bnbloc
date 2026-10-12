@@ -1404,6 +1404,14 @@ WHERE r.channel_id = '' AND d.user_id IS NULL`)
 			return dropColumnIfExists(ctx, db, "agent_messages", "client_submit_id")
 		},
 	},
+	{
+		// Each requeued attempt of a job, kept with the requeue
+		// (docs/bugs/2026-10-12-retried-job-hides-why.md).
+		id: "2026_10_agent_jobs_attempts",
+		run: func(ctx context.Context, db sqlConn) error {
+			return addColumnIfMissing(ctx, db, "agent_jobs", "attempts_json", "JSON NULL AFTER room_expert_name")
+		},
+	},
 }
 
 // sqlConn is the statement surface a migration runs on. runMigrations passes

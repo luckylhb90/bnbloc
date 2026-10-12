@@ -39,6 +39,7 @@ func (j AgentJob) View() wire.AgentJob {
 		Status:            string(j.Status),
 		FailureReason:     string(j.FailureReason),
 		Attempt:           j.Attempt,
+		Attempts:          j.AttemptViews(),
 		CreatedAtMs:       j.CreatedAtMs,
 		UpdatedAtMs:       j.UpdatedAtMs,
 		ClaimedAtMs:       j.ClaimedAtMs,
@@ -57,6 +58,18 @@ func (j AgentJob) View() wire.AgentJob {
 		ContentMissing:    diag.ContentMissing,
 		ReplySessionID:    diag.SessionID,
 	}
+}
+
+// AttemptViews projects the job's earlier attempts (nil when it has none).
+func (j AgentJob) AttemptViews() []wire.AgentJobAttempt {
+	if len(j.Attempts) == 0 {
+		return nil
+	}
+	out := make([]wire.AgentJobAttempt, len(j.Attempts))
+	for i, a := range j.Attempts {
+		out[i] = wire.AgentJobAttempt{Attempt: a.Attempt, Reason: string(a.Reason), AtMs: a.AtMs}
+	}
+	return out
 }
 
 // AgentJobViews projects a job list.

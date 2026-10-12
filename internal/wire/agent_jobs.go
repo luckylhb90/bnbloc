@@ -22,11 +22,15 @@ type AgentJob struct {
 	Status          string `json:"status" tstype:"AgentJobStatus"`
 	FailureReason   string `json:"failureReason,omitempty" tstype:"AgentJobFailureReason"`
 	Attempt         int    `json:"attempt"`
-	CreatedAtMs     int64  `json:"createdAtMs"`
-	UpdatedAtMs     int64  `json:"updatedAtMs"`
-	ClaimedAtMs     int64  `json:"claimedAtMs,omitempty"`
-	StartedAtMs     int64  `json:"startedAtMs,omitempty"`
-	FinishedAtMs    int64  `json:"finishedAtMs,omitempty"`
+	// Attempts are the earlier attempts that failed and were retried,
+	// oldest first (the newest store.MaxRecordedAttempts): why a job is on
+	// attempt 2.
+	Attempts     []AgentJobAttempt `json:"attempts,omitempty"`
+	CreatedAtMs  int64             `json:"createdAtMs"`
+	UpdatedAtMs  int64             `json:"updatedAtMs"`
+	ClaimedAtMs  int64             `json:"claimedAtMs,omitempty"`
+	StartedAtMs  int64             `json:"startedAtMs,omitempty"`
+	FinishedAtMs int64             `json:"finishedAtMs,omitempty"`
 	// DispatchedByJobID / DispatchDepth: the job whose agent dispatched this
 	// one through the room tools, and the hops from the person's message.
 	DispatchedByJobID string `json:"dispatchedByJobId,omitempty"`
@@ -50,6 +54,15 @@ type AgentJob struct {
 	// ReplySessionID is the activity session a replied job's reply was
 	// posted under (notifications pair the reply with its job by it).
 	ReplySessionID string `json:"replySessionId,omitempty"`
+}
+
+// AgentJobAttempt is one earlier attempt of a job: its number, the
+// retryable reason it failed for (a code, never the raw diagnostics:
+// decision O4) and when it went back on the queue.
+type AgentJobAttempt struct {
+	Attempt int    `json:"attempt"`
+	Reason  string `json:"reason" tstype:"AgentJobFailureReason"`
+	AtMs    int64  `json:"atMs"`
 }
 
 // AgentJobsReply is GET /v1/rooms/{id}/agent-jobs.

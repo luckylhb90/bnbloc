@@ -304,20 +304,33 @@ func TestContractBridgeJobStoreClaimOwnership(t *testing.T) {
 	})
 }
 
-// A claimed job becomes claimable again once its lease has expired: at
-// now == lease expiry (liveAt), not before.
-func TestContractBridgeJobStoreReclaimAfterLeaseExpiry(t *testing.T) {
+// A job whose lease lapsed is not claimable as it stands: the sweep puts it
+// back on the queue once the lease expired (at now == expiry, liveAt, not
+// before), recording the lost attempt as lease_expired, and the next claim
+// is attempt 2.
+func TestContractBridgeJobStoreLapsedLeaseRequeuedBySweep(t *testing.T) {
 	forEachBackend(t, func(t *testing.T, b *Backends) {
 		r, job := claimedRig(t, b) // lease expires at 1020
 		other := &bjRig{b: b, ctx: r.ctx, tid: r.tid, owner: r.owner, bridge: uniq("br2-"), core: r.core, room: r.room}
 		other.beat(t, BridgeOnline, 1000)
 		other.advertise(t, "t1")
-		if got := other.claim(t, 1019, 1); len(got) != 0 {
-			t.Fatalf("claimed a job whose lease is live: %v", jobIDs(got))
+		if got := other.claim(t, 1020, 1); len(got) != 0 {
+			t.Fatalf("claimed a lapsed job the sweep has not requeued: %v", jobIDs(got))
+		}
+		if _, ok := sweepAll(t, b.BridgeJobs, SweepRequest{NowMs: 1019})[job.JobID]; ok {
+			t.Fatal("swept a job whose lease is live")
+		}
+		requeued, ok := sweepAll(t, b.BridgeJobs, SweepRequest{NowMs: 1020})[job.JobID]
+		want := []AgentJobAttempt{{Attempt: 1, Reason: FailureLeaseExpired, AtMs: 1020}}
+		if !ok || requeued.Status != AgentJobQueued || requeued.FailureReason != FailureLeaseExpired || requeued.LeaseBridgeID != "" || requeued.FinishedAtMs != 0 || !slices.Equal(requeued.Attempts, want) {
+			t.Fatalf("lapsed lease at expiry = %+v (swept %v)", requeued, ok)
+		}
+		if got := must(b.AgentRuns().GetAgentRun(r.ctx, job.JobID))(t); got.Status != AgentJobQueued || !slices.Equal(got.Attempts, want) {
+			t.Fatalf("stored requeue = %+v", got)
 		}
 		got := other.claim(t, 1020, 1)
-		if len(got) != 1 || got[0].JobID != job.JobID || got[0].Attempt != 2 || got[0].LeaseBridgeID != other.bridge {
-			t.Fatalf("reclaim at expiry = %+v", got)
+		if len(got) != 1 || got[0].JobID != job.JobID || got[0].Attempt != 2 || got[0].LeaseBridgeID != other.bridge || !slices.Equal(got[0].Attempts, want) {
+			t.Fatalf("reclaim after the requeue = %+v", got)
 		}
 		// The superseded bridge can no longer report or renew.
 		if _, err := r.jobs().UpdateAgentJobStatus(r.ctx, JobStatusUpdate{JobID: job.JobID, BridgeID: r.bridge, Status: AgentJobReplied, NowMs: 1030}); !errors.Is(err, ErrAgentJobLeaseMismatch) {
@@ -415,7 +428,8 @@ func TestContractBridgeJobStoreRetryClassification(t *testing.T) {
 		}{
 			{"runner start failure retries", FailureRunnerStartFailed, 0, AgentJobQueued},
 			{"core unavailable retries", FailureCoreUnavailable, 0, AgentJobQueued},
-			{"turn timeout retries", FailureTurnTimeout, 0, AgentJobQueued},
+			{"a lapsed lease retries", FailureLeaseExpired, 0, AgentJobQueued},
+			{"a starting sandbox retries", FailureSandboxStarting, 0, AgentJobQueued},
 			{"an unreadable budget retries", FailureBudgetUnavailable, 0, AgentJobQueued},
 			{"a started turn is final", FailureRunnerFailed, 0, AgentJobFailed},
 			{"no reply is final", FailureReplyTimeout, 0, AgentJobFailed},
@@ -434,13 +448,69 @@ func TestContractBridgeJobStoreRetryClassification(t *testing.T) {
 					if got.LeaseBridgeID != "" || got.LeaseExpiresAtMs != 0 || got.FinishedAtMs != 0 {
 						t.Fatalf("requeued job still leased or finished: %+v", got)
 					}
+					if want := []AgentJobAttempt{{Attempt: 1, Reason: tc.reason, AtMs: 30}}; !slices.Equal(got.Attempts, want) {
+						t.Fatalf("requeue recorded %+v, want %+v", got.Attempts, want)
+					}
 					if len(again) != 1 {
 						t.Fatal("a requeued job was not claimable again")
 					}
-				} else if len(again) != 0 || got.FinishedAtMs != 30 {
-					t.Fatalf("final job: re-claimed %d, finished %d", len(again), got.FinishedAtMs)
+				} else if len(again) != 0 || got.FinishedAtMs != 30 || len(got.Attempts) != 0 {
+					t.Fatalf("final job: re-claimed %d, finished %d, attempts %+v", len(again), got.FinishedAtMs, got.Attempts)
 				}
 			})
+		}
+	})
+}
+
+// Every requeue records its attempt (a bridge's retryable report and the
+// sweep's lapsed lease alike), the newest MaxRecordedAttempts are kept, and
+// a terminal failure keeps the history.
+func TestContractBridgeJobStoreAttemptHistory(t *testing.T) {
+	forEachBackend(t, func(t *testing.T, b *Backends) {
+		r := newBJRig(b)
+		job := r.put(t, 1, 1)
+		r.beat(t, BridgeOnline, 10)
+		r.advertise(t, "t1")
+		const maxAttempts = MaxRecordedAttempts + 5
+		var want []AgentJobAttempt
+		now := int64(20)
+		for attempt := 1; attempt <= MaxRecordedAttempts+2; attempt++ {
+			now += 10
+			got := r.claim(t, now, 1)
+			if len(got) != 1 || got[0].Attempt != attempt {
+				t.Fatalf("claim of attempt %d = %+v", attempt, got)
+			}
+			reason := []AgentJobFailureReason{FailureSandboxStarting, FailureCoreUnavailable, FailureRunnerStartFailed}[attempt%3]
+			if attempt == 3 {
+				// The lease lapses instead: the sweep requeues it.
+				now = got[0].LeaseExpiresAtMs
+				reason = FailureLeaseExpired
+				if _, ok := sweepAll(t, b.BridgeJobs, SweepRequest{NowMs: now, MaxAttempts: maxAttempts})[job.JobID]; !ok {
+					t.Fatal("the lapsed attempt was not swept")
+				}
+			} else if _, err := r.jobs().UpdateAgentJobStatus(r.ctx, JobStatusUpdate{JobID: job.JobID, BridgeID: r.bridge, Status: AgentJobFailed, FailureReason: reason, NowMs: now, MaxAttempts: maxAttempts}); err != nil {
+				t.Fatal(err)
+			}
+			want = append(want, AgentJobAttempt{Attempt: attempt, Reason: reason, AtMs: now})
+			if len(want) > MaxRecordedAttempts {
+				want = want[1:]
+			}
+			stored := must(b.AgentRuns().GetAgentRun(r.ctx, job.JobID))(t)
+			if stored.Status != AgentJobQueued || !slices.Equal(stored.Attempts, want) {
+				t.Fatalf("after attempt %d: %s %+v, want queued %+v", attempt, stored.Status, stored.Attempts, want)
+			}
+		}
+		if len(want) != MaxRecordedAttempts || want[0].Attempt != 3 {
+			t.Fatalf("test drove %+v; want the cap reached with the oldest dropped", want)
+		}
+		r.claim(t, now+10, 1)
+		final, err := r.jobs().UpdateAgentJobStatus(r.ctx, JobStatusUpdate{JobID: job.JobID, BridgeID: r.bridge, Status: AgentJobFailed, FailureReason: FailureRunnerFailed, NowMs: now + 20, MaxAttempts: maxAttempts})
+		if err != nil || final.Status != AgentJobFailed || !slices.Equal(final.Attempts, want) {
+			t.Fatalf("terminal failure = %+v, %v; want the history %+v kept", final, err, want)
+		}
+		listed, err := r.jobs().ListAgentJobs(r.ctx, r.room, "", 0)
+		if err != nil || len(listed) != 1 || !slices.Equal(listed[0].Attempts, want) {
+			t.Fatalf("listed = %+v, %v", listed, err)
 		}
 	})
 }
@@ -463,11 +533,15 @@ func TestContractBridgeJobStoreRenewLease(t *testing.T) {
 		other := &bjRig{b: b, ctx: r.ctx, owner: r.owner, bridge: uniq("br2-"), core: r.core}
 		other.beat(t, BridgeOnline, 1500)
 		other.advertise(t, "t1")
+		if _, ok := sweepAll(t, b.BridgeJobs, SweepRequest{NowMs: 1500})[job.JobID]; ok {
+			t.Fatal("swept a renewed job")
+		}
 		if got := other.claim(t, 1500, 1); len(got) != 0 {
 			t.Fatalf("renewed job re-claimed: %v", jobIDs(got))
 		}
+		sweepAll(t, b.BridgeJobs, SweepRequest{NowMs: 1900})
 		if got := other.claim(t, 1900, 1); len(got) != 1 {
-			t.Fatal("a lapsed renewal was not re-claimable")
+			t.Fatal("a lapsed renewal was not re-claimable after the sweep")
 		}
 		// LeaseMs 0 renews by DefaultLeaseMs.
 		if err := r.jobs().RenewAgentJobLease(r.ctx, LeaseRenewal{JobID: job.JobID, BridgeID: other.bridge, NowMs: 2000}); err != nil {
@@ -532,13 +606,15 @@ func TestContractBridgeJobStoreSweep(t *testing.T) {
 		q := newBJRig(b)
 		stuck := q.put(t, 1, now-120_000)   // queued exactly the timeout
 		fresh := q.put(t, 2, now-120_000+1) // a millisecond short of it
-		// Live jobs whose lease lapsed: failed only on their last attempt.
+		// Live jobs whose lease lapsed: requeued while attempts remain,
+		// failed on their last attempt with the history kept.
 		l := newBJRig(b)
 		last := l.put(t, 1, 10)
 		l.beat(t, BridgeOnline, 100)
 		l.advertise(t, "t1")
-		l.claim(t, 100, 5)  // attempt 1, lease to 1100
-		l.claim(t, 1100, 5) // lapsed: attempt 2, lease to 2100
+		l.claim(t, 100, 5) // attempt 1, lease to 1100
+		sweepAll(t, b.BridgeJobs, SweepRequest{NowMs: 1100, MaxAttempts: 2})
+		l.claim(t, 1100, 5) // requeued: attempt 2, lease to 2100
 		retry := l.put(t, 2, 1200)
 		l.claim(t, 1200, 5) // attempt 1, lease to 2200
 
@@ -546,19 +622,29 @@ func TestContractBridgeJobStoreSweep(t *testing.T) {
 		if j, ok := swept[stuck.JobID]; !ok || j.Status != AgentJobFailed || j.FailureReason != FailureNoBridgeOnline || j.FinishedAtMs != now || j.UpdatedAtMs != now {
 			t.Fatalf("queued past the timeout = %+v (swept %v)", j, ok)
 		}
-		if j, ok := swept[last.JobID]; !ok || j.FailureReason != FailureTurnTimeout || j.LeaseExpiresAtMs != 0 || j.Attempt != 2 {
+		lost := []AgentJobAttempt{{Attempt: 1, Reason: FailureLeaseExpired, AtMs: 1100}}
+		if j, ok := swept[last.JobID]; !ok || j.Status != AgentJobFailed || j.FailureReason != FailureLeaseExpired || j.LeaseExpiresAtMs != 0 || j.Attempt != 2 || !slices.Equal(j.Attempts, lost) {
 			t.Fatalf("lapsed lease on the last attempt = %+v (swept %v)", j, ok)
 		}
-		for _, j := range []AgentJob{fresh, retry} {
-			if _, ok := swept[j.JobID]; ok {
-				t.Fatalf("swept %s (short of the timeout, or attempts left)", j.JobID)
-			}
+		if j, ok := swept[retry.JobID]; !ok || j.Status != AgentJobQueued || j.FailureReason != FailureLeaseExpired || j.UpdatedAtMs != now || j.LeaseBridgeID != "" {
+			t.Fatalf("lapsed lease with attempts left = %+v (swept %v), want requeued", j, ok)
+		}
+		if _, ok := swept[fresh.JobID]; ok {
+			t.Fatal("swept a job a millisecond short of the queue timeout")
 		}
 		if got := must(b.AgentRuns().GetAgentRun(q.ctx, stuck.JobID))(t); got.Status != AgentJobFailed || got.FailureReason != FailureNoBridgeOnline {
 			t.Fatalf("stored swept job = %+v", got)
 		}
-		if got := must(b.AgentRuns().GetAgentRun(l.ctx, retry.JobID))(t); got.Status != AgentJobClaimed {
-			t.Fatalf("a job with attempts left = %+v, want still claimed (re-claimable)", got)
+		if got := must(b.AgentRuns().GetAgentRun(l.ctx, last.JobID))(t); !slices.Equal(got.Attempts, lost) {
+			t.Fatalf("stored failed job's attempts = %+v, want the history kept", got.Attempts)
+		}
+		// A requeued job's queue time starts at the requeue: it is not failed
+		// as queued-too-long for having been created long ago.
+		if got := must(b.AgentRuns().GetAgentRun(l.ctx, retry.JobID))(t); got.Status != AgentJobQueued {
+			t.Fatalf("requeued job = %+v, want still queued", got)
+		}
+		if j, ok := sweepAll(t, b.BridgeJobs, SweepRequest{NowMs: now + 120_000, QueuedTimeoutMs: 120_000, MaxAttempts: 2})[retry.JobID]; !ok || j.FailureReason != FailureNoBridgeOnline {
+			t.Fatalf("requeued job unclaimed for the queue timeout = %+v (swept %v)", j, ok)
 		}
 	})
 }

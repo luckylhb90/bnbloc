@@ -168,6 +168,46 @@ func TestSweepFailsQueuedJobAndNotifiesRoom(t *testing.T) {
 	}
 }
 
+// A job whose bridge stopped renewing its lease goes back on the queue: the
+// room sees the job update (queued, the lost attempt recorded) and no failure
+// notice, since nothing failed for the member yet.
+func TestSweepRequeuesLapsedLeaseWithoutNotice(t *testing.T) {
+	pub := &capturePublisher{}
+	jobs := store.NewMemoryBridgeJobs()
+	svc := &Service{Store: store.NewMemory(), Publisher: pub, Membership: membership.NewStatic(), BridgeJobs: jobs}
+	ctx := tenant.NewContext(context.Background(), tenant.Default)
+	now := time.Now().UnixMilli()
+	if _, err := jobs.PutAgentJob(ctx, store.AgentJob{JobID: "lapsed", RoomID: "room-9", MessageSeq: 1, OwnerUserID: "maya", Core: "c", Provider: "nimbus", CreatedAtMs: now}); err != nil {
+		t.Fatal(err)
+	}
+	if err := jobs.PutBridgeHeartbeat(ctx, store.BridgeHeartbeat{BridgeID: "br", OwnerUserID: "maya", Status: store.BridgeOnline, LastSeenAtMs: now}); err != nil {
+		t.Fatal(err)
+	}
+	if err := jobs.ReplaceBridgeAgents(ctx, "br", []store.BridgeAgent{{OwnerUserID: "maya", Core: "c", Provider: "nimbus", TargetID: "t"}}); err != nil {
+		t.Fatal(err)
+	}
+	// Claimed with a lease that has already lapsed.
+	if got, err := jobs.ClaimAgentJobs(ctx, store.ClaimRequest{BridgeID: "br", OwnerUserID: "maya", NowMs: now, LeaseMs: 1}); err != nil || len(got) != 1 {
+		t.Fatalf("claim = %v, %v", got, err)
+	}
+	time.Sleep(2 * time.Millisecond)
+
+	svc.SweepAgentJobs(context.Background())
+
+	var job wire.AgentJob
+	for _, ev := range pub.events {
+		switch p := ev.Payload.(type) {
+		case wire.AgentJob:
+			job = p
+		case wire.ReportMessagesInput:
+			t.Fatalf("a requeued job posted a notice: %+v", p)
+		}
+	}
+	if job.Status != string(store.AgentJobQueued) || len(job.Attempts) != 1 || job.Attempts[0].Reason != string(store.FailureLeaseExpired) || job.Attempts[0].Attempt != 1 {
+		t.Fatalf("published job = %+v, want queued with the lapsed attempt recorded", job)
+	}
+}
+
 // Cancelling a live job must stop its worker too: after cancel the bridge that
 // still holds the lease can no longer drive the job to replied, otherwise a
 // cancelled turn would post its answer anyway.

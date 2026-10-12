@@ -109,18 +109,20 @@ type AgentRun struct {
 	RoomName  string `json:"roomName,omitempty"`
 	ChannelID string `json:"channelId,omitempty"`
 	// Requester asked for the run; Borrowed when that is not the agent owner.
-	Requester     string          `json:"requester"`
-	Borrowed      bool            `json:"borrowed,omitempty"`
-	Status        string          `json:"status" tstype:"AgentJobStatus"`
-	FailureReason string          `json:"failureReason,omitempty" tstype:"AgentJobFailureReason"`
-	Error         string          `json:"error,omitempty"`
-	Warning       string          `json:"warning,omitempty"`
-	Attempt       int             `json:"attempt,omitempty"`
-	Request       AgentRunRequest `json:"request"`
-	Agent         AgentRunAgent   `json:"agent"`
-	Phases        AgentRunPhases  `json:"phases"`
-	Reply         *AgentRunReply  `json:"reply,omitempty"`
-	Usage         *AgentRunUsage  `json:"usage,omitempty"`
+	Requester     string `json:"requester"`
+	Borrowed      bool   `json:"borrowed,omitempty"`
+	Status        string `json:"status" tstype:"AgentJobStatus"`
+	FailureReason string `json:"failureReason,omitempty" tstype:"AgentJobFailureReason"`
+	Error         string `json:"error,omitempty"`
+	Warning       string `json:"warning,omitempty"`
+	Attempt       int    `json:"attempt,omitempty"`
+	// Attempts are the run's earlier attempts and why each was retried.
+	Attempts []AgentJobAttempt `json:"attempts,omitempty"`
+	Request  AgentRunRequest   `json:"request"`
+	Agent    AgentRunAgent     `json:"agent"`
+	Phases   AgentRunPhases    `json:"phases"`
+	Reply    *AgentRunReply    `json:"reply,omitempty"`
+	Usage    *AgentRunUsage    `json:"usage,omitempty"`
 	// DispatchedBy is set when an agent dispatched this run through the room
 	// tools (the parent job and the hop depth).
 	DispatchedBy *AgentRunDispatch `json:"dispatchedBy,omitempty"`

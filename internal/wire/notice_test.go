@@ -44,13 +44,13 @@ func TestNoticesCarryKind(t *testing.T) {
 
 func TestJobNoticeShape(t *testing.T) {
 	in := JobNotice{RoomID: "room-1", ChannelID: "ch", JobID: "j1", SourceSeq: 7, Kind: NoticeJobFailed,
-		Text: "failed", OwnerUserID: "maya", Provider: "codex", FailReason: "turn_timeout", Extra: map[string]any{"notice": "spoofed"}}.Report()
+		Text: "failed", OwnerUserID: "maya", Provider: "codex", FailReason: "lease_expired", Extra: map[string]any{"notice": "spoofed"}}.Report()
 	if in.AgentSessionID != JobNoticeSessionID("j1") || len(in.Messages) != 1 || in.Messages[0].Seq != JobNoticeSeq {
 		t.Fatalf("batch = %+v", in)
 	}
 	p := in.Messages[0].Payload.(map[string]any)
 	for k, want := range map[string]any{"notice": NoticeJobFailed, "role": "assistant", "text": "failed", "jobId": "j1",
-		"sourceSeq": int64(7), "ownerUserId": "maya", "provider": "codex", "failReason": "turn_timeout", "messageId": "job-failed-job-j1"} {
+		"sourceSeq": int64(7), "ownerUserId": "maya", "provider": "codex", "failReason": "lease_expired", "messageId": "job-failed-job-j1"} {
 		if p[k] != want {
 			t.Errorf("payload[%s] = %v, want %v", k, p[k], want)
 		}

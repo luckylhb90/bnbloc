@@ -258,9 +258,10 @@ func (s *Service) publishJob(ctx context.Context, job store.AgentJob, now int64)
 	s.Publisher.Publish(tenant.NewContext(ctx, job.TenantID), wire.Event{RoomID: job.RoomID, ChannelID: job.ChannelID, Kind: wire.EventAgentJobUpdated, Payload: job.View(), AtUnixMs: now})
 }
 
-// SweepAgentJobs fails jobs no worker can finish and notifies their rooms. The
-// daemon calls it periodically so a member never waits on a job whose bridge
-// went away.
+// SweepAgentJobs takes back jobs no worker is finishing and tells their
+// rooms: a lapsed lease with attempts left goes back on the queue (the job
+// update says so), anything else fails with a notice. The daemon calls it
+// periodically so a member never waits on a job whose bridge went away.
 func (s *Service) SweepAgentJobs(ctx context.Context) {
 	if s.BridgeJobs == nil {
 		return
@@ -272,7 +273,9 @@ func (s *Service) SweepAgentJobs(ctx context.Context) {
 	}
 	for _, job := range jobs {
 		s.publishJob(ctx, job, now)
-		s.postJobNotice(ctx, job, job.FailureReason.Text(job.Provider), now)
+		if job.Status.Terminal() {
+			s.postJobNotice(ctx, job, job.FailureReason.Text(job.Provider), now)
+		}
 	}
 }
 

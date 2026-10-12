@@ -133,6 +133,7 @@ CREATE TABLE IF NOT EXISTS agent_jobs (
   room_expert_id      VARCHAR(64) NOT NULL DEFAULT '',
   room_expert_version VARCHAR(64) NOT NULL DEFAULT '',
   room_expert_name    VARCHAR(256) NOT NULL DEFAULT '',
+  attempts_json       JSON NULL,
   UNIQUE KEY uq_agent_job_origin (tenant_id, room_id, message_seq, owner_user_id, core, provider),
   KEY idx_agent_jobs_claim (tenant_id, owner_user_id, status, lease_expires_at_ms),
   KEY idx_agent_jobs_room (tenant_id, room_id, channel_id, updated_at_ms),

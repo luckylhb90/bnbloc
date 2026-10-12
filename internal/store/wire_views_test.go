@@ -34,6 +34,31 @@ func TestAgentJobViewProjectsDiagnostics(t *testing.T) {
 	}
 }
 
+// A retried job's member view says why each earlier attempt failed: the
+// reason codes and times, never the diagnostics of those attempts.
+func TestAgentJobViewCarriesAttempts(t *testing.T) {
+	j := AgentJob{JobID: "job-1", Status: AgentJobQueued, Attempt: 1, DiagnosticsJSON: json.RawMessage(`{"error":"dial tcp 127.0.0.1:7777: connection refused"}`)}
+	j = j.requeued(FailureSandboxStarting, 40)
+	j.Attempt = 2
+	j = j.requeued(FailureLeaseExpired, 90)
+	v := j.View()
+	want := `"attempts":[{"attempt":1,"reason":"sandbox_starting","atMs":40},{"attempt":2,"reason":"lease_expired","atMs":90}]`
+	raw, err := json.Marshal(v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), want) {
+		t.Fatalf("view = %s, want %s", raw, want)
+	}
+	if strings.Count(string(raw), "connection refused") > 1 {
+		t.Fatalf("an attempt carries diagnostics: %s", raw)
+	}
+	// A job never retried carries no attempts key at all.
+	if raw, _ := json.Marshal(AgentJob{JobID: "job-2"}.View()); strings.Contains(string(raw), "attempts") {
+		t.Fatalf("fresh job view = %s", raw)
+	}
+}
+
 // An artifact version's member view carries no blob key or tenant.
 func TestArtifactVersionViewHidesStorage(t *testing.T) {
 	v := ArtifactVersion{ArtifactID: "a", TenantID: "org-a", Version: 2, Storage: ArtifactStorageBlob, BlobKey: "sha256/abc", ContentHash: "abc", ThumbnailBlobKey: "sha256/def", Thumbnail: &ArtifactThumbnail{MimeType: "image/png", Width: 1, Height: 1}}
