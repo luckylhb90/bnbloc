@@ -38,9 +38,16 @@ type ContentComponent struct {
 	// declares none).
 	Acked bool `json:"acked"`
 	// Uses counts the members and rooms that enabled or pinned it.
-	Uses        int   `json:"uses"`
-	CreatedAtMs int64 `json:"createdAtMs"`
-	UpdatedAtMs int64 `json:"updatedAtMs"`
+	Uses int `json:"uses"`
+	// Runs counts the agent runs that wore an expert and Members their
+	// distinct requesters; for a pack, Members counts the members who
+	// turned it on for themselves. Each is capped (store.MaxUsageCount).
+	Runs    int `json:"runs"`
+	Members int `json:"members"`
+	// Team is a team expert's roster (as its manifest names it).
+	Team        *ContentTeam `json:"team,omitempty"`
+	CreatedAtMs int64        `json:"createdAtMs"`
+	UpdatedAtMs int64        `json:"updatedAtMs"`
 }
 
 // ContentRequires mirrors a manifest's requires.
@@ -105,6 +112,9 @@ type ContentVersionDetail struct {
 const (
 	ContentUseMember = "member"
 	ContentUseRoom   = "room"
+	// ContentUseRoomExpert is a room's expert: one of its pinned experts
+	// every agent turn in the room wears (scope id = the room).
+	ContentUseRoomExpert = "room-expert"
 )
 
 // ContentUse is where a component is enabled (a member's skill packs, a
@@ -152,6 +162,7 @@ const (
 	ContentSourceExpertNeeds = "expert-requires" // a skill pack the expert requires
 	ContentSourceRoom        = "room"            // a room skill pack
 	ContentSourceMember      = "member"          // the agent owner's skill pack
+	ContentSourceRoomExpert  = "room-expert"     // the room's expert
 )
 
 // ContentRef is one resolved package in effect for a turn.
@@ -174,7 +185,13 @@ type ContentRef struct {
 // packs in effect (room, the agent owner's, the expert's requirements), and
 // requirements no usable package satisfies.
 type ContentEffective struct {
-	Expert     *ContentRef  `json:"expert,omitempty"`
+	Expert *ContentRef `json:"expert,omitempty"`
+	// RoomExpert is the room's expert, worn under the chat's own (absent
+	// when the room has none, or it is the chat's expert).
+	RoomExpert *ContentRef `json:"roomExpert,omitempty"`
+	// Team is the chat expert's roster when it is a team, each member's
+	// expert resolved as the requester.
+	Team       *ContentTeam `json:"team,omitempty"`
 	SkillPacks []ContentRef `json:"skillPacks"`
 	Missing    []string     `json:"missing,omitempty"`
 }

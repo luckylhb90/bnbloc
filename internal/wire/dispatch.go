@@ -31,6 +31,8 @@ type DispatchMarker struct {
 	JobID string `json:"jobId"`
 	Depth int    `json:"depth"`
 	Via   string `json:"via,omitempty"`
+	// Role is the team role the dispatch staffs (a team lead's dispatch).
+	Role string `json:"role,omitempty"`
 }
 
 // DispatchRecipient names the agent a dispatch addresses, in the chat
@@ -52,6 +54,9 @@ type DispatchRequest struct {
 	Text        string            `json:"text"`
 	Expert      *ChatExpert       `json:"expert,omitempty"`
 	ClientMsgID string            `json:"clientMsgId,omitempty"`
+	// Role names the team role the dispatch staffs ([a-z0-9-]); the feed
+	// labels the dispatch with it.
+	Role string `json:"role,omitempty"`
 }
 
 // DispatchReply answers an accepted dispatch: the posted message's room

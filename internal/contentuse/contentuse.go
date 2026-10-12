@@ -130,6 +130,24 @@ func Effective(ctx context.Context, st store.ContentComponentStore, job store.Ag
 	if err != nil {
 		return out, err
 	}
+	// requireSkills adds the skill packs an expert requires, resolved as
+	// the requester; an unmet requirement is reported missing.
+	requireSkills := func(m contentpkg.Manifest) error {
+		for _, req := range m.Requires.Skills {
+			rc, rv, ok, err := resolveReference(ctx, st, requester, job.TenantID, roomUses, req, contentpkg.KindSkill)
+			if err != nil {
+				return err
+			}
+			if !ok {
+				out.Missing = append(out.Missing, req)
+				continue
+			}
+			if err := add(rc, rv, wire.ContentSourceExpertNeeds); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
 	if job.ExpertID != "" {
 		c, v, err := Usable(ctx, st, requester, job.RoomID, job.ExpertID, job.ExpertVersion)
 		switch {
@@ -148,19 +166,35 @@ func Effective(ctx context.Context, st store.ContentComponentStore, job store.Ag
 			if err != nil {
 				return out, err
 			}
-			for _, req := range m.Requires.Skills {
-				rc, rv, ok, err := resolveRequirement(ctx, st, requester, job.TenantID, roomUses, req)
-				if err != nil {
-					return out, err
-				}
-				if !ok {
-					out.Missing = append(out.Missing, req)
-					continue
-				}
-				if err := add(rc, rv, wire.ContentSourceExpertNeeds); err != nil {
+			if err := requireSkills(m); err != nil {
+				return out, err
+			}
+			if m.Team != nil {
+				if out.Team, err = ResolveTeam(ctx, st, requester, job.RoomID, m.Team); err != nil {
 					return out, err
 				}
 			}
+		}
+	}
+	// The room's expert is worn under the chat's own, with what it requires.
+	switch rc, rv, missing, err := roomExpert(ctx, st, requester, job); {
+	case err != nil:
+		return out, err
+	case missing != "":
+		out.Missing = append(out.Missing, missing)
+	case rc.ID != "":
+		ref, err := Ref(rc, rv, wire.ContentSourceRoomExpert)
+		if err != nil {
+			return out, err
+		}
+		out.RoomExpert = &ref
+		seen[rc.ID] = true
+		m, err := Manifest(rv)
+		if err != nil {
+			return out, err
+		}
+		if err := requireSkills(m); err != nil {
+			return out, err
 		}
 	}
 	for _, u := range roomUses {
@@ -209,6 +243,9 @@ func BundleKeys(e wire.ContentEffective) map[string]bool {
 	if e.Expert != nil {
 		keys[e.Expert.BundleKey] = true
 	}
+	if e.RoomExpert != nil {
+		keys[e.RoomExpert.BundleKey] = true
+	}
 	for _, r := range e.SkillPacks {
 		keys[r.BundleKey] = true
 	}
@@ -228,10 +265,11 @@ func pinnedVersion(ctx context.Context, st store.ContentComponentStore, u store.
 	return c, v, err
 }
 
-// resolveRequirement picks, for "name@range", the highest satisfying
-// version among the skill packs of that name the requester may use and the
-// room's skill packs (a room pin fixes its version).
-func resolveRequirement(ctx context.Context, st store.ContentComponentStore, v extpipe.Viewer, tenantID string, roomUses []store.ContentUse, req string) (store.ContentComponent, store.ContentComponentVersion, bool, error) {
+// resolveReference picks, for "name@range", the highest satisfying
+// version among the components of that kind and name the requester may use
+// and the room's (a room pin fixes its version): skill packs an expert
+// requires, experts a team's roles name.
+func resolveReference(ctx context.Context, st store.ContentComponentStore, v extpipe.Viewer, tenantID string, roomUses []store.ContentUse, req, kind string) (store.ContentComponent, store.ContentComponentVersion, bool, error) {
 	ref, err := contentpkg.ParseReference(req)
 	if err != nil {
 		return store.ContentComponent{}, store.ContentComponentVersion{}, false, nil
@@ -242,7 +280,7 @@ func resolveRequirement(ctx context.Context, st store.ContentComponentStore, v e
 	}
 	var cands []cand
 	for _, u := range roomUses {
-		if u.Kind != contentpkg.KindSkill {
+		if u.Kind != kind {
 			continue
 		}
 		c, err := st.GetContentComponent(ctx, u.ComponentID)
@@ -256,7 +294,7 @@ func resolveRequirement(ctx context.Context, st store.ContentComponentStore, v e
 			cands = append(cands, cand{c, u.PinnedVersion})
 		}
 	}
-	own, err := st.ListContentComponents(ctx, store.ContentComponentQuery{TenantID: tenantID, Kind: contentpkg.KindSkill})
+	own, err := st.ListContentComponents(ctx, store.ContentComponentQuery{TenantID: tenantID, Kind: kind})
 	if err != nil {
 		return store.ContentComponent{}, store.ContentComponentVersion{}, false, err
 	}
