@@ -1296,7 +1296,9 @@ WHERE r.channel_id = '' AND d.user_id IS NULL`)
 		// prerequisite, not a backfill.
 		id: "2026_10_tenant_issuer_unique",
 		run: func(ctx context.Context, db sqlConn) error {
-			if _, err := db.ExecContext(ctx, `ALTER TABLE tenants MODIFY COLUMN sso_issuer VARCHAR(255) NULL`); err != nil {
+			// An OIDC issuer is compared as an exact string (OpenID Connect
+			// Discovery), so the key is binary, as the memory store compares.
+			if _, err := db.ExecContext(ctx, `ALTER TABLE tenants MODIFY COLUMN sso_issuer VARCHAR(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NULL`); err != nil {
 				return fmt.Errorf("tenants.sso_issuer nullable: %w", err)
 			}
 			if _, err := db.ExecContext(ctx, `UPDATE tenants SET sso_issuer = NULL WHERE sso_issuer = ''`); err != nil {

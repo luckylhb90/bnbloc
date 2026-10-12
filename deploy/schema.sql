@@ -12,7 +12,7 @@ CREATE TABLE IF NOT EXISTS tenants (
   tenant_id     VARCHAR(64) PRIMARY KEY,
   name          VARCHAR(255) NOT NULL,
   status        ENUM('active','suspended') NOT NULL DEFAULT 'active',
-  sso_issuer    VARCHAR(255) NULL,
+  sso_issuer    VARCHAR(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NULL,
   run_quota     INT NOT NULL DEFAULT 0,
   cost_allowance DECIMAL(18,6) NOT NULL DEFAULT 0,
   require_sandbox_for_borrow TINYINT(1) NOT NULL DEFAULT 0,

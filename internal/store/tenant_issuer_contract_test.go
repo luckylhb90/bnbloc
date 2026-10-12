@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 )
 
@@ -78,6 +79,18 @@ func TestContractTenantIssuerUnique(t *testing.T) {
 		}
 		if got := owner(issuerX); got != nimbus {
 			t.Fatalf("issuer X maps %q; want %s", got, nimbus)
+		}
+
+		// Issuers compare exactly: a case variant is another issuer.
+		upper := strings.ToUpper(issuerY)
+		if got := owner(upper); got != "" {
+			t.Fatalf("issuer %s maps %q; want none (Y differs only in case)", upper, got)
+		}
+		if err := put(orbit, "Orbit", upper); err != nil {
+			t.Fatalf("claim a case variant of a taken issuer: %v", err)
+		}
+		if got := owner(upper); got != orbit {
+			t.Fatalf("issuer %s maps %q; want %s", upper, got, orbit)
 		}
 	})
 }
