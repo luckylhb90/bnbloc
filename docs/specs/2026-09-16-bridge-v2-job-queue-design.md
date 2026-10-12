@@ -325,9 +325,14 @@ on a turn certain to fail the same way.
 
 | Retryable | Terminal on first report |
 | --- | --- |
-| `runner_start_failed`, `runner_killed`, `runner_failed` | `borrow_not_authorized` |
-| `core_unavailable` | `agent_not_advertised` |
-| `turn_timeout`, `reply_timeout` | `no_bridge_online`, `cancelled` |
+| `runner_start_failed` (the start request provably never took effect) | `runner_failed` (the turn started, or may have), `reply_timeout` |
+| `core_unavailable` (unreachable before any agent work) | `borrow_not_authorized`, `agent_not_advertised`, `sandbox_required`, `budget_exhausted` |
+| `turn_timeout` | `content_unavailable`, `team_unsupported`, `invalid_job`, `no_bridge_online`, `cancelled` |
+
+A job is retried only when no agent work can have started: a started or
+ambiguous turn retried would run the member's prompt twice (2026-10-12; the
+bridge classifies a failure by the drive stage it reached,
+`services/bridge/job_failure.go`, and `runner_killed` is gone).
 
 A requeued job keeps its `failure_reason` while sitting back in `queued`, so the
 UI shows it as retrying rather than as a fresh wait or a plain failure.
@@ -413,11 +418,15 @@ User-visible `failure_reason` values:
 - `borrow_not_authorized`
 - `core_unavailable`
 - `runner_start_failed`
-- `runner_killed`
 - `runner_failed`
 - `turn_timeout`
 - `reply_timeout`
 - `cancelled`
+- `budget_exhausted`
+- `sandbox_required`
+- `content_unavailable`
+- `team_unsupported`
+- `invalid_job`
 
 Developer diagnostics (`diagnostics_json`) may include:
 

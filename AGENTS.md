@@ -644,6 +644,17 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   `<vmexec> run [--stdio] -- <word>` as already routed and fail closed with
   exit 2 (the PreToolUse code that blocks; any other non-zero lets the tool
   run on the host).
+- **A job retries only when no agent work can have started.**
+  `store.AgentJobFailureReason.Retryable` owns what retries
+  (`core_unavailable`, `runner_start_failed`, the lease sweep's
+  `turn_timeout`); `services/bridge/job_failure.go` owns which reason a
+  failure gets: deterministic refusals go through `b.refuse` with a final
+  reason (`invalid_job`, `content_unavailable`, `team_unsupported`,
+  `sandbox_required`, …), and a drive error is classified by the stage it
+  reached (`atStage`, `driveFailureReason`): a started or ambiguous turn,
+  and `reply_timeout`, are final, or the prompt runs twice and a borrow is
+  reserved twice. Never classify by error text, and never report a failed
+  status elsewhere (`TestDriveRefusalsAreFinal`).
 - **The bridge MUST send `agentSessionId` when posting a reply to
   `agent-activity/messages`.** Activity dedupes new messages by a
   per-`(room, agentSessionId)` cursor. With the field missing, every session's

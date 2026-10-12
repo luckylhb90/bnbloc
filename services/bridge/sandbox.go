@@ -17,7 +17,6 @@ import (
 
 	corepkg "github.com/luckylhb90/bnbloc/core"
 	coreprotocol "github.com/luckylhb90/bnbloc/core/protocol"
-	"github.com/luckylhb90/bnbloc/internal/store"
 	sandbox "github.com/luckylhb90/bnbloc/sandbox/protocol"
 )
 
@@ -432,11 +431,5 @@ func (b *Bridge) sandboxedAgent(ctx context.Context, coreName string) bool {
 // reservation answered sandboxRequired): a visible sandbox-required notice
 // and the final job failure sandbox_required. Nothing has run.
 func (b *Bridge) refuseUnsandboxed(ctx context.Context, job bridgeJob, owner, coreName, text string) {
-	b.postNotice(ctx, job.ref(), job.RoomID, job.ChannelID, "sandbox-required", map[string]any{
-		"text":        text,
-		"ownerUserId": owner,
-		"provider":    job.Provider,
-		"failReason":  "sandbox_required",
-	})
-	b.reportJobStatus(ctx, job.JobID, store.AgentJobFailed, store.FailureSandboxRequired, map[string]any{"core": coreName, "provider": job.Provider, "requesterUserId": job.RequesterUserID, "error": text})
+	b.refuse(ctx, job, owner, refuseSandboxRequired, text, map[string]any{"core": coreName, "provider": job.Provider, "requesterUserId": job.RequesterUserID})
 }

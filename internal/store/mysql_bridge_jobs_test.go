@@ -343,7 +343,8 @@ func TestMySQLBridgeJobsRetryClassification(t *testing.T) {
 		reason AgentJobFailureReason
 		want   AgentJobStatus
 	}{
-		{"runner-killed", FailureRunnerKilled, AgentJobQueued},
+		{"runner-start-failed", FailureRunnerStartFailed, AgentJobQueued},
+		{"runner-failed", FailureRunnerFailed, AgentJobFailed},
 		{"borrow-not-authorized", FailureBorrowNotAuthorized, AgentJobFailed},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

@@ -617,8 +617,8 @@ func TestClaimOnceFailsJobWithMissingPromptWithoutDriving(t *testing.T) {
 	if !b.claimOnce(context.Background()) {
 		t.Fatal("claimOnce returned false, want one claimed job")
 	}
-	if got := rec.wait(t); got != "failed:runner_failed" {
-		t.Fatalf("statuses = %s, want failed:runner_failed", got)
+	if got := rec.wait(t); got != "failed:invalid_job" {
+		t.Fatalf("statuses = %s, want failed:invalid_job", got)
 	}
 	if atomic.LoadInt64(&createCalls) != 0 {
 		t.Fatal("job with empty messageText drove the local core")

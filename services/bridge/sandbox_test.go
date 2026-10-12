@@ -78,6 +78,8 @@ type sandboxProv struct {
 	inputs        []corepkg.SessionOptions
 	turns         int
 	busy          bool
+	// createErr fails every session create (the turn's start).
+	createErr error
 }
 
 func (p *sandboxProv) Supports(_ context.Context, _ corepkg.Endpoint, c corepkg.Capability) bool {
@@ -99,6 +101,9 @@ func (p *sandboxProv) CreateWorkspaceAt(_ context.Context, _ corepkg.Endpoint, w
 }
 
 func (p *sandboxProv) CreateSession(ctx context.Context, ep corepkg.Endpoint, req corepkg.SessionRequest) (corepkg.SessionResult, error) {
+	if p.createErr != nil {
+		return corepkg.SessionResult{}, p.createErr
+	}
 	p.mu.Lock()
 	p.turns++
 	p.busy = true

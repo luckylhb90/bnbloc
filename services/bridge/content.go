@@ -16,7 +16,6 @@ import (
 
 	corepkg "github.com/luckylhb90/bnbloc/core"
 	"github.com/luckylhb90/bnbloc/internal/contentpkg"
-	"github.com/luckylhb90/bnbloc/internal/store"
 	"github.com/luckylhb90/bnbloc/internal/tarbundle"
 	"github.com/luckylhb90/bnbloc/internal/wire"
 	"github.com/luckylhb90/bnbloc/services/bridge/roomtools"
@@ -378,12 +377,6 @@ func (b *Bridge) jobContentOrRefuse(ctx context.Context, job bridgeJob, owner, c
 	if errors.As(err, &unavailable) {
 		text = "The expert " + unavailable.expert + " is no longer available to " + job.RequesterUserID + ". Nothing ran."
 	}
-	b.postNotice(ctx, job.ref(), job.RoomID, job.ChannelID, "content-unavailable", map[string]any{
-		"text":        text,
-		"ownerUserId": owner,
-		"provider":    job.Provider,
-		"failReason":  "content_unavailable",
-	})
-	b.reportJobStatus(ctx, job.JobID, store.AgentJobFailed, store.FailureRunnerFailed, map[string]any{"core": coreName, "provider": job.Provider, "error": text})
+	b.refuse(ctx, job, owner, refuseContentUnavailable, text, map[string]any{"core": coreName, "provider": job.Provider})
 	return nil, false
 }

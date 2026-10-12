@@ -297,7 +297,7 @@ func TestContentUnavailableExpertRefuses(t *testing.T) {
 	if len(prov.recordedProfiles()) != 0 {
 		t.Fatal("drove a job whose expert is gone")
 	}
-	if st := g.lastStatus(); st["status"] != "failed" {
+	if st := g.lastStatus(); st["status"] != "failed" || st["failureReason"] != "content_unavailable" {
 		t.Fatalf("status = %+v", st)
 	}
 	if n := g.allNotices(); !strings.Contains(n, "The expert Reviewer is no longer available") {

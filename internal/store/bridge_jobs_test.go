@@ -178,7 +178,9 @@ func TestRetryableFailureRequeuesAndNonRetryableIsFinal(t *testing.T) {
 		want    AgentJobStatus
 		claimed int
 	}{
-		{"runner killed retries", FailureRunnerKilled, AgentJobQueued, 1},
+		{"runner start failure retries", FailureRunnerStartFailed, AgentJobQueued, 1},
+		{"a started turn is final", FailureRunnerFailed, AgentJobFailed, 0},
+		{"no reply is final", FailureReplyTimeout, AgentJobFailed, 0},
 		{"core unavailable retries", FailureCoreUnavailable, AgentJobQueued, 1},
 		{"turn timeout retries", FailureTurnTimeout, AgentJobQueued, 1},
 		{"unauthorized borrow is final", FailureBorrowNotAuthorized, AgentJobFailed, 0},
@@ -206,7 +208,7 @@ func TestRetryableFailureRequeuesAndNonRetryableIsFinal(t *testing.T) {
 // up terminal instead of looping forever.
 func TestRetryableFailureBecomesFinalAtAttemptLimit(t *testing.T) {
 	s := claimedJob(t)
-	got, err := s.UpdateAgentJobStatus(bctx(), JobStatusUpdate{JobID: "job-1", BridgeID: "br-1", Status: AgentJobFailed, FailureReason: FailureRunnerKilled, NowMs: 30, MaxAttempts: 1})
+	got, err := s.UpdateAgentJobStatus(bctx(), JobStatusUpdate{JobID: "job-1", BridgeID: "br-1", Status: AgentJobFailed, FailureReason: FailureRunnerStartFailed, NowMs: 30, MaxAttempts: 1})
 	if err != nil {
 		t.Fatal(err)
 	}

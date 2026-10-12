@@ -163,7 +163,7 @@ func TestTeamOnACoreWithoutRoomToolsRefuses(t *testing.T) {
 	if len(prov.recordedPrompts()) != 0 {
 		t.Fatal("drove a team on a core without room tools")
 	}
-	if st := g.lastStatus(); st["status"] != "failed" {
+	if st := g.lastStatus(); st["status"] != "failed" || st["failureReason"] != "team_unsupported" {
 		t.Fatalf("status = %+v", st)
 	}
 	if n := g.allNotices(); !strings.Contains(n, "The team Release team needs an agent that can use the room tools") {

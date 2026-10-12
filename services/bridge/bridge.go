@@ -690,20 +690,20 @@ func (b *Bridge) runBridgeJob(ctx context.Context, job bridgeJob) {
 	defer release()
 	go b.renewLeaseLoop(ctx, job.JobID, func() { b.abortJob(job.JobID, "lease_lost") })
 	text := strings.TrimSpace(job.MessageText)
+	owner := firstNonEmpty(job.OwnerUserID, b.cfg.OwnerSubject)
 	if text == "" && len(job.AttachmentIDs) == 0 {
-		b.reportJobStatus(ctx, job.JobID, store.AgentJobFailed, store.FailureRunnerFailed, map[string]any{"error": "missing messageText"})
+		b.refuse(ctx, job, owner, refuseInvalidJob, "missing messageText", nil)
 		return
 	}
-	owner := firstNonEmpty(job.OwnerUserID, b.cfg.OwnerSubject)
 	coreName, ok := b.resolveCore(job.Core)
 	if !ok {
 		// A job naming a core this bridge does not run must not be driven on a
 		// different core: that silently answers with the wrong agent.
-		b.reportJobStatus(ctx, job.JobID, store.AgentJobFailed, store.FailureAgentNotAdvertised, map[string]any{"core": job.Core, "provider": job.Provider})
+		b.refuse(ctx, job, owner, refuseNotAdvertised, "", map[string]any{"core": job.Core, "provider": job.Provider})
 		return
 	}
 	if b.providerDisabled(coreName, job.Provider) {
-		b.reportJobStatus(ctx, job.JobID, store.AgentJobFailed, store.FailureAgentNotAdvertised, map[string]any{"core": coreName, "provider": job.Provider})
+		b.refuse(ctx, job, owner, refuseNotAdvertised, "", map[string]any{"core": coreName, "provider": job.Provider})
 		return
 	}
 	// The expert and skill packs the turn wears are resolved and verified
@@ -740,7 +740,7 @@ func (b *Bridge) runBridgeJob(ctx context.Context, job bridgeJob) {
 		}
 		if denyReason != "" {
 			b.postBorrowDenied(ctx, job.ref(), job.RoomID, owner, job.Provider, job.ChannelID, denyReason)
-			b.reportJobStatus(ctx, job.JobID, store.AgentJobFailed, store.FailureBorrowNotAuthorized, map[string]any{"core": coreName, "provider": job.Provider, "requesterUserId": job.RequesterUserID, "denyReason": denyReason})
+			b.refuse(ctx, job, owner, refuseBorrowDenied, "", map[string]any{"core": coreName, "provider": job.Provider, "requesterUserId": job.RequesterUserID, "denyReason": denyReason})
 			return
 		}
 		// A platform agent's turn that named no model runs with its host's
@@ -803,8 +803,7 @@ func (b *Bridge) runBridgeJob(ctx context.Context, job bridgeJob) {
 			b.reportJobStatus(ctx, job.JobID, store.AgentJobReplied, "", res.usage.withRunReport(map[string]any{"core": coreName, "provider": job.Provider, "workspaceId": res.workspaceID, "sessionId": res.sessionID, "warning": cleanDriveError(err)}, job.Model))
 			return
 		}
-		reason := classifyJobFailure(err)
-		b.reportJobStatus(ctx, job.JobID, store.AgentJobFailed, reason, res.usage.withRunReport(map[string]any{"core": coreName, "provider": job.Provider, "targetId": target, "error": cleanDriveError(err)}, job.Model))
+		b.failJob(ctx, job.JobID, driveFailureReason(err), res.usage.withRunReport(map[string]any{"core": coreName, "provider": job.Provider, "targetId": target, "error": cleanDriveError(err)}, job.Model))
 		return
 	}
 	if !reflowReported {
@@ -824,7 +823,8 @@ func (b *Bridge) runBridgeJob(ctx context.Context, job bridgeJob) {
 		}
 		return
 	}
-	b.reportJobStatus(ctx, job.JobID, store.AgentJobFailed, store.FailureReplyTimeout, res.usage.withRunReport(map[string]any{"core": coreName, "provider": job.Provider, "workspaceId": res.workspaceID, "sessionId": res.sessionID, "error": "agent turn completed without a visible reply"}, job.Model))
+	// The turn ran (it may have acted) without a visible reply: final.
+	b.failJob(ctx, job.JobID, store.FailureReplyTimeout, res.usage.withRunReport(map[string]any{"core": coreName, "provider": job.Provider, "workspaceId": res.workspaceID, "sessionId": res.sessionID, "error": "agent turn completed without a visible reply"}, job.Model))
 }
 
 // renewLeaseLoop keeps this bridge's lease on a running job alive until the
@@ -903,14 +903,6 @@ func (b *Bridge) reportJobStatus(ctx context.Context, jobID string, status store
 	}
 	_, err := b.gatewayPOST(ctx, "/v1/bridge/jobs/"+url.PathEscape(jobID)+"/status", body)
 	return err
-}
-
-func classifyJobFailure(err error) store.AgentJobFailureReason {
-	msg := strings.ToLower(err.Error())
-	if strings.Contains(msg, "killed") || strings.Contains(msg, "signal") {
-		return store.FailureRunnerKilled
-	}
-	return store.FailureRunnerFailed
 }
 
 // reconcile subscribes to any watched room not already streamed.
@@ -1554,7 +1546,7 @@ func (b *Bridge) driveClaim(ctx context.Context, job jobRef, room, owner, core, 
 		exec, err := prepareExec(ctx)
 		if err != nil {
 			b.postDriveFailed(ctx, job, room, owner, provider, "the agent sandbox could not be prepared: "+err.Error(), channelID)
-			return driveResult{}, err
+			return driveResult{}, atStage(stagePrepare, err)
 		}
 		opts.Execution = exec
 	}
@@ -1569,7 +1561,8 @@ func (b *Bridge) driveClaim(ctx context.Context, job jobRef, room, owner, core, 
 	rs, err := b.ensureSession(ctx, job, room, owner, core, provider, target, channelID, attachmentIDs, promptFn, opts)
 	if err != nil {
 		b.postDriveFailed(ctx, job, room, owner, provider, cleanDriveError(err), channelID)
-		return driveResult{}, err
+		// ensureSession tags its session create (the turn's start) itself.
+		return driveResult{}, atStage(stagePrepare, err)
 	}
 	// If the session was freshly created, the initial prompt already ran; only
 	// send follow-up input for an existing session.
@@ -1579,7 +1572,7 @@ func (b *Bridge) driveClaim(ctx context.Context, job jobRef, room, owner, core, 
 		prompt := b.drivePrompt(ctx, room, owner, core, provider, rs.workspaceID, rs.sessionID, text, rs.written, &rs.roomSession.ctx, false)
 		if err := b.sendInput(ctx, entry, rs.workspaceID, rs.sessionID, prompt, opts); err != nil {
 			b.postDriveFailed(ctx, job, room, owner, provider, cleanDriveError(err), channelID)
-			return driveResult{workspaceID: rs.workspaceID, sessionID: rs.sessionID}, err
+			return driveResult{workspaceID: rs.workspaceID, sessionID: rs.sessionID}, atStage(stageStart, err)
 		}
 	}
 	rs.roomSession.markTurn(deliverableTurn{StartMs: time.Now().UnixMilli(), JobID: job.ID, SourceSeq: job.MessageSeq})
@@ -1598,7 +1591,7 @@ func (b *Bridge) driveClaim(ctx context.Context, job jobRef, room, owner, core, 
 	var usage turnUsage
 	replied, err := b.reflow(ctx, job, room, rs.roomSession, channelID, &usage)
 	b.postSessionState(ctx, room, rs.roomSession, "idle")
-	return driveResult{workspaceID: rs.workspaceID, sessionID: rs.sessionID, replied: replied, usage: usage}, err
+	return driveResult{workspaceID: rs.workspaceID, sessionID: rs.sessionID, replied: replied, usage: usage}, atStage(stageRun, err)
 }
 
 type ensureResult struct {
@@ -1629,7 +1622,7 @@ func (b *Bridge) ensureSession(ctx context.Context, job jobRef, room, owner, cor
 		// Configured but its daemon has not been found yet (it is resolved on
 		// the next roster tick once it is up). Say so instead of failing on an
 		// empty URL.
-		return nil, fmt.Errorf("the %s core is not running on this machine yet", core)
+		return nil, coreNotRunningError{core: core}
 	}
 	key := driveSessionKey(room, core, provider, opts.Execution != nil)
 	contentSum := job.content.contentSum()
@@ -1709,7 +1702,8 @@ func (b *Bridge) ensureSession(ctx context.Context, job jobRef, room, owner, cor
 	if err != nil {
 		rs.release()
 		b.deleteWorkspace(ctx, entry, workspaceID)
-		return nil, fmt.Errorf("create session: %w", err)
+		// The session create carries the initial prompt: the turn's start.
+		return nil, atStage(stageStart, fmt.Errorf("create session: %w", err))
 	}
 	// Under mu: the session's workspace reader (a room tool call during
 	// this first turn) reads it concurrently.

@@ -8,7 +8,6 @@ import (
 
 	corepkg "github.com/luckylhb90/bnbloc/core"
 	"github.com/luckylhb90/bnbloc/internal/expertteam"
-	"github.com/luckylhb90/bnbloc/internal/store"
 	"github.com/luckylhb90/bnbloc/internal/wire"
 	"github.com/luckylhb90/bnbloc/services/bridge/roomtools"
 )
@@ -74,17 +73,16 @@ func (b *Bridge) refuseTeamWithoutTools(ctx context.Context, job bridgeJob, owne
 		return false
 	}
 	entry, ok := b.coreEntry(coreName)
-	if ok && entry.endpoint.OK() && corepkg.Supports(ctx, entry.provider, entry.endpoint, corepkg.CapabilityAgentProfile) {
+	if !ok || !entry.endpoint.OK() {
+		// The core is not reachable: its capabilities are unknown, and the
+		// drive fails retryably as core_unavailable instead.
+		return false
+	}
+	if corepkg.Supports(ctx, entry.provider, entry.endpoint, corepkg.CapabilityAgentProfile) {
 		return false
 	}
 	text := "The team " + firstNonEmpty(c.team.Name, "expert") + " needs an agent that can use the room tools to ask its members; " + job.Provider + " cannot. Nothing ran."
-	b.postNotice(ctx, job.ref(), job.RoomID, job.ChannelID, "team-unsupported", map[string]any{
-		"text":        text,
-		"ownerUserId": owner,
-		"provider":    job.Provider,
-		"failReason":  "team_unsupported",
-	})
-	b.reportJobStatus(ctx, job.JobID, store.AgentJobFailed, store.FailureRunnerFailed, map[string]any{"core": coreName, "provider": job.Provider, "error": text})
+	b.refuse(ctx, job, owner, refuseTeamUnsupported, text, map[string]any{"core": coreName, "provider": job.Provider})
 	return true
 }
 

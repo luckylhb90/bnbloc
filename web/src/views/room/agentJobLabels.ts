@@ -17,13 +17,15 @@ export const AGENT_JOB_FAILURE_LABELS: Record<string, string> = {
   borrow_not_authorized: "not authorized",
   core_unavailable: "core unavailable",
   runner_start_failed: "runner failed to start",
-  runner_killed: "runner was killed",
   runner_failed: "runner failed",
   turn_timeout: "turn timed out",
   reply_timeout: "reply timed out",
   cancelled: "cancelled",
   budget_exhausted: "monthly budget reached",
   sandbox_required: "agent sandbox required",
+  content_unavailable: "expert unavailable",
+  team_unsupported: "team needs the room tools",
+  invalid_job: "nothing to run",
 } as const;
 
 export const LIVE_AGENT_JOB_STATUSES = new Set<AgentJob["status"]>([

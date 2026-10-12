@@ -51,13 +51,20 @@ const (
 	FailureNoBridgeOnline      AgentJobFailureReason = "no_bridge_online"
 	FailureAgentNotAdvertised  AgentJobFailureReason = "agent_not_advertised"
 	FailureBorrowNotAuthorized AgentJobFailureReason = "borrow_not_authorized"
-	FailureCoreUnavailable     AgentJobFailureReason = "core_unavailable"
-	FailureRunnerStartFailed   AgentJobFailureReason = "runner_start_failed"
-	FailureRunnerKilled        AgentJobFailureReason = "runner_killed"
-	FailureRunnerFailed        AgentJobFailureReason = "runner_failed"
-	FailureTurnTimeout         AgentJobFailureReason = "turn_timeout"
-	FailureReplyTimeout        AgentJobFailureReason = "reply_timeout"
-	FailureCancelled           AgentJobFailureReason = "cancelled"
+	// FailureCoreUnavailable: the core could not be reached before any
+	// agent work started (retryable).
+	FailureCoreUnavailable AgentJobFailureReason = "core_unavailable"
+	// FailureRunnerStartFailed: the request that starts the turn provably
+	// never took effect (retryable).
+	FailureRunnerStartFailed AgentJobFailureReason = "runner_start_failed"
+	// FailureRunnerFailed: the turn started, or may have (an ambiguous
+	// start); final: a retry would run the prompt twice.
+	FailureRunnerFailed AgentJobFailureReason = "runner_failed"
+	FailureTurnTimeout  AgentJobFailureReason = "turn_timeout"
+	// FailureReplyTimeout: the turn ran and produced no visible reply;
+	// final for the same reason.
+	FailureReplyTimeout AgentJobFailureReason = "reply_timeout"
+	FailureCancelled    AgentJobFailureReason = "cancelled"
 	// FailureBudgetExhausted: the agent owner's (or the tenant's) monthly
 	// usage budget is reached with hard stop on (R12); final, not retried.
 	FailureBudgetExhausted AgentJobFailureReason = "budget_exhausted"
@@ -65,16 +72,26 @@ const (
 	// the owner's agent sandbox and it is off / not ready / unsupported by
 	// the agent's core; final (a new message retries once the owner fixes it).
 	FailureSandboxRequired AgentJobFailureReason = "sandbox_required"
+	// FailureContentUnavailable: the job names an expert its requester can
+	// no longer wear; final.
+	FailureContentUnavailable AgentJobFailureReason = "content_unavailable"
+	// FailureTeamUnsupported: a team job on an agent that cannot use the
+	// room tools; final.
+	FailureTeamUnsupported AgentJobFailureReason = "team_unsupported"
+	// FailureInvalidJob: the job itself cannot be driven (no text and no
+	// attachment); final.
+	FailureInvalidJob AgentJobFailureReason = "invalid_job"
 )
 
-// Retryable reports whether a failed job may be attempted again. A cause the
-// next attempt cannot change — an unauthorized borrow, an agent nobody
-// advertises, an explicit cancel — is terminal on the first failure; retrying it
-// only burns a worker slot on a turn that is certain to fail the same way.
+// Retryable reports whether a failed job may be attempted again: only when
+// no agent work can have started (the core was unreachable, the start
+// request provably never took effect) or the lease lapsed without a report.
+// Everything else is terminal on the first failure: a deterministic refusal
+// fails the same way again, and a started or ambiguous turn would run the
+// member's prompt twice.
 func (r AgentJobFailureReason) Retryable() bool {
 	switch r {
-	case FailureRunnerKilled, FailureRunnerFailed, FailureRunnerStartFailed,
-		FailureCoreUnavailable, FailureTurnTimeout, FailureReplyTimeout:
+	case FailureRunnerStartFailed, FailureCoreUnavailable, FailureTurnTimeout:
 		return true
 	default:
 		return false
