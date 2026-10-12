@@ -2,66 +2,51 @@ package store
 
 import (
 	"context"
-	"strconv"
 	"testing"
 )
 
-// TenantUsage sums runs_used and cost_used across every grant of a tenant,
-// spanning rooms, and never leaks another tenant's usage.
-func TestTenantUsageAggregatesAndIsolates(t *testing.T) {
-	ca, cb := tenantCtx(tenantA), tenantCtx(tenantB)
-	g := NewMemoryGrant()
-
-	// Two grants for tenant A across two different rooms.
-	if err := g.PutGrant(ca, Grant{GrantID: "A1", RoomID: "r1", TargetID: "shared-agent:*", OwnerUserID: "alice", GranteeUserID: "*", CreatedAtMs: 1}); err != nil {
-		t.Fatalf("put A1: %v", err)
-	}
-	if err := g.PutGrant(ca, Grant{GrantID: "A2", RoomID: "r2", TargetID: "shared-agent:*", OwnerUserID: "alice", GranteeUserID: "*", CreatedAtMs: 1}); err != nil {
-		t.Fatalf("put A2: %v", err)
-	}
-	// One grant for tenant B that must never contribute to A's totals.
-	if err := g.PutGrant(cb, Grant{GrantID: "B1", RoomID: "r1", TargetID: "shared-agent:*", OwnerUserID: "bob", GranteeUserID: "*", CreatedAtMs: 1}); err != nil {
-		t.Fatalf("put B1: %v", err)
-	}
-
-	// A: 2 runs @1.50 in r1, 1 run @0.25 in r2 -> 3 runs, 3.25 cost.
-	n := 0
-	run := func(ctx context.Context, grantID string, cost float64) {
-		t.Helper()
-		n++
-		rid := "rsv-" + strconv.Itoa(n)
-		if _, err := g.ReserveRun(ctx, RunReservation{ReservationID: rid, GrantID: grantID, RoomID: "r1", OwnerUserID: "o", BorrowerUserID: "b", AtMs: 1}); err != nil {
-			t.Fatalf("reserve %s: %v", grantID, err)
+// TenantUsage sums runs_used and cost_used across every owner-issued grant
+// of a tenant, spanning rooms, and never leaks another tenant's usage.
+func TestContractGrantStoreTenantUsage(t *testing.T) {
+	forEachBackend(t, func(t *testing.T, b *Backends) {
+		g := b.Grant
+		ca, cb := tenantCtx(uniq("t-usage-a-")), tenantCtx(uniq("t-usage-b-"))
+		put := func(ctx context.Context, id, room string) {
+			t.Helper()
+			if err := g.PutGrant(ctx, Grant{GrantID: id, RoomID: room, TargetID: "shared-agent:*", OwnerUserID: "maya", GranteeUserID: "*", CreatedAtMs: 1}); err != nil {
+				t.Fatalf("put %s: %v", id, err)
+			}
 		}
-		if err := g.SettleRun(ctx, grantID, rid, RunUsage{Cost: &cost}, 2); err != nil {
-			t.Fatalf("settle %s: %v", grantID, err)
+		a1, a2, b1 := uniq("g-a1-"), uniq("g-a2-"), uniq("g-b1-")
+		put(ca, a1, "r1")
+		put(ca, a2, "r2")
+		put(cb, b1, "r1")
+		run := func(ctx context.Context, grant string, cost float64) {
+			t.Helper()
+			rid := uniq("rsv-")
+			if _, err := g.ReserveRun(ctx, RunReservation{ReservationID: rid, GrantID: grant, RoomID: "r1", OwnerUserID: "maya", BorrowerUserID: "jack", AtMs: 10}); err != nil {
+				t.Fatalf("reserve on %s: %v", grant, err)
+			}
+			if err := g.SettleRun(ctx, grant, rid, RunUsage{Cost: &cost}, 20); err != nil {
+				t.Fatalf("settle on %s: %v", grant, err)
+			}
 		}
-	}
-	run(ca, "A1", 1.50)
-	run(ca, "A1", 1.50)
-	run(ca, "A2", 0.25)
-	for range 5 {
-		run(cb, "B1", 2.00)
-	}
-
-	runs, cost, _ := g.TenantUsage(ca)
-	if runs != 3 {
-		t.Fatalf("tenant A runs = %d, want 3", runs)
-	}
-	if cost != 3.25 {
-		t.Fatalf("tenant A cost = %v, want 3.25", cost)
-	}
-
-	bruns, bcost, _ := g.TenantUsage(cb)
-	if bruns != 5 {
-		t.Fatalf("tenant B runs = %d, want 5", bruns)
-	}
-	if bcost != 10.0 {
-		t.Fatalf("tenant B cost = %v, want 10.0", bcost)
-	}
-
-	// No tenant in context is an error, never a cross-tenant leak.
-	if runs, cost, err := g.TenantUsage(bg()); err == nil || runs != 0 || cost != 0 {
-		t.Fatalf("usage without tenant = (%d,%v), want (0,0) and an error", runs, cost)
-	}
+		// A: 2 runs @1.50 in r1, 1 run @0.25 in r2 -> 3 runs, 3.25 cost.
+		run(ca, a1, 1.5)
+		run(ca, a1, 1.5)
+		run(ca, a2, 0.25)
+		for range 5 {
+			run(cb, b1, 2)
+		}
+		if runs, cost, err := g.TenantUsage(ca); err != nil || runs != 3 || cost != 3.25 {
+			t.Fatalf("tenant A usage = %d, %v, %v; want 3, 3.25", runs, cost, err)
+		}
+		if runs, cost, err := g.TenantUsage(cb); err != nil || runs != 5 || cost != 10 {
+			t.Fatalf("tenant B usage = %d, %v, %v; want 5, 10", runs, cost, err)
+		}
+		// No tenant in context is an error, never a cross-tenant leak.
+		if runs, cost, err := g.TenantUsage(bg()); err == nil || runs != 0 || cost != 0 {
+			t.Fatalf("usage without tenant = (%d,%v), want (0,0) and an error", runs, cost)
+		}
+	})
 }

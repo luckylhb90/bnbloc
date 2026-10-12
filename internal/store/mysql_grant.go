@@ -43,8 +43,8 @@ func (s *MySQLGrant) PutGrant(ctx context.Context, g Grant) error {
 		  revoked_at_ms = VALUES(revoked_at_ms),
 		  runs_used = VALUES(runs_used), cost_used = VALUES(cost_used)`,
 		g.GrantID, tnt, g.RoomID, g.TargetID, g.OwnerUserID, g.GranteeUserID, models,
-		caps, nullInt(g.RunQuota), nullFloat(g.CostAllowance), g.MaxConcurrent, nullInt64(g.ResetAtMs),
-		g.RunsUsed, g.CostUsed, nullInt64(g.RevokedAtMs), nullInt64(g.ExpiresAtMs), g.CreatedAtMs, g.Source, g.CreatedBy)
+		caps, nullPtr(g.RunQuota), nullPtr(g.CostAllowance), g.MaxConcurrent, nullPtr(g.ResetAtMs),
+		g.RunsUsed, g.CostUsed, nullPtr(g.RevokedAtMs), nullPtr(g.ExpiresAtMs), g.CreatedAtMs, g.Source, g.CreatedBy)
 	return err
 }
 
@@ -91,18 +91,8 @@ func scanGrant(row rowScanner) (Grant, error) {
 		v := int(runQuota.Int64)
 		g.RunQuota = &v
 	}
-	if costAllowance.Valid {
-		g.CostAllowance = &costAllowance.Float64
-	}
-	if resetAt.Valid {
-		g.ResetAtMs = &resetAt.Int64
-	}
-	if revokedAt.Valid {
-		g.RevokedAtMs = &revokedAt.Int64
-	}
-	if expiresAt.Valid {
-		g.ExpiresAtMs = &expiresAt.Int64
-	}
+	g.CostAllowance = validFloat(costAllowance)
+	g.ResetAtMs, g.RevokedAtMs, g.ExpiresAtMs = validInt64(resetAt), validInt64(revokedAt), validInt64(expiresAt)
 	return g, nil
 }
 
@@ -116,10 +106,7 @@ func (s *MySQLGrant) RevokeGrant(ctx context.Context, grantID string, atMs int64
 	if err != nil {
 		return err
 	}
-	if n, _ := res.RowsAffected(); n == 0 {
-		return ErrGrantNotFound
-	}
-	return nil
+	return requireMatched(res, ErrGrantNotFound)
 }
 
 // TenantUsage sums runs_used and cost_used across the ctx tenant's
@@ -150,72 +137,72 @@ func (s *MySQLGrant) AppendAudit(ctx context.Context, rec AuditRecord) error {
 		`INSERT INTO shared_agent_audit
 		 (tenant_id, room_id, grant_id, actor_user_id, owner_user_id, action, decision, deny_reason, model, channel_id, at_ms, cost, input_tokens, output_tokens)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		tnt, rec.RoomID, nullStr(rec.GrantID), rec.ActorUserID, rec.OwnerUserID, rec.Action,
-		rec.Decision, nullStr(rec.DenyReason), nullStr(rec.Model), rec.ChannelID, rec.AtMs, nullFloat(rec.Cost),
-		nullInt64(rec.InputTokens), nullInt64(rec.OutputTokens))
+		tnt, rec.RoomID, nullIfZero(rec.GrantID), rec.ActorUserID, rec.OwnerUserID, rec.Action,
+		rec.Decision, nullIfZero(rec.DenyReason), nullIfZero(rec.Model), rec.ChannelID, rec.AtMs, nullPtr(rec.Cost),
+		nullPtr(rec.InputTokens), nullPtr(rec.OutputTokens))
 	return err
 }
 
-// auditRecordColumns is the column list scanAuditRecord reads, in its order.
-const auditRecordColumns = `room_id, COALESCE(grant_id,''), actor_user_id, owner_user_id, action, decision,
-		        COALESCE(deny_reason,''), COALESCE(model,''), COALESCE(channel_id,''), at_ms`
+// auditRecordColumns is the column list scanAuditRecord reads, in its order:
+// every column of a record.
+const auditRecordColumns = `audit_id, tenant_id, room_id, COALESCE(grant_id,''), actor_user_id, owner_user_id, action, decision,
+		        COALESCE(deny_reason,''), COALESCE(model,''), channel_id, at_ms, cost, input_tokens, output_tokens,
+		        COALESCE(reservation_id,''), settled_at_ms`
 
 // scanAuditRecord reads one auditRecordColumns row.
 func scanAuditRecord(row rowScanner) (AuditRecord, error) {
 	var r AuditRecord
-	err := row.Scan(&r.RoomID, &r.GrantID, &r.ActorUserID, &r.OwnerUserID, &r.Action,
-		&r.Decision, &r.DenyReason, &r.Model, &r.ChannelID, &r.AtMs)
-	return r, err
+	var cost sql.NullFloat64
+	var inTok, outTok, settled sql.NullInt64
+	if err := row.Scan(&r.ID, &r.TenantID, &r.RoomID, &r.GrantID, &r.ActorUserID, &r.OwnerUserID, &r.Action,
+		&r.Decision, &r.DenyReason, &r.Model, &r.ChannelID, &r.AtMs, &cost, &inTok, &outTok,
+		&r.ReservationID, &settled); err != nil {
+		return AuditRecord{}, err
+	}
+	r.Cost = validFloat(cost)
+	r.InputTokens, r.OutputTokens, r.SettledAtMs = validInt64(inTok), validInt64(outTok), validInt64(settled)
+	return r, nil
 }
 
-// AuditRecords returns a room's audit records newest-first. limit<=0 defaults
-// to 100 (capped at 500); beforeAtMs>0 keeps only records strictly older than
-// that timestamp for cursor pagination.
-func (s *MySQLGrant) AuditRecords(ctx context.Context, roomID string, limit int, beforeAtMs int64) ([]AuditRecord, error) {
+// validFloat reads a nullable DECIMAL column (nil = NULL).
+func validFloat(v sql.NullFloat64) *float64 {
+	if !v.Valid {
+		return nil
+	}
+	return &v.Float64
+}
+
+// validInt64 reads a nullable BIGINT column (nil = NULL).
+func validInt64(v sql.NullInt64) *int64 {
+	if !v.Valid {
+		return nil
+	}
+	return &v.Int64
+}
+
+// AuditRecords returns one page of the ctx tenant's borrow audit trail (see
+// GrantStore; idx_audit_room_time for a room, idx_audit_tenant_time for the
+// tenant).
+func (s *MySQLGrant) AuditRecords(ctx context.Context, q AuditRecordQuery) ([]AuditRecord, error) {
 	tnt, err := tenant.Require(ctx)
 	if err != nil {
 		return nil, err
 	}
-	if limit <= 0 {
-		limit = 100
-	}
-	if limit > 500 {
-		limit = 500
-	}
-	where := "tenant_id = ? AND room_id = ?"
-	args := []any{tnt, roomID}
-	if beforeAtMs > 0 {
-		where += " AND at_ms < ?"
-		args = append(args, beforeAtMs)
-	}
-	args = append(args, limit)
-	return queryAll(ctx, s.DB,
-		`SELECT `+auditRecordColumns+` FROM shared_agent_audit WHERE `+where+` ORDER BY at_ms DESC LIMIT ?`, scanAuditRecord, args...)
+	return s.borrowAuditPage(ctx, AuditLogQuery{TenantID: tnt, After: q.After, Limit: auditPage(q.Limit)}, q.RoomID)
 }
 
-// TenantAuditRecords returns the ctx tenant's audit records across ALL rooms
-// newest-first for an org-wide audit trail. limit<=0 defaults to 100 (capped at
-// 500); beforeAtMs>0 keeps only records strictly older than that timestamp.
-func (s *MySQLGrant) TenantAuditRecords(ctx context.Context, limit int, beforeAtMs int64) ([]AuditRecord, error) {
-	tnt, err := tenant.Require(ctx)
-	if err != nil {
-		return nil, err
+// borrowAuditPage is the one read of shared_agent_audit pages (AuditRecords
+// and the AuditLog reader): the rows q and roomID ("" = any) admit, in merge
+// order (at_ms DESC, audit_id DESC), at most q.Limit.
+func (s *MySQLGrant) borrowAuditPage(ctx context.Context, q AuditLogQuery, roomID string) ([]AuditRecord, error) {
+	where, args := auditSQLFilter(q, auditSourceRank(AuditSourceBorrow), "tenant_id", "actor_user_id", "decision", "", "audit_id")
+	if roomID != "" {
+		where += " AND room_id = ?"
+		args = append(args, roomID)
 	}
-	if limit <= 0 {
-		limit = 100
-	}
-	if limit > 500 {
-		limit = 500
-	}
-	where := "tenant_id = ?"
-	args := []any{tnt}
-	if beforeAtMs > 0 {
-		where += " AND at_ms < ?"
-		args = append(args, beforeAtMs)
-	}
-	args = append(args, limit)
+	args = append(args, q.Limit)
 	return queryAll(ctx, s.DB,
-		`SELECT `+auditRecordColumns+` FROM shared_agent_audit WHERE `+where+` ORDER BY at_ms DESC LIMIT ?`, scanAuditRecord, args...)
+		`SELECT `+auditRecordColumns+` FROM shared_agent_audit WHERE `+where+` ORDER BY at_ms DESC, audit_id DESC LIMIT ?`, scanAuditRecord, args...)
 }
 
 // RoomGrants returns all grants in a room newest-first (callers filter
@@ -226,35 +213,10 @@ func (s *MySQLGrant) RoomGrants(ctx context.Context, roomID string) ([]Grant, er
 		return nil, err
 	}
 	return queryAll(ctx, s.DB,
-		`SELECT `+grantColumns+` FROM shared_agent_grants WHERE tenant_id = ? AND room_id = ? ORDER BY created_at_ms DESC`,
+		`SELECT `+grantColumns+` FROM shared_agent_grants WHERE tenant_id = ? AND room_id = ? ORDER BY created_at_ms DESC, grant_id DESC`,
 		func(r rowScanner) (Grant, error) {
 			g, err := scanGrant(r)
 			g.TenantID = tnt
 			return g, err
 		}, tnt, roomID)
-}
-
-func nullInt(p *int) any {
-	if p == nil {
-		return nil
-	}
-	return *p
-}
-func nullInt64(p *int64) any {
-	if p == nil {
-		return nil
-	}
-	return *p
-}
-func nullFloat(p *float64) any {
-	if p == nil {
-		return nil
-	}
-	return *p
-}
-func nullStr(s string) any {
-	if s == "" {
-		return nil
-	}
-	return s
 }

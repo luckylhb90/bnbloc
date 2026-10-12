@@ -3,7 +3,6 @@ package store
 import (
 	"context"
 	"testing"
-	"time"
 )
 
 // seedAuditLog appends the same scenario to any extension + grant store pair:
@@ -124,27 +123,52 @@ func checkAuditScenario(t *testing.T, tA, tB, actor string, readers ...AuditLogR
 	_ = tB
 }
 
-func TestAuditLogMergeOrderAndIsolation(t *testing.T) {
-	ext, grants := NewMemoryExtensionAudit(), NewMemoryGrant()
-	seedAuditLog(t, ext, grants, "ta", "tb", "admin", 1000)
-	checkAuditScenario(t, "ta", "tb", "admin", ext, grants)
+// Merge order, tenant isolation, filters and cursor paging of the two audit
+// trails (extension_audit and the borrow trail) on both backends.
+func TestContractAuditLogReader(t *testing.T) {
+	forEachBackend(t, func(t *testing.T, b *Backends) {
+		tA, tB, actor := uniq("t-audit-a-"), uniq("t-audit-b-"), uniq("auditor-")
+		seedAuditLog(t, b.ExtAudit, b.Grant, tA, tB, actor, 1000)
+		readers := b.AuditLogReaders()
+		checkAuditScenario(t, tA, tB, actor, readers...)
 
-	// from/to bound the time range (to exclusive).
-	got := pageAll(t, AuditLogQuery{TenantID: "ta", FromMs: 1020, ToMs: 1030}, 10, ext, grants)
-	if len(got) != 3 {
-		t.Fatalf("range rows = %v", auditKeys(got))
-	}
+		// from/to bound the time range (to exclusive).
+		got := pageAll(t, AuditLogQuery{TenantID: tA, FromMs: 1020, ToMs: 1030}, 10, readers...)
+		if len(got) != 3 {
+			t.Fatalf("range rows = %v", auditKeys(got))
+		}
+		// An empty page is [] (serialized), never nil.
+		rows, next, err := MergeAuditLog(context.Background(), AuditLogQuery{TenantID: uniq("t-audit-none-")}, readers...)
+		if err != nil || rows == nil || len(rows) != 0 || next != nil {
+			t.Fatalf("empty page = %#v, %v, %v", rows, next, err)
+		}
+		for _, rd := range readers {
+			if rows, err := rd.AuditLog(context.Background(), AuditLogQuery{Actor: actor}); err != nil || rows == nil || len(rows) != 0 {
+				t.Fatalf("unscoped read = %#v, %v; want []", rows, err)
+			}
+		}
+	})
 }
 
-func TestMySQLAuditLog(t *testing.T) {
-	dsn := mysqlTestDSN(t)
-	b, err := NewBackends(dsn)
-	if err != nil {
-		t.Fatalf("NewBackends: %v", err)
-	}
-	defer b.DB.Close()
-	suffix := itoaBase(time.Now().UnixNano())
-	tA, tB, actor := "it-audit-a-"+suffix, "it-audit-b-"+suffix, "it-auditor-"+suffix
-	seedAuditLog(t, b.ExtAudit, b.Grant, tA, tB, actor, time.Now().UnixMilli())
-	checkAuditScenario(t, tA, tB, actor, b.AuditLogReaders()...)
+// ExtensionAuditStore appends records that its trail then reads back whole.
+func TestContractExtensionAuditStore(t *testing.T) {
+	forEachBackend(t, func(t *testing.T, b *Backends) {
+		tid, actor := uniq("t-ext-"), uniq("admin-")
+		rec := ExtAuditRecord{Kind: "plugin", Name: "auditor", Action: "install", Actor: actor, KeyID: "k1", TenantID: tid, Outcome: "allow", Detail: "v1", AtMs: 42}
+		if err := b.ExtAudit.AppendExtAudit(context.Background(), rec); err != nil {
+			t.Fatal(err)
+		}
+		rows, _, err := MergeAuditLog(context.Background(), AuditLogQuery{TenantID: tid}, b.AuditLogReaders()...)
+		if err != nil || len(rows) != 1 {
+			t.Fatalf("rows = %+v, %v", rows, err)
+		}
+		r := rows[0]
+		if r.Source != AuditSourceExtension || r.Kind != "plugin" || r.Name != "auditor" || r.Action != "install" || r.Actor != actor ||
+			r.TenantID != tid || r.Outcome != "allow" || r.Detail != "v1" || r.AtMs != 42 || r.ID == 0 {
+			t.Fatalf("row = %+v", r)
+		}
+		if other, _, _ := MergeAuditLog(context.Background(), AuditLogQuery{TenantID: tid + "-other"}, b.AuditLogReaders()...); len(other) != 0 {
+			t.Fatalf("another tenant sees %+v", other)
+		}
+	})
 }

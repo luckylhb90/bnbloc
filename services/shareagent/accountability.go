@@ -194,7 +194,7 @@ func (s *Service) handleOwnerAuthorizations(w http.ResponseWriter, r *http.Reque
 	// own turn shares the "turn" action but has actor == owner).
 	recent := map[string][]string{}
 	seen := map[string]map[string]bool{}
-	recs, err := s.Grants.AuditRecords(r.Context(), roomID, 100, 0)
+	recs, err := s.Grants.AuditRecords(r.Context(), store.AuditRecordQuery{RoomID: roomID, Limit: 100})
 	if err != nil {
 		obs.ServerError(w, "read audit failed", err)
 		httpx.Error(w, "read audit failed", http.StatusInternalServerError)

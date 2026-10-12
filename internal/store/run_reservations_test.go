@@ -6,13 +6,17 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
-	"time"
 )
+
+// Reserve-then-settle (R8) on both backends.
+func TestContractRunReservationStore(t *testing.T) {
+	forEachBackend(t, func(t *testing.T, b *Backends) { reservationCases(t, b.Grant, uniq("rsv-")) })
+}
 
 // reservationCases exercises reserve-then-settle (R8) against any GrantStore.
 func reservationCases(t *testing.T, g GrantStore, prefix string) {
 	t.Helper()
-	ctx := tenantCtx(tenantA)
+	ctx := tenantCtx(prefix + "-t")
 	future := int64(4_000_000_000_000)
 	put := func(id string, quota *int, allowance *float64) {
 		t.Helper()
@@ -77,6 +81,28 @@ func reservationCases(t *testing.T, g GrantStore, prefix string) {
 		}
 		if err := reserve(id, id+"-after-raise-2", 1000); !errors.Is(err, ErrRunQuotaExhausted) {
 			t.Fatalf("reserve past raised quota err = %v, want ErrRunQuotaExhausted", err)
+		}
+	})
+
+	t.Run("a reservation id is used once", func(t *testing.T) {
+		id := prefix + "-dup"
+		put(id, nil, nil)
+		if err := reserve(id, id+"-r1", 1000); err != nil {
+			t.Fatalf("reserve: %v", err)
+		}
+		if err := reserve(id, id+"-r1", 1001); !errors.Is(err, ErrReservationExists) {
+			t.Fatalf("second reserve under one id = %v, want ErrReservationExists", err)
+		}
+		if got := must(g.GetGrant(ctx, id))(t); got.RunsUsed != 1 {
+			t.Fatalf("runsUsed = %d, want 1 (a refused reservation consumes nothing)", got.RunsUsed)
+		}
+		// Another tenant may use the same reservation id.
+		other := tenantCtx(prefix + "-t-other")
+		if err := g.PutGrant(other, Grant{GrantID: id + "-o", RoomID: "r1", TargetID: "shared-agent:x", OwnerUserID: "alice", GranteeUserID: "*", CreatedAtMs: 1}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := g.ReserveRun(other, RunReservation{ReservationID: id + "-r1", GrantID: id + "-o", RoomID: "r1", OwnerUserID: "alice", BorrowerUserID: "bob", AtMs: 1000}); err != nil {
+			t.Fatalf("same reservation id in another tenant: %v", err)
 		}
 	})
 
@@ -178,18 +204,4 @@ func reservationCases(t *testing.T, g GrantStore, prefix string) {
 			t.Fatalf("settle after revoke: %v", err)
 		}
 	})
-}
-
-func TestMemoryRunReservations(t *testing.T) {
-	reservationCases(t, NewMemoryGrant(), "mem")
-}
-
-func TestMySQLRunReservations(t *testing.T) {
-	dsn := mysqlTestDSN(t)
-	db, err := OpenMySQL(dsn)
-	if err != nil {
-		t.Fatalf("open: %v", err)
-	}
-	defer db.Close()
-	reservationCases(t, NewMySQLGrant(db), "it"+strconv.FormatInt(time.Now().UnixNano(), 36))
 }

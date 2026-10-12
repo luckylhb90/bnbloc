@@ -5,8 +5,6 @@ import (
 	"database/sql"
 	"errors"
 
-	"github.com/go-sql-driver/mysql"
-
 	"github.com/luckylhb90/bnbloc/internal/tenant"
 )
 
@@ -47,7 +45,8 @@ func scanQuotaRequest(scan func(...any) error, tnt string) (QuotaRequest, error)
 }
 
 // CreateQuotaRequest inserts a pending request; a duplicate pending_key returns
-// the existing open request with ErrQuotaRequestPending.
+// the existing open request with ErrQuotaRequestPending, a taken request id
+// ErrQuotaRequestExists.
 func (s *MySQLQuotaRequests) CreateQuotaRequest(ctx context.Context, r QuotaRequest) (QuotaRequest, error) {
 	tnt, err := tenant.Require(ctx)
 	if err != nil {
@@ -61,10 +60,9 @@ func (s *MySQLQuotaRequests) CreateQuotaRequest(ctx context.Context, r QuotaRequ
 		 (request_id, tenant_id, room_id, owner_user_id, requester_user_id, provider, requested_runs,
 		  note, status, pending_key, created_at_ms)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)`,
-		r.RequestID, tnt, r.RoomID, r.OwnerUserID, r.RequesterUserID, r.Provider, nullInt(r.RequestedRuns),
+		r.RequestID, tnt, r.RoomID, r.OwnerUserID, r.RequesterUserID, r.Provider, nullPtr(r.RequestedRuns),
 		r.Note, pk, r.CreatedAtMs)
-	var me *mysql.MySQLError
-	if errors.As(err, &me) && me.Number == mysqlErrDupEntry {
+	if isDupKey(err, "uq_quota_req_pending") {
 		existing, gerr := scanQuotaRequest(s.DB.QueryRowContext(ctx,
 			`SELECT `+quotaRequestCols+` FROM shared_agent_quota_requests WHERE tenant_id = ? AND pending_key = ?`,
 			tnt, pk).Scan, tnt)
@@ -74,7 +72,7 @@ func (s *MySQLQuotaRequests) CreateQuotaRequest(ctx context.Context, r QuotaRequ
 		return existing, ErrQuotaRequestPending
 	}
 	if err != nil {
-		return QuotaRequest{}, err
+		return QuotaRequest{}, dupAs(err, ErrQuotaRequestExists)
 	}
 	return r, nil
 }
@@ -121,7 +119,7 @@ func (s *MySQLQuotaRequests) ListQuotaRequests(ctx context.Context, q QuotaReque
 	args = append(args, quotaListLimit(q.Limit))
 	out, err := queryAll(ctx, s.DB,
 		`SELECT `+quotaRequestCols+` FROM shared_agent_quota_requests WHERE `+where+
-			` ORDER BY created_at_ms DESC LIMIT ?`, func(r rowScanner) (QuotaRequest, error) {
+			` ORDER BY created_at_ms DESC, request_id DESC LIMIT ?`, func(r rowScanner) (QuotaRequest, error) {
 			return scanQuotaRequest(r.Scan, tnt)
 		}, args...)
 	if err != nil {
@@ -144,7 +142,7 @@ func (s *MySQLQuotaRequests) DecideQuotaRequest(ctx context.Context, d QuotaDeci
 		`UPDATE shared_agent_quota_requests
 		 SET status = ?, granted_runs = ?, decided_at_ms = ?, decided_by = ?, pending_key = NULL
 		 WHERE tenant_id = ? AND request_id = ? AND owner_user_id = ? AND status = 'pending'`,
-		string(d.Status), nullInt(d.GrantedRuns), d.AtMs, d.OwnerUserID, tnt, d.RequestID, d.OwnerUserID)
+		string(d.Status), nullPtr(d.GrantedRuns), d.AtMs, d.OwnerUserID, tnt, d.RequestID, d.OwnerUserID)
 	if err != nil {
 		return QuotaRequest{}, err
 	}
@@ -172,14 +170,14 @@ func (s *MySQLQuotaRequests) ReopenQuotaRequest(ctx context.Context, requestID s
 	if r.Status != QuotaRequestApproved {
 		return ErrQuotaRequestDecided
 	}
-	_, err = s.DB.ExecContext(ctx,
+	res, err := s.DB.ExecContext(ctx,
 		`UPDATE shared_agent_quota_requests
 		 SET status = 'pending', granted_runs = NULL, decided_at_ms = 0, decided_by = '', pending_key = ?
 		 WHERE tenant_id = ? AND request_id = ? AND status = 'approved'`,
 		quotaPendingKey(r.TenantID, r), r.TenantID, requestID)
-	var me *mysql.MySQLError
-	if errors.As(err, &me) && me.Number == mysqlErrDupEntry {
-		return ErrQuotaRequestPending
+	if err != nil {
+		return dupAs(err, ErrQuotaRequestPending)
 	}
-	return err
+	// A concurrent change between the read and the write: no longer approved.
+	return requireMatched(res, ErrQuotaRequestDecided)
 }

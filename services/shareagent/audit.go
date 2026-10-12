@@ -6,11 +6,14 @@ import (
 
 	"github.com/luckylhb90/bnbloc/internal/httpx"
 	"github.com/luckylhb90/bnbloc/internal/obs"
+	"github.com/luckylhb90/bnbloc/internal/store"
 )
 
 // auditRecordView is the JSON projection of one org-wide audit record. It omits
 // the internal grant id and tenant id; the tenant is implied by the caller.
 type auditRecordView struct {
+	// ID with AtMs is the record's cursor (?before=&beforeId=).
+	ID          int64  `json:"id"`
 	RoomID      string `json:"roomId"`
 	ActorUserID string `json:"actorUserId"`
 	OwnerUserID string `json:"ownerUserId"`
@@ -26,7 +29,9 @@ type auditRecordView struct {
 // ALL rooms newest-first, for an org-wide audit trail. The tenant is bound to
 // the request context by svcauth; RBAC gating (org_admin only) is enforced at
 // the gateway. Optional query params: limit (<=0 defaults 100, capped 500) and
-// before (cursor: keep only records strictly older than that at_ms).
+// before (cursor: keep only records strictly older than that at_ms; with
+// beforeId, the records after that record in the audit order, so records
+// sharing a millisecond are never skipped).
 func (s *Service) handleTenantAudit(w http.ResponseWriter, r *http.Request) {
 	limit := 0
 	if v := r.URL.Query().Get("limit"); v != "" {
@@ -34,13 +39,17 @@ func (s *Service) handleTenantAudit(w http.ResponseWriter, r *http.Request) {
 			limit = n
 		}
 	}
-	var before int64
+	q := store.AuditRecordQuery{Limit: limit}
 	if v := r.URL.Query().Get("before"); v != "" {
-		if n, err := strconv.ParseInt(v, 10, 64); err == nil {
-			before = n
+		if n, err := strconv.ParseInt(v, 10, 64); err == nil && n > 0 {
+			after := store.AuditCursor{AtMs: n, Source: store.AuditSourceBorrow}
+			if id, err := strconv.ParseInt(r.URL.Query().Get("beforeId"), 10, 64); err == nil {
+				after.ID = id
+			}
+			q.After = &after
 		}
 	}
-	recs, err := s.Grants.TenantAuditRecords(r.Context(), limit, before)
+	recs, err := s.Grants.AuditRecords(r.Context(), q)
 	if err != nil {
 		obs.ServerError(w, "read audit failed", err)
 		httpx.Error(w, "read audit failed", http.StatusInternalServerError)
@@ -49,6 +58,7 @@ func (s *Service) handleTenantAudit(w http.ResponseWriter, r *http.Request) {
 	views := make([]auditRecordView, 0, len(recs))
 	for _, rec := range recs {
 		views = append(views, auditRecordView{
+			ID:          rec.ID,
 			RoomID:      rec.RoomID,
 			ActorUserID: rec.ActorUserID,
 			OwnerUserID: rec.OwnerUserID,

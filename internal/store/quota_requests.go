@@ -35,6 +35,8 @@ var (
 	ErrQuotaRequestPending = errors.New("store: a pending quota request already exists")
 	// ErrQuotaRequestDecided: the request is no longer pending.
 	ErrQuotaRequestDecided = errors.New("store: quota request already decided")
+	// ErrQuotaRequestExists: the request id is taken in the tenant.
+	ErrQuotaRequestExists = errors.New("store: quota request exists")
 )
 
 // QuotaRequest is one borrower's request for more runs on an owner's room
@@ -84,11 +86,12 @@ type QuotaDecision struct {
 type QuotaRequestStore interface {
 	// CreateQuotaRequest stores a new pending request. When an open request
 	// already exists for the same (room, owner, provider, requester) it returns
-	// that request with ErrQuotaRequestPending.
+	// that request with ErrQuotaRequestPending; a taken request id is
+	// ErrQuotaRequestExists.
 	CreateQuotaRequest(ctx context.Context, r QuotaRequest) (QuotaRequest, error)
 	GetQuotaRequest(ctx context.Context, requestID string) (QuotaRequest, error)
-	// ListQuotaRequests returns matching requests newest-first (limit<=0 → 100,
-	// capped at 500).
+	// ListQuotaRequests returns matching requests newest-first (then by
+	// request id, descending; limit<=0 → 100, capped at MaxQuotaRequestList).
 	ListQuotaRequests(ctx context.Context, q QuotaRequestQuery) ([]QuotaRequest, error)
 	// DecideQuotaRequest atomically moves a pending request owned by
 	// d.OwnerUserID to d.Status. ErrQuotaRequestDecided when it is no longer
@@ -97,7 +100,10 @@ type QuotaRequestStore interface {
 	// ReopenQuotaRequest returns an approved request to pending: the
 	// compensating step when the grant raise that follows an approval fails
 	// (the authorization was revoked in between), so the request is never left
-	// approved with no effect.
+	// approved with no effect. ErrQuotaRequestNotFound for an unknown
+	// request, ErrQuotaRequestDecided when it is not approved (pending
+	// included), ErrQuotaRequestPending when a newer request for the same
+	// agent is open.
 	ReopenQuotaRequest(ctx context.Context, requestID string) error
 }
 
@@ -109,15 +115,10 @@ func quotaPendingKey(tnt string, r QuotaRequest) string {
 	return "qp_" + base64.RawURLEncoding.EncodeToString(sum[:])
 }
 
-func quotaListLimit(n int) int {
-	if n <= 0 {
-		return 100
-	}
-	if n > 500 {
-		return 500
-	}
-	return n
-}
+// MaxQuotaRequestList bounds one ListQuotaRequests page.
+const MaxQuotaRequestList = 500
+
+func quotaListLimit(n int) int { return clampLimit(n, 100, MaxQuotaRequestList) }
 
 // MemoryQuotaRequests is the in-memory QuotaRequestStore.
 type MemoryQuotaRequests struct {
@@ -148,6 +149,9 @@ func (s *MemoryQuotaRequests) CreateQuotaRequest(ctx context.Context, r QuotaReq
 		return s.reqs[existing], ErrQuotaRequestPending
 	}
 	key := grantKey(tnt, r.RequestID)
+	if _, taken := s.reqs[key]; taken {
+		return QuotaRequest{}, ErrQuotaRequestExists
+	}
 	s.reqs[key] = r
 	s.pending[pk] = key
 	return r, nil
@@ -195,7 +199,12 @@ func (s *MemoryQuotaRequests) ListQuotaRequests(ctx context.Context, q QuotaRequ
 		}
 		out = append(out, r)
 	}
-	sort.SliceStable(out, func(i, j int) bool { return out[i].CreatedAtMs > out[j].CreatedAtMs })
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].CreatedAtMs != out[j].CreatedAtMs {
+			return out[i].CreatedAtMs > out[j].CreatedAtMs
+		}
+		return out[i].RequestID > out[j].RequestID
+	})
 	if limit := quotaListLimit(q.Limit); len(out) > limit {
 		out = out[:limit]
 	}

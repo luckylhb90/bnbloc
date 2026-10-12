@@ -36,8 +36,8 @@ type BorrowTurnQuery struct {
 // approved quota request applies. It is part of GrantStore.
 type BorrowUsageStore interface {
 	// BorrowTurns returns the ctx tenant's (every tenant's with
-	// q.AllTenants) recorded borrow turns matching q, oldest-first, at most
-	// MaxBorrowTurnRows.
+	// q.AllTenants) recorded borrow turns matching q, oldest-first (then by
+	// row id), at most MaxBorrowTurnRows; empty is [].
 	BorrowTurns(ctx context.Context, q BorrowTurnQuery) ([]AuditRecord, error)
 	// RaiseRunQuota atomically adds `add` runs to a grant live at atMs
 	// (Grant.Live) without touching its usage counters, so an approved
@@ -66,7 +66,7 @@ func (s *MemoryGrant) BorrowTurns(ctx context.Context, q BorrowTurnQuery) ([]Aud
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	var out []AuditRecord
+	out := []AuditRecord{}
 	for _, rec := range s.audit {
 		if (!q.AllTenants && rec.TenantID != tnt) || !isBorrowTurn(rec) || rec.AtMs < q.FromMs || (q.ToMs > 0 && rec.AtMs >= q.ToMs) {
 			continue
@@ -82,7 +82,12 @@ func (s *MemoryGrant) BorrowTurns(ctx context.Context, q BorrowTurnQuery) ([]Aud
 		}
 		out = append(out, rec)
 	}
-	sort.SliceStable(out, func(i, j int) bool { return out[i].AtMs < out[j].AtMs })
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].AtMs != out[j].AtMs {
+			return out[i].AtMs < out[j].AtMs
+		}
+		return out[i].ID < out[j].ID
+	})
 	if len(out) > MaxBorrowTurnRows {
 		out = out[:MaxBorrowTurnRows]
 	}

@@ -1,6 +1,7 @@
 package store
 
 import (
+	"strconv"
 	"testing"
 )
 
@@ -38,11 +39,8 @@ func platformTurnCases(t *testing.T, g GrantStore, sfx string) {
 	}
 }
 
-func TestMemoryPlatformTurns(t *testing.T) { platformTurnCases(t, NewMemoryGrant(), "m") }
-
-func TestMySQLPlatformTurns(t *testing.T) {
-	b := mysqlBackendsForTest(t)
-	platformTurnCases(t, b.Grant, runSuffix())
+func TestContractBorrowUsageStorePlatformTurns(t *testing.T) {
+	forEachBackend(t, func(t *testing.T, b *Backends) { platformTurnCases(t, b.Grant, uniq("")) })
 }
 
 // PendingAgentJobs counts an owner's queued and claimed jobs per agent across
@@ -65,7 +63,7 @@ func pendingJobCases(t *testing.T, jobs BridgeJobStore, sfx string) {
 		if j.OwnerUserID == "" {
 			j.OwnerUserID = owner
 		}
-		j.JobID = "job-pj-" + sfx + "-" + itoaBase(int64(i))
+		j.JobID = "job-pj-" + sfx + "-" + strconv.Itoa(i)
 		j.RoomID += "-" + sfx
 		j.MessageSeq = int64(i + 1)
 		j.RequesterUserID = "bob"
@@ -82,9 +80,6 @@ func pendingJobCases(t *testing.T, jobs BridgeJobStore, sfx string) {
 	}
 }
 
-func TestMemoryPendingAgentJobs(t *testing.T) { pendingJobCases(t, NewMemoryBridgeJobs(), "m") }
-
-func TestMySQLPendingAgentJobs(t *testing.T) {
-	b := mysqlBackendsForTest(t)
-	pendingJobCases(t, b.BridgeJobs, runSuffix())
+func TestPendingAgentJobsOnBothBackends(t *testing.T) {
+	forEachBackend(t, func(t *testing.T, b *Backends) { pendingJobCases(t, b.BridgeJobs, uniq("")) })
 }

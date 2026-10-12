@@ -430,7 +430,7 @@ func TestPlatformAgentReserve(t *testing.T) {
 		t.Fatalf("runs used = %d, want 3 (a refused drive reserves nothing)", g.RunsUsed)
 	}
 	allowed, denied := 0, 0
-	recs, err := e.grants.AuditRecords(dctx(), "room-1", 0, 0)
+	recs, err := e.grants.AuditRecords(dctx(), store.AuditRecordQuery{RoomID: "room-1"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -593,7 +593,7 @@ func TestPlatformAgentReserveDefaultModel(t *testing.T) {
 		t.Fatalf("reserve without a default = %d %v", code, out)
 	}
 	var models []string
-	recs, err := e.grants.AuditRecords(dctx(), "room-1", 0, 0)
+	recs, err := e.grants.AuditRecords(dctx(), store.AuditRecordQuery{RoomID: "room-1"})
 	if err != nil {
 		t.Fatal(err)
 	}

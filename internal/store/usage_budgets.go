@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"math"
 	"sort"
 	"sync"
 
@@ -30,8 +31,23 @@ type UsageBudget struct {
 	UpdatedAtMs int64
 }
 
-// sameLimits reports whether two budgets warn at the same points (a change
-// re-arms the month's warnings).
+// budgetCostScale is the precision of a stored budget cost (the cost column
+// is DECIMAL(18,6)).
+const budgetCostScale = 1e6
+
+// normalized is b as both stores keep it: the cost rounded to the column's
+// precision, so a cost with more decimals compares equal to what was stored
+// and an unchanged save never re-arms the warnings.
+func (b UsageBudget) normalized() UsageBudget {
+	if b.Cost != nil {
+		c := math.Round(*b.Cost*budgetCostScale) / budgetCostScale
+		b.Cost = &c
+	}
+	return b
+}
+
+// sameLimits reports whether two normalized budgets warn at the same points
+// (a change re-arms the month's warnings).
 func (b UsageBudget) sameLimits(o UsageBudget) bool {
 	eqI := func(a, b *int64) bool { return (a == nil) == (b == nil) && (a == nil || *a == *b) }
 	eqF := func(a, b *float64) bool { return (a == nil) == (b == nil) && (a == nil || *a == *b) }
@@ -48,7 +64,8 @@ type UsageBudgetStore interface {
 	GetUsageBudget(ctx context.Context, userID string) (UsageBudget, bool, error)
 	// ReplaceUsageBudgets makes budgets the ctx tenant's whole budget set:
 	// absent budgets are deleted, present ones upserted. A budget whose
-	// limits changed re-arms its warnings for the period.
+	// limits changed (costs compare at the stored precision, 6 decimals)
+	// re-arms its warnings for the period.
 	ReplaceUsageBudgets(ctx context.Context, budgets []UsageBudget) error
 	// ClaimBudgetWarning records that the warning at level (a percentage) of
 	// userID's budget is sent for period ("YYYY-MM"). It returns true for
@@ -66,7 +83,7 @@ type memBudget struct {
 // MemoryUsageBudgets is the in-memory UsageBudgetStore.
 type MemoryUsageBudgets struct {
 	mu   sync.Mutex
-	rows map[string]map[string]*memBudget // tenant -> lower(user) -> row
+	rows map[string]map[string]*memBudget // tenant -> user -> row
 }
 
 // NewMemoryUsageBudgets returns an empty in-memory budget store.
@@ -118,6 +135,7 @@ func (s *MemoryUsageBudgets) ReplaceUsageBudgets(ctx context.Context, budgets []
 	old := s.rows[tnt]
 	next := make(map[string]*memBudget, len(budgets))
 	for _, b := range budgets {
+		b = b.normalized()
 		key := b.UserID
 		row := &memBudget{b: b}
 		if prev, ok := old[key]; ok && prev.b.sameLimits(b) {

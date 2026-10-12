@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"strings"
 
 	"github.com/luckylhb90/bnbloc/internal/tenant"
@@ -42,20 +43,8 @@ func (s *MySQLUsageBudgets) ListUsageBudgets(ctx context.Context) ([]UsageBudget
 	if err != nil {
 		return nil, err
 	}
-	rows, err := s.DB.QueryContext(ctx, `SELECT `+budgetColumns+` FROM usage_budgets WHERE tenant_id = ? ORDER BY user_id`, tnt)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var out []UsageBudget
-	for rows.Next() {
-		b, err := scanBudget(rows.Scan)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, b)
-	}
-	return out, rows.Err()
+	return queryAll(ctx, s.DB, `SELECT `+budgetColumns+` FROM usage_budgets WHERE tenant_id = ? ORDER BY user_id`,
+		func(r rowScanner) (UsageBudget, error) { return scanBudget(r.Scan) }, tnt)
 }
 
 // GetUsageBudget implements UsageBudgetStore.
@@ -66,7 +55,7 @@ func (s *MySQLUsageBudgets) GetUsageBudget(ctx context.Context, userID string) (
 	}
 	b, err := scanBudget(s.DB.QueryRowContext(ctx,
 		`SELECT `+budgetColumns+` FROM usage_budgets WHERE tenant_id = ? AND user_id = ?`, tnt, userID).Scan)
-	if err == sql.ErrNoRows {
+	if errors.Is(err, sql.ErrNoRows) {
 		return UsageBudget{}, false, nil
 	}
 	if err != nil {
@@ -101,6 +90,7 @@ func (s *MySQLUsageBudgets) ReplaceUsageBudgets(ctx context.Context, budgets []U
 		return err
 	}
 	for _, b := range budgets {
+		b = b.normalized()
 		if _, err := tx.ExecContext(ctx,
 			`INSERT INTO usage_budgets
 			 (tenant_id, user_id, tokens, cost, warn_at_percent, hard_stop, updated_by, updated_at_ms)
@@ -110,7 +100,7 @@ func (s *MySQLUsageBudgets) ReplaceUsageBudgets(ctx context.Context, budgets []U
 			  warned_period = IF(warned_level = 0, '', warned_period),
 			  tokens = VALUES(tokens), cost = VALUES(cost), warn_at_percent = VALUES(warn_at_percent),
 			  hard_stop = VALUES(hard_stop), updated_by = VALUES(updated_by), updated_at_ms = VALUES(updated_at_ms)`,
-			tnt, b.UserID, nullInt64(b.Tokens), nullFloat(b.Cost), b.WarnAtPercent, b.HardStop, b.UpdatedBy, b.UpdatedAtMs); err != nil {
+			tnt, b.UserID, nullPtr(b.Tokens), nullPtr(b.Cost), b.WarnAtPercent, b.HardStop, b.UpdatedBy, b.UpdatedAtMs); err != nil {
 			return err
 		}
 	}

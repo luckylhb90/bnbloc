@@ -36,6 +36,9 @@ var (
 	ErrReservationNotFound = errors.New("store: run reservation not found")
 	ErrReservationSettled  = errors.New("store: run reservation already settled")
 	ErrReservationExpired  = errors.New("store: run reservation expired")
+	// ErrReservationExists: the reservation id is taken in the tenant
+	// (nothing is consumed or recorded).
+	ErrReservationExists = errors.New("store: run reservation exists")
 )
 
 // RunReservation is one borrowed run admitted against a grant.
@@ -67,7 +70,8 @@ type RunReservationStore interface {
 	// still admit it, increments runs_used, and records the run's audit
 	// record under r.ReservationID. ErrGrantNotFound for an absent or
 	// non-live grant, ErrRunQuotaExhausted / ErrCostAllowanceExhausted when a
-	// ceiling refuses it (nothing is consumed or recorded then).
+	// ceiling refuses it, ErrReservationExists for a reservation id the
+	// tenant already used (nothing is consumed or recorded then).
 	ReserveRun(ctx context.Context, r RunReservation) (Grant, error)
 	// SettleRun attaches u to the reservation of grantID and adds u.Cost to
 	// the grant's cost_used. ErrReservationNotFound / ErrReservationSettled /
@@ -122,9 +126,14 @@ func (s *MemoryGrant) ReserveRun(ctx context.Context, r RunReservation) (Grant, 
 	if err := g.admitReservation(r.AtMs); err != nil {
 		return Grant{}, err
 	}
+	for _, rec := range s.audit {
+		if rec.TenantID == tnt && rec.ReservationID == r.ReservationID {
+			return Grant{}, ErrReservationExists
+		}
+	}
 	g.RunsUsed++
 	s.grants[key] = g
-	s.audit = append(s.audit, reservationAudit(tnt, r))
+	s.appendAuditLocked(reservationAudit(tnt, r))
 	return g, nil
 }
 

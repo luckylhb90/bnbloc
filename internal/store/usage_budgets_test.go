@@ -1,12 +1,46 @@
 package store
 
 import (
-	"strconv"
 	"sync"
 	"sync/atomic"
 	"testing"
-	"time"
 )
+
+func TestContractUsageBudgetStore(t *testing.T) {
+	forEachBackend(t, func(t *testing.T, b *Backends) { budgetCases(t, b.Budgets, uniq("t-budget-")) })
+}
+
+// A cost is kept at the column's precision (DECIMAL(18,6)) on both
+// backends: saving the same budget with a cost of more decimals does not
+// re-arm the month's warnings, and reads return the stored precision.
+func TestContractUsageBudgetStoreCostPrecision(t *testing.T) {
+	forEachBackend(t, func(t *testing.T, b *Backends) {
+		s := b.Budgets
+		ctx := tenantCtx(uniq("t-budget-prec-"))
+		cost := 1.23456789
+		save := func() {
+			t.Helper()
+			if err := s.ReplaceUsageBudgets(ctx, []UsageBudget{{UserID: "maya", Cost: &cost, WarnAtPercent: 80, UpdatedBy: "admin", UpdatedAtMs: 1}}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		save()
+		got, ok, err := s.GetUsageBudget(ctx, "maya")
+		if err != nil || !ok || got.Cost == nil || *got.Cost != 1.234568 {
+			t.Fatalf("stored cost = %+v %v %v, want 1.234568", got.Cost, ok, err)
+		}
+		if ok, err := s.ClaimBudgetWarning(ctx, "maya", "2026-10", 80); err != nil || !ok {
+			t.Fatalf("first claim = %v %v", ok, err)
+		}
+		save()
+		if ok, err := s.ClaimBudgetWarning(ctx, "maya", "2026-10", 80); err != nil || ok {
+			t.Fatalf("claim after an unchanged save = %v %v; the save must not re-arm", ok, err)
+		}
+		if list := must(s.ListUsageBudgets(tenantCtx(uniq("t-budget-none-"))))(t); list == nil || len(list) != 0 {
+			t.Fatalf("empty list = %#v, want []", list)
+		}
+	})
+}
 
 func budgetCases(t *testing.T, s UsageBudgetStore, tnt string) {
 	t.Helper()
@@ -92,18 +126,4 @@ func budgetCases(t *testing.T, s UsageBudgetStore, tnt string) {
 	if list, _ := s.ListUsageBudgets(ctx); len(list) != 0 {
 		t.Fatalf("after clear list = %+v", list)
 	}
-}
-
-func TestMemoryUsageBudgets(t *testing.T) {
-	budgetCases(t, NewMemoryUsageBudgets(), "t-budget")
-}
-
-func TestMySQLUsageBudgets(t *testing.T) {
-	dsn := mysqlTestDSN(t)
-	db, err := OpenMySQL(dsn)
-	if err != nil {
-		t.Fatalf("open: %v", err)
-	}
-	defer db.Close()
-	budgetCases(t, NewMySQLUsageBudgets(db), "tb"+strconv.FormatInt(time.Now().UnixNano(), 36))
 }

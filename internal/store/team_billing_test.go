@@ -8,34 +8,15 @@ import (
 	"github.com/luckylhb90/bnbloc/internal/wire"
 )
 
-// Team dashboard (F1) and borrow billing (F3) store contracts, run against the
-// memory backends always and the MySQL backends when BNBLOC_TEST_MYSQL_DSN is
-// set. MySQL runs use a per-run tenant and ids so a shared database never
-// leaks rows between runs.
+// Team dashboard (F1) and borrow billing (F3) store contracts, run on both
+// backends (forEachBackend) with per-run tenants and ids.
 
 func intp(v int) *int { return &v }
 
-func runSuffix() string { return itoaBase(time.Now().UnixNano()) }
-
-func mysqlBackendsForTest(t *testing.T) *Backends {
-	t.Helper()
-	dsn := mysqlTestDSN(t)
-	b, err := NewBackends(dsn)
-	if err != nil {
-		t.Fatalf("NewBackends: %v", err)
-	}
-	t.Cleanup(func() { _ = b.DB.Close() })
-	return b
-}
-
-func TestMemoryQuotaRequests(t *testing.T) {
-	quotaRequestCases(t, NewMemoryQuotaRequests(), "t-quota", "room-q")
-}
-
-func TestMySQLQuotaRequests(t *testing.T) {
-	b := mysqlBackendsForTest(t)
-	sfx := runSuffix()
-	quotaRequestCases(t, b.QuotaRequests, "t-quota-"+sfx, "room-q-"+sfx)
+func TestContractQuotaRequestStore(t *testing.T) {
+	forEachBackend(t, func(t *testing.T, b *Backends) {
+		quotaRequestCases(t, b.QuotaRequests, uniq("t-quota-"), uniq("room-q-"))
+	})
 }
 
 func quotaRequestCases(t *testing.T, s QuotaRequestStore, tnt, room string) {
@@ -87,16 +68,48 @@ func quotaRequestCases(t *testing.T, s QuotaRequestStore, tnt, room string) {
 	if _, err := s.CreateQuotaRequest(ctx, dup); err != nil {
 		t.Fatalf("create after decision: %v", err)
 	}
+	// Only an approved request reopens; a taken id is refused.
+	if err := s.ReopenQuotaRequest(ctx, dup.RequestID); !errors.Is(err, ErrQuotaRequestDecided) {
+		t.Fatalf("reopen of a pending request = %v, want ErrQuotaRequestDecided", err)
+	}
+	if err := s.ReopenQuotaRequest(ctx, req.RequestID); !errors.Is(err, ErrQuotaRequestDecided) {
+		t.Fatalf("reopen of a declined request = %v, want ErrQuotaRequestDecided", err)
+	}
+	if err := s.ReopenQuotaRequest(ctx, "qr-none-"+room); !errors.Is(err, ErrQuotaRequestNotFound) {
+		t.Fatalf("reopen of an unknown request = %v, want ErrQuotaRequestNotFound", err)
+	}
+	taken := req
+	taken.Provider = "core:claude"
+	if _, err := s.CreateQuotaRequest(ctx, taken); !errors.Is(err, ErrQuotaRequestExists) {
+		t.Fatalf("create under a taken id = %v, want ErrQuotaRequestExists", err)
+	}
+	// Newest first with the id breaking ties; the limit bounds the page.
+	for _, id := range []string{"qr-t1-", "qr-t2-"} {
+		r := req
+		r.RequestID, r.Provider, r.CreatedAtMs = id+room, "core:"+id, 900
+		if _, err := s.CreateQuotaRequest(ctx, r); err != nil {
+			t.Fatal(err)
+		}
+	}
+	list := must(s.ListQuotaRequests(ctx, QuotaRequestQuery{OwnerUserID: "alice"}))(t)
+	if len(list) != 4 || list[0].RequestID != "qr-t2-"+room || list[1].RequestID != "qr-t1-"+room || list[3].RequestID != req.RequestID {
+		t.Fatalf("order = %+v", list)
+	}
+	if page := must(s.ListQuotaRequests(ctx, QuotaRequestQuery{OwnerUserID: "alice", Limit: 1}))(t); len(page) != 1 || page[0].RequestID != "qr-t2-"+room {
+		t.Fatalf("limit 1 = %+v", page)
+	}
+	if page := must(s.ListQuotaRequests(ctx, QuotaRequestQuery{OwnerUserID: "alice", Limit: 1 << 20}))(t); len(page) != 4 {
+		t.Fatalf("limit beyond the cap = %d rows, want 4", len(page))
+	}
+	if none := must(s.ListQuotaRequests(tenantCtx(tnt+"-other"), QuotaRequestQuery{}))(t); none == nil || len(none) != 0 {
+		t.Fatalf("empty list = %#v, want []", none)
+	}
 }
 
-func TestMemoryBorrowUsage(t *testing.T) {
-	borrowUsageCases(t, NewMemoryGrant(), "t-borrow", "room-b")
-}
-
-func TestMySQLBorrowUsage(t *testing.T) {
-	b := mysqlBackendsForTest(t)
-	sfx := runSuffix()
-	borrowUsageCases(t, b.Grant, "t-borrow-"+sfx, "room-b-"+sfx)
+func TestContractBorrowUsageStore(t *testing.T) {
+	forEachBackend(t, func(t *testing.T, b *Backends) {
+		borrowUsageCases(t, b.Grant, uniq("t-borrow-"), uniq("room-b-"))
+	})
 }
 
 func borrowUsageCases(t *testing.T, g GrantStore, tnt, room string) {
@@ -137,8 +150,18 @@ func borrowUsageCases(t *testing.T, g GrantStore, tnt, room string) {
 	if n := len(must(g.BorrowTurns(ctx, BorrowTurnQuery{FromMs: 0, ToMs: 5000, BorrowerUserID: "bob"}))(t)); n != 1 {
 		t.Fatalf("bob turns = %d, want 1", n)
 	}
-	if n := len(must(g.BorrowTurns(tenantCtx(tnt+"-other"), BorrowTurnQuery{FromMs: 0, ToMs: 5000}))(t)); n != 0 {
-		t.Fatalf("cross-tenant turns = %d, want 0", n)
+	if other := must(g.BorrowTurns(tenantCtx(tnt+"-other"), BorrowTurnQuery{FromMs: 0, ToMs: 5000}))(t); other == nil || len(other) != 0 {
+		t.Fatalf("cross-tenant turns = %#v, want []", other)
+	}
+	// Turns of one millisecond keep their append order (the row id).
+	for _, actor := range []string{"zed-1", "zed-2", "zed-3"} {
+		if err := g.AppendAudit(ctx, AuditRecord{RoomID: room, GrantID: gid, ActorUserID: actor, OwnerUserID: "alice", Action: "turn", Decision: "allow", AtMs: 4000}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	tied := must(g.BorrowTurns(ctx, BorrowTurnQuery{FromMs: 4000, ToMs: 4001}))(t)
+	if len(tied) != 3 || tied[0].ActorUserID != "zed-1" || tied[2].ActorUserID != "zed-3" {
+		t.Fatalf("tied turns = %+v, want append order", tied)
 	}
 
 	// Raising keeps usage; unlimited and revoked grants refuse.
@@ -163,14 +186,10 @@ func borrowUsageCases(t *testing.T, g GrantStore, tnt, room string) {
 	}
 }
 
-func TestMemoryTeamAgents(t *testing.T) {
-	jobs := NewMemoryBridgeJobs()
-	teamAgentCases(t, jobs, jobs, "t-team", runSuffix())
-}
-
-func TestMySQLTeamAgents(t *testing.T) {
-	b := mysqlBackendsForTest(t)
-	teamAgentCases(t, b.BridgeJobs, b.TeamAgents(), "t-team-"+runSuffix(), runSuffix())
+func TestTeamAgentsOnBothBackends(t *testing.T) {
+	forEachBackend(t, func(t *testing.T, b *Backends) {
+		teamAgentCases(t, b.BridgeJobs, b.TeamAgents(), uniq("t-team-"), uniq(""))
+	})
 }
 
 func teamAgentCases(t *testing.T, jobs BridgeJobStore, team TeamAgentReader, tnt, sfx string) {
@@ -235,14 +254,10 @@ func teamAgentCases(t *testing.T, jobs BridgeJobStore, team TeamAgentReader, tnt
 	}
 }
 
-func TestMemoryAgentUsage(t *testing.T) {
-	m := NewMemory()
-	agentUsageCases(t, m, m, "t-usage", runSuffix())
-}
-
-func TestMySQLAgentUsage(t *testing.T) {
-	b := mysqlBackendsForTest(t)
-	agentUsageCases(t, b.Activity, b.AgentUsage(), "t-usage-"+runSuffix(), runSuffix())
+func TestAgentUsageOnBothBackends(t *testing.T) {
+	forEachBackend(t, func(t *testing.T, b *Backends) {
+		agentUsageCases(t, b.Activity, b.AgentUsage(), uniq("t-usage-"), uniq(""))
+	})
 }
 
 func agentUsageCases(t *testing.T, act ActivityStore, usage AgentUsageReader, tnt, sfx string) {

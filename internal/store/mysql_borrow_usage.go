@@ -42,9 +42,9 @@ func (s *MySQLGrant) BorrowTurns(ctx context.Context, q BorrowTurnQuery) ([]Audi
 	}
 	args = append(args, MaxBorrowTurnRows)
 	return queryAll(ctx, s.DB,
-		`SELECT a.tenant_id, a.room_id, COALESCE(a.grant_id,''), a.actor_user_id, a.owner_user_id, a.action, a.decision,
-		        COALESCE(a.model,''), COALESCE(a.channel_id,''), a.at_ms, a.cost, a.input_tokens, a.output_tokens
-		 FROM `+from+` WHERE `+where+` ORDER BY a.at_ms ASC LIMIT ?`, scanBorrowTurn, args...)
+		`SELECT a.audit_id, a.tenant_id, a.room_id, COALESCE(a.grant_id,''), a.actor_user_id, a.owner_user_id, a.action, a.decision,
+		        COALESCE(a.model,''), a.channel_id, a.at_ms, a.cost, a.input_tokens, a.output_tokens
+		 FROM `+from+` WHERE `+where+` ORDER BY a.at_ms ASC, a.audit_id ASC LIMIT ?`, scanBorrowTurn, args...)
 }
 
 // scanBorrowTurn reads one BorrowTurns row.
@@ -52,22 +52,11 @@ func scanBorrowTurn(row rowScanner) (AuditRecord, error) {
 	var r AuditRecord
 	var cost sql.NullFloat64
 	var inTok, outTok sql.NullInt64
-	if err := row.Scan(&r.TenantID, &r.RoomID, &r.GrantID, &r.ActorUserID, &r.OwnerUserID, &r.Action,
+	if err := row.Scan(&r.ID, &r.TenantID, &r.RoomID, &r.GrantID, &r.ActorUserID, &r.OwnerUserID, &r.Action,
 		&r.Decision, &r.Model, &r.ChannelID, &r.AtMs, &cost, &inTok, &outTok); err != nil {
 		return AuditRecord{}, err
 	}
-	if cost.Valid {
-		c := cost.Float64
-		r.Cost = &c
-	}
-	if inTok.Valid {
-		v := inTok.Int64
-		r.InputTokens = &v
-	}
-	if outTok.Valid {
-		v := outTok.Int64
-		r.OutputTokens = &v
-	}
+	r.Cost, r.InputTokens, r.OutputTokens = validFloat(cost), validInt64(inTok), validInt64(outTok)
 	return r, nil
 }
 

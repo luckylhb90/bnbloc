@@ -2,7 +2,6 @@ package store
 
 import (
 	"context"
-	"database/sql"
 	"sort"
 	"strings"
 )
@@ -109,10 +108,7 @@ func auditBefore(a, b AuditCursor) bool {
 // MergeAuditLog reads one page across readers in merge order. next is the
 // cursor of the page's last row when more rows follow, nil at the end.
 func MergeAuditLog(ctx context.Context, q AuditLogQuery, readers ...AuditLogReader) (rows []AuditLogRow, next *AuditCursor, err error) {
-	if q.Limit <= 0 {
-		q.Limit = 100
-	}
-	page := q.Limit
+	page := auditPage(q.Limit)
 	// One extra row per reader tells whether anything follows the page.
 	q.Limit = page + 1
 	for _, rd := range readers {
@@ -124,6 +120,9 @@ func MergeAuditLog(ctx context.Context, q AuditLogQuery, readers ...AuditLogRead
 			return nil, nil, err
 		}
 		rows = append(rows, got...)
+	}
+	if rows == nil {
+		rows = []AuditLogRow{}
 	}
 	sort.SliceStable(rows, func(i, j int) bool { return auditBefore(rows[i].Cursor(), rows[j].Cursor()) })
 	if len(rows) > page {
@@ -182,21 +181,25 @@ func (q AuditLogQuery) matches(r AuditLogRow) bool {
 // pageMemory sorts candidate rows in merge order and applies the limit.
 func pageMemory(rows []AuditLogRow, limit int) []AuditLogRow {
 	sort.SliceStable(rows, func(i, j int) bool { return auditBefore(rows[i].Cursor(), rows[j].Cursor()) })
-	if limit > 0 && len(rows) > limit {
-		rows = rows[:limit]
+	if n := auditReaderLimit(limit); len(rows) > n {
+		rows = rows[:n]
 	}
 	return rows
 }
+
+// auditReaderLimit is one trail's page size: MergeAuditLog asks each reader
+// for one row more than its page.
+func auditReaderLimit(n int) int { return clampLimit(n, DefaultAuditPage, MaxAuditPage+1) }
 
 // AuditLog implements AuditLogReader for the in-memory extension trail. The
 // row id is the append position (1-based), monotonic like the MySQL id.
 func (s *MemoryExtensionAudit) AuditLog(_ context.Context, q AuditLogQuery) ([]AuditLogRow, error) {
 	if !q.scoped() {
-		return nil, nil
+		return []AuditLogRow{}, nil
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	var out []AuditLogRow
+	out := []AuditLogRow{}
 	for i, rec := range s.recs {
 		row := extAuditRow(int64(i+1), rec)
 		if q.matches(row) {
@@ -209,18 +212,21 @@ func (s *MemoryExtensionAudit) AuditLog(_ context.Context, q AuditLogQuery) ([]A
 // AuditLog implements AuditLogReader for the in-memory borrow trail.
 func (s *MemoryGrant) AuditLog(_ context.Context, q AuditLogQuery) ([]AuditLogRow, error) {
 	if !q.scoped() || !q.wantsBorrow() {
-		return nil, nil
+		return []AuditLogRow{}, nil
 	}
+	q.Limit = auditReaderLimit(q.Limit)
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	var out []AuditLogRow
-	for i, rec := range s.audit {
-		row := borrowAuditRow(int64(i+1), rec)
-		if q.matches(row) {
-			out = append(out, row)
-		}
+	return borrowAuditRows(s.auditPageLocked(q, "")), nil
+}
+
+// borrowAuditRows normalizes borrow records.
+func borrowAuditRows(recs []AuditRecord) []AuditLogRow {
+	out := make([]AuditLogRow, 0, len(recs))
+	for _, rec := range recs {
+		out = append(out, borrowAuditRow(rec))
 	}
-	return pageMemory(out, q.Limit), nil
+	return out
 }
 
 func extAuditRow(id int64, rec ExtAuditRecord) AuditLogRow {
@@ -232,7 +238,7 @@ func extAuditRow(id int64, rec ExtAuditRecord) AuditLogRow {
 
 // borrowAuditRow normalizes one borrow decision: the agent owner is the
 // subject (Name), the decision the outcome.
-func borrowAuditRow(id int64, rec AuditRecord) AuditLogRow {
+func borrowAuditRow(rec AuditRecord) AuditLogRow {
 	var detail []string
 	if rec.DenyReason != "" {
 		detail = append(detail, "reason="+rec.DenyReason)
@@ -244,7 +250,7 @@ func borrowAuditRow(id int64, rec AuditRecord) AuditLogRow {
 		detail = append(detail, "channel="+rec.ChannelID)
 	}
 	return AuditLogRow{
-		Source: AuditSourceBorrow, ID: id, Kind: AuditKindBorrow, Name: rec.OwnerUserID, Action: rec.Action,
+		Source: AuditSourceBorrow, ID: rec.ID, Kind: AuditKindBorrow, Name: rec.OwnerUserID, Action: rec.Action,
 		Actor: rec.ActorUserID, TenantID: rec.TenantID, Outcome: rec.Decision, Detail: strings.Join(detail, " "),
 		RoomID: rec.RoomID, AtMs: rec.AtMs,
 	}
@@ -300,67 +306,35 @@ func auditSQLFilter(q AuditLogQuery, rank int, tenantCol, actorCol, outcomeCol, 
 	return strings.Join(where, " AND "), args
 }
 
-func auditLimit(n int) int {
-	if n <= 0 {
-		return 100
-	}
-	return n
-}
-
 // AuditLog implements AuditLogReader over extension_audit
 // (idx_extension_audit_tenant for a tenant scope, idx_extension_audit_at
 // across tenants).
 func (s *MySQLExtensionAudit) AuditLog(ctx context.Context, q AuditLogQuery) ([]AuditLogRow, error) {
 	if !q.scoped() {
-		return nil, nil
+		return []AuditLogRow{}, nil
 	}
 	where, args := auditSQLFilter(q, 0, "tenant_id", "actor", "outcome", "kind", "id")
-	args = append(args, auditLimit(q.Limit))
-	rows, err := s.DB.QueryContext(ctx, `SELECT id, kind, name, action, actor, tenant_id, outcome, COALESCE(detail, ''), at_ms
-FROM extension_audit WHERE `+where+` ORDER BY at_ms DESC, id DESC LIMIT ?`, args...)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var out []AuditLogRow
-	for rows.Next() {
+	args = append(args, auditReaderLimit(q.Limit))
+	return queryAll(ctx, s.DB, `SELECT id, kind, name, action, actor, tenant_id, outcome, COALESCE(detail, ''), at_ms
+FROM extension_audit WHERE `+where+` ORDER BY at_ms DESC, id DESC LIMIT ?`, func(row rowScanner) (AuditLogRow, error) {
 		r := AuditLogRow{Source: AuditSourceExtension}
-		if err := rows.Scan(&r.ID, &r.Kind, &r.Name, &r.Action, &r.Actor, &r.TenantID, &r.Outcome, &r.Detail, &r.AtMs); err != nil {
-			return nil, err
-		}
-		out = append(out, r)
-	}
-	return out, rows.Err()
+		err := row.Scan(&r.ID, &r.Kind, &r.Name, &r.Action, &r.Actor, &r.TenantID, &r.Outcome, &r.Detail, &r.AtMs)
+		return r, err
+	}, args...)
 }
 
 // AuditLog implements AuditLogReader over shared_agent_audit
 // (idx_audit_tenant_time for a tenant scope, idx_audit_time across tenants).
 func (s *MySQLGrant) AuditLog(ctx context.Context, q AuditLogQuery) ([]AuditLogRow, error) {
 	if !q.scoped() || !q.wantsBorrow() {
-		return nil, nil
+		return []AuditLogRow{}, nil
 	}
-	where, args := auditSQLFilter(q, 1, "tenant_id", "actor_user_id", "decision", "", "audit_id")
-	args = append(args, auditLimit(q.Limit))
-	rows, err := s.DB.QueryContext(ctx, `SELECT audit_id, tenant_id, room_id, actor_user_id, owner_user_id, action, decision,
-       COALESCE(deny_reason, ''), COALESCE(model, ''), channel_id, at_ms
-FROM shared_agent_audit WHERE `+where+` ORDER BY at_ms DESC, audit_id DESC LIMIT ?`, args...)
+	q.Limit = auditReaderLimit(q.Limit)
+	recs, err := s.borrowAuditPage(ctx, q, "")
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	var out []AuditLogRow
-	for rows.Next() {
-		var id int64
-		var rec AuditRecord
-		var channel sql.NullString
-		if err := rows.Scan(&id, &rec.TenantID, &rec.RoomID, &rec.ActorUserID, &rec.OwnerUserID, &rec.Action, &rec.Decision,
-			&rec.DenyReason, &rec.Model, &channel, &rec.AtMs); err != nil {
-			return nil, err
-		}
-		rec.ChannelID = channel.String
-		out = append(out, borrowAuditRow(id, rec))
-	}
-	return out, rows.Err()
+	return borrowAuditRows(recs), nil
 }
 
 // AuditLogReaders returns the configured audit trails' read sides in source

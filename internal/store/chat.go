@@ -467,8 +467,8 @@ func (s *MySQLChat) AppendRoomMessages(ctx context.Context, rows []RoomMessage) 
 		if len(payload) == 0 {
 			payload = json.RawMessage("{}")
 		}
-		args = append(args, m.TenantID, m.RoomID, m.ChannelID, m.Seq, m.Kind, nullStr(m.Author), nullStr(m.ClientMsgID),
-			payload, nullStr(MessageText(m.Kind, payload)), m.CreatedAtMs)
+		args = append(args, m.TenantID, m.RoomID, m.ChannelID, m.Seq, m.Kind, nullIfZero(m.Author), nullIfZero(m.ClientMsgID),
+			payload, nullIfZero(MessageText(m.Kind, payload)), m.CreatedAtMs)
 	}
 	_, err := s.DB.ExecContext(ctx, q.String(), args...)
 	if isDupEntry(err) {

@@ -61,17 +61,17 @@ func (s *MySQLGrant) reserveOnce(ctx context.Context, tnt string, r RunReservati
 	if err != nil {
 		return false, err
 	}
-	if n, _ := res.RowsAffected(); n == 0 {
-		return false, nil
+	if n, err := res.RowsAffected(); err != nil || n == 0 {
+		return false, err
 	}
 	rec := reservationAudit(tnt, r)
 	if _, err := tx.ExecContext(ctx,
 		`INSERT INTO shared_agent_audit
 		 (tenant_id, room_id, grant_id, actor_user_id, owner_user_id, action, decision, model, channel_id, at_ms, reservation_id)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		tnt, rec.RoomID, nullStr(rec.GrantID), rec.ActorUserID, rec.OwnerUserID, rec.Action,
-		rec.Decision, nullStr(rec.Model), rec.ChannelID, rec.AtMs, rec.ReservationID); err != nil {
-		return false, err
+		tnt, rec.RoomID, nullIfZero(rec.GrantID), rec.ActorUserID, rec.OwnerUserID, rec.Action,
+		rec.Decision, nullIfZero(rec.Model), rec.ChannelID, rec.AtMs, rec.ReservationID); err != nil {
+		return false, dupAs(err, ErrReservationExists)
 	}
 	return true, tx.Commit()
 }
@@ -94,7 +94,7 @@ func (s *MySQLGrant) SettleRun(ctx context.Context, grantID, reservationID strin
 		`UPDATE shared_agent_audit
 		 SET settled_at_ms = ?, model = COALESCE(?, model), cost = ?, input_tokens = ?, output_tokens = ?
 		 WHERE tenant_id = ? AND reservation_id = ? AND grant_id = ? AND settled_at_ms IS NULL AND at_ms > ?`,
-		nowMs, nullStr(strings.TrimSpace(u.Model)), nullFloat(u.Cost), nullInt64(u.InputTokens), nullInt64(u.OutputTokens),
+		nowMs, nullIfZero(strings.TrimSpace(u.Model)), nullPtr(u.Cost), nullPtr(u.InputTokens), nullPtr(u.OutputTokens),
 		tnt, reservationID, grantID, nowMs-RunReservationTTLms)
 	if err != nil {
 		return err

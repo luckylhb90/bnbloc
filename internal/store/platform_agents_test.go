@@ -58,7 +58,7 @@ func testPlatformGrant(t *testing.T, g GrantStore, p string) {
 	}
 	// Usage accountability: the platform runs are audited as borrowed turns.
 	turns := 0
-	for _, rec := range must(g.AuditRecords(ctx, r1, 0, 0))(t) {
+	for _, rec := range must(g.AuditRecords(ctx, AuditRecordQuery{RoomID: r1}))(t) {
 		if rec.GrantID == pg && rec.Action == "turn" && rec.Decision == "allow" && rec.ActorUserID == "bob" {
 			turns++
 		}

@@ -131,7 +131,7 @@ func TestReserveBorrowRefusals(t *testing.T) {
 		t.Fatalf("runsUsed = %d after refusals, want 0", n)
 	}
 	var denies int
-	recs, err := gs.AuditRecords(dctx(), "room-1", 50, 0)
+	recs, err := gs.AuditRecords(dctx(), store.AuditRecordQuery{RoomID: "room-1", Limit: 50})
 	if err != nil {
 		t.Fatal(err)
 	}
