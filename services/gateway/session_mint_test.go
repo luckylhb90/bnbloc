@@ -21,11 +21,11 @@ import (
 // sign-in, land in the switched tenant with the role there.
 func TestTenantSwitchPersistsAcrossRefreshAndFork(t *testing.T) {
 	gw, srv, _ := refreshGateway(t)
-	gw.TenantResolver = func(id auth.Identity, _ string) (string, string) {
+	gw.TenantResolver = func(id auth.Identity, _ string) (string, string, error) {
 		if id.Tenant == "acme" {
-			return "acme", "org_admin"
+			return "acme", "org_admin", nil
 		}
-		return "home", "member"
+		return "home", "member", nil
 	}
 	gw.TenantMemberRole = func(tenantID, userID string) (string, bool) {
 		return "org_admin", tenantID == "acme" && userID == "alice"
@@ -61,7 +61,7 @@ func TestTenantSwitchPersistsAcrossRefreshAndFork(t *testing.T) {
 
 func TestMintAdminToken(t *testing.T) {
 	now := time.Now()
-	tok, err := MintAdminToken("Admin@Corp.example", []string{"admin@corp.example"}, "signing-key", now)
+	tok, err := MintAdminToken("admin@corp.example", []string{" admin@corp.example"}, "signing-key", now)
 	if err != nil {
 		t.Fatal(err)
 	}
