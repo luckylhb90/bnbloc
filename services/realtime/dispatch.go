@@ -66,6 +66,16 @@ func refuse(status int, code, format string, args ...any) error {
 	return &dispatchRefusal{status: status, code: code, msg: fmt.Sprintf(format, args...)}
 }
 
+// dispatchFailure is a dispatch that failed on a read of its own (the
+// parent chain, a bridge owner, the dispatch listing): a 500 that names the
+// failing step, as opposed to a PostChat error.
+type dispatchFailure struct{ err error }
+
+func (e dispatchFailure) Error() string { return e.err.Error() }
+func (e dispatchFailure) Unwrap() error { return e.err }
+
+func failed(format string, err error) error { return dispatchFailure{fmt.Errorf(format, err)} }
+
 // dispatchStripes serializes the fan-out count and the post of dispatches
 // that share a parent job (striped by parent id, so no per-key state is
 // kept). Every dispatch of a parent job lands on the room owner replica
@@ -103,11 +113,15 @@ func (s *Service) handleInternalDispatch(w http.ResponseWriter, r *http.Request)
 	}
 	reply, err := s.Dispatch(r.Context(), roomID, caller, in)
 	var refusal *dispatchRefusal
+	var failure dispatchFailure
 	switch {
 	case err == nil:
 		writeJSON(w, http.StatusOK, reply)
 	case errors.As(err, &refusal):
 		writeJSON(w, refusal.status, map[string]string{"code": refusal.code, "error": refusal.msg})
+	case errors.As(err, &failure):
+		obs.ServerError(w, "agent dispatch failed", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "agent dispatch failed"})
 	default:
 		writeChatPostErr(w, err)
 	}
@@ -141,7 +155,7 @@ func (s *Service) Dispatch(ctx context.Context, roomID, caller string, in wire.D
 		return reply, refuse(http.StatusNotFound, wire.DispatchParentNotFound, "parent job not found in this room")
 	}
 	if err != nil {
-		return reply, fmt.Errorf("read parent job: %w", err)
+		return reply, failed("read parent job: %w", err)
 	}
 	if err := s.checkDispatchAuthority(ctx, roomID, caller, parent); err != nil {
 		return reply, err
@@ -168,7 +182,7 @@ func (s *Service) Dispatch(ctx context.Context, roomID, caller string, in wire.D
 	}
 	children, err := s.Dispatches.ListDispatchedJobs(ctx, parent.JobID)
 	if err != nil {
-		return reply, fmt.Errorf("list dispatched jobs: %w", err)
+		return reply, failed("list dispatched jobs: %w", err)
 	}
 	for _, c := range children {
 		if clientMsgID != "" && c.ClientMsgID == clientMsgID {
@@ -195,7 +209,7 @@ func (s *Service) Dispatch(ctx context.Context, roomID, caller string, in wire.D
 		return reply, err
 	}
 	if posted.Job == nil {
-		return reply, fmt.Errorf("dispatch posted at sequence %d but no agent job was queued", posted.Sequence)
+		return reply, dispatchFailure{fmt.Errorf("dispatch posted at sequence %d but no agent job was queued", posted.Sequence)}
 	}
 	return wire.DispatchReply{Sequence: posted.Sequence, JobID: posted.Job.JobID, Depth: depth}, nil
 }
@@ -218,7 +232,7 @@ func (s *Service) checkDispatchAuthority(ctx context.Context, roomID, caller str
 		return refuse(http.StatusForbidden, wire.DispatchNotParentBridge, "the parent job is not running on the caller's bridge")
 	}
 	if err != nil {
-		return fmt.Errorf("read bridge owner: %w", err)
+		return failed("read bridge owner: %w", err)
 	}
 	tid := tenant.FromContext(ctx)
 	if s.Membership == nil || !s.Membership.IsMember(roomID, caller, tid) {
@@ -241,7 +255,7 @@ func (s *Service) checkDispatchChain(ctx context.Context, to wire.DispatchRecipi
 			return nil
 		}
 		if err != nil {
-			return fmt.Errorf("read dispatch chain: %w", err)
+			return failed("read dispatch chain: %w", err)
 		}
 		if sameAgent(to, up) {
 			return refuse(http.StatusConflict, wire.DispatchCycle, "%s is already working on this request higher up the chain", agentHandle(up.OwnerUserID, up.Provider))

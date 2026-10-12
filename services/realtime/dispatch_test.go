@@ -322,3 +322,25 @@ func TestScaleOutDispatchRunsOnRoomOwner(t *testing.T) {
 		t.Fatal("the non-owner touched the room's hub")
 	}
 }
+
+// brokenRuns fails every parent read.
+type brokenRuns struct{ *store.MemoryBridgeJobs }
+
+func (brokenRuns) GetAgentRun(context.Context, string) (store.AgentJob, error) {
+	return store.AgentJob{}, fmt.Errorf("connection reset")
+}
+
+// A store failure is a named 500 (never a guard refusal, never silent), and
+// is audited as failed.
+func TestDispatchStoreFailureIs500(t *testing.T) {
+	f := newDispatchFixture(t)
+	f.svc.Dispatches = brokenRuns{f.jobs}
+	code, out := f.dispatch("jack", toBob("job_any"))
+	if code != http.StatusInternalServerError || out["code"] != nil {
+		t.Fatalf("dispatch = %d %v; want a 500 without a guard code", code, out)
+	}
+	recs, _ := f.audit.ExtAuditRecords(dctx(), AgentDispatchAuditKind, 10, 0)
+	if len(recs) != 1 || recs[0].Outcome != "failed" {
+		t.Fatalf("audit = %+v; want one failed row", recs)
+	}
+}
