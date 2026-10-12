@@ -172,7 +172,8 @@ Everything else is the app's choice.
   is audited.
 
 **Transport, storage, lifecycle**
-- TLS in transit; the database's encryption at rest.
+- TLS in transit. Document bodies are encrypted at the application layer;
+  see 4.7.
 - Bodies are stored and returned as JSON only. bnbloc's own UI never renders
   them as HTML, and an app's XSS stays inside its own sandbox.
 - Capability tokens are redacted from gateway access logs. Sites already send
@@ -189,6 +190,47 @@ Everything else is the app's choice.
   that way.
 - Borrowed or platform agents that read app data stay inside the existing
   sandbox and confinement rules.
+
+### 4.7 Encryption: the database never holds a readable body
+
+Disk or RDS encryption at rest only protects stolen disks and snapshots.
+Anyone with SQL access, such as a DBA, a leaked backup or an injection
+elsewhere, would still read plaintext. So app data is encrypted in the
+gateway, before it reaches the database.
+
+- **Envelope encryption, one key per app.**
+  - Each app gets a random 256-bit data key, used for AES-256-GCM over each
+    document body. The additional authenticated data is `app_id|collection|doc_id`,
+    so a ciphertext can't be moved to another document or app.
+  - The data key is stored only wrapped by the master key, through the one
+    existing owner `internal/sealbox`, which already seals member and org
+    credentials.
+  - The master key never sits in the database: it is `BNBLOC_SECRET_STORE_KEY`
+    today, with a KMS-backed key as a drop-in later.
+- **What stays plaintext:** only routing metadata: `app_id`, `collection`,
+  `doc_id`, the pseudonymous `by_key` (an HMAC, not the identity), `public`,
+  `version` and the timestamps. Bodies and the real-identity mapping are
+  ciphertext.
+- **Crypto-shredding.** Deleting an app, its room, or a retention purge
+  destroys the app's data key, so every copy of its documents becomes
+  unreadable at once, including copies in database backups.
+- **Rotation.** A master-key rotation re-wraps the data keys only; documents
+  are not re-encrypted.
+- **Cost.** Body fields can't be filtered in SQL. Queries narrow by metadata
+  in SQL (collection, author, time, public), and the gateway applies `filter`
+  to the decrypted page. The per-app cap bounds this. The tallies, lists and
+  full reads apps and agents actually do are unaffected.
+- **Who can still decrypt:** the running gateway, which holds the master key.
+  It has to, to serve the app. A database-only compromise reveals no
+  content.
+- **Later, if needed: owner-only end-to-end encryption.** The page encrypts a
+  private document to the owners' public keys, and only an owner's desktop,
+  which also runs the bridge and its agents, can decrypt it. Not in this
+  round: it needs member key management, and it breaks reads by the gateway
+  and by agents running anywhere other than the owner's desktop.
+- One owner: `appdata.Cipher`, which wraps `sealbox` for keys and AES-GCM for
+  bodies. A static test forbids writing `app_docs.body` anywhere except
+  through it.
 
 ## 5. Storage backend
 
@@ -257,6 +299,10 @@ Tests:
 - A document not marked public is hidden from other link holders.
 - Visitors only ever see pseudonymous `_by`.
 - Capability tokens never appear in access logs.
+- The raw `app_docs.body` column is never readable plaintext; ciphertext
+  moved to another document fails to open.
+- After an app is deleted, its documents are unreadable even from a restored
+  backup (data key destroyed).
 - A revoked link stops writes.
 - The filter whitelist rejects unknown operators.
 
