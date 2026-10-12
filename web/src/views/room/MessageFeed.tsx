@@ -30,7 +30,6 @@ export function MessageFeed({
   loadingHistory,
   unreadFromSeq,
   agentJobs,
-  showJobDiagnostics,
   artifactsBySeq,
   showDesktopHandoff,
   onStartAgent,
@@ -60,7 +59,6 @@ export function MessageFeed({
   readonly loadingHistory: boolean;
   readonly unreadFromSeq: number | null;
   readonly agentJobs: Record<number, AgentJob[]>;
-  readonly showJobDiagnostics: boolean;
   readonly artifactsBySeq: Record<number, string[]>;
   readonly showDesktopHandoff: boolean;
   readonly onStartAgent: () => void;
@@ -165,7 +163,6 @@ export function MessageFeed({
           feed={visibleFeed}
           unreadFromSeq={unreadFromSeq}
           agentJobs={agentJobs}
-          showJobDiagnostics={showJobDiagnostics}
           deliverablesAfter={deliverablesAfter}
           onRetry={onRetry}
           onDelete={onDelete}
@@ -188,7 +185,6 @@ export function MessageFeed({
 type RowActions = {
   readonly roomId: string;
   readonly agentJobs: Record<number, AgentJob[]>;
-  readonly showJobDiagnostics: boolean;
   readonly deliverablesAfter: Map<number, PlacedDeliverables[]>;
   readonly onRetry: (item: FeedItem) => void;
   readonly onDelete: (item: FeedItem) => void;
@@ -279,7 +275,6 @@ function FeedRow({
   placed,
   roomId,
   agentJobs,
-  showJobDiagnostics,
   onRetry,
   onDelete,
   onEdit,
@@ -320,7 +315,6 @@ function FeedRow({
       {typeof m.seq === "number" && (
         <AgentJobStatus
           jobs={agentJobs[m.seq] || []}
-          showDiagnostics={showJobDiagnostics}
           onCancel={onCancelJob}
           queueAhead={queueAhead}
         />

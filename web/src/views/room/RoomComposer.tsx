@@ -12,12 +12,14 @@ import type { RoomModelCatalogs } from "@/lib/agentCatalogs";
 import { showStarterPrompts } from "@/lib/onboarding";
 import { useDisplayNames } from "@/lib/useDisplayName";
 
-// RoomComposer is the room footer: either the join panel (when previewing an
-// unjoined room) or the live-typing indicator plus the message composer. It is
+// RoomComposer is the room footer: the join panel (when previewing an unjoined
+// room), a read-only note (a visitor: lib/roomRoles mayChat), or the
+// live-typing indicator plus the message composer. It is
 // flat and full-bleed at every width: one top rule, no outer gutter, no card;
 // only the safe-area insets (home indicator, landscape notch) pad it.
 export function RoomComposer({
   roomPreview,
+  readOnly = false,
   agent,
   subject,
   roomId,
@@ -36,6 +38,8 @@ export function RoomComposer({
   variant = "room",
 }: {
   readonly roomPreview: boolean;
+  // The member may follow the room but not post (a visitor).
+  readonly readOnly?: boolean;
   readonly agent: LocalAgent;
   readonly subject: string | null;
   readonly roomId: string;
@@ -94,6 +98,10 @@ export function RoomComposer({
             {joining ? "Joining…" : "Join room"}
           </Button>
         </div>
+      ) : readOnly ? (
+        <p className="px-4 py-3 text-sm text-[var(--color-fg-muted)]">
+          You are a visitor here: you can follow the room, but only its members can post or ask agents.
+        </p>
       ) : (
         <>
           <TypingLine typers={Object.keys(typingUsers).filter((u) => !isSelf(u, subject))} />

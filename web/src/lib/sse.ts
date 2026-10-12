@@ -1,6 +1,7 @@
 import { getToken, refreshSession } from "./session";
 import { apiUrl } from "./config";
 import { normalizeRoomEvent, type RoomEvent } from "./roomEvents.ts";
+import { ROOM_EVENT_KINDS } from "./roomEventKinds.ts";
 
 // Which events a room subscription receives. The default (the room view)
 // is every channel; includePeople also admits the room's people chat, which
@@ -11,37 +12,6 @@ export interface RoomStreamScope {
   readonly includePeople?: boolean;
   readonly channelOnly?: boolean;
 }
-// The realtime service emits SSE named events whose name is the event Kind.
-// EventSource delivers named events only to matching listeners, so we register
-// one per kind (a bare onmessage misses them all — the original bug).
-const ROOM_EVENT_KINDS = [
-  "chat_message",
-  "agent_messages",
-  "agent_session_state",
-  "agent_roster",
-  "presence_join",
-  "presence_leave",
-  "presence_snapshot",
-  "presence_typing",
-  "message_deleted",
-  "message_edited",
-  // Durable agent-job lifecycle (queue status rows under the chat that spawned
-  // them) and room deliverable changes (the Files panel's live refresh).
-  "agent_job_created",
-  "agent_job_updated",
-  "artifact_updated",
-  // Live collaboration state from a running artifact preview (transient).
-  "artifact_state",
-  // Access revocation (transient): the server closes the stream right after.
-  "member_removed",
-  "room_deleted",
-  // Message tasks (transient): the room's task strip updates live.
-  "task_updated",
-  // A room's experts, room expert and room packs changed (transient).
-  "content_uses_changed",
-  // The room tools saved or submitted content for a member (transient).
-  "content_saved",
-];
 
 // subscribeRoom opens an SSE stream for a room's live events. EventSource cannot
 // set headers, so the session token is passed as an access_token query param

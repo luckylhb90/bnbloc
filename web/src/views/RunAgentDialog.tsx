@@ -44,10 +44,7 @@ export function RunAgentDialog({
     devDiscovery,
     save,
   } = agent;
-  // Targets the gateway itself can start (desktop-managed sidecar targets are
-  // driven by the member's bridge from a room, not from here).
-  const launchTargets = targets.filter((t) => t.runViaGateway !== false);
-  const launchTarget = launchTargets.find((t) => t.id === target) ?? launchTargets[0];
+  const launchTarget = targets.find((t) => t.id === target) ?? targets[0];
   // Why Run is unavailable, stated next to the button — never a silent
   // disabled control.
   const blocked =
@@ -55,7 +52,7 @@ export function RunAgentDialog({
       ? "Checking for agent cores…"
       : detected === false
         ? "No agent core is connected (see above)."
-        : launchTargets.length === 0
+        : targets.length === 0
           ? "No agent here can be started from this page. Agents run by your desktop app are started from a room: message them there."
           : null;
 
@@ -86,7 +83,7 @@ export function RunAgentDialog({
   // separated in the <Select>. Preserves first-seen core order; a target with
   // no core (legacy) is grouped under "other".
   const groupedTargets: { core: string; items: AgentTarget[] }[] = [];
-  for (const t of launchTargets) {
+  for (const t of targets) {
     const core = t.core || "other";
     let g = groupedTargets.find((x) => x.core === core);
     if (!g) {
@@ -168,7 +165,7 @@ export function RunAgentDialog({
           />
         </Field>
 
-        {launchTargets.length > 0 && (
+        {targets.length > 0 && (
           <Field label="Agent target">
             <Select
               value={launchTarget?.id || ""}

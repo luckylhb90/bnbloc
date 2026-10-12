@@ -268,7 +268,7 @@ func (s *Service) PostChat(ctx context.Context, p ChatPost) (ChatPosted, error) 
 		} else {
 			posted.Job = &job
 			s.auditExpertUse(ctx, expert, job)
-			_, _ = s.publish(ctx, wire.Event{RoomID: p.RoomID, ChannelID: channelID, Kind: wire.EventAgentJobCreated, Payload: job, AtUnixMs: nowMs}, realtime.Durable{})
+			_, _ = s.publish(ctx, wire.Event{RoomID: p.RoomID, ChannelID: channelID, Kind: wire.EventAgentJobCreated, Payload: job.View(), AtUnixMs: nowMs}, realtime.Durable{})
 		}
 	}
 	return posted, nil

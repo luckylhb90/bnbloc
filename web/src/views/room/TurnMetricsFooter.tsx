@@ -26,7 +26,7 @@ export function TurnMetricsFooter({ metrics }: { readonly metrics: TurnMetrics }
     metrics.ttftMs > 0 ? `TTFT ${formatDuration(metrics.ttftMs)}` : "",
     metrics.durationApiMs > 0 ? formatDuration(metrics.durationApiMs) : "",
   ].filter(Boolean);
-  const costPart = metrics.reported && metrics.costUsd > 0 ? [formatUsd(metrics.costUsd)] : [];
+  const costPart = metrics.costUsd !== undefined && metrics.costUsd > 0 ? [formatUsd(metrics.costUsd)] : [];
   return (
     <div
       title={metricTitle(metrics)}

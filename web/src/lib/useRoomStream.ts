@@ -213,7 +213,6 @@ export function useRoomStream(params: UseRoomStreamParams): UseRoomStream {
           onRevokedRef.current(ended);
           return;
         }
-        if (e.kind === "member_removed") return;
         if (e.kind === "presence_typing" && e.presenceUser) {
           if (!isSelfUser(e.presenceUser, subject)) {
             const user = e.presenceUser;

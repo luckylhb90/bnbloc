@@ -104,29 +104,36 @@ function isChatAttachment(value: unknown): value is ChatAttachment {
   );
 }
 
-function isTurnMetrics(value: unknown): value is TurnMetrics {
-  if (!value || typeof value !== "object") return false;
-  return (
-    "inputTokens" in value &&
-    typeof value.inputTokens === "number" &&
-    "outputTokens" in value &&
-    typeof value.outputTokens === "number" &&
-    "cacheCreationTokens" in value &&
-    typeof value.cacheCreationTokens === "number" &&
-    "cacheReadTokens" in value &&
-    typeof value.cacheReadTokens === "number" &&
-    "thinkingTokens" in value &&
-    typeof value.thinkingTokens === "number" &&
-    "durationApiMs" in value &&
-    typeof value.durationApiMs === "number" &&
-    "ttftMs" in value &&
-    typeof value.ttftMs === "number" &&
-    "costUsd" in value &&
-    typeof value.costUsd === "number" &&
-    "reported" in value &&
-    typeof value.reported === "boolean" &&
-    (!("model" in value) || typeof value.model === "string")
-  );
+// readTurnMetrics reads a reply's free-form metrics map the way the server
+// bills it (wire.TurnUsageFromMetrics; both are pinned to
+// internal/wire/testdata/turn_usage.json): an empty map is no usage;
+// reported=false means tokens and cost are unknown (zero, not measured);
+// an absent or negative count is 0; a cost is present only when reported,
+// numeric and not negative. The display-only keys (cache, thinking, timing)
+// default to 0 the same way.
+export function readTurnMetrics(value: unknown): TurnMetrics | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const m = value as Record<string, unknown>;
+  if (Object.keys(m).length === 0) return undefined;
+  const model = typeof m.model === "string" && m.model.trim() ? m.model.trim() : undefined;
+  const reported = m.reported !== false;
+  const count = (k: string) => {
+    const v = m[k];
+    return reported && typeof v === "number" && v > 0 ? Math.trunc(v) : 0;
+  };
+  const cost = reported && typeof m.costUsd === "number" && m.costUsd >= 0 ? m.costUsd : undefined;
+  return {
+    ...(model ? { model } : {}),
+    reported,
+    inputTokens: count("inputTokens"),
+    outputTokens: count("outputTokens"),
+    cacheCreationTokens: count("cacheCreationTokens"),
+    cacheReadTokens: count("cacheReadTokens"),
+    thinkingTokens: count("thinkingTokens"),
+    durationApiMs: count("durationApiMs"),
+    ttftMs: count("ttftMs"),
+    ...(cost !== undefined ? { costUsd: cost } : {}),
+  };
 }
 // normalizeRoomEvent maps a raw room event (from the SSE stream or the history
 // endpoint, which share the {kind, payload, sequence, atUnixMs} shape) into the
@@ -150,7 +157,7 @@ export function normalizeRoomEvent(ev: RoomEvent, emit: (e: RoomEvent) => void):
       const owner = (mp.ownerUserId as string) || "";
       const core = typeof mp.core === "string" ? mp.core : "";
       const handle = provider ? (owner ? `${owner}/${provider}` : provider) : undefined;
-      const metrics = isTurnMetrics(mp.metrics) ? mp.metrics : undefined;
+      const metrics = readTurnMetrics(mp.metrics);
       const thinking = typeof mp.thinking === "string" && mp.thinking ? mp.thinking : undefined;
       // A notice line (a team lead's progress) is no reply: it leaves the
       // agent's working indicator alone.
@@ -189,10 +196,10 @@ export function normalizeRoomEvent(ev: RoomEvent, emit: (e: RoomEvent) => void):
       const attachments = p.attachments.filter(isChatAttachment);
       if (attachments.length > 0) ev.attachments = attachments;
     }
-    // A previously-edited message loaded from history carries editedAtMs, so the
-    // feed can show an "(edited)" marker without a live message_edited event.
-    if (typeof p.editedAtMs === "number") ev.editedAtMs = p.editedAtMs;
-    // Imported history: mark the row and keep its original edit stamp.
+    // A history row (wire.FeedMessage) carries the message's edit stamp as its
+    // own editedAtMs, the RoomEvent field of the same name, so the feed shows
+    // "(edited)" without a live message_edited event. Imported history keeps
+    // its original edit stamp in the import marker.
     ev.importedFrom = importedFrom(p);
     ev.editedAtMs ??= importedEditedAtMs(p);
     ev.scheduledId = scheduledMarker(p)?.scheduleId;

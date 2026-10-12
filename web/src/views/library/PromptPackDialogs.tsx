@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { api, type Room } from "@/lib/api";
+import { api, type RoomSummary } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { contentLabel, type ContentComponent, type ContentComponentDetail } from "@/lib/contentComponents";
 import { apiErrorText, contentApi } from "@/lib/contentComponentsApi";
@@ -207,7 +207,7 @@ export function PromptImportDialog({
 export function AddToRoomDialog({ pack, onClose }: { readonly pack: ContentComponent | null; readonly onClose: () => void }) {
   const { subject } = useAuth();
   const toast = useToast();
-  const [rooms, setRooms] = useState<Room[] | null>(null);
+  const [rooms, setRooms] = useState<RoomSummary[] | null>(null);
   const [roomId, setRoomId] = useState("");
   const [busy, setBusy] = useState(false);
   useEffect(() => {

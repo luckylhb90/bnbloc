@@ -17,8 +17,8 @@ type TeamJob struct {
 	RoomName      string `json:"roomName,omitempty"`
 	ChannelID     string `json:"channelId,omitempty"`
 	Requester     string `json:"requester"`
-	Status        string `json:"status"`
-	FailureReason string `json:"failureReason,omitempty"`
+	Status        string `json:"status" tstype:"AgentJobStatus"`
+	FailureReason string `json:"failureReason,omitempty" tstype:"AgentJobFailureReason"`
 	CreatedAtMs   int64  `json:"createdAtMs"`
 	StartedAtMs   int64  `json:"startedAtMs,omitempty"`
 	FinishedAtMs  int64  `json:"finishedAtMs,omitempty"`

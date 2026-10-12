@@ -1,0 +1,80 @@
+[
+  {
+    "name": "full",
+    "metrics": {
+      "cacheCreationTokens": 10,
+      "cacheReadTokens": 20,
+      "costUsd": 0.0042,
+      "durationApiMs": 900,
+      "inputTokens": 1200,
+      "model": "m-1",
+      "outputTokens": 340,
+      "reported": true,
+      "thinkingTokens": 5,
+      "ttftMs": 300
+    },
+    "usage": {
+      "model": "m-1",
+      "reported": true,
+      "inputTokens": 1200,
+      "outputTokens": 340,
+      "costUsd": 0.0042
+    }
+  },
+  {
+    "name": "partial",
+    "metrics": {
+      "inputTokens": 1200,
+      "model": "m-1",
+      "outputTokens": 340
+    },
+    "usage": {
+      "model": "m-1",
+      "reported": true,
+      "inputTokens": 1200,
+      "outputTokens": 340,
+      "costUsd": null
+    }
+  },
+  {
+    "name": "not reported",
+    "metrics": {
+      "inputTokens": 99,
+      "model": "m-2",
+      "reported": false
+    },
+    "usage": {
+      "model": "m-2",
+      "reported": false,
+      "inputTokens": 0,
+      "outputTokens": 0,
+      "costUsd": null
+    }
+  },
+  {
+    "name": "negative counts",
+    "metrics": {
+      "costUsd": -1,
+      "inputTokens": -5,
+      "outputTokens": 7
+    },
+    "usage": {
+      "model": "",
+      "reported": true,
+      "inputTokens": 0,
+      "outputTokens": 7,
+      "costUsd": null
+    }
+  },
+  {
+    "name": "empty",
+    "metrics": {},
+    "usage": {
+      "model": "",
+      "reported": false,
+      "inputTokens": 0,
+      "outputTokens": 0,
+      "costUsd": null
+    }
+  }
+]

@@ -221,7 +221,8 @@ func (s *Service) publishBlobVersion(w http.ResponseWriter, r *http.Request, art
 		cur, err := s.Artifacts.GetArtifactVersion(r.Context(), art.ArtifactID, art.CurrentVersion)
 		if err == nil && cur.ContentHash == up.ref.SHA256 && cur.MimeType == up.mimeType {
 			cur.Content = ""
-			httpx.WriteJSON(w, http.StatusOK, map[string]any{"artifact": art, "version": cur, "unchanged": true})
+			view := cur.View()
+			httpx.WriteJSON(w, http.StatusOK, wire.ArtifactReply{Artifact: art.View(), Version: &view, Unchanged: true})
 			return
 		}
 	}
@@ -462,7 +463,7 @@ func (s *Service) handlePutArtifactThumbnail(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	if v.ThumbnailBlobKey != "" && v.ThumbnailRank >= rank {
-		httpx.WriteJSON(w, http.StatusOK, map[string]any{"version": metadataOnly(v), "stored": false})
+		httpx.WriteJSON(w, http.StatusOK, wire.ArtifactThumbnailReply{Version: metadataOnly(v).View(), Stored: false})
 		return
 	}
 	if s.Blobs == nil {
@@ -486,7 +487,7 @@ func (s *Service) handlePutArtifactThumbnail(w http.ResponseWriter, r *http.Requ
 	if landed {
 		s.publishArtifactEventReason(r.Context(), art, caller(r), "thumbnail")
 	}
-	httpx.WriteJSON(w, http.StatusOK, map[string]any{"version": metadataOnly(stored), "stored": landed})
+	httpx.WriteJSON(w, http.StatusOK, wire.ArtifactThumbnailReply{Version: metadataOnly(stored).View(), Stored: landed})
 }
 
 // handleGetArtifactThumbnail serves a version's stored thumbnail (404 when

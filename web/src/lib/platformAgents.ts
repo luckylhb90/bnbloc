@@ -136,7 +136,7 @@ export function splitAgentHosts(members: readonly Member[]): {
   const agentHosts: string[] = [];
   for (const m of members) {
     if (m.agentHost) agentHosts.push(m.userId);
-    else people.push({ userId: m.userId, role: m.role });
+    else people.push(m);
   }
   return { people, agentHosts };
 }

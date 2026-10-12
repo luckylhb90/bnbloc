@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { CloudIcon, DesktopIcon, DownloadSimpleIcon, SparkleIcon, XIcon } from "@phosphor-icons/react";
-import { api, ApiError, type Room } from "@/lib/api";
+import { api, ApiError, type RoomSummary } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { inDesktopShell } from "@/lib/config";
 import { useDesktopPresence } from "@/lib/desktopPresence";
@@ -36,12 +36,12 @@ const CREATE_ATTEMPTS = 3;
 // member reaches an agent reply with one click plus typing. The secondary
 // path is the desktop app (own agents). `rooms` is the member's room list
 // when the view already has it; otherwise the card reads it.
-export function WelcomeCard({ rooms, onOpen }: { readonly rooms?: readonly Room[] | null; readonly onOpen: (id: string) => void }) {
+export function WelcomeCard({ rooms, onOpen }: { readonly rooms?: readonly RoomSummary[] | null; readonly onOpen: (id: string) => void }) {
   const { subject, reauth } = useAuth();
   const toast = useToast();
   const { agents: offered } = usePlatformAgents();
   const presence = useDesktopPresence();
-  const [ownRooms, setOwnRooms] = useState<readonly Room[] | null>(null);
+  const [ownRooms, setOwnRooms] = useState<readonly RoomSummary[] | null>(null);
   const [dismissed, setDismissed] = useState(() => welcomeDismissed(browserStorage(), subject));
   const [starting, setStarting] = useState(false);
 

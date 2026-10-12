@@ -138,7 +138,7 @@ func roomReplyTo(channelID string) *wire.NotificationReply {
 // on, exactly as the member's request addressed it (owner, provider, core):
 // replying continues the conversation with that agent, and borrow rules are
 // enforced downstream as for any chat.
-func agentReplyTo(channelID string, j jobView) *wire.NotificationReply {
+func agentReplyTo(channelID string, j wire.AgentJob) *wire.NotificationReply {
 	if j.Provider == "" {
 		return roomReplyTo(channelID)
 	}

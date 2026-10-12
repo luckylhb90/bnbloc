@@ -3,7 +3,8 @@ import type { AgentJob } from "@/lib/api";
 import { cn } from "@/lib/cn";
 import { relativeTime } from "@/lib/format";
 import { ActorLabel } from "@/views/room/ActorLabel";
-import { agentJobStatusLabel, LIVE_AGENT_JOB_STATUSES } from "@/views/room/agentJobLabels";
+import { isLiveJob } from "@/lib/agentRuns";
+import { agentJobStatusLabel } from "@/views/room/agentJobLabels";
 
 export type RecentArtifactChange = {
   readonly artifactId: string;
@@ -97,7 +98,7 @@ export function ActivityRail({
           </span>
         ))}
         {visibleJobs.map((job) => {
-          const live = LIVE_AGENT_JOB_STATUSES.has(job.status);
+          const live = isLiveJob(job);
           return (
             <span
               key={job.jobId}

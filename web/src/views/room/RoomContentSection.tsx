@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { BrainIcon, ChatTextIcon, TrashIcon, WrenchIcon } from "@phosphor-icons/react";
-import { useAuth } from "@/lib/auth";
 import { contentKindWord, contentLabel, isTeam, type ContentComponent, type ContentUse } from "@/lib/contentComponents";
 import { contentUsesChanged } from "@/lib/contentUsesEvents";
 import { apiErrorText, contentApi } from "@/lib/contentComponentsApi";
@@ -11,7 +10,6 @@ import { Select } from "@/ui/Select";
 import { useToast } from "@/ui/Toast";
 import { ContentViewDialog, PermissionBadges } from "@/views/library/ContentViewDialog";
 import { PromptPackViewDialog } from "@/views/library/PromptPackDialogs";
-import { useMyRoomRole } from "@/views/room/useMyRoomRole";
 import { ContentByline } from "@/views/library/ContentSharing";
 
 type PinMode = "latest" | "pinned";
@@ -24,10 +22,7 @@ const PIN_MODES = [
 // pinned for the room's composer (and @mentions), and skill packs every
 // agent in the room loads. The room's owner and admins change them; every
 // member sees them.
-export function RoomContentSection({ roomId }: { readonly roomId: string }) {
-  const { subject } = useAuth();
-  const role = useMyRoomRole(roomId, subject);
-  const canEdit = role === "owner" || role === "admin";
+export function RoomContentSection({ roomId, canEdit }: { readonly roomId: string; readonly canEdit: boolean }) {
   const toast = useToast();
   const [uses, setUses] = useState<readonly ContentUse[] | null>(null);
   // The room's expert (one of its pinned experts), worn by every agent turn.
@@ -158,7 +153,7 @@ export function RoomContentSection({ roomId }: { readonly roomId: string }) {
       <p className="text-sm font-medium">Experts, skills and prompts</p>
       <p className="mb-3 text-xs text-[var(--color-fg-muted)]">
         Pinned experts are offered in this room's composer and as @name. Skill packs load for every agent in the room. Prompt packs show in everyone's prompt picker here.
-        {!canEdit && role !== null ? " The room's owner and admins change them." : ""}
+        {!canEdit ? " The room's owner and admins change them." : ""}
       </p>
       {uses === null ? (
         <p className="text-xs text-[var(--color-fg-subtle)]">Loading…</p>

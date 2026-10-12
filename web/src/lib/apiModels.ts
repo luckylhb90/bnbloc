@@ -1,19 +1,25 @@
 // Gateway DTOs (wire shapes) of the /v1 surface. Re-exported by api.ts, the
-// client façade, so views import them from "@/lib/api".
-export interface Room {
-  roomId: string;
-  name?: string;
-  description?: string;
-  visibility: "private" | "shared";
-  syncMode?: "git" | "mutagen" | "none";
-  role?: string;
-  isOwner?: boolean;
-  memberCount?: number;
-  createdBy?: string;
-  createdAtMs?: number;
-  preview?: boolean;
-}
+// client façade, so views import them from "@/lib/api". A shape the Go
+// server owns is generated (wire.gen.ts) and only re-exported here; what
+// stays below has no Go wire type yet.
+export type {
+  AgentJob,
+  AgentTarget,
+  Artifact,
+  ArtifactThumbnail,
+  ArtifactVersion,
+  Core,
+  PlazaRoom,
+  RoomDetail,
+  RoomMember as Member,
+  RoomPreview,
+  RoomSummary,
+} from "./wire.gen.ts";
+import type { RoomDetail, RoomPreview } from "./wire.gen.ts";
 
+// Room is GET /v1/rooms/{id}: a member's detail, or a non-member's preview
+// of a shared room (`"preview" in room` tells them apart).
+export type Room = RoomDetail | RoomPreview;
 // One channel of a room: a topic-scoped message stream. Members, agent
 // borrows, and files are room-level and shared across channels.
 export interface Channel {
@@ -42,16 +48,9 @@ export interface TurnMetrics {
   readonly thinkingTokens: number;
   readonly durationApiMs: number;
   readonly ttftMs: number;
-  readonly costUsd: number;
+  // Absent unless reported (an unreported cost is not $0).
+  readonly costUsd?: number;
   readonly reported: boolean;
-}
-
-export interface Member {
-  userId: string;
-  role: string;
-  // A platform agent's host, in the room only so its bridge drives that
-  // agent: not a person (lib/platformAgents.ts splitAgentHosts).
-  agentHost?: boolean;
 }
 
 // Org-admin: one audit-trail entry for the tenant (agent borrow/turn decisions,
@@ -184,75 +183,6 @@ export interface JoinRequest {
   decidedBy: string;
 }
 
-export interface AgentJob {
-  jobId: string;
-  roomId: string;
-  channelId: string;
-  messageSeq: number;
-  requesterUserId: string;
-  ownerUserId: string;
-  core: string;
-  provider: string;
-  status: "queued" | "claimed" | "running" | "reflowing" | "replied" | "failed" | "timed_out" | "cancelled";
-  failureReason?: string;
-  attempt: number;
-  leaseBridgeId?: string;
-  leaseExpiresAtMs?: number;
-  updatedAtMs?: number;
-  diagnostics?: unknown;
-}
-
-
-// A collaboration deliverable (spec, report, code) the room iterates on.
-// Server-side object: every member, including web clients with no local
-// bridge, sees the same current version.
-export interface Artifact {
-  artifactId: string;
-  roomId: string;
-  channelId: string;
-  kind: string;
-  title: string;
-  language?: string;
-  currentVersion: number;
-  createdBy: string;
-  createdAtMs: number;
-  updatedAtMs: number;
-  // Binary-capable deliverables (additive; absent on text-only artifacts):
-  // the file's MIME type and name (display + extension source).
-  mimeType?: string;
-  fileName?: string;
-}
-
-// A stored preview image for one version (cards show it when present).
-export interface ArtifactThumbnail {
-  mimeType: string;
-  width: number;
-  height: number;
-}
-
-// One immutable revision. List responses omit content; it is fetched per
-// version on demand: `content` for inline text, the content route for
-// blob-backed files (which never carry `content`).
-export interface ArtifactVersion {
-  artifactId: string;
-  version: number;
-  parentVersion: number;
-  contentHash: string;
-  content?: string;
-  summary?: string;
-  authorUserId: string;
-  createdAtMs: number;
-  // Additive file fields (absent on versions published before them).
-  storage?: "inline" | "blob";
-  sizeBytes?: number;
-  mimeType?: string;
-  // The agent job / chat message that produced this version: the explicit
-  // link a chat file card anchors on.
-  sourceJobId?: string;
-  sourceSeq?: number;
-  thumbnail?: ArtifactThumbnail;
-}
-
 // Server-side filters of the room's artifact list (all optional).
 export interface ArtifactListFilter {
   kind?: string;
@@ -264,34 +194,3 @@ export interface ArtifactListFilter {
   cursor?: string;
 }
 
-export interface AgentTarget {
-  id: string;
-  provider: string;
-  localAgentUrl?: string;
-  localAgentToken?: string;
-  runViaGateway?: boolean;
-  // Which daemon core backend this target lives on.
-  // The id is already core-qualified ("<core>/<rawid>"); this is the explicit
-  // core for grouping in the UI. Empty for legacy/borrowed targets.
-  core: string;
-  // Model + reasoning pickers discovered by the core (empty => no picker). The
-  // frontend hardcodes nothing: these mirror the agent CLI's own config. Models
-  // are plain ids; reasoning is per-target (the core exposes one ladder).
-  models?: string[];
-  reasoningEfforts?: string[];
-  // Per-model reasoning options: pick a model, get that model's efforts. Falls
-  // back to reasoningEfforts when a model has no entry.
-  reasoningByModel?: Record<string, string[]>;
-  defaultModel?: string;
-  defaultReasoning?: string;
-}
-
-export interface Core {
-  name: string;
-  available: boolean;
-  backend?: string;
-  // "sidecar" cores are driven by the client's own bridge (not the gateway);
-  // the Agents page uses this to count a running managed sidecar as usable.
-  runtime?: string;
-  requiresDesktop?: boolean;
-}

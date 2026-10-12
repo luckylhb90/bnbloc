@@ -11,6 +11,8 @@ import (
 // client reads; a field with no source is omitted (absent cost ≠ zero cost).
 
 // Run listing scopes (AgentRunsReply.Scope).
+//
+//wire:union RunScope
 const (
 	RunScopeRoom   = "room"
 	RunScopeSelf   = "self"
@@ -109,8 +111,8 @@ type AgentRun struct {
 	// Requester asked for the run; Borrowed when that is not the agent owner.
 	Requester     string          `json:"requester"`
 	Borrowed      bool            `json:"borrowed,omitempty"`
-	Status        string          `json:"status"`
-	FailureReason string          `json:"failureReason,omitempty"`
+	Status        string          `json:"status" tstype:"AgentJobStatus"`
+	FailureReason string          `json:"failureReason,omitempty" tstype:"AgentJobFailureReason"`
 	Error         string          `json:"error,omitempty"`
 	Warning       string          `json:"warning,omitempty"`
 	Attempt       int             `json:"attempt,omitempty"`
@@ -139,7 +141,7 @@ type AgentRun struct {
 // (scope self) and GET /v1/tenant/jobs (scope tenant). NextBefore is the
 // opaque cursor of the next (older) page; absent on the last page.
 type AgentRunsReply struct {
-	Scope      string     `json:"scope"`
+	Scope      string     `json:"scope" tstype:"RunScope"`
 	Runs       []AgentRun `json:"runs"`
 	NextBefore string     `json:"nextBefore,omitempty"`
 }

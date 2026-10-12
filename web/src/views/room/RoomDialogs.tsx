@@ -1,5 +1,6 @@
 import { useMemo } from "react";
 import type { Room } from "@/lib/api";
+import type { RoomMembership } from "@/lib/roomRoles";
 import { ConfirmDialog } from "@/ui/Dialog";
 import { RoomSettings } from "@/views/RoomSettings";
 import { BorrowAuthDialog } from "@/views/BorrowDialog";
@@ -11,6 +12,7 @@ import type { RoomPlatformAgents } from "@/views/room/useRoomPlatformAgents";
 export function RoomDialogs({
   roomId,
   room,
+  me,
   subject,
   online,
   roomAgents,
@@ -27,6 +29,7 @@ export function RoomDialogs({
 }: {
   readonly roomId: string;
   readonly room: Room | null;
+  readonly me: RoomMembership | null;
   readonly subject: string | null;
   readonly online: string[];
   readonly roomAgents: RoomAgent[];
@@ -49,8 +52,8 @@ export function RoomDialogs({
   );
   return (
     <>
-      {dialog === "settings" && room && (
-        <RoomSettings room={room} onClose={onCloseDialog} onChanged={onRoomChanged} onDeleted={onRoomDeleted} />
+      {dialog === "settings" && room && !("preview" in room) && me && (
+        <RoomSettings room={room} me={me} onClose={onCloseDialog} onChanged={onRoomChanged} onDeleted={onRoomDeleted} />
       )}
       {dialog === "members" && (
         <MembersDialog

@@ -4,7 +4,23 @@ import { saveBlob } from "./saveBlob.ts";
 import { tapOnboarding } from "./onboardingEvents.ts";
 import { splitAgentHosts } from "./platformAgents.ts";
 import { apiUrl } from "./config";
-import { MaxUnreadRooms } from "./wire.gen.ts";
+import {
+  MaxUnreadRooms,
+  type AgentJobsReply,
+  type AgentTargetsReply,
+  type ArtifactDetail,
+  type ArtifactList,
+  type ArtifactReply,
+  type ArtifactVersionReply,
+  type CoresReply,
+  type FeedPage,
+  type PlazaReply,
+  type RoomDetail,
+  type RoomMembersReply,
+  type RoomPreview,
+  type RoomsReply,
+  type UnreadReply,
+} from "./wire.gen.ts";
 import { authedFetch, errorDetail } from "./session.ts";
 import { downloadFilename, type RoomHandoffInfo, type RoomImportResult } from "./handoff.ts";
 import type { Grant } from "./sessionGrant.ts";
@@ -23,10 +39,8 @@ import {
   type UsageReportQuery,
 } from "./teamDashboard.ts";
 import type {
-  Room,
   Channel,
   ChatAttachment,
-  Member,
   TenantAuditRecord,
   TenantUsage,
   TenantMember,
@@ -40,12 +54,7 @@ import type {
   ReleaseHub,
   DirectoryTenant,
   JoinRequest,
-  AgentJob,
-  Artifact,
   ArtifactListFilter,
-  ArtifactVersion,
-  AgentTarget,
-  Core,
 } from "./apiModels";
 import type {
   ComponentInstallRequest,
@@ -334,7 +343,7 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ code, nonce }),
     }),
-  cores: () => req<{ cores: Core[] }>("/v1/cores"),
+  cores: () => req<CoresReply>("/v1/cores"),
 
   // Chat messages as tasks (F6): any room member may mark/toggle/unmark.
   roomTasks: (roomId: string) => req<{ tasks: MessageTask[] }>(`/v1/rooms/${encodeURIComponent(roomId)}/tasks`),
@@ -353,18 +362,20 @@ export const api = {
     return req<SearchResponse>(`/v1/search?${p.toString()}`);
   },
   myRooms: (subject: string) =>
-    req<{ rooms: Room[] }>(
+    req<RoomsReply>(
       `/v1/users/${encodeURIComponent(subject)}/rooms?detail=1`,
     ),
   searchRooms: (q: string) =>
-    req<{ rooms: Room[] }>(`/v1/rooms?q=${encodeURIComponent(q)}`),
-  getRoom: (id: string) => req<Room>(`/v1/rooms/${encodeURIComponent(id)}`),
+    req<PlazaReply>(`/v1/rooms?q=${encodeURIComponent(q)}`),
+  // A member gets the room's detail; a non-member of a shared room its
+  // preview (a join card); a private room is 404 to a non-member.
+  getRoom: (id: string) => req<RoomDetail | RoomPreview>(`/v1/rooms/${encodeURIComponent(id)}`),
   createRoom: (body: {
     roomId: string;
     name?: string;
     description?: string;
     visibility: string;
-  }) => req<Room>("/v1/rooms", { method: "POST", body: JSON.stringify(body) }),
+  }) => req<RoomDetail>("/v1/rooms", { method: "POST", body: JSON.stringify(body) }),
   updateRoom: (
     id: string,
     body: {
@@ -374,7 +385,7 @@ export const api = {
       syncMode?: string;
     },
   ) =>
-    req<Room>(`/v1/rooms/${encodeURIComponent(id)}`, {
+    req<RoomDetail>(`/v1/rooms/${encodeURIComponent(id)}`, {
       method: "PATCH",
       body: JSON.stringify(body),
     }),
@@ -396,7 +407,7 @@ export const api = {
   // The room's people. Agent-host memberships (a platform agent's host) are
   // split off here, the one place, so no people list ever shows them.
   members: async (id: string) => {
-    const res = await req<{ members: Member[] | null }>(`/v1/rooms/${encodeURIComponent(id)}/members`);
+    const res = await req<RoomMembersReply>(`/v1/rooms/${encodeURIComponent(id)}/members`);
     const { people, agentHosts } = splitAgentHosts(res.members ?? []);
     return { members: people, agentHosts };
   },
@@ -411,17 +422,9 @@ export const api = {
   // gateway bounds one request's room list, so larger sets are fetched in
   // chunks and merged.
   roomsUnread: async (roomIds: string[]) => {
-    const merged: {
-      unread: Record<string, number>;
-      // Per-channel unread counts per room (only channels with unread > 0,
-      // default first).
-      channels: Record<string, { channelId: string; count: number }[]>;
-    } = { unread: {}, channels: {} };
+    const merged: UnreadReply = { unread: {}, channels: {} };
     for (let i = 0; i < roomIds.length; i += MaxUnreadRooms) {
-      const part = await req<{
-        unread?: Record<string, number>;
-        channels?: Record<string, { channelId: string; count: number }[]>;
-      }>(`/v1/rooms-unread?rooms=${encodeURIComponent(roomIds.slice(i, i + MaxUnreadRooms).join(","))}`);
+      const part = await req<UnreadReply>(`/v1/rooms-unread?rooms=${encodeURIComponent(roomIds.slice(i, i + MaxUnreadRooms).join(","))}`);
       Object.assign(merged.unread, part.unread ?? {});
       Object.assign(merged.channels, part.channels ?? {});
     }
@@ -445,21 +448,13 @@ export const api = {
   // Paginated room-feed history older than `before` (a sequence cursor; omit for
   // the latest page), ascending by sequence. Beyond the live replay buffer.
   roomHistory: (id: string, before?: number, limit = 50, channelId?: string) =>
-    req<{
-      messages: {
-        sequence: number;
-        kind: string;
-        channelId?: string;
-        payload: Record<string, unknown>;
-        atUnixMs: number;
-      }[];
-    }>(
+    req<FeedPage>(
       `/v1/rooms/${encodeURIComponent(id)}/history?limit=${limit}${before ? `&before=${before}` : ""}${channelId ? `&channelId=${encodeURIComponent(channelId)}` : ""}`,
     ),
   // Durable agent jobs for the current room/channel, used to show queued,
   // running, and failed state below the originating chat message.
   agentJobs: (roomId: string, channelId?: string) =>
-    req<{ jobs: AgentJob[] }>(
+    req<AgentJobsReply>(
       `/v1/rooms/${encodeURIComponent(roomId)}/agent-jobs${channelId ? `?channelId=${encodeURIComponent(channelId)}` : ""}`,
     ),
   // Stop a queued or running job. Authorized by room membership, so a member can
@@ -472,14 +467,14 @@ export const api = {
 
   // Room artifacts: create / list / read / publish under the room's membership.
   createArtifact: (roomId: string, body: { kind: string; title: string; channelId?: string; language?: string; content?: string; summary?: string }) =>
-    req<{ artifact: Artifact }>(`/v1/rooms/${encodeURIComponent(roomId)}/artifacts`, {
+    req<ArtifactReply>(`/v1/rooms/${encodeURIComponent(roomId)}/artifacts`, {
       method: "POST",
       body: JSON.stringify(body),
     }),
   // The room's artifacts, optionally filtered server-side (kind / mime /
   // author / producing message / text search) and paged (nextCursor).
   artifacts: (roomId: string, filter: ArtifactListFilter = {}) =>
-    req<{ artifacts: Artifact[]; nextCursor?: string }>(
+    req<ArtifactList>(
       `/v1/rooms/${encodeURIComponent(roomId)}/artifacts${artifactListQuery(filter)}`,
     ),
   // The deliverables produced by the room messages with seq in [from, to]:
@@ -489,11 +484,11 @@ export const api = {
       `/v1/rooms/${encodeURIComponent(roomId)}/artifact-anchors?from=${from}&to=${to}`,
     ),
   artifactDetail: (roomId: string, artifactId: string) =>
-    req<{ artifact: Artifact; versions: ArtifactVersion[] }>(
+    req<ArtifactDetail>(
       `/v1/rooms/${encodeURIComponent(roomId)}/artifacts/${encodeURIComponent(artifactId)}`,
     ),
   artifactVersion: (roomId: string, artifactId: string, version: number) =>
-    req<{ version: ArtifactVersion }>(
+    req<ArtifactVersionReply>(
       `/v1/rooms/${encodeURIComponent(roomId)}/artifacts/${encodeURIComponent(artifactId)}/versions/${version}`,
     ),
   // Relay a live artifact's collaboration state (a gesture in a running
@@ -516,7 +511,7 @@ export const api = {
     artifactId: string,
     body: { baseVersion: number; content: string; summary?: string },
   ) =>
-    req<{ artifact: Artifact; version: ArtifactVersion }>(
+    req<ArtifactReply>(
       `/v1/rooms/${encodeURIComponent(roomId)}/artifacts/${encodeURIComponent(artifactId)}/versions`,
       { method: "POST", body: JSON.stringify(body) },
     ),
@@ -533,7 +528,7 @@ export const api = {
     roomId: string,
     artifactId: string,
     body: { file: Blob; fileName: string; baseVersion: number; summary?: string; sourceJobId?: string; sourceSeq?: number },
-  ): Promise<{ artifact: Artifact; version: ArtifactVersion }> => {
+  ): Promise<ArtifactReply> => {
     const form = new FormData();
     form.append("file", body.file, body.fileName);
     form.append("baseVersion", String(body.baseVersion));
@@ -545,7 +540,7 @@ export const api = {
       { method: "POST", body: form },
     );
     if (!res.ok) throw new ApiError(res.status, await errorDetail(res));
-    return (await res.json()) as { artifact: Artifact; version: ArtifactVersion };
+    return (await res.json()) as ArtifactReply;
   },
 
   // Room channels: list (default first), create (any member), rename
@@ -777,7 +772,7 @@ export const api = {
     const q = new URLSearchParams();
     if (localAgentUrl) q.set("localAgentUrl", localAgentUrl);
     if (localAgentToken) q.set("localAgentToken", localAgentToken);
-    return req<{ targets: AgentTarget[] }>(`/v1/local-agent/targets?${q}`);
+    return req<AgentTargetsReply>(`/v1/local-agent/targets?${q}`);
   },
   localAgentDiscover: () =>
     req<{ found: boolean; localAgentUrl?: string; localAgentToken?: string }>(

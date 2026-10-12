@@ -14,8 +14,11 @@ const job = (over: Partial<AgentJob>): AgentJob => ({
   ownerUserId: "admin",
   core: "nimbus",
   provider: "codex",
+  messageText: "",
   status: "queued",
   attempt: 1,
+  createdAtMs: 1,
+  updatedAtMs: 1,
   ...over,
 });
 

@@ -11,7 +11,7 @@ import {
 import { ApiError } from "@/lib/api";
 import {
   isFailedRun,
-  isLiveRun,
+  isLiveJob,
   mergeRunPages,
   runAgentLabel,
   runDurationMs,
@@ -66,7 +66,7 @@ function failureText(r: AgentRun): string {
 }
 
 function StatusBadge({ run }: { readonly run: AgentRun }) {
-  const tone = isFailedRun(run) ? "danger" : isLiveRun(run) ? "accent" : run.status === "cancelled" ? "warning" : "neutral";
+  const tone = isFailedRun(run) ? "danger" : isLiveJob(run) ? "accent" : run.status === "cancelled" ? "warning" : "neutral";
   return <Badge tone={tone}>{statusText(run)}</Badge>;
 }
 

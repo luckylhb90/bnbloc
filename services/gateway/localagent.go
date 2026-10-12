@@ -18,6 +18,7 @@ import (
 	"github.com/luckylhb90/bnbloc/internal/coreset"
 	"github.com/luckylhb90/bnbloc/internal/httpx"
 	"github.com/luckylhb90/bnbloc/internal/obs"
+	"github.com/luckylhb90/bnbloc/internal/wire"
 )
 
 // agentEndpoint identifies one member's local agent core daemon. Each
@@ -228,7 +229,7 @@ func (s *Service) handleLocalAgentTargets(w http.ResponseWriter, r *http.Request
 		}
 	}
 
-	out := make([]map[string]any, 0, len(queries))
+	reply := wire.AgentTargetsReply{Targets: []wire.AgentTarget{}}
 	for _, q := range queries {
 		if !q.ep.OK() {
 			continue
@@ -238,32 +239,23 @@ func (s *Service) handleLocalAgentTargets(w http.ResponseWriter, r *http.Request
 			continue
 		}
 		for _, t := range targets {
-			row := map[string]any{
-				"id":       core.QualifyTargetID(q.entry.Name, t.ID),
-				"provider": t.Provider,
-				"core":     q.entry.Name,
-			}
 			// Model/reasoning pickers: forwarded only when the core discovered
-			// them, so a core without a catalog simply offers no picker.
-			if len(t.Models) > 0 {
-				row["models"] = t.Models
-			}
-			if len(t.ReasoningEfforts) > 0 {
-				row["reasoningEfforts"] = t.ReasoningEfforts
-			}
-			if len(t.ReasoningByModel) > 0 {
-				row["reasoningByModel"] = t.ReasoningByModel
-			}
-			if t.DefaultModel != "" {
-				row["defaultModel"] = t.DefaultModel
-			}
-			if t.DefaultReasoning != "" {
-				row["defaultReasoning"] = t.DefaultReasoning
-			}
-			out = append(out, row)
+			// them (omitempty), so a core without a catalog offers no picker.
+			reply.Targets = append(reply.Targets, wire.AgentTarget{
+				ID:       core.QualifyTargetID(q.entry.Name, t.ID),
+				Provider: t.Provider,
+				Core:     q.entry.Name,
+				AgentModelOptions: wire.AgentModelOptions{
+					Models:           t.Models,
+					ReasoningEfforts: t.ReasoningEfforts,
+					ReasoningByModel: t.ReasoningByModel,
+					DefaultModel:     t.DefaultModel,
+					DefaultReasoning: t.DefaultReasoning,
+				},
+			})
 		}
 	}
-	httpx.WriteJSON(w, http.StatusOK, map[string]any{"targets": out})
+	httpx.WriteJSON(w, http.StatusOK, reply)
 }
 
 // adoptRoom makes the workspace id a bnbloc room the caller can use. It

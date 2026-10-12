@@ -90,7 +90,7 @@ func (o *Observer) replyObserved(obs observation, now time.Time) []Event {
 // jobReplied emits agent_finished with the job's reply, or parks the job
 // until the reply arrives.
 func (o *Observer) jobReplied(obs observation, now time.Time) []Event {
-	session := strings.TrimSpace(obs.job.Diagnostics.SessionID)
+	session := strings.TrimSpace(obs.job.ReplySessionID)
 	if session == "" {
 		return jobEvents(obs, agentReply{})
 	}
@@ -161,7 +161,7 @@ func (o *Observer) pruneReplies(now time.Time) {
 
 // jobSinceMs is when the job's turn began (claim time when the bridge never
 // reported running).
-func jobSinceMs(j jobView) int64 {
+func jobSinceMs(j wire.AgentJob) int64 {
 	if j.StartedAtMs > 0 {
 		return j.StartedAtMs
 	}

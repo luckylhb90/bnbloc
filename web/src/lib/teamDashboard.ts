@@ -8,18 +8,8 @@ import { compactNumber } from "./format.ts";
 export type TeamRange = "today" | "7d";
 export type TeamScope = "self" | "tenant";
 
-export interface TeamJob {
-  jobId: string;
-  roomId: string;
-  roomName?: string;
-  channelId?: string;
-  requester: string;
-  status: string;
-  failureReason?: string;
-  createdAtMs: number;
-  startedAtMs?: number;
-  finishedAtMs?: number;
-}
+export type { TeamJob } from "./wire.gen.ts";
+import type { TeamJob } from "./wire.gen.ts";
 
 export interface TeamAgentUsage {
   reportedTurns: number;

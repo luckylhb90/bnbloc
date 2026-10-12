@@ -79,7 +79,7 @@ func repliedJob(jobID, session string, startedAtMs int64) wire.Event {
 	return wire.Event{RoomID: "r1", ChannelID: "c1", Kind: "agent_job_updated", Payload: map[string]any{
 		"jobId": jobID, "requesterUserId": "alice", "ownerUserId": "bob", "provider": "codex", "channelId": "c1",
 		"messageSeq": 10, "messageText": "fix the build", "status": "replied", "startedAtMs": startedAtMs,
-		"diagnostics": map[string]any{"core": "acme", "sessionId": session},
+		"core": "acme", "replySessionId": session,
 	}}
 }
 

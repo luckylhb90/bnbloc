@@ -35,7 +35,8 @@ import { jobQueueAhead } from "@/lib/platformAgents";
 import { useDesktopHandoff } from "@/views/room/useDesktopHandoff";
 import { HandoffBanner } from "@/views/room/HandoffBanner";
 import { useHandoffExport } from "@/views/room/useHandoffExport";
-import { useMyRoomRole } from "@/views/room/useMyRoomRole";
+import { canInvite, mayChat } from "@/lib/roomRoles";
+import { EventMemberJoined, EventMemberRemoved } from "@/lib/wire.gen";
 import { DesktopConnectBanner } from "@/views/DesktopConnect";
 import { useRoomData } from "@/views/room/useRoomData";
 import { useRoomFeed } from "@/views/room/useRoomFeed";
@@ -53,8 +54,6 @@ import { useWorkshopSaves } from "@/views/room/useWorkshopSaves";
 
 type Panel = "chat" | "artifacts";
 type RoomDialog = "settings" | "members" | "borrow" | "leave" | null;
-
-const JOB_DIAGNOSTICS_KEY = "bnbloc.jobDiagnostics";
 
 // RoomView is one room. App keys it by room id, so EVERY piece of state here
 // — channel, feed, jobs, artifact cards, dock, search, panels, dialogs,
@@ -118,8 +117,11 @@ export function RoomView({
   const handoff = useDesktopHandoff(roomId, subject, data.setRoster);
   // Owner/admin act on the room as a whole: export its handoff package, and
   // add the suggested members of an imported room.
-  const myRole = useMyRoomRole(roomId, subject, joinedGen);
-  const canManageRoom = myRole === "owner" || myRole === "admin";
+  const me = data.me ?? null;
+  const canManageRoom = !!me && canInvite(me);
+  // Visitors follow the room but may not post (D1); unknown until the member
+  // list answers, so the composer never flashes read-only.
+  const readOnly = data.me !== undefined && !(me && mayChat(me));
   const handoffExport = useHandoffExport(roomId);
 
   // Layout: container stage drives the rail (inline/drawer/collapsed) and the
@@ -141,21 +143,6 @@ export function RoomView({
   useEffect(() => {
     if (railSurface === "inline") setRailDrawerOpen(false);
   }, [railSurface]);
-
-  // Developer job diagnostics (Cmd/Ctrl+Shift+D), persisted across reloads.
-  const [showJobDiagnostics, setShowJobDiagnostics] = useState(() => localStorage.getItem(JOB_DIAGNOSTICS_KEY) === "1");
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key.toLowerCase() !== "d" || !e.shiftKey || !(e.metaKey || e.ctrlKey)) return;
-      e.preventDefault();
-      setShowJobDiagnostics((on) => {
-        localStorage.setItem(JOB_DIAGNOSTICS_KEY, on ? "0" : "1");
-        return !on;
-      });
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, []);
 
   // Conversation: feed + history for the active channel, kept scrolled.
   const scroller = useFeedScroll();
@@ -201,6 +188,12 @@ export function RoomView({
     if (activity.applyEvent(e)) return;
     if (e.kind === "agent_roster") {
       if (e.rosterAgents) data.setRoster(e.rosterAgents);
+      return;
+    }
+    // Someone joined or was removed: the member list (mentions, people,
+    // and my own role) refreshes.
+    if (e.kind === EventMemberJoined || e.kind === EventMemberRemoved) {
+      data.reloadMembers();
       return;
     }
     if (e.kind === CONTENT_USES_CHANGED) {
@@ -334,10 +327,11 @@ export function RoomView({
   // The people chat: a human-only side conversation agents never see. Docked
   // beside the timeline on a wide room, a full-screen sheet otherwise, its
   // own window in the desktop shell.
+  const member = !!room && !("preview" in room);
   const peopleChat = usePeopleChat({
     roomId,
     joinedGen,
-    enabled: room ? !room.preview : null,
+    enabled: room ? member : null,
     unreadByChannel,
   });
   const peopleUnread = peopleChat.channelId ? unreadByChannel[peopleChat.channelId] ?? 0 : 0;
@@ -433,7 +427,7 @@ export function RoomView({
       <RoomHeader
         room={room}
         roomId={roomId}
-        subject={subject}
+        me={me}
         roomStage={roomStage}
         railSurface={railSurface}
         connected={connected}
@@ -450,10 +444,10 @@ export function RoomView({
         onExportHandoff={canManageRoom ? () => void handoffExport.run() : undefined}
         exportingBytes={handoffExport.exporting ? handoffExport.progressBytes : null}
         onSaveTemplate={canManageRoom ? () => setSavingTemplate(true) : undefined}
-        onShowSchedules={room && !room.preview ? () => setShowSchedules(true) : undefined}
-        onShowRuns={room && !room.preview ? () => setShowRuns(true) : undefined}
+        onShowSchedules={member ? () => setShowSchedules(true) : undefined}
+        onShowRuns={member ? () => setShowRuns(true) : undefined}
         onTogglePeopleChat={
-          room && !room.preview ? () => (peopleChat.open ? closePeopleChat() : peopleChat.openPanel()) : undefined
+          member ? () => (peopleChat.open ? closePeopleChat() : peopleChat.openPanel()) : undefined
         }
         peopleChatOpen={peopleChat.open}
         peopleChatUnread={peopleUnread}
@@ -515,7 +509,6 @@ export function RoomView({
                   unreadFromSeq={unreadFromSeq}
                   showDesktopHandoff={handoff.show}
                   agentJobs={activity.agentJobs}
-                  showJobDiagnostics={showJobDiagnostics}
                   artifactsBySeq={activity.artifactsBySeq}
                   onStartAgent={() => void startAgent()}
                   onLoadEarlier={conversation.loadEarlier}
@@ -536,7 +529,8 @@ export function RoomView({
                 per-channel preference), or the join panel for a preview. */}
             <RoomComposer
               key={channelId ?? ""}
-              roomPreview={!!room?.preview}
+              roomPreview={!!room && "preview" in room}
+              readOnly={readOnly}
               agent={agent}
               subject={subject}
               roomId={roomId}
@@ -602,6 +596,7 @@ export function RoomView({
       <RoomDialogs
         roomId={roomId}
         room={room}
+        me={me}
         subject={subject}
         online={online}
         roomAgents={roomAgents}
@@ -628,7 +623,7 @@ export function RoomView({
         <SchedulesDialog
           roomId={roomId}
           subject={subject}
-          myRole={myRole}
+          moderator={canManageRoom}
           roomAgents={roomAgents}
           localTargets={agent.targets}
           onClose={() => setShowSchedules(false)}

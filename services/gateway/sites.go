@@ -21,6 +21,7 @@ import (
 	"github.com/luckylhb90/bnbloc/internal/roomctx"
 	"github.com/luckylhb90/bnbloc/internal/store"
 	"github.com/luckylhb90/bnbloc/internal/tarbundle"
+	"github.com/luckylhb90/bnbloc/internal/wire"
 )
 
 // Site snapshots (PRD 2026-10-09 "Public share links and live web-app
@@ -218,13 +219,13 @@ func (s *Service) memberSiteVersion(ctx context.Context, subject, tenantID, scop
 	default:
 		return siteVersion{}, fmt.Errorf("room service answered %d", resp.StatusCode)
 	}
-	var out struct {
-		Version store.ArtifactVersion `json:"version"`
-	}
+	var out wire.ArtifactVersionReply
 	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&out); err != nil {
 		return siteVersion{}, fmt.Errorf("decode artifact version: %w", err)
 	}
-	sv, ok := siteVersionOf(out.Version.Storage, out.Version.MimeType, out.Version.BlobKey, out.Version.ContentHash)
+	// A member never sees a blob key: the bytes are content-addressed by the
+	// version's hash.
+	sv, ok := siteVersionOf(out.Version.Storage, out.Version.MimeType, digest.Key(out.Version.ContentHash), out.Version.ContentHash)
 	if !ok {
 		return siteVersion{}, errSiteNotFound
 	}

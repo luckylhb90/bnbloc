@@ -179,7 +179,7 @@ func (s *Service) handleCreateArtifact(w http.ResponseWriter, r *http.Request) {
 		art.MimeType = v.MimeType
 	}
 	s.publishArtifactEvent(r.Context(), art, userID)
-	httpx.WriteJSON(w, http.StatusOK, map[string]any{"artifact": art})
+	httpx.WriteJSON(w, http.StatusOK, wire.ArtifactReply{Artifact: art.View()})
 }
 
 // handleListArtifacts lists the room's artifacts, newest-updated first, with
@@ -208,10 +208,10 @@ func (s *Service) handleListArtifacts(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, "list artifacts failed", http.StatusInternalServerError)
 		return
 	}
-	resp := map[string]any{"artifacts": arts, "maxBytes": s.artifactMaxBytes()}
+	resp := wire.ArtifactList{Artifacts: store.ArtifactViews(arts), MaxBytes: s.artifactMaxBytes()}
 	if len(arts) == q.Limit {
 		last := arts[len(arts)-1]
-		resp["nextCursor"] = strconv.FormatInt(last.UpdatedAtMs, 10) + ":" + last.ArtifactID
+		resp.NextCursor = strconv.FormatInt(last.UpdatedAtMs, 10) + ":" + last.ArtifactID
 	}
 	httpx.WriteJSON(w, http.StatusOK, resp)
 }
@@ -303,7 +303,7 @@ func (s *Service) handleGetArtifact(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	httpx.WriteJSON(w, http.StatusOK, map[string]any{"artifact": art, "versions": versions})
+	httpx.WriteJSON(w, http.StatusOK, wire.ArtifactDetail{Artifact: art.View(), Versions: store.ArtifactVersionViews(versions)})
 }
 
 func (s *Service) handleGetArtifactVersion(w http.ResponseWriter, r *http.Request) {
@@ -326,7 +326,7 @@ func (s *Service) handleGetArtifactVersion(w http.ResponseWriter, r *http.Reques
 		httpx.Error(w, "version not found", http.StatusNotFound)
 		return
 	}
-	httpx.WriteJSON(w, http.StatusOK, map[string]any{"version": v})
+	httpx.WriteJSON(w, http.StatusOK, wire.ArtifactVersionReply{Version: v.View()})
 }
 
 func (s *Service) handlePublishVersion(w http.ResponseWriter, r *http.Request) {
@@ -405,7 +405,8 @@ func (s *Service) commitVersion(w http.ResponseWriter, r *http.Request, art stor
 		return
 	}
 	s.publishArtifactEvent(r.Context(), art, userID)
-	httpx.WriteJSON(w, http.StatusOK, map[string]any{"artifact": art, "version": v})
+	view := v.View()
+	httpx.WriteJSON(w, http.StatusOK, wire.ArtifactReply{Artifact: art.View(), Version: &view})
 }
 
 // authorizeArtifactRead checks room membership and that the artifact belongs to
@@ -443,18 +444,16 @@ func (s *Service) publishArtifactEventReason(ctx context.Context, art store.Arti
 	if s.Publisher == nil {
 		return
 	}
-	payload := map[string]any{
-		"artifactId":     art.ArtifactID,
-		"kind":           art.Kind,
-		"title":          art.Title,
-		"mimeType":       art.MimeType,
-		"fileName":       art.FileName,
-		"currentVersion": art.CurrentVersion,
-		"updatedBy":      actor,
-		"updatedAtMs":    art.UpdatedAtMs,
-	}
-	if reason != "" {
-		payload["reason"] = reason
+	payload := wire.ArtifactUpdated{
+		ArtifactID:     art.ArtifactID,
+		Kind:           art.Kind,
+		Title:          art.Title,
+		MimeType:       art.MimeType,
+		FileName:       art.FileName,
+		CurrentVersion: art.CurrentVersion,
+		UpdatedBy:      actor,
+		UpdatedAtMs:    art.UpdatedAtMs,
+		Reason:         reason,
 	}
 	// Artifact events deliver room-wide (empty ChannelID): the Docs panel is a
 	// room-scoped surface, so a viewer sitting in another channel must still

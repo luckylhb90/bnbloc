@@ -41,6 +41,7 @@ export interface Item extends Base {
   bytes: string;
   role: Kind;
   roles: Kind[];
+  event: EventKind;
   big: string;
   inline: { X: number; };
   Untagged: number;

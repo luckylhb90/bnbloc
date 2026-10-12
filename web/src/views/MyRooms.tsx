@@ -8,7 +8,7 @@ import {
   LockIcon,
   DeviceMobileIcon,
 } from "@phosphor-icons/react";
-import { api, ApiError, type Room } from "@/lib/api";
+import { api, ApiError, type RoomSummary } from "@/lib/api";
 import { isSubmitEnter } from "@/lib/keys";
 import { useAuth } from "@/lib/auth";
 import { Button } from "@/ui/Button";
@@ -22,10 +22,11 @@ import { RunAgentDialog } from "@/views/RunAgentDialog";
 import { HandoffImportButton } from "@/views/HandoffImportButton";
 import { useLocalAgent } from "@/lib/useLocalAgent";
 import { WelcomeCard } from "@/views/WelcomeCard";
+import { isOwner } from "@/lib/roomRoles";
 
 export function MyRooms({ onOpen }: { onOpen: (id: string) => void }) {
   const { subject } = useAuth();
-  const [rooms, setRooms] = useState<Room[] | null>(null);
+  const [rooms, setRooms] = useState<RoomSummary[] | null>(null);
   const [loadError, setLoadError] = useState(false);
   const [unread, setUnread] = useState<Record<string, number>>({});
   const [redeeming, setRedeeming] = useState(false);
@@ -130,8 +131,8 @@ export function MyRooms({ onOpen }: { onOpen: (id: string) => void }) {
           />
         ) : (
           (() => {
-            const owned = rooms.filter((r) => r.isOwner);
-            const joined = rooms.filter((r) => !r.isOwner);
+            const owned = rooms.filter((r) => isOwner(r));
+            const joined = rooms.filter((r) => !isOwner(r));
             return (
               <div className="flex flex-col gap-8">
                 <RoomSection
@@ -213,7 +214,7 @@ function RoomRow({
   onOpen,
   unread,
 }: {
-  room: Room;
+  room: RoomSummary;
   onOpen: (id: string) => void;
   unread?: number;
 }) {
@@ -265,7 +266,7 @@ function RoomSection({
   unread,
 }: {
   title: string;
-  rooms: Room[];
+  rooms: RoomSummary[];
   empty: string;
   onOpen: (id: string) => void;
   unread: Record<string, number>;

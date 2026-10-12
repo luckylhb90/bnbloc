@@ -1,0 +1,16 @@
+{
+  "messages": [
+    {
+      "sequence": 11,
+      "channelId": "chan-1",
+      "kind": "chat_message",
+      "payload": {
+        "userId": "maya",
+        "text": "Please fix the build",
+        "clientMsgId": "c-1"
+      },
+      "atUnixMs": 1760000000500,
+      "editedAtMs": 1760000005000
+    }
+  ]
+}

@@ -251,21 +251,13 @@ func (s *Service) handleCores(w http.ResponseWriter, r *http.Request, claims aut
 			avail[entry.Name] = true
 		}
 	}
-	type coreInfo struct {
-		Name            string `json:"name"`
-		Available       bool   `json:"available"`
-		Backend         string `json:"backend"`
-		Runtime         string `json:"runtime,omitempty"`
-		RequiresDesktop bool   `json:"requiresDesktop,omitempty"`
-		Rollout         string `json:"rollout,omitempty"`
-	}
 	names := core.Names() // already sorted
-	out := make([]coreInfo, 0, len(names))
+	out := make([]wire.Core, 0, len(names))
 	for _, n := range names {
 		if !view.coreVisible(s, n) {
 			continue
 		}
-		info := coreInfo{Name: n, Available: avail[n]}
+		info := wire.Core{Name: n, Available: avail[n]}
 		if d, ok := core.Describe(n); ok {
 			info.Backend = string(d.Backend)
 		}
@@ -282,7 +274,7 @@ func (s *Service) handleCores(w http.ResponseWriter, r *http.Request, claims aut
 		}
 		out = append(out, info)
 	}
-	httpx.WriteJSON(w, http.StatusOK, map[string]any{"cores": out})
+	httpx.WriteJSON(w, http.StatusOK, wire.CoresReply{Cores: out})
 }
 
 // allowedOrigin reports whether an Origin header may access the API. The

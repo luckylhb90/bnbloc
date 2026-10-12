@@ -1,87 +1,23 @@
-// Wire shapes and pure helpers for agent run records (R10), mirroring
-// internal/wire/agent_runs.go. A run is one agent job as a record: request,
+// Pure helpers for agent run records (R10); the shapes are
+// internal/wire/agent_runs.go's, generated into wire.gen.ts. A run is one agent job as a record: request,
 // addressed agent, per-phase timestamps, outcome, reply preview and reported
 // usage. Optional fields are absent when nothing backs them (an absent cost
 // means "not reported", never zero).
 
 import { agentDisplayLabel, defaultDisplayName } from "./displayNames.ts";
+import { AgentJobStatusValues, AgentJobTerminalStatuses } from "./wire.gen.ts";
 
-export type RunScope = "room" | "self" | "tenant";
-
-export interface AgentRunRequest {
-  messageSeq: number;
-  clientMsgId?: string;
-  text?: string;
-  attachments?: number;
-}
-
-export interface AgentRunAgent {
-  owner: string;
-  core: string;
-  provider: string;
-  targetId?: string;
-  model?: string;
-  reasoningEffort?: string;
-}
-
-export interface AgentRunPhases {
-  queuedAtMs: number;
-  claimedAtMs?: number;
-  startedAtMs?: number;
-  firstReplyAtMs?: number;
-  finishedAtMs?: number;
-  updatedAtMs?: number;
-}
-
-export interface AgentRunReply {
-  messageId?: string;
-  roomSeq?: number;
-  text?: string;
-  atMs?: number;
-  count?: number;
-}
-
-export interface AgentRunUsage {
-  model?: string;
-  inputTokens?: number;
-  outputTokens?: number;
-  costUsd?: number;
-}
-
-export interface AgentRun {
-  jobId: string;
-  roomId: string;
-  roomName?: string;
-  channelId?: string;
-  requester: string;
-  borrowed?: boolean;
-  status: string;
-  failureReason?: string;
-  error?: string;
-  warning?: string;
-  attempt?: number;
-  request: AgentRunRequest;
-  agent: AgentRunAgent;
-  phases: AgentRunPhases;
-  reply?: AgentRunReply;
-  usage?: AgentRunUsage;
-  // Set when an agent dispatched this run through the room tools: the
-  // parent job and the hop depth.
-  dispatchedBy?: { jobId: string; depth: number };
-  // The expert the agent wore for this run, at the version the job pinned.
-  expert?: { id: string; name?: string; version?: string };
-  // The room's expert the turn wore under the chat's own (recorded when the
-  // turn resolved it).
-  roomExpert?: { id: string; name?: string; version?: string };
-  redacted?: boolean;
-  diagnostics?: Record<string, unknown>;
-}
-
-export interface AgentRunsReply {
-  scope: RunScope;
-  runs: AgentRun[];
-  nextBefore?: string;
-}
+export type {
+  AgentRun,
+  AgentRunAgent,
+  AgentRunPhases,
+  AgentRunReply,
+  AgentRunRequest,
+  AgentRunsReply,
+  AgentRunUsage,
+  RunScope,
+} from "./wire.gen.ts";
+import type { AgentRun, AgentRunAgent, RunScope } from "./wire.gen.ts";
 
 // Status filter choices the run views offer ("" = every status).
 export type RunStatusFilter = "" | "active" | "failed" | "replied" | "cancelled";
@@ -139,11 +75,10 @@ export function isFailedRun(r: Pick<AgentRun, "status">): boolean {
   return r.status === "failed" || r.status === "timed_out";
 }
 
-const LIVE = new Set(["queued", "claimed", "running", "reflowing"]);
-
-// isLiveRun reports a run that has not reached a terminal status.
-export function isLiveRun(r: Pick<AgentRun, "status">): boolean {
-  return LIVE.has(r.status);
+// isLiveJob reports a job (or run) that has not reached a terminal status:
+// store.AgentJobStatus.Terminal is the one rule (AgentJobTerminalStatuses).
+export function isLiveJob(r: { readonly status: string }): boolean {
+  return (AgentJobStatusValues as readonly string[]).includes(r.status) && !(AgentJobTerminalStatuses as readonly string[]).includes(r.status);
 }
 
 
@@ -172,7 +107,7 @@ export function runPhaseSteps(r: Pick<AgentRun, "phases" | "status">): RunPhaseS
     { id: "claimed", label: "Claimed by bridge", atMs: p.claimedAtMs },
     { id: "started", label: "Started", atMs: p.startedAtMs },
     { id: "firstReply", label: "First reply", atMs: p.firstReplyAtMs },
-    { id: "finished", label: finishLabel, atMs: isLiveRun(r) ? undefined : p.finishedAtMs },
+    { id: "finished", label: finishLabel, atMs: isLiveJob(r) ? undefined : p.finishedAtMs },
   ];
   const out: RunPhaseStep[] = [];
   let prev: number | undefined;
@@ -187,7 +122,7 @@ export function runPhaseSteps(r: Pick<AgentRun, "phases" | "status">): RunPhaseS
 // runDurationMs is the run's total time: queued to finished (or to now while
 // it is still live).
 export function runDurationMs(r: Pick<AgentRun, "phases" | "status">, now: number = Date.now()): number | undefined {
-  const end = isLiveRun(r) ? now : r.phases.finishedAtMs;
+  const end = isLiveJob(r) ? now : r.phases.finishedAtMs;
   return end ? Math.max(0, end - r.phases.queuedAtMs) : undefined;
 }
 

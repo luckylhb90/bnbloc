@@ -170,7 +170,6 @@ export function PeopleChatPanel({
             unreadFromSeq={stream.unreadFromSeq}
             showDesktopHandoff={false}
             agentJobs={NO_JOBS}
-            showJobDiagnostics={false}
             artifactsBySeq={NO_ARTIFACTS}
             onStartAgent={noop}
             onLoadEarlier={conversation.loadEarlier}

@@ -255,7 +255,7 @@ func (s *Service) publishJob(ctx context.Context, job store.AgentJob, now int64)
 		return
 	}
 	// The event belongs to the job's tenant (the sweeper runs tenantless).
-	s.Publisher.Publish(tenant.NewContext(ctx, job.TenantID), wire.Event{RoomID: job.RoomID, ChannelID: job.ChannelID, Kind: wire.EventAgentJobUpdated, Payload: job, AtUnixMs: now})
+	s.Publisher.Publish(tenant.NewContext(ctx, job.TenantID), wire.Event{RoomID: job.RoomID, ChannelID: job.ChannelID, Kind: wire.EventAgentJobUpdated, Payload: job.View(), AtUnixMs: now})
 }
 
 // SweepAgentJobs fails jobs no worker can finish and notifies their rooms. The
@@ -398,7 +398,7 @@ func (s *Service) handleRoomAgentJobs(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, "list agent jobs failed", http.StatusInternalServerError)
 		return
 	}
-	httpx.WriteJSON(w, http.StatusOK, map[string]any{"jobs": jobs})
+	httpx.WriteJSON(w, http.StatusOK, wire.AgentJobsReply{Jobs: store.AgentJobViews(jobs)})
 }
 
 // handleMyAgents returns the CALLER's own bridge-advertised agents across all

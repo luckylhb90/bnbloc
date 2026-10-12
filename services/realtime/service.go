@@ -772,14 +772,14 @@ func (s *Service) durable(ctx context.Context, ev wire.Event, author, clientMsgI
 // sequence, so a client can load earlier history beyond the live replay buffer.
 // The page is scoped to one channel: the `channelId` query param, defaulting
 // to the room's default channel when omitted.
+// Rows are wire.FeedMessage, the internal feed read's row (writeFeedPage).
 func (s *Service) handleHistory(w http.ResponseWriter, r *http.Request) {
 	roomID, _, m, ok := s.room(w, r, membership.AnyMember)
 	if !ok {
 		return
 	}
 	if s.Chat == nil {
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]any{"messages": []any{}})
+		writeFeedPage(w, nil)
 		return
 	}
 	before := parseInt(r.URL.Query().Get("before"))
@@ -801,21 +801,7 @@ func (s *Service) handleHistory(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, "history read failed", http.StatusInternalServerError)
 		return
 	}
-	out := make([]map[string]any, 0, len(msgs))
-	for _, m := range msgs {
-		row := map[string]any{
-			"sequence": m.Seq,
-			"kind":     m.Kind,
-			"payload":  json.RawMessage(m.Payload),
-			"atUnixMs": m.CreatedAtMs,
-		}
-		if m.EditedAtMs != nil {
-			row["editedAtMs"] = *m.EditedAtMs
-		}
-		out = append(out, row)
-	}
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]any{"messages": out})
+	writeFeedPage(w, msgs)
 }
 
 // parseInt parses a base-10 int64 from a query value, 0 on empty/invalid.
@@ -995,8 +981,7 @@ func (s *Service) handleUnread(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, fmt.Sprintf("too many rooms (max %d per request)", wire.MaxUnreadRooms), http.StatusBadRequest)
 		return
 	}
-	out := map[string]int{}
-	perChannel := map[string][]map[string]any{}
+	reply := wire.UnreadReply{Unread: map[string]int{}, Channels: map[string][]wire.ChannelUnread{}}
 	if s.Chat != nil && s.Membership != nil {
 		for _, roomID := range rooms {
 			// A read across rooms the caller names: each room is read in its own
@@ -1029,19 +1014,16 @@ func (s *Service) handleUnread(w http.ResponseWriter, r *http.Request) {
 						continue
 					}
 					total += n
-					perChannel[roomID] = append(perChannel[roomID], map[string]any{
-						"channelId": ch.ChannelID,
-						"count":     n,
-					})
+					reply.Channels[roomID] = append(reply.Channels[roomID], wire.ChannelUnread{ChannelID: ch.ChannelID, Count: n})
 				}
 			}
 			if total > 0 {
-				out[roomID] = total
+				reply.Unread[roomID] = total
 			}
 		}
 	}
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]any{"unread": out, "channels": perChannel})
+	_ = json.NewEncoder(w).Encode(reply)
 }
 
 // handleTyping publishes a transient "presence_typing" event to the room so

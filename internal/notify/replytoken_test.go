@@ -63,7 +63,7 @@ func TestWorkerMintsReplyTokensPerRecipient(t *testing.T) {
 	w := f.worker()
 	w.Replies = &ReplyTokens{Store: replies, Now: f.clock.Now}
 
-	reply := agentReplyTo("ch1", jobView{OwnerUserID: "carol", Provider: "codex", Core: "local"})
+	reply := agentReplyTo("ch1", wire.AgentJob{OwnerUserID: "carol", Provider: "codex", Core: "local"})
 	_, _ = f.emitter.Emit(tctx(), Event{Type: wire.NotificationAgentFinished, RoomID: "r1", Recipients: []string{"alice", "bob"}, Actor: "carol/codex", DedupKey: "job:9", Reply: reply})
 	_, _ = f.emitter.Emit(tctx(), Event{Type: wire.NotificationBorrowRequest, RoomID: "r1", Recipients: []string{"carol"}, Actor: "alice", DedupKey: "borrow:9"})
 	if it, _ := f.mem.Item(tid, EventID(tid, wire.NotificationAgentFinished, "job:9"), "n1"); strings.Contains(string(it.EventJSON), replyTokenPrefix) {

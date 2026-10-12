@@ -5,6 +5,7 @@ import { api, ApiError, type Member } from "@/lib/api";
 import { useToast } from "@/ui/Toast";
 import { Badge, Skeleton } from "@/ui/Card";
 import { dedupeMembers, sameUser } from "@/lib/format";
+import { canInvite } from "@/lib/roomRoles";
 import { ConfirmDialog } from "@/ui/Dialog";
 import { useModalLayer } from "@/ui/useModalLayer";
 import { agentHandle, type RoomAgent } from "@/views/composer/types";
@@ -50,11 +51,12 @@ export function MembersDialog({
   const closeConfirm = useCallback(() => setConfirmRemove(null), []);
   // Per-user role mutation in-flight, so the select is disabled while saving.
   const [savingRole, setSavingRole] = useState<Record<string, boolean>>({});
-  // The caller may remove others only if they are owner/admin here.
-  const myRole = members?.find((m) => sameUser(m.userId, subject))?.role;
+  // The caller may remove others only if they may invite here.
+  const me = members?.find((m) => sameUser(m.userId, subject));
+  const myRole = me?.role;
   // People render by display name, never by id (PRD 2026-10-10 §1).
   const nameOf = useDisplayNames([...(members ?? []).map((m) => m.userId), ...roomAgents.map((a) => a.ownerId)]);
-  const canRemove = myRole === "owner" || myRole === "admin";
+  const canRemove = !!me && canInvite(me);
   const remove = async (userId: string) => {
     try {
       await api.removeMember(roomId, userId);

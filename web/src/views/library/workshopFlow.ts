@@ -54,7 +54,7 @@ async function createWorkshopRoom(): Promise<string> {
 async function findOrCreateWorkshop(subject: string, reauth: () => Promise<void>): Promise<string> {
   const storage = browserStorage();
   const rooms = (await api.myRooms(subject)).rooms ?? [];
-  for (const id of workshopCandidates(rooms, subject, cachedWorkshop(storage, subject))) {
+  for (const id of workshopCandidates(rooms, cachedWorkshop(storage, subject))) {
     if (await pinsBuilder(id)) {
       rememberWorkshop(storage, subject, id);
       return id;

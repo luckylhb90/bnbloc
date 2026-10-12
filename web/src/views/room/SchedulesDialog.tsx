@@ -62,14 +62,15 @@ function errorText(e: unknown, fallback: string): string {
 export function SchedulesDialog({
   roomId,
   subject,
-  myRole,
+  moderator,
   roomAgents,
   localTargets,
   onClose,
 }: {
   readonly roomId: string;
   readonly subject: string | null;
-  readonly myRole: string | null;
+  // The caller may pause or delete anyone's schedule (canInvite).
+  readonly moderator: boolean;
   readonly roomAgents: RoomAgent[];
   readonly localTargets: readonly PickerTarget[];
   readonly onClose: () => void;
@@ -80,7 +81,6 @@ export function SchedulesDialog({
   const [editing, setEditing] = useState<RoomSchedule | "new" | null>(null);
   const [deleting, setDeleting] = useState<RoomSchedule | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
-  const moderator = myRole === "owner" || myRole === "admin";
   const nameOf = useDisplayNames((list ?? []).flatMap((s) => [s.createdBy, s.recipient.kind === "agent" ? s.recipient.ownerId : ""]));
 
   const reload = useCallback(() => {

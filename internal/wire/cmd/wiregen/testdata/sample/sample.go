@@ -53,6 +53,7 @@ type Item struct {
 	Bytes    []byte          `json:"bytes"`
 	Role     string          `json:"role" tstype:"Kind"`
 	Roles    []string        `json:"roles" tstype:"Kind"`
+	Event    string          `json:"event" tstype:"EventKind"`
 	Big      int64           `json:"big,string"`
 	Inline   struct{ X int } `json:"inline"`
 	Untagged int

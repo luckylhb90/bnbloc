@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { api, ApiError, type Room } from "@/lib/api";
-import { dedupeMembers } from "@/lib/format";
+import { api, ApiError, type Member, type Room } from "@/lib/api";
+import { dedupeMembers, sameUser } from "@/lib/format";
 import { isRoomGoneStatus } from "@/lib/roomGone";
 import { composeRoomAgents } from "@/lib/platformAgents";
 import { catalogRefreshKey, type RoomAgentCatalog, type RoomModelCatalogs } from "@/lib/agentCatalogs";
@@ -9,7 +9,8 @@ import { useToast } from "@/ui/Toast";
 import type { RoomAgent } from "@/views/composer/types";
 import { useRoomPlatformAgents } from "@/views/room/useRoomPlatformAgents";
 
-// useRoomData owns the room-level server state: the room detail, its members,
+// useRoomData owns the room-level server state: the room detail, its members
+// (and so the signed-in member's own membership, `me`: the one role source),
 // the live agent roster, the borrowable (authorized) agents and the added
 // platform agents, the agents' model catalogs, plus joining.
 // It is room-scoped (the room view is keyed by room id) and independent of the
@@ -32,8 +33,11 @@ export function useRoomData({
   onGoneRef.current = onGone;
   const toast = useToast();
   const [room, setRoom] = useState<Room | null>(null);
-  const [members, setMembers] = useState<string[]>([]);
+  // null until the member list first answers.
+  const [people, setPeople] = useState<Member[] | null>(null);
   const [agentHosts, setAgentHosts] = useState<string[]>([]);
+  // Bumped by reloadMembers (a member_joined / member_removed event).
+  const [membersGen, setMembersGen] = useState(0);
   const [roster, setRoster] = useState<RosterAgent[]>([]);
   const [shared, setShared] = useState<SharedAgent[]>([]);
   const [joinedGen, setJoinedGen] = useState(0);
@@ -55,20 +59,6 @@ export function useRoomData({
         }),
       );
     api
-      .members(roomId)
-      .then(
-        guard((m) => {
-          setMembers(dedupeMembers(m.members.map((x) => x.userId)));
-          setAgentHosts(m.agentHosts);
-        }),
-      )
-      .catch(
-        guard(() => {
-          setMembers([]);
-          setAgentHosts([]);
-        }),
-      );
-    api
       .roomAgents(roomId)
       .then(guard((res) => setRoster(res.agents || [])))
       .catch(guard(() => setRoster([])));
@@ -84,6 +74,30 @@ export function useRoomData({
       cancelled = true;
     };
   }, [roomId, joinedGen]);
+
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .members(roomId)
+      .then((m) => {
+        if (cancelled) return;
+        setPeople(m.members);
+        setAgentHosts(m.agentHosts);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setPeople([]);
+        setAgentHosts([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [roomId, joinedGen, membersGen]);
+  const reloadMembers = useCallback(() => setMembersGen((g) => g + 1), []);
+  const members = useMemo(() => dedupeMembers((people ?? []).map((x) => x.userId)), [people]);
+  // The signed-in member's membership: undefined while loading, null when
+  // not a member (a preview, or just removed).
+  const me = useMemo(() => (people === null ? undefined : (people.find((m) => sameUser(m.userId, subject)) ?? null)), [people, subject]);
 
   const platform = useRoomPlatformAgents(roomId, subject, joinedGen);
   // The selectable agents: one stable array per (roster, grants, platform
@@ -128,5 +142,5 @@ export function useRoomData({
     }
   }, [roomId, reauth, toast]);
 
-  return { room, setRoom, members, roomAgents, modelCatalogs, platform, setRoster, joinedGen, joining, join };
+  return { room, setRoom, members, me, reloadMembers, roomAgents, modelCatalogs, platform, setRoster, joinedGen, joining, join };
 }

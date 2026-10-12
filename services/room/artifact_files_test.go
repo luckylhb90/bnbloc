@@ -129,13 +129,20 @@ func TestBlobVersionPublishAndContent(t *testing.T) {
 		t.Fatalf("publish = %d %s", code, rep.Error)
 	}
 	v := rep.Version
-	if v.Version != 1 || v.Storage != store.ArtifactStorageBlob || !strings.HasPrefix(v.BlobKey, "sha256/") ||
-		v.SizeBytes != int64(len(img)) || v.MimeType != "image/png" || v.SourceJobID != "job-1" || v.SourceSeq != 7 ||
-		v.ContentHash != strings.TrimPrefix(v.BlobKey, "sha256/") || v.Content != "" {
+	if v.Version != 1 || v.Storage != store.ArtifactStorageBlob || len(v.ContentHash) != 64 ||
+		v.SizeBytes != int64(len(img)) || v.MimeType != "image/png" || v.SourceJobID != "job-1" || v.SourceSeq != 7 || v.Content != "" {
 		t.Fatalf("blob version = %+v", v)
 	}
 	if rep.Artifact.MimeType != "image/png" || rep.Artifact.FileName != "chart.png" {
 		t.Fatalf("artifact = %+v", rep.Artifact)
+	}
+	// The blob key and the tenant stay server-side (decision O4): members
+	// read the bytes through the content route.
+	if v.BlobKey != "" || v.TenantID != "" || rep.Artifact.TenantID != "" {
+		t.Fatalf("a member saw server-side fields: version %+v, artifact %+v", v, rep.Artifact)
+	}
+	if stored, err := e.svc.Artifacts.GetArtifactVersion(dctx(), art.ArtifactID, 1); err != nil || stored.BlobKey != "sha256/"+v.ContentHash {
+		t.Fatalf("stored version = %+v, %v", stored, err)
 	}
 
 	resp := e.get("/v1/rooms/files/artifacts/"+art.ArtifactID+"/versions/1/content", "bob")

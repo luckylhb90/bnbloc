@@ -6,7 +6,7 @@ import {
   GlobeIcon,
   LockIcon,
 } from "@phosphor-icons/react";
-import { api, ApiError, type Room } from "@/lib/api";
+import { api, ApiError, type PlazaRoom } from "@/lib/api";
 import { isSubmitEnter } from "@/lib/keys";
 import { roomIdProblem } from "@/lib/roomId";
 import { useAuth } from "@/lib/auth";
@@ -23,7 +23,7 @@ import { WelcomeCard } from "@/views/WelcomeCard";
 
 export function Plaza({ onOpen }: { onOpen: (id: string) => void }) {
   const [q, setQ] = useState("");
-  const [rooms, setRooms] = useState<Room[] | null>(null);
+  const [rooms, setRooms] = useState<PlazaRoom[] | null>(null);
   const [creating, setCreating] = useState(false);
   const [fromTemplate, setFromTemplate] = useState(false);
   const toast = useToast();
@@ -151,7 +151,7 @@ function RoomCard({
   onOpen,
   onJoin,
 }: {
-  room: Room;
+  room: PlazaRoom;
   onOpen: (id: string) => void;
   onJoin: (id: string) => void;
 }) {

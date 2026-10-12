@@ -357,8 +357,12 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   dispatch requesters, authorizing or borrowing an agent, quota requests).
   Visitors are read-only (D1). `PostChat` enforces `Chat` itself, so no
   post path (scheduler, run-now, dispatch) can skip it. The web mirrors the
-  abilities in `lib/roomRoles.ts`, pinned to
-  `internal/membership/testdata/abilities.json`. `TestNoMembershipFailOpen`
+  abilities in `lib/roomRoles.ts` (`isHuman`, `mayChat`, `canInvite`,
+  `isOwner`), pinned to `internal/membership/testdata/abilities.json` and
+  the generated `RoomRolesThatInvite`; the member's own role comes only from
+  the room's member list (`useRoomData().me`; the room detail carries no
+  role), and a visitor gets a read-only footer, never a composer.
+  `TestNoMembershipFailOpen`
   forbids fail-open guards, direct directory reads in handlers and visitor
   comparisons outside the owners.
 - **A removed member keeps no access.** realtime calls `Directory.Forget`
@@ -1391,6 +1395,23 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   A new binary build surface must pass the same ldflags.
 
 ### UI
+
+- **The web's server shapes are generated from Go, never hand-mirrored.**
+  `internal/wire/cmd/wiregen` writes `web/src/lib/wire.gen.ts` (regenerate:
+  `go generate ./internal/wire`; `scripts/ci.sh go` fails on drift). A JSON
+  shape the web reads is a struct in `internal/wire`, never a
+  `map[string]any` or a store row: members see `store.AgentJob.View()`,
+  `Artifact.View()` and `ArtifactVersion.View()` (decision O4: no tenant,
+  lease, raw diagnostics or blob key; `TestProjectionsOmitServerFields`). A
+  value set is a named string type or a `//wire:union <Name>` const group
+  (a field names it with `tstype:"<Name>"`, as it names the store/rbac enums
+  wiregen reads); a limit a client checks is a constant in
+  `internal/wire/limits.go`; a rule table the web needs (org role grants,
+  terminal job statuses, inviting room roles) is computed by wiregen from
+  its Go owner. The web re-exports these types (`lib/apiModels.ts`) and
+  never redeclares one. A free-form payload (a reply's metrics map, a
+  history row) is pinned by a golden fixture in `internal/wire/testdata/`
+  that both test suites read (`readTurnMetrics` ≡ `TurnUsageFromMetrics`).
 
 - **`Dialog` caps height at `max-h-[85vh]` with a scrollable body.** A dialog
   with more content than the viewport must scroll its body while header/footer

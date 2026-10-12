@@ -8,6 +8,7 @@
 import { contentKindWord, contentLabel, type ContentComponent, type ContentKind } from "./contentComponents.ts";
 import { defaultPlatformChoice, type OwnAgent } from "./onboarding.ts";
 import type { PlatformAgent, PlatformChoice } from "./platformAgents.ts";
+import { isOwner } from "./roomRoles.ts";
 
 export const WORKSHOP_ROOM_NAME = "Expert workshop";
 
@@ -63,13 +64,13 @@ export function workshopAgentPick(a: WorkshopAgent): { core: string; provider: s
   return null;
 }
 
-// A room as the workshop lookup sees it (the member's room list).
+// A room as the workshop lookup sees it (a row of the member's room list,
+// wire.RoomSummary: role is the member's own).
 export interface WorkshopRoomFacts {
   readonly roomId: string;
   readonly name?: string;
   readonly visibility: string;
-  readonly isOwner?: boolean;
-  readonly createdBy?: string;
+  readonly role: string;
   readonly createdAtMs?: number;
 }
 
@@ -77,16 +78,16 @@ export interface WorkshopRoomFacts {
 // workshop is created: the lookup must stay cheap for members with many rooms.
 export const MAX_WORKSHOP_PROBES = 8;
 
-function ownedPrivate(r: WorkshopRoomFacts, subject: string): boolean {
-  return r.visibility === "private" && (r.isOwner === true || (!!r.createdBy && r.createdBy === subject));
+function ownedPrivate(r: WorkshopRoomFacts): boolean {
+  return r.visibility === "private" && isOwner(r);
 }
 
 // workshopCandidates orders the rooms that may be the member's workshop:
 // the cached id first, then owned private rooms named "Expert workshop"
 // (newest first), then the other owned private rooms (newest first), at most
 // MAX_WORKSHOP_PROBES. The caller verifies each by its builder pin.
-export function workshopCandidates(rooms: readonly WorkshopRoomFacts[], subject: string, cachedId: string | null): string[] {
-  const owned = rooms.filter((r) => ownedPrivate(r, subject));
+export function workshopCandidates(rooms: readonly WorkshopRoomFacts[], cachedId: string | null): string[] {
+  const owned = rooms.filter(ownedPrivate);
   const newest = (a: WorkshopRoomFacts, b: WorkshopRoomFacts) => (b.createdAtMs ?? 0) - (a.createdAtMs ?? 0);
   const named = owned.filter((r) => (r.name ?? "").trim().toLowerCase() === WORKSHOP_ROOM_NAME.toLowerCase()).sort(newest);
   const others = owned.filter((r) => !named.includes(r)).sort(newest);

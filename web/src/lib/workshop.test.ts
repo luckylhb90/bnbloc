@@ -76,18 +76,18 @@ eq(workshopAgent([], [], "maya").kind, "none", "no agent");
 // "Expert workshop" (newest first), then other owned private rooms; never
 // shared rooms or rooms someone else owns; bounded.
 const rooms = [
-  { roomId: "r-shared", name: WORKSHOP_ROOM_NAME, visibility: "shared", isOwner: true, createdAtMs: 9 },
-  { roomId: "r-theirs", name: WORKSHOP_ROOM_NAME, visibility: "private", isOwner: false, createdBy: "jack", createdAtMs: 9 },
-  { roomId: "r-old", name: WORKSHOP_ROOM_NAME, visibility: "private", isOwner: true, createdAtMs: 1 },
-  { roomId: "r-new", name: "expert workshop", visibility: "private", createdBy: "maya", createdAtMs: 5 },
-  { roomId: "r-case", name: WORKSHOP_ROOM_NAME, visibility: "private", createdBy: "Maya", createdAtMs: 6 },
-  { roomId: "r-renamed", name: "My builder", visibility: "private", isOwner: true, createdAtMs: 3 },
+  { roomId: "r-shared", name: WORKSHOP_ROOM_NAME, visibility: "shared", role: "owner", createdAtMs: 9 },
+  { roomId: "r-theirs", name: WORKSHOP_ROOM_NAME, visibility: "private", role: "member", createdAtMs: 9 },
+  { roomId: "r-old", name: WORKSHOP_ROOM_NAME, visibility: "private", role: "owner", createdAtMs: 1 },
+  { roomId: "r-new", name: "expert workshop", visibility: "private", role: "owner", createdAtMs: 5 },
+  { roomId: "r-admin", name: WORKSHOP_ROOM_NAME, visibility: "private", role: "admin", createdAtMs: 6 },
+  { roomId: "r-renamed", name: "My builder", visibility: "private", role: "owner", createdAtMs: 3 },
 ];
-eq(workshopCandidates(rooms, "maya", null), ["r-new", "r-old", "r-renamed"], "named first, newest first");
-eq(workshopCandidates(rooms, "maya", "r-renamed"), ["r-renamed", "r-new", "r-old"], "cached first");
-eq(workshopCandidates(rooms, "maya", "r-theirs"), ["r-new", "r-old", "r-renamed"], "a cached room the member does not own is ignored");
-const many = Array.from({ length: 20 }, (_, i) => ({ roomId: `r${i}`, visibility: "private", isOwner: true, createdAtMs: i }));
-eq(workshopCandidates(many, "maya", null).length, MAX_WORKSHOP_PROBES, "bounded probes");
+eq(workshopCandidates(rooms, null), ["r-new", "r-old", "r-renamed"], "named first, newest first");
+eq(workshopCandidates(rooms, "r-renamed"), ["r-renamed", "r-new", "r-old"], "cached first");
+eq(workshopCandidates(rooms, "r-theirs"), ["r-new", "r-old", "r-renamed"], "a cached room the member does not own is ignored");
+const many = Array.from({ length: 20 }, (_, i) => ({ roomId: `r${i}`, visibility: "private", role: "owner", createdAtMs: i }));
+eq(workshopCandidates(many, null).length, MAX_WORKSHOP_PROBES, "bounded probes");
 
 assert(/^expert-workshop-[a-z2-9]{6}$/.test(workshopRoomId(() => 0.5)), "workshop room id");
 

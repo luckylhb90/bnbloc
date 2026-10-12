@@ -70,6 +70,21 @@ func emitPackage(dir, importPath string, foreign []string) ([]byte, error) {
 			e.declared[name] = true
 		}
 	}
+	// Union names are known before any field names one.
+	for _, f := range files {
+		for _, decl := range f.Decls {
+			if gd, ok := decl.(*ast.GenDecl); ok && gd.Tok == token.CONST {
+				if u := directive(gd.Doc); u != "" {
+					e.foreign[u] = true
+				}
+				for _, spec := range gd.Specs {
+					if u := directive(spec.(*ast.ValueSpec).Doc); u != "" {
+						e.foreign[u] = true
+					}
+				}
+			}
+		}
+	}
 	for _, f := range files {
 		if err := e.file(f); err != nil {
 			return nil, err

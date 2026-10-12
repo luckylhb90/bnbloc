@@ -18,7 +18,8 @@ import type { Stage } from "@/lib/capability";
 import { Button } from "@/ui/Button";
 import { cn } from "@/lib/cn";
 import { Dot } from "@/ui/Card";
-import { formatBytes, sameUser } from "@/lib/format";
+import { formatBytes } from "@/lib/format";
+import { canInvite, isOwner, type RoomMembership } from "@/lib/roomRoles";
 import { OnlineStrip } from "@/views/room/RoomNav";
 import { RoomMuteButton } from "@/views/room/RoomMuteButton";
 import type { RailSurface } from "@/views/room/RoomLayout";
@@ -28,7 +29,7 @@ import type { RoomPlatformAgent } from "@/lib/platformAgents";
 export function RoomHeader({
   room,
   roomId,
-  subject,
+  me,
   roomStage,
   railSurface,
   connected,
@@ -54,7 +55,8 @@ export function RoomHeader({
 }: {
   readonly room: Room | null;
   readonly roomId: string;
-  readonly subject: string | null;
+  // The signed-in member's membership (null: not a member, a preview).
+  readonly me: RoomMembership | null;
   readonly roomStage: Stage;
   readonly railSurface: RailSurface;
   readonly connected: boolean;
@@ -218,11 +220,13 @@ export function RoomHeader({
       <Button variant="ghost" size="icon" title="Members" aria-label="Members" onClick={onShowMembers} className="tap">
         <UsersIcon size={18} />
       </Button>
-      {room && (room.role === "owner" || sameUser(room.createdBy, subject)) ? (
+      {me && canInvite(me) && (
         <Button variant="ghost" size="icon" title="Settings" aria-label="Settings" onClick={onShowSettings} className="tap" data-tour="invite">
           <GearSixIcon size={18} />
         </Button>
-      ) : (
+      )}
+      {/* The owner hands the room over first (transfer), then may leave. */}
+      {me && !isOwner(me) && (
         <Button variant="ghost" size="icon" title="Leave room" aria-label="Leave room" onClick={onConfirmLeave} className="tap">
           <SignOutIcon size={18} />
         </Button>

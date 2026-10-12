@@ -1,8 +1,12 @@
-import { normalizeRoomEvent, type RoomEvent } from "./roomEvents.ts";
+import { normalizeRoomEvent, readTurnMetrics, type RoomEvent } from "./roomEvents.ts";
 import { agentIdentity } from "./roomAgents.ts";
-// Golden fixtures written by internal/wire's TestGoldenRoomEvents: the exact
-// JSON the server sends. A field Go stops sending fails here.
+// Golden fixtures written by internal/wire's golden tests: the exact JSON the
+// server sends. A field Go stops sending fails here.
 import sessionState from "../../../internal/wire/testdata/agent_session_state.json" with { type: "json" };
+import agentMessages from "../../../internal/wire/testdata/agent_messages.json" with { type: "json" };
+import historyPage from "../../../internal/wire/testdata/history_page.json" with { type: "json" };
+import jobUpdated from "../../../internal/wire/testdata/agent_job_updated.json" with { type: "json" };
+import turnUsage from "../../../internal/wire/testdata/turn_usage.json" with { type: "json" };
 
 function assert(condition: boolean, message: string): void {
   if (!condition) throw new Error(message);
@@ -42,5 +46,54 @@ function testReplyClearsOnlyItsOwnAgent(): void {
   assert(reply("acme", "progress").agentKey === undefined, "a notice line leaves the indicator alone");
 }
 
+// A reply whose core reported only part of its metrics is billed by the
+// server, so the feed shows its usage too (web M19).
+function testPartialMetricsShowUsage(): void {
+  const [ev] = normalized(agentMessages as RoomEvent);
+  assert(ev.kind === "agent_messages" && ev.text === "Done.", "the fixture is one reply");
+  assert(ev.metrics !== undefined && ev.metrics.inputTokens === 1200 && ev.metrics.outputTokens === 340, `metrics ${JSON.stringify(ev.metrics)}`);
+  assert(ev.metrics?.costUsd === 0.0042 && ev.metrics.cacheReadTokens === 0, "optional keys default to 0");
+  assert(ev.jobId === "job-1" && ev.sourceSeq === 11, "the job link rides the reply");
+  assert(ev.agentKey === agentIdentity({ ownerId: "maya", core: "acme", provider: "codex" }), "keyed by its agent");
+}
+
+// The web reads a metrics map exactly as wire.TurnUsageFromMetrics does.
+function testTurnUsageParity(): void {
+  for (const c of turnUsage as { name: string; metrics: Record<string, unknown>; usage: { model: string; reported: boolean; inputTokens: number; outputTokens: number; costUsd: number | null } }[]) {
+    const m = readTurnMetrics(c.metrics);
+    if (Object.keys(c.metrics).length === 0) {
+      assert(m === undefined, `${c.name}: an empty map is no usage`);
+      continue;
+    }
+    assert(m !== undefined, `${c.name}: read`);
+    assert((m?.model ?? "") === c.usage.model, `${c.name}: model ${m?.model}`);
+    assert(m?.reported === c.usage.reported, `${c.name}: reported`);
+    assert(m?.inputTokens === c.usage.inputTokens && m?.outputTokens === c.usage.outputTokens, `${c.name}: tokens ${m?.inputTokens}/${m?.outputTokens}`);
+    assert((m?.costUsd ?? null) === c.usage.costUsd, `${c.name}: cost ${m?.costUsd}`);
+  }
+}
+
+// A history row edited since it was posted keeps its "(edited)" stamp: the
+// stamp rides the row (wire.FeedMessage), never the payload.
+function testHistoryRowKeepsEditStamp(): void {
+  const [row] = (historyPage as { messages: RoomEvent[] }).messages;
+  const [ev] = normalized(row);
+  assert(ev.kind === "chat_message" && ev.text === "Please fix the build" && ev.author === "maya", "the row is maya's chat");
+  assert(ev.editedAtMs === 1760000005000, `edited ${ev.editedAtMs}`);
+  assert(ev.clientMsgId === "c-1" && ev.channelId === "chan-1", "id and channel survive");
+}
+
+// The job events carry the job projection (wire.AgentJob): no tenant, lease
+// or raw diagnostics, the failure text named.
+function testJobEventIsTheProjection(): void {
+  const job = (jobUpdated as { payload: Record<string, unknown> }).payload;
+  for (const k of ["tenantId", "leaseBridgeId", "leaseExpiresAtMs", "diagnostics"]) assert(!(k in job), `job event carries ${k}`);
+  assert(job.error === "the core exited" && Array.isArray(job.contentMissing), "the member-facing diagnostics are named fields");
+}
+
 testSessionStateFixtureKeysTheAgent();
 testReplyClearsOnlyItsOwnAgent();
+testPartialMetricsShowUsage();
+testTurnUsageParity();
+testHistoryRowKeepsEditStamp();
+testJobEventIsTheProjection();

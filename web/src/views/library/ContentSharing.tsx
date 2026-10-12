@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { ArrowsClockwiseIcon, BuildingsIcon, ShareNetworkIcon } from "@phosphor-icons/react";
-import { api, type Room } from "@/lib/api";
+import { api, type RoomSummary } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { contentLabel, isBuiltin, type ContentComponent } from "@/lib/contentComponents";
 import { apiErrorText } from "@/lib/contentComponentsApi";
@@ -132,7 +132,7 @@ export function ShareDialog({
   const toast = useToast();
   const [target, setTarget] = useState<ShareTarget>("people");
   const [members, setMembers] = useState("");
-  const [rooms, setRooms] = useState<Room[] | null>(null);
+  const [rooms, setRooms] = useState<RoomSummary[] | null>(null);
   const [roomId, setRoomId] = useState("");
   const [note, setNote] = useState("");
   const [copies, setCopies] = useState<readonly ContentCopy[] | null>(null);

@@ -1,0 +1,29 @@
+{
+  "sequence": 0,
+  "roomId": "room-1",
+  "channelId": "chan-1",
+  "kind": "agent_job_updated",
+  "payload": {
+    "jobId": "job-1",
+    "roomId": "room-1",
+    "channelId": "chan-1",
+    "messageSeq": 11,
+    "requesterUserId": "jack",
+    "ownerUserId": "maya",
+    "core": "acme",
+    "provider": "codex",
+    "messageText": "Please fix the build",
+    "status": "failed",
+    "failureReason": "runner_failed",
+    "attempt": 1,
+    "createdAtMs": 1760000000500,
+    "updatedAtMs": 1760000002000,
+    "startedAtMs": 1760000001000,
+    "finishedAtMs": 1760000002000,
+    "error": "the core exited",
+    "contentMissing": [
+      "lint@^1"
+    ]
+  },
+  "atUnixMs": 1760000002000
+}

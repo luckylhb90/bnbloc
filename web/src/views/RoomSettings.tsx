@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { CopyIcon, TrashIcon } from "@phosphor-icons/react";
-import { api, ApiError, type Room } from "@/lib/api";
+import { api, ApiError, type RoomDetail } from "@/lib/api";
+import { canInvite, isOwner, type RoomMembership } from "@/lib/roomRoles";
 import { Button } from "@/ui/Button";
 import { Input, Field } from "@/ui/Input";
 import { Segment, type SegmentOption } from "@/ui/Segment";
@@ -24,25 +25,29 @@ const syncGuidance: Record<string, string> = {
   none: "Chat and agent activity only; code is not synced.",
 };
 
+// RoomSettings is offered to members who may invite (owner, admin): they
+// manage members and the room's content; only the owner edits, transfers or
+// deletes the room itself (the room service refuses anyone else).
 export function RoomSettings({
   room,
+  me,
   onClose,
   onChanged,
   onDeleted,
 }: {
-  room: Room;
+  room: RoomDetail;
+  me: RoomMembership;
   onClose: () => void;
-  onChanged: (r: Room) => void;
+  onChanged: (r: RoomDetail) => void;
   onDeleted: () => void;
 }) {
+  const owner = isOwner(me);
   const [name, setName] = useState(room.name || "");
   const [desc, setDesc] = useState(room.description || "");
   const [vis, setVis] = useState<"private" | "shared">(
     room.visibility === "shared" ? "shared" : "private",
   );
-  const [sync, setSync] = useState<"git" | "mutagen" | "none">(
-    (room.syncMode as "git" | "mutagen" | "none") || "git",
-  );
+  const [sync, setSync] = useState<"git" | "mutagen" | "none">(room.syncMode || "git");
   const [invite, setInvite] = useState("");
   const [inviteRole, setInviteRole] = useState<"admin" | "member" | "visitor">("member");
   const [inviteTtl, setInviteTtl] = useState<"1d" | "7d" | "30d">("7d");
@@ -66,7 +71,7 @@ export function RoomSettings({
         syncMode: sync,
       });
       toast.success("Room updated");
-      onChanged({ ...room, ...updated, name, description: desc, visibility: vis, syncMode: sync });
+      onChanged(updated);
     } catch (e) {
       toast.error(e instanceof ApiError ? e.message : "save failed");
     } finally {
@@ -136,13 +141,17 @@ export function RoomSettings({
           <Button variant="ghost" onClick={onClose}>
             Close
           </Button>
-          <Button variant="primary" onClick={save} disabled={busy}>
-            {busy ? "Saving…" : "Save changes"}
-          </Button>
+          {owner && (
+            <Button variant="primary" onClick={save} disabled={busy}>
+              {busy ? "Saving…" : "Save changes"}
+            </Button>
+          )}
         </>
       }
     >
       <div className="flex flex-col gap-5">
+        {owner && (
+        <>
         <div className="grid gap-4 sm:grid-cols-2">
           <Field label="Name">
             <Input value={name} onChange={(e) => setName(e.target.value)} />
@@ -169,8 +178,10 @@ export function RoomSettings({
         <p className="-mt-2 rounded-[var(--radius)] border border-[var(--color-border)] bg-[var(--color-surface-2)] px-3 py-2 text-xs text-[var(--color-fg-muted)] leading-relaxed">
           {syncGuidance[sync]}
         </p>
+        </>
+        )}
 
-        <RoomContentSection roomId={room.roomId} />
+        <RoomContentSection roomId={room.roomId} canEdit={canInvite(me)} />
 
         {/* Invite */}
         <div className="rounded-[var(--radius)] border border-[var(--color-border)] p-4">
@@ -270,6 +281,8 @@ export function RoomSettings({
           </div>
         </div>
 
+        {owner && (
+        <>
         {/* Transfer ownership */}
         <div className="rounded-[var(--radius)] border border-[var(--color-border)] p-4">
           <p className="text-sm font-medium">Transfer ownership</p>
@@ -307,6 +320,8 @@ export function RoomSettings({
             Delete
           </Button>
         </div>
+        </>
+        )}
       </div>
 
       <ConfirmDialog

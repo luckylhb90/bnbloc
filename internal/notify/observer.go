@@ -49,34 +49,11 @@ type observation struct {
 	author string
 	text   string
 	// agent_job_updated
-	job jobView
+	job wire.AgentJob
 	// agent_messages: the reply's activity session and the text of its last
 	// non-empty message.
 	session   string
 	replyText string
-}
-
-// jobView is the subset of a store.AgentJob the producer reads. The payload
-// arrives typed in-process and as decoded JSON through the internal ingest;
-// both are normalized through the job's JSON shape.
-type jobView struct {
-	JobID           string `json:"jobId"`
-	RequesterUserID string `json:"requesterUserId"`
-	OwnerUserID     string `json:"ownerUserId"`
-	Provider        string `json:"provider"`
-	MessageText     string `json:"messageText"`
-	Status          string `json:"status"`
-	FailureReason   string `json:"failureReason"`
-	ChannelID       string `json:"channelId"`
-	Core            string `json:"core"`
-	MessageSeq      int64  `json:"messageSeq"`
-	CreatedAtMs     int64  `json:"createdAtMs"`
-	StartedAtMs     int64  `json:"startedAtMs"`
-	// Diagnostics carries the bridge's report; on replied it names the
-	// activity session the reply was posted under.
-	Diagnostics struct {
-		SessionID string `json:"sessionId"`
-	} `json:"diagnostics"`
 }
 
 // NewObserver builds an observer with a bounded queue.
@@ -140,8 +117,11 @@ func (o *Observer) Observe(ctx context.Context, ev wire.Event) {
 	}
 }
 
-func decodeJob(payload any) (jobView, bool) {
-	j, ok := wire.DecodePayload[jobView](payload)
+// decodeJob reads a job event's payload (wire.AgentJob, the one job
+// projection). It arrives typed in-process and as decoded JSON through the
+// internal ingest; both are normalized through its JSON.
+func decodeJob(payload any) (wire.AgentJob, bool) {
+	j, ok := wire.DecodePayload[wire.AgentJob](payload)
 	return j, ok && j.JobID != ""
 }
 

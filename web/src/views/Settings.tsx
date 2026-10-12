@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { BellSlashIcon } from "@phosphor-icons/react";
-import { api, type Room } from "@/lib/api";
+import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { notificationsApi } from "@/lib/notificationsApi";
 import { NOTIFICATION_TOGGLES, withRoomMuted, type NotificationPrefs } from "@/lib/notificationPrefs";
@@ -51,7 +51,7 @@ export function Settings() {
       .myRooms(subject)
       .then((r) => {
         const names: Record<string, string> = {};
-        for (const room of (r.rooms ?? []) as Room[]) names[room.roomId] = room.name || room.roomId;
+        for (const room of r.rooms ?? []) names[room.roomId] = room.name || room.roomId;
         setRooms(names);
       })
       .catch(() => {});

@@ -32,6 +32,65 @@ export interface RoomAgentCatalogsReply {
   agents: RoomAgentCatalog[];
 }
 
+// ---- wire/agent_jobs.go ----
+
+// AgentJob is an agent job as a room member sees it: the payload of the
+// agent_job_created and agent_job_updated room events and a row of
+// GET /v1/rooms/{id}/agent-jobs (decision O4). The tenant, the claiming
+// bridge and its lease, and the bridge's raw diagnostics stay server-side;
+// what a member needs from the diagnostics is projected into named fields.
+// store.AgentJob.View builds it, the one projection.
+export interface AgentJob {
+  jobId: string;
+  roomId: string;
+  channelId: string;
+  messageSeq: number;
+  requesterUserId: string;
+  ownerUserId: string;
+  core: string;
+  provider: string;
+  // MessageText is the request (already in the room's chat).
+  messageText: string;
+  model?: string;
+  reasoningEffort?: string;
+  status: AgentJobStatus;
+  failureReason?: AgentJobFailureReason;
+  attempt: number;
+  createdAtMs: number;
+  updatedAtMs: number;
+  claimedAtMs?: number;
+  startedAtMs?: number;
+  finishedAtMs?: number;
+  // DispatchedByJobID / DispatchDepth: the job whose agent dispatched this
+  // one through the room tools, and the hops from the person's message.
+  dispatchedByJobId?: string;
+  dispatchDepth?: number;
+  // Expert* is the expert the chat asked the agent to wear (pinned at
+  // post); RoomExpert* the room's expert the turn wore.
+  expertId?: string;
+  expertVersion?: string;
+  expertName?: string;
+  roomExpertId?: string;
+  roomExpertVersion?: string;
+  roomExpertName?: string;
+  // Error / Warning say why the job failed, or what went wrong after a
+  // reply was posted (the same text the run record shows a member).
+  error?: string;
+  warning?: string;
+  // ContentMissing names requirements the job's content could not meet
+  // (a skill pack an expert requires, a room expert that is gone); the
+  // turn runs without them.
+  contentMissing?: string[];
+  // ReplySessionID is the activity session a replied job's reply was
+  // posted under (notifications pair the reply with its job by it).
+  replySessionId?: string;
+}
+
+// AgentJobsReply is GET /v1/rooms/{id}/agent-jobs.
+export interface AgentJobsReply {
+  jobs: AgentJob[];
+}
+
 // ---- wire/agent_runs.go ----
 
 // Run listing scopes (AgentRunsReply.Scope).
@@ -119,8 +178,8 @@ export interface AgentRun {
   // Requester asked for the run; Borrowed when that is not the agent owner.
   requester: string;
   borrowed?: boolean;
-  status: string;
-  failureReason?: string;
+  status: AgentJobStatus;
+  failureReason?: AgentJobFailureReason;
   error?: string;
   warning?: string;
   attempt?: number;
@@ -149,9 +208,116 @@ export interface AgentRun {
 // (scope self) and GET /v1/tenant/jobs (scope tenant). NextBefore is the
 // opaque cursor of the next (older) page; absent on the last page.
 export interface AgentRunsReply {
-  scope: string;
+  scope: RunScope;
   runs: AgentRun[];
   nextBefore?: string;
+}
+
+// ---- wire/artifacts.go ----
+
+// Artifact is a room deliverable (spec, report, code, image, site) as room
+// members see it. The tenant stays server-side. store.Artifact.View builds
+// it.
+export interface Artifact {
+  artifactId: string;
+  roomId: string;
+  channelId: string;
+  kind: string;
+  title: string;
+  language?: string;
+  // MimeType / FileName are the current version's media type and display
+  // name (the extension source).
+  mimeType?: string;
+  fileName?: string;
+  currentVersion: number;
+  createdBy: string;
+  createdAtMs: number;
+  updatedAtMs: number;
+}
+
+// ArtifactThumbnail is a stored preview image of a version (the bytes are
+// served by the thumbnail route).
+export interface ArtifactThumbnail {
+  mimeType: string;
+  width: number;
+  height: number;
+}
+
+// ArtifactVersion is one immutable revision of an artifact. Lists omit
+// Content; an inline version serves it per version, a blob version through
+// the content route (never Content). The blob key and the tenant stay
+// server-side. store.ArtifactVersion.View builds it.
+export interface ArtifactVersion {
+  artifactId: string;
+  version: number;
+  parentVersion: number;
+  // ContentHash is the sha256 of the version's bytes.
+  contentHash: string;
+  content?: string;
+  // Storage is "inline" or "blob".
+  storage: string;
+  sizeBytes: number;
+  mimeType?: string;
+  // SourceJobID / SourceSeq link the version to the agent job and the room
+  // message that produced it (zero for a manual publish).
+  sourceJobId?: string;
+  sourceSeq?: number;
+  summary?: string;
+  authorUserId: string;
+  createdAtMs: number;
+  thumbnail?: ArtifactThumbnail;
+}
+
+// ArtifactList is GET /v1/rooms/{id}/artifacts: newest-updated first;
+// NextCursor pages on (absent on the last page). MaxBytes is the room's
+// blob version cap, so a publisher skips a file the room would refuse.
+export interface ArtifactList {
+  artifacts: Artifact[];
+  maxBytes: number;
+  nextCursor?: string;
+}
+
+// ArtifactDetail is GET .../artifacts/{id}: the artifact and its newest
+// versions (metadata only).
+export interface ArtifactDetail {
+  artifact: Artifact;
+  versions: ArtifactVersion[];
+}
+
+// ArtifactReply answers a create (Version absent when it published none),
+// a publish, and a blob publish whose bytes were already the current
+// version (Unchanged, nothing new published).
+export interface ArtifactReply {
+  artifact: Artifact;
+  version?: ArtifactVersion;
+  unchanged?: boolean;
+}
+
+// ArtifactVersionReply is GET .../artifacts/{id}/versions/{n}.
+export interface ArtifactVersionReply {
+  version: ArtifactVersion;
+}
+
+// ArtifactThumbnailReply answers a thumbnail put: Stored is false when a
+// thumbnail of higher rank was already stored (the version is unchanged).
+export interface ArtifactThumbnailReply {
+  version: ArtifactVersion;
+  stored: boolean;
+}
+
+// ArtifactUpdated is the payload of an artifact_updated room event: an
+// artifact changed (metadata only, never content). Reason is "" for a new
+// version, "thumbnail" when a version thumbnail was stored.
+export interface ArtifactUpdated {
+  artifactId: string;
+  kind: string;
+  title: string;
+  mimeType: string;
+  fileName: string;
+  currentVersion: number;
+  updatedBy: string;
+  updatedAtMs: number;
+  reason?: string;
 }
 
 // ---- wire/audit_log.go ----
@@ -805,6 +971,40 @@ export interface SavePromptReply {
   promptId: string;
   // Created is true when this save created the pack.
   created: boolean;
+}
+
+// ---- wire/cores.go ----
+
+// AgentTarget is one agent a core can drive for the caller
+// (GET /v1/local-agent/targets). ID is core-qualified ("<core>/<rawid>",
+// core.QualifyTargetID); Core names the core for grouping. The model and
+// reasoning pickers are what the core discovered (absent: no picker).
+export interface AgentTarget extends AgentModelOptions {
+  id: string;
+  provider: string;
+  core: string;
+}
+
+// AgentTargetsReply is GET /v1/local-agent/targets.
+export interface AgentTargetsReply {
+  targets: AgentTarget[];
+}
+
+// Core is one registered core as GET /v1/cores lists it to a member (the
+// rollout gate applied). Available means the gateway resolved an endpoint
+// for it; Runtime "sidecar" cores are driven by the member's own bridge.
+export interface Core {
+  name: string;
+  available: boolean;
+  backend: string;
+  runtime?: string;
+  requiresDesktop?: boolean;
+  rollout?: string;
+}
+
+// CoresReply is GET /v1/cores.
+export interface CoresReply {
+  cores: Core[];
 }
 
 // ---- wire/dispatch.go ----
@@ -1947,6 +2147,104 @@ export interface TenantRetentionView {
   limits: RetentionLimits;
 }
 
+// ---- wire/rooms.go ----
+
+// RoomSummary is one room of the caller's own room list
+// (GET /v1/users/{id}/rooms?detail=1). Role is the caller's role in it.
+export interface RoomSummary {
+  roomId: string;
+  name: string;
+  description: string;
+  visibility: RoomVisibility;
+  syncMode: RoomSyncMode;
+  role: RoomRole;
+  memberCount: number;
+  createdAtMs: number;
+}
+
+// RoomsReply is the caller's room list.
+export interface RoomsReply {
+  rooms: RoomSummary[];
+}
+
+// RoomDetail is GET /v1/rooms/{id} for a member (and the answer to a create
+// or a PATCH). The caller's role is not part of it: it comes from the member
+// list (RoomMembersReply), the one source a role change updates.
+export interface RoomDetail {
+  roomId: string;
+  name: string;
+  description: string;
+  visibility: RoomVisibility;
+  syncMode: RoomSyncMode;
+  createdBy: string;
+  createdAtMs: number;
+  memberCount: number;
+}
+
+// RoomPreview is GET /v1/rooms/{id} for a non-member of a shared room: just
+// enough for a join card. Preview is always true (a private room answers
+// 404 to a non-member).
+export interface RoomPreview {
+  roomId: string;
+  name: string;
+  description: string;
+  visibility: RoomVisibility;
+  memberCount: number;
+  preview: boolean;
+}
+
+// RoomMember is one membership of a room. AgentHost marks a platform
+// agent's host: in the room only so its bridge drives that agent, never a
+// person (clients keep it out of people lists).
+export interface RoomMember {
+  userId: string;
+  role: RoomRole;
+  agentHost: boolean;
+}
+
+// RoomMembersReply is GET /v1/rooms/{id}/members (members only).
+export interface RoomMembersReply {
+  members: RoomMember[];
+}
+
+// PlazaRoom is one room of the plaza (GET /v1/rooms?q=). A private room is
+// Locked: only its name and description are shown, never who made it or
+// how many are in it.
+export interface PlazaRoom {
+  roomId: string;
+  name: string;
+  description: string;
+  visibility: RoomVisibility;
+  locked: boolean;
+  syncMode?: RoomSyncMode;
+  createdBy?: string;
+  createdAtMs?: number;
+  memberCount?: number;
+}
+
+// PlazaReply is one page of the plaza: Total rooms match, this page starts
+// at Offset and holds at most Limit.
+export interface PlazaReply {
+  rooms: PlazaRoom[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+// ChannelUnread is one channel's unread count.
+export interface ChannelUnread {
+  channelId: string;
+  count: number;
+}
+
+// UnreadReply is GET /v1/rooms-unread?rooms= (at most MaxUnreadRooms):
+// per room, the unread total (a room with none is absent) and the channels
+// that have unread messages, default channel first.
+export interface UnreadReply {
+  unread: Record<string, number>;
+  channels: Record<string, ChannelUnread[]>;
+}
+
 // ---- wire/schedules.go ----
 
 // MaxChatTextBytes is the product cap on one chat message's text. realtime
@@ -2300,8 +2598,8 @@ export interface TeamJob {
   roomName?: string;
   channelId?: string;
   requester: string;
-  status: string;
-  failureReason?: string;
+  status: AgentJobStatus;
+  failureReason?: AgentJobFailureReason;
   createdAtMs: number;
   startedAtMs?: number;
   finishedAtMs?: number;
@@ -2815,6 +3113,10 @@ export interface MemberJoinedPayload {
 // The bridge and activity's job sweeper both use these, so their notices for
 // one job share one namespace.
 export const JobNoticeSeq = 1;
+
+// ---- wire unions (//wire:union) ----
+export type RunScope = "room" | "self" | "tenant";
+export const RunScopeValues: readonly RunScope[] = ["room", "self", "tenant"];
 
 // ---- enums owned outside internal/wire ----
 // An agent job's lifecycle status (store.AgentJobStatus).

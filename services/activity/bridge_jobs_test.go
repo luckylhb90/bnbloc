@@ -59,8 +59,8 @@ func TestJobStatusPublishesToOwningRoom(t *testing.T) {
 	if ev.RoomID != "room-1" || ev.ChannelID != "chan-1" || ev.Kind != "agent_job_updated" {
 		t.Fatalf("event = %+v, want room-1/chan-1 agent_job_updated", ev)
 	}
-	job, ok := ev.Payload.(store.AgentJob)
-	if !ok || job.MessageSeq != 7 || job.Status != store.AgentJobReplied {
+	job, ok := ev.Payload.(wire.AgentJob)
+	if !ok || job.MessageSeq != 7 || job.Status != string(store.AgentJobReplied) {
 		t.Fatalf("payload = %+v, want the replied job for seq 7", ev.Payload)
 	}
 }
@@ -137,7 +137,7 @@ func TestSweepFailsQueuedJobAndNotifiesRoom(t *testing.T) {
 
 	svc.SweepAgentJobs(ctx)
 
-	var job store.AgentJob
+	var job wire.AgentJob
 	var failureText string
 	var tag map[string]any
 	for _, ev := range pub.events {
@@ -145,7 +145,7 @@ func TestSweepFailsQueuedJobAndNotifiesRoom(t *testing.T) {
 			t.Fatalf("event published to %q, want room-9", ev.RoomID)
 		}
 		switch p := ev.Payload.(type) {
-		case store.AgentJob:
+		case wire.AgentJob:
 			job = p
 		case wire.ReportMessagesInput:
 			if len(p.Messages) == 1 {
@@ -156,7 +156,7 @@ func TestSweepFailsQueuedJobAndNotifiesRoom(t *testing.T) {
 			}
 		}
 	}
-	if job.Status != store.AgentJobFailed || job.FailureReason != store.FailureNoBridgeOnline {
+	if job.Status != string(store.AgentJobFailed) || job.FailureReason != string(store.FailureNoBridgeOnline) {
 		t.Fatalf("swept job = %+v, want failed/no_bridge_online", job)
 	}
 	if !strings.Contains(failureText, "offline") {
@@ -178,13 +178,13 @@ func TestCancelStopsRunningJobAndLocksOutWorker(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("cancel status = %d, want 200", resp.StatusCode)
 	}
-	var cancelled store.AgentJob
+	var cancelled wire.AgentJob
 	for _, ev := range pub.events {
-		if j, ok := ev.Payload.(store.AgentJob); ok {
+		if j, ok := ev.Payload.(wire.AgentJob); ok {
 			cancelled = j
 		}
 	}
-	if cancelled.Status != store.AgentJobCancelled || cancelled.RoomID != "room-1" {
+	if cancelled.Status != string(store.AgentJobCancelled) || cancelled.RoomID != "room-1" {
 		t.Fatalf("published job = %+v, want cancelled in room-1", cancelled)
 	}
 

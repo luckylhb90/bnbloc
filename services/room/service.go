@@ -3,6 +3,7 @@
 package room
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
@@ -225,7 +226,14 @@ func (s *Service) handleCreateRoom(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	httpx.WriteJSON(w, http.StatusOK, map[string]any{"roomId": roomID, "visibility": string(room.Visibility), "syncMode": string(room.SyncMode)})
+	room.CreatedBy = caller
+	detail, err := s.roomDetail(r.Context(), room)
+	if err != nil {
+		obs.ServerError(w, "count members failed", err)
+		httpx.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, detail)
 }
 
 // handleGetRoom returns full detail to members. To a non-member it returns a
@@ -255,20 +263,34 @@ func (s *Service) handleGetRoom(w http.ResponseWriter, r *http.Request) {
 			httpx.Error(w, "room not found", http.StatusNotFound)
 			return
 		}
-		httpx.WriteJSON(w, http.StatusOK, map[string]any{
-			"roomId": rm.RoomID, "name": rm.Name, "description": rm.Description,
-			"visibility": string(rm.Visibility), "memberCount": memberCount,
-			"preview": true,
+		httpx.WriteJSON(w, http.StatusOK, wire.RoomPreview{
+			RoomID: rm.RoomID, Name: rm.Name, Description: rm.Description,
+			Visibility: string(rm.Visibility), MemberCount: memberCount,
+			Preview: true,
 		})
 
 		return
 	}
-	httpx.WriteJSON(w, http.StatusOK, map[string]any{
-		"roomId": rm.RoomID, "name": rm.Name, "description": rm.Description,
-		"visibility": string(rm.Visibility), "syncMode": string(rm.SyncMode), "createdBy": rm.CreatedBy,
-		"createdAtMs": rm.CreatedAtMs, "memberCount": memberCount,
-	})
+	httpx.WriteJSON(w, http.StatusOK, roomDetailOf(rm, memberCount))
+}
 
+// roomDetail is a room as its members see it (GET, PATCH and create answer
+// it alike), reading its member count.
+func (s *Service) roomDetail(ctx context.Context, rm store.Room) (wire.RoomDetail, error) {
+	memberCount, err := s.Store.MemberCount(ctx, rm.RoomID)
+	if err != nil {
+		return wire.RoomDetail{}, err
+	}
+	return roomDetailOf(rm, memberCount), nil
+}
+
+// roomDetailOf is the one member-facing projection of a room.
+func roomDetailOf(rm store.Room, memberCount int) wire.RoomDetail {
+	return wire.RoomDetail{
+		RoomID: rm.RoomID, Name: rm.Name, Description: rm.Description,
+		Visibility: string(rm.Visibility), SyncMode: string(rm.SyncMode), CreatedBy: rm.CreatedBy,
+		CreatedAtMs: rm.CreatedAtMs, MemberCount: memberCount,
+	}
 }
 
 func (s *Service) handleAddMember(w http.ResponseWriter, r *http.Request) {
@@ -318,18 +340,14 @@ func (s *Service) handleListMembers(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	members := make([]map[string]any, 0, len(memberships))
+	reply := wire.RoomMembersReply{Members: make([]wire.RoomMember, 0, len(memberships))}
 	for _, m := range memberships {
 		// An agent host (a platform agent's host, docs/prd/2026-10-10-zero-
 		// install-onboarding.md §2) is listed only with its flag: clients
 		// keep it out of people lists.
-		members = append(members, map[string]any{
-			"userId":    m.UserID,
-			"role":      string(m.Role),
-			"agentHost": m.AgentHost,
-		})
+		reply.Members = append(reply.Members, wire.RoomMember{UserID: m.UserID, Role: string(m.Role), AgentHost: m.AgentHost})
 	}
-	httpx.WriteJSON(w, http.StatusOK, map[string]any{"members": members})
+	httpx.WriteJSON(w, http.StatusOK, reply)
 }
 
 func (s *Service) handleRemoveMember(w http.ResponseWriter, r *http.Request) {
@@ -523,15 +541,15 @@ func (s *Service) handleUserRooms(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	rooms := make([]map[string]any, 0, len(details))
+	reply := wire.RoomsReply{Rooms: make([]wire.RoomSummary, 0, len(details))}
 	for _, d := range details {
-		rooms = append(rooms, map[string]any{
-			"roomId": d.RoomID, "name": d.Name, "description": d.Description,
-			"visibility": string(d.Visibility), "syncMode": string(d.SyncMode), "role": string(d.Role),
-			"isOwner": d.IsOwner, "memberCount": d.MemberCount, "createdAtMs": d.CreatedAtMs,
+		reply.Rooms = append(reply.Rooms, wire.RoomSummary{
+			RoomID: d.RoomID, Name: d.Name, Description: d.Description,
+			Visibility: string(d.Visibility), SyncMode: string(d.SyncMode), Role: string(d.Role),
+			MemberCount: d.MemberCount, CreatedAtMs: d.CreatedAtMs,
 		})
 	}
-	httpx.WriteJSON(w, http.StatusOK, map[string]any{"rooms": rooms})
+	httpx.WriteJSON(w, http.StatusOK, reply)
 }
 
 func (s *Service) handleCreateInvite(w http.ResponseWriter, r *http.Request) {
@@ -612,23 +630,23 @@ func (s *Service) handlePlaza(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	out := make([]map[string]any, 0, len(rooms))
+	reply := wire.PlazaReply{Rooms: make([]wire.PlazaRoom, 0, len(rooms)), Total: total, Limit: limit, Offset: offset}
 	for _, rc := range rooms {
 		if rc.Visibility == store.VisibilityShared {
-			out = append(out, map[string]any{
-				"roomId": rc.RoomID, "name": rc.Name, "description": rc.Description,
-				"visibility": "shared", "syncMode": string(rc.SyncMode), "createdBy": rc.CreatedBy, "createdAtMs": rc.CreatedAtMs,
-				"memberCount": rc.MemberCount, "locked": false,
+			reply.Rooms = append(reply.Rooms, wire.PlazaRoom{
+				RoomID: rc.RoomID, Name: rc.Name, Description: rc.Description,
+				Visibility: string(store.VisibilityShared), SyncMode: string(rc.SyncMode), CreatedBy: rc.CreatedBy, CreatedAtMs: rc.CreatedAtMs,
+				MemberCount: rc.MemberCount,
 			})
 			continue
 		}
 		// Private: redact everything but the existence + name/description.
-		out = append(out, map[string]any{
-			"roomId": rc.RoomID, "name": rc.Name, "description": rc.Description,
-			"visibility": "private", "locked": true,
+		reply.Rooms = append(reply.Rooms, wire.PlazaRoom{
+			RoomID: rc.RoomID, Name: rc.Name, Description: rc.Description,
+			Visibility: string(store.VisibilityPrivate), Locked: true,
 		})
 	}
-	httpx.WriteJSON(w, http.StatusOK, map[string]any{"rooms": out, "total": total, "limit": limit, "offset": offset})
+	httpx.WriteJSON(w, http.StatusOK, reply)
 }
 
 // handleJoinRoom self-adds the caller to a shared room. Private rooms refuse
@@ -770,11 +788,18 @@ func (s *Service) handlePatchRoom(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	rm, _ := s.Store.GetRoom(r.Context(), roomID)
-	httpx.WriteJSON(w, http.StatusOK, map[string]any{
-		"roomId": rm.RoomID, "name": rm.Name, "description": rm.Description, "visibility": string(rm.Visibility), "syncMode": string(rm.SyncMode),
-	})
-
+	rm, err := s.Store.GetRoom(r.Context(), roomID)
+	if err != nil {
+		httpx.Error(w, err.Error(), http.StatusNotFound)
+		return
+	}
+	detail, err := s.roomDetail(r.Context(), rm)
+	if err != nil {
+		obs.ServerError(w, "count members failed", err)
+		httpx.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, detail)
 }
 
 // handleDeleteRoom soft-deletes a room (owner-only).

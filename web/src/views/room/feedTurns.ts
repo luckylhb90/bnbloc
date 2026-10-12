@@ -15,6 +15,7 @@
 // A row whose parent request is not loaded (an older history page) stays in
 // place until "Load earlier" brings the request in.
 import type { DispatchAttribution } from "../../lib/dispatch.ts";
+import { isLiveJob } from "../../lib/agentRuns.ts";
 
 // The fields of a feed row the grouping reads (FeedItem satisfies it).
 export interface TurnRow {
@@ -141,9 +142,6 @@ export function blockTitle(block: Pick<TurnBlock, "roles" | "agents" | "dispatch
   return block.dispatches.length === 1 ? "Delegated work" : `Delegated work (${block.dispatches.length})`;
 }
 
-// Job statuses that are still working (the block stays open while any is).
-const ACTIVE = new Set(["queued", "claimed", "running", "reflowing"]);
-
 export interface BlockProgress {
   readonly done: number;
   readonly total: number;
@@ -161,7 +159,7 @@ export function blockProgress(block: Pick<TurnBlock, "dispatches">, statusOf: (i
   for (const i of block.dispatches) {
     const s = statusOf(i);
     if (!s) continue;
-    if (ACTIVE.has(s)) active = true;
+    if (isLiveJob({ status: s })) active = true;
     else done++;
   }
   return { done, total: block.dispatches.length, active };

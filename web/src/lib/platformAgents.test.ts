@@ -40,7 +40,7 @@ const codexInRoom: RoomPlatformAgent = { ...codex, hosts: [host("admin", false)]
 
 function testAgentHostsAreNeverPeople(): void {
   const { people, agentHosts } = splitAgentHosts([
-    { userId: "jack", role: "owner" },
+    { userId: "jack", role: "owner", agentHost: false },
     { userId: "admin", role: "member", agentHost: true },
     { userId: "rose", role: "member", agentHost: false },
   ]);

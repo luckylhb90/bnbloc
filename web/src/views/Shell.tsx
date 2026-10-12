@@ -13,7 +13,7 @@ import {
   MagnifyingGlassIcon,
   BuildingsIcon,
 } from "@phosphor-icons/react";
-import { api, type Room } from "@/lib/api";
+import { api, type RoomSummary } from "@/lib/api";
 import { useActingTenant } from "@/lib/session";
 import { useAuth } from "@/lib/auth";
 import { cn } from "@/lib/cn";
@@ -81,7 +81,7 @@ export function Shell({
       return next;
     });
   };
-  const [rooms, setRooms] = useState<Room[]>([]);
+  const [rooms, setRooms] = useState<RoomSummary[]>([]);
   const isSuper = role === "super_admin";
   // Super-admin global tenant switch: the tenant the whole session acts as
   // (lib/session.ts owns it; switching reloads so every view re-fetches under
