@@ -36,8 +36,9 @@ type TurnInterrupter interface {
 }
 
 // TargetResolver is implemented by cores whose target ids can be derived from a
-// provider name without listing live targets. False means the bridge should use
-// the normal ListTargets lookup.
+// provider name without listing live targets (capability resolveTarget:
+// callers reach it through As). False means the bridge should use the normal
+// ListTargets lookup.
 type TargetResolver interface {
 	ResolveTarget(provider string) (targetID string, ok bool)
 }
@@ -70,6 +71,14 @@ const (
 	// the CLI's shell commands into the given sandbox space. A core that does
 	// not advertise it never receives an Execution (Supports gates it).
 	CapabilitySandboxExec Capability = "sandboxExec"
+	// CapabilityDiscover (Discoverer) marks a core that locates its own
+	// daemon without an explicit endpoint (a manifest's discover clause). It
+	// does not depend on an endpoint: callers ask As with a zero Endpoint.
+	CapabilityDiscover Capability = "discover"
+	// CapabilityResolveTarget (TargetResolver) marks a core whose target ids
+	// derive from a provider name without listing targets (a manifest's
+	// targetIdPrefix). Endpoint-independent like CapabilityDiscover.
+	CapabilityResolveTarget Capability = "resolveTarget"
 )
 
 // ErrCapabilityMissing matches (errors.Is) every refusal of a request a core
@@ -459,9 +468,10 @@ func Names() []string {
 	return out
 }
 
-// Discoverer is an optional capability: a core that can locate its local daemon
-// without explicit configuration implements it. Cores that cannot self-discover
-// simply do not implement this, and stay configuration-only.
+// Discoverer is an optional capability (CapabilityDiscover, reached through
+// As; coreset.Discover bounds it): a core that can locate its local daemon
+// without explicit configuration implements it. Cores that cannot
+// self-discover do not offer it and stay configuration-only.
 type Discoverer interface {
 	// Discover returns the local daemon endpoint and true when found. It must be
 	// side-effect free and fast (a file read or a short probe); callers may run

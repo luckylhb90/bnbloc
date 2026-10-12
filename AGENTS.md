@@ -377,7 +377,9 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   bridge cmd mains build their env core list — do not re-parse core env
   elsewhere. Every core entry, env-configured or installed (gateway
   activation), is built by `coreset.EntryFor(name, provider, declared)`:
-  the `_URL`/`_TOKEN` override, `Explicit` and the one discovery timeout
+  the `_URL`/`_TOKEN` override, `Explicit` and discovery through
+  `coreset.Discover`, the one discovery bound (`DiscoverTimeout`), also used
+  by `Rediscover` and the gateway's dev discover route
   (`TestCoreEntriesBuiltOnlyByEntryFor`). The `<NAME>` key is
   `coreset.EnvKey` (non-alphanumerics → `_`); the desktop writes these vars
   only through `core_env_var`/`env_key`, pinned to Go by
@@ -427,7 +429,10 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   - **Optional capabilities go through `core.As[T](ctx, p, ep, cap)`**, never
     a bare type assertion: a manifest or protocol provider implements every
     optional method but `As` consults its `CapabilityReporter` (declared ops /
-    discovery document) per endpoint. There are no capability wrapper types.
+    discovery document) per endpoint. There are no capability wrapper types
+    and no exception: `Discoverer` and `TargetResolver` are capabilities too
+    (`discover`, `resolveTarget`; endpoint-independent, asked with a zero
+    `Endpoint`). `TestNoBareCapabilityAssertion` scans every Go source.
   - **A request a core does not offer is refused, never dropped, with one
     error:** `core.CapabilityMissingError` (`errors.Is`
     `core.ErrCapabilityMissing`, which a daemon's `capability_missing`

@@ -38,9 +38,26 @@ type Entry struct {
 	Explicit bool
 }
 
-// discoverTimeout bounds the best-effort startup discovery of each core so a
-// slow or absent daemon cannot stall composition-root startup.
-const discoverTimeout = 3 * time.Second
+// DiscoverTimeout bounds one core discovery (a listener file read or a
+// liveness probe) so a slow or absent daemon cannot stall startup, a roster
+// refresh or a request. Discover is its one user.
+const DiscoverTimeout = 3 * time.Second
+
+// Discover runs a core's own discovery (core.Discoverer, reached through
+// core.As with capability discover) bounded by DiscoverTimeout: the one
+// discovery path for boot (EntryFor), every refresh (Rediscover) and the
+// gateway's dev discover route. found is false for a core that cannot
+// self-discover, a daemon that is not up, or an endpoint without a URL.
+func Discover(ctx context.Context, p core.Provider) (core.Endpoint, bool) {
+	d, ok := core.As[core.Discoverer](ctx, p, core.Endpoint{}, core.CapabilityDiscover)
+	if !ok {
+		return core.Endpoint{}, false
+	}
+	ctx, cancel := context.WithTimeout(ctx, DiscoverTimeout)
+	defer cancel()
+	ep, found := d.Discover(ctx)
+	return ep, found && ep.OK()
+}
 
 // FromEnv builds the ordered core list of BNBLOC_CORES (comma-separated core
 // names); when unset it yields no env-configured cores (no baked-in default).
@@ -84,7 +101,7 @@ func FromEnv() []Entry {
 // the gateway and the bridge. An explicit URL override wins (Explicit). Else
 // declared, the address an endpoint-runtime package names, is used as fixed
 // configuration (the token override still applies). Else a core that can
-// self-discover is discovered best-effort within discoverTimeout; an entry
+// self-discover is discovered best-effort (Discover); an entry
 // whose daemon is not up yet keeps a zero endpoint for Rediscover. A manifest
 // core's probe inputs (its token, a repointed URL) are wired from the same
 // overrides: they live at the composition root, so the core packages keep no
@@ -105,12 +122,8 @@ func EntryFor(name string, p core.Provider, declared core.Endpoint) Entry {
 		return Entry{Name: name, Provider: p, Endpoint: declared, Explicit: true}
 	}
 	e := Entry{Name: name, Provider: p}
-	if d, ok := p.(core.Discoverer); ok {
-		ctx, cancel := context.WithTimeout(context.Background(), discoverTimeout)
-		if found, ok := d.Discover(ctx); ok {
-			e.Endpoint = found
-		}
-		cancel()
+	if found, ok := Discover(context.Background(), p); ok {
+		e.Endpoint = found
 	}
 	return e
 }
@@ -169,13 +182,7 @@ func Rediscover(ctx context.Context, e *Entry) core.Endpoint {
 	if e.Explicit {
 		return e.Endpoint // fixed configured address: never rediscover
 	}
-	d, ok := e.Provider.(core.Discoverer)
-	if !ok {
-		return e.Endpoint
-	}
-	dctx, cancel := context.WithTimeout(ctx, discoverTimeout)
-	defer cancel()
-	if found, ok := d.Discover(dctx); ok && found.OK() {
+	if found, ok := Discover(ctx, e.Provider); ok {
 		e.Endpoint = found // adopt: fills-if-empty and follows a restart
 	}
 	return e.Endpoint

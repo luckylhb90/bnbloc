@@ -156,7 +156,7 @@ func checkOptionalCapabilities(ctx context.Context, provider core.Provider, cfg 
 			return fmt.Errorf("DeleteWorkspace advertised but failed: %w", err)
 		}
 	}
-	if discoverer, ok := provider.(core.Discoverer); ok {
+	if discoverer, ok := core.As[core.Discoverer](ctx, provider, cfg.Endpoint, core.CapabilityDiscover); ok {
 		if ep, found := discoverer.Discover(ctx); found && ep.BaseURL == "" {
 			return fmt.Errorf("Discover advertised found=true with empty BaseURL")
 		}

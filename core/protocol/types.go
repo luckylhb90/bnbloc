@@ -48,7 +48,7 @@ const (
 	CapabilityAgentProfile = string(core.CapabilityAgentProfile)
 	// CapabilityDiscover marks a package whose daemon can be located without an
 	// explicit endpoint (package metadata only; not a runtime method).
-	CapabilityDiscover = "discover"
+	CapabilityDiscover = string(core.CapabilityDiscover)
 )
 
 // Capabilities lists every Core Protocol capability name: the one registry

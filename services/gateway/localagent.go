@@ -406,14 +406,7 @@ func (s *Service) handleLocalAgentDiscover(w http.ResponseWriter, r *http.Reques
 		writeJSON(w, http.StatusOK, map[string]any{"found": false})
 		return
 	}
-	d, ok := entry.Provider.(core.Discoverer)
-	if !ok {
-		writeJSON(w, http.StatusOK, map[string]any{"found": false})
-		return
-	}
-	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
-	defer cancel()
-	ep, found := d.Discover(ctx)
+	ep, found := coreset.Discover(r.Context(), entry.Provider)
 	if !found {
 		writeJSON(w, http.StatusOK, map[string]any{"found": false})
 		return

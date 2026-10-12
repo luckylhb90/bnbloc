@@ -13,7 +13,8 @@
 // A loaded manifest registers under its Name through the same core registry as
 // any other core, so the gateway/bridge treat it identically. Optional
 // capabilities (interrupt, workspace-file writes, workspace deletion, session
-// file reads, session workdir) are exposed through
+// file reads, session workdir, discovery, target resolution) are exposed
+// through
 // core.CapabilityReporter: the provider implements every optional method and
 // reports a capability supported only when the manifest declares the matching
 // op, so callers probing through core.As never see an unconfigured one.
@@ -59,8 +60,8 @@ func (p *Provider) rest() core.REST {
 	return core.REST{Name: "manifestcore " + p.m.Name, HTTP: p.HTTP}
 }
 
-// Discover implements core.Discoverer when the manifest declares a probe or a
-// listener descriptor (or an endpoint override supplies a probe URL).
+// Discover implements core.Discoverer (capability discover: the manifest
+// declares a probe or a listener descriptor; see Supports).
 func (p *Provider) Discover(ctx context.Context) (core.Endpoint, bool) {
 	if p.m.Discover == nil {
 		return core.Endpoint{}, false
@@ -154,10 +155,10 @@ func (p *Provider) hostRewrite(spec *HostRewriteSpec) string {
 	return spec.Default
 }
 
-// ResolveTarget implements core.TargetResolver when the manifest declares a
-// target id prefix (e.g. "local:"), deriving a target id from a provider
-// name without a network call. An empty prefix reports not-resolvable so the
-// caller falls back to live target listing.
+// ResolveTarget implements core.TargetResolver (capability resolveTarget: the
+// manifest declares a target id prefix such as "local:"), deriving a target
+// id from a provider name without a network call. An empty prefix reports
+// not-resolvable so the caller falls back to live target listing.
 func (p *Provider) ResolveTarget(provider string) (string, bool) {
 	if p.m.TargetIDPrefix == "" {
 		return "", false
@@ -446,6 +447,10 @@ func (p *Provider) Supports(_ context.Context, _ core.Endpoint, c core.Capabilit
 		return p.m.SessionWorkdir.declared()
 	case core.CapabilityAgentProfile:
 		return createSessionTakesProfile(p.m.CreateSession.Body)
+	case core.CapabilityDiscover:
+		return p.m.Discover != nil
+	case core.CapabilityResolveTarget:
+		return p.m.TargetIDPrefix != ""
 	default:
 		return false
 	}

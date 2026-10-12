@@ -189,6 +189,25 @@ func TestResolveTargetPrefix(t *testing.T) {
 	if _, ok := without.ResolveTarget("codex"); ok {
 		t.Error("no prefix must not resolve")
 	}
+	// Both are capabilities reached through core.As like every other one.
+	ctx := context.Background()
+	if _, ok := core.As[core.TargetResolver](ctx, withPrefix, core.Endpoint{}, core.CapabilityResolveTarget); !ok {
+		t.Error("targetIdPrefix must offer resolveTarget")
+	}
+	if _, ok := core.As[core.TargetResolver](ctx, without, core.Endpoint{}, core.CapabilityResolveTarget); ok {
+		t.Error("no prefix must not offer resolveTarget")
+	}
+	if _, ok := core.As[core.Discoverer](ctx, without, core.Endpoint{}, core.CapabilityDiscover); ok {
+		t.Error("no discover clause must not offer discover")
+	}
+	withProbe, _ := New(func() Manifest {
+		m := validManifest("probe")
+		m.Discover = &DiscoverOp{ProbeURL: "http://127.0.0.1:1"}
+		return m
+	}())
+	if _, ok := core.As[core.Discoverer](ctx, withProbe, core.Endpoint{}, core.CapabilityDiscover); !ok {
+		t.Error("a discover clause must offer discover")
+	}
 }
 
 // The enrich op fills each target's catalog from a per-target secondary call,

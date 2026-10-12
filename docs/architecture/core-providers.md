@@ -52,7 +52,10 @@ workspace deletion (`deleteWorkspace`), `SessionFiles` (`sessionFiles`: list
 and read the agent session's workspace files, which the bridge publishes as
 room artifacts — "deliverables"), `SessionWorkdirReporter` (`sessionWorkdir`:
 the session's working directory, the bridge's default live-sync dir), plus
-`TargetResolver`. `sessionFiles` (+ `sessionFileBytes`) is offered by a
+`Discoverer` (`discover`: the core locates its own daemon) and
+`TargetResolver` (`resolveTarget`: target ids derive from a provider name),
+both offered by a manifest that declares a `discover` clause / a
+`targetIdPrefix`. `sessionFiles` (+ `sessionFileBytes`) is offered by a
 manifest that declares the session-file ops and by a Core Protocol daemon that
 advertises it (see "Core Protocol adapter daemon" below). `sessionWorkdir` has
 no Core Protocol v1 endpoint, so only a manifest offers it. A core without a
@@ -509,9 +512,10 @@ byte on selection and addressing.
 Endpoint resolution per core, in order:
 
 1. An explicit `BNBLOC_CORE_<NAME>_URL` (with optional `_TOKEN`) wins.
-2. Otherwise, if the provider implements `core.Discoverer`, discovery fills the
-   endpoint best-effort (bounded by a 3s timeout so a slow/absent daemon cannot
-   stall startup).
+2. Otherwise, if the provider offers `discover`, discovery fills the endpoint
+   best-effort through `coreset.Discover` (bounded by `DiscoverTimeout`, 3s, so
+   a slow/absent daemon cannot stall startup; the same bound applies to every
+   rediscovery and to the gateway's dev discover route).
 3. Otherwise the endpoint is zero — the core is still listed; its targets simply
    come back empty until the daemon is up.
 
