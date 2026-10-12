@@ -22,7 +22,6 @@ var contractPending = map[string]bool{
 	"AgentPrefsStore":             true,
 	"AgentRunReader":              true,
 	"AgentUsageReader":            true,
-	"AttachmentStore":             true,
 	"AuditLogReader":              true,
 	"BridgeJobStore":              true,
 	"ComponentInstallStore":       true,

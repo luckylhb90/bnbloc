@@ -20,7 +20,6 @@ import (
 // the code-health plan empties it.
 var tenantFilterPending = map[string]bool{
 	"agent_dispatch.go:MySQLBridgeJobs.BridgeOwner":                                  true,
-	"attachment.go:MySQLAttachments.GetAttachment":                                   true,
 	"content_prompt_uses.go:MySQLContentComponents.RecordContentPromptUse":           true,
 	"content_usage.go:MySQLContentComponents.CountMemberUses":                        true,
 	"mysql_bridge_jobs.go:MySQLBridgeJobs.ClaimAgentJobs":                            true,
