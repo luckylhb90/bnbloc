@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Select } from "@/ui/Select";
 import { HandshakeIcon, ShieldCheckIcon, PlusIcon } from "@phosphor-icons/react";
 import { api } from "@/lib/api";
-import { borrowKey, borrowTarget } from "@/lib/roomAgents";
+import { borrowKey, borrowTarget, NO_CORE_GROUP, groupByCore } from "@/lib/roomAgents";
 import { Button } from "@/ui/Button";
 import { Input, Field } from "@/ui/Input";
 import { Dialog } from "@/ui/Dialog";
@@ -40,21 +40,6 @@ function dedupeAgents(xs: Agent[]): Agent[] {
   return out;
 }
 
-// groupByCore buckets agents by core in first-seen order; coreless agents fall
-// under "" (rendered as a flat, unlabeled group).
-function groupByCore(xs: Agent[]): [string, Agent[]][] {
-  const order: string[] = [];
-  const byCore = new Map<string, Agent[]>();
-  for (const a of xs) {
-    const c = a.core || "";
-    if (!byCore.has(c)) {
-      byCore.set(c, []);
-      order.push(c);
-    }
-    byCore.get(c)!.push(a);
-  }
-  return order.map((c) => [c, byCore.get(c)!]);
-}
 
 // BorrowAuthDialog is the owner's per-room control for borrowing of their own
 // agents. Authorization is scoped to THIS room (roomId), so authorizing here
@@ -236,11 +221,11 @@ export function BorrowAuthDialog({
               (the bnbloc desktop app) is running and connected; you can also authorize one by name below.
             </p>
           )}
-          {groupByCore(rows).map(([coreName, agents]) => (
-            <div key={coreName || "_"} className="flex flex-col gap-2">
+          {groupByCore(rows).map(({ core: coreName, items: agents }) => (
+            <div key={coreName} className="flex flex-col gap-2">
               {/* Core subheader — only when a core is known, so coreless
-                  (browser/manual) entries render as a flat list as before. */}
-              {coreName && (
+                  (browser/manual) entries render as a flat list. */}
+              {coreName !== NO_CORE_GROUP && (
                 <div className="px-1 text-xs font-medium uppercase tracking-wide text-[var(--color-fg-subtle)]">
                   {coreName}
                 </div>

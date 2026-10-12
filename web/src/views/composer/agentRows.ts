@@ -3,7 +3,7 @@
 // for the same (core, provider) are one row, but another member's agent with
 // the same harness is its own row — selecting it borrows THAT member's agent.
 import { PLATFORM_AGENTS_GROUP, samePlatformAgent, type PlatformAgentRef, type PlatformChoice } from "../../lib/platformAgents.ts";
-import { agentIdentity } from "../../lib/roomAgents.ts";
+import { agentIdentity, coreGroup } from "../../lib/roomAgents.ts";
 import type { RoomAgent } from "./types.ts";
 
 export interface PickerTarget {
@@ -48,7 +48,7 @@ export function agentRows(
     if (byKey.has(key)) continue;
     byKey.set(key, {
       key,
-      group: t.core || "other",
+      group: coreGroup(t),
       core: t.core,
       provider: t.provider,
       ownerId: me,
@@ -66,7 +66,7 @@ export function agentRows(
     }
     byKey.set(key, {
       key,
-      group: a.core || "other",
+      group: coreGroup(a),
       core: a.core ?? "",
       provider: a.provider,
       ownerId: a.ownerId,

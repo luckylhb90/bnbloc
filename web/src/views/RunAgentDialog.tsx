@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Select } from "@/ui/Select";
 import { DownloadSimpleIcon } from "@phosphor-icons/react";
-import { api, type AgentTarget } from "@/lib/api";
+import { api } from "@/lib/api";
 import { useDesktopDownload } from "@/lib/useDesktopDownload";
 import { useLocalAgent } from "@/lib/useLocalAgent";
 import { Button } from "@/ui/Button";
@@ -11,6 +11,7 @@ import { useToast } from "@/ui/Toast";
 import { ReleaseDownloadButton } from "@/views/ReleaseDownloadButton";
 import { PlatformAgentsHint } from "@/views/PlatformAgentsHint";
 import { errorText } from "@/lib/errors";
+import { groupByCore } from "@/lib/roomAgents";
 
 // RunAgentDialog discovers the caller's local agent core, lists its targets, and
 // starts a session that adopts a room. Mirrors the old runLocalAgent flow with a
@@ -79,18 +80,9 @@ export function RunAgentDialog({
   };
 
   // Group targets by their core so different local runtimes are visually
-  // separated in the <Select>. Preserves first-seen core order; a target with
-  // no core (legacy) is grouped under "other".
-  const groupedTargets: { core: string; items: AgentTarget[] }[] = [];
-  for (const t of targets) {
-    const core = t.core || "other";
-    let g = groupedTargets.find((x) => x.core === core);
-    if (!g) {
-      g = { core, items: [] };
-      groupedTargets.push(g);
-    }
-    g.items.push(t);
-  }
+  // separated in the <Select> (groupByCore: first-seen core order, coreless
+  // targets under "other").
+  const groupedTargets = groupByCore(targets);
 
   // Installed core names from the gateway (GET /v1/cores), never a baked-in list.
   const knownCoreNames = coreStatus.map((c) => c.name).join(", ");

@@ -73,6 +73,31 @@ export function parseAgentHandle(handle: string): AgentRef | null {
   return null;
 }
 
+// NO_CORE_GROUP is the group of an agent without a core (a borrowed or
+// legacy target).
+export const NO_CORE_GROUP = "other";
+
+// coreGroup is the group an agent lists under in a picker: its core.
+export function coreGroup(a: { readonly core?: string }): string {
+  return a.core || NO_CORE_GROUP;
+}
+
+// groupByCore buckets items by coreGroup, in first-seen order (the agent
+// picker, the run dialog and the borrow dialog group alike).
+export function groupByCore<T extends { readonly core?: string }>(items: readonly T[]): { readonly core: string; readonly items: T[] }[] {
+  const groups: { core: string; items: T[] }[] = [];
+  for (const it of items) {
+    const core = coreGroup(it);
+    let g = groups.find((x) => x.core === core);
+    if (!g) {
+      g = { core, items: [] };
+      groups.push(g);
+    }
+    g.items.push(it);
+  }
+  return groups;
+}
+
 // mergeRoomAgents builds the room's selectable agents: the live roster (the
 // source of truth for what can be driven), plus authorized-but-not-advertised
 // agents of other members so a browser user can still discover them. A grant
