@@ -18,17 +18,10 @@ export class ApiError extends Error {
 // statusText is how a status reads when there is nothing better to say: the
 // server sent no usable message, or a view words the status itself.
 export function statusText(status: number): string {
+  // A status alone says little: only a rate limit and an unavailable
+  // server have words of their own; anything else names the status (a
+  // router's bare 404 is not "it no longer exists").
   switch (status) {
-    case 401:
-      return "Your session has ended. Sign in again.";
-    case 403:
-      return "You don't have access to that.";
-    case 404:
-      return "It no longer exists.";
-    case 409:
-      return "It was changed in the meantime. Reload and try again.";
-    case 413:
-      return "That is too large.";
     case 429:
       return "Too many requests. Wait a moment and try again.";
     case 502:
