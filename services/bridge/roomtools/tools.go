@@ -19,7 +19,8 @@ const Instructions = `You are working in a bnbloc room shared by people and thei
 - room_status: the state of tasks you dispatched (use the handle ask_agent returns when it stops waiting).
 - read_room: recent messages of this conversation.
 - post_progress: post a short progress line of your current request to the room (once per phase of a longer task).
-- save_component, get_component, list_components, publish_component: save an expert or skill pack you drafted in your workspace (a directory with component.json) to the Library of the person who asked you, only after they confirm; read or list theirs to improve one.
+- save_component, get_component, list_components: save an expert, skill pack or prompt pack you drafted in your workspace (a directory with component.json) to the Library of the person who asked you, only after they confirm; read or list theirs to improve one.
+- publish_component: after they confirm, ask their organization's admins to publish one of theirs to the organization (scope org; the admins approve it), or take it back (scope personal).
 Dispatching is bounded: at most 8 tasks per request you are working on, at most 3 hops deep, never to yourself or to an agent already working on this request.`
 
 // Tool is one room tool: its MCP descriptor and its implementation.

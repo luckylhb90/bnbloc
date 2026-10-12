@@ -43,9 +43,12 @@ const (
 	maxComponentText = 512 << 10
 )
 
-// ScopePersonal is the only publish scope available until sharing and
-// approval (delivery step 4) exist.
-const ScopePersonal = "personal"
+// Publish scopes (publish_component).
+const (
+	ScopePersonal = "personal"
+	ScopeOrg      = "org"
+	ScopePlatform = "platform"
+)
 
 func saveComponentTool() Tool {
 	return Tool{
@@ -66,12 +69,16 @@ func saveComponentTool() Tool {
 
 func publishComponentTool() Tool {
 	return Tool{
-		Name:        "publish_component",
-		Title:       "Publish a saved component",
-		Description: "Change who can use a saved component. Only \"personal\" (the author alone) is available today; sharing with the organization is not available yet.",
+		Name:  "publish_component",
+		Title: "Publish a saved component",
+		Description: "Change who can use a component saved in the Library of the person who asked you, only after they confirm. " +
+			"\"org\" asks their organization's admins to publish its latest version to everyone in the organization: it opens a request " +
+			"the admins approve or decline (members keep the previously approved version until then). \"personal\" withdraws a pending " +
+			"request and takes it out of the organization. \"platform\" (every organization) is a platform admin's action: say so instead.",
 		InputSchema: objectSchema(map[string]any{
 			"id":    map[string]any{"type": "string", "description": "The component id (cc_...)."},
-			"scope": map[string]any{"type": "string", "enum": []string{"personal", "org", "platform"}, "description": "Who may use it."},
+			"scope": map[string]any{"type": "string", "enum": []string{ScopePersonal, ScopeOrg, ScopePlatform}, "description": "Who may use it."},
+			"note":  map[string]any{"type": "string", "description": "For \"org\": a short note for the admins (what it is for)."},
 		}, "id", "scope"),
 		Call: publishComponent,
 	}
@@ -236,6 +243,7 @@ func publishComponent(ctx context.Context, env *Env, args json.RawMessage) Resul
 	var in struct {
 		ID    string `json:"id"`
 		Scope string `json:"scope"`
+		Note  string `json:"note"`
 	}
 	if err := decodeArgs(args, &in); err != nil {
 		return toolError("invalid arguments: %v", err)
@@ -244,24 +252,43 @@ func publishComponent(ctx context.Context, env *Env, args json.RawMessage) Resul
 	if refused != nil {
 		return *refused
 	}
-	if strings.TrimSpace(in.ID) == "" {
+	id := strings.TrimSpace(in.ID)
+	if id == "" {
 		return toolError("id is required")
 	}
-	if in.Scope != ScopePersonal {
-		return toolError("publishing to %q is not available yet: saved components stay personal (only their author uses them) until sharing with the organization ships. The component is saved and ready for its author", in.Scope)
+	switch in.Scope {
+	case ScopePersonal, ScopeOrg:
+	case ScopePlatform:
+		return toolError("publishing to every organization is a platform admin's action, not one you or the person who asked can take: " +
+			"tell them a platform admin promotes it (exports it as a signed package and installs it). To share it with their organization, " +
+			"publish it with scope \"org\": an organization admin approves it")
+	default:
+		return toolError("scope must be %q, %q or %q", ScopePersonal, ScopeOrg, ScopePlatform)
 	}
-	raw, err := env.Gateway.Do(ctx, "GET", "/v1/content-components/"+url.PathEscape(in.ID)+"?"+grant.Encode(), nil)
+	raw, err := env.Gateway.Do(ctx, "POST", "/v1/content-components/"+url.PathEscape(id)+"/publish?"+grant.Encode(),
+		map[string]any{"scope": in.Scope, "note": strings.TrimSpace(in.Note)})
 	if err != nil {
-		return refusal("reading "+in.ID, err)
+		return refusal("publishing "+id, err)
 	}
-	var d componentDetail
-	if err := json.Unmarshal(raw, &d); err != nil {
-		return toolError("unreadable component: %v", err)
+	var reply struct {
+		Scope   string `json:"scope"`
+		Note    string `json:"note"`
+		Request *struct {
+			ID              string `json:"id"`
+			Version         string `json:"version"`
+			Status          string `json:"status"`
+			ApprovedVersion string `json:"approvedVersion"`
+		} `json:"request"`
 	}
-	if !d.Component.Mine {
-		return toolError("%s is not a component of the person who asked you", in.ID)
+	if err := json.Unmarshal(raw, &reply); err != nil {
+		return toolError("the publish answered an unreadable result: %v", err)
 	}
-	return Result{Value: map[string]any{"id": d.Component.ID, "scope": d.Component.Scope, "note": "It is personal: only its author uses it."}}
+	out := map[string]any{"id": id, "scope": reply.Scope, "note": reply.Note}
+	if reply.Request != nil {
+		out["request"] = map[string]any{"id": reply.Request.ID, "version": reply.Request.Version, "status": reply.Request.Status,
+			"approvedVersion": reply.Request.ApprovedVersion}
+	}
+	return Result{Value: out}
 }
 
 func getComponent(ctx context.Context, env *Env, args json.RawMessage) Result {

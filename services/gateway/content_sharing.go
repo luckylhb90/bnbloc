@@ -417,7 +417,7 @@ func (s *Service) handleUpdateContentCopy(w http.ResponseWriter, r *http.Request
 // ---------------------------------------------------------------- publish
 
 // errPlatformPublish answers a member asking for platform scope.
-const errPlatformPublish = "publishing to every organization is a platform admin action: a platform admin exports this component as a package, signs it and installs it (bnbloc content promote). Ask one to promote it; to reach your organization, publish it with scope org"
+const errPlatformPublish = "publishing to every organization is a platform admin action: they export it as a package, sign it and install it (bnbloc content promote). Ask a platform admin; to reach your organization, publish it with scope org"
 
 // handlePublishContent changes who can use the caller's component: org
 // opens a publish request, personal takes it out of the organization,

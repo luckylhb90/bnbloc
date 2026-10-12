@@ -139,19 +139,41 @@ func TestSaveComponentRefusals(t *testing.T) {
 	}
 }
 
-// publish_component keeps personal scope only until sharing ships.
-func TestPublishComponentPersonalOnly(t *testing.T) {
-	gw := &recordingGateway{reply: func(string, string) ([]byte, error) { return []byte(savedDetail), nil }}
-	res := publishComponent(context.Background(), contentEnv(nil, gw, true), json.RawMessage(`{"id":"cc_1","scope":"org"}`))
-	if !strings.Contains(res.Err, "not available yet") || len(gw.calls) != 0 {
-		t.Fatalf("org publish = %q (calls %d)", res.Err, len(gw.calls))
+// publish_component posts the scope to the publish route under the job's
+// grant and reports the request; platform scope is refused locally with
+// what a platform admin does.
+func TestPublishComponentScopes(t *testing.T) {
+	gw := &recordingGateway{reply: func(string, string) ([]byte, error) {
+		return []byte(`{"scope":"personal","note":"Waiting for an organization admin's approval.","request":{"id":"cpr_1","version":"1.2.0","status":"pending"}}`), nil
+	}}
+	res := publishComponent(context.Background(), contentEnv(nil, gw, true), json.RawMessage(`{"id":"cc_1","scope":"org","note":"for reviews"}`))
+	if res.Err != "" {
+		t.Fatal(res.Err)
 	}
-	res = publishComponent(context.Background(), contentEnv(nil, gw, true), json.RawMessage(`{"id":"cc_1","scope":"personal"}`))
-	if res.Err != "" || res.Value.(map[string]any)["scope"] != "personal" {
-		t.Fatalf("personal publish = %+v", res)
+	out := res.Value.(map[string]any)
+	if out["request"].(map[string]any)["status"] != "pending" || !strings.Contains(out["note"].(string), "approval") {
+		t.Fatalf("org publish = %+v", out)
+	}
+	if len(gw.calls) != 1 || gw.calls[0].Method != "POST" || !strings.HasPrefix(gw.calls[0].Path, "/v1/content-components/cc_1/publish?") {
+		t.Fatalf("calls = %+v", gw.calls)
 	}
 	if u, _ := url.Parse(gw.calls[0].Path); u.Query().Get("job") != "job-1" {
-		t.Fatalf("publish read without the job grant: %s", gw.calls[0].Path)
+		t.Fatalf("publish without the job grant: %s", gw.calls[0].Path)
+	}
+	if body, _ := gw.calls[0].Body.(map[string]any); body["scope"] != "org" || body["note"] != "for reviews" {
+		t.Fatalf("body = %+v", gw.calls[0].Body)
+	}
+	res = publishComponent(context.Background(), contentEnv(nil, gw, true), json.RawMessage(`{"id":"cc_1","scope":"platform"}`))
+	if !strings.Contains(res.Err, "platform admin") || len(gw.calls) != 1 {
+		t.Fatalf("platform publish = %q (calls %d)", res.Err, len(gw.calls))
+	}
+	// The gateway's refusal is passed through.
+	refused := &recordingGateway{reply: func(string, string) ([]byte, error) {
+		return nil, &StatusError{Status: 409, Body: []byte("version 1.2.0 is already published to your organization\n")}
+	}}
+	res = publishComponent(context.Background(), contentEnv(nil, refused, true), json.RawMessage(`{"id":"cc_1","scope":"org"}`))
+	if !strings.Contains(res.Err, "already published") {
+		t.Fatalf("refusal = %q", res.Err)
 	}
 }
 
