@@ -309,25 +309,11 @@ func (s *Service) postJobNotice(ctx context.Context, job store.AgentJob, text st
 	// Messages are cursor-tracked per agent session. A swept job never bound one,
 	// so its notice goes to the job's own notice session (shared namespace with
 	// the bridge's job notices) rather than an unrelated session's cursor.
-	in := wire.ReportMessagesInput{
-		WorkspaceID:    job.RoomID,
-		AgentSessionID: wire.JobNoticeSessionID(job.JobID),
-		ChannelID:      job.ChannelID,
-		Messages: []wire.Message{{
-			Seq: wire.JobNoticeSeq,
-			Payload: map[string]any{
-				"messageId":   "job-failed-" + job.JobID,
-				"role":        "assistant",
-				"text":        text,
-				"ownerUserId": job.OwnerUserID,
-				"provider":    job.Provider,
-				"failReason":  string(job.FailureReason),
-				"jobId":       job.JobID,
-				"sourceSeq":   job.MessageSeq,
-			},
-			CreatedAtUnixMs: now,
-		}},
-	}
+	in := wire.JobNotice{
+		RoomID: job.RoomID, ChannelID: job.ChannelID, JobID: job.JobID, SourceSeq: job.MessageSeq,
+		Kind: wire.NoticeJobFailed, Text: text, OwnerUserID: job.OwnerUserID, Provider: job.Provider,
+		FailReason: string(job.FailureReason), AtUnixMs: now,
+	}.Report()
 	fresh, _, err := s.Store.AppendMessages(ctx, job.RoomID, in)
 	if err != nil {
 		slog.Warn("bnbloc activity job failure message not recorded",

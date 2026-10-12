@@ -141,21 +141,13 @@ func postNotice(ctx context.Context, env *Env, job Job, kind, text string, count
 		return errProgressLimit
 	}
 	scope := env.Session.Scope()
-	session := ProgressSessionID(job.JobID)
-	body := map[string]any{
-		"workspaceId":    scope.RoomID,
-		"agentSessionId": session,
-		"channelId":      job.ChannelID,
-		"messages": []map[string]any{{
-			"seq": seq,
-			// The job and its request: the feed nests the line under it.
-			"payload": wire.JobNotice{
-				Kind: kind, MessageID: kind + "-" + job.JobID + "-" + strconv.FormatInt(seq, 10),
-				JobID: job.JobID, SourceSeq: job.MessageSeq, Text: text, OwnerUserID: scope.Owner, Provider: scope.Provider,
-			}.Payload(),
-			"createdAtUnixMs": time.Now().UnixMilli(),
-		}},
-	}
+	body := wire.JobNotice{
+		RoomID: scope.RoomID, ChannelID: job.ChannelID, JobID: job.JobID, SourceSeq: job.MessageSeq,
+		Kind: kind, Text: text, OwnerUserID: scope.Owner, Provider: scope.Provider,
+		Session: ProgressSessionID(job.JobID), Seq: seq,
+		MessageID: kind + "-" + job.JobID + "-" + strconv.FormatInt(seq, 10),
+		AtUnixMs:  time.Now().UnixMilli(),
+	}.Report()
 	_, err := env.Gateway.Do(ctx, http.MethodPost, "/v1/rooms/"+url.PathEscape(scope.RoomID)+"/agent-activity/messages", body)
 	return err
 }
@@ -166,10 +158,10 @@ func (progressLimitError) Error() string { return "progress line limit reached" 
 
 var errProgressLimit error = progressLimitError{}
 
-// Notice kinds (payload.notice) the feed renders as notices.
+// Notice kinds (payload.notice) the room tools post.
 const (
-	NoticeProgress = "progress"
-	NoticeTimeout  = "member-timeout"
+	NoticeProgress = wire.NoticeProgress
+	NoticeTimeout  = wire.NoticeTimeout
 )
 
 func postProgressTool() Tool {

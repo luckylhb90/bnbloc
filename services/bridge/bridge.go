@@ -2170,24 +2170,13 @@ func tagJob(payload map[string]any, jobID string, sourceSeq int64) {
 
 // postNotice records one notice row in the room feed (wire.JobNotice):
 // under the job's notice session when it has a job, else under a session of
-// its own. The job fills in the notice's job tags.
+// its own. The job fills in where it is recorded and the notice's job tags.
 func (b *Bridge) postNotice(ctx context.Context, job jobRef, n wire.JobNotice) {
-	session := noticeSessionID(job.ID)
+	n.RoomID, n.ChannelID = job.RoomID, job.ChannelID
 	n.JobID, n.SourceSeq = job.ID, job.MessageSeq
-	if n.MessageID == "" {
-		n.MessageID = n.Kind + "-" + session
-	}
-	body := map[string]any{
-		"workspaceId":    job.RoomID,
-		"agentSessionId": session,
-		"channelId":      job.ChannelID,
-		"messages": []map[string]any{{
-			"seq":             wire.JobNoticeSeq,
-			"payload":         n.Payload(),
-			"createdAtUnixMs": time.Now().UnixMilli(),
-		}},
-	}
-	if _, err := b.gatewayPOST(ctx, "/v1/rooms/"+job.RoomID+"/agent-activity/messages", body); err != nil {
+	n.Session = noticeSessionID(job.ID)
+	n.AtUnixMs = time.Now().UnixMilli()
+	if _, err := b.gatewayPOST(ctx, "/v1/rooms/"+job.RoomID+"/agent-activity/messages", n.Report()); err != nil {
 		slog.Warn("bnbloc bridge post notice failed",
 			"event", "bnbloc.bridge.post_failed", "room", job.RoomID, "kind", n.Kind, "error", err)
 	}
