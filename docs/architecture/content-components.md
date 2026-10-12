@@ -1,7 +1,7 @@
-# Content components: experts and skill packs
+# Content components: experts, skill packs and prompt packs
 
 Design: [`docs/prd/2026-10-12-experts-and-teams.md`](../prd/2026-10-12-experts-and-teams.md)
-(delivery step 1). This is the durable reference for how content components
+(delivery steps 1 and 3). This is the durable reference for how content components
 are stored, who may use them, how a turn wears them, and the HTTP surface.
 
 ## What they are
@@ -14,11 +14,11 @@ sandboxes, previewers, notifiers, auth providers):
 |---|---|---|
 | Expert | `bnbloc.expert.package/v1` | `component.json`, `INSTRUCTIONS.md`, optional `README.md`, embedded skills `skills/<name>/SKILL.md` (+ scripts/, references/) |
 | Skill pack | `bnbloc.skill.package/v1` | `component.json` (`skills: [names]`), `<name>/SKILL.md` per skill, optional `README.md` |
-
-Prompt packs (`bnbloc.prompt.package/v1`) register a third kind in step 3.
+| Prompt pack | `bnbloc.prompt.package/v1` | `component.json` (its `prompts`), optional `README.md` (see "Prompt packs") |
 
 A package is a plain ustar bundle (`internal/tarbundle`, limit profile
-`tarbundle.ContentLimits`: 8 MiB, 512 files). **One validator,
+`tarbundle.ContentLimits`: 8 MiB, 512 files; a prompt pack's own profile,
+`contentpkg.PromptLimits`, is 1 MiB and 2 files). **One validator,
 `internal/contentpkg`**, backs every entry point (form saves, archive
 uploads, imports, the bridge's materialization):
 
@@ -27,7 +27,7 @@ uploads, imports, the bridge's materialization):
   `description`, `category`, `tags`, `icon`, `requires` (`skills` /
   `prompts` as `name@range`, `mcp` by tool name with env names,
   `permissions`), plus the kind's fields (`quickPrompts`, `welcome`;
-  `skills`). A `team` block is refused until expert teams exist;
+  `skills`; `prompts`). A `team` block is refused until expert teams exist;
 - declared permissions: `scripts`, `mcp.stdio`, `mcp.http:<host>`. A
   package that ships scripts (a `scripts/` or `bin/` dir, or a script
   extension) must declare `scripts`. stdio MCP servers come only from MCP
@@ -37,8 +37,9 @@ uploads, imports, the bridge's materialization):
   `description` (the agent loads the skill from it).
 
 The kind registry (`contentpkg.KindSpec`: short name, limit profile, the
-kind's checks and its form layout) is how a new kind joins without
-branching the shared code.
+kind's checks, its form layout, its import of foreign formats, and
+`MemberUse` — whether a member turns it on for themselves) is how a new
+kind joins without branching the shared code.
 
 ### Import
 
@@ -47,9 +48,62 @@ package with a generated manifest: a bnbloc package (re-validated, version
 rewritten), a skill directory (`SKILL.md` at the root), a skills folder
 (`<name>/SKILL.md` or `skills/<name>/SKILL.md`), or a Claude Code-style
 plugin (`.claude-plugin/plugin.json`: its `skills/` become the skills; for an
-expert its first `agents/<name>.md` body becomes the instructions). It drops
-OS/VCS junk, refuses links and unsafe file names, declares `scripts` when a
-skill ships scripts, and stops an archive bomb at the cap.
+expert its first `agents/<name>.md` body becomes the instructions), or, for
+a prompt pack, markdown and json files of prompts (below). A single text
+file uploads without an archive. Each kind reads its foreign formats in its
+`KindSpec` import hook. It drops OS/VCS junk, refuses links and unsafe file
+names, declares `scripts` when a skill ships scripts, and stops an archive
+bomb at the cap.
+
+## Prompt packs
+
+A curated, versioned set of prompts with variables, used from the composer
+(PRD §4). The prompts live in `component.json`, so a view reads them from
+the stored manifest without fetching the bundle:
+
+```
+prompts: [{id, title, body, variables: [{name, label?, default?, options?}], tags?, slash?: "/name"}]
+```
+
+- **Validator.** At least one and at most 100 prompts; ids (`[a-z0-9-]`)
+  and slash commands (`/` + `[a-z0-9-]`) unique in the pack; a title (one
+  line, ≤ 120) and a body (≤ 8000 characters); every `{{name}}` in a body
+  (spaces inside the braces allowed; anything else between braces is
+  literal text) is a declared variable and every declared variable is
+  used; options unique, a default one of them; tags as in the envelope.
+  Experts and skill packs refuse `prompts`.
+- **Import.** A markdown file holds one prompt per `##` heading (per `#`
+  heading when it has no `##`; a top `#` then names the pack and the text
+  under it describes it; `id:`, `slash:` and `tags:` lines right under a
+  heading set those fields; headings in code fences do not split); a json
+  file is a list of prompts or `{name?, displayName?, description?,
+  prompts}` (`prompt`/`content`/`text` and `command` are read as `body` and
+  `slash`). Placeholders are declared as variables (labels from their
+  names), unused declarations dropped, ids made from titles and made
+  unique (`NormalizePrompts`).
+- **Uses.** Like every content kind: a member turns a pack on for
+  themselves (member use) and a room's owner or admins turn it on for the
+  room (room use). The composer offers the prompts of the member's packs,
+  then the room's (`GET /v1/content-uses?room=`); its picker searches them,
+  a message that starts with `/word` lists matching slash commands, and a
+  prompt with variables asks for them in a small form before its text is
+  inserted.
+- **The personal pack.** "Save as prompt" on a message
+  (`POST /v1/content-components/prompts`) appends the prompt to the
+  member's own pack `my-prompts` ("My prompts") as a new version (patch
+  bump), creating it, and turning it on for them, on the first save. It is
+  a normal pack: viewable, editable and deletable in the Library.
+- **Usage counts.** `content_prompt_uses (component_id, prompt_id,
+  use_count, last_used_at_ms)` counts insertions, one upsert per insertion
+  (`POST /v1/content-components/{id}/prompts/{promptId}/use`, readable packs
+  only), never per keystroke; views carry each prompt's `uses`. Deleting the
+  component deletes its counts.
+- **Expert quick prompts** may point at a pack's prompt (`{title?, ref:
+  "pack/prompt-id"}`, the pack named in `requires.prompts`). Views resolve
+  the reference for the viewer, and in the room for room uses and `?room=`
+  reads, to the highest version satisfying the range among the packs they
+  may use and the room's (`contentuse.ResolvePromptRef`); an unresolved
+  one says which pack it needs.
 
 ## Built-in content
 
@@ -93,11 +147,14 @@ Tables (migration `2026_10_content_components`):
   versions). A new version is appended only while `latest_version` is
   still the one it was based on, and must be semver-newer.
 - `content_component_uses`: where a component is enabled or pinned —
-  `member` (a skill pack for all of a member's agents) or `room` (room
-  skill packs and pinned experts) — at a pinned version or following the
-  latest (`''`).
+  `member` (a skill pack for all of a member's agents, a prompt pack in
+  their composer) or `room` (room skill packs and prompt packs, pinned
+  experts) — at a pinned version or following the latest (`''`).
 - `content_permission_acks`: a member confirmed a version's declared
   permissions (first use).
+- `content_prompt_uses`: per-prompt insertion counts of prompt packs
+  (migration `2026_10_prompt_packs`, which also dropped the former prompt
+  library's `prompts` table).
 
 Bundles live in realtime's content-addressed blob store, like sidecar and
 previewer artifacts; `RetentionStore.ReferencedBlobKeys` includes
@@ -175,16 +232,18 @@ store and the artifact entitlement). JSON shapes: `internal/wire/content_compone
 
 | Route | What |
 |---|---|
-| `GET /v1/content-components?kind=expert\|skill` | The caller's Library: their own components plus org/platform ones visible to them, at the latest version |
+| `GET /v1/content-components?kind=expert\|skill\|prompt` | The caller's Library: their own components plus org/platform ones visible to them, at the latest version |
 | `POST /v1/content-components` | Save a new component: `{form, version?}` (JSON) or a package archive (`component.json` names it). 201 detail; 409 duplicate name; 400 validator message. With `?job=&room=`: a save by the bridge running the job, as its requester (below) |
-| `POST /v1/content-components/import?kind=&name=` | Import an archive (tar, tar.gz, zip) as a new component; `?id=` imports a new version of the caller's component |
+| `POST /v1/content-components/import?kind=&name=` | Import an archive (tar, tar.gz, zip) or a single markdown/json file of prompts as a new component; `?id=` imports a new version of the caller's component |
+| `POST /v1/content-components/prompts` | "Save as prompt": `{title?, body, tags?}` into the caller's personal prompt pack (created on the first save); 201 `{component, promptId, created}` |
+| `POST /v1/content-components/{id}/prompts/{promptId}/use[?room=&version=]` | Count one insertion of a pack's prompt (204) |
 | `GET /v1/content-components/{id}[?room=]` | Detail with versions (readable when visible, or used by a room of the caller's) |
 | `DELETE /v1/content-components/{id}` | Delete (owner) |
 | `POST /v1/content-components/{id}/versions` | New immutable version: `{form, baseVersion, version?}` (the base's extra files carry over) or an archive; owner only; strictly newer |
 | `GET /v1/content-components/{id}/versions/{v}[?room=]` | The version: component as of it, instructions, skill bodies, files (text when viewable) |
 | `POST /v1/content-components/{id}/versions/{v}/ack[?room=]` | Confirm the version's declared permissions |
 | `GET /v1/content-uses[?room=]` | The caller's member uses and a room's uses, each with its component at the version in effect and `updateAvailable` |
-| `PUT /v1/content-uses` | `{scope: member\|room, roomId?, componentId, version?}`: member scope takes skill packs; room scope needs the room's owner or an admin |
+| `PUT /v1/content-uses` | `{scope: member\|room, roomId?, componentId, version?}`: member scope takes the kinds with `MemberUse` (skill and prompt packs); room scope needs the room's owner or an admin |
 | `DELETE /v1/content-uses?scope=&roomId=&componentId=` | Remove a use |
 | `GET /v1/content-components/effective?job=&room=` | The bridge running a job: what its turn wears |
 | `GET /v1/artifacts/{key}[?room=\|?job=&room=]` | Bundle download (`artifactEntitled`) |

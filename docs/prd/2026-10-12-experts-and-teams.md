@@ -1,7 +1,7 @@
 # Content components: experts, skill packs, prompt packs; room tools and expert teams
 
 Status: approved, in development (2026-10-12): steps 1 and 2 implemented,
-step 3 in development, step 5 implemented for experts and skill packs (see
+step 3 implemented, step 5 implemented for experts and skill packs (see
 "Status" below). Feasibility verified in code and by experiments (see
 "Evidence").
 
@@ -506,9 +506,18 @@ through the step-1 session contributor hook), 6f1bb5b (gateway door),
 
 ## Status: step 3 (prompt packs)
 
-**2026-10-12: in development.** Scope: the prompt pack kind, its use in
-the composer, per-prompt usage counts, the Library's Prompts tab, and the
-clean cutover of the old prompt library. Decisions:
+**2026-10-12: implemented** (architecture:
+`docs/architecture/content-components.md` "Prompt packs"). Scope: the
+prompt pack kind, its use in the composer, per-prompt usage counts, the
+Library's Prompts tab, and the clean cutover of the old prompt library.
+Commits: ab8e15b (this design), 07ac053 (`contentpkg`: the kind, its
+validator, form and import, the quick prompt `ref`, the `KindSpec` import
+hook and `MemberUse`), 8228c02 (store and realtime: the prompt library
+dropped, `content_prompt_uses`), e41473a (gateway: "Save as prompt", use
+counts, prompt fields and quick prompt resolution); web: f4c0c6a (the
+Library's Prompts tab, "Save as prompt" and from selected messages, room
+settings, the cutover), 134a762 (composer: picker, /commands, the
+variables form, expert quick prompts). Decisions:
 
 - **A kind, not a library.** `bnbloc.prompt.package/v1` registers a
   `contentpkg.KindSpec` (its own `tarbundle` limit profile: `component.json`
@@ -521,8 +530,10 @@ clean cutover of the old prompt library. Decisions:
 - **Import** (the same `contentpkg.Import`, through a kind hook instead of a
   branch): a markdown file (one prompt per heading) or a json file (a list
   of prompts, or `{prompts: [...]}`), alone or in an archive. Placeholders
-  in imported bodies are declared as variables. "From selected messages" is
-  the Library form prefilled from messages picked in a room.
+  in imported bodies are declared as variables. "From selected messages"
+  is the prompt pack form prefilled with one prompt per message picked in
+  the room's "Save as prompt" dialog (into a new pack or one of the
+  member's).
 - **Scopes and uses are the content ones.** A prompt pack is personal now
   (shared, org and platform with step 4). A member turns a pack on for
   themselves (`content-uses` member scope, now open to every kind that
@@ -547,6 +558,21 @@ clean cutover of the old prompt library. Decisions:
   `/v1/tenant/prompts/*` routes, `internal/store/prompts.go`, the prompt
   hits of global search, the Plaza's shared prompts and the web prompt
   dialogs are removed.
+- **Slash commands start a message.** The `/word` menu opens only while
+  the draft up to the caret is `/word`, so a path or a slash inside text
+  never captures Enter.
+
+**Verified** by the validator, store (memory and MySQL 8.4, including the
+upgrade path: an existing `prompts` table is dropped), gateway route and
+web helper tests (`scripts/ci.sh go` with MySQL, `scripts/ci.sh web`).
+Not yet verified in a browser against running services.
+
+**Open in step 3:** "Create with AI" (the builder) for prompt packs (step
+5's builder covers experts and skill packs); starter prompts in a room
+from a pack; org-shared packs on the Plaza and in global search (the
+former library's shared prompts and search hits are gone until step 4's
+org scope); editing a quick prompt's `ref` in the expert form (it is kept,
+not edited).
 
 ## Status: step 5 (builder, experts and skill packs)
 

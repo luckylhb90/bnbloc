@@ -24,7 +24,7 @@ after `scripts/ci.sh all` and the post-deploy smoke (H1) pass.
 | ID | Item | Acceptance |
 |---|---|---|
 | F1 | Team agent dashboard | Org admins (and super-admins per tenant) see every member's agents: online state, current/last job, turns and cost today/7d, click-through to the room/job. Members see their own. Read-only aggregation over existing bridge/job/activity data. |
-| F2 | Prompt library | Any message (human prompt or agent reply) can be saved to a tenant library with title/tags; library page with search/filter; "Use" inserts the prompt into the composer of a chosen room. Visibility: private / tenant. |
+| F2 | Prompt library (superseded by prompt packs, see F2 below) | Any message (human prompt or agent reply) can be saved to a tenant library with title/tags; library page with search/filter; "Use" inserts the prompt into the composer of a chosen room. Visibility: private / tenant. |
 | F3 | Borrow billing | Per owner/borrower/agent usage and cost reports (day/month), CSV export; quota requests: a borrower asks for more runs/cost, the owner approves/declines in-app. |
 | F4 | Handoff package | Export a room's (or channel's) conversation, artifacts and agent session metadata as a package (JSON + files zip); import into another room or transfer room ownership with the package as history. |
 | F5 | Notifications | Per-member notification settings (mentions, agent finished/failed, borrow requests); signed delivery to installed notifier components (organization default + optional personal bot per member) in the public code; a private notifier turns them into enterprise-messenger bot messages. |
@@ -438,6 +438,13 @@ imported into the new default channel; an imported attachment's uploader is
 the importer (the original uploader survives only as message attribution).
 
 ### F2
+
+**Superseded (2026-10-12):** the prompt library was removed in favor of
+prompt packs, content components with variables and slash commands
+(`docs/prd/2026-10-12-experts-and-teams.md` §4, step 3; reference
+`docs/architecture/content-components.md`). Its table, store, routes,
+moderation path and web views are gone (start empty, no conversion); "Save
+to library" became "Save as prompt". The record below is history.
 
 Prompt library, owned by **realtime** (beside the room feed it is saved from;
 no new service). Table `prompts` (both schema files, migration
