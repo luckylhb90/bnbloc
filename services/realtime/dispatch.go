@@ -219,19 +219,12 @@ func (s *Service) Dispatch(ctx context.Context, roomID, caller string, in wire.D
 // still a person in the room: the caller can only spend authority that is
 // running on its own machine right now.
 func (s *Service) checkDispatchAuthority(ctx context.Context, roomID, caller string, parent store.AgentJob) error {
-	switch parent.Status {
-	case store.AgentJobClaimed, store.AgentJobRunning, store.AgentJobReflowing:
-	default:
-		return refuse(http.StatusConflict, wire.DispatchParentNotRunning, "parent job is %s, not running", parent.Status)
-	}
-	if parent.LeaseBridgeID == "" {
-		return refuse(http.StatusConflict, wire.DispatchParentNotRunning, "parent job is not leased")
-	}
-	owner, err := s.Dispatches.BridgeOwner(ctx, parent.LeaseBridgeID)
-	if errors.Is(err, store.ErrBridgeNotFound) || (err == nil && !strings.EqualFold(owner, caller)) {
+	switch err := store.JobLeasedBy(ctx, s.Dispatches, parent, caller); {
+	case errors.Is(err, store.ErrJobNotLive):
+		return refuse(http.StatusConflict, wire.DispatchParentNotRunning, "parent job is %s and not running on a bridge", parent.Status)
+	case errors.Is(err, store.ErrJobNotCallers):
 		return refuse(http.StatusForbidden, wire.DispatchNotParentBridge, "the parent job is not running on the caller's bridge")
-	}
-	if err != nil {
+	case err != nil:
 		return failed("read bridge owner: %w", err)
 	}
 	tid := tenant.FromContext(ctx)
