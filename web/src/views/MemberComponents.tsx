@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { api, ApiError, type MemberComponent } from "@/lib/api";
+import { api, type MemberComponent } from "@/lib/api";
 import { Card } from "@/ui/Card";
 import { PageHeader } from "@/ui/Page";
 import { useToast } from "@/ui/Toast";
 import { ComponentCard } from "@/views/ComponentCard";
 import { ErrorBox } from "@/ui/ErrorBox";
+import { errorText } from "@/lib/errors";
 
 export function MemberComponents() {
   const toast = useToast();
@@ -18,7 +19,7 @@ export function MemberComponents() {
       const res = await api.components();
       setComponents(res.components ?? []);
     } catch (caught: unknown) {
-      setError(caught instanceof Error ? caught.message : "failed to load components");
+      setError(errorText(caught, "failed to load components"));
       setComponents([]);
     }
   }, []);
@@ -37,7 +38,7 @@ export function MemberComponents() {
       toast.success(`${component.name} installed`);
       await load();
     } catch (caught: unknown) {
-      setError(caught instanceof ApiError ? caught.message : `failed to install ${component.name}`);
+      setError(errorText(caught, `failed to install ${component.name}`));
     } finally {
       setBusy(null);
     }
@@ -51,7 +52,7 @@ export function MemberComponents() {
       toast.success(`${component.name} removed`);
       await load();
     } catch (caught: unknown) {
-      setError(caught instanceof ApiError ? caught.message : `failed to remove ${component.name}`);
+      setError(errorText(caught, `failed to remove ${component.name}`));
     } finally {
       setBusy(null);
     }

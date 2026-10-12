@@ -4,6 +4,7 @@ import { formatBytes } from "@/lib/format";
 import { MaxAttachmentBytes } from "@/lib/wire.gen";
 import { useToast } from "@/ui/Toast";
 import type { AttachmentChipItem, AttachmentChipStatus } from "@/views/AttachmentChips";
+import { errorText } from "@/lib/errors";
 
 // Raster images only: SVG (active content) is refused by the gateway (415).
 export const ATTACHMENT_ACCEPT = [
@@ -111,21 +112,22 @@ export function useComposerAttachments(roomId: string) {
           ),
         );
       } catch (e) {
-        const unsupported = e instanceof ApiError && e.status === 415;
-        const message = unsupported
-          ? "This file type can't be attached"
-          : e instanceof Error
-            ? e.message
-            : "Upload failed";
+        const status = e instanceof ApiError ? e.status : 0;
+        const message =
+          status === 415
+            ? "This file type can't be attached"
+            : status === 413
+              ? `${pending.file.name} is larger than ${formatBytes(MaxAttachmentBytes)}`
+              : errorText(e, `Upload failed for ${pending.file.name}`);
         setFiles((cur) =>
           cur.map((file) =>
             file.id === pending.id ? { ...file, status: "error", error: message } : file,
           ),
         );
         toast.error(
-          unsupported
+          status === 415
             ? `${pending.file.name} can't be attached: SVG files and files whose content doesn't match their type are not allowed`
-            : `Upload failed for ${pending.file.name}: ${message}`,
+            : message,
         );
         return null;
       }

@@ -10,6 +10,7 @@ import { useToast } from "@/ui/Toast";
 import type { RoomAgent } from "@/views/composer/types";
 import { TEMPLATE_VISIBILITY } from "@/views/library/TemplateDialogs";
 import type { FeedItem } from "@/views/room/types";
+import { errorText } from "@/lib/errors";
 
 const agentKey = (a: TemplateAgent) => formatAgentLine(a);
 
@@ -86,7 +87,7 @@ export function SaveTemplateDialog({
       toast.success("Saved as template — find it in Library › Templates");
       onClose();
     } catch (e) {
-      toast.error(e instanceof ApiError && e.status === 403 ? "Only the room owner or an admin can save it as a template" : e instanceof ApiError ? `Could not save the template: ${e.message}` : "Could not save the template");
+      toast.error(e instanceof ApiError && e.status === 403 ? "Only the room owner or an admin can save it as a template" : errorText(e, "Could not save the template"));
     } finally {
       setBusy(false);
     }

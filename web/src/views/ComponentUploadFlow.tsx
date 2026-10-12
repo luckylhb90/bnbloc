@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { CheckCircleIcon } from "@phosphor-icons/react";
-import { api, ApiError, type ComponentRollout, type ComponentValidationStep, type ComponentValidationStepId } from "@/lib/api";
+import { api, type ComponentRollout, type ComponentValidationStep, type ComponentValidationStepId } from "@/lib/api";
 import { artifactRequirementsForPackage, buildFinalComponentPackageJSON, uploadedArtifactsComplete, type ArtifactRequirement } from "@/lib/componentArtifactRequirements";
 import { inspectComponentFile, type InspectedComponentFile } from "@/lib/componentPackageIntake";
 import { createPackageDraft, packageDraftFromEnvelope, nextPublishWizardStep, previousPublishWizardStep, type PackageDraftFields, type PublishWizardStep } from "@/lib/componentPublishWizard";
@@ -17,6 +17,7 @@ import { ComponentPublishSource, type PublishSourceMode } from "@/views/Componen
 import { ComponentUploadReviewPanel } from "@/views/ComponentUploadReviewPanel";
 import type { ReviewPackage } from "@/views/componentPublishTypes";
 import { ComponentValidationTimeline } from "@/views/ComponentValidationTimeline";
+import { errorText } from "@/lib/errors";
 
 const LABEL: Record<ComponentValidationStepId, string> = { reading: "Inspect input", schema: "Package contract", signature: "Signature", artifact: "Artifact validation", probe: "Conformance probe", review: "Review", publishing: "Publish" };
 const INITIAL: readonly ComponentValidationStep[] = [
@@ -87,7 +88,7 @@ export function ComponentUploadFlow({ onPublished }: { readonly onPublished?: (n
       if (result.type === "binary") { setPendingBinary(file); return; }
       setError(result.message);
     } catch (cause: unknown) {
-      const message = cause instanceof Error ? cause.message : "We could not inspect the file structure.";
+      const message = errorText(cause, "We could not inspect the file structure.");
       setPhase("idle"); setError(message); setInspection({ type: "unsupported-file", stage: "source", message, recovery: "choose-json-or-binary" });
     }
   };
@@ -116,7 +117,7 @@ export function ComponentUploadFlow({ onPublished }: { readonly onPublished?: (n
     if (signatureRequired && !signature.trim()) { setError("This gateway only installs signed packages. Attach the detached signature for the package JSON above."); return; }
     const running = serverRunning(checks); setPhase("publishing"); setError(null); setChecks(running);
     try { const saved = await api.publishComponent({ package: finalJSON, signature, rollout }); setPhase("success"); setChecks(serverDone(running, saved.trust.keyId ?? "unsigned dev package", saved.rollout)); setPublished({ name: saved.name, version: saved.version, rollout: saved.rollout, keyId: saved.trust.keyId ?? null }); toast.success(`Published ${saved.name} ${saved.version}`); await onPublished?.(saved.name, saved.secret); }
-    catch (cause: unknown) { const message = cause instanceof ApiError ? cause.message : cause instanceof Error ? cause.message : "Publish failed."; setPhase("idle"); setStep("publish"); setError(message); setChecks(withCheck(running, failingCheck(message), "failed", message)); }
+    catch (cause: unknown) { const message = errorText(cause, "Publish failed"); setPhase("idle"); setStep("publish"); setError(message); setChecks(withCheck(running, failingCheck(message), "failed", message)); }
   };
   const reset = () => { setChoice(null); setReview(null); setInspection(null); setPendingBinary(null); setStep("source"); setPhase("idle"); setSignature(""); setRequirements([]); setUploads({}); setHasArtifacts(false); setError(null); setChecks(INITIAL); setPublished(null); };
 

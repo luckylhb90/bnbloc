@@ -46,7 +46,7 @@ async function existingSubscription(): Promise<PushSubscription | null> {
 async function saveSubscription(sub: PushSubscription): Promise<void> {
   const body = subscriptionBody(sub.toJSON());
   if (!body) throw new Error("This browser returned an unusable push subscription");
-  await req<void>("/v1/my/push-subscriptions", { method: "POST", body: JSON.stringify(body), raw: true });
+  await req<void>("/v1/my/push-subscriptions", { method: "POST", body: JSON.stringify(body), as: "none" });
 }
 
 export interface BrowserPushStatus {
@@ -102,7 +102,7 @@ export async function disableBrowserPush(): Promise<PushToggleState> {
     await req<void>("/v1/my/push-subscriptions", {
       method: "DELETE",
       body: JSON.stringify({ endpoint: sub.endpoint }),
-      raw: true,
+      as: "none",
     });
     await sub.unsubscribe().catch(() => {});
   }

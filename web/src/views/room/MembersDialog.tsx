@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Select } from "@/ui/Select";
 import { UsersIcon, RobotIcon, XIcon, SignOutIcon, ShieldCheckIcon } from "@phosphor-icons/react";
-import { api, ApiError, type Member } from "@/lib/api";
+import { api, type Member } from "@/lib/api";
 import { useToast } from "@/ui/Toast";
 import { Badge, Skeleton } from "@/ui/Card";
 import { dedupeMembers, sameUser } from "@/lib/format";
-import { canInvite } from "@/lib/roomRoles";
+import { canInvite, isOwner } from "@/lib/roomRoles";
 import { ConfirmDialog } from "@/ui/Dialog";
 import { useModalLayer } from "@/ui/useModalLayer";
 import { agentHandle, type RoomAgent } from "@/views/composer/types";
@@ -14,6 +14,7 @@ import type { RoomPlatformAgents } from "@/views/room/useRoomPlatformAgents";
 import { agentDisplayLabel } from "@/lib/displayNames";
 import { useDisplayNames } from "@/lib/useDisplayName";
 import { UserName } from "@/views/UserName";
+import { errorText } from "@/lib/errors";
 
 export function MembersDialog({
   roomId,
@@ -63,7 +64,7 @@ export function MembersDialog({
       setMembers((cur) => (cur ? cur.filter((m) => !sameUser(m.userId, userId)) : cur));
       toast.success(`Removed ${nameOf(userId)}`);
     } catch (e) {
-      toast.error(e instanceof ApiError ? `Remove failed: ${e.message}` : "Remove failed");
+      toast.error(errorText(e, "Remove failed"));
     }
   };
   const changeRole = async (userId: string, role: "admin" | "member" | "visitor") => {
@@ -74,7 +75,7 @@ export function MembersDialog({
         cur ? cur.map((m) => (sameUser(m.userId, userId) ? { ...m, role } : m)) : cur,
       );
     } catch (e) {
-      toast.error(e instanceof ApiError ? `Role change failed: ${e.message}` : "Role change failed");
+      toast.error(errorText(e, "Role change failed"));
     } finally {
       setSavingRole((cur) => {
         const next = { ...cur };
@@ -159,11 +160,11 @@ export function MembersDialog({
                     />
                   </div>
                   <UserName id={m.userId} you={sameUser(m.userId, subject)} className="flex-1 text-sm" />
-                  {m.role === "owner" ? (
+                  {isOwner(m) ? (
                     <Badge tone="accent">owner</Badge>
                   ) : canRemove && !sameUser(m.userId, subject) ? (
                     <Select
-                      value={m.role === "admin" || m.role === "visitor" ? m.role : "member"}
+                      value={m.role}
                       disabled={!!savingRole[m.userId]}
                       onChange={(e) =>
                         changeRole(
@@ -182,7 +183,7 @@ export function MembersDialog({
                   ) : (
                     m.role && m.role !== "member" && <Badge tone="neutral">{m.role}</Badge>
                   )}
-                  {canRemove && m.role !== "owner" && !sameUser(m.userId, subject) && (
+                  {canRemove && !isOwner(m) && !sameUser(m.userId, subject) && (
                     <button
                       onClick={() => setConfirmRemove(m.userId)}
                       title={`Remove ${nameOf(m.userId)}`}

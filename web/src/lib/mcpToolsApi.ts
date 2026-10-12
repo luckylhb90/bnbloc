@@ -14,7 +14,7 @@ export const mcpToolsApi = {
   connectors: () => req<McpConnectorsReply>("/v1/tenant/mcp-connectors"),
   // Store the organization's values (an empty secret keeps the stored one).
   saveConnector: (name: string, values: Record<string, string>) =>
-    req<void>(`/v1/tenant/mcp-connectors/${enc(name)}`, { method: "PUT", body: JSON.stringify({ values }), raw: true }),
+    req<void>(`/v1/tenant/mcp-connectors/${enc(name)}`, { method: "PUT", body: JSON.stringify({ values }), as: "none" }),
   clearConnector: (name: string) =>
-    req<void>(`/v1/tenant/mcp-connectors/${enc(name)}`, { method: "DELETE", raw: true }),
+    req<void>(`/v1/tenant/mcp-connectors/${enc(name)}`, { method: "DELETE", as: "none" }),
 };

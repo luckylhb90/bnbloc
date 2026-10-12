@@ -5,6 +5,7 @@ import { openExternal } from "@/lib/desktop";
 import { isPhoneBrowser } from "@/lib/desktopHandoff";
 import { afterReleaseDownload } from "@/lib/macInstall";
 import { useDesktopDownload } from "@/lib/useDesktopDownload";
+import { errorText } from "./errors.ts";
 
 // How often a browser re-checks whether the member's desktop bridge is online,
 // and the re-checks after "Open desktop app" (the app needs a few seconds to
@@ -90,7 +91,7 @@ export function DesktopPresenceProvider({ subject, children }: { readonly subjec
       return !!app?.online;
     } catch (failure) {
       if (mine !== generation.current) return undefined;
-      setError(failure instanceof Error ? failure.message : "Could not check the desktop connection");
+      setError(errorText(failure, "Could not check the desktop connection"));
       return undefined;
     } finally {
       if (mine === generation.current) setChecking(false);
@@ -154,7 +155,7 @@ export function DesktopPresenceProvider({ subject, children }: { readonly subjec
       await api.downloadReleaseFile(file);
       afterReleaseDownload(file);
     } catch (failure) {
-      setError(failure instanceof Error ? failure.message : "Could not download the desktop app");
+      setError(errorText(failure, "Could not download the desktop app"));
     } finally {
       setDownloading(false);
     }

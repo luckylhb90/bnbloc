@@ -4,8 +4,9 @@ import { desktop, type DesktopUpdateCheck, type DesktopUpdateProgress } from "@/
 import { cn } from "@/lib/cn";
 import { useToast } from "@/ui/Toast";
 import { DesktopUpdateDialog } from "@/views/DesktopUpdateDialog";
-import { enterUpdateWork, errorMessage, progressLabel } from "@/views/desktopUpdateState";
+import { enterUpdateWork, progressLabel } from "@/views/desktopUpdateState";
 import { updateCheckIntervalMs } from "@/views/updateConfigFields";
+import { errorText } from "@/lib/errors";
 
 export interface DesktopUpdateController {
   // Rendered by the sidebar footer: a quiet entry the user clicks when ready.
@@ -38,7 +39,7 @@ export function useDesktopUpdate(signedIn: boolean): DesktopUpdateController {
         setDialogOpen(false);
       }
     } catch (e: unknown) {
-      toast.error(errorMessage(e, "Install failed"));
+      toast.error(errorText(e, "Install failed"));
     } finally {
       release();
       setInstalling(false);
@@ -77,7 +78,7 @@ export function useDesktopUpdate(signedIn: boolean): DesktopUpdateController {
       } catch (e: unknown) {
         // Background work never interrupts (unobtrusive-update PRD): a failed
         // automatic check is logged and retried on the next interval.
-        console.warn("bnbloc: automatic update check failed:", errorMessage(e, "unknown error"));
+        console.warn("bnbloc: automatic update check failed:", errorText(e, "unknown error"));
       } finally {
         release();
         inFlight.current = false;
@@ -94,7 +95,7 @@ export function useDesktopUpdate(signedIn: boolean): DesktopUpdateController {
         // into an immediate re-fire and a tight check loop.
         timer = window.setInterval(() => void run(policy.autoInstall), updateCheckIntervalMs(policy.checkIntervalHours));
       } catch (e: unknown) {
-        console.warn("bnbloc: could not load the update policy:", errorMessage(e, "unknown error"));
+        console.warn("bnbloc: could not load the update policy:", errorText(e, "unknown error"));
       }
     };
 

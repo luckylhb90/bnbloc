@@ -6,6 +6,7 @@ import { Field, Input, Textarea } from "@/ui/Input";
 import { useToast } from "@/ui/Toast";
 import { useDisplayName } from "@/lib/useDisplayName";
 import { formatAgentHandle } from "@/lib/displayNames";
+import { errorText } from "@/lib/errors";
 
 const MAX_NOTE = 500;
 
@@ -49,7 +50,7 @@ export function QuotaRequestDialog({
         onClose();
         return;
       }
-      toast.error(e instanceof ApiError ? e.message : "Could not send the request");
+      toast.error(errorText(e, "Could not send the request"));
     } finally {
       setBusy(false);
     }

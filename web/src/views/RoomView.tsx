@@ -2,7 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { onboardingEvents } from "@/lib/onboardingEvents";
 import { feedSeqRange } from "@/lib/feedSeqRange";
 import { XIcon } from "@phosphor-icons/react";
-import { api, ApiError, type AgentJob } from "@/lib/api";
+import { api, type AgentJob } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { useCoarsePointer, useStage } from "@/lib/capability";
 import { useDock } from "@/lib/useDock";
@@ -36,6 +36,7 @@ import { useDesktopHandoff } from "@/views/room/useDesktopHandoff";
 import { HandoffBanner } from "@/views/room/HandoffBanner";
 import { useHandoffExport } from "@/views/room/useHandoffExport";
 import { canInvite, mayChat } from "@/lib/roomRoles";
+import { can } from "@/lib/permissions";
 import { EventMemberJoined, EventMemberRemoved } from "@/lib/wire.gen";
 import { DesktopConnectBanner } from "@/views/DesktopConnect";
 import { useRoomData } from "@/views/room/useRoomData";
@@ -51,6 +52,7 @@ import { RunsDialog } from "@/views/room/RunsDialog";
 import { CONTENT_SAVED, contentSaves, parseContentSaved } from "@/lib/contentSavedEvents";
 import { CONTENT_USES_CHANGED, contentUsesChanged } from "@/lib/contentUsesEvents";
 import { useWorkshopSaves } from "@/views/room/useWorkshopSaves";
+import { errorText } from "@/lib/errors";
 
 type Panel = "chat" | "artifacts";
 type RoomDialog = "settings" | "members" | "borrow" | "leave" | null;
@@ -70,7 +72,7 @@ export function RoomView({
   onBack: () => void;
   onOpenRoom: (id: string) => void;
 }) {
-  const { subject, reauth } = useAuth();
+  const { subject, reauth, role: orgRole } = useAuth();
   const toast = useToast();
   // The active channel scopes the feed, the stream, sends and read cursors.
   // Null until the rail selects the room's default channel.
@@ -119,9 +121,11 @@ export function RoomView({
   // add the suggested members of an imported room.
   const me = data.me ?? null;
   const canManageRoom = !!me && canInvite(me);
-  // Visitors follow the room but may not post (D1); unknown until the member
-  // list answers, so the composer never flashes read-only.
-  const readOnly = data.me !== undefined && !(me && mayChat(me));
+  // Visitors follow the room but may not post (D1), and neither may a
+  // read-only (viewer) organization role (the gateway refuses its chat);
+  // unknown until the member list answers, so the composer never flashes
+  // read-only.
+  const readOnly = data.me !== undefined && !(me && mayChat(me) && can(orgRole, "drive_agent"));
   const handoffExport = useHandoffExport(roomId);
 
   // Layout: container stage drives the rail (inline/drawer/collapsed) and the
@@ -281,7 +285,7 @@ export function RoomView({
       toast.success("Agent session started");
       onOpenRoom(r.roomId);
     } catch (e) {
-      toast.error(e instanceof ApiError ? e.message : "Could not start the local agent");
+      toast.error(errorText(e, "Could not start the local agent"));
     } finally {
       setStarting(false);
     }

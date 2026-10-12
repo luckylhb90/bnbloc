@@ -8,7 +8,6 @@ import {
   RobotIcon,
   XIcon,
 } from "@phosphor-icons/react";
-import { ApiError } from "@/lib/api";
 import {
   isFailedRun,
   isLiveJob,
@@ -36,6 +35,7 @@ import { Segment } from "@/ui/Segment";
 import { AGENT_JOB_FAILURE_LABELS, AGENT_JOB_STATUS_LABELS } from "@/views/room/agentJobLabels";
 import { AgentHandle, UserName } from "@/views/UserName";
 import { useDisplayNames } from "@/lib/useDisplayName";
+import { errorText } from "@/lib/errors";
 
 const PAGE = 30;
 const REFRESH_MS = 30_000;
@@ -133,7 +133,7 @@ export function RunsBrowser({
         setNext(r.nextBefore);
         setError("");
       })
-      .catch((e) => setError(e instanceof ApiError && e.message ? e.message : "Could not load runs"))
+      .catch((e) => setError(errorText(e, "Could not load runs")))
       .finally(() => setLoading(false));
   }, [load, query]);
 
@@ -157,7 +157,7 @@ export function RunsBrowser({
         setRuns((cur) => mergeRunPages(cur ?? [], r.runs));
         setNext(r.nextBefore);
       })
-      .catch((e) => setError(e instanceof ApiError && e.message ? e.message : "Could not load more runs"))
+      .catch((e) => setError(errorText(e, "Could not load more runs")))
       .finally(() => setLoading(false));
   };
 

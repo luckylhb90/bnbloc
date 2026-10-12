@@ -8,6 +8,7 @@ import type { RosterAgent, SharedAgent } from "@/lib/roomAgents";
 import { useToast } from "@/ui/Toast";
 import type { RoomAgent } from "@/views/composer/types";
 import { useRoomPlatformAgents } from "@/views/room/useRoomPlatformAgents";
+import { errorText } from "@/lib/errors";
 
 // useRoomData owns the room-level server state: the room detail, its members
 // (and so the signed-in member's own membership, `me`: the one role source),
@@ -136,7 +137,7 @@ export function useRoomData({
       setJoinedGen((g) => g + 1);
       toast.success("Joined room");
     } catch (e) {
-      toast.error(e instanceof ApiError ? e.message : "Could not join room");
+      toast.error(errorText(e, "Could not join room"));
     } finally {
       setJoining(false);
     }

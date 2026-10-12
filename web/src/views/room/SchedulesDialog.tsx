@@ -41,6 +41,7 @@ import { agentRows, type PickerTarget } from "@/views/composer/agentRows";
 import type { RoomAgent } from "@/views/composer/types";
 import { useDisplayNames } from "@/lib/useDisplayName";
 import { UserName } from "@/views/UserName";
+import { errorText } from "@/lib/errors";
 
 const SELECT =
   "h-9 w-full rounded-[var(--radius)] border border-[var(--color-border)] bg-[var(--color-surface-2)] px-3 text-sm text-[var(--color-fg)] focus:outline-none focus:border-[var(--color-accent)]";
@@ -51,10 +52,6 @@ const KINDS = [
   { value: "weekly" as const, label: "Weekly" },
   { value: "cron" as const, label: "Custom" },
 ];
-
-function errorText(e: unknown, fallback: string): string {
-  return e instanceof ApiError && e.message ? e.message : fallback;
-}
 
 // SchedulesDialog is the room's scheduled prompts panel (N2): every member
 // sees the room's schedules; the creator edits, runs now, pauses/resumes and

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { PlusIcon, TrashIcon, WalletIcon } from "@phosphor-icons/react";
-import { api, ApiError } from "@/lib/api";
+import { api } from "@/lib/api";
 import { budgetsApi } from "@/lib/budgetsApi";
 import {
   buildBudgetsUpdate,
@@ -21,6 +21,7 @@ import { Switch } from "@/ui/Segment";
 import { useToast } from "@/ui/Toast";
 import { BudgetBar } from "@/views/team/BudgetBar";
 import { EmailInput, UserName } from "@/views/UserName";
+import { errorText } from "@/lib/errors";
 
 // BudgetsTab is where org admins set monthly usage budgets (R12): one for the
 // whole organization and one per member, each a token and/or cost limit with
@@ -51,7 +52,7 @@ export function BudgetsTab() {
         apply(d);
         setError("");
       })
-      .catch((e) => setError(e instanceof ApiError ? e.message : "Could not load budgets"));
+      .catch((e) => setError(errorText(e, "Could not load budgets")));
   }, [apply]);
   useEffect(load, [load]);
 
@@ -84,7 +85,7 @@ export function BudgetsTab() {
       apply(await budgetsApi.saveTenant(update));
       toast.success("Budgets saved");
     } catch (e) {
-      toast.error(e instanceof ApiError ? e.message : "Could not save budgets");
+      toast.error(errorText(e, "Could not save budgets"));
     } finally {
       setSaving(false);
     }

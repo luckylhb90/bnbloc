@@ -6,6 +6,7 @@ import { compactNumber, formatUsd } from "@/lib/format";
 import { Card, Skeleton } from "@/ui/Card";
 import { ErrorBox } from "@/ui/ErrorBox";
 import { BudgetBar } from "@/views/team/BudgetBar";
+import { errorText } from "@/lib/errors";
 
 // MyBudget shows the member's monthly usage budget (set by an org admin) and
 // how much of it their agents used this month. Runs other members borrow on
@@ -22,7 +23,7 @@ export function MyBudget() {
       .catch((e) => {
         // A deployment without budgets answers 503: nothing to show.
         if (e instanceof ApiError && e.status === 503) setUnavailable(true);
-        else setError(e instanceof Error ? e.message : "Could not load your usage budget");
+        else setError(errorText(e, "Could not load your usage budget"));
       });
   }, []);
 

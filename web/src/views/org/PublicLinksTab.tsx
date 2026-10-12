@@ -6,6 +6,7 @@ import { ConfirmDialog } from "@/ui/Dialog";
 import { ErrorBox } from "@/ui/ErrorBox";
 import { useToast } from "@/ui/Toast";
 import { UserName } from "@/views/UserName";
+import { errorText } from "@/lib/errors";
 
 // Org-admin: every active public share link of the tenant — room, artifact,
 // creator, expiry, views — with revoke. Switching public links off for the
@@ -22,7 +23,7 @@ export function PublicLinksTab() {
     try {
       setShares((await sharesApi.tenantShares()).shares ?? []);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "failed to load public links");
+      setError(errorText(e, "failed to load public links"));
     }
   }, []);
 
@@ -36,7 +37,7 @@ export function PublicLinksTab() {
       toast.success("Link revoked");
       await load();
     } catch (e) {
-      toast.error(e instanceof Error && e.message ? e.message : "Could not revoke the link");
+      toast.error(errorText(e, "Could not revoke the link"));
     }
   };
 

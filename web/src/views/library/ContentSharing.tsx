@@ -3,7 +3,6 @@ import { ArrowsClockwiseIcon, BuildingsIcon, ShareNetworkIcon } from "@phosphor-
 import { api, type RoomSummary } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { contentLabel, isBuiltin, type ContentComponent } from "@/lib/contentComponents";
-import { apiErrorText } from "@/lib/contentComponentsApi";
 import {
   canShare,
   hasPendingRequest,
@@ -25,6 +24,7 @@ import { Segment } from "@/ui/Segment";
 import { Select } from "@/ui/Select";
 import { useToast } from "@/ui/Toast";
 import { UserName } from "@/views/UserName";
+import { errorText } from "@/lib/errors";
 
 // Sharing and publishing in the Library (docs/prd/2026-10-12-experts-and-
 // teams.md, step 4): an author shares a copy of a version with colleagues
@@ -65,7 +65,7 @@ export function SharingStatus({ component: c, onChanged }: { readonly component:
         toast.success(`${contentLabel(c)} is now version ${c.sourceLatestVersion}`);
         onChanged();
       } catch (e) {
-        toast.error(apiErrorText(e, "Could not update it"));
+        toast.error(errorText(e, "Could not update it"));
       } finally {
         setBusy(false);
       }
@@ -184,7 +184,7 @@ export function ShareDialog({
       else toast.success(shareSummary(reply));
       onClose();
     } catch (e) {
-      toast.error(apiErrorText(e, "Could not share it"));
+      toast.error(errorText(e, "Could not share it"));
     } finally {
       setBusy(false);
     }
@@ -198,7 +198,7 @@ export function ShareDialog({
       setRoomShares((cur) => cur.filter((r) => r.roomId !== roomId));
       toast.success(`People who join ${roomName(roomId)} no longer get a copy. Copies already given stay.`);
     } catch (e) {
-      toast.error(apiErrorText(e, "Could not stop sharing with the room"));
+      toast.error(errorText(e, "Could not stop sharing with the room"));
     }
   };
 
@@ -320,7 +320,7 @@ export function PublishDialog({
       onChanged();
       onClose();
     } catch (e) {
-      toast.error(apiErrorText(e, scope === "org" ? "Could not ask to publish it" : "Could not take it back"));
+      toast.error(errorText(e, scope === "org" ? "Could not ask to publish it" : "Could not take it back"));
     } finally {
       setBusy(false);
     }

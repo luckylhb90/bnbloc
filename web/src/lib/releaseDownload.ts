@@ -1,6 +1,7 @@
 import { isGatewayArtifactUrl } from "./desktopHandoff.ts";
 import { saveBlob } from "./saveBlob.ts";
-import { authedFetch } from "./session.ts";
+import { ApiError } from "./errors.ts";
+import { authedFetch, errorDetail } from "./session.ts";
 
 // downloadReleaseFile saves a release-hub file. A file hosted on this
 // gateway's artifact store needs the session bearer, so it is fetched through
@@ -18,7 +19,7 @@ export async function downloadReleaseFile(url: string, name: string, gatewayUrl:
   }
 
   const response = await authedFetch(url);
-  if (!response.ok) throw new Error(`Download failed (${response.status})`);
+  if (!response.ok) throw new ApiError(response.status, await errorDetail(response));
 
   saveBlob(await response.blob(), name);
 }

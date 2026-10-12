@@ -9,6 +9,7 @@ import { ErrorBox } from "@/ui/ErrorBox";
 import { Field, Input, Textarea } from "@/ui/Input";
 import { useToast } from "@/ui/Toast";
 import { completeUpdateConfig, describeUpdateDelta, updateCandidateForArchive, type PlatformChangeKind } from "@/views/updateConfigFields";
+import { errorText } from "@/lib/errors";
 
 const STEPS = ["Signed files", "Release info", "Review", "Result"] as const;
 // The local publish flow manages this computer's Apple Silicon updater.
@@ -90,7 +91,7 @@ export function DesktopPublishWizard({
       const signature = signatureFile ? await signatureFile.text() : null;
       setStep(nextDesktopPublishStep({ step, archive: archiveFile, signature, version, gatewayReady: true }));
     } catch (failure) {
-      setError(failure instanceof Error ? failure.message : "Check the selected updater archive and signature.");
+      setError(errorText(failure, "Check the selected updater archive and signature."));
     }
   };
 
@@ -126,7 +127,7 @@ export function DesktopPublishWizard({
       setStep(3);
       toast.success(`Desktop update ${published.updateConfig.release.version} published`);
     } catch (failure) {
-      const detail = failure instanceof Error ? failure.message : "Desktop release publishing failed";
+      const detail = errorText(failure, "Desktop release publishing failed");
       setError(detail);
       if (failure instanceof Error && "hubSaved" in failure && failure.hubSaved === true) onPartialFailure(detail);
     } finally {

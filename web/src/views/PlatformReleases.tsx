@@ -8,6 +8,7 @@ import { Field, Input, Textarea } from "@/ui/Input";
 import { Segment } from "@/ui/Segment";
 import { useToast } from "@/ui/Toast";
 import { ErrorBox } from "@/ui/ErrorBox";
+import { errorText } from "@/lib/errors";
 
 type Channel = "stable" | "internal";
 type ReleaseForm = { readonly version: string; readonly channel: Channel; readonly releaseDate: string; readonly notes: string; readonly files: readonly FileForm[] };
@@ -44,7 +45,7 @@ export function PlatformReleases() {
       setMeta(hub.project ?? EMPTY_META);
       setReleases(hub.releases ?? []);
     } catch (e: unknown) {
-      setLoadError(e instanceof Error ? e.message : "failed to load releases");
+      setLoadError(errorText(e, "failed to load releases"));
     } finally {
       setLoading(false);
     }
@@ -68,7 +69,7 @@ export function PlatformReleases() {
       setMeta(await api.putReleaseMeta(meta));
       toast.success("Release intro saved");
     } catch (e: unknown) {
-      toast.error(e instanceof Error ? e.message : "failed to save release intro");
+      toast.error(errorText(e, "failed to save release intro"));
     } finally {
       setSavingMeta(false);
     }
@@ -90,7 +91,7 @@ export function PlatformReleases() {
       setEditingVersion(null);
       await load();
     } catch (e: unknown) {
-      const message = e instanceof ApiError && e.status === 400 ? e.message : e instanceof Error ? e.message : "failed to save release";
+      const message = e instanceof ApiError && e.status === 400 ? e.message : errorText(e, "failed to save release");
       setFormError(message);
       toast.error(message);
     } finally {
@@ -106,7 +107,7 @@ export function PlatformReleases() {
       toast.success(`Release ${version} deleted`);
       await load();
     } catch (e: unknown) {
-      setLoadError(e instanceof Error ? e.message : "failed to delete release");
+      setLoadError(errorText(e, "failed to delete release"));
     } finally {
       setDeletingVersion(null);
       setConfirmVersion(null);

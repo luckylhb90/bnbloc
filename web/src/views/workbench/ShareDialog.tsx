@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { Select } from "@/ui/Select";
 import { CopyIcon, LinkIcon } from "@phosphor-icons/react";
-import { ApiError } from "@/lib/api";
 import { cn } from "@/lib/cn";
 import { appLinkBase } from "@/lib/config";
 import { relativeTime } from "@/lib/format";
@@ -24,6 +23,7 @@ import { useToast } from "@/ui/Toast";
 import { useCopy } from "@/ui/useCopy";
 import { UserName } from "@/views/UserName";
 import { displayNameOf } from "@/lib/useDisplayName";
+import { errorText } from "@/lib/errors";
 
 // ShareDialog creates and manages public links to one deliverable: pick a
 // version ("this version" or "always the latest") and a lifetime, create the
@@ -87,7 +87,7 @@ export function ShareDialog({
       void copyLink(url);
       void reload();
     } catch (e) {
-      toast.error(e instanceof ApiError && e.message ? e.message : "Could not create the link");
+      toast.error(errorText(e, "Could not create the link"));
     } finally {
       setBusy(false);
     }
@@ -99,7 +99,7 @@ export function ShareDialog({
       toast.success("Link revoked");
       void reload();
     } catch (e) {
-      toast.error(e instanceof ApiError && e.message ? e.message : "Could not revoke the link");
+      toast.error(errorText(e, "Could not revoke the link"));
     }
   };
 

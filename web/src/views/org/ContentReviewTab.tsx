@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { CheckIcon, FileCodeIcon, XIcon } from "@phosphor-icons/react";
 import { contentLabel, permissionLabel, type ContentComponent, type ContentPublishRequest } from "@/lib/contentComponents";
-import { apiErrorText } from "@/lib/contentComponentsApi";
 import { fileChangeLabel, requestTitle, type ContentAdminComponent, type ContentReview } from "@/lib/contentSharing";
 import { contentSharingApi } from "@/lib/contentSharingApi";
 import { relativeTime } from "@/lib/format";
@@ -16,6 +15,7 @@ import { PermissionBadges } from "@/views/library/ContentViewDialog";
 import { TeamRoster } from "@/views/library/ContentFormExtras";
 import { UserName } from "@/views/UserName";
 import { VersionDiff } from "@/views/workbench/VersionDiff";
+import { errorText } from "@/lib/errors";
 
 // Org-admin: content members asked to publish to the organization
 // (docs/prd/2026-10-12-experts-and-teams.md, step 4). Each request is
@@ -40,7 +40,7 @@ export function ContentReviewTab() {
       setRequests(r.requests ?? []);
       setPublished(p.components ?? []);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "failed to load content requests");
+      setError(errorText(e, "failed to load content requests"));
       setRequests([]);
       setPublished([]);
     }
@@ -56,7 +56,7 @@ export function ContentReviewTab() {
       toast.success(action === "unpublish" ? `${contentLabel(c)} is unpublished` : `${contentLabel(c)} is published again`);
       await load();
     } catch (e) {
-      toast.error(apiErrorText(e, "Could not change it"));
+      toast.error(errorText(e, "Could not change it"));
     }
   };
   const remove = async (c: ContentComponent) => {
@@ -65,7 +65,7 @@ export function ContentReviewTab() {
       toast.success(`${contentLabel(c)} is removed from your organization`);
       await load();
     } catch (e) {
-      toast.error(apiErrorText(e, "Could not remove it"));
+      toast.error(errorText(e, "Could not remove it"));
     }
   };
 
@@ -213,7 +213,7 @@ function ReviewDialog({
     contentSharingApi
       .review(requestId)
       .then((r) => live && setReview(r))
-      .catch((e) => live && setError(apiErrorText(e, "Could not load the request")));
+      .catch((e) => live && setError(errorText(e, "Could not load the request")));
     return () => {
       live = false;
     };
@@ -227,7 +227,7 @@ function ReviewDialog({
       toast.success(decision === "approve" ? "Approved: it is published to your organization" : "Declined: its author is told why");
       onDecided();
     } catch (e) {
-      toast.error(apiErrorText(e, decision === "approve" ? "Could not approve it" : "Could not decline it"));
+      toast.error(errorText(e, decision === "approve" ? "Could not approve it" : "Could not decline it"));
     } finally {
       setBusy(false);
     }

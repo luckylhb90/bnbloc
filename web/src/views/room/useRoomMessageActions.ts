@@ -9,6 +9,7 @@ import { ackSent, markStatus, outgoingMessage } from "@/views/room/feedModel";
 import { type ChatRecipient, type FeedItem, type OutgoingMessage, nextFeedId } from "@/views/room/types";
 import { displayNameOf } from "@/lib/useDisplayName";
 import type { ChatExpert, ExpertMarker } from "@/lib/contentComponents";
+import { errorText, statusText } from "@/lib/errors";
 
 export interface SendOptions {
   readonly peopleOnly: boolean;
@@ -81,7 +82,7 @@ export function useRoomMessageActions({
         toast.error(`${displayNameOf(recipient.ownerId)} has not authorized borrowing their ${recipient.provider} here`);
         return false;
       } catch (e) {
-        toast.error(e instanceof ApiError ? `Borrow check failed: ${e.message}` : "Borrow check failed");
+        toast.error(errorText(e, "Borrow check failed"));
         return false;
       }
     },
@@ -110,7 +111,7 @@ export function useRoomMessageActions({
           onStaleChannel();
           return "rejected";
         }
-        if (isPlatformOffline(status, e instanceof Error ? e.message : "")) {
+        if (isPlatformOffline(status, errorText(e, ""))) {
           toast.error(PLATFORM_OFFLINE_MESSAGE);
           onPlatformOffline?.();
           return "rejected";
@@ -120,12 +121,12 @@ export function useRoomMessageActions({
           return "rejected";
         }
         if (status === 400) {
-          toast.error(e instanceof ApiError ? `Message rejected: ${e.message}` : "Message rejected");
+          toast.error(errorText(e, "Message rejected"));
           return "rejected";
         }
         // Explain the rate limit so the user does not just retry into it;
         // other failures keep the retry affordance on the row.
-        if (status === 429) toast.error("You're sending too fast — wait a moment");
+        if (status === 429) toast.error(statusText(429));
         return "failed";
       }
     },
@@ -201,7 +202,7 @@ export function useRoomMessageActions({
       try {
         await api.deleteMessage(roomId, seq);
       } catch (e) {
-        toast.error(e instanceof ApiError ? `Delete failed: ${e.message}` : "Delete failed");
+        toast.error(errorText(e, "Delete failed"));
         setFeed((f) => {
           if (f.some((m) => m.id === item.id)) return f;
           const next = [...f];
@@ -228,7 +229,7 @@ export function useRoomMessageActions({
       try {
         await api.editMessage(roomId, seq, next);
       } catch (e) {
-        toast.error(e instanceof ApiError ? `Edit failed: ${e.message}` : "Edit failed");
+        toast.error(errorText(e, "Edit failed"));
         setFeed((f) => f.map((m) => (m.id === item.id ? { ...m, text: prevText, editedAtMs: prevEdited } : m)));
       }
     },

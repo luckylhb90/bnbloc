@@ -7,6 +7,7 @@
 import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import type { PlatformTenant } from "./apiModels.ts";
 import { gatewayBase } from "./config.ts";
+import { statusText } from "./errors.ts";
 
 let token: string | null = null;
 
@@ -186,13 +187,6 @@ export async function errorDetail(res: Response): Promise<string> {
   } catch {
     // not the error body
   }
-  return statusMessage(res.status);
+  return statusText(res.status);
 }
 
-// statusMessage is the fallback text of a failed response with no usable body.
-export function statusMessage(status: number): string {
-  if (status === 502 || status === 503 || status === 504) {
-    return `The server is temporarily unavailable (${status}). Try again in a moment.`;
-  }
-  return `Request failed (${status})`;
-}

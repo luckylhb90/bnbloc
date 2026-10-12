@@ -4,6 +4,7 @@ import { saveBlob } from "./saveBlob.ts";
 import { tapOnboarding } from "./onboardingEvents.ts";
 import { splitAgentHosts } from "./platformAgents.ts";
 import { apiUrl } from "./config";
+import { ApiError } from "./errors.ts";
 import {
   MaxUnreadRooms,
   type AgentJobsReply,
@@ -100,17 +101,41 @@ export type {
 export type * from "./apiModels";
 export type * from "./teamModels";
 
-// req is exported for feature API modules (e.g. notificationsApi.ts) that keep
-// their endpoints beside their own types instead of growing this file.
-export async function req<T>(path: string, opts: RequestInit & { raw?: boolean } = {}): Promise<T> {
-  const { raw, ...init } = opts;
+// ReqAs is how req reads a successful answer: JSON (the default), nothing,
+// text, a Blob, or the Response itself (streams, headers).
+export type ReqAs = "json" | "none" | "text" | "blob" | "response";
+
+// req is the one authenticated request of the client (feature API modules
+// keep their endpoints beside their own types and call it too). A failure is
+// an ApiError carrying the server's message. A string body is JSON unless a
+// Content-Type says otherwise; a FormData or Blob body keeps the type the
+// browser or the caller sets.
+export async function req<T>(path: string, opts: RequestInit & { as?: ReqAs } = {}): Promise<T> {
+  const { as = "json", ...init } = opts;
   const headers = new Headers(init.headers);
-  if (init.body) headers.set("Content-Type", "application/json");
+  if (typeof init.body === "string" && !headers.has("Content-Type")) headers.set("Content-Type", "application/json");
   const res = await authedFetch(apiUrl(path), { ...init, headers });
   if (!res.ok) throw new ApiError(res.status, await errorDetail(res));
-  if (raw) return undefined as T;
+  switch (as) {
+    case "none":
+      return undefined as T;
+    case "response":
+      return res as T;
+    case "blob":
+      return (await res.blob()) as T;
+    case "text":
+      return (await res.text()) as T;
+  }
   const text = await res.text();
   return (text ? JSON.parse(text) : undefined) as T;
+}
+
+// downloadCsv saves a CSV export under fileName. truncated is the row cap
+// when the server cut the export short (X-Bnbloc-Truncated), else 0.
+export async function downloadCsv(path: string, fileName: string): Promise<{ truncated: number }> {
+  const res = await req<Response>(path, { as: "response" });
+  saveBlob(await res.blob(), fileName);
+  return { truncated: Number(res.headers.get("X-Bnbloc-Truncated") ?? 0) };
 }
 
 function artifactListQuery(filter: ArtifactListFilter): string {
@@ -130,9 +155,7 @@ function artifactVersionPath(roomId: string, artifactId: string, version: number
 }
 
 async function fetchArtifactBlob(path: string): Promise<Blob> {
-  const res = await authedFetch(apiUrl(path));
-  if (!res.ok) throw new ApiError(res.status, await errorDetail(res));
-  return res.blob();
+  return req<Blob>(path, { as: "blob" });
 }
 
 // A component is addressed by name AND kind: a core and a plugin may share a
@@ -142,14 +165,7 @@ function componentPath(base: string, c: ComponentRef, suffix = ""): string {
   return `${base}/${encodeURIComponent(c.name)}${suffix}?kind=${encodeURIComponent(c.kind)}`;
 }
 
-export class ApiError extends Error {
-  constructor(
-    public status: number,
-    message: string,
-  ) {
-    super(message);
-  }
-}
+export { ApiError };
 
 export const api = {
   login: (idpToken: string) =>
@@ -169,7 +185,7 @@ export const api = {
     req<void>("/v1/auth/logout", {
       method: "POST",
       body: JSON.stringify({ refreshToken }),
-      raw: true,
+      as: "none",
     }),
   // Any member of multiple tenants: re-issue the session scoped to another
   // tenant they belong to. The whole session (rooms, agents, role) follows.
@@ -215,10 +231,10 @@ export const api = {
     req<void>(componentPath("/v1/platform/components", component, "/rollout"), {
       method: "PUT",
       body: JSON.stringify({ rollout }),
-      raw: true,
+      as: "none",
     }),
   uninstallPlatformComponent: (component: ComponentRef) =>
-    req<void>(componentPath("/v1/platform/components", component), { method: "DELETE", raw: true }),
+    req<void>(componentPath("/v1/platform/components", component), { method: "DELETE", as: "none" }),
   // Notifier components: a new signing secret (shown once) and a test send
   // to the calling super-admin through the notifier's default delivery.
   rotateComponentSecret: (component: ComponentRef) =>
@@ -231,12 +247,12 @@ export const api = {
   addComponentKey: (body: { readonly publicKey: string; readonly label?: string }) =>
     req<ComponentKey>("/v1/platform/component-keys", { method: "POST", body: JSON.stringify(body) }),
   removeComponentKey: (keyId: string) =>
-    req<void>(`/v1/platform/component-keys/${encodeURIComponent(keyId)}`, { method: "DELETE", raw: true }),
+    req<void>(`/v1/platform/component-keys/${encodeURIComponent(keyId)}`, { method: "DELETE", as: "none" }),
   components: () => req<{ components: MemberComponent[] }>("/v1/components"),
   installComponent: (component: ComponentRef) =>
-    req<void>(componentPath("/v1/components", component, "/install"), { method: "POST", raw: true }),
+    req<void>(componentPath("/v1/components", component, "/install"), { method: "POST", as: "none" }),
   uninstallComponent: (component: ComponentRef) =>
-    req<void>(componentPath("/v1/components", component, "/install"), { method: "DELETE", raw: true }),
+    req<void>(componentPath("/v1/components", component, "/install"), { method: "DELETE", as: "none" }),
   // Trusted publisher keys: the root of trust for the component market. A package
   // signed by a key absent from this list is refused at install.
   // Any signed-in user: the in-app release hub payload (project intro + version
@@ -259,7 +275,7 @@ export const api = {
   deleteRelease: (version: string) =>
     req<void>(`/v1/platform/app-releases/${encodeURIComponent(version)}`, {
       method: "DELETE",
-      raw: true,
+      as: "none",
     }),
   // Any user: browse joinable tenants with the caller's relation to each.
   tenantDirectory: () => req<{ tenants: DirectoryTenant[] }>("/v1/tenants/directory"),
@@ -353,7 +369,7 @@ export const api = {
       body: JSON.stringify({ status }),
     }),
   unmarkTask: (roomId: string, seq: number) =>
-    req<void>(`/v1/rooms/${encodeURIComponent(roomId)}/tasks/${seq}`, { method: "DELETE", raw: true }),
+    req<void>(`/v1/rooms/${encodeURIComponent(roomId)}/tasks/${seq}`, { method: "DELETE", as: "none" }),
   // Global search (F7) across the caller's rooms (resolved server-side).
   search: (q: string, opts: { before?: number; limit?: number } = {}) => {
     const p = new URLSearchParams({ q });
@@ -365,8 +381,10 @@ export const api = {
     req<RoomsReply>(
       `/v1/users/${encodeURIComponent(subject)}/rooms?detail=1`,
     ),
-  searchRooms: (q: string) =>
-    req<PlazaReply>(`/v1/rooms?q=${encodeURIComponent(q)}`),
+  // One plaza page: rooms matching q from offset (the server pages; total
+  // says how many match).
+  searchRooms: (q: string, offset = 0) =>
+    req<PlazaReply>(`/v1/rooms?q=${encodeURIComponent(q)}${offset > 0 ? `&offset=${offset}` : ""}`),
   // A member gets the room's detail; a non-member of a shared room its
   // preview (a join card); a private room is 404 to a non-member.
   getRoom: (id: string) => req<RoomDetail | RoomPreview>(`/v1/rooms/${encodeURIComponent(id)}`),
@@ -392,17 +410,17 @@ export const api = {
   deleteRoom: (id: string) =>
     req<void>(`/v1/rooms/${encodeURIComponent(id)}`, {
       method: "DELETE",
-      raw: true,
+      as: "none",
     }),
   joinRoom: (id: string) =>
     req<void>(`/v1/rooms/${encodeURIComponent(id)}/join`, {
       method: "POST",
-      raw: true,
+      as: "none",
     }),
   leaveRoom: (id: string) =>
     req<void>(`/v1/rooms/${encodeURIComponent(id)}/leave`, {
       method: "POST",
-      raw: true,
+      as: "none",
     }),
   // The room's people. Agent-host memberships (a platform agent's host) are
   // split off here, the one place, so no people list ever shows them.
@@ -416,7 +434,7 @@ export const api = {
   removeMember: (id: string, userId: string) =>
     req<void>(
       `/v1/rooms/${encodeURIComponent(id)}/members/${encodeURIComponent(userId)}`,
-      { method: "DELETE", raw: true },
+      { method: "DELETE", as: "none" },
     ),
   // Per-room unread counts for the caller; pass the known room ids. The
   // gateway bounds one request's room list, so larger sets are fetched in
@@ -436,14 +454,14 @@ export const api = {
     req<void>(`/v1/rooms/${encodeURIComponent(id)}/read`, {
       method: "POST",
       body: JSON.stringify({ seq, ...(channelId ? { channelId } : {}) }),
-      raw: true,
+      as: "none",
     }),
   // Emit a transient typing hint to the room (ephemeral; not persisted).
   roomTyping: (id: string, channelId?: string) =>
     req<void>(`/v1/rooms/${encodeURIComponent(id)}/typing`, {
       method: "POST",
       body: JSON.stringify({ ...(channelId ? { channelId } : {}) }),
-      raw: true,
+      as: "none",
     }),
   // Paginated room-feed history older than `before` (a sequence cursor; omit for
   // the latest page), ascending by sequence. Beyond the live replay buffer.
@@ -535,12 +553,10 @@ export const api = {
     if (body.summary) form.append("summary", body.summary);
     if (body.sourceJobId) form.append("sourceJobId", body.sourceJobId);
     if (body.sourceSeq) form.append("sourceSeq", String(body.sourceSeq));
-    const res = await authedFetch(
-      apiUrl(`/v1/rooms/${encodeURIComponent(roomId)}/artifacts/${encodeURIComponent(artifactId)}/versions`),
-      { method: "POST", body: form },
-    );
-    if (!res.ok) throw new ApiError(res.status, await errorDetail(res));
-    return (await res.json()) as ArtifactReply;
+    return req<ArtifactReply>(`/v1/rooms/${encodeURIComponent(roomId)}/artifacts/${encodeURIComponent(artifactId)}/versions`, {
+      method: "POST",
+      body: form,
+    });
   },
 
   // Room channels: list (default first), create (any member), rename
@@ -574,7 +590,7 @@ export const api = {
     req<void>(`/v1/rooms/${encodeURIComponent(id)}/transfer`, {
       method: "POST",
       body: JSON.stringify({ userId }),
-      raw: true,
+      as: "none",
     }),
   createInvite: (id: string, body: { role?: string; capacity?: number; expiresAtMs?: number }) =>
     req<{ code: string }>(`/v1/rooms/${encodeURIComponent(id)}/invites`, {
@@ -584,20 +600,20 @@ export const api = {
   redeemInvite: (code: string) =>
     req<{ roomId: string }>(`/v1/invites/${encodeURIComponent(code)}/redeem`, {
       method: "POST",
-      raw: true,
+      as: "none",
     }),
   // Delete a room message you authored (soft delete; broadcast to the room).
   deleteMessage: (id: string, seq: number) =>
     req<void>(
       `/v1/rooms/${encodeURIComponent(id)}/messages/${seq}`,
-      { method: "DELETE", raw: true },
+      { method: "DELETE", as: "none" },
     ),
   // Edit a room message you authored (only the author, and not if deleted).
   // Broadcasts a message_edited event to the room.
   editMessage: (id: string, seq: number, text: string) =>
     req<void>(
       `/v1/rooms/${encodeURIComponent(id)}/messages/${seq}`,
-      { method: "PATCH", body: JSON.stringify({ text }), raw: true },
+      { method: "PATCH", body: JSON.stringify({ text }), as: "none" },
     ),
   // Add (or upsert the role of) a member by id (owner/admin only). Reuses the
   // members upsert endpoint, which updates role on conflict.
@@ -605,7 +621,7 @@ export const api = {
     req<void>(`/v1/rooms/${encodeURIComponent(id)}/members`, {
       method: "POST",
       body: JSON.stringify({ userId, role }),
-      raw: true,
+      as: "none",
     }).then(tapOnboarding<void>({ kind: "invite_created", roomId: id })),
   // Borrowable agents active in a room (non-revoked, non-expired), so browser
   // users without a local core can discover agents to borrow.
@@ -630,17 +646,11 @@ export const api = {
     req<{ agents: { ownerUserId: string; core?: string; provider: string; sandboxed?: boolean }[] }>(
       `/v1/rooms/${encodeURIComponent(id)}/agents`,
     ),
-  // Multipart upload: the browser sets the multipart Content-Type boundary, so
-  // this bypasses req's JSON header but shares its authenticated transport.
+  // Multipart upload (the browser sets the multipart boundary).
   uploadAttachment: async (roomId: string, file: File): Promise<ChatAttachment> => {
     const form = new FormData();
     form.append("file", file);
-    const res = await authedFetch(apiUrl(`/v1/rooms/${encodeURIComponent(roomId)}/attachments`), {
-      method: "POST",
-      body: form,
-    });
-    if (!res.ok) throw new ApiError(res.status, await errorDetail(res));
-    return (await res.json()) as ChatAttachment;
+    return req<ChatAttachment>(`/v1/rooms/${encodeURIComponent(roomId)}/attachments`, { method: "POST", body: form });
   },
   // Handoff package (owner/admin): download the room's export zip. The server
   // streams the archive, so its size is unknown up front; onProgress gets the
@@ -649,8 +659,7 @@ export const api = {
     roomId: string,
     onProgress?: (bytes: number) => void,
   ): Promise<{ blob: Blob; filename: string }> => {
-    const res = await authedFetch(apiUrl(`/v1/rooms/${encodeURIComponent(roomId)}/export`));
-    if (!res.ok) throw new ApiError(res.status, await errorDetail(res));
+    const res = await req<Response>(`/v1/rooms/${encodeURIComponent(roomId)}/export`, { as: "response" });
     const filename = downloadFilename(res.headers.get("Content-Disposition"), roomId);
     if (!res.body) return { blob: await res.blob(), filename };
     const reader = res.body.getReader();
@@ -669,9 +678,7 @@ export const api = {
   importRoomPackage: async (file: File): Promise<RoomImportResult> => {
     const form = new FormData();
     form.append("file", file);
-    const res = await authedFetch(apiUrl("/v1/rooms/import"), { method: "POST", body: form });
-    if (!res.ok) throw new ApiError(res.status, await errorDetail(res));
-    return (await res.json()) as RoomImportResult;
+    return req<RoomImportResult>("/v1/rooms/import", { method: "POST", body: form });
   },
   // A room's import provenance; 404 (ApiError) for a room that was not imported.
   roomHandoff: (roomId: string) =>
@@ -689,7 +696,7 @@ export const api = {
     req<void>(`/v1/rooms/${encodeURIComponent(id)}/members`, {
       method: "POST",
       body: JSON.stringify({ userId, role }),
-      raw: true,
+      as: "none",
     }),
   // Post a chat message. The answer carries the sequence the server assigned
   // (also for an idempotent retry of an already-stored clientMsgId), which is
@@ -766,7 +773,7 @@ export const api = {
     req<void>(`/v1/rooms/${encodeURIComponent(roomId)}/agent-prefs`, {
       method: "PUT",
       body: JSON.stringify(body),
-      raw: true,
+      as: "none",
     }),
   localAgentTargets: (localAgentUrl?: string, localAgentToken?: string) => {
     const q = new URLSearchParams();
@@ -850,9 +857,7 @@ export const api = {
   downloadBorrowUsageCsv: async (q: UsageReportQuery) => {
     const path = usageReportPath(q, new Date().getTimezoneOffset(), "csv");
     if (!path) throw new ApiError(400, "Pick a month");
-    const res = await authedFetch(apiUrl(path));
-    if (!res.ok) throw new ApiError(res.status, await errorDetail(res));
-    saveBlob(await res.blob(), `borrow-usage-${q.as}-${q.month}.csv`);
+    await downloadCsv(path, `borrow-usage-${q.as}-${q.month}.csv`);
   },
   // Borrow quota requests (F3). The requester / deciding owner is always the
   // signed-in member; only the request's owner may approve or decline.

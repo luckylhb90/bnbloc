@@ -6,6 +6,7 @@ import { Button } from "@/ui/Button";
 import { Card } from "@/ui/Card";
 import { ErrorBox } from "@/ui/ErrorBox";
 import { useToast } from "@/ui/Toast";
+import { errorText } from "@/lib/errors";
 
 // NotifierDelivery lists the organization's notifier components (installed
 // by the platform admin): an optional one can be turned on or off, and any
@@ -20,7 +21,7 @@ export function NotifierDelivery() {
     try {
       setNotifiers((await notificationsApi.notifiers()).notifiers ?? []);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "failed to load notifiers");
+      setError(errorText(e, "failed to load notifiers"));
       setNotifiers([]);
     }
   }, []);
@@ -59,7 +60,7 @@ function NotifierCard({ notifier, reload }: { notifier: MemberNotifier; reload: 
     try {
       await fn();
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Something went wrong");
+      toast.error(errorText(e, "Something went wrong"));
     } finally {
       setBusy(null);
     }

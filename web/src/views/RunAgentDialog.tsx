@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Select } from "@/ui/Select";
 import { DownloadSimpleIcon } from "@phosphor-icons/react";
-import { api, ApiError, type AgentTarget } from "@/lib/api";
+import { api, type AgentTarget } from "@/lib/api";
 import { useDesktopDownload } from "@/lib/useDesktopDownload";
 import { useLocalAgent } from "@/lib/useLocalAgent";
 import { Button } from "@/ui/Button";
@@ -10,6 +10,7 @@ import { Dialog } from "@/ui/Dialog";
 import { useToast } from "@/ui/Toast";
 import { ReleaseDownloadButton } from "@/views/ReleaseDownloadButton";
 import { PlatformAgentsHint } from "@/views/PlatformAgentsHint";
+import { errorText } from "@/lib/errors";
 
 // RunAgentDialog discovers the caller's local agent core, lists its targets, and
 // starts a session that adopts a room. Mirrors the old runLocalAgent flow with a
@@ -72,7 +73,7 @@ export function RunAgentDialog({
       onStarted(r.roomId);
     } catch (e) {
       toast.error(
-        e instanceof ApiError ? e.message : "could not start local agent",
+        errorText(e, "could not start local agent"),
       );
     } finally {
       setBusy(false);

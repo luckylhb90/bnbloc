@@ -4,6 +4,7 @@ import { mcpToolsApi } from "@/lib/mcpToolsApi";
 import { relativeTime } from "@/lib/format";
 import { ErrorBox } from "@/ui/ErrorBox";
 import { LocalSettingsCard } from "@/views/settings/LocalSettingsCard";
+import { errorText } from "@/lib/errors";
 
 // Org-admin: the organization's connectors for MCP tools with organization
 // credentials (one per tool): the values every member's runs in this
@@ -23,7 +24,7 @@ export function ToolConnectorsTab() {
       setAvailable(reply.available);
       setConnectors(reply.connectors ?? []);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "failed to load tool connectors");
+      setError(errorText(e, "failed to load tool connectors"));
       setConnectors([]);
     }
   }, []);

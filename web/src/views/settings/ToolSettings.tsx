@@ -6,6 +6,7 @@ import { Card } from "@/ui/Card";
 import { ErrorBox } from "@/ui/ErrorBox";
 import { useToast } from "@/ui/Toast";
 import { LocalSettingsCard } from "@/views/settings/LocalSettingsCard";
+import { errorText } from "@/lib/errors";
 
 // ToolSettings (Settings → Tools) holds the member's own credentials for
 // the MCP tools experts and skill packs use, and shows whether each stdio
@@ -26,7 +27,7 @@ export function ToolSettings() {
     try {
       setTools((await desktop.mcpToolSettings()) ?? []);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "failed to load tool settings");
+      setError(errorText(e, "failed to load tool settings"));
       setTools([]);
     }
   }, []);
@@ -89,7 +90,7 @@ function SignInCard({ tool, reload }: { readonly tool: McpToolSettings; readonly
       toast.success(done);
       await reload();
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Something went wrong");
+      toast.error(errorText(e, "Something went wrong"));
     } finally {
       setBusy(false);
     }

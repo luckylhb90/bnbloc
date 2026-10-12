@@ -25,6 +25,7 @@ import { Field, Input, Textarea } from "@/ui/Input";
 import { Segment } from "@/ui/Segment";
 import { useToast } from "@/ui/Toast";
 import { useDisplayNames } from "@/lib/useDisplayName";
+import { errorText } from "@/lib/errors";
 
 export const TEMPLATE_VISIBILITY = [
   { value: "private" as const, label: "Only me" },
@@ -108,9 +109,9 @@ export function TemplateEditorDialog({
       onSaved?.(saved);
       onClose();
     } catch (e) {
-      const msg = e instanceof ApiError ? e.message : "Could not save the template";
+      const msg = errorText(e, "Could not save the template");
       setErr(msg);
-      toast.error(e instanceof ApiError && e.status === 403 ? "You can only edit your own templates" : "Could not save the template");
+      toast.error(e instanceof ApiError && e.status === 403 ? "You can only edit your own templates" : errorText(e, "Could not save the template"));
     } finally {
       setBusy(false);
     }
@@ -266,7 +267,7 @@ export function InstantiateTemplateDialog({
     } catch (e) {
       if (e instanceof ApiError && e.status === 409) setErr("A room with this id already exists");
       else {
-        const msg = e instanceof ApiError ? e.message : "create failed";
+        const msg = errorText(e, "create failed");
         setErr(msg);
         toast.error(`Could not create room: ${msg}`);
       }

@@ -12,7 +12,7 @@ export const schedulesApi = {
   update: (roomId: string, id: string, patch: Partial<ScheduleInput>) =>
     req<RoomSchedule>(`${base(roomId)}/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify(patch) }),
   remove: (roomId: string, id: string) =>
-    req<void>(`${base(roomId)}/${encodeURIComponent(id)}`, { method: "DELETE", raw: true }),
+    req<void>(`${base(roomId)}/${encodeURIComponent(id)}`, { method: "DELETE", as: "none" }),
   // Posts the message now, as the creator; the planned next run is unchanged.
   runNow: (roomId: string, id: string) =>
     req<{ sequence: number }>(`${base(roomId)}/${encodeURIComponent(id)}/run`, { method: "POST" }),

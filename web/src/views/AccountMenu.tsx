@@ -15,6 +15,7 @@ import { useDisplayName } from "@/lib/useDisplayName";
 import { Menu, MenuGroup, MenuItem } from "@/ui/Menu";
 import { BuildVersion } from "@/views/BuildVersion";
 import type { View } from "@/views/Shell";
+import { can } from "@/lib/permissions";
 
 // The views reached through the account menu rather than the sidebar's top
 // nav. While one of them is open the account button shows the active state.
@@ -51,7 +52,7 @@ export function AccountMenu({
   // shown as "Signed in as" only outside privacy mode.
   const name = useDisplayName(subject);
   const privacy = usePrivacyMode();
-  const isAdmin = role === "org_admin" || role === "super_admin";
+  const isAdmin = can(role, "manage_org");
   const item = (id: View, label: string, icon: Parameters<typeof MenuItem>[0]["icon"]) => (
     <MenuItem icon={icon} current={view === id} onSelect={() => onView(id)}>
       {label}
@@ -121,7 +122,7 @@ export function AccountMenu({
         {/* Organization/Platform console: org_admin manages their own tenant,
             super_admin gets the cross-tenant variant. Members never see it and
             the gateway enforces the permission on the underlying APIs. */}
-        {isAdmin && item("org", role === "super_admin" ? "Platform" : "Organization", BuildingsIcon)}
+        {isAdmin && item("org", can(role, "manage_platform") ? "Platform" : "Organization", BuildingsIcon)}
         {item("directory", "Organizations", GlobeIcon)}
       </MenuGroup>
       <MenuGroup label="Me">

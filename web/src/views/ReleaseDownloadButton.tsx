@@ -3,6 +3,7 @@ import { DownloadSimpleIcon } from "@phosphor-icons/react";
 import { api, type ReleaseFile } from "@/lib/api";
 import { afterReleaseDownload } from "@/lib/macInstall";
 import { Button, type ButtonProps } from "@/ui/Button";
+import { errorText } from "@/lib/errors";
 
 export function ReleaseDownloadButton({
   file,
@@ -29,7 +30,7 @@ export function ReleaseDownloadButton({
       // not-yet-notarized app's first launch).
       afterReleaseDownload(file);
     } catch (failure) {
-      setError(failure instanceof Error ? failure.message : "Could not download this file");
+      setError(errorText(failure, "Could not download this file"));
     } finally {
       setDownloading(false);
     }

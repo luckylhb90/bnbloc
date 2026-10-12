@@ -8,6 +8,7 @@ import { cn } from "@/lib/cn";
 import { formatBytes } from "@/lib/format";
 import { Badge } from "@/ui/Card";
 import { Input } from "@/ui/Input";
+import { errorText } from "@/lib/errors";
 
 export type ArtifactUploadState = {
   readonly fileName?: string;
@@ -34,7 +35,7 @@ async function uploadInto(platform: string, file: File, setUploads: Dispatch<Set
     });
     setUploads((current) => ({ ...current, [platform]: { ...base, progress: 100, uploaded } }));
   } catch (caught: unknown) {
-    const error = caught instanceof Error ? caught.message : "artifact upload failed";
+    const error = errorText(caught, "artifact upload failed");
     setUploads((current) => ({ ...current, [platform]: { ...base, error } }));
   }
 }

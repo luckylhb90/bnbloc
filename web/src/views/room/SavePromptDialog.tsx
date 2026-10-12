@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useState } from "react";
-import { apiErrorText } from "@/lib/contentComponentsApi";
 import { cn } from "@/lib/cn";
 import { promptsFromMessages, titleFromText, type PromptDraft } from "@/lib/promptPacks";
 import { announcePromptPacksChanged, promptPacksApi } from "@/lib/promptPacksApi";
@@ -9,6 +8,7 @@ import { Dialog } from "@/ui/Dialog";
 import { Field, Input, Textarea } from "@/ui/Input";
 import { useToast } from "@/ui/Toast";
 import type { FeedItem } from "@/views/room/types";
+import { errorText } from "@/lib/errors";
 
 // The message a prompt is saved from.
 export interface PromptSource {
@@ -91,7 +91,7 @@ export function SavePromptDialog({
       announcePromptPacksChanged();
       onClose();
     } catch (e) {
-      toast.error(apiErrorText(e, "Could not save the prompt"));
+      toast.error(errorText(e, "Could not save the prompt"));
     } finally {
       setBusy(false);
     }

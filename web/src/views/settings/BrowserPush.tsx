@@ -4,6 +4,7 @@ import type { PushToggleState } from "@/lib/webPushModel";
 import { displayEnv, iosInstallHint } from "@/lib/pwa";
 import { Card } from "@/ui/Card";
 import { useToast } from "@/ui/Toast";
+import { errorText } from "@/lib/errors";
 
 const HINTS: Record<Exclude<PushToggleState, "hidden">, string> = {
   on: "This browser shows a notification for every event you get notified about.",
@@ -51,7 +52,7 @@ export function BrowserPush() {
       setState(next);
       if (on && next === "blocked") toast.error("Notifications are blocked for this site");
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Could not change browser notifications");
+      toast.error(errorText(e, "Could not change browser notifications"));
       void load();
     } finally {
       setBusy(false);

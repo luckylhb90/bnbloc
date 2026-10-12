@@ -3,6 +3,7 @@ import { desktop } from "@/lib/desktop";
 import type { PluginLocalSettings } from "@/lib/pluginSettings";
 import { ErrorBox } from "@/ui/ErrorBox";
 import { LocalSettingsCard } from "@/views/settings/LocalSettingsCard";
+import { errorText } from "@/lib/errors";
 
 // PersonalBots configures the member's own notification delivery: a plugin
 // (installed by the platform admin, turned on in Components when optional)
@@ -20,7 +21,7 @@ export function PersonalBots() {
     try {
       setPlugins(await desktop.pluginLocalSettings());
     } catch (e) {
-      setError(e instanceof Error ? e.message : "failed to load plugin settings");
+      setError(errorText(e, "failed to load plugin settings"));
       setPlugins([]);
     }
   }, []);

@@ -24,7 +24,7 @@ export const sharesApi = {
   list: (roomId: string, artifactId: string) => req<{ shares: ShareView[] }>(sharesPath(roomId, artifactId)),
   // Creator, room owner/admins, or an org admin.
   revoke: (roomId: string, artifactId: string, shareId: string) =>
-    req<void>(`${sharesPath(roomId, artifactId)}/${encodeURIComponent(shareId)}`, { method: "DELETE", raw: true }),
+    req<void>(`${sharesPath(roomId, artifactId)}/${encodeURIComponent(shareId)}`, { method: "DELETE", as: "none" }),
   // Org admin: every active link of the tenant.
   tenantShares: () => req<{ shares: TenantShareView[] }>("/v1/tenant/shares?active=1"),
   // A member's frame URL for one site version (ticketed, 1 h).

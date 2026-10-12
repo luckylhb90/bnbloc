@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { PlusIcon, TrashIcon } from "@phosphor-icons/react";
 import { contentLabel, type ContentComponent } from "@/lib/contentComponents";
-import { apiErrorText, contentApi } from "@/lib/contentComponentsApi";
+import { contentApi } from "@/lib/contentComponentsApi";
 import {
   emptyPromptDraft,
   emptyPromptPackForm,
@@ -19,6 +19,7 @@ import { Field, Input, Textarea } from "@/ui/Input";
 import { Switch } from "@/ui/Segment";
 import { Select } from "@/ui/Select";
 import { useToast } from "@/ui/Toast";
+import { errorText } from "@/lib/errors";
 
 // The editor target: a new pack, a new version of one of the member's packs
 // (prefilled from its latest version), or drafted prompts (from selected
@@ -119,7 +120,7 @@ export function PromptPackEditorDialog({
       setForm({ ...f, prompts: [...f.prompts, ...added] });
       setInto(d.component);
     } catch (e) {
-      if (seq === loadSeq.current) toast.error(apiErrorText(e, "Could not load the pack"));
+      if (seq === loadSeq.current) toast.error(errorText(e, "Could not load the pack"));
     } finally {
       if (seq === loadSeq.current) setLoading(false);
     }
@@ -173,7 +174,7 @@ export function PromptPackEditorDialog({
       onSaved?.(d.component);
       onClose();
     } catch (e) {
-      toast.error(apiErrorText(e, "Could not save the prompt pack"));
+      toast.error(errorText(e, "Could not save the prompt pack"));
     } finally {
       setBusy(false);
     }

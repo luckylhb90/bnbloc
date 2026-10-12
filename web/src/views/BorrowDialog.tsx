@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Select } from "@/ui/Select";
 import { HandshakeIcon, ShieldCheckIcon, PlusIcon } from "@phosphor-icons/react";
-import { api, ApiError } from "@/lib/api";
+import { api } from "@/lib/api";
 import { borrowKey, borrowTarget } from "@/lib/roomAgents";
 import { Button } from "@/ui/Button";
 import { Input, Field } from "@/ui/Input";
@@ -10,6 +10,7 @@ import { Badge } from "@/ui/Card";
 import { useToast } from "@/ui/Toast";
 import { QuotaRequestsPanel } from "@/views/team/QuotaRequestsPanel";
 import { UserNames } from "@/views/UserName";
+import { errorText } from "@/lib/errors";
 
 // Authorization TTL options offered to the owner (label -> ms).
 const TTL_OPTIONS: { label: string; ms: number }[] = [
@@ -158,7 +159,7 @@ export function BorrowAuthDialog({
       toast.success(`Authorized borrowing of your ${key} in ${roomName}`);
     } catch (e) {
       toast.error(
-        e instanceof ApiError ? `Authorize failed: ${e.message}` : "Authorize failed",
+        errorText(e, "Authorize failed"),
       );
     } finally {
       setBusy("");
@@ -178,7 +179,7 @@ export function BorrowAuthDialog({
       toast.success(`Revoked borrowing of your ${key} in ${roomName}`);
     } catch (e) {
       toast.error(
-        e instanceof ApiError ? `Revoke failed: ${e.message}` : "Revoke failed",
+        errorText(e, "Revoke failed"),
       );
     } finally {
       setBusy("");

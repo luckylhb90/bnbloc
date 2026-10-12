@@ -4,6 +4,7 @@ import { Button } from "@/ui/Button";
 import { Card } from "@/ui/Card";
 import { Field, Input } from "@/ui/Input";
 import { useToast } from "@/ui/Toast";
+import { errorText } from "@/lib/errors";
 
 // LocalSettingsCard is the one form for a component's credential fields: a
 // plugin's local settings (Settings → Notifications), an MCP tool's member
@@ -46,7 +47,7 @@ export function LocalSettingsCard({
     try {
       await fn();
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Something went wrong");
+      toast.error(errorText(e, "Something went wrong"));
     } finally {
       setBusy(null);
     }

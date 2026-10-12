@@ -29,6 +29,8 @@ import { ContentReviewTab } from "@/views/org/ContentReviewTab";
 import { PlatformContentTab } from "@/views/org/PlatformContentTab";
 import { invalidateTenantPolicy } from "@/lib/tenantPolicy";
 import { UserWithEmail } from "@/views/UserName";
+import { can } from "@/lib/permissions";
+import { errorText } from "@/lib/errors";
 
 type Tab =
   | "overview"
@@ -73,7 +75,7 @@ const TABS: { id: Tab; label: string; superOnly?: boolean }[] = [
 export function Organization() {
   const { tenant, role, subject } = useAuth();
   const [tab, setTab] = useState<Tab>("overview");
-  const isSuper = role === "super_admin";
+  const isSuper = can(role, "manage_platform");
   // The tenant this console administers is the one the session acts in: a
   // super-admin's acting tenant (lib/session.ts, sent on every request), else
   // the session's own. The picker below switches the same acting tenant.
@@ -178,7 +180,7 @@ function OverviewTab({ role }: { role: string | null }) {
       setUsage(u);
       setRecords(a.records ?? []);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "failed to load organization data");
+      setError(errorText(e, "failed to load organization data"));
     } finally {
       setLoading(false);
     }
@@ -213,9 +215,9 @@ function OverviewTab({ role }: { role: string | null }) {
         <Stat label="Role" value={role || "—"} />
       </section>
 
-      {role === "super_admin" && <DeploymentCard />}
-      {role === "super_admin" && <PlatformAgentsCard />}
-      {role === "super_admin" && <PlatformRetentionCard />}
+      {can(role, "manage_platform") && <DeploymentCard />}
+      {can(role, "manage_platform") && <PlatformAgentsCard />}
+      {can(role, "manage_platform") && <PlatformRetentionCard />}
 
       {/* Org-wide audit trail. */}
       <section className="flex flex-col gap-2">
@@ -291,7 +293,7 @@ function MembersTab({ selfId }: { selfId: string | null }) {
       const { members } = await api.tenantMembers();
       setMembers(members ?? []);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "failed to load members");
+      setError(errorText(e, "failed to load members"));
     }
   }, []);
 
@@ -306,7 +308,7 @@ function MembersTab({ selfId }: { selfId: string | null }) {
       await fn();
       await load();
     } catch (e) {
-      setError(e instanceof Error ? e.message : failMsg);
+      setError(errorText(e, failMsg));
     } finally {
       setBusy(null);
     }
@@ -450,7 +452,7 @@ function QuotaTab() {
       setRunQuota(String(u.runQuota));
       setCostAllowance(String(u.costAllowance));
     } catch (e) {
-      setError(e instanceof Error ? e.message : "failed to load quota");
+      setError(errorText(e, "failed to load quota"));
     }
   }, []);
 
@@ -466,7 +468,7 @@ function QuotaTab() {
       await api.setTenantQuota(Number(runQuota) || 0, Number(costAllowance) || 0);
       setSaved(true);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "failed to save quota");
+      setError(errorText(e, "failed to save quota"));
     } finally {
       setSaving(false);
     }
@@ -527,7 +529,7 @@ function SettingsTab() {
       setName(s.name);
       setSsoIssuer(s.ssoIssuer);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "failed to load settings");
+      setError(errorText(e, "failed to load settings"));
     }
   }, []);
 
@@ -544,7 +546,7 @@ function SettingsTab() {
       setSettings(s);
       setSaved(true);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "failed to save settings");
+      setError(errorText(e, "failed to save settings"));
     } finally {
       setSaving(false);
     }
@@ -561,7 +563,7 @@ function SettingsTab() {
       setSettings(await api.updateTenantSettings(patch));
       invalidateTenantPolicy();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "failed to save the policy");
+      setError(errorText(e, "failed to save the policy"));
     } finally {
       setPolicySaving(false);
     }

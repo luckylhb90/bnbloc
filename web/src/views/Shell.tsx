@@ -23,6 +23,7 @@ import { AccountMenu } from "@/views/AccountMenu";
 import { notify, requestNotificationPermission } from "@/lib/notify";
 import { openGlobalSearch } from "@/lib/team";
 import { onRoomGone, withoutRoom } from "@/lib/roomGone";
+import { can } from "@/lib/permissions";
 
 export type View = "plaza" | "myrooms" | "agents" | "team" | "components" | "org" | "directory" | "releases" | "library" | "settings";
 
@@ -82,7 +83,7 @@ export function Shell({
     });
   };
   const [rooms, setRooms] = useState<RoomSummary[]>([]);
-  const isSuper = role === "super_admin";
+  const isSuper = can(role, "manage_platform");
   // Super-admin global tenant switch: the tenant the whole session acts as
   // (lib/session.ts owns it; switching reloads so every view re-fetches under
   // the new scope).

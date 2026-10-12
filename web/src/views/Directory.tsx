@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { BuildingsIcon } from "@phosphor-icons/react";
 import { api, type DirectoryTenant, type JoinRequest } from "@/lib/api";
 import { cn } from "@/lib/cn";
+import { errorText } from "@/lib/errors";
 
 // Directory is the self-service surface for a user to find and request to join
 // an organization (tenant). It lists active tenants with the caller's current
@@ -20,7 +21,7 @@ export function Directory() {
       setTenants(dir.tenants ?? []);
       setMine(req.requests ?? []);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "failed to load organizations");
+      setError(errorText(e, "failed to load organizations"));
     }
   }, []);
 
@@ -35,7 +36,7 @@ export function Directory() {
       await api.requestJoin(tenantId);
       await load();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "failed to submit request");
+      setError(errorText(e, "failed to submit request"));
     } finally {
       setBusy(null);
     }

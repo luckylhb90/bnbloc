@@ -1,8 +1,9 @@
 import { useCallback, useRef, useState } from "react";
-import { api, ApiError } from "@/lib/api";
+import { api } from "@/lib/api";
 import { formatBytes } from "@/lib/format";
 import { saveBlob } from "@/lib/saveBlob";
 import { useToast } from "@/ui/Toast";
+import { errorText } from "@/lib/errors";
 
 // useHandoffExport downloads the room's handoff package (owner/admin), with
 // the running byte count as progress and toasts for start/finish/failure.
@@ -20,7 +21,7 @@ export function useHandoffExport(roomId: string) {
       saveBlob(blob, filename);
       toast.success(`Handoff package downloaded (${formatBytes(blob.size)})`);
     } catch (e) {
-      toast.error(e instanceof ApiError ? e.message : "Export failed");
+      toast.error(errorText(e, "Export failed"));
     } finally {
       running.current = false;
       setProgressBytes(null);

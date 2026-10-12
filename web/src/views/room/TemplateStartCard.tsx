@@ -1,12 +1,13 @@
 import { useState } from "react";
 import { SquaresFourIcon, XIcon } from "@phosphor-icons/react";
-import { api, ApiError } from "@/lib/api";
+import { api } from "@/lib/api";
 import { agentFollowUps, agentHandle, clearTemplateStart, takeTemplateStart, type RoomTemplateInstance } from "@/lib/roomTemplates";
 import { composerDrafts } from "@/lib/team";
 import { Button } from "@/ui/Button";
 import { useToast } from "@/ui/Toast";
 import { displayNameOf } from "@/lib/useDisplayName";
 import { UserName, UserNames } from "@/views/UserName";
+import { errorText } from "@/lib/errors";
 
 // TemplateStartCard follows up a room just created from a template: starter
 // prompts drop into the composer, suggested agents' owners can be invited
@@ -45,7 +46,7 @@ export function TemplateStartCard({
       setAdded((a) => [...a, userId]);
       toast.success(`Added ${displayNameOf(userId)}`);
     } catch (e) {
-      toast.error(e instanceof ApiError ? e.message : "Add member failed");
+      toast.error(errorText(e, "Add member failed"));
     }
   };
   const askOwner = (ownerId: string, provider: string) =>

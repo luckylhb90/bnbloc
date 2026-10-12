@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useState } from "react";
-import { ApiError } from "@/lib/api";
 import {
   daysOf,
   describeDays,
@@ -22,6 +21,7 @@ import { Button } from "@/ui/Button";
 import { ErrorBox } from "@/ui/ErrorBox";
 import { Select } from "@/ui/Select";
 import { useToast } from "@/ui/Toast";
+import { errorText } from "@/lib/errors";
 
 // Data retention settings: the organization's override in the org Settings
 // tab (TenantRetentionSection) and the platform default in the Platform
@@ -41,7 +41,7 @@ export function TenantRetentionSection() {
     try {
       setView(await retentionApi.tenant());
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Could not load data retention");
+      setError(errorText(e, "Could not load data retention"));
     }
   }, []);
 
@@ -55,7 +55,7 @@ export function TenantRetentionSection() {
       toast.success("Data retention saved");
       return true;
     } catch (e) {
-      toast.error(e instanceof ApiError ? `Save failed: ${e.message}` : "Save failed");
+      toast.error(errorText(e, "Save failed"));
       return false;
     }
   };
@@ -91,7 +91,7 @@ export function PlatformRetentionCard() {
     try {
       setView(await retentionApi.platform());
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Could not load data retention");
+      setError(errorText(e, "Could not load data retention"));
     }
   }, []);
 
@@ -105,7 +105,7 @@ export function PlatformRetentionCard() {
       toast.success("Default data retention saved");
       return true;
     } catch (e) {
-      toast.error(e instanceof ApiError ? `Save failed: ${e.message}` : "Save failed");
+      toast.error(errorText(e, "Save failed"));
       return false;
     }
   };

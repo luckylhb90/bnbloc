@@ -6,6 +6,7 @@ import type { ArtifactFileInfo } from "@/views/artifact/registry";
 
 export type { ArtifactDetail } from "../../lib/wire.gen.ts";
 import type { ArtifactDetail } from "../../lib/wire.gen.ts";
+import { errorText } from "@/lib/errors";
 
 // Shared artifact data for the workbench, chat file cards and the
 // deliverables view:
@@ -172,7 +173,7 @@ export function useVersionBlob(
         if (!cancelled) setState({ key, blob, error: "" });
       })
       .catch((e: unknown) => {
-        if (!cancelled) setState({ key, blob: null, error: e instanceof Error && e.message ? e.message : "Could not load this file." });
+        if (!cancelled) setState({ key, blob: null, error: errorText(e, "Could not load this file.") });
       });
     return () => {
       cancelled = true;

@@ -11,7 +11,7 @@ import {
   UploadSimpleIcon,
 } from "@phosphor-icons/react";
 import { contentLabel, matchesContent, type ContentComponent } from "@/lib/contentComponents";
-import { apiErrorText, contentApi } from "@/lib/contentComponentsApi";
+import { contentApi } from "@/lib/contentComponentsApi";
 import { announcePromptPacksChanged } from "@/lib/promptPacksApi";
 import { relativeTime } from "@/lib/format";
 import { packUses, PERSONAL_PROMPT_PACK } from "@/lib/promptPacks";
@@ -28,6 +28,7 @@ import { AddToRoomDialog, PromptImportDialog, PromptPackViewDialog } from "@/vie
 import { PromptPackEditorDialog, type PromptPackTarget } from "@/views/library/PromptPackEditorDialog";
 import { ContentByline, PublishDialog, ShareDialog, SharingActions, SharingStatus } from "@/views/library/ContentSharing";
 import { useOpenWorkshop } from "@/views/library/workshopFlow";
+import { errorText } from "@/lib/errors";
 
 // PromptsTab is the Library's prompt packs: the member's packs (and those
 // published to them) with search, view, create by form, import, new
@@ -60,7 +61,7 @@ export function PromptsTab({ tabs, onOpenRoom }: { readonly tabs: React.ReactNod
       .catch((e) => {
         if (!live) return;
         setItems([]);
-        toast.error(apiErrorText(e, "Could not load the prompt packs"));
+        toast.error(errorText(e, "Could not load the prompt packs"));
       });
     return () => {
       live = false;
@@ -84,7 +85,7 @@ export function PromptsTab({ tabs, onOpenRoom }: { readonly tabs: React.ReactNod
       announcePromptPacksChanged();
       toast.success(on ? `${contentLabel(c)} is on in your composer` : `${contentLabel(c)} is off in your composer`);
     } catch (e) {
-      toast.error(apiErrorText(e, "Could not change it"));
+      toast.error(errorText(e, "Could not change it"));
     }
   };
   // A new pack made here is on for its author at once (their composer
@@ -103,7 +104,7 @@ export function PromptsTab({ tabs, onOpenRoom }: { readonly tabs: React.ReactNod
       announcePromptPacksChanged();
       reload();
     } catch (e) {
-      toast.error(apiErrorText(e, "Could not delete it"));
+      toast.error(errorText(e, "Could not delete it"));
     }
   };
 

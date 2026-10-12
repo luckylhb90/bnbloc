@@ -7,6 +7,7 @@ import { UsageBillingTab } from "@/views/team/UsageBillingTab";
 import { TeamRunsTab } from "@/views/team/TeamRunsTab";
 import { BudgetsTab } from "@/views/team/BudgetsTab";
 import type { RunAgentFilter } from "@/views/runs/RunsBrowser";
+import { can } from "@/lib/permissions";
 
 type Tab = "agents" | "runs" | "usage" | "budgets";
 
@@ -22,7 +23,7 @@ const TABS: { id: Tab; label: string }[] = [
 // borrowing. The gateway enforces the same split (/v1/tenant/* is manage_org).
 export function Team({ onOpenRoom }: { readonly onOpenRoom: (id: string) => void }) {
   const { role, tenant } = useAuth();
-  const canSeeTeam = role === "org_admin" || role === "super_admin";
+  const canSeeTeam = can(role, "manage_org");
   const [tab, setTab] = useState<Tab>("agents");
   // The agent the Runs tab is narrowed to (an agent row's "Runs" link).
   const [runsAgent, setRunsAgent] = useState<RunAgentFilter | null>(null);

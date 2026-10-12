@@ -6,7 +6,8 @@ import { Badge, Card } from "@/ui/Card";
 import { Button } from "@/ui/Button";
 import { useToast } from "@/ui/Toast";
 import { DesktopUpdateDialog } from "@/views/DesktopUpdateDialog";
-import { enterUpdateWork, errorMessage, progressLabel } from "@/views/desktopUpdateState";
+import { enterUpdateWork, progressLabel } from "@/views/desktopUpdateState";
+import { errorText } from "@/lib/errors";
 
 type CheckState =
   | { readonly kind: "idle" }
@@ -30,7 +31,7 @@ export function DesktopUpdatePanel() {
     void desktop.appInfo().then((info) => {
       if (mounted) setAppInfo(info);
     }).catch((e: unknown) => {
-      if (mounted) setState({ kind: "failed", message: errorMessage(e, "Could not load app version") });
+      if (mounted) setState({ kind: "failed", message: errorText(e, "Could not load app version") });
     });
     void desktop.updatePolicy()
       .then((policy) => {
@@ -41,7 +42,7 @@ export function DesktopUpdatePanel() {
       .catch((e: unknown) => {
         if (!mounted) return;
         setPolicyLoaded(true);
-        setState({ kind: "failed", message: errorMessage(e, "Could not load update policy") });
+        setState({ kind: "failed", message: errorText(e, "Could not load update policy") });
       });
     return () => {
       mounted = false;
@@ -71,7 +72,7 @@ export function DesktopUpdatePanel() {
       else if (result.available) setState({ kind: "available", update: result });
       else setState({ kind: "upToDate" });
     } catch (e: unknown) {
-      setState({ kind: "failed", message: errorMessage(e, "Update check failed") });
+      setState({ kind: "failed", message: errorText(e, "Update check failed") });
     } finally {
       release();
     }
@@ -86,7 +87,7 @@ export function DesktopUpdatePanel() {
       const ok = await desktop.installUpdate();
       if (!ok) setState({ kind: "upToDate" });
     } catch (e: unknown) {
-      const message = errorMessage(e, "Install failed");
+      const message = errorText(e, "Install failed");
       setState({ kind: "failed", message });
       toast.error(message);
     } finally {

@@ -1,5 +1,4 @@
 import { useEffect, useState } from "react";
-import { ApiError } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { defaultDisplayName, validateDisplayName } from "@/lib/displayNames";
 import { MaxDisplayNameRunes } from "@/lib/wire.gen";
@@ -10,6 +9,7 @@ import { Button } from "@/ui/Button";
 import { Card } from "@/ui/Card";
 import { Input } from "@/ui/Input";
 import { useToast } from "@/ui/Toast";
+import { errorText } from "@/lib/errors";
 
 // ProfileSettings is Settings → Profile (the member's display name, PRD
 // 2026-10-10 §1) and Settings → Privacy (the local "Hide email addresses"
@@ -62,7 +62,7 @@ export function ProfileSettings() {
       toast.success(next ? "Display name saved" : "Display name cleared");
     } catch (e) {
       nameResolver.set(subject, prev || null);
-      toast.error(e instanceof ApiError ? e.message : "Could not save your display name");
+      toast.error(errorText(e, "Could not save your display name"));
     } finally {
       setSaving(false);
     }

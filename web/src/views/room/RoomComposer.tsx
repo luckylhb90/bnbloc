@@ -100,7 +100,7 @@ export function RoomComposer({
         </div>
       ) : readOnly ? (
         <p className="px-4 py-3 text-sm text-[var(--color-fg-muted)]">
-          You are a visitor here: you can follow the room, but only its members can post or ask agents.
+          You can follow this room, but your role here is read-only: you can't post or ask agents.
         </p>
       ) : (
         <>

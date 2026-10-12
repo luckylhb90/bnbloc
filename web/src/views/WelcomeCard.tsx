@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { CloudIcon, DesktopIcon, DownloadSimpleIcon, SparkleIcon, XIcon } from "@phosphor-icons/react";
 import { api, ApiError, type RoomSummary } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
+import { can } from "@/lib/permissions";
 import { inDesktopShell } from "@/lib/config";
 import { useDesktopPresence } from "@/lib/desktopPresence";
 import { openMacInstallGuide } from "@/lib/macInstall";
@@ -26,6 +27,7 @@ import { useQuery } from "@/lib/useQuery";
 import { autoStartTour } from "@/lib/useOnboarding";
 import { Button } from "@/ui/Button";
 import { useToast } from "@/ui/Toast";
+import { errorText } from "@/lib/errors";
 
 // Room ids are global: a taken id is retried with a fresh suffix.
 const CREATE_ATTEMPTS = 3;
@@ -37,7 +39,10 @@ const CREATE_ATTEMPTS = 3;
 // path is the desktop app (own agents). `rooms` is the member's room list
 // when the view already has it; otherwise the card reads it.
 export function WelcomeCard({ rooms, onOpen }: { readonly rooms?: readonly RoomSummary[] | null; readonly onOpen: (id: string) => void }) {
-  const { subject, reauth } = useAuth();
+  const { subject, reauth, role } = useAuth();
+  // Starting a room creates one and drives an agent: a read-only (viewer)
+  // organization role does neither.
+  const mayStart = can(role, "create_room") && can(role, "drive_agent");
   const toast = useToast();
   const { agents: offered } = usePlatformAgents();
   const presence = useDesktopPresence();
@@ -68,7 +73,7 @@ export function WelcomeCard({ rooms, onOpen }: { readonly rooms?: readonly RoomS
   const visible = showWelcome({ roomCount, dismissed });
   // A brand-new member is guided from this first screen: the tour starts on
   // the start button (only when there is an agent to start a room with).
-  const canStart = visible && startWith.kind !== "none";
+  const canStart = visible && mayStart && startWith.kind !== "none";
   useEffect(() => {
     if (canStart) autoStartTour(subject, roomCount);
   }, [canStart, subject, roomCount]);
@@ -99,7 +104,7 @@ export function WelcomeCard({ rooms, onOpen }: { readonly rooms?: readonly RoomS
       composerAgentPicks.queue(roomId, ref);
       onOpen(roomId);
     } catch (e) {
-      toast.error(e instanceof ApiError ? `Could not start the room: ${e.message}` : "Could not start the room");
+      toast.error(errorText(e, "Could not start the room"));
     } finally {
       setStarting(false);
     }
@@ -147,7 +152,7 @@ export function WelcomeCard({ rooms, onOpen }: { readonly rooms?: readonly RoomS
         </div>
       </div>
       <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
-        {startWith.kind !== "none" && (
+        {mayStart && startWith.kind !== "none" && (
           <Button
             variant="primary"
             onClick={() => void start()}

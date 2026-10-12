@@ -11,9 +11,6 @@ export function enterUpdateWork(): (() => void) | null {
   };
 }
 
-export function errorMessage(e: unknown, fallback: string): string {
-  return e instanceof Error ? e.message : fallback;
-}
 
 export function progressLabel(progress: DesktopUpdateProgress | null): string | null {
   if (!progress) return null;

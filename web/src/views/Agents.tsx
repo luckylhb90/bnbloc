@@ -33,6 +33,7 @@ import { DesktopUpdatePanel } from "@/views/DesktopUpdates";
 import { ReleaseDownloadButton } from "@/views/ReleaseDownloadButton";
 import { PlatformAgentsHint } from "@/views/PlatformAgentsHint";
 import { EmailInput } from "@/views/UserName";
+import { errorText } from "@/lib/errors";
 
 // Agents is the single page for everything about the agents this workspace can
 // drive. It replaces the former split between the read-only "Agent cores" page
@@ -218,7 +219,7 @@ export function Agents() {
       setDirty(false);
       toast.success("Settings saved");
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Save failed");
+      toast.error(errorText(e, "Save failed"));
     } finally {
       setSaving(false);
     }
@@ -415,7 +416,7 @@ export function Agents() {
                           void desktop
                             .start()
                             .catch((e) =>
-                              toast.error(e instanceof Error ? e.message : "Could not start the bridge"),
+                              toast.error(errorText(e, "Could not start the bridge")),
                             )
                         }
                       >

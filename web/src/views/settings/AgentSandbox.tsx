@@ -6,6 +6,7 @@ import { Button } from "@/ui/Button";
 import { Card } from "@/ui/Card";
 import { Segment } from "@/ui/Segment";
 import { useToast } from "@/ui/Toast";
+import { errorText } from "@/lib/errors";
 
 const TONE_CLASS = {
   muted: "text-[var(--color-fg-subtle)]",
@@ -53,7 +54,7 @@ export function AgentSandbox() {
       if (next) setStatus(next);
       toast.success(done);
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Something went wrong");
+      toast.error(errorText(e, "Something went wrong"));
       void load();
     } finally {
       setBusy(null);

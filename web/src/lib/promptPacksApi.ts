@@ -1,6 +1,4 @@
-import { ApiError, req } from "./api.ts";
-import { apiUrl } from "./config.ts";
-import { authedFetch, errorDetail } from "./session.ts";
+import { req } from "./api.ts";
 import type { ContentComponentDetail } from "./contentComponents.ts";
 import { noteSaved } from "./contentComponentsApi.ts";
 import { promptImportContentType, promptPackPayload, type PromptPackForm } from "./promptPacks.ts";
@@ -38,13 +36,13 @@ export const promptPacksApi = {
       q.set("kind", "prompt");
       if (opts.name?.trim()) q.set("name", opts.name.trim());
     }
-    const res = await authedFetch(apiUrl(`/v1/content-components/import?${q}`), {
-      method: "POST",
-      headers: { "Content-Type": promptImportContentType(file.name) },
-      body: file,
-    });
-    if (!res.ok) throw new ApiError(res.status, await errorDetail(res));
-    return noteSaved((await res.json()) as ContentComponentDetail);
+    return noteSaved(
+      await req<ContentComponentDetail>(`/v1/content-components/import?${q}`, {
+        method: "POST",
+        headers: { "Content-Type": promptImportContentType(file.name) },
+        body: file,
+      }),
+    );
   },
   // "Save as prompt": into the caller's personal pack (created on the
   // first save, as a new version after).
@@ -56,6 +54,6 @@ export const promptPacksApi = {
     if (opts.roomId) q.set("room", opts.roomId);
     if (opts.version) q.set("version", opts.version);
     const qs = q.toString();
-    return req<void>(`/v1/content-components/${enc(componentId)}/prompts/${enc(promptId)}/use${qs ? `?${qs}` : ""}`, { method: "POST", raw: true });
+    return req<void>(`/v1/content-components/${enc(componentId)}/prompts/${enc(promptId)}/use${qs ? `?${qs}` : ""}`, { method: "POST", as: "none" });
   },
 };

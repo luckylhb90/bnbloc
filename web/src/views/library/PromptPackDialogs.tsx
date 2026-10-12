@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { api, type RoomSummary } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { contentLabel, type ContentComponent, type ContentComponentDetail } from "@/lib/contentComponents";
-import { apiErrorText, contentApi } from "@/lib/contentComponentsApi";
+import { contentApi } from "@/lib/contentComponentsApi";
 import { variableLabel, PROMPT_IMPORT_ACCEPT } from "@/lib/promptPacks";
 import { announcePromptPacksChanged, promptPacksApi } from "@/lib/promptPacksApi";
 import { lastRoom } from "@/lib/team";
@@ -13,6 +13,7 @@ import { Field, Input } from "@/ui/Input";
 import { Select } from "@/ui/Select";
 import { useToast } from "@/ui/Toast";
 import { ContentByline } from "@/views/library/ContentSharing";
+import { errorText } from "@/lib/errors";
 
 // PromptPackViewDialog shows a pack's prompts at a version: title, /command,
 // tags, variables, body and how often each was inserted. roomId reads a pack
@@ -40,7 +41,7 @@ export function PromptPackViewDialog({
     contentApi
       .get(pack.id, roomId)
       .then((d) => live && setDetail(d))
-      .catch((e) => live && toast.error(apiErrorText(e, "Could not load the pack")));
+      .catch((e) => live && toast.error(errorText(e, "Could not load the pack")));
     return () => {
       live = false;
     };
@@ -54,7 +55,7 @@ export function PromptPackViewDialog({
     contentApi
       .version(pack.id, version, roomId)
       .then((v) => live && setShown(v.component))
-      .catch((e) => live && toast.error(apiErrorText(e, "Could not load that version")));
+      .catch((e) => live && toast.error(errorText(e, "Could not load that version")));
     return () => {
       live = false;
     };
@@ -150,7 +151,7 @@ export function PromptImportDialog({
       onImported(d.component);
       onClose();
     } catch (e) {
-      toast.error(apiErrorText(e, "Could not import"));
+      toast.error(errorText(e, "Could not import"));
     } finally {
       setBusy(false);
     }
@@ -237,7 +238,7 @@ export function AddToRoomDialog({ pack, onClose }: { readonly pack: ContentCompo
       announcePromptPacksChanged();
       onClose();
     } catch (e) {
-      toast.error(apiErrorText(e, "Could not turn it on for the room"));
+      toast.error(errorText(e, "Could not turn it on for the room"));
     } finally {
       setBusy(false);
     }

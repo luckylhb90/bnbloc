@@ -1,6 +1,4 @@
-import { apiUrl } from "@/lib/config";
 import { req } from "@/lib/api";
-import { authedFetch, errorDetail } from "@/lib/session";
 import {
   frameTicketStale,
   parsePreviewerCatalog,
@@ -104,6 +102,5 @@ export function startPreviewerSync(): () => void {
  *  keeps the first one; later writes are ignored). */
 export async function putVersionThumbnail(roomId: string, artifactId: string, version: number, png: ArrayBuffer): Promise<void> {
   const path = `/v1/rooms/${encodeURIComponent(roomId)}/artifacts/${encodeURIComponent(artifactId)}/versions/${version}/thumbnail`;
-  const res = await authedFetch(apiUrl(path), { method: "PUT", headers: { "Content-Type": "image/png" }, body: png });
-  if (!res.ok) throw new Error(`thumbnail upload failed (${res.status}): ${await errorDetail(res)}`);
+  await req<void>(path, { method: "PUT", headers: { "Content-Type": "image/png" }, body: png, as: "none" });
 }

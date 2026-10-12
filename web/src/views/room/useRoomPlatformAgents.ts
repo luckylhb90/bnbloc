@@ -15,6 +15,7 @@ import { browserStorage, pickHost, readLastHost, rememberHost } from "@/lib/plat
 import { usePlatformAgents } from "@/lib/usePlatformAgents";
 import { useVisiblePoll } from "@/lib/useVisiblePoll";
 import { useToast } from "@/ui/Toast";
+import { errorText } from "@/lib/errors";
 
 // Host online/queued state is re-read this often while the room is visible
 // and has (or is offered) platform agents.
@@ -108,7 +109,7 @@ export function useRoomPlatformAgents(roomId: string, subject: string | null, ge
         return true;
       } catch (e) {
         const status = e instanceof ApiError ? e.status : 0;
-        toast.error(addFailureMessage(status, e instanceof Error ? e.message : "", agent.provider));
+        toast.error(addFailureMessage(status, errorText(e, ""), agent.provider));
         // An agent that is no longer published drops out of the picker.
         if (status === 404) refetchOffered();
         return false;
@@ -124,7 +125,7 @@ export function useRoomPlatformAgents(roomId: string, subject: string | null, ge
         setInRoom((cur) => cur.filter((a) => !samePlatformAgent(a, agent)));
         toast.success(`Removed ${agent.provider} from this room`);
       } catch (e) {
-        toast.error(e instanceof ApiError ? `Remove failed: ${e.message}` : "Remove failed");
+        toast.error(errorText(e, "Remove failed"));
       }
     },
     [roomId, toast],

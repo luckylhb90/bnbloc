@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { CaretDownIcon, CaretRightIcon } from "@phosphor-icons/react";
 import type { ArtifactViewerProps } from "./registry";
 import { useViewerToolbar } from "./toolbar";
+import { errorText } from "@/lib/errors";
 
 // JsonViewer: a collapsible tree that stays responsive on large documents —
 // children render only when their node is open, at most PAGE per node until
@@ -92,7 +93,7 @@ export default function JsonViewer({ content, toolbar }: ArtifactViewerProps) {
     try {
       return { ok: true as const, value: JSON.parse(content) as unknown };
     } catch (e) {
-      return { ok: false as const, error: e instanceof Error ? e.message : "Invalid JSON" };
+      return { ok: false as const, error: errorText(e, "Invalid JSON") };
     }
   }, [content]);
   const small = useMemo(() => parsed.ok && countNodes(parsed.value, EXPAND_ALL_MAX) <= EXPAND_ALL_MAX, [parsed]);

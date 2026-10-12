@@ -5,6 +5,7 @@ import { Button } from "@/ui/Button";
 import { Dialog } from "@/ui/Dialog";
 import { useToast } from "@/ui/Toast";
 import { UserName } from "@/views/UserName";
+import { errorText } from "@/lib/errors";
 
 // Trusted publisher keys are the market's root of trust: install refuses any
 // package signed by a key not listed here. So the empty state is a warning, not
@@ -43,7 +44,7 @@ export function TrustedKeysPanel() {
     } catch (e) {
       // 400 (unparseable) and 409 (duplicate) both belong beside the key field;
       // the server's message is specific and must reach the operator verbatim.
-      setAddError(e instanceof Error ? e.message : "Failed to add key");
+      setAddError(errorText(e, "Failed to add key"));
     } finally {
       setAdding(false);
     }

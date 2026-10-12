@@ -4,6 +4,7 @@ import { notificationsApi } from "@/lib/notificationsApi";
 import { isRoomMuted, withRoomMuted, type NotificationPrefs } from "@/lib/notificationPrefs";
 import { Button } from "@/ui/Button";
 import { useToast } from "@/ui/Toast";
+import { errorText } from "@/lib/errors";
 
 // RoomMuteButton toggles "Mute notifications" for one room: the room joins
 // (or leaves) the member's quiet rooms, which silences every notification
@@ -41,7 +42,7 @@ export function RoomMuteButton({ roomId }: { readonly roomId: string }) {
       setPrefs(saved);
       toast.success(muted ? "Notifications unmuted for this room" : "Notifications muted for this room");
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Could not change notification settings");
+      toast.error(errorText(e, "Could not change notification settings"));
     } finally {
       setBusy(false);
     }

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { CheckIcon, XIcon } from "@phosphor-icons/react";
-import { api, ApiError } from "@/lib/api";
+import { api } from "@/lib/api";
 import { relativeTime } from "@/lib/format";
 import { sortQuotaRequests, type QuotaRequest } from "@/lib/teamDashboard";
 import { useVisiblePoll } from "@/lib/useVisiblePoll";
@@ -10,6 +10,7 @@ import { Input } from "@/ui/Input";
 import { useToast } from "@/ui/Toast";
 import { UserName } from "@/views/UserName";
 import { displayNameOf } from "@/lib/useDisplayName";
+import { errorText } from "@/lib/errors";
 
 const POLL_MS = 30_000;
 
@@ -79,7 +80,7 @@ export function QuotaRequestsPanel({
       load();
       onChanged?.();
     } catch (e) {
-      toast.error(e instanceof ApiError ? e.message : "Could not update the request");
+      toast.error(errorText(e, "Could not update the request"));
       load();
     } finally {
       setBusy("");

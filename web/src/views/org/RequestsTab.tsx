@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { api, type JoinRequest } from "@/lib/api";
 import { ErrorBox } from "@/ui/ErrorBox";
 import { UserWithEmail } from "@/views/UserName";
+import { errorText } from "@/lib/errors";
 
 // Org-admin: self-service join requests for the tenant (split from
 // Organization.tsx).
@@ -16,7 +17,7 @@ export function RequestsTab() {
       const { requests } = await api.listJoinRequests("pending");
       setRequests(requests ?? []);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "failed to load requests");
+      setError(errorText(e, "failed to load requests"));
     }
   }, []);
 
@@ -32,7 +33,7 @@ export function RequestsTab() {
       else await api.rejectJoinRequest(userId);
       await load();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "failed to update request");
+      setError(errorText(e, "failed to update request"));
     } finally {
       setBusy(null);
     }

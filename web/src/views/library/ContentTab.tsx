@@ -11,7 +11,7 @@ import {
   WrenchIcon,
 } from "@phosphor-icons/react";
 import { contentLabel, isBuiltin, isTeam, matchesContent, usageLine, type ContentComponent } from "@/lib/contentComponents";
-import { apiErrorText, contentApi } from "@/lib/contentComponentsApi";
+import { contentApi } from "@/lib/contentComponentsApi";
 import { relativeTime } from "@/lib/format";
 import { improvePrompt, workshopPrompt } from "@/lib/workshop";
 import { Button } from "@/ui/Button";
@@ -26,6 +26,7 @@ import { ContentViewDialog, PermissionBadges } from "@/views/library/ContentView
 import { TeamBadge, TeamRoster } from "@/views/library/ContentFormExtras";
 import { ContentByline, PublishDialog, ShareDialog, SharingActions, SharingStatus } from "@/views/library/ContentSharing";
 import { useOpenWorkshop } from "@/views/library/workshopFlow";
+import { errorText } from "@/lib/errors";
 
 const COPY: Record<"expert" | "skill", { subtitle: string; empty: string; hint: string; search: string }> = {
   expert: {
@@ -82,7 +83,7 @@ export function ContentTab({
       .catch((e) => {
         if (!live) return;
         setItems([]);
-        toast.error(apiErrorText(e, "Could not load the library"));
+        toast.error(errorText(e, "Could not load the library"));
       });
     return () => {
       live = false;
@@ -99,7 +100,7 @@ export function ContentTab({
       toast.success(`Deleted ${c.name}`);
       reload();
     } catch (e) {
-      toast.error(apiErrorText(e, "Could not delete it"));
+      toast.error(errorText(e, "Could not delete it"));
     }
   };
   const toggleForMe = async (c: ContentComponent, on: boolean) => {
@@ -114,7 +115,7 @@ export function ContentTab({
       });
       toast.success(on ? `${contentLabel(c)} is on for all your agents` : `${contentLabel(c)} is off for your agents`);
     } catch (e) {
-      toast.error(apiErrorText(e, "Could not change it"));
+      toast.error(errorText(e, "Could not change it"));
     }
   };
 

@@ -45,6 +45,6 @@ export const platformAgentsApi = {
   remove: (roomId: string, agent: PlatformAgentRef) =>
     req<void>(`${roomPath(roomId)}/${encodeURIComponent(agent.provider)}?core=${encodeURIComponent(agent.core)}`, {
       method: "DELETE",
-      raw: true,
+      as: "none",
     }),
 };

@@ -1,4 +1,5 @@
 import { apiUrl } from "./config.ts";
+import { ApiError } from "./errors.ts";
 import { authedFetch, errorDetail, type FetchImpl } from "./session.ts";
 
 // The ONE platform-artifact upload (super-admin, content-addressed blob store):
@@ -59,7 +60,7 @@ export async function uploadArtifact(
       throw failure;
     }
     if (!response.ok) {
-      throw new Error(`Artifact upload failed: ${await errorDetail(response)}`);
+      throw new ApiError(response.status, `Artifact upload failed: ${await errorDetail(response)}`);
     }
 
     const uploaded = (await response.json()) as { key?: string; sha256?: string; size?: number };

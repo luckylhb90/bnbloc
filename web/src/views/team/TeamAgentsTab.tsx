@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { ArrowClockwiseIcon, CpuIcon, ListChecksIcon } from "@phosphor-icons/react";
-import { api, ApiError } from "@/lib/api";
+import { api } from "@/lib/api";
 import { cn } from "@/lib/cn";
 import { formatUsd, relativeTime } from "@/lib/format";
 import {
@@ -21,6 +21,7 @@ import { EmptyState } from "@/ui/Page";
 import { Segment } from "@/ui/Segment";
 import { AGENT_JOB_FAILURE_LABELS, AGENT_JOB_STATUS_LABELS } from "@/views/room/agentJobLabels";
 import { AgentHandle, UserName, useAgentHandle } from "@/views/UserName";
+import { errorText } from "@/lib/errors";
 
 const RANGES = [
   { value: "today" as const, label: "Today" },
@@ -118,7 +119,7 @@ export function TeamAgentsTab({
         setData(r);
         setError("");
       })
-      .catch((e) => setError(e instanceof ApiError ? e.message : "Could not load the team dashboard"))
+      .catch((e) => setError(errorText(e, "Could not load the team dashboard")))
       .finally(() => setLoading(false));
   }, [effectiveScope, range]);
 

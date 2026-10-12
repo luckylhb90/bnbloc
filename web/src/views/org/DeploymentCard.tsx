@@ -4,6 +4,7 @@ import { deploymentApi } from "@/lib/deploymentApi";
 import { deploymentRows, shortCommit, type DeploymentVersions } from "@/lib/deployment";
 import { BUILD_COMMIT } from "@/lib/buildInfo";
 import { ErrorBox } from "@/ui/ErrorBox";
+import { errorText } from "@/lib/errors";
 
 // DeploymentCard (Platform console overview, super-admin): the commit every
 // service instance and the embedded web bundle run, with a skew warning when
@@ -17,7 +18,7 @@ export function DeploymentCard() {
     try {
       setData(await deploymentApi.versions());
     } catch (e) {
-      setError(e instanceof Error ? e.message : "failed to load deployment versions");
+      setError(errorText(e, "failed to load deployment versions"));
     }
   }, []);
 

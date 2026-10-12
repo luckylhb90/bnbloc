@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { CopySimpleIcon, DownloadSimpleIcon, PlusIcon, TrashIcon, WrenchIcon } from "@phosphor-icons/react";
-import { api, ApiError } from "@/lib/api";
+import { api } from "@/lib/api";
 import { buildMCPPackage } from "@/lib/mcpPackageApi";
 import {
   BINARY_PLATFORMS,
@@ -22,6 +22,7 @@ import { Field, Input, Textarea } from "@/ui/Input";
 import { Segment, Switch } from "@/ui/Segment";
 import { Select } from "@/ui/Select";
 import { useCopy } from "@/ui/useCopy";
+import { errorText } from "@/lib/errors";
 
 // PlatformMCPForm builds an MCP tool package from a form (docs/prd/2026-10-
 // 12-experts-and-teams.md, "Gap closure" 10). Binaries go through the
@@ -74,7 +75,7 @@ function McpFormBody() {
       const up = await api.uploadArtifact(file, { onProgress: setUploading });
       set({ binaries: [...form.binaries.filter((b) => b.platform !== platform), { platform, key: up.key, fileName: file.name }] });
     } catch (e) {
-      setError(e instanceof Error ? e.message : "The upload failed");
+      setError(errorText(e, "The upload failed"));
     } finally {
       setUploading(null);
     }
@@ -92,7 +93,7 @@ function McpFormBody() {
       const json = await buildMCPPackage(mcpDraftBody(form));
       setResult({ json, file: mcpPackageFileName(form.name, form.version) });
     } catch (e) {
-      setError(e instanceof ApiError && e.message ? e.message : "Could not build the package");
+      setError(errorText(e, "Could not build the package"));
     } finally {
       setBuilding(false);
     }

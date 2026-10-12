@@ -8,7 +8,7 @@ import {
   LockIcon,
   DeviceMobileIcon,
 } from "@phosphor-icons/react";
-import { api, ApiError, type RoomSummary } from "@/lib/api";
+import { api, type RoomSummary } from "@/lib/api";
 import { isSubmitEnter } from "@/lib/keys";
 import { useAuth } from "@/lib/auth";
 import { Button } from "@/ui/Button";
@@ -23,6 +23,7 @@ import { HandoffImportButton } from "@/views/HandoffImportButton";
 import { useLocalAgent } from "@/lib/useLocalAgent";
 import { WelcomeCard } from "@/views/WelcomeCard";
 import { isOwner } from "@/lib/roomRoles";
+import { errorText } from "@/lib/errors";
 
 export function MyRooms({ onOpen }: { onOpen: (id: string) => void }) {
   const { subject } = useAuth();
@@ -320,7 +321,7 @@ function RedeemDialog({
       setCode("");
       onRedeemed(r?.roomId || "");
     } catch (e) {
-      setErr(e instanceof ApiError ? e.message : "redeem failed");
+      setErr(errorText(e, "redeem failed"));
     } finally {
       setBusy(false);
     }

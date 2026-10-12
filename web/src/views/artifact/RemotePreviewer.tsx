@@ -14,6 +14,7 @@ import { PREVIEWER_PROTOCOL, stateKey, type HostMessage } from "../../../preview
 import { invalidateArtifacts, loadArtifactDetail } from "@/views/workbench/artifactData";
 import type { ArtifactViewerProps, ViewerToolbarItem } from "./registry";
 import { freshPreviewer, installedPreviewer, putVersionThumbnail } from "./remotePreviewers";
+import { errorText } from "@/lib/errors";
 
 // RemotePreviewer hosts an installed previewer component: a third-party
 // static bundle rendering one artifact version inside a sandboxed frame.
@@ -167,7 +168,7 @@ function PreviewerFrame({
         case "preview.ready":
           if (readyRef.current) return; // one hand-off per frame
           readyRef.current = true;
-          void handOff().catch((e: unknown) => setError(e instanceof Error ? e.message : "Could not load the file"));
+          void handOff().catch((e: unknown) => setError(errorText(e, "Could not load the file")));
           return;
         case "preview.toolbar.set":
           toolbar.set(msg.items as readonly ViewerToolbarItem[]);

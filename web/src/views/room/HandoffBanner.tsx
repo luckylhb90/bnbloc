@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { PackageIcon, XIcon } from "@phosphor-icons/react";
-import { api, ApiError } from "@/lib/api";
+import { api } from "@/lib/api";
 import {
   handoffBannerText,
   pendingSuggestions,
@@ -13,6 +13,7 @@ import { Dialog } from "@/ui/Dialog";
 import { useToast } from "@/ui/Toast";
 import { displayNameOf } from "@/lib/useDisplayName";
 import { UserWithEmail } from "@/views/UserName";
+import { errorText } from "@/lib/errors";
 
 const dismissKey = (roomId: string) => `bnbloc.handoffBanner.${roomId}`;
 
@@ -59,7 +60,7 @@ export function HandoffBanner({
       setAdded((a) => [...a, m.userId]);
       toast.success(`Added ${displayNameOf(m.userId)}`);
     } catch (e) {
-      toast.error(e instanceof ApiError ? e.message : "Add member failed");
+      toast.error(errorText(e, "Add member failed"));
     }
   };
 

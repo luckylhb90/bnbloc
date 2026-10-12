@@ -12,6 +12,7 @@ import { Segment } from "@/ui/Segment";
 import { useToast } from "@/ui/Toast";
 import { InstantiateTemplateDialog, TemplateEditorDialog } from "@/views/library/TemplateDialogs";
 import { UserName } from "@/views/UserName";
+import { can } from "@/lib/permissions";
 
 type Scope = "all" | "mine";
 const SCOPES = [
@@ -31,7 +32,7 @@ export function TemplatesTab({ tabs, onOpenRoom }: { tabs: React.ReactNode; onOp
   const [using, setUsing] = useState<RoomTemplate | null>(null);
   const [deleting, setDeleting] = useState<RoomTemplate | null>(null);
   const [epoch, setEpoch] = useState(0);
-  const isAdmin = role === "org_admin" || role === "super_admin";
+  const isAdmin = can(role, "manage_org");
   const reload = useCallback(() => setEpoch((n) => n + 1), []);
 
   useEffect(() => {

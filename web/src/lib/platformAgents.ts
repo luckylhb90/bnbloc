@@ -32,6 +32,7 @@ import type {
   PlatformAgentsPolicy,
   PlatformAgentSpec as PolicyAgent,
 } from "./wire.gen.ts";
+import { statusText } from "./errors.ts";
 
 // PUT /v1/platform/platform-agents: the caller's entry only.
 export interface PlatformAgentsPolicyInput {
@@ -206,7 +207,7 @@ export function hostsLabel(hosts: readonly PlatformHost[], nameOf: (id: string) 
 export function addFailureMessage(status: number, detail: string, provider: string): string {
   if (status === 403) return "Only room members who can chat may add agents to this room";
   if (status === 404) return `${provider} is no longer offered as a platform agent`;
-  if (status === 429) return "You're doing that too fast — wait a moment";
+  if (status === 429) return statusText(429);
   return detail ? `Could not add ${provider}: ${detail}` : `Could not add ${provider}`;
 }
 

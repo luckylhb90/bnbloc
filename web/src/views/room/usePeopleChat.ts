@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { api, ApiError } from "@/lib/api";
+import { api } from "@/lib/api";
 import { messageJumps, type MessageJump } from "@/lib/team";
 import { useToast } from "@/ui/Toast";
+import { errorText } from "@/lib/errors";
 
 export interface PeopleChat {
   // The room's people chat channel; null until it exists (a member opens it).
@@ -98,7 +99,7 @@ export function usePeopleChat({
           setOpen(true);
         })
         .catch((e: unknown) => {
-          toast.error(e instanceof ApiError ? `Could not open the people chat: ${e.message}` : "Could not open the people chat");
+          toast.error(errorText(e, "Could not open the people chat"));
         });
     },
     [channelId, roomId, toast],

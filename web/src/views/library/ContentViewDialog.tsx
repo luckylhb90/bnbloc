@@ -9,7 +9,7 @@ import {
   type ContentComponentDetail,
   type ContentVersionDetail,
 } from "@/lib/contentComponents";
-import { apiErrorText, contentApi } from "@/lib/contentComponentsApi";
+import { contentApi } from "@/lib/contentComponentsApi";
 import { formatBytes, relativeTime } from "@/lib/format";
 import { saveBlob } from "@/lib/saveBlob";
 import { Button } from "@/ui/Button";
@@ -19,6 +19,7 @@ import { Select } from "@/ui/Select";
 import { useToast } from "@/ui/Toast";
 import { ContentByline } from "@/views/library/ContentSharing";
 import { TeamBadge, TeamRoster } from "@/views/library/ContentFormExtras";
+import { errorText } from "@/lib/errors";
 
 // PermissionBadges shows what a component declares (scripts, local tools,
 // hosts it calls); someone else's script-bearing content runs sandboxed.
@@ -65,7 +66,7 @@ export function ContentViewDialog({
     contentApi
       .get(component.id, roomId)
       .then((d) => live && setDetail(d))
-      .catch((e) => live && toast.error(apiErrorText(e, "Could not load it")));
+      .catch((e) => live && toast.error(errorText(e, "Could not load it")));
     return () => {
       live = false;
     };
@@ -78,7 +79,7 @@ export function ContentViewDialog({
     contentApi
       .version(component.id, version, roomId)
       .then((v) => live && setView(v))
-      .catch((e) => live && toast.error(apiErrorText(e, "Could not load that version")));
+      .catch((e) => live && toast.error(errorText(e, "Could not load that version")));
     return () => {
       live = false;
     };
@@ -89,7 +90,7 @@ export function ContentViewDialog({
     try {
       saveBlob(await contentApi.bundle(url, roomId), `${component.name}-${v}.tar`);
     } catch (e) {
-      toast.error(apiErrorText(e, "Could not download the bundle"));
+      toast.error(errorText(e, "Could not download the bundle"));
     }
   };
 

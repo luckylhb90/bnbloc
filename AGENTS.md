@@ -1413,6 +1413,17 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   history row) is pinned by a golden fixture in `internal/wire/testdata/`
   that both test suites read (`readTurnMetrics` ≡ `TurnUsageFromMetrics`).
 
+- **Requests, failures and org permissions have one owner each in the
+  web.** `req` (`lib/api.ts`: `as: "json" | "none" | "text" | "blob" |
+  "response"`, JSON only for a string body; `downloadCsv`) is the one
+  authenticated request (boundary rules 1, 1b). A failed request is an
+  `ApiError` (`lib/errors.ts`, rule 2), and a view renders any failure with
+  `errorText(e, what)` and a status with `statusText` (rule 4; never
+  `e instanceof Error ? e.message : …`). An organization permission is
+  `can(role, perm)` (`lib/permissions.ts`, grants generated from
+  `rbac.Can`; role literals only there and in `lib/roomRoles.ts`, rule 8):
+  a viewer is offered no room creation and gets a read-only composer.
+
 - **`Dialog` caps height at `max-h-[85vh]` with a scrollable body.** A dialog
   with more content than the viewport must scroll its body while header/footer
   stay pinned; do not add dialogs that assume unbounded height.

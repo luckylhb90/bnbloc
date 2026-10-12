@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { CopyIcon, TrashIcon } from "@phosphor-icons/react";
-import { api, ApiError, type RoomDetail } from "@/lib/api";
+import { api, type RoomDetail } from "@/lib/api";
 import { canInvite, isOwner, type RoomMembership } from "@/lib/roomRoles";
 import { Button } from "@/ui/Button";
 import { Input, Field } from "@/ui/Input";
@@ -11,6 +11,7 @@ import { useCopy } from "@/ui/useCopy";
 import { displayNameOf } from "@/lib/useDisplayName";
 import { EmailInput } from "@/views/UserName";
 import { RoomContentSection } from "@/views/room/RoomContentSection";
+import { errorText } from "@/lib/errors";
 
 const syncOptions: SegmentOption<"git" | "mutagen" | "none">[] = [
   { value: "git", label: "Git" },
@@ -73,7 +74,7 @@ export function RoomSettings({
       toast.success("Room updated");
       onChanged(updated);
     } catch (e) {
-      toast.error(e instanceof ApiError ? e.message : "save failed");
+      toast.error(errorText(e, "save failed"));
     } finally {
       setBusy(false);
     }
@@ -93,7 +94,7 @@ export function RoomSettings({
       });
       setInvite(r.code);
     } catch (e) {
-      toast.error(e instanceof ApiError ? e.message : "invite failed");
+      toast.error(errorText(e, "invite failed"));
     }
   };
 
@@ -105,7 +106,7 @@ export function RoomSettings({
       toast.success(`Added ${displayNameOf(id)}`);
       setNewMember("");
     } catch (e) {
-      toast.error(e instanceof ApiError ? e.message : "add member failed");
+      toast.error(errorText(e, "add member failed"));
     }
   };
 
@@ -115,7 +116,7 @@ export function RoomSettings({
       toast.success("Room deleted");
       onDeleted();
     } catch (e) {
-      toast.error(e instanceof ApiError ? e.message : "delete failed");
+      toast.error(errorText(e, "delete failed"));
     }
   };
 
@@ -126,7 +127,7 @@ export function RoomSettings({
       setTransferTo("");
       onClose();
     } catch (e) {
-      toast.error(e instanceof ApiError ? e.message : "transfer failed");
+      toast.error(errorText(e, "transfer failed"));
     }
   };
 

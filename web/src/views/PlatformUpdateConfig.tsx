@@ -9,6 +9,7 @@ import { Segment, Switch } from "@/ui/Segment";
 import { useToast } from "@/ui/Toast";
 import { DesktopPublishWizard } from "@/views/DesktopPublishWizard";
 import { completeUpdateConfig, fieldErrorsFromUpdateMessage, MANUAL_UPDATE_TARGETS, MAX_UPDATE_CHECK_INTERVAL_HOURS, MIN_UPDATE_CHECK_INTERVAL_HOURS, updateConfigDirty, type UpdateFieldErrors, type UpdateTarget } from "@/views/updateConfigFields";
+import { errorText } from "@/lib/errors";
 
 const CHANNEL_OPTIONS = [
   { value: "stable", label: "Stable" },
@@ -55,7 +56,7 @@ export function PlatformUpdateConfig() {
       setSaved(complete);
       setErrors({});
     } catch (e: unknown) {
-      setLoadError(e instanceof Error ? e.message : "failed to load update configuration");
+      setLoadError(errorText(e, "failed to load update configuration"));
     } finally {
       setLoading(false);
     }
@@ -94,7 +95,7 @@ export function PlatformUpdateConfig() {
         setErrors(next);
         if (Object.keys(next).length === 0) setLoadError(e.message);
       } else {
-        setLoadError(e instanceof Error ? e.message : "failed to save update configuration");
+        setLoadError(errorText(e, "failed to save update configuration"));
       }
     } finally {
       setSaving(false);

@@ -15,6 +15,7 @@ import {
 import { ErrorBox } from "@/ui/ErrorBox";
 import { useToast } from "@/ui/Toast";
 import { UserName } from "@/views/UserName";
+import { errorText } from "@/lib/errors";
 
 // Platform super-admin: organization sync. Rules map the groups, department
 // or email domain an auth provider asserts at sign-in onto a tenant
@@ -78,7 +79,7 @@ export function OrgSyncTab() {
       setMeta({ updatedAtMs: set.updatedAtMs, updatedBy: set.updatedBy });
       setTenants(t.tenants ?? []);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "failed to load org sync rules");
+      setError(errorText(e, "failed to load org sync rules"));
     }
   }, []);
 
@@ -113,7 +114,7 @@ export function OrgSyncTab() {
       setMeta({ updatedAtMs: set.updatedAtMs, updatedBy: set.updatedBy });
       toast.success("Org sync rules saved. They apply at each sign-in; run a resync to apply them now.");
     } catch (e) {
-      setError(e instanceof Error ? e.message : "failed to save rules");
+      setError(errorText(e, "failed to save rules"));
     } finally {
       setBusy(null);
     }
@@ -126,7 +127,7 @@ export function OrgSyncTab() {
       const res = await orgSyncApi.resync();
       toast.success(`Resync checked ${res.subjects} member(s); ${res.changed.length} changed.`);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "resync failed");
+      setError(errorText(e, "resync failed"));
     } finally {
       setBusy(null);
     }
@@ -291,7 +292,7 @@ function PreviewPanel() {
     try {
       setResult(await orgSyncApi.preview({ email: email.trim(), groups: splitList(groups), department: department.trim() }));
     } catch (e) {
-      setError(e instanceof Error ? e.message : "preview failed");
+      setError(errorText(e, "preview failed"));
     } finally {
       setBusy(false);
     }
@@ -370,7 +371,7 @@ function DeprovisionPanel() {
       toast.success(`Deprovisioned ${results.length} user(s); ended ${sessions} sign-in(s).`);
       setIds("");
     } catch (e) {
-      setError(e instanceof Error ? e.message : "deprovision failed");
+      setError(errorText(e, "deprovision failed"));
     } finally {
       setBusy(false);
     }

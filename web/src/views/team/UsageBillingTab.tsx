@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { DownloadSimpleIcon, ReceiptIcon } from "@phosphor-icons/react";
-import { api, ApiError } from "@/lib/api";
+import { api } from "@/lib/api";
 import {
   currentMonth,
   formatTokens,
@@ -18,6 +18,7 @@ import { Segment } from "@/ui/Segment";
 import { useToast } from "@/ui/Toast";
 import { QuotaRequestsPanel } from "@/views/team/QuotaRequestsPanel";
 import { UserName } from "@/views/UserName";
+import { errorText } from "@/lib/errors";
 
 const GROUPS = [
   { value: "day" as const, label: "By day" },
@@ -57,7 +58,7 @@ export function UsageBillingTab({
         setReport(r);
         setError("");
       })
-      .catch((e) => setError(e instanceof ApiError ? e.message : "Could not load the usage report"));
+      .catch((e) => setError(errorText(e, "Could not load the usage report")));
   }, [as, groupBy, month]);
   useEffect(load, [load]);
 
@@ -66,7 +67,7 @@ export function UsageBillingTab({
     try {
       await api.downloadBorrowUsageCsv({ as, groupBy, month });
     } catch (e) {
-      toast.error(e instanceof ApiError ? `CSV export failed: ${e.message}` : "CSV export failed");
+      toast.error(errorText(e, "CSV export failed"));
     } finally {
       setDownloading(false);
     }

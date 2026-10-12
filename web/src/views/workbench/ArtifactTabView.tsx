@@ -12,7 +12,7 @@ import {
   PencilSimpleIcon,
   ShareNetworkIcon,
 } from "@phosphor-icons/react";
-import { api, ApiError, type Artifact } from "@/lib/api";
+import { api, type Artifact } from "@/lib/api";
 import { downloadFileName, fileCategory, fileTypeLabel, isTextual } from "@/lib/artifactFiles";
 import { cn } from "@/lib/cn";
 import { appLinkBase } from "@/lib/config";
@@ -43,6 +43,7 @@ import { categoryIcons } from "./fileIcons";
 import { ShareDialog } from "./ShareDialog";
 import { VersionDiff } from "./VersionDiff";
 import { useDisplayNames } from "@/lib/useDisplayName";
+import { errorText } from "@/lib/errors";
 
 // ArtifactTabView is one workbench tab: a deliverable with its toolbar —
 // title and type, the version picker (any version; compare any two text
@@ -249,7 +250,7 @@ export function ArtifactTabView({
       toast.success(`Restored v${shown} as v${res.artifact.currentVersion}`);
       refreshed();
     } catch (e) {
-      toast.error(e instanceof ApiError && e.message ? e.message : "Restore failed");
+      toast.error(errorText(e, "Restore failed"));
     } finally {
       setBusy(false);
     }
@@ -261,7 +262,7 @@ export function ArtifactTabView({
       setMode("view");
       refreshed();
     } catch (e) {
-      toast.error(e instanceof ApiError && e.message ? e.message : "Publish failed");
+      toast.error(errorText(e, "Publish failed"));
     } finally {
       setBusy(false);
     }

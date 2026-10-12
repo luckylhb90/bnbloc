@@ -10,6 +10,7 @@ import { Badge, Card, Skeleton } from "@/ui/Card";
 import { ConfirmDialog } from "@/ui/Dialog";
 import { ErrorBox } from "@/ui/ErrorBox";
 import { useToast } from "@/ui/Toast";
+import { errorText } from "@/lib/errors";
 
 function ClientIcon({ client }: { readonly client: string }) {
   const cls = "shrink-0 text-[var(--color-fg-subtle)]";
@@ -54,7 +55,7 @@ export function SignedInDevices() {
     try {
       setSessions((await devicesApi.list()).sessions ?? []);
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : "Could not load your signed-in devices");
+      setError(errorText(e, "Could not load your signed-in devices"));
       setSessions([]);
     }
   }, []);
@@ -78,7 +79,7 @@ export function SignedInDevices() {
     } catch (e) {
       // 404: already gone (expired or revoked elsewhere) — the reload shows it.
       if (!(e instanceof ApiError && e.status === 404)) {
-        toast.error(e instanceof ApiError ? `Could not sign out that device: ${e.message}` : "Could not sign out that device");
+        toast.error(errorText(e, "Could not sign out that device"));
       }
     } finally {
       setBusy(false);
@@ -92,7 +93,7 @@ export function SignedInDevices() {
       const { revoked } = await devicesApi.revokeOthers();
       toast.success(revoked === 1 ? "Signed out 1 other session" : `Signed out ${revoked} other sessions`);
     } catch (e) {
-      toast.error(e instanceof ApiError ? `Could not sign out other devices: ${e.message}` : "Could not sign out other devices");
+      toast.error(errorText(e, "Could not sign out other devices"));
     } finally {
       setBusy(false);
     }

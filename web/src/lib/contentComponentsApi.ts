@@ -1,6 +1,4 @@
-import { ApiError, req } from "./api.ts";
-import { apiUrl } from "./config.ts";
-import { authedFetch, errorDetail } from "./session.ts";
+import { req } from "./api.ts";
 import {
   archiveContentType,
   formPayload,
@@ -50,13 +48,7 @@ async function postArchive<T>(path: string, file: File): Promise<T> {
 }
 
 async function postBody<T>(path: string, body: Blob, contentType: string): Promise<T> {
-  const res = await authedFetch(apiUrl(path), {
-    method: "POST",
-    headers: { "Content-Type": contentType },
-    body,
-  });
-  if (!res.ok) throw new ApiError(res.status, await errorDetail(res));
-  return (await res.json()) as T;
+  return req<T>(path, { method: "POST", headers: { "Content-Type": contentType }, body });
 }
 
 // Content components (experts, skill packs), served by the gateway
@@ -91,31 +83,22 @@ export const contentApi = {
   createArchive: (tar: Blob) => postBody<ContentComponentDetail>("/v1/content-components", tar, "application/x-tar"),
   newVersionArchive: (id: string, tar: Blob) =>
     postBody<ContentComponentDetail>(`/v1/content-components/${enc(id)}/versions`, tar, "application/x-tar").then(noteSaved),
-  remove: (id: string) => req<void>(`/v1/content-components/${enc(id)}`, { method: "DELETE", raw: true }),
+  remove: (id: string) => req<void>(`/v1/content-components/${enc(id)}`, { method: "DELETE", as: "none" }),
   ack: (id: string, version: string, roomId?: string) =>
-    req<void>(`/v1/content-components/${enc(id)}/versions/${enc(version)}/ack${roomQuery(roomId)}`, { method: "POST", raw: true }),
+    req<void>(`/v1/content-components/${enc(id)}/versions/${enc(version)}/ack${roomQuery(roomId)}`, { method: "POST", as: "none" }),
   uses: (roomId?: string) => req<ContentUsesReply>(`/v1/content-uses${roomQuery(roomId)}`),
   putUse: (scope: ContentUseScope, componentId: string, opts: { roomId?: string; version?: string } = {}) =>
     req<void>("/v1/content-uses", {
       method: "PUT",
       body: JSON.stringify({ scope, componentId, ...(opts.roomId ? { roomId: opts.roomId } : {}), ...(opts.version ? { version: opts.version } : {}) }),
-      raw: true,
+      as: "none",
     }),
   removeUse: (scope: ContentUseScope, componentId: string, roomId?: string) => {
     const q = new URLSearchParams({ scope, componentId });
     if (roomId) q.set("roomId", roomId);
-    return req<void>(`/v1/content-uses?${q}`, { method: "DELETE", raw: true });
+    return req<void>(`/v1/content-uses?${q}`, { method: "DELETE", as: "none" });
   },
   // The bundle archive (download through the artifact entitlement).
-  bundle: async (bundleUrl: string, roomId?: string): Promise<Blob> => {
-    const res = await authedFetch(apiUrl(bundleUrl + roomQuery(roomId)));
-    if (!res.ok) throw new ApiError(res.status, await errorDetail(res));
-    return res.blob();
-  },
+  bundle: (bundleUrl: string, roomId?: string): Promise<Blob> => req<Blob>(bundleUrl + roomQuery(roomId), { as: "blob" }),
 };
 
-// apiErrorText is the server's own message (the validator explains what is
-// wrong) or a fallback.
-export function apiErrorText(e: unknown, fallback: string): string {
-  return e instanceof ApiError && e.message ? `${fallback}: ${e.message}` : fallback;
-}

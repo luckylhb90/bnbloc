@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { BrainIcon, ChatTextIcon, TrashIcon, WrenchIcon } from "@phosphor-icons/react";
 import { contentKindWord, contentLabel, isTeam, type ContentComponent, type ContentUse } from "@/lib/contentComponents";
 import { contentUsesChanged } from "@/lib/contentUsesEvents";
-import { apiErrorText, contentApi } from "@/lib/contentComponentsApi";
+import { contentApi } from "@/lib/contentComponentsApi";
 import { Button } from "@/ui/Button";
 import { Badge } from "@/ui/Card";
 import { Segment } from "@/ui/Segment";
@@ -11,6 +11,7 @@ import { useToast } from "@/ui/Toast";
 import { ContentViewDialog, PermissionBadges } from "@/views/library/ContentViewDialog";
 import { PromptPackViewDialog } from "@/views/library/PromptPackDialogs";
 import { ContentByline } from "@/views/library/ContentSharing";
+import { errorText } from "@/lib/errors";
 
 type PinMode = "latest" | "pinned";
 const PIN_MODES = [
@@ -46,7 +47,7 @@ export function RoomContentSection({ roomId, canEdit }: { readonly roomId: strin
       .catch((e) => {
         if (!live) return;
         setUses([]);
-        toast.error(apiErrorText(e, "Could not load the room's experts and skills"));
+        toast.error(errorText(e, "Could not load the room's experts and skills"));
       });
     return () => {
       live = false;
@@ -74,7 +75,7 @@ export function RoomContentSection({ roomId, canEdit }: { readonly roomId: strin
       toast.success(id ? "Every agent turn here now wears the room expert" : "The room has no room expert now");
       reload();
     } catch (e) {
-      toast.error(apiErrorText(e, "Could not change the room expert"));
+      toast.error(errorText(e, "Could not change the room expert"));
     }
   };
 
@@ -86,7 +87,7 @@ export function RoomContentSection({ roomId, canEdit }: { readonly roomId: strin
       toast.success(done);
       reload();
     } catch (e) {
-      toast.error(apiErrorText(e, "Could not change the room's experts and skills"));
+      toast.error(errorText(e, "Could not change the room's experts and skills"));
     }
   };
   const add = () => {
@@ -101,7 +102,7 @@ export function RoomContentSection({ roomId, canEdit }: { readonly roomId: strin
       toast.success(`${u.component ? contentLabel(u.component) : "It"} removed from the room`);
       reload();
     } catch (e) {
-      toast.error(apiErrorText(e, "Could not remove it"));
+      toast.error(errorText(e, "Could not remove it"));
     }
   };
 

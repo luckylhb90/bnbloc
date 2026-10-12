@@ -12,7 +12,7 @@ import {
   type ContentKind,
 } from "@/lib/contentComponents";
 import type { MemberComponent } from "@/lib/apiTypes";
-import { apiErrorText, contentApi } from "@/lib/contentComponentsApi";
+import { contentApi } from "@/lib/contentComponentsApi";
 import { packPromptOptions, type PackPromptOption } from "@/lib/contentFormRefs";
 import { mcpToolsApi } from "@/lib/mcpToolsApi";
 import { Button } from "@/ui/Button";
@@ -21,6 +21,7 @@ import { Field, Input, Textarea } from "@/ui/Input";
 import { Select } from "@/ui/Select";
 import { useToast } from "@/ui/Toast";
 import { QuickPromptsEditor, RequirementsFields, TagsIconFields, TeamEditor } from "@/views/library/ContentFormExtras";
+import { errorText } from "@/lib/errors";
 
 // The editor target: a new component of a kind, or a new version of one of
 // the member's components (prefilled from its latest version).
@@ -108,7 +109,7 @@ export function ContentEditorDialog({
       .then((d) => live && setForm(formFromVersion(d)))
       .catch((e) => {
         if (!live) return;
-        toast.error(apiErrorText(e, "Could not load the latest version"));
+        toast.error(errorText(e, "Could not load the latest version"));
         onClose();
       });
     return () => {
@@ -131,7 +132,7 @@ export function ContentEditorDialog({
       onSaved();
       onClose();
     } catch (e) {
-      toast.error(apiErrorText(e, "Could not save"));
+      toast.error(errorText(e, "Could not save"));
     } finally {
       setBusy(false);
     }
@@ -244,7 +245,7 @@ export function ImportDialog({
       onImported();
       onClose();
     } catch (e) {
-      toast.error(apiErrorText(e, "Could not import"));
+      toast.error(errorText(e, "Could not import"));
     } finally {
       setBusy(false);
     }

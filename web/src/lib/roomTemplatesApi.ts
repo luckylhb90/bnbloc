@@ -19,8 +19,8 @@ export const roomTemplatesApi = {
     req<RoomTemplate>("/v1/room-templates", { method: "POST", body: JSON.stringify(body) }),
   update: (id: string, patch: Partial<RoomTemplateInput>) =>
     req<RoomTemplate>(`/v1/room-templates/${enc(id)}`, { method: "PATCH", body: JSON.stringify(patch) }),
-  remove: (id: string) => req<void>(`/v1/room-templates/${enc(id)}`, { method: "DELETE", raw: true }),
-  moderate: (id: string) => req<void>(`/v1/tenant/room-templates/${enc(id)}`, { method: "DELETE", raw: true }),
+  remove: (id: string) => req<void>(`/v1/room-templates/${enc(id)}`, { method: "DELETE", as: "none" }),
+  moderate: (id: string) => req<void>(`/v1/tenant/room-templates/${enc(id)}`, { method: "DELETE", as: "none" }),
   // Room owner/admin: save a room as a template.
   fromRoom: (roomId: string, body: TemplateFromRoomInput) =>
     req<RoomTemplate>(`/v1/room-templates/from-room/${enc(roomId)}`, { method: "POST", body: JSON.stringify(body) }),

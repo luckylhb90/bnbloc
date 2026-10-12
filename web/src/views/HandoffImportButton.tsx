@@ -4,6 +4,7 @@ import { api, ApiError } from "@/lib/api";
 import { importSummary } from "@/lib/handoff";
 import { Button } from "@/ui/Button";
 import { useToast } from "@/ui/Toast";
+import { errorText } from "@/lib/errors";
 
 // HandoffImportButton picks a handoff package (.zip), imports it into a NEW
 // room owned by the caller, and opens that room. The original members are not
@@ -29,11 +30,7 @@ export function HandoffImportButton({
       onImported(res.roomId);
     } catch (e) {
       toast.error(
-        e instanceof ApiError
-          ? e.status === 413
-            ? "That handoff package is too large to import"
-            : e.message
-          : "Import failed",
+        e instanceof ApiError && e.status === 413 ? "That handoff package is too large to import" : errorText(e, "Import failed"),
       );
     } finally {
       setBusy(false);

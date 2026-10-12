@@ -13,6 +13,7 @@ import {
 import { DeviceFrame } from "./DeviceFrame";
 import type { ArtifactViewerProps } from "./registry";
 import { useViewerToolbar } from "./toolbar";
+import { errorText } from "@/lib/errors";
 
 // SiteViewer runs a web app (`site` version: a static snapshot the gateway
 // serves file by file) in a sandboxed iframe — opaque origin, no
@@ -65,7 +66,7 @@ export default function SiteViewer({ site, file, toolbar }: ArtifactViewerProps)
       setError("");
       setFrame((f) => ({ src: siteFrameUrl(url.siteUrl, frameEnv()), nonce: (f?.nonce ?? 0) + 1 }));
     } catch (e) {
-      setError(e instanceof Error && e.message ? e.message : "Could not open this web app.");
+      setError(errorText(e, "Could not open this web app."));
     }
   }, [usable]);
 

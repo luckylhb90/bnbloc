@@ -2,10 +2,10 @@ import { useEffect, useState } from "react";
 import { CheckCircleIcon, UsersThreeIcon, WarningIcon } from "@phosphor-icons/react";
 import { isTeam, type ExpertChoice } from "@/lib/contentComponents";
 import { estimateText, leadLine, planRequest, seatLine, teamConfirmKey, unstaffedRoles, type TeamPlan } from "@/lib/teams";
-import { apiErrorText } from "@/lib/contentComponentsApi";
 import { teamApi } from "@/lib/teamsApi";
 import { Button } from "@/ui/Button";
 import { useDisplayNames } from "@/lib/useDisplayName";
+import { errorText } from "@/lib/errors";
 
 // The lead agent a team runs on: the composer's resolved recipient.
 export interface TeamLead {
@@ -47,7 +47,7 @@ export function useTeamPlan(roomId: string, expert: ExpertChoice | null, lead: T
     teamApi
       .plan(roomId, planRequest(team, lead))
       .then((p) => live && setPlan(p))
-      .catch((e) => live && setError(apiErrorText(e, "Could not staff the team")))
+      .catch((e) => live && setError(errorText(e, "Could not staff the team")))
       .finally(() => live && setLoading(false));
     return () => {
       live = false;

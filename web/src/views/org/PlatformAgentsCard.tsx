@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { api, ApiError } from "@/lib/api";
+import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { cn } from "@/lib/cn";
 import {
@@ -27,6 +27,7 @@ import { Select } from "@/ui/Select";
 import { useToast } from "@/ui/Toast";
 import { PlatformAgentsUsagePanel } from "@/views/org/PlatformAgentsUsage";
 import { UserName } from "@/views/UserName";
+import { errorText } from "@/lib/errors";
 
 const EMPTY_ENTRY: PlatformAgentsPolicyInput = { enabled: false, agents: [] };
 
@@ -64,7 +65,7 @@ export function PlatformAgentsCard() {
       );
       setDraft(entryOf(p, subject));
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Could not load platform agents");
+      setError(errorText(e, "Could not load platform agents"));
     }
   }, [subject]);
 
@@ -85,7 +86,7 @@ export function PlatformAgentsCard() {
       setDraft(entryOf(next, subject));
       toast.success("Platform agents saved");
     } catch (e) {
-      toast.error(e instanceof ApiError ? `Save failed: ${e.message}` : "Save failed");
+      toast.error(errorText(e, "Save failed"));
     } finally {
       setSaving(false);
     }

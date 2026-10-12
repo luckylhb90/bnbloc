@@ -17,6 +17,7 @@ import { SignedInDevices } from "@/views/settings/SignedInDevices";
 import { MyBudget } from "@/views/settings/MyBudget";
 import { AgentSandbox } from "@/views/settings/AgentSandbox";
 import { ProfileSettings } from "@/views/settings/ProfileSettings";
+import { errorText } from "@/lib/errors";
 
 
 // Settings holds the member's personal settings. Notifications are delivered
@@ -36,7 +37,7 @@ export function Settings() {
     try {
       setPrefs(await notificationsApi.prefs());
     } catch (e) {
-      setError(e instanceof Error ? e.message : "failed to load notification settings");
+      setError(errorText(e, "failed to load notification settings"));
     }
   }, []);
 
@@ -65,7 +66,7 @@ export function Settings() {
       setPrefs(await notificationsApi.savePrefs(next));
     } catch (e) {
       setPrefs(prev);
-      toast.error(e instanceof Error ? e.message : "Could not save notification settings");
+      toast.error(errorText(e, "Could not save notification settings"));
     } finally {
       setSaving(false);
     }

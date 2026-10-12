@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { CopyIcon, DownloadSimpleIcon, GlobeIcon } from "@phosphor-icons/react";
 import { contentLabel, type ContentComponent } from "@/lib/contentComponents";
-import { apiErrorText } from "@/lib/contentComponentsApi";
 import { promoteCommands, tenantScopeBody, tenantScopeLabel, type ContentAdminComponent } from "@/lib/contentSharing";
 import { contentSharingApi } from "@/lib/contentSharingApi";
 import { relativeTime } from "@/lib/format";
@@ -14,6 +13,7 @@ import { useToast } from "@/ui/Toast";
 import { useCopy } from "@/ui/useCopy";
 import { PermissionBadges } from "@/views/library/ContentViewDialog";
 import { UserName } from "@/views/UserName";
+import { errorText } from "@/lib/errors";
 
 // Super-admin: content at platform scope (docs/prd/2026-10-12-experts-and-
 // teams.md, step 4). Platform content reaches every organization; it gets
@@ -35,7 +35,7 @@ export function PlatformContentTab() {
       const r = await contentSharingApi.platformContent();
       setItems(r.components ?? []);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "failed to load content");
+      setError(errorText(e, "failed to load content"));
       setItems([]);
     }
   }, []);
@@ -50,7 +50,7 @@ export function PlatformContentTab() {
       toast.success(action === "unpublish" ? `${contentLabel(c)} is unpublished everywhere` : `${contentLabel(c)} is published again`);
       await load();
     } catch (e) {
-      toast.error(apiErrorText(e, "Could not change it"));
+      toast.error(errorText(e, "Could not change it"));
     }
   };
   const remove = async (c: ContentComponent) => {
@@ -59,7 +59,7 @@ export function PlatformContentTab() {
       toast.success(`${contentLabel(c)} is removed from the platform`);
       await load();
     } catch (e) {
-      toast.error(apiErrorText(e, "Could not remove it"));
+      toast.error(errorText(e, "Could not remove it"));
     }
   };
 
@@ -178,7 +178,7 @@ function PromoteDialog({ component: c, onClose }: { readonly component: ContentC
       a.click();
       URL.revokeObjectURL(url);
     } catch (e) {
-      toast.error(apiErrorText(e, "Could not export the package"));
+      toast.error(errorText(e, "Could not export the package"));
     } finally {
       setBusy(false);
     }
@@ -238,7 +238,7 @@ function TenantScopeDialog({ item, onClose, onSaved }: { readonly item: ContentA
       onSaved();
       onClose();
     } catch (e) {
-      toast.error(apiErrorText(e, "Could not change its organizations"));
+      toast.error(errorText(e, "Could not change its organizations"));
     } finally {
       setBusy(false);
     }

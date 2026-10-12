@@ -7,6 +7,7 @@ import { Markdown } from "@/lib/markdown";
 import { Button } from "@/ui/Button";
 import { Badge, Card } from "@/ui/Card";
 import { ReleaseDownloadButton } from "@/views/ReleaseDownloadButton";
+import { errorText } from "@/lib/errors";
 
 const FALLBACK_PROJECT_NAME = "bnbloc";
 
@@ -21,7 +22,7 @@ export function ReleaseHub() {
     try {
       setHub(await api.getAppReleases());
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "failed to load releases");
+      setError(errorText(e, "failed to load releases"));
     } finally {
       setLoading(false);
     }

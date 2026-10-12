@@ -3,6 +3,7 @@ import { api, ApiError, type MessageTask, type TaskStatus } from "@/lib/api";
 import type { RoomEvent } from "@/lib/roomEvents";
 import { applyTaskUpdate } from "@/lib/team";
 import { useToast } from "@/ui/Toast";
+import { errorText } from "@/lib/errors";
 
 export interface RoomTasks {
   readonly tasks: MessageTask[];
@@ -51,7 +52,7 @@ export function useRoomTasks(roomId: string, joinedGen: number): RoomTasks {
           if (done) toast.success(done);
         })
         .catch((e) => {
-          toast.error(e instanceof ApiError && e.status === 404 ? "That message no longer exists" : "Could not update the task");
+          toast.error(e instanceof ApiError && e.status === 404 ? "That message no longer exists" : errorText(e, "Could not update the task"));
         });
     },
     [roomId, toast],

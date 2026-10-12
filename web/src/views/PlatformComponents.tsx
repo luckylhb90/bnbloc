@@ -13,6 +13,7 @@ import { ComponentCard } from "@/views/ComponentCard";
 import { ComponentUploadFlow } from "@/views/ComponentUploadFlow";
 import { PlatformMCPForm } from "@/views/PlatformMCPForm";
 import { TrustedKeysPanel } from "@/views/PlatformTrustedKeys";
+import { errorText } from "@/lib/errors";
 
 type KindFilter = "all" | ComponentKind;
 
@@ -44,7 +45,7 @@ export function PlatformComponents() {
       const result = await api.listPlatformComponents();
       setComponents(result.components ?? []);
     } catch (error: unknown) {
-      setLoadError(error instanceof Error ? error.message : "failed to load components");
+      setLoadError(errorText(error, "failed to load components"));
       setComponents([]);
     }
   }, []);
@@ -68,7 +69,7 @@ export function PlatformComponents() {
       toast.success(`${component.name} ${rolloutCopy(rollout)}`);
       await load();
     } catch (error: unknown) {
-      setLoadError(error instanceof Error ? error.message : "failed to set rollout");
+      setLoadError(errorText(error, "failed to set rollout"));
     } finally {
       setBusyComponent(null);
     }
@@ -82,7 +83,7 @@ export function PlatformComponents() {
       setRevealed({ name: component.name, secret });
       toast.success(`New signing secret for ${component.name}`);
     } catch (error: unknown) {
-      setLoadError(error instanceof Error ? error.message : "failed to rotate the secret");
+      setLoadError(errorText(error, "failed to rotate the secret"));
     } finally {
       setBusyComponent(null);
     }
@@ -95,7 +96,7 @@ export function PlatformComponents() {
       if (r.ok) toast.success(r.message);
       else toast.error(r.message);
     } catch (error: unknown) {
-      toast.error(error instanceof Error ? error.message : "Could not send a test notification");
+      toast.error(errorText(error, "Could not send a test notification"));
     } finally {
       setBusyComponent(null);
     }
@@ -109,7 +110,7 @@ export function PlatformComponents() {
       toast.success(`${component.name} uninstalled`);
       await load();
     } catch (error: unknown) {
-      setLoadError(error instanceof Error ? error.message : "failed to uninstall component");
+      setLoadError(errorText(error, "failed to uninstall component"));
     } finally {
       setBusyComponent(null);
     }

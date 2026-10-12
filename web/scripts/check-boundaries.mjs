@@ -27,6 +27,50 @@ export const RULES = [
     sample: { file: "lib/api.ts", text: "export interface AgentJob {\n  jobId: string;\n}" },
   },
   {
+    id: 1,
+    name: "network requests go through the transports: req (lib/api.ts), the public share fetch, the bundle probe",
+    // A hand-rolled fetch skips the session refresh, the acting tenant and
+    // the error mapping (web M1).
+    pattern: /\bfetch\(/,
+    allowed: ["lib/session.ts", "lib/sharesApi.ts", "views/WebUpdateNotice.tsx"],
+    sample: { file: "views/X.tsx", text: "const res = await fetch(url);" },
+  },
+  {
+    id: "1b",
+    name: "authenticated requests go through req; authedFetch only in the transports",
+    pattern: /\bauthedFetch\(/,
+    // artifactUpload streams with progress (XHR); releaseDownload fetches an
+    // absolute artifact URL.
+    allowed: ["lib/session.ts", "lib/api.ts", "lib/artifactUpload.ts", "lib/releaseDownload.ts"],
+    sample: { file: "lib/xApi.ts", text: "const res = await authedFetch(apiUrl(path));" },
+  },
+  {
+    id: 2,
+    name: "a failed request becomes an ApiError only in the transports (lib/errors.ts owns the class)",
+    pattern: /new ApiError\(/,
+    allowed: ["lib/api.ts", "lib/errors.ts", "lib/sharesApi.ts", "lib/artifactUpload.ts", "lib/releaseDownload.ts"],
+    sample: { file: "lib/xApi.ts", text: "if (!res.ok) throw new ApiError(res.status, await errorDetail(res));" },
+  },
+  {
+    id: 4,
+    name: "views render a failure with errorText / statusText (lib/errors.ts)",
+    // These leaked "Failed to fetch", a SyntaxError or [object Object]
+    // into toasts (web M3).
+    pattern: /instanceof Error \?|String\((?:e|err|error)\)/,
+    scope: /^views\//,
+    allowed: [],
+    sample: { file: "views/X.tsx", text: 'toast.error(e instanceof Error ? e.message : "failed");' },
+  },
+  {
+    id: 8,
+    name: "role abilities are decided by lib/roomRoles.ts (room) and lib/permissions.ts (organization)",
+    // Five copies of the org-role check ignored the viewer role, and the
+    // room settings gear keyed on the creator, not the owner (web H7, H8).
+    pattern: /\.role [!=]== "(?:owner|admin|visitor|org_admin|super_admin|viewer)"|\brole [!=]== "(?:org_admin|super_admin|viewer)"/,
+    allowed: ["lib/roomRoles.ts", "lib/permissions.ts"],
+    sample: { file: "views/X.tsx", text: 'const isAdmin = role === "org_admin" || role === "super_admin";' },
+  },
+  {
     id: 6,
     name: "the session token rides a URL only on the room event stream",
     // EventSource cannot set headers, so sse.ts passes the session as
@@ -61,6 +105,7 @@ export function violations(files) {
   for (const { file, text } of files) {
     if (/\.test\.tsx?$/.test(file)) continue;
     for (const rule of RULES) {
+      if (rule.scope && !rule.scope.test(file)) continue;
       if (rule.allowed.includes(file) || !rule.pattern.test(text)) continue;
       out.push(`${file}: rule ${rule.id} (${rule.name})`);
     }

@@ -3,6 +3,7 @@ import { api, type PlatformTenant } from "@/lib/api";
 import { useQuery } from "@/lib/useQuery";
 import { cn } from "@/lib/cn";
 import { ErrorBox } from "@/ui/ErrorBox";
+import { errorText } from "@/lib/errors";
 
 // Platform super-admin: the cross-tenant registry (split from
 // Organization.tsx).
@@ -35,7 +36,7 @@ export function TenantsTab() {
       await fn();
       refetch();
     } catch (e) {
-      setMutError(e instanceof Error ? e.message : failMsg);
+      setMutError(errorText(e, failMsg));
     } finally {
       setBusy(null);
     }

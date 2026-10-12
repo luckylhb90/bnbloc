@@ -21,6 +21,7 @@ import {
 } from "@/lib/workshop";
 import type { ToastAction } from "@/ui/Toast";
 import { useToast } from "@/ui/Toast";
+import { errorText } from "@/lib/errors";
 
 // Room ids are global: a taken id is retried with a fresh suffix.
 const CREATE_ATTEMPTS = 3;
@@ -96,7 +97,7 @@ export function useOpenWorkshop(onOpenRoom: (roomId: string) => void): { readonl
         composerDrafts.queue(roomId, draft);
         onOpenRoom(roomId);
       } catch (e) {
-        toast.error(e instanceof ApiError && e.message ? `Could not open the workshop: ${e.message}` : "Could not open the workshop");
+        toast.error(errorText(e, "Could not open the workshop"));
       } finally {
         setBusy(false);
       }

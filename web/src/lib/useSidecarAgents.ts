@@ -16,6 +16,7 @@ import {
   type SidecarEntry,
   type SidecarSnapshot,
 } from "@/lib/sidecarState";
+import { errorReason } from "./errors.ts";
 
 // One app-wide poller for the desktop's managed sidecars, shared by every view
 // that lists local agents (Agents page, composer agent picker, run dialog) so
@@ -66,7 +67,7 @@ function update(key: string, fn: (e: SidecarEntry) => SidecarEntry): void {
 }
 
 function message(e: unknown): string {
-  return e instanceof Error ? e.message : String(e);
+  return errorReason(e) || "unknown error";
 }
 
 async function loadTargets(e: SidecarEntry): Promise<void> {

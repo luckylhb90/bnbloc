@@ -1,5 +1,6 @@
 import type { ReleaseEntry, ReleaseFile, UpdateConfig, UpdatePolicy } from "./api";
 import { updateCandidateForArchive } from "../views/updateConfigFields.ts";
+import { errorText } from "./errors.ts";
 
 // The operator CLI (`bnbloc updates publish`) applies these same rules in Go:
 // cmd/bnbloc/desktop_release.go. Change both together (their tests mirror
@@ -162,7 +163,7 @@ export async function publishDesktopRelease(input: DesktopReleaseInput & {
   try {
     await input.saveHub(prepared.hubRelease);
   } catch (error) {
-    const detail = error instanceof Error ? error.message : "unknown error";
+    const detail = errorText(error, "unknown error");
     throw new Error(`Artifact uploaded, but Release Hub save failed. Auto-update is not activated. ${detail}`);
   }
 
@@ -172,7 +173,7 @@ export async function publishDesktopRelease(input: DesktopReleaseInput & {
     input.onProgress?.("Published. Existing clients will discover the update on their next check.");
     return { artifact, updateConfig, hubRelease: prepared.hubRelease };
   } catch (error) {
-    const detail = error instanceof Error ? error.message : "unknown error";
+    const detail = errorText(error, "unknown error");
     const partial = new Error(`Release Hub saved, but updater configuration failed. Update rollout is not activated. ${detail}`);
     Object.assign(partial, { hubSaved: true });
     throw partial;

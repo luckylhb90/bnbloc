@@ -1,13 +1,14 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Select } from "@/ui/Select";
 import { FileCodeIcon, FileDocIcon, ListIcon, MagnifyingGlassIcon, SquaresFourIcon, XIcon } from "@phosphor-icons/react";
-import { api, ApiError, type Artifact, type ArtifactListFilter } from "@/lib/api";
+import { api, type Artifact, type ArtifactListFilter } from "@/lib/api";
 import { fileCategory, type FileCategory } from "@/lib/artifactFiles";
 import { cn } from "@/lib/cn";
 import { useToast } from "@/ui/Toast";
 import { FileCard, FileRow } from "./FileCard";
 import { versionFacts } from "./artifactData";
 import { useDisplayNames } from "@/lib/useDisplayName";
+import { errorText } from "@/lib/errors";
 
 // DeliverablesView: every artifact of the room as a filterable grid or list
 // (type, author, date, search; optionally only one message's deliverables).
@@ -163,7 +164,7 @@ export function DeliverablesView({
       });
       onOpen(res.artifact.artifactId);
     } catch (e) {
-      toast.error(e instanceof ApiError && e.message ? e.message : "Could not create the file");
+      toast.error(errorText(e, "Could not create the file"));
     } finally {
       setBusy(false);
     }

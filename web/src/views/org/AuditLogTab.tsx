@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Select } from "@/ui/Select";
 import { ArrowClockwiseIcon, DownloadSimpleIcon, ScrollIcon } from "@phosphor-icons/react";
-import { ApiError, type PlatformTenant } from "@/lib/api";
+import { type PlatformTenant } from "@/lib/api";
 import {
   appendAuditPage,
   AUDIT_KIND_GROUPS,
@@ -21,6 +21,7 @@ import { EmptyState } from "@/ui/Page";
 import { useToast } from "@/ui/Toast";
 import { UserWithEmail } from "@/views/UserName";
 import { useEmailMask } from "@/lib/privacyMode";
+import { errorText } from "@/lib/errors";
 
 const selectClass =
   "h-10 rounded-[var(--radius)] border border-[var(--color-border)] bg-[var(--color-surface-2)] px-2 text-sm";
@@ -69,7 +70,7 @@ export function AuditLogTab({
       .catch((e) => {
         if (gen !== generation.current) return;
         setEntries([]);
-        setError(e instanceof ApiError ? e.message : "Could not load the audit log");
+        setError(errorText(e, "Could not load the audit log"));
       });
   }, [scopeKey, filter]);
   useEffect(load, [load]);
@@ -84,7 +85,7 @@ export function AuditLogTab({
       setEntries((shown) => appendAuditPage(shown ?? [], r.entries ?? []));
       setCursor(r.nextCursor);
     } catch (e) {
-      toast.error(e instanceof ApiError ? `Could not load more: ${e.message}` : "Could not load more events");
+      toast.error(errorText(e, "Could not load more events"));
     } finally {
       setLoadingMore(false);
     }
@@ -96,7 +97,7 @@ export function AuditLogTab({
       const { truncated } = await auditLogApi.downloadCsv(logScope, filter);
       if (truncated > 0) toast.info(`Export capped at ${truncated} events; narrow the date range for the rest`);
     } catch (e) {
-      toast.error(e instanceof ApiError ? `CSV export failed: ${e.message}` : "CSV export failed");
+      toast.error(errorText(e, "CSV export failed"));
     } finally {
       setDownloading(false);
     }

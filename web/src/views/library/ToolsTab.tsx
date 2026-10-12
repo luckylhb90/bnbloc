@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { MagnifyingGlassIcon, WrenchIcon } from "@phosphor-icons/react";
 import type { MemberComponent } from "@/lib/api";
 import { contentLabel, type ContentComponent } from "@/lib/contentComponents";
-import { apiErrorText, contentApi } from "@/lib/contentComponentsApi";
+import { contentApi } from "@/lib/contentComponentsApi";
 import { desktop } from "@/lib/desktop";
 import { credentialStatus, envSummary, toolUsers, type McpToolSettings } from "@/lib/mcpTools";
 import { mcpToolsApi } from "@/lib/mcpToolsApi";
@@ -11,6 +11,7 @@ import { Badge, Card, Skeleton } from "@/ui/Card";
 import { Input } from "@/ui/Input";
 import { EmptyState, PageHeader } from "@/ui/Page";
 import { useToast } from "@/ui/Toast";
+import { errorText } from "@/lib/errors";
 
 // ToolsTab is the Library's MCP tools: the tool servers published by the
 // platform that experts and skill packs can require, as the member may use
@@ -41,7 +42,7 @@ export function ToolsTab({ tabs }: { readonly tabs: React.ReactNode }) {
       .catch((e) => {
         if (!live) return;
         setTools([]);
-        toast.error(apiErrorText(e, "Could not load the tools"));
+        toast.error(errorText(e, "Could not load the tools"));
       });
     return () => {
       live = false;
@@ -62,7 +63,7 @@ export function ToolsTab({ tabs }: { readonly tabs: React.ReactNode }) {
       toast.success(on ? `${t.name} is on for you` : `${t.name} is off for you`);
       reload();
     } catch (e) {
-      toast.error(apiErrorText(e, "Could not change it"));
+      toast.error(errorText(e, "Could not change it"));
     }
   };
 

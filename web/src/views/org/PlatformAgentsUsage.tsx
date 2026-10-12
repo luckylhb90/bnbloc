@@ -8,6 +8,7 @@ import { useQuery } from "@/lib/useQuery";
 import { Button } from "@/ui/Button";
 import { ErrorBox } from "@/ui/ErrorBox";
 import { UserName } from "@/views/UserName";
+import { errorText } from "@/lib/errors";
 
 // PlatformAgentsUsagePanel is the platform agents' usage dashboard (PRD
 // 2026-10-10 v2 §2): today's and this month's totals, then expandable top
@@ -28,7 +29,7 @@ export function PlatformAgentsUsagePanel() {
         </Button>
       </div>
       {query.error && !usage ? (
-        <ErrorBox>{query.error instanceof Error ? query.error.message : "Could not load usage"}</ErrorBox>
+        <ErrorBox>{errorText(query.error, "Could not load usage")}</ErrorBox>
       ) : !usage ? (
         <p className="text-xs text-[var(--color-fg-subtle)]">Loading usage…</p>
       ) : (

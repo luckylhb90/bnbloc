@@ -1,12 +1,13 @@
 import { useEffect, useState } from "react";
 import { BookmarkSimpleIcon } from "@phosphor-icons/react";
-import { api, ApiError, type Artifact } from "@/lib/api";
+import { api, type Artifact } from "@/lib/api";
 import { contentKindWord } from "@/lib/contentComponents";
 import { contentApi } from "@/lib/contentComponentsApi";
 import { isManifestPath, packageDir, packageFiles, parseDraftManifest, tarArchive, type DraftManifest } from "@/lib/contentDrafts";
 import { useToast } from "@/ui/Toast";
 import { savedActions, savedMessage } from "@/views/library/workshopFlow";
 import { loadArtifactDetail, loadVersionBlob, versionMeta } from "./artifactData";
+import { errorText } from "@/lib/errors";
 
 // At most this many artifact list pages are read to gather a package's files.
 const MAX_PAGES = 5;
@@ -100,7 +101,7 @@ function SaveDraftButton({ roomId, pkg }: { readonly roomId: string; readonly pk
       const c = saved.component;
       toast.success(savedMessage(c), savedActions(c, roomId, (msg) => toast.info(msg)));
     } catch (e) {
-      setError(e instanceof ApiError && e.message ? e.message : `Could not save the ${word}`);
+      setError(errorText(e, `Could not save the ${word}`));
     } finally {
       setBusy(false);
     }

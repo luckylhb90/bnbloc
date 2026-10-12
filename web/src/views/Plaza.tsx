@@ -10,6 +10,8 @@ import { api, ApiError, type PlazaRoom } from "@/lib/api";
 import { isSubmitEnter } from "@/lib/keys";
 import { roomIdProblem } from "@/lib/roomId";
 import { useAuth } from "@/lib/auth";
+import { can } from "@/lib/permissions";
+import { errorText } from "@/lib/errors";
 import { Button } from "@/ui/Button";
 import { Input, Field } from "@/ui/Input";
 import { Card, Badge, Skeleton } from "@/ui/Card";
@@ -24,10 +26,30 @@ import { WelcomeCard } from "@/views/WelcomeCard";
 export function Plaza({ onOpen }: { onOpen: (id: string) => void }) {
   const [q, setQ] = useState("");
   const [rooms, setRooms] = useState<PlazaRoom[] | null>(null);
+  // How many rooms match q (the plaza pages; rooms holds the loaded pages).
+  const [total, setTotal] = useState(0);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [creating, setCreating] = useState(false);
   const [fromTemplate, setFromTemplate] = useState(false);
   const toast = useToast();
-  const { reauth } = useAuth();
+  const { reauth, role } = useAuth();
+  // A read-only (viewer) organization role creates no rooms.
+  const mayCreate = can(role, "create_room");
+
+  // loadMore appends the next plaza page of the current query.
+  const loadMore = async () => {
+    if (!rooms) return;
+    setLoadingMore(true);
+    try {
+      const r = await api.searchRooms(q, rooms.length);
+      setRooms((cur) => [...(cur ?? []), ...r.rooms.filter((x) => !(cur ?? []).some((c) => c.roomId === x.roomId))]);
+      setTotal(r.total);
+    } catch (e) {
+      toast.error(errorText(e, "Could not load more rooms"));
+    } finally {
+      setLoadingMore(false);
+    }
+  };
 
   const join = async (id: string) => {
     try {
@@ -50,7 +72,11 @@ export function Plaza({ onOpen }: { onOpen: (id: string) => void }) {
         setRooms(null);
         api
           .searchRooms(q)
-          .then((r) => !cancelled && setRooms(r.rooms || []))
+          .then((r) => {
+            if (cancelled) return;
+            setRooms(r.rooms);
+            setTotal(r.total);
+          })
           .catch(() => !cancelled && setRooms([]));
       },
       q ? 250 : 0,
@@ -67,10 +93,12 @@ export function Plaza({ onOpen }: { onOpen: (id: string) => void }) {
         title="Plaza"
         subtitle="Discover shared rooms or start your own"
         actions={
-          <Button variant="primary" onClick={() => setCreating(true)}>
-            <PlusIcon size={16} />
-            New room
-          </Button>
+          mayCreate ? (
+            <Button variant="primary" onClick={() => setCreating(true)}>
+              <PlusIcon size={16} />
+              New room
+            </Button>
+          ) : undefined
         }
       />
 
@@ -105,10 +133,12 @@ export function Plaza({ onOpen }: { onOpen: (id: string) => void }) {
                 : "Be the first — create a room to start collaborating."
             }
             action={
-              <Button variant="primary" onClick={() => setCreating(true)}>
-                <PlusIcon size={16} />
-                New room
-              </Button>
+              mayCreate ? (
+                <Button variant="primary" onClick={() => setCreating(true)}>
+                  <PlusIcon size={16} />
+                  New room
+                </Button>
+              ) : undefined
             }
           />
         ) : (
@@ -116,6 +146,13 @@ export function Plaza({ onOpen }: { onOpen: (id: string) => void }) {
             {rooms.map((r) => (
               <RoomCard key={r.roomId} room={r} onOpen={onOpen} onJoin={join} />
             ))}
+          </div>
+        )}
+        {rooms && rooms.length < total && (
+          <div className="mt-4 flex justify-center">
+            <Button variant="outline" onClick={() => void loadMore()} disabled={loadingMore}>
+              {loadingMore ? "Loading…" : `Show more rooms (${total - rooms.length})`}
+            </Button>
           </div>
         )}
         <SharedPrompts />
@@ -247,7 +284,7 @@ function CreateRoomDialog({
       if (e instanceof ApiError && e.status === 409) {
         setErr("A room with this id already exists");
       } else {
-        const msg = e instanceof ApiError ? e.message : "create failed";
+        const msg = errorText(e, "create failed");
         setErr(msg);
         toast.error(`Could not create room: ${msg}`);
       }
