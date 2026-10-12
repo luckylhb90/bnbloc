@@ -291,11 +291,15 @@ func (s *Service) contentViews(ctx context.Context, claims auth.Claims, comps []
 }
 
 func (s *Service) handleListContent(w http.ResponseWriter, r *http.Request) {
-	claims, ok := s.contentCaller(w, r, false)
+	caller, ok := s.contentCaller(w, r, false)
 	if !ok {
 		return
 	}
-	list, err := s.memberContent(r.Context(), claims, strings.TrimSpace(r.URL.Query().Get("kind")))
+	actor, ok := s.contentActing(w, r, caller)
+	if !ok {
+		return
+	}
+	list, err := s.memberContent(r.Context(), actor.Claims, strings.TrimSpace(r.URL.Query().Get("kind")))
 	if err != nil {
 		if strings.HasPrefix(err.Error(), "unknown content kind") {
 			http.Error(w, err.Error(), http.StatusBadRequest)
@@ -344,9 +348,15 @@ func readBody(w http.ResponseWriter, r *http.Request, limit int64) ([]byte, bool
 }
 
 // handleCreateContent saves a new component: a JSON form, or a package
-// archive whose component.json names it.
+// archive whose component.json names it. With a job grant (?job=&room=,
+// content_requester.go) the bridge running the job saves it as the job's
+// requester.
 func (s *Service) handleCreateContent(w http.ResponseWriter, r *http.Request) {
-	claims, ok := s.contentCaller(w, r, true)
+	caller, ok := s.contentCaller(w, r, true)
+	if !ok {
+		return
+	}
+	actor, ok := s.contentActing(w, r, caller)
 	if !ok {
 		return
 	}
@@ -376,7 +386,10 @@ func (s *Service) handleCreateContent(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	s.createContent(w, r, claims, pkg, bundle)
+	if !jobSaveAllowed(w, actor, pkg) {
+		return
+	}
+	s.createContent(w, r, actor, pkg, bundle)
 }
 
 // importArchive reads an uploaded bnbloc package or a foreign format: a
@@ -426,7 +439,7 @@ func (s *Service) handleImportContent(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-		s.addContentVersion(w, r, claims, c, pkg, bundle)
+		s.addContentVersion(w, r, contentActor{Claims: claims}, c, pkg, bundle)
 		return
 	}
 	kind := strings.TrimSpace(q.Get("kind"))
@@ -440,7 +453,7 @@ func (s *Service) handleImportContent(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	s.createContent(w, r, claims, pkg, bundle)
+	s.createContent(w, r, contentActor{Claims: claims}, pkg, bundle)
 }
 
 // storeBundle puts a validated bundle into realtime's blob store.
@@ -458,8 +471,9 @@ func (s *Service) storeBundle(ctx context.Context, pkg *contentpkg.Package, bund
 	return ref.Key, nil
 }
 
-func (s *Service) createContent(w http.ResponseWriter, r *http.Request, claims auth.Claims, pkg *contentpkg.Package, bundle []byte) {
+func (s *Service) createContent(w http.ResponseWriter, r *http.Request, actor contentActor, pkg *contentpkg.Package, bundle []byte) {
 	ctx := r.Context()
+	claims := actor.Claims
 	key, err := s.storeBundle(ctx, pkg, bundle)
 	if err != nil {
 		obs.ServerError(w, "store content bundle failed", err)
@@ -489,6 +503,7 @@ func (s *Service) createContent(w http.ResponseWriter, r *http.Request, claims a
 		return
 	}
 	c.LatestVersion = v.Version
+	s.auditJobSave(ctx, actor, c, v.Version)
 	s.writeContentDetail(w, r, claims, c, http.StatusCreated)
 }
 
@@ -523,10 +538,15 @@ func nextContentVersion(c store.ContentComponent, requested string) (string, err
 // handleNewContentVersion saves the caller's component as a new immutable
 // version: a JSON form (built on baseVersion's files) or a package archive.
 func (s *Service) handleNewContentVersion(w http.ResponseWriter, r *http.Request) {
-	claims, ok := s.contentCaller(w, r, true)
+	caller, ok := s.contentCaller(w, r, true)
 	if !ok {
 		return
 	}
+	actor, ok := s.contentActing(w, r, caller)
+	if !ok {
+		return
+	}
+	claims := actor.Claims
 	ctx := r.Context()
 	c, err := s.ownContent(ctx, claims, r.PathValue("id"))
 	if err != nil {
@@ -584,11 +604,15 @@ func (s *Service) handleNewContentVersion(w http.ResponseWriter, r *http.Request
 			return
 		}
 	}
-	s.addContentVersion(w, r, claims, c, pkg, bundle)
+	if !jobSaveAllowed(w, actor, pkg) {
+		return
+	}
+	s.addContentVersion(w, r, actor, c, pkg, bundle)
 }
 
-func (s *Service) addContentVersion(w http.ResponseWriter, r *http.Request, claims auth.Claims, c store.ContentComponent, pkg *contentpkg.Package, bundle []byte) {
+func (s *Service) addContentVersion(w http.ResponseWriter, r *http.Request, actor contentActor, c store.ContentComponent, pkg *contentpkg.Package, bundle []byte) {
 	ctx := r.Context()
+	claims := actor.Claims
 	if pkg.Manifest.Kind != c.Kind || pkg.Manifest.Name != c.Name {
 		http.Error(w, fmt.Sprintf("a new version keeps the %s's kind and name (%s)", shortKind(c.Kind), c.Name), http.StatusBadRequest)
 		return
@@ -622,6 +646,7 @@ func (s *Service) addContentVersion(w http.ResponseWriter, r *http.Request, clai
 		return
 	}
 	next.LatestVersion = v.Version
+	s.auditJobSave(ctx, actor, next, v.Version)
 	s.writeContentDetail(w, r, claims, next, http.StatusCreated)
 }
 
@@ -656,10 +681,15 @@ func contentVersionView(v store.ContentComponentVersion) wire.ContentVersion {
 }
 
 func (s *Service) handleGetContent(w http.ResponseWriter, r *http.Request) {
-	claims, ok := s.contentCaller(w, r, false)
+	caller, ok := s.contentCaller(w, r, false)
 	if !ok {
 		return
 	}
+	actor, ok := s.contentActing(w, r, caller)
+	if !ok {
+		return
+	}
+	claims := actor.Claims
 	c, err := s.readableContent(r.Context(), claims, r.PathValue("id"), r.URL.Query().Get("room"))
 	if err != nil {
 		contentStoreErr(w, "load content component failed", err)
@@ -697,10 +727,15 @@ func (s *Service) contentPackage(ctx context.Context, v store.ContentComponentVe
 // version, its instructions and skill bodies (the Library form) and its
 // files (text when viewable).
 func (s *Service) handleGetContentVersion(w http.ResponseWriter, r *http.Request) {
-	claims, ok := s.contentCaller(w, r, false)
+	caller, ok := s.contentCaller(w, r, false)
 	if !ok {
 		return
 	}
+	actor, ok := s.contentActing(w, r, caller)
+	if !ok {
+		return
+	}
+	claims := actor.Claims
 	ctx := r.Context()
 	c, err := s.readableContent(ctx, claims, r.PathValue("id"), r.URL.Query().Get("room"))
 	if err != nil {
