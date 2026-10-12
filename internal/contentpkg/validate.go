@@ -147,7 +147,7 @@ func (m Manifest) NeedsSandbox() bool {
 
 func validateEnvelope(m Manifest, opts Options) error {
 	if !ValidName(m.Name) {
-		return fmt.Errorf("name %q: use lower-case letters, digits and hyphens (at most 63)", m.Name)
+		return fmt.Errorf("name %q: use lower-case letters, digits and hyphens (at most %d)", m.Name, maxName)
 	}
 	if !semver.Valid(m.Version) {
 		return fmt.Errorf("version %q is not a semantic version (major.minor.patch)", m.Version)

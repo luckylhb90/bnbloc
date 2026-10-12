@@ -45,6 +45,7 @@ const (
 
 // Text bounds of the envelope.
 const (
+	maxName         = 63
 	maxDisplayName  = 120
 	maxDescription  = 1000
 	maxCategory     = 40
@@ -62,13 +63,14 @@ const (
 )
 
 var (
-	nameRE = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,62}$`)
+	nameRE = regexp.MustCompile(fmt.Sprintf(`^[a-z0-9][a-z0-9-]{0,%d}$`, maxName-1))
 	tagRE  = regexp.MustCompile(`^[a-z0-9][a-z0-9 _-]*$`)
 	hostRE = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*(:[0-9]{1,5})?$`)
 )
 
 // ValidName reports whether s is a valid component or skill name: lower-case
-// letters, digits and hyphens, starting with a letter or digit, at most 63.
+// letters, digits and hyphens, starting with a letter or digit, at most
+// maxName.
 func ValidName(s string) bool { return nameRE.MatchString(s) }
 
 // Manifest is component.json, the envelope shared by every content kind

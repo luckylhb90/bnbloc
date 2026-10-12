@@ -55,7 +55,8 @@ const (
 	maxVarDefault     = 1000
 	maxVarOptions     = 30
 	maxVarOption      = 200
-	maxSlashCommand   = 40
+	maxSlashCommand   = 40 // after the "/"
+	maxVarName        = 40
 	promptPackMaxSize = 1 << 20
 )
 
@@ -66,9 +67,9 @@ var PromptLimits = tarbundle.Limits{MaxBytes: promptPackMaxSize, MaxFiles: 2}
 var (
 	// placeholderRE matches a {{name}} placeholder (spaces inside the
 	// braces allowed). Anything else between braces is literal text.
-	placeholderRE = regexp.MustCompile(`\{\{\s*([A-Za-z_][A-Za-z0-9_]{0,39})\s*\}\}`)
-	varNameRE     = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]{0,39}$`)
-	slashRE       = regexp.MustCompile(`^/[a-z0-9][a-z0-9-]{0,39}$`)
+	placeholderRE = regexp.MustCompile(fmt.Sprintf(`\{\{\s*([A-Za-z_][A-Za-z0-9_]{0,%d})\s*\}\}`, maxVarName-1))
+	varNameRE     = regexp.MustCompile(fmt.Sprintf(`^[A-Za-z_][A-Za-z0-9_]{0,%d}$`, maxVarName-1))
+	slashRE       = regexp.MustCompile(fmt.Sprintf(`^/[a-z0-9][a-z0-9-]{0,%d}$`, maxSlashCommand-1))
 )
 
 func init() {
@@ -132,7 +133,7 @@ func validatePromptPack(p *Package) error {
 			at = fmt.Sprintf("prompt %s", pr.ID)
 		}
 		if !ValidName(pr.ID) {
-			return fmt.Errorf("%s: id %q: use lower-case letters, digits and hyphens (at most 63)", at, pr.ID)
+			return fmt.Errorf("%s: id %q: use lower-case letters, digits and hyphens (at most %d)", at, pr.ID, maxName)
 		}
 		if ids[pr.ID] {
 			return fmt.Errorf("prompt id %q is used twice", pr.ID)
