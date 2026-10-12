@@ -157,7 +157,9 @@ func Effective(ctx context.Context, st store.ContentComponentStore, job store.Ag
 		return nil
 	}
 	if job.ExpertID != "" {
-		c, v, err := Usable(ctx, st, requester, job.RoomID, job.ExpertID, job.ExpertVersion)
+		c, v, err := jobExpert(ctx, st, job, func() (store.ContentComponent, store.ContentComponentVersion, error) {
+			return Usable(ctx, st, requester, job.RoomID, job.ExpertID, job.ExpertVersion)
+		})
 		switch {
 		case errors.Is(err, ErrNotUsable):
 			out.Missing = append(out.Missing, "expert "+firstNonEmpty(job.ExpertName, job.ExpertID))

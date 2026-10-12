@@ -27,6 +27,9 @@ var (
 	errExpertNotAvailable = errors.New("expert not available")
 	// errExpertWithoutAgent: an expert on a message to no agent (400).
 	errExpertWithoutAgent = errors.New("an expert needs an agent recipient")
+	// errDraftNotAvailable: the draft does not exist, was not staged by
+	// the dispatching job in this room, or expired (400).
+	errDraftNotAvailable = errors.New("draft not available")
 )
 
 // chatExpert is a resolved chat expert.
@@ -35,18 +38,31 @@ type chatExpert struct {
 	Name        string
 	DisplayName string
 	Version     string
+	// Draft marks a staged draft worn for a quick try (ID is the draft's).
+	Draft bool
 }
 
-// label is how the expert reads in records ("Reviewer").
+// label is how the expert reads in records ("Reviewer", "Reviewer
+// (draft)").
 func (e *chatExpert) label() string {
+	name := e.Name
 	if e.DisplayName != "" {
-		return e.DisplayName
+		name = e.DisplayName
 	}
-	return e.Name
+	if e.Draft {
+		return name + " (draft)"
+	}
+	return name
 }
 
 // resolveChatExpert pins the expert a post asks for (nil when none).
 func (s *Service) resolveChatExpert(ctx context.Context, p ChatPost, agent bool) (*chatExpert, error) {
+	if p.Draft != "" {
+		if !agent {
+			return nil, errExpertWithoutAgent
+		}
+		return s.resolveChatDraft(ctx, p)
+	}
 	if p.Expert == nil || strings.TrimSpace(p.Expert.ID) == "" {
 		return nil, nil
 	}
@@ -74,11 +90,35 @@ func (s *Service) resolveChatExpert(ctx context.Context, p ChatPost, agent bool)
 	return &chatExpert{ID: c.ID, Name: c.Name, DisplayName: m.DisplayName, Version: v.Version}, nil
 }
 
+// resolveChatDraft pins the staged draft a dispatch asks its target to wear
+// (a quick try): it must exist in this tenant and room, have been staged by
+// the dispatching job (p.Dispatched), and not have expired. The job records
+// the draft as its expert; contentuse.Effective resolves it the same way.
+func (s *Service) resolveChatDraft(ctx context.Context, p ChatPost) (*chatExpert, error) {
+	if s.Content == nil || p.Dispatched == nil || p.Expert != nil {
+		return nil, errDraftNotAvailable
+	}
+	d, err := s.Content.GetContentDraft(ctx, strings.TrimSpace(p.Draft))
+	if errors.Is(err, store.ErrContentNotFound) {
+		return nil, errDraftNotAvailable
+	}
+	if err != nil {
+		return nil, fmt.Errorf("draft lookup failed: %w", err)
+	}
+	if d.TenantID != tenant.FromContext(ctx) || d.RoomID != p.RoomID || d.JobID != p.Dispatched.JobID || !d.Live(time.Now().UnixMilli()) {
+		return nil, errDraftNotAvailable
+	}
+	return &chatExpert{ID: d.ID, Name: d.Name, DisplayName: d.DisplayName, Version: d.Version, Draft: true}, nil
+}
+
 // payload is the chat message's expert block.
 func (e *chatExpert) payload() map[string]any {
 	out := map[string]any{"id": e.ID, "name": e.Name, "version": e.Version}
 	if e.DisplayName != "" {
 		out["displayName"] = e.DisplayName
+	}
+	if e.Draft {
+		out["draft"] = true
 	}
 	return out
 }
@@ -94,10 +134,16 @@ func (s *Service) auditExpertUse(ctx context.Context, e *chatExpert, job store.A
 	if job.Core != "" {
 		agent = job.OwnerUserID + "/" + job.Core + "/" + job.Provider
 	}
+	action, what := "use", "expert "
+	if e.Draft {
+		// A quick try of an unsaved draft (try_draft): not a use of a
+		// component.
+		action, what = "try", "draft "
+	}
 	rec := store.ExtAuditRecord{
-		Kind: wire.AuditKindContent, Name: e.Name + "@" + e.Version, Action: "use", Actor: job.RequesterUserID,
+		Kind: wire.AuditKindContent, Name: e.Name + "@" + e.Version, Action: action, Actor: job.RequesterUserID,
 		TenantID: tenant.FromContext(ctx), Outcome: "queued",
-		Detail: "expert " + e.label() + " v" + e.Version + " on agent " + agent + " (job " + job.JobID + ", room " + job.RoomID + ")",
+		Detail: what + e.label() + " v" + e.Version + " on agent " + agent + " (job " + job.JobID + ", room " + job.RoomID + ")",
 		AtMs:   time.Now().UnixMilli(),
 	}
 	if err := s.Audit.AppendExtAudit(ctx, rec); err != nil {

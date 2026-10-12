@@ -67,6 +67,7 @@ func (s *Service) registerContentComponents(mux *http.ServeMux) {
 	mux.HandleFunc("POST /v1/content-components", s.handleCreateContent)
 	mux.HandleFunc("POST /v1/content-components/import", s.handleImportContent)
 	mux.HandleFunc("GET /v1/content-components/effective", s.handleContentEffective)
+	mux.HandleFunc("POST /v1/content-drafts", s.handleStageContentDraft)
 	mux.HandleFunc("GET /v1/content-components/{id}", s.handleGetContent)
 	mux.HandleFunc("DELETE /v1/content-components/{id}", s.handleDeleteContent)
 	mux.HandleFunc("POST /v1/content-components/{id}/versions", s.handleNewContentVersion)
@@ -1233,13 +1234,15 @@ func (s *Service) recordRoomExpert(ctx context.Context, job store.AgentJob, ref 
 
 // contentBundleEntitled reports whether the caller may download a content
 // bundle: a version of a component visible to them, of one their room
-// uses (?room=), or one in effect for a job their bridge runs (?job=).
+// uses (?room=), or one in effect for a job their bridge runs (?job=; a
+// staged draft the job wears has no version row and is granted this way
+// only).
 func (s *Service) contentBundleEntitled(ctx context.Context, claims auth.Claims, key string, grant url.Values) (bool, error) {
 	if s.ContentComponents == nil {
 		return false, nil
 	}
 	versions, err := s.ContentComponents.ContentVersionsByBlob(ctx, key)
-	if err != nil || len(versions) == 0 {
+	if err != nil {
 		return false, err
 	}
 	roomID := strings.TrimSpace(grant.Get("room"))

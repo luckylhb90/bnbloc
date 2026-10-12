@@ -74,6 +74,10 @@ type ChatPost struct {
 	// Expert asks the agent recipient to wear an expert (a content
 	// component the author may use here); the job pins its version.
 	Expert *wire.ChatExpert
+	// Draft asks the agent recipient to wear a staged content draft (a
+	// quick try, chat_expert.go): only a dispatch sets it, for a draft its
+	// parent job staged. Never set with Expert.
+	Draft string
 }
 
 // ChatPosted is what PostChat did: the message's sequence and, for an agent

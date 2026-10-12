@@ -143,6 +143,8 @@ func (s *Service) Dispatch(ctx context.Context, roomID, caller string, in wire.D
 		return reply, refuse(http.StatusBadRequest, wire.DispatchInvalid, "clientMsgId must be 1-64 letters, digits, '-' or '_'")
 	case in.Role != "" && !contentpkg.ValidName(in.Role):
 		return reply, refuse(http.StatusBadRequest, wire.DispatchInvalid, "role must be lower-case letters, digits and hyphens")
+	case in.Draft != "" && in.Expert != nil:
+		return reply, refuse(http.StatusBadRequest, wire.DispatchInvalid, "a dispatch wears an expert or a draft, not both")
 	}
 
 	parent, err = s.Dispatches.GetAgentRun(ctx, in.ParentJobID)
@@ -198,12 +200,15 @@ func (s *Service) Dispatch(ctx context.Context, roomID, caller string, in wire.D
 		Recipient:   &ChatRecipient{OwnerID: in.Recipient.OwnerID, Provider: in.Recipient.Provider, Core: in.Recipient.Core},
 		Dispatched:  &wire.DispatchMarker{JobID: parent.JobID, ParentSeq: parent.MessageSeq, Depth: depth, Via: agentHandle(parent.OwnerUserID, parent.Provider), Role: in.Role},
 		Expert:      in.Expert,
+		Draft:       strings.TrimSpace(in.Draft),
 	})
 	switch {
 	case errors.Is(err, errAgentInPeopleChat):
 		return reply, refuse(http.StatusBadRequest, wire.DispatchPeopleChat, "agents cannot be addressed in the people chat")
 	case errors.Is(err, errExpertNotAvailable):
 		return reply, refuse(http.StatusBadRequest, wire.DispatchExpertUnusable, "the expert does not exist or the requester may not use it here")
+	case errors.Is(err, errDraftNotAvailable):
+		return reply, refuse(http.StatusBadRequest, wire.DispatchDraftUnavailable, "the draft does not exist, was not staged by this job in this room, or expired: stage it again")
 	}
 	if err != nil {
 		return reply, err
