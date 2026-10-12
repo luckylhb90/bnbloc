@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { BrainIcon, CaretDownIcon, PushPinIcon, ShieldWarningIcon, XIcon } from "@phosphor-icons/react";
 import { cn } from "@/lib/cn";
-import { contentLabel, permissionLabel, type ContentQuickPrompt, type ExpertChoice } from "@/lib/contentComponents";
+import { contentLabel, isTeam, permissionLabel, type ContentQuickPrompt, type ExpertChoice } from "@/lib/contentComponents";
+import { TeamBadge } from "@/views/library/ContentFormExtras";
 import { Button } from "@/ui/Button";
 import { Dialog } from "@/ui/Dialog";
 import { UserName } from "@/views/UserName";
@@ -50,6 +51,7 @@ export function ExpertPicker({
       >
         <BrainIcon size={15} weight={expert ? "fill" : "regular"} />
         <span className="hidden min-w-0 truncate @md:inline @md:max-w-[9rem]">{label}</span>
+        {expert && isTeam(expert.component) && <TeamBadge className="hidden @md:inline-flex" />}
         <CaretDownIcon size={12} className="shrink-0" />
       </button>
       {open && (
@@ -68,6 +70,7 @@ export function ExpertPicker({
             >
               {c.source === "room" ? <PushPinIcon size={14} className="shrink-0 text-[var(--color-accent)]" aria-label="Pinned in this room" /> : <BrainIcon size={14} className="shrink-0" />}
               <span className="min-w-0 flex-1 truncate">{contentLabel(c.component)}</span>
+              {isTeam(c.component) && <TeamBadge />}
               <span className="shrink-0 font-mono text-[0.65rem] text-[var(--color-fg-subtle)]">v{c.version || c.component.latestVersion}</span>
             </button>
           ))}

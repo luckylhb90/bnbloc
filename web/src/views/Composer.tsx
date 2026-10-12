@@ -30,6 +30,7 @@ import { mentionLabel, mentionMatches } from "@/views/composer/mentions";
 import { contentLabel, type ExpertChoice } from "@/lib/contentComponents";
 import { useComposerExpert } from "@/views/composer/useComposerExpert";
 import { ExpertBanner, ExpertPermissionDialog, ExpertPicker } from "@/views/composer/ExpertPicker";
+import { TeamPlanCard, useTeamPlan } from "@/views/composer/TeamPlanCard";
 import { useComposerPrompts } from "@/views/composer/useComposerPrompts";
 import { PromptPickerButton, PromptVariablesDialog, SlashMenu } from "@/views/composer/PromptPicker";
 
@@ -336,6 +337,14 @@ export function Composer({
     : myRunsOn
       ? `your ${myRunsOn.provider}`
       : null;
+  // A picked team is staffed on the agent that leads it and confirmed with
+  // its cost estimate before the first send.
+  const teamLead = runsOnAgent
+    ? { ownerId: runsOnAgent.ownerId, core: runsOnAgent.core, provider: runsOnAgent.provider }
+    : myRunsOn
+      ? { ownerId: subject ?? "", core: myRunsOn.core || undefined, provider: myRunsOn.provider }
+      : null;
+  const team = useTeamPlan(roomId, people || peopleOnly ? null : exp.expert, teamLead);
 
   // pickExpertMention removes the typed "@partial" and picks the expert.
   const pickExpertMention = (e: ExpertChoice) => {
@@ -398,6 +407,11 @@ export function Composer({
       return;
     }
     if (expertSend && !(await exp.confirm())) {
+      setSending(false);
+      return;
+    }
+    if (expertSend && !team.confirmed) {
+      toast.error("Check the team and its cost estimate, then choose Use this team");
       setSending(false);
       return;
     }
@@ -639,6 +653,7 @@ export function Composer({
             }}
           />
         )}
+        {!people && !peopleOnly && <TeamPlanCard team={team} hasLead={!!teamLead} onCancel={() => exp.pick(null)} />}
         <AttachmentChips
           attachments={attachments.chipItems}
           onRemove={attachments.removeFile}
