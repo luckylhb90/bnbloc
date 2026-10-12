@@ -16,6 +16,7 @@ import (
 	"github.com/luckylhb90/bnbloc/internal/extgov"
 	"github.com/luckylhb90/bnbloc/internal/extpipe"
 	"github.com/luckylhb90/bnbloc/internal/extreg"
+	"github.com/luckylhb90/bnbloc/internal/mcptool"
 	"github.com/luckylhb90/bnbloc/internal/pluginruntime"
 	"github.com/luckylhb90/bnbloc/internal/sandboxruntime"
 	"github.com/luckylhb90/bnbloc/internal/store"
@@ -38,6 +39,7 @@ func NewCorePipeline(s *Service, audit store.ExtensionAuditStore) *extpipe.Pipel
 			pkgmeta.KindPlugin:      s.pluginInstaller(),
 			extreg.KindSandbox:      sandboxruntime.Installer(),
 			extreg.KindPreviewer:    s.previewerInstaller(),
+			extreg.KindMCP:          mcptool.Installer(),
 		},
 		TrustedKeysKey: componentTrustedKeysKey,
 		Now:            func() int64 { return s.nowTime().UnixMilli() },

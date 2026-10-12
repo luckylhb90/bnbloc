@@ -129,6 +129,7 @@ func (s *Service) handleUninstallComponent(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	s.afterNotifierUninstall(r.Context(), rec)
+	s.afterMCPUninstall(r.Context(), rec)
 	w.WriteHeader(http.StatusNoContent)
 }
 

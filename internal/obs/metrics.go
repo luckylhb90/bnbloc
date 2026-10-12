@@ -193,6 +193,8 @@ var routeWords = map[string]bool{
 	"dispatch": true,
 	// expert teams: which agent takes each role, and its estimate.
 	"team-plan": true,
+	// MCP tool components: organization connectors.
+	"mcp-connectors": true,
 }
 
 // idCollections name segments whose NEXT segment is always an identifier, even
@@ -211,6 +213,8 @@ var idCollections = map[string]bool{
 	// names a route; a room's /platform-agents/{provider} still collapses
 	// (a provider is not a route word).
 	"agent-hosts": true,
+	// /v1/tenant/mcp-connectors/{component}
+	"mcp-connectors": true,
 }
 
 // maxRouteSegments bounds the label depth so an arbitrarily deep path cannot

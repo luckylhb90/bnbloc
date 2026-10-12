@@ -95,6 +95,8 @@ func TestRouteLabel(t *testing.T) {
 		"/internal/v1/rooms/r/dispatch":                    "/internal/v1/rooms/:id/dispatch",
 		"/v1/rooms/r/dispatch":                             "/v1/rooms/:id/dispatch",
 		"/v1/rooms/r/team-plan":                            "/v1/rooms/:id/team-plan",
+		"/v1/tenant/mcp-connectors":                        "/v1/tenant/mcp-connectors",
+		"/v1/tenant/mcp-connectors/effective":              "/v1/tenant/mcp-connectors/:id",
 		// users is an id collection, so the batch lookup reads as the only
 		// three-segment users route; a user named "profiles" stays an id.
 		"/v1/users/profiles":       "/v1/users/:id",

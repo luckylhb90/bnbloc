@@ -169,6 +169,9 @@ services:
       # Stable session-token signing key so sessions survive gateway restarts.
       # Dev default is fine locally; production MUST inject a strong secret.
       BNBLOC_SESSION_SIGNING_KEY: "${BNBLOC_SESSION_SIGNING_KEY:-dev-bnbloc-session-signing-key-change-me}"
+      # Seals organization MCP tool connectors at rest (32 random bytes,
+      # base64 or hex: `openssl rand -base64 32`). Unset = org connectors off.
+      BNBLOC_SECRET_STORE_KEY: "${BNBLOC_SECRET_STORE_KEY:-}"
       # OIDC is optional; unset -> dev verifier.
       BNBLOC_OIDC_ISSUER_URL: "${BNBLOC_OIDC_ISSUER_URL:-}"
       BNBLOC_OIDC_CLIENT_ID: "${BNBLOC_OIDC_CLIENT_ID:-}"

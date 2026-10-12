@@ -88,11 +88,12 @@ func (s *Service) requestComponentRecord(w http.ResponseWriter, r *http.Request,
 // componentKindVisibleInMemberCatalog names the kinds a member's desktop
 // consumes from GET /v1/components (and may download artifacts of): cores and
 // plugins it supervises, and sandbox runtimes it will supervise / the bridge
-// will drive, and previewer bundles members' clients render files with.
-// Endpoint-only kinds driven server-side (auth providers, notifiers) never
-// reach member machines.
+// will drive, previewer bundles members' clients render files with, and MCP
+// tools (stdio binaries the desktop materializes, http endpoints the agent
+// calls). Endpoint-only kinds driven server-side (auth providers, notifiers)
+// never reach member machines.
 func componentKindVisibleInMemberCatalog(kind extreg.Kind) bool {
-	return kind == core.KindCore || kind == pkgmeta.KindPlugin || kind == extreg.KindSandbox || kind == extreg.KindPreviewer
+	return kind == core.KindCore || kind == pkgmeta.KindPlugin || kind == extreg.KindSandbox || kind == extreg.KindPreviewer || kind == extreg.KindMCP
 }
 
 // memberComponents is one request's read of the install records and the

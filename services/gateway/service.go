@@ -26,6 +26,7 @@ import (
 	"github.com/luckylhb90/bnbloc/internal/orgsync"
 	"github.com/luckylhb90/bnbloc/internal/rbac"
 	"github.com/luckylhb90/bnbloc/internal/realtime"
+	"github.com/luckylhb90/bnbloc/internal/sealbox"
 	"github.com/luckylhb90/bnbloc/internal/shard"
 	"github.com/luckylhb90/bnbloc/internal/store"
 	"github.com/luckylhb90/bnbloc/internal/svcauth"
@@ -113,6 +114,9 @@ type Service struct {
 	ExtAudit         store.ExtensionAuditStore
 	ExtPipe          *extpipe.Pipeline
 	AllowExtUnsigned bool
+	// SecretBox seals organization MCP connectors (BNBLOC_SECRET_STORE_KEY);
+	// nil turns org connectors off (mcp_tools.go).
+	SecretBox *sealbox.Box
 	// ComponentInstalls persists per-member opt-in installs of distributed
 	// components (rollout=optin extension records). nil (in-memory dev/tests)
 	// leaves optin components hidden for everyone; auto ones still distribute.
@@ -259,6 +263,9 @@ func (s *Service) Handler() http.Handler {
 	mux.HandleFunc("PUT /v1/platform/app-releases/{version}", s.handlePlatformReleasePut)
 	mux.HandleFunc("DELETE /v1/platform/app-releases/{version}", s.handlePlatformReleaseDelete)
 	mux.HandleFunc("GET /v1/platform/versions", s.handlePlatformVersions)
+	mux.HandleFunc("GET /v1/tenant/mcp-connectors", s.handleListMCPConnectors)
+	mux.HandleFunc("PUT /v1/tenant/mcp-connectors/{name}", s.handlePutMCPConnector)
+	mux.HandleFunc("DELETE /v1/tenant/mcp-connectors/{name}", s.handleDeleteMCPConnector)
 	s.registerContentComponents(mux)
 	s.registerContentPrompts(mux)
 	s.registerAPITokens(mux)

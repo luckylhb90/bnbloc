@@ -93,6 +93,12 @@ gateway:
   # daemon-token bypass (fail closed).
   localAgentToken:
     secretRef: { name: "", key: localAgentToken }
+  # Seals organization MCP tool connectors at rest (BNBLOC_SECRET_STORE_KEY:
+  # 32 random bytes, base64 or hex, e.g. `openssl rand -base64 32`). Every
+  # replica shares it; losing it loses the stored connectors (org admins
+  # enter them again). Unset turns org connectors off.
+  secretStoreKey:
+    secretRef: { name: "", key: secretStoreKey }
   extraEnv: []
   ingress:
     enabled: true

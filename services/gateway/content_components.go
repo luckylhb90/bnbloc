@@ -370,6 +370,10 @@ func (s *Service) handleCreateContent(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	opts, ok := s.saveContentOptions(w, r, actor.Claims)
+	if !ok {
+		return
+	}
 	var pkg *contentpkg.Package
 	var bundle []byte
 	var err error
@@ -378,7 +382,7 @@ func (s *Service) handleCreateContent(w http.ResponseWriter, r *http.Request) {
 		if !ok {
 			return
 		}
-		pkg, bundle, err = importArchive(raw, "", "", "")
+		pkg, bundle, err = importArchive(raw, opts)
 	} else {
 		var req contentSaveRequest
 		raw, ok := readBody(w, r, maxContentFormBytes)
@@ -390,7 +394,7 @@ func (s *Service) handleCreateContent(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		version := firstNonEmpty(strings.TrimSpace(req.Version), "1.0.0")
-		pkg, bundle, err = contentpkg.Build(req.Form, version, contentOptions(), nil)
+		pkg, bundle, err = contentpkg.Build(req.Form, version, opts, nil)
 	}
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
@@ -402,22 +406,20 @@ func (s *Service) handleCreateContent(w http.ResponseWriter, r *http.Request) {
 	s.createContent(w, r, actor, pkg, bundle)
 }
 
-// importArchive reads an uploaded bnbloc package or a foreign format: a
-// package archive with its own component.json imports with its own kind.
-func importArchive(raw []byte, kind, name, version string) (*contentpkg.Package, []byte, error) {
-	if kind == "" {
-		// A bundle upload names its kind in component.json.
-		pkg, err := contentpkg.Validate(raw, "", contentOptions())
-		if err == nil {
-			return pkg, raw, nil
-		}
+// importArchive reads an uploaded bnbloc package archive: its own
+// component.json names its kind.
+func importArchive(raw []byte, opts contentpkg.Options) (*contentpkg.Package, []byte, error) {
+	pkg, err := contentpkg.Validate(raw, "", opts)
+	if err != nil {
 		return nil, nil, err
 	}
-	return contentpkg.Import(raw, kind, name, version, contentOptions())
+	return pkg, raw, nil
 }
 
-// contentOptions are the use-site validation inputs: no MCP tool
-// components exist yet, so every requires.mcp is refused.
+// contentOptions validate stored content when it is read: references are
+// checked by syntax only (a save checked them against the catalog,
+// saveContentOptions; an MCP tool uninstalled since shows as missing at use
+// time instead of breaking the content).
 func contentOptions() contentpkg.Options { return contentpkg.Options{} }
 
 // handleImportContent imports an archive of an existing format as a new
@@ -429,6 +431,10 @@ func (s *Service) handleImportContent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	q := r.URL.Query()
+	opts, ok := s.saveContentOptions(w, r, claims)
+	if !ok {
+		return
+	}
 	raw, ok := readBody(w, r, tarbundle.ContentLimits.MaxArchiveBytes())
 	if !ok {
 		return
@@ -444,7 +450,7 @@ func (s *Service) handleImportContent(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), http.StatusConflict)
 			return
 		}
-		pkg, bundle, err := contentpkg.Import(raw, c.Kind, c.Name, version, contentOptions())
+		pkg, bundle, err := contentpkg.Import(raw, c.Kind, c.Name, version, opts)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
@@ -458,7 +464,7 @@ func (s *Service) handleImportContent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	version := firstNonEmpty(strings.TrimSpace(q.Get("version")), "1.0.0")
-	pkg, bundle, err := contentpkg.Import(raw, kind, strings.TrimSpace(q.Get("name")), version, contentOptions())
+	pkg, bundle, err := contentpkg.Import(raw, kind, strings.TrimSpace(q.Get("name")), version, opts)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
@@ -563,6 +569,10 @@ func (s *Service) handleNewContentVersion(w http.ResponseWriter, r *http.Request
 		contentStoreErr(w, "load content component failed", err)
 		return
 	}
+	opts, ok := s.saveContentOptions(w, r, claims)
+	if !ok {
+		return
+	}
 	var pkg *contentpkg.Package
 	var bundle []byte
 	if isArchiveBody(r) {
@@ -575,7 +585,7 @@ func (s *Service) handleNewContentVersion(w http.ResponseWriter, r *http.Request
 			http.Error(w, err.Error(), http.StatusConflict)
 			return
 		}
-		pkg, bundle, err = contentpkg.Import(raw, c.Kind, c.Name, version, contentOptions())
+		pkg, bundle, err = contentpkg.Import(raw, c.Kind, c.Name, version, opts)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
@@ -609,7 +619,7 @@ func (s *Service) handleNewContentVersion(w http.ResponseWriter, r *http.Request
 			}
 		}
 		req.Form.Kind, req.Form.Name = c.Kind, c.Name
-		if pkg, bundle, err = contentpkg.Build(req.Form, version, contentOptions(), base); err != nil {
+		if pkg, bundle, err = contentpkg.Build(req.Form, version, opts, base); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
@@ -1122,6 +1132,11 @@ func (s *Service) handleContentEffective(w http.ResponseWriter, r *http.Request)
 	if err != nil {
 		obs.ServerError(w, "resolve job content failed", err)
 		http.Error(w, "resolve job content failed", http.StatusInternalServerError)
+		return
+	}
+	if err := s.resolveEffectiveMCP(r.Context(), job, &eff); err != nil {
+		obs.ServerError(w, "resolve job MCP tools failed", err)
+		http.Error(w, "resolve job MCP tools failed", http.StatusInternalServerError)
 		return
 	}
 	writeJSON(w, http.StatusOK, eff)

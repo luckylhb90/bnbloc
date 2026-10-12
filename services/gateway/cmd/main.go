@@ -22,6 +22,7 @@ import (
 	"github.com/luckylhb90/bnbloc/internal/orgsync"
 	"github.com/luckylhb90/bnbloc/internal/provisioning"
 	"github.com/luckylhb90/bnbloc/internal/rbac"
+	"github.com/luckylhb90/bnbloc/internal/sealbox"
 	"github.com/luckylhb90/bnbloc/internal/shard"
 	"github.com/luckylhb90/bnbloc/internal/store"
 	"github.com/luckylhb90/bnbloc/internal/svcauth"
@@ -228,6 +229,15 @@ func main() {
 	}
 	tw := resolveTenantWiring()
 	allowUnsigned := truthy(config.FromEnvRaw("BNBLOC_EXT_ALLOW_UNSIGNED"))
+	// Organization MCP connectors are sealed under the secret store key;
+	// unset turns them off, a malformed key refuses to start.
+	secretBox, err := sealbox.FromEnv()
+	if err != nil {
+		log.Fatalf("bnbloc-gateway: %v", err)
+	}
+	if secretBox == nil {
+		log.Printf("bnbloc-gateway: %s unset; organization MCP connectors are off", sealbox.KeyEnv)
+	}
 	svc := &gateway.Service{
 		Verifier: resolveVerifier(),
 		Signer:   auth.NewSigner(resolveSigningKey()),
@@ -250,6 +260,7 @@ func main() {
 		PlatformSettings:  tw.Settings,
 		ExtAudit:          tw.ExtAudit,
 		AllowExtUnsigned:  allowUnsigned,
+		SecretBox:         secretBox,
 		ComponentInstalls: tw.ComponentInstalls,
 		ContentComponents: tw.ContentComponents,
 		ContentJobs:       tw.ContentJobs,

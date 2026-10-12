@@ -38,5 +38,5 @@ func componentFromExtRecord(rec extpipe.Record) (installedComponent, error) {
 }
 
 func componentRequiresDesktop(runtime pkgmeta.Runtime, kind string) bool {
-	return runtime == pkgmeta.RuntimeSidecar && kind != "auth-provider"
+	return (runtime == pkgmeta.RuntimeSidecar && kind != "auth-provider") || runtime == pkgmeta.RuntimeStdio
 }

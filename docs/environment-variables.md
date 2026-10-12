@@ -63,6 +63,7 @@ sync-layer HMAC. The value must be identical across every service.
 | `BNBLOC_TENANT_AUTOPROVISION` | on | `false` locks tenant membership to pre-provisioned tenants instead of auto-provisioning at login. |
 | `BNBLOC_DESKTOP_DOWNLOAD_URL` | — | Fallback desktop download link served when the deployment has no curated release history. |
 | `BNBLOC_EXT_ALLOW_UNSIGNED` | unset | Dev-only: accept unsigned component packages (see Components below). |
+| `BNBLOC_SECRET_STORE_KEY` | — (org connectors off) | 32 random bytes, base64 or hex (`openssl rand -base64 32`), sealing organization MCP tool connectors at rest (AES-256-GCM, `internal/sealbox`): the credentials org admins enter for MCP tools with org credentials (`/v1/tenant/mcp-connectors`). Every gateway replica shares it. Unset = org connectors are off (the routes answer 409; such tools show as missing); a malformed value refuses to start. Losing or changing it makes stored connectors unreadable: org admins enter them again. Secret. |
 
 ## Internal wiring
 

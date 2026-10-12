@@ -46,6 +46,8 @@ type componentInfo struct {
 	// Previewer is an installed previewer's match/toolbar metadata, its
 	// pinned bundle, and the caller's browser frame URL (previewers.go).
 	Previewer *previewerCatalogInfo `json:"previewer,omitempty"`
+	// MCP is an MCP tool's tools, env and credentials source (mcp_tools.go).
+	MCP *mcpCatalogInfo `json:"mcp,omitempty"`
 }
 
 func (s *Service) handleComponents(w http.ResponseWriter, r *http.Request) {
@@ -131,6 +133,9 @@ func (s *Service) handleComponents(w http.ResponseWriter, r *http.Request) {
 			component.Guest = cfg.Guest
 			if rec.Kind == string(extreg.KindPreviewer) {
 				component.Previewer = s.previewerCatalog(claims, rec, cfg)
+			}
+			if isMCP(rec) {
+				component.MCP = s.mcpCatalog(r.Context(), claims, rec, cfg)
 			}
 			if cfg.Protocol.Min != "" || cfg.Protocol.Max != "" {
 				proto := cfg.Protocol

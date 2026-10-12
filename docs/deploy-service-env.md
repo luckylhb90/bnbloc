@@ -48,6 +48,7 @@ embedded SPA. Stateless apart from the shared database — scale horizontally.
 | `BNBLOC_MYSQL_DSN` | yes | Tenant registry, platform settings, components. |
 | `BNBLOC_INTERNAL_KEY` | yes | Signs `X-Bnbloc-User`. Same value as all backends. |
 | `BNBLOC_SESSION_SIGNING_KEY` | yes | Signs session JWTs. All replicas share it. |
+| `BNBLOC_SECRET_STORE_KEY` | for org MCP connectors | 32 random bytes (base64 or hex) sealing organization MCP tool connectors at rest. All replicas share it. Unset = org connectors off; malformed = refuses to start. |
 | `BNBLOC_OIDC_ISSUER_URL` + `BNBLOC_OIDC_CLIENT_ID` | no | OIDC relying party. Unset in production = direct login disabled; sign in via an installed auth-provider (SSO). |
 | `BNBLOC_SUPER_ADMINS` | yes | Comma-separated verified subject ids/emails (cross-tenant admins). |
 | `BNBLOC_ROOM_BASE_URL` | yes | `http://bnbloc-room:8080` |
