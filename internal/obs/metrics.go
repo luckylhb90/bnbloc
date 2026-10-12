@@ -162,7 +162,7 @@ var routeWords = map[string]bool{
 	"channels": true, "agent-prefs": true,
 	"events": true, "agents": true, "chat": true, "attachments": true, "history": true,
 	"typing": true, "read": true, "messages": true, "publish": true, "blobs": true,
-	"agent-activity": true, "session-state": true, "submit-provenance": true, "sync-states": true,
+	"agent-activity": true, "session-state": true,
 	"bridge": true, "heartbeat": true, "my": true, "jobs": true, "claim": true, "status": true, "lease": true,
 	"agent-jobs": true, "cancel": true, "agent-catalogs": true,
 	"ice-config": true, "rendezvous": true, "stream": true,

@@ -379,7 +379,6 @@ func TestBridgeIDDefaultsToOwnerTenantAndHonorsExplicit(t *testing.T) {
 func TestHeartbeatPostsCurrentAgentCapabilities(t *testing.T) {
 	var got struct {
 		BridgeID       string `json:"bridgeId"`
-		TenantID       string `json:"tenantId"`
 		OwnerUserID    string `json:"ownerUserId"`
 		ServeAllOwners bool   `json:"serveAllOwners"`
 		Agents         []struct {
@@ -408,7 +407,7 @@ func TestHeartbeatPostsCurrentAgentCapabilities(t *testing.T) {
 	if err := b.reportHeartbeat(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if got.BridgeID != "bridge-alice-tenant-a" || got.TenantID != "tenant-a" || got.OwnerUserID != "alice" || !got.ServeAllOwners {
+	if got.BridgeID != "bridge-alice-tenant-a" || got.OwnerUserID != "alice" || !got.ServeAllOwners {
 		t.Fatalf("heartbeat identity = %+v", got)
 	}
 	if len(got.Agents) != 2 {

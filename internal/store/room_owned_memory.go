@@ -51,16 +51,6 @@ func (m *Memory) deleteRoomRows(tenantID, roomID string) {
 			delete(m.cursors, k)
 		}
 	}
-	for k := range m.submits {
-		if in(k) {
-			delete(m.submits, k)
-		}
-	}
-	for k := range m.sync {
-		if in(k) {
-			delete(m.sync, k)
-		}
-	}
 	kept := m.usage[:0]
 	for _, u := range m.usage {
 		if u.tenant != tenantID || u.room != roomID {

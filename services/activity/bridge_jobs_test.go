@@ -214,7 +214,7 @@ func TestCancelRejectsNonMember(t *testing.T) {
 func TestSweptFailureMessageIsWrittenWithoutCallerTenant(t *testing.T) {
 	mem := membership.NewStatic()
 	mem.Add("room-9", "maya")
-	activityStore := store.NewMemory()
+	activityStore := &tenantRecordingActivity{Memory: store.NewMemory()}
 	jobs := store.NewMemoryBridgeJobs()
 	pub := &capturePublisher{}
 	svc := &Service{Store: activityStore, Publisher: pub, Membership: mem, BridgeJobs: jobs}
@@ -228,8 +228,8 @@ func TestSweptFailureMessageIsWrittenWithoutCallerTenant(t *testing.T) {
 
 	// Durable when a reader in the job's tenant can see it, which is what a
 	// member reloading the room does.
-	if states := activityStore.SyncStates(seed, "room-9"); len(states) == 0 {
-		t.Fatal("sweep wrote no durable failure message for the room")
+	if got := activityStore.appended["room-9"]; got != tenant.Default {
+		t.Fatalf("sweep stored the failure message in tenant %q, want %q", got, tenant.Default)
 	}
 	var sawMessage bool
 	for _, ev := range pub.events {
@@ -295,4 +295,22 @@ func TestMyAgentsReportsDesktop(t *testing.T) {
 	if online, seen, _ := get("alice"); online || seen != 0 {
 		t.Fatalf("alice (never connected) = online %v seen %d", online, seen)
 	}
+}
+
+// tenantRecordingActivity records the tenant each room's messages were
+// appended in.
+type tenantRecordingActivity struct {
+	*store.Memory
+	appended map[string]string
+}
+
+func (a *tenantRecordingActivity) AppendMessages(ctx context.Context, roomID string, in wire.ReportMessagesInput) ([]wire.Message, int64, error) {
+	fresh, next, err := a.Memory.AppendMessages(ctx, roomID, in)
+	if err == nil {
+		if a.appended == nil {
+			a.appended = map[string]string{}
+		}
+		a.appended[roomID] = tenant.FromContext(ctx)
+	}
+	return fresh, next, err
 }

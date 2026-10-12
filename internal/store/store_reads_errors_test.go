@@ -20,8 +20,6 @@ import (
 // error, and an entry whose method gained one must be removed (the test fails
 // on a stale entry). Batch 4.2 of the code-health plan empties it.
 var readsWithoutError = map[string]bool{
-	"ActivityStore.SubmitQueryable":           true,
-	"ActivityStore.SyncStates":                true,
 	"AgentPrefsStore.GetAgentPrefs":           true,
 	"AgentUsageReader.AgentUsage":             true,
 	"ArtifactStore.ListArtifactVersions":      true,

@@ -1,11 +1,10 @@
 // Package activity implements the bnbloc-activity HTTP service: the server side
-// of the open-source SessionActivityReporter, plus the atomic
-// submit-provenance admission barrier. All routes are scoped by roomId, which
-// must equal the report's workspaceId (roomId ≡ workspaceId).
+// of the open-source SessionActivityReporter (session state and agent
+// messages) and the bridge job queue. Report routes are scoped by roomId,
+// which must equal the report's workspaceId (roomId ≡ workspaceId).
 package activity
 
 import (
-	"errors"
 	"net/http"
 	"strings"
 	"time"
@@ -80,8 +79,6 @@ func (s *Service) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /v1/rooms/{roomId}/agent-activity/session-state", s.handleSessionState)
 	mux.HandleFunc("POST /v1/rooms/{roomId}/agent-activity/messages", s.handleMessages)
-	mux.HandleFunc("POST /v1/rooms/{roomId}/agent-activity/submit-provenance", s.handleSubmitProvenance)
-	mux.HandleFunc("GET /v1/rooms/{roomId}/agent-activity/sync-states", s.handleSyncStates)
 	mux.HandleFunc("POST /v1/bridge/heartbeat", s.handleBridgeHeartbeat)
 	mux.HandleFunc("GET /v1/my/agents", s.handleMyAgents)
 	// The model catalogs of the agents a member may address in a room.
@@ -187,52 +184,6 @@ func (s *Service) handleMessages(w http.ResponseWriter, r *http.Request) {
 		s.noteReplyBurn(r.Context(), fresh)
 	}
 	httpx.WriteJSON(w, http.StatusOK, wire.ReportMessagesReply{NextCursor: next})
-}
-
-// handleSubmitProvenance is the atomic admission barrier. It acks only after
-// the client-submit id is durably queryable. A duplicate id is a benign replay
-// and returns 200 (idempotent), never a second provider admission.
-func (s *Service) handleSubmitProvenance(w http.ResponseWriter, r *http.Request) {
-	var in wire.SubmitProvenanceInput
-	if !httpx.DecodeJSON(w, r, maxBodyBytes, &in) {
-		return
-	}
-	roomID, err := roomctx.RequireEqual(r.PathValue("roomId"), in.WorkspaceID)
-	if err != nil {
-		httpx.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-	if !s.authorize(w, r, roomID) {
-		return
-	}
-	if strings.TrimSpace(in.ClientSubmitID) == "" {
-		httpx.Error(w, "clientSubmitId is required", http.StatusBadRequest)
-		return
-	}
-	if err := s.Store.RecordSubmitProvenance(r.Context(), in); err != nil && !errors.Is(err, store.ErrDuplicateSubmit) {
-		obs.ServerError(w, "submit provenance failed", err)
-		httpx.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	// Barrier contract: only ack once the id is queryable.
-	if !s.Store.SubmitQueryable(r.Context(), roomID, in.AgentSessionID, in.ClientSubmitID) {
-		obs.ServerError(w, "submit provenance not queryable after write", nil)
-		httpx.Error(w, "submit provenance not queryable after write", http.StatusInternalServerError)
-		return
-	}
-	w.WriteHeader(http.StatusOK)
-}
-
-func (s *Service) handleSyncStates(w http.ResponseWriter, r *http.Request) {
-	roomID, err := roomctx.Normalize(r.PathValue("roomId"))
-	if err != nil {
-		httpx.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-	if !s.authorize(w, r, roomID) {
-		return
-	}
-	httpx.WriteJSON(w, http.StatusOK, wire.SyncStatesReply{States: s.Store.SyncStates(r.Context(), roomID)})
 }
 
 // authorize enforces room membership (fail closed). The caller identity is the

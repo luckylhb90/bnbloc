@@ -17,7 +17,7 @@ func TestMiddlewareLogsTagsWithoutSecrets(t *testing.T) {
 	h := Middleware(logger, NewMetrics("test"), http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
-	req := httptest.NewRequest(http.MethodGet, "/v1/rooms/room-1/agent-activity/sync-states", nil)
+	req := httptest.NewRequest(http.MethodGet, "/v1/rooms/room-1/agent-activity/session-state", nil)
 	req.Header.Set("X-Bnbloc-User", "alice")
 	// A secret sneaking in via a header must not be logged.
 	req.Header.Set("Authorization", "Bearer sk-SECRET-DO-NOT-LOG")

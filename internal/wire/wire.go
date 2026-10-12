@@ -48,29 +48,6 @@ type ReportMessagesReply struct {
 	NextCursor int64 `json:"nextCursor"`
 }
 
-// SubmitProvenanceInput is the body of the atomic submit-provenance barrier.
-// The server must persist the canonical client-submit message and turn
-// admission in one transaction and only ack after clientSubmitId is queryable.
-type SubmitProvenanceInput struct {
-	WorkspaceID    string `json:"workspaceId"`
-	AgentSessionID string `json:"agentSessionId"`
-	ClientSubmitID string `json:"clientSubmitId"`
-	TurnAdmission  any    `json:"turnAdmission"`
-}
-
-// WorkspaceAgentSyncState mirrors the open-source sync-state projection.
-type WorkspaceAgentSyncState struct {
-	PendingCount  int    `json:"pendingCount"`
-	FailedCount   int    `json:"failedCount"`
-	LastError     string `json:"lastError,omitempty"`
-	MessageCursor int64  `json:"messageCursor"`
-}
-
-// SyncStatesReply returns per-session sync states for a room.
-type SyncStatesReply struct {
-	States map[string]WorkspaceAgentSyncState `json:"states"`
-}
-
 // RosterAgent is one agent a member's bridge advertises as reachable in a room.
 // The room agent roster is the union of these across members, letting the
 // composer picker offer real drivable agents without the gateway reaching any

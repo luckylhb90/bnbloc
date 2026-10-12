@@ -77,34 +77,6 @@ func TestSessionStateAcceptsMember(t *testing.T) {
 	}
 }
 
-// The submit-provenance barrier is idempotent: a replayed client-submit id
-// returns 200, never a duplicate admission error.
-func TestSubmitProvenanceIsIdempotent(t *testing.T) {
-	srv, mem := newTestServer(t)
-	mem.Add("room-1", "alice")
-	in := wire.SubmitProvenanceInput{WorkspaceID: "room-1", AgentSessionID: "s1", ClientSubmitID: "cs-1"}
-	for attempt := range 2 {
-		resp := post(t, srv, "/v1/rooms/room-1/agent-activity/submit-provenance", "alice", in)
-		status := resp.StatusCode
-		resp.Body.Close()
-		if status != http.StatusOK {
-			t.Fatalf("attempt %d status = %d, want 200", attempt, status)
-		}
-	}
-}
-
-// Empty client-submit id is rejected: the barrier requires a stable id.
-func TestSubmitProvenanceRequiresID(t *testing.T) {
-	srv, mem := newTestServer(t)
-	mem.Add("room-1", "alice")
-	resp := post(t, srv, "/v1/rooms/room-1/agent-activity/submit-provenance", "alice",
-		wire.SubmitProvenanceInput{WorkspaceID: "room-1", AgentSessionID: "s1", ClientSubmitID: ""})
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400", resp.StatusCode)
-	}
-}
-
 // The activity service publishes an event through its realtime.Publisher on a
 // session-state report, so a separate realtime process can fan it out.
 func TestSessionStatePublishesEvent(t *testing.T) {

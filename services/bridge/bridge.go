@@ -518,7 +518,6 @@ func (b *Bridge) bridgeID() string {
 
 type heartbeatRequest struct {
 	BridgeID       string           `json:"bridgeId"`
-	TenantID       string           `json:"tenantId"`
 	OwnerUserID    string           `json:"ownerUserId"`
 	AppInstanceID  string           `json:"appInstanceId"`
 	Version        string           `json:"version"`
@@ -537,7 +536,6 @@ type heartbeatAgent struct {
 func (b *Bridge) reportHeartbeat(ctx context.Context) error {
 	_, err := b.gatewayPOST(ctx, "/v1/bridge/heartbeat", heartbeatRequest{
 		BridgeID:       b.bridgeID(),
-		TenantID:       b.cfg.Tenant,
 		OwnerUserID:    b.cfg.OwnerSubject,
 		AppInstanceID:  b.cfg.AppInstanceID,
 		Version:        b.cfg.Version,
@@ -569,7 +567,6 @@ func (b *Bridge) heartbeatAgents() []heartbeatAgent {
 
 type claimRequest struct {
 	BridgeID       string `json:"bridgeId"`
-	TenantID       string `json:"tenantId"`
 	OwnerUserID    string `json:"ownerUserId"`
 	MaxJobs        int    `json:"maxJobs"`
 	ServeAllOwners bool   `json:"serveAllOwners"`
@@ -622,7 +619,7 @@ func (b *Bridge) claimOnce(ctx context.Context) bool {
 	if slots <= 0 {
 		return false
 	}
-	raw, err := b.gatewayPOST(ctx, "/v1/bridge/jobs/claim", claimRequest{BridgeID: b.bridgeID(), TenantID: b.cfg.Tenant, OwnerUserID: b.cfg.OwnerSubject, MaxJobs: slots, ServeAllOwners: b.cfg.ServeAllOwners})
+	raw, err := b.gatewayPOST(ctx, "/v1/bridge/jobs/claim", claimRequest{BridgeID: b.bridgeID(), OwnerUserID: b.cfg.OwnerSubject, MaxJobs: slots, ServeAllOwners: b.cfg.ServeAllOwners})
 	if err != nil {
 		slog.Warn("bnbloc bridge job claim failed", "event", "bnbloc.bridge.job_claim_failed", "error", err)
 		return false

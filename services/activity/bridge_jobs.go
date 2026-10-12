@@ -21,7 +21,6 @@ import (
 
 type heartbeatBody struct {
 	BridgeID       string            `json:"bridgeId"`
-	TenantID       string            `json:"tenantId"`
 	OwnerUserID    string            `json:"ownerUserId"`
 	AppInstanceID  string            `json:"appInstanceId"`
 	Version        string            `json:"version"`
@@ -111,7 +110,6 @@ func (s *Service) serveAll(requested bool, caller string) bool {
 
 type claimBody struct {
 	BridgeID       string `json:"bridgeId"`
-	TenantID       string `json:"tenantId"`
 	OwnerUserID    string `json:"ownerUserId"`
 	MaxJobs        int    `json:"maxJobs"`
 	ServeAllOwners bool   `json:"serveAllOwners"`

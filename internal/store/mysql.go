@@ -15,8 +15,8 @@ import (
 )
 
 // MySQL implements ActivityStore over a database/sql connection. It satisfies
-// the same contract as Memory, enforcing canonical version monotonicity and the
-// idempotent submit-provenance barrier through SQL constraints.
+// the same contract as Memory, enforcing canonical version monotonicity and
+// idempotent message appends through SQL constraints.
 type MySQL struct {
 	DB *sql.DB
 }
@@ -137,92 +137,6 @@ ON DUPLICATE KEY UPDATE message_cursor = GREATEST(message_cursor, VALUES(message
 		return nil, 0, err
 	}
 	return fresh, cursor, nil
-}
-
-// RecordSubmitProvenance atomically persists the client-submit message. The
-// unique key (room, session, client_submit_id) makes a replay a duplicate that
-// maps to ErrDuplicateSubmit; the row is queryable after commit.
-func (m *MySQL) RecordSubmitProvenance(ctx context.Context, in wire.SubmitProvenanceInput) error {
-	tnt, err := tenant.Require(ctx)
-	if err != nil {
-		return err
-	}
-	admission, err := jsonArg(in.TurnAdmission)
-	if err != nil {
-		return err
-	}
-	tx, err := m.DB.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	// Compute the next per-session seq under a lock so concurrent submits for the
-	// same session cannot pick the same seq. The range predicate on the PK prefix
-	// (room_id, agent_session_id) takes InnoDB gap locks under REPEATABLE READ, so
-	// even a first-ever submit (no rows yet) serializes a concurrent submit rather
-	// than both computing seq=1 and colliding on the PK.
-	var next int64
-	if err := tx.QueryRowContext(ctx, `
-SELECT COALESCE(MAX(seq), 0) + 1 FROM agent_messages
-WHERE room_id = ? AND agent_session_id = ? FOR UPDATE`,
-		in.WorkspaceID, in.AgentSessionID).Scan(&next); err != nil {
-		return err
-	}
-	res, err := tx.ExecContext(ctx, `
-INSERT IGNORE INTO agent_messages (tenant_id, room_id, agent_session_id, seq, client_submit_id, payload_json, created_at_ms)
-VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		tnt, in.WorkspaceID, in.AgentSessionID, next, in.ClientSubmitID, admission, 0)
-	if err != nil {
-		return err
-	}
-	affected, err := res.RowsAffected()
-	if err != nil {
-		return err
-	}
-	if affected == 0 {
-		// The seq lock guarantees a distinct seq, so the only key INSERT IGNORE can
-		// swallow is the unique (room, session, client_submit_id): a genuine replay.
-		return ErrDuplicateSubmit
-	}
-	return tx.Commit()
-}
-
-// SubmitQueryable reports whether the client-submit id is durably persisted.
-func (m *MySQL) SubmitQueryable(ctx context.Context, roomID, agentSessionID, clientSubmitID string) bool {
-	tnt, err := tenant.Require(ctx)
-	if err != nil {
-		return false
-	}
-	var one int
-	err = m.DB.QueryRowContext(ctx,
-		`SELECT 1 FROM agent_messages WHERE tenant_id = ? AND room_id = ? AND agent_session_id = ? AND client_submit_id = ? LIMIT 1`,
-		tnt, roomID, agentSessionID, clientSubmitID).Scan(&one)
-	return err == nil
-}
-
-// SyncStates returns per-session sync states for a room.
-func (m *MySQL) SyncStates(ctx context.Context, roomID string) map[string]wire.WorkspaceAgentSyncState {
-	out := map[string]wire.WorkspaceAgentSyncState{}
-	tnt, err := tenant.Require(ctx)
-	if err != nil {
-		return out
-	}
-	rows, err := m.DB.QueryContext(ctx,
-		`SELECT agent_session_id, pending_count, failed_count, COALESCE(last_error, ''), message_cursor
-FROM sync_states WHERE tenant_id = ? AND room_id = ?`, tnt, roomID)
-	if err != nil {
-		return out
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var id string
-		var st wire.WorkspaceAgentSyncState
-		if err := rows.Scan(&id, &st.PendingCount, &st.FailedCount, &st.LastError, &st.MessageCursor); err != nil {
-			continue
-		}
-		out[id] = st
-	}
-	return out
 }
 
 // mysqlErrDupEntry is MySQL's ER_DUP_ENTRY (duplicate key on insert).

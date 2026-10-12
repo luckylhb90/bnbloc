@@ -6,17 +6,11 @@ package store
 
 import (
 	"context"
-	"errors"
 	"sync"
 
 	"github.com/luckylhb90/bnbloc/internal/tenant"
 	"github.com/luckylhb90/bnbloc/internal/wire"
 )
-
-// ErrDuplicateSubmit indicates the client-submit id already exists for the
-// session; the submit-provenance barrier is idempotent, so this is a benign
-// replay and callers may treat it as success.
-var ErrDuplicateSubmit = errors.New("store: duplicate client-submit id")
 
 // ActivityStore persists projected agent activity per room. Implementations
 // must be safe for concurrent use.
@@ -30,15 +24,6 @@ type ActivityStore interface {
 	// the next cursor. Replays at or below the cursor are dropped so callers
 	// publish each message to a room at most once.
 	AppendMessages(ctx context.Context, roomID string, in wire.ReportMessagesInput) ([]wire.Message, int64, error)
-	// RecordSubmitProvenance atomically persists the client-submit message and
-	// turn admission. It returns only after clientSubmitId is queryable. A
-	// duplicate id returns ErrDuplicateSubmit.
-	RecordSubmitProvenance(ctx context.Context, in wire.SubmitProvenanceInput) error
-	// SubmitQueryable reports whether a client-submit id is durably queryable,
-	// proving the barrier completed.
-	SubmitQueryable(ctx context.Context, roomID, agentSessionID, clientSubmitID string) bool
-	// SyncStates returns per-session sync states for a room.
-	SyncStates(ctx context.Context, roomID string) map[string]wire.WorkspaceAgentSyncState
 }
 
 type sessionKey struct{ tenant, room, session string }
@@ -48,8 +33,6 @@ type Memory struct {
 	mu       sync.Mutex
 	versions map[sessionKey]int64
 	cursors  map[sessionKey]int64
-	submits  map[sessionKey]map[string]struct{}
-	sync     map[sessionKey]wire.WorkspaceAgentSyncState
 	// usage keeps reported reply metrics for AgentUsage (team dashboard).
 	usage []usageSample
 }
@@ -59,8 +42,6 @@ func NewMemory() *Memory {
 	return &Memory{
 		versions: map[sessionKey]int64{},
 		cursors:  map[sessionKey]int64{},
-		submits:  map[sessionKey]map[string]struct{}{},
-		sync:     map[sessionKey]wire.WorkspaceAgentSyncState{},
 	}
 }
 
@@ -108,62 +89,5 @@ func (m *Memory) AppendMessages(ctx context.Context, roomID string, in wire.Repo
 	}
 	m.cursors[key] = cursor
 	m.recordUsageLocked(tnt, roomID, fresh)
-	st := m.sync[key]
-	st.MessageCursor = cursor
-	m.sync[key] = st
 	return fresh, cursor, nil
-}
-
-// RecordSubmitProvenance is the atomic idempotent barrier.
-func (m *Memory) RecordSubmitProvenance(ctx context.Context, in wire.SubmitProvenanceInput) error {
-	tnt, err := tenant.Require(ctx)
-	if err != nil {
-		return err
-	}
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	key := sessionKey{tnt, in.WorkspaceID, in.AgentSessionID}
-	set := m.submits[key]
-	if set == nil {
-		set = map[string]struct{}{}
-		m.submits[key] = set
-	}
-	if _, ok := set[in.ClientSubmitID]; ok {
-		return ErrDuplicateSubmit
-	}
-	set[in.ClientSubmitID] = struct{}{}
-	return nil
-}
-
-// SubmitQueryable reports whether the client-submit id is durably recorded.
-func (m *Memory) SubmitQueryable(ctx context.Context, roomID, agentSessionID, clientSubmitID string) bool {
-	tnt, err := tenant.Require(ctx)
-	if err != nil {
-		return false
-	}
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	set := m.submits[sessionKey{tnt, roomID, agentSessionID}]
-	if set == nil {
-		return false
-	}
-	_, ok := set[clientSubmitID]
-	return ok
-}
-
-// SyncStates returns a copy of per-session sync states for a room.
-func (m *Memory) SyncStates(ctx context.Context, roomID string) map[string]wire.WorkspaceAgentSyncState {
-	tnt, err := tenant.Require(ctx)
-	if err != nil {
-		return map[string]wire.WorkspaceAgentSyncState{}
-	}
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	out := map[string]wire.WorkspaceAgentSyncState{}
-	for key, st := range m.sync {
-		if key.tenant == tnt && key.room == roomID {
-			out[key.session] = st
-		}
-	}
-	return out
 }
