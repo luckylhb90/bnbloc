@@ -3,7 +3,7 @@
 Status: approved, in development (2026-10-12): steps 1 and 2 implemented,
 step 3 implemented, step 5 implemented for experts and skill packs, step 6
 expert teams and MCP tool components implemented, step 4 sharing and
-approval in development (see "Status" below). Feasibility verified in code and by experiments (see
+approval implemented (see "Status" below). Feasibility verified in code and by experiments (see
 "Evidence").
 
 ## Why
@@ -910,7 +910,44 @@ Settings → Tools is); the desktop materializes on each catalog refresh
 
 ## Status: step 4 (sharing and approval)
 
-**2026-10-12: in development.** Scope: section 1's shared, organization
+**2026-10-12: implemented** (architecture:
+`docs/architecture/content-components.md`, "Sharing and publishing").
+Commits: 44eedb9 (this record), ceb632a (store: `source_id`/`shared_by`,
+the unique key with `source_id`, status changes, `content_publish_requests`,
+migration `2026_10_content_sharing`), 4516b09 (`contentuse`: the author as
+the trust owner, `Visible`, prompt search), 88a7ff6 (`contentpkg`: the
+signable platform package), d5fc614 (`content_shared`/`content_review`
+notifications), 57eafc5 (gateway: shares, copy update, publish requests,
+org review and management, platform export and install), 2bd193e (realtime:
+prompt hits in global search), 40ac890 (room tools `publish_component`,
+Expert builder 1.0.2), 56a04e4 (`bnbloc content export|promote`); web:
+9978785 (Library: Share, Publish to organization, copies and their
+updates, the Plaza's shared prompts, prompt search hits), 8622626
+(Organization → Content review, Platform content).
+
+**Verified** by store tests (memory and MySQL 8.4, including converging a
+pre-step-4 table), `contentuse`, `contentpkg`, gateway route tests
+(authorization: only the author shares, publishes or edits; only org admins
+of the request's organization review and decide; only a super admin exports
+and installs; a tampered or unsigned package is refused), room tool, CLI and
+web helper tests (`scripts/ci.sh go` with MySQL 8.4, `scripts/ci.sh web`).
+Not yet verified against running services or in a browser.
+
+**Open:** notification preferences have no switch for the two new types;
+a room share reaches the room's members at that moment (people who join
+later do not get a copy; a room pin is the room-wide alternative); platform
+content has no tenant restriction (it reaches every organization or, when
+unpublished, none); org rows of two authors may share a name (requirements
+resolve to the highest satisfying version among them); the publish
+endpoint does not auto-open a request when an author saves a new version
+(the Library shows the version the organization uses beside the latest).
+
+**Closed elsewhere:** step 3's open "org-shared packs on the Plaza and in
+global search", and step 6's "a built-in expert is not yet a team member"
+(`contentuse.Visible` includes built-in and platform content in `name@range`
+resolution).
+
+Scope: section 1's shared, organization
 and platform scopes for every content kind (experts, teams, skill packs,
 prompt packs), the builder's `publish_component` for them, and what the
 prompt-library cutover left to this step (org-shared prompts on the Plaza
