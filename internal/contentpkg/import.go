@@ -13,31 +13,33 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/luckylhb90/bnbloc/core"
 	"github.com/luckylhb90/bnbloc/internal/tarbundle"
 )
 
-// Import turns an uploaded archive (tar, tar.gz or zip) of an existing
-// format into a content package:
+// Import turns an upload (a tar, tar.gz or zip archive, or one text file)
+// of an existing format into a content package:
 //
 //   - a bnbloc package (component.json at the root) imports as is;
-//   - a skill directory (SKILL.md at the root) or a directory of skills
-//     (<name>/SKILL.md, or skills/<name>/SKILL.md);
-//   - a Claude Code-style plugin (.claude-plugin/plugin.json): its
-//     skills/<name>/ become the skills, and for an expert its first
-//     agents/<name>.md becomes the instructions.
+//   - otherwise the kind reads its foreign formats (KindSpec.fromImport):
+//     a skill directory (SKILL.md at the root) or a directory of skills
+//     (<name>/SKILL.md, or skills/<name>/SKILL.md); a Claude Code-style
+//     plugin (.claude-plugin/plugin.json: its skills/<name>/ become the
+//     skills, and for an expert its first agents/<name>.md becomes the
+//     instructions); markdown or json files of prompts.
 //
-// kind is the target kind ("expert" or "skill"); name overrides the
+// kind is the target kind ("expert", "skill", "prompt"); name overrides the
 // generated name; version is the version to write. A manifest is generated
 // for every format but the first, declaring the scripts permission when a
 // skill ships scripts.
-func Import(archive []byte, kind, name, version string, opts Options) (*Package, []byte, error) {
+func Import(upload []byte, kind, name, version string, opts Options) (*Package, []byte, error) {
 	spec, ok := Lookup(kind)
 	if !ok {
 		return nil, nil, fmt.Errorf("unknown kind %q", kind)
 	}
-	files, err := readArchive(archive, spec.Limits)
+	files, err := readUpload(upload)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -45,53 +47,13 @@ func Import(archive []byte, kind, name, version string, opts Options) (*Package,
 	if raw, ok := files[ManifestFile]; ok {
 		return importPackage(raw, files, spec, name, version, opts)
 	}
-	var plugin pluginManifest
-	if raw, ok := files[".claude-plugin/plugin.json"]; ok {
-		if err := json.Unmarshal(raw, &plugin); err != nil {
-			return nil, nil, fmt.Errorf(".claude-plugin/plugin.json: %w", err)
-		}
-	}
-	skills, err := findSkills(files)
-	if err != nil {
-		return nil, nil, err
-	}
-	m := Manifest{Kind: spec.Kind, Version: version}
-	out := map[string][]byte{}
-	switch spec.Kind {
-	case KindSkill:
-		if len(skills) == 0 {
-			return nil, nil, errors.New("no skills found: a skill is a directory with a SKILL.md")
-		}
-		for _, s := range skills {
-			m.Skills = append(m.Skills, s.slug)
-			for rel, data := range s.files {
-				out[s.slug+"/"+rel] = data
-			}
-		}
-		m.Name = firstNonEmpty(name, slugify(plugin.Name))
-		if m.Name == "" {
-			m.Name = skills[0].slug
-		}
-		m.Description = firstNonEmpty(plugin.Description, skills[0].description)
-		if len(skills) > 1 && plugin.Description == "" {
-			m.Description = fmt.Sprintf("%d skills: %s", len(skills), skillNames(skills))
-		}
-	case KindExpert:
-		instructions, meta, err := findInstructions(files)
-		if err != nil {
-			return nil, nil, err
-		}
-		out[InstructionsFile] = []byte(strings.TrimSpace(instructions) + "\n")
-		for _, s := range skills {
-			for rel, data := range s.files {
-				out[expertSkillsDir+"/"+s.slug+"/"+rel] = data
-			}
-		}
-		m.Name = firstNonEmpty(name, slugify(meta["name"]), slugify(plugin.Name))
-		m.DisplayName = firstNonEmpty(meta["name"], plugin.Name)
-		m.Description = firstNonEmpty(meta["description"], plugin.Description)
-	default:
+	if spec.fromImport == nil {
 		return nil, nil, fmt.Errorf("import does not create %s packages", spec.Short)
+	}
+	m := Manifest{Kind: spec.Kind, Name: strings.TrimSpace(name), Version: version}
+	out := map[string][]byte{}
+	if err := spec.fromImport(files, &m, out); err != nil {
+		return nil, nil, err
 	}
 	if m.Name == "" {
 		return nil, nil, errors.New("the import has no name: pass one")
@@ -108,6 +70,72 @@ func Import(archive []byte, kind, name, version string, opts Options) (*Package,
 		}
 	}
 	return Pack(m, out, opts)
+}
+
+// pluginOf reads a Claude Code-style plugin's manifest, when the upload is
+// one.
+func pluginOf(files map[string][]byte) (pluginManifest, error) {
+	var plugin pluginManifest
+	if raw, ok := files[".claude-plugin/plugin.json"]; ok {
+		if err := json.Unmarshal(raw, &plugin); err != nil {
+			return plugin, fmt.Errorf(".claude-plugin/plugin.json: %w", err)
+		}
+	}
+	return plugin, nil
+}
+
+// skillPackFromImport: the upload's skills become the pack's.
+func skillPackFromImport(files map[string][]byte, m *Manifest, out map[string][]byte) error {
+	plugin, err := pluginOf(files)
+	if err != nil {
+		return err
+	}
+	skills, err := findSkills(files)
+	if err != nil {
+		return err
+	}
+	if len(skills) == 0 {
+		return errors.New("no skills found: a skill is a directory with a SKILL.md")
+	}
+	for _, s := range skills {
+		m.Skills = append(m.Skills, s.slug)
+		for rel, data := range s.files {
+			out[s.slug+"/"+rel] = data
+		}
+	}
+	m.Name = firstNonEmpty(m.Name, slugify(plugin.Name), skills[0].slug)
+	m.Description = firstNonEmpty(plugin.Description, skills[0].description)
+	if len(skills) > 1 && plugin.Description == "" {
+		m.Description = fmt.Sprintf("%d skills: %s", len(skills), skillNames(skills))
+	}
+	return nil
+}
+
+// expertFromImport: instructions from a plugin agent or an instructions
+// file, the upload's skills embedded.
+func expertFromImport(files map[string][]byte, m *Manifest, out map[string][]byte) error {
+	plugin, err := pluginOf(files)
+	if err != nil {
+		return err
+	}
+	skills, err := findSkills(files)
+	if err != nil {
+		return err
+	}
+	instructions, meta, err := findInstructions(files)
+	if err != nil {
+		return err
+	}
+	out[InstructionsFile] = []byte(strings.TrimSpace(instructions) + "\n")
+	for _, s := range skills {
+		for rel, data := range s.files {
+			out[expertSkillsDir+"/"+s.slug+"/"+rel] = data
+		}
+	}
+	m.Name = firstNonEmpty(m.Name, slugify(meta["name"]), slugify(plugin.Name))
+	m.DisplayName = firstNonEmpty(meta["name"], plugin.Name)
+	m.Description = firstNonEmpty(meta["description"], plugin.Description)
+	return nil
 }
 
 // importPackage re-validates an uploaded bnbloc package, rewriting only its
@@ -247,6 +275,33 @@ func junk(p string) bool {
 		}
 	}
 	return false
+}
+
+// readUpload reads an upload: an archive, or a single text file (a
+// markdown or json file of prompts), named by its content.
+func readUpload(raw []byte) (map[string][]byte, error) {
+	if isArchive(raw) || !utf8.Valid(raw) {
+		// Every content kind's archive is read within the widest content
+		// profile; the kind's own caps apply to the package built from it.
+		return readArchive(raw, tarbundle.ContentLimits)
+	}
+	if len(raw) > promptPackMaxSize {
+		return nil, fmt.Errorf("the file exceeds %d bytes", promptPackMaxSize)
+	}
+	t := bytes.TrimSpace(bytes.TrimPrefix(raw, []byte("\ufeff")))
+	if len(t) == 0 {
+		return nil, errors.New("the file is empty")
+	}
+	if t[0] == '{' || t[0] == '[' {
+		return map[string][]byte{"prompts.json": raw}, nil
+	}
+	return map[string][]byte{"prompts.md": raw}, nil
+}
+
+// isArchive reports a zip, gzip or tar upload by its magic bytes.
+func isArchive(raw []byte) bool {
+	return bytes.HasPrefix(raw, []byte("PK\x03\x04")) || bytes.HasPrefix(raw, []byte{0x1f, 0x8b}) ||
+		(len(raw) >= 262 && string(raw[257:262]) == "ustar")
 }
 
 // readArchive reads a tar, tar.gz or zip archive into files, refusing what a

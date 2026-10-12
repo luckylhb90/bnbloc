@@ -1,7 +1,7 @@
 // Package contentpkg is the one validator, builder and importer of content
 // components (docs/prd/2026-10-12-experts-and-teams.md): packages that are
-// mostly text — experts and skill packs now, prompt packs next — which
-// members author as well as the platform. Install, member publish, form
+// mostly text — experts, skill packs and prompt packs — which members
+// author as well as the platform. Install, member publish, form
 // saves, imports and the bridge's materialization all go through it, so a
 // package is checked by the same rules wherever it enters.
 //
@@ -25,6 +25,7 @@ import (
 const (
 	KindExpert = "bnbloc.expert.package/v1"
 	KindSkill  = "bnbloc.skill.package/v1"
+	KindPrompt = "bnbloc.prompt.package/v1"
 )
 
 // ManifestFile is the manifest's path in every content bundle.
@@ -93,6 +94,9 @@ type Manifest struct {
 
 	// Skill pack: the slugs of its skills (<slug>/SKILL.md each).
 	Skills []string `json:"skills,omitempty"`
+
+	// Prompt pack: its prompts (they live in the manifest).
+	Prompts []Prompt `json:"prompts,omitempty"`
 }
 
 // Requires lists what a package needs at use time: skill and prompt packs
@@ -112,10 +116,13 @@ type MCPRequirement struct {
 	Env  []string `json:"env,omitempty"`
 }
 
-// QuickPrompt is one composer quick prompt of an expert.
+// QuickPrompt is one composer quick prompt of an expert: its text, or a
+// reference to a prompt of a prompt pack the expert requires
+// ("pack/prompt-id"; the pack is named in requires.prompts).
 type QuickPrompt struct {
-	Title  string `json:"title"`
-	Prompt string `json:"prompt"`
+	Title  string `json:"title,omitempty"`
+	Prompt string `json:"prompt,omitempty"`
+	Ref    string `json:"ref,omitempty"`
 }
 
 // Reference is a parsed "name@range" requirement.
@@ -137,14 +144,22 @@ func ParseReference(s string) (Reference, error) {
 type KindSpec struct {
 	// Kind is the manifest kind string.
 	Kind string
-	// Short is the API / UI name ("expert", "skill").
+	// Short is the API / UI name ("expert", "skill", "prompt").
 	Short string
 	// Limits is the kind's tarbundle limit profile.
 	Limits tarbundle.Limits
+	// MemberUse reports a kind a member turns on for themselves (a
+	// content use of member scope): skill packs (all their agents) and
+	// prompt packs (their composer). Experts are picked per message.
+	MemberUse bool
 	// validate checks the kind's own manifest fields and files.
 	validate func(p *Package) error
 	// fromForm lays out the kind's files from a form save.
 	fromForm func(f Form, m *Manifest, files map[string][]byte) error
+	// fromImport generates the kind's manifest fields and files from an
+	// imported foreign format (files of the upload; m carries the kind and
+	// version, and the name when one was given).
+	fromImport func(files map[string][]byte, m *Manifest, out map[string][]byte) error
 }
 
 var kinds = map[string]KindSpec{}

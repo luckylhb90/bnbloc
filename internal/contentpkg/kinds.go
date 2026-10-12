@@ -21,8 +21,10 @@ const (
 )
 
 func init() {
-	register(KindSpec{Kind: KindExpert, Short: "expert", Limits: tarbundle.ContentLimits, validate: validateExpert, fromForm: expertFromForm})
-	register(KindSpec{Kind: KindSkill, Short: "skill", Limits: tarbundle.ContentLimits, validate: validateSkillPack, fromForm: skillPackFromForm})
+	register(KindSpec{Kind: KindExpert, Short: "expert", Limits: tarbundle.ContentLimits,
+		validate: validateExpert, fromForm: expertFromForm, fromImport: expertFromImport})
+	register(KindSpec{Kind: KindSkill, Short: "skill", Limits: tarbundle.ContentLimits, MemberUse: true,
+		validate: validateSkillPack, fromForm: skillPackFromForm, fromImport: skillPackFromImport})
 }
 
 // validateExpert: INSTRUCTIONS.md (non-empty), optional embedded skills under
@@ -32,6 +34,9 @@ func validateExpert(p *Package) error {
 	m := p.Manifest
 	if len(m.Skills) > 0 {
 		return fmt.Errorf("an expert lists no skills field; embed skills under %s/<name>/ or require skill packs", expertSkillsDir)
+	}
+	if len(m.Prompts) > 0 {
+		return fmt.Errorf("an expert lists no prompts field; require prompt packs (requires.prompts) and point quick prompts at them")
 	}
 	text, err := readText(p.Bundle, InstructionsFile, maxInstructions)
 	if err != nil {
@@ -45,13 +50,7 @@ func validateExpert(p *Package) error {
 		return fmt.Errorf("at most %d quick prompts", maxQuickPrompts)
 	}
 	for i, q := range m.QuickPrompts {
-		if strings.TrimSpace(q.Title) == "" || strings.TrimSpace(q.Prompt) == "" {
-			return fmt.Errorf("quick prompt %d needs a title and a prompt", i+1)
-		}
-		if err := checkText("quick prompt title", q.Title, maxQuickTitle, true); err != nil {
-			return err
-		}
-		if err := checkText("quick prompt", q.Prompt, maxQuickPrompt, false); err != nil {
+		if err := checkQuickPrompt(m, i, q); err != nil {
 			return err
 		}
 	}
@@ -87,6 +86,34 @@ func validateExpert(p *Package) error {
 	return nil
 }
 
+// checkQuickPrompt: a quick prompt is a title and its text, or a reference
+// "pack/prompt-id" to a prompt of a prompt pack the expert requires (its
+// title then defaults to the prompt's).
+func checkQuickPrompt(m Manifest, i int, q QuickPrompt) error {
+	if err := checkText("quick prompt title", q.Title, maxQuickTitle, true); err != nil {
+		return err
+	}
+	if q.Ref == "" {
+		if strings.TrimSpace(q.Title) == "" || strings.TrimSpace(q.Prompt) == "" {
+			return fmt.Errorf("quick prompt %d needs a title and a prompt", i+1)
+		}
+		return checkText("quick prompt", q.Prompt, maxQuickPrompt, false)
+	}
+	if q.Prompt != "" {
+		return fmt.Errorf("quick prompt %d: give a prompt or a ref to a pack's prompt, not both", i+1)
+	}
+	pack, _, ok := ParsePromptRef(q.Ref)
+	if !ok {
+		return fmt.Errorf("quick prompt %d: ref %q: want pack-name/prompt-id", i+1, q.Ref)
+	}
+	for _, r := range m.Requires.Prompts {
+		if ref, err := ParseReference(r); err == nil && ref.Name == pack {
+			return nil
+		}
+	}
+	return fmt.Errorf("quick prompt %d: ref %q: name the prompt pack %s in requires.prompts", i+1, q.Ref, pack)
+}
+
 // validateSkillPack: manifest skills lists every <slug>/SKILL.md of the
 // pack, and nothing else lies at the top level but component.json and
 // README.md.
@@ -94,6 +121,9 @@ func validateSkillPack(p *Package) error {
 	m := p.Manifest
 	if len(m.QuickPrompts) > 0 || m.Welcome != "" {
 		return fmt.Errorf("quick prompts and a welcome belong to experts")
+	}
+	if len(m.Prompts) > 0 {
+		return fmt.Errorf("prompts belong to prompt packs")
 	}
 	if len(m.Skills) == 0 {
 		return fmt.Errorf("a skill pack lists its skills (component.json skills)")

@@ -241,7 +241,7 @@ func TestContentImport(t *testing.T) {
 	if code != http.StatusCreated || decodeDetail(t, raw).Component.LatestVersion != "1.0.1" {
 		t.Fatalf("import version = %d %s", code, raw)
 	}
-	if code, _ := g.do("maya", http.MethodPost, "/v1/content-components/import?kind=prompt", "application/zip", zipArchive(t, map[string]string{"SKILL.md": skill})); code != http.StatusBadRequest {
+	if code, _ := g.do("maya", http.MethodPost, "/v1/content-components/import?kind=bogus", "application/zip", zipArchive(t, map[string]string{"SKILL.md": skill})); code != http.StatusBadRequest {
 		t.Fatalf("unknown kind = %d", code)
 	}
 }
