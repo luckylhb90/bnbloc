@@ -400,6 +400,13 @@ desktop agent.
 
 ### Batch 5: Go→TS wire generation and web owners (L)
 
+Status: partial, web-only items landed on branch
+`worktree-agent-a7a5bfbb8064292e7` with 1E: formatters in `format.ts`
+(M25, L3), `isSubmitEnter` (M18), `lib/clipboard.ts` + `ui/useCopy`
+(M23), unparsable SSE data dropped (L12), `useDismissOnOutside` (L8), dead
+exports (5.3, without knip). Boundary rules 6, 10 and L8 live in
+`web/scripts/check-boundaries.mjs`. Everything else here is still open.
+
 | # | Item | Refs | Size |
 |---|---|---|---|
 | 5.1 | **Projections in `internal/wire`**: room (list and detail), member, plaza, history, unread, targets, cores. Job and artifact projections leave out `tenantId`, `leaseBridgeId`, `diagnostics` and `blobKey` (§5, O4). Limits become wire constants, including the attachment and blob size limits. A generator (tygo or a small `go/ast` tool) writes `web/src/lib/wire.gen.ts`: `omitempty` → `?`, const groups → unions, `RoomEventKinds`, limits. `scripts/ci.sh go` runs it and then `git diff --exit-code`. Golden fixtures in `internal/wire/testdata/`, with a `node --test` over `normalizeRoomEvent`. Unparsable SSE data is dropped. | web M19, M26–M28, L10–L12; svc L8 | L |
