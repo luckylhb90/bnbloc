@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -40,12 +41,13 @@ func coresPublishMCP(args []string) error {
 		return err
 	}
 	c := newClient(resolveConfig(*gateway, *token))
+	var pins map[string]pkgmeta.Artifact
 	if len(binaries) > 0 {
-		if pkg.Artifacts, err = uploadArtifacts(c, binaries); err != nil {
+		if pins, err = uploadArtifacts(c, binaries); err != nil {
 			return err
 		}
 	}
-	if err := pkgmeta.ValidatePackage(pkg); err != nil {
+	if pkg, err = pkgmeta.AssembleMCP(pkg, pins); err != nil {
 		return err
 	}
 	body, err := json.Marshal(pkg)
@@ -63,10 +65,10 @@ func coresPublishMCP(args []string) error {
 	return nil
 }
 
-// mcpPublishInputs reads and checks the package before any upload: an MCP
-// package (kind and contract filled when omitted), valid apart from its
-// binary pins; a stdio package needs --binary per platform (each staged as
-// an upload placeholder until uploaded), an endpoint package takes none.
+// mcpPublishInputs reads the package and checks it before any upload
+// through the shared assembly (pkgmeta.PrepareMCP): each --binary must name
+// an existing file, and the platforms they name are the draft's upload
+// placeholders until uploaded.
 func mcpPublishInputs(packageFile string, binaries multiFlag) (pkgmeta.Package, error) {
 	if packageFile == "" {
 		return pkgmeta.Package{}, fmt.Errorf("usage: cores publish-mcp --package <mcp.json> [--binary <platform>=<path>...]")
@@ -81,38 +83,23 @@ func mcpPublishInputs(packageFile string, binaries multiFlag) (pkgmeta.Package, 
 	if err := dec.Decode(&pkg); err != nil {
 		return pkgmeta.Package{}, fmt.Errorf("package json invalid: %w", err)
 	}
-	if pkg.Kind == "" {
-		pkg.Kind = pkgmeta.KindMCPPackageV1
-	}
-	if pkg.Contract == "" {
-		pkg.Contract = pkgmeta.MCPContractV1
-	}
-	if pkg.Kind != pkgmeta.KindMCPPackageV1 {
-		return pkgmeta.Package{}, fmt.Errorf("package kind %q is not %s", pkg.Kind, pkgmeta.KindMCPPackageV1)
-	}
-	switch pkg.Runtime {
-	case pkgmeta.RuntimeStdio:
-		if len(binaries) == 0 {
-			return pkgmeta.Package{}, fmt.Errorf("a stdio MCP tool needs at least one --binary <platform>=<path>")
+	platforms := make([]string, 0, len(binaries))
+	for _, b := range binaries {
+		platform, path, err := parseBinarySpec(b)
+		if err != nil {
+			return pkgmeta.Package{}, err
 		}
-		pkg.Artifacts = map[string]pkgmeta.Artifact{}
-		for _, b := range binaries {
-			platform, path, err := parseBinarySpec(b)
-			if err != nil {
-				return pkgmeta.Package{}, err
-			}
-			if _, err := os.Stat(path); err != nil {
-				return pkgmeta.Package{}, fmt.Errorf("--binary %s: %w", platform, err)
-			}
-			pkg.Artifacts[platform] = pkgmeta.Artifact{}
+		if _, err := os.Stat(path); err != nil {
+			return pkgmeta.Package{}, fmt.Errorf("--binary %s: %w", platform, err)
 		}
-	default:
-		if len(binaries) > 0 {
-			return pkgmeta.Package{}, fmt.Errorf("--binary is only for a stdio MCP tool (runtime %q)", pkg.Runtime)
-		}
+		platforms = append(platforms, platform)
 	}
-	if err := pkgmeta.ValidatePackage(pkg); err != nil {
-		return pkgmeta.Package{}, err
+	pkg, err = pkgmeta.PrepareMCP(pkg, platforms)
+	switch {
+	case errors.Is(err, pkgmeta.ErrMCPNeedsBinaries):
+		return pkgmeta.Package{}, fmt.Errorf("%w: pass at least one --binary <platform>=<path>", err)
+	case errors.Is(err, pkgmeta.ErrMCPEndpointBinaries):
+		return pkgmeta.Package{}, fmt.Errorf("--binary is only for a stdio MCP tool: %w", err)
 	}
-	return pkg, nil
+	return pkg, err
 }
