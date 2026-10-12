@@ -15,7 +15,7 @@ import {
 } from "@/lib/teamDashboard";
 import { useVisiblePoll } from "@/lib/useVisiblePoll";
 import { Button } from "@/ui/Button";
-import { Badge, Card, Skeleton } from "@/ui/Card";
+import { Badge, Card, Skeleton, StatTile } from "@/ui/Card";
 import { ErrorBox } from "@/ui/ErrorBox";
 import { EmptyState } from "@/ui/Page";
 import { Segment } from "@/ui/Segment";
@@ -148,11 +148,11 @@ export function TeamAgentsTab({
 
       {data && agents.length > 0 && (
         <section className="grid grid-cols-2 gap-3 sm:grid-cols-5">
-          <Stat label="Online" value={`${sum.online}/${agents.length}`} />
-          <Stat label="Working now" value={String(sum.busy)} />
-          <Stat label="Turns" value={String(sum.turns)} />
-          <Stat label="Borrowed runs" value={String(sum.borrowedRuns)} />
-          <Stat label="Reported cost" value={formatUsd(sum.costUsd)} />
+          <StatTile label="Online" value={`${sum.online}/${agents.length}`} />
+          <StatTile label="Working now" value={String(sum.busy)} />
+          <StatTile label="Turns" value={String(sum.turns)} />
+          <StatTile label="Borrowed runs" value={String(sum.borrowedRuns)} />
+          <StatTile label="Reported cost" value={formatUsd(sum.costUsd)} />
         </section>
       )}
 
@@ -321,15 +321,6 @@ function RunsLink({
     >
       <ListChecksIcon size={12} /> Runs
     </button>
-  );
-}
-
-function Stat({ label, value }: { readonly label: string; readonly value: string }) {
-  return (
-    <div className="rounded-[var(--radius)] border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2">
-      <div className="text-xs uppercase tracking-wide text-[var(--color-fg-subtle)]">{label}</div>
-      <div className="mt-0.5 text-lg font-semibold tabular">{value}</div>
-    </div>
   );
 }
 

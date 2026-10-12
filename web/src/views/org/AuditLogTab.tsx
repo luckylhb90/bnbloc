@@ -16,7 +16,7 @@ import { cn } from "@/lib/cn";
 import { Button } from "@/ui/Button";
 import { Skeleton } from "@/ui/Card";
 import { ErrorBox } from "@/ui/ErrorBox";
-import { Input } from "@/ui/Input";
+import { Input, Field } from "@/ui/Input";
 import { EmptyState } from "@/ui/Page";
 import { useToast } from "@/ui/Toast";
 import { UserWithEmail } from "@/views/UserName";
@@ -252,15 +252,6 @@ export function AuditLogTab({
         </div>
       )}
     </section>
-  );
-}
-
-function Field({ label, children }: { readonly label: string; readonly children: React.ReactNode }) {
-  return (
-    <label className="flex flex-col gap-1 text-xs text-[var(--color-fg-subtle)]">
-      {label}
-      {children}
-    </label>
   );
 }
 

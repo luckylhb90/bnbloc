@@ -4,7 +4,7 @@ import { api, type ComponentKind, type ComponentRollout, type PlatformComponent 
 import { describeTestResult } from "@/lib/notificationPrefs";
 import { useStage } from "@/lib/capability";
 import { Button } from "@/ui/Button";
-import { Card } from "@/ui/Card";
+import { Card, EmptyCard } from "@/ui/Card";
 import { ErrorBox } from "@/ui/ErrorBox";
 import { Segment } from "@/ui/Segment";
 import { useToast } from "@/ui/Toast";
@@ -303,11 +303,3 @@ function SectionHeading({ title, subtitle }: { readonly title: string; readonly 
   );
 }
 
-function EmptyCard({ title, hint }: { readonly title: string; readonly hint: string }) {
-  return (
-    <Card className="border-dashed px-4 py-8 text-center">
-      <p className="text-sm font-medium text-[var(--color-fg)]">{title}</p>
-      <p className="mt-1 text-sm text-[var(--color-fg-muted)]">{hint}</p>
-    </Card>
-  );
-}

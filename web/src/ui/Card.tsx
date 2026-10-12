@@ -58,3 +58,27 @@ export function Dot({ tone = "accent" }: { tone?: "accent" | "muted" | "danger" 
   }[tone];
   return <span className={cn("inline-block size-2 rounded-full pulse-dot", c)} />;
 }
+
+// EmptyCard is a dashed placeholder card: a title and a hint.
+export function EmptyCard({ title, hint }: { readonly title: string; readonly hint: string }) {
+  return (
+    <Card className="border-dashed px-4 py-8 text-center">
+      <p className="text-sm font-medium text-[var(--color-fg)]">{title}</p>
+      <p className="mt-1 text-sm text-[var(--color-fg-muted)]">{hint}</p>
+    </Card>
+  );
+}
+
+// StatTile is one figure of a dashboard row: a label, the value and an
+// optional note beside it.
+export function StatTile({ label, value, sub }: { readonly label: string; readonly value: string; readonly sub?: string }) {
+  return (
+    <div className="rounded-[var(--radius)] border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-3">
+      <div className="text-xs uppercase tracking-wide text-[var(--color-fg-subtle)]">{label}</div>
+      <div className="mt-1 flex items-baseline gap-1">
+        <span className="text-lg font-semibold tabular">{value}</span>
+        {sub && <span className="text-xs text-[var(--color-fg-subtle)]">{sub}</span>}
+      </div>
+    </div>
+  );
+}

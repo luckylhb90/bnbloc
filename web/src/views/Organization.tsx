@@ -36,6 +36,8 @@ import { ConfirmDialog } from "@/ui/Dialog";
 import { displayNameOf } from "@/lib/useDisplayName";
 import { listPlaceholder } from "@/ui/QueryState";
 import { exactTime, formatDate, formatUsd } from "@/lib/format";
+import { StatTile } from "@/ui/Card";
+import { Field } from "@/ui/Input";
 
 type Tab =
   | "overview"
@@ -211,14 +213,14 @@ function OverviewTab({ role }: { role: string | null }) {
 
       {/* Usage against org ceilings (0 = unlimited). */}
       <section className="grid grid-cols-2 gap-3 md:grid-cols-4">
-        <Stat label="Agent runs" value={usage ? String(usage.runsUsed) : "—"} sub={ceil(usage?.runQuota)} />
-        <Stat
+        <StatTile label="Agent runs" value={usage ? String(usage.runsUsed) : "—"} sub={ceil(usage?.runQuota)} />
+        <StatTile
           label="Cost"
           value={usage ? formatUsd(usage.costUsed) : "—"}
           sub={usage?.costAllowance ? formatUsd(usage.costAllowance) : "unlimited"}
         />
-        <Stat label="Audit events" value={records ? String(records.length) : "—"} />
-        <Stat label="Role" value={role || "—"} />
+        <StatTile label="Audit events" value={records ? String(records.length) : "—"} />
+        <StatTile label="Role" value={role || "—"} />
       </section>
 
       {can(role, "manage_platform") && <DeploymentCard />}
@@ -657,25 +659,3 @@ function ceil(v: number | undefined): string {
   return v && v > 0 ? `/ ${v}` : "unlimited";
 }
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <label className="flex flex-col gap-1.5">
-      <span className="text-xs font-medium uppercase tracking-wide text-[var(--color-fg-subtle)]">
-        {label}
-      </span>
-      {children}
-    </label>
-  );
-}
-
-function Stat({ label, value, sub }: { label: string; value: string; sub?: string }) {
-  return (
-    <div className="rounded-[var(--radius)] border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-3">
-      <div className="text-xs uppercase tracking-wide text-[var(--color-fg-subtle)]">{label}</div>
-      <div className="mt-1 flex items-baseline gap-1">
-        <span className="text-lg font-semibold">{value}</span>
-        {sub && <span className="text-xs text-[var(--color-fg-subtle)]">{sub}</span>}
-      </div>
-    </div>
-  );
-}

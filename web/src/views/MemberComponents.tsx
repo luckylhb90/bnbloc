@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api, type MemberComponent } from "@/lib/api";
-import { Card } from "@/ui/Card";
+import { EmptyCard } from "@/ui/Card";
 import { PageHeader } from "@/ui/Page";
 import { useToast } from "@/ui/Toast";
 import { ComponentCard } from "@/views/ComponentCard";
@@ -124,11 +124,3 @@ function ComponentSection({
   );
 }
 
-function EmptyCard({ title, hint }: { readonly title: string; readonly hint: string }) {
-  return (
-    <Card className="border-dashed px-4 py-8 text-center">
-      <p className="text-sm font-medium text-[var(--color-fg)]">{title}</p>
-      <p className="mt-1 text-sm text-[var(--color-fg-muted)]">{hint}</p>
-    </Card>
-  );
-}
