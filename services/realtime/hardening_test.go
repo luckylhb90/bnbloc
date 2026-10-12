@@ -322,8 +322,11 @@ func TestSmallBodiesBounded(t *testing.T) {
 			t.Errorf("%s oversized: %d, want 413", p, r.StatusCode)
 		}
 	}
-	// An empty typing body stays valid (legacy clients).
-	if r := channelPost(t, srv, "/v1/rooms/room-1/typing", "alice", ""); r.StatusCode != http.StatusOK {
-		t.Errorf("empty typing body: %d, want 200", r.StatusCode)
+	// A typing hint is a JSON body; {} means the room's default channel.
+	if r := channelPost(t, srv, "/v1/rooms/room-1/typing", "alice", "{}"); r.StatusCode != http.StatusOK {
+		t.Errorf("typing {}: %d, want 200", r.StatusCode)
+	}
+	if r := channelPost(t, srv, "/v1/rooms/room-1/typing", "alice", ""); r.StatusCode != http.StatusBadRequest {
+		t.Errorf("empty typing body: %d, want 400", r.StatusCode)
 	}
 }

@@ -77,10 +77,10 @@ type Service struct {
 	// Chat optionally persists room-feed messages for history paging. Nil keeps
 	// realtime in-memory-only (local dev / tests).
 	Chat ChatStore
-	// Channels optionally resolves channel routing: the default channel that
-	// receives requests omitting channelId, and the channel list for per-channel
-	// unread aggregation. Nil routes channel-less traffic to the legacy empty
-	// channel "" (pre-channels rooms keep working unchanged).
+	// Channels resolves channel routing: the default channel that receives
+	// requests omitting channelId, and the channel list for per-channel
+	// unread aggregation. Nil (in-memory dev) routes everything to the
+	// room-wide stream "".
 	Channels   ChannelStore
 	BridgeJobs BridgeJobStore
 	// Attachments + Blobs back the multimodal upload/download path: metadata in
@@ -260,13 +260,10 @@ func (s *Service) Handler() http.Handler {
 }
 
 // resolveChannel maps a request's channelId to its routing target. An explicit
-// channel must be a live channel of the room (errUnknownChannel otherwise); an
-// omitted one resolves the room's default channel so channel-less clients keep
-// landing in one well-known stream. A room with no default channel
-// (pre-channels data, or a broken create invariant) falls back to the legacy
-// empty channel — where pre-channel rows live — after logging: messages routed
-// there are invisible to the default channel's history. With no channel store
-// (in-memory dev) an explicit id passes through unvalidated.
+// channel must be a live channel of the room; an omitted one resolves the
+// room's default channel (every room is created with one). Either missing is
+// errUnknownChannel. With no channel store (in-memory dev) an explicit id
+// passes through unvalidated and an omitted one is the room-wide stream "".
 func (s *Service) resolveChannel(ctx context.Context, roomID, channelID string) (string, error) {
 	if channelID = strings.TrimSpace(channelID); channelID != "" {
 		if s.Channels != nil {
@@ -276,13 +273,14 @@ func (s *Service) resolveChannel(ctx context.Context, roomID, channelID string) 
 		}
 		return channelID, nil
 	}
-	if s.Channels != nil {
-		if def, ok := s.Channels.DefaultChannel(ctx, roomID); ok {
-			return def.ChannelID, nil
-		}
-		log.Printf("realtime: room=%s has no default channel; routing to the empty channel", roomID)
+	if s.Channels == nil {
+		return "", nil
 	}
-	return "", nil
+	def, ok := s.Channels.DefaultChannel(ctx, roomID)
+	if !ok {
+		return "", errUnknownChannel
+	}
+	return def.ChannelID, nil
 }
 
 // isPeopleChannel reports whether channelID is the room's people chat. The
@@ -900,16 +898,6 @@ func (s *Service) handleMarkRead(w http.ResponseWriter, r *http.Request) {
 			httpx.Error(w, "mark-read failed", http.StatusInternalServerError)
 			return
 		}
-		// Pre-channel rows live in the empty channel but are surfaced as the
-		// default channel's unread. Reading the default channel must clear them
-		// too, otherwise that count can never be cleared by any action.
-		if s.Channels != nil {
-			if def, ok := s.Channels.DefaultChannel(r.Context(), roomID); ok && def.ChannelID == channelID {
-				if err := s.Chat.MarkRead(r.Context(), roomID, "", userID, body.Seq, time.Now().UnixMilli()); err != nil {
-					log.Printf("realtime: mark-read legacy room=%s user=%s seq=%d: %v", roomID, userID, body.Seq, err)
-				}
-			}
-		}
 	}
 	w.WriteHeader(http.StatusOK)
 }
@@ -1047,9 +1035,8 @@ func (s *Service) handleEditMessage(w http.ResponseWriter, r *http.Request) {
 // this needs no server-side membership enumeration; each room is still
 // membership-checked. Shape: {"unread": {"<roomId>": <count>}, "channels":
 // {"<roomId>": [{"channelId": ..., "count": ...}]}} — the room total spans
-// every stream that can hold the caller's messages (the legacy empty channel
-// plus each live channel), and the per-channel list carries only channels with
-// unread messages, default channel first.
+// the room's live channels, and the per-channel list carries only channels
+// with unread messages, default channel first.
 func (s *Service) handleUnread(w http.ResponseWriter, r *http.Request) {
 	userID := svcauth.Subject(r)
 	if userID == "" {
@@ -1087,36 +1074,22 @@ func (s *Service) handleUnread(w http.ResponseWriter, r *http.Request) {
 				ctx = tenant.NewContext(ctx, m.Tenant)
 			}
 			total := 0
-			// The legacy empty channel holds rows written before channels existed.
-			// They count toward the room total, but they must also be attributed to
-			// a channel the member can actually open: a count that belongs to no
-			// channel shows a room badge nobody can locate or clear, because every
-			// channel view reads its own id and never the empty bucket.
-			legacy := 0
-			if n, err := s.Chat.UnreadCount(ctx, roomID, "", userID); err == nil {
-				legacy = n
-				total += n
-			}
-			if s.Channels != nil {
-				defaultID := ""
-				if def, ok := s.Channels.DefaultChannel(ctx, roomID); ok {
-					defaultID = def.ChannelID
+			if s.Channels == nil {
+				// In-memory dev: every message is on the room-wide stream.
+				if n, err := s.Chat.UnreadCount(ctx, roomID, "", userID); err == nil {
+					total = n
 				}
+			} else {
 				for _, ch := range s.Channels.ListChannels(ctx, roomID) {
 					n, err := s.Chat.UnreadCount(ctx, roomID, ch.ChannelID, userID)
-					if err != nil {
+					if err != nil || n == 0 {
 						continue
 					}
 					total += n
-					if ch.ChannelID == defaultID {
-						n += legacy // pre-channel history reads as the default channel
-					}
-					if n > 0 {
-						perChannel[roomID] = append(perChannel[roomID], map[string]any{
-							"channelId": ch.ChannelID,
-							"count":     n,
-						})
-					}
+					perChannel[roomID] = append(perChannel[roomID], map[string]any{
+						"channelId": ch.ChannelID,
+						"count":     n,
+					})
 				}
 			}
 			if total > 0 {
@@ -1132,7 +1105,7 @@ func (s *Service) handleUnread(w http.ResponseWriter, r *http.Request) {
 // other members can show a "<user> is typing…" hint. It is ephemeral: not
 // persisted and not part of history (persist() only stores chat/agent
 // messages). Body {"channelId": <optional>} scopes the hint to one channel
-// (the room's default when omitted); an empty body keeps the legacy behavior.
+// (the room's default when omitted).
 func (s *Service) handleTyping(w http.ResponseWriter, r *http.Request) {
 	roomID, err := roomctx.Normalize(r.PathValue("roomId"))
 	if err != nil {
@@ -1152,8 +1125,7 @@ func (s *Service) handleTyping(w http.ResponseWriter, r *http.Request) {
 		// room's default channel.
 		ChannelId string `json:"channelId"`
 	}
-	// An empty body (legacy clients) is fine; a malformed or oversized one is not.
-	if !httpx.DecodeOptionalJSON(w, r, maxSmallBodyBytes, &body) {
+	if !httpx.DecodeJSON(w, r, maxSmallBodyBytes, &body) {
 		return
 	}
 	channelID, err := s.resolveChannel(r.Context(), roomID, body.ChannelId)

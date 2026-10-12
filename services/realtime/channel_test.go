@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -321,5 +322,19 @@ func TestUnreadPerChannelAndMarkReadScoped(t *testing.T) {
 	}
 	if got := res.Channels["room-1"]; len(got) != 1 || got[0].ChannelID != "ch_b" || got[0].Count != 1 {
 		t.Fatalf("per-channel unread after read = %+v, want only ch_b:1", got)
+	}
+}
+
+// A room without a default channel is an undefined state (rooms are created
+// with theirs): a request that omits channelId is refused, never routed to a
+// room-wide "" stream no channel view reads.
+func TestNoDefaultChannelRefusesOmittedChannel(t *testing.T) {
+	srv, svc := newChannelTestServer(t)
+	svc.Channels = store.NewMemoryChannel() // room-1 has no channel at all
+	if r := channelPost(t, srv, "/v1/rooms/room-1/typing", "alice", "{}"); r.StatusCode != http.StatusNotFound {
+		t.Fatalf("typing in a room without a default channel: %d, want 404", r.StatusCode)
+	}
+	if _, err := svc.resolveChannel(dctx(), "room-1", ""); !errors.Is(err, errUnknownChannel) {
+		t.Fatalf("resolveChannel = %v, want errUnknownChannel", err)
 	}
 }

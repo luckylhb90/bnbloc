@@ -38,24 +38,9 @@ func (s *Service) handleListChannels(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, "caller is not a member of room", http.StatusForbidden)
 		return
 	}
+	// A room is created with its default channel in one transaction
+	// (createRoom), so a read never has to mint one.
 	channels := s.Channels.ListChannels(r.Context(), roomID)
-	if len(channels) == 0 {
-		// Older rooms may predate channels (or a previous best-effort channel
-		// insert may have failed). Heal by creating the locked default channel on
-		// first list so every room always has a selectable message stream.
-		def := store.RoomChannel{
-			ChannelID:   ids.New("ch_"),
-			TenantID:    tenant.FromContext(r.Context()),
-			RoomID:      roomID,
-			Name:        "general",
-			IsDefault:   true,
-			CreatedBy:   caller(r),
-			CreatedAtMs: s.Now(),
-		}
-		if err := s.Channels.PutChannel(r.Context(), def); err == nil {
-			channels = []store.RoomChannel{def}
-		}
-	}
 	out := make([]channelView, 0, len(channels))
 	for _, c := range channels {
 		if c.IsPeople() {
