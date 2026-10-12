@@ -101,6 +101,59 @@ the confined CLI and the guest see them; `execution.sandbox.workdir` must equal
 it. Design:
 [`docs/prd/2026-10-09-agent-vm-sandbox.md`](../prd/2026-10-09-agent-vm-sandbox.md).
 
+`agentProfile` is the second request-carrying capability (also asked through
+`core.Supports`): a core advertising it receives a `profile` on session
+create (`core/protocol` `AgentProfile`, in process `core.SessionRequest.Profile`),
+the role the session wears (an expert, the skill packs in effect, and MCP
+servers contributed per session such as room tools):
+
+```json
+{"profile": {
+  "instructions": "You are the reviewer. …",
+  "skills": [{"name": "review-checklist", "files": [
+    {"path": "SKILL.md", "content": "---\nname: review-checklist\ndescription: …\n---\n…"},
+    {"path": "scripts/lint.sh", "content": "…"},
+    {"path": "assets/logo.png", "contentBase64": "…"}]}],
+  "mcpServers": [
+    {"type": "http", "name": "room", "url": "http://127.0.0.1:41234/mcp",
+     "headers": [{"name": "Authorization", "value": "Bearer …"}]},
+    {"name": "fs", "command": "mcp-fs", "args": ["--root", "."], "env": []}],
+  "env": {"TOOL_TOKEN": "…"}}}
+```
+
+The core maps it natively and keeps the member's own agent configuration
+loading alongside: the instructions as a system-prompt append (ACP
+`_meta.systemPrompt.append`, a CLI flag) or an instructions file in the
+workspace (`AGENTS.md`, `CLAUDE.md`); each skill as
+`<skills dir>/<name>/<path>` (`.claude/skills/`, `.agents/skills/`,
+`.opencode/skills/`) so the agent loads it from `SKILL.md`'s description; the
+MCP servers in the ACP `McpServer` shape (stdio has no `type`); `env` as
+extra agent environment. Env values and MCP header/env values are secrets: a
+core never logs or persists them. A core that cannot honor a profile answers
+`bad_request`; the protocol client refuses to send one to a core that does not
+advertise the capability. A profile is per session: the bridge starts a new
+session when the content (instructions + skill files) changes. A core without
+`agentProfile` gets the bridge's fallback: the instructions (and a summary of
+the skills) prefixed to the first prompt of the session.
+
+Each target reports the MCP transports its agent accepts in a profile:
+`core.Target.MCPTransports` (wire `mcpTransports`: `"stdio"`, `"http"`,
+`"sse"`; empty = stdio only, which every ACP agent takes). It is per target
+because an adapter fronting several agents learns each agent's support
+separately (ACP `initialize` → `agentCapabilities.mcpCapabilities`). The
+bridge hands it to session contributors (`SessionInfo.MCPTransports`), so a
+contributor attaches a server the agent can reach instead of the core
+dropping it. A manifest declares it as `listTargets.targets.mcpTransports`
+(a list element's own `mcpTransports` wins).
+
+**Agent-config paths.** The `writeFile` path contract is `.room/` plus the
+fixed agent-config list `core.AgentConfigPaths` (`CLAUDE.md`, `AGENTS.md`,
+`.claude/skills/**`, `.agents/skills/**`, `.opencode/**`, `.mcp.json`);
+`core.WorkspaceFileAllowed` is the rule a core enforces on every write. These
+paths are bnbloc-owned: the bridge never publishes them as deliverables nor
+code-syncs them, and they are write-denied in sandboxed runs
+(`hostConfine.denyWrite`).
+
 Vocabulary note: the codebase overloads "provider". **Core** = the daemon
 backend (an installed manifest or adapter core such as `acme`), carried on the wire as `core`. **Harness** = the
 agent kind inside a core (`codex`, `claude`), carried in `core.Target.Provider`
@@ -209,7 +262,7 @@ substituted verbatim. Available vars, per verb:
 | Verb | Vars available |
 | --- | --- |
 | `createWorkspace` | `{shortid}` |
-| `createSession` | `{workspaceId}`, `{targetId}`, `{prompt}`, `{shortid}` |
+| `createSession` | `{workspaceId}`, `{targetId}`, `{prompt}`, `{shortid}`, `{model}`, `{reasoningEffort}`, `{instructions}`, and the raw-JSON forms `"{agentProfile\|json}"`, `"{skills\|json}"`, `"{mcpServers\|json}"`, `"{env\|json}"` |
 | `sendInput` | `{workspaceId}`, `{sessionId}`, `{text}` |
 | `sessionIdle` | `{workspaceId}`, `{sessionId}` |
 | `latestSession` | `{workspaceId}` |
@@ -218,6 +271,12 @@ The `{targetId|firstTarget}` fallback form: when a `createSession` body
 references it and the request supplies no target, the provider calls
 `listTargets` first and binds the first listed target's id. Use it for daemons
 that require a pre-registered agent id.
+
+The exact string `"{var|json}"` inserts the var's JSON value (an object or
+array in the Core Protocol wire shape, `null` when empty) instead of a string;
+`"{var|omit}"` drops the key when the var is empty. A manifest whose
+`createSession` body references any profile var (`{instructions}`,
+`agentProfile`, `skills`, `mcpServers`, `env`) advertises `agentProfile`.
 
 #### JSON-path extraction
 
@@ -351,7 +410,7 @@ The bridge/gateway drive it through the protocol client with
    camelCase JSON tags (`workspaceId`, `sessionId`, …) — that file IS the
    contract, so every wire field carries a tag and an untagged field is a bug. Advertise only the optional
    capabilities you actually serve (`interrupt`, `writeFile`,
-   `deleteWorkspace`, `sandboxExec`, `sessionFiles` + `sessionFileBytes`) —
+   `deleteWorkspace`, `sandboxExec`, `agentProfile`, `sessionFiles` + `sessionFileBytes`) —
    clients degrade gracefully when a capability is absent.
    **Deliverables** (`sessionFiles` + `sessionFileBytes`, advertised
    together — the wire has only the exact-bytes read):

@@ -128,3 +128,21 @@ func TestClient_Profile_gatedByDiscovery_andCarriedOnTheWire(t *testing.T) {
 		t.Fatalf("err = %v", err)
 	}
 }
+
+func TestTarget_mcpTransportsRoundTrip(t *testing.T) {
+	raw, err := json.Marshal(ListTargetsResponse{Targets: WireTargets([]core.Target{{ID: "a", Provider: "p", MCPTransports: []string{"stdio", "http"}}, {ID: "b", Provider: "q"}})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), `"mcpTransports":["stdio","http"]`) || strings.Count(string(raw), "mcpTransports") != 1 {
+		t.Fatalf("wire = %s", raw)
+	}
+	var back ListTargetsResponse
+	if err := json.Unmarshal(raw, &back); err != nil {
+		t.Fatal(err)
+	}
+	ts := back.Core()
+	if !ts[0].TransportSupported(core.MCPHTTP) || ts[0].TransportSupported(core.MCPSSE) || !ts[1].TransportSupported(core.MCPStdio) || ts[1].TransportSupported(core.MCPHTTP) {
+		t.Fatalf("targets = %+v", ts)
+	}
+}

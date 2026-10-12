@@ -305,6 +305,26 @@ type Target struct {
 	// without a selection. Empty when the core does not surface them.
 	DefaultModel     string
 	DefaultReasoning string
+	// MCPTransports are the MCP server transports this target's agent
+	// accepts in a profile (MCPStdio, MCPHTTP, MCPSSE), so a profile
+	// contributor attaches a server the agent can actually reach. Empty =
+	// stdio only (every ACP agent takes stdio). Per target: an adapter
+	// fronting several agents learns each agent's support separately.
+	MCPTransports []string
+}
+
+// TransportSupported reports whether the target's agent accepts MCP
+// servers of the given transport (stdio always).
+func (t Target) TransportSupported(transport string) bool {
+	if transport == "" || transport == MCPStdio {
+		return true
+	}
+	for _, s := range t.MCPTransports {
+		if s == transport {
+			return true
+		}
+	}
+	return false
 }
 
 // Provider is the outbound control contract for one agent core. All methods are

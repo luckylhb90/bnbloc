@@ -341,6 +341,10 @@ type Target struct {
 	ReasoningByModel map[string][]string `json:"reasoningByModel,omitempty"`
 	DefaultModel     string              `json:"defaultModel,omitempty"`
 	DefaultReasoning string              `json:"defaultReasoning,omitempty"`
+	// MCPTransports lists the MCP transports the target's agent accepts in
+	// a session profile ("stdio", "http", "sse"); empty = stdio only. An
+	// ACP adapter fills it from the agent's initialize mcpCapabilities.
+	MCPTransports []string `json:"mcpTransports,omitempty"`
 }
 
 type ListTargetsResponse struct {
@@ -606,7 +610,7 @@ func WireTargets(ts []core.Target) []Target {
 	out := make([]Target, 0, len(ts))
 	for _, t := range ts {
 		out = append(out, Target{ID: t.ID, Provider: t.Provider, Models: t.Models, ReasoningEfforts: t.ReasoningEfforts,
-			ReasoningByModel: t.ReasoningByModel, DefaultModel: t.DefaultModel, DefaultReasoning: t.DefaultReasoning})
+			ReasoningByModel: t.ReasoningByModel, DefaultModel: t.DefaultModel, DefaultReasoning: t.DefaultReasoning, MCPTransports: t.MCPTransports})
 	}
 	return out
 }
@@ -615,7 +619,7 @@ func (r ListTargetsResponse) Core() []core.Target {
 	out := make([]core.Target, 0, len(r.Targets))
 	for _, t := range r.Targets {
 		out = append(out, core.Target{ID: t.ID, Provider: t.Provider, Models: t.Models, ReasoningEfforts: t.ReasoningEfforts,
-			ReasoningByModel: t.ReasoningByModel, DefaultModel: t.DefaultModel, DefaultReasoning: t.DefaultReasoning})
+			ReasoningByModel: t.ReasoningByModel, DefaultModel: t.DefaultModel, DefaultReasoning: t.DefaultReasoning, MCPTransports: t.MCPTransports})
 	}
 	return out
 }

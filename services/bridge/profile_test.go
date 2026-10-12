@@ -99,6 +99,7 @@ func TestSessionContributorReachesProfileCore(t *testing.T) {
 		}, nil
 	}))
 
+	b.cacheTargets("core-a", []corepkg.Target{{ID: "t", Provider: "agent-a", MCPTransports: []string{corepkg.MCPStdio, corepkg.MCPHTTP}}})
 	job1 := jobRef{ID: "job-1", RequesterUserID: "jack", TenantID: "t1", MessageSeq: 4}
 	if _, err := b.driveClaim(context.Background(), job1, "r1", "maya", "core-a", "agent-a", "t", "first", nil, corepkg.SessionOptions{}, nil, "ch", nil); err != nil {
 		t.Fatal(err)
@@ -117,6 +118,9 @@ func TestSessionContributorReachesProfileCore(t *testing.T) {
 		t.Fatalf("profile = %+v", p)
 	}
 	mu.Lock()
+	if len(infos) != 1 || len(infos[0].MCPTransports) != 2 || infos[0].MCPTransports[1] != corepkg.MCPHTTP {
+		t.Fatalf("session transports = %+v", infos)
+	}
 	if len(infos) != 1 || infos[0].JobID != "job-1" || infos[0].RequesterUserID != "jack" || infos[0].RoomID != "r1" || infos[0].Owner != "maya" || infos[0].Key == "" {
 		t.Fatalf("session info = %+v", infos)
 	}

@@ -34,6 +34,10 @@ type SessionInfo struct {
 	Core      string
 	Provider  string
 	Sandboxed bool
+	// MCPTransports are the MCP transports the target's agent accepts
+	// (core.Target.MCPTransports; empty = stdio only): contribute a server
+	// of a transport the agent can reach.
+	MCPTransports []string
 	// JobID / RequesterUserID are the job whose drive creates the session.
 	// Later turns of the same session report theirs through
 	// SessionContribution.Turn.
@@ -171,6 +175,22 @@ func (rs *roomSession) release() {
 	for _, h := range hooks {
 		h()
 	}
+}
+
+// targetTransports returns the MCP transports of the target a session is
+// created for, from the last listed targets of the core (by target id, else
+// by provider).
+func (b *Bridge) targetTransports(coreName, target, provider string) []string {
+	var byProvider []string
+	for _, t := range b.cachedTargets(coreName) {
+		if t.ID == target {
+			return t.MCPTransports
+		}
+		if byProvider == nil && strings.EqualFold(t.Provider, provider) {
+			byProvider = t.MCPTransports
+		}
+	}
+	return byProvider
 }
 
 // unbindLocked drops a session binding and releases what its contributors

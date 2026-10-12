@@ -69,3 +69,29 @@ func TestManifestMapsAgentProfile(t *testing.T) {
 		t.Fatal("manifest without profile vars advertises agentProfile")
 	}
 }
+
+// A manifest declares its targets' MCP transports statically; a list
+// element's own mcpTransports wins; an unknown transport fails the load.
+func TestManifestDeclaresMCPTransports(t *testing.T) {
+	var caps []capture
+	srv := fakeRESTDaemon(t, &caps)
+	defer srv.Close()
+	manifest := strings.Replace(restManifest, `"provider": "harness" }`, `"provider": "harness", "mcpTransports": ["stdio", "http"] }`, 1)
+	p, err := Parse([]byte(manifest))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ts, err := p.ListTargets(context.Background(), core.Endpoint{BaseURL: srv.URL})
+	if err != nil || len(ts) != 2 {
+		t.Fatalf("targets = %+v, %v", ts, err)
+	}
+	for _, tg := range ts {
+		if !tg.TransportSupported(core.MCPHTTP) || tg.TransportSupported(core.MCPSSE) {
+			t.Fatalf("target %+v", tg)
+		}
+	}
+	bad := strings.Replace(restManifest, `"provider": "harness" }`, `"provider": "harness", "mcpTransports": ["ws"] }`, 1)
+	if _, err := Parse([]byte(bad)); err == nil {
+		t.Fatal("unknown transport accepted")
+	}
+}

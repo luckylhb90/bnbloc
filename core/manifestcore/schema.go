@@ -3,6 +3,7 @@ package manifestcore
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/luckylhb90/bnbloc/core"
 	"strings"
 )
 
@@ -75,6 +76,10 @@ type TargetsSpec struct {
 	// Enrich runs one secondary call per listed target to fill its
 	// model/reasoning catalog (e.g. a per-provider composer-options call).
 	Enrich *EnrichSpec `json:"enrich,omitempty"`
+	// MCPTransports declares the MCP transports every listed target's agent
+	// accepts in a session profile ("stdio", "http", "sse"); a list
+	// element's own "mcpTransports" array wins. Empty = stdio only.
+	MCPTransports []string `json:"mcpTransports,omitempty"`
 }
 
 // ItemsSpec shapes a list response into typed records: reflow messages
@@ -193,6 +198,13 @@ func New(m Manifest) (*Provider, error) {
 	}
 	if err := validateSessionFileOps(m); err != nil {
 		return nil, err
+	}
+	if t := m.ListTargets.Targets; t != nil {
+		for _, tr := range t.MCPTransports {
+			if tr != core.MCPStdio && tr != core.MCPHTTP && tr != core.MCPSSE {
+				return nil, fmt.Errorf("manifestcore %q: listTargets.targets.mcpTransports: unknown transport %q", m.Name, tr)
+			}
+		}
 	}
 	return &Provider{m: m}, nil
 }

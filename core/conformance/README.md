@@ -36,3 +36,6 @@ Two optional capabilities carry contract checks beyond "it answers":
   `core.AgentConfigPaths` must be refused (`core.WorkspaceFileAllowed`).
 - `agentProfile`: a session created with a profile (instructions, a skill,
   an env var) must start.
+
+Targets may report `mcpTransports` (`stdio`, `http`, `sse`; empty = stdio
+only): the MCP transports their agent accepts in a session profile.

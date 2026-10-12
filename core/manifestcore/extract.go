@@ -66,9 +66,19 @@ func (op Op) extractTargets(doc any) []core.Target {
 			ReasoningByModel: stringSliceMapFromPath(el, "reasoningByModel"),
 			DefaultModel:     jsonPathString(el, "defaultModel"),
 			DefaultReasoning: jsonPathString(el, "defaultReasoning"),
+			MCPTransports:    firstNonEmptySlice(stringSliceFromPath(el, "mcpTransports"), op.Targets.MCPTransports),
 		})
 	}
 	return out
+}
+
+func firstNonEmptySlice(vals ...[]string) []string {
+	for _, v := range vals {
+		if len(v) > 0 {
+			return v
+		}
+	}
+	return nil
 }
 
 // itemList resolves the op's items.list array, or nil when the op has no items

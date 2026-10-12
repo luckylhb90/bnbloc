@@ -1628,7 +1628,8 @@ func (b *Bridge) ensureSession(ctx context.Context, job jobRef, room, owner, cor
 		profile = &corepkg.AgentProfile{}
 		hooks = b.contribute(ctx, SessionInfo{
 			Key: key, TenantID: job.TenantID, RoomID: room, ChannelID: channelID, Owner: owner, Core: core, Provider: provider,
-			Sandboxed: opts.Execution != nil, JobID: job.ID, RequesterUserID: job.RequesterUserID,
+			Sandboxed: opts.Execution != nil, MCPTransports: b.targetTransports(core, target, provider),
+			JobID: job.ID, RequesterUserID: job.RequesterUserID,
 		}, profile)
 		if profile.Empty() {
 			profile = nil
