@@ -1402,10 +1402,14 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   shape the web reads is a struct in `internal/wire`, never a
   `map[string]any` or a store row: members see `store.AgentJob.View()`,
   `Artifact.View()` and `ArtifactVersion.View()` (decision O4: no tenant,
-  lease, raw diagnostics or blob key; `TestProjectionsOmitServerFields`). A
-  value set is a named string type or a `//wire:union <Name>` const group
-  (a field names it with `tstype:"<Name>"`, as it names the store/rbac enums
-  wiregen reads); a limit a client checks is a constant in
+  lease, raw diagnostics or blob key; `TestProjectionsOmitServerFields`;
+  a run record's raw diagnostics reach only the agent's owner and org
+  admins by signed role, `runViewer.seesDiagnostics`). A
+  value set is a named string type, a `//wire:union <Name>` const group, or
+  `//wire:union <Name> <Field>` on a registry variable (the union of each
+  row's field: `RoomEventKind` from `wire.RoomEventKinds`); a field names it
+  with `tstype:"<Name>"`, as it names the store/rbac/pkgmeta/extpipe enums
+  wiregen reads. A limit a client checks is a constant in
   `internal/wire/limits.go`; a rule table the web needs (org role grants,
   terminal job statuses, inviting room roles) is computed by wiregen from
   its Go owner. The web re-exports these types (`export type { X } from
@@ -1413,8 +1417,11 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   free-form payload (a reply's metrics map, a history row) is pinned by a
   golden fixture in `internal/wire/testdata/` that both test suites read
   (`readTurnMetrics` ≡ `TurnUsageFromMetrics`). The room stream listens for
-  every kind of the Go union (`lib/roomEventKinds.ts`; a kind not yet in
-  the registry is listed there until it is).
+  exactly the registry's kinds (`lib/roomEventKinds.ts` is the generated
+  `RoomEventKindValues`). Component shapes are wire types too
+  (`wire/components.go`, and the package parts in
+  `wire/component_shapes.go`, which `core/pkgmeta` names for package
+  authors by alias); `lib/apiTypes.ts` only re-exports them.
 
 - **Requests, failures and org permissions have one owner each in the
   web.** `req` (`lib/api.ts`: `as: "json" | "none" | "text" | "blob" |

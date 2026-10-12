@@ -657,14 +657,19 @@ Status: landed (2026-10-12), on top of the 1E web items (formatters,
 - **Status 5.1:** done. `internal/wire/cmd/wiregen` writes
   `web/src/lib/wire.gen.ts` from every exported type, constant and
   constant-valued variable of `internal/wire`, the `//wire:union` groups,
-  the store/rbac enums a field names with `tstype`, the content kinds of
-  the `contentpkg` registry and tables computed by their owners
+  the store/rbac/pkgmeta/extpipe enums a field names with `tstype`, the
+  content kinds of the `contentpkg` registry and tables computed by their
+  owners
   (`OrgRolePermissions`, `AgentJobTerminalStatuses`,
   `RoomRolesThatInvite`); `go generate ./internal/wire` regenerates and
   `scripts/ci.sh go` runs `wiregen -check` (`TestEmitGolden` pins the
   rendering). Projections: `RoomSummary`/`RoomDetail`/`RoomPreview`,
   `RoomMembersReply`, `PlazaReply`, the history page is `FeedPage`,
   `UnreadReply`, `AgentTargetsReply`, `CoresReply`, `MyAgentsReply`, the
+  component projections (`PlatformComponent`, `PublishedComponent`,
+  `MemberComponent`, the trusted keys; the package parts they carry are
+  defined once in `wire/component_shapes.go` and named for package authors
+  by `core/pkgmeta` aliases), the
   job (`store.AgentJob.View`) and artifact (`Artifact.View`,
   `ArtifactVersion.View`) projections without tenant, lease, raw
   diagnostics or blob key (O4; `TestProjectionsOmitServerFields`). Limits
@@ -672,9 +677,11 @@ Status: landed (2026-10-12), on top of the 1E web items (formatters,
   re-export the generated types (rule T8). Golden fixtures
   (`agent_messages`, `history_page`, `agent_job_updated`, `turn_usage`)
   run through `normalizeRoomEvent` / `readTurnMetrics`. The room event
-  kind union comes from `//wire:union RoomEventKind` until Batch 2's
-  registry lands (then `lib/roomEventKinds.ts` reads the registry and its
-  `UNREGISTERED_ROOM_EVENT_KINDS` list goes).
+  kinds are generated from the registry (`//wire:union RoomEventKind Name`
+  on `wire.RoomEventKinds`): `lib/roomEventKinds.ts` is that list, and its
+  test holds it equal to the generated registry rows. `lib/apiTypes.ts`
+  re-exports the generated component types; only the package file the
+  publish flow builds and the wizard's step state stay hand-written.
 - **Status 5.2:** done except as noted. Owners: `req` (`as:`,
   `downloadCsv`), `lib/errors.ts` (`ApiError`, `errorText`, `statusText`),
   `lib/permissions.ts` (generated grants; viewers get no room creation and a
@@ -697,12 +704,10 @@ Status: landed (2026-10-12), on top of the 1E web items (formatters,
 - **Status 5.3:** done. knip runs in `scripts/ci.sh web`
   (`web/knip.json`); the unused re-exports it found are gone (the named
   dead files and helpers were removed with 1E).
-- **Open (outside this batch):** the room run detail still returns raw
-  diagnostics to any member; gating it to the job's owner and org admins
-  (O4) needs Batch 2.4's signed org permission. Component types
-  (`lib/apiTypes.ts`) stay hand-written until the gateway's component
-  projections move into `internal/wire` (Batch 2.6 removes their dual
-  adoption fields first).
+- **O4 on run detail:** done. The room run detail returns the raw
+  diagnostics only to the agent's owner and to a viewer whose signed org
+  role grants manage_org (`rbac.Can(svcauth.Role(r), …)`); everyone else
+  reads the projection (`TestRoomRunDetailDiagnosticsOwnerAndOrgAdminOnly`).
 
 | # | Item | Refs | Size |
 |---|---|---|---|
