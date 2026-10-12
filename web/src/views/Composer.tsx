@@ -13,7 +13,7 @@ import { cn } from "@/lib/cn";
 import type { LocalAgent } from "@/lib/useLocalAgent";
 import { api } from "@/lib/api";
 import { NO_ROOM_CATALOGS, resolveModelCatalog, type RoomModelCatalogs } from "@/lib/agentCatalogs";
-import { PLATFORM_OFFLINE_MESSAGE, defaultPlatformRecipient } from "@/lib/platformAgents";
+import { PLATFORM_OFFLINE_MESSAGE, defaultPlatformRecipient, routeSend } from "@/lib/platformAgents";
 import { Button } from "@/ui/Button";
 import { useToast } from "@/ui/Toast";
 import { AttachmentChips } from "@/views/AttachmentChips";
@@ -338,9 +338,12 @@ export function Composer({
       ? `your ${myRunsOn.provider}`
       : null;
   // A picked team is staffed on the agent that leads it and confirmed with
-  // its cost estimate before the first send.
-  const teamLead = runsOnAgent
-    ? { ownerId: runsOnAgent.ownerId, core: runsOnAgent.core, provider: runsOnAgent.provider }
+  // its cost estimate before the first send. The lead is resolved exactly
+  // as send() will: a platform agent on the host routing picks now, so the
+  // plan, its estimate and the confirmation follow that host.
+  const leadAgent = runsOnAgent ? routeSend(runsOnAgent, platformAgents?.route, subject ?? null).recipient : null;
+  const teamLead = leadAgent
+    ? { ownerId: leadAgent.ownerId, core: leadAgent.core, provider: leadAgent.provider }
     : myRunsOn
       ? { ownerId: subject ?? "", core: myRunsOn.core || undefined, provider: myRunsOn.provider }
       : null;
@@ -417,17 +420,16 @@ export function Composer({
     }
     // A platform agent goes to the host routing picks now (PRD v2 §4); with
     // every host offline nothing is sent (no dead job) and the draft stays.
-    const platformRef = picked?.platform ? { core: picked.core ?? "", provider: picked.provider } : null;
-    const host = platformRef && !toPeople ? platformAgents?.route(platformRef) ?? null : null;
-    if (platformRef && !toPeople && !host) {
+    // The team plan resolved its lead through the same routeSend.
+    const routed = routeSend(toPeople ? null : picked, platformAgents?.route, subject ?? null);
+    if (routed.offline) {
       toast.error(PLATFORM_OFFLINE_MESSAGE);
       setSending(false);
       return;
     }
-    const eff: RoomAgent | null =
-      picked && host
-        ? { ...picked, ownerId: host.hostUserId, self: host.hostUserId.toLowerCase() === (subject ?? "").toLowerCase(), defaultModel: host.defaultModel }
-        : picked;
+    const host = routed.host;
+    const platformRef = host && picked ? { core: picked.core ?? "", provider: picked.provider } : null;
+    const eff: RoomAgent | null = toPeople ? picked : routed.recipient;
     // Attach the model+reasoning selection to the agent recipient when one is
     // present and the user picked either. Omitting both keeps agent defaults.
     const withOpts: RoomAgent | null =

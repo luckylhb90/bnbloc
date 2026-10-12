@@ -129,6 +129,16 @@ export function seatLine(e: TeamPlanEntry): string {
   return `${e.role ?? "lead"} → ${who}`;
 }
 
+// leadLine names the agent that leads the plan: "Lead: jack/codex", and
+// for a platform agent the host it runs on ("Lead: codex, a platform agent
+// on host-a's machine"), so the member confirms the host the send uses.
+export function leadLine(plan: Pick<TeamPlan, "lead">, nameOf: (id: string) => string = (id) => id): string {
+  const a = plan.lead.agent;
+  if (!a) return "Lead: unavailable";
+  const who = a.platform ? `${a.provider}, a platform agent on ${nameOf(a.ownerId)}'s machine` : a.handle || `${a.ownerId}/${a.provider}`;
+  return plan.lead.online ? `Lead: ${who}` : `Lead: ${who} (${plan.lead.reason || "not online"})`;
+}
+
 // unstaffedRoles names the roles nobody can take now.
 export function unstaffedRoles(plan: TeamPlan): string[] {
   return plan.roles.filter((r) => !r.agent).map((r) => r.role ?? "");

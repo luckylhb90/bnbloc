@@ -1,10 +1,11 @@
 import { useEffect, useState } from "react";
 import { CheckCircleIcon, UsersThreeIcon, WarningIcon } from "@phosphor-icons/react";
 import { isTeam, type ExpertChoice } from "@/lib/contentComponents";
-import { estimateText, planRequest, seatLine, teamConfirmKey, unstaffedRoles, type TeamPlan } from "@/lib/teams";
+import { estimateText, leadLine, planRequest, seatLine, teamConfirmKey, unstaffedRoles, type TeamPlan } from "@/lib/teams";
 import { apiErrorText } from "@/lib/contentComponentsApi";
 import { teamApi } from "@/lib/teamsApi";
 import { Button } from "@/ui/Button";
+import { useDisplayNames } from "@/lib/useDisplayName";
 
 // The lead agent a team runs on: the composer's resolved recipient.
 export interface TeamLead {
@@ -68,6 +69,7 @@ export function useTeamPlan(roomId: string, expert: ExpertChoice | null, lead: T
 // TeamPlanCard shows a picked team before its first send: who takes each
 // role, the pre-flight cost estimate, and the confirmation.
 export function TeamPlanCard({ team, hasLead, onCancel }: { readonly team: ComposerTeam; readonly hasLead: boolean; readonly onCancel: () => void }) {
+  const nameOf = useDisplayNames([team.plan?.lead.agent?.ownerId]);
   if (!team.active) return null;
   const plan = team.plan;
   const unstaffed = plan ? unstaffedRoles(plan) : [];
@@ -87,6 +89,9 @@ export function TeamPlanCard({ team, hasLead, onCancel }: { readonly team: Compo
       ) : plan ? (
         <>
           <ul className="mt-1 flex flex-col gap-0.5 text-[var(--color-fg-muted)]">
+            <li data-team-lead className={plan.lead.online ? undefined : "text-[var(--color-warning)]"}>
+              {leadLine(plan, nameOf)}
+            </li>
             {plan.roles.map((r) => (
               <li key={r.role} className={r.agent ? undefined : "text-[var(--color-warning)]"}>
                 {seatLine(r)}

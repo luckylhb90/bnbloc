@@ -354,3 +354,26 @@ export function defaultPlatformRecipient(roomAgents: readonly RoomAgent[], hasOw
   if (hasOwnAgent) return null;
   return roomAgents.find((a) => a.platform && !a.self) ?? null;
 }
+
+// SendRoute is where a send to a picked recipient goes now: a platform
+// agent's recipient is re-routed to the host routing picks (offline: every
+// host is down and nothing may be sent); any other recipient goes as picked.
+export interface SendRoute {
+  readonly recipient: RoomAgent | null;
+  readonly host: PlatformHost | null;
+  readonly offline: boolean;
+}
+
+// routeSend is the one place a send's recipient is resolved: the composer's
+// send and its team plan (the lead the plan staffs and estimates) both call
+// it, so the plan names the host the send will use.
+export function routeSend(picked: RoomAgent | null, route: ((agent: PlatformAgentRef) => PlatformHost | null) | undefined, subject: string | null): SendRoute {
+  if (!picked?.platform) return { recipient: picked, host: null, offline: false };
+  const host = route?.({ core: picked.core ?? "", provider: picked.provider }) ?? null;
+  if (!host) return { recipient: picked, host: null, offline: true };
+  return {
+    recipient: { ...picked, ownerId: host.hostUserId, self: sameUser(host.hostUserId, subject), defaultModel: host.defaultModel },
+    host,
+    offline: false,
+  };
+}

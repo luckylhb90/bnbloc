@@ -11,6 +11,7 @@ import {
   otherHostPolicies,
   platformChoices,
   PLATFORM_AGENTS_GROUP,
+  routeSend,
   samePolicyInput,
   setPolicyDefaultModel,
   splitAgentHosts,
@@ -230,3 +231,21 @@ testConsoleRows();
   const untick = toggleDraftAgent({ enabled: true, agents: [{ ...codex }] }, codex, false);
   if (!untick.enabled || untick.agents.length !== 0) throw new Error("unticking never changes the switch");
 }
+
+// routeSend: the composer's send and its team plan resolve a platform
+// recipient to the same routed host; other recipients go as picked.
+function testRouteSendSharesTheHost(): void {
+  const picked = { ownerId: "admin", core: "nimbus", provider: "codex", self: false, platform: true, sandboxed: true };
+  const route = () => host("host-b", true, 0, "x-free");
+  const r = routeSend(picked, route, "maya");
+  assert(r.recipient?.ownerId === "host-b" && r.host?.hostUserId === "host-b" && !r.offline, "routed to the picked host");
+  assert(r.recipient?.defaultModel === "x-free" && r.recipient.self === false, "the host's default model; not self");
+  assert(routeSend(picked, route, "HOST-B").recipient?.self === true, "self when the caller is the host");
+  const off = routeSend(picked, () => null, "maya");
+  assert(off.offline && off.host === null, "every host offline");
+  const own = { ownerId: "maya", provider: "codex", self: true };
+  const plain = routeSend(own, route, "maya");
+  assert(plain.recipient === own && !plain.offline && plain.host === null, "a non-platform recipient goes as picked");
+  assert(routeSend(null, route, "maya").recipient === null, "no recipient");
+}
+testRouteSendSharesTheHost();

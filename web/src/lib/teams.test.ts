@@ -3,6 +3,7 @@ import {
   estimateText,
   formatDefaultAgent,
   formatUsd,
+  leadLine,
   parseDefaultAgent,
   planRequest,
   seatLine,
@@ -59,3 +60,12 @@ eq(seatLine(plan.roles[1]), "tester → unavailable (no platform agent is added 
 eq(unstaffedRoles(plan), ["tester"], "unstaffed roles");
 eq(teamConfirmKey("cc_t", "1.0.0", { ownerId: "maya", provider: "opencode" }), "cc_t@1.0.0:maya//opencode", "confirm key");
 eq(teamConfirmKey("cc_t", "1.0.0", null), "", "no lead");
+
+// The plan names its lead, and a platform lead's host (the one the send uses).
+eq(leadLine(plan), "Lead: maya/opencode", "own lead");
+eq(
+  leadLine({ lead: { online: true, agent: { ownerId: "host-b", core: "nimbus", provider: "codex", handle: "host-b/codex", platform: true } } }, (id) => (id === "host-b" ? "Host B" : id)),
+  "Lead: codex, a platform agent on Host B's machine",
+  "platform lead names its host",
+);
+eq(leadLine({ lead: { online: false, reason: "jack/codex is not online in this room", agent: { ownerId: "jack", provider: "codex", handle: "jack/codex" } } }), "Lead: jack/codex (jack/codex is not online in this room)", "offline lead");
