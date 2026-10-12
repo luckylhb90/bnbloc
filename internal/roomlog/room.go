@@ -37,6 +37,9 @@ type Guidance struct {
 	// HasRoomFiles: bnbloc writes the room's records into the session's
 	// workspace (.room/, the pull model).
 	HasRoomFiles bool
+	// TeamLead: the session wears a team expert (its default rule for
+	// leading; the team's SOP may override it).
+	TeamLead bool
 }
 
 // guidanceData is what the template reads: the facts, the limits and the

@@ -1,6 +1,9 @@
 package expertteam
 
 import (
+	"flag"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -88,37 +91,49 @@ func TestEstimate(t *testing.T) {
 	}
 }
 
+var updateGolden = flag.Bool("update", false, "rewrite the golden section in testdata")
+
+// TestSection pins the lead's roster section (testdata/section.md): role →
+// expert, the roles' descriptions fenced and bounded, the mechanics; no
+// staffing and no policy.
 func TestSection(t *testing.T) {
 	team := wire.ContentTeam{Lead: "coordinator", Members: []wire.ContentTeamMember{
 		{Role: "reviewer", Expert: "code-reviewer@^1", Resolved: &wire.ContentTeamExpert{Name: "code-reviewer", DisplayName: "Code reviewer", Version: "1.2.0", Description: "Reviews diffs."}},
 		{Role: "tester", Expert: "tester@^1", Missing: "no expert tester@^1 you may use"},
 		{Role: "writer", Expert: "writer", Description: "Writes notes.", Resolved: &wire.ContentTeamExpert{Name: "writer", Version: "1.0.0"}},
 	}}
-	plan := wire.TeamPlanReply{Roles: []wire.TeamPlanEntry{
-		{Role: "reviewer", Agent: &wire.PlanAgent{Handle: "jack/codex"}, Online: true},
-		{Role: "tester", Agent: &wire.PlanAgent{Handle: "host/claude"}, Online: true},
-		{Role: "writer", Reason: "bob's agent is not online in this room"},
-	}}
-	s := Section(team, plan)
+	s := Section(team)
+	path := filepath.Join("testdata", "section.md")
+	if *updateGolden {
+		_ = os.MkdirAll("testdata", 0o755)
+		if err := os.WriteFile(path, []byte(s), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	want, err := os.ReadFile(path)
+	if err != nil || s != string(want) {
+		t.Fatalf("section differs from %s (%v; run with -update after reviewing):\n%s", path, err, s)
+	}
 	for _, want := range []string{
-		"You are the coordinator of this team",
-		"- reviewer → Code reviewer v1.2.0 → jack/codex (online)\n",
-		"- tester → tester@^1 → unavailable: no expert tester@^1 you may use",
-		"- writer → writer v1.0.0 → unavailable: bob's agent is not online in this room\n",
+		"- reviewer → Code reviewer v1.2.0\n",
+		"- tester → tester@^1 (unavailable: no expert tester@^1 you may use)\n",
 		roomlog.Fence(coversAuthor, "- reviewer: Reviews diffs.\n- writer: Writes notes.\n"),
-		"refuse that part",
-		"post_progress",
 		"After 3 failed member tasks",
 	} {
 		if !strings.Contains(s, want) {
 			t.Errorf("section lacks %q:\n%s", want, s)
 		}
 	}
+	for _, policy := range []string{"refuse that part", "(online)", "not online", "yourself"} {
+		if strings.Contains(s, policy) {
+			t.Errorf("section carries %q (staffing is live, policy is guidance):\n%s", policy, s)
+		}
+	}
 	// Another author's description is bounded inside the lead's
 	// instructions.
 	long := team
 	long.Members = []wire.ContentTeamMember{{Role: "writer", Expert: "writer", Description: strings.Repeat("写", 400), Resolved: &wire.ContentTeamExpert{Name: "writer", Version: "1.0.0"}}}
-	if got := Section(long, plan); strings.Contains(got, strings.Repeat("写", 101)) || !strings.Contains(got, "写…") {
+	if got := Section(long); strings.Contains(got, strings.Repeat("写", 101)) || !strings.Contains(got, "写…") {
 		t.Errorf("an unbounded role description reached the instructions:\n%s", got)
 	}
 }

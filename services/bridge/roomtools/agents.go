@@ -102,7 +102,7 @@ func listRoomAgentsTool() Tool {
 		Name:  "list_room_agents",
 		Title: "List the room's agents",
 		Description: "List the agents you can ask in this room right now: each one's handle (pass it to ask_agent), owner, core and provider. " +
-			"The agent marked you=true is you.",
+			"The agent marked you=true is you. When you lead a team, team lists who takes each role right now, or why nobody can.",
 		InputSchema: objectSchema(map[string]any{}),
 		ReadOnly:    true,
 		Call: func(ctx context.Context, env *Env, args json.RawMessage) Result {
@@ -114,10 +114,14 @@ func listRoomAgentsTool() Tool {
 			if err != nil {
 				return refusal("listing the room's agents", err)
 			}
-			return Result{Value: map[string]any{
+			out := map[string]any{
 				"agents": agents,
 				"limits": map[string]any{"maxDispatchesPerRequest": wire.MaxDispatchFanOut, "maxDepth": wire.MaxDispatchDepth},
-			}}
+			}
+			if team := env.Session.current().Team; team != nil {
+				out["team"] = team.staffing()
+			}
+			return Result{Value: out}
 		},
 	}
 }

@@ -37,13 +37,15 @@ func (b *Bridge) teamPlan(ctx context.Context, job bridgeJob, team *wire.Content
 }
 
 // teamContent adds a team to the job's content: the roster section after
-// the SOP, and the roster the room tools dispatch by.
+// the SOP (content only: no staffing, which would churn the session's
+// binding sum as agents come and go), and the roster the room tools
+// dispatch by and report (list_room_agents), staffed for this turn.
 func (b *Bridge) teamContent(ctx context.Context, job bridgeJob, c *jobContent, team *wire.ContentTeam) error {
 	plan, err := b.teamPlan(ctx, job, team)
 	if err != nil {
 		return err
 	}
-	section := expertteam.Section(*team, plan)
+	section := expertteam.Section(*team)
 	if c.instructions != "" {
 		c.instructions += "\n\n"
 	}

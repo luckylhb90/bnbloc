@@ -66,6 +66,24 @@ func ask(t *testing.T, srv *Server, token string, args map[string]any) (string, 
 	return toolText(t, post(t, srv, token, rpc(1, "tools/call", map[string]any{"name": "ask_agent", "arguments": args}), nil))
 }
 
+// list_room_agents reports the bound turn's staffing to a lead: who takes
+// each role now, or why nobody can (the lead's instructions carry none of
+// it, so a role agent coming or going never churns its session).
+func TestListRoomAgentsReportsTeamStaffing(t *testing.T) {
+	tg := newTeamGateway()
+	srv, token, sess := startServer(t, tg)
+	sess.Bind(Job{JobID: "job_lead", RequesterUserID: "maya", ChannelID: "ch_general", Team: releaseTeam()})
+	text, isErr := toolText(t, post(t, srv, token, rpc(1, "tools/call", map[string]any{"name": "list_room_agents", "arguments": map[string]any{}}), nil))
+	want := `"team":[{"role":"reviewer","agent":"bob/claude"},{"role":"tester","unavailable":"a platform agent is not online in this room"},{"role":"writer","unavailable":"no expert doc-writer that maya may use here"}]`
+	if isErr || !strings.Contains(text, want) {
+		t.Fatalf("list_room_agents = %s; want %s", text, want)
+	}
+	sess.Bind(Job{JobID: "job_plain", ChannelID: "ch_general"})
+	if text, _ := toolText(t, post(t, srv, token, rpc(2, "tools/call", map[string]any{"name": "list_room_agents", "arguments": map[string]any{}}), nil)); strings.Contains(text, `"team"`) {
+		t.Fatalf("a turn without a team reports one: %s", text)
+	}
+}
+
 // A role dispatches to the role's agent wearing the role's expert, marked
 // with the role; an unknown role is refused as uncovered, an unstaffed or
 // expert-less role names why, and a role refuses an explicit expert. Raw

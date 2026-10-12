@@ -129,7 +129,7 @@ func TestTeamLeadWearsSOPAndRoster(t *testing.T) {
 		t.Fatalf("profiles = %+v", ps)
 	}
 	in := ps[0].Instructions
-	for _, want := range []string{"SOP: plan, delegate, merge.", "## Your team", "You are the coordinator", "- reviewer → Code reviewer v1.2.0 → bob/agent-b (online)", "- reviewer: Reviews diffs."} {
+	for _, want := range []string{"SOP: plan, delegate, merge.", "## Your team", "You are the coordinator", "- reviewer → Code reviewer v1.2.0\n", "- reviewer: Reviews diffs.", "[Leading your team]"} {
 		if !strings.Contains(in, want) {
 			t.Fatalf("instructions lack %q:\n%s", want, in)
 		}
@@ -146,6 +146,50 @@ func TestTeamLeadWearsSOPAndRoster(t *testing.T) {
 	r := turns[0].Team.Roles[0]
 	if r.Role != "reviewer" || r.Agent == nil || r.Agent.OwnerID != "bob" || r.Expert == nil || r.Expert.ComponentID != "cc_rev" || turns[0].Team.Name != "Release team" {
 		t.Fatalf("bound role = %+v (team %+v)", r, turns[0].Team)
+	}
+}
+
+// A role's agent going offline (or coming back) does not change the lead's
+// binding sum: the instructions carry no staffing, so the lead keeps its
+// session and its memory; the turn's bound roster says who takes the role
+// now (2026-10-13: the section's "(online)" churned the session).
+func TestRoleAgentOnlineChangeKeepsLeadSession(t *testing.T) {
+	g := newTeamGateway(t, reviewerPlan())
+	eff := teamEffective(g)
+	g.setEffective("job-1", eff)
+	g.setEffective("job-2", eff)
+	prov := &profileProv{}
+	b := g.bridge(prov, "maya")
+	rec := &turnRecorder{}
+	b.AddSessionContributor(rec)
+
+	online, err := b.resolveJobContent(context.Background(), contentJob("job-1", eff.Expert.ComponentID), "maya")
+	if err != nil {
+		t.Fatal(err)
+	}
+	b.runBridgeJob(context.Background(), contentJob("job-1", eff.Expert.ComponentID))
+
+	offline := reviewerPlan()
+	offline.Roles[0].Agent, offline.Roles[0].Online, offline.Roles[0].Reason = nil, false, "bob's agent is not online in this room"
+	g.mu.Lock()
+	g.plan = offline
+	g.mu.Unlock()
+	gone, err := b.resolveJobContent(context.Background(), contentJob("job-2", eff.Expert.ComponentID), "maya")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if online.bindingSum() != gone.bindingSum() {
+		t.Fatalf("a role agent going offline changed the lead's binding sum:\n%s\n---\n%s", online.instructions, gone.instructions)
+	}
+	b.runBridgeJob(context.Background(), contentJob("job-2", eff.Expert.ComponentID))
+	if ps := prov.recordedProfiles(); len(ps) != 1 {
+		t.Fatalf("sessions created = %d, want the lead's one session kept", len(ps))
+	}
+	rec.mu.Lock()
+	turns := rec.turns
+	rec.mu.Unlock()
+	if len(turns) != 2 || turns[1].Team == nil || turns[1].Team.Roles[0].Agent != nil || turns[1].Team.Roles[0].Reason == "" {
+		t.Fatalf("the second turn's roster does not say the role is unstaffed: %+v", turns)
 	}
 }
 

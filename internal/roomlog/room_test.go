@@ -79,6 +79,7 @@ func TestSessionGuidanceGolden(t *testing.T) {
 	for name, g := range map[string]Guidance{
 		"guidance-tools.txt": pullTools,
 		"guidance-plain.txt": {},
+		"guidance-team.txt":  {Self: "maya/codex", HasTools: true, HasRoomFiles: true, TeamLead: true},
 	} {
 		golden(t, name, SessionGuidance(g))
 	}

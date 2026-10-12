@@ -168,22 +168,22 @@ func Estimate(lead wire.TeamPlanEntry, roles []wire.TeamPlanEntry) wire.TeamCost
 	return est
 }
 
-// Section is the generated part of the lead's instructions: who leads, the
-// roster (role → expert → agent, online or why not), and the rules the
-// room tools enforce. It follows the team expert's own instructions (the
-// SOP).
-func Section(team wire.ContentTeam, plan wire.TeamPlanReply) string {
-	byRole := map[string]wire.TeamPlanEntry{}
-	for _, e := range plan.Roles {
-		byRole[e.Role] = e
-	}
+// Section is the generated part of the lead's instructions: who leads,
+// the roster (role → expert, and what each role covers, fenced: other
+// authors wrote it), and the mechanics the room tools enforce. It follows
+// the team expert's own instructions (the SOP). Only content goes in:
+// which agent takes a role right now changes as agents come and go, and
+// the instructions feed the session's binding sum, so staffing is read
+// live (list_room_agents) and the lead keeps its session. How to lead (plan,
+// delegate, never do a missing role's work) is a default rule of the
+// session guidance (roomlog, TeamLead) the SOP may override.
+func Section(team wire.ContentTeam) string {
 	var b strings.Builder
 	lead := team.Lead
 	if lead == "" {
 		lead = contentpkg.DefaultLeadRole
 	}
-	fmt.Fprintf(&b, "## Your team\n\nYou are the %s of this team. You do not do the members' work yourself: you plan, delegate each part to the role that covers it with the bnbloc-room tool ask_agent (pass the role name as the handle), and merge their results.\n\n", lead)
-	b.WriteString("Roster (role → expert → agent):\n")
+	fmt.Fprintf(&b, "## Your team\n\nYou are the %s of this team.\n\nRoster (role → expert):\n", lead)
 	var covered strings.Builder
 	for _, m := range team.Members {
 		expert := m.Expert
@@ -191,18 +191,10 @@ func Section(team wire.ContentTeam, plan wire.TeamPlanReply) string {
 		if m.Resolved != nil {
 			expert = firstNonEmpty(m.Resolved.DisplayName, m.Resolved.Name) + " v" + m.Resolved.Version
 			covers = firstNonEmpty(covers, strings.TrimSpace(m.Resolved.Description))
+		} else {
+			expert += " (unavailable: " + firstNonEmpty(m.Missing, "its expert does not resolve") + ")"
 		}
-		agent := "no agent"
-		e, ok := byRole[m.Role]
-		switch {
-		case m.Resolved == nil:
-			agent = "unavailable: " + firstNonEmpty(m.Missing, "its expert does not resolve")
-		case ok && e.Agent != nil:
-			agent = e.Agent.Handle + " (online)"
-		case ok:
-			agent = "unavailable: " + e.Reason
-		}
-		fmt.Fprintf(&b, "- %s → %s → %s\n", m.Role, expert, agent)
+		fmt.Fprintf(&b, "- %s → %s\n", m.Role, expert)
 		if covers != "" {
 			covered.WriteString("- " + m.Role + ": " + roomlog.Truncate(oneLine(covers), MaxCoversBytes) + "\n")
 		}
@@ -215,11 +207,10 @@ func Section(team wire.ContentTeam, plan wire.TeamPlanReply) string {
 		b.WriteString("\n")
 	}
 	fmt.Fprintf(&b, `
-Rules:
-- Capability check first: before you start, check that the roster covers every part of the request. If a part is covered by no role, say so and refuse that part; never invent a role or do a missing role's work yourself.
-- Dispatch with ask_agent(handle: "<role>", task): the role's agent wears the role's expert. An unavailable role cannot be asked.
-- Post one progress line per phase with post_progress (for example "Phase 1/3: review dispatched to reviewer"), so the room can follow.
-- A member that does not finish in time keeps running: check it later with room_status. After %d failed member tasks the room tools stop further dispatches: then stop and tell the requester what failed.
+How the room tools run the team:
+- ask_agent(handle: "<role>", task) dispatches to the role's agent, wearing the role's expert. Which agent takes each role right now, or why none can, is in list_room_agents (team); an unavailable role cannot be asked.
+- post_progress posts one progress line per phase (for example "Phase 1/3: review dispatched to reviewer").
+- A member that does not finish in time keeps running: check it later with room_status. After %d failed member tasks the tools refuse further dispatches.
 `, wire.MaxTeamFailures)
 	return b.String()
 }

@@ -53,6 +53,33 @@ func (t *Team) role(name string) (TeamRole, bool) {
 	return TeamRole{}, false
 }
 
+// roleStaffing is one role as list_room_agents reports it: the agent that
+// takes it for this turn, or why none can.
+type roleStaffing struct {
+	Role        string `json:"role"`
+	Agent       string `json:"agent,omitempty"`
+	Unavailable string `json:"unavailable,omitempty"`
+}
+
+// staffing is the roster as staffed for the bound turn (the lead's
+// instructions carry no staffing: it would churn the session).
+func (t *Team) staffing() []roleStaffing {
+	out := make([]roleStaffing, 0, len(t.Roles))
+	for _, r := range t.Roles {
+		s := roleStaffing{Role: r.Role}
+		switch {
+		case r.Expert == nil:
+			s.Unavailable = firstNonEmptyString(r.Missing, "its expert does not resolve")
+		case r.Agent == nil:
+			s.Unavailable = firstNonEmptyString(r.Reason, "no agent can take it")
+		default:
+			s.Agent = r.Agent.Handle
+		}
+		out = append(out, s)
+	}
+	return out
+}
+
 func (t *Team) roleNames() string {
 	names := make([]string, 0, len(t.Roles))
 	for _, r := range t.Roles {
@@ -215,7 +242,7 @@ func teamTarget(team *Team, handle, expert string) (TeamRole, *Result) {
 	r, ok := team.role(name)
 	switch {
 	case !ok:
-		res := toolError("%q is not a role of your team (roles: %s). The roster does not cover it: refuse that part of the request instead of improvising a role", name, team.roleNames())
+		res := toolError("%q is not a role of your team (roles: %s): the roster does not cover it", name, team.roleNames())
 		return TeamRole{}, &res
 	case expert != "":
 		res := toolError("the %s role brings its own expert; leave expert out", r.Role)

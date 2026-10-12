@@ -239,6 +239,7 @@ func (b *Bridge) sessionGuidance(ctx context.Context, d *drive, ep corepkg.Endpo
 	_, pull := b.coreEntry(d.core)
 	facts.Self = agentSpeakerLabel(d.owner, d.job.Provider)
 	facts.HasRoomFiles = pull && d.caps.writer != nil
+	facts.TeamLead = d.content.teamRoster() != nil
 	if d.caps.profile {
 		profile = d.content.profile()
 		if profile == nil {
