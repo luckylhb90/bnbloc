@@ -8,6 +8,7 @@ import { Dialog, ConfirmDialog } from "@/ui/Dialog";
 import { useToast } from "@/ui/Toast";
 import { displayNameOf } from "@/lib/useDisplayName";
 import { EmailInput } from "@/views/UserName";
+import { RoomContentSection } from "@/views/room/RoomContentSection";
 
 const syncOptions: SegmentOption<"git" | "mutagen" | "none">[] = [
   { value: "git", label: "Git" },
@@ -166,6 +167,8 @@ export function RoomSettings({
         <p className="-mt-2 rounded-[var(--radius)] border border-[var(--color-border)] bg-[var(--color-surface-2)] px-3 py-2 text-xs text-[var(--color-fg-muted)] leading-relaxed">
           {syncGuidance[sync]}
         </p>
+
+        <RoomContentSection roomId={room.roomId} />
 
         {/* Invite */}
         <div className="rounded-[var(--radius)] border border-[var(--color-border)] p-4">
