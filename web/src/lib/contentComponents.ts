@@ -283,7 +283,7 @@ export function formPayload(f: ContentForm): Record<string, unknown> {
     out.requires = {
       ...(req.skills?.length ? { skills: req.skills } : {}),
       ...(req.prompts?.length ? { prompts: req.prompts } : {}),
-      // MCP tools carry over unchanged (the form does not edit them).
+      // MCP tools the content requires (the form edits them: contentFormRefs.ts).
       ...(req.mcp?.length ? { mcp: req.mcp } : {}),
       ...(req.permissions?.length ? { permissions: req.permissions } : {}),
     };

@@ -1,6 +1,8 @@
 import { useState } from "react";
 import { PlusIcon, TrashIcon, UsersThreeIcon } from "@phosphor-icons/react";
-import { splitList, type ContentForm, type ContentFormRole, type ContentFormTeam, type ContentKind } from "@/lib/contentComponents";
+import type { MemberComponent } from "@/lib/apiTypes";
+import { splitList, type ContentForm, type ContentFormRole, type ContentFormTeam, type ContentKind, type ContentQuickPrompt } from "@/lib/contentComponents";
+import { addMcpTool, clearPromptRef, envChoices, mcpPermission, pickPromptRef, removeMcpTool, toggleEnv, type PackPromptOption } from "@/lib/contentFormRefs";
 import { defaultAgentLabel, formatDefaultAgent, parseDefaultAgent, type ContentTeam, type DefaultAgentKind } from "@/lib/teams";
 import { cn } from "@/lib/cn";
 import { Button } from "@/ui/Button";
@@ -54,13 +56,25 @@ export function TagsIconFields({ form, patch }: { readonly form: ContentForm; re
 }
 
 // RequirementsFields edits what a component needs at use time: skill and
-// prompt packs by name or name@range, and whether it runs scripts. Other
-// declared permissions (local or remote tools) carry over unchanged.
-export function RequirementsFields({ form, patch, kind }: { readonly form: ContentForm; readonly patch: (p: Partial<ContentForm>) => void; readonly kind: ContentKind }) {
+// prompt packs by name or name@range, the MCP tools it calls, and whether
+// it runs scripts. MCP permissions follow the tools picked
+// (contentFormRefs.ts); other declared permissions carry over unchanged.
+export function RequirementsFields({
+  form,
+  patch,
+  kind,
+  tools,
+}: {
+  readonly form: ContentForm;
+  readonly patch: (p: Partial<ContentForm>) => void;
+  readonly kind: ContentKind;
+  // The MCP tool components visible to the member (null while loading).
+  readonly tools: readonly MemberComponent[] | null;
+}) {
   const req = form.requires ?? {};
   const perms = req.permissions ?? [];
   const scripts = perms.includes("scripts");
-  const others = perms.filter((p) => p !== "scripts");
+  const others = perms.filter((p) => p !== "scripts" && p !== "mcp.stdio" && !p.startsWith("mcp.http:"));
   const setReq = (p: Partial<typeof req>) => patch({ requires: { ...req, ...p } });
   return (
     <div className="flex flex-col gap-3">
@@ -71,19 +85,166 @@ export function RequirementsFields({ form, patch, kind }: { readonly form: Conte
             <ListInput value={req.skills ?? []} onChange={(skills) => setReq({ skills })} placeholder="lint-kit@^1" label="Required skill packs" />
           </Field>
           <Field label="Prompt packs" hint="For quick prompts that point at a pack's prompt">
-            <ListInput value={req.prompts ?? []} onChange={(prompts) => setReq({ prompts })} placeholder="release-notes@^1" label="Required prompt packs" />
+            {/* Keyed by the list so a quick prompt's pick shows up here. */}
+            <ListInput key={(req.prompts ?? []).join(",")} value={req.prompts ?? []} onChange={(prompts) => setReq({ prompts })} placeholder="release-notes@^1" label="Required prompt packs" />
           </Field>
         </div>
       )}
+      <McpToolsEditor form={form} patch={patch} tools={tools} />
       <label className="flex items-center gap-2 text-sm">
         <input
           type="checkbox"
           checked={scripts}
-          onChange={(e) => setReq({ permissions: e.target.checked ? [...others, "scripts"] : others })}
+          onChange={(e) => setReq({ permissions: e.target.checked ? [...perms, "scripts"] : perms.filter((p) => p !== "scripts") })}
         />
         Runs scripts (someone else's use runs in the agent sandbox)
       </label>
       {others.length > 0 && <p className="text-xs text-[var(--color-fg-subtle)]">Other declared permissions carry over: {others.join(", ")}</p>}
+    </div>
+  );
+}
+
+// McpToolsEditor picks the MCP tool components the content calls and the
+// variables it needs set; the permission each tool's transport needs is
+// declared with it.
+function McpToolsEditor({
+  form,
+  patch,
+  tools,
+}: {
+  readonly form: ContentForm;
+  readonly patch: (p: Partial<ContentForm>) => void;
+  readonly tools: readonly MemberComponent[] | null;
+}) {
+  const req = form.requires ?? {};
+  const picked = req.mcp ?? [];
+  const list = tools ?? [];
+  const byName = new Map(list.map((t) => [t.name, t]));
+  const addable = list.filter((t) => !picked.some((m) => m.name === t.name));
+  return (
+    <div className="flex flex-col gap-2">
+      <span className="text-sm">Tools</span>
+      {picked.length === 0 && (
+        <p className="text-xs text-[var(--color-fg-subtle)]">
+          {tools === null ? "Loading tools…" : list.length === 0 ? "No MCP tools are available to you." : "Pick the MCP tools this needs. Agents get them when it is used."}
+        </p>
+      )}
+      {picked.map((m) => {
+        const tool = byName.get(m.name);
+        return (
+          <div key={m.name} className="flex flex-col gap-1.5 rounded-[var(--radius)] border border-[var(--color-border)] p-3">
+            <div className="flex items-center gap-2">
+              <span className="font-mono text-sm">{m.name}</span>
+              {tool ? (
+                <span className="text-xs text-[var(--color-fg-subtle)]">{mcpPermission(tool) === "mcp.stdio" ? "runs on the agent's computer" : `calls ${mcpPermission(tool).slice("mcp.http:".length) || "a remote server"}`}</span>
+              ) : (
+                <Badge>{tools === null ? "loading" : "not available"}</Badge>
+              )}
+              <div className="flex-1" />
+              <button
+                type="button"
+                onClick={() => patch({ requires: removeMcpTool(req, m.name, list) })}
+                aria-label={`Remove tool ${m.name}`}
+                title="Remove tool"
+                className="tactile text-[var(--color-fg-subtle)] hover:text-[var(--color-danger)]"
+              >
+                <TrashIcon size={16} />
+              </button>
+            </div>
+            {tool ? (
+              envChoices(tool, m).map((c) => (
+                <label key={c.env.name} className="flex items-center gap-2 text-sm" title={c.env.description}>
+                  <input type="checkbox" checked={c.checked} disabled={c.locked} onChange={(e) => patch({ requires: toggleEnv(req, tool, c.env.name, e.target.checked) })} />
+                  <span className="font-mono text-xs">{c.env.name}</span>
+                  <span className="text-xs text-[var(--color-fg-subtle)]">
+                    {c.locked ? "always needed" : "needed by this"}
+                    {c.env.secret ? " · secret" : ""}
+                  </span>
+                </label>
+              ))
+            ) : (
+              tools !== null && <p className="text-xs text-[var(--color-fg-subtle)]">This tool is no longer available to you. Remove it, or ask an admin.</p>
+            )}
+          </div>
+        );
+      })}
+      {addable.length > 0 && (
+        <Select
+          className="h-9 w-64"
+          value=""
+          aria-label="Add a tool"
+          onChange={(e) => {
+            const t = byName.get(e.target.value);
+            if (t) patch({ requires: addMcpTool(req, t, list) });
+          }}
+        >
+          <option value="">Add a tool…</option>
+          {addable.map((t) => (
+            <option key={t.name} value={t.name}>
+              {t.name}
+              {t.description ? ` · ${t.description}` : ""}
+            </option>
+          ))}
+        </Select>
+      )}
+    </div>
+  );
+}
+
+// QuickPromptsEditor edits an expert's quick prompts: text, or a pointer
+// to a prompt of a prompt pack (the pack joins the requirements).
+export function QuickPromptsEditor({
+  form,
+  patch,
+  options,
+}: {
+  readonly form: ContentForm;
+  readonly patch: (p: Partial<ContentForm>) => void;
+  // The prompts of the prompt packs the member can see.
+  readonly options: readonly PackPromptOption[];
+}) {
+  const qps = form.quickPrompts;
+  const set = (i: number, q: Partial<ContentQuickPrompt>) => patch({ quickPrompts: qps.map((x, j) => (j === i ? { ...x, ...q } : x)) });
+  const pick = (i: number, ref: string) => {
+    if (!ref) {
+      patch({ quickPrompts: clearPromptRef(qps, i) });
+      return;
+    }
+    const o = options.find((x) => x.ref === ref);
+    if (o) patch(pickPromptRef(qps, form.requires ?? {}, i, o));
+  };
+  return (
+    <div className="flex flex-col gap-2">
+      <span className="text-xs font-medium uppercase tracking-wide text-[var(--color-fg-muted)]">Quick prompts</span>
+      {qps.map((q, i) => (
+        <div key={i} className="flex flex-col gap-1.5">
+          <div className="flex items-start gap-2">
+            <Input className="w-40 shrink-0" placeholder={q.ref ? "Title (optional)" : "Title"} value={q.title} onChange={(e) => set(i, { title: e.target.value })} aria-label="Quick prompt title" />
+            {q.ref ? (
+              <span className="flex h-9 min-w-0 flex-1 items-center truncate text-sm text-[var(--color-fg-muted)]" title={q.ref}>
+                Uses a pack prompt
+              </span>
+            ) : (
+              <Input placeholder="Prompt" value={q.prompt} onChange={(e) => set(i, { prompt: e.target.value })} aria-label="Quick prompt" />
+            )}
+            <button type="button" aria-label="Remove quick prompt" className="tactile mt-2.5 text-[var(--color-fg-subtle)] hover:text-[var(--color-danger)]" onClick={() => patch({ quickPrompts: qps.filter((_, j) => j !== i) })}>
+              <TrashIcon size={16} />
+            </button>
+          </div>
+          <Select className="h-9" value={q.ref ?? ""} aria-label="Quick prompt source" onChange={(e) => pick(i, e.target.value)}>
+            <option value="">Its own text</option>
+            {q.ref && !options.some((o) => o.ref === q.ref) && <option value={q.ref}>{q.ref} (not available to you)</option>}
+            {options.map((o) => (
+              <option key={o.ref} value={o.ref}>
+                {o.label}
+              </option>
+            ))}
+          </Select>
+        </div>
+      ))}
+      <Button variant="outline" size="sm" className="self-start" onClick={() => patch({ quickPrompts: [...qps, { title: "", prompt: "" }] })}>
+        <PlusIcon size={14} /> Add quick prompt
+      </Button>
     </div>
   );
 }

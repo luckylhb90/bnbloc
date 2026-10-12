@@ -11,13 +11,16 @@ import {
   type ContentFormSkill,
   type ContentKind,
 } from "@/lib/contentComponents";
+import type { MemberComponent } from "@/lib/apiTypes";
 import { apiErrorText, contentApi } from "@/lib/contentComponentsApi";
+import { packPromptOptions, type PackPromptOption } from "@/lib/contentFormRefs";
+import { mcpToolsApi } from "@/lib/mcpToolsApi";
 import { Button } from "@/ui/Button";
 import { Dialog } from "@/ui/Dialog";
 import { Field, Input, Textarea } from "@/ui/Input";
 import { Select } from "@/ui/Select";
 import { useToast } from "@/ui/Toast";
-import { RequirementsFields, TagsIconFields, TeamEditor } from "@/views/library/ContentFormExtras";
+import { QuickPromptsEditor, RequirementsFields, TagsIconFields, TeamEditor } from "@/views/library/ContentFormExtras";
 
 // The editor target: a new component of a kind, or a new version of one of
 // the member's components (prefilled from its latest version).
@@ -68,6 +71,27 @@ export function ContentEditorDialog({
   const [form, setForm] = useState<ContentForm | null>(null);
   const [busy, setBusy] = useState(false);
   const base = target && "base" in target ? target.base : null;
+  // What the reference pickers offer: the prompts of the prompt packs and
+  // the MCP tools the member can see (best-effort: a failed load offers none).
+  const [packPrompts, setPackPrompts] = useState<readonly PackPromptOption[]>([]);
+  const [tools, setTools] = useState<readonly MemberComponent[] | null>(null);
+  const open = !!target;
+  useEffect(() => {
+    if (!open) return;
+    let live = true;
+    setTools(null);
+    contentApi
+      .list("prompt")
+      .then((r) => live && setPackPrompts(packPromptOptions(r.components ?? [])))
+      .catch(() => live && setPackPrompts([]));
+    mcpToolsApi
+      .list()
+      .then((t) => live && setTools(t))
+      .catch(() => live && setTools([]));
+    return () => {
+      live = false;
+    };
+  }, [open]);
 
   useEffect(() => {
     if (!target) {
@@ -165,21 +189,7 @@ export function ContentEditorDialog({
               <Field label="Welcome" hint="Shown when someone picks this expert">
                 <Textarea rows={2} value={form.welcome} onChange={(e) => patch({ welcome: e.target.value })} />
               </Field>
-              <div className="flex flex-col gap-2">
-                <span className="text-xs font-medium uppercase tracking-wide text-[var(--color-fg-muted)]">Quick prompts</span>
-                {form.quickPrompts.map((q, i) => (
-                  <div key={i} className="flex items-start gap-2">
-                    <Input className="w-40 shrink-0" placeholder="Title" value={q.title} onChange={(e) => patch({ quickPrompts: form.quickPrompts.map((x, j) => (j === i ? { ...x, title: e.target.value } : x)) })} aria-label="Quick prompt title" />
-                    <Input placeholder="Prompt" value={q.prompt} onChange={(e) => patch({ quickPrompts: form.quickPrompts.map((x, j) => (j === i ? { ...x, prompt: e.target.value } : x)) })} aria-label="Quick prompt" />
-                    <button type="button" aria-label="Remove quick prompt" className="tactile mt-2.5 text-[var(--color-fg-subtle)] hover:text-[var(--color-danger)]" onClick={() => patch({ quickPrompts: form.quickPrompts.filter((_, j) => j !== i) })}>
-                      <TrashIcon size={16} />
-                    </button>
-                  </div>
-                ))}
-                <Button variant="outline" size="sm" className="self-start" onClick={() => patch({ quickPrompts: [...form.quickPrompts, { title: "", prompt: "" }] })}>
-                  <PlusIcon size={14} /> Add quick prompt
-                </Button>
-              </div>
+              <QuickPromptsEditor form={form} patch={patch} options={packPrompts} />
             </>
           )}
           <div className="flex flex-col gap-2">
@@ -188,7 +198,7 @@ export function ContentEditorDialog({
             </span>
             <SkillsEditor skills={form.skills} onChange={(skills) => patch({ skills })} />
           </div>
-          <RequirementsFields form={form} patch={patch} kind={kind} />
+          <RequirementsFields form={form} patch={patch} kind={kind} tools={tools} />
           {kind === "expert" && <TeamEditor team={form.team} onChange={(team) => patch({ team })} />}
         </div>
       )}
