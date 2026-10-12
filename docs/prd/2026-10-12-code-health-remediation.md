@@ -566,6 +566,57 @@ desktop agent.
 
 ### Batch 4: store contract suite and parity (L)
 
+Status (2026-10-12): landed on the Batch 4 branch (not yet on `main`).
+- **4.1 Status:** done. `forEachBackend` is the only rig; every
+  two-backend store interface has a `TestContract<Interface>…` suite in
+  `contract_*_test.go` (twins merged, the inline DSN checks and the rig
+  helpers deleted). MySQL tests never share a database: `internal/testmysql`
+  (`Fresh` per test, `Shared` per test binary, dropped by `Main`) owns
+  `BNBLOC_TEST_MYSQL_DSN`, and advisory locks are scoped to their database
+  (`advisoryLock`), which fixed the parallel-package flakes. CI runs the
+  tests as the container's root. Tests: `TestEveryStoreInterfaceHasContract`,
+  `TestStoreTestsUseOneRig`, `TestMySQLTestsUseTestmysql`,
+  `TestAdvisoryLocksScopedByDatabase`. Also fixed: the flaky sealbox tamper
+  case.
+- **4.2 Status:** done. Every allowlisted read returns an error except
+  `ActivityStore.SubmitQueryable`/`SyncStates` (removed with their endpoints
+  in Batch 2). One list-read helper `queryAll`/`rowScanner`;
+  `TestMySQLReadsReportFailures` calls every MySQL operation on a closed
+  database. Callers: logged 500 or fail closed; four places keep their
+  documented degrade-on-error behaviour (offline platform-agent guard,
+  platform-agent listing, content-review notification, budget hard stop).
+- **4.3 Status:** done except M11 (`Grant.Live`, admission rule: Batch 2.6).
+  Rule owners in `rules.go` (`clampLimit`, `liveAt`, `isDupEntry`/`dupAs`,
+  `nullIfZero`/`nullPtr`, `sqlNotDeleted`/`sqlHumanMember`); bridge liveness
+  (`BridgeLive`/`liveBridgePred`, `nowMs` from the caller) and generated
+  job-status IN lists in `bridge_jobs.go`; `BridgeOwner` the one bridge
+  identity; claims by `EXISTS`; attachments tenant-scoped and insert-only;
+  insert-only keys with exported sentinels; re-put parity; deterministic
+  ordering; one expiry boundary; revoke without a time refused; `[]` for
+  empty lists; full audit reads with a tie-break and one implementation;
+  bundle entitlement in one query (`ContentComponentsByBlob`); platform
+  settings compare-and-set (`UpdatePlatformSetting`); one blob-key list
+  (`blobKeySources`); budget cost at the column's precision; SSO issuers
+  compared exactly. Tests: `TestStoreRulesSingleSource`,
+  `TestTenantTablesFilterTenant` (with `// cross-tenant: <reason>`),
+  `TestBlobKeyColumnsReferenced`, the contract cases. Left: id columns other
+  than identities (job, bridge, core, provider ids, setting keys) keep the
+  case-insensitive collation on MySQL; every writer generates or validates
+  them lowercase, so no case variant can reach the store.
+- **4.4 Status:** done. Migrations `2026_10_store_indexes`,
+  `2026_10_tenant_issuer_unique` (issuer `utf8mb4_bin`, `''` to NULL,
+  unique; `ErrSSOIssuerTaken`). `SweepAgentJobs` is two indexed reads,
+  `TenantTeamJobs` has no `OR`, `CountContentUses` is capped
+  (`MaxUsageCount`), FULLTEXT threshold documented.
+- **4.5 Status:** done. Migrations `2026_10_drop_unused_columns`,
+  `2026_10_room_id_width_json_columns`; `retiredColumns` beside
+  `retiredTables`; `ExtAuditRecords`, the `search_text` backfill and
+  `MaxRoomSeq`'s unused branches deleted (the reindex route and CLI stay for
+  the OpenSearch repair); `agent_sessions` keeps only what is read.
+  `TestNoWriteOnlyColumns`. Not done: tables orphaned by the Batch 2
+  removals (concurrent batch) and `RecordSubmitProvenance`/`SubmitQueryable`
+  (Batch 2).
+
 | # | Item | Refs | Size |
 |---|---|---|---|
 | 4.1 | **One rig.** `forEachBackend(t, fn)` becomes the only rig. Delete the ~30 inline DSN checks and the 4 rig helpers. Add contract suites for every interface that lacks one: Activity, Attachment, Room core, Channel, Tenant, AgentPrefs (plus its `var _` assertion), Artifact core, BridgeJob lifecycle (merging the twin tests), Grant, RefreshToken, SSOHandoff, ComponentInstall, ExtensionAudit, PlatformSettings. | store H8, T1 | L |
