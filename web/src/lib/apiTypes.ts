@@ -1,12 +1,13 @@
-export type ComponentKind = "core" | "plugin" | "auth-provider" | "notifier" | "sandbox" | "previewer";
+export type ComponentKind = "core" | "plugin" | "auth-provider" | "notifier" | "sandbox" | "previewer" | "mcp";
 export type ComponentPackageKind =
   | "bnbloc.core.package/v1"
   | "bnbloc.plugin.package/v1"
   | "bnbloc.auth-provider.package/v1"
   | "bnbloc.notifier.package/v1"
   | "bnbloc.sandbox.package/v1"
-  | "bnbloc.previewer.package/v1";
-export type ComponentRuntime = "endpoint" | "manifest" | "sidecar" | "bundle";
+  | "bnbloc.previewer.package/v1"
+  | "bnbloc.mcp.package/v1";
+export type ComponentRuntime = "endpoint" | "manifest" | "sidecar" | "bundle" | "stdio";
 export type ComponentRollout = "auto" | "optin" | "off";
 
 export interface ComponentProtocolRange {
@@ -70,6 +71,32 @@ export interface ComponentPreviewer {
   readonly toolbar?: readonly { readonly id: string; readonly icon: string; readonly label: string; readonly kind: string }[];
 }
 
+// An MCP tool component's payload (bnbloc.mcp.package/v1): its tools (for
+// display), the variables it needs and where their values come from
+// (member: each member's desktop; org: an org admin's connector), and the
+// stdio args or http auth header. Values never ship in a package.
+export interface ComponentMCPEnv {
+  readonly name: string;
+  readonly description?: string;
+  readonly secret?: boolean;
+  readonly required?: boolean;
+}
+
+export interface ComponentMCP {
+  readonly tools: readonly { readonly name: string; readonly description?: string }[];
+  readonly env?: readonly ComponentMCPEnv[];
+  readonly credentials?: "member" | "org";
+  readonly stdio?: { readonly args?: readonly string[] };
+  readonly http?: { readonly auth: { readonly scheme: string; readonly header?: string; readonly env?: string } };
+}
+
+// The member catalog adds the transport and, for org credentials, whether
+// the member's organization configured its connector.
+export interface MemberComponentMCP extends ComponentMCP {
+  readonly transport?: "stdio" | "http";
+  readonly orgConfigured?: boolean;
+}
+
 export interface ComponentTrust {
   readonly keyId?: string;
   readonly contentHash?: string;
@@ -103,7 +130,9 @@ export interface ComponentBase {
   readonly hooks?: readonly string[];
   readonly artifacts?: Readonly<Record<string, ComponentArtifact>>;
   readonly sidecar?: ComponentSidecar;
+  readonly endpoint?: ComponentEndpoint;
   readonly previewer?: ComponentPreviewer;
+  readonly mcp?: MemberComponentMCP;
 }
 
 export interface PlatformComponent extends ComponentBase {
@@ -152,6 +181,7 @@ export interface ComponentPackageEnvelope {
   readonly hooks?: readonly string[];
   readonly localSettings?: readonly LocalSettingField[];
   readonly previewer?: ComponentPreviewer;
+  readonly mcp?: ComponentMCP;
 }
 
 export interface ComponentPublishRequest {

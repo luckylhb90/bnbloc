@@ -11,6 +11,7 @@ import { ErrorBox } from "@/ui/ErrorBox";
 import { useToast } from "@/ui/Toast";
 import { NotifierDelivery } from "@/views/settings/NotifierDelivery";
 import { PersonalBots } from "@/views/settings/PersonalBots";
+import { ToolSettings } from "@/views/settings/ToolSettings";
 import { BrowserPush } from "@/views/settings/BrowserPush";
 import { SignedInDevices } from "@/views/settings/SignedInDevices";
 import { MyBudget } from "@/views/settings/MyBudget";
@@ -145,6 +146,7 @@ export function Settings() {
           )}
         </section>
         <AgentSandbox />
+        <ToolSettings />
         <MyBudget />
         <SignedInDevices />
       </div>

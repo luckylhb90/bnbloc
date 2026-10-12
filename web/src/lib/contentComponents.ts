@@ -45,10 +45,17 @@ export interface ContentQuickPrompt {
   readonly resolved?: PromptRef;
 }
 
+// An MCP tool component a package requires, and the tool's variables it
+// needs set (docs/architecture/content-components.md, MCP tool components).
+export interface ContentMCPRequirement {
+  readonly name: string;
+  readonly env?: readonly string[];
+}
+
 export interface ContentRequires {
   readonly skills?: readonly string[];
   readonly prompts?: readonly string[];
-  readonly mcp?: readonly string[];
+  readonly mcp?: readonly ContentMCPRequirement[];
   readonly permissions?: readonly string[];
 }
 
@@ -235,10 +242,12 @@ export function formPayload(f: ContentForm): Record<string, unknown> {
   const tags = cleanTags(f.tags ?? []);
   if (tags.length > 0) out.tags = tags;
   const req = f.requires ?? {};
-  if ((req.skills?.length ?? 0) + (req.prompts?.length ?? 0) + (req.permissions?.length ?? 0) > 0) {
+  if ((req.skills?.length ?? 0) + (req.prompts?.length ?? 0) + (req.mcp?.length ?? 0) + (req.permissions?.length ?? 0) > 0) {
     out.requires = {
       ...(req.skills?.length ? { skills: req.skills } : {}),
       ...(req.prompts?.length ? { prompts: req.prompts } : {}),
+      // MCP tools carry over unchanged (the form does not edit them).
+      ...(req.mcp?.length ? { mcp: req.mcp } : {}),
       ...(req.permissions?.length ? { permissions: req.permissions } : {}),
     };
   }

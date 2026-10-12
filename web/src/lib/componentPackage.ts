@@ -1,4 +1,4 @@
-import type { ComponentPackageEnvelope, ComponentPreviewer, ComponentSidecarFile } from "./apiTypes";
+import type { ComponentMCP, ComponentPackageEnvelope, ComponentPreviewer, ComponentSidecarFile } from "./apiTypes";
 
 type ParseResult =
   | { readonly ok: true; readonly value: ComponentPackageEnvelope }
@@ -17,7 +17,7 @@ export function parseComponentPackage(raw: string): ParseResult {
 
 function parsePackageRecord(record: Readonly<Record<string, unknown>>): ParseResult {
   const kind = readPackageKind(record["kind"]);
-  if (!kind) return { ok: false, error: "package kind must be bnbloc.core.package/v1, bnbloc.plugin.package/v1, bnbloc.auth-provider.package/v1, bnbloc.notifier.package/v1, bnbloc.sandbox.package/v1, or bnbloc.previewer.package/v1" };
+  if (!kind) return { ok: false, error: "package kind must be bnbloc.core.package/v1, bnbloc.plugin.package/v1, bnbloc.auth-provider.package/v1, bnbloc.notifier.package/v1, bnbloc.sandbox.package/v1, bnbloc.previewer.package/v1, or bnbloc.mcp.package/v1" };
   const name = readRequiredString(record, "name");
   const version = readRequiredString(record, "version");
   const publisher = readRequiredString(record, "publisher");
@@ -42,6 +42,9 @@ function parsePackageRecord(record: Readonly<Record<string, unknown>>): ParseRes
   const previewer = readPreviewer(record["previewer"]);
   if (!previewer.ok) return previewer;
   if (previewer.value && kind !== "bnbloc.previewer.package/v1") return { ok: false, error: "previewer is only valid for previewer packages" };
+  const mcp = readMCP(record["mcp"]);
+  if (!mcp.ok) return mcp;
+  if (mcp.value && kind !== "bnbloc.mcp.package/v1") return { ok: false, error: "mcp is only valid for MCP tool packages" };
   if (kind === "bnbloc.core.package/v1" && !protocol) return { ok: false, error: "core package requires protocol.min and protocol.max" };
   const shapeError = packageShapeError(kind, runtime, record, artifacts.value, sidecar.value, hooks.value);
   if (shapeError) return { ok: false, error: shapeError };
@@ -65,6 +68,7 @@ function parsePackageRecord(record: Readonly<Record<string, unknown>>): ParseRes
       ...(hooks.value ? { hooks: hooks.value } : {}),
       ...(localSettings.value ? { localSettings: localSettings.value } : {}),
       ...(previewer.value ? { previewer: previewer.value } : {}),
+      ...(mcp.value ? { mcp: mcp.value } : {}),
     },
   };
 }
@@ -102,6 +106,12 @@ function packageShapeError(
     if (runtime !== "bundle") return "previewer package runtime must be bundle";
     if (!("previewer" in record)) return "previewer package requires previewer";
   }
+  if (kind === "bnbloc.mcp.package/v1") {
+    if (record["contract"] !== "bnbloc.mcp.contract/v1") return `MCP package contract ${String(record["contract"])} is not supported`;
+    if (runtime !== "stdio" && runtime !== "endpoint") return "MCP package runtime must be stdio or endpoint";
+    if (!("mcp" in record)) return "MCP package requires mcp (its tools)";
+  }
+  if (runtime === "stdio" && Object.keys(artifacts ?? {}).length === 0) return "stdio runtime requires one binary artifact per platform";
   if (runtime === "bundle" && (Object.keys(artifacts ?? {}).length !== 1 || !artifacts?.["bundle"])) return "bundle runtime requires exactly one artifact named bundle";
   if (runtime === "endpoint" && !readEndpoint(record["endpoint"])) return "endpoint runtime requires endpoint.baseUrl";
   if (runtime === "manifest" && !("manifest" in record)) return "manifest runtime requires manifest";
@@ -117,13 +127,14 @@ function readPackageKind(value: unknown): ComponentPackageEnvelope["kind"] | nul
     value === "bnbloc.auth-provider.package/v1" ||
     value === "bnbloc.notifier.package/v1" ||
     value === "bnbloc.sandbox.package/v1" ||
-    value === "bnbloc.previewer.package/v1"
+    value === "bnbloc.previewer.package/v1" ||
+    value === "bnbloc.mcp.package/v1"
     ? value
     : null;
 }
 
 function readRuntime(value: unknown): ComponentPackageEnvelope["runtime"] | null {
-  return value === "endpoint" || value === "manifest" || value === "sidecar" || value === "bundle" ? value : null;
+  return value === "endpoint" || value === "manifest" || value === "sidecar" || value === "bundle" || value === "stdio" ? value : null;
 }
 
 function readRequiredString(record: Readonly<Record<string, unknown>>, key: string): string | null {
@@ -211,6 +222,14 @@ function readLocalSettings(value: unknown): { readonly ok: true; readonly value?
     });
   }
   return { ok: true, value: fields };
+}
+
+// readMCP keeps an MCP block as published (the gateway validates its tools,
+// env, credentials and auth); it only needs to be an object with tools.
+function readMCP(value: unknown): { readonly ok: true; readonly value?: ComponentMCP } | { readonly ok: false; readonly error: string } {
+  if (value === undefined) return { ok: true };
+  if (!isRecord(value) || !Array.isArray(value["tools"])) return { ok: false, error: "mcp requires a tools list" };
+  return { ok: true, value: value as unknown as ComponentMCP };
 }
 
 // readPreviewer keeps a previewer block's shape (the gateway validates its

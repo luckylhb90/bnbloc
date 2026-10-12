@@ -22,6 +22,7 @@ const FILTERS = [
   { value: "notifier", label: "Notifiers" },
   { value: "sandbox", label: "Sandboxes" },
   { value: "previewer", label: "Previewers" },
+  { value: "mcp", label: "MCP tools" },
 ] satisfies readonly { readonly value: KindFilter; readonly label: string }[];
 
 export function PlatformComponents() {
@@ -122,12 +123,12 @@ export function PlatformComponents() {
           <div className="min-w-0 flex-1">
             <h2 className="text-base font-semibold text-[var(--color-fg)]">Components Workbench</h2>
             <p className="mt-1 text-sm leading-relaxed text-[var(--color-fg-muted)]">
-              Publish signed core, plugin, auth-provider, notifier, sandbox and previewer packages, review trust and runtime facts, and choose who receives each component.
+              Publish signed core, plugin, auth-provider, notifier, sandbox, previewer and MCP tool packages, review trust and runtime facts, and choose who receives each component.
             </p>
           </div>
           <div className="hidden shrink-0 gap-6 pl-5 sm:flex">
             <HeadStat label="Components" value={counts.total} />
-            <HeadStat label="Cores / Plugins / Auth / Notifiers / Sandboxes / Previewers" value={`${counts.core} / ${counts.plugin} / ${counts["auth-provider"]} / ${counts.notifier} / ${counts.sandbox} / ${counts.previewer}`} />
+            <HeadStat label="Cores / Plugins / Auth / Notifiers / Sandboxes / Previewers / MCP tools" value={`${counts.core} / ${counts.plugin} / ${counts["auth-provider"]} / ${counts.notifier} / ${counts.sandbox} / ${counts.previewer} / ${counts.mcp}`} />
             <HeadStat label="Auto-installed" value={counts.auto} />
             <HeadStat label="Members" value={counts.members > 0 ? counts.members : "—"} />
           </div>
@@ -241,6 +242,7 @@ function summarizeComponents(components: readonly PlatformComponent[]) {
     notifier: ofKind("notifier"),
     sandbox: ofKind("sandbox"),
     previewer: ofKind("previewer"),
+    mcp: ofKind("mcp"),
     auto,
     members,
   };

@@ -1,10 +1,10 @@
-import { CpuIcon, EyeIcon, PackageIcon, PlugsConnectedIcon, ShieldCheckIcon, WarningCircleIcon } from "@phosphor-icons/react";
+import { CpuIcon, EyeIcon, PackageIcon, PlugsConnectedIcon, ShieldCheckIcon, WarningCircleIcon, WrenchIcon } from "@phosphor-icons/react";
 import type { ComponentRollout, MemberComponent, PlatformComponent } from "@/lib/api";
 import { cn } from "@/lib/cn";
 import { Badge } from "@/ui/Card";
 
 export function KindIcon({ kind }: { readonly kind: string }) {
-  const Icon = kind === "core" ? CpuIcon : kind === "plugin" ? PlugsConnectedIcon : kind === "previewer" ? EyeIcon : PackageIcon;
+  const Icon = kind === "core" ? CpuIcon : kind === "plugin" ? PlugsConnectedIcon : kind === "previewer" ? EyeIcon : kind === "mcp" ? WrenchIcon : PackageIcon;
   return (
     <div className="grid size-9 shrink-0 place-items-center rounded-[var(--radius)] bg-[var(--color-surface-2)] text-[var(--color-accent)]">
       <Icon size={18} weight={kind === "core" ? "regular" : "fill"} />
@@ -114,6 +114,23 @@ export function PreviewerFacts({ component }: { readonly component: PlatformComp
   );
 }
 
+// MCPFacts: what an MCP tool offers and needs: its tools, transport, the
+// variables it takes and where their values come from.
+export function MCPFacts({ component }: { readonly component: PlatformComponent }) {
+  const m = component.mcp;
+  if (!m) return null;
+  const transport = component.runtime === "endpoint" ? `http · ${component.endpoint?.baseUrl ?? ""}` : "stdio · spawned by the agent per session";
+  const credentials = m.credentials === "org" ? "org admins configure one connector per organization" : m.credentials === "member" ? "each member sets them on their desktop" : "none";
+  return (
+    <div className="mt-4 rounded-[var(--radius)] border border-[var(--color-border)] bg-[var(--color-surface-2)] p-3">
+      <div className="text-xs font-medium uppercase tracking-wide text-[var(--color-fg-subtle)]">MCP tool</div>
+      <p className="mt-1 break-all text-xs text-[var(--color-fg-muted)]">{transport}</p>
+      <ChipGroup label="Tools" values={m.tools.map((t) => t.name)} empty="None declared." compact />
+      <ChipGroup label={`Variables (${credentials})`} values={(m.env ?? []).map((e) => `${e.name}${e.secret ? " (secret)" : ""}${e.required ? " *" : ""}`)} empty="None." compact />
+    </div>
+  );
+}
+
 export function kindLabel(kind: string): string {
   return kind === "core"
     ? "Core"
@@ -125,7 +142,9 @@ export function kindLabel(kind: string): string {
           ? "Sandbox"
           : kind === "previewer"
             ? "Previewer"
-            : "Auth provider";
+            : kind === "mcp"
+              ? "MCP tool"
+              : "Auth provider";
 }
 
 export function memberMeta(component: MemberComponent): string {

@@ -21,11 +21,17 @@ export class MissingArtifactUploadError extends Error {
 }
 
 export function artifactRequirementsForPackage(envelope: ComponentPackageEnvelope): readonly ArtifactRequirement[] {
-  // Sidecar binaries per platform, or a previewer's one bundle archive.
-  if (envelope.runtime !== "sidecar" && envelope.runtime !== "bundle") return [];
+  // Sidecar or stdio MCP binaries per platform, or a previewer's one bundle
+  // archive.
+  if (!runtimeNeedsArtifacts(envelope.runtime)) return [];
   return Object.keys(envelope.artifacts ?? {})
     .sort((left, right) => left.localeCompare(right))
     .map((platform) => ({ platform }));
+}
+
+// runtimeNeedsArtifacts: the runtimes whose package pins uploaded files.
+export function runtimeNeedsArtifacts(runtime: ComponentPackageEnvelope["runtime"] | undefined): boolean {
+  return runtime === "sidecar" || runtime === "bundle" || runtime === "stdio";
 }
 
 export function uploadedArtifactsComplete(

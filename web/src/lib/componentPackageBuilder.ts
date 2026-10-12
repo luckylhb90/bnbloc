@@ -1,4 +1,4 @@
-import type { ComponentPackageEnvelope, ComponentPackageKind, ComponentRuntime, LocalSettingField } from "./apiTypes";
+import type { ComponentMCP, ComponentPackageEnvelope, ComponentPackageKind, ComponentRuntime, LocalSettingField } from "./apiTypes";
 import type { ArtifactRequirement } from "./componentArtifactRequirements";
 
 export type ComponentPackageDraft = {
@@ -24,6 +24,9 @@ export type ComponentPackageDraft = {
   // host API capabilities and the desktop-local settings schema.
   readonly host?: readonly string[];
   readonly localSettings?: readonly LocalSettingField[];
+  // MCP-only, carried unchanged from an imported package: its tools, env,
+  // credentials source and stdio args or http auth.
+  readonly mcp?: ComponentMCP;
 };
 
 export type ComponentPackageBuildResult =
@@ -45,6 +48,10 @@ export function buildComponentPackage(draft: ComponentPackageDraft): ComponentPa
   if (draft.kind === "bnbloc.notifier.package/v1") {
     if (draft.runtime !== "endpoint") return failure("Notifier packages use endpoint runtime.");
     if (draft.contract !== "bnbloc.notifier.contract/v1") return failure("Notifier contract is required.");
+  }
+  if (draft.kind === "bnbloc.mcp.package/v1") {
+    if (draft.runtime !== "stdio" && draft.runtime !== "endpoint") return failure("MCP tool packages use stdio or endpoint runtime.");
+    if (!draft.mcp) return failure("MCP tool packages need their mcp block (import the package JSON).");
   }
   if (draft.kind === "bnbloc.plugin.package/v1") {
     if (draft.runtime !== "sidecar") return failure("Plugin packages use sidecar runtime.");
@@ -70,6 +77,12 @@ export function buildComponentPackage(draft: ComponentPackageDraft): ComponentPa
     } catch (caught: unknown) {
       return failure(caught instanceof SyntaxError ? `Manifest JSON is invalid: ${caught.message}` : "Manifest JSON is invalid.");
     }
+  } else if (draft.runtime === "stdio") {
+    // A stdio MCP server: one binary per platform, spawned by the agent
+    // (no local service URL).
+    if (!draft.platformArtifacts?.length) return failure("Select at least one platform binary.");
+    artifacts = Object.fromEntries([...new Set(draft.platformArtifacts)].map((platform) => [platform, { url: "", sha256: "" }]));
+    artifactRequirements = Object.keys(artifacts).sort((a, b) => a.localeCompare(b)).map((platform) => ({ platform }));
   } else {
     const localUrl = draft.localUrl?.trim() ?? "";
     if (!localUrl) return failure("Sidecar runtime requires a loopback local URL.");
@@ -107,6 +120,7 @@ export function buildComponentPackage(draft: ComponentPackageDraft): ComponentPa
       ...(draft.contract ? { contract: draft.contract } : {}),
       ...(draft.hooks?.length ? { hooks: draft.hooks } : {}),
       ...(isPluginDraft(draft) && draft.localSettings?.length ? { localSettings: draft.localSettings } : {}),
+      ...(draft.kind === "bnbloc.mcp.package/v1" && draft.mcp ? { mcp: draft.mcp } : {}),
     },
     artifactRequirements,
   };

@@ -6,7 +6,7 @@ import { Button } from "@/ui/Button";
 import { Badge, Card } from "@/ui/Card";
 import { ConfirmDialog } from "@/ui/Dialog";
 import { Segment } from "@/ui/Segment";
-import { AdoptionBar, ArtifactFacts, ChipGroup, FactBlock, KindIcon, PreviewerFacts, RolloutBadge, TrustBlock, kindLabel, memberMeta } from "@/views/componentFacts";
+import { AdoptionBar, ArtifactFacts, ChipGroup, FactBlock, KindIcon, MCPFacts, PreviewerFacts, RolloutBadge, TrustBlock, kindLabel, memberMeta } from "@/views/componentFacts";
 
 const ROLLOUT_SEGMENTS = [
   { value: "auto", label: "Auto" },
@@ -107,6 +107,7 @@ function AdminComponentCard({
         />
       )}
       <PreviewerFacts component={component} />
+      <MCPFacts component={component} />
       <ArtifactFacts component={component} />
       <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-[var(--color-border)] pt-4">
         <div className="min-w-[15rem] flex-1">

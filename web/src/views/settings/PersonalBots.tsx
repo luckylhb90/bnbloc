@@ -1,11 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { desktop } from "@/lib/desktop";
-import { initialValues, missingRequired, settingsUpdate, type PluginLocalSettings } from "@/lib/pluginSettings";
-import { Button } from "@/ui/Button";
-import { Card } from "@/ui/Card";
+import type { PluginLocalSettings } from "@/lib/pluginSettings";
 import { ErrorBox } from "@/ui/ErrorBox";
-import { Field, Input } from "@/ui/Input";
-import { useToast } from "@/ui/Toast";
+import { LocalSettingsCard } from "@/views/settings/LocalSettingsCard";
 
 // PersonalBots configures the member's own notification delivery: a plugin
 // (installed by the platform admin, turned on in Components when optional)
@@ -59,76 +56,22 @@ export function PersonalBots() {
 }
 
 function PluginSettingsCard({ plugin, reload }: { plugin: PluginLocalSettings; reload: () => Promise<void> }) {
-  const toast = useToast();
-  const [values, setValues] = useState<Record<string, string>>(() => initialValues(plugin.fields));
-  const [busy, setBusy] = useState<"save" | "clear" | null>(null);
-
-  useEffect(() => {
-    setValues(initialValues(plugin.fields));
-  }, [plugin]);
-
-  const run = async (kind: NonNullable<typeof busy>, fn: () => Promise<void>) => {
-    setBusy(kind);
-    try {
-      await fn();
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Something went wrong");
-    } finally {
-      setBusy(null);
-    }
-  };
-
-  const save = () =>
-    run("save", async () => {
-      const missing = missingRequired(plugin.fields, values);
-      if (missing.length > 0) {
-        toast.error(`Fill in ${missing.join(", ")}`);
-        return;
-      }
-      await desktop.savePluginLocalSettings(plugin.plugin, settingsUpdate(plugin.fields, values));
-      toast.success(`${plugin.plugin} saved on this computer and restarted`);
-      await reload();
-    });
-
-  const clear = () =>
-    run("clear", async () => {
-      await desktop.clearPluginLocalSettings(plugin.plugin);
-      toast.success(`${plugin.plugin} settings removed from this computer`);
-      await reload();
-    });
-
   return (
-    <Card className="flex flex-col gap-3 px-4 py-3">
-      <div className="min-w-0">
-        <span className="block text-sm font-medium">
-          {plugin.plugin} <span className="text-xs font-normal text-[var(--color-fg-subtle)]">{plugin.version}</span>
-        </span>
-        <span className="block text-xs text-[var(--color-fg-muted)]">{plugin.configured ? plugin.message : "Not set up yet: fill in the fields below."}</span>
-      </div>
-      <div className="flex flex-col gap-3">
-        {plugin.fields.map((f) => (
-          <Field key={f.key} label={f.required ? `${f.label} *` : f.label} hint={f.help}>
-            <Input
-              type={f.secret ? "password" : "text"}
-              autoComplete={f.secret ? "new-password" : "off"}
-              spellCheck={false}
-              value={values[f.key] ?? ""}
-              placeholder={f.secret && f.set ? "••• set (leave empty to keep)" : ""}
-              onChange={(e) => setValues((cur) => ({ ...cur, [f.key]: e.target.value }))}
-            />
-          </Field>
-        ))}
-      </div>
-      <div className="flex flex-wrap items-center gap-2">
-        <Button size="sm" variant="primary" disabled={busy !== null} onClick={() => void save()}>
-          {busy === "save" ? "Saving…" : "Save"}
-        </Button>
-        {plugin.fields.some((f) => f.set) && (
-          <Button size="sm" variant="ghost" disabled={busy !== null} onClick={() => void clear()}>
-            {busy === "clear" ? "Removing…" : "Remove from this computer"}
-          </Button>
-        )}
-      </div>
-    </Card>
+    <LocalSettingsCard
+      title={plugin.plugin}
+      version={plugin.version}
+      status={plugin.configured ? plugin.message : "Not set up yet: fill in the fields below."}
+      fields={plugin.fields}
+      onSave={async (values) => {
+        await desktop.savePluginLocalSettings(plugin.plugin, values);
+        await reload();
+      }}
+      onClear={async () => {
+        await desktop.clearPluginLocalSettings(plugin.plugin);
+        await reload();
+      }}
+      savedText={`${plugin.plugin} saved on this computer and restarted`}
+      clearedText={`${plugin.plugin} settings removed from this computer`}
+    />
   );
 }

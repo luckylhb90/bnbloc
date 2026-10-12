@@ -24,10 +24,11 @@ import { PlatformAgentsCard } from "@/views/org/PlatformAgentsCard";
 import { PlatformRetentionCard, TenantRetentionSection } from "@/views/org/RetentionCard";
 import { AuditLogTab } from "@/views/org/AuditLogTab";
 import { PublicLinksTab } from "@/views/org/PublicLinksTab";
+import { ToolConnectorsTab } from "@/views/org/ToolConnectorsTab";
 import { invalidateTenantPolicy } from "@/lib/tenantPolicy";
 import { UserWithEmail } from "@/views/UserName";
 
-type Tab = "overview" | "members" | "requests" | "quota" | "settings" | "links" | "audit" | "tenants" | "orgsync" | "components" | "updates" | "releases";
+type Tab = "overview" | "members" | "requests" | "quota" | "settings" | "links" | "tools" | "audit" | "tenants" | "orgsync" | "components" | "updates" | "releases";
 
 const TABS: { id: Tab; label: string; superOnly?: boolean }[] = [
   { id: "overview", label: "Overview" },
@@ -36,6 +37,7 @@ const TABS: { id: Tab; label: string; superOnly?: boolean }[] = [
   { id: "quota", label: "Quota" },
   { id: "settings", label: "Settings" },
   { id: "links", label: "Public links" },
+  { id: "tools", label: "Tool connectors" },
   { id: "audit", label: "Audit log" },
   { id: "tenants", label: "Tenants", superOnly: true },
   { id: "orgsync", label: "Org sync", superOnly: true },
@@ -142,6 +144,7 @@ export function Organization() {
       {tab === "quota" && <QuotaTab key={activeTenant} scope={activeTenant} />}
       {tab === "settings" && <SettingsTab key={activeTenant} scope={activeTenant} />}
       {tab === "links" && <PublicLinksTab key={activeTenant} scope={activeTenant} />}
+      {tab === "tools" && <ToolConnectorsTab key={activeTenant} scope={activeTenant} />}
       {tab === "audit" && (
         <AuditLogTab key={isSuper ? "platform" : activeTenant} platform={isSuper} scope={activeTenant} tenants={tenants} />
       )}

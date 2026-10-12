@@ -55,9 +55,9 @@ export function ComponentUploadReviewPanel(props: {
   );
 }
 
-function kindName(kind: ComponentPackageEnvelope["kind"]): string { return kind === "bnbloc.core.package/v1" ? "Core" : kind === "bnbloc.plugin.package/v1" ? "Plugin" : kind === "bnbloc.notifier.package/v1" ? "Notifier" : "Auth provider"; }
+function kindName(kind: ComponentPackageEnvelope["kind"]): string { return kind === "bnbloc.core.package/v1" ? "Core" : kind === "bnbloc.plugin.package/v1" ? "Plugin" : kind === "bnbloc.notifier.package/v1" ? "Notifier" : kind === "bnbloc.mcp.package/v1" ? "MCP tool" : "Auth provider"; }
 function contractFact(envelope: ComponentPackageEnvelope): string { return envelope.contract ?? (envelope.protocol ? `Core Protocol ${envelope.protocol.min}–${envelope.protocol.max}` : "No contract declared"); }
-function artifactDetail(envelope: ComponentPackageEnvelope): string { const count = Object.keys(envelope.artifacts ?? {}).length; return envelope.runtime === "sidecar" ? `${count} platform binary${count === 1 ? "" : "ies"} required` : "No binary required"; }
+function artifactDetail(envelope: ComponentPackageEnvelope): string { const count = Object.keys(envelope.artifacts ?? {}).length; return envelope.runtime === "sidecar" || envelope.runtime === "stdio" ? `${count} platform binary${count === 1 ? "" : "ies"} required` : "No binary required"; }
 function Fact({ label, value }: { readonly label: string; readonly value: string }) { return <div className="rounded-[var(--radius)] border border-[var(--color-border)] bg-[var(--color-surface-2)] px-3 py-2"><div className="text-[0.65rem] font-medium uppercase tracking-wide text-[var(--color-fg-subtle)]">{label}</div><div className="mt-0.5 break-words text-[var(--color-fg)]">{value}</div></div>; }
 
 // packageFileName names the downloaded package after its identity so the

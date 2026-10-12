@@ -1,4 +1,4 @@
-import type { ComponentPackageEnvelope, ComponentPackageKind, ComponentRuntime, LocalSettingField } from "./apiTypes";
+import type { ComponentMCP, ComponentPackageEnvelope, ComponentPackageKind, ComponentRuntime, LocalSettingField } from "./apiTypes";
 
 export type PublishWizardStep = "source" | "configure" | "artifacts" | "publish";
 
@@ -24,6 +24,14 @@ export interface PackageDraftFields {
   readonly hooks?: readonly string[];
   readonly host?: readonly string[];
   readonly localSettings?: readonly LocalSettingField[];
+  // An MCP tool's block, carried unchanged from the imported package.
+  readonly mcp?: ComponentMCP;
+}
+
+// takesBinaries: the runtimes whose platform binaries the wizard uploads
+// (a sidecar's, a stdio MCP server's).
+export function takesBinaries(runtime: ComponentRuntime | undefined): boolean {
+  return runtime === "sidecar" || runtime === "stdio";
 }
 
 export interface WizardAdvanceState {
@@ -34,7 +42,7 @@ export interface WizardAdvanceState {
 
 export function nextPublishWizardStep(step: PublishWizardStep, state: WizardAdvanceState): PublishWizardStep | null {
   if (step === "source") return state.sourceReady ? "configure" : null;
-  if (step === "configure") return state.runtime === "sidecar" ? "artifacts" : state.runtime ? "publish" : null;
+  if (step === "configure") return takesBinaries(state.runtime) ? "artifacts" : state.runtime ? "publish" : null;
   if (step === "artifacts") return state.artifactsReady ? "publish" : null;
   return null;
 }
@@ -42,7 +50,7 @@ export function nextPublishWizardStep(step: PublishWizardStep, state: WizardAdva
 export function previousPublishWizardStep(step: PublishWizardStep, runtime: ComponentRuntime | undefined): PublishWizardStep | null {
   if (step === "configure") return "source";
   if (step === "artifacts") return "configure";
-  if (step === "publish") return runtime === "sidecar" ? "artifacts" : "configure";
+  if (step === "publish") return takesBinaries(runtime) ? "artifacts" : "configure";
   return null;
 }
 
@@ -51,10 +59,11 @@ export function createPackageDraft(kind: ComponentPackageKind, runtime: Componen
     kind === "bnbloc.plugin.package/v1" ? "bnbloc.plugin.contract/v1"
     : kind === "bnbloc.auth-provider.package/v1" ? "bnbloc.auth-provider.contract/v1"
     : kind === "bnbloc.notifier.package/v1" ? "bnbloc.notifier.contract/v1"
+    : kind === "bnbloc.mcp.package/v1" ? "bnbloc.mcp.contract/v1"
     : undefined;
   return {
     kind, runtime, name: "", version: "0.1.0", publisher: "", protocolMin: "1.0", protocolMax: "1.0",
-    platformArtifacts: runtime === "sidecar" ? [] : undefined, contract, hooks: kind === "bnbloc.plugin.package/v1" ? [] : undefined,
+    platformArtifacts: takesBinaries(runtime) ? [] : undefined, contract, hooks: kind === "bnbloc.plugin.package/v1" ? [] : undefined,
   };
 }
 
@@ -66,5 +75,6 @@ export function packageDraftFromEnvelope(envelope: ComponentPackageEnvelope): Pa
     localUrl: envelope.sidecar?.localUrl ?? "", listenEnv: envelope.sidecar?.listenEnv ?? "", supervisedEnv: envelope.sidecar?.supervisedEnv ?? "", args: envelope.sidecar?.args,
     platformArtifacts: Object.keys(envelope.artifacts ?? {}), network: envelope.permissions?.network, capabilities: envelope.capabilities,
     contract: envelope.contract, hooks: envelope.hooks, host: envelope.permissions?.host, localSettings: envelope.localSettings,
+    ...(envelope.mcp ? { mcp: envelope.mcp } : {}),
   };
 }
