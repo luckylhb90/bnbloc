@@ -19,7 +19,7 @@ var ErrNoTenants = errors.New("enabledTenants must name at least one tenant (use
 // Ids are trimmed, de-duplicated and sorted; a list that is empty after that
 // is rejected with ErrNoTenants (fail closed — it never means "all tenants").
 func (p *Pipeline) SetTenants(ctx context.Context, kind extreg.Kind, name string, tenants []string, actor string) error {
-	normalized := normalizeTenants(tenants)
+	normalized := NormalizeTenants(tenants)
 	if len(normalized) == 0 {
 		return ErrNoTenants
 	}
@@ -49,7 +49,10 @@ func (p *Pipeline) writeTenants(ctx context.Context, kind extreg.Kind, name stri
 	return nil
 }
 
-func normalizeTenants(tenants []string) []string {
+// NormalizeTenants trims, de-duplicates and sorts tenant ids (the shape a
+// tenant restriction is stored in, for executable records and platform
+// content alike).
+func NormalizeTenants(tenants []string) []string {
 	seen := map[string]bool{}
 	out := []string{}
 	for _, t := range tenants {

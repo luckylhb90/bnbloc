@@ -99,3 +99,33 @@ func TestSearchPrompts(t *testing.T) {
 		t.Fatalf("limit = %+v", hits)
 	}
 }
+
+// Platform content limited to some organizations reaches only them: the
+// Library, name@range resolution and the chat path all decide through the
+// tenant scope ("Gap closure" 3).
+func TestPlatformTenantScope(t *testing.T) {
+	f := fixture{t: t, st: store.NewMemoryContentComponents()}
+	f.scoped(store.ContentComponent{ID: "plat", Kind: contentpkg.KindSkill, Name: "kit", Scope: store.ContentScopePlatform, EnabledTenants: []string{"t2"}},
+		map[string]any{"version": "1.0.0"})
+	ctx := context.Background()
+	if got, err := Visible(ctx, f.st, viewer("maya"), contentpkg.KindSkill); err != nil || len(got) != 0 {
+		t.Fatalf("t1 sees %+v, %v", got, err)
+	}
+	if _, _, ok, _ := resolveReference(ctx, f.st, viewer("maya"), "t1", nil, "kit@^1", contentpkg.KindSkill); ok {
+		t.Fatal("t1 resolved platform content scoped to t2")
+	}
+	if _, _, err := Usable(ctx, f.st, viewer("maya"), "", "plat", ""); err != ErrNotUsable {
+		t.Fatalf("t1 usable = %v", err)
+	}
+	other := viewer("olga")
+	other.Tenant = "t2"
+	if got, err := Visible(ctx, f.st, other, contentpkg.KindSkill); err != nil || len(got) != 1 {
+		t.Fatalf("t2 sees %+v, %v", got, err)
+	}
+	if err := f.st.SetContentComponentTenants(ctx, "plat", nil, 2); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := Visible(ctx, f.st, viewer("maya"), contentpkg.KindSkill); len(got) != 1 {
+		t.Fatalf("cleared scope: t1 sees %+v", got)
+	}
+}

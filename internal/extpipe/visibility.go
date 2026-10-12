@@ -56,8 +56,10 @@ func GateForRecord(rec Record) Gate {
 // install is the publication, unpublishing retires it, and members opt in
 // per use (an expert per message, a pack turned on), so content has no
 // second opt-in switch (docs/prd/2026-10-12-experts-and-teams.md, step 4).
+// Platform content takes the component tenant scope of executable records
+// (EnabledTenants; "Gap closure" 3).
 func GateForContent(c store.ContentComponent) Gate {
-	return Gate{Scope: c.Scope, Owner: c.Owner, TenantID: c.TenantID, Status: c.Status}
+	return Gate{Scope: c.Scope, Owner: c.Owner, TenantID: c.TenantID, Tenants: c.EnabledTenants, Status: c.Status}
 }
 
 // MemberVisibility is the one gate: built-in content (shipped with the
