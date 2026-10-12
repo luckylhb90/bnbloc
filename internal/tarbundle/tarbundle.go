@@ -14,8 +14,6 @@ package tarbundle
 import (
 	"archive/tar"
 	"bytes"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -27,6 +25,7 @@ import (
 	"strings"
 
 	"github.com/luckylhb90/bnbloc/core"
+	"github.com/luckylhb90/bnbloc/internal/digest"
 )
 
 // Limits caps one bundle's files.
@@ -91,20 +90,21 @@ func (b *Bundle) Size() int {
 // ErrDigest reports archive bytes that do not match the pinned sha256.
 var ErrDigest = errors.New("bundle does not match its sha256")
 
-// Parse verifies raw against wantSHA256 (when non-empty) and decodes it.
+// Parse verifies raw against wantSHA256 (when non-empty: a bundle this
+// process just packed or received for validation has no pin yet; a stored
+// bundle is read only through Cache.LoadPinned) and decodes it.
 // Only regular files and directories are accepted; every file path must be a
 // valid bundle path, unique, and the caps hold.
 func Parse(raw []byte, wantSHA256 string, l Limits) (*Bundle, error) {
 	if int64(len(raw)) > l.MaxArchiveBytes() {
 		return nil, fmt.Errorf("bundle exceeds %d bytes", l.MaxBytes)
 	}
-	sum := sha256.Sum256(raw)
-	digest := hex.EncodeToString(sum[:])
-	if wantSHA256 != "" && digest != wantSHA256 {
+	sum := digest.Of(raw)
+	if wantSHA256 != "" && sum != wantSHA256 {
 		return nil, ErrDigest
 	}
 	tr := tar.NewReader(bytes.NewReader(raw))
-	b := &Bundle{SHA256: digest, files: map[string][]byte{}}
+	b := &Bundle{SHA256: sum, files: map[string][]byte{}}
 	total := 0
 	for {
 		hdr, err := tr.Next()

@@ -3,14 +3,14 @@ package tarbundle
 import (
 	"archive/tar"
 	"bytes"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/luckylhb90/bnbloc/internal/digest"
 )
 
 type entry struct {
@@ -44,11 +44,6 @@ func archive(t *testing.T, entries ...entry) []byte {
 	return buf.Bytes()
 }
 
-func digest(raw []byte) string {
-	sum := sha256.Sum256(raw)
-	return hex.EncodeToString(sum[:])
-}
-
 func TestPackParseRoundTrip(t *testing.T) {
 	dir := t.TempDir()
 	for name, body := range map[string]string{"index.html": "<html>", "assets/main.js": "js", ".DS_Store": "junk", ".git/config": "x"} {
@@ -68,7 +63,7 @@ func TestPackParseRoundTrip(t *testing.T) {
 	if !bytes.Equal(raw, again) {
 		t.Fatal("Pack is not deterministic")
 	}
-	b, err := Parse(raw, digest(raw), PreviewerLimits)
+	b, err := Parse(raw, digest.Of(raw), PreviewerLimits)
 	if err != nil {
 		t.Fatal(err)
 	}

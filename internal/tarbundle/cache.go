@@ -2,13 +2,19 @@ package tarbundle
 
 import (
 	"container/list"
+	"errors"
 	"sync"
+
+	"github.com/luckylhb90/bnbloc/internal/digest"
 )
 
 // Cache keeps parsed bundles by archive sha256, least recently used first
 // out once their file bytes exceed the cap. Bundles are content-addressed,
 // so an entry is never stale. Concurrent loads of one digest share a single
 // load. The zero value is not usable; use NewCache.
+//
+// LoadPinned is the only way in or out: every cached bundle was verified
+// against the pin it is looked up by (TestBundleLoadsArePinned).
 type Cache struct {
 	maxBytes int
 
@@ -31,53 +37,46 @@ func NewCache(maxBytes int) *Cache {
 	return &Cache{maxBytes: maxBytes, order: list.New(), byKey: map[string]*list.Element{}, loading: map[string]*cacheLoad{}}
 }
 
-// Get returns the cached bundle with this archive sha256.
-func (c *Cache) Get(sha string) (*Bundle, bool) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	el, ok := c.byKey[sha]
-	if !ok {
-		return nil, false
-	}
-	c.order.MoveToFront(el)
-	return el.Value.(*Bundle), true
-}
+// ErrUnpinned refuses a bundle load without a canonical sha256 pin.
+var ErrUnpinned = errors.New("bundle load needs its sha256 pin")
 
-// GetOrLoad returns the bundle with archive sha256 sha, calling load once
-// (across concurrent callers) on a miss and caching its result. load must
-// return a bundle whose SHA256 is sha (Parse with the pinned digest).
-func (c *Cache) GetOrLoad(sha string, load func() (*Bundle, error)) (*Bundle, error) {
+// LoadPinned returns the bundle whose archive sha256 is sha: from the cache,
+// or fetched once (across concurrent callers), parsed within l and verified
+// against sha. An empty or non-canonical pin is refused before anything is
+// fetched; bytes that do not match the pin fail with ErrDigest and are never
+// cached. A failed load is not cached either.
+func (c *Cache) LoadPinned(sha string, l Limits, fetch func() ([]byte, error)) (*Bundle, error) {
+	if !digest.Valid(sha) {
+		return nil, ErrUnpinned
+	}
 	c.mu.Lock()
 	if el, ok := c.byKey[sha]; ok {
 		c.order.MoveToFront(el)
 		c.mu.Unlock()
 		return el.Value.(*Bundle), nil
 	}
-	if l, ok := c.loading[sha]; ok {
+	if ld, ok := c.loading[sha]; ok {
 		c.mu.Unlock()
-		<-l.done
-		return l.b, l.err
+		<-ld.done
+		return ld.b, ld.err
 	}
-	l := &cacheLoad{done: make(chan struct{})}
-	c.loading[sha] = l
+	ld := &cacheLoad{done: make(chan struct{})}
+	c.loading[sha] = ld
 	c.mu.Unlock()
 
-	l.b, l.err = load()
+	if raw, err := fetch(); err != nil {
+		ld.err = err
+	} else {
+		ld.b, ld.err = Parse(raw, sha, l)
+	}
 	c.mu.Lock()
 	delete(c.loading, sha)
-	if l.err == nil {
-		c.putLocked(l.b)
+	if ld.err == nil {
+		c.putLocked(ld.b)
 	}
 	c.mu.Unlock()
-	close(l.done)
-	return l.b, l.err
-}
-
-// Put caches b under its SHA256.
-func (c *Cache) Put(b *Bundle) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.putLocked(b)
+	close(ld.done)
+	return ld.b, ld.err
 }
 
 func (c *Cache) putLocked(b *Bundle) {

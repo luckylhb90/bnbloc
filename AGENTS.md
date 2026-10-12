@@ -587,7 +587,10 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   hex characters, a content-addressed key is `sha256/<hex>`
   (`digest.Of`/`Valid`/`Key`/`ParseKey`), compared exactly: an upper-case
   digest is not a digest. `TestDigestRuleSingleOwner` forbids the prefix,
-  a 64-hex pattern or a case-blind compare anywhere else.
+  a 64-hex pattern or a case-blind compare anywhere else. A stored bundle
+  (content, previewer, site) is read only through
+  `tarbundle.Cache.LoadPinned`, which refuses an empty or mismatching pin
+  and caches nothing unverified (`TestBundleLoadsArePinned`).
 
 ### Verification traps
 

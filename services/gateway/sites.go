@@ -253,12 +253,8 @@ var backendClient = &http.Client{Timeout: 15 * time.Second}
 // the blob store (read on the gateway's own behalf: the caller authorized).
 func (s *Service) siteBundle(ctx context.Context, sv siteVersion) (*tarbundle.Bundle, error) {
 	_, sites := s.bundleCaches()
-	return sites.GetOrLoad(sv.ContentHash, func() (*tarbundle.Bundle, error) {
-		raw, err := s.readArtifactBlob(ctx, sv.BlobKey, tarbundle.SiteLimits.MaxArchiveBytes())
-		if err != nil {
-			return nil, err
-		}
-		return tarbundle.Parse(raw, sv.ContentHash, tarbundle.SiteLimits)
+	return sites.LoadPinned(sv.ContentHash, tarbundle.SiteLimits, func() ([]byte, error) {
+		return s.readArtifactBlob(ctx, sv.BlobKey, tarbundle.SiteLimits.MaxArchiveBytes())
 	})
 }
 

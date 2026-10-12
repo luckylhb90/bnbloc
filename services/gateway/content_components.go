@@ -737,15 +737,11 @@ var contentBundles = struct {
 // contentPackage loads and validates a version's bundle (cached by digest).
 func (s *Service) contentPackage(ctx context.Context, v store.ContentComponentVersion) (*contentpkg.Package, error) {
 	contentBundles.once.Do(func() { contentBundles.cache = tarbundle.NewCache(64 << 20) })
-	b, err := contentBundles.cache.GetOrLoad(v.SHA256, func() (*tarbundle.Bundle, error) {
-		raw, ok := contentbuiltin.Bundle(v.BundleBlobKey)
-		if !ok {
-			var err error
-			if raw, err = s.readArtifactBlob(ctx, v.BundleBlobKey, tarbundle.ContentLimits.MaxArchiveBytes()); err != nil {
-				return nil, err
-			}
+	b, err := contentBundles.cache.LoadPinned(v.SHA256, tarbundle.ContentLimits, func() ([]byte, error) {
+		if raw, ok := contentbuiltin.Bundle(v.BundleBlobKey); ok {
+			return raw, nil
 		}
-		return tarbundle.Parse(raw, v.SHA256, tarbundle.ContentLimits)
+		return s.readArtifactBlob(ctx, v.BundleBlobKey, tarbundle.ContentLimits.MaxArchiveBytes())
 	})
 	if err != nil {
 		return nil, err

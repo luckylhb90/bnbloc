@@ -184,16 +184,12 @@ func (s *Service) visiblePreviewer(ctx context.Context, claims auth.Claims, name
 // from the cache or the artifact store (via realtime).
 func (s *Service) fetchPreviewerBundle(ctx context.Context, art pkgmeta.Artifact) (*tarbundle.Bundle, error) {
 	previewers, _ := s.bundleCaches()
-	return previewers.GetOrLoad(art.SHA256, func() (*tarbundle.Bundle, error) {
+	return previewers.LoadPinned(art.SHA256, tarbundle.PreviewerLimits, func() ([]byte, error) {
 		key := artifactURLKey(art.URL)
 		if key == "" {
 			return nil, fmt.Errorf("bundle URL is not a gateway artifact")
 		}
-		raw, err := s.readArtifactBlob(ctx, key, tarbundle.PreviewerLimits.MaxArchiveBytes())
-		if err != nil {
-			return nil, err
-		}
-		return tarbundle.Parse(raw, art.SHA256, tarbundle.PreviewerLimits)
+		return s.readArtifactBlob(ctx, key, tarbundle.PreviewerLimits.MaxArchiveBytes())
 	})
 }
 
