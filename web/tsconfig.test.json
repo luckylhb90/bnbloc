@@ -1,0 +1,9 @@
+{
+  // Type-checks the tests too. The production build (tsconfig.json, run by
+  // the image's web stage with only web/ present) excludes them, because tests
+  // may read fixtures shared with Go from outside web/. scripts/ci.sh web runs
+  // this from the full checkout.
+  "extends": "./tsconfig.json",
+  "include": ["src"],
+  "exclude": []
+}

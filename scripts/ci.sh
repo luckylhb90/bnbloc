@@ -56,8 +56,26 @@ web_install_build() {
   pnpm --dir web build
 }
 
+# The gateway image builds the SPA from web/ alone (plus the desktop
+# package.json for the version stamp), so a production import of any other
+# repo file breaks the deploy while in-repo builds pass. Rebuild the same
+# layout in a temp dir.
+web_isolated_build() {
+  local tmp
+  tmp="$(mktemp -d)"
+  trap 'rm -rf "$tmp"' RETURN
+  mkdir -p "$tmp/apps/desktop"
+  cp apps/desktop/package.json "$tmp/apps/desktop/package.json"
+  (cd web && tar --exclude=node_modules --exclude='*.tsbuildinfo' -cf - .) | (mkdir -p "$tmp/web" && cd "$tmp/web" && tar -xf -)
+  (cd "$tmp/web" && pnpm install --frozen-lockfile --silent && pnpm build >/dev/null)
+}
+
 stage_web() {
   web_install_build
+  log "web: type-check tests (tsconfig.test.json; the build excludes them)"
+  pnpm --dir web run typecheck:tests
+  log "web: production build from web/ alone (what the image's web stage sees)"
+  web_isolated_build
   log "web: node --test"
   (cd web && node --test 'src/**/*.test.ts' 'scripts/*.test.mjs' 'previewer-sdk/src/*.test.ts')
   log "web: knip (no unused files, exports or dependencies)"

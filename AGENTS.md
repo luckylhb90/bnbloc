@@ -248,6 +248,13 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   `outDir`). Building web repopulates both the gateway's static assets and the
   desktop `frontendDist`. Swapping the gateway binary updates the browser path;
   the desktop app needs its own rebuild to embed the new bundle.
+- **The gateway image builds the SPA from `web/` alone** (plus
+  `apps/desktop/package.json` for the version stamp). Production sources never
+  import a repo file outside `web/` (boundary rule B1). Tests may read fixtures
+  shared with Go (`internal/*/testdata`): the production `tsc -b` excludes
+  `*.test.ts`, and `tsconfig.test.json` type-checks them in `scripts/ci.sh web`.
+  That stage also rebuilds `web/` in an isolated temp dir, the same layout the
+  image sees (`docs/bugs/2026-10-12-gateway-image-web-build-reads-go-fixtures.md`).
 - After a service code change, rebuild that service's container/binary and
   restart it; verify the running artifact hash matches your build before
   concluding a fix failed.

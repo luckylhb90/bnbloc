@@ -169,6 +169,17 @@ export const RULES = [
     allowed: ["ui/useDismissOnOutside.ts"],
     sample: { file: "views/X.tsx", text: 'document.addEventListener("mousedown", onDoc);' },
   },
+  {
+    id: "B1",
+    name: "production sources import only from web/ (the image's web stage builds web/ alone)",
+    // The gateway image copies only web/ into its web build stage, so a
+    // production import of a repo file outside web/ (a Go fixture, a doc)
+    // breaks the deploy while every in-repo check stays green. Tests may read
+    // shared fixtures: they are type-checked by tsconfig.test.json in CI.
+    pattern: /\bfrom\s+["'](?:\.\.\/)+(?:internal|core|services|apps|cmd|deploy|docs|packages|sandbox)\//,
+    allowed: [],
+    sample: { file: "lib/x.ts", text: 'import rows from "../../../internal/membership/testdata/abilities.json" with { type: "json" };' },
+  },
 ];
 
 // violations returns "<file>: rule <id> (<name>)" for every source file (a

@@ -7,6 +7,7 @@
     "dev": "vite",
     "check:file-length": "node scripts/check-file-length.mjs",
     "build": "npm run check:file-length && tsc -b && vite build",
+    "typecheck:tests": "tsc -p tsconfig.test.json",
     "preview": "vite preview"
   },
   "dependencies": {
