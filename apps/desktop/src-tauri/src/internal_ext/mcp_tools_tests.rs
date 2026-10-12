@@ -203,3 +203,31 @@ async fn binaries_are_downloaded_verified_and_cached() {
     assert!(!wrong.exists(), "mismatched bytes never land");
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn an_oauth_tool_carries_its_sign_in_spec() {
+    let c = catalog(serde_json::json!({"components": [
+        {"kind": "mcp", "name": "drive", "version": "1.0.0", "runtime": "endpoint", "rollout": "auto", "installed": true,
+         "endpoint": {"baseUrl": "https://tools.example.com/mcp"},
+         "mcp": {"transport": "http", "tools": [{"name": "list_files"}],
+                 "http": {"auth": {"scheme": "oauth", "clientId": "bnbloc", "scopes": ["files:read"]}}}},
+        {"kind": "mcp", "name": "search", "version": "2.0.0", "runtime": "endpoint", "rollout": "auto", "installed": true,
+         "endpoint": {"baseUrl": "https://tools.example.com/search"},
+         "mcp": {"transport": "http", "credentials": "member", "tools": [{"name": "search"}],
+                 "env": [{"name": "TOOLS_TOKEN", "secret": true, "required": true}],
+                 "http": {"auth": {"scheme": "bearer", "env": "TOOLS_TOKEN"}}}}
+    ]}));
+    let tools = installed_mcp_tools(&c, "darwin-arm64");
+    let drive = &tools[0];
+    assert_eq!(
+        drive.oauth,
+        Some(OAuthSpec {
+            url: "https://tools.example.com/mcp".into(),
+            client_id: Some("bnbloc".into()),
+            scopes: vec!["files:read".into()],
+        })
+    );
+    assert!(drive.fields.is_empty() && drive.holds_member_credentials());
+    // A bearer tool keeps member settings, not a sign-in.
+    assert!(tools[1].oauth.is_none() && tools[1].holds_member_credentials());
+}

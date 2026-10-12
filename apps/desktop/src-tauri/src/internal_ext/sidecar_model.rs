@@ -249,6 +249,17 @@ pub(super) struct ComponentEntry {
     /// Present for an installed MCP tool: its tools, env and credentials.
     #[serde(default)]
     pub(super) mcp: Option<McpEntry>,
+    /// An endpoint component's address (an http MCP tool's server URL).
+    #[serde(default)]
+    pub(super) endpoint: Option<EndpointEntry>,
+}
+
+/// The part of a catalog endpoint block the desktop needs.
+#[derive(Clone, Default, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct EndpointEntry {
+    #[serde(default)]
+    pub(super) base_url: String,
 }
 
 /// The part of a catalog MCP block the desktop needs (pkgmeta.MCP plus the
@@ -265,6 +276,30 @@ pub(super) struct McpEntry {
     pub(super) env: Vec<McpEnvEntry>,
     #[serde(default)]
     pub(super) tools: Vec<McpToolEntry>,
+    /// An endpoint tool's auth (pkgmeta.MCPHTTP).
+    #[serde(default)]
+    pub(super) http: Option<McpHttpEntry>,
+}
+
+/// An endpoint MCP tool's auth (pkgmeta.MCPHTTP).
+#[derive(Clone, Default, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct McpHttpEntry {
+    #[serde(default)]
+    pub(super) auth: McpAuthEntry,
+}
+
+/// pkgmeta.MCPHTTPAuth: the parts a member's sign-in needs (scheme
+/// "oauth"); bearer and header values come from the member settings.
+#[derive(Clone, Default, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct McpAuthEntry {
+    #[serde(default)]
+    pub(super) scheme: String,
+    #[serde(default)]
+    pub(super) client_id: Option<String>,
+    #[serde(default)]
+    pub(super) scopes: Vec<String>,
 }
 
 /// One variable an MCP tool needs (pkgmeta.MCPEnv).

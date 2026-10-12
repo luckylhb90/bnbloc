@@ -210,6 +210,22 @@ fn mcp_tool_settings_clear(
     state.clear_mcp_tool_settings(&tool)
 }
 
+/// Sign the member in to an MCP tool that takes an OAuth sign-in: the tool's
+/// sign-in page opens in the browser; the tokens stay on this machine.
+#[tauri::command]
+async fn mcp_tool_sign_in(
+    state: State<'_, internal_ext::Adapter>,
+    tool: String,
+) -> Result<(), String> {
+    state.sign_in_mcp_tool(&tool).await
+}
+
+/// Forget the member's sign-in to an MCP tool on this machine.
+#[tauri::command]
+fn mcp_tool_sign_out(state: State<'_, internal_ext::Adapter>, tool: String) -> Result<(), String> {
+    state.sign_out_mcp_tool(&tool)
+}
+
 #[tauri::command]
 fn app_info(app: tauri::AppHandle) -> serde_json::Value {
     json!({
@@ -378,6 +394,8 @@ pub fn run() {
             mcp_tool_settings,
             mcp_tool_settings_save,
             mcp_tool_settings_clear,
+            mcp_tool_sign_in,
+            mcp_tool_sign_out,
             app_info,
             updater_client::check_update,
             updater_client::install_update,

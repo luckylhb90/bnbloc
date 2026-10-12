@@ -16,6 +16,13 @@
 //! Tools and stored like plugin `localSettings` (one 0600 JSON object per
 //! tool under the app config dir, `BNBLOC_MCP_SETTINGS_DIR` for the bridge);
 //! they never leave this machine. They are forgotten with the tool.
+//!
+//! An http tool declaring `auth.scheme = "oauth"` takes a sign-in instead:
+//! the member signs in from Settings → Tools (mcp_oauth.rs runs the MCP
+//! authorization flow in their browser), the tokens are stored 0600 under
+//! `<mcp-settings>/oauth/<tool>.json` for the bridge and refreshed here on
+//! every catalog refresh shortly before they expire. Removing the tool
+//! forgets the sign-in.
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -34,6 +41,10 @@ use crate::internal_ext::sidecar_model::{
 use crate::internal_ext::sidecar_status::component_id;
 use crate::internal_ext::sidecar_util::{cache_file_name, current_platform};
 use crate::internal_ext::Adapter;
+
+#[path = "mcp_oauth.rs"]
+mod mcp_oauth;
+use mcp_oauth::{OAuthSpec, TokenFailure};
 
 /// The env var naming the tools dir the bridge reads.
 pub(super) const TOOLS_DIR_ENV: &str = "BNBLOC_MCP_TOOLS_DIR";
@@ -54,6 +65,16 @@ pub(super) struct McpTool {
     pub(super) tools: Vec<McpToolEntry>,
     /// A stdio tool's binary for this platform: (url, sha256).
     pub(super) binary: Option<(String, String)>,
+    /// An http tool each member signs in to (auth scheme "oauth").
+    pub(super) oauth: Option<OAuthSpec>,
+}
+
+impl McpTool {
+    /// The tool keeps something of the member's on this machine (settings
+    /// or a sign-in), forgotten when it leaves the catalog.
+    fn holds_member_credentials(&self) -> bool {
+        !self.fields.is_empty() || self.oauth.is_some()
+    }
 }
 
 /// What the manager last learned of the MCP tools, and the materialization
@@ -64,6 +85,10 @@ pub(super) struct McpState {
     local: Mutex<HashMap<String, (String, String)>>,
     /// Serializes materializations: each pass owns the tools dir.
     pass: tokio::sync::Mutex<()>,
+    /// Tools with a sign-in open in the browser.
+    signing_in: Mutex<HashSet<String>>,
+    /// Serializes sign-in refreshes (a rotated refresh token is used once).
+    refresh: tokio::sync::Mutex<()>,
 }
 
 /// One installed MCP tool as Settings → Tools renders it. Secret values are
@@ -76,14 +101,32 @@ pub struct McpToolSettings {
     pub transport: String,
     pub credentials: String,
     pub tools: Vec<McpToolEntry>,
-    /// Every required member setting is set (always true for org or no
-    /// credentials).
+    /// Every required member setting is set, or the member is signed in
+    /// (always true for org or no credentials).
     pub configured: bool,
+    /// "oauth" when the member signs in to the tool ("" otherwise).
+    pub auth: String,
+    /// The member's sign-in on this computer (oauth tools; never a token).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sign_in: Option<McpSignInView>,
     /// The stdio binary's state on this machine ("ready", "downloading",
     /// "failed", "unavailable"; "" for http tools) and its message.
     pub state: String,
     pub message: String,
     pub fields: Vec<LocalSettingView>,
+}
+
+/// An oauth tool's sign-in as Settings → Tools shows it.
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct McpSignInView {
+    /// The authorization server's host ("Signed in with …").
+    pub server: String,
+    pub signed_in_at_ms: i64,
+    /// 0 when the server stated no expiry.
+    pub expires_at_ms: i64,
+    /// The access token is usable now, or can be refreshed.
+    pub valid: bool,
 }
 
 /// The installed MCP tools of a catalog for `platform`.
@@ -112,6 +155,19 @@ pub(super) fn installed_mcp_tools(catalog: &ComponentsResponse, platform: &str) 
             } else {
                 Vec::new()
             };
+            let oauth = mcp
+                .http
+                .as_ref()
+                .filter(|h| h.auth.scheme == "oauth")
+                .map(|h| OAuthSpec {
+                    url: c
+                        .endpoint
+                        .as_ref()
+                        .map(|e| e.base_url.clone())
+                        .unwrap_or_default(),
+                    client_id: h.auth.client_id.clone().filter(|id| !id.is_empty()),
+                    scopes: h.auth.scopes.clone(),
+                });
             Some(McpTool {
                 name: c.name.clone(),
                 version: c.version.clone(),
@@ -120,6 +176,7 @@ pub(super) fn installed_mcp_tools(catalog: &ComponentsResponse, platform: &str) 
                 fields,
                 tools: mcp.tools.clone(),
                 binary,
+                oauth,
             })
         })
         .collect();
@@ -205,17 +262,21 @@ impl Adapter {
     /// reconcile).
     pub(super) fn sync_mcp_tools(&self, catalog: &ComponentsResponse) {
         let tools = installed_mcp_tools(catalog, &current_platform());
-        let member: HashSet<String> = tools
-            .iter()
-            .filter(|t| !t.fields.is_empty())
-            .map(|t| t.name.clone())
-            .collect();
         let previous = std::mem::replace(&mut *self.mcp.tools.lock(), tools.clone());
-        for gone in previous.iter().filter(|t| !member.contains(&t.name)) {
-            if !gone.fields.is_empty() {
+        for gone in previous.iter().filter(|t| t.holds_member_credentials()) {
+            let now = tools.iter().find(|t| t.name == gone.name);
+            if !gone.fields.is_empty() && now.is_none_or(|t| t.fields.is_empty()) {
                 self.forget_mcp_settings(&gone.name);
             }
+            if gone.oauth.is_some() && now.is_none_or(|t| t.oauth.is_none()) {
+                self.forget_mcp_sign_in(&gone.name);
+            }
         }
+        let sup = self.clone();
+        let signed = tools.clone();
+        tauri::async_runtime::spawn(async move {
+            sup.refresh_mcp_sign_ins(&signed).await;
+        });
         let sup = self.clone();
         tauri::async_runtime::spawn(async move {
             if let Err(e) = sup.materialize_mcp_tools(tools).await {
@@ -313,8 +374,31 @@ impl Adapter {
             } else {
                 (String::new(), String::new())
             };
+            let sign_in = tool.oauth.as_ref().map(|_| {
+                mcp_oauth::sign_in_path(&dir, &tool.name)
+                    .ok()
+                    .and_then(|p| mcp_oauth::load_sign_in(&p))
+            });
+            let now = mcp_oauth::now_ms();
+            let sign_in_view = sign_in.flatten().map(|s| McpSignInView {
+                server: s.issuer_host(),
+                signed_in_at_ms: s.signed_in_at_ms,
+                expires_at_ms: s.expires_at_ms,
+                valid: s.valid_at(now) || !s.refresh_token.is_empty(),
+            });
+            let configured = if tool.oauth.is_some() {
+                sign_in_view.as_ref().is_some_and(|v| v.valid)
+            } else {
+                missing_required(&tool.fields, &values).is_empty()
+            };
             out.push(McpToolSettings {
-                configured: missing_required(&tool.fields, &values).is_empty(),
+                configured,
+                auth: if tool.oauth.is_some() {
+                    "oauth".into()
+                } else {
+                    String::new()
+                },
+                sign_in: sign_in_view,
                 fields: views(&tool.fields, &values),
                 tools: tool.tools,
                 tool: tool.name,
@@ -350,6 +434,100 @@ impl Adapter {
             Ok(()) => Ok(()),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
             Err(e) => Err(format!("delete settings: {e}")),
+        }
+    }
+
+    /// Sign the member in to an oauth tool in their browser and store the
+    /// tokens for the bridge. One sign-in per tool at a time.
+    pub async fn sign_in_mcp_tool(&self, tool: &str) -> Result<(), String> {
+        let spec = self
+            .mcp
+            .tools
+            .lock()
+            .iter()
+            .find(|t| t.name == tool)
+            .and_then(|t| t.oauth.clone())
+            .ok_or_else(|| format!("MCP tool {tool} is not installed or takes no sign-in"))?;
+        let path = mcp_oauth::sign_in_path(&self.mcp_settings_dir()?, tool)?;
+        if !self.mcp.signing_in.lock().insert(tool.to_string()) {
+            return Err(format!(
+                "A sign-in to {tool} is already open in your browser"
+            ));
+        }
+        let result = async {
+            let http = mcp_oauth::oauth_client()?;
+            let open = |url: String| {
+                open::that_detached(&url).map_err(|e| format!("could not open the browser: {e}"))
+            };
+            let signed =
+                mcp_oauth::sign_in(&http, tool, &spec, open, mcp_oauth::SIGN_IN_TIMEOUT).await?;
+            mcp_oauth::save_sign_in(&path, &signed)
+        }
+        .await;
+        self.mcp.signing_in.lock().remove(tool);
+        result
+    }
+
+    /// Forget the member's sign-in to an oauth tool on this computer.
+    pub fn sign_out_mcp_tool(&self, tool: &str) -> Result<(), String> {
+        let known = self
+            .mcp
+            .tools
+            .lock()
+            .iter()
+            .any(|t| t.name == tool && t.oauth.is_some());
+        if !known {
+            return Err(format!(
+                "MCP tool {tool} is not installed or takes no sign-in"
+            ));
+        }
+        mcp_oauth::forget_sign_in(&mcp_oauth::sign_in_path(&self.mcp_settings_dir()?, tool)?)
+    }
+
+    /// Refresh the sign-ins about to expire. A refresh the server refuses
+    /// forgets the sign-in (the member signs in again); a failed request is
+    /// retried on the next catalog refresh.
+    async fn refresh_mcp_sign_ins(&self, tools: &[McpTool]) {
+        let Ok(dir) = self.mcp_settings_dir() else {
+            return;
+        };
+        let Ok(http) = mcp_oauth::oauth_client() else {
+            return;
+        };
+        let _pass = self.mcp.refresh.lock().await;
+        for tool in tools.iter().filter(|t| t.oauth.is_some()) {
+            let Ok(path) = mcp_oauth::sign_in_path(&dir, &tool.name) else {
+                continue;
+            };
+            let Some(current) = mcp_oauth::load_sign_in(&path) else {
+                continue;
+            };
+            if !current.needs_refresh(mcp_oauth::now_ms()) {
+                continue;
+            }
+            match mcp_oauth::refresh(&http, &current).await {
+                Ok(next) => {
+                    if let Err(e) = mcp_oauth::save_sign_in(&path, &next) {
+                        eprintln!("[mcp-tools:{}] store refreshed sign-in: {e}", tool.name);
+                    }
+                }
+                Err(TokenFailure::Refused(m)) => {
+                    eprintln!("[mcp-tools:{}] sign-in no longer valid: {m}", tool.name);
+                    let _ = mcp_oauth::forget_sign_in(&path);
+                }
+                Err(TokenFailure::Failed(m)) => {
+                    eprintln!("[mcp-tools:{}] refresh failed: {m}", tool.name);
+                }
+            }
+        }
+    }
+
+    fn forget_mcp_sign_in(&self, tool: &str) {
+        if let Ok(path) = self
+            .mcp_settings_dir()
+            .and_then(|dir| mcp_oauth::sign_in_path(&dir, tool))
+        {
+            let _ = mcp_oauth::forget_sign_in(&path);
         }
     }
 
