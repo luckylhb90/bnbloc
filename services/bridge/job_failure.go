@@ -81,7 +81,7 @@ func (b *Bridge) refuse(ctx context.Context, d *drive, r *refusal) {
 func (b *Bridge) fail(ctx context.Context, d *drive, err error, diagnostics map[string]any) {
 	reason := driveFailureReason(err)
 	b.postNotice(ctx, d.ref(), wire.JobNotice{
-		Kind: driveFailureNotice(err), Text: driveFailureText(d.job.Provider, err),
+		Kind: driveFailureNotice(err), Text: driveErrorText(d.job.Provider, err),
 		OwnerUserID: d.owner, Provider: d.job.Provider, FailReason: string(reason),
 	})
 	b.failJob(ctx, d.job.JobID, reason, diagnostics)
@@ -183,8 +183,12 @@ func driveFailureNotice(err error) string {
 	return "drive-failed"
 }
 
-// driveFailureText is the member-readable notice of a failed drive.
-func driveFailureText(provider string, err error) string {
+// driveErrorText is the member-readable notice of a failed drive, rendered
+// from the drive ERROR: the stage it reached and the core's own detail (a
+// missing API key, a disconnected runtime). It is not a failure-reason
+// sentence: the reason's member-facing sentence (notifications, activity's
+// notices) is store.AgentJobFailureReason.Text, which knows no error detail.
+func driveErrorText(provider string, err error) string {
 	var failed turnFailedError
 	switch {
 	case errors.Is(err, errNoReply):
