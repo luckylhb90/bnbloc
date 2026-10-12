@@ -127,7 +127,7 @@ func TestPluginPackageInstall_rejectsUnknownHookAndBadArtifactMetadata(t *testin
 			respBody, status := postComponent(t, srv.URL, token, body, signPackage(key.private, body))
 
 			// Then
-			if status != http.StatusBadRequest || !strings.Contains(string(respBody), tc.want) {
+			if status != http.StatusBadRequest || !strings.Contains(errorMessage(respBody), tc.want) {
 				t.Fatalf("status=%d body=%s, want 400 containing %q", status, respBody, tc.want)
 			}
 		})
@@ -159,7 +159,7 @@ func TestPluginPackageInstall_rejectsSignatureFailures(t *testing.T) {
 			respBody, status := postComponent(t, srv.URL, token, sentBody, tc.signature(key, body))
 
 			// Then
-			if status != http.StatusBadRequest || !strings.Contains(string(respBody), tc.want) {
+			if status != http.StatusBadRequest || !strings.Contains(errorMessage(respBody), tc.want) {
 				t.Fatalf("status=%d body=%s, want 400 containing %q", status, respBody, tc.want)
 			}
 		})

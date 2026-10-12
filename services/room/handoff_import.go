@@ -20,6 +20,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/luckylhb90/bnbloc/core"
+	"github.com/luckylhb90/bnbloc/internal/httpx"
 	"github.com/luckylhb90/bnbloc/internal/ids"
 	"github.com/luckylhb90/bnbloc/internal/obs"
 	"github.com/luckylhb90/bnbloc/internal/realtime"
@@ -51,12 +52,11 @@ func badPackage(format string, args ...any) error {
 func (s *Service) handleImportRoom(w http.ResponseWriter, r *http.Request) {
 	user := caller(r)
 	if user == "" {
-		writeErr(w, http.StatusUnauthorized, "missing authenticated subject")
+		httpx.Error(w, "missing authenticated subject", http.StatusUnauthorized)
 		return
 	}
 	if s.Handoff == nil || s.RoomImports == nil || s.Artifacts == nil || s.Channels == nil {
-		obs.ServerError(w, "handoff packages are not configured", nil)
-		writeErr(w, http.StatusServiceUnavailable, "handoff packages are not configured")
+		httpx.Unavailable(w, "handoff packages are")
 		return
 	}
 	// The package plus multipart framing; the archive itself is re-checked
@@ -65,41 +65,41 @@ func (s *Service) handleImportRoom(w http.ResponseWriter, r *http.Request) {
 	if err := r.ParseMultipartForm(32 << 20); err != nil {
 		var tooLarge *http.MaxBytesError
 		if errors.As(err, &tooLarge) {
-			writeErr(w, http.StatusRequestEntityTooLarge, fmt.Sprintf("handoff package exceeds %d MiB", maxHandoffPackageBytes>>20))
+			httpx.Error(w, fmt.Sprintf("handoff package exceeds %d MiB", maxHandoffPackageBytes>>20), http.StatusRequestEntityTooLarge)
 			return
 		}
-		writeErr(w, http.StatusBadRequest, "expected a multipart 'file' field with the handoff package")
+		httpx.Error(w, "expected a multipart 'file' field with the handoff package", http.StatusBadRequest)
 		return
 	}
 	defer func() { _ = r.MultipartForm.RemoveAll() }()
 	fhs := r.MultipartForm.File["file"]
 	if len(fhs) != 1 {
-		writeErr(w, http.StatusBadRequest, "expected a multipart 'file' field with the handoff package")
+		httpx.Error(w, "expected a multipart 'file' field with the handoff package", http.StatusBadRequest)
 		return
 	}
 	if fhs[0].Size > maxHandoffPackageBytes {
-		writeErr(w, http.StatusRequestEntityTooLarge, fmt.Sprintf("handoff package exceeds %d MiB", maxHandoffPackageBytes>>20))
+		httpx.Error(w, fmt.Sprintf("handoff package exceeds %d MiB", maxHandoffPackageBytes>>20), http.StatusRequestEntityTooLarge)
 		return
 	}
 	f, err := fhs[0].Open()
 	if err != nil {
-		writeErr(w, http.StatusBadRequest, "unreadable upload")
+		httpx.Error(w, "unreadable upload", http.StatusBadRequest)
 		return
 	}
 	defer f.Close()
 	zr, err := zip.NewReader(f, fhs[0].Size)
 	if err != nil {
-		writeErr(w, http.StatusBadRequest, "the handoff package is not a zip archive")
+		httpx.Error(w, "the handoff package is not a zip archive", http.StatusBadRequest)
 		return
 	}
 	pkg, err := readHandoffPackage(zr, s.artifactMaxBytes())
 	if err != nil {
 		var pe *errPackage
 		if errors.As(err, &pe) {
-			writeErr(w, http.StatusBadRequest, pe.msg)
+			httpx.Error(w, pe.msg, http.StatusBadRequest)
 			return
 		}
-		writeErr(w, http.StatusBadRequest, "unreadable handoff package: "+err.Error())
+		httpx.Error(w, "unreadable handoff package: "+err.Error(), http.StatusBadRequest)
 		return
 	}
 	res, err := s.importPackage(r.Context(), user, pkg)
@@ -108,13 +108,14 @@ func (s *Service) handleImportRoom(w http.ResponseWriter, r *http.Request) {
 		var se *realtime.StatusError
 		if errors.As(err, &se) || errors.Is(err, realtime.ErrHandoffUnconfigured) {
 			obs.ServerError(w, "room history service refused the import", err)
-			writeErr(w, http.StatusBadGateway, "room history service refused the import")
+			httpx.Error(w, "room history service refused the import", http.StatusBadGateway)
 			return
 		}
-		writeErr(w, http.StatusInternalServerError, "import failed")
+		obs.ServerError(w, "import failed", err)
+		httpx.Error(w, "import failed", http.StatusInternalServerError)
 		return
 	}
-	writeJSON(w, http.StatusOK, res)
+	httpx.WriteJSON(w, http.StatusOK, res)
 }
 
 // handoffPackage is a validated package: the manifest plus the archive entries

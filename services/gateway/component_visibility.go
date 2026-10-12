@@ -12,6 +12,7 @@ import (
 	"github.com/luckylhb90/bnbloc/internal/coreset"
 	"github.com/luckylhb90/bnbloc/internal/extpipe"
 	"github.com/luckylhb90/bnbloc/internal/extreg"
+	"github.com/luckylhb90/bnbloc/internal/httpx"
 	"github.com/luckylhb90/bnbloc/internal/obs"
 )
 
@@ -72,14 +73,14 @@ func (s *Service) requestComponentRecord(w http.ResponseWriter, r *http.Request,
 	rec, ok, err := s.findComponentRecord(r.Context(), kind, name)
 	switch {
 	case errors.Is(err, errAmbiguousComponent):
-		http.Error(w, err.Error(), http.StatusConflict)
+		httpx.Error(w, err.Error(), http.StatusConflict)
 		return extpipe.Record{}, false
 	case err != nil:
 		obs.ServerError(w, "load components failed", err)
-		http.Error(w, "load components failed", http.StatusInternalServerError)
+		httpx.Error(w, "load components failed", http.StatusInternalServerError)
 		return extpipe.Record{}, false
 	case !ok:
-		http.Error(w, "component not found", http.StatusNotFound)
+		httpx.Error(w, "component not found", http.StatusNotFound)
 		return extpipe.Record{}, false
 	}
 	return rec, true

@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/luckylhb90/bnbloc/internal/httpx"
 	"github.com/luckylhb90/bnbloc/internal/notify"
 	"github.com/luckylhb90/bnbloc/internal/obs"
 	"github.com/luckylhb90/bnbloc/internal/store"
@@ -191,11 +192,11 @@ func (s *Service) handleTenantBudgets(w http.ResponseWriter, r *http.Request) {
 	}
 	out, err := s.tenantBudgets(r.Context())
 	if err != nil {
-		slog.Error("bnbloc activity budgets read failed", "event", "bnbloc.activity.budgets_failed", "error", err)
-		writeErr(w, http.StatusInternalServerError, "budgets read failed")
+		obs.ServerError(w, "budgets read failed", err)
+		httpx.Error(w, "budgets read failed", http.StatusInternalServerError)
 		return
 	}
-	writeJSON(w, http.StatusOK, out)
+	httpx.WriteJSON(w, http.StatusOK, out)
 }
 
 // handlePutTenantBudgets is PUT /v1/tenant/budgets: it replaces the ctx
@@ -205,7 +206,7 @@ func (s *Service) handlePutTenantBudgets(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	var in wire.TenantBudgetsUpdate
-	if !decode(w, r, &in) {
+	if !httpx.DecodeJSON(w, r, maxBodyBytes, &in) {
 		return
 	}
 	caller := strings.TrimSpace(r.Header.Get("X-Bnbloc-User"))
@@ -213,25 +214,25 @@ func (s *Service) handlePutTenantBudgets(w http.ResponseWriter, r *http.Request)
 	var readErr budgetReadError
 	if errors.As(err, &readErr) {
 		obs.ServerError(w, "budgets membership read failed", readErr.err)
-		writeErr(w, http.StatusInternalServerError, "budgets membership read failed")
+		httpx.Error(w, "budgets membership read failed", http.StatusInternalServerError)
 		return
 	}
 	if err != nil {
-		writeErr(w, http.StatusBadRequest, err.Error())
+		httpx.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 	if err := s.Budgets.ReplaceUsageBudgets(r.Context(), budgets); err != nil {
-		slog.Error("bnbloc activity budgets write failed", "event", "bnbloc.activity.budgets_failed", "error", err)
-		writeErr(w, http.StatusInternalServerError, "budgets write failed")
+		obs.ServerError(w, "budgets write failed", err)
+		httpx.Error(w, "budgets write failed", http.StatusInternalServerError)
 		return
 	}
 	out, err := s.tenantBudgets(r.Context())
 	if err != nil {
-		slog.Error("bnbloc activity budgets read failed", "event", "bnbloc.activity.budgets_failed", "error", err)
-		writeErr(w, http.StatusInternalServerError, "budgets read failed")
+		obs.ServerError(w, "budgets read failed", err)
+		httpx.Error(w, "budgets read failed", http.StatusInternalServerError)
 		return
 	}
-	writeJSON(w, http.StatusOK, out)
+	httpx.WriteJSON(w, http.StatusOK, out)
 	// A changed budget may already be crossed: evaluate everyone now.
 	tid := tenant.FromContext(r.Context())
 	for _, b := range budgets {
@@ -332,8 +333,8 @@ func (s *Service) handleMyBudget(w http.ResponseWriter, r *http.Request) {
 	out := wire.MyBudgetReply{BudgetPeriod: period, Burn: burn}
 	b, ok, err := s.Budgets.GetUsageBudget(r.Context(), caller)
 	if err != nil {
-		slog.Error("bnbloc activity budget read failed", "event", "bnbloc.activity.budgets_failed", "error", err)
-		writeErr(w, http.StatusInternalServerError, "budget read failed")
+		obs.ServerError(w, "budget read failed", err)
+		httpx.Error(w, "budget read failed", http.StatusInternalServerError)
 		return
 	}
 	if ok {
@@ -342,18 +343,17 @@ func (s *Service) handleMyBudget(w http.ResponseWriter, r *http.Request) {
 	}
 	out.BlockedBy = s.budgetBlock(r.Context(), caller, period.PeriodStartMs)
 	out.Blocked = out.BlockedBy != ""
-	writeJSON(w, http.StatusOK, out)
+	httpx.WriteJSON(w, http.StatusOK, out)
 }
 
 // budgetsReady answers 401 / 501 when the request cannot be served.
 func (s *Service) budgetsReady(w http.ResponseWriter, r *http.Request) bool {
 	if strings.TrimSpace(r.Header.Get("X-Bnbloc-User")) == "" {
-		writeErr(w, http.StatusUnauthorized, "missing authenticated subject")
+		httpx.Error(w, "missing authenticated subject", http.StatusUnauthorized)
 		return false
 	}
 	if s.Budgets == nil {
-		obs.ServerError(w, "usage budgets not configured", nil)
-		writeErr(w, http.StatusNotImplemented, "usage budgets not configured")
+		httpx.Unavailable(w, "usage budgets")
 		return false
 	}
 	return true

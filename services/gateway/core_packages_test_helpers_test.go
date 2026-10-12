@@ -13,6 +13,7 @@ import (
 
 	"github.com/luckylhb90/bnbloc/core/pkgmeta"
 	"github.com/luckylhb90/bnbloc/core/protocol"
+	"github.com/luckylhb90/bnbloc/internal/httpx"
 )
 
 func postComponent(t *testing.T, baseURL, token string, body []byte, signature string) ([]byte, int) {
@@ -141,4 +142,14 @@ func minisignTestPrefix(keyID string) []byte {
 		panic(err)
 	}
 	return append([]byte{'E', 'd'}, decoded...)
+}
+
+// errorMessage is the message of the one error body ({"error": ...}), or the
+// raw body when it is not one.
+func errorMessage(raw []byte) string {
+	var body httpx.ErrorBody
+	if err := json.Unmarshal(raw, &body); err != nil || body.Error == "" {
+		return string(raw)
+	}
+	return body.Error
 }

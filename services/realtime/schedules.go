@@ -2,7 +2,6 @@ package realtimehttp
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -10,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/luckylhb90/bnbloc/internal/httpx"
 	"github.com/luckylhb90/bnbloc/internal/ids"
 	"github.com/luckylhb90/bnbloc/internal/membership"
 	"github.com/luckylhb90/bnbloc/internal/obs"
@@ -72,7 +72,7 @@ func (s *Service) registerScheduleRoutes(mux *http.ServeMux) {
 func (s *Service) schedulesReady(w http.ResponseWriter) bool {
 	if s.Schedules == nil {
 		obs.ServerError(w, "schedules unavailable", nil)
-		http.Error(w, "schedules unavailable", http.StatusServiceUnavailable)
+		httpx.Error(w, "schedules unavailable", http.StatusServiceUnavailable)
 		return false
 	}
 	return true
@@ -131,10 +131,10 @@ func planNextRun(sc *wire.RoomSchedule, now time.Time) error {
 func writeScheduleErr(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, store.ErrScheduleNotFound):
-		http.Error(w, "schedule not found", http.StatusNotFound)
+		httpx.Error(w, "schedule not found", http.StatusNotFound)
 	default:
-		log.Printf("realtime: schedule store: %v", err)
-		http.Error(w, "schedule store error", http.StatusInternalServerError)
+		obs.ServerError(w, "schedule store error", err)
+		httpx.Error(w, "schedule store error", http.StatusInternalServerError)
 	}
 }
 
@@ -148,7 +148,7 @@ func (s *Service) handleListSchedules(w http.ResponseWriter, r *http.Request) {
 		writeScheduleErr(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"schedules": list})
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"schedules": list})
 }
 
 func (s *Service) handleCreateSchedule(w http.ResponseWriter, r *http.Request) {
@@ -158,9 +158,7 @@ func (s *Service) handleCreateSchedule(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var in scheduleInput
-	r.Body = http.MaxBytesReader(w, r.Body, maxChatBodyBytes)
-	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
-		http.Error(w, "invalid json body", http.StatusBadRequest)
+	if !httpx.DecodeJSON(w, r, maxChatBodyBytes, &in) {
 		return
 	}
 	now := time.Now()
@@ -196,11 +194,11 @@ func (s *Service) handleCreateSchedule(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if room >= maxSchedulesPerRoom {
-		http.Error(w, fmt.Sprintf("this room already has %d schedules (the maximum)", maxSchedulesPerRoom), http.StatusConflict)
+		httpx.Error(w, fmt.Sprintf("this room already has %d schedules (the maximum)", maxSchedulesPerRoom), http.StatusConflict)
 		return
 	}
 	if mine >= maxSchedulesPerMember {
-		http.Error(w, fmt.Sprintf("you already own %d schedules in this room (the maximum)", maxSchedulesPerMember), http.StatusConflict)
+		httpx.Error(w, fmt.Sprintf("you already own %d schedules in this room (the maximum)", maxSchedulesPerMember), http.StatusConflict)
 		return
 	}
 	created, err := s.Schedules.CreateSchedule(r.Context(), sc)
@@ -208,7 +206,7 @@ func (s *Service) handleCreateSchedule(w http.ResponseWriter, r *http.Request) {
 		writeScheduleErr(w, err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, created)
+	httpx.WriteJSON(w, http.StatusCreated, created)
 }
 
 // checkScheduleSpec validates text, recipient, channel, recurrence and
@@ -216,12 +214,11 @@ func (s *Service) handleCreateSchedule(w http.ResponseWriter, r *http.Request) {
 // writeScheduleSpecErr writes checkScheduleSpec's refusal. Its 5xx (a failed
 // channel lookup) is logged and never echoes the store error to the caller.
 func writeScheduleSpecErr(w http.ResponseWriter, status int, err error) {
+	msg := err.Error()
 	if status >= http.StatusInternalServerError {
-		obs.ServerError(w, "schedule channel lookup failed", err)
-		http.Error(w, "schedule channel lookup failed", status)
-		return
+		msg = "schedule channel lookup failed"
 	}
-	http.Error(w, err.Error(), status)
+	httpx.WriteStatus(w, status, msg, err)
 }
 
 func (s *Service) checkScheduleSpec(ctx context.Context, sc *wire.RoomSchedule, now time.Time) (int, error) {
@@ -270,16 +267,14 @@ func (s *Service) handlePatchSchedule(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var in scheduleInput
-	r.Body = http.MaxBytesReader(w, r.Body, maxChatBodyBytes)
-	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
-		http.Error(w, "invalid json body", http.StatusBadRequest)
+	if !httpx.DecodeJSON(w, r, maxChatBodyBytes, &in) {
 		return
 	}
 	if cur.CreatedBy != userID {
 		pauseOnly := in.Enabled != nil && !*in.Enabled && in.Text == nil && in.ChannelID == nil &&
 			in.Recipient == nil && in.Recurrence == nil && in.Timezone == nil
 		if !pauseOnly || !s.canModerateSchedules(r.Context(), roomID, userID) {
-			http.Error(w, "only the creator may change this schedule (owners and admins may pause it)", http.StatusForbidden)
+			httpx.Error(w, "only the creator may change this schedule (owners and admins may pause it)", http.StatusForbidden)
 			return
 		}
 	}
@@ -323,7 +318,7 @@ func (s *Service) handlePatchSchedule(w http.ResponseWriter, r *http.Request) {
 		writeScheduleErr(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, next)
+	httpx.WriteJSON(w, http.StatusOK, next)
 }
 
 func (s *Service) handleDeleteSchedule(w http.ResponseWriter, r *http.Request) {
@@ -337,7 +332,7 @@ func (s *Service) handleDeleteSchedule(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if cur.CreatedBy != userID && !s.canModerateSchedules(r.Context(), roomID, userID) {
-		http.Error(w, "only the creator, the room owner, or an admin may delete this schedule", http.StatusForbidden)
+		httpx.Error(w, "only the creator, the room owner, or an admin may delete this schedule", http.StatusForbidden)
 		return
 	}
 	if err := s.Schedules.DeleteSchedule(r.Context(), roomID, cur.ScheduleID); err != nil {
@@ -360,7 +355,7 @@ func (s *Service) handleRunSchedule(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if cur.CreatedBy != userID {
-		http.Error(w, "only the creator may run this schedule", http.StatusForbidden)
+		httpx.Error(w, "only the creator may run this schedule", http.StatusForbidden)
 		return
 	}
 	now := time.Now()
@@ -376,7 +371,7 @@ func (s *Service) handleRunSchedule(w http.ResponseWriter, r *http.Request) {
 		writeChatPostErr(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]int64{"sequence": seq})
+	httpx.WriteJSON(w, http.StatusOK, map[string]int64{"sequence": seq})
 }
 
 // postScheduled posts sc's message as its creator through PostChat. slot

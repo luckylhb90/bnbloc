@@ -3,13 +3,14 @@ package realtimehttp
 import (
 	"encoding/json"
 	"errors"
-	"github.com/luckylhb90/bnbloc/internal/httpx"
 	"io"
 	"mime"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/luckylhb90/bnbloc/internal/httpx"
 
 	"github.com/luckylhb90/bnbloc/internal/blobstore"
 	"github.com/luckylhb90/bnbloc/internal/obs"
@@ -34,7 +35,7 @@ type blobCapability struct {
 func (s *Service) handleInternalBlobCapability(w http.ResponseWriter, _ *http.Request) {
 	if s.Blobs == nil {
 		obs.ServerError(w, "blob store unavailable", nil)
-		http.Error(w, s.blobUnavailableMessage(), http.StatusServiceUnavailable)
+		httpx.Error(w, s.blobUnavailableMessage(), http.StatusServiceUnavailable)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -54,7 +55,7 @@ func (s *Service) handleInternalBlobCapability(w http.ResponseWriter, _ *http.Re
 func (s *Service) handleInternalBlobPut(w http.ResponseWriter, r *http.Request) {
 	if s.Blobs == nil {
 		obs.ServerError(w, "blob store unavailable", nil)
-		http.Error(w, s.blobUnavailableMessage(), http.StatusServiceUnavailable)
+		httpx.Error(w, s.blobUnavailableMessage(), http.StatusServiceUnavailable)
 		return
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, maxBlobUploadBytes)
@@ -62,11 +63,11 @@ func (s *Service) handleInternalBlobPut(w http.ResponseWriter, r *http.Request) 
 	if err != nil {
 		var tooLarge *http.MaxBytesError
 		if errors.As(err, &tooLarge) {
-			http.Error(w, "blob too large", http.StatusRequestEntityTooLarge)
+			httpx.Error(w, "blob too large", http.StatusRequestEntityTooLarge)
 			return
 		}
 		obs.ServerError(w, "blob store failed", err)
-		http.Error(w, "blob store failed: "+err.Error(), http.StatusInternalServerError)
+		httpx.Error(w, "blob store failed: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -80,18 +81,18 @@ func (s *Service) handleInternalBlobPut(w http.ResponseWriter, r *http.Request) 
 func (s *Service) handleInternalBlobGet(w http.ResponseWriter, r *http.Request) {
 	if s.Blobs == nil {
 		obs.ServerError(w, "blob store unavailable", nil)
-		http.Error(w, s.blobUnavailableMessage(), http.StatusServiceUnavailable)
+		httpx.Error(w, s.blobUnavailableMessage(), http.StatusServiceUnavailable)
 		return
 	}
 	key := strings.TrimPrefix(r.PathValue("key"), "/")
 	rc, size, err := s.Blobs.Get(r.Context(), key)
 	if err != nil {
 		if errors.Is(err, blobstore.ErrBlobNotFound) {
-			http.Error(w, "blob not found", http.StatusNotFound)
+			httpx.Error(w, "blob not found", http.StatusNotFound)
 			return
 		}
 		obs.ServerError(w, "blob read failed", err)
-		http.Error(w, "blob read failed", http.StatusInternalServerError)
+		httpx.Error(w, "blob read failed", http.StatusInternalServerError)
 		return
 	}
 	defer rc.Close()
@@ -127,18 +128,17 @@ type blobPresignResult struct {
 func (s *Service) handleInternalBlobPresign(w http.ResponseWriter, r *http.Request) {
 	presigner, ok := s.Blobs.(blobstore.Presigner)
 	if !s.DirectDownloads || !ok {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "direct downloads disabled"})
+		httpx.Error(w, "direct downloads disabled", http.StatusNotFound)
 		return
 	}
 	var req blobPresignRequest
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 8<<10)).Decode(&req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json body"})
+	if !httpx.DecodeJSON(w, r, 8<<10, &req) {
 		return
 	}
 	opts := blobstore.PresignOptions{ContentType: strings.TrimSpace(req.ContentType)}
 	if opts.ContentType != "" {
 		if _, _, err := mime.ParseMediaType(opts.ContentType); err != nil {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid contentType"})
+			httpx.Error(w, "invalid contentType", http.StatusBadRequest)
 			return
 		}
 	}
@@ -146,16 +146,16 @@ func (s *Service) handleInternalBlobPresign(w http.ResponseWriter, r *http.Reque
 	expires := time.Now().Add(blobPresignTTL)
 	u, err := presigner.PresignGet(r.Context(), strings.TrimSpace(req.Key), blobPresignTTL, opts)
 	if errors.Is(err, blobstore.ErrInvalidKey) {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid blob key"})
+		httpx.Error(w, "invalid blob key", http.StatusBadRequest)
 		return
 	}
 	if err != nil {
 		obs.ServerError(w, "blob presign failed", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "blob presign failed"})
+		httpx.Error(w, "blob presign failed", http.StatusInternalServerError)
 		return
 	}
 	w.Header().Set("Cache-Control", "no-store")
-	writeJSON(w, http.StatusOK, blobPresignResult{URL: u, ExpiresAtMs: expires.UnixMilli()})
+	httpx.WriteJSON(w, http.StatusOK, blobPresignResult{URL: u, ExpiresAtMs: expires.UnixMilli()})
 }
 
 // setContentLength declares a known blob size, so a reader (and every proxy

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/luckylhb90/bnbloc/internal/httpx"
 	"github.com/luckylhb90/bnbloc/internal/membership"
 	"github.com/luckylhb90/bnbloc/internal/obs"
 	"github.com/luckylhb90/bnbloc/internal/roomctx"
@@ -83,7 +84,7 @@ type authorizeBody struct {
 func (s *Service) handleAuthorize(w http.ResponseWriter, r *http.Request) {
 	roomID, err := roomctx.Normalize(r.PathValue("roomId"))
 	if err != nil {
-		writeErr(w, http.StatusBadRequest, err.Error())
+		httpx.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 	// Authorizing a borrow is a person's act in the conversation: never an
@@ -95,11 +96,11 @@ func (s *Service) handleAuthorize(w http.ResponseWriter, r *http.Request) {
 	}
 	provider := providerFromTarget(r.PathValue("targetId"))
 	if provider == "" {
-		writeErr(w, http.StatusBadRequest, "target must be shared-agent:<provider>")
+		httpx.Error(w, "target must be shared-agent:<provider>", http.StatusBadRequest)
 		return
 	}
 	var body authorizeBody
-	if !decodeJSON(w, r, &body) {
+	if !httpx.DecodeJSON(w, r, httpx.DefaultBodyLimit, &body) {
 		return
 	}
 	// The model range is exactly what the owner authorized. No default is
@@ -143,16 +144,17 @@ func (s *Service) handleAuthorize(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := s.Grants.PutGrant(r.Context(), grant); err != nil {
 		obs.ServerError(w, "authorize failed", err)
-		writeErr(w, http.StatusInternalServerError, err.Error())
+		httpx.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{
 		"authorized":  true,
 		"grantId":     grantID,
 		"owner":       owner,
 		"provider":    provider,
 		"expiresAtMs": expiresAt,
 	})
+
 }
 
 // handleDeauthorize revokes an owner's room authorization for a provider. Only
@@ -160,7 +162,7 @@ func (s *Service) handleAuthorize(w http.ResponseWriter, r *http.Request) {
 func (s *Service) handleDeauthorize(w http.ResponseWriter, r *http.Request) {
 	roomID, err := roomctx.Normalize(r.PathValue("roomId"))
 	if err != nil {
-		writeErr(w, http.StatusBadRequest, err.Error())
+		httpx.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 	// Any person may withdraw their own authorization (a member made a
@@ -172,15 +174,15 @@ func (s *Service) handleDeauthorize(w http.ResponseWriter, r *http.Request) {
 	}
 	provider := providerFromTarget(r.PathValue("targetId"))
 	if provider == "" {
-		writeErr(w, http.StatusBadRequest, "target must be shared-agent:<provider>")
+		httpx.Error(w, "target must be shared-agent:<provider>", http.StatusBadRequest)
 		return
 	}
 	if err := s.Grants.RevokeGrant(r.Context(), roomAuthGrantID(r.Context(), roomID, owner, provider), s.Now()); err != nil && err != store.ErrGrantNotFound {
 		obs.ServerError(w, "deauthorize failed", err)
-		writeErr(w, http.StatusInternalServerError, err.Error())
+		httpx.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"authorized": false, "owner": owner, "provider": provider})
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"authorized": false, "owner": owner, "provider": provider})
 }
 
 // handleAuthorization reports whether a live room authorization exists for an
@@ -191,7 +193,7 @@ func (s *Service) handleDeauthorize(w http.ResponseWriter, r *http.Request) {
 func (s *Service) handleAuthorization(w http.ResponseWriter, r *http.Request) {
 	roomID, err := roomctx.Normalize(r.PathValue("roomId"))
 	if err != nil {
-		writeErr(w, http.StatusBadRequest, err.Error())
+		httpx.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 	if _, ok := s.requireMember(w, r, roomID, callerSubject(r), membership.AnyMember); !ok {
@@ -200,7 +202,7 @@ func (s *Service) handleAuthorization(w http.ResponseWriter, r *http.Request) {
 	owner := strings.TrimSpace(r.URL.Query().Get("owner"))
 	provider := providerFromTarget(r.PathValue("targetId"))
 	if owner == "" || provider == "" {
-		writeErr(w, http.StatusBadRequest, "owner and shared-agent:<provider> target required")
+		httpx.Error(w, "owner and shared-agent:<provider> target required", http.StatusBadRequest)
 		return
 	}
 	authorized, expiresAt, models := s.roomAuthorized(r.Context(), roomID, owner, provider)
@@ -216,7 +218,7 @@ func (s *Service) handleAuthorization(w http.ResponseWriter, r *http.Request) {
 			resp["quotaExhausted"] = grant.RunsUsed >= *grant.RunQuota
 		}
 	}
-	writeJSON(w, http.StatusOK, resp)
+	httpx.WriteJSON(w, http.StatusOK, resp)
 }
 
 // roomAuthorized reports whether a live (present, not revoked, not expired) room

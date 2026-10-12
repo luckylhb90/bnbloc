@@ -7,6 +7,7 @@ import (
 	"github.com/luckylhb90/bnbloc/core"
 	"github.com/luckylhb90/bnbloc/core/pkgmeta"
 	"github.com/luckylhb90/bnbloc/internal/coreset"
+	"github.com/luckylhb90/bnbloc/internal/httpx"
 	"github.com/luckylhb90/bnbloc/internal/obs"
 )
 
@@ -25,48 +26,48 @@ import (
 func (s *Service) handleCoreArtifact(w http.ResponseWriter, r *http.Request) {
 	claims, err := s.authenticate(r)
 	if err != nil {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		httpx.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
 	name := r.PathValue("name")
 	platform := strings.TrimSpace(r.URL.Query().Get("platform"))
 	if platform == "" {
-		http.Error(w, "platform query parameter is required", http.StatusBadRequest)
+		httpx.Error(w, "platform query parameter is required", http.StatusBadRequest)
 		return
 	}
 	view, err := s.loadMemberComponents(r.Context(), claims)
 	if err != nil {
 		obs.ServerError(w, "load components failed", err)
-		http.Error(w, "load components failed", http.StatusInternalServerError)
+		httpx.Error(w, "load components failed", http.StatusInternalServerError)
 		return
 	}
 	rec, ok := view.record(core.KindCore, name)
 	if !ok {
-		http.Error(w, "sidecar core not found", http.StatusNotFound)
+		httpx.Error(w, "sidecar core not found", http.StatusNotFound)
 		return
 	}
 	if !view.visibility(rec).Installed {
-		http.Error(w, "core not available", http.StatusNotFound)
+		httpx.Error(w, "core not available", http.StatusNotFound)
 		return
 	}
 	p, err := componentFromExtRecord(rec)
 	if err != nil {
 		obs.ServerError(w, "load components failed", err)
-		http.Error(w, "load components failed", http.StatusInternalServerError)
+		httpx.Error(w, "load components failed", http.StatusInternalServerError)
 		return
 	}
 	switch p.Runtime {
 	case pkgmeta.RuntimeManifest:
-		writeJSON(w, http.StatusOK, map[string]any{"version": p.Version, "manifest": p.Manifest})
+		httpx.WriteJSON(w, http.StatusOK, map[string]any{"version": p.Version, "manifest": p.Manifest})
 	case pkgmeta.RuntimeSidecar:
 		art, ok := p.Artifacts[platform]
 		if !ok {
-			http.Error(w, "core unavailable on this platform", http.StatusNotFound)
+			httpx.Error(w, "core unavailable on this platform", http.StatusNotFound)
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"url": art.URL, "sha256": art.SHA256, "version": p.Version, "sidecar": p.Sidecar, "manifest": p.Manifest})
+		httpx.WriteJSON(w, http.StatusOK, map[string]any{"url": art.URL, "sha256": art.SHA256, "version": p.Version, "sidecar": p.Sidecar, "manifest": p.Manifest})
 	default:
-		http.Error(w, "sidecar core not found", http.StatusNotFound)
+		httpx.Error(w, "sidecar core not found", http.StatusNotFound)
 	}
 }
 

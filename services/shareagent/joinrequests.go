@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/luckylhb90/bnbloc/internal/httpx"
 	"github.com/luckylhb90/bnbloc/internal/obs"
 	"github.com/luckylhb90/bnbloc/internal/store"
 	"github.com/luckylhb90/bnbloc/internal/tenant"
@@ -30,13 +31,12 @@ type directoryTenantView struct {
 // suspended tenants are hidden. The caller is the X-Bnbloc-User subject.
 func (s *Service) handleTenantDirectory(w http.ResponseWriter, r *http.Request) {
 	if s.Tenants == nil {
-		obs.ServerError(w, "tenant registry not configured", nil)
-		writeErr(w, http.StatusNotImplemented, "tenant registry not configured")
+		httpx.Unavailable(w, "tenant registry")
 		return
 	}
 	caller := callerSubject(r)
 	if caller == "" {
-		writeErr(w, http.StatusUnauthorized, "missing authenticated subject")
+		httpx.Error(w, "missing authenticated subject", http.StatusUnauthorized)
 		return
 	}
 	out := make([]directoryTenantView, 0)
@@ -48,7 +48,7 @@ func (s *Service) handleTenantDirectory(w http.ResponseWriter, r *http.Request) 
 		_, member, err := s.Tenants.GetMember(r.Context(), t.TenantID, caller)
 		if err != nil {
 			obs.ServerError(w, "read membership failed", err)
-			writeErr(w, http.StatusInternalServerError, "read membership failed")
+			httpx.Error(w, "read membership failed", http.StatusInternalServerError)
 			return
 		}
 		if member {
@@ -58,7 +58,7 @@ func (s *Service) handleTenantDirectory(w http.ResponseWriter, r *http.Request) 
 		}
 		out = append(out, directoryTenantView{TenantID: t.TenantID, Name: t.Name, Relation: relation})
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"tenants": out})
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"tenants": out})
 }
 
 type joinRequestBody struct {
@@ -72,37 +72,36 @@ type joinRequestBody struct {
 // user requesting to join is, by definition, not yet scoped to it.
 func (s *Service) handleCreateJoinRequest(w http.ResponseWriter, r *http.Request) {
 	if s.Tenants == nil {
-		obs.ServerError(w, "tenant registry not configured", nil)
-		writeErr(w, http.StatusNotImplemented, "tenant registry not configured")
+		httpx.Unavailable(w, "tenant registry")
 		return
 	}
 	caller := callerSubject(r)
 	if caller == "" {
-		writeErr(w, http.StatusUnauthorized, "missing authenticated subject")
+		httpx.Error(w, "missing authenticated subject", http.StatusUnauthorized)
 		return
 	}
 	tid := r.PathValue("tenantId")
 	t, err := s.Tenants.GetTenant(r.Context(), tid)
 	if err != nil {
-		writeErr(w, http.StatusNotFound, "tenant not found")
+		httpx.Error(w, "tenant not found", http.StatusNotFound)
 		return
 	}
 	if t.Status != store.TenantActive {
-		writeErr(w, http.StatusConflict, "tenant is not accepting requests")
+		httpx.Error(w, "tenant is not accepting requests", http.StatusConflict)
 		return
 	}
 	_, member, err := s.Tenants.GetMember(r.Context(), tid, caller)
 	if err != nil {
 		obs.ServerError(w, "read membership failed", err)
-		writeErr(w, http.StatusInternalServerError, "read membership failed")
+		httpx.Error(w, "read membership failed", http.StatusInternalServerError)
 		return
 	}
 	if member {
-		writeErr(w, http.StatusConflict, "already a member")
+		httpx.Error(w, "already a member", http.StatusConflict)
 		return
 	}
 	var body joinRequestBody
-	if !decodeOptionalJSON(w, r, &body) {
+	if !httpx.DecodeOptionalJSON(w, r, httpx.DefaultBodyLimit, &body) {
 		return
 	}
 	jr := store.JoinRequest{
@@ -114,23 +113,22 @@ func (s *Service) handleCreateJoinRequest(w http.ResponseWriter, r *http.Request
 	}
 	if err := s.Tenants.PutJoinRequest(r.Context(), jr); err != nil {
 		obs.ServerError(w, "submit request failed", err)
-		writeErr(w, http.StatusInternalServerError, "submit request failed")
+		httpx.Error(w, "submit request failed", http.StatusInternalServerError)
 		return
 	}
-	writeJSON(w, http.StatusCreated, joinRequestView(jr))
+	httpx.WriteJSON(w, http.StatusCreated, joinRequestView(jr))
 }
 
 // handleMyJoinRequests lists the caller's own join requests across tenants so a
 // user can track status.
 func (s *Service) handleMyJoinRequests(w http.ResponseWriter, r *http.Request) {
 	if s.Tenants == nil {
-		obs.ServerError(w, "tenant registry not configured", nil)
-		writeErr(w, http.StatusNotImplemented, "tenant registry not configured")
+		httpx.Unavailable(w, "tenant registry")
 		return
 	}
 	caller := callerSubject(r)
 	if caller == "" {
-		writeErr(w, http.StatusUnauthorized, "missing authenticated subject")
+		httpx.Error(w, "missing authenticated subject", http.StatusUnauthorized)
 		return
 	}
 	reqs := s.Tenants.ListJoinRequestsForUser(r.Context(), caller)
@@ -138,7 +136,7 @@ func (s *Service) handleMyJoinRequests(w http.ResponseWriter, r *http.Request) {
 	for _, jr := range reqs {
 		views = append(views, joinRequestView(jr))
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"requests": views})
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"requests": views})
 }
 
 // handleListJoinRequests lists the ctx tenant's join requests for the admin
@@ -146,8 +144,7 @@ func (s *Service) handleMyJoinRequests(w http.ResponseWriter, r *http.Request) {
 // RBAC (manage_org) is enforced at the gateway; the tenant is the ctx tenant.
 func (s *Service) handleListJoinRequests(w http.ResponseWriter, r *http.Request) {
 	if s.Tenants == nil {
-		obs.ServerError(w, "tenant registry not configured", nil)
-		writeErr(w, http.StatusNotImplemented, "tenant registry not configured")
+		httpx.Unavailable(w, "tenant registry")
 		return
 	}
 	tid := tenant.FromContext(r.Context())
@@ -165,7 +162,7 @@ func (s *Service) handleListJoinRequests(w http.ResponseWriter, r *http.Request)
 	for _, jr := range reqs {
 		views = append(views, joinRequestView(jr))
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"requests": views})
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"requests": views})
 }
 
 // handleApproveJoinRequest approves a pending request: it creates the tenant
@@ -183,15 +180,14 @@ func (s *Service) handleRejectJoinRequest(w http.ResponseWriter, r *http.Request
 
 func (s *Service) decideJoinRequest(w http.ResponseWriter, r *http.Request, approve bool) {
 	if s.Tenants == nil {
-		obs.ServerError(w, "tenant registry not configured", nil)
-		writeErr(w, http.StatusNotImplemented, "tenant registry not configured")
+		httpx.Unavailable(w, "tenant registry")
 		return
 	}
 	tid := tenant.FromContext(r.Context())
 	userID := r.PathValue("userId")
 	jr, ok := s.Tenants.GetJoinRequest(r.Context(), tid, userID)
 	if !ok {
-		writeErr(w, http.StatusNotFound, "join request not found")
+		httpx.Error(w, "join request not found", http.StatusNotFound)
 		return
 	}
 	now := s.Now()
@@ -202,7 +198,7 @@ func (s *Service) decideJoinRequest(w http.ResponseWriter, r *http.Request, appr
 			TenantID: tid, UserID: userID, Role: store.OrgRoleMember, JoinedAtMs: now,
 		}); err != nil {
 			obs.ServerError(w, "approve failed", err)
-			writeErr(w, http.StatusInternalServerError, "approve failed")
+			httpx.Error(w, "approve failed", http.StatusInternalServerError)
 			return
 		}
 		jr.Status = store.JoinApproved
@@ -213,11 +209,11 @@ func (s *Service) decideJoinRequest(w http.ResponseWriter, r *http.Request, appr
 	jr.DecidedBy = callerSubject(r)
 	if err := s.Tenants.PutJoinRequest(r.Context(), jr); err != nil {
 		obs.ServerError(w, "update request failed", err)
-		writeErr(w, http.StatusInternalServerError, "update request failed")
+		httpx.Error(w, "update request failed", http.StatusInternalServerError)
 		return
 	}
 	s.auditMember(r, userID, "join_"+string(jr.Status), "")
-	writeJSON(w, http.StatusOK, joinRequestView(jr))
+	httpx.WriteJSON(w, http.StatusOK, joinRequestView(jr))
 }
 
 // joinRequestView is the JSON projection of a join request.

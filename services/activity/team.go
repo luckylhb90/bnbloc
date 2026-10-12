@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/luckylhb90/bnbloc/internal/obs"
+	"github.com/luckylhb90/bnbloc/internal/httpx"
 	"github.com/luckylhb90/bnbloc/internal/store"
 	"github.com/luckylhb90/bnbloc/internal/wire"
 )
@@ -63,12 +63,11 @@ func (s *Service) handleTeamAgents(scope string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		caller := strings.TrimSpace(r.Header.Get("X-Bnbloc-User"))
 		if caller == "" {
-			writeErr(w, http.StatusUnauthorized, "missing authenticated subject")
+			httpx.Error(w, "missing authenticated subject", http.StatusUnauthorized)
 			return
 		}
 		if s.Team == nil {
-			obs.ServerError(w, "team dashboard not configured", nil)
-			writeErr(w, http.StatusNotImplemented, "team dashboard not configured")
+			httpx.Unavailable(w, "team dashboard")
 			return
 		}
 		now := time.Now()
@@ -77,19 +76,20 @@ func (s *Service) handleTeamAgents(scope string) http.HandlerFunc {
 		}
 		rng, since, ok := teamSince(r.URL.Query().Get("range"), r.URL.Query().Get("tzOffsetMin"), now)
 		if !ok {
-			writeErr(w, http.StatusBadRequest, "range must be today or 7d (tzOffsetMin within ±840)")
+			httpx.Error(w, "range must be today or 7d (tzOffsetMin within ±840)", http.StatusBadRequest)
 			return
 		}
 		owner := caller
 		if scope == teamScopeTenant {
 			owner = ""
 		}
-		writeJSON(w, http.StatusOK, wire.TeamAgentsReply{
+		httpx.WriteJSON(w, http.StatusOK, wire.TeamAgentsReply{
 			Scope:   scope,
 			Range:   rng,
 			SinceMs: since,
 			Agents:  s.teamAgents(r, owner, since, now.UnixMilli()),
 		})
+
 	}
 }
 

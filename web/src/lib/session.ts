@@ -171,25 +171,22 @@ export async function authedFetch(
   return send();
 }
 
-// errorDetail extracts the gateway's error text from a failed response: the
-// JSON `error`/`message` field when present, else a plain-text body. An empty
-// body or a proxy's HTML error page (a 502 while a service restarts) is never
-// shown raw: it becomes a sentence a person can act on.
+// errorDetail extracts the message of a failed response. Every bnbloc
+// surface answers errors with one body, {"error": "<message>"}
+// (internal/httpx.ErrorBody); anything else (an empty body, a proxy's HTML
+// page during a restart, a router's plain 404) is never shown raw: it
+// becomes a sentence a person can act on.
 export async function errorDetail(res: Response): Promise<string> {
   const text = (await res.text().catch(() => "")).trim();
-  if (!text || text.startsWith("<")) return statusMessage(res.status);
   try {
     const parsed: unknown = JSON.parse(text);
-    if (parsed && typeof parsed === "object") {
-      const error = "error" in parsed ? parsed.error : undefined;
-      const message = "message" in parsed ? parsed.message : undefined;
-      if (typeof error === "string" && error) return error;
-      if (typeof message === "string" && message) return message;
+    if (parsed && typeof parsed === "object" && "error" in parsed && typeof parsed.error === "string" && parsed.error) {
+      return parsed.error;
     }
-    return text;
   } catch {
-    return text;
+    // not the error body
   }
+  return statusMessage(res.status);
 }
 
 // statusMessage is the fallback text of a failed response with no usable body.

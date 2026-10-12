@@ -19,6 +19,7 @@ import (
 	"github.com/luckylhb90/bnbloc/internal/contentpkg"
 	"github.com/luckylhb90/bnbloc/internal/contentuse"
 	"github.com/luckylhb90/bnbloc/internal/extpipe"
+	"github.com/luckylhb90/bnbloc/internal/httpx"
 	"github.com/luckylhb90/bnbloc/internal/ids"
 	"github.com/luckylhb90/bnbloc/internal/obs"
 	"github.com/luckylhb90/bnbloc/internal/semver"
@@ -79,19 +80,19 @@ func (s *Service) registerContentComponents(mux *http.ServeMux) {
 // contentStoreErr answers a store failure (404 for a missing component).
 func contentStoreErr(w http.ResponseWriter, what string, err error) {
 	if errors.Is(err, store.ErrContentNotFound) {
-		http.Error(w, "content component not found", http.StatusNotFound)
+		httpx.Error(w, "content component not found", http.StatusNotFound)
 		return
 	}
 	if errors.Is(err, errContentReadOnly) {
-		http.Error(w, err.Error(), http.StatusConflict)
+		httpx.Error(w, err.Error(), http.StatusConflict)
 		return
 	}
 	if errors.Is(err, store.ErrContentOrgNameTaken) {
-		http.Error(w, "the organization already has a component of that kind and name: remove the other one first", http.StatusConflict)
+		httpx.Error(w, "the organization already has a component of that kind and name: remove the other one first", http.StatusConflict)
 		return
 	}
 	obs.ServerError(w, what, err)
-	http.Error(w, what, http.StatusInternalServerError)
+	httpx.Error(w, what, http.StatusInternalServerError)
 }
 
 func shortKind(kind string) string {
@@ -219,18 +220,10 @@ func (s *Service) contentSkills(ctx context.Context, v store.ContentComponentVer
 // memberContent lists the content components visible to the caller at
 // their latest version: the caller's own (personal and shared copies) and
 // those published to their organization and the platform, all through the
-// one visibility function.
-func (s *Service) memberContent(ctx context.Context, claims auth.Claims, kind string) ([]wire.ContentComponent, error) {
+// one visibility function. kind is a full content kind ("" = every kind).
+func (s *Service) memberContent(ctx context.Context, claims auth.Claims, full string) ([]wire.ContentComponent, error) {
 	if s.ContentComponents == nil {
 		return []wire.ContentComponent{}, nil
-	}
-	var full string
-	if kind != "" {
-		k, ok := contentpkg.Lookup(kind)
-		if !ok {
-			return nil, fmt.Errorf("unknown content kind %q", kind)
-		}
-		full = k.Kind
 	}
 	visible, err := contentuse.Visible(ctx, s.ContentComponents, viewerOf(claims), full)
 	if err != nil {
@@ -318,17 +311,22 @@ func (s *Service) handleListContent(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	list, err := s.memberContent(r.Context(), actor.Claims, strings.TrimSpace(r.URL.Query().Get("kind")))
-	if err != nil {
-		if strings.HasPrefix(err.Error(), "unknown content kind") {
-			http.Error(w, err.Error(), http.StatusBadRequest)
+	var full string
+	if kind := strings.TrimSpace(r.URL.Query().Get("kind")); kind != "" {
+		k, ok := contentpkg.Lookup(kind)
+		if !ok {
+			httpx.Error(w, fmt.Sprintf("unknown content kind %q", kind), http.StatusBadRequest)
 			return
 		}
+		full = k.Kind
+	}
+	list, err := s.memberContent(r.Context(), actor.Claims, full)
+	if err != nil {
 		obs.ServerError(w, "list content components failed", err)
-		http.Error(w, "list content components failed", http.StatusInternalServerError)
+		httpx.Error(w, "list content components failed", http.StatusInternalServerError)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"components": list})
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"components": list})
 }
 
 // contentSaveRequest is a JSON save: a form, the version to write
@@ -357,10 +355,10 @@ func readBody(w http.ResponseWriter, r *http.Request, limit int64) ([]byte, bool
 	if err != nil {
 		var mbe *http.MaxBytesError
 		if errors.As(err, &mbe) {
-			http.Error(w, "package too large", http.StatusRequestEntityTooLarge)
+			httpx.Error(w, "package too large", http.StatusRequestEntityTooLarge)
 			return nil, false
 		}
-		http.Error(w, "read body failed", http.StatusBadRequest)
+		httpx.Error(w, "read body failed", http.StatusBadRequest)
 		return nil, false
 	}
 	return raw, true
@@ -395,14 +393,14 @@ func (s *Service) handleCreateContent(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if err := json.Unmarshal(raw, &req); err != nil {
-			http.Error(w, "invalid json body", http.StatusBadRequest)
+			httpx.Error(w, "invalid json body", http.StatusBadRequest)
 			return
 		}
 		version := firstNonEmpty(strings.TrimSpace(req.Version), "1.0.0")
 		pkg, bundle, err = contentpkg.Build(req.Form, version, opts, nil)
 	}
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		httpx.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 	if !jobSaveAllowed(w, actor, pkg) {
@@ -453,12 +451,12 @@ func (s *Service) handleImportContent(w http.ResponseWriter, r *http.Request) {
 		}
 		version, err := nextContentVersion(c, q.Get("version"))
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusConflict)
+			httpx.Error(w, err.Error(), http.StatusConflict)
 			return
 		}
 		pkg, bundle, err := contentpkg.Import(raw, c.Kind, c.Name, version, opts)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
+			httpx.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
 		s.addContentVersion(w, r, contentActor{Claims: claims}, c, pkg, bundle)
@@ -466,13 +464,13 @@ func (s *Service) handleImportContent(w http.ResponseWriter, r *http.Request) {
 	}
 	kind := strings.TrimSpace(q.Get("kind"))
 	if _, ok := contentpkg.Lookup(kind); !ok {
-		http.Error(w, fmt.Sprintf("unknown kind %q", kind), http.StatusBadRequest)
+		httpx.Error(w, fmt.Sprintf("unknown kind %q", kind), http.StatusBadRequest)
 		return
 	}
 	version := firstNonEmpty(strings.TrimSpace(q.Get("version")), "1.0.0")
 	pkg, bundle, err := contentpkg.Import(raw, kind, strings.TrimSpace(q.Get("name")), version, opts)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		httpx.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 	s.createContent(w, r, contentActor{Claims: claims}, pkg, bundle)
@@ -499,7 +497,7 @@ func (s *Service) createContent(w http.ResponseWriter, r *http.Request, actor co
 	key, err := s.storeBundle(ctx, pkg, bundle)
 	if err != nil {
 		obs.ServerError(w, "store content bundle failed", err)
-		http.Error(w, "store content bundle failed", http.StatusBadGateway)
+		httpx.Error(w, "store content bundle failed", http.StatusBadGateway)
 		return
 	}
 	now := s.nowTime().UnixMilli()
@@ -512,16 +510,16 @@ func (s *Service) createContent(w http.ResponseWriter, r *http.Request, actor co
 	v, err := contentVersionRow(pkg, key, len(bundle), claims.Subject, now)
 	if err != nil {
 		obs.ServerError(w, "encode content manifest failed", err)
-		http.Error(w, "encode content manifest failed", http.StatusInternalServerError)
+		httpx.Error(w, "encode content manifest failed", http.StatusInternalServerError)
 		return
 	}
 	switch err := s.ContentComponents.CreateContentComponent(ctx, c, v); {
 	case errors.Is(err, store.ErrContentExists):
-		http.Error(w, fmt.Sprintf("you already have a %s named %q: save a new version of it instead", shortKind(m.Kind), m.Name), http.StatusConflict)
+		httpx.Error(w, fmt.Sprintf("you already have a %s named %q: save a new version of it instead", shortKind(m.Kind), m.Name), http.StatusConflict)
 		return
 	case err != nil:
 		obs.ServerError(w, "save content component failed", err)
-		http.Error(w, "save content component failed", http.StatusInternalServerError)
+		httpx.Error(w, "save content component failed", http.StatusInternalServerError)
 		return
 	}
 	c.LatestVersion = v.Version
@@ -585,12 +583,12 @@ func (s *Service) handleNewContentVersion(w http.ResponseWriter, r *http.Request
 		}
 		version, err := nextContentVersion(c, r.URL.Query().Get("version"))
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusConflict)
+			httpx.Error(w, err.Error(), http.StatusConflict)
 			return
 		}
 		pkg, bundle, err = contentpkg.Import(raw, c.Kind, c.Name, version, opts)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
+			httpx.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
 	} else {
@@ -600,12 +598,12 @@ func (s *Service) handleNewContentVersion(w http.ResponseWriter, r *http.Request
 		}
 		var req contentSaveRequest
 		if err := json.Unmarshal(raw, &req); err != nil {
-			http.Error(w, "invalid json body", http.StatusBadRequest)
+			httpx.Error(w, "invalid json body", http.StatusBadRequest)
 			return
 		}
 		version, err := nextContentVersion(c, req.Version)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusConflict)
+			httpx.Error(w, err.Error(), http.StatusConflict)
 			return
 		}
 		var base *contentpkg.Package
@@ -617,13 +615,13 @@ func (s *Service) handleNewContentVersion(w http.ResponseWriter, r *http.Request
 			}
 			if base, err = s.contentPackage(ctx, bver); err != nil {
 				obs.ServerError(w, "load base version failed", err)
-				http.Error(w, "load base version failed", http.StatusBadGateway)
+				httpx.Error(w, "load base version failed", http.StatusBadGateway)
 				return
 			}
 		}
 		req.Form.Kind, req.Form.Name = c.Kind, c.Name
 		if pkg, bundle, err = contentpkg.Build(req.Form, version, opts, base); err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
+			httpx.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
 	}
@@ -637,24 +635,24 @@ func (s *Service) addContentVersion(w http.ResponseWriter, r *http.Request, acto
 	ctx := r.Context()
 	claims := actor.Claims
 	if pkg.Manifest.Kind != c.Kind || pkg.Manifest.Name != c.Name {
-		http.Error(w, fmt.Sprintf("a new version keeps the %s's kind and name (%s)", shortKind(c.Kind), c.Name), http.StatusBadRequest)
+		httpx.Error(w, fmt.Sprintf("a new version keeps the %s's kind and name (%s)", shortKind(c.Kind), c.Name), http.StatusBadRequest)
 		return
 	}
 	if _, err := nextContentVersion(c, pkg.Manifest.Version); err != nil {
-		http.Error(w, err.Error(), http.StatusConflict)
+		httpx.Error(w, err.Error(), http.StatusConflict)
 		return
 	}
 	key, err := s.storeBundle(ctx, pkg, bundle)
 	if err != nil {
 		obs.ServerError(w, "store content bundle failed", err)
-		http.Error(w, "store content bundle failed", http.StatusBadGateway)
+		httpx.Error(w, "store content bundle failed", http.StatusBadGateway)
 		return
 	}
 	now := s.nowTime().UnixMilli()
 	v, err := contentVersionRow(pkg, key, len(bundle), claims.Subject, now)
 	if err != nil {
 		obs.ServerError(w, "encode content manifest failed", err)
-		http.Error(w, "encode content manifest failed", http.StatusInternalServerError)
+		httpx.Error(w, "encode content manifest failed", http.StatusInternalServerError)
 		return
 	}
 	next := c
@@ -662,7 +660,7 @@ func (s *Service) addContentVersion(w http.ResponseWriter, r *http.Request, acto
 	next.DisplayName, next.Description, next.Category, next.UpdatedAtMs = m.DisplayName, m.Description, m.Category, now
 	switch err := s.ContentComponents.AddContentComponentVersion(ctx, next, c.LatestVersion, v); {
 	case errors.Is(err, store.ErrContentVersionConflict):
-		http.Error(w, "the component changed while saving: reload and save again", http.StatusConflict)
+		httpx.Error(w, "the component changed while saving: reload and save again", http.StatusConflict)
 		return
 	case err != nil:
 		contentStoreErr(w, "save content version failed", err)
@@ -690,13 +688,13 @@ func (s *Service) writeContentDetailWith(w http.ResponseWriter, r *http.Request,
 			err = errors.New("latest version missing")
 		}
 		obs.ServerError(w, "load content component failed", err)
-		http.Error(w, "load content component failed", http.StatusInternalServerError)
+		httpx.Error(w, "load content component failed", http.StatusInternalServerError)
 		return
 	}
 	versions, err := s.ContentComponents.ListContentComponentVersions(ctx, c.ID)
 	if err != nil {
 		obs.ServerError(w, "load content versions failed", err)
-		http.Error(w, "load content versions failed", http.StatusInternalServerError)
+		httpx.Error(w, "load content versions failed", http.StatusInternalServerError)
 		return
 	}
 	out := wire.ContentComponentDetail{Component: views[0], Versions: make([]wire.ContentVersion, 0, len(versions))}
@@ -706,7 +704,7 @@ func (s *Service) writeContentDetailWith(w http.ResponseWriter, r *http.Request,
 	if extra != nil {
 		extra(&out)
 	}
-	writeJSON(w, status, out)
+	httpx.WriteJSON(w, status, out)
 }
 
 func contentVersionView(v store.ContentComponentVersion) wire.ContentVersion {
@@ -772,13 +770,13 @@ func (s *Service) handleGetContentVersion(w http.ResponseWriter, r *http.Request
 	pkg, err := s.contentPackage(ctx, v)
 	if err != nil {
 		obs.ServerError(w, "load content bundle failed", err)
-		http.Error(w, "load content bundle failed", http.StatusBadGateway)
+		httpx.Error(w, "load content bundle failed", http.StatusBadGateway)
 		return
 	}
 	acks, err := s.ContentComponents.ListContentAcks(ctx, claims.Subject, []string{c.ID})
 	if err != nil {
 		obs.ServerError(w, "load content acks failed", err)
-		http.Error(w, "load content acks failed", http.StatusInternalServerError)
+		httpx.Error(w, "load content acks failed", http.StatusInternalServerError)
 		return
 	}
 	acked := map[string]bool{}
@@ -788,13 +786,13 @@ func (s *Service) handleGetContentVersion(w http.ResponseWriter, r *http.Request
 	view, err := contentView(c, v, claims, acked, 0)
 	if err != nil {
 		obs.ServerError(w, "decode content manifest failed", err)
-		http.Error(w, "decode content manifest failed", http.StatusInternalServerError)
+		httpx.Error(w, "decode content manifest failed", http.StatusInternalServerError)
 		return
 	}
 	enriched := []wire.ContentComponent{view}
 	if err := s.enrichPromptViews(ctx, claims, r.URL.Query().Get("room"), enriched); err != nil {
 		obs.ServerError(w, "load prompt fields failed", err)
-		http.Error(w, "load prompt fields failed", http.StatusInternalServerError)
+		httpx.Error(w, "load prompt fields failed", http.StatusInternalServerError)
 		return
 	}
 	view = enriched[0]
@@ -819,7 +817,7 @@ func (s *Service) handleGetContentVersion(w http.ResponseWriter, r *http.Request
 		}
 		out.Files = append(out.Files, f)
 	}
-	writeJSON(w, http.StatusOK, out)
+	httpx.WriteJSON(w, http.StatusOK, out)
 }
 
 func (s *Service) handleDeleteContent(w http.ResponseWriter, r *http.Request) {
@@ -861,7 +859,7 @@ func (s *Service) handleAckContent(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := s.ContentComponents.PutContentAck(ctx, store.ContentAck{Subject: claims.Subject, ComponentID: c.ID, Version: v.Version, AckedAtMs: s.nowTime().UnixMilli()}); err != nil {
 		obs.ServerError(w, "record content ack failed", err)
-		http.Error(w, "record content ack failed", http.StatusInternalServerError)
+		httpx.Error(w, "record content ack failed", http.StatusInternalServerError)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -878,23 +876,23 @@ func (s *Service) handleListContentUses(w http.ResponseWriter, r *http.Request) 
 	var err error
 	if out.Member, err = s.contentUseViews(ctx, claims, store.ContentUseMember, claims.Subject); err != nil {
 		obs.ServerError(w, "list content uses failed", err)
-		http.Error(w, "list content uses failed", http.StatusInternalServerError)
+		httpx.Error(w, "list content uses failed", http.StatusInternalServerError)
 		return
 	}
 	if room := actor.Room; room != "" {
 		// contentGrant checked the caller's reach of the room.
 		if out.Room, err = s.contentUseViews(ctx, claims, store.ContentUseRoom, room); err != nil {
 			obs.ServerError(w, "list content uses failed", err)
-			http.Error(w, "list content uses failed", http.StatusInternalServerError)
+			httpx.Error(w, "list content uses failed", http.StatusInternalServerError)
 			return
 		}
 		if out.RoomExpert, err = s.roomExpertOf(ctx, room); err != nil {
 			obs.ServerError(w, "list room expert failed", err)
-			http.Error(w, "list room expert failed", http.StatusInternalServerError)
+			httpx.Error(w, "list room expert failed", http.StatusInternalServerError)
 			return
 		}
 	}
-	writeJSON(w, http.StatusOK, out)
+	httpx.WriteJSON(w, http.StatusOK, out)
 }
 
 // contentUseViews lists a scope's uses with each component at the version
@@ -966,7 +964,7 @@ func (s *Service) handlePutContentUse(w http.ResponseWriter, r *http.Request) {
 	}
 	var req wire.ContentUseRequest
 	if err := json.Unmarshal(raw, &req); err != nil {
-		http.Error(w, "invalid json body", http.StatusBadRequest)
+		httpx.Error(w, "invalid json body", http.StatusBadRequest)
 		return
 	}
 	claims, scope, scopeID, ok := s.contentUseScope(w, claims, req.Scope, req.RoomID)
@@ -986,7 +984,7 @@ func (s *Service) handlePutContentUse(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if spec, _ := contentpkg.Lookup(c.Kind); scope == store.ContentUseMember && !spec.MemberUse {
-		http.Error(w, "only skill and prompt packs are turned on for you; pick an expert per message", http.StatusBadRequest)
+		httpx.Error(w, "only skill and prompt packs are turned on for you; pick an expert per message", http.StatusBadRequest)
 		return
 	}
 	if version := strings.TrimSpace(req.Version); version != "" {
@@ -1016,17 +1014,17 @@ func (s *Service) contentUseScope(w http.ResponseWriter, claims auth.Claims, sco
 	case wire.ContentUseRoom, wire.ContentUseRoomExpert:
 		roomID = strings.TrimSpace(roomID)
 		if roomID == "" {
-			http.Error(w, "roomId required", http.StatusBadRequest)
+			httpx.Error(w, "roomId required", http.StatusBadRequest)
 			return claims, "", "", false
 		}
 		editor, ok := s.roomEditorClaims(claims, roomID)
 		if !ok {
-			http.Error(w, "only the room's owner or admins change its experts and skills", http.StatusForbidden)
+			httpx.Error(w, "only the room's owner or admins change its experts and skills", http.StatusForbidden)
 			return claims, "", "", false
 		}
 		return editor, store.ContentUseScope(scope), roomID, true
 	default:
-		http.Error(w, "scope must be member, room or room-expert", http.StatusBadRequest)
+		httpx.Error(w, "scope must be member, room or room-expert", http.StatusBadRequest)
 		return claims, "", "", false
 	}
 }
@@ -1045,14 +1043,14 @@ func (s *Service) handleDeleteContentUse(w http.ResponseWriter, r *http.Request)
 	componentID := strings.TrimSpace(q.Get("componentId"))
 	if err := s.ContentComponents.DeleteContentUse(r.Context(), scope, scopeID, componentID); err != nil {
 		obs.ServerError(w, "delete content use failed", err)
-		http.Error(w, "delete content use failed", http.StatusInternalServerError)
+		httpx.Error(w, "delete content use failed", http.StatusInternalServerError)
 		return
 	}
 	if scope == store.ContentUseRoom {
 		// The room expert is one of the room's pinned experts.
 		if err := s.unpinRoomExpert(r.Context(), scopeID, componentID); err != nil {
 			obs.ServerError(w, "clear room expert failed", err)
-			http.Error(w, "clear room expert failed", http.StatusInternalServerError)
+			httpx.Error(w, "clear room expert failed", http.StatusInternalServerError)
 			return
 		}
 	}
@@ -1069,27 +1067,27 @@ func (s *Service) handleContentEffective(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	if actor.Job == nil {
-		http.Error(w, "job and room required", http.StatusBadRequest)
+		httpx.Error(w, "job and room required", http.StatusBadRequest)
 		return
 	}
 	job := *actor.Job
 	eff, err := contentuse.Effective(r.Context(), s.ContentComponents, job)
 	if err != nil {
 		obs.ServerError(w, "resolve job content failed", err)
-		http.Error(w, "resolve job content failed", http.StatusInternalServerError)
+		httpx.Error(w, "resolve job content failed", http.StatusInternalServerError)
 		return
 	}
 	if err := s.resolveEffectiveMCP(r.Context(), job, &eff); err != nil {
 		obs.ServerError(w, "resolve job MCP tools failed", err)
-		http.Error(w, "resolve job MCP tools failed", http.StatusInternalServerError)
+		httpx.Error(w, "resolve job MCP tools failed", http.StatusInternalServerError)
 		return
 	}
 	if err := s.recordRoomExpert(r.Context(), job, eff.RoomExpert); err != nil {
 		obs.ServerError(w, "record job room expert failed", err)
-		http.Error(w, "record job room expert failed", http.StatusInternalServerError)
+		httpx.Error(w, "record job room expert failed", http.StatusInternalServerError)
 		return
 	}
-	writeJSON(w, http.StatusOK, eff)
+	httpx.WriteJSON(w, http.StatusOK, eff)
 }
 
 // jobAgent is a job's agent as audit details name it: owner/provider, or

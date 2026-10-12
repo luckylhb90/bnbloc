@@ -1,9 +1,10 @@
 package gateway
 
 import (
-	"encoding/json"
-	"github.com/luckylhb90/bnbloc/internal/semver"
 	"net/http"
+
+	"github.com/luckylhb90/bnbloc/internal/httpx"
+	"github.com/luckylhb90/bnbloc/internal/semver"
 
 	"github.com/luckylhb90/bnbloc/internal/auth"
 	"github.com/luckylhb90/bnbloc/internal/obs"
@@ -24,13 +25,13 @@ func (s *Service) handleAppUpdate(w http.ResponseWriter, r *http.Request) {
 	// Session auth is required because the manifest contains admin-supplied
 	// download URLs; exposing those unauthenticated could leak internal artifacts.
 	if _, err := s.authenticate(r); err != nil {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		httpx.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
 	cfg, err := loadUpdateConfig(r.Context(), s.PlatformSettings)
 	if err != nil {
 		obs.ServerError(w, "load update config failed", err)
-		http.Error(w, "load update config failed", http.StatusInternalServerError)
+		httpx.Error(w, "load update config failed", http.StatusInternalServerError)
 		return
 	}
 	manifest, ok := updateManifestForRequest(cfg, updateRequest{
@@ -42,23 +43,23 @@ func (s *Service) handleAppUpdate(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
-	writeJSON(w, http.StatusOK, manifest)
+	httpx.WriteJSON(w, http.StatusOK, manifest)
 }
 
 func (s *Service) handleUpdatePolicy(w http.ResponseWriter, r *http.Request) {
 	// Session auth matches the manifest endpoint: polling policy is only needed
 	// after sign-in, and keeping it authenticated avoids exposing rollout state.
 	if _, err := s.authenticate(r); err != nil {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		httpx.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
 	cfg, err := loadUpdateConfig(r.Context(), s.PlatformSettings)
 	if err != nil {
 		obs.ServerError(w, "load update policy failed", err)
-		http.Error(w, "load update policy failed", http.StatusInternalServerError)
+		httpx.Error(w, "load update policy failed", http.StatusInternalServerError)
 		return
 	}
-	writeJSON(w, http.StatusOK, cfg.Policy)
+	httpx.WriteJSON(w, http.StatusOK, cfg.Policy)
 }
 
 func (s *Service) handlePlatformUpdateConfig(w http.ResponseWriter, r *http.Request) {
@@ -68,10 +69,10 @@ func (s *Service) handlePlatformUpdateConfig(w http.ResponseWriter, r *http.Requ
 	cfg, err := loadUpdateConfig(r.Context(), s.PlatformSettings)
 	if err != nil {
 		obs.ServerError(w, "load update config failed", err)
-		http.Error(w, "load update config failed", http.StatusInternalServerError)
+		httpx.Error(w, "load update config failed", http.StatusInternalServerError)
 		return
 	}
-	writeJSON(w, http.StatusOK, cfg)
+	httpx.WriteJSON(w, http.StatusOK, cfg)
 }
 
 func (s *Service) handlePlatformUpdateConfigPut(w http.ResponseWriter, r *http.Request) {
@@ -80,23 +81,22 @@ func (s *Service) handlePlatformUpdateConfigPut(w http.ResponseWriter, r *http.R
 		return
 	}
 	var cfg wire.UpdateConfig
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64*1024)).Decode(&cfg); err != nil {
-		http.Error(w, "invalid json body", http.StatusBadRequest)
+	if !httpx.DecodeJSON(w, r, 64*1024, &cfg) {
 		return
 	}
 	if cfg.Release.Platforms == nil {
 		cfg.Release.Platforms = map[string]wire.UpdatePlatform{}
 	}
 	if err := validateUpdateConfig(cfg); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		httpx.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 	if err := saveUpdateConfig(r.Context(), s.PlatformSettings, updateConfigSave{Config: cfg, UpdatedBy: claims.Subject, UpdatedAtMs: s.Now().UnixMilli()}); err != nil {
 		obs.ServerError(w, "save update config failed", err)
-		http.Error(w, "save update config failed", http.StatusInternalServerError)
+		httpx.Error(w, "save update config failed", http.StatusInternalServerError)
 		return
 	}
-	writeJSON(w, http.StatusOK, cfg)
+	httpx.WriteJSON(w, http.StatusOK, cfg)
 }
 
 func (s *Service) requireSuperAdmin(w http.ResponseWriter, r *http.Request) bool {
@@ -107,11 +107,11 @@ func (s *Service) requireSuperAdmin(w http.ResponseWriter, r *http.Request) bool
 func (s *Service) requireSuperAdminClaims(w http.ResponseWriter, r *http.Request) (auth.Claims, bool) {
 	claims, err := s.authenticate(r)
 	if err != nil {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		httpx.Error(w, "unauthorized", http.StatusUnauthorized)
 		return auth.Claims{}, false
 	}
 	if !isSuperAdminRole(claims.Role) {
-		http.Error(w, "insufficient org role", http.StatusForbidden)
+		httpx.Error(w, "insufficient org role", http.StatusForbidden)
 		return auth.Claims{}, false
 	}
 	return claims, true

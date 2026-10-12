@@ -5,6 +5,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/luckylhb90/bnbloc/internal/httpx"
 	"github.com/luckylhb90/bnbloc/internal/obs"
 	"github.com/luckylhb90/bnbloc/internal/store"
 	"github.com/luckylhb90/bnbloc/internal/tenant"
@@ -23,8 +24,7 @@ import (
 // retentionReady answers 501 when the stores are not configured.
 func (s *Service) retentionReady(w http.ResponseWriter) bool {
 	if s.Settings == nil || s.Tenants == nil {
-		obs.ServerError(w, "retention policy not configured", nil)
-		writeErr(w, http.StatusNotImplemented, "retention policy not configured")
+		httpx.Unavailable(w, "retention policy")
 		return false
 	}
 	return true
@@ -35,13 +35,13 @@ func (s *Service) platformRetentionView(w http.ResponseWriter, r *http.Request) 
 	def, err := store.LoadPlatformRetention(r.Context(), s.Settings)
 	if err != nil {
 		obs.ServerError(w, "read retention default failed", err)
-		writeErr(w, http.StatusInternalServerError, "read retention default failed")
+		httpx.Error(w, "read retention default failed", http.StatusInternalServerError)
 		return wire.PlatformRetentionView{}, false
 	}
 	status, err := store.LoadRetentionStatus(r.Context(), s.Settings)
 	if err != nil {
 		obs.ServerError(w, "read retention status failed", err)
-		writeErr(w, http.StatusInternalServerError, "read retention status failed")
+		httpx.Error(w, "read retention status failed", http.StatusInternalServerError)
 		return wire.PlatformRetentionView{}, false
 	}
 	return wire.PlatformRetentionView{Default: def, Limits: wire.CurrentRetentionLimits(), Status: status}, true
@@ -52,7 +52,7 @@ func (s *Service) handleGetPlatformRetention(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	if v, ok := s.platformRetentionView(w, r); ok {
-		writeJSON(w, http.StatusOK, v)
+		httpx.WriteJSON(w, http.StatusOK, v)
 	}
 }
 
@@ -63,22 +63,22 @@ func (s *Service) handlePutPlatformRetention(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	var body wire.RetentionPolicy
-	if !decodeJSON(w, r, &body) {
+	if !httpx.DecodeJSON(w, r, httpx.DefaultBodyLimit, &body) {
 		return
 	}
 	if err := body.Validate(); err != nil {
-		writeErr(w, http.StatusBadRequest, err.Error())
+		httpx.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 	actor := callerSubject(r)
 	if err := store.SavePlatformRetention(r.Context(), s.Settings, body, actor, s.nowMs()); err != nil {
 		obs.ServerError(w, "save retention default failed", err)
-		writeErr(w, http.StatusInternalServerError, "save retention default failed")
+		httpx.Error(w, "save retention default failed", http.StatusInternalServerError)
 		return
 	}
 	s.audit(r.Context(), store.ExtAuditRecord{Kind: wire.AuditKindRetention, Name: "platform", Action: "policy", Actor: actor, Detail: retentionDetail(body.AsDefault(), "forever")})
 	if v, ok := s.platformRetentionView(w, r); ok {
-		writeJSON(w, http.StatusOK, v)
+		httpx.WriteJSON(w, http.StatusOK, v)
 	}
 }
 
@@ -87,7 +87,7 @@ func (s *Service) tenantRetentionView(w http.ResponseWriter, r *http.Request, t 
 	def, err := store.LoadPlatformRetention(r.Context(), s.Settings)
 	if err != nil {
 		obs.ServerError(w, "read retention default failed", err)
-		writeErr(w, http.StatusInternalServerError, "read retention default failed")
+		httpx.Error(w, "read retention default failed", http.StatusInternalServerError)
 		return wire.TenantRetentionView{}, false
 	}
 	return wire.TenantRetentionView{
@@ -102,11 +102,11 @@ func (s *Service) handleGetTenantRetention(w http.ResponseWriter, r *http.Reques
 	}
 	t, err := s.Tenants.GetTenant(r.Context(), tenant.FromContext(r.Context()))
 	if err != nil {
-		writeErr(w, http.StatusNotFound, "tenant not found")
+		httpx.Error(w, "tenant not found", http.StatusNotFound)
 		return
 	}
 	if v, ok := s.tenantRetentionView(w, r, t); ok {
-		writeJSON(w, http.StatusOK, v)
+		httpx.WriteJSON(w, http.StatusOK, v)
 	}
 }
 
@@ -117,27 +117,27 @@ func (s *Service) handlePutTenantRetention(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	var body wire.RetentionPolicy
-	if !decodeJSON(w, r, &body) {
+	if !httpx.DecodeJSON(w, r, httpx.DefaultBodyLimit, &body) {
 		return
 	}
 	if err := body.Validate(); err != nil {
-		writeErr(w, http.StatusBadRequest, err.Error())
+		httpx.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 	tid := tenant.FromContext(r.Context())
 	t, err := s.Tenants.SetTenantRetention(r.Context(), tid, body)
 	if err == store.ErrTenantNotFound {
-		writeErr(w, http.StatusNotFound, "tenant not found")
+		httpx.Error(w, "tenant not found", http.StatusNotFound)
 		return
 	}
 	if err != nil {
 		obs.ServerError(w, "save tenant retention failed", err)
-		writeErr(w, http.StatusInternalServerError, "save tenant retention failed")
+		httpx.Error(w, "save tenant retention failed", http.StatusInternalServerError)
 		return
 	}
 	s.audit(r.Context(), store.ExtAuditRecord{Kind: wire.AuditKindRetention, Name: tid, Action: "policy", Actor: callerSubject(r), TenantID: tid, Detail: retentionDetail(body, "default")})
 	if v, ok := s.tenantRetentionView(w, r, t); ok {
-		writeJSON(w, http.StatusOK, v)
+		httpx.WriteJSON(w, http.StatusOK, v)
 	}
 }
 

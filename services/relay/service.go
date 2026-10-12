@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/luckylhb90/bnbloc/internal/httpx"
 	"github.com/luckylhb90/bnbloc/internal/obs"
 	"github.com/luckylhb90/bnbloc/internal/shard"
 )
@@ -193,24 +194,23 @@ type candidateBody struct {
 func (s *Service) handleRendezvousPublish(w http.ResponseWriter, r *http.Request) {
 	sessionKey := r.PathValue("sessionKey")
 	if strings.TrimSpace(sessionKey) == "" {
-		http.Error(w, "session key required", http.StatusBadRequest)
+		httpx.Error(w, "session key required", http.StatusBadRequest)
 		return
 	}
 	var body candidateBody
 	// Cap the body so a single publish cannot amplify memory. The limit covers
 	// the JSON envelope around a maxCandidateBytes candidate.
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxCandidateBytes+512)).Decode(&body); err != nil {
-		http.Error(w, "invalid json body", http.StatusBadRequest)
+	if !httpx.DecodeJSON(w, r, maxCandidateBytes+512, &body) {
 		return
 	}
 	if len(body.Candidate) > maxCandidateBytes {
-		http.Error(w, "candidate too large", http.StatusRequestEntityTooLarge)
+		httpx.Error(w, "candidate too large", http.StatusRequestEntityTooLarge)
 		return
 	}
 	p, ok := s.pairingFor(sessionKey)
 	if !ok {
 		obs.ServerError(w, "too many sessions", nil)
-		http.Error(w, "too many sessions", http.StatusServiceUnavailable)
+		httpx.Error(w, "too many sessions", http.StatusServiceUnavailable)
 		return
 	}
 	p.mu.Lock()
@@ -220,7 +220,7 @@ func (s *Service) handleRendezvousPublish(w http.ResponseWriter, r *http.Request
 	// the queue without bound.
 	if len(p.candidates[body.PeerID]) >= maxCandidatesPerPeer {
 		p.mu.Unlock()
-		http.Error(w, "candidate queue full", http.StatusTooManyRequests)
+		httpx.Error(w, "candidate queue full", http.StatusTooManyRequests)
 		return
 	}
 	p.candidates[body.PeerID] = append(p.candidates[body.PeerID], []byte(body.Candidate))

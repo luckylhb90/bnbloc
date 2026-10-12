@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/luckylhb90/bnbloc/internal/httpx"
 	"github.com/luckylhb90/bnbloc/internal/membership"
 	"github.com/luckylhb90/bnbloc/internal/roomctx"
 	"github.com/luckylhb90/bnbloc/internal/store"
@@ -32,7 +33,7 @@ type sharedAccess struct {
 func (s *Service) handleAccess(w http.ResponseWriter, r *http.Request) {
 	roomID, err := roomctx.Normalize(r.PathValue("roomId"))
 	if err != nil {
-		writeErr(w, http.StatusBadRequest, err.Error())
+		httpx.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 	if _, ok := s.requireMember(w, r, roomID, callerSubject(r), membership.AnyMember); !ok {
@@ -41,7 +42,7 @@ func (s *Service) handleAccess(w http.ResponseWriter, r *http.Request) {
 	grantID := r.URL.Query().Get("grantId")
 	grant, err := s.Grants.GetGrant(r.Context(), grantID)
 	if err != nil || grant.RoomID != roomID {
-		writeErr(w, http.StatusNotFound, "grant not found")
+		httpx.Error(w, "grant not found", http.StatusNotFound)
 		return
 	}
 	snapshot := sharedAccess{
@@ -64,7 +65,7 @@ func (s *Service) handleAccess(w http.ResponseWriter, r *http.Request) {
 		}
 		snapshot.RunQuotaRemaining = &remaining
 	}
-	writeJSON(w, http.StatusOK, snapshot)
+	httpx.WriteJSON(w, http.StatusOK, snapshot)
 }
 
 func callerSubject(r *http.Request) string {

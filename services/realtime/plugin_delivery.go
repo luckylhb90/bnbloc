@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/luckylhb90/bnbloc/core/pkgmeta"
+	"github.com/luckylhb90/bnbloc/internal/httpx"
 	"github.com/luckylhb90/bnbloc/internal/obs"
 	"github.com/luckylhb90/bnbloc/internal/store"
 	"github.com/luckylhb90/bnbloc/internal/tenant"
@@ -37,20 +38,20 @@ func (s *Service) registerPluginRoutes(mux *http.ServeMux) {
 func (s *Service) handlePluginEvents(w http.ResponseWriter, r *http.Request) {
 	subject := strings.TrimSpace(r.Header.Get("X-Bnbloc-User"))
 	if subject == "" {
-		http.Error(w, "missing authenticated subject", http.StatusUnauthorized)
+		httpx.Error(w, "missing authenticated subject", http.StatusUnauthorized)
 		return
 	}
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		obs.ServerError(w, "streaming unsupported", nil)
-		http.Error(w, "streaming unsupported", http.StatusInternalServerError)
+		httpx.Error(w, "streaming unsupported", http.StatusInternalServerError)
 		return
 	}
 	// ?plugins=1: the desktop runs a plugin sidecar. Without it the stream
 	// carries catalog hints only.
 	st, err := s.PluginHooks.subscribe(subject, tenant.FromContext(r.Context()), r.URL.Query().Get("plugins") == "1")
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusTooManyRequests)
+		httpx.Error(w, err.Error(), http.StatusTooManyRequests)
 		return
 	}
 	defer s.PluginHooks.unsubscribe(st)
@@ -98,21 +99,19 @@ func (s *Service) handlePluginEvents(w http.ResponseWriter, r *http.Request) {
 func (s *Service) handlePluginEventAck(w http.ResponseWriter, r *http.Request) {
 	subject := strings.TrimSpace(r.Header.Get("X-Bnbloc-User"))
 	if subject == "" {
-		http.Error(w, "missing authenticated subject", http.StatusUnauthorized)
+		httpx.Error(w, "missing authenticated subject", http.StatusUnauthorized)
 		return
 	}
 	var ack wire.PluginDeliveryAck
-	r.Body = http.MaxBytesReader(w, r.Body, maxSmallBodyBytes)
-	if err := json.NewDecoder(r.Body).Decode(&ack); err != nil {
-		http.Error(w, "invalid json body", http.StatusBadRequest)
+	if !httpx.DecodeJSON(w, r, maxSmallBodyBytes, &ack) {
 		return
 	}
 	if ack.Status != wire.PluginDeliveryDelivered && ack.Status != wire.PluginDeliveryFailed {
-		http.Error(w, `status must be "delivered" or "failed"`, http.StatusBadRequest)
+		httpx.Error(w, `status must be "delivered" or "failed"`, http.StatusBadRequest)
 		return
 	}
 	if !s.PluginHooks.ack(r.Context(), subject, r.PathValue("id"), ack) {
-		http.Error(w, "delivery not found", http.StatusNotFound)
+		httpx.Error(w, "delivery not found", http.StatusNotFound)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

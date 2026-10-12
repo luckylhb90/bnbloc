@@ -8,12 +8,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"io"
 	"net/http"
 	"strings"
 	"time"
 
+	"github.com/luckylhb90/bnbloc/internal/httpx"
 	"github.com/luckylhb90/bnbloc/internal/membership"
 	"github.com/luckylhb90/bnbloc/internal/obs"
 	"github.com/luckylhb90/bnbloc/internal/roomctx"
@@ -90,12 +90,12 @@ type Service struct {
 // is missing or refused.
 func (s *Service) requireMember(w http.ResponseWriter, r *http.Request, roomID, caller string, need membership.Need) (membership.Member, bool) {
 	if caller == "" {
-		writeErr(w, http.StatusUnauthorized, "missing authenticated subject")
+		httpx.Error(w, "missing authenticated subject", http.StatusUnauthorized)
 		return membership.Member{}, false
 	}
 	m, err := membership.RoomScope(r.Context(), s.Membership, roomID, caller, need)
 	if err != nil {
-		writeErr(w, http.StatusForbidden, err.Error())
+		httpx.Error(w, err.Error(), http.StatusForbidden)
 		return membership.Member{}, false
 	}
 	return m, true
@@ -214,7 +214,7 @@ func (s *Service) handleAction(action string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		roomID, err := roomctx.Normalize(r.PathValue("roomId"))
 		if err != nil {
-			writeErr(w, http.StatusBadRequest, err.Error())
+			httpx.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
 		actor := strings.TrimSpace(r.Header.Get("X-Bnbloc-User"))
@@ -222,7 +222,7 @@ func (s *Service) handleAction(action string) http.HandlerFunc {
 			return
 		}
 		var body actionBody
-		if !decodeJSON(w, r, &body) {
+		if !httpx.DecodeJSON(w, r, httpx.DefaultBodyLimit, &body) {
 			return
 		}
 		req := shareagent.Request{
@@ -242,14 +242,14 @@ func (s *Service) handleAction(action string) http.HandlerFunc {
 			if body.LeaseID != "" {
 				s.Controller.Release(r.Context(), body.LeaseID)
 			}
-			writeJSON(w, http.StatusOK, map[string]any{"accepted": decision.Allowed})
+			httpx.WriteJSON(w, http.StatusOK, map[string]any{"accepted": decision.Allowed})
 			return
 		}
 
 		decision := s.Controller.Authorize(r.Context(), req)
 		if !decision.Allowed {
 			// Fail closed with the stable deny reason.
-			writeJSON(w, http.StatusForbidden, map[string]string{"denyReason": decision.DenyReason})
+			httpx.WriteJSON(w, http.StatusForbidden, map[string]string{"denyReason": decision.DenyReason})
 			return
 		}
 		// For a turn, proxy to the owner daemon. The request carries model/
@@ -260,13 +260,13 @@ func (s *Service) handleAction(action string) http.HandlerFunc {
 			if proxyErr != nil {
 				s.Controller.Release(r.Context(), decision.LeaseID)
 				obs.ServerError(w, "grant action failed", proxyErr)
-				writeJSON(w, http.StatusBadGateway, map[string]string{"error": "owner turn proxy failed"})
+				httpx.Error(w, "owner turn proxy failed", http.StatusBadGateway)
 				return
 			}
-			writeJSON(w, http.StatusOK, map[string]any{"accepted": true, "leaseId": decision.LeaseID, "result": result})
+			httpx.WriteJSON(w, http.StatusOK, map[string]any{"accepted": true, "leaseId": decision.LeaseID, "result": result})
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"accepted": true, "leaseId": decision.LeaseID})
+		httpx.WriteJSON(w, http.StatusOK, map[string]any{"accepted": true, "leaseId": decision.LeaseID})
 	}
 }
 
@@ -309,44 +309,3 @@ var errOwnerUnavailable = &proxyError{"owner endpoint unavailable"}
 type proxyError struct{ msg string }
 
 func (e *proxyError) Error() string { return e.msg }
-
-// maxJSONBodyBytes caps every shareagent JSON request body. The largest
-// legitimate body (an authorization with a model list) is a few hundred bytes;
-// the cap stops a client from streaming an unbounded payload into the decoder.
-const maxJSONBodyBytes = 64 << 10
-
-// decodeJSON decodes a size-capped JSON request body into v. It writes 413 for
-// an oversized body and 400 for malformed JSON, returning false in both cases.
-func decodeJSON(w http.ResponseWriter, r *http.Request, v any) bool {
-	return decodeJSONBody(w, r, v, false)
-}
-
-// decodeOptionalJSON is decodeJSON for endpoints whose body may be empty.
-func decodeOptionalJSON(w http.ResponseWriter, r *http.Request, v any) bool {
-	return decodeJSONBody(w, r, v, true)
-}
-
-func decodeJSONBody(w http.ResponseWriter, r *http.Request, v any, optional bool) bool {
-	r.Body = http.MaxBytesReader(w, r.Body, maxJSONBodyBytes)
-	err := json.NewDecoder(r.Body).Decode(v)
-	if err == nil || (optional && errors.Is(err, io.EOF)) {
-		return true
-	}
-	var tooLarge *http.MaxBytesError
-	if errors.As(err, &tooLarge) {
-		writeErr(w, http.StatusRequestEntityTooLarge, "request body too large")
-		return false
-	}
-	writeErr(w, http.StatusBadRequest, "invalid json body")
-	return false
-}
-
-func writeJSON(w http.ResponseWriter, code int, v any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(code)
-	_ = json.NewEncoder(w).Encode(v)
-}
-
-func writeErr(w http.ResponseWriter, code int, msg string) {
-	writeJSON(w, code, map[string]string{"error": msg})
-}

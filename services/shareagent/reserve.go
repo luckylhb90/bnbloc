@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/luckylhb90/bnbloc/internal/httpx"
 	"github.com/luckylhb90/bnbloc/internal/ids"
 	"github.com/luckylhb90/bnbloc/internal/membership"
 	"github.com/luckylhb90/bnbloc/internal/obs"
@@ -58,7 +59,7 @@ type reserveBorrowBody struct {
 func (s *Service) handleReserveBorrow(w http.ResponseWriter, r *http.Request) {
 	roomID, err := roomctx.Normalize(r.PathValue("roomId"))
 	if err != nil {
-		writeErr(w, http.StatusBadRequest, err.Error())
+		httpx.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 	caller := callerSubject(r)
@@ -68,26 +69,26 @@ func (s *Service) handleReserveBorrow(w http.ResponseWriter, r *http.Request) {
 	owner := strings.TrimSpace(r.URL.Query().Get("owner"))
 	provider := providerFromTarget(r.PathValue("targetId"))
 	if owner == "" || provider == "" {
-		writeErr(w, http.StatusBadRequest, "owner and shared-agent:<provider> target required")
+		httpx.Error(w, "owner and shared-agent:<provider> target required", http.StatusBadRequest)
 		return
 	}
 	if caller != owner {
-		writeErr(w, http.StatusForbidden, "only the agent owner may reserve a borrow")
+		httpx.Error(w, "only the agent owner may reserve a borrow", http.StatusForbidden)
 		return
 	}
 	var body reserveBorrowBody
-	if !decodeJSON(w, r, &body) {
+	if !httpx.DecodeJSON(w, r, httpx.DefaultBodyLimit, &body) {
 		return
 	}
 	borrower := strings.TrimSpace(body.Borrower)
 	if borrower == "" || borrower == owner {
-		writeErr(w, http.StatusBadRequest, "borrower must be a member other than the owner")
+		httpx.Error(w, "borrower must be a member other than the owner", http.StatusBadRequest)
 		return
 	}
 	// The borrower drives the agent: a member who may chat (never a visitor
 	// or an agent host).
 	if _, err := membership.RoomScope(r.Context(), s.Membership, roomID, borrower, membership.Chat); err != nil {
-		writeErr(w, http.StatusForbidden, "borrower: "+err.Error())
+		httpx.Error(w, "borrower: "+err.Error(), http.StatusForbidden)
 		return
 	}
 	channelID := strings.TrimSpace(body.ChannelId)
@@ -108,7 +109,7 @@ func (s *Service) handleReserveBorrow(w http.ResponseWriter, r *http.Request) {
 			RoomID: roomID, GrantID: grantID, ActorUserID: borrower, OwnerUserID: owner,
 			Action: "turn", Decision: "deny", DenyReason: reason, Model: model, ChannelID: channelID, AtMs: s.Now(),
 		})
-		writeJSON(w, http.StatusForbidden, map[string]any{"reserved": false, "denyReason": reason, "sandboxRequired": platform})
+		httpx.WriteJSON(w, http.StatusForbidden, map[string]any{"reserved": false, "denyReason": reason, "sandboxRequired": platform})
 	}
 	switch {
 	case platform && current.ExpiresAtMs != nil:
@@ -129,14 +130,14 @@ func (s *Service) handleReserveBorrow(w http.ResponseWriter, r *http.Request) {
 		runQuota, costAllowance, err := s.tenantCeilings(r.Context())
 		if err != nil {
 			obs.ServerError(w, "reserve borrow failed", err)
-			writeErr(w, http.StatusInternalServerError, "reserve borrow failed")
+			httpx.Error(w, "reserve borrow failed", http.StatusInternalServerError)
 			return
 		}
 		if runQuota > 0 || costAllowance > 0 {
 			runs, cost, err := s.Grants.TenantUsage(r.Context())
 			if err != nil {
 				obs.ServerError(w, "reserve borrow failed", err)
-				writeErr(w, http.StatusInternalServerError, "reserve borrow failed")
+				httpx.Error(w, "reserve borrow failed", http.StatusInternalServerError)
 				return
 			}
 			if (runQuota > 0 && runs >= runQuota) || (costAllowance > 0 && cost >= costAllowance) {
@@ -165,7 +166,7 @@ func (s *Service) handleReserveBorrow(w http.ResponseWriter, r *http.Request) {
 		return
 	case err != nil:
 		obs.ServerError(w, "reserve borrow failed", err)
-		writeErr(w, http.StatusInternalServerError, "reserve borrow failed")
+		httpx.Error(w, "reserve borrow failed", http.StatusInternalServerError)
 		return
 	}
 	shareagent.RecordDecision(s.Metrics, "allow", "")
@@ -182,7 +183,7 @@ func (s *Service) handleReserveBorrow(w http.ResponseWriter, r *http.Request) {
 	if platform && spec.DefaultModel != "" {
 		resp["defaultModel"] = spec.DefaultModel
 	}
-	writeJSON(w, http.StatusOK, resp)
+	httpx.WriteJSON(w, http.StatusOK, resp)
 }
 
 // clipModel trims a core-reported model label and clips an over-long one to

@@ -3,10 +3,12 @@ package room
 import (
 	"context"
 	"errors"
-	"github.com/luckylhb90/bnbloc/internal/wire"
 	"log/slog"
 	"net/http"
 	"strings"
+
+	"github.com/luckylhb90/bnbloc/internal/httpx"
+	"github.com/luckylhb90/bnbloc/internal/wire"
 
 	"github.com/luckylhb90/bnbloc/internal/obs"
 	"github.com/luckylhb90/bnbloc/internal/secrettoken"
@@ -84,8 +86,7 @@ func (s *Service) tenantPolicy(ctx context.Context) (store.Tenant, error) {
 // sharesReady checks the share routes' dependencies.
 func (s *Service) sharesReady(w http.ResponseWriter) bool {
 	if s.Artifacts == nil || s.Tenants == nil {
-		obs.ServerError(w, "artifact shares not configured", nil)
-		writeErr(w, http.StatusServiceUnavailable, "artifact shares not configured")
+		httpx.Unavailable(w, "artifact shares")
 		return false
 	}
 	return true
@@ -96,12 +97,12 @@ func (s *Service) sharesReady(w http.ResponseWriter) bool {
 func (s *Service) shareArtifact(w http.ResponseWriter, r *http.Request) (store.Artifact, bool) {
 	roomID := r.PathValue("roomId")
 	if !s.Store.IsMember(r.Context(), roomID, caller(r)) {
-		writeErr(w, http.StatusForbidden, "caller is not a member of room")
+		httpx.Error(w, "caller is not a member of room", http.StatusForbidden)
 		return store.Artifact{}, false
 	}
 	art, err := s.Artifacts.GetArtifact(r.Context(), r.PathValue("artifactId"))
 	if err != nil || art.RoomID != roomID {
-		writeErr(w, http.StatusNotFound, "artifact not found")
+		httpx.Error(w, "artifact not found", http.StatusNotFound)
 		return store.Artifact{}, false
 	}
 	return art, true
@@ -121,40 +122,40 @@ func (s *Service) handleCreateShare(w http.ResponseWriter, r *http.Request) {
 		Version        int `json:"version"`
 		ExpiresInHours int `json:"expiresInHours"`
 	}
-	if !decode(w, r, &body) {
+	if !httpx.DecodeJSON(w, r, maxJSONBodyBytes, &body) {
 		return
 	}
 	if body.Version < 0 {
-		writeErr(w, http.StatusBadRequest, "version must be 0 (latest) or an existing version")
+		httpx.Error(w, "version must be 0 (latest) or an existing version", http.StatusBadRequest)
 		return
 	}
 	if body.ExpiresInHours == 0 {
 		body.ExpiresInHours = defaultShareTTLHours
 	}
 	if body.ExpiresInHours < 1 || body.ExpiresInHours > maxShareTTLHours {
-		writeErr(w, http.StatusBadRequest, "expiresInHours must be 1..2160")
+		httpx.Error(w, "expiresInHours must be 1..2160", http.StatusBadRequest)
 		return
 	}
 	if body.Version > 0 {
 		if _, err := s.Artifacts.GetArtifactVersion(r.Context(), art.ArtifactID, body.Version); err != nil {
-			writeErr(w, http.StatusBadRequest, "version does not exist")
+			httpx.Error(w, "version does not exist", http.StatusBadRequest)
 			return
 		}
 	}
 	policy, err := s.tenantPolicy(r.Context())
 	if err != nil {
 		obs.ServerError(w, "read tenant policy failed", err)
-		writeErr(w, http.StatusInternalServerError, "read tenant policy failed")
+		httpx.Error(w, "read tenant policy failed", http.StatusInternalServerError)
 		return
 	}
 	if policy.PublicSharesDisabled {
-		writeErr(w, http.StatusForbidden, errPublicSharesDisabled)
+		httpx.Error(w, errPublicSharesDisabled, http.StatusForbidden)
 		return
 	}
 	id, token, hash, err := shareTokenFormat.New()
 	if err != nil {
 		obs.ServerError(w, "mint share token failed", err)
-		writeErr(w, http.StatusInternalServerError, "create share failed")
+		httpx.Error(w, "create share failed", http.StatusInternalServerError)
 		return
 	}
 	now := s.Now()
@@ -164,10 +165,10 @@ func (s *Service) handleCreateShare(w http.ResponseWriter, r *http.Request) {
 	})
 	if err != nil {
 		obs.ServerError(w, "create share failed", err)
-		writeErr(w, http.StatusInternalServerError, "create share failed")
+		httpx.Error(w, "create share failed", http.StatusInternalServerError)
 		return
 	}
-	writeJSON(w, http.StatusCreated, map[string]any{"share": viewShare(sh, now), "token": token})
+	httpx.WriteJSON(w, http.StatusCreated, map[string]any{"share": viewShare(sh, now), "token": token})
 }
 
 // handleListShares lists an artifact's links, newest first; revoked and
@@ -184,14 +185,14 @@ func (s *Service) handleListShares(w http.ResponseWriter, r *http.Request) {
 	list, err := s.Artifacts.ListArtifactShares(r.Context(), art.RoomID, art.ArtifactID, now-shareListWindowMs)
 	if err != nil {
 		obs.ServerError(w, "list shares failed", err)
-		writeErr(w, http.StatusInternalServerError, "list shares failed")
+		httpx.Error(w, "list shares failed", http.StatusInternalServerError)
 		return
 	}
 	out := make([]wire.ShareView, 0, len(list))
 	for _, sh := range list {
 		out = append(out, viewShare(sh, now))
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"shares": out})
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"shares": out})
 }
 
 // handleRevokeShare revokes a link (204, idempotent). Allowed for the link's
@@ -208,30 +209,30 @@ func (s *Service) handleRevokeShare(w http.ResponseWriter, r *http.Request) {
 	orgAdmin, err := s.isOrgAdmin(ctx, user)
 	if err != nil {
 		obs.ServerError(w, "read org role failed", err)
-		writeErr(w, http.StatusInternalServerError, "read org role failed")
+		httpx.Error(w, "read org role failed", http.StatusInternalServerError)
 		return
 	}
 	if !member && !orgAdmin {
-		writeErr(w, http.StatusForbidden, "caller is not a member of room")
+		httpx.Error(w, "caller is not a member of room", http.StatusForbidden)
 		return
 	}
 	sh, err := s.Artifacts.GetArtifactShare(ctx, r.PathValue("shareId"))
 	if errors.Is(err, store.ErrArtifactShareNotFound) || (err == nil && (sh.RoomID != roomID || sh.ArtifactID != r.PathValue("artifactId"))) {
-		writeErr(w, http.StatusNotFound, "share not found")
+		httpx.Error(w, "share not found", http.StatusNotFound)
 		return
 	}
 	if err != nil {
 		obs.ServerError(w, "read share failed", err)
-		writeErr(w, http.StatusInternalServerError, "read share failed")
+		httpx.Error(w, "read share failed", http.StatusInternalServerError)
 		return
 	}
 	if !orgAdmin && sh.CreatedBy != user && !(member && role.CanInvite()) {
-		writeErr(w, http.StatusForbidden, "only the link's creator, a room owner or admin, or an org admin may revoke it")
+		httpx.Error(w, "only the link's creator, a room owner or admin, or an org admin may revoke it", http.StatusForbidden)
 		return
 	}
 	if _, err := s.Artifacts.RevokeArtifactShare(ctx, sh.ShareID, user, s.Now()); err != nil {
 		obs.ServerError(w, "revoke share failed", err)
-		writeErr(w, http.StatusInternalServerError, "revoke share failed")
+		httpx.Error(w, "revoke share failed", http.StatusInternalServerError)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -258,7 +259,7 @@ func (s *Service) handleTenantShares(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if caller(r) == "" {
-		writeErr(w, http.StatusUnauthorized, "missing authenticated subject")
+		httpx.Error(w, "missing authenticated subject", http.StatusUnauthorized)
 		return
 	}
 	now := s.Now()
@@ -269,14 +270,14 @@ func (s *Service) handleTenantShares(w http.ResponseWriter, r *http.Request) {
 	list, err := s.Artifacts.ListTenantArtifactShares(r.Context(), q)
 	if err != nil {
 		obs.ServerError(w, "list tenant shares failed", err)
-		writeErr(w, http.StatusInternalServerError, "list tenant shares failed")
+		httpx.Error(w, "list tenant shares failed", http.StatusInternalServerError)
 		return
 	}
 	out := make([]tenantShareView, 0, len(list))
 	for _, sh := range list {
 		out = append(out, tenantShareView{ShareView: viewShare(sh.ArtifactShare, now), RoomID: sh.RoomID, ArtifactTitle: sh.ArtifactTitle})
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"shares": out})
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"shares": out})
 }
 
 // handleResolveShare is POST /internal/v1/shares/resolve {token, countView}
@@ -287,7 +288,7 @@ func (s *Service) handleTenantShares(w http.ResponseWriter, r *http.Request) {
 // so a token holder learns nothing about a dead link.
 func (s *Service) handleResolveShare(w http.ResponseWriter, r *http.Request) {
 	if caller(r) != shareResolverSubject {
-		writeErr(w, http.StatusForbidden, "share resolution is gateway-only")
+		httpx.Error(w, "share resolution is gateway-only", http.StatusForbidden)
 		return
 	}
 	if !s.sharesReady(w) || !s.profilesReady(w) {
@@ -297,20 +298,20 @@ func (s *Service) handleResolveShare(w http.ResponseWriter, r *http.Request) {
 		Token     string `json:"token"`
 		CountView bool   `json:"countView"`
 	}
-	if !decode(w, r, &body) {
+	if !httpx.DecodeJSON(w, r, maxJSONBodyBytes, &body) {
 		return
 	}
 	res, ok, err := s.resolveShare(r.Context(), body.Token, body.CountView)
 	if err != nil {
 		obs.ServerError(w, "resolve share failed", err)
-		writeErr(w, http.StatusInternalServerError, "resolve share failed")
+		httpx.Error(w, "resolve share failed", http.StatusInternalServerError)
 		return
 	}
 	if !ok {
-		writeErr(w, http.StatusNotFound, "share not found")
+		httpx.Error(w, "share not found", http.StatusNotFound)
 		return
 	}
-	writeJSON(w, http.StatusOK, res)
+	httpx.WriteJSON(w, http.StatusOK, res)
 }
 
 // resolveShare implements the resolve route: ok=false for every inactive

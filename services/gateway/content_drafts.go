@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/luckylhb90/bnbloc/internal/contentpkg"
+	"github.com/luckylhb90/bnbloc/internal/httpx"
 	"github.com/luckylhb90/bnbloc/internal/ids"
 	"github.com/luckylhb90/bnbloc/internal/obs"
 	"github.com/luckylhb90/bnbloc/internal/store"
@@ -30,7 +31,7 @@ func (s *Service) handleStageContentDraft(w http.ResponseWriter, r *http.Request
 		return
 	}
 	if actor.Job == nil {
-		http.Error(w, "a draft is staged by the bridge running a job (?job=&room=)", http.StatusBadRequest)
+		httpx.Error(w, "a draft is staged by the bridge running a job (?job=&room=)", http.StatusBadRequest)
 		return
 	}
 	opts, ok := s.saveContentOptions(w, r, actor.Claims)
@@ -38,7 +39,7 @@ func (s *Service) handleStageContentDraft(w http.ResponseWriter, r *http.Request
 		return
 	}
 	if !isArchiveBody(r) {
-		http.Error(w, "send the draft as a package archive (application/x-tar)", http.StatusUnsupportedMediaType)
+		httpx.Error(w, "send the draft as a package archive (application/x-tar)", http.StatusUnsupportedMediaType)
 		return
 	}
 	raw, ok := readBody(w, r, tarbundle.ContentLimits.MaxArchiveBytes())
@@ -47,28 +48,28 @@ func (s *Service) handleStageContentDraft(w http.ResponseWriter, r *http.Request
 	}
 	pkg, bundle, err := importArchive(raw, opts)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		httpx.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 	m := pkg.Manifest
 	switch {
 	case m.Kind != contentpkg.KindExpert && m.Kind != contentpkg.KindSkill:
-		http.Error(w, "only an expert or a skill pack can be tried: an agent wears it", http.StatusBadRequest)
+		httpx.Error(w, "only an expert or a skill pack can be tried: an agent wears it", http.StatusBadRequest)
 		return
 	case m.Team != nil:
-		http.Error(w, "a team cannot be tried as a draft: try each member's expert, then save the team", http.StatusBadRequest)
+		httpx.Error(w, "a team cannot be tried as a draft: try each member's expert, then save the team", http.StatusBadRequest)
 		return
 	}
 	key, err := s.storeBundle(r.Context(), pkg, bundle)
 	if err != nil {
 		obs.ServerError(w, "store draft bundle failed", err)
-		http.Error(w, "store draft bundle failed", http.StatusBadGateway)
+		httpx.Error(w, "store draft bundle failed", http.StatusBadGateway)
 		return
 	}
 	manifest, err := json.Marshal(m)
 	if err != nil {
 		obs.ServerError(w, "encode draft manifest failed", err)
-		http.Error(w, "encode draft manifest failed", http.StatusInternalServerError)
+		httpx.Error(w, "encode draft manifest failed", http.StatusInternalServerError)
 		return
 	}
 	job := actor.Job
@@ -84,8 +85,8 @@ func (s *Service) handleStageContentDraft(w http.ResponseWriter, r *http.Request
 	}
 	if err := s.ContentComponents.PutContentDraft(tenant.NewContext(r.Context(), job.TenantID), d); err != nil {
 		obs.ServerError(w, "stage content draft failed", err)
-		http.Error(w, "stage content draft failed", http.StatusInternalServerError)
+		httpx.Error(w, "stage content draft failed", http.StatusInternalServerError)
 		return
 	}
-	writeJSON(w, http.StatusCreated, wire.ContentDraft{ID: d.ID, Kind: shortKind(m.Kind), Name: m.Name, DisplayName: m.DisplayName, Version: m.Version, ExpiresAtMs: d.ExpiresAtMs})
+	httpx.WriteJSON(w, http.StatusCreated, wire.ContentDraft{ID: d.ID, Kind: shortKind(m.Kind), Name: m.Name, DisplayName: m.DisplayName, Version: m.Version, ExpiresAtMs: d.ExpiresAtMs})
 }

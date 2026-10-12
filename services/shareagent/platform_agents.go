@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/luckylhb90/bnbloc/internal/httpx"
 	"github.com/luckylhb90/bnbloc/internal/membership"
 	"github.com/luckylhb90/bnbloc/internal/obs"
 	"github.com/luckylhb90/bnbloc/internal/roomctx"
@@ -56,8 +57,7 @@ const errNotPublished = "platform agent is not published"
 // registry is not configured.
 func (s *Service) platformAgentsReady(w http.ResponseWriter) bool {
 	if s.Settings == nil || s.Tenants == nil {
-		obs.ServerError(w, "platform agents not configured", nil)
-		writeErr(w, http.StatusNotImplemented, "platform agents not configured")
+		httpx.Unavailable(w, "platform agents")
 		return false
 	}
 	return true
@@ -68,7 +68,7 @@ func (s *Service) platformPolicy(w http.ResponseWriter, r *http.Request) (wire.P
 	p, err := store.LoadPlatformAgents(r.Context(), s.Settings)
 	if err != nil {
 		obs.ServerError(w, "read platform agents policy failed", err)
-		writeErr(w, http.StatusInternalServerError, "read platform agents policy failed")
+		httpx.Error(w, "read platform agents policy failed", http.StatusInternalServerError)
 		return wire.PlatformAgentsPolicy{}, false
 	}
 	return p, true
@@ -84,7 +84,7 @@ func (s *Service) handleGetPlatformAgentsPolicy(w http.ResponseWriter, r *http.R
 	if !ok {
 		return
 	}
-	writeJSON(w, http.StatusOK, p)
+	httpx.WriteJSON(w, http.StatusOK, p)
 }
 
 // handlePutPlatformAgentsPolicy is PUT /v1/platform/platform-agents
@@ -98,14 +98,14 @@ func (s *Service) handlePutPlatformAgentsPolicy(w http.ResponseWriter, r *http.R
 	}
 	host := callerSubject(r)
 	if host == "" {
-		writeErr(w, http.StatusUnauthorized, "missing authenticated subject")
+		httpx.Error(w, "missing authenticated subject", http.StatusUnauthorized)
 		return
 	}
 	var body struct {
 		Enabled bool                     `json:"enabled"`
 		Agents  []wire.PlatformAgentSpec `json:"agents"`
 	}
-	if !decodeJSON(w, r, &body) {
+	if !httpx.DecodeJSON(w, r, httpx.DefaultBodyLimit, &body) {
 		return
 	}
 	entry := wire.PlatformAgentHost{HostUserID: host, Enabled: body.Enabled, Agents: []wire.PlatformAgentSpec{}}
@@ -113,11 +113,11 @@ func (s *Service) handlePutPlatformAgentsPolicy(w http.ResponseWriter, r *http.R
 	for _, a := range body.Agents {
 		a = wire.PlatformAgentSpec{Core: strings.TrimSpace(a.Core), Provider: strings.TrimSpace(a.Provider), DefaultModel: strings.TrimSpace(a.DefaultModel)}
 		if a.Core == "" || a.Provider == "" {
-			writeErr(w, http.StatusBadRequest, "each agent needs a core and a provider")
+			httpx.Error(w, "each agent needs a core and a provider", http.StatusBadRequest)
 			return
 		}
 		if len([]rune(a.DefaultModel)) > maxRecordedModel {
-			writeErr(w, http.StatusBadRequest, "defaultModel is too long")
+			httpx.Error(w, "defaultModel is too long", http.StatusBadRequest)
 			return
 		}
 		if !seen[a.Ref()] {
@@ -132,7 +132,7 @@ func (s *Service) handlePutPlatformAgentsPolicy(w http.ResponseWriter, r *http.R
 	p := current.WithHost(entry)
 	if err := store.SavePlatformAgents(r.Context(), s.Settings, p, host, s.Now()); err != nil {
 		obs.ServerError(w, "save platform agents policy failed", err)
-		writeErr(w, http.StatusInternalServerError, "save platform agents policy failed")
+		httpx.Error(w, "save platform agents policy failed", http.StatusInternalServerError)
 		return
 	}
 	names := make([]string, 0, len(entry.Agents))
@@ -147,7 +147,7 @@ func (s *Service) handlePutPlatformAgentsPolicy(w http.ResponseWriter, r *http.R
 		Kind: wire.AuditKindPlatformAgent, Name: host, Action: "policy", Actor: host,
 		Detail: "enabled=" + boolWord(entry.Enabled) + " agents=" + strings.Join(names, ","),
 	})
-	writeJSON(w, http.StatusOK, p)
+	httpx.WriteJSON(w, http.StatusOK, p)
 }
 
 // platformGrantSpec returns the published spec of a platform grant's agent
@@ -233,7 +233,7 @@ func (s *Service) handleListPlatformAgents(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	if callerSubject(r) == "" {
-		writeErr(w, http.StatusUnauthorized, "missing authenticated subject")
+		httpx.Error(w, "missing authenticated subject", http.StatusUnauthorized)
 		return
 	}
 	p, ok := s.platformPolicy(w, r)
@@ -249,7 +249,7 @@ func (s *Service) handleListPlatformAgents(w http.ResponseWriter, r *http.Reques
 		}
 		agents = append(agents, agentView(a.Ref, hosts))
 	}
-	writeJSON(w, http.StatusOK, wire.PlatformAgentsReply{Agents: agents})
+	httpx.WriteJSON(w, http.StatusOK, wire.PlatformAgentsReply{Agents: agents})
 }
 
 // roomPlatformAgents groups the room's available platform grants into one
@@ -317,7 +317,7 @@ func (s *Service) handleListRoomPlatformAgents(w http.ResponseWriter, r *http.Re
 	for host, want := range hosts {
 		s.reconcileAgentHost(ctx, tid, roomID, host, want)
 	}
-	writeJSON(w, http.StatusOK, wire.PlatformAgentsReply{Agents: roomPlatformAgents(pgs, p, s.newHostStates(ctx))})
+	httpx.WriteJSON(w, http.StatusOK, wire.PlatformAgentsReply{Agents: roomPlatformAgents(pgs, p, s.newHostStates(ctx))})
 }
 
 // extendRoomPlatformAgents gives every agent added to the room (it holds a
@@ -408,13 +408,12 @@ func (s *Service) platformRoom(w http.ResponseWriter, r *http.Request) (string, 
 		return "", none, false
 	}
 	if s.AgentHosts == nil {
-		obs.ServerError(w, "agent-host memberships not configured", nil)
-		writeErr(w, http.StatusNotImplemented, "platform agents not configured")
+		httpx.Unavailable(w, "platform agents")
 		return "", none, false
 	}
 	roomID, err := roomctx.Normalize(r.PathValue("roomId"))
 	if err != nil {
-		writeErr(w, http.StatusBadRequest, err.Error())
+		httpx.Error(w, err.Error(), http.StatusBadRequest)
 		return "", none, false
 	}
 	m, ok := s.requireMember(w, r, roomID, callerSubject(r), membership.AnyMember)
@@ -437,11 +436,11 @@ func (s *Service) handleAddRoomPlatformAgent(w http.ResponseWriter, r *http.Requ
 	tid := tenant.FromContext(ctx)
 	caller := callerSubject(r)
 	if !m.MayChat() {
-		writeErr(w, http.StatusForbidden, "only a room member who may chat can add a platform agent")
+		httpx.Error(w, "only a room member who may chat can add a platform agent", http.StatusForbidden)
 		return
 	}
 	var body wire.PlatformAgentRef
-	if !decodeJSON(w, r, &body) {
+	if !httpx.DecodeJSON(w, r, httpx.DefaultBodyLimit, &body) {
 		return
 	}
 	ref := wire.PlatformAgentRef{Core: strings.TrimSpace(body.Core), Provider: strings.TrimSpace(body.Provider)}
@@ -451,7 +450,7 @@ func (s *Service) handleAddRoomPlatformAgent(w http.ResponseWriter, r *http.Requ
 	}
 	hosts := p.HostsOf(ref)
 	if ref.Core == "" || ref.Provider == "" || len(hosts) == 0 {
-		writeErr(w, http.StatusNotFound, errNotPublished)
+		httpx.Error(w, errNotPublished, http.StatusNotFound)
 		return
 	}
 	serving := map[string]bool{}
@@ -467,7 +466,7 @@ func (s *Service) handleAddRoomPlatformAgent(w http.ResponseWriter, r *http.Requ
 		}
 		if _, err := s.putPlatformHost(ctx, tid, roomID, h.HostUserID, ref, caller); err != nil {
 			obs.ServerError(w, "add platform agent host failed", err)
-			writeErr(w, http.StatusInternalServerError, "add platform agent failed")
+			httpx.Error(w, "add platform agent failed", http.StatusInternalServerError)
 			return
 		}
 		created = true
@@ -483,7 +482,7 @@ func (s *Service) handleAddRoomPlatformAgent(w http.ResponseWriter, r *http.Requ
 		code = http.StatusCreated
 		s.auditPlatformAgent(r, roomID, ref, "add")
 	}
-	writeJSON(w, code, map[string]any{"agent": view})
+	httpx.WriteJSON(w, code, map[string]any{"agent": view})
 }
 
 // handleRemoveRoomPlatformAgent is DELETE
@@ -501,7 +500,7 @@ func (s *Service) handleRemoveRoomPlatformAgent(w http.ResponseWriter, r *http.R
 	caller := callerSubject(r)
 	ref := wire.PlatformAgentRef{Core: strings.TrimSpace(r.URL.Query().Get("core")), Provider: strings.TrimSpace(r.PathValue("provider"))}
 	if ref.Core == "" || ref.Provider == "" {
-		writeErr(w, http.StatusBadRequest, "core and provider are required")
+		httpx.Error(w, "core and provider are required", http.StatusBadRequest)
 		return
 	}
 	// The room's live grants of this agent, whoever hosts them (policy-
@@ -528,13 +527,13 @@ func (s *Service) handleRemoveRoomPlatformAgent(w http.ResponseWriter, r *http.R
 		isHost = isHost || g.OwnerUserID == caller
 	}
 	if !m.MayChat() && !isHost {
-		writeErr(w, http.StatusForbidden, "only a room member who may chat or the host can remove a platform agent")
+		httpx.Error(w, "only a room member who may chat or the host can remove a platform agent", http.StatusForbidden)
 		return
 	}
 	for _, g := range targets {
 		if err := s.Grants.RevokeGrant(ctx, g.GrantID, s.Now()); err != nil && err != store.ErrGrantNotFound {
 			obs.ServerError(w, "revoke platform grant failed", err)
-			writeErr(w, http.StatusInternalServerError, "remove platform agent failed")
+			httpx.Error(w, "remove platform agent failed", http.StatusInternalServerError)
 			return
 		}
 	}

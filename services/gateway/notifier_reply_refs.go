@@ -5,12 +5,12 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
-	"log/slog"
 	"net/http"
 	"strings"
 
 	"github.com/luckylhb90/bnbloc/internal/extpipe"
 	"github.com/luckylhb90/bnbloc/internal/extreg"
+	"github.com/luckylhb90/bnbloc/internal/httpx"
 	"github.com/luckylhb90/bnbloc/internal/notify"
 	"github.com/luckylhb90/bnbloc/internal/obs"
 	"github.com/luckylhb90/bnbloc/internal/store"
@@ -41,41 +41,41 @@ func (s *Service) verifyNotifierCall(w http.ResponseWriter, r *http.Request) (ex
 	ctx := r.Context()
 	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxNotifierReplyBodyBytes))
 	if err != nil {
-		http.Error(w, "body too large or unreadable", http.StatusRequestEntityTooLarge)
+		httpx.Error(w, "body too large or unreadable", http.StatusRequestEntityTooLarge)
 		return extpipe.Record{}, nil, false
 	}
 	if s.NotifierReplies == nil {
 		obs.ServerError(w, "notifier replies are not available", nil)
-		http.Error(w, "notifier replies are not available", http.StatusServiceUnavailable)
+		httpx.Error(w, "notifier replies are not available", http.StatusServiceUnavailable)
 		return extpipe.Record{}, nil, false
 	}
 	name := strings.TrimSpace(r.Header.Get(wire.NotifierComponentHeader))
 	if name == "" {
-		http.Error(w, wire.NotifierComponentHeader+" required", http.StatusUnauthorized)
+		httpx.Error(w, wire.NotifierComponentHeader+" required", http.StatusUnauthorized)
 		return extpipe.Record{}, nil, false
 	}
 	rec, found, err := s.findComponentRecord(ctx, extreg.KindNotifier, name)
 	switch {
 	case err != nil:
-		slog.Error("bnbloc-gateway: notifier call: load components failed", "notifier", name, "error", err)
-		http.Error(w, "load components failed", http.StatusInternalServerError)
+		obs.ServerError(w, "load components failed", err)
+		httpx.Error(w, "load components failed", http.StatusInternalServerError)
 		return extpipe.Record{}, nil, false
 	case !found:
-		http.Error(w, "notifier not installed", http.StatusForbidden)
+		httpx.Error(w, "notifier not installed", http.StatusForbidden)
 		return extpipe.Record{}, nil, false
 	}
 	secret, ok, err := s.notifierSecrets().Get(ctx, rec.Name)
 	switch {
 	case err != nil:
-		slog.Error("bnbloc-gateway: notifier call: read signing secret failed", "notifier", rec.Name, "error", err)
-		http.Error(w, "read notifier secret failed", http.StatusInternalServerError)
+		obs.ServerError(w, "read notifier secret failed", err)
+		httpx.Error(w, "read notifier secret failed", http.StatusInternalServerError)
 		return extpipe.Record{}, nil, false
 	case !ok:
-		http.Error(w, "notifier has no signing secret", http.StatusUnauthorized)
+		httpx.Error(w, "notifier has no signing secret", http.StatusUnauthorized)
 		return extpipe.Record{}, nil, false
 	}
 	if err := notify.Verify(r.Header.Get(wire.NotificationSignatureHeader), secret, body, s.nowTime(), notify.SignatureTolerance); err != nil {
-		http.Error(w, "invalid signature", http.StatusUnauthorized)
+		httpx.Error(w, "invalid signature", http.StatusUnauthorized)
 		return extpipe.Record{}, nil, false
 	}
 	return rec, body, true
@@ -107,7 +107,7 @@ func (s *Service) handleNotifierReplyRef(w http.ResponseWriter, r *http.Request)
 	}
 	var req wire.NotifierReplyRefRequest
 	if err := json.Unmarshal(body, &req); err != nil {
-		http.Error(w, "invalid json body", http.StatusBadRequest)
+		httpx.Error(w, "invalid json body", http.StatusBadRequest)
 		return
 	}
 	_, err := s.replyTokens().Register(r.Context(), rec.Name, strings.TrimSpace(req.ReplyToken), req.Ref, req.Recipient)
@@ -115,15 +115,15 @@ func (s *Service) handleNotifierReplyRef(w http.ResponseWriter, r *http.Request)
 	case err == nil:
 		w.WriteHeader(http.StatusNoContent)
 	case errors.Is(err, notify.ErrReplyRefInvalid):
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		httpx.Error(w, err.Error(), http.StatusBadRequest)
 	case errors.Is(err, notify.ErrReplyTokenUnknown):
-		http.Error(w, "unknown reply token", http.StatusNotFound)
+		httpx.Error(w, "unknown reply token", http.StatusNotFound)
 	case errors.Is(err, notify.ErrReplyTokenExpired):
-		http.Error(w, "reply token expired", http.StatusGone)
+		httpx.Error(w, "reply token expired", http.StatusGone)
 	case errors.Is(err, notify.ErrReplyRefConflict):
-		http.Error(w, "reference already registered for another reply token", http.StatusConflict)
+		httpx.Error(w, "reference already registered for another reply token", http.StatusConflict)
 	default:
-		slog.Error("bnbloc-gateway: register reply reference failed", "notifier", rec.Name, "error", err)
-		http.Error(w, "register reply reference failed", http.StatusInternalServerError)
+		obs.ServerError(w, "register reply reference failed", err)
+		httpx.Error(w, "register reply reference failed", http.StatusInternalServerError)
 	}
 }

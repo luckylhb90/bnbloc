@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/luckylhb90/bnbloc/internal/auth"
+	"github.com/luckylhb90/bnbloc/internal/httpx"
 	"github.com/luckylhb90/bnbloc/internal/roomctx"
 )
 
@@ -36,17 +37,17 @@ func attachmentTicketScope(roomID, attachmentID string) string {
 func (s *Service) handleAttachmentTicket(w http.ResponseWriter, r *http.Request) {
 	claims, err := s.authenticate(r)
 	if err != nil {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		httpx.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
 	roomID, attachmentID := r.PathValue("roomId"), r.PathValue("attachmentId")
 	if roomctx.ValidateID(roomID) != nil || attachmentID == "" || strings.Contains(attachmentID, "/") {
-		http.Error(w, "invalid attachment path", http.StatusBadRequest)
+		httpx.Error(w, "invalid attachment path", http.StatusBadRequest)
 		return
 	}
 	claims, ok := s.roomClaims(claims, roomID)
 	if !ok {
-		http.Error(w, "room scope not authorized", http.StatusForbidden)
+		httpx.Error(w, "room scope not authorized", http.StatusForbidden)
 		return
 	}
 	expires := s.nowTime().Add(attachmentTicketTTL)
@@ -59,11 +60,12 @@ func (s *Service) handleAttachmentTicket(w http.ResponseWriter, r *http.Request)
 		ID:            attachmentTicketScope(roomID, attachmentID),
 	})
 	w.Header().Set("Cache-Control", "no-store")
-	writeJSON(w, http.StatusOK, map[string]any{
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{
 		"url": "/v1/rooms/" + url.PathEscape(roomID) + "/attachments/" + url.PathEscape(attachmentID) +
 			"?ticket=" + url.QueryEscape(ticket),
 		"expiresAtMs": expires.UnixMilli(),
 	})
+
 }
 
 // attachmentTicketClaims authenticates an attachment download by its

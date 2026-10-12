@@ -22,6 +22,7 @@ import (
 
 	"github.com/luckylhb90/bnbloc/internal/config"
 	"github.com/luckylhb90/bnbloc/internal/extgov"
+	"github.com/luckylhb90/bnbloc/internal/httpx"
 	"github.com/luckylhb90/bnbloc/internal/obs"
 	"github.com/luckylhb90/bnbloc/internal/store"
 	"github.com/luckylhb90/bnbloc/internal/wire"
@@ -347,10 +348,10 @@ func (p *WebPush) handlePublicKey(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !p.Enabled() {
-		writeErr(w, http.StatusNotFound, "browser notifications are not configured on this deployment")
+		httpx.Error(w, "browser notifications are not configured on this deployment", http.StatusNotFound)
 		return
 	}
-	writeJSON(w, http.StatusOK, wire.WebPushPublicKey{PublicKey: strings.TrimRight(p.Config.PublicKey, "=")})
+	httpx.WriteJSON(w, http.StatusOK, wire.WebPushPublicKey{PublicKey: strings.TrimRight(p.Config.PublicKey, "=")})
 }
 
 // subscriptionID keys a subscription by its endpoint.
@@ -365,20 +366,20 @@ func (p *WebPush) handleSubscribe(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !p.Enabled() {
-		writeErr(w, http.StatusNotFound, "browser notifications are not configured on this deployment")
+		httpx.Error(w, "browser notifications are not configured on this deployment", http.StatusNotFound)
 		return
 	}
 	var in wire.WebPushSubscriptionInput
-	if !decodeBody(w, r, &in) {
+	if !httpx.DecodeJSON(w, r, maxBodyBytes, &in) {
 		return
 	}
 	in.Endpoint = strings.TrimSpace(in.Endpoint)
 	if err := validPushEndpoint(in.Endpoint); err != nil {
-		writeErr(w, http.StatusBadRequest, err.Error())
+		httpx.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 	if err := validSubscriptionKeys(in.Keys); err != nil {
-		writeErr(w, http.StatusBadRequest, err.Error())
+		httpx.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 	now := p.now().UnixMilli()
@@ -386,7 +387,7 @@ func (p *WebPush) handleSubscribe(w http.ResponseWriter, r *http.Request) {
 	existing, err := p.Subs.ListWebPushSubscriptions(r.Context(), user)
 	if err != nil {
 		obs.ServerError(w, "read push subscriptions failed", err)
-		writeErr(w, http.StatusInternalServerError, "read push subscriptions failed")
+		httpx.Error(w, "read push subscriptions failed", http.StatusInternalServerError)
 		return
 	}
 	// A member's devices are bounded: the least recently refreshed
@@ -398,7 +399,7 @@ func (p *WebPush) handleSubscribe(w http.ResponseWriter, r *http.Request) {
 	for i := 0; !known && len(existing)-i >= maxPushSubscriptionsPerMember; i++ {
 		if err := p.Subs.DeleteWebPushSubscription(r.Context(), user, existing[i].ID); err != nil {
 			obs.ServerError(w, "trim push subscriptions failed", err)
-			writeErr(w, http.StatusInternalServerError, "trim push subscriptions failed")
+			httpx.Error(w, "trim push subscriptions failed", http.StatusInternalServerError)
 			return
 		}
 	}
@@ -411,7 +412,7 @@ func (p *WebPush) handleSubscribe(w http.ResponseWriter, r *http.Request) {
 		CreatedAtMs: now, UpdatedAtMs: now,
 	}); err != nil {
 		obs.ServerError(w, "save push subscription failed", err)
-		writeErr(w, http.StatusInternalServerError, "save push subscription failed")
+		httpx.Error(w, "save push subscription failed", http.StatusInternalServerError)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -423,12 +424,12 @@ func (p *WebPush) handleUnsubscribe(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var in wire.WebPushSubscriptionInput
-	if !decodeBody(w, r, &in) {
+	if !httpx.DecodeJSON(w, r, maxBodyBytes, &in) {
 		return
 	}
 	endpoint := strings.TrimSpace(in.Endpoint)
 	if endpoint == "" {
-		writeErr(w, http.StatusBadRequest, "endpoint required")
+		httpx.Error(w, "endpoint required", http.StatusBadRequest)
 		return
 	}
 	if p.Subs == nil {
@@ -437,7 +438,7 @@ func (p *WebPush) handleUnsubscribe(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := p.Subs.DeleteWebPushSubscription(r.Context(), user, subscriptionID(endpoint)); err != nil {
 		obs.ServerError(w, "delete push subscription failed", err)
-		writeErr(w, http.StatusInternalServerError, "delete push subscription failed")
+		httpx.Error(w, "delete push subscription failed", http.StatusInternalServerError)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

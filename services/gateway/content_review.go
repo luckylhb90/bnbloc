@@ -13,6 +13,7 @@ import (
 	"github.com/luckylhb90/bnbloc/internal/auth"
 	"github.com/luckylhb90/bnbloc/internal/contentpkg"
 	"github.com/luckylhb90/bnbloc/internal/contentshare"
+	"github.com/luckylhb90/bnbloc/internal/httpx"
 	"github.com/luckylhb90/bnbloc/internal/ids"
 	"github.com/luckylhb90/bnbloc/internal/notify"
 	"github.com/luckylhb90/bnbloc/internal/obs"
@@ -59,7 +60,7 @@ func (s *Service) contentAdmin(w http.ResponseWriter, r *http.Request) (auth.Cla
 	}
 	if s.ContentComponents == nil {
 		obs.ServerError(w, "content components unavailable", nil)
-		http.Error(w, "content components unavailable", http.StatusServiceUnavailable)
+		httpx.Error(w, "content components unavailable", http.StatusServiceUnavailable)
 		return auth.Claims{}, false
 	}
 	return claims, true
@@ -87,13 +88,13 @@ func (s *Service) handleListContentRequests(w http.ResponseWriter, r *http.Reque
 	case "all":
 		q.Status = ""
 	default:
-		http.Error(w, "status must be pending or all", http.StatusBadRequest)
+		httpx.Error(w, "status must be pending or all", http.StatusBadRequest)
 		return
 	}
 	reqs, err := s.ContentComponents.ListContentRequests(ctx, q)
 	if err != nil {
 		obs.ServerError(w, "list publish requests failed", err)
-		http.Error(w, "list publish requests failed", http.StatusInternalServerError)
+		httpx.Error(w, "list publish requests failed", http.StatusInternalServerError)
 		return
 	}
 	out := make([]wire.ContentPublishRequest, 0, len(reqs))
@@ -105,24 +106,24 @@ func (s *Service) handleListContentRequests(w http.ResponseWriter, r *http.Reque
 		approved, err := s.approvedVersion(ctx, req.TenantID, req.Kind, req.ComponentID)
 		if err != nil {
 			obs.ServerError(w, "list publish requests failed", err)
-			http.Error(w, "list publish requests failed", http.StatusInternalServerError)
+			httpx.Error(w, "list publish requests failed", http.StatusInternalServerError)
 			return
 		}
 		out = append(out, publishRequestView(req, display, approved))
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"requests": out})
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"requests": out})
 }
 
 // orgRequest loads a request of the admin's organization.
 func (s *Service) orgRequest(w http.ResponseWriter, r *http.Request, claims auth.Claims) (store.ContentPublishRequest, bool) {
 	req, err := s.ContentComponents.GetContentRequest(r.Context(), r.PathValue("id"))
 	if errors.Is(err, store.ErrContentRequestNotFound) || (err == nil && req.TenantID != claims.Tenant) {
-		http.Error(w, "publish request not found", http.StatusNotFound)
+		httpx.Error(w, "publish request not found", http.StatusNotFound)
 		return store.ContentPublishRequest{}, false
 	}
 	if err != nil {
 		obs.ServerError(w, "load publish request failed", err)
-		http.Error(w, "load publish request failed", http.StatusInternalServerError)
+		httpx.Error(w, "load publish request failed", http.StatusInternalServerError)
 		return store.ContentPublishRequest{}, false
 	}
 	return req, true
@@ -141,12 +142,12 @@ func (s *Service) requestedVersion(w http.ResponseWriter, r *http.Request, req s
 		v, err = s.ContentComponents.GetContentComponentVersion(ctx, c.ID, req.Version)
 	}
 	if errors.Is(err, store.ErrContentNotFound) {
-		http.Error(w, "its author deleted this component or version", http.StatusConflict)
+		httpx.Error(w, "its author deleted this component or version", http.StatusConflict)
 		return store.ContentComponent{}, store.ContentComponentVersion{}, false
 	}
 	if err != nil {
 		obs.ServerError(w, "load requested version failed", err)
-		http.Error(w, "load requested version failed", http.StatusInternalServerError)
+		httpx.Error(w, "load requested version failed", http.StatusInternalServerError)
 		return store.ContentComponent{}, store.ContentComponentVersion{}, false
 	}
 	return c, v, true
@@ -173,13 +174,13 @@ func (s *Service) handleReviewContentRequest(w http.ResponseWriter, r *http.Requ
 	pkg, err := s.contentPackage(ctx, v)
 	if err != nil {
 		obs.ServerError(w, "load content bundle failed", err)
-		http.Error(w, "load content bundle failed", http.StatusBadGateway)
+		httpx.Error(w, "load content bundle failed", http.StatusBadGateway)
 		return
 	}
 	view, err := s.reviewView(ctx, claims, c, v)
 	if err != nil {
 		obs.ServerError(w, "decode content manifest failed", err)
-		http.Error(w, "decode content manifest failed", http.StatusInternalServerError)
+		httpx.Error(w, "decode content manifest failed", http.StatusInternalServerError)
 		return
 	}
 	out := wire.ContentReview{Component: view, ScriptFiles: pkg.ScriptFiles()}
@@ -187,7 +188,7 @@ func (s *Service) handleReviewContentRequest(w http.ResponseWriter, r *http.Requ
 	org, err := s.orgPublication(ctx, c)
 	if err != nil {
 		obs.ServerError(w, "load organization publication failed", err)
-		http.Error(w, "load organization publication failed", http.StatusInternalServerError)
+		httpx.Error(w, "load organization publication failed", http.StatusInternalServerError)
 		return
 	}
 	approved := ""
@@ -202,20 +203,20 @@ func (s *Service) handleReviewContentRequest(w http.ResponseWriter, r *http.Requ
 		}
 		if prevPkg, err = s.contentPackage(ctx, pv); err != nil {
 			obs.ServerError(w, "load published bundle failed", err)
-			http.Error(w, "load published bundle failed", http.StatusBadGateway)
+			httpx.Error(w, "load published bundle failed", http.StatusBadGateway)
 			return
 		}
 		prev, err := s.reviewView(ctx, claims, *org, pv)
 		if err != nil {
 			obs.ServerError(w, "decode content manifest failed", err)
-			http.Error(w, "decode content manifest failed", http.StatusInternalServerError)
+			httpx.Error(w, "decode content manifest failed", http.StatusInternalServerError)
 			return
 		}
 		out.Previous = &prev
 	}
 	out.Request = publishRequestView(req, firstNonEmpty(c.DisplayName, c.Name), approved)
 	out.Files = contentFileChanges(prevPkg, pkg)
-	writeJSON(w, http.StatusOK, out)
+	httpx.WriteJSON(w, http.StatusOK, out)
 }
 
 // reviewView is a component at one version for an approver.
@@ -309,7 +310,7 @@ func decisionNote(w http.ResponseWriter, r *http.Request) (string, bool) {
 	var in wire.ContentDecisionInput
 	if len(bytes.TrimSpace(raw)) > 0 {
 		if err := json.Unmarshal(raw, &in); err != nil {
-			http.Error(w, "invalid json body", http.StatusBadRequest)
+			httpx.Error(w, "invalid json body", http.StatusBadRequest)
 			return "", false
 		}
 	}
@@ -391,7 +392,7 @@ func (s *Service) decideContentRequest(w http.ResponseWriter, r *http.Request, s
 		return
 	}
 	if !s.rateAllow(claims.Subject) {
-		http.Error(w, "rate limit exceeded", http.StatusTooManyRequests)
+		httpx.Error(w, "rate limit exceeded", http.StatusTooManyRequests)
 		return
 	}
 	ctx := r.Context()
@@ -404,7 +405,7 @@ func (s *Service) decideContentRequest(w http.ResponseWriter, r *http.Request, s
 		return
 	}
 	if req.Status != store.ContentRequestPending {
-		http.Error(w, "this request was already "+string(req.Status), http.StatusConflict)
+		httpx.Error(w, "this request was already "+string(req.Status), http.StatusConflict)
 		return
 	}
 	var src store.ContentComponent
@@ -418,10 +419,10 @@ func (s *Service) decideContentRequest(w http.ResponseWriter, r *http.Request, s
 		switch holder, err := s.orgNameHolder(ctx, src); {
 		case err != nil:
 			obs.ServerError(w, "check organization names failed", err)
-			http.Error(w, "check organization names failed", http.StatusInternalServerError)
+			httpx.Error(w, "check organization names failed", http.StatusInternalServerError)
 			return
 		case holder != nil:
-			http.Error(w, orgNameTaken(*holder, "decline this request and ask "+req.RequestedBy+" to rename theirs"), http.StatusConflict)
+			httpx.Error(w, orgNameTaken(*holder, "decline this request and ask "+req.RequestedBy+" to rename theirs"), http.StatusConflict)
 			return
 		}
 	}
@@ -430,14 +431,14 @@ func (s *Service) decideContentRequest(w http.ResponseWriter, r *http.Request, s
 	})
 	switch {
 	case errors.Is(err, store.ErrContentRequestDecided):
-		http.Error(w, "this request was already "+string(decided.Status), http.StatusConflict)
+		httpx.Error(w, "this request was already "+string(decided.Status), http.StatusConflict)
 		return
 	case errors.Is(err, store.ErrContentRequestNotFound):
-		http.Error(w, "publish request not found", http.StatusNotFound)
+		httpx.Error(w, "publish request not found", http.StatusNotFound)
 		return
 	case err != nil:
 		obs.ServerError(w, "decide publish request failed", err)
-		http.Error(w, "decide publish request failed", http.StatusInternalServerError)
+		httpx.Error(w, "decide publish request failed", http.StatusInternalServerError)
 		return
 	}
 	label := contentshare.KindLabel(req.Kind) + ` "` + req.Name + `"`
@@ -448,15 +449,15 @@ func (s *Service) decideContentRequest(w http.ResponseWriter, r *http.Request, s
 		if err != nil {
 			_ = s.ContentComponents.ReopenContentRequest(ctx, req.ID)
 			if errors.Is(err, errStaleRequest) {
-				http.Error(w, "the organization already uses a newer version: ask the author for a new request", http.StatusConflict)
+				httpx.Error(w, "the organization already uses a newer version: ask the author for a new request", http.StatusConflict)
 				return
 			}
 			if errors.Is(err, store.ErrContentOrgNameTaken) {
-				http.Error(w, "the organization already has a "+contentshare.KindLabel(src.Kind)+" named "+src.Name+": decline this request and ask "+req.RequestedBy+" to rename theirs", http.StatusConflict)
+				httpx.Error(w, "the organization already has a "+contentshare.KindLabel(src.Kind)+" named "+src.Name+": decline this request and ask "+req.RequestedBy+" to rename theirs", http.StatusConflict)
 				return
 			}
 			obs.ServerError(w, "publish to the organization failed", err)
-			http.Error(w, "publish to the organization failed", http.StatusInternalServerError)
+			httpx.Error(w, "publish to the organization failed", http.StatusInternalServerError)
 			return
 		}
 		approved = org.LatestVersion
@@ -479,7 +480,7 @@ func (s *Service) decideContentRequest(w http.ResponseWriter, r *http.Request, s
 		Type: wire.NotificationContentReview, Recipients: []string{req.RequestedBy}, Actor: claims.Subject,
 		Title: title, Text: text, URL: appLink(r, "library"), DedupKey: "content-decision:" + req.ID,
 	})
-	writeJSON(w, http.StatusOK, map[string]any{"request": publishRequestView(decided, firstNonEmpty(src.DisplayName, req.Name), approved)})
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"request": publishRequestView(decided, firstNonEmpty(src.DisplayName, req.Name), approved)})
 }
 
 func noteSuffix(note string) string {
@@ -500,7 +501,7 @@ func (s *Service) handleListOrgContent(w http.ResponseWriter, r *http.Request) {
 	comps, err := s.ContentComponents.ListContentComponents(ctx, store.ContentComponentQuery{TenantID: claims.Tenant, Scopes: []store.ContentScope{store.ContentScopeOrg}})
 	if err != nil {
 		obs.ServerError(w, "list organization content failed", err)
-		http.Error(w, "list organization content failed", http.StatusInternalServerError)
+		httpx.Error(w, "list organization content failed", http.StatusInternalServerError)
 		return
 	}
 	s.writeAdminContent(w, r, claims, comps)
@@ -511,7 +512,7 @@ func (s *Service) writeAdminContent(w http.ResponseWriter, r *http.Request, clai
 	views, err := s.contentViews(r.Context(), claims, comps, nil)
 	if err != nil {
 		obs.ServerError(w, "load published content failed", err)
-		http.Error(w, "load published content failed", http.StatusInternalServerError)
+		httpx.Error(w, "load published content failed", http.StatusInternalServerError)
 		return
 	}
 	byID := map[string]store.ContentComponent{}
@@ -524,7 +525,7 @@ func (s *Service) writeAdminContent(w http.ResponseWriter, r *http.Request, clai
 		c := byID[v.ID]
 		out = append(out, wire.ContentAdminComponent{Component: v, TenantID: c.TenantID, EnabledTenants: c.EnabledTenants})
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"components": out})
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"components": out})
 }
 
 // orgContent loads an organization row of the admin's organization.

@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/luckylhb90/bnbloc/internal/httpx"
 	"github.com/luckylhb90/bnbloc/internal/obs"
 	"github.com/luckylhb90/bnbloc/internal/store"
 	"github.com/luckylhb90/bnbloc/internal/tenant"
@@ -25,8 +26,7 @@ type memberView struct {
 // RBAC (manage_org) is enforced at the gateway.
 func (s *Service) handleTenantMembers(w http.ResponseWriter, r *http.Request) {
 	if s.Tenants == nil {
-		obs.ServerError(w, "tenant registry not configured", nil)
-		writeErr(w, http.StatusNotImplemented, "tenant registry not configured")
+		httpx.Unavailable(w, "tenant registry")
 		return
 	}
 	tid := tenant.FromContext(r.Context())
@@ -40,7 +40,7 @@ func (s *Service) handleTenantMembers(w http.ResponseWriter, r *http.Request) {
 			Source:     string(m.Source),
 		})
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"members": views})
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"members": views})
 }
 
 type setRoleBody struct {
@@ -52,37 +52,36 @@ type setRoleBody struct {
 // without an admin) and normalizes the role to a known value.
 func (s *Service) handleTenantSetMemberRole(w http.ResponseWriter, r *http.Request) {
 	if s.Tenants == nil {
-		obs.ServerError(w, "tenant registry not configured", nil)
-		writeErr(w, http.StatusNotImplemented, "tenant registry not configured")
+		httpx.Unavailable(w, "tenant registry")
 		return
 	}
 	userID := r.PathValue("userId")
 	if userID == "" {
-		writeErr(w, http.StatusBadRequest, "missing user id")
+		httpx.Error(w, "missing user id", http.StatusBadRequest)
 		return
 	}
 	if userID == callerSubject(r) {
-		writeErr(w, http.StatusForbidden, "cannot change your own role")
+		httpx.Error(w, "cannot change your own role", http.StatusForbidden)
 		return
 	}
 	var body setRoleBody
-	if !decodeJSON(w, r, &body) {
+	if !httpx.DecodeJSON(w, r, httpx.DefaultBodyLimit, &body) {
 		return
 	}
 	tid := tenant.FromContext(r.Context())
 	existing, ok, err := s.Tenants.GetMember(r.Context(), tid, userID)
 	if err != nil {
 		obs.ServerError(w, "read membership failed", err)
-		writeErr(w, http.StatusInternalServerError, "read membership failed")
+		httpx.Error(w, "read membership failed", http.StatusInternalServerError)
 		return
 	}
 	if !ok {
-		writeErr(w, http.StatusNotFound, "member not found")
+		httpx.Error(w, "member not found", http.StatusNotFound)
 		return
 	}
 	newRole := store.NormalizeOrgRole(body.Role)
 	if s.strandsLastAdmin(r.Context(), tid, existing, newRole) {
-		writeErr(w, http.StatusConflict, "cannot demote the last org admin")
+		httpx.Error(w, "cannot demote the last org admin", http.StatusConflict)
 		return
 	}
 	fromRole := existing.Role
@@ -92,15 +91,16 @@ func (s *Service) handleTenantSetMemberRole(w http.ResponseWriter, r *http.Reque
 	existing.Source = store.MemberSourceManual
 	if err := s.Tenants.PutMember(r.Context(), existing); err != nil {
 		obs.ServerError(w, "update member failed", err)
-		writeErr(w, http.StatusInternalServerError, "update member failed")
+		httpx.Error(w, "update member failed", http.StatusInternalServerError)
 		return
 	}
 	s.auditMember(r, userID, "role", "role="+string(newRole)+" from="+string(fromRole))
-	writeJSON(w, http.StatusOK, memberView{
+	httpx.WriteJSON(w, http.StatusOK, memberView{
 		UserID:     existing.UserID,
 		Role:       string(existing.Role),
 		JoinedAtMs: existing.JoinedAtMs,
 	})
+
 }
 
 type addMemberBody struct {
@@ -114,24 +114,23 @@ type addMemberBody struct {
 // before their first sign-in.
 func (s *Service) handleTenantAddMember(w http.ResponseWriter, r *http.Request) {
 	if s.Tenants == nil {
-		obs.ServerError(w, "tenant registry not configured", nil)
-		writeErr(w, http.StatusNotImplemented, "tenant registry not configured")
+		httpx.Unavailable(w, "tenant registry")
 		return
 	}
 	var body addMemberBody
-	if !decodeJSON(w, r, &body) {
+	if !httpx.DecodeJSON(w, r, httpx.DefaultBodyLimit, &body) {
 		return
 	}
 	userID := strings.TrimSpace(body.UserID)
 	if userID == "" {
-		writeErr(w, http.StatusBadRequest, "missing user id")
+		httpx.Error(w, "missing user id", http.StatusBadRequest)
 		return
 	}
 	tid := tenant.FromContext(r.Context())
 	existing, ok, err := s.Tenants.GetMember(r.Context(), tid, userID)
 	if err != nil {
 		obs.ServerError(w, "read membership failed", err)
-		writeErr(w, http.StatusInternalServerError, "read membership failed")
+		httpx.Error(w, "read membership failed", http.StatusInternalServerError)
 		return
 	}
 	joined := existing.JoinedAtMs
@@ -142,7 +141,7 @@ func (s *Service) handleTenantAddMember(w http.ResponseWriter, r *http.Request) 
 	// Add-member upserts: on an existing member it is a role change, so it must
 	// honor the same last-admin guard as the role-change path.
 	if ok && s.strandsLastAdmin(r.Context(), tid, existing, role) {
-		writeErr(w, http.StatusConflict, "cannot demote the last org admin")
+		httpx.Error(w, "cannot demote the last org admin", http.StatusConflict)
 		return
 	}
 	m := store.TenantMember{
@@ -153,7 +152,7 @@ func (s *Service) handleTenantAddMember(w http.ResponseWriter, r *http.Request) 
 	}
 	if err := s.Tenants.PutMember(r.Context(), m); err != nil {
 		obs.ServerError(w, "add member failed", err)
-		writeErr(w, http.StatusInternalServerError, "add member failed")
+		httpx.Error(w, "add member failed", http.StatusInternalServerError)
 		return
 	}
 	if ok {
@@ -161,7 +160,7 @@ func (s *Service) handleTenantAddMember(w http.ResponseWriter, r *http.Request) 
 	} else {
 		s.auditMember(r, userID, "add", "role="+string(role))
 	}
-	writeJSON(w, http.StatusOK, memberView{UserID: m.UserID, Role: string(m.Role), JoinedAtMs: m.JoinedAtMs})
+	httpx.WriteJSON(w, http.StatusOK, memberView{UserID: m.UserID, Role: string(m.Role), JoinedAtMs: m.JoinedAtMs})
 }
 
 // handleTenantRemoveMember removes a member from the tenant. It refuses to
@@ -169,38 +168,37 @@ func (s *Service) handleTenantAddMember(w http.ResponseWriter, r *http.Request) 
 // the last org_admin, which would strand the org without an administrator.
 func (s *Service) handleTenantRemoveMember(w http.ResponseWriter, r *http.Request) {
 	if s.Tenants == nil {
-		obs.ServerError(w, "tenant registry not configured", nil)
-		writeErr(w, http.StatusNotImplemented, "tenant registry not configured")
+		httpx.Unavailable(w, "tenant registry")
 		return
 	}
 	userID := r.PathValue("userId")
 	if userID == "" {
-		writeErr(w, http.StatusBadRequest, "missing user id")
+		httpx.Error(w, "missing user id", http.StatusBadRequest)
 		return
 	}
 	if userID == callerSubject(r) {
-		writeErr(w, http.StatusForbidden, "cannot remove yourself")
+		httpx.Error(w, "cannot remove yourself", http.StatusForbidden)
 		return
 	}
 	tid := tenant.FromContext(r.Context())
 	target, ok, err := s.Tenants.GetMember(r.Context(), tid, userID)
 	if err != nil {
 		obs.ServerError(w, "read membership failed", err)
-		writeErr(w, http.StatusInternalServerError, "read membership failed")
+		httpx.Error(w, "read membership failed", http.StatusInternalServerError)
 		return
 	}
 	if !ok {
-		writeErr(w, http.StatusNotFound, "member not found")
+		httpx.Error(w, "member not found", http.StatusNotFound)
 		return
 	}
 	// Removal drops the member's role entirely ("" is never org_admin).
 	if s.strandsLastAdmin(r.Context(), tid, target, "") {
-		writeErr(w, http.StatusConflict, "cannot remove the last org admin")
+		httpx.Error(w, "cannot remove the last org admin", http.StatusConflict)
 		return
 	}
 	if err := s.Tenants.RemoveMember(r.Context(), tid, userID); err != nil {
 		obs.ServerError(w, "remove member failed", err)
-		writeErr(w, http.StatusInternalServerError, "remove member failed")
+		httpx.Error(w, "remove member failed", http.StatusInternalServerError)
 		return
 	}
 	s.auditMember(r, userID, "remove", "role="+string(target.Role))
@@ -213,7 +211,7 @@ func (s *Service) handleTenantRemoveMember(w http.ResponseWriter, r *http.Reques
 				"event", "bnbloc.shareagent.push_subscriptions_cleanup_failed", "tenant", tid, "user", userID, "error", err)
 		}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"removed": true, "userId": userID})
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"removed": true, "userId": userID})
 }
 
 // strandsLastAdmin reports whether moving member to newRole would leave the
@@ -243,25 +241,24 @@ type quotaBody struct {
 // change takes effect immediately for this tenant only.
 func (s *Service) handleTenantSetQuota(w http.ResponseWriter, r *http.Request) {
 	if s.Tenants == nil {
-		obs.ServerError(w, "tenant registry not configured", nil)
-		writeErr(w, http.StatusNotImplemented, "tenant registry not configured")
+		httpx.Unavailable(w, "tenant registry")
 		return
 	}
 	var body quotaBody
-	if !decodeJSON(w, r, &body) {
+	if !httpx.DecodeJSON(w, r, httpx.DefaultBodyLimit, &body) {
 		return
 	}
 	if body.RunQuota < 0 || body.CostAllowance < 0 {
-		writeErr(w, http.StatusBadRequest, "quota must be non-negative")
+		httpx.Error(w, "quota must be non-negative", http.StatusBadRequest)
 		return
 	}
 	tid := tenant.FromContext(r.Context())
 	if err := s.Tenants.SetQuota(r.Context(), tid, body.RunQuota, body.CostAllowance); err != nil {
 		obs.ServerError(w, "set quota failed", err)
-		writeErr(w, http.StatusInternalServerError, "set quota failed")
+		httpx.Error(w, "set quota failed", http.StatusInternalServerError)
 		return
 	}
-	writeJSON(w, http.StatusOK, quotaBody{RunQuota: body.RunQuota, CostAllowance: body.CostAllowance})
+	httpx.WriteJSON(w, http.StatusOK, quotaBody{RunQuota: body.RunQuota, CostAllowance: body.CostAllowance})
 }
 
 type settingsView struct {
@@ -292,17 +289,16 @@ func viewSettings(t store.Tenant) settingsView {
 // issuer/domain) for the org settings tab.
 func (s *Service) handleTenantSettings(w http.ResponseWriter, r *http.Request) {
 	if s.Tenants == nil {
-		obs.ServerError(w, "tenant registry not configured", nil)
-		writeErr(w, http.StatusNotImplemented, "tenant registry not configured")
+		httpx.Unavailable(w, "tenant registry")
 		return
 	}
 	tid := tenant.FromContext(r.Context())
 	t, err := s.Tenants.GetTenant(r.Context(), tid)
 	if err != nil {
-		writeErr(w, http.StatusNotFound, "tenant not found")
+		httpx.Error(w, "tenant not found", http.StatusNotFound)
 		return
 	}
-	writeJSON(w, http.StatusOK, viewSettings(t))
+	httpx.WriteJSON(w, http.StatusOK, viewSettings(t))
 }
 
 type settingsBody struct {
@@ -318,18 +314,17 @@ type settingsBody struct {
 // editable here.
 func (s *Service) handleTenantUpdateSettings(w http.ResponseWriter, r *http.Request) {
 	if s.Tenants == nil {
-		obs.ServerError(w, "tenant registry not configured", nil)
-		writeErr(w, http.StatusNotImplemented, "tenant registry not configured")
+		httpx.Unavailable(w, "tenant registry")
 		return
 	}
 	var body settingsBody
-	if !decodeJSON(w, r, &body) {
+	if !httpx.DecodeJSON(w, r, httpx.DefaultBodyLimit, &body) {
 		return
 	}
 	tid := tenant.FromContext(r.Context())
 	t, err := s.Tenants.GetTenant(r.Context(), tid)
 	if err != nil {
-		writeErr(w, http.StatusNotFound, "tenant not found")
+		httpx.Error(w, "tenant not found", http.StatusNotFound)
 		return
 	}
 	if body.Name != nil {
@@ -340,7 +335,7 @@ func (s *Service) handleTenantUpdateSettings(w http.ResponseWriter, r *http.Requ
 	}
 	if err := s.Tenants.PutTenant(r.Context(), t); err != nil {
 		obs.ServerError(w, "update settings failed", err)
-		writeErr(w, http.StatusInternalServerError, "update settings failed")
+		httpx.Error(w, "update settings failed", http.StatusInternalServerError)
 		return
 	}
 	if body.RequireSandboxForBorrow != nil || body.PublicSharesDisabled != nil {
@@ -350,9 +345,9 @@ func (s *Service) handleTenantUpdateSettings(w http.ResponseWriter, r *http.Requ
 		})
 		if err != nil {
 			obs.ServerError(w, "update tenant policy failed", err)
-			writeErr(w, http.StatusInternalServerError, "update settings failed")
+			httpx.Error(w, "update settings failed", http.StatusInternalServerError)
 			return
 		}
 	}
-	writeJSON(w, http.StatusOK, viewSettings(t))
+	httpx.WriteJSON(w, http.StatusOK, viewSettings(t))
 }

@@ -96,26 +96,25 @@ func (s *Service) attachmentsReady() bool {
 func (s *Service) handleUploadAttachment(w http.ResponseWriter, r *http.Request) {
 	roomID, err := roomctx.Normalize(r.PathValue("roomId"))
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		httpx.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 	userID := strings.TrimSpace(r.Header.Get("X-Bnbloc-User"))
 	if userID == "" {
-		http.Error(w, "missing authenticated subject", http.StatusUnauthorized)
+		httpx.Error(w, "missing authenticated subject", http.StatusUnauthorized)
 		return
 	}
 	if _, ok := s.member(w, r, roomID, userID, membership.AnyMember); !ok {
 		return
 	}
 	if !s.attachmentsReady() {
-		obs.ServerError(w, "attachments not configured", nil)
-		http.Error(w, "attachments not configured", http.StatusServiceUnavailable)
+		httpx.Unavailable(w, "attachments")
 		return
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, maxAttachmentBytes+maxAttachmentField)
 	file, header, err := r.FormFile("file")
 	if err != nil {
-		http.Error(w, "expected a multipart 'file' field", http.StatusBadRequest)
+		httpx.Error(w, "expected a multipart 'file' field", http.StatusBadRequest)
 		return
 	}
 	defer file.Close()
@@ -123,29 +122,29 @@ func (s *Service) handleUploadAttachment(w http.ResponseWriter, r *http.Request)
 	contentType := mediaType(header.Header.Get("Content-Type"))
 	check, ok := allowedAttachmentTypes[contentType]
 	if !ok {
-		http.Error(w, "unsupported content type", http.StatusUnsupportedMediaType)
+		httpx.Error(w, "unsupported content type", http.StatusUnsupportedMediaType)
 		return
 	}
 	head := make([]byte, 512)
 	n, err := io.ReadFull(file, head)
 	if err != nil && !errors.Is(err, io.ErrUnexpectedEOF) && !errors.Is(err, io.EOF) {
-		http.Error(w, "attachment read failed", http.StatusBadRequest)
+		httpx.Error(w, "attachment read failed", http.StatusBadRequest)
 		return
 	}
 	head = head[:n]
 	if !check(http.DetectContentType(head)) {
-		http.Error(w, "attachment content does not match its declared type", http.StatusUnsupportedMediaType)
+		httpx.Error(w, "attachment content does not match its declared type", http.StatusUnsupportedMediaType)
 		return
 	}
 	body := io.MultiReader(bytes.NewReader(head), file)
 	key, size, sha, err := s.Blobs.Put(r.Context(), io.LimitReader(body, maxAttachmentBytes+1))
 	if err != nil {
 		obs.ServerError(w, "attachment store failed", err)
-		http.Error(w, "attachment store failed", http.StatusInternalServerError)
+		httpx.Error(w, "attachment store failed", http.StatusInternalServerError)
 		return
 	}
 	if size > maxAttachmentBytes {
-		http.Error(w, "attachment too large", http.StatusRequestEntityTooLarge)
+		httpx.Error(w, "attachment too large", http.StatusRequestEntityTooLarge)
 		return
 	}
 	att := store.Attachment{
@@ -161,7 +160,7 @@ func (s *Service) handleUploadAttachment(w http.ResponseWriter, r *http.Request)
 	}
 	if err := s.Attachments.PutAttachment(r.Context(), att); err != nil {
 		obs.ServerError(w, "attachment metadata store failed", err)
-		http.Error(w, "attachment metadata store failed", http.StatusInternalServerError)
+		httpx.Error(w, "attachment metadata store failed", http.StatusInternalServerError)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -172,35 +171,34 @@ func (s *Service) handleUploadAttachment(w http.ResponseWriter, r *http.Request)
 func (s *Service) handleDownloadAttachment(w http.ResponseWriter, r *http.Request) {
 	roomID, err := roomctx.Normalize(r.PathValue("roomId"))
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		httpx.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 	userID := strings.TrimSpace(r.Header.Get("X-Bnbloc-User"))
 	if userID == "" {
-		http.Error(w, "missing authenticated subject", http.StatusUnauthorized)
+		httpx.Error(w, "missing authenticated subject", http.StatusUnauthorized)
 		return
 	}
 	if _, ok := s.member(w, r, roomID, userID, membership.AnyMember); !ok {
 		return
 	}
 	if !s.attachmentsReady() {
-		obs.ServerError(w, "attachments not configured", nil)
-		http.Error(w, "attachments not configured", http.StatusServiceUnavailable)
+		httpx.Unavailable(w, "attachments")
 		return
 	}
 	att, ok, err := s.Attachments.GetAttachment(r.Context(), roomID, strings.TrimSpace(r.PathValue("attachmentId")))
 	if err != nil {
 		obs.ServerError(w, "attachment lookup failed", err)
-		http.Error(w, "attachment lookup failed", http.StatusInternalServerError)
+		httpx.Error(w, "attachment lookup failed", http.StatusInternalServerError)
 		return
 	}
 	if !ok {
-		http.Error(w, "attachment not found", http.StatusNotFound)
+		httpx.Error(w, "attachment not found", http.StatusNotFound)
 		return
 	}
 	blob, size, err := s.Blobs.Get(r.Context(), att.BlobKey)
 	if err != nil {
-		http.Error(w, "attachment blob missing", http.StatusNotFound)
+		httpx.Error(w, "attachment blob missing", http.StatusNotFound)
 		return
 	}
 	defer blob.Close()

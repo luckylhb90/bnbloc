@@ -9,6 +9,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/luckylhb90/bnbloc/internal/httpx"
 	"github.com/luckylhb90/bnbloc/internal/ids"
 	"github.com/luckylhb90/bnbloc/internal/obs"
 	"github.com/luckylhb90/bnbloc/internal/roomctx"
@@ -68,19 +69,19 @@ func (s *Service) handleTemplateAction(w http.ResponseWriter, r *http.Request) {
 	case second == "instantiate":
 		s.handleInstantiateTemplate(w, r, first)
 	default:
-		writeErr(w, http.StatusNotFound, "not found")
+		httpx.Error(w, "not found", http.StatusNotFound)
 	}
 }
 
 func (s *Service) templatesReady(w http.ResponseWriter, r *http.Request) (string, bool) {
 	user := caller(r)
 	if user == "" {
-		writeErr(w, http.StatusUnauthorized, "missing authenticated subject")
+		httpx.Error(w, "missing authenticated subject", http.StatusUnauthorized)
 		return "", false
 	}
 	if s.Templates == nil {
 		obs.ServerError(w, "room templates unavailable", nil)
-		writeErr(w, http.StatusServiceUnavailable, "room templates unavailable")
+		httpx.Error(w, "room templates unavailable", http.StatusServiceUnavailable)
 		return "", false
 	}
 	return user, true
@@ -89,12 +90,12 @@ func (s *Service) templatesReady(w http.ResponseWriter, r *http.Request) (string
 func writeTemplateErr(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, store.ErrTemplateNotFound):
-		writeErr(w, http.StatusNotFound, "template not found")
+		httpx.Error(w, "template not found", http.StatusNotFound)
 	case errors.Is(err, store.ErrTemplateForbidden):
-		writeErr(w, http.StatusForbidden, "only the author may change this template")
+		httpx.Error(w, "only the author may change this template", http.StatusForbidden)
 	default:
-		log.Printf("room: template store: %v", err)
-		writeErr(w, http.StatusInternalServerError, "template store error")
+		obs.ServerError(w, "template store error", err)
+		httpx.Error(w, "template store error", http.StatusInternalServerError)
 	}
 }
 
@@ -241,7 +242,7 @@ func (s *Service) handleListTemplates(w http.ResponseWriter, r *http.Request) {
 		writeTemplateErr(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"templates": list})
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"templates": list})
 }
 
 func (s *Service) handleGetTemplate(w http.ResponseWriter, r *http.Request) {
@@ -254,7 +255,7 @@ func (s *Service) handleGetTemplate(w http.ResponseWriter, r *http.Request) {
 		writeTemplateErr(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, t)
+	httpx.WriteJSON(w, http.StatusOK, t)
 }
 
 // templateInput is the create body (and, with nil fields unchanged, the
@@ -272,7 +273,7 @@ func (s *Service) handleCreateTemplate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var in templateInput
-	if !decode(w, r, &in) {
+	if !httpx.DecodeJSON(w, r, maxJSONBodyBytes, &in) {
 		return
 	}
 	var body wire.RoomTemplateBody
@@ -304,7 +305,7 @@ func (s *Service) saveNewTemplate(w http.ResponseWriter, r *http.Request, user s
 		}
 	}
 	if err != nil {
-		writeErr(w, http.StatusBadRequest, err.Error())
+		httpx.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 	created, err := s.Templates.CreateTemplate(r.Context(), t)
@@ -312,7 +313,7 @@ func (s *Service) saveNewTemplate(w http.ResponseWriter, r *http.Request, user s
 		writeTemplateErr(w, err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, created)
+	httpx.WriteJSON(w, http.StatusCreated, created)
 }
 
 func (s *Service) handlePatchTemplate(w http.ResponseWriter, r *http.Request) {
@@ -321,14 +322,14 @@ func (s *Service) handlePatchTemplate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var in templateInput
-	if !decode(w, r, &in) {
+	if !httpx.DecodeJSON(w, r, maxJSONBodyBytes, &in) {
 		return
 	}
 	var patch store.TemplatePatch
 	if in.Name != nil {
 		name := strings.TrimSpace(*in.Name)
 		if err := validTemplateName(name); err != nil {
-			writeErr(w, http.StatusBadRequest, err.Error())
+			httpx.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
 		patch.Name = &name
@@ -336,7 +337,7 @@ func (s *Service) handlePatchTemplate(w http.ResponseWriter, r *http.Request) {
 	if in.Description != nil {
 		d := strings.TrimSpace(*in.Description)
 		if !runesIn(d, maxTemplateDescRunes) {
-			writeErr(w, http.StatusBadRequest, "description too long")
+			httpx.Error(w, "description too long", http.StatusBadRequest)
 			return
 		}
 		patch.Description = &d
@@ -344,7 +345,7 @@ func (s *Service) handlePatchTemplate(w http.ResponseWriter, r *http.Request) {
 	if in.Visibility != nil {
 		v, err := normalizeTemplateVisibility(*in.Visibility)
 		if err != nil {
-			writeErr(w, http.StatusBadRequest, err.Error())
+			httpx.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
 		patch.Visibility = &v
@@ -352,7 +353,7 @@ func (s *Service) handlePatchTemplate(w http.ResponseWriter, r *http.Request) {
 	if in.Body != nil {
 		b, err := normalizeTemplateBody(*in.Body)
 		if err != nil {
-			writeErr(w, http.StatusBadRequest, err.Error())
+			httpx.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
 		patch.Body = &b
@@ -362,7 +363,7 @@ func (s *Service) handlePatchTemplate(w http.ResponseWriter, r *http.Request) {
 		writeTemplateErr(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, t)
+	httpx.WriteJSON(w, http.StatusOK, t)
 }
 
 func (s *Service) handleDeleteTemplate(w http.ResponseWriter, r *http.Request) {
@@ -397,11 +398,11 @@ func (s *Service) handleTemplateFromRoom(w http.ResponseWriter, r *http.Request,
 	}
 	roomID, err := roomctx.Normalize(rawRoomID)
 	if err != nil {
-		writeErr(w, http.StatusBadRequest, err.Error())
+		httpx.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 	if role, ok := s.Store.MemberRole(r.Context(), roomID, user); !ok || !role.CanInvite() {
-		writeErr(w, http.StatusForbidden, "only the room owner or an admin may save it as a template")
+		httpx.Error(w, "only the room owner or an admin may save it as a template", http.StatusForbidden)
 		return
 	}
 	var in struct {
@@ -411,12 +412,12 @@ func (s *Service) handleTemplateFromRoom(w http.ResponseWriter, r *http.Request,
 		IncludeMembers   bool                 `json:"includeMembers"`
 		IncludeSchedules bool                 `json:"includeSchedules"`
 	}
-	if !decode(w, r, &in) {
+	if !httpx.DecodeJSON(w, r, maxJSONBodyBytes, &in) {
 		return
 	}
 	rm, err := s.Store.GetRoom(r.Context(), roomID)
 	if err != nil {
-		writeErr(w, http.StatusNotFound, "room not found")
+		httpx.Error(w, "room not found", http.StatusNotFound)
 		return
 	}
 	body := wire.RoomTemplateBody{
@@ -445,7 +446,7 @@ func (s *Service) handleTemplateFromRoom(w http.ResponseWriter, r *http.Request,
 		list, err := s.Schedules.ListSchedules(r.Context(), roomID)
 		if err != nil {
 			obs.ServerError(w, "could not read the room's schedules", err)
-			writeErr(w, http.StatusInternalServerError, "could not read the room's schedules")
+			httpx.Error(w, "could not read the room's schedules", http.StatusInternalServerError)
 			return
 		}
 		for _, sc := range list {
@@ -480,7 +481,7 @@ func (s *Service) handleInstantiateTemplate(w http.ResponseWriter, r *http.Reque
 		Name       string `json:"name"`
 		Visibility string `json:"visibility"`
 	}
-	if !decode(w, r, &in) {
+	if !httpx.DecodeJSON(w, r, maxJSONBodyBytes, &in) {
 		return
 	}
 	t, err := s.Templates.GetTemplate(r.Context(), templateID, user)
@@ -493,7 +494,7 @@ func (s *Service) handleInstantiateTemplate(w http.ResponseWriter, r *http.Reque
 		err = roomctx.ValidateID(roomID)
 	}
 	if err != nil {
-		writeErr(w, http.StatusBadRequest, "invalid room id: 1-64 bytes, no whitespace edges, control characters, or / \\ ? # %")
+		httpx.Error(w, "invalid room id: 1-64 bytes, no whitespace edges, control characters, or / \\ ? # %", http.StatusBadRequest)
 		return
 	}
 	name := strings.TrimSpace(in.Name)
@@ -506,18 +507,18 @@ func (s *Service) handleInstantiateTemplate(w http.ResponseWriter, r *http.Reque
 		CreatedAtMs: s.Now(),
 	})
 	if errors.Is(err, store.ErrRoomExists) {
-		writeErr(w, http.StatusConflict, "room id already exists")
+		httpx.Error(w, "room id already exists", http.StatusConflict)
 		return
 	}
 	if err != nil {
 		obs.ServerError(w, "instantiate template failed", err)
-		writeErr(w, http.StatusInternalServerError, err.Error())
+		httpx.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 	if err := s.Templates.UseTemplate(r.Context(), t.TemplateID, user); err != nil {
 		log.Printf("room: template %s use count: %v", t.TemplateID, err)
 	}
-	writeJSON(w, http.StatusOK, res)
+	httpx.WriteJSON(w, http.StatusOK, res)
 }
 
 // instantiate applies template t to a new room owned by user.

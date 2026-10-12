@@ -2,11 +2,12 @@ package room
 
 import (
 	"encoding/json"
-	"github.com/luckylhb90/bnbloc/internal/wire"
 	"io"
 	"net/http"
 	"strings"
 	"testing"
+
+	"github.com/luckylhb90/bnbloc/internal/wire"
 
 	"github.com/luckylhb90/bnbloc/internal/store"
 	"github.com/luckylhb90/bnbloc/internal/svcauth"

@@ -14,6 +14,7 @@ import (
 	"github.com/luckylhb90/bnbloc/internal/auth"
 	"github.com/luckylhb90/bnbloc/internal/authprovider"
 	"github.com/luckylhb90/bnbloc/internal/extreg"
+	"github.com/luckylhb90/bnbloc/internal/httpx"
 	"github.com/luckylhb90/bnbloc/internal/obs"
 	"github.com/luckylhb90/bnbloc/internal/store"
 )
@@ -80,20 +81,19 @@ func (s *Service) handleAuthProviderConfig(w http.ResponseWriter, r *http.Reques
 		out["authProviderAvailable"] = true
 		out["authProviderStartPath"] = publicAuthStartPath
 	}
-	writeJSON(w, http.StatusOK, out)
+	httpx.WriteJSON(w, http.StatusOK, out)
 }
 
 func (s *Service) proxyAuthProvider(w http.ResponseWriter, r *http.Request, providerPath string) {
 	provider, ok := s.activeAuthProvider(r.Context())
 	if !ok {
-		obs.ServerError(w, "auth provider is not configured", nil)
-		http.Error(w, "auth provider is not configured", http.StatusServiceUnavailable)
+		httpx.Unavailable(w, "auth provider is")
 		return
 	}
 	base, err := url.Parse(provider.BaseURL)
 	if err != nil {
 		obs.ServerError(w, "auth provider endpoint invalid", err)
-		http.Error(w, "auth provider endpoint invalid", http.StatusInternalServerError)
+		httpx.Error(w, "auth provider endpoint invalid", http.StatusInternalServerError)
 		return
 	}
 	proxy := httputil.NewSingleHostReverseProxy(base)
@@ -110,24 +110,23 @@ func (s *Service) proxyAuthProvider(w http.ResponseWriter, r *http.Request, prov
 func (s *Service) handleAuthProviderACS(w http.ResponseWriter, r *http.Request) {
 	provider, ok := s.activeAuthProvider(r.Context())
 	if !ok {
-		obs.ServerError(w, "auth provider is not configured", nil)
-		http.Error(w, "auth provider is not configured", http.StatusServiceUnavailable)
+		httpx.Unavailable(w, "auth provider is")
 		return
 	}
 	if err := r.ParseForm(); err != nil {
-		http.Error(w, "invalid auth response", http.StatusBadRequest)
+		httpx.Error(w, "invalid auth response", http.StatusBadRequest)
 		return
 	}
 	endpoint, err := url.Parse(provider.BaseURL + authProviderACSPath)
 	if err != nil {
 		obs.ServerError(w, "auth provider endpoint invalid", err)
-		http.Error(w, "auth provider endpoint invalid", http.StatusInternalServerError)
+		httpx.Error(w, "auth provider endpoint invalid", http.StatusInternalServerError)
 		return
 	}
 	req, err := http.NewRequestWithContext(r.Context(), http.MethodPost, endpoint.String(), strings.NewReader(r.PostForm.Encode()))
 	if err != nil {
 		obs.ServerError(w, "auth provider request invalid", err)
-		http.Error(w, "auth provider request invalid", http.StatusInternalServerError)
+		httpx.Error(w, "auth provider request invalid", http.StatusInternalServerError)
 		return
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -137,7 +136,7 @@ func (s *Service) handleAuthProviderACS(w http.ResponseWriter, r *http.Request) 
 	resp, err := client.Do(req)
 	if err != nil {
 		obs.ServerError(w, "auth provider unavailable", err)
-		http.Error(w, "auth provider unavailable", http.StatusServiceUnavailable)
+		httpx.Error(w, "auth provider unavailable", http.StatusServiceUnavailable)
 		return
 	}
 	defer resp.Body.Close()
@@ -145,14 +144,14 @@ func (s *Service) handleAuthProviderACS(w http.ResponseWriter, r *http.Request) 
 		location := resp.Header.Get("Location")
 		if strings.TrimSpace(location) == "" {
 			obs.ServerError(w, "auth provider redirect missing location", nil)
-			http.Error(w, "auth provider redirect missing location", http.StatusBadGateway)
+			httpx.Error(w, "auth provider redirect missing location", http.StatusBadGateway)
 			return
 		}
 		http.Redirect(w, r, location, http.StatusFound)
 		return
 	}
 	if resp.StatusCode != http.StatusOK {
-		http.Error(w, "auth provider rejected response", http.StatusUnauthorized)
+		httpx.Error(w, "auth provider rejected response", http.StatusUnauthorized)
 		return
 	}
 	limited := http.MaxBytesReader(w, resp.Body, 64*1024)
@@ -160,7 +159,7 @@ func (s *Service) handleAuthProviderACS(w http.ResponseWriter, r *http.Request) 
 	if err := json.NewDecoder(limited).Decode(&assertion); err != nil {
 		_, _ = io.Copy(io.Discard, limited)
 		obs.ServerError(w, "auth provider response invalid", err)
-		http.Error(w, "auth provider response invalid", http.StatusBadGateway)
+		httpx.Error(w, "auth provider response invalid", http.StatusBadGateway)
 		return
 	}
 	subject := strings.TrimSpace(assertion.Subject)
@@ -168,7 +167,7 @@ func (s *Service) handleAuthProviderACS(w http.ResponseWriter, r *http.Request) 
 		subject = strings.TrimSpace(assertion.Email)
 	}
 	if subject == "" {
-		http.Error(w, "auth provider response missing identity", http.StatusUnauthorized)
+		httpx.Error(w, "auth provider response missing identity", http.StatusUnauthorized)
 		return
 	}
 	identity := auth.Identity{Subject: subject, Email: assertion.Email}
@@ -178,7 +177,7 @@ func (s *Service) handleAuthProviderACS(w http.ResponseWriter, r *http.Request) 
 	// access decision, so a failed sync refuses the sign-in.
 	if tid, err := s.applyOrgSync(r.Context(), identity, assertion); err != nil {
 		obs.ServerError(w, "org sync at sign-in", err)
-		http.Error(w, "organization sync unavailable", http.StatusServiceUnavailable)
+		httpx.Error(w, "organization sync unavailable", http.StatusServiceUnavailable)
 		return
 	} else if tid != "" {
 		identity.Tenant = tid
@@ -221,7 +220,7 @@ func (s *Service) completeSSO(w http.ResponseWriter, r *http.Request, identity a
 	}
 	target, err := s.ssoRelayTarget(r, relay)
 	if err != nil {
-		http.Error(w, "invalid sso redirect target", http.StatusBadRequest)
+		httpx.Error(w, "invalid sso redirect target", http.StatusBadRequest)
 		return
 	}
 	// Resolve the scope up front so every flow shares the suspended-tenant
@@ -229,12 +228,12 @@ func (s *Service) completeSSO(w http.ResponseWriter, r *http.Request, identity a
 	// session (and its refresh family) when the client redeems.
 	scope, err := s.resolveSession(identity)
 	if errors.Is(err, errTenantSuspended) {
-		http.Error(w, "tenant suspended", http.StatusForbidden)
+		httpx.Error(w, "tenant suspended", http.StatusForbidden)
 		return
 	}
 	if err != nil {
 		obs.ServerError(w, "session issue failed", err)
-		http.Error(w, "session issue failed", http.StatusInternalServerError)
+		httpx.Error(w, "session issue failed", http.StatusInternalServerError)
 		return
 	}
 	fragment := url.Values{}
@@ -243,21 +242,21 @@ func (s *Service) completeSSO(w http.ResponseWriter, r *http.Request, identity a
 	cliNonce := strings.TrimSpace(q.Get(cliNonceParam))
 	switch {
 	case desktopNonce != "" && cliNonce != "":
-		http.Error(w, "sso redirect target names two hand-off flows", http.StatusBadRequest)
+		httpx.Error(w, "sso redirect target names two hand-off flows", http.StatusBadRequest)
 		return
 	case cliNonce != "":
 		if len(cliNonce) < minCLINonceLen {
-			http.Error(w, "cli sign-in nonce too short", http.StatusBadRequest)
+			httpx.Error(w, "cli sign-in nonce too short", http.StatusBadRequest)
 			return
 		}
 		q.Del(cliNonceParam)
 		target.RawQuery = q.Encode()
 		if err := s.parkCLIHandoff(r.Context(), identity, cliNonce); errors.Is(err, store.ErrSSOHandoffPending) {
-			http.Error(w, "cli sign-in already completed", http.StatusConflict)
+			httpx.Error(w, "cli sign-in already completed", http.StatusConflict)
 			return
 		} else if err != nil {
 			obs.ServerError(w, "sso hand-off unavailable", err)
-			http.Error(w, "sso hand-off unavailable", http.StatusServiceUnavailable)
+			httpx.Error(w, "sso hand-off unavailable", http.StatusServiceUnavailable)
 			return
 		}
 		fragment.Set("cliSignedIn", "1")
@@ -267,7 +266,7 @@ func (s *Service) completeSSO(w http.ResponseWriter, r *http.Request, identity a
 		code, err := s.parkDesktopHandoff(r.Context(), identity, desktopNonce)
 		if err != nil {
 			obs.ServerError(w, "sso hand-off unavailable", err)
-			http.Error(w, "sso hand-off unavailable", http.StatusServiceUnavailable)
+			httpx.Error(w, "sso hand-off unavailable", http.StatusServiceUnavailable)
 			return
 		}
 		fragment.Set("ssoCode", code)
@@ -275,7 +274,7 @@ func (s *Service) completeSSO(w http.ResponseWriter, r *http.Request, identity a
 		grant, err := s.openFamily(r.Context(), identity, scope, originFor(r, "", clientWeb))
 		if err != nil {
 			obs.ServerError(w, "session issue failed", err)
-			http.Error(w, "session issue failed", http.StatusInternalServerError)
+			httpx.Error(w, "session issue failed", http.StatusInternalServerError)
 			return
 		}
 		fragment.Set("sessionToken", grant.Token)
@@ -380,19 +379,21 @@ func (s *Service) handleSSOExchange(w http.ResponseWriter, r *http.Request) {
 		Code  string `json:"code"`
 		Nonce string `json:"nonce"`
 	}
-	r.Body = http.MaxBytesReader(w, r.Body, maxAuthBodyBytes)
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Code == "" || body.Nonce == "" {
-		http.Error(w, "code and nonce required", http.StatusBadRequest)
+	if !httpx.DecodeJSON(w, r, maxAuthBodyBytes, &body) {
+		return
+	}
+	if body.Code == "" || body.Nonce == "" {
+		httpx.Error(w, "code and nonce required", http.StatusBadRequest)
 		return
 	}
 	identity, ok, err := s.redeemDesktopHandoff(r.Context(), body.Code, body.Nonce)
 	if err != nil {
 		obs.ServerError(w, "sso hand-off unavailable", err)
-		http.Error(w, "sso hand-off unavailable", http.StatusServiceUnavailable)
+		httpx.Error(w, "sso hand-off unavailable", http.StatusServiceUnavailable)
 		return
 	}
 	if !ok {
-		http.Error(w, "invalid or expired sso code", http.StatusUnauthorized)
+		httpx.Error(w, "invalid or expired sso code", http.StatusUnauthorized)
 		return
 	}
 	s.writeHandoffGrant(w, r, identity, clientDesktop)
@@ -407,19 +408,21 @@ func (s *Service) handleSSOClaim(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Nonce string `json:"nonce"`
 	}
-	r.Body = http.MaxBytesReader(w, r.Body, maxAuthBodyBytes)
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || strings.TrimSpace(body.Nonce) == "" {
-		http.Error(w, "nonce required", http.StatusBadRequest)
+	if !httpx.DecodeJSON(w, r, maxAuthBodyBytes, &body) {
+		return
+	}
+	if strings.TrimSpace(body.Nonce) == "" {
+		httpx.Error(w, "nonce required", http.StatusBadRequest)
 		return
 	}
 	identity, ok, err := s.claimCLIHandoff(r.Context(), strings.TrimSpace(body.Nonce))
 	if err != nil {
 		obs.ServerError(w, "sso hand-off unavailable", err)
-		http.Error(w, "sso hand-off unavailable", http.StatusServiceUnavailable)
+		httpx.Error(w, "sso hand-off unavailable", http.StatusServiceUnavailable)
 		return
 	}
 	if !ok {
-		http.Error(w, "no completed sign-in for this nonce", http.StatusNotFound)
+		httpx.Error(w, "no completed sign-in for this nonce", http.StatusNotFound)
 		return
 	}
 	s.writeHandoffGrant(w, r, identity, clientCLI)
@@ -431,13 +434,13 @@ func (s *Service) handleSSOClaim(w http.ResponseWriter, r *http.Request) {
 func (s *Service) writeHandoffGrant(w http.ResponseWriter, r *http.Request, identity auth.Identity, client string) {
 	grant, err := s.issueSession(r.Context(), identity, originFor(r, "", client))
 	if errors.Is(err, errTenantSuspended) {
-		http.Error(w, "tenant suspended", http.StatusForbidden)
+		httpx.Error(w, "tenant suspended", http.StatusForbidden)
 		return
 	}
 	if err != nil {
 		obs.ServerError(w, "session issue failed", err)
-		http.Error(w, "session issue failed", http.StatusInternalServerError)
+		httpx.Error(w, "session issue failed", http.StatusInternalServerError)
 		return
 	}
-	writeJSON(w, http.StatusOK, grant)
+	httpx.WriteJSON(w, http.StatusOK, grant)
 }

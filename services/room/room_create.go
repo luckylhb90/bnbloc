@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/luckylhb90/bnbloc/internal/httpx"
 	"github.com/luckylhb90/bnbloc/internal/ids"
 	"github.com/luckylhb90/bnbloc/internal/obs"
 	"github.com/luckylhb90/bnbloc/internal/store"
@@ -98,9 +99,9 @@ func (s *Service) publishMemberJoined(ctx context.Context, roomID, userID string
 func writeMemberErr(w http.ResponseWriter, err error) {
 	var pol errMemberPolicy
 	if errors.As(err, &pol) {
-		writeErr(w, pol.status, pol.msg)
+		httpx.WriteStatus(w, pol.status, pol.msg, err)
 		return
 	}
 	obs.ServerError(w, "add member failed", err)
-	writeErr(w, http.StatusInternalServerError, err.Error())
+	httpx.Error(w, err.Error(), http.StatusInternalServerError)
 }

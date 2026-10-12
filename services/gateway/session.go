@@ -7,7 +7,6 @@ import (
 	"crypto/subtle"
 	"encoding/base64"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -16,6 +15,7 @@ import (
 	"time"
 
 	"github.com/luckylhb90/bnbloc/internal/auth"
+	"github.com/luckylhb90/bnbloc/internal/httpx"
 	"github.com/luckylhb90/bnbloc/internal/obs"
 	"github.com/luckylhb90/bnbloc/internal/rbac"
 	"github.com/luckylhb90/bnbloc/internal/store"
@@ -316,12 +316,12 @@ func (s *Service) useRefreshToken(ctx context.Context, raw string, rotate bool) 
 func writeRefreshError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, errTenantSuspended):
-		http.Error(w, "tenant suspended", http.StatusUnauthorized)
+		httpx.Error(w, "tenant suspended", http.StatusUnauthorized)
 	case errors.Is(err, errRefreshRejected):
-		http.Error(w, errRefreshRejected.Error(), http.StatusUnauthorized)
+		httpx.Error(w, errRefreshRejected.Error(), http.StatusUnauthorized)
 	default:
 		obs.ServerError(w, "session issue failed", err)
-		http.Error(w, "session issue failed", http.StatusInternalServerError)
+		httpx.Error(w, "session issue failed", http.StatusInternalServerError)
 	}
 }
 
@@ -334,9 +334,11 @@ type refreshBody struct {
 // decodeRefreshBody reads a {refreshToken} body (400 when missing).
 func decodeRefreshBody(w http.ResponseWriter, r *http.Request) (refreshBody, bool) {
 	var body refreshBody
-	r.Body = http.MaxBytesReader(w, r.Body, maxAuthBodyBytes)
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || strings.TrimSpace(body.RefreshToken) == "" {
-		http.Error(w, "refreshToken required", http.StatusBadRequest)
+	if !httpx.DecodeJSON(w, r, maxAuthBodyBytes, &body) {
+		return refreshBody{}, false
+	}
+	if strings.TrimSpace(body.RefreshToken) == "" {
+		httpx.Error(w, "refreshToken required", http.StatusBadRequest)
 		return refreshBody{}, false
 	}
 	return body, true
@@ -358,7 +360,7 @@ func (s *Service) handleRefresh(w http.ResponseWriter, r *http.Request) {
 		writeRefreshError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, s.grantFor(fam, scope))
+	httpx.WriteJSON(w, http.StatusOK, s.grantFor(fam, scope))
 }
 
 // handleRefreshFork opens a NEW refresh family for the same sign-in, leaving
@@ -387,7 +389,7 @@ func (s *Service) handleRefreshFork(w http.ResponseWriter, r *http.Request) {
 		writeRefreshError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, grant)
+	httpx.WriteJSON(w, http.StatusOK, grant)
 }
 
 // handleLogout revokes the presented refresh token's family. Idempotent and
@@ -404,7 +406,7 @@ func (s *Service) handleLogout(w http.ResponseWriter, r *http.Request) {
 		revoked, err := s.refreshTokens().RevokeRefreshFamily(r.Context(), claims.Subject, claims.Family, s.nowTime().UnixMilli())
 		if err != nil {
 			obs.ServerError(w, "logout failed", err)
-			http.Error(w, "logout failed", http.StatusInternalServerError)
+			httpx.Error(w, "logout failed", http.StatusInternalServerError)
 			return
 		}
 		if revoked {
@@ -434,13 +436,13 @@ type mySession struct {
 func (s *Service) handleMySessions(w http.ResponseWriter, r *http.Request) {
 	claims, err := s.authenticate(r)
 	if err != nil {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		httpx.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
 	fams, err := s.refreshTokens().ListRefreshFamilies(r.Context(), claims.Subject, s.nowTime().UnixMilli())
 	if err != nil {
 		obs.ServerError(w, "list sessions failed", err)
-		http.Error(w, "list sessions failed", http.StatusInternalServerError)
+		httpx.Error(w, "list sessions failed", http.StatusInternalServerError)
 		return
 	}
 	out := make([]mySession, 0, len(fams))
@@ -451,7 +453,7 @@ func (s *Service) handleMySessions(w http.ResponseWriter, r *http.Request) {
 			ParentID: f.ParentFamilyID, Current: f.FamilyID == claims.Family,
 		})
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"sessions": out})
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"sessions": out})
 }
 
 // handleRevokeMySession revokes one of the caller's own families (404 when
@@ -462,18 +464,18 @@ func (s *Service) handleMySessions(w http.ResponseWriter, r *http.Request) {
 func (s *Service) handleRevokeMySession(w http.ResponseWriter, r *http.Request) {
 	claims, err := s.authenticate(r)
 	if err != nil {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		httpx.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
 	id := r.PathValue("id")
 	revoked, err := s.refreshTokens().RevokeRefreshFamily(r.Context(), claims.Subject, id, s.nowTime().UnixMilli())
 	if err != nil {
 		obs.ServerError(w, "revoke session failed", err)
-		http.Error(w, "revoke session failed", http.StatusInternalServerError)
+		httpx.Error(w, "revoke session failed", http.StatusInternalServerError)
 		return
 	}
 	if !revoked {
-		http.Error(w, "session not found", http.StatusNotFound)
+		httpx.Error(w, "session not found", http.StatusNotFound)
 		return
 	}
 	s.auditSessionRevokeByID(r.Context(), id, "revoke", claims.Subject)
@@ -481,7 +483,7 @@ func (s *Service) handleRevokeMySession(w http.ResponseWriter, r *http.Request) 
 		return f.ParentFamilyID == id
 	}); err != nil {
 		obs.ServerError(w, "revoke session failed", err)
-		http.Error(w, "revoke session failed", http.StatusInternalServerError)
+		httpx.Error(w, "revoke session failed", http.StatusInternalServerError)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -495,16 +497,16 @@ func (s *Service) handleRevokeMySession(w http.ResponseWriter, r *http.Request) 
 func (s *Service) handleRevokeOtherSessions(w http.ResponseWriter, r *http.Request) {
 	claims, err := s.authenticate(r)
 	if err != nil {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		httpx.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
 	if r.URL.Query().Get("others") != "1" {
-		http.Error(w, "others=1 required", http.StatusBadRequest)
+		httpx.Error(w, "others=1 required", http.StatusBadRequest)
 		return
 	}
 	if claims.Family == "" {
 		// Without a family the current sign-in is unknown, so "others" is too.
-		http.Error(w, "the current session has no sign-in record; sign in again", http.StatusConflict)
+		httpx.Error(w, "the current session has no sign-in record; sign in again", http.StatusConflict)
 		return
 	}
 	n, err := s.revokeMySessionsWhere(r.Context(), claims.Subject, func(f store.RefreshFamily) bool {
@@ -512,10 +514,10 @@ func (s *Service) handleRevokeOtherSessions(w http.ResponseWriter, r *http.Reque
 	})
 	if err != nil {
 		obs.ServerError(w, "revoke sessions failed", err)
-		http.Error(w, "revoke sessions failed", http.StatusInternalServerError)
+		httpx.Error(w, "revoke sessions failed", http.StatusInternalServerError)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"revoked": n})
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"revoked": n})
 }
 
 // revokeMySessionsWhere revokes the subject's active families selected by

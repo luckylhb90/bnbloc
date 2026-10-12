@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"log"
 	"net/http"
 	"strconv"
@@ -16,6 +15,7 @@ import (
 	"time"
 
 	"github.com/luckylhb90/bnbloc/core"
+	"github.com/luckylhb90/bnbloc/internal/httpx"
 	"github.com/luckylhb90/bnbloc/internal/membership"
 	"github.com/luckylhb90/bnbloc/internal/notify"
 	"github.com/luckylhb90/bnbloc/internal/obs"
@@ -296,11 +296,11 @@ func (s *Service) agentMayReadChannel(w http.ResponseWriter, ctx context.Context
 	people, err := s.isPeopleChannel(ctx, roomID, channelID)
 	if err != nil {
 		obs.ServerError(w, "channel lookup failed", err)
-		http.Error(w, "channel lookup failed", http.StatusInternalServerError)
+		httpx.Error(w, "channel lookup failed", http.StatusInternalServerError)
 		return false
 	}
 	if people {
-		http.Error(w, "the people chat is for people only", http.StatusForbidden)
+		httpx.Error(w, "the people chat is for people only", http.StatusForbidden)
 		return false
 	}
 	return true
@@ -369,12 +369,12 @@ func accessRevoked(ev wire.Event, subject string) bool {
 func (s *Service) handleEvents(w http.ResponseWriter, r *http.Request) {
 	roomID, err := roomctx.Normalize(r.PathValue("roomId"))
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		httpx.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 	userID := strings.TrimSpace(r.Header.Get("X-Bnbloc-User"))
 	if userID == "" {
-		http.Error(w, "missing authenticated subject", http.StatusUnauthorized)
+		httpx.Error(w, "missing authenticated subject", http.StatusUnauthorized)
 		return
 	}
 	// A stream outlives any cache entry: it opens on the room service's
@@ -382,7 +382,7 @@ func (s *Service) handleEvents(w http.ResponseWriter, r *http.Request) {
 	// removed seconds ago) and re-checks at every heartbeat below.
 	m, err := membership.FreshRoomScope(r.Context(), s.Membership, roomID, userID, membership.AnyMember)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusForbidden)
+		httpx.Error(w, err.Error(), http.StatusForbidden)
 		return
 	}
 	// A platform agent host's stream (its bridge driving the hosted agent)
@@ -392,7 +392,7 @@ func (s *Service) handleEvents(w http.ResponseWriter, r *http.Request) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		obs.ServerError(w, "streaming unsupported", nil)
-		http.Error(w, "streaming unsupported", http.StatusInternalServerError)
+		httpx.Error(w, "streaming unsupported", http.StatusInternalServerError)
 		return
 	}
 	// Channel scope: a channel-scoped subscriber receives one channel (omitted
@@ -410,7 +410,7 @@ func (s *Service) handleEvents(w http.ResponseWriter, r *http.Request) {
 	channelID := ""
 	if !allChannels {
 		if channelID, err = s.resolveChannel(r.Context(), roomID, r.URL.Query().Get("channelId")); err != nil {
-			http.Error(w, err.Error(), http.StatusNotFound)
+			httpx.Error(w, err.Error(), http.StatusNotFound)
 			return
 		}
 		if !human && !s.agentMayReadChannel(w, r.Context(), roomID, channelID) {
@@ -536,12 +536,12 @@ func (s *Service) handleEvents(w http.ResponseWriter, r *http.Request) {
 func (s *Service) handleAgents(w http.ResponseWriter, r *http.Request) {
 	roomID, err := roomctx.Normalize(r.PathValue("roomId"))
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		httpx.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 	userID := strings.TrimSpace(r.Header.Get("X-Bnbloc-User"))
 	if userID == "" {
-		http.Error(w, "missing authenticated subject", http.StatusUnauthorized)
+		httpx.Error(w, "missing authenticated subject", http.StatusUnauthorized)
 		return
 	}
 	if _, ok := s.member(w, r, roomID, userID, membership.AnyMember); !ok {
@@ -585,12 +585,12 @@ func parseAgentRefs(raw, sandboxedRaw string) []realtime.AgentRef {
 func (s *Service) handleChat(w http.ResponseWriter, r *http.Request) {
 	roomID, err := roomctx.Normalize(r.PathValue("roomId"))
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		httpx.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 	userID := strings.TrimSpace(r.Header.Get("X-Bnbloc-User"))
 	if userID == "" {
-		http.Error(w, "missing authenticated subject", http.StatusUnauthorized)
+		httpx.Error(w, "missing authenticated subject", http.StatusUnauthorized)
 		return
 	}
 	// Only a member who may chat posts (PostChat checks it): never a visitor,
@@ -617,9 +617,7 @@ func (s *Service) handleChat(w http.ResponseWriter, r *http.Request) {
 	}
 	// Cap the request body so a client cannot stream an unbounded payload; the
 	// text limit in PostChat is the product bound, this is defense-in-depth.
-	r.Body = http.MaxBytesReader(w, r.Body, maxChatBodyBytes)
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		http.Error(w, "invalid json body", http.StatusBadRequest)
+	if !httpx.DecodeJSON(w, r, maxChatBodyBytes, &body) {
 		return
 	}
 	posted, err := s.PostChat(r.Context(), ChatPost{
@@ -647,19 +645,19 @@ func writeChatPostErr(w http.ResponseWriter, err error) {
 	var offline errPlatformAgentOffline
 	switch {
 	case membership.IsRefusal(err):
-		http.Error(w, err.Error(), http.StatusForbidden)
+		httpx.Error(w, err.Error(), http.StatusForbidden)
 	case errors.As(err, &offline):
 		writePlatformAgentOffline(w, offline)
 	case errors.Is(err, errMessageTooLong):
-		http.Error(w, err.Error(), http.StatusRequestEntityTooLarge)
+		httpx.Error(w, err.Error(), http.StatusRequestEntityTooLarge)
 	case errors.Is(err, errEmptyMessage), errors.Is(err, errAgentInPeopleChat), errors.As(err, &bad),
 		errors.Is(err, errExpertNotAvailable), errors.Is(err, errExpertWithoutAgent):
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		httpx.Error(w, err.Error(), http.StatusBadRequest)
 	case errors.Is(err, errUnknownChannel):
-		http.Error(w, err.Error(), http.StatusNotFound)
+		httpx.Error(w, err.Error(), http.StatusNotFound)
 	default:
 		obs.ServerError(w, "message persistence failed", err)
-		http.Error(w, "message persistence failed", http.StatusInternalServerError)
+		httpx.Error(w, "message persistence failed", http.StatusInternalServerError)
 	}
 }
 
@@ -669,13 +667,11 @@ func writeChatPostErr(w http.ResponseWriter, err error) {
 func (s *Service) handleInternalPublish(w http.ResponseWriter, r *http.Request) {
 	roomID, err := roomctx.Normalize(r.PathValue("roomId"))
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		httpx.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 	var ev wire.Event
-	r.Body = http.MaxBytesReader(w, r.Body, maxInternalPublishBytes)
-	if err := json.NewDecoder(r.Body).Decode(&ev); err != nil {
-		http.Error(w, "invalid json body", http.StatusBadRequest)
+	if !httpx.DecodeJSON(w, r, maxInternalPublishBytes, &ev) {
 		return
 	}
 	ev.RoomID = roomID
@@ -688,11 +684,11 @@ func (s *Service) handleInternalPublish(w http.ResponseWriter, r *http.Request) 
 		people, err := s.isPeopleChannel(r.Context(), roomID, ev.ChannelID)
 		if err != nil {
 			obs.ServerError(w, "channel lookup failed", err)
-			http.Error(w, "channel lookup failed", http.StatusInternalServerError)
+			httpx.Error(w, "channel lookup failed", http.StatusInternalServerError)
 			return
 		}
 		if people {
-			http.Error(w, errAgentInPeopleChat.Error(), http.StatusBadRequest)
+			httpx.Error(w, errAgentInPeopleChat.Error(), http.StatusBadRequest)
 			return
 		}
 	}
@@ -705,7 +701,7 @@ func (s *Service) handleInternalPublish(w http.ResponseWriter, r *http.Request) 
 	d, err := s.durable(r.Context(), ev, "", "")
 	if err != nil {
 		obs.ServerError(w, "publish failed", err)
-		http.Error(w, "publish failed", http.StatusInternalServerError)
+		httpx.Error(w, "publish failed", http.StatusInternalServerError)
 		return
 	}
 	published, err := s.Hub.PublishCommit(ev, d)
@@ -714,7 +710,7 @@ func (s *Service) handleInternalPublish(w http.ResponseWriter, r *http.Request) 
 			log.Printf("realtime: persist room=%s kind=%s: %v", ev.RoomID, ev.Kind, err)
 		}
 		obs.ServerError(w, "publish failed", err)
-		http.Error(w, "publish failed", http.StatusInternalServerError)
+		httpx.Error(w, "publish failed", http.StatusInternalServerError)
 		return
 	}
 	s.deliverPluginEvent(r.Context(), published)
@@ -793,12 +789,12 @@ func (s *Service) durable(ctx context.Context, ev wire.Event, author, clientMsgI
 func (s *Service) handleHistory(w http.ResponseWriter, r *http.Request) {
 	roomID, err := roomctx.Normalize(r.PathValue("roomId"))
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		httpx.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 	userID := strings.TrimSpace(r.Header.Get("X-Bnbloc-User"))
 	if userID == "" {
-		http.Error(w, "missing authenticated subject", http.StatusUnauthorized)
+		httpx.Error(w, "missing authenticated subject", http.StatusUnauthorized)
 		return
 	}
 	m, ok := s.member(w, r, roomID, userID, membership.AnyMember)
@@ -817,7 +813,7 @@ func (s *Service) handleHistory(w http.ResponseWriter, r *http.Request) {
 	}
 	channelID, err := s.resolveChannel(r.Context(), roomID, r.URL.Query().Get("channelId"))
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusNotFound)
+		httpx.Error(w, err.Error(), http.StatusNotFound)
 		return
 	}
 	if !m.IsHuman() && !s.agentMayReadChannel(w, r.Context(), roomID, channelID) {
@@ -826,7 +822,7 @@ func (s *Service) handleHistory(w http.ResponseWriter, r *http.Request) {
 	msgs, err := s.Chat.RoomHistory(r.Context(), roomID, channelID, before, limit)
 	if err != nil {
 		obs.ServerError(w, "history read failed", err)
-		http.Error(w, "history read failed", http.StatusInternalServerError)
+		httpx.Error(w, "history read failed", http.StatusInternalServerError)
 		return
 	}
 	out := make([]map[string]any, 0, len(msgs))
@@ -861,12 +857,12 @@ func parseInt(s string) int64 {
 func (s *Service) handleMarkRead(w http.ResponseWriter, r *http.Request) {
 	roomID, err := roomctx.Normalize(r.PathValue("roomId"))
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		httpx.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 	userID := strings.TrimSpace(r.Header.Get("X-Bnbloc-User"))
 	if userID == "" {
-		http.Error(w, "missing authenticated subject", http.StatusUnauthorized)
+		httpx.Error(w, "missing authenticated subject", http.StatusUnauthorized)
 		return
 	}
 	if _, ok := s.member(w, r, roomID, userID, membership.AnyMember); !ok {
@@ -878,20 +874,18 @@ func (s *Service) handleMarkRead(w http.ResponseWriter, r *http.Request) {
 		// the room's default channel.
 		ChannelId string `json:"channelId"`
 	}
-	r.Body = http.MaxBytesReader(w, r.Body, maxSmallBodyBytes)
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil && !errors.Is(err, io.EOF) {
-		http.Error(w, "invalid json body", http.StatusBadRequest)
+	if !httpx.DecodeOptionalJSON(w, r, maxSmallBodyBytes, &body) {
 		return
 	}
 	if s.Chat != nil {
 		channelID, err := s.resolveChannel(r.Context(), roomID, body.ChannelId)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusNotFound)
+			httpx.Error(w, err.Error(), http.StatusNotFound)
 			return
 		}
 		if err := s.Chat.MarkRead(r.Context(), roomID, channelID, userID, body.Seq, time.Now().UnixMilli()); err != nil {
-			log.Printf("realtime: mark-read room=%s user=%s seq=%d: %v", roomID, userID, body.Seq, err)
-			http.Error(w, "mark-read failed", http.StatusInternalServerError)
+			obs.ServerError(w, "mark-read failed", err)
+			httpx.Error(w, "mark-read failed", http.StatusInternalServerError)
 			return
 		}
 		// Pre-channel rows live in the empty channel but are surfaced as the
@@ -915,12 +909,12 @@ func (s *Service) handleMarkRead(w http.ResponseWriter, r *http.Request) {
 func (s *Service) handleDeleteMessage(w http.ResponseWriter, r *http.Request) {
 	roomID, err := roomctx.Normalize(r.PathValue("roomId"))
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		httpx.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 	userID := strings.TrimSpace(r.Header.Get("X-Bnbloc-User"))
 	if userID == "" {
-		http.Error(w, "missing authenticated subject", http.StatusUnauthorized)
+		httpx.Error(w, "missing authenticated subject", http.StatusUnauthorized)
 		return
 	}
 	if _, ok := s.member(w, r, roomID, userID, membership.AnyMember); !ok {
@@ -928,7 +922,7 @@ func (s *Service) handleDeleteMessage(w http.ResponseWriter, r *http.Request) {
 	}
 	seq := parseInt(r.PathValue("seq"))
 	if seq <= 0 || s.Chat == nil {
-		http.Error(w, "invalid message", http.StatusBadRequest)
+		httpx.Error(w, "invalid message", http.StatusBadRequest)
 		return
 	}
 	// Read the message's channel before the delete hides it: the transient
@@ -936,18 +930,18 @@ func (s *Service) handleDeleteMessage(w http.ResponseWriter, r *http.Request) {
 	channelID, _, err := s.messageChannel(r.Context(), roomID, seq)
 	if err != nil {
 		obs.ServerError(w, "delete failed", err)
-		http.Error(w, "delete failed", http.StatusInternalServerError)
+		httpx.Error(w, "delete failed", http.StatusInternalServerError)
 		return
 	}
 	deleted, err := s.Chat.DeleteRoomMessage(r.Context(), roomID, seq, userID, time.Now().UnixMilli())
 	if err != nil {
 		obs.ServerError(w, "delete failed", err)
-		http.Error(w, "delete failed", http.StatusInternalServerError)
+		httpx.Error(w, "delete failed", http.StatusInternalServerError)
 		return
 	}
 	if !deleted {
 		// Not the author, or no such message. Do not reveal which.
-		http.Error(w, "cannot delete this message", http.StatusForbidden)
+		httpx.Error(w, "cannot delete this message", http.StatusForbidden)
 		return
 	}
 	s.SearchUpdates.Enqueue(store.MessageKey{TenantID: tenant.FromContext(r.Context()), RoomID: roomID, Seq: seq})
@@ -970,12 +964,12 @@ func (s *Service) handleDeleteMessage(w http.ResponseWriter, r *http.Request) {
 func (s *Service) handleEditMessage(w http.ResponseWriter, r *http.Request) {
 	roomID, err := roomctx.Normalize(r.PathValue("roomId"))
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		httpx.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 	userID := strings.TrimSpace(r.Header.Get("X-Bnbloc-User"))
 	if userID == "" {
-		http.Error(w, "missing authenticated subject", http.StatusUnauthorized)
+		httpx.Error(w, "missing authenticated subject", http.StatusUnauthorized)
 		return
 	}
 	if _, ok := s.member(w, r, roomID, userID, membership.AnyMember); !ok {
@@ -983,24 +977,22 @@ func (s *Service) handleEditMessage(w http.ResponseWriter, r *http.Request) {
 	}
 	seq := parseInt(r.PathValue("seq"))
 	if seq <= 0 || s.Chat == nil {
-		http.Error(w, "invalid message", http.StatusBadRequest)
+		httpx.Error(w, "invalid message", http.StatusBadRequest)
 		return
 	}
 	var body struct {
 		Text string `json:"text"`
 	}
-	r.Body = http.MaxBytesReader(w, r.Body, maxChatBodyBytes)
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		http.Error(w, "invalid json body", http.StatusBadRequest)
+	if !httpx.DecodeJSON(w, r, maxChatBodyBytes, &body) {
 		return
 	}
 	text := strings.TrimSpace(body.Text)
 	if text == "" {
-		http.Error(w, "empty message", http.StatusBadRequest)
+		httpx.Error(w, "empty message", http.StatusBadRequest)
 		return
 	}
 	if len(body.Text) > maxChatTextBytes {
-		http.Error(w, "message too long", http.StatusRequestEntityTooLarge)
+		httpx.Error(w, "message too long", http.StatusRequestEntityTooLarge)
 		return
 	}
 	// The live event is scoped to the message's channel, read before the
@@ -1008,19 +1000,19 @@ func (s *Service) handleEditMessage(w http.ResponseWriter, r *http.Request) {
 	channelID, _, err := s.messageChannel(r.Context(), roomID, seq)
 	if err != nil {
 		obs.ServerError(w, "edit failed", err)
-		http.Error(w, "edit failed", http.StatusInternalServerError)
+		httpx.Error(w, "edit failed", http.StatusInternalServerError)
 		return
 	}
 	now := time.Now().UnixMilli()
 	edited, err := s.Chat.EditRoomMessage(r.Context(), roomID, seq, userID, text, now)
 	if err != nil {
 		obs.ServerError(w, "edit failed", err)
-		http.Error(w, "edit failed", http.StatusInternalServerError)
+		httpx.Error(w, "edit failed", http.StatusInternalServerError)
 		return
 	}
 	if !edited {
 		// Not the author, no such message, or already deleted. Do not reveal which.
-		http.Error(w, "cannot edit this message", http.StatusForbidden)
+		httpx.Error(w, "cannot edit this message", http.StatusForbidden)
 		return
 	}
 	s.SearchUpdates.Enqueue(store.MessageKey{TenantID: tenant.FromContext(r.Context()), RoomID: roomID, Seq: seq})
@@ -1049,7 +1041,7 @@ func (s *Service) handleEditMessage(w http.ResponseWriter, r *http.Request) {
 func (s *Service) handleUnread(w http.ResponseWriter, r *http.Request) {
 	userID := strings.TrimSpace(r.Header.Get("X-Bnbloc-User"))
 	if userID == "" {
-		http.Error(w, "missing authenticated subject", http.StatusUnauthorized)
+		httpx.Error(w, "missing authenticated subject", http.StatusUnauthorized)
 		return
 	}
 	var rooms []string
@@ -1063,7 +1055,7 @@ func (s *Service) handleUnread(w http.ResponseWriter, r *http.Request) {
 		rooms = append(rooms, roomID)
 	}
 	if len(rooms) > maxUnreadRooms {
-		http.Error(w, fmt.Sprintf("too many rooms (max %d per request)", maxUnreadRooms), http.StatusBadRequest)
+		httpx.Error(w, fmt.Sprintf("too many rooms (max %d per request)", maxUnreadRooms), http.StatusBadRequest)
 		return
 	}
 	out := map[string]int{}
@@ -1132,12 +1124,12 @@ func (s *Service) handleUnread(w http.ResponseWriter, r *http.Request) {
 func (s *Service) handleTyping(w http.ResponseWriter, r *http.Request) {
 	roomID, err := roomctx.Normalize(r.PathValue("roomId"))
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		httpx.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 	userID := strings.TrimSpace(r.Header.Get("X-Bnbloc-User"))
 	if userID == "" {
-		http.Error(w, "missing authenticated subject", http.StatusUnauthorized)
+		httpx.Error(w, "missing authenticated subject", http.StatusUnauthorized)
 		return
 	}
 	if _, ok := s.member(w, r, roomID, userID, membership.Chat); !ok {
@@ -1148,15 +1140,13 @@ func (s *Service) handleTyping(w http.ResponseWriter, r *http.Request) {
 		// room's default channel.
 		ChannelId string `json:"channelId"`
 	}
-	r.Body = http.MaxBytesReader(w, r.Body, maxSmallBodyBytes)
 	// An empty body (legacy clients) is fine; a malformed or oversized one is not.
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil && !errors.Is(err, io.EOF) {
-		http.Error(w, "invalid json body", http.StatusBadRequest)
+	if !httpx.DecodeOptionalJSON(w, r, maxSmallBodyBytes, &body) {
 		return
 	}
 	channelID, err := s.resolveChannel(r.Context(), roomID, body.ChannelId)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusNotFound)
+		httpx.Error(w, err.Error(), http.StatusNotFound)
 		return
 	}
 	s.Hub.Publish(wire.Event{

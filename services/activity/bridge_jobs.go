@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/luckylhb90/bnbloc/internal/httpx"
 	"github.com/luckylhb90/bnbloc/internal/obs"
 	"github.com/luckylhb90/bnbloc/internal/roomctx"
 	"github.com/luckylhb90/bnbloc/internal/store"
@@ -38,24 +39,23 @@ type bridgeAgentBody struct {
 
 func (s *Service) handleBridgeHeartbeat(w http.ResponseWriter, r *http.Request) {
 	if s.BridgeJobs == nil {
-		obs.ServerError(w, "bridge jobs not configured", nil)
-		writeErr(w, http.StatusNotImplemented, "bridge jobs not configured")
+		httpx.Unavailable(w, "bridge jobs")
 		return
 	}
 	caller := strings.TrimSpace(r.Header.Get("X-Bnbloc-User"))
 	if caller == "" {
-		writeErr(w, http.StatusUnauthorized, "missing authenticated subject")
+		httpx.Error(w, "missing authenticated subject", http.StatusUnauthorized)
 		return
 	}
 	var body heartbeatBody
-	if !decode(w, r, &body) {
+	if !httpx.DecodeJSON(w, r, maxBodyBytes, &body) {
 		return
 	}
 	if body.OwnerUserID == "" {
 		body.OwnerUserID = caller
 	}
 	if body.OwnerUserID != caller {
-		writeErr(w, http.StatusForbidden, "bridge owner mismatch")
+		httpx.Error(w, "bridge owner mismatch", http.StatusForbidden)
 		return
 	}
 	now := time.Now().UnixMilli()
@@ -63,11 +63,11 @@ func (s *Service) handleBridgeHeartbeat(w http.ResponseWriter, r *http.Request) 
 	serveAll := s.serveAll(body.ServeAllOwners, caller)
 	if err := s.BridgeJobs.PutBridgeHeartbeat(r.Context(), store.BridgeHeartbeat{BridgeID: body.BridgeID, OwnerUserID: body.OwnerUserID, AppInstanceID: body.AppInstanceID, Version: body.Version, Status: store.BridgeOnline, LastSeenAtMs: now, MetadataJSON: body.Metadata, ServeAllOwners: serveAll}); err != nil {
 		if errors.Is(err, store.ErrBridgeOwnerMismatch) {
-			writeErr(w, http.StatusForbidden, "bridge owner mismatch")
+			httpx.Error(w, "bridge owner mismatch", http.StatusForbidden)
 			return
 		}
 		obs.ServerError(w, "bridge heartbeat failed", err)
-		writeErr(w, http.StatusInternalServerError, err.Error())
+		httpx.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 	agents := make([]store.BridgeAgent, 0, len(body.Agents))
@@ -79,11 +79,11 @@ func (s *Service) handleBridgeHeartbeat(w http.ResponseWriter, r *http.Request) 
 	}
 	if err := s.BridgeJobs.ReplaceBridgeAgents(r.Context(), body.BridgeID, agents); err != nil {
 		obs.ServerError(w, "bridge heartbeat failed", err)
-		writeErr(w, http.StatusInternalServerError, err.Error())
+		httpx.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 	s.Metrics.CounterInc(metricBridgeHeartbeats)
-	writeJSON(w, http.StatusOK, map[string]any{"bridgeId": body.BridgeID, "agents": len(agents), "serveAllOwners": serveAll})
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"bridgeId": body.BridgeID, "agents": len(agents), "serveAllOwners": serveAll})
 }
 
 // resolveBridgeID applies the default bridge id for a caller that sends none.
@@ -118,24 +118,23 @@ type claimBody struct {
 
 func (s *Service) handleBridgeJobClaim(w http.ResponseWriter, r *http.Request) {
 	if s.BridgeJobs == nil {
-		obs.ServerError(w, "bridge jobs not configured", nil)
-		writeErr(w, http.StatusNotImplemented, "bridge jobs not configured")
+		httpx.Unavailable(w, "bridge jobs")
 		return
 	}
 	caller := strings.TrimSpace(r.Header.Get("X-Bnbloc-User"))
 	if caller == "" {
-		writeErr(w, http.StatusUnauthorized, "missing authenticated subject")
+		httpx.Error(w, "missing authenticated subject", http.StatusUnauthorized)
 		return
 	}
 	var body claimBody
-	if !decode(w, r, &body) {
+	if !httpx.DecodeJSON(w, r, maxBodyBytes, &body) {
 		return
 	}
 	if body.OwnerUserID == "" {
 		body.OwnerUserID = caller
 	}
 	if body.OwnerUserID != caller {
-		writeErr(w, http.StatusForbidden, "bridge owner mismatch")
+		httpx.Error(w, "bridge owner mismatch", http.StatusForbidden)
 		return
 	}
 	// A claim goes through a bridge the caller registered (heartbeat). The
@@ -148,13 +147,13 @@ func (s *Service) handleBridgeJobClaim(w http.ResponseWriter, r *http.Request) {
 	jobs, err := s.BridgeJobs.ClaimAgentJobs(r.Context(), store.ClaimRequest{BridgeID: body.BridgeID, OwnerUserID: caller, MaxJobs: body.MaxJobs, NowMs: time.Now().UnixMilli(), LeaseMs: 60000, ServeAllOwners: body.ServeAllOwners && s.AllowServeAllOwners})
 	if err != nil {
 		obs.ServerError(w, "bridge job claim failed", err)
-		writeErr(w, http.StatusInternalServerError, err.Error())
+		httpx.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 	// The claim is the last server step before a bridge drives: a reached
 	// hard-stop usage budget refuses the job here (R12).
 	jobs = s.refuseOverBudget(r.Context(), body.BridgeID, jobs)
-	writeJSON(w, http.StatusOK, map[string]any{"jobs": jobs})
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"jobs": jobs})
 }
 
 type jobStatusBody struct {
@@ -175,26 +174,25 @@ func validJobStatus(s store.AgentJobStatus) bool {
 
 func (s *Service) handleBridgeJobStatus(w http.ResponseWriter, r *http.Request) {
 	if s.BridgeJobs == nil {
-		obs.ServerError(w, "bridge jobs not configured", nil)
-		writeErr(w, http.StatusNotImplemented, "bridge jobs not configured")
+		httpx.Unavailable(w, "bridge jobs")
 		return
 	}
 	caller := strings.TrimSpace(r.Header.Get("X-Bnbloc-User"))
 	if caller == "" {
-		writeErr(w, http.StatusUnauthorized, "missing authenticated subject")
+		httpx.Error(w, "missing authenticated subject", http.StatusUnauthorized)
 		return
 	}
 	var body jobStatusBody
-	if !decode(w, r, &body) {
+	if !httpx.DecodeJSON(w, r, maxBodyBytes, &body) {
 		return
 	}
 	jobID := r.PathValue("jobId")
 	if body.BridgeID == "" || jobID == "" {
-		writeErr(w, http.StatusBadRequest, "bridgeId and jobId required")
+		httpx.Error(w, "bridgeId and jobId required", http.StatusBadRequest)
 		return
 	}
 	if !validJobStatus(body.Status) {
-		writeErr(w, http.StatusBadRequest, "unsupported job status")
+		httpx.Error(w, "unsupported job status", http.StatusBadRequest)
 		return
 	}
 	// A status report may only come from the member who registered that bridge.
@@ -210,7 +208,7 @@ func (s *Service) handleBridgeJobStatus(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	s.publishJob(r.Context(), job, now)
-	writeJSON(w, http.StatusOK, map[string]any{"jobId": jobID, "status": job.Status, "leaseExpiresAtMs": job.LeaseExpiresAtMs})
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"jobId": jobID, "status": job.Status, "leaseExpiresAtMs": job.LeaseExpiresAtMs})
 }
 
 type leaseBody struct {
@@ -222,22 +220,21 @@ type leaseBody struct {
 // another bridge, running the same prompt twice.
 func (s *Service) handleBridgeJobLease(w http.ResponseWriter, r *http.Request) {
 	if s.BridgeJobs == nil {
-		obs.ServerError(w, "bridge jobs not configured", nil)
-		writeErr(w, http.StatusNotImplemented, "bridge jobs not configured")
+		httpx.Unavailable(w, "bridge jobs")
 		return
 	}
 	caller := strings.TrimSpace(r.Header.Get("X-Bnbloc-User"))
 	if caller == "" {
-		writeErr(w, http.StatusUnauthorized, "missing authenticated subject")
+		httpx.Error(w, "missing authenticated subject", http.StatusUnauthorized)
 		return
 	}
 	var body leaseBody
-	if !decode(w, r, &body) {
+	if !httpx.DecodeJSON(w, r, maxBodyBytes, &body) {
 		return
 	}
 	jobID := r.PathValue("jobId")
 	if body.BridgeID == "" || jobID == "" {
-		writeErr(w, http.StatusBadRequest, "bridgeId and jobId required")
+		httpx.Error(w, "bridgeId and jobId required", http.StatusBadRequest)
 		return
 	}
 	if !s.requireBridgeOwner(w, r, body.BridgeID, caller) {
@@ -248,7 +245,7 @@ func (s *Service) handleBridgeJobLease(w http.ResponseWriter, r *http.Request) {
 		writeJobStoreError(w, "job lease renewal failed", err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"jobId": jobID, "leaseExpiresAtMs": now + store.DefaultLeaseMs})
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"jobId": jobID, "leaseExpiresAtMs": now + store.DefaultLeaseMs})
 }
 
 // publishJob fans a job transition to the room that owns it. The room id must
@@ -352,13 +349,12 @@ func (s *Service) postJobNotice(ctx context.Context, job store.AgentJob, text st
 // lease, and it works whether the job is still queued or already running.
 func (s *Service) handleCancelAgentJob(w http.ResponseWriter, r *http.Request) {
 	if s.BridgeJobs == nil {
-		obs.ServerError(w, "bridge jobs not configured", nil)
-		writeErr(w, http.StatusNotImplemented, "bridge jobs not configured")
+		httpx.Unavailable(w, "bridge jobs")
 		return
 	}
 	roomID, err := roomctx.Normalize(r.PathValue("roomId"))
 	if err != nil {
-		writeErr(w, http.StatusBadRequest, err.Error())
+		httpx.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 	if !s.authorize(w, r, roomID) {
@@ -366,7 +362,7 @@ func (s *Service) handleCancelAgentJob(w http.ResponseWriter, r *http.Request) {
 	}
 	jobID := strings.TrimSpace(r.PathValue("jobId"))
 	if jobID == "" {
-		writeErr(w, http.StatusBadRequest, "jobId required")
+		httpx.Error(w, "jobId required", http.StatusBadRequest)
 		return
 	}
 	now := time.Now().UnixMilli()
@@ -381,7 +377,7 @@ func (s *Service) handleCancelAgentJob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.publishJob(r.Context(), job, now)
-	writeJSON(w, http.StatusOK, map[string]any{"jobId": job.JobID, "status": job.Status})
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"jobId": job.JobID, "status": job.Status})
 }
 
 // writeJobStoreError is the one mapping of a bridge-job store error: only the
@@ -391,12 +387,12 @@ func (s *Service) handleCancelAgentJob(w http.ResponseWriter, r *http.Request) {
 func writeJobStoreError(w http.ResponseWriter, what string, err error) {
 	switch {
 	case errors.Is(err, store.ErrAgentJobLeaseMismatch):
-		writeErr(w, http.StatusConflict, err.Error())
+		httpx.Error(w, err.Error(), http.StatusConflict)
 	case errors.Is(err, store.ErrAgentJobNotFound):
-		writeErr(w, http.StatusNotFound, err.Error())
+		httpx.Error(w, err.Error(), http.StatusNotFound)
 	default:
 		obs.ServerError(w, what, err)
-		writeErr(w, http.StatusInternalServerError, what)
+		httpx.Error(w, what, http.StatusInternalServerError)
 	}
 }
 
@@ -406,11 +402,11 @@ func (s *Service) requireBridgeOwner(w http.ResponseWriter, r *http.Request, bri
 	hb, err := s.BridgeJobs.LookupBridge(r.Context(), bridgeID)
 	if err != nil && !errors.Is(err, store.ErrBridgeNotFound) {
 		obs.ServerError(w, "bridge lookup failed", err)
-		writeErr(w, http.StatusInternalServerError, "bridge lookup failed")
+		httpx.Error(w, "bridge lookup failed", http.StatusInternalServerError)
 		return false
 	}
 	if err != nil || hb.OwnerUserID != caller {
-		writeErr(w, http.StatusForbidden, "bridge owner mismatch")
+		httpx.Error(w, "bridge owner mismatch", http.StatusForbidden)
 		return false
 	}
 	return true
@@ -418,19 +414,18 @@ func (s *Service) requireBridgeOwner(w http.ResponseWriter, r *http.Request, bri
 
 func (s *Service) handleRoomAgentJobs(w http.ResponseWriter, r *http.Request) {
 	if s.BridgeJobs == nil {
-		obs.ServerError(w, "bridge jobs not configured", nil)
-		writeErr(w, http.StatusNotImplemented, "bridge jobs not configured")
+		httpx.Unavailable(w, "bridge jobs")
 		return
 	}
 	roomID, err := roomctx.Normalize(r.PathValue("roomId"))
 	if err != nil {
-		writeErr(w, http.StatusBadRequest, err.Error())
+		httpx.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 	if !s.authorize(w, r, roomID) {
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"jobs": s.BridgeJobs.ListAgentJobs(r.Context(), roomID, r.URL.Query().Get("channelId"), 100)})
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"jobs": s.BridgeJobs.ListAgentJobs(r.Context(), roomID, r.URL.Query().Get("channelId"), 100)})
 }
 
 // handleMyAgents returns the CALLER's own bridge-advertised agents across all
@@ -440,7 +435,7 @@ func (s *Service) handleRoomAgentJobs(w http.ResponseWriter, r *http.Request) {
 func (s *Service) handleMyAgents(w http.ResponseWriter, r *http.Request) {
 	caller := strings.TrimSpace(r.Header.Get("X-Bnbloc-User"))
 	if caller == "" {
-		writeErr(w, http.StatusUnauthorized, "missing authenticated subject")
+		httpx.Error(w, "missing authenticated subject", http.StatusUnauthorized)
 		return
 	}
 	agents := s.BridgeJobs.ListBridgeAgentsForOwner(r.Context(), caller)
@@ -466,11 +461,11 @@ func (s *Service) handleMyAgents(w http.ResponseWriter, r *http.Request) {
 	hb, found, err := s.BridgeJobs.LatestBridgeForOwner(r.Context(), caller)
 	if err != nil {
 		obs.ServerError(w, "read the member's latest bridge", err)
-		writeErr(w, http.StatusInternalServerError, "could not read the desktop connection")
+		httpx.Error(w, "could not read the desktop connection", http.StatusInternalServerError)
 		return
 	}
 	if found {
 		d = desktop{Online: store.BridgeLive(hb, time.Now().UnixMilli()), LastSeenAtMs: hb.LastSeenAtMs}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"agents": rows, "desktop": d})
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"agents": rows, "desktop": d})
 }

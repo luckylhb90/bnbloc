@@ -5,12 +5,12 @@
 package activity
 
 import (
-	"encoding/json"
 	"errors"
 	"net/http"
 	"strings"
 	"time"
 
+	"github.com/luckylhb90/bnbloc/internal/httpx"
 	"github.com/luckylhb90/bnbloc/internal/membership"
 	"github.com/luckylhb90/bnbloc/internal/obs"
 	"github.com/luckylhb90/bnbloc/internal/realtime"
@@ -113,12 +113,12 @@ func (s *Service) Handler() http.Handler {
 
 func (s *Service) handleSessionState(w http.ResponseWriter, r *http.Request) {
 	var in wire.ReportSessionStateInput
-	if !decode(w, r, &in) {
+	if !httpx.DecodeJSON(w, r, maxBodyBytes, &in) {
 		return
 	}
 	roomID, err := roomctx.RequireEqual(r.PathValue("roomId"), in.WorkspaceID)
 	if err != nil {
-		writeErr(w, http.StatusBadRequest, err.Error())
+		httpx.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 	if !s.authorize(w, r, roomID) {
@@ -126,28 +126,28 @@ func (s *Service) handleSessionState(w http.ResponseWriter, r *http.Request) {
 	}
 	owner, ok := s.attributeOwner(r, roomID, in.OwnerUserID)
 	if !ok {
-		writeErr(w, http.StatusForbidden, "agent owner mismatch")
+		httpx.Error(w, "agent owner mismatch", http.StatusForbidden)
 		return
 	}
 	in.OwnerUserID = owner
 	cursor, err := s.Store.PutSessionState(r.Context(), in)
 	if err != nil {
 		obs.ServerError(w, "session state failed", err)
-		writeErr(w, http.StatusInternalServerError, err.Error())
+		httpx.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 	s.Publisher.Publish(r.Context(), wire.Event{RoomID: roomID, Kind: "agent_session_state", Payload: in, AtUnixMs: in.OccurredAtUnixMs})
-	writeJSON(w, http.StatusOK, wire.ReportSessionStateReply{SyncCursor: cursor})
+	httpx.WriteJSON(w, http.StatusOK, wire.ReportSessionStateReply{SyncCursor: cursor})
 }
 
 func (s *Service) handleMessages(w http.ResponseWriter, r *http.Request) {
 	var in wire.ReportMessagesInput
-	if !decodeLimit(w, r, &in, maxMessagesBodyBytes) {
+	if !httpx.DecodeJSON(w, r, maxMessagesBodyBytes, &in) {
 		return
 	}
 	roomID, err := roomctx.RequireEqual(r.PathValue("roomId"), in.WorkspaceID)
 	if err != nil {
-		writeErr(w, http.StatusBadRequest, err.Error())
+		httpx.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 	if !s.authorize(w, r, roomID) {
@@ -165,7 +165,7 @@ func (s *Service) handleMessages(w http.ResponseWriter, r *http.Request) {
 		asserted, _ := p["ownerUserId"].(string)
 		owner, ok := s.attributeOwner(r, roomID, asserted)
 		if !ok {
-			writeErr(w, http.StatusForbidden, "agent owner mismatch")
+			httpx.Error(w, "agent owner mismatch", http.StatusForbidden)
 			return
 		}
 		p["ownerUserId"] = owner
@@ -173,7 +173,7 @@ func (s *Service) handleMessages(w http.ResponseWriter, r *http.Request) {
 	fresh, next, err := s.Store.AppendMessages(r.Context(), roomID, in)
 	if err != nil {
 		obs.ServerError(w, "messages failed", err)
-		writeErr(w, http.StatusInternalServerError, err.Error())
+		httpx.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 	// Publish only genuinely-new messages so a reporter that re-drains (restart,
@@ -186,7 +186,7 @@ func (s *Service) handleMessages(w http.ResponseWriter, r *http.Request) {
 		// Reported usage moves the owners' monthly budgets (R12).
 		s.noteReplyBurn(r.Context(), fresh)
 	}
-	writeJSON(w, http.StatusOK, wire.ReportMessagesReply{NextCursor: next})
+	httpx.WriteJSON(w, http.StatusOK, wire.ReportMessagesReply{NextCursor: next})
 }
 
 // handleSubmitProvenance is the atomic admission barrier. It acks only after
@@ -194,30 +194,30 @@ func (s *Service) handleMessages(w http.ResponseWriter, r *http.Request) {
 // and returns 200 (idempotent), never a second provider admission.
 func (s *Service) handleSubmitProvenance(w http.ResponseWriter, r *http.Request) {
 	var in wire.SubmitProvenanceInput
-	if !decode(w, r, &in) {
+	if !httpx.DecodeJSON(w, r, maxBodyBytes, &in) {
 		return
 	}
 	roomID, err := roomctx.RequireEqual(r.PathValue("roomId"), in.WorkspaceID)
 	if err != nil {
-		writeErr(w, http.StatusBadRequest, err.Error())
+		httpx.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 	if !s.authorize(w, r, roomID) {
 		return
 	}
 	if strings.TrimSpace(in.ClientSubmitID) == "" {
-		writeErr(w, http.StatusBadRequest, "clientSubmitId is required")
+		httpx.Error(w, "clientSubmitId is required", http.StatusBadRequest)
 		return
 	}
 	if err := s.Store.RecordSubmitProvenance(r.Context(), in); err != nil && !errors.Is(err, store.ErrDuplicateSubmit) {
 		obs.ServerError(w, "submit provenance failed", err)
-		writeErr(w, http.StatusInternalServerError, err.Error())
+		httpx.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 	// Barrier contract: only ack once the id is queryable.
 	if !s.Store.SubmitQueryable(r.Context(), roomID, in.AgentSessionID, in.ClientSubmitID) {
 		obs.ServerError(w, "submit provenance not queryable after write", nil)
-		writeErr(w, http.StatusInternalServerError, "submit provenance not queryable after write")
+		httpx.Error(w, "submit provenance not queryable after write", http.StatusInternalServerError)
 		return
 	}
 	w.WriteHeader(http.StatusOK)
@@ -226,13 +226,13 @@ func (s *Service) handleSubmitProvenance(w http.ResponseWriter, r *http.Request)
 func (s *Service) handleSyncStates(w http.ResponseWriter, r *http.Request) {
 	roomID, err := roomctx.Normalize(r.PathValue("roomId"))
 	if err != nil {
-		writeErr(w, http.StatusBadRequest, err.Error())
+		httpx.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 	if !s.authorize(w, r, roomID) {
 		return
 	}
-	writeJSON(w, http.StatusOK, wire.SyncStatesReply{States: s.Store.SyncStates(r.Context(), roomID)})
+	httpx.WriteJSON(w, http.StatusOK, wire.SyncStatesReply{States: s.Store.SyncStates(r.Context(), roomID)})
 }
 
 // authorize enforces room membership (fail closed). The caller identity is the
@@ -241,11 +241,11 @@ func (s *Service) handleSyncStates(w http.ResponseWriter, r *http.Request) {
 func (s *Service) authorize(w http.ResponseWriter, r *http.Request, roomID string) bool {
 	userID := strings.TrimSpace(r.Header.Get("X-Bnbloc-User"))
 	if userID == "" {
-		writeErr(w, http.StatusUnauthorized, "missing authenticated subject")
+		httpx.Error(w, "missing authenticated subject", http.StatusUnauthorized)
 		return false
 	}
 	if _, err := membership.RoomScope(r.Context(), s.Membership, roomID, userID, membership.AnyMember); err != nil {
-		writeErr(w, http.StatusForbidden, err.Error())
+		httpx.Error(w, err.Error(), http.StatusForbidden)
 		return false
 	}
 	return true
@@ -278,33 +278,3 @@ const (
 	maxBodyBytes         = 64 << 10
 	maxMessagesBodyBytes = 4 << 20
 )
-
-func decode(w http.ResponseWriter, r *http.Request, v any) bool {
-	return decodeLimit(w, r, v, maxBodyBytes)
-}
-
-// decodeLimit decodes a JSON body capped at limit bytes: an oversized body is
-// refused with 413 instead of being buffered without bound.
-func decodeLimit(w http.ResponseWriter, r *http.Request, v any, limit int64) bool {
-	r.Body = http.MaxBytesReader(w, r.Body, limit)
-	if err := json.NewDecoder(r.Body).Decode(v); err != nil {
-		var tooLarge *http.MaxBytesError
-		if errors.As(err, &tooLarge) {
-			writeErr(w, http.StatusRequestEntityTooLarge, "request body too large")
-			return false
-		}
-		writeErr(w, http.StatusBadRequest, "invalid json body")
-		return false
-	}
-	return true
-}
-
-func writeJSON(w http.ResponseWriter, code int, v any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(code)
-	_ = json.NewEncoder(w).Encode(v)
-}
-
-func writeErr(w http.ResponseWriter, code int, msg string) {
-	writeJSON(w, code, map[string]string{"error": msg})
-}

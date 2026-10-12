@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/luckylhb90/bnbloc/internal/httpx"
 	"github.com/luckylhb90/bnbloc/internal/membership"
 	"github.com/luckylhb90/bnbloc/internal/notify"
 	"github.com/luckylhb90/bnbloc/internal/obs"
@@ -381,9 +382,7 @@ func (s *Service) registerPeerRoutes(mux *http.ServeMux, internal func(http.Hand
 // on to every other replica, which serves it locally and never re-forwards.
 func (s *Service) handleInternalComponentsChanged(w http.ResponseWriter, r *http.Request) {
 	var c wire.ComponentsChanged
-	r.Body = http.MaxBytesReader(w, r.Body, maxSmallBodyBytes)
-	if err := json.NewDecoder(r.Body).Decode(&c); err != nil {
-		http.Error(w, "invalid json body", http.StatusBadRequest)
+	if !httpx.DecodeJSON(w, r, maxSmallBodyBytes, &c) {
 		return
 	}
 	c.TenantID, c.Member = strings.TrimSpace(c.TenantID), strings.TrimSpace(c.Member)
@@ -403,9 +402,11 @@ func (s *Service) handleInternalComponentsChanged(w http.ResponseWriter, r *http
 // tenant; the people-chat guard already ran on the room owner.
 func (s *Service) handleInternalPluginEvent(w http.ResponseWriter, r *http.Request) {
 	var ev wire.Event
-	r.Body = http.MaxBytesReader(w, r.Body, maxInternalPublishBytes)
-	if err := json.NewDecoder(r.Body).Decode(&ev); err != nil || ev.RoomID == "" {
-		http.Error(w, "invalid event", http.StatusBadRequest)
+	if !httpx.DecodeJSON(w, r, maxInternalPublishBytes, &ev) {
+		return
+	}
+	if ev.RoomID == "" {
+		httpx.Error(w, "invalid event", http.StatusBadRequest)
 		return
 	}
 	s.PluginHooks.Deliver(r.Context(), s.Membership, ev)
@@ -415,7 +416,7 @@ func (s *Service) handleInternalPluginEvent(w http.ResponseWriter, r *http.Reque
 // handleInternalMemberDesktop answers, for the member's owner, whether the
 // member holds a desktop plugin stream in the signed tenant.
 func (s *Service) handleInternalMemberDesktop(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]bool{"desktop": s.PluginHooks.HasDesktop(tenant.FromContext(r.Context()), r.PathValue("member"))})
+	httpx.WriteJSON(w, http.StatusOK, map[string]bool{"desktop": s.PluginHooks.HasDesktop(tenant.FromContext(r.Context()), r.PathValue("member"))})
 }
 
 // handleInternalMemberNotification delivers one member's notification to
@@ -423,20 +424,18 @@ func (s *Service) handleInternalMemberDesktop(w http.ResponseWriter, r *http.Req
 // the outcome once known: delivered by a plugin, or not.
 func (s *Service) handleInternalMemberNotification(w http.ResponseWriter, r *http.Request) {
 	var n wire.PluginNotification
-	r.Body = http.MaxBytesReader(w, r.Body, maxInternalPublishBytes)
-	if err := json.NewDecoder(r.Body).Decode(&n); err != nil {
-		http.Error(w, "invalid json body", http.StatusBadRequest)
+	if !httpx.DecodeJSON(w, r, maxInternalPublishBytes, &n) {
 		return
 	}
 	if n.UserID != r.PathValue("member") {
-		http.Error(w, "notification is for another member", http.StatusBadRequest)
+		httpx.Error(w, "notification is for another member", http.StatusBadRequest)
 		return
 	}
 	outcome := make(chan bool, 1)
 	s.PluginHooks.DeliverNotification(tenant.FromContext(r.Context()), n, func(delivered bool) { outcome <- delivered })
 	select {
 	case delivered := <-outcome:
-		writeJSON(w, http.StatusOK, map[string]bool{"delivered": delivered})
+		httpx.WriteJSON(w, http.StatusOK, map[string]bool{"delivered": delivered})
 	case <-r.Context().Done():
 		// The caller gave up (it falls back on its own); the outcome still
 		// lands in the buffered channel and is dropped.
@@ -468,15 +467,17 @@ var scheduledPostErrs = map[string]error{
 func (s *Service) handleInternalScheduledPost(w http.ResponseWriter, r *http.Request) {
 	roomID, err := roomctx.Normalize(r.PathValue("roomId"))
 	if err != nil || s.Schedules == nil {
-		http.Error(w, "invalid schedule", http.StatusBadRequest)
+		httpx.Error(w, "invalid schedule", http.StatusBadRequest)
 		return
 	}
 	var body struct {
 		SlotMs int64 `json:"slotMs"`
 	}
-	r.Body = http.MaxBytesReader(w, r.Body, maxSmallBodyBytes)
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.SlotMs <= 0 {
-		http.Error(w, "invalid json body", http.StatusBadRequest)
+	if !httpx.DecodeJSON(w, r, maxSmallBodyBytes, &body) {
+		return
+	}
+	if body.SlotMs <= 0 {
+		httpx.Error(w, "slotMs required", http.StatusBadRequest)
 		return
 	}
 	sc, err := s.Schedules.GetSchedule(r.Context(), roomID, r.PathValue("scheduleId"))
@@ -487,20 +488,20 @@ func (s *Service) handleInternalScheduledPost(w http.ResponseWriter, r *http.Req
 	seq, err := s.postScheduled(r.Context(), sc, time.UnixMilli(body.SlotMs))
 	if err != nil {
 		if membership.IsRefusal(err) {
-			writeJSON(w, http.StatusUnprocessableEntity, map[string]string{"code": scheduledPostNotPermitted, "error": err.Error()})
+			httpx.WriteJSON(w, http.StatusUnprocessableEntity, map[string]string{"code": scheduledPostNotPermitted, "error": err.Error()})
 			return
 		}
 		for code, sentinel := range scheduledPostErrs {
 			if errors.Is(err, sentinel) {
-				writeJSON(w, http.StatusUnprocessableEntity, map[string]string{"code": code, "error": err.Error()})
+				httpx.WriteJSON(w, http.StatusUnprocessableEntity, map[string]string{"code": code, "error": err.Error()})
 				return
 			}
 		}
 		obs.ServerError(w, "scheduled post failed", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		httpx.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]int64{"sequence": seq})
+	httpx.WriteJSON(w, http.StatusOK, map[string]int64{"sequence": seq})
 }
 
 // postScheduledAtOwner posts a claimed slot on the room's owner: locally when

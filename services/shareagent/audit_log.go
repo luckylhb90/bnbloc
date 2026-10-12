@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/luckylhb90/bnbloc/internal/httpx"
 	"github.com/luckylhb90/bnbloc/internal/obs"
 	"github.com/luckylhb90/bnbloc/internal/store"
 	"github.com/luckylhb90/bnbloc/internal/tenant"
@@ -42,7 +43,7 @@ const (
 func (s *Service) handleTenantAuditLog(w http.ResponseWriter, r *http.Request) {
 	tid := tenant.FromContext(r.Context())
 	if tid == "" {
-		writeErr(w, http.StatusBadRequest, "missing tenant scope")
+		httpx.Error(w, "missing tenant scope", http.StatusBadRequest)
 		return
 	}
 	s.serveAuditLog(w, r, store.AuditLogQuery{TenantID: tid})
@@ -58,13 +59,12 @@ func (s *Service) handlePlatformAuditLog(w http.ResponseWriter, r *http.Request)
 
 func (s *Service) serveAuditLog(w http.ResponseWriter, r *http.Request, scope store.AuditLogQuery) {
 	if len(s.AuditLog) == 0 {
-		obs.ServerError(w, "audit log not configured", nil)
-		writeErr(w, http.StatusNotImplemented, "audit log not configured")
+		httpx.Unavailable(w, "audit log")
 		return
 	}
 	q, csvOut, msg := parseAuditLogQuery(r, scope)
 	if msg != "" {
-		writeErr(w, http.StatusBadRequest, msg)
+		httpx.Error(w, msg, http.StatusBadRequest)
 		return
 	}
 	if csvOut {
@@ -73,15 +73,15 @@ func (s *Service) serveAuditLog(w http.ResponseWriter, r *http.Request, scope st
 	}
 	rows, next, err := store.MergeAuditLog(r.Context(), q, s.AuditLog...)
 	if err != nil {
-		slog.Error("bnbloc shareagent: audit log read failed", "event", "bnbloc.shareagent.audit_log_failed", "error", err)
-		writeErr(w, http.StatusInternalServerError, "audit log read failed")
+		obs.ServerError(w, "audit log read failed", err)
+		httpx.Error(w, "audit log read failed", http.StatusInternalServerError)
 		return
 	}
 	reply := wire.AuditLogReply{Entries: auditEntries(rows)}
 	if next != nil {
 		reply.NextCursor = encodeAuditCursor(*next)
 	}
-	writeJSON(w, http.StatusOK, reply)
+	httpx.WriteJSON(w, http.StatusOK, reply)
 }
 
 // parseAuditLogQuery reads the filters onto the caller-decided scope.
@@ -189,8 +189,8 @@ func (s *Service) writeAuditCSV(w http.ResponseWriter, r *http.Request, q store.
 	for {
 		rows, next, err := store.MergeAuditLog(r.Context(), q, s.AuditLog...)
 		if err != nil {
-			slog.Error("bnbloc shareagent: audit log export failed", "event", "bnbloc.shareagent.audit_log_failed", "error", err)
-			writeErr(w, http.StatusInternalServerError, "audit log export failed")
+			obs.ServerError(w, "audit log export failed", err)
+			httpx.Error(w, "audit log export failed", http.StatusInternalServerError)
 			return
 		}
 		for _, e := range auditEntries(rows) {

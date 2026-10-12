@@ -8,6 +8,7 @@ import (
 
 	"github.com/luckylhb90/bnbloc/internal/auth"
 	"github.com/luckylhb90/bnbloc/internal/contentpkg"
+	"github.com/luckylhb90/bnbloc/internal/httpx"
 	"github.com/luckylhb90/bnbloc/internal/membership"
 	"github.com/luckylhb90/bnbloc/internal/obs"
 	"github.com/luckylhb90/bnbloc/internal/rbac"
@@ -87,10 +88,7 @@ func writeGrantErr(w http.ResponseWriter, err error) {
 	if !errors.As(err, &ge) {
 		ge = &grantError{status: http.StatusInternalServerError, msg: "resolve content grant failed", cause: err}
 	}
-	if ge.status >= 500 {
-		obs.ServerError(w, ge.msg, ge.cause)
-	}
-	http.Error(w, ge.msg, ge.status)
+	httpx.WriteStatus(w, ge.status, ge.msg, ge.cause)
 }
 
 // contentGrant resolves who a content request acts as. Without ?job= the
@@ -153,11 +151,11 @@ func (s *Service) contentGrant(r *http.Request, caller auth.Claims) (contentActo
 func (s *Service) contentCaller(w http.ResponseWriter, r *http.Request, write bool, grant jobGrant) (contentActor, bool) {
 	caller, err := s.authenticate(r)
 	if err != nil {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		httpx.Error(w, "unauthorized", http.StatusUnauthorized)
 		return contentActor{}, false
 	}
 	if grant == grantRefused && strings.TrimSpace(r.URL.Query().Get("job")) != "" {
-		http.Error(w, "this content action is never taken on behalf of a job", http.StatusBadRequest)
+		httpx.Error(w, "this content action is never taken on behalf of a job", http.StatusBadRequest)
 		return contentActor{}, false
 	}
 	actor, err := s.contentGrant(r, caller)
@@ -167,16 +165,16 @@ func (s *Service) contentCaller(w http.ResponseWriter, r *http.Request, write bo
 	}
 	if s.ContentComponents == nil {
 		obs.ServerError(w, "content components unavailable", nil)
-		http.Error(w, "content components unavailable", http.StatusServiceUnavailable)
+		httpx.Error(w, "content components unavailable", http.StatusServiceUnavailable)
 		return contentActor{}, false
 	}
 	if write {
 		if !rbac.Can(caller.Role, rbac.PermDriveAgent) {
-			http.Error(w, "insufficient org role", http.StatusForbidden)
+			httpx.Error(w, "insufficient org role", http.StatusForbidden)
 			return contentActor{}, false
 		}
 		if !s.rateAllow(caller.Subject) {
-			http.Error(w, "rate limit exceeded", http.StatusTooManyRequests)
+			httpx.Error(w, "rate limit exceeded", http.StatusTooManyRequests)
 			return contentActor{}, false
 		}
 	}
@@ -204,7 +202,7 @@ func jobSaveAllowed(w http.ResponseWriter, actor contentActor, pkg *contentpkg.P
 		return true
 	}
 	if pkg.Scripts || pkg.Manifest.NeedsSandbox() {
-		http.Error(w, "a package with scripts is saved only from your own agent: this agent belongs to someone else. Save it from the reply's files (\"Save as expert\" / \"Save as skill pack\") after reviewing it", http.StatusForbidden)
+		httpx.Error(w, "a package with scripts is saved only from your own agent: this agent belongs to someone else. Save it from the reply's files (\"Save as expert\" / \"Save as skill pack\") after reviewing it", http.StatusForbidden)
 		return false
 	}
 	return true

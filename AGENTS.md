@@ -1210,15 +1210,28 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   `/usr/local/bin/healthcheck <url>` shipped in every distroless image
   (`deploy/healthcheck`). `routeLabel` collapses id-bearing path segments so
   metric labels stay bounded — extend it when adding a new id-bearing route.
+- **One error body, one decoder: `internal/httpx`.** The gateway and every
+  backend answer errors with `{"error": "<message>"}` (`httpx.ErrorBody`,
+  plus a `code` where a route defines one, e.g. dispatch refusals) through
+  `httpx.Error` (http.Error's argument order), and decode JSON bodies with
+  `httpx.DecodeJSON(w, r, limit, &v)` (413 oversized, 400 malformed,
+  everywhere). A dependency the deployment does not configure is
+  `httpx.Unavailable(w, what)` → 503 (never 500/501/502). Go clients read a
+  failed body with `httpx.ErrorText`; the web's only reader is
+  `errorDetail` (`lib/session.ts`). `TestOneErrorBodyOwner` forbids
+  `http.Error`, private `writeJSON`/`writeErr` pairs and hand-rolled request
+  decoders outside the owner.
 - **No silent 5xx.** Every handler 5xx is preceded by
-  `obs.ServerError(w, "<what failed>", err)` (or another log call naming the
-  branch's error); it rides the request's log line as one Error-level
-  `event=bnbloc.http.5xx` entry with `what` + `error`, and the response body
-  keeps each service's own shape. `TestNoSilent5xx` (internal/obs) fails on
-  a constant-5xx write without it; a status held in a variable is invisible
-  to it, so status-mapping helpers call `ServerError` in their 5xx branch. A
-  5xx logged with `what=unrecorded` is a missed site. Reverse proxies use
-  `obs.ProxyError`. Never put secrets in error strings.
+  `obs.ServerError(w, "<what failed>", err)` naming the branch's error (a
+  bare slog/log line does not count); it rides the request's log line as one
+  Error-level `event=bnbloc.http.5xx` entry with `what` + `error`.
+  `TestNoSilent5xx` (internal/obs) fails on a constant-5xx write without it.
+  A status computed at run time (a mapping helper's result, an upstream's
+  status) is written only by `httpx.WriteStatus(w, status, msg, err)`, which
+  records the cause of any 5xx; an upstream status is never passed through
+  as-is (`TestErrorStatusesThroughWriteStatus`). A 5xx logged with
+  `what=unrecorded` is a missed site. Reverse proxies use `obs.ProxyError`.
+  Never put secrets in error strings.
 - **Build identity is a build arg, never source.** Images stamp
   `internal/buildinfo` (commit + build time) via `-ldflags -X` from
   `CI_COMMIT_SHA` (`.git` is not in the build context); every internal

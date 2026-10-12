@@ -2,9 +2,7 @@ package gateway
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
-	"log/slog"
 	"net/http"
 	"regexp"
 	"strings"
@@ -12,6 +10,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/luckylhb90/bnbloc/internal/auth"
+	"github.com/luckylhb90/bnbloc/internal/httpx"
 	"github.com/luckylhb90/bnbloc/internal/notify"
 	"github.com/luckylhb90/bnbloc/internal/obs"
 	"github.com/luckylhb90/bnbloc/internal/secrettoken"
@@ -113,14 +112,12 @@ func (s *Service) handleCreateAPIToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body createAPITokenBody
-	r.Body = http.MaxBytesReader(w, r.Body, maxAuthBodyBytes)
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		http.Error(w, "invalid json body", http.StatusBadRequest)
+	if !httpx.DecodeJSON(w, r, maxAuthBodyBytes, &body) {
 		return
 	}
 	label := strings.TrimSpace(body.Label)
 	if label == "" || utf8.RuneCountInString(label) > maxAPITokenLabelRunes {
-		http.Error(w, "label required (at most 128 characters)", http.StatusBadRequest)
+		httpx.Error(w, "label required (at most 128 characters)", http.StatusBadRequest)
 		return
 	}
 	ttlDays := body.TTLDays
@@ -128,7 +125,7 @@ func (s *Service) handleCreateAPIToken(w http.ResponseWriter, r *http.Request) {
 		ttlDays = defaultAPITokenTTLDays
 	}
 	if ttlDays < 1 || ttlDays > maxAPITokenTTLDays {
-		http.Error(w, "ttlDays must be between 1 and 365", http.StatusBadRequest)
+		httpx.Error(w, "ttlDays must be between 1 and 365", http.StatusBadRequest)
 		return
 	}
 	subject := strings.TrimSpace(body.Subject)
@@ -138,7 +135,7 @@ func (s *Service) handleCreateAPIToken(w http.ResponseWriter, r *http.Request) {
 		subject = claims.Subject
 		email = s.sessionEmail(r.Context(), claims)
 	case !serviceSubjectRe.MatchString(subject):
-		http.Error(w, "subject must be your own or a service subject svc:<name> (lowercase letters, digits, . _ -)", http.StatusBadRequest)
+		httpx.Error(w, "subject must be your own or a service subject svc:<name> (lowercase letters, digits, . _ -)", http.StatusBadRequest)
 		return
 	}
 	tenantHint := strings.TrimSpace(body.TenantID)
@@ -146,13 +143,13 @@ func (s *Service) handleCreateAPIToken(w http.ResponseWriter, r *http.Request) {
 		tenantHint = claims.Tenant
 	}
 	if len(tenantHint) > 64 {
-		http.Error(w, "tenantId too long", http.StatusBadRequest)
+		httpx.Error(w, "tenantId too long", http.StatusBadRequest)
 		return
 	}
 	id, token, hash, err := apiTokenFormat.New()
 	if err != nil {
 		obs.ServerError(w, "issue token failed", err)
-		http.Error(w, "issue token failed", http.StatusInternalServerError)
+		httpx.Error(w, "issue token failed", http.StatusInternalServerError)
 		return
 	}
 	now := s.nowTime()
@@ -162,14 +159,15 @@ func (s *Service) handleCreateAPIToken(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := s.apiTokens().CreateAPIToken(r.Context(), rec); err != nil {
 		obs.ServerError(w, "issue token failed", err)
-		http.Error(w, "issue token failed", http.StatusInternalServerError)
+		httpx.Error(w, "issue token failed", http.StatusInternalServerError)
 		return
 	}
 	s.auditAPIToken(r.Context(), id, "issue", "allow", claims.Subject, "subject="+subject+" label="+label)
-	writeJSON(w, http.StatusCreated, struct {
+	httpx.WriteJSON(w, http.StatusCreated, struct {
 		apiTokenView
 		Token string `json:"token"`
 	}{viewAPIToken(rec, now.UnixMilli()), token})
+
 }
 
 // sessionEmail is the verified email of the caller's sign-in (from its
@@ -193,7 +191,7 @@ func (s *Service) handleListAPITokens(w http.ResponseWriter, r *http.Request) {
 	rows, err := s.apiTokens().ListAPITokens(r.Context())
 	if err != nil {
 		obs.ServerError(w, "list tokens failed", err)
-		http.Error(w, "list tokens failed", http.StatusInternalServerError)
+		httpx.Error(w, "list tokens failed", http.StatusInternalServerError)
 		return
 	}
 	now := s.nowTime().UnixMilli()
@@ -201,7 +199,7 @@ func (s *Service) handleListAPITokens(w http.ResponseWriter, r *http.Request) {
 	for _, t := range rows {
 		out = append(out, viewAPIToken(t, now))
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"tokens": out})
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"tokens": out})
 }
 
 func (s *Service) handleRevokeAPIToken(w http.ResponseWriter, r *http.Request) {
@@ -213,11 +211,11 @@ func (s *Service) handleRevokeAPIToken(w http.ResponseWriter, r *http.Request) {
 	revoked, err := s.apiTokens().RevokeAPIToken(r.Context(), id, claims.Subject, s.nowTime().UnixMilli())
 	if err != nil {
 		obs.ServerError(w, "revoke token failed", err)
-		http.Error(w, "revoke token failed", http.StatusInternalServerError)
+		httpx.Error(w, "revoke token failed", http.StatusInternalServerError)
 		return
 	}
 	if !revoked {
-		http.Error(w, "token not found or already revoked", http.StatusNotFound)
+		httpx.Error(w, "token not found or already revoked", http.StatusNotFound)
 		return
 	}
 	s.auditAPIToken(r.Context(), id, "revoke", "allow", claims.Subject, "")
@@ -240,61 +238,64 @@ var errAPITokenRejected = errors.New("invalid, expired or revoked api token")
 // the credential (no bearer). Throttled per client IP like login.
 func (s *Service) handleAPITokenExchange(w http.ResponseWriter, r *http.Request) {
 	if !s.guessAllow("ip:" + s.clientIP(r)) {
-		http.Error(w, "rate limit exceeded", http.StatusTooManyRequests)
+		httpx.Error(w, "rate limit exceeded", http.StatusTooManyRequests)
 		return
 	}
 	var body struct {
 		Token string `json:"token"`
 	}
-	r.Body = http.MaxBytesReader(w, r.Body, maxAuthBodyBytes)
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || strings.TrimSpace(body.Token) == "" {
-		http.Error(w, "token required", http.StatusBadRequest)
+	if !httpx.DecodeJSON(w, r, maxAuthBodyBytes, &body) {
+		return
+	}
+	if strings.TrimSpace(body.Token) == "" {
+		httpx.Error(w, "token required", http.StatusBadRequest)
 		return
 	}
 	id, secret, ok := apiTokenFormat.Parse(body.Token)
 	if !ok {
-		http.Error(w, errAPITokenRejected.Error(), http.StatusUnauthorized)
+		httpx.Error(w, errAPITokenRejected.Error(), http.StatusUnauthorized)
 		return
 	}
 	tok, found, err := s.apiTokens().GetAPIToken(r.Context(), id)
 	if err != nil {
 		obs.ServerError(w, "session issue failed", err)
-		http.Error(w, "session issue failed", http.StatusInternalServerError)
+		httpx.Error(w, "session issue failed", http.StatusInternalServerError)
 		return
 	}
 	if !found {
-		http.Error(w, errAPITokenRejected.Error(), http.StatusUnauthorized)
+		httpx.Error(w, errAPITokenRejected.Error(), http.StatusUnauthorized)
 		return
 	}
 	now := s.nowTime()
 	if !secrettoken.Verify(secret, tok.SecretHash) {
 		s.auditAPIToken(r.Context(), id, "exchange", "deny", tok.Subject, "secret mismatch")
-		http.Error(w, errAPITokenRejected.Error(), http.StatusUnauthorized)
+		httpx.Error(w, errAPITokenRejected.Error(), http.StatusUnauthorized)
 		return
 	}
 	if !tok.Active(now.UnixMilli()) {
 		s.auditAPIToken(r.Context(), id, "exchange", "deny", tok.Subject, "revoked or expired")
-		http.Error(w, errAPITokenRejected.Error(), http.StatusUnauthorized)
+		httpx.Error(w, errAPITokenRejected.Error(), http.StatusUnauthorized)
 		return
 	}
 	scope, err := s.resolveSession(auth.Identity{Subject: tok.Subject, Email: tok.Email, Tenant: tok.TenantHint})
 	if errors.Is(err, errTenantSuspended) {
 		s.auditAPIToken(r.Context(), id, "exchange", "deny", tok.Subject, "tenant suspended")
-		http.Error(w, "tenant suspended", http.StatusForbidden)
+		httpx.Error(w, "tenant suspended", http.StatusForbidden)
 		return
 	}
 	if err != nil {
 		obs.ServerError(w, "session issue failed", err)
-		http.Error(w, "session issue failed", http.StatusInternalServerError)
+		httpx.Error(w, "session issue failed", http.StatusInternalServerError)
 		return
 	}
 	_ = s.apiTokens().TouchAPIToken(r.Context(), id, now.UnixMilli())
 	expires := now.Add(s.SessionTTL)
 	session := mintSession(s.Signer, tok.Subject, "", scope, expires)
 	s.auditAPIToken(r.Context(), id, "exchange", "allow", tok.Subject, "")
-	writeJSON(w, http.StatusOK, apiTokenGrant{
+	httpx.WriteJSON(w, http.StatusOK, apiTokenGrant{
 		Token: session, Subject: tok.Subject, Tenant: scope.Tenant, Role: scope.Role, Rooms: scope.Rooms, ExpiresAtMs: expires.UnixMilli(),
 	})
+
 }
 
 func (s *Service) auditAPIToken(ctx context.Context, id, action, outcome, actor, detail string) {
@@ -317,13 +318,11 @@ func (s *Service) handlePlatformAlert(w http.ResponseWriter, r *http.Request) {
 	}
 	if s.Alerts == nil {
 		obs.ServerError(w, "alerts unavailable (no notification store)", nil)
-		http.Error(w, "alerts unavailable (no notification store)", http.StatusServiceUnavailable)
+		httpx.Error(w, "alerts unavailable (no notification store)", http.StatusServiceUnavailable)
 		return
 	}
 	var body wire.AdminAlertRequest
-	r.Body = http.MaxBytesReader(w, r.Body, maxAuthBodyBytes)
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		http.Error(w, "invalid json body", http.StatusBadRequest)
+	if !httpx.DecodeJSON(w, r, maxAuthBodyBytes, &body) {
 		return
 	}
 	recipients := body.Recipients
@@ -333,7 +332,7 @@ func (s *Service) handlePlatformAlert(w http.ResponseWriter, r *http.Request) {
 	dedup, err := randomTokenID()
 	if err != nil {
 		obs.ServerError(w, "alert failed", err)
-		http.Error(w, "alert failed", http.StatusInternalServerError)
+		httpx.Error(w, "alert failed", http.StatusInternalServerError)
 		return
 	}
 	tid := claims.Tenant
@@ -345,17 +344,17 @@ func (s *Service) handlePlatformAlert(w http.ResponseWriter, r *http.Request) {
 	})
 	switch {
 	case errors.Is(err, notify.ErrAlertNoRecipient):
-		http.Error(w, "no recipients (pass recipients, or configure BNBLOC_SUPER_ADMINS)", http.StatusBadRequest)
+		httpx.Error(w, "no recipients (pass recipients, or configure BNBLOC_SUPER_ADMINS)", http.StatusBadRequest)
 		return
 	case errors.Is(err, notify.ErrAlertInvalid):
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		httpx.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	case errors.Is(err, notify.ErrAlertNoNotifier):
-		http.Error(w, "nothing reaches the recipients in tenant "+tid+" (no notifier component, notification plugin or browser push subscription); install a notifier (docs/notifications.md)", http.StatusConflict)
+		httpx.Error(w, "nothing reaches the recipients in tenant "+tid+" (no notifier component, notification plugin or browser push subscription); install a notifier (docs/notifications.md)", http.StatusConflict)
 		return
 	case err != nil:
-		slog.Error("bnbloc gateway: admin alert failed", "event", "bnbloc.alert.failed", "tenant", tid, "error", err)
-		http.Error(w, "alert failed", http.StatusInternalServerError)
+		obs.ServerError(w, "alert failed", err)
+		httpx.Error(w, "alert failed", http.StatusInternalServerError)
 		return
 	}
 	if s.ExtAudit != nil {
@@ -364,5 +363,5 @@ func (s *Service) handlePlatformAlert(w http.ResponseWriter, r *http.Request) {
 			Detail: "notifiers=" + strings.Join(res.Notifiers, ",") + " recipients=" + strings.Join(res.Recipients, ","), AtMs: s.nowTime().UnixMilli(),
 		})
 	}
-	writeJSON(w, http.StatusAccepted, res)
+	httpx.WriteJSON(w, http.StatusAccepted, res)
 }

@@ -2,14 +2,15 @@ package gateway
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"github.com/luckylhb90/bnbloc/internal/wire"
 	"io"
 	"net/http"
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/luckylhb90/bnbloc/internal/httpx"
+	"github.com/luckylhb90/bnbloc/internal/wire"
 
 	"github.com/luckylhb90/bnbloc/core"
 	"github.com/luckylhb90/bnbloc/core/pkgmeta"
@@ -18,7 +19,6 @@ import (
 	"github.com/luckylhb90/bnbloc/internal/extreg"
 	"github.com/luckylhb90/bnbloc/internal/obs"
 	"github.com/luckylhb90/bnbloc/internal/previewerruntime"
-	"github.com/luckylhb90/bnbloc/internal/realtime"
 	"github.com/luckylhb90/bnbloc/internal/tarbundle"
 )
 
@@ -115,7 +115,7 @@ func (s *Service) handlePreviewerFile(w http.ResponseWriter, r *http.Request) {
 	cfg, ok, err := s.visiblePreviewer(r.Context(), claims, name, version)
 	if err != nil {
 		obs.ServerError(w, "load previewer failed", err)
-		http.Error(w, "load previewer failed", http.StatusInternalServerError)
+		httpx.Error(w, "load previewer failed", http.StatusInternalServerError)
 		return
 	}
 	if !ok {
@@ -126,7 +126,7 @@ func (s *Service) handlePreviewerFile(w http.ResponseWriter, r *http.Request) {
 	b, err := s.fetchPreviewerBundle(r.Context(), art)
 	if err != nil {
 		obs.ServerError(w, "load previewer bundle failed", err)
-		http.Error(w, "load previewer bundle failed", http.StatusBadGateway)
+		httpx.Error(w, "load previewer bundle failed", http.StatusBadGateway)
 		return
 	}
 	data, ok := b.File(file)
@@ -202,14 +202,8 @@ func (s *Service) readArtifactBlob(ctx context.Context, key string, limit int64)
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	rc, _, err := s.blobs().OpenBlob(ctx, gatewayServiceSubject, key)
-	var se *realtime.StatusError
-	switch {
-	case errors.As(err, &se) && se.Status == http.StatusNotFound:
-		return nil, fmt.Errorf("artifact not found in gateway artifact store")
-	case errors.As(err, &se):
-		return nil, fmt.Errorf("artifact store read failed with status %d", se.Status)
-	case err != nil:
-		return nil, fmt.Errorf("artifact store unreachable")
+	if err != nil {
+		return nil, blobOpenErr(err)
 	}
 	defer rc.Close()
 	raw, err := io.ReadAll(io.LimitReader(rc, limit+1))

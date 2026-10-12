@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/luckylhb90/bnbloc/internal/httpx"
 	"github.com/luckylhb90/bnbloc/internal/obs"
 	"github.com/luckylhb90/bnbloc/internal/store"
 	"github.com/luckylhb90/bnbloc/internal/wire"
@@ -44,12 +45,12 @@ func (s *Service) handleSearchReindex(w http.ResponseWriter, r *http.Request) {
 	}
 	if s.Search == nil {
 		obs.ServerError(w, "search backend unavailable", nil)
-		http.Error(w, "search backend unavailable", http.StatusServiceUnavailable)
+		httpx.Error(w, "search backend unavailable", http.StatusServiceUnavailable)
 		return
 	}
 	var req wire.SearchReindexRequest
 	if err := json.NewDecoder(io.LimitReader(r.Body, 4096)).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
-		http.Error(w, "invalid body", http.StatusBadRequest)
+		httpx.Error(w, "invalid body", http.StatusBadRequest)
 		return
 	}
 	batches := req.MaxBatches
@@ -65,12 +66,12 @@ func (s *Service) handleSearchReindex(w http.ResponseWriter, r *http.Request) {
 	for i := 0; i < batches && !resp.Done && time.Now().Before(deadline); i++ {
 		b, err := s.Search.Reindex(ctx, resp.Cursor, store.SearchReindexBatchSize)
 		if errors.Is(err, store.ErrInvalidSearchCursor) {
-			http.Error(w, err.Error(), http.StatusBadRequest)
+			httpx.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
 		if err != nil {
 			obs.ServerError(w, "search reindex ("+resp.Backend+")", fmt.Errorf("by %s at cursor %q: %w", userID, resp.Cursor, err))
-			http.Error(w, "search reindex failed", http.StatusInternalServerError)
+			httpx.Error(w, "search reindex failed", http.StatusInternalServerError)
 			return
 		}
 		resp.Scanned += b.Scanned
@@ -80,7 +81,7 @@ func (s *Service) handleSearchReindex(w http.ResponseWriter, r *http.Request) {
 	}
 	log.Printf("realtime: search reindex (%s) by %s: scanned=%d updated=%d cursor=%q done=%v",
 		resp.Backend, userID, resp.Scanned, resp.Updated, resp.Cursor, resp.Done)
-	writeJSON(w, http.StatusOK, resp)
+	httpx.WriteJSON(w, http.StatusOK, resp)
 }
 
 func (s *Service) handleSearchStatus(w http.ResponseWriter, r *http.Request) {
@@ -89,10 +90,10 @@ func (s *Service) handleSearchStatus(w http.ResponseWriter, r *http.Request) {
 	}
 	if s.Search == nil {
 		obs.ServerError(w, "search backend unavailable", nil)
-		http.Error(w, "search backend unavailable", http.StatusServiceUnavailable)
+		httpx.Error(w, "search backend unavailable", http.StatusServiceUnavailable)
 		return
 	}
 	st := s.Search.Status(r.Context())
 	st.Updates = s.SearchUpdates.Stats()
-	writeJSON(w, http.StatusOK, st)
+	httpx.WriteJSON(w, http.StatusOK, st)
 }

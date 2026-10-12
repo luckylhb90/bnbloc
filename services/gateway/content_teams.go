@@ -8,6 +8,7 @@ import (
 	"github.com/luckylhb90/bnbloc/internal/auth"
 	"github.com/luckylhb90/bnbloc/internal/contentpkg"
 	"github.com/luckylhb90/bnbloc/internal/contentuse"
+	"github.com/luckylhb90/bnbloc/internal/httpx"
 	"github.com/luckylhb90/bnbloc/internal/obs"
 	"github.com/luckylhb90/bnbloc/internal/realtime"
 	"github.com/luckylhb90/bnbloc/internal/store"
@@ -71,13 +72,13 @@ func (s *Service) roomExpertOf(ctx context.Context, roomID string) (string, erro
 func (s *Service) putRoomExpert(w http.ResponseWriter, r *http.Request, claims auth.Claims, roomID string, c store.ContentComponent) {
 	ctx := r.Context()
 	if c.Kind != contentpkg.KindExpert {
-		http.Error(w, "the room expert must be an expert", http.StatusBadRequest)
+		httpx.Error(w, "the room expert must be an expert", http.StatusBadRequest)
 		return
 	}
 	pins, err := s.ContentComponents.ListContentUses(ctx, store.ContentUseRoom, roomID)
 	if err != nil {
 		obs.ServerError(w, "list room content uses failed", err)
-		http.Error(w, "list room content uses failed", http.StatusInternalServerError)
+		httpx.Error(w, "list room content uses failed", http.StatusInternalServerError)
 		return
 	}
 	pinned, ok := "", false
@@ -87,7 +88,7 @@ func (s *Service) putRoomExpert(w http.ResponseWriter, r *http.Request, claims a
 		}
 	}
 	if !ok {
-		http.Error(w, "pin the expert in the room first", http.StatusBadRequest)
+		httpx.Error(w, "pin the expert in the room first", http.StatusBadRequest)
 		return
 	}
 	v, err := s.ContentComponents.GetContentComponentVersion(ctx, c.ID, firstNonEmpty(pinned, c.LatestVersion))
@@ -98,17 +99,17 @@ func (s *Service) putRoomExpert(w http.ResponseWriter, r *http.Request, claims a
 	m, err := contentuse.Manifest(v)
 	if err != nil {
 		obs.ServerError(w, "decode content manifest failed", err)
-		http.Error(w, "decode content manifest failed", http.StatusInternalServerError)
+		httpx.Error(w, "decode content manifest failed", http.StatusInternalServerError)
 		return
 	}
 	if m.Team != nil {
-		http.Error(w, "a team cannot be the room expert; pick it per message", http.StatusBadRequest)
+		httpx.Error(w, "a team cannot be the room expert; pick it per message", http.StatusBadRequest)
 		return
 	}
 	current, err := s.ContentComponents.ListContentUses(ctx, store.ContentUseRoomExpert, roomID)
 	if err != nil {
 		obs.ServerError(w, "list room expert failed", err)
-		http.Error(w, "list room expert failed", http.StatusInternalServerError)
+		httpx.Error(w, "list room expert failed", http.StatusInternalServerError)
 		return
 	}
 	for _, u := range current {
@@ -117,7 +118,7 @@ func (s *Service) putRoomExpert(w http.ResponseWriter, r *http.Request, claims a
 		}
 		if err := s.ContentComponents.DeleteContentUse(ctx, store.ContentUseRoomExpert, roomID, u.ComponentID); err != nil {
 			obs.ServerError(w, "replace room expert failed", err)
-			http.Error(w, "replace room expert failed", http.StatusInternalServerError)
+			httpx.Error(w, "replace room expert failed", http.StatusInternalServerError)
 			return
 		}
 	}

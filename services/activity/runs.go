@@ -4,11 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
 
+	"github.com/luckylhb90/bnbloc/internal/httpx"
 	"github.com/luckylhb90/bnbloc/internal/membership"
 	"github.com/luckylhb90/bnbloc/internal/obs"
 	"github.com/luckylhb90/bnbloc/internal/roomctx"
@@ -115,7 +115,7 @@ func parseRunCursor(s string) (store.AgentRunCursor, bool) {
 func (s *Service) handleRoomRuns(w http.ResponseWriter, r *http.Request) {
 	roomID, err := roomctx.Normalize(r.PathValue("roomId"))
 	if err != nil {
-		writeErr(w, http.StatusBadRequest, err.Error())
+		httpx.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 	if !s.authorize(w, r, roomID) {
@@ -123,7 +123,7 @@ func (s *Service) handleRoomRuns(w http.ResponseWriter, r *http.Request) {
 	}
 	q, err := parseRunQuery(r)
 	if err != nil {
-		writeErr(w, http.StatusBadRequest, err.Error())
+		httpx.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 	q.RoomID = roomID
@@ -136,12 +136,12 @@ func (s *Service) handleRuns(scope string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		caller := strings.TrimSpace(r.Header.Get("X-Bnbloc-User"))
 		if caller == "" {
-			writeErr(w, http.StatusUnauthorized, "missing authenticated subject")
+			httpx.Error(w, "missing authenticated subject", http.StatusUnauthorized)
 			return
 		}
 		q, err := parseRunQuery(r)
 		if err != nil {
-			writeErr(w, http.StatusBadRequest, err.Error())
+			httpx.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
 		if scope == wire.RunScopeSelf {
@@ -155,14 +155,13 @@ func (s *Service) handleRuns(scope string) http.HandlerFunc {
 
 func (s *Service) writeRuns(w http.ResponseWriter, r *http.Request, scope string, q store.AgentRunQuery) {
 	if s.Runs == nil {
-		obs.ServerError(w, "run records not configured", nil)
-		writeErr(w, http.StatusNotImplemented, "run records not configured")
+		httpx.Unavailable(w, "run records")
 		return
 	}
 	jobs, err := s.Runs.ListAgentRuns(r.Context(), q)
 	if err != nil {
-		slog.Error("bnbloc activity run listing failed", "event", "bnbloc.activity.runs_list_failed", "scope", scope, "error", err)
-		writeErr(w, http.StatusInternalServerError, "list runs failed")
+		obs.ServerError(w, "list runs failed", err)
+		httpx.Error(w, "list runs failed", http.StatusInternalServerError)
 		return
 	}
 	v := s.runViewer(r, scope)
@@ -173,7 +172,7 @@ func (s *Service) writeRuns(w http.ResponseWriter, r *http.Request, scope string
 	if n := len(jobs); n > 0 && n == effectiveRunLimit(q.Limit) {
 		out.NextBefore = runCursor(jobs[n-1])
 	}
-	writeJSON(w, http.StatusOK, out)
+	httpx.WriteJSON(w, http.StatusOK, out)
 }
 
 // effectiveRunLimit mirrors the store's page clamp so a full page is known to
@@ -193,32 +192,31 @@ func effectiveRunLimit(n int) int {
 func (s *Service) handleRoomRun(w http.ResponseWriter, r *http.Request) {
 	roomID, err := roomctx.Normalize(r.PathValue("roomId"))
 	if err != nil {
-		writeErr(w, http.StatusBadRequest, err.Error())
+		httpx.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 	if !s.authorize(w, r, roomID) {
 		return
 	}
 	if s.Runs == nil {
-		obs.ServerError(w, "run records not configured", nil)
-		writeErr(w, http.StatusNotImplemented, "run records not configured")
+		httpx.Unavailable(w, "run records")
 		return
 	}
 	j, err := s.Runs.GetAgentRun(r.Context(), strings.TrimSpace(r.PathValue("jobId")))
 	if errors.Is(err, store.ErrAgentJobNotFound) || (err == nil && j.RoomID != roomID) {
-		writeErr(w, http.StatusNotFound, "run not found")
+		httpx.Error(w, "run not found", http.StatusNotFound)
 		return
 	}
 	if err != nil {
-		slog.Error("bnbloc activity run read failed", "event", "bnbloc.activity.run_read_failed", "room", roomID, "error", err)
-		writeErr(w, http.StatusInternalServerError, "read run failed")
+		obs.ServerError(w, "read run failed", err)
+		httpx.Error(w, "read run failed", http.StatusInternalServerError)
 		return
 	}
 	run := s.runViewer(r, wire.RunScopeRoom).record(j, true)
 	if run.Reply != nil && run.Reply.MessageID != "" {
 		run.Reply.RoomSeq = s.replyRoomSeq(r.Context(), j, run.Reply.MessageID)
 	}
-	writeJSON(w, http.StatusOK, run)
+	httpx.WriteJSON(w, http.StatusOK, run)
 }
 
 // replyRoomSeq finds the room sequence of the feed batch carrying the reply

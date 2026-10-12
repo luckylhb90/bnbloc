@@ -15,6 +15,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/luckylhb90/bnbloc/internal/httpx"
 	"github.com/luckylhb90/bnbloc/internal/svcauth"
 	"github.com/luckylhb90/bnbloc/internal/tenant"
 	"github.com/luckylhb90/bnbloc/internal/wire"
@@ -90,7 +91,7 @@ func (c *HandoffClient) do(ctx context.Context, method, path, user string, body 
 	if resp.StatusCode/100 != 2 {
 		b, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 		_ = resp.Body.Close()
-		return nil, &StatusError{Status: resp.StatusCode, Body: string(b)}
+		return nil, &StatusError{Status: resp.StatusCode, Body: httpx.ErrorText(b)}
 	}
 	return resp, nil
 }

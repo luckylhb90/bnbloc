@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+
+	"github.com/luckylhb90/bnbloc/internal/httpx"
 )
 
 // Instructions tell the agent what the room tools are for. They ride the
@@ -165,10 +167,7 @@ func httpStatusText(status int) string {
 func refusal(what string, err error) Result {
 	var se *StatusError
 	if errors.As(err, &se) {
-		var body struct {
-			Code  string `json:"code"`
-			Error string `json:"error"`
-		}
+		var body httpx.ErrorBody
 		if json.Unmarshal(se.Body, &body) == nil && body.Error != "" {
 			if body.Code != "" {
 				return toolError("%s refused (%s): %s", what, body.Code, body.Error)

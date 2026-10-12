@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/luckylhb90/bnbloc/internal/httpx"
 	"github.com/luckylhb90/bnbloc/internal/obs"
 	"github.com/luckylhb90/bnbloc/internal/store"
 	"github.com/luckylhb90/bnbloc/internal/tenant"
@@ -29,13 +30,12 @@ func viewTenantPolicy(t store.Tenant) tenantPolicyView {
 // Read-only: only org admins change it (PUT /v1/tenant/settings).
 func (s *Service) handleMyTenantPolicy(w http.ResponseWriter, r *http.Request) {
 	if s.Tenants == nil {
-		obs.ServerError(w, "tenant registry not configured", nil)
-		writeErr(w, http.StatusNotImplemented, "tenant registry not configured")
+		httpx.Unavailable(w, "tenant registry")
 		return
 	}
 	caller := strings.TrimSpace(r.Header.Get("X-Bnbloc-User"))
 	if caller == "" {
-		writeErr(w, http.StatusUnauthorized, "missing authenticated subject")
+		httpx.Error(w, "missing authenticated subject", http.StatusUnauthorized)
 		return
 	}
 	tid := tenant.FromContext(r.Context())
@@ -43,19 +43,19 @@ func (s *Service) handleMyTenantPolicy(w http.ResponseWriter, r *http.Request) {
 		_, member, err := s.Tenants.GetMember(r.Context(), q, caller)
 		if err != nil {
 			obs.ServerError(w, "read membership failed", err)
-			writeErr(w, http.StatusInternalServerError, "read membership failed")
+			httpx.Error(w, "read membership failed", http.StatusInternalServerError)
 			return
 		}
 		if !member {
-			writeErr(w, http.StatusForbidden, "not a member of that tenant")
+			httpx.Error(w, "not a member of that tenant", http.StatusForbidden)
 			return
 		}
 		tid = q
 	}
 	t, err := s.Tenants.GetTenant(r.Context(), tid)
 	if err != nil {
-		writeErr(w, http.StatusNotFound, "tenant not found")
+		httpx.Error(w, "tenant not found", http.StatusNotFound)
 		return
 	}
-	writeJSON(w, http.StatusOK, viewTenantPolicy(t))
+	httpx.WriteJSON(w, http.StatusOK, viewTenantPolicy(t))
 }

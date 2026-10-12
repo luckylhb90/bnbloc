@@ -1,5 +1,5 @@
 import { apiUrl } from "./config.ts";
-import { authedFetch, type FetchImpl } from "./session.ts";
+import { authedFetch, errorDetail, type FetchImpl } from "./session.ts";
 
 // The ONE platform-artifact upload (super-admin, content-addressed blob store):
 // used by the desktop release publisher and the component publish wizard.
@@ -59,14 +59,7 @@ export async function uploadArtifact(
       throw failure;
     }
     if (!response.ok) {
-      const detail = (await response.text().catch(() => "")).trim();
-      if (response.status === 503) {
-        throw new Error(`Artifact storage is not configured on this gateway${detail ? `: ${detail}` : "."}`);
-      }
-      if (response.status === 404 || response.status === 405) {
-        throw new Error("This gateway does not support artifact uploads; upgrade gateway and realtime first.");
-      }
-      throw new Error(detail || `Artifact upload failed (${response.status})`);
+      throw new Error(`Artifact upload failed: ${await errorDetail(response)}`);
     }
 
     const uploaded = (await response.json()) as { key?: string; sha256?: string; size?: number };

@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/luckylhb90/bnbloc/internal/httpx"
 	"github.com/luckylhb90/bnbloc/internal/ids"
 	"github.com/luckylhb90/bnbloc/internal/obs"
 	"github.com/luckylhb90/bnbloc/internal/store"
@@ -34,7 +35,7 @@ func toChannelView(c store.RoomChannel) channelView {
 func (s *Service) handleListChannels(w http.ResponseWriter, r *http.Request) {
 	roomID := r.PathValue("roomId")
 	if !s.Store.IsMember(r.Context(), roomID, caller(r)) {
-		writeErr(w, http.StatusForbidden, "caller is not a member of room")
+		httpx.Error(w, "caller is not a member of room", http.StatusForbidden)
 		return
 	}
 	channels := s.Channels.ListChannels(r.Context(), roomID)
@@ -62,7 +63,7 @@ func (s *Service) handleListChannels(w http.ResponseWriter, r *http.Request) {
 		}
 		out = append(out, toChannelView(c))
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"channels": out})
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"channels": out})
 }
 
 // handleGetPeopleChat returns the room's people chat without creating it:
@@ -72,16 +73,16 @@ func (s *Service) handleListChannels(w http.ResponseWriter, r *http.Request) {
 func (s *Service) handleGetPeopleChat(w http.ResponseWriter, r *http.Request) {
 	roomID := r.PathValue("roomId")
 	if !s.isHumanMember(r, roomID, caller(r)) {
-		writeErr(w, http.StatusForbidden, "caller is not a member of room")
+		httpx.Error(w, "caller is not a member of room", http.StatusForbidden)
 		return
 	}
 	for _, c := range s.Channels.ListChannels(r.Context(), roomID) {
 		if c.IsPeople() {
-			writeJSON(w, http.StatusOK, toChannelView(c))
+			httpx.WriteJSON(w, http.StatusOK, toChannelView(c))
 			return
 		}
 	}
-	writeErr(w, http.StatusNotFound, "the room has no people chat yet")
+	httpx.Error(w, "the room has no people chat yet", http.StatusNotFound)
 }
 
 // handlePeopleChat returns the room's people chat — a human-only side
@@ -90,16 +91,16 @@ func (s *Service) handleGetPeopleChat(w http.ResponseWriter, r *http.Request) {
 func (s *Service) handlePeopleChat(w http.ResponseWriter, r *http.Request) {
 	roomID := r.PathValue("roomId")
 	if !s.isHumanMember(r, roomID, caller(r)) {
-		writeErr(w, http.StatusForbidden, "caller is not a member of room")
+		httpx.Error(w, "caller is not a member of room", http.StatusForbidden)
 		return
 	}
 	ch, err := s.Channels.EnsurePeopleChannel(r.Context(), roomID, caller(r), s.Now())
 	if err != nil {
 		obs.ServerError(w, "open people chat failed", err)
-		writeErr(w, http.StatusInternalServerError, err.Error())
+		httpx.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	writeJSON(w, http.StatusOK, toChannelView(ch))
+	httpx.WriteJSON(w, http.StatusOK, toChannelView(ch))
 }
 
 // handleCreateChannel adds a channel. Any member may create one; the creator
@@ -107,27 +108,27 @@ func (s *Service) handlePeopleChat(w http.ResponseWriter, r *http.Request) {
 func (s *Service) handleCreateChannel(w http.ResponseWriter, r *http.Request) {
 	roomID := r.PathValue("roomId")
 	if !s.isHumanMember(r, roomID, caller(r)) {
-		writeErr(w, http.StatusForbidden, "caller is not a member of room")
+		httpx.Error(w, "caller is not a member of room", http.StatusForbidden)
 		return
 	}
 	var body struct {
 		Name string `json:"name"`
 	}
-	if !decode(w, r, &body) {
+	if !httpx.DecodeJSON(w, r, maxJSONBodyBytes, &body) {
 		return
 	}
 	name := strings.TrimSpace(body.Name)
 	if name == "" {
-		writeErr(w, http.StatusBadRequest, "name is required")
+		httpx.Error(w, "name is required", http.StatusBadRequest)
 		return
 	}
 	ch, err := s.createChannel(r.Context(), roomID, name, caller(r))
 	if err != nil {
 		obs.ServerError(w, "create channel failed", err)
-		writeErr(w, http.StatusInternalServerError, err.Error())
+		httpx.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	writeJSON(w, http.StatusOK, toChannelView(ch))
+	httpx.WriteJSON(w, http.StatusOK, toChannelView(ch))
 }
 
 // createChannel adds a non-default channel named name, created by creator
@@ -155,46 +156,46 @@ func (s *Service) handleRenameChannel(w http.ResponseWriter, r *http.Request) {
 	user := caller(r)
 	role, ok := s.Store.MemberRole(r.Context(), roomID, user)
 	if !ok {
-		writeErr(w, http.StatusForbidden, "caller is not a member of room")
+		httpx.Error(w, "caller is not a member of room", http.StatusForbidden)
 		return
 	}
 	ch, ok := s.Channels.GetChannel(r.Context(), roomID, r.PathValue("channelId"))
 	if !ok {
-		writeErr(w, http.StatusNotFound, "channel not found")
+		httpx.Error(w, "channel not found", http.StatusNotFound)
 		return
 	}
 	if ch.IsDefault || ch.IsPeople() {
-		writeErr(w, http.StatusConflict, "the default channel and the people chat cannot be renamed")
+		httpx.Error(w, "the default channel and the people chat cannot be renamed", http.StatusConflict)
 		return
 	}
 	if !role.CanInvite() && ch.CreatedBy != user {
-		writeErr(w, http.StatusForbidden, "only the owner, an admin, or the channel creator may rename")
+		httpx.Error(w, "only the owner, an admin, or the channel creator may rename", http.StatusForbidden)
 		return
 	}
 	var body struct {
 		Name string `json:"name"`
 	}
-	if !decode(w, r, &body) {
+	if !httpx.DecodeJSON(w, r, maxJSONBodyBytes, &body) {
 		return
 	}
 	name := strings.TrimSpace(body.Name)
 	if name == "" {
-		writeErr(w, http.StatusBadRequest, "name is required")
+		httpx.Error(w, "name is required", http.StatusBadRequest)
 		return
 	}
 	// Conditional rename: if a delete lands between the permission check and
 	// this write, RenameChannel fails instead of resurrecting the row.
 	if err := s.Channels.RenameChannel(r.Context(), roomID, ch.ChannelID, name); err != nil {
 		if errors.Is(err, store.ErrChannelNotFound) {
-			writeErr(w, http.StatusNotFound, "channel not found")
+			httpx.Error(w, "channel not found", http.StatusNotFound)
 			return
 		}
 		obs.ServerError(w, "rename channel failed", err)
-		writeErr(w, http.StatusInternalServerError, err.Error())
+		httpx.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 	ch.Name = name
-	writeJSON(w, http.StatusOK, toChannelView(ch))
+	httpx.WriteJSON(w, http.StatusOK, toChannelView(ch))
 }
 
 // handleDeleteChannel soft-deletes a channel (owner/admin only); the default
@@ -202,22 +203,22 @@ func (s *Service) handleRenameChannel(w http.ResponseWriter, r *http.Request) {
 func (s *Service) handleDeleteChannel(w http.ResponseWriter, r *http.Request) {
 	roomID := r.PathValue("roomId")
 	if role, ok := s.Store.MemberRole(r.Context(), roomID, caller(r)); !ok || !role.CanInvite() {
-		writeErr(w, http.StatusForbidden, "only the owner or an admin may delete channels")
+		httpx.Error(w, "only the owner or an admin may delete channels", http.StatusForbidden)
 		return
 	}
 	channelID := r.PathValue("channelId")
 	ch, ok := s.Channels.GetChannel(r.Context(), roomID, channelID)
 	if !ok {
-		writeErr(w, http.StatusNotFound, "channel not found")
+		httpx.Error(w, "channel not found", http.StatusNotFound)
 		return
 	}
 	if ch.IsDefault || ch.IsPeople() {
-		writeErr(w, http.StatusConflict, "the default channel and the people chat cannot be deleted")
+		httpx.Error(w, "the default channel and the people chat cannot be deleted", http.StatusConflict)
 		return
 	}
 	if err := s.Channels.DeleteChannel(r.Context(), roomID, channelID, s.Now()); err != nil {
 		obs.ServerError(w, "delete channel failed", err)
-		writeErr(w, http.StatusInternalServerError, err.Error())
+		httpx.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 	w.WriteHeader(http.StatusOK)

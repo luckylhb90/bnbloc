@@ -49,8 +49,8 @@ func TestCreateRoomRejectsOversizedBody(t *testing.T) {
 	srv, _ := newTestServer(t)
 	resp := do(t, http.MethodPost, srv.URL+"/v1/rooms", "alice", map[string]string{"roomId": "r", "description": strings.Repeat("x", maxJSONBodyBytes)})
 	resp.Body.Close()
-	if resp.StatusCode != http.StatusBadRequest {
-		t.Fatalf("oversized create = %d, want 400", resp.StatusCode)
+	if resp.StatusCode != http.StatusRequestEntityTooLarge {
+		t.Fatalf("oversized create = %d, want 413", resp.StatusCode)
 	}
 }
 

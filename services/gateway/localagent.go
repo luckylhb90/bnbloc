@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log/slog"
 	"net"
 	"net/http"
 	"net/url"
@@ -18,6 +17,7 @@ import (
 	"github.com/luckylhb90/bnbloc/core"
 	"github.com/luckylhb90/bnbloc/internal/config"
 	"github.com/luckylhb90/bnbloc/internal/coreset"
+	"github.com/luckylhb90/bnbloc/internal/httpx"
 	"github.com/luckylhb90/bnbloc/internal/obs"
 	"github.com/luckylhb90/bnbloc/internal/svcauth"
 )
@@ -92,14 +92,14 @@ type localAgentRunResult struct {
 func (s *Service) handleLocalAgentRun(w http.ResponseWriter, r *http.Request) {
 	claims, err := s.authenticate(r)
 	if err != nil {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		httpx.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
 	// It creates a room and drives an agent: the proxy's org RBAC and rate
 	// limit apply (edgeGate), not just a session.
 	p, err := parseAPIPath(r)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		httpx.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 	if !s.edgeGate(w, r, p, claims) {
@@ -112,13 +112,12 @@ func (s *Service) handleLocalAgentRun(w http.ResponseWriter, r *http.Request) {
 		LocalAgentURL   string `json:"localAgentUrl"`
 		LocalAgentToken string `json:"localAgentToken"`
 	}
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64*1024)).Decode(&body); err != nil {
-		http.Error(w, "invalid json body", http.StatusBadRequest)
+	if !httpx.DecodeJSON(w, r, 64*1024, &body) {
 		return
 	}
 	override, err := localAgentOverride(body.LocalAgentURL, body.LocalAgentToken)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusForbidden)
+		httpx.Error(w, err.Error(), http.StatusForbidden)
 		return
 	}
 	// Pick the core: an explicit body.core wins, then the core encoded in the
@@ -132,7 +131,7 @@ func (s *Service) handleLocalAgentRun(w http.ResponseWriter, r *http.Request) {
 	visibleEntries, err := s.visibleCoreEntries(r.Context(), claims)
 	if err != nil {
 		obs.ServerError(w, "load components failed", err)
-		http.Error(w, "load components failed", http.StatusInternalServerError)
+		httpx.Error(w, "load components failed", http.StatusInternalServerError)
 		return
 	}
 	var entry *coreset.Entry
@@ -144,7 +143,7 @@ func (s *Service) handleLocalAgentRun(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		if entry == nil {
-			http.Error(w, "core not available", http.StatusNotFound)
+			httpx.Error(w, "core not available", http.StatusNotFound)
 			return
 		}
 	} else if len(visibleEntries) > 0 {
@@ -152,20 +151,20 @@ func (s *Service) handleLocalAgentRun(w http.ResponseWriter, r *http.Request) {
 	}
 	if entry == nil {
 		obs.ServerError(w, "no core configured", nil)
-		http.Error(w, "no core configured", http.StatusServiceUnavailable)
+		httpx.Error(w, "no core configured", http.StatusServiceUnavailable)
 		return
 	}
 	// The agent target is the caller's choice from /v1/local-agent/targets;
 	// target ids are core data, so there is no gateway-side default to guess.
 	target := strings.TrimSpace(rawTarget)
 	if target == "" {
-		http.Error(w, "agentTargetId is required", http.StatusBadRequest)
+		httpx.Error(w, "agentTargetId is required", http.StatusBadRequest)
 		return
 	}
 	ep := s.callerEndpoint(entry, override)
 	if !ep.OK() {
 		obs.ServerError(w, "the selected core has no reachable endpoint", nil)
-		http.Error(w, "the selected core has no reachable endpoint", http.StatusServiceUnavailable)
+		httpx.Error(w, "the selected core has no reachable endpoint", http.StatusServiceUnavailable)
 		return
 	}
 	if strings.TrimSpace(body.Prompt) == "" {
@@ -191,15 +190,15 @@ func (s *Service) handleLocalAgentRun(w http.ResponseWriter, r *http.Request) {
 		localAgentRunFailed(w, "create_session", entry.Name, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, localAgentRunResult{
+	httpx.WriteJSON(w, http.StatusOK, localAgentRunResult{
 		RoomID: wsID, AgentSessionID: res.SessionID, TurnID: res.TurnID, Phase: res.Phase,
 	})
+
 }
 
 func localAgentRunFailed(w http.ResponseWriter, step, coreName string, err error) {
-	slog.Warn("bnbloc gateway local agent run failed",
-		"event", "bnbloc.gateway.local_agent_run_failed", "step", step, "core", coreName, "error", err)
-	http.Error(w, "local agent core request failed ("+step+")", http.StatusBadGateway)
+	obs.ServerError(w, "local agent core request failed ("+step+", core "+coreName+")", err)
+	httpx.Error(w, "local agent core request failed ("+step+")", http.StatusBadGateway)
 }
 
 // handleLocalAgentTargets lists the enabled agent targets across every
@@ -210,18 +209,18 @@ func localAgentRunFailed(w http.ResponseWriter, step, coreName string, err error
 func (s *Service) handleLocalAgentTargets(w http.ResponseWriter, r *http.Request) {
 	claims, err := s.authenticate(r)
 	if err != nil {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		httpx.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
 	visibleEntries, err := s.visibleCoreEntries(r.Context(), claims)
 	if err != nil {
 		obs.ServerError(w, "load components failed", err)
-		http.Error(w, "load components failed", http.StatusInternalServerError)
+		httpx.Error(w, "load components failed", http.StatusInternalServerError)
 		return
 	}
 	override, err := localAgentOverride(r.URL.Query().Get("localAgentUrl"), r.URL.Query().Get("localAgentToken"))
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusForbidden)
+		httpx.Error(w, err.Error(), http.StatusForbidden)
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 8*time.Second)
@@ -298,7 +297,7 @@ func (s *Service) handleLocalAgentTargets(w http.ResponseWriter, r *http.Request
 			out = append(out, row)
 		}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"targets": out})
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"targets": out})
 }
 
 // adoptRoom makes the workspace id a bnbloc room the caller can use. It
@@ -370,12 +369,6 @@ func truncate(b []byte, n int) string {
 	return string(b)
 }
 
-func writeJSON(w http.ResponseWriter, code int, v any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(code)
-	_ = json.NewEncoder(w).Encode(v)
-}
-
 // handleLocalAgentDiscover auto-detects a core's local daemon on the caller's
 // host and returns its address + token so the web client can self-fill instead
 // of asking the user to paste them. It reports the DEFAULT (first) core by
@@ -395,7 +388,7 @@ func (s *Service) handleLocalAgentDiscover(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	if _, err := s.authenticate(r); err != nil {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		httpx.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
 	entry := s.defaultCore()
@@ -403,20 +396,21 @@ func (s *Service) handleLocalAgentDiscover(w http.ResponseWriter, r *http.Reques
 		entry = s.coreByName(name)
 	}
 	if entry == nil {
-		writeJSON(w, http.StatusOK, map[string]any{"found": false})
+		httpx.WriteJSON(w, http.StatusOK, map[string]any{"found": false})
 		return
 	}
 	ep, found := coreset.Discover(r.Context(), entry.Provider)
 	if !found {
-		writeJSON(w, http.StatusOK, map[string]any{"found": false})
+		httpx.WriteJSON(w, http.StatusOK, map[string]any{"found": false})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{
 		"found":           true,
 		"core":            entry.Name,
 		"localAgentUrl":   ep.BaseURL,
 		"localAgentToken": ep.Token,
 	})
+
 }
 
 // devDiscoveryEnv is the dev-only single-host switch: /v1/local-agent/discover

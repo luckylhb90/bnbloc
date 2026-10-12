@@ -33,6 +33,7 @@ import (
 	"time"
 
 	"github.com/luckylhb90/bnbloc/internal/config"
+	"github.com/luckylhb90/bnbloc/internal/httpx"
 	"github.com/luckylhb90/bnbloc/internal/tenant"
 )
 
@@ -138,7 +139,7 @@ func Middleware(key string, next http.Handler) http.Handler {
 			return
 		}
 		if !verify(key, r, user) {
-			http.Error(w, "invalid internal identity signature", http.StatusUnauthorized)
+			httpx.Error(w, "invalid internal identity signature", http.StatusUnauthorized)
 			return
 		}
 		// Signature covers the tenant header, so it is now trusted: bind it to
@@ -158,11 +159,11 @@ func RequireSigned(key string, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		user := strings.TrimSpace(r.Header.Get(HeaderUser))
 		if user == "" {
-			http.Error(w, "internal endpoint requires a service identity", http.StatusUnauthorized)
+			httpx.Error(w, "internal endpoint requires a service identity", http.StatusUnauthorized)
 			return
 		}
 		if key != "" && !verify(key, r, user) {
-			http.Error(w, "invalid internal identity signature", http.StatusUnauthorized)
+			httpx.Error(w, "invalid internal identity signature", http.StatusUnauthorized)
 			return
 		}
 		next.ServeHTTP(w, r)

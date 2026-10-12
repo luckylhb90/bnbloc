@@ -27,7 +27,9 @@ func TestDispatchThroughATeamRole(t *testing.T) {
 		t.Fatal(err)
 	}
 	f.svc.Content = content
-	p := f.parent("job_lead", func(j *store.AgentJob) { j.ExpertID, j.ExpertVersion, j.ExpertName = "cc_team", "1.0.0", "Release team" })
+	p := f.parent("job_lead", func(j *store.AgentJob) {
+		j.ExpertID, j.ExpertVersion, j.ExpertName = "cc_team", "1.0.0", "Release team"
+	})
 
 	in := toBob(p.JobID)
 	in.Expert = &wire.ChatExpert{ID: "cc_rev", Version: "1.2.0"}

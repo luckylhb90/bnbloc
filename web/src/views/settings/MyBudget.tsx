@@ -20,8 +20,8 @@ export function MyBudget() {
       .mine()
       .then(setData)
       .catch((e) => {
-        // A deployment without budgets answers 501: nothing to show.
-        if (e instanceof ApiError && e.status === 501) setUnavailable(true);
+        // A deployment without budgets answers 503: nothing to show.
+        if (e instanceof ApiError && e.status === 503) setUnavailable(true);
         else setError(e instanceof Error ? e.message : "Could not load your usage budget");
       });
   }, []);

@@ -243,7 +243,7 @@ func TestRunsPageWithOpaqueCursor(t *testing.T) {
 		}
 	}
 	svc.Runs = nil
-	if code, _ := getRuns(t, svc, "/v1/my/jobs", "carol"); code != http.StatusNotImplemented {
-		t.Fatalf("unconfigured = %d, want 501", code)
+	if code, _ := getRuns(t, svc, "/v1/my/jobs", "carol"); code != http.StatusServiceUnavailable {
+		t.Fatalf("unconfigured = %d, want 503", code)
 	}
 }

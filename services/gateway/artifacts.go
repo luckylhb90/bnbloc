@@ -17,6 +17,7 @@ import (
 	"github.com/luckylhb90/bnbloc/core/pkgmeta"
 	"github.com/luckylhb90/bnbloc/internal/contentbuiltin"
 	"github.com/luckylhb90/bnbloc/internal/extpipe"
+	"github.com/luckylhb90/bnbloc/internal/httpx"
 	"github.com/luckylhb90/bnbloc/internal/obs"
 	"github.com/luckylhb90/bnbloc/internal/realtime"
 	"github.com/luckylhb90/bnbloc/internal/svcauth"
@@ -39,8 +40,7 @@ func (s *Service) handleArtifactCapability(w http.ResponseWriter, r *http.Reques
 	}
 	base := strings.TrimRight(s.Backends.Realtime, "/")
 	if base == "" {
-		obs.ServerError(w, "artifact store not configured", nil)
-		http.Error(w, "artifact store not configured", http.StatusServiceUnavailable)
+		httpx.Unavailable(w, "artifact store")
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
@@ -48,7 +48,7 @@ func (s *Service) handleArtifactCapability(w http.ResponseWriter, r *http.Reques
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, base+"/internal/v1/blobs", nil)
 	if err != nil {
 		obs.ServerError(w, "artifact store check failed", err)
-		http.Error(w, "artifact store check failed", http.StatusInternalServerError)
+		httpx.Error(w, "artifact store check failed", http.StatusInternalServerError)
 		return
 	}
 	req.Header.Set("X-Bnbloc-User", claims.Subject)
@@ -56,16 +56,15 @@ func (s *Service) handleArtifactCapability(w http.ResponseWriter, r *http.Reques
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		obs.ServerError(w, "artifact store unreachable", err)
-		http.Error(w, "artifact store unreachable", http.StatusBadGateway)
+		httpx.Error(w, "artifact store unreachable", http.StatusBadGateway)
 		return
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		w.WriteHeader(resp.StatusCode)
-		_, _ = io.Copy(w, resp.Body)
+		writeBlobStoreErr(w, upstreamStatusError(resp))
 		return
 	}
-	writeJSON(w, http.StatusOK, artifactCapability{Enabled: true, Backend: "realtime-blob"})
+	httpx.WriteJSON(w, http.StatusOK, artifactCapability{Enabled: true, Backend: "realtime-blob"})
 }
 
 // handleArtifactUpload streams a super-admin-uploaded binary through to
@@ -81,8 +80,7 @@ func (s *Service) handleArtifactUpload(w http.ResponseWriter, r *http.Request) {
 	}
 	base := strings.TrimRight(s.Backends.Realtime, "/")
 	if base == "" {
-		obs.ServerError(w, "artifact store not configured", nil)
-		http.Error(w, "artifact store not configured", http.StatusServiceUnavailable)
+		httpx.Unavailable(w, "artifact store")
 		return
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, maxArtifactUploadBytes)
@@ -91,7 +89,7 @@ func (s *Service) handleArtifactUpload(w http.ResponseWriter, r *http.Request) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, base+"/internal/v1/blobs", r.Body)
 	if err != nil {
 		obs.ServerError(w, "artifact upload failed", err)
-		http.Error(w, "artifact upload failed", http.StatusInternalServerError)
+		httpx.Error(w, "artifact upload failed", http.StatusInternalServerError)
 		return
 	}
 	req.Header.Set("Content-Type", "application/octet-stream")
@@ -112,7 +110,7 @@ func (s *Service) handleArtifactUpload(w http.ResponseWriter, r *http.Request) {
 func (s *Service) handleArtifactDownload(w http.ResponseWriter, r *http.Request) {
 	claims, err := s.authenticate(r)
 	if err != nil {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		httpx.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
 	key := strings.TrimPrefix(r.PathValue("key"), "/")
@@ -122,7 +120,7 @@ func (s *Service) handleArtifactDownload(w http.ResponseWriter, r *http.Request)
 	actor, err := s.contentGrant(r, claims)
 	var refused *grantError
 	if errors.As(err, &refused) && refused.status < 500 {
-		http.Error(w, "artifact not found", http.StatusNotFound)
+		httpx.Error(w, "artifact not found", http.StatusNotFound)
 		return
 	}
 	if err != nil {
@@ -132,11 +130,11 @@ func (s *Service) handleArtifactDownload(w http.ResponseWriter, r *http.Request)
 	entitled, err := s.artifactEntitled(r.Context(), actor, key)
 	if err != nil {
 		obs.ServerError(w, "load artifact entitlement failed", err)
-		http.Error(w, "load artifact entitlement failed", http.StatusInternalServerError)
+		httpx.Error(w, "load artifact entitlement failed", http.StatusInternalServerError)
 		return
 	}
 	if !entitled {
-		http.Error(w, "artifact not found", http.StatusNotFound)
+		httpx.Error(w, "artifact not found", http.StatusNotFound)
 		return
 	}
 	// A built-in content bundle ships inside the binary, never in the blob
@@ -148,8 +146,7 @@ func (s *Service) handleArtifactDownload(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	if strings.TrimSpace(s.Backends.Realtime) == "" {
-		obs.ServerError(w, "artifact store not configured", nil)
-		http.Error(w, "artifact store not configured", http.StatusServiceUnavailable)
+		httpx.Unavailable(w, "artifact store")
 		return
 	}
 	// ?direct=1 (the desktop's component downloader): a presigned S3 URL
@@ -193,7 +190,7 @@ func (s *Service) redirectToPresignedBlob(w http.ResponseWriter, r *http.Request
 	}
 	if err != nil {
 		obs.ServerError(w, "blob presign failed", err)
-		http.Error(w, "blob presign failed", http.StatusBadGateway)
+		httpx.Error(w, "blob presign failed", http.StatusBadGateway)
 		return true
 	}
 	h := w.Header()
@@ -210,14 +207,11 @@ func (s *Service) redirectToPresignedBlob(w http.ResponseWriter, r *http.Request
 func writeBlobStoreErr(w http.ResponseWriter, err error) {
 	var se *realtime.StatusError
 	if errors.As(err, &se) {
-		if se.Status >= 500 {
-			obs.ServerError(w, "artifact store failed", err)
-		}
-		http.Error(w, "artifact store failed via realtime: "+strings.TrimSpace(se.Body), se.Status)
+		httpx.WriteStatus(w, se.Status, "artifact store failed via realtime: "+strings.TrimSpace(se.Body), err)
 		return
 	}
 	obs.ServerError(w, "artifact store unreachable", err)
-	http.Error(w, "artifact store unreachable", http.StatusBadGateway)
+	httpx.Error(w, "artifact store unreachable", http.StatusBadGateway)
 }
 
 // streamBlob copies a blob body to the client, declaring its length when
@@ -317,23 +311,39 @@ func (s *Service) proxyArtifact(w http.ResponseWriter, req *http.Request, client
 	resp, err := client.Do(req)
 	if err != nil {
 		obs.ServerError(w, "artifact store unreachable", err)
-		http.Error(w, "artifact store unreachable", http.StatusBadGateway)
+		httpx.Error(w, "artifact store unreachable", http.StatusBadGateway)
 		return
 	}
 	defer resp.Body.Close()
-	if ct := resp.Header.Get("Content-Type"); ct != "" {
-		w.Header().Set("Content-Type", ct)
-	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		if resp.StatusCode >= 500 {
-			obs.ServerError(w, "artifact store failed", fmt.Errorf("realtime status %d", resp.StatusCode))
-		}
-		http.Error(w, "artifact store failed via realtime: "+strings.TrimSpace(string(raw)), resp.StatusCode)
+	if resp.StatusCode != http.StatusOK {
+		writeBlobStoreErr(w, upstreamStatusError(resp))
 		return
 	}
-	w.WriteHeader(resp.StatusCode)
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
 	_, _ = io.Copy(w, resp.Body)
+}
+
+// blobOpenErr is the one description of a failed blob open on the
+// gateway's own behalf (a package probe, a previewer or site bundle read).
+func blobOpenErr(err error) error {
+	var se *realtime.StatusError
+	switch {
+	case errors.As(err, &se) && se.Status == http.StatusNotFound:
+		return fmt.Errorf("artifact not found in gateway artifact store")
+	case errors.As(err, &se):
+		return fmt.Errorf("artifact store read failed with status %d", se.Status)
+	default:
+		return fmt.Errorf("artifact store unreachable")
+	}
+}
+
+// upstreamStatusError reads a failed realtime blob answer into the
+// StatusError writeBlobStoreErr maps (the same shape the blob client
+// returns), so every blob failure is answered in one place.
+func upstreamStatusError(resp *http.Response) *realtime.StatusError {
+	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+	return &realtime.StatusError{Status: resp.StatusCode, Body: httpx.ErrorText(raw)}
 }
 
 func (s *Service) probeUploadedArtifacts(ctx context.Context, pkg pkgmeta.Package, artifactBaseURL string) error {
@@ -360,14 +370,8 @@ func (s *Service) probeUploadedArtifact(ctx context.Context, key, wantSHA string
 	probeCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	rc, _, err := s.blobs().OpenBlob(probeCtx, gatewayServiceSubject, key)
-	var se *realtime.StatusError
-	switch {
-	case errors.As(err, &se) && se.Status == http.StatusNotFound:
-		return fmt.Errorf("artifact not found in gateway artifact store")
-	case errors.As(err, &se):
-		return fmt.Errorf("artifact store probe failed with status %d", se.Status)
-	case err != nil:
-		return fmt.Errorf("artifact store unreachable")
+	if err != nil {
+		return blobOpenErr(err)
 	}
 	defer rc.Close()
 	hash, _, err := copySHA256(rc)

@@ -8,14 +8,15 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/luckylhb90/bnbloc/internal/httpx"
-	"github.com/luckylhb90/bnbloc/internal/wire"
 	"io"
 	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/luckylhb90/bnbloc/internal/httpx"
+	"github.com/luckylhb90/bnbloc/internal/wire"
 
 	"github.com/luckylhb90/bnbloc/internal/obs"
 	"github.com/luckylhb90/bnbloc/internal/store"
@@ -85,14 +86,14 @@ func (s *Service) publicShare(w http.ResponseWriter, r *http.Request, countView,
 	ip := s.clientIP(r)
 	guessKey := "share-ip:" + ip
 	if !s.publicAllow(ip) || s.guessBlocked(guessKey) {
-		http.Error(w, "rate limit exceeded", http.StatusTooManyRequests)
+		httpx.Error(w, "rate limit exceeded", http.StatusTooManyRequests)
 		return wire.ShareResolution{}, false
 	}
 	token := r.PathValue("token")
 	notFound := func() (wire.ShareResolution, bool) {
 		s.guessAllow(guessKey)
 		w.Header().Set("Cache-Control", "no-store")
-		http.Error(w, "share not found", http.StatusNotFound)
+		httpx.Error(w, "share not found", http.StatusNotFound)
 		return wire.ShareResolution{}, false
 	}
 	if !plausibleShareToken(token) {
@@ -112,7 +113,7 @@ func (s *Service) publicShare(w http.ResponseWriter, r *http.Request, countView,
 	}
 	if err != nil {
 		obs.ServerError(w, "resolve share failed", err)
-		http.Error(w, "resolve share failed", http.StatusBadGateway)
+		httpx.Error(w, "resolve share failed", http.StatusBadGateway)
 		return wire.ShareResolution{}, false
 	}
 	if reuse {
@@ -186,7 +187,7 @@ func (s *Service) handlePublicShare(w http.ResponseWriter, r *http.Request) {
 		out.SiteURL = publicSiteBase(r.PathValue("token"))
 	}
 	w.Header().Set("Cache-Control", "no-store")
-	writeJSON(w, http.StatusOK, out)
+	httpx.WriteJSON(w, http.StatusOK, out)
 }
 
 // publicMIME is the version's media type (an inline version without one is

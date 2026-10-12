@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/luckylhb90/bnbloc/internal/httpx"
 	"github.com/luckylhb90/bnbloc/internal/membership"
 	"github.com/luckylhb90/bnbloc/internal/obs"
 	"github.com/luckylhb90/bnbloc/internal/store"
@@ -28,12 +29,12 @@ func (s *Service) registerAgentHostRoutes(mux *http.ServeMux) {
 // user; ok=false when it wrote an error.
 func agentHostTarget(w http.ResponseWriter, r *http.Request) (roomID, userID string, ok bool) {
 	if caller(r) != membership.AgentHostSubject {
-		writeErr(w, http.StatusForbidden, "agent-host memberships are managed by shareagent only")
+		httpx.Error(w, "agent-host memberships are managed by shareagent only", http.StatusForbidden)
 		return "", "", false
 	}
 	roomID, userID = r.PathValue("roomId"), strings.TrimSpace(r.PathValue("userId"))
 	if roomID == "" || userID == "" {
-		writeErr(w, http.StatusBadRequest, "room and user are required")
+		httpx.Error(w, "room and user are required", http.StatusBadRequest)
 		return "", "", false
 	}
 	return roomID, userID, true
@@ -48,11 +49,11 @@ func (s *Service) handlePutAgentHost(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := s.Store.AddAgentHost(r.Context(), roomID, userID, s.Now()); err != nil {
 		if errors.Is(err, store.ErrRoomNotFound) {
-			writeErr(w, http.StatusNotFound, "room not found")
+			httpx.Error(w, "room not found", http.StatusNotFound)
 			return
 		}
 		obs.ServerError(w, "add agent host failed", err)
-		writeErr(w, http.StatusInternalServerError, "add agent host failed")
+		httpx.Error(w, "add agent host failed", http.StatusInternalServerError)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -72,7 +73,7 @@ func (s *Service) handleDeleteAgentHost(w http.ResponseWriter, r *http.Request) 
 	}
 	if err := s.Store.RemoveAgentHost(r.Context(), roomID, userID); err != nil {
 		obs.ServerError(w, "remove agent host failed", err)
-		writeErr(w, http.StatusInternalServerError, "remove agent host failed")
+		httpx.Error(w, "remove agent host failed", http.StatusInternalServerError)
 		return
 	}
 	s.publishMemberRemoved(r, roomID, userID)

@@ -3,6 +3,7 @@ package shareagenthttp
 import (
 	"net/http"
 
+	"github.com/luckylhb90/bnbloc/internal/httpx"
 	"github.com/luckylhb90/bnbloc/internal/membership"
 	"github.com/luckylhb90/bnbloc/internal/roomctx"
 	"github.com/luckylhb90/bnbloc/internal/store"
@@ -25,7 +26,7 @@ type sharedAgentEntry struct {
 func (s *Service) handleListSharedAgents(w http.ResponseWriter, r *http.Request) {
 	roomID, err := roomctx.Normalize(r.PathValue("roomId"))
 	if err != nil {
-		writeErr(w, http.StatusBadRequest, err.Error())
+		httpx.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 	if _, ok := s.requireMember(w, r, roomID, callerSubject(r), membership.AnyMember); !ok {
@@ -59,5 +60,5 @@ func (s *Service) handleListSharedAgents(w http.ResponseWriter, r *http.Request)
 			HasQuota:      g.RunQuota != nil,
 		})
 	}
-	writeJSON(w, http.StatusOK, entries)
+	httpx.WriteJSON(w, http.StatusOK, entries)
 }

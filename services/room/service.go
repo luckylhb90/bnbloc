@@ -5,7 +5,6 @@ package room
 import (
 	"crypto/rand"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"math"
 	"net/http"
@@ -14,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/luckylhb90/bnbloc/internal/httpx"
 	"github.com/luckylhb90/bnbloc/internal/obs"
 	"github.com/luckylhb90/bnbloc/internal/realtime"
 	"github.com/luckylhb90/bnbloc/internal/roomctx"
@@ -181,7 +181,7 @@ func (s *Service) Handler() http.Handler {
 func (s *Service) handleCreateRoom(w http.ResponseWriter, r *http.Request) {
 	caller := caller(r)
 	if caller == "" {
-		writeErr(w, http.StatusUnauthorized, "missing authenticated subject")
+		httpx.Error(w, "missing authenticated subject", http.StatusUnauthorized)
 		return
 	}
 	var body struct {
@@ -191,18 +191,18 @@ func (s *Service) handleCreateRoom(w http.ResponseWriter, r *http.Request) {
 		Visibility  string `json:"visibility"`
 		SyncMode    string `json:"syncMode"`
 	}
-	if !decode(w, r, &body) {
+	if !httpx.DecodeJSON(w, r, maxJSONBodyBytes, &body) {
 		return
 	}
 	roomID, err := roomctx.Normalize(body.RoomID)
 	if err != nil {
-		writeErr(w, http.StatusBadRequest, err.Error())
+		httpx.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 	// The id becomes a path segment everywhere (gateway routing, backend mux,
 	// bridge URLs) and a VARCHAR(64) key; refuse what cannot be stored/routed.
 	if err := roomctx.ValidateID(roomID); err != nil {
-		writeErr(w, http.StatusBadRequest, "invalid room id: 1-64 bytes, no whitespace edges, control characters, or / \\ ? # %")
+		httpx.Error(w, "invalid room id: 1-64 bytes, no whitespace edges, control characters, or / \\ ? # %", http.StatusBadRequest)
 		return
 	}
 	room := store.Room{
@@ -218,14 +218,14 @@ func (s *Service) handleCreateRoom(w http.ResponseWriter, r *http.Request) {
 		// never an adoption: creating must not hand the caller someone else's
 		// room (BE-1).
 		if errors.Is(err, store.ErrRoomExists) {
-			writeErr(w, http.StatusConflict, "room id already exists")
+			httpx.Error(w, "room id already exists", http.StatusConflict)
 			return
 		}
 		obs.ServerError(w, "create room failed", err)
-		writeErr(w, http.StatusInternalServerError, err.Error())
+		httpx.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"roomId": roomID, "visibility": string(room.Visibility), "syncMode": string(room.SyncMode)})
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"roomId": roomID, "visibility": string(room.Visibility), "syncMode": string(room.SyncMode)})
 }
 
 // handleGetRoom returns full detail to members. To a non-member it returns a
@@ -235,41 +235,43 @@ func (s *Service) handleGetRoom(w http.ResponseWriter, r *http.Request) {
 	roomID := r.PathValue("roomId")
 	rm, err := s.Store.GetRoom(r.Context(), roomID)
 	if err != nil {
-		writeErr(w, http.StatusNotFound, err.Error())
+		httpx.Error(w, err.Error(), http.StatusNotFound)
 		return
 	}
 	isMember := s.Store.IsMember(r.Context(), roomID, caller(r))
 	if !isMember {
 		if rm.Visibility != store.VisibilityShared {
-			writeErr(w, http.StatusNotFound, "room not found")
+			httpx.Error(w, "room not found", http.StatusNotFound)
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]any{
+		httpx.WriteJSON(w, http.StatusOK, map[string]any{
 			"roomId": rm.RoomID, "name": rm.Name, "description": rm.Description,
 			"visibility": string(rm.Visibility), "memberCount": s.Store.MemberCount(r.Context(), roomID),
 			"preview": true,
 		})
+
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{
 		"roomId": rm.RoomID, "name": rm.Name, "description": rm.Description,
 		"visibility": string(rm.Visibility), "syncMode": string(rm.SyncMode), "createdBy": rm.CreatedBy,
 		"createdAtMs": rm.CreatedAtMs, "memberCount": s.Store.MemberCount(r.Context(), roomID),
 	})
+
 }
 
 func (s *Service) handleAddMember(w http.ResponseWriter, r *http.Request) {
 	roomID := r.PathValue("roomId")
 	role, ok := s.Store.MemberRole(r.Context(), roomID, caller(r))
 	if !ok || !role.CanInvite() {
-		writeErr(w, http.StatusForbidden, "caller may not add members")
+		httpx.Error(w, "caller may not add members", http.StatusForbidden)
 		return
 	}
 	var body struct {
 		UserID string `json:"userId"`
 		Role   string `json:"role"`
 	}
-	if !decode(w, r, &body) {
+	if !httpx.DecodeJSON(w, r, maxJSONBodyBytes, &body) {
 		return
 	}
 	if err := s.addMember(r.Context(), roomID, body.UserID, normalizeRole(body.Role)); err != nil {
@@ -285,7 +287,7 @@ func (s *Service) handleAddMember(w http.ResponseWriter, r *http.Request) {
 func (s *Service) handleListMembers(w http.ResponseWriter, r *http.Request) {
 	roomID := r.PathValue("roomId")
 	if !s.Store.IsMember(r.Context(), roomID, caller(r)) {
-		writeErr(w, http.StatusForbidden, "caller is not a member of room")
+		httpx.Error(w, "caller is not a member of room", http.StatusForbidden)
 		return
 	}
 	memberships := s.Store.Members(r.Context(), roomID)
@@ -300,7 +302,7 @@ func (s *Service) handleListMembers(w http.ResponseWriter, r *http.Request) {
 			"agentHost": m.AgentHost,
 		})
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"members": members})
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"members": members})
 }
 
 func (s *Service) handleRemoveMember(w http.ResponseWriter, r *http.Request) {
@@ -308,22 +310,22 @@ func (s *Service) handleRemoveMember(w http.ResponseWriter, r *http.Request) {
 	target := r.PathValue("userId")
 	role, ok := s.Store.MemberRole(r.Context(), roomID, caller(r))
 	if !ok || !role.CanInvite() {
-		writeErr(w, http.StatusForbidden, "caller may not remove members")
+		httpx.Error(w, "caller may not remove members", http.StatusForbidden)
 		return
 	}
 	// Removing yourself is the Leave flow, not a kick; keep the semantics clean.
 	if target == caller(r) {
-		writeErr(w, http.StatusBadRequest, "use leave to remove yourself")
+		httpx.Error(w, "use leave to remove yourself", http.StatusBadRequest)
 		return
 	}
 	// The owner cannot be kicked; ownership must be transferred first.
 	if targetRole, ok := s.Store.MemberRole(r.Context(), roomID, target); ok && targetRole == store.RoleOwner {
-		writeErr(w, http.StatusForbidden, "cannot remove the room owner; transfer ownership first")
+		httpx.Error(w, "cannot remove the room owner; transfer ownership first", http.StatusForbidden)
 		return
 	}
 	if err := s.Store.RemoveMember(r.Context(), roomID, target); err != nil {
 		obs.ServerError(w, "remove member failed", err)
-		writeErr(w, http.StatusInternalServerError, err.Error())
+		httpx.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 	s.publishMemberRemoved(r, roomID, target)
@@ -351,15 +353,15 @@ func (s *Service) publishMemberRemoved(r *http.Request, roomID, userID string) {
 func (s *Service) handleGetMember(w http.ResponseWriter, r *http.Request) {
 	roomID := r.PathValue("roomId")
 	if !s.Store.IsMember(r.Context(), roomID, caller(r)) {
-		writeErr(w, http.StatusForbidden, "caller is not a member of room")
+		httpx.Error(w, "caller is not a member of room", http.StatusForbidden)
 		return
 	}
 	m, ok := s.Store.GetMember(r.Context(), roomID, r.PathValue("userId"))
 	if !ok {
-		writeErr(w, http.StatusNotFound, "not a member")
+		httpx.Error(w, "not a member", http.StatusNotFound)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"userId": m.UserID, "role": string(m.Role), "agentHost": m.AgentHost})
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"userId": m.UserID, "role": string(m.Role), "agentHost": m.AgentHost})
 }
 
 // handleMembershipProbe answers "is userId a member of roomId in ANY tenant",
@@ -377,10 +379,10 @@ func (s *Service) handleGetMember(w http.ResponseWriter, r *http.Request) {
 func (s *Service) handleMembershipProbe(w http.ResponseWriter, r *http.Request) {
 	m, member := s.Store.MembershipAnyTenant(r.Context(), r.PathValue("roomId"), r.PathValue("userId"))
 	if !member {
-		writeJSON(w, http.StatusOK, map[string]any{"member": false})
+		httpx.WriteJSON(w, http.StatusOK, map[string]any{"member": false})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"member": true, "role": string(m.Role), "agentHost": m.AgentHost, "tenantId": m.TenantID})
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"member": true, "role": string(m.Role), "agentHost": m.AgentHost, "tenantId": m.TenantID})
 }
 
 // isHumanMember reports whether user is a member of the room whose
@@ -399,10 +401,10 @@ func (s *Service) isHumanMember(r *http.Request, roomID, user string) bool {
 func (s *Service) handleRoomTenant(w http.ResponseWriter, r *http.Request) {
 	tid, ok := s.Store.RoomTenant(r.Context(), r.PathValue("roomId"))
 	if !ok {
-		writeErr(w, http.StatusNotFound, "room not found")
+		httpx.Error(w, "room not found", http.StatusNotFound)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"tenantId": tid})
+	httpx.WriteJSON(w, http.StatusOK, map[string]string{"tenantId": tid})
 }
 
 // handleUserRooms returns the room ids a user is a member of. The gateway calls
@@ -411,7 +413,7 @@ func (s *Service) handleRoomTenant(w http.ResponseWriter, r *http.Request) {
 func (s *Service) handleUserRooms(w http.ResponseWriter, r *http.Request) {
 	userID := r.PathValue("userId")
 	if caller(r) != userID {
-		writeErr(w, http.StatusForbidden, "caller may only query own rooms")
+		httpx.Error(w, "caller may only query own rooms", http.StatusForbidden)
 		return
 	}
 	// The bridge discovery shape: every room the owner is a member of across
@@ -425,19 +427,19 @@ func (s *Service) handleUserRooms(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Query().Get("allTenants") == "1" {
 		rooms := s.Store.RoomsForUserAllTenants(r.Context(), userID)
 		if r.URL.Query().Get("includeAgentHost") != "1" {
-			writeJSON(w, http.StatusOK, map[string][]string{"rooms": rooms})
+			httpx.WriteJSON(w, http.StatusOK, map[string][]string{"rooms": rooms})
 			return
 		}
 		hosted := s.Store.AgentHostRoomsAllTenants(r.Context(), userID)
 		if hosted == nil {
 			hosted = []string{}
 		}
-		writeJSON(w, http.StatusOK, map[string][]string{"rooms": append(rooms, hosted...), "agentHostRooms": hosted})
+		httpx.WriteJSON(w, http.StatusOK, map[string][]string{"rooms": append(rooms, hosted...), "agentHostRooms": hosted})
 		return
 	}
 	if r.URL.Query().Get("detail") == "" {
 		// Login path: bare id list used to stamp token room scope.
-		writeJSON(w, http.StatusOK, map[string][]string{"rooms": s.Store.RoomsForUser(r.Context(), userID)})
+		httpx.WriteJSON(w, http.StatusOK, map[string][]string{"rooms": s.Store.RoomsForUser(r.Context(), userID)})
 		return
 	}
 	details := s.Store.RoomsForUserDetailed(r.Context(), userID)
@@ -449,14 +451,14 @@ func (s *Service) handleUserRooms(w http.ResponseWriter, r *http.Request) {
 			"isOwner": d.IsOwner, "memberCount": d.MemberCount, "createdAtMs": d.CreatedAtMs,
 		})
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"rooms": rooms})
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"rooms": rooms})
 }
 
 func (s *Service) handleCreateInvite(w http.ResponseWriter, r *http.Request) {
 	roomID := r.PathValue("roomId")
 	role, ok := s.Store.MemberRole(r.Context(), roomID, caller(r))
 	if !ok || !role.CanInvite() {
-		writeErr(w, http.StatusForbidden, "caller may not create invites")
+		httpx.Error(w, "caller may not create invites", http.StatusForbidden)
 		return
 	}
 	var body struct {
@@ -464,11 +466,11 @@ func (s *Service) handleCreateInvite(w http.ResponseWriter, r *http.Request) {
 		ExpiresAtMs int64  `json:"expiresAtMs"`
 		Capacity    int    `json:"capacity"`
 	}
-	if !decode(w, r, &body) {
+	if !httpx.DecodeJSON(w, r, maxJSONBodyBytes, &body) {
 		return
 	}
 	if body.Capacity < 1 {
-		writeErr(w, http.StatusBadRequest, "capacity must be >= 1")
+		httpx.Error(w, "capacity must be >= 1", http.StatusBadRequest)
 		return
 	}
 	now := s.Now()
@@ -481,42 +483,42 @@ func (s *Service) handleCreateInvite(w http.ResponseWriter, r *http.Request) {
 	inv := store.Invite{Code: code, RoomID: roomID, Role: normalizeInviteRole(body.Role), ExpiresAtMs: body.ExpiresAtMs, Capacity: body.Capacity, CreatedBy: caller(r)}
 	if err := s.Store.CreateInvite(r.Context(), inv); err != nil {
 		obs.ServerError(w, "create invite failed", err)
-		writeErr(w, http.StatusInternalServerError, err.Error())
+		httpx.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"code": code, "roomId": roomID, "role": string(inv.Role), "expiresAtMs": inv.ExpiresAtMs, "capacity": inv.Capacity})
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"code": code, "roomId": roomID, "role": string(inv.Role), "expiresAtMs": inv.ExpiresAtMs, "capacity": inv.Capacity})
 }
 
 func (s *Service) handleRedeem(w http.ResponseWriter, r *http.Request) {
 	caller := caller(r)
 	if caller == "" {
-		writeErr(w, http.StatusUnauthorized, "missing authenticated subject")
+		httpx.Error(w, "missing authenticated subject", http.StatusUnauthorized)
 		return
 	}
 	m, err := s.Store.RedeemInvite(r.Context(), r.PathValue("code"), caller, s.Now())
 	if err != nil {
 		switch {
 		case errors.Is(err, store.ErrInviteNotFound):
-			writeErr(w, http.StatusNotFound, err.Error())
+			httpx.Error(w, err.Error(), http.StatusNotFound)
 		case errors.Is(err, store.ErrInviteExpired), errors.Is(err, store.ErrInviteFull):
-			writeErr(w, http.StatusForbidden, err.Error())
+			httpx.Error(w, err.Error(), http.StatusForbidden)
 		default:
 			obs.ServerError(w, "redeem invite failed", err)
-			writeErr(w, http.StatusInternalServerError, err.Error())
+			httpx.Error(w, err.Error(), http.StatusInternalServerError)
 		}
 		return
 	}
 	// A redeem by someone already in the room announces a join again;
 	// what listens is idempotent (an existing copy is left unchanged).
 	s.publishMemberJoined(r.Context(), m.RoomID, m.UserID)
-	writeJSON(w, http.StatusOK, map[string]any{"roomId": m.RoomID, "membership": map[string]string{"userId": m.UserID, "role": string(m.Role)}})
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"roomId": m.RoomID, "membership": map[string]string{"userId": m.UserID, "role": string(m.Role)}})
 }
 
 // handlePlaza lists rooms for discovery. Private rooms are returned locked with
 // only non-sensitive fields; shared rooms include member counts and are joinable.
 func (s *Service) handlePlaza(w http.ResponseWriter, r *http.Request) {
 	if caller(r) == "" {
-		writeErr(w, http.StatusUnauthorized, "missing authenticated subject")
+		httpx.Error(w, "missing authenticated subject", http.StatusUnauthorized)
 		return
 	}
 	q := r.URL.Query()
@@ -525,7 +527,7 @@ func (s *Service) handlePlaza(w http.ResponseWriter, r *http.Request) {
 	rooms, total, err := s.Store.SearchRooms(r.Context(), q.Get("q"), limit, offset)
 	if err != nil {
 		obs.ServerError(w, "list plaza rooms failed", err)
-		writeErr(w, http.StatusInternalServerError, err.Error())
+		httpx.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 	out := make([]map[string]any, 0, len(rooms))
@@ -544,7 +546,7 @@ func (s *Service) handlePlaza(w http.ResponseWriter, r *http.Request) {
 			"visibility": "private", "locked": true,
 		})
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"rooms": out, "total": total, "limit": limit, "offset": offset})
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"rooms": out, "total": total, "limit": limit, "offset": offset})
 }
 
 // handleJoinRoom self-adds the caller to a shared room. Private rooms refuse
@@ -552,32 +554,32 @@ func (s *Service) handlePlaza(w http.ResponseWriter, r *http.Request) {
 func (s *Service) handleJoinRoom(w http.ResponseWriter, r *http.Request) {
 	caller := caller(r)
 	if caller == "" {
-		writeErr(w, http.StatusUnauthorized, "missing authenticated subject")
+		httpx.Error(w, "missing authenticated subject", http.StatusUnauthorized)
 		return
 	}
 	roomID := r.PathValue("roomId")
 	rm, err := s.Store.GetRoom(r.Context(), roomID)
 	if err != nil {
-		writeErr(w, http.StatusNotFound, err.Error())
+		httpx.Error(w, err.Error(), http.StatusNotFound)
 		return
 	}
 	// An agent-host membership is not one: joining makes the host a human
 	// member (AddMember converts the row).
 	if m, ok := s.Store.GetMember(r.Context(), roomID, caller); ok && !m.AgentHost {
-		writeJSON(w, http.StatusOK, map[string]any{"roomId": roomID, "role": string(m.Role)})
+		httpx.WriteJSON(w, http.StatusOK, map[string]any{"roomId": roomID, "role": string(m.Role)})
 		return
 	}
 	if rm.Visibility != store.VisibilityShared {
-		writeErr(w, http.StatusForbidden, "room is private; an invite code is required")
+		httpx.Error(w, "room is private; an invite code is required", http.StatusForbidden)
 		return
 	}
 	if err := s.Store.AddMember(r.Context(), store.Membership{RoomID: roomID, UserID: caller, Role: store.RoleMember, JoinedAtMs: s.Now()}); err != nil {
 		obs.ServerError(w, "join room failed", err)
-		writeErr(w, http.StatusInternalServerError, err.Error())
+		httpx.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 	s.publishMemberJoined(r.Context(), roomID, caller)
-	writeJSON(w, http.StatusOK, map[string]any{"roomId": roomID, "role": string(store.RoleMember)})
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"roomId": roomID, "role": string(store.RoleMember)})
 }
 
 // handleLeaveRoom removes the caller's membership. The owner cannot leave; they
@@ -585,22 +587,22 @@ func (s *Service) handleJoinRoom(w http.ResponseWriter, r *http.Request) {
 func (s *Service) handleLeaveRoom(w http.ResponseWriter, r *http.Request) {
 	caller := caller(r)
 	if caller == "" {
-		writeErr(w, http.StatusUnauthorized, "missing authenticated subject")
+		httpx.Error(w, "missing authenticated subject", http.StatusUnauthorized)
 		return
 	}
 	roomID := r.PathValue("roomId")
 	role, ok := s.Store.MemberRole(r.Context(), roomID, caller)
 	if !ok {
-		writeErr(w, http.StatusNotFound, "not a member")
+		httpx.Error(w, "not a member", http.StatusNotFound)
 		return
 	}
 	if role == store.RoleOwner {
-		writeErr(w, http.StatusConflict, "owner cannot leave; transfer ownership or delete the room")
+		httpx.Error(w, "owner cannot leave; transfer ownership or delete the room", http.StatusConflict)
 		return
 	}
 	if err := s.Store.RemoveMember(r.Context(), roomID, caller); err != nil {
 		obs.ServerError(w, "leave room failed", err)
-		writeErr(w, http.StatusInternalServerError, err.Error())
+		httpx.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 	s.publishMemberRemoved(r, roomID, caller)
@@ -611,31 +613,31 @@ func (s *Service) handleLeaveRoom(w http.ResponseWriter, r *http.Request) {
 func (s *Service) handleTransferRoom(w http.ResponseWriter, r *http.Request) {
 	roomID := r.PathValue("roomId")
 	if role, ok := s.Store.MemberRole(r.Context(), roomID, caller(r)); !ok || role != store.RoleOwner {
-		writeErr(w, http.StatusForbidden, "only the owner may transfer ownership")
+		httpx.Error(w, "only the owner may transfer ownership", http.StatusForbidden)
 		return
 	}
 	var body struct {
 		UserID string `json:"userId"`
 	}
-	if !decode(w, r, &body) {
+	if !httpx.DecodeJSON(w, r, maxJSONBodyBytes, &body) {
 		return
 	}
 	if strings.TrimSpace(body.UserID) == "" {
-		writeErr(w, http.StatusBadRequest, "userId is required")
+		httpx.Error(w, "userId is required", http.StatusBadRequest)
 		return
 	}
 	if err := s.Store.TransferOwner(r.Context(), roomID, body.UserID); err != nil {
-		writeErr(w, http.StatusBadRequest, err.Error())
+		httpx.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"roomId": roomID, "owner": body.UserID})
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"roomId": roomID, "owner": body.UserID})
 }
 
 // handlePatchRoom updates name/description/visibility (owner-only).
 func (s *Service) handlePatchRoom(w http.ResponseWriter, r *http.Request) {
 	roomID := r.PathValue("roomId")
 	if role, ok := s.Store.MemberRole(r.Context(), roomID, caller(r)); !ok || role != store.RoleOwner {
-		writeErr(w, http.StatusForbidden, "only the owner may edit the room")
+		httpx.Error(w, "only the owner may edit the room", http.StatusForbidden)
 		return
 	}
 	var body struct {
@@ -644,7 +646,7 @@ func (s *Service) handlePatchRoom(w http.ResponseWriter, r *http.Request) {
 		Visibility  *string `json:"visibility"`
 		SyncMode    *string `json:"syncMode"`
 	}
-	if !decode(w, r, &body) {
+	if !httpx.DecodeJSON(w, r, maxJSONBodyBytes, &body) {
 		return
 	}
 	patch := store.RoomPatch{Name: body.Name, Description: body.Description}
@@ -658,33 +660,34 @@ func (s *Service) handlePatchRoom(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := s.Store.UpdateRoom(r.Context(), roomID, patch); err != nil {
 		if errors.Is(err, store.ErrRoomNotFound) {
-			writeErr(w, http.StatusNotFound, err.Error())
+			httpx.Error(w, err.Error(), http.StatusNotFound)
 			return
 		}
 		obs.ServerError(w, "patch room failed", err)
-		writeErr(w, http.StatusInternalServerError, err.Error())
+		httpx.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 	rm, _ := s.Store.GetRoom(r.Context(), roomID)
-	writeJSON(w, http.StatusOK, map[string]any{
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{
 		"roomId": rm.RoomID, "name": rm.Name, "description": rm.Description, "visibility": string(rm.Visibility), "syncMode": string(rm.SyncMode),
 	})
+
 }
 
 // handleDeleteRoom soft-deletes a room (owner-only).
 func (s *Service) handleDeleteRoom(w http.ResponseWriter, r *http.Request) {
 	roomID := r.PathValue("roomId")
 	if role, ok := s.Store.MemberRole(r.Context(), roomID, caller(r)); !ok || role != store.RoleOwner {
-		writeErr(w, http.StatusForbidden, "only the owner may delete the room")
+		httpx.Error(w, "only the owner may delete the room", http.StatusForbidden)
 		return
 	}
 	if err := s.Store.DeleteRoom(r.Context(), roomID); err != nil {
 		if errors.Is(err, store.ErrRoomNotFound) {
-			writeErr(w, http.StatusNotFound, err.Error())
+			httpx.Error(w, err.Error(), http.StatusNotFound)
 			return
 		}
 		obs.ServerError(w, "delete room failed", err)
-		writeErr(w, http.StatusInternalServerError, err.Error())
+		httpx.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 	// Every member's live stream closes: the room no longer exists (BE-10).
@@ -739,41 +742,22 @@ func caller(r *http.Request) string { return strings.TrimSpace(r.Header.Get("X-B
 // larger caps.
 const maxJSONBodyBytes = 64 << 10
 
-func decode(w http.ResponseWriter, r *http.Request, v any) bool {
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxJSONBodyBytes)).Decode(v); err != nil {
-		writeErr(w, http.StatusBadRequest, "invalid json body")
-		return false
-	}
-	return true
-}
-
-func writeJSON(w http.ResponseWriter, code int, v any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(code)
-	_ = json.NewEncoder(w).Encode(v)
-}
-
-func writeErr(w http.ResponseWriter, code int, msg string) {
-	writeJSON(w, code, map[string]string{"error": msg})
-}
-
 // handleGetAgentPrefs returns the caller's last-selected agent for a room+
 // channel context (falling back is the client's job: room-level row, then the
 // user's global default). Members only, like every room-scoped read.
 func (s *Service) handleGetAgentPrefs(w http.ResponseWriter, r *http.Request) {
 	if s.AgentPrefs == nil {
-		obs.ServerError(w, "agent prefs not configured", nil)
-		writeErr(w, http.StatusNotImplemented, "agent prefs not configured")
+		httpx.Unavailable(w, "agent prefs")
 		return
 	}
 	roomID := r.PathValue("roomId")
 	user := caller(r)
 	if user == "" {
-		writeErr(w, http.StatusUnauthorized, "missing authenticated subject")
+		httpx.Error(w, "missing authenticated subject", http.StatusUnauthorized)
 		return
 	}
 	if !s.Store.IsMember(r.Context(), roomID, user) {
-		writeErr(w, http.StatusForbidden, "caller is not a member of room")
+		httpx.Error(w, "caller is not a member of room", http.StatusForbidden)
 		return
 	}
 	channel := r.URL.Query().Get("channel")
@@ -781,29 +765,29 @@ func (s *Service) handleGetAgentPrefs(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		p = store.AgentPrefs{}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{
 		"roomId": roomID, "channelId": channel,
 		"ownerId": p.OwnerID, "core": p.Core, "provider": p.Provider, "model": p.Model, "reasoning": p.Reasoning,
 		"found": ok,
 	})
+
 }
 
 // handlePutAgentPrefs upserts the caller's selection for a room+channel.
 // Silently tolerates a body missing optional fields; the client debounces.
 func (s *Service) handlePutAgentPrefs(w http.ResponseWriter, r *http.Request) {
 	if s.AgentPrefs == nil {
-		obs.ServerError(w, "agent prefs not configured", nil)
-		writeErr(w, http.StatusNotImplemented, "agent prefs not configured")
+		httpx.Unavailable(w, "agent prefs")
 		return
 	}
 	roomID := r.PathValue("roomId")
 	user := caller(r)
 	if user == "" {
-		writeErr(w, http.StatusUnauthorized, "missing authenticated subject")
+		httpx.Error(w, "missing authenticated subject", http.StatusUnauthorized)
 		return
 	}
 	if !s.Store.IsMember(r.Context(), roomID, user) {
-		writeErr(w, http.StatusForbidden, "caller is not a member of room")
+		httpx.Error(w, "caller is not a member of room", http.StatusForbidden)
 		return
 	}
 	var body struct {
@@ -814,14 +798,13 @@ func (s *Service) handlePutAgentPrefs(w http.ResponseWriter, r *http.Request) {
 		Model     string `json:"model"`
 		Reasoning string `json:"reasoning"`
 	}
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&body); err != nil {
-		writeErr(w, http.StatusBadRequest, "invalid json body")
+	if !httpx.DecodeJSON(w, r, 4096, &body) {
 		return
 	}
 	// An agent is (owner, core, provider): without the owner a restore could
 	// land on another member's agent of the same harness.
 	if strings.TrimSpace(body.Provider) == "" || strings.TrimSpace(body.Owner) == "" {
-		writeErr(w, http.StatusBadRequest, "ownerId and provider are required")
+		httpx.Error(w, "ownerId and provider are required", http.StatusBadRequest)
 		return
 	}
 	if err := s.AgentPrefs.PutAgentPrefs(r.Context(), store.AgentPrefs{
@@ -830,7 +813,7 @@ func (s *Service) handlePutAgentPrefs(w http.ResponseWriter, r *http.Request) {
 		UpdatedAtMs: s.Now(),
 	}, user); err != nil {
 		obs.ServerError(w, "put agent prefs failed", err)
-		writeErr(w, http.StatusInternalServerError, err.Error())
+		httpx.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

@@ -18,6 +18,7 @@ import (
 
 	"github.com/luckylhb90/bnbloc/internal/auth"
 	"github.com/luckylhb90/bnbloc/internal/blobstore"
+	"github.com/luckylhb90/bnbloc/internal/httpx"
 	"github.com/luckylhb90/bnbloc/internal/store"
 	"github.com/luckylhb90/bnbloc/internal/svcauth"
 	"github.com/luckylhb90/bnbloc/internal/tarbundle"
@@ -74,7 +75,7 @@ func newSiteEnv(t *testing.T) *siteEnv {
 			http.Error(w, "version not found", http.StatusNotFound)
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"version": v})
+		httpx.WriteJSON(w, http.StatusOK, map[string]any{"version": v})
 	})
 	room.HandleFunc("POST /internal/v1/shares/resolve", func(w http.ResponseWriter, r *http.Request) {
 		var body struct {
@@ -93,7 +94,7 @@ func newSiteEnv(t *testing.T) *siteEnv {
 		if body.CountView {
 			e.views[body.Token]++
 		}
-		writeJSON(w, http.StatusOK, res)
+		httpx.WriteJSON(w, http.StatusOK, res)
 	})
 	roomSrv := httptest.NewServer(room)
 	t.Cleanup(roomSrv.Close)

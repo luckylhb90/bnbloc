@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/luckylhb90/bnbloc/internal/extpipe"
+	"github.com/luckylhb90/bnbloc/internal/httpx"
 	"github.com/luckylhb90/bnbloc/internal/notify"
 	"github.com/luckylhb90/bnbloc/internal/obs"
 	"github.com/luckylhb90/bnbloc/internal/rbac"
@@ -59,63 +60,60 @@ func (s *Service) handleNotifierReply(w http.ResponseWriter, r *http.Request) {
 	}
 	var req wire.NotifierReplyRequest
 	if err := json.Unmarshal(body, &req); err != nil {
-		http.Error(w, "invalid json body", http.StatusBadRequest)
+		httpx.Error(w, "invalid json body", http.StatusBadRequest)
 		return
 	}
 	key := strings.TrimSpace(req.IdempotencyKey)
 	if key == "" || len(key) > maxReplyIdempotencyKey {
-		http.Error(w, "idempotencyKey required (at most 200 bytes)", http.StatusBadRequest)
+		httpx.Error(w, "idempotencyKey required (at most 200 bytes)", http.StatusBadRequest)
 		return
 	}
 	if len(req.Text) > maxNotifierReplyTextBytes {
-		http.Error(w, "message too long", http.StatusRequestEntityTooLarge)
+		httpx.Error(w, "message too long", http.StatusRequestEntityTooLarge)
 		return
 	}
 	text := strings.TrimSpace(req.Text)
 	if text == "" {
-		http.Error(w, "empty message", http.StatusBadRequest)
+		httpx.Error(w, "empty message", http.StatusBadRequest)
 		return
 	}
 	tok, err := s.resolveNotifierReply(ctx, rec.Name, req)
 	switch {
 	case errors.Is(err, errReplyFormAmbiguous):
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		httpx.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	case errors.Is(err, notify.ErrReplyTokenExpired):
-		http.Error(w, "reply token expired", http.StatusGone)
+		httpx.Error(w, "reply token expired", http.StatusGone)
 		return
 	case errors.Is(err, notify.ErrReplyTokenUnknown):
-		http.Error(w, "unknown reply token", http.StatusNotFound)
+		httpx.Error(w, "unknown reply token", http.StatusNotFound)
 		return
 	case err != nil:
-		slog.Error("bnbloc-gateway: resolve notifier reply failed", "notifier", rec.Name, "error", err)
-		http.Error(w, "read reply token failed", http.StatusInternalServerError)
+		obs.ServerError(w, "read reply token failed", err)
+		httpx.Error(w, "read reply token failed", http.StatusInternalServerError)
 		return
 	case tok.Notifier != rec.Name:
 		// A token is bound to the notifier it was delivered through.
-		http.Error(w, "unknown reply token", http.StatusNotFound)
+		httpx.Error(w, "unknown reply token", http.StatusNotFound)
 		return
 	}
 	if reason := s.notifierReplyDenied(ctx, rec, tok); reason != "" {
 		s.auditNotifierReply(ctx, rec, tok, "deny", reason)
-		http.Error(w, reason, http.StatusForbidden)
+		httpx.Error(w, reason, http.StatusForbidden)
 		return
 	}
 	if !s.rateAllow(tok.UserID) {
-		http.Error(w, "rate limit exceeded", http.StatusTooManyRequests)
+		httpx.Error(w, "rate limit exceeded", http.StatusTooManyRequests)
 		return
 	}
 	seq, status, msg, cause := s.postNotifierReply(ctx, tok, text, notify.ReplyClientMsgID(rec.Name, tok.UserID, key))
 	if status != http.StatusOK {
-		if status >= http.StatusInternalServerError {
-			obs.ServerError(w, msg, cause)
-		}
 		s.auditNotifierReply(ctx, rec, tok, "deny", msg)
-		http.Error(w, msg, status)
+		httpx.WriteStatus(w, status, msg, cause)
 		return
 	}
 	s.auditNotifierReply(ctx, rec, tok, "allow", "")
-	writeJSON(w, http.StatusOK, wire.NotifierReplyResponse{RoomID: tok.RoomID, Sequence: seq})
+	httpx.WriteJSON(w, http.StatusOK, wire.NotifierReplyResponse{RoomID: tok.RoomID, Sequence: seq})
 }
 
 // notifierReplyDenied applies the distribution and org rules at post time:

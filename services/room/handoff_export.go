@@ -9,7 +9,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/luckylhb90/bnbloc/internal/httpx"
 	"io"
 	"log"
 	"net/http"
@@ -17,6 +16,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/luckylhb90/bnbloc/internal/httpx"
 
 	"github.com/luckylhb90/bnbloc/internal/obs"
 	"github.com/luckylhb90/bnbloc/internal/realtime"
@@ -34,34 +35,33 @@ func (s *Service) handleExportRoom(w http.ResponseWriter, r *http.Request) {
 	roomID := r.PathValue("roomId")
 	user := caller(r)
 	if user == "" {
-		writeErr(w, http.StatusUnauthorized, "missing authenticated subject")
+		httpx.Error(w, "missing authenticated subject", http.StatusUnauthorized)
 		return
 	}
 	role, ok := s.Store.MemberRole(r.Context(), roomID, user)
 	if !ok {
-		writeErr(w, http.StatusForbidden, "caller is not a member of room")
+		httpx.Error(w, "caller is not a member of room", http.StatusForbidden)
 		return
 	}
 	if !role.CanInvite() {
-		writeErr(w, http.StatusForbidden, "only the room owner or an admin may export a handoff package")
+		httpx.Error(w, "only the room owner or an admin may export a handoff package", http.StatusForbidden)
 		return
 	}
 	if s.Handoff == nil || s.Artifacts == nil || s.Channels == nil {
-		obs.ServerError(w, "handoff packages are not configured", nil)
-		writeErr(w, http.StatusServiceUnavailable, "handoff packages are not configured")
+		httpx.Unavailable(w, "handoff packages are")
 		return
 	}
 	rm, err := s.Store.GetRoom(r.Context(), roomID)
 	if err != nil {
-		writeErr(w, http.StatusNotFound, "room not found")
+		httpx.Error(w, "room not found", http.StatusNotFound)
 		return
 	}
 	// Read the first feed page before committing to a 200: a realtime outage
 	// is an HTTP error, not a truncated download.
 	first, err := s.Handoff.Feed(r.Context(), user, roomID, 0, handoffFeedPage)
 	if err != nil {
-		log.Printf("room: export room=%s: feed: %v", roomID, err)
-		writeErr(w, http.StatusBadGateway, "room history unavailable")
+		obs.ServerError(w, "room history unavailable", err)
+		httpx.Error(w, "room history unavailable", http.StatusBadGateway)
 		return
 	}
 	now := s.Now()

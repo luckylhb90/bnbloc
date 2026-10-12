@@ -143,15 +143,14 @@ type blobUpload struct {
 // (same sha256) is a no-op answered with unchanged=true.
 func (s *Service) publishBlobVersion(w http.ResponseWriter, r *http.Request, art store.Artifact, userID string) {
 	if s.Blobs == nil {
-		obs.ServerError(w, "artifact blob store not configured", nil)
-		writeErr(w, http.StatusServiceUnavailable, "artifact blob store not configured")
+		httpx.Unavailable(w, "artifact blob store")
 		return
 	}
 	max := s.artifactMaxBytes()
 	r.Body = http.MaxBytesReader(w, r.Body, max+(1<<20))
 	mr, err := r.MultipartReader()
 	if err != nil {
-		writeErr(w, http.StatusBadRequest, "invalid multipart body")
+		httpx.Error(w, "invalid multipart body", http.StatusBadRequest)
 		return
 	}
 	var up blobUpload
@@ -168,16 +167,13 @@ func (s *Service) publishBlobVersion(w http.ResponseWriter, r *http.Request, art
 		name := part.FormName()
 		if name == "file" {
 			if seenFile {
-				writeErr(w, http.StatusBadRequest, "exactly one file part is allowed")
+				httpx.Error(w, "exactly one file part is allowed", http.StatusBadRequest)
 				return
 			}
 			seenFile = true
 			code, msg := s.storeFilePart(r.Context(), userID, art, part, max, &up)
 			if code != 0 {
-				if code >= 500 {
-					obs.ServerError(w, msg, nil)
-				}
-				writeErr(w, code, msg)
+				httpx.WriteStatus(w, code, msg, nil)
 				return
 			}
 			continue
@@ -188,7 +184,7 @@ func (s *Service) publishBlobVersion(w http.ResponseWriter, r *http.Request, art
 			return
 		}
 		if len(raw) > maxMultipartFieldBytes {
-			writeErr(w, http.StatusBadRequest, "form field "+name+" is too long")
+			httpx.Error(w, "form field "+name+" is too long", http.StatusBadRequest)
 			return
 		}
 		val := strings.TrimSpace(string(raw))
@@ -196,7 +192,7 @@ func (s *Service) publishBlobVersion(w http.ResponseWriter, r *http.Request, art
 		case "baseVersion":
 			n, err := strconv.Atoi(val)
 			if err != nil || n < 0 {
-				writeErr(w, http.StatusBadRequest, "baseVersion must be >= 0")
+				httpx.Error(w, "baseVersion must be >= 0", http.StatusBadRequest)
 				return
 			}
 			up.baseVersion, up.hasBase = n, true
@@ -207,18 +203,18 @@ func (s *Service) publishBlobVersion(w http.ResponseWriter, r *http.Request, art
 		case "sourceSeq":
 			n, err := strconv.ParseInt(val, 10, 64)
 			if err != nil {
-				writeErr(w, http.StatusBadRequest, "invalid sourceSeq")
+				httpx.Error(w, "invalid sourceSeq", http.StatusBadRequest)
 				return
 			}
 			up.sourceSeq = n
 		}
 	}
 	if !seenFile {
-		writeErr(w, http.StatusBadRequest, "expected a multipart 'file' part")
+		httpx.Error(w, "expected a multipart 'file' part", http.StatusBadRequest)
 		return
 	}
 	if !up.hasBase {
-		writeErr(w, http.StatusBadRequest, "baseVersion is required")
+		httpx.Error(w, "baseVersion is required", http.StatusBadRequest)
 		return
 	}
 	if !validVersionProvenance(w, up.summary, up.sourceJobID, up.sourceSeq) {
@@ -229,7 +225,7 @@ func (s *Service) publishBlobVersion(w http.ResponseWriter, r *http.Request, art
 		cur, err := s.Artifacts.GetArtifactVersion(r.Context(), art.ArtifactID, art.CurrentVersion)
 		if err == nil && cur.ContentHash == up.ref.SHA256 && cur.MimeType == up.mimeType {
 			cur.Content = ""
-			writeJSON(w, http.StatusOK, map[string]any{"artifact": art, "version": cur, "unchanged": true})
+			httpx.WriteJSON(w, http.StatusOK, map[string]any{"artifact": art, "version": cur, "unchanged": true})
 			return
 		}
 	}
@@ -289,10 +285,10 @@ func (s *Service) storeFilePart(ctx context.Context, userID string, art store.Ar
 func (s *Service) writeUploadErr(w http.ResponseWriter, err error, max int64) {
 	var tooLarge *http.MaxBytesError
 	if errors.As(err, &tooLarge) {
-		writeErr(w, http.StatusRequestEntityTooLarge, fmt.Sprintf("file exceeds the %d byte limit", max))
+		httpx.Error(w, fmt.Sprintf("file exceeds the %d byte limit", max), http.StatusRequestEntityTooLarge)
 		return
 	}
-	writeErr(w, http.StatusBadRequest, "invalid multipart body")
+	httpx.Error(w, "invalid multipart body", http.StatusBadRequest)
 }
 
 func firstNonEmptyString(vals ...string) string {
@@ -309,22 +305,22 @@ func firstNonEmptyString(vals ...string) string {
 func (s *Service) artifactVersionForRead(w http.ResponseWriter, r *http.Request) (store.Artifact, store.ArtifactVersion, bool) {
 	roomID := r.PathValue("roomId")
 	if !s.Store.IsMember(r.Context(), roomID, caller(r)) {
-		writeErr(w, http.StatusForbidden, "caller is not a member of room")
+		httpx.Error(w, "caller is not a member of room", http.StatusForbidden)
 		return store.Artifact{}, store.ArtifactVersion{}, false
 	}
 	art, err := s.Artifacts.GetArtifact(r.Context(), r.PathValue("artifactId"))
 	if err != nil || art.RoomID != roomID {
-		writeErr(w, http.StatusNotFound, "artifact not found")
+		httpx.Error(w, "artifact not found", http.StatusNotFound)
 		return store.Artifact{}, store.ArtifactVersion{}, false
 	}
 	version, err := strconv.Atoi(strings.TrimSpace(r.PathValue("version")))
 	if err != nil {
-		writeErr(w, http.StatusBadRequest, "invalid version")
+		httpx.Error(w, "invalid version", http.StatusBadRequest)
 		return store.Artifact{}, store.ArtifactVersion{}, false
 	}
 	v, err := s.Artifacts.GetArtifactVersion(r.Context(), art.ArtifactID, version)
 	if err != nil {
-		writeErr(w, http.StatusNotFound, "version not found")
+		httpx.Error(w, "version not found", http.StatusNotFound)
 		return store.Artifact{}, store.ArtifactVersion{}, false
 	}
 	return art, v, true
@@ -355,7 +351,7 @@ func (s *Service) handleArtifactContent(w http.ResponseWriter, r *http.Request) 
 			return
 		case !errors.Is(err, realtime.ErrDirectDownloadsDisabled):
 			obs.ServerError(w, "artifact presign failed", err)
-			writeErr(w, http.StatusBadGateway, "artifact presign failed")
+			httpx.Error(w, "artifact presign failed", http.StatusBadGateway)
 			return
 		}
 	}
@@ -365,8 +361,7 @@ func (s *Service) handleArtifactContent(w http.ResponseWriter, r *http.Request) 
 	switch v.Storage {
 	case store.ArtifactStorageBlob:
 		if s.Blobs == nil {
-			obs.ServerError(w, "artifact blob store not configured", nil)
-			writeErr(w, http.StatusServiceUnavailable, "artifact blob store not configured")
+			httpx.Unavailable(w, "artifact blob store")
 			return
 		}
 		rc, n, err := s.Blobs.OpenBlob(r.Context(), caller(r), v.BlobKey)
@@ -438,45 +433,44 @@ func (s *Service) handlePutArtifactThumbnail(w http.ResponseWriter, r *http.Requ
 	}
 	rank := store.ArtifactThumbnailRank(source)
 	if rank == 0 {
-		writeErr(w, http.StatusBadRequest, "source must be builtin or previewer")
+		httpx.Error(w, "source must be builtin or previewer", http.StatusBadRequest)
 		return
 	}
 	mimeType := store.MediaType(r.Header.Get("Content-Type"))
 	if mimeType != "image/png" && mimeType != "image/webp" {
-		writeErr(w, http.StatusUnsupportedMediaType, "thumbnail must be image/png or image/webp")
+		httpx.Error(w, "thumbnail must be image/png or image/webp", http.StatusUnsupportedMediaType)
 		return
 	}
 	raw, err := io.ReadAll(io.LimitReader(r.Body, maxThumbnailBytes+1))
 	if err != nil {
-		writeErr(w, http.StatusBadRequest, "thumbnail read failed")
+		httpx.Error(w, "thumbnail read failed", http.StatusBadRequest)
 		return
 	}
 	if len(raw) > maxThumbnailBytes {
-		writeErr(w, http.StatusRequestEntityTooLarge, "thumbnail exceeds 512 KiB")
+		httpx.Error(w, "thumbnail exceeds 512 KiB", http.StatusRequestEntityTooLarge)
 		return
 	}
 	width, height, err := thumbnailDimensions(mimeType, raw)
 	if err != nil {
-		writeErr(w, http.StatusUnsupportedMediaType, "thumbnail is not a valid "+mimeType+": "+err.Error())
+		httpx.Error(w, "thumbnail is not a valid "+mimeType+": "+err.Error(), http.StatusUnsupportedMediaType)
 		return
 	}
 	if width <= 0 || height <= 0 || width > maxThumbnailSide || height > maxThumbnailSide {
-		writeErr(w, http.StatusBadRequest, fmt.Sprintf("thumbnail must be at most %dx%d px", maxThumbnailSide, maxThumbnailSide))
+		httpx.Error(w, fmt.Sprintf("thumbnail must be at most %dx%d px", maxThumbnailSide, maxThumbnailSide), http.StatusBadRequest)
 		return
 	}
 	if v.ThumbnailBlobKey != "" && v.ThumbnailRank >= rank {
-		writeJSON(w, http.StatusOK, map[string]any{"version": metadataOnly(v), "stored": false})
+		httpx.WriteJSON(w, http.StatusOK, map[string]any{"version": metadataOnly(v), "stored": false})
 		return
 	}
 	if s.Blobs == nil {
-		obs.ServerError(w, "artifact blob store not configured", nil)
-		writeErr(w, http.StatusServiceUnavailable, "artifact blob store not configured")
+		httpx.Unavailable(w, "artifact blob store")
 		return
 	}
 	ref, err := s.Blobs.PutBlob(r.Context(), caller(r), bytes.NewReader(raw))
 	if err != nil {
 		obs.ServerError(w, "thumbnail store failed", err)
-		writeErr(w, http.StatusBadGateway, "thumbnail store failed")
+		httpx.Error(w, "thumbnail store failed", http.StatusBadGateway)
 		return
 	}
 	stored, landed, err := s.Artifacts.SetArtifactThumbnail(r.Context(), art.ArtifactID, v.Version, store.ArtifactThumbnailWrite{
@@ -484,13 +478,13 @@ func (s *Service) handlePutArtifactThumbnail(w http.ResponseWriter, r *http.Requ
 	})
 	if err != nil {
 		obs.ServerError(w, "thumbnail record failed", err)
-		writeErr(w, http.StatusInternalServerError, "thumbnail record failed")
+		httpx.Error(w, "thumbnail record failed", http.StatusInternalServerError)
 		return
 	}
 	if landed {
 		s.publishArtifactEventReason(r.Context(), art, caller(r), "thumbnail")
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"version": metadataOnly(stored), "stored": landed})
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"version": metadataOnly(stored), "stored": landed})
 }
 
 // handleGetArtifactThumbnail serves a version's stored thumbnail (404 when
@@ -502,7 +496,7 @@ func (s *Service) handleGetArtifactThumbnail(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	if v.ThumbnailBlobKey == "" || v.Thumbnail == nil {
-		writeErr(w, http.StatusNotFound, "no thumbnail")
+		httpx.Error(w, "no thumbnail", http.StatusNotFound)
 		return
 	}
 	etag := `"` + strings.TrimPrefix(v.ThumbnailBlobKey, digest.KeyPrefix) + `"`
@@ -511,8 +505,7 @@ func (s *Service) handleGetArtifactThumbnail(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	if s.Blobs == nil {
-		obs.ServerError(w, "artifact blob store not configured", nil)
-		writeErr(w, http.StatusServiceUnavailable, "artifact blob store not configured")
+		httpx.Unavailable(w, "artifact blob store")
 		return
 	}
 	rc, n, err := s.Blobs.OpenBlob(r.Context(), caller(r), v.ThumbnailBlobKey)
@@ -538,11 +531,11 @@ func (s *Service) handleGetArtifactThumbnail(w http.ResponseWriter, r *http.Requ
 func writeBlobReadErr(w http.ResponseWriter, err error) {
 	var se *realtime.StatusError
 	if errors.As(err, &se) && se.Status == http.StatusNotFound {
-		writeErr(w, http.StatusNotFound, "artifact bytes are no longer stored")
+		httpx.Error(w, "artifact bytes are no longer stored", http.StatusNotFound)
 		return
 	}
 	obs.ServerError(w, "artifact blob read failed", err)
-	writeErr(w, http.StatusBadGateway, "artifact blob read failed")
+	httpx.Error(w, "artifact blob read failed", http.StatusBadGateway)
 }
 
 func metadataOnly(v store.ArtifactVersion) store.ArtifactVersion {

@@ -10,6 +10,7 @@ import (
 	"github.com/luckylhb90/bnbloc/internal/extgov"
 	"github.com/luckylhb90/bnbloc/internal/extpipe"
 	"github.com/luckylhb90/bnbloc/internal/extreg"
+	"github.com/luckylhb90/bnbloc/internal/httpx"
 	"github.com/luckylhb90/bnbloc/internal/notify"
 	"github.com/luckylhb90/bnbloc/internal/obs"
 	"github.com/luckylhb90/bnbloc/internal/store"
@@ -77,7 +78,7 @@ func (s *Service) afterNotifierUninstall(ctx context.Context, rec extpipe.Record
 func (s *Service) requestNotifierRecord(w http.ResponseWriter, r *http.Request) (extpipe.Record, bool) {
 	name := strings.TrimSpace(r.PathValue("name"))
 	if name == "" {
-		http.Error(w, "component name required", http.StatusBadRequest)
+		httpx.Error(w, "component name required", http.StatusBadRequest)
 		return extpipe.Record{}, false
 	}
 	rec, ok := s.requestComponentRecord(w, r, name)
@@ -85,7 +86,7 @@ func (s *Service) requestNotifierRecord(w http.ResponseWriter, r *http.Request) 
 		return extpipe.Record{}, false
 	}
 	if !isNotifier(rec) {
-		http.Error(w, "component is not a notifier", http.StatusBadRequest)
+		httpx.Error(w, "component is not a notifier", http.StatusBadRequest)
 		return extpipe.Record{}, false
 	}
 	return rec, true
@@ -107,11 +108,11 @@ func (s *Service) handleRotateComponentSecret(w http.ResponseWriter, r *http.Req
 	secret, err := s.notifierSecrets().Rotate(r.Context(), rec.Name, claims.Subject)
 	if err != nil {
 		obs.ServerError(w, "rotate secret failed", err)
-		http.Error(w, "rotate secret failed", http.StatusInternalServerError)
+		httpx.Error(w, "rotate secret failed", http.StatusInternalServerError)
 		return
 	}
 	s.auditNotifier(r.Context(), rec, "rotate-secret", "allow", claims.Subject, "")
-	writeJSON(w, http.StatusOK, map[string]string{"secret": secret})
+	httpx.WriteJSON(w, http.StatusOK, map[string]string{"secret": secret})
 }
 
 // handleTestComponent sends one signed test notification through a notifier
@@ -128,17 +129,17 @@ func (s *Service) handleTestComponent(w http.ResponseWriter, r *http.Request) {
 	}
 	ep, err := notify.Kind.Endpoint(rec, extgov.Guard{Net: extgov.NewNetGuard(rec.Network)})
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusConflict)
+		httpx.Error(w, err.Error(), http.StatusConflict)
 		return
 	}
 	secret, found, err := s.notifierSecrets().Get(r.Context(), rec.Name)
 	switch {
 	case err != nil:
 		obs.ServerError(w, "read notifier secret failed", err)
-		http.Error(w, "read notifier secret failed", http.StatusInternalServerError)
+		httpx.Error(w, "read notifier secret failed", http.StatusInternalServerError)
 		return
 	case !found:
-		http.Error(w, "notifier has no signing secret; rotate one first", http.StatusConflict)
+		httpx.Error(w, "notifier has no signing secret; rotate one first", http.StatusConflict)
 		return
 	}
 	tid := claims.Tenant
@@ -152,7 +153,7 @@ func (s *Service) handleTestComponent(w http.ResponseWriter, r *http.Request) {
 		outcome = "failed"
 	}
 	s.auditNotifier(r.Context(), rec, "test", outcome, claims.Subject, strings.TrimSpace(res.EventID+" "+res.Error))
-	writeJSON(w, http.StatusOK, res)
+	httpx.WriteJSON(w, http.StatusOK, res)
 }
 
 func (s *Service) auditNotifier(ctx context.Context, rec extpipe.Record, action, outcome, actor, detail string) {

@@ -11,6 +11,7 @@ import (
 	"github.com/luckylhb90/bnbloc/internal/auth"
 	"github.com/luckylhb90/bnbloc/internal/contentpkg"
 	"github.com/luckylhb90/bnbloc/internal/contentuse"
+	"github.com/luckylhb90/bnbloc/internal/httpx"
 	"github.com/luckylhb90/bnbloc/internal/ids"
 	"github.com/luckylhb90/bnbloc/internal/obs"
 	"github.com/luckylhb90/bnbloc/internal/semver"
@@ -60,11 +61,11 @@ func (s *Service) handleSavePrompt(w http.ResponseWriter, r *http.Request) {
 	}
 	var req wire.SavePromptRequest
 	if err := json.Unmarshal(raw, &req); err != nil {
-		http.Error(w, "invalid json body", http.StatusBadRequest)
+		httpx.Error(w, "invalid json body", http.StatusBadRequest)
 		return
 	}
 	if strings.TrimSpace(req.Body) == "" {
-		http.Error(w, "the prompt is empty", http.StatusBadRequest)
+		httpx.Error(w, "the prompt is empty", http.StatusBadRequest)
 		return
 	}
 	ctx := r.Context()
@@ -75,11 +76,11 @@ func (s *Service) handleSavePrompt(w http.ResponseWriter, r *http.Request) {
 		case errors.Is(err, errPromptPackRaced):
 			continue
 		case errors.As(err, &bad):
-			http.Error(w, bad.Error(), http.StatusBadRequest)
+			httpx.Error(w, bad.Error(), http.StatusBadRequest)
 			return
 		case err != nil:
 			obs.ServerError(w, "save prompt failed", err)
-			http.Error(w, "save prompt failed", http.StatusBadGateway)
+			httpx.Error(w, "save prompt failed", http.StatusBadGateway)
 			return
 		}
 		views, err := s.contentViews(ctx, claims, []store.ContentComponent{c}, nil)
@@ -88,13 +89,13 @@ func (s *Service) handleSavePrompt(w http.ResponseWriter, r *http.Request) {
 				err = errors.New("saved version missing")
 			}
 			obs.ServerError(w, "load prompt pack failed", err)
-			http.Error(w, "load prompt pack failed", http.StatusInternalServerError)
+			httpx.Error(w, "load prompt pack failed", http.StatusInternalServerError)
 			return
 		}
-		writeJSON(w, http.StatusCreated, wire.SavePromptReply{Component: views[0], PromptID: promptID, Created: created})
+		httpx.WriteJSON(w, http.StatusCreated, wire.SavePromptReply{Component: views[0], PromptID: promptID, Created: created})
 		return
 	}
-	http.Error(w, "your prompt pack changed while saving: save again", http.StatusConflict)
+	httpx.Error(w, "your prompt pack changed while saving: save again", http.StatusConflict)
 }
 
 // badPrompt is a save the validator refused (a 400 with its message).
@@ -198,7 +199,7 @@ func (s *Service) handlePromptUse(w http.ResponseWriter, r *http.Request) {
 	}
 	claims := actor.Claims
 	if !s.rateAllow(claims.Subject) {
-		http.Error(w, "rate limit exceeded", http.StatusTooManyRequests)
+		httpx.Error(w, "rate limit exceeded", http.StatusTooManyRequests)
 		return
 	}
 	ctx := r.Context()
@@ -219,12 +220,12 @@ func (s *Service) handlePromptUse(w http.ResponseWriter, r *http.Request) {
 	m, err := contentuse.Manifest(v)
 	if err != nil {
 		obs.ServerError(w, "decode prompt pack failed", err)
-		http.Error(w, "decode prompt pack failed", http.StatusInternalServerError)
+		httpx.Error(w, "decode prompt pack failed", http.StatusInternalServerError)
 		return
 	}
 	promptID := r.PathValue("promptId")
 	if _, ok := m.FindPrompt(promptID); !ok {
-		http.Error(w, "prompt not found", http.StatusNotFound)
+		httpx.Error(w, "prompt not found", http.StatusNotFound)
 		return
 	}
 	if err := s.ContentComponents.RecordContentPromptUse(ctx, c.ID, promptID, s.nowTime().UnixMilli()); err != nil {

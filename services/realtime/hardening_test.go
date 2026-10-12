@@ -284,8 +284,8 @@ func TestInternalPublishGuards(t *testing.T) {
 		t.Errorf("anonymous publish: %d, want 401", code)
 	}
 	big := `{"kind":"x","payload":"` + strings.Repeat("a", maxInternalPublishBytes) + `"}`
-	if code := post(big, "service:activity"); code != http.StatusBadRequest {
-		t.Errorf("oversized publish: %d, want 400", code)
+	if code := post(big, "service:activity"); code != http.StatusRequestEntityTooLarge {
+		t.Errorf("oversized publish: %d, want 413", code)
 	}
 }
 
@@ -318,8 +318,8 @@ func TestSmallBodiesBounded(t *testing.T) {
 	srv, _ := newChannelTestServer(t)
 	big := `{"seq":1,"channelId":"` + strings.Repeat("x", maxSmallBodyBytes) + `"}`
 	for _, p := range []string{"/v1/rooms/room-1/read", "/v1/rooms/room-1/typing"} {
-		if r := channelPost(t, srv, p, "alice", big); r.StatusCode != http.StatusBadRequest {
-			t.Errorf("%s oversized: %d, want 400", p, r.StatusCode)
+		if r := channelPost(t, srv, p, "alice", big); r.StatusCode != http.StatusRequestEntityTooLarge {
+			t.Errorf("%s oversized: %d, want 413", p, r.StatusCode)
 		}
 	}
 	// An empty typing body stays valid (legacy clients).

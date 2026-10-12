@@ -138,8 +138,8 @@ func TestTeamAgentsRejectsAnonymousAndBadRange(t *testing.T) {
 		}
 	}
 	svc.Team = nil
-	if code, _ := getTeam(t, svc, "/v1/team/agents", "alice"); code != http.StatusNotImplemented {
-		t.Fatalf("unconfigured = %d, want 501", code)
+	if code, _ := getTeam(t, svc, "/v1/team/agents", "alice"); code != http.StatusServiceUnavailable {
+		t.Fatalf("unconfigured = %d, want 503", code)
 	}
 }
 

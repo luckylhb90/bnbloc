@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/luckylhb90/bnbloc/internal/httpx"
 	"github.com/luckylhb90/bnbloc/internal/store"
 	"github.com/luckylhb90/bnbloc/internal/wire"
 )
@@ -112,7 +113,7 @@ func (p reportParams) period(atMs int64) string {
 func (s *Service) handleUsageReport(w http.ResponseWriter, r *http.Request) {
 	caller := callerSubject(r)
 	if caller == "" {
-		writeErr(w, http.StatusUnauthorized, "missing authenticated subject")
+		httpx.Error(w, "missing authenticated subject", http.StatusUnauthorized)
 		return
 	}
 	as := r.URL.Query().Get("as")
@@ -126,7 +127,7 @@ func (s *Service) handleUsageReport(w http.ResponseWriter, r *http.Request) {
 	case wire.UsageAsBorrower:
 		q.BorrowerUserID = caller
 	default:
-		writeErr(w, http.StatusBadRequest, "as must be owner or borrower")
+		httpx.Error(w, "as must be owner or borrower", http.StatusBadRequest)
 		return
 	}
 	s.serveUsageReport(w, r, as, q)
@@ -136,7 +137,7 @@ func (s *Service) handleUsageReport(w http.ResponseWriter, r *http.Request) {
 // gateway).
 func (s *Service) handleTenantUsageReport(w http.ResponseWriter, r *http.Request) {
 	if callerSubject(r) == "" {
-		writeErr(w, http.StatusUnauthorized, "missing authenticated subject")
+		httpx.Error(w, "missing authenticated subject", http.StatusUnauthorized)
 		return
 	}
 	s.serveUsageReport(w, r, wire.UsageAsTenant, store.BorrowTurnQuery{})
@@ -145,7 +146,7 @@ func (s *Service) handleTenantUsageReport(w http.ResponseWriter, r *http.Request
 func (s *Service) serveUsageReport(w http.ResponseWriter, r *http.Request, as string, q store.BorrowTurnQuery) {
 	p, bad := parseReportParams(r, time.UnixMilli(s.Now()))
 	if bad != "" {
-		writeErr(w, http.StatusBadRequest, bad)
+		httpx.Error(w, bad, http.StatusBadRequest)
 		return
 	}
 	q.FromMs, q.ToMs = p.from.UnixMilli(), p.to.UnixMilli()
@@ -168,7 +169,7 @@ func (s *Service) serveUsageReport(w http.ResponseWriter, r *http.Request, as st
 		writeUsageCSV(w, report)
 		return
 	}
-	writeJSON(w, http.StatusOK, report)
+	httpx.WriteJSON(w, http.StatusOK, report)
 }
 
 // groupBorrowTurns buckets turns by (period, owner, borrower, provider, room).

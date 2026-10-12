@@ -7,7 +7,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/luckylhb90/bnbloc/internal/obs"
+	"github.com/luckylhb90/bnbloc/internal/httpx"
 	"github.com/luckylhb90/bnbloc/internal/roomctx"
 	"github.com/luckylhb90/bnbloc/internal/shareagent"
 	"github.com/luckylhb90/bnbloc/internal/store"
@@ -34,17 +34,16 @@ import (
 func (s *Service) handleRoomAgentCatalogs(w http.ResponseWriter, r *http.Request) {
 	caller := strings.TrimSpace(r.Header.Get("X-Bnbloc-User"))
 	if caller == "" {
-		writeErr(w, http.StatusUnauthorized, "missing authenticated subject")
+		httpx.Error(w, "missing authenticated subject", http.StatusUnauthorized)
 		return
 	}
 	if s.BridgeJobs == nil || s.Rooms == nil {
-		obs.ServerError(w, "room agent catalogs not configured", nil)
-		writeErr(w, http.StatusNotImplemented, "room agent catalogs not configured")
+		httpx.Unavailable(w, "room agent catalogs")
 		return
 	}
 	roomID, err := roomctx.Normalize(r.PathValue("roomId"))
 	if err != nil {
-		writeErr(w, http.StatusBadRequest, err.Error())
+		httpx.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 	if !s.authorize(w, r, roomID) {
@@ -54,7 +53,7 @@ func (s *Service) handleRoomAgentCatalogs(w http.ResponseWriter, r *http.Request
 	for _, a := range s.roomAddressableAgents(r, roomID) {
 		agents = append(agents, a.RoomAgentCatalog)
 	}
-	writeJSON(w, http.StatusOK, wire.RoomAgentCatalogsReply{Agents: agents})
+	httpx.WriteJSON(w, http.StatusOK, wire.RoomAgentCatalogsReply{Agents: agents})
 }
 
 // addressableAgent is one agent a member may address in a room; Platform

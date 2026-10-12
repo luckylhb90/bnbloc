@@ -9,6 +9,7 @@ import (
 	"github.com/luckylhb90/bnbloc/internal/contentpkg"
 	"github.com/luckylhb90/bnbloc/internal/extpipe"
 	"github.com/luckylhb90/bnbloc/internal/extreg"
+	"github.com/luckylhb90/bnbloc/internal/httpx"
 	"github.com/luckylhb90/bnbloc/internal/obs"
 	"github.com/luckylhb90/bnbloc/internal/wire"
 )
@@ -53,19 +54,19 @@ type componentInfo struct {
 func (s *Service) handleComponents(w http.ResponseWriter, r *http.Request) {
 	claims, err := s.authenticate(r)
 	if err != nil {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		httpx.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
 	recs, err := s.corePipeline().List(r.Context(), "")
 	if err != nil {
 		obs.ServerError(w, "load components failed", err)
-		http.Error(w, "load components failed", http.StatusInternalServerError)
+		httpx.Error(w, "load components failed", http.StatusInternalServerError)
 		return
 	}
 	installedBy, err := s.memberInstalledComponents(r.Context(), claims.Subject)
 	if err != nil {
 		obs.ServerError(w, "load components failed", err)
-		http.Error(w, "load components failed", http.StatusInternalServerError)
+		httpx.Error(w, "load components failed", http.StatusInternalServerError)
 		return
 	}
 	memberCounts := map[string]int{}
@@ -80,7 +81,7 @@ func (s *Service) handleComponents(w http.ResponseWriter, r *http.Request) {
 			counts, err := s.ComponentInstalls.CountComponentInstalls(r.Context(), kind)
 			if err != nil {
 				obs.ServerError(w, "load components failed", err)
-				http.Error(w, "load components failed", http.StatusInternalServerError)
+				httpx.Error(w, "load components failed", http.StatusInternalServerError)
 				return
 			}
 			for name, count := range counts {
@@ -103,7 +104,7 @@ func (s *Service) handleComponents(w http.ResponseWriter, r *http.Request) {
 		cfg, err := extpipe.DecodeConfig(rec)
 		if err != nil {
 			obs.ServerError(w, "load components failed", err)
-			http.Error(w, "load components failed", http.StatusInternalServerError)
+			httpx.Error(w, "load components failed", http.StatusInternalServerError)
 			return
 		}
 		component := componentInfo{
@@ -153,14 +154,14 @@ func (s *Service) handleComponents(w http.ResponseWriter, r *http.Request) {
 		content, err = s.memberContent(r.Context(), claims, contentKindFilter(onlyKind))
 		if err != nil {
 			obs.ServerError(w, "load content components failed", err)
-			http.Error(w, "load content components failed", http.StatusInternalServerError)
+			httpx.Error(w, "load content components failed", http.StatusInternalServerError)
 			return
 		}
 	}
 	if content == nil {
 		content = []wire.ContentComponent{}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"components": out, "contentComponents": content})
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"components": out, "contentComponents": content})
 }
 
 func isContentKind(kind string) bool {
@@ -168,9 +169,11 @@ func isContentKind(kind string) bool {
 	return ok
 }
 
+// contentKindFilter is the full content kind a catalog filter names, ""
+// for every kind.
 func contentKindFilter(kind string) string {
-	if isContentKind(kind) {
-		return kind
+	if k, ok := contentpkg.Lookup(kind); ok {
+		return k.Kind
 	}
 	return ""
 }
@@ -178,17 +181,17 @@ func contentKindFilter(kind string) string {
 func (s *Service) handleComponentInstall(w http.ResponseWriter, r *http.Request) {
 	claims, err := s.authenticate(r)
 	if err != nil {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		httpx.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
 	if s.ComponentInstalls == nil {
 		obs.ServerError(w, "component installs unavailable", nil)
-		http.Error(w, "component installs unavailable", http.StatusServiceUnavailable)
+		httpx.Error(w, "component installs unavailable", http.StatusServiceUnavailable)
 		return
 	}
 	name := strings.TrimSpace(r.PathValue("name"))
 	if name == "" {
-		http.Error(w, "component name required", http.StatusBadRequest)
+		httpx.Error(w, "component name required", http.StatusBadRequest)
 		return
 	}
 	rec, ok := s.requestComponentRecord(w, r, name)
@@ -197,16 +200,16 @@ func (s *Service) handleComponentInstall(w http.ResponseWriter, r *http.Request)
 	}
 	vis := extpipe.MemberVisibility(viewerOf(claims), extpipe.GateForRecord(rec), 0)
 	if !vis.Visible {
-		http.Error(w, "component not found", http.StatusNotFound)
+		httpx.Error(w, "component not found", http.StatusNotFound)
 		return
 	}
 	if extpipe.NormalizeRollout(rec.Rollout) != extpipe.RolloutOptIn {
-		http.Error(w, "component is not opt-in", http.StatusBadRequest)
+		httpx.Error(w, "component is not opt-in", http.StatusBadRequest)
 		return
 	}
 	if err := s.ComponentInstalls.PutComponentInstall(r.Context(), claims.Subject, rec.Kind, rec.Name, s.nowTime().UnixMilli()); err != nil {
 		obs.ServerError(w, "record install failed", err)
-		http.Error(w, "record install failed", http.StatusInternalServerError)
+		httpx.Error(w, "record install failed", http.StatusInternalServerError)
 		return
 	}
 	// An opt-in row is the member's in every organization, and their
@@ -219,17 +222,17 @@ func (s *Service) handleComponentInstall(w http.ResponseWriter, r *http.Request)
 func (s *Service) handleComponentUninstall(w http.ResponseWriter, r *http.Request) {
 	claims, err := s.authenticate(r)
 	if err != nil {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		httpx.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
 	if s.ComponentInstalls == nil {
 		obs.ServerError(w, "component installs unavailable", nil)
-		http.Error(w, "component installs unavailable", http.StatusServiceUnavailable)
+		httpx.Error(w, "component installs unavailable", http.StatusServiceUnavailable)
 		return
 	}
 	name := strings.TrimSpace(r.PathValue("name"))
 	if name == "" {
-		http.Error(w, "component name required", http.StatusBadRequest)
+		httpx.Error(w, "component name required", http.StatusBadRequest)
 		return
 	}
 	rec, ok := s.requestComponentRecord(w, r, name)
@@ -238,7 +241,7 @@ func (s *Service) handleComponentUninstall(w http.ResponseWriter, r *http.Reques
 	}
 	if err := s.ComponentInstalls.DeleteComponentInstall(r.Context(), claims.Subject, rec.Kind, rec.Name); err != nil {
 		obs.ServerError(w, "remove install failed", err)
-		http.Error(w, "remove install failed", http.StatusInternalServerError)
+		httpx.Error(w, "remove install failed", http.StatusInternalServerError)
 		return
 	}
 	s.componentsChanged(r.Context(), "", claims.Subject)

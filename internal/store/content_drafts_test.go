@@ -22,7 +22,7 @@ func exerciseContentDrafts(t *testing.T, b *Backends, prefix string) {
 	draft := func(id, key string, expires int64) ContentDraft {
 		return ContentDraft{ID: prefix + id, TenantID: prefix + "-t", RoomID: "room-1", JobID: "job-1", Requester: "maya", Author: "jack",
 			Kind: "bnbloc.expert.package/v1", Name: "reviewer", DisplayName: "Reviewer", Version: "1.0.0",
-			ManifestJSON: json.RawMessage(`{"kind":"bnbloc.expert.package/v1","name":"reviewer","version":"1.0.0"}`),
+			ManifestJSON:  json.RawMessage(`{"kind":"bnbloc.expert.package/v1","name":"reviewer","version":"1.0.0"}`),
 			BundleBlobKey: key, SHA256: strings.TrimPrefix(key, "sha256/"), SizeBytes: 42, CreatedAtMs: now, ExpiresAtMs: expires}
 	}
 	live, gone := draft("-live", liveKey, now+ContentDraftTTL.Milliseconds()), draft("-gone", goneKey, now-1)

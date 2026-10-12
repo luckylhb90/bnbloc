@@ -186,8 +186,8 @@ func TestArtifactStateRelayRules(t *testing.T) {
 		resp.Body.Close()
 	}
 	// Oversize refused.
-	if resp := artifactRequest(t, srv, "POST", "/v1/rooms/room-1/artifacts/"+id+"/state", "alice", map[string]any{"state": map[string]string{"blob": strings.Repeat("x", 20*1024)}}); resp.StatusCode != http.StatusBadRequest {
-		t.Fatalf("oversize state = %d, want 400", resp.StatusCode)
+	if resp := artifactRequest(t, srv, "POST", "/v1/rooms/room-1/artifacts/"+id+"/state", "alice", map[string]any{"state": map[string]string{"blob": strings.Repeat("x", 20*1024)}}); resp.StatusCode != http.StatusRequestEntityTooLarge {
+		t.Fatalf("oversize state = %d, want 413", resp.StatusCode)
 	} else {
 		resp.Body.Close()
 	}

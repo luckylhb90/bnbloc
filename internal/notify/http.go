@@ -1,7 +1,6 @@
 package notify
 
 import (
-	"encoding/json"
 	"errors"
 	"net/http"
 	"strings"
@@ -9,6 +8,7 @@ import (
 
 	"github.com/luckylhb90/bnbloc/internal/extpipe"
 	"github.com/luckylhb90/bnbloc/internal/extreg"
+	"github.com/luckylhb90/bnbloc/internal/httpx"
 	"github.com/luckylhb90/bnbloc/internal/obs"
 	"github.com/luckylhb90/bnbloc/internal/roomctx"
 	"github.com/luckylhb90/bnbloc/internal/store"
@@ -62,7 +62,7 @@ func (h *Handlers) now() time.Time {
 func caller(w http.ResponseWriter, r *http.Request) (string, bool) {
 	u := strings.TrimSpace(r.Header.Get("X-Bnbloc-User"))
 	if u == "" {
-		writeErr(w, http.StatusUnauthorized, "missing authenticated subject")
+		httpx.Error(w, "missing authenticated subject", http.StatusUnauthorized)
 		return "", false
 	}
 	return u, true
@@ -76,13 +76,13 @@ func (h *Handlers) handleGetPrefs(w http.ResponseWriter, r *http.Request) {
 	p, found, err := h.Prefs.GetNotificationPrefs(r.Context(), user)
 	if err != nil {
 		obs.ServerError(w, "read notification prefs failed", err)
-		writeErr(w, http.StatusInternalServerError, "read notification prefs failed")
+		httpx.Error(w, "read notification prefs failed", http.StatusInternalServerError)
 		return
 	}
 	if !found {
 		p = store.DefaultNotificationPrefs()
 	}
-	writeJSON(w, http.StatusOK, prefsDTO(p))
+	httpx.WriteJSON(w, http.StatusOK, prefsDTO(p))
 }
 
 func (h *Handlers) handlePutPrefs(w http.ResponseWriter, r *http.Request) {
@@ -91,12 +91,12 @@ func (h *Handlers) handlePutPrefs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body wire.NotificationPrefs
-	if !decodeBody(w, r, &body) {
+	if !httpx.DecodeJSON(w, r, maxBodyBytes, &body) {
 		return
 	}
 	quiet, err := normalizeQuietRooms(body.QuietRooms)
 	if err != nil {
-		writeErr(w, http.StatusBadRequest, err.Error())
+		httpx.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 	p := store.NotificationPrefs{
@@ -106,10 +106,10 @@ func (h *Handlers) handlePutPrefs(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := h.Prefs.PutNotificationPrefs(r.Context(), user, p); err != nil {
 		obs.ServerError(w, "save notification prefs failed", err)
-		writeErr(w, http.StatusInternalServerError, "save notification prefs failed")
+		httpx.Error(w, "save notification prefs failed", http.StatusInternalServerError)
 		return
 	}
-	writeJSON(w, http.StatusOK, prefsDTO(p))
+	httpx.WriteJSON(w, http.StatusOK, prefsDTO(p))
 }
 
 func normalizeQuietRooms(in []string) ([]string, error) {
@@ -149,11 +149,11 @@ func (h *Handlers) visibleNotifier(w http.ResponseWriter, r *http.Request) (extp
 	rec, found, err := h.Notifiers.Record(r.Context(), r.PathValue("name"))
 	if err != nil {
 		obs.ServerError(w, "read notifiers failed", err)
-		writeErr(w, http.StatusInternalServerError, "read notifiers failed")
+		httpx.Error(w, "read notifiers failed", http.StatusInternalServerError)
 		return extpipe.Record{}, false
 	}
 	if !found || !Distributes(rec, tenant.FromContext(r.Context())) {
-		writeErr(w, http.StatusNotFound, "notifier not found")
+		httpx.Error(w, "notifier not found", http.StatusNotFound)
 		return extpipe.Record{}, false
 	}
 	return rec, true
@@ -167,7 +167,7 @@ func (h *Handlers) handleListNotifiers(w http.ResponseWriter, r *http.Request) {
 	recs, err := h.Notifiers.Records(r.Context())
 	if err != nil {
 		obs.ServerError(w, "read notifiers failed", err)
-		writeErr(w, http.StatusInternalServerError, "read notifiers failed")
+		httpx.Error(w, "read notifiers failed", http.StatusInternalServerError)
 		return
 	}
 	tid := tenant.FromContext(r.Context())
@@ -187,7 +187,7 @@ func (h *Handlers) handleListNotifiers(w http.ResponseWriter, r *http.Request) {
 		}
 		out = append(out, n)
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"notifiers": out})
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"notifiers": out})
 }
 
 // handleTestNotifier sends one signed "test" notification to the caller only,
@@ -206,13 +206,13 @@ func (h *Handlers) handleTestNotifier(w http.ResponseWriter, r *http.Request) {
 	ep, live := h.Notifiers.Live(rec)
 	if !live {
 		obs.ServerError(w, "notifier is not active yet; try again shortly", nil)
-		writeErr(w, http.StatusServiceUnavailable, "notifier is not active yet; try again shortly")
+		httpx.Error(w, "notifier is not active yet; try again shortly", http.StatusServiceUnavailable)
 		return
 	}
 	secret, found, err := h.Secrets.Get(r.Context(), rec.Name)
 	if err != nil || !found {
 		obs.ServerError(w, "notifier signing secret unavailable", err)
-		writeErr(w, http.StatusServiceUnavailable, "notifier signing secret unavailable")
+		httpx.Error(w, "notifier signing secret unavailable", http.StatusServiceUnavailable)
 		return
 	}
 	tid := tenant.FromContext(r.Context())
@@ -229,24 +229,5 @@ func (h *Handlers) handleTestNotifier(w http.ResponseWriter, r *http.Request) {
 			Outcome: outcome, Detail: strings.TrimSpace(res.EventID + " " + res.Error), AtMs: now.UnixMilli(),
 		})
 	}
-	writeJSON(w, http.StatusOK, res)
-}
-
-func decodeBody(w http.ResponseWriter, r *http.Request, v any) bool {
-	r.Body = http.MaxBytesReader(w, r.Body, maxBodyBytes)
-	if err := json.NewDecoder(r.Body).Decode(v); err != nil {
-		writeErr(w, http.StatusBadRequest, "invalid json body")
-		return false
-	}
-	return true
-}
-
-func writeJSON(w http.ResponseWriter, status int, v any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(v)
-}
-
-func writeErr(w http.ResponseWriter, status int, msg string) {
-	writeJSON(w, status, map[string]string{"error": msg})
+	httpx.WriteJSON(w, http.StatusOK, res)
 }

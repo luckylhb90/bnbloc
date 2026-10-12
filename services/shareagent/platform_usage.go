@@ -6,6 +6,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/luckylhb90/bnbloc/internal/httpx"
 	"github.com/luckylhb90/bnbloc/internal/shareagent"
 	"github.com/luckylhb90/bnbloc/internal/store"
 	"github.com/luckylhb90/bnbloc/internal/tenant"
@@ -28,12 +29,12 @@ const (
 // reports; default UTC) places "today" and "this month".
 func (s *Service) handlePlatformAgentsUsage(w http.ResponseWriter, r *http.Request) {
 	if callerSubject(r) == "" {
-		writeErr(w, http.StatusUnauthorized, "missing authenticated subject")
+		httpx.Error(w, "missing authenticated subject", http.StatusUnauthorized)
 		return
 	}
 	loc, bad := reportLocation(r.URL.Query().Get("tzOffsetMin"))
 	if bad != "" {
-		writeErr(w, http.StatusBadRequest, bad)
+		httpx.Error(w, bad, http.StatusBadRequest)
 		return
 	}
 	nowMs := s.Now()
@@ -43,7 +44,7 @@ func (s *Service) handlePlatformAgentsUsage(w http.ResponseWriter, r *http.Reque
 	turns := s.Grants.BorrowTurns(r.Context(), store.BorrowTurnQuery{
 		FromMs: monthStart, ToMs: nowMs + 1, PlatformOnly: true, AllTenants: true,
 	})
-	writeJSON(w, http.StatusOK, s.platformUsage(r.Context(), turns, dayStart))
+	httpx.WriteJSON(w, http.StatusOK, s.platformUsage(r.Context(), turns, dayStart))
 }
 
 // usageAcc accumulates runs, tokens and cost.

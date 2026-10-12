@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/luckylhb90/bnbloc/internal/contentpkg"
+	"github.com/luckylhb90/bnbloc/internal/httpx"
 	"github.com/luckylhb90/bnbloc/internal/membership"
 	"github.com/luckylhb90/bnbloc/internal/obs"
 	"github.com/luckylhb90/bnbloc/internal/roomctx"
@@ -90,23 +91,22 @@ func dispatchStripe(parentJobID string) *sync.Mutex {
 func (s *Service) handleInternalDispatch(w http.ResponseWriter, r *http.Request) {
 	roomID, err := roomctx.Normalize(r.PathValue("roomId"))
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		httpx.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 	caller := strings.TrimSpace(r.Header.Get("X-Bnbloc-User"))
 	if caller == "" {
-		http.Error(w, "missing authenticated subject", http.StatusUnauthorized)
+		httpx.Error(w, "missing authenticated subject", http.StatusUnauthorized)
 		return
 	}
 	if s.Dispatches == nil || s.BridgeJobs == nil {
-		obs.ServerError(w, "agent dispatch not configured", nil)
-		http.Error(w, "agent dispatch not configured", http.StatusServiceUnavailable)
+		httpx.Unavailable(w, "agent dispatch")
 		return
 	}
 	var in wire.DispatchRequest
 	r.Body = http.MaxBytesReader(w, r.Body, maxChatBodyBytes)
 	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"code": wire.DispatchInvalid, "error": "invalid json body"})
+		httpx.WriteJSON(w, http.StatusBadRequest, httpx.ErrorBody{Code: wire.DispatchInvalid, Error: "invalid json body"})
 		return
 	}
 	reply, err := s.Dispatch(r.Context(), roomID, caller, in)
@@ -114,12 +114,12 @@ func (s *Service) handleInternalDispatch(w http.ResponseWriter, r *http.Request)
 	var failure dispatchFailure
 	switch {
 	case err == nil:
-		writeJSON(w, http.StatusOK, reply)
+		httpx.WriteJSON(w, http.StatusOK, reply)
 	case errors.As(err, &refusal):
-		writeJSON(w, refusal.status, map[string]string{"code": refusal.code, "error": refusal.msg})
+		httpx.WriteJSON(w, refusal.status, httpx.ErrorBody{Code: refusal.code, Error: refusal.msg})
 	case errors.As(err, &failure):
 		obs.ServerError(w, "agent dispatch failed", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "agent dispatch failed"})
+		httpx.Error(w, "agent dispatch failed", http.StatusInternalServerError)
 	default:
 		writeChatPostErr(w, err)
 	}

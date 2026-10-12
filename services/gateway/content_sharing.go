@@ -13,6 +13,7 @@ import (
 
 	"github.com/luckylhb90/bnbloc/internal/auth"
 	"github.com/luckylhb90/bnbloc/internal/contentshare"
+	"github.com/luckylhb90/bnbloc/internal/httpx"
 	"github.com/luckylhb90/bnbloc/internal/ids"
 	"github.com/luckylhb90/bnbloc/internal/notify"
 	"github.com/luckylhb90/bnbloc/internal/obs"
@@ -59,7 +60,7 @@ func (s *Service) registerContentSharing(mux *http.ServeMux) {
 func contentNote(w http.ResponseWriter, note string) (string, bool) {
 	note = strings.TrimSpace(note)
 	if utf8.RuneCountInString(note) > maxContentNoteRunes {
-		http.Error(w, "the note must be at most 500 characters", http.StatusBadRequest)
+		httpx.Error(w, "the note must be at most 500 characters", http.StatusBadRequest)
 		return "", false
 	}
 	return note, true
@@ -129,7 +130,7 @@ func (s *Service) handleShareContent(w http.ResponseWriter, r *http.Request) {
 	}
 	var req wire.ContentShareRequest
 	if err := json.Unmarshal(raw, &req); err != nil {
-		http.Error(w, "invalid json body", http.StatusBadRequest)
+		httpx.Error(w, "invalid json body", http.StatusBadRequest)
 		return
 	}
 	note, ok := contentNote(w, req.Note)
@@ -151,7 +152,7 @@ func (s *Service) handleShareContent(w http.ResponseWriter, r *http.Request) {
 		// (realtime's member-join step), until the author revokes it.
 		if err := contentshare.RecordRoomShare(ctx, s.ContentComponents, src, v, room, note, s.nowTime().UnixMilli()); err != nil {
 			obs.ServerError(w, "record room share failed", err)
-			http.Error(w, "record room share failed", http.StatusInternalServerError)
+			httpx.Error(w, "record room share failed", http.StatusInternalServerError)
 			return
 		}
 		out.Room = room
@@ -161,7 +162,7 @@ func (s *Service) handleShareContent(w http.ResponseWriter, r *http.Request) {
 		res, err := contentshare.Copy(ctx, s.ContentComponents, src, v, member, s.nowTime().UnixMilli())
 		if err != nil {
 			obs.ServerError(w, "share content component failed", err)
-			http.Error(w, "share content component failed", http.StatusInternalServerError)
+			httpx.Error(w, "share content component failed", http.StatusInternalServerError)
 			return
 		}
 		out.Shared = append(out.Shared, res)
@@ -191,7 +192,7 @@ func (s *Service) handleShareContent(w http.ResponseWriter, r *http.Request) {
 		// someone else is a new notification, a retried one is not.
 		URL: appLink(r, "library"), DedupKey: "share:" + src.ID + "@" + v.Version + ":" + strings.Join(reached, ","),
 	})
-	writeJSON(w, http.StatusOK, out)
+	httpx.WriteJSON(w, http.StatusOK, out)
 }
 
 // shareRecipients resolves a share's recipients: the named members and the
@@ -201,22 +202,22 @@ func (s *Service) shareRecipients(w http.ResponseWriter, r *http.Request, claims
 	candidates := append([]string(nil), req.Members...)
 	if room := strings.TrimSpace(req.RoomID); room != "" {
 		if m, ok := s.roomMember(claims.Subject, room); !ok || !m.IsHuman() {
-			http.Error(w, "you can share only with a room you are a member of", http.StatusForbidden)
+			httpx.Error(w, "you can share only with a room you are a member of", http.StatusForbidden)
 			return nil, nil, false
 		}
 		if !s.roomInTenant(claims, room) {
-			http.Error(w, "that room belongs to another organization", http.StatusForbidden)
+			httpx.Error(w, "that room belongs to another organization", http.StatusForbidden)
 			return nil, nil, false
 		}
 		if s.RoomMembers == nil {
 			obs.ServerError(w, "room members unavailable", nil)
-			http.Error(w, "room members unavailable", http.StatusServiceUnavailable)
+			httpx.Error(w, "room members unavailable", http.StatusServiceUnavailable)
 			return nil, nil, false
 		}
 		members, err := s.RoomMembers(tenant.NewContext(r.Context(), claims.Tenant), room)
 		if err != nil {
 			obs.ServerError(w, "list room members failed", err)
-			http.Error(w, "list room members failed", http.StatusBadGateway)
+			httpx.Error(w, "list room members failed", http.StatusBadGateway)
 			return nil, nil, false
 		}
 		candidates = append(candidates, members...)
@@ -242,11 +243,11 @@ func (s *Service) shareRecipients(w http.ResponseWriter, r *http.Request, claims
 		}
 	}
 	if len(recipients) > maxShareRecipients {
-		http.Error(w, fmt.Sprintf("a share reaches at most %d members", maxShareRecipients), http.StatusBadRequest)
+		httpx.Error(w, fmt.Sprintf("a share reaches at most %d members", maxShareRecipients), http.StatusBadRequest)
 		return nil, nil, false
 	}
 	if len(recipients) == 0 && len(skipped) == 0 {
-		http.Error(w, "name the members or the room to share with", http.StatusBadRequest)
+		httpx.Error(w, "name the members or the room to share with", http.StatusBadRequest)
 		return nil, nil, false
 	}
 	return recipients, skipped, true
@@ -270,7 +271,7 @@ func (s *Service) handleListContentShares(w http.ResponseWriter, r *http.Request
 	})
 	if err != nil {
 		obs.ServerError(w, "list shared copies failed", err)
-		http.Error(w, "list shared copies failed", http.StatusInternalServerError)
+		httpx.Error(w, "list shared copies failed", http.StatusInternalServerError)
 		return
 	}
 	out := make([]wire.ContentCopy, 0, len(copies))
@@ -280,14 +281,14 @@ func (s *Service) handleListContentShares(w http.ResponseWriter, r *http.Request
 	shares, err := s.ContentComponents.ListContentRoomShares(ctx, store.ContentRoomShareQuery{ComponentID: src.ID})
 	if err != nil {
 		obs.ServerError(w, "list room shares failed", err)
-		http.Error(w, "list room shares failed", http.StatusInternalServerError)
+		httpx.Error(w, "list room shares failed", http.StatusInternalServerError)
 		return
 	}
 	rooms := make([]wire.ContentRoomShare, 0, len(shares))
 	for _, sh := range shares {
 		rooms = append(rooms, wire.ContentRoomShare{RoomID: sh.RoomID, Version: sh.Version, Note: sh.Note, CreatedAtMs: sh.CreatedAtMs, UpdatedAtMs: sh.UpdatedAtMs})
 	}
-	writeJSON(w, http.StatusOK, wire.ContentShares{Copies: out, Rooms: rooms})
+	httpx.WriteJSON(w, http.StatusOK, wire.ContentShares{Copies: out, Rooms: rooms})
 }
 
 // handleRevokeRoomShare ends the author's room share: members who join the
@@ -308,11 +309,11 @@ func (s *Service) handleRevokeRoomShare(w http.ResponseWriter, r *http.Request) 
 	removed, err := s.ContentComponents.DeleteContentRoomShare(ctx, room, src.ID)
 	if err != nil {
 		obs.ServerError(w, "revoke room share failed", err)
-		http.Error(w, "revoke room share failed", http.StatusInternalServerError)
+		httpx.Error(w, "revoke room share failed", http.StatusInternalServerError)
 		return
 	}
 	if !removed {
-		http.Error(w, "this component is not shared with that room", http.StatusNotFound)
+		httpx.Error(w, "this component is not shared with that room", http.StatusNotFound)
 		return
 	}
 	s.auditContent(ctx, "unshare", claims.Subject, claims.Tenant, src, src.LatestVersion,
@@ -352,17 +353,17 @@ func (s *Service) handleUpdateContentCopy(w http.ResponseWriter, r *http.Request
 		return
 	}
 	if cp.Scope != store.ContentScopeShared {
-		http.Error(w, "only a copy someone shared with you is updated from its author", http.StatusConflict)
+		httpx.Error(w, "only a copy someone shared with you is updated from its author", http.StatusConflict)
 		return
 	}
 	src, err := s.sourceOfCopy(ctx, cp)
 	if err != nil {
 		obs.ServerError(w, "load the author's component failed", err)
-		http.Error(w, "load the author's component failed", http.StatusInternalServerError)
+		httpx.Error(w, "load the author's component failed", http.StatusInternalServerError)
 		return
 	}
 	if src == nil {
-		http.Error(w, "its author no longer has it: your copy stays as it is", http.StatusConflict)
+		httpx.Error(w, "its author no longer has it: your copy stays as it is", http.StatusConflict)
 		return
 	}
 	if cmp, err := semver.Compare(src.LatestVersion, cp.LatestVersion); err != nil || cmp <= 0 {
@@ -378,12 +379,12 @@ func (s *Service) handleUpdateContentCopy(w http.ResponseWriter, r *http.Request
 	next := cp
 	if err := contentshare.ListingFields(&next, v, now); err != nil {
 		obs.ServerError(w, "decode content manifest failed", err)
-		http.Error(w, "decode content manifest failed", http.StatusInternalServerError)
+		httpx.Error(w, "decode content manifest failed", http.StatusInternalServerError)
 		return
 	}
 	switch err := s.ContentComponents.AddContentComponentVersion(ctx, next, cp.LatestVersion, contentshare.CloneVersion(v, now)); {
 	case errors.Is(err, store.ErrContentVersionConflict):
-		http.Error(w, "the copy changed while updating: reload and try again", http.StatusConflict)
+		httpx.Error(w, "the copy changed while updating: reload and try again", http.StatusConflict)
 		return
 	case err != nil:
 		contentStoreErr(w, "update shared copy failed", err)
@@ -422,7 +423,7 @@ func (s *Service) handlePublishContent(w http.ResponseWriter, r *http.Request) {
 	}
 	var in wire.ContentPublishInput
 	if err := json.Unmarshal(raw, &in); err != nil {
-		http.Error(w, "invalid json body", http.StatusBadRequest)
+		httpx.Error(w, "invalid json body", http.StatusBadRequest)
 		return
 	}
 	note, ok := contentNote(w, in.Note)
@@ -435,9 +436,9 @@ func (s *Service) handlePublishContent(w http.ResponseWriter, r *http.Request) {
 	case wire.ContentScopePersonal:
 		s.withdrawOrgPublication(w, r, claims, c)
 	case wire.ContentScopePlatform:
-		http.Error(w, errPlatformPublish, http.StatusForbidden)
+		httpx.Error(w, errPlatformPublish, http.StatusForbidden)
 	default:
-		http.Error(w, "scope must be personal, org or platform", http.StatusBadRequest)
+		httpx.Error(w, "scope must be personal, org or platform", http.StatusBadRequest)
 	}
 }
 
@@ -463,26 +464,26 @@ func (s *Service) requestOrgPublication(w http.ResponseWriter, r *http.Request, 
 	org, err := s.orgPublication(ctx, c)
 	if err != nil {
 		obs.ServerError(w, "load organization publication failed", err)
-		http.Error(w, "load organization publication failed", http.StatusInternalServerError)
+		httpx.Error(w, "load organization publication failed", http.StatusInternalServerError)
 		return
 	}
 	if org != nil && org.Status == store.ContentStatusActive && org.LatestVersion == v.Version {
-		http.Error(w, fmt.Sprintf("version %s is already published to your organization", v.Version), http.StatusConflict)
+		httpx.Error(w, fmt.Sprintf("version %s is already published to your organization", v.Version), http.StatusConflict)
 		return
 	}
 	switch holder, err := s.orgNameHolder(ctx, c); {
 	case err != nil:
 		obs.ServerError(w, "check organization names failed", err)
-		http.Error(w, "check organization names failed", http.StatusInternalServerError)
+		httpx.Error(w, "check organization names failed", http.StatusInternalServerError)
 		return
 	case holder != nil:
-		http.Error(w, orgNameTaken(*holder, "rename yours: save it under a new name, and ask again"), http.StatusConflict)
+		httpx.Error(w, orgNameTaken(*holder, "rename yours: save it under a new name, and ask again"), http.StatusConflict)
 		return
 	}
 	view, err := s.openPublishRequest(ctx, r, actor, c, v.Version, note, org, true)
 	if err != nil {
 		obs.ServerError(w, "create publish request failed", err)
-		http.Error(w, "create publish request failed", http.StatusInternalServerError)
+		httpx.Error(w, "create publish request failed", http.StatusInternalServerError)
 		return
 	}
 	approved := view.ApprovedVersion
@@ -490,7 +491,7 @@ func (s *Service) requestOrgPublication(w http.ResponseWriter, r *http.Request, 
 	if approved != "" {
 		msg += " Members keep using version " + approved + " until then."
 	}
-	writeJSON(w, http.StatusCreated, wire.ContentPublishReply{Scope: wire.ContentScopePersonal, Request: &view, Note: msg})
+	httpx.WriteJSON(w, http.StatusCreated, wire.ContentPublishReply{Scope: wire.ContentScopePersonal, Request: &view, Note: msg})
 }
 
 // openPublishRequest stores a pending request for version of the author's
@@ -609,7 +610,7 @@ func (s *Service) withdrawOrgPublication(w http.ResponseWriter, r *http.Request,
 	pending, err := s.ContentComponents.ListContentRequests(ctx, store.ContentRequestQuery{ComponentID: c.ID, Status: store.ContentRequestPending})
 	if err != nil {
 		obs.ServerError(w, "list publish requests failed", err)
-		http.Error(w, "list publish requests failed", http.StatusInternalServerError)
+		httpx.Error(w, "list publish requests failed", http.StatusInternalServerError)
 		return
 	}
 	for _, p := range pending {
@@ -617,14 +618,14 @@ func (s *Service) withdrawOrgPublication(w http.ResponseWriter, r *http.Request,
 			Status: store.ContentRequestWithdrawn, By: claims.Subject, AtMs: now})
 		if err != nil && !errors.Is(err, store.ErrContentRequestDecided) {
 			obs.ServerError(w, "withdraw publish request failed", err)
-			http.Error(w, "withdraw publish request failed", http.StatusInternalServerError)
+			httpx.Error(w, "withdraw publish request failed", http.StatusInternalServerError)
 			return
 		}
 	}
 	org, err := s.orgPublication(ctx, c)
 	if err != nil {
 		obs.ServerError(w, "load organization publication failed", err)
-		http.Error(w, "load organization publication failed", http.StatusInternalServerError)
+		httpx.Error(w, "load organization publication failed", http.StatusInternalServerError)
 		return
 	}
 	if org != nil && org.Status != store.ContentStatusRetired {
@@ -635,7 +636,7 @@ func (s *Service) withdrawOrgPublication(w http.ResponseWriter, r *http.Request,
 		s.auditContent(ctx, "unpublish", claims.Subject, claims.Tenant, *org, org.LatestVersion,
 			contentshare.Label(*org)+" taken out of the organization by its author "+claims.Subject)
 	}
-	writeJSON(w, http.StatusOK, wire.ContentPublishReply{Scope: wire.ContentScopePersonal, Note: "It is personal: only its author uses it (copies shared with members stay theirs)."})
+	httpx.WriteJSON(w, http.StatusOK, wire.ContentPublishReply{Scope: wire.ContentScopePersonal, Note: "It is personal: only its author uses it (copies shared with members stay theirs)."})
 }
 
 // publishRequestView is a request on the wire.

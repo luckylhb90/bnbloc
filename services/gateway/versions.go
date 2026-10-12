@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/luckylhb90/bnbloc/internal/buildinfo"
+	"github.com/luckylhb90/bnbloc/internal/httpx"
 	"github.com/luckylhb90/bnbloc/internal/wire"
 )
 
@@ -44,7 +45,7 @@ func (s *Service) handlePlatformVersions(w http.ResponseWriter, r *http.Request)
 	if !s.requireSuperAdmin(w, r) {
 		return
 	}
-	writeJSON(w, http.StatusOK, s.deploymentVersions(r.Context()))
+	httpx.WriteJSON(w, http.StatusOK, s.deploymentVersions(r.Context()))
 }
 
 func (s *Service) deploymentVersions(ctx context.Context) wire.DeploymentVersions {

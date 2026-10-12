@@ -2,7 +2,6 @@ package gateway
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -14,6 +13,7 @@ import (
 	"github.com/luckylhb90/bnbloc/internal/contentpkg"
 	"github.com/luckylhb90/bnbloc/internal/extpipe"
 	"github.com/luckylhb90/bnbloc/internal/extreg"
+	"github.com/luckylhb90/bnbloc/internal/httpx"
 	"github.com/luckylhb90/bnbloc/internal/mcptool"
 	"github.com/luckylhb90/bnbloc/internal/obs"
 	"github.com/luckylhb90/bnbloc/internal/rbac"
@@ -63,7 +63,7 @@ func (s *Service) saveContentOptions(w http.ResponseWriter, r *http.Request, cla
 	cands, err := s.mcpCandidates(r.Context(), claims)
 	if err != nil {
 		obs.ServerError(w, "load MCP tools failed", err)
-		http.Error(w, "load MCP tools failed", http.StatusInternalServerError)
+		httpx.Error(w, "load MCP tools failed", http.StatusInternalServerError)
 		return contentpkg.Options{}, false
 	}
 	return contentpkg.Options{MCPTool: func(name string) (contentpkg.MCPToolInfo, bool) {
@@ -159,11 +159,11 @@ func (s *Service) mcpCatalog(ctx context.Context, claims auth.Claims, rec extpip
 func (s *Service) orgAdmin(w http.ResponseWriter, r *http.Request) (auth.Claims, bool) {
 	claims, err := s.authenticate(r)
 	if err != nil {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		httpx.Error(w, "unauthorized", http.StatusUnauthorized)
 		return auth.Claims{}, false
 	}
 	if !rbac.Can(claims.Role, rbac.PermManageOrg) {
-		http.Error(w, "insufficient org role", http.StatusForbidden)
+		httpx.Error(w, "insufficient org role", http.StatusForbidden)
 		return auth.Claims{}, false
 	}
 	return claims, true
@@ -176,21 +176,21 @@ func (s *Service) orgMCPRecord(w http.ResponseWriter, r *http.Request, claims au
 	rec, ok, err := s.findComponentRecord(r.Context(), extreg.KindMCP, name)
 	if err != nil {
 		obs.ServerError(w, "load MCP tools failed", err)
-		http.Error(w, "load MCP tools failed", http.StatusInternalServerError)
+		httpx.Error(w, "load MCP tools failed", http.StatusInternalServerError)
 		return extpipe.Record{}, extpipe.PackageConfig{}, false
 	}
 	if !ok || !extpipe.MemberVisibility(viewerOf(claims), extpipe.GateForRecord(rec), 0).Visible {
-		http.Error(w, "MCP tool not found", http.StatusNotFound)
+		httpx.Error(w, "MCP tool not found", http.StatusNotFound)
 		return extpipe.Record{}, extpipe.PackageConfig{}, false
 	}
 	cfg, err := extpipe.DecodeConfig(rec)
 	if err != nil {
 		obs.ServerError(w, "load MCP tools failed", err)
-		http.Error(w, "load MCP tools failed", http.StatusInternalServerError)
+		httpx.Error(w, "load MCP tools failed", http.StatusInternalServerError)
 		return extpipe.Record{}, extpipe.PackageConfig{}, false
 	}
 	if cfg.MCP == nil || cfg.MCP.Credentials != pkgmeta.MCPCredentialsOrg {
-		http.Error(w, "this MCP tool takes no organization connector", http.StatusBadRequest)
+		httpx.Error(w, "this MCP tool takes no organization connector", http.StatusBadRequest)
 		return extpipe.Record{}, extpipe.PackageConfig{}, false
 	}
 	return rec, cfg, true
@@ -207,7 +207,7 @@ func (s *Service) handleListMCPConnectors(w http.ResponseWriter, r *http.Request
 	recs, err := s.corePipeline().List(r.Context(), extreg.KindMCP)
 	if err != nil {
 		obs.ServerError(w, "load MCP tools failed", err)
-		http.Error(w, "load MCP tools failed", http.StatusInternalServerError)
+		httpx.Error(w, "load MCP tools failed", http.StatusInternalServerError)
 		return
 	}
 	connectors := s.mcpConnectors()
@@ -219,7 +219,7 @@ func (s *Service) handleListMCPConnectors(w http.ResponseWriter, r *http.Request
 		cfg, err := extpipe.DecodeConfig(rec)
 		if err != nil {
 			obs.ServerError(w, "load MCP tools failed", err)
-			http.Error(w, "load MCP tools failed", http.StatusInternalServerError)
+			httpx.Error(w, "load MCP tools failed", http.StatusInternalServerError)
 			return
 		}
 		if cfg.MCP == nil || cfg.MCP.Credentials != pkgmeta.MCPCredentialsOrg {
@@ -230,7 +230,7 @@ func (s *Service) handleListMCPConnectors(w http.ResponseWriter, r *http.Request
 			c, _, err := connectors.Get(r.Context(), claims.Tenant, rec.Name)
 			if err != nil {
 				obs.ServerError(w, "read MCP connector failed", err)
-				http.Error(w, "read MCP connector failed", http.StatusInternalServerError)
+				httpx.Error(w, "read MCP connector failed", http.StatusInternalServerError)
 				return
 			}
 			stored = c
@@ -251,7 +251,7 @@ func (s *Service) handleListMCPConnectors(w http.ResponseWriter, r *http.Request
 		reply.Connectors = append(reply.Connectors, view)
 	}
 	sort.Slice(reply.Connectors, func(i, j int) bool { return reply.Connectors[i].Name < reply.Connectors[j].Name })
-	writeJSON(w, http.StatusOK, reply)
+	httpx.WriteJSON(w, http.StatusOK, reply)
 }
 
 // handlePutMCPConnector answers PUT /v1/tenant/mcp-connectors/{name}:
@@ -267,28 +267,27 @@ func (s *Service) handlePutMCPConnector(w http.ResponseWriter, r *http.Request) 
 	}
 	connectors := s.mcpConnectors()
 	if !connectors.Available() {
-		http.Error(w, mcptool.ErrConnectorsOff.Error(), http.StatusConflict)
+		httpx.Error(w, mcptool.ErrConnectorsOff.Error(), http.StatusConflict)
 		return
 	}
 	var req wire.MCPConnectorUpdate
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10)).Decode(&req); err != nil {
-		http.Error(w, "invalid json body", http.StatusBadRequest)
+	if !httpx.DecodeJSON(w, r, 64<<10, &req) {
 		return
 	}
 	current, _, err := connectors.Get(r.Context(), claims.Tenant, rec.Name)
 	if err != nil {
 		obs.ServerError(w, "read MCP connector failed", err)
-		http.Error(w, "read MCP connector failed", http.StatusInternalServerError)
+		httpx.Error(w, "read MCP connector failed", http.StatusInternalServerError)
 		return
 	}
 	next, err := mcptool.MergeValues(cfg.MCP.Env, current.Values, req.Values)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		httpx.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 	if err := connectors.Put(r.Context(), claims.Tenant, rec.Name, next, claims.Subject); err != nil {
 		obs.ServerError(w, "save MCP connector failed", err)
-		http.Error(w, "save MCP connector failed", http.StatusInternalServerError)
+		httpx.Error(w, "save MCP connector failed", http.StatusInternalServerError)
 		return
 	}
 	s.auditMCPConnector(r.Context(), rec, claims, "connector-set")
@@ -307,7 +306,7 @@ func (s *Service) handleDeleteMCPConnector(w http.ResponseWriter, r *http.Reques
 	}
 	if err := s.mcpConnectors().Delete(r.Context(), claims.Tenant, rec.Name); err != nil {
 		obs.ServerError(w, "delete MCP connector failed", err)
-		http.Error(w, "delete MCP connector failed", http.StatusInternalServerError)
+		httpx.Error(w, "delete MCP connector failed", http.StatusInternalServerError)
 		return
 	}
 	s.auditMCPConnector(r.Context(), rec, claims, "connector-clear")

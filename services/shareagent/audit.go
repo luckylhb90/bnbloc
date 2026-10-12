@@ -3,6 +3,8 @@ package shareagenthttp
 import (
 	"net/http"
 	"strconv"
+
+	"github.com/luckylhb90/bnbloc/internal/httpx"
 )
 
 // auditRecordView is the JSON projection of one org-wide audit record. It omits
@@ -52,5 +54,5 @@ func (s *Service) handleTenantAudit(w http.ResponseWriter, r *http.Request) {
 			AtMs:        rec.AtMs,
 		})
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"records": views})
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"records": views})
 }

@@ -20,6 +20,7 @@ import (
 	"github.com/luckylhb90/bnbloc/internal/auth"
 	"github.com/luckylhb90/bnbloc/internal/coreset"
 	"github.com/luckylhb90/bnbloc/internal/extpipe"
+	"github.com/luckylhb90/bnbloc/internal/httpx"
 	"github.com/luckylhb90/bnbloc/internal/notify"
 	"github.com/luckylhb90/bnbloc/internal/obs"
 	"github.com/luckylhb90/bnbloc/internal/orgsync"
@@ -318,13 +319,13 @@ func (s *Service) defaultCore() *coreset.Entry {
 func (s *Service) handleCores(w http.ResponseWriter, r *http.Request) {
 	claims, err := s.authenticate(r)
 	if err != nil {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		httpx.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
 	view, err := s.loadMemberComponents(r.Context(), claims)
 	if err != nil {
 		obs.ServerError(w, "load components failed", err)
-		http.Error(w, "load components failed", http.StatusInternalServerError)
+		httpx.Error(w, "load components failed", http.StatusInternalServerError)
 		return
 	}
 	// A core is available when its endpoint resolves. Re-discover first so a
@@ -365,7 +366,7 @@ func (s *Service) handleCores(w http.ResponseWriter, r *http.Request) {
 			component, err := componentFromExtRecord(rec)
 			if err != nil {
 				obs.ServerError(w, "load components failed", err)
-				http.Error(w, "load components failed", http.StatusInternalServerError)
+				httpx.Error(w, "load components failed", http.StatusInternalServerError)
 				return
 			}
 			info.Runtime = string(component.Runtime)
@@ -374,7 +375,7 @@ func (s *Service) handleCores(w http.ResponseWriter, r *http.Request) {
 		}
 		out = append(out, info)
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"cores": out})
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"cores": out})
 }
 
 // allowedOrigin reports whether an Origin header may access the API. The
@@ -453,31 +454,29 @@ func (s *Service) handleLogin(w http.ResponseWriter, r *http.Request) {
 	// claimed identity would let anyone lock a victim out), so the guess
 	// throttle is keyed on the client IP.
 	if !s.guessAllow("ip:" + s.clientIP(r)) {
-		http.Error(w, "rate limit exceeded", http.StatusTooManyRequests)
+		httpx.Error(w, "rate limit exceeded", http.StatusTooManyRequests)
 		return
 	}
 	var body loginBody
-	r.Body = http.MaxBytesReader(w, r.Body, maxAuthBodyBytes)
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		http.Error(w, "invalid json body", http.StatusBadRequest)
+	if !httpx.DecodeJSON(w, r, maxAuthBodyBytes, &body) {
 		return
 	}
 	identity, err := s.Verifier.Verify(body.IDPToken)
 	if err != nil {
-		http.Error(w, "invalid idp token", http.StatusUnauthorized)
+		httpx.Error(w, "invalid idp token", http.StatusUnauthorized)
 		return
 	}
 	grant, err := s.issueSession(r.Context(), identity, originFor(r, body.Client, clientWeb))
 	if errors.Is(err, errTenantSuspended) {
-		http.Error(w, "tenant suspended", http.StatusForbidden)
+		httpx.Error(w, "tenant suspended", http.StatusForbidden)
 		return
 	}
 	if err != nil {
 		obs.ServerError(w, "session issue failed", err)
-		http.Error(w, "session issue failed", http.StatusInternalServerError)
+		httpx.Error(w, "session issue failed", http.StatusInternalServerError)
 		return
 	}
-	writeJSON(w, http.StatusOK, grant)
+	httpx.WriteJSON(w, http.StatusOK, grant)
 }
 
 type switchTenantBody struct {
@@ -496,28 +495,26 @@ type switchTenantBody struct {
 func (s *Service) handleSwitchTenant(w http.ResponseWriter, r *http.Request) {
 	claims, err := s.authenticate(r)
 	if err != nil {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		httpx.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
 	var body switchTenantBody
-	r.Body = http.MaxBytesReader(w, r.Body, maxAuthBodyBytes)
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		http.Error(w, "invalid json body", http.StatusBadRequest)
+	if !httpx.DecodeJSON(w, r, maxAuthBodyBytes, &body) {
 		return
 	}
 	target := strings.TrimSpace(body.TenantID)
 	if target == "" {
-		http.Error(w, "tenantId required", http.StatusBadRequest)
+		httpx.Error(w, "tenantId required", http.StatusBadRequest)
 		return
 	}
 	scope, err := s.switchScope(claims, target)
 	switch {
 	case errors.Is(err, errNotTenantMember), errors.Is(err, errTenantSuspended):
-		http.Error(w, err.Error(), http.StatusForbidden)
+		httpx.Error(w, err.Error(), http.StatusForbidden)
 		return
 	case err != nil:
 		obs.ServerError(w, "tenant switch failed", err)
-		http.Error(w, err.Error(), http.StatusServiceUnavailable)
+		httpx.Error(w, err.Error(), http.StatusServiceUnavailable)
 		return
 	}
 	now := s.nowTime()
@@ -528,18 +525,19 @@ func (s *Service) handleSwitchTenant(w http.ResponseWriter, r *http.Request) {
 		})
 		switch {
 		case errors.Is(err, store.ErrRefreshInvalid):
-			http.Error(w, "the sign-in has ended", http.StatusUnauthorized)
+			httpx.Error(w, "the sign-in has ended", http.StatusUnauthorized)
 			return
 		case err != nil:
 			obs.ServerError(w, "persist tenant switch failed", err)
-			http.Error(w, "persist tenant switch failed", http.StatusInternalServerError)
+			httpx.Error(w, "persist tenant switch failed", http.StatusInternalServerError)
 			return
 		}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{
 		"sessionToken": mintSession(s.Signer, claims.Subject, claims.Family, scope, now.Add(s.SessionTTL)),
 		"subject":      claims.Subject, "tenant": scope.Tenant, "role": scope.Role, "rooms": scope.Rooms,
 	})
+
 }
 
 // handleProxy verifies the caller, enforces room scope, org RBAC, and rate
@@ -549,12 +547,12 @@ func (s *Service) handleSwitchTenant(w http.ResponseWriter, r *http.Request) {
 func (s *Service) handleProxy(w http.ResponseWriter, r *http.Request) {
 	p, err := parseAPIPath(r)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		httpx.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 	claims, ok := s.proxyClaims(r, p)
 	if !ok {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		httpx.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
 	// Enforce room scope: a token may only reach rooms it is a member of.
@@ -574,7 +572,7 @@ func (s *Service) handleProxy(w http.ResponseWriter, r *http.Request) {
 		// membership lookup instead of forcing re-login (the stale-scope desync).
 		// The fallback only fires on the miss path, so the common case stays free.
 		if !isJoin && !isAdminRevoke && !s.roomReachable(claims, p.RoomID) {
-			http.Error(w, "room scope not authorized", http.StatusForbidden)
+			httpx.Error(w, "room scope not authorized", http.StatusForbidden)
 			return
 		}
 	}
@@ -593,7 +591,7 @@ func (s *Service) handleProxy(w http.ResponseWriter, r *http.Request) {
 	} else if room := p.searchRoom(r); room != "" {
 		var ok bool
 		if claims, ok = s.roomClaims(claims, room); !ok {
-			http.Error(w, "room scope not authorized", http.StatusForbidden)
+			httpx.Error(w, "room scope not authorized", http.StatusForbidden)
 			return
 		}
 	}
@@ -620,21 +618,21 @@ func (s *Service) edgeGate(w http.ResponseWriter, r *http.Request, p apiPath, cl
 	// at the edge before it reaches a backend. Room-role checks
 	// (owner/admin/member) remain the room/shareagent services' job.
 	if perm := requiredPermission(r.Method, p); perm != rbac.PermRead && !rbac.Can(claims.Role, perm) {
-		http.Error(w, "insufficient org role", http.StatusForbidden)
+		httpx.Error(w, "insufficient org role", http.StatusForbidden)
 		return false
 	}
 	// Invite redemption is authenticated, so the code-guessing throttle is keyed
 	// on the subject: one account cannot brute-force invite codes, and users
 	// behind a shared proxy/NAT never share a bucket.
 	if isInviteRedeem(r.Method, p) && !s.guessAllow("subject:"+claims.Subject) {
-		http.Error(w, "rate limit exceeded", http.StatusTooManyRequests)
+		httpx.Error(w, "rate limit exceeded", http.StatusTooManyRequests)
 		return false
 	}
 	// Throttle cost-bearing writes (chat, borrow, room creation) per subject
 	// so a client cannot spam messages or drive unbounded agent turns.
 	// Reads/SSE are never limited.
 	if rateLimited(r.Method, p) && !s.rateAllow(claims.Subject) {
-		http.Error(w, "rate limit exceeded", http.StatusTooManyRequests)
+		httpx.Error(w, "rate limit exceeded", http.StatusTooManyRequests)
 		return false
 	}
 	return true
@@ -743,13 +741,13 @@ func (s *Service) trustedProxy(ip string) bool {
 func (s *Service) proxyAs(w http.ResponseWriter, r *http.Request, p apiPath, subject, tenantID string) {
 	target := s.route(p)
 	if target == "" {
-		http.Error(w, "no route", http.StatusNotFound)
+		httpx.Error(w, "no route", http.StatusNotFound)
 		return
 	}
 	upstream, err := url.Parse(target)
 	if err != nil {
 		obs.ServerError(w, "bad upstream", err)
-		http.Error(w, "bad upstream", http.StatusInternalServerError)
+		httpx.Error(w, "bad upstream", http.StatusInternalServerError)
 		return
 	}
 	r.Header.Del("X-Bnbloc-User")

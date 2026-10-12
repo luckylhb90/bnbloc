@@ -10,6 +10,7 @@ import (
 
 	"github.com/luckylhb90/bnbloc/core/pkgmeta"
 	"github.com/luckylhb90/bnbloc/internal/digest"
+	"github.com/luckylhb90/bnbloc/internal/httpx"
 	"github.com/luckylhb90/bnbloc/internal/obs"
 )
 
@@ -53,7 +54,7 @@ func (s *Service) handleBuildMCPPackage(w http.ResponseWriter, r *http.Request) 
 	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 256*1024))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&draft); err != nil {
-		http.Error(w, "invalid json body: "+err.Error(), http.StatusBadRequest)
+		httpx.Error(w, "invalid json body: "+err.Error(), http.StatusBadRequest)
 		return
 	}
 	base := publicBaseURL(r)
@@ -63,7 +64,7 @@ func (s *Service) handleBuildMCPPackage(w http.ResponseWriter, r *http.Request) 
 		key := strings.TrimSpace(staged.Key)
 		sha, ok := digest.ParseKey(key)
 		if !ok {
-			http.Error(w, fmt.Sprintf("artifacts.%s.key must be the key the artifact upload answered (%s<hex>)", platform, digest.KeyPrefix), http.StatusBadRequest)
+			httpx.Error(w, fmt.Sprintf("artifacts.%s.key must be the key the artifact upload answered (%s<hex>)", platform, digest.KeyPrefix), http.StatusBadRequest)
 			return
 		}
 		platforms = append(platforms, platform)
@@ -76,31 +77,30 @@ func (s *Service) handleBuildMCPPackage(w http.ResponseWriter, r *http.Request) 
 		Permissions: draft.Permissions, MCP: draft.MCP,
 	}, platforms)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		httpx.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 	pkg, err := pkgmeta.AssembleMCP(prepared, pins)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		httpx.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 	if len(pkg.Artifacts) > 0 {
 		if strings.TrimSpace(s.Backends.Realtime) == "" {
-			obs.ServerError(w, "artifact store not configured", nil)
-			http.Error(w, "artifact store not configured", http.StatusServiceUnavailable)
+			httpx.Unavailable(w, "artifact store")
 			return
 		}
 		// The staged bytes must be there and match their key, as the install
 		// will check: a package pinning a missing binary is refused now.
 		if err := s.probeUploadedArtifacts(r.Context(), pkg, base); err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
+			httpx.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
 	}
 	body, err := json.MarshalIndent(pkg, "", "  ")
 	if err != nil {
 		obs.ServerError(w, "encode mcp package failed", err)
-		http.Error(w, "encode mcp package failed", http.StatusInternalServerError)
+		httpx.Error(w, "encode mcp package failed", http.StatusInternalServerError)
 		return
 	}
 	var buf bytes.Buffer

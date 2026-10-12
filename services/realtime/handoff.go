@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/luckylhb90/bnbloc/internal/httpx"
 	"github.com/luckylhb90/bnbloc/internal/membership"
 	"github.com/luckylhb90/bnbloc/internal/obs"
 	"github.com/luckylhb90/bnbloc/internal/realtime"
@@ -58,7 +59,7 @@ func (s *Service) handleInternalFeed(w http.ResponseWriter, r *http.Request) {
 	msgs, err := s.Chat.RoomFeed(r.Context(), roomID, parseInt(r.URL.Query().Get("after")), limit)
 	if err != nil {
 		obs.ServerError(w, "feed read failed", err)
-		http.Error(w, "feed read failed", http.StatusInternalServerError)
+		httpx.Error(w, "feed read failed", http.StatusInternalServerError)
 		return
 	}
 	writeFeedPage(w, msgs)
@@ -89,27 +90,19 @@ func (s *Service) handleInternalImport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if s.Chat == nil {
-		obs.ServerError(w, "history store not configured", nil)
-		http.Error(w, "history store not configured", http.StatusServiceUnavailable)
+		httpx.Unavailable(w, "history store")
 		return
 	}
-	r.Body = http.MaxBytesReader(w, r.Body, wire.MaxImportBatchBytes)
 	var batch wire.RoomImportBatch
-	if err := json.NewDecoder(r.Body).Decode(&batch); err != nil {
-		var tooLarge *http.MaxBytesError
-		if errors.As(err, &tooLarge) {
-			http.Error(w, "import batch too large", http.StatusRequestEntityTooLarge)
-			return
-		}
-		http.Error(w, "invalid json body", http.StatusBadRequest)
+	if !httpx.DecodeJSON(w, r, wire.MaxImportBatchBytes, &batch) {
 		return
 	}
 	if len(batch.Messages) > wire.MaxImportBatchMessages {
-		http.Error(w, fmt.Sprintf("too many messages in one batch (max %d)", wire.MaxImportBatchMessages), http.StatusRequestEntityTooLarge)
+		httpx.Error(w, fmt.Sprintf("too many messages in one batch (max %d)", wire.MaxImportBatchMessages), http.StatusRequestEntityTooLarge)
 		return
 	}
 	if strings.TrimSpace(batch.FromRoomID) == "" {
-		http.Error(w, "fromRoomId is required", http.StatusBadRequest)
+		httpx.Error(w, "fromRoomId is required", http.StatusBadRequest)
 		return
 	}
 	importedAt := batch.ImportedAtMs
@@ -124,7 +117,7 @@ func (s *Service) handleInternalImport(w http.ResponseWriter, r *http.Request) {
 			if errors.Is(err, errUnknownChannel) {
 				status = http.StatusNotFound
 			}
-			http.Error(w, fmt.Sprintf("message %d: %v", i, err), status)
+			httpx.WriteStatus(w, status, fmt.Sprintf("message %d: %v", i, err), err)
 			return
 		}
 		rows = append(rows, row)
@@ -136,7 +129,7 @@ func (s *Service) handleInternalImport(w http.ResponseWriter, r *http.Request) {
 			realtime.Durable{Journal: s.Chat, Row: row})
 		if err != nil {
 			obs.ServerError(w, "import persistence failed", err)
-			http.Error(w, "import persistence failed", http.StatusInternalServerError)
+			httpx.Error(w, "import persistence failed", http.StatusInternalServerError)
 			return
 		}
 		reply.Imported++
@@ -208,7 +201,7 @@ func (s *Service) importRow(r *http.Request, roomID string, batch wire.RoomImpor
 func (s *Service) handoffRoom(w http.ResponseWriter, r *http.Request) (string, bool) {
 	roomID, err := roomctx.Normalize(r.PathValue("roomId"))
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		httpx.Error(w, err.Error(), http.StatusBadRequest)
 		return "", false
 	}
 	userID := strings.TrimSpace(r.Header.Get("X-Bnbloc-User"))

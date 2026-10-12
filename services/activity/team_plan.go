@@ -9,6 +9,7 @@ import (
 
 	"github.com/luckylhb90/bnbloc/internal/contentpkg"
 	"github.com/luckylhb90/bnbloc/internal/expertteam"
+	"github.com/luckylhb90/bnbloc/internal/httpx"
 	"github.com/luckylhb90/bnbloc/internal/obs"
 	"github.com/luckylhb90/bnbloc/internal/roomctx"
 	"github.com/luckylhb90/bnbloc/internal/store"
@@ -36,17 +37,16 @@ const costSampleRuns = 20
 func (s *Service) handleTeamPlan(w http.ResponseWriter, r *http.Request) {
 	caller := strings.TrimSpace(r.Header.Get("X-Bnbloc-User"))
 	if caller == "" {
-		writeErr(w, http.StatusUnauthorized, "missing authenticated subject")
+		httpx.Error(w, "missing authenticated subject", http.StatusUnauthorized)
 		return
 	}
 	if s.BridgeJobs == nil || s.Rooms == nil || s.Runs == nil {
-		obs.ServerError(w, "team plan not configured", nil)
-		writeErr(w, http.StatusNotImplemented, "team plan not configured")
+		httpx.Unavailable(w, "team plan")
 		return
 	}
 	roomID, err := roomctx.Normalize(r.PathValue("roomId"))
 	if err != nil {
-		writeErr(w, http.StatusBadRequest, err.Error())
+		httpx.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 	ctx := r.Context()
@@ -54,16 +54,16 @@ func (s *Service) handleTeamPlan(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var in wire.TeamPlanRequest
-	if !decode(w, r, &in) {
+	if !httpx.DecodeJSON(w, r, maxBodyBytes, &in) {
 		return
 	}
 	if len(in.Members) == 0 || len(in.Members) > wire.MaxDispatchFanOut {
-		writeErr(w, http.StatusBadRequest, "a team plan names 1 to 8 roles")
+		httpx.Error(w, "a team plan names 1 to 8 roles", http.StatusBadRequest)
 		return
 	}
 	for _, m := range in.Members {
 		if !contentpkg.ValidName(m.Role) {
-			writeErr(w, http.StatusBadRequest, "invalid role "+m.Role)
+			httpx.Error(w, "invalid role "+m.Role, http.StatusBadRequest)
 			return
 		}
 	}
@@ -78,7 +78,7 @@ func (s *Service) handleTeamPlan(w http.ResponseWriter, r *http.Request) {
 		lead = wire.PlanAgent{OwnerID: job.OwnerUserID, Core: job.Core, Provider: job.Provider}
 	} else {
 		if in.Lead == nil || strings.TrimSpace(in.Lead.OwnerID) == "" || strings.TrimSpace(in.Lead.Provider) == "" {
-			writeErr(w, http.StatusBadRequest, "lead ownerId and provider are required")
+			httpx.Error(w, "lead ownerId and provider are required", http.StatusBadRequest)
 			return
 		}
 		lead = wire.PlanAgent{OwnerID: strings.TrimSpace(in.Lead.OwnerID), Core: strings.TrimSpace(in.Lead.Core), Provider: strings.TrimSpace(in.Lead.Provider)}
@@ -122,7 +122,7 @@ func (s *Service) handleTeamPlan(w http.ResponseWriter, r *http.Request) {
 	}
 	if reply.Lead.Cost, err = sample(&lead); err != nil {
 		obs.ServerError(w, "team plan cost", err)
-		writeErr(w, http.StatusInternalServerError, "team plan cost failed")
+		httpx.Error(w, "team plan cost failed", http.StatusInternalServerError)
 		return
 	}
 	reply.Roles = expertteam.Resolve(requester, lead, agents, in.Members)
@@ -132,12 +132,12 @@ func (s *Service) handleTeamPlan(w http.ResponseWriter, r *http.Request) {
 		}
 		if reply.Roles[i].Cost, err = sample(reply.Roles[i].Agent); err != nil {
 			obs.ServerError(w, "team plan cost", err)
-			writeErr(w, http.StatusInternalServerError, "team plan cost failed")
+			httpx.Error(w, "team plan cost failed", http.StatusInternalServerError)
 			return
 		}
 	}
 	reply.Estimate = expertteam.Estimate(reply.Lead, reply.Roles)
-	writeJSON(w, http.StatusOK, reply)
+	httpx.WriteJSON(w, http.StatusOK, reply)
 }
 
 // planJob reads the lead's job for a bridge's team plan: it must be in the
@@ -147,25 +147,24 @@ func (s *Service) planJob(w http.ResponseWriter, r *http.Request, roomID, caller
 	job, err := s.Runs.GetAgentRun(ctx, jobID)
 	switch {
 	case errors.Is(err, store.ErrAgentJobNotFound) || (err == nil && job.RoomID != roomID):
-		writeErr(w, http.StatusNotFound, "job not found in this room")
+		httpx.Error(w, "job not found in this room", http.StatusNotFound)
 		return store.AgentJob{}, false
 	case err != nil:
 		obs.ServerError(w, "team plan job read", err)
-		writeErr(w, http.StatusInternalServerError, "job read failed")
+		httpx.Error(w, "job read failed", http.StatusInternalServerError)
 		return store.AgentJob{}, false
 	}
 	if s.Leases == nil {
-		obs.ServerError(w, "team plan leases not configured", nil)
-		writeErr(w, http.StatusNotImplemented, "team plan for a job not configured")
+		httpx.Unavailable(w, "team plan for a job")
 		return store.AgentJob{}, false
 	}
 	switch err := store.JobLeasedBy(ctx, s.Leases, job, caller); {
 	case errors.Is(err, store.ErrJobNotLive), errors.Is(err, store.ErrJobNotCallers):
-		writeErr(w, http.StatusForbidden, "the job is not running on the caller's bridge")
+		httpx.Error(w, "the job is not running on the caller's bridge", http.StatusForbidden)
 		return store.AgentJob{}, false
 	case err != nil:
 		obs.ServerError(w, "team plan lease check", err)
-		writeErr(w, http.StatusInternalServerError, "lease check failed")
+		httpx.Error(w, "lease check failed", http.StatusInternalServerError)
 		return store.AgentJob{}, false
 	}
 	return job, true

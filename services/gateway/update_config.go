@@ -3,12 +3,13 @@ package gateway
 import (
 	"context"
 	"fmt"
-	"github.com/luckylhb90/bnbloc/internal/semver"
 	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/luckylhb90/bnbloc/internal/semver"
 
 	"github.com/luckylhb90/bnbloc/internal/store"
 	"github.com/luckylhb90/bnbloc/internal/wire"

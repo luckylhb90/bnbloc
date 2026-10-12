@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/luckylhb90/bnbloc/internal/httpx"
 	"github.com/luckylhb90/bnbloc/internal/obs"
 	"github.com/luckylhb90/bnbloc/internal/store"
 	"github.com/luckylhb90/bnbloc/internal/tenant"
@@ -27,8 +28,7 @@ type platformTenantView struct {
 // is irrelevant here. A non-super-admin never reaches this handler.
 func (s *Service) handlePlatformTenants(w http.ResponseWriter, r *http.Request) {
 	if s.Tenants == nil {
-		obs.ServerError(w, "tenant registry not configured", nil)
-		writeErr(w, http.StatusNotImplemented, "tenant registry not configured")
+		httpx.Unavailable(w, "tenant registry")
 		return
 	}
 	tenants := s.Tenants.ListTenants(r.Context())
@@ -44,7 +44,7 @@ func (s *Service) handlePlatformTenants(w http.ResponseWriter, r *http.Request) 
 			CreatedAtMs:   t.CreatedAtMs,
 		})
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"tenants": views})
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"tenants": views})
 }
 
 type createTenantBody struct {
@@ -58,21 +58,20 @@ type createTenantBody struct {
 // slug; a duplicate id is a conflict.
 func (s *Service) handlePlatformCreateTenant(w http.ResponseWriter, r *http.Request) {
 	if s.Tenants == nil {
-		obs.ServerError(w, "tenant registry not configured", nil)
-		writeErr(w, http.StatusNotImplemented, "tenant registry not configured")
+		httpx.Unavailable(w, "tenant registry")
 		return
 	}
 	var body createTenantBody
-	if !decodeJSON(w, r, &body) {
+	if !httpx.DecodeJSON(w, r, httpx.DefaultBodyLimit, &body) {
 		return
 	}
 	id := tenantSlug(body.TenantID)
 	if id == "" {
-		writeErr(w, http.StatusBadRequest, "tenant id must be a non-empty slug (a-z 0-9 - _)")
+		httpx.Error(w, "tenant id must be a non-empty slug (a-z 0-9 - _)", http.StatusBadRequest)
 		return
 	}
 	if _, err := s.Tenants.GetTenant(r.Context(), id); err == nil {
-		writeErr(w, http.StatusConflict, "tenant already exists")
+		httpx.Error(w, "tenant already exists", http.StatusConflict)
 		return
 	}
 	name := strings.TrimSpace(body.Name)
@@ -88,14 +87,15 @@ func (s *Service) handlePlatformCreateTenant(w http.ResponseWriter, r *http.Requ
 	}
 	if err := s.Tenants.PutTenant(r.Context(), t); err != nil {
 		obs.ServerError(w, "create tenant failed", err)
-		writeErr(w, http.StatusInternalServerError, "create tenant failed")
+		httpx.Error(w, "create tenant failed", http.StatusInternalServerError)
 		return
 	}
 	s.auditTenant(r, id, "create", "name="+name)
-	writeJSON(w, http.StatusCreated, platformTenantView{
+	httpx.WriteJSON(w, http.StatusCreated, platformTenantView{
 		TenantID: t.TenantID, Name: t.Name, Status: string(t.Status),
 		SSOIssuer: t.SSOIssuer, CreatedAtMs: t.CreatedAtMs,
 	})
+
 }
 
 type statusBody struct {
@@ -108,44 +108,44 @@ type statusBody struct {
 // legacy/dev session, so suspending it would lock everyone out.
 func (s *Service) handlePlatformSetTenantStatus(w http.ResponseWriter, r *http.Request) {
 	if s.Tenants == nil {
-		obs.ServerError(w, "tenant registry not configured", nil)
-		writeErr(w, http.StatusNotImplemented, "tenant registry not configured")
+		httpx.Unavailable(w, "tenant registry")
 		return
 	}
 	id := r.PathValue("tenantId")
 	var body statusBody
-	if !decodeJSON(w, r, &body) {
+	if !httpx.DecodeJSON(w, r, httpx.DefaultBodyLimit, &body) {
 		return
 	}
 	status := store.TenantStatus(strings.TrimSpace(body.Status))
 	if status != store.TenantActive && status != store.TenantSuspended {
-		writeErr(w, http.StatusBadRequest, "status must be active or suspended")
+		httpx.Error(w, "status must be active or suspended", http.StatusBadRequest)
 		return
 	}
 	if id == tenant.Default && status == store.TenantSuspended {
-		writeErr(w, http.StatusConflict, "the default tenant cannot be suspended")
+		httpx.Error(w, "the default tenant cannot be suspended", http.StatusConflict)
 		return
 	}
 	t, err := s.Tenants.GetTenant(r.Context(), id)
 	if err != nil {
-		writeErr(w, http.StatusNotFound, "tenant not found")
+		httpx.Error(w, "tenant not found", http.StatusNotFound)
 		return
 	}
 	t.Status = status
 	if err := s.Tenants.PutTenant(r.Context(), t); err != nil {
 		obs.ServerError(w, "update status failed", err)
-		writeErr(w, http.StatusInternalServerError, "update status failed")
+		httpx.Error(w, "update status failed", http.StatusInternalServerError)
 		return
 	}
 	s.auditTenant(r, id, "status", "status="+string(status))
 	if status == store.TenantSuspended {
 		s.revokeSessionsFor(r.Context(), suspendedTenantRevokeFilter(id), "tenant "+id+" suspended")
 	}
-	writeJSON(w, http.StatusOK, platformTenantView{
+	httpx.WriteJSON(w, http.StatusOK, platformTenantView{
 		TenantID: t.TenantID, Name: t.Name, Status: string(t.Status),
 		SSOIssuer: t.SSOIssuer, RunQuota: t.RunQuota, CostAllowance: t.CostAllowance,
 		CreatedAtMs: t.CreatedAtMs,
 	})
+
 }
 
 // tenantSlug normalizes a proposed tenant id to a safe slug: lowercased, with

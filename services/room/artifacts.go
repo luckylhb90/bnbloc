@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/luckylhb90/bnbloc/internal/httpx"
 	"github.com/luckylhb90/bnbloc/internal/ids"
 	"github.com/luckylhb90/bnbloc/internal/obs"
 	"github.com/luckylhb90/bnbloc/internal/store"
@@ -87,7 +88,7 @@ func (s *Service) handleCreateArtifact(w http.ResponseWriter, r *http.Request) {
 	roomID := r.PathValue("roomId")
 	userID := caller(r)
 	if !s.Store.IsMember(r.Context(), roomID, userID) {
-		writeErr(w, http.StatusForbidden, "caller is not a member of room")
+		httpx.Error(w, "caller is not a member of room", http.StatusForbidden)
 		return
 	}
 	var body createArtifactBody
@@ -97,28 +98,28 @@ func (s *Service) handleCreateArtifact(w http.ResponseWriter, r *http.Request) {
 	body.Kind = strings.TrimSpace(body.Kind)
 	body.Title = strings.TrimSpace(body.Title)
 	if !validArtifactKind(body.Kind) {
-		writeErr(w, http.StatusBadRequest, "kind must be one of markdown, code, image, html, app, file, site")
+		httpx.Error(w, "kind must be one of markdown, code, image, html, app, file, site", http.StatusBadRequest)
 		return
 	}
 	if body.Kind == store.ArtifactKindSite && body.Content != "" {
-		writeErr(w, http.StatusBadRequest, errSiteNeedsSnapshot)
+		httpx.Error(w, errSiteNeedsSnapshot, http.StatusBadRequest)
 		return
 	}
 	if body.Title == "" {
-		writeErr(w, http.StatusBadRequest, "title is required")
+		httpx.Error(w, "title is required", http.StatusBadRequest)
 		return
 	}
 	if len([]rune(body.Title)) > maxArtifactTitleRunes {
-		writeErr(w, http.StatusBadRequest, "title is too long")
+		httpx.Error(w, "title is too long", http.StatusBadRequest)
 		return
 	}
 	if len(body.Content) > maxArtifactContentBytes {
-		writeErr(w, http.StatusRequestEntityTooLarge, "content exceeds the 2 MiB limit")
+		httpx.Error(w, "content exceeds the 2 MiB limit", http.StatusRequestEntityTooLarge)
 		return
 	}
 	body.FileName = sanitizeArtifactFileName(body.FileName)
 	if len([]rune(body.FileName)) > maxArtifactFileNameRunes {
-		writeErr(w, http.StatusBadRequest, "fileName is too long")
+		httpx.Error(w, "fileName is too long", http.StatusBadRequest)
 		return
 	}
 	now := s.Now()
@@ -129,7 +130,7 @@ func (s *Service) handleCreateArtifact(w http.ResponseWriter, r *http.Request) {
 	// present, and the store's idempotent put keeps any existing history.
 	if callerID := strings.TrimSpace(body.ArtifactId); callerID != "" {
 		if len(callerID) < 8 || len(callerID) > 64 || !artifactIDShape.MatchString(callerID) {
-			writeErr(w, http.StatusBadRequest, "invalid artifactId")
+			httpx.Error(w, "invalid artifactId", http.StatusBadRequest)
 			return
 		}
 		id = callerID
@@ -147,12 +148,12 @@ func (s *Service) handleCreateArtifact(w http.ResponseWriter, r *http.Request) {
 		UpdatedAtMs: now,
 	})
 	if errors.Is(err, store.ErrArtifactIDTaken) {
-		writeErr(w, http.StatusConflict, "artifactId is taken by another room")
+		httpx.Error(w, "artifactId is taken by another room", http.StatusConflict)
 		return
 	}
 	if err != nil {
 		obs.ServerError(w, "create artifact failed", err)
-		writeErr(w, http.StatusInternalServerError, err.Error())
+		httpx.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 	// An artifact with content publishes its first version immediately, so the
@@ -164,7 +165,7 @@ func (s *Service) handleCreateArtifact(w http.ResponseWriter, r *http.Request) {
 		}, 0)
 		if err != nil {
 			obs.ServerError(w, "create artifact failed", err)
-			writeErr(w, http.StatusInternalServerError, err.Error())
+			httpx.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
 		art.CurrentVersion = v.Version
@@ -172,7 +173,7 @@ func (s *Service) handleCreateArtifact(w http.ResponseWriter, r *http.Request) {
 		art.MimeType = v.MimeType
 	}
 	s.publishArtifactEvent(r.Context(), art, userID)
-	writeJSON(w, http.StatusOK, map[string]any{"artifact": art})
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"artifact": art})
 }
 
 // handleListArtifacts lists the room's artifacts, newest-updated first, with
@@ -182,7 +183,7 @@ func (s *Service) handleCreateArtifact(w http.ResponseWriter, r *http.Request) {
 func (s *Service) handleListArtifacts(w http.ResponseWriter, r *http.Request) {
 	roomID := r.PathValue("roomId")
 	if !s.Store.IsMember(r.Context(), roomID, caller(r)) {
-		writeErr(w, http.StatusForbidden, "caller is not a member of room")
+		httpx.Error(w, "caller is not a member of room", http.StatusForbidden)
 		return
 	}
 	q, ok := parseArtifactQuery(w, r, roomID)
@@ -192,7 +193,7 @@ func (s *Service) handleListArtifacts(w http.ResponseWriter, r *http.Request) {
 	arts, err := s.Artifacts.ListArtifacts(r.Context(), q)
 	if err != nil {
 		obs.ServerError(w, "list artifacts failed", err)
-		writeErr(w, http.StatusInternalServerError, "list artifacts failed")
+		httpx.Error(w, "list artifacts failed", http.StatusInternalServerError)
 		return
 	}
 	resp := map[string]any{"artifacts": arts, "maxBytes": s.artifactMaxBytes()}
@@ -200,7 +201,7 @@ func (s *Service) handleListArtifacts(w http.ResponseWriter, r *http.Request) {
 		last := arts[len(arts)-1]
 		resp["nextCursor"] = strconv.FormatInt(last.UpdatedAtMs, 10) + ":" + last.ArtifactID
 	}
-	writeJSON(w, http.StatusOK, resp)
+	httpx.WriteJSON(w, http.StatusOK, resp)
 }
 
 // handleArtifactAnchors answers which artifacts were produced by the room
@@ -210,22 +211,22 @@ func (s *Service) handleListArtifacts(w http.ResponseWriter, r *http.Request) {
 func (s *Service) handleArtifactAnchors(w http.ResponseWriter, r *http.Request) {
 	roomID := r.PathValue("roomId")
 	if !s.Store.IsMember(r.Context(), roomID, caller(r)) {
-		writeErr(w, http.StatusForbidden, "caller is not a member of room")
+		httpx.Error(w, "caller is not a member of room", http.StatusForbidden)
 		return
 	}
 	from, errFrom := strconv.ParseInt(r.URL.Query().Get("from"), 10, 64)
 	to, errTo := strconv.ParseInt(r.URL.Query().Get("to"), 10, 64)
 	if errFrom != nil || errTo != nil || from < 1 || to < from {
-		writeErr(w, http.StatusBadRequest, "from and to must be sequences with 1 <= from <= to")
+		httpx.Error(w, "from and to must be sequences with 1 <= from <= to", http.StatusBadRequest)
 		return
 	}
 	anchors, err := s.Artifacts.ArtifactAnchors(r.Context(), roomID, from, to)
 	if err != nil {
 		obs.ServerError(w, "list artifact anchors failed", err)
-		writeErr(w, http.StatusInternalServerError, "list artifact anchors failed")
+		httpx.Error(w, "list artifact anchors failed", http.StatusInternalServerError)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"anchors": anchors})
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"anchors": anchors})
 }
 
 // parseArtifactQuery reads the list filters and paging cursor.
@@ -243,7 +244,7 @@ func parseArtifactQuery(w http.ResponseWriter, r *http.Request, roomID string) (
 	if raw := strings.TrimSpace(v.Get("limit")); raw != "" {
 		n, err := strconv.Atoi(raw)
 		if err != nil || n <= 0 || n > 200 {
-			writeErr(w, http.StatusBadRequest, "limit must be 1..200")
+			httpx.Error(w, "limit must be 1..200", http.StatusBadRequest)
 			return q, false
 		}
 		q.Limit = n
@@ -251,7 +252,7 @@ func parseArtifactQuery(w http.ResponseWriter, r *http.Request, roomID string) (
 	if raw := strings.TrimSpace(v.Get("sourceSeq")); raw != "" {
 		n, err := strconv.ParseInt(raw, 10, 64)
 		if err != nil || n <= 0 {
-			writeErr(w, http.StatusBadRequest, "invalid sourceSeq")
+			httpx.Error(w, "invalid sourceSeq", http.StatusBadRequest)
 			return q, false
 		}
 		q.SourceSeq = n
@@ -260,7 +261,7 @@ func parseArtifactQuery(w http.ResponseWriter, r *http.Request, roomID string) (
 		ms, id, ok := strings.Cut(raw, ":")
 		n, err := strconv.ParseInt(ms, 10, 64)
 		if !ok || err != nil || n <= 0 || id == "" {
-			writeErr(w, http.StatusBadRequest, "invalid cursor")
+			httpx.Error(w, "invalid cursor", http.StatusBadRequest)
 			return q, false
 		}
 		q.BeforeUpdatedMs, q.BeforeID = n, id
@@ -275,11 +276,11 @@ func (s *Service) handleGetArtifact(w http.ResponseWriter, r *http.Request) {
 	}
 	art, err := s.Artifacts.GetArtifact(r.Context(), r.PathValue("artifactId"))
 	if err != nil {
-		writeErr(w, http.StatusNotFound, "artifact not found")
+		httpx.Error(w, "artifact not found", http.StatusNotFound)
 		return
 	}
 	versions := s.Artifacts.ListArtifactVersions(r.Context(), art.ArtifactID, 50)
-	writeJSON(w, http.StatusOK, map[string]any{"artifact": art, "versions": versions})
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"artifact": art, "versions": versions})
 }
 
 func (s *Service) handleGetArtifactVersion(w http.ResponseWriter, r *http.Request) {
@@ -289,32 +290,32 @@ func (s *Service) handleGetArtifactVersion(w http.ResponseWriter, r *http.Reques
 	}
 	art, err := s.Artifacts.GetArtifact(r.Context(), r.PathValue("artifactId"))
 	if err != nil {
-		writeErr(w, http.StatusNotFound, "artifact not found")
+		httpx.Error(w, "artifact not found", http.StatusNotFound)
 		return
 	}
 	version, perr := strconv.Atoi(strings.TrimSpace(r.PathValue("version")))
 	if perr != nil {
-		writeErr(w, http.StatusBadRequest, "invalid version")
+		httpx.Error(w, "invalid version", http.StatusBadRequest)
 		return
 	}
 	v, err := s.Artifacts.GetArtifactVersion(r.Context(), art.ArtifactID, version)
 	if err != nil {
-		writeErr(w, http.StatusNotFound, "version not found")
+		httpx.Error(w, "version not found", http.StatusNotFound)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"version": v})
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"version": v})
 }
 
 func (s *Service) handlePublishVersion(w http.ResponseWriter, r *http.Request) {
 	roomID := r.PathValue("roomId")
 	userID := caller(r)
 	if !s.Store.IsMember(r.Context(), roomID, userID) {
-		writeErr(w, http.StatusForbidden, "caller is not a member of room")
+		httpx.Error(w, "caller is not a member of room", http.StatusForbidden)
 		return
 	}
 	art, err := s.Artifacts.GetArtifact(r.Context(), r.PathValue("artifactId"))
 	if err != nil || art.RoomID != roomID {
-		writeErr(w, http.StatusNotFound, "artifact not found")
+		httpx.Error(w, "artifact not found", http.StatusNotFound)
 		return
 	}
 	if mt, _, _ := mime.ParseMediaType(r.Header.Get("Content-Type")); mt == "multipart/form-data" {
@@ -322,7 +323,7 @@ func (s *Service) handlePublishVersion(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if art.Kind == store.ArtifactKindSite {
-		writeErr(w, http.StatusBadRequest, errSiteNeedsSnapshot)
+		httpx.Error(w, errSiteNeedsSnapshot, http.StatusBadRequest)
 		return
 	}
 	var body publishVersionBody
@@ -333,11 +334,11 @@ func (s *Service) handlePublishVersion(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if len(body.Content) > maxArtifactContentBytes {
-		writeErr(w, http.StatusRequestEntityTooLarge, "content exceeds the 2 MiB limit")
+		httpx.Error(w, "content exceeds the 2 MiB limit", http.StatusRequestEntityTooLarge)
 		return
 	}
 	if body.BaseVersion < 0 {
-		writeErr(w, http.StatusBadRequest, "baseVersion must be >= 0")
+		httpx.Error(w, "baseVersion must be >= 0", http.StatusBadRequest)
 		return
 	}
 	s.commitVersion(w, r, art, userID, store.ArtifactVersion{
@@ -350,11 +351,11 @@ func (s *Service) handlePublishVersion(w http.ResponseWriter, r *http.Request) {
 // validVersionProvenance bounds a version's summary and source link.
 func validVersionProvenance(w http.ResponseWriter, summary, sourceJobID string, sourceSeq int64) bool {
 	if len([]rune(strings.TrimSpace(summary))) > maxArtifactSummaryRunes {
-		writeErr(w, http.StatusBadRequest, "summary is too long")
+		httpx.Error(w, "summary is too long", http.StatusBadRequest)
 		return false
 	}
 	if len(strings.TrimSpace(sourceJobID)) > maxArtifactSourceJobLen || sourceSeq < 0 {
-		writeErr(w, http.StatusBadRequest, "invalid sourceJobId or sourceSeq")
+		httpx.Error(w, "invalid sourceJobId or sourceSeq", http.StatusBadRequest)
 		return false
 	}
 	return true
@@ -367,27 +368,27 @@ func (s *Service) commitVersion(w http.ResponseWriter, r *http.Request, art stor
 		if errors.Is(err, store.ErrArtifactVersionConflict) {
 			// 409 carries the current version so the client can re-read and
 			// rebase instead of guessing: concurrent editors see the race.
-			writeErr(w, http.StatusConflict, "artifact was updated concurrently")
+			httpx.Error(w, "artifact was updated concurrently", http.StatusConflict)
 			return
 		}
 		obs.ServerError(w, "publish version failed", err)
-		writeErr(w, http.StatusInternalServerError, err.Error())
+		httpx.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 	s.publishArtifactEvent(r.Context(), art, userID)
-	writeJSON(w, http.StatusOK, map[string]any{"artifact": art, "version": v})
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"artifact": art, "version": v})
 }
 
 // authorizeArtifactRead checks room membership and that the artifact belongs to
 // the room in the path, so an id leaked across rooms cannot be probed.
 func (s *Service) authorizeArtifactRead(w http.ResponseWriter, r *http.Request, roomID string) bool {
 	if !s.Store.IsMember(r.Context(), roomID, caller(r)) {
-		writeErr(w, http.StatusForbidden, "caller is not a member of room")
+		httpx.Error(w, "caller is not a member of room", http.StatusForbidden)
 		return false
 	}
 	art, err := s.Artifacts.GetArtifact(r.Context(), r.PathValue("artifactId"))
 	if err != nil || art.RoomID != roomID {
-		writeErr(w, http.StatusNotFound, "artifact not found")
+		httpx.Error(w, "artifact not found", http.StatusNotFound)
 		return false
 	}
 	return true
@@ -433,8 +434,7 @@ func (s *Service) publishArtifactEventReason(ctx context.Context, art store.Arti
 }
 
 func decodeArtifactBody(w http.ResponseWriter, r *http.Request, dst any) bool {
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxArtifactContentBytes+(64<<10))).Decode(dst); err != nil {
-		writeErr(w, http.StatusBadRequest, "invalid json body")
+	if !httpx.DecodeJSON(w, r, maxArtifactContentBytes+(64<<10), dst) {
 		return false
 	}
 	return true
@@ -462,12 +462,11 @@ func (s *Service) handleArtifactState(w http.ResponseWriter, r *http.Request) {
 	roomID := r.PathValue("roomId")
 	userID := caller(r)
 	if !s.Store.IsMember(r.Context(), roomID, userID) {
-		writeErr(w, http.StatusForbidden, "caller is not a member of room")
+		httpx.Error(w, "caller is not a member of room", http.StatusForbidden)
 		return
 	}
 	var body artifactStateBody
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxArtifactStateBytes+(4<<10))).Decode(&body); err != nil {
-		writeErr(w, http.StatusBadRequest, "invalid json body")
+	if !httpx.DecodeJSON(w, r, maxArtifactStateBytes+(4<<10), &body) {
 		return
 	}
 	// The path carries the artifact id (the client already knows it there); a
@@ -478,17 +477,17 @@ func (s *Service) handleArtifactState(w http.ResponseWriter, r *http.Request) {
 		body.ArtifactID = strings.TrimSpace(body.ArtifactID)
 	}
 	if body.ArtifactID == "" || len(body.State) == 0 || len(body.State) > maxArtifactStateBytes {
-		writeErr(w, http.StatusBadRequest, "artifactId and state (<=16KiB) required")
+		httpx.Error(w, "artifactId and state (<=16KiB) required", http.StatusBadRequest)
 		return
 	}
 	art, err := s.Artifacts.GetArtifact(r.Context(), body.ArtifactID)
 	if err != nil || art.RoomID != roomID {
-		writeErr(w, http.StatusNotFound, "artifact not found")
+		httpx.Error(w, "artifact not found", http.StatusNotFound)
 		return
 	}
 	if s.Publisher == nil {
 		obs.ServerError(w, "realtime unavailable", nil)
-		writeErr(w, http.StatusServiceUnavailable, "realtime unavailable")
+		httpx.Error(w, "realtime unavailable", http.StatusServiceUnavailable)
 		return
 	}
 	var state any
@@ -522,13 +521,13 @@ func (s *Service) handleGetArtifactState(w http.ResponseWriter, r *http.Request)
 	roomID := r.PathValue("roomId")
 	userID := caller(r)
 	if !s.Store.IsMember(r.Context(), roomID, userID) {
-		writeErr(w, http.StatusForbidden, "caller is not a member of room")
+		httpx.Error(w, "caller is not a member of room", http.StatusForbidden)
 		return
 	}
 	artifactID := strings.TrimSpace(r.PathValue("artifactId"))
 	art, err := s.Artifacts.GetArtifact(r.Context(), artifactID)
 	if err != nil || art.RoomID != roomID {
-		writeErr(w, http.StatusNotFound, "artifact not found")
+		httpx.Error(w, "artifact not found", http.StatusNotFound)
 		return
 	}
 	snap, ok := s.liveStates.get(artifactID)
@@ -537,5 +536,5 @@ func (s *Service) handleGetArtifactState(w http.ResponseWriter, r *http.Request)
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
-	writeJSON(w, http.StatusOK, snap)
+	httpx.WriteJSON(w, http.StatusOK, snap)
 }

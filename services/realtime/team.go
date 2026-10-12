@@ -2,7 +2,6 @@ package realtimehttp
 
 import (
 	"context"
-	"encoding/json"
 	"log"
 	"net/http"
 	"strconv"
@@ -12,6 +11,7 @@ import (
 
 	"github.com/luckylhb90/bnbloc/internal/contentuse"
 	"github.com/luckylhb90/bnbloc/internal/extpipe"
+	"github.com/luckylhb90/bnbloc/internal/httpx"
 	"github.com/luckylhb90/bnbloc/internal/membership"
 	"github.com/luckylhb90/bnbloc/internal/obs"
 	"github.com/luckylhb90/bnbloc/internal/roomctx"
@@ -49,17 +49,11 @@ func (s *Service) registerTeamRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /v1/platform/search/status", s.handleSearchStatus)
 }
 
-func writeJSON(w http.ResponseWriter, status int, v any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(v)
-}
-
 // requireSubject returns the authenticated caller, answering 401 when absent.
 func requireSubject(w http.ResponseWriter, r *http.Request) (string, bool) {
 	userID := strings.TrimSpace(r.Header.Get("X-Bnbloc-User"))
 	if userID == "" {
-		http.Error(w, "missing authenticated subject", http.StatusUnauthorized)
+		httpx.Error(w, "missing authenticated subject", http.StatusUnauthorized)
 		return "", false
 	}
 	return userID, true
@@ -71,7 +65,7 @@ func requireSubject(w http.ResponseWriter, r *http.Request) (string, bool) {
 func (s *Service) requireRoomMember(w http.ResponseWriter, r *http.Request, need membership.Need) (roomID, userID string, m membership.Member, ok bool) {
 	roomID, err := roomctx.Normalize(r.PathValue("roomId"))
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		httpx.Error(w, err.Error(), http.StatusBadRequest)
 		return "", "", m, false
 	}
 	if userID, ok = requireSubject(w, r); !ok {
@@ -89,7 +83,7 @@ func (s *Service) requireRoomMember(w http.ResponseWriter, r *http.Request, need
 func (s *Service) member(w http.ResponseWriter, r *http.Request, roomID, userID string, need membership.Need) (membership.Member, bool) {
 	m, err := membership.RoomScope(r.Context(), s.Membership, roomID, userID, need)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusForbidden)
+		httpx.Error(w, err.Error(), http.StatusForbidden)
 		return m, false
 	}
 	return m, true
@@ -100,7 +94,7 @@ func (s *Service) member(w http.ResponseWriter, r *http.Request, roomID, userID 
 func (s *Service) tasksReady(w http.ResponseWriter) bool {
 	if s.Tasks == nil || s.Chat == nil {
 		obs.ServerError(w, "message tasks unavailable", nil)
-		http.Error(w, "message tasks unavailable", http.StatusServiceUnavailable)
+		httpx.Error(w, "message tasks unavailable", http.StatusServiceUnavailable)
 		return false
 	}
 	return true
@@ -124,10 +118,10 @@ func (s *Service) handleListTasks(w http.ResponseWriter, r *http.Request) {
 	tasks, err := s.Tasks.ListMessageTasks(r.Context(), roomID)
 	if err != nil {
 		obs.ServerError(w, "task read failed", err)
-		http.Error(w, "task read failed", http.StatusInternalServerError)
+		httpx.Error(w, "task read failed", http.StatusInternalServerError)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"tasks": tasks})
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"tasks": tasks})
 }
 
 // handlePutTask marks a persisted message as a task or toggles its status
@@ -141,19 +135,17 @@ func (s *Service) handlePutTask(w http.ResponseWriter, r *http.Request) {
 	}
 	seq := parseInt(r.PathValue("seq"))
 	if seq <= 0 {
-		http.Error(w, "invalid message", http.StatusBadRequest)
+		httpx.Error(w, "invalid message", http.StatusBadRequest)
 		return
 	}
 	var body struct {
 		Status string `json:"status"`
 	}
-	r.Body = http.MaxBytesReader(w, r.Body, maxSmallBodyBytes)
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		http.Error(w, "invalid json body", http.StatusBadRequest)
+	if !httpx.DecodeJSON(w, r, maxSmallBodyBytes, &body) {
 		return
 	}
 	if body.Status != wire.TaskOpen && body.Status != wire.TaskDone {
-		http.Error(w, "status must be open or done", http.StatusBadRequest)
+		httpx.Error(w, "status must be open or done", http.StatusBadRequest)
 		return
 	}
 	ctx := r.Context()
@@ -161,18 +153,18 @@ func (s *Service) handlePutTask(w http.ResponseWriter, r *http.Request) {
 	task, found, err := s.Tasks.GetMessageTask(ctx, roomID, seq)
 	if err != nil {
 		obs.ServerError(w, "task read failed", err)
-		http.Error(w, "task read failed", http.StatusInternalServerError)
+		httpx.Error(w, "task read failed", http.StatusInternalServerError)
 		return
 	}
 	if !found {
 		msg, exists, err := s.Chat.GetRoomMessage(ctx, roomID, seq)
 		if err != nil {
 			obs.ServerError(w, "message read failed", err)
-			http.Error(w, "message read failed", http.StatusInternalServerError)
+			httpx.Error(w, "message read failed", http.StatusInternalServerError)
 			return
 		}
 		if !exists {
-			http.Error(w, "message not found", http.StatusNotFound)
+			httpx.Error(w, "message not found", http.StatusNotFound)
 			return
 		}
 		task = wire.MessageTask{
@@ -193,11 +185,11 @@ func (s *Service) handlePutTask(w http.ResponseWriter, r *http.Request) {
 	stored, err := s.Tasks.PutMessageTask(ctx, task)
 	if err != nil {
 		obs.ServerError(w, "task write failed", err)
-		http.Error(w, "task write failed", http.StatusInternalServerError)
+		httpx.Error(w, "task write failed", http.StatusInternalServerError)
 		return
 	}
 	s.publishTaskUpdated(roomID, stored.ChannelID, wire.TaskUpdatedPayload{Seq: seq, Task: &stored}, now)
-	writeJSON(w, http.StatusOK, stored)
+	httpx.WriteJSON(w, http.StatusOK, stored)
 }
 
 // handleDeleteTask unmarks a message (any room member).
@@ -208,17 +200,17 @@ func (s *Service) handleDeleteTask(w http.ResponseWriter, r *http.Request) {
 	}
 	seq := parseInt(r.PathValue("seq"))
 	if seq <= 0 {
-		http.Error(w, "invalid message", http.StatusBadRequest)
+		httpx.Error(w, "invalid message", http.StatusBadRequest)
 		return
 	}
 	removed, err := s.Tasks.DeleteMessageTask(r.Context(), roomID, seq)
 	if err != nil {
 		obs.ServerError(w, "task write failed", err)
-		http.Error(w, "task write failed", http.StatusInternalServerError)
+		httpx.Error(w, "task write failed", http.StatusInternalServerError)
 		return
 	}
 	if !removed {
-		http.Error(w, "message is not a task", http.StatusNotFound)
+		httpx.Error(w, "message is not a task", http.StatusNotFound)
 		return
 	}
 	s.publishTaskUpdated(roomID, "", wire.TaskUpdatedPayload{Seq: seq, Removed: true}, time.Now().UnixMilli())
@@ -272,7 +264,7 @@ func (s *Service) handleSearch(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	text := strings.TrimSpace(q.Get("q"))
 	if utf8.RuneCountInString(text) < store.SearchMinRunes {
-		http.Error(w, "query must be at least 2 characters", http.StatusBadRequest)
+		httpx.Error(w, "query must be at least 2 characters", http.StatusBadRequest)
 		return
 	}
 	limit := int(parseInt(q.Get("limit")))
@@ -283,13 +275,13 @@ func (s *Service) handleSearch(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	if s.Rooms == nil {
 		obs.ServerError(w, "room directory unavailable", nil)
-		http.Error(w, "room directory unavailable", http.StatusServiceUnavailable)
+		httpx.Error(w, "room directory unavailable", http.StatusServiceUnavailable)
 		return
 	}
 	member, err := s.Rooms.MemberRooms(ctx, userID, tenant.FromContext(ctx))
 	if err != nil {
-		log.Printf("realtime: search: member rooms for %s: %v", userID, err)
-		http.Error(w, "room directory unavailable", http.StatusServiceUnavailable)
+		obs.ServerError(w, "room directory unavailable", err)
+		httpx.Error(w, "room directory unavailable", http.StatusServiceUnavailable)
 		return
 	}
 	filter := map[string]bool{}
@@ -315,7 +307,7 @@ func (s *Service) handleSearch(w http.ResponseWriter, r *http.Request) {
 		msgs, err := s.Search.Search(ctx, store.MessageSearch{RoomIDs: roomIDs, Text: text, BeforeMs: before, Limit: limit})
 		if err != nil {
 			obs.ServerError(w, "search messages ("+s.Search.Backend()+")", err)
-			http.Error(w, "search failed", http.StatusInternalServerError)
+			httpx.Error(w, "search failed", http.StatusInternalServerError)
 			return
 		}
 		kinds := map[string]string{} // room\x00channel -> channel kind
@@ -377,7 +369,7 @@ func (s *Service) handleSearch(w http.ResponseWriter, r *http.Request) {
 			})
 		}
 	}
-	writeJSON(w, http.StatusOK, resp)
+	httpx.WriteJSON(w, http.StatusOK, resp)
 }
 
 // snippetAround returns a short single-line excerpt of text centred on the

@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/luckylhb90/bnbloc/internal/httpx"
 	"github.com/luckylhb90/bnbloc/internal/obs"
 	"github.com/luckylhb90/bnbloc/internal/store"
 	"github.com/luckylhb90/bnbloc/internal/wire"
@@ -27,8 +28,7 @@ func (s *Service) registerProfileRoutes(mux *http.ServeMux) {
 // profilesReady answers 503 when no profile store is configured.
 func (s *Service) profilesReady(w http.ResponseWriter) bool {
 	if s.Profiles == nil {
-		obs.ServerError(w, "user profiles not configured", nil)
-		writeErr(w, http.StatusServiceUnavailable, "user profiles not configured")
+		httpx.Unavailable(w, "user profiles")
 		return false
 	}
 	return true
@@ -62,7 +62,7 @@ func (s *Service) myProfile(ctx context.Context, userID string) (wire.MyProfile,
 func (s *Service) handleGetMyProfile(w http.ResponseWriter, r *http.Request) {
 	user := caller(r)
 	if user == "" {
-		writeErr(w, http.StatusUnauthorized, "missing authenticated subject")
+		httpx.Error(w, "missing authenticated subject", http.StatusUnauthorized)
 		return
 	}
 	if !s.profilesReady(w) {
@@ -71,10 +71,10 @@ func (s *Service) handleGetMyProfile(w http.ResponseWriter, r *http.Request) {
 	p, err := s.myProfile(r.Context(), user)
 	if err != nil {
 		obs.ServerError(w, "read profile failed", err)
-		writeErr(w, http.StatusInternalServerError, "read profile failed")
+		httpx.Error(w, "read profile failed", http.StatusInternalServerError)
 		return
 	}
-	writeJSON(w, http.StatusOK, p)
+	httpx.WriteJSON(w, http.StatusOK, p)
 }
 
 // handlePutMyProfile is PUT /v1/my/profile {displayName} → wire.MyProfile.
@@ -83,7 +83,7 @@ func (s *Service) handleGetMyProfile(w http.ResponseWriter, r *http.Request) {
 func (s *Service) handlePutMyProfile(w http.ResponseWriter, r *http.Request) {
 	user := caller(r)
 	if user == "" {
-		writeErr(w, http.StatusUnauthorized, "missing authenticated subject")
+		httpx.Error(w, "missing authenticated subject", http.StatusUnauthorized)
 		return
 	}
 	if !s.profilesReady(w) {
@@ -92,20 +92,20 @@ func (s *Service) handlePutMyProfile(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		DisplayName string `json:"displayName"`
 	}
-	if !decode(w, r, &body) {
+	if !httpx.DecodeJSON(w, r, maxJSONBodyBytes, &body) {
 		return
 	}
 	name, err := store.NormalizeDisplayName(body.DisplayName)
 	if err != nil {
-		writeErr(w, http.StatusBadRequest, err.Error())
+		httpx.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 	if err := s.Profiles.SetDisplayName(r.Context(), user, name, s.Now()); err != nil {
 		obs.ServerError(w, "save profile failed", err)
-		writeErr(w, http.StatusInternalServerError, "save profile failed")
+		httpx.Error(w, "save profile failed", http.StatusInternalServerError)
 		return
 	}
-	writeJSON(w, http.StatusOK, wire.MyProfile{UserID: user, DisplayName: store.DisplayName(user, name), IsDefault: name == ""})
+	httpx.WriteJSON(w, http.StatusOK, wire.MyProfile{UserID: user, DisplayName: store.DisplayName(user, name), IsDefault: name == ""})
 }
 
 // handleUserProfiles is GET /v1/users/profiles?ids=a,b,… → {profiles:
@@ -115,7 +115,7 @@ func (s *Service) handlePutMyProfile(w http.ResponseWriter, r *http.Request) {
 // who exists. At most maxProfileLookupIDs distinct ids per call.
 func (s *Service) handleUserProfiles(w http.ResponseWriter, r *http.Request) {
 	if caller(r) == "" {
-		writeErr(w, http.StatusUnauthorized, "missing authenticated subject")
+		httpx.Error(w, "missing authenticated subject", http.StatusUnauthorized)
 		return
 	}
 	if !s.profilesReady(w) {
@@ -123,20 +123,20 @@ func (s *Service) handleUserProfiles(w http.ResponseWriter, r *http.Request) {
 	}
 	ids := profileLookupIDs(r.URL.Query()["ids"])
 	if len(ids) == 0 {
-		writeErr(w, http.StatusBadRequest, "ids is required")
+		httpx.Error(w, "ids is required", http.StatusBadRequest)
 		return
 	}
 	if len(ids) > maxProfileLookupIDs {
-		writeErr(w, http.StatusBadRequest, "at most 200 ids per request")
+		httpx.Error(w, "at most 200 ids per request", http.StatusBadRequest)
 		return
 	}
 	profiles, err := s.displayNames(r.Context(), ids)
 	if err != nil {
 		obs.ServerError(w, "read profiles failed", err)
-		writeErr(w, http.StatusInternalServerError, "read profiles failed")
+		httpx.Error(w, "read profiles failed", http.StatusInternalServerError)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"profiles": profiles})
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"profiles": profiles})
 }
 
 // profileLookupIDs splits the comma-separated ids values into trimmed,

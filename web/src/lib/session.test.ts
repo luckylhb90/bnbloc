@@ -77,7 +77,9 @@ async function testNoHandlerMeansNoRefresh(): Promise<void> {
 async function testErrorDetailNeverShowsARawStatusOrHtml(): Promise<void> {
   const detail = (body: string, status: number) => errorDetail(new Response(body, { status }));
   assert((await detail('{"error":"room not found"}', 404)) === "room not found", "the gateway's JSON error");
-  assert((await detail("rate limit exceeded\n", 429)) === "rate limit exceeded", "a plain-text body");
+  assert((await detail('{"error":"tenant suspended","code":"x"}', 403)) === "tenant suspended", "the error body with a code");
+  assert((await detail("404 page not found\n", 404)) === "Request failed (404)", "a router's plain-text body is not the error body");
+  assert((await detail('{"message":"nope"}', 400)) === "Request failed (400)", "no other JSON shape is read");
   assert((await detail("", 502)).startsWith("The server is temporarily unavailable (502)"), "an empty 502");
   assert((await detail("<html><body>Bad Gateway</body></html>", 502)).startsWith("The server is temporarily unavailable"), "a proxy HTML page");
   assert((await detail("", 500)) === "Request failed (500)", "an empty 500");

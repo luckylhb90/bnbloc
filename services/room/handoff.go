@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/luckylhb90/bnbloc/internal/httpx"
 	"github.com/luckylhb90/bnbloc/internal/obs"
 	"github.com/luckylhb90/bnbloc/internal/wire"
 )
@@ -73,24 +74,24 @@ type HandoffFeed interface {
 func (s *Service) handleGetHandoff(w http.ResponseWriter, r *http.Request) {
 	roomID := r.PathValue("roomId")
 	if !s.Store.IsMember(r.Context(), roomID, caller(r)) {
-		writeErr(w, http.StatusForbidden, "caller is not a member of room")
+		httpx.Error(w, "caller is not a member of room", http.StatusForbidden)
 		return
 	}
 	if s.RoomImports == nil {
-		writeErr(w, http.StatusNotFound, "room was not imported")
+		httpx.Error(w, "room was not imported", http.StatusNotFound)
 		return
 	}
 	info, ok, err := s.RoomImports.GetRoomImport(r.Context(), roomID)
 	if err != nil {
 		obs.ServerError(w, "handoff lookup failed", err)
-		writeErr(w, http.StatusInternalServerError, "handoff lookup failed")
+		httpx.Error(w, "handoff lookup failed", http.StatusInternalServerError)
 		return
 	}
 	if !ok {
-		writeErr(w, http.StatusNotFound, "room was not imported")
+		httpx.Error(w, "room was not imported", http.StatusNotFound)
 		return
 	}
-	writeJSON(w, http.StatusOK, info)
+	httpx.WriteJSON(w, http.StatusOK, info)
 }
 
 // feedPayload is the read view of a feed row's payload the handoff needs:

@@ -49,7 +49,7 @@ func TestEffectiveResolvesTeam(t *testing.T) {
 		map[string]any{"version": "1.3.0", "displayName": "Code reviewer", "description": "Reviews diffs carefully."},
 		map[string]any{"version": "2.0.0"})
 	f.put("tst", contentpkg.KindExpert, "tester", "jack", map[string]any{"version": "1.1.0", "displayName": "Tester"}) // jack's: maya gets it via the room
-	f.put("doc", contentpkg.KindExpert, "doc-writer", "kim", map[string]any{"version": "1.0.0"})                     // kim's: not usable
+	f.put("doc", contentpkg.KindExpert, "doc-writer", "kim", map[string]any{"version": "1.0.0"})                       // kim's: not usable
 	f.put("sub", contentpkg.KindExpert, "sub-team", "maya", teamManifest(map[string]any{"role": "x", "expert": "tester", "defaultAgent": "platform"}))
 	f.put("team", contentpkg.KindExpert, "release-team", "maya", teamManifest(
 		map[string]any{"role": "reviewer", "expert": "code-reviewer@^1", "defaultAgent": "requester"},

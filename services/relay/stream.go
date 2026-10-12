@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/luckylhb90/bnbloc/internal/httpx"
 	"github.com/luckylhb90/bnbloc/internal/wsconn"
 )
 
@@ -30,7 +31,7 @@ type streamPair struct {
 func (s *Service) handleStream(w http.ResponseWriter, r *http.Request) {
 	sessionKey := r.PathValue("sessionKey")
 	if sessionKey == "" {
-		http.Error(w, "session key required", http.StatusBadRequest)
+		httpx.Error(w, "session key required", http.StatusBadRequest)
 		return
 	}
 	conn, err := wsconn.Upgrade(w, r)

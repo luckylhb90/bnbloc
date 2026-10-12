@@ -15,6 +15,7 @@ import (
 	"github.com/luckylhb90/bnbloc/internal/contentuse"
 	"github.com/luckylhb90/bnbloc/internal/digest"
 	"github.com/luckylhb90/bnbloc/internal/extpipe"
+	"github.com/luckylhb90/bnbloc/internal/httpx"
 	"github.com/luckylhb90/bnbloc/internal/ids"
 	"github.com/luckylhb90/bnbloc/internal/obs"
 	"github.com/luckylhb90/bnbloc/internal/semver"
@@ -54,7 +55,7 @@ func (s *Service) platformContentAdmin(w http.ResponseWriter, r *http.Request) (
 	}
 	if s.ContentComponents == nil {
 		obs.ServerError(w, "content components unavailable", nil)
-		http.Error(w, "content components unavailable", http.StatusServiceUnavailable)
+		httpx.Error(w, "content components unavailable", http.StatusServiceUnavailable)
 		return auth.Claims{}, false
 	}
 	return claims, true
@@ -74,13 +75,13 @@ func (s *Service) handleListPlatformContent(w http.ResponseWriter, r *http.Reque
 	case wire.ContentScopePlatform, wire.ContentScopeOrg:
 		scopes = []store.ContentScope{store.ContentScope(scope)}
 	default:
-		http.Error(w, "scope must be platform or org", http.StatusBadRequest)
+		httpx.Error(w, "scope must be platform or org", http.StatusBadRequest)
 		return
 	}
 	comps, err := s.ContentComponents.ListContentComponents(r.Context(), store.ContentComponentQuery{Scopes: scopes})
 	if err != nil {
 		obs.ServerError(w, "list platform content failed", err)
-		http.Error(w, "list platform content failed", http.StatusInternalServerError)
+		httpx.Error(w, "list platform content failed", http.StatusInternalServerError)
 		return
 	}
 	s.writeAdminContent(w, r, claims, comps)
@@ -96,7 +97,7 @@ func (s *Service) handleExportContentPackage(w http.ResponseWriter, r *http.Requ
 	ctx := r.Context()
 	id := r.PathValue("id")
 	if contentbuiltin.IsBuiltinID(id) {
-		http.Error(w, "built-in content already reaches every organization", http.StatusConflict)
+		httpx.Error(w, "built-in content already reaches every organization", http.StatusConflict)
 		return
 	}
 	c, err := s.ContentComponents.GetContentComponent(ctx, id)
@@ -111,25 +112,25 @@ func (s *Service) handleExportContentPackage(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	if v.BundleBlobKey != digest.Key(v.SHA256) {
-		http.Error(w, "this version's bundle is not in the gateway artifact store", http.StatusConflict)
+		httpx.Error(w, "this version's bundle is not in the gateway artifact store", http.StatusConflict)
 		return
 	}
 	m, err := contentuse.Manifest(v)
 	if err != nil {
 		obs.ServerError(w, "decode content manifest failed", err)
-		http.Error(w, "decode content manifest failed", http.StatusInternalServerError)
+		httpx.Error(w, "decode content manifest failed", http.StatusInternalServerError)
 		return
 	}
 	publisher := firstNonEmpty(q.Get("publisher"), "self")
 	pkg := contentpkg.PlatformPackage(m, v.SHA256, publicBaseURL(r)+"/v1/artifacts/"+v.BundleBlobKey, publisher)
 	if err := pkgmeta.ValidatePackage(pkg); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		httpx.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 	body, err := json.MarshalIndent(pkg, "", "  ")
 	if err != nil {
 		obs.ServerError(w, "encode content package failed", err)
-		http.Error(w, "encode content package failed", http.StatusInternalServerError)
+		httpx.Error(w, "encode content package failed", http.StatusInternalServerError)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -159,13 +160,13 @@ func (s *Service) installPlatformContent(w http.ResponseWriter, r *http.Request,
 	ctx := r.Context()
 	if s.ContentComponents == nil {
 		obs.ServerError(w, "content components unavailable", nil)
-		http.Error(w, "content components unavailable", http.StatusServiceUnavailable)
+		httpx.Error(w, "content components unavailable", http.StatusServiceUnavailable)
 		return
 	}
 	status := store.ContentStatusActive
 	switch extpipe.NormalizeRollout(req.Rollout) {
 	case extpipe.RolloutOptIn:
-		http.Error(w, "content has no opt-in rollout: members pick experts and turn packs on themselves (use auto or off)", http.StatusBadRequest)
+		httpx.Error(w, "content has no opt-in rollout: members pick experts and turn packs on themselves (use auto or off)", http.StatusBadRequest)
 		return
 	case extpipe.RolloutOff:
 		status = store.ContentStatusRetired
@@ -173,39 +174,39 @@ func (s *Service) installPlatformContent(w http.ResponseWriter, r *http.Request,
 	pkg, keyID, err := s.corePipeline().VerifyPackage(ctx, []byte(req.Package), []byte(req.Signature))
 	if errors.Is(err, extpipe.ErrTrustedKeys) {
 		obs.ServerError(w, "load trusted publisher keys failed", err)
-		http.Error(w, "load trusted publisher keys failed", http.StatusInternalServerError)
+		httpx.Error(w, "load trusted publisher keys failed", http.StatusInternalServerError)
 		return
 	}
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		httpx.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 	if err := pkgmeta.ValidateGatewayArtifactURLs(pkg, publicBaseURL(r)); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		httpx.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 	sha := pkg.Artifacts[contentpkg.PlatformBundleArtifact].SHA256
 	key := digest.Key(sha)
 	raw, err := s.readArtifactBlob(ctx, key, tarbundle.ContentLimits.MaxArchiveBytes())
 	if err != nil {
-		http.Error(w, "read the package's bundle: "+err.Error(), http.StatusBadRequest)
+		httpx.Error(w, "read the package's bundle: "+err.Error(), http.StatusBadRequest)
 		return
 	}
 	cpkg, err := contentpkg.Validate(raw, sha, contentOptions())
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		httpx.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 	m := cpkg.Manifest
 	if m.Kind != pkg.Kind || m.Name != pkg.Name || m.Version != pkg.Version {
-		http.Error(w, fmt.Sprintf("the bundle is %s %s %s, the package names %s %s %s", shortKind(m.Kind), m.Name, m.Version, shortKind(pkg.Kind), pkg.Name, pkg.Version), http.StatusBadRequest)
+		httpx.Error(w, fmt.Sprintf("the bundle is %s %s %s, the package names %s %s %s", shortKind(m.Kind), m.Name, m.Version, shortKind(pkg.Kind), pkg.Name, pkg.Version), http.StatusBadRequest)
 		return
 	}
 	now := s.nowTime().UnixMilli()
 	ver, err := contentVersionRow(cpkg, key, len(raw), claims.Subject, now)
 	if err != nil {
 		obs.ServerError(w, "encode content manifest failed", err)
-		http.Error(w, "encode content manifest failed", http.StatusInternalServerError)
+		httpx.Error(w, "encode content manifest failed", http.StatusInternalServerError)
 		return
 	}
 	ver.Signature = strings.TrimSpace(req.Signature)
@@ -213,11 +214,11 @@ func (s *Service) installPlatformContent(w http.ResponseWriter, r *http.Request,
 	var conflict platformConflict
 	switch {
 	case errors.As(err, &conflict):
-		http.Error(w, conflict.Error(), http.StatusConflict)
+		httpx.Error(w, conflict.Error(), http.StatusConflict)
 		return
 	case err != nil:
 		obs.ServerError(w, "install platform content failed", err)
-		http.Error(w, "install platform content failed", http.StatusInternalServerError)
+		httpx.Error(w, "install platform content failed", http.StatusInternalServerError)
 		return
 	}
 	signed := "unsigned (dev)"
@@ -225,7 +226,7 @@ func (s *Service) installPlatformContent(w http.ResponseWriter, r *http.Request,
 		signed = "signed by key " + keyID
 	}
 	s.auditContent(ctx, "install", claims.Subject, "", c, m.Version, contentshare.Label(c)+" v"+m.Version+" installed for every organization by "+claims.Subject+", "+signed+", publisher "+pkg.Publisher)
-	writeJSON(w, http.StatusOK, contentInstallReply{ID: c.ID, Name: c.Name, Kind: shortKind(c.Kind), Version: m.Version, Scope: string(c.Scope), Status: string(c.Status)})
+	httpx.WriteJSON(w, http.StatusOK, contentInstallReply{ID: c.ID, Name: c.Name, Kind: shortKind(c.Kind), Version: m.Version, Scope: string(c.Scope), Status: string(c.Status)})
 }
 
 // platformConflict is an install that would rewrite an installed version.
@@ -355,28 +356,28 @@ func (s *Service) platformContentByName(w http.ResponseWriter, r *http.Request, 
 	rows, err := s.ContentComponents.ListContentComponents(ctx, store.ContentComponentQuery{Kind: kind, Name: name, Scopes: []store.ContentScope{store.ContentScopePlatform}})
 	if err != nil {
 		obs.ServerError(w, "load platform content failed", err)
-		http.Error(w, "load platform content failed", http.StatusInternalServerError)
+		httpx.Error(w, "load platform content failed", http.StatusInternalServerError)
 		return store.ContentComponent{}, false, true
 	}
 	switch {
 	case len(rows) == 0 && kind != "":
-		http.Error(w, "component not found", http.StatusNotFound)
+		httpx.Error(w, "component not found", http.StatusNotFound)
 		return store.ContentComponent{}, false, true
 	case len(rows) == 0:
 		return store.ContentComponent{}, false, false
 	case len(rows) > 1:
-		http.Error(w, errAmbiguousComponent.Error(), http.StatusConflict)
+		httpx.Error(w, errAmbiguousComponent.Error(), http.StatusConflict)
 		return store.ContentComponent{}, false, true
 	}
 	if kind == "" {
 		_, found, err := s.findComponentRecord(ctx, "", name)
 		if err != nil && !errors.Is(err, errAmbiguousComponent) {
 			obs.ServerError(w, "load components failed", err)
-			http.Error(w, "load components failed", http.StatusInternalServerError)
+			httpx.Error(w, "load components failed", http.StatusInternalServerError)
 			return store.ContentComponent{}, false, true
 		}
 		if found || err != nil {
-			http.Error(w, errAmbiguousComponent.Error(), http.StatusConflict)
+			httpx.Error(w, errAmbiguousComponent.Error(), http.StatusConflict)
 			return store.ContentComponent{}, false, true
 		}
 	}
@@ -390,7 +391,7 @@ func (s *Service) setPlatformContentTenants(w http.ResponseWriter, r *http.Reque
 	var tenants []string
 	if !req.AllTenants {
 		if tenants = extpipe.NormalizeTenants(req.EnabledTenants); len(tenants) == 0 {
-			http.Error(w, extpipe.ErrNoTenants.Error(), http.StatusBadRequest)
+			httpx.Error(w, extpipe.ErrNoTenants.Error(), http.StatusBadRequest)
 			return
 		}
 	}

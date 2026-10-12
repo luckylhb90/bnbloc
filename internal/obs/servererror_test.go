@@ -53,15 +53,45 @@ func TestMiddlewareLogs5xxWithCause(t *testing.T) {
 }
 
 // TestNoSilent5xx is the static guard of the ServerError convention: in
-// every non-test Go file under services/ and internal/ (internal/obs owns
-// the convention and is exempt), a call that passes a constant 5xx status —
-// http.Error(w, msg, 500), writeErr(w, 503, ...), w.WriteHeader(502), ... —
-// must be preceded in its block by a log call: obs.ServerError, or a
-// slog/log/logger call. When the write's branch is about an error (see
-// branchErr), that log call must name it. A status held in a variable is invisible
-// here; such helpers call ServerError in their 5xx branch by convention.
+// every non-test Go file under services/ and internal/ (internal/obs and
+// internal/httpx own the convention and are exempt), a call that passes a
+// constant 5xx status — httpx.Error(w, msg, 500), w.WriteHeader(502), ... —
+// must be preceded in its block by obs.ServerError (a bare slog/log line
+// does not count: the request's own log line would still say
+// what=unrecorded). When the write's branch is about an error (see
+// branchErr), that call must name it. A status held in a variable goes
+// through httpx.WriteStatus (TestErrorStatusesThroughWriteStatus).
 func TestNoSilent5xx(t *testing.T) {
+	problems := scanServiceSources(t, silent5xx)
+	if len(problems) > 0 {
+		t.Fatalf("%d 5xx response(s) without a logged cause; add obs.ServerError(w, \"<what failed>\", <err>) before the write:\n  %s",
+			len(problems), strings.Join(problems, "\n  "))
+	}
+}
+
+// TestErrorStatusesThroughWriteStatus: an error response whose status is
+// computed at run time (a mapping helper's result, an upstream's status)
+// may be a 5xx that TestNoSilent5xx cannot see, so it is written only by
+// httpx.WriteStatus, which records the cause of any 5xx. An upstream's
+// status is never written through as-is (w.WriteHeader(resp.StatusCode)).
+func TestErrorStatusesThroughWriteStatus(t *testing.T) {
+	problems := scanServiceSources(t, variableErrorStatus)
+	if len(problems) > 0 {
+		t.Fatalf("%d error write(s) with a run-time status; use httpx.WriteStatus(w, status, msg, err):\n  %s",
+			len(problems), strings.Join(problems, "\n  "))
+	}
+}
+
+// scanServiceSources runs check over every non-test Go file under
+// services/ and internal/ except the convention's owners, returning
+// "<file>:<finding>" sorted.
+func scanServiceSources(t *testing.T, check func(path string) ([]string, error)) []string {
+	t.Helper()
 	root := filepath.Join("..", "..")
+	owners := map[string]bool{
+		filepath.Join(root, "internal", "obs"):   true,
+		filepath.Join(root, "internal", "httpx"): true,
+	}
 	var problems []string
 	for _, dir := range []string{"services", "internal"} {
 		err := filepath.WalkDir(filepath.Join(root, dir), func(path string, d fs.DirEntry, err error) error {
@@ -69,7 +99,7 @@ func TestNoSilent5xx(t *testing.T) {
 				return err
 			}
 			if d.IsDir() {
-				if d.Name() == "testdata" || path == filepath.Join(root, "internal", "obs") {
+				if d.Name() == "testdata" || owners[path] {
 					return filepath.SkipDir
 				}
 				return nil
@@ -77,7 +107,7 @@ func TestNoSilent5xx(t *testing.T) {
 			if !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
 				return nil
 			}
-			found, err := silent5xx(path)
+			found, err := check(path)
 			if err != nil {
 				return err
 			}
@@ -92,10 +122,48 @@ func TestNoSilent5xx(t *testing.T) {
 		}
 	}
 	sort.Strings(problems)
-	if len(problems) > 0 {
-		t.Fatalf("%d 5xx response(s) without a logged cause; add obs.ServerError(w, \"<what failed>\", <err>) before the write:\n  %s",
-			len(problems), strings.Join(problems, "\n  "))
+	return problems
+}
+
+// variableErrorStatus returns "<line>: <call>" for every error write
+// (httpx.Error, http.Error) whose status is not a constant, and every
+// WriteHeader of an upstream's StatusCode.
+func variableErrorStatus(path string) ([]string, error) {
+	fset := token.NewFileSet()
+	f, err := parser.ParseFile(fset, path, nil, 0)
+	if err != nil {
+		return nil, err
 	}
+	var out []string
+	ast.Inspect(f, func(n ast.Node) bool {
+		call, ok := n.(*ast.CallExpr)
+		if !ok {
+			return true
+		}
+		name := callName(call)
+		switch {
+		case (name == "httpx.Error" || name == "http.Error") && len(call.Args) == 3 && !constantStatus(call.Args[2]):
+			out = append(out, strconv.Itoa(fset.Position(call.Pos()).Line)+": "+name)
+		case strings.HasSuffix(name, ".WriteHeader") && len(call.Args) == 1:
+			if sel, ok := call.Args[0].(*ast.SelectorExpr); ok && sel.Sel.Name == "StatusCode" {
+				out = append(out, strconv.Itoa(fset.Position(call.Pos()).Line)+": "+name+"(…StatusCode)")
+			}
+		}
+		return true
+	})
+	return out, nil
+}
+
+// constantStatus reports an http.StatusX selector or an integer literal.
+func constantStatus(e ast.Expr) bool {
+	switch v := e.(type) {
+	case *ast.SelectorExpr:
+		x, ok := v.X.(*ast.Ident)
+		return ok && x.Name == "http" && strings.HasPrefix(v.Sel.Name, "Status")
+	case *ast.BasicLit:
+		return v.Kind == token.INT
+	}
+	return false
 }
 
 // silent5xx returns "<line>: <call>" for every unlogged 5xx write in path.
@@ -145,7 +213,7 @@ func has5xxArg(call *ast.CallExpr) bool {
 
 func writesStatus(call *ast.CallExpr) bool {
 	switch callName(call) {
-	case "http.Error", "writeErr", "writeJSON":
+	case "http.Error", "httpx.Error", "httpx.WriteJSON":
 		return true
 	}
 	return strings.HasSuffix(callName(call), ".WriteHeader")
@@ -174,6 +242,10 @@ func isLogCall(call *ast.CallExpr) bool {
 			return true
 		case "obs":
 			return sel.Sel.Name == "ServerError"
+		case "httpx":
+			// httpx.Error writes the response; WriteStatus and Unavailable
+			// record their own cause.
+			return recordsCause(call)
 		case "http":
 			return false // http.Error writes the response
 		}
@@ -185,9 +257,21 @@ func isLogCall(call *ast.CallExpr) bool {
 	return false
 }
 
+// recordsCause reports a call that records a 5xx's cause on the request's
+// log line: obs.ServerError, or an httpx writer that calls it. A bare
+// slog/log line is not one: it is a second, unstructured line, and the
+// request's own line would still say what=unrecorded.
+func recordsCause(call *ast.CallExpr) bool {
+	switch callName(call) {
+	case "obs.ServerError", "httpx.WriteStatus", "httpx.Unavailable":
+		return true
+	}
+	return false
+}
+
 // loggedBefore reports whether a statement before the write, in the block
-// that holds it, is a log call naming the branch's error (when the write
-// is in an `if <err> != nil` branch).
+// that holds it, records the cause (recordsCause) naming the branch's error
+// (when the write is in an `if <err> != nil` branch).
 func loggedBefore(stack []ast.Node, call *ast.CallExpr) bool {
 	errName := branchErr(stack)
 	for i := len(stack) - 1; i >= 1; i-- {
@@ -294,7 +378,7 @@ func logs(s ast.Stmt, errName string) bool {
 		return false
 	}
 	call, ok := es.X.(*ast.CallExpr)
-	if !ok || !isLogCall(call) {
+	if !ok || !recordsCause(call) {
 		return false
 	}
 	if errName == "" {

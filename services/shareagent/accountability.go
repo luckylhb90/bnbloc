@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/luckylhb90/bnbloc/internal/httpx"
 	"github.com/luckylhb90/bnbloc/internal/membership"
 	"github.com/luckylhb90/bnbloc/internal/obs"
 	"github.com/luckylhb90/bnbloc/internal/roomctx"
@@ -61,7 +62,7 @@ const maxRecordedModel = 128
 func (s *Service) handleRecordBorrow(w http.ResponseWriter, r *http.Request) {
 	roomID, err := roomctx.Normalize(r.PathValue("roomId"))
 	if err != nil {
-		writeErr(w, http.StatusBadRequest, err.Error())
+		httpx.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 	caller := callerSubject(r)
@@ -71,30 +72,30 @@ func (s *Service) handleRecordBorrow(w http.ResponseWriter, r *http.Request) {
 	owner := strings.TrimSpace(r.URL.Query().Get("owner"))
 	provider := providerFromTarget(r.PathValue("targetId"))
 	if owner == "" || provider == "" {
-		writeErr(w, http.StatusBadRequest, "owner and shared-agent:<provider> target required")
+		httpx.Error(w, "owner and shared-agent:<provider> target required", http.StatusBadRequest)
 		return
 	}
 	if caller != owner {
-		writeErr(w, http.StatusForbidden, "only the agent owner may record a borrow")
+		httpx.Error(w, "only the agent owner may record a borrow", http.StatusForbidden)
 		return
 	}
 	var body recordBorrowBody
-	if !decodeJSON(w, r, &body) {
+	if !httpx.DecodeJSON(w, r, httpx.DefaultBodyLimit, &body) {
 		return
 	}
 	reservationID := strings.TrimSpace(body.ReservationId)
 	if reservationID == "" {
-		writeErr(w, http.StatusBadRequest, "reservationId required")
+		httpx.Error(w, "reservationId required", http.StatusBadRequest)
 		return
 	}
 	// NaN fails every comparison, so test the admissible range positively.
 	if body.Cost != nil && !(*body.Cost >= 0 && *body.Cost <= maxRecordedCost) {
-		writeErr(w, http.StatusBadRequest, "cost must be between 0 and 1000000")
+		httpx.Error(w, "cost must be between 0 and 1000000", http.StatusBadRequest)
 		return
 	}
 	for _, n := range []*int64{body.InputTokens, body.OutputTokens} {
 		if n != nil && (*n < 0 || *n > maxRecordedTokens) {
-			writeErr(w, http.StatusBadRequest, "token counts must be between 0 and 1000000000000")
+			httpx.Error(w, "token counts must be between 0 and 1000000000000", http.StatusBadRequest)
 			return
 		}
 	}
@@ -109,16 +110,16 @@ func (s *Service) handleRecordBorrow(w http.ResponseWriter, r *http.Request) {
 	}
 	switch {
 	case err == nil:
-		writeJSON(w, http.StatusOK, map[string]any{"recorded": true})
+		httpx.WriteJSON(w, http.StatusOK, map[string]any{"recorded": true})
 	case errors.Is(err, store.ErrReservationNotFound):
-		writeJSON(w, http.StatusNotFound, map[string]any{"recorded": false, "error": "reservation not found"})
+		httpx.WriteJSON(w, http.StatusNotFound, map[string]any{"recorded": false, "error": "reservation not found"})
 	case errors.Is(err, store.ErrReservationSettled):
-		writeJSON(w, http.StatusConflict, map[string]any{"recorded": false, "error": "reservation already settled"})
+		httpx.WriteJSON(w, http.StatusConflict, map[string]any{"recorded": false, "error": "reservation already settled"})
 	case errors.Is(err, store.ErrReservationExpired):
-		writeJSON(w, http.StatusConflict, map[string]any{"recorded": false, "error": "reservation expired"})
+		httpx.WriteJSON(w, http.StatusConflict, map[string]any{"recorded": false, "error": "reservation expired"})
 	default:
 		obs.ServerError(w, "record borrow failed", err)
-		writeErr(w, http.StatusInternalServerError, "record borrow failed")
+		httpx.Error(w, "record borrow failed", http.StatusInternalServerError)
 	}
 }
 
@@ -130,21 +131,22 @@ func (s *Service) handleTenantUsage(w http.ResponseWriter, r *http.Request) {
 	runs, cost, err := s.Grants.TenantUsage(r.Context())
 	if err != nil {
 		obs.ServerError(w, "read tenant usage failed", err)
-		writeErr(w, http.StatusInternalServerError, "read tenant usage failed")
+		httpx.Error(w, "read tenant usage failed", http.StatusInternalServerError)
 		return
 	}
 	runQuota, costAllowance, err := s.tenantCeilings(r.Context())
 	if err != nil {
 		obs.ServerError(w, "read tenant ceilings failed", err)
-		writeErr(w, http.StatusInternalServerError, "read tenant ceilings failed")
+		httpx.Error(w, "read tenant ceilings failed", http.StatusInternalServerError)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{
 		"runsUsed":      runs,
 		"costUsed":      cost,
 		"runQuota":      runQuota,
 		"costAllowance": costAllowance,
 	})
+
 }
 
 // tenantCeilings resolves the ctx tenant's org-level run/cost ceilings from the
@@ -180,7 +182,7 @@ type authorizationView struct {
 func (s *Service) handleOwnerAuthorizations(w http.ResponseWriter, r *http.Request) {
 	roomID, err := roomctx.Normalize(r.PathValue("roomId"))
 	if err != nil {
-		writeErr(w, http.StatusBadRequest, err.Error())
+		httpx.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 	owner := callerSubject(r)
@@ -236,5 +238,5 @@ func (s *Service) handleOwnerAuthorizations(w http.ResponseWriter, r *http.Reque
 		}
 		views = append(views, v)
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"owner": owner, "authorizations": views})
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"owner": owner, "authorizations": views})
 }

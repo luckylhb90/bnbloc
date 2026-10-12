@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/luckylhb90/bnbloc/internal/httpx"
 	"github.com/luckylhb90/bnbloc/internal/obs"
 	"github.com/luckylhb90/bnbloc/internal/rbac"
 	"github.com/luckylhb90/bnbloc/internal/store"
@@ -23,30 +24,29 @@ import (
 // within the session TTL.
 func (s *Service) handleTenantRevokeMemberSessions(w http.ResponseWriter, r *http.Request) {
 	if s.Tenants == nil || s.RefreshTokens == nil {
-		obs.ServerError(w, "session revocation not configured", nil)
-		writeErr(w, http.StatusNotImplemented, "session revocation not configured")
+		httpx.Unavailable(w, "session revocation")
 		return
 	}
 	userID := r.PathValue("userId")
 	if userID == "" {
-		writeErr(w, http.StatusBadRequest, "missing user id")
+		httpx.Error(w, "missing user id", http.StatusBadRequest)
 		return
 	}
 	tid := tenant.FromContext(r.Context())
 	_, member, err := s.Tenants.GetMember(r.Context(), tid, userID)
 	if err != nil {
 		obs.ServerError(w, "read membership failed", err)
-		writeErr(w, http.StatusInternalServerError, "read membership failed")
+		httpx.Error(w, "read membership failed", http.StatusInternalServerError)
 		return
 	}
 	if !member {
-		writeErr(w, http.StatusNotFound, "member not found")
+		httpx.Error(w, "member not found", http.StatusNotFound)
 		return
 	}
 	n, err := s.RefreshTokens.RevokeRefreshFamilies(r.Context(), store.RefreshRevokeFilter{Subject: userID}, s.nowMs())
 	if err != nil {
 		obs.ServerError(w, "revoke sessions failed", err)
-		writeErr(w, http.StatusInternalServerError, "revoke sessions failed")
+		httpx.Error(w, "revoke sessions failed", http.StatusInternalServerError)
 		return
 	}
 	log.Printf("bnbloc-shareagent: %s revoked %d session(s) of %s (tenant %s)", callerSubject(r), n, userID, tid)
@@ -54,7 +54,7 @@ func (s *Service) handleTenantRevokeMemberSessions(w http.ResponseWriter, r *htt
 		Kind: wire.AuditKindSession, Name: userID, Action: "revoke_member", Actor: callerSubject(r),
 		TenantID: tid, Detail: "revoked=" + strconv.Itoa(n),
 	})
-	writeJSON(w, http.StatusOK, map[string]any{"userId": userID, "revoked": n})
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"userId": userID, "revoked": n})
 }
 
 // revokeSessionsFor revokes refresh families matching filter after an

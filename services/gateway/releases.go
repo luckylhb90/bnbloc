@@ -4,11 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/luckylhb90/bnbloc/internal/semver"
 	"net/http"
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/luckylhb90/bnbloc/internal/httpx"
+	"github.com/luckylhb90/bnbloc/internal/semver"
 
 	"github.com/luckylhb90/bnbloc/internal/config"
 	"github.com/luckylhb90/bnbloc/internal/obs"
@@ -127,13 +129,13 @@ func validateReleaseEntry(entry wire.ReleaseEntry) error {
 // download URLs are admin-supplied and should not be exposed unauthenticated).
 func (s *Service) handleAppReleases(w http.ResponseWriter, r *http.Request) {
 	if _, err := s.authenticate(r); err != nil {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		httpx.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
 	hub, err := loadReleaseHub(r.Context(), s.PlatformSettings)
 	if err != nil {
 		obs.ServerError(w, "load releases failed", err)
-		http.Error(w, "load releases failed", http.StatusInternalServerError)
+		httpx.Error(w, "load releases failed", http.StatusInternalServerError)
 		return
 	}
 	// Deployment without curated release history: BNBLOC_DESKTOP_DOWNLOAD_URL
@@ -143,7 +145,7 @@ func (s *Service) handleAppReleases(w http.ResponseWriter, r *http.Request) {
 			hub.Releases = []wire.ReleaseEntry{{Version: "latest", Files: []wire.ReleaseFile{{Platform: "any", Arch: "any", URL: url, Name: "bnbloc-desktop"}}}}
 		}
 	}
-	writeJSON(w, http.StatusOK, hub)
+	httpx.WriteJSON(w, http.StatusOK, hub)
 }
 
 // handlePlatformReleases is the super-admin editor read: full history + intro.
@@ -154,10 +156,10 @@ func (s *Service) handlePlatformReleases(w http.ResponseWriter, r *http.Request)
 	hub, err := loadReleaseHub(r.Context(), s.PlatformSettings)
 	if err != nil {
 		obs.ServerError(w, "load releases failed", err)
-		http.Error(w, "load releases failed", http.StatusInternalServerError)
+		httpx.Error(w, "load releases failed", http.StatusInternalServerError)
 		return
 	}
-	writeJSON(w, http.StatusOK, hub)
+	httpx.WriteJSON(w, http.StatusOK, hub)
 }
 
 // handlePlatformReleaseMetaPut updates the project intro (name/tagline/intro).
@@ -167,21 +169,19 @@ func (s *Service) handlePlatformReleaseMetaPut(w http.ResponseWriter, r *http.Re
 		return
 	}
 	var meta wire.ReleaseHubMeta
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64*1024)).Decode(&meta); err != nil {
-		http.Error(w, "invalid json body", http.StatusBadRequest)
+	if !httpx.DecodeJSON(w, r, 64*1024, &meta) {
 		return
 	}
 	if s.PlatformSettings == nil {
-		obs.ServerError(w, "platform settings store not configured", nil)
-		http.Error(w, "platform settings store not configured", http.StatusInternalServerError)
+		httpx.Unavailable(w, "platform settings store")
 		return
 	}
 	if err := saveReleaseHubMeta(r.Context(), s.PlatformSettings, meta, claims.Subject, s.Now().UnixMilli()); err != nil {
 		obs.ServerError(w, "save release meta failed", err)
-		http.Error(w, "save release meta failed", http.StatusInternalServerError)
+		httpx.Error(w, "save release meta failed", http.StatusInternalServerError)
 		return
 	}
-	writeJSON(w, http.StatusOK, meta)
+	httpx.WriteJSON(w, http.StatusOK, meta)
 }
 
 // handlePlatformReleasePut creates or updates one version entry.
@@ -191,8 +191,7 @@ func (s *Service) handlePlatformReleasePut(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	var entry wire.ReleaseEntry
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 256*1024)).Decode(&entry); err != nil {
-		http.Error(w, "invalid json body", http.StatusBadRequest)
+	if !httpx.DecodeJSON(w, r, 256*1024, &entry) {
 		return
 	}
 	entry.Version = strings.TrimSpace(r.PathValue("version"))
@@ -200,22 +199,21 @@ func (s *Service) handlePlatformReleasePut(w http.ResponseWriter, r *http.Reques
 		entry.Files = []wire.ReleaseFile{}
 	}
 	if err := validateReleaseEntry(entry); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		httpx.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 	if s.PlatformSettings == nil {
-		obs.ServerError(w, "platform settings store not configured", nil)
-		http.Error(w, "platform settings store not configured", http.StatusInternalServerError)
+		httpx.Unavailable(w, "platform settings store")
 		return
 	}
 	entry.CreatedAtMs = s.Now().UnixMilli()
 	entry.CreatedBy = claims.Subject
 	if err := saveReleaseEntry(r.Context(), s.PlatformSettings, entry, claims.Subject, entry.CreatedAtMs); err != nil {
 		obs.ServerError(w, "save release failed", err)
-		http.Error(w, "save release failed", http.StatusInternalServerError)
+		httpx.Error(w, "save release failed", http.StatusInternalServerError)
 		return
 	}
-	writeJSON(w, http.StatusOK, entry)
+	httpx.WriteJSON(w, http.StatusOK, entry)
 }
 
 // handlePlatformReleaseDelete removes a version entry. Deletion here is a hard
@@ -227,17 +225,16 @@ func (s *Service) handlePlatformReleaseDelete(w http.ResponseWriter, r *http.Req
 	}
 	version := strings.TrimSpace(r.PathValue("version"))
 	if version == "" {
-		http.Error(w, "version required", http.StatusBadRequest)
+		httpx.Error(w, "version required", http.StatusBadRequest)
 		return
 	}
 	if s.PlatformSettings == nil {
-		obs.ServerError(w, "platform settings store not configured", nil)
-		http.Error(w, "platform settings store not configured", http.StatusInternalServerError)
+		httpx.Unavailable(w, "platform settings store")
 		return
 	}
 	if err := s.PlatformSettings.DeletePlatformSetting(r.Context(), releaseHistoryKey(version)); err != nil {
 		obs.ServerError(w, "delete release failed", err)
-		http.Error(w, "delete release failed", http.StatusInternalServerError)
+		httpx.Error(w, "delete release failed", http.StatusInternalServerError)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

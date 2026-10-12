@@ -7,6 +7,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/luckylhb90/bnbloc/internal/httpx"
 	"github.com/luckylhb90/bnbloc/internal/ids"
 	"github.com/luckylhb90/bnbloc/internal/membership"
 	"github.com/luckylhb90/bnbloc/internal/obs"
@@ -58,18 +59,17 @@ func validRuns(n *int) bool { return n == nil || (*n >= 1 && *n <= maxQuotaReque
 // raise otherwise).
 func (s *Service) handleCreateQuotaRequest(w http.ResponseWriter, r *http.Request) {
 	if s.QuotaRequests == nil {
-		obs.ServerError(w, "quota requests not configured", nil)
-		writeErr(w, http.StatusNotImplemented, "quota requests not configured")
+		httpx.Unavailable(w, "quota requests")
 		return
 	}
 	requester := callerSubject(r)
 	var in wire.CreateQuotaRequestInput
-	if !decodeJSON(w, r, &in) {
+	if !httpx.DecodeJSON(w, r, httpx.DefaultBodyLimit, &in) {
 		return
 	}
 	roomID, err := roomctx.Normalize(in.RoomID)
 	if err != nil {
-		writeErr(w, http.StatusBadRequest, err.Error())
+		httpx.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 	// Asking for more runs is part of borrowing: a member who may chat.
@@ -79,29 +79,29 @@ func (s *Service) handleCreateQuotaRequest(w http.ResponseWriter, r *http.Reques
 	owner := strings.TrimSpace(in.Owner)
 	provider := strings.TrimSpace(in.Provider)
 	if owner == "" || provider == "" {
-		writeErr(w, http.StatusBadRequest, "owner and provider are required")
+		httpx.Error(w, "owner and provider are required", http.StatusBadRequest)
 		return
 	}
 	if owner == requester {
-		writeErr(w, http.StatusBadRequest, "you cannot request quota on your own agent")
+		httpx.Error(w, "you cannot request quota on your own agent", http.StatusBadRequest)
 		return
 	}
 	if !validRuns(in.RequestedRuns) {
-		writeErr(w, http.StatusBadRequest, "requestedRuns must be between 1 and 10000")
+		httpx.Error(w, "requestedRuns must be between 1 and 10000", http.StatusBadRequest)
 		return
 	}
 	note := strings.TrimSpace(in.Note)
 	if utf8.RuneCountInString(note) > maxQuotaNoteRunes {
-		writeErr(w, http.StatusBadRequest, "note must be at most 500 characters")
+		httpx.Error(w, "note must be at most 500 characters", http.StatusBadRequest)
 		return
 	}
 	grant, live := s.liveAuthorization(r.Context(), roomID, owner, provider)
 	if !live {
-		writeErr(w, http.StatusConflict, "the owner has no active authorization for this agent in this room")
+		httpx.Error(w, "the owner has no active authorization for this agent in this room", http.StatusConflict)
 		return
 	}
 	if grant.RunQuota == nil {
-		writeErr(w, http.StatusConflict, "this authorization has no run limit")
+		httpx.Error(w, "this authorization has no run limit", http.StatusConflict)
 		return
 	}
 	created, err := s.QuotaRequests.CreateQuotaRequest(r.Context(), store.QuotaRequest{
@@ -115,32 +115,32 @@ func (s *Service) handleCreateQuotaRequest(w http.ResponseWriter, r *http.Reques
 		CreatedAtMs:     s.Now(),
 	})
 	if errors.Is(err, store.ErrQuotaRequestPending) {
-		writeJSON(w, http.StatusConflict, map[string]any{
+		httpx.WriteJSON(w, http.StatusConflict, map[string]any{
 			"error":   "you already have a pending request for this agent",
 			"request": quotaRequestView(created),
 		})
+
 		return
 	}
 	if err != nil {
 		obs.ServerError(w, "create quota request failed", err)
-		writeErr(w, http.StatusInternalServerError, "create quota request failed")
+		httpx.Error(w, "create quota request failed", http.StatusInternalServerError)
 		return
 	}
 	s.notifyQuotaRequest(r.Context(), created)
-	writeJSON(w, http.StatusCreated, map[string]any{"request": quotaRequestView(created)})
+	httpx.WriteJSON(w, http.StatusCreated, map[string]any{"request": quotaRequestView(created)})
 }
 
 // handleListQuotaRequests lists the caller's requests: role=owner those
 // addressed to the caller, role=requester (default) those the caller made.
 func (s *Service) handleListQuotaRequests(w http.ResponseWriter, r *http.Request) {
 	if s.QuotaRequests == nil {
-		obs.ServerError(w, "quota requests not configured", nil)
-		writeErr(w, http.StatusNotImplemented, "quota requests not configured")
+		httpx.Unavailable(w, "quota requests")
 		return
 	}
 	caller := callerSubject(r)
 	if caller == "" {
-		writeErr(w, http.StatusUnauthorized, "missing authenticated subject")
+		httpx.Error(w, "missing authenticated subject", http.StatusUnauthorized)
 		return
 	}
 	query := r.URL.Query()
@@ -151,20 +151,20 @@ func (s *Service) handleListQuotaRequests(w http.ResponseWriter, r *http.Request
 	case "", "requester":
 		q.RequesterUserID = caller
 	default:
-		writeErr(w, http.StatusBadRequest, "role must be owner or requester")
+		httpx.Error(w, "role must be owner or requester", http.StatusBadRequest)
 		return
 	}
 	switch status := store.QuotaRequestStatus(query.Get("status")); status {
 	case "", store.QuotaRequestPending, store.QuotaRequestApproved, store.QuotaRequestDeclined:
 		q.Status = status
 	default:
-		writeErr(w, http.StatusBadRequest, "status must be pending, approved, or declined")
+		httpx.Error(w, "status must be pending, approved, or declined", http.StatusBadRequest)
 		return
 	}
 	if v := query.Get("roomId"); v != "" {
 		roomID, err := roomctx.Normalize(v)
 		if err != nil {
-			writeErr(w, http.StatusBadRequest, err.Error())
+			httpx.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
 		q.RoomID = roomID
@@ -174,7 +174,7 @@ func (s *Service) handleListQuotaRequests(w http.ResponseWriter, r *http.Request
 	for _, rq := range reqs {
 		out = append(out, quotaRequestView(rq))
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"requests": out})
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"requests": out})
 }
 
 // decidableRequest loads a pending request the caller owns, writing the error
@@ -182,26 +182,25 @@ func (s *Service) handleListQuotaRequests(w http.ResponseWriter, r *http.Request
 // requester, whatever the body says.
 func (s *Service) decidableRequest(w http.ResponseWriter, r *http.Request) (store.QuotaRequest, bool) {
 	if s.QuotaRequests == nil {
-		obs.ServerError(w, "quota requests not configured", nil)
-		writeErr(w, http.StatusNotImplemented, "quota requests not configured")
+		httpx.Unavailable(w, "quota requests")
 		return store.QuotaRequest{}, false
 	}
 	caller := callerSubject(r)
 	if caller == "" {
-		writeErr(w, http.StatusUnauthorized, "missing authenticated subject")
+		httpx.Error(w, "missing authenticated subject", http.StatusUnauthorized)
 		return store.QuotaRequest{}, false
 	}
 	req, err := s.QuotaRequests.GetQuotaRequest(r.Context(), r.PathValue("requestId"))
 	if err != nil {
-		writeErr(w, http.StatusNotFound, "quota request not found")
+		httpx.Error(w, "quota request not found", http.StatusNotFound)
 		return store.QuotaRequest{}, false
 	}
 	if req.OwnerUserID != caller {
-		writeErr(w, http.StatusForbidden, "only the agent owner may decide this request")
+		httpx.Error(w, "only the agent owner may decide this request", http.StatusForbidden)
 		return store.QuotaRequest{}, false
 	}
 	if req.Status != store.QuotaRequestPending {
-		writeErr(w, http.StatusConflict, "quota request already decided")
+		httpx.Error(w, "quota request already decided", http.StatusConflict)
 		return store.QuotaRequest{}, false
 	}
 	return req, true
@@ -217,7 +216,7 @@ func (s *Service) handleApproveQuotaRequest(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	var in wire.ApproveQuotaRequestInput
-	if !decodeOptionalJSON(w, r, &in) {
+	if !httpx.DecodeOptionalJSON(w, r, httpx.DefaultBodyLimit, &in) {
 		return
 	}
 	runs := in.Runs
@@ -225,16 +224,16 @@ func (s *Service) handleApproveQuotaRequest(w http.ResponseWriter, r *http.Reque
 		runs = req.RequestedRuns
 	}
 	if runs == nil {
-		writeErr(w, http.StatusBadRequest, "runs is required (the request named no amount)")
+		httpx.Error(w, "runs is required (the request named no amount)", http.StatusBadRequest)
 		return
 	}
 	if !validRuns(runs) {
-		writeErr(w, http.StatusBadRequest, "runs must be between 1 and 10000")
+		httpx.Error(w, "runs must be between 1 and 10000", http.StatusBadRequest)
 		return
 	}
 	owner := callerSubject(r)
 	if _, live := s.liveAuthorization(r.Context(), req.RoomID, owner, req.Provider); !live {
-		writeErr(w, http.StatusConflict, "your authorization for this agent is no longer active; authorize it again first")
+		httpx.Error(w, "your authorization for this agent is no longer active; authorize it again first", http.StatusConflict)
 		return
 	}
 	decided, err := s.QuotaRequests.DecideQuotaRequest(r.Context(), store.QuotaDecision{
@@ -251,18 +250,18 @@ func (s *Service) handleApproveQuotaRequest(w http.ResponseWriter, r *http.Reque
 		// approved with no effect.
 		_ = s.QuotaRequests.ReopenQuotaRequest(r.Context(), req.RequestID)
 		if errors.Is(err, store.ErrGrantNotFound) || errors.Is(err, store.ErrRunQuotaUnlimited) {
-			writeErr(w, http.StatusConflict, "your authorization for this agent changed; try again")
+			httpx.Error(w, "your authorization for this agent changed; try again", http.StatusConflict)
 			return
 		}
 		obs.ServerError(w, "raise run quota failed", err)
-		writeErr(w, http.StatusInternalServerError, "raise run quota failed")
+		httpx.Error(w, "raise run quota failed", http.StatusInternalServerError)
 		return
 	}
 	resp := map[string]any{"request": quotaRequestView(decided), "runsUsed": grant.RunsUsed}
 	if grant.RunQuota != nil {
 		resp["runQuota"] = *grant.RunQuota
 	}
-	writeJSON(w, http.StatusOK, resp)
+	httpx.WriteJSON(w, http.StatusOK, resp)
 }
 
 // handleDeclineQuotaRequest declines a pending request (owner only).
@@ -278,18 +277,18 @@ func (s *Service) handleDeclineQuotaRequest(w http.ResponseWriter, r *http.Reque
 		s.writeDecideErr(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"request": quotaRequestView(decided)})
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"request": quotaRequestView(decided)})
 }
 
 func (s *Service) writeDecideErr(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, store.ErrQuotaRequestDecided):
-		writeErr(w, http.StatusConflict, "quota request already decided")
+		httpx.Error(w, "quota request already decided", http.StatusConflict)
 	case errors.Is(err, store.ErrQuotaRequestNotFound):
-		writeErr(w, http.StatusNotFound, "quota request not found")
+		httpx.Error(w, "quota request not found", http.StatusNotFound)
 	default:
 		obs.ServerError(w, "decide quota request failed", err)
-		writeErr(w, http.StatusInternalServerError, "decide quota request failed")
+		httpx.Error(w, "decide quota request failed", http.StatusInternalServerError)
 	}
 }
 

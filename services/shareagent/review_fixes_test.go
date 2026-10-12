@@ -9,6 +9,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/luckylhb90/bnbloc/internal/httpx"
 	"github.com/luckylhb90/bnbloc/internal/store"
 	"github.com/luckylhb90/bnbloc/internal/tenant"
 )
@@ -212,7 +213,7 @@ func TestShareagentRejectsOversizedBody(t *testing.T) {
 	svc, _ := newService(t, "")
 	srv := httptest.NewServer(svc.Handler())
 	defer srv.Close()
-	huge := `{"allowedModels":["` + strings.Repeat("m", maxJSONBodyBytes) + `"]}`
+	huge := `{"allowedModels":["` + strings.Repeat("m", httpx.DefaultBodyLimit) + `"]}`
 	put, _ := http.NewRequest(http.MethodPut,
 		srv.URL+"/v1/rooms/room-1/shared-agents/shared-agent:codex/authorization", strings.NewReader(huge))
 	put.Header.Set("X-Bnbloc-User", "alice")

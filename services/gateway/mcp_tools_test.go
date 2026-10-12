@@ -100,7 +100,7 @@ func TestContentSaveChecksMCPReferences(t *testing.T) {
 	}
 	for i, c := range cases {
 		code, raw := g.json("maya", http.MethodPost, "/v1/content-components", mcpExpert(c.requires))
-		if code != c.code || !strings.Contains(string(raw), c.want) {
+		if code != c.code || !strings.Contains(errorMessage(raw), c.want) {
 			t.Fatalf("case %d = %d %s", i, code, raw)
 		}
 	}

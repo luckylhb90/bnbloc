@@ -2,7 +2,6 @@ package gateway
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -10,6 +9,7 @@ import (
 
 	"github.com/luckylhb90/bnbloc/internal/auth"
 	"github.com/luckylhb90/bnbloc/internal/authprovider"
+	"github.com/luckylhb90/bnbloc/internal/httpx"
 	"github.com/luckylhb90/bnbloc/internal/obs"
 	"github.com/luckylhb90/bnbloc/internal/orgsync"
 )
@@ -65,16 +65,14 @@ func (s *Service) orgSyncAdmin(w http.ResponseWriter, r *http.Request) (auth.Cla
 	}
 	if s.OrgSync == nil {
 		obs.ServerError(w, "organization sync not configured (no tenant store)", nil)
-		http.Error(w, "organization sync not configured (no tenant store)", http.StatusNotImplemented)
+		httpx.Error(w, "organization sync not configured (no tenant store)", http.StatusNotImplemented)
 		return auth.Claims{}, false
 	}
 	return claims, true
 }
 
 func decodeOrgSyncBody(w http.ResponseWriter, r *http.Request, v any) bool {
-	r.Body = http.MaxBytesReader(w, r.Body, maxOrgSyncBodyBytes)
-	if err := json.NewDecoder(r.Body).Decode(v); err != nil {
-		http.Error(w, "invalid json body", http.StatusBadRequest)
+	if !httpx.DecodeJSON(w, r, maxOrgSyncBodyBytes, v) {
 		return false
 	}
 	return true
@@ -83,7 +81,7 @@ func decodeOrgSyncBody(w http.ResponseWriter, r *http.Request, v any) bool {
 // orgSyncFailed answers a 5xx and logs its cause.
 func orgSyncFailed(w http.ResponseWriter, op string, err error) {
 	obs.ServerError(w, "org sync "+op, err)
-	http.Error(w, "organization sync "+op+" failed", http.StatusInternalServerError)
+	httpx.Error(w, "organization sync "+op+" failed", http.StatusInternalServerError)
 }
 
 func (s *Service) handleOrgSyncRules(w http.ResponseWriter, r *http.Request) {
@@ -95,7 +93,7 @@ func (s *Service) handleOrgSyncRules(w http.ResponseWriter, r *http.Request) {
 		orgSyncFailed(w, "read rules", err)
 		return
 	}
-	writeJSON(w, http.StatusOK, set)
+	httpx.WriteJSON(w, http.StatusOK, set)
 }
 
 func (s *Service) handleOrgSyncPutRules(w http.ResponseWriter, r *http.Request) {
@@ -112,14 +110,14 @@ func (s *Service) handleOrgSyncPutRules(w http.ResponseWriter, r *http.Request) 
 	set, err := s.OrgSync.SaveRules(r.Context(), body.Rules, claims.Subject)
 	var invalid *orgsync.ValidationError
 	if errors.As(err, &invalid) {
-		http.Error(w, invalid.Error(), http.StatusBadRequest)
+		httpx.Error(w, invalid.Error(), http.StatusBadRequest)
 		return
 	}
 	if err != nil {
 		orgSyncFailed(w, "save rules", err)
 		return
 	}
-	writeJSON(w, http.StatusOK, set)
+	httpx.WriteJSON(w, http.StatusOK, set)
 }
 
 type orgSyncPreviewBody struct {
@@ -147,7 +145,7 @@ func (s *Service) handleOrgSyncPreview(w http.ResponseWriter, r *http.Request) {
 		userID = strings.TrimSpace(body.Email)
 	}
 	if userID == "" {
-		http.Error(w, "email or userId required", http.StatusBadRequest)
+		httpx.Error(w, "email or userId required", http.StatusBadRequest)
 		return
 	}
 	res, err := s.OrgSync.Apply(r.Context(), orgsync.Attributes{
@@ -157,7 +155,7 @@ func (s *Service) handleOrgSyncPreview(w http.ResponseWriter, r *http.Request) {
 		orgSyncFailed(w, "preview", err)
 		return
 	}
-	writeJSON(w, http.StatusOK, res)
+	httpx.WriteJSON(w, http.StatusOK, res)
 }
 
 // handleOrgSyncDeprovision is the directory feed's (or an operator's) way to
@@ -175,7 +173,7 @@ func (s *Service) handleOrgSyncDeprovision(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	if len(body.UserIDs) == 0 || len(body.UserIDs) > maxDeprovisionUsers {
-		http.Error(w, "userIds must list 1 to 1000 users", http.StatusBadRequest)
+		httpx.Error(w, "userIds must list 1 to 1000 users", http.StatusBadRequest)
 		return
 	}
 	results, err := s.OrgSync.Deprovision(r.Context(), body.UserIDs, claims.Subject)
@@ -183,7 +181,7 @@ func (s *Service) handleOrgSyncDeprovision(w http.ResponseWriter, r *http.Reques
 		orgSyncFailed(w, "deprovision", err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"results": results})
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"results": results})
 }
 
 // handleOrgSyncResync re-applies the saved rules to every subject a sign-in
@@ -198,5 +196,5 @@ func (s *Service) handleOrgSyncResync(w http.ResponseWriter, r *http.Request) {
 		orgSyncFailed(w, "resync", err)
 		return
 	}
-	writeJSON(w, http.StatusOK, res)
+	httpx.WriteJSON(w, http.StatusOK, res)
 }

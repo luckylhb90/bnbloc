@@ -16,6 +16,7 @@ import (
 	"github.com/luckylhb90/bnbloc/core"
 	"github.com/luckylhb90/bnbloc/internal/auth"
 	"github.com/luckylhb90/bnbloc/internal/digest"
+	"github.com/luckylhb90/bnbloc/internal/httpx"
 	"github.com/luckylhb90/bnbloc/internal/obs"
 	"github.com/luckylhb90/bnbloc/internal/roomctx"
 	"github.com/luckylhb90/bnbloc/internal/store"
@@ -100,30 +101,30 @@ func parseSiteTicketScope(id string) (roomID, artifactID string, version int, ok
 func (s *Service) handleSiteTicket(w http.ResponseWriter, r *http.Request) {
 	claims, err := s.authenticate(r)
 	if err != nil {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		httpx.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
 	roomID, artifactID := r.PathValue("roomId"), r.PathValue("artifactId")
 	version, err := strconv.Atoi(r.PathValue("version"))
 	if roomctx.ValidateID(roomID) != nil || artifactID == "" || strings.Contains(artifactID, "/") || err != nil || version <= 0 {
-		http.Error(w, "invalid site version path", http.StatusBadRequest)
+		httpx.Error(w, "invalid site version path", http.StatusBadRequest)
 		return
 	}
 	claims, ok := s.roomClaims(claims, roomID)
 	if !ok {
-		http.Error(w, "room scope not authorized", http.StatusForbidden)
+		httpx.Error(w, "room scope not authorized", http.StatusForbidden)
 		return
 	}
 	tenantID := claims.Tenant
 	scope := siteTicketScope(roomID, artifactID, version)
 	sv, err := s.memberSiteVersion(r.Context(), claims.Subject, tenantID, scope)
 	if errors.Is(err, errSiteNotFound) {
-		http.Error(w, "site version not found", http.StatusNotFound)
+		httpx.Error(w, "site version not found", http.StatusNotFound)
 		return
 	}
 	if err != nil {
 		obs.ServerError(w, "load site version failed", err)
-		http.Error(w, "load site version failed", http.StatusBadGateway)
+		httpx.Error(w, "load site version failed", http.StatusBadGateway)
 		return
 	}
 	s.cacheSiteAuth(claims.Subject, scope, sv)
@@ -137,10 +138,11 @@ func (s *Service) handleSiteTicket(w http.ResponseWriter, r *http.Request) {
 		ID:            scope,
 	})
 	w.Header().Set("Cache-Control", "no-store")
-	writeJSON(w, http.StatusOK, map[string]any{
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{
 		"siteUrl":     memberSiteBase(ticket),
 		"expiresAtMs": expires.UnixMilli(),
 	})
+
 }
 
 func memberSiteBase(ticket string) string { return "/v1/sites/" + url.PathEscape(ticket) + "/" }
@@ -172,7 +174,7 @@ func (s *Service) handleMemberSite(w http.ResponseWriter, r *http.Request) {
 		}
 		if err != nil {
 			obs.ServerError(w, "load site version failed", err)
-			http.Error(w, "load site version failed", http.StatusBadGateway)
+			httpx.Error(w, "load site version failed", http.StatusBadGateway)
 			return
 		}
 		s.cacheSiteAuth(claims.Subject, claims.ID, sv)
@@ -265,7 +267,7 @@ func (s *Service) serveSite(w http.ResponseWriter, r *http.Request, sv siteVersi
 	b, err := s.siteBundle(r.Context(), sv)
 	if err != nil {
 		obs.ServerError(w, "load site bundle failed", err)
-		http.Error(w, "load site bundle failed", http.StatusBadGateway)
+		httpx.Error(w, "load site bundle failed", http.StatusBadGateway)
 		return
 	}
 	file, redirect := siteFile(b, r.PathValue("path"))
