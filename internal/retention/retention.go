@@ -21,6 +21,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/luckylhb90/bnbloc/internal/audit"
 	"github.com/luckylhb90/bnbloc/internal/blobstore"
 	"github.com/luckylhb90/bnbloc/internal/obs"
 	"github.com/luckylhb90/bnbloc/internal/store"
@@ -298,12 +299,10 @@ func (w *Worker) auditPurge(ctx context.Context, tenantID string, kind wire.Rete
 	}
 	sort.Strings(items)
 	detail := "older than " + strconv.Itoa(days) + " days (before " + time.UnixMilli(before).UTC().Format(time.RFC3339) + "): " + strings.Join(items, " ")
-	if err := w.Audit.AppendExtAudit(ctx, store.ExtAuditRecord{
+	audit.Record(ctx, w.Audit, store.ExtAuditRecord{
 		Kind: wire.AuditKindRetention, Name: string(kind), Action: "purge", Actor: "retention",
-		TenantID: tenantID, Outcome: "ok", Detail: detail, AtMs: w.now().UnixMilli(),
-	}); err != nil {
-		slog.Warn("bnbloc retention: audit append failed", "event", "bnbloc.retention.error", "what", "audit", "error", err)
-	}
+		TenantID: tenantID, Outcome: wire.AuditOutcomeOK, Detail: detail, AtMs: w.now().UnixMilli(),
+	})
 }
 
 func sum(r store.PurgeResult) int64 {

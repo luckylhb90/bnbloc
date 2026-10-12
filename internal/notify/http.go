@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/luckylhb90/bnbloc/internal/audit"
 	"github.com/luckylhb90/bnbloc/internal/extpipe"
 	"github.com/luckylhb90/bnbloc/internal/extreg"
 	"github.com/luckylhb90/bnbloc/internal/httpx"
@@ -221,11 +222,11 @@ func (h *Handlers) handleTestNotifier(w http.ResponseWriter, r *http.Request) {
 	p := TestPayload(tid, user, h.PublicURL, now)
 	res := SendTest(r.Context(), ep, secret, p, now)
 	if h.Audit != nil {
-		outcome := "delivered"
+		outcome := wire.AuditOutcomeDelivered
 		if !res.Delivered {
-			outcome = "failed"
+			outcome = wire.AuditOutcomeFailed
 		}
-		_ = h.Audit.AppendExtAudit(r.Context(), store.ExtAuditRecord{
+		audit.Record(r.Context(), h.Audit, store.ExtAuditRecord{
 			Kind: string(extreg.KindNotifier), Name: rec.Name, Action: "test", Actor: user, TenantID: tid,
 			Outcome: outcome, Detail: strings.TrimSpace(res.EventID + " " + res.Error), AtMs: now.UnixMilli(),
 		})

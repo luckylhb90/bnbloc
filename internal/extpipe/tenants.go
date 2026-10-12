@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/luckylhb90/bnbloc/internal/extreg"
+	"github.com/luckylhb90/bnbloc/internal/wire"
 )
 
 // ErrNoTenants rejects a tenant restriction that names no tenant. An empty list
@@ -45,7 +46,7 @@ func (p *Pipeline) writeTenants(ctx context.Context, kind extreg.Kind, name stri
 	if tenants == nil {
 		detail = "*"
 	}
-	p.audit(ctx, rec, "set-tenants", "allow", actor, detail)
+	p.audit(ctx, rec, "set-tenants", wire.AuditOutcomeAllow, actor, detail)
 	return nil
 }
 

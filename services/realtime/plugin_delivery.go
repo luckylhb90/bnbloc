@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/luckylhb90/bnbloc/core/pkgmeta"
+	"github.com/luckylhb90/bnbloc/internal/audit"
 	"github.com/luckylhb90/bnbloc/internal/httpx"
 	"github.com/luckylhb90/bnbloc/internal/obs"
 	"github.com/luckylhb90/bnbloc/internal/store"
@@ -288,7 +289,7 @@ func (d *PluginHookDispatcher) auditDelivery(p pendingDelivery, outcome, detail 
 		return
 	}
 	ctx := tenant.NewContext(context.Background(), p.tenantID)
-	_ = d.audit.AppendExtAudit(ctx, store.ExtAuditRecord{
+	audit.Record(ctx, d.audit, store.ExtAuditRecord{
 		Kind: string(pkgmeta.KindPlugin), Name: p.plugin, Action: "deliver", Actor: p.subject,
 		Outcome: outcome, Detail: detail, TenantID: p.tenantID, AtMs: d.now(),
 	})

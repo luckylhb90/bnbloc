@@ -32,5 +32,5 @@ func (s *Service) auditSessionRevokeByID(ctx context.Context, familyID, action, 
 	if err != nil || !ok {
 		fam = store.RefreshFamily{FamilyID: familyID, Subject: actor}
 	}
-	s.auditSessionRevoke(ctx, fam, action, actor, "revoked")
+	s.auditSessionRevoke(ctx, fam, action, actor, wire.AuditOutcomeRevoked)
 }

@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/luckylhb90/bnbloc/core/pkgmeta"
+	"github.com/luckylhb90/bnbloc/internal/audit"
 	"github.com/luckylhb90/bnbloc/internal/extreg"
 	"github.com/luckylhb90/bnbloc/internal/store"
 )
@@ -143,7 +144,7 @@ func (p *Pipeline) audit(ctx context.Context, rec Record, action, outcome, actor
 	if p.Audit == nil {
 		return
 	}
-	_ = p.Audit.AppendExtAudit(ctx, store.ExtAuditRecord{
+	audit.Record(ctx, p.Audit, store.ExtAuditRecord{
 		Kind: rec.Kind, Name: rec.Name, Action: action, Actor: actor,
 		KeyID: rec.KeyID, Outcome: outcome, Detail: detail, AtMs: p.now(),
 	})

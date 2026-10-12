@@ -5,12 +5,12 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/csv"
-	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/luckylhb90/bnbloc/internal/audit"
 	"github.com/luckylhb90/bnbloc/internal/httpx"
 	"github.com/luckylhb90/bnbloc/internal/obs"
 	"github.com/luckylhb90/bnbloc/internal/store"
@@ -220,23 +220,13 @@ func (s *Service) writeAuditCSV(w http.ResponseWriter, r *http.Request, q store.
 	_, _ = w.Write(buf.Bytes())
 }
 
-// audit appends one administration event to the shared audit trail
-// (extension_audit). Best-effort: the action already happened, so a failed
-// write is logged, never surfaced to the caller.
+// audit appends one administration event to the shared audit trail at the
+// service's clock (audit.Record: best effort, outcome ok by default).
 func (s *Service) audit(ctx context.Context, rec store.ExtAuditRecord) {
-	if s.ExtAudit == nil {
-		return
-	}
 	if rec.AtMs == 0 {
 		rec.AtMs = s.nowMs()
 	}
-	if rec.Outcome == "" {
-		rec.Outcome = "ok"
-	}
-	if err := s.ExtAudit.AppendExtAudit(ctx, rec); err != nil {
-		slog.Warn("bnbloc shareagent: audit append failed", "event", "bnbloc.shareagent.audit_append_failed",
-			"kind", rec.Kind, "action", rec.Action, "error", err)
-	}
+	audit.Record(ctx, s.ExtAudit, rec)
 }
 
 // auditMember records an org membership change in the ctx tenant.

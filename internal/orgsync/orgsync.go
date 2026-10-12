@@ -18,8 +18,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/luckylhb90/bnbloc/internal/audit"
 	"github.com/luckylhb90/bnbloc/internal/store"
 	"github.com/luckylhb90/bnbloc/internal/tenant"
+	"github.com/luckylhb90/bnbloc/internal/wire"
 )
 
 const (
@@ -534,8 +536,8 @@ func (s *Syncer) audit(ctx context.Context, name, tenantID, action, actor, detai
 	if s.Audit == nil {
 		return
 	}
-	_ = s.Audit.AppendExtAudit(ctx, store.ExtAuditRecord{
+	audit.Record(ctx, s.Audit, store.ExtAuditRecord{
 		Kind: AuditKind, Name: name, Action: action, Actor: actor, TenantID: tenantID,
-		Outcome: "applied", Detail: detail, AtMs: s.now().UnixMilli(),
+		Outcome: wire.AuditOutcomeOK, Detail: detail, AtMs: s.now().UnixMilli(),
 	})
 }

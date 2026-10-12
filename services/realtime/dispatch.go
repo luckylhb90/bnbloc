@@ -6,13 +6,13 @@ import (
 	"errors"
 	"fmt"
 	"hash/fnv"
-	"log/slog"
 	"net/http"
 	"regexp"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/luckylhb90/bnbloc/internal/audit"
 	"github.com/luckylhb90/bnbloc/internal/contentpkg"
 	"github.com/luckylhb90/bnbloc/internal/httpx"
 	"github.com/luckylhb90/bnbloc/internal/membership"
@@ -295,13 +295,13 @@ func (s *Service) auditDispatch(ctx context.Context, caller string, parent store
 	if s.Audit == nil {
 		return
 	}
-	outcome := "allow"
+	outcome := wire.AuditOutcomeAllow
 	var refusal *dispatchRefusal
 	switch {
 	case errors.As(err, &refusal):
-		outcome = "deny"
+		outcome = wire.AuditOutcomeDeny
 	case err != nil:
-		outcome = "failed"
+		outcome = wire.AuditOutcomeFailed
 	}
 	detail := []string{"parentJob=" + in.ParentJobID}
 	if parent.JobID != "" {
@@ -332,7 +332,5 @@ func (s *Service) auditDispatch(ctx context.Context, caller string, parent store
 		Detail:   strings.Join(detail, " "),
 		AtMs:     time.Now().UnixMilli(),
 	}
-	if aerr := s.Audit.AppendExtAudit(context.WithoutCancel(ctx), rec); aerr != nil {
-		slog.Warn("bnbloc realtime dispatch audit failed", "event", "bnbloc.realtime.dispatch_audit_failed", "error", aerr)
-	}
+	audit.Record(context.WithoutCancel(ctx), s.Audit, rec)
 }

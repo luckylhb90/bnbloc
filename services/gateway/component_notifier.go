@@ -15,6 +15,7 @@ import (
 	"github.com/luckylhb90/bnbloc/internal/notify"
 	"github.com/luckylhb90/bnbloc/internal/obs"
 	"github.com/luckylhb90/bnbloc/internal/store"
+	"github.com/luckylhb90/bnbloc/internal/wire"
 )
 
 // notifierInstaller is the gateway's notifier lifecycle: the shared
@@ -76,12 +77,7 @@ func (s *Service) afterNotifierUninstall(ctx context.Context, rec extpipe.Record
 // requestNotifierRecord resolves {name} (with ?kind=) to an installed
 // notifier, writing the error response otherwise.
 func (s *Service) requestNotifierRecord(w http.ResponseWriter, r *http.Request) (extpipe.Record, bool) {
-	name := strings.TrimSpace(r.PathValue("name"))
-	if name == "" {
-		httpx.Error(w, "component name required", http.StatusBadRequest)
-		return extpipe.Record{}, false
-	}
-	rec, ok := s.requestComponentRecord(w, r, name)
+	rec, ok := s.requestComponentRecord(w, r, r.PathValue("name"))
 	if !ok {
 		return extpipe.Record{}, false
 	}
@@ -107,7 +103,7 @@ func (s *Service) handleRotateComponentSecret(w http.ResponseWriter, r *http.Req
 		httpx.Error(w, "rotate secret failed", http.StatusInternalServerError)
 		return
 	}
-	s.auditNotifier(r.Context(), claims, rec, "rotate-secret", "allow", "")
+	s.auditNotifier(r.Context(), claims, rec, "rotate-secret", wire.AuditOutcomeAllow, "")
 	httpx.WriteJSON(w, http.StatusOK, map[string]string{"secret": secret})
 }
 
@@ -137,9 +133,9 @@ func (s *Service) handleTestComponent(w http.ResponseWriter, r *http.Request, cl
 	tid := claims.Tenant
 	now := s.nowTime()
 	res := notify.SendTest(r.Context(), ep, secret, notify.TestPayload(tid, claims.Subject, "", now), now)
-	outcome := "delivered"
+	outcome := wire.AuditOutcomeDelivered
 	if !res.Delivered {
-		outcome = "failed"
+		outcome = wire.AuditOutcomeFailed
 	}
 	s.auditNotifier(r.Context(), claims, rec, "test", outcome, strings.TrimSpace(res.EventID+" "+res.Error))
 	httpx.WriteJSON(w, http.StatusOK, res)

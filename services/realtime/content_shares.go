@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/luckylhb90/bnbloc/internal/audit"
 	"github.com/luckylhb90/bnbloc/internal/contentshare"
 	"github.com/luckylhb90/bnbloc/internal/membership"
 	"github.com/luckylhb90/bnbloc/internal/notify"
@@ -61,9 +62,9 @@ func (s *Service) grantRoomShares(ctx context.Context, tid, roomID, member strin
 		}
 		label := contentshare.Label(g.Source)
 		if s.Audit != nil {
-			_ = s.Audit.AppendExtAudit(ctx, store.ExtAuditRecord{
+			audit.Record(ctx, s.Audit, store.ExtAuditRecord{
 				Kind: wire.AuditKindContent, Name: g.Source.Name + "@" + g.Share.Version, Action: "share", Actor: g.Share.SharedBy,
-				TenantID: tid, Outcome: "allow", AtMs: now,
+				TenantID: tid, Outcome: wire.AuditOutcomeAllow, AtMs: now,
 				Detail: label + " v" + g.Share.Version + " shared by " + g.Share.SharedBy + " with " + member + " (" + g.Result.Status + ", joined room " + roomID + ")",
 			})
 		}

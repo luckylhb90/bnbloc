@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/luckylhb90/bnbloc/internal/extreg"
+	"github.com/luckylhb90/bnbloc/internal/wire"
 )
 
 const (
@@ -66,10 +67,10 @@ func (p *Pipeline) SetRollout(ctx context.Context, kind extreg.Kind, name, rollo
 	}
 	if hasInstaller && rec.active() {
 		if err := p.activate(ctx, in, rec, p.guard(rec)); err != nil {
-			p.audit(ctx, rec, "set-rollout", "deny", actor, err.Error())
+			p.audit(ctx, rec, "set-rollout", wire.AuditOutcomeDeny, actor, err.Error())
 			return err
 		}
 	}
-	p.audit(ctx, rec, "set-rollout", "allow", actor, rollout)
+	p.audit(ctx, rec, "set-rollout", wire.AuditOutcomeAllow, actor, rollout)
 	return nil
 }

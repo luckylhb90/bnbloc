@@ -181,7 +181,7 @@ func (s *Service) auditJobSave(ctx context.Context, actor contentActor, c store.
 	agent := jobAgent(*j)
 	s.audit(ctx, j.TenantID, store.ExtAuditRecord{
 		Kind: wire.AuditKindContent, Name: c.Name + "@" + version, Action: "save", Actor: j.RequesterUserID,
-		Outcome: "allow",
+		Outcome: wire.AuditOutcomeAllow,
 		Detail: shortKind(c.Kind) + " " + c.Name + " v" + version + " saved by agent " + agent + " for " + j.RequesterUserID +
 			" (job " + j.JobID + ", room " + j.RoomID + ", bridge of " + actor.Bridge + ")",
 	})

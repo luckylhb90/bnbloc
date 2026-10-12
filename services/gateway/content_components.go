@@ -1107,7 +1107,7 @@ func (s *Service) recordRoomExpert(ctx context.Context, job store.AgentJob, ref 
 	}
 	s.audit(ctx, job.TenantID, store.ExtAuditRecord{
 		Kind: wire.AuditKindContent, Name: ref.Name + "@" + ref.Version, Action: "use", Actor: job.RequesterUserID,
-		Outcome: "running",
+		Outcome: wire.AuditOutcomeRunning,
 		Detail:  "room expert " + name + " v" + ref.Version + " on agent " + jobAgent(job) + " (job " + job.JobID + ", room " + job.RoomID + ")",
 	})
 	return nil

@@ -63,7 +63,7 @@ func contentNote(w http.ResponseWriter, note string) (string, bool) {
 func (s *Service) auditContent(ctx context.Context, action, actor, tenantID string, c store.ContentComponent, version, detail string) {
 	s.audit(ctx, tenantID, store.ExtAuditRecord{
 		Kind: wire.AuditKindContent, Name: c.Name + "@" + version, Action: action, Actor: actor,
-		Outcome: "allow", Detail: detail,
+		Outcome: wire.AuditOutcomeAllow, Detail: detail,
 	})
 }
 

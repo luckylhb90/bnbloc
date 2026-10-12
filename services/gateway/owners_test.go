@@ -8,10 +8,11 @@ import (
 	"testing"
 )
 
-// TestAuditWrittenOnlyByAudit: a gateway audit row is written by audit
-// (audit.go), which stamps the time, logs a failed write and always takes
-// the row's tenant — hand-built rows omitted it (an API token issue, a
-// notifier test), so the tenant's admins never saw them.
+// TestAuditWrittenOnlyByAudit: a gateway audit row is written by s.audit
+// (audit.go, over the shared internal/audit.Record), which stamps the
+// gateway's time and always takes the row's tenant — hand-built rows
+// omitted it (an API token issue, a notifier test), so the tenant's admins
+// never saw them.
 func TestAuditWrittenOnlyByAudit(t *testing.T) {
 	files, err := filepath.Glob("*.go")
 	if err != nil {
@@ -25,7 +26,7 @@ func TestAuditWrittenOnlyByAudit(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if strings.Contains(string(raw), ".AppendExtAudit(") {
+		if strings.Contains(string(raw), ".AppendExtAudit(") || strings.Contains(string(raw), "audit.Record(") {
 			t.Errorf("%s writes an audit row itself; use s.audit(ctx, tenantID, rec)", f)
 		}
 	}

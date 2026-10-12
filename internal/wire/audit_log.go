@@ -57,3 +57,16 @@ type AuditLogReply struct {
 	Entries    []AuditLogEntry `json:"entries"`
 	NextCursor string          `json:"nextCursor,omitempty"`
 }
+
+// Audit outcomes: the one vocabulary of an audit record's outcome
+// (internal/audit.Record writers; the web's auditOutcomeTone reads it).
+const (
+	AuditOutcomeOK        = "ok"        // an administration action done
+	AuditOutcomeAllow     = "allow"     // a decision admitted (install, exchange, reply, share, use)
+	AuditOutcomeDeny      = "deny"      // a decision refused
+	AuditOutcomeDelivered = "delivered" // a delivery accepted
+	AuditOutcomeFailed    = "failed"    // a delivery or a dispatch failed
+	AuditOutcomeQueued    = "queued"    // accepted for later work (an admin alert, an expert run)
+	AuditOutcomeRunning   = "running"   // work under way (content resolved for a running job)
+	AuditOutcomeRevoked   = "revoked"   // a sign-in ended
+)

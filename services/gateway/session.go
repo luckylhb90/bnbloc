@@ -20,6 +20,7 @@ import (
 	"github.com/luckylhb90/bnbloc/internal/rbac"
 	"github.com/luckylhb90/bnbloc/internal/store"
 	"github.com/luckylhb90/bnbloc/internal/tenant"
+	"github.com/luckylhb90/bnbloc/internal/wire"
 )
 
 // sessionGrant is a freshly minted session for a verified identity: the
@@ -317,7 +318,7 @@ func (s *Service) useRefreshToken(ctx context.Context, raw string, rotate bool) 
 	fam, err = tokens.UseRefreshFamily(ctx, use)
 	if errors.Is(err, store.ErrRefreshReuse) {
 		log.Printf("bnbloc-gateway: refresh token reuse for subject %q (family %s, client %q): family revoked", fam.Subject, fam.FamilyID, fam.Client)
-		s.auditSessionRevoke(ctx, fam, "reuse_revoked", fam.Subject, "revoked")
+		s.auditSessionRevoke(ctx, fam, "reuse_revoked", fam.Subject, wire.AuditOutcomeRevoked)
 		return store.RefreshFamily{}, auth.Identity{}, sessionScope{}, errRefreshRejected
 	}
 	if errors.Is(err, store.ErrRefreshInvalid) {
@@ -551,7 +552,7 @@ func (s *Service) revokeMySessionsWhere(ctx context.Context, subject string, pic
 		}
 		if revoked {
 			n++
-			s.auditSessionRevoke(ctx, f, "revoke", subject, "revoked")
+			s.auditSessionRevoke(ctx, f, "revoke", subject, wire.AuditOutcomeRevoked)
 		}
 	}
 	return n, nil

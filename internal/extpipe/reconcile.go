@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/luckylhb90/bnbloc/internal/extreg"
+	"github.com/luckylhb90/bnbloc/internal/wire"
 )
 
 // liveRecord is a record this process activated, with the fingerprint of the
@@ -104,7 +105,7 @@ func (p *Pipeline) Reconcile(ctx context.Context, host extreg.Service) (Reconcil
 		}
 		in, _ := p.installer(extreg.Kind(rec.Kind))
 		if err := p.activate(ctx, in, rec, p.guard(rec)); err != nil {
-			p.audit(ctx, rec, "enable", "deny", "", "reconcile: "+err.Error())
+			p.audit(ctx, rec, "enable", wire.AuditOutcomeDeny, "", "reconcile: "+err.Error())
 			if p.failed == nil {
 				p.failed = map[string]string{}
 			}

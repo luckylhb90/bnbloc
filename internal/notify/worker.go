@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/luckylhb90/bnbloc/internal/audit"
 	"github.com/luckylhb90/bnbloc/internal/extpipe"
 	"github.com/luckylhb90/bnbloc/internal/extreg"
 	"github.com/luckylhb90/bnbloc/internal/obs"
@@ -331,7 +332,7 @@ func (w *Worker) audit(ctx context.Context, it store.NotificationOutboxItem, a s
 	if a.Error != "" {
 		detail += ": " + a.Error
 	}
-	_ = w.Audit.AppendExtAudit(ctx, store.ExtAuditRecord{
+	audit.Record(ctx, w.Audit, store.ExtAuditRecord{
 		Kind: string(extreg.KindNotifier), Name: it.Notifier, Action: "deliver", Outcome: string(a.Outcome),
 		Detail: detail, TenantID: it.TenantID, AtMs: a.AtMs,
 	})

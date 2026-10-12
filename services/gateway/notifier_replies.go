@@ -95,7 +95,7 @@ func (s *Service) handleNotifierReply(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if reason := s.notifierReplyDenied(ctx, rec, tok); reason != "" {
-		s.auditNotifierReply(ctx, rec, tok, "deny", reason)
+		s.auditNotifierReply(ctx, rec, tok, wire.AuditOutcomeDeny, reason)
 		httpx.Error(w, reason, http.StatusForbidden)
 		return
 	}
@@ -105,11 +105,11 @@ func (s *Service) handleNotifierReply(w http.ResponseWriter, r *http.Request) {
 	}
 	seq, status, msg, cause := s.postNotifierReply(ctx, tok, text, notify.ReplyClientMsgID(rec.Name, tok.UserID, key))
 	if status != http.StatusOK {
-		s.auditNotifierReply(ctx, rec, tok, "deny", msg)
+		s.auditNotifierReply(ctx, rec, tok, wire.AuditOutcomeDeny, msg)
 		httpx.WriteStatus(w, status, msg, cause)
 		return
 	}
-	s.auditNotifierReply(ctx, rec, tok, "allow", "")
+	s.auditNotifierReply(ctx, rec, tok, wire.AuditOutcomeAllow, "")
 	httpx.WriteJSON(w, http.StatusOK, wire.NotifierReplyResponse{RoomID: tok.RoomID, Sequence: seq})
 }
 

@@ -22,6 +22,7 @@ import (
 	"github.com/luckylhb90/bnbloc/internal/extgov"
 	"github.com/luckylhb90/bnbloc/internal/extreg"
 	"github.com/luckylhb90/bnbloc/internal/store"
+	"github.com/luckylhb90/bnbloc/internal/wire"
 )
 
 // Record is the durable per-extension install record persisted in
@@ -200,7 +201,7 @@ func (p *Pipeline) Install(ctx context.Context, req InstallRequest) (Record, err
 	}
 	guard := p.guard(rec)
 	if err := in.Probe(ctx, rec, guard); err != nil {
-		p.audit(ctx, rec, "install", "deny", req.Actor, err.Error())
+		p.audit(ctx, rec, "install", wire.AuditOutcomeDeny, req.Actor, err.Error())
 		return Record{}, err
 	}
 	if err := p.save(ctx, rec, req.Actor); err != nil {
@@ -211,14 +212,14 @@ func (p *Pipeline) Install(ctx context.Context, req InstallRequest) (Record, err
 	}
 	if rec.active() {
 		if err := p.activate(ctx, in, rec, guard); err != nil {
-			p.audit(ctx, rec, "install", "deny", req.Actor, err.Error())
+			p.audit(ctx, rec, "install", wire.AuditOutcomeDeny, req.Actor, err.Error())
 			if restoreErr := p.restore(ctx, in, rec, prev, upgrading, req.Actor); restoreErr != nil {
 				return Record{}, fmt.Errorf("%w: %w (restoring previous record: %w)", ErrPersist, err, restoreErr)
 			}
 			return Record{}, err
 		}
 	}
-	p.audit(ctx, rec, "install", "allow", req.Actor, "")
+	p.audit(ctx, rec, "install", wire.AuditOutcomeAllow, req.Actor, "")
 	return rec, nil
 }
 
@@ -234,7 +235,7 @@ func (p *Pipeline) restore(ctx context.Context, in KindInstaller, failed, prev R
 	}
 	if prev.active() {
 		if err := p.activate(ctx, in, prev, p.guard(prev)); err != nil {
-			p.audit(ctx, prev, "install", "deny", actor, "restore previous: "+err.Error())
+			p.audit(ctx, prev, "install", wire.AuditOutcomeDeny, actor, "restore previous: "+err.Error())
 		}
 	}
 	return nil
@@ -261,7 +262,7 @@ func (p *Pipeline) Uninstall(ctx context.Context, kind extreg.Kind, name, actor 
 	if err := p.Settings.DeletePlatformSetting(ctx, recordKey(kind, name)); err != nil {
 		return fmt.Errorf("%w: %w", ErrPersist, err)
 	}
-	p.audit(ctx, rec, "uninstall", "allow", actor, "")
+	p.audit(ctx, rec, "uninstall", wire.AuditOutcomeAllow, actor, "")
 	return nil
 }
 

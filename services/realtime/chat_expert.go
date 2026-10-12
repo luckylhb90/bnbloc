@@ -4,10 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
 	"strings"
 	"time"
 
+	"github.com/luckylhb90/bnbloc/internal/audit"
 	"github.com/luckylhb90/bnbloc/internal/contentpkg"
 	"github.com/luckylhb90/bnbloc/internal/contentuse"
 	"github.com/luckylhb90/bnbloc/internal/extpipe"
@@ -142,11 +142,9 @@ func (s *Service) auditExpertUse(ctx context.Context, e *chatExpert, job store.A
 	}
 	rec := store.ExtAuditRecord{
 		Kind: wire.AuditKindContent, Name: e.Name + "@" + e.Version, Action: action, Actor: job.RequesterUserID,
-		TenantID: tenant.FromContext(ctx), Outcome: "queued",
+		TenantID: tenant.FromContext(ctx), Outcome: wire.AuditOutcomeQueued,
 		Detail: what + e.label() + " v" + e.Version + " on agent " + agent + " (job " + job.JobID + ", room " + job.RoomID + ")",
 		AtMs:   time.Now().UnixMilli(),
 	}
-	if err := s.Audit.AppendExtAudit(ctx, rec); err != nil {
-		log.Printf("realtime: audit expert use job=%s: %v", job.JobID, err)
-	}
+	audit.Record(ctx, s.Audit, rec)
 }
