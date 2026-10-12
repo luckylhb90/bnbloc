@@ -5,9 +5,9 @@ import (
 	"errors"
 	"reflect"
 	"sort"
+	"strconv"
 	"sync"
 	"testing"
-	"time"
 )
 
 type notificationStores interface {
@@ -15,36 +15,28 @@ type notificationStores interface {
 	NotificationOutboxStore
 }
 
-func TestMemoryNotificationStores(t *testing.T) {
-	testNotificationStores(t, NewMemoryNotifications(), "ntf-mem")
-}
-
-// TestMySQLNotificationStores runs the same contract against MySQL (gated on
-// BNBLOC_TEST_MYSQL_DSN). The outbox claim is cross-tenant, so the test only
-// works with timestamps far in the past (no live row is due at NowMs<=10000)
-// and removes its own tenant's rows afterwards.
-func TestMySQLNotificationStores(t *testing.T) {
-	dsn := mysqlTestDSN(t)
-	b, err := NewBackends(dsn)
-	if err != nil {
-		t.Fatalf("NewBackends: %v", err)
-	}
-	tid := "ntf-it-" + itoaBase(time.Now().UnixNano())
-	// Rows of earlier (crashed) runs would be due at the test's small clock.
-	_, _ = b.DB.Exec(`DELETE FROM notification_outbox WHERE tenant_id LIKE 'ntf-it-%'`)
-	t.Cleanup(func() {
-		_, _ = b.DB.Exec(`DELETE FROM notification_outbox WHERE tenant_id=?`, tid)
-		_, _ = b.DB.Exec(`DELETE FROM notification_prefs WHERE tenant_id LIKE ?`, tid+"%")
-		_ = b.DB.Close()
+// Prefs: absent -> found=false; round-trip (a re-put replaces every field);
+// tenant-isolated; per user (case-variant ids are distinct).
+func TestContractNotificationPrefsStore(t *testing.T) {
+	forEachBackend(t, func(t *testing.T, b *Backends) {
+		testNotificationPrefs(t, b.Notifications, uniq("ntf-prefs-"))
 	})
-	testNotificationStores(t, NewMySQLNotifications(b.DB), tid)
 }
 
-func testNotificationStores(t *testing.T, s notificationStores, tid string) {
+// The outbox on both backends: idempotent enqueue per (tenant, id,
+// notifier), leased claims, lease-guarded attempts, prune, and concurrent
+// claimers. Claims are cross-tenant, so the test keeps its own tenant's
+// items.
+func TestContractNotificationOutboxStore(t *testing.T) {
+	forEachBackend(t, func(t *testing.T, b *Backends) {
+		testNotificationOutbox(t, b.Notifications, uniq("ntf-out-"))
+	})
+}
+
+func testNotificationPrefs(t *testing.T, s notificationStores, tid string) {
 	ctx := tenantCtx(tid)
 	other := tenantCtx(tid + "-other")
 
-	// Prefs: absent -> found=false; round-trip; tenant-isolated.
 	if _, ok, err := s.GetNotificationPrefs(ctx, "alice"); err != nil || ok {
 		t.Fatalf("absent prefs = ok %v err %v", ok, err)
 	}
@@ -63,9 +55,16 @@ func testNotificationStores(t *testing.T, s notificationStores, tid string) {
 	if err := s.PutNotificationPrefs(ctx, "alice", want); err != nil {
 		t.Fatalf("put prefs: %v", err)
 	}
-	if got, _, _ := s.GetNotificationPrefs(ctx, "alice"); len(got.QuietRooms) != 0 {
-		t.Fatalf("quiet rooms not replaced: %v", got.QuietRooms)
+	if got, _, _ := s.GetNotificationPrefs(ctx, "alice"); got.QuietRooms == nil || len(got.QuietRooms) != 0 {
+		t.Fatalf("quiet rooms not replaced: %#v (want [])", got.QuietRooms)
 	}
+	if _, ok, _ := s.GetNotificationPrefs(ctx, "Alice"); ok {
+		t.Fatal("prefs of a case-variant user id")
+	}
+}
+
+func testNotificationOutbox(t *testing.T, s notificationStores, tid string) {
+	ctx := tenantCtx(tid)
 
 	// Outbox: enqueue is idempotent per (tenant, id, notifier).
 	enq := func(id string, next int64) {
@@ -95,13 +94,22 @@ func testNotificationStores(t *testing.T, s notificationStores, tid string) {
 		sort.Strings(out)
 		return out
 	}
+	mine := func(items []NotificationOutboxItem) []NotificationOutboxItem {
+		var out []NotificationOutboxItem
+		for _, it := range items {
+			if it.TenantID == tid {
+				out = append(out, it)
+			}
+		}
+		return out
+	}
 	claim := func(token string, now int64) []NotificationOutboxItem {
 		t.Helper()
-		items, err := s.ClaimNotifications(bg(), NotificationClaim{Token: token, NowMs: now, LeaseMs: 1000, Limit: 10})
+		items, err := s.ClaimNotifications(bg(), NotificationClaim{Token: token, NowMs: now, LeaseMs: 1000, Limit: 50})
 		if err != nil {
 			t.Fatalf("claim: %v", err)
 		}
-		return items
+		return mine(items)
 	}
 	first := claim("t1", 100)
 	if got := ids(first); !reflect.DeepEqual(got, []string{tid + "-a", tid + "-b"}) {
@@ -168,7 +176,7 @@ func testNotificationStores(t *testing.T, s notificationStores, tid string) {
 
 	// Concurrent workers (replicas) never claim the same item twice.
 	for i := 0; i < 20; i++ {
-		enq(tid+"-p"+itoaBase(int64(i)), 7000)
+		enq(tid+"-p"+strconv.Itoa(i), 7000)
 	}
 	var mu sync.Mutex
 	seen := map[string]int{}
@@ -178,13 +186,13 @@ func testNotificationStores(t *testing.T, s notificationStores, tid string) {
 		go func(w int) {
 			defer wg.Done()
 			for round := 0; round < 3; round++ {
-				items, err := s.ClaimNotifications(bg(), NotificationClaim{Token: "w" + itoaBase(int64(w)) + "r" + itoaBase(int64(round)), NowMs: 7100, LeaseMs: 100000, Limit: 5})
+				items, err := s.ClaimNotifications(bg(), NotificationClaim{Token: tid + "w" + strconv.Itoa(w) + "r" + strconv.Itoa(round), NowMs: 7100, LeaseMs: 100000, Limit: 5})
 				if err != nil {
 					t.Errorf("concurrent claim: %v", err)
 					return
 				}
 				mu.Lock()
-				for _, it := range items {
+				for _, it := range mine(items) {
 					seen[it.ID]++
 				}
 				mu.Unlock()
@@ -194,6 +202,13 @@ func testNotificationStores(t *testing.T, s notificationStores, tid string) {
 	wg.Wait()
 	if len(seen) != 20 {
 		t.Fatalf("concurrent claims covered %d items, want 20", len(seen))
+	}
+	// A claim with no limit takes one item; finished items are never due.
+	enq(tid+"-one-a", 8000)
+	enq(tid+"-one-b", 8000)
+	got, err := s.ClaimNotifications(bg(), NotificationClaim{Token: tid + "-one", NowMs: 8000, LeaseMs: 10})
+	if err != nil || len(got) != 1 {
+		t.Fatalf("claim without a limit = %+v, %v; want one item", got, err)
 	}
 	for id, n := range seen {
 		if n != 1 {

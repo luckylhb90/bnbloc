@@ -95,9 +95,8 @@ func (m *MySQLNotifications) EnqueueNotification(ctx context.Context, item Notif
 // The claim walks pending rows only (idx_notification_outbox_due leads with
 // delivered_at_ms, failed_at_ms), in a total order: due time, then the key.
 func (m *MySQLNotifications) ClaimNotifications(ctx context.Context, c NotificationClaim) ([]NotificationOutboxItem, error) {
-	if c.Limit <= 0 {
-		c.Limit = 1
-	}
+	// cross-tenant: one worker drains every tenant's queue.
+	c.Limit = notificationClaimLimit(c.Limit)
 	if _, err := m.DB.ExecContext(ctx,
 		`UPDATE notification_outbox SET claim_token=?, next_attempt_at_ms=?
 		 WHERE delivered_at_ms IS NULL AND failed_at_ms IS NULL AND next_attempt_at_ms <= ?
@@ -105,28 +104,20 @@ func (m *MySQLNotifications) ClaimNotifications(ctx context.Context, c Notificat
 		c.Token, c.NowMs+c.LeaseMs, c.NowMs, c.Limit); err != nil {
 		return nil, err
 	}
-	rows, err := m.DB.QueryContext(ctx,
+	return queryAll(ctx, m.DB,
 		`SELECT tenant_id, id, notifier, event_json, attempts, next_attempt_at_ms, last_error, created_at_ms
 		 FROM notification_outbox WHERE claim_token=? AND delivered_at_ms IS NULL AND failed_at_ms IS NULL
-		 ORDER BY next_attempt_at_ms, tenant_id, id, notifier`, c.Token)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var out []NotificationOutboxItem
-	for rows.Next() {
-		var it NotificationOutboxItem
-		var body string
-		if err := rows.Scan(&it.TenantID, &it.ID, &it.Notifier, &body, &it.Attempts, &it.NextAttemptAtMs, &it.LastError, &it.CreatedAtMs); err != nil {
-			return nil, err
-		}
-		it.EventJSON = []byte(body)
-		out = append(out, it)
-	}
-	return out, rows.Err()
+		 ORDER BY next_attempt_at_ms, tenant_id, id, notifier`, func(r rowScanner) (NotificationOutboxItem, error) {
+			var it NotificationOutboxItem
+			var body string
+			err := r.Scan(&it.TenantID, &it.ID, &it.Notifier, &body, &it.Attempts, &it.NextAttemptAtMs, &it.LastError, &it.CreatedAtMs)
+			it.EventJSON = []byte(body)
+			return it, err
+		}, c.Token)
 }
 
 func (m *MySQLNotifications) RecordNotificationAttempt(ctx context.Context, a NotificationAttempt) error {
+	// The attempt names its row's tenant (the worker holds no tenant scope).
 	var (
 		res sql.Result
 		err error
@@ -170,13 +161,11 @@ func (m *MySQLNotifications) RecordNotificationAttempt(ctx context.Context, a No
 }
 
 func (m *MySQLNotifications) PruneNotifications(ctx context.Context, beforeMs int64, limit int) (int64, error) {
-	if limit <= 0 {
-		limit = 1000
-	}
+	// cross-tenant: the worker prunes every tenant's finished items.
 	res, err := m.DB.ExecContext(ctx,
 		`DELETE FROM notification_outbox
 		 WHERE created_at_ms < ? AND (delivered_at_ms IS NOT NULL OR failed_at_ms IS NOT NULL)
-		 LIMIT ?`, beforeMs, limit)
+		 LIMIT ?`, beforeMs, notificationPruneLimit(limit))
 	if err != nil {
 		return 0, err
 	}

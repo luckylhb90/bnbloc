@@ -68,7 +68,8 @@ func (m *MemoryWebPush) PutWebPushSubscription(ctx context.Context, s WebPushSub
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	key := [2]string{tid, s.ID}
-	if old, ok := m.rows[key]; ok && old.CreatedAtMs != 0 {
+	if old, ok := m.rows[key]; ok {
+		// A re-put keeps the creation time, like the SQL upsert.
 		s.CreatedAtMs = old.CreatedAtMs
 	}
 	m.rows[key] = s
@@ -151,22 +152,13 @@ func (m *MySQLWebPush) ListWebPushSubscriptions(ctx context.Context, userID stri
 	if err != nil {
 		return nil, err
 	}
-	rows, err := m.DB.QueryContext(ctx,
+	return queryAll(ctx, m.DB,
 		`SELECT id, user_id, endpoint, p256dh, auth_secret, user_agent, created_at_ms, updated_at_ms
-		 FROM web_push_subscriptions WHERE tenant_id=? AND user_id=? ORDER BY updated_at_ms, id`, tid, userID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	out := []WebPushSubscription{}
-	for rows.Next() {
-		var s WebPushSubscription
-		if err := rows.Scan(&s.ID, &s.UserID, &s.Endpoint, &s.P256dh, &s.Auth, &s.UserAgent, &s.CreatedAtMs, &s.UpdatedAtMs); err != nil {
-			return nil, err
-		}
-		out = append(out, s)
-	}
-	return out, rows.Err()
+		 FROM web_push_subscriptions WHERE tenant_id=? AND user_id=? ORDER BY updated_at_ms, id`, func(r rowScanner) (WebPushSubscription, error) {
+			var s WebPushSubscription
+			err := r.Scan(&s.ID, &s.UserID, &s.Endpoint, &s.P256dh, &s.Auth, &s.UserAgent, &s.CreatedAtMs, &s.UpdatedAtMs)
+			return s, err
+		}, tid, userID)
 }
 
 func (m *MySQLWebPush) DeleteWebPushSubscription(ctx context.Context, userID, id string) error {

@@ -52,6 +52,7 @@ func (m *MemoryNotifications) NotificationOutboxStats(_ context.Context) (Notifi
 // NotificationOutboxStats aggregates every tenant's outbox in one scan (the
 // table is bounded by the worker's prune of finished items).
 func (m *MySQLNotifications) NotificationOutboxStats(ctx context.Context) (NotificationOutboxStats, error) {
+	// cross-tenant: an instance-wide metrics snapshot.
 	var st NotificationOutboxStats
 	var oldest sql.NullInt64
 	err := m.DB.QueryRowContext(ctx, `SELECT

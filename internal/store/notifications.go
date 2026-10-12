@@ -62,7 +62,8 @@ type NotificationOutboxItem struct {
 }
 
 // NotificationClaim asks for up to Limit due items (cross-tenant: one worker
-// drains every tenant's queue). Claimed items are leased to Token until
+// drains every tenant's queue; Limit <= 0 claims one, at most
+// MaxNotificationClaim). Claimed items are leased to Token until
 // NowMs+LeaseMs: another worker (replica) cannot claim them before the lease
 // lapses, and a crashed worker's items become due again afterwards.
 type NotificationClaim struct {
@@ -122,10 +123,26 @@ type NotificationOutboxStore interface {
 	// RecordNotificationAttempt finishes one attempt on a leased item.
 	RecordNotificationAttempt(ctx context.Context, a NotificationAttempt) error
 	// PruneNotifications deletes up to limit finished (delivered or failed)
-	// items created before beforeMs, returning how many it removed.
+	// items created before beforeMs, returning how many it removed (limit
+	// <= 0 or above NotificationPruneBatch means NotificationPruneBatch).
 	PruneNotifications(ctx context.Context, beforeMs int64, limit int) (int64, error)
 	// NotificationOutboxStats aggregates every tenant's outbox (metrics).
 	NotificationOutboxStats(ctx context.Context) (NotificationOutboxStats, error)
+}
+
+// Notification batch bounds, the same on both backends.
+const (
+	// MaxNotificationClaim bounds one claim.
+	MaxNotificationClaim = 500
+	// NotificationPruneBatch bounds one prune of finished items, reply
+	// tokens or reply references.
+	NotificationPruneBatch = 1000
+)
+
+func notificationClaimLimit(n int) int { return clampLimit(n, 1, MaxNotificationClaim) }
+
+func notificationPruneLimit(n int) int {
+	return clampLimit(n, NotificationPruneBatch, NotificationPruneBatch)
 }
 
 // truncateErr bounds a stored delivery error to its column width.
@@ -204,9 +221,7 @@ func (m *MemoryNotifications) EnqueueNotification(ctx context.Context, item Noti
 }
 
 func (m *MemoryNotifications) ClaimNotifications(_ context.Context, c NotificationClaim) ([]NotificationOutboxItem, error) {
-	if c.Limit <= 0 {
-		c.Limit = 1
-	}
+	c.Limit = notificationClaimLimit(c.Limit)
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	due := []*memOutboxRow{}
@@ -278,11 +293,12 @@ func (m *MemoryNotifications) RecordNotificationAttempt(_ context.Context, a Not
 }
 
 func (m *MemoryNotifications) PruneNotifications(_ context.Context, beforeMs int64, limit int) (int64, error) {
+	limit = notificationPruneLimit(limit)
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	var n int64
 	for key, row := range m.outbox {
-		if limit > 0 && n >= int64(limit) {
+		if n >= int64(limit) {
 			break
 		}
 		finished := row.item.DeliveredAtMs != 0 || row.item.FailedAtMs != 0

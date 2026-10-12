@@ -3,30 +3,14 @@ package store
 import (
 	"errors"
 	"testing"
-	"time"
 )
 
-func TestMemoryNotificationDispatched(t *testing.T) {
-	testNotificationDispatched(t, NewMemoryNotifications(), "ntf-dsp-mem")
-}
-
-// TestMySQLNotificationDispatched runs the dispatched-outcome contract
-// against MySQL (gated on BNBLOC_TEST_MYSQL_DSN). Claims are cross-tenant,
-// so it uses a clock window (20000–30000 ms) no live row is due in and
-// removes its own rows afterwards.
-func TestMySQLNotificationDispatched(t *testing.T) {
-	dsn := mysqlTestDSN(t)
-	b, err := NewBackends(dsn)
-	if err != nil {
-		t.Fatalf("NewBackends: %v", err)
-	}
-	tid := "ntf-dsp-" + itoaBase(time.Now().UnixNano())
-	_, _ = b.DB.Exec(`DELETE FROM notification_outbox WHERE tenant_id LIKE 'ntf-dsp-%'`)
-	t.Cleanup(func() {
-		_, _ = b.DB.Exec(`DELETE FROM notification_outbox WHERE tenant_id=?`, tid)
-		_ = b.DB.Close()
+// The dispatched outcome on both backends. Claims are cross-tenant, so the
+// test reads back its own tenant's items only.
+func TestContractNotificationOutboxStoreDispatched(t *testing.T) {
+	forEachBackend(t, func(t *testing.T, b *Backends) {
+		testNotificationDispatched(t, b.Notifications, uniq("ntf-dsp-"))
 	})
-	testNotificationDispatched(t, NewMySQLNotifications(b.DB), tid)
 }
 
 // A dispatched hand-off keeps the claim (the outcome is recorded under the

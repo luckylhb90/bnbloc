@@ -82,10 +82,10 @@ func (m *MemoryNotificationReplies) deleteRefsLocked(notifier string) {
 func (m *MemoryNotificationReplies) pruneRefsLocked(beforeMs int64, limit int) {
 	n := 0
 	for k, r := range m.refs {
-		if limit > 0 && n >= limit {
+		if n >= limit {
 			return
 		}
-		if r.ExpiresAtMs < beforeMs {
+		if !liveAt(r.ExpiresAtMs, beforeMs) {
 			delete(m.refs, k)
 			n++
 		}
@@ -142,6 +142,6 @@ func (m *MySQLNotificationReplies) deleteRefs(ctx context.Context, notifier stri
 
 func (m *MySQLNotificationReplies) pruneRefs(ctx context.Context, beforeMs int64, limit int) error {
 	_, err := m.DB.ExecContext(ctx,
-		`DELETE FROM notification_reply_refs WHERE expires_at_ms < ? LIMIT ?`, beforeMs, limit)
+		`DELETE FROM notification_reply_refs WHERE expires_at_ms <= ? LIMIT ?`, beforeMs, limit)
 	return err
 }

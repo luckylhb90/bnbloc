@@ -2,27 +2,10 @@ package store
 
 import (
 	"testing"
-	"time"
 )
 
-func TestMemoryWebPushStore(t *testing.T) {
-	testWebPushStore(t, NewMemoryWebPush(), "wp-mem")
-}
-
-// TestMySQLWebPushStore runs the same contract against MySQL (gated on
-// BNBLOC_TEST_MYSQL_DSN) under a unique tenant it removes afterwards.
-func TestMySQLWebPushStore(t *testing.T) {
-	dsn := mysqlTestDSN(t)
-	b, err := NewBackends(dsn)
-	if err != nil {
-		t.Fatalf("NewBackends: %v", err)
-	}
-	tid := "wp-it-" + itoaBase(time.Now().UnixNano())
-	t.Cleanup(func() {
-		_, _ = b.DB.Exec(`DELETE FROM web_push_subscriptions WHERE tenant_id LIKE ?`, tid+"%")
-		_ = b.DB.Close()
-	})
-	testWebPushStore(t, NewMySQLWebPush(b.DB), tid)
+func TestContractWebPushSubscriptionStore(t *testing.T) {
+	forEachBackend(t, func(t *testing.T, b *Backends) { testWebPushStore(t, b.WebPush, uniq("wp-")) })
 }
 
 func testWebPushStore(t *testing.T, s WebPushSubscriptionStore, tid string) {
@@ -31,8 +14,8 @@ func testWebPushStore(t *testing.T, s WebPushSubscriptionStore, tid string) {
 	sub := func(id, user string, at int64) WebPushSubscription {
 		return WebPushSubscription{ID: id, UserID: user, Endpoint: "https://push.example/" + id, P256dh: "pk-" + id, Auth: "au-" + id, UserAgent: "ua", CreatedAtMs: at, UpdatedAtMs: at}
 	}
-	if got, err := s.ListWebPushSubscriptions(ctx, "alice"); err != nil || len(got) != 0 {
-		t.Fatalf("empty list = %v, %v", got, err)
+	if got, err := s.ListWebPushSubscriptions(ctx, "alice"); err != nil || got == nil || len(got) != 0 {
+		t.Fatalf("empty list = %#v, %v; want []", got, err)
 	}
 	for _, x := range []WebPushSubscription{sub("a1", "alice", 10), sub("a2", "alice", 5), sub("b1", "bob", 7)} {
 		if err := s.PutWebPushSubscription(ctx, x); err != nil {
@@ -43,9 +26,12 @@ func testWebPushStore(t *testing.T, s WebPushSubscriptionStore, tid string) {
 	if err != nil || len(got) != 2 || got[0].ID != "a2" || got[1].ID != "a1" || got[1].Endpoint != "https://push.example/a1" || got[1].P256dh != "pk-a1" || got[1].Auth != "au-a1" {
 		t.Fatalf("alice subs = %+v, %v", got, err)
 	}
-	// Tenant isolation.
+	// Tenant isolation; user ids are case-sensitive.
 	if got, _ := s.ListWebPushSubscriptions(other, "alice"); len(got) != 0 {
 		t.Fatalf("other tenant sees %+v", got)
+	}
+	if got, _ := s.ListWebPushSubscriptions(ctx, "Alice"); len(got) != 0 {
+		t.Fatalf("a case-variant user sees %+v", got)
 	}
 	// Re-subscribing the same endpoint under another member moves it and
 	// keeps its creation time.

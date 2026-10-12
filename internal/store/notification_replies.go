@@ -32,7 +32,11 @@ type NotificationReplyToken struct {
 // NotificationReplyTokenStore persists reply tokens. Lookups are by token
 // hash and cross-tenant (the tenant is a column of the row, not a context
 // scope): the caller is a notifier component, which has no tenant session.
+// A token is live strictly before ExpiresAtMs (liveAt); pruning at beforeMs
+// deletes the tokens (and references) no longer live then.
 type NotificationReplyTokenStore interface {
+	// PutNotificationReplyToken stores t; a taken hash is
+	// ErrNotificationReplyTokenExists.
 	PutNotificationReplyToken(ctx context.Context, t NotificationReplyToken) error
 	// GetNotificationReplyToken returns the row of tokenHash (found=false when
 	// unknown; expiry is the caller's check).
@@ -40,8 +44,9 @@ type NotificationReplyTokenStore interface {
 	// DeleteNotificationReplyTokens removes every token of a notifier
 	// (uninstall).
 	DeleteNotificationReplyTokens(ctx context.Context, notifier string) error
-	// PruneNotificationReplyTokens deletes up to limit tokens that expired
-	// before beforeMs.
+	// PruneNotificationReplyTokens deletes up to limit tokens expired at
+	// beforeMs (limit <= 0 or above NotificationPruneBatch means
+	// NotificationPruneBatch), and as many expired references.
 	PruneNotificationReplyTokens(ctx context.Context, beforeMs int64, limit int) (int64, error)
 	// Reply references (R9, notification_reply_refs.go): uninstall and
 	// pruning remove them with their tokens.
@@ -67,12 +72,18 @@ func NewMemoryNotificationReplies() *MemoryNotificationReplies {
 
 var errEmptyReplyTokenHash = errors.New("store: reply token hash required")
 
+// ErrNotificationReplyTokenExists rejects a second token under one hash.
+var ErrNotificationReplyTokenExists = errors.New("store: reply token exists")
+
 func (m *MemoryNotificationReplies) PutNotificationReplyToken(_ context.Context, t NotificationReplyToken) error {
 	if t.TokenHash == "" {
 		return errEmptyReplyTokenHash
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if _, taken := m.rows[t.TokenHash]; taken {
+		return ErrNotificationReplyTokenExists
+	}
 	m.rows[t.TokenHash] = t
 	return nil
 }
@@ -97,14 +108,15 @@ func (m *MemoryNotificationReplies) DeleteNotificationReplyTokens(_ context.Cont
 }
 
 func (m *MemoryNotificationReplies) PruneNotificationReplyTokens(_ context.Context, beforeMs int64, limit int) (int64, error) {
+	limit = notificationPruneLimit(limit)
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	var n int64
 	for k, t := range m.rows {
-		if limit > 0 && n >= int64(limit) {
+		if n >= int64(limit) {
 			break
 		}
-		if t.ExpiresAtMs < beforeMs {
+		if !liveAt(t.ExpiresAtMs, beforeMs) {
 			delete(m.rows, k)
 			n++
 		}
@@ -133,10 +145,11 @@ func (m *MySQLNotificationReplies) PutNotificationReplyToken(ctx context.Context
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		t.TokenHash, t.TenantID, t.Notifier, t.EventID, t.RoomID, t.ChannelID, t.UserID,
 		t.ReplyOwnerID, t.ReplyProvider, t.ReplyCore, t.CreatedAtMs, t.ExpiresAtMs)
-	return err
+	return dupAs(err, ErrNotificationReplyTokenExists)
 }
 
 func (m *MySQLNotificationReplies) GetNotificationReplyToken(ctx context.Context, tokenHash string) (NotificationReplyToken, bool, error) {
+	// cross-tenant: looked up by token hash for a notifier (no tenant session).
 	var t NotificationReplyToken
 	err := m.DB.QueryRowContext(ctx,
 		`SELECT token_hash, tenant_id, notifier, event_id, room_id, channel_id, user_id,
@@ -154,6 +167,7 @@ func (m *MySQLNotificationReplies) GetNotificationReplyToken(ctx context.Context
 }
 
 func (m *MySQLNotificationReplies) DeleteNotificationReplyTokens(ctx context.Context, notifier string) error {
+	// cross-tenant: a notifier's uninstall removes its tokens in every tenant.
 	if _, err := m.DB.ExecContext(ctx, `DELETE FROM notification_reply_tokens WHERE notifier=?`, notifier); err != nil {
 		return err
 	}
@@ -161,11 +175,10 @@ func (m *MySQLNotificationReplies) DeleteNotificationReplyTokens(ctx context.Con
 }
 
 func (m *MySQLNotificationReplies) PruneNotificationReplyTokens(ctx context.Context, beforeMs int64, limit int) (int64, error) {
-	if limit <= 0 {
-		limit = 1000
-	}
+	// cross-tenant: expired tokens of every tenant are pruned together.
+	limit = notificationPruneLimit(limit)
 	res, err := m.DB.ExecContext(ctx,
-		`DELETE FROM notification_reply_tokens WHERE expires_at_ms < ? LIMIT ?`, beforeMs, limit)
+		`DELETE FROM notification_reply_tokens WHERE expires_at_ms <= ? LIMIT ?`, beforeMs, limit)
 	if err != nil {
 		return 0, err
 	}

@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/luckylhb90/bnbloc/internal/tenant"
+	"github.com/luckylhb90/bnbloc/internal/testmysql"
 )
 
 // A database migrated before the outbox became per-notifier still has the
@@ -13,8 +14,7 @@ import (
 // The converging migration must replace it so enqueues work again, and must
 // leave a current-shape table alone.
 func TestNotificationOutboxPerNotifierMigrationConvergesOldShape(t *testing.T) {
-	dsn := mysqlTestDSN(t)
-	b, err := NewBackends(dsn)
+	b, err := NewBackends(testmysql.Fresh(t))
 	if err != nil {
 		t.Fatal(err)
 	}

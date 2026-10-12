@@ -4,36 +4,15 @@ import (
 	"context"
 	"errors"
 	"testing"
-	"time"
 )
 
-func TestMemoryNotificationReplyRefs(t *testing.T) {
-	testNotificationReplyRefs(t, NewMemoryNotificationReplies(), "nrr-mem")
-}
-
-// TestMySQLNotificationReplyRefs runs the same contract against MySQL (gated
-// on BNBLOC_TEST_MYSQL_DSN) under a unique notifier it removes.
-func TestMySQLNotificationReplyRefs(t *testing.T) {
-	dsn := mysqlTestDSN(t)
-	b, err := NewBackends(dsn)
-	if err != nil {
-		t.Fatalf("NewBackends: %v", err)
-	}
-	notifier := "nrr-it-" + itoaBase(time.Now().UnixNano())
-	t.Cleanup(func() {
-		_, _ = b.DB.Exec(`DELETE FROM notification_reply_tokens WHERE notifier LIKE ?`, notifier+"%")
-		_, _ = b.DB.Exec(`DELETE FROM notification_reply_refs WHERE notifier LIKE ?`, notifier+"%")
-		_ = b.DB.Close()
-	})
-	testNotificationReplyRefs(t, NewMySQLNotificationReplies(b.DB), notifier)
+func TestContractNotificationReplyTokenStoreRefs(t *testing.T) {
+	forEachBackend(t, func(t *testing.T, b *Backends) { testNotificationReplyRefs(t, b.ReplyTokens, uniq("nrr-")) })
 }
 
 func testNotificationReplyRefs(t *testing.T, s NotificationReplyTokenStore, notifier string) {
 	ctx := context.Background()
-	hash := func(s string) string {
-		out := []byte(s + "0000000000000000000000000000000000000000000000000000000000000000")
-		return string(out[:64])
-	}
+	hash := replyHash
 	// One message sent to two accounts: one ref, a row per recipient.
 	alice := NotificationReplyRef{Notifier: notifier, Ref: "v1:1:+900", Recipient: "+11", TokenHash: hash(notifier + "a"), CreatedAtMs: 100, ExpiresAtMs: 500}
 	bob := NotificationReplyRef{Notifier: notifier, Ref: "v1:1:+900", Recipient: "+22", TokenHash: hash(notifier + "b"), CreatedAtMs: 100, ExpiresAtMs: 1 << 50}
@@ -65,8 +44,15 @@ func testNotificationReplyRefs(t *testing.T, s NotificationReplyTokenStore, noti
 			t.Fatalf("get %v = %v %v", k, ok, err)
 		}
 	}
-	// Pruning tokens prunes expired references too.
-	if _, err := s.PruneNotificationReplyTokens(ctx, 1000, 100); err != nil {
+	// Pruning tokens prunes the references expired at beforeMs too (alice's
+	// expires at 500: expired at 500, live at 499).
+	if _, err := s.PruneNotificationReplyTokens(ctx, 499, 100); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok, _ := s.GetNotificationReplyRef(ctx, notifier, alice.Ref, "+11"); !ok {
+		t.Fatal("a reference live at beforeMs was pruned")
+	}
+	if _, err := s.PruneNotificationReplyTokens(ctx, 500, 100); err != nil {
 		t.Fatal(err)
 	}
 	if _, ok, _ := s.GetNotificationReplyRef(ctx, notifier, alice.Ref, "+11"); ok {

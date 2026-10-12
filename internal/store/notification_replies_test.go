@@ -2,36 +2,69 @@ package store
 
 import (
 	"context"
+	"errors"
+	"strconv"
 	"testing"
-	"time"
 )
 
-func TestMemoryNotificationReplyTokens(t *testing.T) {
-	testNotificationReplyTokens(t, NewMemoryNotificationReplies(), "nrt-mem")
+func TestContractNotificationReplyTokenStore(t *testing.T) {
+	forEachBackend(t, func(t *testing.T, b *Backends) { testNotificationReplyTokens(t, b.ReplyTokens, uniq("nrt-")) })
 }
 
-// TestMySQLNotificationReplyTokens runs the same contract against MySQL
-// (gated on BNBLOC_TEST_MYSQL_DSN) under a unique notifier it removes.
-func TestMySQLNotificationReplyTokens(t *testing.T) {
-	dsn := mysqlTestDSN(t)
-	b, err := NewBackends(dsn)
-	if err != nil {
-		t.Fatalf("NewBackends: %v", err)
-	}
-	notifier := "nrt-it-" + itoaBase(time.Now().UnixNano())
-	t.Cleanup(func() {
-		_, _ = b.DB.Exec(`DELETE FROM notification_reply_tokens WHERE notifier LIKE ?`, notifier+"%")
-		_ = b.DB.Close()
+// replyHash is a 64-character token hash unique per seed.
+func replyHash(seed string) string {
+	return (seed + "0000000000000000000000000000000000000000000000000000000000000000")[:64]
+}
+
+// Pruning at beforeMs removes the tokens expired then (expires <= beforeMs:
+// live strictly before expiry), and a prune with no limit removes at most
+// NotificationPruneBatch on both backends.
+func TestContractNotificationReplyTokenStorePrune(t *testing.T) {
+	forEachBackend(t, func(t *testing.T, b *Backends) {
+		s := b.ReplyTokens
+		ctx := context.Background()
+		notifier := uniq("nrt-prune-")
+		edge := NotificationReplyToken{TokenHash: replyHash(notifier + "e"), TenantID: "acme", Notifier: notifier, EventID: "e", RoomID: "r", UserID: "maya", CreatedAtMs: 1, ExpiresAtMs: 500}
+		live := edge
+		live.TokenHash, live.ExpiresAtMs = replyHash(notifier+"l"), 501
+		for _, tok := range []NotificationReplyToken{edge, live} {
+			if err := s.PutNotificationReplyToken(ctx, tok); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if _, err := s.PruneNotificationReplyTokens(ctx, 500, 0); err != nil {
+			t.Fatal(err)
+		}
+		if _, ok := must2(s.GetNotificationReplyToken(ctx, edge.TokenHash))(t); ok {
+			t.Fatal("a token expiring at beforeMs survived the prune")
+		}
+		if _, ok := must2(s.GetNotificationReplyToken(ctx, live.TokenHash))(t); !ok {
+			t.Fatal("a token live at beforeMs was pruned")
+		}
+		// limit <= 0 is one bounded batch, not "everything".
+		if testing.Short() {
+			return
+		}
+		many := NotificationPruneBatch + 5
+		for i := 0; i < many; i++ {
+			tok := edge
+			tok.TokenHash = replyHash(notifier + "m" + strconv.Itoa(100000+i))
+			if err := s.PutNotificationReplyToken(ctx, tok); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if n, err := s.PruneNotificationReplyTokens(ctx, 500, 0); err != nil || n != NotificationPruneBatch {
+			t.Fatalf("prune without a limit = %d, %v; want %d", n, err, NotificationPruneBatch)
+		}
+		if n, err := s.PruneNotificationReplyTokens(ctx, 500, 1<<20); err != nil || n != 5 {
+			t.Fatalf("second prune = %d, %v; want the 5 left", n, err)
+		}
 	})
-	testNotificationReplyTokens(t, NewMySQLNotificationReplies(b.DB), notifier)
 }
 
 func testNotificationReplyTokens(t *testing.T, s NotificationReplyTokenStore, notifier string) {
 	ctx := context.Background()
-	hash := func(s string) string { // 64 hex chars, unique per notifier
-		out := []byte(s + "0000000000000000000000000000000000000000000000000000000000000000")
-		return string(out[:64])
-	}
+	hash := replyHash
 	agent := NotificationReplyToken{
 		TokenHash: hash(notifier + "a"), TenantID: "acme", Notifier: notifier, EventID: "ntf_1",
 		RoomID: "design", ChannelID: "ch-1", UserID: "alice", ReplyOwnerID: "carol", ReplyProvider: "codex",
@@ -51,6 +84,14 @@ func testNotificationReplyTokens(t *testing.T, s NotificationReplyTokenStore, no
 	if err := s.PutNotificationReplyToken(ctx, NotificationReplyToken{}); err == nil {
 		t.Fatal("put without hash succeeded")
 	}
+	dup := room
+	dup.UserID = "mallory"
+	if err := s.PutNotificationReplyToken(ctx, dup); !errors.Is(err, ErrNotificationReplyTokenExists) {
+		t.Fatalf("second token under one hash = %v, want ErrNotificationReplyTokenExists", err)
+	}
+	if got, _ := must2(s.GetNotificationReplyToken(ctx, room.TokenHash))(t); got != room {
+		t.Fatalf("a refused put changed the token: %+v", got)
+	}
 	got, ok, err := s.GetNotificationReplyToken(ctx, agent.TokenHash)
 	if err != nil || !ok || got != agent {
 		t.Fatalf("get agent = %+v %v %v", got, ok, err)
@@ -58,8 +99,8 @@ func testNotificationReplyTokens(t *testing.T, s NotificationReplyTokenStore, no
 	if _, ok, err := s.GetNotificationReplyToken(ctx, hash(notifier+"missing")); err != nil || ok {
 		t.Fatalf("get missing = %v %v", ok, err)
 	}
-	// Prune removes only expired rows.
-	if n, err := s.PruneNotificationReplyTokens(ctx, 1000, 100); err != nil || n != 1 {
+	// Prune removes only expired rows (other tests' expired rows may go too).
+	if n, err := s.PruneNotificationReplyTokens(ctx, 1000, 100); err != nil || n < 1 {
 		t.Fatalf("prune = %d %v", n, err)
 	}
 	if _, ok, _ := s.GetNotificationReplyToken(ctx, agent.TokenHash); ok {
