@@ -170,17 +170,11 @@ func (s *Service) handleShareContent(w http.ResponseWriter, r *http.Request, cal
 		}
 		s.auditContent(ctx, "share", claims.Subject, claims.Tenant, src, v.Version, detail)
 	}
-	text := note
-	if text == "" {
-		text = "It is in your Library, pinned to version " + v.Version + "."
+	for _, ev := range contentshare.Announce(contentshare.Share{
+		Source: src, Version: v.Version, SharedBy: claims.Subject, Note: note, Link: s.appLink(r, "library"),
+	}, reached) {
+		s.notifyContent(ctx, claims.Tenant, ev)
 	}
-	s.notifyContent(ctx, claims.Tenant, notify.Event{
-		Type: wire.NotificationContentShared, Recipients: reached, Actor: claims.Subject,
-		Title: claims.Subject + " shared the " + contentshare.Label(src) + " with you", Text: text,
-		// One event per share call: a later share of the same version to
-		// someone else is a new notification, a retried one is not.
-		URL: s.appLink(r, "library"), DedupKey: "share:" + src.ID + "@" + v.Version + ":" + strings.Join(reached, ","),
-	})
 	httpx.WriteJSON(w, http.StatusOK, out)
 }
 
