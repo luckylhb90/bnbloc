@@ -40,7 +40,9 @@ use sidecar_util::env_key;
 
 use crate::child_process::{self, Backoff, Child, STOP_GRACE};
 
-/// Steady-state catalog refresh cadence.
+/// Steady-state catalog refresh cadence: the safety net behind the pushed
+/// `components_changed` hints (plugin_events.rs), which refresh within
+/// seconds of a change.
 const POLL_INTERVAL: std::time::Duration = std::time::Duration::from_secs(60);
 /// First retry after a failed refresh (gateway outage at boot, expired
 /// session); doubles up to POLL_INTERVAL so sidecars come up soon after the
@@ -66,6 +68,8 @@ pub struct Adapter {
     /// The installed MCP tools and their materialized binaries
     /// (mcp_tools.rs).
     mcp: Arc<mcp_tools::McpState>,
+    /// Coalesces pushed catalog hints into one refresh (plugin_events.rs).
+    catalog_hints: Arc<plugin_events::HintDebounce>,
 }
 
 impl Adapter {
@@ -87,6 +91,7 @@ impl Adapter {
             reconcile_lock: Arc::new(tokio::sync::Mutex::new(())),
             sandbox: Arc::new(Mutex::new(sandbox::SandboxState::default())),
             mcp: Arc::new(mcp_tools::McpState::default()),
+            catalog_hints: Arc::new(plugin_events::HintDebounce::default()),
         }
     }
 
@@ -155,8 +160,8 @@ impl Adapter {
         tauri::async_runtime::spawn(async move {
             sup.stabilize_bridge(generation).await;
         });
-        // Plugin hooks reach local plugin sidecars only through this
-        // member's own stream (plugin_events).
+        // The member's own stream (plugin_events): plugin hooks for local
+        // plugin sidecars and catalog hints that refresh before the poll.
         let sup = self.clone();
         tauri::async_runtime::spawn(async move {
             sup.run_plugin_events(generation).await;

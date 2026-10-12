@@ -250,12 +250,18 @@ These are code behaviors, not variables — recorded here because operators ask:
   and `notification.v1` — one member's notification, routed to their desktop
   instead of the server notifiers).
   Realtime decides which member sees which event and audits the outcome, but
-  never dials a sidecar: each member's desktop that runs a plugin sidecar holds
-  `GET /v1/my/plugin-events` (SSE through the gateway), posts every delivered
+  never dials a sidecar: each member's desktop holds
+  `GET /v1/my/plugin-events` (SSE through the gateway; `?plugins=1` while it
+  runs a plugin sidecar, the only streams deliveries go to), posts every delivered
   envelope to its own loopback `POST /events`, and acknowledges it with
   `POST /v1/my/plugin-events/{id}/ack`. Delivery is per member (every member
   of the room with the plugin and a connected desktop gets the event) and
-  best-effort (an offline desktop misses events). No variable configures it.
+  best-effort (an offline desktop misses events). The same stream carries
+  `components_changed` hints: after a component install, uninstall, rollout
+  or tenant change, or a member's opt-in, the gateway signals realtime
+  (`POST /internal/v1/components/changed`), every replica pushes the hint to
+  the member streams it holds, and the desktop refreshes its component
+  catalog at once instead of at its 60 s poll. No variable configures it.
   The server never launches plugin processes — supervision is the desktop
   sidecar manager's. The desktop launches a plugin with
   `BNBLOC_PLUGIN_HOST_URL`/`BNBLOC_PLUGIN_HOST_TOKEN` (its loopback host API,

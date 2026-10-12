@@ -131,7 +131,8 @@ Realtime streams `text/event-stream`; the edge proxy must not buffer responses
 and needs a long idle timeout. Replicas reach each other on the realtime port
 (forwarded requests, `/readyz` probes, and the signed internal peer routes
 `/internal/v1/plugin-events`, `/internal/v1/members/{m}/…`,
-`/internal/v1/rooms/{id}/schedules/{s}/post`); a network policy must allow
+`/internal/v1/rooms/{id}/schedules/{s}/post`, and the hand-off of the
+gateway's `/internal/v1/components/changed` catalog hint); a network policy must allow
 realtime → realtime on `:8082`.
 
 ## activity (`:8081`)

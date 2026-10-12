@@ -154,7 +154,16 @@ func (g *deliveryGroup) resolve(delivered bool) {
 type pluginStream struct {
 	subject  string
 	tenantID string // the member's session tenant (what their desktop lists)
-	ch       chan wire.PluginDelivery
+	// plugins: the desktop runs a plugin sidecar (?plugins=1). Only such a
+	// stream receives plugin deliveries and counts for notification
+	// routing; a desktop without plugins holds the stream for catalog
+	// hints alone.
+	plugins bool
+	ch      chan wire.PluginDelivery
+	// hints carries components_changed hints (buffer 1: a hint already
+	// queued covers any number of later ones; the desktop re-reads its
+	// whole catalog).
+	hints chan wire.ComponentsChanged
 	// closed ends the stream: the member moved to another replica
 	// (closeStreams); the desktop reconnects to the new owner.
 	closed chan struct{}
@@ -317,13 +326,14 @@ func (d *PluginHookDispatcher) run() {
 }
 
 // HasDesktop reports whether member holds a plugin event stream whose
-// session is in tenantID (notification routing: a desktop that may run a
-// notification plugin).
+// session is in tenantID from a desktop running plugin sidecars
+// (notification routing: a desktop that may run a notification plugin). A
+// stream held only for catalog hints does not count.
 func (d *PluginHookDispatcher) HasDesktop(tenantID, member string) bool {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	for st := range d.streams {
-		if st.subject == member && st.tenantID == tenantID {
+		if st.plugins && st.subject == member && st.tenantID == tenantID {
 			return true
 		}
 	}
@@ -371,7 +381,7 @@ func (d *PluginHookDispatcher) fanOutNotification(item pluginEvent) {
 	if err != nil {
 		return
 	}
-	for _, st := range d.connectedStreams() {
+	for _, st := range d.pluginStreams() {
 		if st.subject != n.UserID || st.tenantID != item.tenantID {
 			continue
 		}
@@ -410,7 +420,7 @@ func (d *PluginHookDispatcher) fanOut(item pluginEvent) {
 	}
 	event := spec.Event + ".v" + spec.Version
 	memberOf := map[string]bool{} // subject -> in the event's room (probed once per event)
-	for _, st := range d.connectedStreams() {
+	for _, st := range d.pluginStreams() {
 		for _, rec := range plugins {
 			if !d.streamMayUse(ctx, st, rec) {
 				continue

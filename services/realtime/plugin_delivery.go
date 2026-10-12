@@ -30,8 +30,10 @@ func (s *Service) registerPluginRoutes(mux *http.ServeMux) {
 }
 
 // handlePluginEvents streams the caller's plugin hook deliveries as SSE
-// (event: plugin_event, data: wire.PluginDelivery). The desktop that runs the
-// caller's plugin sidecars holds it open while it has any plugin installed.
+// (event: plugin_event, data: wire.PluginDelivery) and catalog hints (event:
+// components_changed, data: wire.ComponentsChanged). The member's desktop
+// holds it open while its sidecar manager runs, with ?plugins=1 while it
+// runs a plugin sidecar.
 func (s *Service) handlePluginEvents(w http.ResponseWriter, r *http.Request) {
 	subject := strings.TrimSpace(r.Header.Get("X-Bnbloc-User"))
 	if subject == "" {
@@ -44,7 +46,9 @@ func (s *Service) handlePluginEvents(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "streaming unsupported", http.StatusInternalServerError)
 		return
 	}
-	st, err := s.PluginHooks.subscribe(subject, tenant.FromContext(r.Context()))
+	// ?plugins=1: the desktop runs a plugin sidecar. Without it the stream
+	// carries catalog hints only.
+	st, err := s.PluginHooks.subscribe(subject, tenant.FromContext(r.Context()), r.URL.Query().Get("plugins") == "1")
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusTooManyRequests)
 		return
@@ -77,6 +81,13 @@ func (s *Service) handlePluginEvents(w http.ResponseWriter, r *http.Request) {
 			}
 			fmt.Fprintf(w, "id: %s\nevent: %s\ndata: %s\n\n", delivery.ID, wire.PluginEventKind, data)
 			flusher.Flush()
+		case hint := <-st.hints:
+			data, err := json.Marshal(hint)
+			if err != nil {
+				continue
+			}
+			fmt.Fprintf(w, "event: %s\ndata: %s\n\n", wire.ComponentsChangedKind, data)
+			flusher.Flush()
 		}
 	}
 }
@@ -107,7 +118,7 @@ func (s *Service) handlePluginEventAck(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func (d *PluginHookDispatcher) subscribe(subject, tenantID string) (*pluginStream, error) {
+func (d *PluginHookDispatcher) subscribe(subject, tenantID string, plugins bool) (*pluginStream, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	n := 0
@@ -119,7 +130,8 @@ func (d *PluginHookDispatcher) subscribe(subject, tenantID string) (*pluginStrea
 	if n >= maxPluginStreamsPerSubject {
 		return nil, errTooManyPluginStreams
 	}
-	st := &pluginStream{subject: subject, tenantID: tenantID, ch: make(chan wire.PluginDelivery, pluginStreamBuffer), closed: make(chan struct{})}
+	st := &pluginStream{subject: subject, tenantID: tenantID, plugins: plugins, ch: make(chan wire.PluginDelivery, pluginStreamBuffer),
+		hints: make(chan wire.ComponentsChanged, 1), closed: make(chan struct{})}
 	d.streams[st] = struct{}{}
 	return st, nil
 }
@@ -151,14 +163,51 @@ func (d *PluginHookDispatcher) closeStreams(owned func(member string) bool) int 
 	return n
 }
 
-func (d *PluginHookDispatcher) connectedStreams() []*pluginStream {
+// pluginStreams are the connected streams of desktops running plugin
+// sidecars: the only ones plugin deliveries go to.
+func (d *PluginHookDispatcher) pluginStreams() []*pluginStream {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	out := make([]*pluginStream, 0, len(d.streams))
 	for st := range d.streams {
-		out = append(out, st)
+		if st.plugins {
+			out = append(out, st)
+		}
 	}
 	return out
+}
+
+// hasStream reports whether subject holds any member stream here.
+func (d *PluginHookDispatcher) hasStream(subject string) bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	for st := range d.streams {
+		if st.subject == subject {
+			return true
+		}
+	}
+	return false
+}
+
+// componentsChanged queues a catalog hint on every connected stream it
+// concerns (the hint's tenant, "" = all; its member, "" = all) without
+// blocking, and reports how many streams it reached. A stream with a hint
+// already queued needs no second one.
+func (d *PluginHookDispatcher) componentsChanged(c wire.ComponentsChanged) int {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	n := 0
+	for st := range d.streams {
+		if (c.TenantID != "" && st.tenantID != c.TenantID) || (c.Member != "" && st.subject != c.Member) {
+			continue
+		}
+		select {
+		case st.hints <- c:
+		default:
+		}
+		n++
+	}
+	return n
 }
 
 // offer queues one delivery on a stream without blocking. A full pending

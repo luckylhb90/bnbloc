@@ -78,7 +78,7 @@ func newPluginFixture(t *testing.T, settings store.PlatformSettingsStore, names 
 
 func (f *pluginFixture) subscribe(t *testing.T, subject, tenantID string) *pluginStream {
 	t.Helper()
-	st, err := f.dispatcher.subscribe(subject, tenantID)
+	st, err := f.dispatcher.subscribe(subject, tenantID, true)
 	if err != nil {
 		t.Fatalf("subscribe %s: %v", subject, err)
 	}
@@ -200,7 +200,7 @@ func TestPluginEvents_streamDeliversEnvelopeAndAuditsAck(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, srv.URL+"/v1/my/plugin-events", nil)
+	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, srv.URL+"/v1/my/plugin-events?plugins=1", nil)
 	req.Header.Set("X-Bnbloc-User", "alice")
 	stream, err := http.DefaultClient.Do(req)
 	if err != nil || stream.StatusCode != http.StatusOK {
@@ -209,7 +209,7 @@ func TestPluginEvents_streamDeliversEnvelopeAndAuditsAck(t *testing.T) {
 	defer stream.Body.Close()
 	frames := sseFrames(t, stream.Body)
 	deadline := time.Now().Add(2 * time.Second)
-	for len(f.dispatcher.connectedStreams()) == 0 && time.Now().Before(deadline) {
+	for len(f.dispatcher.pluginStreams()) == 0 && time.Now().Before(deadline) {
 		time.Sleep(5 * time.Millisecond)
 	}
 
@@ -498,7 +498,7 @@ func TestPluginEvents_streamsPerMemberAreBounded(t *testing.T) {
 	for i := 0; i < maxPluginStreamsPerSubject; i++ {
 		f.subscribe(t, "alice", tenant.Default)
 	}
-	if _, err := f.dispatcher.subscribe("alice", tenant.Default); !errors.Is(err, errTooManyPluginStreams) {
+	if _, err := f.dispatcher.subscribe("alice", tenant.Default, true); !errors.Is(err, errTooManyPluginStreams) {
 		t.Fatalf("subscribe over the cap = %v, want errTooManyPluginStreams", err)
 	}
 	f.subscribe(t, "bob", tenant.Default)

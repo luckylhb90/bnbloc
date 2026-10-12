@@ -251,8 +251,9 @@ component can have) with every recipient the preference, mute and collapse
 rules kept. Otherwise it is queued directly to the server notifiers, as if
 nobody ran a plugin. Realtime's outbox worker then routes each recipient:
 
-1. A member whose desktop holds the plugin event stream
-   (`GET /v1/my/plugin-events`, session in the event's tenant) gets the
+1. A member whose desktop holds the plugin event stream as a plugin
+   desktop (`GET /v1/my/plugin-events?plugins=1`, sent while it runs a
+   plugin sidecar; session in the event's tenant) gets the
    notification there: realtime hands it to every entitled plugin on that
    member's streams that declares `notification.v1` (rollout not `off`,
    tenant scope admits the event's tenant and the session's, opt-in only

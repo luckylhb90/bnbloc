@@ -77,13 +77,34 @@ func (p *HTTPPublisher) Publish(ctx context.Context, ev wire.Event) {
 		log.Printf("realtime publisher(%s): marshal %s: %v", p.Service, ev.Kind, err)
 		return
 	}
+	p.post(ctx, "/internal/v1/rooms/"+url.PathEscape(ev.RoomID)+"/publish", tenantID, buf, ev.Kind+" room="+ev.RoomID)
+}
+
+// ComponentsChanged tells realtime that the executable component catalog
+// changed (POST /internal/v1/components/changed): realtime queues a
+// components_changed hint on the member desktop streams it concerns, on
+// every replica, so desktops refresh their catalog now instead of at their
+// next poll. Best-effort like Publish: the change itself already succeeded.
+func (p *HTTPPublisher) ComponentsChanged(ctx context.Context, c wire.ComponentsChanged) {
+	if p == nil || p.BaseURL == "" {
+		return
+	}
+	buf, err := json.Marshal(c)
+	if err != nil {
+		log.Printf("realtime publisher(%s): marshal components_changed: %v", p.Service, err)
+		return
+	}
+	p.post(ctx, "/internal/v1/components/changed", c.TenantID, buf, "components_changed")
+}
+
+// post makes one signed internal call to realtime as p.Service in tenantID.
+func (p *HTTPPublisher) post(ctx context.Context, path, tenantID string, buf []byte, what string) {
 	// The publish outlives neither its timeout nor needs the caller's
 	// cancellation: a handler that has already written its response must still
 	// deliver the event.
 	pctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	defer cancel()
-	target := p.BaseURL + "/internal/v1/rooms/" + url.PathEscape(ev.RoomID) + "/publish"
-	req, err := http.NewRequestWithContext(pctx, http.MethodPost, target, bytes.NewReader(buf))
+	req, err := http.NewRequestWithContext(pctx, http.MethodPost, p.BaseURL+path, bytes.NewReader(buf))
 	if err != nil {
 		log.Printf("realtime publisher(%s): request: %v", p.Service, err)
 		return
@@ -99,11 +120,11 @@ func (p *HTTPPublisher) Publish(ctx context.Context, ev wire.Event) {
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		log.Printf("realtime publisher(%s): publish %s room=%s: %v", p.Service, ev.Kind, ev.RoomID, err)
+		log.Printf("realtime publisher(%s): publish %s: %v", p.Service, what, err)
 		return
 	}
 	_ = resp.Body.Close()
 	if resp.StatusCode/100 != 2 {
-		log.Printf("realtime publisher(%s): publish %s room=%s: status %d", p.Service, ev.Kind, ev.RoomID, resp.StatusCode)
+		log.Printf("realtime publisher(%s): publish %s: status %d", p.Service, what, resp.StatusCode)
 	}
 }

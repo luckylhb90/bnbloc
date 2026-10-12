@@ -100,6 +100,7 @@ func (s *Service) handleInstallComponent(w http.ResponseWriter, r *http.Request)
 		http.Error(w, errNotifierSecret.Error(), http.StatusInternalServerError)
 		return
 	}
+	s.componentsChanged(r.Context(), "", "")
 	writeJSON(w, http.StatusOK, componentInstallResponse{installedComponent: component, Secret: secret})
 }
 
@@ -140,6 +141,7 @@ func (s *Service) handleUninstallComponent(w http.ResponseWriter, r *http.Reques
 	}
 	s.afterNotifierUninstall(r.Context(), rec)
 	s.afterMCPUninstall(r.Context(), rec)
+	s.componentsChanged(r.Context(), "", "")
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -175,6 +177,7 @@ func (s *Service) handleSetComponentRollout(w http.ResponseWriter, r *http.Reque
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+	s.componentsChanged(r.Context(), "", "")
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -221,6 +224,7 @@ func (s *Service) handleSetComponentTenants(w http.ResponseWriter, r *http.Reque
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+	s.componentsChanged(r.Context(), "", "")
 	w.WriteHeader(http.StatusNoContent)
 }
 

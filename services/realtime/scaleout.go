@@ -95,6 +95,18 @@ type Peers struct {
 
 	mu     sync.Mutex
 	queues map[string]chan peerPluginEvent
+
+	// hints holds one components_changed hand-off slot per peer: at most one
+	// call in flight per peer and at most one more coalesced behind it.
+	hintMu sync.Mutex
+	hints  map[string]*peerHintSlot
+}
+
+// peerHintSlot is one peer's components_changed hand-off: busy while a call
+// is in flight, pending the (merged) hint to send after it.
+type peerHintSlot struct {
+	busy    bool
+	pending *wire.ComponentsChanged
 }
 
 // peerPluginEvent is one room event handed to a peer for plugin fan-out.
@@ -124,7 +136,7 @@ func NewPeers(set *shard.Set) *Peers {
 	if set == nil {
 		return nil
 	}
-	return &Peers{set: set, key: svcauth.KeyFromEnv(), client: set.Client(), queues: map[string]chan peerPluginEvent{}}
+	return &Peers{set: set, key: svcauth.KeyFromEnv(), client: set.Client(), queues: map[string]chan peerPluginEvent{}, hints: map[string]*peerHintSlot{}}
 }
 
 // Set is the underlying shard set (nil for a single node).
@@ -227,6 +239,75 @@ func (p *Peers) drain(peer string, q chan peerPluginEvent) {
 	}
 }
 
+// forwardComponentsChanged hands a catalog hint to every other live peer,
+// each of which queues it on the member streams it owns. Never blocks: each
+// peer has one call in flight at most, and hints arriving meanwhile merge
+// into one follow-up (a hint is "re-read your catalog", so merging widens
+// its scope instead of queueing; over-notifying only costs a refresh).
+func (p *Peers) forwardComponentsChanged(c wire.ComponentsChanged) {
+	if p == nil {
+		return
+	}
+	self := p.set.Self()
+	for _, peer := range p.set.Peers() {
+		if peer == self {
+			continue
+		}
+		p.hintMu.Lock()
+		slot := p.hints[peer]
+		if slot == nil {
+			slot = &peerHintSlot{}
+			p.hints[peer] = slot
+		}
+		if slot.busy {
+			slot.pending = mergeHints(slot.pending, c)
+			p.hintMu.Unlock()
+			continue
+		}
+		slot.busy = true
+		p.hintMu.Unlock()
+		go p.sendHints(peer, slot, c)
+	}
+}
+
+// sendHints delivers c to peer, then whatever merged behind it.
+func (p *Peers) sendHints(peer string, slot *peerHintSlot, c wire.ComponentsChanged) {
+	for {
+		ctx, cancel := context.WithTimeout(context.Background(), peerCallTimeout)
+		status, body, err := p.call(ctx, http.MethodPost, peer, "/internal/v1/components/changed", c.TenantID, c)
+		cancel()
+		if err != nil || status/100 != 2 {
+			log.Printf("realtime: components_changed hand-off to peer %s failed: status=%d err=%v %s", peer, status, err, bytes.TrimSpace(body))
+		}
+		p.hintMu.Lock()
+		if slot.pending == nil {
+			slot.busy = false
+			p.hintMu.Unlock()
+			return
+		}
+		c = *slot.pending
+		slot.pending = nil
+		p.hintMu.Unlock()
+	}
+}
+
+// mergeHints widens a pending hint to cover c too: a differing tenant or
+// member becomes "every".
+func mergeHints(pending *wire.ComponentsChanged, c wire.ComponentsChanged) *wire.ComponentsChanged {
+	if pending == nil {
+		return &c
+	}
+	m := *pending
+	if m.TenantID != c.TenantID {
+		m.TenantID = ""
+	}
+	if m.Member != c.Member {
+		m.Member = ""
+	}
+	m.AtMs = max(m.AtMs, c.AtMs)
+	return &m
+}
+
 // prune stops the hand-off workers of peers that left the live view (pod IPs
 // change on every restart, so the set of addresses ever seen is unbounded).
 func (p *Peers) prune() {
@@ -238,13 +319,20 @@ func (p *Peers) prune() {
 		live[peer] = true
 	}
 	p.mu.Lock()
-	defer p.mu.Unlock()
 	for peer, q := range p.queues {
 		if !live[peer] {
 			close(q)
 			delete(p.queues, peer)
 		}
 	}
+	p.mu.Unlock()
+	p.hintMu.Lock()
+	for peer, slot := range p.hints {
+		if !live[peer] && !slot.busy {
+			delete(p.hints, peer)
+		}
+	}
+	p.hintMu.Unlock()
 }
 
 // reconcileOwnership releases the in-process state of every key this replica
@@ -282,6 +370,30 @@ func (s *Service) registerPeerRoutes(mux *http.ServeMux, internal func(http.Hand
 	mux.Handle("GET /internal/v1/members/{member}/desktop", internal(s.handleInternalMemberDesktop))
 	mux.Handle("POST /internal/v1/members/{member}/notifications", internal(s.handleInternalMemberNotification))
 	mux.Handle("POST /internal/v1/rooms/{roomId}/schedules/{scheduleId}/post", internal(s.handleInternalScheduledPost))
+	mux.Handle("POST /internal/v1/components/changed", internal(s.handleInternalComponentsChanged))
+}
+
+// handleInternalComponentsChanged queues a catalog hint
+// (wire.ComponentsChanged) on the member streams this replica holds. The
+// gateway calls it after a change of the executable component catalog; a
+// call that did not come from a peer (no shard.ForwardedHeader) is handed
+// on to every other replica, which serves it locally and never re-forwards.
+func (s *Service) handleInternalComponentsChanged(w http.ResponseWriter, r *http.Request) {
+	var c wire.ComponentsChanged
+	r.Body = http.MaxBytesReader(w, r.Body, maxSmallBodyBytes)
+	if err := json.NewDecoder(r.Body).Decode(&c); err != nil {
+		http.Error(w, "invalid json body", http.StatusBadRequest)
+		return
+	}
+	c.TenantID, c.Member = strings.TrimSpace(c.TenantID), strings.TrimSpace(c.Member)
+	if c.AtMs <= 0 {
+		c.AtMs = time.Now().UnixMilli()
+	}
+	s.PluginHooks.componentsChanged(c)
+	if r.Header.Get(shard.ForwardedHeader) == "" {
+		s.Peers.forwardComponentsChanged(c)
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // handleInternalPluginEvent fans a room event its owner published out to the

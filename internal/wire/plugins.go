@@ -13,6 +13,28 @@ import "encoding/json"
 // PluginEventKind is the SSE event name of one PluginDelivery frame.
 const PluginEventKind = "plugin_event"
 
+// ComponentsChangedKind is the SSE event name of a ComponentsChanged hint on
+// the same member stream: the member's executable component catalog
+// (GET /v1/components) changed, so the desktop refreshes it now instead of
+// at its next poll. The stream doubles as the member's desktop channel; a
+// desktop holds it whenever its sidecar manager runs, with ?plugins=1 only
+// while it runs a plugin sidecar (plugin deliveries and notification routing
+// consider only those streams).
+const ComponentsChangedKind = "components_changed"
+
+// ComponentsChanged is the body of realtime's internal
+// POST /internal/v1/components/changed (the gateway's signal after a catalog
+// change, and the hand-off between realtime replicas) and the data of a
+// components_changed frame. It is a hint, not the change: the desktop
+// re-reads its catalog. TenantID scopes it to the members signed in to one
+// organization ("" = every member); Member scopes it to one member (an
+// opt-in install or removal).
+type ComponentsChanged struct {
+	TenantID string `json:"tenantId,omitempty"`
+	Member   string `json:"member,omitempty"`
+	AtMs     int64  `json:"atMs"`
+}
+
 // Plugin delivery outcomes a desktop acknowledges (PluginDeliveryAck.Status).
 const (
 	PluginDeliveryDelivered = "delivered"

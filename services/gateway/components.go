@@ -209,6 +209,7 @@ func (s *Service) handleComponentInstall(w http.ResponseWriter, r *http.Request)
 		http.Error(w, "record install failed", http.StatusInternalServerError)
 		return
 	}
+	s.componentsChanged(r.Context(), claims.Tenant, claims.Subject)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -237,5 +238,6 @@ func (s *Service) handleComponentUninstall(w http.ResponseWriter, r *http.Reques
 		http.Error(w, "remove install failed", http.StatusInternalServerError)
 		return
 	}
+	s.componentsChanged(r.Context(), claims.Tenant, claims.Subject)
 	w.WriteHeader(http.StatusNoContent)
 }

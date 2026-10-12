@@ -1,14 +1,25 @@
-//! Plugin hook delivery on the member's machine.
+//! The member's desktop stream: plugin hook deliveries and catalog hints.
 //!
 //! realtime is the hook authority (which plugin sees which room event, rollout,
 //! tenant scope, opt-in installs) and the auditor, but a plugin sidecar runs
-//! here, on a loopback port the server can never dial. So while this desktop
-//! runs at least one plugin sidecar it holds the member's authenticated stream
-//! `GET /v1/my/plugin-events` (SSE through the gateway), posts each delivery's
-//! envelope to the running sidecar's loopback `POST /events`, and reports the
-//! outcome with `POST /v1/my/plugin-events/{id}/ack`, which realtime audits.
-//! Deliveries are handled one at a time in stream order; the server bounds
-//! what it buffers for a slow desktop.
+//! here, on a loopback port the server can never dial. So this desktop holds
+//! the member's authenticated stream `GET /v1/my/plugin-events` (SSE through
+//! the gateway) whenever its sidecar manager runs:
+//!
+//! - `plugin_event`: with `?plugins=1` (only while at least one plugin sidecar
+//!   is installed) it posts each delivery's envelope to the running sidecar's
+//!   loopback `POST /events` and reports the outcome with
+//!   `POST /v1/my/plugin-events/{id}/ack`, which realtime audits. Deliveries
+//!   are handled one at a time in stream order; the server bounds what it
+//!   buffers for a slow desktop. A stream without the flag gets no
+//!   deliveries and does not count as a plugin desktop for notifications.
+//! - `components_changed`: the member's component catalog changed (an
+//!   install, uninstall, rollout or tenant change, an opt-in); the manager
+//!   refreshes it now (hints coalesce for HINT_COALESCE) instead of at the
+//!   next poll, so a newly published MCP tool or sidecar shows up within
+//!   seconds. The poll stays the safety net for a hint missed while the
+//!   stream was down (a reconnect also refreshes once).
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use futures_util::StreamExt;
@@ -21,8 +32,16 @@ use crate::internal_ext::Adapter;
 
 /// SSE event name of one delivery frame (wire.PluginEventKind).
 const PLUGIN_EVENT: &str = "plugin_event";
-/// How often an idle loop (no plugin sidecar installed) rechecks.
-const IDLE_CHECK: Duration = Duration::from_secs(5);
+/// SSE event name of a catalog hint (wire.ComponentsChangedKind).
+const COMPONENTS_CHANGED: &str = "components_changed";
+/// Hints arriving within this window of the first one are served by one
+/// catalog refresh (an install publishes, sets rollout and tenants in a
+/// row).
+const HINT_COALESCE: Duration = Duration::from_secs(2);
+/// How often a held stream re-checks whether it is still the right one
+/// (manager stopped, session changed, plugins installed or removed) while
+/// no bytes arrive.
+const STREAM_CHECK: Duration = Duration::from_secs(5);
 const RECONNECT_MIN: Duration = Duration::from_secs(1);
 const RECONNECT_MAX: Duration = Duration::from_secs(30);
 /// A stream that stayed up this long resets the reconnect backoff.
@@ -36,6 +55,26 @@ const ACK_TIMEOUT: Duration = Duration::from_secs(10);
 /// Bound on one unterminated SSE frame (the largest event payload is 1 MiB).
 const MAX_FRAME_BYTES: usize = 4 << 20;
 
+/// Coalesces catalog hints: the first hint claims the one scheduled
+/// refresh; later hints are absorbed until that refresh starts (it releases
+/// the claim first, so a hint arriving during the reconcile schedules
+/// another: the reconcile may have read the catalog before that change).
+#[derive(Default)]
+pub(super) struct HintDebounce {
+    scheduled: AtomicBool,
+}
+
+impl HintDebounce {
+    /// True when the caller must schedule the refresh.
+    fn claim(&self) -> bool {
+        !self.scheduled.swap(true, Ordering::SeqCst)
+    }
+
+    fn release(&self) {
+        self.scheduled.store(false, Ordering::SeqCst);
+    }
+}
+
 #[derive(serde::Deserialize)]
 struct PluginDelivery {
     id: String,
@@ -44,20 +83,20 @@ struct PluginDelivery {
 }
 
 impl Adapter {
-    /// Hold the member's plugin event stream while this desktop runs plugin
-    /// sidecars; reconnect with backoff; stop with the manager generation.
+    /// Hold the member's desktop stream while the manager runs; reconnect
+    /// with backoff; stop with the manager generation.
     pub(super) async fn run_plugin_events(&self, generation: u64) {
         let mut backoff = Backoff::new(RECONNECT_MIN, RECONNECT_MAX, STABLE_STREAM);
+        let mut opened_before = false;
         loop {
             if !self.manager_current(generation) {
                 return;
             }
-            if !self.runs_plugins() {
-                tokio::time::sleep(IDLE_CHECK).await;
-                continue;
-            }
             let started = Instant::now();
-            if let Err(e) = self.consume_plugin_events(generation).await {
+            if let Err(e) = self
+                .consume_plugin_events(generation, &mut opened_before)
+                .await
+            {
                 eprintln!("[plugin-events] {e}");
             }
             if !self.manager_current(generation) {
@@ -79,14 +118,38 @@ impl Adapter {
         })
     }
 
-    async fn consume_plugin_events(&self, generation: u64) -> Result<(), String> {
+    /// Refresh the component catalog soon: hints within HINT_COALESCE
+    /// share one reconcile (serialized with the poll by reconcile_lock).
+    pub(super) fn request_catalog_refresh(&self) {
+        if !self.catalog_hints.claim() {
+            return;
+        }
+        let sup = self.clone();
+        tauri::async_runtime::spawn(async move {
+            tokio::time::sleep(HINT_COALESCE).await;
+            sup.catalog_hints.release();
+            if let Err(e) = sup.reconcile_bounded().await {
+                eprintln!("[sidecar-manager] hinted refresh failed: {e}");
+            }
+        });
+    }
+
+    async fn consume_plugin_events(
+        &self,
+        generation: u64,
+        opened_before: &mut bool,
+    ) -> Result<(), String> {
         let gateway = self.gateway.lock().clone();
         if gateway.base_url.is_empty() || gateway.token.is_empty() {
             return Err("no gateway session".into());
         }
+        // The flag tells realtime whether plugin deliveries (and
+        // notification routing) may use this stream; the stream is reopened
+        // when it stops matching.
+        let plugins = self.runs_plugins();
         let resp = self
             .http()?
-            .get(format!("{}/v1/my/plugin-events", gateway.base_url))
+            .get(stream_url(&gateway.base_url, plugins))
             .bearer_auth(&gateway.token)
             .header(ACCEPT, "text/event-stream")
             .send()
@@ -95,32 +158,44 @@ impl Adapter {
         if !resp.status().is_success() {
             return Err(format!("open stream: status {}", resp.status()));
         }
+        // A hint sent while the stream was down is lost: catch up once.
+        if std::mem::replace(opened_before, true) {
+            self.request_catalog_refresh();
+        }
         let mut body = resp.bytes_stream();
         let mut parser = SseParser::default();
-        // The server writes a keep-alive comment every 15s, so this loop
-        // re-evaluates at least that often; the shared client's read-idle
-        // timeout turns a dead connection into an error.
-        while let Some(chunk) = body.next().await {
-            let chunk = chunk.map_err(|e| format!("read stream: {e}"))?;
-            for frame in parser.push(&chunk)? {
-                if frame.event != PLUGIN_EVENT {
-                    continue;
-                }
-                match serde_json::from_str::<PluginDelivery>(&frame.data) {
-                    Ok(delivery) => self.handle_delivery(&gateway, delivery).await,
-                    Err(e) => eprintln!("[plugin-events] undecodable delivery: {e}"),
+        loop {
+            // The server writes a keep-alive comment every 15s; the shared
+            // client's read-idle timeout turns a dead connection into an
+            // error. The periodic wake re-checks the stream's fit sooner.
+            if let Ok(next) = tokio::time::timeout(STREAM_CHECK, body.next()).await {
+                let Some(chunk) = next else {
+                    return Err("stream closed by the gateway".into());
+                };
+                let chunk = chunk.map_err(|e| format!("read stream: {e}"))?;
+                for frame in parser.push(&chunk)? {
+                    match frame_action(&frame) {
+                        FrameAction::Deliver => {
+                            match serde_json::from_str::<PluginDelivery>(&frame.data) {
+                                Ok(delivery) => self.handle_delivery(&gateway, delivery).await,
+                                Err(e) => eprintln!("[plugin-events] undecodable delivery: {e}"),
+                            }
+                        }
+                        FrameAction::RefreshCatalog => self.request_catalog_refresh(),
+                        FrameAction::Ignore => {}
+                    }
                 }
             }
-            // Stop when the manager stopped, no plugin is left, or the session
-            // changed (a sign-in as another member must not keep this stream).
+            // Stop when the manager stopped, the plugin set flipped, or the
+            // session changed (a sign-in as another member must not keep
+            // this stream).
             if !self.manager_current(generation)
-                || !self.runs_plugins()
+                || self.runs_plugins() != plugins
                 || !same_session(&self.gateway.lock(), &gateway)
             {
                 return Ok(());
             }
         }
-        Err("stream closed by the gateway".into())
     }
 
     async fn handle_delivery(&self, gateway: &GatewayAccess, delivery: PluginDelivery) {
@@ -167,6 +242,28 @@ impl Adapter {
             return Err(format!("status {}", resp.status()));
         }
         Ok(())
+    }
+}
+
+/// The member stream URL; `?plugins=1` while a plugin sidecar is installed.
+fn stream_url(base_url: &str, plugins: bool) -> String {
+    let query = if plugins { "?plugins=1" } else { "" };
+    format!("{base_url}/v1/my/plugin-events{query}")
+}
+
+/// What a stream frame asks of the desktop.
+#[derive(Debug, PartialEq)]
+enum FrameAction {
+    Deliver,
+    RefreshCatalog,
+    Ignore,
+}
+
+fn frame_action(frame: &SseFrame) -> FrameAction {
+    match frame.event.as_str() {
+        PLUGIN_EVENT => FrameAction::Deliver,
+        COMPONENTS_CHANGED => FrameAction::RefreshCatalog,
+        _ => FrameAction::Ignore,
     }
 }
 
@@ -323,6 +420,48 @@ mod tests {
                     data: "{\"id\":\"a-2\"}".into()
                 },
             ]
+        );
+    }
+
+    #[test]
+    fn components_changed_frames_refresh_the_catalog() {
+        let mut parser = SseParser::default();
+        let frames = parser
+            .push(b"event: components_changed\ndata: {\"atMs\":42}\n\nevent: plugin_event\ndata: {}\n\nevent: other\ndata: x\n\n")
+            .expect("push");
+        let actions: Vec<FrameAction> = frames.iter().map(frame_action).collect();
+        assert_eq!(
+            actions,
+            vec![
+                FrameAction::RefreshCatalog,
+                FrameAction::Deliver,
+                FrameAction::Ignore
+            ]
+        );
+    }
+
+    #[test]
+    fn stream_url_flags_plugin_desktops() {
+        assert_eq!(
+            stream_url("https://gw.example", true),
+            "https://gw.example/v1/my/plugin-events?plugins=1"
+        );
+        assert_eq!(
+            stream_url("https://gw.example", false),
+            "https://gw.example/v1/my/plugin-events"
+        );
+    }
+
+    #[test]
+    fn hint_debounce_coalesces_until_the_refresh_starts() {
+        let debounce = HintDebounce::default();
+        assert!(debounce.claim(), "first hint schedules a refresh");
+        assert!(!debounce.claim(), "a burst shares it");
+        assert!(!debounce.claim());
+        debounce.release();
+        assert!(
+            debounce.claim(),
+            "a hint during the reconcile schedules another"
         );
     }
 

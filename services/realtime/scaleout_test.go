@@ -343,7 +343,7 @@ func TestScaleOutPluginDeliveryCrossesReplicas(t *testing.T) {
 	c.members.Add(room, member)
 	c.members.Add(room, "jack")
 
-	plugin := c.open(other, "/v1/my/plugin-events", member)
+	plugin := c.open(other, "/v1/my/plugin-events?plugins=1", member)
 	deadline := time.Now().Add(3 * time.Second)
 	for !memberOwner.svc.PluginHooks.HasDesktop(tenant.Default, member) {
 		if time.Now().After(deadline) {
@@ -392,7 +392,7 @@ func TestScaleOutNotificationRouteCrossesReplicas(t *testing.T) {
 	if route.HasDesktop(tenant.Default, member) {
 		t.Fatal("desktop reported before the member connected")
 	}
-	plugin := c.open(worker, "/v1/my/plugin-events", member) // forwarded to the owner
+	plugin := c.open(worker, "/v1/my/plugin-events?plugins=1", member) // forwarded to the owner
 	deadline := time.Now().Add(3 * time.Second)
 	for !route.HasDesktop(tenant.Default, member) {
 		if time.Now().After(deadline) {
