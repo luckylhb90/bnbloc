@@ -123,11 +123,11 @@ impl SignIn {
 }
 
 /// The sign-in file of `tool` under the MCP settings dir.
-pub(super) fn sign_in_path(settings_dir: &Path, tool: &str) -> Result<PathBuf, String> {
+fn sign_in_path(settings_dir: &Path, tool: &str) -> Result<PathBuf, String> {
     settings_path(&settings_dir.join(OAUTH_DIR), tool)
 }
 
-pub(super) fn load_sign_in(path: &Path) -> Option<SignIn> {
+fn load_sign_in(path: &Path) -> Option<SignIn> {
     std::fs::read(path)
         .ok()
         .and_then(|raw| serde_json::from_slice::<SignIn>(&raw).ok())
@@ -148,6 +148,12 @@ pub(in crate::internal_ext) struct SignIns {
 impl SignIns {
     fn lock(&self, tool: &str) -> Arc<parking_lot::Mutex<()>> {
         Arc::clone(self.locks.lock().entry(tool.to_string()).or_default())
+    }
+
+    /// `tool`'s stored sign-in (files are replaced atomically, so a read
+    /// needs no lock).
+    pub(super) fn load(&self, dir: &Path, tool: &str) -> Option<SignIn> {
+        load_sign_in(&sign_in_path(dir, tool).ok()?)
     }
 
     /// Store `tool`'s sign-in owner-only (0600).

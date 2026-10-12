@@ -384,11 +384,10 @@ impl Adapter {
             } else {
                 (String::new(), String::new())
             };
-            let sign_in = tool.oauth.as_ref().map(|_| {
-                mcp_oauth::sign_in_path(&dir, &tool.name)
-                    .ok()
-                    .and_then(|p| mcp_oauth::load_sign_in(&p))
-            });
+            let sign_in = tool
+                .oauth
+                .as_ref()
+                .map(|_| self.mcp.sign_ins.load(&dir, &tool.name));
             let now = mcp_oauth::now_ms();
             let sign_in_view = sign_in.flatten().map(|s| McpSignInView {
                 server: s.issuer_host(),

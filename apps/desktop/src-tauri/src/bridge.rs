@@ -29,7 +29,7 @@ use tauri::async_runtime::JoinHandle;
 use tauri::AppHandle;
 
 use crate::child_process::{self, Backoff, Child, ChildEvent, STOP_GRACE};
-use crate::internal_ext::sidecar_util::env_key;
+use crate::internal_ext::sidecar_util::core_env_var;
 use crate::settings::Settings;
 
 const MAX_LOG_LINES: usize = 200;
@@ -457,12 +457,11 @@ fn env_for(
         if name.is_empty() {
             continue;
         }
-        let key = env_key(name);
         if let Some(url) = c.url.as_deref().map(str::trim).filter(|v| !v.is_empty()) {
-            env.insert(format!("BNBLOC_CORE_{key}_URL"), url.to_string());
+            env.insert(core_env_var(name, "URL"), url.to_string());
         }
         if let Some(token) = c.token.as_deref().map(str::trim).filter(|v| !v.is_empty()) {
-            env.insert(format!("BNBLOC_CORE_{key}_TOKEN"), token.to_string());
+            env.insert(core_env_var(name, "TOKEN"), token.to_string());
         }
     }
     // Desktop builds wire managed sidecar cores after user settings so
@@ -558,7 +557,12 @@ mod tests {
         .expect("fixture");
         assert!(!fixture.cases.is_empty());
         for case in fixture.cases {
-            assert_eq!(env_key(&case.name), case.key, "env_key({:?})", case.name);
+            assert_eq!(
+                crate::internal_ext::sidecar_util::env_key(&case.name),
+                case.key,
+                "env_key({:?})",
+                case.name
+            );
             let s = Settings {
                 cores: vec![crate::settings::CoreConfig {
                     name: case.name.clone(),

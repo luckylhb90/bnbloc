@@ -336,7 +336,11 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   elsewhere. Every core entry, env-configured or installed (gateway
   activation), is built by `coreset.EntryFor(name, provider, declared)`:
   the `_URL`/`_TOKEN` override, `Explicit` and the one discovery timeout
-  (`TestCoreEntriesBuiltOnlyByEntryFor`). Unset `BNBLOC_CORES`
+  (`TestCoreEntriesBuiltOnlyByEntryFor`). The `<NAME>` key is
+  `coreset.EnvKey` (non-alphanumerics → `_`); the desktop writes these vars
+  only through `core_env_var`/`env_key`, pinned to Go by
+  `internal/coreset/testdata/core_env_keys.json` (`core_env_key_matches_go`).
+  Unset `BNBLOC_CORES`
   yields no env-configured cores — cores arrive from the extension registry
   (rehydrated installs, activated into the gateway's list) or explicit
   `BNBLOC_CORES` entries, never a baked-in name. The composes now default it EMPTY with no manifests
@@ -456,8 +460,9 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   exit); `POST /v1/chat` forwards to the gateway chat route with the
   desktop's session (per-plugin rate limit, namespaced `clientMsgId`).
   `localSettings` (plugin packages only) are entered in Settings →
-  Notifications via Tauri commands, stored 0600 under the app config dir
-  (`internal_ext/plugin_settings.rs`), passed as
+  Notifications via Tauri commands, stored 0600 in the signed-in member's
+  own directory (`member_dir`: `<app config>/members/<hash of gateway origin
+  and subject>/`, `internal_ext/member_dir.rs`; never a shared dir), passed as
   `BNBLOC_PLUGIN_SETTINGS_FILE`, and NEVER sent to the gateway; a plugin
   missing required settings is not launched, saving restarts it. Do not
   reintroduce member secrets on the server (the old
@@ -597,6 +602,13 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   (`BNBLOC_CORE_MANIFESTS_DIR` carries the transient manifests; the DB is the
   source of truth). Neither the gateway nor realtime may start, stop, or
   exec a component process — they only deliver signed metadata and events.
+  Owners in the shell (`internal_ext/owners_tests.rs` scans for copies):
+  uninstall cleanup is `sidecar_sweep`, run after every successful
+  reconcile against the live catalog (never an in-memory diff, which is
+  empty after a restart); "this process is our orphan from an earlier
+  session" is `owned_orphan` (spawn record from another app pid AND an
+  executable under the component's cache root, never either alone); member
+  secrets live only under `member_dir`.
 - **The desktop owns the sandbox VM, the bridge only uses it.** At most one
   sandbox component (`bnbloc.sandbox.package/v1`) runs per desktop. Its
   executable and declared files live in one sha256-verified per-version
@@ -816,8 +828,11 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   desktop (`internal_ext/mcp_oauth.rs`) discovers the authorization server at
   sign-in (never declared or hardcoded), requires PKCE S256 and checks
   `resource`, `state` and `iss`. Tokens live 0600 under
-  `<mcp-settings>/oauth/`; never send them to the gateway, log them, put them
-  in the session checksum or lend them to a borrowed or platform drive.
+  `<mcp-settings>/oauth/` in the member's `member_dir`; never send them to the
+  gateway, log them, put them in the session checksum or lend them to a
+  borrowed or platform drive. Every read, write and delete goes through
+  `SignIns` (per-tool lock; a refresh commits only over the sign-in it
+  started from, so a sign-out during a refresh wins).
 
 ### Borrow authorization
 

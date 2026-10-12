@@ -333,6 +333,12 @@ pub(super) fn home_env() -> Option<(&'static str, std::ffi::OsString)> {
         .map(|home| (key, home))
 }
 
+/// A core's env override `BNBLOC_CORE_<env_key(name)>_<field>` (`URL`,
+/// `TOKEN`): the only place the desktop names one.
+pub(crate) fn core_env_var(name: &str, field: &str) -> String {
+    format!("BNBLOC_CORE_{}_{field}", env_key(name))
+}
+
 /// The one rule naming a core's env overrides (`BNBLOC_CORE_<key>_URL` /
 /// `_TOKEN`), the same as Go's `coreset.EnvKey`: upper-cased, every character
 /// outside `[A-Za-z0-9]` replaced by `_`. Pinned on both sides by

@@ -2,6 +2,8 @@
 //! the gateway, download and pin their platform artifacts, then keep the local
 //! binaries alive for the bridge to drive through core endpoint env overrides.
 #[cfg(test)]
+mod owners_tests;
+#[cfg(test)]
 mod reconcile_tests;
 #[cfg(test)]
 mod sandbox_live_tests;
@@ -38,7 +40,7 @@ pub use plugin_settings::PluginLocalSettings;
 pub use sidecar_model::AdapterStatus;
 use sidecar_model::{GatewayAccess, Inner, ManagedSidecar, SidecarSpec};
 pub use sidecar_targets::SidecarAuthStatus;
-use sidecar_util::env_key;
+use sidecar_util::core_env_var;
 
 use crate::child_process::{self, Backoff, Child, STOP_GRACE};
 
@@ -476,10 +478,7 @@ pub fn extend_core_env(
             .local_url(&status.name)
             .filter(|url| !url.trim().is_empty())
         {
-            env.insert(
-                format!("BNBLOC_CORE_{}_URL", env_key(&status.name)),
-                local_url,
-            );
+            env.insert(core_env_var(&status.name, "URL"), local_url);
         }
         if !out.iter().any(|name| name == &status.name) {
             out.push(status.name);
