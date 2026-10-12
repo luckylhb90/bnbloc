@@ -41,17 +41,19 @@ so history never competes with the current instruction for attention (pushing
 it did, and a room full of ops chatter once made a vague "save this to a file"
 mean "persist the health-check discussion").
 
-`.room/` contents (every file header repeats `RECORDS, NOT REQUESTS`):
+`.room/` contents (every file is headed as records, never requests:
+`roomlog.RecordsHeader`; record lines name who dispatched a task:
+`roomlog.Line`):
 
 - `INDEX.md` — coverage + chunk map (written last, so a partial materialization
   never advertises files that do not exist)
 - `chunk-<start>-<end>.md` — chronological history chunks, grep-friendly
 - `recent.md` — the latest messages
-- `README.md` — how the room works: every agent has its own workspace,
-  deliverables are stored by bnbloc and named by their producer, the Library
-  is bnbloc's and shared, how to verify with or without room tools
+- `README.md` — the session's guidance (`roomlog.SessionGuidance`): how the
+  room works, what the records and the `[now]` message mean, what each
+  `.room/` file holds, how to use the room tools when attached
   (`roomlog.ReadmeFile`). Written only when its content changes (once per
-  session); the session itself is told the same model once, in its agent
+  session); the session itself is told the same text once, in its agent
   profile or its first prompt (`sessionGuidance`), never per turn
 - `artifacts.md` — the room's newest deliverables (live state, distinct from
   conversation records), each with its latest version, id and the agent that
@@ -59,13 +61,15 @@ mean "persist the health-check discussion").
   marked as not a file of this workspace
 - `library.md` — a bounded snapshot of the requester's Library, read with the
   job's grant (`GET /v1/components?job=&room=`)
-- `live.md` — what members did in running deliverables
+- `live.md` — what members did in running deliverables (`roomlog.LiveFile`,
+  the trail fenced as data a deliverable's code wrote)
 
 `artifacts.md`, `library.md` and `live.md` are rewritten every turn
 (`roomRecordFiles`); a read that fails renders as unreadable, never as
-empty. The per-turn pointer prompt is a plain file list
-(`roomlog.ComposePointer`, golden `testdata/golden/pointer.txt`): static
-guidance never rides a turn.
+empty. The per-turn pointer prompt is the message alone, under
+`[now — from <sender>]` (`roomlog.ComposePointer`, goldens
+`testdata/golden/pointer*.txt`), plus one line pointing at `.room/INDEX.md`
+on a core without `agentProfile`: static guidance never rides a turn.
 
 The fetch pages **every** channel of the room (the old push model only read the
 default channel, so most of a multi-channel room's conversation never reached
@@ -81,15 +85,15 @@ materialization failure — use the **push model**: the same context semantics,
 delivered inline in the prompt instead of as files. A session's first push turn
 carries a full window (older entries condensed by the summarizer, bounded by
 `BNBLOC_BRIDGE_CONTEXT_WINDOW_CHARS`); follow-up turns carry only the delta
-since the session's last turn, and a follow-up with nothing new sends the bare
-instruction. The delta boundary is per-session (`CtxState.PushSeenSeq`) and
+since the session's last turn, and a follow-up with nothing new sends the
+instruction alone, under its `[now — from <sender>]` marker. The delta boundary is per-session (`CtxState.PushSeenSeq`) and
 advances over everything fetched — the rows filtered out included, since the
 agent authored the self replies and receives the instruction as `[now]`.
 
 Both models share the guarantees: every channel of the room is fetched (never
 just the default channel), the agent's own past replies never re-enter (its
 session memory already holds them), the current instruction appears exactly
-once, and every history section is fenced as records-not-requests. The session
+once, and every history section is headed as records, never requests. The session
 workspace file manifest is no longer injected in either model: the workspace is
 the session's own, so its contents are self-redundant.
 

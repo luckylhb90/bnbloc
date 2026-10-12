@@ -1074,18 +1074,32 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   (`TestHistoryReadsOnlyAgentChannels`, `TestDecodeRowSkipsNotices`). The
   bridge reads with its owner's human session, so realtime does not guard
   it: never add an agent-facing history read beside it.
-- **Every agent is told the room model, with or without room tools,
-  once per session.** `roomlog` owns what an agent reads about the room
-  besides history (`docs/architecture/room-tools.md`, "What every agent is
-  told"): the room model (`SessionGuidance`: own workspaces, deliverables
-  stored by bnbloc, the Library is bnbloc's and shared, how to verify) is
-  static session guidance; the bridge's `sessionGuidance` is the one owner
-  of where it goes: the head of the agent profile on an `agentProfile` core
-  (outside the binding sum), else the head of the session's first prompt
-  (the expert fallback's prefix). Never put static guidance in a per-turn
-  prompt: `ComposePointer` is a plain file list pinned by its golden.
-  `.room/README.md` (`ReadmeFile`) is written only when its content changes
-  (`ReadmeUpdate`); `.room/artifacts.md` (each
+- **Model-facing text has one owner per category**
+  (`docs/architecture/room-tools.md`, "What every agent is told";
+  `docs/bugs/2026-10-13-model-facing-text-review.md`). Session guidance is
+  `roomlog.SessionGuidance(roomlog.Guidance)`, one `go:embed` template
+  (`internal/roomlog/guidance.tmpl`) rendered with the session's facts
+  (`Self`, `HasTools`, `HasRoomFiles`, `TeamLead`; numbers from their
+  constants, never literals): who the agent is, the records and `[now]`
+  rules, the room model, the reply language, the `.room/` legend, the room
+  tools' usage and the team default rule. The bridge's `sessionGuidance`
+  is the one owner of where it goes and of its facts: the head of the agent
+  profile on an `agentProfile` core (outside the binding sum), else the
+  head of the session's first prompt (an empty room's too); a session
+  contribution declares `RoomTools` and words nothing, and the room tools'
+  MCP `instructions` is one line pointing to it. Scaffolding is
+  `internal/roomlog/markers.go`: `RecordsHeader`, `Fence(author, text)`
+  (every text someone else wrote that a tool or file hands an agent: a
+  reply, `read_room`, another author's component, a deliverable, the live
+  trail, team role descriptions), `Line` (attributed record lines), the
+  `[now — from <sender>]` marker and `Truncate` (the one rune-safe cut);
+  `TestModelTextMarkersSingleOwner` forbids their literals and the
+  identity line in any other Go string. Never put static guidance in a
+  per-turn prompt: `ComposePointer` is the message alone (plus one records
+  line on a core without a profile). Every surface has a golden, and
+  `TestPromptBudgets` (`services/bridge/prompt_test.go`) bounds each one.
+  `.room/README.md` (`ReadmeFile`, the session's guidance) is written only
+  when its content changes (`ReadmeUpdate`); `.room/artifacts.md` (each
   deliverable's producer by `VersionProducer`, the source job's agent from
   the run record, marked not in this workspace) and `.room/library.md`
   (`ReadLibrary`: `GET /v1/components?job=&room=`, the requester's Library
@@ -1132,6 +1146,9 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   `internal/expertteam` (`POST /v1/rooms/{id}/team-plan`), never on the lead's
   own agent. Team guards (roles, `wire.MaxTeamFailures`, timeout notices,
   `post_progress`) live in the room tools, never in instructions alone.
+  The lead's roster section (`expertteam.Section`) carries content only,
+  never staffing: who takes a role now is `list_room_agents`' `team`, so a
+  role agent coming or going never changes the lead's binding sum.
 - A failed job's member-facing sentence is
   `store.AgentJobFailureReason.Text`; the web's one reason table is
   `AGENT_JOB_FAILURES` (`views/room/agentJobLabels.ts`: a label and a

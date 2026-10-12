@@ -474,10 +474,12 @@ A team is an expert with a `team` block (`internal/contentpkg/team.go`):
   send until the member confirms.
 - **Run time** (bridge): the lead's bridge asks for the plan with
   `?job=`, appends the generated roster section (`expertteam.Section`:
-  role → expert → agent handle, online or why not; the capability, progress
-  and failure rules) after the SOP, and binds the roster to the turn's
-  room tools session (`TurnInfo.Team`). The roster is part of the content
-  checksum. A team on a core without `agentProfile` is refused with a
+  role → expert, the roles' descriptions fenced, the room tools'
+  mechanics) after the SOP, and binds the staffed roster to the turn's
+  room tools session (`TurnInfo.Team`; `list_room_agents` reports who takes
+  each role). The section is part of the content checksum, so it carries
+  no staffing: a role agent coming or going keeps the lead's session. How
+  to lead is a default rule of the session guidance the SOP may override. A team on a core without `agentProfile` is refused with a
   notice (no room tools, no dispatch). The guards live in the room tools
   ([`room-tools.md`](room-tools.md), "Teams").
 

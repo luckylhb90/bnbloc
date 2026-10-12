@@ -98,4 +98,38 @@ architecture test:
 
 ## Status
 
-In progress on branch `worktree-agent-a7ae496545df72837`.
+Fixed on branch `worktree-agent-a7ae496545df72837` (the builder's format
+skill and the starters prompt pack, review items 8 and 10, are separate
+work):
+
+| Item | Commit |
+| --- | --- |
+| Dead code (`Options.Files`, one reminder literal) | `7dd1191` |
+| Attribution (`Line`, `[now — from X]`) | `d2000ac` |
+| One fence owner, `live.md` in roomlog | `040ebae` |
+| Room-tools usage as session guidance, one template | `38629e6` |
+| Per-turn prompt is the message alone; empty-room guidance | `a6d07ad` |
+| Team section without staffing or policy | `af00286` |
+| `ask_agent` deliverables carry `artifactId` | `3a1f4f2` |
+| Reply language, rune-safe `Truncate` | `b41bb79` |
+| Goldens, `TestPromptBudgets`, marker archtest | `86c2399` |
+
+Fixed overhead (chars/4), before → after:
+
+| Surface | Before | After |
+| --- | --- | --- |
+| Pull turn, without the message | 159 | 9 (17 on a core without a profile) |
+| Push follow-up with new lines (framing) | 92 | 26 |
+| Push follow-up, nothing new | 0 | 9 (the sender marker) |
+| Push first turn (framing + guidance on a core without a profile) | ≈442 | ≈382 |
+| Session prefix with room tools (guidance + tools/list) | 2,818 (3,244 where MCP instructions surface) | 2,787 (2,821) |
+
+The session prefix stays about the same size because the guidance now
+carries what used to ride every turn (identity, the records and `[now]`
+rules, the `.room/` legend) and the reply-language rule; it is sent once
+and cached. Tests: `TestModelTextMarkersSingleOwner`, `TestFence`,
+`TestLineAttribution`, `TestAttributionEverywhere`,
+`TestSessionGuidanceGolden`, `TestPushSessionInEmptyRoomGetsGuidance`,
+`TestRoleAgentOnlineChangeKeepsLeadSession`,
+`TestListRoomAgentsReportsTeamStaffing`, `TestGetComponentFencesOthersFiles`,
+`TestToolsListGolden`, `TestPromptPrefixGolden`, `TestPromptBudgets`.

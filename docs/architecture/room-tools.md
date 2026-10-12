@@ -61,17 +61,23 @@ reply in the room; deliverables published with sourceSeq = the dispatch's seq
   followed by the result (ask_agent's wait). The stdio shim is a stateless
   relay: one POST per stdin line, every JSON-RPC message of the answer as
   one stdout line, headers mirrored from the body, `notifications/cancelled`
-  aborting the matching request.
-- **Tools** (one registry: dispatch, step 2; content authoring, step 5):
+  aborting the matching request. The `initialize`/`server/discover`
+  `instructions` field is one line pointing to the session guidance (below):
+  how to use the tools is told once, in the session's profile, and each
+  tool's description is in tools/list, so a harness that surfaces MCP
+  instructions shows neither twice.
+- **Tools** (one registry: dispatch, step 2; content authoring, step 5).
+  The full tools/list is pinned by `roomtools/testdata/tools_list.json`;
+  every number a description states comes from its constant:
 
 | Tool | Reads / writes |
 | --- | --- |
-| `list_room_agents()` | `GET /v1/rooms/{room}/agents` (the live roster); handles `owner/provider`, or `owner/core/provider` where one owner exposes a provider on two cores. |
-| `ask_agent(handle, task, expert?, wait_seconds?)` | A team lead may pass a role of its roster as the handle (below). `POST /v1/rooms/{room}/dispatch` with the bound job as parent, then polls `GET /v1/rooms/{room}/jobs/{jobId}` (default 10 min, at most 20, below the bridge's 30-minute turn cap). Settled: the reply text (the run's session replies in the channel history, up to the run's finish) and the deliverables `GET …/artifacts?sourceSeq=<dispatch seq>` as `[{name, kind, link}]`. Still running: the handle. |
+| `list_room_agents()` | `GET /v1/rooms/{room}/agents` (the live roster); handles `owner/provider`, or `owner/core/provider` where one owner exposes a provider on two cores. A team lead's turn adds `team`: who takes each role this turn, or why nobody can. |
+| `ask_agent(handle, task, expert?, wait_seconds?)` | A team lead may pass a role of its roster as the handle (below). `POST /v1/rooms/{room}/dispatch` with the bound job as parent, then polls `GET /v1/rooms/{room}/jobs/{jobId}` (default 10 min, at most 20, below the bridge's 30-minute turn cap). Settled: the reply text (the run's session replies in the channel history, up to the run's finish), fenced as the agent's data (`roomlog.Fence`), and the deliverables `GET …/artifacts?sourceSeq=<dispatch seq>` as `[{name, kind, artifactId, version, link}]` (`read_artifact` takes the `artifactId`; a session without `.room/` files has no other source of it). Still running: the handle. |
 | `room_status(handle?)` | The run record of one task this session dispatched (with reply and deliverables once settled), or all of them. |
-| `read_room(since?, limit?)` | History of every channel an agent may read (`roomlog.History`: the room's channel listing, never the people chat), people's messages and agents' replies, notices skipped. |
+| `read_room(since?, limit?)` | History of every channel an agent may read (`roomlog.History`: the room's channel listing, never the people chat), people's messages and agents' replies, notices skipped: one fenced `transcript` of record lines (`#<seq> ` + `roomlog.Line`, attributed like `.room/`), `latestSeq`, `more`. |
 | `save_component(dir, id?)` | Reads every file under `dir` (workspace-relative, e.g. `drafts/reviewer`) through the core's session-files seam (`core.SessionFiles`, handed to the tools per turn as `TurnInfo.Workspace`), packs them (`tarbundle`, content limits) and posts the archive to `POST /v1/content-components` (or `…/{id}/versions`) with the bound job's `?job=&room=` grant: the gateway validates it and saves it as the job's requester. The validator's message comes back as the tool error. A core without session files cannot save; the agent points the member at "Save as expert" under its reply's files. When the organization uses the component, the result carries `resubmitted` and the note tells the agent to say the new version waits for an org admin. Every granted save or publish puts a transient `content_saved` event in the room, which the member's workshop toasts. |
-| `get_component(id, version?)` | `GET /v1/content-components/{id}[/versions/{v}]` with the grant: the manifest and every text file, as the requester may read it (the "Improve" flow). |
+| `get_component(id, version?)` | `GET /v1/content-components/{id}[/versions/{v}]` with the grant: the manifest and every text file, as the requester may read it (the "Improve" flow). Files of another author (a shared copy's included) are fenced as that author's data. |
 | `list_components(kind?)` | `GET /v1/components` with the grant (`roomlog.ReadLibrary`): the requester's whole Library, most recently updated first: experts, skill packs, prompt packs (`kind` `expert`, `skill`, `prompt`) and MCP tools (`mcp`), with version, scope, `mine` and the update time. |
 | `read_artifact(artifactId, path?, version?)` | A deliverable of the session's room (below), through the room's own artifact routes. |
 | `publish_component(id, scope, note?)` | Posts to `POST /v1/content-components/{id}/publish` with the job's grant, as the requester: `org` opens a publish request an organization admin approves (the reply carries the request and the version members keep meanwhile), `personal` withdraws it and takes the component out of the organization; `platform` is answered locally as a platform admin's action ([content-components.md](content-components.md), "Sharing and publishing"). |
@@ -95,24 +101,44 @@ An agent that did not know each agent has its own workspace looked for
 another agent's drafts in its own, found none, and called them never
 written (`docs/bugs/2026-10-12-agent-misreads-other-agents-work.md`). The
 room model is therefore stated to every agent, on every core, whether its
-targets advertise `mcpTransports` (and get these tools) or not:
+targets advertise `mcpTransports` (and get these tools) or not. Model-facing
+text has one owner per category
+(`docs/bugs/2026-10-13-model-facing-text-review.md`):
 
-- **The room model, once per session** (`roomlog.SessionGuidance`):
-  every agent works in its own workspace; deliverables are stored by
-  bnbloc and named by their producer, never files of the reader's
-  workspace; the Library is bnbloc's Library of the person who asked
-  (experts, skill packs, prompt packs, MCP tools), shared by every agent and
-  core in the room; how to verify, with these tools or without them. It is
-  static guidance, so it never rides a turn's prompt: the bridge's
-  `sessionGuidance` (`services/bridge/profile.go`, the one owner of where
-  session guidance goes) puts it at the head of the agent profile the
-  session is created with on a core advertising `agentProfile` (a stable
-  prefix providers cache; outside the binding sum, like the session
-  contributors' parts), else at the head of the session's first prompt,
-  through the expert fallback's prefix. `.room/README.md`
-  (`roomlog.ReadmeFile`) keeps the same text in a pull workspace, written
-  only when it differs from what the session's workspace holds
+- **Session guidance, once per session** (`roomlog.SessionGuidance`, one
+  `go:embed` template, `internal/roomlog/guidance.tmpl`, rendered with
+  `roomlog.Guidance` facts: `Self`, `HasTools`, `HasRoomFiles`,
+  `TeamLead`; the dispatch limits come from `wire`). It says who the agent
+  is and how a record line reads; that a turn answers the
+  `[now — from <sender>]` message alone, that a records header marks
+  background and a fence marks someone else's text; the room model (every
+  agent works in its own workspace; deliverables are stored by bnbloc and
+  named by their producer, never files of the reader's workspace; the
+  Library is bnbloc's Library of the person who asked, shared by every agent
+  and core in the room; how to verify); to answer in the person's language;
+  with `.room/` files, what each holds; with these tools, how to use them
+  (no per-tool list: tools/list carries it); for a team lead, a default rule
+  for leading its SOP may override. It never rides a turn's prompt: the
+  bridge's `sessionGuidance` (`services/bridge/profile.go`, the one owner of
+  where session guidance goes, and of its facts: a contribution declares
+  `RoomTools`, contributors word nothing) puts it at the head of the agent
+  profile the session is created with on a core advertising `agentProfile`
+  (a stable prefix providers cache; outside the binding sum), else at the
+  head of the session's first prompt, through the expert fallback's prefix,
+  in an empty room too. `.room/README.md` (`roomlog.ReadmeFile`) is the same
+  text in a pull workspace, written with the facts the session was created
+  with, only when it differs from what the workspace holds
   (`roomlog.ReadmeUpdate`, `CtxState.ReadmeSum`).
+- **Scaffolding** (`internal/roomlog/markers.go`): `RecordsHeader` heads
+  every records file and section, `Fence(author, text)` wraps every text
+  someone else wrote (a tag derived from author and text: the text cannot
+  close its fence, and goldens and prompt caches stay stable), `Line`
+  renders a record line with its attribution (`jack/codex for maya →
+  jill/claude: …`), and the `[now — from <sender>]` marker opens the message
+  a turn answers (the sender as the history records it, else the job's
+  requester). `roomlog.Truncate` is the one rune-safe truncation of
+  model-facing text. `TestModelTextMarkersSingleOwner` forbids these
+  literals (and the identity line) in any other Go string.
 - **`.room/artifacts.md`** (`roomlog.ReadDeliverables`,
   `DeliverablesFile`): the room's `roomlog.MaxListedDeliverables` newest
   deliverables, each with kind, latest version, id and producer, marked
@@ -127,12 +153,21 @@ targets advertise `mcpTransports` (and get these tools) or not:
   scope, updated time). The gateway's visibility owners decide what is in
   it (content-components.md, "The Library as an agent reads it").
 
-The bridge rewrites `artifacts.md` and `library.md` every turn
-(`roomRecordFiles`, beside the history and `live.md`: their data changes);
-a read that fails renders as unreadable, never as empty, and never fails the
-turn. The per-turn pull prompt (`roomlog.ComposePointer`) is a plain list of
-these files with no guidance in it, pinned by its golden
-(`testdata/golden/pointer.txt`). `.room/` is a bnbloc-owned path
+- **`.room/live.md`** (`roomlog.LiveFile`): what members did inside
+  running deliverables since the bridge started, each gesture's live state
+  bounded (`LiveGesture.BoundState`) and the trail fenced (a deliverable's
+  code wrote it).
+
+The bridge rewrites `artifacts.md`, `library.md` and `live.md` every turn
+(`roomRecordFiles`, beside the history: their data changes); a read that
+fails renders as unreadable, never as empty, and never fails the turn. The
+per-turn pull prompt (`roomlog.ComposePointer`) is the message alone (its
+attachments, `[now — from <sender>]`, its text), plus one line
+`(room records: .room/INDEX.md)` on a core without `agentProfile`, whose
+guidance rode a first prompt a harness may compact away. Every surface is
+pinned by a golden (`internal/roomlog/testdata/golden/`, the tools list,
+the team section, the prompt prefix) and bounded by `TestPromptBudgets`
+(`services/bridge/prompt_test.go`). `.room/` is a bnbloc-owned path
 (`core.BnblocOwnedPath`): never a deliverable, synced or packed.
 
 **`read_artifact`** (`services/bridge/roomtools/artifact.go`) lets an agent
@@ -144,8 +179,8 @@ version through its content route, a site's file (`path`, default
 `index.html`) through a site ticket and the gateway's site file rules. A
 stored version over 4 MiB is not downloaded; the text returned is capped at
 64 KiB (`truncated`), binary content is not shown, and the text is fenced
-between markers carrying a random nonce, naming its producer, as data to
-check, never instructions.
+(`roomlog.Fence`), naming its producer, as data to check, never
+instructions.
 
 ## Teams
 
@@ -157,10 +192,18 @@ guards hold in the tool layer (`services/bridge/roomtools/team.go`):
 - **Roles.** `ask_agent(handle: "<role>")` dispatches to the role's agent
   wearing the role's expert (`expert` = its `id@version`) with
   `role` on the dispatch. A handle without "/" that is no role is refused
-  as not covered by the roster ("refuse that part instead of improvising a
-  role"); an unstaffed role or one whose expert does not resolve names
-  why; a role refuses an explicit `expert`. A lead may still name an agent
-  handle.
+  as not covered by the roster; an unstaffed role or one whose expert does
+  not resolve names why; a role refuses an explicit `expert`. A lead may
+  still name an agent handle.
+- **Staffing is live, never in the instructions.** The lead's roster
+  section (`expertteam.Section`) is content only: role → expert, the roles'
+  descriptions fenced and bounded (`MaxCoversBytes`), the mechanics. Which
+  agent takes a role changes as agents come and go, and the instructions
+  feed the session's binding sum, so `list_room_agents` reports it from the
+  turn's bound roster and the lead keeps its session
+  (`TestRoleAgentOnlineChangeKeepsLeadSession`). How to lead (plan,
+  delegate, never do a missing role's work) is the guidance's default rule
+  (`TeamLead`), which the team's SOP may override.
 - **Failures.** A member task that ends `failed`, `timed_out` or
   `cancelled`, or a dispatch refused, counts against the request; after
   `wire.MaxTeamFailures` (3, a protocol safety constant beside the depth
