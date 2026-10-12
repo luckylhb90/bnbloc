@@ -5,26 +5,30 @@ import { cn } from "@/lib/cn";
 import { ErrorBox } from "@/ui/ErrorBox";
 import { errorText } from "@/lib/errors";
 import { listPlaceholder } from "@/ui/QueryState";
+import { useToast } from "@/ui/Toast";
 
 // Platform super-admin: the cross-tenant registry (split from
 // Organization.tsx).
 export function TenantsTab() {
   const { data: tenants, error: loadError } = useTenants();
-  const [mutError, setMutError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [newId, setNewId] = useState("");
   const [newName, setNewName] = useState("");
 
-  const error = mutError ?? (loadError ? errorText(loadError, "failed to load tenants") : null);
+  const toast = useToast();
+  const error = loadError ? errorText(loadError, "Could not load the tenants") : null;
 
-  const run = async (key: string, fn: () => Promise<unknown>, failMsg: string) => {
+  // run is a mutation: its result is a toast (a load error stays inline).
+  const run = async (key: string, fn: () => Promise<unknown>, failMsg: string, okMsg: string): Promise<boolean> => {
     setBusy(key);
-    setMutError(null);
     try {
       await fn();
+      toast.success(okMsg);
       refreshTenants();
+      return true;
     } catch (e) {
-      setMutError(errorText(e, failMsg));
+      toast.error(errorText(e, failMsg));
+      return false;
     } finally {
       setBusy(null);
     }
@@ -33,9 +37,10 @@ export function TenantsTab() {
   const create = async () => {
     const id = newId.trim();
     if (!id) return;
-    await run("__create__", () => api.createTenant({ tenantId: id, name: newName.trim() || id }), "failed to create tenant");
-    setNewId("");
-    setNewName("");
+    if (await run("__create__", () => api.createTenant({ tenantId: id, name: newName.trim() || id }), "Could not create the tenant", `Created ${id}`)) {
+      setNewId("");
+      setNewName("");
+    }
   };
 
   return (
@@ -115,7 +120,8 @@ export function TenantsTab() {
                           void run(
                             t.tenantId,
                             () => api.setTenantStatus(t.tenantId, suspended ? "active" : "suspended"),
-                            "failed to change status",
+                            "Could not change the status",
+                            `${t.tenantId} ${suspended ? "reactivated" : "suspended"}`,
                           )
                         }
                         disabled={busy === t.tenantId || (isDefault && !suspended)}

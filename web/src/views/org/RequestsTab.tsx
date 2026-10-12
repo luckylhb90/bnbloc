@@ -5,6 +5,8 @@ import { UserWithEmail } from "@/views/UserName";
 import { errorText } from "@/lib/errors";
 import { listPlaceholder } from "@/ui/QueryState";
 import { formatDate } from "@/lib/format";
+import { useToast } from "@/ui/Toast";
+import { displayNameOf } from "@/lib/useDisplayName";
 
 // Org-admin: self-service join requests for the tenant (split from
 // Organization.tsx).
@@ -12,6 +14,7 @@ export function RequestsTab() {
   const [requests, setRequests] = useState<JoinRequest[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
+  const toast = useToast();
 
   const load = useCallback(async () => {
     setError(null);
@@ -27,15 +30,17 @@ export function RequestsTab() {
     void load();
   }, [load]);
 
+  // A decision is a mutation: its result is a toast (a load error stays
+  // inline).
   const decide = async (userId: string, approve: boolean) => {
     setBusy(userId);
-    setError(null);
     try {
       if (approve) await api.approveJoinRequest(userId);
       else await api.rejectJoinRequest(userId);
+      toast.success(`${approve ? "Approved" : "Rejected"} ${displayNameOf(userId)}`);
       await load();
     } catch (e) {
-      setError(errorText(e, "failed to update request"));
+      toast.error(errorText(e, "Could not update the request"));
     } finally {
       setBusy(null);
     }

@@ -38,6 +38,7 @@ import { listPlaceholder } from "@/ui/QueryState";
 import { exactTime, formatDate, formatUsd } from "@/lib/format";
 import { StatTile } from "@/ui/Card";
 import { Field } from "@/ui/Input";
+import { useToast } from "@/ui/Toast";
 
 type Tab =
   | "overview"
@@ -295,6 +296,7 @@ function MembersTab({ selfId }: { selfId: string | null }) {
   const [newId, setNewId] = useState("");
   const [newRole, setNewRole] = useState<TenantMember["role"]>("member");
   const [removing, setRemoving] = useState<string | null>(null);
+  const toast = useToast();
 
   const load = useCallback(async () => {
     setError(null);
@@ -310,16 +312,17 @@ function MembersTab({ selfId }: { selfId: string | null }) {
     void load();
   }, [load]);
 
-  // run reports whether fn succeeded, so a failed add keeps what was typed.
-  const run = async (key: string, fn: () => Promise<unknown>, failMsg: string): Promise<boolean> => {
+  // run is a mutation: its result is a toast (a load error stays inline);
+  // it reports whether fn succeeded, so a failed add keeps what was typed.
+  const run = async (key: string, fn: () => Promise<unknown>, failMsg: string, okMsg?: string): Promise<boolean> => {
     setBusy(key);
-    setError(null);
     try {
       await fn();
+      if (okMsg) toast.success(okMsg);
       await load();
       return true;
     } catch (e) {
-      setError(errorText(e, failMsg));
+      toast.error(errorText(e, failMsg));
       return false;
     } finally {
       setBusy(null);
@@ -329,7 +332,7 @@ function MembersTab({ selfId }: { selfId: string | null }) {
   const addMember = async () => {
     const id = newId.trim();
     if (!id) return;
-    if (await run("__add__", () => api.addTenantMember(id, newRole), "failed to add member")) setNewId("");
+    if (await run("__add__", () => api.addTenantMember(id, newRole), "Could not add the member", `Added ${displayNameOf(id)}`)) setNewId("");
   };
 
   return (
@@ -407,7 +410,8 @@ function MembersTab({ selfId }: { selfId: string | null }) {
                           void run(
                             m.userId,
                             () => api.setTenantMemberRole(m.userId, e.target.value as TenantMember["role"]),
-                            "failed to change role",
+                            "Could not change the role",
+                            "Role changed",
                           )
                         }
                         className="rounded-[var(--radius)] border border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-1 text-sm disabled:opacity-50"
@@ -446,7 +450,7 @@ function MembersTab({ selfId }: { selfId: string | null }) {
       <ConfirmDialog
         open={removing !== null}
         onClose={() => setRemoving(null)}
-        onConfirm={() => removing && run(removing, () => api.removeTenantMember(removing), "failed to remove member")}
+        onConfirm={() => removing && run(removing, () => api.removeTenantMember(removing), "Could not remove the member", `Removed ${displayNameOf(removing)}`)}
         title="Remove this member?"
         description={`${removing ? displayNameOf(removing) : ""} loses access to the organization and its rooms.`}
         confirmLabel="Remove"
