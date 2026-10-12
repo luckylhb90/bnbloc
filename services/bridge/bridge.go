@@ -1509,30 +1509,14 @@ func (b *Bridge) ensureSession(ctx context.Context, d *drive, key driveKey, prom
 	written := b.materializeAttachments(ctx, d.caps.bytesWriter, entry.endpoint, room, workspaceID, d.job.AttachmentIDs)
 	var st roomlog.CtxState
 	initialPrompt := prompt(workspaceID, &st, written)
-	// The profile the session wears: a core advertising agentProfile
-	// receives the content's profile with the session contributors' parts
-	// merged in; any other core gets the content as a prefix of the first
-	// prompt (its skill files written under .agents/skills/ when it accepts
-	// workspace files).
-	var profile *corepkg.AgentProfile
-	var hooks sessionHooks
-	if d.caps.profile {
-		profile = d.content.profile()
-		if profile == nil {
-			profile = &corepkg.AgentProfile{}
-		}
-		hooks = b.contribute(ctx, SessionInfo{
-			TenantID: d.job.TenantID, RoomID: room, ChannelID: d.job.ChannelID, Owner: d.owner, Core: d.core, Provider: provider,
-			Sandboxed: opts.Execution != nil, MCPTransports: b.targetTransports(d.core, d.target, provider),
-			JobID: d.job.JobID, RequesterUserID: d.job.RequesterUserID,
-		}, profile)
-		if profile.Empty() {
-			profile = nil
-		}
-	} else if !d.content.empty() {
-		written := b.writeFallbackSkills(ctx, d.caps.bytesWriter, entry.endpoint, d.core, workspaceID, d.content)
-		initialPrompt = d.content.promptPrefix(written) + initialPrompt
-	}
+	// What the session is told once (the room model, the content, the
+	// session contributors' parts): its profile or its first prompt's head.
+	profile, prefix, hooks := b.sessionGuidance(ctx, d, entry.endpoint, workspaceID, SessionInfo{
+		TenantID: d.job.TenantID, RoomID: room, ChannelID: d.job.ChannelID, Owner: d.owner, Core: d.core, Provider: provider,
+		Sandboxed: opts.Execution != nil, MCPTransports: b.targetTransports(d.core, d.target, provider),
+		JobID: d.job.JobID, RequesterUserID: d.job.RequesterUserID,
+	})
+	initialPrompt = prefix + initialPrompt
 	rs := &roomSession{owner: d.owner, provider: provider, core: d.core, workspaceID: workspaceID, ctx: st, hooks: hooks, profileSum: bindingSum}
 	if opts.Execution != nil {
 		rs.workdir = opts.Execution.Sandbox.Workdir

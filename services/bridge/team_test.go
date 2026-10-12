@@ -186,7 +186,7 @@ func TestRoomExpertUnderTheChatExpert(t *testing.T) {
 
 	b.runBridgeJob(context.Background(), contentJob("job-1", expert.ComponentID))
 	ps := prov.recordedProfiles()
-	if len(ps) != 1 || ps[0].Instructions != "Write plainly.\n\nYou are the reviewer.\n" {
+	if len(ps) != 1 || profileContent(t, ps[0]) != "Write plainly.\n\nYou are the reviewer." {
 		t.Fatalf("instructions = %q", ps[0].Instructions)
 	}
 	var running map[string]any
@@ -202,7 +202,7 @@ func TestRoomExpertUnderTheChatExpert(t *testing.T) {
 	}
 	// No chat expert: the room expert alone (a new session: other content).
 	b.runBridgeJob(context.Background(), contentJob("job-2", ""))
-	if ps = prov.recordedProfiles(); len(ps) != 2 || strings.TrimSpace(ps[1].Instructions) != "Write plainly." {
+	if ps = prov.recordedProfiles(); len(ps) != 2 || profileContent(t, ps[1]) != "Write plainly." {
 		t.Fatalf("room expert alone = %+v", ps)
 	}
 }

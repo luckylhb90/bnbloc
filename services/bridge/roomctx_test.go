@@ -222,7 +222,7 @@ func TestDriveClaimPullWritesRoomFilesAndPointerPrompt(t *testing.T) {
 		t.Fatal("no session prompt recorded")
 	}
 	prompt := prompts[0]
-	if !strings.Contains(prompt, ".room/INDEX.md") || !strings.Contains(prompt, ".room/README.md") || !strings.Contains(prompt, "write hello.rs") {
+	if !strings.Contains(prompt, ".room/INDEX.md") || !strings.Contains(prompt, ".room/library.md") || !strings.Contains(prompt, "write hello.rs") {
 		t.Fatalf("pointer prompt malformed:\n%s", prompt)
 	}
 	// The whole point: history must NOT be in the prompt.
@@ -276,6 +276,44 @@ func TestDriveClaimPullDeltaOnReuse(t *testing.T) {
 	last := prompts[len(prompts)-1]
 	if strings.Contains(last, "new message") {
 		t.Fatalf("history leaked into reuse prompt:\n%s", last)
+	}
+}
+
+// .room/README.md is static: a session's first pass writes it, follow-up
+// turns do not rewrite it while its content is unchanged, and the records
+// whose data changes (artifacts.md, library.md) are rewritten every turn. A
+// new session (a fresh workspace) writes it again.
+func TestDriveClaimPullWritesReadmeOnlyWhenChanged(t *testing.T) {
+	prov := &profileProv{}
+	b := newProfileBridge(t, prov)
+	count := func() map[string]int {
+		n := map[string]int{}
+		for _, w := range prov.recordedWrites() {
+			n[w]++
+		}
+		return n
+	}
+	for i, text := range []string{"turn one", "turn two", "turn three"} {
+		if _, err := b.driveClaim(context.Background(), testDrive(b, jobRef{ID: fmt.Sprintf("job-%d", i)}, "r1", "maya", "core-a", "agent-a", "t", text, "ch"), nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	n := count()
+	if n[".room/README.md"] != 1 {
+		t.Fatalf("README.md written %d times over three turns of one session, want once", n[".room/README.md"])
+	}
+	if n[".room/artifacts.md"] != 3 || n[".room/library.md"] != 3 {
+		t.Fatalf("per-turn records written %v, want three each", n)
+	}
+	// A new session starts from a fresh workspace: the README is written again.
+	b.mu.Lock()
+	b.forgetRoom("r1")
+	b.mu.Unlock()
+	if _, err := b.driveClaim(context.Background(), testDrive(b, jobRef{ID: "job-new"}, "r1", "maya", "core-a", "agent-a", "t", "new session", "ch"), nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := count()[".room/README.md"]; got != 2 {
+		t.Fatalf("README.md written %d times after a new session, want 2", got)
 	}
 }
 

@@ -112,9 +112,10 @@ func expertLabel(r *wire.ContentRef) string {
 	return name + " (v" + r.Version + ")"
 }
 
-// promptPrefix is the fallback for a core without agentProfile: the
-// expert's instructions and the skills, pointing at their files when they
-// were written into the workspace (skillsWritten), else inlined.
+// promptPrefix is the content's part of the fallback for a core without
+// agentProfile (sessionGuidance places it): the expert's instructions and
+// the skills, pointing at their files when they were written into the
+// workspace (skillsWritten), else inlined.
 func (c *jobContent) promptPrefix(skillsWritten bool) string {
 	if c.empty() {
 		return ""
@@ -153,7 +154,6 @@ func (c *jobContent) promptPrefix(skillsWritten bool) string {
 		}
 		b.WriteString("\n")
 	}
-	b.WriteString("---\n\n")
 	return b.String()
 }
 

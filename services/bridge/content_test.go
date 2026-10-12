@@ -12,6 +12,7 @@ import (
 
 	corepkg "github.com/luckylhb90/bnbloc/core"
 	"github.com/luckylhb90/bnbloc/internal/contentpkg"
+	"github.com/luckylhb90/bnbloc/internal/roomlog"
 	"github.com/luckylhb90/bnbloc/internal/wire"
 )
 
@@ -188,7 +189,7 @@ func TestContentProfileReachesProfileCore(t *testing.T) {
 		t.Fatalf("profiles = %+v", ps)
 	}
 	p := ps[0]
-	if strings.TrimSpace(p.Instructions) != "You are the reviewer. MARKER-ALPHA" {
+	if profileContent(t, p) != "You are the reviewer. MARKER-ALPHA" {
 		t.Fatalf("instructions = %q", p.Instructions)
 	}
 	var names []string
@@ -233,7 +234,7 @@ func TestContentFallbackPrefixesThePrompt(t *testing.T) {
 		t.Fatalf("prompts = %q", prompts)
 	}
 	pr := prompts[0]
-	if !strings.HasPrefix(pr, "[Expert: Reviewer (v1.0.0).") || !strings.Contains(pr, "MARKER-ALPHA") || !strings.Contains(pr, ".agents/skills/<name>/") ||
+	if !strings.HasPrefix(pr, roomlog.SessionGuidance()+"\n[Expert: Reviewer (v1.0.0).") || !strings.Contains(pr, "MARKER-ALPHA") || !strings.Contains(pr, ".agents/skills/<name>/") ||
 		!strings.Contains(pr, "- checklist: Use when reviewing a diff") || !strings.Contains(pr, "review my change") {
 		t.Fatalf("prompt = %s", pr)
 	}
@@ -276,7 +277,7 @@ func TestContentChangeStartsANewSession(t *testing.T) {
 		b.runBridgeJob(context.Background(), j)
 	}
 	ps := prov.recordedProfiles()
-	if len(ps) != 3 || ps[0].Instructions != "v1 rules\n" || ps[1].Instructions != "v2 rules\n" || ps[2] != nil {
+	if len(ps) != 3 || profileContent(t, ps[0]) != "v1 rules" || profileContent(t, ps[1]) != "v2 rules" || profileContent(t, ps[2]) != "" {
 		t.Fatalf("sessions = %d %+v", len(ps), ps)
 	}
 	if in := prov.recordedInputs(); len(in) != 1 {

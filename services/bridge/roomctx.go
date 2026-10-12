@@ -83,13 +83,19 @@ func extForContentType(contentType, filename string) string {
 	return ""
 }
 
-// roomRecordFiles are the .room/ records rewritten every turn besides the
-// history (roomlog owns their wording): the room model (README.md), the
-// deliverables with their producers (artifacts.md), the requester's Library
-// (library.md, read with the job's grant) and the live interaction trail. A
-// failed read renders as unreadable, never as empty, and never fails the
-// turn.
-func (b *Bridge) roomRecordFiles(ctx context.Context, room, jobID string, self roomlog.Producer) []roomlog.NamedFile {
+// roomRecordFiles are the .room/ records of a pass besides the history
+// (roomlog owns their wording): the room model (README.md) when the
+// workspace does not hold its current text yet (roomlog.ReadmeUpdate: once
+// per session, not every turn; readmeSum is what to record once written),
+// then the data rewritten every turn: the deliverables with their producers
+// (artifacts.md), the requester's Library (library.md, read with the job's
+// grant) and the live interaction trail. A failed read renders as
+// unreadable, never as empty, and never fails the turn.
+func (b *Bridge) roomRecordFiles(ctx context.Context, room, jobID string, self roomlog.Producer, st roomlog.CtxState) (files []roomlog.NamedFile, readmeSum string) {
+	readme, readmeSum, changed := roomlog.ReadmeUpdate(st)
+	if changed {
+		files = append(files, readme)
+	}
 	deliverables, derr := roomlog.ReadDeliverables(ctx, b.gatewayGET, room, &b.producers)
 	if derr != nil {
 		slog.Debug("bnbloc bridge deliverables unreadable", "event", "bnbloc.bridge.roomctx_deliverables_failed", "room", room, "error", derr)
@@ -98,12 +104,11 @@ func (b *Bridge) roomRecordFiles(ctx context.Context, room, jobID string, self r
 	if lerr != nil {
 		slog.Debug("bnbloc bridge library unreadable", "event", "bnbloc.bridge.roomctx_library_failed", "room", room, "job", jobID, "error", lerr)
 	}
-	return []roomlog.NamedFile{
-		roomlog.ReadmeFile(),
+	return append(files,
 		roomlog.DeliverablesFile(deliverables, derr, self),
 		roomlog.LibraryFile(library, lerr),
 		b.roomLiveMd(room),
-	}
+	), readmeSum
 }
 
 // roomLiveMd renders the recent live-artifact interaction trail: what members
@@ -174,7 +179,8 @@ func (b *Bridge) materializeRoomContext(ctx context.Context, w corepkg.Workspace
 		newState.SelfAfterSeq = newState.EndSeq
 	}
 	// Insert the records before the trailing INDEX.
-	records := b.roomRecordFiles(ctx, room, jobID, self)
+	records, readmeSum := b.roomRecordFiles(ctx, room, jobID, self, st)
+	newState.ReadmeSum = readmeSum
 	if n := len(files); n > 0 && files[n-1].Name == ".room/INDEX.md" {
 		files = append(append(files[:n-1:n-1], records...), files[n-1])
 	} else {

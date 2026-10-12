@@ -2,11 +2,29 @@ package bridge
 
 import (
 	"context"
+	"strings"
 	"sync"
 	"testing"
 
 	corepkg "github.com/luckylhb90/bnbloc/core"
+	"github.com/luckylhb90/bnbloc/internal/roomlog"
 )
+
+// profileContent is a session profile's instructions after the room model
+// every profile opens with (sessionGuidance); it fails when the room model
+// is not there.
+func profileContent(t *testing.T, p *corepkg.AgentProfile) string {
+	t.Helper()
+	if p == nil {
+		t.Fatal("no profile")
+	}
+	head := strings.TrimRight(roomlog.SessionGuidance(), "\n")
+	rest, ok := strings.CutPrefix(p.Instructions, head)
+	if !ok {
+		t.Fatalf("the profile does not open with the room model:\n%s", p.Instructions)
+	}
+	return strings.TrimSpace(rest)
+}
 
 // profileProv is a pull-capable core that advertises agentProfile (unless
 // noProfile) and records the profile of every session create.
@@ -129,7 +147,7 @@ func TestSessionContributorReachesProfileCore(t *testing.T) {
 		t.Fatalf("profiles = %+v", profiles)
 	}
 	p := profiles[0]
-	if len(p.MCPServers) != 1 || p.MCPServers[0].Name != "room" || p.Instructions != "Use the room tools to reach other agents." {
+	if len(p.MCPServers) != 1 || p.MCPServers[0].Name != "room" || profileContent(t, p) != "Use the room tools to reach other agents." {
 		t.Fatalf("profile = %+v", p)
 	}
 	mu.Lock()
@@ -168,5 +186,74 @@ func TestSessionContributorSkipsCoreWithoutProfile(t *testing.T) {
 	}
 	if ps := prov.recordedProfiles(); len(ps) != 1 || ps[0] != nil {
 		t.Fatalf("profiles = %+v", ps)
+	}
+}
+
+// roomModelMarker is a line of the room model (roomlog.SessionGuidance).
+const roomModelMarker = "Every agent works in its own workspace"
+
+// The room model is session guidance: a session created on an agentProfile
+// core carries it in its profile (once, at create), and no turn's prompt
+// repeats it.
+func TestRoomModelRidesTheProfile(t *testing.T) {
+	prov := &profileProv{}
+	b := newProfileBridge(t, prov)
+	for i, text := range []string{"first", "second"} {
+		if _, err := b.driveClaim(context.Background(), testDrive(b, jobRef{ID: "job-" + text}, "r1", "maya", "core-a", "agent-a", "t", text, "ch"), nil); err != nil {
+			t.Fatalf("turn %d: %v", i, err)
+		}
+	}
+	ps := prov.recordedProfiles()
+	if len(ps) != 1 {
+		t.Fatalf("profiles = %+v, want one session", ps)
+	}
+	if rest := profileContent(t, ps[0]); rest != "" {
+		t.Fatalf("a session without content carries %q after the room model", rest)
+	}
+	turns := append(prov.recordedPrompts(), prov.recordedInputs()...)
+	if len(turns) != 2 {
+		t.Fatalf("turn prompts = %q", turns)
+	}
+	for _, p := range turns {
+		if strings.Contains(p, roomModelMarker) {
+			t.Fatalf("a turn's prompt repeats the room model the profile carries:\n%s", p)
+		}
+	}
+}
+
+// A core without agentProfile gets the room model at the head of its
+// session's first prompt only, pull model and push model alike; a follow-up
+// turn's prompt does not carry it.
+func TestRoomModelInFirstPromptOnlyWithoutProfile(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		push bool
+	}{{"pull", false}, {"push", true}} {
+		t.Run(tc.name, func(t *testing.T) {
+			prov := &profileProv{noProfile: true}
+			prov.failWrites = tc.push // no .room/ files: the pushed context
+			b := newProfileBridge(t, prov)
+			for i, text := range []string{"first", "second"} {
+				if _, err := b.driveClaim(context.Background(), testDrive(b, jobRef{ID: "job-" + text}, "r1", "maya", "core-a", "agent-a", "t", text, "ch"), nil); err != nil {
+					t.Fatalf("turn %d: %v", i, err)
+				}
+			}
+			if ps := prov.recordedProfiles(); len(ps) != 1 || ps[0] != nil {
+				t.Fatalf("profiles = %+v, want one session without a profile", ps)
+			}
+			first, follow := prov.recordedPrompts(), prov.recordedInputs()
+			if len(first) != 1 || len(follow) != 1 {
+				t.Fatalf("first prompts %q, follow-ups %q", first, follow)
+			}
+			if !strings.HasPrefix(first[0], roomlog.SessionGuidance()) || strings.Count(first[0], roomModelMarker) != 1 {
+				t.Fatalf("the first prompt does not open with the room model (once):\n%s", first[0])
+			}
+			if !strings.Contains(first[0], "first") {
+				t.Fatalf("the first prompt lost its message:\n%s", first[0])
+			}
+			if strings.Contains(follow[0], roomModelMarker) || !strings.Contains(follow[0], "second") {
+				t.Fatalf("the follow-up turn's prompt carries the room model (or lost its message):\n%s", follow[0])
+			}
+		})
 	}
 }
