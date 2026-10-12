@@ -25,15 +25,33 @@ import { PlatformRetentionCard, TenantRetentionSection } from "@/views/org/Reten
 import { AuditLogTab } from "@/views/org/AuditLogTab";
 import { PublicLinksTab } from "@/views/org/PublicLinksTab";
 import { ToolConnectorsTab } from "@/views/org/ToolConnectorsTab";
+import { ContentReviewTab } from "@/views/org/ContentReviewTab";
+import { PlatformContentTab } from "@/views/org/PlatformContentTab";
 import { invalidateTenantPolicy } from "@/lib/tenantPolicy";
 import { UserWithEmail } from "@/views/UserName";
 
-type Tab = "overview" | "members" | "requests" | "quota" | "settings" | "links" | "tools" | "audit" | "tenants" | "orgsync" | "components" | "updates" | "releases";
+type Tab =
+  | "overview"
+  | "members"
+  | "requests"
+  | "content"
+  | "quota"
+  | "settings"
+  | "links"
+  | "tools"
+  | "audit"
+  | "tenants"
+  | "orgsync"
+  | "components"
+  | "platformContent"
+  | "updates"
+  | "releases";
 
 const TABS: { id: Tab; label: string; superOnly?: boolean }[] = [
   { id: "overview", label: "Overview" },
   { id: "members", label: "Members" },
   { id: "requests", label: "Requests" },
+  { id: "content", label: "Content" },
   { id: "quota", label: "Quota" },
   { id: "settings", label: "Settings" },
   { id: "links", label: "Public links" },
@@ -42,6 +60,7 @@ const TABS: { id: Tab; label: string; superOnly?: boolean }[] = [
   { id: "tenants", label: "Tenants", superOnly: true },
   { id: "orgsync", label: "Org sync", superOnly: true },
   { id: "components", label: "Components", superOnly: true },
+  { id: "platformContent", label: "Platform content", superOnly: true },
   { id: "updates", label: "Updates", superOnly: true },
   { id: "releases", label: "Releases", superOnly: true },
 ];
@@ -121,7 +140,7 @@ export function Organization() {
         )}
       </header>
 
-      <nav className="flex gap-1 border-b border-[var(--color-border)]">
+      <nav className="flex gap-1 overflow-x-auto border-b border-[var(--color-border)]">
         {TABS.filter((t) => !t.superOnly || isSuper).map((t) => (
           <button
             key={t.id}
@@ -145,6 +164,7 @@ export function Organization() {
       {tab === "settings" && <SettingsTab key={activeTenant} scope={activeTenant} />}
       {tab === "links" && <PublicLinksTab key={activeTenant} scope={activeTenant} />}
       {tab === "tools" && <ToolConnectorsTab key={activeTenant} scope={activeTenant} />}
+      {tab === "content" && <ContentReviewTab key={activeTenant} scope={activeTenant} />}
       {tab === "audit" && (
         <AuditLogTab key={isSuper ? "platform" : activeTenant} platform={isSuper} scope={activeTenant} tenants={tenants} />
       )}
@@ -152,6 +172,7 @@ export function Organization() {
       {tab === "orgsync" && isSuper && <OrgSyncTab />}
       {tab === "updates" && isSuper && <PlatformUpdateConfig />}
       {tab === "components" && isSuper && <PlatformComponents />}
+      {tab === "platformContent" && isSuper && <PlatformContentTab />}
       {tab === "releases" && isSuper && <PlatformReleases />}
     </div>
   );
