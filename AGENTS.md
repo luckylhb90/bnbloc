@@ -613,6 +613,47 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   streaming would need a new core capability, which belongs to the agent
   runtime, not bnbloc. Do not fake it; the client animates a reveal only.
 
+### Content components, agent profiles and room tools
+
+- **Content components go through one validator.** Experts and skill packs
+  (later prompt packs) enter only through `internal/contentpkg` (form,
+  archive, import, bridge). A new content kind registers a `KindSpec`; no
+  branches in shared code.
+- **"May member M use component C" has one answer:**
+  `extpipe.MemberVisibility`, for executable and content components alike
+  (room pins and uses come in through `internal/contentuse`). Never
+  re-derive visibility in a handler.
+- **Agent-config paths are bnbloc-owned** (`CLAUDE.md`, `AGENTS.md`,
+  `.claude/skills/**`, `.agents/skills/**`, `.opencode/**`, `.mcp.json`):
+  never deliverables, site content or code sync; write-denied in sandboxed
+  drives. A core's file writer accepts only `core.WorkspaceFileAllowed`
+  paths.
+- **Agent profiles are per session.** A profile goes only to a core
+  advertising `agentProfile` (`core.Supports`); its content checksum is part
+  of the bridge session key; contributed MCP servers and env stay out of it.
+  Never log profile secrets. Other cores get the prompt-prefix fallback.
+  `Target.MCPTransports` says which MCP transports a target accepts (empty =
+  stdio only).
+- **Someone else's content declaring `scripts` or `mcp.stdio` forces a
+  sandboxed drive** (`decideSandbox`), refused where no sandbox can take it.
+- **Work on behalf of a running job** (dispatch, content resolution, bundle
+  grants) is checked with `store.JobLeasedBy`.
+- **Agents dispatch agents only through the room tools, as the job's human
+  requester.** `services/bridge/roomtools` is a loopback MCP server, one
+  bearer per driven session (constant-time compared, bound to the turn's job
+  via `SessionContribution.Turn`, revoked on unbind); the agent never holds
+  the bridge session or a gateway credential. `ask_agent` goes through the
+  gateway's `POST /v1/rooms/{id}/dispatch`, rewritten and signed onto
+  realtime's `/internal/v1/rooms/{id}/dispatch` (room owner replica), which
+  posts through `PostChat` as the parent job's human requester with
+  `payload.dispatchedBy`, so borrow, quota, budget and sandbox checks apply
+  unchanged. Never add a dispatch that authors as the agent or the bridge
+  owner, and never bypass the guards (parent live and leased by the caller's
+  bridge, requester still a human member, depth <= `wire.MaxDispatchDepth`,
+  <= `wire.MaxDispatchFanOut` per parent, no self or cycle, never the people
+  chat). An agent-facing read (`read_room`) reads only the bound job's
+  channel.
+
 ### Borrow authorization
 
 - **Borrowing another member's agent requires that owner's per-room
