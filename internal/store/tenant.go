@@ -85,6 +85,10 @@ type Tenant struct {
 	// (wire.PublishApprovalNone). contentshare.NeedsApproval is its one
 	// reader.
 	PublishApproval string
+	// AssistDisabled is the org-admin switch that turns AI assists off for
+	// the organization (docs/prd/2026-10-13-ai-assist.md §2; default off:
+	// assists run when the deployment has an assist model).
+	AssistDisabled bool
 	// Retention is the org-admin data retention override (null = the
 	// platform default, 0 = keep forever, N = delete after N days); see
 	// wire.RetentionPolicy. Set only through SetTenantRetention.
@@ -116,6 +120,7 @@ type TenantPolicyUpdate struct {
 	OutsideLinksDisabled    *bool
 	AnonymousLinksDisabled  *bool
 	PublishApproval         *string
+	AssistDisabled          *bool
 }
 
 // apply returns t with the update's set fields.
@@ -131,6 +136,9 @@ func (u TenantPolicyUpdate) apply(t Tenant) Tenant {
 	}
 	if u.PublishApproval != nil {
 		t.PublishApproval = *u.PublishApproval
+	}
+	if u.AssistDisabled != nil {
+		t.AssistDisabled = *u.AssistDisabled
 	}
 	return t
 }

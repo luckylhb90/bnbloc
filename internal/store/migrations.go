@@ -1541,6 +1541,14 @@ WHERE r.channel_id = '' AND d.user_id IS NULL`)
 			return nil
 		},
 	},
+	{
+		// AI assist (docs/prd/2026-10-13-ai-assist.md §2): the
+		// organization's switch that turns assists off (default on).
+		id: "2026_10_tenant_assist_disabled",
+		run: func(ctx context.Context, db sqlConn) error {
+			return addColumnIfMissing(ctx, db, "tenants", "assist_disabled", "TINYINT(1) NOT NULL DEFAULT 0 AFTER publish_approval")
+		},
+	},
 }
 
 // sqlConn is the statement surface a migration runs on. runMigrations passes

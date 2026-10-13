@@ -19,6 +19,7 @@ CREATE TABLE IF NOT EXISTS tenants (
   anonymous_links_disabled TINYINT(1) NOT NULL DEFAULT 0,
   outside_links_disabled TINYINT(1) NOT NULL DEFAULT 0,
   publish_approval VARCHAR(16) NOT NULL DEFAULT 'required',
+  assist_disabled TINYINT(1) NOT NULL DEFAULT 0,
   created_at_ms BIGINT NOT NULL,
   retention_messages_days INT NULL,
   retention_artifact_versions_days INT NULL,

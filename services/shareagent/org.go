@@ -310,6 +310,10 @@ type settingsView struct {
 	// waits for an org admin ("required", the default) or takes effect at
 	// once ("none"); contentshare.NeedsApproval reads it.
 	PublishApproval string `json:"publishApproval"`
+	// AssistDisabled: AI assists are off for the organization
+	// (docs/prd/2026-10-13-ai-assist.md §2); the gateway's assist status
+	// reads it.
+	AssistDisabled bool `json:"assistDisabled"`
 }
 
 func viewSettings(t store.Tenant) settingsView {
@@ -322,6 +326,7 @@ func viewSettings(t store.Tenant) settingsView {
 		OutsideLinksDisabled:    t.OutsideLinksDisabled,
 		AnonymousLinksDisabled:  t.AnonymousLinksDisabled,
 		PublishApproval:         t.PublishApproval,
+		AssistDisabled:          t.AssistDisabled,
 	}
 }
 
@@ -348,12 +353,13 @@ type settingsBody struct {
 	OutsideLinksDisabled    *bool   `json:"outsideLinksDisabled"`
 	AnonymousLinksDisabled  *bool   `json:"anonymousLinksDisabled"`
 	PublishApproval         *string `json:"publishApproval"`
+	AssistDisabled          *bool   `json:"assistDisabled"`
 }
 
 // handleTenantUpdateSettings updates the tenant's display name, SSO
 // issuer/domain and policy switches (sandbox for borrowed drives, share
 // links for people outside the organization and without sign-in, publish
-// approval). Only provided fields change; the tenant id and
+// approval, AI assists). Only provided fields change; the tenant id and
 // status are not editable here.
 func (s *Service) handleTenantUpdateSettings(w http.ResponseWriter, r *http.Request) {
 	if s.Tenants == nil {
@@ -388,12 +394,13 @@ func (s *Service) handleTenantUpdateSettings(w http.ResponseWriter, r *http.Requ
 		httpx.Error(w, "update settings failed", http.StatusInternalServerError)
 		return
 	}
-	if body.RequireSandboxForBorrow != nil || body.OutsideLinksDisabled != nil || body.AnonymousLinksDisabled != nil || body.PublishApproval != nil {
+	if body.RequireSandboxForBorrow != nil || body.OutsideLinksDisabled != nil || body.AnonymousLinksDisabled != nil || body.PublishApproval != nil || body.AssistDisabled != nil {
 		t, err = s.Tenants.SetTenantPolicy(r.Context(), tid, store.TenantPolicyUpdate{
 			RequireSandboxForBorrow: body.RequireSandboxForBorrow,
 			OutsideLinksDisabled:    body.OutsideLinksDisabled,
 			AnonymousLinksDisabled:  body.AnonymousLinksDisabled,
 			PublishApproval:         body.PublishApproval,
+			AssistDisabled:          body.AssistDisabled,
 		})
 		if err != nil {
 			obs.ServerError(w, "update tenant policy failed", err)

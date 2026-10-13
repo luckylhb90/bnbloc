@@ -121,3 +121,24 @@ func TestTenantPolicy_publishApproval(t *testing.T) {
 		t.Fatalf("member read: %d %v", code, body)
 	}
 }
+
+// AI assists are on unless an org admin turns them off; the other
+// switches keep the setting.
+func TestTenantPolicy_assistDisabled(t *testing.T) {
+	svc, _ := newService(t)
+	tenants := store.NewMemoryTenant()
+	_ = tenants.PutTenant(tctx("acme"), store.Tenant{TenantID: "acme", Name: "Acme", Status: store.TenantActive})
+	svc.Tenants = tenants
+	if code, body := tenantPolicyReq(t, svc, http.MethodGet, "/v1/tenant/settings", "acme", "admin", nil); code != http.StatusOK || body["assistDisabled"] != false {
+		t.Fatalf("default: %d %v", code, body)
+	}
+	if code, body := tenantPolicyReq(t, svc, http.MethodPut, "/v1/tenant/settings", "acme", "admin", map[string]any{"assistDisabled": true}); code != http.StatusOK || body["assistDisabled"] != true {
+		t.Fatalf("turn off: %d %v", code, body)
+	}
+	if code, body := tenantPolicyReq(t, svc, http.MethodPut, "/v1/tenant/settings", "acme", "admin", map[string]any{"publishApproval": "none"}); code != http.StatusOK || body["assistDisabled"] != true {
+		t.Fatalf("another switch kept it: %d %v", code, body)
+	}
+	if got, _ := tenants.GetTenant(tctx("acme"), "acme"); !got.AssistDisabled {
+		t.Fatal("not stored")
+	}
+}
