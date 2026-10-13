@@ -85,7 +85,8 @@ explicitly anonymous.
   still sees no session and no cookie (`sitePath`, `withSitesOrigin` and
   the log redaction already cover `/v1/public/shares/{…}`).
 - A route's credential is resolved by one function (`openShare`): a
-  `bsh_` token resolves the link through the room service as before; a
+  link token (`internal/sharelink` since `2026-10-13-short-share-links.md`)
+  resolves the link through the room service as before; a
   share ticket resolves its share id (`POST /internal/v1/shares/resolve
   {shareId}`, gateway-only: the gateway vouches for its own signature);
   anything else spends the guess budget. Then `shareAccess` runs. A ticket

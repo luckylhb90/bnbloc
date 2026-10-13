@@ -10,6 +10,7 @@ import (
 	"github.com/luckylhb90/bnbloc/internal/rbac"
 	"github.com/luckylhb90/bnbloc/internal/wire"
 
+	"github.com/luckylhb90/bnbloc/internal/sharelink"
 	"github.com/luckylhb90/bnbloc/internal/store"
 	"github.com/luckylhb90/bnbloc/internal/svcauth"
 	"github.com/luckylhb90/bnbloc/internal/tarbundle"
@@ -41,6 +42,7 @@ func sharesRoom(t *testing.T) (*handoffEnv, *store.MemoryTenant, *int64) {
 type shareReply struct {
 	Share  wire.ShareView   `json:"share"`
 	Token  string           `json:"token"`
+	URL    string           `json:"url"`
 	Shares []wire.ShareView `json:"shares"`
 	Error  string           `json:"error"`
 }
@@ -95,16 +97,16 @@ func TestShareCreateAndList(t *testing.T) {
 		t.Fatalf("create = %d %s", code, rep.Error)
 	}
 	sh := rep.Share
-	if !strings.HasPrefix(rep.Token, "bsh_"+sh.ShareID+"_") || len(sh.ShareID) != 32 {
-		t.Fatalf("token %q for share %q", rep.Token, sh.ShareID)
+	if !sharelink.Valid(rep.Token) || strings.Contains(rep.Token, sh.ShareID) || len(sh.ShareID) != 32 || rep.URL != "" {
+		t.Fatalf("token %q for share %q, url %q (the gateway adds it)", rep.Token, sh.ShareID, rep.URL)
 	}
 	if sh.Version != 0 || sh.CreatedBy != "bob" || sh.ArtifactID != art.ArtifactID || !sh.Active || sh.Access != wire.ShareAccessOrg ||
 		sh.CreatedAtMs != *now || sh.ExpiresAtMs != *now+168*hourMs || sh.ViewCount != 0 {
 		t.Fatalf("share = %+v", sh)
 	}
 	stored, err := e.svc.Artifacts.GetArtifactShare(testCtx(t), sh.ShareID)
-	if err != nil || strings.Contains(rep.Token, stored.TokenHash) || len(stored.TokenHash) != 64 {
-		t.Fatalf("stored = %+v %v (only the secret's hash is stored)", stored, err)
+	if err != nil || stored.TokenHash != sharelink.Hash(rep.Token) || strings.Contains(stored.TokenHash, rep.Token) {
+		t.Fatalf("stored = %+v %v (only the token's hash is stored)", stored, err)
 	}
 
 	*now += 10
@@ -214,14 +216,17 @@ func TestShareResolve(t *testing.T) {
 	}
 
 	id := latest.Share.ShareID
-	secret := strings.TrimPrefix(latest.Token, "bsh_"+id+"_")
-	flipped := []byte(secret)
+	flipped := []byte(latest.Token)
 	flipped[0] ^= 1
+	unknown, _ := sharelink.New()
 	for name, tok := range map[string]string{
-		"malformed":  "not-a-token",
-		"unknown id": "bsh_" + strings.Repeat("0", 32) + "_" + secret,
-		"bad secret": "bsh_" + id + "_" + string(flipped),
-		"no secret":  "bsh_" + id + "_",
+		"malformed":      "not-a-token",
+		"unknown":        unknown,
+		"one char off":   string(flipped),
+		"too long":       latest.Token + "0",
+		"an old link":    "bsh_" + id + "_" + latest.Token,
+		"its share id":   id,
+		"its token hash": sharelink.Hash(latest.Token),
 	} {
 		if code, _ := e.resolve(tok); code != http.StatusNotFound {
 			t.Fatalf("%s = %d, want 404", name, code)

@@ -139,10 +139,17 @@ WHERE tenant_id=? AND share_id=? AND revoked_at_ms IS NULL`, atMs, by, tid, shar
 }
 
 func (m *MySQLArtifacts) ResolveArtifactShare(ctx context.Context, shareID string) (ArtifactShare, error) {
-	// cross-tenant: a share token carries no tenant; the caller verifies the
-	// secret, then works in the row's tenant.
+	// cross-tenant: a share ticket names the share id alone; the caller
+	// then works in the row's tenant.
 	return scanArtifactShare(m.DB.QueryRowContext(ctx, `
 SELECT `+artifactShareCols+` FROM artifact_shares s WHERE s.share_id=?`, shareID))
+}
+
+func (m *MySQLArtifacts) ResolveArtifactShareByToken(ctx context.Context, tokenHash string) (ArtifactShare, error) {
+	// cross-tenant: a share token carries no tenant; the caller works in
+	// the row's tenant (found through uq_artifact_shares_token).
+	return scanArtifactShare(m.DB.QueryRowContext(ctx, `
+SELECT `+artifactShareCols+` FROM artifact_shares s WHERE s.token_hash=?`, tokenHash))
 }
 
 func (m *MySQLArtifacts) CountArtifactShareView(ctx context.Context, shareID string, atMs int64) error {

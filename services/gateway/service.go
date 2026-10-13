@@ -721,6 +721,10 @@ func (s *Service) proxyAs(w http.ResponseWriter, r *http.Request, p apiPath, cla
 	// -1 flushes after each write. Non-stream responses are unaffected.
 	proxy.FlushInterval = -1
 	proxy.ErrorHandler = obs.ProxyError("backend proxy failed")
+	if p.isArtifactShareCreate(r.Method) {
+		// A new link leaves with its URL on this gateway's public origin.
+		proxy.ModifyResponse = s.withShareURL(r)
+	}
 	proxy.ServeHTTP(w, r)
 }
 

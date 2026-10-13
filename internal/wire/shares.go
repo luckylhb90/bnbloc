@@ -35,6 +35,18 @@ type ShareCreateRequest struct {
 	Access         string `json:"access,omitempty" tstype:"ShareAccess"`
 }
 
+// ShareCreated answers a link's create (201): the link and its token,
+// shown this once (only its hash is stored). URL is the link to hand out,
+// `<public origin>/s/<token>` (sharelink.URL): the room service leaves it
+// empty and the gateway fills it in on the way out, so every link is
+// spelled by one owner on the gateway's public origin
+// (docs/prd/2026-10-13-short-share-links.md).
+type ShareCreated struct {
+	Share ShareView `json:"share"`
+	Token string    `json:"token"`
+	URL   string    `json:"url"`
+}
+
 // ShareAccessUpdate is PATCH …/shares/{shareId}: the link's new access.
 type ShareAccessUpdate struct {
 	Access string `json:"access" tstype:"ShareAccess"`

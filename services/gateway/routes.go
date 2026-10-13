@@ -7,6 +7,7 @@ import (
 	"github.com/luckylhb90/bnbloc/internal/auth"
 	"github.com/luckylhb90/bnbloc/internal/httpx"
 	"github.com/luckylhb90/bnbloc/internal/rbac"
+	"github.com/luckylhb90/bnbloc/internal/sharelink"
 	"github.com/luckylhb90/bnbloc/internal/store"
 )
 
@@ -168,6 +169,7 @@ func (s *Service) routes() []route {
 		// A share link's routes take its credential in the path: the link's
 		// token, or a share ticket in its place (share_access.go).
 		member("POST /v1/share-tickets", s.handleShareTicket),
+		open(sharelink.Pattern, shareCredential, s.handleShareLink),
 		open("GET /v1/public/shares/{token}", shareCredential, s.handlePublicShare),
 		open("GET /v1/public/shares/{token}/content", shareCredential, s.handlePublicShareContent),
 		open("GET /v1/public/shares/{token}/site", shareCredential, s.handleSiteRootRedirect),

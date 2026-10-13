@@ -11,6 +11,7 @@ import (
 	"github.com/luckylhb90/bnbloc/internal/auth"
 	"github.com/luckylhb90/bnbloc/internal/httpx"
 	"github.com/luckylhb90/bnbloc/internal/obs"
+	"github.com/luckylhb90/bnbloc/internal/sharelink"
 	"github.com/luckylhb90/bnbloc/internal/wire"
 )
 
@@ -35,7 +36,7 @@ import (
 // else of that organization.
 //
 // Every share route's credential is the {token} path segment, resolved by
-// openShare: the link's own token ("bsh_…", an anonymous caller), or a
+// openShare: the link's own token (sharelink.Valid, an anonymous caller), or a
 // share ticket (auth.KindShareTicket) the share page minted after sign-in
 // (handleShareTicket), which rides in the path in the token's place exactly
 // like a member site ticket, so a frame, a download link and an app's
@@ -128,7 +129,7 @@ func (s *Service) openShare(r *http.Request, reuse bool) (openedShare, error) {
 		caller shareCaller
 	)
 	switch {
-	case plausibleShareToken(cred):
+	case sharelink.Valid(cred):
 		req.Token = cred
 	case len(cred) <= maxShareTicketLen:
 		t, err := s.Signer.VerifyKind(cred, auth.KindShareTicket)
@@ -231,7 +232,7 @@ func (s *Service) handleShareTicket(w http.ResponseWriter, r *http.Request, clai
 		return
 	}
 	token := strings.TrimSpace(in.Token)
-	if !plausibleShareToken(token) {
+	if !sharelink.Valid(token) {
 		writeShareErr(w, s.shareMiss(r))
 		return
 	}

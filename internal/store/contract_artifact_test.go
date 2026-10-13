@@ -483,6 +483,20 @@ func TestContractArtifactShareStore(t *testing.T) {
 		if _, err := s.ResolveArtifactShare(context.Background(), uniq("nope-")); !errors.Is(err, ErrArtifactShareNotFound) {
 			t.Fatalf("resolve unknown = %v", err)
 		}
+		// By the token's hash, in any tenant; a hash is unique.
+		if byTok, err := s.ResolveArtifactShareByToken(context.Background(), live.TokenHash); err != nil || byTok.ShareID != live.ShareID || byTok.TenantID != live.TenantID || byTok.ViewCount != 2 {
+			t.Fatalf("resolve by token = %+v %v", byTok, err)
+		}
+		for _, h := range []string{HashArtifactContent(uniq("nope-")), ""} {
+			if _, err := s.ResolveArtifactShareByToken(context.Background(), h); !errors.Is(err, ErrArtifactShareNotFound) {
+				t.Fatalf("resolve by an unknown token %q = %v", h, err)
+			}
+		}
+		dupID := uniq("sh-")
+		if _, err := s.CreateArtifactShare(other, ArtifactShare{ShareID: dupID, TokenHash: live.TokenHash, RoomID: room, ArtifactID: artID,
+			CreatedBy: "eve", CreatedAtMs: 1, ExpiresAtMs: 2}); !errors.Is(err, ErrArtifactShareExists) {
+			t.Fatalf("a taken token hash = %v", err)
+		}
 		if _, err := s.CreateArtifactShare(context.Background(), live); !errors.Is(err, tenant.ErrNoTenant) {
 			t.Fatalf("create without tenant = %v", err)
 		}

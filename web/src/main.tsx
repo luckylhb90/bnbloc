@@ -20,7 +20,7 @@ const PublicSharePage = lazy(() =>
   import("@/views/share/PublicSharePage").then((m) => ({ default: m.PublicSharePage })),
 );
 
-// Root picks the public share page for a `#/share/<token>` hash, else the
+// Root picks the public share page for a share page hash, else the
 // signed-in app; a hash change (a share link opened in this tab) switches.
 function Root() {
   const [shareToken, setShareToken] = useState(() => shareTokenFromHash(window.location.hash));

@@ -1,6 +1,6 @@
 // Package secrettoken mints and verifies the "<prefix><id>_<secret>" bearer
 // credentials bnbloc hands out once and stores only as a hash: API tokens
-// (bnbloc_at_) and artifact share links (bsh_). The id is a random hex
+// (bnbloc_at_). The id is a random hex
 // lookup key; the secret is 32 random bytes, base64url, and only its sha256
 // hex is persisted, so a database read never yields a usable credential.
 // Verification is constant-time.
@@ -20,7 +20,7 @@ const secretBytes = 32
 
 // Format is one token family: its prefix and the hex length of its id.
 type Format struct {
-	// Prefix starts every token of the family ("bnbloc_at_", "bsh_").
+	// Prefix starts every token of the family ("bnbloc_at_").
 	Prefix string
 	// IDLen is the hex id length (even; 32 = 128 bits).
 	IDLen int

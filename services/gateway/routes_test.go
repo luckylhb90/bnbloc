@@ -12,6 +12,7 @@ import (
 
 	"github.com/luckylhb90/bnbloc/internal/auth"
 	"github.com/luckylhb90/bnbloc/internal/rbac"
+	"github.com/luckylhb90/bnbloc/internal/sharelink"
 )
 
 // readerWrites are the session routes that write yet any member, a
@@ -35,8 +36,8 @@ var readerWrites = map[string]string{
 
 // publicPrefixes are where a route may take no session: sign-in, the IdP's
 // SSO endpoints, and routes whose credential travels in the request (a
-// share token, a ticket, a component signature).
-var publicPrefixes = []string{"/v1/auth/", "/api/auth/", "/v1/public/", "/v1/sites/", "/v1/previewers/", "/v1/notifier/", "/v1/local-agent/discover"}
+// share token, a ticket, a component signature; a share link's own path).
+var publicPrefixes = []string{"/v1/auth/", "/api/auth/", "/v1/public/", "/v1/sites/", "/v1/previewers/", "/v1/notifier/", "/v1/local-agent/discover", sharelink.Prefix}
 
 // TestEveryGatewayRouteGated: every route the gateway serves itself is a
 // row of the route table with its edge policy, and the policy holds. The

@@ -15,7 +15,9 @@
 //                             "copy link" from a workbench tab)
 //   #/preview/<room>/<art> -> handled elsewhere (StandalonePreview)
 //   #/share/<token>        -> the public share page (no sign-in); main.tsx
-//                             renders it before auth (shareTokenFromHash)
+//                             renders it before auth (shareTokenFromHash).
+//                             A share link (<origin>/s/<token>, the
+//                             server's) redirects here.
 //
 // The SSO callback uses a key=value hash (#sessionToken=...&subject=...) which
 // auth.tsx consumes and clears before the app renders; that shape never starts
@@ -111,19 +113,24 @@ export function appRoot(base: string): string {
   return url.href;
 }
 
-// A share token as the room service mints it: `bsh_<shareId>_<secret>`
-// (base64url secret). The page accepts the URL-safe alphabet only, so a
-// fragment can never smuggle a path into the public API calls.
+// A share page's token: the page accepts the URL-safe alphabet only, so a
+// fragment can never smuggle a path into the public API calls. It takes
+// any such token, not only the current format (the server's
+// internal/sharelink): an older or unknown link reaches the page and is
+// told it is no longer available, by the server's 404.
 const SHARE_TOKEN = /^[A-Za-z0-9_-]{8,256}$/;
 
-/** The token of a public share page hash (`#/share/<token>`), else null. */
-export function shareTokenFromHash(hash: string): string | null {
-  const m = /^#\/share\/([^/?#]+)\/?$/.exec(hash);
-  return m && SHARE_TOKEN.test(m[1]) ? m[1] : null;
+const SHARE_PAGE = "#/share/";
+
+/** The public share page's hash for a link's token (where a share link
+ *  lands, and where signing in brings a person back to). */
+export function shareHash(token: string): string {
+  return SHARE_PAGE + token;
 }
 
-/** The public link of a share: the app's base (the gateway root in the
- *  desktop shell, the page origin in a browser) plus `#/share/<token>`. */
-export function shareLinkUrl(base: string, token: string): string {
-  return `${appRoot(base)}#/share/${token}`;
+/** The token of a public share page hash (`shareHash`), else null. */
+export function shareTokenFromHash(hash: string): string | null {
+  if (!hash.startsWith(SHARE_PAGE)) return null;
+  const m = /^([^/?#]+)\/?$/.exec(hash.slice(SHARE_PAGE.length));
+  return m && SHARE_TOKEN.test(m[1]) ? m[1] : null;
 }

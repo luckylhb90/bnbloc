@@ -53,25 +53,6 @@ type publicShareView struct {
 
 var errShareNotFound = errors.New("share not found")
 
-// maxShareTokenLen bounds what is forwarded for resolution
-// (bsh_<shareId>_<secret> is well under it).
-const maxShareTokenLen = 256
-
-// plausibleShareToken rejects what can never be a share token without a
-// backend round trip (it still spends the guess budget).
-func plausibleShareToken(tok string) bool {
-	if !strings.HasPrefix(tok, "bsh_") || len(tok) > maxShareTokenLen {
-		return false
-	}
-	for i := 0; i < len(tok); i++ {
-		c := tok[i]
-		if !('a' <= c && c <= 'z' || 'A' <= c && c <= 'Z' || '0' <= c && c <= '9' || c == '_' || c == '-') {
-			return false
-		}
-	}
-	return true
-}
-
 func publicSiteBase(token string) string {
 	return "/v1/public/shares/" + url.PathEscape(token) + "/site/"
 }

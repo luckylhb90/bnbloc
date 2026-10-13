@@ -78,7 +78,9 @@ and an organization switch for links reaching people outside it.
   TINYINT(1) NOT NULL DEFAULT 0`.
 - Token: `bsh_<shareId>_<secret>` (secret 32 random bytes, base64url); only
   the hash is stored; verification is constant-time (same pattern as API
-  tokens). Shown once, at create.
+  tokens). Shown once, at create. (Superseded 2026-10-13: a 22-character
+  base62 token found by its hash, the link `<origin>/s/<token>`;
+  `2026-10-13-short-share-links.md`.)
 
 ### Room service (member routes, behind the gateway as today)
 

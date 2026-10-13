@@ -26,9 +26,10 @@ var ErrArtifactShareRevokeTime = errors.New("store: artifact share revocation ne
 
 // ArtifactShare is one share link of an artifact
 // (docs/prd/2026-10-09-artifact-shares-and-site-previews.md; access:
-// docs/prd/2026-10-13-share-link-sign-in.md). The token
-// "bsh_<ShareID>_<secret>" is shown once at create; only TokenHash (the
-// secret's sha256 hex) is stored.
+// docs/prd/2026-10-13-share-link-sign-in.md; the token:
+// docs/prd/2026-10-13-short-share-links.md). The token (internal/sharelink)
+// is shown once at create; only TokenHash (sharelink.Hash) is stored, and
+// the link is found by it.
 type ArtifactShare struct {
 	ShareID    string
 	TokenHash  string
@@ -89,7 +90,8 @@ type TenantShareQuery struct {
 type ArtifactShareStore interface {
 	// CreateArtifactShare stores a new link in the context tenant (an empty
 	// Access is wire.ShareAccessOrg; an unknown one ErrArtifactShareAccess);
-	// ErrArtifactShareExists when the id is taken in any tenant.
+	// ErrArtifactShareExists when the id or the token hash is taken in any
+	// tenant.
 	CreateArtifactShare(ctx context.Context, sh ArtifactShare) (ArtifactShare, error)
 	// SetArtifactShareAccess changes a link's access (ErrArtifactShareAccess
 	// for an unknown one) and returns it as stored.
@@ -106,11 +108,14 @@ type ArtifactShareStore interface {
 	// revocation is kept) and returns it as stored. atMs <= 0 is
 	// ErrArtifactShareRevokeTime on both backends.
 	RevokeArtifactShare(ctx context.Context, shareID, by string, atMs int64) (ArtifactShare, error)
-	// ResolveArtifactShare looks a link up by id in ANY tenant: the token
-	// carries no tenant, and share ids are globally unique (the primary
-	// key). The caller must verify the token secret against TokenHash
-	// before trusting the row, and then works in the row's tenant.
+	// ResolveArtifactShare looks a link up by id in ANY tenant (a share
+	// ticket the gateway signed names it; share ids are globally unique,
+	// the primary key). The caller then works in the row's tenant.
 	ResolveArtifactShare(ctx context.Context, shareID string) (ArtifactShare, error)
+	// ResolveArtifactShareByToken looks a link up by its token's hash
+	// (sharelink.Hash) in ANY tenant: the token carries no tenant, and
+	// token hashes are unique. ErrArtifactShareNotFound for none.
+	ResolveArtifactShareByToken(ctx context.Context, tokenHash string) (ArtifactShare, error)
 	// CountArtifactShareView records one view of a link of the context
 	// tenant.
 	CountArtifactShareView(ctx context.Context, shareID string, atMs int64) error
@@ -151,6 +156,11 @@ func (s *MemoryArtifacts) CreateArtifactShare(ctx context.Context, sh ArtifactSh
 	defer s.mu.Unlock()
 	if _, dup := s.shares[sh.ShareID]; dup {
 		return ArtifactShare{}, ErrArtifactShareExists
+	}
+	for _, other := range s.shares {
+		if other.TokenHash == sh.TokenHash {
+			return ArtifactShare{}, ErrArtifactShareExists
+		}
 	}
 	sh.TenantID = tid
 	sh.RevokedAtMs, sh.RevokedBy, sh.ViewCount, sh.LastViewedAtMs = 0, "", 0, 0
@@ -269,7 +279,8 @@ func (s *MemoryArtifacts) RevokeArtifactShare(ctx context.Context, shareID, by s
 	return sh, nil
 }
 
-// ResolveArtifactShare is cross-tenant: a share token carries no tenant.
+// ResolveArtifactShare is cross-tenant: a share ticket names the share id
+// alone.
 func (s *MemoryArtifacts) ResolveArtifactShare(_ context.Context, shareID string) (ArtifactShare, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -278,6 +289,19 @@ func (s *MemoryArtifacts) ResolveArtifactShare(_ context.Context, shareID string
 		return ArtifactShare{}, ErrArtifactShareNotFound
 	}
 	return sh, nil
+}
+
+// ResolveArtifactShareByToken is cross-tenant: a share token carries no
+// tenant.
+func (s *MemoryArtifacts) ResolveArtifactShareByToken(_ context.Context, tokenHash string) (ArtifactShare, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, sh := range s.shares {
+		if tokenHash != "" && sh.TokenHash == tokenHash {
+			return sh, nil
+		}
+	}
+	return ArtifactShare{}, ErrArtifactShareNotFound
 }
 
 func (s *MemoryArtifacts) CountArtifactShareView(ctx context.Context, shareID string, atMs int64) error {

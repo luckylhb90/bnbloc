@@ -5,7 +5,7 @@
 // required) unless its creator lets anyone signed in, or anyone at all,
 // open it (docs/prd/2026-10-13-share-link-sign-in.md).
 
-export type { ShareAccess, ShareTicket, ShareView, TenantPolicy } from "./wire.gen.ts";
+export type { ShareAccess, ShareCreated, ShareTicket, ShareView, TenantPolicy } from "./wire.gen.ts";
 import type { ShareAccess, ShareCreateRequest, ShareTicket, ShareView, TenantPolicy } from "./wire.gen.ts";
 import { ApiError, errorReason } from "./errors.ts";
 import { ShareAccessValues } from "./wire.gen.ts";
@@ -16,10 +16,6 @@ export interface TenantShareView extends ShareView {
   readonly artifactTitle: string;
 }
 
-export interface CreatedShare {
-  readonly share: ShareView;
-  readonly token: string;
-}
 
 /** What the public share page learns about a link (nothing of the room). */
 export interface PublicShare {

@@ -156,6 +156,13 @@ func (p apiPath) endsMembership(method, caller string) (user string, ok bool) {
 // revoke any public link of their organization without being a member of
 // its room (the room service re-checks the org role in the room's tenant);
 // it is the only room route with that exemption.
+// isArtifactShareCreate is POST /v1/rooms/{id}/artifacts/{artifactId}/shares:
+// a link's create, whose answer the proxy completes with the link's URL
+// (withShareURL).
+func (p apiPath) isArtifactShareCreate(method string) bool {
+	return method == http.MethodPost && len(p.segs) == 6 && p.RoomSub == "artifacts" && p.segs[5] == "shares"
+}
+
 func (p apiPath) isArtifactShareRevoke(method string) bool {
 	return method == http.MethodDelete && len(p.segs) == 7 && p.RoomSub == "artifacts" && p.segs[5] == "shares"
 }

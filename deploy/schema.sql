@@ -445,11 +445,12 @@ CREATE TABLE IF NOT EXISTS artifact_versions (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- Share links of one artifact (docs/prd/2026-10-09-artifact-shares-
--- and-site-previews.md): an expiring, revocable "bsh_<share_id>_<secret>"
--- token; only the secret's sha256 hex is stored. version 0 follows the
--- artifact's latest version. access is who may open it: 'org' (signed-in
--- members of the organization) or 'anyone' (docs/prd/2026-10-13-share-
--- link-sign-in.md). Not exported with the room.
+-- and-site-previews.md): an expiring, revocable token (internal/sharelink,
+-- docs/prd/2026-10-13-short-share-links.md); only its sha256 hex is
+-- stored, and the link is found by it. version 0 follows the artifact's
+-- latest version. access is who may open it: 'org' (signed-in members of
+-- the organization), 'signed_in' (anyone signed in) or 'anyone'
+-- (docs/prd/2026-10-13-share-link-sign-in.md). Not exported with the room.
 CREATE TABLE IF NOT EXISTS artifact_shares (
   share_id          VARCHAR(32) PRIMARY KEY,
   token_hash        CHAR(64) NOT NULL,

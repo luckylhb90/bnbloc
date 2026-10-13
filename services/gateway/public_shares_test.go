@@ -13,9 +13,9 @@ import (
 )
 
 const (
-	siteToken = "bsh_shsite_c2l0ZXNlY3JldA"
-	docToken  = "bsh_shdoc_ZG9jc2VjcmV0"
-	pdfToken  = "bsh_shpdf_cGRmc2VjcmV0"
+	siteToken = "siteToken0000000000000"
+	docToken  = "docToken00000000000000"
+	pdfToken  = "pdfToken00000000000000"
 )
 
 // shareRes is a resolution of an "anyone" link whose share id is id.
@@ -139,7 +139,7 @@ func TestPublicShare_site_serves_files_under_the_share_base(t *testing.T) {
 func TestPublicShare_misses_spend_the_guess_budget(t *testing.T) {
 	e := newShareEnv(t)
 	for i := 0; i < int(defaultGuessBurst); i++ {
-		if resp, _ := e.do(http.MethodGet, "/v1/public/shares/bsh_nope_x"+string(rune('a'+i)), ""); resp.StatusCode != http.StatusNotFound {
+		if resp, _ := e.do(http.MethodGet, "/v1/public/shares/nopeToken000000000000"+string(rune('a'+i)), ""); resp.StatusCode != http.StatusNotFound {
 			t.Fatalf("miss %d status %d", i, resp.StatusCode)
 		}
 	}
@@ -170,7 +170,7 @@ func TestPublicShare_reads_are_rate_limited_per_ip(t *testing.T) {
 
 func TestPublicShare_garbage_tokens_never_reach_the_room_service(t *testing.T) {
 	e := newShareEnv(t)
-	for _, tok := range []string{"nope", "bsh_" + strings.Repeat("a", 300), "bsh_a%2Fb"} {
+	for _, tok := range []string{"nope", strings.Repeat("a", 300), "a%2Fb" + strings.Repeat("a", 17), "bsh_" + strings.Repeat("0", 32) + "_c2VjcmV0", strings.Repeat("a", 21) + "-"} {
 		if resp, _ := e.do(http.MethodGet, "/v1/public/shares/"+tok, ""); resp.StatusCode != http.StatusNotFound {
 			t.Fatalf("%q status %d", tok, resp.StatusCode)
 		}

@@ -12,6 +12,8 @@ import (
 	"os"
 	"regexp"
 	"time"
+
+	"github.com/luckylhb90/bnbloc/internal/sharelink"
 )
 
 var roomPathRe = regexp.MustCompile(`/v1/rooms/([^/]+)`)
@@ -27,6 +29,7 @@ var secretPathRes = []*regexp.Regexp{
 	regexp.MustCompile(`(/relay/stream/)[^/]+()`),
 	regexp.MustCompile(`(/v1/sites/)[^/]+()`),
 	regexp.MustCompile(`(/v1/public/shares/)[^/]+()`),
+	regexp.MustCompile(`^(` + regexp.QuoteMeta(sharelink.Prefix) + `)[^/]+()`),
 	regexp.MustCompile(`(/v1/previewers/[^/]+/[^/]+/)[^/]+()`),
 }
 

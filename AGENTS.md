@@ -553,6 +553,20 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   (`POST /internal/v1/shares/view`). `TestShareAccessSingleOwner` forbids
   comparing a link's access elsewhere in the gateway and reading the
   switches outside the store and the settings routes.
+- **A share link has one owner: `internal/sharelink`**
+  (`docs/prd/2026-10-13-short-share-links.md`). The token is 22 base62
+  characters (`New`, `Valid`), stored only as `Hash` and found by it
+  (`ResolveArtifactShareByToken`, the unique `token_hash`); the share id
+  stays the row's key (`ids.New("")`) for tickets and the API. The link is
+  `<public origin>/s/<token>` (`URL`): the gateway fills the create
+  answer's `url` (`wire.ShareCreated`, `withShareURL` on the proxied
+  create, `s.publicOrigin`), and the web shows it and never builds one.
+  `GET /s/{token}` (a route-table row) redirects a well-formed token to the
+  share page (`PagePath`, the web's `shareHash` in `lib/hashRoute.ts`),
+  404 otherwise; it is main-origin only and redacted from request logs. A
+  token of another shape (an old `bsh_…` link) is a 404 "share not found"
+  without a backend call. `TestShareLinkSpelledOnce` forbids spelling `/s/`
+  or `#/share/` anywhere else (Go, and the web outside `hashRoute.ts`).
 
 ### Local-agent cores (multi-core)
 

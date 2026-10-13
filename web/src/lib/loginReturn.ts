@@ -13,7 +13,7 @@
 //
 // Pure apart from the injected store; unit-tested under node.
 
-import { appRoot, shareTokenFromHash } from "./hashRoute.ts";
+import { appRoot, shareHash, shareTokenFromHash } from "./hashRoute.ts";
 import { readStored, StorageKey, writeStored } from "./storageKeys.ts";
 
 /** A remembered return older than this is dropped (a sign-in abandoned
@@ -36,7 +36,7 @@ const sessionStore: ReturnStore = {
  *  document (pageUrl without its fragment). Null for a token no share page
  *  would take (nothing is remembered). */
 export function beginShareSignIn(token: string, pageUrl: string, nowMs: number, store: ReturnStore = sessionStore): string | null {
-  const hash = `#/share/${token}`;
+  const hash = shareHash(token);
   if (shareTokenFromHash(hash) === null) return null;
   store.write(JSON.stringify({ hash, atMs: nowMs }));
   return appRoot(pageUrl);

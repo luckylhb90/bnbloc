@@ -1,4 +1,4 @@
-import { artifactLinkUrl, parseHashRoute, routeHash, shareLinkUrl, shareTokenFromHash } from "./hashRoute.ts";
+import { artifactLinkUrl, parseHashRoute, routeHash, shareHash, shareTokenFromHash } from "./hashRoute.ts";
 
 // Local runner (the web tsconfig has no node types); a failure throws.
 function test(name: string, fn: () => void): void {
@@ -69,11 +69,15 @@ test("artifact links are absolute room-member URLs", () => {
   eq(artifactLinkUrl("https://h/sub", "r1", "a1"), "https://h/sub/#/room/r1?artifact=a1", "directory base");
 });
 
-test("share links and the public share route", () => {
-  const token = "bsh_s1a2b3_Zm9vYmFyLWJhel9xdXV4"; // gitleaks:allow (made-up test token)
-  eq(shareLinkUrl("https://gw.example.com", token), `https://gw.example.com/#/share/${token}`, "gateway base");
-  eq(shareLinkUrl("https://gw.example.com/app/#/room/r1", token), `https://gw.example.com/app/#/share/${token}`, "page base");
+test("the public share route", () => {
+  const token = "Ab3dEf6hIj9kLm2nOp5qRs"; // a link's token (22 base62)
+  eq(shareHash(token), `#/share/${token}`, "the share page's hash");
+  eq(shareTokenFromHash(shareHash(token)), token, "round trip");
   eq(shareTokenFromHash(`#/share/${token}`), token, "parses");
+  // An older or unknown token still reaches the page, which the server
+  // answers 404: "This link is no longer available".
+  const old = "bsh_s1a2b3_Zm9vYmFyLWJhel9xdXV4"; // gitleaks:allow (made-up test token)
+  eq(shareTokenFromHash(shareHash(old)), old, "an old link's token reaches the page");
   eq(shareTokenFromHash(`#/share/${token}/`), token, "trailing slash");
   for (const bad of ["", "#/share/", "#/share/short", "#/share/a%2Fb_cdefgh", "#/share/abc/def/ghi", `#/share/${token}?x=1`, "#/room/r1"]) {
     eq(shareTokenFromHash(bad), null, `rejects ${bad}`);

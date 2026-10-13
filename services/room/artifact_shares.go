@@ -8,11 +8,12 @@ import (
 	"strings"
 
 	"github.com/luckylhb90/bnbloc/internal/httpx"
+	"github.com/luckylhb90/bnbloc/internal/ids"
 	"github.com/luckylhb90/bnbloc/internal/rbac"
 	"github.com/luckylhb90/bnbloc/internal/wire"
 
 	"github.com/luckylhb90/bnbloc/internal/obs"
-	"github.com/luckylhb90/bnbloc/internal/secrettoken"
+	"github.com/luckylhb90/bnbloc/internal/sharelink"
 	"github.com/luckylhb90/bnbloc/internal/store"
 	"github.com/luckylhb90/bnbloc/internal/svcauth"
 	"github.com/luckylhb90/bnbloc/internal/tenant"
@@ -24,13 +25,10 @@ import (
 // version, or 0 = always the latest) that the organization's signed-in
 // members may open ("org", the default), anyone who signs in to this
 // deployment ("signed_in") or anyone holding it ("anyone").
-// The token "bsh_<shareId>_<secret>" is shown once; only the secret's hash
-// is stored. The gateway resolves a link through the signed internal route
+// The token (internal/sharelink, docs/prd/2026-10-13-short-share-links.md)
+// is shown once; only its hash is stored, and the link is found by it. The gateway resolves a link through the signed internal route
 // below and decides who may open it (shareAccess); every dead link answers
 // the same 404 here.
-
-// shareTokenFormat is the share-link token family.
-var shareTokenFormat = secrettoken.Format{Prefix: "bsh_", IDLen: 32}
 
 const (
 	defaultShareTTLHours = 168      // 7 days
@@ -181,15 +179,10 @@ func (s *Service) handleCreateShare(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, shareAccessRefusal(body.Access), http.StatusForbidden)
 		return
 	}
-	id, token, hash, err := shareTokenFormat.New()
-	if err != nil {
-		obs.ServerError(w, "mint share token failed", err)
-		httpx.Error(w, "create share failed", http.StatusInternalServerError)
-		return
-	}
+	token, hash := sharelink.New()
 	now := s.Now()
 	sh, err := s.Artifacts.CreateArtifactShare(r.Context(), store.ArtifactShare{
-		ShareID: id, TokenHash: hash, RoomID: art.RoomID, ArtifactID: art.ArtifactID, Version: body.Version, Access: body.Access,
+		ShareID: ids.New(""), TokenHash: hash, RoomID: art.RoomID, ArtifactID: art.ArtifactID, Version: body.Version, Access: body.Access,
 		CreatedBy: caller(r), CreatedAtMs: now, ExpiresAtMs: now + int64(body.ExpiresInHours)*hourMs,
 	})
 	if err != nil {
@@ -197,7 +190,8 @@ func (s *Service) handleCreateShare(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, "create share failed", http.StatusInternalServerError)
 		return
 	}
-	httpx.WriteJSON(w, http.StatusCreated, map[string]any{"share": viewShare(sh, now), "token": token})
+	// The gateway adds the link's URL (wire.ShareCreated.URL).
+	httpx.WriteJSON(w, http.StatusCreated, wire.ShareCreated{Share: viewShare(sh, now), Token: token})
 }
 
 // handleListShares lists an artifact's links, newest first; revoked and
@@ -405,17 +399,21 @@ func (s *Service) handleShareView(w http.ResponseWriter, r *http.Request) {
 // resolveShare implements the resolve route: ok=false for every dead link;
 // err only for a store failure.
 func (s *Service) resolveShare(ctx context.Context, req wire.ShareResolveRequest) (wire.ShareResolution, bool, error) {
-	if (req.Token == "") == (req.ShareID == "") {
+	var (
+		sh  store.ArtifactShare
+		err error
+	)
+	switch {
+	case (req.Token == "") == (req.ShareID == ""):
 		return wire.ShareResolution{}, false, nil
+	case req.Token != "":
+		if !sharelink.Valid(req.Token) {
+			return wire.ShareResolution{}, false, nil
+		}
+		sh, err = s.Artifacts.ResolveArtifactShareByToken(ctx, sharelink.Hash(req.Token))
+	default:
+		sh, err = s.Artifacts.ResolveArtifactShare(ctx, req.ShareID)
 	}
-	id, secret, byToken := shareTokenFormat.Parse(req.Token)
-	if req.Token != "" && !byToken {
-		return wire.ShareResolution{}, false, nil
-	}
-	if !byToken {
-		id = req.ShareID
-	}
-	sh, err := s.Artifacts.ResolveArtifactShare(ctx, id)
 	if errors.Is(err, store.ErrArtifactShareNotFound) {
 		return wire.ShareResolution{}, false, nil
 	}
@@ -423,7 +421,7 @@ func (s *Service) resolveShare(ctx context.Context, req wire.ShareResolveRequest
 		return wire.ShareResolution{}, false, err
 	}
 	now := s.Now()
-	if (byToken && !secrettoken.Verify(secret, sh.TokenHash)) || !sh.Active(now) {
+	if !sh.Active(now) {
 		return wire.ShareResolution{}, false, nil
 	}
 	// From here on the link's own tenant scopes every read.

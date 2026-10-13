@@ -15,7 +15,8 @@ import { ViewerToolbar } from "@/views/artifact/toolbar";
 import { categoryIcons } from "@/views/workbench/fileIcons";
 import { SharedApp } from "./SharedApp";
 
-// PublicSharePage is what a link's holder sees at `#/share/<token>`
+// PublicSharePage is what a link's holder sees at the share page's hash
+// (lib/hashRoute shareHash; a share link `<origin>/s/<token>` redirects there)
 // (docs/prd/2026-10-13-share-link-sign-in.md): nothing of the room but the
 // shared version. A link anyone can open renders at once, without a session.
 // A link that needs sign-in (for the room's organization, the default, or

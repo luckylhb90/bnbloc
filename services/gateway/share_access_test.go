@@ -126,7 +126,7 @@ func TestShareTicketForTheOrganizationOnly(t *testing.T) {
 	if r := e.call(http.MethodPost, "/v1/share-tickets", wire.ShareTicketRequest{Token: tok}); r.status != http.StatusUnauthorized {
 		t.Fatalf("no session = %d %s", r.status, r.body)
 	}
-	for _, bad := range []string{"bsh_nope_x", "garbage", ""} {
+	for _, bad := range []string{"bsh_nope_x", "garbage", "", "nopeToken0000000000000"} {
 		if r := e.mintTicket("nora", bad); r.status != http.StatusNotFound {
 			t.Fatalf("token %q = %d %s", bad, r.status, r.body)
 		}

@@ -2,9 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Select } from "@/ui/Select";
 import { CopyIcon, LinkIcon, WarningIcon } from "@phosphor-icons/react";
 import { cn } from "@/lib/cn";
-import { appLinkBase } from "@/lib/config";
 import { relativeTime } from "@/lib/format";
-import { shareLinkUrl } from "@/lib/hashRoute";
 import {
   allowedShareAccess,
   chosenShareAccess,
@@ -107,7 +105,7 @@ export function ShareDialog({
     setBusy(true);
     try {
       const res = await sharesApi.create(roomId, artifactId, shareRequest({ latest: latest === "latest", version, days, access: chosen }));
-      const url = shareLinkUrl(appLinkBase(), res.token);
+      const url = res.url;
       setLink(url);
       void copyLink(url);
       void reload();
