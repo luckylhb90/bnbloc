@@ -37,6 +37,8 @@ import { TeamPlanCard, useTeamPlan } from "@/views/composer/TeamPlanCard";
 import { useComposerPrompts } from "@/views/composer/useComposerPrompts";
 import { PromptPickerButton, PromptVariablesDialog, SlashMenu } from "@/views/composer/PromptPicker";
 import { explicitRecipient, resolveRecipient } from "@/views/composer/recipient";
+import { useEnhancePrompt } from "@/views/composer/useEnhancePrompt";
+import { AssistButton } from "@/views/AssistButton";
 
 const toolButton =
   "tactile grid size-10 shrink-0 place-items-center rounded-[var(--radius)] text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-2)] hover:text-[var(--color-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/60";
@@ -122,6 +124,11 @@ export function Composer({
   const attachments = useComposerAttachments(roomId);
   // A "Make similar" draft's references arrive stored in the room.
   useInjectedAttachments(roomId, people ? null : channelId, attachments.addStored);
+  // "Enhance prompt": the AI assist rewrites the text in place (Undo puts
+  // it back); hidden without a model.
+  const storedAttachmentIds = useMemo(() => attachments.files.flatMap((f) => (f.stored ? [f.stored.id] : [])), [attachments.files]);
+  const enhance = useEnhancePrompt({ roomId, text, setText, attachmentIds: storedAttachmentIds, taRef });
+  const enhancing = enhance.state !== "idle";
   // @-mention autocomplete: when the caret is inside an "@partial" token, show a
   // filtered member list; selecting one inserts "@name ".
   const [mention, setMention] = useState<{ query: string; start: number } | null>(
@@ -274,7 +281,7 @@ export function Composer({
 
   const send = async () => {
     const t = text.trim();
-    if (sending || (!t && refs.length === 0 && attachments.files.length === 0)) return;
+    if (sending || enhancing || (!t && refs.length === 0 && attachments.files.length === 0)) return;
     setSending(true);
     // Prepend each reference as an attributed Markdown quote so the agent
     // receives the referenced content inline, then the user's own text.
@@ -558,6 +565,7 @@ export function Composer({
           rows={people ? 2 : 1}
           value={text}
           disabled={disabled}
+          readOnly={enhancing}
           placeholder={
             people
               ? "Message people in this room (agents can't see this)"
@@ -585,6 +593,8 @@ export function Composer({
           onKeyDown={(e) => {
             // Keys during an IME composition (CJK input) are the IME's.
             if (isImeKey(e)) return;
+            // Cmd/Ctrl+Z right after an enhance restores the member's text.
+            if (enhance.onKeyDown(e)) return;
             // The /command menu, when open, takes the keys first.
             if (prompts.onKeyDown(e)) return;
             // While the mention list is open, arrows move the highlight and
@@ -730,6 +740,20 @@ export function Composer({
               </span>
             )}
           </div>
+          {!people && !peopleOnly && enhance.canUndo && (
+            <button type="button" onClick={enhance.undo} className="shrink-0 rounded-full px-2.5 py-1 text-xs text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-2)] hover:text-[var(--color-fg)]" title="Put back what you wrote">
+              Undo
+            </button>
+          )}
+          {!people && !peopleOnly && enhance.task && (
+            <AssistButton
+              label="Enhance prompt"
+              state={enhance.state}
+              onRun={() => void enhance.run()}
+              onStop={enhance.stop}
+              disabled={disabled || sending || (!enhancing && !text.trim())}
+            />
+          )}
           <Button
             variant="primary"
             size="icon"
@@ -737,6 +761,7 @@ export function Composer({
             disabled={
               disabled ||
               sending ||
+              enhancing ||
               attachments.isUploading ||
               (!text.trim() && refs.length === 0 && attachments.files.length === 0)
             }
