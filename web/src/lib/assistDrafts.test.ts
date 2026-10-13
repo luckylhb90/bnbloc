@@ -92,7 +92,7 @@ function comp(p: Partial<ContentComponent> & Pick<ContentComponent, "id" | "name
 // draft-prompt-pack: prompts with unique ids and their variables.
 {
   const patch = promptPackDraftPatch(
-    { displayName: "Release notes", prompts: [{ title: "Notes", prompt: "Write notes for {{version}}" }, { title: "Notes", prompt: "Again" }, { title: "No body" }] },
+    { displayName: "Release notes", prompts: [{ title: "Notes", body: "Write notes for {{version}}" }, { title: "Notes", body: "Again" }, { title: "No body" }] },
     emptyPromptPackForm(),
     true,
   );
@@ -110,7 +110,7 @@ function comp(p: Partial<ContentComponent> & Pick<ContentComponent, "id" | "name
 {
   const form = emptyPromptPackForm();
   form.prompts = [{ id: "weekly", title: "Weekly report", body: "old", slash: "weekly", tags: "report", variables: [], starter: true }];
-  const patch = promptPackDraftPatch({ prompts: [{ title: "weekly report", prompt: "New {{team}}" }, { title: "Retro", prompt: "Run a retro" }] }, form, false);
+  const patch = promptPackDraftPatch({ prompts: [{ title: "weekly report", body: "New {{team}}" }, { title: "Retro", body: "Run a retro" }] }, form, false);
   eq(
     patch.prompts?.map((p) => [p.id, p.slash, p.starter, p.body, p.variables.map((v) => v.name)]),
     [

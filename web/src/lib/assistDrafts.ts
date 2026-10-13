@@ -85,7 +85,7 @@ export function filledPromptPack(f: PromptPackForm): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   if (f.displayName.trim()) out.displayName = f.displayName.trim();
   if (f.description.trim()) out.description = f.description.trim();
-  const prompts = f.prompts.filter((p) => p.title.trim() || p.body.trim()).map((p) => ({ title: p.title.trim(), prompt: p.body.trim() }));
+  const prompts = f.prompts.filter((p) => p.title.trim() || p.body.trim()).map((p) => ({ title: p.title.trim(), body: p.body.trim() }));
   if (prompts.length > 0) out.prompts = prompts;
   return out;
 }
@@ -183,11 +183,11 @@ export function promptPackDraftPatch(fields: Fields, form: PromptPackForm, isNew
   const ids = new Set<string>();
   const kept = new Set<PromptDraft>();
   const prompts: PromptDraft[] = fieldItems(fields, "prompts")
-    .filter((p) => p.prompt)
+    .filter((p) => p.body)
     .slice(0, MaxAssistItems)
     .map((p) => {
       const title = (p.title ?? "").slice(0, MAX_QUICK_TITLE);
-      const body = p.prompt ?? "";
+      const body = p.body ?? "";
       const same = form.prompts.find((d) => !kept.has(d) && d.title.trim() && d.title.trim().toLowerCase() === title.toLowerCase());
       const base = same ?? emptyPromptDraft();
       if (same) kept.add(same);
