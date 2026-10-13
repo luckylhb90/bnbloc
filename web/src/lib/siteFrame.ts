@@ -14,6 +14,15 @@
 // Either way the gateway's response CSP is `sandbox allow-scripts …` (an
 // opaque origin even when opened top-level) and the iframe sandbox below
 // never grants allow-same-origin.
+//
+// An interactive app's SDK (`~app/sdk.js`) calls `~app/…` relative to the
+// site's own URL, so under a member ticket it acts as the member with no
+// token of its own. It asks its parent for a visitor token at load; the
+// member's viewer answers nothing (only a public link's page holds one:
+// lib/appVisitor.ts), and the SDK asks again only when a call is refused
+// for a missing visitor token, which a ticket never is. The desktop's
+// scheme forwards only reads so far
+// (docs/bugs/2026-10-13-desktop-site-frame-drops-app-api.md).
 
 import { schemeUrl, type ConvertFileSrc } from "./schemeUrl.ts";
 /** Desktop URI scheme proxying `/v1/sites/…` to the gateway. */

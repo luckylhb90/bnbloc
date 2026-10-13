@@ -38,6 +38,8 @@ export const StorageKey = {
   handoffBanner: "bnbloc.handoffBanner",
   templateStart: "bnbloc.templateStart",
   workbench: "bnbloc.workbench",
+  // A public link's app visitor token, per share (lib/appVisitor.ts).
+  appVisitor: "bnbloc.appVisitor",
 } as const;
 
 export type StorageKeyName = (typeof StorageKey)[keyof typeof StorageKey];

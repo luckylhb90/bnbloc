@@ -3,6 +3,7 @@ import { apiUrl } from "./config";
 import { errorDetail } from "./session.ts";
 import { tapOnboarding } from "./onboardingEvents.ts";
 import type { CreatedShare, PublicShare, ShareView, SiteTicket, TenantShareView } from "./shares.ts";
+import type { AppVisitorToken } from "./wire.gen.ts";
 import { roomPath } from "./roomId.ts";
 
 // Share-link and site endpoints. Member routes go through the authenticated
@@ -40,8 +41,8 @@ function publicPath(token: string, suffix = ""): string {
   return `/v1/public/shares/${encodeURIComponent(token)}${suffix}`;
 }
 
-async function publicFetch(path: string): Promise<Response> {
-  const res = await fetch(apiUrl(path), { credentials: "omit", cache: "no-store", referrerPolicy: "no-referrer" });
+async function publicFetch(path: string, init: RequestInit = {}): Promise<Response> {
+  const res = await fetch(apiUrl(path), { ...init, credentials: "omit", cache: "no-store", referrerPolicy: "no-referrer" });
   if (!res.ok) throw new ApiError(res.status, await errorDetail(res));
   return res;
 }
@@ -53,4 +54,14 @@ export const publicShareApi = {
   content: async (token: string) => (await publicFetch(publicPath(token, "/content"))).blob(),
   // The Download button's target (attachment; may redirect to storage).
   downloadUrl: (token: string) => apiUrl(publicPath(token, "/content?download=1")),
+  // A visitor token for the link's app (held by lib/appVisitor.ts); prev
+  // renews a still-valid one for the same visitor.
+  visitor: async (token: string, prev?: string) =>
+    (await (
+      await publicFetch(publicPath(token, "/visitor"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(prev ? { token: prev } : {}),
+      })
+    ).json()) as AppVisitorToken,
 };

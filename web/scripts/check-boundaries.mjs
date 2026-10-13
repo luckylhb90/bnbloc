@@ -170,6 +170,16 @@ export const RULES = [
     sample: { file: "views/X.tsx", text: 'document.addEventListener("mousedown", onDoc);' },
   },
   {
+    id: "A1",
+    name: "a public link's app visitor token (handshake, storage, renewal) lives in lib/appVisitor.ts",
+    // The token is a credential of the link's app: one holder decides where
+    // it is kept, when it is renewed and which frame may receive it (only
+    // the page's own app frame). sharesApi.ts only spells the mint route.
+    pattern: /\bAppVisitor(?:Request|Grant|Header|HandshakeVersion)\b|\bStorageKey\.appVisitor\b|["'`]\/visitor["'`]/,
+    allowed: ["lib/appVisitor.ts", "lib/sharesApi.ts", "lib/wire.gen.ts"],
+    sample: { file: "views/X.tsx", text: 'frame.postMessage({ type: AppVisitorGrant, v: 1, token }, "*");' },
+  },
+  {
     id: "B1",
     name: "production sources import only from web/ (the image's web stage builds web/ alone)",
     // The gateway image copies only web/ into its web build stage, so a

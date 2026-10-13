@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { DownloadSimpleIcon, LinkBreakIcon } from "@phosphor-icons/react";
 import { ApiError } from "@/lib/api";
 import { fileCategory, fileTypeLabel, isTextual, type ArtifactFileFacts } from "@/lib/artifactFiles";
@@ -8,18 +8,21 @@ import { publicShareApi } from "@/lib/sharesApi";
 import "@/views/artifact/builtin";
 import { ArtifactBody, resolveViewer, useViewerRegistry } from "@/views/artifact/ArtifactBody";
 import { fileInfoFromFacts } from "@/views/artifact/fileInfo";
-import type { SiteSource, ViewerToolbarItem, ViewerToolbarValue } from "@/views/artifact/registry";
+import type { ViewerToolbarItem, ViewerToolbarValue } from "@/views/artifact/registry";
 import { ViewerToolbar } from "@/views/artifact/toolbar";
 import { categoryIcons } from "@/views/workbench/fileIcons";
+import { SharedApp } from "./SharedApp";
 
 // PublicSharePage is what someone outside the room sees at `#/share/<token>`:
-// no sign-in, no session, nothing of the room — the product name, the file's
-// title, who shared it, when the link expires, a Download button, and the
-// file rendered by the same viewer registry as the workbench (bytes from the
-// public content route; a web app in its sandboxed site frame). It calls
-// only the public share routes (lib/sharesApi publicShareApi). A dead link
-// (unknown, expired, revoked, switched off) is one "no longer available"
-// page: the gateway answers 404 for all of them alike.
+// no sign-in, no session, nothing of the room. A web app (a version the
+// gateway serves as a site: `siteUrl`) is the app itself, full-screen
+// (SharedApp). Any other file gets the file page: the product name, the
+// file's title, who shared it, when the link expires, a Download button, and
+// the file rendered by the same viewer registry as the workbench (bytes from
+// the public content route). It calls only the public share routes
+// (lib/sharesApi publicShareApi). A dead link (unknown, expired, revoked,
+// switched off) is one "no longer available" page: the gateway answers 404
+// for all of them alike.
 
 type Load = { kind: "loading" } | { kind: "gone" } | { kind: "error" } | { kind: "ready"; share: PublicShare };
 
@@ -44,7 +47,10 @@ export function PublicSharePage({ token }: { readonly token: string }) {
     };
   }, [token, attempt]);
 
-  if (load.kind === "ready") return <SharedFile token={token} share={load.share} />;
+  if (load.kind === "ready") {
+    const { share } = load;
+    return share.siteUrl ? <SharedApp token={token} share={{ ...share, siteUrl: share.siteUrl }} /> : <SharedFile token={token} share={share} />;
+  }
   return (
     <Frame>
       <div className="grid flex-1 place-items-center p-6 text-center">
@@ -130,10 +136,10 @@ function SharedFile({ token, share }: { readonly token: string; readonly share: 
   };
   const file = fileInfoFromFacts(facts, share.version.version, share.version.sizeBytes);
   const viewer = resolveViewer(file, undefined, isTextual(facts));
+  // A site the gateway does not serve has no frame and no bytes here: the
+  // file fallback offers the download.
   const runsSite = viewer?.input === "site";
   const { blob, error } = usePublicBytes(token, viewer !== null && !runsSite, file.mimeType);
-  const siteUrl = share.siteUrl;
-  const site = useMemo<SiteSource | null>(() => (siteUrl ? { resolve: async () => ({ siteUrl }) } : null), [siteUrl]);
   const [tools, setTools] = useState<{ items: readonly ViewerToolbarItem[]; emit: (id: string, value: ViewerToolbarValue) => void }>({
     items: [],
     emit: () => {},
@@ -186,7 +192,6 @@ function SharedFile({ token, share }: { readonly token: string; readonly share: 
             artifactId="shared"
             file={file}
             blob={blob}
-            site={runsSite ? site : null}
             viewer={viewer}
             onDownload={() => window.location.assign(download)}
             onToolbar={onToolbar}
