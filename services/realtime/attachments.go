@@ -5,8 +5,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
+	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -20,23 +23,61 @@ import (
 
 const maxAttachmentField = 512
 
-// allowedAttachmentTypes gates uploads to passive images and common documents,
-// mapping each accepted client-declared type to the check its server-sniffed
-// content (http.DetectContentType over the first 512 bytes) must pass. The
-// declared type alone is never trusted: an HTML or script payload declared as
-// image/png or text/plain is refused. Active formats (SVG, HTML, XML) are not
-// accepted at all — served from the app origin they execute script.
-var allowedAttachmentTypes = map[string]func(sniffed string) bool{
-	"image/png":        sniffedAs("image/png"),
-	"image/jpeg":       sniffedAs("image/jpeg"),
-	"image/gif":        sniffedAs("image/gif"),
-	"image/webp":       sniffedAs("image/webp"),
-	"application/pdf":  sniffedAs("application/pdf"),
-	"application/zip":  sniffedAs("application/zip"),
-	"text/plain":       sniffedPlainText,
-	"text/markdown":    sniffedPlainText,
-	"text/csv":         sniffedPlainText,
-	"application/json": sniffedPlainText,
+// attachmentType resolves an upload's type from wire.AttachmentTypes (the
+// one list, which the composer's picker offers too): by the file's
+// extension, else — a name without one — by its declared Content-Type. The
+// declared type never overrides the name, and neither is trusted without
+// attachmentContentMatches.
+func attachmentType(filename, declared string) (wire.AttachmentType, bool) {
+	ext := strings.ToLower(filepath.Ext(filename))
+	for _, t := range wire.AttachmentTypes {
+		if ext != "" && slices.Contains(t.Extensions, ext) {
+			return t, true
+		}
+		if ext == "" && t.MIME == mediaType(declared) {
+			return t, true
+		}
+	}
+	return wire.AttachmentType{}, false
+}
+
+// oleMagic opens an OLE compound file (legacy Office documents).
+var oleMagic = []byte{0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1}
+
+// attachmentContentMatches reports whether an upload's first bytes pass its
+// type's content check (wire.AttachmentContent*). Text must sniff as plain
+// text: HTML or XML markup sniffs as text/html / text/xml and is refused.
+func attachmentContentMatches(content string, head []byte) bool {
+	sniffed := mediaType(http.DetectContentType(head))
+	switch content {
+	case wire.AttachmentContentPNG:
+		return sniffed == "image/png"
+	case wire.AttachmentContentJPEG:
+		return sniffed == "image/jpeg"
+	case wire.AttachmentContentGIF:
+		return sniffed == "image/gif"
+	case wire.AttachmentContentWebP:
+		return sniffed == "image/webp"
+	case wire.AttachmentContentPDF:
+		return sniffed == "application/pdf"
+	case wire.AttachmentContentZip:
+		return bytes.HasPrefix(head, []byte("PK\x03\x04")) || bytes.HasPrefix(head, []byte("PK\x05\x06"))
+	case wire.AttachmentContentOLE:
+		return bytes.HasPrefix(head, oleMagic)
+	case wire.AttachmentContentText:
+		return sniffed == "text/plain"
+	case wire.AttachmentContentISOMedia:
+		return len(head) >= 12 && string(head[4:8]) == "ftyp"
+	case wire.AttachmentContentWebM:
+		return bytes.HasPrefix(head, []byte{0x1A, 0x45, 0xDF, 0xA3})
+	case wire.AttachmentContentMP3:
+		return bytes.HasPrefix(head, []byte("ID3")) || (len(head) >= 2 && head[0] == 0xFF && head[1]&0xE0 == 0xE0)
+	case wire.AttachmentContentWAV:
+		return len(head) >= 12 && string(head[:4]) == "RIFF" && string(head[8:12]) == "WAVE"
+	case wire.AttachmentContentOgg:
+		return bytes.HasPrefix(head, []byte("OggS"))
+	}
+	return false
 }
 
 // inlineAttachmentTypes are the only types served inline (rendered by the
@@ -52,14 +93,6 @@ var inlineAttachmentTypes = map[string]bool{
 // attachmentCSP sandboxes any attachment response that a browser does render,
 // so even a mis-typed file cannot run script with the app origin's privileges.
 const attachmentCSP = "default-src 'none'; sandbox"
-
-func sniffedAs(want string) func(string) bool {
-	return func(sniffed string) bool { return mediaType(sniffed) == want }
-}
-
-// sniffedPlainText accepts content the sniffer classifies as plain text; HTML
-// or XML markup sniffs as text/html / text/xml and is refused.
-func sniffedPlainText(sniffed string) bool { return mediaType(sniffed) == "text/plain" }
 
 // AttachmentStore is the metadata port the realtime service needs (the store
 // package's concrete impl satisfies it).
@@ -106,12 +139,12 @@ func (s *Service) handleUploadAttachment(w http.ResponseWriter, r *http.Request)
 	}
 	defer file.Close()
 	filename := sanitizeFilename(header.Filename)
-	contentType := mediaType(header.Header.Get("Content-Type"))
-	check, ok := allowedAttachmentTypes[contentType]
+	kind, ok := attachmentType(filename, header.Header.Get("Content-Type"))
 	if !ok {
-		httpx.Error(w, "unsupported content type", http.StatusUnsupportedMediaType)
+		httpx.Error(w, fmt.Sprintf("%s can't be attached: images, PDF, Office and OpenDocument files, text, audio, video and zip can", filename), http.StatusUnsupportedMediaType)
 		return
 	}
+	contentType := kind.MIME
 	head := make([]byte, 512)
 	n, err := io.ReadFull(file, head)
 	if err != nil && !errors.Is(err, io.ErrUnexpectedEOF) && !errors.Is(err, io.EOF) {
@@ -119,8 +152,8 @@ func (s *Service) handleUploadAttachment(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	head = head[:n]
-	if !check(http.DetectContentType(head)) {
-		httpx.Error(w, "attachment content does not match its declared type", http.StatusUnsupportedMediaType)
+	if !attachmentContentMatches(kind.Content, head) {
+		httpx.Error(w, fmt.Sprintf("%s can't be attached: its content is not a %s file", filename, kind.Extensions[0]), http.StatusUnsupportedMediaType)
 		return
 	}
 	body := io.MultiReader(bytes.NewReader(head), file)

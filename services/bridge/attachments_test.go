@@ -113,3 +113,20 @@ func attachmentNotices(g *pullGateway) []string {
 	}
 	return out
 }
+
+// An attachment is written with its type's extension, keeping the name's
+// when it is one of the type's.
+func TestExtForContentType(t *testing.T) {
+	for _, c := range []struct{ ct, name, want string }{
+		{"image/png", "image", ".png"},
+		{"image/jpeg", "photo.JPEG", ".jpeg"},
+		{"application/vnd.openxmlformats-officedocument.presentationml.template", "Brand.potx", ".potx"},
+		{"application/vnd.openxmlformats-officedocument.presentationml.presentation", "deck", ".pptx"},
+		{"application/x-unknown", "data.bin", ".bin"},
+		{"application/x-unknown", "noext", ""},
+	} {
+		if got := extForContentType(c.ct, c.name); got != c.want {
+			t.Errorf("extForContentType(%q, %q) = %q, want %q", c.ct, c.name, got, c.want)
+		}
+	}
+}

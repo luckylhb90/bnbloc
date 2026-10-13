@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
+	"slices"
 	"strings"
 
 	corepkg "github.com/luckylhb90/bnbloc/core"
@@ -127,27 +128,27 @@ func (b *Bridge) attachmentMeta(ctx context.Context, room, id string) wire.ChatA
 	return meta
 }
 
-// extForContentType maps an attachment's content-type (validated against the
-// upload allow-list, so authoritative) to a file extension, falling back to the
-// original filename's extension, else "". The extension lets the agent's tools
-// recognize the file (an image tool needs .png/.jpg, not an opaque blob).
+// extForContentType is the extension an attachment is written with, so the
+// agent's tools recognize the file (an image tool needs .png, a deck .pptx):
+// its type's (wire.AttachmentTypes, which the upload held it to) — the
+// original name's when that is one of them (.potx stays .potx) — else the
+// original name's, else "".
 func extForContentType(contentType, filename string) string {
-	switch strings.ToLower(strings.TrimSpace(contentType)) {
-	case "image/png":
-		return ".png"
-	case "image/jpeg", "image/jpg":
-		return ".jpg"
-	case "image/gif":
-		return ".gif"
-	case "image/webp":
-		return ".webp"
-	case "application/pdf":
-		return ".pdf"
-	}
+	ext := ""
 	if dot := strings.LastIndexByte(filename, '.'); dot >= 0 && dot+1 < len(filename) {
-		return filename[dot:]
+		ext = filename[dot:]
 	}
-	return ""
+	ct := strings.ToLower(strings.TrimSpace(contentType))
+	for _, t := range wire.AttachmentTypes {
+		if t.MIME != ct {
+			continue
+		}
+		if slices.Contains(t.Extensions, strings.ToLower(ext)) {
+			return strings.ToLower(ext)
+		}
+		return t.Extensions[0]
+	}
+	return ext
 }
 
 // roomRecordFiles are the .room/ records of a pass besides the history

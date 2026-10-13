@@ -1,30 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, ApiError, type ChatAttachment } from "@/lib/api";
 import { formatBytes } from "@/lib/format";
-import { MaxAttachmentBytes } from "@/lib/wire.gen";
+import { AttachmentTypes, MaxAttachmentBytes } from "@/lib/wire.gen";
 import { useToast } from "@/ui/Toast";
 import type { AttachmentChipItem, AttachmentChipStatus } from "@/views/AttachmentChips";
 import { errorText } from "@/lib/errors";
 
-// Raster images only: SVG (active content) is refused by the gateway (415).
-export const ATTACHMENT_ACCEPT = [
-  "image/png",
-  "image/jpeg",
-  "image/gif",
-  "image/webp",
-  "application/pdf",
-  "text/plain",
-  "text/markdown",
-  "application/zip",
-  "application/json",
-  ".csv",
-  ".doc",
-  ".docx",
-  ".xls",
-  ".xlsx",
-  ".ppt",
-  ".pptx",
-].join(",");
+// The files the picker offers: wire.AttachmentTypes, the list the upload
+// holds every file to (by extension, then by content).
+export const ATTACHMENT_ACCEPT = AttachmentTypes.flatMap((t) => [t.mime, ...t.extensions]).join(",");
 
 // A pending attachment: a file the member picked (uploaded on send), or one
 // already stored in the room that a draft brought along (a "Make similar"
@@ -126,9 +110,10 @@ export function useComposerAttachments(roomId: string) {
         );
       } catch (e) {
         const status = e instanceof ApiError ? e.status : 0;
+        // A refused type: the server's reason names the file and why.
         const message =
           status === 415
-            ? "This file type can't be attached"
+            ? errorText(e, `${file.name} can't be attached`)
             : status === 413
               ? `${file.name} is larger than ${formatBytes(MaxAttachmentBytes)}`
               : errorText(e, `Upload failed for ${file.name}`);
@@ -137,11 +122,7 @@ export function useComposerAttachments(roomId: string) {
             file.id === pending.id ? { ...file, status: "error", error: message } : file,
           ),
         );
-        toast.error(
-          status === 415
-            ? `${file.name} can't be attached: SVG files and files whose content doesn't match their type are not allowed`
-            : message,
-        );
+        toast.error(message);
         return null;
       }
     }

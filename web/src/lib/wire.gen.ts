@@ -632,6 +632,41 @@ export interface AssistModelTest {
   usage: AssistUsage;
 }
 
+// ---- wire/attachment_types.go ----
+
+// Content checks of an attachment type (AttachmentType.Content): what its
+// first bytes must look like.
+export const AttachmentContentPNG = "png";
+export const AttachmentContentJPEG = "jpeg";
+export const AttachmentContentGIF = "gif";
+export const AttachmentContentWebP = "webp";
+export const AttachmentContentPDF = "pdf";
+// AttachmentContentZip: a zip archive (zip, and the Office Open XML and
+// OpenDocument formats, which are zip archives).
+export const AttachmentContentZip = "zip";
+// AttachmentContentOLE: an OLE compound file (legacy .doc, .xls, .ppt).
+export const AttachmentContentOLE = "ole";
+// AttachmentContentText: plain text (never HTML or XML).
+export const AttachmentContentText = "text";
+// AttachmentContentISOMedia: an ISO base media file (mp4, mov, m4a).
+export const AttachmentContentISOMedia = "isomedia";
+export const AttachmentContentWebM = "webm";
+export const AttachmentContentMP3 = "mp3";
+export const AttachmentContentWAV = "wav";
+export const AttachmentContentOgg = "ogg";
+
+// AttachmentType is one kind of file a chat attachment may be: its canonical
+// media type (what the attachment is stored and served as), the extensions
+// that name it (lower case, with the dot) and its content check.
+export interface AttachmentType {
+  mime: string;
+  extensions: string[];
+  content: AttachmentContent;
+}
+
+// AttachmentTypes are the files a chat attachment may be.
+export const AttachmentTypes: readonly AttachmentType[] = [{ mime: "image/png", extensions: [".png"], content: "png" }, { mime: "image/jpeg", extensions: [".jpg", ".jpeg"], content: "jpeg" }, { mime: "image/gif", extensions: [".gif"], content: "gif" }, { mime: "image/webp", extensions: [".webp"], content: "webp" }, { mime: "application/pdf", extensions: [".pdf"], content: "pdf" }, { mime: "application/zip", extensions: [".zip"], content: "zip" }, { mime: "application/vnd.openxmlformats-officedocument.wordprocessingml.document", extensions: [".docx"], content: "zip" }, { mime: "application/vnd.openxmlformats-officedocument.wordprocessingml.template", extensions: [".dotx"], content: "zip" }, { mime: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", extensions: [".xlsx"], content: "zip" }, { mime: "application/vnd.openxmlformats-officedocument.spreadsheetml.template", extensions: [".xltx"], content: "zip" }, { mime: "application/vnd.openxmlformats-officedocument.presentationml.presentation", extensions: [".pptx"], content: "zip" }, { mime: "application/vnd.openxmlformats-officedocument.presentationml.template", extensions: [".potx"], content: "zip" }, { mime: "application/vnd.openxmlformats-officedocument.presentationml.slideshow", extensions: [".ppsx"], content: "zip" }, { mime: "application/vnd.oasis.opendocument.text", extensions: [".odt"], content: "zip" }, { mime: "application/vnd.oasis.opendocument.spreadsheet", extensions: [".ods"], content: "zip" }, { mime: "application/vnd.oasis.opendocument.presentation", extensions: [".odp"], content: "zip" }, { mime: "application/msword", extensions: [".doc"], content: "ole" }, { mime: "application/vnd.ms-excel", extensions: [".xls"], content: "ole" }, { mime: "application/vnd.ms-powerpoint", extensions: [".ppt", ".pot", ".pps"], content: "ole" }, { mime: "text/plain", extensions: [".txt", ".log"], content: "text" }, { mime: "text/markdown", extensions: [".md", ".markdown"], content: "text" }, { mime: "text/csv", extensions: [".csv"], content: "text" }, { mime: "text/tab-separated-values", extensions: [".tsv"], content: "text" }, { mime: "application/json", extensions: [".json"], content: "text" }, { mime: "application/yaml", extensions: [".yaml", ".yml"], content: "text" }, { mime: "video/mp4", extensions: [".mp4", ".m4v"], content: "isomedia" }, { mime: "video/quicktime", extensions: [".mov"], content: "isomedia" }, { mime: "video/webm", extensions: [".webm"], content: "webm" }, { mime: "audio/mpeg", extensions: [".mp3"], content: "mp3" }, { mime: "audio/mp4", extensions: [".m4a"], content: "isomedia" }, { mime: "audio/wav", extensions: [".wav"], content: "wav" }, { mime: "audio/ogg", extensions: [".ogg", ".oga"], content: "ogg" }];
+
 // ---- wire/audit_log.go ----
 
 // TruncatedHeader names the response header an audit CSV export sets to
@@ -4229,6 +4264,8 @@ export type AssistContext = "room" | "artifact" | "attachments" | "library" | "c
 export const AssistContextValues: readonly AssistContext[] = ["room", "artifact", "attachments", "library", "clock"];
 export type AssistFieldType = "text" | "list" | "items";
 export const AssistFieldTypeValues: readonly AssistFieldType[] = ["text", "list", "items"];
+export type AttachmentContent = "png" | "jpeg" | "gif" | "webp" | "pdf" | "zip" | "ole" | "text" | "isomedia" | "webm" | "mp3" | "wav" | "ogg";
+export const AttachmentContentValues: readonly AttachmentContent[] = ["png", "jpeg", "gif", "webp", "pdf", "zip", "ole", "text", "isomedia", "webm", "mp3", "wav", "ogg"];
 export type ContentUseScope = "member" | "room" | "room-expert";
 export const ContentUseScopeValues: readonly ContentUseScope[] = ["member", "room", "room-expert"];
 export type ContentSavedAction = "saved" | "submitted" | "published";

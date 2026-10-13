@@ -114,6 +114,54 @@ func TestUploadRejectsActiveAndMismatchedContent(t *testing.T) {
 	}
 }
 
+// Office, OpenDocument, audio and video files are attached by their
+// extension and stored as their canonical type once their first bytes match
+// it (the type the browser declared does not decide it), so a PowerPoint
+// template a browser declares as application/zip, or one it declares
+// nothing for, goes through; a file whose content is not its type does not.
+func TestUploadAcceptsWorkFilesByExtension(t *testing.T) {
+	srv, _ := newAttachmentServer(t)
+	zip := []byte("PK\x03\x04\x14\x00\x06\x00\x08\x00[Content_Types].xml")
+	ole := []byte("\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1\x00\x00")
+	mp4 := []byte("\x00\x00\x00\x18ftypmp42\x00\x00\x00\x00mp42isom")
+	ok := []struct {
+		name, declared, want string
+		body                 []byte
+	}{
+		{"Slides Template 4.1.pptx", "application/zip", "application/vnd.openxmlformats-officedocument.presentationml.presentation", zip},
+		{"brand.potx", "", "application/vnd.openxmlformats-officedocument.presentationml.template", zip},
+		{"plan.XLSX", "application/octet-stream", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", zip},
+		{"old.ppt", "application/vnd.ms-powerpoint", "application/vnd.ms-powerpoint", ole},
+		{"demo.mov", "video/quicktime", "video/quicktime", mp4},
+		{"notes.md", "", "text/markdown", []byte("# Notes\n- one\n")},
+		{"image", "image/png", "image/png", pngBytes},
+	}
+	for _, c := range ok {
+		resp := uploadAttachment(t, srv, c.name, c.declared, c.body)
+		var meta struct {
+			ContentType string `json:"contentType"`
+		}
+		_ = json.NewDecoder(resp.Body).Decode(&meta)
+		if resp.StatusCode != http.StatusOK || meta.ContentType != c.want {
+			t.Errorf("%s (declared %q): status %d type %q, want 200 %q", c.name, c.declared, resp.StatusCode, meta.ContentType, c.want)
+		}
+	}
+	refused := []struct {
+		name, declared string
+		body           []byte
+	}{
+		{"deck.pptx", "application/vnd.openxmlformats-officedocument.presentationml.presentation", []byte("<html><script>x</script></html>")},
+		{"old.doc", "application/msword", zip},
+		{"tool.exe", "application/octet-stream", []byte("MZ\x90\x00")},
+		{"page", "text/html", []byte("<html></html>")},
+	}
+	for _, c := range refused {
+		if resp := uploadAttachment(t, srv, c.name, c.declared, c.body); resp.StatusCode != http.StatusUnsupportedMediaType {
+			t.Errorf("%s (declared %q): status %d, want 415", c.name, c.declared, resp.StatusCode)
+		}
+	}
+}
+
 func download(t *testing.T, srv *httptest.Server, id string) *http.Response {
 	t.Helper()
 	req, _ := http.NewRequest(http.MethodGet, srv.URL+"/v1/rooms/room-1/attachments/"+id, nil)
