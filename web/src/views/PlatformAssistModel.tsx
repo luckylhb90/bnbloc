@@ -5,7 +5,7 @@ import { relativeTime } from "@/lib/format";
 import { Button } from "@/ui/Button";
 import { Badge, Card } from "@/ui/Card";
 import { ErrorBox } from "@/ui/ErrorBox";
-import { Field, Input } from "@/ui/Input";
+import { Field, Input, Textarea } from "@/ui/Input";
 import { useToast } from "@/ui/Toast";
 
 // PlatformAssistModel is the platform console's "AI assist" card
@@ -21,6 +21,8 @@ export function PlatformAssistModel() {
   const [saved, setSaved] = useState<AssistModelConfig | null>(null);
   const [baseUrl, setBaseUrl] = useState("");
   const [model, setModel] = useState("");
+  // The hosts an organization's own model may use (one per line or comma).
+  const [orgHosts, setOrgHosts] = useState("");
   // The key being typed: "" keeps the stored one.
   const [apiKey, setApiKey] = useState("");
   const [replacing, setReplacing] = useState(false);
@@ -33,6 +35,7 @@ export function PlatformAssistModel() {
     setSaved(c);
     setBaseUrl(c.baseUrl);
     setModel(c.model);
+    setOrgHosts((c.orgHosts ?? []).join(", "));
     setApiKey("");
     setReplacing(false);
   };
@@ -55,7 +58,15 @@ export function PlatformAssistModel() {
     setError(null);
     setTest(null);
     try {
-      adopt(await assistModelApi.put({ baseUrl: baseUrl.trim(), model: model.trim(), ...(apiKey.trim() ? { apiKey: apiKey.trim() } : {}), ...(clearKey ? { clearKey: true } : {}) }));
+      adopt(
+        await assistModelApi.put({
+          baseUrl: baseUrl.trim(),
+          model: model.trim(),
+          orgHosts: hostList(orgHosts),
+          ...(apiKey.trim() ? { apiKey: apiKey.trim() } : {}),
+          ...(clearKey ? { clearKey: true } : {}),
+        }),
+      );
       toast.success(clearKey ? "The API key is cleared" : baseUrl.trim() ? "The assist model is saved" : "AI assist is off");
     } catch (e) {
       setError(errorText(e, "Could not save the assist model"));
@@ -79,7 +90,8 @@ export function PlatformAssistModel() {
   if (!saved) {
     return error ? <ErrorBox>{error}</ErrorBox> : <p className="text-sm text-[var(--color-fg-muted)]">Loading the assist model…</p>;
   }
-  const dirty = baseUrl.trim() !== saved.baseUrl || model.trim() !== saved.model || !!apiKey.trim();
+  const dirty =
+    baseUrl.trim() !== saved.baseUrl || model.trim() !== saved.model || !!apiKey.trim() || hostList(orgHosts).join(",") !== (saved.orgHosts ?? []).join(",");
   const on = !!saved.baseUrl && !!saved.model;
   return (
     <section className="flex flex-col gap-4">
@@ -121,6 +133,9 @@ export function PlatformAssistModel() {
                 <Input type="password" autoComplete="off" value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder={saved.keySet ? "A new key" : "sk-…"} />
               )}
             </Field>
+            <Field label="Organization hosts" hint="Hosts an organization may use for its own model (comma or one per line). None: organizations use this model.">
+              <Textarea rows={2} value={orgHosts} onChange={(e) => setOrgHosts(e.target.value)} placeholder="llm.example.com" />
+            </Field>
             {saved.updatedBy && (
               <p className="self-end text-xs text-[var(--color-fg-subtle)]">
                 Last changed by {saved.updatedBy}
@@ -159,4 +174,9 @@ export function PlatformAssistModel() {
       </Card>
     </section>
   );
+}
+
+// hostList reads the organization hosts field: lower-cased, de-duplicated.
+function hostList(s: string): string[] {
+  return [...new Set(s.split(/[,\s]+/).map((h) => h.trim().toLowerCase()).filter(Boolean))];
 }

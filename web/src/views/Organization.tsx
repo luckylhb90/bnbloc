@@ -21,6 +21,7 @@ import { invalidateAssistStatus } from "@/lib/assist";
 import { ErrorBox } from "@/ui/ErrorBox";
 import { Switch } from "@/ui/Segment";
 import { RequestsTab } from "@/views/org/RequestsTab";
+import { OrgAssistModel } from "@/views/org/OrgAssistModel";
 import { TenantsTab } from "@/views/org/TenantsTab";
 import { OrgSyncTab } from "@/views/org/OrgSyncTab";
 import { DeploymentCard } from "@/views/org/DeploymentCard";
@@ -709,6 +710,7 @@ function SettingsTab() {
           publishing) when the platform has an assist model. What they typed, and the room or deliverable it refers
           to, is sent to that model. Off: the assist buttons are hidden for this organization.
         </p>
+        {!(settings?.assistDisabled ?? false) && <OrgAssistModel />}
       </div>
       <TenantRetentionSection />
     </section>
