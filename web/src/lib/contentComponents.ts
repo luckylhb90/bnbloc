@@ -10,6 +10,7 @@ import type { ChatExpert, ContentComponent, ContentQuickPrompt, ContentRequires,
 
 export type { ContentKind } from "./wire.gen.ts";
 import type { ContentKind } from "./wire.gen.ts";
+import { ContentTagPattern, MaxContentTagRunes } from "./wire.gen.ts";
 
 // The built-in builder expert (shipped with the release, read-only, listed
 // for every member with scope "builtin"): it interviews the member, drafts
@@ -213,6 +214,21 @@ export function usageLine(c: Pick<ContentComponent, "kind" | "runs" | "members">
   return parts.join(" · ");
 }
 
+// TAG is the server's one tag rule (wire.ContentTagPattern): lower-case
+// letters of any script, digits, spaces, '_' and '-'.
+const TAG = new RegExp(ContentTagPattern, "u");
+
+// tagProblem is the first tag the server would refuse, worded for the form
+// (every content form checks tags through it).
+export function tagProblem(tags: readonly string[]): string | null {
+  for (const t of cleanTags(tags)) {
+    if (!TAG.test(t) || [...t].length > MaxContentTagRunes) {
+      return `The tag "${t}" uses lower-case letters (any language), digits, spaces, "_" and "-" (at most ${MaxContentTagRunes} characters)`;
+    }
+  }
+  return null;
+}
+
 // formProblem is the first thing the form must fix before saving (the
 // server validates everything; this only catches the obvious early).
 export function formProblem(f: ContentForm): string | null {
@@ -220,9 +236,8 @@ export function formProblem(f: ContentForm): string | null {
   if (!name) return "Give it a name";
   if (!/^[a-z0-9][a-z0-9-]{0,62}$/.test(name)) return "The name uses lower-case letters, digits and hyphens";
   if (f.kind === "expert" && !f.instructions.trim()) return "An expert needs instructions";
-  for (const t of cleanTags(f.tags ?? [])) {
-    if (!/^[a-z0-9][a-z0-9 _-]*$/.test(t) || t.length > 32) return `The tag "${t}" uses lower-case letters, digits, spaces, "_" and "-" (at most 32)`;
-  }
+  const tag = tagProblem(f.tags ?? []);
+  if (tag) return tag;
   for (const r of [...(f.requires?.skills ?? []), ...(f.requires?.prompts ?? [])]) {
     if (!/^[a-z0-9][a-z0-9-]{0,62}(@\S+)?$/.test(r.trim())) return `The requirement "${r}" reads name or name@range`;
   }

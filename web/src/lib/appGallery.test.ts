@@ -146,6 +146,8 @@ assert(!coverRefused(new TypeError("Failed to fetch")), "offline is not");
   eq([publishAppProblem(form), publishAppProblem({ ...form, name: "" }), publishAppProblem({ ...form, name: "Bad Name" })], [null, "Give it a name", "The name uses lower-case letters, digits and hyphens"], "name problems");
   assert(publishAppProblem({ ...form, componentId: "cc_9", name: "" }) === null, "a new version needs no name");
   assert(publishAppProblem({ ...form, tags: "ok, Bad!" })?.includes("bad!") ?? false, "a bad tag");
+  eq(publishAppProblem({ ...form, tags: "评审, 优先级 规划, q3-planning" }), null, "tags in any script (wire.ContentTagPattern)");
+  assert(publishAppProblem({ ...form, tags: "评".repeat(33) }) !== null, "a tag over MaxContentTagRunes characters");
   eq([appNameFrom(" Team 2026 — Sign-up "), appNameFrom("***")], ["team-2026-sign-up", ""], "names from titles");
 }
 

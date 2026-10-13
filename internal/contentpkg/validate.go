@@ -164,13 +164,8 @@ func validateEnvelope(m Manifest, opts Options) error {
 	if m.Category != "" && (!ValidName(m.Category) || len(m.Category) > maxCategory) {
 		return fmt.Errorf("category %q: use lower-case letters, digits and hyphens", m.Category)
 	}
-	if len(m.Tags) > maxTags {
-		return fmt.Errorf("at most %d tags", maxTags)
-	}
-	for _, t := range m.Tags {
-		if len(t) > maxTag || !tagRE.MatchString(t) {
-			return fmt.Errorf("tag %q: use lower-case letters, digits, spaces, '_' and '-'", t)
-		}
+	if err := checkTags(m.Tags); err != nil {
+		return err
 	}
 	if err := checkText("icon", m.Icon, maxIcon, true); err != nil {
 		return err
@@ -380,4 +375,18 @@ func (p *Package) ProfileSkills() []core.ProfileSkill {
 		out = append(out, ps)
 	}
 	return out
+}
+
+// checkTags applies the one tag rule (wire.ContentTagPattern, at most
+// maxTags tags of at most maxTag characters).
+func checkTags(tags []string) error {
+	if len(tags) > maxTags {
+		return fmt.Errorf("at most %d tags", maxTags)
+	}
+	for _, t := range tags {
+		if utf8.RuneCountInString(t) > maxTag || !tagRE.MatchString(t) {
+			return fmt.Errorf("tag %q: use lower-case letters (any script), digits, spaces, '_' and '-', at most %d characters", t, maxTag)
+		}
+	}
+	return nil
 }

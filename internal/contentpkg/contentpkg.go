@@ -20,6 +20,7 @@ import (
 
 	"github.com/luckylhb90/bnbloc/core/pkgmeta"
 	"github.com/luckylhb90/bnbloc/internal/tarbundle"
+	"github.com/luckylhb90/bnbloc/internal/wire"
 )
 
 // Content kinds.
@@ -51,7 +52,7 @@ const (
 	maxDescription  = 1000
 	maxCategory     = 40
 	maxTags         = 12
-	maxTag          = 32
+	maxTag          = wire.MaxContentTagRunes
 	maxIcon         = 64
 	maxRequires     = 32
 	maxInstructions = 64 << 10
@@ -65,7 +66,7 @@ const (
 
 var (
 	nameRE = regexp.MustCompile(fmt.Sprintf(`^[a-z0-9][a-z0-9-]{0,%d}$`, maxName-1))
-	tagRE  = regexp.MustCompile(`^[a-z0-9][a-z0-9 _-]*$`)
+	tagRE  = regexp.MustCompile(wire.ContentTagPattern)
 	hostRE = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*(:[0-9]{1,5})?$`)
 )
 

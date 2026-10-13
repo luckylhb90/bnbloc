@@ -372,3 +372,25 @@ func TestReferencesAndLookup(t *testing.T) {
 		t.Fatalf("kinds = %+v", Kinds())
 	}
 }
+
+// Tags follow wire.ContentTagPattern: lower-case letters of any script
+// (CJK included), digits, spaces, '_' and '-', at most MaxContentTagRunes
+// characters.
+func TestTagsAcceptAnyScriptLowerCase(t *testing.T) {
+	for tag, ok := range map[string]bool{
+		"review":                true,
+		"评审":                    true,
+		"优先级 规划":                true,
+		"q3-planning":           true,
+		"Review":                false,
+		"-lead":                 false,
+		"emoji🙂":                false,
+		strings.Repeat("评", 32): true,
+		strings.Repeat("评", 33): false,
+	} {
+		err := checkTags([]string{tag})
+		if (err == nil) != ok {
+			t.Errorf("tag %q: err=%v, want ok=%v", tag, err, ok)
+		}
+	}
+}

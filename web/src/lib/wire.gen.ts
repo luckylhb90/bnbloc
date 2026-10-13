@@ -2015,6 +2015,14 @@ export const MaxArtifactStateBytes = 16384;
 // characters after trimming (Unicode code points, which is also how
 // MySQL sizes the VARCHAR(40) column).
 export const MaxDisplayNameRunes = 40;
+// MaxContentTagRunes bounds one content component tag, in characters.
+export const MaxContentTagRunes = 32;
+
+// ContentTagPattern is the one rule for a content component tag: lower-case
+// letters of any script (CJK and other caseless letters included), digits,
+// spaces, '_' and '-', starting with a letter or digit. It is valid both as
+// Go RE2 and as a JavaScript regular expression with the "u" flag.
+export const ContentTagPattern = "^[\\p{Ll}\\p{Lo}\\p{Nd}][\\p{Ll}\\p{Lo}\\p{Nd} _-]*$";
 
 // The safety caps of an interactive app's data (docs/prd/2026-10-12-
 // interactive-apps.md §4.5): cost and abuse bounds, not product rules. The

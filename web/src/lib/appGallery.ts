@@ -9,7 +9,7 @@
 
 export type { AppCategory, AppDemo, AppPublishRequest, AppUseReply, AppUseRequest } from "./wire.gen.ts";
 import { AppCategoryValues, type AppCategory, type AppPublishRequest, type AppUseRequest, type RoomSummary } from "./wire.gen.ts";
-import { cleanTags, contentLabel, splitList, type ContentComponent } from "./contentComponents.ts";
+import { cleanTags, contentLabel, splitList, tagProblem, type ContentComponent } from "./contentComponents.ts";
 import { ApiError, errorText } from "./errors.ts";
 import { mayChat } from "./roomRoles.ts";
 
@@ -133,10 +133,7 @@ export function publishAppProblem(f: PublishAppForm): string | null {
     if (!name) return "Give it a name";
     if (!NAME.test(name)) return "The name uses lower-case letters, digits and hyphens";
   }
-  for (const t of cleanTags(splitList(f.tags))) {
-    if (!/^[a-z0-9][a-z0-9 _-]*$/.test(t) || t.length > 32) return `The tag "${t}" uses lower-case letters, digits, spaces, "_" and "-" (at most 32)`;
-  }
-  return null;
+  return tagProblem(splitList(f.tags));
 }
 
 /** publishAppRequest is the body of POST …/publish-app: the trimmed form,
