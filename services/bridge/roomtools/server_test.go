@@ -224,6 +224,12 @@ func TestModernProtocol(t *testing.T) {
 	if vs, _ := d.Result["supportedVersions"].([]any); len(vs) == 0 || vs[0] != ModernVersion {
 		t.Fatalf("supportedVersions = %v", d.Result["supportedVersions"])
 	}
+	// A modern list result carries its cache hints (a client refuses one
+	// without them), scoped to this session.
+	list := post(t, srv, token, rpc(5, "tools/list", map[string]any{"_meta": modernMeta(ModernVersion)}), hdr("tools/list", ""))
+	if tools, _ := list.Result["tools"].([]any); list.status != 200 || len(tools) == 0 || list.Result["cacheScope"] != "private" || list.Result["ttlMs"] != float64(toolsListTTL.Milliseconds()) {
+		t.Fatalf("modern tools/list = %d %s", list.status, list.body)
+	}
 	call := post(t, srv, token, rpc(2, "tools/call", map[string]any{"name": "list_room_agents", "arguments": map[string]any{}, "_meta": modernMeta(ModernVersion)}), hdr("tools/call", "list_room_agents"))
 	if text, isErr := toolText(t, call); isErr || call.Result["resultType"] != "complete" || !strings.Contains(text, "bob/claude") {
 		t.Fatalf("modern call = %s", call.body)

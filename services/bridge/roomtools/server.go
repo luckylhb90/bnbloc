@@ -386,7 +386,14 @@ func (c *call) dispatch(ctx context.Context) (any, *rpcError) {
 	case "ping":
 		return c.complete(map[string]any{}), nil
 	case "tools/list":
-		return c.complete(map[string]any{"tools": c.srv.tools.Descriptors()}), nil
+		result := map[string]any{"tools": c.srv.tools.Descriptors()}
+		if c.modern {
+			// A 2026-07-28 list result is cacheable (SEP-2549) and a client
+			// refuses one without its hints: the tools are this session's
+			// (its bearer), so never cached for anyone else.
+			result["ttlMs"], result["cacheScope"] = toolsListTTL.Milliseconds(), "private"
+		}
+		return c.complete(result), nil
 	case "tools/call":
 		var p struct {
 			Name      string          `json:"name"`
@@ -411,6 +418,10 @@ func (c *call) dispatch(ctx context.Context) (any, *rpcError) {
 		return nil, &rpcError{Code: codeMethodNotFound, Message: "method not found: " + c.req.Method}
 	}
 }
+
+// toolsListTTL is how long a modern client may keep the tool list: the
+// tools never change during a session (listChanged false).
+const toolsListTTL = 5 * time.Minute
 
 // complete stamps a modern result's resultType.
 func (c *call) complete(result map[string]any) map[string]any {
