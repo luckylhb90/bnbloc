@@ -43,6 +43,12 @@ stage_go() {
   log "web/src/lib/wire.gen.ts generated from internal/wire (go generate ./internal/wire)"
   go run ./internal/wire/cmd/wiregen -check
   ensure_webui_placeholder
+  log "gofmt"
+  unformatted="$(gofmt -l $(git ls-files '*.go'))"
+  if [ -n "$unformatted" ]; then
+    printf 'gofmt needed:\n%s\n' "$unformatted" >&2
+    return 1
+  fi
   log "go vet ./..."
   go vet ./...
   log "go test ./...${BNBLOC_TEST_MYSQL_DSN:+ (with MySQL integration tests)}"

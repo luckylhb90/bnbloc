@@ -69,4 +69,3 @@ func Limits() []Limit {
 		{prompt, "package size", PromptLimits.MaxBytes, UnitBytes},
 	}
 }
-
