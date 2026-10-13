@@ -7,6 +7,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -164,5 +166,32 @@ func TestReadArtifactCapsItsSize(t *testing.T) {
 	content, _ := out["content"].(string)
 	if out["truncated"] != true || len(content) > maxArtifactText+512 {
 		t.Fatalf("read %d bytes of content (truncated=%v), want at most %d", len(content), out["truncated"], maxArtifactText)
+	}
+}
+
+// The room tools never open a site ticket or a site URL: a site may be
+// served from the sites origin, which never sees a session, so an agent
+// reads a site's files only through the main origin's site file read
+// (…/versions/{v}/files/{path}; services/gateway site_file_read_test.go
+// reads one with a sites origin set).
+func TestRoomToolsNeverOpenSiteTickets(t *testing.T) {
+	files, err := filepath.Glob("*.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	forbidden := []string{"site-ticket", "/v1/sites/", "siteUrl", "/site/"}
+	for _, f := range files {
+		if strings.HasSuffix(f, "_test.go") {
+			continue
+		}
+		raw, err := os.ReadFile(f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, s := range forbidden {
+			if bytes.Contains(raw, []byte(s)) {
+				t.Errorf("%s names %q: room tools read a site through …/versions/{v}/files/{path}, never a site ticket or URL", f, s)
+			}
+		}
 	}
 }

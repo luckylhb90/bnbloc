@@ -98,19 +98,16 @@ func parseSiteTicketScope(id string) (roomID, artifactID string, version int, ok
 // member (the edge room scope, then the room service's own read check while
 // the version is fetched) and the version a site snapshot.
 func (s *Service) handleSiteTicket(w http.ResponseWriter, r *http.Request, claims auth.Claims) {
-	roomID, artifactID := r.PathValue("roomId"), r.PathValue("artifactId")
-	version, err := strconv.Atoi(r.PathValue("version"))
-	if roomctx.ValidateID(roomID) != nil || artifactID == "" || strings.Contains(artifactID, "/") || err != nil || version <= 0 {
-		httpx.Error(w, "invalid site version path", http.StatusBadRequest)
+	scope, roomID, ok := siteVersionPath(w, r)
+	if !ok {
 		return
 	}
-	claims, ok := s.roomClaims(claims, roomID)
+	claims, ok = s.roomClaims(claims, roomID)
 	if !ok {
 		httpx.Error(w, "room scope not authorized", http.StatusForbidden)
 		return
 	}
 	tenantID := claims.Tenant
-	scope := siteTicketScope(roomID, artifactID, version)
 	sv, err := s.memberSiteVersion(r.Context(), claims.Subject, tenantID, scope)
 	if errors.Is(err, errSiteNotFound) {
 		httpx.Error(w, "site version not found", http.StatusNotFound)
@@ -137,6 +134,19 @@ func (s *Service) handleSiteTicket(w http.ResponseWriter, r *http.Request, claim
 		"expiresAtMs": expires.UnixMilli(),
 	})
 
+}
+
+// siteVersionPath reads a room route's site version
+// ({roomId}/artifacts/{artifactId}/versions/{version}) as its
+// siteTicketScope; it answers 400 and ok=false when the path names none.
+func siteVersionPath(w http.ResponseWriter, r *http.Request) (scope, roomID string, ok bool) {
+	roomID, artifactID := r.PathValue("roomId"), r.PathValue("artifactId")
+	version, err := strconv.Atoi(r.PathValue("version"))
+	if roomctx.ValidateID(roomID) != nil || artifactID == "" || strings.Contains(artifactID, "/") || err != nil || version <= 0 {
+		httpx.Error(w, "invalid site version path", http.StatusBadRequest)
+		return "", "", false
+	}
+	return siteTicketScope(roomID, artifactID, version), roomID, true
 }
 
 func memberSiteBase(ticket string) string { return "/v1/sites/" + url.PathEscape(ticket) + "/" }

@@ -23,13 +23,15 @@ import (
 // through the room's own artifact routes with the bridge's session, so the
 // room service applies its membership and room checks (a non-member, or an
 // artifact of another room, is refused there); the tool reads only the
-// session's room. The text comes back bounded and fenced as untrusted data
+// session's room. A site's file comes through the gateway's site file read
+// with the bound job's grant, which the room service checks the same way. The text comes back bounded and fenced as untrusted data
 // written by someone else.
 
 // read_artifact bounds.
 const (
-	// maxArtifactFetchBytes is the largest stored version (or site
-	// snapshot) the tool downloads.
+	// maxArtifactFetchBytes is the largest stored version the tool
+	// downloads. A site is read one file at a time, which the gateway's
+	// site file read bounds.
 	maxArtifactFetchBytes = 4 << 20
 	// maxArtifactText is the most text it returns.
 	maxArtifactText = 64 << 10
@@ -101,7 +103,7 @@ func readArtifact(ctx context.Context, env *Env, args json.RawMessage) Result {
 		"mimeType": v.MimeType, "sizeBytes": v.SizeBytes, "producedBy": producer.String(),
 		"stored": "by bnbloc in this room, not in your workspace",
 	}
-	if v.SizeBytes > maxArtifactFetchBytes {
+	if art.Kind != store.ArtifactKindSite && v.SizeBytes > maxArtifactFetchBytes {
 		out["note"] = fmt.Sprintf("%d bytes, larger than read_artifact reads (%d): ask the person to open it in the room's Docs panel", v.SizeBytes, maxArtifactFetchBytes)
 		return Result{Value: out}
 	}
@@ -123,9 +125,12 @@ func readArtifact(ctx context.Context, env *Env, args json.RawMessage) Result {
 }
 
 // artifactBytes reads a version's bytes: inline text as stored, a blob
-// through the content route, a site's file through a site ticket (the
-// gateway's one implementation of the site file rules). It records the
-// site file read in out.
+// through the content route, a site's file through the gateway's site file
+// read (…/versions/{v}/files/{path}?job=, on the main origin with the
+// bridge's session, as the job's requester). It never opens a site ticket:
+// a site URL may be on the sites origin, which never sees a session
+// (TestRoomToolsNeverOpenSiteTickets). It records the site file read in
+// out.
 func artifactBytes(ctx context.Context, env *Env, base string, art wire.Artifact, v wire.ArtifactVersion, path string, out map[string]any) ([]byte, *Result) {
 	versionPath := base + "/versions/" + strconv.Itoa(v.Version)
 	switch {
@@ -138,23 +143,12 @@ func artifactBytes(ctx context.Context, env *Env, base string, art wire.Artifact
 			r := toolError("path %q is not a plain file path of the site", path)
 			return nil, &r
 		}
-		raw, err := env.Gateway.Do(ctx, http.MethodPost, versionPath+"/site-ticket", nil)
-		if err != nil {
-			r := refusal("opening site "+art.ArtifactID, err)
-			return nil, &r
-		}
-		var ticket struct {
-			SiteURL string `json:"siteUrl"`
-		}
-		if err := json.Unmarshal(raw, &ticket); err != nil || !strings.HasPrefix(ticket.SiteURL, "/v1/sites/") {
-			r := toolError("the site ticket answered an unreadable result")
-			return nil, &r
-		}
 		segs := strings.Split(p, "/")
 		for i, s := range segs {
 			segs[i] = url.PathEscape(s)
 		}
-		data, err := env.Gateway.Do(ctx, http.MethodGet, ticket.SiteURL+strings.Join(segs, "/"), nil)
+		job := env.Session.current().JobID
+		data, err := env.Gateway.Do(ctx, http.MethodGet, versionPath+"/files/"+strings.Join(segs, "/")+"?job="+url.QueryEscape(job), nil)
 		if err != nil {
 			r := refusal("reading "+p+" of site "+art.ArtifactID, err)
 			return nil, &r

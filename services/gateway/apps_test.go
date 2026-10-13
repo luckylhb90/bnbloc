@@ -21,6 +21,7 @@ import (
 
 	"github.com/luckylhb90/bnbloc/internal/appdata"
 	"github.com/luckylhb90/bnbloc/internal/auth"
+	"github.com/luckylhb90/bnbloc/internal/blobstore"
 	"github.com/luckylhb90/bnbloc/internal/digest"
 	"github.com/luckylhb90/bnbloc/internal/ids"
 	"github.com/luckylhb90/bnbloc/internal/obs"
@@ -52,6 +53,7 @@ type appGW struct {
 	gw      *Service
 	srv     *httptest.Server
 	jobs    *store.MemoryBridgeJobs
+	blobs   *blobstore.DiskStore
 	tenant  string
 	roomID  string
 	appA    string
@@ -68,7 +70,12 @@ func newAppGW(t *testing.T) *appGW {
 	}
 	e := &appGW{t: t, b: b, tenant: "home"}
 	e.hub = realtime.NewHub(64, 64)
-	rtSrv := httptest.NewServer(svcauth.Middleware(appGWKey, (&realtimehttp.Service{Hub: e.hub}).Handler()))
+	disk, err := blobstore.NewDiskStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.blobs = disk
+	rtSrv := httptest.NewServer(svcauth.Middleware(appGWKey, (&realtimehttp.Service{Hub: e.hub, Blobs: disk}).Handler()))
 	t.Cleanup(rtSrv.Close)
 
 	raw := make([]byte, 32)

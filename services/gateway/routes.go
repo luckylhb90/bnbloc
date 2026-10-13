@@ -156,6 +156,7 @@ func (s *Service) routes() []route {
 		member("GET /v1/artifacts/{key...}", s.handleArtifactDownload),
 		open("GET /v1/previewers/{name}/{version}/{ticket}/{path...}", "a previewer ticket in the path", s.handlePreviewerFile),
 		member("POST /v1/rooms/{roomId}/artifacts/{artifactId}/versions/{version}/site-ticket", s.handleSiteTicket),
+		member("GET /v1/rooms/{roomId}/artifacts/{artifactId}/versions/{version}/files/{path...}", s.handleSiteFileRead),
 		member("POST /v1/rooms/{roomId}/attachments/{attachmentId}/ticket", s.handleAttachmentTicket),
 		open("GET /v1/sites/{ticket}", "a site ticket in the path", s.handleSiteRootRedirect),
 		open("GET /v1/sites/{ticket}/{path...}", "a site ticket in the path", s.handleMemberSite),
