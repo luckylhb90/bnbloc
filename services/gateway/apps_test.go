@@ -162,7 +162,8 @@ func (r resp) docs() []map[string]any {
 	return p.Docs
 }
 
-// call makes one request to the gateway; headers are "Name: value".
+// call makes one request to the gateway; headers are "Name: value" ("Host:
+// h" sets the request's host).
 func (e *appGW) call(method, path string, body any, headers ...string) resp {
 	e.t.Helper()
 	var rd io.Reader
@@ -186,6 +187,10 @@ func (e *appGW) call(method, path string, body any, headers ...string) resp {
 	}
 	for _, h := range headers {
 		name, value, _ := strings.Cut(h, ": ")
+		if name == "Host" {
+			req.Host = value
+			continue
+		}
 		req.Header.Set(name, value)
 	}
 	r, err := noRedirectClient.Do(req)

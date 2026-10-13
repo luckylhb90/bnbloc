@@ -118,6 +118,7 @@ func (s *Service) routes() []route {
 		open("POST /v1/auth/logout", "a refresh token", s.handleLogout),
 		open("POST /v1/auth/api-token", "an API token", s.handleAPITokenExchange).spends(guessBudget),
 		open("GET /v1/auth/sso-config", "the sign-in page asks which sign-in to offer", s.handleAuthProviderConfig),
+		open("GET /v1/public/client-config", "deployment facts a client needs before sign-in: no data", s.handleClientConfig),
 		open("GET "+publicAuthStartPath, "starts an SSO sign-in", s.handleSSOStart),
 		open("GET /api/auth/metadata", "the IdP reads the SP metadata", s.handleSSOMetadata),
 		open("GET /api/auth/logout", "the IdP's single logout", s.handleSSOLogout),

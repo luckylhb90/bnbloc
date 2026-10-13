@@ -52,6 +52,7 @@ embedded SPA. Stateless apart from the shared database — scale horizontally.
 | `BNBLOC_OIDC_ISSUER_URL` + `BNBLOC_OIDC_CLIENT_ID` | no | OIDC relying party. Unset in production = direct login disabled; sign in via an installed auth-provider (SSO). |
 | `BNBLOC_SUPER_ADMINS` | yes | Comma-separated verified subject ids/emails (cross-tenant admins). |
 | `BNBLOC_PUBLIC_URL` | recommended | Public origin; every link and artifact URL the gateway hands out (content notifications, published package artifacts, previewer CSP). Unset = each request's own origin. |
+| `BNBLOC_SITES_ORIGIN` | recommended | A separate https origin (e.g. `https://sites.bnbloc-usercontent.example`) that serves published sites, their app data API and the app SDK, and nothing else; the public origin then answers site paths 404. Needs its own DNS name, TLS certificate and an ingress / edge-proxy rule to the same gateway that keeps its Host header; prefer a separate registrable domain. A bare origin only (no path, no trailing slash) on another host than `BNBLOC_PUBLIC_URL`; anything else refuses to start. Unset = sites are served sandboxed from the public origin. |
 | `BNBLOC_ROOM_BASE_URL` | yes | `http://bnbloc-room:8080` |
 | `BNBLOC_REALTIME_BASE_URL` | yes | `http://bnbloc-realtime:8082` |
 | `BNBLOC_ACTIVITY_BASE_URL` | yes | `http://bnbloc-activity:8081` |

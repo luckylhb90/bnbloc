@@ -277,6 +277,12 @@ func main() {
 	if err != nil {
 		log.Fatalf("bnbloc-gateway: %v", err)
 	}
+	// Sites (and their app API) get an origin of their own when the
+	// deployment names one; a malformed value refuses to start.
+	sitesOrigin, err := gateway.ParseSitesOrigin(config.FromEnvRaw(gateway.SitesOriginEnv), config.FromEnvRaw(notify.PublicURLEnv))
+	if err != nil {
+		log.Fatalf("bnbloc-gateway: %v", err)
+	}
 	svc := &gateway.Service{
 		Verifier: resolveVerifier(),
 		Signer:   auth.NewSigner(resolveSigningKey()),
@@ -308,6 +314,7 @@ func main() {
 		AllowedOrigins:    config.List("BNBLOC_ALLOWED_ORIGINS"),
 		TrustedProxies:    resolveTrustedProxies(),
 		PublicURL:         config.FromEnvRaw(notify.PublicURLEnv),
+		SitesOrigin:       sitesOrigin,
 		DevDiscovery:      gateway.DevDiscoveryFromEnv(),
 		// Deployment without curated release history: a download link still
 		// activates the UI's download affordances (one synthetic release).

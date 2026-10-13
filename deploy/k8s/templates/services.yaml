@@ -130,6 +130,8 @@ spec:
               value: {{ join "," ($cfg.allowedOrigins | default list) | quote }}
             - name: BNBLOC_TRUSTED_PROXIES
               value: {{ join "," ($cfg.trustedProxies | default list) | quote }}
+            - name: BNBLOC_SITES_ORIGIN
+              value: {{ $cfg.sitesOrigin | default "" | quote }}
             - name: BNBLOC_CORES
               value: {{ join "," ($cfg.cores | default list) | quote }}
             {{- end }}
@@ -302,6 +304,7 @@ spec:
       storage: {{ .Values.realtime.attachments.persistence.size }}
 {{- end }}
 {{- if .Values.gateway.ingress.enabled }}
+{{- $sitesHost := regexReplaceAll ":[0-9]+$" (trimPrefix "https://" (.Values.gateway.sitesOrigin | default "")) "" }}
 ---
 apiVersion: networking.k8s.io/v1
 kind: Ingress
@@ -332,9 +335,27 @@ spec:
               service:
                 name: bnbloc-gateway
                 port: { number: 8080 }
+    {{- if $sitesHost }}
+    # The sites origin (gateway.sitesOrigin): the same gateway, which serves
+    # only sites and their app API on this host (and nothing else).
+    - host: {{ $sitesHost }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: bnbloc-gateway
+                port: { number: 8080 }
+    {{- end }}
   {{- if .Values.gateway.ingress.tls }}
   tls:
     - hosts: [{{ .Values.gateway.ingress.host }}]
       secretName: bnbloc-gateway-tls
+    {{- if $sitesHost }}
+    # Its own certificate.
+    - hosts: [{{ $sitesHost }}]
+      secretName: bnbloc-sites-tls
+    {{- end }}
   {{- end }}
 {{- end }}

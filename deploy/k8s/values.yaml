@@ -95,6 +95,14 @@ gateway:
   # (the API-token exchange and public shares stay reachable). Empty trusts
   # no proxy (every client then shares the controller's bucket).
   trustedProxies: []
+  # A separate https origin for sites and their app API
+  # (BNBLOC_SITES_ORIGIN, e.g. https://sites.bnbloc-usercontent.example):
+  # the gateway then serves sites only there and nothing else there. It
+  # needs its own DNS name and TLS certificate (Secret bnbloc-sites-tls);
+  # the ingress below adds its host, routed to the gateway. Recommended in
+  # production, preferably on a separate registrable domain. Empty = sites
+  # are served sandboxed from the public origin.
+  sitesOrigin: ""
   # Explicitly configured cores (operator escape hatch; installed component
   # packages need no entry). Each needs BNBLOC_CORE_<NAME>_URL via extraEnv.
   cores: []

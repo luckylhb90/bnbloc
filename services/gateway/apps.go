@@ -150,10 +150,7 @@ func (s *Service) appRoutes() []route {
 // appFramePath reports a path under a frame entry's ~app/: answered with
 // CORS for any origin, without credentials (withCORS).
 func appFramePath(path string) bool {
-	if !strings.HasPrefix(path, "/v1/sites/") && !strings.HasPrefix(path, "/v1/public/shares/") {
-		return false
-	}
-	return strings.Contains(path, "/~app/")
+	return sitePath(path) && strings.Contains(path, "/~app/")
 }
 
 // appCORSHeaders are the request headers an app's frame sends.

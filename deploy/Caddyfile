@@ -90,6 +90,35 @@ bnbloc.example.com {
 	}
 }
 
+# --- The sites origin (BNBLOC_SITES_ORIGIN, recommended) ------------------
+# Published sites and their app data API get an origin of their own: set
+# BNBLOC_SITES_ORIGIN=https://sites.bnbloc-usercontent.example on the
+# gateway, give the name its own DNS record (Caddy obtains its certificate),
+# and route it to the same gateway with its Host header (Caddy's default).
+# The gateway then serves only site paths on this host and refuses them on
+# the main one. Prefer a separate registrable domain over a subdomain of the
+# main host. No X-Frame-Options here: sites are framed by the main origin
+# (their own CSP says frame-ancestors). Uncomment once the name resolves:
+#
+# sites.bnbloc-usercontent.example {
+# 	# App data writes are at most 68 KiB; site files are read only.
+# 	request_body {
+# 		max_size 1MiB
+# 	}
+# 	handle {
+# 		# The app change feed is SSE.
+# 		reverse_proxy 127.0.0.1:7090 {
+# 			flush_interval -1
+# 		}
+# 	}
+# 	encode gzip
+# 	header {
+# 		Strict-Transport-Security "max-age=31536000"
+# 		X-Content-Type-Options "nosniff"
+# 		Referrer-Policy "no-referrer"
+# 	}
+# }
+
 # --- nginx equivalent ---------------------------------------------------
 #
 # server {

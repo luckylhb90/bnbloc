@@ -16,6 +16,13 @@ The web client is served same-origin with the API, so the SPA, the API, and the
 relay must all sit under this **one** domain (the browser calls the backend with
 relative paths).
 
+**Recommended: a second domain for sites.** Published sites and interactive
+apps get their own origin (`BNBLOC_SITES_ORIGIN`), preferably on a separate
+registrable domain, e.g. `sites.bnbloc-usercontent.example`: its own DNS
+record and TLS certificate, every path routed to `bnbloc-gateway:8080` with
+the Host header kept, the same SSE timeouts as below, request bodies up to
+1 MiB. The gateway serves only sites there.
+
 ## 2. Path routing (front proxy → in-cluster Service)
 
 Route by path prefix. Longest-prefix wins, so `/relay/` is matched before `/`.

@@ -204,6 +204,11 @@ services:
       # Public origin of every link and artifact URL the gateway hands out
       # (empty = the request's own origin).
       BNBLOC_PUBLIC_URL: "${BNBLOC_PUBLIC_URL:-}"
+      # Recommended: a separate https origin for sites and their app API
+      # (its own DNS name and certificate; the edge proxy routes it to this
+      # gateway with its Host header; prefer a separate registrable domain).
+      # Empty = sites are served sandboxed from the public origin.
+      BNBLOC_SITES_ORIGIN: "${BNBLOC_SITES_ORIGIN:-}"
       # Identity: production requires an OIDC issuer + client id (the dev
       # verifier accepts any identity and is refused when BNBLOC_ENV=production).
       BNBLOC_OIDC_ISSUER_URL: "${BNBLOC_OIDC_ISSUER_URL:-}"

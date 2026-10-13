@@ -51,6 +51,19 @@ test("desktop frames go through the bnbloc-site scheme with the path verbatim", 
   eq(siteGatewayUrl("/v1/sites/abc/", base), "https://gw.example.com/v1/sites/abc/", "open in new tab");
 });
 
+test("a site URL on the sites origin is used as the gateway handed it out", () => {
+  const sites = "https://sites.bnbloc.example.com/v1/sites/T/";
+  eq(siteFrameUrl(sites, { apiUrl: sameOrigin, baseURI: "https://bnbloc.example.com/" }), sites, "browser");
+  eq(siteGatewayUrl(sites, { apiUrl: gateway, baseURI: "tauri://localhost/" }), sites, "open in new tab");
+  eq(
+    siteFrameUrl(sites, { apiUrl: gateway, baseURI: "tauri://localhost/", convertFileSrc: tauriConvert(false) }),
+    "bnbloc-site://localhost/v1/sites/T/",
+    "desktop: the scheme, which forwards to the sites origin",
+  );
+  const pub = "https://sites.bnbloc.example.com/v1/public/shares/bsh_x/site/";
+  eq(siteGatewayUrl(pub, { apiUrl: sameOrigin, baseURI: "https://bnbloc.example.com/s/x" }), pub, "a public link's site");
+});
+
 test("the sandbox never grants the app origin", () => {
   eq(SITE_SANDBOX.includes("allow-same-origin"), false, "no same origin");
   eq(SITE_SANDBOX.includes("allow-top-navigation"), false, "no top navigation");

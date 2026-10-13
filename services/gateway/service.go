@@ -172,6 +172,11 @@ type Service struct {
 	// https://bnbloc.example.com): the base of every link and artifact URL
 	// the gateway hands out (publicOrigin). Empty = the request's own origin.
 	PublicURL string
+	// SitesOrigin is the deployment's separate origin for sites
+	// (BNBLOC_SITES_ORIGIN, in ParseSitesOrigin's canonical form): when set,
+	// the only origin serving sites and their app API (sites_origin.go);
+	// "" serves them from the gateway's own origin.
+	SitesOrigin string
 	// TrustedProxies are the reverse proxies (CIDRs, BNBLOC_TRUSTED_PROXIES)
 	// whose X-Forwarded-For the gateway believes when deriving a client IP for
 	// the unauthenticated login throttle. Empty trusts no proxy: the TCP peer
@@ -232,7 +237,7 @@ func (s *Service) Handler() http.Handler {
 	// gateway-embedded UI is same-origin, but the desktop shell and any hosted
 	// web client are cross-origin and need CORS (handled by the wrapper below).
 	mux.HandleFunc("/", s.handleRoot)
-	return s.withCORS(mux)
+	return s.withSitesOrigin(s.withCORS(mux))
 }
 
 // handleCores lists every registered core with its availability and unified
@@ -629,13 +634,20 @@ func (s *Service) clientIP(r *http.Request) string {
 // the configured public origin (PublicURL) when the deployment names one —
 // links in notifications to other members, published artifact URLs and a
 // previewer's CSP never echo a caller's Host header then — else the
-// request's host with publicScheme.
+// request's host with publicScheme. A site's URL is siteURL's.
 func (s *Service) publicOrigin(r *http.Request) string {
 	if base := strings.TrimRight(strings.TrimSpace(s.PublicURL), "/"); base != "" {
 		return base
 	}
 	return s.publicScheme(r) + "://" + r.Host
 }
+
+// siteURL is the URL the gateway hands out for a site path (a member
+// ticket's or a public link's site base): on the sites origin when the
+// deployment has one, the only origin serving sites then
+// (sites_origin.go); else the path itself, on the origin the client
+// called.
+func (s *Service) siteURL(path string) string { return s.SitesOrigin + path }
 
 // publicScheme is the scheme the client used: the X-Forwarded-Proto of a
 // trusted proxy (like clientIP, a client-written header is believed only

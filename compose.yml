@@ -149,6 +149,10 @@ services:
       BNBLOC_SUPER_ADMINS: "${BNBLOC_SUPER_ADMINS:-root}"
       # Public origin of every link and artifact URL the gateway hands out.
       BNBLOC_PUBLIC_URL: "${BNBLOC_PUBLIC_URL:-http://localhost:7090}"
+      # A separate https origin (its own DNS name and certificate, routed to
+      # this gateway) serving sites and their app API, and only those; empty
+      # = sites are served sandboxed from the public origin.
+      BNBLOC_SITES_ORIGIN: "${BNBLOC_SITES_ORIGIN:-}"
       BNBLOC_ACTIVITY_BASE_URL: "http://activity:8081"
       BNBLOC_REALTIME_BASE_URL: "http://realtime:8082"
       BNBLOC_SHAREAGENT_BASE_URL: "http://shareagent:8083"

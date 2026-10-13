@@ -203,7 +203,7 @@ func (s *Service) handlePublicShare(w http.ResponseWriter, r *http.Request) {
 	out.ExpiresAtMs = res.Share.ExpiresAtMs
 	out.FollowsLatest = res.Share.Version == 0
 	if _, isSite := siteVersionOf(res.Version.Storage, res.Version.MimeType, res.Version.BlobKey, res.Version.ContentHash); isSite && res.Artifact.Kind == store.ArtifactKindSite {
-		out.SiteURL = publicSiteBase(r.PathValue("token"))
+		out.SiteURL = s.siteURL(publicSiteBase(r.PathValue("token")))
 	}
 	w.Header().Set("Cache-Control", "no-store")
 	httpx.WriteJSON(w, http.StatusOK, out)

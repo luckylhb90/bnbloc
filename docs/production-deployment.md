@@ -88,6 +88,9 @@ The full variable reference is [Environment Variables](./environment-variables.m
 | `BNBLOC_OIDC_ISSUER_URL` + `BNBLOC_OIDC_CLIENT_ID` | The identity provider. Production refuses the dev verifier, which accepts any identity string. |
 | `BNBLOC_SUPER_ADMINS` | Cross-tenant platform admins; set real verified subject ids/emails. |
 
+Recommended: `BNBLOC_PUBLIC_URL`, and `BNBLOC_SITES_ORIGIN` with its own
+DNS name, certificate and proxy rule ("The sites origin" below).
+
 Optional: `BNBLOC_ALLOWED_ORIGINS`, S3 attachment settings,
 `BNBLOC_AWS_SECRET_ID` to load secrets from AWS Secrets Manager.
 
@@ -158,6 +161,36 @@ rehydrate at gateway boot.
   cleartext and relies on transport TLS. Never expose the relay port directly.
 - **Long timeouts** for SSE/WebSocket streams (30 min idle) and large uploads
   (10 min body read). In Caddy these are global server options.
+
+### The sites origin (recommended)
+
+Published sites (and the interactive apps among them) run sandboxed, with
+an opaque origin, wherever they are served. Production should also give them
+an origin of their own, so no site ever shares a host with the web client,
+its storage or the API:
+
+1. Pick a name, preferably on a separate registrable domain (e.g.
+   `sites.bnbloc-usercontent.example` beside `bnbloc.example.com`): a
+   subdomain of the main host shares its cookie scope.
+2. Give it its own DNS record and TLS certificate.
+3. Route it to the same gateway, keeping the Host header: the commented
+   `sites.bnbloc-usercontent.example` block in `deploy/Caddyfile`, or Helm
+   `gateway.sitesOrigin` (which adds the host to the Ingress with its own
+   `bnbloc-sites-tls` Secret).
+4. Set `BNBLOC_SITES_ORIGIN=https://sites.bnbloc-usercontent.example` on the
+   gateway (a bare https origin; another host than `BNBLOC_PUBLIC_URL`; a
+   malformed value stops the gateway at startup).
+
+The gateway then serves sites, their app data API and the app SDK only on
+that host, refuses everything else there (404: no API, no web client, no
+session), and refuses site paths on the main host. Site links it hands out
+(member viewers, public share links) point at the sites origin, and the
+desktop app learns it from `GET /v1/public/client-config`. Check it:
+
+```bash
+curl -s https://bnbloc.example.com/v1/public/client-config   # {"sitesOrigin":"https://sites…"}
+curl -s -o /dev/null -w '%{http_code}\n' https://sites.bnbloc-usercontent.example/   # 404
+```
 
 ## Verify a deployment
 
@@ -545,7 +578,9 @@ its log.
   are configured. Credentials come from a Secret or the pod's IAM identity;
   `directDownloads: true` (+ `publicEndpoint` when the endpoint is
   cluster-internal) answers downloads with presigned URLs.
-- **Ingress.** One host: `/relay` → relay, `/` → gateway. The default
+- **Ingress.** One host: `/relay` → relay, `/` → gateway, plus the sites
+  origin's host → gateway when `gateway.sitesOrigin` is set (its certificate
+  in the `bnbloc-sites-tls` Secret; see "The sites origin" above). The default
   annotations target ingress-nginx (256 MiB bodies, no buffering, 30 min
   timeouts); translate them for another controller. Set
   `gateway.trustedProxies` to the controller's pod CIDR so per-IP rate limits

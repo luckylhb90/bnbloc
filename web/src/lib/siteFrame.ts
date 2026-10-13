@@ -3,12 +3,16 @@
 // React, no DOM globals) so it is unit-tested under node; SiteViewer wires it
 // to the iframe.
 //
-// Where a site is served from (one file rule set on the gateway):
-//   - member: POST …/versions/{v}/site-ticket mints `siteUrl` =
+// Where a site is served from (one file rule set on the gateway). The
+// gateway hands out `siteUrl`: a path on its own origin, or an absolute
+// URL on the deployment's sites origin (BNBLOC_SITES_ORIGIN, the only
+// origin serving sites then). The web never decides the host.
+//   - member: POST …/versions/{v}/site-ticket mints `siteUrl` for
 //     `/v1/sites/<ticket>/` (12 h; the ticket in the path is the credential,
-//     no session). Browser: that gateway URL. Desktop: the shell's
-//     `bnbloc-site` scheme (apps/desktop/src-tauri/src/site_scheme.rs), which
-//     proxies the same path to the gateway, so the app CSP only has to admit
+//     no session). Browser: that URL. Desktop: the shell's `bnbloc-site`
+//     scheme (apps/desktop/src-tauri/src/site_scheme.rs) with the URL's
+//     path, which the shell proxies to the gateway's sites (the sites
+//     origin when the gateway names one), so the app CSP only has to admit
 //     the scheme in frame-src.
 //   - public share page: `siteUrl` from GET /v1/public/shares/{token}.
 // Either way the gateway's response CSP is `sandbox allow-scripts …` (an
@@ -17,12 +21,11 @@
 //
 // An interactive app's SDK (`~app/sdk.js`) calls `~app/…` relative to the
 // site's own URL, so under a member ticket it acts as the member with no
-// token of its own. It asks its parent for a visitor token at load; the
-// member's viewer answers nothing (only a public link's page holds one:
-// lib/appVisitor.ts), and the SDK asks again only when a call is refused
-// for a missing visitor token, which a ticket never is. The desktop's
-// scheme forwards only reads so far
-// (docs/bugs/2026-10-13-desktop-site-frame-drops-app-api.md).
+// token of its own (the desktop scheme forwards every method of the app
+// API and relays its change feed). It asks its parent for a visitor token
+// at load; the member's viewer answers nothing (only a public link's page
+// holds one: lib/appVisitor.ts), and the SDK asks again only when a call
+// is refused for a missing visitor token, which a ticket never is.
 
 import { schemeUrl, type ConvertFileSrc } from "./schemeUrl.ts";
 /** Desktop URI scheme proxying `/v1/sites/…` to the gateway. */
@@ -55,20 +58,26 @@ export interface SiteFrameEnv {
 }
 
 const MEMBER_SITE_PATH = /^\/v1\/sites\/[A-Za-z0-9._~-]+\//;
+const ABSOLUTE_URL = /^[a-z][a-z0-9+.-]*:/i;
 
-/** The gateway URL of a site (absolute): what "open in new tab" opens. */
+/** The URL of a site (absolute): what "open in new tab" opens and a
+ *  browser frames. A `siteUrl` on the sites origin is already absolute;
+ *  a path is on the gateway. */
 export function siteGatewayUrl(siteUrl: string, env: Pick<SiteFrameEnv, "apiUrl" | "baseURI">): string {
-  return new URL(env.apiUrl(siteUrl), env.baseURI).href;
+  return ABSOLUTE_URL.test(siteUrl) ? siteUrl : new URL(env.apiUrl(siteUrl), env.baseURI).href;
 }
 
-/** The iframe src of a site. In the desktop shell a member site URL goes
- *  through the `bnbloc-site` scheme (schemeUrl keeps the path's slashes).
- *  Anything else is the gateway URL. */
+/** The iframe src of a site. In the desktop shell a member site goes
+ *  through the `bnbloc-site` scheme with its path (schemeUrl keeps the
+ *  slashes); the shell forwards it to wherever the gateway serves sites.
+ *  Anything else is the site's URL. */
 export function siteFrameUrl(siteUrl: string, env: SiteFrameEnv): string {
-  if (env.convertFileSrc && MEMBER_SITE_PATH.test(siteUrl)) {
-    return schemeUrl(env.convertFileSrc, SITE_SCHEME, siteUrl);
+  const url = new URL(siteGatewayUrl(siteUrl, env));
+  const path = url.pathname + url.search;
+  if (env.convertFileSrc && MEMBER_SITE_PATH.test(path)) {
+    return schemeUrl(env.convertFileSrc, SITE_SCHEME, path);
   }
-  return siteGatewayUrl(siteUrl, env);
+  return url.href;
 }
 
 /** Milliseconds until a ticket expiring at `expiresAtMs` must be re-minted

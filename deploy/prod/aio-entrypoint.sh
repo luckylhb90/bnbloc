@@ -42,6 +42,10 @@ unset BNBLOC_REALTIME_PEERS BNBLOC_REALTIME_SELF BNBLOC_RELAY_PEERS BNBLOC_RELAY
 # realtime, shareagent and activity's budget warnings; the gateway's links
 # and artifact URLs) straight from the container environment; unset
 # means no notification links and request-origin gateway links. Delivery targets are installed notifier components.
+# The gateway reads BNBLOC_SITES_ORIGIN (a separate https origin serving
+# sites and their app API, routed to this container by the edge proxy; a
+# malformed value is fatal) the same way; unset means sites are served
+# sandboxed from the public origin.
 # Browser push reads BNBLOC_WEB_PUSH_VAPID_PUBLIC_KEY / _PRIVATE_KEY /
 # _SUBJECT (realtime) the same way; unset means the channel is off.
 # The gateway and room read BNBLOC_SECRET_STORE_KEY (seals organization MCP

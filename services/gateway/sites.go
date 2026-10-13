@@ -94,7 +94,7 @@ func parseSiteTicketScope(id string) (roomID, artifactID string, version int, ok
 
 // handleSiteTicket mints a member's site ticket:
 // POST /v1/rooms/{roomId}/artifacts/{artifactId}/versions/{version}/site-ticket
-// → {siteUrl: "/v1/sites/<ticket>/", expiresAtMs}. The caller must be a room
+// → {siteUrl: siteURL("/v1/sites/<ticket>/"), expiresAtMs}. The caller must be a room
 // member (the edge room scope, then the room service's own read check while
 // the version is fetched) and the version a site snapshot.
 func (s *Service) handleSiteTicket(w http.ResponseWriter, r *http.Request, claims auth.Claims) {
@@ -133,7 +133,7 @@ func (s *Service) handleSiteTicket(w http.ResponseWriter, r *http.Request, claim
 	})
 	w.Header().Set("Cache-Control", "no-store")
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{
-		"siteUrl":     memberSiteBase(ticket),
+		"siteUrl":     s.siteURL(memberSiteBase(ticket)),
 		"expiresAtMs": expires.UnixMilli(),
 	})
 
