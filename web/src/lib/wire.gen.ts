@@ -503,6 +503,14 @@ export interface AssistTask {
   context?: AssistContext[];
 }
 
+// AssistSpec is an assist component's task (its component.json output,
+// fields and context), on its Library view.
+export interface AssistSpec {
+  output: AssistOutput;
+  fields?: AssistField[];
+  context?: AssistContext[];
+}
+
 // AssistField is one field of a JSON task's reply.
 export interface AssistField {
   name: string;
@@ -1087,6 +1095,8 @@ export interface ContentComponent {
   welcome?: string;
   // Prompts are a prompt pack's prompts (content_prompts.go).
   prompts?: ContentPrompt[];
+  // Assist is an assist's task (docs/prd/2026-10-13-ai-assist.md §3).
+  assist?: AssistSpec;
   // Mine is true for the caller's own personal component: they author it
   // (new versions, sharing, publishing).
   mine: boolean;
@@ -4229,8 +4239,8 @@ export const ComponentRuntimeValues: readonly ComponentRuntime[] = ["stdio", "en
 export type ComponentRollout = "auto" | "optin" | "off";
 export const ComponentRolloutValues: readonly ComponentRollout[] = ["auto", "optin", "off"];
 // A content component kind's short name (the contentpkg registry).
-export type ContentKind = "expert" | "prompt" | "skill" | "work";
-export const ContentKindValues: readonly ContentKind[] = ["expert", "prompt", "skill", "work"];
+export type ContentKind = "assist" | "expert" | "prompt" | "skill" | "work";
+export const ContentKindValues: readonly ContentKind[] = ["assist", "expert", "prompt", "skill", "work"];
 
 // ---- tables computed by their Go owners ----
 // The job statuses store.AgentJobStatus.Terminal reports finished; every

@@ -33,6 +33,8 @@ type ContentComponent struct {
 	Welcome      string               `json:"welcome,omitempty"`
 	// Prompts are a prompt pack's prompts (content_prompts.go).
 	Prompts []ContentPrompt `json:"prompts,omitempty"`
+	// Assist is an assist's task (docs/prd/2026-10-13-ai-assist.md §3).
+	Assist *AssistSpec `json:"assist,omitempty"`
 	// Mine is true for the caller's own personal component: they author it
 	// (new versions, sharing, publishing).
 	Mine bool `json:"mine"`

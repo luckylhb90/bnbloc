@@ -284,6 +284,9 @@ func saveComponent(ctx context.Context, env *Env, args json.RawMessage) Result {
 	if files > 0 {
 		out["files"] = files
 	}
+	if c.Kind == "assist" {
+		out["note"] = fmt.Sprintf("Saved the assist %s version %s to the Library of the person who asked you. It runs on the deployment's assist model behind the sparkle button of its task (one named like a built-in assist replaces that one for them), not in an agent's composer; publish_component shares it with their organization.", c.Name, c.LatestVersion)
+	}
 	if c.Kind == "work" {
 		out["note"] = fmt.Sprintf("Saved the work %s version %s to the Library of the person who asked you: a snapshot of the deliverable, without its data. publish_component shares it with their organization's gallery.", c.Name, c.LatestVersion)
 		if c.Recipe != nil {

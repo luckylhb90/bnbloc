@@ -1,0 +1,12 @@
+{
+  "kind": "bnbloc.assist.package/v1",
+  "name": "enhance-prompt",
+  "version": "1.0.0",
+  "displayName": "Enhance prompt",
+  "description": "Turns what you typed in the composer into a clear request for the room's agents: the goal, the deliverables, the constraints and how to check the result, keeping your intent and every detail.",
+  "category": "authoring",
+  "tags": ["assist", "prompts"],
+  "icon": "sparkle",
+  "output": "text",
+  "context": ["room", "attachments"]
+}

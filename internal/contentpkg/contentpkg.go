@@ -29,6 +29,7 @@ const (
 	KindSkill  = "bnbloc.skill.package/v1"
 	KindPrompt = "bnbloc.prompt.package/v1"
 	KindWork   = "bnbloc.work.package/v1"
+	KindAssist = "bnbloc.assist.package/v1"
 )
 
 // ManifestFile is the manifest's path in every content bundle.
@@ -111,6 +112,13 @@ type Manifest struct {
 	// Recipe is how the work was made: its reference files lie in the
 	// bundle under references/.
 	Recipe *wire.WorkRecipe `json:"recipe,omitempty"`
+
+	// Assist: the task's output (wire.AssistOutputs), the fields a JSON
+	// reply holds and the context it may receive (wire.AssistContexts);
+	// INSTRUCTIONS.md is its system prompt (assist.go).
+	Output  string             `json:"output,omitempty"`
+	Fields  []wire.AssistField `json:"fields,omitempty"`
+	Context []string           `json:"context,omitempty"`
 }
 
 // Requires lists what a package needs at use time: skill and prompt packs
@@ -162,6 +170,10 @@ type KindSpec struct {
 	Short string
 	// Limits is the kind's tarbundle limit profile.
 	Limits tarbundle.Limits
+	// Use reports a kind that is a content use at all: a room's expert,
+	// skill packs and prompt packs, which reach agents and composers. A
+	// work (a snapshot) and an assist (the assist model's task) never are.
+	Use bool
 	// MemberUse reports a kind a member turns on for themselves (a
 	// content use of member scope): skill packs (all their agents) and
 	// prompt packs (their composer). Experts are picked per message.

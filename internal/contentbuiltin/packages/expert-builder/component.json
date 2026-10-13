@@ -1,9 +1,9 @@
 {
   "kind": "bnbloc.expert.package/v1",
   "name": "expert-builder",
-  "version": "1.2.3",
+  "version": "1.3.0",
   "displayName": "Expert builder",
-  "description": "Creates and improves experts, skill packs and prompt packs with you in a short conversation: it asks a few questions, drafts the package where you can read it, lets you try it, and saves it to your Library when you say so.",
+  "description": "Creates and improves experts, skill packs, prompt packs and AI assists with you in a short conversation: it asks a few questions, drafts the package where you can read it, lets you try it, and saves it to your Library when you say so.",
   "category": "authoring",
   "tags": ["builder", "experts", "skills", "prompts"],
   "icon": "sparkle",
@@ -19,6 +19,10 @@
     {
       "title": "Create a prompt pack",
       "prompt": "Help me create a prompt pack for ___: prompts my team reuses when ___. Examples of what we ask: [an example]"
+    },
+    {
+      "title": "Create an assist",
+      "prompt": "Help me create an AI assist for ___: when someone ___, it should turn what they typed into ___."
     },
     {
       "title": "Improve one of mine",

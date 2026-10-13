@@ -1,6 +1,6 @@
 ---
 name: package-format
-description: Use whenever you draft, fix or explain an expert, skill pack or prompt pack package - the exact files and manifest fields, requirements (skill packs, prompt packs, MCP tools), teams, scripts, every limit the save enforces, and example packages.
+description: Use whenever you draft, fix or explain an expert, skill pack, prompt pack or assist package - the exact files and manifest fields, requirements (skill packs, prompt packs, MCP tools), teams, scripts, every limit the save enforces, and example packages.
 ---
 
 # Package format
@@ -15,8 +15,8 @@ of each kind.
 A directory `drafts/<name>/` holding a `component.json` manifest: strict
 JSON, unknown fields are refused.
 
-- `kind`: `"bnbloc.expert.package/v1"`, `"bnbloc.skill.package/v1"` or
-  `"bnbloc.prompt.package/v1"`.
+- `kind`: `"bnbloc.expert.package/v1"`, `"bnbloc.skill.package/v1"`,
+  `"bnbloc.prompt.package/v1"` or `"bnbloc.assist.package/v1"`.
 - `name`: lower-case letters, digits and hyphens, starting with a letter or
   digit (`contract-reviewer`); the same as the directory.
 - `version`: semantic version `major.minor.patch` without a leading `v`
@@ -80,6 +80,34 @@ drafts/<name>/
 - Every `{{name}}` is declared in `variables`, and every declared variable
   appears in the body. Keep bodies specific (who the answer is for, the
   format, the length) so the prompt is worth reusing.
+
+## Assist (`bnbloc.assist.package/v1`)
+
+```
+drafts/<name>/
+  component.json      + "output", "fields" (json only), "context" (optional)
+  INSTRUCTIONS.md     required: the task's system prompt
+  README.md           optional
+```
+
+- An assist runs on the deployment's assist model behind a button (the
+  composer's "enhance prompt", a form's "Fill with AI"), not on an agent:
+  no `requires`, `skills`, `prompts`, `quickPrompts` or other files.
+- `output`: `"text"` (the reply replaces what the person typed) or `"json"`
+  (the reply fills form fields).
+- `fields` (json only, required there): `{ "name", "description"?,
+  "list"? }`; `name` is the form field's (`displayName`, `tags`), `list:
+  true` for a list of strings.
+- `context`: what the server may add besides the typed text, any of
+  `"room"` (its name, expert, skills and recent messages), `"artifact"`
+  (a deliverable's title, type, file and recipe prompt) and
+  `"attachments"` (names and types).
+- The model gets the person's text and that context fenced as data, so
+  `INSTRUCTIONS.md` says what to produce from them, in which language, and
+  to return only the result.
+- The name selects the task: an assist named like a built-in one
+  (`enhance-prompt`) replaces it for its owner, or for the organization
+  once published there.
 
 ## SKILL.md (skill packs and experts)
 
@@ -178,4 +206,10 @@ add scripts only when the person asks for them.
 | work | recipe reference files together | 25 MiB |
 | work | recipe.prompt | 16 KiB |
 | work | README.md | 64 KiB |
+| assist | INSTRUCTIONS.md | 16 KiB |
+| assist | fields | 12 entries |
+| assist | fields[].name | 40 characters |
+| assist | fields[].description | 300 characters |
+| assist | files in the package | 3 files |
+| assist | package size | 64 KiB |
 <!-- limits:end -->

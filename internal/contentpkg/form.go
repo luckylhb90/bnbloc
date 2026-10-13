@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/luckylhb90/bnbloc/internal/tarbundle"
+	"github.com/luckylhb90/bnbloc/internal/wire"
 )
 
 // Form is a content component saved from the Library form (or by a
@@ -28,6 +29,11 @@ type Form struct {
 
 	// Team makes an expert a team (its roster).
 	Team *TeamSpec `json:"team,omitempty"`
+
+	// An assist's task (Instructions is its system prompt).
+	Output  string             `json:"output,omitempty"`
+	Fields  []wire.AssistField `json:"fields,omitempty"`
+	Context []string           `json:"context,omitempty"`
 }
 
 // FormSkill is one skill written in the form: its SKILL.md is generated
@@ -49,6 +55,9 @@ func Build(f Form, version string, opts Options, base *Package) (*Package, []byt
 	}
 	if base != nil && base.Manifest.Kind != spec.Kind {
 		return nil, nil, fmt.Errorf("a %s cannot become a %s", base.Manifest.Kind, spec.Kind)
+	}
+	if spec.Kind != KindAssist && (f.Output != "" || len(f.Fields) > 0 || len(f.Context) > 0) {
+		return nil, nil, errAssistFields
 	}
 	m := Manifest{
 		Kind: spec.Kind, Name: strings.TrimSpace(f.Name), Version: version,

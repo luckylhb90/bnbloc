@@ -195,6 +195,9 @@ func validateEnvelope(m Manifest, opts Options) error {
 	if m.Kind != KindWork && (m.Type != "" || m.File != "" || m.Recipe != nil) {
 		return fmt.Errorf("a type, a file and a recipe belong to a work")
 	}
+	if m.Kind != KindAssist && (m.Output != "" || len(m.Fields) > 0 || len(m.Context) > 0) {
+		return errAssistFields
+	}
 	r := m.Requires
 	if len(r.Skills)+len(r.Prompts)+len(r.MCP)+len(r.Permissions) > maxRequires {
 		return fmt.Errorf("at most %d requirements", maxRequires)

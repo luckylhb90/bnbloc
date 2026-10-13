@@ -73,7 +73,7 @@ var (
 )
 
 func init() {
-	register(KindSpec{Kind: KindPrompt, Short: "prompt", Limits: PromptLimits, MemberUse: true,
+	register(KindSpec{Kind: KindPrompt, Short: "prompt", Limits: PromptLimits, Use: true, MemberUse: true,
 		validate: validatePromptPack, fromForm: promptPackFromForm, fromImport: promptPackFromImport})
 }
 

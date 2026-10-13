@@ -184,6 +184,7 @@ func contentView(c store.ContentComponent, v store.ContentComponentVersion, clai
 		out.CoverURL = "/v1/content-components/" + url.PathEscape(c.ID) + "/versions/" + url.PathEscape(v.Version) + "/cover"
 		out.WorkType, out.WorkFile, out.Recipe = m.Type, m.File, m.Recipe
 	}
+	out.Assist = m.AssistSpec()
 	held := ownedBy(c, claims)
 	out.Mine = held && c.Scope == store.ContentScopePersonal
 	out.Removable = held && (c.Scope == store.ContentScopePersonal || c.Scope == store.ContentScopeShared)
@@ -1043,11 +1044,16 @@ func (s *Service) handlePutContentUse(w http.ResponseWriter, r *http.Request, ca
 		contentStoreErr(w, "load content component failed", err)
 		return
 	}
+	spec, _ := contentpkg.Lookup(c.Kind)
+	if !spec.Use {
+		httpx.Error(w, fmt.Sprintf("a %s is not turned on in a room or for a member", spec.Short), http.StatusBadRequest)
+		return
+	}
 	if scope == store.ContentUseRoomExpert {
 		s.putRoomExpert(w, r, claims, scopeID, c)
 		return
 	}
-	if spec, _ := contentpkg.Lookup(c.Kind); scope == store.ContentUseMember && !spec.MemberUse {
+	if scope == store.ContentUseMember && !spec.MemberUse {
 		httpx.Error(w, "only skill and prompt packs are turned on for you; pick an expert per message", http.StatusBadRequest)
 		return
 	}

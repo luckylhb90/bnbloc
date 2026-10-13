@@ -55,6 +55,14 @@ type AssistTask struct {
 	Context     []string      `json:"context,omitempty" tstype:"AssistContext"`
 }
 
+// AssistSpec is an assist component's task (its component.json output,
+// fields and context), on its Library view.
+type AssistSpec struct {
+	Output  string        `json:"output" tstype:"AssistOutput"`
+	Fields  []AssistField `json:"fields,omitempty"`
+	Context []string      `json:"context,omitempty" tstype:"AssistContext"`
+}
+
 // AssistField is one field of a JSON task's reply.
 type AssistField struct {
 	Name        string `json:"name"`

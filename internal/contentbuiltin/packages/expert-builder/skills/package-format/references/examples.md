@@ -157,3 +157,32 @@ You run a product launch with a researcher and a writer.
 ## When a role is missing
 Tell the user which role could not be staffed and what is left undone.
 ```
+
+## An assist
+
+<!-- example: drafts/meeting-invite/component.json -->
+```json
+{
+  "kind": "bnbloc.assist.package/v1",
+  "name": "meeting-invite",
+  "version": "1.0.0",
+  "displayName": "Meeting invite",
+  "description": "Turns a one-line meeting idea into an invite: title, agenda and what to prepare.",
+  "output": "json",
+  "fields": [
+    { "name": "title", "description": "The meeting's title, one line" },
+    { "name": "agenda", "description": "The agenda as short lines" },
+    { "name": "prepare", "description": "What attendees prepare", "list": true }
+  ],
+  "context": ["room"]
+}
+```
+
+<!-- example: drafts/meeting-invite/INSTRUCTIONS.md -->
+```markdown
+You turn the person's one-line meeting idea into an invite. Answer only
+with a JSON object holding "title", "agenda" and "prepare", in the
+language the person wrote in. Use the room's name and recent messages to
+make the agenda concrete; never invent dates, names or numbers that are
+not given.
+```

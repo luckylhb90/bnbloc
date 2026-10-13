@@ -21,9 +21,9 @@ const (
 )
 
 func init() {
-	register(KindSpec{Kind: KindExpert, Short: "expert", Limits: tarbundle.ContentLimits,
+	register(KindSpec{Kind: KindExpert, Short: "expert", Limits: tarbundle.ContentLimits, Use: true,
 		validate: validateExpert, fromForm: expertFromForm, fromImport: expertFromImport})
-	register(KindSpec{Kind: KindSkill, Short: "skill", Limits: tarbundle.ContentLimits, MemberUse: true,
+	register(KindSpec{Kind: KindSkill, Short: "skill", Limits: tarbundle.ContentLimits, Use: true, MemberUse: true,
 		validate: validateSkillPack, fromForm: skillPackFromForm, fromImport: skillPackFromImport})
 }
 
