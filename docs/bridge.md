@@ -167,6 +167,21 @@ to a core.
   drive is sandboxed (`sandboxed`), and the authority refuses an unsandboxed
   one with `sandbox_required` (`sandboxRequired: true`) before anything is
   reserved; the bridge then refuses through the same notice and job failure.
+- **Environment passed to sandboxed agents.** A guest command gets the
+  default environment only (terminal, locale, git identity). A member lets
+  more into the sandboxed runs of their OWN agents in Settings → Agent
+  sandbox → "Environment passed to sandboxed agents": names or `PREFIX*`
+  patterns (`pkgmeta.ValidForwardEnv`: never `BNBLOC_*`, the guest's
+  `HOME`/`USER`/`PATH`/…, or loader variables), handed to the bridge as
+  `BNBLOC_SANDBOX_ENV`. Only names travel (the execution descriptor's
+  `env`, vmexec's `BNBLOC_VMEXEC_ENV`); vmexec reads each value from the
+  agent's own host environment when a command crosses. `decideSandbox`
+  gives them only to a sandboxed own drive wearing no one else's
+  script-bearing content (`ownerEnv`): never a borrowed or platform drive,
+  so the owner's secrets never reach someone else's prompt. No core declares
+  the environment its agent needs, so an own sandboxed run whose agent
+  reports an error ends its notice with a pointer to this setting
+  (`docs/bugs/2026-10-13-demo-app-build-issues.md`).
 - **Agent-host rooms.** Room discovery passes `includeAgentHost=1`; rooms
   listed in `agentHostRooms` (the owner only hosts a platform agent there)
   are streamed and served, but never live-synced, and realtime takes no
@@ -176,8 +191,9 @@ to a core.
   provider)`) is created, the space is ensured (re-ensured every turn: the
   runtime hands host-created entries to the space user only on ensure) with
   that directory mounted at the IDENTICAL guest path and the
-  `protocol.VMExecForwardEnv` allowlist, and a 4 h space-scoped exec token is
-  minted. The core gets `execution` on session create / input; a new sandboxed
+  `protocol.ForwardEnvAllowlist` of the drive (the default
+  `protocol.VMExecForwardEnv` plus, on the owner's own drive only, the names
+  the member listed: below), and a 4 h space-scoped exec token is minted. The core gets `execution` on session create / input; a new sandboxed
   session's workspace is created IN the workdir (`CreateWorkspaceAt`), so
   `.room/` context and attachments land where the confined CLI and the guest
   see them. A failed ensure/mint fails the drive visibly — it never falls back

@@ -5,6 +5,7 @@ import (
 	"go/parser"
 	"go/token"
 	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -32,6 +33,25 @@ func TestHostConfineFromEnv(t *testing.T) {
 	}
 	if got := PassthroughFromEnv(env(map[string]string{EnvVMExecPassthrough: " git, ,gh "})); !reflect.DeepEqual(got, []string{"git", "gh"}) {
 		t.Fatalf("PassthroughFromEnv = %v", got)
+	}
+}
+
+// One allowlist for both ends: the default list plus a run's extra names,
+// each once; ForwardedEnv admits exactly what it lists.
+func TestForwardEnvAllowlistAndForwardedEnv(t *testing.T) {
+	if got := ForwardEnvAllowlist(nil); !reflect.DeepEqual(got, VMExecForwardEnv) {
+		t.Fatalf("no extra = %v; want the default list", got)
+	}
+	allow := ForwardEnvAllowlist([]string{"EXAMPLE_API_KEY", "TERM", "EXAMPLE_*"})
+	if len(allow) != len(VMExecForwardEnv)+2 || !slices.Contains(allow, "EXAMPLE_API_KEY") || !slices.Contains(allow, "EXAMPLE_*") {
+		t.Fatalf("allowlist = %v", allow)
+	}
+	environ := []string{"TERM=xterm", "EXAMPLE_API_KEY=k", "EXAMPLE_URL=u", "SECRET=s", "LC_ALL=C"}
+	if got := ForwardedEnv(environ, VMExecForwardEnv); !reflect.DeepEqual(got, map[string]string{"TERM": "xterm", "LC_ALL": "C"}) {
+		t.Fatalf("default forward = %v", got)
+	}
+	if got := ForwardedEnv(environ, allow); !reflect.DeepEqual(got, map[string]string{"TERM": "xterm", "LC_ALL": "C", "EXAMPLE_API_KEY": "k", "EXAMPLE_URL": "u"}) {
+		t.Fatalf("forward with the owner's names = %v", got)
 	}
 }
 

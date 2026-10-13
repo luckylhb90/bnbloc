@@ -945,7 +945,14 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   `requireSandboxForBorrow` is on: then they are refused BEFORE any quota is
   reserved, with a `sandbox-required` notice (job failure `sandbox_required`).
   An unreadable policy refuses too. A failed ensure/mint fails the drive; it
-  never falls back to the host. Sessions and locks are keyed by execution
+  never falls back to the host. What environment crosses into the guest is
+  `protocol.ForwardEnvAllowlist(extra)` at both ends (the space
+  `envAllowlist`, re-ensured every turn, and vmexec's `ForwardedEnv`):
+  the default list plus, only where `decideSandbox` says `ownerEnv` (the
+  owner's own drive, no foreign script content), the names the member
+  listed (`BNBLOC_SANDBOX_ENV`, rule `pkgmeta.ValidForwardEnv`, the
+  desktop's pinned copy `valid_forward_env`). Names only travel; never pass
+  the owner's names to a borrowed or platform drive. Sessions and locks are keyed by execution
   kind (`driveKey`): switching host↔sandbox starts a new session and
   workspace (created IN the sandbox workdir via `CreateWorkspaceAt`). Nothing
   is moved.

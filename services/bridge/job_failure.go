@@ -82,8 +82,14 @@ func (b *Bridge) refuse(ctx context.Context, d *drive, r *refusal) {
 // diagnostics are the run report the caller assembled.
 func (b *Bridge) fail(ctx context.Context, d *drive, err error, diagnostics map[string]any) {
 	reason := driveFailureReason(err)
+	text := driveErrorText(d.job.Provider, err)
+	if agentFailed(err) && d.ownSandbox {
+		// No core declares the environment its agent needs, so a sandboxed
+		// own run whose agent failed says where the owner lets it in.
+		text += " " + sandboxEnvHint
+	}
 	b.postNotice(ctx, d.ref(), wire.JobNotice{
-		Kind: driveFailureNotice(err), Text: driveErrorText(d.job.Provider, err), Detail: agentErrorDetail(err),
+		Kind: driveFailureNotice(err), Text: text, Detail: agentErrorDetail(err),
 		OwnerUserID: d.owner, Provider: d.job.Provider, FailReason: string(reason),
 	})
 	b.failJob(ctx, d.job.JobID, reason, diagnostics)
@@ -183,6 +189,11 @@ func agentFailed(err error) bool {
 	var failed turnFailedError
 	return errors.As(err, &failed)
 }
+
+// sandboxEnvHint ends the notice of an own sandboxed run whose agent
+// reported an error: the guest gets only the default environment plus what
+// the owner listed (SandboxConfig.Env).
+const sandboxEnvHint = "It ran in the agent sandbox, which receives only the environment variables listed in Settings → Agent sandbox → Environment passed to sandboxed agents: add any its agent needs from this computer, such as an API key."
 
 // maxNoticeDetailBytes bounds the agent's own error output a notice
 // carries (wire.JobNotice.Detail).

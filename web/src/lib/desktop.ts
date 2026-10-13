@@ -58,6 +58,10 @@ export interface DesktopSettings {
   /** Which of this member's agent runs execute their commands in the local
    *  sandbox VM. Mirrors BNBLOC_SANDBOX_MODE. */
   sandboxMode: SandboxMode;
+  /** Environment variable names (or PREFIX* patterns) passed into the
+   *  sandboxed runs of this member's own agents; names only. Shell-owned:
+   *  changed through setSandboxEnv. Mirrors BNBLOC_SANDBOX_ENV. */
+  sandboxEnv: string[];
 }
 
 export interface AppInfo {
@@ -325,6 +329,16 @@ export const desktop = {
     })) as SandboxStatus;
   },
 
+  // The names passed into the sandboxed runs of the member's own agents
+  // (refused whole when one is not a valid name; the error says which).
+  async setSandboxEnv(names: string[]): Promise<SandboxStatus | null> {
+    const t = tauri();
+    if (!t) return null;
+    return (await t.invoke("sandbox_env_set", { names }).catch((e: unknown) => {
+      throw new Error(e instanceof Error ? e.message : String(e));
+    })) as SandboxStatus;
+  },
+
   async restartSandboxVm(): Promise<SandboxStatus | null> {
     const t = tauri();
     if (!t) return null;
@@ -463,6 +477,7 @@ export async function ensureBridgeRunning(subject: string, gatewayUrl: string, t
       serveAllOwners: false,
       gatewayToken: "",
       sandboxMode: "borrowed",
+      sandboxEnv: [],
       gatewayUrl: "",
       owner: "",
       tenant: "",

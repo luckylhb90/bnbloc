@@ -90,6 +90,15 @@ pub struct Settings {
     /// to the bridge as `BNBLOC_SANDBOX_MODE`; tenant policy may raise it.
     #[serde(default)]
     pub sandbox_mode: SandboxMode,
+    /// Environment variable names (or `PREFIX*` patterns) the member lets
+    /// into the sandboxed runs of their own agents, beyond the default
+    /// (terminal, locale, git identity). Names only, never values: a value
+    /// is read from the agent's own environment when a command crosses into
+    /// the VM. Borrowed and platform runs never get them. Handed to the
+    /// bridge as `BNBLOC_SANDBOX_ENV`; validated by
+    /// `sandbox::valid_forward_env` when saved.
+    #[serde(default)]
+    pub sandbox_env: Vec<String>,
 }
 
 /// The member's sandbox setting (`BNBLOC_SANDBOX_MODE`).
@@ -143,12 +152,15 @@ pub fn normalize_gateway_url(raw: &str) -> String {
 impl Settings {
     /// Take the web's settings form: every field but the ones the shell
     /// owns, which only their own command changes (`sandbox_mode`:
-    /// `sandbox_mode_set`). The web writes whole snapshots, which may be
-    /// stale; a stale snapshot must not revert a shell-owned field.
+    /// `sandbox_mode_set`; `sandbox_env`: `sandbox_env_set`). The web writes
+    /// whole snapshots, which may be stale; a stale snapshot must not revert
+    /// a shell-owned field.
     pub fn apply_web(&mut self, from_web: Settings) {
         let sandbox_mode = self.sandbox_mode;
+        let sandbox_env = std::mem::take(&mut self.sandbox_env);
         *self = from_web;
         self.sandbox_mode = sandbox_mode;
+        self.sandbox_env = sandbox_env;
     }
 
     /// True when the minimum fields to run the bridge are present. The bridge
@@ -334,16 +346,19 @@ mod tests {
         let mut current = Settings {
             owner: "maya".into(),
             sandbox_mode: SandboxMode::All,
+            sandbox_env: vec!["EXAMPLE_API_KEY".into()],
             ..Default::default()
         };
         let stale_form = Settings {
             owner: "maya".into(),
             tenant: "t2".into(),
             sandbox_mode: SandboxMode::Borrowed,
+            sandbox_env: vec![],
             ..Default::default()
         };
         current.apply_web(stale_form);
         assert_eq!(current.sandbox_mode, SandboxMode::All);
+        assert_eq!(current.sandbox_env, vec!["EXAMPLE_API_KEY".to_string()]);
         assert_eq!(current.tenant, "t2", "the web's fields are taken");
     }
 

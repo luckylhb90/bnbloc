@@ -10,11 +10,13 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
 
 	corepkg "github.com/luckylhb90/bnbloc/core"
+	coreprotocol "github.com/luckylhb90/bnbloc/core/protocol"
 	"github.com/luckylhb90/bnbloc/internal/store"
 	sandbox "github.com/luckylhb90/bnbloc/sandbox/protocol"
 )
@@ -258,7 +260,7 @@ func (g *sandboxGateway) lastStatus() map[string]any {
 	return g.statuses[len(g.statuses)-1]
 }
 
-func sandboxBridge(t *testing.T, gw *sandboxGateway, sbx *fakeSandboxd, mode SandboxMode, prov *sandboxProv) (*Bridge, string) {
+func sandboxBridge(t *testing.T, gw *sandboxGateway, sbx *fakeSandboxd, mode SandboxMode, prov corepkg.Provider) (*Bridge, string) {
 	t.Helper()
 	root := t.TempDir()
 	cfg := SandboxConfig{Mode: mode}
@@ -530,15 +532,105 @@ func TestDecideSandbox(t *testing.T) {
 		// Someone else's script-bearing content forces the sandbox, own
 		// drive or not, and is refused where the sandbox cannot take it.
 		{"foreign content, own drive", false, []string{"lint kit"}, SandboxBorrowed, true, true, never, true, false},
+		{"foreign content, own drive, mode all", false, []string{"lint kit"}, SandboxAll, true, true, never, true, false},
 		{"foreign content, mode off", false, []string{"lint kit"}, SandboxOff, false, true, never, false, true},
 		{"foreign content, unsupported", true, []string{"lint kit"}, SandboxBorrowed, true, false, never, false, true},
 		{"foreign content, not ready", false, []string{"lint kit"}, SandboxAll, false, true, never, false, true},
 	}
+	// The owner's forwarded environment goes to exactly one kind of drive:
+	// their own, sandboxed, wearing nothing from someone else that runs
+	// scripts. Never a borrowed one, never one forced by foreign content.
+	ownerEnv := map[string]bool{"own in mode all": true}
 	for _, tc := range cases {
 		d := decideSandbox(tc.borrowed, tc.foreign, tc.mode, tc.ready, "", tc.supports, tc.policy, "alice", "codex")
-		if d.sandboxed != tc.wantSandboxed || (d.refuse != "") != tc.wantRefus {
+		if d.sandboxed != tc.wantSandboxed || (d.refuse != "") != tc.wantRefus || d.ownerEnv != ownerEnv[tc.name] {
 			t.Errorf("%s: %+v", tc.name, d)
 		}
+	}
+}
+
+// The member's forwarded names reach their own sandboxed drive (the space
+// allowlist and the descriptor), and a borrowed turn of the same agent
+// right after converges back to the default list: never the owner's names.
+func TestSandbox_ownDriveForwardsTheOwnersEnv_borrowedNever(t *testing.T) {
+	gw := newSandboxGateway(t, "room-1", false)
+	sbx := newFakeSandboxd(t)
+	prov := &sandboxProv{supports: true}
+	b, _ := sandboxBridge(t, gw, sbx, SandboxAll, prov)
+	owners := []string{"EXAMPLE_API_KEY", "EXAMPLE_*"}
+	b.sandbox.cfg.Env = owners
+	ctx := context.Background()
+
+	b.runBridgeJob(ctx, job("job-1", "alice"))
+	if prov.opts.Execution == nil || !slices.Equal(prov.opts.Execution.Sandbox.Env, owners) {
+		t.Fatalf("own drive execution env = %+v; want the owner's names", prov.opts.Execution)
+	}
+	if got := sbx.ensures[0].EnvAllowlist; !slices.Equal(got, coreprotocol.ForwardEnvAllowlist(owners)) {
+		t.Fatalf("own drive space allowlist = %v", got)
+	}
+
+	b.runBridgeJob(ctx, job("job-2", "bob"))
+	if len(prov.inputs) != 1 || prov.inputs[0].Execution == nil || len(prov.inputs[0].Execution.Sandbox.Env) != 0 {
+		t.Fatalf("borrowed turn execution = %+v; want no forwarded names", prov.inputs)
+	}
+	if got := sbx.ensures[1].EnvAllowlist; !slices.Equal(got, coreprotocol.VMExecForwardEnv) {
+		t.Fatalf("borrowed turn space allowlist = %v; want the default list only", got)
+	}
+	raw, _ := json.Marshal(prov.inputs)
+	if strings.Contains(string(raw), "EXAMPLE_") {
+		t.Fatalf("the owner's names reached a borrowed turn: %s", raw)
+	}
+}
+
+// failingSandboxProv is a sandboxExec core whose every turn fails: busy
+// once, then idle and failed with the agent's missing-key message.
+type failingSandboxProv struct{ sandboxProv }
+
+func (p *failingSandboxProv) PollTurn(ctx context.Context, ep corepkg.Endpoint, ws, s string) (corepkg.TurnStatus, error) {
+	ts, err := p.sandboxProv.PollTurn(ctx, ep, ws, s)
+	if ts.Idle {
+		ts.Failed, ts.FailMessage = true, "Missing environment variable: `EXAMPLE_API_KEY`"
+	}
+	return ts, err
+}
+
+// Cores declare no environment their agent needs, so an own sandboxed run
+// whose agent failed says where the owner lets variables into the sandbox;
+// a borrowed run's notice never points the borrower at the owner's setting.
+func TestSandbox_agentErrorHintsAtTheEnvSetting_onOwnRunsOnly(t *testing.T) {
+	for _, tc := range []struct {
+		requester string
+		hint      bool
+	}{{"alice", true}, {"bob", false}} {
+		gw := newSandboxGateway(t, "room-1", false)
+		prov := &failingSandboxProv{sandboxProv{supports: true}}
+		b, _ := sandboxBridge(t, gw, newFakeSandboxd(t), SandboxAll, prov)
+		b.runBridgeJob(context.Background(), job("job-1", tc.requester))
+
+		if st := gw.lastStatus(); st["status"] != "failed" || st["failureReason"] != "agent_error" {
+			t.Fatalf("%s: status = %v", tc.requester, st)
+		}
+		_, fresh := gw.stored()
+		if len(fresh) != 1 {
+			t.Fatalf("%s: rows = %+v; want the one notice", tc.requester, fresh)
+		}
+		text := payloadText(fresh[0])
+		if got := strings.Contains(text, "Environment passed to sandboxed agents"); got != tc.hint {
+			t.Fatalf("%s: notice %q; hint = %v, want %v", tc.requester, text, got, tc.hint)
+		}
+		if !strings.Contains(payloadField(fresh[0], "detail"), "EXAMPLE_API_KEY") {
+			t.Fatalf("%s: notice detail = %q", tc.requester, payloadField(fresh[0], "detail"))
+		}
+	}
+}
+
+func TestParseSandboxEnv(t *testing.T) {
+	env, refused := ParseSandboxEnv(" EXAMPLE_API_KEY, EXAMPLE_*\nEXAMPLE_API_KEY  BNBLOC_TOKEN,path,* ")
+	if !slices.Equal(env, []string{"EXAMPLE_API_KEY", "EXAMPLE_*"}) || !slices.Equal(refused, []string{"BNBLOC_TOKEN", "path", "*"}) {
+		t.Fatalf("ParseSandboxEnv = %v, refused %v", env, refused)
+	}
+	if env, refused := ParseSandboxEnv(""); env != nil || refused != nil {
+		t.Fatalf("empty = %v, %v", env, refused)
 	}
 }
 

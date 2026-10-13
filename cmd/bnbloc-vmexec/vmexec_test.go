@@ -149,6 +149,27 @@ func TestRun_streamsInTheSpace_withMappedCwdAndExactExitCode(t *testing.T) {
 	}
 }
 
+// The names the owner allowed for their own run (the descriptor's env)
+// cross with their host values; nothing else beyond the default does.
+func TestRun_forwardsTheDescriptorsEnvNames(t *testing.T) {
+	f, srv := newFakeSandbox(t)
+	f.respond = func(sandbox.ExecRequest, func() string) (string, string, int) { return "", "", 0 }
+	r := testRunner(t, srv, "/host/ws", nil, io.Discard, io.Discard)
+	r.cfg.Env = []string{"EXAMPLE_API_KEY", "EXAMPLE_BASE_*"}
+	r.environ = append(r.environ, "EXAMPLE_API_KEY=k-1", "EXAMPLE_BASE_URL=https://api.example.com", "EXAMPLE_OTHER=no")
+
+	if code := r.run(context.Background(), []string{"true"}, false); code != 0 {
+		t.Fatalf("code = %d", code)
+	}
+	env := f.execs[0].Env
+	if env["EXAMPLE_API_KEY"] != "k-1" || env["EXAMPLE_BASE_URL"] != "https://api.example.com" || env["TERM"] != "xterm" {
+		t.Fatalf("forwarded env = %v; want the allowed names with their host values", env)
+	}
+	if _, ok := env["EXAMPLE_OTHER"]; ok || env["SECRET_TOKEN"] != "" {
+		t.Fatalf("forwarded env = %v; a name nobody allowed crossed", env)
+	}
+}
+
 func TestRun_argvIsExact_andStdinIsPiped(t *testing.T) {
 	f, srv := newFakeSandbox(t)
 	f.respond = func(req sandbox.ExecRequest, stdin func() string) (string, string, int) {

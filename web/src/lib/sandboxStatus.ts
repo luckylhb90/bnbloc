@@ -23,6 +23,8 @@ export interface SandboxStatus {
   state: SandboxState;
   message: string;
   mode: SandboxMode;
+  // The names passed into the sandboxed runs of the member's own agents.
+  env: string[];
   isolation?: string;
   machine?: SandboxMachine;
   lastError?: string;

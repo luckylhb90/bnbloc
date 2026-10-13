@@ -15,6 +15,7 @@ func sampleExecution() *core.Execution {
 		VMExec: "/opt/vmexec", Workdir: "/h/bnbloc-workspaces/r1-c-p",
 		Mounts:      []core.PathMount{{Host: "/h/bnbloc-workspaces/r1-c-p", Guest: "/h/bnbloc-workspaces/r1-c-p"}},
 		Passthrough: []string{"gh"},
+		Env:         []string{"EXAMPLE_API_KEY", "EXAMPLE_*"},
 		HostConfine: core.HostConfine{Workspace: "/h/bnbloc-workspaces/r1-c-p", AllowRead: []string{"/opt/tools"}, DenyWrite: []string{"/h/bnbloc-workspaces/r1-c-p/.routing"}},
 	}}
 }
@@ -25,7 +26,7 @@ func TestExecutionWireShape(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, key := range []string{`"execution":{"mode":"sandbox"`, `"execToken":"tok"`, `"vmexec":"/opt/vmexec"`, `"mounts":[{"host":`, `"hostConfine":{"workspace":`, `"allowRead":["/opt/tools"]`, `"machine":"bnbloc"`, `"workdir":`} {
+	for _, key := range []string{`"execution":{"mode":"sandbox"`, `"execToken":"tok"`, `"vmexec":"/opt/vmexec"`, `"mounts":[{"host":`, `"hostConfine":{"workspace":`, `"allowRead":["/opt/tools"]`, `"machine":"bnbloc"`, `"workdir":`, `"env":["EXAMPLE_API_KEY","EXAMPLE_*"]`} {
 		if !strings.Contains(string(raw), key) {
 			t.Fatalf("wire %s lacks %s", raw, key)
 		}

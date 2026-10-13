@@ -54,7 +54,10 @@ therefore cannot pre-check; it can only explain (below).
   ends build their allowlist from `protocol.ForwardEnvAllowlist(extra)`: the
   space `envAllowlist` the bridge ensures every turn (so a borrowed turn
   after an own one converges back to the default) and vmexec's
-  `ForwardedEnv`.
+  `ForwardedEnv`. The space allowlist is the hard bound: the sandbox runtime
+  drops any name it does not list, so even a CLI process a core kept alive
+  from the owner's turn cannot pass the owner's names into a borrowed
+  turn's commands.
 - A sandboxed own drive whose agent reports an error gets a hint in its
   notice: variables the agent needs reach the sandbox only when listed in
   that setting.
@@ -128,19 +131,39 @@ with the reply.
 
 ## Tests
 
-- `TestOwnDriveForwardsTheOwnersEnvBorrowedNever` (bridge): own sandboxed
-  drive ensures the space with the owner's patterns and hands them in the
-  descriptor; a borrowed drive and a drive wearing foreign script content
-  get the default list only.
-- `TestForwardEnvAllowlistAndForwardedEnv`, `TestValidForwardEnvMatchesFixture`
-  (Go) and `forward_env_pattern_matches_go` (desktop): the rule and its pin.
-- `TestVMExecEnvRoundTrip` and the wire round trip cover the new field.
+Each was broken once on purpose (the fix reverted or weakened) and failed.
+
+- `TestSandbox_ownDriveForwardsTheOwnersEnv_borrowedNever` (bridge): the
+  own sandboxed drive ensures the space with the owner's names and hands
+  them in the descriptor; a borrowed turn of the same agent right after
+  converges back to the default list and carries no names.
+  `TestDecideSandbox`: `ownerEnv` only for an own drive, never a borrowed
+  one or one forced by foreign content. Broken by `ownerEnv: !forced`.
+- `TestRun_forwardsTheDescriptorsEnvNames` (vmexec): the listed names cross
+  with their host values, nothing else does. Broken by forwarding the
+  default list only.
+- `TestSandbox_agentErrorHintsAtTheEnvSetting_onOwnRunsOnly` (bridge): the
+  setting hint on an own run's agent error, never on a borrowed run's.
+- `TestValidForwardEnvMatchesFixture` (Go) and
+  `forward_env_pattern_matches_go` (desktop): the rule and its pin;
+  `TestParseSandboxEnv`, `forward_env_list_splits_dedupes_and_refuses_whole`,
+  `TestForwardEnvAllowlistAndForwardedEnv`; `TestVMExecEnvRoundTrip` and
+  `TestExecutionWireShape` cover the new descriptor field; the desktop's
+  bridge env and fingerprint tests cover `BNBLOC_SANDBOX_ENV` and the
+  restart on a changed list.
 - `TestFailedTurnIsNeverAReply` (bridge): a core that reports `failed` and
-  leaves its error as the last message ends the job `agent_error` with a
-  fenced detail; the error never reaches the room as a reply.
-- `TestOneTurnPublishesOneSiteVersion` (bridge): a turn that rewrites a site
-  on every poll publishes exactly one site version.
+  leaves its error as the turn's last message ends the job `agent_error`
+  with the error in the notice's detail, with and without progress posted
+  before; the error never reaches the room as a reply. Broken by the old
+  `ts.Failed && !posted` rule (the job ended `replied` with the error as the
+  reply: the QA symptom) and by dropping `agentFailed` from settle.
+- `testNoticeCarriesTheAgentErrorApart` (web) over the golden
+  `internal/wire/testdata/job_notice.json`.
+- `TestOneTurnPublishesOneSiteVersion` (bridge): a turn that rewrites its
+  site on every poll publishes exactly one site version, the final one.
+  Broken by publishing on every poll of the running turn: 7 versions.
 
 ## Landing
 
-- (filled in below as commits land)
+- `bb38150` bridge: an agent's error fails its job; deliverables publish
+  once per turn (2, 3).

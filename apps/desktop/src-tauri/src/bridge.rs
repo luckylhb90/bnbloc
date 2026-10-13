@@ -530,7 +530,7 @@ fn env_for(
     // The local sandbox (BNBLOC_SANDBOX_*): the member's mode always, the
     // sidecar URL/bearer/machine only while it is ready. Memory only — the
     // bearer is never written to settings or logged.
-    crate::internal_ext::sandbox::extend_bridge_env(app, &mut env, s.sandbox_mode);
+    crate::internal_ext::sandbox::extend_bridge_env(app, &mut env, s.sandbox_mode, &s.sandbox_env);
     env
 }
 

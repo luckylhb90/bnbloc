@@ -172,7 +172,7 @@ func (r *runner) exec(ctx context.Context, command []string, guestCwd string, pi
 	ep := r.endpoint()
 	req := sandbox.ExecRequest{
 		Command:   command,
-		Env:       coreprotocol.ForwardedEnv(r.environ),
+		Env:       coreprotocol.ForwardedEnv(r.environ, coreprotocol.ForwardEnvAllowlist(r.cfg.Env)),
 		Workdir:   guestCwd,
 		StdinPipe: pipeStdin,
 	}

@@ -60,9 +60,11 @@ impl Adapter {
         // too: it appearing, going away, or the mode changing restarts the
         // bridge through the same stabilized path.
         let handoff = self.sandbox_handoff();
-        if let Some(fingerprint) =
-            super::sandbox::bridge_fingerprint(self.sandbox_mode(), handoff.as_ref())
-        {
+        if let Some(fingerprint) = super::sandbox::bridge_fingerprint(
+            self.sandbox_mode(),
+            &self.sandbox_env(),
+            handoff.as_ref(),
+        ) {
             set.insert(super::sandbox::BRIDGE_KEY.to_string(), fingerprint);
         }
         // So is the member directory the bridge reads its owner's MCP

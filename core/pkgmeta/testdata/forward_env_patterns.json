@@ -1,0 +1,39 @@
+{
+  "valid": [
+    "EXAMPLE_API_KEY",
+    "EXAMPLE_*",
+    "OPENAI_BASE_URL",
+    "HOMEBREW_GITHUB_API_TOKEN",
+    "PYTHONPATH",
+    "A",
+    "X_*"
+  ],
+  "invalid": [
+    "",
+    "*",
+    "example_api_key",
+    "1KEY",
+    "KEY-NAME",
+    "KEY NAME",
+    "KEY=VALUE",
+    "EXAMPLE_**",
+    "*_API_KEY",
+    "BNBLOC_VMEXEC_TOKEN",
+    "BNBLOC_*",
+    "BN*",
+    "B*",
+    "HOME",
+    "HOME*",
+    "H*",
+    "PATH",
+    "PA*",
+    "P*",
+    "USER",
+    "SHELL",
+    "TMPDIR",
+    "LD_PRELOAD",
+    "LD_*",
+    "L*",
+    "DYLD_INSERT_LIBRARIES"
+  ]
+}

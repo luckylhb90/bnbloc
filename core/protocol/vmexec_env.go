@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 )
@@ -25,6 +26,7 @@ const (
 	EnvVMExecWorkdir     = "BNBLOC_VMEXEC_WORKDIR"
 	EnvVMExecMounts      = "BNBLOC_VMEXEC_MOUNTS"      // JSON [{"host":…,"guest":…}]
 	EnvVMExecPassthrough = "BNBLOC_VMEXEC_PASSTHROUGH" // comma-separated command names
+	EnvVMExecEnv         = "BNBLOC_VMEXEC_ENV"         // comma-separated env names / PREFIX* forwarded beyond VMExecForwardEnv
 	EnvConfineWorkspace  = "BNBLOC_CONFINE_WORKSPACE"
 	EnvConfineAllowRead  = "BNBLOC_CONFINE_ALLOW_READ"  // JSON array of host paths
 	EnvConfineAllowWrite = "BNBLOC_CONFINE_ALLOW_WRITE" // JSON array of host paths
@@ -48,6 +50,7 @@ func VMExecEnv(s SandboxExecution) []string {
 		EnvVMExecWorkdir + "=" + s.Workdir,
 		EnvVMExecMounts + "=" + string(mountsJSON),
 		EnvVMExecPassthrough + "=" + strings.Join(s.Passthrough, ","),
+		EnvVMExecEnv + "=" + strings.Join(s.Env, ","),
 	}
 	if c := s.HostConfine; c != nil {
 		read, _ := json.Marshal(nonNil(c.AllowRead))
@@ -105,6 +108,7 @@ func SandboxFromEnv(getenv func(string) string) (SandboxExecution, error) {
 		}
 	}
 	s.Passthrough = PassthroughFromEnv(getenv)
+	s.Env = listFromEnv(getenv, EnvVMExecEnv)
 	c, err := HostConfineFromEnv(getenv)
 	if err != nil {
 		return SandboxExecution{}, err
@@ -116,8 +120,13 @@ func SandboxFromEnv(getenv func(string) string) (SandboxExecution, error) {
 // PassthroughFromEnv parses BNBLOC_VMEXEC_PASSTHROUGH: the command names
 // that run on the host.
 func PassthroughFromEnv(getenv func(string) string) []string {
+	return listFromEnv(getenv, EnvVMExecPassthrough)
+}
+
+// listFromEnv parses one comma-separated list variable, dropping blanks.
+func listFromEnv(getenv func(string) string, variable string) []string {
 	var out []string
-	for _, name := range strings.Split(getenv(EnvVMExecPassthrough), ",") {
+	for _, name := range strings.Split(getenv(variable), ",") {
 		if name = strings.TrimSpace(name); name != "" {
 			out = append(out, name)
 		}
@@ -161,23 +170,41 @@ func sorted(v []string) []string {
 }
 
 // VMExecForwardEnv is the host environment vmexec forwards into the guest
-// (terminal, locale, git identity — never credentials): exact names, or a
-// prefix ending in "*". The bridge uses the same list as the space
-// envAllowlist, so both ends agree on what may cross.
+// by default (terminal, locale, git identity — never credentials): exact
+// names, or a prefix ending in "*".
 var VMExecForwardEnv = []string{
 	"TERM", "COLORTERM", "LANG", "LC_*", "TZ", "CI", "NO_COLOR", "FORCE_COLOR", "CLICOLOR", "COLUMNS", "LINES",
 	"GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL", "GIT_COMMITTER_NAME", "GIT_COMMITTER_EMAIL",
 }
 
-// ForwardedEnv picks the VMExecForwardEnv entries out of a KEY=VALUE list.
-func ForwardedEnv(environ []string) map[string]string {
+// ForwardEnvAllowlist is what one sandboxed run lets cross into the guest:
+// VMExecForwardEnv plus extra, the patterns its owner allowed for their own
+// runs (SandboxExecution.Env; pkgmeta.ValidForwardEnv, checked by the
+// bridge; empty for any run on someone else's behalf). Both ends use it:
+// the bridge as the space envAllowlist it ensures every turn, vmexec to
+// pick what it forwards (ForwardedEnv), so they agree on what may cross.
+// Only names cross here; each value is read from the agent's own host
+// environment when a command runs.
+func ForwardEnvAllowlist(extra []string) []string {
+	out := append([]string(nil), VMExecForwardEnv...)
+	for _, p := range extra {
+		if !slices.Contains(out, p) {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// ForwardedEnv picks the entries of a KEY=VALUE list that allow admits
+// (exact names, or a prefix ending in "*"; ForwardEnvAllowlist).
+func ForwardedEnv(environ, allow []string) map[string]string {
 	out := map[string]string{}
 	for _, kv := range environ {
 		k, v, ok := strings.Cut(kv, "=")
 		if !ok {
 			continue
 		}
-		for _, pat := range VMExecForwardEnv {
+		for _, pat := range allow {
 			if k == pat || (strings.HasSuffix(pat, "*") && strings.HasPrefix(k, strings.TrimSuffix(pat, "*"))) {
 				out[k] = v
 				break

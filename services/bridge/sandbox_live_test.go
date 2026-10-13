@@ -49,11 +49,11 @@ func TestSandboxPrepare_liveSidecar(t *testing.T) {
 	if ready, reason := rt.status(ctx); !ready {
 		t.Fatalf("sandbox not ready: %s", reason)
 	}
-	exec, err := rt.prepare(ctx, "room-1", "core-a", "codex", "alice")
+	exec, err := rt.prepare(ctx, "room-1", "core-a", "codex", "alice", nil)
 	if err != nil {
 		t.Fatalf("prepare: %v", err)
 	}
-	if _, err := rt.prepare(ctx, "room-1", "core-a", "codex", "alice"); err != nil {
+	if _, err := rt.prepare(ctx, "room-1", "core-a", "codex", "alice", nil); err != nil {
 		t.Fatalf("re-prepare (per-turn re-ensure): %v", err)
 	}
 	s := exec.Sandbox

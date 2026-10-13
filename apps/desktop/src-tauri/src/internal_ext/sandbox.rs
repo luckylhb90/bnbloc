@@ -49,6 +49,8 @@ pub(super) const ENV_VMEXEC: &str = "BNBLOC_SANDBOX_VMEXEC";
 pub(super) const ENV_MODE: &str = "BNBLOC_SANDBOX_MODE";
 pub(super) const ENV_MACHINE: &str = "BNBLOC_SANDBOX_MACHINE";
 pub(super) const ENV_WORKSPACES_ROOT: &str = "BNBLOC_SANDBOX_WORKSPACES_ROOT";
+/// The names the member lets into their own sandboxed runs (comma list).
+pub(super) const ENV_FORWARD: &str = "BNBLOC_SANDBOX_ENV";
 /// The bridge-stabilizing watcher's key for the sandbox handoff (a slash
 /// never appears in a core name, so it cannot collide with one).
 pub(super) const BRIDGE_KEY: &str = "sandbox/handoff";
@@ -120,10 +122,12 @@ pub(crate) struct BridgeHandoff {
     pub(crate) workspaces_root: PathBuf,
 }
 
-/// The bridge env for `mode` and the current handoff: the mode always; the
-/// rest only while ready and not off.
+/// The bridge env for `mode`, the member's forwarded names and the current
+/// handoff: the mode always; the rest (the names included) only while
+/// ready and not off.
 pub(crate) fn bridge_env(
     mode: SandboxMode,
+    forward: &[String],
     handoff: Option<&BridgeHandoff>,
 ) -> Vec<(String, String)> {
     let mut env = vec![(ENV_MODE.to_string(), mode.as_str().to_string())];
@@ -136,6 +140,9 @@ pub(crate) fn bridge_env(
             ENV_WORKSPACES_ROOT.into(),
             h.workspaces_root.to_string_lossy().into_owned(),
         ));
+        if !forward.is_empty() {
+            env.push((ENV_FORWARD.into(), forward.join(",")));
+        }
     }
     env
 }
@@ -145,17 +152,77 @@ pub(crate) fn bridge_env(
 /// seq and therefore a new token).
 pub(super) fn bridge_fingerprint(
     mode: SandboxMode,
+    forward: &[String],
     handoff: Option<&BridgeHandoff>,
 ) -> Option<String> {
     let h = handoff.filter(|_| mode != SandboxMode::Off)?;
     Some(format!(
-        "{}|{}|{}|{}|{}",
+        "{}|{}|{}|{}|{}|{}",
         mode.as_str(),
         h.seq,
         h.url,
         h.machine,
-        h.vmexec.display()
+        h.vmexec.display(),
+        forward.join(",")
     ))
+}
+
+/// The one rule for an environment variable pattern a member lets into
+/// their own sandboxed runs: the Go owner's (`pkgmeta.ValidForwardEnv`), as
+/// a copy pinned by `core/pkgmeta/testdata/forward_env_patterns.json`
+/// (`forward_env_pattern_matches_go`). An upper-case identifier, optionally
+/// followed by `*` for a prefix; never one that can match a name the
+/// sandbox or bnbloc owns.
+pub(crate) fn valid_forward_env(pattern: &str) -> bool {
+    const RESERVED: &[&str] = &[
+        "BNBLOC_*", "HOME", "USER", "LOGNAME", "SHELL", "PATH", "PWD", "OLDPWD", "TMPDIR",
+        "HOSTNAME", "LD_*", "DYLD_*",
+    ];
+    let (name, is_prefix) = match pattern.strip_suffix('*') {
+        Some(name) => (name, true),
+        None => (pattern, false),
+    };
+    let mut chars = name.chars();
+    let shaped = chars.next().is_some_and(|c| c.is_ascii_uppercase())
+        && chars.all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_');
+    if !shaped {
+        return false;
+    }
+    RESERVED.iter().all(|r| {
+        let (owned, owned_prefix) = match r.strip_suffix('*') {
+            Some(owned) => (owned, true),
+            None => (*r, false),
+        };
+        !((is_prefix && owned.starts_with(name))
+            || (owned_prefix && name.starts_with(owned))
+            || name == owned)
+    })
+}
+
+/// The member's list as entered (comma, space or newline separated):
+/// each pattern once, in order, or the patterns the rule refuses.
+pub(crate) fn forward_env_list(raw: &[String]) -> Result<Vec<String>, String> {
+    let mut out: Vec<String> = Vec::new();
+    let mut refused: Vec<String> = Vec::new();
+    for p in raw
+        .iter()
+        .flat_map(|s| s.split(|c: char| c == ',' || c.is_whitespace()))
+        .filter(|p| !p.is_empty())
+    {
+        if !valid_forward_env(p) {
+            refused.push(p.to_string());
+        } else if !out.iter().any(|o| o == p) {
+            out.push(p.to_string());
+        }
+    }
+    if refused.is_empty() {
+        Ok(out)
+    } else {
+        Err(format!(
+            "Not an environment variable name a sandboxed run may receive: {}. Use upper-case names like EXAMPLE_API_KEY, or a prefix like EXAMPLE_*; bnbloc's own and the system's variables (BNBLOC_*, HOME, PATH, …) cannot be passed.",
+            refused.join(", ")
+        ))
+    }
 }
 
 /// The status the Settings → Agent sandbox section renders.
@@ -171,6 +238,9 @@ pub struct SandboxStatus {
     pub state: &'static str,
     pub message: String,
     pub mode: SandboxMode,
+    /// The names the member lets into their own sandboxed runs (never
+    /// values).
+    pub env: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub isolation: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -393,6 +463,14 @@ impl Adapter {
         self.app
             .try_state::<crate::AppState>()
             .map(|state| state.settings.lock().sandbox_mode)
+            .unwrap_or_default()
+    }
+
+    /// The names the member lets into their own sandboxed runs.
+    pub(super) fn sandbox_env(&self) -> Vec<String> {
+        self.app
+            .try_state::<crate::AppState>()
+            .map(|state| state.settings.lock().sandbox_env.clone())
             .unwrap_or_default()
     }
 
@@ -769,6 +847,7 @@ impl Adapter {
             state: "notInstalled",
             message: "No sandbox component is installed".into(),
             mode,
+            env: self.sandbox_env(),
             isolation: None,
             machine: None,
             last_error: state.last_error.clone(),
@@ -852,11 +931,12 @@ pub(crate) fn extend_bridge_env(
     app: Option<&tauri::AppHandle>,
     env: &mut std::collections::HashMap<String, String>,
     mode: SandboxMode,
+    forward: &[String],
 ) {
     let handoff = app
         .and_then(|app| app.try_state::<Adapter>())
         .and_then(|adapter| adapter.sandbox_handoff());
-    env.extend(bridge_env(mode, handoff.as_ref()));
+    env.extend(bridge_env(mode, forward, handoff.as_ref()));
 }
 
 // ------------------------------------------------------------------ commands
@@ -881,6 +961,21 @@ pub(crate) fn sandbox_mode_set(
 ) -> Result<SandboxStatus, String> {
     state.update_settings(|settings| settings.sandbox_mode = mode)?;
     adapter.sandbox_mode_changed();
+    Ok(adapter.sandbox_status())
+}
+
+/// Persist the names the member lets into their own sandboxed runs
+/// (Settings → Agent sandbox → "Environment passed to sandboxed agents"),
+/// refused whole when one is not a valid pattern (`forward_env_list`). The
+/// bridge-stabilizing watcher restarts the bridge when its env changes.
+#[tauri::command]
+pub(crate) fn sandbox_env_set(
+    state: tauri::State<'_, crate::AppState>,
+    adapter: tauri::State<'_, Adapter>,
+    names: Vec<String>,
+) -> Result<SandboxStatus, String> {
+    let names = forward_env_list(&names)?;
+    state.update_settings(|settings| settings.sandbox_env = names)?;
     Ok(adapter.sandbox_status())
 }
 
@@ -910,9 +1005,11 @@ mod tests {
     #[test]
     fn bridge_env_carries_the_mode_always_and_the_rest_only_while_ready() {
         let h = handoff();
-        let env: std::collections::HashMap<_, _> = bridge_env(SandboxMode::Borrowed, Some(&h))
-            .into_iter()
-            .collect();
+        let none: &[String] = &[];
+        let env: std::collections::HashMap<_, _> =
+            bridge_env(SandboxMode::Borrowed, none, Some(&h))
+                .into_iter()
+                .collect();
         assert_eq!(env[ENV_MODE], "borrowed");
         assert_eq!(env[ENV_URL], "http://127.0.0.1:50123");
         assert_eq!(env[ENV_TOKEN], "tok-secret-value");
@@ -922,13 +1019,20 @@ mod tests {
         );
         assert_eq!(env[ENV_MACHINE], "bnbloc");
         assert_eq!(env[ENV_WORKSPACES_ROOT], "/Users/me/bnbloc-workspaces");
+        assert!(!env.contains_key(ENV_FORWARD), "no names: no variable");
+
+        let forward = vec!["EXAMPLE_API_KEY".to_string(), "EXAMPLE_*".to_string()];
+        let env: std::collections::HashMap<_, _> = bridge_env(SandboxMode::All, &forward, Some(&h))
+            .into_iter()
+            .collect();
+        assert_eq!(env[ENV_FORWARD], "EXAMPLE_API_KEY,EXAMPLE_*");
 
         assert_eq!(
-            bridge_env(SandboxMode::All, None),
+            bridge_env(SandboxMode::All, &forward, None),
             vec![(ENV_MODE.to_string(), "all".to_string())]
         );
         assert_eq!(
-            bridge_env(SandboxMode::Off, Some(&h)),
+            bridge_env(SandboxMode::Off, &forward, Some(&h)),
             vec![(ENV_MODE.to_string(), "off".to_string())],
             "off never hands the sandbox over"
         );
@@ -937,21 +1041,68 @@ mod tests {
     #[test]
     fn the_token_never_appears_in_the_fingerprint_or_debug_output() {
         let h = handoff();
-        let fp = bridge_fingerprint(SandboxMode::Borrowed, Some(&h)).expect("ready");
+        let none: &[String] = &[];
+        let fp = bridge_fingerprint(SandboxMode::Borrowed, none, Some(&h)).expect("ready");
         assert!(!fp.contains("tok-secret-value"), "{fp}");
         assert!(!format!("{h:?}").contains("tok-secret-value"));
         // The fingerprint changes with everything the bridge env carries.
         assert_ne!(
             Some(fp.clone()),
-            bridge_fingerprint(SandboxMode::All, Some(&h))
+            bridge_fingerprint(SandboxMode::All, none, Some(&h))
+        );
+        assert_ne!(
+            Some(fp.clone()),
+            bridge_fingerprint(
+                SandboxMode::Borrowed,
+                &["EXAMPLE_API_KEY".to_string()],
+                Some(&h)
+            ),
+            "a changed name list restarts the bridge"
         );
         let mut relaunched = h.clone();
         relaunched.seq += 1;
         assert_ne!(
             Some(fp),
-            bridge_fingerprint(SandboxMode::Borrowed, Some(&relaunched))
+            bridge_fingerprint(SandboxMode::Borrowed, none, Some(&relaunched))
         );
-        assert_eq!(bridge_fingerprint(SandboxMode::Off, Some(&h)), None);
-        assert_eq!(bridge_fingerprint(SandboxMode::Borrowed, None), None);
+        assert_eq!(bridge_fingerprint(SandboxMode::Off, none, Some(&h)), None);
+        assert_eq!(bridge_fingerprint(SandboxMode::Borrowed, none, None), None);
+    }
+
+    /// The desktop's copy of the forwarding rule agrees with the Go owner
+    /// (`pkgmeta.ValidForwardEnv`) on the shared fixture.
+    #[test]
+    fn forward_env_pattern_matches_go() {
+        #[derive(serde::Deserialize)]
+        struct Fixture {
+            valid: Vec<String>,
+            invalid: Vec<String>,
+        }
+        let fixture: Fixture = serde_json::from_str(include_str!(
+            "../../../../../core/pkgmeta/testdata/forward_env_patterns.json"
+        ))
+        .expect("fixture");
+        assert!(!fixture.valid.is_empty() && !fixture.invalid.is_empty());
+        for p in &fixture.valid {
+            assert!(valid_forward_env(p), "valid_forward_env({p:?}) = false");
+        }
+        for p in &fixture.invalid {
+            assert!(!valid_forward_env(p), "valid_forward_env({p:?}) = true");
+        }
+    }
+
+    #[test]
+    fn forward_env_list_splits_dedupes_and_refuses_whole() {
+        assert_eq!(
+            forward_env_list(&[
+                " EXAMPLE_API_KEY, EXAMPLE_*\nEXAMPLE_API_KEY ".into(),
+                String::new()
+            ]),
+            Ok(vec!["EXAMPLE_API_KEY".to_string(), "EXAMPLE_*".to_string()])
+        );
+        assert_eq!(forward_env_list(&[]), Ok(vec![]));
+        let err = forward_env_list(&["EXAMPLE_API_KEY".into(), "PATH".into(), "BNBLOC_X".into()])
+            .expect_err("refused");
+        assert!(err.contains("PATH, BNBLOC_X"), "{err}");
     }
 }

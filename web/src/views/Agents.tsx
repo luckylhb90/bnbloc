@@ -74,6 +74,7 @@ const EMPTY: DesktopSettings = {
   serveAllOwners: false,
   gatewayToken: "",
   sandboxMode: "borrowed",
+  sandboxEnv: [],
 };
 
 export function Agents() {

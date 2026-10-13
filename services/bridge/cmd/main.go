@@ -76,8 +76,16 @@ func main() {
 	if err != nil {
 		log.Fatalf("bnbloc-bridge: %v", err)
 	}
+	// The names the member lets into their own sandboxed runs: an entry the
+	// rule refuses is dropped and logged, never fatal (the desktop refuses
+	// it on save; a stale settings file must not crash-loop the bridge).
+	sandboxEnv, refusedEnv := bridge.ParseSandboxEnv(config.FromEnvRaw("BNBLOC_SANDBOX_ENV"))
+	if len(refusedEnv) > 0 {
+		log.Printf("bnbloc-bridge: BNBLOC_SANDBOX_ENV: ignoring %q (not an environment variable name or PREFIX* pattern a sandboxed run may receive)", refusedEnv)
+	}
 	sandboxCfg := bridge.SandboxConfig{
 		Mode:           sandboxMode,
+		Env:            sandboxEnv,
 		URL:            strings.TrimRight(strings.TrimSpace(config.FromEnvRaw("BNBLOC_SANDBOX_URL")), "/"),
 		Token:          strings.TrimSpace(config.FromEnvRaw("BNBLOC_SANDBOX_TOKEN")),
 		VMExec:         strings.TrimSpace(config.FromEnvRaw("BNBLOC_SANDBOX_VMEXEC")),

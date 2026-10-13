@@ -416,6 +416,7 @@ pub fn run() {
             internal_ext::sandbox::sandbox_status,
             internal_ext::sandbox::sandbox_mode_get,
             internal_ext::sandbox::sandbox_mode_set,
+            internal_ext::sandbox::sandbox_env_set,
             internal_ext::sandbox::sandbox_restart_vm,
         ])
         .on_page_load(|webview, payload| {

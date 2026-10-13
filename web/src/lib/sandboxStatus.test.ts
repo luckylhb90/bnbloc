@@ -22,6 +22,7 @@ const base: SandboxStatus = {
   state: "ready",
   message: "VM up",
   mode: "borrowed",
+  env: [],
   timings: { sidecarReadyMs: 120, prewarmMs: 900 },
   handedToBridge: true,
   isolation: "microvm",

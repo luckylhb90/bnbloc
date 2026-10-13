@@ -53,6 +53,9 @@ type drive struct {
 	// host); unsandboxed says why a borrowed drive is not sandboxed (stage 4).
 	prepareExec func(context.Context) (*corepkg.Execution, error)
 	unsandboxed string
+	// ownSandbox: the sandboxed drive runs on its owner's own behalf and
+	// gets the owner's forwarded environment (sandboxDecision.ownerEnv).
+	ownSandbox bool
 
 	reservationID string // stage 5: the borrow's reservation ("" = none)
 	target        string // stage 6
@@ -208,11 +211,9 @@ func (b *Bridge) planExecution(ctx context.Context, d *drive) *refusal {
 	if team := d.content.teamRoster(); team != nil && d.caps.reachable && !d.caps.profile {
 		return refuseTeamUnsupported.refused("The team "+firstNonEmpty(team.Name, "expert")+" needs an agent that can use the room tools to ask its members; "+d.job.Provider+" cannot. Nothing ran.", d.agent())
 	}
-	prepare, refuse, unavailable := b.planSandbox(ctx, d)
-	if refuse != "" {
+	if refuse := b.planSandbox(ctx, d); refuse != "" {
 		return refuseSandboxRequired.refused(refuse, b.sandboxDiagnostics(d))
 	}
-	d.prepareExec, d.unsandboxed = prepare, unavailable
 	return nil
 }
 

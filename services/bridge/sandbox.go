@@ -11,11 +11,14 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	corepkg "github.com/luckylhb90/bnbloc/core"
+	"github.com/luckylhb90/bnbloc/core/pkgmeta"
 	coreprotocol "github.com/luckylhb90/bnbloc/core/protocol"
 	sandbox "github.com/luckylhb90/bnbloc/sandbox/protocol"
 )
@@ -54,12 +57,32 @@ func ParseSandboxMode(raw string) (SandboxMode, error) {
 	}
 }
 
+// ParseSandboxEnv reads BNBLOC_SANDBOX_ENV (comma or whitespace separated):
+// the patterns pkgmeta.ValidForwardEnv admits, each once, and the entries
+// it refused.
+func ParseSandboxEnv(raw string) (env, refused []string) {
+	for _, p := range strings.FieldsFunc(raw, func(r rune) bool { return r == ',' || unicode.IsSpace(r) }) {
+		switch {
+		case !pkgmeta.ValidForwardEnv(p):
+			refused = append(refused, p)
+		case !slices.Contains(env, p):
+			env = append(env, p)
+		}
+	}
+	return env, refused
+}
+
 // SandboxConfig is the sandbox the desktop handed this bridge at launch. All
 // of it lives in memory only; Token is the sandbox ADMIN bearer: it never
 // leaves the bridge (cores get space-scoped exec tokens) and is never logged
 // (LogValue redacts the whole config).
 type SandboxConfig struct {
 	Mode SandboxMode
+	// Env is what the member lets into the sandboxed runs of their own
+	// agents beyond the default (BNBLOC_SANDBOX_ENV, ParseSandboxEnv):
+	// environment variable names or PREFIX* patterns, never values. Only
+	// a drive decideSandbox marks ownerEnv gets it.
+	Env []string
 	// URL / Token / VMExec / Machine / WorkspacesRoot are set only while the
 	// sandbox is ready and the mode is not off; any of them empty = the
 	// sandbox is unavailable.
@@ -224,8 +247,11 @@ func slugPart(s string, max int) string {
 // with no process left from before (the turn fence, sandbox_fence.go), the
 // space (re-ensured every turn: the runtime hands host-created entries to
 // the space user only on ensure), and a fresh space-scoped exec token. The
-// returned descriptor carries no admin credential.
-func (s *sandboxRuntime) prepare(ctx context.Context, room, core, provider, owner string) (*corepkg.Execution, error) {
+// returned descriptor carries no admin credential. env is the owner's
+// forwarded names for this drive (nil unless decideSandbox marked it
+// ownerEnv): the space's envAllowlist is re-ensured from it every turn, so
+// a turn for someone else after the owner's converges back to the default.
+func (s *sandboxRuntime) prepare(ctx context.Context, room, core, provider, owner string, env []string) (*corepkg.Execution, error) {
 	space := sandboxSpaceName(room, core, provider)
 	workdir := filepath.Join(s.cfg.WorkspacesRoot, space)
 	if err := os.MkdirAll(workdir, 0o700); err != nil {
@@ -247,7 +273,7 @@ func (s *sandboxRuntime) prepare(ctx context.Context, room, core, provider, owne
 	if _, err := s.client.EnsureSpace(ctx, s.endpoint(), s.cfg.Machine, space, sandbox.SpaceRequest{
 		Workdir:      workdir,
 		Mounts:       mounts,
-		EnvAllowlist: coreprotocol.VMExecForwardEnv,
+		EnvAllowlist: coreprotocol.ForwardEnvAllowlist(env),
 		Labels:       sandbox.Labels{Room: room, Core: core, Provider: provider, Owner: owner},
 	}); err != nil {
 		s.invalidate()
@@ -267,6 +293,7 @@ func (s *sandboxRuntime) prepare(ctx context.Context, room, core, provider, owne
 		VMExec:      s.cfg.VMExec,
 		Workdir:     workdir,
 		Mounts:      pathMounts(mounts),
+		Env:         env,
 		// The protected paths (the role the session wears, the room
 		// context, host-executed project config) are write-denied: a
 		// borrowed prompt can neither rewrite its role nor plant config a
@@ -298,6 +325,13 @@ func (s *sandboxRuntime) invalidate() {
 // sandboxDecision is how one drive runs.
 type sandboxDecision struct {
 	sandboxed bool
+	// ownerEnv: the sandboxed drive runs on its owner's own behalf, wearing
+	// nothing from someone else that runs scripts, so it gets the owner's
+	// forwarded environment (SandboxConfig.Env). Never a borrowed or
+	// platform drive, and never one forced into the sandbox by foreign
+	// content: the owner's secrets must not reach someone else's prompt or
+	// code.
+	ownerEnv bool
 	// refuse is the member-readable reason a borrowed drive is refused
 	// (tenant policy requires the sandbox); empty = run.
 	refuse string
@@ -332,11 +366,12 @@ func contentSandboxPrefix(foreign []string) string {
 // and an error when it is unreadable. A drive wearing someone else's
 // script-bearing content (foreign, the content's names) is sandboxed like a
 // borrowed one, and refused when it cannot be: such content never runs on
-// the owner's host.
+// the owner's host. Only a sandboxed drive that is neither borrowed nor
+// forced gets the owner's forwarded environment (ownerEnv).
 func decideSandbox(borrowed bool, foreign []string, mode SandboxMode, ready bool, notReadyReason string, coreSupports bool, requirePolicy func() (bool, error), owner, provider string) sandboxDecision {
 	forced := len(foreign) > 0
 	if ready && coreSupports && (mode == SandboxAll || ((borrowed || forced) && mode == SandboxBorrowed)) {
-		return sandboxDecision{sandboxed: true}
+		return sandboxDecision{sandboxed: true, ownerEnv: !borrowed && !forced}
 	}
 	if forced {
 		unavailable := sandboxUnavailable(mode, ready, notReadyReason, coreSupports, owner, provider)
@@ -419,31 +454,37 @@ func (b *Bridge) fetchSandboxPolicy(ctx context.Context, tenantKey string) (bool
 	return *out.RequireSandboxForBorrow, nil
 }
 
-// planSandbox decides how a drive runs (stage 4). prepare is non-nil for a
-// sandboxed drive; refuse is set when the drive must not run at all;
-// unavailable says why a borrowed drive is not sandboxed
-// (sandboxDecision.unavailable). Whether the core can run sandboxed is the
+// planSandbox decides how a drive runs (stage 4) and fills it in:
+// d.prepareExec readies a sandboxed turn (nil: the host), d.unsandboxed
+// says why a borrowed drive is not sandboxed (sandboxDecision.unavailable)
+// and d.ownSandbox whether the sandboxed drive gets its owner's forwarded
+// environment (sandboxDecision.ownerEnv). It returns the refusal text when
+// the drive must not run at all. Whether the core can run sandboxed is the
 // drive's capability snapshot.
-func (b *Bridge) planSandbox(ctx context.Context, d *drive) (prepare func(context.Context) (*corepkg.Execution, error), refuse, unavailable string) {
+func (b *Bridge) planSandbox(ctx context.Context, d *drive) (refuse string) {
 	s := b.sandbox
 	ready, reason := s.status(ctx)
 	dec := decideSandbox(d.borrowed, d.content.foreign, s.cfg.Mode, ready, reason, d.caps.workdir != nil, func() (bool, error) {
 		return b.requireSandboxForBorrow(ctx, d.job.TenantID)
 	}, d.owner, d.job.Provider)
-	if dec.refuse != "" {
-		return nil, dec.refuse, dec.unavailable
+	d.unsandboxed = dec.unavailable
+	if dec.refuse != "" || !dec.sandboxed {
+		return dec.refuse
 	}
-	if !dec.sandboxed {
-		return nil, "", dec.unavailable
+	var env []string
+	if dec.ownerEnv {
+		env = s.cfg.Env
 	}
+	d.ownSandbox = dec.ownerEnv
 	room, core, provider, owner := d.job.RoomID, d.core, d.job.Provider, d.owner
-	return func(ctx context.Context) (*corepkg.Execution, error) {
-		exec, err := s.prepare(ctx, room, core, provider, owner)
+	d.prepareExec = func(ctx context.Context) (*corepkg.Execution, error) {
+		exec, err := s.prepare(ctx, room, core, provider, owner, env)
 		if err != nil {
 			return nil, s.prepareFailure(ctx, err)
 		}
 		return exec, nil
-	}, "", ""
+	}
+	return ""
 }
 
 // prepareFailure is a failed prepare as the drive reports it: a

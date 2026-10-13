@@ -214,7 +214,10 @@ type Execution struct {
 // the Sandbox Protocol endpoint, a short-lived space-scoped exec token (a
 // secret: never logged, never persisted), the machine + space addressing,
 // the bnbloc-vmexec helper path, the host→guest mounts, the host commands
-// allowed to bypass the sandbox, and the host confinement of the CLI.
+// allowed to bypass the sandbox, the environment names the owner lets into
+// the guest beyond the default (Env: names or PREFIX* patterns, never
+// values; only on the owner's own runs), and the host confinement of the
+// CLI.
 type SandboxExecution struct {
 	URL         string
 	ExecToken   string
@@ -225,6 +228,7 @@ type SandboxExecution struct {
 	Workdir     string
 	Mounts      []PathMount
 	Passthrough []string
+	Env         []string
 	HostConfine HostConfine
 }
 

@@ -82,6 +82,7 @@ of a sandboxed session:
   "workdir": "/Users/m/bnbloc-workspaces/<space>",
   "mounts": [{"host": "/Users/m/bnbloc-workspaces/<space>", "guest": "/Users/m/bnbloc-workspaces/<space>"}],
   "passthrough": ["gh"],
+  "env": ["EXAMPLE_API_KEY"],
   "hostConfine": {"workspace": "/Users/m/bnbloc-workspaces/<space>", "allowRead": [], "allowWrite": [],
                   "denyWrite": ["/Users/m/bnbloc-workspaces/<space>/.routing-config"]}}}
 ```
@@ -94,7 +95,11 @@ the CLI's shell commands into the space through `bnbloc-vmexec` (`run`,
 `claude-prefix` for `CLAUDE_CODE_SHELL_PREFIX`, `hook <harness>` for
 command-rewriting hooks); file tools, MCP servers and hooks stay on the host.
 `protocol.VMExecEnv` turns the descriptor into the helper's environment
-(`BNBLOC_VMEXEC_*`, `BNBLOC_CONFINE_*`). `execToken` is a short-lived
+(`BNBLOC_VMEXEC_*`, `BNBLOC_CONFINE_*`). `env` lists the environment
+variable names (or `PREFIX*` patterns) vmexec forwards from the CLI's own
+host environment into the guest beyond the default
+(`protocol.ForwardEnvAllowlist`): what the owner allowed for their own runs,
+absent on any run for someone else; never values. `execToken` is a short-lived
 space-scoped Sandbox Protocol exec token (it can only run commands in that
 space) — never log or persist it; a fresh one arrives every turn. A core must
 answer `bad_request` for an execution it cannot honor (never silently run on

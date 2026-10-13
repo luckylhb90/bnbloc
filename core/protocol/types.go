@@ -297,7 +297,12 @@ type SandboxExecution struct {
 	Mounts  []PathMount `json:"mounts,omitempty"`
 	// Passthrough lists command names vmexec may run on the host instead of
 	// the guest (empty for borrowed drives unless the owner allows).
-	Passthrough []string     `json:"passthrough,omitempty"`
+	Passthrough []string `json:"passthrough,omitempty"`
+	// Env lists environment variable names (or PREFIX* patterns) vmexec
+	// forwards from the CLI's host environment into the guest beyond the
+	// default (ForwardEnvAllowlist): what the owner allowed for their own
+	// runs, empty on every run for someone else. Names only, never values.
+	Env         []string     `json:"env,omitempty"`
 	HostConfine *HostConfine `json:"hostConfine,omitempty"`
 }
 
@@ -333,7 +338,7 @@ func WireExecution(e *core.Execution) *Execution {
 	}
 	return &Execution{Mode: ExecutionModeSandbox, Sandbox: &SandboxExecution{
 		URL: s.URL, ExecToken: s.ExecToken, ExpiresAtMs: s.ExpiresAtMs, Machine: s.Machine, Space: s.Space,
-		VMExec: s.VMExec, Workdir: s.Workdir, Mounts: mounts, Passthrough: s.Passthrough,
+		VMExec: s.VMExec, Workdir: s.Workdir, Mounts: mounts, Passthrough: s.Passthrough, Env: s.Env,
 		HostConfine: &HostConfine{Workspace: s.HostConfine.Workspace, AllowRead: s.HostConfine.AllowRead, AllowWrite: s.HostConfine.AllowWrite, DenyWrite: s.HostConfine.DenyWrite},
 	}}
 }
@@ -355,7 +360,7 @@ func (e *Execution) Core() (*core.Execution, error) {
 	}
 	out := &core.Execution{Sandbox: core.SandboxExecution{
 		URL: s.URL, ExecToken: s.ExecToken, ExpiresAtMs: s.ExpiresAtMs, Machine: s.Machine, Space: s.Space,
-		VMExec: s.VMExec, Workdir: s.Workdir, Mounts: mounts, Passthrough: s.Passthrough,
+		VMExec: s.VMExec, Workdir: s.Workdir, Mounts: mounts, Passthrough: s.Passthrough, Env: s.Env,
 	}}
 	if s.HostConfine != nil {
 		out.Sandbox.HostConfine = core.HostConfine{Workspace: s.HostConfine.Workspace, AllowRead: s.HostConfine.AllowRead, AllowWrite: s.HostConfine.AllowWrite, DenyWrite: s.HostConfine.DenyWrite}

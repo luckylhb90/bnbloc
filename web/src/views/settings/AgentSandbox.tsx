@@ -4,6 +4,7 @@ import { desktop } from "@/lib/desktop";
 import { canRestartVm, SANDBOX_MODES, statusLine, type SandboxMode, type SandboxStatus } from "@/lib/sandboxStatus";
 import { Button } from "@/ui/Button";
 import { Card } from "@/ui/Card";
+import { Input } from "@/ui/Input";
 import { Segment } from "@/ui/Segment";
 import { useToast } from "@/ui/Toast";
 import { errorText } from "@/lib/errors";
@@ -24,7 +25,9 @@ export function AgentSandbox() {
   const inShell = desktop.available();
   const toast = useToast();
   const [status, setStatus] = useState<SandboxStatus | null>(null);
-  const [busy, setBusy] = useState<"mode" | "restart" | null>(null);
+  const [busy, setBusy] = useState<"mode" | "restart" | "env" | null>(null);
+  // The env names being edited; null = showing the saved list.
+  const [envDraft, setEnvDraft] = useState<string | null>(null);
   // The organization's policy: when it requires the sandbox for borrowing,
   // this member's agents cannot be borrowed while the sandbox is off/not ready.
   const requiredForBorrow = useTenantPolicy()?.requireSandboxForBorrow ?? false;
@@ -46,15 +49,17 @@ export function AgentSandbox() {
 
   if (!inShell) return null;
 
-  const run = async (kind: NonNullable<typeof busy>, fn: () => Promise<SandboxStatus | null>, done: string) => {
+  const run = async (kind: NonNullable<typeof busy>, fn: () => Promise<SandboxStatus | null>, done: string): Promise<boolean> => {
     setBusy(kind);
     try {
       const next = await fn();
       if (next) setStatus(next);
       toast.success(done);
+      return true;
     } catch (e) {
       toast.error(errorText(e, "Something went wrong"));
       void load();
+      return false;
     } finally {
       setBusy(null);
     }
@@ -63,6 +68,16 @@ export function AgentSandbox() {
   const setMode = (mode: SandboxMode) => {
     if (!status || mode === status.mode || busy) return;
     void run("mode", () => desktop.setSandboxMode(mode), "Agent sandbox setting saved");
+  };
+
+  const savedEnv = (status?.env ?? []).join(", ");
+  const envText = envDraft ?? savedEnv;
+  const saveEnv = () => {
+    if (busy || envDraft === null) return;
+    const names = envDraft.split(/[\s,]+/).filter((n) => n !== "");
+    void run("env", () => desktop.setSandboxEnv(names), "Sandbox environment saved").then((ok) => {
+      if (ok) setEnvDraft(null);
+    });
   };
 
   const line = status ? statusLine(status) : null;
@@ -107,6 +122,34 @@ export function AgentSandbox() {
               {busy === "restart" ? "Restarting…" : "Restart VM"}
             </Button>
           )}
+        </div>
+        <div className="flex flex-col gap-1.5 border-t border-[var(--color-border)] pt-3">
+          <label htmlFor="sandbox-env" className="text-sm font-medium">
+            Environment passed to sandboxed agents
+          </label>
+          <p className="text-xs text-[var(--color-fg-muted)]">
+            Commands in the VM get only your terminal, locale and git identity settings. List the environment variables
+            your own agents need there, such as an API key: names like EXAMPLE_API_KEY, or a prefix like EXAMPLE_*. Only
+            the names are saved; each value is read from your agent's environment when it runs. Runs of your agents by
+            other members never get them.
+          </p>
+          <div className="flex items-center gap-2">
+            <Input
+              id="sandbox-env"
+              className="font-mono"
+              placeholder="EXAMPLE_API_KEY, EXAMPLE_BASE_URL"
+              value={envText}
+              spellCheck={false}
+              autoCapitalize="characters"
+              onChange={(e) => setEnvDraft(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") saveEnv();
+              }}
+            />
+            <Button size="sm" disabled={busy !== null || envDraft === null || envDraft === savedEnv} onClick={saveEnv}>
+              {busy === "env" ? "Saving…" : "Save"}
+            </Button>
+          </div>
         </div>
         {status?.installed && status.name && (
           <span className="text-xs text-[var(--color-fg-subtle)]">
