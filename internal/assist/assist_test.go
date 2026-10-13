@@ -214,7 +214,7 @@ func TestModelRefusalsAndTheHostGuard(t *testing.T) {
 }
 
 func TestFieldsHoldTheReplyToTheTask(t *testing.T) {
-	fields := []wire.AssistField{{Name: "displayName"}, {Name: "description"}, {Name: "tags", List: true}}
+	fields := []wire.AssistField{{Name: "displayName"}, {Name: "description"}, {Name: "tags", Type: wire.AssistFieldList}}
 	got, err := Fields("Here you go:\n```json\n{\"displayName\":\" Offsite vote \",\"tags\":[\"team\",\"team\",\"poll\",\"\"],\"extra\":\"x\"}\n```", fields)
 	if err != nil {
 		t.Fatal(err)
@@ -229,6 +229,31 @@ func TestFieldsHoldTheReplyToTheTask(t *testing.T) {
 		if _, err := Fields(bad, fields); !errors.Is(err, ErrBadReply) {
 			t.Errorf("%q: %v", bad, err)
 		}
+	}
+}
+
+// An items field holds objects of its item fields only (strings), drops an
+// item with none, takes plain strings for a one-field item and stops at
+// wire.MaxAssistItems.
+func TestFieldsHoldItems(t *testing.T) {
+	fields := []wire.AssistField{
+		{Name: "prompts", Type: wire.AssistFieldItems, Item: []wire.AssistField{{Name: "title"}, {Name: "prompt"}}},
+		{Name: "steps", Type: wire.AssistFieldItems, Item: []wire.AssistField{{Name: "text"}}},
+	}
+	got, err := Fields(`{"prompts":[{"title":" Weekly ","prompt":"Sum up the week","x":"drop"},{"other":1},"loose",{"prompt":7}],"steps":["one",{"text":"two"}]}`, fields)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ps := got["prompts"].([]map[string]string)
+	if len(ps) != 2 || ps[0]["title"] != "Weekly" || ps[0]["prompt"] != "Sum up the week" || ps[0]["x"] != "" || ps[1]["prompt"] != "7" {
+		t.Fatalf("prompts = %v", ps)
+	}
+	if st := got["steps"].([]map[string]string); len(st) != 2 || st[0]["text"] != "one" || st[1]["text"] != "two" {
+		t.Fatalf("steps = %v", st)
+	}
+	many := `{"steps":[` + strings.TrimSuffix(strings.Repeat(`"s",`, wire.MaxAssistItems+5), ",") + `]}`
+	if got, _ := Fields(many, fields); len(got["steps"].([]map[string]string)) != wire.MaxAssistItems {
+		t.Fatalf("items past the bound = %d", len(got["steps"].([]map[string]string)))
 	}
 }
 

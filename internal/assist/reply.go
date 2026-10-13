@@ -15,10 +15,13 @@ const (
 )
 
 // Fields holds a JSON task's reply to its declared fields: the object (a
-// fenced ```json block or text around it tolerated), each declared field a
-// string (a list field: a list of strings; a string is split at commas),
-// unknown keys dropped. ErrBadReply when it is not an object or holds none
-// of the fields.
+// fenced ```json block or text around it tolerated), each declared field in
+// its shape — text: a string; list: a list of strings (a string is split at
+// commas); items: a list of objects holding only the item fields, as
+// strings (an item with none is dropped; a plain string fills an items
+// field of one item field), at most wire.MaxAssistItems — unknown keys
+// dropped. ErrBadReply when it is not an object or holds none of the
+// fields.
 func Fields(reply string, fields []wire.AssistField) (map[string]any, error) {
 	obj, ok := object(reply)
 	if !ok {
@@ -30,8 +33,14 @@ func Fields(reply string, fields []wire.AssistField) (map[string]any, error) {
 		if !ok || v == nil {
 			continue
 		}
-		if f.List {
+		switch f.Type {
+		case wire.AssistFieldList:
 			if l := list(v); len(l) > 0 {
+				out[f.Name] = l
+			}
+			continue
+		case wire.AssistFieldItems:
+			if l := items(v, f.Item); len(l) > 0 {
 				out[f.Name] = l
 			}
 			continue
@@ -101,6 +110,39 @@ func list(v any) []string {
 		seen[s] = true
 		out = append(out, s)
 		if len(out) == maxListItems {
+			break
+		}
+	}
+	return out
+}
+
+func items(v any, fields []wire.AssistField) []map[string]string {
+	raw, ok := v.([]any)
+	if !ok {
+		return nil
+	}
+	out := []map[string]string{}
+	for _, e := range raw {
+		item := map[string]string{}
+		switch t := e.(type) {
+		case map[string]any:
+			for _, f := range fields {
+				if s := scalar(t[f.Name]); s != "" {
+					item[f.Name] = cut(s, maxFieldRunes)
+				}
+			}
+		case string:
+			if len(fields) == 1 {
+				if s := cut(t, maxFieldRunes); s != "" {
+					item[fields[0].Name] = s
+				}
+			}
+		}
+		if len(item) == 0 {
+			continue
+		}
+		out = append(out, item)
+		if len(out) == wire.MaxAssistItems {
 			break
 		}
 	}

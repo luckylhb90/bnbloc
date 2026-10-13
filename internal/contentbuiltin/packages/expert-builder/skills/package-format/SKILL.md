@@ -96,12 +96,15 @@ drafts/<name>/
 - `output`: `"text"` (the reply replaces what the person typed) or `"json"`
   (the reply fills form fields).
 - `fields` (json only, required there): `{ "name", "description"?,
-  "list"? }`; `name` is the form field's (`displayName`, `tags`), `list:
-  true` for a list of strings.
+  "type"?, "item"? }`; `name` is the form field's (`displayName`, `tags`);
+  `type` is `"text"` (default), `"list"` (strings) or `"items"` (a list of
+  objects whose own text fields `item` names, e.g. quick prompts
+  `{title, prompt}`).
 - `context`: what the server may add besides the typed text, any of
   `"room"` (its name, expert, skills and recent messages), `"artifact"`
-  (a deliverable's title, type, file and recipe prompt) and
-  `"attachments"` (names and types).
+  (a deliverable's title, type, file and recipe prompt), `"attachments"`
+  (names and types), `"library"` (the experts and skill packs the person
+  can use) and `"clock"` (the current time in their timezone).
 - The model gets the person's text and that context fenced as data, so
   `INSTRUCTIONS.md` says what to produce from them, in which language, and
   to return only the result.

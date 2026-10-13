@@ -12,7 +12,7 @@
     { "name": "displayName", "description": "The work's name in the gallery" },
     { "name": "description", "description": "One or two sentences: who it is for and what it does" },
     { "name": "category", "description": "One of the gallery's categories" },
-    { "name": "tags", "description": "Three to five tags", "list": true }
+    { "name": "tags", "description": "Three to five tags", "type": "list" }
   ],
   "context": ["artifact"]
 }

@@ -76,8 +76,8 @@ func TestDescribeWorkFillsThePublishForm(t *testing.T) {
 		if !form[f.Name] {
 			t.Errorf("field %q is not a publish form field", f.Name)
 		}
-		if f.List != (f.Name == "tags") {
-			t.Errorf("field %q list = %v", f.Name, f.List)
+		if (f.Type == wire.AssistFieldList) != (f.Name == "tags") {
+			t.Errorf("field %q type = %q", f.Name, f.Type)
 		}
 	}
 	text := p.Validated.Instructions

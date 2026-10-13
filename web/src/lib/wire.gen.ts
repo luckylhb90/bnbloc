@@ -476,9 +476,13 @@ export const AssistOutputs: readonly string[] = ["text", "json"];
 export const AssistContextRoom = "room";
 export const AssistContextArtifact = "artifact";
 export const AssistContextAttachments = "attachments";
+// AssistContextLibrary: the experts and skill packs the member can use.
+export const AssistContextLibrary = "library";
+// AssistContextClock: the current time in the member's timezone.
+export const AssistContextClock = "clock";
 
 // AssistContexts are the contexts an assist task may declare.
-export const AssistContexts: readonly string[] = ["room", "artifact", "attachments"];
+export const AssistContexts: readonly string[] = ["room", "artifact", "attachments", "library", "clock"];
 
 // Bounds of an assist request.
 export const MaxAssistText = 8000;
@@ -511,12 +515,28 @@ export interface AssistSpec {
   context?: AssistContext[];
 }
 
-// AssistField is one field of a JSON task's reply.
+// A JSON task's field shapes (AssistField.Type).
+// AssistFieldText is a string (the default).
+export const AssistFieldText = "text";
+// AssistFieldList is a list of strings (tags).
+export const AssistFieldList = "list";
+// AssistFieldItems is a list of objects whose fields (Item) are strings.
+export const AssistFieldItems = "items";
+
+// AssistFieldTypes are the field shapes a JSON task may declare.
+export const AssistFieldTypes: readonly string[] = ["text", "list", "items"];
+
+// MaxAssistItems bounds an items field of a reply.
+export const MaxAssistItems = 20;
+
+// AssistField is one field of a JSON task's reply: a string, a list of
+// strings, or a list of objects whose own fields (Item, strings only) it
+// names.
 export interface AssistField {
   name: string;
   description?: string;
-  // List marks a field holding a list of strings (tags).
-  list?: boolean;
+  type?: AssistFieldType;
+  item?: AssistField[];
 }
 
 // AssistRequest is POST /v1/assist/{task}: what the member typed and the
@@ -531,6 +551,9 @@ export interface AssistRequest {
   expertId?: string;
   artifactId?: string;
   attachmentIds?: string[];
+  // Timezone is the member's IANA timezone (the clock context; UTC when
+  // absent or unknown).
+  timezone?: string;
 }
 
 // AssistUsage is a call's token counts and latency.
@@ -551,8 +574,8 @@ export interface AssistDone {
   usage: AssistUsage;
 }
 
-// AssistJSONReply is a JSON task's answer: the declared fields only
-// (strings, or string lists for list fields).
+// AssistJSONReply is a JSON task's answer: the declared fields only, in
+// their shapes (a string, a list of strings, a list of string objects).
 export interface AssistJSONReply {
   fields: Record<string, unknown>;
   usage: AssistUsage;
@@ -567,22 +590,41 @@ export interface AssistModelConfig {
   baseUrl: string;
   model: string;
   keySet: boolean;
+  // OrgHosts are the hosts an organization's own model may use (platform
+  // model only; none = organizations cannot set their own).
+  orgHosts?: string[];
   updatedBy?: string;
   updatedAtMs?: number;
 }
 
-// AssistModelUpdate is PUT /v1/platform/assist-model. An empty APIKey
-// keeps the stored key; ClearKey removes it. An empty BaseURL turns the
-// model off.
+// AssistModelUpdate is PUT /v1/platform/assist-model (and, without
+// OrgHosts, PUT /v1/tenant/assist-model). An empty APIKey keeps the
+// stored key; ClearKey removes it. An empty BaseURL turns the model off
+// (an organization's: back to the platform's).
 export interface AssistModelUpdate {
   baseUrl: string;
   model: string;
   apiKey?: string;
   clearKey?: boolean;
+  orgHosts?: string[];
 }
 
-// AssistModelTest is POST /v1/platform/assist-model/test: one short
-// completion through the stored model.
+// AssistOrgModel is GET /v1/tenant/assist-model: the organization's own
+// model (Model.BaseURL "" = it uses the platform's) and the hosts it may
+// name.
+export interface AssistOrgModel {
+  model: AssistModelConfig;
+  // AllowedHosts are the platform's OrgHosts; empty = an organization
+  // cannot set its own model.
+  allowedHosts: string[];
+  // PlatformModel names the platform's model ("" = none), shown as what
+  // members use when the organization sets none.
+  platformModel?: string;
+}
+
+// AssistModelTest is POST /v1/platform/assist-model/test (and
+// /v1/tenant/assist-model/test): one short completion through the stored
+// model.
 export interface AssistModelTest {
   ok: boolean;
   error?: string;
@@ -4179,8 +4221,10 @@ export type AppExportFormat = "json" | "csv";
 export const AppExportFormatValues: readonly AppExportFormat[] = ["json", "csv"];
 export type AssistOutput = "text" | "json";
 export const AssistOutputValues: readonly AssistOutput[] = ["text", "json"];
-export type AssistContext = "room" | "artifact" | "attachments";
-export const AssistContextValues: readonly AssistContext[] = ["room", "artifact", "attachments"];
+export type AssistContext = "room" | "artifact" | "attachments" | "library" | "clock";
+export const AssistContextValues: readonly AssistContext[] = ["room", "artifact", "attachments", "library", "clock"];
+export type AssistFieldType = "text" | "list" | "items";
+export const AssistFieldTypeValues: readonly AssistFieldType[] = ["text", "list", "items"];
 export type ContentUseScope = "member" | "room" | "room-expert";
 export const ContentUseScopeValues: readonly ContentUseScope[] = ["member", "room", "room-expert"];
 export type ContentSavedAction = "saved" | "submitted" | "published";

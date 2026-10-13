@@ -116,6 +116,47 @@ func checkAssistFields(m Manifest) error {
 		if err := checkText("field "+f.Name+" description", f.Description, maxAssistFieldDesc, true); err != nil {
 			return err
 		}
+		if err := checkAssistFieldShape(f); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// checkAssistFieldShape: a field's type is one of wire.AssistFieldTypes
+// (empty = text); an items field names its objects' fields (Item: text
+// fields, uniquely named, bounded), any other field names none.
+func checkAssistFieldShape(f wire.AssistField) error {
+	if f.Type != "" && !slices.Contains(wire.AssistFieldTypes, f.Type) {
+		return fmt.Errorf("field %q: type %q is not one of %s", f.Name, f.Type, strings.Join(wire.AssistFieldTypes, ", "))
+	}
+	if f.Type != wire.AssistFieldItems {
+		if len(f.Item) > 0 {
+			return fmt.Errorf("field %q: only an items field names item fields", f.Name)
+		}
+		return nil
+	}
+	if len(f.Item) == 0 {
+		return fmt.Errorf("field %q: an items field names its item fields", f.Name)
+	}
+	if len(f.Item) > maxAssistFields {
+		return fmt.Errorf("field %q: at most %d item fields", f.Name, maxAssistFields)
+	}
+	seen := map[string]bool{}
+	for _, it := range f.Item {
+		if !assistFieldRE.MatchString(it.Name) {
+			return fmt.Errorf("field %q: item field name %q: letters, digits and '_', starting with a letter (at most %d)", f.Name, it.Name, maxAssistFieldName)
+		}
+		if seen[it.Name] {
+			return fmt.Errorf("field %q: item field %q named twice", f.Name, it.Name)
+		}
+		seen[it.Name] = true
+		if it.Type != "" && it.Type != wire.AssistFieldText || len(it.Item) > 0 {
+			return fmt.Errorf("field %q: item field %q must be text", f.Name, it.Name)
+		}
+		if err := checkText("field "+f.Name+"."+it.Name+" description", it.Description, maxAssistFieldDesc, true); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -129,7 +170,8 @@ func assistFromForm(f Form, m *Manifest, files map[string][]byte) error {
 	}
 	m.Output = strings.TrimSpace(f.Output)
 	for _, fd := range f.Fields {
-		m.Fields = append(m.Fields, wire.AssistField{Name: strings.TrimSpace(fd.Name), Description: strings.TrimSpace(fd.Description), List: fd.List})
+		fd.Name, fd.Description, fd.Type = strings.TrimSpace(fd.Name), strings.TrimSpace(fd.Description), strings.TrimSpace(fd.Type)
+		m.Fields = append(m.Fields, fd)
 	}
 	m.Context = f.Context
 	files[InstructionsFile] = []byte(strings.TrimSpace(f.Instructions) + "\n")

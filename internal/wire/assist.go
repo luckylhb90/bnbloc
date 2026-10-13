@@ -25,10 +25,14 @@ const (
 	AssistContextRoom        = "room"
 	AssistContextArtifact    = "artifact"
 	AssistContextAttachments = "attachments"
+	// AssistContextLibrary: the experts and skill packs the member can use.
+	AssistContextLibrary = "library"
+	// AssistContextClock: the current time in the member's timezone.
+	AssistContextClock = "clock"
 )
 
 // AssistContexts are the contexts an assist task may declare.
-var AssistContexts = []string{AssistContextRoom, AssistContextArtifact, AssistContextAttachments}
+var AssistContexts = []string{AssistContextRoom, AssistContextArtifact, AssistContextAttachments, AssistContextLibrary, AssistContextClock}
 
 // Bounds of an assist request.
 const (
@@ -63,12 +67,32 @@ type AssistSpec struct {
 	Context []string      `json:"context,omitempty" tstype:"AssistContext"`
 }
 
-// AssistField is one field of a JSON task's reply.
+// A JSON task's field shapes (AssistField.Type).
+//
+//wire:union AssistFieldType
+const (
+	// AssistFieldText is a string (the default).
+	AssistFieldText = "text"
+	// AssistFieldList is a list of strings (tags).
+	AssistFieldList = "list"
+	// AssistFieldItems is a list of objects whose fields (Item) are strings.
+	AssistFieldItems = "items"
+)
+
+// AssistFieldTypes are the field shapes a JSON task may declare.
+var AssistFieldTypes = []string{AssistFieldText, AssistFieldList, AssistFieldItems}
+
+// MaxAssistItems bounds an items field of a reply.
+const MaxAssistItems = 20
+
+// AssistField is one field of a JSON task's reply: a string, a list of
+// strings, or a list of objects whose own fields (Item, strings only) it
+// names.
 type AssistField struct {
-	Name        string `json:"name"`
-	Description string `json:"description,omitempty"`
-	// List marks a field holding a list of strings (tags).
-	List bool `json:"list,omitempty"`
+	Name        string        `json:"name"`
+	Description string        `json:"description,omitempty"`
+	Type        string        `json:"type,omitempty" tstype:"AssistFieldType"`
+	Item        []AssistField `json:"item,omitempty"`
 }
 
 // AssistRequest is POST /v1/assist/{task}: what the member typed and the
@@ -83,6 +107,9 @@ type AssistRequest struct {
 	ExpertID      string   `json:"expertId,omitempty"`
 	ArtifactID    string   `json:"artifactId,omitempty"`
 	AttachmentIDs []string `json:"attachmentIds,omitempty"`
+	// Timezone is the member's IANA timezone (the clock context; UTC when
+	// absent or unknown).
+	Timezone string `json:"timezone,omitempty"`
 }
 
 // AssistUsage is a call's token counts and latency.
@@ -103,8 +130,8 @@ type AssistDone struct {
 	Usage AssistUsage `json:"usage"`
 }
 
-// AssistJSONReply is a JSON task's answer: the declared fields only
-// (strings, or string lists for list fields).
+// AssistJSONReply is a JSON task's answer: the declared fields only, in
+// their shapes (a string, a list of strings, a list of string objects).
 type AssistJSONReply struct {
 	Fields map[string]any `json:"fields"`
 	Usage  AssistUsage    `json:"usage"`
@@ -119,22 +146,41 @@ type AssistModelConfig struct {
 	BaseURL      string `json:"baseUrl"`
 	Model        string `json:"model"`
 	KeySet       bool   `json:"keySet"`
-	UpdatedBy    string `json:"updatedBy,omitempty"`
-	UpdatedAtMs  int64  `json:"updatedAtMs,omitempty"`
+	// OrgHosts are the hosts an organization's own model may use (platform
+	// model only; none = organizations cannot set their own).
+	OrgHosts    []string `json:"orgHosts,omitempty"`
+	UpdatedBy   string   `json:"updatedBy,omitempty"`
+	UpdatedAtMs int64    `json:"updatedAtMs,omitempty"`
 }
 
-// AssistModelUpdate is PUT /v1/platform/assist-model. An empty APIKey
-// keeps the stored key; ClearKey removes it. An empty BaseURL turns the
-// model off.
+// AssistModelUpdate is PUT /v1/platform/assist-model (and, without
+// OrgHosts, PUT /v1/tenant/assist-model). An empty APIKey keeps the
+// stored key; ClearKey removes it. An empty BaseURL turns the model off
+// (an organization's: back to the platform's).
 type AssistModelUpdate struct {
-	BaseURL  string `json:"baseUrl"`
-	Model    string `json:"model"`
-	APIKey   string `json:"apiKey,omitempty"`
-	ClearKey bool   `json:"clearKey,omitempty"`
+	BaseURL  string   `json:"baseUrl"`
+	Model    string   `json:"model"`
+	APIKey   string   `json:"apiKey,omitempty"`
+	ClearKey bool     `json:"clearKey,omitempty"`
+	OrgHosts []string `json:"orgHosts,omitempty"`
 }
 
-// AssistModelTest is POST /v1/platform/assist-model/test: one short
-// completion through the stored model.
+// AssistOrgModel is GET /v1/tenant/assist-model: the organization's own
+// model (Model.BaseURL "" = it uses the platform's) and the hosts it may
+// name.
+type AssistOrgModel struct {
+	Model AssistModelConfig `json:"model"`
+	// AllowedHosts are the platform's OrgHosts; empty = an organization
+	// cannot set its own model.
+	AllowedHosts []string `json:"allowedHosts"`
+	// PlatformModel names the platform's model ("" = none), shown as what
+	// members use when the organization sets none.
+	PlatformModel string `json:"platformModel,omitempty"`
+}
+
+// AssistModelTest is POST /v1/platform/assist-model/test (and
+// /v1/tenant/assist-model/test): one short completion through the stored
+// model.
 type AssistModelTest struct {
 	OK    bool        `json:"ok"`
 	Error string      `json:"error,omitempty"`

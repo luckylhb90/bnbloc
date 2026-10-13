@@ -172,7 +172,7 @@ Tell the user which role could not be staffed and what is left undone.
   "fields": [
     { "name": "title", "description": "The meeting's title, one line" },
     { "name": "agenda", "description": "The agenda as short lines" },
-    { "name": "prepare", "description": "What attendees prepare", "list": true }
+    { "name": "prepare", "description": "What attendees prepare", "type": "list" }
   ],
   "context": ["room"]
 }
