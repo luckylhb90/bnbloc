@@ -1288,7 +1288,11 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   the share page's handshake uses (`wire.AppVisitorRequest`/`Grant`),
   pinned by `TestAppSDKServed`; app budgets are `appRates` (IP, link,
   participant; writes stricter). A frame entry's `~app/` answers CORS for
-  any origin without credentials (`appFramePath`).
+  any origin without credentials (`appFramePath`). On the web, a public
+  link to a site is the app full-screen (`SharedApp`), and the share page
+  is the only holder of the visitor token (`lib/appVisitor.ts`: answers
+  only its own frame's window, renews before expiry); a member's site
+  viewer answers no visitor request.
 - **http MCP per-member sign-in is `mcp.http.auth.scheme = "oauth"`.** The
   desktop (`internal_ext/mcp_oauth.rs`) discovers the authorization server at
   sign-in (never declared or hardcoded), requires PKCE S256 and checks
@@ -1630,7 +1634,12 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
     wording: `roomGoneText` (`lib/roomGone.ts`);
   - list states: `ui/QueryState` (a load error is shown with Retry, never as
     an empty list); a destructive action: `ConfirmDialog` (rule 10b); a
-    mutation's result is a toast, a load error stays inline.
+    mutation's result is a toast, a load error stays inline;
+  - a public link's app visitor token (handshake, per-share storage,
+    renewal): `lib/appVisitor.ts` (rule A1; the share page's app view
+    `views/share/SharedApp.tsx` only wires it); an app's owners' data line
+    (counts, export, clear): `lib/appData.ts` + `views/workbench/AppDataLine.tsx`
+    (who is an owner is the stats route's answer, never re-decided).
 
 - **`Dialog` caps height at `max-h-[85vh]` with a scrollable body.** A dialog
   with more content than the viewport must scroll its body while header/footer

@@ -8,7 +8,8 @@ event-kind registry (2.5), the store rig (4.1) and the generated wire types
 
 Progress: delivery steps 1–3 **landed** on 2026-10-13 (store, cipher, the
 room service's data owner, and the gateway's capabilities, visitor tokens,
-SDK and change feed; see §7 "Step status"). Steps 4–6 are open.
+SDK and change feed; see §7 "Step status"). Step 5 (the web's app view and
+data line) **landed** on 2026-10-13. Steps 4 and 6 are open.
 
 ## 1. Why
 
@@ -430,7 +431,40 @@ app_keys(app_id PRIMARY KEY, tenant_id, room_id, wrapped_key, created_at_ms)
   - **Logs**: site tickets, share tokens and previewer tickets are
     redacted from request logs with the invite codes and relay keys; the
     visitor token is a header and never logged.
-- Steps 4–6: open.
+- **Step 5: landed (2026-10-13).** The web
+  (`docs/architecture/web-client-multi-form.md`, "Public share links and
+  interactive apps"):
+  - **App view.** A public link whose share answers a `siteUrl` renders
+    `views/share/SharedApp.tsx`: the site frame full-screen inside the
+    safe areas, the site sandbox kept, no header, version line or
+    download, no page scroll. Other files keep the file page.
+  - **Visitor token.** `lib/appVisitor.ts` is its one web owner (boundary
+    rule A1): minted on the frame's first request, stored per share under
+    a hash of the share token (never the token), renewed an hour before
+    expiry with the held token (same visitor) and pushed to the frame,
+    answered only to the page's own frame window. Decided while building:
+    a second request for the token the frame already holds renews first
+    (the gateway refused it, e.g. after a signing-key change; renewal keeps
+    the visitor when the token is still valid), falling back to the held
+    token when the mint fails; a renewal that does not extend the token
+    (the link ends first) is not repeated.
+  - **Member tickets.** `SiteViewer` answers no visitor request; the SDK
+    only waits for a token after a visitor refusal, which a ticket never
+    gets. The desktop's `bnbloc-site` scheme forwards reads only, so an
+    app's writes and change feed fail there:
+    `docs/bugs/2026-10-13-desktop-site-frame-drops-app-api.md` (open).
+  - **Data line** (`views/workbench/AppDataLine.tsx`, rules in
+    `lib/appData.ts`) on a site's card and in the artifact viewer: counts
+    per collection, shown only when the app has data and only to owners —
+    the owners' stats route decides (403: no line), the web never
+    re-implements `appOwner`. Export pages `find` per collection (JSON of
+    all collections, CSV of one: stamps first, then fields by first
+    appearance, nested values JSON-encoded in one cell, formula-like text
+    defused). Clear data (`DELETE …/data`) sits behind `ConfirmDialog` and
+    needs `drive_agent`. The room stream's `app_changed` refreshes the
+    counts, coalesced per app. **Delete app data** (the key and all rows)
+    is what Clear data does today: the room entry has one wipe.
+- Steps 4 and 6: open.
 
 ### Tests
 

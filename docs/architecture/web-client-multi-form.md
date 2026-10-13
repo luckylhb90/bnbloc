@@ -69,6 +69,39 @@ Sources: `web/vite.config.ts:6-14`, `services/gateway/webui/webui.go:1-58`,
   mount (`web/src/main.tsx`, `web/src/lib/desktop.ts` `seedPreviewSession`).
   Routing must run after that seed.
 
+## Public share links and interactive apps
+
+- `#/share/<token>` (`web/src/main.tsx`) renders before sign-in and calls
+  only the public share routes (`publicShareApi`, `lib/sharesApi.ts`).
+- A link to a web app (the share answers a `siteUrl`) is the **app view**
+  (`views/share/SharedApp.tsx`): the site frame full-screen inside the
+  safe areas (`index.html`'s `viewport-fit=cover`), no file-viewer header,
+  version line or download, and no page scroll. The frame keeps the site
+  sandbox (`SITE_SANDBOX`, never `allow-same-origin`). Any other file keeps
+  the file page (`SharedFile`).
+- The app view holds the link's **visitor token** for the app's data API:
+  `lib/appVisitor.ts` is its one owner (web boundary rule A1). It mints the
+  token on the frame's first handshake request
+  (`POST /v1/public/shares/{token}/visitor`), keeps it per share in
+  `localStorage` (`StorageKey.appVisitor` plus a hash of the share token,
+  never the token itself), renews it an hour before it expires (same
+  visitor) and pushes the renewed grant to the frame. It answers only a
+  request whose `event.source` is its own frame's window; a repeated
+  request for the token the frame already holds renews it first (the
+  gateway refused it, e.g. after a signing-key change).
+- A member's site viewer (`SiteViewer`, `lib/siteFrame.ts`) answers no
+  visitor request: the member's ticket is the capability, and the SDK
+  only waits for a visitor token after a refusal a ticket never gets. In
+  the desktop shell the `bnbloc-site` scheme forwards reads only, so an
+  app's writes and change feed need the open fix in
+  `docs/bugs/2026-10-13-desktop-site-frame-drops-app-api.md`.
+- An app's owners see its **data line** on the deliverable card and in the
+  artifact viewer (`views/workbench/AppDataLine.tsx`, rules in
+  `lib/appData.ts`): the count per collection from the owners' stats route
+  (a 403 there means "not an owner": no line), Export (JSON of every
+  collection, CSV of one, paged through `find`) and Clear data behind
+  `ConfirmDialog`. The room stream's `app_changed` refreshes the counts.
+
 ## API client contract
 
 - `web/src/lib/api.ts` exposes a single `api` object of promise-returning
