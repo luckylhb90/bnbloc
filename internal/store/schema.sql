@@ -16,7 +16,7 @@ CREATE TABLE IF NOT EXISTS tenants (
   run_quota     INT NOT NULL DEFAULT 0,
   cost_allowance DECIMAL(18,6) NOT NULL DEFAULT 0,
   require_sandbox_for_borrow TINYINT(1) NOT NULL DEFAULT 0,
-  public_shares_disabled TINYINT(1) NOT NULL DEFAULT 0,
+  anonymous_links_disabled TINYINT(1) NOT NULL DEFAULT 0,
   created_at_ms BIGINT NOT NULL,
   retention_messages_days INT NULL,
   retention_artifact_versions_days INT NULL,
@@ -441,10 +441,12 @@ CREATE TABLE IF NOT EXISTS artifact_versions (
   KEY idx_artifact_versions_thumb (thumb_blob_key)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
--- Public share links of one artifact (docs/prd/2026-10-09-artifact-shares-
+-- Share links of one artifact (docs/prd/2026-10-09-artifact-shares-
 -- and-site-previews.md): an expiring, revocable "bsh_<share_id>_<secret>"
 -- token; only the secret's sha256 hex is stored. version 0 follows the
--- artifact's latest version. Not exported with the room.
+-- artifact's latest version. access is who may open it: 'org' (signed-in
+-- members of the organization) or 'anyone' (docs/prd/2026-10-13-share-
+-- link-sign-in.md). Not exported with the room.
 CREATE TABLE IF NOT EXISTS artifact_shares (
   share_id          VARCHAR(32) PRIMARY KEY,
   token_hash        CHAR(64) NOT NULL,
@@ -452,6 +454,7 @@ CREATE TABLE IF NOT EXISTS artifact_shares (
   room_id           VARCHAR(64) NOT NULL,
   artifact_id       VARCHAR(64) NOT NULL,
   version           INT NOT NULL,
+  access            VARCHAR(8) NOT NULL DEFAULT 'org',
   created_by        VARCHAR(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
   created_at_ms     BIGINT NOT NULL,
   expires_at_ms     BIGINT NOT NULL,

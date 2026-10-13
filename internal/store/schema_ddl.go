@@ -48,6 +48,7 @@ var retiredColumns = map[string]string{
 	"agent_sessions.state_json":          "2026_10_drop_unused_columns",
 	"agent_sessions.updated_at_ms":       "2026_10_drop_unused_columns",
 	"agent_messages.client_submit_id":    "2026_10_drop_legacy_borrow_and_submit",
+	"tenants.public_shares_disabled":     "2026_10_share_link_access",
 }
 
 // retiredColumn reports whether table.column is in retiredColumns, or its

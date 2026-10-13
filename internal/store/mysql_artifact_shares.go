@@ -6,11 +6,12 @@ import (
 	"errors"
 
 	"github.com/luckylhb90/bnbloc/internal/tenant"
+	"github.com/luckylhb90/bnbloc/internal/wire"
 )
 
 var _ ArtifactShareStore = (*MySQLArtifacts)(nil)
 
-const artifactShareCols = `s.share_id, s.token_hash, s.tenant_id, s.room_id, s.artifact_id, s.version, s.created_by, s.created_at_ms, s.expires_at_ms, s.revoked_at_ms, s.revoked_by, s.view_count, s.last_viewed_at_ms`
+const artifactShareCols = `s.share_id, s.token_hash, s.tenant_id, s.room_id, s.artifact_id, s.version, s.access, s.created_by, s.created_at_ms, s.expires_at_ms, s.revoked_at_ms, s.revoked_by, s.view_count, s.last_viewed_at_ms`
 
 // shareEndedAt is when a link stopped working: its revocation or expiry,
 // whichever came first (ArtifactShare.endedAtMs in Go).
@@ -21,15 +22,36 @@ func (m *MySQLArtifacts) CreateArtifactShare(ctx context.Context, sh ArtifactSha
 	if err != nil {
 		return ArtifactShare{}, err
 	}
+	if sh.Access, err = shareAccessOf(sh.Access); err != nil {
+		return ArtifactShare{}, err
+	}
 	sh.TenantID = tid
 	sh.RevokedAtMs, sh.RevokedBy, sh.ViewCount, sh.LastViewedAtMs = 0, "", 0, 0
 	if _, err := m.DB.ExecContext(ctx, `
-INSERT INTO artifact_shares (share_id, token_hash, tenant_id, room_id, artifact_id, version, created_by, created_at_ms, expires_at_ms)
-VALUES (?,?,?,?,?,?,?,?,?)`,
-		sh.ShareID, sh.TokenHash, tid, sh.RoomID, sh.ArtifactID, sh.Version, sh.CreatedBy, sh.CreatedAtMs, sh.ExpiresAtMs); err != nil {
+INSERT INTO artifact_shares (share_id, token_hash, tenant_id, room_id, artifact_id, version, access, created_by, created_at_ms, expires_at_ms)
+VALUES (?,?,?,?,?,?,?,?,?,?)`,
+		sh.ShareID, sh.TokenHash, tid, sh.RoomID, sh.ArtifactID, sh.Version, sh.Access, sh.CreatedBy, sh.CreatedAtMs, sh.ExpiresAtMs); err != nil {
 		return ArtifactShare{}, dupAs(err, ErrArtifactShareExists)
 	}
 	return sh, nil
+}
+
+func (m *MySQLArtifacts) SetArtifactShareAccess(ctx context.Context, shareID, access string) (ArtifactShare, error) {
+	tid, err := tenant.Require(ctx)
+	if err != nil {
+		return ArtifactShare{}, err
+	}
+	if !wire.ValidShareAccess(access) {
+		return ArtifactShare{}, ErrArtifactShareAccess
+	}
+	res, err := m.DB.ExecContext(ctx, `UPDATE artifact_shares SET access=? WHERE tenant_id=? AND share_id=?`, access, tid, shareID)
+	if err != nil {
+		return ArtifactShare{}, err
+	}
+	if err := requireMatched(res, ErrArtifactShareNotFound); err != nil {
+		return ArtifactShare{}, err
+	}
+	return m.GetArtifactShare(ctx, shareID)
 }
 
 func (m *MySQLArtifacts) GetArtifactShare(ctx context.Context, shareID string) (ArtifactShare, error) {
@@ -142,7 +164,7 @@ func scanArtifactShare(row rowScanner, extra ...any) (ArtifactShare, error) {
 	var sh ArtifactShare
 	var revokedAt, lastViewed sql.NullInt64
 	var revokedBy sql.NullString
-	dest := append([]any{&sh.ShareID, &sh.TokenHash, &sh.TenantID, &sh.RoomID, &sh.ArtifactID, &sh.Version,
+	dest := append([]any{&sh.ShareID, &sh.TokenHash, &sh.TenantID, &sh.RoomID, &sh.ArtifactID, &sh.Version, &sh.Access,
 		&sh.CreatedBy, &sh.CreatedAtMs, &sh.ExpiresAtMs, &revokedAt, &revokedBy, &sh.ViewCount, &lastViewed}, extra...)
 	if err := row.Scan(dest...); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {

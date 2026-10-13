@@ -84,6 +84,13 @@ const (
 	// the share link it was minted for. It authorizes nothing but app data
 	// calls through that link, which re-resolve the link on every call.
 	KindAppVisitor = "app-visitor"
+	// KindShareTicket is a signed-in member's credential for one share link
+	// that requires sign-in to its organization: Subject is the member,
+	// Tenant the link's organization and ID the share id. It rides in the
+	// link's URL path in place of the link's token and authorizes nothing
+	// but that link's routes, which re-resolve the link and re-check the
+	// member's organization membership.
+	KindShareTicket = "share-ticket"
 )
 
 // HasRoom reports whether the claims authorize the given room scope.

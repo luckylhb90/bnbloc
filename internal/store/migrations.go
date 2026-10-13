@@ -1456,6 +1456,24 @@ WHERE r.channel_id = '' AND d.user_id IS NULL`)
 			return createSchemaTable(ctx, db, "app_keys")
 		},
 	},
+	{
+		// Share links require sign-in by default
+		// (docs/prd/2026-10-13-share-link-sign-in.md): each link's access
+		// ('org' unless its creator chose 'anyone'; existing links become
+		// 'org'), and the organization switch now disables 'anyone' links
+		// only, renamed to say so. Pre-launch: the old switch's value is not
+		// carried over. tenants.public_shares_disabled is a retiredColumn.
+		id: "2026_10_share_link_access",
+		run: func(ctx context.Context, db sqlConn) error {
+			if err := addColumnIfMissing(ctx, db, "artifact_shares", "access", "VARCHAR(8) NOT NULL DEFAULT 'org' AFTER version"); err != nil {
+				return err
+			}
+			if err := addColumnIfMissing(ctx, db, "tenants", "anonymous_links_disabled", "TINYINT(1) NOT NULL DEFAULT 0 AFTER require_sandbox_for_borrow"); err != nil {
+				return err
+			}
+			return dropColumnIfExists(ctx, db, "tenants", "public_shares_disabled")
+		},
+	},
 }
 
 // sqlConn is the statement surface a migration runs on. runMigrations passes

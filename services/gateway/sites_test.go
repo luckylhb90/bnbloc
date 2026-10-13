@@ -22,6 +22,7 @@ import (
 	"github.com/luckylhb90/bnbloc/internal/store"
 	"github.com/luckylhb90/bnbloc/internal/svcauth"
 	"github.com/luckylhb90/bnbloc/internal/tarbundle"
+	"github.com/luckylhb90/bnbloc/internal/wire"
 )
 
 // presigningDisk is a disk blob store that also presigns (a stand-in for
@@ -44,7 +45,7 @@ type siteEnv struct {
 	members     map[string]bool                  // "room/user"
 	versions    map[string]store.ArtifactVersion // "room/artifact/version"
 	shares      map[string]map[string]any        // token -> resolution
-	views       map[string]int
+	views       map[string]int                   // share id -> views counted
 	resolveUser string
 	versionGets atomic.Int32
 }
@@ -78,10 +79,7 @@ func newSiteEnv(t *testing.T) *siteEnv {
 		httpx.WriteJSON(w, http.StatusOK, map[string]any{"version": v})
 	})
 	room.HandleFunc("POST /internal/v1/shares/resolve", func(w http.ResponseWriter, r *http.Request) {
-		var body struct {
-			Token     string `json:"token"`
-			CountView bool   `json:"countView"`
-		}
+		var body wire.ShareResolveRequest
 		_ = json.NewDecoder(r.Body).Decode(&body)
 		e.mu.Lock()
 		defer e.mu.Unlock()
@@ -91,10 +89,15 @@ func newSiteEnv(t *testing.T) *siteEnv {
 			http.Error(w, "not found", http.StatusNotFound)
 			return
 		}
-		if body.CountView {
-			e.views[body.Token]++
-		}
 		httpx.WriteJSON(w, http.StatusOK, res)
+	})
+	room.HandleFunc("POST /internal/v1/shares/view", func(w http.ResponseWriter, r *http.Request) {
+		var body wire.ShareViewCount
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		e.mu.Lock()
+		defer e.mu.Unlock()
+		e.views[body.ShareID]++
+		w.WriteHeader(http.StatusNoContent)
 	})
 	roomSrv := httptest.NewServer(room)
 	t.Cleanup(roomSrv.Close)

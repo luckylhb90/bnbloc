@@ -164,11 +164,11 @@ func TestShareResolveUsesDisplayName(t *testing.T) {
 	e, _, _ := sharesRoom(t)
 	art := e.createArtifact("alice", map[string]any{"kind": "markdown", "title": "Spec", "fileName": "spec.md", "content": "# v1"})
 	_, link := e.share(http.MethodPost, sharesPath(art.ArtifactID), "bob", map[string]any{})
-	if _, res := e.resolve(link.Token, false); res.SharedBy != (wire.ShareUser{UserID: "bob", DisplayName: "bob"}) {
+	if _, res := e.resolve(link.Token); res.SharedBy != (wire.ShareUser{UserID: "bob", DisplayName: "bob"}) {
 		t.Fatalf("default shared by = %+v", res.SharedBy)
 	}
 	e.must(e.roomSrv, http.MethodPut, "/v1/my/profile", "bob", map[string]string{"displayName": "Bob B."})
-	if _, res := e.resolve(link.Token, false); res.SharedBy != (wire.ShareUser{UserID: "bob", DisplayName: "Bob B."}) {
+	if _, res := e.resolve(link.Token); res.SharedBy != (wire.ShareUser{UserID: "bob", DisplayName: "Bob B."}) {
 		t.Fatalf("named shared by = %+v", res.SharedBy)
 	}
 }

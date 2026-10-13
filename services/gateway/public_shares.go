@@ -2,12 +2,11 @@ package gateway
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -17,16 +16,18 @@ import (
 	"github.com/luckylhb90/bnbloc/internal/httpx"
 	"github.com/luckylhb90/bnbloc/internal/wire"
 
-	"github.com/luckylhb90/bnbloc/internal/obs"
 	"github.com/luckylhb90/bnbloc/internal/store"
 )
 
-// Public share links (PRD 2026-10-09 "Gateway"): unauthenticated reads of
-// one shared artifact version, never a session. Every request resolves the
-// link through the room service (POST /internal/v1/shares/resolve), which
-// answers 404 for every inactive case; the gateway reveals nothing of the
-// room beyond the shared version. Reads are rate-limited per client IP, and
-// a token miss also spends the IP's guess budget (brute-force guard).
+// Share link routes (PRD 2026-10-09 "Gateway"; access: PRD 2026-10-13):
+// reads of one shared artifact version, never a session. Every request
+// opens the link through openShare (share_access.go): the room service
+// resolves it (POST /internal/v1/shares/resolve, 404 for every dead link)
+// and shareAccess decides whether its caller — anonymous with the link's
+// token, or a member with a share ticket in the token's place — may open
+// it. The gateway reveals nothing of the room beyond the shared version.
+// Reads are rate-limited per client IP, and a miss also spends the IP's
+// guess budget (brute-force guard).
 
 // publicShareView is GET /v1/public/shares/{token}.
 type publicShareView struct {
@@ -75,88 +76,37 @@ func publicSiteBase(token string) string {
 	return "/v1/public/shares/" + url.PathEscape(token) + "/site/"
 }
 
-// publicShare rate-limits the caller and resolves the path's share token.
-// It answers the refusal itself (429, 404, 502) and reports ok=false. With
-// reuse, a recent resolution of the same token is served from the short
-// public-site cache (site file requests only).
-func (s *Service) publicShare(w http.ResponseWriter, r *http.Request, countView, reuse bool) (wire.ShareResolution, bool) {
+// publicShare rate-limits the caller and opens the path's link
+// (openShare). It answers the refusal itself (429, 404, 401, 403, 502) and
+// reports ok=false. With reuse, a recent opening of the same credential is
+// served from the short public-site cache (site file requests only).
+func (s *Service) publicShare(w http.ResponseWriter, r *http.Request, reuse bool) (openedShare, bool) {
 	w.Header().Set("Referrer-Policy", "no-referrer")
 	if !s.publicAllow(s.clientIP(r)) {
 		httpx.Error(w, "rate limit exceeded", http.StatusTooManyRequests)
-		return wire.ShareResolution{}, false
+		return openedShare{}, false
 	}
-	res, err := s.shareByToken(r, countView, reuse)
+	o, err := s.openShare(r, reuse)
 	if err != nil {
 		writeShareErr(w, err)
-		return wire.ShareResolution{}, false
+		return openedShare{}, false
 	}
-	return res, true
+	return o, true
 }
 
 // errShareGuessing refuses a client IP whose guess budget token misses
 // have spent.
 var errShareGuessing = errors.New("rate limit exceeded")
 
-// shareByToken resolves the path's share token for a public route: the one
-// lookup of every route a share link reaches. An IP whose guess budget is
-// spent is refused before any lookup (errShareGuessing), and a miss
-// (errShareNotFound: a garbage token, or any inactive link) spends it. With
-// reuse, a recent resolution of the same token is served from the short
-// public-site cache.
-func (s *Service) shareByToken(r *http.Request, countView, reuse bool) (wire.ShareResolution, error) {
-	guessKey := "share-ip:" + s.clientIP(r)
-	if s.guessBlocked(guessKey) {
-		return wire.ShareResolution{}, errShareGuessing
-	}
-	token := r.PathValue("token")
-	if !plausibleShareToken(token) {
-		s.guessAllow(guessKey)
-		return wire.ShareResolution{}, errShareNotFound
-	}
-	s.bundleCaches()
-	sum := sha256.Sum256([]byte(token))
-	cacheKey := hex.EncodeToString(sum[:])
-	if reuse {
-		if res, ok := s.publicSites.get(cacheKey); ok {
-			return res, nil
-		}
-	}
-	res, err := s.resolveShare(r.Context(), token, countView)
-	if errors.Is(err, errShareNotFound) {
-		s.guessAllow(guessKey)
-	}
-	if err != nil {
-		return wire.ShareResolution{}, err
-	}
-	if reuse {
-		s.publicSites.put(cacheKey, res)
-	}
-	return res, nil
-}
-
-// writeShareErr answers a shareByToken failure.
-func writeShareErr(w http.ResponseWriter, err error) {
-	switch {
-	case errors.Is(err, errShareGuessing):
-		httpx.Error(w, "rate limit exceeded", http.StatusTooManyRequests)
-	case errors.Is(err, errShareNotFound):
-		w.Header().Set("Cache-Control", "no-store")
-		httpx.Error(w, "share not found", http.StatusNotFound)
-	default:
-		obs.ServerError(w, "resolve share failed", err)
-		httpx.Error(w, "resolve share failed", http.StatusBadGateway)
-	}
-}
-
-// resolveShare asks the room service to resolve a share token (svcauth-
-// signed as the gateway's own service subject). Every inactive case is
-// errShareNotFound.
-func (s *Service) resolveShare(ctx context.Context, token string, countView bool) (wire.ShareResolution, error) {
+// resolveShare asks the room service to resolve a link (by its token, or
+// by a share ticket's share id; svcauth-signed as the gateway's own
+// service subject). Every dead link is errShareNotFound.
+func (s *Service) resolveShare(ctx context.Context, req wire.ShareResolveRequest) (wire.ShareResolution, error) {
 	base := strings.TrimRight(s.Backends.Room, "/")
 	if base == "" {
 		return wire.ShareResolution{}, fmt.Errorf("room service not configured")
 	}
-	body, err := json.Marshal(map[string]any{"token": token, "countView": countView})
+	body, err := json.Marshal(req)
 	if err != nil {
 		return wire.ShareResolution{}, err
 	}
@@ -183,13 +133,34 @@ func (s *Service) resolveShare(ctx context.Context, token string, countView bool
 	return res, nil
 }
 
-// handlePublicShare answers GET /v1/public/shares/{token}: what an outsider
-// may see of the link (counts a view).
+// countShareView records one view of a link its caller opened. Best
+// effort: a lost count never fails the page.
+func (s *Service) countShareView(ctx context.Context, shareID string) {
+	base := strings.TrimRight(s.Backends.Room, "/")
+	body, err := json.Marshal(wire.ShareViewCount{ShareID: shareID})
+	if base == "" || err != nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	resp, err := callBackend(ctx, http.MethodPost, base+"/internal/v1/shares/view", body, gatewayServiceSubject, "")
+	if err != nil {
+		slog.Warn("bnbloc gateway: share view count failed", "event", "bnbloc.share.view_count_failed", "error", err)
+		return
+	}
+	resp.Body.Close()
+}
+
+// handlePublicShare answers GET /v1/public/shares/{token}: what the link's
+// caller may see of it (counts a view). The token is the link's credential
+// (its token, or a share ticket); a site's siteUrl carries the same one.
 func (s *Service) handlePublicShare(w http.ResponseWriter, r *http.Request) {
-	res, ok := s.publicShare(w, r, true, false)
+	o, ok := s.publicShare(w, r, false)
 	if !ok {
 		return
 	}
+	res := o.res
+	s.countShareView(r.Context(), res.Share.ShareID)
 	var out publicShareView
 	out.Artifact.Kind = res.Artifact.Kind
 	out.Artifact.Title = res.Artifact.Title
@@ -225,10 +196,11 @@ func publicMIME(res wire.ShareResolution) string {
 // the version's bytes, sandboxed. ?download=1 makes it an attachment and,
 // for a blob version with direct downloads on, a 302 to a presigned URL.
 func (s *Service) handlePublicShareContent(w http.ResponseWriter, r *http.Request) {
-	res, ok := s.publicShare(w, r, false, false)
+	o, ok := s.publicShare(w, r, false)
 	if !ok {
 		return
 	}
+	res := o.res
 	download := r.URL.Query().Get("download") == "1"
 	mimeType := publicMIME(res)
 	fileName := store.ArtifactDownloadName(res.Artifact.Kind, res.Artifact.FileName, res.Artifact.Title)
@@ -272,10 +244,11 @@ func (s *Service) handlePublicShareContent(w http.ResponseWriter, r *http.Reques
 // handlePublicShareSite answers GET /v1/public/shares/{token}/site/{path...}
 // with a file of a shared site version (the site file rules).
 func (s *Service) handlePublicShareSite(w http.ResponseWriter, r *http.Request) {
-	res, ok := s.publicShare(w, r, false, true)
+	o, ok := s.publicShare(w, r, true)
 	if !ok {
 		return
 	}
+	res := o.res
 	sv, isSite := siteVersionOf(res.Version.Storage, res.Version.MimeType, res.Version.BlobKey, res.Version.ContentHash)
 	if !isSite || res.Artifact.Kind != store.ArtifactKindSite {
 		http.NotFound(w, r)

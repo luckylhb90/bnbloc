@@ -203,7 +203,7 @@ type Service struct {
 	previewerBundles *tarbundle.Cache
 	siteBundles      *tarbundle.Cache
 	siteAuth         *boundedCache[siteVersion]
-	publicSites      *boundedCache[wire.ShareResolution]
+	publicSites      *boundedCache[openedShare]
 	// SuperAdmins is the configured platform super-admin list
 	// (BNBLOC_SUPER_ADMINS): the default recipients of an admin alert.
 	SuperAdmins []string

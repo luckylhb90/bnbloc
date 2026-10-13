@@ -32,7 +32,7 @@ import (
 // served under three entry points, each a capability the request carries:
 //
 //	/v1/sites/{ticket}/~app/…                  a member's site ticket: the member (Kind member)
-//	/v1/public/shares/{token}/site/~app/…      a public share link plus a visitor token: the visitor (Kind visitor)
+//	/v1/public/shares/{token}/site/~app/…      a share link: a share ticket's member (Kind member), or a visitor token (Kind visitor)
 //	/v1/rooms/{roomId}/apps/{artifactId}/…     a session: the member, or with ?job= the job's agent (Kind agent)
 //
 // with the same API under each (appAPI): c/{collection}[/{id}], me and
@@ -58,7 +58,7 @@ type appEntry int
 
 const (
 	appTicket appEntry = iota // a member's site ticket in the path
-	appShare                  // a public share token in the path, plus a visitor token
+	appShare                  // a share link's credential in the path (a share ticket, or the token plus a visitor token)
 	appRoom                   // a session, in the room of the path (?job=: the job's agent)
 )
 
@@ -89,7 +89,7 @@ var appEntries = []struct {
 	why    string
 }{
 	{appTicket, "/v1/sites/{ticket}/~app", "a member's site ticket in the path"},
-	{appShare, "/v1/public/shares/{token}/site/~app", "a public share token in the path and a visitor token"},
+	{appShare, "/v1/public/shares/{token}/site/~app", "a share ticket in the path, or a share link's token in the path and a visitor token"},
 	{appRoom, "/v1/rooms/{roomId}/apps/{artifactId}", ""},
 }
 
@@ -180,7 +180,8 @@ func writeAppErr(w http.ResponseWriter, err error) {
 		httpx.WriteJSON(w, ae.status, httpx.ErrorBody{Error: ae.msg, Code: ae.code})
 	case errors.As(err, &ge):
 		writeGrantErr(w, err)
-	case errors.Is(err, errShareGuessing), errors.Is(err, errShareNotFound):
+	case errors.Is(err, errShareGuessing), errors.Is(err, errShareNotFound), errors.Is(err, errShareSignIn),
+		errors.As(err, new(*shareOrgOnlyError)), errors.Is(err, errTenantSuspended), errors.Is(err, errSwitchUnavailable):
 		writeShareErr(w, err)
 	case errors.Is(err, errSiteNotFound):
 		writeAppErr(w, errAppNotFound)
@@ -227,20 +228,31 @@ func (s *Service) ticketApp(r *http.Request) (appCapability, error) {
 	}, nil
 }
 
-// shareApp: a public share link of a site, resolved on every call (a
-// revoked or expired link, a disabled organization or a deleted room stops
-// it at once), and the visitor token minted for that link.
+// shareApp: a share link of a site, opened on every call (openShare: a
+// revoked or expired link, an "anyone" link the organization disabled, a
+// link switched to "org", a member who left the organization or a deleted
+// room stops it at once). A share ticket's member is the participant
+// (member:<subject>); an anonymous caller of an "anyone" link needs the
+// visitor token minted for that link.
 func (s *Service) shareApp(r *http.Request) (appCapability, error) {
-	token := strings.TrimSpace(r.Header.Get(wire.AppVisitorHeader))
-	if token == "" {
-		return appCapability{}, &appError{status: http.StatusUnauthorized, code: wire.AppVisitorRequired, msg: "a public link's app needs a visitor token from its share page"}
-	}
-	res, err := s.shareByToken(r, false, false)
+	o, err := s.openShare(r, false)
 	if err != nil {
 		return appCapability{}, err
 	}
+	res := o.res
 	if res.Artifact.Kind != store.ArtifactKindSite {
 		return appCapability{}, errAppNotFound
+	}
+	if o.caller.subject != "" {
+		return appCapability{
+			tenant: res.TenantID,
+			scope:  svcauth.AppScope{RoomID: res.RoomID, AppID: res.Artifact.ArtifactID, Kind: svcauth.AppMember, Participant: o.caller.subject},
+			link:   "share:" + res.Share.ShareID,
+		}, nil
+	}
+	token := strings.TrimSpace(r.Header.Get(wire.AppVisitorHeader))
+	if token == "" {
+		return appCapability{}, &appError{status: http.StatusUnauthorized, code: wire.AppVisitorRequired, msg: "a public link's app needs a visitor token from its share page"}
 	}
 	visitor, err := s.Signer.VerifyKind(token, auth.KindAppVisitor)
 	if err != nil || visitor.ID != res.Share.ShareID || visitor.Subject == "" {
@@ -497,17 +509,25 @@ const appVisitorTTL = 24 * time.Hour
 const maxAppVisitorBody = 4 << 10
 
 // handleAppVisitor is POST /v1/public/shares/{token}/visitor: a visitor
-// token for a share link of an app (wire.AppVisitorToken), bound to the
-// link and a random visitor id, expiring with the link at the latest. A
-// still-valid token of the same link in the body is renewed for the same
-// visitor. Minting spends the client IP's visitor budget (the route row).
+// token for an anonymous caller of an "anyone" link of an app
+// (wire.AppVisitorToken), bound to the link and a random visitor id,
+// expiring with the link at the latest. A still-valid token of the same
+// link in the body is renewed for the same visitor. An "org" link mints
+// none (shareAccess refuses an anonymous caller), nor does a share ticket:
+// its member is the app's participant. Minting spends the client IP's
+// visitor budget (the route row).
 func (s *Service) handleAppVisitor(w http.ResponseWriter, r *http.Request) {
-	res, ok := s.publicShare(w, r, false, false)
+	o, ok := s.publicShare(w, r, false)
 	if !ok {
 		return
 	}
+	res := o.res
 	if res.Artifact.Kind != store.ArtifactKindSite {
 		writeAppErr(w, errAppNotFound)
+		return
+	}
+	if o.caller.subject != "" {
+		writeAppErr(w, &appError{status: http.StatusBadRequest, msg: "a signed-in member's link needs no visitor token"})
 		return
 	}
 	var in wire.AppVisitorRenew

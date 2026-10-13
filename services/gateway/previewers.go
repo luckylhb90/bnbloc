@@ -215,7 +215,7 @@ func (s *Service) bundleCaches() (previewers, sites *tarbundle.Cache) {
 		s.previewerBundles = tarbundle.NewCache(previewerCacheBytes)
 		s.siteBundles = tarbundle.NewCache(siteCacheBytes)
 		s.siteAuth = newBoundedCache[siteVersion](siteAuthTTL, siteCacheMaxEntries)
-		s.publicSites = newBoundedCache[wire.ShareResolution](publicSiteResolveTTL, siteCacheMaxEntries)
+		s.publicSites = newBoundedCache[openedShare](publicSiteResolveTTL, siteCacheMaxEntries)
 	})
 	return s.previewerBundles, s.siteBundles
 }

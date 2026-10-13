@@ -297,9 +297,10 @@ type settingsView struct {
 	// RequireSandboxForBorrow: borrowed agent drives must run in the owner's
 	// agent sandbox (refused when it is unavailable).
 	RequireSandboxForBorrow bool `json:"requireSandboxForBorrow"`
-	// PublicSharesDisabled: public artifact share links are off (create is
-	// refused, existing links resolve 404).
-	PublicSharesDisabled bool `json:"publicSharesDisabled"`
+	// AnonymousLinksDisabled: share links anyone can open without signing
+	// in are off (creating or switching to one is refused, existing ones
+	// resolve 404); links for the organization's members stay allowed.
+	AnonymousLinksDisabled bool `json:"anonymousLinksDisabled"`
 }
 
 func viewSettings(t store.Tenant) settingsView {
@@ -309,7 +310,7 @@ func viewSettings(t store.Tenant) settingsView {
 		Status:                  string(t.Status),
 		SSOIssuer:               t.SSOIssuer,
 		RequireSandboxForBorrow: t.RequireSandboxForBorrow,
-		PublicSharesDisabled:    t.PublicSharesDisabled,
+		AnonymousLinksDisabled:  t.AnonymousLinksDisabled,
 	}
 }
 
@@ -333,7 +334,7 @@ type settingsBody struct {
 	Name                    *string `json:"name"`
 	SSOIssuer               *string `json:"ssoIssuer"`
 	RequireSandboxForBorrow *bool   `json:"requireSandboxForBorrow"`
-	PublicSharesDisabled    *bool   `json:"publicSharesDisabled"`
+	AnonymousLinksDisabled  *bool   `json:"anonymousLinksDisabled"`
 }
 
 // handleTenantUpdateSettings updates the tenant's display name, SSO
@@ -369,10 +370,10 @@ func (s *Service) handleTenantUpdateSettings(w http.ResponseWriter, r *http.Requ
 		httpx.Error(w, "update settings failed", http.StatusInternalServerError)
 		return
 	}
-	if body.RequireSandboxForBorrow != nil || body.PublicSharesDisabled != nil {
+	if body.RequireSandboxForBorrow != nil || body.AnonymousLinksDisabled != nil {
 		t, err = s.Tenants.SetTenantPolicy(r.Context(), tid, store.TenantPolicyUpdate{
 			RequireSandboxForBorrow: body.RequireSandboxForBorrow,
-			PublicSharesDisabled:    body.PublicSharesDisabled,
+			AnonymousLinksDisabled:  body.AnonymousLinksDisabled,
 		})
 		if err != nil {
 			obs.ServerError(w, "update tenant policy failed", err)

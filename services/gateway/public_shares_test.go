@@ -18,11 +18,12 @@ const (
 	pdfToken  = "bsh_shpdf_cGRmc2VjcmV0"
 )
 
-func shareRes(shareVersion int, kind, title, fileName string, v store.ArtifactVersion) map[string]any {
+// shareRes is a resolution of an "anyone" link whose share id is id.
+func shareRes(id string, shareVersion int, kind, title, fileName string, v store.ArtifactVersion) map[string]any {
 	return map[string]any{
-		"tenantId": "default", "roomId": "room-1",
-		"share": map[string]any{"shareId": "sh1", "artifactId": v.ArtifactID, "version": shareVersion, "createdBy": "alice",
-			"createdAtMs": 1, "expiresAtMs": 1900000000000, "viewCount": 0, "active": true},
+		"tenantId": "default", "orgName": "Default", "roomId": "room-1",
+		"share": map[string]any{"shareId": id, "artifactId": v.ArtifactID, "version": shareVersion, "createdBy": "alice",
+			"createdAtMs": 1, "expiresAtMs": 1900000000000, "viewCount": 0, "access": "anyone", "active": true},
 		"artifact": map[string]any{"artifactId": v.ArtifactID, "kind": kind, "title": title, "fileName": fileName},
 		"version":  v,
 		"sharedBy": map[string]any{"userId": "alice", "displayName": "Alice A."},
@@ -39,9 +40,9 @@ func newShareEnv(t *testing.T) *siteEnv {
 	}
 	pdf := store.ArtifactVersion{ArtifactID: "art_pdf", Version: 2, Storage: store.ArtifactStorageBlob, BlobKey: key, ContentHash: sha, SizeBytes: size, MimeType: "application/pdf", CreatedAtMs: 5}
 	doc := store.ArtifactVersion{ArtifactID: "art_doc", Version: 3, Storage: store.ArtifactStorageInline, Content: "# Plan\n", SizeBytes: 7, MimeType: "text/markdown", Summary: "first cut", CreatedAtMs: 7}
-	e.shares[siteToken] = shareRes(0, store.ArtifactKindSite, "Demo", "dist", site)
-	e.shares[pdfToken] = shareRes(2, store.ArtifactKindFile, "Q3", "Q3 report.pdf", pdf)
-	e.shares[docToken] = shareRes(3, store.ArtifactKindMarkdown, "Plan", "plan.md", doc)
+	e.shares[siteToken] = shareRes("shsite", 0, store.ArtifactKindSite, "Demo", "dist", site)
+	e.shares[pdfToken] = shareRes("shpdf", 2, store.ArtifactKindFile, "Q3", "Q3 report.pdf", pdf)
+	e.shares[docToken] = shareRes("shdoc", 3, store.ArtifactKindMarkdown, "Plan", "plan.md", doc)
 	return e
 }
 
@@ -60,8 +61,8 @@ func TestPublicShare_metadata_reveals_only_the_shared_version(t *testing.T) {
 	if canon, _ := json.Marshal(got); string(canon) != want {
 		t.Fatalf("metadata\n got %s\nwant %s", canon, want)
 	}
-	if e.views[docToken] != 1 || e.resolveUser != svcauth.ServiceSubject("gateway") {
-		t.Fatalf("views %d resolver user %q", e.views[docToken], e.resolveUser)
+	if e.views["shdoc"] != 1 || e.resolveUser != svcauth.ServiceSubject("gateway") {
+		t.Fatalf("views %d resolver user %q", e.views["shdoc"], e.resolveUser)
 	}
 
 	resp, body = e.do(http.MethodGet, "/v1/public/shares/"+siteToken, "")
@@ -96,7 +97,7 @@ func TestPublicShare_content_is_sandboxed_and_does_not_count_views(t *testing.T)
 	if got := resp.Header.Get("Content-Disposition"); got != `attachment; filename="Q3 report.pdf"` {
 		t.Fatalf("disposition %q", got)
 	}
-	if e.views[pdfToken]+e.views[docToken] != 0 {
+	if e.views["shpdf"]+e.views["shdoc"] != 0 {
 		t.Fatal("content reads must not count views")
 	}
 }

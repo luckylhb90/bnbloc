@@ -1,6 +1,7 @@
 # Share links require sign-in by default (2026-10-13)
 
-Status: accepted by the product owner (2026-10-13, final); building.
+Status: accepted by the product owner (2026-10-13, final); **landed** 2026-10-13
+(migration `2026_10_share_link_access`).
 
 Amends `2026-10-09-artifact-shares-and-site-previews.md` (public share
 links) and `2026-10-12-interactive-apps.md` (apps on a public link). Both
@@ -146,3 +147,18 @@ Nothing changes: a member's site (`/v1/sites/{ticket}`) and the
 ## Status
 
 - Recorded 2026-10-13, before building.
+- Landed 2026-10-13: the store, room service and gateway (`share_access.go`,
+  `POST /v1/share-tickets`, `POST /internal/v1/shares/view`), then the web
+  (`lib/loginReturn.ts`, the share page, the share dialog, the
+  organization settings). Decided while building:
+  - The view count moved out of the resolve call: the gateway counts a
+    view only after `shareAccess` passes, so a refused probe of an org
+    link counts none.
+  - `/v1/my/tenant-policy` also carries the organization's `name` (the
+    share dialog's "People in <org>").
+  - The default access lives in the store (`shareAccessOf`); the room
+    service passes an absent access through.
+  - An org admin keeps the revoke exemption only; an access change goes
+    through the room's own reach (the creator, a room owner or admin).
+  - The gateway's `orgMember` (content sharing) now reads membership
+    through `memberRole`, the one tenant-membership read.

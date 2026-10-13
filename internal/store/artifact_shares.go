@@ -6,6 +6,7 @@ import (
 	"sort"
 
 	"github.com/luckylhb90/bnbloc/internal/tenant"
+	"github.com/luckylhb90/bnbloc/internal/wire"
 )
 
 // ErrArtifactShareNotFound reports an unknown share id (or one outside the
@@ -15,12 +16,17 @@ var ErrArtifactShareNotFound = errors.New("store: artifact share not found")
 // ErrArtifactShareExists refuses a share id already taken (ids are global).
 var ErrArtifactShareExists = errors.New("store: artifact share id already exists")
 
+// ErrArtifactShareAccess refuses an access mode that is not one of
+// wire.ShareAccess.
+var ErrArtifactShareAccess = errors.New("store: unknown artifact share access")
+
 // ErrArtifactShareRevokeTime refuses a revocation without a time (atMs <=
 // 0): RevokedAtMs 0 means "not revoked", so such a revoke cannot be stored.
 var ErrArtifactShareRevokeTime = errors.New("store: artifact share revocation needs a time")
 
-// ArtifactShare is one public share link of an artifact
-// (docs/prd/2026-10-09-artifact-shares-and-site-previews.md). The token
+// ArtifactShare is one share link of an artifact
+// (docs/prd/2026-10-09-artifact-shares-and-site-previews.md; access:
+// docs/prd/2026-10-13-share-link-sign-in.md). The token
 // "bsh_<ShareID>_<secret>" is shown once at create; only TokenHash (the
 // secret's sha256 hex) is stored.
 type ArtifactShare struct {
@@ -30,7 +36,10 @@ type ArtifactShare struct {
 	RoomID     string
 	ArtifactID string
 	// Version is the pinned version; 0 follows the artifact's latest.
-	Version     int
+	Version int
+	// Access is who may open the link (wire.ShareAccess); a link created
+	// without one is wire.ShareAccessOrg.
+	Access      string
 	CreatedBy   string
 	CreatedAtMs int64
 	ExpiresAtMs int64
@@ -78,9 +87,13 @@ type TenantShareQuery struct {
 // ArtifactShareStore persists share links. Every method except
 // ResolveArtifactShare is scoped to the context tenant.
 type ArtifactShareStore interface {
-	// CreateArtifactShare stores a new link in the context tenant;
+	// CreateArtifactShare stores a new link in the context tenant (an empty
+	// Access is wire.ShareAccessOrg; an unknown one ErrArtifactShareAccess);
 	// ErrArtifactShareExists when the id is taken in any tenant.
 	CreateArtifactShare(ctx context.Context, sh ArtifactShare) (ArtifactShare, error)
+	// SetArtifactShareAccess changes a link's access (ErrArtifactShareAccess
+	// for an unknown one) and returns it as stored.
+	SetArtifactShareAccess(ctx context.Context, shareID, access string) (ArtifactShare, error)
 	// GetArtifactShare returns one link of the context tenant.
 	GetArtifactShare(ctx context.Context, shareID string) (ArtifactShare, error)
 	// ListArtifactShares returns an artifact's links that stopped working
@@ -112,11 +125,26 @@ func tenantShareLimit(n int) int {
 	return clampLimit(n, maxTenantArtifactShareList, maxTenantArtifactShareList)
 }
 
+// shareAccessOf is the access a link is created with: its own, org when it
+// names none; ErrArtifactShareAccess for an unknown one.
+func shareAccessOf(access string) (string, error) {
+	if access == "" {
+		return wire.ShareAccessOrg, nil
+	}
+	if !wire.ValidShareAccess(access) {
+		return "", ErrArtifactShareAccess
+	}
+	return access, nil
+}
+
 var _ ArtifactShareStore = (*MemoryArtifacts)(nil)
 
 func (s *MemoryArtifacts) CreateArtifactShare(ctx context.Context, sh ArtifactShare) (ArtifactShare, error) {
 	tid, err := tenant.Require(ctx)
 	if err != nil {
+		return ArtifactShare{}, err
+	}
+	if sh.Access, err = shareAccessOf(sh.Access); err != nil {
 		return ArtifactShare{}, err
 	}
 	s.mu.Lock()
@@ -127,6 +155,25 @@ func (s *MemoryArtifacts) CreateArtifactShare(ctx context.Context, sh ArtifactSh
 	sh.TenantID = tid
 	sh.RevokedAtMs, sh.RevokedBy, sh.ViewCount, sh.LastViewedAtMs = 0, "", 0, 0
 	s.shares[sh.ShareID] = sh
+	return sh, nil
+}
+
+func (s *MemoryArtifacts) SetArtifactShareAccess(ctx context.Context, shareID, access string) (ArtifactShare, error) {
+	tid, err := tenant.Require(ctx)
+	if err != nil {
+		return ArtifactShare{}, err
+	}
+	if !wire.ValidShareAccess(access) {
+		return ArtifactShare{}, ErrArtifactShareAccess
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	sh, ok := s.shares[shareID]
+	if !ok || sh.TenantID != tid {
+		return ArtifactShare{}, ErrArtifactShareNotFound
+	}
+	sh.Access = access
+	s.shares[shareID] = sh
 	return sh, nil
 }
 

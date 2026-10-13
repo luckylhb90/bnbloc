@@ -92,11 +92,8 @@ func (s *Service) appLink(r *http.Request, route string) string {
 // orgMember reports whether subject belongs to the organization (fail
 // closed without a tenant directory).
 func (s *Service) orgMember(tenantID, subject string) bool {
-	if s.TenantMemberRole == nil {
-		return false
-	}
-	_, ok := s.TenantMemberRole(tenantID, subject)
-	return ok
+	_, err := s.memberRole(tenantID, subject)
+	return err == nil
 }
 
 // ---------------------------------------------------------------- shares

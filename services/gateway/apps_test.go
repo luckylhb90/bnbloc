@@ -43,7 +43,8 @@ const appGWKey = "app-gateway-internal-key"
 // data on) and a real realtime hub, as composed in production: the room
 // service publishes app_changed through realtime's signed ingest. One room
 // ("maya" owner, "jack" member) holds two site apps, A and B, and a
-// markdown artifact.
+// markdown artifact. The organization ("home", named "Home Org") has maya,
+// jack and nora (not in the room); olaf belongs to another one ("away").
 type appGW struct {
 	t       *testing.T
 	b       *store.Backends
@@ -105,6 +106,23 @@ func newAppGW(t *testing.T) *appGW {
 		}
 		return string(m.Role), !m.AgentHost
 	})
+	e.gw.TenantMemberRole = func(tenantID, userID string) (string, bool) {
+		m, ok, err := b.Tenant.GetMember(context.Background(), tenantID, userID)
+		if err != nil || !ok {
+			return "", false
+		}
+		return string(m.Role), true
+	}
+	for id, name := range map[string]string{e.tenant: "Home Org", "away": "Away Org"} {
+		if err := b.Tenant.PutTenant(context.Background(), store.Tenant{TenantID: id, Name: name, Status: store.TenantActive, CreatedAtMs: 1}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for user, tid := range map[string]string{"maya": e.tenant, "jack": e.tenant, "nora": e.tenant, "olaf": "away"} {
+		if err := b.Tenant.PutMember(context.Background(), store.TenantMember{TenantID: tid, UserID: user, Role: store.OrgRoleMember}); err != nil {
+			t.Fatal(err)
+		}
+	}
 	e.jobs = store.NewMemoryBridgeJobs()
 	e.gw.ContentJobs = e.jobs
 	e.srv = httptest.NewServer(e.gw.Handler())
@@ -238,11 +256,17 @@ func (e *appGW) roomCall(subject, method, path string, body any) resp {
 	return resp{status: r.StatusCode, body: out}
 }
 
-// share mints a public link to artifact (following its latest version):
-// its token and id.
+// share mints a link anyone can open to artifact (following its latest
+// version): its token and id.
 func (e *appGW) share(artifact string) (tok, id string) {
 	e.t.Helper()
-	r := e.roomCall("maya", http.MethodPost, "/v1/rooms/"+e.roomID+"/artifacts/"+artifact+"/shares", map[string]any{})
+	return e.shareWith(artifact, wire.ShareAccessAnyone)
+}
+
+// shareWith mints a link to artifact with access ("" = the default).
+func (e *appGW) shareWith(artifact, access string) (tok, id string) {
+	e.t.Helper()
+	r := e.roomCall("maya", http.MethodPost, "/v1/rooms/"+e.roomID+"/artifacts/"+artifact+"/shares", wire.ShareCreateRequest{Access: access})
 	var out struct {
 		Token string         `json:"token"`
 		Share wire.ShareView `json:"share"`
@@ -525,13 +549,10 @@ func TestPublicAppNeedsVisitorAndLiveLink(t *testing.T) {
 	e.room.Now = func() int64 { return now() + 365*24*3600_000 }
 	dead("expired")
 	e.room.Now = now
-	// Public links disabled for the organization.
-	if err := e.b.Tenant.PutTenant(e.ctx(), store.Tenant{TenantID: e.tenant, Name: "home", Status: store.TenantActive, CreatedAtMs: 1}); err != nil {
-		t.Fatal(err)
-	}
+	// Anonymous links disabled for the organization.
 	publicLinks := func(off bool) {
 		t.Helper()
-		if _, err := e.b.Tenant.SetTenantPolicy(e.ctx(), e.tenant, store.TenantPolicyUpdate{PublicSharesDisabled: &off}); err != nil {
+		if _, err := e.b.Tenant.SetTenantPolicy(e.ctx(), e.tenant, store.TenantPolicyUpdate{AnonymousLinksDisabled: &off}); err != nil {
 			t.Fatal(err)
 		}
 	}

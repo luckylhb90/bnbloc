@@ -2989,6 +2989,49 @@ export interface SearchUpdateStats {
 
 // ---- wire/shares.go ----
 
+// Who may open a share link (ShareView.Access): a signed-in member of the
+// room's organization (the default), or anyone holding the link, without
+// signing in (the creator's opt-in, refused while the organization
+// disables anonymous links).
+export const ShareAccessOrg = "org";
+export const ShareAccessAnyone = "anyone";
+
+// ShareCreateRequest is POST /v1/rooms/{roomId}/artifacts/{artifactId}/shares:
+// Version 0 (or absent) follows the latest version; ExpiresInHours
+// 1..2160 (default 168); Access defaults to ShareAccessOrg.
+export interface ShareCreateRequest {
+  version?: number;
+  expiresInHours?: number;
+  access?: ShareAccess;
+}
+
+// ShareAccessUpdate is PATCH …/shares/{shareId}: the link's new access.
+export interface ShareAccessUpdate {
+  access: ShareAccess;
+}
+
+// ShareTicketRequest is POST /v1/share-tickets: the link's token, in the
+// body so it never reaches an access log.
+export interface ShareTicketRequest {
+  token: string;
+}
+
+// ShareTicket answers a ticket mint: a signed credential of the signed-in
+// member for one link, used in place of the link's token in
+// /v1/public/shares/{…} (metadata, content, site, ~app).
+export interface ShareTicket {
+  ticket: string;
+  expiresAtMs: number;
+}
+
+// The codes of a share route's refusal (httpx.ErrorBody code) the share
+// page acts on.
+// ShareSignInRequired: an org link opened without signing in (401).
+export const ShareSignInRequired = "share_sign_in_required";
+// ShareOrgOnly: the signed-in caller is not a member of the link's
+// organization (403).
+export const ShareOrgOnly = "share_org_only";
+
 // ShareView is one share link as the room service lists it.
 export interface ShareView {
   shareId: string;
@@ -3001,15 +3044,34 @@ export interface ShareView {
   revokedBy?: string;
   viewCount: number;
   lastViewedAtMs?: number;
+  // Access is who may open the link (ShareAccessOrg, ShareAccessAnyone).
+  access: ShareAccess;
   // Active is the link's own state (not revoked, not expired); the
   // organization switch is reported by GET /v1/my/tenant-policy.
   active: boolean;
 }
 
+// ShareResolveRequest is the gateway's internal POST
+// /internal/v1/shares/resolve: a link's token (its secret is verified), or
+// the share id of a share ticket the gateway signed.
+export interface ShareResolveRequest {
+  token?: string;
+  shareId?: string;
+}
+
+// ShareViewCount is the gateway's internal POST /internal/v1/shares/view:
+// one view of a link its caller was allowed to open.
+export interface ShareViewCount {
+  shareId: string;
+}
+
 // ShareResolution is the room service's answer to the gateway's internal
-// POST /internal/v1/shares/resolve for an active link.
+// POST /internal/v1/shares/resolve for a live link.
 export interface ShareResolution {
   tenantId: string;
+  // OrgName is the organization's display name (its id when it has
+  // none), for the refusal of a caller outside it.
+  orgName: string;
   roomId: string;
   share: ShareView;
   artifact: ShareArtifact;
@@ -3674,6 +3736,10 @@ export type ScheduleRunStatus = "ok" | "error" | "skipped";
 export const ScheduleRunStatusValues: readonly ScheduleRunStatus[] = ["ok", "error", "skipped"];
 export type TemplateVisibility = "private" | "tenant";
 export const TemplateVisibilityValues: readonly TemplateVisibility[] = ["private", "tenant"];
+export type ShareAccess = "org" | "anyone";
+export const ShareAccessValues: readonly ShareAccess[] = ["org", "anyone"];
+export type ShareRefusalCode = "share_sign_in_required" | "share_org_only";
+export const ShareRefusalCodeValues: readonly ShareRefusalCode[] = ["share_sign_in_required", "share_org_only"];
 export type TaskStatus = "open" | "done";
 export const TaskStatusValues: readonly TaskStatus[] = ["open", "done"];
 export type SearchResultKind = "message" | "artifact" | "prompt";

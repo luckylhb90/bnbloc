@@ -25,8 +25,9 @@ var readerWrites = map[string]string{
 	"DELETE /v1/components/{name}/install": "a member's own opt-out",
 	"POST /v1/rooms/{roomId}/artifacts/{artifactId}/versions/{version}/site-ticket": "mints a read ticket for a site the member may read",
 	"POST /v1/rooms/{roomId}/attachments/{attachmentId}/ticket":                     "mints a read ticket for an attachment the member may read",
-	"POST /v1/content-components/{id}/versions/{version}/ack":                       "acknowledges the version of a component the member uses",
-	"POST /v1/content-components/{id}/prompts/{promptId}/use":                       "counts one prompt insertion (it spends the cost budget)",
+	"POST /v1/share-tickets":                                  "mints a read ticket for a share link the member's organization may open",
+	"POST /v1/content-components/{id}/versions/{version}/ack": "acknowledges the version of a component the member uses",
+	"POST /v1/content-components/{id}/prompts/{promptId}/use": "counts one prompt insertion (it spends the cost budget)",
 }
 
 // publicPrefixes are where a route may take no session: sign-in, the IdP's

@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/luckylhb90/bnbloc/internal/tenant"
+	"github.com/luckylhb90/bnbloc/internal/wire"
 )
 
 // ArtifactStore, ArtifactIndex and ArtifactShareStore contract: versions
@@ -484,6 +485,42 @@ func TestContractArtifactShareStore(t *testing.T) {
 		}
 		if _, err := s.CreateArtifactShare(context.Background(), live); !errors.Is(err, tenant.ErrNoTenant) {
 			t.Fatalf("create without tenant = %v", err)
+		}
+
+		// Access: org unless the link says otherwise, an unknown mode
+		// refused, changed in the link's tenant only.
+		if live.Access != wire.ShareAccessOrg || must(s.GetArtifactShare(ctx, live.ShareID))(t).Access != wire.ShareAccessOrg {
+			t.Fatalf("a link created without an access = %q, want org", live.Access)
+		}
+		anyID := uniq("sh-")
+		anyone, err := s.CreateArtifactShare(ctx, ArtifactShare{ShareID: anyID, TokenHash: HashArtifactContent(anyID), RoomID: room, ArtifactID: artID,
+			Access: wire.ShareAccessAnyone, CreatedBy: "maya", CreatedAtMs: now - 50*dayMs, ExpiresAtMs: now - 40*dayMs})
+		if err != nil || anyone.Access != wire.ShareAccessAnyone {
+			t.Fatalf("create anyone = %+v %v", anyone, err)
+		}
+		badID := uniq("sh-")
+		if _, err := s.CreateArtifactShare(ctx, ArtifactShare{ShareID: badID, TokenHash: HashArtifactContent(badID), RoomID: room, ArtifactID: artID, Access: "public", CreatedAtMs: 1, ExpiresAtMs: 2}); !errors.Is(err, ErrArtifactShareAccess) {
+			t.Fatalf("create with an unknown access = %v", err)
+		}
+		if got, err := s.SetArtifactShareAccess(ctx, anyID, wire.ShareAccessOrg); err != nil || got.Access != wire.ShareAccessOrg {
+			t.Fatalf("set org = %+v %v", got, err)
+		}
+		if got := must(s.ResolveArtifactShare(context.Background(), anyID))(t); got.Access != wire.ShareAccessOrg {
+			t.Fatalf("resolved access after the change = %q", got.Access)
+		}
+		if _, err := s.SetArtifactShareAccess(ctx, anyID, wire.ShareAccessOrg); err != nil {
+			t.Fatalf("setting the stored access again = %v", err)
+		}
+		for _, bad := range []string{"", "public"} {
+			if _, err := s.SetArtifactShareAccess(ctx, anyID, bad); !errors.Is(err, ErrArtifactShareAccess) {
+				t.Fatalf("set %q = %v", bad, err)
+			}
+		}
+		if _, err := s.SetArtifactShareAccess(other, anyID, wire.ShareAccessAnyone); !errors.Is(err, ErrArtifactShareNotFound) {
+			t.Fatalf("set from another tenant = %v", err)
+		}
+		if _, err := s.SetArtifactShareAccess(ctx, uniq("nope-"), wire.ShareAccessAnyone); !errors.Is(err, ErrArtifactShareNotFound) {
+			t.Fatalf("set unknown = %v", err)
 		}
 
 		// Org-admin list: titles, the active filter (expiry at now is not

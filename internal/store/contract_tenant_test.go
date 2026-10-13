@@ -50,10 +50,10 @@ func TestContractTenantStoreTenants(t *testing.T) {
 			t.Fatalf("SetQuota of a missing tenant = %v", err)
 		}
 		on, off := true, false
-		if p, err := s.SetTenantPolicy(ctx, older, TenantPolicyUpdate{RequireSandboxForBorrow: &on}); err != nil || !p.RequireSandboxForBorrow || p.PublicSharesDisabled {
+		if p, err := s.SetTenantPolicy(ctx, older, TenantPolicyUpdate{RequireSandboxForBorrow: &on}); err != nil || !p.RequireSandboxForBorrow || p.AnonymousLinksDisabled {
 			t.Fatalf("set sandbox = %+v, %v", p, err)
 		}
-		if p, err := s.SetTenantPolicy(ctx, older, TenantPolicyUpdate{PublicSharesDisabled: &on}); err != nil || !p.RequireSandboxForBorrow || !p.PublicSharesDisabled {
+		if p, err := s.SetTenantPolicy(ctx, older, TenantPolicyUpdate{AnonymousLinksDisabled: &on}); err != nil || !p.RequireSandboxForBorrow || !p.AnonymousLinksDisabled {
 			t.Fatalf("set public shares = %+v, %v (an unset switch is kept)", p, err)
 		}
 		days := 30
@@ -65,16 +65,16 @@ func TestContractTenantStoreTenants(t *testing.T) {
 		}
 		got, _ = s.GetTenant(ctx, older)
 		if got.Name != "Renamed" || got.Status != TenantSuspended || got.CreatedAtMs != 10 || got.RunQuota != 5 || got.CostAllowance != 1.5 ||
-			!got.RequireSandboxForBorrow || !got.PublicSharesDisabled || got.Retention.Days(wire.RetentionKinds[0]) == nil {
+			!got.RequireSandboxForBorrow || !got.AnonymousLinksDisabled || got.Retention.Days(wire.RetentionKinds[0]) == nil {
 			t.Fatalf("tenant after a re-put = %+v; only name, status and issuer may change", got)
 		}
-		if p, err := s.SetTenantPolicy(ctx, older, TenantPolicyUpdate{RequireSandboxForBorrow: &off}); err != nil || p.RequireSandboxForBorrow || !p.PublicSharesDisabled {
+		if p, err := s.SetTenantPolicy(ctx, older, TenantPolicyUpdate{RequireSandboxForBorrow: &off}); err != nil || p.RequireSandboxForBorrow || !p.AnonymousLinksDisabled {
 			t.Fatalf("clear sandbox = %+v, %v", p, err)
 		}
 		if r, err := s.SetTenantRetention(ctx, older, wire.RetentionPolicy{}); err != nil || r.Retention.Days(wire.RetentionKinds[0]) != nil {
 			t.Fatalf("clear retention = %+v, %v", r, err)
 		}
-		if _, err := s.SetTenantPolicy(ctx, uniq("nope-"), TenantPolicyUpdate{PublicSharesDisabled: &on}); !errors.Is(err, ErrTenantNotFound) {
+		if _, err := s.SetTenantPolicy(ctx, uniq("nope-"), TenantPolicyUpdate{AnonymousLinksDisabled: &on}); !errors.Is(err, ErrTenantNotFound) {
 			t.Fatalf("SetTenantPolicy of a missing tenant = %v", err)
 		}
 		if _, err := s.SetTenantRetention(ctx, uniq("nope-"), wire.RetentionPolicy{}); !errors.Is(err, ErrTenantNotFound) {

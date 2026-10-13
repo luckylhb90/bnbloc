@@ -102,7 +102,7 @@ func TestContractIdenticalUpdateSucceeds(t *testing.T) {
 		}
 		on := true
 		for i := 0; i < 2; i++ {
-			if _, err := b.Tenant.SetTenantPolicy(ctx, tid, TenantPolicyUpdate{PublicSharesDisabled: &on}); err != nil {
+			if _, err := b.Tenant.SetTenantPolicy(ctx, tid, TenantPolicyUpdate{AnonymousLinksDisabled: &on}); err != nil {
 				t.Fatalf("SetTenantPolicy #%d: %v", i, err)
 			}
 		}

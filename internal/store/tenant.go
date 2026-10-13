@@ -69,10 +69,12 @@ type Tenant struct {
 	// drives must run sandboxed; an owner machine without a ready sandbox
 	// refuses them instead of running on the host (default off).
 	RequireSandboxForBorrow bool
-	// PublicSharesDisabled is the org-admin switch that turns public artifact
-	// share links off: creating one is refused and every existing link
-	// resolves 404 while it is on (default off).
-	PublicSharesDisabled bool
+	// AnonymousLinksDisabled is the org-admin switch that turns share links
+	// anyone can open (access "anyone") off: creating or switching to one
+	// is refused and every existing one resolves 404 while it is on
+	// (default off). Links for the organization's members stay allowed.
+	// The room service's anonymousLinkAllowed is its one reader.
+	AnonymousLinksDisabled bool
 	// Retention is the org-admin data retention override (null = the
 	// platform default, 0 = keep forever, N = delete after N days); see
 	// wire.RetentionPolicy. Set only through SetTenantRetention.
@@ -83,7 +85,7 @@ type Tenant struct {
 // left as stored.
 type TenantPolicyUpdate struct {
 	RequireSandboxForBorrow *bool
-	PublicSharesDisabled    *bool
+	AnonymousLinksDisabled  *bool
 }
 
 // apply returns t with the update's set fields.
@@ -91,8 +93,8 @@ func (u TenantPolicyUpdate) apply(t Tenant) Tenant {
 	if u.RequireSandboxForBorrow != nil {
 		t.RequireSandboxForBorrow = *u.RequireSandboxForBorrow
 	}
-	if u.PublicSharesDisabled != nil {
-		t.PublicSharesDisabled = *u.PublicSharesDisabled
+	if u.AnonymousLinksDisabled != nil {
+		t.AnonymousLinksDisabled = *u.AnonymousLinksDisabled
 	}
 	return t
 }

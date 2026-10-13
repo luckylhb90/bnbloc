@@ -11,18 +11,20 @@ import (
 	"github.com/luckylhb90/bnbloc/internal/tenant"
 )
 
-// tenantPolicyView is GET /v1/my/tenant-policy: the org-admin policy
-// switches a member's surfaces follow — the owner's bridge (borrowed drives
-// must run sandboxed) and the web (the share dialog is hidden while public
-// links are disabled).
+// tenantPolicyView is GET /v1/my/tenant-policy: the organization's name and
+// the org-admin policy switches a member's surfaces follow — the owner's
+// bridge (borrowed drives must run sandboxed) and the web (the share
+// dialog offers no link anyone can open while anonymous links are
+// disabled).
 type tenantPolicyView struct {
 	TenantID                string `json:"tenantId"`
+	Name                    string `json:"name"`
 	RequireSandboxForBorrow bool   `json:"requireSandboxForBorrow"`
-	PublicSharesDisabled    bool   `json:"publicSharesDisabled"`
+	AnonymousLinksDisabled  bool   `json:"anonymousLinksDisabled"`
 }
 
 func viewTenantPolicy(t store.Tenant) tenantPolicyView {
-	return tenantPolicyView{TenantID: t.TenantID, RequireSandboxForBorrow: t.RequireSandboxForBorrow, PublicSharesDisabled: t.PublicSharesDisabled}
+	return tenantPolicyView{TenantID: t.TenantID, Name: t.Name, RequireSandboxForBorrow: t.RequireSandboxForBorrow, AnonymousLinksDisabled: t.AnonymousLinksDisabled}
 }
 
 // handleMyTenantPolicy answers the policy of ?tenant= (a tenant the caller is

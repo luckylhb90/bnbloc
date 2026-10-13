@@ -57,14 +57,25 @@ func sharesPath(artifactID string) string {
 	return "/v1/rooms/files/artifacts/" + artifactID + "/shares"
 }
 
-// resolve calls the internal resolve route as the gateway.
-func (e *handoffEnv) resolve(token string, countView bool) (int, wire.ShareResolution) {
+// resolve calls the internal resolve route as the gateway, by token.
+func (e *handoffEnv) resolve(token string) (int, wire.ShareResolution) {
+	return e.resolveBy(wire.ShareResolveRequest{Token: token})
+}
+
+// resolveBy calls the internal resolve route as the gateway.
+func (e *handoffEnv) resolveBy(req wire.ShareResolveRequest) (int, wire.ShareResolution) {
 	e.t.Helper()
-	code, raw := e.do(e.roomSrv, http.MethodPost, "/internal/v1/shares/resolve", svcauth.ServiceSubject("gateway"),
-		map[string]any{"token": token, "countView": countView})
+	code, raw := e.do(e.roomSrv, http.MethodPost, "/internal/v1/shares/resolve", svcauth.ServiceSubject("gateway"), req)
 	var out wire.ShareResolution
 	_ = json.Unmarshal(raw, &out)
 	return code, out
+}
+
+// view counts one view of a link as the gateway.
+func (e *handoffEnv) view(shareID string) int {
+	e.t.Helper()
+	code, _ := e.do(e.roomSrv, http.MethodPost, "/internal/v1/shares/view", svcauth.ServiceSubject("gateway"), wire.ShareViewCount{ShareID: shareID})
+	return code
 }
 
 func (e *handoffEnv) publishText(user, artifactID string, base int, content string) {
@@ -87,7 +98,7 @@ func TestShareCreateAndList(t *testing.T) {
 	if !strings.HasPrefix(rep.Token, "bsh_"+sh.ShareID+"_") || len(sh.ShareID) != 32 {
 		t.Fatalf("token %q for share %q", rep.Token, sh.ShareID)
 	}
-	if sh.Version != 0 || sh.CreatedBy != "bob" || sh.ArtifactID != art.ArtifactID || !sh.Active ||
+	if sh.Version != 0 || sh.CreatedBy != "bob" || sh.ArtifactID != art.ArtifactID || !sh.Active || sh.Access != wire.ShareAccessOrg ||
 		sh.CreatedAtMs != *now || sh.ExpiresAtMs != *now+168*hourMs || sh.ViewCount != 0 {
 		t.Fatalf("share = %+v", sh)
 	}
@@ -101,8 +112,12 @@ func TestShareCreateAndList(t *testing.T) {
 	if code != http.StatusCreated || pinned.Share.Version != 1 || pinned.Share.ExpiresAtMs != *now+hourMs {
 		t.Fatalf("pinned = %d %+v", code, pinned)
 	}
+	*now++
+	if code, anyone := e.share(http.MethodPost, sharesPath(art.ArtifactID), "alice", map[string]any{"access": "anyone"}); code != http.StatusCreated || anyone.Share.Access != wire.ShareAccessAnyone {
+		t.Fatalf("anyone = %d %+v", code, anyone)
+	}
 	for _, bad := range []map[string]any{
-		{"expiresInHours": 2161}, {"expiresInHours": -1}, {"version": -1}, {"version": 2},
+		{"expiresInHours": 2161}, {"expiresInHours": -1}, {"version": -1}, {"version": 2}, {"access": "public"},
 	} {
 		if code, rep := e.share(http.MethodPost, sharesPath(art.ArtifactID), "alice", bad); code != http.StatusBadRequest {
 			t.Fatalf("create %v = %d %s, want 400", bad, code, rep.Error)
@@ -116,7 +131,7 @@ func TestShareCreateAndList(t *testing.T) {
 	}
 
 	code, list := e.share(http.MethodGet, sharesPath(art.ArtifactID), "bob", nil)
-	if code != http.StatusOK || len(list.Shares) != 2 || list.Shares[0].ShareID != pinned.Share.ShareID || list.Shares[1].ShareID != sh.ShareID {
+	if code != http.StatusOK || len(list.Shares) != 3 || list.Shares[1].ShareID != pinned.Share.ShareID || list.Shares[2].ShareID != sh.ShareID {
 		t.Fatalf("list = %d %+v (newest first)", code, list)
 	}
 	if code, _ := e.share(http.MethodGet, sharesPath(art.ArtifactID), "carol", nil); code != http.StatusForbidden {
@@ -125,7 +140,7 @@ func TestShareCreateAndList(t *testing.T) {
 	// An expired link stays listed (inactive) for 30 days, then drops.
 	*now += 2 * hourMs
 	_, list = e.share(http.MethodGet, sharesPath(art.ArtifactID), "bob", nil)
-	if len(list.Shares) != 2 || list.Shares[0].Active || !list.Shares[1].Active {
+	if len(list.Shares) != 3 || list.Shares[1].Active || !list.Shares[2].Active {
 		t.Fatalf("after the pinned link expired: %+v", list.Shares)
 	}
 	*now += 40 * 24 * hourMs
@@ -135,17 +150,22 @@ func TestShareCreateAndList(t *testing.T) {
 	}
 }
 
-// Resolve answers an active link with its artifact and version — the latest
-// one at call time for a follow-latest link — counts views on request, and
-// answers the same 404 for every inactive case.
+// Resolve answers a live link (by token, or by the share id of a share
+// ticket) with its artifact and version — the latest one at call time for a
+// follow-latest link — and answers the same 404 for every dead case; the
+// view route counts a view.
 func TestShareResolve(t *testing.T) {
 	e, tenants, now := sharesRoom(t)
 	art := e.createArtifact("alice", map[string]any{"kind": "markdown", "title": "Spec", "fileName": "spec.md", "content": "# v1"})
-	_, latest := e.share(http.MethodPost, sharesPath(art.ArtifactID), "bob", map[string]any{})
+	_, latest := e.share(http.MethodPost, sharesPath(art.ArtifactID), "bob", map[string]any{"access": "anyone"})
 	_, pinned := e.share(http.MethodPost, sharesPath(art.ArtifactID), "alice", map[string]any{"version": 1, "expiresInHours": 1})
 
-	code, res := e.resolve(latest.Token, true)
-	if code != http.StatusOK || res.TenantID != tenant.Default || res.RoomID != "files" || res.Share.ShareID != latest.Share.ShareID ||
+	if code := e.view(latest.Share.ShareID); code != http.StatusNoContent {
+		t.Fatalf("view = %d", code)
+	}
+	code, res := e.resolve(latest.Token)
+	if code != http.StatusOK || res.TenantID != tenant.Default || res.OrgName != "Default" || res.RoomID != "files" || res.Share.ShareID != latest.Share.ShareID ||
+		res.Share.Access != wire.ShareAccessAnyone ||
 		res.Artifact.ArtifactID != art.ArtifactID || res.Artifact.Kind != "markdown" || res.Artifact.Title != "Spec" || res.Artifact.FileName != "spec.md" ||
 		res.Version.Version != 1 || res.Version.Storage != store.ArtifactStorageInline || res.Version.Content != "# v1" || res.Version.MimeType != "text/markdown" ||
 		res.Version.BlobKey != "" || res.Version.ContentHash != store.HashArtifactContent("# v1") ||
@@ -153,15 +173,36 @@ func TestShareResolve(t *testing.T) {
 		t.Fatalf("resolve = %d %+v", code, res)
 	}
 	// A new version: the latest link follows it, the pinned one does not.
+	// Resolving never counts a view.
 	e.publishText("alice", art.ArtifactID, 1, "# v2")
-	if _, res := e.resolve(latest.Token, false); res.Version.Version != 2 || res.Version.Content != "# v2" || res.Share.ViewCount != 1 {
-		t.Fatalf("latest after v2 = %+v (countView=false must not count)", res)
+	if _, res := e.resolve(latest.Token); res.Version.Version != 2 || res.Version.Content != "# v2" || res.Share.ViewCount != 1 {
+		t.Fatalf("latest after v2 = %+v (resolving must not count)", res)
 	}
-	if _, res := e.resolve(pinned.Token, true); res.Version.Version != 1 || res.Share.ViewCount != 1 {
+	if _, res := e.resolve(pinned.Token); res.Version.Version != 1 || res.Share.ViewCount != 0 || res.Share.Access != wire.ShareAccessOrg {
 		t.Fatalf("pinned after v2 = %+v", res)
 	}
 	if sh, _ := e.svc.Artifacts.GetArtifactShare(testCtx(t), latest.Share.ShareID); sh.ViewCount != 1 {
 		t.Fatalf("stored views = %d, want 1", sh.ViewCount)
+	}
+	if code := e.view("nope"); code != http.StatusNotFound {
+		t.Fatalf("view of an unknown link = %d", code)
+	}
+	// By share id (a share ticket the gateway signed): no secret, the same
+	// link; a request naming both or neither resolves nothing.
+	if code, res := e.resolveBy(wire.ShareResolveRequest{ShareID: pinned.Share.ShareID}); code != http.StatusOK || res.Share.ShareID != pinned.Share.ShareID || res.Version.Version != 1 {
+		t.Fatalf("by share id = %d %+v", code, res)
+	}
+	for name, req := range map[string]wire.ShareResolveRequest{
+		"both":    {Token: latest.Token, ShareID: pinned.Share.ShareID},
+		"neither": {},
+		"unknown": {ShareID: strings.Repeat("0", 32)},
+	} {
+		if code, _ := e.resolveBy(req); code != http.StatusNotFound {
+			t.Fatalf("%s = %d, want 404", name, code)
+		}
+	}
+	if code, _ := e.do(e.roomSrv, http.MethodPost, "/internal/v1/shares/view", "alice", wire.ShareViewCount{ShareID: latest.Share.ShareID}); code != http.StatusForbidden {
+		t.Fatalf("member view count = %d, want 403", code)
 	}
 
 	// Only the gateway's service subject may resolve.
@@ -182,31 +223,46 @@ func TestShareResolve(t *testing.T) {
 		"bad secret": "bsh_" + id + "_" + string(flipped),
 		"no secret":  "bsh_" + id + "_",
 	} {
-		if code, _ := e.resolve(tok, true); code != http.StatusNotFound {
+		if code, _ := e.resolve(tok); code != http.StatusNotFound {
 			t.Fatalf("%s = %d, want 404", name, code)
 		}
 	}
 
 	// Expired.
 	*now += hourMs
-	if code, _ := e.resolve(pinned.Token, false); code != http.StatusNotFound {
+	if code, _ := e.resolve(pinned.Token); code != http.StatusNotFound {
 		t.Fatalf("expired = %d, want 404", code)
 	}
-	// Org-disabled: resolve 404, create 403 with the contract text; re-enabled works again.
+	if code, _ := e.resolveBy(wire.ShareResolveRequest{ShareID: pinned.Share.ShareID}); code != http.StatusNotFound {
+		t.Fatalf("expired by share id = %d, want 404", code)
+	}
+	// Anonymous links disabled: an "anyone" link resolves 404 and cannot be
+	// created or switched to; an "org" link keeps working and can be
+	// created. Re-enabled, the anyone link works again.
 	on, off := true, false
-	if _, err := tenants.SetTenantPolicy(testCtx(t), tenant.Default, store.TenantPolicyUpdate{PublicSharesDisabled: &on}); err != nil {
+	if _, err := tenants.SetTenantPolicy(testCtx(t), tenant.Default, store.TenantPolicyUpdate{AnonymousLinksDisabled: &on}); err != nil {
 		t.Fatal(err)
 	}
-	if code, _ := e.resolve(latest.Token, false); code != http.StatusNotFound {
-		t.Fatalf("disabled = %d, want 404", code)
+	if code, _ := e.resolve(latest.Token); code != http.StatusNotFound {
+		t.Fatalf("anyone while disabled = %d, want 404", code)
 	}
-	if code, rep := e.share(http.MethodPost, sharesPath(art.ArtifactID), "alice", map[string]any{}); code != http.StatusForbidden || rep.Error != "public share links are disabled for this organization" {
-		t.Fatalf("create while disabled = %d %q", code, rep.Error)
+	if code, rep := e.share(http.MethodPost, sharesPath(art.ArtifactID), "alice", map[string]any{"access": "anyone"}); code != http.StatusForbidden || rep.Error != errAnonymousLinksDisabled {
+		t.Fatalf("create anyone while disabled = %d %q", code, rep.Error)
 	}
-	if _, err := tenants.SetTenantPolicy(testCtx(t), tenant.Default, store.TenantPolicyUpdate{PublicSharesDisabled: &off}); err != nil {
+	code, orgLink := e.share(http.MethodPost, sharesPath(art.ArtifactID), "alice", map[string]any{})
+	if code != http.StatusCreated {
+		t.Fatalf("create org while disabled = %d %q", code, orgLink.Error)
+	}
+	if code, _ := e.resolve(orgLink.Token); code != http.StatusOK {
+		t.Fatalf("org link while disabled = %d, want 200", code)
+	}
+	if code, rep := e.share(http.MethodPatch, sharesPath(art.ArtifactID)+"/"+orgLink.Share.ShareID, "alice", wire.ShareAccessUpdate{Access: wire.ShareAccessAnyone}); code != http.StatusForbidden || rep.Error != errAnonymousLinksDisabled {
+		t.Fatalf("switch to anyone while disabled = %d %q", code, rep.Error)
+	}
+	if _, err := tenants.SetTenantPolicy(testCtx(t), tenant.Default, store.TenantPolicyUpdate{AnonymousLinksDisabled: &off}); err != nil {
 		t.Fatal(err)
 	}
-	if code, _ := e.resolve(latest.Token, false); code != http.StatusOK {
+	if code, _ := e.resolve(latest.Token); code != http.StatusOK {
 		t.Fatalf("re-enabled = %d, want 200", code)
 	}
 	// Revoked.
@@ -214,16 +270,19 @@ func TestShareResolve(t *testing.T) {
 	if code, _ := e.do(e.roomSrv, http.MethodDelete, sharesPath(art.ArtifactID)+"/"+id, "bob", nil); code != http.StatusNoContent {
 		t.Fatalf("revoke = %d", code)
 	}
-	if code, _ := e.resolve(latest.Token, false); code != http.StatusNotFound {
+	if code, _ := e.resolve(latest.Token); code != http.StatusNotFound {
 		t.Fatalf("revoked = %d, want 404", code)
+	}
+	if code, _ := e.resolveBy(wire.ShareResolveRequest{ShareID: id}); code != http.StatusNotFound {
+		t.Fatalf("revoked by share id = %d, want 404", code)
 	}
 	// Room gone.
 	_, fresh := e.share(http.MethodPost, sharesPath(art.ArtifactID), "alice", map[string]any{})
-	if code, _ := e.resolve(fresh.Token, false); code != http.StatusOK {
+	if code, _ := e.resolve(fresh.Token); code != http.StatusOK {
 		t.Fatalf("fresh = %d", code)
 	}
 	e.must(e.roomSrv, http.MethodDelete, "/v1/rooms/files", "alice", nil)
-	if code, _ := e.resolve(fresh.Token, false); code != http.StatusNotFound {
+	if code, _ := e.resolve(fresh.Token); code != http.StatusNotFound {
 		t.Fatalf("room deleted = %d, want 404", code)
 	}
 }
@@ -234,14 +293,14 @@ func TestShareResolveBlobAndEmpty(t *testing.T) {
 	e, _, _ := sharesRoom(t)
 	empty := e.createArtifact("alice", map[string]any{"kind": "file", "title": "later.pdf", "fileName": "later.pdf"})
 	_, rep := e.share(http.MethodPost, sharesPath(empty.ArtifactID), "alice", map[string]any{})
-	if code, _ := e.resolve(rep.Token, false); code != http.StatusNotFound {
+	if code, _ := e.resolve(rep.Token); code != http.StatusNotFound {
 		t.Fatalf("no version yet = %d, want 404", code)
 	}
 	pdf := []byte("%PDF-1.4\n%binary\x00\x01\n")
 	if code, v := e.postFile("alice", empty.ArtifactID, map[string]string{"baseVersion": "0", "summary": "draft"}, "later.pdf", "", pdf); code != http.StatusOK {
 		t.Fatalf("publish = %d %s", code, v.Error)
 	}
-	code, res := e.resolve(rep.Token, false)
+	code, res := e.resolve(rep.Token)
 	if code != http.StatusOK || res.Version.Storage != store.ArtifactStorageBlob || !strings.HasPrefix(res.Version.BlobKey, "sha256/") ||
 		res.Version.Content != "" || res.Version.MimeType != "application/pdf" || res.Version.SizeBytes != int64(len(pdf)) || res.Version.Summary != "draft" {
 		t.Fatalf("blob resolve = %d %+v", code, res)
@@ -308,6 +367,40 @@ func TestShareRevokeAuthorization(t *testing.T) {
 	// The org-admin pass is for revoking only.
 	if code, _ := e.share(http.MethodGet, sharesPath(art.ArtifactID), "olga", nil); code != http.StatusForbidden {
 		t.Fatalf("org admin list of a foreign room = %d, want 403", code)
+	}
+}
+
+// A link's access changes for those who may revoke it (managedShare); the
+// list and the resolution follow at once, and an unknown mode is a 400.
+func TestShareAccessChange(t *testing.T) {
+	e, _, _ := sharesRoom(t)
+	e.must(e.roomSrv, http.MethodPost, "/v1/rooms/files/members", "alice", map[string]any{"userId": "dave", "role": "member"})
+	art := e.createArtifact("alice", map[string]any{"kind": "markdown", "title": "Spec", "content": "x"})
+	_, link := e.share(http.MethodPost, sharesPath(art.ArtifactID), "bob", map[string]any{})
+	path := sharesPath(art.ArtifactID) + "/" + link.Share.ShareID
+	set := func(user, access string) (int, shareReply) {
+		return e.share(http.MethodPatch, path, user, wire.ShareAccessUpdate{Access: access})
+	}
+	if code, _ := set("dave", wire.ShareAccessAnyone); code != http.StatusForbidden {
+		t.Fatalf("another member = %d, want 403", code)
+	}
+	if code, _ := set("carol", wire.ShareAccessAnyone); code != http.StatusForbidden {
+		t.Fatalf("non-member = %d, want 403", code)
+	}
+	if code, _ := set("bob", "public"); code != http.StatusBadRequest {
+		t.Fatalf("unknown access = %d, want 400", code)
+	}
+	if code, rep := set("bob", wire.ShareAccessAnyone); code != http.StatusOK || rep.Share.Access != wire.ShareAccessAnyone {
+		t.Fatalf("creator to anyone = %d %+v", code, rep)
+	}
+	if _, res := e.resolve(link.Token); res.Share.Access != wire.ShareAccessAnyone {
+		t.Fatalf("resolved access = %q", res.Share.Access)
+	}
+	if code, rep := set("alice", wire.ShareAccessOrg); code != http.StatusOK || rep.Share.Access != wire.ShareAccessOrg {
+		t.Fatalf("room owner to org = %d %+v", code, rep)
+	}
+	if _, list := e.share(http.MethodGet, sharesPath(art.ArtifactID), "dave", nil); len(list.Shares) != 1 || list.Shares[0].Access != wire.ShareAccessOrg {
+		t.Fatalf("listed access = %+v", list.Shares)
 	}
 }
 

@@ -101,6 +101,10 @@ func (rt route) spends(b rateBudget) route { rt.budget = b; return rt }
 // with adds the dependencies the route needs.
 func (rt route) with(deps ...dependency) route { rt.needs = append(rt.needs, deps...); return rt }
 
+// shareCredential is why a share link's route takes no session: the
+// credential its handler opens the link with (openShare, shareAccess).
+const shareCredential = "a share link's token, or a share ticket, in the path"
+
 // routes is the table of every route the gateway serves itself.
 func (s *Service) routes() []route {
 	const (
@@ -160,11 +164,14 @@ func (s *Service) routes() []route {
 		member("POST /v1/rooms/{roomId}/attachments/{attachmentId}/ticket", s.handleAttachmentTicket),
 		open("GET /v1/sites/{ticket}", "a site ticket in the path", s.handleSiteRootRedirect),
 		open("GET /v1/sites/{ticket}/{path...}", "a site ticket in the path", s.handleMemberSite),
-		open("GET /v1/public/shares/{token}", "a public share token", s.handlePublicShare),
-		open("GET /v1/public/shares/{token}/content", "a public share token", s.handlePublicShareContent),
-		open("GET /v1/public/shares/{token}/site", "a public share token", s.handleSiteRootRedirect),
-		open("GET /v1/public/shares/{token}/site/{path...}", "a public share token", s.handlePublicShareSite),
-		open("POST /v1/public/shares/{token}/visitor", "a public share token", s.handleAppVisitor).spends(visitorBudget),
+		// A share link's routes take its credential in the path: the link's
+		// token, or a share ticket in its place (share_access.go).
+		member("POST /v1/share-tickets", s.handleShareTicket),
+		open("GET /v1/public/shares/{token}", shareCredential, s.handlePublicShare),
+		open("GET /v1/public/shares/{token}/content", shareCredential, s.handlePublicShareContent),
+		open("GET /v1/public/shares/{token}/site", shareCredential, s.handleSiteRootRedirect),
+		open("GET /v1/public/shares/{token}/site/{path...}", shareCredential, s.handlePublicShareSite),
+		open("POST /v1/public/shares/{token}/visitor", shareCredential, s.handleAppVisitor).spends(visitorBudget),
 
 		// A notifier's signed call on a member's behalf.
 		open("POST /v1/notifier/replies", "the notifier component's signature", s.handleNotifierReply),

@@ -50,18 +50,18 @@ func TestTenantPolicy_settingsAndMemberRead(t *testing.T) {
 	}
 	// A rename leaves the policy alone.
 	tenantPolicyReq(t, svc, http.MethodPut, "/v1/tenant/settings", "globex", "admin", map[string]any{"name": "Globex"})
-	if code, body := tenantPolicyReq(t, svc, http.MethodGet, "/v1/my/tenant-policy?tenant=globex", "acme", "alice", nil); code != http.StatusOK || body["requireSandboxForBorrow"] != true || body["publicSharesDisabled"] != false || body["tenantId"] != "globex" {
+	if code, body := tenantPolicyReq(t, svc, http.MethodGet, "/v1/my/tenant-policy?tenant=globex", "acme", "alice", nil); code != http.StatusOK || body["requireSandboxForBorrow"] != true || body["anonymousLinksDisabled"] != false || body["tenantId"] != "globex" {
 		t.Fatalf("member read of another tenant: %d %v", code, body)
 	}
 	// The public-links switch is independent of the sandbox switch.
-	code, body = tenantPolicyReq(t, svc, http.MethodPut, "/v1/tenant/settings", "globex", "admin", map[string]any{"publicSharesDisabled": true})
-	if code != http.StatusOK || body["publicSharesDisabled"] != true || body["requireSandboxForBorrow"] != true || body["name"] != "Globex" {
+	code, body = tenantPolicyReq(t, svc, http.MethodPut, "/v1/tenant/settings", "globex", "admin", map[string]any{"anonymousLinksDisabled": true})
+	if code != http.StatusOK || body["anonymousLinksDisabled"] != true || body["requireSandboxForBorrow"] != true || body["name"] != "Globex" {
 		t.Fatalf("disable public shares: %d %v", code, body)
 	}
-	if code, body := tenantPolicyReq(t, svc, http.MethodGet, "/v1/my/tenant-policy?tenant=globex", "acme", "alice", nil); code != http.StatusOK || body["publicSharesDisabled"] != true || body["requireSandboxForBorrow"] != true {
+	if code, body := tenantPolicyReq(t, svc, http.MethodGet, "/v1/my/tenant-policy?tenant=globex", "acme", "alice", nil); code != http.StatusOK || body["anonymousLinksDisabled"] != true || body["requireSandboxForBorrow"] != true {
 		t.Fatalf("member read after disabling public shares: %d %v", code, body)
 	}
-	if code, body := tenantPolicyReq(t, svc, http.MethodGet, "/v1/my/tenant-policy", "acme", "alice", nil); code != http.StatusOK || body["publicSharesDisabled"] != false {
+	if code, body := tenantPolicyReq(t, svc, http.MethodGet, "/v1/my/tenant-policy", "acme", "alice", nil); code != http.StatusOK || body["anonymousLinksDisabled"] != false {
 		t.Fatalf("the other tenant is unaffected: %d %v", code, body)
 	}
 	// The old read is gone (clean cutover).
