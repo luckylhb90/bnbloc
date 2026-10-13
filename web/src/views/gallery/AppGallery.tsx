@@ -31,7 +31,7 @@ import { AppAuthorName, FavoriteStar, GALLERY_QUERY } from "./AppParts";
 export function AppGallery({ onOpenRoom }: { readonly onOpenRoom: (roomId: string, artifactId: string) => void }) {
   const { subject, tenant } = useAuth();
   const toast = useToast();
-  const list = useQuery(queryKey(GALLERY_QUERY, { subject, tenant }), () => contentApi.list("app").then((r) => r.components ?? []), { staleMs: 30_000 });
+  const list = useQuery(queryKey(GALLERY_QUERY, { subject, tenant }), () => contentApi.list("work").then((r) => r.components ?? []), { staleMs: 30_000 });
   const [tab, setTab] = useState<GalleryTab>("all");
   const [query, setQuery] = useState("");
   const [favoritesOnly, setFavoritesOnly] = useState(false);

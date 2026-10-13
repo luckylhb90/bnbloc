@@ -78,6 +78,20 @@ func ValidateBundle(b *tarbundle.Bundle, opts Options) (*Package, error) {
 	if !ok {
 		return nil, fmt.Errorf("package has no %s", ManifestFile)
 	}
+	return validateWith(b, rawManifest, opts)
+}
+
+// ValidateStored checks a stored version's bundle against its version
+// row's manifest (store.ContentComponentVersion.ManifestJSON): the row is
+// the version's manifest. The two are equal when the version is saved,
+// and the row's is what a data migration moves (2026_10_content_works
+// moved the app kind's rows to the work kind; their bundles keep the
+// component.json they were saved with).
+func ValidateStored(b *tarbundle.Bundle, manifest []byte, opts Options) (*Package, error) {
+	return validateWith(b, manifest, opts)
+}
+
+func validateWith(b *tarbundle.Bundle, rawManifest []byte, opts Options) (*Package, error) {
 	var m Manifest
 	dec := json.NewDecoder(bytes.NewReader(rawManifest))
 	dec.DisallowUnknownFields()
@@ -96,7 +110,7 @@ func ValidateBundle(b *tarbundle.Bundle, opts Options) (*Package, error) {
 	}
 	p := &Package{Manifest: m, SHA256: b.SHA256, Bundle: b}
 	for _, f := range b.Paths() {
-		if !spec.Site && isScript(f) {
+		if !spec.Snapshot && isScript(f) {
 			p.Scripts = true
 			break
 		}
@@ -177,6 +191,9 @@ func validateEnvelope(m Manifest, opts Options) error {
 		if err := validateTeam(*m.Team); err != nil {
 			return err
 		}
+	}
+	if m.Kind != KindWork && (m.Type != "" || m.File != "") {
+		return fmt.Errorf("a type and a file belong to a work")
 	}
 	r := m.Requires
 	if len(r.Skills)+len(r.Prompts)+len(r.MCP)+len(r.Permissions) > maxRequires {

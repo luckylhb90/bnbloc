@@ -50,8 +50,11 @@ Fix what fails and test again. If a check still fails, or the test cannot
 run, say exactly that instead of calling it done.
 
 In the same run, save the first screen as `cover.png` beside its
-`index.html` (16:10, e.g. 1280x800, under 1 MiB). It is shown on the app's
-cards, in the room and in the gallery. PNG, JPEG or WebP only, never SVG.
+`index.html` (16:10, e.g. 1280x800, under 1 MiB): its card's cover in the
+room and the gallery. PNG, JPEG or WebP only, never SVG. Asked to publish
+it, `save_component` with its `artifactId` saves it as a work (any
+deliverable can be one; a video's cover is a frame its turn saved as
+`cover.png`).
 
 ## The SDK
 
@@ -99,8 +102,6 @@ API calls:
    board's cards, votes when results are live and anonymous); keep ballots
    for owners' eyes, contact details and free text private.
 
-So a page shows each person the public documents and their own.
-
 ## Patterns
 
 - **Once per person:** `put((await app.me()).id, doc, {ifAbsent: true})`.
@@ -114,8 +115,8 @@ So a page shows each person the public documents and their own.
   `next`) on each change. Private votes are counted only where owners read
   them: show visitors a thank-you instead, or make the votes public.
 - **Closing:** the app's own code. A closing time in the code (or in a
-  public `settings` document an owner writes) that the page checks before
-  it offers the form, and says "closed" after. A direct API call can still
+  public `settings` document an owner writes) checked before the form
+  shows, and "closed" after. A direct API call can still
   write after it: when you report, leave out documents created after the
   close (`_createdAt`).
 

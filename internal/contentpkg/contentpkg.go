@@ -28,7 +28,7 @@ const (
 	KindExpert = "bnbloc.expert.package/v1"
 	KindSkill  = "bnbloc.skill.package/v1"
 	KindPrompt = "bnbloc.prompt.package/v1"
-	KindApp    = "bnbloc.app.package/v1"
+	KindWork   = "bnbloc.work.package/v1"
 )
 
 // ManifestFile is the manifest's path in every content bundle.
@@ -102,6 +102,12 @@ type Manifest struct {
 
 	// Prompt pack: its prompts (they live in the manifest).
 	Prompts []Prompt `json:"prompts,omitempty"`
+
+	// Work: its type (wire.WorkType, derived from the deliverable by
+	// WorkTypeOf) and, for anything but a site or an app, its one file
+	// at the bundle's root.
+	Type string `json:"type,omitempty"`
+	File string `json:"file,omitempty"`
 }
 
 // Requires lists what a package needs at use time: skill and prompt packs
@@ -157,11 +163,12 @@ type KindSpec struct {
 	// content use of member scope): skill packs (all their agents) and
 	// prompt packs (their composer). Experts are picked per message.
 	MemberUse bool
-	// Site reports a kind whose bundle is a site (apps): its code runs
-	// only in the sandboxed site frame, never on a member's machine, so a
-	// script file in it is no executable content (no scripts permission,
-	// no sandbox forced).
-	Site bool
+	// Snapshot reports a kind whose bundle is a deliverable's snapshot
+	// (works): nothing in it runs on a member's machine (a site's code
+	// runs only in the sandboxed site frame), so a script file in it is no
+	// executable content (no scripts permission, no sandbox forced), and a
+	// listing never opens its bundle (up to a site's size).
+	Snapshot bool
 	// validate checks the kind's own manifest fields and files.
 	validate func(p *Package) error
 	// fromForm lays out the kind's files from a form save.

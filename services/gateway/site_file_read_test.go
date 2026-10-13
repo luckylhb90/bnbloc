@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/luckylhb90/bnbloc/internal/appdata"
 	"github.com/luckylhb90/bnbloc/internal/ids"
 	"github.com/luckylhb90/bnbloc/internal/store"
 	"github.com/luckylhb90/bnbloc/internal/tarbundle"
@@ -31,9 +32,13 @@ func (e *appGW) realSite(room string, files map[string]string) string {
 	if err != nil {
 		e.t.Fatal(err)
 	}
+	// The room service detects the app SDK while it stores a version
+	// (putVersionBlob); this version is stored directly.
+	var scan appdata.SDKScan
+	_, _ = scan.Write(raw)
 	id := e.artifact(room, store.ArtifactKindSite)
 	if _, _, err := e.b.Artifacts.PublishArtifactVersion(e.ctx(), id, store.ArtifactVersion{Storage: store.ArtifactStorageBlob, BlobKey: key,
-		ContentHash: sha, MimeType: tarbundle.SiteMIME, SizeBytes: size, AuthorUserID: "maya", CreatedAtMs: 1}, 0); err != nil {
+		ContentHash: sha, MimeType: tarbundle.SiteMIME, SizeBytes: size, AuthorUserID: "maya", CreatedAtMs: 1, LoadsAppSDK: scan.Found()}, 0); err != nil {
 		e.t.Fatal(err)
 	}
 	return id

@@ -59,7 +59,7 @@ func Import(upload []byte, kind, name, version string, opts Options) (*Package, 
 	m.DisplayName = oneLine(m.DisplayName, maxDisplayName)
 	m.Description = oneLine(m.Description, maxDescription)
 	for p := range out {
-		if !spec.Site && isScript(p) {
+		if !spec.Snapshot && isScript(p) {
 			m.Requires.Permissions = []string{PermScripts}
 			break
 		}

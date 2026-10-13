@@ -131,12 +131,12 @@
         "openWorldHint": false,
         "readOnlyHint": false
       },
-      "description": "Save to the Library of the person who asked you, after they confirmed: the package drafted in a workspace directory (dir), or a site deliverable as an app (artifactId: its current files, never its data). It is validated first; an error says what to fix. Without id it creates a component (refused if they have one of that kind and name); with id (cc_...) it saves its next version.",
+      "description": "Save to the Library of the person who asked you, after they confirmed: a package drafted in a workspace directory (dir), or a deliverable as a gallery work (artifactId: its current version, never its data). Validated first; an error says what to fix. Without id it creates (refused if they have one of that kind and name); with id (cc_...) it saves the next version.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
           "artifactId": {
-            "description": "Instead of dir: a site deliverable's id (art_...).",
+            "description": "Instead of dir: any deliverable's id (art_...).",
             "type": "string"
           },
           "category": {
@@ -162,7 +162,7 @@
             "type": "string"
           },
           "name": {
-            "description": "A new app's name (lower-case, hyphens).",
+            "description": "A new work's name (lower-case, hyphens).",
             "type": "string"
           }
         },

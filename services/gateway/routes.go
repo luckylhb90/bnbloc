@@ -207,12 +207,12 @@ func (s *Service) routes() []route {
 		// The app gallery (app_gallery.go): an app's cover, favorites, a
 		// site published as an app, and "Use this app" (a copy in a room
 		// the caller owns, or in a new room: room creation's permission).
-		member("GET /v1/content-components/{id}/versions/{version}/cover", s.handleAppCover).with(needContent),
+		member("GET /v1/content-components/{id}/versions/{version}/cover", s.handleWorkCover).with(needContent),
 		member("POST /v1/content-components/{id}/versions/{version}/demo", s.handleAppDemo).spends(costBudget).with(needContent),
 		member("PUT /v1/content-components/{id}/favorite", s.handleFavorite).spends(costBudget).with(needContent),
 		member("DELETE /v1/content-components/{id}/favorite", s.handleFavorite).spends(costBudget).with(needContent),
 		gated("POST /v1/content-components/{id}/use-app", create, s.handleUseApp).spends(costBudget).with(needContent),
-		gated("POST /v1/rooms/{roomId}/artifacts/{artifactId}/publish-app", drive, s.handlePublishApp).spends(costBudget).with(needContent),
+		gated("POST /v1/rooms/{roomId}/artifacts/{artifactId}/publish-work", drive, s.handlePublishWork).spends(costBudget).with(needContent),
 
 		// Organization administration (manage_org in the acting tenant).
 		gated("GET /v1/tenant/mcp-connectors", org, s.handleListMCPConnectors),

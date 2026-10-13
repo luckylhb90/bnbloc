@@ -232,82 +232,6 @@ export interface AgentRunsReply {
   nextBefore?: string;
 }
 
-// ---- wire/app_gallery.go ----
-
-// An app's category (component.json "category"), the gallery's tabs. An
-// app names one of these or none; any other value is refused
-// (contentpkg's app kind).
-export const AppCategoryOffice = "office";
-export const AppCategoryData = "data";
-export const AppCategoryProductivity = "productivity";
-export const AppCategoryContent = "content";
-export const AppCategoryLearning = "learning";
-export const AppCategoryEngineering = "engineering";
-export const AppCategoryFinance = "finance";
-export const AppCategoryLife = "life";
-export const AppCategoryOther = "other";
-
-// AppCategories lists the categories in the gallery's tab order.
-export const AppCategories: readonly string[] = ["office", "data", "productivity", "content", "learning", "engineering", "finance", "life", "other"];
-
-// Whether a member's publish to the organization waits for an org admin
-// (the tenant settings' publishApproval; PRD §11). Required is the
-// default; with none a publish takes effect at once, still audited, and
-// admins can still unpublish, restore or remove it. It covers every
-// content kind; contentshare.NeedsApproval is its one reader.
-export const PublishApprovalRequired = "required";
-export const PublishApprovalNone = "none";
-
-// AppPublishRequest is POST /v1/rooms/{roomId}/artifacts/{artifactId}/publish-app:
-// snapshot the site's current version (its files, cover and README, never
-// its data) as an app component of the caller's. Without ComponentID it
-// creates one named Name; with it, the snapshot is the next version of
-// that app of the caller's. DisplayName defaults to the site's title.
-export interface AppPublishRequest {
-  componentId?: string;
-  name?: string;
-  displayName?: string;
-  description?: string;
-  category?: AppCategory;
-  tags?: string[];
-}
-
-// AppUseRequest is POST /v1/content-components/{id}/use-app: copy the app
-// (Version, default its latest) into a room the caller owns (RoomID) or
-// into a new room (NewRoom).
-export interface AppUseRequest {
-  version?: string;
-  roomId?: string;
-  newRoom?: AppNewRoom;
-}
-
-// AppNewRoom names the room "Use this app" creates (default: the app's
-// display name).
-export interface AppNewRoom {
-  name?: string;
-}
-
-// AppDemo answers POST /v1/content-components/{id}/versions/{v}/demo:
-// where an app version's demo runs. SiteURL is a site URL (on the sites
-// origin when the deployment has one) whose ~app/sdk.js is the SDK in demo
-// mode: its data lives in the page's memory only, and no app data call
-// is answered under it.
-export interface AppDemo {
-  siteUrl: string;
-  expiresAtMs: number;
-}
-
-// AppUseReply answers "Use this app": the new site deliverable, which
-// starts with an empty data space of its own.
-export interface AppUseReply {
-  roomId: string;
-  artifactId: string;
-  version: number;
-  createdRoom?: boolean;
-  // From attributes the copy: "<name>@<version>".
-  from: string;
-}
-
 // ---- wire/apps.go ----
 
 // AppDocWrite is an insert (POST) or a replace (PUT). Doc is the document's
@@ -1080,10 +1004,15 @@ export interface ContentComponent {
   // usage counts).
   favorite: boolean;
   favoriteCount: number;
-  // CoverURL is an app's cover image at this version
+  // CoverURL is a work's cover image at this version
   // (GET /v1/content-components/{id}/versions/{v}/cover; the session
-  // authorizes it), absent when the app ships none.
+  // authorizes it; 404 when the work has none, and the card draws the
+  // generated cover). Absent for the other kinds.
   coverUrl?: string;
+  // WorkType is a work's type at this version (what deliverable it
+  // snapshots); WorkFile its one file (absent for a site or an app).
+  workType?: WorkType;
+  workFile?: string;
   // Team is a team expert's roster (as its manifest names it).
   team?: ContentTeam;
   createdAtMs: number;
@@ -2035,10 +1964,6 @@ export const MaxAppDocBytes = 65536;
 export const MaxAppDocs = 100000;
 // MaxAppBytes bounds the stored bytes of one app's documents.
 export const MaxAppBytes = 268435456;
-// MaxAppCoverBytes bounds an app's cover image (cover.png, .jpg or
-// .webp at the site's root, docs/prd/2026-10-13-app-gallery.md §4): a
-// larger one is not served, and the card draws the generated cover.
-export const MaxAppCoverBytes = 1048576;
 // MaxAppCollections bounds the named collections of one app.
 export const MaxAppCollections = 64;
 // MaxAppCollectionNameLen bounds a collection name (letters, digits,
@@ -2052,6 +1977,11 @@ export const MaxAppFindLimit = 500;
 // MaxAppRequestBytes bounds one app data request body: a document plus
 // its envelope (AppDocWrite, AppDocPatch).
 export const MaxAppRequestBytes = 69632;
+
+// MaxWorkCoverBytes bounds a work's cover image (cover.png, .jpg or
+// .webp at the bundle's root, or an image work's image): a larger one
+// is not served, and the card draws the generated cover.
+export const MaxWorkCoverBytes = 1048576;
 
 // ---- wire/mcp_tools.go ----
 
@@ -3914,13 +3844,104 @@ export interface MemberJoinedPayload {
 // one job share one namespace.
 export const JobNoticeSeq = 1;
 
+// ---- wire/works.go ----
+
+// A work's category (component.json "category"), the gallery's tabs. A
+// work names one of these or none; any other value is refused
+// (contentpkg's work kind).
+export const WorkCategoryOffice = "office";
+export const WorkCategoryData = "data";
+export const WorkCategoryProductivity = "productivity";
+export const WorkCategoryContent = "content";
+export const WorkCategoryLearning = "learning";
+export const WorkCategoryEngineering = "engineering";
+export const WorkCategoryFinance = "finance";
+export const WorkCategoryLife = "life";
+export const WorkCategoryOther = "other";
+
+// WorkCategories lists the categories in the gallery's tab order.
+export const WorkCategories: readonly string[] = ["office", "data", "productivity", "content", "learning", "engineering", "finance", "life", "other"];
+
+// A work's type (component.json "type"): what the deliverable it
+// snapshots is. It is derived from the deliverable (contentpkg.WorkTypeOf,
+// the one rule), never typed by hand: an app is a site that loads the app
+// SDK (store.Artifact.IsApp), a document is markdown, PDF, text or an
+// office document.
+export const WorkTypeApp = "app";
+export const WorkTypeSite = "site";
+export const WorkTypeImage = "image";
+export const WorkTypeVideo = "video";
+export const WorkTypeAudio = "audio";
+export const WorkTypeDocument = "document";
+export const WorkTypeSlides = "slides";
+export const WorkTypeTable = "table";
+export const WorkTypeOther = "other";
+
+// WorkTypes lists the types in the gallery's filter order.
+export const WorkTypes: readonly string[] = ["app", "image", "video", "audio", "document", "slides", "table", "site", "other"];
+
+// Whether a member's publish to the organization waits for an org admin
+// (the tenant settings' publishApproval; app gallery PRD §11). Required is
+// the default; with none a publish takes effect at once, still audited,
+// and admins can still unpublish, restore or remove it. It covers every
+// content kind; contentshare.NeedsApproval is its one reader.
+export const PublishApprovalRequired = "required";
+export const PublishApprovalNone = "none";
+
+// WorkPublishRequest is POST /v1/rooms/{roomId}/artifacts/{artifactId}/publish-work:
+// snapshot the deliverable's current version (a site's files, or the one
+// file, never its data) as a work component of the caller's. Without
+// ComponentID it creates one named Name; with it, the snapshot is the next
+// version of that work of the caller's. DisplayName defaults to the
+// deliverable's title.
+export interface WorkPublishRequest {
+  componentId?: string;
+  name?: string;
+  displayName?: string;
+  description?: string;
+  category?: WorkCategory;
+  tags?: string[];
+}
+
+// AppUseRequest is POST /v1/content-components/{id}/use-app: copy an app
+// work (Version, default its latest) into a room the caller owns (RoomID)
+// or into a new room (NewRoom).
+export interface AppUseRequest {
+  version?: string;
+  roomId?: string;
+  newRoom?: WorkNewRoom;
+}
+
+// WorkNewRoom names the room "Use this app" creates
+// (default: the work's display name).
+export interface WorkNewRoom {
+  name?: string;
+}
+
+// AppDemo answers POST /v1/content-components/{id}/versions/{v}/demo:
+// where an app version's demo runs. SiteURL is a site URL (on the sites
+// origin when the deployment has one) whose ~app/sdk.js is the SDK in demo
+// mode: its data lives in the page's memory only, and no app data call
+// is answered under it.
+export interface AppDemo {
+  siteUrl: string;
+  expiresAtMs: number;
+}
+
+// AppUseReply answers "Use this app": the new site deliverable, which
+// starts with an empty data space of its own.
+export interface AppUseReply {
+  roomId: string;
+  artifactId: string;
+  version: number;
+  createdRoom?: boolean;
+  // From attributes the copy: "<name>@<version>".
+  from: string;
+}
+
 // ---- wire unions (//wire:union) ----
 export type RunScope = "room" | "self" | "tenant";
 export const RunScopeValues: readonly RunScope[] = ["room", "self", "tenant"];
-export type AppCategory = "office" | "data" | "productivity" | "content" | "learning" | "engineering" | "finance" | "life" | "other";
-export const AppCategoryValues: readonly AppCategory[] = ["office", "data", "productivity", "content", "learning", "engineering", "finance", "life", "other"];
-export type PublishApproval = "required" | "none";
-export const PublishApprovalValues: readonly PublishApproval[] = ["required", "none"];
 export type AppErrorCode = "visitor_token_required" | "visitor_token_invalid";
 export const AppErrorCodeValues: readonly AppErrorCode[] = ["visitor_token_required", "visitor_token_invalid"];
 export type AppExportFormat = "json" | "csv";
@@ -3955,6 +3976,12 @@ export type UsageAs = "owner" | "borrower" | "tenant";
 export const UsageAsValues: readonly UsageAs[] = ["owner", "borrower", "tenant"];
 export type QuotaRequestStatus = "pending" | "approved" | "declined";
 export const QuotaRequestStatusValues: readonly QuotaRequestStatus[] = ["pending", "approved", "declined"];
+export type WorkCategory = "office" | "data" | "productivity" | "content" | "learning" | "engineering" | "finance" | "life" | "other";
+export const WorkCategoryValues: readonly WorkCategory[] = ["office", "data", "productivity", "content", "learning", "engineering", "finance", "life", "other"];
+export type WorkType = "app" | "site" | "image" | "video" | "audio" | "document" | "slides" | "table" | "other";
+export const WorkTypeValues: readonly WorkType[] = ["app", "site", "image", "video", "audio", "document", "slides", "table", "other"];
+export type PublishApproval = "required" | "none";
+export const PublishApprovalValues: readonly PublishApproval[] = ["required", "none"];
 
 // ---- enums owned outside internal/wire ----
 // An agent job's lifecycle status (store.AgentJobStatus).
@@ -3985,8 +4012,8 @@ export const ComponentRuntimeValues: readonly ComponentRuntime[] = ["stdio", "en
 export type ComponentRollout = "auto" | "optin" | "off";
 export const ComponentRolloutValues: readonly ComponentRollout[] = ["auto", "optin", "off"];
 // A content component kind's short name (the contentpkg registry).
-export type ContentKind = "app" | "expert" | "prompt" | "skill";
-export const ContentKindValues: readonly ContentKind[] = ["app", "expert", "prompt", "skill"];
+export type ContentKind = "expert" | "prompt" | "skill" | "work";
+export const ContentKindValues: readonly ContentKind[] = ["expert", "prompt", "skill", "work"];
 
 // ---- tables computed by their Go owners ----
 // The job statuses store.AgentJobStatus.Terminal reports finished; every

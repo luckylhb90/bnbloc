@@ -66,10 +66,15 @@ type ContentComponent struct {
 	// usage counts).
 	Favorite      bool `json:"favorite"`
 	FavoriteCount int  `json:"favoriteCount"`
-	// CoverURL is an app's cover image at this version
+	// CoverURL is a work's cover image at this version
 	// (GET /v1/content-components/{id}/versions/{v}/cover; the session
-	// authorizes it), absent when the app ships none.
+	// authorizes it; 404 when the work has none, and the card draws the
+	// generated cover). Absent for the other kinds.
 	CoverURL string `json:"coverUrl,omitempty"`
+	// WorkType is a work's type at this version (what deliverable it
+	// snapshots); WorkFile its one file (absent for a site or an app).
+	WorkType string `json:"workType,omitempty" tstype:"WorkType"`
+	WorkFile string `json:"workFile,omitempty"`
 	// Team is a team expert's roster (as its manifest names it).
 	Team        *ContentTeam `json:"team,omitempty"`
 	CreatedAtMs int64        `json:"createdAtMs"`

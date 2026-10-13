@@ -1,12 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import { AppWindowIcon, BuildingsIcon } from "@phosphor-icons/react";
-import { APP_CATEGORY_LABELS, publishAppForm, publishAppProblem, publishAppRequest, type AppCategory, type PublishAppForm } from "@/lib/appGallery";
+import { APP_CATEGORY_LABELS, publishAppForm, publishAppProblem, publishAppRequest, type WorkCategory, type PublishAppForm } from "@/lib/appGallery";
 import { appGalleryApi } from "@/lib/appGalleryApi";
 import { contentLabel, type ContentComponent } from "@/lib/contentComponents";
 import { contentApi } from "@/lib/contentComponentsApi";
 import { errorText } from "@/lib/errors";
 import { invalidateQueries } from "@/lib/useQuery";
-import { AppCategoryValues } from "@/lib/wire.gen";
+import { WorkCategoryValues } from "@/lib/wire.gen";
 import { Button } from "@/ui/Button";
 import { Dialog } from "@/ui/Dialog";
 import { ErrorBox } from "@/ui/ErrorBox";
@@ -56,7 +56,7 @@ export function PublishAppDialog({ site, onClose }: { readonly site: PublishSite
     setMine(null);
     setForm(publishAppForm(site.title, []));
     contentApi
-      .list("app")
+      .list("work")
       .then((r) => {
         if (!live) return;
         const own = (r.components ?? []).filter((c) => c.mine);
@@ -158,9 +158,9 @@ export function PublishAppDialog({ site, onClose }: { readonly site: PublishSite
         </Field>
         <div className="grid gap-4 sm:grid-cols-2">
           <Field label="Category">
-            <Select value={form.category} onChange={(e) => set({ category: e.target.value as AppCategory | "" })}>
+            <Select value={form.category} onChange={(e) => set({ category: e.target.value as WorkCategory | "" })}>
               <option value="">{target ? "Keep its category" : "No category"}</option>
-              {AppCategoryValues.map((c) => (
+              {WorkCategoryValues.map((c) => (
                 <option key={c} value={c}>
                   {APP_CATEGORY_LABELS[c]}
                 </option>

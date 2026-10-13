@@ -33,7 +33,7 @@ export const CONTENT_KINDS: Readonly<Record<ContentKind, { readonly word: string
   expert: { word: "expert", label: "Expert", libraryTab: "experts", packageKind: "bnbloc.expert.package/v1" },
   skill: { word: "skill pack", label: "Skill pack", libraryTab: "skills", packageKind: "bnbloc.skill.package/v1" },
   prompt: { word: "prompt pack", label: "Prompt pack", libraryTab: "prompts", packageKind: "bnbloc.prompt.package/v1" },
-  app: { word: "app", label: "App", libraryTab: null, packageKind: "bnbloc.app.package/v1" },
+  work: { word: "work", label: "Work", libraryTab: null, packageKind: "bnbloc.work.package/v1" },
 };
 
 // The short kind of a content package's manifest kind.

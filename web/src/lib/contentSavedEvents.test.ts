@@ -18,7 +18,7 @@ assert(
   "submitted message",
 );
 assert(
-  submittedMessage({ kind: "app", name: "lunch-poll", displayName: "Lunch poll", version: "1.0.0", action: "published" }) === "Published the app Lunch poll v1.0.0 to your organization",
+  submittedMessage({ kind: "work", name: "lunch-poll", displayName: "Lunch poll", version: "1.0.0", action: "published" }) === "Published the work Lunch poll v1.0.0 to your organization",
   "published message",
 );
 assert(parseContentSaved({ componentId: "cc_1", kind: "expert", name: "x", version: "1", action: "published", owner: "maya" })?.action === "published", "a publication without approval");

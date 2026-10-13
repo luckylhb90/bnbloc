@@ -37,7 +37,7 @@ func TestAppDemoNeverReachesAppData(t *testing.T) {
 	if r := e.call(http.MethodPost, "/v1/rooms/"+e.roomID+"/apps/"+site+"/c/votes", map[string]any{"doc": map[string]any{"ballot": "B"}}, e.as("maya")); r.status != http.StatusCreated {
 		t.Fatalf("a vote = %d %s", r.status, r.body)
 	}
-	app := e.publishApp("maya", site, wire.AppPublishRequest{Name: "lunch-poll"})
+	app := e.publishApp("maya", site, wire.WorkPublishRequest{Name: "lunch-poll"})
 
 	// Someone who may not read the app gets no demo; a document is no app.
 	if r := e.demo("jack", app.ID, "1.0.0"); r.status != http.StatusNotFound {
@@ -112,7 +112,7 @@ func TestAppDemoNeverReachesAppData(t *testing.T) {
 // serve it.
 func TestAppDemoOnSitesOrigin(t *testing.T) {
 	e := galleryGW(t)
-	app := e.publishApp("maya", e.pollSite(), wire.AppPublishRequest{Name: "lunch-poll"})
+	app := e.publishApp("maya", e.pollSite(), wire.WorkPublishRequest{Name: "lunch-poll"})
 	e.withSites()
 	path := sitePathOf(t, demoURL(t, e.demo("maya", app.ID, "1.0.0", mainHost)))
 	if r := e.call(http.MethodGet, path+"poll.js", nil, sitesHost); r.status != http.StatusOK {

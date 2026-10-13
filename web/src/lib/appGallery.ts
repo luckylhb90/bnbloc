@@ -7,14 +7,14 @@
 // the publish request and the room choice of a copy. The requests are
 // lib/appGalleryApi.ts, the views views/gallery/.
 
-export type { AppCategory, AppDemo, AppPublishRequest, AppUseReply, AppUseRequest } from "./wire.gen.ts";
-import { AppCategoryValues, type AppCategory, type AppPublishRequest, type AppUseRequest, type RoomSummary } from "./wire.gen.ts";
+export type { WorkCategory, AppDemo, WorkPublishRequest, AppUseReply, AppUseRequest } from "./wire.gen.ts";
+import { WorkCategoryValues, type WorkCategory, type WorkPublishRequest, type AppUseRequest, type RoomSummary } from "./wire.gen.ts";
 import { cleanTags, contentLabel, splitList, tagProblem, type ContentComponent } from "./contentComponents.ts";
 import { ApiError, errorText } from "./errors.ts";
 import { mayChat } from "./roomRoles.ts";
 
 /** What the gallery calls each category (its tabs, a card's detail). */
-export const APP_CATEGORY_LABELS: Readonly<Record<AppCategory, string>> = {
+export const APP_CATEGORY_LABELS: Readonly<Record<WorkCategory, string>> = {
   office: "Office",
   data: "Data",
   productivity: "Productivity",
@@ -27,17 +27,17 @@ export const APP_CATEGORY_LABELS: Readonly<Record<AppCategory, string>> = {
 };
 
 /** A gallery tab: every app, or one category. */
-export type GalleryTab = "all" | AppCategory;
+export type GalleryTab = "all" | WorkCategory;
 
 /** The tabs in the wire's order (wire.AppCategories), "All" first. */
 export const GALLERY_TABS: readonly { readonly value: GalleryTab; readonly label: string }[] = [
   { value: "all", label: "All" },
-  ...AppCategoryValues.map((c) => ({ value: c, label: APP_CATEGORY_LABELS[c] })),
+  ...WorkCategoryValues.map((c) => ({ value: c, label: APP_CATEGORY_LABELS[c] })),
 ];
 
 /** The category's label, "" for none (or one this client does not know). */
 export function appCategoryLabel(category: string | undefined): string {
-  return category && category in APP_CATEGORY_LABELS ? APP_CATEGORY_LABELS[category as AppCategory] : "";
+  return category && category in APP_CATEGORY_LABELS ? APP_CATEGORY_LABELS[category as WorkCategory] : "";
 }
 
 export interface GalleryFilter {
@@ -60,7 +60,7 @@ export function matchesApp(c: ContentComponent, query: string): boolean {
  *  organization publication is listed too shows once, as the publication
  *  (what everyone sees and stars). */
 export function galleryApps(list: readonly ContentComponent[], f: GalleryFilter): ContentComponent[] {
-  const apps = list.filter((c) => c.kind === "app");
+  const apps = list.filter((c) => c.kind === "work" && c.workType === "app");
   const listed = new Set(apps.map((c) => c.id));
   return apps
     .filter((c) => !(c.publication?.orgComponentId && listed.has(c.publication.orgComponentId)))
@@ -97,7 +97,7 @@ export interface PublishAppForm {
   readonly name: string;
   readonly displayName: string;
   readonly description: string;
-  readonly category: AppCategory | "";
+  readonly category: WorkCategory | "";
   // Comma- or newline-separated.
   readonly tags: string;
 }
@@ -121,7 +121,7 @@ export function appNameFrom(title: string): string {
  *  the member's own app of the same display name. */
 export function publishAppForm(title: string, mine: readonly Pick<ContentComponent, "id" | "name" | "displayName" | "kind" | "mine">[]): PublishAppForm {
   const label = title.trim();
-  const same = mine.find((c) => c.kind === "app" && c.mine && contentLabel(c) === label);
+  const same = mine.find((c) => c.kind === "work" && c.mine && contentLabel(c) === label);
   return { componentId: same?.id ?? "", name: appNameFrom(label), displayName: label, description: "", category: "", tags: "" };
 }
 
@@ -139,8 +139,8 @@ export function publishAppProblem(f: PublishAppForm): string | null {
 /** publishAppRequest is the body of POST …/publish-app: the trimmed form,
  *  empty fields left out (a new version keeps what it leaves out), and no
  *  name for a new version (the app's own stays). */
-export function publishAppRequest(f: PublishAppForm): AppPublishRequest {
-  const out: AppPublishRequest = f.componentId ? { componentId: f.componentId } : { name: f.name.trim() };
+export function publishAppRequest(f: PublishAppForm): WorkPublishRequest {
+  const out: WorkPublishRequest = f.componentId ? { componentId: f.componentId } : { name: f.name.trim() };
   const displayName = f.displayName.trim();
   const description = f.description.trim();
   const tags = cleanTags(splitList(f.tags));

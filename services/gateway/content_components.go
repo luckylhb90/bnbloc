@@ -178,10 +178,11 @@ func contentView(c store.ContentComponent, v store.ContentComponentVersion, clai
 		SharedBy: c.SharedBy, SourceID: c.SourceID,
 		CreatedAtMs: c.CreatedAtMs, UpdatedAtMs: c.UpdatedAtMs,
 	}
-	if c.Kind == contentpkg.KindApp {
-		// Answered 404 when the version ships no cover: a listing never
-		// opens an app's bundle (up to a site's size) to find out.
+	if c.Kind == contentpkg.KindWork {
+		// Answered 404 when the version has no cover: a listing never
+		// opens a work's bundle (up to a site's size) to find out.
 		out.CoverURL = "/v1/content-components/" + url.PathEscape(c.ID) + "/versions/" + url.PathEscape(v.Version) + "/cover"
+		out.WorkType, out.WorkFile = m.Type, m.File
 	}
 	held := ownedBy(c, claims)
 	out.Mine = held && c.Scope == store.ContentScopePersonal
@@ -205,10 +206,10 @@ func contentView(c store.ContentComponent, v store.ContentComponentVersion, clai
 
 // contentSkills fills the skill list of a view from the version's bundle
 // (best-effort: a listing degrades to no skill list rather than failing).
-// A site kind (an app) has no skills, and its bundle is never opened for a
-// listing.
+// A snapshot kind (a work) has no skills, and its bundle is never opened
+// for a listing.
 func (s *Service) contentSkills(ctx context.Context, v store.ContentComponentVersion, view *wire.ContentComponent) {
-	if spec, ok := contentpkg.Lookup(view.Kind); !ok || spec.Site {
+	if spec, ok := contentpkg.Lookup(view.Kind); !ok || spec.Snapshot {
 		return
 	}
 	pkg, err := s.contentPackage(ctx, v)
@@ -762,7 +763,7 @@ func (s *Service) contentPackage(ctx context.Context, v store.ContentComponentVe
 	if err != nil {
 		return nil, err
 	}
-	return contentpkg.ValidateBundle(b, contentOptions())
+	return contentpkg.ValidateStored(b, v.ManifestJSON, contentOptions())
 }
 
 // handleGetContentVersion answers one version: the component as of that

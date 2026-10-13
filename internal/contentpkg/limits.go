@@ -9,7 +9,7 @@ import (
 // authoring guidance states it.
 type Limit struct {
 	// Applies says which packages it bounds ("every package", "expert",
-	// "skill pack", "prompt pack", "team expert", "app").
+	// "skill pack", "prompt pack", "team expert", "work").
 	Applies string
 	// Field is what is bounded: a manifest field, a file or the bundle
 	// ("displayName", "prompts[].body", "INSTRUCTIONS.md").
@@ -35,7 +35,7 @@ const (
 // here (the Expert builder's package-format skill does, and its test fails
 // when the skill drifts), so no limit is written down twice.
 func Limits() []Limit {
-	const all, expert, skill, prompt, team, app = "every package", "expert", "skill pack", "prompt pack", "team expert", "app"
+	const all, expert, skill, prompt, team, work = "every package", "expert", "skill pack", "prompt pack", "team expert", "work"
 	return []Limit{
 		{all, "name", maxName, UnitChars},
 		{all, "displayName", maxDisplayName, UnitChars},
@@ -70,9 +70,9 @@ func Limits() []Limit {
 		{prompt, "variables[].options[]", maxVarOption, UnitChars},
 		{prompt, "files in the package", PromptLimits.MaxFiles, UnitFiles},
 		{prompt, "package size", PromptLimits.MaxBytes, UnitBytes},
-		{app, "files in the package", AppLimits.MaxFiles, UnitFiles},
-		{app, "package size", AppLimits.MaxBytes, UnitBytes},
-		{app, "cover image", wire.MaxAppCoverBytes, UnitBytes},
-		{app, ReadmeFile, maxInstructions, UnitBytes},
+		{work, "files in the package", WorkLimits.MaxFiles, UnitFiles},
+		{work, "package size", WorkLimits.MaxBytes, UnitBytes},
+		{work, "cover image", wire.MaxWorkCoverBytes, UnitBytes},
+		{work, ReadmeFile, maxInstructions, UnitBytes},
 	}
 }

@@ -1517,6 +1517,30 @@ WHERE r.channel_id = '' AND d.user_id IS NULL`)
 			return addColumnIfMissing(ctx, db, "tenants", "outside_links_disabled", "TINYINT(1) NOT NULL DEFAULT 0 AFTER anonymous_links_disabled")
 		},
 	},
+	{
+		// Works (docs/prd/2026-10-13-works-gallery-and-make-similar.md §2):
+		// the content kind "work" replaces "app". Every row of the app kind
+		// moves to the work kind, and its versions' manifests name the work
+		// kind with the type "app" (every published app was a site of an
+		// app); a stored version is read against its row's manifest
+		// (contentpkg.ValidateStored), so the bundles stay as they were
+		// saved. A data rewrite only: no column changes.
+		id: "2026_10_content_works",
+		run: func(ctx context.Context, db sqlConn) error {
+			const app, work = "bnbloc.app.package/v1", "bnbloc.work.package/v1"
+			if _, err := db.ExecContext(ctx, `UPDATE content_component_versions v JOIN content_components c ON c.id = v.component_id
+  SET v.manifest_json = JSON_SET(v.manifest_json, '$.kind', ?, '$.type', 'app')
+  WHERE c.kind = ?`, work, app); err != nil {
+				return fmt.Errorf("move app manifests to works: %w", err)
+			}
+			for _, table := range []string{"content_components", "content_component_uses", "content_drafts", "content_publish_requests"} {
+				if _, err := db.ExecContext(ctx, "UPDATE "+table+" SET kind = ? WHERE kind = ?", work, app); err != nil {
+					return fmt.Errorf("move %s apps to works: %w", table, err)
+				}
+			}
+			return nil
+		},
+	},
 }
 
 // sqlConn is the statement surface a migration runs on. runMigrations passes

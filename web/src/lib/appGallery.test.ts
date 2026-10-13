@@ -19,7 +19,7 @@ import { coverRefused } from "./appCover.ts";
 import type { ContentComponent } from "./contentComponents.ts";
 import { orgPublishCopy, orgPublishToast } from "./contentSharing.ts";
 import { ApiError } from "./errors.ts";
-import { AppCategoryValues, type RoomSummary } from "./wire.gen.ts";
+import { WorkCategoryValues, type RoomSummary } from "./wire.gen.ts";
 
 function assert(condition: boolean, message: string): void {
   if (!condition) throw new Error(message);
@@ -32,7 +32,8 @@ function eq(a: unknown, b: unknown, message: string): void {
 function app(over: Partial<ContentComponent>): ContentComponent {
   return {
     id: "cc_1",
-    kind: "app",
+    kind: "work",
+    workType: "app",
     name: "lunch-poll",
     displayName: "Lunch poll",
     owner: "maya",
@@ -60,11 +61,11 @@ function app(over: Partial<ContentComponent>): ContentComponent {
 // its label.
 eq(
   GALLERY_TABS.map((t) => t.value),
-  ["all", ...AppCategoryValues],
+  ["all", ...WorkCategoryValues],
   "tabs",
 );
 eq(GALLERY_TABS[1], { value: "office", label: "Office" }, "first category tab");
-assert(AppCategoryValues.every((c) => APP_CATEGORY_LABELS[c]), "every category has a label");
+assert(WorkCategoryValues.every((c) => APP_CATEGORY_LABELS[c]), "every category has a label");
 eq([appCategoryLabel("life"), appCategoryLabel(""), appCategoryLabel("games"), appCategoryLabel(undefined)], ["Life", "", "", ""], "category labels");
 
 // The gallery: apps only; the tab, the search (name, display name,

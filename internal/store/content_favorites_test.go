@@ -20,7 +20,7 @@ func TestContractContentFavoriteStore(t *testing.T) {
 		orgA, orgB := prefix+"-a", prefix+"-b"
 		app, other, builtin := prefix+"-app", prefix+"-other", BuiltinContentIDPrefix+"starters"
 		for _, id := range []string{app, other} {
-			c := ContentComponent{ID: id, Kind: "bnbloc.app.package/v1", Name: id, Scope: ContentScopePlatform, Status: ContentStatusActive, CreatedAtMs: 1, UpdatedAtMs: 1}
+			c := ContentComponent{ID: id, Kind: "bnbloc.work.package/v1", Name: id, Scope: ContentScopePlatform, Status: ContentStatusActive, CreatedAtMs: 1, UpdatedAtMs: 1}
 			if err := s.CreateContentComponent(ctx, c, contentVersion(id, "1.0.0", uniqBlobKey(), 1)); err != nil {
 				t.Fatal(err)
 			}

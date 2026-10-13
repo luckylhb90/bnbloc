@@ -61,15 +61,15 @@ func saveComponentTool() Tool {
 	return Tool{
 		Name:  "save_component",
 		Title: "Save a drafted component",
-		Description: "Save to the Library of the person who asked you, after they confirmed: the package drafted in a workspace directory (dir), " +
-			"or a site deliverable as an app (artifactId: its current files, never its data). It is validated first; an error says what to fix. " +
-			"Without id it creates a component (refused if they have one of that kind and name); with id (cc_...) it saves its next version.",
+		Description: "Save to the Library of the person who asked you, after they confirmed: a package drafted in a workspace directory (dir), " +
+			"or a deliverable as a gallery work (artifactId: its current version, never its data). Validated first; an error says what to fix. " +
+			"Without id it creates (refused if they have one of that kind and name); with id (cc_...) it saves the next version.",
 		InputSchema: objectSchema(map[string]any{
 			"dir":        map[string]any{"type": "string", "description": "Workspace-relative directory holding component.json, e.g. drafts/contract-reviewer."},
-			"artifactId": map[string]any{"type": "string", "description": "Instead of dir: a site deliverable's id (art_...)."},
+			"artifactId": map[string]any{"type": "string", "description": "Instead of dir: any deliverable's id (art_...)."},
 			"id":         map[string]any{"type": "string", "description": "The component to save a new version of; omit to create."},
-			"name":       map[string]any{"type": "string", "description": "A new app's name (lower-case, hyphens)."},
-			"category":   map[string]any{"type": "string", "enum": wire.AppCategories},
+			"name":       map[string]any{"type": "string", "description": "A new work's name (lower-case, hyphens)."},
+			"category":   map[string]any{"type": "string", "enum": wire.WorkCategories},
 		}),
 		Call: saveComponent,
 	}
@@ -238,15 +238,15 @@ func saveComponent(ctx context.Context, env *Env, args json.RawMessage) Result {
 	)
 	switch art := strings.TrimSpace(in.ArtifactID); {
 	case art != "" && in.Dir != "":
-		return toolError("give dir (a drafted package) or artifactId (a site, saved as an app), not both")
+		return toolError("give dir (a drafted package) or artifactId (a deliverable, saved as a work), not both")
 	case art != "":
-		// A site's current version as an app (the gateway snapshots its
-		// files as the job's requester; its data never comes along).
-		p = "/v1/rooms/" + url.PathEscape(env.Session.Scope().RoomID) + "/artifacts/" + url.PathEscape(art) + "/publish-app?" + url.Values{"job": {job.JobID}}.Encode()
-		body = wire.AppPublishRequest{ComponentID: id, Name: strings.TrimSpace(in.Name), Category: strings.TrimSpace(in.Category)}
-		what = "the site " + art
+		// A deliverable's current version as a work (the gateway snapshots
+		// its files as the job's requester; its data never comes along).
+		p = "/v1/rooms/" + url.PathEscape(env.Session.Scope().RoomID) + "/artifacts/" + url.PathEscape(art) + "/publish-work?" + url.Values{"job": {job.JobID}}.Encode()
+		body = wire.WorkPublishRequest{ComponentID: id, Name: strings.TrimSpace(in.Name), Category: strings.TrimSpace(in.Category)}
+		what = "the deliverable " + art
 	case in.Name != "" || in.Category != "":
-		return toolError("name and category are an app's: pass artifactId (a site deliverable) to save one")
+		return toolError("name and category are a work's: pass artifactId (a deliverable) to save one")
 	default:
 		dir, err := cleanDir(in.Dir)
 		if err != nil {
@@ -282,8 +282,8 @@ func saveComponent(ctx context.Context, env *Env, args json.RawMessage) Result {
 	if files > 0 {
 		out["files"] = files
 	}
-	if c.Kind == "app" {
-		out["note"] = fmt.Sprintf("Saved the app %s version %s to the Library of the person who asked you: a template of the site's files, without its data. publish_component shares it with their organization.", c.Name, c.LatestVersion)
+	if c.Kind == "work" {
+		out["note"] = fmt.Sprintf("Saved the work %s version %s to the Library of the person who asked you: a snapshot of the deliverable, without its data. publish_component shares it with their organization's gallery.", c.Name, c.LatestVersion)
 	}
 	if rs := d.Resubmitted; rs != nil {
 		keep := ""

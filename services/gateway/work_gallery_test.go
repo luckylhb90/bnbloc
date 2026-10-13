@@ -66,12 +66,12 @@ func (e *appGW) as(subject string) string {
 }
 
 // publishApp publishes a site as subject's app (201 expected).
-func (e *appGW) publishApp(subject, site string, in wire.AppPublishRequest) wire.ContentComponent {
+func (e *appGW) publishApp(subject, site string, in wire.WorkPublishRequest) wire.ContentComponent {
 	e.t.Helper()
-	r := e.call(http.MethodPost, "/v1/rooms/"+e.roomID+"/artifacts/"+site+"/publish-app", in, e.as(subject))
+	r := e.call(http.MethodPost, "/v1/rooms/"+e.roomID+"/artifacts/"+site+"/publish-work", in, e.as(subject))
 	var d wire.ContentComponentDetail
 	if r.status != http.StatusCreated || json.Unmarshal(r.body, &d) != nil {
-		e.t.Fatalf("publish-app as %s = %d %s", subject, r.status, r.body)
+		e.t.Fatalf("publish-work as %s = %d %s", subject, r.status, r.body)
 	}
 	return d.Component
 }
@@ -102,19 +102,19 @@ func TestPublishAppFromSite(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, u := range []string{"nora", "olaf"} {
-		if r := e.call(http.MethodPost, "/v1/rooms/"+e.roomID+"/artifacts/"+site+"/publish-app", wire.AppPublishRequest{Name: "lunch-poll"}, e.as(u)); r.status != http.StatusForbidden {
+		if r := e.call(http.MethodPost, "/v1/rooms/"+e.roomID+"/artifacts/"+site+"/publish-work", wire.WorkPublishRequest{Name: "lunch-poll"}, e.as(u)); r.status != http.StatusForbidden {
 			t.Fatalf("publish by %s = %d %s", u, r.status, r.body)
 		}
 	}
-	if r := e.call(http.MethodPost, "/v1/rooms/"+e.roomID+"/artifacts/"+site+"/publish-app", wire.AppPublishRequest{Name: "lunch-poll", Category: "games"}, e.as("maya")); r.status != http.StatusBadRequest || !strings.Contains(string(r.body), "category") {
+	if r := e.call(http.MethodPost, "/v1/rooms/"+e.roomID+"/artifacts/"+site+"/publish-work", wire.WorkPublishRequest{Name: "lunch-poll", Category: "games"}, e.as("maya")); r.status != http.StatusBadRequest || !strings.Contains(string(r.body), "category") {
 		t.Fatalf("a bad category = %d %s", r.status, r.body)
 	}
-	if r := e.call(http.MethodPost, "/v1/rooms/"+e.roomID+"/artifacts/"+e.doc+"/publish-app", wire.AppPublishRequest{Name: "doc"}, e.as("maya")); r.status != http.StatusNotFound {
-		t.Fatalf("a document as an app = %d %s", r.status, r.body)
+	if r := e.call(http.MethodPost, "/v1/rooms/"+e.roomID+"/artifacts/"+e.doc+"/publish-work", wire.WorkPublishRequest{Name: "doc"}, e.as("maya")); r.status != http.StatusNotFound {
+		t.Fatalf("a deliverable without a version as a work = %d %s", r.status, r.body)
 	}
 
-	app := e.publishApp("jack", site, wire.AppPublishRequest{Name: "lunch-poll", Description: "Vote on lunch", Category: wire.AppCategoryLife, Tags: []string{"poll"}})
-	if app.Kind != "app" || app.Scope != "personal" || !app.Mine || app.Category != wire.AppCategoryLife || app.DisplayName != "app" || app.LatestVersion != "1.0.0" ||
+	app := e.publishApp("jack", site, wire.WorkPublishRequest{Name: "lunch-poll", Description: "Vote on lunch", Category: wire.WorkCategoryLife, Tags: []string{"poll"}})
+	if app.Kind != "work" || app.WorkType != wire.WorkTypeApp || app.WorkFile != "" || app.Scope != "personal" || !app.Mine || app.Category != wire.WorkCategoryLife || app.DisplayName != "app" || app.LatestVersion != "1.0.0" ||
 		len(app.Permissions) != 0 || app.NeedsSandbox || app.CoverURL == "" {
 		t.Fatalf("the app = %+v", app)
 	}
@@ -151,11 +151,11 @@ func TestPublishAppFromSite(t *testing.T) {
 	// A new version of the same app; someone else's app is not theirs to
 	// version.
 	// A new version keeps what the request leaves out.
-	again := e.publishApp("jack", site, wire.AppPublishRequest{ComponentID: app.ID})
-	if again.ID != app.ID || again.LatestVersion != "1.0.1" || again.Category != wire.AppCategoryLife || again.Description != "Vote on lunch" {
+	again := e.publishApp("jack", site, wire.WorkPublishRequest{ComponentID: app.ID})
+	if again.ID != app.ID || again.LatestVersion != "1.0.1" || again.Category != wire.WorkCategoryLife || again.Description != "Vote on lunch" {
 		t.Fatalf("the next version = %+v", again)
 	}
-	if r := e.call(http.MethodPost, "/v1/rooms/"+e.roomID+"/artifacts/"+site+"/publish-app", wire.AppPublishRequest{ComponentID: app.ID}, e.as("maya")); r.status != http.StatusNotFound {
+	if r := e.call(http.MethodPost, "/v1/rooms/"+e.roomID+"/artifacts/"+site+"/publish-work", wire.WorkPublishRequest{ComponentID: app.ID}, e.as("maya")); r.status != http.StatusNotFound {
 		t.Fatalf("a version of someone else's app = %d %s", r.status, r.body)
 	}
 }
@@ -166,15 +166,15 @@ func TestAgentPublishesAppThroughRoomTools(t *testing.T) {
 	e := galleryGW(t)
 	site := e.pollSite()
 	e.runJob("job-1", e.roomID)
-	r := e.roomToolAs(e.roomID, "job-1", "save_component", map[string]any{"artifactId": site, "name": "lunch-poll", "category": wire.AppCategoryLife})
+	r := e.roomToolAs(e.roomID, "job-1", "save_component", map[string]any{"artifactId": site, "name": "lunch-poll", "category": wire.WorkCategoryLife})
 	if r.Err != "" {
 		t.Fatalf("save_component = %+v", r)
 	}
 	out, _ := r.Value.(map[string]any)
-	if out["kind"] != "app" || out["name"] != "lunch-poll" || out["version"] != "1.0.0" {
+	if out["kind"] != "work" || out["name"] != "lunch-poll" || out["version"] != "1.0.0" {
 		t.Fatalf("save_component = %v", out)
 	}
-	comps, err := e.b.ContentComponents.ListContentComponents(e.ctx(), store.ContentComponentQuery{Owner: "maya", Kind: "bnbloc.app.package/v1"})
+	comps, err := e.b.ContentComponents.ListContentComponents(e.ctx(), store.ContentComponentQuery{Owner: "maya", Kind: "bnbloc.work.package/v1"})
 	if err != nil || len(comps) != 1 || comps[0].Scope != store.ContentScopePersonal || comps[0].TenantID != e.tenant {
 		t.Fatalf("maya's apps = %+v, %v (saved for the job's requester)", comps, err)
 	}
@@ -196,7 +196,7 @@ func TestUseApp(t *testing.T) {
 	if r := e.call(http.MethodPost, "/v1/rooms/"+e.roomID+"/apps/"+site+"/c/votes", map[string]any{"doc": map[string]any{"ballot": "B"}}, e.as("maya")); r.status != http.StatusCreated {
 		t.Fatalf("a vote = %d %s", r.status, r.body)
 	}
-	app := e.publishApp("maya", site, wire.AppPublishRequest{Name: "lunch-poll", DisplayName: "Lunch poll"})
+	app := e.publishApp("maya", site, wire.WorkPublishRequest{Name: "lunch-poll", DisplayName: "Lunch poll"})
 
 	// maya's personal app is hers alone.
 	if r := e.call(http.MethodPost, "/v1/content-components/"+app.ID+"/use-app", wire.AppUseRequest{RoomID: e.roomID}, e.as("jack")); r.status != http.StatusNotFound {
@@ -263,7 +263,7 @@ func TestUseApp(t *testing.T) {
 	}
 
 	// Into a new room of his.
-	r = e.call(http.MethodPost, "/v1/content-components/"+org.ID+"/use-app", wire.AppUseRequest{NewRoom: &wire.AppNewRoom{}}, e.as("jack"))
+	r = e.call(http.MethodPost, "/v1/content-components/"+org.ID+"/use-app", wire.AppUseRequest{NewRoom: &wire.WorkNewRoom{}}, e.as("jack"))
 	var fresh wire.AppUseReply
 	if r.status != http.StatusCreated || json.Unmarshal(r.body, &fresh) != nil || !fresh.CreatedRoom || fresh.RoomID == e.roomID {
 		t.Fatalf("use-app in a new room = %d %s", r.status, r.body)
@@ -285,7 +285,7 @@ func TestUseApp(t *testing.T) {
 // libraryApp is subject's Library entry of an app by name (nil when none).
 func (e *appGW) libraryApp(subject, name string) *wire.ContentComponent {
 	e.t.Helper()
-	r := e.call(http.MethodGet, "/v1/content-components?kind=app", nil, e.as(subject))
+	r := e.call(http.MethodGet, "/v1/content-components?kind=work", nil, e.as(subject))
 	var list struct {
 		Components []wire.ContentComponent `json:"components"`
 	}
@@ -309,7 +309,7 @@ func TestContentFavorites(t *testing.T) {
 	if _, err := e.b.Tenant.SetTenantPolicy(e.ctx(), e.tenant, store.TenantPolicyUpdate{PublishApproval: &none}); err != nil {
 		t.Fatal(err)
 	}
-	app := e.publishApp("maya", e.pollSite(), wire.AppPublishRequest{Name: "lunch-poll"})
+	app := e.publishApp("maya", e.pollSite(), wire.WorkPublishRequest{Name: "lunch-poll"})
 	if r := e.call(http.MethodPut, "/v1/content-components/"+app.ID+"/favorite", nil, e.as("jack")); r.status != http.StatusNotFound {
 		t.Fatalf("a star on an invisible app = %d %s", r.status, r.body)
 	}

@@ -33,8 +33,8 @@ func kindPackages(name string) map[string]map[string]string {
 		"prompt": {
 			"component.json": `{"kind":"bnbloc.prompt.package/v1","name":"` + name + `","version":"1.0.0","prompts":[{"id":"hi","title":"Hi","body":"Say hi"}]}`,
 		},
-		"app": {
-			"component.json": `{"kind":"bnbloc.app.package/v1","name":"` + name + `","version":"1.0.0","category":"data"}`,
+		"work": {
+			"component.json": `{"kind":"bnbloc.work.package/v1","name":"` + name + `","version":"1.0.0","type":"site","category":"data"}`,
 			"index.html":     "<p>app</p>",
 			"app.js":         "1",
 		},
@@ -57,7 +57,7 @@ func TestPublishApprovalEveryKind(t *testing.T) {
 	g := newSharingGateway(t)
 	for _, setting := range []string{"", wire.PublishApprovalRequired, wire.PublishApprovalNone} {
 		g.setApproval(setting)
-		for _, kind := range []string{"expert", "skill", "prompt", "app"} {
+		for _, kind := range []string{"expert", "skill", "prompt", "work"} {
 			name := "k-" + kind + "-" + firstNonEmpty(setting, "default")
 			files := kindPackages(name)[kind]
 			code, raw := g.do("maya", http.MethodPost, "/v1/content-components", "application/x-tar", packageTar(t, files))

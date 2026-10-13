@@ -43,7 +43,7 @@ func TestSiteCover(t *testing.T) {
 	if _, _, err := SiteCover(parse(map[string][]byte{"cover.webp": []byte("<svg xmlns='http://www.w3.org/2000/svg'/>")})); !errors.Is(err, ErrCoverNotImage) {
 		t.Fatalf("an SVG named webp = %v", err)
 	}
-	if _, _, err := SiteCover(parse(map[string][]byte{"cover.png": append(cover, make([]byte, wire.MaxAppCoverBytes)...)})); !errors.Is(err, ErrCoverTooLarge) {
+	if _, _, err := SiteCover(parse(map[string][]byte{"cover.png": append(cover, make([]byte, wire.MaxWorkCoverBytes)...)})); !errors.Is(err, ErrCoverTooLarge) {
 		t.Fatalf("an oversized cover = %v", err)
 	}
 }

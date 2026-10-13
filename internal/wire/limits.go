@@ -46,10 +46,6 @@ const (
 	MaxAppDocs = 100_000
 	// MaxAppBytes bounds the stored bytes of one app's documents.
 	MaxAppBytes = 256 << 20
-	// MaxAppCoverBytes bounds an app's cover image (cover.png, .jpg or
-	// .webp at the site's root, docs/prd/2026-10-13-app-gallery.md §4): a
-	// larger one is not served, and the card draws the generated cover.
-	MaxAppCoverBytes = 1 << 20
 	// MaxAppCollections bounds the named collections of one app.
 	MaxAppCollections = 64
 	// MaxAppCollectionNameLen bounds a collection name (letters, digits,
@@ -63,4 +59,13 @@ const (
 	// MaxAppRequestBytes bounds one app data request body: a document plus
 	// its envelope (AppDocWrite, AppDocPatch).
 	MaxAppRequestBytes = MaxAppDocBytes + 4<<10
+)
+
+// The caps of a work (docs/prd/2026-10-13-works-gallery-and-make-similar.md):
+// contentpkg's work kind enforces them.
+const (
+	// MaxWorkCoverBytes bounds a work's cover image (cover.png, .jpg or
+	// .webp at the bundle's root, or an image work's image): a larger one
+	// is not served, and the card draws the generated cover.
+	MaxWorkCoverBytes = 1 << 20
 )

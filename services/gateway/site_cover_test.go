@@ -49,7 +49,7 @@ func TestSiteCoverServedOnlyAsAnImage(t *testing.T) {
 		{"svg named png", map[string]string{"index.html": "app", "cover.png": `<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>`}, http.StatusUnsupportedMediaType, ""},
 		{"html named webp", map[string]string{"index.html": "app", "cover.webp": `<!doctype html><script>alert(1)</script>`}, http.StatusUnsupportedMediaType, ""},
 		{"jpeg named png", map[string]string{"index.html": "app", "cover.png": jpgCover}, http.StatusUnsupportedMediaType, ""},
-		{"over the cap", map[string]string{"index.html": "app", "cover.png": pngCover + strings.Repeat("\x00", wire.MaxAppCoverBytes)}, http.StatusRequestEntityTooLarge, ""},
+		{"over the cap", map[string]string{"index.html": "app", "cover.png": pngCover + strings.Repeat("\x00", wire.MaxWorkCoverBytes)}, http.StatusRequestEntityTooLarge, ""},
 	} {
 		site := e.realSite(e.roomID, c.files)
 		r := cover(site)
@@ -64,7 +64,7 @@ func TestSiteCoverServedOnlyAsAnImage(t *testing.T) {
 		}
 		h := r.header
 		if h.Get("Content-Type") != c.ctype || h.Get("X-Content-Type-Options") != "nosniff" ||
-			!strings.Contains(h.Get("Content-Security-Policy"), "sandbox") || len(r.body) > wire.MaxAppCoverBytes {
+			!strings.Contains(h.Get("Content-Security-Policy"), "sandbox") || len(r.body) > wire.MaxWorkCoverBytes {
 			t.Fatalf("%s: headers %v (%d bytes)", c.name, h, len(r.body))
 		}
 	}
