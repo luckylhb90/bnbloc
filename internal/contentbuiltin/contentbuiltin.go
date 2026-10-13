@@ -1,7 +1,9 @@
 // Package contentbuiltin is the built-in source of content components
 // (docs/prd/2026-10-12-experts-and-teams.md §5): experts and skill packs that
-// ship inside the binaries, versioned with the release. Today that is the
-// Expert builder, which authors experts and skill packs by conversation.
+// ship inside the binaries, versioned with the release: the Expert builder
+// (authors experts, skill packs and prompt packs by conversation), the
+// starter prompts, and the interactive apps' skill pack, App builder expert
+// and app starters.
 //
 // Built-in content is not a second library. Each package directory under
 // packages/ is packed and validated by internal/contentpkg (the one

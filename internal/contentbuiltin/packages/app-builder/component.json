@@ -1,0 +1,21 @@
+{
+  "kind": "bnbloc.expert.package/v1",
+  "name": "app-builder",
+  "version": "1.0.0",
+  "displayName": "App builder",
+  "description": "Builds interactive apps with you (polls, surveys, sign-up sheets, forms, boards) that people use from a link on their phones, keeps their answers in the app's own data, and reports on what they answered.",
+  "category": "apps",
+  "tags": ["apps", "polls", "surveys", "forms"],
+  "icon": "sparkle",
+  "requires": {
+    "skills": ["interactive-apps@^1"],
+    "prompts": ["app-starters@^1"]
+  },
+  "quickPrompts": [
+    { "ref": "app-starters/poll" },
+    { "ref": "app-starters/survey" },
+    { "ref": "app-starters/signup" },
+    { "ref": "app-starters/app-report" }
+  ],
+  "welcome": "I build small interactive apps with you: a poll, a survey, a sign-up sheet, a form or a board that people open from a link on their phones. Their answers are kept in the app, and when you are ready I read them and write the report. Tell me what people should do and what you want to know afterwards. Write in whatever language you like; I answer in yours."
+}

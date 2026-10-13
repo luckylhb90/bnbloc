@@ -208,16 +208,17 @@ func TestBuilderLimitsMatchValidator(t *testing.T) {
 	}
 }
 
-// The builder names no workspace path policy of its own: what bnbloc writes
+// No built-in names a workspace path policy of its own: what bnbloc writes
 // for the agent and what a harness executes are core's lists
-// (core/workspace_paths.go), and its drafts are never in them.
+// (core/workspace_paths.go), and the builder's drafts are never in them.
 func TestBuilderNamesNoWorkspacePaths(t *testing.T) {
-	p := builder(t)
-	for _, f := range p.Validated.Bundle.Paths() {
-		raw, _ := p.Validated.Bundle.File(f)
-		for _, path := range core.ProtectedWorkspacePaths() {
-			if strings.Contains(string(raw), path) {
-				t.Errorf("%s names the workspace path %q: refer to bnbloc's and the harness's files generically", f, path)
+	for _, p := range All() {
+		for _, f := range p.Validated.Bundle.Paths() {
+			raw, _ := p.Validated.Bundle.File(f)
+			for _, path := range core.ProtectedWorkspacePaths() {
+				if strings.Contains(string(raw), path) {
+					t.Errorf("%s/%s names the workspace path %q: refer to bnbloc's and the harness's files generically", p.Component.Name, f, path)
+				}
 			}
 		}
 	}

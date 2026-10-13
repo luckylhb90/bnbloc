@@ -1,0 +1,59 @@
+{
+  "kind": "bnbloc.prompt.package/v1",
+  "name": "app-starters",
+  "version": "1.0.0",
+  "displayName": "App starters",
+  "description": "Prompts that have an agent build an interactive app people use from a link (a poll, a survey, a sign-up sheet) and report on what they answered.",
+  "category": "apps",
+  "tags": ["apps", "polls", "surveys"],
+  "prompts": [
+    {
+      "id": "poll",
+      "title": "Build a poll",
+      "body": "Build a poll as an interactive app: \"{{question}}\" with the options {{options}}. One vote per person (a vote can be changed until it closes), {{results}}, closing {{closes}}. Mobile-first, so people can vote from a link on their phones.",
+      "variables": [
+        { "name": "question", "label": "Question" },
+        { "name": "options", "label": "Options", "default": "A, B and C" },
+        { "name": "results", "label": "Results", "options": ["live results everyone can see", "results only for this room"], "default": "live results everyone can see" },
+        { "name": "closes", "label": "Closes", "default": "when I say so" }
+      ],
+      "slash": "/poll",
+      "tags": ["poll"]
+    },
+    {
+      "id": "survey",
+      "title": "Build a survey",
+      "body": "Build a short survey as an interactive app about {{topic}} for {{audience}}: {{questions}} Each person answers once; the answers stay private to this room, and respondents see a thank-you. Mobile-first.",
+      "variables": [
+        { "name": "topic", "label": "Topic" },
+        { "name": "audience", "label": "Who answers", "default": "the team" },
+        { "name": "questions", "label": "Questions", "default": "a 1 to 5 rating, what went well and what to change." }
+      ],
+      "slash": "/survey",
+      "tags": ["survey"]
+    },
+    {
+      "id": "signup",
+      "title": "Build a sign-up sheet",
+      "body": "Build a sign-up sheet as an interactive app for {{event}} with {{places}} places. Each person signs up once with {{fields}}, can take their name off again, and sees who else is coming and how many places are left. Mobile-first.",
+      "variables": [
+        { "name": "event", "label": "Event" },
+        { "name": "places", "label": "Places", "default": "20" },
+        { "name": "fields", "label": "What to ask", "default": "their name" }
+      ],
+      "slash": "/signup",
+      "tags": ["sign-up"]
+    },
+    {
+      "id": "app-report",
+      "title": "Report on an app's answers",
+      "body": "Read all the data of the {{app}} app in this room and write a report as a Markdown document: {{focus}} Say how many entries you read and which you left out (duplicates, after the close), and quote free text as the people's own words.",
+      "variables": [
+        { "name": "app", "label": "App" },
+        { "name": "focus", "label": "What to report", "default": "the totals per option, the trend, and a recommendation." }
+      ],
+      "slash": "/app-report",
+      "tags": ["report"]
+    }
+  ]
+}

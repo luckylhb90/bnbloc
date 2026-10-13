@@ -3,6 +3,7 @@ package contentbuiltin
 import (
 	"context"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -74,8 +75,18 @@ func TestOverlayListsAndReadsBuiltins(t *testing.T) {
 	}
 
 	got, err := st.ListContentComponents(ctx, store.ContentComponentQuery{Kind: contentpkg.KindExpert, Scopes: []store.ContentScope{store.ContentScopeBuiltin}})
-	if err != nil || len(got) != 1 || got[0].ID != BuilderID {
-		t.Fatalf("builtin listing = %+v, %v", got, err)
+	var experts []string
+	for _, p := range All() {
+		if p.Component.Kind == contentpkg.KindExpert {
+			experts = append(experts, p.Component.ID)
+		}
+	}
+	var listed []string
+	for _, c := range got {
+		listed = append(listed, c.ID)
+	}
+	if err != nil || strings.Join(listed, ",") != strings.Join(experts, ",") || !slices.Contains(listed, BuilderID) {
+		t.Fatalf("builtin experts listed = %v (want %v), %v", listed, experts, err)
 	}
 	// Skill-kind and owner/tenant-filtered queries do not list it.
 	for _, q := range []store.ContentComponentQuery{
