@@ -215,14 +215,19 @@ An exec token authorizes ONLY, as that space's user:
 - `POST /machines/{machine}/spaces/{space}/run` and `…/exec` of THAT space
   (`{machine}` by id or name, as everywhere), and
 - the control endpoints `POST /machines/{machine}/execs/{execId}/stdin|resize|signal`
-  of execs started with the same token (piped stdin, Ctrl-C forwarding).
+  of execs started in THAT space by any of its exec tokens (piped stdin,
+  Ctrl-C forwarding): a long-lived exec (a CLI's exec server) outlives its
+  first token, and the renewed token keeps controlling it.
 
 Every other route — discover, images, machines, lifecycle, machine-level
 exec, other spaces, space GET/PUT/DELETE, files, archives, snapshots, pools,
 and minting itself — answers 403 `forbidden` for an exec token. An expired or
 unknown token is 401 `unauthorized`. Deleting the space (or its machine)
 revokes its tokens; re-ensuring the space keeps them valid. The bridge mints
-one per turn (`bnbloc-vmexec` uses it); the conformance step `execTokens`
+one per turn and, while the turn runs on a core advertising
+`executionRefresh`, a fresh one every 30 minutes (each valid 1 hour);
+`bnbloc-vmexec` reads the current one (`BNBLOC_VMEXEC_TOKEN_FILE`) for every
+request; the conformance step `execTokens`
 checks all of the above.
 
 ## Exec

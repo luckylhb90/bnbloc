@@ -13,6 +13,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	coreprotocol "github.com/luckylhb90/bnbloc/core/protocol"
 	sandbox "github.com/luckylhb90/bnbloc/sandbox/protocol"
@@ -32,6 +33,10 @@ type fakeSandbox struct {
 	respond func(req sandbox.ExecRequest, stdin func() string) (stdout, stderr string, code int)
 	runOut  string // stdout of /run (the cwd relay)
 	eof     chan struct{}
+	// tokens, when set, are the bearers accepted (else exec-tok only);
+	// stdinTokens records the bearer of each stdin write.
+	tokens      map[string]bool
+	stdinTokens []string
 }
 
 func newFakeSandbox(t *testing.T) (*fakeSandbox, *httptest.Server) {
@@ -41,8 +46,17 @@ func newFakeSandbox(t *testing.T) (*fakeSandbox, *httptest.Server) {
 	return f, srv
 }
 
+func (f *fakeSandbox) accepts(auth string) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.tokens == nil {
+		return auth == "Bearer exec-tok"
+	}
+	return f.tokens[strings.TrimPrefix(auth, "Bearer ")]
+}
+
 func (f *fakeSandbox) serve(w http.ResponseWriter, r *http.Request) {
-	if r.Header.Get("Authorization") != "Bearer exec-tok" {
+	if !f.accepts(r.Header.Get("Authorization")) {
 		w.WriteHeader(http.StatusUnauthorized)
 		_ = json.NewEncoder(w).Encode(sandbox.ErrorEnvelope{Error: sandbox.ProtocolError{Code: sandbox.ErrorUnauthorized}})
 		return
@@ -83,6 +97,7 @@ func (f *fakeSandbox) serve(w http.ResponseWriter, r *http.Request) {
 	case strings.HasSuffix(p, "/execs/x1/stdin"):
 		data, _ := io.ReadAll(r.Body)
 		f.mu.Lock()
+		f.stdinTokens = append(f.stdinTokens, strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "))
 		f.stdin.Write(data)
 		eof := r.URL.Query().Get("eof") == "1" && !f.stdinEOF
 		if eof {
@@ -185,6 +200,67 @@ func TestRun_argvIsExact_andStdinIsPiped(t *testing.T) {
 	}
 	if got := f.execs[0]; strings.Join(got.Command, " ") != "codex exec-server --listen stdio" || !got.StdinPipe {
 		t.Fatalf("exec request = %+v", got)
+	}
+}
+
+// A long-lived exec (a CLI's exec server over stdio) keeps working past
+// its first token: once that token expired, its stdin goes with the
+// renewed one the core wrote to BNBLOC_VMEXEC_TOKEN_FILE, read again for
+// every request.
+func TestRun_longLivedExecUsesTheRenewedToken(t *testing.T) {
+	f, srv := newFakeSandbox(t)
+	f.tokens = map[string]bool{"exec-tok": true}
+	f.respond = func(req sandbox.ExecRequest, stdin func() string) (string, string, int) {
+		return stdin(), "", 0
+	}
+	tokenFile := filepath.Join(t.TempDir(), "token")
+	if err := os.WriteFile(tokenFile, []byte("exec-tok\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	in, feed := io.Pipe()
+	var stdout bytes.Buffer
+	r := testRunner(t, srv, "/host/ws", in, &stdout, io.Discard)
+	r.getenv = func(k string) string {
+		if k == coreprotocol.EnvVMExecTokenFile {
+			return tokenFile
+		}
+		return ""
+	}
+	done := make(chan int)
+	go func() {
+		done <- r.run(context.Background(), []string{"codex", "exec-server", "--listen", "stdio"}, true)
+	}()
+
+	_, _ = feed.Write([]byte("before\n"))
+	for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(5 * time.Millisecond) {
+		f.mu.Lock()
+		got := f.stdin.String()
+		f.mu.Unlock()
+		if got == "before\n" {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the first chunk never reached the exec")
+		}
+	}
+	// The turn's token is renewed: the first expires, the core writes the
+	// fresh one to the token file.
+	f.mu.Lock()
+	f.tokens = map[string]bool{"renewed-tok": true}
+	f.mu.Unlock()
+	if err := os.WriteFile(tokenFile, []byte("renewed-tok\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, _ = feed.Write([]byte("after\n"))
+	_ = feed.Close()
+
+	if code := <-done; code != 0 || stdout.String() != "before\nafter\n" {
+		t.Fatalf("code=%d stdout=%q", code, stdout.String())
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if last := f.stdinTokens[len(f.stdinTokens)-1]; f.stdinTokens[0] != "exec-tok" || last != "renewed-tok" {
+		t.Fatalf("stdin bearers = %v; want the first token, then the renewed one", f.stdinTokens)
 	}
 }
 

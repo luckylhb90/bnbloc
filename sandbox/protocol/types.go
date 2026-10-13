@@ -622,7 +622,9 @@ type RunResult struct {
 // The minted token authorizes ONLY, as that space's user:
 //   - POST .../machines/{machine}/spaces/{space}/run and .../exec, and
 //   - the control endpoints (POST .../machines/{machine}/execs/{execId}/stdin,
-//     resize, signal) of execs that were started with the same token.
+//     resize, signal) of execs started in the same space by any of its exec
+//     tokens: a caller renews a long-lived exec's token (a turn that runs
+//     for hours), and the renewed token keeps controlling it.
 //
 // {machine} may be the machine id or name, as everywhere. Every other route
 // (discover, machines, other spaces, files, archives, minting, ...) answers

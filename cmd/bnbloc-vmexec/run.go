@@ -23,7 +23,11 @@ import (
 // environment. Its seams (cwd, host exec, signals) are fields so tests drive
 // it without touching the real process.
 type runner struct {
-	cfg     coreprotocol.SandboxExecution
+	cfg coreprotocol.SandboxExecution
+	// getenv reads the environment again for every request: the exec
+	// token may be renewed through BNBLOC_VMEXEC_TOKEN_FILE while a
+	// long-lived exec (a CLI's exec server) runs.
+	getenv  func(string) string
 	client  *sandbox.Client
 	environ []string
 	getwd   func() (string, error)
@@ -42,6 +46,7 @@ func newRunner(stdin io.Reader, stdout, stderr io.Writer) (*runner, error) {
 	}
 	return &runner{
 		cfg:      cfg,
+		getenv:   os.Getenv,
 		client:   sandbox.NewClient(&http.Client{}),
 		environ:  os.Environ(),
 		getwd:    os.Getwd,
@@ -52,8 +57,36 @@ func newRunner(stdin io.Reader, stdout, stderr io.Writer) (*runner, error) {
 	}, nil
 }
 
+// token is the exec token for the next request: the current one (the token
+// file, renewed by the core) when readable, else the one read at start.
+func (r *runner) token() string {
+	if r.getenv != nil {
+		if tok := coreprotocol.CurrentExecToken(r.getenv); tok != "" {
+			return tok
+		}
+	}
+	return r.cfg.ExecToken
+}
+
 func (r *runner) endpoint() core.Endpoint {
-	return core.Endpoint{BaseURL: r.cfg.URL, Token: r.cfg.ExecToken}
+	return core.Endpoint{BaseURL: r.cfg.URL, Token: r.token()}
+}
+
+// control sends a control request (stdin, signal) for an exec started with
+// startToken: with that token while it is valid, then — once it expired
+// (unauthorized) — with the current, renewed one, which the sandbox accepts
+// for any exec of the same space.
+func (r *runner) control(startToken string, call func(core.Endpoint) error) error {
+	ep := core.Endpoint{BaseURL: r.cfg.URL, Token: startToken}
+	err := call(ep)
+	if err == nil || sandbox.ErrorCodeOf(err) != sandbox.ErrorUnauthorized {
+		return err
+	}
+	if cur := r.token(); cur != startToken {
+		ep.Token = cur
+		return call(ep)
+	}
+	return err
 }
 
 // runCommand is `vmexec run [--stdio] -- <command…>`.
@@ -170,6 +203,7 @@ func (r *runner) exec(ctx context.Context, command []string, guestCwd string, pi
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	ep := r.endpoint()
+	startToken := ep.Token
 	req := sandbox.ExecRequest{
 		Command:   command,
 		Env:       coreprotocol.ForwardedEnv(r.environ, coreprotocol.ForwardEnvAllowlist(r.cfg.Env)),
@@ -182,7 +216,7 @@ func (r *runner) exec(ctx context.Context, command []string, guestCwd string, pi
 	)
 	started := make(chan struct{})
 	var startOnce sync.Once
-	go r.forwardSignals(ctx, started, &mu, &execID, cancel)
+	go r.forwardSignals(ctx, started, &mu, &execID, cancel, startToken)
 	final, err := r.client.SpaceExec(ctx, ep, r.cfg.Machine, r.cfg.Space, req, func(ev sandbox.ExecEvent) {
 		switch ev.Type {
 		case sandbox.ExecStarted:
@@ -191,7 +225,7 @@ func (r *runner) exec(ctx context.Context, command []string, guestCwd string, pi
 			mu.Unlock()
 			startOnce.Do(func() { close(started) })
 			if pipeStdin {
-				go r.pumpStdin(ctx, ev.ExecID)
+				go r.pumpStdin(ctx, ev.ExecID, startToken)
 			}
 		case sandbox.ExecStdout, sandbox.ExecStderr:
 			data, derr := base64.StdEncoding.DecodeString(ev.DataBase64)
@@ -220,18 +254,22 @@ func (r *runner) exec(ctx context.Context, command []string, guestCwd string, pi
 
 // pumpStdin copies the host stdin into the running exec, chunk by chunk, and
 // closes the guest stdin at EOF.
-func (r *runner) pumpStdin(ctx context.Context, execID string) {
-	ep := r.endpoint()
+func (r *runner) pumpStdin(ctx context.Context, execID, startToken string) {
 	buf := make([]byte, 64*1024)
 	for {
 		n, err := r.stdin.Read(buf)
 		if n > 0 {
-			if werr := r.client.WriteStdin(ctx, ep, r.cfg.Machine, execID, buf[:n], false); werr != nil {
+			chunk := buf[:n]
+			if werr := r.control(startToken, func(ep core.Endpoint) error {
+				return r.client.WriteStdin(ctx, ep, r.cfg.Machine, execID, chunk, false)
+			}); werr != nil {
 				return
 			}
 		}
 		if err != nil {
-			_ = r.client.WriteStdin(ctx, ep, r.cfg.Machine, execID, nil, true)
+			_ = r.control(startToken, func(ep core.Endpoint) error {
+				return r.client.WriteStdin(ctx, ep, r.cfg.Machine, execID, nil, true)
+			})
 			return
 		}
 	}
@@ -239,7 +277,7 @@ func (r *runner) pumpStdin(ctx context.Context, execID string) {
 
 // forwardSignals relays SIGINT/SIGTERM/SIGHUP to the guest process. A third
 // signal abandons the exec (closing the stream kills it).
-func (r *runner) forwardSignals(ctx context.Context, started <-chan struct{}, mu *sync.Mutex, execID *string, cancel context.CancelFunc) {
+func (r *runner) forwardSignals(ctx context.Context, started <-chan struct{}, mu *sync.Mutex, execID *string, cancel context.CancelFunc, startToken string) {
 	if r.signals == nil {
 		return
 	}
@@ -266,7 +304,7 @@ func (r *runner) forwardSignals(ctx context.Context, started <-chan struct{}, mu
 			if sig, ok := s.(syscall.Signal); ok {
 				num = int(sig)
 			}
-			_ = r.client.Signal(ctx, r.endpoint(), r.cfg.Machine, id, num)
+			_ = r.control(startToken, func(ep core.Endpoint) error { return r.client.Signal(ctx, ep, r.cfg.Machine, id, num) })
 		}
 	}
 }

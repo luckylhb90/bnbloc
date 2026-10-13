@@ -731,8 +731,10 @@ func (s *suite) signal(t *testing.T) {
 // --- security ---
 
 // execTokens checks space-scoped exec tokens: a minted token runs commands in
-// its own space only (run, streamed exec, and the control endpoints of its own
-// execs), every other route is forbidden, and expiry / space deletion revoke it.
+// its own space only (run, streamed exec, and the control endpoints of the
+// execs of its space — a renewed token controls an exec an earlier one
+// started), every other route is forbidden, and expiry / space deletion
+// revoke it.
 func (s *suite) execTokens(t *testing.T) {
 	s.need(t, protocol.CapabilitySpaces, protocol.CapabilityExecTokens)
 	if s.spaceA.Name == "" {
@@ -800,6 +802,43 @@ func (s *suite) execTokens(t *testing.T) {
 	if err != nil || final.ExitCode == nil || *final.ExitCode == 0 || time.Since(sigStart) > 10*time.Second {
 		t.Fatalf("exec token signal to its own exec: %+v %v after %s", final, err, time.Since(sigStart))
 	}
+
+	// A renewed token of the same space controls an exec an earlier token
+	// started (a long-lived exec outlives its first token).
+	renewed, err := s.c.MintExecToken(s.ctx, s.ep, s.main.ID, spaceAName, 300)
+	if err != nil {
+		t.Fatalf("mint a renewed token: %v", err)
+	}
+	renewedEP := core.Endpoint{BaseURL: s.ep.BaseURL, Token: renewed.Token}
+	var renewOnce sync.Once
+	var renewErr error
+	stdout = ""
+	final, err = s.c.SpaceExec(s.ctx, ep, s.main.ID, spaceAName, protocol.ExecRequest{Command: []string{"sh", "-c", "cat; echo done"}, StdinPipe: true, TimeoutMs: 30_000}, func(ev protocol.ExecEvent) {
+		switch ev.Type {
+		case protocol.ExecStarted:
+			renewOnce.Do(func() {
+				go func() {
+					err := s.c.WriteStdin(s.ctx, renewedEP, s.main.ID, ev.ExecID, []byte("via-renewed\n"), true)
+					mu.Lock()
+					renewErr = err
+					mu.Unlock()
+					if err != nil {
+						_ = s.c.WriteStdin(s.ctx, ep, s.main.ID, ev.ExecID, nil, true)
+					}
+				}()
+			})
+		case protocol.ExecStdout:
+			mu.Lock()
+			stdout += decode(t, ev.DataBase64)
+			mu.Unlock()
+		}
+	})
+	mu.Lock()
+	if err != nil || renewErr != nil || final.ExitCode == nil || *final.ExitCode != 0 || stdout != "via-renewed\ndone\n" {
+		mu.Unlock()
+		t.Fatalf("a renewed token's stdin to an exec of its space: %+v %v / write %v, stdout %q", final, err, renewErr, stdout)
+	}
+	mu.Unlock()
 
 	// Forbidden: everything else.
 	_, err = s.c.SpaceRun(s.ctx, ep, s.main.ID, spaceBName, protocol.ExecRequest{Command: []string{"true"}})

@@ -85,7 +85,7 @@ func nonNil(v []string) []string {
 func SandboxFromEnv(getenv func(string) string) (SandboxExecution, error) {
 	s := SandboxExecution{
 		URL:       strings.TrimSpace(getenv(EnvVMExecURL)),
-		ExecToken: execTokenFromEnv(getenv),
+		ExecToken: CurrentExecToken(getenv),
 		Machine:   strings.TrimSpace(getenv(EnvVMExecMachine)),
 		Space:     strings.TrimSpace(getenv(EnvVMExecSpace)),
 		VMExec:    strings.TrimSpace(getenv(EnvVMExecPath)),
@@ -126,10 +126,11 @@ func SandboxFromEnv(getenv func(string) string) (SandboxExecution, error) {
 // readTokenFile reads the token file (a variable for tests).
 var readTokenFile = os.ReadFile
 
-// execTokenFromEnv is the session's current exec token: the token file's
+// CurrentExecToken is the session's current exec token: the token file's
 // (BNBLOC_VMEXEC_TOKEN_FILE, renewed by the core) when it is set and holds
-// one, else BNBLOC_VMEXEC_TOKEN's.
-func execTokenFromEnv(getenv func(string) string) string {
+// one, else BNBLOC_VMEXEC_TOKEN's. A long-lived vmexec reads it again for
+// every request it sends, so a renewed token reaches a running turn.
+func CurrentExecToken(getenv func(string) string) string {
 	if path := strings.TrimSpace(getenv(EnvVMExecTokenFile)); path != "" {
 		if raw, err := readTokenFile(path); err == nil {
 			if tok := strings.TrimSpace(string(raw)); tok != "" {
