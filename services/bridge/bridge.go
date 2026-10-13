@@ -123,21 +123,10 @@ type Config struct {
 	// workspace.
 	StateDir string
 	// MaxTurn bounds how long one turn may run (BNBLOC_BRIDGE_MAX_TURN; 0 =
-	// DefaultMaxTurn). The bridge owns a turn's length: it sends the
-	// deadline to the core (docs/prd/2026-10-13-live-turns.md §2).
+	// no bound). A turn ends when the agent stops working, never by the
+	// clock (docs/prd/2026-10-13-live-turns.md §2): only a deployment that
+	// sets a bound sends the turn's deadline to the core.
 	MaxTurn time.Duration
-}
-
-// DefaultMaxTurn is how long a turn may run when the deployment sets no
-// bound: real work (building an app, a deck) runs for many minutes.
-const DefaultMaxTurn = 2 * time.Hour
-
-// maxTurn is the bound of one turn (Config.MaxTurn).
-func (b *Bridge) maxTurn() time.Duration {
-	if b.cfg.MaxTurn > 0 {
-		return b.cfg.MaxTurn
-	}
-	return DefaultMaxTurn
 }
 
 // LogValue keeps the config's credentials out of every log line: the gateway
@@ -267,6 +256,8 @@ type Bridge struct {
 	// sandbox is the agent sandbox this bridge drives sandboxed turns in
 	// (sandbox.go); never nil (an unconfigured one is simply never ready).
 	sandbox *sandboxRuntime
+	// execRenewInterval overrides sandboxExecRenewEvery (tests).
+	execRenewInterval time.Duration
 
 	// contrib holds the registered session contributors (profile.go).
 	contrib contributors
@@ -1386,10 +1377,15 @@ func (b *Bridge) driveClaim(ctx context.Context, d *drive, beforeReflow func(*ro
 	lock.Lock()
 	defer lock.Unlock()
 
-	// The turn's deadline: the bridge's bound, sent to the core so it ends
-	// the turn then (and not earlier for time reasons).
-	deadline := time.Now().Add(b.maxTurn())
-	opts := corepkg.SessionOptions{Model: d.job.Model, ReasoningEffort: d.job.ReasoningEffort, DeadlineMs: deadline.UnixMilli()}
+	// The turn's deadline, only when the deployment bounds a turn: sent to
+	// the core so it ends the turn then (and not earlier for time reasons).
+	// Without a bound a turn runs while the agent works.
+	var deadline time.Time
+	opts := corepkg.SessionOptions{Model: d.job.Model, ReasoningEffort: d.job.ReasoningEffort}
+	if b.cfg.MaxTurn > 0 {
+		deadline = time.Now().Add(b.cfg.MaxTurn)
+		opts.DeadlineMs = deadline.UnixMilli()
+	}
 	var turn *roomSession // the session a sandboxed turn ran in (its fence)
 	if d.prepareExec != nil {
 		exec, err := d.prepareExec(ctx)
@@ -1413,6 +1409,9 @@ func (b *Bridge) driveClaim(ctx context.Context, d *drive, beforeReflow func(*ro
 		return driveResult{}, atStage(stagePrepare, err)
 	}
 	turn = rs.roomSession
+	if opts.Execution != nil {
+		defer b.renewExecution(ctx, d, rs.workspaceID, rs.sessionID, opts.Execution)()
+	}
 	b.noticeUndelivered(ctx, d, rs.atts.undelivered)
 	// If the session was freshly created, the initial prompt already ran; only
 	// send follow-up input for an existing session.
@@ -1441,7 +1440,7 @@ func (b *Bridge) driveClaim(ctx context.Context, d *drive, beforeReflow func(*ro
 	// reply would then surface only on the next message's reflow.
 	b.waitTurnStart(ctx, rs.roomSession)
 	var usage turnUsage
-	replied, err := b.reflow(ctx, reflowTurn{room: d.job.RoomID, channelID: d.job.ChannelID, jobID: d.job.JobID, deadline: deadline, bound: b.maxTurn()}, rs.roomSession, &usage)
+	replied, err := b.reflow(ctx, reflowTurn{room: d.job.RoomID, channelID: d.job.ChannelID, jobID: d.job.JobID, deadline: deadline, bound: b.cfg.MaxTurn}, rs.roomSession, &usage)
 	b.postSessionState(ctx, d.job.RoomID, rs.roomSession, "idle")
 	return driveResult{workspaceID: rs.workspaceID, sessionID: rs.sessionID, replied: replied, usage: usage}, atStage(stageRun, err)
 }
@@ -1880,7 +1879,7 @@ func (b *Bridge) sessionReachable(ctx context.Context, entry coreEntry, workspac
 // Deliverables are not published here: settle publishes them once, after
 // the turn (publishDeliverables).
 // reflowTurn is the turn reflow collects: where its replies go, its job
-// (progress), and its deadline and the bound it came from.
+// (progress), and its deadline and the bound it came from (zero: none).
 type reflowTurn struct {
 	room, channelID, jobID string
 	deadline               time.Time
@@ -1893,13 +1892,17 @@ func (b *Bridge) reflow(ctx context.Context, t reflowTurn, rs *roomSession, usag
 	// long time (codex can work for minutes), so a fixed cap would truncate a
 	// live reply. Each sign of progress — a new message, or a still-busy turn —
 	// pushes the window forward; only a genuine stall (no output and no active
-	// turn) for the whole window ends the reflow. hardDeadline bounds the total
-	// so a wedged session can never pin the goroutine forever.
+	// turn) for the whole window ends the reflow. There is no total bound
+	// unless the deployment sets one (t.deadline): a turn the core reports
+	// busy runs as long as it works.
 	const idleWindow = 120 * time.Second
 	idleDeadline := time.Now().Add(idleWindow)
 	// The core ends the turn at its deadline and reports it; a minute's
 	// grace lets that report arrive before the bridge gives up itself.
-	hardDeadline := t.deadline.Add(time.Minute)
+	var hardDeadline time.Time
+	if !t.deadline.IsZero() {
+		hardDeadline = t.deadline.Add(time.Minute)
+	}
 	var progress progressRelay
 	posted := false // any user-visible assistant reply reached the room this turn
 	// consecutive poll failures; tolerate a short blip (daemon restart, network
@@ -1933,7 +1936,7 @@ func (b *Bridge) reflow(ctx context.Context, t reflowTurn, rs *roomSession, usag
 			// next turn must not post them either), never posted. The notice
 			// carries the core's own message (fail).
 			rs.consume(msgs, latest)
-			if ts.FailCode == corepkg.FailCodeDeadline {
+			if ts.FailCode == corepkg.FailCodeDeadline && t.bound > 0 {
 				return posted, turnDeadlineError{after: t.bound}
 			}
 			return posted, turnFailedError{detail: ts.FailMessage}
@@ -1975,7 +1978,7 @@ func (b *Bridge) reflow(ctx context.Context, t reflowTurn, rs *roomSession, usag
 		if progressed {
 			idleDeadline = time.Now().Add(idleWindow)
 		}
-		if time.Now().After(hardDeadline) {
+		if !hardDeadline.IsZero() && time.Now().After(hardDeadline) {
 			return posted, turnDeadlineError{after: t.bound}
 		}
 		if time.Now().After(idleDeadline) {

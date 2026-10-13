@@ -33,6 +33,7 @@ type fakeSandboxd struct {
 	ensures []sandbox.SpaceRequest
 	spaces  []string
 	minted  int
+	ttls    []int64 // each mint's requested TTL (seconds)
 	state   sandbox.State
 	// calls is every space call in order: "ensure", "delete", "delete?purge".
 	calls []string
@@ -73,6 +74,9 @@ func newFakeSandboxd(t *testing.T) *fakeSandboxd {
 			_ = json.NewEncoder(w).Encode(sandbox.Machine{ID: "m1", Name: "bnbloc", State: f.state})
 		case strings.HasPrefix(p, sandbox.SpacesPath("bnbloc")+"/") && strings.HasSuffix(p, "/exec-tokens"):
 			f.minted++
+			var req sandbox.ExecTokenRequest
+			_ = json.NewDecoder(r.Body).Decode(&req)
+			f.ttls = append(f.ttls, req.TTLSeconds)
 			_ = json.NewEncoder(w).Encode(sandbox.ExecToken{Token: "tok-" + string(rune('0'+f.minted)), ExpiresAtMs: 99})
 		case strings.HasPrefix(p, sandbox.SpacesPath("bnbloc")+"/") && r.Method == http.MethodDelete:
 			call := "delete"

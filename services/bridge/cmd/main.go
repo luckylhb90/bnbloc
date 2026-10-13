@@ -126,8 +126,8 @@ func main() {
 		// Which workspace each agent of a room uses, kept across restarts
 		// (the desktop: the member's own directory; empty = memory only).
 		StateDir: strings.TrimSpace(config.FromEnvRaw("BNBLOC_BRIDGE_STATE_DIR")),
-		// How long one turn may run (0 = bridge.DefaultMaxTurn): sent to
-		// the core as the turn's deadline.
+		// How long one turn may run (0 = no bound: a turn runs while its
+		// agent works); a bound is sent to the core as the turn's deadline.
 		MaxTurn: config.Duration("BNBLOC_BRIDGE_MAX_TURN", 0),
 		// Deployment tuning floors for per-drive context (0 => built-in default).
 		WindowChars:       config.GetInt("BNBLOC_BRIDGE_CONTEXT_WINDOW_CHARS", 0),

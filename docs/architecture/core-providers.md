@@ -198,13 +198,32 @@ dropping it. A manifest declares it as `listTargets.targets.mcpTransports`
 
 **A turn's length and its progress**
 ([`docs/prd/2026-10-13-live-turns.md`](../prd/2026-10-13-live-turns.md)).
-The caller owns how long a turn may run: session create and input carry
-`deadlineMs` (Unix ms; `core.SessionOptions.DeadlineMs`), the bridge's
-bound (`BNBLOC_BRIDGE_MAX_TURN`, default 2 hours) from the turn's start. A
-core fails a turn still running then — `failed`, `failCode: "deadline"` —
-and never ends one earlier for time reasons; ending a turn (deadline,
-interrupt) stops everything it started (the process group). The bridge
-reports a deadline as the agent having run out of time. With capability
+A turn ends when its agent stops working, never by the clock: the bridge
+ends one the core reports neither busy nor producing anything for a sliding
+2-minute window, or a member stops it. A deployment may bound a turn
+(`BNBLOC_BRIDGE_MAX_TURN`, default none); only then do session create and
+input carry `deadlineMs` (Unix ms; `core.SessionOptions.DeadlineMs`). A
+core fails a turn still running at its deadline — `failed`,
+`failCode: "deadline"` — never ends one earlier for time reasons, and with
+no deadline imposes none of its own; ending a turn (deadline, interrupt)
+stops everything it started (the process group). The bridge reports a
+deadline as the agent having run out of time.
+
+**A sandboxed turn's command access renews itself** (capability
+`executionRefresh`). A sandboxed turn's exec token is short-lived (1 hour);
+while the turn runs the bridge mints a fresh one every 30 minutes and hands
+the running session its fresh execution:
+`PUT /core/v1/workspaces/{ws}/sessions/{sid}/execution` with the `Execution`
+object as body (the shape of `CreateSessionRequest.execution`) — 204 on
+success, 404 `session_not_found`, 400 for an invalid descriptor
+(`core.ExecutionRefresher`, `protocol.Client.RefreshExecution`). The core
+writes the current token to a file only the member can read and names it
+in `BNBLOC_VMEXEC_TOKEN_FILE` for the CLI's processes; `bnbloc-vmexec`
+reads it for every request it sends — a one-shot command, and every stdin
+write or signal of a long-lived exec (a CLI's exec server) — falling back
+to `BNBLOC_VMEXEC_TOKEN` when the file is unreadable or empty. A core
+without `executionRefresh` gets one token minted to outlive long turns
+(4 hours). With capability
 `turnActivity`, `PollTurn` reports a running turn's `startedAtMs` and
 `activity`: its latest steps, oldest first (at most
 `protocol.MaxTurnActivity`), each `{kind, title, atMs}` with kind `tool`
@@ -514,7 +533,8 @@ The bridge/gateway drive it through the protocol client with
    25 MiB attachment needs (see "Workspace file size").
    Advertise only the optional
    capabilities you actually serve (`interrupt`, `writeFile`,
-   `deleteWorkspace`, `sandboxExec`, `agentProfile`, `sessionFiles` + `sessionFileBytes`) —
+   `deleteWorkspace`, `sandboxExec`, `executionRefresh`, `agentProfile`,
+   `turnActivity`, `sessionFiles` + `sessionFileBytes`) —
    clients degrade gracefully when a capability is absent.
    **Deliverables** (`sessionFiles` + `sessionFileBytes`, advertised
    together — the wire has only the exact-bytes read):

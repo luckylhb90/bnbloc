@@ -103,9 +103,18 @@ func (c SandboxConfig) present() bool {
 }
 
 const (
-	// sandboxExecTokenTTL bounds one sandboxed turn's command access. A fresh
-	// token is minted per turn; this only has to outlive the longest turn.
-	sandboxExecTokenTTL = 4 * time.Hour
+	// sandboxExecTokenTTL bounds a sandboxed turn's command access: a token
+	// is minted per turn and, while the turn runs on a core that takes a
+	// fresh execution (executionRefresh), renewed every sandboxExecRenewEvery
+	// (renewExecution), so a turn may run for hours while each token stays
+	// short-lived and lapses within the hour after the turn ends.
+	sandboxExecTokenTTL = time.Hour
+	// sandboxExecRenewEvery is how often a running turn's token is renewed.
+	sandboxExecRenewEvery = 30 * time.Minute
+	// sandboxExecTokenNoRefreshTTL is a turn's token on a core that cannot
+	// take a fresh execution: it cannot be renewed, so it outlives longer
+	// turns instead.
+	sandboxExecTokenNoRefreshTTL = 4 * time.Hour
 	// sandboxReadyTTL / sandboxNotReadyTTL cache the readiness probe.
 	sandboxReadyTTL    = 30 * time.Second
 	sandboxNotReadyTTL = 10 * time.Second
@@ -251,7 +260,7 @@ func slugPart(s string, max int) string {
 // forwarded names for this drive (nil unless decideSandbox marked it
 // ownerEnv): the space's envAllowlist is re-ensured from it every turn, so
 // a turn for someone else after the owner's converges back to the default.
-func (s *sandboxRuntime) prepare(ctx context.Context, room, core, provider, owner string, env []string) (*corepkg.Execution, error) {
+func (s *sandboxRuntime) prepare(ctx context.Context, room, core, provider, owner string, env []string, ttl time.Duration) (*corepkg.Execution, error) {
 	space := sandboxSpaceName(room, core, provider)
 	workdir := filepath.Join(s.cfg.WorkspacesRoot, space)
 	if err := os.MkdirAll(workdir, 0o700); err != nil {
@@ -279,7 +288,7 @@ func (s *sandboxRuntime) prepare(ctx context.Context, room, core, provider, owne
 		s.invalidate()
 		return nil, fmt.Errorf("agent sandbox space: %w", err)
 	}
-	tok, err := s.client.MintExecToken(ctx, s.endpoint(), s.cfg.Machine, space, int64(sandboxExecTokenTTL/time.Second))
+	tok, err := s.client.MintExecToken(ctx, s.endpoint(), s.cfg.Machine, space, int64(ttl/time.Second))
 	if err != nil {
 		s.invalidate()
 		return nil, fmt.Errorf("agent sandbox exec token: %w", err)
@@ -301,6 +310,18 @@ func (s *sandboxRuntime) prepare(ctx context.Context, room, core, provider, owne
 		// shared workdir directly; the turn fence covers those.
 		HostConfine: corepkg.HostConfine{Workspace: workdir, DenyWrite: protectedDenyWrite(workdir)},
 	}}, nil
+}
+
+// renewed is exec with a freshly minted token for its space (a running
+// turn's renewal; ttl as prepare's).
+func (s *sandboxRuntime) renewed(ctx context.Context, exec *corepkg.Execution, ttl time.Duration) (*corepkg.Execution, error) {
+	tok, err := s.client.MintExecToken(ctx, s.endpoint(), s.cfg.Machine, exec.Sandbox.Space, int64(ttl/time.Second))
+	if err != nil {
+		return nil, fmt.Errorf("agent sandbox exec token: %w", err)
+	}
+	next := *exec
+	next.Sandbox.ExecToken, next.Sandbox.ExpiresAtMs = tok.Token, tok.ExpiresAtMs
+	return &next, nil
 }
 
 // pathMounts is a core's host→guest path mapping of a space's shared mounts.
@@ -478,7 +499,7 @@ func (b *Bridge) planSandbox(ctx context.Context, d *drive) (refuse string) {
 	d.ownSandbox = dec.ownerEnv
 	room, core, provider, owner := d.job.RoomID, d.core, d.job.Provider, d.owner
 	d.prepareExec = func(ctx context.Context) (*corepkg.Execution, error) {
-		exec, err := s.prepare(ctx, room, core, provider, owner, env)
+		exec, err := s.prepare(ctx, room, core, provider, owner, env, d.execTokenTTL())
 		if err != nil {
 			return nil, s.prepareFailure(ctx, err)
 		}

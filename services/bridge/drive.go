@@ -185,6 +185,18 @@ type driveCaps struct {
 	// maxInput is the core's stated request body limit (0 = unstated):
 	// a file whose write would exceed it is reported, never sent.
 	maxInput int64
+	// refresher: executionRefresh (a running sandboxed turn's exec token
+	// is renewed; renewExecution).
+	refresher corepkg.ExecutionRefresher
+}
+
+// execTokenTTL is a sandboxed turn's first exec token lifetime: short
+// when the core takes renewals, long enough for long turns when it cannot.
+func (d *drive) execTokenTTL() time.Duration {
+	if d.caps.refresher != nil {
+		return sandboxExecTokenTTL
+	}
+	return sandboxExecTokenNoRefreshTTL
 }
 
 // snapshotCapabilities is stage 3.
@@ -209,6 +221,7 @@ func (b *Bridge) coreCaps(ctx context.Context, coreName string) driveCaps {
 	caps.writer, _ = corepkg.As[corepkg.WorkspaceFileWriter](ctx, p, ep, corepkg.CapabilityWriteFile)
 	caps.bytesWriter, _ = corepkg.As[corepkg.WorkspaceFileBytesWriter](ctx, p, ep, corepkg.CapabilityWriteFile)
 	caps.maxInput = corepkg.MaxInputBytes(ctx, p, ep)
+	caps.refresher, _ = corepkg.As[corepkg.ExecutionRefresher](ctx, p, ep, corepkg.CapabilityExecutionRefresh)
 	return caps
 }
 

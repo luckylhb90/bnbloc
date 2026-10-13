@@ -72,6 +72,22 @@ func TestLiveTurn_deadlineAndProgress(t *testing.T) {
 	}
 }
 
+// Without a bound a turn runs while its agent works: no deadline reaches
+// the core, and nothing ends it for time.
+func TestLiveTurn_noBoundByDefault(t *testing.T) {
+	gw := newSandboxGateway(t, "room-1", false)
+	prov := &liveTurnProv{end: corepkg.TurnStatus{Idle: true}}
+	b := New(Config{GatewayBaseURL: gw.srv.URL, GatewayToken: "t", OwnerSubject: "alice", Cores: newTestCore(prov)})
+	b.runBridgeJob(context.Background(), job("job-1", "alice"))
+	if len(prov.deadlines) != 1 || prov.deadlines[0] != 0 {
+		t.Fatalf("deadlines = %v; want none sent", prov.deadlines)
+	}
+	_, fresh := gw.stored()
+	if strings.Contains(strings.Join(storedTexts(fresh), "\n"), "ran out of time") {
+		t.Fatalf("notice = %q; an unbounded turn must not end for time", storedTexts(fresh))
+	}
+}
+
 func TestHumanDuration(t *testing.T) {
 	for d, want := range map[time.Duration]string{2 * time.Hour: "2 hours", time.Hour: "1 hour", 90 * time.Minute: "90 minutes", time.Minute: "1 minute", 30 * time.Second: "30s"} {
 		if got := humanDuration(d); got != want {
