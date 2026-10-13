@@ -102,10 +102,35 @@ assert(!updateAvailable(undefined, "3.0.0"), "following latest");
   eq(formProblem(a), "A JSON assist names the fields of its reply", "a JSON assist needs fields");
   a.assist = { output: "json", fields: [{ name: "tag list", description: "x" }], context: ["artifact"] };
   eq(formProblem(a), "Each field name uses letters, digits and _ (starting with a letter)", "a field name");
-  a.assist = { output: "json", fields: [{ name: " tags ", description: " Tags ", list: true }, { name: "", description: "" }], context: ["artifact"] };
+  a.assist = { output: "json", fields: [{ name: "prompts", type: "items", item: [] }], context: [] };
+  eq(formProblem(a), "The items field prompts names its items' fields", "an items field names its item fields");
+  a.assist = { output: "json", fields: [{ name: "prompts", type: "items", item: [{ name: "a title" }] }], context: [] };
+  eq(formProblem(a), "Each item field of prompts uses letters, digits and _ (starting with a letter)", "an item field name");
+  a.assist = {
+    output: "json",
+    fields: [
+      { name: " tags ", description: " Tags ", type: "list" },
+      { name: "title", type: "text" },
+      { name: "prompts", type: "items", item: [{ name: " title " }, { name: "" }, { name: "prompt", description: "The body" }] },
+      { name: "", description: "" },
+    ],
+    context: ["artifact"],
+  };
+  eq(formProblem(a), null, "list, text and items fields");
   eq(
     formPayload(a),
-    { kind: "assist", name: "describe-work", instructions: "Describe it.", output: "json", fields: [{ name: "tags", description: "Tags", list: true }], context: ["artifact"] },
+    {
+      kind: "assist",
+      name: "describe-work",
+      instructions: "Describe it.",
+      output: "json",
+      fields: [
+        { name: "tags", description: "Tags", type: "list" },
+        { name: "title" },
+        { name: "prompts", type: "items", item: [{ name: "title" }, { name: "prompt", description: "The body" }] },
+      ],
+      context: ["artifact"],
+    },
     "assist payload",
   );
   a.assist = { output: "text", fields: [{ name: "left", description: "" }], context: [] };

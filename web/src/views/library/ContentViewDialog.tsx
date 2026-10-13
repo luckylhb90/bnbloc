@@ -156,7 +156,7 @@ export function ContentViewDialog({
                       {c.assist.fields?.map((f) => (
                         <li key={f.name}>
                           <span className="font-mono">{f.name}</span>
-                          {f.list ? " (list)" : ""}
+                          {f.type === "list" ? " (list)" : f.type === "items" ? ` (items: ${(f.item ?? []).map((x) => x.name).join(", ")})` : ""}
                           {f.description ? <span className="text-[var(--color-fg-muted)]"> — {f.description}</span> : null}
                         </li>
                       ))}

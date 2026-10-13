@@ -9,7 +9,7 @@ export type { ChatExpert, ContentComponent, ContentComponentDetail, ContentMCPRe
 import type { ChatExpert, ContentComponent, ContentQuickPrompt, ContentRequires, ContentUse, ContentVersionDetail } from "./wire.gen.ts";
 
 export type { ContentKind } from "./wire.gen.ts";
-import type { AssistSpec, ContentKind } from "./wire.gen.ts";
+import type { AssistField, AssistSpec, ContentKind } from "./wire.gen.ts";
 import { ContentTagPattern, MaxContentTagRunes } from "./wire.gen.ts";
 
 // The built-in builder expert (shipped with the release, read-only, listed
@@ -134,12 +134,28 @@ export function formFromVersion(d: ContentVersionDetail): ContentForm {
       lead: c.team?.lead && c.team.lead !== "lead" ? c.team.lead : "",
       members: (c.team?.members ?? []).map((m) => ({ role: m.role, expert: m.expert, defaultAgent: m.defaultAgent, description: m.description ?? "" })),
     },
-    ...(c.assist ? { assist: { output: c.assist.output, fields: (c.assist.fields ?? []).map((f) => ({ ...f })), context: [...(c.assist.context ?? [])] } } : {}),
+    ...(c.assist ? { assist: { output: c.assist.output, fields: (c.assist.fields ?? []).map((f) => ({ ...f, ...(f.item ? { item: f.item.map((y) => ({ ...y })) } : {}) })), context: [...(c.assist.context ?? [])] } } : {}),
   };
 }
 
 function trimmed(s: string): string {
   return s.trim();
+}
+
+// ASSIST_FIELD_NAME is a JSON assist's reply field name (and an item's).
+const ASSIST_FIELD_NAME = /^[a-zA-Z][a-zA-Z0-9_]{0,39}$/;
+
+// assistFieldPayload is one reply field as a save sends it: text is the
+// default shape (left out), an items field carries its item fields.
+function assistFieldPayload(x: AssistField): AssistField {
+  const description = trimmed(x.description ?? "");
+  const item = x.type === "items" ? (x.item ?? []).map(assistFieldPayload).filter((y) => y.name) : [];
+  return {
+    name: trimmed(x.name),
+    ...(description ? { description } : {}),
+    ...(x.type && x.type !== "text" ? { type: x.type } : {}),
+    ...(item.length > 0 ? { item } : {}),
+  };
 }
 
 // formPayload is the JSON form a save sends: empty optional fields and
@@ -171,9 +187,7 @@ export function formPayload(f: ContentForm): Record<string, unknown> {
     const a = f.assist ?? { output: "text" };
     out.instructions = f.instructions.trim();
     out.output = a.output;
-    const fields = (a.fields ?? [])
-      .map((x) => ({ name: trimmed(x.name), ...(trimmed(x.description ?? "") ? { description: trimmed(x.description ?? "") } : {}), ...(x.list ? { list: true } : {}) }))
-      .filter((x) => x.name);
+    const fields = (a.fields ?? []).map(assistFieldPayload).filter((x) => x.name);
     if (a.output === "json" && fields.length > 0) out.fields = fields;
     if ((a.context ?? []).length > 0) out.context = a.context;
   }
@@ -260,7 +274,13 @@ export function formProblem(f: ContentForm): string | null {
     if (!f.instructions.trim()) return "An AI assist needs instructions";
     const fields = (f.assist?.fields ?? []).filter((x) => x.name.trim() || x.description?.trim());
     if (f.assist?.output === "json" && fields.length === 0) return "A JSON assist names the fields of its reply";
-    for (const x of fields) if (!/^[a-zA-Z][a-zA-Z0-9_]{0,39}$/.test(x.name.trim())) return "Each field name uses letters, digits and _ (starting with a letter)";
+    for (const x of fields) {
+      if (!ASSIST_FIELD_NAME.test(x.name.trim())) return "Each field name uses letters, digits and _ (starting with a letter)";
+      if (x.type !== "items") continue;
+      const item = (x.item ?? []).filter((y) => y.name.trim());
+      if (item.length === 0) return `The items field ${x.name.trim()} names its items' fields`;
+      for (const y of item) if (!ASSIST_FIELD_NAME.test(y.name.trim())) return `Each item field of ${x.name.trim()} uses letters, digits and _ (starting with a letter)`;
+    }
   }
   const tag = tagProblem(f.tags ?? []);
   if (tag) return tag;
