@@ -2145,7 +2145,7 @@ export const NoticeAttachmentUndelivered = "attachment-undelivered";
 export const EventAgentJobProgress = "agent_job_progress";
 
 // Job activity kinds (JobActivity.Kind): Core Protocol's turn activity
-// kinds (core/protocol TurnActivity*; TestJobActivityKindsAreTheProtocols).
+// kinds (core/protocol TurnActivity*; core/protocol TestTurnActivityIsTheWires).
 // JobActivityTool: a step the agent ran (a command, a file read or
 // written, a search).
 export const JobActivityTool = "tool";
