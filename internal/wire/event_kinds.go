@@ -69,6 +69,7 @@ var RoomEventKinds = []EventKindSpec{
 	{Name: KindAgentMessages, Durable: true, Replay: true, ChannelScoped: true},
 	{Name: EventAgentJobCreated, ChannelScoped: true},
 	{Name: EventAgentJobUpdated, ChannelScoped: true},
+	{Name: EventAgentJobProgress, ChannelScoped: true},
 	{Name: EventAgentSessionState},
 	{Name: EventAgentRoster},
 	{Name: EventPresenceJoin},

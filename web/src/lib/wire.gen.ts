@@ -1867,7 +1867,7 @@ export interface EventKindSpec {
 // RoomEventKinds is the registry of room event kinds. The web's
 // RoomEventKind union (and RoomEventKindValues) is generated from the Name
 // of each row: a kind registered here is a kind the web listens for.
-export const RoomEventKinds: readonly EventKindSpec[] = [{ name: "chat_message", durable: true, replay: true, channelScoped: true }, { name: "agent_messages", durable: true, replay: true, channelScoped: true }, { name: "agent_job_created", channelScoped: true }, { name: "agent_job_updated", channelScoped: true }, { name: "agent_session_state" }, { name: "agent_roster" }, { name: "presence_join" }, { name: "presence_leave" }, { name: "presence_snapshot" }, { name: "presence_typing", channelScoped: true }, { name: "message_deleted", channelScoped: true }, { name: "message_edited", channelScoped: true }, { name: "task_updated", channelScoped: true }, { name: "artifact_updated" }, { name: "artifact_state" }, { name: "member_joined" }, { name: "member_removed", revocation: true }, { name: "room_deleted", revocation: true }, { name: "content_saved" }, { name: "content_uses_changed" }, { name: "app_changed" }];
+export const RoomEventKinds: readonly EventKindSpec[] = [{ name: "chat_message", durable: true, replay: true, channelScoped: true }, { name: "agent_messages", durable: true, replay: true, channelScoped: true }, { name: "agent_job_created", channelScoped: true }, { name: "agent_job_updated", channelScoped: true }, { name: "agent_job_progress", channelScoped: true }, { name: "agent_session_state" }, { name: "agent_roster" }, { name: "presence_join" }, { name: "presence_leave" }, { name: "presence_snapshot" }, { name: "presence_typing", channelScoped: true }, { name: "message_deleted", channelScoped: true }, { name: "message_edited", channelScoped: true }, { name: "task_updated", channelScoped: true }, { name: "artifact_updated" }, { name: "artifact_state" }, { name: "member_joined" }, { name: "member_removed", revocation: true }, { name: "room_deleted", revocation: true }, { name: "content_saved" }, { name: "content_uses_changed" }, { name: "app_changed" }];
 
 // ---- wire/handoff.go ----
 
@@ -2137,6 +2137,53 @@ export const NoticeJobFailed = "job-failed";
 // reach the agent's workspace, and why (the bridge, once per job, under
 // AttachmentNoticeSessionID so the job's own notice still posts).
 export const NoticeAttachmentUndelivered = "attachment-undelivered";
+
+// ---- wire/job_progress.go ----
+
+// EventAgentJobProgress carries AgentJobProgress (activity), scoped to the
+// job's channel.
+export const EventAgentJobProgress = "agent_job_progress";
+
+// Job activity kinds (JobActivity.Kind): Core Protocol's turn activity
+// kinds (core/protocol TurnActivity*; TestJobActivityKindsAreTheProtocols).
+// JobActivityTool: a step the agent ran (a command, a file read or
+// written, a search).
+export const JobActivityTool = "tool";
+// JobActivityThinking: the agent is reasoning.
+export const JobActivityThinking = "thinking";
+// JobActivityText: the agent is writing.
+export const JobActivityText = "text";
+
+// Bounds of a job's progress (Core Protocol's MaxTurnActivity and
+// MaxTurnActivityTitle; the bridge cuts to them).
+export const MaxJobActivity = 8;
+export const MaxJobActivityTitle = 120;
+
+// JobActivity is one step of a live job's turn: a short title such as
+// "Bash: python extract.py" (never file contents or secrets).
+export interface JobActivity {
+  kind: JobActivityKind;
+  title?: string;
+  atMs: number;
+}
+
+// AgentJobProgress is EventAgentJobProgress: a live job's turn start and
+// latest steps, oldest first (at most MaxJobActivity). AtMs is when the
+// bridge read it.
+export interface AgentJobProgress {
+  jobId: string;
+  startedAtMs?: number;
+  activity: JobActivity[];
+  atMs: number;
+}
+
+// JobProgressInput is POST /v1/bridge/jobs/{jobId}/progress: the claiming
+// bridge's report of its job's turn.
+export interface JobProgressInput {
+  bridgeId: string;
+  startedAtMs?: number;
+  activity: JobActivity[];
+}
 
 // ---- wire/limits.go ----
 
@@ -4271,8 +4318,10 @@ export type ContentUseScope = "member" | "room" | "room-expert";
 export const ContentUseScopeValues: readonly ContentUseScope[] = ["member", "room", "room-expert"];
 export type ContentSavedAction = "saved" | "submitted" | "published";
 export const ContentSavedActionValues: readonly ContentSavedAction[] = ["saved", "submitted", "published"];
-export type RoomEventKind = "chat_message" | "agent_messages" | "agent_job_created" | "agent_job_updated" | "agent_session_state" | "agent_roster" | "presence_join" | "presence_leave" | "presence_snapshot" | "presence_typing" | "message_deleted" | "message_edited" | "task_updated" | "artifact_updated" | "artifact_state" | "member_joined" | "member_removed" | "room_deleted" | "content_saved" | "content_uses_changed" | "app_changed";
-export const RoomEventKindValues: readonly RoomEventKind[] = ["chat_message", "agent_messages", "agent_job_created", "agent_job_updated", "agent_session_state", "agent_roster", "presence_join", "presence_leave", "presence_snapshot", "presence_typing", "message_deleted", "message_edited", "task_updated", "artifact_updated", "artifact_state", "member_joined", "member_removed", "room_deleted", "content_saved", "content_uses_changed", "app_changed"];
+export type RoomEventKind = "chat_message" | "agent_messages" | "agent_job_created" | "agent_job_updated" | "agent_job_progress" | "agent_session_state" | "agent_roster" | "presence_join" | "presence_leave" | "presence_snapshot" | "presence_typing" | "message_deleted" | "message_edited" | "task_updated" | "artifact_updated" | "artifact_state" | "member_joined" | "member_removed" | "room_deleted" | "content_saved" | "content_uses_changed" | "app_changed";
+export const RoomEventKindValues: readonly RoomEventKind[] = ["chat_message", "agent_messages", "agent_job_created", "agent_job_updated", "agent_job_progress", "agent_session_state", "agent_roster", "presence_join", "presence_leave", "presence_snapshot", "presence_typing", "message_deleted", "message_edited", "task_updated", "artifact_updated", "artifact_state", "member_joined", "member_removed", "room_deleted", "content_saved", "content_uses_changed", "app_changed"];
+export type JobActivityKind = "tool" | "thinking" | "text";
+export const JobActivityKindValues: readonly JobActivityKind[] = ["tool", "thinking", "text"];
 export type ScheduleRecipientKind = "room" | "agent";
 export const ScheduleRecipientKindValues: readonly ScheduleRecipientKind[] = ["room", "agent"];
 export type RecurrenceKind = "once" | "daily" | "weekly" | "cron";
