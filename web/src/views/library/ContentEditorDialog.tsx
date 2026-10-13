@@ -21,6 +21,8 @@ import { Field, Input, Textarea } from "@/ui/Input";
 import { Select } from "@/ui/Select";
 import { useToast } from "@/ui/Toast";
 import { AssistFormFields } from "@/views/library/AssistFormFields";
+import { DraftWithAI } from "@/views/library/DraftWithAI";
+import { DRAFT_EXPERT, DRAFT_SKILL_PACK, expertDraftPatch, filledForm, skillPackDraftPatch } from "@/lib/assistDrafts";
 import { QuickPromptsEditor, RequirementsFields, TagsIconFields, TeamEditor } from "@/views/library/ContentFormExtras";
 import { errorText } from "@/lib/errors";
 
@@ -170,6 +172,14 @@ export function ContentEditorDialog({
         <p className="text-sm text-[var(--color-fg-muted)]">Loading…</p>
       ) : (
         <div className="flex flex-col gap-4">
+          {(kind === "expert" || kind === "skill") && (
+            <DraftWithAI
+              task={kind === "expert" ? DRAFT_EXPERT : DRAFT_SKILL_PACK}
+              placeholder={kind === "expert" ? "Describe the expert, e.g. a reviewer of our API designs" : "Describe the skills, e.g. checks for our release notes"}
+              current={() => filledForm(form)}
+              onDraft={(fields) => patch(kind === "expert" ? expertDraftPatch(fields, form, !base) : skillPackDraftPatch(fields, form, !base))}
+            />
+          )}
           <div className="grid gap-4 sm:grid-cols-2">
             <Field label="Name" hint="Lower-case letters, digits and hyphens">
               <Input value={form.name} disabled={!!base} onChange={(e) => patch({ name: e.target.value })} placeholder={kind === "expert" ? "reviewer" : kind === "assist" ? "enhance-prompt" : "lint-kit"} />

@@ -106,6 +106,22 @@ function comp(p: Partial<ContentComponent> & Pick<ContentComponent, "id" | "name
   );
 }
 
+// A new version keeps a same-titled prompt's id, command and starter flag.
+{
+  const form = emptyPromptPackForm();
+  form.prompts = [{ id: "weekly", title: "Weekly report", body: "old", slash: "weekly", tags: "report", variables: [], starter: true }];
+  const patch = promptPackDraftPatch({ prompts: [{ title: "weekly report", prompt: "New {{team}}" }, { title: "Retro", prompt: "Run a retro" }] }, form, false);
+  eq(
+    patch.prompts?.map((p) => [p.id, p.slash, p.starter, p.body, p.variables.map((v) => v.name)]),
+    [
+      ["weekly", "weekly", true, "New {{team}}", ["team"]],
+      ["retro", "", false, "Run a retro", []],
+    ],
+    "kept by title",
+  );
+  eq(patch.name, undefined, "a new version keeps the pack's name");
+}
+
 // plan-room: the room id, and the expert and skills found in the library (unknown names dropped).
 {
   const experts = [comp({ id: "e1", name: "reviewer", displayName: "Code reviewer", kind: "expert" })];

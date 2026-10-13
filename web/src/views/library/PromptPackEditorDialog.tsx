@@ -20,6 +20,8 @@ import { Switch } from "@/ui/Segment";
 import { Select } from "@/ui/Select";
 import { useToast } from "@/ui/Toast";
 import { errorText } from "@/lib/errors";
+import { DRAFT_PROMPT_PACK, filledPromptPack, promptPackDraftPatch } from "@/lib/assistDrafts";
+import { DraftWithAI } from "@/views/library/DraftWithAI";
 
 // The editor target: a new pack, a new version of one of the member's packs
 // (prefilled from its latest version), or drafted prompts (from selected
@@ -202,6 +204,14 @@ export function PromptPackEditorDialog({
       }
     >
       <div className="flex flex-col gap-4">
+        {!loading && !drafts && (
+          <DraftWithAI
+            task={DRAFT_PROMPT_PACK}
+            placeholder="Describe the prompts, e.g. weekly report and retro prompts for our team"
+            current={() => filledPromptPack(form)}
+            onDraft={(fields) => setForm((f) => ({ ...f, ...promptPackDraftPatch(fields, f, !into) }))}
+          />
+        )}
         {drafts && (
           <Field label="Save into">
             <Select value={into?.id ?? ""} onChange={(e) => pickInto(e.target.value)} aria-label="Save into">

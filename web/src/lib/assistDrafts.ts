@@ -174,18 +174,26 @@ export function skillPackDraftPatch(fields: Fields, form: ContentForm, isNew: bo
 }
 
 /** promptPackDraftPatch is a draft-prompt-pack reply onto the prompt pack
- *  form: its prompts replace the form's (ids unique from their titles,
- *  variables read from their {{placeholders}}). */
+ *  form: its prompts replace the form's. A prompt titled like one the form
+ *  holds keeps that one's id, command, tags, starter flag and variables
+ *  (a new version of a pack); the others get ids unique from their titles
+ *  and variables read from their {{placeholders}}. */
 export function promptPackDraftPatch(fields: Fields, form: PromptPackForm, isNew: boolean): Partial<PromptPackForm> {
   const patch: Partial<PromptPackForm> = { ...envelopePatch(fields, form, isNew) };
   const ids = new Set<string>();
+  const kept = new Set<PromptDraft>();
   const prompts: PromptDraft[] = fieldItems(fields, "prompts")
     .filter((p) => p.prompt)
     .slice(0, MaxAssistItems)
     .map((p) => {
-      const id = uniqueId(p.title || p.prompt || "", ids);
+      const title = (p.title ?? "").slice(0, MAX_QUICK_TITLE);
+      const body = p.prompt ?? "";
+      const same = form.prompts.find((d) => !kept.has(d) && d.title.trim() && d.title.trim().toLowerCase() === title.toLowerCase());
+      const base = same ?? emptyPromptDraft();
+      if (same) kept.add(same);
+      const id = same?.id && !ids.has(same.id) ? same.id : uniqueId(title || body, ids);
       ids.add(id);
-      return { ...emptyPromptDraft(), id, title: (p.title ?? "").slice(0, MAX_QUICK_TITLE), body: p.prompt ?? "", variables: syncVariables(p.prompt ?? "", []) };
+      return { ...base, id, title, body, variables: syncVariables(body, base.variables) };
     });
   if (prompts.length > 0) patch.prompts = prompts;
   return patch;
