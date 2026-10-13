@@ -341,7 +341,9 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   org action with `rbac.Can(svcauth.Role(r), perm)`, never by re-reading the
   tenant store; the gateway drops a non-platform role when a room moves the
   request into another organization). `TestSignedRequestsUseNewRequest` and
-  `TestSubjectReadOnlyViaSvcauth` forbid hand-set or hand-read headers. An
+  `TestSubjectReadOnlyViaSvcauth` forbid hand-set or hand-read headers (the
+  app scope of an interactive app's request too: `Key.AssertApp` writes it,
+  `AppScopeOf` reads it). An
   internal route only services call is guarded by
   `svcauth.RequireService(key, services, h)` (realtime publish, blobs, peer
   routes; room agent hosts and share resolution); only the routes that act
@@ -1230,6 +1232,39 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   A gateway route that changes a member's executable catalog signals
   `componentsChanged` (realtime `POST /internal/v1/components/changed`,
   passed on to every replica); the 60 s poll is only a safety net.
+- **Interactive apps' data has one owner per rule**
+  (`docs/prd/2026-10-12-interactive-apps.md`). Each published site (an
+  app; `app_id` = the site artifact's id) owns a data space of JSON
+  documents. Storage is `store.AppDocs` (`app_docs` keyed `(app_id,
+  collection, doc_id)`, `app_keys`): every query names app, tenant and
+  room; an insert is create-only per id (the primary key decides `ifAbsent`)
+  and needs the app's current key; `UpdateAppDoc` is the one write (`SELECT
+  … FOR UPDATE`, the caller's callback, `version + 1`). Encryption is
+  `appdata.Cipher` alone (a per-app data key wrapped by `internal/sealbox`,
+  AES-256-GCM bodies bound to `app_id|collection|doc_id`, the sealed
+  author, the `_by` pseudonym; `Rotate` re-wraps keys only):
+  `TestSealedColumnsWrittenOnlyByCipher` forbids setting `BodySealed` /
+  `AuthorSealed` or naming the sealed columns elsewhere. Deleting data
+  crypto-shreds: the key goes first (an empty `wrapped_key` refuses
+  writes), then the rows in batches (`WipeApp`; `DeleteRoom`'s
+  `roomOwnedTable.destroy`/`batched`). The document rules are
+  `internal/appdata` (server stamps `_id _by _createdAt _updatedAt
+  _version`, `_author` for owners only, never client-set: `ParseBody`;
+  `Body.Patch` for merge and `$inc`; the filter whitelist `FilterOps`,
+  applied after decryption). The room service's data owner
+  (`services/room/appdata.go`) holds the two platform rules: owners are the
+  room's members who may chat and its agents (`appOwner`); only the author
+  or an owner changes a document (`mayChange`); private unless written
+  public (`readable`). Its routes (`/internal/v1/app/…`) are gateway-only
+  (`RequireService`) and take the whole scope from the signed app scope:
+  the gateway asserts identity (`Assert`, the room's tenant) and then
+  `svcauth.Key.AssertApp` (room, app, `<kind>:<id>` participant: `member`,
+  `agent`, `visitor`) under one timestamp; the handler reads it only through
+  `svcauth.AppScopeOf`. No route takes an app, room or tenant from the
+  path, query or body (`TestAppDataScopeFromCapabilityOnly`). `If-Match:
+  <version>` is `ifVersion`, `If-None-Match: *` is `ifAbsent` (both 409);
+  caps are the `wire.MaxApp*` constants; every status goes through
+  `writeAppError`.
 - **http MCP per-member sign-in is `mcp.http.auth.scheme = "oauth"`.** The
   desktop (`internal_ext/mcp_oauth.rs`) discovers the authorization server at
   sign-in (never declared or hardcoded), requires PKCE S256 and checks

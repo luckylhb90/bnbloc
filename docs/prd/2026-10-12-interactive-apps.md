@@ -6,6 +6,10 @@ gateway route table (2.1), `svcauth.NewRequest` (2.2), `httpx` (2.3), the
 event-kind registry (2.5), the store rig (4.1) and the generated wire types
 (5.1).
 
+Progress: delivery steps 1 and 2 **landed** on 2026-10-13 (store, cipher
+and the room service's data owner; see §7 "Step status"). Steps 3–6 are
+open.
+
 ## 1. Why
 
 A member asks an agent in a room to build a small interactive project, such
@@ -321,6 +325,47 @@ app_keys(app_id PRIMARY KEY, tenant_id, room_id, wrapped_key, created_at_ms)
 | 4 | Room tool `app_data`, `.room/apps.md`, and the builtin skill pack, expert and starter prompts |
 | 5 | Web: app view for site shares; the card data line |
 | 6 | `BNBLOC_SITES_ORIGIN` on every deploy surface |
+
+### Step status
+
+- **Step 1: landed (2026-10-13).** `store.AppDocs` (memory and MySQL, the
+  `TestContractAppDocs…` suite), migration `2026_10_app_data` (`app_docs`,
+  `app_keys`), both tables in `roomOwnedTables`, `appdata.Cipher`. Decided
+  while building:
+  - `app_keys` also carries `KEY (tenant_id, room_id)`, so a room deletion
+    finds its apps without a scan.
+  - A crypto-shred destroys the key in place first (`wrapped_key = ''`,
+    which refuses writes while the rows go) and deletes the key row last,
+    so an interrupted wipe resumes on the next one. Room deletion destroys
+    the keys in its transaction and deletes the rows in batches after the
+    commit. An app key is only created in a live room.
+  - `_by` is an HMAC keyed by the app's data key (a per-app secret, not the
+    guessable app id), so a wipe also renews the pseudonyms.
+  - Retention of app data (a purge kind with an age index) is not part of
+    steps 1–2; until it lands, room deletion and the owners' **Delete app
+    data** are the ways app data goes.
+- **Step 2: landed (2026-10-13).** `services/room/appdata.go`, gateway-only
+  internal routes under `/internal/v1/app/` (the file's comment is the
+  contract the gateway step calls). Until step 3, the scope arrives as
+  svcauth-signed headers: `svcauth.Key.AssertApp` after `Assert` (subject
+  `service:gateway`, the room's tenant) adds the room, the app and the
+  participant `<member|agent|visitor>:<id>` under one signature
+  (`X-bnbloc-App-Sig`); `svcauth.AppScopeOf` is the only reader. Decided
+  while building:
+  - Owners are the room's members who may chat (a room visitor is a
+    participant, not an owner) and the room's agents.
+  - `ifVersion` is `If-Match: <version>`, `ifAbsent` is
+    `If-None-Match: *` on PUT; PUT without either replaces, or creates a
+    free id. PATCH takes `{merge, $inc, public}`; inserts and replaces
+    `{doc, public}` (`wire.AppDocWrite`, `wire.AppDocPatch`).
+  - A find sorts by `_id` (`sort=_id` or `-_id`); it scans at most 2000
+    documents per request after decryption and returns a `next` cursor.
+  - The per-app caps are counted per replica (re-read every 10 s, own
+    writes added between reads): other replicas' writes inside the window
+    may overshoot a cap, which still bounds cost and abuse.
+  - A document's `_author` (the real participant) is rendered for owners
+    only.
+- Steps 3–6: open.
 
 ### Tests
 
