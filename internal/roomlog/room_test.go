@@ -5,6 +5,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -84,7 +85,7 @@ func TestSessionGuidanceGolden(t *testing.T) {
 		golden(t, name, SessionGuidance(g))
 	}
 	plain, tools := SessionGuidance(Guidance{}), SessionGuidance(pullTools)
-	for _, s := range []string{".room/", "[The bnbloc-room tools]", "read_artifact"} {
+	for _, s := range []string{".room/", "[The bnbloc-room tools]", "read_artifact", "app_data", "apps.md"} {
 		if strings.Contains(plain, s) {
 			t.Errorf("guidance without tools or .room/ mentions %q:\n%s", s, plain)
 		}
@@ -94,7 +95,7 @@ func TestSessionGuidanceGolden(t *testing.T) {
 	}
 	// A session with the tools but no .room/ files (a core that takes no
 	// workspace files) is never pointed at a file it does not have.
-	if noFiles := SessionGuidance(Guidance{HasTools: true}); strings.Contains(noFiles, ".room/") || strings.Contains(noFiles, "artifacts.md") {
+	if noFiles := SessionGuidance(Guidance{HasTools: true}); strings.Contains(noFiles, ".room/") || strings.Contains(noFiles, "artifacts.md") || strings.Contains(noFiles, "apps.md") {
 		t.Errorf("guidance without .room/ files mentions them:\n%s", noFiles)
 	}
 	if want := fmt.Sprintf("at most %d tasks per request you are working on, %d hops deep", wire.MaxDispatchFanOut, wire.MaxDispatchDepth); !strings.Contains(tools, want) {
@@ -271,4 +272,65 @@ func TestComposeGolden(t *testing.T) {
 	older := []Entry{{Seq: 1, Speaker: "jack", Text: "earlier plan"}, {Seq: 2, Speaker: "jack/codex", Kind: KindAgent, Text: "drafted it"}}
 	golden(t, "compose-fresh.txt", Compose(append(older, attributedEntries...), now, Options{WindowChars: 120, Summarizer: StructuredSummarizer{}}))
 	golden(t, "compose-delta.txt", ComposeDelta(attributedEntries, now, Options{}))
+}
+
+// appsFetch is a room with two sites and a document: site artf_poll holds
+// data (maya/codex built it), site artf_page holds none, and the document
+// is no app whatever its data.
+func appsFetch() *fakeFetch {
+	return &fakeFetch{bodies: map[string]string{
+		"/v1/rooms/r1/artifacts?limit=30": `{"artifacts":[
+			{"artifactId":"artf_poll","title":"Friday poll","kind":"site","currentVersion":3,"createdBy":"maya","updatedAtMs":3},
+			{"artifactId":"artf_page","title":"Landing page","kind":"site","currentVersion":1,"createdBy":"maya","updatedAtMs":2},
+			{"artifactId":"art_doc","title":"notes.md","kind":"markdown","currentVersion":1,"createdBy":"maya","updatedAtMs":1}]}`,
+		"/v1/rooms/r1/artifacts/artf_poll/versions/3": `{"version":{"artifactId":"artf_poll","version":3,"sourceJobId":"job-a","authorUserId":"maya"}}`,
+		"/v1/rooms/r1/jobs/job-a":                     `{"jobId":"job-a","agent":{"owner":"maya","core":"acme","provider":"codex"}}`,
+		"/v1/rooms/r1/apps/artf_poll/stats?job=job-1": `{"documents":12,"bytes":4096,"collections":{"votes":11,"options":1}}`,
+		"/v1/rooms/r1/apps/artf_page/stats?job=job-1": `{"documents":0,"bytes":0,"collections":{}}`,
+	}}
+}
+
+// .room/apps.md lists the room's interactive apps: the site deliverables
+// whose data holds documents (read with the job's grant), each with its
+// producer and its collections' counts, never a document's content. It is
+// written only once the room has an app, and from then on every turn, so
+// it never goes stale; a failed read says so.
+func TestAppsGolden(t *testing.T) {
+	ff := appsFetch()
+	apps, err := ReadApps(context.Background(), ff.fetch, "r1", "job-1", &ProducerCache{})
+	if err != nil || len(apps) != 1 || apps[0].ArtifactID != "artf_poll" {
+		t.Fatalf("apps = %+v, %v", apps, err)
+	}
+	for _, c := range ff.calls {
+		if strings.Contains(c, "art_doc") || strings.Contains(c, "artf_page/versions") {
+			t.Errorf("read %s: only a site's usage, and only an app's producer, are read", c)
+		}
+	}
+	f, write, listed := AppsUpdate(false, apps, nil)
+	if !write || !listed || f.Name != ".room/apps.md" {
+		t.Fatalf("a room with an app: write=%v listed=%v name=%s", write, listed, f.Name)
+	}
+	golden(t, "apps.md", f.Content)
+	if !strings.Contains(f.Content, "- Friday poll v3, id artf_poll: from maya/codex on core acme; 12 documents: options 1, votes 11\n") {
+		t.Errorf("apps.md lacks the app's line:\n%s", f.Content)
+	}
+
+	if _, write, listed := AppsUpdate(false, nil, nil); write || listed {
+		t.Fatal("a room without apps gets an apps.md")
+	}
+	if _, write, _ := AppsUpdate(false, nil, errors.New("down")); write {
+		t.Fatal("an unreadable room that never had apps gets an apps.md")
+	}
+	if f, write, listed := AppsUpdate(true, nil, nil); !write || !listed || !strings.Contains(f.Content, "(no app holds data now)") {
+		t.Fatalf("apps.md after the data went is not rewritten: write=%v\n%s", write, f.Content)
+	}
+	if f, _, _ := AppsUpdate(true, nil, errors.New("down")); !strings.Contains(f.Content, "could not be read this turn") {
+		t.Fatalf("a failed read renders:\n%s", f.Content)
+	}
+	if _, err := ReadApps(context.Background(), ff.fetch, "r1", "", nil); err == nil {
+		t.Fatal("apps read without a job's grant")
+	}
+	if got := AppPath("r1", "artf_poll", "c/votes", "job-1", url.Values{"limit": {"5"}}); got != "/v1/rooms/r1/apps/artf_poll/c/votes?job=job-1&limit=5" {
+		t.Fatalf("AppPath = %s", got)
+	}
 }

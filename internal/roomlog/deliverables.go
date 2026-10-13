@@ -131,8 +131,22 @@ type Deliverable struct {
 // A version whose producer cannot be read is listed with what is known (the
 // job id) and resolved again next time.
 func ReadDeliverables(ctx context.Context, fetch Fetch, room string, cache *ProducerCache) ([]Deliverable, error) {
-	base := "/v1/rooms/" + url.PathEscape(room) + "/artifacts"
-	raw, err := fetch(ctx, base+"?limit="+strconv.Itoa(MaxListedDeliverables))
+	list, err := listDeliverables(ctx, fetch, room)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]Deliverable, 0, len(list))
+	for _, a := range list {
+		out = append(out, deliverableOf(ctx, fetch, room, a, cache))
+	}
+	return out, nil
+}
+
+// listDeliverables is the room's newest-updated deliverables (at most
+// MaxListedDeliverables) that have a title and a version: the one listing
+// .room/artifacts.md and .room/apps.md read.
+func listDeliverables(ctx context.Context, fetch Fetch, room string) ([]wire.Artifact, error) {
+	raw, err := fetch(ctx, deliverablesPath(room)+"?limit="+strconv.Itoa(MaxListedDeliverables))
 	if err != nil {
 		return nil, err
 	}
@@ -140,22 +154,12 @@ func ReadDeliverables(ctx context.Context, fetch Fetch, room string, cache *Prod
 	if err := json.Unmarshal(raw, &list); err != nil {
 		return nil, fmt.Errorf("unreadable deliverables listing: %w", err)
 	}
-	out := make([]Deliverable, 0, len(list.Artifacts))
+	out := make([]wire.Artifact, 0, len(list.Artifacts))
 	for _, a := range list.Artifacts {
 		if a.Title == "" || a.CurrentVersion <= 0 {
 			continue
 		}
-		d := Deliverable{ArtifactID: a.ArtifactID, Title: a.Title, Kind: a.Kind, Version: a.CurrentVersion, UpdatedAtMs: a.UpdatedAtMs}
-		key := room + "\x00" + a.ArtifactID + "\x00" + strconv.Itoa(a.CurrentVersion)
-		if p, ok := cache.get(key); ok {
-			d.Producer = p
-		} else if p, err := deliverableProducer(ctx, fetch, room, base, a); err == nil {
-			cache.put(key, p)
-			d.Producer = p
-		} else {
-			d.Producer = p
-		}
-		out = append(out, d)
+		out = append(out, a)
 		if len(out) == MaxListedDeliverables {
 			break
 		}
@@ -163,9 +167,27 @@ func ReadDeliverables(ctx context.Context, fetch Fetch, room string, cache *Prod
 	return out, nil
 }
 
+func deliverablesPath(room string) string { return "/v1/rooms/" + url.PathEscape(room) + "/artifacts" }
+
+// deliverableOf is a listed artifact with the producer of its latest
+// version, from the cache when it was resolved before.
+func deliverableOf(ctx context.Context, fetch Fetch, room string, a wire.Artifact, cache *ProducerCache) Deliverable {
+	d := Deliverable{ArtifactID: a.ArtifactID, Title: a.Title, Kind: a.Kind, Version: a.CurrentVersion, UpdatedAtMs: a.UpdatedAtMs}
+	key := room + "\x00" + a.ArtifactID + "\x00" + strconv.Itoa(a.CurrentVersion)
+	if p, ok := cache.get(key); ok {
+		d.Producer = p
+	} else if p, err := deliverableProducer(ctx, fetch, room, a); err == nil {
+		cache.put(key, p)
+		d.Producer = p
+	} else {
+		d.Producer = p
+	}
+	return d
+}
+
 // deliverableProducer reads a's latest version and resolves its producer.
-func deliverableProducer(ctx context.Context, fetch Fetch, room, base string, a wire.Artifact) (Producer, error) {
-	raw, err := fetch(ctx, base+"/"+url.PathEscape(a.ArtifactID)+"/versions/"+strconv.Itoa(a.CurrentVersion))
+func deliverableProducer(ctx context.Context, fetch Fetch, room string, a wire.Artifact) (Producer, error) {
+	raw, err := fetch(ctx, deliverablesPath(room)+"/"+url.PathEscape(a.ArtifactID)+"/versions/"+strconv.Itoa(a.CurrentVersion))
 	if err != nil {
 		return Producer{}, err
 	}

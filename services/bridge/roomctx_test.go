@@ -27,12 +27,16 @@ type pullGateway struct {
 	runs           map[string]string
 	library        string
 	libraryQueries []string
-	srv            *httptest.Server
+	// appStats answers an app's usage by artifact id; appQueries is the
+	// query of each usage read.
+	appStats   map[string]string
+	appQueries []string
+	srv        *httptest.Server
 }
 
 func newPullGateway(t *testing.T) *pullGateway {
 	t.Helper()
-	g := &pullGateway{history: map[string]string{}, versions: map[string]string{}, runs: map[string]string{}}
+	g := &pullGateway{history: map[string]string{}, versions: map[string]string{}, runs: map[string]string{}, appStats: map[string]string{}}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /v1/rooms/r1/channels", func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprint(w, `{"channels":[{"channelId":"general"},{"channelId":"test"}]}`)
@@ -86,6 +90,17 @@ func newPullGateway(t *testing.T) *pullGateway {
 			return
 		}
 		fmt.Fprint(w, g.library)
+	})
+	mux.HandleFunc("GET /v1/rooms/r1/apps/{id}/stats", func(w http.ResponseWriter, r *http.Request) {
+		g.mu.Lock()
+		defer g.mu.Unlock()
+		g.appQueries = append(g.appQueries, r.URL.RawQuery)
+		body, ok := g.appStats[r.PathValue("id")]
+		if !ok {
+			http.NotFound(w, r)
+			return
+		}
+		fmt.Fprint(w, body)
 	})
 	mux.HandleFunc("POST /v1/rooms/r1/agent-activity/session-state", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -280,6 +295,53 @@ func TestDriveClaimPullDeltaOnReuse(t *testing.T) {
 	last := prompts[len(prompts)-1]
 	if strings.Contains(last, "new message") {
 		t.Fatalf("history leaked into reuse prompt:\n%s", last)
+	}
+}
+
+// .room/apps.md appears once the room has an interactive app (a site whose
+// data holds documents, read with the turn's job grant) and is rewritten
+// every turn from then on, so it never claims data that is gone.
+func TestRoomRecordsWriteAppsOnceTheRoomHasOne(t *testing.T) {
+	g := newPullGateway(t)
+	g.setHistory("general", []int64{1}, map[int64]string{1: "hello"})
+	g.mu.Lock()
+	g.artifacts = `{"artifacts":[{"artifactId":"artf_poll","title":"Friday poll","kind":"site","currentVersion":1,"createdBy":"maya"}]}`
+	g.versions["artf_poll/1"] = `{"version":{"artifactId":"artf_poll","version":1,"sourceJobId":"job-a","authorUserId":"maya"}}`
+	g.runs["job-a"] = `{"jobId":"job-a","agent":{"owner":"maya","core":"acme","provider":"opencode"}}`
+	g.appStats["artf_poll"] = `{"documents":0,"bytes":0,"collections":{}}`
+	g.mu.Unlock()
+	b := New(Config{GatewayBaseURL: g.srv.URL, GatewayToken: "t", OwnerSubject: "maya"})
+	// One session's passes, each with its own job, threading the state the
+	// pass records (materializeRoomContext's).
+	var st roomlog.CtxState
+	turn := func(job string, stats string) (string, bool) {
+		t.Helper()
+		g.mu.Lock()
+		g.appStats["artf_poll"] = stats
+		g.mu.Unlock()
+		files, next := b.roomRecordFiles(context.Background(), "r1", job, roomlog.Producer{Owner: "maya", Provider: "codex"}, st, roomlog.Guidance{HasRoomFiles: true})
+		st.ReadmeSum, st.AppsListed = next.ReadmeSum, next.AppsListed
+		for _, f := range files {
+			if f.Name == ".room/apps.md" {
+				return f.Content, true
+			}
+		}
+		return "", false
+	}
+	if got, ok := turn("job-1", `{"documents":0,"bytes":0,"collections":{}}`); ok {
+		t.Fatalf("a room whose site holds no data gets apps.md:\n%s", got)
+	}
+	got, ok := turn("job-2", `{"documents":3,"bytes":90,"collections":{"votes":3}}`)
+	if !ok || !strings.Contains(got, "- Friday poll v1, id artf_poll: from maya/opencode on core acme; 3 documents: votes 3") {
+		t.Fatalf("apps.md once the room has an app (written %v):\n%s", ok, got)
+	}
+	if got, ok := turn("job-3", `{"documents":0,"bytes":0,"collections":{}}`); !ok || !strings.Contains(got, "(no app holds data now)") {
+		t.Fatalf("apps.md after the data went (written %v):\n%s", ok, got)
+	}
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if len(g.appQueries) != 3 || g.appQueries[1] != "job=job-2" {
+		t.Fatalf("usage reads = %q, want one per turn with its job's grant", g.appQueries)
 	}
 }
 

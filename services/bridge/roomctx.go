@@ -91,13 +91,25 @@ func extForContentType(contentType, filename string) string {
 // (artifacts.md), the requester's Library (library.md, read with the job's
 // grant) and the live interaction trail (live.md: what members did inside
 // running deliverables since the bridge started, so a member's "the board
-// looks wrong now" is answerable from the actual gestures). A failed read renders as
-// unreadable, never as empty, and never fails the turn.
-func (b *Bridge) roomRecordFiles(ctx context.Context, room, jobID string, self roomlog.Producer, st roomlog.CtxState, g roomlog.Guidance) (files []roomlog.NamedFile, readmeSum string) {
+// looks wrong now" is answerable from the actual gestures), and, once the
+// room has an interactive app, apps.md (roomlog.AppsUpdate: each app's
+// collections and document counts, read with the job's grant; rewritten
+// every turn from then on, so it never goes stale). A failed read renders
+// as unreadable, never as empty, and never fails the turn. next is st with
+// what the pass records (ReadmeSum, AppsListed) once the files are written.
+func (b *Bridge) roomRecordFiles(ctx context.Context, room, jobID string, self roomlog.Producer, st roomlog.CtxState, g roomlog.Guidance) (files []roomlog.NamedFile, next roomlog.CtxState) {
+	next = st
 	readme, readmeSum, changed := roomlog.ReadmeUpdate(st, g)
+	next.ReadmeSum = readmeSum
 	if changed {
 		files = append(files, readme)
 	}
+	apps, aerr := roomlog.ReadApps(ctx, b.gatewayGET, room, jobID, &b.producers)
+	if aerr != nil {
+		slog.Debug("bnbloc bridge apps unreadable", "event", "bnbloc.bridge.roomctx_apps_failed", "room", room, "job", jobID, "error", aerr)
+	}
+	appsFile, writeApps, appsListed := roomlog.AppsUpdate(st.AppsListed, apps, aerr)
+	next.AppsListed = appsListed
 	deliverables, derr := roomlog.ReadDeliverables(ctx, b.gatewayGET, room, &b.producers)
 	if derr != nil {
 		slog.Debug("bnbloc bridge deliverables unreadable", "event", "bnbloc.bridge.roomctx_deliverables_failed", "room", room, "error", derr)
@@ -106,11 +118,15 @@ func (b *Bridge) roomRecordFiles(ctx context.Context, room, jobID string, self r
 	if lerr != nil {
 		slog.Debug("bnbloc bridge library unreadable", "event", "bnbloc.bridge.roomctx_library_failed", "room", room, "job", jobID, "error", lerr)
 	}
-	return append(files,
+	files = append(files,
 		roomlog.DeliverablesFile(deliverables, derr, self),
 		roomlog.LibraryFile(library, lerr),
 		roomlog.LiveFile(b.liveTrail(room)),
-	), readmeSum
+	)
+	if writeApps {
+		files = append(files, appsFile)
+	}
+	return files, next
 }
 
 // materializeRoomContext refreshes the .room/ tree in the given workspace and
@@ -154,8 +170,8 @@ func (b *Bridge) materializeRoomContext(ctx context.Context, w corepkg.Workspace
 		newState.SelfAfterSeq = newState.EndSeq
 	}
 	// Insert the records before the trailing INDEX.
-	records, readmeSum := b.roomRecordFiles(ctx, room, jobID, self, st, g)
-	newState.ReadmeSum = readmeSum
+	records, recorded := b.roomRecordFiles(ctx, room, jobID, self, st, g)
+	newState.ReadmeSum, newState.AppsListed = recorded.ReadmeSum, recorded.AppsListed
 	if n := len(files); n > 0 && files[n-1].Name == ".room/INDEX.md" {
 		files = append(append(files[:n-1:n-1], records...), files[n-1])
 	} else {

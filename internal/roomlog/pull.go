@@ -55,6 +55,9 @@ type CtxState struct {
 	// ReadmeSum is the sum of the .room/README.md last written into this
 	// session's workspace (ReadmeUpdate); empty until the first pull pass.
 	ReadmeSum string
+	// AppsListed: this session's workspace holds a .room/apps.md (the room
+	// had an app), so every pass rewrites it (AppsUpdate).
+	AppsListed bool
 }
 
 // NamedFile is one materialized .room/ file.
@@ -145,6 +148,7 @@ func indexFile(st CtxState) NamedFile {
 	fmt.Fprintf(&b, "Coverage: %s through seq %d, %d chunks.\n", coverage, st.EndSeq, len(st.Chunks))
 	b.WriteString("Chunks are chronological; filenames carry their seq ranges (chunk-<start>-<end>.md).\n")
 	b.WriteString("The latest messages are in recent.md. Room deliverables: artifacts.md. The Library: library.md. Live deliverables: live.md.\n")
+	b.WriteString("Interactive apps and how much data each holds: apps.md, once the room has one.\n")
 	b.WriteString("How this room works (every agent has its own workspace): README.md.\n")
 	return NamedFile{Name: ".room/INDEX.md", Content: b.String()}
 }
