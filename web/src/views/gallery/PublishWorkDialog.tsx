@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { DESCRIBE_WORK, runJSONAssist, useAssistTask, workDraftPatch } from "@/lib/assist";
 import { BuildingsIcon, StorefrontIcon } from "@phosphor-icons/react";
 import { contentLabel, type ContentComponent } from "@/lib/contentComponents";
 import { contentApi } from "@/lib/contentComponentsApi";
@@ -24,6 +25,7 @@ import { Field, Input, Textarea } from "@/ui/Input";
 import { Switch } from "@/ui/Segment";
 import { Select } from "@/ui/Select";
 import { useToast } from "@/ui/Toast";
+import { AssistButton } from "@/views/AssistButton";
 import { PublishDialog } from "@/views/library/ContentSharing";
 import { GALLERY_QUERY } from "./WorkParts";
 
@@ -39,7 +41,10 @@ import { GALLERY_QUERY } from "./WorkParts";
 // author seeing it: they edit the prompt, untick reference files or drop
 // the recipe. Then it offers "Publish to organization" through the
 // Library's publish flow (PublishDialog: sent for approval, or published at
-// once, by the organization's setting).
+// once, by the organization's setting). "Fill with AI" (the describe-work
+// assist, when the deployment has one) drafts the name, description,
+// category and tags from the deliverable; the member edits them, and
+// nothing is published until they press Publish.
 
 /** The deliverable a publish snapshots. */
 export interface PublishDeliverable {
@@ -57,6 +62,8 @@ export function PublishWorkDialog({ deliverable, onClose }: { readonly deliverab
   const [busy, setBusy] = useState(false);
   const [saved, setSaved] = useState<ContentComponent | null>(null);
   const [publishing, setPublishing] = useState(false);
+  const describe = useAssistTask(DESCRIBE_WORK);
+  const [filling, setFilling] = useState(false);
   // The dialog restarts when it opens for another deliverable, not on a new
   // object for the same one.
   const key = deliverable ? `${deliverable.roomId}\u0000${deliverable.artifactId}` : "";
@@ -113,6 +120,20 @@ export function PublishWorkDialog({ deliverable, onClose }: { readonly deliverab
     }
   };
 
+  const fill = async () => {
+    if (!describe || filling) return;
+    setFilling(true);
+    setFailure("");
+    try {
+      const r = await runJSONAssist(describe.name, { text: deliverable.title, roomId: deliverable.roomId, artifactId: deliverable.artifactId });
+      setForm((f) => ({ ...f, ...workDraftPatch(r.fields ?? {}, f) }));
+    } catch (e) {
+      setFailure(errorText(e, "Could not fill it in with AI"));
+    } finally {
+      setFilling(false);
+    }
+  };
+
   if (saved) {
     return (
       <>
@@ -159,6 +180,12 @@ export function PublishWorkDialog({ deliverable, onClose }: { readonly deliverab
       }
     >
       <div className="flex flex-col gap-4">
+        {describe && (
+          <div className="flex items-center justify-between gap-3 rounded-[var(--radius-lg)] bg-[var(--color-surface-2)] px-3 py-2">
+            <p className="text-xs text-[var(--color-fg-muted)]">Draft the name, description, category and tags from the deliverable, then edit them.</p>
+            <AssistButton variant="text" label="Fill with AI" state={filling ? "waiting" : "idle"} onRun={() => void fill()} disabled={loading || busy} />
+          </div>
+        )}
         {mine && mine.length > 0 && (
           <Field label="Publish as" hint="A new work, or the next version of one of yours (rooms that use a copy keep theirs).">
             <Select value={form.componentId} onChange={(e) => set({ componentId: e.target.value })}>
