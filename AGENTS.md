@@ -1559,7 +1559,15 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   section is pinned to `sdk.d.ts` (`TestInteractiveAppsSkillMatchesSDK`:
   a renamed or added SDK method fails until the skill follows), the
   `app-builder` expert requires it, and `app-starters` holds `/poll`,
-  `/survey`, `/signup`, `/app-report`.
+  `/survey`, `/signup`, `/app-report`. Before an agent finishes an app the
+  skill makes it test the page in a headless browser (no console errors,
+  a visible main view, the main action written and read back) and never
+  call it done when a check failed or could not run
+  (`docs/prd/2026-10-13-interactive-apps-self-test.md`); the harness is
+  its `references/self-test.md`, and the SDK it serves is the demo-mode
+  one bnbloc writes into every pull workspace as `.room/app-sdk/sdk.js`
+  (`roomlog.AppSDKUpdate` over `appsdk.DemoJS`, rewritten only when it
+  changes; never a second SDK file).
 - **"Is this deliverable an app" has one owner: `store.Artifact.IsApp`**
   (`internal/store/artifact_apps.go`, `docs/prd/2026-10-13-app-gallery.md`
   §5): a site whose data space exists (its `app_keys` row, not being

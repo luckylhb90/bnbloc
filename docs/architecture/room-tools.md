@@ -185,6 +185,12 @@ text has one owner per category
   running deliverables since the bridge started, each gesture's live state
   bounded (`LiveGesture.BoundState`) and the trail fenced (a deliverable's
   code wrote it).
+- **`.room/app-sdk/sdk.js`** (`roomlog.AppSDKUpdate`): the interactive
+  apps' SDK in demo mode (`appsdk.DemoJS`: every call answered in the
+  page's memory, nothing sent), written at a workspace's first pass and
+  again only when the SDK changes. The `interactive-apps` skill's
+  self-test serves it as the page's `~app/sdk.js` before the agent says an
+  app works (`docs/prd/2026-10-13-interactive-apps-self-test.md`).
 - **`.room/apps.md`** (`roomlog.ReadApps`, `AppsFile`): the room's
   interactive apps, each with its producer and its collections' document
   counts, never a document's content. The apps are the listed deliverables

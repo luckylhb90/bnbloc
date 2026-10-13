@@ -9,10 +9,12 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/luckylhb90/bnbloc/core"
 	"github.com/luckylhb90/bnbloc/internal/appdata"
 	"github.com/luckylhb90/bnbloc/internal/contentpkg"
 	"github.com/luckylhb90/bnbloc/internal/contentuse"
 	"github.com/luckylhb90/bnbloc/internal/extpipe"
+	"github.com/luckylhb90/bnbloc/internal/roomlog"
 	"github.com/luckylhb90/bnbloc/internal/store"
 	"github.com/luckylhb90/bnbloc/internal/wire"
 	"github.com/luckylhb90/bnbloc/services/gateway/appsdk"
@@ -27,6 +29,7 @@ const (
 	appStartersID   = IDPrefix + "app-starters"
 	appsSkillFile   = "interactive-apps/SKILL.md"
 	appsExamples    = "interactive-apps/references/examples.md"
+	appsSelfTest    = "interactive-apps/references/self-test.md"
 	sdkBegin        = "<!-- sdk:begin -->"
 	sdkEnd          = "<!-- sdk:end -->"
 	appsSkillMaxTk  = 1800 // below the 8 KiB a core without agentProfile inlines a skill body at
@@ -112,6 +115,7 @@ func TestInteractiveAppsSkillMatchesSDK(t *testing.T) {
 	d := readSDKDecl(t)
 	skill := builtinFile(t, appsSkillID, appsSkillFile)
 	examples := builtinFile(t, appsSkillID, appsExamples)
+	selfTest := builtinFile(t, appsSkillID, appsSelfTest)
 	start, end := strings.Index(skill, sdkBegin), strings.Index(skill, sdkEnd)
 	if start < 0 || end < start {
 		t.Fatalf("the skill has no %s … %s section", sdkBegin, sdkEnd)
@@ -137,7 +141,7 @@ func TestInteractiveAppsSkillMatchesSDK(t *testing.T) {
 		}
 	}
 	// Every SDK call in the skill and its examples is a declared method.
-	for name, text := range map[string]string{appsSkillFile: skill, appsExamples: examples} {
+	for name, text := range map[string]string{appsSkillFile: skill, appsExamples: examples, appsSelfTest: selfTest} {
 		for _, m := range appCallRE.FindAllStringSubmatch(text, -1) {
 			if !slices.Contains(d.appMethods, m[1]) {
 				t.Errorf("%s calls app.%s, which the SDK does not have", name, m[1])
@@ -160,9 +164,22 @@ func TestInteractiveAppsSkillMatchesSDK(t *testing.T) {
 		// The cover convention (docs/prd/2026-10-13-app-gallery.md §4.1):
 		// the file the app validator reads, within its cap.
 		"`cover.png`", "headless browser", fmt.Sprintf("under %d MiB", wire.MaxAppCoverBytes>>20), "never SVG",
+		// The self-test before delivery
+		// (docs/prd/2026-10-13-interactive-apps-self-test.md): the three
+		// checks, the never-claim-done rule, the demo-mode SDK bnbloc
+		// writes into the room records (roomlog.AppSDKPath) and the harness.
+		"no console error", "visible content", "writes through the SDK", "read back",
+		"Never say an app is done or works", "`" + strings.TrimPrefix(roomlog.AppSDKPath, core.RoomContextDir) + "`", "`references/self-test.md`",
 	} {
 		if !strings.Contains(skill, want) {
 			t.Errorf("the skill does not state %q", want)
+		}
+	}
+	// The harness serves that SDK as the page's own and checks what the
+	// skill promises.
+	for _, want := range []string{`"/~app/sdk.js"`, "pageerror", "innerText", "app.collection(", "never call the\napp done"} {
+		if !strings.Contains(selfTest, want) {
+			t.Errorf("the self-test reference does not hold %q", want)
 		}
 	}
 }

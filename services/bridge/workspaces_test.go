@@ -19,6 +19,7 @@ import (
 	"github.com/luckylhb90/bnbloc/internal/store"
 	"github.com/luckylhb90/bnbloc/internal/tarbundle"
 	"github.com/luckylhb90/bnbloc/services/bridge/roomtools"
+	"github.com/luckylhb90/bnbloc/services/gateway/appsdk"
 )
 
 // fsCore is a core whose workspaces are directories, as an ACP adapter's
@@ -39,8 +40,10 @@ type fsCore struct {
 	unknown error
 	// turnFiles are what the agent writes during its next turn.
 	turnFiles map[string]string
-	// copyWrites counts bnbloc's writes under .room/deliverables/.
+	// copyWrites counts bnbloc's writes under .room/deliverables/; writes
+	// every workspace file write by path.
 	copyWrites []string
+	writes     map[string]int
 	started    bool
 	// turnPolls makes every turn report busy that many polls after it
 	// started; inTurn and overlaps catch a turn that starts while another
@@ -204,6 +207,10 @@ func (c *fsCore) WriteWorkspaceFileBytes(_ context.Context, _ corepkg.Endpoint, 
 	if strings.HasPrefix(rel, roomlog.DeliverablesDir) {
 		c.copyWrites = append(c.copyWrites, rel)
 	}
+	if c.writes == nil {
+		c.writes = map[string]int{}
+	}
+	c.writes[rel]++
 	full := filepath.Join(c.dir(ws), filepath.FromSlash(rel))
 	if err := os.MkdirAll(filepath.Dir(full), 0o700); err != nil {
 		return err
@@ -428,5 +435,28 @@ func TestDeliverableCopiesInTheWorkspace(t *testing.T) {
 	fsDrive(t, b, "job-3", nil)
 	if got, _ := os.ReadFile(filepath.Join(ws, ".room/deliverables/art_site/app.js")); string(got) != "render(2)" {
 		t.Fatalf("the new version was not copied: %q", got)
+	}
+}
+
+// A pull workspace holds the app SDK in demo mode for an agent's self-test
+// of an app (docs/prd/2026-10-13-interactive-apps-self-test.md): written
+// at the workspace's first pass, not again while it is unchanged, whichever
+// session drives.
+func TestWorkspaceHoldsTheDemoAppSDK(t *testing.T) {
+	g := newPullGateway(t)
+	c := newFSCore(t)
+	b := fsBridge(t, g, c, "")
+	fsDrive(t, b, "job-1", appBuilder())
+	fsDrive(t, b, "job-2", nil)
+	fsDrive(t, b, "job-3", nil)
+	got, err := os.ReadFile(filepath.Join(c.root, "ws1", filepath.FromSlash(roomlog.AppSDKPath)))
+	if err != nil || string(got) != string(appsdk.DemoJS) {
+		t.Fatalf("the workspace's SDK is not the demo-mode SDK (%v)", err)
+	}
+	c.mu.Lock()
+	n := c.writes[roomlog.AppSDKPath]
+	c.mu.Unlock()
+	if n != 1 {
+		t.Fatalf("the SDK was written %d times over three turns of two sessions, want once", n)
 	}
 }

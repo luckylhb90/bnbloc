@@ -1,7 +1,7 @@
 {
   "kind": "bnbloc.expert.package/v1",
   "name": "app-builder",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "displayName": "App builder",
   "description": "Builds interactive apps with you (polls, surveys, sign-up sheets, forms, boards) that people use from a link on their phones, keeps their answers in the app's own data, and reports on what they answered.",
   "category": "apps",

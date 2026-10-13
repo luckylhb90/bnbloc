@@ -7,6 +7,7 @@ import (
 
 	corepkg "github.com/luckylhb90/bnbloc/core"
 	"github.com/luckylhb90/bnbloc/internal/roomlog"
+	"github.com/luckylhb90/bnbloc/services/gateway/appsdk"
 )
 
 // Pull-based room context wiring.
@@ -85,8 +86,9 @@ func extForContentType(contentType, filename string) string {
 // roomRecordFiles are the .room/ records of a pass besides the history
 // (roomlog owns their wording): the session's guidance (README.md, rendered
 // with its facts g) when the workspace does not hold its current text yet
-// (roomlog.ReadmeUpdate: once per session, not every turn; readmeSum is
-// what to record once written),
+// (roomlog.ReadmeUpdate: once, not every turn; readmeSum is what to record
+// once written), the app SDK in demo mode the same way
+// (roomlog.AppSDKUpdate),
 // then the data rewritten every turn: the deliverables with their producers
 // (artifacts.md), the requester's Library (library.md, read with the job's
 // grant) and the live interaction trail (live.md: what members did inside
@@ -103,6 +105,13 @@ func (b *Bridge) roomRecordFiles(ctx context.Context, room, jobID string, self r
 	next.ReadmeSum = readmeSum
 	if changed {
 		files = append(files, readme)
+	}
+	// The app SDK in demo mode, for an agent's self-test of an app it
+	// builds (served as the page's ~app/sdk.js; nothing it does is sent).
+	sdk, sdkSum, changed := roomlog.AppSDKUpdate(st, appsdk.DemoJS)
+	next.AppSDKSum = sdkSum
+	if changed {
+		files = append(files, sdk)
 	}
 	apps, aerr := roomlog.ReadApps(ctx, b.gatewayGET, room, jobID, &b.producers)
 	if aerr != nil {
@@ -160,7 +169,7 @@ func (b *Bridge) materializeRoomContext(ctx context.Context, w corepkg.Workspace
 	files, newState := roomlog.Materialize(entries, complete, st)
 	// Insert the records before the trailing INDEX.
 	records, recorded := b.roomRecordFiles(ctx, room, jobID, self, st, g, cp)
-	newState.ReadmeSum, newState.AppsListed = recorded.ReadmeSum, recorded.AppsListed
+	newState.ReadmeSum, newState.AppsListed, newState.AppSDKSum = recorded.ReadmeSum, recorded.AppsListed, recorded.AppSDKSum
 	if n := len(files); n > 0 && files[n-1].Name == ".room/INDEX.md" {
 		files = append(append(files[:n-1:n-1], records...), files[n-1])
 	} else {

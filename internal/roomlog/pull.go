@@ -48,6 +48,9 @@ type CtxState struct {
 	// AppsListed: the workspace holds a .room/apps.md (the room
 	// had an app), so every pass rewrites it (AppsUpdate).
 	AppsListed bool
+	// AppSDKSum is the sum of the demo-mode app SDK last written into the
+	// workspace (AppSDKUpdate); empty until the first pull pass.
+	AppSDKSum string
 }
 
 // NamedFile is one materialized .room/ file.

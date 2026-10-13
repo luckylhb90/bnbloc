@@ -33,15 +33,25 @@ this file: read it before your first app.
 - Fixed content (options, questions, slots) goes in the code: the data
   exists only once bnbloc has published the site, after your turn.
 
-## Its cover
+## Test it before you finish, then its cover
 
-Before you finish, save a screenshot of the app's first screen as
-`cover.png` beside its `index.html` (16:10, e.g. 1280x800, under 1 MiB):
-open the page with a headless browser in your working directory, for
-example `npx playwright screenshot --viewport-size=1280,800 poll/index.html
-poll/cover.png`. Its data calls fail there; the layout is what counts. The
-cover is published with the site and shown on its cards, in the room and
-in the gallery. PNG, JPEG or WebP only, never SVG.
+Never say an app is done or works before a headless browser showed it.
+bnbloc's room records in your workspace hold the SDK in demo mode as
+`app-sdk/sdk.js` (calls answered in the page's memory, nothing sent).
+Serve a copy of the app's folder with that file as its `~app/sdk.js` and
+check, with the harness in `references/self-test.md`:
+
+1. no console error and no uncaught exception;
+2. the main view shows visible content, never a blank or hidden screen;
+3. the page's main action writes through the SDK, and what it wrote is
+   read back and shown.
+
+Fix what fails and test again. If a check still fails, or the test cannot
+run, say exactly that instead of calling it done.
+
+In the same run, save the first screen as `cover.png` beside its
+`index.html` (16:10, e.g. 1280x800, under 1 MiB). It is shown on the app's
+cards, in the room and in the gallery. PNG, JPEG or WebP only, never SVG.
 
 ## The SDK
 

@@ -7,6 +7,7 @@ import (
 	"strings"
 	"text/template"
 
+	"github.com/luckylhb90/bnbloc/core"
 	"github.com/luckylhb90/bnbloc/internal/wire"
 )
 
@@ -72,6 +73,22 @@ func SessionGuidance(g Guidance) string {
 // workspace beside the records it describes.
 func ReadmeFile(g Guidance) NamedFile {
 	return NamedFile{Name: ".room/README.md", Content: "# How this room works (read before judging anyone's work)\n\n" + SessionGuidance(g)}
+}
+
+// AppSDKPath is where a pull workspace holds the interactive apps' SDK in
+// demo mode (docs/prd/2026-10-13-interactive-apps-self-test.md): every
+// call answered in the page's own memory, nothing sent. An agent's
+// self-test of an app serves it as the page's SDK; the interactive-apps
+// skill names it within the room records.
+const AppSDKPath = core.RoomContextDir + "app-sdk/sdk.js"
+
+// AppSDKUpdate is the demo-mode SDK js as a file when the workspace does
+// not hold it yet (st.AppSDKSum, like ReadmeUpdate): written at a
+// workspace's first pass and again only when the SDK changes.
+func AppSDKUpdate(st CtxState, js []byte) (f NamedFile, sum string, changed bool) {
+	h := sha256.Sum256(js)
+	sum = hex.EncodeToString(h[:])
+	return NamedFile{Name: AppSDKPath, Content: string(js)}, sum, sum != st.AppSDKSum
 }
 
 // ReadmeUpdate is .room/README.md when the session's workspace does not hold
