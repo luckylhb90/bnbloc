@@ -54,6 +54,7 @@ import { CONTENT_SAVED, contentSaves, parseContentSaved } from "@/lib/contentSav
 import { CONTENT_USES_CHANGED, contentUsesChanged } from "@/lib/contentUsesEvents";
 import { useWorkshopSaves } from "@/views/room/useWorkshopSaves";
 import { errorText } from "@/lib/errors";
+import { DeliverableOwner } from "@/views/workbench/deliverableOwner";
 
 type Panel = "chat" | "artifacts";
 type RoomDialog = "settings" | "members" | "borrow" | "leave" | null;
@@ -423,6 +424,7 @@ export function RoomView({
   );
 
   return (
+    <DeliverableOwner.Provider value={!!me && mayChat(me)}>
     <div className="coarse-targets relative flex h-full min-h-0 flex-col" data-room-stage={roomStage} data-pointer={isCoarsePointer ? "coarse" : "fine"}>
       <RoomHeader
         room={room}
@@ -640,5 +642,6 @@ export function RoomView({
         />
       )}
     </div>
+    </DeliverableOwner.Provider>
   );
 }

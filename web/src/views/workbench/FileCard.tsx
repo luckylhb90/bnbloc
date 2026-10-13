@@ -7,9 +7,9 @@ import { formatBytes, relativeTime } from "@/lib/format";
 import { Menu, MenuItem } from "@/ui/Menu";
 import { ActorLabel } from "@/views/room/ActorLabel";
 import { AppCover, siteCover } from "./AppCover";
-import { appStatsAnswer } from "@/lib/appData";
-import { PublishAppDialog } from "@/views/gallery/PublishAppDialog";
-import { AppDataLine, useAppStats } from "./AppDataLine";
+import { PublishWorkDialog } from "@/views/gallery/PublishWorkDialog";
+import { AppDataLine } from "./AppDataLine";
+import { useDeliverableOwner } from "./deliverableOwner";
 import { fileInfoFor, loadCardImage, useArtifactDetail, versionMeta } from "./artifactData";
 import { categoryIcons } from "./fileIcons";
 import { ShareDialog } from "./ShareDialog";
@@ -20,8 +20,9 @@ import { ShareDialog } from "./ShareDialog";
 // size and version. A card is a pointer: clicking opens the artifact in a
 // workbench tab; it never runs or renders the file itself. Its menu offers
 // Open and Share (the share dialog: who may open a link, its version and
-// lifetime), and for an app's owners (its stats route's answer) Publish to
-// gallery. An interactive app's card (the server's isApp) adds its
+// lifetime), and for the room's deliverables' owners (useDeliverableOwner)
+// Publish to gallery, whatever the deliverable. An interactive app's card
+// (the server's isApp) adds its
 // owners' data line (AppDataLine) below. Detail and images load only once
 // the card scrolls into view.
 
@@ -100,8 +101,8 @@ export function FileCard({
   const [tiny, setTiny] = useState(false);
   const [sharingOpen, setSharingOpen] = useState(false);
   const [publishing, setPublishing] = useState(false);
-  // An app's owners publish it (the stats route answers them only).
-  const owner = appStatsAnswer(useAppStats(roomId, artifact?.isApp ? artifactId : null)).kind === "stats";
+  // The room's deliverables' owners publish any of them to the gallery.
+  const owner = useDeliverableOwner();
   if (error) return null; // deleted or inaccessible: no card
   const facts = artifact ? versionFacts(artifact, meta) : null;
   const file = artifact ? fileInfoFor(artifact, artifact.currentVersion, meta) : null;
@@ -180,13 +181,13 @@ export function FileCard({
               <MenuItem icon={ShareNetworkIcon} onSelect={() => setSharingOpen(true)}>
                 Share…
               </MenuItem>
-              {app && owner && (
+              {owner && (
                 <MenuItem icon={StorefrontIcon} onSelect={() => setPublishing(true)}>
                   Publish to gallery…
                 </MenuItem>
               )}
             </Menu>
-            <PublishAppDialog site={publishing ? { roomId, artifactId, title: file.name } : null} onClose={() => setPublishing(false)} />
+            <PublishWorkDialog deliverable={publishing ? { roomId, artifactId, title: file.name } : null} onClose={() => setPublishing(false)} />
             <ShareDialog
               open={sharingOpen}
               onClose={() => setSharingOpen(false)}

@@ -23,14 +23,14 @@ import { useToast } from "@/ui/Toast";
 import { SharedPrompts } from "@/views/library/SharedPrompts";
 import { InstantiateTemplateDialog } from "@/views/library/TemplateDialogs";
 import { WelcomeCard } from "@/views/WelcomeCard";
-import { AppGallery } from "@/views/gallery/AppGallery";
+import { WorkGallery } from "@/views/gallery/WorkGallery";
 
-// Plaza's two sections: shared rooms, and the app gallery
-// (docs/prd/2026-10-13-app-gallery.md §7).
-type PlazaSection = "rooms" | "apps";
+// Plaza's two sections: shared rooms, and the works gallery
+// (docs/prd/2026-10-13-works-gallery-and-make-similar.md §2).
+type PlazaSection = "rooms" | "works";
 const PLAZA_SECTIONS = [
   { value: "rooms" as const, label: "Rooms" },
-  { value: "apps" as const, label: "Apps" },
+  { value: "works" as const, label: "Works" },
 ];
 
 export function Plaza({ onOpen }: { onOpen: (id: string) => void }) {
@@ -102,7 +102,7 @@ export function Plaza({ onOpen }: { onOpen: (id: string) => void }) {
     <>
       <PageHeader
         title="Plaza"
-        subtitle={section === "apps" ? "Find apps to try and use, from your organization and the platform" : "Discover shared rooms or start your own"}
+        subtitle={section === "works" ? "Find work to learn from and make your own, from your organization and the platform" : "Discover shared rooms or start your own"}
         actions={
           mayCreate ? (
             <Button variant="primary" onClick={() => setCreating(true)}>
@@ -116,10 +116,10 @@ export function Plaza({ onOpen }: { onOpen: (id: string) => void }) {
       <div className="p-4 sm:p-6">
         <WelcomeCard onOpen={onOpen} />
         <Segment options={PLAZA_SECTIONS} value={section} onChange={setSection} className="mb-5 w-full max-w-xs" />
-        {section === "apps" ? (
-          <AppGallery
+        {section === "works" ? (
+          <WorkGallery
             onOpenRoom={(roomId, artifactId) => {
-              window.location.hash = routeHash({ kind: "room", roomId, artifactId });
+              window.location.hash = routeHash({ kind: "room", roomId, ...(artifactId ? { artifactId } : {}) });
             }}
           />
         ) : (

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
-import { useInjectedAgent, useInjectedDraft, useInjectedReferences } from "@/views/composer/useInjectedDraft";
+import { useInjectedAgent, useInjectedAttachments, useInjectedDraft, useInjectedReferences } from "@/views/composer/useInjectedDraft";
 import {
   PaperPlaneRightIcon,
   HashIcon,
@@ -120,6 +120,8 @@ export function Composer({
   const moreRef = useRef<HTMLDivElement>(null);
   useDismissOnOutside(showMore, moreRef, () => setShowMore(false));
   const attachments = useComposerAttachments(roomId);
+  // A "Make similar" draft's references arrive stored in the room.
+  useInjectedAttachments(roomId, people ? null : channelId, attachments.addStored);
   // @-mention autocomplete: when the caret is inside an "@partial" token, show a
   // filtered member list; selecting one inserts "@name ".
   const [mention, setMention] = useState<{ query: string; start: number } | null>(

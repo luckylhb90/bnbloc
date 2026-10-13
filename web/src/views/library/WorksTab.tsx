@@ -21,20 +21,110 @@ import { AgentHandle, UserName } from "@/views/UserName";
 import { AppCover, siteCover } from "@/views/workbench/AppCover";
 import { useInView } from "@/views/workbench/FileCard";
 import { ShareDialog } from "@/views/workbench/ShareDialog";
-import { PublishAppDialog } from "@/views/gallery/PublishAppDialog";
+import { PublishWorkDialog } from "@/views/gallery/PublishWorkDialog";
+import { WorkCard } from "@/views/gallery/WorkGallery";
+import { WorkDetailDialog } from "@/views/gallery/WorkDetailDialog";
+import { GALLERY_QUERY } from "@/views/gallery/WorkParts";
+import { useAuth } from "@/lib/auth";
+import type { ContentComponent } from "@/lib/contentComponents";
+import { contentApi } from "@/lib/contentComponentsApi";
+import { invalidateQueries, queryKey, useQuery } from "@/lib/useQuery";
+import { workGalleryApi } from "@/lib/workGalleryApi";
+import { Segment } from "@/ui/Segment";
 
-// AppsTab is the Library's "My apps" (docs/prd/2026-10-13-app-gallery.md
-// §5): the interactive apps of every room of the organization where the
-// member is one of the apps' owners (GET /v1/my/apps, the server's answer),
-// newest first. Each card: the cover (the site's own, else the generated
-// one), the name, and its room, producer, link status and document count;
-// open (the app in its room), share or manage links (the share dialog),
-// export the data (the server's audited export), publish it to the app
-// gallery (PublishAppDialog) and go to the room.
+// WorksTab is the Library's "Works" (works PRD §2, app gallery PRD §5),
+// in two views. "Published": the member's works in the gallery, of every
+// type (the content listing's, theirs and the copies shared with them),
+// opened in the gallery's detail. "Apps in rooms": the interactive apps of
+// every room of the organization where the member is one of the apps'
+// owners (GET /v1/my/apps, the server's answer), newest first. Each app
+// card: the cover (the site's own, else the generated one), the name, and
+// its room, producer, link status and document count; open (the app in
+// its room), share or manage links (the share dialog), export the data
+// (the server's audited export), publish it to the works gallery
+// (PublishWorkDialog) and go to the room.
 
 const PAGE = 24;
 
-export function AppsTab({ tabs, onOpenRoom }: { readonly tabs: React.ReactNode; readonly onOpenRoom: (roomId: string) => void }) {
+export function WorksTab({ tabs, onOpenRoom }: { readonly tabs: React.ReactNode; readonly onOpenRoom: (roomId: string) => void }) {
+  const [view, setView] = useState<WorksView>("published");
+  return (
+    <>
+      <PageHeader title="Library" subtitle={view === "published" ? "What you published to the works gallery" : "Interactive apps in rooms you can manage"} actions={tabs} />
+      <div className="p-4 sm:p-6">
+        <Segment options={WORKS_VIEWS} value={view} onChange={setView} className="mb-5 w-full max-w-xs" />
+        {view === "published" ? <PublishedWorks onOpenRoom={onOpenRoom} /> : <RoomApps onOpenRoom={onOpenRoom} />}
+      </div>
+    </>
+  );
+}
+
+// The tab's two views: the member's works in the gallery, and the
+// interactive apps of their rooms (with their data and links).
+type WorksView = "published" | "apps";
+const WORKS_VIEWS = [
+  { value: "published" as const, label: "Published" },
+  { value: "apps" as const, label: "Apps in rooms" },
+];
+
+/** PublishedWorks are the member's own works (and copies shared with
+ *  them) of every type, from the content listing: opened in the gallery's
+ *  detail. */
+function PublishedWorks({ onOpenRoom }: { readonly onOpenRoom: (roomId: string) => void }) {
+  const { subject, tenant } = useAuth();
+  const toast = useToast();
+  const list = useQuery(queryKey(GALLERY_QUERY, { subject, tenant }), () => contentApi.list("work").then((r) => r.components ?? []), { staleMs: 30_000 });
+  const [openId, setOpenId] = useState<string | null>(null);
+  const works = (list.data ?? []).filter((c) => c.kind === "work" && (c.mine || c.removable)).sort((a, b) => b.updatedAtMs - a.updatedAtMs);
+  const open = works.find((c) => c.id === openId) ?? null;
+  const toggleStar = async (c: ContentComponent) => {
+    try {
+      await workGalleryApi.favorite(c.id, !c.favorite);
+      invalidateQueries(GALLERY_QUERY);
+    } catch (e) {
+      toast.error(errorText(e, "Could not change your favorites"));
+    }
+  };
+  const go = (roomId: string, artifactId?: string) => {
+    setOpenId(null);
+    if (artifactId) window.location.hash = routeHash({ kind: "room", roomId, artifactId });
+    else onOpenRoom(roomId);
+  };
+  if (list.error && !list.data) return <LoadFailed message={errorText(list.error, "Could not load your works")} onRetry={() => void list.refetch()} />;
+  if (!list.data) {
+    return (
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4" role="status" aria-label="Loading your works">
+        {[0, 1, 2].map((i) => (
+          <Skeleton key={i} className="aspect-[16/13]" />
+        ))}
+      </div>
+    );
+  }
+  return (
+    <>
+      {works.length === 0 ? (
+        <EmptyState
+          icon={<StorefrontIcon size={26} />}
+          title="No works yet"
+          hint="Publish a deliverable from its card in a room (Publish to gallery): an app, an image, a video, a document, anything an agent made."
+        />
+      ) : (
+        <ul className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4" aria-label="Your works">
+          {works.map((c) => (
+            <li key={c.id} className="min-w-0">
+              <WorkCard work={c} onOpen={() => setOpenId(c.id)} onStar={() => void toggleStar(c)} />
+            </li>
+          ))}
+        </ul>
+      )}
+      <WorkDetailDialog work={open} onClose={() => setOpenId(null)} onStar={() => open && void toggleStar(open)} onUsed={go} onDrafted={(roomId) => go(roomId)} />
+    </>
+  );
+}
+
+/** RoomApps are the interactive apps of every room of the organization
+ *  where the member is one of the apps' owners (GET /v1/my/apps). */
+function RoomApps({ onOpenRoom }: { readonly onOpenRoom: (roomId: string) => void }) {
   const [apps, setApps] = useState<MyApp[] | null>(null);
   const [cursor, setCursor] = useState<string | undefined>(undefined);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -78,8 +168,6 @@ export function AppsTab({ tabs, onOpenRoom }: { readonly tabs: React.ReactNode; 
 
   return (
     <>
-      <PageHeader title="Library" subtitle="Interactive apps in rooms you can manage" actions={tabs} />
-      <div className="p-4 sm:p-6">
         {loadError ? (
           <LoadFailed message={loadError} onRetry={reload} />
         ) : apps === null ? (
@@ -112,7 +200,6 @@ export function AppsTab({ tabs, onOpenRoom }: { readonly tabs: React.ReactNode; 
             )}
           </>
         )}
-      </div>
     </>
   );
 }
@@ -212,7 +299,7 @@ function AppCard({ app, onOpenRoom, onLinksChanged }: { readonly app: MyApp; rea
           Go to room
         </MenuItem>
       </Menu>
-      <PublishAppDialog site={publishing ? { roomId: app.roomId, artifactId: app.appId, title: app.name } : null} onClose={() => setPublishing(false)} />
+      <PublishWorkDialog deliverable={publishing ? { roomId: app.roomId, artifactId: app.appId, title: app.name } : null} onClose={() => setPublishing(false)} />
       <ShareDialog
         open={sharing}
         onClose={() => {

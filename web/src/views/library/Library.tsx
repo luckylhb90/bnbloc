@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { takeLibraryTab, type LibraryTabName } from "@/lib/team";
 import { Segment } from "@/ui/Segment";
-import { AppsTab } from "@/views/library/AppsTab";
+import { WorksTab } from "@/views/library/WorksTab";
 import { ContentTab } from "@/views/library/ContentTab";
 import { PromptsTab } from "@/views/library/PromptsTab";
 import { TemplatesTab } from "@/views/library/TemplatesTab";
@@ -14,12 +14,13 @@ const LIBRARY_TABS = [
   { value: "prompts" as const, label: "Prompts" },
   { value: "tools" as const, label: "Tools" },
   { value: "templates" as const, label: "Templates" },
-  { value: "apps" as const, label: "Apps" },
+  { value: "works" as const, label: "Works" },
 ];
 
 // Library holds the content components (experts, skill packs, prompt
 // packs), the MCP tools they can require, the room-template library (N3)
-// and the member's interactive apps across their rooms ("Apps").
+// and the member's works ("Works": what they published to the gallery,
+// and the interactive apps across their rooms).
 export function Library({ onOpenRoom }: { onOpenRoom: (roomId: string) => void }) {
   // "Open in Library" from a save toast opens the saved kind's tab.
   const [tab, setTab] = useState<LibraryTab>(() => takeLibraryTab() ?? "experts");
@@ -28,6 +29,6 @@ export function Library({ onOpenRoom }: { onOpenRoom: (roomId: string) => void }
   if (tab === "skills") return <ContentTab key="skill" kind="skill" tabs={tabs} onOpenRoom={onOpenRoom} />;
   if (tab === "prompts") return <PromptsTab tabs={tabs} onOpenRoom={onOpenRoom} />;
   if (tab === "tools") return <ToolsTab tabs={tabs} />;
-  if (tab === "apps") return <AppsTab tabs={tabs} onOpenRoom={onOpenRoom} />;
+  if (tab === "works") return <WorksTab tabs={tabs} onOpenRoom={onOpenRoom} />;
   return <TemplatesTab tabs={tabs} onOpenRoom={onOpenRoom} />;
 }

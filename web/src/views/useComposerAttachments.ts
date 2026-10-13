@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, ApiError, type ChatAttachment } from "@/lib/api";
 import { formatBytes } from "@/lib/format";
 import { MaxAttachmentBytes } from "@/lib/wire.gen";
@@ -26,14 +26,15 @@ export const ATTACHMENT_ACCEPT = [
   ".pptx",
 ].join(",");
 
-interface PendingAttachment {
+// A pending attachment: a file the member picked (uploaded on send), or one
+// already stored in the room that a draft brought along (a "Make similar"
+// draft's references: stored, nothing to upload).
+type PendingAttachment = {
   readonly id: string;
-  readonly file: File;
   readonly previewUrl?: string;
   readonly status: AttachmentChipStatus;
-  readonly stored?: ChatAttachment;
   readonly error?: string;
-}
+} & ({ readonly file: File; readonly stored?: ChatAttachment } | { readonly file?: undefined; readonly stored: ChatAttachment });
 
 export function useComposerAttachments(roomId: string) {
   const [files, setFiles] = useState<PendingAttachment[]>([]);
@@ -68,6 +69,16 @@ export function useComposerAttachments(roomId: string) {
     if (accepted.length > 0) setFiles((cur) => [...cur, ...accepted]);
   };
 
+  // addStored brings attachments already stored in the room (a draft's
+  // references) into the composer, as if uploaded.
+  const addStored = useCallback((stored: readonly ChatAttachment[]) => {
+    if (stored.length === 0) return;
+    setFiles((cur) => [
+      ...cur,
+      ...stored.filter((s) => !cur.some((f) => f.stored?.id === s.id)).map((s) => ({ id: crypto.randomUUID(), stored: s, status: "uploaded" as const })),
+    ]);
+  }, []);
+
   const removeFile = (id: string) => {
     setFiles((cur) => {
       const removing = cur.find((file) => file.id === id);
@@ -96,6 +107,8 @@ export function useComposerAttachments(roomId: string) {
         uploaded.push(pending.stored);
         continue;
       }
+      if (!pending.file) continue;
+      const file = pending.file;
       setFiles((cur) =>
         cur.map((file) =>
           file.id === pending.id
@@ -104,7 +117,7 @@ export function useComposerAttachments(roomId: string) {
         ),
       );
       try {
-        const stored = await api.uploadAttachment(roomId, pending.file);
+        const stored = await api.uploadAttachment(roomId, file);
         uploaded.push(stored);
         setFiles((cur) =>
           cur.map((file) =>
@@ -117,8 +130,8 @@ export function useComposerAttachments(roomId: string) {
           status === 415
             ? "This file type can't be attached"
             : status === 413
-              ? `${pending.file.name} is larger than ${formatBytes(MaxAttachmentBytes)}`
-              : errorText(e, `Upload failed for ${pending.file.name}`);
+              ? `${file.name} is larger than ${formatBytes(MaxAttachmentBytes)}`
+              : errorText(e, `Upload failed for ${file.name}`);
         setFiles((cur) =>
           cur.map((file) =>
             file.id === pending.id ? { ...file, status: "error", error: message } : file,
@@ -126,7 +139,7 @@ export function useComposerAttachments(roomId: string) {
         );
         toast.error(
           status === 415
-            ? `${pending.file.name} can't be attached: SVG files and files whose content doesn't match their type are not allowed`
+            ? `${file.name} can't be attached: SVG files and files whose content doesn't match their type are not allowed`
             : message,
         );
         return null;
@@ -139,9 +152,9 @@ export function useComposerAttachments(roomId: string) {
     () =>
       files.map((file) => ({
         id: file.id,
-        filename: file.file.name,
-        contentType: file.file.type,
-        size: file.file.size,
+        filename: file.file?.name ?? file.stored?.filename ?? "",
+        contentType: file.file?.type ?? file.stored?.contentType ?? "",
+        size: file.file?.size ?? file.stored?.size ?? 0,
         previewUrl: file.previewUrl,
         status: file.status,
         error: file.error,
@@ -153,6 +166,7 @@ export function useComposerAttachments(roomId: string) {
     files,
     chipItems,
     addFiles,
+    addStored,
     removeFile,
     clearFiles,
     uploadFiles,

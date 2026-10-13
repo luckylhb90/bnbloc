@@ -1,5 +1,6 @@
 import { useEffect, type Dispatch, type RefObject, type SetStateAction } from "react";
-import { composerAgentPicks, composerDrafts, composerRefs, mergeDraft } from "@/lib/team";
+import { composerAgentPicks, composerAttachments, composerDrafts, composerRefs, mergeDraft } from "@/lib/team";
+import type { ChatAttachment } from "@/lib/wire.gen";
 import { samePlatformAgent } from "@/lib/platformAgents";
 import type { Referenceable, RoomAgent } from "@/views/composer/types";
 import { nextFeedId } from "@/views/room/types";
@@ -62,6 +63,28 @@ export function useInjectedReferences(
       if (id === roomId) apply();
     });
   }, [roomId, channelId, enabled, setRefs, textareaRef]);
+}
+
+// useInjectedAttachments attaches what another view stored in the room for
+// the composer (a "Make similar" draft's references): taken once the
+// composer has its channel, shown as attachment chips the member may
+// remove, sent with the message like any upload.
+export function useInjectedAttachments(
+  roomId: string,
+  channelId: string | null | undefined,
+  addStored: (stored: readonly ChatAttachment[]) => void,
+): void {
+  useEffect(() => {
+    if (!channelId) return;
+    const apply = () => {
+      const stored = composerAttachments.take(roomId);
+      if (stored && stored.length > 0) addStored(stored);
+    };
+    apply();
+    return composerAttachments.subscribe((id) => {
+      if (id === roomId) apply();
+    });
+  }, [roomId, channelId, addStored]);
 }
 
 // useInjectedAgent selects the agent another view asked for (the welcome

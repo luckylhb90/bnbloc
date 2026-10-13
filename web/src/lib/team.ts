@@ -1,9 +1,11 @@
 // Pure helpers for the team features (message tasks, global search) plus the
 // cross-view hand-offs they need: a composer draft queued for a room (a
-// borrow request to an agent's owner) and a message jump queued for a room (search /
-// task "jump to message"). Both hand-offs are in-memory: the target room view
-// consumes them on mount, or immediately when it is already open.
+// borrow request to an agent's owner, a "Make similar" draft's text, expert
+// and attachments) and a message jump queued for a room (search / task "jump
+// to message"). The hand-offs are in-memory: the target room view consumes
+// them on mount, or immediately when it is already open.
 import type { MessageTask, SearchResult, TaskUpdate } from "./teamModels.ts";
+import type { ChatAttachment } from "./wire.gen.ts";
 import type { Referenceable } from "../views/composer/types.ts";
 import { StorageKey, memberKey, readStored, writeStored } from "./storageKeys.ts";
 import { gatewayBase } from "./config.ts";
@@ -118,6 +120,10 @@ export const artifactLinks = handoff<{ readonly artifactId: string; readonly ver
 // people chat's "Ask the agent about this"); queued refs accumulate until the
 // composer takes them.
 export const composerRefs = handoff<readonly Referenceable[]>();
+// composerAttachments carries attachments already stored in a room to its
+// main composer (a "Make similar" draft's references), attached as if the
+// member had uploaded them.
+export const composerAttachments = handoff<readonly ChatAttachment[]>();
 
 export function queueComposerRef(roomId: string, ref: Referenceable): void {
   composerRefs.queue(roomId, [...(composerRefs.peek(roomId) ?? []), ref]);
@@ -179,7 +185,7 @@ export function lastRoom(subject: string): string | null {
 
 // The Library tab to open (a save toast's "Open in Library"). Taken once on
 // the page's mount.
-export type LibraryTabName = "experts" | "skills" | "prompts" | "tools" | "templates" | "apps";
+export type LibraryTabName = "experts" | "skills" | "prompts" | "tools" | "templates" | "works";
 let pendingLibraryTab: LibraryTabName | null = null;
 export function queueLibraryTab(tab: LibraryTabName): void {
   pendingLibraryTab = tab;

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { ArrowClockwiseIcon, CopySimpleIcon, FlaskIcon, XIcon } from "@phosphor-icons/react";
-import { appGalleryApi } from "@/lib/appGalleryApi";
+import { workGalleryApi } from "@/lib/workGalleryApi";
 import { contentLabel, type ContentComponent } from "@/lib/contentComponents";
 import { errorText } from "@/lib/errors";
 import { SITE_SANDBOX, siteFrameUrl } from "@/lib/siteFrame";
@@ -31,7 +31,7 @@ export function AppDemo({ app, onClose, onUse }: { readonly app: ContentComponen
     let live = true;
     setFrame(null);
     setError(null);
-    appGalleryApi
+    workGalleryApi
       .demo(app)
       .then((d) => live && setFrame({ key, src: siteFrameUrl(d.siteUrl, siteFrameEnv()), nonce: 0 }))
       .catch((e: unknown) => live && setError({ key, message: errorText(e, "Could not start the demo") }));

@@ -5,8 +5,8 @@ import { cn } from "@/lib/cn";
 import { loadAppCover, loadComponentCover } from "./artifactData";
 
 // AppCover fills its box (the card sets the 16:10 frame) with an app's
-// cover: its own cover image when the gateway serves one (a site version's
-// in a room, an app component version's in the gallery), else the
+// or a work's cover: its own cover image when the gateway serves one (a
+// site version's in a room, a work version's in the gallery), else the
 // generated cover (lib/appCover.ts: a gradient seeded by the app's id and
 // the name's initial). A card is never blank, and a cover the gateway
 // refuses (coverRefused: none, too large, not an image) is asked once.
@@ -24,7 +24,7 @@ export function siteCover(roomId: string, appId: string, version: number): Cover
   return { key: `site\u0000${roomId}\u0000${appId}\u0000${version}`, load: () => loadAppCover(roomId, appId, version) };
 }
 
-/** An app component version's cover (its listing's coverUrl; absent: none). */
+/** A work version's cover (its listing's coverUrl; absent: none). */
 export function componentCover(coverUrl: string | undefined): CoverSource | null {
   if (!coverUrl) return null;
   return { key: `component\u0000${coverUrl}`, load: () => loadComponentCover(coverUrl) };
