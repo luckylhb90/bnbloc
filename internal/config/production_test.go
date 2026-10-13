@@ -24,3 +24,37 @@ func TestRequireInProductionOnlyEnforcesInProduction(t *testing.T) {
 		t.Fatalf("missing list wrong: %v", err)
 	}
 }
+
+// A dev-only switch refuses production startup only when it is on (or
+// malformed): an explicit off is the same as unset
+// (docs/bugs/2026-10-13-destructive-migration-broke-mixed-deploy.md).
+func TestRefuseInProductionOnlyWhenOn(t *testing.T) {
+	t.Setenv(EnvVar, "production")
+	for raw, refused := range map[string]bool{
+		"": false, "  ": false, "0": false, "false": false, "OFF": false, "no": false, "f": false,
+		"1": true, "true": true, "on": true, "yes": true, "enabled": true,
+	} {
+		t.Setenv("BNBLOC_TEST_DEV_SWITCH", raw)
+		if err := RefuseInProduction("BNBLOC_TEST_DEV_SWITCH"); (err != nil) != refused {
+			t.Errorf("BNBLOC_TEST_DEV_SWITCH=%q: refused = %v, want %v", raw, err != nil, refused)
+		}
+	}
+	t.Setenv(EnvVar, "")
+	t.Setenv("BNBLOC_TEST_DEV_SWITCH", "1")
+	if err := RefuseInProduction("BNBLOC_TEST_DEV_SWITCH"); err != nil {
+		t.Fatalf("development refuses nothing: %v", err)
+	}
+}
+
+func TestStrictBool(t *testing.T) {
+	for raw, want := range map[string]bool{"": false, "yes": true, "OFF": false, "t": true, "F": false} {
+		t.Setenv("BNBLOC_TEST_BOOL", raw)
+		if got, err := StrictBool("BNBLOC_TEST_BOOL"); err != nil || got != want {
+			t.Errorf("StrictBool(%q) = %v, %v; want %v", raw, got, err, want)
+		}
+	}
+	t.Setenv("BNBLOC_TEST_BOOL", "maybe")
+	if _, err := StrictBool("BNBLOC_TEST_BOOL"); err == nil || !strings.Contains(err.Error(), "BNBLOC_TEST_BOOL") {
+		t.Fatalf("a malformed switch must refuse, naming it: %v", err)
+	}
+}

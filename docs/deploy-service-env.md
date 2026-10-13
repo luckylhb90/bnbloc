@@ -52,7 +52,7 @@ embedded SPA. Stateless apart from the shared database — scale horizontally.
 | `BNBLOC_OIDC_ISSUER_URL` + `BNBLOC_OIDC_CLIENT_ID` | no | OIDC relying party. Unset in production = direct login disabled; sign in via an installed auth-provider (SSO). |
 | `BNBLOC_SUPER_ADMINS` | yes | Comma-separated verified subject ids/emails (cross-tenant admins). |
 | `BNBLOC_PUBLIC_URL` | recommended | Public origin; every link and artifact URL the gateway hands out (content notifications, published package artifacts, previewer CSP). Unset = each request's own origin. |
-| `BNBLOC_SITES_ORIGIN` | recommended | A separate https origin (e.g. `https://sites.bnbloc-usercontent.example`) that serves published sites, their app data API and the app SDK, and nothing else; the public origin then answers site paths 404. Needs its own DNS name, TLS certificate and an ingress / edge-proxy rule to the same gateway that keeps its Host header; prefer a separate registrable domain. A bare origin only (no path, no trailing slash); anything else refuses to start. A value on the host of `BNBLOC_PUBLIC_URL` is no separate origin: it is logged and treated as unset. Unset = sites are served sandboxed from the public origin. |
+| `BNBLOC_SITES_ORIGIN` | recommended | A separate https origin (e.g. `https://sites.bnbloc-usercontent.example`) that serves published sites, their app data API and the app SDK, and nothing else; the public origin then answers site paths 404. Needs its own DNS name, TLS certificate and an ingress / edge-proxy rule to the same gateway that keeps its Host header; prefer a separate registrable domain. A bare origin only (no path or query; one trailing slash is the same origin); anything else refuses to start. A value on the host of `BNBLOC_PUBLIC_URL` is no separate origin: it is logged and treated as unset. Unset = sites are served sandboxed from the public origin. |
 | `BNBLOC_ROOM_BASE_URL` | yes | `http://bnbloc-room:8080` |
 | `BNBLOC_REALTIME_BASE_URL` | yes | `http://bnbloc-realtime:8082` |
 | `BNBLOC_ACTIVITY_BASE_URL` | yes | `http://bnbloc-activity:8081` |
@@ -61,7 +61,7 @@ embedded SPA. Stateless apart from the shared database — scale horizontally.
 | `BNBLOC_TRUSTED_PROXIES` | behind a proxy | CIDRs of the edge proxy, so the per-IP limits (direct login and the API-token exchange, public share reads) see real clients. Needed on SSO-only production too: the API-token exchange and public shares stay reachable there. |
 | `BNBLOC_ALLOWED_ORIGINS` | if cross-origin | Extra browser origins for CORS. |
 | `BNBLOC_CORES` (+ `BNBLOC_CORE_<NAME>_URL`) | optional | Explicit cores only; installed packages need none. |
-| `BNBLOC_METRICS_ADDR` | for metrics | Internal `/metrics` listener (`:9090` in compose/Helm). The public listener never serves `/metrics` (404); unset = no gateway metrics. Never route or publish it. |
+| `BNBLOC_METRICS_ADDR` | for metrics | Internal `/metrics` listener (`:9090` in compose/Helm). The public listener never serves `/metrics` (404); unset = no gateway metrics; the gateway's own listen address refuses to start. Never route or publish it. |
 | `BNBLOC_GATEWAY_PEERS` | with >1 replica | The gateway replica set (Helm: the headless `bnbloc-gateway-peers:8080`; or a comma list of `host:port`). Each replica enforces 1/N of every rate limit, N = live replicas, so the configured budget holds across the deployment. Unset = one replica (N replicas would then allow N times every budget). |
 
 The gateway does **not** proxy the relay (it only reads the relay's `/version`);
@@ -148,7 +148,7 @@ Agent-activity ingest, dedup, durable bridge jobs, and reply fan-out.
 | `BNBLOC_INTERNAL_KEY` | yes | Same value as gateway. |
 | `BNBLOC_ROOM_BASE_URL` | yes | `http://bnbloc-room:8080` — membership. |
 | `BNBLOC_REALTIME_BASE_URL` | yes | `http://bnbloc-realtime:8082` — the path agent replies reach clients. Without it replies persist but never reach clients. |
-| `BNBLOC_ACTIVITY_ALLOW_SERVE_ALL` | never in prod | Dev-only single-host serve-all bridges; fatal in production. |
+| `BNBLOC_ACTIVITY_ALLOW_SERVE_ALL` | never in prod | Dev-only single-host serve-all bridges; fatal in production when on (an explicit `false` is the same as unset). |
 | `BNBLOC_PUBLIC_URL` | recommended | Links in usage budget warnings (queued to the shared outbox; realtime delivers). Unset = no links. |
 
 ## shareagent (`:8083`)

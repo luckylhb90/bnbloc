@@ -32,9 +32,10 @@ import (
 const SitesOriginEnv = "BNBLOC_SITES_ORIGIN"
 
 // ParseSitesOrigin validates BNBLOC_SITES_ORIGIN: empty (no sites origin),
-// or a bare https origin (scheme and host, an optional port; no path, no
-// trailing slash, no query or credentials). It answers the canonical form
-// (lower case, no default port). A bad value is a startup error. A value
+// or a bare https origin (scheme and host, an optional port; no path, query
+// or credentials; one trailing slash is the same origin). It answers the
+// canonical form (lower case, no default port, no slash). A malformed value
+// is a startup error. A value
 // on the host of publicURL (BNBLOC_PUBLIC_URL) is no separate origin at all
 // (the main origin's cookies would reach it): it means the same as unset —
 // sites served in place, sandbox-only — and is logged, never fatal, so a
@@ -52,8 +53,8 @@ func ParseSitesOrigin(raw, publicURL string) (string, error) {
 		return "", fmt.Errorf("%s must be an https origin (got %q)", SitesOriginEnv, raw)
 	case u.Host == "" || u.Hostname() == "" || u.Opaque != "" || u.User != nil:
 		return "", fmt.Errorf("%s must name a host (got %q)", SitesOriginEnv, raw)
-	case u.Path != "" || u.RawPath != "" || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" || strings.HasSuffix(raw, "/"):
-		return "", fmt.Errorf("%s must be a bare origin: no path, trailing slash, query or fragment (got %q)", SitesOriginEnv, raw)
+	case (u.Path != "" && u.Path != "/") || u.RawPath != "" || u.RawQuery != "" || u.ForceQuery || u.Fragment != "":
+		return "", fmt.Errorf("%s must be a bare origin: no path, query or fragment (got %q)", SitesOriginEnv, raw)
 	}
 	host := canonicalHost(u.Host)
 	if main := strings.TrimSpace(publicURL); main != "" {

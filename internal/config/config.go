@@ -3,6 +3,7 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"strconv"
 	"strings"
@@ -55,20 +56,44 @@ func GetInt(key string, fallback int) int {
 }
 
 // ParseBool is the one reading of a boolean switch, in the environment or a
-// stored setting: 1/true/yes/on and 0/false/no/off (any case); anything else
-// — unset included — is fallback.
+// stored setting: 1/t/true/yes/on and 0/f/false/no/off (any case); anything
+// else — unset included — is fallback.
 func ParseBool(raw string, fallback bool) bool {
-	switch strings.ToLower(strings.TrimSpace(raw)) {
-	case "1", "true", "yes", "on":
-		return true
-	case "0", "false", "no", "off":
-		return false
+	if v, ok := boolWord(raw); ok {
+		return v
 	}
 	return fallback
 }
 
+// boolWord is the switch vocabulary of ParseBool (a superset of
+// strconv.ParseBool's, so no value that parsed there is refused here).
+func boolWord(raw string) (v, ok bool) {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "1", "t", "true", "yes", "on":
+		return true, true
+	case "0", "f", "false", "no", "off":
+		return false, true
+	}
+	return false, false
+}
+
 // Bool reads a boolean environment switch (ParseBool).
 func Bool(key string, fallback bool) bool { return ParseBool(os.Getenv(key), fallback) }
+
+// StrictBool reads a boolean environment switch whose malformed value must
+// refuse startup: blank is false, a ParseBool word its value, anything else
+// an error naming the variable.
+func StrictBool(key string) (bool, error) {
+	raw := strings.TrimSpace(os.Getenv(key))
+	if raw == "" {
+		return false, nil
+	}
+	v, ok := boolWord(raw)
+	if !ok {
+		return false, fmt.Errorf("%s=%q: want 1/true/yes/on or 0/false/no/off", key, raw)
+	}
+	return v, nil
+}
 
 // List reads a comma-separated environment list: trimmed, empty entries
 // dropped, nil when unset.

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/luckylhb90/bnbloc/internal/config"
@@ -34,7 +35,7 @@ var startupProbeBudget = time.Minute
 // and every index call retries the probe. A malformed setting is an error
 // in both modes.
 func FromEnv(ctx context.Context, chat store.ChatIndex, metrics *obs.Metrics) (Index, *Updater, error) {
-	raw := config.FromEnvRaw(EnvOpenSearchURL)
+	raw := strings.TrimSpace(config.FromEnvRaw(EnvOpenSearchURL))
 	if raw == "" {
 		return NewStore(chat), nil, nil
 	}
@@ -42,7 +43,7 @@ func FromEnv(ctx context.Context, chat store.ChatIndex, metrics *obs.Metrics) (I
 		URL:         raw,
 		Username:    config.FromEnvRaw(EnvOpenSearchUsername),
 		Password:    config.FromEnvRaw(EnvOpenSearchPassword),
-		IndexPrefix: config.FromEnvRaw(EnvOpenSearchIndexPrefix),
+		IndexPrefix: strings.TrimSpace(config.FromEnvRaw(EnvOpenSearchIndexPrefix)),
 	}, chat, metrics)
 	if err != nil {
 		return nil, nil, err

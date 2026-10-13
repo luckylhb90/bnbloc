@@ -16,10 +16,12 @@ import (
 // startup error in production.
 func TestFromEnv(t *testing.T) {
 	chat := store.NewMemoryChat()
-	t.Setenv(EnvOpenSearchURL, "")
-	idx, updates, err := FromEnv(context.Background(), chat, nil)
-	if err != nil || idx.Backend() != BackendMySQL || updates != nil {
-		t.Fatalf("unset = %v %v %v", idx, updates, err)
+	for _, unset := range []string{"", "  "} { // blank is unset, never fatal
+		t.Setenv(EnvOpenSearchURL, unset)
+		idx, updates, err := FromEnv(context.Background(), chat, nil)
+		if err != nil || idx.Backend() != BackendMySQL || updates != nil {
+			t.Fatalf("unset (%q) = %v %v %v", unset, idx, updates, err)
+		}
 	}
 
 	t.Setenv(EnvOpenSearchURL, "https://search:9200")
@@ -34,7 +36,7 @@ func TestFromEnv(t *testing.T) {
 	t.Setenv(EnvOpenSearchURL, fake.URL)
 	t.Setenv(EnvOpenSearchIndexPrefix, "acme-dev")
 	t.Setenv("BNBLOC_ENV", "")
-	idx, updates, err = FromEnv(context.Background(), chat, nil)
+	idx, updates, err := FromEnv(context.Background(), chat, nil)
 	if err != nil || idx.Backend() != BackendOpenSearch || updates == nil {
 		t.Fatalf("development with the cluster down = %v %v %v, want a warning only", idx, updates, err)
 	}

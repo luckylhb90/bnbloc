@@ -3,6 +3,7 @@ package obs
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -21,12 +22,21 @@ func TestPlanListeners(t *testing.T) {
 		{"internal with metrics addr", ":9090", nil, false, ":9090"},
 		{"public default", "", []ServeOption{PublicListener()}, false, ""},
 		{"public with metrics addr", " :9090 ", []ServeOption{PublicListener()}, false, ":9090"},
+		// The main listener's own address is where an internal service
+		// serves /metrics when unset: the same, never a bind conflict.
+		{"internal with the main addr", ":8080", nil, true, ""},
 	}
 	for _, c := range cases {
 		p := planListeners(":8080", c.metricsAddr, c.opts)
 		if p.metricsOnMain != c.onMain || p.metricsAddr != c.separateAddr {
 			t.Errorf("%s: plan = %+v; want onMain=%v addr=%q", c.name, p, c.onMain, c.separateAddr)
 		}
+	}
+	// On a public listener it would publish /metrics: refused at startup.
+	t.Setenv(MetricsAddrEnv, "127.0.0.1:1")
+	err := ServeWithHealth("gw", "127.0.0.1:1", http.NotFoundHandler(), nil, PublicListener())
+	if err == nil || !strings.Contains(err.Error(), MetricsAddrEnv) {
+		t.Fatalf("public listener with its own address as the metrics address = %v, want a startup error", err)
 	}
 }
 

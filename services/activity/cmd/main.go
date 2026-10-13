@@ -4,7 +4,6 @@ package main
 import (
 	"context"
 	"log"
-	"strings"
 	"time"
 
 	"github.com/luckylhb90/bnbloc/internal/config"
@@ -81,16 +80,16 @@ func dispatchReader(jobs store.BridgeJobStore) store.LeasedJobReader {
 }
 
 // allowServeAll reads the dev-only BNBLOC_ACTIVITY_ALLOW_SERVE_ALL gate. It is
-// fatal in production: one member's bridge driving (and attributing replies
-// for) every member's agent is a single-host testing mode only.
+// fatal in production when on (config.RefuseInProduction, the one guard of a
+// dev-only switch): one member's bridge driving (and attributing replies for)
+// every member's agent is a single-host testing mode only.
 func allowServeAll() bool {
-	switch strings.ToLower(strings.TrimSpace(config.FromEnvRaw("BNBLOC_ACTIVITY_ALLOW_SERVE_ALL"))) {
-	case "1", "true", "yes", "on":
-	default:
-		return false
+	const env = "BNBLOC_ACTIVITY_ALLOW_SERVE_ALL"
+	if err := config.RefuseInProduction(env); err != nil {
+		log.Fatalf("bnbloc-activity: %v (a single-host testing mode)", err)
 	}
-	if config.Production() {
-		log.Fatalf("bnbloc-activity: BNBLOC_ACTIVITY_ALLOW_SERVE_ALL is a single-host testing mode and is refused when %s=production", config.EnvVar)
+	if !config.Bool(env, false) {
+		return false
 	}
 	log.Printf("WARNING bnbloc-activity: serve-all bridges enabled (BNBLOC_ACTIVITY_ALLOW_SERVE_ALL); single-host testing only")
 	return true

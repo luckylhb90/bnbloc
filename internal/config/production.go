@@ -40,16 +40,20 @@ func RequireInProduction(names ...string) error {
 }
 
 // RefuseInProduction returns an error naming every dev-only switch in names
-// that is set (non-blank) when the process runs in production mode; nil in
-// development. It is the counterpart of RequireInProduction for switches
-// whose presence, not absence, selects a dev path.
+// that is on when the process runs in production mode; nil in development.
+// It is the counterpart of RequireInProduction for switches whose presence,
+// not absence, selects a dev path, and the one production guard of every
+// dev-only switch. An explicit off (ParseBool's 0/false/no/off) is the same
+// as unset and never refuses startup; a value that is neither on nor off is
+// malformed and refuses like on.
 func RefuseInProduction(names ...string) error {
 	if !Production() {
 		return nil
 	}
 	var set []string
 	for _, n := range names {
-		if strings.TrimSpace(os.Getenv(n)) != "" {
+		raw := os.Getenv(n)
+		if v, ok := boolWord(raw); strings.TrimSpace(raw) != "" && (v || !ok) {
 			set = append(set, n)
 		}
 	}

@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"strconv"
 	"strings"
 	"time"
 
@@ -93,7 +92,7 @@ func ContentKey(content []byte) (key string, sha256hex string) {
 
 func FromEnv() (BlobStore, error) {
 	if bucket := strings.TrimSpace(config.FromEnvRaw("BNBLOC_ATTACHMENTS_S3_BUCKET")); bucket != "" {
-		usePathStyle, err := parseBoolEnv("BNBLOC_ATTACHMENTS_S3_PATH_STYLE")
+		usePathStyle, err := config.StrictBool("BNBLOC_ATTACHMENTS_S3_PATH_STYLE")
 		if err != nil {
 			return nil, err
 		}
@@ -122,7 +121,7 @@ func FromEnv() (BlobStore, error) {
 // false): whether downloads may be answered with a presigned URL. Only a
 // store that implements Presigner can honour it.
 func DirectDownloadsFromEnv() (bool, error) {
-	return parseBoolEnv("BNBLOC_ATTACHMENTS_S3_DIRECT_DOWNLOADS")
+	return config.StrictBool("BNBLOC_ATTACHMENTS_S3_DIRECT_DOWNLOADS")
 }
 
 func s3CredentialProviderFromEnvOrAWS(ctx context.Context, region string) (aws.CredentialsProvider, error) {
@@ -158,18 +157,6 @@ func firstEnv(keys ...string) string {
 		}
 	}
 	return ""
-}
-
-func parseBoolEnv(key string) (bool, error) {
-	raw := strings.TrimSpace(config.FromEnvRaw(key))
-	if raw == "" {
-		return false, nil
-	}
-	v, err := strconv.ParseBool(raw)
-	if err != nil {
-		return false, fmt.Errorf("parse %s: %w", key, err)
-	}
-	return v, nil
 }
 
 func validateKey(key string) (string, error) {

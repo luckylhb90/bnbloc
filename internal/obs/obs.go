@@ -153,6 +153,12 @@ func serve(service, addr string, handler http.Handler, metrics *Metrics, check f
 	if plan.metrics != nil {
 		metrics = plan.metrics
 	}
+	if plan.sameAsMain {
+		if plan.public {
+			return fmt.Errorf("%s=%s is the public listener's address, which never serves /metrics; set an internal address or leave it unset", MetricsAddrEnv, plan.metricsAddr)
+		}
+		logger.Warn(MetricsAddrEnv + " is the main listener's address: /metrics is served there, as when it is unset")
+	}
 	logger.Info("listening", "addr", addr, "metricsAddr", plan.metricsAddr, "metricsOnMain", plan.metricsOnMain)
 	if plan.public && plan.metricsAddr == "" {
 		logger.Warn("metrics disabled: the public listener never serves /metrics; set " + MetricsAddrEnv + " to an internal address to expose them")

@@ -33,6 +33,11 @@ type listenerPlan struct {
 	public        bool
 	metricsAddr   string
 	metricsOnMain bool
+	// sameAsMain: the metrics address is the main listener's. On an
+	// internal listener that is where /metrics is served when the address is
+	// unset, so it means the same (logged, never a bind conflict); on a
+	// public one it would publish /metrics, so serve refuses it.
+	sameAsMain bool
 	// metrics, when set (WithMetrics), replaces the registry serve was given.
 	metrics *Metrics
 }
@@ -41,6 +46,10 @@ func planListeners(mainAddr, metricsAddr string, opts []ServeOption) listenerPla
 	p := listenerPlan{metricsAddr: strings.TrimSpace(metricsAddr)}
 	for _, o := range opts {
 		o(&p)
+	}
+	p.sameAsMain = p.metricsAddr != "" && p.metricsAddr == strings.TrimSpace(mainAddr)
+	if p.sameAsMain && !p.public {
+		p.metricsAddr = ""
 	}
 	p.metricsOnMain = !p.public && p.metricsAddr == ""
 	return p

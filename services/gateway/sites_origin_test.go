@@ -155,8 +155,11 @@ func TestParseSitesOrigin(t *testing.T) {
 		"https://sites.bnbloc.example.com":     "https://sites.bnbloc.example.com",
 		"https://Sites.BNBLOC.example.com:443": "https://sites.bnbloc.example.com",
 		"https://bnbloc-usercontent.example:8443": "https://bnbloc-usercontent.example:8443",
+		// One trailing slash names the same origin.
+		"https://sites.bnbloc.example.com/": "https://sites.bnbloc.example.com",
 		// The main host is no separate origin: the same as unset.
 		"https://bnbloc.example.com":      "",
+		"https://bnbloc.example.com/":     "",
 		"https://BNBLOC.example.com:8443": "",
 	} {
 		got, err := ParseSitesOrigin(raw, public)
@@ -167,7 +170,7 @@ func TestParseSitesOrigin(t *testing.T) {
 	for _, raw := range []string{
 		"http://sites.bnbloc.example.com",
 		"sites.bnbloc.example.com",
-		"https://sites.bnbloc.example.com/",
+		"https://sites.bnbloc.example.com//",
 		"https://sites.bnbloc.example.com/apps",
 		"https://sites.bnbloc.example.com?x=1",
 		"https://sites.bnbloc.example.com#f",
