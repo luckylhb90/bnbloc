@@ -1,7 +1,8 @@
-# Content components: experts, skill packs and prompt packs
+# Content components: experts, skill packs, prompt packs and apps
 
 Design: [`docs/prd/2026-10-12-experts-and-teams.md`](../prd/2026-10-12-experts-and-teams.md)
-(delivery steps 1, 3 and 4, and the "Gap closure"). This is the durable reference for how content components
+(delivery steps 1, 3 and 4, and the "Gap closure"); apps:
+[`docs/prd/2026-10-13-app-gallery.md`](../prd/2026-10-13-app-gallery.md). This is the durable reference for how content components
 are stored, who may use them, how they are shared and published, how a turn
 wears them, and the HTTP surface.
 
@@ -17,10 +18,14 @@ servers content requires, see "MCP tool components"):
 | Expert | `bnbloc.expert.package/v1` | `component.json`, `INSTRUCTIONS.md`, optional `README.md`, embedded skills `skills/<name>/SKILL.md` (+ scripts/, references/) |
 | Skill pack | `bnbloc.skill.package/v1` | `component.json` (`skills: [names]`), `<name>/SKILL.md` per skill, optional `README.md` |
 | Prompt pack | `bnbloc.prompt.package/v1` | `component.json` (its `prompts`), optional `README.md` (see "Prompt packs") |
+| App | `bnbloc.app.package/v1` | `component.json`, a site folder (`index.html` at the root or `dist/index.html`), optional cover (`cover.png`, `.webp`, `.jpg` or `.jpeg`) and `README.md` (see "Apps") |
 
 A package is a plain ustar bundle (`internal/tarbundle`, limit profile
 `tarbundle.ContentLimits`: 8 MiB, 512 files; a prompt pack's own profile,
-`contentpkg.PromptLimits`, is 1 MiB and 2 files). **One validator,
+`contentpkg.PromptLimits`, is 1 MiB and 2 files; an app's,
+`contentpkg.AppLimits`, a site snapshot's plus its manifest). A bundle is
+read within `contentpkg.BundleLimits()`, the widest registered profile,
+until its manifest names the kind (uploads, stored versions, imports). **One validator,
 `internal/contentpkg`**, backs every entry point (form saves, archive
 uploads, imports, the bridge's materialization):
 
@@ -56,9 +61,61 @@ Every bound the validator enforces (lengths, counts, sizes) is one table,
 that states a limit renders it from there (the builder's format skill).
 
 The kind registry (`contentpkg.KindSpec`: short name, limit profile, the
-kind's checks, its form layout, its import of foreign formats, and
-`MemberUse` — whether a member turns it on for themselves) is how a new
+kind's checks, its form layout, its import of foreign formats,
+`MemberUse` — whether a member turns it on for themselves — and `Site` —
+a bundle whose code runs only in the sandboxed site frame) is how a new
 kind joins without branching the shared code.
+
+## Apps
+
+An app (docs/prd/2026-10-13-app-gallery.md §3) is an interactive app
+published as a template: the site's files, never its data.
+
+- **Validator** (`contentpkg/app.go`): an entry point (`index.html` at the
+  root, or `dist/index.html`); no protected workspace path
+  (`core.ProtectedWorkspacePath`); a cover, when it ships one, that
+  `tarbundle.SiteCover` accepts (the one cover rule, the site cover
+  route's too: `cover.png`, `cover.webp`, `cover.jpg` or `cover.jpeg` at
+  the root, the first present, whose bytes sniff as the type its name
+  says, within `wire.MaxAppCoverBytes`; an SVG is never a cover); a
+  `README.md` that is text; `category` one of
+  `wire.AppCategories` (office, data, productivity, content, learning,
+  engineering, finance, life, other) or none; none of the other kinds'
+  fields, and no `requires` (an app requires nothing). Its scripts are no
+  executable content (`KindSpec.Site`): no `scripts` permission, no
+  sandbox forced. A form never writes an app; an import reads a site
+  folder.
+- **Publishing from a site.** `POST /v1/rooms/{roomId}/artifacts/{artifactId}/publish-app`
+  (`wire.AppPublishRequest {componentId?, name, displayName?, description?, category?, tags?}`)
+  snapshots the site's current version as the caller's personal app
+  (`contentpkg.AppFromSite`; the room service reads the site as the
+  member), or as the next version of their app `componentId` (keeping the
+  fields the request leaves out). Only an owner of the room's apps, a
+  member who may post in it (`membership.Member.MayChat`), publishes one;
+  `?job=` acts for the job's requester (the room tools' `save_component`
+  with `artifactId`). A site holding a `component.json` of its own is
+  refused. The data space is never read. Org and platform publishing are
+  the existing flows, for apps as for every kind.
+- **Cover.** `GET /v1/content-components/{id}/versions/{v}/cover` serves
+  it to a caller who may read the component, as the site cover route
+  does (`writeCover`: its checked type, `nosniff`, a sandbox CSP); 404
+  when the version ships none. A listing
+  carries an app's `coverUrl` without opening its bundle (a card falls
+  back to its generated cover on a 404).
+- **Use this app.** `POST /v1/content-components/{id}/use-app`
+  (`wire.AppUseRequest {version?, roomId? | newRoom: {name?}}`) copies a
+  visible app's version (`contentpkg.AppSite`: its files without the
+  manifest, a `dist/` entry's at the root) as a new `site` artifact in a
+  room the caller owns (may post in) or in a new room they create (room
+  creation's permission), first version "from <name>@<version>", through
+  the room service's own artifact routes as the caller. Its data space is
+  its new artifact id's: empty, separate from the original's. The copy is
+  a use of the app in the room's organization (`content_component_uses`
+  scope `app-copy`, scope id = the copy's artifact), counted in `uses`.
+- **Favorites.** `PUT|DELETE /v1/content-components/{id}/favorite` stars a
+  component the caller sees (any kind), in the organization they act in;
+  listings carry `favorite` and `favoriteCount` (that organization's
+  members, capped like the usage counts).
 
 ### Import
 
@@ -148,7 +205,7 @@ prompts: [{id, title, body, variables: [{name, label?, default?, options?}], tag
 
 Some content ships with the release:
 
-- The **Expert builder** (`cc_builtin_expert-builder`, 1.2.0) authors
+- The **Expert builder** (`cc_builtin_expert-builder`, 1.2.1) authors
   experts, skill packs and prompt packs by conversation (PRD §5). The
   Library's Experts, Skills and Prompts tabs open the workshop with "Create
   with AI" and "Improve with AI" (`views/library/workshopFlow.ts`), prefilled
@@ -169,9 +226,11 @@ Some content ships with the release:
   prompts are all starters: an empty room's general-purpose examples (see
   "Prompt packs").
 - Interactive apps (`docs/prd/2026-10-12-interactive-apps.md` §4.6): the
-  **Interactive apps** skill pack (`cc_builtin_interactive-apps`: the app
-  SDK, the platform's two rules, the visitor model, closing in the app's
-  code, publishing, mobile-first layout, reading the data back with
+  **Interactive apps** skill pack (`cc_builtin_interactive-apps`, 1.1.0:
+  the app SDK, the platform's two rules, the visitor model, closing in the
+  app's code, publishing, mobile-first layout, the gallery cover (a
+  headless-browser screenshot of the first screen saved as `cover.png`,
+  its cap stated from `wire.MaxAppCoverBytes`), reading the data back with
   `app_data`; its SDK section is pinned to the served `sdk.d.ts` by
   `TestInteractiveAppsSkillMatchesSDK`, its long examples are
   `references/examples.md`), the **App builder** expert
@@ -234,8 +293,10 @@ Tables (migration `2026_10_content_components`):
   `member` (a skill pack for all of a member's agents, a prompt pack in
   their composer), `room` (room skill packs and prompt packs, pinned
   experts) or `room-expert` (the room's expert, one of its pinned experts;
-  scope id = the room, at most one) — at a pinned version or following the
-  latest (`''`). A `room-expert` row is not counted as a second use.
+  scope id = the room, at most one) or `app-copy` (an app copied into a
+  room by "Use this app"; scope id = the copy's site artifact; never in
+  effect for a turn) — at a pinned version or following the latest
+  (`''`). A `room-expert` row is not counted as a second use.
 - Usage counts read `agent_jobs` on `idx_agent_jobs_expert (tenant_id,
   expert_id, requester_user_id)` (migration
   `2026_10_agent_jobs_expert_usage`): an expert's runs and distinct
@@ -248,6 +309,11 @@ Tables (migration `2026_10_content_components`):
   tenant (migration `2026_10_content_use_counts_tenant`).
 - `content_permission_acks`: a member confirmed a version's declared
   permissions (first use).
+- `content_favorites (tenant_id, member_id, component_id, created_at_ms)`:
+  a member's stars, per organization (migration `2026_10_app_gallery`,
+  which also added `tenants.publish_approval`); deleted with the
+  component; `idx_content_favorites_component` serves the counts. Store:
+  `store.ContentFavoriteStore` (contract `TestContractContentFavoriteStore`).
 - `content_prompt_uses`: per-organization, per-prompt insertion counts of
   prompt packs (migration `2026_10_prompt_packs`, which also dropped the
   former prompt library's `prompts` table; `tenant_id` joined the key in
@@ -349,6 +415,18 @@ Design: PRD §1 "Sources, scopes and trust" and "Status: step 4".
   room tools' `publish_component` with a job grant) opens a publish request
   for a version (default the latest); a newer request withdraws a pending
   one, and the organization's current version cannot be requested again.
+  **Whether a publish waits for an admin is the organization's setting**
+  (`publishApproval: "required" | "none"` in the tenant settings, default
+  `required`, edited by org admins in Organization → Settings through
+  `PUT /v1/tenant/settings`), for every kind. Its one reader is
+  `contentshare.NeedsApproval`, and the gateway's one publish path is
+  `publishToOrg` (the publish route, `publish_component` and a new
+  version's resubmission all call it; `TestOrgPublishDecidedByNeedsApproval`).
+  With `none` the version is published at once (the org row created or
+  moved forward and active, a pending request superseded, an audit
+  `publish` row, the room tools' `content_saved` action `published`; a
+  save's detail carries `orgPublished`), and admins still unpublish,
+  restore or remove it.
   Org admins (`manage_org` in that organization; a super admin acting
   in it) list requests, review one (the version's declared
   permissions, the files that execute (`Package.ScriptFiles`),
@@ -406,8 +484,9 @@ Design: PRD §1 "Sources, scopes and trust" and "Status: step 4".
   organization's admins for a request and to the author for the decision.
 - **Audit** (`extension_audit`, kind `content`): `share` (also a copy given
   on join), `unshare` (a room share revoked), `update`, `request` (naming
-  the agent when the room tools asked), `approve`, `decline`, `unpublish`,
-  `restore`, `remove`, `install`, `set-tenants`.
+  the agent when the room tools asked), `publish` (published without
+  approval), `approve`, `decline`, `unpublish`, `restore`, `remove`,
+  `install`, `set-tenants`, `use` (an app copied into a room).
 
 ## How a turn wears it
 
@@ -650,7 +729,7 @@ store and the artifact entitlement). JSON shapes: `internal/wire/content_compone
 
 | Route | What |
 |---|---|
-| `GET /v1/content-components?kind=expert\|skill\|prompt` | The caller's Library (`contentuse.Visible`): their own components and the copies they hold plus org/platform ones visible to them, at the latest version, with usage counts (`runs`, `members`), a team's roster (`team`), `mine`/`removable`, a copy's `sharedBy`/`sourceId`/`sourceLatestVersion` and the author's `publication` |
+| `GET /v1/content-components?kind=expert\|skill\|prompt\|app` | The caller's Library (`contentuse.Visible`): their own components and the copies they hold plus org/platform ones visible to them, at the latest version, with usage counts (`runs`, `members`), the caller's star and the organization's count (`favorite`, `favoriteCount`), an app's `coverUrl`, a team's roster (`team`), `mine`/`removable`, a copy's `sharedBy`/`sourceId`/`sourceLatestVersion` and the author's `publication` |
 | `POST /v1/content-components` | Save a new component: `{form, version?}` (JSON) or a package archive (`component.json` names it). 201 detail; 409 duplicate name; 400 validator message. With `?job=&room=`: a save by the bridge running the job, as its requester (below) |
 | `POST /v1/content-components/import?kind=&name=` | Import an archive (tar, tar.gz, zip) or a single markdown/json file of prompts as a new component; `?id=` imports a new version of the caller's component |
 | `POST /v1/content-drafts?job=&room=` | The bridge running a job stages an unsaved expert or skill pack for a quick try (archive body; as the job's requester; 201 `wire.ContentDraft`); see [room-tools.md](room-tools.md), "Quick tries of drafts" |
@@ -662,7 +741,11 @@ store and the artifact entitlement). JSON shapes: `internal/wire/content_compone
 | `GET /v1/content-components/{id}/shares` | The copies made from the author's component and its room shares (`{copies: [{member, componentId, version, updatedAtMs}], rooms: [{roomId, version, note?, createdAtMs, updatedAtMs}]}`) |
 | `DELETE /v1/content-components/{id}/shares/rooms/{room}` | Revoke a room share: later joiners get no copy, existing copies stay (the author only; 404 when there is none) |
 | `POST /v1/content-components/{id}/update` | A shared copy moves to its author's latest version (its holder; 409 when the author no longer has it) |
-| `POST /v1/content-components/{id}/publish` | `{scope: org\|personal\|platform, version?, note?}`: `org` opens a publish request (201 `{scope, request, note}`); `personal` withdraws it and unpublishes the org row; `platform` is a 403 saying what a platform admin does (the author; with `?job=&room=` as the job's requester) |
+| `POST /v1/content-components/{id}/publish` | `{scope: org\|personal\|platform, version?, note?}`: `org` opens a publish request (201 `{scope, request, note}`), or publishes at once where the organization requires no approval (201 `{scope: org, note}`); `personal` withdraws it and unpublishes the org row; `platform` is a 403 saying what a platform admin does (the author; with `?job=&room=` as the job's requester) |
+| `POST /v1/rooms/{roomId}/artifacts/{artifactId}/publish-app` | A site's current version as the caller's app (`wire.AppPublishRequest`; a room member who may post; with `?job=` as the job's requester); 201 detail (see "Apps") |
+| `GET /v1/content-components/{id}/versions/{v}/cover` | An app version's cover image (404 when none) |
+| `PUT\|DELETE /v1/content-components/{id}/favorite` | Star (a component the caller sees) or unstar it; 204 |
+| `POST /v1/content-components/{id}/use-app` | Copy a visible app into a room the caller owns or a new room (`wire.AppUseRequest`); 201 `wire.AppUseReply {roomId, artifactId, version, createdRoom?, from}` |
 | `GET /v1/tenant/content-requests[?status=all]` | Org admins: publish requests of the organization (pending by default) with the approved version |
 | `GET /v1/tenant/content-requests/{id}` | Org admins: the review (`wire.ContentReview`: the requested version, `scriptFiles`, `previous`, `files` changes) |
 | `POST /v1/tenant/content-requests/{id}/approve\|decline` | Org admins: `{note?}`; approve publishes the version to the organization |

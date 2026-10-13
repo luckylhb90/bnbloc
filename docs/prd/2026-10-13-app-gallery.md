@@ -4,6 +4,15 @@ Status: accepted (2026-10-13). The product owner approved the direction, the
 order and §11. Build after the share-link sign-in change
 (`docs/prd/2026-10-13-share-link-sign-in.md`) and the "Apps" views (§5) land.
 
+Status of the server side (2026-10-13): steps 2, 3 and 5 are built. The
+content kind `app` and its validator, publishing from a site (route and
+room tools), cover serving, favorites, "Use this app" and the
+`publishApproval` organization setting (with its field in Organization →
+Settings) are in; the cover convention is in the `interactive-apps` skill
+pack (1.1.0). The reference is `docs/architecture/content-components.md`,
+"Apps". Open: the fallback-cover owner, the "Publish to gallery" card
+action and the gallery itself (steps 1, 2's web part and 4).
+
 ## 1. Why
 
 Members build interactive apps in rooms (`docs/prd/2026-10-12-interactive-
@@ -169,10 +178,17 @@ with step 2. Decided while building:
 1. The "Apps" filter and Library "My apps" (§5).
 2. Content kind `app`: validator, store, the fallback-cover owner, publishing
    from the card, and agent publishing; the org `publishApproval` setting (§11).
+   Server side done: `contentpkg` kind `app`, `POST /v1/rooms/{roomId}/
+   artifacts/{artifactId}/publish-app`, `save_component` with `artifactId`,
+   the cover route, favorites (`content_favorites`, migration
+   `2026_10_app_gallery`), `contentshare.NeedsApproval` behind every publish
+   path.
 3. The `cover.png` convention in the skill pack, with the drift test kept.
+   Done.
 4. The Plaza gallery: grid, categories, search, favorites, detail page and
    demo mode.
-5. "Use this app" copy flow.
+5. "Use this app" copy flow. Server side done:
+   `POST /v1/content-components/{id}/use-app`.
 
 Each step lands with its tests:
 - validator cases;

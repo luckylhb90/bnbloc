@@ -1025,10 +1025,29 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
 
 ### Content components, agent profiles and room tools
 
-- **Content components go through one validator.** Experts and skill packs
-  (later prompt packs) enter only through `internal/contentpkg` (form,
-  archive, import, bridge). A new content kind registers a `KindSpec`; no
-  branches in shared code.
+- **Content components go through one validator.** Experts, skill packs,
+  prompt packs and apps enter only through `internal/contentpkg` (form,
+  archive, import, bridge, a site published as an app). A new content kind
+  registers a `KindSpec`; no branches in shared code. A bundle is read
+  within `contentpkg.BundleLimits()` (the widest kind's profile) until its
+  manifest names the kind; never a fixed profile of one kind.
+- **An app is a content kind** (`bnbloc.app.package/v1`,
+  `docs/prd/2026-10-13-app-gallery.md`): a template of a site's files,
+  never its data. `KindSpec.Site` says its scripts run only in the
+  sandboxed site frame (no `scripts` permission, no sandbox forced); the
+  validator checks the entry point, protected paths, the cover and
+  `category` from `wire.AppCategories`. Which file is a cover (site or app)
+  and what it may hold has one owner, `tarbundle.SiteCover` (sniffed as
+  the type its name says, within `wire.MaxAppCoverBytes`, never an SVG;
+  `TestCoverRuleOwned`), served only through `writeCover`. A site becomes an app only
+  through `POST /v1/rooms/{roomId}/artifacts/{artifactId}/publish-app`
+  (`contentpkg.AppFromSite`, a room member who may post: the app owner
+  rule; the room tools' `save_component` with `artifactId`); a copy only
+  through `POST /v1/content-components/{id}/use-app` (`contentpkg.AppSite`,
+  a new site artifact, so a fresh empty data space; counted as a
+  `content_component_uses` row of scope `app-copy`). A listing never
+  opens an app's bundle (its `coverUrl` may answer 404). Favorites are `store.ContentFavoriteStore` (`content_favorites`,
+  per tenant, deleted with the component).
 - **Archives and directory packing have one owner: `internal/tarbundle`.**
   An upload of a foreign format is read by `ReadArchive` (an unsafe name is
   refused, never rewritten), and every directory pack (save_component's
@@ -1238,8 +1257,18 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   author's version rows. Trust decisions use `ContentComponent.Author()`, never
   `Owner` (a copy with scripts still forces the sandbox). Org scope is a
   separate row created or advanced only by an approved
-  `content_publish_requests` row; never make an author's personal row
-  org-visible. Platform content arrives only as a signed package on
+  `content_publish_requests` row, or by `publishToOrg` where the
+  organization requires no approval; never make an author's personal row
+  org-visible.
+- **Whether a publish to the organization waits for an admin has one
+  owner: `contentshare.NeedsApproval(tenant)`** (the tenant settings'
+  `publishApproval`, `required` by default, `none` publishes at once,
+  still audited and removable by admins; every kind). The gateway's one
+  publish path is `publishToOrg` (the publish route, `publish_component`,
+  a new version's resubmission); it alone opens a request
+  (`openPublishRequest`) or publishes (`orgPublish`, beside an admin's
+  approval), and nothing else reads the setting
+  (`TestOrgPublishDecidedByNeedsApproval`). Platform content arrives only as a signed package on
   `POST /v1/platform/components` (`contentpkg.PlatformPackage`,
   `Pipeline.VerifyPackage`); the console never signs.
 - **"What can member M see" is `contentuse.Visible`** (Library, `name@range`
