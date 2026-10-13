@@ -1,7 +1,7 @@
 # The desktop's site frame drops an app's writes and change feed (2026-10-13)
 
-Status: **open**. Found while landing interactive apps step 5 (the web);
-the fix belongs to the desktop shell and is not part of that step.
+Status: **landed** (2026-10-13, with interactive apps step 6). Found while
+landing interactive apps step 5 (the web); the fix is the desktop shell's.
 
 ## Symptom
 
@@ -47,6 +47,42 @@ Decide in the desktop shell, with step 6 (`BNBLOC_SITES_ORIGIN`) in view:
 The first keeps one path for browser and desktop and is the likely choice
 once sites have their own origin.
 
+## Fix (landed)
+
+The second, made whole: the scheme stays the desktop's one path, with or
+without a sites origin, so the app CSP still admits only the scheme in
+`frame-src` and no gateway or sites origin has to be written into the
+shell's static CSP (Tauri's CSP is fixed at build time; the gateway and its
+sites origin are runtime settings).
+
+- **Every method of the app API.** A path under `~app/` takes GET, HEAD,
+  POST, PUT, PATCH, DELETE and OPTIONS (a site file still only GET and
+  HEAD), with its body (at most `wire.MaxAppRequestBytes`, else 413) and
+  the request headers the API reads: `Content-Type`, `If-Match`,
+  `If-None-Match`, `Accept`, `X-Bnbloc-Visitor`, and a preflight's
+  `Access-Control-Request-*`. Never a cookie or `Authorization`. The CORS
+  answer headers pass back.
+- **The change feed.** A Tauri scheme responder takes one body, so a
+  stream cannot pass through it. The shell holds the feed's upstream SSE
+  stream itself (one per feed URL and visitor) and answers each
+  `GET ~app/events` with the events that arrived since the previous
+  request, waiting up to 20 s for one (an empty batch is a keep-alive). The
+  SDK reads the batch, sees the end and reconnects 1 s later; the held
+  stream keeps every event meanwhile, so nothing is lost while the page
+  polls. A feed nobody polls for 45 s is closed; a refusal (a dead ticket)
+  is answered as the gateway answered it.
+- **The sites origin.** The scheme forwards to wherever the gateway serves
+  sites: `GET /v1/public/client-config` names the sites origin
+  (`BNBLOC_SITES_ORIGIN`) when there is one, else the gateway itself
+  (cached 5 minutes per gateway). The web hands the scheme the site URL's
+  path (`siteFrameUrl`), whatever origin the URL is on.
+
+Tests: `apps/desktop/src-tauri/src/site_scheme_tests.rs` (writes with
+their body and conditions, the preflight, the held feed delivering every
+event across polls over one upstream stream, a refused and an unpolled
+feed, the sites origin rule).
+
 ## Landing
 
-Not landed.
+Landed 2026-10-13 with interactive apps delivery step 6
+(`docs/prd/2026-10-12-interactive-apps.md`).
