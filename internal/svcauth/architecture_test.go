@@ -47,6 +47,7 @@ func TestSignedRequestsUseNewRequest(t *testing.T) {
 		"sets X-Bnbloc-Tenant by hand": regexp.MustCompile(`Header\.Set\((svcauth\.HeaderTenant|"X-Bnbloc-Tenant")`),
 		"sets X-Bnbloc-Role by hand":   regexp.MustCompile(`Header\.Set\((svcauth\.HeaderRole|"X-Bnbloc-Role")`),
 		"sets the signature by hand":   regexp.MustCompile(`Header\.Set\(svcauth\.Header(Sig|Ts)`),
+		"sets the app scope by hand":   regexp.MustCompile(`Header\.Set\((svcauth\.HeaderApp|"X-Bnbloc-App)`),
 	}
 	if problems := scanSources(t, rules, nil); len(problems) > 0 {
 		t.Fatalf("build internal requests with svcauth.NewRequest (or Key.Assert):\n  %s", strings.Join(problems, "\n  "))
@@ -54,13 +55,15 @@ func TestSignedRequestsUseNewRequest(t *testing.T) {
 }
 
 // TestSubjectReadOnlyViaSvcauth: a handler reads its verified caller with
-// svcauth.Subject and its org role with svcauth.Role, never the raw header
+// svcauth.Subject, its org role with svcauth.Role and an app's scope with
+// svcauth.AppScopeOf, never the raw header
 // (the copies trimmed differently and one answered 403 for a missing
 // subject where the others answered 401).
 func TestSubjectReadOnlyViaSvcauth(t *testing.T) {
 	rules := map[string]*regexp.Regexp{
 		"reads X-Bnbloc-User": regexp.MustCompile(`Header\.Get\((svcauth\.HeaderUser|"X-Bnbloc-User")`),
 		"reads X-Bnbloc-Role": regexp.MustCompile(`Header\.Get\((svcauth\.HeaderRole|"X-Bnbloc-Role")`),
+		"reads the app scope": regexp.MustCompile(`Header\.Get\((svcauth\.HeaderApp|"X-Bnbloc-App)`),
 	}
 	allow := map[string]string{
 		"internal/obs/": "the request log line names the asserted subject; obs sits below svcauth (svcauth → httpx → obs)",
