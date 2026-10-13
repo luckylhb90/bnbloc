@@ -134,6 +134,7 @@ function artifactListQuery(filter: ArtifactListFilter): string {
     if (value) params.set(key, value);
   }
   if (filter.sourceSeq && filter.sourceSeq > 0) params.set("sourceSeq", String(filter.sourceSeq));
+  if (filter.apps) params.set("app", "1");
   if (filter.limit && filter.limit > 0) params.set("limit", String(filter.limit));
   const query = params.toString();
   return query ? `?${query}` : "";

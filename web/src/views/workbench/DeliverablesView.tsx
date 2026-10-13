@@ -2,41 +2,33 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Select } from "@/ui/Select";
 import { FileCodeIcon, FileDocIcon, ListIcon, MagnifyingGlassIcon, SquaresFourIcon, XIcon } from "@phosphor-icons/react";
 import { api, type Artifact, type ArtifactListFilter } from "@/lib/api";
-import { fileCategory, type FileCategory } from "@/lib/artifactFiles";
 import { cn } from "@/lib/cn";
 import { useToast } from "@/ui/Toast";
+import { LoadFailed } from "@/ui/QueryState";
 import { FileCard, FileRow } from "./FileCard";
-import { versionFacts } from "./artifactData";
+import {
+  DATE_FILTERS,
+  TYPE_FILTERS,
+  deliverableFiltered,
+  deliverableMatches,
+  deliverableQuery,
+  type DateFilter,
+  type DeliverableFilter,
+  type TypeFilter,
+} from "./deliverableFilters";
 import { useDisplayNames } from "@/lib/useDisplayName";
 import { errorText } from "@/lib/errors";
 import { StorageKey, readStored, writeStored } from "@/lib/storageKeys";
 
 // DeliverablesView: every artifact of the room as a filterable grid or list
-// (type, author, date, search; optionally only one message's deliverables).
-// Server-side filters (q, author, sourceSeq, mime) narrow each page; the
-// same filters also apply client-side, so a page from a server that ignores
-// one still shows only matching items. Type and date are client-side.
+// (type — "Apps" among them —, author, date, search; optionally only one
+// message's deliverables). Server-side filters (q, author, sourceSeq, mime,
+// apps) narrow each page; the same filters also apply client-side
+// (deliverableFilters.ts), so a page from a server that ignores one still
+// shows only matching items. The other types and the date are client-side.
 
-type TypeFilter = "all" | "images" | "documents" | "code" | "tables" | "web" | "media" | "other";
-type DateFilter = "any" | "day" | "week" | "month";
 type Layout = "grid" | "list";
 
-const TYPES: readonly { value: TypeFilter; label: string; categories: readonly FileCategory[] }[] = [
-  { value: "all", label: "All types", categories: [] },
-  { value: "images", label: "Images", categories: ["image"] },
-  { value: "documents", label: "Documents", categories: ["markdown", "pdf", "text"] },
-  { value: "code", label: "Code", categories: ["code", "json"] },
-  { value: "tables", label: "Tables", categories: ["table"] },
-  { value: "web", label: "Web & apps", categories: ["web"] },
-  { value: "media", label: "Audio & video", categories: ["audio", "video"] },
-  { value: "other", label: "Other files", categories: ["archive", "file"] },
-];
-const DATES: readonly { value: DateFilter; label: string; ms: number }[] = [
-  { value: "any", label: "Any time", ms: 0 },
-  { value: "day", label: "Last 24 hours", ms: 86_400_000 },
-  { value: "week", label: "Last 7 days", ms: 7 * 86_400_000 },
-  { value: "month", label: "Last 30 days", ms: 30 * 86_400_000 },
-];
 const PAGE_SIZE = 60;
 const LAYOUT_KEY = StorageKey.deliverablesLayout;
 
@@ -80,7 +72,8 @@ export function DeliverablesView({
   const [items, setItems] = useState<Artifact[] | null>(null);
   const [cursor, setCursor] = useState<string | undefined>(undefined);
   const [loadingMore, setLoadingMore] = useState(false);
-  const [failed, setFailed] = useState(false);
+  const [failed, setFailed] = useState<unknown>(null);
+  const [reloads, setReloads] = useState(0);
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
@@ -88,8 +81,9 @@ export function DeliverablesView({
     return () => window.clearTimeout(t);
   }, [search]);
 
+  const shownFilter = useMemo<DeliverableFilter>(() => ({ type, author, date, q }), [type, author, date, q]);
   const filter = useMemo<ArtifactListFilter>(
-    () => ({ q: q || undefined, author: author || undefined, sourceSeq, mime: type === "images" ? "image/*" : undefined, limit: PAGE_SIZE }),
+    () => ({ ...deliverableQuery({ type, author, date: "any", q }), sourceSeq, limit: PAGE_SIZE }),
     [q, author, sourceSeq, type],
   );
 
@@ -101,15 +95,15 @@ export function DeliverablesView({
         if (cancelled) return;
         setItems(res.artifacts ?? []);
         setCursor(res.nextCursor || undefined);
-        setFailed(false);
+        setFailed(null);
       })
-      .catch(() => {
-        if (!cancelled) setFailed(true);
+      .catch((e: unknown) => {
+        if (!cancelled) setFailed(e ?? new Error("load failed"));
       });
     return () => {
       cancelled = true;
     };
-  }, [roomId, filter, refreshSignal]);
+  }, [roomId, filter, refreshSignal, reloads]);
 
   const loadMore = useCallback(async () => {
     if (!cursor) return;
@@ -121,8 +115,8 @@ export function DeliverablesView({
         return [...(cur ?? []), ...(res.artifacts ?? []).filter((a) => !seen.has(a.artifactId))];
       });
       setCursor(res.nextCursor || undefined);
-    } catch {
-      toast.error("Could not load more deliverables");
+    } catch (e) {
+      toast.error(errorText(e, "Could not load more deliverables"));
     } finally {
       setLoadingMore(false);
     }
@@ -131,17 +125,9 @@ export function DeliverablesView({
   const authors = useMemo(() => [...new Set((items ?? []).map((a) => a.createdBy))].sort(), [items]);
   const nameOf = useDisplayNames(authors);
   const shown = useMemo(() => {
-    const categories = TYPES.find((t) => t.value === type)?.categories ?? [];
-    const since = DATES.find((d) => d.value === date)?.ms ?? 0;
-    const needle = q.toLowerCase();
-    return (items ?? []).filter(
-      (a) =>
-        (categories.length === 0 || categories.includes(fileCategory(versionFacts(a)))) &&
-        (!author || a.createdBy === author) &&
-        (!since || Date.now() - a.updatedAtMs <= since) &&
-        (!needle || a.title.toLowerCase().includes(needle) || (a.fileName ?? "").toLowerCase().includes(needle)),
-    );
-  }, [items, type, author, date, q]);
+    const now = Date.now();
+    return (items ?? []).filter((a) => deliverableMatches(a, shownFilter, now));
+  }, [items, shownFilter]);
 
   const switchLayout = (next: Layout) => {
     setLayout(next);
@@ -171,7 +157,7 @@ export function DeliverablesView({
     }
   };
 
-  const filtered = !!(q || author || type !== "all" || date !== "any");
+  const filtered = deliverableFiltered(shownFilter);
   return (
     <div className="@container flex h-full min-h-0 flex-col">
       <div className="flex flex-col gap-2 border-b border-[var(--color-border)] p-3">
@@ -212,7 +198,7 @@ export function DeliverablesView({
         </label>
         <div className="grid grid-cols-3 gap-1.5">
           <Select aria-label="Type" value={type} onChange={(e) => setType(e.target.value as TypeFilter)} className={SELECT}>
-            {TYPES.map((t) => (
+            {TYPE_FILTERS.map((t) => (
               <option key={t.value} value={t.value}>
                 {t.label}
               </option>
@@ -227,7 +213,7 @@ export function DeliverablesView({
             ))}
           </Select>
           <Select aria-label="Date" value={date} onChange={(e) => setDate(e.target.value as DateFilter)} className={SELECT}>
-            {DATES.map((d) => (
+            {DATE_FILTERS.map((d) => (
               <option key={d.value} value={d.value}>
                 {d.label}
               </option>
@@ -252,15 +238,19 @@ export function DeliverablesView({
         )}
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto p-3">
-        {failed && items === null ? (
-          <p className="py-6 text-center text-xs text-[var(--color-fg-subtle)]">Could not load deliverables.</p>
+        {failed !== null && items === null ? (
+          <LoadFailed message={errorText(failed, "Could not load the deliverables")} onRetry={() => setReloads((n) => n + 1)} />
         ) : items === null ? (
-          <p className="py-6 text-center text-xs text-[var(--color-fg-subtle)]">Loading…</p>
+          <p role="status" className="py-6 text-center text-xs text-[var(--color-fg-subtle)]">
+            Loading…
+          </p>
         ) : shown.length === 0 ? (
           <p className="py-6 text-center text-xs text-[var(--color-fg-subtle)]">
-            {filtered || sourceSeq !== undefined
-              ? "No deliverables match these filters."
-              : "No deliverables yet. Files agents produce appear here; members can add documents and code."}
+            {type === "apps" && !q && !author && date === "any" && sourceSeq === undefined
+              ? "No apps in this room yet. Ask an agent to build one: a poll, a sign-up sheet or a survey."
+              : filtered || sourceSeq !== undefined
+                ? "No deliverables match these filters."
+                : "No deliverables yet. Files agents produce appear here; members can add documents and code."}
           </p>
         ) : layout === "grid" ? (
           <div className="grid grid-cols-[repeat(auto-fill,minmax(8.5rem,1fr))] gap-2">

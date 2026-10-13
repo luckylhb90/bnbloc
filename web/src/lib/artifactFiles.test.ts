@@ -1,15 +1,4 @@
-import {
-  artifactExtension,
-  artifactFileName,
-  downloadFileName,
-  fileCategory,
-  fileExtension,
-  fileTypeLabel,
-  inferMime,
-  isPreviewableImage,
-  isTextual,
-  SITE_MIME,
-} from "./artifactFiles.ts";
+import { SITE_MIME, artifactExtension, artifactFileName, deliverableTypeLabel, downloadFileName, fileCategory, fileExtension, fileTypeLabel, inferMime, isPreviewableImage, isTextual } from "./artifactFiles.ts";
 
 function test(name: string, fn: () => void): void {
   try {
@@ -74,7 +63,7 @@ test("categories, text-ness and labels", () => {
   eq(isPreviewableImage({ fileName: "a.tiff", mimeType: "image/tiff" }), false, "tiff not decodable everywhere");
 });
 
-test("a web app (site) is named by its title, labelled Web app, saved as .tar", () => {
+test("a web app (site) is named by its title, labelled Website, saved as .tar", () => {
   const site = { kind: "site", title: "Todo app v2.0", fileName: "dist", mimeType: SITE_MIME };
   eq(inferMime(site), SITE_MIME, "declared site MIME");
   eq(inferMime({ kind: "site", title: "x" }), SITE_MIME, "kind implies the MIME");
@@ -82,7 +71,9 @@ test("a web app (site) is named by its title, labelled Web app, saved as .tar", 
   eq(artifactFileName({ kind: "site", fileName: "apps/dist", title: "" }), "dist", "dir name without a title");
   eq(artifactExtension(site), "", "a dotted title is not an extension");
   eq(fileCategory(site), "web", "web category");
-  eq(fileTypeLabel(site), "Web app", "label");
+  eq(fileTypeLabel(site), "Website", "label");
+  eq(deliverableTypeLabel(true, site), "Interactive app", "an app's label");
+  eq(deliverableTypeLabel(false, site), "Website", "a site that is no app");
   eq(isTextual(site), false, "an archive is not text");
   eq(downloadFileName({ name: "Todo app", mimeType: SITE_MIME }), "Todo app.tar", "archive download name");
   eq(downloadFileName({ name: "a.png", mimeType: "image/png" }), "a.png", "other files keep their name");

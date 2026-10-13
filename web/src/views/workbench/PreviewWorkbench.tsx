@@ -1,10 +1,10 @@
 import { useRef, useState } from "react";
 import { DotsThreeIcon, PushPinIcon, PushPinSlashIcon, SquaresFourIcon, XIcon, XSquareIcon } from "@phosphor-icons/react";
-import { fileCategory } from "@/lib/artifactFiles";
+import { fileCategory, versionFacts } from "@/lib/artifactFiles";
 import { cn } from "@/lib/cn";
 import { DELIVERABLES_TAB, type WorkbenchTab } from "@/lib/workbenchTabs";
 import { Menu, MenuItem } from "@/ui/Menu";
-import { fileInfoFor, useArtifactDetail, versionFacts, versionMeta } from "./artifactData";
+import { fileInfoFor, useArtifactDetail, versionMeta } from "./artifactData";
 import { ArtifactTabView } from "./ArtifactTabView";
 import { DeliverablesView } from "./DeliverablesView";
 import { categoryIcons } from "./fileIcons";

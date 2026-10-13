@@ -13,7 +13,7 @@ import {
   ShareNetworkIcon,
 } from "@phosphor-icons/react";
 import { api, type Artifact } from "@/lib/api";
-import { downloadFileName, fileCategory, fileTypeLabel, isSite, isTextual } from "@/lib/artifactFiles";
+import { downloadFileName, fileCategory, fileTypeLabel, isSite, isTextual, versionFacts } from "@/lib/artifactFiles";
 import { cn } from "@/lib/cn";
 import { appLinkBase } from "@/lib/config";
 import { formatBytes, relativeTime } from "@/lib/format";
@@ -34,7 +34,6 @@ import {
   loadVersionBlob,
   useArtifactDetail,
   useVersionBlob,
-  versionFacts,
   versionMeta,
   type ArtifactDetail,
 } from "./artifactData";
@@ -386,7 +385,7 @@ export function ArtifactTabView({
           )}
         </div>
       </div>
-      {isSite(facts) && <AppDataLine roomId={roomId} artifactId={artifactId} appName={file.name} />}
+      {artifact.isApp && <AppDataLine roomId={roomId} artifactId={artifactId} appName={file.name} />}
       <div className="relative min-h-0 flex-1 overflow-hidden" role="region" aria-label={file.name}>
         {mode === "edit" ? (
           <div className="flex h-full flex-col gap-2 p-2">
@@ -447,6 +446,7 @@ export function ArtifactTabView({
         artifactId={artifactId}
         fileName={file.name}
         version={shown}
+        kind={artifact?.isApp ? "app" : facts && isSite(facts) ? "site" : "file"}
       />
     </div>
   );

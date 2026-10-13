@@ -141,7 +141,7 @@ export function AppDataLine({
       onClose={() => setConfirmClear(false)}
       onConfirm={clear}
       title="Clear this app's data?"
-      description={`This permanently deletes the app's ${total}, for everyone using it, its share links included. It cannot be undone: export the data first to keep a copy.`}
+      description={`This permanently deletes the app's ${total} for everyone, including what people entered through share links. The app and its links stay. It cannot be undone: export the data first to keep a copy.`}
       confirmLabel="Clear data"
       danger
     />

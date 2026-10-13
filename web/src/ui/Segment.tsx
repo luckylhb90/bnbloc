@@ -31,11 +31,13 @@ export function Segment<T extends string>({
         return (
           <button
             key={o.value}
+            type="button"
             role="tab"
             aria-selected={active}
+            title={o.label}
             onClick={() => onChange(o.value)}
             className={cn(
-              "tactile rounded-[calc(var(--radius)-0.25rem)] px-3 py-2 text-sm text-center",
+              "tactile min-w-0 truncate rounded-[calc(var(--radius)-0.25rem)] px-2 py-2 text-sm text-center sm:px-3",
               active
                 ? "bg-[var(--color-elevated)] text-[var(--color-fg)] shadow-[var(--shadow-pop)]"
                 : "text-[var(--color-fg-muted)] hover:text-[var(--color-fg)]",

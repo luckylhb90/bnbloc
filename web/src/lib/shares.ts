@@ -53,6 +53,21 @@ export interface TenantPolicy {
   readonly anonymousLinksDisabled: boolean;
 }
 
+/** What a link shares: a file, a site, or an interactive app. */
+export type ShareTarget = "file" | "site" | "app";
+
+/** The share dialog's line on what the people a link reaches get. */
+export function shareTargetDescription(target: ShareTarget): string {
+  switch (target) {
+    case "app":
+      return "People you send the link to open this app full-screen and use it. Nothing else of the room is shown.";
+    case "site":
+      return "People you send the link to open this site full-screen. Nothing else of the room is shown.";
+    default:
+      return "People you send the link to can view and download this file. Nothing else of the room is shown.";
+  }
+}
+
 /** A new link is for the organization's signed-in members. */
 export const DEFAULT_SHARE_ACCESS: ShareAccess = "org";
 

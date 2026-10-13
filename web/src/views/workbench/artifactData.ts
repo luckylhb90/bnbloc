@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { api, type Artifact, type ArtifactVersion } from "@/lib/api";
-import { inferMime, type ArtifactFileFacts } from "@/lib/artifactFiles";
+import { inferMime, versionFacts } from "@/lib/artifactFiles";
+import { myAppsApi } from "@/lib/myAppsApi";
 import { fileInfoFromFacts } from "@/views/artifact/fileInfo";
 import type { ArtifactFileInfo } from "@/views/artifact/registry";
 
@@ -99,17 +100,6 @@ export function useArtifactDetail(
   return { detail: state.detail, error: state.error };
 }
 
-/** File facts of one version (an older version keeps its own MIME type). */
-export function versionFacts(artifact: Artifact, meta?: ArtifactVersion): ArtifactFileFacts {
-  return {
-    kind: artifact.kind,
-    title: artifact.title,
-    fileName: artifact.fileName,
-    mimeType: meta?.mimeType || artifact.mimeType,
-    language: artifact.language,
-  };
-}
-
 export function fileInfoFor(artifact: Artifact, version: number, meta?: ArtifactVersion): ArtifactFileInfo {
   return fileInfoFromFacts(versionFacts(artifact, meta), version, meta?.sizeBytes);
 }
@@ -196,14 +186,24 @@ export function loadCardImage(
   meta: ArtifactVersion,
   source: "thumbnail" | "content",
 ): Promise<string> {
-  const key = `${roomId}\u0000${artifact.artifactId}\u0000${meta.version}\u0000${source}`;
-  const cached = cardImages.get(key);
-  if (cached) return cached;
-  const pending = (
+  return cachedCardImage(`${roomId}\u0000${artifact.artifactId}\u0000${meta.version}\u0000${source}`, () =>
     source === "thumbnail"
       ? api.artifactThumbnail(roomId, artifact.artifactId, meta.version)
-      : loadVersionBlob(roomId, artifact, meta.version, meta)
-  ).then((blob) => URL.createObjectURL(blob));
+      : loadVersionBlob(roomId, artifact, meta.version, meta),
+  );
+}
+
+/** Object URL of an app's cover (its site version's cover image), in the
+ *  same cache; it rejects with the gateway's 404/413/415 when the site has
+ *  no cover it serves (the card then draws lib/appCover's). */
+export function loadAppCover(roomId: string, artifactId: string, version: number): Promise<string> {
+  return cachedCardImage(`${roomId}\u0000${artifactId}\u0000${version}\u0000cover`, () => myAppsApi.cover(roomId, artifactId, version));
+}
+
+function cachedCardImage(key: string, load: () => Promise<Blob>): Promise<string> {
+  const cached = cardImages.get(key);
+  if (cached) return cached;
+  const pending = load().then((blob) => URL.createObjectURL(blob));
   pending.catch(() => {
     if (cardImages.get(key) === pending) cardImages.delete(key);
   });

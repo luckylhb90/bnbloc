@@ -1,23 +1,26 @@
 import { useEffect, useRef, useState } from "react";
 import { ArrowSquareOutIcon, DotsThreeIcon, ShareNetworkIcon } from "@phosphor-icons/react";
 import type { Artifact, ArtifactVersion } from "@/lib/api";
-import { fileCategory, fileTypeLabel, isPreviewableImage, isSite } from "@/lib/artifactFiles";
+import { deliverableTypeLabel, fileCategory, isPreviewableImage, isSite, versionFacts } from "@/lib/artifactFiles";
 import { cn } from "@/lib/cn";
 import { formatBytes, relativeTime } from "@/lib/format";
 import { Menu, MenuItem } from "@/ui/Menu";
 import { ActorLabel } from "@/views/room/ActorLabel";
+import { AppCover } from "./AppCover";
 import { AppDataLine } from "./AppDataLine";
-import { fileInfoFor, loadCardImage, useArtifactDetail, versionFacts, versionMeta } from "./artifactData";
+import { fileInfoFor, loadCardImage, useArtifactDetail, versionMeta } from "./artifactData";
 import { categoryIcons } from "./fileIcons";
 import { ShareDialog } from "./ShareDialog";
 
 // FileCard: one deliverable as a card — a thumbnail (the version's stored
-// thumbnail, else the image itself for images, else a type icon), name,
-// type, size and version. A card is a pointer: clicking opens the artifact in
-// a workbench tab; it never runs or renders the file itself. Its menu offers
-// Open and Share (a public link; hidden when the organization turned public
-// links off). A web app's card adds its owners' data line (AppDataLine)
-// below. Detail and images load only once the card scrolls into view.
+// thumbnail, else the image itself for images, else an interactive app's
+// cover — its own or the generated one —, else a type icon), name, type,
+// size and version. A card is a pointer: clicking opens the artifact in a
+// workbench tab; it never runs or renders the file itself. Its menu offers
+// Open and Share (the share dialog: who may open a link, its version and
+// lifetime). An interactive app's card (the server's isApp) adds its
+// owners' data line (AppDataLine) below. Detail and images load only once
+// the card scrolls into view.
 
 /** Images above this are not fetched just to draw a card. */
 const CARD_IMAGE_MAX_BYTES = 8 * 1024 * 1024;
@@ -97,7 +100,9 @@ export function FileCard({
   const facts = artifact ? versionFacts(artifact, meta) : null;
   const file = artifact ? fileInfoFor(artifact, artifact.currentVersion, meta) : null;
   const Icon = categoryIcons[facts ? fileCategory(facts) : "file"];
-  const app = !!facts && isSite(facts);
+  const site = !!facts && isSite(facts);
+  // An interactive app is the server's answer (isApp), never re-derived.
+  const app = !!artifact?.isApp;
   return (
     <div className={cn("flex min-w-0 flex-col", className)}>
       <div className="group/card relative flex min-w-0">
@@ -123,6 +128,8 @@ export function FileCard({
                   tiny ? "object-contain p-2 [image-rendering:pixelated]" : "object-cover",
                 )}
               />
+            ) : artifact?.isApp && file ? (
+              <AppCover roomId={roomId} appId={artifactId} version={artifact.currentVersion} name={file.name} enabled={visible} />
             ) : (
               <Icon size={26} className="text-[var(--color-fg-subtle)]" aria-hidden />
             )}
@@ -136,7 +143,7 @@ export function FileCard({
             <span className="truncate text-xs font-medium text-[var(--color-fg)]">{file?.name ?? "…"}</span>
             <span className="truncate text-[11px] text-[var(--color-fg-subtle)]">
               {facts
-                ? [fileTypeLabel(facts), meta?.sizeBytes !== undefined ? formatBytes(meta.sizeBytes) : ""].filter(Boolean).join(" · ")
+                ? [deliverableTypeLabel(!!artifact?.isApp, facts), meta?.sizeBytes !== undefined ? formatBytes(meta.sizeBytes) : ""].filter(Boolean).join(" · ")
                 : " "}
             </span>
           </span>
@@ -175,6 +182,7 @@ export function FileCard({
               artifactId={artifactId}
               fileName={file.name}
               version={artifact.currentVersion}
+              kind={app ? "app" : site ? "site" : "file"}
             />
           </>
         )}
@@ -200,7 +208,7 @@ export function FileRow({ artifact, onOpen }: { readonly artifact: Artifact; rea
       <span className="min-w-0 flex-1">
         <span className="block truncate text-[var(--color-fg)]">{file.name}</span>
         <span className="flex items-center gap-1 text-[11px] text-[var(--color-fg-subtle)]">
-          <span>{fileTypeLabel(facts)}</span>
+          <span>{deliverableTypeLabel(artifact.isApp, facts)}</span>
           <span>·</span>
           <ActorLabel actor={artifact.createdBy} />
         </span>

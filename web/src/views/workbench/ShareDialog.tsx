@@ -14,9 +14,11 @@ import {
   shareAccessOptions,
   shareRequest,
   shareState,
+  shareTargetDescription,
   shareVersionLabel,
   viewsLabel,
   type ShareAccess,
+  type ShareTarget,
   type ShareView,
 } from "@/lib/shares";
 import { sharesApi } from "@/lib/sharesApi";
@@ -49,6 +51,7 @@ export function ShareDialog({
   artifactId,
   fileName,
   version,
+  kind = "file",
 }: {
   readonly open: boolean;
   readonly onClose: () => void;
@@ -57,6 +60,8 @@ export function ShareDialog({
   readonly fileName: string;
   // The version the member is looking at ("This version").
   readonly version: number;
+  // What the link shares (the dialog's description).
+  readonly kind?: ShareTarget;
 }) {
   const toast = useToast();
   const policy = useTenantPolicy();
@@ -135,7 +140,7 @@ export function ShareDialog({
       open={open}
       onClose={onClose}
       title={`Share ${fileName}`}
-      description="People you send the link to can view and download this file. Nothing else of the room is shown."
+      description={shareTargetDescription(kind)}
       footer={
         <>
           <Button variant="ghost" onClick={onClose}>
@@ -224,9 +229,16 @@ export function ShareDialog({
         <div className="flex flex-col gap-1.5">
           <span className="text-xs font-medium uppercase tracking-wide text-[var(--color-fg-subtle)]">Links</span>
           {listFailed ? (
-            <p className="text-sm text-[var(--color-fg-subtle)]">Could not load the links.</p>
+            <p role="alert" className="flex flex-wrap items-center gap-2 text-sm text-[var(--color-fg-subtle)]">
+              Could not load the links.
+              <Button size="sm" variant="ghost" onClick={() => void reload()}>
+                Retry
+              </Button>
+            </p>
           ) : shares === null ? (
-            <p className="text-sm text-[var(--color-fg-subtle)]">Loading…</p>
+            <p role="status" className="text-sm text-[var(--color-fg-subtle)]">
+              Loading…
+            </p>
           ) : shares.length === 0 ? (
             <p className="text-sm text-[var(--color-fg-subtle)]">No links yet.</p>
           ) : (

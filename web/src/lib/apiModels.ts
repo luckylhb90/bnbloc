@@ -130,6 +130,8 @@ export interface ArtifactListFilter {
   author?: string;
   sourceSeq?: number;
   q?: string;
+  /** Interactive apps only (the server's isApp rule). */
+  apps?: boolean;
   limit?: number;
   cursor?: string;
 }

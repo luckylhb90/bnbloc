@@ -7,12 +7,29 @@
 // `fileName`. Every consumer asks the same questions — "what MIME is this?",
 // "what extension?", "which icon/category?" — so the answers live here once.
 
+import type { Artifact, ArtifactVersion } from "./wire.gen.ts";
+
 export interface ArtifactFileFacts {
   readonly kind?: string;
   readonly title?: string;
   readonly fileName?: string;
   readonly mimeType?: string;
   readonly language?: string;
+}
+
+/** File facts of one version of an artifact (an older version keeps its
+ *  own MIME type). */
+export function versionFacts(
+  artifact: Pick<Artifact, "kind" | "title" | "fileName" | "mimeType" | "language">,
+  meta?: Pick<ArtifactVersion, "mimeType">,
+): ArtifactFileFacts {
+  return {
+    kind: artifact.kind,
+    title: artifact.title,
+    fileName: artifact.fileName,
+    mimeType: meta?.mimeType || artifact.mimeType,
+    language: artifact.language,
+  };
 }
 
 /** A `site` artifact version: a static web app snapshot (a tar of its
@@ -251,12 +268,19 @@ export function isTextual(facts: ArtifactFileFacts): boolean {
   );
 }
 
+/** A deliverable's type label: "Interactive app" for an app (the server's
+ *  isApp: a site that loads the app SDK or holds data), else its file
+ *  type's. */
+export function deliverableTypeLabel(isApp: boolean, facts: ArtifactFileFacts): string {
+  return isApp ? "Interactive app" : fileTypeLabel(facts);
+}
+
 /** Short human label for the type ("PNG", "Markdown", "PDF"). */
 export function fileTypeLabel(facts: ArtifactFileFacts): string {
   const ext = artifactExtension(facts);
   const category = fileCategory(facts);
   if (category === "markdown") return "Markdown";
-  if (isSite(facts)) return "Web app";
+  if (isSite(facts)) return "Website";
   if (facts.kind === "app") return "App";
   if (ext) return ext.toUpperCase();
   if (facts.kind) return facts.kind.charAt(0).toUpperCase() + facts.kind.slice(1);
