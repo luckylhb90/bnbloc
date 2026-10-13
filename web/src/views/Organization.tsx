@@ -16,6 +16,8 @@ import { cn } from "@/lib/cn";
 import { PlatformComponents } from "@/views/PlatformComponents";
 import { PlatformReleases } from "@/views/PlatformReleases";
 import { PlatformUpdateConfig } from "@/views/PlatformUpdateConfig";
+import { PlatformAssistModel } from "@/views/PlatformAssistModel";
+import { invalidateAssistStatus } from "@/lib/assist";
 import { ErrorBox } from "@/ui/ErrorBox";
 import { Switch } from "@/ui/Segment";
 import { RequestsTab } from "@/views/org/RequestsTab";
@@ -56,6 +58,7 @@ type Tab =
   | "components"
   | "platformContent"
   | "updates"
+  | "assist"
   | "releases";
 
 const TABS: { id: Tab; label: string; superOnly?: boolean }[] = [
@@ -73,6 +76,7 @@ const TABS: { id: Tab; label: string; superOnly?: boolean }[] = [
   { id: "components", label: "Components", superOnly: true },
   { id: "platformContent", label: "Platform content", superOnly: true },
   { id: "updates", label: "Updates", superOnly: true },
+  { id: "assist", label: "AI assist", superOnly: true },
   { id: "releases", label: "Releases", superOnly: true },
 ];
 
@@ -169,6 +173,7 @@ export function Organization() {
       {tab === "tenants" && isSuper && <TenantsTab />}
       {tab === "orgsync" && isSuper && <OrgSyncTab />}
       {tab === "updates" && isSuper && <PlatformUpdateConfig />}
+      {tab === "assist" && isSuper && <PlatformAssistModel />}
       {tab === "components" && isSuper && <PlatformComponents />}
       {tab === "platformContent" && isSuper && <PlatformContentTab />}
       {tab === "releases" && isSuper && <PlatformReleases />}
@@ -585,6 +590,7 @@ function SettingsTab() {
     outsideLinksDisabled?: boolean;
     anonymousLinksDisabled?: boolean;
     publishApproval?: PublishApproval;
+    assistDisabled?: boolean;
   }) => {
     if (policySaving) return;
     setPolicySaving(true);
@@ -592,6 +598,7 @@ function SettingsTab() {
     try {
       setSettings(await api.updateTenantSettings(patch));
       invalidateTenantPolicy();
+      if (patch.assistDisabled !== undefined) invalidateAssistStatus();
     } catch (e) {
       setError(errorText(e, "failed to save the policy"));
     } finally {
@@ -687,6 +694,20 @@ function SettingsTab() {
           On: when a member publishes an expert, skill pack, prompt pack or app to the organization, an admin reviews
           and approves it first (Content review). Off: it is published at once. Either way it is recorded in the audit
           log, and admins can unpublish, restore or remove it.
+        </p>
+      </div>
+      <div className="flex flex-col gap-2 border-t border-[var(--color-border)] pt-4">
+        <span className="text-xs font-medium uppercase tracking-wide text-[var(--color-fg-subtle)]">AI assist</span>
+        <Switch
+          checked={!(settings?.assistDisabled ?? false)}
+          onChange={(v) => void savePolicy({ assistDisabled: !v })}
+          label="Allow AI assist"
+          ariaLabel="Allow AI assist"
+        />
+        <p className="text-xs text-[var(--color-fg-subtle)]">
+          On: members get the AI assist behind manual entries (the composer's Enhance prompt, Fill with AI when
+          publishing) when the platform has an assist model. What they typed, and the room or deliverable it refers
+          to, is sent to that model. Off: the assist buttons are hidden for this organization.
         </p>
       </div>
       <TenantRetentionSection />

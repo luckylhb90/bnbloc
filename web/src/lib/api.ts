@@ -337,6 +337,7 @@ export const api = {
       outsideLinksDisabled?: boolean;
       anonymousLinksDisabled?: boolean;
       publishApproval?: PublishApproval;
+      assistDisabled?: boolean;
     },
   ) =>
     req<TenantSettings>("/v1/tenant/settings", {

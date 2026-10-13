@@ -101,6 +101,9 @@ export interface TenantSettings {
   // Org policy: whether a member's publish to the organization waits for
   // an admin ("required", the default) or takes effect at once ("none").
   publishApproval: PublishApproval;
+  // Org policy: AI assist is off for the organization's members (the
+  // assist buttons are hidden; docs/prd/2026-10-13-ai-assist.md §2).
+  assistDisabled: boolean;
 }
 
 // Platform super-admin: one tenant row in the cross-tenant overview.
