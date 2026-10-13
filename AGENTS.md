@@ -451,7 +451,9 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   mux: site paths (`sitePath`, the one "is this a site path" rule, which
   `appFramePath` builds on) only on that host, nothing else there, 404
   either way; a new site route needs no change, a new API route never
-  serves there.
+  serves there. A session never goes to a site URL: what reads a site
+  with a session (an agent's `read_artifact`) uses the main origin's site
+  file read (`handleSiteFileRead`).
   The artifact URL is built and parsed only by `pkgmeta`
   (`GatewayArtifactURL`/`Path`, `ArtifactKeyOf`, `GatewayArtifactKey`;
   `TestArtifactURLOneOwner`). A gateway audit row is written only by
@@ -1121,7 +1123,12 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   `AppsUpdate` once the room has an app and every turn after, so it never
   goes stale; `CtxState.AppsListed`). An agent with tools reads a
   deliverable with `read_artifact`, through the room's own artifact routes
-  (membership and room checked there), bounded and fenced as untrusted.
+  (membership and room checked there), bounded and fenced as untrusted; a
+  site's file through the gateway's site file read on the main origin
+  (`GET /v1/rooms/{roomId}/artifacts/{artifactId}/versions/{v}/files/{path...}?job=`,
+  `site_file_read.go`: the job grant, the room service's read as the
+  requester, 4 MiB a file), never a site ticket or site URL
+  (`TestRoomToolsNeverOpenSiteTickets`).
   Never tell an agent a deliverable or a component is "in its workspace",
   and never compute a producer, a Library listing or an app listing
   elsewhere.

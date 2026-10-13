@@ -542,12 +542,21 @@ app_keys(app_id PRIMARY KEY, tenant_id, room_id, wrapped_key, created_at_ms)
     admitting only the scheme. A scheme responder takes one body, so the
     change feed is held by the shell and answered as successive batches
     (the bug record).
-  - **Known gap:** the room tool `read_artifact` reads a site's files
-    through a member site ticket with the bridge's session on the main
-    origin; with a sites origin set the ticket's `siteUrl` is absolute and
-    the tool refuses it ("unreadable result"), failing closed. It needs a
-    session route on the main origin for an agent's read of a site file
-    (follow-up for the room tools' owner).
+  - **An agent reads a site's files on the main origin** (closed gap). The
+    room tool `read_artifact` used to read a site's files through a member
+    site ticket with the bridge's session; with a sites origin set the
+    ticket's `siteUrl` was absolute and the tool refused it ("unreadable
+    result"). It now reads one file through a session route on the main
+    origin,
+    `GET /v1/rooms/{roomId}/artifacts/{artifactId}/versions/{v}/files/{path...}?job=`
+    (`services/gateway/site_file_read.go`, a route-table row): the bound
+    job's grant (`jobGrant`), the room service's read as the job's
+    requester (a non-member or another room's artifact is a 404), the
+    pinned bundle (`siteBundle`, `LoadPinned`), the file exactly as stored,
+    4 MiB at most (413), served as a sandboxed attachment. The tool never
+    opens a site ticket or site URL (`TestRoomToolsNeverOpenSiteTickets`);
+    `TestReadArtifactReadsSiteFileWithSitesOrigin` reads a site with a sites
+    origin set.
   - **Audited export** (`GET /v1/rooms/{roomId}/apps/{artifactId}/export?
     collection=&format=json|csv`, the room entry, owners only: a member who
     may chat, or the job's agent). The room service streams it

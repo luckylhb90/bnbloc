@@ -80,7 +80,7 @@ reply in the room; deliverables published with sourceSeq = the dispatch's seq
 | `save_component(dir, id?)` | Reads every file under `dir` (workspace-relative, e.g. `drafts/reviewer`) through the core's session-files seam (`core.SessionFiles`, handed to the tools per turn as `TurnInfo.Workspace`), packs them (`tarbundle`, content limits) and posts the archive to `POST /v1/content-components` (or `…/{id}/versions`) with the bound job's `?job=&room=` grant: the gateway validates it and saves it as the job's requester. The validator's message comes back as the tool error. A core without session files cannot save; the agent points the member at "Save as expert" under its reply's files. When the organization uses the component, the result carries `resubmitted` and the note tells the agent to say the new version waits for an org admin. Every granted save or publish puts a transient `content_saved` event in the room, which the member's workshop toasts. |
 | `get_component(id, version?)` | `GET /v1/content-components/{id}[/versions/{v}]` with the grant: the manifest and every text file, as the requester may read it (the "Improve" flow). Files of another author (a shared copy's included) are fenced as that author's data. |
 | `list_components(kind?)` | `GET /v1/components` with the grant (`roomlog.ReadLibrary`): the requester's whole Library, most recently updated first: experts, skill packs, prompt packs (`kind` `expert`, `skill`, `prompt`) and MCP tools (`mcp`), with version, scope, `mine` and the update time. |
-| `read_artifact(artifactId, path?, version?)` | A deliverable of the session's room (below), through the room's own artifact routes. |
+| `read_artifact(artifactId, path?, version?)` | A deliverable of the session's room (below), through the room's own artifact routes; a site's file through `GET …/versions/{v}/files/{path...}?job=` on the main origin. |
 | `publish_component(id, scope, note?)` | Posts to `POST /v1/content-components/{id}/publish` with the job's grant, as the requester: `org` opens a publish request an organization admin approves (the reply carries the request and the version members keep meanwhile), `personal` withdraws it and takes the component out of the organization; `platform` is answered locally as a platform admin's action ([content-components.md](content-components.md), "Sharing and publishing"). |
 | `post_progress(text)` | Posts one progress line of the bound job as a room notice (below): at most 20 per job, 500 characters each. |
 | `try_draft(dir, task, handle?, wait_seconds?)` | A real quick try of an unsaved expert or skill pack (below): packs `dir` like `save_component`, validates it with `contentpkg` (the error goes back to the agent), stages it with the job grant (`POST /v1/content-drafts`) and dispatches `task` to another agent wearing it through the same door, guards and wait as `ask_agent`. |
@@ -188,9 +188,18 @@ with tools check another agent's work: the artifact detail and version
 routes (`GET /v1/rooms/{room}/artifacts/{id}[/versions/{v}]`) as the bridge's
 session, so the room service refuses a non-member and an artifact of
 another room (the tool also refuses a detail naming another room); a blob
-version through its content route, a site's file (`path`, default
-`index.html`) through a site ticket and the gateway's site file rules. A
-stored version over 4 MiB is not downloaded; the text returned is capped at
+version through its content route; a site's file (`path`, default
+`index.html`) through the gateway's site file read on the main origin,
+`GET /v1/rooms/{room}/artifacts/{id}/versions/{v}/files/{path...}?job=`
+(`services/gateway/site_file_read.go`). That route admits the bound job's
+grant (the job runs on this bridge, its requester may still post), reads
+the version as the requester through the room service (a non-member or
+another room's artifact is a 404), answers the bundle file exactly as
+stored (no rewrite, no fallback) and refuses a file over 4 MiB with a 413.
+The tool never opens a site ticket: a site URL may be on the sites origin
+(`BNBLOC_SITES_ORIGIN`), which never sees a session
+(`TestRoomToolsNeverOpenSiteTickets`). A stored non-site version over 4 MiB
+is not downloaded; the text returned is capped at
 64 KiB (`truncated`), binary content is not shown, and the text is fenced
 (`roomlog.Fence`), naming its producer, as data to check, never
 instructions.
