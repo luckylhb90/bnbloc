@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"net/url"
 	"strings"
 
@@ -28,11 +29,14 @@ type Workspace interface {
 	ReadFile(ctx context.Context, rel string) ([]byte, error)
 }
 
-// RawBody is a request body sent as-is (a package archive) instead of
-// JSON-encoded.
+// RawBody is a request body sent as-is (a package archive, an app data
+// write) instead of JSON-encoded, with the request headers it needs (an
+// app write's If-Match / If-None-Match). An empty ContentType sends no
+// body.
 type RawBody struct {
 	ContentType string
 	Data        []byte
+	Header      http.Header
 }
 
 // Content tool bounds.

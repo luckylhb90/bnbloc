@@ -5,6 +5,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
+	"net/http"
 
 	corepkg "github.com/luckylhb90/bnbloc/core"
 	"github.com/luckylhb90/bnbloc/services/bridge/roomtools"
@@ -36,7 +38,16 @@ func (g roomToolsGateway) Do(ctx context.Context, method, path string, body any)
 	var raw []byte
 	var err error
 	if rb, ok := body.(roomtools.RawBody); ok {
-		raw, err = g.b.doRaw(ctx, g.b.http, method, g.b.cfg.GatewayBaseURL+path, g.b.gatewayAuth(ctx), rb.ContentType, bytes.NewReader(rb.Data))
+		header := rb.Header.Clone()
+		var data io.Reader
+		if rb.ContentType != "" {
+			if header == nil {
+				header = http.Header{}
+			}
+			header.Set("Content-Type", rb.ContentType)
+			data = bytes.NewReader(rb.Data)
+		}
+		raw, _, err = g.b.send(ctx, g.b.http, method, g.b.cfg.GatewayBaseURL+path, g.b.gatewayAuth(ctx), header, data)
 	} else {
 		raw, err = g.b.do(ctx, method, g.b.cfg.GatewayBaseURL+path, g.b.gatewayAuth(ctx), body)
 	}

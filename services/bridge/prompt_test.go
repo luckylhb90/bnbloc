@@ -88,8 +88,8 @@ func TestPromptBudgets(t *testing.T) {
 		// Once per session (cached prefix).
 		{"session guidance (tools, .room/)", guidance, 700},
 		{"session guidance (tools, .room/, team lead)", team, 750},
-		{"tools/list", toolsList, 2200},
-		{"session prefix (guidance + tools/list)", guidance + toolsList, 2900},
+		{"tools/list", toolsList, 2550},
+		{"session prefix (guidance + tools/list)", guidance + toolsList, 3250},
 	} {
 		got := tokens(c.text)
 		t.Logf("%-48s %5d tokens (budget %d)", c.name, got, c.budget)

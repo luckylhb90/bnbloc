@@ -296,6 +296,84 @@
       },
       "name": "post_progress",
       "title": "Post a progress line"
+    },
+    {
+      "annotations": {
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "description": "Read and change the data of this room's interactive apps (site deliverables whose pages store JSON documents in collections). You are an owner: you see every document, with _author, and may change any. Actions: list (the apps; with artifactId, its collections); find (filter, sort, limit (default 50), after=next); get; insert; put (ifAbsent, ifVersion); patch (doc merged, inc added); delete; wipe (all documents, for good: only when the person asked, with confirm). public: readable by all its users. Documents come fenced as the users' data.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "enum": [
+              "list",
+              "find",
+              "get",
+              "insert",
+              "put",
+              "patch",
+              "delete",
+              "wipe"
+            ],
+            "type": "string"
+          },
+          "after": {
+            "type": "string"
+          },
+          "artifactId": {
+            "type": "string"
+          },
+          "collection": {
+            "type": "string"
+          },
+          "confirm": {
+            "type": "boolean"
+          },
+          "doc": {
+            "type": "object"
+          },
+          "filter": {
+            "description": "Field (dotted ok) to a value or {$eq $ne $in $gt $gte $lt $lte $exists}.",
+            "type": "object"
+          },
+          "id": {
+            "type": "string"
+          },
+          "ifAbsent": {
+            "type": "boolean"
+          },
+          "ifVersion": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "inc": {
+            "type": "object"
+          },
+          "limit": {
+            "maximum": 500,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "public": {
+            "type": "boolean"
+          },
+          "sort": {
+            "enum": [
+              "_id",
+              "-_id"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "type": "object"
+      },
+      "name": "app_data",
+      "title": "Read and change an app's data"
     }
   ]
 }

@@ -2288,7 +2288,7 @@ func (b *Bridge) gatewayGET(ctx context.Context, path string) ([]byte, error) {
 // Content-Disposition headers), so the bridge can write it with a real
 // extension and name it in the prompt without a separate metadata call.
 func (b *Bridge) gatewayGETAttachment(ctx context.Context, path string) (data []byte, contentType, filename string, err error) {
-	raw, header, err := b.send(ctx, b.http, http.MethodGet, b.cfg.GatewayBaseURL+path, b.gatewayAuth(ctx), "", nil)
+	raw, header, err := b.send(ctx, b.http, http.MethodGet, b.cfg.GatewayBaseURL+path, b.gatewayAuth(ctx), nil, nil)
 	if err != nil {
 		return nil, "", "", err
 	}
@@ -2444,21 +2444,28 @@ func (b *Bridge) do(ctx context.Context, method, url, token string, body any) ([
 // doRaw sends one request with a raw body (contentType empty = no body) and
 // returns the response body, or a *gatewayError for a non-2xx answer.
 func (b *Bridge) doRaw(ctx context.Context, client *http.Client, method, url, token, contentType string, body io.Reader) ([]byte, error) {
-	raw, _, err := b.send(ctx, client, method, url, token, contentType, body)
+	var header http.Header
+	if contentType != "" {
+		header = http.Header{"Content-Type": {contentType}}
+	}
+	raw, _, err := b.send(ctx, client, method, url, token, header, body)
 	return raw, err
 }
 
 // send is every gateway request the bridge makes outside the room stream:
-// the bearer (token "" = none), the content type, a response body read up
-// to maxGatewayBody, and a *gatewayError for a non-2xx answer. It returns
-// the response headers too (an attachment's type and name).
-func (b *Bridge) send(ctx context.Context, client *http.Client, method, url, token, contentType string, body io.Reader) ([]byte, http.Header, error) {
+// the bearer (token "" = none), the request's other headers (its content
+// type, an app write's conditions), a response body read up to
+// maxGatewayBody, and a *gatewayError for a non-2xx answer. It returns the
+// response headers too (an attachment's type and name).
+func (b *Bridge) send(ctx context.Context, client *http.Client, method, url, token string, header http.Header, body io.Reader) ([]byte, http.Header, error) {
 	req, err := http.NewRequestWithContext(ctx, method, url, body)
 	if err != nil {
 		return nil, nil, err
 	}
-	if contentType != "" {
-		req.Header.Set("Content-Type", contentType)
+	for name, values := range header {
+		for _, v := range values {
+			req.Header.Add(name, v)
+		}
 	}
 	if token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)

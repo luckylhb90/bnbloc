@@ -125,13 +125,14 @@ func (r *Registry) Descriptors() []map[string]any {
 }
 
 // DefaultRegistry holds the room tools: dispatch (step 2), content
-// authoring (step 5) and team progress (step 6).
+// authoring (step 5), team progress (step 6) and interactive apps' data
+// (app_data).
 func DefaultRegistry() *Registry {
 	r := NewRegistry()
 	for _, t := range []Tool{
 		listRoomAgentsTool(), askAgentTool(), roomStatusTool(), readRoomTool(), readArtifactTool(),
 		saveComponentTool(), getComponentTool(), listComponentsTool(), publishComponentTool(), tryDraftTool(),
-		postProgressTool(),
+		postProgressTool(), appDataTool(),
 	} {
 		if err := r.Register(t); err != nil {
 			panic(err) // a static registration bug
