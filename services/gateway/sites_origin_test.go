@@ -155,6 +155,9 @@ func TestParseSitesOrigin(t *testing.T) {
 		"https://sites.bnbloc.example.com":     "https://sites.bnbloc.example.com",
 		"https://Sites.BNBLOC.example.com:443": "https://sites.bnbloc.example.com",
 		"https://bnbloc-usercontent.example:8443": "https://bnbloc-usercontent.example:8443",
+		// The main host is no separate origin: the same as unset.
+		"https://bnbloc.example.com":      "",
+		"https://BNBLOC.example.com:8443": "",
 	} {
 		got, err := ParseSitesOrigin(raw, public)
 		if err != nil || got != want {
@@ -170,8 +173,6 @@ func TestParseSitesOrigin(t *testing.T) {
 		"https://sites.bnbloc.example.com#f",
 		"https://user@sites.bnbloc.example.com",
 		"https://",
-		"https://bnbloc.example.com",
-		"https://BNBLOC.example.com:8443",
 		"https://%zz",
 	} {
 		if got, err := ParseSitesOrigin(raw, public); err == nil {

@@ -178,8 +178,8 @@ its storage or the API:
    `gateway.sitesOrigin` (which adds the host to the Ingress with its own
    `bnbloc-sites-tls` Secret).
 4. Set `BNBLOC_SITES_ORIGIN=https://sites.bnbloc-usercontent.example` on the
-   gateway (a bare https origin; another host than `BNBLOC_PUBLIC_URL`; a
-   malformed value stops the gateway at startup).
+   gateway (a bare https origin; a malformed value stops the gateway at
+   startup; the host of `BNBLOC_PUBLIC_URL` is treated as unset and logged).
 
 The gateway then serves sites, their app data API and the app SDK only on
 that host, refuses everything else there (404: no API, no web client, no

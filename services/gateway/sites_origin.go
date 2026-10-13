@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"fmt"
+	"log"
 	"net/http"
 	"net/url"
 	"strings"
@@ -32,10 +33,12 @@ const SitesOriginEnv = "BNBLOC_SITES_ORIGIN"
 
 // ParseSitesOrigin validates BNBLOC_SITES_ORIGIN: empty (no sites origin),
 // or a bare https origin (scheme and host, an optional port; no path, no
-// trailing slash, no query or credentials) whose host is not the host of
-// publicURL (BNBLOC_PUBLIC_URL; the main origin's cookies would reach it).
-// It answers the canonical form (lower case, no default port). A bad value
-// is a startup error.
+// trailing slash, no query or credentials). It answers the canonical form
+// (lower case, no default port). A bad value is a startup error. A value
+// on the host of publicURL (BNBLOC_PUBLIC_URL) is no separate origin at all
+// (the main origin's cookies would reach it): it means the same as unset —
+// sites served in place, sandbox-only — and is logged, never fatal, so a
+// deployment without its own sites DNS name yet still starts.
 func ParseSitesOrigin(raw, publicURL string) (string, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
@@ -56,7 +59,8 @@ func ParseSitesOrigin(raw, publicURL string) (string, error) {
 	if main := strings.TrimSpace(publicURL); main != "" {
 		pu, err := url.Parse(main)
 		if err == nil && strings.EqualFold(pu.Hostname(), u.Hostname()) {
-			return "", fmt.Errorf("%s must be another host than %s (%s): the main origin's cookies would reach it", SitesOriginEnv, "BNBLOC_PUBLIC_URL", u.Hostname())
+			log.Printf("bnbloc-gateway: %s names the main host %s: no separate sites origin; sites are served in place (sandbox-only)", SitesOriginEnv, u.Hostname())
+			return "", nil
 		}
 	}
 	return "https://" + host, nil
