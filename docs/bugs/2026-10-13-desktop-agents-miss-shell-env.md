@@ -1,6 +1,6 @@
 # Desktop agents miss the member's shell environment (2026-10-13)
 
-Status: fixing.
+Status: fixed (4908134).
 
 ## Symptom
 
@@ -63,4 +63,26 @@ One owner in the shell, `apps/desktop/src-tauri/src/shell_env.rs`:
 - The sandbox's "Environment passed to sandboxed agents" reads values from
   the bridge's environment, which now includes the shell's.
 
-Landing commits: (pending)
+## Exposure
+
+The shell's values now sit in the environment of the bridge, the cores and
+the agent CLIs they start, as they would for a terminal-launched agent. A
+sandboxed turn's guest still gets only `protocol.ForwardEnvAllowlist`
+(the member's listed names only on their own drives), so a borrowed or
+platform drive's commands in the VM never see them. An unsandboxed
+borrowed drive runs on the host as before: it could already read
+`~/.zshrc` there.
+
+## Verification
+
+- Every test of the change was broken once and seen to fail (parse start,
+  the `BNBLOC_*` filter, PATH order, apply over explicit env, the timeout,
+  `Debug` and log lines printing values, the owner test with a caller-built
+  env, `spawn` without `apply`, the shell fallback, the failure outcome).
+- A real `/bin/zsh -ilc` on a developer Mac: 144 names in 0.9 s, count
+  only in the log.
+- `scripts/ci.sh desktop` and `scripts/ci.sh web` pass; no new clippy
+  warning on macOS or the Windows type-check.
+
+Landing commits: 4908134 (shell_env, `child_process::spawn(cmd, &ShellEnv)`,
+the reload command and button, tests, AGENTS.md and the desktop README).
