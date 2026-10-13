@@ -25,6 +25,26 @@ progress". Decided while building:
 - **Host git hardening** neutralizes hooks and fsmonitor; a filter or
   diff driver a guest writes is not, and is documented.
 
+Status (2026-10-14): §2 as revised built on bnbloc's side — no fixed turn
+length, the renewal of a sandboxed turn's command access, the long-quiet
+note. Decided while building:
+- **No bound unless set.** `BNBLOC_BRIDGE_MAX_TURN` defaults to none;
+  without it no `deadlineMs` is sent and only the stall window ends a turn.
+  A core's `deadline` failure without a bridge bound reports the core's own
+  message.
+- **Renewal** is `executionRefresh` (`PUT …/sessions/{sid}/execution`,
+  `core.ExecutionRefresher`); the first token lives 1 hour on a core that
+  takes renewals (renewed every 30 minutes until the turn ends), 4 hours on
+  one that cannot. A failed renewal is logged and retried.
+- **A long-lived exec** (a CLI's exec server) keeps working: vmexec reads
+  `BNBLOC_VMEXEC_TOKEN_FILE` for every request, controls an exec with its
+  starting token and, once that expired, the renewed one; the Sandbox
+  Protocol now lets any exec token of a space control the execs of that
+  space (a sandbox implementation must follow; the conformance step checks
+  it).
+- **Long quiet**: after 10 minutes without a new step the strip says "No
+  new step for N min — still running" instead of rotating notes.
+
 ## 1. Why
 
 A member asked an agent on a desktop core to build an expert from a

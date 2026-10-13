@@ -27,6 +27,10 @@ export const SHOWN_STEPS = 5;
 export const QUIET_AFTER_MS = 20_000;
 /** How long each quiet note shows. */
 export const NOTE_EVERY_MS = 8_000;
+/** A turn this long without a new step says so plainly (a build or a test
+ *  suite can run an hour as one step): it is still running, and only the
+ *  member stops it. */
+export const LONG_QUIET_MS = 10 * 60_000;
 
 const sameSteps = (a: readonly JobStep[], b: readonly JobStep[]) =>
   a.length === b.length && a.every((s, i) => s.kind === b[i]!.kind && s.title === b[i]!.title && s.atMs === b[i]!.atMs);
@@ -112,8 +116,10 @@ export function earlierSteps(p?: JobProgress): JobStep[] {
 
 /** quietNote is the plain note a quiet turn shows (null while steps still
  *  come in): after QUIET_AFTER_MS without a new step, the notes rotate every
- *  NOTE_EVERY_MS. The agent is named as members know it (its provider and
- *  model), never by its core, which names deployment internals. */
+ *  NOTE_EVERY_MS; after LONG_QUIET_MS, one steady note says how long it has
+ *  been and that the turn is still running. The agent is named as members
+ *  know it (its provider and model), never by its core, which names
+ *  deployment internals. */
 export function quietNote(
   job: Pick<AgentJob, "provider" | "model" | "startedAtMs" | "claimedAtMs" | "createdAtMs">,
   p: JobProgress | undefined,
@@ -123,6 +129,7 @@ export function quietNote(
   const since = Math.max(p?.changedAtMs ?? 0, start);
   const quiet = nowMs - since;
   if (quiet < QUIET_AFTER_MS) return null;
+  if (quiet >= LONG_QUIET_MS) return `No new step for ${Math.floor(quiet / 60_000)} min — still running`;
   const mins = Math.floor((nowMs - start) / 60_000);
   const notes = [
     "Complex tasks can take several minutes",

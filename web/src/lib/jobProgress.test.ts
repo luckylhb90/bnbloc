@@ -7,6 +7,7 @@ import {
   NOTE_EVERY_MS,
   pruneProgress,
   QUIET_AFTER_MS,
+  LONG_QUIET_MS,
   quietNote,
   stepLabel,
   turnStart,
@@ -48,6 +49,7 @@ const step = (kind: JobStep["kind"], title: string | undefined, atMs: number): J
 eq(formatElapsed(8_400), "8s", "seconds");
 eq(formatElapsed(185_000), "3m 05s", "minutes");
 eq(formatElapsed(3_720_000), "1h 02m", "hours");
+eq(formatElapsed(8_040_000), "2h 14m", "a turn of hours");
 eq(formatElapsed(-5), "0s", "never negative");
 eq(turnStart({ createdAtMs: 1, claimedAtMs: 2, startedAtMs: 3 }, { jobId: "j", startedAtMs: 4, steps: [], changedAtMs: 0 }), 4, "the turn's own start first");
 eq(turnStart({ createdAtMs: 1, claimedAtMs: 2 }), 2, "else when a bridge took it");
@@ -80,4 +82,8 @@ eq(stepLabel(step("tool", "Bash: ls", 0)), "Bash: ls", "a title as given");
   eq(at(4), "Complex tasks can take several minutes", "rotates");
   eq(quietNote({ provider: "codex", createdAtMs: 0 }, undefined, QUIET_AFTER_MS + 2 * NOTE_EVERY_MS), "codex is working", "no model: no dangling separator");
   eq(quietNote({ provider: "codex", createdAtMs: 0 }, undefined, QUIET_AFTER_MS + 3 * NOTE_EVERY_MS), "Still working", "under a minute");
+  // A long quiet step (a build, a test suite) is said plainly, not killed.
+  eq(quietNote(job, p, 40_000 + LONG_QUIET_MS - 1) === null, false, "still rotating just before");
+  eq(quietNote(job, p, 40_000 + LONG_QUIET_MS), "No new step for 10 min — still running", "long quiet");
+  eq(quietNote(job, p, 40_000 + 47 * 60_000), "No new step for 47 min — still running", "it says how long");
 }
