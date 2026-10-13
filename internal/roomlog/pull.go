@@ -25,11 +25,11 @@ const (
 	chunkMaxBytes   = 12 * 1024
 )
 
-// CtxState tracks a session's shared-context coverage for BOTH delivery
-// models. The pull model (materialized .room/ files) uses OldestSeq/EndSeq/
-// Chunks; the push model (inline prompt context) uses PushSeenSeq. A session
-// uses one model per core, but a pull session can fall back to push mid-life
-// (materialization failure), so the two live in one state.
+// CtxState tracks shared-context coverage for BOTH delivery models. The
+// pull model (materialized .room/ files) uses OldestSeq/EndSeq/Chunks,
+// ReadmeSum and AppsListed: a workspace's, shared by the agent's channel
+// sessions (the bridge keeps it with the workspace); the push model (inline
+// prompt context) uses PushSeenSeq: a session's.
 type CtxState struct {
 	// OldestSeq is the oldest materialized sequence; 0 means full history.
 	OldestSeq int64
@@ -42,20 +42,10 @@ type CtxState struct {
 	// delivered as the [now] section). 0 means nothing pushed yet; the next
 	// push turn delivers a full window before switching to deltas.
 	PushSeenSeq int64
-	// SelfAfterSeq is the session-creation boundary for the self-reply filter.
-	// The agent's own replies with Seq > SelfAfterSeq were produced by THIS
-	// session — its CLI memory holds them, so records drop them as redundancy.
-	// Replies with Seq <= SelfAfterSeq are from PRIOR sessions (a core restart
-	// rebinds to a blank session; the bridge's session table is in-memory, so
-	// every bridge restart rebinds too) — the new session's memory does NOT
-	// hold them, and they are exactly the continuity it needs, so they stay.
-	// Set once at a session's first pull pass; 0 is a valid bound (the room was
-	// empty at creation, so every self reply is this session's).
-	SelfAfterSeq int64
-	// ReadmeSum is the sum of the .room/README.md last written into this
-	// session's workspace (ReadmeUpdate); empty until the first pull pass.
+	// ReadmeSum is the sum of the .room/README.md last written into the
+	// workspace (ReadmeUpdate); empty until the first pull pass.
 	ReadmeSum string
-	// AppsListed: this session's workspace holds a .room/apps.md (the room
+	// AppsListed: the workspace holds a .room/apps.md (the room
 	// had an app), so every pass rewrites it (AppsUpdate).
 	AppsListed bool
 }

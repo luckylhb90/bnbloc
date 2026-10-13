@@ -375,6 +375,20 @@ type driveKey struct {
 	sandboxed            bool
 }
 
+// sessionKey is one channel's session of a drive slot
+// (docs/prd/2026-10-13-sessions-per-channel.md): an agent has a session per
+// channel, so a channel's conversation is its own session's memory, and
+// one workspace (and drive lock) per drive slot, shared by those sessions.
+type sessionKey struct {
+	driveKey
+	channel string
+}
+
+// sessionKey is the drive's channel session.
+func (d *drive) sessionKey() sessionKey {
+	return sessionKey{driveKey: d.key(), channel: d.job.ChannelID}
+}
+
 // agentID is the (room, core, provider) identity both execution kinds of
 // an agent share (its sandbox space is named from it).
 func (k driveKey) agentID() string { return k.room + "\x00" + k.core + "\x00" + k.provider }

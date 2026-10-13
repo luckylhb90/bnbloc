@@ -147,7 +147,8 @@ func (b *Bridge) sessionFiles(ctx context.Context, coreName string) (files corep
 }
 
 // publishDeliverables publishes the turn's produced files as artifact
-// versions. rs.lastPublished holds the file-listing snapshot after the previous
+// versions. The workspace's published listing (workspaceShared, shared by
+// its channel sessions) is the file-listing snapshot after the previous
 // publish; the diff between it and the current listing is what this turn
 // produced. turn.StartMs scopes a cold start to what the current turn actually
 // wrote: files older than the turn are the session's history, not this turn's
@@ -160,10 +161,12 @@ func (b *Bridge) publishDeliverables(ctx context.Context, room, channelID string
 		return
 	}
 	// A turn's publish runs on its own goroutine (publishTurn), so it can
-	// overlap the next turn's; both read and replace lastPublished:
-	// serialize them per session.
-	rs.publishMu.Lock()
-	defer rs.publishMu.Unlock()
+	// overlap the next turn's (of any channel session of the workspace);
+	// both read and replace the published listing: serialize them per
+	// workspace.
+	sh := rs.shared()
+	sh.publishMu.Lock()
+	defer sh.publishMu.Unlock()
 	files, ep, binarySafe, ok := b.sessionFiles(ctx, rs.core)
 	if !ok {
 		slog.Debug("bnbloc bridge deliverables skipped: core offers no session files", "event", "bnbloc.bridge.deliverables_skip", "core", rs.core)
@@ -179,7 +182,7 @@ func (b *Bridge) publishDeliverables(ctx context.Context, room, channelID string
 		return
 	}
 	now := fileStamps(current)
-	cold := rs.lastPublished == nil
+	cold := sh.published == nil
 
 	// Changed = written during this turn (mtime), new since the last publish,
 	// or a (size, mtime) drift. The mtime arm is what a cold start uses: it
@@ -193,7 +196,7 @@ func (b *Bridge) publishDeliverables(ctx context.Context, room, channelID string
 			return touched(f)
 		}
 		// Warm: a stamp drift since the previous turn's publish.
-		prev, existed := rs.lastPublished[f.Path]
+		prev, existed := sh.published[f.Path]
 		return !existed || prev != (fileStamp{Bytes: f.Bytes, MtimeMs: f.MtimeMs})
 	}
 	// changed are the individual deliverables; changedPaths every changed or
@@ -209,13 +212,13 @@ func (b *Bridge) publishDeliverables(ctx context.Context, room, channelID string
 			changed = append(changed, f)
 		}
 	}
-	for p := range rs.lastPublished {
+	for p := range sh.published {
 		if _, still := now[p]; !still {
 			changedPaths = append(changedPaths, p)
 		}
 	}
 	if len(changedPaths) == 0 {
-		rs.lastPublished = now
+		sh.published = now
 		return
 	}
 	// The room's blob cap decides which files can publish at all. Unknown
@@ -227,7 +230,7 @@ func (b *Bridge) publishDeliverables(ctx context.Context, room, channelID string
 			"event", "bnbloc.bridge.deliverables_deferred", "room", room, "error", err)
 		return
 	}
-	rs.lastPublished = now
+	sh.published = now
 	// Static web apps publish as one site snapshot each; their web assets
 	// are then not individual deliverables. Sites need exact bytes.
 	if binarySafe {

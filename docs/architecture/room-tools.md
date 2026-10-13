@@ -197,6 +197,10 @@ text has one owner per category
   `CtxState.AppsListed`), so it never claims an app that is gone. INDEX.md
   names it.
 
+The `.room/` tree is the agent's workspace's, shared by its session of
+every channel (`docs/prd/2026-10-13-sessions-per-channel.md`): one set of
+records, written by whichever session's turn runs (turns on a workspace
+never overlap), each pass continuing what the workspace holds.
 The bridge rewrites `artifacts.md`, `library.md`, `live.md` and (once
 written) `apps.md` every turn (`roomRecordFiles`, beside the history:
 their data changes); a read that

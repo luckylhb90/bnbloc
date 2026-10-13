@@ -29,16 +29,50 @@ import (
 // a bridge restart finds its agents' workspaces; without one they live in
 // memory and a restart starts each agent in a new workspace. A workspace
 // also keeps what bnbloc copied into its .room/deliverables/ (the copies
-// outlive the sessions that read them).
+// outlive the sessions that read them), and, while the bridge runs, what
+// the sessions of that workspace share (workspaceShared): an agent has a
+// session per channel (docs/prd/2026-10-13-sessions-per-channel.md) and
+// one working tree.
 
 // workspacesFile is the bindings file in the state directory.
 const workspacesFile = "workspaces.json"
 
-// agentWorkspace is one slot's workspace: the core's workspace id and the
-// deliverable copies its .room/ holds.
+// agentWorkspace is one slot's workspace: the core's workspace id, the
+// deliverable copies its .room/ holds, and what its sessions share.
 type agentWorkspace struct {
 	id     string
 	copies roomlog.CopyState
+	shared *workspaceShared
+}
+
+// workspaceShared is what the sessions of one workspace share while the
+// bridge runs: the .room/ tree's pull state (the records are the room's,
+// the same for every channel), the file listing deliverable publishing
+// diffs against and the lock that serializes those publishes, and the
+// sandbox fence's baseline (the protected paths bnbloc last left there).
+type workspaceShared struct {
+	mu    sync.Mutex
+	room  roomlog.CtxState
+	fence string
+
+	publishMu sync.Mutex
+	// published is the workspace's file listing as of the previous
+	// deliverable publish (nil before the first): the diff against the
+	// current listing is what changed since. Guarded by publishMu.
+	published map[string]fileStamp
+}
+
+// roomState is the .room/ tree's pull state.
+func (s *workspaceShared) roomState() roomlog.CtxState {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.room
+}
+
+func (s *workspaceShared) setRoomState(st roomlog.CtxState) {
+	s.mu.Lock()
+	s.room = st
+	s.mu.Unlock()
 }
 
 type agentWorkspaces struct {
@@ -91,7 +125,7 @@ func newAgentWorkspaces(dir string) *agentWorkspaces {
 			continue
 		}
 		k := driveKey{room: r.Room, core: r.Core, provider: r.Provider, sandboxed: r.Sandboxed}
-		w.m[k] = agentWorkspace{id: r.WorkspaceID, copies: r.Copies}
+		w.m[k] = agentWorkspace{id: r.WorkspaceID, copies: r.Copies, shared: &workspaceShared{}}
 	}
 	return w
 }
@@ -108,8 +142,19 @@ func (w *agentWorkspaces) id(k driveKey) (string, bool) {
 func (w *agentWorkspaces) bind(k driveKey, id string) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	w.m[k] = agentWorkspace{id: id}
+	w.m[k] = agentWorkspace{id: id, shared: &workspaceShared{}}
 	w.saveLocked()
+}
+
+// shared is what the sessions of workspace id of slot k share (a detached
+// one when the slot is bound to another workspace meanwhile).
+func (w *agentWorkspaces) shared(k driveKey, id string) *workspaceShared {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if ws := w.m[k]; ws.id == id && ws.shared != nil {
+		return ws.shared
+	}
+	return &workspaceShared{}
 }
 
 // unbind drops slot k's binding when it is still workspace id (a
@@ -164,11 +209,18 @@ func (w *agentWorkspaces) setCopies(k driveKey, id string, st roomlog.CopyState)
 }
 
 // roomFilesCleared records that slot k's .room/ tree was removed (the
-// sandbox workdir's reset): its copies are gone.
+// sandbox workdir's reset): its records and copies are gone.
 func (w *agentWorkspaces) roomFilesCleared(k driveKey) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	if ws, ok := w.m[k]; ok && len(ws.copies) > 0 {
+	ws, ok := w.m[k]
+	if !ok {
+		return
+	}
+	if ws.shared != nil {
+		ws.shared.setRoomState(roomlog.CtxState{})
+	}
+	if len(ws.copies) > 0 {
 		ws.copies = nil
 		w.m[k] = ws
 		w.saveLocked()

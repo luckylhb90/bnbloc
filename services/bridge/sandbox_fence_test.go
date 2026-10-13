@@ -80,7 +80,12 @@ func fenceBridge(t *testing.T) (*Bridge, *guestProv, *fakeSandboxd, *sandboxGate
 func (b *Bridge) sandboxedSession() *roomSession {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	return b.sessions[driveKey{room: "room-1", core: "core-a", provider: "codex", sandboxed: true}]
+	for sk, rs := range b.sessions {
+		if sk.driveKey == (driveKey{room: "room-1", core: "core-a", provider: "codex", sandboxed: true}) {
+			return rs
+		}
+	}
+	return nil
 }
 
 // The VM shell gap: inside the sandbox a guest command writes the shared
@@ -187,5 +192,38 @@ func TestSandboxFence_quiescesTheSpaceAroundEveryTurn(t *testing.T) {
 	failing.runBridgeJob(ctx, job("job-4", "bob"))
 	if st := gw.lastStatus(); st["status"] != "failed" || prov.turns != 0 {
 		t.Fatalf("unquiescable space: status %v, turns %d; want the drive refused before any session", st, prov.turns)
+	}
+}
+
+// The channel sessions of one sandboxed workspace share its fence
+// (docs/prd/2026-10-13-sessions-per-channel.md): a second channel's fresh
+// session neither resets the tree the first one wears nor makes it look
+// breached, and a breach in either channel's turn drops both.
+func TestSandboxFence_channelSessionsShareTheWorkspace(t *testing.T) {
+	b, prov, _, _, workdir := fenceBridge(t)
+	ctx := context.Background()
+	inChannel := func(id, ch string) bridgeJob {
+		j := job(id, "bob")
+		j.ChannelID = ch
+		return j
+	}
+	b.runBridgeJob(ctx, inChannel("job-1", "ch"))
+	b.runBridgeJob(ctx, inChannel("job-2", "ch2"))
+	b.runBridgeJob(ctx, inChannel("job-3", "ch"))
+	if len(prov.workdirs) != 1 || len(prov.planted) != 2 || len(prov.inputs) != 1 {
+		t.Fatalf("workspaces %v, sessions %d, inputs %d; want two channel sessions in one workspace, the first reused", prov.workdirs, len(prov.planted), len(prov.inputs))
+	}
+	// A guest write in ch2's turn: both sessions go, the tree is reset.
+	prov.plantNext(".claude/settings.json")
+	b.runBridgeJob(ctx, inChannel("job-4", "ch2"))
+	if _, err := os.Lstat(filepath.Join(workdir, ".claude", "settings.json")); err == nil {
+		t.Fatal("the planted file survived the turn's end")
+	}
+	if b.sandboxedSession() != nil {
+		t.Fatal("a session of the breached workspace is still bound")
+	}
+	b.runBridgeJob(ctx, inChannel("job-5", "ch"))
+	if len(prov.planted) != 3 || prov.planted[2] {
+		t.Fatalf("after the breach: sessions %d, planted at create %v; want a fresh session on a clean tree", len(prov.planted), prov.planted)
 	}
 }

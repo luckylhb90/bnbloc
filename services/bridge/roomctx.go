@@ -137,45 +137,27 @@ func (b *Bridge) roomRecordFiles(ctx context.Context, room, jobID string, self r
 }
 
 // materializeRoomContext refreshes the .room/ tree in the given workspace and
-// returns the updated state. dropText is the current turn's instruction: it is
-// delivered as the [now] section of the prompt, so it is removed from the
-// records (the newest matching entry only — an older identical message is
-// genuine history), and its sender (roomlog.Sender: "jack/codex for maya"
-// for a dispatched task; "" when the fetch did not hold it) is returned for
-// the [now] marker. jobID is the turn's job, whose grant reads the
-// requester's Library. self is this agent, the speaker "owner/provider" of
-// its own replies; its replies from THIS session (Seq past the
-// session-creation boundary, which a fresh pass records) are dropped — the
-// CLI's memory already holds them. Its
-// replies from before the boundary stay: a rebind (core or bridge restart)
-// starts a blank session whose memory does NOT hold them, and they are the
-// continuity the new session needs. Other speakers (people, other agents)
-// always materialize: seeing each other is the point of a shared room. Files
-// are written chunks → recent → records (roomRecordFiles) → INDEX (INDEX
-// last, so a partial write never advertises files that do not exist). State
-// is only advanced on full success, so a failed pass retries cleanly next
-// turn.
-func (b *Bridge) materializeRoomContext(ctx context.Context, w corepkg.WorkspaceFileWriter, ep corepkg.Endpoint, room, workspaceID, jobID, dropText string, self roomlog.Producer, fresh bool, st roomlog.CtxState, g roomlog.Guidance, cp *deliverableCopier) (roomlog.CtxState, string, error) {
-	selfSpeaker := agentSpeakerLabel(self.Owner, self.Provider)
+// returns the updated state. The tree is the workspace's, shared by every
+// channel session of the agent (docs/prd/2026-10-13-sessions-per-channel.md):
+// it holds the room's records, every line of every channel an agent may
+// read, the agent's own replies and the current message included (a filter
+// of one session would hide them from another session, whose memory does
+// not hold them; the turn answers its [now] message alone, records are
+// background). now is the current turn's message: its sender as the
+// history records it (roomlog.Sender: "jack/codex for maya" for a
+// dispatched task; "" when the fetch did not hold it) is returned for the
+// [now] marker. jobID is the turn's job, whose grant reads the requester's
+// Library. self is this agent. Files are written chunks → recent → records
+// (roomRecordFiles) → INDEX (INDEX last, so a partial write never
+// advertises files that do not exist). State is only advanced on full
+// success, so a failed pass retries cleanly next turn.
+func (b *Bridge) materializeRoomContext(ctx context.Context, w corepkg.WorkspaceFileWriter, ep corepkg.Endpoint, room, workspaceID, jobID, now string, self roomlog.Producer, st roomlog.CtxState, g roomlog.Guidance, cp *deliverableCopier) (roomlog.CtxState, string, error) {
 	entries, complete, err := roomlog.History(ctx, b.gatewayGET, room, roomlog.HistoryQuery{After: st.EndSeq})
 	if err != nil {
 		return st, "", err
 	}
-	entries, from := dropInstruction(entries, dropText)
-	bound := st.SelfAfterSeq
-	if fresh {
-		// A brand-new session: everything fetched predates it, so all of
-		// its own replies are prior sessions' and must stay.
-		bound = noSelfBound
-	}
-	entries = dropSelf(entries, selfSpeaker, bound)
+	from := instructionSender(entries, now)
 	files, newState := roomlog.Materialize(entries, complete, st)
-	if fresh {
-		// Record the session-creation boundary: everything materialized above
-		// predates this session; its own replies from here on are the
-		// session-memory redundancy the bound filters.
-		newState.SelfAfterSeq = newState.EndSeq
-	}
 	// Insert the records before the trailing INDEX.
 	records, recorded := b.roomRecordFiles(ctx, room, jobID, self, st, g, cp)
 	newState.ReadmeSum, newState.AppsListed = recorded.ReadmeSum, recorded.AppsListed
@@ -193,12 +175,13 @@ func (b *Bridge) materializeRoomContext(ctx context.Context, w corepkg.Workspace
 }
 
 // drivePrompt builds a turn's prompt. A pull-capable core gets the pointer
-// prompt over materialized .room/ files (fresh sessions seed the tree before
-// the session is created — the workspace exists, the session does not yet);
-// any materialization failure falls back to the push model for this turn. A
-// core without the writer capability uses the push model every turn. The
-// [now] marker names the message's sender as the room history records it,
-// else the job's requester.
+// prompt over the workspace's materialized .room/ files (a fresh session's
+// first pass runs before the session is created — the workspace exists, the
+// session does not yet); any materialization failure falls back to the push
+// model for this turn. A core without the writer capability uses the push
+// model every turn, with the session's own push state st. The [now] marker
+// names the message's sender as the room history records it, else the
+// job's requester.
 func (b *Bridge) drivePrompt(ctx context.Context, d *drive, workspaceID string, atts []writtenAttachment, st *roomlog.CtxState, g roomlog.Guidance, fresh bool) string {
 	room, owner, provider, text := d.job.RoomID, d.owner, d.job.Provider, d.text
 	now := roomlog.Now{From: d.job.RequesterUserID, Text: text, Attachments: toPromptAttachments(atts)}
@@ -207,22 +190,20 @@ func (b *Bridge) drivePrompt(ctx context.Context, d *drive, workspaceID string, 
 		return b.driveTextDelta(ctx, room, owner, provider, now, st, fresh)
 	}
 	w, ep := d.caps.writer, entry.endpoint
-	// Materialize: fresh sessions start from an empty state.
-	start := *st
-	if fresh {
-		start = roomlog.CtxState{}
-	}
+	// The tree is the workspace's: a session continues what the workspace
+	// holds, whichever of the agent's sessions wrote it.
+	shared := b.workspaces.shared(d.key(), workspaceID)
 	var cp *deliverableCopier
 	if d.caps.bytesWriter != nil {
 		cp = &deliverableCopier{key: d.key(), workspaceID: workspaceID, w: d.caps.bytesWriter, ep: ep}
 	}
-	newSt, from, err := b.materializeRoomContext(ctx, w, ep, room, workspaceID, d.job.JobID, text, roomlog.Producer{Owner: owner, Provider: provider, Core: d.core}, fresh, start, g, cp)
+	newSt, from, err := b.materializeRoomContext(ctx, w, ep, room, workspaceID, d.job.JobID, text, roomlog.Producer{Owner: owner, Provider: provider, Core: d.core}, shared.roomState(), g, cp)
 	if err != nil {
 		slog.Warn("bnbloc bridge room-context materialization failed; falling back to pushed context",
 			"event", "bnbloc.bridge.roomctx_failed", "room", room, "core", d.core, "error", err)
 		return b.driveTextDelta(ctx, room, owner, provider, now, st, fresh)
 	}
-	*st = newSt
+	shared.setRoomState(newSt)
 	if from != "" {
 		now.From = from
 	}
@@ -346,6 +327,13 @@ func (b *Bridge) driveTextDelta(ctx context.Context, room, owner, provider strin
 // noSelfBound keeps every one of the agent's own replies (dropSelf): a fresh
 // session's memory holds none of them.
 const noSelfBound = int64(1) << 62
+
+// instructionSender is the sender of the current instruction as the
+// history records it (the newest entry with its text; "" when none).
+func instructionSender(entries []roomlog.Entry, text string) string {
+	_, from := dropInstruction(append([]roomlog.Entry(nil), entries...), text)
+	return from
+}
 
 // dropInstruction removes the current instruction from the records: it is
 // delivered as the [now] section, so a copy would both duplicate it and

@@ -358,7 +358,8 @@ func TestRoomRecordsWriteAppsOnceTheRoomHasOne(t *testing.T) {
 // .room/README.md is static: a session's first pass writes it, follow-up
 // turns do not rewrite it while its content is unchanged, and the records
 // whose data changes (artifacts.md, library.md) are rewritten every turn. A
-// new session (a fresh workspace) writes it again.
+// new session in the same workspace finds it there; a fresh workspace gets
+// it again.
 func TestDriveClaimPullWritesReadmeOnlyWhenChanged(t *testing.T) {
 	prov := &profileProv{}
 	b := newProfileBridge(t, prov)
@@ -381,15 +382,23 @@ func TestDriveClaimPullWritesReadmeOnlyWhenChanged(t *testing.T) {
 	if n[".room/artifacts.md"] != 3 || n[".room/library.md"] != 3 {
 		t.Fatalf("per-turn records written %v, want three each", n)
 	}
-	// A new session starts from a fresh workspace: the README is written again.
+	// A new session in the same workspace finds the README there.
 	b.mu.Lock()
 	b.forgetRoom("r1")
 	b.mu.Unlock()
 	if _, err := b.driveClaim(context.Background(), testDrive(b, jobRef{ID: "job-new"}, "r1", "maya", "core-a", "agent-a", "t", "new session", "ch"), nil); err != nil {
 		t.Fatal(err)
 	}
+	if got := count()[".room/README.md"]; got != 1 {
+		t.Fatalf("README.md written %d times after a new session in the same workspace, want once", got)
+	}
+	// A fresh workspace (a bridge that kept no bindings) writes it again.
+	fresh := New(b.cfg)
+	if _, err := fresh.driveClaim(context.Background(), testDrive(fresh, jobRef{ID: "job-fresh"}, "r1", "maya", "core-a", "agent-a", "t", "fresh workspace", "ch"), nil); err != nil {
+		t.Fatal(err)
+	}
 	if got := count()[".room/README.md"]; got != 2 {
-		t.Fatalf("README.md written %d times after a new session, want 2", got)
+		t.Fatalf("README.md written %d times after a fresh workspace, want 2", got)
 	}
 }
 
@@ -416,16 +425,20 @@ func TestDriveClaimPullFallsBackOnWriterFailure(t *testing.T) {
 	}
 }
 
-// The current instruction must not appear in the materialized records: it is
-// delivered as the [now] section of the prompt, and a copy in recent.md would
-// both duplicate it and re-inject it as history on later turns.
-func TestMaterializeDropsCurrentInstructionFromRecords(t *testing.T) {
+// The .room/ tree is the workspace's, shared by every channel session of
+// the agent (docs/prd/2026-10-13-sessions-per-channel.md): it keeps every
+// line of every channel an agent may read, the agent's own replies and the
+// current message included (a filter of one session would hide them from
+// another session, whose memory does not hold them), and a pass continues
+// what the workspace holds. The current message's sender is returned for
+// the [now] marker.
+func TestMaterializeKeepsEveryLineInTheSharedTree(t *testing.T) {
 	g := newPullGateway(t)
-	g.setHistory("general", []int64{10, 11}, map[int64]string{
-		10: "older unrelated message",
-		11: "create final_check.rs: print done",
-	})
+	g.setHistory("general", []int64{10}, map[int64]string{10: "person asks"})
+	g.addAgentRow("general", 11, "maya", "agent-a", "my reply in general")
 	g.setHistory("test", []int64{}, nil)
+	g.addAgentRow("test", 12, "maya", "opencode", "peer agent answers")
+	g.addChatRow("test", 13, "jack", "create final_check.rs: print done")
 	prov := &fakeCoreProvider{url: g.srv.URL}
 	b := New(Config{
 		GatewayBaseURL: g.srv.URL,
@@ -437,50 +450,7 @@ func TestMaterializeDropsCurrentInstructionFromRecords(t *testing.T) {
 	if !ok {
 		t.Fatal("fake provider must satisfy WorkspaceFileWriter")
 	}
-	_, _, err := b.materializeRoomContext(context.Background(), w, ep, "r1", "ws", "job-x", "create final_check.rs: print done", roomlog.Producer{Owner: "maya", Provider: "agent-a"}, true, roomlog.CtxState{}, roomlog.Guidance{HasRoomFiles: true}, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	// The written recent.md must contain the older message but not the instruction.
-	var recent string
-	for _, wr := range prov.roomFileWrites() {
-		if strings.HasSuffix(wr.path, "recent.md") {
-			recent = wr.content
-		}
-	}
-	if recent == "" {
-		t.Fatal("recent.md not written")
-	}
-	if strings.Contains(recent, "final_check") {
-		t.Fatalf("current instruction leaked into records:\n%s", recent)
-	}
-	if !strings.Contains(recent, "older unrelated message") {
-		t.Fatalf("genuine history must remain:\n%s", recent)
-	}
-}
-
-// Self-reply filtering is bounded by the session-creation boundary. A FRESH
-// session keeps its own prior replies — a rebind starts a blank CLI (bridge
-// restarts rebind every session, and the bridge's session table is
-// in-memory), so without them the agent forgets its own work while
-// remembering everyone else's. A follow-up pass drops only the replies THIS
-// session produced (its CLI memory holds them); other speakers always stay.
-func TestMaterializeSelfFilterIsSessionBounded(t *testing.T) {
-	newBridge := func(g *pullGateway) (*Bridge, corepkg.WorkspaceFileWriter, corepkg.Endpoint, *fakeCoreProvider) {
-		prov := &fakeCoreProvider{url: g.srv.URL}
-		b := New(Config{
-			GatewayBaseURL: g.srv.URL,
-			GatewayToken:   "t",
-			OwnerSubject:   "maya",
-			Cores:          []CoreConfig{{Name: "core-a", Provider: prov, Endpoint: corepkg.Endpoint{BaseURL: g.srv.URL}}},
-		})
-		w, ep, ok := testWriter(b, "core-a")
-		if !ok {
-			t.Fatal("fake provider must satisfy WorkspaceFileWriter")
-		}
-		return b, w, ep, prov
-	}
-	recentOf := func(prov *fakeCoreProvider) string {
+	recentOf := func() string {
 		var recent string
 		for _, wr := range prov.roomFileWrites() {
 			if strings.HasSuffix(wr.path, "recent.md") {
@@ -489,52 +459,30 @@ func TestMaterializeSelfFilterIsSessionBounded(t *testing.T) {
 		}
 		return recent
 	}
-
-	// Fresh session: its own prior replies STAY (continuity across a rebind).
-	g := newPullGateway(t)
-	g.setHistory("general", []int64{10}, map[int64]string{10: "person asks"})
-	g.addAgentRow("general", 11, "maya", "agent-a", "my earlier-session reply")
-	g.setHistory("test", []int64{}, nil)
-	g.addAgentRow("test", 12, "maya", "opencode", "peer agent answers")
-	b, w, ep, prov := newBridge(g)
-	st, _, err := b.materializeRoomContext(context.Background(), w, ep, "r1", "ws", "job-x", "", roomlog.Producer{Owner: "maya", Provider: "agent-a"}, true, roomlog.CtxState{}, roomlog.Guidance{HasRoomFiles: true}, nil)
+	self := roomlog.Producer{Owner: "maya", Provider: "agent-a"}
+	st, from, err := b.materializeRoomContext(context.Background(), w, ep, "r1", "ws", "job-x", "create final_check.rs: print done", self, roomlog.CtxState{}, roomlog.Guidance{HasRoomFiles: true}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	recent := recentOf(prov)
-	if !strings.Contains(recent, "my earlier-session reply") {
-		t.Fatalf("a fresh (rebound) session must see its own prior replies:\n%s", recent)
+	if from != "jack" {
+		t.Fatalf("instruction sender = %q, want jack", from)
 	}
-	if !strings.Contains(recent, "person asks") || !strings.Contains(recent, "peer agent answers") {
-		t.Fatalf("others must always materialize:\n%s", recent)
-	}
-	if st.SelfAfterSeq == 0 {
-		t.Fatalf("fresh pass must record the session boundary, got %+v", st)
+	recent := recentOf()
+	for _, want := range []string{"person asks", "my reply in general", "peer agent answers", "final_check"} {
+		if !strings.Contains(recent, want) {
+			t.Errorf("the shared records lack %q:\n%s", want, recent)
+		}
 	}
 
-	// Follow-up: only THIS session's own replies drop; prior ones stay.
-	g2 := newPullGateway(t)
-	g2.setHistory("general", []int64{10}, map[int64]string{10: "person asks"})
-	g2.addAgentRow("general", 11, "maya", "agent-a", "my earlier-session reply")
-	g2.setHistory("test", []int64{}, nil)
-	g2.addAgentRow("test", 12, "maya", "opencode", "peer agent answers")
-	// New since the bound: the session's own reply and a new person line.
-	g2.addAgentRow("general", 13, "maya", "agent-a", "my this-session reply")
-	g2.addChatRow("test", 14, "jack", "new person line")
-	b2, w2, ep2, prov2 := newBridge(g2)
-	st2 := roomlog.CtxState{EndSeq: 12, Chunks: []string{".room/chunk-x.md"}, SelfAfterSeq: 12}
-	if _, _, err := b2.materializeRoomContext(context.Background(), w2, ep2, "r1", "ws", "job-x", "", roomlog.Producer{Owner: "maya", Provider: "agent-a"}, false, st2, roomlog.Guidance{HasRoomFiles: true}, nil); err != nil {
+	// The next pass (another channel's session) continues the workspace's
+	// state: only what is new is fetched into a new chunk.
+	g.addAgentRow("general", 14, "maya", "agent-a", "my next reply")
+	st2, _, err := b.materializeRoomContext(context.Background(), w, ep, "r1", "ws", "job-y", "", self, st, roomlog.Guidance{HasRoomFiles: true}, nil)
+	if err != nil {
 		t.Fatal(err)
 	}
-	recent2 := recentOf(prov2)
-	if strings.Contains(recent2, "my this-session reply") {
-		t.Fatalf("this session's own reply is session memory; records must drop it:\n%s", recent2)
-	}
-	if !strings.Contains(recent2, "new person line") {
-		t.Fatalf("the delta's other messages must stay:\n%s", recent2)
-	}
-	if !strings.Contains(recent2, "my earlier-session reply") {
-		t.Fatalf("prior-session self replies must stay across passes:\n%s", recent2)
+	if st2.EndSeq != 14 || len(st2.Chunks) != len(st.Chunks)+1 || !strings.Contains(recentOf(), "my next reply") {
+		t.Fatalf("continued pass: state %+v after %+v", st2, st)
 	}
 }
 

@@ -299,10 +299,32 @@ func (b *Bridge) targetTransports(coreName, target, provider string) []string {
 
 // unbindLocked drops a session binding and releases what its contributors
 // granted (asynchronously: callers hold b.mu). Callers hold b.mu.
-func (b *Bridge) unbindLocked(key driveKey) {
-	rs := b.sessions[key]
-	delete(b.sessions, key)
+func (b *Bridge) unbindLocked(sk sessionKey) {
+	rs := b.sessions[sk]
+	delete(b.sessions, sk)
 	if rs != nil {
 		go rs.release()
 	}
+}
+
+// unbindWorkspaceLocked drops every channel session of workspace slot key
+// (its tree is no longer what they were started on). Callers hold b.mu.
+func (b *Bridge) unbindWorkspaceLocked(key driveKey) {
+	for sk := range b.sessions {
+		if sk.driveKey == key {
+			b.unbindLocked(sk)
+		}
+	}
+}
+
+// workspaceBound reports whether any channel session of slot key is bound.
+func (b *Bridge) workspaceBound(key driveKey) bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	for sk := range b.sessions {
+		if sk.driveKey == key {
+			return true
+		}
+	}
+	return false
 }

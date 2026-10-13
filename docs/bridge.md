@@ -44,7 +44,7 @@ One bridge acts for one member (`BNBLOC_BRIDGE_OWNER`). It:
    (`publishTurn`; `docs/bugs/2026-10-13-demo-app-build-issues.md`).
 
 **Shared room context** is pull-based. History is not pushed into the prompt —
-it is materialized once per session into a `.room/` directory inside the
+it is materialized into a `.room/` directory inside the
 agent's own workspace, and the prompt carries only a pointer. The agent
 consults the records with its own file tools when a task needs prior context,
 so history never competes with the current instruction for attention (pushing
@@ -87,9 +87,13 @@ on a core without `agentProfile`: static guidance never rides a turn.
 
 The fetch pages **every** channel of the room (the old push model only read the
 default channel, so most of a multi-channel room's conversation never reached
-the agent), merges chronologically, and follow-up turns materialize only the
-delta past the session's last-covered seq. The current instruction is dropped
-from the records — it is delivered as the `[now]` section. The history API
+the agent), merges chronologically, and later passes materialize only the
+delta past what the workspace's tree covers. The tree is the workspace's,
+shared by the agent's session of every channel
+(`docs/prd/2026-10-13-sessions-per-channel.md`), so it keeps every line, the
+agent's own replies and the current message included: one session's filter
+would hide them from another channel's session, whose memory does not hold
+them. The turn answers its `[now]` message alone. The history API
 returns pages in **ascending** order with the newest `limit` messages below the
 cursor; the paging cursor is the page's oldest seq.
 
@@ -105,9 +109,10 @@ advances over everything fetched — the rows filtered out included, since the
 agent authored the self replies and receives the instruction as `[now]`.
 
 Both models share the guarantees: every channel of the room is fetched (never
-just the default channel), the agent's own past replies never re-enter (its
-session memory already holds them), the current instruction appears exactly
-once, and every history section is headed as records, never requests. The session
+just the default channel) and every history section is headed as records,
+never requests. The push model, being one session's prompt, also leaves out
+the agent's own past replies of that session (its memory holds them) and
+the current instruction (it is the `[now]` section). The session
 workspace file manifest is no longer injected in either model: the workspace is
 the agent's own, so its contents are self-redundant.
 
@@ -206,10 +211,13 @@ to a core.
   `.room/` context and attachments land where the confined CLI and the guest
   see them. A failed ensure/mint fails the drive visibly — it never falls back
   to the host.
-- **Separate sessions per execution kind.** Sessions (and drive locks) are
-  keyed `room, core, provider[, sandbox]`: when an agent's execution kind
-  changes (mode switch, sandbox ready/unavailable, own vs borrowed), the new
-  kind gets its own session and workspace; nothing is rebound or moved.
+- **Separate workspaces per execution kind, sessions per channel.**
+  Workspaces and drive locks are keyed `room, core, provider[, sandbox]`,
+  sessions also by channel: each channel's conversation is its own session,
+  in the agent's one workspace, and two channels' turns queue on the
+  workspace's lock. When an agent's execution kind changes (mode switch,
+  sandbox ready/unavailable, own vs borrowed), the new kind gets its own
+  sessions and workspace; nothing is rebound or moved.
 - **Roster badge.** The room subscription advertises `&sandboxed=` (the
   `core/provider` pairs whose borrowed drives run sandboxed); realtime carries
   it as `sandboxed` on the room roster and the web shows a shield on those

@@ -42,6 +42,13 @@ type fsCore struct {
 	// copyWrites counts bnbloc's writes under .room/deliverables/.
 	copyWrites []string
 	started    bool
+	// turnPolls makes every turn report busy that many polls after it
+	// started; inTurn and overlaps catch a turn that starts while another
+	// one runs in the same core.
+	turnPolls int
+	busy      int
+	inTurn    bool
+	overlaps  int
 }
 
 type fsSession struct {
@@ -50,6 +57,9 @@ type fsSession struct {
 	// files is what the workspace held when the session (and its harness)
 	// started.
 	files []string
+	// turns are the messages the session received: its initial prompt and
+	// every input (its conversation).
+	turns []string
 }
 
 func newFSCore(t *testing.T) *fsCore {
@@ -87,15 +97,20 @@ func (c *fsCore) CreateSession(_ context.Context, _ corepkg.Endpoint, req corepk
 	if !c.held(req.WorkspaceID) {
 		return corepkg.SessionResult{}, notFound("/workspaces/" + req.WorkspaceID + "/sessions")
 	}
-	s := fsSession{id: fmt.Sprintf("s%d", len(c.sessions)+1), workspace: req.WorkspaceID, profile: req.Profile, files: c.listLocked(req.WorkspaceID)}
+	s := fsSession{id: fmt.Sprintf("s%d", len(c.sessions)+1), workspace: req.WorkspaceID, profile: req.Profile, files: c.listLocked(req.WorkspaceID), turns: []string{req.Prompt}}
 	c.sessions = append(c.sessions, s)
 	c.workLocked(req.WorkspaceID)
 	return corepkg.SessionResult{SessionID: s.id}, nil
 }
 
-func (c *fsCore) SendInput(_ context.Context, _ corepkg.Endpoint, ws, _, _ string, _ corepkg.SessionOptions) error {
+func (c *fsCore) SendInput(_ context.Context, _ corepkg.Endpoint, ws, sess, text string, _ corepkg.SessionOptions) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	for i := range c.sessions {
+		if c.sessions[i].id == sess {
+			c.sessions[i].turns = append(c.sessions[i].turns, text)
+		}
+	}
 	c.workLocked(ws)
 	return nil
 }
@@ -109,6 +124,10 @@ func (c *fsCore) workLocked(ws string) {
 	}
 	c.turnFiles = nil
 	c.started = true
+	if c.inTurn {
+		c.overlaps++
+	}
+	c.inTurn, c.busy = true, c.turnPolls
 }
 
 // listLocked lists ws's files outside .room/ (the agent's own).
@@ -151,6 +170,11 @@ func (c *fsCore) PollTurn(_ context.Context, _ corepkg.Endpoint, _, sess string)
 		c.started = false
 		return corepkg.TurnStatus{}, nil
 	}
+	if c.busy > 0 {
+		c.busy--
+		return corepkg.TurnStatus{}, nil
+	}
+	c.inTurn = false
 	return corepkg.TurnStatus{Idle: true}, nil
 }
 

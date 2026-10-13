@@ -342,7 +342,7 @@ func TestRefreshRosterFollowsEndpointChange(t *testing.T) {
 		Cores:          []CoreConfig{{Name: "core-a", Provider: prov, Endpoint: prov.ep}},
 	})
 	// A live bound session on the discovery-capable core.
-	key := driveKey{room: "room1", core: "core-a", provider: "codex"}
+	key := sessionKey{driveKey: driveKey{room: "room1", core: "core-a", provider: "codex"}, channel: "ch"}
 	b.sessions[key] = &roomSession{core: "core-a", workspaceID: "w", sessionID: "s"}
 
 	// Same endpoint: refresh must NOT evict the session.

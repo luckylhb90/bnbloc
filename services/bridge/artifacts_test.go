@@ -333,7 +333,7 @@ func TestPublishDeliverablesSkipsCoreWithoutSessionFiles(t *testing.T) {
 	if len(cg.creates) != 0 || len(cg.publishes) != 0 {
 		t.Fatalf("core without SessionFiles published: creates=%d publishes=%d", len(cg.creates), len(cg.publishes))
 	}
-	if rs.lastPublished != nil {
+	if rs.shared().published != nil {
 		t.Fatal("skipped publish must not record a snapshot")
 	}
 }

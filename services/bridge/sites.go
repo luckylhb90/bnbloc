@@ -212,7 +212,7 @@ func (b *Bridge) publishSites(ctx context.Context, room, channelID string, rs *r
 		if i >= maxSitesPerPass {
 			slog.Info("bnbloc bridge site deferred: per-pass cap",
 				"event", "bnbloc.bridge.site_deferred", "room", room, "root", site.root, "cap", maxSitesPerPass)
-			delete(rs.lastPublished, path.Join(site.root, siteRootIndex))
+			delete(rs.shared().published, path.Join(site.root, siteRootIndex))
 			continue
 		}
 		b.publishSite(ctx, room, channelID, rs, files, ep, current, site, maxBytes, turn)

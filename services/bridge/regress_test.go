@@ -284,9 +284,9 @@ func TestSyncPlanUsesRoomSessionWorkspace(t *testing.T) {
 	older.markTurn(deliverableTurn{StartMs: 100})
 	newer := &roomSession{core: "core-a", workspaceID: "w2", sessionID: "s2"}
 	newer.markTurn(deliverableTurn{StartMs: 200})
-	b.sessions[driveKey{room: "room1", core: "core-a", provider: "codex"}] = older
-	b.sessions[driveKey{room: "room1", core: "core-a", provider: "claude"}] = newer
-	b.sessions[driveKey{room: "room10", core: "core-a", provider: "codex"}] = &roomSession{core: "core-a", workspaceID: "wx", sessionID: "sx"}
+	b.sessions[sessionKey{driveKey: driveKey{room: "room1", core: "core-a", provider: "codex"}}] = older
+	b.sessions[sessionKey{driveKey: driveKey{room: "room1", core: "core-a", provider: "claude"}}] = newer
+	b.sessions[sessionKey{driveKey: driveKey{room: "room10", core: "core-a", provider: "codex"}}] = &roomSession{core: "core-a", workspaceID: "wx", sessionID: "sx"}
 
 	mode, dir, _ := b.syncPlan(context.Background(), "room1")
 	if mode != "mutagen" || dir != "/proj/two" {
@@ -295,7 +295,7 @@ func TestSyncPlanUsesRoomSessionWorkspace(t *testing.T) {
 }
 
 // BR-14: one turn's publish goroutine and the next turn's may run on the
-// same session at once; they must not race on lastPublished
+// same workspace at once; they must not race on its published listing
 // (run with -race).
 func TestConcurrentPublishDeliverablesIsSerialized(t *testing.T) {
 	fc := newFakeCore()
@@ -311,7 +311,7 @@ func TestConcurrentPublishDeliverablesIsSerialized(t *testing.T) {
 		}()
 	}
 	wg.Wait()
-	if rs.lastPublished == nil {
+	if rs.shared().published == nil {
 		t.Fatal("publish did not record the file-listing snapshot")
 	}
 }

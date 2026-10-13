@@ -988,20 +988,24 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   owner's own drive, no foreign script content), the names the member
   listed (`BNBLOC_SANDBOX_ENV`, rule `pkgmeta.ValidForwardEnv`, the
   desktop's pinned copy `valid_forward_env`). Names only travel; never pass
-  the owner's names to a borrowed or platform drive. Sessions and locks are keyed by execution
-  kind (`driveKey`): switching host↔sandbox starts a new session and
-  workspace (created IN the sandbox workdir via `CreateWorkspaceAt`). Nothing
-  is moved.
+  the owner's names to a borrowed or platform drive. Workspaces, sessions
+  and locks are keyed by execution kind (`driveKey`): switching
+  host↔sandbox starts a new session and workspace (created IN the sandbox
+  workdir via `CreateWorkspaceAt`). Nothing is moved.
 - **Guest commands write the shared workdir past the host deny-write; the
   turn fence covers it** (`services/bridge/sandbox_fence.go`). After every
   sandboxed turn the bridge deletes the space without purge (its processes
   die, its tokens are revoked; the next prepare re-ensures it, quiescing
   first a space it has not quiesced itself and refusing the drive when it
   cannot), then checks the protected paths' fingerprint against the
-  session's baseline (taken before a follow-up turn's input, or after a
-  fresh session's create); a change drops the session and removes every
-  protected path (`resetProtectedPaths`), so no harness starts on config a
-  guest wrote (`TestSandboxFence_*`). Never skip the quiesce to keep a
+  workspace's baseline (`workspaceShared.fence`, shared by its channel
+  sessions; taken before a follow-up turn's input, or after a fresh
+  session's create); a change drops every session of the workspace and
+  removes every protected path (`resetProtectedPaths`), so no harness
+  starts on config a guest wrote (`TestSandboxFence_*`). A fresh session
+  resets the protected paths first only when no other session of the
+  workspace is bound (what is there is bnbloc's own, fence-verified, and
+  worn by that session). Never skip the quiesce to keep a
   guest process alive between turns, and never trust a protected path a
   sandboxed turn could have written.
 - **`bnbloc-vmexec` confine: write-deny by default.** Only the workspace,
@@ -1040,8 +1044,12 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   profile, room tools and records: the drive fails `core_unavailable`
   (retried) before anything reaches it. Own, borrowed,
   platform, sandboxed and dispatched drives differ only in the inputs to
-  stages 4 and 5: never add a per-kind drive path. A drive slot (session
-  and drive lock) is a `driveKey` (room, core, provider, execution kind);
+  stages 4 and 5: never add a per-kind drive path. A drive slot
+  (workspace and drive lock) is a `driveKey` (room, core, provider,
+  execution kind); a session is a `sessionKey` (the slot and the channel:
+  `docs/prd/2026-10-13-sessions-per-channel.md`), so each channel's
+  conversation is its own session's memory, and the slot's lock keeps two
+  channels' turns from ever running in one working tree at once;
   `TestNoHandRolledAgentRefs` forbids a hand-built key, a `"shared-agent:"`
   literal (use `shareagent.PlatformTarget`) and a core/provider `+"/"+`
   join (use `core.QualifyTargetID`/`SplitTargetID`) in the bridge. A
@@ -1063,7 +1071,13 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   drops its bindings. A deliverable's identity is the agent's, not the
   session's (`artifactIDForFile`: room, owner, core, provider, path), so
   a file edited in a later session publishes a new version of the same
-  deliverable. Never create a workspace per session again.
+  deliverable. What the sessions of a workspace share at run time is the
+  workspace's (`workspaceShared`): the `.room/` tree's pull state (the
+  records keep every line of every agent-readable channel, the agent's
+  own replies and the current message included: a session's filter would
+  hide them from another channel's session), the listing deliverable
+  publishing diffs against (and its lock), the sandbox fence. Never
+  create a workspace per session again.
 - **A job retries only when no agent work can have started.**
   `store.retryBackoffs` is the one retry table: a reason retries
   (`AgentJobFailureReason.Retryable`) exactly when it has a row, and the

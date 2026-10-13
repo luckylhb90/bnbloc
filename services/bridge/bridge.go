@@ -199,7 +199,7 @@ type Bridge struct {
 	driveCtx context.Context
 	mu       sync.Mutex
 	rooms    map[string]context.CancelFunc // roomId -> stream canceller
-	sessions map[driveKey]*roomSession     // drive slot -> bound session
+	sessions map[sessionKey]*roomSession   // channel session -> bound session
 	// workspaces is each drive slot's workspace, which outlives its
 	// sessions (workspaces.go).
 	workspaces *agentWorkspaces
@@ -263,22 +263,18 @@ type roomSession struct {
 	workspaceID string
 	sessionID   string
 	lastVersion int64 // last reflowed message cursor
-	// lastPublished is the session workspace's file listing as of the previous
-	// deliverable publish (nil before the first observed turn). The diff against
-	// the current manifest is what changed since.
-	lastPublished map[string]fileStamp
+	// ws is what the session shares with the other sessions of its
+	// workspace (workspaceShared: the .room/ pull state, the publish
+	// listing, the fence baseline); read through shared().
+	ws *workspaceShared
 	// turn is the in-flight turn: when it began (deliverable publishing scopes
 	// a cold-start session to this turn's own output) and the job + prompting
 	// message its published versions link to. Guarded by mu (read by sync
 	// planning on another goroutine).
 	turn deliverableTurn
-	// publishMu serializes deliverable publishes for this session: the
-	// post-turn publish runs on its own goroutine while the next turn's reflow
-	// publishes periodically, and both read+replace lastPublished.
-	publishMu sync.Mutex
-	// ctx tracks the pull-based room context materialized into the session
-	// workspace's .room/ directory: which history chunks exist and how far
-	// they reach. Zero value = nothing materialized yet.
+	// ctx is the session's push-model state (what its prompts carried:
+	// CtxState.PushSeenSeq); the .room/ tree's pull state is the
+	// workspace's (workspaceShared).
 	ctx          roomlog.CtxState
 	stateVersion int64 // monotonic version for agent_session_state reports
 	// profileSum is the content checksum of the agent profile the session
@@ -291,12 +287,22 @@ type roomSession struct {
 	// hooks are the session contributors' turn/release callbacks (guarded
 	// by mu).
 	hooks sessionHooks
-	// workdir is a sandboxed session's shared workdir ("" on the host), and
-	// fence the fingerprint of its protected paths its turns must find
-	// (guarded by mu; the turn fence, sandbox_fence.go).
+	// workdir is a sandboxed session's shared workdir ("" on the host);
+	// the fingerprint of its protected paths its turns must find is the
+	// workspace's (the turn fence, sandbox_fence.go).
 	workdir string
-	fence   string
 	mu      sync.Mutex
+}
+
+// shared is what the session shares with the other sessions of its
+// workspace (a session made outside ensureSession gets its own).
+func (rs *roomSession) shared() *workspaceShared {
+	rs.mu.Lock()
+	defer rs.mu.Unlock()
+	if rs.ws == nil {
+		rs.ws = &workspaceShared{}
+	}
+	return rs.ws
 }
 
 func (rs *roomSession) markTurn(t deliverableTurn) {
@@ -426,7 +432,7 @@ func New(cfg Config) *Bridge {
 		http:        &http.Client{Timeout: 20 * time.Second},
 		stream:      &http.Client{},
 		rooms:       map[string]context.CancelFunc{},
-		sessions:    map[driveKey]*roomSession{},
+		sessions:    map[sessionKey]*roomSession{},
 		workspaces:  newAgentWorkspaces(cfg.StateDir),
 		locks:       map[driveKey]*sync.Mutex{},
 		syncs:       map[string]context.CancelFunc{},
@@ -889,9 +895,9 @@ func (b *Bridge) rediscoverCores(ctx context.Context) {
 		b.cores[name] = cur
 		rebound := before.endpoint.OK()
 		if rebound {
-			for key, rs := range b.sessions {
+			for sk, rs := range b.sessions {
 				if rs.core == name {
-					b.unbindLocked(key)
+					b.unbindLocked(sk)
 				}
 			}
 		}
@@ -927,9 +933,9 @@ func (b *Bridge) refreshTargets(ctx context.Context) {
 // forgetRoom drops per-room state for a room the bridge no longer watches:
 // its bound sessions and drive locks. Callers hold b.mu.
 func (b *Bridge) forgetRoom(room string) {
-	for key := range b.sessions {
-		if key.room == room {
-			b.unbindLocked(key)
+	for sk := range b.sessions {
+		if sk.room == room {
+			b.unbindLocked(sk)
 		}
 	}
 	for key := range b.locks {
@@ -1458,29 +1464,29 @@ func (b *Bridge) ensureSession(ctx context.Context, d *drive, key driveKey, prom
 		return nil, coreNotRunningError{core: d.core}
 	}
 	room, provider := d.job.RoomID, d.job.Provider
+	sk := d.sessionKey()
 	bindingSum := d.content.bindingSum()
 	b.mu.Lock()
-	existing := b.sessions[key]
+	existing := b.sessions[sk]
 	if existing != nil && existing.profileSum != bindingSum {
 		// The turn wears different content (another expert, a new version,
 		// a changed skill pack): a new session, whose files the core (or
 		// the fallback below) materializes from scratch.
 		slog.Info("bnbloc bridge content changed, starting a new session",
 			"event", "bnbloc.bridge.session_content_changed", "room", room, "core", d.core, "provider", provider, "session", existing.sessionID)
-		b.unbindLocked(key)
+		b.unbindLocked(sk)
 		existing = nil
 	}
 	b.mu.Unlock()
 	if existing != nil && !existing.fenceIntact() {
-		// A sandboxed session whose protected paths changed since its last
-		// turn's fence (a quiesce that failed, a write from outside): not
-		// reused; the fresh session below starts from a reset tree.
+		// The sandboxed workspace's protected paths changed since its last
+		// turn's fence (a quiesce that failed, a write from outside): no
+		// session of it is reused; the fresh session below starts from a
+		// reset tree.
 		slog.Warn("bnbloc bridge sandboxed session's protected paths changed; starting a new session",
 			"event", "bnbloc.bridge.sandbox_fence_breached", "room", room, "core", d.core, "provider", provider, "session", existing.sessionID)
 		b.mu.Lock()
-		if b.sessions[key] == existing {
-			b.unbindLocked(key)
-		}
+		b.unbindWorkspaceLocked(key)
 		b.mu.Unlock()
 		existing = nil
 	}
@@ -1490,8 +1496,8 @@ func (b *Bridge) ensureSession(ctx context.Context, d *drive, key driveKey, prom
 				"event", "bnbloc.bridge.session_rebind", "room", room, "core", d.core,
 				"provider", provider, "session", existing.sessionID, "error", err)
 			b.mu.Lock()
-			if b.sessions[key] == existing {
-				b.unbindLocked(key)
+			if b.sessions[sk] == existing {
+				b.unbindLocked(sk)
 			}
 			b.mu.Unlock()
 		} else {
@@ -1502,10 +1508,12 @@ func (b *Bridge) ensureSession(ctx context.Context, d *drive, key driveKey, prom
 			return &ensureResult{roomSession: existing, freshlyCreated: false, written: written}, nil
 		}
 	}
-	if opts.Execution != nil {
+	if opts.Execution != nil && !b.workspaceBound(key) {
 		// The sandbox workdir outlives sessions: clear the previous
 		// session's agent config (and the room records, which the new
 		// session writes afresh) before this one materializes its own.
+		// Not while another channel's session of the workspace is bound:
+		// what is there is bnbloc's own, fence-verified, and worn by it.
 		resetProtectedPaths(opts.Execution.Sandbox.Workdir)
 		b.workspaces.roomFilesCleared(key)
 	}
@@ -1524,7 +1532,7 @@ func (b *Bridge) ensureSession(ctx context.Context, d *drive, key driveKey, prom
 		workspaceID = created
 		b.workspaces.bind(key, workspaceID)
 	}
-	rs, written, err := b.startSession(ctx, d, entry, workspaceID, prompt, opts)
+	rs, written, err := b.startSession(ctx, d, key, entry, workspaceID, prompt, opts)
 	if err != nil && reused && corepkg.NotFound(err) {
 		// The core no longer holds the workspace (it was deleted, or the
 		// core lost its state): a new one, the agent's files gone with the
@@ -1539,7 +1547,7 @@ func (b *Bridge) ensureSession(ctx context.Context, d *drive, key driveKey, prom
 		old := workspaceID
 		workspaceID, reused = created, false
 		b.workspaces.bind(key, workspaceID)
-		if rs, written, err = b.startSession(ctx, d, entry, workspaceID, prompt, opts); err != nil {
+		if rs, written, err = b.startSession(ctx, d, key, entry, workspaceID, prompt, opts); err != nil {
 			// Not the workspace after all (the 404 named something else,
 			// a target): the agent keeps the one it had.
 			b.workspaces.bind(key, old)
@@ -1557,10 +1565,10 @@ func (b *Bridge) ensureSession(ctx context.Context, d *drive, key driveKey, prom
 		return nil, err
 	}
 	b.mu.Lock()
-	b.sessions[key] = rs
+	b.sessions[sk] = rs
 	b.mu.Unlock()
 	slog.Info("bnbloc bridge bound room to session",
-		"event", "bnbloc.bridge.session_bound", "room", room, "core", d.core, "provider", provider, "workspace", workspaceID, "reused", reused, "session", rs.sessionID)
+		"event", "bnbloc.bridge.session_bound", "room", room, "channel", sk.channel, "core", d.core, "provider", provider, "workspace", workspaceID, "reused", reused, "session", rs.sessionID)
 	return &ensureResult{roomSession: rs, freshlyCreated: true, written: written}, nil
 }
 
@@ -1569,7 +1577,7 @@ func (b *Bridge) ensureSession(ctx context.Context, d *drive, key driveKey, prom
 // then the session created with its initial prompt (the turn's start). It
 // returns the session, not yet bound to a slot, and the attachments
 // written.
-func (b *Bridge) startSession(ctx context.Context, d *drive, entry coreEntry, workspaceID string, prompt promptFn, opts corepkg.SessionOptions) (*roomSession, []writtenAttachment, error) {
+func (b *Bridge) startSession(ctx context.Context, d *drive, key driveKey, entry coreEntry, workspaceID string, prompt promptFn, opts corepkg.SessionOptions) (*roomSession, []writtenAttachment, error) {
 	room, provider := d.job.RoomID, d.job.Provider
 	// Materialize attachments into the workspace BEFORE the initial prompt
 	// runs (createSession below executes it), so the agent's very first
@@ -1584,7 +1592,7 @@ func (b *Bridge) startSession(ctx context.Context, d *drive, entry coreEntry, wo
 	})
 	var st roomlog.CtxState
 	initialPrompt := prefix + prompt(workspaceID, &st, written, facts)
-	rs := &roomSession{owner: d.owner, provider: provider, core: d.core, workspaceID: workspaceID, ctx: st, hooks: hooks, profileSum: d.content.bindingSum(), guidance: facts}
+	rs := &roomSession{owner: d.owner, provider: provider, core: d.core, workspaceID: workspaceID, ws: b.workspaces.shared(key, workspaceID), ctx: st, hooks: hooks, profileSum: d.content.bindingSum(), guidance: facts}
 	if opts.Execution != nil {
 		rs.workdir = opts.Execution.Sandbox.Workdir
 	}

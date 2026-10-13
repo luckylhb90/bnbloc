@@ -219,9 +219,10 @@ func (rs *roomSession) fenceBaseline() {
 			"event", "bnbloc.bridge.sandbox_fence_unreadable", "workdir", rs.workdir, "error", err)
 		sum = ""
 	}
-	rs.mu.Lock()
-	rs.fence = sum
-	rs.mu.Unlock()
+	sh := rs.shared()
+	sh.mu.Lock()
+	sh.fence = sum
+	sh.mu.Unlock()
 }
 
 // fenceIntact reports whether a sandboxed session's protected paths are
@@ -230,9 +231,10 @@ func (rs *roomSession) fenceIntact() bool {
 	if rs.workdir == "" {
 		return true
 	}
-	rs.mu.Lock()
-	want := rs.fence
-	rs.mu.Unlock()
+	sh := rs.shared()
+	sh.mu.Lock()
+	want := sh.fence
+	sh.mu.Unlock()
 	sum, err := protectedFingerprint(rs.workdir)
 	return err == nil && want != "" && sum == want
 }
@@ -256,10 +258,10 @@ func (b *Bridge) endSandboxedTurn(ctx context.Context, key driveKey, sx corepkg.
 	}
 	slog.Warn("bnbloc bridge sandboxed turn changed protected workspace paths; resetting the session",
 		"event", "bnbloc.bridge.sandbox_fence_breached", "room", key.room, "core", key.core, "provider", key.provider, "workdir", sx.Workdir)
+	// Every channel session of the workspace was started on the tree the
+	// guest changed: none is reused.
 	b.mu.Lock()
-	if b.sessions[key] == rs {
-		b.unbindLocked(key)
-	}
+	b.unbindWorkspaceLocked(key)
 	b.mu.Unlock()
 	resetProtectedPaths(sx.Workdir)
 	b.workspaces.roomFilesCleared(key)
