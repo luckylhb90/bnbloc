@@ -15,11 +15,12 @@ const (
 )
 
 // SSE connection kinds: a presence-counting subscriber (a member's web or
-// desktop client) or a non-presence observer (?presence=0: a bridge, or the
-// smoke check).
+// desktop client), a non-presence observer (?presence=0: a bridge, or the
+// smoke check) or an interactive app's change feed (the gateway's).
 const (
 	SSEKindMember = "member"
 	SSEKindBridge = "bridge"
+	SSEKindApp    = "app"
 )
 
 // EventKindLabel maps an event kind onto the bounded metric label set: the
@@ -43,15 +44,16 @@ func RegisterMetrics(m *obs.Metrics) {
 	m.Describe(metricFeedCommits, "Room feed group commits (one multi-row insert each) by result.")
 	m.Describe(metricFeedCommitEvents, "Durable events stored by successful group commits; divided by the ok commits it is the mean batch size.")
 	m.Describe(metricSSEOverflows, "Room streams closed because the client fell a whole buffer behind; the client reconnects and catches up from history.")
-	m.Describe(metricSSEConnections, "Open room event streams by kind (member: presence-counting client; bridge: ?presence=0 observer).")
-	m.GaugeSet(metricSSEConnections, 0, obs.L("kind", SSEKindMember))
-	m.GaugeSet(metricSSEConnections, 0, obs.L("kind", SSEKindBridge))
+	m.Describe(metricSSEConnections, "Open room event streams by kind (member: presence-counting client; bridge: ?presence=0 observer; app: an interactive app's change feed).")
+	for _, kind := range []string{SSEKindMember, SSEKindBridge, SSEKindApp} {
+		m.GaugeSet(metricSSEConnections, 0, obs.L("kind", kind))
+	}
 }
 
 // TrackSSE counts one open room event stream of kind until the returned
 // func is called (defer it).
 func TrackSSE(m *obs.Metrics, kind string) (done func()) {
-	if kind != SSEKindBridge {
+	if kind != SSEKindBridge && kind != SSEKindApp {
 		kind = SSEKindMember
 	}
 	m.GaugeAdd(metricSSEConnections, 1, obs.L("kind", kind))

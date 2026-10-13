@@ -23,6 +23,7 @@ func TestRoomPreambleOwned(t *testing.T) {
 		"room_request.go:roomCaller":              "the owner",
 		"room_request.go:requireSubject":          "the owner",
 		"service.go:handleInternalPublish":        "a service route (svcauth.RequireService): no member caller",
+		"app_events.go:handleInternalAppEvents":   "the gateway's route (svcauth.RequireService): no member caller",
 		"scaleout.go:handleInternalScheduledPost": "a peer route: the schedule's creator posts through PostChat",
 		"scaleout.go:RouteKey":                    "ownership routing, before any handler",
 		"service.go:handleUnread":                 "reads across the rooms the caller names, each checked with member",

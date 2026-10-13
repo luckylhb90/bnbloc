@@ -53,7 +53,7 @@ route word missing from the vocabulary only reads as `:id`.
 
 | Metric | Type | Labels | Meaning |
 | --- | --- | --- | --- |
-| `bnbloc_realtime_sse_connections` | gauge | `kind` = `member` \| `bridge` | Open room event streams. `member`: a presence-counting client (web, desktop). `bridge`: a `?presence=0` observer (a member's bridge, or `bnbloc smoke`). |
+| `bnbloc_realtime_sse_connections` | gauge | `kind` = `member` \| `bridge` \| `app` | Open room event streams. `member`: a presence-counting client (web, desktop). `bridge`: a `?presence=0` observer (a member's bridge, or `bnbloc smoke`). `app`: an interactive app's change feed (the gateway's `GET ~app/events`). |
 | `bnbloc_realtime_events_published_total` | counter | `kind` | Events published to room streams, by event kind; kinds outside the known set count as `other`. |
 | `bnbloc_realtime_feed_commits_total` | counter | `result` = `ok` \| `error` | Room feed group commits: each stores a batch of one room's durable events (chat, agent replies, imports) in one multi-row insert. `error` fails every member of the batch (store outage, or the scale-out fence); clients retry idempotently. |
 | `bnbloc_realtime_sse_overflows_total` | counter | — | Room streams closed because the client fell a whole buffer (64 events) behind. The client reconnects and catches up from history, so nothing is lost, but a steady rate means streams cannot keep up (slow clients or network, or an overloaded realtime). |
