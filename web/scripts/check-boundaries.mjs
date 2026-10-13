@@ -48,7 +48,8 @@ export const RULES = [
     id: 2,
     name: "a failed request becomes an ApiError only in the transports (lib/errors.ts owns the class)",
     pattern: /new ApiError\(/,
-    allowed: ["lib/api.ts", "lib/errors.ts", "lib/sharesApi.ts", "lib/artifactUpload.ts", "lib/releaseDownload.ts"],
+    // lib/assist.ts reads a streamed assist reply (Server-Sent Events).
+    allowed: ["lib/api.ts", "lib/errors.ts", "lib/sharesApi.ts", "lib/artifactUpload.ts", "lib/releaseDownload.ts", "lib/assist.ts"],
     sample: { file: "lib/xApi.ts", text: "if (!res.ok) throw new ApiError(res.status, await errorDetail(res));" },
   },
   {
@@ -198,6 +199,16 @@ export const RULES = [
     pattern: /\bfrom\s+["'](?:\.\.\/)+(?:internal|core|services|apps|cmd|deploy|docs|packages|sandbox)\//,
     allowed: [],
     sample: { file: "lib/x.ts", text: 'import rows from "../../../internal/membership/testdata/abilities.json" with { type: "json" };' },
+  },
+  {
+    id: "B2",
+    name: "AI assist requests and the assist model live in lib/assist.ts",
+    // Every assist entry runs a task the server resolves (an assist content
+    // component holds its instructions): no view calls the model's routes
+    // or writes a prompt of its own (docs/prd/2026-10-13-ai-assist.md §5).
+    pattern: /["'`]\/v1\/(?:assist|platform\/assist-model)\b/,
+    allowed: ["lib/assist.ts"],
+    sample: { file: "views/X.tsx", text: 'await req("/v1/assist/enhance-prompt", { method: "POST" });' },
   },
 ];
 
