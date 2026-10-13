@@ -45,21 +45,40 @@ to add environment variables to the sandbox.
 - **Misleading failure text.** Every failed sandboxed turn got the
   "add environment variables" hint, whatever the cause.
 
-## 2. One owner of a turn's length
+## 2. One owner of a turn's length — and no fixed length
 
-- **The bridge owns it.** A turn may run up to a deployment-wide bound
-  (`BNBLOC_BRIDGE_MAX_TURN`, default 2 hours), with the existing sliding
-  "no activity" window. The bridge sends the turn's deadline to the core.
-- **Core Protocol:** `CreateSessionRequest` and `SendInputRequest` gain
-  `deadlineMs` (Unix ms). A core ends a turn by then — failed, fail code
-  `deadline` — and never ends one earlier for time reasons. A core without
-  a deadline in the request uses its own generous bound.
+Revised 2026-10-14 (product owner: development tasks run for hours; a
+fixed length is the wrong rule). What ends a turn is the agent stopping
+work, never the clock.
+
+- **No total bound by default.** A turn runs as long as the core reports
+  it busy or it produces output; only a genuine stall (the core reports
+  the turn neither busy nor producing anything for the sliding window,
+  2 minutes) ends it. A deployment may still set a bound
+  (`BNBLOC_BRIDGE_MAX_TURN`, default 0 = none); only then does the bridge
+  send the turn's deadline to the core.
+- **Core Protocol:** `CreateSessionRequest` and `SendInputRequest` carry
+  `deadlineMs` (Unix ms) only when the caller bounds the turn. A core ends
+  a turn by then — failed, fail code `deadline` — never earlier for time
+  reasons, and with no deadline it imposes none of its own.
+- **Long quiet is shown, not killed.** A single command can run for an
+  hour without a new step (a build, a test suite); the progress strip says
+  "no new step for N minutes — still running" and the member decides with
+  Stop.
+- **A sandboxed turn's command access renews itself.** Its exec token is
+  short-lived (1 hour) and the bridge renews it every 30 minutes while
+  the turn runs: Core Protocol `PUT
+  /core/v1/workspaces/{ws}/sessions/{sid}/execution` (capability
+  `executionRefresh`) hands the running turn a fresh execution
+  descriptor; the core writes the token to a file only the member can read
+  (`BNBLOC_VMEXEC_TOKEN_FILE`) that vmexec reads at every command. A turn
+  that ended stops being renewed, so its token lapses within the hour.
 - **A stopped turn stops everything it started**: a core kills the whole
   process group of a turn it ends (deadline, interrupt), so no child keeps
   calling a dead proxy.
 - **Failures say what happened.** A deadline is "ran out of time after
   N minutes". The sandbox environment hint is added only when the error
-  reads as missing credentials (401/403 from the model, "API key",
+  reads as missing credentials (401 from the model, "API key",
   "not logged in", "authentication"), never to every sandboxed failure.
 
 ## 3. Progress while it works
