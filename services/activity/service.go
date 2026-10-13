@@ -87,6 +87,7 @@ func (s *Service) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/bridge/jobs/claim", s.handleBridgeJobClaim)
 	mux.HandleFunc("POST /v1/bridge/jobs/{jobId}/status", s.handleBridgeJobStatus)
 	mux.HandleFunc("POST /v1/bridge/jobs/{jobId}/lease", s.handleBridgeJobLease)
+	mux.HandleFunc("POST /v1/bridge/jobs/{jobId}/progress", s.handleBridgeJobProgress)
 	mux.HandleFunc("GET /v1/rooms/{roomId}/agent-jobs", s.handleRoomAgentJobs)
 	mux.HandleFunc("POST /v1/rooms/{roomId}/agent-jobs/{jobId}/cancel", s.handleCancelAgentJob)
 	// Team agent dashboard (F1): own agents, and the tenant-wide view behind

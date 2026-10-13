@@ -635,6 +635,10 @@ type BridgeJobStore interface {
 	// RenewAgentJobLease extends the lease the bridge holds (errors as
 	// UpdateAgentJobStatus).
 	RenewAgentJobLease(ctx context.Context, ren LeaseRenewal) error
+	// HeldAgentJob returns a live job the bridge holds, from any tenant (the
+	// lease authorizes it, as RenewAgentJobLease): ErrAgentJobNotFound /
+	// ErrAgentJobLeaseMismatch (another bridge holds it, or it is terminal).
+	HeldAgentJob(ctx context.Context, jobID, bridgeID string) (AgentJob, error)
 	// SweepAgentJobs takes back up to MaxSweptJobs stuck jobs (oldest
 	// first) of every tenant, requeued or failed (SweepRequest.swept), and
 	// returns them.
@@ -961,6 +965,12 @@ func (s *MemoryBridgeJobs) RenewAgentJobLease(_ context.Context, ren LeaseRenewa
 	j.UpdatedAtMs = ren.NowMs
 	s.jobs[ren.JobID] = j
 	return nil
+}
+
+func (s *MemoryBridgeJobs) HeldAgentJob(_ context.Context, jobID, bridgeID string) (AgentJob, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.heldJobLocked(jobID, bridgeID)
 }
 
 // CancelAgentJob moves a live job to cancelled. It is scoped by room so a

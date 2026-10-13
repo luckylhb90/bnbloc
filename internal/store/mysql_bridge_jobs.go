@@ -241,6 +241,19 @@ func (m *MySQLBridgeJobs) RenewAgentJobLease(ctx context.Context, ren LeaseRenew
 	return nil
 }
 
+func (m *MySQLBridgeJobs) HeldAgentJob(ctx context.Context, jobID, bridgeID string) (AgentJob, error) {
+	// cross-tenant: keyed on job_id (global) + lease ownership, not tenant
+	// (see RenewAgentJobLease).
+	j, err := m.agentJobByID(ctx, jobID)
+	if err != nil {
+		return AgentJob{}, err
+	}
+	if j.LeaseBridgeID != bridgeID || j.Status.Terminal() {
+		return AgentJob{}, ErrAgentJobLeaseMismatch
+	}
+	return j, nil
+}
+
 // CancelAgentJob moves a live job to cancelled. The status guard makes it safe
 // under a racing worker report: whichever lands first wins and the other is
 // rejected, so a cancelled job is never reopened and a replied job is never
