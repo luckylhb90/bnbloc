@@ -6,24 +6,22 @@ import {
   GlobeIcon,
   LockIcon,
 } from "@phosphor-icons/react";
-import { api, ApiError, type PlazaRoom } from "@/lib/api";
+import { api, type PlazaRoom } from "@/lib/api";
 import { routeHash } from "@/lib/hashRoute";
-import { isSubmitEnter } from "@/lib/keys";
-import { roomIdProblem } from "@/lib/roomId";
 import { useAuth } from "@/lib/auth";
 import { can } from "@/lib/permissions";
 import { errorText } from "@/lib/errors";
 import { Button } from "@/ui/Button";
-import { Input, Field } from "@/ui/Input";
+import { Input } from "@/ui/Input";
 import { Card, Badge, Skeleton } from "@/ui/Card";
 import { Segment } from "@/ui/Segment";
-import { Dialog } from "@/ui/Dialog";
 import { PageHeader, EmptyState } from "@/ui/Page";
 import { useToast } from "@/ui/Toast";
 import { SharedPrompts } from "@/views/library/SharedPrompts";
 import { InstantiateTemplateDialog } from "@/views/library/TemplateDialogs";
 import { WelcomeCard } from "@/views/WelcomeCard";
 import { WorkGallery } from "@/views/gallery/WorkGallery";
+import { CreateRoomDialog } from "@/views/CreateRoomDialog";
 
 // Plaza's two sections: shared rooms, and the works gallery
 // (docs/prd/2026-10-13-works-gallery-and-make-similar.md §2).
@@ -253,137 +251,5 @@ function RoomCard({
         )}
       </div>
     </Card>
-  );
-}
-
-function CreateRoomDialog({
-  open,
-  onClose,
-  onCreated,
-  onFromTemplate,
-}: {
-  open: boolean;
-  onClose: () => void;
-  onCreated: (id: string) => void;
-  onFromTemplate?: () => void;
-}) {
-  const [id, setId] = useState("");
-  const [desc, setDesc] = useState("");
-  const [vis, setVis] = useState<"private" | "shared">("private");
-  const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState("");
-  const { reauth } = useAuth();
-  const toast = useToast();
-
-  const reset = () => {
-    setId("");
-    setDesc("");
-    setVis("private");
-    setErr("");
-  };
-
-  const submit = async () => {
-    const problem = roomIdProblem(id);
-    if (problem) {
-      setErr(problem);
-      return;
-    }
-    setBusy(true);
-    setErr("");
-    try {
-      await api.createRoom({
-        roomId: id.trim(),
-        name: id.trim(),
-        description: desc.trim(),
-        visibility: vis,
-      });
-      // Refresh room-scope so the new room is immediately reachable.
-      await reauth().catch(() => {});
-      reset();
-      onCreated(id.trim());
-    } catch (e) {
-      // The form stays open with the id so the member can adjust it.
-      if (e instanceof ApiError && e.status === 409) {
-        setErr("A room with this id already exists");
-      } else {
-        const msg = errorText(e, "create failed");
-        setErr(msg);
-        toast.error(`Could not create room: ${msg}`);
-      }
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  return (
-    <Dialog
-      open={open}
-      onClose={() => {
-        reset();
-        onClose();
-      }}
-      title="New room"
-      description="Rooms are private by default. You can change this anytime."
-      footer={
-        <>
-          {onFromTemplate && (
-            <Button
-              variant="outline"
-              className="mr-auto"
-              onClick={() => {
-                reset();
-                onFromTemplate();
-              }}
-            >
-              From template…
-            </Button>
-          )}
-          <Button
-            variant="ghost"
-            onClick={() => {
-              reset();
-              onClose();
-            }}
-          >
-            Cancel
-          </Button>
-          <Button variant="primary" onClick={submit} disabled={busy}>
-            {busy ? "Creating…" : "Create room"}
-          </Button>
-        </>
-      }
-    >
-      <div className="flex flex-col gap-4">
-        <Field label="Room id" error={err}>
-          <Input
-            autoFocus
-            placeholder="my-team-room"
-            value={id}
-            onChange={(e) => {
-              setId(e.target.value);
-              if (err) setErr("");
-            }}
-            onKeyDown={(e) => isSubmitEnter(e) && void submit()}
-          />
-        </Field>
-        <Field label="Description" hint="Optional — what is this room for?">
-          <Input
-            placeholder="Design reviews and agent pairing"
-            value={desc}
-            onChange={(e) => setDesc(e.target.value)}
-          />
-        </Field>
-        <Field label="Visibility">
-          <Segment
-            value={vis}
-            onChange={setVis}
-            options={[
-              { value: "private", label: "Private", hint: "invite only" },
-              { value: "shared", label: "Shared", hint: "anyone joins" },
-            ]}
-          />
-        </Field>
-      </div>
-    </Dialog>
   );
 }
