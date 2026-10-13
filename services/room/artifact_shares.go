@@ -22,7 +22,8 @@ import (
 // "Contracts"; access: docs/prd/2026-10-13-share-link-sign-in.md): a room
 // member mints an expiring, revocable link to one artifact (a pinned
 // version, or 0 = always the latest) that the organization's signed-in
-// members may open ("org", the default) or anyone holding it ("anyone").
+// members may open ("org", the default), anyone who signs in to this
+// deployment ("signed_in") or anyone holding it ("anyone").
 // The token "bsh_<shareId>_<secret>" is shown once; only the secret's hash
 // is stored. The gateway resolves a link through the signed internal route
 // below and decides who may open it (shareAccess); every dead link answers
@@ -39,16 +40,23 @@ const (
 	shareListWindowMs = 30 * 24 * hourMs
 )
 
-// errAnonymousLinksDisabled refuses an "anyone" link while the
-// organization disables them.
-const errAnonymousLinksDisabled = "links anyone can open without signing in are disabled for this organization"
+// errShareAccessInvalid refuses an access that is not a wire.ShareAccess.
+const errShareAccessInvalid = `access must be "org", "signed_in" or "anyone"`
 
-// anonymousLinkAllowed is the one reader of the organization's switch: an
-// "org" link is always allowed, an "anyone" link only while the
-// organization does not disable them (create, an access change, and the
+// Refusals of a link access the organization disallows
+// (store.Tenant.ShareAccessAllowed: create, an access change, and the
 // resolution of a live link all ask it).
-func anonymousLinkAllowed(policy store.Tenant, access string) bool {
-	return access != wire.ShareAccessAnyone || !policy.AnonymousLinksDisabled
+const (
+	errOutsideLinksDisabled   = "links for people outside the organization are disabled for this organization"
+	errAnonymousLinksDisabled = "links anyone can open without signing in are disabled for this organization"
+)
+
+// shareAccessRefusal is why the organization refuses a link of access.
+func shareAccessRefusal(access string) string {
+	if access == wire.ShareAccessSignedIn {
+		return errOutsideLinksDisabled
+	}
+	return errAnonymousLinksDisabled
 }
 
 func (s *Service) registerShareRoutes(mux *http.ServeMux) {
@@ -143,7 +151,7 @@ func (s *Service) handleCreateShare(w http.ResponseWriter, r *http.Request) {
 	}
 	// No access is the store's default (org).
 	if body.Access != "" && !wire.ValidShareAccess(body.Access) {
-		httpx.Error(w, `access must be "org" or "anyone"`, http.StatusBadRequest)
+		httpx.Error(w, errShareAccessInvalid, http.StatusBadRequest)
 		return
 	}
 	if body.Version < 0 {
@@ -169,8 +177,8 @@ func (s *Service) handleCreateShare(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, "read tenant policy failed", http.StatusInternalServerError)
 		return
 	}
-	if !anonymousLinkAllowed(policy, body.Access) {
-		httpx.Error(w, errAnonymousLinksDisabled, http.StatusForbidden)
+	if body.Access != "" && !policy.ShareAccessAllowed(body.Access) {
+		httpx.Error(w, shareAccessRefusal(body.Access), http.StatusForbidden)
 		return
 	}
 	id, token, hash, err := shareTokenFormat.New()
@@ -258,8 +266,8 @@ func (s *Service) managedShare(w http.ResponseWriter, r *http.Request, verb stri
 }
 
 // handleSetShareAccess changes who may open a link
-// (wire.ShareAccessUpdate) → 200 {share}. Switching to "anyone" is refused
-// while the organization disables such links. Every open page, frame and
+// (wire.ShareAccessUpdate) → 200 {share}. Switching to an access the
+// organization disallows is refused (403). Every open page, frame and
 // change feed follows within the gateway's re-check windows.
 func (s *Service) handleSetShareAccess(w http.ResponseWriter, r *http.Request) {
 	sh, ok := s.managedShare(w, r, "change")
@@ -271,7 +279,7 @@ func (s *Service) handleSetShareAccess(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !wire.ValidShareAccess(body.Access) {
-		httpx.Error(w, `access must be "org" or "anyone"`, http.StatusBadRequest)
+		httpx.Error(w, errShareAccessInvalid, http.StatusBadRequest)
 		return
 	}
 	policy, err := s.tenantPolicy(r.Context())
@@ -280,8 +288,8 @@ func (s *Service) handleSetShareAccess(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, "read tenant policy failed", http.StatusInternalServerError)
 		return
 	}
-	if !anonymousLinkAllowed(policy, body.Access) {
-		httpx.Error(w, errAnonymousLinksDisabled, http.StatusForbidden)
+	if !policy.ShareAccessAllowed(body.Access) {
+		httpx.Error(w, shareAccessRefusal(body.Access), http.StatusForbidden)
 		return
 	}
 	sh, err = s.Artifacts.SetArtifactShareAccess(r.Context(), sh.ShareID, body.Access)
@@ -424,7 +432,7 @@ func (s *Service) resolveShare(ctx context.Context, req wire.ShareResolveRequest
 	if err != nil {
 		return wire.ShareResolution{}, false, err
 	}
-	if !anonymousLinkAllowed(policy, sh.Access) {
+	if !policy.ShareAccessAllowed(sh.Access) {
 		return wire.ShareResolution{}, false, nil
 	}
 	if _, err := s.Store.GetRoom(ctx, sh.RoomID); err != nil {

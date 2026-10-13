@@ -55,7 +55,7 @@ func newBorrowGateway(t *testing.T, room string) *borrowGateway {
 			}
 			_, _ = w.Write([]byte(`{"reserved":true,"reservationId":"rsv_test"}`))
 		case r.URL.Path == "/v1/my/tenant-policy":
-			_, _ = w.Write([]byte(`{"tenantId":"default","requireSandboxForBorrow":false,"anonymousLinksDisabled":false}`))
+			_, _ = w.Write([]byte(`{"tenantId":"default","requireSandboxForBorrow":false,"shareAccess":["org","signed_in","anyone"]}`))
 		case strings.HasPrefix(r.URL.Path, "/v1/rooms/"+room+"/"):
 			inner.ServeHTTP(w, r)
 		default: // job status / lease reports

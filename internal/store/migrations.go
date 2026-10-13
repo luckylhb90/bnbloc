@@ -1497,6 +1497,26 @@ WHERE r.channel_id = '' AND d.user_id IS NULL`)
 			return addColumnIfMissing(ctx, db, "tenants", "publish_approval", "VARCHAR(16) NOT NULL DEFAULT 'required' AFTER anonymous_links_disabled")
 		},
 	},
+	{
+		// Links anyone signed in can open (docs/prd/2026-10-13-share-link-sign-in.md,
+		// "Amendment"): a link's access may be 'signed_in' (9 characters),
+		// and the organization's switch for links that reach people outside
+		// it (default allowed). Existing links keep their access.
+		//
+		// deploy-safe: artifact_shares.access only widens (VARCHAR(8) to
+		// VARCHAR(16), same default and nullability), so every value the
+		// previous release writes still fits. That release reads a
+		// 'signed_in' row as an unknown access: its gateway refuses the link
+		// with a 404 (shareAccess's default) and its room service refuses the
+		// value on create and change with a 400, never a 500.
+		id: "2026_10_share_link_signed_in",
+		run: func(ctx context.Context, db sqlConn) error {
+			if err := ensureColumnType(ctx, db, "artifact_shares", "access", "varchar(16)", "VARCHAR(16) NOT NULL DEFAULT 'org'"); err != nil {
+				return err
+			}
+			return addColumnIfMissing(ctx, db, "tenants", "outside_links_disabled", "TINYINT(1) NOT NULL DEFAULT 0 AFTER anonymous_links_disabled")
+		},
+	},
 }
 
 // sqlConn is the statement surface a migration runs on. runMigrations passes

@@ -40,7 +40,9 @@ only and is renamed "anonymous links disabled". Where this document says
 "anyone with the link", "without signing in" or "public links disabled",
 read it for `anyone` links. The design (the access mode, `shareAccess`,
 the sign-in return path and the share ticket) is
-`2026-10-13-share-link-sign-in.md`.
+`2026-10-13-share-link-sign-in.md`. Its amendment adds a third mode,
+`signed_in` (anyone who can sign in to the deployment, any organization),
+and an organization switch for links reaching people outside it.
 
 ## Acceptance
 

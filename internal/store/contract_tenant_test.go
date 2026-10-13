@@ -53,8 +53,15 @@ func TestContractTenantStoreTenants(t *testing.T) {
 		if p, err := s.SetTenantPolicy(ctx, older, TenantPolicyUpdate{RequireSandboxForBorrow: &on}); err != nil || !p.RequireSandboxForBorrow || p.AnonymousLinksDisabled {
 			t.Fatalf("set sandbox = %+v, %v", p, err)
 		}
-		if p, err := s.SetTenantPolicy(ctx, older, TenantPolicyUpdate{AnonymousLinksDisabled: &on}); err != nil || !p.RequireSandboxForBorrow || !p.AnonymousLinksDisabled {
+		if p, err := s.SetTenantPolicy(ctx, older, TenantPolicyUpdate{AnonymousLinksDisabled: &on}); err != nil || !p.RequireSandboxForBorrow || !p.AnonymousLinksDisabled || p.OutsideLinksDisabled {
 			t.Fatalf("set public shares = %+v, %v (an unset switch is kept)", p, err)
+		}
+		if p, err := s.SetTenantPolicy(ctx, older, TenantPolicyUpdate{OutsideLinksDisabled: &on}); err != nil || !p.OutsideLinksDisabled || !p.AnonymousLinksDisabled ||
+			!must(s.GetTenant(ctx, older))(t).OutsideLinksDisabled {
+			t.Fatalf("set outside links = %+v, %v", p, err)
+		}
+		if p, err := s.SetTenantPolicy(ctx, older, TenantPolicyUpdate{OutsideLinksDisabled: &off}); err != nil || p.OutsideLinksDisabled || !p.AnonymousLinksDisabled {
+			t.Fatalf("clear outside links = %+v, %v", p, err)
 		}
 		days := 30
 		if r, err := s.SetTenantRetention(ctx, older, wire.RetentionPolicy{}.With(wire.RetentionKinds[0], &days)); err != nil || r.Retention.Days(wire.RetentionKinds[0]) == nil || *r.Retention.Days(wire.RetentionKinds[0]) != 30 {
@@ -254,4 +261,31 @@ func TestContractTenantStoreJoinRequests(t *testing.T) {
 			t.Fatalf("replaced request = %+v", jr)
 		}
 	})
+}
+
+// TestTenantShareAccessAllowed: the organization's one rule of which link
+// access modes it allows. Org links always; outside links off disables
+// signed_in and anyone; anonymous links off disables anyone only; an
+// unknown or empty mode is never allowed.
+func TestTenantShareAccessAllowed(t *testing.T) {
+	for _, c := range []struct {
+		outside, anonymous bool
+		want               []string
+	}{
+		{false, false, []string{wire.ShareAccessOrg, wire.ShareAccessSignedIn, wire.ShareAccessAnyone}},
+		{false, true, []string{wire.ShareAccessOrg, wire.ShareAccessSignedIn}},
+		{true, false, []string{wire.ShareAccessOrg}},
+		{true, true, []string{wire.ShareAccessOrg}},
+	} {
+		tn := Tenant{OutsideLinksDisabled: c.outside, AnonymousLinksDisabled: c.anonymous}
+		got := []string{}
+		for _, a := range append([]string{"", "public"}, wire.ShareAccessModes...) {
+			if tn.ShareAccessAllowed(a) {
+				got = append(got, a)
+			}
+		}
+		if !slices.Equal(got, c.want) {
+			t.Errorf("outside off %v, anonymous off %v: allowed %v, want %v", c.outside, c.anonymous, got, c.want)
+		}
+	}
 }

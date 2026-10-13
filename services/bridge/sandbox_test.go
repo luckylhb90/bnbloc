@@ -215,7 +215,7 @@ func newSandboxGateway(t *testing.T, room string, require bool) *sandboxGateway 
 				http.Error(w, "unavailable", http.StatusServiceUnavailable)
 				return
 			}
-			_ = json.NewEncoder(w).Encode(map[string]any{"tenantId": "t1", "requireSandboxForBorrow": g.require, "anonymousLinksDisabled": false})
+			_ = json.NewEncoder(w).Encode(map[string]any{"tenantId": "t1", "requireSandboxForBorrow": g.require, "shareAccess": []string{"org"}})
 		case strings.HasSuffix(r.URL.Path, "/authorization/reserve"):
 			var body map[string]any
 			_ = json.NewDecoder(r.Body).Decode(&body)

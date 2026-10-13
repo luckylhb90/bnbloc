@@ -525,12 +525,21 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
 - **Who may open a share link has one owner: `shareAccess`**
   (`services/gateway/share_access.go`,
   `docs/prd/2026-10-13-share-link-sign-in.md`). A link's `access` is `org`
-  (the default, `store.shareAccessOf`) or `anyone`. The room service says
-  whether a link is alive (secret, expiry, revocation, room and artifact,
-  and an `anyone` link while the organization's switch is on: its one
-  reader is `anonymousLinkAllowed`); `shareAccess` says whether this caller
-  may open it: `anyone` everyone, `org` a signed-in member of the link's
-  organization (`memberRole`, `tenantClosed`; not necessarily of the room),
+  (the default, `store.shareAccessOf`), `signed_in` or `anyone`
+  (`wire.ShareAccessModes`; `wire.ValidShareAccess` is the one validation,
+  both store backends included). Which modes an organization allows is
+  `store.Tenant.ShareAccessAllowed` alone, over two switches: outside links
+  off (`outsideLinksDisabled`) disables `signed_in` and `anyone`, anonymous
+  links off (`anonymousLinksDisabled`) disables `anyone`; the room service
+  asks it at create, at an access change and at every resolution, and the
+  member's `GET /v1/my/tenant-policy` (`wire.TenantPolicy.shareAccess`)
+  carries its answer, so the web never reads the switches. The room
+  service says whether a link is alive (secret, expiry, revocation, room
+  and artifact, and its mode allowed); `shareAccess` says whether this
+  caller may open it: `anyone` everyone; `signed_in` any signed-in caller,
+  of any organization or none (every session lands in some organization;
+  no membership is asked); `org` a signed-in member of the link's
+  organization (`memberRole`, `tenantClosed`; not necessarily of the room);
   else 401 `share_sign_in_required` / 403 `share_org_only`. Every share
   route's credential is its `{token}` path segment, opened by `openShare`:
   the link's token (anonymous), or a **share ticket**
@@ -543,7 +552,7 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   of an `anyone` link. A view is counted only after `shareAccess` passes
   (`POST /internal/v1/shares/view`). `TestShareAccessSingleOwner` forbids
   comparing a link's access elsewhere in the gateway and reading the
-  switch outside its reader.
+  switches outside the store and the settings routes.
 
 ### Local-agent cores (multi-core)
 
@@ -1871,7 +1880,10 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   - where signing in brings a person back to (a share page of a link for
     the organization): `lib/loginReturn.ts` (rule A2; sessionStorage, a
     share hash only, taken once by `App`); a link's access choices and
-    labels: `lib/shares.ts` (`DEFAULT_SHARE_ACCESS`, `shareAccessOptions`).
+    labels: `lib/shares.ts` (`DEFAULT_SHARE_ACCESS`, `shareAccessOptions`
+    over the policy's `allowedShareAccess`, `shareAccessLabel`); what the
+    share page does with a link (open, sign in, ticket, org-only):
+    `openShareLink` in `lib/shares.ts`.
 
 - **`Dialog` caps height at `max-h-[85vh]` with a scrollable body.** A dialog
   with more content than the viewport must scroll its body while header/footer

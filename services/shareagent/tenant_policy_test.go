@@ -3,6 +3,7 @@ package shareagenthttp
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -50,18 +51,37 @@ func TestTenantPolicy_settingsAndMemberRead(t *testing.T) {
 	}
 	// A rename leaves the policy alone.
 	tenantPolicyReq(t, svc, http.MethodPut, "/v1/tenant/settings", "globex", "admin", map[string]any{"name": "Globex"})
-	if code, body := tenantPolicyReq(t, svc, http.MethodGet, "/v1/my/tenant-policy?tenant=globex", "acme", "alice", nil); code != http.StatusOK || body["requireSandboxForBorrow"] != true || body["anonymousLinksDisabled"] != false || body["tenantId"] != "globex" {
+	if code, body := tenantPolicyReq(t, svc, http.MethodGet, "/v1/my/tenant-policy?tenant=globex", "acme", "alice", nil); code != http.StatusOK || body["requireSandboxForBorrow"] != true || fmt.Sprint(body["shareAccess"]) != "[org signed_in anyone]" || body["tenantId"] != "globex" {
 		t.Fatalf("member read of another tenant: %d %v", code, body)
 	}
-	// The public-links switch is independent of the sandbox switch.
-	code, body = tenantPolicyReq(t, svc, http.MethodPut, "/v1/tenant/settings", "globex", "admin", map[string]any{"anonymousLinksDisabled": true})
-	if code != http.StatusOK || body["anonymousLinksDisabled"] != true || body["requireSandboxForBorrow"] != true || body["name"] != "Globex" {
-		t.Fatalf("disable public shares: %d %v", code, body)
+	// The share link switches are independent of the sandbox switch, and a
+	// member reads their answer (store.Tenant.ShareAccessAllowed), never
+	// the switches: anonymous links off leaves signed_in; outside links off
+	// leaves org only, whatever the anonymous switch says.
+	for _, c := range []struct {
+		set  map[string]any
+		want string
+	}{
+		{map[string]any{"anonymousLinksDisabled": true}, "[org signed_in]"},
+		{map[string]any{"outsideLinksDisabled": true}, "[org]"},
+		{map[string]any{"anonymousLinksDisabled": false}, "[org]"},
+		{map[string]any{"outsideLinksDisabled": false}, "[org signed_in anyone]"},
+	} {
+		code, body = tenantPolicyReq(t, svc, http.MethodPut, "/v1/tenant/settings", "globex", "admin", c.set)
+		if code != http.StatusOK || body["requireSandboxForBorrow"] != true || body["name"] != "Globex" {
+			t.Fatalf("set %v: %d %v", c.set, code, body)
+		}
+		for k, v := range c.set {
+			if body[k] != v {
+				t.Fatalf("set %v: the settings say %s=%v", c.set, k, body[k])
+			}
+		}
+		if code, body := tenantPolicyReq(t, svc, http.MethodGet, "/v1/my/tenant-policy?tenant=globex", "acme", "alice", nil); code != http.StatusOK || fmt.Sprint(body["shareAccess"]) != c.want || body["requireSandboxForBorrow"] != true || body["anonymousLinksDisabled"] != nil {
+			t.Fatalf("member read after %v: %d %v, want shareAccess %s", c.set, code, body, c.want)
+		}
 	}
-	if code, body := tenantPolicyReq(t, svc, http.MethodGet, "/v1/my/tenant-policy?tenant=globex", "acme", "alice", nil); code != http.StatusOK || body["anonymousLinksDisabled"] != true || body["requireSandboxForBorrow"] != true {
-		t.Fatalf("member read after disabling public shares: %d %v", code, body)
-	}
-	if code, body := tenantPolicyReq(t, svc, http.MethodGet, "/v1/my/tenant-policy", "acme", "alice", nil); code != http.StatusOK || body["anonymousLinksDisabled"] != false {
+	tenantPolicyReq(t, svc, http.MethodPut, "/v1/tenant/settings", "globex", "admin", map[string]any{"outsideLinksDisabled": true})
+	if code, body := tenantPolicyReq(t, svc, http.MethodGet, "/v1/my/tenant-policy", "acme", "alice", nil); code != http.StatusOK || fmt.Sprint(body["shareAccess"]) != "[org signed_in anyone]" {
 		t.Fatalf("the other tenant is unaffected: %d %v", code, body)
 	}
 	// The old read is gone (clean cutover).

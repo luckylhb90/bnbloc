@@ -1,21 +1,30 @@
 package wire
 
+import "slices"
+
 // Share links of an artifact (docs/prd/2026-10-09-artifact-shares-and-site-previews.md,
 // access: docs/prd/2026-10-13-share-link-sign-in.md).
 
 // Who may open a share link (ShareView.Access): a signed-in member of the
-// room's organization (the default), or anyone holding the link, without
-// signing in (the creator's opt-in, refused while the organization
-// disables anonymous links).
+// room's organization (the default), anyone who can sign in to this
+// deployment whatever their organization, or anyone holding the link,
+// without signing in. The last two are the creator's opt-in, each
+// refused while the organization disallows it
+// (store.Tenant.ShareAccessAllowed).
 //
 //wire:union ShareAccess
 const (
-	ShareAccessOrg    = "org"
-	ShareAccessAnyone = "anyone"
+	ShareAccessOrg      = "org"
+	ShareAccessSignedIn = "signed_in"
+	ShareAccessAnyone   = "anyone"
 )
 
-// ValidShareAccess reports a known access mode.
-func ValidShareAccess(a string) bool { return a == ShareAccessOrg || a == ShareAccessAnyone }
+// ShareAccessModes is every access mode, narrowest reach first.
+var ShareAccessModes = []string{ShareAccessOrg, ShareAccessSignedIn, ShareAccessAnyone}
+
+// ValidShareAccess reports a known access mode: the one validation of a
+// link's access (the room service's routes and both store backends).
+func ValidShareAccess(a string) bool { return slices.Contains(ShareAccessModes, a) }
 
 // ShareCreateRequest is POST /v1/rooms/{roomId}/artifacts/{artifactId}/shares:
 // Version 0 (or absent) follows the latest version; ExpiresInHours
@@ -50,7 +59,8 @@ type ShareTicket struct {
 //
 //wire:union ShareRefusalCode
 const (
-	// ShareSignInRequired: an org link opened without signing in (401).
+	// ShareSignInRequired: an org or signed_in link opened without signing
+	// in (401).
 	ShareSignInRequired = "share_sign_in_required"
 	// ShareOrgOnly: the signed-in caller is not a member of the link's
 	// organization (403).
@@ -69,7 +79,7 @@ type ShareView struct {
 	RevokedBy      string `json:"revokedBy,omitempty"`
 	ViewCount      int64  `json:"viewCount"`
 	LastViewedAtMs int64  `json:"lastViewedAtMs,omitempty"`
-	// Access is who may open the link (ShareAccessOrg, ShareAccessAnyone).
+	// Access is who may open the link (ShareAccessModes).
 	Access string `json:"access" tstype:"ShareAccess"`
 	// Active is the link's own state (not revoked, not expired); the
 	// organization switch is reported by GET /v1/my/tenant-policy.

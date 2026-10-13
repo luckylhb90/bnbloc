@@ -69,11 +69,15 @@ type Tenant struct {
 	// drives must run sandboxed; an owner machine without a ready sandbox
 	// refuses them instead of running on the host (default off).
 	RequireSandboxForBorrow bool
-	// AnonymousLinksDisabled is the org-admin switch that turns share links
-	// anyone can open (access "anyone") off: creating or switching to one
-	// is refused and every existing one resolves 404 while it is on
-	// (default off). Links for the organization's members stay allowed.
-	// The room service's anonymousLinkAllowed is its one reader.
+	// OutsideLinksDisabled and AnonymousLinksDisabled are the org-admin
+	// switches of share links that reach people outside the organization
+	// (default off: allowed). Outside links off disables both "signed_in"
+	// and "anyone" links; anonymous links off disables "anyone" links only.
+	// A disabled mode cannot be created or switched to, and every existing
+	// link of it resolves 404 while it stays disabled; links for the
+	// organization's members are always allowed. ShareAccessAllowed is
+	// their one reader.
+	OutsideLinksDisabled   bool
 	AnonymousLinksDisabled bool
 	// PublishApproval is the org-admin setting whether a member's publish
 	// to the organization waits for an admin (wire.PublishApprovalRequired,
@@ -87,10 +91,29 @@ type Tenant struct {
 	Retention wire.RetentionPolicy
 }
 
+// ShareAccessAllowed is the one rule of which share link access modes the
+// organization allows (docs/prd/2026-10-13-share-link-sign-in.md,
+// "Amendment"): "org" always; "signed_in" unless outside links are off;
+// "anyone" unless outside or anonymous links are off; an unknown mode
+// never. The room service asks it when a link is created, when its access
+// changes and whenever it resolves; the member's tenant policy reports it.
+func (t Tenant) ShareAccessAllowed(access string) bool {
+	switch access {
+	case wire.ShareAccessOrg:
+		return true
+	case wire.ShareAccessSignedIn:
+		return !t.OutsideLinksDisabled
+	case wire.ShareAccessAnyone:
+		return !t.OutsideLinksDisabled && !t.AnonymousLinksDisabled
+	}
+	return false
+}
+
 // TenantPolicyUpdate changes the org-admin policy switches; a nil field is
 // left as stored.
 type TenantPolicyUpdate struct {
 	RequireSandboxForBorrow *bool
+	OutsideLinksDisabled    *bool
 	AnonymousLinksDisabled  *bool
 	PublishApproval         *string
 }
@@ -99,6 +122,9 @@ type TenantPolicyUpdate struct {
 func (u TenantPolicyUpdate) apply(t Tenant) Tenant {
 	if u.RequireSandboxForBorrow != nil {
 		t.RequireSandboxForBorrow = *u.RequireSandboxForBorrow
+	}
+	if u.OutsideLinksDisabled != nil {
+		t.OutsideLinksDisabled = *u.OutsideLinksDisabled
 	}
 	if u.AnonymousLinksDisabled != nil {
 		t.AnonymousLinksDisabled = *u.AnonymousLinksDisabled

@@ -298,9 +298,13 @@ type settingsView struct {
 	// RequireSandboxForBorrow: borrowed agent drives must run in the owner's
 	// agent sandbox (refused when it is unavailable).
 	RequireSandboxForBorrow bool `json:"requireSandboxForBorrow"`
-	// AnonymousLinksDisabled: share links anyone can open without signing
-	// in are off (creating or switching to one is refused, existing ones
-	// resolve 404); links for the organization's members stay allowed.
+	// OutsideLinksDisabled: share links for people outside the
+	// organization ("signed_in" and "anyone") are off; AnonymousLinksDisabled:
+	// links anyone can open without signing in ("anyone") are off. A
+	// disabled kind cannot be created or switched to, and existing ones
+	// resolve 404; links for the organization's members stay allowed
+	// (store.Tenant.ShareAccessAllowed).
+	OutsideLinksDisabled   bool `json:"outsideLinksDisabled"`
 	AnonymousLinksDisabled bool `json:"anonymousLinksDisabled"`
 	// PublishApproval: whether a member's publish to the organization
 	// waits for an org admin ("required", the default) or takes effect at
@@ -315,6 +319,7 @@ func viewSettings(t store.Tenant) settingsView {
 		Status:                  string(t.Status),
 		SSOIssuer:               t.SSOIssuer,
 		RequireSandboxForBorrow: t.RequireSandboxForBorrow,
+		OutsideLinksDisabled:    t.OutsideLinksDisabled,
 		AnonymousLinksDisabled:  t.AnonymousLinksDisabled,
 		PublishApproval:         t.PublishApproval,
 	}
@@ -340,13 +345,15 @@ type settingsBody struct {
 	Name                    *string `json:"name"`
 	SSOIssuer               *string `json:"ssoIssuer"`
 	RequireSandboxForBorrow *bool   `json:"requireSandboxForBorrow"`
+	OutsideLinksDisabled    *bool   `json:"outsideLinksDisabled"`
 	AnonymousLinksDisabled  *bool   `json:"anonymousLinksDisabled"`
 	PublishApproval         *string `json:"publishApproval"`
 }
 
 // handleTenantUpdateSettings updates the tenant's display name, SSO
-// issuer/domain and policy switches (sandbox for borrowed drives, public share
-// links, publish approval). Only provided fields change; the tenant id and
+// issuer/domain and policy switches (sandbox for borrowed drives, share
+// links for people outside the organization and without sign-in, publish
+// approval). Only provided fields change; the tenant id and
 // status are not editable here.
 func (s *Service) handleTenantUpdateSettings(w http.ResponseWriter, r *http.Request) {
 	if s.Tenants == nil {
@@ -381,9 +388,10 @@ func (s *Service) handleTenantUpdateSettings(w http.ResponseWriter, r *http.Requ
 		httpx.Error(w, "update settings failed", http.StatusInternalServerError)
 		return
 	}
-	if body.RequireSandboxForBorrow != nil || body.AnonymousLinksDisabled != nil || body.PublishApproval != nil {
+	if body.RequireSandboxForBorrow != nil || body.OutsideLinksDisabled != nil || body.AnonymousLinksDisabled != nil || body.PublishApproval != nil {
 		t, err = s.Tenants.SetTenantPolicy(r.Context(), tid, store.TenantPolicyUpdate{
 			RequireSandboxForBorrow: body.RequireSandboxForBorrow,
+			OutsideLinksDisabled:    body.OutsideLinksDisabled,
 			AnonymousLinksDisabled:  body.AnonymousLinksDisabled,
 			PublishApproval:         body.PublishApproval,
 		})

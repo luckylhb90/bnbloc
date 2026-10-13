@@ -365,28 +365,26 @@ func TestSwitchingAnyoneToOrgStopsAnonymousAccess(t *testing.T) {
 
 // TestShareAccessSingleOwner: whether a caller may open a link is decided
 // in share_access.go alone (no other gateway source compares a link's
-// access), and the organization's switch is read only by the room
-// service's anonymousLinkAllowed (beyond the store and the settings
-// routes that persist and serve it).
+// access), and which access modes the organization allows is decided by
+// store.Tenant.ShareAccessAllowed alone: its switches are read nowhere
+// else but the store (which persists them) and the settings routes that
+// serve and change them, and the room service asks the owner.
 func TestShareAccessSingleOwner(t *testing.T) {
-	access := regexp.MustCompile(`wire\.ShareAccess(Org|Anyone)|\.Share\.Access\b`)
-	disabled := regexp.MustCompile(`\.AnonymousLinksDisabled\b`)
-	switchReads := 0
-	archtest.Scan(t, archtest.Opts{Lang: archtest.Go, Roots: []string{"services", "cmd"}}, func(rel string, src []byte) {
+	access := regexp.MustCompile(`wire\.ShareAccess(Org|SignedIn|Anyone)\b|\.Share\.Access\b`)
+	switches := regexp.MustCompile(`\.(AnonymousLinksDisabled|OutsideLinksDisabled)\b`)
+	asks := map[string]int{}
+	archtest.Scan(t, archtest.Opts{Lang: archtest.Go, Roots: []string{"services", "cmd", "internal"}}, func(rel string, src []byte) {
 		if strings.HasPrefix(rel, "services/gateway/") && rel != "services/gateway/share_access.go" && access.Match(src) {
 			t.Errorf("%s decides on a share link's access; shareAccess (share_access.go) is the one owner", rel)
 		}
-		if n := len(disabled.FindAll(src, -1)); n > 0 {
-			switch {
-			case strings.HasPrefix(rel, "services/shareagent/"):
-			case rel == "services/room/artifact_shares.go":
-				switchReads += n
-			default:
-				t.Errorf("%s reads the organization's anonymous links switch; anonymousLinkAllowed is its one reader", rel)
-			}
+		if switches.Match(src) && !strings.HasPrefix(rel, "internal/store/") && rel != "services/shareagent/org.go" {
+			t.Errorf("%s reads the organization's share link switches; store.Tenant.ShareAccessAllowed is their one reader", rel)
 		}
+		asks[rel] = strings.Count(string(src), ".ShareAccessAllowed(")
 	})
-	if switchReads != 1 {
-		t.Errorf("services/room/artifact_shares.go reads the switch %d times; only anonymousLinkAllowed may", switchReads)
+	for _, rel := range []string{"services/room/artifact_shares.go", "services/shareagent/tenant_policy.go"} {
+		if asks[rel] == 0 {
+			t.Errorf("%s does not ask store.Tenant.ShareAccessAllowed", rel)
+		}
 	}
 }

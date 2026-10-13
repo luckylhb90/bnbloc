@@ -265,6 +265,47 @@ func TestShareResolve(t *testing.T) {
 	if code, _ := e.resolve(latest.Token); code != http.StatusOK {
 		t.Fatalf("re-enabled = %d, want 200", code)
 	}
+	// A signed_in link: allowed while only anonymous links are off. Outside
+	// links off kills it and the anyone link at once (404), refuses both on
+	// create and change, and leaves org links working.
+	if _, err := tenants.SetTenantPolicy(testCtx(t), tenant.Default, store.TenantPolicyUpdate{AnonymousLinksDisabled: &on}); err != nil {
+		t.Fatal(err)
+	}
+	code, signedLink := e.share(http.MethodPost, sharesPath(art.ArtifactID), "alice", map[string]any{"access": wire.ShareAccessSignedIn})
+	if code != http.StatusCreated || signedLink.Share.Access != wire.ShareAccessSignedIn {
+		t.Fatalf("create signed_in while anonymous links are off = %d %+v", code, signedLink)
+	}
+	if code, res := e.resolve(signedLink.Token); code != http.StatusOK || res.Share.Access != wire.ShareAccessSignedIn {
+		t.Fatalf("signed_in while anonymous links are off = %d %+v", code, res.Share)
+	}
+	if _, err := tenants.SetTenantPolicy(testCtx(t), tenant.Default, store.TenantPolicyUpdate{AnonymousLinksDisabled: &off, OutsideLinksDisabled: &on}); err != nil {
+		t.Fatal(err)
+	}
+	for name, tok := range map[string]string{"signed_in": signedLink.Token, "anyone": latest.Token} {
+		if code, _ := e.resolve(tok); code != http.StatusNotFound {
+			t.Fatalf("%s while outside links are off = %d, want 404", name, code)
+		}
+	}
+	if code, _ := e.resolve(orgLink.Token); code != http.StatusOK {
+		t.Fatalf("org link while outside links are off = %d, want 200", code)
+	}
+	for access, want := range map[string]string{wire.ShareAccessSignedIn: errOutsideLinksDisabled, wire.ShareAccessAnyone: errAnonymousLinksDisabled} {
+		if code, rep := e.share(http.MethodPost, sharesPath(art.ArtifactID), "alice", map[string]any{"access": access}); code != http.StatusForbidden || rep.Error != want {
+			t.Fatalf("create %s while outside links are off = %d %q", access, code, rep.Error)
+		}
+		if code, rep := e.share(http.MethodPatch, sharesPath(art.ArtifactID)+"/"+orgLink.Share.ShareID, "alice", wire.ShareAccessUpdate{Access: access}); code != http.StatusForbidden || rep.Error != want {
+			t.Fatalf("switch to %s while outside links are off = %d %q", access, code, rep.Error)
+		}
+	}
+	if _, err := tenants.SetTenantPolicy(testCtx(t), tenant.Default, store.TenantPolicyUpdate{OutsideLinksDisabled: &off}); err != nil {
+		t.Fatal(err)
+	}
+	if code, _ := e.resolve(signedLink.Token); code != http.StatusOK {
+		t.Fatalf("signed_in re-enabled = %d, want 200", code)
+	}
+	if code, rep := e.share(http.MethodPost, sharesPath(art.ArtifactID), "alice", map[string]any{"access": "everyone"}); code != http.StatusBadRequest || rep.Error != errShareAccessInvalid {
+		t.Fatalf("an unknown access = %d %q", code, rep.Error)
+	}
 	// Revoked.
 	e.must(e.roomSrv, http.MethodPost, "/v1/rooms/files/artifacts/"+art.ArtifactID+"/versions", "alice", map[string]any{"baseVersion": 2, "content": "# v3"})
 	if code, _ := e.do(e.roomSrv, http.MethodDelete, sharesPath(art.ArtifactID)+"/"+id, "bob", nil); code != http.StatusNoContent {

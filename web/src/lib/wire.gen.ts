@@ -3142,11 +3142,17 @@ export interface SearchUpdateStats {
 // ---- wire/shares.go ----
 
 // Who may open a share link (ShareView.Access): a signed-in member of the
-// room's organization (the default), or anyone holding the link, without
-// signing in (the creator's opt-in, refused while the organization
-// disables anonymous links).
+// room's organization (the default), anyone who can sign in to this
+// deployment whatever their organization, or anyone holding the link,
+// without signing in. The last two are the creator's opt-in, each
+// refused while the organization disallows it
+// (store.Tenant.ShareAccessAllowed).
 export const ShareAccessOrg = "org";
+export const ShareAccessSignedIn = "signed_in";
 export const ShareAccessAnyone = "anyone";
+
+// ShareAccessModes is every access mode, narrowest reach first.
+export const ShareAccessModes: readonly string[] = ["org", "signed_in", "anyone"];
 
 // ShareCreateRequest is POST /v1/rooms/{roomId}/artifacts/{artifactId}/shares:
 // Version 0 (or absent) follows the latest version; ExpiresInHours
@@ -3178,7 +3184,8 @@ export interface ShareTicket {
 
 // The codes of a share route's refusal (httpx.ErrorBody code) the share
 // page acts on.
-// ShareSignInRequired: an org link opened without signing in (401).
+// ShareSignInRequired: an org or signed_in link opened without signing
+// in (401).
 export const ShareSignInRequired = "share_sign_in_required";
 // ShareOrgOnly: the signed-in caller is not a member of the link's
 // organization (403).
@@ -3196,7 +3203,7 @@ export interface ShareView {
   revokedBy?: string;
   viewCount: number;
   lastViewedAtMs?: number;
-  // Access is who may open the link (ShareAccessOrg, ShareAccessAnyone).
+  // Access is who may open the link (ShareAccessModes).
   access: ShareAccess;
   // Active is the link's own state (not revoked, not expired); the
   // organization switch is reported by GET /v1/my/tenant-policy.
@@ -3578,6 +3585,24 @@ export interface TeamPlanReply {
   estimate: TeamCostEstimate;
 }
 
+// ---- wire/tenant_policy.go ----
+
+// TenantPolicy is GET /v1/my/tenant-policy: the organization's name and the
+// org-admin policy a member's surfaces follow. The owner's bridge reads
+// RequireSandboxForBorrow (borrowed drives must run sandboxed); the web's
+// share dialog offers the link access modes in ShareAccess, and publishing
+// to the organization says whether an admin approves it.
+export interface TenantPolicy {
+  tenantId: string;
+  name: string;
+  requireSandboxForBorrow: boolean;
+  // ShareAccess is the link access modes the organization allows, in
+  // ShareAccessModes order: store.Tenant.ShareAccessAllowed's answer for
+  // each, so no client re-decides it.
+  shareAccess: ShareAccess[];
+  publishApproval: PublishApproval;
+}
+
 // ---- wire/turn_usage.go ----
 
 // TurnUsage is the usage one agent reply reports in its free-form metrics map
@@ -3894,8 +3919,8 @@ export type ScheduleRunStatus = "ok" | "error" | "skipped";
 export const ScheduleRunStatusValues: readonly ScheduleRunStatus[] = ["ok", "error", "skipped"];
 export type TemplateVisibility = "private" | "tenant";
 export const TemplateVisibilityValues: readonly TemplateVisibility[] = ["private", "tenant"];
-export type ShareAccess = "org" | "anyone";
-export const ShareAccessValues: readonly ShareAccess[] = ["org", "anyone"];
+export type ShareAccess = "org" | "signed_in" | "anyone";
+export const ShareAccessValues: readonly ShareAccess[] = ["org", "signed_in", "anyone"];
 export type ShareRefusalCode = "share_sign_in_required" | "share_org_only";
 export const ShareRefusalCodeValues: readonly ShareRefusalCode[] = ["share_sign_in_required", "share_org_only"];
 export type TaskStatus = "open" | "done";

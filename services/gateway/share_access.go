@@ -21,9 +21,18 @@ import (
 // caller may open a live link (TestShareAccessSingleOwner):
 //
 //   - an "anyone" link: every caller;
+//   - a "signed_in" link: any signed-in caller, of any organization (or
+//     none: a session of an organization they do not belong to), never a
+//     membership; an anonymous caller is refused with
+//     wire.ShareSignInRequired;
 //   - an "org" link: a signed-in member of the link's organization (not
 //     necessarily of the room); an anonymous caller is refused with
 //     wire.ShareSignInRequired, anyone else with wire.ShareOrgOnly.
+//
+// Whichever the mode, a share ticket's member is the app's member:<subject>
+// participant in the link's room and organization: never an owner unless
+// the room service counts them one (a member of the room), and nothing
+// else of that organization.
 //
 // Every share route's credential is the {token} path segment, resolved by
 // openShare: the link's own token ("bsh_…", an anonymous caller), or a
@@ -59,7 +68,7 @@ type openedShare struct {
 	caller shareCaller
 }
 
-// errShareSignIn refuses an anonymous caller of an org link.
+// errShareSignIn refuses an anonymous caller of an org or signed_in link.
 var errShareSignIn = errors.New("sign in to open this link")
 
 // shareOrgOnlyError refuses a signed-in caller outside the link's
@@ -82,12 +91,16 @@ func (s *Service) shareAccess(res wire.ShareResolution, c shareCaller) error {
 	switch res.Share.Access {
 	case wire.ShareAccessAnyone:
 		return nil
-	case wire.ShareAccessOrg:
+	case wire.ShareAccessSignedIn, wire.ShareAccessOrg:
 	default:
 		return errShareNotFound
 	}
 	if c.subject == "" {
 		return errShareSignIn
+	}
+	if res.Share.Access == wire.ShareAccessSignedIn {
+		// Anyone who could sign in: no organization is asked.
+		return nil
 	}
 	role, err := s.memberRole(res.TenantID, c.subject)
 	switch {
@@ -206,8 +219,9 @@ const maxShareTicketBody = 4 << 10
 
 // handleShareTicket is POST /v1/share-tickets (wire.ShareTicketRequest):
 // the share page's ticket for a link, minted for the signed-in caller once
-// shareAccess admits them — a member of the link's organization, who need
-// not be a member of its room. The token comes in the body, never the URL.
+// shareAccess admits them: for an "org" link a member of the link's
+// organization, who need not be a member of its room; for a "signed_in"
+// link anyone with a session. The token comes in the body, never the URL.
 // The ticket (auth.KindShareTicket: the caller, the link's organization and
 // share id) replaces the token in the link's routes.
 func (s *Service) handleShareTicket(w http.ResponseWriter, r *http.Request, claims auth.Claims) {

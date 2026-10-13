@@ -234,9 +234,9 @@ func (s *Service) ticketApp(r *http.Request) (appCapability, error) {
 }
 
 // shareApp: a share link of a site, opened on every call (openShare: a
-// revoked or expired link, an "anyone" link the organization disabled, a
-// link switched to "org", a member who left the organization or a deleted
-// room stops it at once). A share ticket's member is the participant
+// revoked or expired link, a link of an access the organization disabled,
+// a link switched to "org", a member who left the organization or a
+// deleted room stops it at once). A share ticket's member is the participant
 // (member:<subject>); an anonymous caller of an "anyone" link needs the
 // visitor token minted for that link.
 func (s *Service) shareApp(r *http.Request) (appCapability, error) {
@@ -517,8 +517,9 @@ const maxAppVisitorBody = 4 << 10
 // token for an anonymous caller of an "anyone" link of an app
 // (wire.AppVisitorToken), bound to the link and a random visitor id,
 // expiring with the link at the latest. A still-valid token of the same
-// link in the body is renewed for the same visitor. An "org" link mints
-// none (shareAccess refuses an anonymous caller), nor does a share ticket:
+// link in the body is renewed for the same visitor. An "org" or
+// "signed_in" link mints none (shareAccess refuses an anonymous caller),
+// nor does a share ticket:
 // its member is the app's participant. Minting spends the client IP's
 // visitor budget (the route row).
 func (s *Service) handleAppVisitor(w http.ResponseWriter, r *http.Request) {

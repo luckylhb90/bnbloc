@@ -9,24 +9,20 @@ import (
 	"github.com/luckylhb90/bnbloc/internal/store"
 	"github.com/luckylhb90/bnbloc/internal/svcauth"
 	"github.com/luckylhb90/bnbloc/internal/tenant"
+	"github.com/luckylhb90/bnbloc/internal/wire"
 )
 
-// tenantPolicyView is GET /v1/my/tenant-policy: the organization's name and
-// the org-admin policy switches a member's surfaces follow — the owner's
-// bridge (borrowed drives must run sandboxed) and the web (the share
-// dialog offers no link anyone can open while anonymous links are
-// disabled; publishing to the organization says whether an admin
-// approves it).
-type tenantPolicyView struct {
-	TenantID                string `json:"tenantId"`
-	Name                    string `json:"name"`
-	RequireSandboxForBorrow bool   `json:"requireSandboxForBorrow"`
-	AnonymousLinksDisabled  bool   `json:"anonymousLinksDisabled"`
-	PublishApproval         string `json:"publishApproval"`
-}
-
-func viewTenantPolicy(t store.Tenant) tenantPolicyView {
-	return tenantPolicyView{TenantID: t.TenantID, Name: t.Name, RequireSandboxForBorrow: t.RequireSandboxForBorrow, AnonymousLinksDisabled: t.AnonymousLinksDisabled, PublishApproval: t.PublishApproval}
+// viewTenantPolicy is GET /v1/my/tenant-policy (wire.TenantPolicy): the
+// link access modes are the organization's answer
+// (store.Tenant.ShareAccessAllowed), never its switches.
+func viewTenantPolicy(t store.Tenant) wire.TenantPolicy {
+	allowed := []string{}
+	for _, a := range wire.ShareAccessModes {
+		if t.ShareAccessAllowed(a) {
+			allowed = append(allowed, a)
+		}
+	}
+	return wire.TenantPolicy{TenantID: t.TenantID, Name: t.Name, RequireSandboxForBorrow: t.RequireSandboxForBorrow, ShareAccess: allowed, PublishApproval: t.PublishApproval}
 }
 
 // handleMyTenantPolicy answers the policy of ?tenant= (a tenant the caller is

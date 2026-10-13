@@ -202,8 +202,10 @@ path in place of the link's token, and the app's participant is the
 signed-in member (`member:<subject>`; `_by` stays the per-app pseudonym,
 `me()` names the member to themselves only). An organization member who is
 not in the room is a participant, never an owner. The visitor token (4.3)
-exists only for `anyone` links. Design:
-`2026-10-13-share-link-sign-in.md`.
+exists only for `anyone` links. A `signed_in` link (anyone who can sign
+in, any organization) works like an `org` link without the membership
+check: its ticket's member is a participant, never an owner. Design:
+`2026-10-13-share-link-sign-in.md` (and its amendment).
 
 ### 4.8 Encryption: the database never holds a readable body
 

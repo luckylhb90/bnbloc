@@ -508,6 +508,23 @@ func TestContractArtifactShareStore(t *testing.T) {
 		if got := must(s.ResolveArtifactShare(context.Background(), anyID))(t); got.Access != wire.ShareAccessOrg {
 			t.Fatalf("resolved access after the change = %q", got.Access)
 		}
+		// signed_in (the widest value the column stores) round-trips at
+		// create and change alike.
+		signedID := uniq("sh-")
+		if got, err := s.CreateArtifactShare(ctx, ArtifactShare{ShareID: signedID, TokenHash: HashArtifactContent(signedID), RoomID: room, ArtifactID: artID,
+			Access: wire.ShareAccessSignedIn, CreatedBy: "maya", CreatedAtMs: now - 50*dayMs, ExpiresAtMs: now - 40*dayMs}); err != nil || got.Access != wire.ShareAccessSignedIn {
+			t.Fatalf("create signed_in = %+v %v", got, err)
+		}
+		if got := must(s.ResolveArtifactShare(context.Background(), signedID))(t); got.Access != wire.ShareAccessSignedIn {
+			t.Fatalf("resolved signed_in = %q", got.Access)
+		}
+		if got, err := s.SetArtifactShareAccess(ctx, anyID, wire.ShareAccessSignedIn); err != nil || got.Access != wire.ShareAccessSignedIn ||
+			must(s.GetArtifactShare(ctx, anyID))(t).Access != wire.ShareAccessSignedIn {
+			t.Fatalf("set signed_in = %+v %v", got, err)
+		}
+		if _, err := s.SetArtifactShareAccess(ctx, anyID, wire.ShareAccessOrg); err != nil {
+			t.Fatal(err)
+		}
 		if _, err := s.SetArtifactShareAccess(ctx, anyID, wire.ShareAccessOrg); err != nil {
 			t.Fatalf("setting the stored access again = %v", err)
 		}
