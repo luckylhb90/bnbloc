@@ -105,7 +105,7 @@ func main() {
 		Version:           config.FromEnvRaw("BNBLOC_BRIDGE_VERSION"),
 		Tenant:            tenantID,
 		DisabledProviders: parseDisabledProviders(config.FromEnvRaw("BNBLOC_BRIDGE_DISABLED_PROVIDERS")),
-		ServeAllOwners:    config.FromEnvRaw("BNBLOC_BRIDGE_SERVE_ALL_OWNERS") != "",
+		ServeAllOwners:    config.ParseBool(config.FromEnvRaw("BNBLOC_BRIDGE_SERVE_ALL_OWNERS"), false),
 		Rooms:             rooms,
 		RelayBaseURL:      config.FromEnvRaw("BNBLOC_RELAY_BASE_URL"),
 		SyncEngine:        config.FromEnvRaw("BNBLOC_BRIDGE_SYNC_ENGINE"),

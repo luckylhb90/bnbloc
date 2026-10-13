@@ -4,7 +4,6 @@ package main
 import (
 	"context"
 	"log"
-	"strings"
 	"time"
 
 	"github.com/luckylhb90/bnbloc/internal/blobstore"
@@ -127,7 +126,7 @@ func main() {
 	// changes and uninstalls made through the gateway without a restart.
 	dispatcher := realtimehttp.NewPluginHookDispatcher(backends.ExtAudit, backends.ComponentInstalls, nil)
 	componentPipe := realtimehttp.NewComponentPipeline(backends.Settings, backends.ExtAudit, dispatcher, backends.ComponentInstalls, nil, svc.Notifications.Notifiers.Installer())
-	componentPipe.AllowUnsigned = truthy(config.FromEnvRaw("BNBLOC_EXT_ALLOW_UNSIGNED"))
+	componentPipe.AllowUnsigned = config.ParseBool(config.FromEnvRaw("BNBLOC_EXT_ALLOW_UNSIGNED"), false)
 	if err := componentPipe.Rehydrate(context.Background(), extreg.ServiceRealtime); err != nil {
 		log.Printf("bnbloc-realtime: component rehydrate failed: %v", err)
 	}
@@ -194,14 +193,5 @@ func main() {
 	peers.Start(context.Background())
 	if err := obs.ServeWithHealth("bnbloc-realtime", cfg.ListenAddr, svcauth.Middleware(svcauth.KeyFromEnv(), handler), backends.HealthCheck(), obs.WithMetrics(metrics)); err != nil {
 		log.Fatalf("bnbloc-realtime: %v", err)
-	}
-}
-
-func truthy(raw string) bool {
-	switch strings.ToLower(strings.TrimSpace(raw)) {
-	case "1", "true", "yes", "on":
-		return true
-	default:
-		return false
 	}
 }
