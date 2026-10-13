@@ -6,11 +6,11 @@ gateway route table (2.1), `svcauth.NewRequest` (2.2), `httpx` (2.3), the
 event-kind registry (2.5), the store rig (4.1) and the generated wire types
 (5.1).
 
-Progress: delivery steps 1–5 **landed** on 2026-10-13 (store, cipher, the
+Progress: delivery steps 1–6 **landed** on 2026-10-13 (store, cipher, the
 room service's data owner, the gateway's capabilities, visitor tokens, SDK
 and change feed, the agent's read-back — `app_data`, `.room/apps.md` and
-the built-in content — and the web's app view and data line; see §7
-"Step status"). Step 6 is open.
+the built-in content — the web's app view and data line, and the sites
+origin with the audited export and agent reads; see §7 "Step status").
 
 ## 1. Why
 
@@ -451,21 +451,22 @@ app_keys(app_id PRIMARY KEY, tenant_id, room_id, wrapped_key, created_at_ms)
     (the link ends first) is not repeated.
   - **Member tickets.** `SiteViewer` answers no visitor request; the SDK
     only waits for a token after a visitor refusal, which a ticket never
-    gets. The desktop's `bnbloc-site` scheme forwards reads only, so an
-    app's writes and change feed fail there:
-    `docs/bugs/2026-10-13-desktop-site-frame-drops-app-api.md` (open).
+    gets. The desktop's `bnbloc-site` scheme forwarded reads only, so an
+    app's writes and change feed failed there:
+    `docs/bugs/2026-10-13-desktop-site-frame-drops-app-api.md` (landed
+    with step 6).
   - **Data line** (`views/workbench/AppDataLine.tsx`, rules in
     `lib/appData.ts`) on a site's card and in the artifact viewer: counts
     per collection, shown only when the app has data and only to owners —
     the owners' stats route decides (403: no line), the web never
-    re-implements `appOwner`. Export pages `find` per collection (JSON of
-    all collections, CSV of one: stamps first, then fields by first
-    appearance, nested values JSON-encoded in one cell, formula-like text
-    defused). Clear data (`DELETE …/data`) sits behind `ConfirmDialog` and
+    re-implements `appOwner`. Export (JSON of all collections, CSV of one:
+    stamps first, then fields by first appearance, nested values
+    JSON-encoded in one cell, formula-like text defused) paged `find` in
+    the web at first; step 6 moved it to the server's audited export
+    route. Clear data (`DELETE …/data`) sits behind `ConfirmDialog` and
     needs `drive_agent`. The room stream's `app_changed` refreshes the
     counts, coalesced per app. **Delete app data** (the key and all rows)
     is what Clear data does today: the room entry has one wipe.
-- Steps 4 and 6: open.
 - **Step 4: landed (2026-10-13).** The room tool `app_data`
   (`services/bridge/roomtools/appdata.go`), `.room/apps.md`
   (`internal/roomlog/apps.go`), one session guidance line, and three
@@ -505,9 +506,70 @@ app_keys(app_id PRIMARY KEY, tenant_id, room_id, wrapped_key, created_at_ms)
     with variables, not flagged as empty-room starters (a first message
     should need no form); the App builder offers them as its quick prompts
     (`ref`).
-  - Not in this step: auditing an agent's reads of app data (§4.7) is
-    still open.
-- Steps 5–6: open.
+  - Not in this step: auditing an agent's reads of app data (§4.7); it
+    landed with step 6.
+- **Step 6: landed (2026-10-13).** `BNBLOC_SITES_ORIGIN`
+  (`services/gateway/sites_origin.go`), the audited export and agent reads
+  (`services/room/appdata_export.go`, the CSV owner
+  `internal/appdata/export.go`), and the desktop's app API
+  (`docs/bugs/2026-10-13-desktop-site-frame-drops-app-api.md`). Decided
+  while building:
+  - **The sites origin is a gate in front of the whole mux**
+    (`withSitesOrigin`): with it set, a request is served only when it is a
+    site path (`sitePath`: `/v1/sites/{ticket}[/…]`,
+    `/v1/public/shares/{token}/site[/…]`, files, `~app/` and SDK alike) on
+    the sites origin, or any other path on the main origin; everything else
+    is a 404 with `no-referrer`. The sites origin therefore serves no API
+    route, no web client and nothing that takes a session (the visitor mint
+    and the share JSON stay on the main origin: the share page calls them).
+    Hosts compare case-blind without the https default port; the ingress
+    must keep the Host header.
+  - **Validation at startup** (`ParseSitesOrigin`): a bare https origin (no
+    path, trailing slash, query, fragment or credentials) whose host is not
+    `BNBLOC_PUBLIC_URL`'s, since a same-host origin on another port would
+    share the main origin's cookies. Anything else stops the gateway.
+  - **One URL owner.** `Service.siteURL(path)` is the sites origin plus the
+    path, or the bare path without one (the origin the client called, as
+    before). Member site tickets and a public link's `siteUrl` use it. The
+    web resolves a path against the gateway and uses an absolute URL as is
+    (`siteGatewayUrl`); it never picks a host, and the web client has no
+    `frame-src` to widen (the gateway serves it with
+    `frame-ancestors 'self'` only).
+  - **The desktop asks the gateway** where sites are:
+    `GET /v1/public/client-config` (`wire.ClientConfig.sitesOrigin`, a
+    public route of no data). The `bnbloc-site` scheme forwards there
+    (cached 5 minutes per gateway), so the shell's static CSP keeps
+    admitting only the scheme. A scheme responder takes one body, so the
+    change feed is held by the shell and answered as successive batches
+    (the bug record).
+  - **Known gap:** the room tool `read_artifact` reads a site's files
+    through a member site ticket with the bridge's session on the main
+    origin; with a sites origin set the ticket's `siteUrl` is absolute and
+    the tool refuses it ("unreadable result"), failing closed. It needs a
+    session route on the main origin for an agent's read of a site file
+    (follow-up for the room tools' owner).
+  - **Audited export** (`GET /v1/rooms/{roomId}/apps/{artifactId}/export?
+    collection=&format=json|csv`, the room entry, owners only: a member who
+    may chat, or the job's agent). The room service streams it
+    (`/internal/v1/app/export`): JSON as `{"collections": {name: [doc,
+    …]}}` of every collection (or the one named), CSV of one collection
+    (`format=csv` needs `collection`), its columns collected in a first pass
+    so the header is complete before any row. A failure after the answer
+    began aborts the response, so a download is never short and whole-
+    looking. The web's Export calls it and only names the file; its paging
+    and CSV code are gone, and the CSV rules (`appdata.CSVColumns`,
+    `CSVWriter`, `CSVCell`: CRLF, `encoding/csv` quoting, formula-like text
+    defused, nested values as JSON text) have one owner on the server.
+  - **Audited reads** (§4.7): `auditAppRead` in the room service is the one
+    writer and `appReadAudited` the one rule. One `internal/audit.Record`
+    row per call, never per document: kind `app`, name the app, action
+    `export`, `find` or `get`, the actor (a member's subject; for an agent
+    its owner, with `agent=<owner>/<core>/<provider>` in the detail), and
+    `room=`, `collection=` (`*` for every collection), `rows=` and, for an
+    export, `format=` in the detail. Every export is audited (outcome
+    `failed` when it broke off), and every agent read of documents (`find`,
+    `get`); a member's or a visitor's reads through the app itself are not
+    (that is the app being used), nor reads of no document (`me`, `stats`).
 
 ### Tests
 

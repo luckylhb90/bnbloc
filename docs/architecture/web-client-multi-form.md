@@ -92,15 +92,22 @@ Sources: `web/vite.config.ts:6-14`, `services/gateway/webui/webui.go:1-58`,
 - A member's site viewer (`SiteViewer`, `lib/siteFrame.ts`) answers no
   visitor request: the member's ticket is the capability, and the SDK
   only waits for a visitor token after a refusal a ticket never gets. In
-  the desktop shell the `bnbloc-site` scheme forwards reads only, so an
-  app's writes and change feed need the open fix in
-  `docs/bugs/2026-10-13-desktop-site-frame-drops-app-api.md`.
+  the desktop shell the `bnbloc-site` scheme carries the site's path and
+  forwards every app API method and its change feed
+  (`apps/desktop/src-tauri/src/site_scheme.rs`).
+- **Where a site loads from is the gateway's answer.** `siteUrl` is a path
+  on the gateway, or an absolute URL on the deployment's sites origin
+  (`BNBLOC_SITES_ORIGIN`); `siteGatewayUrl` uses an absolute one as is and
+  the web never picks a host. The web client sets no `frame-src` of its own
+  (the gateway serves it with `frame-ancestors 'self'` only), so a sites
+  origin needs no web configuration.
 - An app's owners see its **data line** on the deliverable card and in the
   artifact viewer (`views/workbench/AppDataLine.tsx`, rules in
   `lib/appData.ts`): the count per collection from the owners' stats route
   (a 403 there means "not an owner": no line), Export (JSON of every
-  collection, CSV of one, paged through `find`) and Clear data behind
-  `ConfirmDialog`. The room stream's `app_changed` refreshes the counts.
+  collection, CSV of one: the server's audited export route, streamed; the
+  web only names the file) and Clear data behind `ConfirmDialog`. The room
+  stream's `app_changed` refreshes the counts.
 
 ## API client contract
 

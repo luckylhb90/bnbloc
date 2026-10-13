@@ -444,6 +444,14 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   `s.publicOrigin(r)` (`BNBLOC_PUBLIC_URL` when set, else the request's host
   with the scheme a trusted proxy forwarded; `TestForwardedHeadersReadOnce`):
   every link to another member, published artifact URL and previewer CSP.
+  A site's URL (a member site ticket, a public link's `siteUrl`) is
+  `s.siteURL(path)` only: on the sites origin (`BNBLOC_SITES_ORIGIN`,
+  validated at startup by `ParseSitesOrigin`) when set, else the bare path.
+  With a sites origin, `withSitesOrigin` (`sites_origin.go`) gates the whole
+  mux: site paths (`sitePath`, the one "is this a site path" rule, which
+  `appFramePath` builds on) only on that host, nothing else there, 404
+  either way; a new site route needs no change, a new API route never
+  serves there.
   The artifact URL is built and parsed only by `pkgmeta`
   (`GatewayArtifactURL`/`Path`, `ArtifactKeyOf`, `GatewayArtifactKey`;
   `TestArtifactURLOneOwner`). A gateway audit row is written only by
@@ -451,7 +459,7 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   the tenant (`TestAuditWrittenOnlyByAudit`). "Is this component mine" is `ownedBy`
   (owner and tenant; `TestContentOwnershipOneRule`). Environment is read at
   startup (`config.Bool`, `config.List`; `Service.DevDiscovery`,
-  `DesktopDownloadURL`, `PublicURL`), never per request.
+  `DesktopDownloadURL`, `PublicURL`, `SitesOrigin`), never per request.
 - **Every session bearer is minted by `mintSession`** (`session.go`): sign-in,
   refresh, fork, tenant switch, API-token exchange, `MintAdminToken`
   (`TestSessionsMintedOnlyByMintSession`). A tenant switch persists on the
@@ -1271,7 +1279,16 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   <version>` is `ifVersion`, `If-None-Match: *` is `ifAbsent` (both 409);
   caps are the `wire.MaxApp*` constants; every status goes through
   `writeAppError`. Every write announces a transient `app_changed`
-  (`wire.AppChanged`, metadata only; `announceAppChange`).
+  (`wire.AppChanged`, metadata only; `announceAppChange`). Reading data
+  out is audited by one writer and one rule
+  (`services/room/appdata_export.go`): `auditAppRead` writes one
+  `internal/audit.Record` row per call (kind `wire.AuditKindApp`, never
+  per document) when `appReadAudited` says so: every export, and every
+  agent read of documents (`find`, `get`); a member's or visitor's own
+  reads through the app are not. The owners' export
+  (`GET …/apps/{artifactId}/export?collection=&format=json|csv`) streams
+  from the room service; the CSV form (columns, quoting, defused formulas,
+  nested JSON) is `internal/appdata` export.go alone, never the web's.
 - **An app request's scope has one owner at the edge:
   `appCapabilityOf`** (`services/gateway/apps.go`). The `~app` API serves
   under three entry points, each a route-table row per call (`appRoutes`):
@@ -1296,7 +1313,14 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   link to a site is the app full-screen (`SharedApp`), and the share page
   is the only holder of the visitor token (`lib/appVisitor.ts`: answers
   only its own frame's window, renews before expiry); a member's site
-  viewer answers no visitor request.
+  viewer answers no visitor request. The web never picks a site's host:
+  `siteUrl` is the gateway's (`siteGatewayUrl` resolves a path, keeps an
+  absolute URL). The desktop frames a member site through its
+  `bnbloc-site` scheme only (`site_scheme.rs`), which forwards to where
+  `GET /v1/public/client-config` says sites are, passes every `~app/`
+  method with its body and the app API's request headers, and holds the
+  change feed itself, answering it as batches (a scheme responder takes
+  one body): never admit a gateway or sites origin in the shell's CSP.
 - **An agent reads an app's data only through the room tool `app_data`**
   (`services/bridge/roomtools/appdata.go`: list, find, get, insert, put,
   patch, delete, and wipe with `confirm`), on the gateway's room entry
@@ -1659,7 +1683,8 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
     renewal): `lib/appVisitor.ts` (rule A1; the share page's app view
     `views/share/SharedApp.tsx` only wires it); an app's owners' data line
     (counts, export, clear): `lib/appData.ts` + `views/workbench/AppDataLine.tsx`
-    (who is an owner is the stats route's answer, never re-decided).
+    (who is an owner is the stats route's answer, never re-decided; an
+    export is the server's audited route, the web only names the file).
 
 - **`Dialog` caps height at `max-h-[85vh]` with a scrollable body.** A dialog
   with more content than the viewport must scroll its body while header/footer
