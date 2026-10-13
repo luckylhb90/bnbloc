@@ -106,13 +106,15 @@ func TestSandboxFence_guestWriteNeverReachesTheNextHarness(t *testing.T) {
 				t.Fatal("the breached session is still bound")
 			}
 			b.runBridgeJob(ctx, job("job-2", "bob"))
-			if len(prov.workdirs) != 2 || len(prov.planted) != 2 || prov.planted[1] {
+			// A fresh session on a clean tree, in the agent's one
+			// workspace (its sessions change, its workspace does not).
+			if len(prov.workdirs) != 1 || len(prov.planted) != 2 || prov.planted[1] {
 				t.Fatalf("turn 2: workspaces %v, planted at create %v; want a fresh session on a clean tree", prov.workdirs, prov.planted)
 			}
 			// An untouched turn keeps its session.
 			b.runBridgeJob(ctx, job("job-3", "bob"))
-			if len(prov.workdirs) != 2 || len(prov.inputs) != 1 {
-				t.Fatalf("turn 3: workspaces %d, inputs %d; want the session reused", len(prov.workdirs), len(prov.inputs))
+			if len(prov.planted) != 2 || len(prov.inputs) != 1 {
+				t.Fatalf("turn 3: sessions %d, inputs %d; want the session reused", len(prov.planted), len(prov.inputs))
 			}
 		})
 	}
@@ -136,7 +138,7 @@ func TestSandboxFence_writeBetweenTurnsStartsAFreshSession(t *testing.T) {
 	prov.all = append(prov.all, ".claude/settings.json")
 	prov.gmu.Unlock()
 	b.runBridgeJob(ctx, job("job-2", "bob"))
-	if len(prov.workdirs) != 2 || len(prov.planted) != 2 || prov.planted[1] || len(prov.inputs) != 0 {
+	if len(prov.workdirs) != 1 || len(prov.planted) != 2 || prov.planted[1] || len(prov.inputs) != 0 {
 		t.Fatalf("workspaces %v, planted at create %v, inputs %d; want a fresh session on a clean tree", prov.workdirs, prov.planted, len(prov.inputs))
 	}
 }

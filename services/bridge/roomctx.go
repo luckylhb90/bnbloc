@@ -97,7 +97,7 @@ func extForContentType(contentType, filename string) string {
 // every turn from then on, so it never goes stale). A failed read renders
 // as unreadable, never as empty, and never fails the turn. next is st with
 // what the pass records (ReadmeSum, AppsListed) once the files are written.
-func (b *Bridge) roomRecordFiles(ctx context.Context, room, jobID string, self roomlog.Producer, st roomlog.CtxState, g roomlog.Guidance) (files []roomlog.NamedFile, next roomlog.CtxState) {
+func (b *Bridge) roomRecordFiles(ctx context.Context, room, jobID string, self roomlog.Producer, st roomlog.CtxState, g roomlog.Guidance, cp *deliverableCopier) (files []roomlog.NamedFile, next roomlog.CtxState) {
 	next = st
 	readme, readmeSum, changed := roomlog.ReadmeUpdate(st, g)
 	next.ReadmeSum = readmeSum
@@ -114,12 +114,19 @@ func (b *Bridge) roomRecordFiles(ctx context.Context, room, jobID string, self r
 	if derr != nil {
 		slog.Debug("bnbloc bridge deliverables unreadable", "event", "bnbloc.bridge.roomctx_deliverables_failed", "room", room, "error", derr)
 	}
+	// The deliverables' copies are written before the records that name
+	// them (artifacts.md, INDEX last), so a record never points at a copy
+	// that is not there.
+	var copies map[string]roomlog.Copy
+	if derr == nil && cp != nil {
+		copies = b.copyDeliverables(ctx, room, deliverables, cp)
+	}
 	library, lerr := roomlog.ReadLibrary(ctx, b.gatewayGET, room, jobID, "")
 	if lerr != nil {
 		slog.Debug("bnbloc bridge library unreadable", "event", "bnbloc.bridge.roomctx_library_failed", "room", room, "job", jobID, "error", lerr)
 	}
 	files = append(files,
-		roomlog.DeliverablesFile(deliverables, derr, self),
+		roomlog.DeliverablesFile(deliverables, derr, self, copies),
 		roomlog.LibraryFile(library, lerr),
 		roomlog.LiveFile(b.liveTrail(room)),
 	)
@@ -148,7 +155,7 @@ func (b *Bridge) roomRecordFiles(ctx context.Context, room, jobID string, self r
 // last, so a partial write never advertises files that do not exist). State
 // is only advanced on full success, so a failed pass retries cleanly next
 // turn.
-func (b *Bridge) materializeRoomContext(ctx context.Context, w corepkg.WorkspaceFileWriter, ep corepkg.Endpoint, room, workspaceID, jobID, dropText string, self roomlog.Producer, fresh bool, st roomlog.CtxState, g roomlog.Guidance) (roomlog.CtxState, string, error) {
+func (b *Bridge) materializeRoomContext(ctx context.Context, w corepkg.WorkspaceFileWriter, ep corepkg.Endpoint, room, workspaceID, jobID, dropText string, self roomlog.Producer, fresh bool, st roomlog.CtxState, g roomlog.Guidance, cp *deliverableCopier) (roomlog.CtxState, string, error) {
 	selfSpeaker := agentSpeakerLabel(self.Owner, self.Provider)
 	entries, complete, err := roomlog.History(ctx, b.gatewayGET, room, roomlog.HistoryQuery{After: st.EndSeq})
 	if err != nil {
@@ -170,7 +177,7 @@ func (b *Bridge) materializeRoomContext(ctx context.Context, w corepkg.Workspace
 		newState.SelfAfterSeq = newState.EndSeq
 	}
 	// Insert the records before the trailing INDEX.
-	records, recorded := b.roomRecordFiles(ctx, room, jobID, self, st, g)
+	records, recorded := b.roomRecordFiles(ctx, room, jobID, self, st, g, cp)
 	newState.ReadmeSum, newState.AppsListed = recorded.ReadmeSum, recorded.AppsListed
 	if n := len(files); n > 0 && files[n-1].Name == ".room/INDEX.md" {
 		files = append(append(files[:n-1:n-1], records...), files[n-1])
@@ -205,7 +212,11 @@ func (b *Bridge) drivePrompt(ctx context.Context, d *drive, workspaceID string, 
 	if fresh {
 		start = roomlog.CtxState{}
 	}
-	newSt, from, err := b.materializeRoomContext(ctx, w, ep, room, workspaceID, d.job.JobID, text, roomlog.Producer{Owner: owner, Provider: provider, Core: d.core}, fresh, start, g)
+	var cp *deliverableCopier
+	if d.caps.bytesWriter != nil {
+		cp = &deliverableCopier{key: d.key(), workspaceID: workspaceID, w: d.caps.bytesWriter, ep: ep}
+	}
+	newSt, from, err := b.materializeRoomContext(ctx, w, ep, room, workspaceID, d.job.JobID, text, roomlog.Producer{Owner: owner, Provider: provider, Core: d.core}, fresh, start, g, cp)
 	if err != nil {
 		slog.Warn("bnbloc bridge room-context materialization failed; falling back to pushed context",
 			"event", "bnbloc.bridge.roomctx_failed", "room", room, "core", d.core, "error", err)
@@ -219,6 +230,28 @@ func (b *Bridge) drivePrompt(ctx context.Context, d *drive, workspaceID string, 
 	// one line pointing at the records: a harness may compact that prompt
 	// away.
 	return roomlog.ComposePointer(now, !d.caps.profile)
+}
+
+// deliverableCopier is where a pass copies the room's deliverables: one
+// slot's workspace, through its core's bytes writer.
+type deliverableCopier struct {
+	key         driveKey
+	workspaceID string
+	w           corepkg.WorkspaceFileBytesWriter
+	ep          corepkg.Endpoint
+}
+
+// copyDeliverables writes the listed deliverables whose latest version the
+// workspace does not hold yet into its .room/deliverables/
+// (roomlog.CopyDeliverables) and records what it holds now with the
+// workspace, which outlives the session (agentWorkspaces).
+func (b *Bridge) copyDeliverables(ctx context.Context, room string, list []roomlog.Deliverable, cp *deliverableCopier) map[string]roomlog.Copy {
+	have := b.workspaces.copies(cp.key, cp.workspaceID)
+	copies, next := roomlog.CopyDeliverables(ctx, b.gatewayGET, room, list, have, func(ctx context.Context, name string, data []byte) error {
+		return cp.w.WriteWorkspaceFileBytes(ctx, cp.ep, cp.workspaceID, name, data)
+	})
+	b.workspaces.setCopies(cp.key, cp.workspaceID, next)
+	return copies
 }
 
 // toPromptAttachments maps the bridge's written descriptors to roomlog's prompt

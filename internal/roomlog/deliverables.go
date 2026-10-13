@@ -140,6 +140,7 @@ type Deliverable struct {
 	ArtifactID  string
 	Title       string
 	Kind        string
+	FileName    string
 	Version     int
 	UpdatedAtMs int64
 	Producer    Producer
@@ -191,7 +192,7 @@ func deliverablesPath(room string) string { return "/v1/rooms/" + url.PathEscape
 // deliverableOf is a listed artifact with the producer of its latest
 // version, from the cache when it was resolved before.
 func deliverableOf(ctx context.Context, fetch Fetch, room string, a wire.Artifact, cache *ProducerCache) Deliverable {
-	d := Deliverable{ArtifactID: a.ArtifactID, Title: a.Title, Kind: a.Kind, Version: a.CurrentVersion, UpdatedAtMs: a.UpdatedAtMs}
+	d := Deliverable{ArtifactID: a.ArtifactID, Title: a.Title, Kind: a.Kind, FileName: a.FileName, Version: a.CurrentVersion, UpdatedAtMs: a.UpdatedAtMs}
 	key := room + "\x00" + a.ArtifactID + "\x00" + strconv.Itoa(a.CurrentVersion)
 	if p, ok := cache.get(key); ok {
 		d.Producer = p
@@ -218,16 +219,18 @@ func deliverableProducer(ctx context.Context, fetch Fetch, room string, a wire.A
 }
 
 // DeliverablesFile renders .room/artifacts.md: each deliverable with its
-// kind, latest version, id and producer, marked plainly as not a file of
-// this workspace. self is the reading agent (its own deliverables say so).
-// A failed listing (err) says so instead of claiming the room has none.
-func DeliverablesFile(list []Deliverable, err error, self Producer) NamedFile {
+// kind, latest version, id and producer, and where its copy is in this
+// workspace (copies, CopyDeliverables) or why it has none. self is the
+// reading agent (its own deliverables say so). A failed listing (err) says
+// so instead of claiming the room has none.
+func DeliverablesFile(list []Deliverable, err error, self Producer, copies map[string]Copy) NamedFile {
 	var b strings.Builder
 	b.WriteString(RecordsHeader("Room deliverables"))
 	b.WriteString("\n")
-	b.WriteString("Files the room's agents published from their own workspaces, or people uploaded. bnbloc stores them,\n")
-	b.WriteString("apart from any workspace: a missing local copy proves nothing. Read one with the read_artifact room tool\n")
-	b.WriteString("(by id) when you have it; otherwise the person opens it in the room's Docs panel.\n\n")
+	b.WriteString("Files the room's agents published from their own workspaces, or people uploaded. bnbloc stores them\n")
+	b.WriteString("and keeps a read-only copy of each below in " + DeliverablesDir + "<id>/, refreshed every turn: to change\n")
+	b.WriteString("one, copy it into your own working tree first. A version without a copy here: the read_artifact room\n")
+	b.WriteString("tool (by id) when you have it, else the person opens it in the room's Docs panel.\n\n")
 	switch {
 	case err != nil:
 		b.WriteString("(the deliverables could not be read this turn; this is not a sign that there are none)\n")
@@ -238,17 +241,31 @@ func DeliverablesFile(list []Deliverable, err error, self Producer) NamedFile {
 		fmt.Fprintf(&b, "- %s (%s) v%d, id %s: ", d.Title, d.Kind, d.Version, d.ArtifactID)
 		switch {
 		case d.Producer.Same(self):
-			fmt.Fprintf(&b, "from you (%s); stored by bnbloc, your workspace may hold a different copy or none\n", d.Producer)
+			fmt.Fprintf(&b, "from you (%s)", d.Producer)
 		case d.Producer.IsAgent():
-			fmt.Fprintf(&b, "from %s, in that agent's workspace; NOT in this workspace\n", d.Producer)
+			fmt.Fprintf(&b, "from %s, whose source is in that agent's workspace", d.Producer)
 		case d.Producer.Person != "":
-			fmt.Fprintf(&b, "uploaded by %s; NOT in this workspace\n", d.Producer)
+			fmt.Fprintf(&b, "uploaded by %s", d.Producer)
 		default:
-			fmt.Fprintf(&b, "from %s; NOT in this workspace\n", d.Producer)
+			fmt.Fprintf(&b, "from %s", d.Producer)
 		}
+		b.WriteString("; " + copyNote(copies[d.ArtifactID], d.Version) + "\n")
 	}
 	if len(list) == MaxListedDeliverables {
 		fmt.Fprintf(&b, "\n(the %d most recently updated; older deliverables, if any, are not listed)\n", MaxListedDeliverables)
 	}
 	return NamedFile{Name: ".room/artifacts.md", Content: b.String()}
+}
+
+// copyNote says where a deliverable's copy is, or why there is none.
+func copyNote(c Copy, latest int) string {
+	switch {
+	case c.TooLarge > 0:
+		return fmt.Sprintf("no copy: %d bytes, over the %d-byte copy bound", c.TooLarge, MaxDeliverableCopyBytes)
+	case c.Dir != "" && c.Version == latest:
+		return "copy: " + c.Dir
+	case c.Dir != "":
+		return fmt.Sprintf("copy of v%d (not yet the latest): %s", c.Version, c.Dir)
+	}
+	return "no copy in this workspace this turn"
 }

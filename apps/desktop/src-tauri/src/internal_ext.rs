@@ -505,13 +505,20 @@ pub fn extend_core_env(
             dirs.mcp_tools().to_string_lossy().into_owned(),
         );
     }
-    if let Some(dir) = adapter
-        .bridge_member_dir_for(settings)
-        .map(|dir| dir.join(member_dir::MCP_SETTINGS_DIR))
-    {
+    if let Some(dir) = adapter.bridge_member_dir_for(settings) {
         env.insert(
             mcp_tools::SETTINGS_DIR_ENV.into(),
-            dir.to_string_lossy().into_owned(),
+            dir.join(member_dir::MCP_SETTINGS_DIR)
+                .to_string_lossy()
+                .into_owned(),
+        );
+        // Which workspace each of the member's agents uses in a room, kept
+        // across bridge restarts (the bridge's workspaces.json).
+        env.insert(
+            member_dir::BRIDGE_STATE_DIR_ENV.into(),
+            dir.join(member_dir::BRIDGE_STATE_DIR)
+                .to_string_lossy()
+                .into_owned(),
         );
     }
     // The managed cores: exactly the set the bridge-stabilizing watcher

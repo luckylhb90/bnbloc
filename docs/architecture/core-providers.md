@@ -155,6 +155,27 @@ profile never carries a command that content inlined. A core without
 `agentProfile` gets the bridge's fallback: the instructions (and a summary of
 the skills) prefixed to the first prompt of the session.
 
+**A workspace outlives its sessions**
+([`docs/bugs/2026-10-13-agent-loses-its-workspace.md`](../bugs/2026-10-13-agent-loses-its-workspace.md)).
+The bridge creates one workspace per agent of a room (and execution kind)
+and creates every later session of that agent in it: another expert, a
+stale session rebound, a core or bridge restart. The contract is additive
+(no wire shape changes). A core therefore:
+
+- accepts a session create (`POST /core/v1/workspaces/{ws}/sessions`) in a
+  workspace it created earlier, the agent's files still there;
+- materializes each session's profile afresh in that workspace: the
+  instructions file rewritten, the skills directory holding exactly the
+  profile's skills (a skill an earlier session wore and this one does not
+  is removed, so a session never wears a role it was not given);
+- answers `404 workspace_not_found` for a workspace it no longer holds; the
+  bridge then creates a new one (`core.NotFound`), and the agent recovers
+  the room's deliverables from `.room/deliverables/`.
+
+A daemon whose discovery cannot be read when a drive asks what it offers
+(`core.CapabilitiesKnown`) is retried (`core_unavailable`), never driven
+as if it offered nothing.
+
 Each target reports the MCP transports its agent accepts in a profile:
 `core.Target.MCPTransports` (wire `mcpTransports`: `"stdio"`, `"http"`,
 `"sse"`; empty = stdio only, which every ACP agent takes). It is per target

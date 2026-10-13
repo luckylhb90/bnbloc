@@ -24,6 +24,7 @@ type pullGateway struct {
 	// "<artifactId>/<version>" and job id; library is the granted member
 	// catalog, libraryQueries the query of each catalog read.
 	versions       map[string]string
+	contents       map[string]string // a version's bytes, by "<artifactId>/<version>"
 	runs           map[string]string
 	library        string
 	libraryQueries []string
@@ -36,7 +37,7 @@ type pullGateway struct {
 
 func newPullGateway(t *testing.T) *pullGateway {
 	t.Helper()
-	g := &pullGateway{history: map[string]string{}, versions: map[string]string{}, runs: map[string]string{}, appStats: map[string]string{}}
+	g := &pullGateway{history: map[string]string{}, versions: map[string]string{}, contents: map[string]string{}, runs: map[string]string{}, appStats: map[string]string{}}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /v1/rooms/r1/channels", func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprint(w, `{"channels":[{"channelId":"general"},{"channelId":"test"}]}`)
@@ -65,6 +66,16 @@ func newPullGateway(t *testing.T) *pullGateway {
 		g.mu.Lock()
 		defer g.mu.Unlock()
 		body, ok := g.versions[r.PathValue("id")+"/"+r.PathValue("v")]
+		if !ok {
+			http.NotFound(w, r)
+			return
+		}
+		fmt.Fprint(w, body)
+	})
+	mux.HandleFunc("GET /v1/rooms/r1/artifacts/{id}/versions/{v}/content", func(w http.ResponseWriter, r *http.Request) {
+		g.mu.Lock()
+		defer g.mu.Unlock()
+		body, ok := g.contents[r.PathValue("id")+"/"+r.PathValue("v")]
 		if !ok {
 			http.NotFound(w, r)
 			return
@@ -218,7 +229,7 @@ func TestDriveClaimPullWritesRoomFilesAndPointerPrompt(t *testing.T) {
 	}
 	for file, want := range map[string]string{
 		".room/README.md":    "Every agent works in its own workspace",
-		".room/artifacts.md": "drafts/weekly-report-assistant/component.json (code) v2, id artf_draft: from maya/opencode on core acme, in that agent's workspace; NOT in this workspace",
+		".room/artifacts.md": "drafts/weekly-report-assistant/component.json (code) v2, id artf_draft: from maya/opencode on core acme, whose source is in that agent's workspace;",
 		".room/library.md":   "weekly-report-assistant · expert · v1.0.0 · personal, theirs",
 	} {
 		if !strings.Contains(written[file], want) {
@@ -318,7 +329,7 @@ func TestRoomRecordsWriteAppsOnceTheRoomHasOne(t *testing.T) {
 		g.artifacts = fmt.Sprintf(`{"artifacts":[{"artifactId":"artf_poll","title":"Friday poll","kind":"site","currentVersion":1,"createdBy":"maya","isApp":%v}]}`, isApp)
 		g.appStats["artf_poll"] = stats
 		g.mu.Unlock()
-		files, next := b.roomRecordFiles(context.Background(), "r1", job, roomlog.Producer{Owner: "maya", Provider: "codex"}, st, roomlog.Guidance{HasRoomFiles: true})
+		files, next := b.roomRecordFiles(context.Background(), "r1", job, roomlog.Producer{Owner: "maya", Provider: "codex"}, st, roomlog.Guidance{HasRoomFiles: true}, nil)
 		st.ReadmeSum, st.AppsListed = next.ReadmeSum, next.AppsListed
 		for _, f := range files {
 			if f.Name == ".room/apps.md" {
@@ -426,7 +437,7 @@ func TestMaterializeDropsCurrentInstructionFromRecords(t *testing.T) {
 	if !ok {
 		t.Fatal("fake provider must satisfy WorkspaceFileWriter")
 	}
-	_, _, err := b.materializeRoomContext(context.Background(), w, ep, "r1", "ws", "job-x", "create final_check.rs: print done", roomlog.Producer{Owner: "maya", Provider: "agent-a"}, true, roomlog.CtxState{}, roomlog.Guidance{HasRoomFiles: true})
+	_, _, err := b.materializeRoomContext(context.Background(), w, ep, "r1", "ws", "job-x", "create final_check.rs: print done", roomlog.Producer{Owner: "maya", Provider: "agent-a"}, true, roomlog.CtxState{}, roomlog.Guidance{HasRoomFiles: true}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -486,7 +497,7 @@ func TestMaterializeSelfFilterIsSessionBounded(t *testing.T) {
 	g.setHistory("test", []int64{}, nil)
 	g.addAgentRow("test", 12, "maya", "opencode", "peer agent answers")
 	b, w, ep, prov := newBridge(g)
-	st, _, err := b.materializeRoomContext(context.Background(), w, ep, "r1", "ws", "job-x", "", roomlog.Producer{Owner: "maya", Provider: "agent-a"}, true, roomlog.CtxState{}, roomlog.Guidance{HasRoomFiles: true})
+	st, _, err := b.materializeRoomContext(context.Background(), w, ep, "r1", "ws", "job-x", "", roomlog.Producer{Owner: "maya", Provider: "agent-a"}, true, roomlog.CtxState{}, roomlog.Guidance{HasRoomFiles: true}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -512,7 +523,7 @@ func TestMaterializeSelfFilterIsSessionBounded(t *testing.T) {
 	g2.addChatRow("test", 14, "jack", "new person line")
 	b2, w2, ep2, prov2 := newBridge(g2)
 	st2 := roomlog.CtxState{EndSeq: 12, Chunks: []string{".room/chunk-x.md"}, SelfAfterSeq: 12}
-	if _, _, err := b2.materializeRoomContext(context.Background(), w2, ep2, "r1", "ws", "job-x", "", roomlog.Producer{Owner: "maya", Provider: "agent-a"}, false, st2, roomlog.Guidance{HasRoomFiles: true}); err != nil {
+	if _, _, err := b2.materializeRoomContext(context.Background(), w2, ep2, "r1", "ws", "job-x", "", roomlog.Producer{Owner: "maya", Provider: "agent-a"}, false, st2, roomlog.Guidance{HasRoomFiles: true}, nil); err != nil {
 		t.Fatal(err)
 	}
 	recent2 := recentOf(prov2)

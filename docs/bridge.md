@@ -17,12 +17,16 @@ One bridge acts for one member (`BNBLOC_BRIDGE_OWNER`). It:
    (`GET /v1/rooms/{id}/events`). This is an outbound dial, so it traverses
    NAT/firewalls like any client.
 2. On a `chat_message` authored by the owner, **drives the local core**:
-   - first message in a room → create a workspace + agent session, the target
-     derived from the chat recipient's provider (and the core's target
-     resolver, e.g. the manifest's `local:` prefix);
-   - later messages → send follow-up input to the bound session.
-     The core mints its own workspace id, so the bridge keeps a room→workspace/
-     session binding in memory (roomId != workspaceId).
+   - first message to an agent in a room → create the agent's workspace and
+     a session in it, the target derived from the chat recipient's provider
+     (and the core's target resolver, e.g. the manifest's `local:` prefix);
+   - later messages → send follow-up input to the bound session;
+   - a new session (other content, a stale session, a bridge restart) is
+     created in the agent's SAME workspace: its files stay
+     (`services/bridge/workspaces.go`). The core mints its own workspace id,
+     so the bridge keeps the agent→workspace binding, persisted in
+     `BNBLOC_BRIDGE_STATE_DIR` when set; a workspace the core no longer holds
+     (404 on the session create) is replaced.
 3. **Reflows replies**: polls the core's messages op (for a manifest core, e.g. `GET /v1/workspaces/{ws}/agent-sessions/{sid}/messages?afterVersion=<cursor>&order=asc`),
    and posts new assistant messages to `POST /v1/rooms/{room}/agent-activity/messages`
    in the exact wire shape the web client renders. The `afterVersion` cursor
@@ -64,7 +68,11 @@ mean "persist the health-check discussion").
 - `artifacts.md` — the room's newest deliverables (live state, distinct from
   conversation records), each with its latest version, id and the agent that
   produced it (`owner/provider` and core, from the version's source job), and
-  marked as not a file of this workspace
+  where its copy is
+- `deliverables/<id>/` — a read-only copy of each listed deliverable's latest
+  version (a site as its file tree), written only when the version changed,
+  bounded per deliverable and per pass (`roomlog.CopyDeliverables`): the
+  source of any deliverable, whatever happened to the workspace
 - `library.md` — a bounded snapshot of the requester's Library, read with the
   job's grant (`GET /v1/components?job=&room=`)
 - `live.md` — what members did in running deliverables (`roomlog.LiveFile`,
@@ -101,7 +109,7 @@ just the default channel), the agent's own past replies never re-enter (its
 session memory already holds them), the current instruction appears exactly
 once, and every history section is headed as records, never requests. The session
 workspace file manifest is no longer injected in either model: the workspace is
-the session's own, so its contents are self-redundant.
+the agent's own, so its contents are self-redundant.
 
 Gateway calls use the **owner's own session**: a refresh token handed over by
 the desktop (forked into the bridge's own family), a static
@@ -225,8 +233,10 @@ verified against its sha256 and validated by `internal/contentpkg`.
   prefixed to the session's first prompt, with the skill files under
   `.agents/skills/` when it accepts workspace files.
 - The profile's content checksum is part of the session binding: a turn
-  wearing different content starts a new session (and a sandbox workdir's
-  agent-config paths are cleared first).
+  wearing different content starts a new session, in the agent's same
+  workspace (and a sandbox workdir's agent-config paths are cleared first).
+  Every session on an `agentProfile` core gets the room tools, with or
+  without content.
 - Someone else's content that declares `scripts` or `mcp.stdio` forces the
   sandbox (refused where the sandbox cannot take it); sandboxed drives deny
   writes to the agent-config paths, which are never published or synced.

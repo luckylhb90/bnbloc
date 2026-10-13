@@ -278,7 +278,7 @@ func (b *Bridge) publishDeliverables(ctx context.Context, room, channelID string
 			d.kind = store.ArtifactKindForFile(f.Path, d.mimeType)
 		}
 		published++
-		if err := b.publishArtifactNow(ctx, room, channelID, rs.workspaceID, rs.sessionID, d, "agent"); err != nil {
+		if err := b.publishArtifactNow(ctx, room, channelID, rs, d, "agent"); err != nil {
 			slog.Debug("bnbloc bridge artifact publish failed",
 				"event", "bnbloc.bridge.artifact_publish_failed", "room", room, "file", f.Path, "error", err)
 		}
@@ -316,10 +316,14 @@ func (b *Bridge) artifactMaxBytes(ctx context.Context, room string) (int64, erro
 	return resp.MaxBytes, nil
 }
 
-// artifactIDForFile derives the stable artifact id for a session file, so the
-// same file's turns publish versions of ONE artifact instead of duplicates.
-func artifactIDForFile(workspaceID, sessionID, rel string) string {
-	return "artf_" + shortHash(workspaceID+"/"+sessionID+"/"+rel)
+// artifactIDForFile derives the stable artifact id of an agent's file: the
+// same file publishes versions of ONE artifact, whichever of the agent's
+// sessions wrote it (its sessions change, its workspace and its files do
+// not: workspaces.go), and after its workspace was replaced and the agent
+// restored the file from its .room/deliverables/ copy.
+func artifactIDForFile(room string, rs *roomSession, rel string) string {
+	agent := driveKey{room: room, core: rs.core, provider: rs.provider}.agentID()
+	return "artf_" + shortHash(agent+"\n"+rs.owner+"\n"+rel)
 }
 
 // deliverable is one file to publish: inline text, or blob bytes with a MIME
@@ -338,8 +342,8 @@ type deliverable struct {
 }
 
 // publishArtifactNow is the real entry: create-or-attach then CAS publish.
-func (b *Bridge) publishArtifactNow(ctx context.Context, room, channelID, workspaceID, sessionID string, d deliverable, author string) error {
-	id := artifactIDForFile(workspaceID, sessionID, d.rel)
+func (b *Bridge) publishArtifactNow(ctx context.Context, room, channelID string, rs *roomSession, d deliverable, author string) error {
+	id := artifactIDForFile(room, rs, d.rel)
 	roomPath := "/v1/rooms/" + url.PathEscape(room) + "/artifacts"
 	title, fileName := d.title, d.fileName
 	if title == "" {

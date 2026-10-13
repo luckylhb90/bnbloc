@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -61,6 +62,15 @@ type HTTPError struct {
 
 func (e *HTTPError) Error() string {
 	return fmt.Sprintf("%s %s %s: status %d: %s", e.Core, e.Method, e.Path, e.Status, Truncate(e.Body, 256))
+}
+
+// NotFound reports a core's 404 answer: what the request named (a
+// workspace, a session, a target, a file) does not exist there, so the
+// request took no effect. The bridge reads it to tell a workspace the core
+// no longer holds from any other failure of a session create.
+func NotFound(err error) bool {
+	var he *HTTPError
+	return errors.As(err, &he) && he.Status == http.StatusNotFound
 }
 
 // EnvelopeError is a failed answer that carried a protocol error envelope:

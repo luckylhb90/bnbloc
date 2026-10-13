@@ -33,7 +33,10 @@ reply in the room; deliverables published with sourceSeq = the dispatch's seq
   answers `GET`/`DELETE` with 405.
 - **One bearer per driven core session.** The bridge's session contributor
   hook (`services/bridge/profile.go`) asks for the session's contribution
-  when the session is created on an `agentProfile` core: the server mints a
+  when the session is created on an `agentProfile` core, every session,
+  with or without an expert or skill packs (a session wearing nothing still
+  gets a profile: the guidance and the contributors' servers), so a plain
+  follow-up after an expert's turn has the tools too: the server mints a
   random bearer and the session's profile gets the server, either
   - `http` with an `Authorization: Bearer …` header, when the target
     advertises http MCP (`core.Target.MCPTransports`), or
@@ -42,7 +45,11 @@ reply in the room; deliverables published with sourceSeq = the dispatch's seq
     agent to accept stdio servers.
   Bearers are looked up by hash and compared in constant time; the release
   hook revokes a bearer when the bridge drops the session binding (rebind,
-  forgotten room, core endpoint change), and a bridge stop revokes them all.
+  forgotten room, core endpoint change), and a bridge stop revokes them all. A core whose
+  capabilities cannot be read at the drive (a protocol daemon's failed
+  discovery, `core.CapabilitiesKnown`) is not driven without them: the job
+  fails `core_unavailable` and is retried, rather than running a whole
+  session with no tools.
 - **Bound to the current job.** The turn hook binds the bearer to the job
   each turn drives. A bearer only ever dispatches on behalf of that job, and
   realtime admits the dispatch only while the job is running on a bridge of
@@ -115,7 +122,9 @@ text has one owner per category
   `[now — from <sender>]` message alone, that a records header marks
   background and a fence marks someone else's text; the room model (every
   agent works in its own workspace; deliverables are stored by bnbloc and
-  named by their producer, never files of the reader's workspace; the
+  named by their producer, with a read-only copy of each in the reader's
+  `.room/deliverables/` where bnbloc writes `.room/` (to change one, copy
+  it into its own files first), never its working files; the
   Library is bnbloc's Library of the person who asked, shared by every agent
   and core in the room; how to verify); to answer in the person's language;
   with `.room/` files, what each holds; with these tools, how to use them
@@ -143,12 +152,29 @@ text has one owner per category
   literals (and the identity line) in any other Go string.
 - **`.room/artifacts.md`** (`roomlog.ReadDeliverables`,
   `DeliverablesFile`): the room's `roomlog.MaxListedDeliverables` newest
-  deliverables, each with kind, latest version, id and producer, marked
-  "NOT in this workspace" (the reader's own: "from you"). The producer of a
+  deliverables, each with kind, latest version, id, producer (the reader's
+  own: "from you"; another agent's: its source is in that agent's
+  workspace) and where its copy is, or why it has none. The producer of a
   version is `roomlog.VersionProducer`: its source job's agent from the run
   record (`owner/provider` and core), else its author (a person's upload).
   The bridge caches resolved versions (`roomlog.ProducerCache`; a version
   never changes), so a turn costs one listing.
+- **`.room/deliverables/<id>/`** (`roomlog.CopyDeliverables`,
+  `docs/bugs/2026-10-13-agent-loses-its-workspace.md`): a read-only copy of
+  each listed deliverable's latest version, a site as its file tree,
+  anything else as one file (its file name). Written in the pull pass
+  before the records that name it, and only when the version changed since
+  the workspace's last pass (`roomlog.CopyState`, kept with the agent's
+  workspace, which outlives its sessions: `services/bridge/workspaces.go`).
+  A version over `roomlog.MaxDeliverableCopyBytes` (8 MiB) is not copied
+  (artifacts.md says so, with its size); one pass writes at most
+  `MaxDeliverableCopyPassBytes` (32 MiB) and the rest follow on the next
+  turns. Nothing under it is deleted, so a site version that dropped a file
+  leaves the old file in the copy. Whatever happens to an agent's
+  workspace, it can recover a deliverable's source from here, and an agent
+  without the room tools reads other agents' work. `.room/` is
+  bnbloc-owned: never published, synced or packed, write-denied in
+  sandboxed drives.
 - **`.room/library.md`** (`roomlog.ReadLibrary`, `LibraryFile`): the
   requester's Library read with the turn's job grant, the
   `roomlog.MaxLibraryItems` most recently updated (name, kind, version,
@@ -228,7 +254,9 @@ would pass it and returns `next` there, a single larger document is cut
 **Budgets.** `TestPromptBudgets` caps the session prefix: guidance 700
 tokens (750 for a team lead), tools/list 2,550, guidance plus tools/list
 3,250. `app_data` added 345 tokens to tools/list (2,168 → 2,513) and its
-guidance line 39 to the guidance (619 → 658).
+guidance line 39 to the guidance (619 → 658). The deliverable copies'
+line added 10 (658 → 668; a team lead's 740 → 750), paid for by a shorter
+workspace line.
 
 ## Teams
 

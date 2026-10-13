@@ -101,7 +101,7 @@ func TestSitePlainRootPublishesOneSnapshot(t *testing.T) {
 		t.Fatalf("site creates = %v, want one", sites)
 	}
 	if sites[0]["title"] != "Demo & Co" || sites[0]["fileName"] != "site" ||
-		sites[0]["artifactId"] != artifactIDForFile("ws", "s", "/") {
+		sites[0]["artifactId"] != artifactIDForFile("room-1", rs, "/") {
 		t.Fatalf("site create = %v", sites[0])
 	}
 	pubs := cg.sitePublishes()

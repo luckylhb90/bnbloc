@@ -2,7 +2,7 @@
 //!
 //! What a member keeps on a desktop (plugin `localSettings`, MCP tool member
 //! credentials, MCP OAuth sign-ins, the sandbox's data dir with its VM
-//! disks) belongs to one member acting in one tenant of one gateway, and the
+//! disks, the bridge's workspace bindings) belongs to one member acting in one tenant of one gateway, and the
 //! catalog that installs those components is scoped the same way: a
 //! super-admin's tenant switch hands the desktop a whole other catalog.
 //! Several members, or one member in several tenants, may use the same
@@ -35,6 +35,10 @@ pub(super) const PLUGIN_SETTINGS_DIR: &str = "plugin-settings";
 pub(super) const MCP_SETTINGS_DIR: &str = "mcp-settings";
 /// A member's sandbox data dirs (`<member>/sandbox/<name>`: VM disks).
 pub(super) const SANDBOX_DATA_DIR: &str = "sandbox";
+/// The bridge's state (`<member>/bridge/`: which workspace each agent of a
+/// room uses), handed to it as `BRIDGE_STATE_DIR_ENV`.
+pub(super) const BRIDGE_STATE_DIR: &str = "bridge";
+pub(super) const BRIDGE_STATE_DIR_ENV: &str = "BNBLOC_BRIDGE_STATE_DIR";
 
 /// The bridge-stabilizing watcher's key for the bridge's member directory
 /// (a slash never appears in a core name, so it cannot collide with one).

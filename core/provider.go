@@ -111,6 +111,26 @@ func Supports(ctx context.Context, p Provider, ep Endpoint, c Capability) bool {
 	return ok && r.Supports(ctx, ep, c)
 }
 
+// CapabilitiesKnown reports why p could not tell which optional
+// capabilities it offers for ep (nil when it can): a protocol daemon whose
+// discovery document could not be read answers Supports false for every
+// optional capability, which is not the same as not offering them. A drive
+// snapshots its core's capabilities once, so it asks this first and fails
+// retryably instead of running a whole session without what the core does
+// offer (an agent profile, the room tools, the .room/ records).
+func CapabilitiesKnown(ctx context.Context, p Provider, ep Endpoint) error {
+	if r, ok := p.(capabilitiesChecker); ok {
+		return r.CapabilitiesKnown(ctx, ep)
+	}
+	return nil
+}
+
+// capabilitiesChecker is a CapabilityReporter that can fail to read what it
+// offers (the Core Protocol client: its discovery).
+type capabilitiesChecker interface {
+	CapabilitiesKnown(ctx context.Context, ep Endpoint) error
+}
+
 // CapabilityReporter is implemented by a provider whose optional capabilities
 // are known only from data — a manifest's declared ops, or a protocol daemon's
 // discovery document — rather than from its Go type. Such a provider

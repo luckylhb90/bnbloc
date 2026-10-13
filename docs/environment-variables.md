@@ -339,6 +339,7 @@ standalone bridge (compose `bridge` profile) reads them from the environment.
 | `BNBLOC_BRIDGE_SERVE_ALL_OWNERS` | off | Single-host testing only: drive every member's agent from this one bridge (needs `BNBLOC_ACTIVITY_ALLOW_SERVE_ALL` on activity). |
 | `BNBLOC_BRIDGE_SUPERVISED` | off | Set by the desktop: exit when stdin closes (parent died). |
 | `BNBLOC_BRIDGE_CONTEXT_WINDOW_CHARS` / `BNBLOC_BRIDGE_CONTEXT_RECENT_ROWS` | built-in | Per-drive room-context tuning floors (0 = default). |
+| `BNBLOC_BRIDGE_STATE_DIR` | — (memory only) | Directory the bridge keeps its state in across restarts: `workspaces.json`, which workspace each agent of a room uses (owner-only). Set by the desktop to the member's own directory (`<member dir>/bridge`). Empty: the bindings live in memory and a restart starts each agent in a new workspace. |
 | `BNBLOC_RELAY_BASE_URL` | — | Relay base for live file sync, e.g. `https://bnbloc.example.com` (the edge routes `/relay/*`). Empty disables file sync; chat/agents are unaffected. |
 | `BNBLOC_BRIDGE_SYNC_ENGINE` | `gosync` | File-sync engine for live-sync rooms. |
 | `BNBLOC_SYNC_SECRET` | — | Deployment-wide secret; the per-room sync token is `HMAC(secret, roomId)`. **Required for file sync in any shared deployment** — empty yields an empty token (dev only). All members' bridges must share it. |

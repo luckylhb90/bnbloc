@@ -211,6 +211,9 @@ services:
       # Real-time file sync (live-sync rooms). Empty relay URL disables sync.
       BNBLOC_RELAY_BASE_URL: "${BNBLOC_RELAY_BASE_URL:-http://relay:8085}"
       BNBLOC_BRIDGE_SYNC_ENGINE: "${BNBLOC_BRIDGE_SYNC_ENGINE:-gosync}"
+      # Where the bridge keeps which workspace each agent uses across
+      # restarts. Empty = memory only (a restart starts new workspaces).
+      BNBLOC_BRIDGE_STATE_DIR: "${BNBLOC_BRIDGE_STATE_DIR:-}"
       # Deployment-wide secret; per-room auth token is HMAC(secret, roomId).
       # All members' bridges must share the same value. Empty disables auth.
       BNBLOC_SYNC_SECRET: "${BNBLOC_SYNC_SECRET:-}"

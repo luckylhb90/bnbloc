@@ -142,6 +142,19 @@ func (e coreNotRunningError) Error() string {
 	return "the " + e.core + " core is not running on this machine yet"
 }
 
+// capabilitiesUnknownError: the core's daemon could not say what it offers
+// (its discovery failed) when the drive asked; nothing was sent to it.
+type capabilitiesUnknownError struct {
+	core string
+	err  error
+}
+
+func (e capabilitiesUnknownError) Error() string {
+	return "the " + e.core + " core did not say what it offers: " + e.err.Error()
+}
+
+func (e capabilitiesUnknownError) Unwrap() error { return e.err }
+
 // sandboxNotReadyError: the agent sandbox a drive must run in is not up yet
 // (its runtime does not answer, or its machine is still starting); nothing
 // was sent to a core. sandboxStarting decides which prepare failures mean
@@ -241,7 +254,8 @@ func driveFailureReason(err error) store.AgentJobFailureReason {
 			return store.FailureSandboxStarting
 		}
 		var notRunning coreNotRunningError
-		if errors.As(err, &notRunning) || corepkg.Retryable(err, false) {
+		var unknown capabilitiesUnknownError
+		if errors.As(err, &notRunning) || errors.As(err, &unknown) || corepkg.Retryable(err, false) {
 			return store.FailureCoreUnavailable
 		}
 	case stageStart:

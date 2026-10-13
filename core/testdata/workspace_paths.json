@@ -6,6 +6,8 @@
     {"path": ".room/README.md", "protected": true, "writable": true},
     {"path": ".room/artifacts.md", "protected": true, "writable": true},
     {"path": ".room/library.md", "protected": true, "writable": true},
+    {"path": ".room/deliverables/art_1/index.html", "protected": true, "writable": true},
+    {"path": ".room/deliverables/art_1/assets/app.js", "protected": true, "writable": true},
     {"path": "./.room/chunk-1.md", "protected": true},
     {"path": "CLAUDE.md", "protected": true, "writable": true},
     {"path": "AGENTS.md", "protected": true, "writable": true},

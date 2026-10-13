@@ -170,27 +170,38 @@ func TestComposeCarriesNoSessionGuidance(t *testing.T) {
 }
 
 // .room/artifacts.md names each deliverable's producer (owner/provider and
-// core, or the person), its latest version and id, and says plainly it is not
-// in this workspace; the reader's own deliverable says it is its own.
+// core, or the person), its latest version and id, and where its read-only
+// copy is in this workspace or why there is none; the reader's own
+// deliverable says it is its own.
 func TestArtifactsGoldenNamesProducers(t *testing.T) {
 	ff := roomFetch()
 	list, err := ReadDeliverables(context.Background(), ff.fetch, "r1", &ProducerCache{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	f := DeliverablesFile(list, nil, Producer{Owner: "maya", Provider: "codex", Core: "nimbus"})
+	copies := map[string]Copy{
+		"artf_a": {Dir: ".room/deliverables/artf_a/", Version: 2, Files: 1},
+		"art_b":  {Version: 1, TooLarge: MaxDeliverableCopyBytes + 1},
+		"artf_c": {Dir: ".room/deliverables/artf_c/", Version: 2, Files: 1, Pending: true},
+	}
+	f := DeliverablesFile(list, nil, Producer{Owner: "maya", Provider: "codex", Core: "nimbus"}, copies)
 	if f.Name != ".room/artifacts.md" {
 		t.Fatalf("name = %s", f.Name)
 	}
 	golden(t, "artifacts.md", f.Content)
 	for _, want := range []string{
-		"drafts/weekly-report-assistant/component.json (code) v2, id artf_a: from maya/opencode on core acme, in that agent's workspace; NOT in this workspace",
-		"brief.md (markdown) v1, id art_b: uploaded by maya (a person); NOT in this workspace",
-		"notes.md (markdown) v3, id artf_c: from you (maya/codex on core nimbus)",
+		"drafts/weekly-report-assistant/component.json (code) v2, id artf_a: from maya/opencode on core acme, whose source is in that agent's workspace; copy: .room/deliverables/artf_a/",
+		"brief.md (markdown) v1, id art_b: uploaded by maya (a person); no copy: 8388609 bytes, over the 8388608-byte copy bound",
+		"notes.md (markdown) v3, id artf_c: from you (maya/codex on core nimbus); copy of v2 (not yet the latest): .room/deliverables/artf_c/",
+		"to change\none, copy it into your own working tree first",
 	} {
 		if !strings.Contains(f.Content, want) {
 			t.Errorf("artifacts.md lacks %q:\n%s", want, f.Content)
 		}
+	}
+	// Without copies (a core that takes no binary files) every line says so.
+	if bare := DeliverablesFile(list, nil, Producer{}, nil).Content; strings.Count(bare, "no copy in this workspace this turn") != 3 {
+		t.Fatalf("artifacts.md without copies:\n%s", bare)
 	}
 }
 
@@ -216,7 +227,7 @@ func TestDeliverablesCacheAndFailure(t *testing.T) {
 	if got := list[0].Producer.String(); got != "an agent (job job-a)" {
 		t.Fatalf("unresolved producer = %q", got)
 	}
-	if got := DeliverablesFile(nil, errors.New("down"), Producer{}).Content; !strings.Contains(got, "could not be read this turn") || strings.Contains(got, "(none yet)") {
+	if got := DeliverablesFile(nil, errors.New("down"), Producer{}, nil).Content; !strings.Contains(got, "could not be read this turn") || strings.Contains(got, "(none yet)") {
 		t.Fatalf("failed listing renders:\n%s", got)
 	}
 }

@@ -169,6 +169,11 @@ func (b *Bridge) resolveContent(ctx context.Context, d *drive) *refusal {
 type driveCaps struct {
 	// reachable: the core's endpoint is known, so the verdicts were asked.
 	reachable bool
+	// unknown: the core could not say what it offers (its discovery
+	// failed). The drive fails retryably at its prepare instead of running
+	// a session without the profile, room tools and records the core does
+	// offer.
+	unknown error
 	// profile: agentProfile (an agent profile, MCP servers, room tools).
 	profile bool
 	// workdir: sandboxExec (a workspace created in the sandbox workdir).
@@ -193,6 +198,9 @@ func (b *Bridge) coreCaps(ctx context.Context, coreName string) driveCaps {
 		return driveCaps{}
 	}
 	p, ep := entry.provider, entry.endpoint
+	if err := corepkg.CapabilitiesKnown(ctx, p, ep); err != nil {
+		return driveCaps{reachable: true, unknown: err}
+	}
 	caps := driveCaps{reachable: true, profile: corepkg.Supports(ctx, p, ep, corepkg.CapabilityAgentProfile)}
 	caps.workdir, _ = corepkg.As[corepkg.WorkdirWorkspaceCreator](ctx, p, ep, corepkg.CapabilitySandboxExec)
 	caps.writer, _ = corepkg.As[corepkg.WorkspaceFileWriter](ctx, p, ep, corepkg.CapabilityWriteFile)
@@ -208,7 +216,7 @@ func (b *Bridge) coreCaps(ctx context.Context, coreName string) driveCaps {
 func (b *Bridge) planExecution(ctx context.Context, d *drive) *refusal {
 	// An unreachable core's capabilities are unknown: the drive fails
 	// retryably as core_unavailable instead.
-	if team := d.content.teamRoster(); team != nil && d.caps.reachable && !d.caps.profile {
+	if team := d.content.teamRoster(); team != nil && d.caps.reachable && d.caps.unknown == nil && !d.caps.profile {
 		return refuseTeamUnsupported.refused("The team "+firstNonEmpty(team.Name, "expert")+" needs an agent that can use the room tools to ask its members; "+d.job.Provider+" cannot. Nothing ran.", d.agent())
 	}
 	if refuse := b.planSandbox(ctx, d); refuse != "" {

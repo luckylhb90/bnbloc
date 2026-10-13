@@ -1034,7 +1034,11 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   capabilities, plan execution, authorize, bind target, drive, settle.
   Stages 1–6 fill in the `drive` or return a `refusal`; the core's
   capabilities are asked once (stage 3) and every later stage reads that
-  snapshot (`TestDriveCapabilitiesAskedOncePerDrive`). Own, borrowed,
+  snapshot (`TestDriveCapabilitiesAskedOncePerDrive`). A core that cannot
+  say what it offers (`core.CapabilitiesKnown`: a protocol daemon whose
+  discovery failed) is not driven in a degraded session without its
+  profile, room tools and records: the drive fails `core_unavailable`
+  (retried) before anything reaches it. Own, borrowed,
   platform, sandboxed and dispatched drives differ only in the inputs to
   stages 4 and 5: never add a per-kind drive path. A drive slot (session
   and drive lock) is a `driveKey` (room, core, provider, execution kind);
@@ -1043,6 +1047,23 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   join (use `core.QualifyTargetID`/`SplitTargetID`) in the bridge. A
   content package that cannot be loaded is `missing`, except the expert
   the chat picked (refused).
+- **An agent keeps one workspace; its sessions change**
+  (`services/bridge/workspaces.go`,
+  `docs/bugs/2026-10-13-agent-loses-its-workspace.md`: a follow-up without
+  the expert ran in a new, empty workspace and could not fix the app it
+  had built). `agentWorkspaces` is the one owner of which workspace a
+  drive slot uses: created for the slot's first session and bound before
+  that session starts; every later session (another binding sum, a stale
+  session rebound, a core endpoint change, a bridge restart) is created
+  in it. It is replaced only when the core answers 404 on the session
+  create (`core.NotFound`: the core no longer holds it), and the bound
+  workspace is never deleted on a failed create. Bindings persist in
+  `BNBLOC_BRIDGE_STATE_DIR` (`workspaces.json`, 0600; the desktop sets the
+  member's `member_dir`/bridge); unset, they live in memory. A gone room
+  drops its bindings. A deliverable's identity is the agent's, not the
+  session's (`artifactIDForFile`: room, owner, core, provider, path), so
+  a file edited in a later session publishes a new version of the same
+  deliverable. Never create a workspace per session again.
 - **A job retries only when no agent work can have started.**
   `store.retryBackoffs` is the one retry table: a reason retries
   (`AgentJobFailureReason.Retryable`) exactly when it has a row, and the
@@ -1209,8 +1230,11 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   advertising `agentProfile` (`core.Supports`); its
   `core.AgentProfile.BindingSum` (instructions, skill files, the MCP
   servers' non-secret identity) binds the session: a turn whose sum differs
-  gets a new one; contributed MCP servers, env and every secret value stay
-  out of it.
+  gets a new one, in the agent's same workspace; contributed MCP servers,
+  env and every secret value stay out of it. Every session on an
+  `agentProfile` core gets the room tools, with or without content (a
+  turn wearing nothing still has a profile: the guidance and the
+  contributors' servers).
   Never log profile secrets. Other cores get the prompt-prefix fallback.
   `Target.MCPTransports` says which MCP transports a target accepts (empty =
   stdio only).
@@ -1284,9 +1308,20 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   `site_file_read.go`: the job grant, the room service's read as the
   requester, 4 MiB a file), never a site ticket or site URL
   (`TestRoomToolsNeverOpenSiteTickets`).
-  Never tell an agent a deliverable or a component is "in its workspace",
-  and never compute a producer, a Library listing or an app listing
-  elsewhere.
+  `.room/deliverables/<id>/` (`roomlog.CopyDeliverables`, the pull pass,
+  before the records that name them) holds a read-only copy of each
+  listed deliverable's latest version (a site as its file tree, anything
+  else as one file), so an agent recovers any deliverable's source
+  whatever happened to its workspace, and an agent without tools reads
+  other agents' work. A copy is written only when its version changed
+  since the workspace's last pass (`roomlog.CopyState`, kept with the
+  workspace in `agentWorkspaces`, cleared with a reset `.room/`), within
+  `MaxDeliverableCopyBytes` per deliverable and
+  `MaxDeliverableCopyPassBytes` per pass; `artifacts.md` says where each
+  copy is or why there is none. To edit one, the agent copies it into
+  its own working tree (the guidance says so). Never tell an agent a
+  deliverable or a component is one of its working files, and never
+  compute a producer, a Library listing or an app listing elsewhere.
 
 - **Built-in content is a content source**, not a second library:
   `internal/contentbuiltin`, wrapped over the content store at gateway and

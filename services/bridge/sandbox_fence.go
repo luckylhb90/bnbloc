@@ -262,6 +262,7 @@ func (b *Bridge) endSandboxedTurn(ctx context.Context, key driveKey, sx corepkg.
 	}
 	b.mu.Unlock()
 	resetProtectedPaths(sx.Workdir)
+	b.workspaces.roomFilesCleared(key)
 }
 
 // quiesce stops every process of a space: deleting it without purge (the

@@ -311,7 +311,7 @@ func (b *Bridge) publishSite(ctx context.Context, room, channelID string, rs *ro
 		rel: site.root + "/", kind: store.ArtifactKindSite, title: site.title, fileName: siteFileName(site.root),
 		mimeType: tarbundle.SiteMIME, content: tarball, turn: turn,
 	}
-	if err := b.publishArtifactNow(ctx, room, channelID, rs.workspaceID, rs.sessionID, d, "agent"); err != nil {
+	if err := b.publishArtifactNow(ctx, room, channelID, rs, d, "agent"); err != nil {
 		slog.Debug("bnbloc bridge site publish failed",
 			"event", "bnbloc.bridge.artifact_publish_failed", "room", room, "root", site.root, "error", err)
 	}

@@ -116,6 +116,12 @@ type Config struct {
 	// stdio tools and member credentials are unavailable (mcp_tools.go).
 	MCPToolsDir    string
 	MCPSettingsDir string
+	// StateDir is where the bridge keeps what must outlive a restart: which
+	// workspace each agent of a room uses (workspaces.go). Set by the
+	// desktop to the member's own directory (BNBLOC_BRIDGE_STATE_DIR).
+	// Empty: in memory only, so a restart starts each agent in a new
+	// workspace.
+	StateDir string
 }
 
 // LogValue keeps the config's credentials out of every log line: the gateway
@@ -194,8 +200,11 @@ type Bridge struct {
 	mu       sync.Mutex
 	rooms    map[string]context.CancelFunc // roomId -> stream canceller
 	sessions map[driveKey]*roomSession     // drive slot -> bound session
-	locks    map[driveKey]*sync.Mutex      // drive slot -> drive lock
-	syncs    map[string]context.CancelFunc // roomId -> sync engine canceller
+	// workspaces is each drive slot's workspace, which outlives its
+	// sessions (workspaces.go).
+	workspaces *agentWorkspaces
+	locks      map[driveKey]*sync.Mutex      // drive slot -> drive lock
+	syncs      map[string]context.CancelFunc // roomId -> sync engine canceller
 	// gone holds rooms the gateway answered 404/403 for (deleted, or the owner
 	// lost access) and when: reconcile does not re-subscribe them while they
 	// are in cooldown, so a room that discovery still lists (or a static
@@ -418,6 +427,7 @@ func New(cfg Config) *Bridge {
 		stream:      &http.Client{},
 		rooms:       map[string]context.CancelFunc{},
 		sessions:    map[driveKey]*roomSession{},
+		workspaces:  newAgentWorkspaces(cfg.StateDir),
 		locks:       map[driveKey]*sync.Mutex{},
 		syncs:       map[string]context.CancelFunc{},
 		gone:        map[string]time.Time{},
@@ -962,6 +972,9 @@ func (b *Bridge) dropGoneRoom(room string, err error) {
 		delete(b.syncs, room)
 	}
 	b.forgetRoom(room)
+	// The room is gone (deleted, or the owner is no longer a member): so
+	// are its agents' workspace bindings.
+	b.workspaces.forgetRoom(room)
 	if b.gone == nil {
 		b.gone = map[string]time.Time{}
 	}
@@ -1342,6 +1355,10 @@ func (b *Bridge) handleJobUpdate(data string) {
 // sandboxed drive readies its turn under that lock — space re-ensure + a
 // fresh exec token — and the descriptor rides the session create / input.
 func (b *Bridge) driveClaim(ctx context.Context, d *drive, beforeReflow func(*roomSession)) (driveResult, error) {
+	if d.caps.unknown != nil {
+		// Nothing was sent to the core: a retryable core_unavailable.
+		return driveResult{}, atStage(stagePrepare, capabilitiesUnknownError{core: d.core, err: d.caps.unknown})
+	}
 	key := d.key()
 	lock := b.driveLock(key)
 	lock.Lock()
@@ -1487,16 +1504,76 @@ func (b *Bridge) ensureSession(ctx context.Context, d *drive, key driveKey, prom
 	}
 	if opts.Execution != nil {
 		// The sandbox workdir outlives sessions: clear the previous
-		// session's agent config before this one materializes its own.
+		// session's agent config (and the room records, which the new
+		// session writes afresh) before this one materializes its own.
 		resetProtectedPaths(opts.Execution.Sandbox.Workdir)
+		b.workspaces.roomFilesCleared(key)
 	}
-	workspaceID, err := b.createWorkspace(ctx, entry, d.caps, opts.Execution)
+	// The slot's workspace outlives its sessions (workspaces.go): a new
+	// session starts in the workspace the agent already works in, and a
+	// workspace is created only for the slot's first session, or when the
+	// core no longer holds the one it had.
+	workspaceID, reused := b.workspaces.id(key)
+	if !reused {
+		created, err := b.createWorkspace(ctx, entry, d.caps, opts.Execution)
+		if err != nil {
+			return nil, fmt.Errorf("create workspace: %w", err)
+		}
+		// Bound before the session is created: what its first pass copies
+		// into the workspace is recorded with it.
+		workspaceID = created
+		b.workspaces.bind(key, workspaceID)
+	}
+	rs, written, err := b.startSession(ctx, d, entry, workspaceID, prompt, opts)
+	if err != nil && reused && corepkg.NotFound(err) {
+		// The core no longer holds the workspace (it was deleted, or the
+		// core lost its state): a new one, the agent's files gone with the
+		// old. Its .room/deliverables/ copies are how it recovers the
+		// room's deliverables.
+		slog.Warn("bnbloc bridge workspace gone from its core; creating a new one",
+			"event", "bnbloc.bridge.workspace_gone", "room", room, "core", d.core, "provider", provider, "workspace", workspaceID, "error", err)
+		created, cerr := b.createWorkspace(ctx, entry, d.caps, opts.Execution)
+		if cerr != nil {
+			return nil, fmt.Errorf("create workspace: %w", cerr)
+		}
+		old := workspaceID
+		workspaceID, reused = created, false
+		b.workspaces.bind(key, workspaceID)
+		if rs, written, err = b.startSession(ctx, d, entry, workspaceID, prompt, opts); err != nil {
+			// Not the workspace after all (the 404 named something else,
+			// a target): the agent keeps the one it had.
+			b.workspaces.bind(key, old)
+			b.deleteWorkspace(ctx, entry, workspaceID)
+			return nil, err
+		}
+	}
 	if err != nil {
-		return nil, fmt.Errorf("create workspace: %w", err)
+		if !reused {
+			// A workspace created for this session only; never the one the
+			// agent already works in, which holds its files.
+			b.workspaces.unbind(key, workspaceID)
+			b.deleteWorkspace(ctx, entry, workspaceID)
+		}
+		return nil, err
 	}
-	// Fresh session: materialize attachments into the new workspace BEFORE the
-	// initial prompt runs (createSession below executes it), so the agent's very
-	// first turn can open the files.
+	b.mu.Lock()
+	b.sessions[key] = rs
+	b.mu.Unlock()
+	slog.Info("bnbloc bridge bound room to session",
+		"event", "bnbloc.bridge.session_bound", "room", room, "core", d.core, "provider", provider, "workspace", workspaceID, "reused", reused, "session", rs.sessionID)
+	return &ensureResult{roomSession: rs, freshlyCreated: true, written: written}, nil
+}
+
+// startSession creates a session in workspace workspaceID: the turn's
+// attachments and the session's guidance and content written there first,
+// then the session created with its initial prompt (the turn's start). It
+// returns the session, not yet bound to a slot, and the attachments
+// written.
+func (b *Bridge) startSession(ctx context.Context, d *drive, entry coreEntry, workspaceID string, prompt promptFn, opts corepkg.SessionOptions) (*roomSession, []writtenAttachment, error) {
+	room, provider := d.job.RoomID, d.job.Provider
+	// Materialize attachments into the workspace BEFORE the initial prompt
+	// runs (createSession below executes it), so the agent's very first
+	// turn can open the files.
 	written := b.materializeAttachments(ctx, d.caps.bytesWriter, entry.endpoint, room, workspaceID, d.job.AttachmentIDs)
 	// What the session is told once (the guidance, the content, the session
 	// contributors' servers): its profile or its first prompt's head.
@@ -1507,7 +1584,7 @@ func (b *Bridge) ensureSession(ctx context.Context, d *drive, key driveKey, prom
 	})
 	var st roomlog.CtxState
 	initialPrompt := prefix + prompt(workspaceID, &st, written, facts)
-	rs := &roomSession{owner: d.owner, provider: provider, core: d.core, workspaceID: workspaceID, ctx: st, hooks: hooks, profileSum: bindingSum, guidance: facts}
+	rs := &roomSession{owner: d.owner, provider: provider, core: d.core, workspaceID: workspaceID, ctx: st, hooks: hooks, profileSum: d.content.bindingSum(), guidance: facts}
 	if opts.Execution != nil {
 		rs.workdir = opts.Execution.Sandbox.Workdir
 	}
@@ -1515,9 +1592,8 @@ func (b *Bridge) ensureSession(ctx context.Context, d *drive, key driveKey, prom
 	sessionID, err := b.createSession(ctx, entry, workspaceID, d.target, initialPrompt, opts, profile)
 	if err != nil {
 		rs.release()
-		b.deleteWorkspace(ctx, entry, workspaceID)
 		// The session create carries the initial prompt: the turn's start.
-		return nil, atStage(stageStart, fmt.Errorf("create session: %w", err))
+		return nil, nil, atStage(stageStart, fmt.Errorf("create session: %w", err))
 	}
 	// Under mu: the session's workspace reader (a room tool call during
 	// this first turn) reads it concurrently.
@@ -1527,12 +1603,7 @@ func (b *Bridge) ensureSession(ctx context.Context, d *drive, key driveKey, prom
 	// The fence baseline: everything there is what bnbloc and the core
 	// wrote for this session.
 	rs.fenceBaseline()
-	b.mu.Lock()
-	b.sessions[key] = rs
-	b.mu.Unlock()
-	slog.Info("bnbloc bridge bound room to session",
-		"event", "bnbloc.bridge.session_bound", "room", room, "core", d.core, "provider", provider, "workspace", workspaceID, "session", sessionID)
-	return &ensureResult{roomSession: rs, freshlyCreated: true, written: written}, nil
+	return rs, written, nil
 }
 
 // --- local agent core (via core.Provider) ---

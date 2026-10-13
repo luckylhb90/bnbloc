@@ -123,6 +123,9 @@ func main() {
 		// member's own tool credentials (never sent to the gateway).
 		MCPToolsDir:    strings.TrimSpace(config.FromEnvRaw("BNBLOC_MCP_TOOLS_DIR")),
 		MCPSettingsDir: strings.TrimSpace(config.FromEnvRaw("BNBLOC_MCP_SETTINGS_DIR")),
+		// Which workspace each agent of a room uses, kept across restarts
+		// (the desktop: the member's own directory; empty = memory only).
+		StateDir: strings.TrimSpace(config.FromEnvRaw("BNBLOC_BRIDGE_STATE_DIR")),
 		// Deployment tuning floors for per-drive context (0 => built-in default).
 		WindowChars:       config.GetInt("BNBLOC_BRIDGE_CONTEXT_WINDOW_CHARS", 0),
 		ContextRecentRows: config.GetInt("BNBLOC_BRIDGE_CONTEXT_RECENT_ROWS", 0),

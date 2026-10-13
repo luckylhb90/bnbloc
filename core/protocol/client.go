@@ -93,6 +93,14 @@ func (c *Client) Supports(ctx context.Context, ep core.Endpoint, capability core
 	return err == nil && HasCapability(d, string(capability))
 }
 
+// CapabilitiesKnown is the discovery read Supports answers from: an
+// unreachable or incompatible daemon's capabilities are unknown, not absent
+// (core.CapabilitiesKnown).
+func (c *Client) CapabilitiesKnown(ctx context.Context, ep core.Endpoint) error {
+	_, err := c.Discovery(ctx, ep)
+	return err
+}
+
 func (c *Client) CreateWorkspace(ctx context.Context, ep core.Endpoint) (string, error) {
 	if _, err := c.Discovery(ctx, ep); err != nil {
 		return "", err
