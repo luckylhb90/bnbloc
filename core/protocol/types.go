@@ -49,6 +49,9 @@ const (
 	// CapabilityDiscover marks a package whose daemon can be located without an
 	// explicit endpoint (package metadata only; not a runtime method).
 	CapabilityDiscover = string(core.CapabilityDiscover)
+	// CapabilityTurnActivity: PollTurn reports a running turn's start and
+	// latest steps (PollTurnResponse.StartedAtMs, Activity).
+	CapabilityTurnActivity = string(core.CapabilityTurnActivity)
 )
 
 // Capabilities lists every Core Protocol capability name: the one registry
@@ -57,6 +60,7 @@ const (
 var Capabilities = []string{
 	CapabilityInterrupt, CapabilityWriteFile, CapabilityDeleteWorkspace, CapabilitySandboxExec,
 	CapabilitySessionFiles, CapabilitySessionFileBytes, CapabilityAgentProfile, CapabilityDiscover,
+	CapabilityTurnActivity,
 }
 
 // KnownCapability reports whether name is a Core Protocol capability.
@@ -187,6 +191,10 @@ type CreateSessionRequest struct {
 	// Profile is sent only to a core advertising agentProfile; absent = the
 	// agent's own configuration only.
 	Profile *AgentProfile `json:"profile,omitempty"`
+	// DeadlineMs is when the turn must end (Unix ms; 0 = none given). The
+	// caller owns a turn's length: a core fails a turn still running then
+	// (FailCodeDeadline) and never ends one earlier for time reasons.
+	DeadlineMs int64 `json:"deadlineMs,omitempty"`
 }
 
 // AgentProfile is the role a session wears (capability agentProfile). The
@@ -258,6 +266,8 @@ type SendInputRequest struct {
 	Text      string         `json:"text"`
 	Options   SessionOptions `json:"options,omitempty"`
 	Execution *Execution     `json:"execution,omitempty"`
+	// DeadlineMs: as on CreateSessionRequest.
+	DeadlineMs int64 `json:"deadlineMs,omitempty"`
 }
 
 // ExecutionModeSandbox is the only Execution.Mode in v1.
@@ -413,6 +423,46 @@ type PollTurnResponse struct {
 	Idle        bool   `json:"idle"`
 	Failed      bool   `json:"failed,omitempty"`
 	FailMessage string `json:"failMessage,omitempty"`
+	// FailCode is a failed turn's machine-readable cause (FailCode*; ""
+	// when the core gives none).
+	FailCode string `json:"failCode,omitempty"`
+	// StartedAtMs and Activity describe a running turn (capability
+	// turnActivity): when it started and its latest steps, oldest first
+	// (at most MaxTurnActivity).
+	StartedAtMs int64          `json:"startedAtMs,omitempty"`
+	Activity    []TurnActivity `json:"activity,omitempty"`
+}
+
+// Fail codes a core may report (PollTurnResponse.FailCode).
+const (
+	// FailCodeDeadline: the turn was still running at its DeadlineMs.
+	FailCodeDeadline = "deadline"
+)
+
+// Turn activity kinds (TurnActivity.Kind).
+const (
+	// TurnActivityTool: a step the agent ran (a command, a file read or
+	// written, a search).
+	TurnActivityTool = "tool"
+	// TurnActivityThinking: the agent is reasoning.
+	TurnActivityThinking = "thinking"
+	// TurnActivityText: the agent is writing.
+	TurnActivityText = "text"
+)
+
+// Bounds of a turn's activity.
+const (
+	MaxTurnActivity      = 8
+	MaxTurnActivityTitle = 120
+)
+
+// TurnActivity is one step of a running turn: a short title such as
+// "Bash: python extract.py" or "Read: template.pptx" (never file contents
+// or secrets; at most MaxTurnActivityTitle characters).
+type TurnActivity struct {
+	Kind  string `json:"kind"`
+	Title string `json:"title,omitempty"`
+	AtMs  int64  `json:"atMs"`
 }
 
 // --- wire <-> core mapping, used by both the client and protocol servers ---

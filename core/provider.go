@@ -71,6 +71,9 @@ const (
 	// the CLI's shell commands into the given sandbox space. A core that does
 	// not advertise it never receives an Execution (Supports gates it).
 	CapabilitySandboxExec Capability = "sandboxExec"
+	// CapabilityTurnActivity: PollTurn reports a running turn's start and
+	// latest steps (protocol PollTurnResponse.Activity).
+	CapabilityTurnActivity Capability = "turnActivity"
 	// CapabilityDiscover (Discoverer) marks a core that locates its own
 	// daemon without an explicit endpoint (a manifest's discover clause). It
 	// does not depend on an endpoint: callers ask As with a zero Endpoint.
