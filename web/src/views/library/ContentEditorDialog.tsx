@@ -20,6 +20,7 @@ import { Dialog } from "@/ui/Dialog";
 import { Field, Input, Textarea } from "@/ui/Input";
 import { Select } from "@/ui/Select";
 import { useToast } from "@/ui/Toast";
+import { AssistFormFields } from "@/views/library/AssistFormFields";
 import { QuickPromptsEditor, RequirementsFields, TagsIconFields, TeamEditor } from "@/views/library/ContentFormExtras";
 import { errorText } from "@/lib/errors";
 
@@ -150,7 +151,9 @@ export function ContentEditorDialog({
           ? `Saves version after ${base.latestVersion}. Earlier versions stay as they are.`
           : kind === "expert"
             ? "A role an agent wears: always-on instructions, optional skills and quick prompts."
-            : "Capabilities an agent loads when a skill's description matches the task."
+            : kind === "assist"
+              ? "A task of the AI assist behind a manual entry: one with the same name as a built-in replaces it for you."
+              : "Capabilities an agent loads when a skill's description matches the task."
       }
       footer={
         <>
@@ -169,10 +172,10 @@ export function ContentEditorDialog({
         <div className="flex flex-col gap-4">
           <div className="grid gap-4 sm:grid-cols-2">
             <Field label="Name" hint="Lower-case letters, digits and hyphens">
-              <Input value={form.name} disabled={!!base} onChange={(e) => patch({ name: e.target.value })} placeholder={kind === "expert" ? "reviewer" : "lint-kit"} />
+              <Input value={form.name} disabled={!!base} onChange={(e) => patch({ name: e.target.value })} placeholder={kind === "expert" ? "reviewer" : kind === "assist" ? "enhance-prompt" : "lint-kit"} />
             </Field>
             <Field label="Display name">
-              <Input value={form.displayName} onChange={(e) => patch({ displayName: e.target.value })} placeholder={kind === "expert" ? "Code reviewer" : "Lint kit"} />
+              <Input value={form.displayName} onChange={(e) => patch({ displayName: e.target.value })} placeholder={kind === "expert" ? "Code reviewer" : kind === "assist" ? "Enhance prompt" : "Lint kit"} />
             </Field>
           </div>
           <Field label="Description">
@@ -193,13 +196,19 @@ export function ContentEditorDialog({
               <QuickPromptsEditor form={form} patch={patch} options={packPrompts} />
             </>
           )}
-          <div className="flex flex-col gap-2">
-            <span className="text-xs font-medium uppercase tracking-wide text-[var(--color-fg-muted)]">
-              {kind === "expert" ? "Embedded skills (optional)" : "Skills"}
-            </span>
-            <SkillsEditor skills={form.skills} onChange={(skills) => patch({ skills })} />
-          </div>
-          <RequirementsFields form={form} patch={patch} kind={kind} tools={tools} />
+          {kind === "assist" ? (
+            <AssistFormFields form={form} patch={patch} />
+          ) : (
+            <>
+              <div className="flex flex-col gap-2">
+                <span className="text-xs font-medium uppercase tracking-wide text-[var(--color-fg-muted)]">
+                  {kind === "expert" ? "Embedded skills (optional)" : "Skills"}
+                </span>
+                <SkillsEditor skills={form.skills} onChange={(skills) => patch({ skills })} />
+              </div>
+              <RequirementsFields form={form} patch={patch} kind={kind} tools={tools} />
+            </>
+          )}
           {kind === "expert" && <TeamEditor team={form.team} onChange={(team) => patch({ team })} />}
         </div>
       )}

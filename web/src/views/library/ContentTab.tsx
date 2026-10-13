@@ -26,7 +26,7 @@ import { useOpenWorkshop } from "@/views/library/workshopFlow";
 import { useContentLibrary } from "@/views/library/useContentLibrary";
 import { LoadFailed } from "@/ui/QueryState";
 
-const COPY: Record<"expert" | "skill", { subtitle: string; empty: string; hint: string; search: string }> = {
+const COPY: Record<"expert" | "skill" | "assist", { subtitle: string; empty: string; hint: string; search: string }> = {
   expert: {
     subtitle: "Roles your agents can wear: instructions, skills and quick prompts",
     empty: "No experts yet",
@@ -39,12 +39,20 @@ const COPY: Record<"expert" | "skill", { subtitle: string; empty: string; hint: 
     hint: "Create one with AI, create one manually, or import a skill folder (SKILL.md). Turn it on for all your agents, or for a room in its settings.",
     search: "Search skills…",
   },
+  assist: {
+    subtitle: "Tasks of the AI assist behind manual entries (the composer's Enhance prompt, Fill with AI)",
+    empty: "No AI assists",
+    hint: "The built-in ones run when your deployment has an assist model. Create one with the same name as a built-in to restyle it for you, or publish it to restyle it for your organization.",
+    search: "Search AI assists…",
+  },
 };
 
-// ContentTab is the Library's Experts or Skills tab: the member's content
-// components of one kind with search, view, create (with AI in the expert
-// workshop, or manually), import, new version and delete; a skill pack can be
-// turned on for all the member's agents. Built-in content is read-only.
+// ContentTab is the Library's Experts, Skills or AI assists tab: the
+// member's content components of one kind with search, view, create (with
+// AI in the expert workshop, or manually), import, new version and delete;
+// a skill pack can be turned on for all the member's agents. An AI assist
+// is created manually only (the workshop drafts agents' content), never
+// imported and never used in a room. Built-in content is read-only.
 // skillOnText is the toast of turning a skill pack on or off for me.
 function skillOnText(c: ContentComponent, on: boolean): string {
   return on ? `${contentLabel(c)} is on for all your agents` : `${contentLabel(c)} is off for your agents`;
@@ -55,7 +63,7 @@ export function ContentTab({
   tabs,
   onOpenRoom,
 }: {
-  readonly kind: "expert" | "skill";
+  readonly kind: "expert" | "skill" | "assist";
   readonly tabs: React.ReactNode;
   readonly onOpenRoom: (roomId: string) => void;
 }) {
@@ -69,6 +77,7 @@ export function ContentTab({
   const [publishing, setPublishing] = useState<ContentComponent | null>(null);
   const [importing, setImporting] = useState(false);
   const copy = COPY[kind];
+  const assist = kind === "assist";
 
   const shown = useMemo(() => (items ?? []).filter((c) => matchesContent(c, q)), [items, q]);
   const mine = useMemo(() => (items ?? []).filter((c) => c.mine), [items]);
@@ -85,18 +94,22 @@ export function ContentTab({
             <Input className="pl-9" placeholder={copy.search} value={q} onChange={(e) => setQ(e.target.value)} />
           </div>
           <div className="flex-1" />
-          <Button variant="ghost" onClick={() => setImporting(true)}>
-            <UploadSimpleIcon size={16} />
-            Import
-          </Button>
-          <Button variant="outline" onClick={() => setEditing({ kind })}>
+          {!assist && (
+            <Button variant="ghost" onClick={() => setImporting(true)}>
+              <UploadSimpleIcon size={16} />
+              Import
+            </Button>
+          )}
+          <Button variant={assist ? "primary" : "outline"} onClick={() => setEditing({ kind })}>
             <PlusIcon size={16} />
-            Create manually
+            {assist ? "Create" : "Create manually"}
           </Button>
-          <Button variant="primary" onClick={() => void workshop.open({ create: kind })} disabled={workshop.busy}>
-            <SparkleIcon size={16} weight="fill" />
-            {workshop.busy ? "Opening…" : "Create with AI"}
-          </Button>
+          {!assist && (
+            <Button variant="primary" onClick={() => void workshop.open({ create: kind })} disabled={workshop.busy}>
+              <SparkleIcon size={16} weight="fill" />
+              {workshop.busy ? "Opening…" : "Create with AI"}
+            </Button>
+          )}
         </div>
         {error ? (
           <LoadFailed message={error} onRetry={reload} />
@@ -108,7 +121,7 @@ export function ContentTab({
           </div>
         ) : shown.length === 0 ? (
           <EmptyState
-            icon={kind === "expert" ? <BrainIcon size={26} /> : <WrenchIcon size={26} />}
+            icon={kind === "expert" ? <BrainIcon size={26} /> : assist ? <SparkleIcon size={26} /> : <WrenchIcon size={26} />}
             title={q ? "Nothing matches" : copy.empty}
             hint={q ? undefined : copy.hint}
           />
@@ -159,7 +172,7 @@ export function ContentTab({
                   <button type="button" onClick={() => setViewing(c)} title="View" aria-label={`View ${c.name}`} className="tactile hover:text-[var(--color-fg)]">
                     <EyeIcon size={15} />
                   </button>
-                  {c.mine && (
+                  {c.mine && !assist && (
                     <button
                       type="button"
                       onClick={() => void workshop.open({ improve: c })}
@@ -192,12 +205,16 @@ export function ContentTab({
       <ContentViewDialog
         component={viewing}
         onClose={() => setViewing(null)}
-        onImprove={(c) => {
-          setViewing(null);
-          void workshop.open({ improve: c });
-        }}
+        onImprove={
+          assist
+            ? undefined
+            : (c) => {
+                setViewing(null);
+                void workshop.open({ improve: c });
+              }
+        }
       />
-      <ImportDialog kind={kind} open={importing} mine={mine} onClose={() => setImporting(false)} onImported={reload} />
+      <ImportDialog kind={kind} open={importing && !assist} mine={mine} onClose={() => setImporting(false)} onImported={reload} />
       <ShareDialog component={sharing} onClose={() => setSharing(null)} />
       <PublishDialog component={publishing} onClose={() => setPublishing(null)} onChanged={reload} />
       <ConfirmDialog

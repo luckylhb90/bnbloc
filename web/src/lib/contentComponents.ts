@@ -9,7 +9,7 @@ export type { ChatExpert, ContentComponent, ContentComponentDetail, ContentMCPRe
 import type { ChatExpert, ContentComponent, ContentQuickPrompt, ContentRequires, ContentUse, ContentVersionDetail } from "./wire.gen.ts";
 
 export type { ContentKind } from "./wire.gen.ts";
-import type { ContentKind } from "./wire.gen.ts";
+import type { AssistSpec, ContentKind } from "./wire.gen.ts";
 import { ContentTagPattern, MaxContentTagRunes } from "./wire.gen.ts";
 
 // The built-in builder expert (shipped with the release, read-only, listed
@@ -28,13 +28,19 @@ export function isBuiltin(c: Pick<ContentComponent, "scope">): boolean {
 // per kind (web L5): a Record over the generated ContentKind, so a kind the
 // server registers (contentpkg) fails to compile until it has its row. An
 // app (docs/prd/2026-10-13-app-gallery.md) is published from a site and
-// listed in the gallery, not in a Library tab of the workshop's.
-export const CONTENT_KINDS: Readonly<Record<ContentKind, { readonly word: string; readonly label: string; readonly libraryTab: "experts" | "skills" | "prompts" | null; readonly packageKind: string }>> = {
+// listed in the gallery, not in a Library tab of the workshop's. An AI
+// assist (docs/prd/2026-10-13-ai-assist.md) is a task of the assist model,
+// listed in its own tab and never used in a room.
+export const CONTENT_KINDS: Readonly<Record<ContentKind, { readonly word: string; readonly label: string; readonly libraryTab: ContentLibraryTab | null; readonly packageKind: string }>> = {
   expert: { word: "expert", label: "Expert", libraryTab: "experts", packageKind: "bnbloc.expert.package/v1" },
   skill: { word: "skill pack", label: "Skill pack", libraryTab: "skills", packageKind: "bnbloc.skill.package/v1" },
   prompt: { word: "prompt pack", label: "Prompt pack", libraryTab: "prompts", packageKind: "bnbloc.prompt.package/v1" },
   work: { word: "work", label: "Work", libraryTab: null, packageKind: "bnbloc.work.package/v1" },
+  assist: { word: "AI assist", label: "AI assist", libraryTab: "assists", packageKind: "bnbloc.assist.package/v1" },
 };
+
+/** The Library tabs that list content components of a kind. */
+export type ContentLibraryTab = "experts" | "skills" | "prompts" | "assists";
 
 // The short kind of a content package's manifest kind.
 export const CONTENT_PACKAGE_KINDS: Readonly<Record<string, ContentKind>> = Object.fromEntries(
@@ -73,6 +79,8 @@ export interface ContentForm {
   requires: ContentRequires;
   // An expert's team roster (absent or empty: not a team).
   team?: ContentFormTeam;
+  // An AI assist's task (instructions is its system prompt).
+  assist?: AssistSpec;
 }
 
 export interface ContentFormRole {
@@ -102,6 +110,7 @@ export function emptyContentForm(kind: ContentKind): ContentForm {
     icon: "",
     requires: {},
     team: { lead: "", members: [] },
+    ...(kind === "assist" ? { assist: { output: "text" as const, fields: [], context: [] } } : {}),
   };
 }
 
@@ -125,6 +134,7 @@ export function formFromVersion(d: ContentVersionDetail): ContentForm {
       lead: c.team?.lead && c.team.lead !== "lead" ? c.team.lead : "",
       members: (c.team?.members ?? []).map((m) => ({ role: m.role, expert: m.expert, defaultAgent: m.defaultAgent, description: m.description ?? "" })),
     },
+    ...(c.assist ? { assist: { output: c.assist.output, fields: (c.assist.fields ?? []).map((f) => ({ ...f })), context: [...(c.assist.context ?? [])] } } : {}),
   };
 }
 
@@ -157,6 +167,16 @@ export function formPayload(f: ContentForm): Record<string, unknown> {
     .map((s) => ({ name: trimmed(s.name), description: trimmed(s.description), body: s.body.trim() }))
     .filter((s) => s.name || s.description || s.body);
   if (skills.length > 0) out.skills = skills;
+  if (f.kind === "assist") {
+    const a = f.assist ?? { output: "text" };
+    out.instructions = f.instructions.trim();
+    out.output = a.output;
+    const fields = (a.fields ?? [])
+      .map((x) => ({ name: trimmed(x.name), ...(trimmed(x.description ?? "") ? { description: trimmed(x.description ?? "") } : {}), ...(x.list ? { list: true } : {}) }))
+      .filter((x) => x.name);
+    if (a.output === "json" && fields.length > 0) out.fields = fields;
+    if ((a.context ?? []).length > 0) out.context = a.context;
+  }
   if (f.kind === "expert") {
     out.instructions = f.instructions.trim();
     const welcome = trimmed(f.welcome);
@@ -236,6 +256,12 @@ export function formProblem(f: ContentForm): string | null {
   if (!name) return "Give it a name";
   if (!/^[a-z0-9][a-z0-9-]{0,62}$/.test(name)) return "The name uses lower-case letters, digits and hyphens";
   if (f.kind === "expert" && !f.instructions.trim()) return "An expert needs instructions";
+  if (f.kind === "assist") {
+    if (!f.instructions.trim()) return "An AI assist needs instructions";
+    const fields = (f.assist?.fields ?? []).filter((x) => x.name.trim() || x.description?.trim());
+    if (f.assist?.output === "json" && fields.length === 0) return "A JSON assist names the fields of its reply";
+    for (const x of fields) if (!/^[a-zA-Z][a-zA-Z0-9_]{0,39}$/.test(x.name.trim())) return "Each field name uses letters, digits and _ (starting with a letter)";
+  }
   const tag = tagProblem(f.tags ?? []);
   if (tag) return tag;
   for (const r of [...(f.requires?.skills ?? []), ...(f.requires?.prompts ?? [])]) {

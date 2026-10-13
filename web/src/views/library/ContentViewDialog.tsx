@@ -144,6 +144,26 @@ export function ContentViewDialog({
                   <pre className="max-h-64 overflow-auto whitespace-pre-wrap rounded-[var(--radius)] bg-[var(--color-surface-2)] p-3 text-xs">{view.instructions.trim()}</pre>
                 </section>
               )}
+              {c.assist && (
+                <section>
+                  <h3 className="mb-1 text-xs font-medium uppercase tracking-wide text-[var(--color-fg-muted)]">Output</h3>
+                  <p className="text-[var(--color-fg-muted)]">
+                    {c.assist.output === "json" ? "JSON fields" : "Streamed text"}
+                    {(c.assist.context?.length ?? 0) > 0 ? ` · receives: ${c.assist.context?.join(", ")}` : ""}
+                  </p>
+                  {(c.assist.fields?.length ?? 0) > 0 && (
+                    <ul className="mt-1 flex flex-col gap-0.5 text-xs">
+                      {c.assist.fields?.map((f) => (
+                        <li key={f.name}>
+                          <span className="font-mono">{f.name}</span>
+                          {f.list ? " (list)" : ""}
+                          {f.description ? <span className="text-[var(--color-fg-muted)]"> — {f.description}</span> : null}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </section>
+              )}
               {isTeam(c) && c.team && (
                 <section>
                   <h3 className="mb-1 text-xs font-medium uppercase tracking-wide text-[var(--color-fg-muted)]">Team</h3>

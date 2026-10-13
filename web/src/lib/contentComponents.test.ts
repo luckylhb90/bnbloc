@@ -92,6 +92,28 @@ assert(!updateAvailable(undefined, "3.0.0"), "following latest");
   eq(formPayload(s), { kind: "skill", name: "kit", skills: [{ name: "a", description: "does a", body: "a" }] }, "skill payload");
 }
 
+// An AI assist's form: its instructions, output, fields (JSON only) and context.
+{
+  const a = emptyContentForm("assist");
+  a.name = "describe-work";
+  a.instructions = " Describe it. ";
+  eq(formProblem(a), null, "a text assist with instructions");
+  a.assist = { output: "json", fields: [], context: ["artifact"] };
+  eq(formProblem(a), "A JSON assist names the fields of its reply", "a JSON assist needs fields");
+  a.assist = { output: "json", fields: [{ name: "tag list", description: "x" }], context: ["artifact"] };
+  eq(formProblem(a), "Each field name uses letters, digits and _ (starting with a letter)", "a field name");
+  a.assist = { output: "json", fields: [{ name: " tags ", description: " Tags ", list: true }, { name: "", description: "" }], context: ["artifact"] };
+  eq(
+    formPayload(a),
+    { kind: "assist", name: "describe-work", instructions: "Describe it.", output: "json", fields: [{ name: "tags", description: "Tags", list: true }], context: ["artifact"] },
+    "assist payload",
+  );
+  a.assist = { output: "text", fields: [{ name: "left", description: "" }], context: [] };
+  eq(formPayload(a), { kind: "assist", name: "describe-work", instructions: "Describe it.", output: "text" }, "a text assist sends no fields");
+  a.instructions = "";
+  eq(formProblem(a), "An AI assist needs instructions", "an assist needs instructions");
+}
+
 // Early form checks.
 {
   const f = emptyContentForm("expert");

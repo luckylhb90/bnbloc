@@ -5,7 +5,7 @@
 // runs the builder, which room is the workshop) so they
 // are unit-tested; the view wiring lives in views/library/workshopFlow.ts.
 
-import { CONTENT_KINDS, contentKindWord, contentLabel, type ContentComponent, type ContentKind } from "./contentComponents.ts";
+import { CONTENT_KINDS, contentKindWord, contentLabel, type ContentComponent, type ContentKind, type ContentLibraryTab } from "./contentComponents.ts";
 import { defaultPlatformChoice, type OwnAgent } from "./onboarding.ts";
 import type { PlatformAgent, PlatformChoice } from "./platformAgents.ts";
 import { isOwner } from "./roomRoles.ts";
@@ -50,7 +50,7 @@ export function tryItDraft(c: Pick<ContentComponent, "quickPrompts" | "prompts">
 }
 
 // libraryTabOf is the Library tab that lists a kind (null: none, an app).
-export function libraryTabOf(kind: ContentKind): "experts" | "skills" | "prompts" | null {
+export function libraryTabOf(kind: ContentKind): ContentLibraryTab | null {
   return CONTENT_KINDS[kind].libraryTab;
 }
 
