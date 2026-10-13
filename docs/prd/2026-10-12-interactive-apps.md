@@ -191,6 +191,20 @@ agents.
 **Rendering.** Bodies are JSON only. bnbloc's own UI never renders them as
 HTML, so an XSS in an app stays inside that app's sandbox.
 
+### 4.7a Link access (2026-10-13, final)
+
+A share link of an app requires sign-in to the room's organization by
+default (`access: org`); a link anyone can open without signing in is the
+creator's per-link opt-in (`access: anyone`), refused while the
+organization disables anonymous links. On an `org` link the share page
+mints a share ticket after sign-in; the ticket rides in the frame's URL
+path in place of the link's token, and the app's participant is the
+signed-in member (`member:<subject>`; `_by` stays the per-app pseudonym,
+`me()` names the member to themselves only). An organization member who is
+not in the room is a participant, never an owner. The visitor token (4.3)
+exists only for `anyone` links. Design:
+`2026-10-13-share-link-sign-in.md`.
+
 ### 4.8 Encryption: the database never holds a readable body
 
 Disk or RDS encryption at rest protects against stolen disks and snapshots,

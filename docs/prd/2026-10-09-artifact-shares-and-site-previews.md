@@ -28,6 +28,20 @@ Out of scope: dynamic dev servers or app backends (needs a tunnel; revisit if
 static snapshots prove insufficient), custom domains, password-protected
 links.
 
+## Link access (2026-10-13, final)
+
+Product decision: every share link (apps, sites, files and documents
+alike) **requires sign-in to the room's organization by default**;
+anonymous access is opted into per link by its creator. A link's `access`
+is `org` (the default: a signed-in member of the room's organization, not
+necessarily of the room) or `anyone` (no sign-in, as this document first
+described). The organization switch below now disables `anyone` links
+only and is renamed "anonymous links disabled". Where this document says
+"anyone with the link", "without signing in" or "public links disabled",
+read it for `anyone` links. The design (the access mode, `shareAccess`,
+the sign-in return path and the share ticket) is
+`2026-10-13-share-link-sign-in.md`.
+
 ## Acceptance
 
 - Member: Share → choose "this version" / "always latest" and an expiry
