@@ -202,11 +202,11 @@ export const RULES = [
   },
   {
     id: "B2",
-    name: "AI assist requests and the assist model live in lib/assist.ts",
+    name: "AI assist requests and the assist models live in lib/assist.ts",
     // Every assist entry runs a task the server resolves (an assist content
     // component holds its instructions): no view calls the model's routes
     // or writes a prompt of its own (docs/prd/2026-10-13-ai-assist.md §5).
-    pattern: /["'`]\/v1\/(?:assist|platform\/assist-model)\b/,
+    pattern: /["'`]\/v1\/(?:assist|(?:platform|tenant)\/assist-model)\b/,
     allowed: ["lib/assist.ts"],
     sample: { file: "views/X.tsx", text: 'await req("/v1/assist/enhance-prompt", { method: "POST" });' },
   },

@@ -10,6 +10,7 @@ import type {
   AssistModelConfig,
   AssistModelTest,
   AssistModelUpdate,
+  AssistOrgModel,
   AssistRequest,
   AssistStatus,
   AssistTask,
@@ -21,12 +22,12 @@ import type {
 // the member can run; every assist entry is hidden without it), a text
 // task's streamed reply (Server-Sent Events over an authenticated fetch:
 // EventSource cannot POST), a JSON task's reply, and the platform
-// console's assist model. No other file names an assist route or holds a
+// console's and the organization's assist model. No other file names an assist route or holds a
 // prompt (web boundary rule B2): the tasks and their instructions are
 // assist content components on the server. The pure helpers (the SSE
 // parser, a JSON reply onto the publish form) are lib/assistModel.ts.
 
-export type { AssistModelConfig, AssistModelTest, AssistModelUpdate, AssistTask, AssistUsage } from "./wire.gen.ts";
+export type { AssistModelConfig, AssistModelTest, AssistModelUpdate, AssistOrgModel, AssistTask, AssistUsage } from "./wire.gen.ts";
 export { DESCRIBE_WORK, ENHANCE_PROMPT, workDraftPatch } from "./assistModel.ts";
 
 const enc = encodeURIComponent;
@@ -88,6 +89,19 @@ export function useAssistTask(name: string): AssistTask | null {
 
 // ---- Running a task ----
 
+/** withTimezone adds the member's timezone (the clock context) unless the
+ *  request names one (a schedule in another timezone). */
+function withTimezone(body: AssistRequest): string {
+  if (body.timezone) return JSON.stringify(body);
+  let timezone = "";
+  try {
+    timezone = Intl.DateTimeFormat().resolvedOptions().timeZone ?? "";
+  } catch {
+    // An unknown timezone: the server uses UTC.
+  }
+  return JSON.stringify(timezone ? { ...body, timezone } : body);
+}
+
 /** A text task's reply: the whole text and the usage. */
 export interface AssistTextResult {
   readonly text: string;
@@ -109,7 +123,7 @@ export async function runTextAssist(
   body: AssistRequest,
   opts: { readonly onDelta: (soFar: string) => void; readonly signal?: AbortSignal },
 ): Promise<AssistTextResult> {
-  const res = await req<Response>(`/v1/assist/${enc(task)}`, { method: "POST", body: JSON.stringify(body), as: "response", signal: opts.signal });
+  const res = await req<Response>(`/v1/assist/${enc(task)}`, { method: "POST", body: withTimezone(body), as: "response", signal: opts.signal });
   if (!res.body) throw new ApiError(502, "The assist sent no reply");
   let text = "";
   let usage: AssistUsage | null = null;
@@ -141,7 +155,7 @@ export async function runTextAssist(
 
 /** runJSONAssist runs a JSON task: its declared fields. */
 export function runJSONAssist(task: string, body: AssistRequest, signal?: AbortSignal): Promise<AssistJSONReply> {
-  return req<AssistJSONReply>(`/v1/assist/${enc(task)}`, { method: "POST", body: JSON.stringify(body), signal });
+  return req<AssistJSONReply>(`/v1/assist/${enc(task)}`, { method: "POST", body: withTimezone(body), signal });
 }
 
 /** isAbort reports a run the member stopped. */
@@ -159,4 +173,19 @@ export const assistModelApi = {
       return c;
     }),
   test: () => req<AssistModelTest>("/v1/platform/assist-model/test", { method: "POST" }),
+};
+
+// ---- The organization's own model ----
+
+/** An org admin's model (it replaces the platform's for the organization's
+ *  members, on a host the platform allows); an empty base URL goes back
+ *  to the platform's. */
+export const orgAssistModelApi = {
+  get: () => req<AssistOrgModel>("/v1/tenant/assist-model"),
+  put: (body: AssistModelUpdate) =>
+    req<AssistOrgModel>("/v1/tenant/assist-model", { method: "PUT", body: JSON.stringify(body) }).then((m) => {
+      invalidateAssistStatus();
+      return m;
+    }),
+  test: () => req<AssistModelTest>("/v1/tenant/assist-model/test", { method: "POST" }),
 };
