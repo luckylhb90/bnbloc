@@ -60,9 +60,13 @@ const siteCSP = "sandbox allow-scripts allow-forms allow-popups allow-modals all
 var errSiteNotFound = errors.New("site not found")
 
 // siteVersion is an authorized site snapshot: what loading its bundle needs.
+// A stored site version is read from the blob store by BlobKey; an app's
+// demo (app_demo.go) has no blob and packs its site again with pack. Either
+// way the bundle is the one ContentHash pins.
 type siteVersion struct {
 	ContentHash string
 	BlobKey     string
+	pack        func(ctx context.Context) ([]byte, error)
 }
 
 // siteVersionOf returns the site snapshot of a version, ok=false when the
@@ -155,10 +159,15 @@ func memberSiteBase(ticket string) string { return "/v1/sites/" + url.PathEscape
 // GET /v1/sites/{ticket}/{path...}. The ticket (an iframe src cannot carry
 // the bearer) names the subject and the version; the room-level read is
 // re-checked whenever no positive check for this subject is cached (≤
-// siteAuthTTL). Anything unreadable is a 404.
+// siteAuthTTL). A demo ticket names an app component version instead
+// (demoTicket: the component's read is re-checked). Anything unreadable
+// is a 404.
 func (s *Service) handleMemberSite(w http.ResponseWriter, r *http.Request) {
 	ticket := r.PathValue("ticket")
 	_, sv, err := s.memberTicket(r.Context(), ticket)
+	if errors.Is(err, errSiteNotFound) {
+		sv, err = s.demoTicket(r.Context(), ticket)
+	}
 	if errors.Is(err, errSiteNotFound) {
 		http.NotFound(w, r)
 		return
@@ -255,6 +264,9 @@ func (s *Service) memberSiteVersion(ctx context.Context, subject, tenantID, scop
 func (s *Service) siteBundle(ctx context.Context, sv siteVersion) (*tarbundle.Bundle, error) {
 	_, sites := s.bundleCaches()
 	return sites.LoadPinned(sv.ContentHash, tarbundle.SiteLimits, func() ([]byte, error) {
+		if sv.pack != nil {
+			return sv.pack(ctx)
+		}
 		return s.readArtifactBlob(ctx, sv.BlobKey, tarbundle.SiteLimits.MaxArchiveBytes())
 	})
 }

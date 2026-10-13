@@ -11,6 +11,10 @@
 // `put((await app.me()).id, doc, {ifAbsent: true})` is one record per
 // person. Caps: 64 KiB per document, 100k documents or 256 MiB per app, 64
 // collections per app.
+//
+// In the app gallery's "Try demo" the same calls are answered by an empty,
+// in-memory data space of the page alone (me() is {id: "demo"}); nothing
+// is saved or shared, and a reload starts empty again.
 
 export {};
 

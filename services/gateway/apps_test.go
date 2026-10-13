@@ -16,6 +16,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -60,6 +61,19 @@ type appGW struct {
 	appA    string
 	appB    string
 	doc     string
+	// appCalls counts the app data calls the backends received: the room
+	// service's /internal/v1/app/… and realtime's app change feed.
+	appCalls atomic.Int64
+}
+
+// countAppCalls counts h's app data requests in e.appCalls.
+func (e *appGW) countAppCalls(h http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/internal/v1/app/") || strings.HasSuffix(r.URL.Path, "/app-events") {
+			e.appCalls.Add(1)
+		}
+		h.ServeHTTP(w, r)
+	})
 }
 
 func newAppGW(t *testing.T) *appGW {
@@ -76,7 +90,7 @@ func newAppGW(t *testing.T) *appGW {
 		t.Fatal(err)
 	}
 	e.blobs = disk
-	rtSrv := httptest.NewServer(svcauth.Middleware(appGWKey, (&realtimehttp.Service{Hub: e.hub, Blobs: disk}).Handler()))
+	rtSrv := httptest.NewServer(e.countAppCalls(svcauth.Middleware(appGWKey, (&realtimehttp.Service{Hub: e.hub, Blobs: disk}).Handler())))
 	t.Cleanup(rtSrv.Close)
 
 	raw := make([]byte, 32)
@@ -91,7 +105,7 @@ func newAppGW(t *testing.T) *appGW {
 	e.room.Artifacts, e.room.Profiles, e.room.Tenants = b.Artifacts, b.Profiles, b.Tenant
 	e.room.AppDocs, e.room.AppCipher = b.AppDocs, appdata.NewCipher(box)
 	e.room.Publisher = realtime.NewHTTPPublisher(rtSrv.URL, "room")
-	roomSrv := httptest.NewServer(svcauth.Middleware(appGWKey, e.room.Handler()))
+	roomSrv := httptest.NewServer(e.countAppCalls(svcauth.Middleware(appGWKey, e.room.Handler())))
 	t.Cleanup(roomSrv.Close)
 	e.roomURL = roomSrv.URL
 
@@ -735,6 +749,10 @@ func TestAppSDKServed(t *testing.T) {
 		"VISITOR_INVALID":   strconv.Quote(wire.AppVisitorInvalid),
 		"CHANGE_EVENT":      strconv.Quote(wire.EventAppChanged),
 		"MAX_DOC_BYTES":     strconv.Itoa(wire.MaxAppDocBytes),
+		// The demo mode's in-memory data space keeps the API's bounds.
+		"MAX_FIND_LIMIT":          strconv.Itoa(wire.MaxAppFindLimit),
+		"MAX_COLLECTION_NAME_LEN": strconv.Itoa(wire.MaxAppCollectionNameLen),
+		"MAX_DOC_ID_LEN":          strconv.Itoa(wire.MaxAppDocIDLen),
 	} {
 		m := regexp.MustCompile(`var ` + name + ` = ([^;]+);`).FindSubmatch(appsdk.JS)
 		if m == nil || string(m[1]) != want {

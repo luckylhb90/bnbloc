@@ -140,3 +140,89 @@ test("subscribe hands over only app_changed events, until unsubscribed", async (
   stop();
   stream.close();
 });
+
+// Demo mode (the gallery's "Try demo"): the same file with its mode
+// argument "demo", as the gateway serves it under a demo ticket
+// (appsdk.DemoJS, pinned by its Go test).
+const LIVE_MODE = ', "live");';
+const DEMO_SDK = SDK.replace(LIVE_MODE, ', "demo");');
+
+test("the SDK passes its mode once, at its end", () => {
+  assert.equal(SDK.split(LIVE_MODE).length, 2);
+  assert.ok(SDK.trimEnd().endsWith(LIVE_MODE));
+});
+
+// bootDemo loads the demo SDK in a frame whose every way out throws: a
+// request, a message to the parent, a message listener.
+function bootDemo() {
+  const out = [];
+  const way = (name) => (...args) => {
+    out.push(name);
+    throw new Error(`demo mode used ${name}(${args.length} args)`);
+  };
+  const window = {
+    addEventListener: way("addEventListener"),
+    parent: { postMessage: way("postMessage") },
+    document: { currentScript: { src: BASE + "sdk.js" }, baseURI: BASE },
+    location: { href: BASE },
+  };
+  const context = { window, fetch: way("fetch"), XMLHttpRequest: way("XMLHttpRequest"), EventSource: way("EventSource"), URL, TextEncoder, setTimeout, clearTimeout, Promise };
+  vm.createContext(context);
+  vm.runInContext(DEMO_SDK, context);
+  return { app: window.bnblocApp, out };
+}
+
+test("demo mode answers the whole data API in the page's memory and never sends a request", async () => {
+  const { app, out } = bootDemo();
+  const changes = [];
+  const stop = app.subscribe((c) => changes.push(plain(c)));
+  const votes = app.collection("votes");
+
+  const me = plain(await app.me());
+  assert.deepEqual(me, { id: "demo", name: "Demo" });
+  const first = plain(await votes.insert({ choice: "A" }, { public: true }));
+  assert.equal(first.choice, "A");
+  assert.equal(first._by, "demo");
+  assert.equal(first._version, 1);
+  // One per person: ifAbsent refuses a second; ifVersion follows the version.
+  const mine = plain(await votes.put(me.id, { choice: "B", n: 1 }, { ifAbsent: true }));
+  await assert.rejects(votes.put(me.id, { choice: "C" }, { ifAbsent: true }), (e) => e.status === 409);
+  await assert.rejects(votes.patch(me.id, { $inc: { n: 1 } }, { ifVersion: 7 }), (e) => e.status === 409);
+  const patched = plain(await votes.patch(me.id, { merge: { note: "hi" }, $inc: { n: 2 } }, { ifVersion: mine._version }));
+  assert.deepEqual([patched.choice, patched.n, patched.note, patched._version, patched._createdAt], ["B", 3, "hi", 2, mine._createdAt]);
+  // Stamps are the server's: a document's own _id or _version is ignored.
+  assert.equal(plain(await votes.put("x1", { _version: 99, _id: "y", v: 1 }))._version, 1);
+
+  // Filters, _id order and paging as the data API has them ("demo" sorts
+  // before the server ids "demo000…").
+  const page = plain(await votes.find({ choice: { $in: ["A", "B"] } }, { limit: 1 }));
+  assert.deepEqual(page.docs.map((d) => d._id), [me.id]);
+  const rest = plain(await votes.find({ choice: { $in: ["A", "B"] } }, { limit: 1, after: page.next }));
+  assert.deepEqual(rest.docs.map((d) => d._id), [first._id]);
+  assert.equal(rest.next, undefined);
+  assert.deepEqual(plain(await votes.find({ n: { $gte: 3 } }, { sort: "-_id" })).docs.map((d) => d._id), [me.id]);
+  assert.equal(plain(await votes.get(first._id)).choice, "A");
+
+  await votes.remove(first._id);
+  await assert.rejects(votes.get(first._id), (e) => e.status === 404);
+  await assert.rejects(app.collection("bad name").insert({ a: 1 }), (e) => e.status === 400);
+  await assert.rejects(votes.insert({ big: "x".repeat(70000) }), (e) => e.status === 413);
+
+  await new Promise((r) => setTimeout(r, 10));
+  assert.deepEqual(
+    changes.map((c) => [c.collection, c.version]),
+    [["votes", 1], ["votes", 1], ["votes", 2], ["votes", 1], ["votes", 0]],
+  );
+  stop();
+  await votes.put("x2", { v: 2 });
+  await new Promise((r) => setTimeout(r, 10));
+  assert.equal(changes.length, 5, "a change reached an unsubscribed listener");
+  assert.deepEqual(out, [], "demo mode reached outside the page");
+});
+
+test("demo data lives in one page: another page starts empty", async () => {
+  const a = bootDemo();
+  await a.app.collection("votes").insert({ choice: "A" });
+  const b = bootDemo();
+  assert.deepEqual(plain(await b.app.collection("votes").find()).docs, []);
+});

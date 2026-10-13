@@ -74,6 +74,13 @@ const (
 	// one artifact version named in ID ("<roomId>/<artifactId>/<version>")
 	// for its subject and tenant, and the room-level read is re-checked.
 	KindSiteFrame = "site-frame"
+	// KindAppDemo is a short-lived ticket in an app's demo frame URL (the
+	// same /v1/sites/<ticket>/… path): it authorizes only reading the site
+	// files of the one app component version named in ID
+	// ("<componentId>@<version>#<site sha256>") for its subject and tenant,
+	// whose read of the component is re-checked. It names no room and no
+	// app data space, so no app data call takes it.
+	KindAppDemo = "app-demo"
 	// KindAttachment is a short-lived ticket in a chat attachment's URL (an
 	// <img src> or <a href> cannot carry the bearer): it authorizes only
 	// GET of the one attachment named in ID ("<roomId>/<attachmentId>") for

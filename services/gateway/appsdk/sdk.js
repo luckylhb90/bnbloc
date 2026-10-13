@@ -35,8 +35,15 @@
  * The SDK asks once at load and again when a call is refused for a missing
  * or invalid visitor token (then it retries that call once). It accepts a
  * grant only from window.parent; the parent may send one unasked.
+ *
+ * Demo mode (the gallery's "Try demo", docs/prd/2026-10-13-app-gallery.md
+ * §7): the gateway serves this same file with its mode argument (the last
+ * line) set to "demo" under a demo ticket. Every call is then answered by
+ * an in-memory data space of this page alone (memoryBackend), with the
+ * data API's shapes and rules; nothing is ever sent (no request, no change
+ * feed, no visitor handshake) and nothing outlives the page.
  */
-(function (global) {
+(function (global, mode) {
   "use strict";
 
   // Wire constants (internal/wire/apps.go, limits.go; pinned by the
@@ -49,6 +56,11 @@
   var VISITOR_INVALID = "visitor_token_invalid";
   var CHANGE_EVENT = "app_changed";
   var MAX_DOC_BYTES = 65536;
+  var MAX_FIND_LIMIT = 500;
+  var MAX_COLLECTION_NAME_LEN = 64;
+  var MAX_DOC_ID_LEN = 128;
+
+  var demo = mode === "demo";
 
   var HANDSHAKE_TIMEOUT_MS = 5000;
   var RECONNECT_MIN_MS = 1000;
@@ -75,7 +87,7 @@
   var visitorToken = "";
   var waiters = [];
 
-  global.addEventListener("message", function (ev) {
+  if (!demo) global.addEventListener("message", function (ev) {
     if (!inFrame || ev.source !== global.parent) return;
     var m = ev.data;
     if (!m || m.type !== VISITOR_GRANT || m.v !== HANDSHAKE_VERSION || typeof m.token !== "string" || !m.token) return;
@@ -104,7 +116,7 @@
     });
   }
 
-  askVisitor();
+  if (!demo) askVisitor();
 
   // ---- requests ----
 
@@ -150,6 +162,7 @@
   }
 
   function call(method, path, body, headers) {
+    if (memory) return memory.call(method, path, body === undefined ? undefined : JSON.parse(JSON.stringify(body)), headers || {});
     var init = { method: method, headers: headers || {} };
     if (body !== undefined) {
       init.body = JSON.stringify(body);
@@ -272,6 +285,7 @@
   // only: after a disconnection the SDK reconnects, and changes made while
   // it was away are not replayed, so re-read what the page shows.
   function subscribe(fn) {
+    if (memory) return memory.subscribe(fn);
     var stopped = false;
     var ctrl = null;
     var delay = RECONNECT_MIN_MS;
@@ -298,6 +312,195 @@
     };
   }
 
+  // ---- demo mode: an in-memory data space of this page alone ----
+
+  // memoryBackend answers call() and subscribe() in demo mode: the data
+  // API's paths, shapes and rules (stamps, ifAbsent / ifVersion
+  // conditions, filters, _id order and paging, merge and $inc), held in
+  // this page's memory. It has no way out: it never fetches, posts a
+  // message or stores anything, and a reload starts empty.
+  function memoryBackend() {
+    var DEMO_ID = "demo";
+    var COLLECTION = /^[A-Za-z0-9_-]+$/;
+    var DOC_ID = /^[A-Za-z0-9_.:-]+$/;
+    var STAMPS = { _id: 1, _by: 1, _createdAt: 1, _updatedAt: 1, _version: 1, _author: 1 };
+    var data = {};
+    var listeners = [];
+    var seq = 0;
+
+    function copy(v) { return v === undefined || v === null ? null : JSON.parse(JSON.stringify(v)); }
+    function refuse(status, message) { return Promise.reject(appError(status, "", message)); }
+    function bodyOf(doc) {
+      var out = {};
+      for (var k in doc) if (Object.prototype.hasOwnProperty.call(doc, k) && !STAMPS[k]) out[k] = doc[k];
+      return out;
+    }
+    function stamped(id, body, prev) {
+      var t = Date.now();
+      var doc = bodyOf(body);
+      doc._id = id;
+      doc._by = DEMO_ID;
+      doc._createdAt = prev ? prev._createdAt : t;
+      doc._updatedAt = t;
+      doc._version = prev ? prev._version + 1 : 1;
+      return doc;
+    }
+    function changed(collection, id, version) {
+      var change = { appId: DEMO_ID, collection: collection, id: id, version: version };
+      listeners.forEach(function (fn) {
+        setTimeout(function () { if (listeners.indexOf(fn) >= 0) fn(copy(change)); }, 0);
+      });
+    }
+    function fieldOf(doc, path) {
+      var v = doc;
+      for (var parts = path.split("."), i = 0; i < parts.length; i++) {
+        if (v === null || typeof v !== "object" || !Object.prototype.hasOwnProperty.call(v, parts[i])) return undefined;
+        v = v[parts[i]];
+      }
+      return v;
+    }
+    function same(a, b) { return JSON.stringify(a) === JSON.stringify(b); }
+    // compare orders two numbers or two strings; anything else never matches a range.
+    function compare(a, b) {
+      if (typeof a !== typeof b || (typeof a !== "number" && typeof a !== "string")) return null;
+      return a < b ? -1 : a > b ? 1 : 0;
+    }
+    function test(v, op, arg) {
+      var c;
+      switch (op) {
+        case "$eq": return v !== undefined && same(v, arg);
+        case "$ne": return !same(v, arg);
+        case "$in": return Array.isArray(arg) && arg.some(function (x) { return v !== undefined && same(v, x); });
+        case "$exists": return (v !== undefined) === !!arg;
+        case "$gt": c = compare(v, arg); return c !== null && c > 0;
+        case "$gte": c = compare(v, arg); return c !== null && c >= 0;
+        case "$lt": c = compare(v, arg); return c !== null && c < 0;
+        case "$lte": c = compare(v, arg); return c !== null && c <= 0;
+      }
+      throw appError(400, "", "unknown filter operator " + op);
+    }
+    function matches(doc, filter) {
+      return Object.keys(filter).every(function (path) {
+        var cond = filter[path];
+        var v = fieldOf(doc, path);
+        var ops = cond !== null && typeof cond === "object" && !Array.isArray(cond) && Object.keys(cond).length > 0 &&
+          Object.keys(cond).every(function (k) { return k.charAt(0) === "$"; });
+        if (!ops) return test(v, "$eq", cond);
+        return Object.keys(cond).every(function (op) { return test(v, op, cond[op]); });
+      });
+    }
+    // mergePatch applies a JSON merge patch (null removes a field).
+    function mergePatch(target, patch) {
+      if (patch === null || typeof patch !== "object" || Array.isArray(patch)) return patch;
+      var out = target !== null && typeof target === "object" && !Array.isArray(target) ? target : {};
+      Object.keys(patch).forEach(function (k) {
+        if (patch[k] === null) delete out[k];
+        else out[k] = mergePatch(out[k], patch[k]);
+      });
+      return out;
+    }
+    function conflict(prev, headers) {
+      if (headers["If-None-Match"] === "*" && prev) return "the document exists";
+      var want = headers["If-Match"];
+      if (want !== undefined && (!prev || String(prev._version) !== want)) return "the document is not at version " + want;
+      return "";
+    }
+
+    function find(docs, query) {
+      var filter = {};
+      try { filter = query.get("filter") ? JSON.parse(query.get("filter")) : {}; } catch (e) { return refuse(400, "filter is not JSON"); }
+      var desc = query.get("sort") === "-_id";
+      var limit = query.get("limit") ? parseInt(query.get("limit"), 10) : 50;
+      if (!(limit >= 1)) return refuse(400, "limit is a positive number");
+      limit = Math.min(limit, MAX_FIND_LIMIT);
+      var after = query.get("after") || "";
+      var ids = Object.keys(docs).sort();
+      if (desc) ids.reverse();
+      var out = [];
+      try {
+        for (var i = 0; i < ids.length; i++) {
+          if (after && (desc ? ids[i] >= after : ids[i] <= after)) continue;
+          if (!matches(docs[ids[i]], filter)) continue;
+          if (out.length === limit) return Promise.resolve({ docs: out, next: out[out.length - 1]._id });
+          out.push(copy(docs[ids[i]]));
+        }
+      } catch (e) {
+        return Promise.reject(e);
+      }
+      return Promise.resolve({ docs: out });
+    }
+
+    function call(method, path, payload, headers) {
+      var url = new URL(path, "https://demo.invalid/");
+      var parts = url.pathname.slice(1).split("/").map(decodeURIComponent);
+      if (method === "GET" && parts.length === 1 && parts[0] === "me") return Promise.resolve({ id: DEMO_ID, name: "Demo" });
+      if (parts[0] !== "c" || parts.length < 2 || parts.length > 3) return refuse(404, "not an app API path");
+      var name = parts[1];
+      var id = parts[2];
+      if (!COLLECTION.test(name) || name.length > MAX_COLLECTION_NAME_LEN) return refuse(400, "invalid collection name");
+      if (id !== undefined && (!DOC_ID.test(id) || id.length > MAX_DOC_ID_LEN)) return refuse(400, "invalid document id");
+      var docs = data[name] || {};
+      var prev = id === undefined ? undefined : docs[id];
+      var why = id === undefined ? "" : conflict(prev, headers);
+      var doc;
+      switch (id === undefined ? method + " c" : method + " doc") {
+        case "GET c":
+          return find(docs, url.searchParams);
+        case "POST c":
+          seq += 1;
+          id = "demo" + ("000000000" + seq).slice(-10);
+          doc = stamped(id, payload.doc, null);
+          break;
+        case "GET doc":
+          return prev ? Promise.resolve(copy(prev)) : refuse(404, "document not found");
+        case "PUT doc":
+          if (why) return refuse(409, why);
+          doc = stamped(id, payload.doc, prev);
+          break;
+        case "PATCH doc":
+          if (!prev) return refuse(404, "document not found");
+          if (why) return refuse(409, why);
+          var body = copy(bodyOf(prev));
+          if (payload.merge !== undefined) body = mergePatch(body, bodyOf(payload.merge || {}));
+          var inc = payload.$inc || {};
+          for (var k in inc) {
+            if (!Object.prototype.hasOwnProperty.call(inc, k)) continue;
+            var cur = fieldOf(body, k);
+            if (typeof inc[k] !== "number" || (cur !== undefined && typeof cur !== "number")) return refuse(400, "$inc adds numbers to numbers");
+            var at = body;
+            var keys = k.split(".");
+            for (var j = 0; j < keys.length - 1; j++) at = at[keys[j]] = at[keys[j]] !== null && typeof at[keys[j]] === "object" ? at[keys[j]] : {};
+            at[keys[keys.length - 1]] = (cur || 0) + inc[k];
+          }
+          doc = stamped(id, body, prev);
+          break;
+        case "DELETE doc":
+          if (!prev) return refuse(404, "document not found");
+          if (why) return refuse(409, why);
+          delete docs[id];
+          changed(name, id, 0);
+          return Promise.resolve(null);
+        default:
+          return refuse(405, "method not allowed");
+      }
+      docs[id] = doc;
+      data[name] = docs;
+      changed(name, id, doc._version);
+      return Promise.resolve(copy(doc));
+    }
+
+    function subscribe(fn) {
+      listeners.push(fn);
+      return function unsubscribe() {
+        listeners = listeners.filter(function (l) { return l !== fn; });
+      };
+    }
+
+    return { call: call, subscribe: subscribe };
+  }
+
+  var memory = demo ? memoryBackend() : null;
+
   var app = {
     collection: function (name) { return new Collection(name); },
     me: function () { return call("GET", "me"); },
@@ -306,4 +509,4 @@
 
   global.bnblocApp = app;
   if (!Object.prototype.hasOwnProperty.call(global, "app")) global.app = app;
-})(typeof window !== "undefined" ? window : globalThis);
+})(typeof window !== "undefined" ? window : globalThis, "live");

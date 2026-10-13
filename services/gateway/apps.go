@@ -139,8 +139,13 @@ func (s *Service) appRoutes() []route {
 		if e.entry == appRoom {
 			continue
 		}
+		sdk := s.handleAppSDK(appsdk.JS, "text/javascript; charset=utf-8")
+		if e.entry == appTicket {
+			// Under a demo ticket, the SDK in demo mode (app_demo.go).
+			sdk = s.handleTicketSDK()
+		}
 		out = append(out,
-			open("GET "+e.prefix+"/sdk.js", "the app SDK: a static file of the gateway's, no data", s.handleAppSDK(appsdk.JS, "text/javascript; charset=utf-8")),
+			open("GET "+e.prefix+"/sdk.js", "the app SDK: a static file of the gateway's, no data", sdk),
 			open("GET "+e.prefix+"/sdk.d.ts", "the app SDK's types: a static file of the gateway's, no data", s.handleAppSDK(appsdk.Types, "text/plain; charset=utf-8")),
 			open("GET "+e.prefix+"/{rest...}", "reserves the app API's namespace inside a site: 404", handleAppNotFound),
 		)

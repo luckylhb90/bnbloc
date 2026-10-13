@@ -84,6 +84,16 @@ type AppNewRoom struct {
 	Name string `json:"name,omitempty"`
 }
 
+// AppDemo answers POST /v1/content-components/{id}/versions/{v}/demo:
+// where an app version's demo runs. SiteURL is a site URL (on the sites
+// origin when the deployment has one) whose ~app/sdk.js is the SDK in demo
+// mode: its data lives in the page's memory only, and no app data call
+// is answered under it.
+type AppDemo struct {
+	SiteURL     string `json:"siteUrl"`
+	ExpiresAtMs int64  `json:"expiresAtMs"`
+}
+
 // AppUseReply answers "Use this app": the new site deliverable, which
 // starts with an empty data space of its own.
 type AppUseReply struct {

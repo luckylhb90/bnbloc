@@ -46,6 +46,7 @@ var contentRouteGrants = map[string]jobGrant{
 	"DELETE /v1/content-components/{id}/shares/rooms/{room}":   grantRefused,
 	"POST /v1/content-components/{id}/update":                  grantRefused,
 	"GET /v1/content-components/{id}/versions/{version}/cover": grantRefused,
+	"POST /v1/content-components/{id}/versions/{version}/demo": grantRefused,
 	"PUT /v1/content-components/{id}/favorite":                 grantRefused,
 	"DELETE /v1/content-components/{id}/favorite":              grantRefused,
 	"POST /v1/content-components/{id}/use-app":                 grantRefused,
