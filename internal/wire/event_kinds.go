@@ -85,6 +85,7 @@ var RoomEventKinds = []EventKindSpec{
 	{Name: EventRoomDeleted, Revocation: true},
 	{Name: EventContentSaved},
 	{Name: EventContentUsesChanged},
+	{Name: EventAppChanged},
 }
 
 var eventKinds = func() map[string]EventKindSpec {

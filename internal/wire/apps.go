@@ -52,3 +52,72 @@ type AppDataStats struct {
 type AppDataWiped struct {
 	Deleted int64 `json:"deleted"`
 }
+
+// EventAppChanged is a transient room event (bnbloc-room): a document of
+// one of the room's apps changed. It is never replayed or persisted and
+// carries only AppChanged: an app's change feed (GET ~app/events at the
+// gateway) re-fetches under its own read rights, so the feed leaks no
+// content.
+const EventAppChanged = "app_changed"
+
+// AppChanged is the payload of EventAppChanged and the data of each event
+// of an app's change feed. Version is the document's version after the
+// change, 0 when it was deleted; a wipe of all of the app's data names no
+// collection and no id.
+type AppChanged struct {
+	AppID      string `json:"appId"`
+	Collection string `json:"collection,omitempty"`
+	ID         string `json:"id,omitempty"`
+	Version    int64  `json:"version"`
+}
+
+// AppVisitorToken answers POST /v1/public/shares/{token}/visitor: a signed
+// visitor token bound to the share link and to one random visitor id (the
+// participant a public link's app knows). The share page keeps it and hands
+// it to the app frame (AppVisitorRequest / AppVisitorGrant); the SDK sends
+// it in AppVisitorHeader.
+type AppVisitorToken struct {
+	Token       string `json:"token"`
+	ExpiresAtMs int64  `json:"expiresAtMs"`
+}
+
+// AppVisitorRenew is the optional body of the visitor route: the token the
+// share page holds. A valid token of the same link is renewed for the same
+// visitor; anything else mints a new visitor.
+type AppVisitorRenew struct {
+	Token string `json:"token,omitempty"`
+}
+
+// AppVisitorHeader carries a public link's visitor token on an app data
+// call: a header, never the URL, so the token stays out of access logs.
+const AppVisitorHeader = "X-Bnbloc-Visitor"
+
+// The visitor handshake between the app frame (the SDK, ~app/sdk.js) and
+// the share page hosting it, over window.postMessage. The frame's origin
+// is opaque, so neither side can name the other's origin; each checks the
+// message's source window instead:
+//
+//	frame  -> parent: {type: AppVisitorRequest, v: AppHandshakeVersion}
+//	parent -> frame:  {type: AppVisitorGrant, v: AppHandshakeVersion, token: AppVisitorToken.token}
+//
+// The parent answers only a request whose event.source is its own app
+// frame's window, and may send a grant unasked (after it renewed the
+// token). The SDK accepts a grant only from window.parent.
+const (
+	AppVisitorRequest   = "bnbloc.app.visitor.request"
+	AppVisitorGrant     = "bnbloc.app.visitor"
+	AppHandshakeVersion = 1
+)
+
+// The error codes of an app data call (httpx.ErrorBody code) the SDK acts
+// on: it asks the share page for a visitor token and retries once.
+//
+//wire:union AppErrorCode
+const (
+	// AppVisitorRequired: a public link's app call carried no visitor
+	// token (401).
+	AppVisitorRequired = "visitor_token_required"
+	// AppVisitorInvalid: the visitor token is forged, expired or another
+	// link's (401).
+	AppVisitorInvalid = "visitor_token_invalid"
+)

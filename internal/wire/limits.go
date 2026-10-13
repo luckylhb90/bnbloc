@@ -48,4 +48,7 @@ const (
 	MaxAppDocIDLen = 128
 	// MaxAppFindLimit bounds one page of a find.
 	MaxAppFindLimit = 500
+	// MaxAppRequestBytes bounds one app data request body: a document plus
+	// its envelope (AppDocWrite, AppDocPatch).
+	MaxAppRequestBytes = MaxAppDocBytes + 4<<10
 )

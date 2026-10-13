@@ -62,6 +62,9 @@ import (
 // _version; _author for owners only): appdata.Render. Errors are httpx's one
 // body.
 //
+// Every write announces itself on the room's stream as a transient
+// app_changed event (announceAppChange): wire.AppChanged, metadata only.
+//
 // # The two rules (§4.4)
 //
 // The app's owners are the room's members who may act in it
@@ -322,9 +325,22 @@ func (s *Service) writeAppDoc(w http.ResponseWriter, a *appCall, status int, d s
 	httpx.WriteJSON(w, status, doc)
 }
 
-// appWriteBodyLimit caps a write's request body: one document plus its
-// envelope.
-const appWriteBodyLimit = wire.MaxAppDocBytes + 4<<10
+// announceAppChange publishes the transient app_changed event of a write
+// (version 0: deleted; no collection: the app was wiped) on the room's
+// stream, which each of the app's change feeds narrows to its app (the
+// gateway's GET ~app/events). It carries no content. The write has
+// happened, so a client that hangs up does not cancel the announcement.
+func (s *Service) announceAppChange(a *appCall, collection, id string, version int64) {
+	if s.Publisher == nil {
+		return
+	}
+	s.Publisher.Publish(context.WithoutCancel(a.ctx), wire.Event{
+		RoomID:   a.scope.RoomID,
+		Kind:     wire.EventAppChanged,
+		Payload:  wire.AppChanged{AppID: a.scope.AppID, Collection: collection, ID: id, Version: version},
+		AtUnixMs: s.Now(),
+	})
+}
 
 // create seals and inserts a new document by the caller. The app's key is
 // re-read once if a wipe replaced it meanwhile.
@@ -361,6 +377,7 @@ func (s *Service) createAppDoc(a *appCall, collection, id string, body appdata.B
 			return store.AppDoc{}, err
 		}
 		s.appUsage.add(a.tenantID, a.scope, collection, 1, int64(len(d.BodySealed)))
+		s.announceAppChange(a, collection, id, d.Version)
 		return d, nil
 	}
 }
@@ -418,6 +435,7 @@ func (s *Service) updateAppDoc(a *appCall, collection, id string, version int64,
 		return store.AppDoc{}, err
 	}
 	s.appUsage.add(a.tenantID, a.scope, collection, 0, grew)
+	s.announceAppChange(a, collection, id, d.Version)
 	return d, nil
 }
 
@@ -429,7 +447,7 @@ func (s *Service) handleAppInsert(w http.ResponseWriter, r *http.Request, a *app
 		return
 	}
 	var in wire.AppDocWrite
-	if !httpx.DecodeJSON(w, r, appWriteBodyLimit, &in) {
+	if !httpx.DecodeJSON(w, r, wire.MaxAppRequestBytes, &in) {
 		return
 	}
 	body, err := appdata.ParseBody(in.Doc)
@@ -460,7 +478,7 @@ func (s *Service) handleAppPut(w http.ResponseWriter, r *http.Request, a *appCal
 		return
 	}
 	var in wire.AppDocWrite
-	if !httpx.DecodeJSON(w, r, appWriteBodyLimit, &in) {
+	if !httpx.DecodeJSON(w, r, wire.MaxAppRequestBytes, &in) {
 		return
 	}
 	body, err := appdata.ParseBody(in.Doc)
@@ -529,7 +547,7 @@ func (s *Service) handleAppPatch(w http.ResponseWriter, r *http.Request, a *appC
 		return
 	}
 	var in wire.AppDocPatch
-	if !httpx.DecodeJSON(w, r, appWriteBodyLimit, &in) {
+	if !httpx.DecodeJSON(w, r, wire.MaxAppRequestBytes, &in) {
 		return
 	}
 	d, err := s.updateAppDoc(a, collection, id, version, in.Public, func(cur appdata.Body) (appdata.Body, error) {
@@ -574,6 +592,7 @@ func (s *Service) handleAppDelete(w http.ResponseWriter, r *http.Request, a *app
 		return
 	}
 	s.appUsage.add(a.tenantID, a.scope, collection, -1, -int64(size))
+	s.announceAppChange(a, collection, id, 0)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -723,6 +742,7 @@ func (s *Service) handleAppWipe(w http.ResponseWriter, _ *http.Request, a *appCa
 		writeAppError(w, err)
 		return
 	}
+	s.announceAppChange(a, "", "", 0)
 	httpx.WriteJSON(w, http.StatusOK, wire.AppDataWiped{Deleted: n})
 }
 

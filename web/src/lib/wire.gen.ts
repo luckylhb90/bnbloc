@@ -278,6 +278,69 @@ export interface AppDataWiped {
   deleted: number;
 }
 
+// EventAppChanged is a transient room event (bnbloc-room): a document of
+// one of the room's apps changed. It is never replayed or persisted and
+// carries only AppChanged: an app's change feed (GET ~app/events at the
+// gateway) re-fetches under its own read rights, so the feed leaks no
+// content.
+export const EventAppChanged = "app_changed";
+
+// AppChanged is the payload of EventAppChanged and the data of each event
+// of an app's change feed. Version is the document's version after the
+// change, 0 when it was deleted; a wipe of all of the app's data names no
+// collection and no id.
+export interface AppChanged {
+  appId: string;
+  collection?: string;
+  id?: string;
+  version: number;
+}
+
+// AppVisitorToken answers POST /v1/public/shares/{token}/visitor: a signed
+// visitor token bound to the share link and to one random visitor id (the
+// participant a public link's app knows). The share page keeps it and hands
+// it to the app frame (AppVisitorRequest / AppVisitorGrant); the SDK sends
+// it in AppVisitorHeader.
+export interface AppVisitorToken {
+  token: string;
+  expiresAtMs: number;
+}
+
+// AppVisitorRenew is the optional body of the visitor route: the token the
+// share page holds. A valid token of the same link is renewed for the same
+// visitor; anything else mints a new visitor.
+export interface AppVisitorRenew {
+  token?: string;
+}
+
+// AppVisitorHeader carries a public link's visitor token on an app data
+// call: a header, never the URL, so the token stays out of access logs.
+export const AppVisitorHeader = "X-Bnbloc-Visitor";
+
+// The visitor handshake between the app frame (the SDK, ~app/sdk.js) and
+// the share page hosting it, over window.postMessage. The frame's origin
+// is opaque, so neither side can name the other's origin; each checks the
+// message's source window instead:
+//
+// 	frame  -> parent: {type: AppVisitorRequest, v: AppHandshakeVersion}
+// 	parent -> frame:  {type: AppVisitorGrant, v: AppHandshakeVersion, token: AppVisitorToken.token}
+//
+// The parent answers only a request whose event.source is its own app
+// frame's window, and may send a grant unasked (after it renewed the
+// token). The SDK accepts a grant only from window.parent.
+export const AppVisitorRequest = "bnbloc.app.visitor.request";
+export const AppVisitorGrant = "bnbloc.app.visitor";
+export const AppHandshakeVersion = 1;
+
+// The error codes of an app data call (httpx.ErrorBody code) the SDK acts
+// on: it asks the share page for a visitor token and retries once.
+// AppVisitorRequired: a public link's app call carried no visitor
+// token (401).
+export const AppVisitorRequired = "visitor_token_required";
+// AppVisitorInvalid: the visitor token is forged, expired or another
+// link's (401).
+export const AppVisitorInvalid = "visitor_token_invalid";
+
 // ---- wire/artifacts.go ----
 
 // Artifact is a room deliverable (spec, report, code, image, site) as room
@@ -1540,7 +1603,7 @@ export interface EventKindSpec {
 // RoomEventKinds is the registry of room event kinds. The web's
 // RoomEventKind union (and RoomEventKindValues) is generated from the Name
 // of each row: a kind registered here is a kind the web listens for.
-export const RoomEventKinds: readonly EventKindSpec[] = [{ name: "chat_message", durable: true, replay: true, channelScoped: true }, { name: "agent_messages", durable: true, replay: true, channelScoped: true }, { name: "agent_job_created", channelScoped: true }, { name: "agent_job_updated", channelScoped: true }, { name: "agent_session_state" }, { name: "agent_roster" }, { name: "presence_join" }, { name: "presence_leave" }, { name: "presence_snapshot" }, { name: "presence_typing", channelScoped: true }, { name: "message_deleted", channelScoped: true }, { name: "message_edited", channelScoped: true }, { name: "task_updated", channelScoped: true }, { name: "artifact_updated" }, { name: "artifact_state" }, { name: "member_joined" }, { name: "member_removed", revocation: true }, { name: "room_deleted", revocation: true }, { name: "content_saved" }, { name: "content_uses_changed" }];
+export const RoomEventKinds: readonly EventKindSpec[] = [{ name: "chat_message", durable: true, replay: true, channelScoped: true }, { name: "agent_messages", durable: true, replay: true, channelScoped: true }, { name: "agent_job_created", channelScoped: true }, { name: "agent_job_updated", channelScoped: true }, { name: "agent_session_state" }, { name: "agent_roster" }, { name: "presence_join" }, { name: "presence_leave" }, { name: "presence_snapshot" }, { name: "presence_typing", channelScoped: true }, { name: "message_deleted", channelScoped: true }, { name: "message_edited", channelScoped: true }, { name: "task_updated", channelScoped: true }, { name: "artifact_updated" }, { name: "artifact_state" }, { name: "member_joined" }, { name: "member_removed", revocation: true }, { name: "room_deleted", revocation: true }, { name: "content_saved" }, { name: "content_uses_changed" }, { name: "app_changed" }];
 
 // ---- wire/handoff.go ----
 
@@ -1850,6 +1913,9 @@ export const MaxAppCollectionNameLen = 64;
 export const MaxAppDocIDLen = 128;
 // MaxAppFindLimit bounds one page of a find.
 export const MaxAppFindLimit = 500;
+// MaxAppRequestBytes bounds one app data request body: a document plus
+// its envelope (AppDocWrite, AppDocPatch).
+export const MaxAppRequestBytes = 69632;
 
 // ---- wire/mcp_tools.go ----
 
@@ -3569,10 +3635,12 @@ export const JobNoticeSeq = 1;
 // ---- wire unions (//wire:union) ----
 export type RunScope = "room" | "self" | "tenant";
 export const RunScopeValues: readonly RunScope[] = ["room", "self", "tenant"];
+export type AppErrorCode = "visitor_token_required" | "visitor_token_invalid";
+export const AppErrorCodeValues: readonly AppErrorCode[] = ["visitor_token_required", "visitor_token_invalid"];
 export type ContentUseScope = "member" | "room" | "room-expert";
 export const ContentUseScopeValues: readonly ContentUseScope[] = ["member", "room", "room-expert"];
-export type RoomEventKind = "chat_message" | "agent_messages" | "agent_job_created" | "agent_job_updated" | "agent_session_state" | "agent_roster" | "presence_join" | "presence_leave" | "presence_snapshot" | "presence_typing" | "message_deleted" | "message_edited" | "task_updated" | "artifact_updated" | "artifact_state" | "member_joined" | "member_removed" | "room_deleted" | "content_saved" | "content_uses_changed";
-export const RoomEventKindValues: readonly RoomEventKind[] = ["chat_message", "agent_messages", "agent_job_created", "agent_job_updated", "agent_session_state", "agent_roster", "presence_join", "presence_leave", "presence_snapshot", "presence_typing", "message_deleted", "message_edited", "task_updated", "artifact_updated", "artifact_state", "member_joined", "member_removed", "room_deleted", "content_saved", "content_uses_changed"];
+export type RoomEventKind = "chat_message" | "agent_messages" | "agent_job_created" | "agent_job_updated" | "agent_session_state" | "agent_roster" | "presence_join" | "presence_leave" | "presence_snapshot" | "presence_typing" | "message_deleted" | "message_edited" | "task_updated" | "artifact_updated" | "artifact_state" | "member_joined" | "member_removed" | "room_deleted" | "content_saved" | "content_uses_changed" | "app_changed";
+export const RoomEventKindValues: readonly RoomEventKind[] = ["chat_message", "agent_messages", "agent_job_created", "agent_job_updated", "agent_session_state", "agent_roster", "presence_join", "presence_leave", "presence_snapshot", "presence_typing", "message_deleted", "message_edited", "task_updated", "artifact_updated", "artifact_state", "member_joined", "member_removed", "room_deleted", "content_saved", "content_uses_changed", "app_changed"];
 export type ScheduleRecipientKind = "room" | "agent";
 export const ScheduleRecipientKindValues: readonly ScheduleRecipientKind[] = ["room", "agent"];
 export type RecurrenceKind = "once" | "daily" | "weekly" | "cron";
