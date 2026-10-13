@@ -116,6 +116,31 @@ published as a template: the site's files, never its data.
   component the caller sees (any kind), in the organization they act in;
   listings carry `favorite` and `favoriteCount` (that organization's
   members, capped like the usage counts).
+- **Try demo** (`services/gateway/app_demo.go`).
+  `POST /v1/content-components/{id}/versions/{v}/demo` answers
+  `wire.AppDemo {siteUrl, expiresAtMs}` for an app version the caller may
+  read: a demo ticket (`auth.KindAppDemo`, 1 h; its ID is
+  `<componentId>@<version>#<site sha256>`) in the member site path
+  (`/v1/sites/{ticket}/…`), so the sites origin, the site CSP and sandbox,
+  and the desktop's `bnbloc-site` scheme apply unchanged. Its files are
+  the app's site (`contentpkg.AppSite`, packed deterministically and
+  pinned by the digest in the ticket, loaded through the site bundle
+  cache), the read of the component re-checked on every file. Under a
+  demo ticket `~app/sdk.js` is `appsdk.DemoJS`: the same `sdk.js` with its
+  mode argument `"demo"`, which answers every call from an in-memory data
+  space of the page (the API's stamps, `ifAbsent`/`ifVersion`, filters,
+  `_id` order and paging, merge and `$inc`, local change events) and
+  sends nothing: no request, no change feed, no visitor handshake. A demo
+  ticket names no room and no site artifact, and the ticket entry's app
+  API resolves only a member's site ticket (`ticketApp`), so every data
+  call under a demo URL is refused before anything is forwarded
+  (`TestAppDemoNeverReachesAppData`; the SDK's node test runs demo mode
+  with every way out throwing).
+- **The gallery** (web): Plaza → Apps lists the content listing's apps
+  (`kind=app`) with category tabs, search, "My favorites", a detail with
+  the README, Try demo and Use this app; "Publish to gallery" is on the
+  Library's My apps cards and on an app deliverable's card for its
+  owners (`views/gallery/`).
 
 ### Import
 
@@ -744,6 +769,7 @@ store and the artifact entitlement). JSON shapes: `internal/wire/content_compone
 | `POST /v1/content-components/{id}/publish` | `{scope: org\|personal\|platform, version?, note?}`: `org` opens a publish request (201 `{scope, request, note}`), or publishes at once where the organization requires no approval (201 `{scope: org, note}`); `personal` withdraws it and unpublishes the org row; `platform` is a 403 saying what a platform admin does (the author; with `?job=&room=` as the job's requester) |
 | `POST /v1/rooms/{roomId}/artifacts/{artifactId}/publish-app` | A site's current version as the caller's app (`wire.AppPublishRequest`; a room member who may post; with `?job=` as the job's requester); 201 detail (see "Apps") |
 | `GET /v1/content-components/{id}/versions/{v}/cover` | An app version's cover image (404 when none) |
+| `POST /v1/content-components/{id}/versions/{v}/demo` | An app version's demo: `wire.AppDemo {siteUrl, expiresAtMs}`, a site URL whose SDK keeps its data in the page (see "Apps") |
 | `PUT\|DELETE /v1/content-components/{id}/favorite` | Star (a component the caller sees) or unstar it; 204 |
 | `POST /v1/content-components/{id}/use-app` | Copy a visible app into a room the caller owns or a new room (`wire.AppUseRequest`); 201 `wire.AppUseReply {roomId, artifactId, version, createdRoom?, from}` |
 | `GET /v1/tenant/content-requests[?status=all]` | Org admins: publish requests of the organization (pending by default) with the approved version |

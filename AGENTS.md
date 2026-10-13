@@ -1101,7 +1101,15 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   a new site artifact, so a fresh empty data space; counted as a
   `content_component_uses` row of scope `app-copy`). A listing never
   opens an app's bundle (its `coverUrl` may answer 404). Favorites are `store.ContentFavoriteStore` (`content_favorites`,
-  per tenant, deleted with the component).
+  per tenant, deleted with the component). An app's "Try demo" is only
+  `POST /v1/content-components/{id}/versions/{v}/demo`
+  (`services/gateway/app_demo.go`): a demo ticket (`auth.KindAppDemo`) in
+  the member site path, whose files are `contentpkg.AppSite` pinned by
+  digest and whose `~app/sdk.js` is `appsdk.DemoJS` (the one `sdk.js` with
+  its mode argument `"demo"`: an in-memory data space of the page, nothing
+  sent). A demo ticket names no room or app: never let the app data API
+  (`ticketApp`) or any `forwardApp` path accept it
+  (`TestAppDemoNeverReachesAppData` counts the backends' app calls).
 - **Archives and directory packing have one owner: `internal/tarbundle`.**
   An upload of a foreign format is read by `ReadArchive` (an unsafe name is
   refused, never rewritten), and every directory pack (save_component's
@@ -1419,7 +1427,9 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   room's `app_changed` only) narrowed to the app by `appEventsOf`. The
   SDK (`services/gateway/appsdk`, `go:embed`) spells the wire constants
   the share page's handshake uses (`wire.AppVisitorRequest`/`Grant`),
-  pinned by `TestAppSDKServed`; app budgets are `appRates` (IP, link,
+  pinned by `TestAppSDKServed`; it is one file with one transport switch:
+  its mode argument (the last line, `"live"`), which `appsdk.DemoJS`
+  sets to `"demo"` for an app's demo (never a second SDK file); app budgets are `appRates` (IP, link,
   participant; writes stricter). A frame entry's `~app/` answers CORS for
   any origin without credentials (`appFramePath`). On the web, a public
   link to a site is the app full-screen (`SharedApp`), and the share page
@@ -1822,14 +1832,26 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
     renewal): `lib/appVisitor.ts` (rule A1; the share page's app view
     `views/share/SharedApp.tsx` only wires it); an app's owners' data line
     (counts, export, clear): `lib/appData.ts` + `views/workbench/AppDataLine.tsx`
-    (shown for an `isApp` deliverable); an app's generated cover:
-    `lib/appCover.ts` (a gradient seeded by the app id, the name's
-    initial; `views/workbench/AppCover.tsx` draws the site's own cover or
-    it); the deliverables' filters: `views/workbench/deliverableFilters.ts`
-    ("Apps" is `isApp`); a member's apps (Library → Apps): `lib/myApps.ts`
-    + `views/library/AppsTab.tsx`
+    (shown for an `isApp` deliverable; `useAppStats` is its one query,
+    whose answer also decides an app card's owner actions); an app's
+    generated cover and when a cover is given up (`coverRefused`: 404,
+    413, 415): `lib/appCover.ts` (a gradient seeded by the app id, the
+    name's initial; `views/workbench/AppCover.tsx` draws a cover source,
+    `siteCover` or `componentCover`, or it); the deliverables' filters:
+    `views/workbench/deliverableFilters.ts` ("Apps" is `isApp`); a
+    member's apps (Library → Apps): `lib/myApps.ts` +
+    `views/library/AppsTab.tsx`
     (who is an owner is the stats route's answer, never re-decided; an
     export is the server's audited route, the web only names the file);
+    the app gallery (Plaza → Apps): `lib/appGallery.ts` (category tabs,
+    the gallery filter, the author line, the publish form and request,
+    the room choice and request of "Use this app") + `lib/appGalleryApi.ts`
+    + `views/gallery/` (`PublishAppDialog` is "Publish to gallery" for
+    the My apps cards and an app deliverable's owners; `AppDemo` frames a
+    demo URL); a site frame's environment (desktop scheme, gateway base):
+    `views/artifact/siteFrameEnv.ts`; what publishing to the organization
+    says (by `publishApproval`) and its toast: `orgPublishCopy` /
+    `orgPublishToast` (`lib/contentSharing.ts`);
   - where signing in brings a person back to (a share page of a link for
     the organization): `lib/loginReturn.ts` (rule A2; sessionStorage, a
     share hash only, taken once by `App`); a link's access choices and

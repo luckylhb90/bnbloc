@@ -4,14 +4,18 @@ Status: accepted (2026-10-13). The product owner approved the direction, the
 order and §11. Build after the share-link sign-in change
 (`docs/prd/2026-10-13-share-link-sign-in.md`) and the "Apps" views (§5) land.
 
-Status of the server side (2026-10-13): steps 2, 3 and 5 are built. The
-content kind `app` and its validator, publishing from a site (route and
-room tools), cover serving, favorites, "Use this app" and the
-`publishApproval` organization setting (with its field in Organization →
-Settings) are in; the cover convention is in the `interactive-apps` skill
-pack (1.1.0). The reference is `docs/architecture/content-components.md`,
-"Apps". Open: the fallback-cover owner, the "Publish to gallery" card
-action and the gallery itself (steps 1, 2's web part and 4).
+Status (2026-10-13): every delivery step is built. The content kind
+`app` and its validator, publishing from a site (route and room tools),
+cover serving, favorites, "Use this app" and the `publishApproval`
+organization setting (with its field in Organization → Settings) are in;
+the cover convention is in the `interactive-apps` skill pack (1.1.0). The
+web has the gallery (Plaza → Apps: grid, category tabs, search, "My
+favorites", the detail with its README, Try demo and Use this app) and
+"Publish to gallery" on the Library's My apps cards and on an app
+deliverable's card for its owners. Try demo is a demo ticket in the member
+site path whose SDK runs in demo mode (an in-memory data space of the
+page; no data call is answered under it). The reference is
+`docs/architecture/content-components.md`, "Apps".
 
 ## 1. Why
 
@@ -67,8 +71,8 @@ discoverable and makes the product feel alive.
 
 ## 5. "Apps" views (before the gallery)
 
-Status: **landed** (2026-10-13), except "Publish to gallery", which comes
-with step 2. Decided while building:
+Status: **landed** (2026-10-13), "Publish to gallery" with step 4.
+Decided while building:
 - **One rule, one owner: `store.Artifact.IsApp`.** A site whose data space
   exists (its key is stored and not being destroyed) or whose current
   version loads `~app/sdk.js`. Every read of an artifact fills both facts;
@@ -186,7 +190,31 @@ with step 2. Decided while building:
 3. The `cover.png` convention in the skill pack, with the drift test kept.
    Done.
 4. The Plaza gallery: grid, categories, search, favorites, detail page and
-   demo mode.
+   demo mode. Done, with "Publish to gallery" (step 2's web part). Decided
+   while building:
+   - **Demo mode is served by the gateway.** `POST /v1/content-components/
+     {id}/versions/{v}/demo` mints a demo ticket (`auth.KindAppDemo`) in
+     the member site path, so the sites origin, the sandbox and the
+     desktop's site scheme apply unchanged; the files are the app's site
+     (`contentpkg.AppSite`, the files a copy gets), pinned by digest.
+     `~app/sdk.js` there is the same `sdk.js` with its mode argument
+     "demo" (`appsdk.DemoJS`): an in-memory data space of the page with
+     the API's rules, and nothing sent. The ticket names no room or app,
+     so the app data API refuses every call under it before forwarding
+     (`TestAppDemoNeverReachesAppData`). The parent page answering the
+     SDK over postMessage was the alternative; it would have needed a
+     second protocol and a store in the web for the same result.
+   - **The gallery lists the content listing's apps**; an author's own app
+     whose organization publication is listed shows once, as the
+     publication. The author line is the person (a copy's author), or
+     "Platform" for platform and built-in content.
+   - **"Use this app"** offers a new room named after the app (the
+     default) or a room the member may post in (`lib/roomRoles`
+     `mayChat`); a 403 or 404 is worded for the member.
+   - **Publishing to the organization** after "Publish to gallery" is the
+     Library's publish dialog, whose copy follows `publishApproval` (the
+     member-readable tenant policy) and whose toast is the server's
+     answer: "Sent for approval" or "Published to your organization".
 5. "Use this app" copy flow. Server side done:
    `POST /v1/content-components/{id}/use-app`.
 
