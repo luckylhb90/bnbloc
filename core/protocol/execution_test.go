@@ -2,6 +2,8 @@ package protocol
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -77,5 +79,39 @@ func TestVMExecEnvRoundTrip(t *testing.T) {
 	}
 	if _, err := SandboxFromEnv(func(string) string { return "" }); err == nil || !strings.Contains(err.Error(), EnvVMExecToken) {
 		t.Fatalf("empty env: %v", err)
+	}
+}
+
+// A token file (BNBLOC_VMEXEC_TOKEN_FILE) wins over the token variable: a
+// core rewrites it when the session's execution is refreshed, and vmexec
+// reads it at every command; an unreadable or empty file falls back.
+func TestExecTokenFromTokenFile(t *testing.T) {
+	env := map[string]string{}
+	for _, kv := range VMExecEnv(*WireExecution(sampleExecution()).Sandbox) {
+		k, v, _ := strings.Cut(kv, "=")
+		env[k] = v
+	}
+	file := filepath.Join(t.TempDir(), "token")
+	env[EnvVMExecTokenFile] = file
+	get := func(k string) string { return env[k] }
+
+	if got, err := SandboxFromEnv(get); err != nil || got.ExecToken != "tok" {
+		t.Fatalf("missing file: %q %v; want the variable's token", got.ExecToken, err)
+	}
+	if err := os.WriteFile(file, []byte("  \n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := SandboxFromEnv(get); got.ExecToken != "tok" {
+		t.Fatalf("empty file: %q; want the variable's token", got.ExecToken)
+	}
+	if err := os.WriteFile(file, []byte("renewed\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := SandboxFromEnv(get); got.ExecToken != "renewed" {
+		t.Fatalf("token file: %q; want renewed", got.ExecToken)
+	}
+	delete(env, EnvVMExecToken)
+	if got, err := SandboxFromEnv(get); err != nil || got.ExecToken != "renewed" {
+		t.Fatalf("file alone: %q %v", got.ExecToken, err)
 	}
 }

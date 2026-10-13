@@ -545,3 +545,46 @@ func TestClient_SandboxExec_gatedByDiscovery_andCarriedOnTheWire(t *testing.T) {
 		t.Fatal("sandboxExec supported without being advertised")
 	}
 }
+
+// RefreshExecution PUTs the session's fresh execution, only to a core that
+// advertises executionRefresh.
+func TestClient_RefreshExecution(t *testing.T) {
+	var advertise atomic.Bool
+	srv, calls := protocolServer(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.EscapedPath() {
+		case PathDiscover:
+			if advertise.Load() {
+				writeDiscover(w, CapabilitySandboxExec, CapabilityExecutionRefresh)
+			} else {
+				writeDiscover(w, CapabilitySandboxExec)
+			}
+		case "/core/v1/workspaces/ws-1/sessions/s-1/execution":
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	})
+	ep := core.Endpoint{BaseURL: srv.URL}
+	ctx := context.Background()
+	if _, ok := core.As[core.ExecutionRefresher](ctx, NewClient("proto", srv.Client()), ep, core.CapabilityExecutionRefresh); ok {
+		t.Fatal("refresher without the capability")
+	}
+	advertise.Store(true)
+	r, ok := core.As[core.ExecutionRefresher](ctx, NewClient("proto", srv.Client()), ep, core.CapabilityExecutionRefresh)
+	if !ok {
+		t.Fatal("no refresher with the capability")
+	}
+	exec := sampleExecution()
+	exec.Sandbox.ExecToken = "renewed"
+	if err := r.RefreshExecution(ctx, ep, "ws-1", "s-1", exec); err != nil {
+		t.Fatal(err)
+	}
+	last := (*calls)[len(*calls)-1]
+	sb, _ := last.body["sandbox"].(map[string]any)
+	if last.method != http.MethodPut || last.path != "/core/v1/workspaces/ws-1/sessions/s-1/execution" || last.body["mode"] != ExecutionModeSandbox || sb["execToken"] != "renewed" {
+		t.Fatalf("refresh request = %+v", last)
+	}
+	if err := r.RefreshExecution(ctx, ep, "ws-1", "s-1", nil); err == nil {
+		t.Fatal("a nil execution was sent")
+	}
+}

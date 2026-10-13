@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"slices"
 	"sort"
 	"strings"
@@ -16,10 +17,15 @@ import (
 // PassthroughFromEnv parse them: the one encoding both sides share, and the
 // only place these names are spelled (TestVMExecEnvNamesOnlyInProtocol).
 // BNBLOC_VMEXEC_TOKEN is the space-scoped exec token (a secret); it can only
-// run commands in the session's own space.
+// run commands in the session's own space. BNBLOC_VMEXEC_TOKEN_FILE, when a
+// core sets it, names a file (readable only by the member) holding the
+// current token: the core rewrites it when the session's execution is
+// refreshed (capability executionRefresh), and vmexec reads it at every
+// command, so a long turn keeps working past its first token's expiry.
 const (
 	EnvVMExecURL         = "BNBLOC_VMEXEC_URL"
 	EnvVMExecToken       = "BNBLOC_VMEXEC_TOKEN"
+	EnvVMExecTokenFile   = "BNBLOC_VMEXEC_TOKEN_FILE"
 	EnvVMExecMachine     = "BNBLOC_VMEXEC_MACHINE"
 	EnvVMExecSpace       = "BNBLOC_VMEXEC_SPACE"
 	EnvVMExecPath        = "BNBLOC_VMEXEC_PATH"
@@ -79,7 +85,7 @@ func nonNil(v []string) []string {
 func SandboxFromEnv(getenv func(string) string) (SandboxExecution, error) {
 	s := SandboxExecution{
 		URL:       strings.TrimSpace(getenv(EnvVMExecURL)),
-		ExecToken: strings.TrimSpace(getenv(EnvVMExecToken)),
+		ExecToken: execTokenFromEnv(getenv),
 		Machine:   strings.TrimSpace(getenv(EnvVMExecMachine)),
 		Space:     strings.TrimSpace(getenv(EnvVMExecSpace)),
 		VMExec:    strings.TrimSpace(getenv(EnvVMExecPath)),
@@ -115,6 +121,23 @@ func SandboxFromEnv(getenv func(string) string) (SandboxExecution, error) {
 	}
 	s.HostConfine = c
 	return s, nil
+}
+
+// readTokenFile reads the token file (a variable for tests).
+var readTokenFile = os.ReadFile
+
+// execTokenFromEnv is the session's current exec token: the token file's
+// (BNBLOC_VMEXEC_TOKEN_FILE, renewed by the core) when it is set and holds
+// one, else BNBLOC_VMEXEC_TOKEN's.
+func execTokenFromEnv(getenv func(string) string) string {
+	if path := strings.TrimSpace(getenv(EnvVMExecTokenFile)); path != "" {
+		if raw, err := readTokenFile(path); err == nil {
+			if tok := strings.TrimSpace(string(raw)); tok != "" {
+				return tok
+			}
+		}
+	}
+	return strings.TrimSpace(getenv(EnvVMExecToken))
 }
 
 // PassthroughFromEnv parses BNBLOC_VMEXEC_PASSTHROUGH: the command names

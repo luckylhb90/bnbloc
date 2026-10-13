@@ -74,6 +74,10 @@ const (
 	// CapabilityTurnActivity: PollTurn reports a running turn's start and
 	// latest steps (protocol PollTurnResponse.Activity).
 	CapabilityTurnActivity Capability = "turnActivity"
+	// CapabilityExecutionRefresh: a running sandboxed session takes a fresh
+	// execution descriptor (ExecutionRefresher), so its exec token is
+	// renewed while a turn runs instead of outliving it.
+	CapabilityExecutionRefresh Capability = "executionRefresh"
 	// CapabilityDiscover (Discoverer) marks a core that locates its own
 	// daemon without an explicit endpoint (a manifest's discover clause). It
 	// does not depend on an endpoint: callers ask As with a zero Endpoint.
@@ -157,6 +161,14 @@ func As[T any](ctx context.Context, p Provider, ep Endpoint, c Capability) (T, b
 		return zero, false
 	}
 	return t, true
+}
+
+// ExecutionRefresher is implemented by cores that hand a running sandboxed
+// session a fresh execution descriptor (CapabilityExecutionRefresh): the
+// caller renews the session's short-lived exec token while a turn runs, and
+// the core makes the commands it routes from then on use it.
+type ExecutionRefresher interface {
+	RefreshExecution(ctx context.Context, ep Endpoint, workspaceID, sessionID string, exec *Execution) error
 }
 
 // InputLimiter is implemented by a provider whose core states the largest

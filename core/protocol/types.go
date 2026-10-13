@@ -52,6 +52,9 @@ const (
 	// CapabilityTurnActivity: PollTurn reports a running turn's start and
 	// latest steps (PollTurnResponse.StartedAtMs, Activity).
 	CapabilityTurnActivity = string(core.CapabilityTurnActivity)
+	// CapabilityExecutionRefresh: PUT .../sessions/{sid}/execution hands a
+	// running sandboxed session a fresh Execution (its renewed exec token).
+	CapabilityExecutionRefresh = string(core.CapabilityExecutionRefresh)
 )
 
 // Capabilities lists every Core Protocol capability name: the one registry
@@ -60,7 +63,7 @@ const (
 var Capabilities = []string{
 	CapabilityInterrupt, CapabilityWriteFile, CapabilityDeleteWorkspace, CapabilitySandboxExec,
 	CapabilitySessionFiles, CapabilitySessionFileBytes, CapabilityAgentProfile, CapabilityDiscover,
-	CapabilityTurnActivity,
+	CapabilityTurnActivity, CapabilityExecutionRefresh,
 }
 
 // KnownCapability reports whether name is a Core Protocol capability.
@@ -849,6 +852,13 @@ func SessionTurnPath(workspaceID, sessionID string) string {
 
 func SessionInterruptPath(workspaceID, sessionID string) string {
 	return WorkspaceSessionsPath(workspaceID) + "/" + escapePath(sessionID) + "/interrupt"
+}
+
+// SessionExecutionPath is PUT …/sessions/{sid}/execution (capability
+// executionRefresh): the body is the session's fresh Execution; 204 on
+// success, 404 session_not_found, 400 for an invalid descriptor.
+func SessionExecutionPath(workspaceID, sessionID string) string {
+	return WorkspaceSessionsPath(workspaceID) + "/" + escapePath(sessionID) + "/execution"
 }
 
 func SessionFilesPath(workspaceID, sessionID string) string {

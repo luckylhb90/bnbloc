@@ -3,6 +3,7 @@ package protocol
 import (
 	"context"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -205,6 +206,22 @@ func (c *Client) Interrupt(ctx context.Context, ep core.Endpoint, workspaceID, s
 	}
 	if err := c.postJSON(ctx, ep, SessionInterruptPath(workspaceID, sessionID), struct{}{}, nil); err != nil {
 		return fmt.Errorf("interrupt turn: %w", err)
+	}
+	return nil
+}
+
+// RefreshExecution implements core.ExecutionRefresher (capability
+// executionRefresh): it hands a running sandboxed session its fresh
+// execution descriptor.
+func (c *Client) RefreshExecution(ctx context.Context, ep core.Endpoint, workspaceID, sessionID string, exec *core.Execution) error {
+	if exec == nil {
+		return errors.New("refresh execution: no execution descriptor")
+	}
+	if err := c.requireCapability(ctx, ep, CapabilityExecutionRefresh); err != nil {
+		return err
+	}
+	if err := c.REST.JSON(ctx, http.MethodPut, ep, SessionExecutionPath(workspaceID, sessionID), WireExecution(exec), nil); err != nil {
+		return fmt.Errorf("refresh execution: %w", err)
 	}
 	return nil
 }
