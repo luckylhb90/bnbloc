@@ -59,19 +59,23 @@ export function Switch({
   onChange,
   label,
   ariaLabel,
+  disabled = false,
 }: {
   checked: boolean;
   onChange: (v: boolean) => void;
   label?: string;
   ariaLabel?: string;
+  disabled?: boolean;
 }) {
   return (
     <button
+      type="button"
       role="switch"
       aria-checked={checked}
       aria-label={ariaLabel}
+      disabled={disabled}
       onClick={() => onChange(!checked)}
-      className="tactile inline-flex items-center gap-2"
+      className="tactile inline-flex items-center gap-2 disabled:cursor-not-allowed disabled:opacity-60"
     >
       <span
         className={cn(

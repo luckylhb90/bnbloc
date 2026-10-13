@@ -165,7 +165,7 @@ function AppCard({ app, onOpenRoom, onLinksChanged }: { readonly app: MyApp; rea
             <span title={exactTime(app.updatedAtMs)}>v{app.version}, {relativeTime(app.updatedAtMs)}</span>
           </span>
           <span className="flex min-w-0 flex-wrap items-center gap-1.5 pt-0.5">
-            <Badge tone={badge.tone === "anyone" ? "warning" : badge.tone === "org" ? "accent" : "neutral"} title={badge.title}>
+            <Badge tone={badge.tone === "anyone" ? "warning" : badge.tone === "none" ? "neutral" : "accent"} title={badge.title}>
               <LinkIcon size={11} aria-hidden />
               {badge.label}
             </Badge>

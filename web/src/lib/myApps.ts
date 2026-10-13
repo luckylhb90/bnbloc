@@ -5,27 +5,32 @@
 
 export type { AppLink, MyApp, MyAppList } from "./wire.gen.ts";
 import type { AppLink } from "./wire.gen.ts";
-import { expiresLabel, shareAccessLabel } from "./shares.ts";
+import { expiresLabel, shareAccessLabel, type ShareAccess } from "./shares.ts";
 
 /** A card's link badge: whether the app is shared and how. */
 export interface AppLinkBadge {
   readonly label: string;
   /** Every working link, one line each (who can open it, its expiry). */
   readonly title: string;
-  /** anyone: a link without sign-in works; org: links need sign-in. */
-  readonly tone: "none" | "org" | "anyone";
+  /** The widest reach of the working links: anyone (no sign-in),
+   *  signed_in (anyone signed in), org (the organization's members). */
+  readonly tone: "none" | ShareAccess;
 }
 
+/** The badge's word for an app's widest link. */
+const BADGE_WORD: Record<ShareAccess, string> = { org: "Org link", signed_in: "Signed-in link", anyone: "Public link" };
+
 /** appLinkBadge sums an app's working links up: "Not shared", "Org link",
- *  "Public link", with the count when there are several. A link anyone can
- *  open wins the badge (it is the one to notice). */
+ *  "Signed-in link", "Public link", with the count when there are several.
+ *  The link that reaches furthest wins the badge (it is the one to
+ *  notice): anyone, then anyone signed in, then the organization. */
 export function appLinkBadge(links: readonly AppLink[], org: string, nowMs: number): AppLinkBadge {
   if (links.length === 0) return { label: "Not shared", title: "No working share link", tone: "none" };
-  const anyone = links.some((l) => l.access === "anyone");
-  const word = anyone ? "Public link" : "Org link";
+  const widest = (["anyone", "signed_in"] as const).find((a) => links.some((l) => l.access === a)) ?? "org";
+  const word = BADGE_WORD[widest];
   const label = links.length === 1 ? word : `${word} +${links.length - 1}`;
   const title = links.map((l) => `${shareAccessLabel(l.access, org)} · ${expiresLabel(l.expiresAtMs, nowMs)}`).join("\n");
-  return { label, title, tone: anyone ? "anyone" : "org" };
+  return { label, title, tone: widest };
 }
 
 /** The listing's query string for one page. */

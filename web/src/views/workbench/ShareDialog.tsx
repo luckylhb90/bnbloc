@@ -6,10 +6,13 @@ import { appLinkBase } from "@/lib/config";
 import { relativeTime } from "@/lib/format";
 import { shareLinkUrl } from "@/lib/hashRoute";
 import {
+  allowedShareAccess,
+  chosenShareAccess,
   DEFAULT_SHARE_ACCESS,
   DEFAULT_SHARE_DAYS,
   expiresLabel,
   SHARE_EXPIRY_OPTIONS,
+  shareAccessChanged,
   shareAccessLabel,
   shareAccessOptions,
   shareRequest,
@@ -33,8 +36,9 @@ import { displayNameOf } from "@/lib/useDisplayName";
 import { errorText } from "@/lib/errors";
 
 // ShareDialog creates and manages share links to one deliverable: pick who
-// may open it (the organization's signed-in members, the default, or anyone
-// with the link — unless the organization switched those off), a version
+// may open it (the organization's signed-in members, the default; anyone
+// signed in, of any organization; or anyone with the link, no sign-in —
+// each unless the organization switched it off), a version
 // ("this version" or "always the latest") and a lifetime, create the link
 // (copied at once — its token is shown only this one time), and see the
 // existing links with who may open them, their views and expiry, changing
@@ -66,9 +70,9 @@ export function ShareDialog({
   const toast = useToast();
   const policy = useTenantPolicy();
   const org = policy?.name ?? "";
-  // Until the policy is known, a link anyone can open is not offered.
-  const anonymousOff = policy?.anonymousLinksDisabled ?? true;
-  const accessOptions = shareAccessOptions(org, anonymousOff);
+  // Until the policy is known, only a link for the organization is offered.
+  const allowed = allowedShareAccess(policy);
+  const accessOptions = shareAccessOptions(org, allowed);
   const [access, setAccess] = useState<ShareAccess>(DEFAULT_SHARE_ACCESS);
   const [latest, setLatest] = useState<"latest" | "this">("latest");
   const [days, setDays] = useState(DEFAULT_SHARE_DAYS);
@@ -94,7 +98,7 @@ export function ShareDialog({
     void reload();
   }, [open, reload]);
   // The chosen access stays one the organization allows.
-  const chosen: ShareAccess = access === "anyone" && anonymousOff ? DEFAULT_SHARE_ACCESS : access;
+  const chosen = chosenShareAccess(access, allowed);
 
   const copy = useCopy();
   const copyLink = (url: string) => copy(url, "link");
@@ -117,7 +121,7 @@ export function ShareDialog({
   const changeAccess = async (share: ShareView, to: ShareAccess) => {
     try {
       await sharesApi.setAccess(roomId, artifactId, share.shareId, to);
-      toast.success(to === "anyone" ? "Anyone with the link can open it now" : "The link now needs sign-in");
+      toast.success(shareAccessChanged(to));
       void reload();
     } catch (e) {
       toast.error(errorText(e, "Could not change who can open the link"));
@@ -249,7 +253,9 @@ export function ShareDialog({
                   <li key={s.shareId} className="flex items-center gap-2 px-3 py-2">
                     <div className="min-w-0 flex-1">
                       <p className="truncate text-sm text-[var(--color-fg)]">
-                        {shareVersionLabel(s.version)} · {shareAccessLabel(s.access, org)}
+                        {shareVersionLabel(s.version)}
+                        {/* An active link's access is its selector. */}
+                        {state !== "active" && ` · ${shareAccessLabel(s.access, org)}`}
                       </p>
                       <p className="truncate text-xs text-[var(--color-fg-subtle)]">
                         {viewsLabel(s.viewCount)} · <UserName id={s.createdBy} /> · {relativeTime(s.createdAtMs)}
@@ -263,15 +269,22 @@ export function ShareDialog({
                     >
                       {state === "active" ? expiresLabel(s.expiresAtMs, now) : state === "revoked" ? "Revoked" : "Expired"}
                     </span>
-                    {state === "active" && (s.access === "anyone" || !anonymousOff) && (
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        onClick={() => void changeAccess(s, s.access === "anyone" ? "org" : "anyone")}
-                        aria-label={s.access === "anyone" ? "Require sign-in for this link" : "Let anyone with this link open it"}
+                    {state === "active" && (
+                      <Select
+                        className="h-8 max-w-[11rem] shrink-0 rounded-[var(--radius)] border border-[var(--color-border)] bg-[var(--color-surface)] px-1.5 text-xs text-[var(--color-fg)]"
+                        value={s.access}
+                        aria-label="Who can open this link"
+                        onChange={(e) => {
+                          const to = e.target.value as ShareAccess;
+                          if (to !== s.access) void changeAccess(s, to);
+                        }}
                       >
-                        {s.access === "anyone" ? "Require sign-in" : "Allow anyone"}
-                      </Button>
+                        {accessOptions.map((o) => (
+                          <option key={o.value} value={o.value} disabled={o.disabled && o.value !== s.access}>
+                            {shareAccessLabel(o.value, org)}
+                          </option>
+                        ))}
+                      </Select>
                     )}
                     {state === "active" && (
                       <Button size="sm" variant="ghost" onClick={() => void revoke(s)} aria-label={`Revoke link created by ${displayNameOf(s.createdBy)}`}>

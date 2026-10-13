@@ -91,8 +91,12 @@ export interface TenantSettings {
   // Org policy: borrowed agents must run in their owner's agent sandbox
   // (refused when the owner's sandbox is off or not ready).
   requireSandboxForBorrow: boolean;
+  // Org policy: share links for people outside the organization (anyone
+  // signed in, and anyone with the link) are off; existing ones answer 404.
+  outsideLinksDisabled: boolean;
   // Org policy: share links anyone can open without signing in are off
-  // (existing ones answer 404); links for the organization stay allowed.
+  // (existing ones answer 404). Links for the organization stay allowed
+  // whatever the two switches say.
   anonymousLinksDisabled: boolean;
   // Org policy: whether a member's publish to the organization waits for
   // an admin ("required", the default) or takes effect at once ("none").

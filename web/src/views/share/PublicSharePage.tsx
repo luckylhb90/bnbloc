@@ -3,10 +3,9 @@ import { DownloadSimpleIcon, LinkBreakIcon, LockSimpleIcon } from "@phosphor-ico
 import { ApiError } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { fileCategory, fileTypeLabel, isTextual, type ArtifactFileFacts } from "@/lib/artifactFiles";
-import { errorReason } from "@/lib/errors";
 import { formatBytes } from "@/lib/format";
 import { beginShareSignIn } from "@/lib/loginReturn";
-import { expiresLabel, shareVersionLabel, type PublicShare } from "@/lib/shares";
+import { expiresLabel, openShareLink, shareVersionLabel, type PublicShare, type ShareOpening } from "@/lib/shares";
 import { publicShareApi, sharesApi } from "@/lib/sharesApi";
 import "@/views/artifact/builtin";
 import { ArtifactBody, resolveViewer, useViewerRegistry } from "@/views/artifact/ArtifactBody";
@@ -19,12 +18,14 @@ import { SharedApp } from "./SharedApp";
 // PublicSharePage is what a link's holder sees at `#/share/<token>`
 // (docs/prd/2026-10-13-share-link-sign-in.md): nothing of the room but the
 // shared version. A link anyone can open renders at once, without a session.
-// A link for the room's organization (the default) answers the page's
-// anonymous request 401: without a session the page remembers itself
-// (lib/loginReturn) and sends the person to the app's sign-in, which brings
-// them back here; with one it mints a share ticket (the only request that
-// carries the session) and opens the link with the ticket in the token's
-// place. Someone outside the organization is told whose link it is.
+// A link that needs sign-in (for the room's organization, the default, or
+// for anyone signed in) answers the page's anonymous request 401: without a
+// session the page remembers itself (lib/loginReturn) and sends the person
+// to the app's sign-in, which brings them back here; with one it mints a
+// share ticket (the only request that carries the session) and opens the
+// link with the ticket in the token's place (lib/shares openShareLink).
+// Someone outside the organization of an organization's link is told whose
+// link it is; a link for anyone signed in never says so.
 //
 // A web app (a version the gateway serves as a site: `siteUrl`, carrying
 // the same credential) is the app itself, full-screen (SharedApp). Any
@@ -35,36 +36,11 @@ import { SharedApp } from "./SharedApp";
 // off) is one "no longer available" page: the gateway answers 404 for all
 // of them alike.
 
-type Load =
-  | { kind: "loading" }
-  | { kind: "gone" }
-  | { kind: "error" }
-  | { kind: "signin" }
-  | { kind: "orgOnly"; message: string }
-  // link is the credential the page opened it with: the token (anyone
-  // links, visitor true) or the member's share ticket.
-  | { kind: "ready"; share: PublicShare; link: string; visitor: boolean };
+type Load = { kind: "loading" } | { kind: "gone" } | { kind: "error" } | ShareOpening;
 
 const PRODUCT = "bnbloc";
 
-/** openLink opens the link of token: anonymously, or — for a link of the
- *  room's organization — with the signed-in member's share ticket. */
-async function openLink(token: string, signedIn: boolean): Promise<Load> {
-  try {
-    return { kind: "ready", share: await publicShareApi.get(token), link: token, visitor: true };
-  } catch (e) {
-    if (!(e instanceof ApiError) || e.status !== 401) throw e;
-  }
-  if (!signedIn) return { kind: "signin" };
-  try {
-    const { ticket } = await sharesApi.ticket(token);
-    return { kind: "ready", share: await publicShareApi.get(ticket), link: ticket, visitor: false };
-  } catch (e) {
-    if (e instanceof ApiError && e.status === 403) return { kind: "orgOnly", message: errorReason(e) };
-    if (e instanceof ApiError && e.status === 401) return { kind: "signin" };
-    throw e;
-  }
-}
+const openApi = { get: publicShareApi.get, ticket: sharesApi.ticket };
 
 export function PublicSharePage({ token }: { readonly token: string }) {
   const { ready, subject } = useAuth();
@@ -75,7 +51,7 @@ export function PublicSharePage({ token }: { readonly token: string }) {
     if (!ready) return;
     let cancelled = false;
     setLoad({ kind: "loading" });
-    openLink(token, signedIn)
+    openShareLink(token, signedIn, openApi)
       .then((next) => {
         if (!cancelled) setLoad(next);
       })
@@ -87,7 +63,7 @@ export function PublicSharePage({ token }: { readonly token: string }) {
     };
   }, [token, attempt, ready, signedIn]);
 
-  // An org link without a session: sign in, then come back here.
+  // A link that needs sign-in, without a session: sign in, then come back.
   useEffect(() => {
     if (load.kind !== "signin") return;
     const url = beginShareSignIn(token, window.location.href, Date.now());

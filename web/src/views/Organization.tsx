@@ -578,7 +578,14 @@ function SettingsTab() {
   // Policy switches save on toggle (each is one switch, not a form); the
   // members' cached tenant policy is re-read so share actions follow.
   const [policySaving, setPolicySaving] = useState(false);
-  const savePolicy = async (patch: { requireSandboxForBorrow?: boolean; anonymousLinksDisabled?: boolean; publishApproval?: PublishApproval }) => {
+  // Outside links off also turns links anyone can open off.
+  const outsideOff = settings?.outsideLinksDisabled ?? false;
+  const savePolicy = async (patch: {
+    requireSandboxForBorrow?: boolean;
+    outsideLinksDisabled?: boolean;
+    anonymousLinksDisabled?: boolean;
+    publishApproval?: PublishApproval;
+  }) => {
     if (policySaving) return;
     setPolicySaving(true);
     setError(null);
@@ -644,16 +651,28 @@ function SettingsTab() {
       <div className="flex flex-col gap-2 border-t border-[var(--color-border)] pt-4">
         <span className="text-xs font-medium uppercase tracking-wide text-[var(--color-fg-subtle)]">Share links</span>
         <Switch
-          checked={!(settings?.anonymousLinksDisabled ?? false)}
+          checked={!outsideOff}
+          onChange={(v) => void savePolicy({ outsideLinksDisabled: !v })}
+          label="Allow links for people outside this organization"
+          ariaLabel="Allow links for people outside this organization"
+        />
+        <p className="text-xs text-[var(--color-fg-subtle)]">
+          A share link is for people in this organization by default: they sign in with your organization's sign-in
+          to open it. On: a member may instead create a link anyone who can sign in here opens, whatever their
+          organization. Off: links reach this organization's members only; no other link can be created, and every
+          existing one stops working until this is turned back on. Links for the organization keep working.
+        </p>
+        <Switch
+          checked={!outsideOff && !(settings?.anonymousLinksDisabled ?? false)}
+          disabled={outsideOff}
           onChange={(v) => void savePolicy({ anonymousLinksDisabled: !v })}
           label="Allow links anyone can open (no sign-in)"
           ariaLabel="Allow links anyone can open (no sign-in)"
         />
         <p className="text-xs text-[var(--color-fg-subtle)]">
-          A share link is for people in this organization by default: they sign in with your organization's sign-in
-          (SSO) to open it. On: a member may instead create a link anyone can open without signing in. Off: no such
-          link can be created, and every existing one stops working until this is turned back on; links for the
-          organization keep working. The Share links tab lists the active links.
+          On: a member may also create a link anyone can open without signing in. Off: no such link can be created,
+          and every existing one stops working until this is turned back on. Needs links for people outside this
+          organization. The Share links tab lists the active links.
         </p>
       </div>
       <div className="flex flex-col gap-2 border-t border-[var(--color-border)] pt-4">

@@ -330,15 +330,23 @@ export const api = {
   // Org-admin: read/update the tenant settings (display name, SSO issuer).
   tenantSettings: () => req<TenantSettings>("/v1/tenant/settings"),
   updateTenantSettings: (
-    body: { name?: string; ssoIssuer?: string; requireSandboxForBorrow?: boolean; anonymousLinksDisabled?: boolean; publishApproval?: PublishApproval },
+    body: {
+      name?: string;
+      ssoIssuer?: string;
+      requireSandboxForBorrow?: boolean;
+      outsideLinksDisabled?: boolean;
+      anonymousLinksDisabled?: boolean;
+      publishApproval?: PublishApproval;
+    },
   ) =>
     req<TenantSettings>("/v1/tenant/settings", {
       method: "PUT",
       body: JSON.stringify(body),
     }),
   // The tenant policy every member reads: the agent-sandbox rule (the
-  // settings sandbox section explains it; the owner's bridge enforces it) and
-  // whether public share links are off (the share actions hide). Read through
+  // settings sandbox section explains it; the owner's bridge enforces it),
+  // the share link access modes the organization allows (the share dialog
+  // offers only those) and publish approval. Read through
   // lib/tenantPolicy.ts, which caches it per tenant.
   myTenantPolicy: (tenantId?: string) =>
     req<TenantPolicy>(`/v1/my/tenant-policy${tenantId ? `?tenant=${encodeURIComponent(tenantId)}` : ""}`),

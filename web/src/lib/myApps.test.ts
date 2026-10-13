@@ -25,4 +25,15 @@ assert(mixed.label === "Public link +1" && mixed.tone === "anyone", `mixed: ${JS
 assert(mixed.title.split("\n").length === 2 && mixed.title.includes("Anyone with the link · Expires in 1 day"), `mixed title: ${mixed.title}`);
 assert(mixed.title.includes("People in your organization"), "an unnamed organization");
 
+const signedIn = appLinkBadge(
+  [
+    { shareId: "s1", access: "org", expiresAtMs: NOW + 3 * DAY, version: 0 },
+    { shareId: "s3", access: "signed_in", expiresAtMs: NOW + 3 * DAY, version: 0 },
+  ],
+  "Acme",
+  NOW,
+);
+assert(signedIn.label === "Signed-in link +1" && signedIn.tone === "signed_in", `signed_in: ${JSON.stringify(signedIn)}`);
+assert(signedIn.title.includes("Anyone signed in · Expires in 3 days"), `signed_in title: ${signedIn.title}`);
+
 assert(myAppsQuery() === "" && myAppsQuery("10:art_a", 24) === "?cursor=10%3Aart_a&limit=24", `query ${myAppsQuery("10:art_a", 24)}`);

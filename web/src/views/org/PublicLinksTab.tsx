@@ -11,10 +11,10 @@ import { listPlaceholder } from "@/ui/QueryState";
 import { exactTime } from "@/lib/format";
 
 // Org-admin: every active share link of the tenant — artifact, who may open
-// it, room, creator, expiry, views — with revoke. Switching links anyone can
-// open off for the organization is the "Allow links anyone can open"
-// setting (Settings tab); it stops every such link at once, this list
-// revokes one.
+// it, room, creator, expiry, views — with revoke. Switching links for
+// people outside the organization, or links anyone can open, off is the
+// Share links setting (Settings tab); it stops every such link at once,
+// this list revokes one.
 export function PublicLinksTab() {
   const toast = useToast();
   const [shares, setShares] = useState<TenantShareView[] | null>(null);

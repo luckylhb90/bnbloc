@@ -2,11 +2,13 @@
 // share dialog, the organization's "Share links" list and the share page
 // format with. No React, no DOM; unit-tested under node. The endpoints live
 // in sharesApi.ts. A link is for the room's organization (sign-in
-// required) unless its creator lets anyone open it
-// (docs/prd/2026-10-13-share-link-sign-in.md).
+// required) unless its creator lets anyone signed in, or anyone at all,
+// open it (docs/prd/2026-10-13-share-link-sign-in.md).
 
-export type { ShareAccess, ShareTicket, ShareView } from "./wire.gen.ts";
-import type { PublishApproval, ShareAccess, ShareCreateRequest, ShareView } from "./wire.gen.ts";
+export type { ShareAccess, ShareTicket, ShareView, TenantPolicy } from "./wire.gen.ts";
+import type { ShareAccess, ShareCreateRequest, ShareTicket, ShareView, TenantPolicy } from "./wire.gen.ts";
+import { ApiError, errorReason } from "./errors.ts";
+import { ShareAccessValues } from "./wire.gen.ts";
 
 /** A share as the org-admin list returns it (every room of the tenant). */
 export interface TenantShareView extends ShareView {
@@ -44,17 +46,6 @@ export interface SiteTicket {
   readonly expiresAtMs: number;
 }
 
-/** The tenant policy every member reads (GET /v1/my/tenant-policy). */
-export interface TenantPolicy {
-  readonly tenantId: string;
-  readonly name: string;
-  readonly requireSandboxForBorrow: boolean;
-  /** Links anyone can open (no sign-in) are off; org links stay allowed. */
-  readonly anonymousLinksDisabled: boolean;
-  /** Whether a publish to the organization waits for an admin. */
-  readonly publishApproval: PublishApproval;
-}
-
 /** What a link shares: a file, a site, or an interactive app. */
 export type ShareTarget = "file" | "site" | "app";
 
@@ -73,29 +64,119 @@ export function shareTargetDescription(target: ShareTarget): string {
 /** A new link is for the organization's signed-in members. */
 export const DEFAULT_SHARE_ACCESS: ShareAccess = "org";
 
-/** The access choices of the share dialog: the organization's members (the
- *  default), or anyone with the link — unavailable while the organization
- *  disables such links. `org` is the organization's name. */
-export function shareAccessOptions(
-  org: string,
-  anonymousLinksDisabled: boolean,
-): readonly { readonly value: ShareAccess; readonly label: string; readonly hint: string; readonly disabled: boolean }[] {
-  return [
-    { value: "org", label: `People in ${orgName(org)} (sign-in required)`, hint: "They sign in with your organization's sign-in (SSO). They don't need to be in this room.", disabled: false },
-    {
-      value: "anyone",
-      label: "Anyone with the link (no sign-in)",
-      hint: anonymousLinksDisabled
-        ? "Your organization has turned off links anyone can open."
-        : "Anyone who gets this link can open it, including people outside your organization.",
-      disabled: anonymousLinksDisabled,
-    },
-  ];
+/** The access modes the organization allows: the tenant policy's answer
+ *  (the server decides; the web never re-reads the switches). Until the
+ *  policy is known, only the default. */
+export function allowedShareAccess(policy: Pick<TenantPolicy, "shareAccess"> | null | undefined): readonly ShareAccess[] {
+  return policy?.shareAccess ?? [DEFAULT_SHARE_ACCESS];
 }
 
-/** "People in Acme" / "Anyone with the link": a link's access in a list. */
+/** The access a new link is created with: the choice, while the
+ *  organization allows it, else the default. */
+export function chosenShareAccess(choice: ShareAccess, allowed: readonly ShareAccess[]): ShareAccess {
+  return allowed.includes(choice) ? choice : DEFAULT_SHARE_ACCESS;
+}
+
+interface ShareAccessWords {
+  /** The dialog's choice ("People in Acme (sign-in required)"). */
+  option: (org: string) => string;
+  /** What the people the link reaches need. */
+  hint: string;
+  /** Why the choice is unavailable. */
+  off: string;
+  /** A link's access in a list ("People in Acme"). */
+  label: (org: string) => string;
+  /** The toast after switching a link to it. */
+  changed: string;
+}
+
+const SHARE_ACCESS: Record<ShareAccess, ShareAccessWords> = {
+  org: {
+    option: (org) => `People in ${orgName(org)} (sign-in required)`,
+    hint: "They sign in with your organization's sign-in. They don't need to be in this room.",
+    off: "",
+    label: (org) => `People in ${orgName(org)}`,
+    changed: "Only people in the organization can open the link now",
+  },
+  signed_in: {
+    option: () => "Anyone signed in (any organization)",
+    hint: "Anyone who can sign in here opens it, including people in other organizations or in none.",
+    off: "Your organization has turned off links for people outside it.",
+    label: () => "Anyone signed in",
+    changed: "Anyone signed in can open the link now",
+  },
+  anyone: {
+    option: () => "Anyone with the link (no sign-in)",
+    hint: "Anyone who gets this link can open it, including people outside your organization.",
+    off: "Your organization has turned off links anyone can open.",
+    label: () => "Anyone with the link",
+    changed: "Anyone with the link can open it now",
+  },
+};
+
+/** The access choices of the share dialog, narrowest reach first: the
+ *  organization's members (the default), anyone signed in, anyone with the
+ *  link. A mode the organization does not allow is unavailable. `org` is
+ *  the organization's name. */
+export function shareAccessOptions(
+  org: string,
+  allowed: readonly ShareAccess[],
+): readonly { readonly value: ShareAccess; readonly label: string; readonly hint: string; readonly disabled: boolean }[] {
+  return ShareAccessValues.map((value) => {
+    const words = SHARE_ACCESS[value];
+    const disabled = value !== DEFAULT_SHARE_ACCESS && !allowed.includes(value);
+    return { value, label: words.option(org), hint: disabled ? words.off : words.hint, disabled };
+  });
+}
+
+/** "People in Acme" / "Anyone signed in" / "Anyone with the link": a
+ *  link's access in a list. */
 export function shareAccessLabel(access: ShareAccess, org: string): string {
-  return access === "anyone" ? "Anyone with the link" : `People in ${orgName(org)}`;
+  return SHARE_ACCESS[access].label(org);
+}
+
+/** The toast after a link's access changed to access. */
+export function shareAccessChanged(access: ShareAccess): string {
+  return SHARE_ACCESS[access].changed;
+}
+
+/** What the share page does with a link (PublicSharePage): open it, send
+ *  the person to sign in, or tell them it is only for an organization they
+ *  are not in. `link` is the credential the page opens it with: the token
+ *  (an anyone link, `visitor`), or the signed-in person's share ticket. */
+export type ShareOpening =
+  | { readonly kind: "signin" }
+  | { readonly kind: "orgOnly"; readonly message: string }
+  | { readonly kind: "ready"; readonly share: PublicShare; readonly link: string; readonly visitor: boolean };
+
+/** The share page's requests: the link's metadata by credential, and the
+ *  signed-in person's ticket mint. */
+export interface ShareOpenApi {
+  get(credential: string): Promise<PublicShare>;
+  ticket(token: string): Promise<Pick<ShareTicket, "ticket">>;
+}
+
+/** openShareLink opens the link of token. Anonymously first: an anyone
+ *  link answers. A link that needs sign-in (org or signed_in) answers 401:
+ *  without a session the page sends the person to sign in; with one it
+ *  mints a share ticket and opens the link with it. Only an org link's
+ *  mint refuses a signed-in person (403, "only for members of <org>");
+ *  a signed_in link takes any session. Other failures are thrown. */
+export async function openShareLink(token: string, signedIn: boolean, api: ShareOpenApi): Promise<ShareOpening> {
+  try {
+    return { kind: "ready", share: await api.get(token), link: token, visitor: true };
+  } catch (e) {
+    if (!(e instanceof ApiError) || e.status !== 401) throw e;
+  }
+  if (!signedIn) return { kind: "signin" };
+  try {
+    const { ticket } = await api.ticket(token);
+    return { kind: "ready", share: await api.get(ticket), link: ticket, visitor: false };
+  } catch (e) {
+    if (e instanceof ApiError && e.status === 403) return { kind: "orgOnly", message: errorReason(e) };
+    if (e instanceof ApiError && e.status === 401) return { kind: "signin" };
+    throw e;
+  }
 }
 
 function orgName(org: string): string {
