@@ -6,6 +6,7 @@ import type { RoomEvent } from "@/lib/roomEvents";
 import { isRoomGoneStatus, reportRoomGone, roomAccessEnded, type RoomAccessEnd, roomGoneText } from "@/lib/roomGone";
 import { ArtifactTabView } from "@/views/workbench/ArtifactTabView";
 import { invalidateArtifacts } from "@/views/workbench/artifactData";
+import { applyAppChanged } from "@/views/workbench/AppDataLine";
 
 // StandalonePreview is the torn-out window for one artifact: the pop-out of
 // a workbench tab (desktop shell). It hosts the same tab view at full
@@ -65,6 +66,7 @@ export function StandalonePreview({ roomId, artifactId }: { roomId: string; arti
         setGone(ended);
         return;
       }
+      if (applyAppChanged(roomId, e)) return;
       if (e.kind === "artifact_updated") {
         const p = e.payload as { artifactId?: string } | undefined;
         if (!p?.artifactId || p.artifactId === artifactId) invalidateArtifacts(roomId, artifactId);

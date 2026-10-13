@@ -11,6 +11,7 @@ import { reportRoomGone, type RoomAccessEnd, roomGoneText } from "@/lib/roomGone
 import type { RoomEvent } from "@/lib/roomEvents";
 import { LazyDeliverablesView } from "@/views/workbench/LazyWorkbench";
 import { useWorkbench } from "@/views/workbench/useWorkbench";
+import { applyAppChanged } from "@/views/workbench/AppDataLine";
 import { desktop } from "@/lib/desktop";
 import { inDesktopShell } from "@/lib/config";
 import { useLocalAgent } from "@/lib/useLocalAgent";
@@ -194,6 +195,7 @@ export function RoomView({
       data.reloadMembers();
       return;
     }
+    if (applyAppChanged(roomId, e)) return;
     if (e.kind === CONTENT_USES_CHANGED) {
       contentUsesChanged.emit(roomId);
       return;

@@ -13,7 +13,7 @@ import {
   ShareNetworkIcon,
 } from "@phosphor-icons/react";
 import { api, type Artifact } from "@/lib/api";
-import { downloadFileName, fileCategory, fileTypeLabel, isTextual } from "@/lib/artifactFiles";
+import { downloadFileName, fileCategory, fileTypeLabel, isSite, isTextual } from "@/lib/artifactFiles";
 import { cn } from "@/lib/cn";
 import { appLinkBase } from "@/lib/config";
 import { formatBytes, relativeTime } from "@/lib/format";
@@ -39,6 +39,7 @@ import {
   versionMeta,
   type ArtifactDetail,
 } from "./artifactData";
+import { AppDataLine } from "./AppDataLine";
 import { categoryIcons } from "./fileIcons";
 import { ShareDialog } from "./ShareDialog";
 import { VersionDiff } from "./VersionDiff";
@@ -49,7 +50,8 @@ import { errorText } from "@/lib/errors";
 // title and type, the version picker (any version; compare any two text
 // versions; restore an older one as a new version), download, copy link,
 // share (public link), open in a new window, fullscreen, and the viewer's
-// own controls — over the viewer itself. The desktop pop-out window hosts
+// own controls — over the viewer itself; a web app adds its owners' data
+// line (AppDataLine) between them. The desktop pop-out window hosts
 // exactly this view. A tab that follows the latest version shows a brief
 // "Updated" mark when a new version arrives (the viewer reloads with it).
 
@@ -388,6 +390,7 @@ export function ArtifactTabView({
           )}
         </div>
       </div>
+      {isSite(facts) && <AppDataLine roomId={roomId} artifactId={artifactId} appName={file.name} />}
       <div className="relative min-h-0 flex-1 overflow-hidden" role="region" aria-label={file.name}>
         {mode === "edit" ? (
           <div className="flex h-full flex-col gap-2 p-2">
