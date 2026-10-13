@@ -23,7 +23,8 @@ func schemaTableDDL(table string) (string, error) {
 }
 
 // retiredTables are tables a later migration drops (and schema.sql no
-// longer holds). The locked migration that created one still runs on a
+// longer holds). A drop lands only in a release after the one that stopped
+// using the table or column (TestMigrationsAreDeploySafe). The locked migration that created one still runs on a
 // fresh database (the ledger replays every migration in order): creating a
 // retired table is skipped there, and the dropping migration removes it
 // from databases that have it.

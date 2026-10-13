@@ -456,6 +456,33 @@ Migrations run at service start under an advisory lock (other services wait
 up to 600 s for it), so a restart is safe. Roll back by checking out the
 previous revision and repeating — migrations do not auto-revert.
 
+**Version skew is safe for one release.** Services restart at different
+times, so for a while the previous release's code runs against the new
+schema. A migration only adds; a table or column is dropped only in a
+release after the one that stopped using it (`TestMigrationsAreDeploySafe`,
+AGENTS.md "A migration only adds"). So any service one release behind, and a
+rollback by one release, keeps working. Verify a release on a staging copy
+before production:
+
+1. Start the previous release, then upgrade every backend (room, activity,
+   realtime, shareagent, relay) while the gateway stays on the previous
+   image. The backends migrate the database.
+2. `bnbloc version` (or the Platform console's Deployment card) shows the
+   skew. Sign in, refresh the page (a session refresh), open a room, chat,
+   and run `bnbloc smoke`.
+3. Upgrade the gateway, roll one backend back to the previous image, and
+   repeat step 2.
+4. In both states the logs hold no 5xx caused by the schema:
+
+   ```bash
+   docker compose -f compose.yml -f deploy/compose.prod.yml logs \
+     | grep 'bnbloc.http.5xx' | grep -Ei "unknown column|doesn't exist|doesn't have a default"
+   ```
+
+A new image that refuses to start leaves the old one serving, so a startup
+check refuses only a dangerous or malformed value, never one that means the
+same as unset.
+
 Upgrade notes:
 
 - **Data retention (2026-10-11)** adds migration `2026_10_data_retention`:

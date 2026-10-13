@@ -1,8 +1,12 @@
 # Migration lock: deployed migration ids are immutable (see AGENTS.md).
 # migration <id> <sha256 of the entry's Go tokens, comments/layout excluded>
 # table <name> <sha256 of its normalized schema.sql CREATE TABLE>
+# released <id>: the newest migration id that shipped in a release
+# unreferenced <table>[.<column>]: a schema.sql name no store code used then
 # Never edit by hand. Append new ids / refresh tables with:
 #   go test ./internal/store -run TestMigrationLock -update
+# Cut a release (advance released, record unreferenced) with:
+#   go test ./internal/store -run TestMigrationsAreDeploySafe -release
 migration 2026_09_rooms_deleted_at_ms d50a7fcf549d8955400caf913a9e8432f292a9a30806a892d064a780927da8a5
 migration 2026_09_grants_expires_at_ms 739fc9e9c71f2de96e2dfe2c1f1e5ebc4efec11fe735906775192ac71d20f2b9
 migration 2026_09_room_messages_client_msg_id c5c8a5b3add4a2fb55b2394822936990eb7b78b992772e644d1a86ce095e5b07
@@ -146,3 +150,4 @@ table usage_budgets bb9e85cca14aeaa779aca0822e5a12191c243eac19e484e011b43c89d0b5
 table user_agent_prefs 8a112db1399a53a6d04f86bb60d1068aca8a6a4d3eecfe07e22055c35e9060c0
 table user_profiles 02b399ec84c6e456b720bd477f3c99196a6d014beaa707ba94caf975a1de54b7
 table web_push_subscriptions 85dd62093250f2fdf11b95804c2227fff196dc44a9f43b562a4fd29a09c0caba
+released 2026_10_artifact_app_sdk

@@ -80,6 +80,12 @@ If a change ever genuinely needs to preserve external state, that is an
 exception to call out explicitly in the design doc and get confirmed — it is not
 the default.
 
+This covers **code paths, never schema steps across a deploy.** A deployed
+database is shared by services that restart at different times, so the
+previous release's code always runs for a while against the new schema; a
+migration only adds, and a drop waits for a later release (expand/contract,
+"A migration only adds" below).
+
 ## Reuse before you add: no copy-paste subsystems
 
 Recurring smell: a new provider/service/handler is built by **copying an
@@ -269,6 +275,54 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   expect the full ledger and zero crashes. `deploy/schema.sql` must stay a
   byte-identical copy of the embedded `internal/store/schema.sql`
   (`scripts/ci.sh go` compares them).
+- **A migration only adds (expand/contract).** Services start, and migrate,
+  at different times: during every rollout the previous release's code runs
+  against the new schema (2026-10-13: a migration dropped a tenant column in
+  the release that stopped reading it, the new gateway could not start, and
+  the old one answered every sign-in with 500;
+  `docs/bugs/2026-10-13-destructive-migration-broke-mixed-deploy.md`). A
+  migration may add tables, columns (nullable, or NOT NULL with a DEFAULT),
+  indexes and widenings. Dropping or renaming a table or column, narrowing a
+  type, or a column that becomes NOT NULL without a default comes in a
+  **later release** than the code that stops using it: release N stops
+  reading and writing it (still in `schema.sql`, allowed in
+  `writeOnlyColumnAllowed` as retiring; if the previous release does not
+  write it, it needs a DEFAULT or NULL first, which is a widening); release
+  N+1's migration drops it, `schema.sql` loses it and
+  `retiredTables`/`retiredColumns` record it. A rename is add new, ship,
+  drop old. A widening that lets new code write values the previous release
+  cannot read (NULL into a column it scans as non-null, a new enum value)
+  ships its readers first. `TestMigrationsAreDeploySafe`
+  (`internal/store/deploy_safe_test.go`) checks every migration newer than
+  `migrations.lock`'s `released` marker: a drop passes only when the lock
+  recorded the name `unreferenced` (no store SQL of that release named it)
+  when the marker was set; a rename never; a column rewrite (`MODIFY`,
+  `ensureColumnType`, a dropped default, NOT NULL without a DEFAULT) only
+  with a `// deploy-safe: <reason>` comment in the entry. Cutting a release
+  runs `go test ./internal/store -run TestMigrationsAreDeploySafe -release`
+  on the released commit (it advances `released` to the newest migration
+  and records the unreferenced names) and commits the lock.
+- **A fatal startup check is for a dangerous or malformed value.** A missing
+  production secret, a malformed key, an ambiguous replica set or a value
+  that would expose something refuses to start. A well-formed value that
+  means the same as unset (a sites origin on the main host, an explicit
+  `false` for a dev-only switch, the main listener's own address as the
+  metrics address) is accepted, logged when surprising, and never fatal: a
+  new image that refuses to start leaves the old one serving against the
+  new schema. Dev-only switches are refused through
+  `config.RefuseInProduction` only; boolean switches read through
+  `config.ParseBool`/`Bool`, or `config.StrictBool` when a malformed value
+  must refuse.
+- **One release of version skew never returns 500 because of schema.** With
+  any service one release behind (or rolled back one release), nothing a
+  member does fails on a missing table or column: the rule above guarantees
+  it for the store, and a wire change between services follows the same
+  expand/contract order. Verify a release on staging before production:
+  migrate with the new backends while the gateway stays on the previous
+  image, then the reverse; in each state sign in, refresh, open a room,
+  chat and run `bnbloc smoke`; `bnbloc version` shows the skew, and the logs
+  must hold no `event=bnbloc.http.5xx` naming an unknown column or table
+  (`docs/production-deployment.md`, "Upgrade").
 - **`BNBLOC_ENV=production` is the one production switch.** It turns every
   dev fallback (no internal key → trust the header, no OIDC → dev verifier,
   no DSN → memory store, no signing key → ephemeral key, dev-only switches
@@ -1632,7 +1686,8 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
 - **A stored column is a read column.** Every `schema.sql` column is read
   by some store query, or sits in `writeOnlyColumnAllowed` with a reason
   (`TestNoWriteOnlyColumns`, a static check over the store's SQL literals).
-  A column nothing reads is dropped in a new migration, not kept "for later".
+  A column nothing reads is dropped in a new migration, not kept "for later",
+  once a release without its reads has shipped ("A migration only adds").
 - **Live schema needs ALTER, not just the schema file.**
   `CREATE TABLE IF NOT EXISTS` does not alter an existing table, so a new
   column (e.g. `client_msg_id`, `deleted_at_ms`) must be `ALTER TABLE`'d
@@ -1650,7 +1705,9 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   deployed-immutable"); a changed/added/removed `schema.sql` table fails
   unless a not-yet-locked migration names it. Land a new migration with
   `go test ./internal/store -run TestMigrationLock -update` (appends; never
-  rewrites a locked id) and commit the lock with it.
+  rewrites a locked id) and commit the lock with it. Immutable is not
+  deploy-safe: a new migration also obeys "A migration only adds"
+  (`TestMigrationsAreDeploySafe`).
 
 ### Observability
 

@@ -90,6 +90,19 @@ var (
 // lists and upsert assignments removed.
 func storeSQLLiterals(t *testing.T) map[string]string {
 	t.Helper()
+	out := storeLiterals(t)
+	for path, text := range out {
+		text = insertColumnList.ReplaceAllString(text, "$1")
+		out[path] = upsertAssignment.ReplaceAllString(text, "")
+	}
+	return out
+}
+
+// storeLiterals returns, per non-test Go file of the package (the migration
+// DDL excluded), its string literals joined: every SQL the store runs, reads
+// and writes alike.
+func storeLiterals(t *testing.T) map[string]string {
+	t.Helper()
 	paths, err := filepath.Glob("*.go")
 	if err != nil {
 		t.Fatal(err)
@@ -123,8 +136,7 @@ func storeSQLLiterals(t *testing.T) map[string]string {
 			b.WriteString(v)
 			b.WriteString("\n")
 		}
-		text := insertColumnList.ReplaceAllString(b.String(), "$1")
-		out[path] = upsertAssignment.ReplaceAllString(text, "")
+		out[path] = b.String()
 	}
 	if len(out) < 20 {
 		t.Fatalf("read only %d store sources", len(out))
