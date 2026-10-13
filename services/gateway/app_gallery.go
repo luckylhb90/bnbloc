@@ -56,7 +56,7 @@ const (
 // owner of the room's apps publishes one: a member who may chat in it
 // (membership.Member.MayChat, the app data owner rule). With ?job= the
 // bridge running the job publishes for its requester (jobGrant, the
-// content routes' admission; save_component kind app).
+// content routes' admission; save_component with artifactId).
 func (s *Service) handlePublishApp(w http.ResponseWriter, r *http.Request, caller auth.Claims) {
 	ctx := r.Context()
 	roomID, artifactID := r.PathValue("roomId"), r.PathValue("artifactId")
@@ -142,6 +142,9 @@ func (s *Service) handlePublishApp(w http.ResponseWriter, r *http.Request, calle
 	pkg, bundle, err := contentpkg.AppFromSite(site, m)
 	if err != nil {
 		httpx.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if !jobSaveAllowed(w, actor, pkg) {
 		return
 	}
 	if existing != nil {
