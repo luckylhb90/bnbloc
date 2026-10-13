@@ -426,9 +426,11 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
 - **Every gateway-served route is a row of the route table**
   (`services/gateway/routes.go`): its org permission (`member` = any
   member, `gated(perm)`), the rate budget a call spends (`costBudget` per
-  subject, `guessBudget` per client IP), the deployment parts it needs
-  (`needContent`, … → 503) or, for a route without a session, why
-  (`open`: the credential its handler checks). `serve` authenticates and
+  subject, `guessBudget`/`visitorBudget` per client IP,
+  `appReadBudget`/`appWriteBudget` per IP, link and participant), the
+  deployment parts it needs (`needContent`, … → 503) or, for a route
+  without a session, why (`open`: the credential its handler checks; an
+  app route's capability, `serveApp`). `serve` authenticates and
   gates before the handler runs, and the proxy's `edgeGate` uses the same
   `permitted`/`spend`; a handler receives `claims` and never authenticates
   or checks a route permission itself (`TestEveryGatewayRouteGated` walks
@@ -1264,7 +1266,29 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   path, query or body (`TestAppDataScopeFromCapabilityOnly`). `If-Match:
   <version>` is `ifVersion`, `If-None-Match: *` is `ifAbsent` (both 409);
   caps are the `wire.MaxApp*` constants; every status goes through
-  `writeAppError`.
+  `writeAppError`. Every write announces a transient `app_changed`
+  (`wire.AppChanged`, metadata only; `announceAppChange`).
+- **An app request's scope has one owner at the edge:
+  `appCapabilityOf`** (`services/gateway/apps.go`). The `~app` API serves
+  under three entry points, each a route-table row per call (`appRoutes`):
+  a member's site ticket (`/v1/sites/{ticket}/~app/…`, Kind `member`), a
+  public share link plus the link's visitor token
+  (`/v1/public/shares/{token}/site/~app/…`, Kind `visitor`; the token is
+  the `X-Bnbloc-Visitor` header, never the URL) and a session in the room
+  of the path (`/v1/rooms/{roomId}/apps/{artifactId}/…`; with `?job=` the
+  job's agent through `jobGrant`, the content routes' one admission).
+  Nothing comes from the query (but `job`) or the body
+  (`TestAppCapabilityReadsNoScopeInput`); a share link is resolved on
+  every call (a dead link refuses at once); `forwardApp` is the one call
+  to `/internal/v1/app/…`. A visitor token is the `auth.KindAppVisitor`
+  kind, bound to the share id, minted only by `handleAppVisitor`. The
+  change feed is realtime's `/internal/v1/rooms/{id}/app-events` (the
+  room's `app_changed` only) narrowed to the app by `appEventsOf`. The
+  SDK (`services/gateway/appsdk`, `go:embed`) spells the wire constants
+  the share page's handshake uses (`wire.AppVisitorRequest`/`Grant`),
+  pinned by `TestAppSDKServed`; app budgets are `appRates` (IP, link,
+  participant; writes stricter). A frame entry's `~app/` answers CORS for
+  any origin without credentials (`appFramePath`).
 - **http MCP per-member sign-in is `mcp.http.auth.scheme = "oauth"`.** The
   desktop (`internal_ext/mcp_oauth.rs`) discovers the authorization server at
   sign-in (never declared or hardcoded), requires PKCE S256 and checks
@@ -1509,6 +1533,10 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   `/usr/local/bin/healthcheck <url>` shipped in every distroless image
   (`deploy/healthcheck`). `routeLabel` collapses id-bearing path segments so
   metric labels stay bounded — extend it when adding a new id-bearing route.
+  A secret that travels in a path (an invite code, a relay key, a site or
+  previewer ticket, a share token) is redacted from the request log by
+  `secretPathRes` (`internal/obs/obs.go`): a new capability-in-the-path
+  route joins it. A new credential goes in a header, never the URL.
 - **One error body, one decoder: `internal/httpx`.** The gateway and every
   backend answer errors with `{"error": "<message>"}` (`httpx.ErrorBody`,
   plus a `code` where a route defines one, e.g. dispatch refusals) through

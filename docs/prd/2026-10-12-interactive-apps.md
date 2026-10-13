@@ -6,9 +6,9 @@ gateway route table (2.1), `svcauth.NewRequest` (2.2), `httpx` (2.3), the
 event-kind registry (2.5), the store rig (4.1) and the generated wire types
 (5.1).
 
-Progress: delivery steps 1 and 2 **landed** on 2026-10-13 (store, cipher
-and the room service's data owner; see §7 "Step status"). Steps 3–6 are
-open.
+Progress: delivery steps 1–3 **landed** on 2026-10-13 (store, cipher, the
+room service's data owner, and the gateway's capabilities, visitor tokens,
+SDK and change feed; see §7 "Step status"). Steps 4–6 are open.
 
 ## 1. Why
 
@@ -365,7 +365,72 @@ app_keys(app_id PRIMARY KEY, tenant_id, room_id, wrapped_key, created_at_ms)
     may overshoot a cap, which still bounds cost and abuse.
   - A document's `_author` (the real participant) is rendered for owners
     only.
-- Steps 3–6: open.
+- **Step 3: landed (2026-10-13).** `services/gateway/apps.go` (the
+  capability resolution and the forward), `services/gateway/appsdk`
+  (`sdk.js`, `sdk.d.ts`), realtime's app change stream
+  (`services/realtime/app_events.go`). The routes, each a route-table row:
+
+  | Entry | Capability | Participant |
+  |---|---|---|
+  | `/v1/sites/{ticket}/~app/…` | a member's site ticket (its room and artifact; the room read re-checked like the site's files) | `member:<subject>` |
+  | `/v1/public/shares/{token}/site/~app/…` | a public share link of a site, resolved on every call, plus the `X-Bnbloc-Visitor` token minted for that link | `visitor:<visitor id>` |
+  | `/v1/rooms/{roomId}/apps/{artifactId}/…` | a session reaching the room; with `?job=` a bridge running that job in the room (the content routes' `jobGrant`) | `member:<subject>`, or `agent:<owner>/<core>/<provider>` |
+
+  Under each: `POST|GET c/{collection}`, `GET|PUT|PATCH|DELETE
+  c/{collection}/{id}`, `GET me`, `GET events` (SSE). The room entry adds
+  the owners' `GET stats` and `DELETE data` (the card's data line and
+  `app_data`, steps 4–5). The frame entries add `GET ~app/sdk.js` and
+  `GET ~app/sdk.d.ts`; any other path under their `~app/` is a 404 (the
+  namespace is reserved inside a site). `POST
+  /v1/public/shares/{token}/visitor` mints a visitor token
+  (`wire.AppVisitorToken`; body `{token}` renews a still-valid one of the
+  same link for the same visitor). Decided while building:
+  - **One resolution, one forward.** `appCapabilityOf` resolves (tenant,
+    room, app, participant) from the capability alone (a static test
+    allows no query parameter but `job` and no body but the visitor
+    route's); `forwardApp` is the only call to `/internal/v1/app/…`,
+    carrying only `Content-Type`, `If-Match`, `If-None-Match` and `Accept`
+    of the client's headers. The room entry's writes need `drive_agent`
+    (a viewer reads an app's data through it, never changes it); an app's
+    page is open to anyone holding its link.
+  - **Visitor tokens** are an `auth` kind of their own (`app-visitor`):
+    subject a random visitor id, ID the share id. They last 24 hours and
+    never outlive the link. A call without one answers 401
+    `visitor_token_required`, a forged, expired or other link's one 401
+    `visitor_token_invalid`. A dead link (revoked, expired, public links
+    disabled, room gone) answers 404 at once: the app routes never reuse
+    a cached resolution.
+  - **The handshake** (for step 5's share page; the constants are in
+    `internal/wire/apps.go` and `wire.gen.ts`):
+    `frame → parent {type: "bnbloc.app.visitor.request", v: 1}`,
+    `parent → frame {type: "bnbloc.app.visitor", v: 1, token}`, over
+    `postMessage` with target `*` (the frame's origin is opaque). The
+    parent answers only a request whose `event.source` is its own app
+    frame's window and may push a grant unasked after renewing; the SDK
+    accepts a grant only from `window.parent`. The SDK asks at load and
+    again on a 401 with one of the two codes, then retries that call
+    once (5 s timeout).
+  - **The SDK** is a classic script (`<script src="~app/sdk.js">`) that
+    defines `bnblocApp`, and `app` unless the page has its own. It uses
+    relative URLs (its own directory), no storage and no credentials; the
+    change feed is read with `fetch` streaming so the visitor token stays
+    a header. The frame's calls are cross-origin (origin `null`), so every
+    `~app/` path of the frame entries answers CORS for any origin without
+    credentials.
+  - **The change feed**: realtime's `GET
+    /internal/v1/rooms/{roomId}/app-events` (gateway only) streams a
+    room's `app_changed` events and nothing else; the gateway narrows it
+    to the app (`appEventsOf`, re-encoding `wire.AppChanged`) and
+    re-resolves the capability every 30 s, ending the feed when it died.
+    `app_changed` is live only: a reconnecting page re-reads.
+  - **Budgets** (per replica, divided like every gateway limit): per
+    client IP, per link (the share link, else the app) and per
+    participant, reads and the stricter writes (`appRates`); visitor
+    minting 20/min (burst 30) per IP.
+  - **Logs**: site tickets, share tokens and previewer tickets are
+    redacted from request logs with the invite codes and relay keys; the
+    visitor token is a header and never logged.
+- Steps 4–6: open.
 
 ### Tests
 
