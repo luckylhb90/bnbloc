@@ -132,4 +132,19 @@ production overlay pins it empty).
 
 ## Status
 
-Recorded 2026-10-13. Landing commits: see below.
+Fixed 2026-10-13.
+
+- 4b2a593: the sites-origin check that stopped the gateway (the outage).
+- 16812a0: the startup-check review (the downgrades above).
+- b6ddb5a: the expand/contract rule, `TestMigrationsAreDeploySafe`, the
+  `released 2026_10_artifact_app_sdk` baseline, the version-skew rule.
+
+Verified: with the marker moved back to `2026_10_app_data` the test
+refuses `2026_10_share_link_access` ("drops tenants.public_shares_disabled
+…, which the released code may still use"); moved back to the first
+migration it refuses the unsafe migrations above, the rewrite in
+`2026_10_room_id_width_json_columns` (it would need a `deploy-safe`
+reason), four older drops and rewrites (`2026_10_converge_fresh_schema`,
+`2026_10_drop_devices`, `2026_10_drop_member_notifier_settings`,
+`2026_10_notification_outbox_per_notifier`), and none of the additive
+migrations.
