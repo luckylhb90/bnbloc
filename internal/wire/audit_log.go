@@ -31,6 +31,9 @@ const (
 	// AuditKindContent: a content component used for a run (an expert a
 	// chat asked an agent to wear).
 	AuditKindContent = "content"
+	// AuditKindApp: an interactive app's data read out (name = the app):
+	// an owner's export, or an agent's read through its job's grant.
+	AuditKindApp = "app"
 )
 
 // AuditLogEntry is one normalized audit record. ID is unique across sources

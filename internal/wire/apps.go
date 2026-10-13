@@ -121,3 +121,16 @@ const (
 	// link's (401).
 	AppVisitorInvalid = "visitor_token_invalid"
 )
+
+// The formats of an owner's export of an app's data (GET
+// /v1/rooms/{roomId}/apps/{artifactId}/export?collection=&format=): JSON
+// is {"collections": {"<name>": [document, …]}} of every collection, or of
+// the one named; CSV is one collection, its stamps first, then the other
+// top-level fields in order of first appearance, nested values as their
+// JSON text (internal/appdata export.go).
+//
+//wire:union AppExportFormat
+const (
+	AppExportJSON = "json"
+	AppExportCSV  = "csv"
+)

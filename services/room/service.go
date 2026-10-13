@@ -78,6 +78,9 @@ type Service struct {
 	// BNBLOC_SECRET_STORE_KEY, no app data.
 	AppDocs   store.AppDocs
 	AppCipher *appdata.Cipher
+	// Audit records every export of an app's data and every agent read of
+	// it (auditAppRead, appdata_export.go). nil records nothing.
+	Audit store.ExtensionAuditStore
 	// appUsage is this replica's view of each app's usage; appCaps the
 	// per-app caps (zero: the wire constants).
 	appUsage appUsageCache

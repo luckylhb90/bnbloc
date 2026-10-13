@@ -1,16 +1,6 @@
 import { useState } from "react";
 import { ArrowClockwiseIcon, DatabaseIcon, DotsThreeIcon, DownloadSimpleIcon, FileCsvIcon, TrashIcon } from "@phosphor-icons/react";
-import {
-  appCollectionCounts,
-  appDataJson,
-  appDataLineShown,
-  appDocsCsv,
-  appExportFileName,
-  appStatsAnswer,
-  collectionsLabel,
-  documentsLabel,
-  type AppDoc,
-} from "@/lib/appData";
+import { appCollectionCounts, appDataLineShown, appExportFileName, appStatsAnswer, collectionsLabel, documentsLabel } from "@/lib/appData";
 import { appDataApi } from "@/lib/appDataApi";
 import { useAuth } from "@/lib/auth";
 import { cn } from "@/lib/cn";
@@ -18,7 +8,7 @@ import { errorText } from "@/lib/errors";
 import { can } from "@/lib/permissions";
 import { saveBlob } from "@/lib/saveBlob";
 import { invalidateQueries, queryKey, useQuery } from "@/lib/useQuery";
-import { EventAppChanged, type AppChanged } from "@/lib/wire.gen";
+import { AppExportCSV, AppExportJSON, EventAppChanged, type AppChanged } from "@/lib/wire.gen";
 import { ConfirmDialog } from "@/ui/Dialog";
 import { Menu, MenuItem } from "@/ui/Menu";
 import { useToast } from "@/ui/Toast";
@@ -117,16 +107,14 @@ export function AppDataLine({
       setBusy(false);
     }
   };
+  // The server streams the export and audits it (owners only).
   const exportJson = () =>
     run("Export failed", async () => {
-      const all: Record<string, AppDoc[]> = {};
-      for (const c of collections) all[c.name] = await appDataApi.collection(roomId, artifactId, c.name);
-      saveBlob(new Blob([appDataJson(all)], { type: "application/json" }), appExportFileName(appName, "json"));
+      saveBlob(await appDataApi.export(roomId, artifactId, AppExportJSON), appExportFileName(appName, "json"));
     });
   const exportCsv = (collection: string) =>
     run("Export failed", async () => {
-      const docs = await appDataApi.collection(roomId, artifactId, collection);
-      saveBlob(new Blob([appDocsCsv(docs)], { type: "text/csv;charset=utf-8" }), appExportFileName(appName, "csv", collection));
+      saveBlob(await appDataApi.export(roomId, artifactId, AppExportCSV, collection), appExportFileName(appName, "csv", collection));
     });
   const clear = () =>
     run("Could not clear the app's data", async () => {

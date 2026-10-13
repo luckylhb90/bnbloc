@@ -36,7 +36,7 @@ import (
 //	/v1/rooms/{roomId}/apps/{artifactId}/…     a session: the member, or with ?job= the job's agent (Kind agent)
 //
 // with the same API under each (appAPI): c/{collection}[/{id}], me and
-// events (the change feed); the room entry adds the owners' stats and data;
+// events (the change feed); the room entry adds the owners' stats, export and data;
 // sdk.js and sdk.d.ts are served under the two frame entries.
 //
 // appCapability is the ONE resolution of an app request's scope (tenant,
@@ -110,6 +110,7 @@ var appAPI = []struct {
 	{http.MethodGet, "/me", false, forwardAppPath("/me")},
 	{http.MethodGet, "/events", false, (*Service).forwardAppEvents},
 	{http.MethodGet, "/stats", true, forwardAppPath("/stats")},
+	{http.MethodGet, "/export", true, forwardAppPath("/export")},
 	{http.MethodDelete, "/data", true, forwardAppPath("/data")},
 }
 

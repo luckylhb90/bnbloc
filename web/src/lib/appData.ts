@@ -8,10 +8,12 @@
 // appOwner: the room's members who may chat, and its agents): the owners'
 // stats route answers 403 to anyone else, so the line asks it and never
 // re-decides. Clearing additionally needs the organization's drive_agent
-// permission (the gateway's rule for the room entry's writes).
+// permission (the gateway's rule for the room entry's writes). An export is
+// the server's (the room service streams it, writes its CSV and audits it):
+// the web only names the file.
 
 import { ApiError } from "./errors.ts";
-import type { AppDataStats, AppDocPage } from "./wire.gen.ts";
+import type { AppDataStats } from "./wire.gen.ts";
 
 /** The stats route's answer as the data line reads it. */
 export type AppStatsAnswer =
@@ -53,69 +55,6 @@ export function collectionsLabel(stats: AppDataStats): string {
   return appCollectionCounts(stats)
     .map((c) => `${c.name} ${c.count.toLocaleString("en-US")}`)
     .join(" · ");
-}
-
-/** A document as the API reads it: its fields plus the server's stamps. */
-export type AppDoc = Record<string, unknown>;
-
-/** The server's stamps (internal/appdata doc.go), the export's first
- *  columns in this order. `_author` (who wrote it) is rendered for owners. */
-export const APP_DOC_STAMPS = ["_id", "_by", "_author", "_createdAt", "_updatedAt", "_version"] as const;
-
-/** allDocs pages a find to its end (each page's `next` is the cursor of the
- *  following one). */
-export async function allDocs(page: (after: string) => Promise<AppDocPage>): Promise<AppDoc[]> {
-  const out: AppDoc[] = [];
-  let after = "";
-  for (;;) {
-    const p = await page(after);
-    out.push(...(p.docs ?? []));
-    if (!p.next || p.next === after) return out;
-    after = p.next;
-  }
-}
-
-/** The JSON export: every collection's documents, by collection name. */
-export function appDataJson(collections: Readonly<Record<string, readonly AppDoc[]>>): string {
-  return JSON.stringify({ collections }, null, 2) + "\n";
-}
-
-// A text cell a spreadsheet would run as a formula (the data is anyone's
-// with the link) is quoted with a leading apostrophe.
-const FORMULA_START = /^[=+\-@\t\r]/;
-
-/** csvCell is one value as a CSV cell. A top-level field's value is written
- *  as is (text, number, boolean); null or absent is empty; anything nested
- *  (an object or an array, at any depth) is its JSON text in the one cell,
- *  so every row has the same columns. A cell with a comma, quote or line
- *  break is quoted, quotes doubled. */
-export function csvCell(value: unknown): string {
-  let text: string;
-  if (value === null || value === undefined) text = "";
-  else if (typeof value === "string") text = FORMULA_START.test(value) ? `'${value}` : value;
-  else if (typeof value === "number" || typeof value === "boolean") text = String(value);
-  else text = JSON.stringify(value);
-  return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
-}
-
-/** appDocsCsv is one collection as CSV: the stamps present first, then
- *  every other top-level field in order of first appearance; one row per
- *  document; CRLF line ends. */
-export function appDocsCsv(docs: readonly AppDoc[]): string {
-  const seen = new Set<string>();
-  const fields: string[] = [];
-  for (const d of docs) {
-    for (const k of Object.keys(d)) {
-      if (!seen.has(k)) {
-        seen.add(k);
-        fields.push(k);
-      }
-    }
-  }
-  const stamps: readonly string[] = APP_DOC_STAMPS;
-  const columns = [...stamps.filter((s) => seen.has(s)), ...fields.filter((f) => !stamps.includes(f))];
-  const rows = [columns.map(csvCell).join(","), ...docs.map((d) => columns.map((c) => csvCell(d[c])).join(","))];
-  return rows.join("\r\n") + "\r\n";
 }
 
 /** An export's file name: the app's name (made file-safe), the collection

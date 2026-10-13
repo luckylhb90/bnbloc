@@ -1,17 +1,6 @@
-import {
-  allDocs,
-  appCollectionCounts,
-  appDataJson,
-  appDataLineShown,
-  appDocsCsv,
-  appExportFileName,
-  appStatsAnswer,
-  collectionsLabel,
-  csvCell,
-  documentsLabel,
-} from "./appData.ts";
+import { appCollectionCounts, appDataLineShown, appExportFileName, appStatsAnswer, collectionsLabel, documentsLabel } from "./appData.ts";
 import { ApiError } from "./errors.ts";
-import type { AppDataStats, AppDocPage } from "./wire.gen.ts";
+import type { AppDataStats } from "./wire.gen.ts";
 
 function assert(condition: boolean, message: string): void {
   if (!condition) throw new Error(message);
@@ -49,62 +38,10 @@ function testCounts(): void {
   eq(documentsLabel(1204), "1,204 documents", "plural, grouped");
 }
 
-function testCsvCells(): void {
-  eq(csvCell("plain"), "plain", "plain text");
-  eq(csvCell('say "hi"'), '"say ""hi"""', "quotes doubled inside quotes");
-  eq(csvCell("a,b"), '"a,b"', "a comma is quoted");
-  eq(csvCell("two\nlines"), '"two\nlines"', "a line break is quoted");
-  eq(csvCell("cr\r"), '"cr\r"', "a carriage return is quoted");
-  eq(csvCell(null), "", "null is empty");
-  eq(csvCell(undefined), "", "absent is empty");
-  eq(csvCell(0), "0", "a number");
-  eq(csvCell(-3), "-3", "a negative number is a number");
-  eq(csvCell(false), "false", "a boolean");
-  eq(csvCell("=HYPERLINK(1)"), "'=HYPERLINK(1)", "a formula is defused");
-  eq(csvCell("+1"), "'+1", "a leading plus is defused");
-  eq(csvCell("@x"), "'@x", "a leading at is defused");
-  eq(csvCell({ a: 1, b: [1, 2] }), '"{""a"":1,""b"":[1,2]}"', "an object is its JSON text, quoted");
-  eq(csvCell(["x", "y"]), '"[""x"",""y""]"', "an array is its JSON text, quoted");
-}
-
-function testCsvTable(): void {
-  const csv = appDocsCsv([
-    { choice: "B", _id: "d1", _by: "p1", _version: 1, _createdAt: 10, _updatedAt: 10, meta: { device: "phone" } },
-    { _id: "d2", _by: "p2", _version: 2, _createdAt: 11, _updatedAt: 12, note: "hi, there", choice: "A", _author: { kind: "visitor", id: "vis_1" } },
-  ]);
-  eq(
-    csv.split("\r\n"),
-    [
-      "_id,_by,_author,_createdAt,_updatedAt,_version,choice,meta,note",
-      'd1,p1,,10,10,1,B,"{""device"":""phone""}",',
-      'd2,p2,"{""kind"":""visitor"",""id"":""vis_1""}",11,12,2,A,,"hi, there"',
-      "",
-    ],
-    "stamps first, then fields by first appearance; nested JSON-encoded; every row the same columns",
-  );
-  eq(appDocsCsv([]), "\r\n", "no documents is an empty header");
-}
-
-async function testPaging(): Promise<void> {
-  const pages: Record<string, AppDocPage> = {
-    "": { docs: [{ _id: "a" }, { _id: "b" }], next: "b" },
-    b: { docs: [{ _id: "c" }], next: "c" },
-    c: { docs: [] },
-  };
-  const asked: string[] = [];
-  const docs = await allDocs(async (after) => {
-    asked.push(after);
-    return pages[after];
-  });
-  eq(docs.map((d) => d._id), ["a", "b", "c"], "every page, in order");
-  eq(asked, ["", "b", "c"], "each page asked after the previous cursor");
-  const stuck = await allDocs(async () => ({ docs: [{ _id: "x" }], next: "x" }));
-  eq(stuck.length, 2, "a cursor that does not move ends the paging");
-}
-
-function testExportShapes(): void {
-  const json = JSON.parse(appDataJson({ votes: [{ _id: "a" }] }));
-  eq(json, { collections: { votes: [{ _id: "a" }] } }, "the JSON export is every collection by name");
+// The export itself (paging, JSON, CSV, escaping) is the server's
+// (internal/appdata export.go, services/room appdata_export.go): the web
+// only names the file.
+function testExportFileNames(): void {
   eq(appExportFileName("Friday poll", "json"), "Friday-poll-data.json", "json file name");
   eq(appExportFileName("Friday poll", "csv", "votes"), "Friday-poll-data-votes.csv", "csv file name names the collection");
   eq(appExportFileName("../..", "csv", "a/b"), "app-data-a-b.csv", "no path in a file name");
@@ -112,7 +49,4 @@ function testExportShapes(): void {
 
 testDataLineVisibility();
 testCounts();
-testCsvCells();
-testCsvTable();
-await testPaging();
-testExportShapes();
+testExportFileNames();

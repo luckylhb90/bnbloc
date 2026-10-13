@@ -341,6 +341,15 @@ export const AppVisitorRequired = "visitor_token_required";
 // link's (401).
 export const AppVisitorInvalid = "visitor_token_invalid";
 
+// The formats of an owner's export of an app's data (GET
+// /v1/rooms/{roomId}/apps/{artifactId}/export?collection=&format=): JSON
+// is {"collections": {"<name>": [document, …]}} of every collection, or of
+// the one named; CSV is one collection, its stamps first, then the other
+// top-level fields in order of first appearance, nested values as their
+// JSON text (internal/appdata export.go).
+export const AppExportJSON = "json";
+export const AppExportCSV = "csv";
+
 // ---- wire/artifacts.go ----
 
 // Artifact is a room deliverable (spec, report, code, image, site) as room
@@ -475,6 +484,9 @@ export const AuditKindRetention = "retention";
 // AuditKindContent: a content component used for a run (an expert a
 // chat asked an agent to wear).
 export const AuditKindContent = "content";
+// AuditKindApp: an interactive app's data read out (name = the app):
+// an owner's export, or an agent's read through its job's grant.
+export const AuditKindApp = "app";
 
 // AuditLogEntry is one normalized audit record. ID is unique across sources
 // ("<source>:<row id>"). Name is the record's subject (component name, member
@@ -3648,6 +3660,8 @@ export type RunScope = "room" | "self" | "tenant";
 export const RunScopeValues: readonly RunScope[] = ["room", "self", "tenant"];
 export type AppErrorCode = "visitor_token_required" | "visitor_token_invalid";
 export const AppErrorCodeValues: readonly AppErrorCode[] = ["visitor_token_required", "visitor_token_invalid"];
+export type AppExportFormat = "json" | "csv";
+export const AppExportFormatValues: readonly AppExportFormat[] = ["json", "csv"];
 export type ContentUseScope = "member" | "room" | "room-expert";
 export const ContentUseScopeValues: readonly ContentUseScope[] = ["member", "room", "room-expert"];
 export type RoomEventKind = "chat_message" | "agent_messages" | "agent_job_created" | "agent_job_updated" | "agent_session_state" | "agent_roster" | "presence_join" | "presence_leave" | "presence_snapshot" | "presence_typing" | "message_deleted" | "message_edited" | "task_updated" | "artifact_updated" | "artifact_state" | "member_joined" | "member_removed" | "room_deleted" | "content_saved" | "content_uses_changed" | "app_changed";

@@ -57,6 +57,8 @@ func main() {
 		log.Fatalf("bnbloc-room: %v", err)
 	}
 	svc.AppDocs = backends.AppDocs
+	// Exports and agent reads of app data are audited.
+	svc.Audit = backends.ExtAudit
 	if svc.AppCipher = appdata.NewCipher(box); svc.AppCipher == nil {
 		log.Printf("bnbloc-room: %s is not set: interactive app data is off", sealbox.KeyEnv)
 	}

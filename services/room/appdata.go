@@ -37,6 +37,7 @@ import (
 //	DELETE /internal/v1/app/c/{collection}/{id}  delete                             → 204
 //	GET    /internal/v1/app/me                   who am I                           → wire.AppMe
 //	GET    /internal/v1/app/stats                owners: usage                      → wire.AppDataStats
+//	GET    /internal/v1/app/export               owners: ?collection=&format=json|csv → the data, streamed (audited)
 //	DELETE /internal/v1/app/data                 owners: delete all data            → wire.AppDataWiped
 //
 // The scope comes ONLY from the request's signed assertions, never from the
@@ -90,6 +91,7 @@ func (s *Service) registerAppDataRoutes(mux *http.ServeMux) {
 	route("DELETE /internal/v1/app/c/{collection}/{id}", appRead, s.handleAppDelete)
 	route("GET /internal/v1/app/me", appWrite, s.handleAppMe)
 	route("GET /internal/v1/app/stats", appOwner, s.handleAppStats)
+	route("GET /internal/v1/app/export", appOwnerRead, s.handleAppExport)
 	route("DELETE /internal/v1/app/data", appOwner, s.handleAppWipe)
 }
 
@@ -103,6 +105,9 @@ const (
 	appWrite
 	// appOwner is an owner's route (no key needed).
 	appOwner
+	// appOwnerRead is an owner's route reading documents (the key when
+	// the app has one).
+	appOwnerRead
 )
 
 type appHandler func(w http.ResponseWriter, r *http.Request, a *appCall)
@@ -160,14 +165,15 @@ func (s *Service) serveApp(w http.ResponseWriter, r *http.Request, key string, n
 	if scope.Kind == svcauth.AppMember {
 		a.subject = scope.Participant
 	}
-	if need == appOwner {
-		if !a.owner {
-			httpx.Error(w, "only the app's owners may do this", http.StatusForbidden)
+	if (need == appOwner || need == appOwnerRead) && !a.owner {
+		httpx.Error(w, "only the app's owners may do this", http.StatusForbidden)
+		return
+	}
+	if need != appOwner {
+		if err := s.loadAppKey(a, need == appWrite); err != nil {
+			writeAppError(w, err)
 			return
 		}
-	} else if err := s.loadAppKey(a, need == appWrite); err != nil {
-		writeAppError(w, err)
-		return
 	}
 	h(w, r, a)
 }
@@ -615,7 +621,13 @@ func (s *Service) handleAppGet(w http.ResponseWriter, r *http.Request, a *appCal
 		writeAppError(w, err)
 		return
 	}
-	s.writeAppDoc(w, a, http.StatusOK, d)
+	doc, err := a.render(d)
+	if err != nil {
+		writeAppError(w, err)
+		return
+	}
+	s.auditAppRead(a, appReadGet, collection, "", 1, nil)
+	httpx.WriteJSON(w, http.StatusOK, doc)
 }
 
 // A find decrypts what SQL narrowed and filters it here: it scans at most
@@ -660,11 +672,21 @@ func (s *Service) handleAppFind(w http.ResponseWriter, r *http.Request, a *appCa
 			return
 		}
 	}
-	limit = min(limit, wire.MaxAppFindLimit)
+	page, err := s.findAppDocs(a, q, filter, min(limit, wire.MaxAppFindLimit))
+	if err != nil {
+		writeAppError(w, err)
+		return
+	}
+	s.auditAppRead(a, appReadFind, collection, "", len(page.Docs), nil)
+	httpx.WriteJSON(w, http.StatusOK, page)
+}
+
+// findAppDocs is one page of a find: up to limit documents matching filter,
+// scanning at most appFindMaxScan.
+func (s *Service) findAppDocs(a *appCall, q store.AppDocQuery, filter appdata.Filter, limit int) (wire.AppDocPage, error) {
 	page := wire.AppDocPage{Docs: []map[string]any{}}
 	if a.key == nil {
-		httpx.WriteJSON(w, http.StatusOK, page)
-		return
+		return page, nil
 	}
 	if by, ok := filter.By(); ok {
 		q.By = by
@@ -676,14 +698,12 @@ func (s *Service) handleAppFind(w http.ResponseWriter, r *http.Request, a *appCa
 	for scanned := 0; ; {
 		docs, err := s.AppDocs.FindAppDocs(a.ctx, q)
 		if err != nil {
-			writeAppError(w, err)
-			return
+			return wire.AppDocPage{}, err
 		}
 		for _, d := range docs {
 			doc, err := a.render(d)
 			if err != nil {
-				writeAppError(w, err)
-				return
+				return wire.AppDocPage{}, err
 			}
 			q.After = d.DocID
 			if filter.Match(doc) {
@@ -691,20 +711,18 @@ func (s *Service) handleAppFind(w http.ResponseWriter, r *http.Request, a *appCa
 			}
 			if len(page.Docs) == limit {
 				page.Next = q.After
-				httpx.WriteJSON(w, http.StatusOK, page)
-				return
+				return page, nil
 			}
 		}
 		scanned += len(docs)
 		if len(docs) < q.Limit {
-			break
+			return page, nil
 		}
 		if scanned >= appFindMaxScan {
 			page.Next = q.After
-			break
+			return page, nil
 		}
 	}
-	httpx.WriteJSON(w, http.StatusOK, page)
 }
 
 // handleAppMe is GET …/me: the caller's per-app id, and a member's own
