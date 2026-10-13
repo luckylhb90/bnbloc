@@ -214,6 +214,8 @@ services:
       # Where the bridge keeps which workspace each agent uses across
       # restarts. Empty = memory only (a restart starts new workspaces).
       BNBLOC_BRIDGE_STATE_DIR: "${BNBLOC_BRIDGE_STATE_DIR:-}"
+      # How long one agent turn may run (a Go duration); empty = 2h.
+      BNBLOC_BRIDGE_MAX_TURN: "${BNBLOC_BRIDGE_MAX_TURN:-}"
       # Deployment-wide secret; per-room auth token is HMAC(secret, roomId).
       # All members' bridges must share the same value. Empty disables auth.
       BNBLOC_SYNC_SECRET: "${BNBLOC_SYNC_SECRET:-}"

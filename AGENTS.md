@@ -2021,6 +2021,24 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   `lib/attachmentTickets.ts`). Web boundary rules live in
   `web/scripts/check-boundaries.mjs` (run by its node test).
 
+## Releases
+
+A release that restarts a runtime reaches every turn in flight and every
+workspace an agent keeps; a check of only the new path misses that
+(`docs/prd/2026-10-13-live-turns.md`).
+
+- **Run `scripts/release-check.sh` before and after** every service,
+  desktop or core release: `bnbloc smoke`, then `bnbloc smoke --agent` for
+  each agent given (or `BNBLOC_RELEASE_AGENTS`). A failure after the
+  release that passed before it is the release's.
+- **A core sidecar release first proves an existing workspace survives
+  it.** On the operator's own desktop: one real turn in a room whose agent
+  already has a workspace, the release, then another turn in that room —
+  both must reply. Only then does it go out, and it goes out with
+  `--rollout optin` first; `auto` follows once it has served real turns.
+- **Never say a release recovers by itself** unless the code path that
+  recovers was read and exercised.
+
 ## Concurrent agents in one working tree
 
 When several agents work in one checkout, commit through a private index
