@@ -1,0 +1,20 @@
+{
+  "kind": "bnbloc.assist.package/v1",
+  "name": "draft-prompt-pack",
+  "version": "1.0.0",
+  "displayName": "Draft a prompt pack",
+  "description": "Turns one sentence into a first draft of a prompt pack: its name, description and ready-to-send prompts, for you to edit before saving.",
+  "category": "authoring",
+  "tags": ["assist", "prompts"],
+  "icon": "sparkle",
+  "output": "json",
+  "fields": [
+    { "name": "displayName", "description": "The prompt pack's name" },
+    { "name": "description", "description": "One or two sentences: what the prompts are for" },
+    { "name": "prompts", "description": "The prompts", "type": "items", "item": [
+      { "name": "title", "description": "A short label" },
+      { "name": "body", "description": "The request it sends, with {{name}} placeholders" }
+    ] },
+    { "name": "tags", "description": "Three to five tags", "type": "list" }
+  ]
+}

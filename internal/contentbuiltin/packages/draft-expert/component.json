@@ -1,0 +1,22 @@
+{
+  "kind": "bnbloc.assist.package/v1",
+  "name": "draft-expert",
+  "version": "1.0.0",
+  "displayName": "Draft an expert",
+  "description": "Turns one sentence into a first draft of an expert: its name, description, instructions, welcome and quick prompts, for you to edit before saving.",
+  "category": "authoring",
+  "tags": ["assist", "experts"],
+  "icon": "sparkle",
+  "output": "json",
+  "fields": [
+    { "name": "displayName", "description": "The expert's name" },
+    { "name": "description", "description": "One or two sentences: what it does and for whom" },
+    { "name": "instructions", "description": "The always-on instructions (markdown)" },
+    { "name": "welcome", "description": "The welcome card shown in a room" },
+    { "name": "quickPrompts", "description": "Requests a member can start from", "type": "items", "item": [
+      { "name": "title", "description": "A short label" },
+      { "name": "prompt", "description": "The request it sends" }
+    ] },
+    { "name": "tags", "description": "Three to five tags", "type": "list" }
+  ]
+}

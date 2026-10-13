@@ -1,0 +1,20 @@
+{
+  "kind": "bnbloc.assist.package/v1",
+  "name": "draft-schedule",
+  "version": "1.0.0",
+  "displayName": "Draft a schedule",
+  "description": "Turns a schedule in plain words (\"every weekday at 9:30, remind the team of the standup\") into the message and when it is sent.",
+  "category": "authoring",
+  "tags": ["assist", "schedules"],
+  "icon": "sparkle",
+  "output": "json",
+  "fields": [
+    { "name": "text", "description": "The message the schedule sends" },
+    { "name": "kind", "description": "once, daily, weekly or cron" },
+    { "name": "time", "description": "HH:MM (daily and weekly)" },
+    { "name": "days", "description": "Days of the week, 0 = Sunday to 6 = Saturday (weekly)", "type": "list" },
+    { "name": "cron", "description": "Five cron fields (cron)" },
+    { "name": "at", "description": "YYYY-MM-DDTHH:MM local time (once)" }
+  ],
+  "context": ["clock"]
+}

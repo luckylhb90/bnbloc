@@ -1,0 +1,21 @@
+{
+  "kind": "bnbloc.assist.package/v1",
+  "name": "draft-skill-pack",
+  "version": "1.0.0",
+  "displayName": "Draft a skill pack",
+  "description": "Turns one sentence into a first draft of a skill pack: its name, description and skills, each with when to use it and how, for you to edit before saving.",
+  "category": "authoring",
+  "tags": ["assist", "skills"],
+  "icon": "sparkle",
+  "output": "json",
+  "fields": [
+    { "name": "displayName", "description": "The skill pack's name" },
+    { "name": "description", "description": "One or two sentences: what the skills are for" },
+    { "name": "skills", "description": "The skills", "type": "items", "item": [
+      { "name": "name", "description": "The skill's name: lower-case letters, digits and hyphens" },
+      { "name": "description", "description": "When an agent should use the skill" },
+      { "name": "body", "description": "How to do it (markdown)" }
+    ] },
+    { "name": "tags", "description": "Three to five tags", "type": "list" }
+  ]
+}
