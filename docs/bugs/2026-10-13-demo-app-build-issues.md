@@ -167,3 +167,7 @@ Each was broken once on purpose (the fix reverted or weakened) and failed.
 
 - `bb38150` bridge: an agent's error fails its job; deliverables publish
   once per turn (2, 3).
+- `819f6b4` sandbox: the member's own runs may pass named environment into
+  the VM (1).
+- Adapter follow-up (bnbloc-acp): see 2, "Adapter follow-up"; not landed
+  here.
