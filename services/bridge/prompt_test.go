@@ -64,6 +64,7 @@ func TestPromptBudgets(t *testing.T) {
 	line := roomlog.Line(entry)
 	now := roomlog.Now{From: "jack/codex for maya"}
 	att := []roomlog.Attachment{{Path: ".room/attachments/att_1.png", Filename: "shot.png", ContentType: "image/png"}}
+	undelivered := []roomlog.UndeliveredAttachment{{Filename: "brand.png", ContentType: "image/png", Size: 1708534, Reason: undeliveredTooLarge(2 << 20)}}
 	guidance := roomlog.SessionGuidance(roomlog.Guidance{Self: "maya/codex", HasTools: true, HasRoomFiles: true})
 	team := roomlog.SessionGuidance(roomlog.Guidance{Self: "maya/codex", HasTools: true, HasRoomFiles: true, TeamLead: true})
 	var tools bytes.Buffer
@@ -85,6 +86,7 @@ func TestPromptBudgets(t *testing.T) {
 		{"push follow-up framing (one new line excluded)", strings.Replace(roomlog.ComposeDelta([]roomlog.Entry{entry}, now, roomlog.Options{}), line, "", 1), 60},
 		{"push first framing (one line excluded)", strings.Replace(roomlog.Compose([]roomlog.Entry{entry}, now, roomlog.Options{}), line, "", 1), 60},
 		{"attachments block, one file", strings.Replace(roomlog.ComposePointer(roomlog.Now{From: now.From, Attachments: att}, false), roomlog.ComposePointer(now, false), "", 1), 50},
+		{"undelivered block, one file", strings.Replace(roomlog.ComposePointer(roomlog.Now{From: now.From, Undelivered: undelivered}, false), roomlog.ComposePointer(now, false), "", 1), 70},
 		// Once per session (cached prefix).
 		{"session guidance (tools, .room/)", guidance, 700},
 		{"session guidance (tools, .room/, team lead)", team, 750},

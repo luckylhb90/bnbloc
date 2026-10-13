@@ -277,9 +277,11 @@ func TestHistoryFilesGolden(t *testing.T) {
 }
 
 // The push model's prompts are pinned: a session's first (records, then the
-// message with its attachment) and a follow-up's delta.
+// message with its attachment and the one that did not reach the
+// workspace) and a follow-up's delta.
 func TestComposeGolden(t *testing.T) {
-	now := Now{From: Sender(attributedEntries[1]), Text: "go", Attachments: []Attachment{{Path: ".room/attachments/att_1.png", Filename: "shot.png", ContentType: "image/png"}}}
+	now := Now{From: Sender(attributedEntries[1]), Text: "go", Attachments: []Attachment{{Path: ".room/attachments/att_1.png", Filename: "shot.png", ContentType: "image/png"}},
+		Undelivered: []UndeliveredAttachment{{Filename: "brand.png", ContentType: "image/png", Size: 1708534, Reason: "too large for this agent's runtime (it accepts files up to 1.5 MB)"}}}
 	older := []Entry{{Seq: 1, Speaker: "jack", Text: "earlier plan"}, {Seq: 2, Speaker: "jack/codex", Kind: KindAgent, Text: "drafted it"}}
 	golden(t, "compose-fresh.txt", Compose(append(older, attributedEntries...), now, Options{WindowChars: 120, Summarizer: StructuredSummarizer{}}))
 	golden(t, "compose-delta.txt", ComposeDelta(attributedEntries, now, Options{}))

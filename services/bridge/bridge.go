@@ -1385,7 +1385,7 @@ func (b *Bridge) driveClaim(ctx context.Context, d *drive, beforeReflow func(*ro
 	// ensureSession (workspace exists, session does not yet); a reused session
 	// materializes there too and returns the written descriptors so the
 	// follow-up prompt below can name them.
-	promptFn := func(workspaceID string, st *roomlog.CtxState, atts []writtenAttachment, g roomlog.Guidance) string {
+	promptFn := func(workspaceID string, st *roomlog.CtxState, atts turnAttachments, g roomlog.Guidance) string {
 		return b.drivePrompt(ctx, d, workspaceID, atts, st, g, true)
 	}
 	rs, err := b.ensureSession(ctx, d, key, promptFn, opts)
@@ -1394,12 +1394,13 @@ func (b *Bridge) driveClaim(ctx context.Context, d *drive, beforeReflow func(*ro
 		return driveResult{}, atStage(stagePrepare, err)
 	}
 	turn = rs.roomSession
+	b.noticeUndelivered(ctx, d, rs.atts.undelivered)
 	// If the session was freshly created, the initial prompt already ran; only
 	// send follow-up input for an existing session.
 	if !rs.freshlyCreated {
 		entry, _ := b.coreEntry(d.core)
 		rs.roomSession.startTurn(b.turnInfo(d, rs.roomSession))
-		prompt := b.drivePrompt(ctx, d, rs.workspaceID, rs.written, &rs.roomSession.ctx, rs.roomSession.guidance, false)
+		prompt := b.drivePrompt(ctx, d, rs.workspaceID, rs.atts, &rs.roomSession.ctx, rs.roomSession.guidance, false)
 		// The fence baseline: the space has no process yet, so everything
 		// there is bnbloc's own, this turn's .room/ refresh included.
 		rs.roomSession.fenceBaseline()
@@ -1435,9 +1436,9 @@ func (b *Bridge) turnInfo(d *drive, rs *roomSession) TurnInfo {
 type ensureResult struct {
 	*roomSession
 	freshlyCreated bool
-	// written is the set of attachments materialized into the workspace for this
-	// turn, so a follow-up (reused-session) prompt can name them.
-	written []writtenAttachment
+	// atts are the turn's attachments, written into the workspace or not,
+	// so a follow-up (reused-session) prompt can name them.
+	atts turnAttachments
 }
 
 // promptFn composes a fresh session's initial prompt once its workspace
@@ -1445,7 +1446,7 @@ type ensureResult struct {
 // materialize .room/ context first (its README written with the session's
 // guidance facts g), so the prompt may depend on the workspace id, reports
 // the materialized state through st, and names the written attachments.
-type promptFn func(workspaceID string, st *roomlog.CtxState, atts []writtenAttachment, g roomlog.Guidance) string
+type promptFn func(workspaceID string, st *roomlog.CtxState, atts turnAttachments, g roomlog.Guidance) string
 
 // ensureSession binds a drive slot to a local workspace+session, creating
 // them on the first message for that slot and reusing them afterward. Each
@@ -1504,8 +1505,8 @@ func (b *Bridge) ensureSession(ctx context.Context, d *drive, key driveKey, prom
 			// Reused session: materialize this turn's attachments into the
 			// existing workspace BEFORE the caller composes the follow-up prompt,
 			// so the prompt can name files that actually exist.
-			written := b.materializeAttachments(ctx, d.caps.bytesWriter, entry.endpoint, room, existing.workspaceID, d.job.AttachmentIDs)
-			return &ensureResult{roomSession: existing, freshlyCreated: false, written: written}, nil
+			atts := b.materializeAttachments(ctx, d.caps.bytesWriter, d.caps.maxInput, entry.endpoint, room, existing.workspaceID, d.job.AttachmentIDs)
+			return &ensureResult{roomSession: existing, freshlyCreated: false, atts: atts}, nil
 		}
 	}
 	if opts.Execution != nil && !b.workspaceBound(key) {
@@ -1532,7 +1533,7 @@ func (b *Bridge) ensureSession(ctx context.Context, d *drive, key driveKey, prom
 		workspaceID = created
 		b.workspaces.bind(key, workspaceID)
 	}
-	rs, written, err := b.startSession(ctx, d, key, entry, workspaceID, prompt, opts)
+	rs, atts, err := b.startSession(ctx, d, key, entry, workspaceID, prompt, opts)
 	if err != nil && reused && corepkg.NotFound(err) {
 		// The core no longer holds the workspace (it was deleted, or the
 		// core lost its state): a new one, the agent's files gone with the
@@ -1547,7 +1548,7 @@ func (b *Bridge) ensureSession(ctx context.Context, d *drive, key driveKey, prom
 		old := workspaceID
 		workspaceID, reused = created, false
 		b.workspaces.bind(key, workspaceID)
-		if rs, written, err = b.startSession(ctx, d, key, entry, workspaceID, prompt, opts); err != nil {
+		if rs, atts, err = b.startSession(ctx, d, key, entry, workspaceID, prompt, opts); err != nil {
 			// Not the workspace after all (the 404 named something else,
 			// a target): the agent keeps the one it had.
 			b.workspaces.bind(key, old)
@@ -1569,7 +1570,7 @@ func (b *Bridge) ensureSession(ctx context.Context, d *drive, key driveKey, prom
 	b.mu.Unlock()
 	slog.Info("bnbloc bridge bound room to session",
 		"event", "bnbloc.bridge.session_bound", "room", room, "channel", sk.channel, "core", d.core, "provider", provider, "workspace", workspaceID, "reused", reused, "session", rs.sessionID)
-	return &ensureResult{roomSession: rs, freshlyCreated: true, written: written}, nil
+	return &ensureResult{roomSession: rs, freshlyCreated: true, atts: atts}, nil
 }
 
 // startSession creates a session in workspace workspaceID: the turn's
@@ -1577,12 +1578,12 @@ func (b *Bridge) ensureSession(ctx context.Context, d *drive, key driveKey, prom
 // then the session created with its initial prompt (the turn's start). It
 // returns the session, not yet bound to a slot, and the attachments
 // written.
-func (b *Bridge) startSession(ctx context.Context, d *drive, key driveKey, entry coreEntry, workspaceID string, prompt promptFn, opts corepkg.SessionOptions) (*roomSession, []writtenAttachment, error) {
+func (b *Bridge) startSession(ctx context.Context, d *drive, key driveKey, entry coreEntry, workspaceID string, prompt promptFn, opts corepkg.SessionOptions) (*roomSession, turnAttachments, error) {
 	room, provider := d.job.RoomID, d.job.Provider
 	// Materialize attachments into the workspace BEFORE the initial prompt
 	// runs (createSession below executes it), so the agent's very first
 	// turn can open the files.
-	written := b.materializeAttachments(ctx, d.caps.bytesWriter, entry.endpoint, room, workspaceID, d.job.AttachmentIDs)
+	atts := b.materializeAttachments(ctx, d.caps.bytesWriter, d.caps.maxInput, entry.endpoint, room, workspaceID, d.job.AttachmentIDs)
 	// What the session is told once (the guidance, the content, the session
 	// contributors' servers): its profile or its first prompt's head.
 	profile, prefix, hooks, facts := b.sessionGuidance(ctx, d, entry.endpoint, workspaceID, SessionInfo{
@@ -1591,7 +1592,7 @@ func (b *Bridge) startSession(ctx context.Context, d *drive, key driveKey, entry
 		JobID: d.job.JobID, RequesterUserID: d.job.RequesterUserID,
 	})
 	var st roomlog.CtxState
-	initialPrompt := prefix + prompt(workspaceID, &st, written, facts)
+	initialPrompt := prefix + prompt(workspaceID, &st, atts, facts)
 	rs := &roomSession{owner: d.owner, provider: provider, core: d.core, workspaceID: workspaceID, ws: b.workspaces.shared(key, workspaceID), ctx: st, hooks: hooks, profileSum: d.content.bindingSum(), guidance: facts}
 	if opts.Execution != nil {
 		rs.workdir = opts.Execution.Sandbox.Workdir
@@ -1601,7 +1602,7 @@ func (b *Bridge) startSession(ctx context.Context, d *drive, key driveKey, entry
 	if err != nil {
 		rs.release()
 		// The session create carries the initial prompt: the turn's start.
-		return nil, nil, atStage(stageStart, fmt.Errorf("create session: %w", err))
+		return nil, turnAttachments{}, atStage(stageStart, fmt.Errorf("create session: %w", err))
 	}
 	// Under mu: the session's workspace reader (a room tool call during
 	// this first turn) reads it concurrently.
@@ -1611,7 +1612,7 @@ func (b *Bridge) startSession(ctx context.Context, d *drive, key driveKey, entry
 	// The fence baseline: everything there is what bnbloc and the core
 	// wrote for this session.
 	rs.fenceBaseline()
-	return rs, written, nil
+	return rs, atts, nil
 }
 
 // --- local agent core (via core.Provider) ---
@@ -2269,6 +2270,44 @@ func (b *Bridge) postNotice(ctx context.Context, job jobRef, n wire.JobNotice) {
 		slog.Warn("bnbloc bridge post notice failed",
 			"event", "bnbloc.bridge.post_failed", "room", job.RoomID, "kind", n.Kind, "error", err)
 	}
+}
+
+// noticeUndelivered tells the room which of a message's attachments did not
+// reach the agent and why: one notice per job (wire.NoticeAttachmentUndelivered,
+// under the job's own attachments session so the job's refusal or failure
+// notice still posts; a retried drive replays it).
+func (b *Bridge) noticeUndelivered(ctx context.Context, d *drive, atts []roomlog.UndeliveredAttachment) {
+	if len(atts) == 0 {
+		return
+	}
+	job := d.ref()
+	n := wire.JobNotice{
+		Kind: wire.NoticeAttachmentUndelivered, Text: undeliveredNoticeText(d.job.Provider, atts),
+		OwnerUserID: d.owner, Provider: d.job.Provider,
+		RoomID: job.RoomID, ChannelID: job.ChannelID, JobID: job.ID, SourceSeq: job.MessageSeq,
+		Session: wire.AttachmentNoticeSessionID(job.ID), AtUnixMs: time.Now().UnixMilli(),
+	}
+	if _, err := b.gatewayPOST(ctx, "/v1/rooms/"+job.RoomID+"/agent-activity/messages", n.Report()); err != nil {
+		slog.Warn("bnbloc bridge post notice failed",
+			"event", "bnbloc.bridge.post_failed", "room", job.RoomID, "kind", n.Kind, "error", err)
+	}
+}
+
+// undeliveredNoticeText is the member's line: every file the agent did not
+// get, with why.
+func undeliveredNoticeText(provider string, atts []roomlog.UndeliveredAttachment) string {
+	parts := make([]string, 0, len(atts))
+	for _, a := range atts {
+		name := firstNonEmpty(strings.TrimSpace(a.Filename), "A file")
+		if a.Size > 0 {
+			name += " (" + roomlog.HumanBytes(a.Size) + ")"
+		}
+		parts = append(parts, name+": "+a.Reason)
+	}
+	if len(parts) == 1 {
+		return "Could not give " + provider + " the attachment " + parts[0] + "."
+	}
+	return "Could not give " + provider + " these attachments: " + strings.Join(parts, "; ") + "."
 }
 
 // borrowDeniedText explains a refused borrow to the borrower.

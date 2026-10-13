@@ -2,11 +2,14 @@ package bridge
 
 import (
 	"context"
+	"encoding/json"
 	"log/slog"
 	"strings"
 
 	corepkg "github.com/luckylhb90/bnbloc/core"
+	"github.com/luckylhb90/bnbloc/core/protocol"
 	"github.com/luckylhb90/bnbloc/internal/roomlog"
+	"github.com/luckylhb90/bnbloc/internal/wire"
 	"github.com/luckylhb90/bnbloc/services/gateway/appsdk"
 )
 
@@ -29,35 +32,99 @@ type writtenAttachment struct {
 	ContentType string
 }
 
-// materializeAttachments downloads each chat attachment and writes it under
-// .room/attachments/<id><ext> so a binary-capable core can open it with its own
-// file tools, and returns descriptors so the turn's prompt can name the files.
-// It uses the WorkspaceFileBytesWriter seam; a core without that capability
-// returns nil (nothing to open). Best-effort per attachment: a failed
-// fetch/write logs and is skipped rather than failing the turn.
-func (b *Bridge) materializeAttachments(ctx context.Context, w corepkg.WorkspaceFileBytesWriter, ep corepkg.Endpoint, room, workspaceID string, ids []string) []writtenAttachment {
-	if len(ids) == 0 || w == nil {
-		return nil
+// turnAttachments are a turn's message attachments: those written into the
+// workspace and those that could not be (named in the prompt and in one
+// notice to the room, never dropped silently).
+type turnAttachments struct {
+	delivered   []writtenAttachment
+	undelivered []roomlog.UndeliveredAttachment
+}
+
+// Why an attachment did not reach the workspace, in words the agent and the
+// member read.
+const (
+	undeliveredNoFiles  = "this agent's runtime cannot receive files"
+	undeliveredDownload = "it could not be downloaded from the room"
+)
+
+// undeliveredTooLarge says a file is over the core's stated limit.
+func undeliveredTooLarge(maxInput int64) string {
+	return "too large for this agent's runtime (it accepts files up to " + roomlog.HumanBytes(protocol.MaxWriteFileBytes(maxInput)) + ")"
+}
+
+// undeliveredRefused says the core refused the write, with its own error
+// cut short.
+func undeliveredRefused(err error) string {
+	msg := strings.Join(strings.Fields(err.Error()), " ")
+	if r := []rune(msg); len(r) > 200 {
+		msg = string(r[:200]) + "…"
 	}
-	var out []writtenAttachment
+	return "this agent's runtime refused it (" + msg + ")"
+}
+
+// materializeAttachments downloads each chat attachment and writes it under
+// .room/attachments/<id><ext> so a binary-capable core can open it with its
+// own file tools, and returns what was written (named in the turn's prompt)
+// and what was not, with why: a core without the bytes writer, a file over
+// the core's stated request limit (maxInput, 0 = unstated; never fetched), a
+// failed download, or a write the core refused. Each failure is logged and
+// the turn still runs.
+func (b *Bridge) materializeAttachments(ctx context.Context, w corepkg.WorkspaceFileBytesWriter, maxInput int64, ep corepkg.Endpoint, room, workspaceID string, ids []string) turnAttachments {
+	var out turnAttachments
 	for _, id := range ids {
 		id = strings.TrimSpace(id)
 		if id == "" {
 			continue
 		}
+		meta := b.attachmentMeta(ctx, room, id)
+		miss := func(reason string, err error) {
+			slog.Warn("bnbloc bridge attachment not delivered", "event", "bnbloc.bridge.attachment_undelivered",
+				"room", room, "attachment", id, "size", meta.Size, "reason", reason, "error", err)
+			out.undelivered = append(out.undelivered, roomlog.UndeliveredAttachment{Filename: meta.Filename, ContentType: meta.ContentType, Size: meta.Size, Reason: reason})
+		}
+		if w == nil {
+			miss(undeliveredNoFiles, nil)
+			continue
+		}
+		if maxInput > 0 && meta.Size > 0 && protocol.WriteFileBodyBytes(meta.Size) > maxInput {
+			miss(undeliveredTooLarge(maxInput), nil)
+			continue
+		}
 		blob, contentType, filename, err := b.gatewayGETAttachment(ctx, "/v1/rooms/"+room+"/attachments/"+id)
 		if err != nil {
-			slog.Debug("bnbloc bridge attachment fetch failed", "event", "bnbloc.bridge.attachment_fetch_failed", "room", room, "attachment", id, "error", err)
+			miss(undeliveredDownload, err)
+			continue
+		}
+		meta.Size = int64(len(blob))
+		meta.Filename = firstNonEmpty(meta.Filename, filename)
+		meta.ContentType = firstNonEmpty(meta.ContentType, contentType)
+		if maxInput > 0 && protocol.WriteFileBodyBytes(meta.Size) > maxInput {
+			miss(undeliveredTooLarge(maxInput), nil)
 			continue
 		}
 		path := ".room/attachments/" + id + extForContentType(contentType, filename)
 		if err := w.WriteWorkspaceFileBytes(ctx, ep, workspaceID, path, blob); err != nil {
-			slog.Debug("bnbloc bridge attachment write failed", "event", "bnbloc.bridge.attachment_write_failed", "room", room, "attachment", id, "error", err)
+			miss(undeliveredRefused(err), err)
 			continue
 		}
-		out = append(out, writtenAttachment{Path: path, Filename: filename, ContentType: contentType})
+		out.delivered = append(out.delivered, writtenAttachment{Path: path, Filename: filename, ContentType: contentType})
 	}
 	return out
+}
+
+// attachmentMeta reads an attachment's name, type and size from the room
+// (zero when it cannot be read: the download still tries, and names it).
+func (b *Bridge) attachmentMeta(ctx context.Context, room, id string) wire.ChatAttachment {
+	var meta wire.ChatAttachment
+	raw, err := b.gatewayGET(ctx, "/v1/rooms/"+room+"/attachments/"+id+"/meta")
+	if err == nil {
+		err = json.Unmarshal(raw, &meta)
+	}
+	if err != nil {
+		slog.Debug("bnbloc bridge attachment meta unavailable", "event", "bnbloc.bridge.attachment_meta_failed", "room", room, "attachment", id, "error", err)
+		return wire.ChatAttachment{}
+	}
+	return meta
 }
 
 // extForContentType maps an attachment's content-type (validated against the
@@ -191,9 +258,9 @@ func (b *Bridge) materializeRoomContext(ctx context.Context, w corepkg.Workspace
 // model every turn, with the session's own push state st. The [now] marker
 // names the message's sender as the room history records it, else the
 // job's requester.
-func (b *Bridge) drivePrompt(ctx context.Context, d *drive, workspaceID string, atts []writtenAttachment, st *roomlog.CtxState, g roomlog.Guidance, fresh bool) string {
+func (b *Bridge) drivePrompt(ctx context.Context, d *drive, workspaceID string, atts turnAttachments, st *roomlog.CtxState, g roomlog.Guidance, fresh bool) string {
 	room, owner, provider, text := d.job.RoomID, d.owner, d.job.Provider, d.text
-	now := roomlog.Now{From: d.job.RequesterUserID, Text: text, Attachments: toPromptAttachments(atts)}
+	now := roomlog.Now{From: d.job.RequesterUserID, Text: text, Attachments: toPromptAttachments(atts.delivered), Undelivered: atts.undelivered}
 	entry, ok := b.coreEntry(d.core)
 	if d.caps.writer == nil || !ok {
 		return b.driveTextDelta(ctx, room, owner, provider, now, st, fresh)

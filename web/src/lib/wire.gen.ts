@@ -2097,6 +2097,10 @@ export const NoticeTimeout = "member-timeout";
 // NoticeJobFailed is a job the server failed (a swept lease, a budget
 // refusal at claim).
 export const NoticeJobFailed = "job-failed";
+// NoticeAttachmentUndelivered names a message's attachments that did not
+// reach the agent's workspace, and why (the bridge, once per job, under
+// AttachmentNoticeSessionID so the job's own notice still posts).
+export const NoticeAttachmentUndelivered = "attachment-undelivered";
 
 // ---- wire/limits.go ----
 

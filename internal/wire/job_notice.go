@@ -58,7 +58,19 @@ const (
 	// NoticeJobFailed is a job the server failed (a swept lease, a budget
 	// refusal at claim).
 	NoticeJobFailed = "job-failed"
+	// NoticeAttachmentUndelivered names a message's attachments that did not
+	// reach the agent's workspace, and why (the bridge, once per job, under
+	// AttachmentNoticeSessionID so the job's own notice still posts).
+	NoticeAttachmentUndelivered = "attachment-undelivered"
 )
+
+// AttachmentNoticeSessionID is the activity session of a job's
+// attachment-undelivered notice: in the job's notice namespace, apart from
+// JobNoticeSessionID itself, whose one notice per job is the job's refusal
+// or failure.
+func AttachmentNoticeSessionID(jobID string) string {
+	return JobNoticeSessionID(jobID) + "-attachments"
+}
 
 // session is the activity session the notice is recorded under.
 func (n JobNotice) session() string {

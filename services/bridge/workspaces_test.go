@@ -52,7 +52,14 @@ type fsCore struct {
 	busy      int
 	inTurn    bool
 	overlaps  int
+	// maxBody refuses a file write over that many bytes, as a core whose
+	// server caps request bodies does, for attachments (0 = none); maxInput is the limit it
+	// states (core.InputLimiter, 0 = none).
+	maxBody  int
+	maxInput int64
 }
+
+func (c *fsCore) MaxInputBytes(context.Context, corepkg.Endpoint) int64 { return c.maxInput }
 
 type fsSession struct {
 	id, workspace string
@@ -203,6 +210,9 @@ func (c *fsCore) WriteWorkspaceFileBytes(_ context.Context, _ corepkg.Endpoint, 
 	defer c.mu.Unlock()
 	if !c.held(ws) {
 		return notFound("/workspaces/" + ws + "/files")
+	}
+	if c.maxBody > 0 && len(data) > c.maxBody && strings.HasPrefix(rel, ".room/attachments/") {
+		return &corepkg.HTTPError{Core: "core-a", Method: http.MethodPut, Path: "/workspaces/" + ws + "/files", Status: http.StatusBadRequest, Body: []byte("invalid json body")}
 	}
 	if strings.HasPrefix(rel, roomlog.DeliverablesDir) {
 		c.copyWrites = append(c.copyWrites, rel)

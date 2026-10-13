@@ -11,5 +11,8 @@ jill/claude: no races found
 [attachments on this message — OPEN THESE: part of the request, saved in this workspace, not records]
 - .room/attachments/att_1.png (original name "shot.png", image/png)
 
+[attachments on this message that did NOT reach this workspace — tell the sender which and why; never say there are none]
+- "brand.png" (image/png, 1.6 MB): too large for this agent's runtime (it accepts files up to 1.5 MB)
+
 [now — from jack/codex for maya]
 go

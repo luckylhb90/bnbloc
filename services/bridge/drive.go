@@ -182,6 +182,9 @@ type driveCaps struct {
 	// fallback skill files).
 	writer      corepkg.WorkspaceFileWriter
 	bytesWriter corepkg.WorkspaceFileBytesWriter
+	// maxInput is the core's stated request body limit (0 = unstated):
+	// a file whose write would exceed it is reported, never sent.
+	maxInput int64
 }
 
 // snapshotCapabilities is stage 3.
@@ -205,6 +208,7 @@ func (b *Bridge) coreCaps(ctx context.Context, coreName string) driveCaps {
 	caps.workdir, _ = corepkg.As[corepkg.WorkdirWorkspaceCreator](ctx, p, ep, corepkg.CapabilitySandboxExec)
 	caps.writer, _ = corepkg.As[corepkg.WorkspaceFileWriter](ctx, p, ep, corepkg.CapabilityWriteFile)
 	caps.bytesWriter, _ = corepkg.As[corepkg.WorkspaceFileBytesWriter](ctx, p, ep, corepkg.CapabilityWriteFile)
+	caps.maxInput = corepkg.MaxInputBytes(ctx, p, ep)
 	return caps
 }
 

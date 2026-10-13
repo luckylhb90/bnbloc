@@ -3,6 +3,7 @@ package bridge
 import (
 	"context"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -32,12 +33,25 @@ type pullGateway struct {
 	// query of each usage read.
 	appStats   map[string]string
 	appQueries []string
-	srv        *httptest.Server
+	// attachments are the room's chat attachments by id; downloads counts
+	// each one's byte reads; reports are the bodies posted to
+	// agent-activity/messages (notices among them).
+	attachments map[string]testAttachment
+	downloads   map[string]int
+	reports     []string
+	srv         *httptest.Server
+}
+
+// testAttachment is a chat attachment the test gateway serves.
+type testAttachment struct {
+	name, contentType string
+	data              []byte
 }
 
 func newPullGateway(t *testing.T) *pullGateway {
 	t.Helper()
-	g := &pullGateway{history: map[string]string{}, versions: map[string]string{}, contents: map[string]string{}, runs: map[string]string{}, appStats: map[string]string{}}
+	g := &pullGateway{history: map[string]string{}, versions: map[string]string{}, contents: map[string]string{}, runs: map[string]string{}, appStats: map[string]string{},
+		attachments: map[string]testAttachment{}, downloads: map[string]int{}}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /v1/rooms/r1/channels", func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprint(w, `{"channels":[{"channelId":"general"},{"channelId":"test"}]}`)
@@ -115,6 +129,36 @@ func newPullGateway(t *testing.T) *pullGateway {
 	})
 	mux.HandleFunc("POST /v1/rooms/r1/agent-activity/session-state", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
+	})
+	mux.HandleFunc("POST /v1/rooms/r1/agent-activity/messages", func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		g.mu.Lock()
+		g.reports = append(g.reports, string(body))
+		g.mu.Unlock()
+		fmt.Fprint(w, `{}`)
+	})
+	mux.HandleFunc("GET /v1/rooms/r1/attachments/{id}", func(w http.ResponseWriter, r *http.Request) {
+		g.mu.Lock()
+		a, ok := g.attachments[r.PathValue("id")]
+		g.downloads[r.PathValue("id")]++
+		g.mu.Unlock()
+		if !ok {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", a.contentType)
+		w.Header().Set("Content-Disposition", fmt.Sprintf("inline; filename=%q", a.name))
+		_, _ = w.Write(a.data)
+	})
+	mux.HandleFunc("GET /v1/rooms/r1/attachments/{id}/meta", func(w http.ResponseWriter, r *http.Request) {
+		g.mu.Lock()
+		a, ok := g.attachments[r.PathValue("id")]
+		g.mu.Unlock()
+		if !ok {
+			http.NotFound(w, r)
+			return
+		}
+		fmt.Fprintf(w, `{"id":%q,"filename":%q,"contentType":%q,"size":%d}`, r.PathValue("id"), a.name, a.contentType, len(a.data))
 	})
 	g.srv = httptest.NewServer(mux)
 	t.Cleanup(g.srv.Close)

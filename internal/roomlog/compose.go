@@ -3,6 +3,7 @@ package roomlog
 import (
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -21,11 +22,14 @@ type Options struct {
 // Now is the message a turn answers: its text, who sent it (the Sender of
 // its room entry) and the files attached to it. Unlike the history
 // sections, the attachments ARE part of the request and the agent must open
-// them; they render as an imperative block before the [now] marker.
+// them; they render as an imperative block before the [now] marker. The
+// files that could not be put in the workspace are named too, with why, so
+// the agent tells the sender instead of answering as if there were none.
 type Now struct {
 	From        string
 	Text        string
 	Attachments []Attachment
+	Undelivered []UndeliveredAttachment
 }
 
 // writeNow renders the turn's message: its attachments, the [now] marker
@@ -34,6 +38,7 @@ type Now struct {
 // dispatched for them.
 func writeNow(b *strings.Builder, now Now) {
 	writeAttachmentsBlock(b, now.Attachments)
+	writeUndeliveredBlock(b, now.Undelivered)
 	if b.Len() > 0 {
 		b.WriteString("\n")
 	}
@@ -72,6 +77,61 @@ func writeAttachmentsBlock(b *strings.Builder, atts []Attachment) {
 		default:
 			fmt.Fprintf(b, "- %s\n", a.Path)
 		}
+	}
+}
+
+// UndeliveredAttachment is a file attached to the current message that is
+// not in the workspace: its original name, type, size (0 = unknown) and
+// why, in words the agent can repeat to the sender.
+type UndeliveredAttachment struct {
+	Filename    string
+	ContentType string
+	Size        int64
+	Reason      string
+}
+
+// writeUndeliveredBlock renders the attachments the agent cannot open. No-op
+// when every attachment arrived.
+func writeUndeliveredBlock(b *strings.Builder, atts []UndeliveredAttachment) {
+	if len(atts) == 0 {
+		return
+	}
+	if b.Len() > 0 {
+		b.WriteString("\n")
+	}
+	b.WriteString("[attachments on this message that did NOT reach this workspace — tell the sender which and why; never say there are none]\n")
+	for _, a := range atts {
+		name := strings.TrimSpace(a.Filename)
+		if name == "" {
+			name = "unnamed file"
+		}
+		var about []string
+		if ct := strings.TrimSpace(a.ContentType); ct != "" {
+			about = append(about, ct)
+		}
+		if a.Size > 0 {
+			about = append(about, HumanBytes(a.Size))
+		}
+		fmt.Fprintf(b, "- %q", name)
+		if len(about) > 0 {
+			fmt.Fprintf(b, " (%s)", strings.Join(about, ", "))
+		}
+		if r := strings.TrimSpace(a.Reason); r != "" {
+			fmt.Fprintf(b, ": %s", r)
+		}
+		b.WriteString("\n")
+	}
+}
+
+// HumanBytes renders a size the way members read it (812 KB, 1.7 MB).
+func HumanBytes(n int64) string {
+	switch {
+	case n >= 1<<20:
+		return strconv.FormatFloat(float64(n)/(1<<20), 'f', 1, 64) + " MB"
+	case n >= 1<<10:
+		return strconv.FormatInt((n+512)>>10, 10) + " KB"
+	default:
+		return strconv.FormatInt(n, 10) + " bytes"
 	}
 }
 
