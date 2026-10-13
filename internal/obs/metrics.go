@@ -199,6 +199,11 @@ var routeWords = map[string]bool{
 	// update|publish, /v1/tenant/content-requests/{id}/approve|decline,
 	// /v1/{tenant,platform}/content-components/{id}/unpublish|restore|package.
 	"content-requests": true, "unpublish": true, "restore": true, "package": true,
+	// interactive apps: the ~app subtree of a site ticket or share link,
+	// /v1/rooms/{id}/apps/{app}/…, the visitor token, the room service's
+	// /internal/v1/app/… and realtime's app-events.
+	"~app": true, "apps": true, "me": true, "stats": true, "data": true,
+	"sdk.js": true, "sdk.d.ts": true, "visitor": true, "app-events": true,
 }
 
 // idCollections name segments whose NEXT segment is always an identifier, even
@@ -223,6 +228,8 @@ var idCollections = map[string]bool{
 	// is never read as a route word ("effective" and "import" are routes
 	// under content-components, so only the request collection is listed).
 	"content-requests": true,
+	// /v1/rooms/{id}/apps/{app}: an app id is never read as a route word.
+	"apps": true,
 }
 
 // maxRouteSegments bounds the label depth so an arbitrarily deep path cannot

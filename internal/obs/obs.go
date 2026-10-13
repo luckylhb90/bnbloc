@@ -16,20 +16,27 @@ import (
 
 var roomPathRe = regexp.MustCompile(`/v1/rooms/([^/]+)`)
 
-// inviteCodeRe and relayKeyRe match path segments that carry secrets: the
-// invite redemption code and the relay stream session key. They are
-// redacted before a path is logged so request logs never leak them (SEC-9).
-var (
-	inviteCodeRe = regexp.MustCompile(`(/v1/invites/)[^/]+(/redeem)`)
-	relayKeyRe   = regexp.MustCompile(`(/relay/stream/)[^/]+`)
-)
+// secretPathRes match path segments that carry secrets: the invite
+// redemption code, the relay stream session key, and the capability tokens
+// of the frame and link routes (a member's site ticket, which an
+// interactive app's data calls carry too; a public share token; a
+// previewer ticket). They are redacted before a path is logged so request
+// logs never leak them (SEC-9).
+var secretPathRes = []*regexp.Regexp{
+	regexp.MustCompile(`(/v1/invites/)[^/]+(/redeem)`),
+	regexp.MustCompile(`(/relay/stream/)[^/]+()`),
+	regexp.MustCompile(`(/v1/sites/)[^/]+()`),
+	regexp.MustCompile(`(/v1/public/shares/)[^/]+()`),
+	regexp.MustCompile(`(/v1/previewers/[^/]+/[^/]+/)[^/]+()`),
+}
 
 // redactPath replaces secret path segments with [REDACTED] for logging. It does
 // not touch room ids (logged separately) or the metrics route label, which
 // already collapses ids into stable buckets.
 func redactPath(path string) string {
-	path = inviteCodeRe.ReplaceAllString(path, "${1}[REDACTED]${2}")
-	path = relayKeyRe.ReplaceAllString(path, "${1}[REDACTED]")
+	for _, re := range secretPathRes {
+		path = re.ReplaceAllString(path, "${1}[REDACTED]${2}")
+	}
 	return path
 }
 

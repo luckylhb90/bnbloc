@@ -36,6 +36,26 @@ func TestMiddlewareLogsTagsWithoutSecrets(t *testing.T) {
 	}
 }
 
+// Capability tokens in a path (invite codes, relay keys, site tickets,
+// share tokens, previewer tickets) never reach the request log; the rest
+// of the path does.
+func TestRedactPathHidesCapabilityTokens(t *testing.T) {
+	for path, want := range map[string]string{
+		"/v1/invites/CODE-SECRET/redeem":                        "/v1/invites/[REDACTED]/redeem",
+		"/relay/stream/KEY-SECRET":                              "/relay/stream/[REDACTED]",
+		"/v1/sites/TICKET-SECRET/~app/c/votes":                  "/v1/sites/[REDACTED]/~app/c/votes",
+		"/v1/sites/TICKET-SECRET":                               "/v1/sites/[REDACTED]",
+		"/v1/public/shares/bsh_SHARE-SECRET/site/~app/events":   "/v1/public/shares/[REDACTED]/site/~app/events",
+		"/v1/public/shares/bsh_SHARE-SECRET/visitor":            "/v1/public/shares/[REDACTED]/visitor",
+		"/v1/previewers/sprites/1.0.0/TICKET-SECRET/index.html": "/v1/previewers/sprites/1.0.0/[REDACTED]/index.html",
+		"/v1/rooms/room-1/apps/art_1/c/votes":                   "/v1/rooms/room-1/apps/art_1/c/votes",
+	} {
+		if got := redactPath(path); got != want || strings.Contains(got, "SECRET") {
+			t.Errorf("redactPath(%q) = %q, want %q", path, got, want)
+		}
+	}
+}
+
 // BE-17: every service server bounds header reads and idle connections.
 func TestNewServerSetsTimeouts(t *testing.T) {
 	srv := newServer(":0", http.NotFoundHandler())
