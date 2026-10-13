@@ -65,7 +65,7 @@ type MCPToolInfo struct {
 func Validate(raw []byte, wantSHA256 string, opts Options) (*Package, error) {
 	// Parse with the widest content profile first: the manifest names the
 	// kind, whose own (equal or narrower) caps are checked below.
-	b, err := tarbundle.Parse(raw, wantSHA256, tarbundle.ContentLimits)
+	b, err := tarbundle.Parse(raw, wantSHA256, BundleLimits())
 	if err != nil {
 		return nil, err
 	}
@@ -96,7 +96,7 @@ func ValidateBundle(b *tarbundle.Bundle, opts Options) (*Package, error) {
 	}
 	p := &Package{Manifest: m, SHA256: b.SHA256, Bundle: b}
 	for _, f := range b.Paths() {
-		if isScript(f) {
+		if !spec.Site && isScript(f) {
 			p.Scripts = true
 			break
 		}
@@ -114,6 +114,9 @@ func ValidateBundle(b *tarbundle.Bundle, opts Options) (*Package, error) {
 // directory, or a script extension), sorted: what an approver reviews.
 func (p *Package) ScriptFiles() []string {
 	out := []string{}
+	if !p.Scripts {
+		return out
+	}
 	for _, f := range p.Bundle.Paths() {
 		if isScript(f) {
 			out = append(out, f)

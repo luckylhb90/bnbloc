@@ -125,7 +125,8 @@ export function useOpenWorkshop(onOpenRoom: (roomId: string) => void): { readonl
 
 // openInLibrary shows the Library tab of a component's kind.
 export function openInLibrary(c: Pick<ContentComponent, "kind">): void {
-  queueLibraryTab(libraryTabOf(c.kind));
+  const tab = libraryTabOf(c.kind);
+  if (tab) queueLibraryTab(tab);
   window.location.hash = routeHash({ kind: "view", view: "library" });
 }
 

@@ -59,7 +59,7 @@ func Import(upload []byte, kind, name, version string, opts Options) (*Package, 
 	m.DisplayName = oneLine(m.DisplayName, maxDisplayName)
 	m.Description = oneLine(m.Description, maxDescription)
 	for p := range out {
-		if isScript(p) {
+		if !spec.Site && isScript(p) {
 			m.Requires.Permissions = []string{PermScripts}
 			break
 		}
@@ -267,7 +267,7 @@ func readUpload(raw []byte) (map[string][]byte, error) {
 	if tarbundle.IsArchive(raw) || !utf8.Valid(raw) {
 		// Every content kind's archive is read within the widest content
 		// profile; the kind's own caps apply to the package built from it.
-		return tarbundle.ReadArchive(raw, tarbundle.ContentLimits)
+		return tarbundle.ReadArchive(raw, BundleLimits())
 	}
 	if len(raw) > promptPackMaxSize {
 		return nil, fmt.Errorf("the file exceeds %d bytes", promptPackMaxSize)
@@ -346,3 +346,7 @@ func oneLine(s string, max int) string {
 	}
 	return s
 }
+
+// NameFrom maps a free-form title to a component name (lower-case
+// letters, digits and hyphens), "" when nothing of it is usable.
+func NameFrom(s string) string { return slugify(s) }

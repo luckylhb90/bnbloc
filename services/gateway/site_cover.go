@@ -2,7 +2,6 @@ package gateway
 
 import (
 	"errors"
-	"fmt"
 	"net/http"
 	"strconv"
 
@@ -10,50 +9,13 @@ import (
 	"github.com/luckylhb90/bnbloc/internal/httpx"
 	"github.com/luckylhb90/bnbloc/internal/obs"
 	"github.com/luckylhb90/bnbloc/internal/tarbundle"
-	"github.com/luckylhb90/bnbloc/internal/wire"
 )
 
 // An app's cover (docs/prd/2026-10-13-app-gallery.md §4, §9): the image a
-// card shows, cover.png, cover.webp or cover.jpg (.jpeg) at the root of the
-// site's bundle, the first of these present. It is served as an image only:
-// its bytes must sniff as the type its name says (an SVG, HTML or any other
-// content is never a cover), at most wire.MaxAppCoverBytes, with nosniff
-// and a sandbox CSP. Without one (404) or with one refused (413, 415) the
-// web draws the generated cover (web/src/lib/appCover.ts).
-
-// siteCoverFiles are the cover file names, in order, with the one media
-// type each may hold.
-var siteCoverFiles = []struct{ name, mimeType string }{
-	{"cover.png", "image/png"},
-	{"cover.webp", "image/webp"},
-	{"cover.jpg", "image/jpeg"},
-	{"cover.jpeg", "image/jpeg"},
-}
-
-// siteCover returns the bundle's cover and its type: found=false when the
-// site has none; err when its cover is refused (errCoverTooLarge,
-// errCoverNotImage).
-func siteCover(b *tarbundle.Bundle) (data []byte, mimeType string, found bool, err error) {
-	for _, f := range siteCoverFiles {
-		data, ok := b.File(f.name)
-		if !ok {
-			continue
-		}
-		if len(data) > wire.MaxAppCoverBytes {
-			return nil, "", true, errCoverTooLarge
-		}
-		if http.DetectContentType(data) != f.mimeType {
-			return nil, "", true, errCoverNotImage
-		}
-		return data, f.mimeType, true, nil
-	}
-	return nil, "", false, nil
-}
-
-var (
-	errCoverTooLarge = fmt.Errorf("the cover is larger than %d bytes", wire.MaxAppCoverBytes)
-	errCoverNotImage = errors.New("the cover is not the PNG, WebP or JPEG image its name says")
-)
+// card shows, as tarbundle.SiteCover reads it (the one rule, shared with
+// the app component validator). It is served as an image only, with
+// nosniff and a sandbox CSP. Without one (404) or with one refused (413,
+// 415) the web draws the generated cover (web/src/lib/appCover.ts).
 
 // handleSiteCover answers a site version's cover:
 // GET /v1/rooms/{roomId}/artifacts/{artifactId}/versions/{version}/cover.
@@ -87,27 +49,33 @@ func (s *Service) handleSiteCover(w http.ResponseWriter, r *http.Request, caller
 		httpx.Error(w, "load site bundle failed", http.StatusBadGateway)
 		return
 	}
-	data, mimeType, found, err := siteCover(b)
+	cover, found, err := tarbundle.SiteCover(b)
 	switch {
 	case !found:
 		httpx.Error(w, "the site has no cover", http.StatusNotFound)
 		return
-	case errors.Is(err, errCoverTooLarge):
+	case errors.Is(err, tarbundle.ErrCoverTooLarge):
 		httpx.Error(w, err.Error(), http.StatusRequestEntityTooLarge)
 		return
 	case err != nil:
 		httpx.Error(w, err.Error(), http.StatusUnsupportedMediaType)
 		return
 	}
+	writeCover(w, r, cover)
+}
+
+// writeCover answers a cover as an image only: its checked type, nosniff,
+// a sandbox CSP (a site version's and an app version's alike).
+func writeCover(w http.ResponseWriter, r *http.Request, cover tarbundle.Cover) {
 	h := w.Header()
-	h.Set("Content-Type", mimeType)
+	h.Set("Content-Type", cover.MimeType)
 	h.Set("X-Content-Type-Options", "nosniff")
 	h.Set("Content-Security-Policy", "default-src 'none'; sandbox")
 	// A version never changes: its cover is cached by the member's browser.
 	h.Set("Cache-Control", "private, max-age=3600")
-	h.Set("Content-Length", strconv.Itoa(len(data)))
+	h.Set("Content-Length", strconv.Itoa(len(cover.Data)))
 	if r.Method == http.MethodHead {
 		return
 	}
-	_, _ = w.Write(data)
+	_, _ = w.Write(cover.Data)
 }

@@ -28,6 +28,13 @@ var backendStreamHTTP = &http.Client{}
 // callBackend makes one signed call as subject in tenantID ("" = the default
 // tenant) with an optional JSON body. The caller closes the response body.
 func callBackend(ctx context.Context, method, url string, body []byte, subject, tenantID string) (*http.Response, error) {
+	return callBackendTyped(ctx, backendHTTP, method, url, "application/json", body, subject, tenantID)
+}
+
+// callBackendTyped is callBackend with the body's media type and the
+// client: an upload (a multipart site snapshot) goes on backendStreamHTTP,
+// bounded by ctx.
+func callBackendTyped(ctx context.Context, client *http.Client, method, url, contentType string, body []byte, subject, tenantID string) (*http.Response, error) {
 	var rd io.Reader
 	if body != nil {
 		rd = bytes.NewReader(body)
@@ -37,9 +44,9 @@ func callBackend(ctx context.Context, method, url string, body []byte, subject, 
 		return nil, err
 	}
 	if body != nil {
-		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Content-Type", contentType)
 	}
-	return backendHTTP.Do(req)
+	return client.Do(req)
 }
 
 // gatewayServiceSubject is the identity the gateway asserts when it calls a

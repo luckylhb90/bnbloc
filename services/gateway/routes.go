@@ -202,6 +202,15 @@ func (s *Service) routes() []route {
 		gated("POST /v1/content-components/{id}/update", drive, s.handleUpdateContentCopy).spends(costBudget).with(needContent),
 		gated("POST /v1/content-components/{id}/publish", drive, s.handlePublishContent).spends(costBudget).with(needContent),
 
+		// The app gallery (app_gallery.go): an app's cover, favorites, a
+		// site published as an app, and "Use this app" (a copy in a room
+		// the caller owns, or in a new room: room creation's permission).
+		member("GET /v1/content-components/{id}/versions/{version}/cover", s.handleAppCover).with(needContent),
+		member("PUT /v1/content-components/{id}/favorite", s.handleFavorite).spends(costBudget).with(needContent),
+		member("DELETE /v1/content-components/{id}/favorite", s.handleFavorite).spends(costBudget).with(needContent),
+		gated("POST /v1/content-components/{id}/use-app", create, s.handleUseApp).spends(costBudget).with(needContent),
+		gated("POST /v1/rooms/{roomId}/artifacts/{artifactId}/publish-app", drive, s.handlePublishApp).spends(costBudget).with(needContent),
+
 		// Organization administration (manage_org in the acting tenant).
 		gated("GET /v1/tenant/mcp-connectors", org, s.handleListMCPConnectors),
 		gated("PUT /v1/tenant/mcp-connectors/{name}", org, s.handlePutMCPConnector),

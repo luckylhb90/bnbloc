@@ -49,8 +49,8 @@ export function tryItDraft(c: Pick<ContentComponent, "quickPrompts" | "prompts">
   return slash ? `${slash} ` : "";
 }
 
-// libraryTabOf is the Library tab that lists a kind.
-export function libraryTabOf(kind: ContentKind): "experts" | "skills" | "prompts" {
+// libraryTabOf is the Library tab that lists a kind (null: none, an app).
+export function libraryTabOf(kind: ContentKind): "experts" | "skills" | "prompts" | null {
   return CONTENT_KINDS[kind].libraryTab;
 }
 

@@ -71,6 +71,13 @@ func (e *appGW) runJob(jobID, room string) {
 // room, bound to job.
 func (e *appGW) readArtifactAs(room, job string, args map[string]any) roomtools.Result {
 	e.t.Helper()
+	return e.roomToolAs(room, job, "read_artifact", args)
+}
+
+// roomToolAs runs a room tool on jack's bridge, in room, bound to job (of
+// maya's).
+func (e *appGW) roomToolAs(room, job, name string, args map[string]any) roomtools.Result {
+	e.t.Helper()
 	gw := bridgeGateway{e: e, bearer: e.session("jack")}
 	srv, err := roomtools.Start(roomtools.Config{Gateway: gw})
 	if err != nil {
@@ -82,7 +89,10 @@ func (e *appGW) readArtifactAs(room, job string, args map[string]any) roomtools.
 		e.t.Fatal(err)
 	}
 	sess.Bind(roomtools.Job{JobID: job, RequesterUserID: "maya"})
-	tool, _ := roomtools.DefaultRegistry().Lookup("read_artifact")
+	tool, ok := roomtools.DefaultRegistry().Lookup(name)
+	if !ok {
+		e.t.Fatalf("no room tool %s", name)
+	}
 	raw, _ := json.Marshal(args)
 	return tool.Call(context.Background(), &roomtools.Env{Session: sess, Gateway: gw}, raw)
 }

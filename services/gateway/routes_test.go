@@ -28,6 +28,8 @@ var readerWrites = map[string]string{
 	"POST /v1/share-tickets":                                  "mints a read ticket for a share link the member's organization may open",
 	"POST /v1/content-components/{id}/versions/{version}/ack": "acknowledges the version of a component the member uses",
 	"POST /v1/content-components/{id}/prompts/{promptId}/use": "counts one prompt insertion (it spends the cost budget)",
+	"PUT /v1/content-components/{id}/favorite":                "a member's own star on a component they see (it spends the cost budget)",
+	"DELETE /v1/content-components/{id}/favorite":             "takes a member's own star back (it spends the cost budget)",
 }
 
 // publicPrefixes are where a route may take no session: sign-in, the IdP's

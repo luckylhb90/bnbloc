@@ -11,6 +11,7 @@ import (
 	"github.com/luckylhb90/bnbloc/core"
 	"github.com/luckylhb90/bnbloc/internal/roomlog"
 	"github.com/luckylhb90/bnbloc/internal/tarbundle"
+	"github.com/luckylhb90/bnbloc/internal/wire"
 )
 
 // Content tools (docs/prd/2026-10-12-experts-and-teams.md §5): an agent
@@ -60,15 +61,16 @@ func saveComponentTool() Tool {
 	return Tool{
 		Name:  "save_component",
 		Title: "Save a drafted component",
-		Description: "Save the package drafted in a directory of your workspace (for example drafts/contract-reviewer, holding component.json) " +
-			"to the Library of the person who asked you. It is validated first; a validation error says what to fix. " +
-			"Without id it creates a new component (refused if they already have one of that kind and name); with id (cc_...) " +
-			"it saves a new version of that component of theirs (the version number is bumped for you). " +
-			"Save only after the person confirmed.",
+		Description: "Save to the Library of the person who asked you, after they confirmed: the package drafted in a workspace directory (dir), " +
+			"or a site deliverable as an app (artifactId: its current files, never its data). It is validated first; an error says what to fix. " +
+			"Without id it creates a component (refused if they have one of that kind and name); with id (cc_...) it saves its next version.",
 		InputSchema: objectSchema(map[string]any{
-			"dir": map[string]any{"type": "string", "description": "Workspace-relative directory holding component.json, e.g. drafts/contract-reviewer."},
-			"id":  map[string]any{"type": "string", "description": "The component to save a new version of (from get_component or list_components); omit to create."},
-		}, "dir"),
+			"dir":        map[string]any{"type": "string", "description": "Workspace-relative directory holding component.json, e.g. drafts/contract-reviewer."},
+			"artifactId": map[string]any{"type": "string", "description": "Instead of dir: a site deliverable's id (art_...)."},
+			"id":         map[string]any{"type": "string", "description": "The component to save a new version of; omit to create."},
+			"name":       map[string]any{"type": "string", "description": "A new app's name (lower-case, hyphens)."},
+			"category":   map[string]any{"type": "string", "enum": wire.AppCategories},
+		}),
 		Call: saveComponent,
 	}
 }
@@ -78,8 +80,8 @@ func publishComponentTool() Tool {
 		Name:  "publish_component",
 		Title: "Publish a saved component",
 		Description: "Change who can use a component saved in the Library of the person who asked you, only after they confirm. " +
-			"\"org\" asks their organization's admins to publish its latest version to everyone in the organization: it opens a request " +
-			"the admins approve or decline (members keep the previously approved version until then). \"personal\" withdraws a pending " +
+			"\"org\" publishes its latest version to their organization: unless it publishes without approval, as an admin's request " +
+			"(members keep the approved version until then). \"personal\" withdraws a pending " +
 			"request and takes it out of the organization. \"platform\" (every organization) is a platform admin's action: say so instead.",
 		InputSchema: objectSchema(map[string]any{
 			"id":    map[string]any{"type": "string", "description": "The component id (cc_...)."},
@@ -208,39 +210,64 @@ type componentDetail struct {
 		Version         string `json:"version"`
 		ApprovedVersion string `json:"approvedVersion"`
 	} `json:"resubmitted"`
+	// OrgPublished is the version the save published to the organization
+	// at once (it uses the component and requires no approval).
+	OrgPublished string `json:"orgPublished"`
 }
 
 func saveComponent(ctx context.Context, env *Env, args json.RawMessage) Result {
 	var in struct {
-		Dir string `json:"dir"`
-		ID  string `json:"id"`
+		Dir        string `json:"dir"`
+		ArtifactID string `json:"artifactId"`
+		ID         string `json:"id"`
+		Name       string `json:"name"`
+		Category   string `json:"category"`
 	}
 	if err := decodeArgs(args, &in); err != nil {
 		return toolError("invalid arguments: %v", err)
 	}
-	_, grant, refused := jobGrant(env, "save_component")
+	job, grant, refused := jobGrant(env, "save_component")
 	if refused != nil {
 		return *refused
 	}
-	dir, err := cleanDir(in.Dir)
+	id := strings.TrimSpace(in.ID)
+	var (
+		p, what string
+		body    any
+		files   int
+	)
+	switch art := strings.TrimSpace(in.ArtifactID); {
+	case art != "" && in.Dir != "":
+		return toolError("give dir (a drafted package) or artifactId (a site, saved as an app), not both")
+	case art != "":
+		// A site's current version as an app (the gateway snapshots its
+		// files as the job's requester; its data never comes along).
+		p = "/v1/rooms/" + url.PathEscape(env.Session.Scope().RoomID) + "/artifacts/" + url.PathEscape(art) + "/publish-app?" + url.Values{"job": {job.JobID}}.Encode()
+		body = wire.AppPublishRequest{ComponentID: id, Name: strings.TrimSpace(in.Name), Category: strings.TrimSpace(in.Category)}
+		what = "the site " + art
+	case in.Name != "" || in.Category != "":
+		return toolError("name and category are an app's: pass artifactId (a site deliverable) to save one")
+	default:
+		dir, err := cleanDir(in.Dir)
+		if err != nil {
+			return toolError("%v", err)
+		}
+		ws := env.Session.workspace()
+		if ws == nil {
+			return toolError("save_component cannot read your workspace: this agent's core does not expose its files. Ask the person to use \"Save as expert\" / \"Save as skill pack\" under your reply's files instead")
+		}
+		bundle, n, err := packDir(ctx, ws, dir)
+		if err != nil {
+			return toolError("%v", err)
+		}
+		p, body, what, files = "/v1/content-components?"+grant.Encode(), RawBody{ContentType: "application/x-tar", Data: bundle}, dir, n
+		if id != "" {
+			p = "/v1/content-components/" + url.PathEscape(id) + "/versions?" + grant.Encode()
+		}
+	}
+	raw, err := env.Gateway.Do(ctx, "POST", p, body)
 	if err != nil {
-		return toolError("%v", err)
-	}
-	ws := env.Session.workspace()
-	if ws == nil {
-		return toolError("save_component cannot read your workspace: this agent's core does not expose its files. Ask the person to use \"Save as expert\" / \"Save as skill pack\" under your reply's files instead")
-	}
-	bundle, n, err := packDir(ctx, ws, dir)
-	if err != nil {
-		return toolError("%v", err)
-	}
-	p := "/v1/content-components?" + grant.Encode()
-	if id := strings.TrimSpace(in.ID); id != "" {
-		p = "/v1/content-components/" + url.PathEscape(id) + "/versions?" + grant.Encode()
-	}
-	raw, err := env.Gateway.Do(ctx, "POST", p, RawBody{ContentType: "application/x-tar", Data: bundle})
-	if err != nil {
-		return refusal("saving "+dir, err)
+		return refusal("saving "+what, err)
 	}
 	var d componentDetail
 	if err := json.Unmarshal(raw, &d); err != nil {
@@ -249,8 +276,14 @@ func saveComponent(ctx context.Context, env *Env, args json.RawMessage) Result {
 	c := d.Component
 	out := map[string]any{
 		"saved": true, "id": c.ID, "kind": c.Kind, "name": c.Name, "displayName": c.DisplayName,
-		"version": c.LatestVersion, "scope": c.Scope, "files": n,
+		"version": c.LatestVersion, "scope": c.Scope,
 		"note": fmt.Sprintf("Saved %s version %s to the Library of the person who asked you (the version is assigned on save; report this one, not the number in your draft). They can pick it in any room's composer.", c.Name, c.LatestVersion),
+	}
+	if files > 0 {
+		out["files"] = files
+	}
+	if c.Kind == "app" {
+		out["note"] = fmt.Sprintf("Saved the app %s version %s to the Library of the person who asked you: a template of the site's files, without its data. publish_component shares it with their organization.", c.Name, c.LatestVersion)
 	}
 	if rs := d.Resubmitted; rs != nil {
 		keep := ""
@@ -259,6 +292,9 @@ func saveComponent(ctx context.Context, env *Env, args json.RawMessage) Result {
 		}
 		out["resubmitted"] = map[string]any{"request": rs.ID, "version": rs.Version, "approvedVersion": rs.ApprovedVersion}
 		out["note"] = out["note"].(string) + fmt.Sprintf(" Their organization uses this component, so version %s was sent to its admins for approval%s. Tell them.", rs.Version, keep)
+	}
+	if d.OrgPublished != "" {
+		out["note"] = out["note"].(string) + fmt.Sprintf(" Their organization uses this component and publishes without approval: its members use version %s now. Tell them.", d.OrgPublished)
 	}
 	return Result{Value: out}
 }

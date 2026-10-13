@@ -25,11 +25,14 @@ export function isBuiltin(c: Pick<ContentComponent, "scope">): boolean {
 
 // CONTENT_KINDS is everything the client says about a content kind, one row
 // per kind (web L5): a Record over the generated ContentKind, so a kind the
-// server registers (contentpkg) fails to compile until it has its row.
-export const CONTENT_KINDS: Readonly<Record<ContentKind, { readonly word: string; readonly label: string; readonly libraryTab: "experts" | "skills" | "prompts"; readonly packageKind: string }>> = {
+// server registers (contentpkg) fails to compile until it has its row. An
+// app (docs/prd/2026-10-13-app-gallery.md) is published from a site and
+// listed in the gallery, not in a Library tab of the workshop's.
+export const CONTENT_KINDS: Readonly<Record<ContentKind, { readonly word: string; readonly label: string; readonly libraryTab: "experts" | "skills" | "prompts" | null; readonly packageKind: string }>> = {
   expert: { word: "expert", label: "Expert", libraryTab: "experts", packageKind: "bnbloc.expert.package/v1" },
   skill: { word: "skill pack", label: "Skill pack", libraryTab: "skills", packageKind: "bnbloc.skill.package/v1" },
   prompt: { word: "prompt pack", label: "Prompt pack", libraryTab: "prompts", packageKind: "bnbloc.prompt.package/v1" },
+  app: { word: "app", label: "App", libraryTab: null, packageKind: "bnbloc.app.package/v1" },
 };
 
 // The short kind of a content package's manifest kind.

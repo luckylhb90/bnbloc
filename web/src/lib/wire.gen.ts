@@ -232,6 +232,72 @@ export interface AgentRunsReply {
   nextBefore?: string;
 }
 
+// ---- wire/app_gallery.go ----
+
+// An app's category (component.json "category"), the gallery's tabs. An
+// app names one of these or none; any other value is refused
+// (contentpkg's app kind).
+export const AppCategoryOffice = "office";
+export const AppCategoryData = "data";
+export const AppCategoryProductivity = "productivity";
+export const AppCategoryContent = "content";
+export const AppCategoryLearning = "learning";
+export const AppCategoryEngineering = "engineering";
+export const AppCategoryFinance = "finance";
+export const AppCategoryLife = "life";
+export const AppCategoryOther = "other";
+
+// AppCategories lists the categories in the gallery's tab order.
+export const AppCategories: readonly string[] = ["office", "data", "productivity", "content", "learning", "engineering", "finance", "life", "other"];
+
+// Whether a member's publish to the organization waits for an org admin
+// (the tenant settings' publishApproval; PRD §11). Required is the
+// default; with none a publish takes effect at once, still audited, and
+// admins can still unpublish, restore or remove it. It covers every
+// content kind; contentshare.NeedsApproval is its one reader.
+export const PublishApprovalRequired = "required";
+export const PublishApprovalNone = "none";
+
+// AppPublishRequest is POST /v1/rooms/{roomId}/artifacts/{artifactId}/publish-app:
+// snapshot the site's current version (its files, cover and README, never
+// its data) as an app component of the caller's. Without ComponentID it
+// creates one named Name; with it, the snapshot is the next version of
+// that app of the caller's. DisplayName defaults to the site's title.
+export interface AppPublishRequest {
+  componentId?: string;
+  name?: string;
+  displayName?: string;
+  description?: string;
+  category?: AppCategory;
+  tags?: string[];
+}
+
+// AppUseRequest is POST /v1/content-components/{id}/use-app: copy the app
+// (Version, default its latest) into a room the caller owns (RoomID) or
+// into a new room (NewRoom).
+export interface AppUseRequest {
+  version?: string;
+  roomId?: string;
+  newRoom?: AppNewRoom;
+}
+
+// AppNewRoom names the room "Use this app" creates (default: the app's
+// display name).
+export interface AppNewRoom {
+  name?: string;
+}
+
+// AppUseReply answers "Use this app": the new site deliverable, which
+// starts with an empty data space of its own.
+export interface AppUseReply {
+  roomId: string;
+  artifactId: string;
+  version: number;
+  createdRoom?: boolean;
+  // From attributes the copy: "<name>@<version>".
+  from: string;
+}
+
 // ---- wire/apps.go ----
 
 // AppDocWrite is an insert (POST) or a replace (PUT). Doc is the document's
@@ -999,6 +1065,15 @@ export interface ContentComponent {
   // turned it on for themselves. Each is capped (store.MaxUsageCount).
   runs: number;
   members: number;
+  // Favorite is true when the caller starred it; FavoriteCount counts
+  // the members of the caller's organization who did (capped like the
+  // usage counts).
+  favorite: boolean;
+  favoriteCount: number;
+  // CoverURL is an app's cover image at this version
+  // (GET /v1/content-components/{id}/versions/{v}/cover; the session
+  // authorizes it), absent when the app ships none.
+  coverUrl?: string;
   // Team is a team expert's roster (as its manifest names it).
   team?: ContentTeam;
   createdAtMs: number;
@@ -1050,6 +1125,10 @@ export interface ContentComponentDetail {
   // the new version waits for an org admin's approval while members keep
   // the approved one ("Gap closure" 5).
   resubmitted?: ContentPublishRequest;
+  // OrgPublished is the version a new save published to the
+  // organization at once: it uses the component and requires no
+  // approval (contentshare.NeedsApproval).
+  orgPublished?: string;
 }
 
 // ContentFile is one file of a version: its text when it is UTF-8 and
@@ -1378,9 +1457,12 @@ export interface ContentUsesChanged {
 // reply. Payload: ContentSaved; clients act only on their own (Owner).
 export const EventContentSaved = "content_saved";
 
-// ContentSaved actions.
+// ContentSaved actions: a save, a publish request to the organization, or
+// a publication to it that took effect at once (the organization requires
+// no approval).
 export const ContentSavedSaved = "saved";
 export const ContentSavedSubmitted = "submitted";
+export const ContentSavedPublished = "published";
 
 // ContentSaved is the payload of EventContentSaved.
 export interface ContentSaved {
@@ -1389,10 +1471,11 @@ export interface ContentSaved {
   name: string;
   displayName?: string;
   version: string;
-  // Action is saved (a new component or version) or submitted (a publish
+  // Action is saved (a new component or version), submitted (a publish
   // request to the organization, opened by publish_component or by the
-  // save of a new version of a component the organization uses).
-  action: string;
+  // save of a new version of a component the organization uses) or
+  // published (the same, where the organization requires no approval).
+  action: ContentSavedAction;
   // Created marks a new component (not a new version).
   created?: boolean;
   // Owner is the member it was saved for (the job's requester).
@@ -3775,12 +3858,18 @@ export const JobNoticeSeq = 1;
 // ---- wire unions (//wire:union) ----
 export type RunScope = "room" | "self" | "tenant";
 export const RunScopeValues: readonly RunScope[] = ["room", "self", "tenant"];
+export type AppCategory = "office" | "data" | "productivity" | "content" | "learning" | "engineering" | "finance" | "life" | "other";
+export const AppCategoryValues: readonly AppCategory[] = ["office", "data", "productivity", "content", "learning", "engineering", "finance", "life", "other"];
+export type PublishApproval = "required" | "none";
+export const PublishApprovalValues: readonly PublishApproval[] = ["required", "none"];
 export type AppErrorCode = "visitor_token_required" | "visitor_token_invalid";
 export const AppErrorCodeValues: readonly AppErrorCode[] = ["visitor_token_required", "visitor_token_invalid"];
 export type AppExportFormat = "json" | "csv";
 export const AppExportFormatValues: readonly AppExportFormat[] = ["json", "csv"];
 export type ContentUseScope = "member" | "room" | "room-expert";
 export const ContentUseScopeValues: readonly ContentUseScope[] = ["member", "room", "room-expert"];
+export type ContentSavedAction = "saved" | "submitted" | "published";
+export const ContentSavedActionValues: readonly ContentSavedAction[] = ["saved", "submitted", "published"];
 export type RoomEventKind = "chat_message" | "agent_messages" | "agent_job_created" | "agent_job_updated" | "agent_session_state" | "agent_roster" | "presence_join" | "presence_leave" | "presence_snapshot" | "presence_typing" | "message_deleted" | "message_edited" | "task_updated" | "artifact_updated" | "artifact_state" | "member_joined" | "member_removed" | "room_deleted" | "content_saved" | "content_uses_changed" | "app_changed";
 export const RoomEventKindValues: readonly RoomEventKind[] = ["chat_message", "agent_messages", "agent_job_created", "agent_job_updated", "agent_session_state", "agent_roster", "presence_join", "presence_leave", "presence_snapshot", "presence_typing", "message_deleted", "message_edited", "task_updated", "artifact_updated", "artifact_state", "member_joined", "member_removed", "room_deleted", "content_saved", "content_uses_changed", "app_changed"];
 export type ScheduleRecipientKind = "room" | "agent";
@@ -3837,8 +3926,8 @@ export const ComponentRuntimeValues: readonly ComponentRuntime[] = ["stdio", "en
 export type ComponentRollout = "auto" | "optin" | "off";
 export const ComponentRolloutValues: readonly ComponentRollout[] = ["auto", "optin", "off"];
 // A content component kind's short name (the contentpkg registry).
-export type ContentKind = "expert" | "prompt" | "skill";
-export const ContentKindValues: readonly ContentKind[] = ["expert", "prompt", "skill"];
+export type ContentKind = "app" | "expert" | "prompt" | "skill";
+export const ContentKindValues: readonly ContentKind[] = ["app", "expert", "prompt", "skill"];
 
 // ---- tables computed by their Go owners ----
 // The job statuses store.AgentJobStatus.Terminal reports finished; every

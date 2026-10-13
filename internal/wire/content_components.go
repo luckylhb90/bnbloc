@@ -61,6 +61,15 @@ type ContentComponent struct {
 	// turned it on for themselves. Each is capped (store.MaxUsageCount).
 	Runs    int `json:"runs"`
 	Members int `json:"members"`
+	// Favorite is true when the caller starred it; FavoriteCount counts
+	// the members of the caller's organization who did (capped like the
+	// usage counts).
+	Favorite      bool `json:"favorite"`
+	FavoriteCount int  `json:"favoriteCount"`
+	// CoverURL is an app's cover image at this version
+	// (GET /v1/content-components/{id}/versions/{v}/cover; the session
+	// authorizes it), absent when the app ships none.
+	CoverURL string `json:"coverUrl,omitempty"`
 	// Team is a team expert's roster (as its manifest names it).
 	Team        *ContentTeam `json:"team,omitempty"`
 	CreatedAtMs int64        `json:"createdAtMs"`
@@ -112,6 +121,10 @@ type ContentComponentDetail struct {
 	// the new version waits for an org admin's approval while members keep
 	// the approved one ("Gap closure" 5).
 	Resubmitted *ContentPublishRequest `json:"resubmitted,omitempty"`
+	// OrgPublished is the version a new save published to the
+	// organization at once: it uses the component and requires no
+	// approval (contentshare.NeedsApproval).
+	OrgPublished string `json:"orgPublished,omitempty"`
 }
 
 // ContentFile is one file of a version: its text when it is UTF-8 and

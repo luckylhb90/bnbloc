@@ -124,6 +124,10 @@ const (
 	// ContentUseRoom: for a room — room skill packs (every agent in the
 	// room) and pinned experts (offered in the room's composer).
 	ContentUseRoom ContentUseScope = "room"
+	// ContentUseAppCopy: an app copied into a room by "Use this app"
+	// (docs/prd/2026-10-13-app-gallery.md §8; scope id = the copy's site
+	// artifact). Never in effect for a turn: it counts the app's uses.
+	ContentUseAppCopy ContentUseScope = "app-copy"
 )
 
 // ContentUse enables or pins a component in a scope, at a pinned version
@@ -206,8 +210,8 @@ type ContentComponentStore interface {
 	// query: the components with a version bundling q.Key that are within
 	// q's reach (ContentBlobQuery), by id, at most MaxContentList.
 	ContentComponentsByBlob(ctx context.Context, q ContentBlobQuery) ([]ContentComponent, error)
-	// DeleteContentComponent removes a component, its versions, uses, acks
-	// and publish requests (the bundles become unreferenced; blob GC
+	// DeleteContentComponent removes a component, its versions, uses, acks,
+	// favorites and publish requests (the bundles become unreferenced; blob GC
 	// collects them).
 	DeleteContentComponent(ctx context.Context, id string) error
 	// SetContentComponentStatus changes a component's status (unpublish,
@@ -244,6 +248,7 @@ type ContentComponentStore interface {
 	ContentPublishRequestStore
 	ContentRoomShareStore
 	ContentDraftStore
+	ContentFavoriteStore
 }
 
 func contentLimit(n int) int { return clampLimit(n, MaxContentList, MaxContentList) }
@@ -322,12 +327,14 @@ type MemoryContentComponents struct {
 	requests   map[string]ContentPublishRequest     // request id -> request
 	roomShares map[string]ContentRoomShare          // room\x00component -> share
 	drafts     map[string]ContentDraft              // draft id -> staged draft (content_drafts.go)
+	favorites  map[string]ContentFavorite           // tenant\x00member\x00component -> star (content_favorites.go)
 }
 
 // NewMemoryContentComponents returns an empty in-memory store.
 func NewMemoryContentComponents() *MemoryContentComponents {
 	return &MemoryContentComponents{components: map[string]ContentComponent{}, versions: map[string][]ContentComponentVersion{}, uses: map[string]ContentUse{}, acks: map[string]ContentAck{},
-		promptUses: map[string]map[string]int64{}, requests: map[string]ContentPublishRequest{}, roomShares: map[string]ContentRoomShare{}}
+		promptUses: map[string]map[string]int64{}, requests: map[string]ContentPublishRequest{}, roomShares: map[string]ContentRoomShare{},
+		favorites: map[string]ContentFavorite{}}
 }
 
 var _ ContentComponentStore = (*MemoryContentComponents)(nil)
@@ -489,6 +496,11 @@ func (s *MemoryContentComponents) DeleteContentComponent(_ context.Context, id s
 	for k, sh := range s.roomShares {
 		if sh.ComponentID == id {
 			delete(s.roomShares, k)
+		}
+	}
+	for k, f := range s.favorites {
+		if f.ComponentID == id {
+			delete(s.favorites, k)
 		}
 	}
 	return nil

@@ -1485,6 +1485,18 @@ WHERE r.channel_id = '' AND d.user_id IS NULL`)
 			return addColumnIfMissing(ctx, db, "artifact_versions", "loads_app_sdk", "TINYINT(1) NOT NULL DEFAULT 0 AFTER thumb_rank")
 		},
 	},
+	{
+		// The app gallery (docs/prd/2026-10-13-app-gallery.md §7, §11): the
+		// members' favorites, and the organization's publish approval
+		// setting ('required' unless an org admin turns it off).
+		id: "2026_10_app_gallery",
+		run: func(ctx context.Context, db sqlConn) error {
+			if err := createSchemaTable(ctx, db, "content_favorites"); err != nil {
+				return err
+			}
+			return addColumnIfMissing(ctx, db, "tenants", "publish_approval", "VARCHAR(16) NOT NULL DEFAULT 'required' AFTER anonymous_links_disabled")
+		},
+	},
 }
 
 // sqlConn is the statement surface a migration runs on. runMigrations passes

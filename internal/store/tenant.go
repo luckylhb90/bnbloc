@@ -75,6 +75,12 @@ type Tenant struct {
 	// (default off). Links for the organization's members stay allowed.
 	// The room service's anonymousLinkAllowed is its one reader.
 	AnonymousLinksDisabled bool
+	// PublishApproval is the org-admin setting whether a member's publish
+	// to the organization waits for an admin (wire.PublishApprovalRequired,
+	// the default a new tenant gets) or takes effect at once
+	// (wire.PublishApprovalNone). contentshare.NeedsApproval is its one
+	// reader.
+	PublishApproval string
 	// Retention is the org-admin data retention override (null = the
 	// platform default, 0 = keep forever, N = delete after N days); see
 	// wire.RetentionPolicy. Set only through SetTenantRetention.
@@ -86,6 +92,7 @@ type Tenant struct {
 type TenantPolicyUpdate struct {
 	RequireSandboxForBorrow *bool
 	AnonymousLinksDisabled  *bool
+	PublishApproval         *string
 }
 
 // apply returns t with the update's set fields.
@@ -95,6 +102,9 @@ func (u TenantPolicyUpdate) apply(t Tenant) Tenant {
 	}
 	if u.AnonymousLinksDisabled != nil {
 		t.AnonymousLinksDisabled = *u.AnonymousLinksDisabled
+	}
+	if u.PublishApproval != nil {
+		t.PublishApproval = *u.PublishApproval
 	}
 	return t
 }
@@ -261,6 +271,9 @@ func (s *MemoryTenant) PutTenant(_ context.Context, t Tenant) error {
 		}
 		cur.Name, cur.Status, cur.SSOIssuer = t.Name, t.Status, t.SSOIssuer
 		t = cur
+	} else {
+		// A new tenant takes the column defaults MySQL gives it.
+		t.PublishApproval = wire.PublishApprovalRequired
 	}
 	s.tenants[t.TenantID] = t
 	if t.SSOIssuer != "" {

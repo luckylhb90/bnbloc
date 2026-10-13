@@ -295,10 +295,17 @@ func (e *roomBackendError) Error() string {
 // roomBackendCall calls the room service as subject in tenantID (the
 // request's effective tenant), both signed like a proxied request.
 func (s *Service) roomBackendCall(ctx context.Context, method, path, subject, tenantID string, body []byte) error {
+	return s.roomBackendDo(ctx, backendHTTP, method, path, "application/json", body, subject, tenantID, nil)
+}
+
+// roomBackendDo calls the room service on client as subject in tenantID with a body
+// of contentType and decodes a 2xx answer into out (nil: discarded); a
+// non-2xx answer is a *roomBackendError.
+func (s *Service) roomBackendDo(ctx context.Context, client *http.Client, method, path, contentType string, body []byte, subject, tenantID string, out any) error {
 	if s.Backends.Room == "" {
 		return fmt.Errorf("room backend not configured")
 	}
-	resp, err := callBackend(ctx, method, strings.TrimRight(s.Backends.Room, "/")+path, body, subject, tenantID)
+	resp, err := callBackendTyped(ctx, client, method, strings.TrimRight(s.Backends.Room, "/")+path, contentType, body, subject, tenantID)
 	if err != nil {
 		return err
 	}
@@ -307,7 +314,10 @@ func (s *Service) roomBackendCall(ctx context.Context, method, path, subject, te
 		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
 		return &roomBackendError{Path: path, Status: resp.StatusCode, Body: httpx.ErrorText(raw)}
 	}
-	return nil
+	if out == nil {
+		return nil
+	}
+	return json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(out)
 }
 
 // handleLocalAgentDiscover auto-detects a core's local daemon on the caller's

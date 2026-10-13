@@ -252,6 +252,9 @@ func TestBuiltinsHardCodeNoLanguage(t *testing.T) {
 func TestBuilderQuickPromptsServeTheWorkshop(t *testing.T) {
 	qps := builder(t).Validated.Manifest.QuickPrompts
 	for _, k := range contentpkg.Kinds() {
+		if k.Site {
+			continue // an app is published from a site deliverable, not drafted in the workshop
+		}
 		n := 0
 		for _, q := range qps {
 			title := strings.ToLower(q.Title)

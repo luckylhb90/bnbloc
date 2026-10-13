@@ -1,12 +1,15 @@
 package contentpkg
 
-import "github.com/luckylhb90/bnbloc/internal/tarbundle"
+import (
+	"github.com/luckylhb90/bnbloc/internal/tarbundle"
+	"github.com/luckylhb90/bnbloc/internal/wire"
+)
 
 // Limit is one bound the validator enforces, named the way package
 // authoring guidance states it.
 type Limit struct {
 	// Applies says which packages it bounds ("every package", "expert",
-	// "skill pack", "prompt pack", "team expert").
+	// "skill pack", "prompt pack", "team expert", "app").
 	Applies string
 	// Field is what is bounded: a manifest field, a file or the bundle
 	// ("displayName", "prompts[].body", "INSTRUCTIONS.md").
@@ -32,7 +35,7 @@ const (
 // here (the Expert builder's package-format skill does, and its test fails
 // when the skill drifts), so no limit is written down twice.
 func Limits() []Limit {
-	const all, expert, skill, prompt, team = "every package", "expert", "skill pack", "prompt pack", "team expert"
+	const all, expert, skill, prompt, team, app = "every package", "expert", "skill pack", "prompt pack", "team expert", "app"
 	return []Limit{
 		{all, "name", maxName, UnitChars},
 		{all, "displayName", maxDisplayName, UnitChars},
@@ -67,5 +70,9 @@ func Limits() []Limit {
 		{prompt, "variables[].options[]", maxVarOption, UnitChars},
 		{prompt, "files in the package", PromptLimits.MaxFiles, UnitFiles},
 		{prompt, "package size", PromptLimits.MaxBytes, UnitBytes},
+		{app, "files in the package", AppLimits.MaxFiles, UnitFiles},
+		{app, "package size", AppLimits.MaxBytes, UnitBytes},
+		{app, "cover image", wire.MaxAppCoverBytes, UnitBytes},
+		{app, ReadmeFile, maxInstructions, UnitBytes},
 	}
 }

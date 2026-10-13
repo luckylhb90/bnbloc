@@ -102,7 +102,11 @@ func Pack(m Manifest, files map[string][]byte, opts Options) (*Package, []byte, 
 		all[k] = v
 	}
 	all[ManifestFile] = append(raw, '\n')
-	bundle, err := tarbundle.PackFiles(all, tarbundle.ContentLimits)
+	limits := BundleLimits()
+	if spec, ok := kinds[m.Kind]; ok {
+		limits = spec.Limits
+	}
+	bundle, err := tarbundle.PackFiles(all, limits)
 	if err != nil {
 		return nil, nil, err
 	}

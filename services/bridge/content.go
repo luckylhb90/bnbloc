@@ -265,7 +265,7 @@ func (b *Bridge) resolveJobContent(ctx context.Context, job bridgeJob, owner str
 // contentPackage downloads one bundle under the job's grant and validates
 // it against its pinned sha256 (cached by digest).
 func (b *Bridge) contentPackage(ctx context.Context, job bridgeJob, ref wire.ContentRef) (*contentpkg.Package, error) {
-	bundle, err := contentBundleCache().LoadPinned(ref.SHA256, tarbundle.ContentLimits, func() ([]byte, error) {
+	bundle, err := contentBundleCache().LoadPinned(ref.SHA256, contentpkg.BundleLimits(), func() ([]byte, error) {
 		q := url.Values{"job": {job.JobID}, "room": {job.RoomID}}
 		return b.gatewayGET(ctx, pkgmeta.GatewayArtifactPath(ref.BundleKey)+"?"+q.Encode())
 	})

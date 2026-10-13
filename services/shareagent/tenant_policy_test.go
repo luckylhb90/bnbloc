@@ -75,3 +75,29 @@ func TestTenantPolicy_settingsAndMemberRead(t *testing.T) {
 		t.Fatalf("anonymous read: %d, want 401", code)
 	}
 }
+
+// Publish approval (docs/prd/2026-10-13-app-gallery.md §11) is an org
+// admin's setting: required by default, "none" or "required" only, kept by
+// the other switches, readable by members.
+func TestTenantPolicy_publishApproval(t *testing.T) {
+	svc, _ := newService(t)
+	tenants := store.NewMemoryTenant()
+	_ = tenants.PutTenant(tctx("acme"), store.Tenant{TenantID: "acme", Name: "Acme", Status: store.TenantActive})
+	_ = tenants.PutMember(tctx("acme"), store.TenantMember{TenantID: "acme", UserID: "alice"})
+	svc.Tenants = tenants
+	if code, body := tenantPolicyReq(t, svc, http.MethodGet, "/v1/tenant/settings", "acme", "admin", nil); code != http.StatusOK || body["publishApproval"] != "required" {
+		t.Fatalf("default: %d %v", code, body)
+	}
+	if code, body := tenantPolicyReq(t, svc, http.MethodPut, "/v1/tenant/settings", "acme", "admin", map[string]any{"publishApproval": "sometimes"}); code != http.StatusBadRequest {
+		t.Fatalf("unknown value: %d %v", code, body)
+	}
+	if code, body := tenantPolicyReq(t, svc, http.MethodPut, "/v1/tenant/settings", "acme", "admin", map[string]any{"publishApproval": "none"}); code != http.StatusOK || body["publishApproval"] != "none" {
+		t.Fatalf("set none: %d %v", code, body)
+	}
+	if code, body := tenantPolicyReq(t, svc, http.MethodPut, "/v1/tenant/settings", "acme", "admin", map[string]any{"anonymousLinksDisabled": true}); code != http.StatusOK || body["publishApproval"] != "none" {
+		t.Fatalf("another switch kept it: %d %v", code, body)
+	}
+	if code, body := tenantPolicyReq(t, svc, http.MethodGet, "/v1/my/tenant-policy", "acme", "alice", nil); code != http.StatusOK || body["publishApproval"] != "none" {
+		t.Fatalf("member read: %d %v", code, body)
+	}
+}

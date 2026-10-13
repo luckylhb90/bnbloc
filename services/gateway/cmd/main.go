@@ -129,6 +129,8 @@ type tenantWiring struct {
 	// organization's org admins (content sharing and approval).
 	RoomMembers func(ctx context.Context, roomID string) ([]string, error)
 	OrgAdmins   func(tenantID string) ([]string, error)
+	// TenantSettings reads an organization's settings (publish approval).
+	TenantSettings func(ctx context.Context, tenantID string) (store.Tenant, error)
 	// Health pings the control-plane store for the readiness probe; nil when no
 	// DB is configured (dev/in-memory), which reads as always-ready.
 	Health func() error
@@ -227,7 +229,7 @@ func resolveTenantWiring() tenantWiring {
 		}
 		return out, nil
 	}
-	return tenantWiring{Resolve: res.Resolve, RoomMembers: roomMembers, OrgAdmins: orgAdmins, Suspended: suspended, MemberRole: memberRole, Settings: backends.Settings, ExtAudit: backends.ExtAudit, ComponentInstalls: backends.ComponentInstalls, NotifierReplies: backends.ReplyTokens, SSOHandoffs: backends.SSOHandoffs, RefreshTokens: backends.RefreshTokens, MemberCount: memberCount, Health: backends.HealthCheck(),
+	return tenantWiring{Resolve: res.Resolve, RoomMembers: roomMembers, OrgAdmins: orgAdmins, TenantSettings: tenants.GetTenant, Suspended: suspended, MemberRole: memberRole, Settings: backends.Settings, ExtAudit: backends.ExtAudit, ComponentInstalls: backends.ComponentInstalls, NotifierReplies: backends.ReplyTokens, SSOHandoffs: backends.SSOHandoffs, RefreshTokens: backends.RefreshTokens, MemberCount: memberCount, Health: backends.HealthCheck(),
 		APITokens: backends.APITokens,
 		// Built-in content (the Expert builder) overlays the stored components.
 		ContentComponents: contentbuiltin.Overlay(backends.ContentComponents),
@@ -311,6 +313,7 @@ func main() {
 		MemberCount:       tw.MemberCount,
 		RoomMembers:       tw.RoomMembers,
 		OrgAdmins:         tw.OrgAdmins,
+		TenantSettings:    tw.TenantSettings,
 		AllowedOrigins:    config.List("BNBLOC_ALLOWED_ORIGINS"),
 		TrustedProxies:    resolveTrustedProxies(),
 		PublicURL:         config.FromEnvRaw(notify.PublicURLEnv),

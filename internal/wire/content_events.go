@@ -21,10 +21,15 @@ type ContentUsesChanged struct {
 // reply. Payload: ContentSaved; clients act only on their own (Owner).
 const EventContentSaved = "content_saved"
 
-// ContentSaved actions.
+// ContentSaved actions: a save, a publish request to the organization, or
+// a publication to it that took effect at once (the organization requires
+// no approval).
+//
+//wire:union ContentSavedAction
 const (
 	ContentSavedSaved     = "saved"
 	ContentSavedSubmitted = "submitted"
+	ContentSavedPublished = "published"
 )
 
 // ContentSaved is the payload of EventContentSaved.
@@ -34,10 +39,11 @@ type ContentSaved struct {
 	Name        string `json:"name"`
 	DisplayName string `json:"displayName,omitempty"`
 	Version     string `json:"version"`
-	// Action is saved (a new component or version) or submitted (a publish
+	// Action is saved (a new component or version), submitted (a publish
 	// request to the organization, opened by publish_component or by the
-	// save of a new version of a component the organization uses).
-	Action string `json:"action"`
+	// save of a new version of a component the organization uses) or
+	// published (the same, where the organization requires no approval).
+	Action string `json:"action" tstype:"ContentSavedAction"`
 	// Created marks a new component (not a new version).
 	Created bool `json:"created,omitempty"`
 	// Owner is the member it was saved for (the job's requester).

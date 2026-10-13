@@ -50,7 +50,7 @@ assert(bad({ team: { lead: "", members: [{ role: "a", expert: "x", defaultAgent:
 const back = formFromVersion({
   component: {
     id: "cc_t", kind: "expert", name: "release-team", owner: "maya", scope: "personal", status: "active", latestVersion: "1.0.0", version: "1.0.0",
-    permissions: [], requires: {}, mine: true, removable: false, acked: true, uses: 0, runs: 0, members: 0, createdAtMs: 0, updatedAtMs: 0, tags: ["release"], icon: "rocket",
+    permissions: [], requires: {}, mine: true, removable: false, acked: true, uses: 0, runs: 0, members: 0, favorite: false, favoriteCount: 0, createdAtMs: 0, updatedAtMs: 0, tags: ["release"], icon: "rocket",
     team: { lead: "lead", members: [{ role: "reviewer", expert: "code-reviewer@^1", defaultAgent: "requester" }] },
   },
   version: { version: "1.0.0", sha256: "", bundleKey: "", bundleUrl: "", sizeBytes: 0, createdBy: "maya", createdAtMs: 0 },

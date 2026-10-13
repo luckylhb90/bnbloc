@@ -237,6 +237,7 @@ func (s *MySQLContentComponents) DeleteContentComponent(ctx context.Context, id 
 		`DELETE FROM content_publish_requests WHERE component_id = ?`,
 		`DELETE FROM content_room_shares WHERE component_id = ?`,
 		`DELETE FROM content_prompt_uses WHERE component_id = ?`,
+		`DELETE FROM content_favorites WHERE component_id = ?`,
 		`DELETE FROM content_permission_acks WHERE component_id = ?`,
 		`DELETE FROM content_component_uses WHERE component_id = ?`,
 		`DELETE FROM content_component_versions WHERE component_id = ?`,

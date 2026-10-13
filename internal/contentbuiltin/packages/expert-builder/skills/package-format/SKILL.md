@@ -171,4 +171,8 @@ add scripts only when the person asks for them.
 | prompt pack | variables[].options[] | 200 characters |
 | prompt pack | files in the package | 2 files |
 | prompt pack | package size | 1 MiB |
+| app | files in the package | 2001 files |
+| app | package size | 65 MiB |
+| app | cover image | 1 MiB |
+| app | README.md | 64 KiB |
 <!-- limits:end -->

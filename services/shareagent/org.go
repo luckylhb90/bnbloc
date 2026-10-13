@@ -11,6 +11,7 @@ import (
 	"github.com/luckylhb90/bnbloc/internal/obs"
 	"github.com/luckylhb90/bnbloc/internal/store"
 	"github.com/luckylhb90/bnbloc/internal/tenant"
+	"github.com/luckylhb90/bnbloc/internal/wire"
 )
 
 // memberView is the JSON projection of one tenant member for the org console.
@@ -301,6 +302,10 @@ type settingsView struct {
 	// in are off (creating or switching to one is refused, existing ones
 	// resolve 404); links for the organization's members stay allowed.
 	AnonymousLinksDisabled bool `json:"anonymousLinksDisabled"`
+	// PublishApproval: whether a member's publish to the organization
+	// waits for an org admin ("required", the default) or takes effect at
+	// once ("none"); contentshare.NeedsApproval reads it.
+	PublishApproval string `json:"publishApproval"`
 }
 
 func viewSettings(t store.Tenant) settingsView {
@@ -311,6 +316,7 @@ func viewSettings(t store.Tenant) settingsView {
 		SSOIssuer:               t.SSOIssuer,
 		RequireSandboxForBorrow: t.RequireSandboxForBorrow,
 		AnonymousLinksDisabled:  t.AnonymousLinksDisabled,
+		PublishApproval:         t.PublishApproval,
 	}
 }
 
@@ -335,12 +341,13 @@ type settingsBody struct {
 	SSOIssuer               *string `json:"ssoIssuer"`
 	RequireSandboxForBorrow *bool   `json:"requireSandboxForBorrow"`
 	AnonymousLinksDisabled  *bool   `json:"anonymousLinksDisabled"`
+	PublishApproval         *string `json:"publishApproval"`
 }
 
 // handleTenantUpdateSettings updates the tenant's display name, SSO
 // issuer/domain and policy switches (sandbox for borrowed drives, public share
-// links). Only provided fields change; the tenant id and status are not
-// editable here.
+// links, publish approval). Only provided fields change; the tenant id and
+// status are not editable here.
 func (s *Service) handleTenantUpdateSettings(w http.ResponseWriter, r *http.Request) {
 	if s.Tenants == nil {
 		httpx.Unavailable(w, "tenant registry")
@@ -348,6 +355,10 @@ func (s *Service) handleTenantUpdateSettings(w http.ResponseWriter, r *http.Requ
 	}
 	var body settingsBody
 	if !httpx.DecodeJSON(w, r, httpx.DefaultBodyLimit, &body) {
+		return
+	}
+	if body.PublishApproval != nil && !wire.ValidPublishApproval(*body.PublishApproval) {
+		httpx.Error(w, "publishApproval must be \""+wire.PublishApprovalRequired+"\" or \""+wire.PublishApprovalNone+"\"", http.StatusBadRequest)
 		return
 	}
 	tid := tenant.FromContext(r.Context())
@@ -370,10 +381,11 @@ func (s *Service) handleTenantUpdateSettings(w http.ResponseWriter, r *http.Requ
 		httpx.Error(w, "update settings failed", http.StatusInternalServerError)
 		return
 	}
-	if body.RequireSandboxForBorrow != nil || body.AnonymousLinksDisabled != nil {
+	if body.RequireSandboxForBorrow != nil || body.AnonymousLinksDisabled != nil || body.PublishApproval != nil {
 		t, err = s.Tenants.SetTenantPolicy(r.Context(), tid, store.TenantPolicyUpdate{
 			RequireSandboxForBorrow: body.RequireSandboxForBorrow,
 			AnonymousLinksDisabled:  body.AnonymousLinksDisabled,
+			PublishApproval:         body.PublishApproval,
 		})
 		if err != nil {
 			obs.ServerError(w, "update tenant policy failed", err)

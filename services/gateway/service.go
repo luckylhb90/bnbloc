@@ -67,6 +67,10 @@ type Service struct {
 	// OrgAdmins lists an organization's org admins (content publish
 	// requests notify them). nil notifies nobody.
 	OrgAdmins func(tenantID string) ([]string, error)
+	// TenantSettings reads an organization's settings (its publish
+	// approval: contentshare.NeedsApproval). nil reads as the defaults
+	// (approval required).
+	TenantSettings func(ctx context.Context, tenantID string) (store.Tenant, error)
 	// RoomTenant resolves a room's authoritative tenant (rooms.tenant_id) so a
 	// room-scoped request executes in the ROOM's tenant, not the caller's
 	// session tenant. Empty result leaves the session tenant in force. nil

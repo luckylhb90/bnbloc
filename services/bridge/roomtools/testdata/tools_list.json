@@ -131,22 +131,41 @@
         "openWorldHint": false,
         "readOnlyHint": false
       },
-      "description": "Save the package drafted in a directory of your workspace (for example drafts/contract-reviewer, holding component.json) to the Library of the person who asked you. It is validated first; a validation error says what to fix. Without id it creates a new component (refused if they already have one of that kind and name); with id (cc_...) it saves a new version of that component of theirs (the version number is bumped for you). Save only after the person confirmed.",
+      "description": "Save to the Library of the person who asked you, after they confirmed: the package drafted in a workspace directory (dir), or a site deliverable as an app (artifactId: its current files, never its data). It is validated first; an error says what to fix. Without id it creates a component (refused if they have one of that kind and name); with id (cc_...) it saves its next version.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
+          "artifactId": {
+            "description": "Instead of dir: a site deliverable's id (art_...).",
+            "type": "string"
+          },
+          "category": {
+            "enum": [
+              "office",
+              "data",
+              "productivity",
+              "content",
+              "learning",
+              "engineering",
+              "finance",
+              "life",
+              "other"
+            ],
+            "type": "string"
+          },
           "dir": {
             "description": "Workspace-relative directory holding component.json, e.g. drafts/contract-reviewer.",
             "type": "string"
           },
           "id": {
-            "description": "The component to save a new version of (from get_component or list_components); omit to create.",
+            "description": "The component to save a new version of; omit to create.",
+            "type": "string"
+          },
+          "name": {
+            "description": "A new app's name (lower-case, hyphens).",
             "type": "string"
           }
         },
-        "required": [
-          "dir"
-        ],
         "type": "object"
       },
       "name": "save_component",
@@ -208,7 +227,7 @@
         "openWorldHint": false,
         "readOnlyHint": false
       },
-      "description": "Change who can use a component saved in the Library of the person who asked you, only after they confirm. \"org\" asks their organization's admins to publish its latest version to everyone in the organization: it opens a request the admins approve or decline (members keep the previously approved version until then). \"personal\" withdraws a pending request and takes it out of the organization. \"platform\" (every organization) is a platform admin's action: say so instead.",
+      "description": "Change who can use a component saved in the Library of the person who asked you, only after they confirm. \"org\" publishes its latest version to their organization: unless it publishes without approval, as an admin's request (members keep the approved version until then). \"personal\" withdraws a pending request and takes it out of the organization. \"platform\" (every organization) is a platform admin's action: say so instead.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {

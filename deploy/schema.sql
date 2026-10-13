@@ -17,6 +17,7 @@ CREATE TABLE IF NOT EXISTS tenants (
   cost_allowance DECIMAL(18,6) NOT NULL DEFAULT 0,
   require_sandbox_for_borrow TINYINT(1) NOT NULL DEFAULT 0,
   anonymous_links_disabled TINYINT(1) NOT NULL DEFAULT 0,
+  publish_approval VARCHAR(16) NOT NULL DEFAULT 'required',
   created_at_ms BIGINT NOT NULL,
   retention_messages_days INT NULL,
   retention_artifact_versions_days INT NULL,
@@ -884,6 +885,19 @@ CREATE TABLE IF NOT EXISTS content_prompt_uses (
   use_count       BIGINT NOT NULL DEFAULT 0,
   last_used_at_ms BIGINT NOT NULL,
   PRIMARY KEY (component_id, tenant_id, prompt_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- A member's favorite content components (the app gallery's star,
+-- docs/prd/2026-10-13-app-gallery.md §7), per organization: built-in and
+-- platform content is starred in every organization, and one's counts are
+-- not another's. Deleted with the component.
+CREATE TABLE IF NOT EXISTS content_favorites (
+  tenant_id     VARCHAR(64) NOT NULL,
+  member_id     VARCHAR(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
+  component_id  VARCHAR(64) NOT NULL,
+  created_at_ms BIGINT NOT NULL,
+  PRIMARY KEY (tenant_id, member_id, component_id),
+  KEY idx_content_favorites_component (component_id, tenant_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- Interactive apps' documents (docs/prd/2026-10-12-interactive-apps.md

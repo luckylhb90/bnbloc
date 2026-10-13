@@ -41,6 +41,8 @@ function comp(over: Partial<ContentComponent>): ContentComponent {
     runs: 0,
     members: 0,
     uses: 0,
+    favorite: false,
+    favoriteCount: 0,
     createdAtMs: 1,
     updatedAtMs: 1,
     ...over,

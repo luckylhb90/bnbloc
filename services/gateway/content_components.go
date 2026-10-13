@@ -9,6 +9,7 @@ import (
 	"io"
 	"mime"
 	"net/http"
+	"net/url"
 	"sort"
 	"strings"
 	"sync"
@@ -177,6 +178,11 @@ func contentView(c store.ContentComponent, v store.ContentComponentVersion, clai
 		SharedBy: c.SharedBy, SourceID: c.SourceID,
 		CreatedAtMs: c.CreatedAtMs, UpdatedAtMs: c.UpdatedAtMs,
 	}
+	if c.Kind == contentpkg.KindApp {
+		// Answered 404 when the version ships no cover: a listing never
+		// opens an app's bundle (up to a site's size) to find out.
+		out.CoverURL = "/v1/content-components/" + url.PathEscape(c.ID) + "/versions/" + url.PathEscape(v.Version) + "/cover"
+	}
 	held := ownedBy(c, claims)
 	out.Mine = held && c.Scope == store.ContentScopePersonal
 	out.Removable = held && (c.Scope == store.ContentScopePersonal || c.Scope == store.ContentScopeShared)
@@ -199,7 +205,12 @@ func contentView(c store.ContentComponent, v store.ContentComponentVersion, clai
 
 // contentSkills fills the skill list of a view from the version's bundle
 // (best-effort: a listing degrades to no skill list rather than failing).
+// A site kind (an app) has no skills, and its bundle is never opened for a
+// listing.
 func (s *Service) contentSkills(ctx context.Context, v store.ContentComponentVersion, view *wire.ContentComponent) {
+	if spec, ok := contentpkg.Lookup(view.Kind); !ok || spec.Site {
+		return
+	}
 	pkg, err := s.contentPackage(ctx, v)
 	if err != nil {
 		return
@@ -267,6 +278,18 @@ func (s *Service) contentViews(ctx context.Context, claims auth.Claims, comps []
 	if err != nil {
 		return nil, err
 	}
+	starred, err := s.ContentComponents.ListContentFavorites(ctx, claims.Tenant, claims.Subject, idList)
+	if err != nil {
+		return nil, err
+	}
+	favorite := map[string]bool{}
+	for _, f := range starred {
+		favorite[f.ComponentID] = true
+	}
+	stars, err := s.ContentComponents.CountContentFavorites(ctx, claims.Tenant, idList)
+	if err != nil {
+		return nil, err
+	}
 	for _, c := range comps {
 		version := c.LatestVersion
 		if p := pinned[c.ID]; p != "" {
@@ -283,6 +306,7 @@ func (s *Service) contentViews(ctx context.Context, claims auth.Claims, comps []
 		if err != nil {
 			return nil, err
 		}
+		view.Favorite, view.FavoriteCount = favorite[c.ID], stars[c.ID]
 		s.contentSkills(ctx, v, &view)
 		out = append(out, view)
 	}
@@ -373,7 +397,7 @@ func (s *Service) handleCreateContent(w http.ResponseWriter, r *http.Request, ca
 	var bundle []byte
 	var err error
 	if isArchiveBody(r) {
-		raw, ok := readBody(w, r, tarbundle.ContentLimits.MaxArchiveBytes())
+		raw, ok := readBody(w, r, contentpkg.BundleLimits().MaxArchiveBytes())
 		if !ok {
 			return
 		}
@@ -431,7 +455,7 @@ func (s *Service) handleImportContent(w http.ResponseWriter, r *http.Request, ca
 	if !ok {
 		return
 	}
-	raw, ok := readBody(w, r, tarbundle.ContentLimits.MaxArchiveBytes())
+	raw, ok := readBody(w, r, contentpkg.BundleLimits().MaxArchiveBytes())
 	if !ok {
 		return
 	}
@@ -569,7 +593,7 @@ func (s *Service) handleNewContentVersion(w http.ResponseWriter, r *http.Request
 	var pkg *contentpkg.Package
 	var bundle []byte
 	if isArchiveBody(r) {
-		raw, ok := readBody(w, r, tarbundle.ContentLimits.MaxArchiveBytes())
+		raw, ok := readBody(w, r, contentpkg.BundleLimits().MaxArchiveBytes())
 		if !ok {
 			return
 		}
@@ -661,8 +685,10 @@ func (s *Service) addContentVersion(w http.ResponseWriter, r *http.Request, acto
 	next.LatestVersion = v.Version
 	s.auditJobSave(ctx, actor, next, v.Version)
 	s.contentSaved(ctx, actor, next, v.Version, wire.ContentSavedSaved, false)
-	resubmitted := s.resubmitOrgPublication(ctx, r, actor, next, v.Version)
-	s.writeContentDetailWith(w, r, claims, next, http.StatusCreated, func(d *wire.ContentComponentDetail) { d.Resubmitted = resubmitted })
+	res := s.resubmitOrgPublication(ctx, r, actor, next, v.Version)
+	s.writeContentDetailWith(w, r, claims, next, http.StatusCreated, func(d *wire.ContentComponentDetail) {
+		d.Resubmitted, d.OrgPublished = res.request, res.published
+	})
 }
 
 // writeContentDetail answers a component with its versions.
@@ -727,11 +753,11 @@ var contentBundles = struct {
 // contentPackage loads and validates a version's bundle (cached by digest).
 func (s *Service) contentPackage(ctx context.Context, v store.ContentComponentVersion) (*contentpkg.Package, error) {
 	contentBundles.once.Do(func() { contentBundles.cache = tarbundle.NewCache(64 << 20) })
-	b, err := contentBundles.cache.LoadPinned(v.SHA256, tarbundle.ContentLimits, func() ([]byte, error) {
+	b, err := contentBundles.cache.LoadPinned(v.SHA256, contentpkg.BundleLimits(), func() ([]byte, error) {
 		if raw, ok := contentbuiltin.Bundle(v.BundleBlobKey); ok {
 			return raw, nil
 		}
-		return s.readArtifactBlob(ctx, v.BundleBlobKey, tarbundle.ContentLimits.MaxArchiveBytes())
+		return s.readArtifactBlob(ctx, v.BundleBlobKey, contentpkg.BundleLimits().MaxArchiveBytes())
 	})
 	if err != nil {
 		return nil, err

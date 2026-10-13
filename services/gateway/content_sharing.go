@@ -38,7 +38,8 @@ import (
 // content-addressed bundle. It is pinned to what it was given; the author's
 // later edits reach it only when the recipient updates it. Only the author
 // of a personal component shares or publishes it. Organization publication
-// is a request an org admin decides (content_review.go); platform scope is
+// is a request an org admin decides (content_review.go), or immediate where
+// the organization requires no approval (publishToOrg); platform scope is
 // a super admin's signed install (content_platform.go).
 
 // Share and publish bounds.
@@ -460,18 +461,101 @@ func (s *Service) requestOrgPublication(w http.ResponseWriter, r *http.Request, 
 		httpx.Error(w, orgNameTaken(*holder, "rename yours: save it under a new name, and ask again"), http.StatusConflict)
 		return
 	}
-	view, err := s.openPublishRequest(ctx, r, actor, c, v.Version, note, org, true)
-	if err != nil {
-		obs.ServerError(w, "create publish request failed", err)
-		httpx.Error(w, "create publish request failed", http.StatusInternalServerError)
+	res, err := s.publishToOrg(ctx, r, actor, c, v, note, org, true)
+	switch {
+	case errors.Is(err, errStaleRequest):
+		httpx.Error(w, "the organization already uses a newer version: publish that one or a newer one", http.StatusConflict)
+		return
+	case errors.Is(err, store.ErrContentOrgNameTaken):
+		httpx.Error(w, "the organization already has a "+contentshare.KindLabel(c.Kind)+" named "+c.Name+": rename yours: save it under a new name, and publish again", http.StatusConflict)
+		return
+	case err != nil:
+		obs.ServerError(w, "publish to the organization failed", err)
+		httpx.Error(w, "publish to the organization failed", http.StatusInternalServerError)
 		return
 	}
-	approved := view.ApprovedVersion
+	if res.request == nil {
+		httpx.WriteJSON(w, http.StatusCreated, wire.ContentPublishReply{Scope: wire.ContentScopeOrg,
+			Note: "Published to your organization: its members can use version " + res.published + " now (your organization publishes without approval)."})
+		return
+	}
 	msg := "Waiting for an organization admin's approval."
-	if approved != "" {
+	if approved := res.request.ApprovedVersion; approved != "" {
 		msg += " Members keep using version " + approved + " until then."
 	}
-	httpx.WriteJSON(w, http.StatusCreated, wire.ContentPublishReply{Scope: wire.ContentScopePersonal, Request: &view, Note: msg})
+	httpx.WriteJSON(w, http.StatusCreated, wire.ContentPublishReply{Scope: wire.ContentScopePersonal, Request: res.request, Note: msg})
+}
+
+// orgPublishResult is what a publish to the organization did: opened a
+// request for an org admin, or published version published at once.
+type orgPublishResult struct {
+	request   *wire.ContentPublishRequest
+	published string
+}
+
+// publishToOrg is the ONE way a member's publish reaches the organization:
+// the publish route, the room tools' publish_component and a new version's
+// resubmission all call it, for every content kind. The organization's
+// settings decide through contentshare.NeedsApproval: by default it opens
+// a request an org admin approves (openPublishRequest, notifying the
+// admins when notifyAdmins); where the organization requires no approval
+// it publishes v at once (orgPublish), withdraws any pending request it
+// supersedes and audits the publication, which admins can still
+// unpublish, restore or remove. org is c's organization row (nil before a
+// first publication); the caller has checked the organization's name.
+func (s *Service) publishToOrg(ctx context.Context, r *http.Request, actor contentActor, c store.ContentComponent, v store.ContentComponentVersion, note string, org *store.ContentComponent, notifyAdmins bool) (orgPublishResult, error) {
+	settings, err := s.tenantSettings(ctx, c.TenantID)
+	if err != nil {
+		return orgPublishResult{}, err
+	}
+	if contentshare.NeedsApproval(settings) {
+		view, err := s.openPublishRequest(ctx, r, actor, c, v.Version, note, org, notifyAdmins)
+		if err != nil {
+			return orgPublishResult{}, err
+		}
+		return orgPublishResult{request: &view}, nil
+	}
+	claims := actor.Claims
+	row, err := s.orgPublish(ctx, c, v)
+	if err != nil {
+		return orgPublishResult{}, err
+	}
+	if err := s.withdrawPending(ctx, c, claims.Subject); err != nil {
+		return orgPublishResult{}, err
+	}
+	s.contentSaved(ctx, actor, c, v.Version, wire.ContentSavedPublished, false)
+	detail := contentshare.Label(c) + " v" + v.Version + " published to the organization by " + claims.Subject + " (no approval required)"
+	if actor.Job != nil {
+		detail += " (through agent " + actor.Job.OwnerUserID + "/" + actor.Job.Provider + ", job " + actor.Job.JobID + ")"
+	}
+	s.auditContent(ctx, "publish", claims.Subject, claims.Tenant, row, v.Version, detail+noteSuffix(note))
+	return orgPublishResult{published: row.LatestVersion}, nil
+}
+
+// tenantSettings reads an organization's settings; without a registry the
+// defaults (approval required).
+func (s *Service) tenantSettings(ctx context.Context, tenantID string) (store.Tenant, error) {
+	if s.TenantSettings == nil {
+		return store.Tenant{TenantID: tenantID, PublishApproval: wire.PublishApprovalRequired}, nil
+	}
+	return s.TenantSettings(ctx, tenantID)
+}
+
+// withdrawPending withdraws c's pending publish requests (by its author:
+// a withdrawal, or a direct publication that supersedes them).
+func (s *Service) withdrawPending(ctx context.Context, c store.ContentComponent, by string) error {
+	pending, err := s.ContentComponents.ListContentRequests(ctx, store.ContentRequestQuery{ComponentID: c.ID, Status: store.ContentRequestPending})
+	if err != nil {
+		return err
+	}
+	for _, p := range pending {
+		_, err := s.ContentComponents.DecideContentRequest(ctx, store.ContentRequestDecision{RequestID: p.ID, TenantID: p.TenantID,
+			Status: store.ContentRequestWithdrawn, By: by, AtMs: s.nowTime().UnixMilli()})
+		if err != nil && !errors.Is(err, store.ErrContentRequestDecided) {
+			return err
+		}
+	}
+	return nil
 }
 
 // openPublishRequest stores a pending request for version of the author's
@@ -523,43 +607,50 @@ func (s *Service) openPublishRequest(ctx context.Context, r *http.Request, actor
 	return publishRequestView(req, firstNonEmpty(c.DisplayName, c.Name), approved), nil
 }
 
-// resubmitOrgPublication opens the publish request of a new version the
-// author just saved, when their component is in use by the organization
-// (an active org row) or has a request pending ("Gap closure" 5): one
-// pending request per component (the new one supersedes it), and the
-// admins are notified only when none was pending, so repeated saves do not
-// repeat the notification. Best-effort: the save already succeeded, so a
-// failure is logged and the author can still ask by hand.
-func (s *Service) resubmitOrgPublication(ctx context.Context, r *http.Request, actor contentActor, c store.ContentComponent, version string) *wire.ContentPublishRequest {
+// resubmitOrgPublication publishes a new version the author just saved to
+// the organization (publishToOrg: a request, or at once where the
+// organization requires no approval) when their component is in use by
+// the organization (an active org row) or has a request pending ("Gap
+// closure" 5): one pending request per component (the new one supersedes
+// it), and the admins are notified only when none was pending, so repeated
+// saves do not repeat the notification. Best-effort: the save already
+// succeeded, so a failure is logged and the author can still publish by
+// hand.
+func (s *Service) resubmitOrgPublication(ctx context.Context, r *http.Request, actor contentActor, c store.ContentComponent, version string) orgPublishResult {
 	if c.Scope != store.ContentScopePersonal || !ownedBy(c, actor.Claims) {
-		return nil
+		return orgPublishResult{}
 	}
 	org, err := s.orgPublication(ctx, c)
 	if err != nil {
 		slog.Warn("bnbloc gateway: resubmit to the organization failed", "event", "bnbloc.content.resubmit_failed", "component", c.ID, "error", err)
-		return nil
+		return orgPublishResult{}
 	}
 	pending, err := s.ContentComponents.ListContentRequests(ctx, store.ContentRequestQuery{ComponentID: c.ID, Status: store.ContentRequestPending, Limit: 1})
 	if err != nil {
 		slog.Warn("bnbloc gateway: resubmit to the organization failed", "event", "bnbloc.content.resubmit_failed", "component", c.ID, "error", err)
-		return nil
+		return orgPublishResult{}
 	}
 	if (org == nil || org.Status != store.ContentStatusActive) && len(pending) == 0 {
-		return nil
+		return orgPublishResult{}
 	}
 	if holder, err := s.orgNameHolder(ctx, c); err != nil || holder != nil {
-		return nil // the name is another author's: the request could not be approved
+		return orgPublishResult{} // the name is another author's: the request could not be approved
+	}
+	v, err := s.ContentComponents.GetContentComponentVersion(ctx, c.ID, version)
+	if err != nil {
+		slog.Warn("bnbloc gateway: resubmit to the organization failed", "event", "bnbloc.content.resubmit_failed", "component", c.ID, "error", err)
+		return orgPublishResult{}
 	}
 	note := "Opened automatically for the new version " + version + "."
 	if len(pending) > 0 {
 		note = "Opened automatically for the new version " + version + " (replaces the request for " + pending[0].Version + ")."
 	}
-	view, err := s.openPublishRequest(ctx, r, actor, c, version, note, org, len(pending) == 0)
+	res, err := s.publishToOrg(ctx, r, actor, c, v, note, org, len(pending) == 0)
 	if err != nil {
 		slog.Warn("bnbloc gateway: resubmit to the organization failed", "event", "bnbloc.content.resubmit_failed", "component", c.ID, "error", err)
-		return nil
+		return orgPublishResult{}
 	}
-	return &view
+	return res
 }
 
 // orgNameHolder is the organization row of another component that holds
@@ -595,20 +686,10 @@ func orgNameTaken(holder store.ContentComponent, then string) string {
 func (s *Service) withdrawOrgPublication(w http.ResponseWriter, r *http.Request, claims auth.Claims, c store.ContentComponent) {
 	ctx := r.Context()
 	now := s.nowTime().UnixMilli()
-	pending, err := s.ContentComponents.ListContentRequests(ctx, store.ContentRequestQuery{ComponentID: c.ID, Status: store.ContentRequestPending})
-	if err != nil {
-		obs.ServerError(w, "list publish requests failed", err)
-		httpx.Error(w, "list publish requests failed", http.StatusInternalServerError)
+	if err := s.withdrawPending(ctx, c, claims.Subject); err != nil {
+		obs.ServerError(w, "withdraw publish request failed", err)
+		httpx.Error(w, "withdraw publish request failed", http.StatusInternalServerError)
 		return
-	}
-	for _, p := range pending {
-		_, err := s.ContentComponents.DecideContentRequest(ctx, store.ContentRequestDecision{RequestID: p.ID, TenantID: p.TenantID,
-			Status: store.ContentRequestWithdrawn, By: claims.Subject, AtMs: now})
-		if err != nil && !errors.Is(err, store.ErrContentRequestDecided) {
-			obs.ServerError(w, "withdraw publish request failed", err)
-			httpx.Error(w, "withdraw publish request failed", http.StatusInternalServerError)
-			return
-		}
 	}
 	org, err := s.orgPublication(ctx, c)
 	if err != nil {

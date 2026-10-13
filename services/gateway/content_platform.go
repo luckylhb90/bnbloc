@@ -20,7 +20,6 @@ import (
 	"github.com/luckylhb90/bnbloc/internal/obs"
 	"github.com/luckylhb90/bnbloc/internal/semver"
 	"github.com/luckylhb90/bnbloc/internal/store"
-	"github.com/luckylhb90/bnbloc/internal/tarbundle"
 	"github.com/luckylhb90/bnbloc/internal/wire"
 )
 
@@ -158,7 +157,7 @@ func (s *Service) installPlatformContent(w http.ResponseWriter, r *http.Request,
 	}
 	sha := pkg.Artifacts[contentpkg.PlatformBundleArtifact].SHA256
 	key := digest.Key(sha)
-	raw, err := s.readArtifactBlob(ctx, key, tarbundle.ContentLimits.MaxArchiveBytes())
+	raw, err := s.readArtifactBlob(ctx, key, contentpkg.BundleLimits().MaxArchiveBytes())
 	if err != nil {
 		httpx.Error(w, "read the package's bundle: "+err.Error(), http.StatusBadRequest)
 		return

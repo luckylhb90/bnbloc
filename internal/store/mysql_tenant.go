@@ -19,7 +19,7 @@ type MySQLTenant struct {
 func NewMySQLTenant(db *sql.DB) *MySQLTenant { return &MySQLTenant{DB: db} }
 
 // tenantCols is the column list a Tenant scans from, in Scan order.
-const tenantCols = `tenant_id, name, status, COALESCE(sso_issuer, ''), run_quota, cost_allowance, require_sandbox_for_borrow, anonymous_links_disabled, created_at_ms,
+const tenantCols = `tenant_id, name, status, COALESCE(sso_issuer, ''), run_quota, cost_allowance, require_sandbox_for_borrow, anonymous_links_disabled, publish_approval, created_at_ms,
   retention_messages_days, retention_artifact_versions_days, retention_audit_days, retention_agent_jobs_days`
 
 // scanTenant reads one row of tenantCols.
@@ -27,7 +27,7 @@ func scanTenant(sc rowScanner) (Tenant, error) {
 	var t Tenant
 	var status string
 	var ret [4]sql.NullInt64
-	if err := sc.Scan(&t.TenantID, &t.Name, &status, &t.SSOIssuer, &t.RunQuota, &t.CostAllowance, &t.RequireSandboxForBorrow, &t.AnonymousLinksDisabled, &t.CreatedAtMs,
+	if err := sc.Scan(&t.TenantID, &t.Name, &status, &t.SSOIssuer, &t.RunQuota, &t.CostAllowance, &t.RequireSandboxForBorrow, &t.AnonymousLinksDisabled, &t.PublishApproval, &t.CreatedAtMs,
 		&ret[0], &ret[1], &ret[2], &ret[3]); err != nil {
 		return Tenant{}, err
 	}
@@ -144,8 +144,9 @@ func (m *MySQLTenant) SetTenantPolicy(ctx context.Context, tenantID string, u Te
 	if _, err := m.DB.ExecContext(ctx, `
 UPDATE tenants SET
   require_sandbox_for_borrow = COALESCE(?, require_sandbox_for_borrow),
-  anonymous_links_disabled = COALESCE(?, anonymous_links_disabled)
-WHERE tenant_id = ?`, nullPtr(u.RequireSandboxForBorrow), nullPtr(u.AnonymousLinksDisabled), tenantID); err != nil {
+  anonymous_links_disabled = COALESCE(?, anonymous_links_disabled),
+  publish_approval = COALESCE(?, publish_approval)
+WHERE tenant_id = ?`, nullPtr(u.RequireSandboxForBorrow), nullPtr(u.AnonymousLinksDisabled), nullPtr(u.PublishApproval), tenantID); err != nil {
 		return Tenant{}, err
 	}
 	// The stored row is the result (ErrTenantNotFound when there is none).

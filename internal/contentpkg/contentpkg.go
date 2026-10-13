@@ -27,6 +27,7 @@ const (
 	KindExpert = "bnbloc.expert.package/v1"
 	KindSkill  = "bnbloc.skill.package/v1"
 	KindPrompt = "bnbloc.prompt.package/v1"
+	KindApp    = "bnbloc.app.package/v1"
 )
 
 // ManifestFile is the manifest's path in every content bundle.
@@ -155,6 +156,11 @@ type KindSpec struct {
 	// content use of member scope): skill packs (all their agents) and
 	// prompt packs (their composer). Experts are picked per message.
 	MemberUse bool
+	// Site reports a kind whose bundle is a site (apps): its code runs
+	// only in the sandboxed site frame, never on a member's machine, so a
+	// script file in it is no executable content (no scripts permission,
+	// no sandbox forced).
+	Site bool
 	// validate checks the kind's own manifest fields and files.
 	validate func(p *Package) error
 	// fromForm lays out the kind's files from a form save.
@@ -167,15 +173,27 @@ type KindSpec struct {
 
 var kinds = map[string]KindSpec{}
 
+// bundleLimits is the widest limit profile of the registered kinds
+// (BundleLimits).
+var bundleLimits tarbundle.Limits
+
 func register(k KindSpec) {
 	if _, dup := kinds[k.Kind]; dup {
 		panic("contentpkg: duplicate kind " + k.Kind)
 	}
 	kinds[k.Kind] = k
+	bundleLimits.MaxBytes = max(bundleLimits.MaxBytes, k.Limits.MaxBytes)
+	bundleLimits.MaxFiles = max(bundleLimits.MaxFiles, k.Limits.MaxFiles)
 	// A content kind is also a pkgmeta package kind: its signed platform
 	// package (platform.go) installs through the component pipeline.
 	pkgmeta.RegisterKindValidator(k.Kind, validatePlatformPackage)
 }
+
+// BundleLimits is the one limit profile a content bundle is read within
+// before its manifest names its kind (an upload, a stored version, an
+// archive import): the widest of the registered kinds'. Each kind's own,
+// equal or narrower, caps are checked once the kind is known.
+func BundleLimits() tarbundle.Limits { return bundleLimits }
 
 // Lookup returns the registered kind by manifest kind or short name.
 func Lookup(kind string) (KindSpec, bool) {
