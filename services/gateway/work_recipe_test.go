@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"slices"
 	"strings"
 	"testing"
 
@@ -109,7 +110,12 @@ func TestRecipeCapturedFromTheProducingJob(t *testing.T) {
 		r.Agent == nil || r.Agent.Core != "acme" || r.Agent.Provider != "codex" {
 		t.Fatalf("recipe = %+v", r)
 	}
-	if len(r.Skills) != 2 || r.Skills[0].Name != "charts" || r.Skills[1].Name != "palettes" || len(r.Prompts) != 1 || r.Prompts[0].Name != "chart-prompts" {
+	skills := []string{}
+	for _, p := range r.Skills {
+		skills = append(skills, p.Name)
+	}
+	slices.Sort(skills)
+	if strings.Join(skills, ",") != "charts,palettes" || len(r.Prompts) != 1 || r.Prompts[0].Name != "chart-prompts" {
 		t.Fatalf("recipe packs = %+v %+v", r.Skills, r.Prompts)
 	}
 	if len(r.References) != 2 || r.References[0].AttachmentID != brief || r.References[0].Name != "brief.md" || r.References[0].ContentType != "text/markdown" ||
@@ -136,6 +142,11 @@ func TestRecipeCapturedFromTheProducingJob(t *testing.T) {
 	}
 	if got := strings.Join(e.versionFiles("maya", w.ID, "1.0.0"), ","); got != "component.json,q3.png,references/brief.md,references/sales.csv" {
 		t.Fatalf("the work's files = %s", got)
+	}
+	// A related file downloads by its path, named as attached.
+	if r := e.call(http.MethodGet, "/v1/content-components/"+w.ID+"/versions/1.0.0/file?path=references/brief.md", nil, e.as("maya")); r.status != http.StatusOK ||
+		string(r.body) != "# Brief\nBars, not pies.\n" || !strings.Contains(r.header.Get("Content-Disposition"), "brief.md") {
+		t.Fatalf("a reference file = %d %v", r.status, r.header)
 	}
 }
 

@@ -374,6 +374,68 @@ func (s *Service) handleWorkCover(w http.ResponseWriter, r *http.Request, caller
 	writeCover(w, r, cover)
 }
 
+// handleWorkFile serves a work version's file to a caller who may read
+// the component: its one file (a work that is not a site; the detail's
+// viewers render it), or with ?path= one of its recipe's reference files.
+// The bytes are typed by their name (store.ArtifactMIME) and served as an
+// artifact's are: nosniff, a sandbox CSP, inline only for a raster image.
+func (s *Service) handleWorkFile(w http.ResponseWriter, r *http.Request, caller auth.Claims) {
+	actor, ok := s.contentCaller(w, r, caller, grantRefused)
+	if !ok {
+		return
+	}
+	ctx := r.Context()
+	c, err := s.readableContent(ctx, actor.Claims, r.PathValue("id"), actor.Room)
+	if err == nil && c.Kind != contentpkg.KindWork {
+		err = store.ErrContentNotFound
+	}
+	if err != nil {
+		contentStoreErr(w, "load content component failed", err)
+		return
+	}
+	v, err := s.ContentComponents.GetContentComponentVersion(ctx, c.ID, r.PathValue("version"))
+	if err != nil {
+		contentStoreErr(w, "load content version failed", err)
+		return
+	}
+	pkg, err := s.contentPackage(ctx, v)
+	if err != nil {
+		obs.ServerError(w, "load content bundle failed", err)
+		httpx.Error(w, "load content bundle failed", http.StatusBadGateway)
+		return
+	}
+	name, data, ok := contentpkg.WorkFile(pkg)
+	if p := r.URL.Query().Get("path"); p != "" {
+		ok = false
+		for _, ref := range contentpkg.WorkReferences(pkg) {
+			if ref.Ref.File == p {
+				name, data, ok = ref.Ref.Name, ref.Data, true
+			}
+		}
+	}
+	if !ok {
+		httpx.Error(w, "no such file in this work", http.StatusNotFound)
+		return
+	}
+	mt := store.ArtifactMIME(name, data[:min(len(data), 512)])
+	h := w.Header()
+	h.Set("Content-Type", mt)
+	disposition := "attachment"
+	if store.IsInlineSafeImage(mt) {
+		disposition = "inline"
+	}
+	h.Set("Content-Disposition", httpx.ContentDisposition(disposition, name))
+	h.Set("X-Content-Type-Options", "nosniff")
+	h.Set("Content-Security-Policy", "default-src 'none'; sandbox")
+	// A version never changes: its files are cached by the member's browser.
+	h.Set("Cache-Control", "private, max-age=3600")
+	h.Set("Content-Length", strconv.Itoa(len(data)))
+	if r.Method == http.MethodHead {
+		return
+	}
+	_, _ = w.Write(data)
+}
+
 // handleFavorite stars (PUT) a component visible to the caller, or takes
 // the star back (DELETE, whatever the component's visibility now), in the
 // organization they act in.

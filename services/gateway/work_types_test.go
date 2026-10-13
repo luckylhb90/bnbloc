@@ -100,6 +100,33 @@ func TestPublishWorkEveryType(t *testing.T) {
 		t.Fatalf("the video's frame cover = %d", r.status)
 	}
 
+	// The detail's viewers read a work's file: typed by its name, never
+	// sniffed; only a raster image inline.
+	if r := e.call(http.MethodGet, "/v1/content-components/"+img.ID+"/versions/1.0.0/file", nil, e.as("maya")); r.status != http.StatusOK ||
+		r.header.Get("Content-Type") != "image/png" || !strings.HasPrefix(r.header.Get("Content-Disposition"), "inline") || r.header.Get("X-Content-Type-Options") != "nosniff" || string(r.body) != png {
+		t.Fatalf("the image work's file = %d %v", r.status, r.header)
+	}
+	plan := e.libraryApp("maya", "plan")
+	if r := e.call(http.MethodGet, "/v1/content-components/"+plan.ID+"/versions/1.0.0/file", nil, e.as("maya")); r.status != http.StatusOK ||
+		!strings.HasPrefix(r.header.Get("Content-Type"), "text/markdown") || !strings.HasPrefix(r.header.Get("Content-Disposition"), "attachment") || string(r.body) != "# Plan\n" {
+		t.Fatalf("the document work's file = %d %v %s", r.status, r.header, r.body)
+	}
+	if r := e.call(http.MethodGet, "/v1/content-components/"+plan.ID+"/versions/1.0.0/file?path=component.json", nil, e.as("maya")); r.status != http.StatusNotFound {
+		t.Fatalf("a file that is not the work's = %d", r.status)
+	}
+	if r := e.call(http.MethodGet, "/v1/content-components/"+plan.ID+"/versions/1.0.0/file", nil, e.as("jack")); r.status != http.StatusNotFound {
+		t.Fatalf("someone else's personal work's file = %d", r.status)
+	}
+	// A site work previews in the sandboxed frame (a demo URL); a file
+	// work has none.
+	site := e.publishApp("maya", e.realSite(e.roomID, map[string]string{"index.html": "<p>hello</p>"}), wire.WorkPublishRequest{Name: "hello"})
+	if site.WorkType != wire.WorkTypeSite {
+		t.Fatalf("a site work = %+v", site)
+	}
+	if r := e.demo("maya", site.ID, "1.0.0"); r.status != http.StatusOK {
+		t.Fatalf("a site work's preview = %d %s", r.status, r.body)
+	}
+
 	// Only an app is used as a copy or tried as a demo.
 	if r := e.call(http.MethodPost, "/v1/content-components/"+img.ID+"/use-app", wire.AppUseRequest{RoomID: e.roomID}, e.as("maya")); r.status != http.StatusBadRequest {
 		t.Fatalf("use-app of an image = %d %s", r.status, r.body)

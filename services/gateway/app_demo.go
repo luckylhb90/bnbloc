@@ -93,15 +93,16 @@ func (s *Service) handleAppDemo(w http.ResponseWriter, r *http.Request, caller a
 	httpx.WriteJSON(w, http.StatusOK, wire.AppDemo{SiteURL: s.siteURL(memberSiteBase(ticket)), ExpiresAtMs: expires.UnixMilli()})
 }
 
-// demoVersion is an app work's version the claims may read; any other
-// work or kind is a not-found (Try demo is an app's only).
+// demoVersion is a site or app work's version the claims may read (an
+// app's Try demo, a site work's preview in its detail); any other work or
+// kind is a not-found.
 func (s *Service) demoVersion(ctx context.Context, claims auth.Claims, id, version string) (store.ContentComponent, store.ContentComponentVersion, error) {
 	c, err := s.readableContent(ctx, claims, id, "")
 	if err != nil {
 		return store.ContentComponent{}, store.ContentComponentVersion{}, err
 	}
 	v, err := s.ContentComponents.GetContentComponentVersion(ctx, c.ID, version)
-	if err == nil && workTypeOf(c, v) != wire.WorkTypeApp {
+	if err == nil && !wire.WorkTypeIsSite(workTypeOf(c, v)) {
 		err = store.ErrContentNotFound
 	}
 	return c, v, err
