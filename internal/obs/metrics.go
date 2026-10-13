@@ -193,6 +193,9 @@ var routeWords = map[string]bool{
 	"dispatch": true,
 	// expert teams: which agent takes each role, and its estimate.
 	"team-plan": true,
+	// the works gallery: a deliverable published as a work, its recipe,
+	// and a draft started from one.
+	"publish-work": true, "recipe": true, "make-similar": true,
 	// MCP tool components: organization connectors.
 	"mcp-connectors": true,
 	// content sharing and approval: /v1/content-components/{id}/shares|

@@ -25,6 +25,7 @@ import (
 	"github.com/luckylhb90/bnbloc/internal/blobstore"
 	"github.com/luckylhb90/bnbloc/internal/digest"
 	"github.com/luckylhb90/bnbloc/internal/ids"
+	"github.com/luckylhb90/bnbloc/internal/membership"
 	"github.com/luckylhb90/bnbloc/internal/obs"
 	"github.com/luckylhb90/bnbloc/internal/realtime"
 	"github.com/luckylhb90/bnbloc/internal/sealbox"
@@ -90,7 +91,8 @@ func newAppGW(t *testing.T) *appGW {
 		t.Fatal(err)
 	}
 	e.blobs = disk
-	rtSrv := httptest.NewServer(e.countAppCalls(svcauth.Middleware(appGWKey, (&realtimehttp.Service{Hub: e.hub, Blobs: disk}).Handler())))
+	rt := &realtimehttp.Service{Hub: e.hub, Blobs: disk, Attachments: b.Attachments}
+	rtSrv := httptest.NewServer(e.countAppCalls(svcauth.Middleware(appGWKey, rt.Handler())))
 	t.Cleanup(rtSrv.Close)
 
 	raw := make([]byte, 32)
@@ -108,6 +110,8 @@ func newAppGW(t *testing.T) *appGW {
 	roomSrv := httptest.NewServer(e.countAppCalls(svcauth.Middleware(appGWKey, e.room.Handler())))
 	t.Cleanup(roomSrv.Close)
 	e.roomURL = roomSrv.URL
+	// realtime's room routes (attachments) ask the room service.
+	rt.Membership = membership.NewRoomClient(roomSrv.URL)
 
 	e.gw = newGateway(t, roomSrv.URL)
 	e.gw.Backends.Realtime = rtSrv.URL

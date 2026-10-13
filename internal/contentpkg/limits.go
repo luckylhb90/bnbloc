@@ -73,6 +73,9 @@ func Limits() []Limit {
 		{work, "files in the package", WorkLimits.MaxFiles, UnitFiles},
 		{work, "package size", WorkLimits.MaxBytes, UnitBytes},
 		{work, "cover image", wire.MaxWorkCoverBytes, UnitBytes},
+		{work, "recipe.references", wire.MaxWorkReferences, UnitItems},
+		{work, "recipe reference files together", wire.MaxWorkReferenceBytes, UnitBytes},
+		{work, "recipe.prompt", wire.MaxChatTextBytes, UnitBytes},
 		{work, ReadmeFile, maxInstructions, UnitBytes},
 	}
 }

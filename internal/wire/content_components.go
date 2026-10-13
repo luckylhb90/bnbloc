@@ -75,6 +75,9 @@ type ContentComponent struct {
 	// snapshots); WorkFile its one file (absent for a site or an app).
 	WorkType string `json:"workType,omitempty" tstype:"WorkType"`
 	WorkFile string `json:"workFile,omitempty"`
+	// Recipe is how a work was made (its manifest's), absent when it
+	// carries none.
+	Recipe *WorkRecipe `json:"recipe,omitempty"`
 	// Team is a team expert's roster (as its manifest names it).
 	Team        *ContentTeam `json:"team,omitempty"`
 	CreatedAtMs int64        `json:"createdAtMs"`

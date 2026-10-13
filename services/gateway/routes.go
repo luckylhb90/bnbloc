@@ -213,6 +213,7 @@ func (s *Service) routes() []route {
 		member("DELETE /v1/content-components/{id}/favorite", s.handleFavorite).spends(costBudget).with(needContent),
 		gated("POST /v1/content-components/{id}/use-app", create, s.handleUseApp).spends(costBudget).with(needContent),
 		gated("POST /v1/rooms/{roomId}/artifacts/{artifactId}/publish-work", drive, s.handlePublishWork).spends(costBudget).with(needContent),
+		member("GET /v1/rooms/{roomId}/artifacts/{artifactId}/recipe", s.handleDeliverableRecipe).with(needContent),
 
 		// Organization administration (manage_org in the acting tenant).
 		gated("GET /v1/tenant/mcp-connectors", org, s.handleListMCPConnectors),

@@ -131,7 +131,7 @@
         "openWorldHint": false,
         "readOnlyHint": false
       },
-      "description": "Save to the Library of the person who asked you, after they confirmed: a package drafted in a workspace directory (dir), or a deliverable as a gallery work (artifactId: its current version, never its data). Validated first; an error says what to fix. Without id it creates (refused if they have one of that kind and name); with id (cc_...) it saves the next version.",
+      "description": "Save to the Library of the person who asked you, after they confirmed: a package drafted in a workspace directory (dir), or a deliverable as a gallery work (artifactId: its current version and recipe, never its data). Validated first; an error says what to fix. Without id it creates (refused if they have one of that kind and name); with id (cc_...) it saves the next version.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {

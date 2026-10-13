@@ -68,4 +68,9 @@ const (
 	// .webp at the bundle's root, or an image work's image): a larger one
 	// is not served, and the card draws the generated cover.
 	MaxWorkCoverBytes = 1 << 20
+	// MaxWorkReferences bounds the reference files a work's recipe keeps
+	// (the request's attachments, in order; the rest are left out).
+	MaxWorkReferences = 8
+	// MaxWorkReferenceBytes bounds the reference files of a work together.
+	MaxWorkReferenceBytes = 25 << 20
 )

@@ -182,7 +182,7 @@ func contentView(c store.ContentComponent, v store.ContentComponentVersion, clai
 		// Answered 404 when the version has no cover: a listing never
 		// opens a work's bundle (up to a site's size) to find out.
 		out.CoverURL = "/v1/content-components/" + url.PathEscape(c.ID) + "/versions/" + url.PathEscape(v.Version) + "/cover"
-		out.WorkType, out.WorkFile = m.Type, m.File
+		out.WorkType, out.WorkFile, out.Recipe = m.Type, m.File, m.Recipe
 	}
 	held := ownedBy(c, claims)
 	out.Mine = held && c.Scope == store.ContentScopePersonal

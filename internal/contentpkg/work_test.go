@@ -3,6 +3,7 @@ package contentpkg
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"image"
 	"image/color"
 	"image/jpeg"
@@ -368,4 +369,113 @@ func keys(m map[string][]byte) []string {
 		out = append(out, k)
 	}
 	return out
+}
+
+// A recipe rides the manifest; its reference files lie under references/,
+// each under a name of its own; a site's copy leaves them out.
+func TestWorkRecipe(t *testing.T) {
+	recipe := &wire.WorkRecipe{
+		Prompt: "Make a lunch poll for Friday",
+		Expert: &wire.WorkRecipePart{ID: "cc_1", Name: "poll-maker", DisplayName: "Poll maker", Version: "1.2.0"},
+		Skills: []wire.WorkRecipePart{{ID: "cc_2", Name: "interactive-apps", Version: "1.3.0"}},
+		Agent:  &wire.WorkRecipeAgent{Core: "acme", Provider: "codex"},
+	}
+	refs := []WorkReferenceFile{
+		{Ref: wire.WorkReference{AttachmentID: "att_1", Name: "brief.md", ContentType: "text/markdown"}, Data: []byte("# Brief")},
+		{Ref: wire.WorkReference{AttachmentID: "att_2", Name: "../brief.md", ContentType: "text/markdown"}, Data: []byte("# Brief 2")},
+	}
+	raw, _ := tarbundle.PackFiles(map[string][]byte{"index.html": []byte("<p>poll</p>"), "references/notes.txt": []byte("the site's own")}, tarbundle.SiteLimits)
+	site, _ := tarbundle.Parse(raw, "", tarbundle.SiteLimits)
+	m := Manifest{Name: "lunch-poll", Version: "1.0.0", Recipe: recipe}
+	p, bundle, err := WorkFromDeliverable(WorkDeliverable{Artifact: wire.Artifact{Kind: store.ArtifactKindSite}}, WorkSnapshot{Site: site, References: refs}, m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := p.Manifest.Recipe
+	if got == nil || got.Prompt != recipe.Prompt || got.Expert.Name != "poll-maker" || len(got.References) != 2 ||
+		got.References[0].File != "references/brief.md" || got.References[1].File != "references/2-brief.md" ||
+		got.References[0].AttachmentID != "" || got.References[1].SizeBytes != 9 {
+		t.Fatalf("recipe = %+v", got)
+	}
+	if recipe.References != nil {
+		t.Fatal("the caller's recipe was changed")
+	}
+	// It survives a stored read.
+	if p, err = Validate(bundle, "", Options{}); err != nil || len(WorkReferences(p)) != 2 || string(WorkReferences(p)[1].Data) != "# Brief 2" {
+		t.Fatalf("stored = %v", err)
+	}
+	copied := WorkSite(p)
+	if _, ok := copied["references/brief.md"]; ok {
+		t.Fatal("a site's copy holds the recipe's references")
+	}
+	if string(copied["references/notes.txt"]) != "the site's own" {
+		t.Fatal("a site's copy lost its own references/ folder")
+	}
+	// An image work with references.
+	img, _, err := WorkFromDeliverable(WorkDeliverable{Artifact: wire.Artifact{Kind: store.ArtifactKindImage}}, WorkSnapshot{Name: "chart.png", Data: pngBytes(t, 4, 4), References: refs[:1]}, m)
+	if err != nil || len(img.Manifest.Recipe.References) != 1 {
+		t.Fatalf("an image work with a reference = %v", err)
+	}
+	// No recipe: the references go nowhere.
+	none, _, err := WorkFromDeliverable(WorkDeliverable{Artifact: wire.Artifact{Kind: store.ArtifactKindImage}}, WorkSnapshot{Name: "chart.png", Data: pngBytes(t, 4, 4), References: refs}, Manifest{Name: "x", Version: "1.0.0"})
+	if err != nil || none.Manifest.Recipe != nil || len(none.Bundle.Paths()) != 2 {
+		t.Fatalf("no recipe = %v %v", err, none.Bundle.Paths())
+	}
+}
+
+func TestWorkRecipeRefused(t *testing.T) {
+	img := pngBytes(t, 4, 4)
+	base := func() map[string]any {
+		return map[string]any{"type": wire.WorkTypeImage, "file": "chart.png"}
+	}
+	ref := map[string]any{"file": "references/brief.md", "name": "brief.md", "contentType": "text/markdown", "sizeBytes": 7}
+	for _, c := range []struct {
+		name   string
+		recipe map[string]any
+		files  map[string][]byte
+		want   string
+	}{
+		{"a long prompt", map[string]any{"prompt": strings.Repeat("x", wire.MaxChatTextBytes+1)}, nil, "recipe prompt"},
+		{"a bad skill name", map[string]any{"skills": []any{map[string]any{"id": "cc_1", "name": "Bad Name"}}}, nil, "name"},
+		{"a skill without an id", map[string]any{"skills": []any{map[string]any{"name": "review"}}}, nil, "an id"},
+		{"a bad version", map[string]any{"expert": map[string]any{"id": "cc_1", "name": "x", "version": "one"}}, nil, "version"},
+		{"an agent without a provider", map[string]any{"agent": map[string]any{"core": "acme"}}, nil, "a provider"},
+		{"a missing reference", map[string]any{"references": []any{ref}}, nil, "not in the bundle"},
+		{"a reference outside references/", map[string]any{"references": []any{map[string]any{"file": "brief.md", "name": "brief.md", "contentType": "text/markdown", "sizeBytes": 7}}},
+			map[string][]byte{"brief.md": []byte("# Brief")}, "under references/"},
+		{"a reference of another size", map[string]any{"references": []any{map[string]any{"file": "references/brief.md", "name": "brief.md", "contentType": "text/markdown", "sizeBytes": 3}}},
+			map[string][]byte{"references/brief.md": []byte("# Brief")}, "not 3"},
+		{"a stored attachment", map[string]any{"references": []any{map[string]any{"file": "references/brief.md", "attachmentId": "att_1", "name": "brief.md", "contentType": "text/markdown", "sizeBytes": 7}}},
+			map[string][]byte{"references/brief.md": []byte("# Brief")}, "names no attachment"},
+		{"an unlisted reference file", map[string]any{}, map[string][]byte{"references/brief.md": []byte("# Brief")}, "holds only its file"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			extra := base()
+			extra["recipe"] = c.recipe
+			files := map[string][]byte{"chart.png": img}
+			for k, v := range c.files {
+				files[k] = v
+			}
+			if _, err := Validate(workBundle(t, files, extra), "", Options{}); err == nil || !strings.Contains(err.Error(), c.want) {
+				t.Fatalf("err = %v, want %q", err, c.want)
+			}
+		})
+	}
+	too := []any{}
+	files := map[string][]byte{"chart.png": img}
+	for i := 0; i <= wire.MaxWorkReferences; i++ {
+		f := fmt.Sprintf("references/r%d.txt", i)
+		files[f] = []byte("x")
+		too = append(too, map[string]any{"file": f, "name": "r.txt", "contentType": "text/plain", "sizeBytes": 1})
+	}
+	extra := base()
+	extra["recipe"] = map[string]any{"references": too}
+	if _, err := Validate(workBundle(t, files, extra), "", Options{}); err == nil || !strings.Contains(err.Error(), "reference files") {
+		t.Fatalf("too many references = %v", err)
+	}
+	extra = base()
+	extra["recipe"] = map[string]any{"prompt": "fine", "references": []any{ref}}
+	if _, err := Validate(workBundle(t, map[string][]byte{"chart.png": img, "references/brief.md": []byte("# Brief")}, extra), "", Options{}); err != nil {
+		t.Fatalf("a valid recipe: %v", err)
+	}
 }

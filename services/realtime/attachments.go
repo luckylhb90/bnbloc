@@ -185,6 +185,32 @@ func (s *Service) handleDownloadAttachment(w http.ResponseWriter, r *http.Reques
 	_, _ = io.Copy(w, blob)
 }
 
+// handleAttachmentMeta answers a stored attachment's metadata to a room
+// member (wire.ChatAttachment: its name, declared type and size), as a
+// chat message embeds it: what a work's recipe records of a request's
+// attachment (docs/prd/2026-10-13-works-gallery-and-make-similar.md §3).
+func (s *Service) handleAttachmentMeta(w http.ResponseWriter, r *http.Request) {
+	roomID, _, _, ok := s.room(w, r, membership.AnyMember)
+	if !ok {
+		return
+	}
+	if !s.attachmentsReady() {
+		httpx.Unavailable(w, "attachments")
+		return
+	}
+	att, ok, err := s.Attachments.GetAttachment(r.Context(), roomID, strings.TrimSpace(r.PathValue("attachmentId")))
+	if err != nil {
+		obs.ServerError(w, "attachment lookup failed", err)
+		httpx.Error(w, "attachment lookup failed", http.StatusInternalServerError)
+		return
+	}
+	if !ok {
+		httpx.Error(w, "attachment not found", http.StatusNotFound)
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, attachmentMeta(att))
+}
+
 // writeAttachmentHeaders sets the download response headers. Only verified
 // raster images render inline with their type; everything else (including
 // rows stored before upload sniffing existed, e.g. SVG) is an opaque

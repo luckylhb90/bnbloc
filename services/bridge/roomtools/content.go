@@ -62,7 +62,7 @@ func saveComponentTool() Tool {
 		Name:  "save_component",
 		Title: "Save a drafted component",
 		Description: "Save to the Library of the person who asked you, after they confirmed: a package drafted in a workspace directory (dir), " +
-			"or a deliverable as a gallery work (artifactId: its current version, never its data). Validated first; an error says what to fix. " +
+			"or a deliverable as a gallery work (artifactId: its current version and recipe, never its data). Validated first; an error says what to fix. " +
 			"Without id it creates (refused if they have one of that kind and name); with id (cc_...) it saves the next version.",
 		InputSchema: objectSchema(map[string]any{
 			"dir":        map[string]any{"type": "string", "description": "Workspace-relative directory holding component.json, e.g. drafts/contract-reviewer."},
@@ -201,6 +201,8 @@ type componentDetail struct {
 		Mine          bool   `json:"mine"`
 		Owner         string `json:"owner"`
 		SharedBy      string `json:"sharedBy"`
+		// Recipe is a saved work's: how it was made.
+		Recipe *wire.WorkRecipe `json:"recipe"`
 	} `json:"component"`
 	// Resubmitted is the publish request the save opened by itself: the
 	// organization uses the component, so the new version waits for an
@@ -284,6 +286,10 @@ func saveComponent(ctx context.Context, env *Env, args json.RawMessage) Result {
 	}
 	if c.Kind == "work" {
 		out["note"] = fmt.Sprintf("Saved the work %s version %s to the Library of the person who asked you: a snapshot of the deliverable, without its data. publish_component shares it with their organization's gallery.", c.Name, c.LatestVersion)
+		if c.Recipe != nil {
+			out["recipe"] = recipeSummary(c.Recipe)
+			out["note"] = out["note"].(string) + " It carries its recipe (the request, its expert, packs and reference files), which others start from with Make similar: say so, and that they can edit or drop it by publishing the deliverable again from its card."
+		}
 	}
 	if rs := d.Resubmitted; rs != nil {
 		keep := ""
@@ -449,4 +455,36 @@ func listComponents(ctx context.Context, env *Env, args json.RawMessage) Result 
 		items[i].Description = roomlog.Truncate(items[i].Description, maxListedDescription)
 	}
 	return Result{Value: map[string]any{"components": items}}
+}
+
+// recipeSummary is what save_component reports of a saved work's recipe:
+// whether it keeps the request's text, the expert, the packs and the
+// reference files by name, so the agent can tell the person what it
+// carries.
+func recipeSummary(r *wire.WorkRecipe) map[string]any {
+	out := map[string]any{"request": r.Prompt != ""}
+	if r.Expert != nil {
+		out["expert"] = r.Expert.Name
+	}
+	names := func(parts []wire.WorkRecipePart) []string {
+		out := make([]string, 0, len(parts))
+		for _, p := range parts {
+			out = append(out, p.Name)
+		}
+		return out
+	}
+	if len(r.Skills) > 0 {
+		out["skills"] = names(r.Skills)
+	}
+	if len(r.Prompts) > 0 {
+		out["prompts"] = names(r.Prompts)
+	}
+	if len(r.References) > 0 {
+		refs := make([]string, 0, len(r.References))
+		for _, ref := range r.References {
+			refs = append(refs, ref.Name)
+		}
+		out["references"] = refs
+	}
+	return out
 }

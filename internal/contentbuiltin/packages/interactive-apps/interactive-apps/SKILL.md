@@ -52,9 +52,9 @@ run, say exactly that instead of calling it done.
 In the same run, save the first screen as `cover.png` beside its
 `index.html` (16:10, e.g. 1280x800, under 1 MiB): its card's cover in the
 room and the gallery. PNG, JPEG or WebP only, never SVG. Asked to publish
-it, `save_component` with its `artifactId` saves it as a work (any
-deliverable can be one; a video's cover is a frame its turn saved as
-`cover.png`).
+it, `save_component` with its `artifactId` saves it as a work with its
+recipe (any deliverable can be one; a video's cover is a frame its turn
+saved as `cover.png`).
 
 ## The SDK
 

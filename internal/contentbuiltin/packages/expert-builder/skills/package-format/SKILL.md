@@ -171,8 +171,11 @@ add scripts only when the person asks for them.
 | prompt pack | variables[].options[] | 200 characters |
 | prompt pack | files in the package | 2 files |
 | prompt pack | package size | 1 MiB |
-| work | files in the package | 2001 files |
-| work | package size | 65 MiB |
+| work | files in the package | 2010 files |
+| work | package size | 91 MiB |
 | work | cover image | 1 MiB |
+| work | recipe.references | 8 entries |
+| work | recipe reference files together | 25 MiB |
+| work | recipe.prompt | 16 KiB |
 | work | README.md | 64 KiB |
 <!-- limits:end -->

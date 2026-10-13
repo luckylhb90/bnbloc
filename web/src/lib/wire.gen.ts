@@ -1013,6 +1013,9 @@ export interface ContentComponent {
   // snapshots); WorkFile its one file (absent for a site or an app).
   workType?: WorkType;
   workFile?: string;
+  // Recipe is how a work was made (its manifest's), absent when it
+  // carries none.
+  recipe?: WorkRecipe;
   // Team is a team expert's roster (as its manifest names it).
   team?: ContentTeam;
   createdAtMs: number;
@@ -1978,10 +1981,17 @@ export const MaxAppFindLimit = 500;
 // its envelope (AppDocWrite, AppDocPatch).
 export const MaxAppRequestBytes = 69632;
 
+// The caps of a work (docs/prd/2026-10-13-works-gallery-and-make-similar.md):
+// contentpkg's work kind enforces them.
 // MaxWorkCoverBytes bounds a work's cover image (cover.png, .jpg or
 // .webp at the bundle's root, or an image work's image): a larger one
 // is not served, and the card draws the generated cover.
 export const MaxWorkCoverBytes = 1048576;
+// MaxWorkReferences bounds the reference files a work's recipe keeps
+// (the request's attachments, in order; the rest are left out).
+export const MaxWorkReferences = 8;
+// MaxWorkReferenceBytes bounds the reference files of a work together.
+export const MaxWorkReferenceBytes = 26214400;
 
 // ---- wire/mcp_tools.go ----
 
@@ -3893,7 +3903,10 @@ export const PublishApprovalNone = "none";
 // file, never its data) as a work component of the caller's. Without
 // ComponentID it creates one named Name; with it, the snapshot is the next
 // version of that work of the caller's. DisplayName defaults to the
-// deliverable's title.
+// deliverable's title. The recipe is captured from the producing job
+// (WorkRecipeCapture): Recipe overrides it (its references are a subset
+// of the captured ones, named by attachmentId), and IncludeRecipe false
+// publishes none.
 export interface WorkPublishRequest {
   componentId?: string;
   name?: string;
@@ -3901,6 +3914,62 @@ export interface WorkPublishRequest {
   description?: string;
   category?: WorkCategory;
   tags?: string[];
+  recipe?: WorkRecipe;
+  includeRecipe?: boolean;
+}
+
+// WorkRecipe is how a work was made (works PRD §3): the request that
+// produced the deliverable version, the expert, skill packs and prompt
+// packs the turn used, the files the request attached (stored in the
+// work's bundle under references/) and the agent. It is captured from the
+// producing job when the work is published, shown to the author first,
+// and what "Make similar" starts from. Agent is informational only.
+export interface WorkRecipe {
+  prompt?: string;
+  expert?: WorkRecipePart;
+  skills?: WorkRecipePart[];
+  prompts?: WorkRecipePart[];
+  references?: WorkReference[];
+  agent?: WorkRecipeAgent;
+}
+
+// WorkRecipePart is a content component a recipe used: an expert, a skill
+// pack or a prompt pack, at the version the turn used.
+export interface WorkRecipePart {
+  id: string;
+  name: string;
+  displayName?: string;
+  version?: string;
+}
+
+// WorkReference is one input file of a recipe. In a work's manifest File
+// is its path in the bundle (references/<name>); while a recipe is only
+// captured (before publishing) AttachmentID names the request's
+// attachment it comes from and File is empty.
+export interface WorkReference {
+  file?: string;
+  attachmentId?: string;
+  name: string;
+  contentType: string;
+  sizeBytes: number;
+}
+
+// WorkRecipeAgent is the agent that produced the work (informational:
+// "Make similar" runs on the member's own choice).
+export interface WorkRecipeAgent {
+  core?: string;
+  provider: string;
+}
+
+// WorkRecipeCapture answers GET /v1/rooms/{roomId}/artifacts/{artifactId}/recipe:
+// the recipe a publish of the deliverable's current version (Version)
+// captures; Recipe is absent when no producing job is found (an uploaded
+// file). Skipped names the request's attachments left out (over the
+// reference caps, wire.MaxWorkReferences and MaxWorkReferenceBytes).
+export interface WorkRecipeCapture {
+  version: number;
+  recipe?: WorkRecipe;
+  skipped?: string[];
 }
 
 // AppUseRequest is POST /v1/content-components/{id}/use-app: copy an app

@@ -108,6 +108,9 @@ type Manifest struct {
 	// at the bundle's root.
 	Type string `json:"type,omitempty"`
 	File string `json:"file,omitempty"`
+	// Recipe is how the work was made: its reference files lie in the
+	// bundle under references/.
+	Recipe *wire.WorkRecipe `json:"recipe,omitempty"`
 }
 
 // Requires lists what a package needs at use time: skill and prompt packs

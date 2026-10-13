@@ -206,6 +206,7 @@ func (s *Service) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/rooms/{roomId}/chat", s.handleChat)
 	mux.HandleFunc("POST /v1/rooms/{roomId}/attachments", s.handleUploadAttachment)
 	mux.HandleFunc("GET /v1/rooms/{roomId}/attachments/{attachmentId}", s.handleDownloadAttachment)
+	mux.HandleFunc("GET /v1/rooms/{roomId}/attachments/{attachmentId}/meta", s.handleAttachmentMeta)
 	mux.HandleFunc("GET /v1/rooms/{roomId}/history", s.handleHistory)
 	mux.HandleFunc("POST /v1/rooms/{roomId}/typing", s.handleTyping)
 	mux.HandleFunc("POST /v1/rooms/{roomId}/read", s.handleMarkRead)

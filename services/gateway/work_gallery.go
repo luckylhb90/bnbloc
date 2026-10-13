@@ -132,6 +132,11 @@ func (s *Service) handlePublishWork(w http.ResponseWriter, r *http.Request, call
 	if m.Name == "" {
 		m.Name = firstNonEmpty(contentpkg.NameFrom(m.DisplayName), contentpkg.NameFrom(art.FileName), "work")
 	}
+	// The recipe: captured from the producing job, or the author's edit
+	// of it, or none.
+	if m.Recipe, d.Snapshot.References, err = s.publishedRecipe(ctx, actor.Claims, roomID, d.Version, in); !writeRecipeErr(w, err) {
+		return
+	}
 	pkg, bundle, err := contentpkg.WorkFromDeliverable(d.Source, d.Snapshot, m)
 	if err != nil {
 		httpx.Error(w, err.Error(), http.StatusBadRequest)
@@ -206,27 +211,11 @@ func writeDeliverableErr(w http.ResponseWriter, err error) bool {
 // the file's bytes). errSiteNotFound when it is not a published
 // deliverable of the room the member reads.
 func (s *Service) currentDeliverable(ctx context.Context, claims auth.Claims, roomID, artifactID string) (deliverable, error) {
-	var detail wire.ArtifactDetail
-	base := "/v1/rooms/" + url.PathEscape(roomID) + "/artifacts/" + url.PathEscape(artifactID)
-	err := s.roomBackendDo(ctx, backendHTTP, http.MethodGet, base, "", nil, claims.Subject, claims.Tenant, &detail)
-	var rbe *roomBackendError
-	switch {
-	case errors.As(err, &rbe) && rbe.Status < http.StatusInternalServerError:
-		return deliverable{}, errSiteNotFound
-	case err != nil:
+	art, v, err := s.deliverableVersion(ctx, claims, roomID, artifactID)
+	if err != nil {
 		return deliverable{}, err
 	}
-	art := detail.Artifact
-	if art.CurrentVersion < 1 {
-		return deliverable{}, errSiteNotFound
-	}
-	d := deliverable{Artifact: art, Version: wire.ArtifactVersion{ArtifactID: art.ArtifactID, Version: art.CurrentVersion},
-		Source: contentpkg.WorkDeliverable{Artifact: art}}
-	for _, v := range detail.Versions {
-		if v.Version == art.CurrentVersion {
-			d.Version = v
-		}
-	}
+	d := deliverable{Artifact: art, Version: v, Source: contentpkg.WorkDeliverable{Artifact: art}}
 	if art.Kind == store.ArtifactKindSite {
 		sv, err := s.memberSiteVersion(ctx, claims.Subject, claims.Tenant, siteTicketScope(roomID, art.ArtifactID, art.CurrentVersion))
 		if err != nil {
@@ -237,13 +226,39 @@ func (s *Service) currentDeliverable(ctx context.Context, claims auth.Claims, ro
 		}
 		return d, nil
 	}
-	path := base + "/versions/" + strconv.Itoa(art.CurrentVersion) + "/content"
+	path := "/v1/rooms/" + url.PathEscape(roomID) + "/artifacts/" + url.PathEscape(artifactID) + "/versions/" + strconv.Itoa(art.CurrentVersion) + "/content"
 	data, err := s.roomBackendBytes(ctx, path, claims, int64(tarbundle.SiteLimits.MaxBytes))
 	if err != nil {
 		return deliverable{}, err
 	}
 	d.Snapshot.Name, d.Snapshot.Data = store.ArtifactDownloadName(art.Kind, art.FileName, art.Title), data
 	return d, nil
+}
+
+// deliverableVersion reads a deliverable and its current version's
+// metadata (its producing job and request) as the member in claims;
+// errSiteNotFound when it is not a published deliverable of the room the
+// member reads.
+func (s *Service) deliverableVersion(ctx context.Context, claims auth.Claims, roomID, artifactID string) (wire.Artifact, wire.ArtifactVersion, error) {
+	var detail wire.ArtifactDetail
+	err := s.roomBackendDo(ctx, backendHTTP, http.MethodGet, "/v1/rooms/"+url.PathEscape(roomID)+"/artifacts/"+url.PathEscape(artifactID), "", nil, claims.Subject, claims.Tenant, &detail)
+	var rbe *roomBackendError
+	switch {
+	case errors.As(err, &rbe) && rbe.Status < http.StatusInternalServerError:
+		return wire.Artifact{}, wire.ArtifactVersion{}, errSiteNotFound
+	case err != nil:
+		return wire.Artifact{}, wire.ArtifactVersion{}, err
+	}
+	art := detail.Artifact
+	if art.CurrentVersion < 1 {
+		return wire.Artifact{}, wire.ArtifactVersion{}, errSiteNotFound
+	}
+	for _, v := range detail.Versions {
+		if v.Version == art.CurrentVersion {
+			return art, v, nil
+		}
+	}
+	return art, wire.ArtifactVersion{ArtifactID: art.ArtifactID, Version: art.CurrentVersion}, nil
 }
 
 // turnCover is the cover a single-file deliverable's producing turn saved

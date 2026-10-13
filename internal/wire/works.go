@@ -90,14 +90,73 @@ func ValidPublishApproval(p string) bool {
 // file, never its data) as a work component of the caller's. Without
 // ComponentID it creates one named Name; with it, the snapshot is the next
 // version of that work of the caller's. DisplayName defaults to the
-// deliverable's title.
+// deliverable's title. The recipe is captured from the producing job
+// (WorkRecipeCapture): Recipe overrides it (its references are a subset
+// of the captured ones, named by attachmentId), and IncludeRecipe false
+// publishes none.
 type WorkPublishRequest struct {
-	ComponentID string   `json:"componentId,omitempty"`
-	Name        string   `json:"name,omitempty"`
-	DisplayName string   `json:"displayName,omitempty"`
-	Description string   `json:"description,omitempty"`
-	Category    string   `json:"category,omitempty" tstype:"WorkCategory"`
-	Tags        []string `json:"tags,omitempty"`
+	ComponentID   string      `json:"componentId,omitempty"`
+	Name          string      `json:"name,omitempty"`
+	DisplayName   string      `json:"displayName,omitempty"`
+	Description   string      `json:"description,omitempty"`
+	Category      string      `json:"category,omitempty" tstype:"WorkCategory"`
+	Tags          []string    `json:"tags,omitempty"`
+	Recipe        *WorkRecipe `json:"recipe,omitempty"`
+	IncludeRecipe *bool       `json:"includeRecipe,omitempty"`
+}
+
+// WorkRecipe is how a work was made (works PRD §3): the request that
+// produced the deliverable version, the expert, skill packs and prompt
+// packs the turn used, the files the request attached (stored in the
+// work's bundle under references/) and the agent. It is captured from the
+// producing job when the work is published, shown to the author first,
+// and what "Make similar" starts from. Agent is informational only.
+type WorkRecipe struct {
+	Prompt     string           `json:"prompt,omitempty"`
+	Expert     *WorkRecipePart  `json:"expert,omitempty"`
+	Skills     []WorkRecipePart `json:"skills,omitempty"`
+	Prompts    []WorkRecipePart `json:"prompts,omitempty"`
+	References []WorkReference  `json:"references,omitempty"`
+	Agent      *WorkRecipeAgent `json:"agent,omitempty"`
+}
+
+// WorkRecipePart is a content component a recipe used: an expert, a skill
+// pack or a prompt pack, at the version the turn used.
+type WorkRecipePart struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	DisplayName string `json:"displayName,omitempty"`
+	Version     string `json:"version,omitempty"`
+}
+
+// WorkReference is one input file of a recipe. In a work's manifest File
+// is its path in the bundle (references/<name>); while a recipe is only
+// captured (before publishing) AttachmentID names the request's
+// attachment it comes from and File is empty.
+type WorkReference struct {
+	File         string `json:"file,omitempty"`
+	AttachmentID string `json:"attachmentId,omitempty"`
+	Name         string `json:"name"`
+	ContentType  string `json:"contentType"`
+	SizeBytes    int64  `json:"sizeBytes"`
+}
+
+// WorkRecipeAgent is the agent that produced the work (informational:
+// "Make similar" runs on the member's own choice).
+type WorkRecipeAgent struct {
+	Core     string `json:"core,omitempty"`
+	Provider string `json:"provider"`
+}
+
+// WorkRecipeCapture answers GET /v1/rooms/{roomId}/artifacts/{artifactId}/recipe:
+// the recipe a publish of the deliverable's current version (Version)
+// captures; Recipe is absent when no producing job is found (an uploaded
+// file). Skipped names the request's attachments left out (over the
+// reference caps, wire.MaxWorkReferences and MaxWorkReferenceBytes).
+type WorkRecipeCapture struct {
+	Version int         `json:"version"`
+	Recipe  *WorkRecipe `json:"recipe,omitempty"`
+	Skipped []string    `json:"skipped,omitempty"`
 }
 
 // AppUseRequest is POST /v1/content-components/{id}/use-app: copy an app

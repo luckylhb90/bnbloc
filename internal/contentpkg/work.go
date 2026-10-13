@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"path"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/luckylhb90/bnbloc/core"
+	"github.com/luckylhb90/bnbloc/internal/semver"
 	"github.com/luckylhb90/bnbloc/internal/store"
 	"github.com/luckylhb90/bnbloc/internal/tarbundle"
 	"github.com/luckylhb90/bnbloc/internal/wire"
@@ -19,10 +21,12 @@ import (
 // dist/), within a site snapshot's caps; any other deliverable is its one
 // file at the bundle's root, which the manifest names (file). Beside it a
 // work may carry a card cover (tarbundle.WorkCover) and a README.md for the
-// detail page. A work holds no data: an app's data lives in its site's
-// data space, which is never part of a bundle. Nothing in it runs on a
-// member's machine (a site's code runs only in the sandboxed site frame),
-// so its scripts need no permission and a work requires nothing.
+// detail page, and the recipe that made it (the manifest's recipe, its
+// reference files under references/). A work holds no data: an app's data
+// lives in its site's data space, which is never part of a bundle. Nothing
+// in it runs on a member's machine (a site's code runs only in the
+// sandboxed site frame), so its scripts need no permission and a work
+// requires nothing.
 
 // Work files.
 const (
@@ -34,11 +38,17 @@ const (
 	// workRenamedPrefix prefixes a deliverable file whose name is one the
 	// bundle reserves (component.json, README.md).
 	workRenamedPrefix = "work-"
+	// WorkReferencesDir holds a recipe's reference files.
+	WorkReferencesDir = "references"
 )
 
 // WorkLimits are a work bundle's caps: a site snapshot's (a single file is
-// held to the same bytes) plus its manifest.
-var WorkLimits = tarbundle.Limits{MaxBytes: tarbundle.SiteLimits.MaxBytes + maxWorkManifest, MaxFiles: tarbundle.SiteLimits.MaxFiles + 1}
+// held to the same bytes), its recipe's references and its manifest and
+// cover.
+var WorkLimits = tarbundle.Limits{
+	MaxBytes: tarbundle.SiteLimits.MaxBytes + wire.MaxWorkReferenceBytes + wire.MaxWorkCoverBytes + maxWorkManifest,
+	MaxFiles: tarbundle.SiteLimits.MaxFiles + wire.MaxWorkReferences + 2,
+}
 
 // maxWorkManifest is the room a work's component.json takes beyond the
 // site's own caps.
@@ -147,6 +157,9 @@ func validateWork(p *Package) error {
 	if err := validateWorkFiles(p); err != nil {
 		return err
 	}
+	if err := validateRecipe(p); err != nil {
+		return err
+	}
 	if _, _, err := WorkCover(p); err != nil {
 		return err
 	}
@@ -161,7 +174,7 @@ func validateWork(p *Package) error {
 // validateWorkFiles holds the files to the type: a site or an app is a
 // folder with an entry point (and names no file); any other type is the
 // one file the manifest names, at the root, of that type, beside only the
-// manifest, a README.md and a cover.
+// manifest, a README.md, a cover and the recipe's references.
 func validateWorkFiles(p *Package) error {
 	m := p.Manifest
 	if !validWorkType(m.Type) {
@@ -187,12 +200,110 @@ func validateWorkFiles(p *Package) error {
 		return fmt.Errorf("%s is a %s, not a %s", m.File, t, m.Type)
 	}
 	cover, _, _ := tarbundle.SiteCover(p.Bundle)
+	refs := referenceFiles(m)
 	for _, f := range p.Bundle.Paths() {
-		switch f {
-		case ManifestFile, ReadmeFile, m.File, cover.File:
+		switch {
+		case f == ManifestFile, f == ReadmeFile, f == m.File, f == cover.File, refs[f]:
 		default:
-			return fmt.Errorf("%s: a %s work holds only its file, %s, %s and a cover", f, m.Type, ManifestFile, ReadmeFile)
+			return fmt.Errorf("%s: a %s work holds only its file, %s, %s, a cover and its recipe's references", f, m.Type, ManifestFile, ReadmeFile)
 		}
+	}
+	return nil
+}
+
+// referenceFiles are the bundle paths of a manifest's recipe references.
+func referenceFiles(m Manifest) map[string]bool {
+	out := map[string]bool{}
+	if m.Recipe != nil {
+		for _, r := range m.Recipe.References {
+			out[r.File] = true
+		}
+	}
+	return out
+}
+
+// Bounds of a recipe's text.
+const (
+	maxRecipePartID   = 64
+	maxReferenceName  = 255
+	maxReferenceType  = 127
+	maxRecipeAgentRef = 64
+)
+
+// validateRecipe: the prompt is chat text (wire.MaxChatTextBytes), each
+// component is an id, a valid name and a semantic version, at most
+// maxRequires of each kind, and each reference is a file of the bundle
+// under references/ of its stated size, at most wire.MaxWorkReferences
+// within wire.MaxWorkReferenceBytes together. A stored recipe names no
+// attachment (that is a capture's, before publishing).
+func validateRecipe(p *Package) error {
+	r := p.Manifest.Recipe
+	if r == nil {
+		return nil
+	}
+	if !utf8.ValidString(r.Prompt) || len(r.Prompt) > wire.MaxChatTextBytes {
+		return fmt.Errorf("recipe prompt: UTF-8 text of at most %d bytes", wire.MaxChatTextBytes)
+	}
+	parts := append([]wire.WorkRecipePart(nil), r.Skills...)
+	parts = append(parts, r.Prompts...)
+	if r.Expert != nil {
+		parts = append(parts, *r.Expert)
+	}
+	if len(r.Skills) > maxRequires || len(r.Prompts) > maxRequires {
+		return fmt.Errorf("recipe: at most %d skill packs and %d prompt packs", maxRequires, maxRequires)
+	}
+	for _, c := range parts {
+		switch {
+		case c.ID == "" || len(c.ID) > maxRecipePartID || strings.ContainsAny(c.ID, "/ \r\n"):
+			return fmt.Errorf("recipe component %q: an id", c.ID)
+		case !ValidName(c.Name):
+			return fmt.Errorf("recipe component %q: name %q", c.ID, c.Name)
+		case c.Version != "" && !semver.Valid(c.Version):
+			return fmt.Errorf("recipe component %s: version %q", c.Name, c.Version)
+		}
+		if err := checkText("recipe displayName", c.DisplayName, maxDisplayName, true); err != nil {
+			return err
+		}
+	}
+	if a := r.Agent; a != nil {
+		if a.Provider == "" {
+			return errors.New("recipe agent: a provider")
+		}
+		for _, s := range []string{a.Core, a.Provider} {
+			if err := checkText("recipe agent", s, maxRecipeAgentRef, true); err != nil {
+				return err
+			}
+		}
+	}
+	if len(r.References) > wire.MaxWorkReferences {
+		return fmt.Errorf("recipe: at most %d reference files", wire.MaxWorkReferences)
+	}
+	var total int64
+	seen := map[string]bool{}
+	for _, ref := range r.References {
+		dir, base := path.Split(ref.File)
+		data, ok := p.Bundle.File(ref.File)
+		switch {
+		case ref.AttachmentID != "":
+			return fmt.Errorf("recipe reference %s: a stored recipe names no attachment", ref.Name)
+		case dir != WorkReferencesDir+"/" || base == "" || seen[ref.File]:
+			return fmt.Errorf("recipe reference %q: a file of its own under %s/", ref.File, WorkReferencesDir)
+		case !ok:
+			return fmt.Errorf("recipe reference %s is not in the bundle", ref.File)
+		case int64(len(data)) != ref.SizeBytes:
+			return fmt.Errorf("recipe reference %s: %d bytes, not %d", ref.File, len(data), ref.SizeBytes)
+		}
+		seen[ref.File] = true
+		total += ref.SizeBytes
+		if err := checkText("recipe reference name", ref.Name, maxReferenceName, true); err != nil {
+			return err
+		}
+		if err := checkText("recipe reference contentType", ref.ContentType, maxReferenceType, true); err != nil {
+			return err
+		}
+	}
+	if total > wire.MaxWorkReferenceBytes {
+		return fmt.Errorf("recipe: the reference files are larger than %d bytes together", wire.MaxWorkReferenceBytes)
 	}
 	return nil
 }
@@ -228,15 +339,16 @@ func WorkEntryOf(b *tarbundle.Bundle) (string, bool) {
 }
 
 // WorkSite is the site a validated app or site work copies into a room
-// ("Use this app") and runs as its demo: its files without the manifest, a
-// dist/ entry's files at the root (with the root's cover and README.md
-// beside them).
+// ("Use this app") and runs as its demo: its files without the manifest
+// and the recipe's references, a dist/ entry's files at the root (with the
+// root's cover and README.md beside them).
 func WorkSite(p *Package) map[string][]byte {
 	entry, _ := WorkEntryOf(p.Bundle)
 	prefix := strings.TrimSuffix(entry, SiteEntry)
+	refs := referenceFiles(p.Manifest)
 	out := map[string][]byte{}
 	for _, f := range p.Bundle.Paths() {
-		if f == ManifestFile {
+		if f == ManifestFile || refs[f] {
 			continue
 		}
 		data, _ := p.Bundle.File(f)
@@ -268,14 +380,36 @@ func WorkFile(p *Package) (string, []byte, bool) {
 	return p.Manifest.File, data, ok
 }
 
+// WorkReferenceFile is one reference file of a recipe: what the recipe
+// says of it and its bytes.
+type WorkReferenceFile struct {
+	Ref  wire.WorkReference
+	Data []byte
+}
+
+// WorkReferences are a validated work's reference files, in the recipe's
+// order.
+func WorkReferences(p *Package) []WorkReferenceFile {
+	var out []WorkReferenceFile
+	if r := p.Manifest.Recipe; r != nil {
+		for _, ref := range r.References {
+			data, _ := p.Bundle.File(ref.File)
+			out = append(out, WorkReferenceFile{Ref: ref, Data: data})
+		}
+	}
+	return out
+}
+
 // WorkSnapshot is a deliverable version as a work holds it: a site's files
 // (Site), or one file (Name and Data) with an optional cover image (Cover:
-// a video's frame; a site's cover is its own cover file).
+// a video's frame; a site's cover is its own cover file), and the
+// recipe's reference files (References: their names, types and bytes).
 type WorkSnapshot struct {
-	Site  *tarbundle.Bundle
-	Name  string
-	Data  []byte
-	Cover []byte
+	Site       *tarbundle.Bundle
+	Name       string
+	Data       []byte
+	Cover      []byte
+	References []WorkReferenceFile
 }
 
 // WorkFromDeliverable is the work a deliverable version publishes as: its
@@ -283,7 +417,8 @@ type WorkSnapshot struct {
 // here, the type by WorkTypeOf). A site holding a component.json of its
 // own is refused: the manifest is the work's. An HTML document becomes a
 // site whose entry it is; a file named as a file the bundle reserves is
-// renamed.
+// renamed. With a recipe (m.Recipe), the snapshot's references go under
+// references/ (each a name of its own) and the recipe lists them.
 func WorkFromDeliverable(d WorkDeliverable, snap WorkSnapshot, m Manifest) (*Package, []byte, error) {
 	files := map[string][]byte{}
 	m.Kind, m.File = KindWork, ""
@@ -298,6 +433,7 @@ func WorkFromDeliverable(d WorkDeliverable, snap WorkSnapshot, m Manifest) (*Pac
 			files[f], _ = snap.Site.File(f)
 		}
 		m.Type = WorkTypeOf(d)
+		m.Recipe = placeReferences(m.Recipe, snap.References, files)
 		return Pack(m, files, Options{})
 	}
 	name := path.Base(strings.TrimSpace(snap.Name))
@@ -311,23 +447,68 @@ func WorkFromDeliverable(d WorkDeliverable, snap WorkSnapshot, m Manifest) (*Pac
 			return nil, nil, errors.New("a site's cover is its own cover file: save it in the site's folder")
 		}
 		files[SiteEntry] = snap.Data
+		m.Recipe = placeReferences(m.Recipe, snap.References, files)
 		return Pack(m, files, Options{})
 	}
 	if name == ManifestFile || name == ReadmeFile {
 		name = workRenamedPrefix + name
 	}
+	files[name], m.File = snap.Data, name
 	if snap.Cover != nil {
 		cover, err := tarbundle.CoverFile(snap.Cover)
 		if err != nil {
 			return nil, nil, fmt.Errorf("the cover: %w", err)
 		}
-		if cover == name {
-			return nil, nil, fmt.Errorf("the work's file is named %s: it is its own cover", name)
+		if cover != name {
+			files[cover] = snap.Cover
 		}
-		files[cover] = snap.Cover
 	}
-	files[name], m.File = snap.Data, name
+	m.Recipe = placeReferences(m.Recipe, snap.References, files)
 	return Pack(m, files, Options{})
+}
+
+// placeReferences puts the reference files into files under references/,
+// each under its own name (a taken one gets a number), and returns the
+// recipe listing them (a copy; nil stays nil, and its references go
+// nowhere).
+func placeReferences(r *wire.WorkRecipe, refs []WorkReferenceFile, files map[string][]byte) *wire.WorkRecipe {
+	if r == nil {
+		return nil
+	}
+	out := *r
+	out.References = nil
+	for _, f := range refs {
+		base := safeReferenceName(f.Ref.Name)
+		p := WorkReferencesDir + "/" + base
+		for n := 2; files[p] != nil; n++ {
+			p = fmt.Sprintf("%s/%d-%s", WorkReferencesDir, n, base)
+		}
+		files[p] = f.Data
+		ref := f.Ref
+		ref.File, ref.AttachmentID, ref.SizeBytes = p, "", int64(len(f.Data))
+		out.References = append(out.References, ref)
+	}
+	return &out
+}
+
+// safeReferenceName is a reference's file name in the bundle: its base
+// name with anything but letters, digits, '.', '-' and '_' replaced.
+func safeReferenceName(name string) string {
+	base := path.Base(strings.ReplaceAll(strings.TrimSpace(name), "\\", "/"))
+	b := []byte(base)
+	for i, c := range b {
+		if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '.' || c == '-' || c == '_') {
+			b[i] = '-'
+		}
+	}
+	out := strings.TrimLeft(string(b), ".")
+	if out == "" {
+		out = "file"
+	}
+	if len(out) > 100 {
+		out = out[len(out)-100:]
+	}
+	return out
 }
 
 // workFromForm: a work is published from a deliverable, never written in a
