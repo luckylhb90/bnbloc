@@ -30,8 +30,17 @@ task declares and relays the reply. Nothing else calls a model.
   that answers one completion instead is read whole). A JSON task asks for
   `response_format: json_object` and again without it when the model
   answers 400.
+- **An organization's own model** (`GET/PUT /v1/tenant/assist-model`,
+  `POST …/test`, org admins): base URL, model and key, sealed under
+  `assist.model/<tenant>` (so a row moved to another organization does
+  not open). Its host must be one of the platform model's `orgHosts`
+  (exact `host[:port]`, set by the super admin; none by default), so an
+  org admin cannot point the gateway at an arbitrary address. A member
+  runs on their organization's model while its host stays allowed, else
+  on the platform's (`Settings.Effective`); the audit row says which. The
+  platform's PUT replaces `orgHosts` with what it sends.
 - **An organization may turn assists off** (`assistDisabled` in its
-  settings, `PUT /v1/tenant/settings`). `GET /v1/assist` answers
+  settings, `PUT /v1/tenant/settings`), its own model or not. `GET /v1/assist` answers
   `available: false` (and no tasks) without a model or in such an
   organization; the web hides every assist entry then. There is no second
   path through members' agents.
@@ -41,8 +50,10 @@ task declares and relays the reply. Nothing else calls a model.
 - **The `assist` kind** (`bnbloc.assist.package/v1`, `contentpkg/assist.go`):
   `INSTRUCTIONS.md` is the task's system prompt (at most 16 KiB: every call
   sends it); `component.json` names its `output` (`text` or `json`), for
-  JSON the `fields` its reply holds (`{name, description, list}`), and the
-  `context` it may receive (`room`, `artifact`, `attachments`). Nothing
+  JSON the `fields` its reply holds (`{name, description, type, item}`:
+  `type` is `text`, `list` — strings — or `items`, a list of objects whose
+  text fields `item` names), and the `context` it may receive (`room`,
+  `artifact`, `attachments`, `library`, `clock`). Nothing
   else: no `requires`, no other files. An assist is no content use
   (`KindSpec.Use`): a room or member never turns one on, and it never
   reaches an agent's workspace.
@@ -55,8 +66,15 @@ task declares and relays the reply. Nothing else calls a model.
   (text; room, attachments) rewrites the composer's text into a clear
   request; `describe-work` (json: `displayName`, `description`,
   `category`, `tags`; artifact) drafts a work's gallery entry, its
-  categories held to `wire.WorkCategories` by a test. Each stays within a
-  token budget (`assists_test.go`).
+  categories held to `wire.WorkCategories` by a test. `draft-expert`,
+  `draft-skill-pack` and `draft-prompt-pack` (json; no context) fill the
+  Library's form from a sentence (plus the form's current values the web
+  appends), their fields and item fields held to `contentpkg.Form`'s by a
+  test; `plan-room` (json; library) proposes a room's id, name,
+  description, expert, skill packs and first message, naming only what the
+  library lists; `draft-schedule` (json; clock) turns plain words into a
+  recurrence (`wire.ScheduleRecurrence`'s fields plus `text` and a local
+  `at`). Each stays within a token budget (`assists_test.go`).
 
 ## One run
 
@@ -74,22 +92,29 @@ assist rate (20 a minute per replica share).
   history and `roomlog.DecodeRow`), a deliverable of it (title, type by
   `contentpkg.WorkTypeOf`, file name, and the request that produced its
   current version through the recipe owner `deliverableRecipe`), and
-  attachments of it (names and types). Anything the member cannot read is
+  attachments of it (names and types), the library (`assist.LibraryOf`:
+  the experts and skill packs the member may use, one per name, the
+  nearest, their own first, at most 40 each, cut to a menu) and the clock
+  (now in the request's `timezone`, `schedule.LoadZone`'s rule, UTC when
+  unknown). Anything the member cannot read is
   a 404; a deliverable or attachments without `roomId` a 400; neither text
   nor context a 400.
 - **The prompt** (`assist.Messages`): the instructions as the system
   message, then one user message introducing the blocks as data, with
-  `<room>`, `<recent_messages>`, `<artifact>`, `<attachments>` and the
-  member's `<text>`; the block tags inside untrusted text are neutralized,
+  `<room>`, `<recent_messages>`, `<artifact>`, `<attachments>`,
+  `<library>`, `<clock>` and the member's `<text>`; the block tags inside untrusted text are neutralized,
   so it cannot close its block or open another. Goldens pin the layout
   (`internal/assist/testdata/golden`).
 - **A text task** answers Server-Sent Events: `delta` `{text}` per piece,
   then `done` `{usage}`; a failure after the first piece is an `error`
   `{error}` event, before it an HTTP 502.
-- **A JSON task** answers `wire.AssistJSONReply`: the declared fields only
-  (strings; a list field a list of strings, a string split at commas),
-  from the reply's object (a fenced block tolerated); a reply that is not
-  that object is a 502.
+- **A JSON task** answers `wire.AssistJSONReply`: the declared fields only,
+  in their shapes (a text field a string; a list field a list of strings,
+  a string split at commas; an items field a list of objects holding only
+  the item fields as strings, an item with none dropped, a plain string
+  taken for a one-field item, at most `wire.MaxAssistItems`), from the
+  reply's object (a fenced block tolerated); a reply that is not that
+  object is a 502. The content validator still owns what a form saves.
 - **Audit**: every run is an audit row of kind `assist` (`task@version`,
   the component, the model, the token counts and the latency, the failure
   class), never the text; a model change is one too.
