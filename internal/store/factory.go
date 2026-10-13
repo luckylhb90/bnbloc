@@ -241,6 +241,8 @@ func NewBackends(dsn string) (*Backends, error) {
 		// view over MemoryRoom's channel table) so the default channel created
 		// transactionally with a room is immediately visible to channel reads.
 		rooms := NewMemoryRoom()
+		artifacts, appDocs := NewMemoryArtifacts(), NewMemoryAppDocs(rooms)
+		artifacts.appData = appDocs
 		b := &Backends{
 			Activity:          NewMemory(),
 			Room:              rooms,
@@ -249,7 +251,7 @@ func NewBackends(dsn string) (*Backends, error) {
 			Tenant:            NewMemoryTenant(),
 			Channel:           rooms.Channels(),
 			BridgeJobs:        NewMemoryBridgeJobs(),
-			Artifacts:         NewMemoryArtifacts(),
+			Artifacts:         artifacts,
 			Settings:          NewMemoryPlatformSettings(),
 			Attachments:       NewMemoryAttachments(),
 			ExtAudit:          NewMemoryExtensionAudit(),
@@ -270,7 +272,7 @@ func NewBackends(dsn string) (*Backends, error) {
 			OrgSync:           NewMemoryOrgSync(),
 			Profiles:          NewMemoryUserProfiles(),
 			ContentComponents: NewMemoryContentComponents(),
-			AppDocs:           NewMemoryAppDocs(rooms),
+			AppDocs:           appDocs,
 		}
 		// DeleteRoom clears every memory store holding room-owned rows, as
 		// the MySQL DeleteRoom clears roomOwnedTables.

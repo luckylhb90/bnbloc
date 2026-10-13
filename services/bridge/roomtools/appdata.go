@@ -207,10 +207,10 @@ func (c appCall) listApps() Result {
 	}
 	res := map[string]any{"apps": out}
 	if err != nil {
-		res["note"] = "some site deliverables could not be read; they may be apps too"
+		res["note"] = "some apps' data could not be read; they are not listed"
 	}
 	if len(out) == 0 {
-		res["note"] = "no site deliverable of this room holds data yet; an app's data is read by its artifactId"
+		res["note"] = "this room has no interactive app yet (a site that loads the app SDK, or holds data); any site's data is read by its artifactId"
 	}
 	return Result{Value: res}
 }

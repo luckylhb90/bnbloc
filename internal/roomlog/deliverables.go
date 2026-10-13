@@ -66,21 +66,40 @@ func (p Producer) String() string {
 }
 
 // VersionProducer resolves who produced v, a version of a deliverable of
-// room: its source job's agent, else its author (a person's publish).
+// room, reading its source job's run record through the gateway
+// (ProducerOf).
 func VersionProducer(ctx context.Context, fetch Fetch, room string, v wire.ArtifactVersion) (Producer, error) {
+	return ProducerOf(ctx, v, func(ctx context.Context, job string) (wire.AgentRunAgent, error) {
+		raw, err := fetch(ctx, "/v1/rooms/"+url.PathEscape(room)+"/jobs/"+url.PathEscape(job))
+		if err != nil {
+			return wire.AgentRunAgent{}, err
+		}
+		var run wire.AgentRun
+		if err := json.Unmarshal(raw, &run); err != nil {
+			return wire.AgentRunAgent{}, err
+		}
+		return run.Agent, nil
+	})
+}
+
+// ProducerOf is the one producer rule: v's source job's agent, as agentOf
+// reads that job's run record, else v's author (a person's publish). A job
+// whose agent cannot be read leaves the job id. VersionProducer reads the
+// run through the gateway; the room service (a member's apps) reads its
+// store.
+func ProducerOf(ctx context.Context, v wire.ArtifactVersion, agentOf func(ctx context.Context, jobID string) (wire.AgentRunAgent, error)) (Producer, error) {
 	job := strings.TrimSpace(v.SourceJobID)
 	if job == "" {
 		return Producer{Person: v.AuthorUserID}, nil
 	}
-	raw, err := fetch(ctx, "/v1/rooms/"+url.PathEscape(room)+"/jobs/"+url.PathEscape(job))
+	agent, err := agentOf(ctx, job)
 	if err != nil {
 		return Producer{JobID: job}, err
 	}
-	var run wire.AgentRun
-	if err := json.Unmarshal(raw, &run); err != nil || run.Agent.Provider == "" {
-		return Producer{JobID: job}, fmt.Errorf("run %s names no agent (%v)", job, err)
+	if agent.Provider == "" {
+		return Producer{JobID: job}, fmt.Errorf("run %s names no agent", job)
 	}
-	return Producer{Owner: run.Agent.Owner, Provider: run.Agent.Provider, Core: run.Agent.Core}, nil
+	return Producer{Owner: agent.Owner, Provider: agent.Provider, Core: agent.Core}, nil
 }
 
 // ProducerCache remembers resolved producers per room, artifact and version

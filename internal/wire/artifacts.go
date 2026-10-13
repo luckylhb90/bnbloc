@@ -18,6 +18,10 @@ type Artifact struct {
 	CreatedBy      string `json:"createdBy"`
 	CreatedAtMs    int64  `json:"createdAtMs"`
 	UpdatedAtMs    int64  `json:"updatedAtMs"`
+	// IsApp: the artifact is an interactive app, a site whose data space
+	// exists or whose current version loads the app SDK (store.Artifact.IsApp,
+	// the one rule; a client never re-derives it).
+	IsApp bool `json:"isApp"`
 }
 
 // ArtifactThumbnail is a stored preview image of a version (the bytes are

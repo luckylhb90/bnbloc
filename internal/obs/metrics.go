@@ -203,7 +203,7 @@ var routeWords = map[string]bool{
 	// /v1/rooms/{id}/apps/{app}/…, the visitor token, the room service's
 	// /internal/v1/app/… and realtime's app-events.
 	"~app": true, "apps": true, "me": true, "stats": true, "data": true,
-	"sdk.js": true, "sdk.d.ts": true, "visitor": true, "app-events": true,
+	"sdk.js": true, "sdk.d.ts": true, "visitor": true, "app-events": true, "cover": true,
 }
 
 // idCollections name segments whose NEXT segment is always an identifier, even

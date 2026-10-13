@@ -504,6 +504,10 @@ app_keys(app_id PRIMARY KEY, tenant_id, room_id, wrapped_key, created_at_ms)
     `stats` says. Scanning a bundle for `~app/sdk.js` was rejected: it
     downloads every site each turn and still says nothing about data. An
     app nobody used yet is not listed; `app_data` takes any site by id.
+    *Superseded 2026-10-13* (`2026-10-13-app-gallery.md` §5): the SDK is
+    detected once per version while its bytes are stored, never by a
+    download, and an app is a site that loads it or has a data space
+    (`store.Artifact.IsApp`); `ReadApps` reads the projection's `isApp`.
   - **`.room/apps.md`** appears once the room has an app and is then
     rewritten every turn of the session (`CtxState.AppsListed`), so it
     never claims data that was deleted; a room whose usage cannot be read

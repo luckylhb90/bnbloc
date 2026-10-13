@@ -640,20 +640,20 @@ func (s *Service) importArtifactVersion(ctx context.Context, user string, f *zip
 		return store.ArtifactVersion{}, badPackage("%s: %v", f.Name, err)
 	}
 	defer rc.Close()
-	ref, err := s.Blobs.PutBlob(ctx, rc)
+	mimeType := store.MediaType(v.MimeType)
+	if mimeType == "" {
+		mimeType = "application/octet-stream"
+	}
+	ref, loadsSDK, err := s.putVersionBlob(ctx, mimeType, rc)
 	if err != nil {
 		return store.ArtifactVersion{}, err
 	}
 	if ref.SHA256 != v.ContentHash {
 		return store.ArtifactVersion{}, badPackage("%s does not match its hash", f.Name)
 	}
-	mimeType := store.MediaType(v.MimeType)
-	if mimeType == "" {
-		mimeType = "application/octet-stream"
-	}
 	return store.ArtifactVersion{
 		Storage: store.ArtifactStorageBlob, BlobKey: ref.Key, ContentHash: ref.SHA256,
-		SizeBytes: ref.Size, MimeType: mimeType,
+		SizeBytes: ref.Size, MimeType: mimeType, LoadsAppSDK: loadsSDK,
 	}, nil
 }
 

@@ -298,25 +298,24 @@ func TestDriveClaimPullDeltaOnReuse(t *testing.T) {
 	}
 }
 
-// .room/apps.md appears once the room has an interactive app (a site whose
-// data holds documents, read with the turn's job grant) and is rewritten
-// every turn from then on, so it never claims data that is gone.
+// .room/apps.md appears once the room has an interactive app (a site the
+// listing marks isApp, its usage read with the turn's job grant) and is
+// rewritten every turn from then on, so it never claims an app that is gone.
 func TestRoomRecordsWriteAppsOnceTheRoomHasOne(t *testing.T) {
 	g := newPullGateway(t)
 	g.setHistory("general", []int64{1}, map[int64]string{1: "hello"})
 	g.mu.Lock()
-	g.artifacts = `{"artifacts":[{"artifactId":"artf_poll","title":"Friday poll","kind":"site","currentVersion":1,"createdBy":"maya"}]}`
 	g.versions["artf_poll/1"] = `{"version":{"artifactId":"artf_poll","version":1,"sourceJobId":"job-a","authorUserId":"maya"}}`
 	g.runs["job-a"] = `{"jobId":"job-a","agent":{"owner":"maya","core":"acme","provider":"opencode"}}`
-	g.appStats["artf_poll"] = `{"documents":0,"bytes":0,"collections":{}}`
 	g.mu.Unlock()
 	b := New(Config{GatewayBaseURL: g.srv.URL, GatewayToken: "t", OwnerSubject: "maya"})
 	// One session's passes, each with its own job, threading the state the
 	// pass records (materializeRoomContext's).
 	var st roomlog.CtxState
-	turn := func(job string, stats string) (string, bool) {
+	turn := func(job string, isApp bool, stats string) (string, bool) {
 		t.Helper()
 		g.mu.Lock()
+		g.artifacts = fmt.Sprintf(`{"artifacts":[{"artifactId":"artf_poll","title":"Friday poll","kind":"site","currentVersion":1,"createdBy":"maya","isApp":%v}]}`, isApp)
 		g.appStats["artf_poll"] = stats
 		g.mu.Unlock()
 		files, next := b.roomRecordFiles(context.Background(), "r1", job, roomlog.Producer{Owner: "maya", Provider: "codex"}, st, roomlog.Guidance{HasRoomFiles: true})
@@ -328,20 +327,20 @@ func TestRoomRecordsWriteAppsOnceTheRoomHasOne(t *testing.T) {
 		}
 		return "", false
 	}
-	if got, ok := turn("job-1", `{"documents":0,"bytes":0,"collections":{}}`); ok {
-		t.Fatalf("a room whose site holds no data gets apps.md:\n%s", got)
+	if got, ok := turn("job-1", false, `{"documents":0,"bytes":0,"collections":{}}`); ok {
+		t.Fatalf("a room whose site is no app gets apps.md:\n%s", got)
 	}
-	got, ok := turn("job-2", `{"documents":3,"bytes":90,"collections":{"votes":3}}`)
+	got, ok := turn("job-2", true, `{"documents":3,"bytes":90,"collections":{"votes":3}}`)
 	if !ok || !strings.Contains(got, "- Friday poll v1, id artf_poll: from maya/opencode on core acme; 3 documents: votes 3") {
 		t.Fatalf("apps.md once the room has an app (written %v):\n%s", ok, got)
 	}
-	if got, ok := turn("job-3", `{"documents":0,"bytes":0,"collections":{}}`); !ok || !strings.Contains(got, "(no app holds data now)") {
-		t.Fatalf("apps.md after the data went (written %v):\n%s", ok, got)
+	if got, ok := turn("job-3", false, `{"documents":0,"bytes":0,"collections":{}}`); !ok || !strings.Contains(got, "(no apps now)") {
+		t.Fatalf("apps.md after the app went (written %v):\n%s", ok, got)
 	}
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	if len(g.appQueries) != 3 || g.appQueries[1] != "job=job-2" {
-		t.Fatalf("usage reads = %q, want one per turn with its job's grant", g.appQueries)
+	if len(g.appQueries) != 1 || g.appQueries[0] != "job=job-2" {
+		t.Fatalf("usage reads = %q, want one for the app's turn with its job's grant", g.appQueries)
 	}
 }
 

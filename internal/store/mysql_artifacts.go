@@ -17,12 +17,15 @@ func NewMySQLArtifacts(db *sql.DB) *MySQLArtifacts { return &MySQLArtifacts{DB: 
 
 var _ ArtifactStore = (*MySQLArtifacts)(nil)
 
-const artifactCols = `artifact_id, tenant_id, room_id, channel_id, kind, title, language, mime_type, file_name, current_version, created_by, created_at_ms, updated_at_ms`
+// artifactCols selects an artifacts row aliased a, with the two app facts
+// Artifact.IsApp decides on (artifact_apps.go).
+const artifactCols = `a.artifact_id, a.tenant_id, a.room_id, a.channel_id, a.kind, a.title, a.language, a.mime_type, a.file_name, a.current_version, a.created_by, a.created_at_ms, a.updated_at_ms, ` +
+	sqlArtifactLoadsSDK + `, ` + sqlArtifactHasAppData
 
 // artifactVersionCols selects a version row; {content} is replaced by the
 // content expression (the column, or an empty string literal for
 // metadata-only listings).
-const artifactVersionCols = `artifact_id, tenant_id, version, parent_version, content_hash, {content}, storage, blob_key, size_bytes, mime_type, source_job_id, source_seq, summary, author_user_id, created_at_ms, thumb_blob_key, thumb_mime_type, thumb_width, thumb_height, thumb_rank`
+const artifactVersionCols = `artifact_id, tenant_id, version, parent_version, content_hash, {content}, storage, blob_key, size_bytes, mime_type, source_job_id, source_seq, summary, author_user_id, created_at_ms, thumb_blob_key, thumb_mime_type, thumb_width, thumb_height, thumb_rank, loads_app_sdk`
 
 func versionCols(withContent bool) string {
 	if withContent {
@@ -68,7 +71,7 @@ func (m *MySQLArtifacts) GetArtifact(ctx context.Context, artifactID string) (Ar
 	if err != nil {
 		return Artifact{}, err
 	}
-	return scanArtifact(m.DB.QueryRowContext(ctx, `SELECT `+artifactCols+` FROM artifacts WHERE tenant_id=? AND artifact_id=?`, tid, artifactID))
+	return scanArtifact(m.DB.QueryRowContext(ctx, `SELECT `+artifactCols+` FROM artifacts a WHERE a.tenant_id=? AND a.artifact_id=?`, tid, artifactID))
 }
 
 func (m *MySQLArtifacts) ListArtifacts(ctx context.Context, q ArtifactQuery) ([]Artifact, error) {
@@ -76,42 +79,45 @@ func (m *MySQLArtifacts) ListArtifacts(ctx context.Context, q ArtifactQuery) ([]
 	if err != nil {
 		return nil, err
 	}
-	sqlq := `SELECT ` + artifactCols + ` FROM artifacts a WHERE tenant_id=? AND room_id=?`
+	sqlq := `SELECT ` + artifactCols + ` FROM artifacts a WHERE a.tenant_id=? AND a.room_id=?`
 	args := []any{tid, q.RoomID}
 	if q.ChannelID != "" {
-		sqlq += ` AND channel_id=?`
+		sqlq += ` AND a.channel_id=?`
 		args = append(args, q.ChannelID)
 	}
 	if q.Kind != "" {
-		sqlq += ` AND kind=?`
+		sqlq += ` AND a.kind=?`
 		args = append(args, q.Kind)
 	}
 	if q.MimeType != "" {
 		if prefix, ok := strings.CutSuffix(q.MimeType, "/*"); ok {
-			sqlq += ` AND mime_type LIKE ?`
+			sqlq += ` AND a.mime_type LIKE ?`
 			args = append(args, strings.TrimPrefix(likePattern(prefix+"/"), "%")) // "type/%": a prefix match
 		} else {
-			sqlq += ` AND mime_type=?`
+			sqlq += ` AND a.mime_type=?`
 			args = append(args, q.MimeType)
 		}
 	}
 	if q.Author != "" {
-		sqlq += ` AND created_by=?`
+		sqlq += ` AND a.created_by=?`
 		args = append(args, q.Author)
 	}
 	if t := strings.TrimSpace(q.Text); t != "" {
-		sqlq += ` AND (title LIKE ? OR file_name LIKE ?)`
+		sqlq += ` AND (a.title LIKE ? OR a.file_name LIKE ?)`
 		args = append(args, likePattern(t), likePattern(t))
 	}
 	if q.SourceSeq > 0 {
 		sqlq += ` AND EXISTS (SELECT 1 FROM artifact_versions v WHERE v.tenant_id=a.tenant_id AND v.artifact_id=a.artifact_id AND v.source_seq=?)`
 		args = append(args, q.SourceSeq)
 	}
+	if q.Apps {
+		sqlq += ` AND ` + sqlArtifactIsApp
+	}
 	if q.BeforeUpdatedMs > 0 {
-		sqlq += ` AND (updated_at_ms < ? OR (updated_at_ms = ? AND artifact_id < ?))`
+		sqlq += ` AND (a.updated_at_ms < ? OR (a.updated_at_ms = ? AND a.artifact_id < ?))`
 		args = append(args, q.BeforeUpdatedMs, q.BeforeUpdatedMs, q.BeforeID)
 	}
-	sqlq += ` ORDER BY updated_at_ms DESC, artifact_id DESC LIMIT ?`
+	sqlq += ` ORDER BY a.updated_at_ms DESC, a.artifact_id DESC LIMIT ?`
 	return queryAll(ctx, m.DB, sqlq, scanArtifact, append(args, artifactListLimit(q.Limit))...)
 }
 
@@ -188,9 +194,9 @@ WHERE tenant_id=? AND artifact_id=? AND current_version = ?`,
 	v.Version = baseVersion + 1
 	v.ParentVersion = baseVersion
 	if _, err := tx.ExecContext(ctx, `
-INSERT INTO artifact_versions (tenant_id, artifact_id, version, parent_version, content_hash, content, storage, blob_key, size_bytes, mime_type, source_job_id, source_seq, summary, author_user_id, created_at_ms)
-VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-		tid, artifactID, v.Version, v.ParentVersion, v.ContentHash, v.Content, v.Storage, v.BlobKey, v.SizeBytes, v.MimeType, v.SourceJobID, v.SourceSeq, v.Summary, v.AuthorUserID, v.CreatedAtMs); err != nil {
+INSERT INTO artifact_versions (tenant_id, artifact_id, version, parent_version, content_hash, content, storage, blob_key, size_bytes, mime_type, source_job_id, source_seq, summary, author_user_id, created_at_ms, loads_app_sdk)
+VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		tid, artifactID, v.Version, v.ParentVersion, v.ContentHash, v.Content, v.Storage, v.BlobKey, v.SizeBytes, v.MimeType, v.SourceJobID, v.SourceSeq, v.Summary, v.AuthorUserID, v.CreatedAtMs, v.LoadsAppSDK); err != nil {
 		return Artifact{}, ArtifactVersion{}, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -249,7 +255,8 @@ WHERE tenant_id=? AND artifact_id=? AND version=? AND (thumb_blob_key='' OR thum
 
 func scanArtifact(row rowScanner) (Artifact, error) {
 	var a Artifact
-	err := row.Scan(&a.ArtifactID, &a.TenantID, &a.RoomID, &a.ChannelID, &a.Kind, &a.Title, &a.Language, &a.MimeType, &a.FileName, &a.CurrentVersion, &a.CreatedBy, &a.CreatedAtMs, &a.UpdatedAtMs)
+	err := row.Scan(&a.ArtifactID, &a.TenantID, &a.RoomID, &a.ChannelID, &a.Kind, &a.Title, &a.Language, &a.MimeType, &a.FileName, &a.CurrentVersion, &a.CreatedBy, &a.CreatedAtMs, &a.UpdatedAtMs,
+		&a.LoadsAppSDK, &a.HasAppData)
 	if err == sql.ErrNoRows {
 		return Artifact{}, ErrArtifactNotFound
 	}
@@ -266,7 +273,7 @@ func scanArtifactVersion(row rowScanner) (ArtifactVersion, error) {
 	err := row.Scan(&v.ArtifactID, &v.TenantID, &v.Version, &v.ParentVersion, &v.ContentHash, &v.Content,
 		&v.Storage, &v.BlobKey, &v.SizeBytes, &v.MimeType, &v.SourceJobID, &v.SourceSeq,
 		&v.Summary, &v.AuthorUserID, &v.CreatedAtMs,
-		&v.ThumbnailBlobKey, &thumbMime, &thumbW, &thumbH, &v.ThumbnailRank)
+		&v.ThumbnailBlobKey, &thumbMime, &thumbW, &thumbH, &v.ThumbnailRank, &v.LoadsAppSDK)
 	if err == sql.ErrNoRows {
 		return ArtifactVersion{}, ErrArtifactNotFound
 	}

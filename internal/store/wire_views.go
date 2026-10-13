@@ -97,6 +97,7 @@ func (a Artifact) View() wire.Artifact {
 		CreatedBy:      a.CreatedBy,
 		CreatedAtMs:    a.CreatedAtMs,
 		UpdatedAtMs:    a.UpdatedAtMs,
+		IsApp:          a.IsApp(),
 	}
 }
 

@@ -101,6 +101,11 @@ type Artifact struct {
 	CreatedBy      string `json:"createdBy"`
 	CreatedAtMs    int64  `json:"createdAtMs"`
 	UpdatedAtMs    int64  `json:"updatedAtMs"`
+	// LoadsAppSDK (the current version's) and HasAppData (its data space
+	// exists) are the facts Artifact.IsApp decides on; every read fills
+	// them, no write takes them (artifact_apps.go).
+	LoadsAppSDK bool `json:"-"`
+	HasAppData  bool `json:"-"`
 }
 
 // ArtifactAnchor links a room message (Seq, a version's sourceSeq) to an
@@ -154,6 +159,10 @@ type ArtifactVersion struct {
 	// and source priority; server-side only.
 	ThumbnailBlobKey string `json:"-"`
 	ThumbnailRank    int    `json:"-"`
+	// LoadsAppSDK records that the version's site bundle loads the app SDK,
+	// detected once when its bytes were stored (appdata.SDKScan); the
+	// artifact's IsApp reads its current version's.
+	LoadsAppSDK bool `json:"-"`
 }
 
 // ArtifactThumbnailWrite is one thumbnail store request.
@@ -182,6 +191,8 @@ type ArtifactQuery struct {
 	// Text substring-matches the title or file name (case-insensitive,
 	// taken literally).
 	Text string
+	// Apps selects interactive apps only (Artifact.IsApp).
+	Apps bool
 	// BeforeUpdatedMs + BeforeID: return only artifacts strictly after this
 	// cursor in (updatedAtMs desc, artifactId desc) order. Zero = first page.
 	BeforeUpdatedMs int64
@@ -204,6 +215,9 @@ type ArtifactStore interface {
 	PutArtifact(ctx context.Context, a Artifact) (Artifact, error)
 	GetArtifact(ctx context.Context, artifactID string) (Artifact, error)
 	ListArtifacts(ctx context.Context, q ArtifactQuery) ([]Artifact, error)
+	// ListApps pages the interactive apps of a set of rooms
+	// (artifact_apps.go).
+	ListApps(ctx context.Context, q AppListQuery) ([]Artifact, error)
 	// ArtifactAnchors returns the (sourceSeq, artifact) links of a room's
 	// artifact versions whose sourceSeq lies in [fromSeq, toSeq], ordered by
 	// seq: the deliverable cards a feed shows under those messages. At most
@@ -313,6 +327,9 @@ type MemoryArtifacts struct {
 	artifacts map[string]Artifact
 	versions  map[string]map[int]ArtifactVersion
 	shares    map[string]ArtifactShare
+	// appData answers whether an app's data space exists (HasAppData);
+	// NewBackends wires the memory app docs store in.
+	appData *MemoryAppDocs
 }
 
 func NewMemoryArtifacts() *MemoryArtifacts {
@@ -335,7 +352,7 @@ func (s *MemoryArtifacts) PutArtifact(ctx context.Context, a Artifact) (Artifact
 		}
 		// Idempotent attach: a re-put with the same id keeps the artifact's
 		// version history instead of resetting it.
-		return existing, nil
+		return s.withAppFactsLocked(existing), nil
 	}
 	if a.CreatedAtMs <= 0 {
 		a.CreatedAtMs = time.Now().UnixMilli()
@@ -358,7 +375,7 @@ func (s *MemoryArtifacts) GetArtifact(ctx context.Context, artifactID string) (A
 	if !ok || a.TenantID != tid {
 		return Artifact{}, ErrArtifactNotFound
 	}
-	return a, nil
+	return s.withAppFactsLocked(a), nil
 }
 
 func (s *MemoryArtifacts) ListArtifacts(ctx context.Context, q ArtifactQuery) ([]Artifact, error) {
@@ -375,6 +392,9 @@ func (s *MemoryArtifacts) ListArtifacts(ctx context.Context, q ArtifactQuery) ([
 			continue
 		}
 		if q.SourceSeq > 0 && !s.hasSourceSeqLocked(a.ArtifactID, q.SourceSeq) {
+			continue
+		}
+		if a = s.withAppFactsLocked(a); q.Apps && !a.IsApp() {
 			continue
 		}
 		out = append(out, a)
@@ -481,7 +501,7 @@ func (s *MemoryArtifacts) PublishArtifactVersion(ctx context.Context, artifactID
 		a.MimeType = v.MimeType
 	}
 	s.artifacts[artifactID] = a
-	return a, v, nil
+	return s.withAppFactsLocked(a), v, nil
 }
 
 func (s *MemoryArtifacts) GetArtifactVersion(ctx context.Context, artifactID string, version int) (ArtifactVersion, error) {

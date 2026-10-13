@@ -81,6 +81,10 @@ type Service struct {
 	// Audit records every export of an app's data and every agent read of
 	// it (auditAppRead, appdata_export.go). nil records nothing.
 	Audit store.ExtensionAuditStore
+	// Runs reads the run records of the jobs that produced deliverables:
+	// a member's apps name each one's producer (my_apps.go). Nil leaves
+	// agent-produced apps' producer unknown.
+	Runs store.AgentRunReader
 	// appUsage is this replica's view of each app's usage; appCaps the
 	// per-app caps (zero: the wire constants).
 	appUsage appUsageCache
@@ -194,6 +198,7 @@ func (s *Service) Handler() http.Handler {
 	s.registerProfileRoutes(mux)
 	s.registerAgentHostRoutes(mux)
 	s.registerAppDataRoutes(mux)
+	mux.HandleFunc("GET /v1/my/apps", s.handleMyApps)
 	return svcauth.EnsureTenant(mux)
 }
 

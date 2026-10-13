@@ -199,6 +199,11 @@ func (s *Service) route(p apiPath) string {
 		if p.is("v1", "my", "profile") {
 			return s.Backends.Room
 		}
+		// The member's interactive apps across their rooms: the room
+		// service owns rooms, artifacts, app data and share links.
+		if p.is("v1", "my", "apps") {
+			return s.Backends.Room
+		}
 		return ""
 	case "rooms-unread":
 		return s.Backends.Realtime

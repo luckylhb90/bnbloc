@@ -350,7 +350,7 @@ func (s *MemoryArtifacts) SearchArtifacts(ctx context.Context, roomIDs []string,
 	out := []Artifact{}
 	for _, a := range s.artifacts {
 		if a.TenantID == tid && in[a.RoomID] && (containsFold(a.Title, text) || containsFold(a.FileName, text)) {
-			out = append(out, a)
+			out = append(out, s.withAppFactsLocked(a))
 		}
 	}
 	sortArtifactsNewestFirst(out)
@@ -377,7 +377,7 @@ func (m *MySQLArtifacts) SearchArtifacts(ctx context.Context, roomIDs []string, 
 		args = append(args, id)
 	}
 	args = append(args, likePattern(text), likePattern(text), searchLimit(limit))
-	return queryAll(ctx, m.DB, `SELECT `+artifactCols+` FROM artifacts
-	 WHERE tenant_id = ? AND room_id IN (`+inPlaceholders(len(roomIDs))+`) AND (title LIKE ? OR file_name LIKE ?)
-	 ORDER BY updated_at_ms DESC, artifact_id DESC LIMIT ?`, scanArtifact, args...)
+	return queryAll(ctx, m.DB, `SELECT `+artifactCols+` FROM artifacts a
+	 WHERE a.tenant_id = ? AND a.room_id IN (`+inPlaceholders(len(roomIDs))+`) AND (a.title LIKE ? OR a.file_name LIKE ?)
+	 ORDER BY a.updated_at_ms DESC, a.artifact_id DESC LIMIT ?`, scanArtifact, args...)
 }

@@ -274,36 +274,40 @@ func TestComposeGolden(t *testing.T) {
 	golden(t, "compose-delta.txt", ComposeDelta(attributedEntries, now, Options{}))
 }
 
-// appsFetch is a room with two sites and a document: site artf_poll holds
-// data (maya/codex built it), site artf_page holds none, and the document
-// is no app whatever its data.
+// appsFetch is a room with three sites and a document, as the listing's
+// isApp (the server's one rule) marks them: artf_poll is an app holding
+// data (maya/codex built it), artf_form an app nobody used yet (it loads
+// the SDK; jack published it), artf_page a plain site, and the document is
+// no app.
 func appsFetch() *fakeFetch {
 	return &fakeFetch{bodies: map[string]string{
 		"/v1/rooms/r1/artifacts?limit=30": `{"artifacts":[
-			{"artifactId":"artf_poll","title":"Friday poll","kind":"site","currentVersion":3,"createdBy":"maya","updatedAtMs":3},
-			{"artifactId":"artf_page","title":"Landing page","kind":"site","currentVersion":1,"createdBy":"maya","updatedAtMs":2},
-			{"artifactId":"art_doc","title":"notes.md","kind":"markdown","currentVersion":1,"createdBy":"maya","updatedAtMs":1}]}`,
+			{"artifactId":"artf_poll","title":"Friday poll","kind":"site","currentVersion":3,"createdBy":"maya","updatedAtMs":4,"isApp":true},
+			{"artifactId":"artf_form","title":"Sign-up form","kind":"site","currentVersion":1,"createdBy":"jack","updatedAtMs":3,"isApp":true},
+			{"artifactId":"artf_page","title":"Landing page","kind":"site","currentVersion":1,"createdBy":"maya","updatedAtMs":2,"isApp":false},
+			{"artifactId":"art_doc","title":"notes.md","kind":"markdown","currentVersion":1,"createdBy":"maya","updatedAtMs":1,"isApp":false}]}`,
 		"/v1/rooms/r1/artifacts/artf_poll/versions/3": `{"version":{"artifactId":"artf_poll","version":3,"sourceJobId":"job-a","authorUserId":"maya"}}`,
+		"/v1/rooms/r1/artifacts/artf_form/versions/1": `{"version":{"artifactId":"artf_form","version":1,"authorUserId":"jack"}}`,
 		"/v1/rooms/r1/jobs/job-a":                     `{"jobId":"job-a","agent":{"owner":"maya","core":"acme","provider":"codex"}}`,
 		"/v1/rooms/r1/apps/artf_poll/stats?job=job-1": `{"documents":12,"bytes":4096,"collections":{"votes":11,"options":1}}`,
-		"/v1/rooms/r1/apps/artf_page/stats?job=job-1": `{"documents":0,"bytes":0,"collections":{}}`,
+		"/v1/rooms/r1/apps/artf_form/stats?job=job-1": `{"documents":0,"bytes":0,"collections":{}}`,
 	}}
 }
 
-// .room/apps.md lists the room's interactive apps: the site deliverables
-// whose data holds documents (read with the job's grant), each with its
-// producer and its collections' counts, never a document's content. It is
-// written only once the room has an app, and from then on every turn, so
-// it never goes stale; a failed read says so.
+// .room/apps.md lists the room's interactive apps: the deliverables the
+// listing marks isApp (read with the job's grant), each with its producer
+// and its collections' counts, never a document's content. It is written
+// only once the room has an app, and from then on every turn, so it never
+// goes stale; a failed read says so.
 func TestAppsGolden(t *testing.T) {
 	ff := appsFetch()
 	apps, err := ReadApps(context.Background(), ff.fetch, "r1", "job-1", &ProducerCache{})
-	if err != nil || len(apps) != 1 || apps[0].ArtifactID != "artf_poll" {
+	if err != nil || len(apps) != 2 || apps[0].ArtifactID != "artf_poll" || apps[1].ArtifactID != "artf_form" {
 		t.Fatalf("apps = %+v, %v", apps, err)
 	}
 	for _, c := range ff.calls {
-		if strings.Contains(c, "art_doc") || strings.Contains(c, "artf_page/versions") {
-			t.Errorf("read %s: only a site's usage, and only an app's producer, are read", c)
+		if strings.Contains(c, "art_doc") || strings.Contains(c, "artf_page") {
+			t.Errorf("read %s: only an app's usage and producer are read", c)
 		}
 	}
 	f, write, listed := AppsUpdate(false, apps, nil)
@@ -321,7 +325,7 @@ func TestAppsGolden(t *testing.T) {
 	if _, write, _ := AppsUpdate(false, nil, errors.New("down")); write {
 		t.Fatal("an unreadable room that never had apps gets an apps.md")
 	}
-	if f, write, listed := AppsUpdate(true, nil, nil); !write || !listed || !strings.Contains(f.Content, "(no app holds data now)") {
+	if f, write, listed := AppsUpdate(true, nil, nil); !write || !listed || !strings.Contains(f.Content, "(no apps now)") {
 		t.Fatalf("apps.md after the data went is not rewritten: write=%v\n%s", write, f.Content)
 	}
 	if f, _, _ := AppsUpdate(true, nil, errors.New("down")); !strings.Contains(f.Content, "could not be read this turn") {

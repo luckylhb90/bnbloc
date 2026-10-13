@@ -59,6 +59,8 @@ func main() {
 	svc.AppDocs = backends.AppDocs
 	// Exports and agent reads of app data are audited.
 	svc.Audit = backends.ExtAudit
+	// A member's apps name who produced each (the source job's run record).
+	svc.Runs = backends.AgentRuns()
 	if svc.AppCipher = appdata.NewCipher(box); svc.AppCipher == nil {
 		log.Printf("bnbloc-room: %s is not set: interactive app data is off", sealbox.KeyEnv)
 	}

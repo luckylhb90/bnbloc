@@ -434,6 +434,7 @@ CREATE TABLE IF NOT EXISTS artifact_versions (
   thumb_width     INT NOT NULL DEFAULT 0,
   thumb_height    INT NOT NULL DEFAULT 0,
   thumb_rank      INT NOT NULL DEFAULT 0,
+  loads_app_sdk   TINYINT(1) NOT NULL DEFAULT 0,
   PRIMARY KEY (tenant_id, artifact_id, version),
   KEY idx_artifact_versions_source (tenant_id, source_seq),
   KEY idx_artifact_versions_created (tenant_id, created_at_ms),

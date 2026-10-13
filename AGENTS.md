@@ -1355,8 +1355,8 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   patch, delete, and wipe with `confirm`), on the gateway's room entry
   with the bound job's `?job=` (the agent is an owner; the room service's
   rules apply unchanged). Its path is spelled only by `roomlog.AppPath`;
-  "which deliverables are apps" is `roomlog.ReadApps` (a site among the
-  listed deliverables whose data holds a document, by its owners' `stats`),
+  the room's apps for an agent are `roomlog.ReadApps` (the listed
+  deliverables the projection marks `isApp`, each with its owners' `stats`),
   read by `.room/apps.md` and `app_data list` alike. Every document it
   returns is fenced (`roomlog.Fence`) and bounded (`maxAppDataText`, a find
   cut there continues with `next`). The bridge's gateway client carries a
@@ -1366,6 +1366,30 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   a renamed or added SDK method fails until the skill follows), the
   `app-builder` expert requires it, and `app-starters` holds `/poll`,
   `/survey`, `/signup`, `/app-report`.
+- **"Is this deliverable an app" has one owner: `store.Artifact.IsApp`**
+  (`internal/store/artifact_apps.go`, `docs/prd/2026-10-13-app-gallery.md`
+  §5): a site whose data space exists (its `app_keys` row, not being
+  destroyed) or whose current version loads the app SDK. `sqlArtifactIsApp`
+  is its SQL twin beside it; every read fills the two facts
+  (`LoadsAppSDK`, `HasAppData`), and the projection's `isApp`
+  (`Artifact.View`) is the only way out: the deliverables' Apps filter
+  (`?app=1`, `ArtifactQuery.Apps`), a member's apps (`ListApps`), the
+  agents' `ReadApps` and the web read it, never re-derive it. Whether a
+  version loads the SDK is detected ONCE, while its bytes stream into the
+  blob store (`putVersionBlob` tees a site bundle through
+  `appdata.SDKScan`; `appdata.SDKPath` is the SDK's one spelling) and
+  stored on the version (`artifact_versions.loads_app_sdk`): no listing
+  ever reads a bundle back (`TestAppRuleSingleOwner`,
+  `TestSiteAppSDKDetectedOncePerVersion`). A member's apps across rooms
+  are `GET /v1/my/apps` (`services/room/my_apps.go`): the rooms of the
+  signed tenant where the caller may chat (`Member.MayChat`, the app owner
+  rule), keyset-paged, each with its room's name, its producer
+  (`roomlog.ProducerOf`, the one producer rule, over the run store), its
+  document count (only with a data space) and its working links. An app's
+  cover is `GET …/versions/{v}/cover` (`services/gateway/site_cover.go`):
+  `cover.png`/`.webp`/`.jpg` at the site's root, served only when its bytes
+  sniff as that type and within `wire.MaxAppCoverBytes`, with nosniff and a
+  sandbox CSP (never an SVG); without one the web draws `lib/appCover.ts`.
 - **http MCP per-member sign-in is `mcp.http.auth.scheme = "oauth"`.** The
   desktop (`internal_ext/mcp_oauth.rs`) discovers the authorization server at
   sign-in (never declared or hardcoded), requires PKCE S256 and checks
@@ -1712,6 +1736,12 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
     renewal): `lib/appVisitor.ts` (rule A1; the share page's app view
     `views/share/SharedApp.tsx` only wires it); an app's owners' data line
     (counts, export, clear): `lib/appData.ts` + `views/workbench/AppDataLine.tsx`
+    (shown for an `isApp` deliverable); an app's generated cover:
+    `lib/appCover.ts` (a gradient seeded by the app id, the name's
+    initial; `views/workbench/AppCover.tsx` draws the site's own cover or
+    it); the deliverables' filters: `views/workbench/deliverableFilters.ts`
+    ("Apps" is `isApp`); a member's apps (Library → Apps): `lib/myApps.ts`
+    + `views/library/AppsTab.tsx`
     (who is an owner is the stats route's answer, never re-decided; an
     export is the server's audited route, the web only names the file);
   - where signing in brings a person back to (a share page of a link for

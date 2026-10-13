@@ -370,6 +370,10 @@ export interface Artifact {
   createdBy: string;
   createdAtMs: number;
   updatedAtMs: number;
+  // IsApp: the artifact is an interactive app, a site whose data space
+  // exists or whose current version loads the app SDK (store.Artifact.IsApp,
+  // the one rule; a client never re-derives it).
+  isApp: boolean;
 }
 
 // ArtifactThumbnail is a stored preview image of a version (the bytes are
@@ -1926,6 +1930,10 @@ export const MaxAppDocBytes = 65536;
 export const MaxAppDocs = 100000;
 // MaxAppBytes bounds the stored bytes of one app's documents.
 export const MaxAppBytes = 268435456;
+// MaxAppCoverBytes bounds an app's cover image (cover.png, .jpg or
+// .webp at the site's root, docs/prd/2026-10-13-app-gallery.md §4): a
+// larger one is not served, and the card draws the generated cover.
+export const MaxAppCoverBytes = 1048576;
 // MaxAppCollections bounds the named collections of one app.
 export const MaxAppCollections = 64;
 // MaxAppCollectionNameLen bounds a collection name (letters, digits,
@@ -2058,6 +2066,53 @@ export interface MyDesktop {
 export interface MyAgentsReply {
   agents: MyAgent[];
   desktop: MyDesktop;
+}
+
+// ---- wire/my_apps.go ----
+
+// MyApp is one app of the listing.
+export interface MyApp {
+  // AppID is the site artifact's id (the app's data space is keyed by it).
+  appId: string;
+  name: string;
+  roomId: string;
+  roomName: string;
+  version: number;
+  updatedAtMs: number;
+  // Producer made the latest version.
+  producer: AppProducer;
+  // Documents is the app's document count (its owners' stats); 0 when
+  // the app holds no data.
+  documents: number;
+  // Links are the app's share links that work now (not revoked, not
+  // expired), newest first.
+  links: AppLink[];
+}
+
+// AppProducer is who produced a version: an agent (Owner, Provider, Core),
+// or a person (Person) for a manual publish; empty when the source job's
+// run record is gone.
+export interface AppProducer {
+  owner?: string;
+  provider?: string;
+  core?: string;
+  person?: string;
+}
+
+// AppLink is one working share link of an app.
+export interface AppLink {
+  shareId: string;
+  access: ShareAccess;
+  expiresAtMs: number;
+  // Version is the pinned version; 0 follows the latest.
+  version: number;
+}
+
+// MyAppList is GET /v1/my/apps; NextCursor pages on (absent on the last
+// page).
+export interface MyAppList {
+  apps: MyApp[];
+  nextCursor?: string;
 }
 
 // ---- wire/notifications.go ----

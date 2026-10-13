@@ -15,6 +15,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/luckylhb90/bnbloc/internal/appdata"
 	"github.com/luckylhb90/bnbloc/internal/config"
 	"github.com/luckylhb90/bnbloc/internal/digest"
 	"github.com/luckylhb90/bnbloc/internal/httpx"
@@ -128,6 +129,8 @@ type blobUpload struct {
 	summary     string
 	sourceJobID string
 	sourceSeq   int64
+	// loadsSDK: the file is a site bundle that loads the app SDK.
+	loadsSDK bool
 }
 
 // publishBlobVersion handles the multipart form of POST …/versions: the
@@ -228,7 +231,7 @@ func (s *Service) publishBlobVersion(w http.ResponseWriter, r *http.Request, art
 	}
 	s.commitVersion(w, r, art, userID, store.ArtifactVersion{
 		Storage: store.ArtifactStorageBlob, BlobKey: up.ref.Key, ContentHash: up.ref.SHA256,
-		SizeBytes: up.ref.Size, MimeType: up.mimeType,
+		SizeBytes: up.ref.Size, MimeType: up.mimeType, LoadsAppSDK: up.loadsSDK,
 		SourceJobID: up.sourceJobID, SourceSeq: up.sourceSeq,
 		Summary: up.summary, AuthorUserID: userID, CreatedAtMs: s.Now(),
 	}, up.baseVersion)
@@ -264,7 +267,7 @@ func (s *Service) storeFilePart(ctx context.Context, userID string, art store.Ar
 	}
 	up.mimeType = mimeType
 	capped := &cappedReader{r: io.MultiReader(bytes.NewReader(head), part), max: max}
-	ref, err := s.Blobs.PutBlob(ctx, capped)
+	ref, loadsSDK, err := s.putVersionBlob(ctx, mimeType, capped)
 	if capped.exceeded {
 		return http.StatusRequestEntityTooLarge, fmt.Sprintf("file exceeds the %d byte limit", max)
 	}
@@ -275,8 +278,23 @@ func (s *Service) storeFilePart(ctx context.Context, userID string, art store.Ar
 	if err != nil {
 		return http.StatusBadGateway, "artifact blob store failed: " + err.Error()
 	}
-	up.ref = ref
+	up.ref, up.loadsSDK = ref, loadsSDK
 	return 0, ""
+}
+
+// putVersionBlob streams a version's bytes into the blob store. A site
+// bundle passes through appdata.SDKScan on its way, so whether it loads the
+// app SDK is decided once per version, while its bytes are stored, and is
+// never re-read from the bundle (store.ArtifactVersion.LoadsAppSDK; the
+// one rule over it is store.Artifact.IsApp).
+func (s *Service) putVersionBlob(ctx context.Context, mimeType string, r io.Reader) (realtime.BlobRef, bool, error) {
+	if store.MediaType(mimeType) != tarbundle.SiteMIME {
+		ref, err := s.Blobs.PutBlob(ctx, r)
+		return ref, false, err
+	}
+	var scan appdata.SDKScan
+	ref, err := s.Blobs.PutBlob(ctx, io.TeeReader(r, &scan))
+	return ref, err == nil && scan.Found(), err
 }
 
 func (s *Service) writeUploadErr(w http.ResponseWriter, err error, max int64) {

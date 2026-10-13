@@ -161,14 +161,15 @@ text has one owner per category
   code wrote it).
 - **`.room/apps.md`** (`roomlog.ReadApps`, `AppsFile`): the room's
   interactive apps, each with its producer and its collections' document
-  counts, never a document's content. An app is a site among the listed
-  deliverables (`roomlog.MaxListedDeliverables`) whose data holds at least
-  one document, as its owners' `GET …/apps/{id}/stats?job=` answers it
-  with the turn's job grant: a site whose data is empty has nothing to read
-  back, and `app_data` takes any site by id. The file appears only once
-  the room has an app; from then on the session's workspace gets it every
-  turn (`roomlog.AppsUpdate`, `CtxState.AppsListed`), so it never claims
-  data that was deleted. INDEX.md names it.
+  counts, never a document's content. The apps are the listed deliverables
+  (`roomlog.MaxListedDeliverables`) the listing marks `isApp` (the
+  server's one rule, `store.Artifact.IsApp`: a site that loads the app SDK
+  or whose data space exists), each with its owners' `GET
+  …/apps/{id}/stats?job=` read with the turn's job grant; `app_data` takes
+  any site by id. The file appears only once the room has an app; from
+  then on the session's workspace gets it every turn (`roomlog.AppsUpdate`,
+  `CtxState.AppsListed`), so it never claims an app that is gone. INDEX.md
+  names it.
 
 The bridge rewrites `artifacts.md`, `library.md`, `live.md` and (once
 written) `apps.md` every turn (`roomRecordFiles`, beside the history:

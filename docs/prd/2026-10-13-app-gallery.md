@@ -58,6 +58,43 @@ discoverable and makes the product feel alive.
 
 ## 5. "Apps" views (before the gallery)
 
+Status: **landed** (2026-10-13), except "Publish to gallery", which comes
+with step 2. Decided while building:
+- **One rule, one owner: `store.Artifact.IsApp`.** A site whose data space
+  exists (its key is stored and not being destroyed) or whose current
+  version loads `~app/sdk.js`. Every read of an artifact fills both facts;
+  `sqlArtifactIsApp` is the SQL twin beside the Go rule; the projection's
+  `isApp` is the one way out (deliverables, `?app=1`, `GET /v1/my/apps`,
+  the agents' `.room/apps.md` and `app_data list`, the web). An app nobody
+  used yet is now an app (it loads the SDK) and is listed with 0 documents.
+- **The SDK is detected once per version, while its bytes are stored.**
+  The room service tees a site bundle through `appdata.SDKScan` on its way
+  into the blob store (publish and import alike) and stores the answer on
+  the version (`artifact_versions.loads_app_sdk`, migration
+  `2026_10_artifact_app_sdk`). A site bundle is an uncompressed ustar, so a
+  substring scan of the stream sees every file's bytes; nothing re-reads a
+  bundle to list. Versions stored before the migration read as not loading
+  it (pre-launch; their data space still makes them apps).
+- **`GET /v1/my/apps`** (the room service; `wire.MyAppList`): the apps of
+  the rooms of the effective tenant where the caller may chat (an owner),
+  newest-updated first, keyset-paged (24, at most 60). Each: app id, name,
+  room id and name, latest version and update time, producer (the source
+  job's agent, else the publishing person: `roomlog.ProducerOf`, now the
+  one producer rule for agents and the listing), the document count (read
+  only for an app with a data space) and the working links (access,
+  expiry).
+- **Covers.** `GET /v1/rooms/{roomId}/artifacts/{artifactId}/versions/{v}/cover`
+  (a member's room read): the first of `cover.png`, `cover.webp`,
+  `cover.jpg`, `cover.jpeg` at the site root, only when its bytes sniff as
+  that type, at most `wire.MaxAppCoverBytes` (1 MiB), with nosniff and a
+  sandbox CSP; an SVG is never a cover. 404 without one, 413 over the cap,
+  415 for anything else: the card then draws the generated cover
+  (`lib/appCover.ts`). The room's deliverable cards of apps show the cover
+  too.
+- **The deliverables panel** has an "Apps" type (server-side `?app=1`, and
+  the same `isApp` on the page); "Web & apps" became "Web pages & sites",
+  and a site's type label is "Website", an app's "Interactive app".
+
 - **The room's deliverables panel** gets an "Apps" filter: sites whose data
   space exists, or that load `~app/sdk.js`. Use the same rule as
   `roomlog.ReadApps`, extended to sites with the SDK reference. One owner.

@@ -210,8 +210,7 @@ func (s *Service) handleListArtifacts(w http.ResponseWriter, r *http.Request) {
 	}
 	resp := wire.ArtifactList{Artifacts: store.ArtifactViews(arts), MaxBytes: s.artifactMaxBytes()}
 	if len(arts) == q.Limit {
-		last := arts[len(arts)-1]
-		resp.NextCursor = strconv.FormatInt(last.UpdatedAtMs, 10) + ":" + last.ArtifactID
+		resp.NextCursor = artifactCursor(arts[len(arts)-1])
 	}
 	httpx.WriteJSON(w, http.StatusOK, resp)
 }
@@ -257,7 +256,9 @@ func parseArtifactQuery(w http.ResponseWriter, r *http.Request, roomID string) (
 		MimeType:  store.MediaType(v.Get("mime")),
 		Author:    strings.TrimSpace(v.Get("author")),
 		Text:      strings.TrimSpace(v.Get("q")),
-		Limit:     100,
+		// app=1: interactive apps only (store.Artifact.IsApp).
+		Apps:  v.Get("app") == "1",
+		Limit: 100,
 	}
 	if raw := strings.TrimSpace(v.Get("limit")); raw != "" {
 		n, err := strconv.Atoi(raw)
@@ -275,16 +276,31 @@ func parseArtifactQuery(w http.ResponseWriter, r *http.Request, roomID string) (
 		}
 		q.SourceSeq = n
 	}
-	if raw := strings.TrimSpace(v.Get("cursor")); raw != "" {
-		ms, id, ok := strings.Cut(raw, ":")
-		n, err := strconv.ParseInt(ms, 10, 64)
-		if !ok || err != nil || n <= 0 || id == "" {
-			httpx.Error(w, "invalid cursor", http.StatusBadRequest)
-			return q, false
-		}
-		q.BeforeUpdatedMs, q.BeforeID = n, id
+	before, id, ok := parseArtifactCursor(w, v.Get("cursor"))
+	q.BeforeUpdatedMs, q.BeforeID = before, id
+	return q, ok
+}
+
+// artifactCursor is the keyset cursor after the last artifact of a page
+// (newest-updated first): "<updatedAtMs>:<artifactId>".
+func artifactCursor(a store.Artifact) string {
+	return strconv.FormatInt(a.UpdatedAtMs, 10) + ":" + a.ArtifactID
+}
+
+// parseArtifactCursor reads an artifactCursor ("" is the first page); it
+// answers 400 and ok=false on a malformed one.
+func parseArtifactCursor(w http.ResponseWriter, raw string) (updatedMs int64, id string, ok bool) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return 0, "", true
 	}
-	return q, true
+	ms, id, cut := strings.Cut(raw, ":")
+	n, err := strconv.ParseInt(ms, 10, 64)
+	if !cut || err != nil || n <= 0 || id == "" {
+		httpx.Error(w, "invalid cursor", http.StatusBadRequest)
+		return 0, "", false
+	}
+	return n, id, true
 }
 
 func (s *Service) handleGetArtifact(w http.ResponseWriter, r *http.Request) {

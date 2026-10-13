@@ -1474,6 +1474,17 @@ WHERE r.channel_id = '' AND d.user_id IS NULL`)
 			return dropColumnIfExists(ctx, db, "tenants", "public_shares_disabled")
 		},
 	},
+	{
+		// Which deliverables are interactive apps
+		// (docs/prd/2026-10-13-app-gallery.md §5): a site version records
+		// whether its bundle loads the app SDK, detected once when its bytes
+		// are stored. Pre-launch: versions stored before read as not loading
+		// it (their data space, when one exists, still makes them apps).
+		id: "2026_10_artifact_app_sdk",
+		run: func(ctx context.Context, db sqlConn) error {
+			return addColumnIfMissing(ctx, db, "artifact_versions", "loads_app_sdk", "TINYINT(1) NOT NULL DEFAULT 0 AFTER thumb_rank")
+		},
+	},
 }
 
 // sqlConn is the statement surface a migration runs on. runMigrations passes
