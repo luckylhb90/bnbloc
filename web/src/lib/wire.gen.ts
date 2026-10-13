@@ -461,6 +461,122 @@ export interface ArtifactUpdated {
   reason?: string;
 }
 
+// ---- wire/assist.go ----
+
+// Assist task outputs (an assist component's manifest "output").
+export const AssistOutputText = "text";
+export const AssistOutputJSON = "json";
+
+// AssistOutputs are the outputs an assist task may declare.
+export const AssistOutputs: readonly string[] = ["text", "json"];
+
+// Context an assist task may receive (its manifest "context"), resolved by
+// the server from the ids in the request after checking the caller may
+// read them.
+export const AssistContextRoom = "room";
+export const AssistContextArtifact = "artifact";
+export const AssistContextAttachments = "attachments";
+
+// AssistContexts are the contexts an assist task may declare.
+export const AssistContexts: readonly string[] = ["room", "artifact", "attachments"];
+
+// Bounds of an assist request.
+export const MaxAssistText = 8000;
+export const MaxAssistAttachments = 20;
+
+// AssistStatus is GET /v1/assist: whether assists are available to the
+// caller (a configured model, and an organization that has not turned
+// them off) and the tasks they can run.
+export interface AssistStatus {
+  available: boolean;
+  tasks: AssistTask[];
+}
+
+// AssistTask is one runnable task: the component it resolved to, its
+// output and, for JSON output, the fields its reply holds.
+export interface AssistTask {
+  name: string;
+  displayName?: string;
+  componentId: string;
+  output: AssistOutput;
+  fields?: AssistField[];
+  context?: AssistContext[];
+}
+
+// AssistField is one field of a JSON task's reply.
+export interface AssistField {
+  name: string;
+  description?: string;
+  // List marks a field holding a list of strings (tags).
+  list?: boolean;
+}
+
+// AssistRequest is POST /v1/assist/{task}: what the member typed and the
+// ids of what it refers to.
+export interface AssistRequest {
+  text: string;
+  roomId?: string;
+  artifactId?: string;
+  attachmentIds?: string[];
+}
+
+// AssistUsage is a call's token counts and latency.
+export interface AssistUsage {
+  model: string;
+  promptTokens: number;
+  completionTokens: number;
+  latencyMs: number;
+}
+
+// AssistDelta is a text task's "delta" event: the next piece of the reply.
+export interface AssistDelta {
+  text: string;
+}
+
+// AssistDone is a text task's "done" event.
+export interface AssistDone {
+  usage: AssistUsage;
+}
+
+// AssistJSONReply is a JSON task's answer: the declared fields only
+// (strings, or string lists for list fields).
+export interface AssistJSONReply {
+  fields: Record<string, unknown>;
+  usage: AssistUsage;
+}
+
+// AssistModelConfig is GET /v1/platform/assist-model: the deployment's
+// assist model. The key is never returned, only whether one is set.
+// Configurable is false without a secret store key (the key is never
+// stored in clear).
+export interface AssistModelConfig {
+  configurable: boolean;
+  baseUrl: string;
+  model: string;
+  keySet: boolean;
+  updatedBy?: string;
+  updatedAtMs?: number;
+}
+
+// AssistModelUpdate is PUT /v1/platform/assist-model. An empty APIKey
+// keeps the stored key; ClearKey removes it. An empty BaseURL turns the
+// model off.
+export interface AssistModelUpdate {
+  baseUrl: string;
+  model: string;
+  apiKey?: string;
+  clearKey?: boolean;
+}
+
+// AssistModelTest is POST /v1/platform/assist-model/test: one short
+// completion through the stored model.
+export interface AssistModelTest {
+  ok: boolean;
+  error?: string;
+  reply?: string;
+  usage: AssistUsage;
+}
+
 // ---- wire/audit_log.go ----
 
 // TruncatedHeader names the response header an audit CSV export sets to
@@ -4043,6 +4159,10 @@ export type AppErrorCode = "visitor_token_required" | "visitor_token_invalid";
 export const AppErrorCodeValues: readonly AppErrorCode[] = ["visitor_token_required", "visitor_token_invalid"];
 export type AppExportFormat = "json" | "csv";
 export const AppExportFormatValues: readonly AppExportFormat[] = ["json", "csv"];
+export type AssistOutput = "text" | "json";
+export const AssistOutputValues: readonly AssistOutput[] = ["text", "json"];
+export type AssistContext = "room" | "artifact" | "attachments";
+export const AssistContextValues: readonly AssistContext[] = ["room", "artifact", "attachments"];
 export type ContentUseScope = "member" | "room" | "room-expert";
 export const ContentUseScopeValues: readonly ContentUseScope[] = ["member", "room", "room-expert"];
 export type ContentSavedAction = "saved" | "submitted" | "published";
