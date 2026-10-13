@@ -13,12 +13,18 @@ import type { AssistRunState } from "@/views/AssistButton";
 
 export function useEnhancePrompt({
   roomId,
+  channelId,
+  expertId,
   text,
   setText,
   attachmentIds,
   taRef,
 }: {
   readonly roomId: string;
+  // The composer's channel (the recent messages the server reads) and the
+  // expert picked for the message (else the server uses the room's).
+  readonly channelId?: string | null;
+  readonly expertId?: string | null;
   readonly text: string;
   readonly setText: (t: string) => void;
   // The attachments already stored in the room (the server reads their
@@ -60,7 +66,13 @@ export function useEnhancePrompt({
     try {
       const { text: result } = await runTextAssist(
         task.name,
-        { text: original, roomId, ...(attachmentIds.length > 0 ? { attachmentIds: [...attachmentIds] } : {}) },
+        {
+          text: original,
+          roomId,
+          ...(channelId ? { channelId } : {}),
+          ...(expertId ? { expertId } : {}),
+          ...(attachmentIds.length > 0 ? { attachmentIds: [...attachmentIds] } : {}),
+        },
         {
           signal: ctl.signal,
           onDelta: (soFar) => {
@@ -85,7 +97,7 @@ export function useEnhancePrompt({
       setState("idle");
       focusEnd();
     }
-  }, [task, state, text, roomId, attachmentIds, setText, toast, focusEnd]);
+  }, [task, state, text, roomId, channelId, expertId, attachmentIds, setText, toast, focusEnd]);
 
   const stop = useCallback(() => abortRef.current?.abort(), []);
 

@@ -127,8 +127,6 @@ export function Composer({
   // "Enhance prompt": the AI assist rewrites the text in place (Undo puts
   // it back); hidden without a model.
   const storedAttachmentIds = useMemo(() => attachments.files.flatMap((f) => (f.stored ? [f.stored.id] : [])), [attachments.files]);
-  const enhance = useEnhancePrompt({ roomId, text, setText, attachmentIds: storedAttachmentIds, taRef });
-  const enhancing = enhance.state !== "idle";
   // @-mention autocomplete: when the caret is inside an "@partial" token, show a
   // filtered member list; selecting one inserts "@name ".
   const [mention, setMention] = useState<{ query: string; start: number } | null>(
@@ -141,6 +139,16 @@ export function Composer({
   // Experts (the room's pinned ones and the member's own) answer @name too:
   // picking one sets the expert, which runs on the selected agent.
   const exp = useComposerExpert(roomId, !people);
+  const enhance = useEnhancePrompt({
+    roomId,
+    channelId: people ? null : channelId,
+    expertId: exp.expert?.component.id ?? null,
+    text,
+    setText,
+    attachmentIds: storedAttachmentIds,
+    taRef,
+  });
+  const enhancing = enhance.state !== "idle";
   // Prompts of the member's packs and the room's: the picker, /commands
   // and expert quick prompts that point at a pack's prompt.
   const prompts = useComposerPrompts(roomId, !people, setText, taRef);
