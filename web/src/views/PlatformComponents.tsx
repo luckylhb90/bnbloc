@@ -36,6 +36,20 @@ export function PlatformComponents() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [busyComponent, setBusyComponent] = useState<string | null>(null);
   const [filter, setFilter] = useState<KindFilter>("all");
+  // The gateway's install policy: false only when the deployment accepts
+  // unsigned packages (BNBLOC_EXT_ALLOW_UNSIGNED), which must never be the
+  // case in production — say so where packages are installed.
+  const [signatureRequired, setSignatureRequired] = useState(true);
+  useEffect(() => {
+    let live = true;
+    api.listComponentKeys().then(
+      (r) => live && setSignatureRequired(r.signatureRequired !== false),
+      () => {},
+    );
+    return () => {
+      live = false;
+    };
+  }, []);
   // A notifier's signing secret, shown once after install or rotation.
   const [revealed, setRevealed] = useState<{ readonly name: string; readonly secret: string } | null>(null);
 
@@ -138,6 +152,11 @@ export function PlatformComponents() {
         </div>
       </Card>
 
+      {!signatureRequired && (
+        <ErrorBox>
+          This deployment installs unsigned packages (BNBLOC_EXT_ALLOW_UNSIGNED is on). Anyone who can install a component can run unverified code; turn it off before production.
+        </ErrorBox>
+      )}
       {loadError && <ErrorBox>{loadError}</ErrorBox>}
       {revealed && <SecretReveal name={revealed.name} secret={revealed.secret} onDismiss={() => setRevealed(null)} />}
 

@@ -266,6 +266,11 @@ func main() {
 	}
 	tw := resolveTenantWiring()
 	allowUnsigned := config.Bool("BNBLOC_EXT_ALLOW_UNSIGNED", false)
+	if allowUnsigned && config.Production() {
+		// Not fatal (a deployment mid-migration to signed packages must still
+		// start), but loud: the platform console shows the same warning.
+		log.Printf("bnbloc-gateway: WARNING BNBLOC_EXT_ALLOW_UNSIGNED is on in production: unsigned component packages install and run unverified")
+	}
 	// Organization MCP connectors are sealed under the secret store key;
 	// unset turns them off, a malformed key refuses to start.
 	secretBox, err := sealbox.FromEnv()
