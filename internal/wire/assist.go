@@ -72,10 +72,15 @@ type AssistField struct {
 }
 
 // AssistRequest is POST /v1/assist/{task}: what the member typed and the
-// ids of what it refers to.
+// ids of what it refers to. ChannelID is the room channel the composer is
+// in (its recent messages; "" = the room's default channel); ExpertID the
+// expert picked for the message (else the room's). An artifact and the
+// attachments are the room's, so they need RoomID.
 type AssistRequest struct {
 	Text          string   `json:"text"`
 	RoomID        string   `json:"roomId,omitempty"`
+	ChannelID     string   `json:"channelId,omitempty"`
+	ExpertID      string   `json:"expertId,omitempty"`
 	ArtifactID    string   `json:"artifactId,omitempty"`
 	AttachmentIDs []string `json:"attachmentIds,omitempty"`
 }

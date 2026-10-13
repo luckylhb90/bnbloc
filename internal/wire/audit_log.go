@@ -34,6 +34,9 @@ const (
 	// AuditKindApp: an interactive app's data read out (name = the app):
 	// an owner's export, or an agent's read through its job's grant.
 	AuditKindApp = "app"
+	// AuditKindAssist: an AI assist ran (name = task@version; the model,
+	// tokens and latency, never the text) or the assist model was set.
+	AuditKindAssist = "assist"
 )
 
 // AuditLogEntry is one normalized audit record. ID is unique across sources

@@ -520,10 +520,15 @@ export interface AssistField {
 }
 
 // AssistRequest is POST /v1/assist/{task}: what the member typed and the
-// ids of what it refers to.
+// ids of what it refers to. ChannelID is the room channel the composer is
+// in (its recent messages; "" = the room's default channel); ExpertID the
+// expert picked for the message (else the room's). An artifact and the
+// attachments are the room's, so they need RoomID.
 export interface AssistRequest {
   text: string;
   roomId?: string;
+  channelId?: string;
+  expertId?: string;
   artifactId?: string;
   attachmentIds?: string[];
 }
@@ -615,6 +620,9 @@ export const AuditKindContent = "content";
 // AuditKindApp: an interactive app's data read out (name = the app):
 // an owner's export, or an agent's read through its job's grant.
 export const AuditKindApp = "app";
+// AuditKindAssist: an AI assist ran (name = task@version; the model,
+// tokens and latency, never the text) or the assist model was set.
+export const AuditKindAssist = "assist";
 
 // AuditLogEntry is one normalized audit record. ID is unique across sources
 // ("<source>:<row id>"). Name is the record's subject (component name, member
