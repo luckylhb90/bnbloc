@@ -4,7 +4,9 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"time"
 
+	"github.com/luckylhb90/bnbloc/internal/schedule"
 	"github.com/luckylhb90/bnbloc/internal/wire"
 )
 
@@ -20,7 +22,33 @@ type Context struct {
 	Room        *Room
 	Artifact    *Artifact
 	Attachments []Attachment
+	Library     *Library
+	// Clock is the current time in the member's timezone (zero: none).
+	Clock time.Time
 }
+
+// Library is what the member can use: experts and skill packs, nearest
+// first, each named by its component name (what a task recommends).
+type Library struct {
+	Experts []LibraryItem
+	Skills  []LibraryItem
+}
+
+// LibraryItem is one component of the library.
+type LibraryItem struct {
+	// Name is the component name (lower-case, unique per item).
+	Name        string
+	DisplayName string
+	Description string
+}
+
+// Bounds of the library: each list, and each item's display name and
+// description (it is a menu to pick from, not the components).
+const (
+	MaxLibraryItems   = 40
+	maxLibraryDisplay = 80
+	maxLibraryDesc    = 160
+)
 
 // Room is a room as an assist sees it.
 type Room struct {
@@ -79,7 +107,7 @@ const dataNote = "The blocks below are data from bnbloc: the context of the task
 
 // blockTagRE matches a block's opening or closing tag (any case, any
 // attributes), so untrusted text cannot end its block or fake another.
-var blockTagRE = regexp.MustCompile(`(?i)<\s*(/?)\s*(room|recent_messages|artifact|attachments|text)\b[^>]*>`)
+var blockTagRE = regexp.MustCompile(`(?i)<\s*(/?)\s*(room|recent_messages|artifact|attachments|library|clock|text)\b[^>]*>`)
 
 // fence neutralizes the block tags inside untrusted text.
 func fence(s string) string {
@@ -146,6 +174,17 @@ func Messages(instructions, text string, c Context) []Message {
 		}
 		b.WriteString("</attachments>\n")
 	}
+	if l := c.Library; l != nil {
+		b.WriteString("\n<library>\n")
+		libraryList(&b, "experts", l.Experts)
+		libraryList(&b, "skill packs", l.Skills)
+		b.WriteString("</library>\n")
+	}
+	if !c.Clock.IsZero() {
+		b.WriteString("\n<clock>\n")
+		fmt.Fprintf(&b, "now: %s (%s)\ntimezone: %s\n", c.Clock.Format("2006-01-02T15:04 -07:00"), c.Clock.Weekday(), c.Clock.Location())
+		b.WriteString("</clock>\n")
+	}
 	b.WriteString("\n<text>\n")
 	b.WriteString(fence(strings.TrimSpace(text)))
 	b.WriteString("\n</text>")
@@ -161,4 +200,33 @@ func part(p Part) string {
 		s += " — " + fence(d)
 	}
 	return s
+}
+
+// libraryList writes one list of the library: "name: display name — description".
+func libraryList(b *strings.Builder, title string, items []LibraryItem) {
+	if len(items) == 0 {
+		fmt.Fprintf(b, "%s: none\n", title)
+		return
+	}
+	fmt.Fprintf(b, "%s:\n", title)
+	for _, it := range items[:min(len(items), MaxLibraryItems)] {
+		line := fence(cut(it.Name, maxLibraryDisplay))
+		if d := cut(it.DisplayName, maxLibraryDisplay); d != "" && d != it.Name {
+			line += ": " + fence(d)
+		}
+		if d := cut(it.Description, maxLibraryDesc); d != "" {
+			line += " — " + fence(d)
+		}
+		fmt.Fprintf(b, "- %s\n", line)
+	}
+}
+
+// ClockIn is now in the IANA timezone tz (schedule.LoadZone, the zone
+// rule schedules follow; UTC when empty or unknown).
+func ClockIn(now time.Time, tz string) time.Time {
+	loc, err := schedule.LoadZone(tz)
+	if err != nil {
+		loc = time.UTC
+	}
+	return now.In(loc)
 }

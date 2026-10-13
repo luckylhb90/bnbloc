@@ -26,7 +26,18 @@ var scopeRank = map[store.ContentScope]int{
 
 // Tasks lists the assists v may run, one per name (the nearest), by name.
 func Tasks(ctx context.Context, st store.ContentComponentStore, v extpipe.Viewer) ([]store.ContentComponent, error) {
-	list, err := contentuse.Visible(ctx, st, v, contentpkg.KindAssist)
+	out, err := usable(ctx, st, v, contentpkg.KindAssist)
+	if err != nil {
+		return nil, err
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	return out, nil
+}
+
+// usable lists the components of kind v may use, one per name (the
+// nearest), in no particular order.
+func usable(ctx context.Context, st store.ContentComponentStore, v extpipe.Viewer, kind string) ([]store.ContentComponent, error) {
+	list, err := contentuse.Visible(ctx, st, v, kind)
 	if err != nil {
 		return nil, err
 	}
@@ -44,7 +55,32 @@ func Tasks(ctx context.Context, st store.ContentComponentStore, v extpipe.Viewer
 	for _, c := range nearest {
 		out = append(out, c)
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	return out, nil
+}
+
+// LibraryOf is the library context: the experts and skill packs v may use,
+// one per name (the nearest), the member's own first (nearest scope, then
+// by name), at most MaxLibraryItems each.
+func LibraryOf(ctx context.Context, st store.ContentComponentStore, v extpipe.Viewer) (*Library, error) {
+	out := &Library{}
+	for _, k := range []struct {
+		kind string
+		into *[]LibraryItem
+	}{{contentpkg.KindExpert, &out.Experts}, {contentpkg.KindSkill, &out.Skills}} {
+		list, err := usable(ctx, st, v, k.kind)
+		if err != nil {
+			return nil, err
+		}
+		sort.Slice(list, func(i, j int) bool {
+			if a, b := scopeRank[list[i].Scope], scopeRank[list[j].Scope]; a != b {
+				return a < b
+			}
+			return list[i].Name < list[j].Name
+		})
+		for _, c := range list[:min(len(list), MaxLibraryItems)] {
+			*k.into = append(*k.into, LibraryItem{Name: c.Name, DisplayName: c.DisplayName, Description: c.Description})
+		}
+	}
 	return out, nil
 }
 

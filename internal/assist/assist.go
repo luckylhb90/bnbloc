@@ -29,6 +29,8 @@ type Model struct {
 	BaseURL string
 	Model   string
 	APIKey  string
+	// Org marks an organization's own model (Settings.Effective).
+	Org bool
 }
 
 // Configured reports a model assists can run on.
