@@ -76,3 +76,20 @@ export function statusLine(s: SandboxStatus): { tone: SandboxTone; text: string 
 export function canRestartVm(s: SandboxStatus): boolean {
   return s.installed && s.mode !== "off" && !!s.isolation && (s.state === "ready" || s.state === "error");
 }
+
+// What "Reload shell environment" answers (the shell's `shell_env_reload`,
+// apps/desktop/src-tauri/src/shell_env.rs): how many variables agents now
+// get from the member's login shell, and why none when the shell failed.
+// Never a name or a value.
+export interface ShellEnvReload {
+  imported: number;
+  error?: string;
+}
+
+// shellEnvReloadText is the toast after a reload; ok=false when the shell
+// failed and the agents kept the app's own environment.
+export function shellEnvReloadText(r: ShellEnvReload): { ok: boolean; text: string } {
+  if (r.error) return { ok: false, text: `Could not read your shell environment (${r.error}). Agents restarted without it.` };
+  const n = r.imported;
+  return { ok: true, text: `Agents restarted with ${n} variable${n === 1 ? "" : "s"} from your shell.` };
+}

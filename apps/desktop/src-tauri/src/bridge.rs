@@ -327,8 +327,9 @@ impl Supervisor {
             g.refresh_token.clone()
         };
         cmd.envs(env_for(settings, refresh_token.as_deref(), Some(&self.app)));
+        let shell_env = crate::shell_env::current().await;
         let (mut rx, child) =
-            child_process::spawn(cmd).map_err(|e| format!("spawn sidecar: {e}"))?;
+            child_process::spawn(cmd, &shell_env).map_err(|e| format!("spawn sidecar: {e}"))?;
         let pid = child.pid();
         {
             let mut g = self.inner.lock();

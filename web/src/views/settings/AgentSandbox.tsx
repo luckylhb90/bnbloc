@@ -1,7 +1,14 @@
 import { useCallback, useEffect, useState } from "react";
 import { useTenantPolicy } from "@/lib/tenantPolicy";
 import { desktop } from "@/lib/desktop";
-import { canRestartVm, SANDBOX_MODES, statusLine, type SandboxMode, type SandboxStatus } from "@/lib/sandboxStatus";
+import {
+  canRestartVm,
+  SANDBOX_MODES,
+  shellEnvReloadText,
+  statusLine,
+  type SandboxMode,
+  type SandboxStatus,
+} from "@/lib/sandboxStatus";
 import { Button } from "@/ui/Button";
 import { Card } from "@/ui/Card";
 import { Input } from "@/ui/Input";
@@ -25,7 +32,7 @@ export function AgentSandbox() {
   const inShell = desktop.available();
   const toast = useToast();
   const [status, setStatus] = useState<SandboxStatus | null>(null);
-  const [busy, setBusy] = useState<"mode" | "restart" | "env" | null>(null);
+  const [busy, setBusy] = useState<"mode" | "restart" | "env" | "shell" | null>(null);
   // The env names being edited; null = showing the saved list.
   const [envDraft, setEnvDraft] = useState<string | null>(null);
   // The organization's policy: when it requires the sandbox for borrowing,
@@ -78,6 +85,26 @@ export function AgentSandbox() {
     void run("env", () => desktop.setSandboxEnv(names), "Sandbox environment saved").then((ok) => {
       if (ok) setEnvDraft(null);
     });
+  };
+
+  // Read the login shell's environment again; the bridge and the agents
+  // restart with it.
+  const reloadShellEnv = async () => {
+    if (busy) return;
+    setBusy("shell");
+    try {
+      const r = await desktop.reloadShellEnv();
+      if (r) {
+        const { ok, text } = shellEnvReloadText(r);
+        if (ok) toast.success(text);
+        else toast.error(text);
+      }
+    } catch (e) {
+      toast.error(errorText(e, "Something went wrong"));
+    } finally {
+      setBusy(null);
+      void load();
+    }
   };
 
   const line = status ? statusLine(status) : null;
@@ -150,6 +177,15 @@ export function AgentSandbox() {
               {busy === "env" ? "Saving…" : "Save"}
             </Button>
           </div>
+        </div>
+        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-[var(--color-border)] pt-3">
+          <p className="min-w-0 flex-1 text-xs text-[var(--color-fg-muted)]">
+            Your agents get the variables your login shell exports (such as in ~/.zshrc or ~/.zprofile), read when the
+            app starts. After exporting a new one, reload it here: the bridge and your agents restart.
+          </p>
+          <Button size="sm" variant="ghost" disabled={busy !== null} onClick={() => void reloadShellEnv()}>
+            {busy === "shell" ? "Reloading…" : "Reload shell environment"}
+          </Button>
         </div>
         {status?.installed && status.name && (
           <span className="text-xs text-[var(--color-fg-subtle)]">

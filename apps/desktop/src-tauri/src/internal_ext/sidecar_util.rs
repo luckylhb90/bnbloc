@@ -1,4 +1,4 @@
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::time::Duration;
 
 use crate::internal_ext::loopback::{self, LoopbackHttp};
@@ -255,38 +255,6 @@ pub(super) fn protocol_range_contains(
     matches!((parse(min), parse(max)), (Some(min), Some(max)) if min <= version && version <= max)
 }
 
-pub(super) fn sidecar_path_env(current_path: Option<&str>, home: Option<PathBuf>) -> String {
-    let mut parts = Vec::new();
-    if let Some(path) = current_path {
-        parts.extend(std::env::split_paths(path));
-    }
-    if let Some(home) = home {
-        for dir in [
-            ".local/bin",
-            ".opencode/bin",
-            ".local/share/mise/shims",
-            ".cargo/bin",
-        ] {
-            parts.push(home.join(dir));
-        }
-    }
-    #[cfg(unix)]
-    parts.extend([
-        PathBuf::from("/opt/homebrew/bin"),
-        PathBuf::from("/usr/local/bin"),
-    ]);
-    let mut out = Vec::new();
-    for part in parts {
-        if !out.iter().any(|seen| seen == &part) {
-            out.push(part);
-        }
-    }
-    std::env::join_paths(out)
-        .unwrap_or_default()
-        .to_string_lossy()
-        .into_owned()
-}
-
 pub(super) fn home_env() -> Option<(&'static str, std::ffi::OsString)> {
     #[cfg(windows)]
     let key = "USERPROFILE";
@@ -447,15 +415,6 @@ mod tests {
             !current_platform().contains("unsupported"),
             "this build is mapped"
         );
-    }
-
-    #[test]
-    fn sidecar_path_env_includes_user_cli_dirs_when_gui_path_is_sparse() {
-        let path = sidecar_path_env(Some("/usr/bin:/bin"), Some(PathBuf::from("/Users/example")));
-
-        assert!(path.contains("/Users/example/.local/bin"), "got {path}");
-        assert!(path.contains("/opt/homebrew/bin"), "got {path}");
-        assert!(path.starts_with("/usr/bin:/bin"), "got {path}");
     }
 
     #[test]

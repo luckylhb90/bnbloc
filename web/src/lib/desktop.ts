@@ -10,7 +10,7 @@ import { inDesktopShell } from "./config";
 import { api, type AgentTarget, type UpdatePolicy } from "./api";
 import type { McpToolSettings } from "./mcpTools";
 import type { PluginLocalSettings } from "./pluginSettings";
-import type { SandboxMode, SandboxStatus } from "./sandboxStatus";
+import type { SandboxMode, SandboxStatus, ShellEnvReload } from "./sandboxStatus";
 import { SESSION_KEY, parseSessionRecord, type SessionRecord } from "./sessionGrant";
 import { StorageKey, readStored, writeStored } from "./storageKeys.ts";
 
@@ -345,6 +345,17 @@ export const desktop = {
     return (await t.invoke("sandbox_restart_vm").catch((e: unknown) => {
       throw new Error(e instanceof Error ? e.message : String(e));
     })) as SandboxStatus;
+  },
+
+  // Read the member's login-shell environment again and restart the bridge
+  // and the sidecars with it (a newly exported key reaches the agents
+  // without quitting the app).
+  async reloadShellEnv(): Promise<ShellEnvReload | null> {
+    const t = tauri();
+    if (!t) return null;
+    return (await t.invoke("shell_env_reload").catch((e: unknown) => {
+      throw new Error(e instanceof Error ? e.message : String(e));
+    })) as ShellEnvReload;
   },
 
   async appInfo(): Promise<AppInfo | null> {

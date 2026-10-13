@@ -928,6 +928,19 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   two bridges, no relaunch onto a dying sidecar's port);
   `RestartPolicy::BRIDGE`/`SIDECAR` is the one backoff (a clean bridge exit
   is final, a sidecar always restarts); child output is bounded.
+  A child's environment beyond what its spawner sets is `shell_env`, the
+  member's login-shell environment (a Finder/Dock app never runs
+  `~/.zshrc`; `docs/bugs/2026-10-13-desktop-agents-miss-shell-env.md`):
+  `$SHELL -ilc` prints it NUL-separated between a random marker, once per
+  launch (the first spawn waits, bounded by a timeout; a failure falls
+  back to the app's own env) and again on "Reload shell environment"
+  (`shell_env_reload`, which restarts the bridge and sidecars). Every
+  child is spawned by `child_process::spawn(cmd, &shell_env::current())`,
+  which sets it beneath the command's explicit env, so `BNBLOC_*`, tokens
+  and ports the desktop sets win; `BNBLOC_*` and shell-session names are
+  never imported, PATH is the shell's then the app's missing entries, and
+  only the count is logged, never a value (`every_child_gets_the_shell_env`).
+  Never patch PATH or env for one child elsewhere.
   "Is this sidecar usable" is `ManagedSidecar::endpoint`, and the bridge
   env and its restart watcher read one list (`bridge_cores`). Values:
   `Sha256Pin` (parsed once at catalog decode, every kind),

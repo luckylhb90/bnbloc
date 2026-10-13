@@ -12,7 +12,7 @@ use crate::internal_ext::sidecar_orphan::{
     read_spawn_record, remove_spawn_record, terminate_orphan, write_spawn_record, ListenerPlan,
     OccupiedListener, Orphan, SpawnRecord, CAN_TERMINATE,
 };
-use crate::internal_ext::sidecar_util::{home_env, probe_core_protocol_listener, sidecar_path_env};
+use crate::internal_ext::sidecar_util::probe_core_protocol_listener;
 use crate::internal_ext::Adapter;
 
 /// Consecutive checksum mismatches tolerated (a truncated or proxied
@@ -347,23 +347,15 @@ impl Adapter {
                 LoopbackHttp::parse(runtime_url)?.authority(),
             );
         }
-        let home = home_env();
-        if let Some((home_key, home)) = home.clone() {
-            cmd.env(home_key, home);
-        }
-        let current_path = std::env::var("PATH").ok();
-        cmd.env(
-            "PATH",
-            sidecar_path_env(current_path.as_deref(), home.map(|(_, home)| home.into())),
-        );
         cmd.args(&spec.args);
         let kind = runtime(spec.kind);
         // Released however this launch ends: a failed spawn, a stale one,
         // the exit (kind_runtime::LaunchGuard).
         let mut guard = kind.launch(self, spec, path, &mut cmd).await?;
+        let shell_env = crate::shell_env::current().await;
         drop(listener.take());
         let (mut rx, child) =
-            child_process::spawn(cmd).map_err(|e| format!("spawn sidecar: {e}"))?;
+            child_process::spawn(cmd, &shell_env).map_err(|e| format!("spawn sidecar: {e}"))?;
         let pid = child.pid();
         {
             let mut inner = self.inner.lock();

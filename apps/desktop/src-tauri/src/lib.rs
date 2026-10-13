@@ -13,6 +13,7 @@ mod internal_ext;
 mod previewer_scheme;
 mod secret;
 mod settings;
+mod shell_env;
 mod site_scheme;
 mod sso_deep_link;
 mod updater_client;
@@ -276,6 +277,17 @@ pub(crate) fn resume_children(app: &tauri::AppHandle) {
     }
 }
 
+/// "Reload shell environment" (Settings → Agent sandbox): resolve the
+/// member's login-shell environment again (shell_env), then restart the
+/// bridge and every sidecar so they and the agents they run get it.
+#[tauri::command]
+async fn shell_env_reload(app: tauri::AppHandle) -> shell_env::Reloaded {
+    let reloaded = shell_env::reload().await;
+    child_process::terminate(detach_children(&app), child_process::STOP_GRACE).await;
+    resume_children(&app);
+    reloaded
+}
+
 /// Whether closing this window ends the app (and with it the bridge and the
 /// sidecars). Only the main window does; preview and people-chat pop-outs
 /// never do.
@@ -321,6 +333,9 @@ pub fn run() {
             |ctx, request, responder| site_scheme::handle(ctx.app_handle(), request, responder),
         )
         .setup(|app| {
+            // Start resolving the member's shell environment now: the first
+            // child spawn waits for it (shell_env).
+            tauri::async_runtime::spawn(shell_env::current());
             let handle = app.handle().clone();
             let supervisor = Supervisor::new(handle.clone());
             let dirs = dirs::Dirs::resolve(&handle);
@@ -418,6 +433,7 @@ pub fn run() {
             internal_ext::sandbox::sandbox_mode_set,
             internal_ext::sandbox::sandbox_env_set,
             internal_ext::sandbox::sandbox_restart_vm,
+            shell_env_reload,
         ])
         .on_page_load(|webview, payload| {
             // A pending cold-start SSO link is applied once the main page has

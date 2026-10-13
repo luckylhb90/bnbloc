@@ -1,7 +1,9 @@
 //! The one supervised-child primitive shared by the bridge supervisor
 //! (`bridge.rs`) and the component sidecar manager (`internal_ext`).
 //!
-//! A spawned child gets piped stdio: its stdout/stderr arrive as
+//! A spawned child gets the member's login-shell environment
+//! (`shell_env::ShellEnv`) beneath the env its caller sets, and piped
+//! stdio: its stdout/stderr arrive as
 //! [`ChildEvent::Line`]s and its exit as one final [`ChildEvent::Exited`]. The
 //! shell keeps the child's stdin open for the child's whole lifetime; a
 //! supervised child (bridge: `BNBLOC_BRIDGE_SUPERVISED`, sidecars: the
@@ -29,6 +31,8 @@ use std::time::{Duration, Instant};
 use futures_util::future::{BoxFuture, FutureExt, Shared};
 use shared_child::SharedChild;
 use tokio::sync::mpsc;
+
+use crate::shell_env::ShellEnv;
 
 /// Grace period between the graceful stop signal and a force-kill.
 pub(crate) const STOP_GRACE: Duration = Duration::from_secs(5);
@@ -61,8 +65,14 @@ pub(crate) struct Child {
     job: windows_job::Job,
 }
 
-/// Spawn `cmd` with piped stdio. Returns the event stream and the handle.
-pub(crate) fn spawn(mut cmd: Command) -> std::io::Result<(mpsc::Receiver<ChildEvent>, Child)> {
+/// Spawn `cmd` with piped stdio and the member's shell environment beneath
+/// its explicit env (`shell_env`: what `cmd` sets wins). Returns the event
+/// stream and the handle.
+pub(crate) fn spawn(
+    mut cmd: Command,
+    env: &ShellEnv,
+) -> std::io::Result<(mpsc::Receiver<ChildEvent>, Child)> {
+    env.apply(&mut cmd);
     cmd.stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
@@ -386,6 +396,10 @@ impl Backoff {
 mod windows_tests {
     use super::*;
 
+    fn spawn(cmd: Command) -> std::io::Result<(mpsc::Receiver<ChildEvent>, Child)> {
+        super::spawn(cmd, &ShellEnv::default())
+    }
+
     fn wait_for(mut done: impl FnMut() -> bool, within: Duration) -> bool {
         let deadline = Instant::now() + within;
         while Instant::now() < deadline {
@@ -437,10 +451,38 @@ mod windows_tests {
 mod tests {
     use super::*;
 
+    fn spawn(cmd: Command) -> std::io::Result<(mpsc::Receiver<ChildEvent>, Child)> {
+        super::spawn(cmd, &ShellEnv::default())
+    }
+
     fn sh(script: &str) -> Command {
         let mut cmd = Command::new("/bin/sh");
         cmd.args(["-c", script]);
         cmd
+    }
+
+    /// A child sees the shell's variables, and what its spawner sets for it
+    /// wins over them.
+    #[tokio::test]
+    async fn children_get_the_shell_env_beneath_their_explicit_env() {
+        let env = ShellEnv::for_test(
+            &[
+                ("EXAMPLE_API_KEY", "from-shell"),
+                ("EXAMPLE_PORT", "from-shell"),
+                ("BNBLOC_BRIDGE_OWNER", "from-shell"),
+            ],
+            None,
+        );
+        let mut cmd = sh("echo \"$EXAMPLE_API_KEY|$EXAMPLE_PORT|$BNBLOC_BRIDGE_OWNER\"");
+        cmd.env("EXAMPLE_PORT", "explicit");
+        cmd.env("BNBLOC_BRIDGE_OWNER", "maya");
+        let (rx, _child) = super::spawn(cmd, &env).expect("spawn");
+        let events = collect(rx).await;
+        assert_eq!(
+            events.first(),
+            Some(&ChildEvent::Line("from-shell|explicit|maya".into())),
+            "{events:?}"
+        );
     }
 
     async fn collect(mut rx: mpsc::Receiver<ChildEvent>) -> Vec<ChildEvent> {

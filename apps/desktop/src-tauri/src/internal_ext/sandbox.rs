@@ -1038,6 +1038,37 @@ mod tests {
         );
     }
 
+    /// "Environment passed to sandboxed agents" saves names only; each value
+    /// is read from the agent's environment, which carries the member's
+    /// shell variables (shell_env) beneath what the desktop hands over. A
+    /// shell can never replace the handoff itself.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn forwarded_names_find_their_values_in_the_shell_environment() {
+        let h = handoff();
+        let shell = crate::shell_env::ShellEnv::for_test(
+            &[
+                ("EXAMPLE_API_KEY", "from-shell"),
+                ("BNBLOC_SANDBOX_TOKEN", "from-shell"),
+            ],
+            None,
+        );
+        let mut cmd = std::process::Command::new("/bin/sh");
+        cmd.args([
+            "-c",
+            "echo \"$BNBLOC_SANDBOX_ENV|$EXAMPLE_API_KEY|$BNBLOC_SANDBOX_TOKEN\"",
+        ]);
+        let forward = vec!["EXAMPLE_API_KEY".to_string()];
+        cmd.envs(bridge_env(SandboxMode::All, &forward, Some(&h)));
+        let (mut rx, _child) = crate::child_process::spawn(cmd, &shell).expect("spawn");
+        assert_eq!(
+            rx.recv().await,
+            Some(crate::child_process::ChildEvent::Line(
+                "EXAMPLE_API_KEY|from-shell|tok-secret-value".into()
+            ))
+        );
+    }
+
     #[test]
     fn the_token_never_appears_in_the_fingerprint_or_debug_output() {
         let h = handoff();

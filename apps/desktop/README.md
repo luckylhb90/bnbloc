@@ -25,6 +25,7 @@ apps/desktop/
       artifact_scheme.rs       bnbloc-artifact:// scheme: the live-artifact runner's own origin
       child_process.rs         shared child spawn + graceful stop + backoff
       child_process/windows_job.rs  per-child kill-on-close Job Object (Windows)
+      shell_env.rs             the member's login-shell environment, for every child
       internal_ext/            component sidecar manager (catalog, download, supervise)
       settings.rs              persisted connection settings (owner-only JSON file)
     icons/                     app icons (placeholder; real icons are a release task)
@@ -111,6 +112,8 @@ no business logic. IPC commands (Rust ↔ web):
 - `check_update(sessionToken)` / `install_update(sessionToken)`
 - `open_url(url)` / `pop_out_preview(roomId, artifactId)`
 - `app_info() -> { version, platform, inShell }`
+- `shell_env_reload() -> { imported, error? }` (Settings → Agent sandbox →
+  "Reload shell environment")
 
 Process lifecycle: every child (bridge and component sidecars) gets a stdin
 pipe the shell holds open; a stop closes it (supervised children exit on EOF),
@@ -121,6 +124,30 @@ the run it replaces to stop. The settings file holds credentials and is
 written owner-only (0600) through a temp file unique to each write; an
 unreadable settings file is moved aside (`settings.json.corrupt-<ms>`) and
 reported in the bridge log, never reset and overwritten.
+
+## The member's shell environment
+
+An app started from Finder, the Dock or a desktop launcher never runs the
+member's login shell, so what `~/.zshrc`/`~/.zprofile` export (API keys,
+version-manager PATH entries) would reach no agent CLI. `src/shell_env.rs`
+resolves it once per launch: `$SHELL` (`/bin/zsh` on macOS, `/bin/sh`
+elsewhere when unset) runs as `-ilc` with stdin `/dev/null`, in its own
+session, and prints `env -0` between a per-run random marker; rc output
+outside the markers is ignored, and a shell that fails or takes longer than
+4 s is killed with its process group (the children then get the app's own
+environment). The first child spawn waits for it.
+
+Every child (the bridge, every sidecar, and through them every agent CLI and
+MCP stdio tool) gets it beneath what the desktop sets for that child, so
+`BNBLOC_*`, tokens and ports always win, and a core's own per-agent config
+applies later inside the core. `BNBLOC_*` and shell-session names (`PWD`,
+`OLDPWD`, `SHLVL`, `_`, `TERM_SESSION_ID`, `SHELL_SESSION_*`) are never
+imported; PATH is the shell's, then the app's entries it lacks. The log
+shows the imported count (names in debug builds only), never a value.
+Nothing the app sends over the network carries it. After exporting a new
+variable, Settings → Agent sandbox → "Reload shell environment" resolves it
+again and restarts the bridge and the sidecars. On Windows this is a no-op:
+GUI apps inherit the user's variables there.
 
 Settings map one-to-one to the bridge's environment (see `docs/bridge.md`). The
 web bundle feature-detects the shell (`window.__TAURI__`) and renders a **Local

@@ -24,11 +24,17 @@ fn sources() -> Vec<(String, String)> {
         .filter(|p| !p.to_string_lossy().ends_with("_tests.rs"))
         .map(|p| {
             let text = std::fs::read_to_string(&p).expect("read source");
-            let code = text
-                .split("#[cfg(test)]\nmod tests {")
-                .next()
-                .unwrap_or("")
-                .to_string();
+            // Test modules come last; the first one ends the code.
+            let end = [
+                "#[cfg(test)]\nmod tests {",
+                "#[cfg(all(test, unix))]\nmod ",
+                "#[cfg(all(test, windows))]\nmod ",
+            ]
+            .iter()
+            .filter_map(|marker| text.find(marker))
+            .min()
+            .unwrap_or(text.len());
+            let code = text[..end].to_string();
             let rel = p
                 .strip_prefix(&src)
                 .unwrap()
@@ -153,6 +159,46 @@ fn gateway_calls_go_through_the_gateway_client() {
             "internal_ext/sandbox_api.rs",
         ],
     );
+}
+
+/// Every child the desktop runs (the bridge, every sidecar, and through them
+/// every agent CLI and MCP stdio tool) is spawned by child_process::spawn,
+/// which sets the member's login-shell environment beneath the child's own
+/// (shell_env). The only other processes are the resolving shell itself and
+/// the orphan check's system tools (lsof, ps).
+#[test]
+fn every_child_gets_the_shell_env() {
+    only_in_any(
+        "Command::new(",
+        &[
+            "bridge.rs",
+            "internal_ext/sidecar_runtime.rs",
+            "internal_ext/sidecar_orphan.rs",
+            "shell_env.rs",
+        ],
+    );
+    only_in_any(
+        "child_process::spawn(",
+        &["bridge.rs", "internal_ext/sidecar_runtime.rs"],
+    );
+    only_in_any(
+        ".spawn()",
+        &["child_process/windows_job.rs", "shell_env.rs"],
+    );
+    only_in_any(".output()", &["internal_ext/sidecar_orphan.rs"]);
+    only_in("SharedChild::", "child_process.rs");
+    // The env a spawn gets is the one resolution's (shell_env::current),
+    // never one a caller builds; it is applied only by spawn.
+    only_in("ShellEnv::default()", "shell_env.rs");
+    only_in(".apply(&mut cmd)", "child_process.rs");
+    let sources = sources();
+    for spawner in ["bridge.rs", "internal_ext/sidecar_runtime.rs"] {
+        let code = &sources.iter().find(|(rel, _)| rel == spawner).unwrap().1;
+        assert!(
+            code.contains("shell_env::current().await"),
+            "{spawner} spawns without the shell environment"
+        );
+    }
 }
 
 /// Every stop of a supervised child goes through child_process::Stopping,

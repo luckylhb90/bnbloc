@@ -1,4 +1,4 @@
-import { canRestartVm, statusLine, type SandboxStatus } from "./sandboxStatus.ts";
+import { canRestartVm, shellEnvReloadText, statusLine, type SandboxStatus } from "./sandboxStatus.ts";
 
 // The web tsconfig has no node types, so the tests use a local runner (same
 // convention as the other *.test.ts files); a failure throws and fails `node --test`.
@@ -61,4 +61,13 @@ test("restart is offered only for a running runtime outside mode off", () => {
   equal(canRestartVm({ ...base, state: "error", machine: undefined }), true);
   equal(canRestartVm({ ...base, state: "error", isolation: undefined }), false);
   equal(canRestartVm({ ...base, installed: false, state: "notInstalled" }), false);
+});
+
+test("a shell environment reload reports the count or why none", () => {
+  equal(shellEnvReloadText({ imported: 42 }), { ok: true, text: "Agents restarted with 42 variables from your shell." });
+  equal(shellEnvReloadText({ imported: 1 }).text, "Agents restarted with 1 variable from your shell.");
+  equal(shellEnvReloadText({ imported: 0, error: "/bin/zsh timed out after 4s" }), {
+    ok: false,
+    text: "Could not read your shell environment (/bin/zsh timed out after 4s). Agents restarted without it.",
+  });
 });
