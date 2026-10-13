@@ -34,7 +34,10 @@ explicitly anonymous.
   copy). It disables `anyone` links only: creating one, or switching one
   to `anyone`, is refused (403), and an existing `anyone` link resolves as
   dead (404) while it is on. `org` links stay allowed. The room service's
-  `anonymousLinkAllowed` is the one reader of the switch.
+  `anonymousLinkAllowed` is the one reader of the switch. (Amended below:
+  `signed_in` links and the outside-links switch; the one reader is now
+  `store.Tenant.ShareAccessAllowed`, and the member's tenant policy carries
+  the allowed modes instead of the switch.)
 - **One owner decides whether a request may open a link:**
   `shareAccess(share, caller)` (`services/gateway/share_access.go`). The
   room service still decides whether the link is alive (secret, expiry,
@@ -162,3 +165,78 @@ Nothing changes: a member's site (`/v1/sites/{ticket}`) and the
     through the room's own reach (the creator, a room owner or admin).
   - The gateway's `orgMember` (content sharing) now reads membership
     through `memberRole`, the one tenant-membership read.
+
+## Amendment: links anyone signed in can open (2026-10-13)
+
+Status: accepted by the product owner (2026-10-13, final); being built.
+
+### Decision
+
+A third link access mode beside `org` (the default) and `anyone`:
+**`signed_in`**: anyone who can sign in to this deployment may open the
+link, without being a member of the link's organization. In an SSO-only
+deployment that is anyone the company's identity provider authenticates,
+including people in no organization yet or in a different one. The
+creator picks it per link; `org` stays the default.
+
+### Design
+
+- **Store.** `artifact_shares.access` takes `signed_in` (the validation's
+  one owner is `wire.ValidShareAccess` over `wire.ShareAccessModes`, read by
+  both backends; the column widens from `VARCHAR(8)` to `VARCHAR(16)`,
+  migration `2026_10_share_link_signed_in`).
+- **Access owner.** `shareAccess` gains: `signed_in` needs a signed-in
+  caller (a session at the ticket mint, a share ticket on every other
+  route), of any organization; never a tenant membership. An anonymous
+  caller is refused with 401 `share_sign_in_required`, exactly like an
+  `org` link, so the share page sends the person to sign in and back. The
+  share ticket is unchanged: bound to (share id, the link's organization,
+  the subject); the data scope is the link's room and organization; the
+  caller is the app's `member:<subject>` participant, never an owner (the
+  room service's `appOwner` reads room membership), and gains nothing else
+  in that organization.
+- **A person in no organization.** Every session lands in an organization:
+  sign-in resolves one (the IdP's, the issuer's, the person's latest
+  membership, else the default) and, with auto-provisioning off, a person
+  who belongs to none still signs in, as a viewer of that organization
+  without a membership row. Such a session mints a ticket for a
+  `signed_in` link like any other: the mode asks only for a verified
+  session.
+- **Re-checks.** Every use re-resolves the link (alive, still `signed_in`,
+  allowed by the organization); there is no per-person check beyond the
+  ticket's signature and expiry (at most 12 h, never past the link).
+- **Organization policy: two switches, one owner.** The organization keeps
+  `anonymousLinksDisabled` ("Allow links anyone can open (no sign-in)") and
+  gains `outsideLinksDisabled` ("Allow links for people outside this
+  organization"; `tenants.outside_links_disabled`, default allowed). Off,
+  the outside switch disables both `signed_in` and `anyone` links; the
+  anonymous switch disables `anyone` only. The one rule is
+  `store.Tenant.ShareAccessAllowed(access)`: `org` always; `signed_in`
+  unless outside links are off; `anyone` unless either switch is off. The
+  room service asks it at create, at an access change (403) and at every
+  resolution (a disabled mode resolves as dead, 404); the member's
+  `GET /v1/my/tenant-policy` (`wire.TenantPolicy`) reports its answer as
+  `shareAccess` (the modes allowed), so the web never re-decides it.
+- **Web.** The share dialog's selector: "People in <org> (sign-in
+  required)" (default), "Anyone signed in (any organization)", "Anyone with
+  the link (no sign-in)", each with a short description, a mode the
+  organization disallows unavailable; the list shows each link's mode and
+  changes it. The share page treats `signed_in` like `org` (sign in if
+  needed, then the ticket); the "only for members of" refusal comes only
+  from an `org` link. The organization settings show both switches, the
+  anonymous one under the outside one.
+
+### Tests
+
+- `signed_in` refuses an anonymous caller on every route (metadata,
+  content, site, `~app`, visitor);
+- a signed-in member of another organization opens it; a person with no
+  membership anywhere opens it;
+- inside an app that person is a participant, not an owner, and their
+  ticket opens only that share;
+- the outside switch turns `signed_in` and `anyone` off at once (create,
+  change, existing links); the anonymous switch only `anyone`;
+- the default stays `org`; `TestShareAccessSingleOwner` covers the new
+  mode and switch;
+- web: the selector's options and default, and the share page's sign-in
+  redirect and ticket for a `signed_in` link.
