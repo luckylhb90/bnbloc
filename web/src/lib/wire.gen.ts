@@ -646,7 +646,8 @@ export const AttachmentContentPDF = "pdf";
 export const AttachmentContentZip = "zip";
 // AttachmentContentOLE: an OLE compound file (legacy .doc, .xls, .ppt).
 export const AttachmentContentOLE = "ole";
-// AttachmentContentText: plain text (never HTML or XML).
+// AttachmentContentText: text, not binary (markup included: a text
+// attachment is only served as an opaque download).
 export const AttachmentContentText = "text";
 // AttachmentContentISOMedia: an ISO base media file (mp4, mov, m4a).
 export const AttachmentContentISOMedia = "isomedia";

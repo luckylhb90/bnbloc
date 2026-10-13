@@ -91,9 +91,9 @@ func uploadAttachment(t *testing.T, srv *httptest.Server, filename, contentType 
 
 var pngBytes = []byte("\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00")
 
-// Active formats are refused, and a declared type the content does not match
-// (HTML smuggled as image/png or text/plain) is refused: an upload can never
-// become script served from the app origin.
+// Active formats are refused, and so is content that is not its type (HTML
+// smuggled as image/png): an upload can never become script served from the
+// app origin.
 func TestUploadRejectsActiveAndMismatchedContent(t *testing.T) {
 	srv, _ := newAttachmentServer(t)
 	html := []byte("<html><script>alert(document.cookie)</script></html>")
@@ -104,7 +104,7 @@ func TestUploadRejectsActiveAndMismatchedContent(t *testing.T) {
 		{"x.svg", "image/svg+xml", []byte(`<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>`)},
 		{"x.html", "text/html", html},
 		{"x.png", "image/png", html},
-		{"x.txt", "text/plain", html},
+		{"x.txt", "text/plain", []byte("\x00\x01\x02binary\x00")},
 		{"x.png", "image/png", []byte("GIF89a......")},
 	}
 	for _, c := range cases {
@@ -134,6 +134,9 @@ func TestUploadAcceptsWorkFilesByExtension(t *testing.T) {
 		{"old.ppt", "application/vnd.ms-powerpoint", "application/vnd.ms-powerpoint", ole},
 		{"demo.mov", "video/quicktime", "video/quicktime", mp4},
 		{"notes.md", "", "text/markdown", []byte("# Notes\n- one\n")},
+		{"readme.md", "application/octet-stream", "text/markdown", []byte("<!-- toc -->\n# Title\n")},
+		{"center.md", "text/x-markdown", "text/markdown", []byte("<p align=\"center\"><img src=\"logo.png\"></p>\n")},
+		{"中文.txt", "text/plain", "text/plain", []byte("品牌规范：主色 #F0B90B\n")},
 		{"image", "image/png", "image/png", pngBytes},
 	}
 	for _, c := range ok {
@@ -159,6 +162,30 @@ func TestUploadAcceptsWorkFilesByExtension(t *testing.T) {
 		if resp := uploadAttachment(t, srv, c.name, c.declared, c.body); resp.StatusCode != http.StatusUnsupportedMediaType {
 			t.Errorf("%s (declared %q): status %d, want 415", c.name, c.declared, resp.StatusCode)
 		}
+	}
+}
+
+// Text whose first bytes are markup is attached, and served only as an
+// opaque, nosniff, sandboxed download.
+func TestMarkupTextIsServedAsADownload(t *testing.T) {
+	srv, _ := newAttachmentServer(t)
+	resp := uploadAttachment(t, srv, "page.txt", "text/html", []byte("<html><script>alert(1)</script></html>"))
+	var meta struct {
+		ID string `json:"id"`
+	}
+	_ = json.NewDecoder(resp.Body).Decode(&meta)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("upload status %d", resp.StatusCode)
+	}
+	got := download(t, srv, meta.ID)
+	if ct := got.Header.Get("Content-Type"); ct != "application/octet-stream" {
+		t.Errorf("Content-Type = %q, want application/octet-stream", ct)
+	}
+	if cd := got.Header.Get("Content-Disposition"); !strings.HasPrefix(cd, "attachment") {
+		t.Errorf("Content-Disposition = %q, want attachment", cd)
+	}
+	if got.Header.Get("X-Content-Type-Options") != "nosniff" || got.Header.Get("Content-Security-Policy") != attachmentCSP {
+		t.Errorf("missing nosniff/CSP: %v", got.Header)
 	}
 }
 

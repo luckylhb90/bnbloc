@@ -45,8 +45,10 @@ func attachmentType(filename, declared string) (wire.AttachmentType, bool) {
 var oleMagic = []byte{0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1}
 
 // attachmentContentMatches reports whether an upload's first bytes pass its
-// type's content check (wire.AttachmentContent*). Text must sniff as plain
-// text: HTML or XML markup sniffs as text/html / text/xml and is refused.
+// type's content check (wire.AttachmentContent*). Text must be text, not
+// binary: markup is text too (a README opening with <!-- toc --> or
+// <p align="center">), and a text attachment is only ever served as an
+// opaque, nosniff, sandboxed download, so its markup never renders.
 func attachmentContentMatches(content string, head []byte) bool {
 	sniffed := mediaType(http.DetectContentType(head))
 	switch content {
@@ -65,7 +67,7 @@ func attachmentContentMatches(content string, head []byte) bool {
 	case wire.AttachmentContentOLE:
 		return bytes.HasPrefix(head, oleMagic)
 	case wire.AttachmentContentText:
-		return sniffed == "text/plain"
+		return strings.HasPrefix(sniffed, "text/")
 	case wire.AttachmentContentISOMedia:
 		return len(head) >= 12 && string(head[4:8]) == "ftyp"
 	case wire.AttachmentContentWebM:
