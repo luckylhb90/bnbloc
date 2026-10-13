@@ -4,10 +4,12 @@ package main
 import (
 	"log"
 
+	"github.com/luckylhb90/bnbloc/internal/appdata"
 	"github.com/luckylhb90/bnbloc/internal/config"
 	"github.com/luckylhb90/bnbloc/internal/contentbuiltin"
 	"github.com/luckylhb90/bnbloc/internal/obs"
 	"github.com/luckylhb90/bnbloc/internal/realtime"
+	"github.com/luckylhb90/bnbloc/internal/sealbox"
 	"github.com/luckylhb90/bnbloc/internal/store"
 	"github.com/luckylhb90/bnbloc/internal/svcauth"
 	"github.com/luckylhb90/bnbloc/services/room"
@@ -48,6 +50,16 @@ func main() {
 	// A template's prompt packs: the content store under the built-in
 	// overlay, as the gateway and realtime read it.
 	svc.Content = contentbuiltin.Overlay(backends.ContentComponents)
+	// Interactive apps' data is sealed under the deployment's secret store
+	// key (appdata.Cipher); without it the app data routes answer 503.
+	box, err := sealbox.FromEnv()
+	if err != nil {
+		log.Fatalf("bnbloc-room: %v", err)
+	}
+	svc.AppDocs = backends.AppDocs
+	if svc.AppCipher = appdata.NewCipher(box); svc.AppCipher == nil {
+		log.Printf("bnbloc-room: %s is not set: interactive app data is off", sealbox.KeyEnv)
+	}
 	if err := obs.ServeWithHealth("bnbloc-room", cfg.ListenAddr, svcauth.Middleware(svcauth.KeyFromEnv(), svc.Handler()), backends.HealthCheck()); err != nil {
 		log.Fatalf("bnbloc-room: %v", err)
 	}

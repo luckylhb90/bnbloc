@@ -62,7 +62,7 @@ sync-layer HMAC. The value must be identical across every service.
 | `BNBLOC_TENANT_AUTOPROVISION` | on | `false` locks tenant membership to pre-provisioned tenants instead of auto-provisioning at login. |
 | `BNBLOC_DESKTOP_DOWNLOAD_URL` | — | Fallback desktop download link served when the deployment has no curated release history. |
 | `BNBLOC_EXT_ALLOW_UNSIGNED` | unset | Dev-only: accept unsigned component packages (see Components below). |
-| `BNBLOC_SECRET_STORE_KEY` | — (org connectors off) | 32 random bytes, base64 or hex (`openssl rand -base64 32`), sealing organization MCP tool connectors at rest (AES-256-GCM, `internal/sealbox`): the credentials org admins enter for MCP tools with org credentials (`/v1/tenant/mcp-connectors`). Every gateway replica shares it. Unset = org connectors are off (the routes answer 409; such tools show as missing); a malformed value refuses to start. Losing or changing it makes stored connectors unreadable: org admins enter them again. Secret. |
+| `BNBLOC_SECRET_STORE_KEY` | — (org connectors off) | 32 random bytes, base64 or hex (`openssl rand -base64 32`), sealing organization MCP tool connectors at rest (AES-256-GCM, `internal/sealbox`): the credentials org admins enter for MCP tools with org credentials (`/v1/tenant/mcp-connectors`). Every gateway replica shares it, and the room service reads the same value for interactive apps' data (see Artifact files (room)). Unset = org connectors are off (the routes answer 409; such tools show as missing); a malformed value refuses to start. Losing or changing it makes stored connectors unreadable: org admins enter them again. Secret. |
 
 ## Internal wiring
 
@@ -149,6 +149,7 @@ writes and reads them over the signed internal route).
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
+| `BNBLOC_SECRET_STORE_KEY` | — (app data off) | The gateway's secret store key (one value per deployment, every room replica). The room service wraps each interactive app's data key with it (`appdata.Cipher`; docs/prd/2026-10-12-interactive-apps.md §4.8); the database holds only wrapped keys and sealed documents. Unset = the app data routes answer 503; a malformed value refuses to start. Losing it makes every app's data unreadable; rotating it re-wraps the data keys only (`appdata.Rotate`). Secret. |
 | `BNBLOC_ARTIFACT_MAX_BYTES` | `104857600` (100 MiB) | Max bytes of one blob artifact version (room). Must be 1..268435456 (realtime's 256 MiB blob cap); anything else is a startup error. Publishers (the bridge) read the effective value from the artifact list's `maxBytes`. Raise the edge proxy's body limit for `POST /v1/rooms/*/artifacts/*/versions` (Caddyfile, ingress `proxy-body-size`) with it. |
 
 ## Member notifications (realtime, shareagent)

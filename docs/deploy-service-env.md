@@ -48,7 +48,7 @@ embedded SPA. Stateless apart from the shared database — scale horizontally.
 | `BNBLOC_MYSQL_DSN` | yes | Tenant registry, platform settings, components. |
 | `BNBLOC_INTERNAL_KEY` | yes | Signs `X-Bnbloc-User`. Same value as all backends. |
 | `BNBLOC_SESSION_SIGNING_KEY` | yes | Signs session JWTs. All replicas share it. |
-| `BNBLOC_SECRET_STORE_KEY` | for org MCP connectors | 32 random bytes (base64 or hex) sealing organization MCP tool connectors at rest. All replicas share it. Unset = org connectors off; malformed = refuses to start. |
+| `BNBLOC_SECRET_STORE_KEY` | for org MCP connectors | 32 random bytes (base64 or hex) sealing organization MCP tool connectors at rest. All replicas share it, and the room service (app data). Unset = org connectors off; malformed = refuses to start. |
 | `BNBLOC_OIDC_ISSUER_URL` + `BNBLOC_OIDC_CLIENT_ID` | no | OIDC relying party. Unset in production = direct login disabled; sign in via an installed auth-provider (SSO). |
 | `BNBLOC_SUPER_ADMINS` | yes | Comma-separated verified subject ids/emails (cross-tenant admins). |
 | `BNBLOC_PUBLIC_URL` | recommended | Public origin; every link and artifact URL the gateway hands out (content notifications, published package artifacts, previewer CSP). Unset = each request's own origin. |
@@ -71,7 +71,8 @@ the database and reconcile installed components from platform settings every
 
 ## room (`:8080`)
 
-Room directory, membership, invites; fans artifact changes to realtime.
+Room directory, membership, invites; fans artifact changes to realtime;
+owns interactive apps' data (sealed documents per site artifact).
 
 | Variable | Required | Notes |
 | --- | --- | --- |
@@ -79,6 +80,7 @@ Room directory, membership, invites; fans artifact changes to realtime.
 | `BNBLOC_INTERNAL_KEY` | yes | Same value as gateway. |
 | `BNBLOC_REALTIME_BASE_URL` | yes | `http://bnbloc-realtime:8082` — artifact-change fan-out, blob artifact versions + thumbnails (stored in realtime's blob store over the signed internal route), and the feed/attachment side of handoff package export/import. |
 | `BNBLOC_ARTIFACT_MAX_BYTES` | no | Max bytes of one blob artifact version. Unset = 100 MiB; must be 1..268435456 (realtime's 256 MiB blob cap) or the service refuses to start. Raise the edge proxy's body limit for `POST /v1/rooms/*/artifacts/*/versions` with it. |
+| `BNBLOC_SECRET_STORE_KEY` | for app data | The gateway's value (every room replica): wraps each interactive app's data key. Unset = the app data routes answer 503; malformed = refuses to start. |
 
 ## realtime (`:8082`) — scales out by room ownership
 

@@ -132,13 +132,11 @@ spec:
               value: {{ join "," ($cfg.trustedProxies | default list) | quote }}
             - name: BNBLOC_CORES
               value: {{ join "," ($cfg.cores | default list) | quote }}
-            {{- with $cfg.secretStoreKey }}
-            {{- if .secretRef.name }}
+            {{- end }}
+            {{- if and (has $name (list "gateway" "room")) $.Values.secretStoreKey.secretRef.name }}
             - name: BNBLOC_SECRET_STORE_KEY
               valueFrom:
-                secretKeyRef: { name: {{ .secretRef.name }}, key: {{ .secretRef.key }} }
-            {{- end }}
-            {{- end }}
+                secretKeyRef: { name: {{ $.Values.secretStoreKey.secretRef.name }}, key: {{ $.Values.secretStoreKey.secretRef.key }} }
             {{- end }}
             {{- if and (eq $name "room") $cfg.artifactMaxBytes }}
             - name: BNBLOC_ARTIFACT_MAX_BYTES

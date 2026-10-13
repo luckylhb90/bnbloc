@@ -232,6 +232,52 @@ export interface AgentRunsReply {
   nextBefore?: string;
 }
 
+// ---- wire/apps.go ----
+
+// AppDocWrite is an insert (POST) or a replace (PUT). Doc is the document's
+// JSON object; stamps in it are ignored. Public opts the document into
+// being readable by everyone holding the app (insert: default false;
+// replace: unchanged when absent).
+export interface AppDocWrite {
+  doc: unknown;
+  public?: boolean;
+}
+
+// AppDocPatch is a PATCH: Merge is a JSON merge patch (RFC 7396) and Inc
+// adds numbers at top-level or dotted paths; Public as in AppDocWrite.
+export interface AppDocPatch {
+  merge?: unknown;
+  $inc?: unknown;
+  public?: boolean;
+}
+
+// AppDocPage is one page of a find. Next is the cursor of the following
+// page (pass it as after=), empty on the last page.
+export interface AppDocPage {
+  docs: Record<string, unknown>[];
+  next?: string;
+}
+
+// AppMe is who the caller is to the app: ID is their per-app pseudonym (the
+// _by of what they write); Name their display name, for a signed-in
+// member only.
+export interface AppMe {
+  id: string;
+  name?: string;
+}
+
+// AppDataStats is an app's usage, for its owners.
+export interface AppDataStats {
+  documents: number;
+  bytes: number;
+  collections: Record<string, number>;
+}
+
+// AppDataWiped answers an owner's delete of all of an app's data.
+export interface AppDataWiped {
+  deleted: number;
+}
+
 // ---- wire/artifacts.go ----
 
 // Artifact is a room deliverable (spec, report, code, image, site) as room

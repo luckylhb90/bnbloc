@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/luckylhb90/bnbloc/internal/appdata"
 	"github.com/luckylhb90/bnbloc/internal/httpx"
 	"github.com/luckylhb90/bnbloc/internal/obs"
 	"github.com/luckylhb90/bnbloc/internal/realtime"
@@ -72,6 +73,15 @@ type Service struct {
 	// /v1/users/profiles, and the share resolve's "shared by"). Nil answers
 	// those routes 503.
 	Profiles store.UserProfileStore
+	// AppDocs and AppCipher hold and seal interactive apps' data (the app
+	// data routes, appdata.go). Either nil answers those routes 503: no
+	// BNBLOC_SECRET_STORE_KEY, no app data.
+	AppDocs   store.AppDocs
+	AppCipher *appdata.Cipher
+	// appUsage is this replica's view of each app's usage; appCaps the
+	// per-app caps (zero: the wire constants).
+	appUsage appUsageCache
+	appCaps  appCaps
 	// Publisher fans artifact change events to the room's live subscribers.
 	// Optional: nil (tests) simply skips the live notification.
 	Publisher realtime.Publisher
@@ -180,6 +190,7 @@ func (s *Service) Handler() http.Handler {
 	s.registerShareRoutes(mux)
 	s.registerProfileRoutes(mux)
 	s.registerAgentHostRoutes(mux)
+	s.registerAppDataRoutes(mux)
 	return svcauth.EnsureTenant(mux)
 }
 

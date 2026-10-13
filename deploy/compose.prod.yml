@@ -65,6 +65,8 @@ services:
       BNBLOC_AWS_REGION: "${BNBLOC_AWS_REGION:-}"
       BNBLOC_INTERNAL_KEY: "${BNBLOC_INTERNAL_KEY:-}"
       BNBLOC_ARTIFACT_MAX_BYTES: "${BNBLOC_ARTIFACT_MAX_BYTES:-}"
+      # Seals interactive apps' data keys (unset = app data off).
+      BNBLOC_SECRET_STORE_KEY: "${BNBLOC_SECRET_STORE_KEY:-}"
     healthcheck:
       <<: *health
       test: ["CMD", "/usr/local/bin/healthcheck", "http://127.0.0.1:8080/readyz"]
