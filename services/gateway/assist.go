@@ -32,9 +32,12 @@ import (
 //
 //	GET  /v1/assist                       whether assists run for the caller, and the tasks
 //	POST /v1/assist/{task}                one run: SSE for a text task, JSON for a JSON task
-//	GET  /v1/platform/assist-model        the model (never its key)
-//	PUT  /v1/platform/assist-model        set it (super admin)
+//	GET  /v1/platform/assist-model        the platform's model (never its key)
+//	PUT  /v1/platform/assist-model        set it and the hosts organizations may use (super admin)
 //	POST /v1/platform/assist-model/test   one short completion
+//	GET  /v1/tenant/assist-model          the organization's own model (org admin)
+//	PUT  /v1/tenant/assist-model          set it, on a host the platform allows
+//	POST /v1/tenant/assist-model/test     one short completion through it
 
 // assistRate bounds one member's assist runs: 20 a minute, on top of the
 // cost budget every run spends.
@@ -53,21 +56,25 @@ func (s *Service) assistSettings() *assist.Settings {
 	return &assist.Settings{Store: s.PlatformSettings, Box: s.SecretBox, Now: func() int64 { return s.nowTime().UnixMilli() }}
 }
 
-// assistModel is the model assists run on for claims' organization (ok
-// false: none configured, or the organization turned assists off).
+// assistModel is the model assists run on for claims' organization: its
+// own, else the platform's (assist.Settings.Effective). ok false: the
+// organization turned assists off, or no model is configured.
 func (s *Service) assistModel(ctx context.Context, claims auth.Claims) (assist.Model, bool, error) {
 	if s.PlatformSettings == nil {
 		return assist.Model{}, false, nil
-	}
-	m, err := s.assistSettings().Model(ctx)
-	if err != nil || !m.Configured() {
-		return assist.Model{}, false, err
 	}
 	t, err := s.tenantSettings(ctx, claims.Tenant)
 	if err != nil && !errors.Is(err, store.ErrTenantNotFound) {
 		return assist.Model{}, false, err
 	}
-	return m, !t.AssistDisabled, nil
+	if t.AssistDisabled {
+		return assist.Model{}, false, nil
+	}
+	m, err := s.assistSettings().Effective(ctx, claims.Tenant)
+	if err != nil || !m.Configured() {
+		return assist.Model{}, false, err
+	}
+	return m, true, nil
 }
 
 // assistTask is a resolved task: its component, version and package.
@@ -202,7 +209,7 @@ func (s *Service) assistJSON(w http.ResponseWriter, r *http.Request, claims auth
 	if err == nil {
 		fields, err = assist.Fields(text, task.Package.Manifest.Fields)
 	}
-	s.auditAssist(r.Context(), claims, task, usage, err)
+	s.auditAssist(r.Context(), claims, task, model, usage, err)
 	if err != nil {
 		writeAssistModelErr(w, err)
 		return
@@ -241,7 +248,7 @@ func (s *Service) assistText(w http.ResponseWriter, r *http.Request, claims auth
 	usage, err := s.assistClient().Stream(r.Context(), model, msgs, func(piece string) error {
 		return send("delta", wire.AssistDelta{Text: piece})
 	})
-	s.auditAssist(r.Context(), claims, task, usage, err)
+	s.auditAssist(r.Context(), claims, task, model, usage, err)
 	switch {
 	case err == nil:
 		_ = send("done", wire.AssistDone{Usage: usage})
@@ -257,11 +264,15 @@ func (s *Service) assistClient() *assist.Client {
 	return &assist.Client{Transport: s.AssistTransport, Now: s.nowTime}
 }
 
-// auditAssist records a run: the task, the model, the tokens and the
-// latency, never the text.
-func (s *Service) auditAssist(ctx context.Context, claims auth.Claims, task assistTask, usage wire.AssistUsage, runErr error) {
+// auditAssist records a run: the task, the model (and whether it is the
+// organization's own), the tokens and the latency, never the text.
+func (s *Service) auditAssist(ctx context.Context, claims auth.Claims, task assistTask, model assist.Model, usage wire.AssistUsage, runErr error) {
+	name := firstNonEmpty(usage.Model, model.Model)
+	if model.Org {
+		name += " (the organization's)"
+	}
 	outcome, detail := wire.AuditOutcomeAllow, fmt.Sprintf("component %s, model %s, %d prompt + %d completion tokens, %d ms",
-		task.Component.ID, usage.Model, usage.PromptTokens, usage.CompletionTokens, usage.LatencyMs)
+		task.Component.ID, name, usage.PromptTokens, usage.CompletionTokens, usage.LatencyMs)
 	if runErr != nil {
 		outcome, detail = "failed", detail+", failed: "+assistErrClass(runErr)
 	}
@@ -326,12 +337,23 @@ func (e assistBadRequest) Error() string { return string(e) }
 // assistContext resolves the contexts the task declares (others are never
 // read, whatever the request names) as the member reads them: the room
 // (its name, expert, skill packs and recent messages), a deliverable of it
-// (title, type, file, the request that produced it) and attachments of it
-// (names and types).
+// (title, type, file, the request that produced it), attachments of it
+// (names and types), the library (the experts and skill packs the member
+// may use) and the clock (now in the request's timezone).
 func (s *Service) assistContext(ctx context.Context, claims auth.Claims, declared []string, req wire.AssistRequest) (assist.Context, error) {
 	var out assist.Context
 	roomID := strings.TrimSpace(req.RoomID)
 	wants := func(c string) bool { return slices.Contains(declared, c) }
+	if wants(wire.AssistContextClock) {
+		out.Clock = assist.ClockIn(s.nowTime(), req.Timezone)
+	}
+	if wants(wire.AssistContextLibrary) && s.ContentComponents != nil {
+		lib, err := assist.LibraryOf(ctx, s.ContentComponents, viewerOf(claims))
+		if err != nil {
+			return out, err
+		}
+		out.Library = lib
+	}
 	needsRoom := (wants(wire.AssistContextRoom) && roomID != "") ||
 		(wants(wire.AssistContextArtifact) && req.ArtifactID != "") ||
 		(wants(wire.AssistContextAttachments) && len(req.AttachmentIDs) > 0)
@@ -523,37 +545,105 @@ func (s *Service) handleAssistModel(w http.ResponseWriter, r *http.Request, clai
 
 // handlePutAssistModel answers PUT /v1/platform/assist-model.
 func (s *Service) handlePutAssistModel(w http.ResponseWriter, r *http.Request, claims auth.Claims) {
+	if view, ok := s.putAssistModel(w, r, claims, s.assistSettings()); ok {
+		httpx.WriteJSON(w, http.StatusOK, view)
+	}
+}
+
+// putAssistModel stores a model update (the platform's or an
+// organization's) and audits it; a refusal is answered (ok false).
+func (s *Service) putAssistModel(w http.ResponseWriter, r *http.Request, claims auth.Claims, settings *assist.Settings) (wire.AssistModelConfig, bool) {
 	var u wire.AssistModelUpdate
 	if !httpx.DecodeJSON(w, r, 16<<10, &u) {
-		return
+		return wire.AssistModelConfig{}, false
 	}
-	view, err := s.assistSettings().Put(r.Context(), u, claims.Subject)
+	view, err := settings.Put(r.Context(), u, claims.Subject)
 	switch {
 	case errors.Is(err, assist.ErrSettingsOff):
 		httpx.Error(w, err.Error(), http.StatusConflict)
-		return
+		return wire.AssistModelConfig{}, false
 	case errors.Is(err, assist.ErrInvalidSettings):
 		httpx.Error(w, err.Error(), http.StatusBadRequest)
-		return
+		return wire.AssistModelConfig{}, false
 	case err != nil:
 		obs.ServerError(w, "save the assist model failed", err)
 		httpx.Error(w, "save the assist model failed", http.StatusInternalServerError)
-		return
+		return wire.AssistModelConfig{}, false
 	}
-	action, detail := "model-set", "model "+view.Model+" at "+hostOf(view.BaseURL)
+	name, action, detail := "assist-model", "model-set", "model "+view.Model+" at "+hostOf(view.BaseURL)
+	if len(view.OrgHosts) > 0 {
+		detail += ", organizations may use " + strings.Join(view.OrgHosts, ", ")
+	}
+	if settings.Tenant != "" {
+		name = "org-assist-model"
+	}
 	if view.BaseURL == "" {
 		action, detail = "model-clear", "assists turned off"
+		if settings.Tenant != "" {
+			detail = "back to the platform's model"
+		}
 	}
-	s.audit(r.Context(), claims.Tenant, store.ExtAuditRecord{Kind: wire.AuditKindAssist, Name: "assist-model", Action: action,
+	s.audit(r.Context(), claims.Tenant, store.ExtAuditRecord{Kind: wire.AuditKindAssist, Name: name, Action: action,
 		Actor: claims.Subject, Outcome: wire.AuditOutcomeAllow, Detail: detail})
-	httpx.WriteJSON(w, http.StatusOK, view)
+	return view, true
 }
 
-// handleTestAssistModel answers POST /v1/platform/assist-model/test: one
-// short completion through the stored model; a failure is the answer, not
-// an HTTP error.
+// orgAssistModel is the organization's own model view: the model, the
+// hosts it may name and the platform's model name.
+func (s *Service) orgAssistModel(ctx context.Context, tenant string) (wire.AssistOrgModel, error) {
+	settings := s.assistSettings()
+	own, err := settings.Org(tenant).View(ctx)
+	if err != nil {
+		return wire.AssistOrgModel{}, err
+	}
+	out := wire.AssistOrgModel{Model: own, AllowedHosts: []string{}}
+	platform, err := settings.View(ctx)
+	if err != nil {
+		return wire.AssistOrgModel{}, err
+	}
+	if platform.BaseURL != "" {
+		out.PlatformModel = platform.Model
+	}
+	if platform.OrgHosts != nil {
+		out.AllowedHosts = platform.OrgHosts
+	}
+	return out, nil
+}
+
+// handleOrgAssistModel answers GET /v1/tenant/assist-model.
+func (s *Service) handleOrgAssistModel(w http.ResponseWriter, r *http.Request, claims auth.Claims) {
+	out, err := s.orgAssistModel(r.Context(), claims.Tenant)
+	if err != nil {
+		obs.ServerError(w, "read the assist model failed", err)
+		httpx.Error(w, "read the assist model failed", http.StatusInternalServerError)
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, out)
+}
+
+// handlePutOrgAssistModel answers PUT /v1/tenant/assist-model: the
+// organization's own model, on a host the platform allows.
+func (s *Service) handlePutOrgAssistModel(w http.ResponseWriter, r *http.Request, claims auth.Claims) {
+	if _, ok := s.putAssistModel(w, r, claims, s.assistSettings().Org(claims.Tenant)); !ok {
+		return
+	}
+	s.handleOrgAssistModel(w, r, claims)
+}
+
+// handleTestOrgAssistModel answers POST /v1/tenant/assist-model/test.
+func (s *Service) handleTestOrgAssistModel(w http.ResponseWriter, r *http.Request, claims auth.Claims) {
+	s.testAssistModel(w, r, s.assistSettings().Org(claims.Tenant))
+}
+
+// handleTestAssistModel answers POST /v1/platform/assist-model/test.
 func (s *Service) handleTestAssistModel(w http.ResponseWriter, r *http.Request, claims auth.Claims) {
-	m, err := s.assistSettings().Model(r.Context())
+	s.testAssistModel(w, r, s.assistSettings())
+}
+
+// testAssistModel sends one short completion through a stored model; a
+// failure is the answer, not an HTTP error.
+func (s *Service) testAssistModel(w http.ResponseWriter, r *http.Request, settings *assist.Settings) {
+	m, err := settings.Model(r.Context())
 	if err != nil {
 		obs.ServerError(w, "read the assist model failed", err)
 		httpx.Error(w, "read the assist model failed", http.StatusInternalServerError)

@@ -312,3 +312,109 @@ func TestAssistOwnTaskUseAndRate(t *testing.T) {
 		t.Fatalf("%d of 3 runs refused, want 2 past a burst of 1", got)
 	}
 }
+
+// orgAdmin is the session header of an admin of e's organization.
+func (e *appGW) orgAdmin(subject string) string {
+	return "Authorization: Bearer " + e.gw.Signer.Issue(auth.Claims{Subject: subject, Tenant: e.tenant, Role: "org_admin", ExpiresAtUnix: time.Now().Add(time.Hour).Unix()})
+}
+
+// An organization's own model: an org admin sets it on a host the super
+// admin allowed; it replaces the platform's for that organization only;
+// its runs are audited as the organization's.
+func TestAssistOrganizationModel(t *testing.T) {
+	e, platformFake, sink := assistGW(t)
+	orgFake := &assistModelFake{reply: "from the org model"}
+	orgSrv := httptest.NewServer(orgFake)
+	t.Cleanup(orgSrv.Close)
+	orgHost := strings.TrimPrefix(orgSrv.URL, "http://")
+	var view wire.AssistOrgModel
+	r := e.call(http.MethodGet, "/v1/tenant/assist-model", nil, e.orgAdmin("ada"))
+	if r.status != http.StatusOK || json.Unmarshal(r.body, &view) != nil || len(view.AllowedHosts) != 0 || view.PlatformModel != "fast" || view.Model.BaseURL != "" {
+		t.Fatalf("view = %d %s", r.status, r.body)
+	}
+	put := wire.AssistModelUpdate{BaseURL: orgSrv.URL + "/v1", Model: "org-fast", APIKey: "sk-org-key"}
+	if r := e.call(http.MethodPut, "/v1/tenant/assist-model", put, e.orgAdmin("ada")); r.status != http.StatusBadRequest {
+		t.Fatalf("no allowed host: %d %s", r.status, r.body)
+	}
+	if r := e.call(http.MethodPut, "/v1/platform/assist-model", wire.AssistModelUpdate{BaseURL: platformBase(e), Model: "fast", OrgHosts: []string{orgHost}}, e.superAdmin()); r.status != http.StatusOK {
+		t.Fatalf("allow the host: %d %s", r.status, r.body)
+	}
+	if r := e.call(http.MethodPut, "/v1/tenant/assist-model", put, e.as("maya")); r.status != http.StatusForbidden {
+		t.Fatalf("a member sets the organization's model: %d", r.status)
+	}
+	if r := e.call(http.MethodPut, "/v1/tenant/assist-model", wire.AssistModelUpdate{BaseURL: "https://evil.example/v1", Model: "m"}, e.orgAdmin("ada")); r.status != http.StatusBadRequest {
+		t.Fatalf("a host the platform does not allow: %d %s", r.status, r.body)
+	}
+	r = e.call(http.MethodPut, "/v1/tenant/assist-model", put, e.orgAdmin("ada"))
+	if r.status != http.StatusOK || json.Unmarshal(r.body, &view) != nil || !view.Model.KeySet || view.Model.Model != "org-fast" || strings.Contains(string(r.body), "sk-org-key") {
+		t.Fatalf("set = %d %s", r.status, r.body)
+	}
+	sink.take()
+	if r := e.call(http.MethodPost, "/v1/tenant/assist-model/test", nil, e.orgAdmin("ada")); r.json()["ok"] != true || orgFake.auth[len(orgFake.auth)-1] != "Bearer sk-org-key" {
+		t.Fatalf("test = %s", r.body)
+	}
+	r = e.call(http.MethodPost, "/v1/assist/enhance-prompt", wire.AssistRequest{Text: "x"}, e.as("maya"))
+	if text, _ := assistEvents(t, r.body); text != "from the org model" {
+		t.Fatalf("maya's run = %q", text)
+	}
+	if recs := sink.take(); len(recs) != 1 || !strings.Contains(recs[0].Detail, "(the organization's)") {
+		t.Fatalf("audit = %+v", recs)
+	}
+	platformFake.reply = "from the platform"
+	if text, _ := assistEvents(t, e.call(http.MethodPost, "/v1/assist/enhance-prompt", wire.AssistRequest{Text: "x"}, e.as("olaf")).body); text != "from the platform" {
+		t.Fatalf("another organization's run = %q", text)
+	}
+	// The organization's switch still turns assists off entirely.
+	off := true
+	if _, err := e.b.Tenant.SetTenantPolicy(e.ctx(), e.tenant, store.TenantPolicyUpdate{AssistDisabled: &off}); err != nil {
+		t.Fatal(err)
+	}
+	if r := e.call(http.MethodGet, "/v1/assist", nil, e.as("maya")); r.json()["available"] != false {
+		t.Fatalf("turned off with its own model: %s", r.body)
+	}
+}
+
+// platformBase is the platform model's base URL as configured.
+func platformBase(e *appGW) string {
+	return e.call(http.MethodGet, "/v1/platform/assist-model", nil, e.superAdmin()).json()["baseUrl"].(string)
+}
+
+// plan-room reads the library (what the member may use, nearest first)
+// and draft-schedule the clock in the member's timezone; items replies
+// keep their shape.
+func TestAssistLibraryAndClock(t *testing.T) {
+	e, fake, _ := assistGW(t)
+	fake.reply = `{"roomId":"q3-launch","name":"Q3 launch","description":"Plan the launch.","expert":"app-builder","skills":["interactive-apps","nope"],"firstMessage":"Draft the plan."}`
+	r := e.call(http.MethodPost, "/v1/assist/plan-room", wire.AssistRequest{Text: "a room to plan the Q3 launch"}, e.as("maya"))
+	var reply wire.AssistJSONReply
+	if r.status != http.StatusOK || json.Unmarshal(r.body, &reply) != nil || reply.Fields["roomId"] != "q3-launch" || len(reply.Fields["skills"].([]any)) != 2 {
+		t.Fatalf("plan-room = %d %s", r.status, r.body)
+	}
+	user := fake.last()[1]["content"]
+	for _, want := range []string{"<library>\nexperts:\n", "- app-builder: App builder — ", "skill packs:\n", "- interactive-apps: "} {
+		if !strings.Contains(user, want) {
+			t.Errorf("the library lacks %q:\n%s", want, user)
+		}
+	}
+	if strings.Contains(user, "enhance-prompt") || strings.Contains(user, "<clock>") {
+		t.Errorf("the library lists an assist, or a context the task did not declare:\n%s", user)
+	}
+	e.gw.Now = func() time.Time { return time.Date(2026, 10, 13, 20, 15, 0, 0, time.UTC) }
+	fake.reply = `{"text":"Standup in 5 minutes","kind":"weekly","time":"09:30","days":["1","2","3","4","5"],"cron":"","at":""}`
+	r = e.call(http.MethodPost, "/v1/assist/draft-schedule", wire.AssistRequest{Text: "every weekday 9:30 remind the standup", Timezone: "Asia/Shanghai"}, e.as("maya"))
+	if r.status != http.StatusOK || json.Unmarshal(r.body, &reply) != nil || reply.Fields["kind"] != "weekly" || len(reply.Fields["days"].([]any)) != 5 || reply.Fields["cron"] != nil {
+		t.Fatalf("draft-schedule = %d %s", r.status, r.body)
+	}
+	if user := fake.last()[1]["content"]; !strings.Contains(user, "<clock>\nnow: 2026-10-14T04:15 +08:00 (Wednesday)\ntimezone: Asia/Shanghai\n</clock>") || strings.Contains(user, "<library>") {
+		t.Fatalf("the clock:\n%s", user)
+	}
+	fake.reply = `{"displayName":"Weekly","prompts":[{"title":"Status","body":"Sum up {{project}}.","extra":"x"},{"nope":1}],"tags":"ops, weekly"}`
+	r = e.call(http.MethodPost, "/v1/assist/draft-prompt-pack", wire.AssistRequest{Text: "weekly ops prompts"}, e.as("maya"))
+	if r.status != http.StatusOK || json.Unmarshal(r.body, &reply) != nil {
+		t.Fatalf("draft-prompt-pack = %d %s", r.status, r.body)
+	}
+	ps := reply.Fields["prompts"].([]any)
+	if len(ps) != 1 || ps[0].(map[string]any)["body"] != "Sum up {{project}}." || ps[0].(map[string]any)["extra"] != nil || len(reply.Fields["tags"].([]any)) != 2 {
+		t.Fatalf("prompts = %+v", reply.Fields)
+	}
+}
