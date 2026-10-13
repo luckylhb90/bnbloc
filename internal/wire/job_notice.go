@@ -23,6 +23,10 @@ type JobNotice struct {
 	JobID     string
 	SourceSeq int64
 	Text      string
+	// Detail is the agent's or its core's own error output, verbatim but
+	// cut (a failed turn's failMessage): never bnbloc's sentence and never
+	// Markdown. Clients render it fenced (monospace, apart from Text).
+	Detail string
 	// OwnerUserID / Provider attribute the notice to the agent it is about.
 	OwnerUserID string
 	Provider    string
@@ -82,6 +86,9 @@ func (n JobNotice) Payload() map[string]any {
 	p["provider"] = n.Provider
 	if n.FailReason != "" {
 		p["failReason"] = n.FailReason
+	}
+	if strings.TrimSpace(n.Detail) != "" {
+		p["detail"] = n.Detail
 	}
 	if strings.TrimSpace(n.JobID) != "" {
 		p["jobId"] = n.JobID

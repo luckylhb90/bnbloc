@@ -1771,10 +1771,15 @@ func (b *Bridge) sessionReachable(ctx context.Context, entry coreEntry, workspac
 
 // --- reflow: local messages -> bnbloc room ---
 
-// reflow polls the session's messages after the last reflowed cursor and pushes
-// new assistant replies into the room until the turn is idle and drained. It
-// returns whether a visible assistant reply was posted, and folds each consumed
-// reply's reported metrics into usage (nil = not tracked).
+// reflow polls the session's turn status and messages after the last
+// reflowed cursor and pushes new assistant replies into the room until the
+// turn is idle and drained. It returns whether a visible assistant reply was
+// posted, and folds each consumed reply's reported metrics into usage (nil =
+// not tracked). A turn the core reports failed ends in turnFailedError,
+// whatever was posted before it: the job fails (agent_error), and what
+// completed together with the failure is never posted as a reply.
+// Deliverables are not published here: settle publishes them once, after
+// the turn (publishDeliverables).
 func (b *Bridge) reflow(ctx context.Context, room string, rs *roomSession, channelID string, usage *turnUsage) (bool, error) {
 	// idleDeadline is a sliding "no activity" window: the turn may run for a
 	// long time (codex can work for minutes), so a fixed cap would truncate a
@@ -1787,12 +1792,6 @@ func (b *Bridge) reflow(ctx context.Context, room string, rs *roomSession, chann
 	idleDeadline := time.Now().Add(idleWindow)
 	hardDeadline := time.Now().Add(maxTurn)
 	posted := false // any user-visible assistant reply reached the room this turn
-	// Deliverables surface while the turn runs, not only after it drains: a
-	// member watching Docs sees the agent's files appear as they are written.
-	// Throttled because reflow polls every few seconds and the publish pass
-	// costs one manifest fetch plus reads of only the changed files.
-	lastPublish := time.Now()
-	const publishEvery = 10 * time.Second
 	// consecutive poll failures; tolerate a short blip (daemon restart, network
 	// hiccup) instead of ending the turn — the reply would otherwise be lost.
 	fails := 0
@@ -1802,55 +1801,39 @@ func (b *Bridge) reflow(ctx context.Context, room string, rs *roomSession, chann
 		if !ok {
 			return posted, fmt.Errorf("unknown core %q", rs.core)
 		}
-		progressed := false
+		// The turn's status first, then its messages: once the status says
+		// idle, the messages read after it are complete (the final drain), so
+		// a reply that completed as the turn ended is never left behind.
 		pollCtx, cancelPoll := context.WithTimeout(ctx, corePollTimeout)
-		msgs, latest, err := entry.provider.Messages(pollCtx, entry.endpoint, rs.workspaceID, rs.sessionID, rs.lastVersion)
-		cancelPoll()
-		var postErr error
-		if err == nil {
-			drained := true
-			for _, m := range msgs {
-				if m.Version <= rs.lastVersion {
-					continue
-				}
-				if strings.EqualFold(m.Role, "assistant") && m.UserVisible && m.Completed &&
-					strings.TrimSpace(m.Text) != "" {
-					if perr := b.postRoomMessage(ctx, room, rs, m, channelID); perr != nil {
-						if !permanentGatewayError(perr) {
-							// The reply did not reach the room. Keep the cursor
-							// BEFORE it so the next poll re-posts it (activity
-							// dedupes by its stable seq if the post did land).
-							postErr = perr
-							drained = false
-							break
-						}
-						// The gateway will never accept this message (4xx);
-						// retrying cannot help, so it is logged and skipped.
-						slog.Warn("bnbloc bridge reply rejected by gateway, skipping",
-							"event", "bnbloc.bridge.post_rejected", "room", room, "message", m.MessageID, "error", perr)
-						usage.add(m.Metrics) // consumed: the turn still used it
-					} else {
-						posted = true
-						progressed = true
-						usage.add(m.Metrics)
-						usage.noteReply(m)
-					}
-				}
-				if m.Version > rs.lastVersion {
-					rs.lastVersion = m.Version
-				}
-			}
-			if drained && latest > rs.lastVersion {
-				rs.lastVersion = latest
-			}
-		}
-		if time.Since(lastPublish) >= publishEvery {
-			lastPublish = time.Now()
-			b.publishDeliverables(ctx, room, channelID, rs, rs.lastTurn())
-		}
-		pollCtx, cancelPoll = context.WithTimeout(ctx, corePollTimeout)
 		ts, tsErr := entry.provider.PollTurn(pollCtx, entry.endpoint, rs.workspaceID, rs.sessionID)
 		cancelPoll()
+		var (
+			msgs   []corepkg.Message
+			latest int64
+			err    error
+		)
+		if tsErr == nil {
+			pollCtx, cancelPoll = context.WithTimeout(ctx, corePollTimeout)
+			msgs, latest, err = entry.provider.Messages(pollCtx, entry.endpoint, rs.workspaceID, rs.sessionID, rs.lastVersion)
+			cancelPoll()
+		}
+		if tsErr == nil && err == nil && ts.Idle && ts.Failed {
+			// The core reports the turn failed. The messages that completed
+			// with it are the failure's output, not a reply: consumed (the
+			// next turn must not post them either), never posted. The notice
+			// carries the core's own message (fail).
+			rs.consume(msgs, latest)
+			return posted, turnFailedError{detail: ts.FailMessage}
+		}
+		progressed := false
+		var postErr error
+		if tsErr == nil && err == nil {
+			var n int
+			n, postErr = b.postReplies(ctx, room, rs, channelID, msgs, latest, usage)
+			if n > 0 {
+				posted, progressed = true, true
+			}
+		}
 		switch {
 		case err != nil || tsErr != nil || postErr != nil:
 			// A poll (or a reply post) failed. Tolerate a bounded run of
@@ -1864,11 +1847,7 @@ func (b *Bridge) reflow(ctx context.Context, room string, rs *roomSession, chann
 				return posted, firstError(err, tsErr, postErr)
 			}
 		case ts.Idle:
-			// The turn is done and drained. If it failed and produced no visible
-			// reply, the error says why nothing came back (its notice: fail).
-			if ts.Failed && !posted {
-				return false, turnFailedError{detail: ts.FailMessage}
-			}
+			// The turn is done and drained.
 			return posted, nil
 		default:
 			fails = 0         // healthy poll of an active turn
@@ -1891,6 +1870,60 @@ func (b *Bridge) reflow(ctx context.Context, room string, rs *roomSession, chann
 		// not possible here; this is the finest granularity available.
 		case <-time.After(400 * time.Millisecond):
 		}
+	}
+}
+
+// postReplies posts the completed, user-visible assistant messages of msgs
+// (read after rs.lastVersion) to the room and advances the cursor past what
+// it consumed. It returns how many reached the room, and the transient post
+// failure that stopped it: the cursor then stays BEFORE that message, so
+// the next poll re-posts it (activity dedupes by its stable seq if the post
+// did land). A message the gateway will never accept (4xx) is logged and
+// skipped.
+func (b *Bridge) postReplies(ctx context.Context, room string, rs *roomSession, channelID string, msgs []corepkg.Message, latest int64, usage *turnUsage) (int, error) {
+	n := 0
+	for _, m := range msgs {
+		if m.Version <= rs.lastVersion {
+			continue
+		}
+		if isReply(m) {
+			if perr := b.postRoomMessage(ctx, room, rs, m, channelID); perr != nil {
+				if !permanentGatewayError(perr) {
+					return n, perr
+				}
+				slog.Warn("bnbloc bridge reply rejected by gateway, skipping",
+					"event", "bnbloc.bridge.post_rejected", "room", room, "message", m.MessageID, "error", perr)
+				usage.add(m.Metrics) // consumed: the turn still used it
+			} else {
+				n++
+				usage.add(m.Metrics)
+				usage.noteReply(m)
+			}
+		}
+		rs.lastVersion = m.Version
+	}
+	if latest > rs.lastVersion {
+		rs.lastVersion = latest
+	}
+	return n, nil
+}
+
+// isReply reports a message that reaches the room as the agent's reply: a
+// completed, user-visible assistant message with text.
+func isReply(m corepkg.Message) bool {
+	return strings.EqualFold(m.Role, "assistant") && m.UserVisible && m.Completed && strings.TrimSpace(m.Text) != ""
+}
+
+// consume advances the reflow cursor past msgs (and the session's latest
+// version) without posting them.
+func (rs *roomSession) consume(msgs []corepkg.Message, latest int64) {
+	for _, m := range msgs {
+		if m.Version > rs.lastVersion {
+			rs.lastVersion = m.Version
+		}
+	}
+	if latest > rs.lastVersion {
+		rs.lastVersion = latest
 	}
 }
 

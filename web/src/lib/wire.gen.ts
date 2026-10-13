@@ -1956,6 +1956,10 @@ export interface JobNotice {
   JobID: string;
   SourceSeq: number;
   Text: string;
+  // Detail is the agent's or its core's own error output, verbatim but
+  // cut (a failed turn's failMessage): never bnbloc's sentence and never
+  // Markdown. Clients render it fenced (monospace, apart from Text).
+  Detail: string;
   // OwnerUserID / Provider attribute the notice to the agent it is about.
   OwnerUserID: string;
   Provider: string;
@@ -3912,8 +3916,8 @@ export const QuotaRequestStatusValues: readonly QuotaRequestStatus[] = ["pending
 export type AgentJobStatus = "queued" | "claimed" | "running" | "reflowing" | "replied" | "failed" | "timed_out" | "cancelled";
 export const AgentJobStatusValues: readonly AgentJobStatus[] = ["queued", "claimed", "running", "reflowing", "replied", "failed", "timed_out", "cancelled"];
 // Why an agent job failed (store.AgentJobFailureReason).
-export type AgentJobFailureReason = "no_bridge_online" | "agent_not_advertised" | "borrow_not_authorized" | "core_unavailable" | "runner_start_failed" | "runner_failed" | "lease_expired" | "sandbox_starting" | "reply_timeout" | "cancelled" | "budget_exhausted" | "budget_unavailable" | "sandbox_required" | "content_unavailable" | "team_unsupported" | "invalid_job";
-export const AgentJobFailureReasonValues: readonly AgentJobFailureReason[] = ["no_bridge_online", "agent_not_advertised", "borrow_not_authorized", "core_unavailable", "runner_start_failed", "runner_failed", "lease_expired", "sandbox_starting", "reply_timeout", "cancelled", "budget_exhausted", "budget_unavailable", "sandbox_required", "content_unavailable", "team_unsupported", "invalid_job"];
+export type AgentJobFailureReason = "no_bridge_online" | "agent_not_advertised" | "borrow_not_authorized" | "core_unavailable" | "runner_start_failed" | "runner_failed" | "agent_error" | "lease_expired" | "sandbox_starting" | "reply_timeout" | "cancelled" | "budget_exhausted" | "budget_unavailable" | "sandbox_required" | "content_unavailable" | "team_unsupported" | "invalid_job";
+export const AgentJobFailureReasonValues: readonly AgentJobFailureReason[] = ["no_bridge_online", "agent_not_advertised", "borrow_not_authorized", "core_unavailable", "runner_start_failed", "runner_failed", "agent_error", "lease_expired", "sandbox_starting", "reply_timeout", "cancelled", "budget_exhausted", "budget_unavailable", "sandbox_required", "content_unavailable", "team_unsupported", "invalid_job"];
 // A member's role in a room (store.Role).
 export type RoomRole = "owner" | "admin" | "member" | "visitor";
 export const RoomRoleValues: readonly RoomRole[] = ["owner", "admin", "member", "visitor"];

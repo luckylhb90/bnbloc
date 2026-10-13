@@ -159,8 +159,9 @@ func (b *Bridge) publishDeliverables(ctx context.Context, room, channelID string
 		slog.Debug("bnbloc bridge deliverables skipped: no session", "event", "bnbloc.bridge.deliverables_skip")
 		return
 	}
-	// The post-turn publish (own goroutine) and the next turn's periodic
-	// publish both read and replace lastPublished; serialize them per session.
+	// A turn's publish runs on its own goroutine (publishTurn), so it can
+	// overlap the next turn's; both read and replace lastPublished:
+	// serialize them per session.
 	rs.publishMu.Lock()
 	defer rs.publishMu.Unlock()
 	files, ep, binarySafe, ok := b.sessionFiles(ctx, rs.core)
@@ -191,9 +192,7 @@ func (b *Bridge) publishDeliverables(ctx context.Context, room, channelID string
 			// Pre-turn history on a cold start is not this turn's work.
 			return touched(f)
 		}
-		// Warm: a stamp drift. A file written this turn whose exact state a
-		// mid-turn pass already published is not changed again, so the
-		// turn-end pass mints no duplicate version of identical content.
+		// Warm: a stamp drift since the previous turn's publish.
 		prev, existed := rs.lastPublished[f.Path]
 		return !existed || prev != (fileStamp{Bytes: f.Bytes, MtimeMs: f.MtimeMs})
 	}

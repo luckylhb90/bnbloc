@@ -64,6 +64,20 @@ func TestGoldenRoomEvents(t *testing.T) {
 				}},
 			},
 		},
+		// A failed turn's notice: bnbloc's sentence as its text, the agent's
+		// own error output as its detail (rendered fenced, never a reply).
+		"job_notice.json": Event{
+			Sequence:  13,
+			RoomID:    "room-1",
+			ChannelID: "chan-1",
+			Kind:      KindAgentMessages,
+			AtUnixMs:  1760000003000,
+			Payload: JobNotice{
+				Kind: "turn-failed", JobID: "job-1", SourceSeq: 11, Text: "The codex agent reported an error and stopped.",
+				Detail: "Missing environment variable: `EXAMPLE_API_KEY`", OwnerUserID: "maya", Provider: "codex",
+				FailReason: "agent_error", RoomID: "room-1", ChannelID: "chan-1", AtUnixMs: 1760000003000,
+			}.Report(),
+		},
 		// A history page (GET .../history) with a chat message edited since
 		// it was posted: the edit stamp rides the row, not the payload.
 		"history_page.json": FeedPage{Messages: []FeedMessage{{

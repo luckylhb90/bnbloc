@@ -114,6 +114,10 @@ const (
 	// FailureRunnerFailed: the turn started, or may have (an ambiguous
 	// start); final: a retry would run the prompt twice.
 	FailureRunnerFailed AgentJobFailureReason = "runner_failed"
+	// FailureAgentError: the agent or its core reported the started turn
+	// failed (Core Protocol PollTurn failed + failMessage: a CLI that could
+	// not start, a provider error); final for the same reason.
+	FailureAgentError AgentJobFailureReason = "agent_error"
 	// FailureLeaseExpired: the bridge holding the job stopped renewing its
 	// lease (it quit, restarted or lost the network) and the sweep took the
 	// job back; retryable, final once the attempts are spent.
@@ -227,6 +231,8 @@ func (r AgentJobFailureReason) Text(agent string) string {
 		return the + " did not run: its agent sandbox was still starting."
 	case FailureReplyTimeout:
 		return the + " stopped responding."
+	case FailureAgentError:
+		return the + " reported an error and stopped."
 	case FailureBudgetExhausted:
 		return the + " did not run: a monthly budget is reached."
 	case FailureBudgetUnavailable:

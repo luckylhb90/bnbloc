@@ -74,6 +74,9 @@ export interface FeedItem {
   // An agent's notice line (a team lead's progress, a member timeout):
   // rendered as a compact line, not a reply.
   notice?: string;
+  // A notice's detail (payload.detail): the agent's own error output,
+  // rendered fenced under the notice line, never as Markdown.
+  noticeDetail?: string;
   // An agent row's job and the room sequence of that job's request
   // (payload.jobId / payload.sourceSeq): delegated work nests under the
   // request that started it (feedTurns.ts).

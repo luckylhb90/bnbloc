@@ -1,0 +1,31 @@
+{
+  "sequence": 13,
+  "roomId": "room-1",
+  "channelId": "chan-1",
+  "kind": "agent_messages",
+  "payload": {
+    "workspaceId": "room-1",
+    "agentSessionId": "job-job-1",
+    "channelId": "chan-1",
+    "messages": [
+      {
+        "seq": 1,
+        "payload": {
+          "detail": "Missing environment variable: `EXAMPLE_API_KEY`",
+          "failReason": "agent_error",
+          "jobId": "job-1",
+          "messageId": "turn-failed-job-job-1",
+          "notice": "turn-failed",
+          "ownerUserId": "maya",
+          "provider": "codex",
+          "role": "assistant",
+          "sourceSeq": 11,
+          "text": "The codex agent reported an error and stopped."
+        },
+        "createdAtUnixMs": 1760000003000
+      }
+    ],
+    "cursor": 0
+  },
+  "atUnixMs": 1760000003000
+}

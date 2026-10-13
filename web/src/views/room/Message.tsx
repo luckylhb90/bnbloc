@@ -194,8 +194,8 @@ export const Message = memo(function Message({
   // An agent's notice line (a team lead's progress, a member that has not
   // finished): one compact line under the agent's name, not a reply.
   if (isAgent && item.notice) {
-    return (
-      <div id={`msg-${item.id}`} data-notice={item.notice} className="ml-10 mt-1 flex min-w-0 items-center gap-1.5 text-xs text-[var(--color-fg-muted)]">
+    const line = (
+      <div className="flex min-w-0 items-center gap-1.5">
         {item.notice === "member-timeout" ? <HourglassIcon size={12} className="shrink-0" /> : <FlagIcon size={12} className="shrink-0" />}
         {/* By display name like every other agent row: never the raw
             owner id (privacy mode, web M15). */}
@@ -205,6 +205,18 @@ export const Message = memo(function Message({
           <span className="shrink-0 text-[0.68rem] text-[var(--color-fg-subtle)]" title={exactTime(item.createdAtMs)}>
             {relativeTime(item.createdAtMs)}
           </span>
+        ) : null}
+      </div>
+    );
+    return (
+      <div id={`msg-${item.id}`} data-notice={item.notice} className="ml-10 mt-1 flex min-w-0 flex-col gap-1 text-xs text-[var(--color-fg-muted)]">
+        {line}
+        {/* The agent's own error output: fenced and verbatim, never
+            Markdown and never a reply. */}
+        {item.noticeDetail ? (
+          <pre className="max-h-40 overflow-auto whitespace-pre-wrap break-words rounded-[var(--radius)] border border-[var(--color-border)] bg-[var(--color-surface-2)] px-2 py-1 font-mono text-[0.7rem] [overflow-wrap:anywhere]">
+            {item.noticeDetail}
+          </pre>
         ) : null}
       </div>
     );

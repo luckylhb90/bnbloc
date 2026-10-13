@@ -25,6 +25,7 @@ export const AGENT_JOB_FAILURES: Record<AgentJobFailureReason, { readonly label:
   core_unavailable: { label: "core unavailable", why: "the agent's core was unreachable" },
   runner_start_failed: { label: "runner failed to start", why: "the agent's runner did not start" },
   runner_failed: { label: "runner failed", why: "the agent's runner failed" },
+  agent_error: { label: "agent error", why: "the agent reported an error" },
   lease_expired: { label: "bridge stopped responding", why: "the agent's bridge stopped responding" },
   sandbox_starting: { label: "sandbox starting", why: "the agent sandbox was starting" },
   reply_timeout: { label: "reply timed out", why: "the reply timed out" },

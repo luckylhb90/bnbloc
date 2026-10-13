@@ -1014,10 +1014,13 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   `agent_not_advertised`, `content_unavailable`, `team_unsupported`,
   `sandbox_required`, `borrow_not_authorized`) goes through `b.refuse`,
   and a drive error through `b.fail`, classified by the stage it reached
-  (`atStage`, `driveFailureReason`): a started or ambiguous turn, and
-  `reply_timeout`, are final, or the prompt runs twice and a borrow is
-  reserved twice. Every refusal and every drive failure posts exactly one
-  notice. Never classify by error text, and never report a failed status
+  (`atStage`, `driveFailureReason`): a started or ambiguous turn,
+  `reply_timeout` and `agent_error` are final, or the prompt runs twice and
+  a borrow is reserved twice. A turn its core reports `failed` fails the job
+  `agent_error` even after it posted replies (`agentFailed`): what completed
+  with the failure is never posted as a reply, and the core's message rides
+  the notice's fenced `detail` (`wire.JobNotice.Detail`). Every refusal and
+  every drive failure posts exactly one notice. Never classify by error text, and never report a failed status
   or declare a refusal elsewhere (`TestDriveRefusalsAreFinal`,
   `TestEveryStageRefusalPostsItsNotice`).
 - **Every requeue records its attempt, in the statement that requeues.**
@@ -1059,6 +1062,12 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   unsettled) as busy; a turn parked in `waiting`/`paused` is ready for the next
   input. Keying "busy" off any non-empty `activeTurnId` wedges follow-ups
   ("agent still running after 90s").
+- **Deliverables publish once per turn, at settle** (`publishTurn`,
+  `services/bridge/drive.go`), after the reply collection ended: each site
+  or file the turn changed gets one new version, an unchanged one none.
+  Never publish from `reflow` or on a timer while the turn runs: every
+  mid-turn pass that saw a rewrite minted a version (2026-10-13: one turn
+  published v1–v7 of one site).
 - **Refresh tokens are server-side families with reuse detection.** Each
   refresh rotates the family; presenting a rotated-away token (beyond a 60 s
   two-tab grace) revokes the whole sign-in. A process handed someone else's

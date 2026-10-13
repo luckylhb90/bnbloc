@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	corepkg "github.com/luckylhb90/bnbloc/core"
+	"github.com/luckylhb90/bnbloc/internal/roomlog"
 	"github.com/luckylhb90/bnbloc/internal/store"
 	"github.com/luckylhb90/bnbloc/internal/wire"
 	sandbox "github.com/luckylhb90/bnbloc/sandbox/protocol"
@@ -82,7 +83,7 @@ func (b *Bridge) refuse(ctx context.Context, d *drive, r *refusal) {
 func (b *Bridge) fail(ctx context.Context, d *drive, err error, diagnostics map[string]any) {
 	reason := driveFailureReason(err)
 	b.postNotice(ctx, d.ref(), wire.JobNotice{
-		Kind: driveFailureNotice(err), Text: driveErrorText(d.job.Provider, err),
+		Kind: driveFailureNotice(err), Text: driveErrorText(d.job.Provider, err), Detail: agentErrorDetail(err),
 		OwnerUserID: d.owner, Provider: d.job.Provider, FailReason: string(reason),
 	})
 	b.failJob(ctx, d.job.JobID, reason, diagnostics)
@@ -168,11 +169,35 @@ func sandboxStarting(err error, ready bool) bool {
 	return false
 }
 
-// turnFailedError: the core reports the started turn failed (detail is the
-// provider's message, e.g. a missing API key).
+// turnFailedError: the agent or its core reports the started turn failed
+// (detail is the core's failMessage, e.g. a CLI that could not start for a
+// missing API key). It fails the job agent_error even when replies were
+// posted before it (agentFailed): an agent's error is never a reply.
 type turnFailedError struct{ detail string }
 
 func (e turnFailedError) Error() string { return "turn failed: " + e.detail }
+
+// agentFailed reports a drive whose agent or core reported its turn failed:
+// the job fails whatever the turn posted (settle).
+func agentFailed(err error) bool {
+	var failed turnFailedError
+	return errors.As(err, &failed)
+}
+
+// maxNoticeDetailBytes bounds the agent's own error output a notice
+// carries (wire.JobNotice.Detail).
+const maxNoticeDetailBytes = 2000
+
+// agentErrorDetail is the notice detail of a failed drive: the agent's or
+// core's own message of a failed turn, verbatim but cut; "" for any other
+// failure (its sentence already says why).
+func agentErrorDetail(err error) string {
+	var failed turnFailedError
+	if !errors.As(err, &failed) {
+		return ""
+	}
+	return roomlog.Truncate(strings.TrimSpace(failed.detail), maxNoticeDetailBytes)
+}
 
 // errNoReply: the turn ran (it may have acted) and ended without a visible
 // reply. Final: a retry would run the prompt again.
@@ -183,12 +208,16 @@ var errNoReply = errors.New("agent turn completed without a visible reply")
 // and an unreachable core core_unavailable; a start request that provably
 // never took effect (core.Retryable for a request that is not idempotent)
 // is runner_start_failed. All three retry. A turn that ran without a reply
-// is reply_timeout. Anything else — a started turn, an ambiguous start, a
+// is reply_timeout, and one its agent or core reported failed agent_error
+// (both final). Anything else — a started turn, an ambiguous start, a
 // deterministic failure, an error of unknown stage — is runner_failed,
 // which never retries.
 func driveFailureReason(err error) store.AgentJobFailureReason {
 	if errors.Is(err, errNoReply) {
 		return store.FailureReplyTimeout
+	}
+	if agentFailed(err) {
+		return store.FailureAgentError
 	}
 	var de *driveError
 	if !errors.As(err, &de) {
@@ -236,7 +265,8 @@ func driveErrorText(provider string, err error) string {
 	case errors.As(err, &notReady):
 		return "The " + provider + " agent did not start: its agent sandbox is still starting."
 	case errors.As(err, &failed):
-		return withDetail("The agent could not complete this request", failed.detail)
+		// The agent's own words go in the notice's detail, fenced.
+		return "The " + provider + " agent reported an error and stopped."
 	case driveFailureNotice(err) == "turn-failed":
 		return withDetail("The "+provider+" agent stopped before it replied", cleanDriveError(err))
 	default:

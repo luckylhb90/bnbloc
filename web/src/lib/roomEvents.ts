@@ -78,6 +78,9 @@ export interface RoomEvent {
   // For agent_messages that are a job's notice line, not a reply
   // (payload.notice: "progress", "member-timeout").
   notice?: string;
+  // For a notice: the agent's own error output it carries (payload.detail),
+  // shown fenced under the notice line.
+  noticeDetail?: string;
   // For agent_messages a job wrote (replies and notices): the job and the
   // room sequence of its request (payload.jobId, payload.sourceSeq), so the
   // feed nests delegated work under the request that started it.
@@ -163,6 +166,7 @@ export function normalizeRoomEvent(ev: RoomEvent, emit: (e: RoomEvent) => void):
       // A notice line (a team lead's progress) is no reply: it leaves the
       // agent's working indicator alone.
       const notice = typeof mp.notice === "string" && mp.notice ? mp.notice : undefined;
+      const noticeDetail = notice && typeof mp.detail === "string" && mp.detail.trim() ? mp.detail : undefined;
       const jobId = typeof mp.jobId === "string" && mp.jobId ? mp.jobId : undefined;
       const sourceSeq = typeof mp.sourceSeq === "number" && mp.sourceSeq > 0 ? mp.sourceSeq : undefined;
       emit({
@@ -181,6 +185,7 @@ export function normalizeRoomEvent(ev: RoomEvent, emit: (e: RoomEvent) => void):
         agentKey:
           role === "assistant" && owner && provider && !notice ? agentIdentity({ ownerId: owner, core, provider }) : undefined,
         ...(notice ? { notice } : {}),
+        ...(noticeDetail ? { noticeDetail } : {}),
         ...(jobId ? { jobId } : {}),
         ...(sourceSeq ? { sourceSeq } : {}),
         importedFrom: importedFrom(p),

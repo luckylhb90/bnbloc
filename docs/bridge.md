@@ -27,11 +27,17 @@ One bridge acts for one member (`BNBLOC_BRIDGE_OWNER`). It:
    and posts new assistant messages to `POST /v1/rooms/{room}/agent-activity/messages`
    in the exact wire shape the web client renders. The `afterVersion` cursor
    dedups.
-4. **Surfaces failures**: when the driven turn settles as `failed` and produced
-   no user-visible reply, the bridge posts the provider's error into the room
-   (e.g. a missing agent API key) instead of leaving a silent no-reply, so the
-   member sees why nothing came back. This mirrors the visible borrow-denied
-   notice.
+4. **Surfaces failures**: when the driven turn settles as `failed`, the job
+   fails `agent_error`, whatever the turn posted before (an agent's error is
+   never a reply): the messages that completed together with the failure are
+   consumed, not posted, and the notice says the agent reported an error,
+   with the core's `failMessage` (e.g. a missing agent API key) as its
+   `detail`, cut and rendered fenced. The turn's status is polled before its
+   messages, so the read after an idle status is the turn's final drain.
+5. **Publishes deliverables once per turn**, at settle, after the reply
+   collection ended: each site or file the turn changed becomes exactly one
+   new artifact version, however often the agent rewrote it during the turn
+   (`publishTurn`; `docs/bugs/2026-10-13-demo-app-build-issues.md`).
 
 **Shared room context** is pull-based. History is not pushed into the prompt —
 it is materialized once per session into a `.room/` directory inside the

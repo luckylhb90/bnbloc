@@ -84,10 +84,13 @@ func storedTexts(msgs []wire.Message) []string {
 	return out
 }
 
-func payloadText(m wire.Message) string {
+func payloadText(m wire.Message) string { return payloadField(m, "text") }
+
+// payloadField reads one string field of a row's payload.
+func payloadField(m wire.Message, key string) string {
 	p, _ := m.Payload.(map[string]any)
-	t, _ := p["text"].(string)
-	return t
+	v, _ := p[key].(string)
+	return v
 }
 
 // turnScriptProv scripts a session across turns: turn 1 fails with no reply,
@@ -150,7 +153,7 @@ func TestReplyAfterFailedTurnIsStillStored(t *testing.T) {
 		return bridgeJob{JobID: id, RoomID: "room-1", ChannelID: "ch", OwnerUserID: "alice", RequesterUserID: "alice", Core: "core-a", Provider: "codex", TargetID: "t", MessageText: text}
 	}
 	b.runBridgeJob(ctx, turn("job-1", "first"))
-	if st := g.lastStatus(); st["status"] != "failed" || st["failureReason"] != "runner_failed" {
+	if st := g.lastStatus(); st["status"] != "failed" || st["failureReason"] != "agent_error" {
 		t.Fatalf("turn 1 status = %+v; want the failed turn reported", st)
 	}
 	b.runBridgeJob(ctx, turn("job-2", "second"))
@@ -160,14 +163,14 @@ func TestReplyAfterFailedTurnIsStillStored(t *testing.T) {
 
 	posts, fresh := g.stored()
 	texts := storedTexts(fresh)
-	if len(texts) != 2 || !strings.Contains(texts[0], "missing API key") || texts[1] != "the answer" {
+	if len(texts) != 2 || !strings.Contains(payloadField(fresh[0], "detail"), "missing API key") || texts[1] != "the answer" {
 		t.Fatalf("stored rows = %q; want the turn-failed notice AND the later real reply", texts)
 	}
 	for _, p := range posts {
 		if p.AgentSessionID == "" {
 			t.Fatalf("activity post without agentSessionId: %+v", p)
 		}
-		isNotice := strings.Contains(payloadText(p.Messages[0]), "could not complete")
+		isNotice := payloadField(p.Messages[0], "notice") != ""
 		if isNotice && p.AgentSessionID == "s" {
 			t.Fatal("notice posted under the real agent session's cursor")
 		}
@@ -291,8 +294,8 @@ func TestSyncPlanUsesRoomSessionWorkspace(t *testing.T) {
 	}
 }
 
-// BR-14: the post-turn publish goroutine and the next turn's periodic publish
-// may run on the same session at once; they must not race on lastPublished
+// BR-14: one turn's publish goroutine and the next turn's may run on the
+// same session at once; they must not race on lastPublished
 // (run with -race).
 func TestConcurrentPublishDeliverablesIsSerialized(t *testing.T) {
 	fc := newFakeCore()

@@ -7,6 +7,7 @@ import agentMessages from "../../../internal/wire/testdata/agent_messages.json" 
 import historyPage from "../../../internal/wire/testdata/history_page.json" with { type: "json" };
 import jobUpdated from "../../../internal/wire/testdata/agent_job_updated.json" with { type: "json" };
 import turnUsage from "../../../internal/wire/testdata/turn_usage.json" with { type: "json" };
+import jobNotice from "../../../internal/wire/testdata/job_notice.json" with { type: "json" };
 
 function assert(condition: boolean, message: string): void {
   if (!condition) throw new Error(message);
@@ -44,6 +45,17 @@ function testReplyClearsOnlyItsOwnAgent(): void {
   assert(reply("acme").agentKey === state.agentKey, "the agent's reply clears its indicator");
   assert(reply("nimbus").agentKey !== state.agentKey, "the same harness under another core is another agent");
   assert(reply("acme", "progress").agentKey === undefined, "a notice line leaves the indicator alone");
+}
+
+// A failed turn's notice carries the agent's own error output apart from
+// its sentence, and is no reply (it leaves the working indicator alone).
+function testNoticeCarriesTheAgentErrorApart(): void {
+  const [ev] = normalized(jobNotice as RoomEvent);
+  assert(ev.notice === "turn-failed", `notice ${ev.notice}`);
+  assert(ev.text === "The codex agent reported an error and stopped.", `text ${ev.text}`);
+  assert(ev.noticeDetail === "Missing environment variable: `EXAMPLE_API_KEY`", `detail ${ev.noticeDetail}`);
+  assert(ev.agentKey === undefined, "a notice is no reply");
+  assert(reply("acme").noticeDetail === undefined, "a reply has no notice detail");
 }
 
 // A reply whose core reported only part of its metrics is billed by the
@@ -93,6 +105,7 @@ function testJobEventIsTheProjection(): void {
 
 testSessionStateFixtureKeysTheAgent();
 testReplyClearsOnlyItsOwnAgent();
+testNoticeCarriesTheAgentErrorApart();
 testPartialMetricsShowUsage();
 testTurnUsageParity();
 testHistoryRowKeepsEditStamp();

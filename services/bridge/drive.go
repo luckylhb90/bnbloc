@@ -298,8 +298,10 @@ func (b *Bridge) driveTurn(ctx context.Context, d *drive) (driveResult, error) {
 // whatever its outcome; the run was counted at reserve time — with the
 // usage the turn's replies reported. An aborted job is no longer ours: the
 // server already recorded the cancel and cleared the lease, so no outcome
-// is reported. Otherwise the job reports replied (its changed files become
-// artifact versions) or fails by the stage its drive reached.
+// is reported. Otherwise the job reports replied, or fails by the stage its
+// drive reached; a turn its agent or core reported failed fails even when
+// it posted replies (agentFailed). Then, once per turn, the files the turn
+// changed become artifact versions (publishTurn).
 func (b *Bridge) settle(ctx context.Context, d *drive, res driveResult, err error) {
 	if d.reservationID != "" {
 		go b.settleBorrow(b.detached(ctx), d.job.RoomID, d.owner, d.core, d.job.Provider, d.reservationID, res.usage.recordFields(d.job.Model))
@@ -309,20 +311,16 @@ func (b *Bridge) settle(ctx context.Context, d *drive, res driveResult, err erro
 			"event", "bnbloc.bridge.job_abandoned", "job", d.job.JobID)
 		return
 	}
+	defer b.publishTurn(ctx, d)
 	diag := d.agent()
 	if res.sessionID != "" {
 		diag["workspaceId"], diag["sessionId"] = res.workspaceID, res.sessionID
 	}
-	if res.replied {
+	if res.replied && !agentFailed(err) {
 		if err != nil {
 			diag["warning"] = cleanDriveError(err)
 		}
 		b.reportJobStatus(ctx, d.job.JobID, store.AgentJobReplied, "", res.usage.withRunReport(diag, d.job.Model))
-		// Presentation only: a failed publish never marks the turn failed.
-		if _, rs := d.run.bound(); rs != nil {
-			go b.publishDeliverables(b.detached(ctx), d.job.RoomID, d.job.ChannelID, rs,
-				deliverableTurn{StartMs: d.startMs, JobID: d.job.JobID, SourceSeq: d.job.MessageSeq})
-		}
 		return
 	}
 	if err == nil {
@@ -332,6 +330,19 @@ func (b *Bridge) settle(ctx context.Context, d *drive, res driveResult, err erro
 	diag["targetId"] = d.target
 	diag["error"] = cleanDriveError(err)
 	b.fail(ctx, d, err, res.usage.withRunReport(diag, d.job.Model))
+}
+
+// publishTurn publishes what the turn changed in its session's workspace as
+// artifact versions, once per turn, after the turn settled (reflow
+// returned): each site or file the turn changed gets exactly one new
+// version however often the agent rewrote it, and an unchanged one none. A
+// drive that never bound a session started no turn and publishes nothing.
+// Presentation only: a failed publish never marks the turn failed.
+func (b *Bridge) publishTurn(ctx context.Context, d *drive) {
+	if _, rs := d.run.bound(); rs != nil {
+		go b.publishDeliverables(b.detached(ctx), d.job.RoomID, d.job.ChannelID, rs,
+			deliverableTurn{StartMs: d.startMs, JobID: d.job.JobID, SourceSeq: d.job.MessageSeq})
+	}
 }
 
 // detached is the context for work that outlives a drive (a borrow settle,

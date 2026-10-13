@@ -34,6 +34,7 @@ export function feedItemFromEvent(e: RoomEvent, subject: string | null, live: bo
     dispatch: e.dispatch,
     expert: e.expert,
     notice: e.notice,
+    noticeDetail: e.noticeDetail,
     jobId: e.jobId,
     sourceSeq: e.sourceSeq,
     peopleOnly: e.kind === "chat_message" && e.toAgent === false ? true : undefined,
