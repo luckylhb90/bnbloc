@@ -33,7 +33,7 @@ assert(agentJobStatusLabel(job({ status: "failed", failureReason: "no_bridge_onl
 const starting = { attempt: 1, reason: "sandbox_starting" as const, atMs: 5 };
 const lapsed = { attempt: 2, reason: "lease_expired" as const, atMs: 9 };
 const retried = job({ status: "reflowing", attempt: 2, attempts: [starting] });
-assert(agentJobStatusLabel(retried) === "collecting reply", "the phase, not the earlier attempt's reason, labels a live job");
+assert(agentJobStatusLabel(retried) === "working", "the phase, not the earlier attempt's reason, labels a live job");
 assert(retryNote(retried, 0) === "retrying — the agent sandbox was starting", `retry note = ${retryNote(retried, 0)}`);
 assert(
   retryNote(job({ status: "running", attempt: 3, attempts: [starting, lapsed] }), 0) === "retrying — the agent's bridge stopped responding",

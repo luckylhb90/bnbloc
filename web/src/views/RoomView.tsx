@@ -46,6 +46,7 @@ import { useRoomActivity } from "@/views/room/useRoomActivity";
 import { useFeedScroll } from "@/views/room/useFeedScroll";
 import { useRoomTeam } from "@/views/room/useRoomTeam";
 import { MessageExtrasProvider } from "@/views/room/messageExtras";
+import { JobProgressProvider } from "@/views/room/JobProgressStrip";
 import { SaveTemplateDialog } from "@/views/room/SaveTemplateDialog";
 import { TemplateStartCard } from "@/views/room/TemplateStartCard";
 import { SchedulesDialog } from "@/views/room/SchedulesDialog";
@@ -495,6 +496,7 @@ export function RoomView({
             >
               <div ref={scroller.contentRef}>
                 <MessageExtrasProvider value={team.extras}>
+                <JobProgressProvider value={activity.jobProgress}>
                 <MessageFeed
                   loaded={!!room}
                   roomId={roomId}
@@ -523,6 +525,7 @@ export function RoomView({
                   onViewAllDeliverables={viewAllDeliverables}
                   agentReady={roomAgents.some((a) => !a.platform) || data.platform.choices.some((c) => c.inRoom && c.online)}
                 />
+                </JobProgressProvider>
                 </MessageExtrasProvider>
               </div>
             </div>

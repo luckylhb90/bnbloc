@@ -6,7 +6,7 @@ export const AGENT_JOB_STATUS_LABELS: Record<AgentJobStatus, string> = {
   queued: "waiting for bridge",
   claimed: "claimed by bridge",
   running: "running",
-  reflowing: "collecting reply",
+  reflowing: "working",
   failed: "failed",
   timed_out: "timed out",
   cancelled: "cancelled",

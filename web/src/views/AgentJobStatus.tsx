@@ -4,6 +4,7 @@ import { AgentHandle } from "@/views/UserName";
 import { isLiveJob } from "@/lib/agentRuns";
 import { agentJobStatusLabel, jobWearing, retryNote } from "@/views/room/agentJobLabels";
 import { useRetryClock } from "@/views/room/useRetryClock";
+import { JobProgressStrip } from "@/views/room/JobProgressStrip";
 
 // The job's raw diagnostics stay with its owner and admins (the run record);
 // a row shows the projection's failure text, what the turn wore and what it
@@ -62,6 +63,8 @@ export function AgentJobStatus({
                 </button>
               )}
             </div>
+            {/* A started job shows what it is doing (live-turns PRD §3). */}
+            {live && j.status !== "queued" && <JobProgressStrip job={j} />}
             {detail && <span className="break-words text-[var(--color-fg-subtle)]">{detail}</span>}
             {wearing.length > 0 && <span className="break-words">as {wearing.join(" + ")}</span>}
             {missing.length > 0 && (

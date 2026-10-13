@@ -2,7 +2,9 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { api, type AgentJob } from "@/lib/api";
 import type { RoomEvent } from "@/lib/roomEvents";
 import { onboardingEventFromRoomEvent, onboardingEvents } from "@/lib/onboardingEvents";
+import { applyProgress, endProgress, pruneProgress, type JobProgress } from "@/lib/jobProgress";
 import { useScopedState } from "@/lib/useScopedState";
+import type { AgentJobProgress } from "@/lib/wire.gen";
 import type { RecentArtifactChange } from "@/views/room/ActivityRail";
 import { invalidateArtifacts, loadArtifactDetail, type ArtifactDetail } from "@/views/workbench/artifactData";
 
@@ -66,6 +68,9 @@ export function useRoomActivity({
 }) {
   const scope = channelId ?? "";
   const [agentJobs, setAgentJobs] = useScopedState<Record<number, AgentJob[]>>(scope, () => ({}));
+  // Live jobs' progress by job id (live-turns PRD §3): transient, only while
+  // the job is live (pruned when an update ends it).
+  const [jobProgress, setJobProgress] = useScopedState<Record<string, JobProgress>>(scope, () => ({}));
   // Artifacts born from a chat message, keyed by that message's seq: the
   // cards render inline under the message whose turn produced the files. The
   // link is the version's explicit sourceSeq; see heuristicAnchor for the
@@ -123,6 +128,8 @@ export function useRoomActivity({
       }
       if (cancelled) return;
       setAgentJobs(bySeq);
+      // A reload (reconnect) may have missed a job ending: keep only live ones.
+      setJobProgress((cur) => pruneProgress(cur, Object.values(bySeq).flat()));
       try {
         // The room already holds deliverables: the checklist can tell.
         const res = await api.artifacts(roomId, { limit: 1 });
@@ -134,7 +141,7 @@ export function useRoomActivity({
     return () => {
       cancelled = true;
     };
-  }, [roomId, channelId, liveReload, setAgentJobs]);
+  }, [roomId, channelId, liveReload, setAgentJobs, setJobProgress]);
 
   // Deliverable cards of the loaded messages, by their explicit sourceSeq
   // (after a reload the live events that anchored them never arrive). Re-read
@@ -174,7 +181,13 @@ export function useRoomActivity({
         // Job events are room-wide; only this channel's rows sit under its feed.
         if (j && typeof j.messageSeq === "number" && (!j.channelId || j.channelId === channelId)) {
           setAgentJobs((cur) => ({ ...cur, [j.messageSeq]: [j] }));
+          setJobProgress((cur) => endProgress(cur, j));
         }
+        return true;
+      }
+      if (e.kind === "agent_job_progress") {
+        const p = e.payload as AgentJobProgress | undefined;
+        if (p && typeof p.jobId === "string") setJobProgress((cur) => applyProgress(cur, p, Date.now()));
         return true;
       }
       if (e.kind === "artifact_state") {
@@ -247,7 +260,7 @@ export function useRoomActivity({
       if (e.kind === "agent_messages" && e.agentKey) clearWorking(e.agentKey);
       return false;
     },
-    [roomId, channelId, subject, armWorking, clearWorking, setAgentJobs, setArtifactsBySeq],
+    [roomId, channelId, subject, armWorking, clearWorking, setAgentJobs, setJobProgress, setArtifactsBySeq],
   );
 
   // Reconnect catch-up: anything may have changed while the stream was down.
@@ -259,6 +272,7 @@ export function useRoomActivity({
 
   return {
     agentJobs,
+    jobProgress,
     artifactsBySeq,
     liveStates,
     filesSignal,
