@@ -2,6 +2,29 @@
 
 Status: accepted (product owner, 2026-10-13).
 
+Status (2026-10-13): bnbloc's side built (§2, §3's protocol, relay and
+event, §4 but the cores' own changes and the web strip). The reference is
+`docs/architecture/core-providers.md`, "A turn's length and its
+progress". Decided while building:
+- **The event**: `agent_job_progress` (transient, channel-scoped, not
+  replayed) carries `wire.AgentJobProgress {jobId, startedAtMs, activity,
+  atMs}`; the bridge posts `wire.JobProgressInput` to `POST
+  /v1/bridge/jobs/{jobId}/progress` (activity: only the bridge holding the
+  live job, the room from the stored job; at most every 2 seconds, only
+  when it changed). A job leaving the live statuses ends its progress.
+- **A deadline fails `reply_timeout`** (final, "ran out of time after
+  N"); the bridge's own deadline has a minute's grace so the core's
+  report arrives first.
+- **The credential hint** matches 401, "unauthorized", an API key, "not
+  logged in", "login required", "authentication", "credential"; a 403 is
+  not one (the key was there and refused).
+- **A forgotten workspace** was already recreated on a 404 at the session
+  create (at the same workdir for a sandboxed slot): the contract now says
+  a core answers 404 `workspace_not_found`, never `bad_request`, for a
+  sandboxed workspace whose directory it lost.
+- **Host git hardening** neutralizes hooks and fsmonitor; a filter or
+  diff driver a guest writes is not, and is documented.
+
 ## 1. Why
 
 A member asked an agent on a desktop core to build an expert from a
