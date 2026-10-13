@@ -53,6 +53,16 @@ function appDataChanged(roomId: string, artifactId: string): void {
   );
 }
 
+/** useAppStats is an app's owners' stats (one query per app, shared by its
+ *  data line and its card's menu); the route answers 403 to anyone but
+ *  its owners. A null artifactId (not an app) asks nothing. */
+export function useAppStats(roomId: string, artifactId: string | null) {
+  const { subject, tenant } = useAuth();
+  return useQuery(artifactId ? queryKey(statsName(roomId, artifactId), { subject, tenant }) : null, () => appDataApi.stats(roomId, artifactId ?? ""), {
+    staleMs: 15_000,
+  });
+}
+
 const CHIP =
   "tactile inline-flex h-7 items-center gap-1 rounded-[var(--radius)] px-2 text-xs text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-2)] hover:text-[var(--color-fg)] disabled:opacity-40";
 
@@ -69,11 +79,9 @@ export function AppDataLine({
   // The card's one-line form (actions in a menu).
   readonly compact?: boolean;
 }) {
-  const { subject, tenant, role } = useAuth();
+  const { role } = useAuth();
   const toast = useToast();
-  const stats = useQuery(queryKey(statsName(roomId, artifactId), { subject, tenant }), () => appDataApi.stats(roomId, artifactId), {
-    staleMs: 15_000,
-  });
+  const stats = useAppStats(roomId, artifactId);
   const answer = appStatsAnswer(stats);
   const [confirmClear, setConfirmClear] = useState(false);
   const [busy, setBusy] = useState(false);

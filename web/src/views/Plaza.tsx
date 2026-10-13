@@ -7,6 +7,7 @@ import {
   LockIcon,
 } from "@phosphor-icons/react";
 import { api, ApiError, type PlazaRoom } from "@/lib/api";
+import { routeHash } from "@/lib/hashRoute";
 import { isSubmitEnter } from "@/lib/keys";
 import { roomIdProblem } from "@/lib/roomId";
 import { useAuth } from "@/lib/auth";
@@ -22,6 +23,15 @@ import { useToast } from "@/ui/Toast";
 import { SharedPrompts } from "@/views/library/SharedPrompts";
 import { InstantiateTemplateDialog } from "@/views/library/TemplateDialogs";
 import { WelcomeCard } from "@/views/WelcomeCard";
+import { AppGallery } from "@/views/gallery/AppGallery";
+
+// Plaza's two sections: shared rooms, and the app gallery
+// (docs/prd/2026-10-13-app-gallery.md §7).
+type PlazaSection = "rooms" | "apps";
+const PLAZA_SECTIONS = [
+  { value: "rooms" as const, label: "Rooms" },
+  { value: "apps" as const, label: "Apps" },
+];
 
 export function Plaza({ onOpen }: { onOpen: (id: string) => void }) {
   const [q, setQ] = useState("");
@@ -31,6 +41,7 @@ export function Plaza({ onOpen }: { onOpen: (id: string) => void }) {
   const [loadingMore, setLoadingMore] = useState(false);
   const [creating, setCreating] = useState(false);
   const [fromTemplate, setFromTemplate] = useState(false);
+  const [section, setSection] = useState<PlazaSection>("rooms");
   const toast = useToast();
   const { reauth, role } = useAuth();
   // A read-only (viewer) organization role creates no rooms.
@@ -91,7 +102,7 @@ export function Plaza({ onOpen }: { onOpen: (id: string) => void }) {
     <>
       <PageHeader
         title="Plaza"
-        subtitle="Discover shared rooms or start your own"
+        subtitle={section === "apps" ? "Find apps to try and use, from your organization and the platform" : "Discover shared rooms or start your own"}
         actions={
           mayCreate ? (
             <Button variant="primary" onClick={() => setCreating(true)}>
@@ -102,60 +113,71 @@ export function Plaza({ onOpen }: { onOpen: (id: string) => void }) {
         }
       />
 
-      <div className="p-6">
+      <div className="p-4 sm:p-6">
         <WelcomeCard onOpen={onOpen} />
-        <div className="relative mb-6 max-w-lg">
-          <MagnifyingGlassIcon
-            size={16}
-            className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[var(--color-fg-subtle)]"
-          />
-          <Input
-            className="pl-9"
-            placeholder="Search rooms…"
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-          />
-        </div>
-
-        {rooms === null ? (
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
-            {Array.from({ length: 6 }).map((_, i) => (
-              <Skeleton key={i} className="h-28" />
-            ))}
-          </div>
-        ) : rooms.length === 0 ? (
-          <EmptyState
-            icon={<GlobeIcon size={24} />}
-            title="No rooms found"
-            hint={
-              q
-                ? "Try a different search, or create a room with this name."
-                : "Be the first — create a room to start collaborating."
-            }
-            action={
-              mayCreate ? (
-                <Button variant="primary" onClick={() => setCreating(true)}>
-                  <PlusIcon size={16} />
-                  New room
-                </Button>
-              ) : undefined
-            }
+        <Segment options={PLAZA_SECTIONS} value={section} onChange={setSection} className="mb-5 w-full max-w-xs" />
+        {section === "apps" ? (
+          <AppGallery
+            onOpenRoom={(roomId, artifactId) => {
+              window.location.hash = routeHash({ kind: "room", roomId, artifactId });
+            }}
           />
         ) : (
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
-            {rooms.map((r) => (
-              <RoomCard key={r.roomId} room={r} onOpen={onOpen} onJoin={join} />
-            ))}
-          </div>
+          <>
+            <div className="relative mb-6 max-w-lg">
+              <MagnifyingGlassIcon
+                size={16}
+                className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[var(--color-fg-subtle)]"
+              />
+              <Input
+                className="pl-9"
+                placeholder="Search rooms…"
+                value={q}
+                onChange={(e) => setQ(e.target.value)}
+              />
+            </div>
+
+            {rooms === null ? (
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
+                {Array.from({ length: 6 }).map((_, i) => (
+                  <Skeleton key={i} className="h-28" />
+                ))}
+              </div>
+            ) : rooms.length === 0 ? (
+              <EmptyState
+                icon={<GlobeIcon size={24} />}
+                title="No rooms found"
+                hint={
+                  q
+                    ? "Try a different search, or create a room with this name."
+                    : "Be the first — create a room to start collaborating."
+                }
+                action={
+                  mayCreate ? (
+                    <Button variant="primary" onClick={() => setCreating(true)}>
+                      <PlusIcon size={16} />
+                      New room
+                    </Button>
+                  ) : undefined
+                }
+              />
+            ) : (
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
+                {rooms.map((r) => (
+                  <RoomCard key={r.roomId} room={r} onOpen={onOpen} onJoin={join} />
+                ))}
+              </div>
+            )}
+            {rooms && rooms.length < total && (
+              <div className="mt-4 flex justify-center">
+                <Button variant="outline" onClick={() => void loadMore()} disabled={loadingMore}>
+                  {loadingMore ? "Loading…" : `Show more rooms (${total - rooms.length})`}
+                </Button>
+              </div>
+            )}
+            <SharedPrompts />
+          </>
         )}
-        {rooms && rooms.length < total && (
-          <div className="mt-4 flex justify-center">
-            <Button variant="outline" onClick={() => void loadMore()} disabled={loadingMore}>
-              {loadingMore ? "Loading…" : `Show more rooms (${total - rooms.length})`}
-            </Button>
-          </div>
-        )}
-        <SharedPrompts />
       </div>
 
       <CreateRoomDialog

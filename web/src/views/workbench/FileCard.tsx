@@ -1,13 +1,15 @@
 import { useEffect, useRef, useState } from "react";
-import { ArrowSquareOutIcon, DotsThreeIcon, ShareNetworkIcon } from "@phosphor-icons/react";
+import { ArrowSquareOutIcon, DotsThreeIcon, ShareNetworkIcon, StorefrontIcon } from "@phosphor-icons/react";
 import type { Artifact, ArtifactVersion } from "@/lib/api";
 import { deliverableTypeLabel, fileCategory, isPreviewableImage, isSite, versionFacts } from "@/lib/artifactFiles";
 import { cn } from "@/lib/cn";
 import { formatBytes, relativeTime } from "@/lib/format";
 import { Menu, MenuItem } from "@/ui/Menu";
 import { ActorLabel } from "@/views/room/ActorLabel";
-import { AppCover } from "./AppCover";
-import { AppDataLine } from "./AppDataLine";
+import { AppCover, siteCover } from "./AppCover";
+import { appStatsAnswer } from "@/lib/appData";
+import { PublishAppDialog } from "@/views/gallery/PublishAppDialog";
+import { AppDataLine, useAppStats } from "./AppDataLine";
 import { fileInfoFor, loadCardImage, useArtifactDetail, versionMeta } from "./artifactData";
 import { categoryIcons } from "./fileIcons";
 import { ShareDialog } from "./ShareDialog";
@@ -18,7 +20,8 @@ import { ShareDialog } from "./ShareDialog";
 // size and version. A card is a pointer: clicking opens the artifact in a
 // workbench tab; it never runs or renders the file itself. Its menu offers
 // Open and Share (the share dialog: who may open a link, its version and
-// lifetime). An interactive app's card (the server's isApp) adds its
+// lifetime), and for an app's owners (its stats route's answer) Publish to
+// gallery. An interactive app's card (the server's isApp) adds its
 // owners' data line (AppDataLine) below. Detail and images load only once
 // the card scrolls into view.
 
@@ -96,6 +99,9 @@ export function FileCard({
   const image = useCardImage(roomId, artifact, meta);
   const [tiny, setTiny] = useState(false);
   const [sharingOpen, setSharingOpen] = useState(false);
+  const [publishing, setPublishing] = useState(false);
+  // An app's owners publish it (the stats route answers them only).
+  const owner = appStatsAnswer(useAppStats(roomId, artifact?.isApp ? artifactId : null)).kind === "stats";
   if (error) return null; // deleted or inaccessible: no card
   const facts = artifact ? versionFacts(artifact, meta) : null;
   const file = artifact ? fileInfoFor(artifact, artifact.currentVersion, meta) : null;
@@ -129,7 +135,7 @@ export function FileCard({
                 )}
               />
             ) : artifact?.isApp && file ? (
-              <AppCover roomId={roomId} appId={artifactId} version={artifact.currentVersion} name={file.name} enabled={visible} />
+              <AppCover seed={artifactId} name={file.name} cover={siteCover(roomId, artifactId, artifact.currentVersion)} enabled={visible} />
             ) : (
               <Icon size={26} className="text-[var(--color-fg-subtle)]" aria-hidden />
             )}
@@ -153,7 +159,7 @@ export function FileCard({
             <Menu
               label={`${file.name} actions`}
               className="absolute left-1.5 top-1.5"
-              menuClassName="absolute left-0 top-full mt-1 w-40"
+              menuClassName="absolute left-0 top-full mt-1 w-48"
               trigger={(props, open) => (
                 <button
                   {...props}
@@ -174,7 +180,13 @@ export function FileCard({
               <MenuItem icon={ShareNetworkIcon} onSelect={() => setSharingOpen(true)}>
                 Share…
               </MenuItem>
+              {app && owner && (
+                <MenuItem icon={StorefrontIcon} onSelect={() => setPublishing(true)}>
+                  Publish to gallery…
+                </MenuItem>
+              )}
             </Menu>
+            <PublishAppDialog site={publishing ? { roomId, artifactId, title: file.name } : null} onClose={() => setPublishing(false)} />
             <ShareDialog
               open={sharingOpen}
               onClose={() => setSharingOpen(false)}

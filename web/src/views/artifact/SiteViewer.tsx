@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { apiUrl } from "@/lib/config";
 import { openExternal } from "@/lib/desktop";
 import {
   SITE_SANDBOX,
@@ -7,10 +6,9 @@ import {
   siteFrameUrl,
   siteGatewayUrl,
   siteTicketRefreshDelay,
-  type ConvertFileSrc,
-  type SiteFrameEnv,
 } from "@/lib/siteFrame";
 import { DeviceFrame } from "./DeviceFrame";
+import { siteFrameEnv } from "./siteFrameEnv";
 import type { ArtifactViewerProps } from "./registry";
 import { useViewerToolbar } from "./toolbar";
 import { errorText } from "@/lib/errors";
@@ -32,11 +30,6 @@ import { errorText } from "@/lib/errors";
 const MIN_REFRESH_MS = 30_000;
 
 type SiteUrl = { readonly siteUrl: string; readonly expiresAtMs?: number };
-
-function frameEnv(): SiteFrameEnv {
-  const internals = window.__TAURI_INTERNALS__ as { convertFileSrc?: ConvertFileSrc } | undefined;
-  return { convertFileSrc: internals?.convertFileSrc, apiUrl, baseURI: document.baseURI };
-}
 
 export default function SiteViewer({ site, file, toolbar }: ArtifactViewerProps) {
   const [width, setWidth] = useState("fill");
@@ -64,7 +57,7 @@ export default function SiteViewer({ site, file, toolbar }: ArtifactViewerProps)
     try {
       const url = await usable();
       setError("");
-      setFrame((f) => ({ src: siteFrameUrl(url.siteUrl, frameEnv()), nonce: (f?.nonce ?? 0) + 1 }));
+      setFrame((f) => ({ src: siteFrameUrl(url.siteUrl, siteFrameEnv()), nonce: (f?.nonce ?? 0) + 1 }));
     } catch (e) {
       setError(errorText(e, "Could not open this web app."));
     }
@@ -84,7 +77,7 @@ export default function SiteViewer({ site, file, toolbar }: ArtifactViewerProps)
 
   const openInNewTab = useCallback(async () => {
     try {
-      await openExternal(siteGatewayUrl((await usable()).siteUrl, frameEnv()));
+      await openExternal(siteGatewayUrl((await usable()).siteUrl, siteFrameEnv()));
     } catch {
       setError("Could not open this web app in a new tab.");
     }

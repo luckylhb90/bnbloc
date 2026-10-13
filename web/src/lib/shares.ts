@@ -6,7 +6,7 @@
 // (docs/prd/2026-10-13-share-link-sign-in.md).
 
 export type { ShareAccess, ShareTicket, ShareView } from "./wire.gen.ts";
-import type { ShareAccess, ShareCreateRequest, ShareView } from "./wire.gen.ts";
+import type { PublishApproval, ShareAccess, ShareCreateRequest, ShareView } from "./wire.gen.ts";
 
 /** A share as the org-admin list returns it (every room of the tenant). */
 export interface TenantShareView extends ShareView {
@@ -51,6 +51,8 @@ export interface TenantPolicy {
   readonly requireSandboxForBorrow: boolean;
   /** Links anyone can open (no sign-in) are off; org links stay allowed. */
   readonly anonymousLinksDisabled: boolean;
+  /** Whether a publish to the organization waits for an admin. */
+  readonly publishApproval: PublishApproval;
 }
 
 /** What a link shares: a file, a site, or an interactive app. */

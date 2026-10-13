@@ -5,7 +5,7 @@
 import { contentLabel, isBuiltin, type ContentComponent, type ContentPublishRequest } from "./contentComponents.ts";
 
 export type { ContentAdminComponent, ContentCopy, ContentFileChange, ContentPublishReply, ContentReview, ContentRoomShare, ContentShareReply, ContentShares } from "./wire.gen.ts";
-import type { ContentFileChange, ContentShareReply } from "./wire.gen.ts";
+import type { ContentFileChange, ContentPublishReply, ContentShareReply, PublishApproval } from "./wire.gen.ts";
 
 // tenantScopeLabel describes where platform content reaches.
 export function tenantScopeLabel(tenants: readonly string[] | undefined): string {
@@ -75,6 +75,31 @@ export function resubmittedMessage(
   if (!r) return null;
   const keep = r.approvedVersion ? `; members keep using ${r.approvedVersion} until then` : "";
   return `Version ${r.version} was sent to your organization's admins for approval${keep}.`;
+}
+
+// orgPublishCopy is what publishing to the organization does under its
+// publishApproval setting (the member-readable tenant policy; unknown
+// reads as the default, "required"): the dialog's description and its
+// button.
+export function orgPublishCopy(approval: PublishApproval | undefined, version: string): { readonly description: string; readonly action: string } {
+  if (approval === "none") {
+    return {
+      description: `Version ${version} is published to your organization at once: everyone in it finds it. It is recorded in the audit log, and admins can unpublish it.`,
+      action: "Publish",
+    };
+  }
+  return {
+    description: `An organization admin reviews version ${version} (its permissions and what changed) and approves or declines it. Once approved, everyone in your organization finds it; your later versions need approval again.`,
+    action: "Ask to publish",
+  };
+}
+
+// orgPublishToast is the toast after a publish to the organization. The
+// reply is contentshare.NeedsApproval's answer under the organization's
+// publishApproval: a request when an admin approves first, none when it
+// went live at once.
+export function orgPublishToast(reply: Pick<ContentPublishReply, "request">): string {
+  return reply.request ? "Sent for approval" : "Published to your organization";
 }
 
 export type PublicationTone = "accent" | "warning" | "muted";

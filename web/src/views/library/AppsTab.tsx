@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { AppWindowIcon, ArrowSquareOutIcon, DatabaseIcon, DotsThreeIcon, DownloadSimpleIcon, LinkIcon, ShareNetworkIcon, SignInIcon } from "@phosphor-icons/react";
+import { AppWindowIcon, ArrowSquareOutIcon, StorefrontIcon, DatabaseIcon, DotsThreeIcon, DownloadSimpleIcon, LinkIcon, ShareNetworkIcon, SignInIcon } from "@phosphor-icons/react";
 import { appDataApi } from "@/lib/appDataApi";
 import { appExportFileName, documentsLabel } from "@/lib/appData";
 import { cn } from "@/lib/cn";
@@ -18,9 +18,10 @@ import { EmptyState, PageHeader } from "@/ui/Page";
 import { LoadFailed } from "@/ui/QueryState";
 import { useToast } from "@/ui/Toast";
 import { AgentHandle, UserName } from "@/views/UserName";
-import { AppCover } from "@/views/workbench/AppCover";
+import { AppCover, siteCover } from "@/views/workbench/AppCover";
 import { useInView } from "@/views/workbench/FileCard";
 import { ShareDialog } from "@/views/workbench/ShareDialog";
+import { PublishAppDialog } from "@/views/gallery/PublishAppDialog";
 
 // AppsTab is the Library's "My apps" (docs/prd/2026-10-13-app-gallery.md
 // §5): the interactive apps of every room of the organization where the
@@ -28,7 +29,8 @@ import { ShareDialog } from "@/views/workbench/ShareDialog";
 // newest first. Each card: the cover (the site's own, else the generated
 // one), the name, and its room, producer, link status and document count;
 // open (the app in its room), share or manage links (the share dialog),
-// export the data (the server's audited export) and go to the room.
+// export the data (the server's audited export), publish it to the app
+// gallery (PublishAppDialog) and go to the room.
 
 const PAGE = 24;
 
@@ -121,6 +123,7 @@ function AppCard({ app, onOpenRoom, onLinksChanged }: { readonly app: MyApp; rea
   const [ref, visible] = useInView<HTMLButtonElement>();
   const [sharing, setSharing] = useState(false);
   const [exporting, setExporting] = useState(false);
+  const [publishing, setPublishing] = useState(false);
   const badge = appLinkBadge(app.links ?? [], org, Date.now());
   const open = () => {
     window.location.hash = routeHash({ kind: "room", roomId: app.roomId, artifactId: app.appId });
@@ -146,7 +149,7 @@ function AppCard({ app, onOpenRoom, onLinksChanged }: { readonly app: MyApp; rea
         className="tactile flex min-w-0 flex-1 flex-col text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--color-accent)]/60"
       >
         <span className="relative block aspect-[16/10] w-full overflow-hidden border-b border-[var(--color-border)] bg-[var(--color-surface-2)]">
-          <AppCover roomId={app.roomId} appId={app.appId} version={app.version} name={app.name} enabled={visible} />
+          <AppCover seed={app.appId} name={app.name} cover={siteCover(app.roomId, app.appId, app.version)} enabled={visible} />
         </span>
         <span className="flex min-w-0 flex-col gap-1 px-3 pb-3 pt-2.5">
           <span className="truncate font-medium text-[var(--color-fg)]" title={app.name}>
@@ -202,10 +205,14 @@ function AppCard({ app, onOpenRoom, onLinksChanged }: { readonly app: MyApp; rea
             {exporting ? "Exporting…" : "Export data (JSON)"}
           </MenuItem>
         )}
+        <MenuItem icon={StorefrontIcon} onSelect={() => setPublishing(true)}>
+          Publish to gallery…
+        </MenuItem>
         <MenuItem icon={SignInIcon} onSelect={() => onOpenRoom(app.roomId)}>
           Go to room
         </MenuItem>
       </Menu>
+      <PublishAppDialog site={publishing ? { roomId: app.roomId, artifactId: app.appId, title: app.name } : null} onClose={() => setPublishing(false)} />
       <ShareDialog
         open={sharing}
         onClose={() => {

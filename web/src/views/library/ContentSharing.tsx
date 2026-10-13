@@ -7,6 +7,8 @@ import {
   canShare,
   hasPendingRequest,
   isPublishedVersion,
+  orgPublishCopy,
+  orgPublishToast,
   parseMembers,
   publicationStatus,
   shareSummary,
@@ -16,6 +18,7 @@ import {
 } from "@/lib/contentSharing";
 import { contentSharingApi } from "@/lib/contentSharingApi";
 import { relativeTime } from "@/lib/format";
+import { useTenantPolicy } from "@/lib/tenantPolicy";
 import { Button } from "@/ui/Button";
 import { Badge } from "@/ui/Card";
 import { Dialog } from "@/ui/Dialog";
@@ -307,8 +310,10 @@ export function PublishDialog({
   const toast = useToast();
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
+  const approval = useTenantPolicy()?.publishApproval;
   useEffect(() => setNote(""), [c]);
   if (!c) return null;
+  const copy = orgPublishCopy(approval, c.latestVersion);
   const status = publicationStatus(c);
   const published = isPublishedVersion(c);
   const canWithdraw = hasPendingRequest(c) || c.publication?.orgStatus === "active";
@@ -316,7 +321,7 @@ export function PublishDialog({
     setBusy(true);
     try {
       const reply = await contentSharingApi.publish(c.id, scope, scope === "org" ? note.trim() : undefined);
-      toast.success(scope === "org" && reply.request ? `Sent to your organization's admins. ${reply.note}` : reply.note);
+      toast.success(scope === "org" ? orgPublishToast(reply) : reply.note);
       onChanged();
       onClose();
     } catch (e) {
@@ -330,7 +335,7 @@ export function PublishDialog({
       open
       onClose={onClose}
       title={`Publish ${contentLabel(c)} to your organization`}
-      description={`An organization admin reviews version ${c.latestVersion} (its permissions and what changed) and approves or declines it. Once approved, everyone in your organization finds it in their Library; your later versions need approval again.`}
+      description={copy.description}
       footer={
         <>
           {canWithdraw && (
@@ -344,7 +349,7 @@ export function PublishDialog({
           </Button>
           <Button variant="primary" onClick={() => void act("org")} disabled={busy || published}>
             <BuildingsIcon size={15} />
-            {published ? "Already published" : busy ? "Sending…" : "Ask to publish"}
+            {published ? "Already published" : busy ? "Sending…" : copy.action}
           </Button>
         </>
       }
@@ -356,7 +361,7 @@ export function PublishDialog({
             It declares permissions ({c.permissions.join(", ")}): admins see them, and other members' runs of it are sandboxed.
           </p>
         )}
-        <Field label="Note for the admins (optional)" hint="What it is for, and why your organization needs it.">
+        <Field label={approval === "none" ? "Note (optional)" : "Note for the admins (optional)"} hint="What it is for, and why your organization needs it.">
           <Textarea value={note} onChange={(e) => setNote(e.target.value)} rows={3} maxLength={500} disabled={published} />
         </Field>
       </div>

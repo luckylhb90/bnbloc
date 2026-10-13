@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { api, type Artifact, type ArtifactVersion } from "@/lib/api";
 import { inferMime, versionFacts } from "@/lib/artifactFiles";
+import { appGalleryApi } from "@/lib/appGalleryApi";
 import { myAppsApi } from "@/lib/myAppsApi";
 import { fileInfoFromFacts } from "@/views/artifact/fileInfo";
 import type { ArtifactFileInfo } from "@/views/artifact/registry";
@@ -198,6 +199,12 @@ export function loadCardImage(
  *  no cover it serves (the card then draws lib/appCover's). */
 export function loadAppCover(roomId: string, artifactId: string, version: number): Promise<string> {
   return cachedCardImage(`${roomId}\u0000${artifactId}\u0000${version}\u0000cover`, () => myAppsApi.cover(roomId, artifactId, version));
+}
+
+/** Object URL of an app component version's cover (the gallery's cards;
+ *  coverUrl names the component and the version), in the same cache. */
+export function loadComponentCover(coverUrl: string): Promise<string> {
+  return cachedCardImage(`component\u0000${coverUrl}`, () => appGalleryApi.cover(coverUrl));
 }
 
 function cachedCardImage(key: string, load: () => Promise<Blob>): Promise<string> {

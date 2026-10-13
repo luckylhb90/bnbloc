@@ -5,6 +5,16 @@
 // between renders, sessions or devices; the initial comes from the app's
 // name. Pure (no React, no DOM); unit-tested under node.
 
+import { ApiError } from "./errors.ts";
+
+/** coverRefused: a cover request failed because the gateway serves no
+ *  cover for this version (404 none, 413 over the cap, 415 not an image):
+ *  the card draws the generated cover and never asks again. Any other
+ *  failure (offline, a server error) draws it too, but asks again later. */
+export function coverRefused(e: unknown): boolean {
+  return e instanceof ApiError && (e.status === 404 || e.status === 413 || e.status === 415);
+}
+
 export interface AppCover {
   /** The CSS background: a two-stop linear gradient. */
   readonly background: string;
