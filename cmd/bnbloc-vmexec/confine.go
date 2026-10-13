@@ -11,6 +11,7 @@ import (
 	"regexp"
 	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 
 	coreprotocol "github.com/luckylhb90/bnbloc/core/protocol"
@@ -794,7 +795,7 @@ func confine(args []string, stdout, stderr io.Writer) int {
 			fmt.Fprintf(stderr, "bnbloc-vmexec confine: %s is unavailable; refusing to run %s unconfined\n", sandboxExec, argv[0])
 			return exitRefused
 		}
-		if err := execHost(append([]string{sandboxExec, "-p", profile, cli}, argv[1:]...), os.Environ()); err != nil {
+		if err := execHost(append([]string{sandboxExec, "-p", profile, cli}, argv[1:]...), confinedEnv(os.Environ())); err != nil {
 			fmt.Fprintf(stderr, "bnbloc-vmexec confine: %v\n", err)
 			return exitFailure
 		}
@@ -814,7 +815,7 @@ func confine(args []string, stdout, stderr io.Writer) int {
 			fmt.Fprintln(stdout, strings.Join(cmd, " "))
 			return 0
 		}
-		if err := execHost(cmd, os.Environ()); err != nil {
+		if err := execHost(cmd, confinedEnv(os.Environ())); err != nil {
 			fmt.Fprintf(stderr, "bnbloc-vmexec confine: %v\n", err)
 			return exitFailure
 		}
@@ -823,6 +824,48 @@ func confine(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "bnbloc-vmexec confine: no host sandbox on %s; refusing to run %s unconfined\n", runtime.GOOS, argv[0])
 		return exitRefused
 	}
+}
+
+// gitOverrides are the git settings every confined CLI (and each git it
+// runs) gets above the repository's own config: the workspace is shared
+// with the guest, which can write .git/config and .git/hooks, and a hook
+// or an fsmonitor command it wrote must never run on the host when the
+// agent's CLI calls git there (docs/prd/2026-10-13-live-turns.md §4).
+var gitOverrides = [][2]string{
+	{"core.fsmonitor", "false"},
+	{"core.hooksPath", "/dev/null"},
+}
+
+// confinedEnv is environ with gitOverrides appended through GIT_CONFIG_COUNT
+// (git's command-line scope, above every config file), after any entries
+// already there; an unreadable count drops those entries.
+func confinedEnv(environ []string) []string {
+	out := make([]string, 0, len(environ)+2*len(gitOverrides)+1)
+	n := 0
+	for _, kv := range environ {
+		if v, ok := strings.CutPrefix(kv, "GIT_CONFIG_COUNT="); ok {
+			if c, err := strconv.Atoi(strings.TrimSpace(v)); err == nil && c > 0 {
+				n = c
+			}
+			continue
+		}
+		out = append(out, kv)
+	}
+	if n == 0 {
+		// No (readable) count: entries numbered without one are not git's.
+		kept := out[:0]
+		for _, kv := range out {
+			if !strings.HasPrefix(kv, "GIT_CONFIG_KEY_") && !strings.HasPrefix(kv, "GIT_CONFIG_VALUE_") {
+				kept = append(kept, kv)
+			}
+		}
+		out = kept
+	}
+	for _, o := range gitOverrides {
+		out = append(out, fmt.Sprintf("GIT_CONFIG_KEY_%d=%s", n, o[0]), fmt.Sprintf("GIT_CONFIG_VALUE_%d=%s", n, o[1]))
+		n++
+	}
+	return append(out, fmt.Sprintf("GIT_CONFIG_COUNT=%d", n))
 }
 
 // parseConfine reads the flags (repeatable path flags) and the host

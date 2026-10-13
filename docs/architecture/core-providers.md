@@ -94,6 +94,13 @@ in `/` names a directory), and routes
 the CLI's shell commands into the space through `bnbloc-vmexec` (`run`,
 `claude-prefix` for `CLAUDE_CODE_SHELL_PREFIX`, `hook <harness>` for
 command-rewriting hooks); file tools, MCP servers and hooks stay on the host.
+`confine` also hands the CLI (and every git it runs) `core.fsmonitor=false`
+and `core.hooksPath=/dev/null` through `GIT_CONFIG_COUNT`, above the
+repository's own config: the guest shares the workspace and can write
+`.git/config` and `.git/hooks`, and nothing it wrote there runs on the host
+when the agent's CLI calls git. Other config a guest can write that names a
+command (a filter or diff driver) is not neutralized: a member's own git in
+a sandboxed workspace reads it as in any repository they did not write.
 `protocol.VMExecEnv` turns the descriptor into the helper's environment
 (`BNBLOC_VMEXEC_*`, `BNBLOC_CONFINE_*`). `env` lists the environment
 variable names (or `PREFIX*` patterns) vmexec forwards from the CLI's own
@@ -168,9 +175,12 @@ stale session rebound, a core or bridge restart. The contract is additive
   instructions file rewritten, the skills directory holding exactly the
   profile's skills (a skill an earlier session wore and this one does not
   is removed, so a session never wears a role it was not given);
-- answers `404 workspace_not_found` for a workspace it no longer holds; the
-  bridge then creates a new one (`core.NotFound`), and the agent recovers
-  the room's deliverables from `.room/deliverables/`.
+- answers `404 workspace_not_found` for a workspace it no longer holds —
+  including a sandboxed session's workspace whose directory it cannot place
+  any more (it lost its record of the workdir), never a `bad_request`; the
+  bridge then creates a new one (`core.NotFound`; a sandboxed one at the
+  same workdir, so the agent's files stay), and the agent recovers the
+  room's deliverables from `.room/deliverables/`.
 
 A daemon whose discovery cannot be read when a drive asks what it offers
 (`core.CapabilitiesKnown`) is retried (`core_unavailable`), never driven
@@ -185,6 +195,26 @@ bridge hands it to session contributors (`SessionInfo.MCPTransports`), so a
 contributor attaches a server the agent can reach instead of the core
 dropping it. A manifest declares it as `listTargets.targets.mcpTransports`
 (a list element's own `mcpTransports` wins).
+
+**A turn's length and its progress**
+([`docs/prd/2026-10-13-live-turns.md`](../prd/2026-10-13-live-turns.md)).
+The caller owns how long a turn may run: session create and input carry
+`deadlineMs` (Unix ms; `core.SessionOptions.DeadlineMs`), the bridge's
+bound (`BNBLOC_BRIDGE_MAX_TURN`, default 2 hours) from the turn's start. A
+core fails a turn still running then — `failed`, `failCode: "deadline"` —
+and never ends one earlier for time reasons; ending a turn (deadline,
+interrupt) stops everything it started (the process group). The bridge
+reports a deadline as the agent having run out of time. With capability
+`turnActivity`, `PollTurn` reports a running turn's `startedAtMs` and
+`activity`: its latest steps, oldest first (at most
+`protocol.MaxTurnActivity`), each `{kind, title, atMs}` with kind `tool`
+(`Bash: python extract.py`, `Read: template.pptx`), `thinking` or `text`;
+titles at most `protocol.MaxTurnActivityTitle` characters, never file
+contents or secrets. The bridge relays them to the room as the job's
+transient progress (`agent_job_progress`), never as messages. A core also
+completes each assistant text block as its own message once the agent
+moves on (a tool call, a new block), so narration reaches the room while
+the turn runs.
 
 **Workspace file size** (`protocol.MinWriteFileBytes`). The bridge hands
 each attachment of a message to the agent's workspace with one `writeFile`

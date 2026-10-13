@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 
@@ -325,5 +326,22 @@ func TestConfineDeniesBnblocCredentialPaths(t *testing.T) {
 				}
 			}
 		}
+	}
+}
+
+// A confined CLI's git never runs a hook or an fsmonitor command the guest
+// wrote into the shared workspace's .git: the overrides ride
+// GIT_CONFIG_COUNT after the entries already there.
+func TestConfinedEnvOverridesGitHooksAndFsmonitor(t *testing.T) {
+	got := confinedEnv([]string{"PATH=/bin", "GIT_CONFIG_COUNT=1", "GIT_CONFIG_KEY_0=user.name", "GIT_CONFIG_VALUE_0=maya"})
+	want := []string{"PATH=/bin", "GIT_CONFIG_KEY_0=user.name", "GIT_CONFIG_VALUE_0=maya",
+		"GIT_CONFIG_KEY_1=core.fsmonitor", "GIT_CONFIG_VALUE_1=false", "GIT_CONFIG_KEY_2=core.hooksPath", "GIT_CONFIG_VALUE_2=/dev/null", "GIT_CONFIG_COUNT=3"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("confinedEnv = %q\nwant %q", got, want)
+	}
+	got = confinedEnv([]string{"GIT_CONFIG_COUNT=junk", "GIT_CONFIG_KEY_0=core.fsmonitor", "GIT_CONFIG_VALUE_0=/tmp/evil"})
+	want = []string{"GIT_CONFIG_KEY_0=core.fsmonitor", "GIT_CONFIG_VALUE_0=false", "GIT_CONFIG_KEY_1=core.hooksPath", "GIT_CONFIG_VALUE_1=/dev/null", "GIT_CONFIG_COUNT=2"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("confinedEnv(unreadable count) = %q\nwant %q", got, want)
 	}
 }
