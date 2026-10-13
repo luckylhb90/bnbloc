@@ -212,6 +212,7 @@ func (s *Service) routes() []route {
 		member("PUT /v1/content-components/{id}/favorite", s.handleFavorite).spends(costBudget).with(needContent),
 		member("DELETE /v1/content-components/{id}/favorite", s.handleFavorite).spends(costBudget).with(needContent),
 		gated("POST /v1/content-components/{id}/use-app", create, s.handleUseApp).spends(costBudget).with(needContent),
+		gated("POST /v1/content-components/{id}/make-similar", create, s.handleMakeSimilar).spends(costBudget).with(needContent),
 		gated("POST /v1/rooms/{roomId}/artifacts/{artifactId}/publish-work", drive, s.handlePublishWork).spends(costBudget).with(needContent),
 		member("GET /v1/rooms/{roomId}/artifacts/{artifactId}/recipe", s.handleDeliverableRecipe).with(needContent),
 

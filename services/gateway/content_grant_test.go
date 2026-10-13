@@ -50,6 +50,7 @@ var contentRouteGrants = map[string]jobGrant{
 	"PUT /v1/content-components/{id}/favorite":                 grantRefused,
 	"DELETE /v1/content-components/{id}/favorite":              grantRefused,
 	"POST /v1/content-components/{id}/use-app":                 grantRefused,
+	"POST /v1/content-components/{id}/make-similar":            grantRefused,
 }
 
 // Every content route either acts as the job's requester under a

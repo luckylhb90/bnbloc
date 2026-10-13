@@ -28,15 +28,16 @@ func (e *appGW) attachment(room, name, contentType, data string) string {
 	return id
 }
 
-// content stores a component of maya's (kind, name) at 1.0.0 with a
-// manifest of its fields.
-func (e *appGW) content(kind, name string, manifest map[string]any) string {
+// content stores a component of maya's (kind, name) at 1.0.0 in scope
+// (personal: hers alone; org: her organization's) with a manifest of its
+// fields.
+func (e *appGW) content(scope store.ContentScope, kind, name string, manifest map[string]any) string {
 	e.t.Helper()
 	id := ids.New("cc_")
 	manifest["kind"], manifest["name"], manifest["version"] = kind, name, "1.0.0"
 	raw, _ := json.Marshal(manifest)
 	if err := e.b.ContentComponents.CreateContentComponent(e.ctx(),
-		store.ContentComponent{ID: id, Kind: kind, Name: name, TenantID: e.tenant, Owner: "maya", Scope: store.ContentScopePersonal, Status: store.ContentStatusActive,
+		store.ContentComponent{ID: id, Kind: kind, Name: name, TenantID: e.tenant, Owner: "maya", Scope: scope, Status: store.ContentStatusActive,
 			DisplayName: strings.ToUpper(name[:1]) + name[1:], CreatedAtMs: 1, UpdatedAtMs: 1},
 		store.ContentComponentVersion{Version: "1.0.0", ManifestJSON: raw, BundleBlobKey: "sha256/" + strings.Repeat("0", 64), SHA256: strings.Repeat("0", 64), SizeBytes: 1, CreatedBy: "maya", CreatedAtMs: 1}); err != nil {
 		e.t.Fatal(err)
@@ -45,15 +46,17 @@ func (e *appGW) content(kind, name string, manifest map[string]any) string {
 }
 
 // recipeRoom is a room where maya's request (job-r, by jack's codex on
-// core acme, wearing her expert) drew a chart from two attachments, with
-// a skill pack and a prompt pack on in the room: the chart deliverable and
+// core acme, wearing her organization's expert) drew a chart from two
+// attachments, with two skill packs (hers, charts, and her organization's,
+// palettes) and her prompt pack on in the room: the chart deliverable and
 // the attachments' ids.
 func (e *appGW) recipeRoom() (chart, brief, data string) {
 	e.t.Helper()
-	expert := e.content("bnbloc.expert.package/v1", "chart-maker", map[string]any{})
-	skill := e.content("bnbloc.skill.package/v1", "charts", map[string]any{"skills": []string{"charts"}})
-	pack := e.content("bnbloc.prompt.package/v1", "chart-prompts", map[string]any{"prompts": []any{map[string]any{"id": "q3", "title": "Q3", "body": "Q3"}}})
-	for _, id := range []string{skill, pack} {
+	expert := e.content(store.ContentScopeOrg, "bnbloc.expert.package/v1", "chart-maker", map[string]any{})
+	skill := e.content(store.ContentScopePersonal, "bnbloc.skill.package/v1", "charts", map[string]any{"skills": []string{"charts"}})
+	orgSkill := e.content(store.ContentScopeOrg, "bnbloc.skill.package/v1", "palettes", map[string]any{"skills": []string{"palettes"}})
+	pack := e.content(store.ContentScopePersonal, "bnbloc.prompt.package/v1", "chart-prompts", map[string]any{"prompts": []any{map[string]any{"id": "q3", "title": "Q3", "body": "Q3"}}})
+	for _, id := range []string{skill, orgSkill, pack} {
 		c, _ := e.b.ContentComponents.GetContentComponent(e.ctx(), id)
 		if err := e.b.ContentComponents.PutContentUse(e.ctx(), store.ContentUse{TenantID: e.tenant, ScopeKind: store.ContentUseRoom, ScopeID: e.roomID, ComponentID: id, Kind: c.Kind, CreatedBy: "maya", CreatedAtMs: 1}); err != nil {
 			e.t.Fatal(err)
@@ -106,7 +109,7 @@ func TestRecipeCapturedFromTheProducingJob(t *testing.T) {
 		r.Agent == nil || r.Agent.Core != "acme" || r.Agent.Provider != "codex" {
 		t.Fatalf("recipe = %+v", r)
 	}
-	if len(r.Skills) != 1 || r.Skills[0].Name != "charts" || len(r.Prompts) != 1 || r.Prompts[0].Name != "chart-prompts" {
+	if len(r.Skills) != 2 || r.Skills[0].Name != "charts" || r.Skills[1].Name != "palettes" || len(r.Prompts) != 1 || r.Prompts[0].Name != "chart-prompts" {
 		t.Fatalf("recipe packs = %+v %+v", r.Skills, r.Prompts)
 	}
 	if len(r.References) != 2 || r.References[0].AttachmentID != brief || r.References[0].Name != "brief.md" || r.References[0].ContentType != "text/markdown" ||

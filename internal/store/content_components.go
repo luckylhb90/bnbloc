@@ -128,6 +128,11 @@ const (
 	// (docs/prd/2026-10-13-app-gallery.md §8; scope id = the copy's site
 	// artifact). Never in effect for a turn: it counts the app's uses.
 	ContentUseAppCopy ContentUseScope = "app-copy"
+	// ContentUseMakeSimilar: a work's recipe started in a room by "Make
+	// similar" (docs/prd/2026-10-13-works-gallery-and-make-similar.md §4;
+	// scope id = the room). Never in effect for a turn: it counts the
+	// work's uses.
+	ContentUseMakeSimilar ContentUseScope = "make-similar"
 )
 
 // ContentUse enables or pins a component in a scope, at a pinned version

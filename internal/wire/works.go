@@ -3,8 +3,9 @@ package wire
 // The works gallery (docs/prd/2026-10-13-app-gallery.md,
 // docs/prd/2026-10-13-works-gallery-and-make-similar.md): any deliverable
 // published as a content component of kind "work" (a snapshot of one
-// deliverable version, never its data), favorites and "Use this app" (an
-// app's copy as a new site).
+// deliverable version, never its data), with the recipe that made it,
+// favorites, "Use this app" (an app's copy as a new site) and "Make
+// similar" (a draft of the recipe in a room of the caller's).
 
 // A work's category (component.json "category"), the gallery's tabs. A
 // work names one of these or none; any other value is refused
@@ -168,7 +169,7 @@ type AppUseRequest struct {
 	NewRoom *WorkNewRoom `json:"newRoom,omitempty"`
 }
 
-// WorkNewRoom names the room "Use this app" creates
+// WorkNewRoom names the room "Use this app" or "Make similar" creates
 // (default: the work's display name).
 type WorkNewRoom struct {
 	Name string `json:"name,omitempty"`
@@ -193,4 +194,32 @@ type AppUseReply struct {
 	CreatedRoom bool   `json:"createdRoom,omitempty"`
 	// From attributes the copy: "<name>@<version>".
 	From string `json:"from"`
+}
+
+// MakeSimilarRequest is POST /v1/content-components/{id}/make-similar:
+// start from a work's recipe (Version, default its latest) in a room the
+// caller may post in (RoomID) or in a new room (NewRoom).
+type MakeSimilarRequest struct {
+	Version string       `json:"version,omitempty"`
+	RoomID  string       `json:"roomId,omitempty"`
+	NewRoom *WorkNewRoom `json:"newRoom,omitempty"`
+}
+
+// MakeSimilarDraft answers "Make similar": the composer draft the room
+// opens with. Text is the recipe's prompt, Expert the recipe's expert when
+// the caller may use it, AttachmentIDs the recipe's reference files (the
+// work itself when the recipe is empty) copied into the room as the
+// caller's attachments (Attachments their metadata, for the composer's
+// chips). Enabled names the skill packs and prompt packs turned on in the
+// room, Skipped what was left out (not visible to the caller, not theirs
+// to turn on in that room, or not attachable).
+type MakeSimilarDraft struct {
+	RoomID        string           `json:"roomId"`
+	CreatedRoom   bool             `json:"createdRoom,omitempty"`
+	Text          string           `json:"text"`
+	Expert        *WorkRecipePart  `json:"expert,omitempty"`
+	AttachmentIDs []string         `json:"attachmentIds"`
+	Attachments   []ChatAttachment `json:"attachments"`
+	Enabled       []string         `json:"enabled,omitempty"`
+	Skipped       []string         `json:"skipped,omitempty"`
 }

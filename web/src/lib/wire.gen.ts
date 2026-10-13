@@ -3981,7 +3981,7 @@ export interface AppUseRequest {
   newRoom?: WorkNewRoom;
 }
 
-// WorkNewRoom names the room "Use this app" creates
+// WorkNewRoom names the room "Use this app" or "Make similar" creates
 // (default: the work's display name).
 export interface WorkNewRoom {
   name?: string;
@@ -4006,6 +4006,34 @@ export interface AppUseReply {
   createdRoom?: boolean;
   // From attributes the copy: "<name>@<version>".
   from: string;
+}
+
+// MakeSimilarRequest is POST /v1/content-components/{id}/make-similar:
+// start from a work's recipe (Version, default its latest) in a room the
+// caller may post in (RoomID) or in a new room (NewRoom).
+export interface MakeSimilarRequest {
+  version?: string;
+  roomId?: string;
+  newRoom?: WorkNewRoom;
+}
+
+// MakeSimilarDraft answers "Make similar": the composer draft the room
+// opens with. Text is the recipe's prompt, Expert the recipe's expert when
+// the caller may use it, AttachmentIDs the recipe's reference files (the
+// work itself when the recipe is empty) copied into the room as the
+// caller's attachments (Attachments their metadata, for the composer's
+// chips). Enabled names the skill packs and prompt packs turned on in the
+// room, Skipped what was left out (not visible to the caller, not theirs
+// to turn on in that room, or not attachable).
+export interface MakeSimilarDraft {
+  roomId: string;
+  createdRoom?: boolean;
+  text: string;
+  expert?: WorkRecipePart;
+  attachmentIds: string[];
+  attachments: ChatAttachment[];
+  enabled?: string[];
+  skipped?: string[];
 }
 
 // ---- wire unions (//wire:union) ----

@@ -1012,14 +1012,25 @@ func (s *Service) handlePutContentUse(w http.ResponseWriter, r *http.Request, ca
 			return
 		}
 	}
-	u := store.ContentUse{TenantID: claims.Tenant, ScopeKind: scope, ScopeID: scopeID, ComponentID: c.ID, Kind: c.Kind,
-		PinnedVersion: strings.TrimSpace(req.Version), CreatedBy: claims.Subject, CreatedAtMs: s.nowTime().UnixMilli()}
-	if err := s.ContentComponents.PutContentUse(ctx, u); err != nil {
+	if err := s.putContentUse(ctx, claims, scope, scopeID, c, strings.TrimSpace(req.Version)); err != nil {
 		contentStoreErr(w, "save content use failed", err)
 		return
 	}
-	s.contentUsesChanged(ctx, claims, scope, scopeID, c.ID)
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// putContentUse turns c on (or pins it) in a use scope the caller was
+// admitted to (contentUseScope: claims are the scope's) and announces the
+// change: the one writer of a member's or a room's content uses (the
+// Library's route and "Make similar" alike).
+func (s *Service) putContentUse(ctx context.Context, claims auth.Claims, scope store.ContentUseScope, scopeID string, c store.ContentComponent, version string) error {
+	u := store.ContentUse{TenantID: claims.Tenant, ScopeKind: scope, ScopeID: scopeID, ComponentID: c.ID, Kind: c.Kind,
+		PinnedVersion: version, CreatedBy: claims.Subject, CreatedAtMs: s.nowTime().UnixMilli()}
+	if err := s.ContentComponents.PutContentUse(ctx, u); err != nil {
+		return err
+	}
+	s.contentUsesChanged(ctx, claims, scope, scopeID, c.ID)
+	return nil
 }
 
 // contentUseScope validates a use scope: "member" is the caller; "room"

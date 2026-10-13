@@ -229,7 +229,7 @@ func (s *Service) publishedRecipe(ctx context.Context, claims auth.Claims, roomI
 		}
 		r = &edit
 	}
-	if r == nil || (r.Prompt == "" && r.Expert == nil && len(r.Skills)+len(r.Prompts)+len(r.References) == 0) {
+	if contentpkg.RecipeEmpty(r) {
 		return nil, nil, nil
 	}
 	var files []contentpkg.WorkReferenceFile

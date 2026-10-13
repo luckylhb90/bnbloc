@@ -211,6 +211,14 @@ func validateWorkFiles(p *Package) error {
 	return nil
 }
 
+// RecipeEmpty reports a recipe that says nothing of how a work was made:
+// none, or no request, expert, pack or reference (the agent alone is
+// informational). A publish stores no empty recipe; "Make similar" attaches
+// the work itself for one.
+func RecipeEmpty(r *wire.WorkRecipe) bool {
+	return r == nil || (r.Prompt == "" && r.Expert == nil && len(r.Skills)+len(r.Prompts)+len(r.References) == 0)
+}
+
 // referenceFiles are the bundle paths of a manifest's recipe references.
 func referenceFiles(m Manifest) map[string]bool {
 	out := map[string]bool{}
