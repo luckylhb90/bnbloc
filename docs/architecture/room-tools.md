@@ -66,7 +66,8 @@ reply in the room; deliverables published with sourceSeq = the dispatch's seq
   how to use the tools is told once, in the session's profile, and each
   tool's description is in tools/list, so a harness that surfaces MCP
   instructions shows neither twice.
-- **Tools** (one registry: dispatch, step 2; content authoring, step 5).
+- **Tools** (one registry: dispatch, step 2; content authoring, step 5;
+  interactive apps' data, `app_data`).
   The full tools/list is pinned by `roomtools/testdata/tools_list.json`;
   every number a description states comes from its constant:
 
@@ -83,6 +84,7 @@ reply in the room; deliverables published with sourceSeq = the dispatch's seq
 | `publish_component(id, scope, note?)` | Posts to `POST /v1/content-components/{id}/publish` with the job's grant, as the requester: `org` opens a publish request an organization admin approves (the reply carries the request and the version members keep meanwhile), `personal` withdraws it and takes the component out of the organization; `platform` is answered locally as a platform admin's action ([content-components.md](content-components.md), "Sharing and publishing"). |
 | `post_progress(text)` | Posts one progress line of the bound job as a room notice (below): at most 20 per job, 500 characters each. |
 | `try_draft(dir, task, handle?, wait_seconds?)` | A real quick try of an unsaved expert or skill pack (below): packs `dir` like `save_component`, validates it with `contentpkg` (the error goes back to the agent), stages it with the job grant (`POST /v1/content-drafts`) and dispatches `task` to another agent wearing it through the same door, guards and wait as `ask_agent`. |
+| `app_data(action, artifactId?, collection?, id?, filter?, sort?, limit?, after?, doc?, inc?, public?, ifAbsent?, ifVersion?, confirm?)` | An interactive app's data (below): the gateway's room entry `/v1/rooms/{room}/apps/{artifactId}/…?job=` as the job's agent, one of the app's owners. `list` without `artifactId` is the room's apps (`roomlog.ReadApps`), with it the app's `stats`; `find`, `get`, `insert`, `put`, `patch`, `delete` map to the app data API; `wipe` (`DELETE …/data`) only with `confirm: true`. |
 
 **Content tools' authority** is the dispatch model applied to the content
 routes (`docs/architecture/content-components.md`, "Requests on behalf of a
@@ -157,9 +159,20 @@ text has one owner per category
   running deliverables since the bridge started, each gesture's live state
   bounded (`LiveGesture.BoundState`) and the trail fenced (a deliverable's
   code wrote it).
+- **`.room/apps.md`** (`roomlog.ReadApps`, `AppsFile`): the room's
+  interactive apps, each with its producer and its collections' document
+  counts, never a document's content. An app is a site among the listed
+  deliverables (`roomlog.MaxListedDeliverables`) whose data holds at least
+  one document, as its owners' `GET …/apps/{id}/stats?job=` answers it
+  with the turn's job grant: a site whose data is empty has nothing to read
+  back, and `app_data` takes any site by id. The file appears only once
+  the room has an app; from then on the session's workspace gets it every
+  turn (`roomlog.AppsUpdate`, `CtxState.AppsListed`), so it never claims
+  data that was deleted. INDEX.md names it.
 
-The bridge rewrites `artifacts.md`, `library.md` and `live.md` every turn
-(`roomRecordFiles`, beside the history: their data changes); a read that
+The bridge rewrites `artifacts.md`, `library.md`, `live.md` and (once
+written) `apps.md` every turn (`roomRecordFiles`, beside the history:
+their data changes); a read that
 fails renders as unreadable, never as empty, and never fails the turn. The
 per-turn pull prompt (`roomlog.ComposePointer`) is the message alone (its
 attachments, `[now — from <sender>]`, its text), plus one line
@@ -181,6 +194,31 @@ stored version over 4 MiB is not downloaded; the text returned is capped at
 64 KiB (`truncated`), binary content is not shown, and the text is fenced
 (`roomlog.Fence`), naming its producer, as data to check, never
 instructions.
+
+**`app_data`** (`services/bridge/roomtools/appdata.go`,
+`docs/prd/2026-10-12-interactive-apps.md` §4.6) reads and changes an
+interactive app's data: collections of JSON documents the people using a
+site deliverable wrote through the app SDK. Every call goes to the
+gateway's room entry of the app data API with the bound job's grant
+(`roomlog.AppPath`: `/v1/rooms/{room}/apps/{artifactId}/…?job=`); the
+gateway admits it only while the job runs on this bridge and makes the
+job's agent (`agent:<owner>/<core>/<provider>`) the participant, one of the
+app's owners: it reads every document with its real `_author` and may
+change any, and what it writes is stamped as the agent. The room service
+applies the platform's rules; the tool adds only `wipe`'s `confirm`. A
+write's conditions travel as the API's headers (`ifVersion` is `If-Match`,
+`ifAbsent` on a put `If-None-Match: *`; the bridge's gateway client sends a
+`RawBody`'s `Header`). Every document returned is one JSON line inside one
+fence (`roomlog.Fence`, written by the app's users), at most
+`maxAppDataText` (96 KiB) per call: a find stops before the document that
+would pass it and returns `next` there, a single larger document is cut
+(`truncated`). A refusal reaches the agent with the API's reason
+(`refusal`).
+
+**Budgets.** `TestPromptBudgets` caps the session prefix: guidance 700
+tokens (750 for a team lead), tools/list 2,550, guidance plus tools/list
+3,250. `app_data` added 345 tokens to tools/list (2,168 → 2,513) and its
+guidance line 39 to the guidance (619 → 658).
 
 ## Teams
 

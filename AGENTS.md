@@ -1108,11 +1108,15 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   the run record, marked not in this workspace) and `.room/library.md`
   (`ReadLibrary`: `GET /v1/components?job=&room=`, the requester's Library
   as the gateway's visibility owners admit it; the room tools'
-  `list_components` reads the same). An agent with tools reads a
+  `list_components` reads the same) and `.room/apps.md` (`ReadApps`, the
+  room's interactive apps with their collections' counts, written by
+  `AppsUpdate` once the room has an app and every turn after, so it never
+  goes stale; `CtxState.AppsListed`). An agent with tools reads a
   deliverable with `read_artifact`, through the room's own artifact routes
   (membership and room checked there), bounded and fenced as untrusted.
   Never tell an agent a deliverable or a component is "in its workspace",
-  and never compute a producer or a Library listing elsewhere.
+  and never compute a producer, a Library listing or an app listing
+  elsewhere.
 
 - **Built-in content is a content source**, not a second library:
   `internal/contentbuiltin`, wrapped over the content store at gateway and
@@ -1293,6 +1297,22 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   is the only holder of the visitor token (`lib/appVisitor.ts`: answers
   only its own frame's window, renews before expiry); a member's site
   viewer answers no visitor request.
+- **An agent reads an app's data only through the room tool `app_data`**
+  (`services/bridge/roomtools/appdata.go`: list, find, get, insert, put,
+  patch, delete, and wipe with `confirm`), on the gateway's room entry
+  with the bound job's `?job=` (the agent is an owner; the room service's
+  rules apply unchanged). Its path is spelled only by `roomlog.AppPath`;
+  "which deliverables are apps" is `roomlog.ReadApps` (a site among the
+  listed deliverables whose data holds a document, by its owners' `stats`),
+  read by `.room/apps.md` and `app_data list` alike. Every document it
+  returns is fenced (`roomlog.Fence`) and bounded (`maxAppDataText`, a find
+  cut there continues with `next`). The bridge's gateway client carries a
+  write's conditions as `RawBody.Header` (`If-Match`, `If-None-Match`).
+  The built-in `interactive-apps` skill pack documents the SDK; its SDK
+  section is pinned to `sdk.d.ts` (`TestInteractiveAppsSkillMatchesSDK`:
+  a renamed or added SDK method fails until the skill follows), the
+  `app-builder` expert requires it, and `app-starters` holds `/poll`,
+  `/survey`, `/signup`, `/app-report`.
 - **http MCP per-member sign-in is `mcp.http.auth.scheme = "oauth"`.** The
   desktop (`internal_ext/mcp_oauth.rs`) discovers the authorization server at
   sign-in (never declared or hardcoded), requires PKCE S256 and checks

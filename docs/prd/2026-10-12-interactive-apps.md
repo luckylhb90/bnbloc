@@ -6,10 +6,11 @@ gateway route table (2.1), `svcauth.NewRequest` (2.2), `httpx` (2.3), the
 event-kind registry (2.5), the store rig (4.1) and the generated wire types
 (5.1).
 
-Progress: delivery steps 1–3 **landed** on 2026-10-13 (store, cipher, the
-room service's data owner, and the gateway's capabilities, visitor tokens,
-SDK and change feed; see §7 "Step status"). Step 5 (the web's app view and
-data line) **landed** on 2026-10-13. Steps 4 and 6 are open.
+Progress: delivery steps 1–5 **landed** on 2026-10-13 (store, cipher, the
+room service's data owner, the gateway's capabilities, visitor tokens, SDK
+and change feed, the agent's read-back — `app_data`, `.room/apps.md` and
+the built-in content — and the web's app view and data line; see §7
+"Step status"). Step 6 is open.
 
 ## 1. Why
 
@@ -465,6 +466,48 @@ app_keys(app_id PRIMARY KEY, tenant_id, room_id, wrapped_key, created_at_ms)
     counts, coalesced per app. **Delete app data** (the key and all rows)
     is what Clear data does today: the room entry has one wipe.
 - Steps 4 and 6: open.
+- **Step 4: landed (2026-10-13).** The room tool `app_data`
+  (`services/bridge/roomtools/appdata.go`), `.room/apps.md`
+  (`internal/roomlog/apps.go`), one session guidance line, and three
+  built-ins (`internal/contentbuiltin/packages/`): the `interactive-apps`
+  skill pack, the `app-builder` expert that requires it, and the
+  `app-starters` prompt pack. Decided while building:
+  - **One tool, eight actions.** `app_data(action, …)`: `list` (without
+    `artifactId` the room's apps, with it the app's collections and
+    counts from `stats`), `find` (filter, sort, limit, after), `get`,
+    `insert`, `put` (`ifAbsent`, `ifVersion`), `patch` (`doc` merged, `inc`
+    added), `delete`, and `wipe`, which needs `confirm: true`. It calls the
+    room entry with the job's grant (`roomlog.AppPath`), so the agent is an
+    owner and its writes are stamped as the agent. Every returned document
+    is one JSON line in one fence (`roomlog.Fence`), at most 96 KiB a call;
+    a find cut there continues with `next`. The descriptor costs 345
+    tokens of tools/list, whose budget moved from 2,200 to 2,550 (session
+    prefix 2,900 to 3,250); the guidance line costs 39.
+  - **An app is a site with data.** "Which deliverables are interactive
+    apps" is one rule (`roomlog.ReadApps`): a site among the newest listed
+    deliverables whose data holds at least one document, as the owners'
+    `stats` says. Scanning a bundle for `~app/sdk.js` was rejected: it
+    downloads every site each turn and still says nothing about data. An
+    app nobody used yet is not listed; `app_data` takes any site by id.
+  - **`.room/apps.md`** appears once the room has an app and is then
+    rewritten every turn of the session (`CtxState.AppsListed`), so it
+    never claims data that was deleted; a room whose usage cannot be read
+    and that never had the file gets none. It lists each app's producer and
+    collection counts, never document content. `INDEX.md` names it.
+  - **The skill documents the SDK, pinned to it.** The skill's SDK section
+    may name only what `sdk.d.ts` declares and must name every app and
+    collection method and option; its examples may call only declared
+    methods; its filter operators and caps are the server's
+    (`TestInteractiveAppsSkillMatchesSDK`). The always-on parts have
+    budgets (`TestAppBuiltinsAlwaysOnBudget`); the long examples are the
+    skill's `references/examples.md`.
+  - **Starters.** `/poll`, `/survey`, `/signup` and `/app-report`, each
+    with variables, not flagged as empty-room starters (a first message
+    should need no form); the App builder offers them as its quick prompts
+    (`ref`).
+  - Not in this step: auditing an agent's reads of app data (§4.7) is
+    still open.
+- Steps 5–6: open.
 
 ### Tests
 

@@ -168,6 +168,17 @@ Some content ships with the release:
 - The **starter prompts** (`cc_builtin_starters`), a prompt pack whose
   prompts are all starters: an empty room's general-purpose examples (see
   "Prompt packs").
+- Interactive apps (`docs/prd/2026-10-12-interactive-apps.md` §4.6): the
+  **Interactive apps** skill pack (`cc_builtin_interactive-apps`: the app
+  SDK, the platform's two rules, the visitor model, closing in the app's
+  code, publishing, mobile-first layout, reading the data back with
+  `app_data`; its SDK section is pinned to the served `sdk.d.ts` by
+  `TestInteractiveAppsSkillMatchesSDK`, its long examples are
+  `references/examples.md`), the **App builder** expert
+  (`cc_builtin_app-builder`, requiring the skill pack) and the **App
+  starters** prompt pack (`cc_builtin_app-starters`: `/poll`, `/survey`,
+  `/signup`, `/app-report`, the App builder's quick prompts by `ref`). The
+  always-on parts are bounded by `TestAppBuiltinsAlwaysOnBudget`.
 
 A built-in prompt text lives only in its package:
 `TestBuiltinPromptsStayOutOfTheWeb` fails on a copy in `web/src`. Built-in
