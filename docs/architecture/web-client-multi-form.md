@@ -69,17 +69,34 @@ Sources: `web/vite.config.ts:6-14`, `services/gateway/webui/webui.go:1-58`,
   mount (`web/src/main.tsx`, `web/src/lib/desktop.ts` `seedPreviewSession`).
   Routing must run after that seed.
 
-## Public share links and interactive apps
+## Share links and interactive apps
 
-- `#/share/<token>` (`web/src/main.tsx`) renders before sign-in and calls
-  only the public share routes (`publicShareApi`, `lib/sharesApi.ts`).
+- `#/share/<token>` (`web/src/main.tsx`, inside `AuthProvider`) renders
+  before sign-in. A link anyone can open is read through the share routes
+  alone (`publicShareApi`, `lib/sharesApi.ts`), without a session. A link
+  for the room's organization (the default,
+  `docs/prd/2026-10-13-share-link-sign-in.md`) answers the anonymous read
+  401: without a session the page remembers itself (`lib/loginReturn.ts`,
+  the one login return path, web boundary rule A2: sessionStorage, 15
+  minutes, a share hash only) and sends the person to the app's sign-in;
+  `App` takes the return once signed in, whichever way, and goes back.
+  With a session the page mints a share ticket (`sharesApi.ticket`, the
+  only call carrying the session) and opens the link with the ticket in
+  the token's place; a 403 is "This link is only for members of <org>".
+- The share dialog (`views/workbench/ShareDialog.tsx`) picks who may open
+  a link (`shareAccessOptions`, default `DEFAULT_SHARE_ACCESS` = `org`;
+  "anyone" is unavailable while the organization disables such links) and
+  lists each link's access, which its creator can change.
 - A link to a web app (the share answers a `siteUrl`) is the **app view**
   (`views/share/SharedApp.tsx`): the site frame full-screen inside the
   safe areas (`index.html`'s `viewport-fit=cover`), no file-viewer header,
   version line or download, and no page scroll. The frame keeps the site
   sandbox (`SITE_SANDBOX`, never `allow-same-origin`). Any other file keeps
   the file page (`SharedFile`).
-- The app view holds the link's **visitor token** for the app's data API:
+- On a link anyone can open, the app view holds the link's **visitor
+  token** for the app's data API (on an org link the frame's URL carries
+  the member's share ticket, which makes them the participant, and no
+  visitor token exists):
   `lib/appVisitor.ts` is its one owner (web boundary rule A1). It mints the
   token on the frame's first handshake request
   (`POST /v1/public/shares/{token}/visitor`), keeps it per share in

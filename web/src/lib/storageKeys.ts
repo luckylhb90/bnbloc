@@ -40,6 +40,9 @@ export const StorageKey = {
   workbench: "bnbloc.workbench",
   // A public link's app visitor token, per share (lib/appVisitor.ts).
   appVisitor: "bnbloc.appVisitor",
+  // Where sign-in brings the person back to (sessionStorage,
+  // lib/loginReturn.ts).
+  loginReturn: "bnbloc.loginReturn",
 } as const;
 
 export type StorageKeyName = (typeof StorageKey)[keyof typeof StorageKey];

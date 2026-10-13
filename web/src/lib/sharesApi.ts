@@ -2,14 +2,15 @@ import { ApiError, req } from "./api.ts";
 import { apiUrl } from "./config";
 import { errorDetail } from "./session.ts";
 import { tapOnboarding } from "./onboardingEvents.ts";
-import type { CreatedShare, PublicShare, ShareView, SiteTicket, TenantShareView } from "./shares.ts";
-import type { AppVisitorToken } from "./wire.gen.ts";
+import type { CreatedShare, PublicShare, ShareAccess, ShareTicket, ShareView, SiteTicket, TenantShareView } from "./shares.ts";
+import type { AppVisitorToken, ShareCreateRequest } from "./wire.gen.ts";
 import { roomPath } from "./roomId.ts";
 
 // Share-link and site endpoints. Member routes go through the authenticated
-// transport (`req`); the public ones (publicShareApi) are plain fetches that
-// never carry a session — the public share page renders before sign-in and
-// must work in a browser that has none.
+// transport (`req`), the share ticket mint included; the link's own routes
+// (publicShareApi) are plain fetches that never carry a session. Their
+// `link` is the credential the share page opens the link with: the link's
+// token, or the member's share ticket in its place (an org link).
 
 function sharesPath(roomId: string, artifactId: string): string {
   return roomPath(roomId, "artifacts", artifactId, "shares");
@@ -18,10 +19,19 @@ function sharesPath(roomId: string, artifactId: string): string {
 export const sharesApi = {
   // Create a link to one version (0 = always the latest). The token comes
   // back once; only its hash is stored.
-  create: (roomId: string, artifactId: string, body: { version: number; expiresInHours: number }) =>
+  create: (roomId: string, artifactId: string, body: ShareCreateRequest) =>
     req<CreatedShare>(sharesPath(roomId, artifactId), { method: "POST", body: JSON.stringify(body) }).then(
       tapOnboarding<CreatedShare>({ kind: "share_created", roomId }),
     ),
+  // Who may open a link: the organization's members, or anyone with it.
+  setAccess: (roomId: string, artifactId: string, shareId: string, access: ShareAccess) =>
+    req<{ share: ShareView }>(`${sharesPath(roomId, artifactId)}/${encodeURIComponent(shareId)}`, {
+      method: "PATCH",
+      body: JSON.stringify({ access }),
+    }),
+  // The signed-in member's ticket for an org link (the token in the body,
+  // never the URL); 403 when they are not in the link's organization.
+  ticket: (token: string) => req<ShareTicket>("/v1/share-tickets", { method: "POST", body: JSON.stringify({ token }) }),
   // The artifact's links, newest first (revoked/expired ones for 30 days).
   list: (roomId: string, artifactId: string) => req<{ shares: ShareView[] }>(sharesPath(roomId, artifactId)),
   // Creator, room owner/admins, or an org admin.
@@ -37,8 +47,8 @@ export const sharesApi = {
     ),
 };
 
-function publicPath(token: string, suffix = ""): string {
-  return `/v1/public/shares/${encodeURIComponent(token)}${suffix}`;
+function publicPath(link: string, suffix = ""): string {
+  return `/v1/public/shares/${encodeURIComponent(link)}${suffix}`;
 }
 
 async function publicFetch(path: string, init: RequestInit = {}): Promise<Response> {
@@ -48,14 +58,15 @@ async function publicFetch(path: string, init: RequestInit = {}): Promise<Respon
 }
 
 export const publicShareApi = {
-  // The link's metadata (counts a view). 404 for every dead link.
-  get: async (token: string) => (await (await publicFetch(publicPath(token))).json()) as PublicShare,
+  // The link's metadata (counts a view). 404 for every dead link; 401 for
+  // an org link opened without a share ticket.
+  get: async (link: string) => (await (await publicFetch(publicPath(link))).json()) as PublicShare,
   // The version's bytes, for the viewers.
-  content: async (token: string) => (await publicFetch(publicPath(token, "/content"))).blob(),
+  content: async (link: string) => (await publicFetch(publicPath(link, "/content"))).blob(),
   // The Download button's target (attachment; may redirect to storage).
-  downloadUrl: (token: string) => apiUrl(publicPath(token, "/content?download=1")),
-  // A visitor token for the link's app (held by lib/appVisitor.ts); prev
-  // renews a still-valid one for the same visitor.
+  downloadUrl: (link: string) => apiUrl(publicPath(link, "/content?download=1")),
+  // A visitor token for an anyone link's app (held by lib/appVisitor.ts);
+  // prev renews a still-valid one for the same visitor.
   visitor: async (token: string, prev?: string) =>
     (await (
       await publicFetch(publicPath(token, "/visitor"), {

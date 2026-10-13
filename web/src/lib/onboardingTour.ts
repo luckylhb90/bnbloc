@@ -90,7 +90,7 @@ export const TOURS: Readonly<Record<TourId, readonly TourStep[]>> = {
     {
       id: "share",
       title: "Share",
-      text: "Share a public link to show your work.",
+      text: "Share a link to show your work.",
       targets: ["share", "files"],
       fallback: "Open a file from Files, then use Share in its toolbar to create a public link.",
       advance: "action",

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { ArrowClockwiseIcon } from "@phosphor-icons/react";
-import { expiresLabel, shareVersionLabel, viewsLabel, type TenantShareView } from "@/lib/shares";
+import { expiresLabel, shareAccessLabel, shareVersionLabel, viewsLabel, type TenantShareView } from "@/lib/shares";
 import { sharesApi } from "@/lib/sharesApi";
 import { ConfirmDialog } from "@/ui/Dialog";
 import { ErrorBox } from "@/ui/ErrorBox";
@@ -10,10 +10,11 @@ import { errorText } from "@/lib/errors";
 import { listPlaceholder } from "@/ui/QueryState";
 import { exactTime } from "@/lib/format";
 
-// Org-admin: every active public share link of the tenant — room, artifact,
-// creator, expiry, views — with revoke. Switching public links off for the
-// organization is the "Allow public share links" setting (Settings tab); it
-// kills every link at once, this list revokes one.
+// Org-admin: every active share link of the tenant — artifact, who may open
+// it, room, creator, expiry, views — with revoke. Switching links anyone can
+// open off for the organization is the "Allow links anyone can open"
+// setting (Settings tab); it stops every such link at once, this list
+// revokes one.
 export function PublicLinksTab() {
   const toast = useToast();
   const [shares, setShares] = useState<TenantShareView[] | null>(null);
@@ -47,7 +48,7 @@ export function PublicLinksTab() {
   return (
     <section className="flex flex-col gap-2">
       <div className="flex items-center justify-between gap-2">
-        <p className="text-sm text-[var(--color-fg-muted)]">Active links anyone can open without signing in.</p>
+        <p className="text-sm text-[var(--color-fg-muted)]">Active share links of this organization's rooms.</p>
         <button
           type="button"
           onClick={() => void load()}
@@ -62,6 +63,7 @@ export function PublicLinksTab() {
           <thead className="bg-[var(--color-surface-2)] text-left text-xs uppercase tracking-wide text-[var(--color-fg-subtle)]">
             <tr>
               <th className="px-3 py-2">Artifact</th>
+              <th className="px-3 py-2">Who can open</th>
               <th className="px-3 py-2">Room</th>
               <th className="px-3 py-2">Created by</th>
               <th className="px-3 py-2">Expires</th>
@@ -79,6 +81,7 @@ export function PublicLinksTab() {
                     </span>
                     <span className="text-xs text-[var(--color-fg-subtle)]">{shareVersionLabel(s.version)}</span>
                   </td>
+                  <td className="px-3 py-2 text-[var(--color-fg-muted)]">{shareAccessLabel(s.access, "the organization")}</td>
                   <td className="max-w-[10rem] truncate px-3 py-2 text-[var(--color-fg-muted)]" title={s.roomId}>
                     {s.roomId}
                   </td>
@@ -102,8 +105,8 @@ export function PublicLinksTab() {
               ))
             ) : (
               <tr>
-                <td colSpan={6} className="px-3 py-6 text-center text-[var(--color-fg-subtle)]">
-                  {listPlaceholder(shares, !!error, "No active public links.")}
+                <td colSpan={7} className="px-3 py-6 text-center text-[var(--color-fg-subtle)]">
+                  {listPlaceholder(shares, !!error, "No active share links.")}
                 </td>
               </tr>
             )}

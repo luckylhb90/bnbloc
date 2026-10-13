@@ -180,6 +180,15 @@ export const RULES = [
     sample: { file: "views/X.tsx", text: 'frame.postMessage({ type: AppVisitorGrant, v: 1, token }, "*");' },
   },
   {
+    id: "A2",
+    name: "the login return path (where sign-in brings a person back to) lives in lib/loginReturn.ts",
+    // A share page that needs a sign-in remembers itself there, and the app
+    // goes back once signed in: one store, one expiry, one shape check.
+    pattern: /\bStorageKey\.loginReturn\b/,
+    allowed: ["lib/loginReturn.ts"],
+    sample: { file: "views/X.tsx", text: 'writeStored(StorageKey.loginReturn, "#/share/x", "session");' },
+  },
+  {
     id: "B1",
     name: "production sources import only from web/ (the image's web stage builds web/ alone)",
     // The gateway image copies only web/ into its web build stage, so a

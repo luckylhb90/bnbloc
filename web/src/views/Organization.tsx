@@ -64,7 +64,7 @@ const TABS: { id: Tab; label: string; superOnly?: boolean }[] = [
   { id: "content", label: "Content" },
   { id: "quota", label: "Quota" },
   { id: "settings", label: "Settings" },
-  { id: "links", label: "Public links" },
+  { id: "links", label: "Share links" },
   { id: "tools", label: "Tool connectors" },
   { id: "audit", label: "Audit log" },
   { id: "tenants", label: "Tenants", superOnly: true },
@@ -577,7 +577,7 @@ function SettingsTab() {
   // Policy switches save on toggle (each is one switch, not a form); the
   // members' cached tenant policy is re-read so share actions follow.
   const [policySaving, setPolicySaving] = useState(false);
-  const savePolicy = async (patch: { requireSandboxForBorrow?: boolean; publicSharesDisabled?: boolean }) => {
+  const savePolicy = async (patch: { requireSandboxForBorrow?: boolean; anonymousLinksDisabled?: boolean }) => {
     if (policySaving) return;
     setPolicySaving(true);
     setError(null);
@@ -641,17 +641,18 @@ function SettingsTab() {
         </p>
       </div>
       <div className="flex flex-col gap-2 border-t border-[var(--color-border)] pt-4">
-        <span className="text-xs font-medium uppercase tracking-wide text-[var(--color-fg-subtle)]">Public links</span>
+        <span className="text-xs font-medium uppercase tracking-wide text-[var(--color-fg-subtle)]">Share links</span>
         <Switch
-          checked={!(settings?.publicSharesDisabled ?? false)}
-          onChange={(v) => void savePolicy({ publicSharesDisabled: !v })}
-          label="Allow public share links"
-          ariaLabel="Allow public share links"
+          checked={!(settings?.anonymousLinksDisabled ?? false)}
+          onChange={(v) => void savePolicy({ anonymousLinksDisabled: !v })}
+          label="Allow links anyone can open (no sign-in)"
+          ariaLabel="Allow links anyone can open (no sign-in)"
         />
         <p className="text-xs text-[var(--color-fg-subtle)]">
-          On: members can share a deliverable through an expiring link anyone can open without signing in. Off: the
-          share actions are hidden and every existing link stops working until this is turned back on. The Public
-          links tab lists the active links.
+          A share link is for people in this organization by default: they sign in with your organization's sign-in
+          (SSO) to open it. On: a member may instead create a link anyone can open without signing in. Off: no such
+          link can be created, and every existing one stops working until this is turned back on; links for the
+          organization keep working. The Share links tab lists the active links.
         </p>
       </div>
       <TenantRetentionSection />

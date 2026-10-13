@@ -57,9 +57,3 @@ export function useTenantPolicy(): TenantPolicy | null {
   }, [tenant, rev]);
   return policy;
 }
-
-/** Whether members may create public share links (hidden until known). */
-export function useSharingEnabled(): boolean {
-  const policy = useTenantPolicy();
-  return policy !== null && !policy.publicSharesDisabled;
-}

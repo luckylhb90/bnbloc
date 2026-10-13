@@ -4,7 +4,6 @@ import type { Artifact, ArtifactVersion } from "@/lib/api";
 import { fileCategory, fileTypeLabel, isPreviewableImage, isSite } from "@/lib/artifactFiles";
 import { cn } from "@/lib/cn";
 import { formatBytes, relativeTime } from "@/lib/format";
-import { useSharingEnabled } from "@/lib/tenantPolicy";
 import { Menu, MenuItem } from "@/ui/Menu";
 import { ActorLabel } from "@/views/room/ActorLabel";
 import { AppDataLine } from "./AppDataLine";
@@ -93,7 +92,6 @@ export function FileCard({
   const meta = artifact ? versionMeta(detail, artifact.currentVersion) : undefined;
   const image = useCardImage(roomId, artifact, meta);
   const [tiny, setTiny] = useState(false);
-  const sharing = useSharingEnabled();
   const [sharingOpen, setSharingOpen] = useState(false);
   if (error) return null; // deleted or inaccessible: no card
   const facts = artifact ? versionFacts(artifact, meta) : null;
@@ -143,7 +141,7 @@ export function FileCard({
             </span>
           </span>
         </button>
-        {sharing && artifact && file && (
+        {artifact && file && (
           <>
             <Menu
               label={`${file.name} actions`}

@@ -1,21 +1,26 @@
 import { useCallback, useEffect, useState } from "react";
 import { Select } from "@/ui/Select";
-import { CopyIcon, LinkIcon } from "@phosphor-icons/react";
+import { CopyIcon, LinkIcon, WarningIcon } from "@phosphor-icons/react";
 import { cn } from "@/lib/cn";
 import { appLinkBase } from "@/lib/config";
 import { relativeTime } from "@/lib/format";
 import { shareLinkUrl } from "@/lib/hashRoute";
 import {
+  DEFAULT_SHARE_ACCESS,
   DEFAULT_SHARE_DAYS,
   expiresLabel,
   SHARE_EXPIRY_OPTIONS,
+  shareAccessLabel,
+  shareAccessOptions,
   shareRequest,
   shareState,
   shareVersionLabel,
   viewsLabel,
+  type ShareAccess,
   type ShareView,
 } from "@/lib/shares";
 import { sharesApi } from "@/lib/sharesApi";
+import { useTenantPolicy } from "@/lib/tenantPolicy";
 import { Button } from "@/ui/Button";
 import { Dialog } from "@/ui/Dialog";
 import { Segment } from "@/ui/Segment";
@@ -25,12 +30,14 @@ import { UserName } from "@/views/UserName";
 import { displayNameOf } from "@/lib/useDisplayName";
 import { errorText } from "@/lib/errors";
 
-// ShareDialog creates and manages public links to one deliverable: pick a
-// version ("this version" or "always the latest") and a lifetime, create the
-// link (copied at once — its token is shown only this one time), and see
-// the existing links with their views and expiry, revoking any. Opened from
-// a workbench tab's toolbar and a file card's menu; both hide it when the
-// organization switched public links off.
+// ShareDialog creates and manages share links to one deliverable: pick who
+// may open it (the organization's signed-in members, the default, or anyone
+// with the link — unless the organization switched those off), a version
+// ("this version" or "always the latest") and a lifetime, create the link
+// (copied at once — its token is shown only this one time), and see the
+// existing links with who may open them, their views and expiry, changing
+// who may open one or revoking it. Opened from a workbench tab's toolbar
+// and a file card's menu.
 
 const SELECT =
   "h-9 w-full rounded-[var(--radius)] border border-[var(--color-border)] bg-[var(--color-surface)] px-2 text-sm text-[var(--color-fg)]";
@@ -52,6 +59,12 @@ export function ShareDialog({
   readonly version: number;
 }) {
   const toast = useToast();
+  const policy = useTenantPolicy();
+  const org = policy?.name ?? "";
+  // Until the policy is known, a link anyone can open is not offered.
+  const anonymousOff = policy?.anonymousLinksDisabled ?? true;
+  const accessOptions = shareAccessOptions(org, anonymousOff);
+  const [access, setAccess] = useState<ShareAccess>(DEFAULT_SHARE_ACCESS);
   const [latest, setLatest] = useState<"latest" | "this">("latest");
   const [days, setDays] = useState(DEFAULT_SHARE_DAYS);
   const [busy, setBusy] = useState(false);
@@ -72,8 +85,11 @@ export function ShareDialog({
     if (!open) return;
     setLink(null);
     setShares(null);
+    setAccess(DEFAULT_SHARE_ACCESS);
     void reload();
   }, [open, reload]);
+  // The chosen access stays one the organization allows.
+  const chosen: ShareAccess = access === "anyone" && anonymousOff ? DEFAULT_SHARE_ACCESS : access;
 
   const copy = useCopy();
   const copyLink = (url: string) => copy(url, "link");
@@ -81,7 +97,7 @@ export function ShareDialog({
   const create = async () => {
     setBusy(true);
     try {
-      const res = await sharesApi.create(roomId, artifactId, shareRequest({ latest: latest === "latest", version, days }));
+      const res = await sharesApi.create(roomId, artifactId, shareRequest({ latest: latest === "latest", version, days, access: chosen }));
       const url = shareLinkUrl(appLinkBase(), res.token);
       setLink(url);
       void copyLink(url);
@@ -90,6 +106,16 @@ export function ShareDialog({
       toast.error(errorText(e, "Could not create the link"));
     } finally {
       setBusy(false);
+    }
+  };
+
+  const changeAccess = async (share: ShareView, to: ShareAccess) => {
+    try {
+      await sharesApi.setAccess(roomId, artifactId, share.shareId, to);
+      toast.success(to === "anyone" ? "Anyone with the link can open it now" : "The link now needs sign-in");
+      void reload();
+    } catch (e) {
+      toast.error(errorText(e, "Could not change who can open the link"));
     }
   };
 
@@ -109,7 +135,7 @@ export function ShareDialog({
       open={open}
       onClose={onClose}
       title={`Share ${fileName}`}
-      description="Anyone with the link can view and download this file without signing in. Nothing else of the room is shown."
+      description="People you send the link to can view and download this file. Nothing else of the room is shown."
       footer={
         <>
           <Button variant="ghost" onClick={onClose}>
@@ -122,6 +148,41 @@ export function ShareDialog({
       }
     >
       <div className="flex flex-col gap-4">
+        <div className="flex flex-col gap-1.5">
+          <span id="share-access-label" className="text-xs font-medium uppercase tracking-wide text-[var(--color-fg-subtle)]">
+            Who can open it
+          </span>
+          <div role="radiogroup" aria-labelledby="share-access-label" className="flex flex-col gap-1.5">
+            {accessOptions.map((o) => {
+              const selected = chosen === o.value;
+              return (
+                <button
+                  key={o.value}
+                  type="button"
+                  role="radio"
+                  aria-checked={selected}
+                  disabled={o.disabled}
+                  onClick={() => setAccess(o.value)}
+                  className={cn(
+                    "tactile flex flex-col items-start gap-0.5 rounded-[var(--radius)] border px-3 py-2 text-left disabled:cursor-not-allowed disabled:opacity-60",
+                    selected
+                      ? "border-[var(--color-accent)] bg-[var(--color-accent-soft)]"
+                      : "border-[var(--color-border)] bg-[var(--color-surface)] hover:bg-[var(--color-surface-2)]",
+                  )}
+                >
+                  <span className="text-sm font-medium text-[var(--color-fg)]">{o.label}</span>
+                  <span className="text-xs text-[var(--color-fg-muted)]">{o.hint}</span>
+                </button>
+              );
+            })}
+          </div>
+          {chosen === "anyone" && (
+            <p role="note" className="flex items-start gap-1.5 text-xs text-[var(--color-warning)]">
+              <WarningIcon size={14} className="mt-px shrink-0" aria-hidden />
+              No sign-in: whoever has this link can open it, and it can be forwarded to anyone.
+            </p>
+          )}
+        </div>
         <div className="flex flex-col gap-1.5">
           <span className="text-xs font-medium uppercase tracking-wide text-[var(--color-fg-subtle)]">Version</span>
           <Segment
@@ -175,7 +236,9 @@ export function ShareDialog({
                 return (
                   <li key={s.shareId} className="flex items-center gap-2 px-3 py-2">
                     <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm text-[var(--color-fg)]">{shareVersionLabel(s.version)}</p>
+                      <p className="truncate text-sm text-[var(--color-fg)]">
+                        {shareVersionLabel(s.version)} · {shareAccessLabel(s.access, org)}
+                      </p>
                       <p className="truncate text-xs text-[var(--color-fg-subtle)]">
                         {viewsLabel(s.viewCount)} · <UserName id={s.createdBy} /> · {relativeTime(s.createdAtMs)}
                       </p>
@@ -188,6 +251,16 @@ export function ShareDialog({
                     >
                       {state === "active" ? expiresLabel(s.expiresAtMs, now) : state === "revoked" ? "Revoked" : "Expired"}
                     </span>
+                    {state === "active" && (s.access === "anyone" || !anonymousOff) && (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => void changeAccess(s, s.access === "anyone" ? "org" : "anyone")}
+                        aria-label={s.access === "anyone" ? "Require sign-in for this link" : "Let anyone with this link open it"}
+                      >
+                        {s.access === "anyone" ? "Require sign-in" : "Allow anyone"}
+                      </Button>
+                    )}
                     {state === "active" && (
                       <Button size="sm" variant="ghost" onClick={() => void revoke(s)} aria-label={`Revoke link created by ${displayNameOf(s.createdBy)}`}>
                         Revoke

@@ -11,9 +11,11 @@ import { registerAppWorkerAfterLoad } from "@/lib/appWorker";
 import { trackVisualViewport } from "@/lib/viewport";
 import { shareTokenFromHash } from "@/lib/hashRoute";
 
-// The public share page renders before (and without) sign-in: it is outside
-// AuthProvider, so it never reads, renews or sends a session, and it calls
-// only the public share routes. Its code loads only for share links.
+// The share page renders before (and without) sign-in. It sits inside
+// AuthProvider only to open a link for the room's organization: it sends
+// the session to the share ticket mint alone, and every other call of the
+// page is a share route that takes no session. Its code loads only for
+// share links.
 const PublicSharePage = lazy(() =>
   import("@/views/share/PublicSharePage").then((m) => ({ default: m.PublicSharePage })),
 );
@@ -27,16 +29,15 @@ function Root() {
     window.addEventListener("hashchange", onHash);
     return () => window.removeEventListener("hashchange", onHash);
   }, []);
-  if (shareToken) {
-    return (
-      <Suspense fallback={null}>
-        <PublicSharePage key={shareToken} token={shareToken} />
-      </Suspense>
-    );
-  }
   return (
     <AuthProvider>
-      <App />
+      {shareToken ? (
+        <Suspense fallback={null}>
+          <PublicSharePage key={shareToken} token={shareToken} />
+        </Suspense>
+      ) : (
+        <App />
+      )}
     </AuthProvider>
   );
 }

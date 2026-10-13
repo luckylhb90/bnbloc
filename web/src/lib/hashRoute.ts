@@ -103,7 +103,7 @@ export function artifactLinkUrl(base: string, roomId: string, artifactId: string
 
 // appRoot is the app's document URL without query or fragment. A directory
 // base gains its trailing slash; a document base (".../index.html") is kept.
-function appRoot(base: string): string {
+export function appRoot(base: string): string {
   const url = new URL(base);
   url.hash = "";
   url.search = "";

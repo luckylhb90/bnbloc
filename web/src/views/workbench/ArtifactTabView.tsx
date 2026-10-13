@@ -20,7 +20,6 @@ import { formatBytes, relativeTime } from "@/lib/format";
 import { artifactLinkUrl } from "@/lib/hashRoute";
 import { saveBlob } from "@/lib/saveBlob";
 import { sharesApi } from "@/lib/sharesApi";
-import { useSharingEnabled } from "@/lib/tenantPolicy";
 import { useToast } from "@/ui/Toast";
 import { useCopy } from "@/ui/useCopy";
 import "@/views/artifact/builtin";
@@ -183,7 +182,6 @@ export function ArtifactTabView({
     }),
     [roomId, artifactId, shown],
   );
-  const sharing = useSharingEnabled();
   const [sharingOpen, setSharingOpen] = useState(false);
   const updated = useUpdatedMark(shown, version === undefined);
   const [mode, setMode] = useState<Mode>("view");
@@ -312,11 +310,9 @@ export function ArtifactTabView({
             <button type="button" className={ACTION} onClick={copyLink} title="Copy link" aria-label="Copy link to this deliverable">
               <LinkIcon size={16} />
             </button>
-            {sharing && (
-              <button type="button" className={ACTION} onClick={() => setSharingOpen(true)} title="Share" aria-label="Share a public link" data-tour="share">
-                <ShareNetworkIcon size={16} />
-              </button>
-            )}
+            <button type="button" className={ACTION} onClick={() => setSharingOpen(true)} title="Share" aria-label="Share a link" data-tour="share">
+              <ShareNetworkIcon size={16} />
+            </button>
             {onOpenWindow !== null && (
               <button type="button" className={ACTION} onClick={openWindow} title="Open in new window" aria-label="Open in new window">
                 <ArrowSquareOutIcon size={16} />
@@ -444,16 +440,14 @@ export function ArtifactTabView({
           />
         )}
       </div>
-      {sharing && (
-        <ShareDialog
-          open={sharingOpen}
-          onClose={() => setSharingOpen(false)}
-          roomId={roomId}
-          artifactId={artifactId}
-          fileName={file.name}
-          version={shown}
-        />
-      )}
+      <ShareDialog
+        open={sharingOpen}
+        onClose={() => setSharingOpen(false)}
+        roomId={roomId}
+        artifactId={artifactId}
+        fileName={file.name}
+        version={shown}
+      />
     </div>
   );
 }

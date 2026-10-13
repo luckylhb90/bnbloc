@@ -12,11 +12,22 @@ import { SITE_SANDBOX, siteGatewayUrl } from "@/lib/siteFrame";
 // allow-same-origin) and sits inside the safe areas, so nothing hides under
 // a notch or a home indicator, and the page itself never scrolls.
 //
-// The page holds the link's visitor token for the app (lib/appVisitor.ts):
-// minted on the frame's first request, kept per share, renewed before it
-// expires and handed only to this page's own app frame.
+// On a link anyone can open (visitor), the page holds the link's visitor
+// token for the app (lib/appVisitor.ts): minted on the frame's first
+// request, kept per share, renewed before it expires and handed only to
+// this page's own app frame. On a link for the organization the frame's
+// siteUrl carries the member's share ticket, which makes them the app's
+// participant: no visitor token is held or handed out.
 
-export function SharedApp({ token, share }: { readonly token: string; readonly share: PublicShare & { readonly siteUrl: string } }) {
+export function SharedApp({
+  token,
+  visitor,
+  share,
+}: {
+  readonly token: string;
+  readonly visitor: boolean;
+  readonly share: PublicShare & { readonly siteUrl: string };
+}) {
   const frameRef = useRef<HTMLIFrameElement | null>(null);
   const title = share.artifact.title.trim() || "Web app";
 
@@ -25,6 +36,7 @@ export function SharedApp({ token, share }: { readonly token: string; readonly s
   }, [title]);
 
   useEffect(() => {
+    if (!visitor) return;
     const host = createVisitorHost({
       shareToken: token,
       mint: (prev) => publicShareApi.visitor(token, prev),
@@ -36,7 +48,7 @@ export function SharedApp({ token, share }: { readonly token: string; readonly s
       window.removeEventListener("message", onMessage);
       host.stop();
     };
-  }, [token]);
+  }, [token, visitor]);
 
   return (
     <div className="fixed inset-0 overflow-hidden bg-[var(--color-bg)] pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)] pt-[env(safe-area-inset-top)]">

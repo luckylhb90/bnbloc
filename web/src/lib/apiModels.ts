@@ -90,9 +90,9 @@ export interface TenantSettings {
   // Org policy: borrowed agents must run in their owner's agent sandbox
   // (refused when the owner's sandbox is off or not ready).
   requireSandboxForBorrow: boolean;
-  // Org policy: public share links are off (existing links answer 404, the
-  // share actions are hidden).
-  publicSharesDisabled: boolean;
+  // Org policy: share links anyone can open without signing in are off
+  // (existing ones answer 404); links for the organization stay allowed.
+  anonymousLinksDisabled: boolean;
 }
 
 // Platform super-admin: one tenant row in the cross-tenant overview.

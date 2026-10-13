@@ -468,6 +468,28 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   sign-in's refresh family (`store.SwitchRefreshFamily`, the tenant hint), so
   refreshes and forked bridge/CLI sessions land in the switched tenant; the
   web never re-applies it.
+- **Who may open a share link has one owner: `shareAccess`**
+  (`services/gateway/share_access.go`,
+  `docs/prd/2026-10-13-share-link-sign-in.md`). A link's `access` is `org`
+  (the default, `store.shareAccessOf`) or `anyone`. The room service says
+  whether a link is alive (secret, expiry, revocation, room and artifact,
+  and an `anyone` link while the organization's switch is on: its one
+  reader is `anonymousLinkAllowed`); `shareAccess` says whether this caller
+  may open it: `anyone` everyone, `org` a signed-in member of the link's
+  organization (`memberRole`, `tenantClosed`; not necessarily of the room),
+  else 401 `share_sign_in_required` / 403 `share_org_only`. Every share
+  route's credential is its `{token}` path segment, opened by `openShare`:
+  the link's token (anonymous), or a **share ticket**
+  (`auth.KindShareTicket`: member, the link's organization, share id;
+  minted only by `POST /v1/share-tickets` after `shareAccess`) in the
+  token's place, so a frame, a download link and an app's relative `~app/`
+  calls carry it and the sites origin never sees a session. A ticket's
+  member is the app's `member:<subject>` participant (never an owner
+  outside the room); a visitor token is minted only for an anonymous caller
+  of an `anyone` link. A view is counted only after `shareAccess` passes
+  (`POST /internal/v1/shares/view`). `TestShareAccessSingleOwner` forbids
+  comparing a link's access elsewhere in the gateway and reading the
+  switch outside its reader.
 
 ### Local-agent cores (multi-core)
 
@@ -1300,10 +1322,10 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   `appCapabilityOf`** (`services/gateway/apps.go`). The `~app` API serves
   under three entry points, each a route-table row per call (`appRoutes`):
   a member's site ticket (`/v1/sites/{ticket}/~app/…`, Kind `member`), a
-  public share link plus the link's visitor token
-  (`/v1/public/shares/{token}/site/~app/…`, Kind `visitor`; the token is
-  the `X-Bnbloc-Visitor` header, never the URL) and a session in the room
-  of the path (`/v1/rooms/{roomId}/apps/{artifactId}/…`; with `?job=` the
+  share link (`/v1/public/shares/{token}/site/~app/…`: a share ticket in
+  the token's place, Kind `member`; or an `anyone` link's token plus its
+  visitor token, Kind `visitor`, the `X-Bnbloc-Visitor` header, never the
+  URL) and a session in the room of the path (`/v1/rooms/{roomId}/apps/{artifactId}/…`; with `?job=` the
   job's agent through `jobGrant`, the content routes' one admission).
   Nothing comes from the query (but `job`) or the body
   (`TestAppCapabilityReadsNoScopeInput`); a share link is resolved on
@@ -1691,7 +1713,11 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
     `views/share/SharedApp.tsx` only wires it); an app's owners' data line
     (counts, export, clear): `lib/appData.ts` + `views/workbench/AppDataLine.tsx`
     (who is an owner is the stats route's answer, never re-decided; an
-    export is the server's audited route, the web only names the file).
+    export is the server's audited route, the web only names the file);
+  - where signing in brings a person back to (a share page of a link for
+    the organization): `lib/loginReturn.ts` (rule A2; sessionStorage, a
+    share hash only, taken once by `App`); a link's access choices and
+    labels: `lib/shares.ts` (`DEFAULT_SHARE_ACCESS`, `shareAccessOptions`).
 
 - **`Dialog` caps height at `max-h-[85vh]` with a scrollable body.** A dialog
   with more content than the viewport must scroll its body while header/footer

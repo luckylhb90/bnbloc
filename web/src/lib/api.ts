@@ -328,7 +328,7 @@ export const api = {
   // Org-admin: read/update the tenant settings (display name, SSO issuer).
   tenantSettings: () => req<TenantSettings>("/v1/tenant/settings"),
   updateTenantSettings: (
-    body: { name?: string; ssoIssuer?: string; requireSandboxForBorrow?: boolean; publicSharesDisabled?: boolean },
+    body: { name?: string; ssoIssuer?: string; requireSandboxForBorrow?: boolean; anonymousLinksDisabled?: boolean },
   ) =>
     req<TenantSettings>("/v1/tenant/settings", {
       method: "PUT",

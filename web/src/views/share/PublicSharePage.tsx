@@ -1,10 +1,13 @@
 import { useCallback, useEffect, useState } from "react";
-import { DownloadSimpleIcon, LinkBreakIcon } from "@phosphor-icons/react";
+import { DownloadSimpleIcon, LinkBreakIcon, LockSimpleIcon } from "@phosphor-icons/react";
 import { ApiError } from "@/lib/api";
+import { useAuth } from "@/lib/auth";
 import { fileCategory, fileTypeLabel, isTextual, type ArtifactFileFacts } from "@/lib/artifactFiles";
+import { errorReason } from "@/lib/errors";
 import { formatBytes } from "@/lib/format";
+import { beginShareSignIn } from "@/lib/loginReturn";
 import { expiresLabel, shareVersionLabel, type PublicShare } from "@/lib/shares";
-import { publicShareApi } from "@/lib/sharesApi";
+import { publicShareApi, sharesApi } from "@/lib/sharesApi";
 import "@/views/artifact/builtin";
 import { ArtifactBody, resolveViewer, useViewerRegistry } from "@/views/artifact/ArtifactBody";
 import { fileInfoFromFacts } from "@/views/artifact/fileInfo";
@@ -13,31 +16,68 @@ import { ViewerToolbar } from "@/views/artifact/toolbar";
 import { categoryIcons } from "@/views/workbench/fileIcons";
 import { SharedApp } from "./SharedApp";
 
-// PublicSharePage is what someone outside the room sees at `#/share/<token>`:
-// no sign-in, no session, nothing of the room. A web app (a version the
-// gateway serves as a site: `siteUrl`) is the app itself, full-screen
-// (SharedApp). Any other file gets the file page: the product name, the
-// file's title, who shared it, when the link expires, a Download button, and
-// the file rendered by the same viewer registry as the workbench (bytes from
-// the public content route). It calls only the public share routes
-// (lib/sharesApi publicShareApi). A dead link (unknown, expired, revoked,
-// switched off) is one "no longer available" page: the gateway answers 404
-// for all of them alike.
+// PublicSharePage is what a link's holder sees at `#/share/<token>`
+// (docs/prd/2026-10-13-share-link-sign-in.md): nothing of the room but the
+// shared version. A link anyone can open renders at once, without a session.
+// A link for the room's organization (the default) answers the page's
+// anonymous request 401: without a session the page remembers itself
+// (lib/loginReturn) and sends the person to the app's sign-in, which brings
+// them back here; with one it mints a share ticket (the only request that
+// carries the session) and opens the link with the ticket in the token's
+// place. Someone outside the organization is told whose link it is.
+//
+// A web app (a version the gateway serves as a site: `siteUrl`, carrying
+// the same credential) is the app itself, full-screen (SharedApp). Any
+// other file gets the file page: the product name, the file's title, who
+// shared it, when the link expires, a Download button, and the file
+// rendered by the same viewer registry as the workbench (bytes from the
+// link's content route). A dead link (unknown, expired, revoked, switched
+// off) is one "no longer available" page: the gateway answers 404 for all
+// of them alike.
 
-type Load = { kind: "loading" } | { kind: "gone" } | { kind: "error" } | { kind: "ready"; share: PublicShare };
+type Load =
+  | { kind: "loading" }
+  | { kind: "gone" }
+  | { kind: "error" }
+  | { kind: "signin" }
+  | { kind: "orgOnly"; message: string }
+  // link is the credential the page opened it with: the token (anyone
+  // links, visitor true) or the member's share ticket.
+  | { kind: "ready"; share: PublicShare; link: string; visitor: boolean };
 
 const PRODUCT = "bnbloc";
 
+/** openLink opens the link of token: anonymously, or — for a link of the
+ *  room's organization — with the signed-in member's share ticket. */
+async function openLink(token: string, signedIn: boolean): Promise<Load> {
+  try {
+    return { kind: "ready", share: await publicShareApi.get(token), link: token, visitor: true };
+  } catch (e) {
+    if (!(e instanceof ApiError) || e.status !== 401) throw e;
+  }
+  if (!signedIn) return { kind: "signin" };
+  try {
+    const { ticket } = await sharesApi.ticket(token);
+    return { kind: "ready", share: await publicShareApi.get(ticket), link: ticket, visitor: false };
+  } catch (e) {
+    if (e instanceof ApiError && e.status === 403) return { kind: "orgOnly", message: errorReason(e) };
+    if (e instanceof ApiError && e.status === 401) return { kind: "signin" };
+    throw e;
+  }
+}
+
 export function PublicSharePage({ token }: { readonly token: string }) {
+  const { ready, subject } = useAuth();
+  const signedIn = subject !== null;
   const [load, setLoad] = useState<Load>({ kind: "loading" });
   const [attempt, setAttempt] = useState(0);
   useEffect(() => {
+    if (!ready) return;
     let cancelled = false;
     setLoad({ kind: "loading" });
-    publicShareApi
-      .get(token)
-      .then((share) => {
-        if (!cancelled) setLoad({ kind: "ready", share });
+    openLink(token, signedIn)
+      .then((next) => {
+        if (!cancelled) setLoad(next);
       })
       .catch((e: unknown) => {
         if (!cancelled) setLoad({ kind: e instanceof ApiError && e.status === 404 ? "gone" : "error" });
@@ -45,17 +85,47 @@ export function PublicSharePage({ token }: { readonly token: string }) {
     return () => {
       cancelled = true;
     };
-  }, [token, attempt]);
+  }, [token, attempt, ready, signedIn]);
+
+  // An org link without a session: sign in, then come back here.
+  useEffect(() => {
+    if (load.kind !== "signin") return;
+    const url = beginShareSignIn(token, window.location.href, Date.now());
+    if (url) window.location.replace(url);
+  }, [load.kind, token]);
 
   if (load.kind === "ready") {
-    const { share } = load;
-    return share.siteUrl ? <SharedApp token={token} share={{ ...share, siteUrl: share.siteUrl }} /> : <SharedFile token={token} share={share} />;
+    const { share, link, visitor } = load;
+    return share.siteUrl ? (
+      <SharedApp token={token} visitor={visitor} share={{ ...share, siteUrl: share.siteUrl }} />
+    ) : (
+      <SharedFile link={link} share={share} />
+    );
+  }
+  if (load.kind === "orgOnly") {
+    return (
+      <Frame>
+        <div className="grid flex-1 place-items-center p-6 text-center">
+          <div className="flex max-w-sm flex-col items-center gap-3">
+            <LockSimpleIcon size={36} className="text-[var(--color-fg-subtle)]" aria-hidden />
+            <h1 className="text-lg font-semibold tracking-tight">{load.message}</h1>
+            <p className="text-sm text-[var(--color-fg-muted)]">
+              You are signed in with an account outside that organization. Ask the person who shared it for access.
+            </p>
+          </div>
+        </div>
+      </Frame>
+    );
   }
   return (
     <Frame>
       <div className="grid flex-1 place-items-center p-6 text-center">
-        {load.kind === "loading" ? (
-          <div role="status" aria-label="Loading" className="size-6 animate-spin rounded-full border-2 border-[var(--color-border-strong)] border-t-[var(--color-accent)]" />
+        {load.kind === "loading" || load.kind === "signin" ? (
+          <div
+            role="status"
+            aria-label={load.kind === "signin" ? "Taking you to sign in" : "Loading"}
+            className="size-6 animate-spin rounded-full border-2 border-[var(--color-border-strong)] border-t-[var(--color-accent)]"
+          />
         ) : (
           <div className="flex max-w-sm flex-col items-center gap-3">
             <LinkBreakIcon size={36} className="text-[var(--color-fg-subtle)]" aria-hidden />
@@ -105,13 +175,13 @@ function Frame({ children, download }: { readonly children: React.ReactNode; rea
 
 /** The link's bytes for a byte-reading viewer (none for a site or a type no
  *  viewer renders). */
-function usePublicBytes(token: string, wanted: boolean, mimeType: string): { blob: Blob | null; error: boolean } {
+function usePublicBytes(link: string, wanted: boolean, mimeType: string): { blob: Blob | null; error: boolean } {
   const [state, setState] = useState<{ blob: Blob | null; error: boolean }>({ blob: null, error: false });
   useEffect(() => {
     if (!wanted) return;
     let cancelled = false;
     publicShareApi
-      .content(token)
+      .content(link)
       .then((b) => {
         const typed = mimeType && b.type !== mimeType ? b.slice(0, b.size, mimeType) : b;
         if (!cancelled) setState({ blob: typed, error: false });
@@ -122,11 +192,11 @@ function usePublicBytes(token: string, wanted: boolean, mimeType: string): { blo
     return () => {
       cancelled = true;
     };
-  }, [token, wanted, mimeType]);
+  }, [link, wanted, mimeType]);
   return state;
 }
 
-function SharedFile({ token, share }: { readonly token: string; readonly share: PublicShare }) {
+function SharedFile({ link, share }: { readonly link: string; readonly share: PublicShare }) {
   useViewerRegistry();
   const facts: ArtifactFileFacts = {
     kind: share.artifact.kind,
@@ -139,7 +209,7 @@ function SharedFile({ token, share }: { readonly token: string; readonly share: 
   // A site the gateway does not serve has no frame and no bytes here: the
   // file fallback offers the download.
   const runsSite = viewer?.input === "site";
-  const { blob, error } = usePublicBytes(token, viewer !== null && !runsSite, file.mimeType);
+  const { blob, error } = usePublicBytes(link, viewer !== null && !runsSite, file.mimeType);
   const [tools, setTools] = useState<{ items: readonly ViewerToolbarItem[]; emit: (id: string, value: ViewerToolbarValue) => void }>({
     items: [],
     emit: () => {},
@@ -152,7 +222,7 @@ function SharedFile({ token, share }: { readonly token: string; readonly share: 
     document.title = `${file.name} · ${PRODUCT}`;
   }, [file.name]);
 
-  const download = publicShareApi.downloadUrl(token);
+  const download = publicShareApi.downloadUrl(link);
   const Icon = categoryIcons[fileCategory(facts)];
   const details = [
     `Shared by ${share.sharedBy.displayName}`,

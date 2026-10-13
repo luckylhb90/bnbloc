@@ -16,6 +16,7 @@ import { DesktopConnectNotice } from "@/views/DesktopConnect";
 import { MacInstallGuideHost } from "@/views/MacInstallGuideHost";
 import { useWebUpdate, WebUpdateNotice } from "@/views/WebUpdateNotice";
 import { GettingStarted } from "@/views/onboarding/GettingStarted";
+import { takeLoginReturn } from "@/lib/loginReturn";
 import { TourOverlay } from "@/views/onboarding/TourOverlay";
 
 // Surfaces load on demand so the first paint ships only the shell and the
@@ -72,6 +73,13 @@ export function App() {
     if (route.artifactId) artifactLinks.queue(route.roomId, { artifactId: route.artifactId, version: route.artifactVersion });
     window.history.replaceState(null, "", routeHash({ kind: "room", roomId: route.roomId }));
   }, [route]);
+  // Signed in after a share page sent the person to sign in: back to it
+  // (lib/loginReturn), whichever way the sign-in came.
+  useEffect(() => {
+    if (!subject) return;
+    const back = takeLoginReturn(Date.now());
+    if (back) window.location.replace(back);
+  }, [subject]);
   // A clicked browser notification opens its deep link in this tab.
   useEffect(() => listenForPushNavigation(), []);
   // "Ask the agent about this" from a popped-out people chat window lands in
