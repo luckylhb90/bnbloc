@@ -3,7 +3,9 @@ package bridge
 import (
 	"context"
 	"errors"
+	"strconv"
 	"strings"
+	"time"
 
 	corepkg "github.com/luckylhb90/bnbloc/core"
 	"github.com/luckylhb90/bnbloc/internal/roomlog"
@@ -83,9 +85,10 @@ func (b *Bridge) refuse(ctx context.Context, d *drive, r *refusal) {
 func (b *Bridge) fail(ctx context.Context, d *drive, err error, diagnostics map[string]any) {
 	reason := driveFailureReason(err)
 	text := driveErrorText(d.job.Provider, err)
-	if agentFailed(err) && d.ownSandbox {
+	if agentFailed(err) && d.ownSandbox && credentialError(agentErrorDetail(err)) {
 		// No core declares the environment its agent needs, so a sandboxed
-		// own run whose agent failed says where the owner lets it in.
+		// own run whose agent could not authenticate says where the owner
+		// lets its credentials in.
 		text += " " + sandboxEnvHint
 	}
 	b.postNotice(ctx, d.ref(), wire.JobNotice{
@@ -196,6 +199,35 @@ type turnFailedError struct{ detail string }
 
 func (e turnFailedError) Error() string { return "turn failed: " + e.detail }
 
+// turnDeadlineError: the turn was still running at its deadline (the
+// bridge's bound, Config.MaxTurn; the core reports it with
+// FailCodeDeadline, or the bridge's own deadline passed). Final: the turn
+// ran.
+type turnDeadlineError struct{ after time.Duration }
+
+func (e turnDeadlineError) Error() string {
+	return "the turn ran out of time after " + humanDuration(e.after)
+}
+
+// humanDuration is a turn bound as a member reads it ("2 hours", "45
+// minutes").
+func humanDuration(d time.Duration) string {
+	switch {
+	case d >= time.Hour && d%time.Hour == 0:
+		if d == time.Hour {
+			return "1 hour"
+		}
+		return strconv.Itoa(int(d/time.Hour)) + " hours"
+	case d >= time.Minute:
+		if m := int(d.Round(time.Minute) / time.Minute); m != 1 {
+			return strconv.Itoa(m) + " minutes"
+		}
+		return "1 minute"
+	default:
+		return d.Round(time.Second).String()
+	}
+}
+
 // agentFailed reports a drive whose agent or core reported its turn failed:
 // the job fails whatever the turn posted (settle).
 func agentFailed(err error) bool {
@@ -203,8 +235,25 @@ func agentFailed(err error) bool {
 	return errors.As(err, &failed)
 }
 
-// sandboxEnvHint ends the notice of an own sandboxed run whose agent
-// reported an error: the guest gets only the default environment plus what
+// credentialMarks are what an agent's error says when it ran without its
+// credentials (a 401, a missing API key, no sign-in). A 403 is not one: the
+// key was there and refused (a model it may not use).
+var credentialMarks = []string{"401", "unauthorized", "api key", "api_key", "apikey", "not logged in", "login required", "authentication", "credential"}
+
+// credentialError reports an agent error that reads as missing
+// credentials: the only failure the sandbox environment hint is for.
+func credentialError(detail string) bool {
+	d := strings.ToLower(detail)
+	for _, m := range credentialMarks {
+		if strings.Contains(d, m) {
+			return true
+		}
+	}
+	return false
+}
+
+// sandboxEnvHint ends the notice of an own sandboxed run whose agent could
+// not authenticate: the guest gets only the default environment plus what
 // the owner listed (SandboxConfig.Env).
 const sandboxEnvHint = "It ran in the agent sandbox, which receives only the environment variables listed in Settings → Agent sandbox → Environment passed to sandboxed agents: add any its agent needs from this computer, such as an API key."
 
@@ -237,7 +286,8 @@ var errNoReply = errors.New("agent turn completed without a visible reply")
 // deterministic failure, an error of unknown stage — is runner_failed,
 // which never retries.
 func driveFailureReason(err error) store.AgentJobFailureReason {
-	if errors.Is(err, errNoReply) {
+	var deadline turnDeadlineError
+	if errors.Is(err, errNoReply) || errors.As(err, &deadline) {
 		return store.FailureReplyTimeout
 	}
 	if agentFailed(err) {
@@ -284,9 +334,12 @@ func driveFailureNotice(err error) string {
 func driveErrorText(provider string, err error) string {
 	var failed turnFailedError
 	var notReady sandboxNotReadyError
+	var deadline turnDeadlineError
 	switch {
 	case errors.Is(err, errNoReply):
 		return "The " + provider + " agent finished without a visible reply."
+	case errors.As(err, &deadline):
+		return "The " + provider + " agent ran out of time after " + humanDuration(deadline.after) + " and was stopped."
 	case errors.As(err, &notReady):
 		return "The " + provider + " agent did not start: its agent sandbox is still starting."
 	case errors.As(err, &failed):

@@ -7,6 +7,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // Service holds the common configuration shared by every bnbloc service.
@@ -50,6 +51,17 @@ func GetInt(key string, fallback int) int {
 	if v, ok := os.LookupEnv(key); ok {
 		if n, err := strconv.Atoi(v); err == nil {
 			return n
+		}
+	}
+	return fallback
+}
+
+// Duration reads a positive Go duration ("2h", "90m") from the environment;
+// unset, unparsable or not positive is fallback.
+func Duration(key string, fallback time.Duration) time.Duration {
+	if v, ok := os.LookupEnv(key); ok {
+		if d, err := time.ParseDuration(strings.TrimSpace(v)); err == nil && d > 0 {
+			return d
 		}
 	}
 	return fallback

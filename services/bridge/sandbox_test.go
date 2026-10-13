@@ -2,9 +2,11 @@ package bridge
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/luckylhb90/bnbloc/internal/wire"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -200,6 +202,7 @@ type sandboxGateway struct {
 	statuses []map[string]any
 	tenants  []string
 	reserves []map[string]any
+	progress []wire.JobProgressInput
 }
 
 func newSandboxGateway(t *testing.T, room string, require bool) *sandboxGateway {
@@ -234,6 +237,13 @@ func newSandboxGateway(t *testing.T, room string, require bool) *sandboxGateway 
 			default:
 				_, _ = w.Write([]byte(`{"reserved":true,"reservationId":"rsv"}`))
 			}
+		case strings.HasSuffix(r.URL.Path, "/progress"):
+			var body wire.JobProgressInput
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			g.mu.Lock()
+			g.progress = append(g.progress, body)
+			g.mu.Unlock()
+			w.WriteHeader(http.StatusNoContent)
 		case strings.HasSuffix(r.URL.Path, "/status"):
 			var body map[string]any
 			_ = json.NewDecoder(r.Body).Decode(&body)
@@ -583,13 +593,17 @@ func TestSandbox_ownDriveForwardsTheOwnersEnv_borrowedNever(t *testing.T) {
 }
 
 // failingSandboxProv is a sandboxExec core whose every turn fails: busy
-// once, then idle and failed with the agent's missing-key message.
-type failingSandboxProv struct{ sandboxProv }
+// once, then idle and failed with the agent's message (default: a missing
+// key).
+type failingSandboxProv struct {
+	sandboxProv
+	message string
+}
 
 func (p *failingSandboxProv) PollTurn(ctx context.Context, ep corepkg.Endpoint, ws, s string) (corepkg.TurnStatus, error) {
 	ts, err := p.sandboxProv.PollTurn(ctx, ep, ws, s)
 	if ts.Idle {
-		ts.Failed, ts.FailMessage = true, "Missing environment variable: `EXAMPLE_API_KEY`"
+		ts.Failed, ts.FailMessage = true, cmp.Or(p.message, "Missing environment variable: `EXAMPLE_API_KEY`")
 	}
 	return ts, err
 }
@@ -603,7 +617,7 @@ func TestSandbox_agentErrorHintsAtTheEnvSetting_onOwnRunsOnly(t *testing.T) {
 		hint      bool
 	}{{"alice", true}, {"bob", false}} {
 		gw := newSandboxGateway(t, "room-1", false)
-		prov := &failingSandboxProv{sandboxProv{supports: true}}
+		prov := &failingSandboxProv{sandboxProv: sandboxProv{supports: true}}
 		b, _ := sandboxBridge(t, gw, newFakeSandboxd(t), SandboxAll, prov)
 		b.runBridgeJob(context.Background(), job("job-1", tc.requester))
 
@@ -620,6 +634,33 @@ func TestSandbox_agentErrorHintsAtTheEnvSetting_onOwnRunsOnly(t *testing.T) {
 		}
 		if !strings.Contains(payloadField(fresh[0], "detail"), "EXAMPLE_API_KEY") {
 			t.Fatalf("%s: notice detail = %q", tc.requester, payloadField(fresh[0], "detail"))
+		}
+	}
+}
+
+// The environment hint is only for an agent that could not authenticate:
+// any other failure of an own sandboxed run (a network error, a model the
+// key may not use) never sends the owner to the sandbox settings.
+func TestSandbox_envHintOnlyForCredentialErrors(t *testing.T) {
+	for _, tc := range []struct {
+		message string
+		hint    bool
+	}{
+		{"API Error: 401 Unauthorized", true},
+		{"Not logged in. Please run /login", true},
+		{"API Error: Connection refused (ECONNREFUSED)", false},
+		{"unexpected status 403 Forbidden: the model is not available for this key", false},
+	} {
+		gw := newSandboxGateway(t, "room-1", false)
+		prov := &failingSandboxProv{sandboxProv: sandboxProv{supports: true}, message: tc.message}
+		b, _ := sandboxBridge(t, gw, newFakeSandboxd(t), SandboxAll, prov)
+		b.runBridgeJob(context.Background(), job("job-1", "alice"))
+		_, fresh := gw.stored()
+		if len(fresh) != 1 {
+			t.Fatalf("%q: rows = %+v", tc.message, fresh)
+		}
+		if got := strings.Contains(payloadText(fresh[0]), "Environment passed to sandboxed agents"); got != tc.hint {
+			t.Fatalf("%q: hint = %v, want %v", tc.message, got, tc.hint)
 		}
 	}
 }
