@@ -168,7 +168,14 @@ Nothing changes: a member's site (`/v1/sites/{ticket}`) and the
 
 ## Amendment: links anyone signed in can open (2026-10-13)
 
-Status: accepted by the product owner (2026-10-13, final); being built.
+Status: accepted by the product owner (2026-10-13, final); **landed**
+2026-10-13: recorded in c92385b, the store, room service, gateway and
+settings in 8bc0d83 (migration `2026_10_share_link_signed_in`), the web
+in 658d9e0. Decided while building: the policy is two switches with one
+owner (an outside switch that implies the anonymous one reads better in
+the settings than one three-way control, and keeps the existing column's
+meaning, so the migration only adds); a link's active access in the share
+dialog's list is a selector of the three modes.
 
 ### Decision
 
