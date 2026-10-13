@@ -1,0 +1,584 @@
+package gateway
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"net/http"
+	"net/url"
+	"slices"
+	"strings"
+	"unicode/utf8"
+
+	"github.com/luckylhb90/bnbloc/internal/assist"
+	"github.com/luckylhb90/bnbloc/internal/auth"
+	"github.com/luckylhb90/bnbloc/internal/contentpkg"
+	"github.com/luckylhb90/bnbloc/internal/contentuse"
+	"github.com/luckylhb90/bnbloc/internal/extpipe"
+	"github.com/luckylhb90/bnbloc/internal/httpx"
+	"github.com/luckylhb90/bnbloc/internal/obs"
+	"github.com/luckylhb90/bnbloc/internal/roomlog"
+	"github.com/luckylhb90/bnbloc/internal/store"
+	"github.com/luckylhb90/bnbloc/internal/wire"
+)
+
+// AI assist (docs/prd/2026-10-13-ai-assist.md): the deployment's assist
+// model behind every manual entry point, through one API. internal/assist
+// owns the model, the prompt and the reply; this file admits the caller,
+// resolves the context a task declares as the member reads it, and relays
+// the reply.
+//
+//	GET  /v1/assist                       whether assists run for the caller, and the tasks
+//	POST /v1/assist/{task}                one run: SSE for a text task, JSON for a JSON task
+//	GET  /v1/platform/assist-model        the model (never its key)
+//	PUT  /v1/platform/assist-model        set it (super admin)
+//	POST /v1/platform/assist-model/test   one short completion
+
+// assistRate bounds one member's assist runs: 20 a minute, on top of the
+// cost budget every run spends.
+const (
+	assistRate  = 20.0 / 60.0
+	assistBurst = 20.0
+)
+
+// maxAssistRequestBytes bounds a run's body (the text plus ids).
+const maxAssistRequestBytes = 64 << 10
+
+// errAssistUnavailable: no model, or the organization turned assists off.
+var errAssistUnavailable = errors.New("AI assists are not available: the deployment has no assist model, or your organization turned them off")
+
+func (s *Service) assistSettings() *assist.Settings {
+	return &assist.Settings{Store: s.PlatformSettings, Box: s.SecretBox, Now: func() int64 { return s.nowTime().UnixMilli() }}
+}
+
+// assistModel is the model assists run on for claims' organization (ok
+// false: none configured, or the organization turned assists off).
+func (s *Service) assistModel(ctx context.Context, claims auth.Claims) (assist.Model, bool, error) {
+	if s.PlatformSettings == nil {
+		return assist.Model{}, false, nil
+	}
+	m, err := s.assistSettings().Model(ctx)
+	if err != nil || !m.Configured() {
+		return assist.Model{}, false, err
+	}
+	t, err := s.tenantSettings(ctx, claims.Tenant)
+	if err != nil && !errors.Is(err, store.ErrTenantNotFound) {
+		return assist.Model{}, false, err
+	}
+	return m, !t.AssistDisabled, nil
+}
+
+// assistTask is a resolved task: its component, version and package.
+type assistTask struct {
+	Component store.ContentComponent
+	Version   store.ContentComponentVersion
+	Package   *contentpkg.Package
+}
+
+func (s *Service) loadAssistTask(ctx context.Context, c store.ContentComponent) (assistTask, error) {
+	v, err := s.ContentComponents.GetContentComponentVersion(ctx, c.ID, c.LatestVersion)
+	if err != nil {
+		return assistTask{}, err
+	}
+	pkg, err := s.contentPackage(ctx, v)
+	if err != nil {
+		return assistTask{}, err
+	}
+	return assistTask{Component: c, Version: v, Package: pkg}, nil
+}
+
+// handleAssistStatus answers GET /v1/assist: whether assists run for the
+// caller and, when they do, the tasks (nearest first by name).
+func (s *Service) handleAssistStatus(w http.ResponseWriter, r *http.Request, claims auth.Claims) {
+	ctx := r.Context()
+	out := wire.AssistStatus{Tasks: []wire.AssistTask{}}
+	_, ok, err := s.assistModel(ctx, claims)
+	if err != nil {
+		obs.ServerError(w, "read the assist model failed", err)
+		httpx.Error(w, "read the assist model failed", http.StatusInternalServerError)
+		return
+	}
+	if !ok {
+		httpx.WriteJSON(w, http.StatusOK, out)
+		return
+	}
+	list, err := assist.Tasks(ctx, s.ContentComponents, viewerOf(claims))
+	if err != nil {
+		contentStoreErr(w, "list assists failed", err)
+		return
+	}
+	for _, c := range list {
+		v, err := s.ContentComponents.GetContentComponentVersion(ctx, c.ID, c.LatestVersion)
+		if errors.Is(err, store.ErrContentNotFound) {
+			continue
+		}
+		if err != nil {
+			contentStoreErr(w, "load assist failed", err)
+			return
+		}
+		m, err := contentuse.Manifest(v)
+		if err != nil {
+			continue
+		}
+		out.Tasks = append(out.Tasks, wire.AssistTask{Name: c.Name, DisplayName: m.DisplayName, ComponentID: c.ID,
+			Output: m.Output, Fields: m.Fields, Context: m.Context})
+	}
+	out.Available = true
+	httpx.WriteJSON(w, http.StatusOK, out)
+}
+
+// handleAssist answers POST /v1/assist/{task}: one run of the nearest task
+// of that name on the assist model, with the context the task declares.
+func (s *Service) handleAssist(w http.ResponseWriter, r *http.Request, claims auth.Claims) {
+	ctx := r.Context()
+	if !s.assistLimiter.get(assistRate, assistBurst, s.Peers.Size).allow(claims.Tenant + "/" + claims.Subject) {
+		httpx.Error(w, "too many AI assists: try again in a minute", http.StatusTooManyRequests)
+		return
+	}
+	raw, ok := readBody(w, r, maxAssistRequestBytes)
+	if !ok {
+		return
+	}
+	var req wire.AssistRequest
+	if err := json.Unmarshal(raw, &req); err != nil {
+		httpx.Error(w, "invalid json body", http.StatusBadRequest)
+		return
+	}
+	if !utf8.ValidString(req.Text) || utf8.RuneCountInString(req.Text) > wire.MaxAssistText {
+		httpx.Error(w, fmt.Sprintf("text must be at most %d characters", wire.MaxAssistText), http.StatusBadRequest)
+		return
+	}
+	if len(req.AttachmentIDs) > wire.MaxAssistAttachments {
+		httpx.Error(w, fmt.Sprintf("at most %d attachments", wire.MaxAssistAttachments), http.StatusBadRequest)
+		return
+	}
+	model, ok, err := s.assistModel(ctx, claims)
+	if err != nil {
+		obs.ServerError(w, "read the assist model failed", err)
+		httpx.Error(w, "read the assist model failed", http.StatusInternalServerError)
+		return
+	}
+	if !ok {
+		httpx.Error(w, errAssistUnavailable.Error(), http.StatusConflict)
+		return
+	}
+	c, found, err := assist.Task(ctx, s.ContentComponents, viewerOf(claims), r.PathValue("task"))
+	if err != nil {
+		contentStoreErr(w, "resolve the assist failed", err)
+		return
+	}
+	if !found {
+		httpx.Error(w, "no such AI assist", http.StatusNotFound)
+		return
+	}
+	task, err := s.loadAssistTask(ctx, c)
+	if err != nil {
+		contentStoreErr(w, "load the assist failed", err)
+		return
+	}
+	actx, err := s.assistContext(ctx, claims, task.Package.Manifest.Context, req)
+	if err != nil {
+		writeAssistContextErr(w, err)
+		return
+	}
+	if strings.TrimSpace(req.Text) == "" && actx.Room == nil && actx.Artifact == nil && len(actx.Attachments) == 0 {
+		httpx.Error(w, "nothing to work from: type something first", http.StatusBadRequest)
+		return
+	}
+	msgs := assist.Messages(task.Package.Instructions, req.Text, actx)
+	if task.Package.Manifest.Output == wire.AssistOutputJSON {
+		s.assistJSON(w, r, claims, task, model, msgs)
+		return
+	}
+	s.assistText(w, r, claims, task, model, msgs)
+}
+
+// assistJSON runs a JSON task and answers its fields.
+func (s *Service) assistJSON(w http.ResponseWriter, r *http.Request, claims auth.Claims, task assistTask, model assist.Model, msgs []assist.Message) {
+	text, usage, err := s.assistClient().Complete(r.Context(), model, msgs, true)
+	var fields map[string]any
+	if err == nil {
+		fields, err = assist.Fields(text, task.Package.Manifest.Fields)
+	}
+	s.auditAssist(r.Context(), claims, task, usage, err)
+	if err != nil {
+		writeAssistModelErr(w, err)
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, wire.AssistJSONReply{Fields: fields, Usage: usage})
+}
+
+// assistText runs a text task as Server-Sent Events: "delta" {text} per
+// piece, then "done" {usage}, or "error" {error} once the stream started.
+// A failure before the first piece answers an HTTP error instead.
+func (s *Service) assistText(w http.ResponseWriter, r *http.Request, claims auth.Claims, task assistTask, model assist.Model, msgs []assist.Message) {
+	rc := http.NewResponseController(w)
+	started := false
+	start := func() {
+		if started {
+			return
+		}
+		started = true
+		h := w.Header()
+		h.Set("Content-Type", "text/event-stream")
+		h.Set("Cache-Control", "no-cache")
+		h.Set("X-Accel-Buffering", "no")
+		w.WriteHeader(http.StatusOK)
+	}
+	send := func(event string, v any) error {
+		start()
+		data, err := json.Marshal(v)
+		if err != nil {
+			return err
+		}
+		if _, err := fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event, data); err != nil {
+			return err
+		}
+		return rc.Flush()
+	}
+	usage, err := s.assistClient().Stream(r.Context(), model, msgs, func(piece string) error {
+		return send("delta", wire.AssistDelta{Text: piece})
+	})
+	s.auditAssist(r.Context(), claims, task, usage, err)
+	switch {
+	case err == nil:
+		_ = send("done", wire.AssistDone{Usage: usage})
+	case started:
+		_ = send("error", map[string]string{"error": assistErrText(err)})
+	default:
+		writeAssistModelErr(w, err)
+	}
+}
+
+// assistClient is the model client (the tests' transport when set).
+func (s *Service) assistClient() *assist.Client {
+	return &assist.Client{Transport: s.AssistTransport, Now: s.nowTime}
+}
+
+// auditAssist records a run: the task, the model, the tokens and the
+// latency, never the text.
+func (s *Service) auditAssist(ctx context.Context, claims auth.Claims, task assistTask, usage wire.AssistUsage, runErr error) {
+	outcome, detail := wire.AuditOutcomeAllow, fmt.Sprintf("component %s, model %s, %d prompt + %d completion tokens, %d ms",
+		task.Component.ID, usage.Model, usage.PromptTokens, usage.CompletionTokens, usage.LatencyMs)
+	if runErr != nil {
+		outcome, detail = "failed", detail+", failed: "+assistErrClass(runErr)
+	}
+	s.audit(ctx, claims.Tenant, store.ExtAuditRecord{
+		Kind: wire.AuditKindAssist, Name: task.Component.Name + "@" + task.Version.Version, Action: "run",
+		Actor: claims.Subject, Outcome: outcome, Detail: detail,
+	})
+}
+
+// assistErrClass names a failure for the audit row without the provider's
+// message (it may quote the request).
+func assistErrClass(err error) string {
+	var me *assist.ModelError
+	switch {
+	case errors.As(err, &me):
+		return fmt.Sprintf("model answered %d", me.Status)
+	case errors.Is(err, assist.ErrBadReply):
+		return "unreadable reply"
+	case errors.Is(err, context.Canceled):
+		return "caller went away"
+	}
+	return "model unreachable"
+}
+
+func assistErrText(err error) string {
+	var me *assist.ModelError
+	if errors.As(err, &me) || errors.Is(err, assist.ErrBadReply) {
+		return err.Error()
+	}
+	return "the assist model could not be reached: " + err.Error()
+}
+
+func writeAssistModelErr(w http.ResponseWriter, err error) {
+	if errors.Is(err, context.Canceled) {
+		return
+	}
+	obs.ServerError(w, "the assist model failed", err)
+	httpx.Error(w, assistErrText(err), http.StatusBadGateway)
+}
+
+// errAssistNotFound: a room, deliverable, expert or attachment the request
+// names is not one the member reads.
+var errAssistNotFound = errors.New("not found")
+
+func writeAssistContextErr(w http.ResponseWriter, err error) {
+	var bad assistBadRequest
+	switch {
+	case errors.As(err, &bad):
+		httpx.Error(w, string(bad), http.StatusBadRequest)
+	case errors.Is(err, errAssistNotFound):
+		httpx.Error(w, "the room, deliverable, expert or attachment is not one you can read", http.StatusNotFound)
+	default:
+		obs.ServerError(w, "read the assist's context failed", err)
+		httpx.Error(w, "read the assist's context failed", http.StatusBadGateway)
+	}
+}
+
+type assistBadRequest string
+
+func (e assistBadRequest) Error() string { return string(e) }
+
+// assistContext resolves the contexts the task declares (others are never
+// read, whatever the request names) as the member reads them: the room
+// (its name, expert, skill packs and recent messages), a deliverable of it
+// (title, type, file, the request that produced it) and attachments of it
+// (names and types).
+func (s *Service) assistContext(ctx context.Context, claims auth.Claims, declared []string, req wire.AssistRequest) (assist.Context, error) {
+	var out assist.Context
+	roomID := strings.TrimSpace(req.RoomID)
+	wants := func(c string) bool { return slices.Contains(declared, c) }
+	needsRoom := (wants(wire.AssistContextRoom) && roomID != "") ||
+		(wants(wire.AssistContextArtifact) && req.ArtifactID != "") ||
+		(wants(wire.AssistContextAttachments) && len(req.AttachmentIDs) > 0)
+	if !needsRoom {
+		return out, nil
+	}
+	if roomID == "" {
+		return out, assistBadRequest("a deliverable and attachments are a room's: name the room (roomId)")
+	}
+	rc, ok := s.roomClaims(claims, roomID)
+	if !ok {
+		return out, errAssistNotFound
+	}
+	if wants(wire.AssistContextRoom) {
+		room, err := s.assistRoom(ctx, rc, roomID, strings.TrimSpace(req.ChannelID), strings.TrimSpace(req.ExpertID))
+		if err != nil {
+			return out, err
+		}
+		out.Room = room
+	}
+	if wants(wire.AssistContextArtifact) && req.ArtifactID != "" {
+		art, err := s.assistArtifact(ctx, rc, roomID, strings.TrimSpace(req.ArtifactID))
+		if err != nil {
+			return out, err
+		}
+		out.Artifact = art
+	}
+	if wants(wire.AssistContextAttachments) {
+		for _, id := range req.AttachmentIDs {
+			meta, found, err := s.attachmentMeta(ctx, rc, roomID, strings.TrimSpace(id))
+			if err != nil {
+				return out, err
+			}
+			if !found {
+				return out, errAssistNotFound
+			}
+			out.Attachments = append(out.Attachments, assist.Attachment{Name: meta.Filename, ContentType: meta.ContentType})
+		}
+	}
+	return out, nil
+}
+
+// assistRoom reads a room as its member: the room service answers its
+// name to members only, realtime its recent messages (in the channel, the
+// default one when ""), and the Library its expert (the one picked for the
+// message, else the room's) and skill packs (the room's and the member's).
+func (s *Service) assistRoom(ctx context.Context, claims auth.Claims, roomID, channelID, expertID string) (*assist.Room, error) {
+	var detail struct {
+		Name    string `json:"name"`
+		Preview bool   `json:"preview"`
+	}
+	err := s.roomBackendDo(ctx, backendHTTP, http.MethodGet, "/v1/rooms/"+url.PathEscape(roomID), "", nil, claims.Subject, claims.Tenant, &detail)
+	var rbe *roomBackendError
+	switch {
+	case errors.As(err, &rbe) && rbe.Status < http.StatusInternalServerError:
+		return nil, errAssistNotFound
+	case err != nil:
+		return nil, err
+	case detail.Preview:
+		return nil, errAssistNotFound
+	}
+	room := &assist.Room{Name: detail.Name}
+	if room.Recent, err = s.assistRecent(ctx, claims, roomID, channelID); err != nil {
+		return nil, err
+	}
+	if s.ContentComponents == nil {
+		return room, nil
+	}
+	if expertID == "" {
+		if expertID, err = s.roomExpertOf(ctx, roomID); err != nil {
+			return nil, err
+		}
+	}
+	if expertID != "" {
+		c, err := s.ContentComponents.GetContentComponent(ctx, expertID)
+		switch {
+		case errors.Is(err, store.ErrContentNotFound):
+		case err != nil:
+			return nil, err
+		case c.Kind == contentpkg.KindExpert && (extpipe.MemberVisibility(viewerOf(claims), extpipe.GateForContent(c), 0).Installed || s.contentInRoom(ctx, claims, roomID, c.ID)):
+			room.Expert = &assist.Part{Name: firstNonEmpty(c.DisplayName, c.Name), Description: c.Description}
+		}
+	}
+	roomUses, err := s.ContentComponents.ListContentUses(ctx, store.ContentUseRoom, roomID)
+	if err != nil {
+		return nil, err
+	}
+	memberUses, err := s.ContentComponents.ListContentUses(ctx, store.ContentUseMember, claims.Subject)
+	if err != nil {
+		return nil, err
+	}
+	seen := map[string]bool{}
+	for i, u := range append(roomUses, memberUses...) {
+		if u.Kind != contentpkg.KindSkill || seen[u.ComponentID] {
+			continue
+		}
+		c, err := s.ContentComponents.GetContentComponent(ctx, u.ComponentID)
+		if errors.Is(err, store.ErrContentNotFound) {
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		if i >= len(roomUses) && !extpipe.MemberVisibility(viewerOf(claims), extpipe.GateForContent(c), 0).Installed {
+			continue
+		}
+		seen[c.ID] = true
+		room.Skills = append(room.Skills, assist.Part{Name: firstNonEmpty(c.DisplayName, c.Name), Description: c.Description})
+	}
+	return room, nil
+}
+
+// assistRecent reads a room channel's latest messages as its member
+// (realtime decides who reads it), oldest first, through the one history
+// row decoder.
+func (s *Service) assistRecent(ctx context.Context, claims auth.Claims, roomID, channelID string) ([]assist.Line, error) {
+	base := strings.TrimRight(s.Backends.Realtime, "/")
+	if base == "" {
+		return nil, nil
+	}
+	q := url.Values{"limit": {"30"}}
+	if channelID != "" {
+		q.Set("channelId", channelID)
+	}
+	resp, err := callBackend(ctx, http.MethodGet, base+"/v1/rooms/"+url.PathEscape(roomID)+"/history?"+q.Encode(), nil, claims.Subject, claims.Tenant)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	switch {
+	case resp.StatusCode >= http.StatusInternalServerError:
+		return nil, upstreamStatusError(resp)
+	case resp.StatusCode != http.StatusOK:
+		return nil, errAssistNotFound
+	}
+	var page struct {
+		Messages []roomlog.Row `json:"messages"`
+	}
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 4<<20)).Decode(&page); err != nil {
+		return nil, fmt.Errorf("decode room history: %w", err)
+	}
+	var lines []assist.Line
+	for _, row := range page.Messages {
+		for _, e := range roomlog.DecodeRow(row) {
+			lines = append(lines, assist.Line{Speaker: e.Speaker, Text: e.Text})
+		}
+	}
+	// The history answers newest first.
+	slices.Reverse(lines)
+	if len(lines) > assist.RecentMessages {
+		lines = lines[len(lines)-assist.RecentMessages:]
+	}
+	return lines, nil
+}
+
+// assistArtifact reads a deliverable of the room as its member: its
+// title, type and file, and the request that produced its current version
+// (the one recipe owner's capture).
+func (s *Service) assistArtifact(ctx context.Context, claims auth.Claims, roomID, artifactID string) (*assist.Artifact, error) {
+	art, v, err := s.deliverableVersion(ctx, claims, roomID, artifactID)
+	if errors.Is(err, errSiteNotFound) {
+		return nil, errAssistNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	out := &assist.Artifact{Title: art.Title, FileName: art.FileName,
+		Type: contentpkg.WorkTypeOf(contentpkg.WorkDeliverable{Artifact: art, FileName: art.FileName})}
+	captured, err := s.deliverableRecipe(ctx, claims, roomID, v)
+	if err != nil {
+		return nil, err
+	}
+	if captured.Recipe != nil {
+		out.Request = captured.Recipe.Prompt
+	}
+	return out, nil
+}
+
+// handleAssistModel answers GET /v1/platform/assist-model.
+func (s *Service) handleAssistModel(w http.ResponseWriter, r *http.Request, claims auth.Claims) {
+	view, err := s.assistSettings().View(r.Context())
+	if err != nil {
+		obs.ServerError(w, "read the assist model failed", err)
+		httpx.Error(w, "read the assist model failed", http.StatusInternalServerError)
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, view)
+}
+
+// handlePutAssistModel answers PUT /v1/platform/assist-model.
+func (s *Service) handlePutAssistModel(w http.ResponseWriter, r *http.Request, claims auth.Claims) {
+	var u wire.AssistModelUpdate
+	if !httpx.DecodeJSON(w, r, 16<<10, &u) {
+		return
+	}
+	view, err := s.assistSettings().Put(r.Context(), u, claims.Subject)
+	switch {
+	case errors.Is(err, assist.ErrSettingsOff):
+		httpx.Error(w, err.Error(), http.StatusConflict)
+		return
+	case errors.Is(err, assist.ErrInvalidSettings):
+		httpx.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	case err != nil:
+		obs.ServerError(w, "save the assist model failed", err)
+		httpx.Error(w, "save the assist model failed", http.StatusInternalServerError)
+		return
+	}
+	action, detail := "model-set", "model "+view.Model+" at "+hostOf(view.BaseURL)
+	if view.BaseURL == "" {
+		action, detail = "model-clear", "assists turned off"
+	}
+	s.audit(r.Context(), claims.Tenant, store.ExtAuditRecord{Kind: wire.AuditKindAssist, Name: "assist-model", Action: action,
+		Actor: claims.Subject, Outcome: wire.AuditOutcomeAllow, Detail: detail})
+	httpx.WriteJSON(w, http.StatusOK, view)
+}
+
+// handleTestAssistModel answers POST /v1/platform/assist-model/test: one
+// short completion through the stored model; a failure is the answer, not
+// an HTTP error.
+func (s *Service) handleTestAssistModel(w http.ResponseWriter, r *http.Request, claims auth.Claims) {
+	m, err := s.assistSettings().Model(r.Context())
+	if err != nil {
+		obs.ServerError(w, "read the assist model failed", err)
+		httpx.Error(w, "read the assist model failed", http.StatusInternalServerError)
+		return
+	}
+	if !m.Configured() {
+		httpx.Error(w, "no assist model is configured", http.StatusConflict)
+		return
+	}
+	reply, usage, err := s.assistClient().Complete(r.Context(), m, []assist.Message{
+		{Role: "system", Content: "Reply with the single word OK."},
+		{Role: "user", Content: "ping"},
+	}, false)
+	out := wire.AssistModelTest{OK: err == nil, Usage: usage}
+	if err != nil {
+		out.Error = assistErrText(err)
+	} else if out.Reply = strings.TrimSpace(reply); utf8.RuneCountInString(out.Reply) > 200 {
+		out.Reply = string([]rune(out.Reply)[:200]) + "…"
+	}
+	httpx.WriteJSON(w, http.StatusOK, out)
+}
+
+func hostOf(raw string) string {
+	if u, err := url.Parse(raw); err == nil {
+		return u.Host
+	}
+	return ""
+}

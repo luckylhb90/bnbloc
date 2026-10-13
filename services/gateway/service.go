@@ -119,9 +119,13 @@ type Service struct {
 	ExtPipe          *extpipe.Pipeline
 	extPipeOnce      sync.Once
 	AllowExtUnsigned bool
-	// SecretBox seals organization MCP connectors (BNBLOC_SECRET_STORE_KEY);
-	// nil turns org connectors off (mcp_tools.go).
+	// SecretBox seals organization MCP connectors and the assist model's
+	// key (BNBLOC_SECRET_STORE_KEY); nil turns both off (mcp_tools.go,
+	// assist.go).
 	SecretBox *sealbox.Box
+	// AssistTransport, when set, carries the assist model's calls (tests);
+	// the host guard applies either way (internal/assist).
+	AssistTransport http.RoundTripper
 	// ComponentInstalls persists per-member opt-in installs of distributed
 	// components (rollout=optin extension records). nil (in-memory dev/tests)
 	// leaves optin components hidden for everyone; auto ones still distribute.
@@ -157,7 +161,9 @@ type Service struct {
 	// appLimiters an interactive app's data calls per IP, link and
 	// participant, reads and writes apart (appRates).
 	visitorLimiter lazyLimiter
-	appLimiters    [appDims]struct{ read, write lazyLimiter }
+	// assistLimiter throttles a member's AI assist runs (assistRate).
+	assistLimiter lazyLimiter
+	appLimiters   [appDims]struct{ read, write lazyLimiter }
 	// appFeedRecheck overrides how often an app's change feed re-resolves
 	// its capability (tests; zero: appFeedRecheck).
 	appFeedRecheck time.Duration

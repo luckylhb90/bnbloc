@@ -215,6 +215,9 @@ func (s *Service) routes() []route {
 		gated("POST /v1/content-components/{id}/use-app", create, s.handleUseApp).spends(costBudget).with(needContent),
 		gated("POST /v1/content-components/{id}/make-similar", create, s.handleMakeSimilar).spends(costBudget).with(needContent),
 		gated("POST /v1/rooms/{roomId}/artifacts/{artifactId}/publish-work", drive, s.handlePublishWork).spends(costBudget).with(needContent),
+		// AI assist (assist.go): the assist model behind manual entry points.
+		member("GET /v1/assist", s.handleAssistStatus).with(needContent),
+		gated("POST /v1/assist/{task}", drive, s.handleAssist).spends(costBudget).with(needContent),
 		member("GET /v1/rooms/{roomId}/artifacts/{artifactId}/recipe", s.handleDeliverableRecipe).with(needContent),
 
 		// Organization administration (manage_org in the acting tenant).
@@ -255,6 +258,9 @@ func (s *Service) routes() []route {
 		gated("POST /v1/platform/api-tokens", platform, s.handleCreateAPIToken),
 		gated("DELETE /v1/platform/api-tokens/{id}", platform, s.handleRevokeAPIToken),
 		gated("POST /v1/platform/alerts", platform, s.handlePlatformAlert),
+		gated("GET /v1/platform/assist-model", platform, s.handleAssistModel),
+		gated("PUT /v1/platform/assist-model", platform, s.handlePutAssistModel),
+		gated("POST /v1/platform/assist-model/test", platform, s.handleTestAssistModel),
 		gated("GET /v1/platform/content-components", platform, s.handleListPlatformContent).with(needContent),
 		gated("GET /v1/platform/content-components/{id}/package", platform, s.handleExportContentPackage).with(needContent),
 		gated("POST /v1/platform/content-components/{id}/unpublish", platform, s.handlePlatformContentStatus(store.ContentStatusRetired)).with(needContent),

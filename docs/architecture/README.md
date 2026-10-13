@@ -37,6 +37,10 @@ extend it" references.
   MCP tool components (`bnbloc.mcp.package/v1`, platform-published stdio
   binaries or http endpoints that content requires by name) are in the same
   document: distribution to desktops, member and organization credentials.
+- [AI assist](ai-assist.md) — the deployment's assist model behind manual
+  entry points (the composer's "enhance prompt", a form's "Fill with AI"):
+  the model's settings and client, assist tasks as content resolved by name,
+  the context a run reads and the fenced prompt.
 - [Room tools](room-tools.md) — how an agent lists the room's agents and
   dispatches work to them (`ask_agent`): the bridge's loopback MCP server and
   its per-session bearers, the realtime dispatch route, its authority (the

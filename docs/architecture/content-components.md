@@ -20,12 +20,13 @@ servers content requires, see "MCP tool components"):
 | Skill pack | `bnbloc.skill.package/v1` | `component.json` (`skills: [names]`), `<name>/SKILL.md` per skill, optional `README.md` |
 | Prompt pack | `bnbloc.prompt.package/v1` | `component.json` (its `prompts`), optional `README.md` (see "Prompt packs") |
 | Work | `bnbloc.work.package/v1` | `component.json` (`type`, `file`, `recipe`), a site folder (`index.html` at the root or `dist/index.html`) or one file at the root, optional cover (`cover.png`, `.webp`, `.jpg` or `.jpeg`), `README.md` and the recipe's `references/` (see "Works") |
+| Assist | `bnbloc.assist.package/v1` | `component.json` (`output`, `fields`, `context`), `INSTRUCTIONS.md` (the task's system prompt), optional `README.md` (see [AI assist](ai-assist.md)) |
 
 A package is a plain ustar bundle (`internal/tarbundle`, limit profile
 `tarbundle.ContentLimits`: 8 MiB, 512 files; a prompt pack's own profile,
 `contentpkg.PromptLimits`, is 1 MiB and 2 files; a work's,
 `contentpkg.WorkLimits`, a site snapshot's plus its references, cover and
-manifest). A bundle is
+manifest; an assist's, `contentpkg.AssistLimits`, 64 KiB and 3 files). A bundle is
 read within `contentpkg.BundleLimits()`, the widest registered profile,
 until its manifest names the kind (uploads, stored versions, imports). **One validator,
 `internal/contentpkg`**, backs every entry point (form saves, archive
