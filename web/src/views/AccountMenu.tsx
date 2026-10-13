@@ -1,7 +1,7 @@
 import {
-  BooksIcon,
   BuildingsIcon,
   CaretUpDownIcon,
+  CpuIcon,
   DownloadSimpleIcon,
   GearSixIcon,
   GlobeIcon,
@@ -20,7 +20,7 @@ import { can } from "@/lib/permissions";
 // The views reached through the account menu rather than the sidebar's top
 // nav. While one of them is open the account button shows the active state.
 const MENU_VIEWS: ReadonlySet<View> = new Set<View>([
-  "library",
+  "agents",
   "team",
   "components",
   "org",
@@ -112,7 +112,7 @@ export function AccountMenu({
         </div>
       )}
       <MenuGroup label="Work">
-        {item("library", "Library", BooksIcon)}
+        {item("agents", "Agents", CpuIcon)}
         {/* Team dashboard + borrow billing: every member sees their own
             agents; org admins see the whole team (gateway gates /v1/tenant/*). */}
         {item("team", "Team", UsersThreeIcon)}

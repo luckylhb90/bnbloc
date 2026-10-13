@@ -9,7 +9,7 @@ import {
   WaveformIcon,
   GlobeIcon,
   LockIcon,
-  CpuIcon,
+  BooksIcon,
   MagnifyingGlassIcon,
   BuildingsIcon,
 } from "@phosphor-icons/react";
@@ -221,7 +221,7 @@ export function Shell({
   const nav = [
     { id: "myrooms" as const, label: "My rooms", icon: ChatsCircleIcon },
     { id: "plaza" as const, label: "Plaza", icon: SquaresFourIcon },
-    { id: "agents" as const, label: "Agents", icon: CpuIcon },
+    { id: "library" as const, label: "Library", icon: BooksIcon },
   ];
 
   return (
