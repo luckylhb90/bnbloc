@@ -1,7 +1,7 @@
 # App gallery: publish an interactive app, browse, use a copy (2026-10-13)
 
-Status: proposed. The product owner approved the direction and the order on
-2026-10-13. Build after the share-link sign-in change
+Status: accepted (2026-10-13). The product owner approved the direction, the
+order and §11. Build after the share-link sign-in change
 (`docs/prd/2026-10-13-share-link-sign-in.md`) and the "Apps" views (§5) land.
 
 ## 1. Why
@@ -131,7 +131,7 @@ discoverable and makes the product feel alive.
 
 1. The "Apps" filter and Library "My apps" (§5).
 2. Content kind `app`: validator, store, the fallback-cover owner, publishing
-   from the card, and agent publishing.
+   from the card, and agent publishing; the org `publishApproval` setting (§11).
 3. The `cover.png` convention in the skill pack, with the drift test kept.
 4. The Plaza gallery: grid, categories, search, favorites, detail page and
    demo mode.
@@ -145,9 +145,24 @@ Each step lands with its tests:
 - a copy whose data space starts empty and is separate from the original;
 - cover type and size checks.
 
-## 11. Open questions
+## 11. Decisions (product owner, 2026-10-13)
 
-- **Q1. Who may publish an app to the org gallery?** Proposal: any member,
-  through the existing org approval, exactly as experts.
-- **Q2. Should "Try demo" exist, or only "Use this app"?** Proposal: keep
-  demo. It is cheap (an in-memory SDK) and it is what makes browsing feel live.
+- **Who may publish to the org gallery.** Any member may publish. Approval
+  follows the organization's setting below.
+- **Try demo.** Kept: the in-memory demo mode described in §7.
+- **Org publication approval is an organization setting.** It covers every
+  content kind (experts, skill packs, prompt packs and apps) under one rule.
+  - The setting is `publishApproval: "required" | "none"`, stored with the
+    tenant settings and edited by org admins in Organization → Settings.
+    It defaults to `"required"`.
+  - With `"none"`, a member's publish to the org goes live at once. It is
+    still audited, and admins can still unpublish, restore or remove it.
+  - Platform scope is unaffected and stays a signed install by a super
+    admin.
+  - One owner decides whether a publish needs a request:
+    `contentshare.NeedsApproval(tenant settings)`. Every publish path calls
+    it.
+  - Its tests:
+    - both settings, for every kind;
+    - the default is `"required"`;
+    - unpublishing still works.
