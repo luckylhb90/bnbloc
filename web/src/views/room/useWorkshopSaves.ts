@@ -16,7 +16,7 @@ export function useWorkshopSaves(roomId: string, subject: string | null): void {
     () =>
       contentSaves.subscribe((room, s) => {
         if (room !== roomId || !isOwnSave(s, subject)) return;
-        if (s.action === "submitted") {
+        if (s.action !== "saved") {
           toast.info(submittedMessage(s));
           return;
         }

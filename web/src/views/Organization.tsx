@@ -3,6 +3,7 @@ import { Select } from "@/ui/Select";
 import { BuildingsIcon, ArrowClockwiseIcon } from "@phosphor-icons/react";
 import {
   api,
+  type PublishApproval,
   type TenantAuditRecord,
   type TenantUsage,
   type TenantMember,
@@ -577,7 +578,7 @@ function SettingsTab() {
   // Policy switches save on toggle (each is one switch, not a form); the
   // members' cached tenant policy is re-read so share actions follow.
   const [policySaving, setPolicySaving] = useState(false);
-  const savePolicy = async (patch: { requireSandboxForBorrow?: boolean; anonymousLinksDisabled?: boolean }) => {
+  const savePolicy = async (patch: { requireSandboxForBorrow?: boolean; anonymousLinksDisabled?: boolean; publishApproval?: PublishApproval }) => {
     if (policySaving) return;
     setPolicySaving(true);
     setError(null);
@@ -653,6 +654,20 @@ function SettingsTab() {
           (SSO) to open it. On: a member may instead create a link anyone can open without signing in. Off: no such
           link can be created, and every existing one stops working until this is turned back on; links for the
           organization keep working. The Share links tab lists the active links.
+        </p>
+      </div>
+      <div className="flex flex-col gap-2 border-t border-[var(--color-border)] pt-4">
+        <span className="text-xs font-medium uppercase tracking-wide text-[var(--color-fg-subtle)]">Publishing</span>
+        <Switch
+          checked={(settings?.publishApproval ?? "required") !== "none"}
+          onChange={(v) => void savePolicy({ publishApproval: v ? "required" : "none" })}
+          label="Require an admin's approval to publish to the organization"
+          ariaLabel="Require an admin's approval to publish to the organization"
+        />
+        <p className="text-xs text-[var(--color-fg-subtle)]">
+          On: when a member publishes an expert, skill pack, prompt pack or app to the organization, an admin reviews
+          and approves it first (Content review). Off: it is published at once. Either way it is recorded in the audit
+          log, and admins can unpublish, restore or remove it.
         </p>
       </div>
       <TenantRetentionSection />

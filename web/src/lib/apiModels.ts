@@ -10,12 +10,13 @@ export type {
   ChatAttachment,
   Core,
   PlazaRoom,
+  PublishApproval,
   RoomDetail,
   RoomMember as Member,
   RoomPreview,
   RoomSummary,
 } from "./wire.gen.ts";
-import type { RoomDetail, RoomPreview } from "./wire.gen.ts";
+import type { PublishApproval, RoomDetail, RoomPreview } from "./wire.gen.ts";
 
 export type { UpdatePlatform as UpdatePlatformArtifact } from "./wire.gen.ts";
 
@@ -93,6 +94,9 @@ export interface TenantSettings {
   // Org policy: share links anyone can open without signing in are off
   // (existing ones answer 404); links for the organization stay allowed.
   anonymousLinksDisabled: boolean;
+  // Org policy: whether a member's publish to the organization waits for
+  // an admin ("required", the default) or takes effect at once ("none").
+  publishApproval: PublishApproval;
 }
 
 // Platform super-admin: one tenant row in the cross-tenant overview.

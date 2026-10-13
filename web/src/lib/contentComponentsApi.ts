@@ -5,7 +5,6 @@ import {
   type ContentComponent,
   type ContentComponentDetail,
   type ContentForm,
-  type ContentPublishRequest,
   type ContentKind,
   type ContentUseScope,
   type ContentUsesReply,
@@ -14,12 +13,14 @@ import {
 
 const enc = encodeURIComponent;
 
-type ResubmittedListener = (r: ContentPublishRequest) => void;
+type ResubmittedListener = (d: Pick<ContentComponentDetail, "resubmitted" | "orgPublished">) => void;
 const resubmittedListeners = new Set<ResubmittedListener>();
 
-// contentResubmitted tells the app that a save opened a publish request by
-// itself (a new version of a component the organization uses): every save
-// path goes through contentApi, so one listener tells the author.
+// contentResubmitted tells the app that a save of a new version of a
+// component the organization uses went to the organization by itself: a
+// publish request, or published at once where no approval is required.
+// Every save path goes through contentApi, so one listener tells the
+// author.
 export const contentResubmitted = {
   subscribe(l: ResubmittedListener): () => void {
     resubmittedListeners.add(l);
@@ -31,8 +32,7 @@ export const contentResubmitted = {
 
 // noteSaved passes a save's detail through, announcing its resubmission.
 export function noteSaved(d: ContentComponentDetail): ContentComponentDetail {
-  const r = d.resubmitted;
-  if (r) for (const l of [...resubmittedListeners]) l(r);
+  if (d.resubmitted || d.orgPublished) for (const l of [...resubmittedListeners]) l(d);
   return d;
 }
 

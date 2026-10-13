@@ -316,7 +316,7 @@ export function PublishDialog({
     setBusy(true);
     try {
       const reply = await contentSharingApi.publish(c.id, scope, scope === "org" ? note.trim() : undefined);
-      toast.success(scope === "org" ? `Sent to your organization's admins. ${reply.note}` : reply.note);
+      toast.success(scope === "org" && reply.request ? `Sent to your organization's admins. ${reply.note}` : reply.note);
       onChanged();
       onClose();
     } catch (e) {

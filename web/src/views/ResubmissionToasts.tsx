@@ -4,8 +4,9 @@ import { resubmittedMessage } from "@/lib/contentSharing";
 import { useToast } from "@/ui/Toast";
 
 // ResubmissionToasts tells the author when saving a new version of a
-// component their organization uses sent it to the admins for approval
-// (the gateway opens that request by itself). Mounted once, beside the app.
+// component their organization uses sent it to the admins for approval, or
+// published it at once (the gateway does either by itself). Mounted once,
+// beside the app.
 export function ResubmissionToasts() {
   const toast = useToast();
   useEffect(

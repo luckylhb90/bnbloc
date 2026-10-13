@@ -7,7 +7,7 @@
 import { contentKindWord, type ContentKind } from "./contentComponents.ts";
 
 export type { ContentSaved } from "./wire.gen.ts";
-import type { ContentSaved } from "./wire.gen.ts";
+import { ContentSavedActionValues, type ContentSaved, type ContentSavedAction } from "./wire.gen.ts";
 
 // The room event kind.
 export const CONTENT_SAVED = "content_saved";
@@ -19,8 +19,8 @@ export function parseContentSaved(payload: Record<string, unknown> | undefined):
   if (!payload) return null;
   const str = (k: string) => (typeof payload[k] === "string" ? (payload[k] as string) : "");
   const kind = str("kind") as ContentKind;
-  const action = str("action");
-  if (!str("componentId") || !str("version") || !str("owner") || !KINDS.includes(kind) || (action !== "saved" && action !== "submitted")) return null;
+  const action = str("action") as ContentSavedAction;
+  if (!str("componentId") || !str("version") || !str("owner") || !KINDS.includes(kind) || !ContentSavedActionValues.includes(action)) return null;
   return {
     componentId: str("componentId"),
     kind,
@@ -38,9 +38,12 @@ export function isOwnSave(s: ContentSaved, subject: string | null): boolean {
   return !!subject && s.owner === subject;
 }
 
-// submittedMessage is the toast of a publish request the room tools opened.
-export function submittedMessage(s: Pick<ContentSaved, "kind" | "name" | "displayName" | "version">): string {
+// submittedMessage is the toast of a publish to the organization the room
+// tools made: a request for its admins, or (where the organization
+// requires no approval) the publication itself.
+export function submittedMessage(s: Pick<ContentSaved, "kind" | "name" | "displayName" | "version" | "action">): string {
   const word = contentKindWord(s.kind);
+  if (s.action === "published") return `Published the ${word} ${s.displayName || s.name} v${s.version} to your organization`;
   return `Asked your organization's admins to publish the ${word} ${s.displayName || s.name} v${s.version}`;
 }
 

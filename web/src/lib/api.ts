@@ -17,6 +17,7 @@ import {
   type FeedPage,
   type MyAgentsReply,
   type PlazaReply,
+  type PublishApproval,
   type RoomDetail,
   type RoomMembersReply,
   type RoomPreview,
@@ -329,7 +330,7 @@ export const api = {
   // Org-admin: read/update the tenant settings (display name, SSO issuer).
   tenantSettings: () => req<TenantSettings>("/v1/tenant/settings"),
   updateTenantSettings: (
-    body: { name?: string; ssoIssuer?: string; requireSandboxForBorrow?: boolean; anonymousLinksDisabled?: boolean },
+    body: { name?: string; ssoIssuer?: string; requireSandboxForBorrow?: boolean; anonymousLinksDisabled?: boolean; publishApproval?: PublishApproval },
   ) =>
     req<TenantSettings>("/v1/tenant/settings", {
       method: "PUT",

@@ -65,8 +65,13 @@ export function shareSummary(r: ContentShareReply): string {
 }
 
 // resubmittedMessage is the toast after saving a new version of a
-// component the organization uses: the gateway sent it for approval.
-export function resubmittedMessage(r: Pick<ContentPublishRequest, "version" | "approvedVersion"> | undefined | null): string | null {
+// component the organization uses: the gateway sent it for approval, or
+// published it at once (the organization requires no approval).
+export function resubmittedMessage(
+  d: { resubmitted?: Pick<ContentPublishRequest, "version" | "approvedVersion"> | null; orgPublished?: string } | undefined | null,
+): string | null {
+  if (d?.orgPublished) return `Version ${d.orgPublished} is published to your organization: its members use it now.`;
+  const r = d?.resubmitted;
   if (!r) return null;
   const keep = r.approvedVersion ? `; members keep using ${r.approvedVersion} until then` : "";
   return `Version ${r.version} was sent to your organization's admins for approval${keep}.`;

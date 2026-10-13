@@ -41,6 +41,8 @@ function comp(over: Partial<ContentComponent> = {}): ContentComponent {
     runs: 0,
     members: 0,
     uses: 0,
+    favorite: false,
+    favoriteCount: 0,
     createdAtMs: 1,
     updatedAtMs: 1,
     ...over,
@@ -156,9 +158,12 @@ assert(cmds[3] === "bnbloc cores install --package reviewer-1.1.0.package.json -
 // A new version of content the organization uses was sent for approval.
 {
   assert(resubmittedMessage(null) === null, "no resubmission");
+  assert(resubmittedMessage({}) === null, "a save the organization does not use");
   assert(
-    resubmittedMessage({ version: "1.2.0", approvedVersion: "1.1.0" }) === "Version 1.2.0 was sent to your organization's admins for approval; members keep using 1.1.0 until then.",
+    resubmittedMessage({ resubmitted: { version: "1.2.0", approvedVersion: "1.1.0" } }) ===
+      "Version 1.2.0 was sent to your organization's admins for approval; members keep using 1.1.0 until then.",
     "resubmission message",
   );
-  assert(resubmittedMessage({ version: "1.2.0" }) === "Version 1.2.0 was sent to your organization's admins for approval.", "resubmission without approved version");
+  assert(resubmittedMessage({ resubmitted: { version: "1.2.0" } }) === "Version 1.2.0 was sent to your organization's admins for approval.", "resubmission without approved version");
+  assert(resubmittedMessage({ orgPublished: "1.2.0" }) === "Version 1.2.0 is published to your organization: its members use it now.", "published without approval");
 }
