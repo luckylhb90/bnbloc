@@ -1445,6 +1445,17 @@ WHERE r.channel_id = '' AND d.user_id IS NULL`)
 			return ensureIndexColumns(ctx, db, "content_component_uses", "idx_content_uses_component", []string{"component_id", "tenant_id", "scope_kind"})
 		},
 	},
+	{
+		// Interactive apps' data (docs/prd/2026-10-12-interactive-apps.md
+		// §5.2): the documents and each app's wrapped data key.
+		id: "2026_10_app_data",
+		run: func(ctx context.Context, db sqlConn) error {
+			if err := createSchemaTable(ctx, db, "app_docs"); err != nil {
+				return err
+			}
+			return createSchemaTable(ctx, db, "app_keys")
+		},
+	},
 }
 
 // sqlConn is the statement surface a migration runs on. runMigrations passes

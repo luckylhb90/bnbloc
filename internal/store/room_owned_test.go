@@ -128,6 +128,10 @@ func TestContractDeleteRoomClearsRoomOwnedRows(t *testing.T) {
 			must(b.ContentComponents.PutContentRoomShare(ctx, ContentRoomShare{RoomID: room, ComponentID: comp.ID, TenantID: tid, Version: "1.0.0", SharedBy: "maya", CreatedAtMs: 1, UpdatedAtMs: 1}))
 			must(b.ContentComponents.PutContentUse(ctx, ContentUse{TenantID: tid, ScopeKind: ContentUseRoom, ScopeID: room, ComponentID: comp.ID, Kind: comp.Kind, CreatedBy: "maya", CreatedAtMs: 1}))
 			must(b.OrgSync.RecordDefaultRoom(ctx, "maya", room, 1))
+			_, err = b.AppDocs.EnsureAppKey(ctx, AppKey{AppID: "app-" + room, RoomID: room, WrappedKey: "wk", CreatedAtMs: 1})
+			must(err)
+			must(b.AppDocs.InsertAppDoc(ctx, AppDoc{AppID: "app-" + room, RoomID: room, Collection: "c", DocID: "d", ByKey: "p",
+				AuthorSealed: []byte("a"), BodySealed: []byte("b"), CreatedAtMs: 1, UpdatedAtMs: 1}, "wk"))
 		}
 		probes = []probe{
 			{"room_messages", func(r string) bool { h, _ := b.Chat.RoomHistory(ctx, r, "", 0, 10); return len(h) > 0 }},
@@ -155,6 +159,14 @@ func TestContractDeleteRoomClearsRoomOwnedRows(t *testing.T) {
 				return len(l) > 0
 			}},
 			{"org_sync_default_rooms", func(r string) bool { ok, _ := b.OrgSync.DefaultRoomGranted(ctx, "maya", r); return ok }},
+			{"app_keys", func(r string) bool {
+				_, ok, _ := b.AppDocs.GetAppKey(ctx, AppScope{AppID: "app-" + r, RoomID: r})
+				return ok
+			}},
+			{"app_docs", func(r string) bool {
+				_, ok, _ := b.AppDocs.GetAppDoc(ctx, AppDocRef{AppScope: AppScope{AppID: "app-" + r, RoomID: r}, Collection: "c", DocID: "d"})
+				return ok
+			}},
 		}
 		seed(gone)
 		seed(kept)

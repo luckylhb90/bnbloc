@@ -47,6 +47,13 @@ func TestMySQLDeleteRoomRemovesEveryRoomOwnedRow(t *testing.T) {
 		"content_room_shares":         `INSERT INTO content_room_shares (room_id, component_id, tenant_id, version, shared_by, created_at_ms, updated_at_ms) VALUES ('{id}', 'cc', 'org-a', '1.0.0', 'alice', 1, 1)`,
 		"content_component_uses":      `INSERT INTO content_component_uses (scope_kind, scope_id, component_id, tenant_id, kind, created_by, created_at_ms) VALUES ('room', '{id}', 'cc', 'org-a', 'expert', 'alice', 1)`,
 		"org_sync_default_rooms":      `INSERT INTO org_sync_default_rooms (user_id, room_id, granted_at_ms) VALUES ('alice', '{id}', 1)`,
+		"app_keys":                    `INSERT INTO app_keys (app_id, tenant_id, room_id, wrapped_key, created_at_ms) VALUES ('app-{id}', 'org-a', '{id}', 'wk', 1)`,
+		// More documents than one shred batch (appShredBatch), so the
+		// batched delete loops.
+		"app_docs": `SET SESSION cte_max_recursion_depth = 5000;
+			INSERT INTO app_docs (app_id, collection, doc_id, tenant_id, room_id, by_key, public, author_sealed, version, body_sealed, created_at_ms, updated_at_ms)
+			WITH RECURSIVE seq (n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM seq WHERE n < 2005)
+			SELECT 'app-{id}', 'c', CONCAT('d', n), 'org-a', '{id}', 'p', 0, 'a', 1, 'b', 1, 1 FROM seq`,
 	}
 	// Rows CreateRoomWithOwnerAndChannel already writes.
 	created := map[string]bool{"room_members": true, "room_channels": true}
@@ -84,6 +91,12 @@ func TestMySQLDeleteRoomRemovesEveryRoomOwnedRow(t *testing.T) {
 		if count("kept") == 0 {
 			t.Errorf("%s: the other room's rows were deleted too", rt.table)
 		}
+	}
+	// app_docs is counted through its app's key row, which is gone too:
+	// count the documents by their own room column as well.
+	var docs int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM app_docs WHERE tenant_id = ? AND room_id = ?`, tenantA, "gone").Scan(&docs); err != nil || docs != 0 {
+		t.Errorf("app_docs: %d rows remain for the deleted room (%v)", docs, err)
 	}
 	if _, err := s.GetRoom(ctx, "gone"); !errors.Is(err, ErrRoomNotFound) {
 		t.Fatalf("GetRoom after delete = %v, want not found", err)

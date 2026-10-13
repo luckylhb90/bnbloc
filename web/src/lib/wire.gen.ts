@@ -1783,6 +1783,28 @@ export const MaxArtifactStateBytes = 16384;
 // MySQL sizes the VARCHAR(40) column).
 export const MaxDisplayNameRunes = 40;
 
+// The safety caps of an interactive app's data (docs/prd/2026-10-12-
+// interactive-apps.md §4.5): cost and abuse bounds, not product rules. The
+// room service (services/room/appdata.go) enforces them; the app SDK checks
+// them before it sends.
+// MaxAppDocBytes bounds one document: its JSON body without the server
+// stamps.
+export const MaxAppDocBytes = 65536;
+// MaxAppDocs bounds the documents of one app, all collections together.
+export const MaxAppDocs = 100000;
+// MaxAppBytes bounds the stored bytes of one app's documents.
+export const MaxAppBytes = 268435456;
+// MaxAppCollections bounds the named collections of one app.
+export const MaxAppCollections = 64;
+// MaxAppCollectionNameLen bounds a collection name (letters, digits,
+// '_' and '-').
+export const MaxAppCollectionNameLen = 64;
+// MaxAppDocIDLen bounds a document id (letters, digits, '_', '-', '.'
+// and ':').
+export const MaxAppDocIDLen = 128;
+// MaxAppFindLimit bounds one page of a find.
+export const MaxAppFindLimit = 500;
+
 // ---- wire/mcp_tools.go ----
 
 // ContentMCPRequirement is one requires.mcp entry of a package: an MCP tool

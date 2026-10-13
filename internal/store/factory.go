@@ -218,6 +218,9 @@ type Backends struct {
 	// ContentComponents holds content components (experts, skill packs),
 	// their versions, uses and permission acks.
 	ContentComponents ContentComponentStore
+	// AppDocs holds interactive apps' documents and data keys
+	// (docs/prd/2026-10-12-interactive-apps.md).
+	AppDocs AppDocs
 }
 
 // NewBackends builds the store set. If dsn is empty, everything is in-memory.
@@ -267,11 +270,12 @@ func NewBackends(dsn string) (*Backends, error) {
 			OrgSync:           NewMemoryOrgSync(),
 			Profiles:          NewMemoryUserProfiles(),
 			ContentComponents: NewMemoryContentComponents(),
+			AppDocs:           NewMemoryAppDocs(rooms),
 		}
 		// DeleteRoom clears every memory store holding room-owned rows, as
 		// the MySQL DeleteRoom clears roomOwnedTables.
 		for _, s := range []any{b.Activity, b.Grant, b.Chat, b.BridgeJobs, b.Artifacts, b.Attachments, b.AgentPrefs,
-			b.MessageTasks, b.QuotaRequests, b.ReplyTokens, b.RoomImports, b.Schedules, b.OrgSync, b.ContentComponents} {
+			b.MessageTasks, b.QuotaRequests, b.ReplyTokens, b.RoomImports, b.Schedules, b.OrgSync, b.ContentComponents, b.AppDocs} {
 			rooms.cascadeDeleteTo(s.(roomRowsOwner))
 		}
 		return b, nil
@@ -316,6 +320,7 @@ func newMySQLBackends(db *sql.DB) *Backends {
 		OrgSync:           NewMySQLOrgSync(db),
 		Profiles:          NewMySQLUserProfiles(db),
 		ContentComponents: NewMySQLContentComponents(db),
+		AppDocs:           NewMySQLAppDocs(db),
 	}
 }
 

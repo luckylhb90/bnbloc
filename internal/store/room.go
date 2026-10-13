@@ -349,6 +349,14 @@ func (s *MemoryRoom) liveRoomKeyLocked(roomID string) (string, bool) {
 	return key, true
 }
 
+// roomLive reports whether the tenant's room exists and is not deleted.
+func (s *MemoryRoom) roomLive(tid, roomID string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, ok := s.liveRoomLocked(tid, roomID)
+	return ok
+}
+
 // liveRoomLocked returns the map key of tid's live room roomID: the one
 // liveness check of the tenant-scoped methods (MySQL's tenant filter plus
 // sqlNotDeleted). Callers hold s.mu.

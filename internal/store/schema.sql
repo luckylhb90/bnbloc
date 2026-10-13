@@ -881,3 +881,42 @@ CREATE TABLE IF NOT EXISTS content_prompt_uses (
   last_used_at_ms BIGINT NOT NULL,
   PRIMARY KEY (component_id, tenant_id, prompt_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Interactive apps' documents (docs/prd/2026-10-12-interactive-apps.md
+-- §5.2): one shared table for every app (app_id = the site artifact's id),
+-- keyed app_id first, so one app's rows cluster together and every query is
+-- a range inside its prefix. body_sealed and author_sealed are AES-256-GCM
+-- under the app's data key (app_keys), written only by appdata.Cipher; the
+-- rest is routing metadata. by_key is the author's per-app pseudonym (_by);
+-- public marks a document every holder of the app may read. Deleted with
+-- the room (crypto-shredded: the key first, then the rows in batches).
+CREATE TABLE IF NOT EXISTS app_docs (
+  app_id          VARCHAR(64) NOT NULL,
+  collection      VARCHAR(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
+  doc_id          VARCHAR(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
+  tenant_id       VARCHAR(64) NOT NULL,
+  room_id         VARCHAR(64) NOT NULL,
+  by_key          VARCHAR(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
+  public          TINYINT(1) NOT NULL DEFAULT 0,
+  author_sealed   VARBINARY(512) NOT NULL,
+  version         BIGINT NOT NULL,
+  body_sealed     MEDIUMBLOB NOT NULL,
+  created_at_ms   BIGINT NOT NULL,
+  updated_at_ms   BIGINT NOT NULL,
+  PRIMARY KEY (app_id, collection, doc_id),
+  KEY idx_app_docs_by (app_id, collection, by_key, doc_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Each app's data key, wrapped by the deployment key (internal/sealbox),
+-- created on the app's first write. An empty wrapped_key is a key being
+-- destroyed: the app takes no writes until its documents are gone.
+-- Deleting the row (or emptying wrapped_key) makes every copy of the app's
+-- documents unreadable.
+CREATE TABLE IF NOT EXISTS app_keys (
+  app_id          VARCHAR(64) NOT NULL PRIMARY KEY,
+  tenant_id       VARCHAR(64) NOT NULL,
+  room_id         VARCHAR(64) NOT NULL,
+  wrapped_key     VARCHAR(255) NOT NULL,
+  created_at_ms   BIGINT NOT NULL,
+  KEY idx_app_keys_room (tenant_id, room_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

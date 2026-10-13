@@ -25,3 +25,27 @@ const (
 	// MySQL sizes the VARCHAR(40) column).
 	MaxDisplayNameRunes = 40
 )
+
+// The safety caps of an interactive app's data (docs/prd/2026-10-12-
+// interactive-apps.md §4.5): cost and abuse bounds, not product rules. The
+// room service (services/room/appdata.go) enforces them; the app SDK checks
+// them before it sends.
+const (
+	// MaxAppDocBytes bounds one document: its JSON body without the server
+	// stamps.
+	MaxAppDocBytes = 64 << 10
+	// MaxAppDocs bounds the documents of one app, all collections together.
+	MaxAppDocs = 100_000
+	// MaxAppBytes bounds the stored bytes of one app's documents.
+	MaxAppBytes = 256 << 20
+	// MaxAppCollections bounds the named collections of one app.
+	MaxAppCollections = 64
+	// MaxAppCollectionNameLen bounds a collection name (letters, digits,
+	// '_' and '-').
+	MaxAppCollectionNameLen = 64
+	// MaxAppDocIDLen bounds a document id (letters, digits, '_', '-', '.'
+	// and ':').
+	MaxAppDocIDLen = 128
+	// MaxAppFindLimit bounds one page of a find.
+	MaxAppFindLimit = 500
+)

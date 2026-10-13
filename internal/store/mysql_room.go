@@ -517,7 +517,9 @@ func (s *MySQLRoom) UpdateRoom(ctx context.Context, roomID string, patch RoomPat
 }
 
 // DeleteRoom soft-deletes a room and hard-deletes every room-owned row in one
-// tx. The room row itself is kept (soft-deleted) so its id is never reused.
+// tx, except the crypto-shredded app data: the tx destroys its keys, and its
+// rows go in batches after the commit (roomOwnedTable.batched). The room row
+// itself is kept (soft-deleted) so its id is never reused.
 func (s *MySQLRoom) DeleteRoom(ctx context.Context, roomID string) error {
 	tid, err := tenant.Require(ctx)
 	if err != nil {
@@ -536,11 +538,29 @@ func (s *MySQLRoom) DeleteRoom(ctx context.Context, roomID string) error {
 		return err
 	}
 	for _, t := range roomOwnedTables {
-		if _, err := tx.ExecContext(ctx, `DELETE FROM `+t.table+` WHERE `+t.where, t.args(tid, roomID)...); err != nil {
+		var err error
+		switch {
+		case t.destroy != "":
+			_, err = tx.ExecContext(ctx, `UPDATE `+t.table+` SET `+t.destroy+` WHERE `+t.where, t.args(tid, roomID)...)
+		case !t.batched:
+			_, err = tx.ExecContext(ctx, `DELETE FROM `+t.table+` WHERE `+t.where, t.args(tid, roomID)...)
+		}
+		if err != nil {
 			return fmt.Errorf("delete room: %s: %w", t.table, err)
 		}
 	}
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	for _, t := range roomOwnedTables {
+		if !t.batched {
+			continue
+		}
+		if _, err := deleteInBatches(ctx, s.DB, t.table, t.where, t.args(tid, roomID)); err != nil {
+			return fmt.Errorf("delete room: %s: %w", t.table, err)
+		}
+	}
+	return nil
 }
 
 // TransferOwner makes newOwner the owner and demotes existing owners to member.

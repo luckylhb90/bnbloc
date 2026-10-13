@@ -9,6 +9,15 @@ type roomOwnedTable struct {
 	// where selects the room's rows; args binds its placeholders.
 	where string
 	args  func(tenantID, roomID string) []any
+	// destroy, when set, is the SET clause DeleteRoom's transaction runs on
+	// the table's rows instead of deleting them: a crypto-shred destroys
+	// the app keys with the room, atomically (appKeyDestroyed).
+	destroy string
+	// batched tables are deleted after the transaction commits, in batches
+	// (deleteInBatches), in list order: their rows are unreadable by then
+	// (their key was destroyed in it), and a large app never holds one long
+	// transaction.
+	batched bool
 }
 
 func tenantRoomArgs(tenantID, roomID string) []any { return []any{tenantID, roomID} }
@@ -65,6 +74,12 @@ var roomOwnedTables = []roomOwnedTable{
 		where: `scope_kind IN ('` + string(ContentUseRoom) + `', '` + string(ContentUseRoomExpert) + `') AND scope_id = ?`},
 	// Default-room grants of organization sync (room ids are global).
 	{table: "org_sync_default_rooms", args: roomOnlyArgs, where: `room_id = ?`},
+	// Interactive apps' data is crypto-shredded: the transaction destroys
+	// the room's app keys, then the documents (through their app's key
+	// row) and the key rows go in batches.
+	{table: "app_docs", batched: true, args: tenantTenantRoomArgs,
+		where: `tenant_id = ? AND app_id IN (SELECT app_id FROM app_keys WHERE tenant_id = ? AND room_id = ?)`},
+	{table: "app_keys", destroy: appKeyDestroyed, batched: true, args: tenantRoomArgs, where: `tenant_id = ? AND room_id = ?`},
 }
 
 // roomOwnedExempt are schema.sql tables that hold a room id but are not
