@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 
@@ -47,12 +49,18 @@ func countingDaemon(t *testing.T, caps ...string) (*httptest.Server, *atomic.Int
 // writeFileDaemon is a conforming writeFile daemon, except that enforce=false
 // accepts a write outside the bnbloc-owned paths.
 func writeFileDaemon(t *testing.T, enforce bool) *httptest.Server {
+	return cappedWriteFileDaemon(t, enforce, 0, 0)
+}
+
+// cappedWriteFileDaemon is writeFileDaemon whose server refuses a request
+// body over maxBody (0 = none), stating limits.maxInputBytes = stated.
+func cappedWriteFileDaemon(t *testing.T, enforce bool, maxBody, stated int64) *httptest.Server {
 	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		path := r.URL.EscapedPath()
 		switch {
 		case path == protocol.PathDiscover:
-			_ = json.NewEncoder(w).Encode(protocol.Discovery{Name: "nimbus", Version: "1", Protocol: protocol.ProtocolRange{Min: "1.0", Max: "1.0"}, Capabilities: []string{protocol.CapabilityWriteFile}})
+			_ = json.NewEncoder(w).Encode(protocol.Discovery{Name: "nimbus", Version: "1", Protocol: protocol.ProtocolRange{Min: "1.0", Max: "1.0"}, Capabilities: []string{protocol.CapabilityWriteFile}, Limits: protocol.Limits{MaxInputBytes: stated}})
 		case path == protocol.PathWorkspaces:
 			_ = json.NewEncoder(w).Encode(protocol.CreateWorkspaceResponse{WorkspaceID: "ws-1"})
 		case path == protocol.PathTargets:
@@ -63,6 +71,12 @@ func writeFileDaemon(t *testing.T, enforce bool) *httptest.Server {
 			w.WriteHeader(http.StatusBadRequest)
 			_ = json.NewEncoder(w).Encode(protocol.ErrorEnvelope{Error: protocol.ProtocolError{Code: protocol.ErrorBadRequest, Message: "path not allowed"}})
 		case r.Method == http.MethodPut:
+			n, _ := io.Copy(io.Discard, r.Body)
+			if maxBody > 0 && n > maxBody {
+				w.WriteHeader(http.StatusBadRequest)
+				_ = json.NewEncoder(w).Encode(protocol.ErrorEnvelope{Error: protocol.ProtocolError{Code: protocol.ErrorBadRequest, Message: "invalid json body"}})
+				return
+			}
 			w.WriteHeader(http.StatusNoContent)
 		case path == "/core/v1/workspaces/ws-1/sessions/s-1/messages", path == "/core/v1/workspaces/ws-1/sessions/s-1/turn", path == "/core/v1/workspaces/ws-1/sessions/s-1/input":
 			_, _ = w.Write([]byte(`{"idle":true,"messages":[],"latestVersion":0}`))
@@ -85,6 +99,21 @@ func TestCheckLive_writeFile_daemonRefusesOutsidePaths(t *testing.T) {
 	bad := writeFileDaemon(t, false)
 	if err := CheckLive(context.Background(), Config{Endpoint: core.Endpoint{BaseURL: bad.URL}, HTTPClient: bad.Client()}); err == nil {
 		t.Fatal("a daemon accepting a write outside the owned paths passed conformance")
+	}
+}
+
+// A writeFile daemon takes a file at the chat attachment cap, or states the
+// smaller limit it holds to: one that silently caps its request bodies
+// fails conformance (docs/bugs/2026-10-13-attachments-dropped-silently.md).
+func TestCheckLive_writeFile_takesAnAttachmentAtTheCap(t *testing.T) {
+	const capped = 2 << 20
+	silent := cappedWriteFileDaemon(t, true, capped, 0)
+	if err := CheckLive(context.Background(), Config{Endpoint: core.Endpoint{BaseURL: silent.URL}, HTTPClient: silent.Client()}); err == nil || !strings.Contains(err.Error(), "limits.maxInputBytes") {
+		t.Fatalf("a daemon capping bodies at %d without saying so = %v, want a failure", capped, err)
+	}
+	stated := cappedWriteFileDaemon(t, true, capped, capped)
+	if err := CheckLive(context.Background(), Config{Endpoint: core.Endpoint{BaseURL: stated.URL}, HTTPClient: stated.Client()}); err != nil {
+		t.Fatalf("a daemon stating its limit = %v, want pass", err)
 	}
 }
 

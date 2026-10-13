@@ -186,6 +186,18 @@ contributor attaches a server the agent can reach instead of the core
 dropping it. A manifest declares it as `listTargets.targets.mcpTransports`
 (a list element's own `mcpTransports` wins).
 
+**Workspace file size** (`protocol.MinWriteFileBytes`). The bridge hands
+each attachment of a message to the agent's workspace with one `writeFile`
+binary write (`contentBase64`), so a core that advertises `writeFile` must
+accept a write holding a file up to the chat attachment cap
+(`wire.MaxAttachmentBytes`, 25 MiB; about 34 MB of request body), or state
+the smaller request body it accepts as discovery `limits.maxInputBytes`
+(`core.InputLimiter`). The bridge never sends a write over a stated limit,
+and a file it cannot deliver — over the limit, refused by the core, or a
+core without `writeFile` — is named in the turn's prompt with why and in
+one `attachment-undelivered` notice to the room, never dropped. The live
+conformance suite writes a file at the cap, or at the stated limit.
+
 **Workspace path policy** (`core/workspace_paths.go`). The `writeFile` path
 contract is `core.BnblocOwnedPaths`: `.room/` plus the agent config a
 session wears (`CLAUDE.md`, `AGENTS.md`, `.claude/skills/**`,
@@ -467,6 +479,9 @@ The bridge/gateway drive it through the protocol client with
    contract, so every wire field carries a tag and an untagged field is a bug.
    The envelope's `retryable` is optional: state it only when you know;
    absent, bnbloc retries a 429/503 that started no work (`core.Retryable`).
+   State the largest request body you accept as discovery
+   `limits.maxInputBytes` when it is under what a `writeFile` write of a
+   25 MiB attachment needs (see "Workspace file size").
    Advertise only the optional
    capabilities you actually serve (`interrupt`, `writeFile`,
    `deleteWorkspace`, `sandboxExec`, `agentProfile`, `sessionFiles` + `sessionFileBytes`) —

@@ -11,6 +11,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/luckylhb90/bnbloc/core"
+	"github.com/luckylhb90/bnbloc/internal/wire"
 )
 
 const (
@@ -676,6 +677,31 @@ func WireTurnStatus(ts core.TurnStatus) PollTurnResponse {
 
 func (r PollTurnResponse) Core() core.TurnStatus {
 	return core.TurnStatus{Idle: r.Idle, Failed: r.Failed, FailMessage: r.FailMessage}
+}
+
+// MinWriteFileBytes is the largest file a core that advertises writeFile
+// must accept in one write unless its discovery states a smaller
+// limits.maxInputBytes: the chat attachment cap, since the bridge hands
+// each attachment of a message to the agent's workspace with one write.
+const MinWriteFileBytes = wire.MaxAttachmentBytes
+
+// writeFileEnvelope is the JSON around a binary write's base64 content.
+var writeFileEnvelope = int64(len(`{"content":"","contentBase64":""}`))
+
+// WriteFileBodyBytes is the request body size of a write of an n-byte file
+// as ContentBase64: what a core's limits.maxInputBytes is compared with.
+func WriteFileBodyBytes(n int64) int64 {
+	return int64(base64.StdEncoding.EncodedLen(int(n))) + writeFileEnvelope
+}
+
+// MaxWriteFileBytes is the largest file one binary write sends within a
+// request body limit (0 = no file fits).
+func MaxWriteFileBytes(maxInput int64) int64 {
+	room := maxInput - writeFileEnvelope
+	if room < 4 {
+		return 0
+	}
+	return room / 4 * 3
 }
 
 type WriteWorkspaceFileRequest struct {

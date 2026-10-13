@@ -101,6 +101,16 @@ func (c *Client) CapabilitiesKnown(ctx context.Context, ep core.Endpoint) error 
 	return err
 }
 
+// MaxInputBytes implements core.InputLimiter from the daemon's discovery
+// (limits.maxInputBytes; 0 when unstated or unreadable).
+func (c *Client) MaxInputBytes(ctx context.Context, ep core.Endpoint) int64 {
+	d, err := c.Discovery(ctx, ep)
+	if err != nil {
+		return 0
+	}
+	return d.Limits.MaxInputBytes
+}
+
 func (c *Client) CreateWorkspace(ctx context.Context, ep core.Endpoint) (string, error) {
 	if _, err := c.Discovery(ctx, ep); err != nil {
 		return "", err

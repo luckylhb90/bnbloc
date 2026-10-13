@@ -156,6 +156,22 @@ func As[T any](ctx context.Context, p Provider, ep Endpoint, c Capability) (T, b
 	return t, true
 }
 
+// InputLimiter is implemented by a provider whose core states the largest
+// request body it accepts (Core Protocol discovery limits.maxInputBytes): a
+// workspace file write larger than that would be refused, so the bridge
+// reports the file undelivered instead of sending it. 0 = not stated.
+type InputLimiter interface {
+	MaxInputBytes(ctx context.Context, ep Endpoint) int64
+}
+
+// MaxInputBytes is p's stated request body limit for ep (0 = none stated).
+func MaxInputBytes(ctx context.Context, p Provider, ep Endpoint) int64 {
+	if l, ok := p.(InputLimiter); ok {
+		return l.MaxInputBytes(ctx, ep)
+	}
+	return 0
+}
+
 // SessionFile is one file in an agent session's workspace listing. Bytes and
 // MtimeMs are the change-detection stamp: size alone misses a same-length
 // rewrite, so a caller compares both.

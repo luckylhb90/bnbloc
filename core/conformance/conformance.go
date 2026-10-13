@@ -50,6 +50,9 @@ func CheckLive(ctx context.Context, cfg Config) error {
 		if err := checkLiveWriteFileRefusal(ctx, provider, cfg); err != nil {
 			return err
 		}
+		if err := checkLiveLargeWrite(ctx, provider, cfg, d); err != nil {
+			return err
+		}
 	}
 	return checkLiveErrorEnvelope(ctx, provider, cfg)
 }
@@ -67,6 +70,25 @@ func checkLiveWriteFileRefusal(ctx context.Context, provider *protocol.Client, c
 	var he *core.HTTPError
 	if !errors.As(err, &he) || he.Status < 400 || he.Status >= 500 {
 		return fmt.Errorf("daemon accepted (or failed with %v) a write outside .room/ and the agent-config paths; want a 4xx refusal", err)
+	}
+	return nil
+}
+
+// checkLiveLargeWrite writes the largest file a writeFile daemon must
+// accept: a chat attachment at its cap (protocol.MinWriteFileBytes), or the
+// largest file within the daemon's stated limits.maxInputBytes. The bridge
+// hands each attachment to the agent's workspace with one such write.
+func checkLiveLargeWrite(ctx context.Context, provider *protocol.Client, cfg Config, d protocol.Discovery) error {
+	n := int64(protocol.MinWriteFileBytes)
+	if limit := d.Limits.MaxInputBytes; limit > 0 {
+		n = min(n, protocol.MaxWriteFileBytes(limit))
+	}
+	workspaceID, err := provider.CreateWorkspace(ctx, cfg.Endpoint)
+	if err != nil {
+		return fmt.Errorf("CreateWorkspace: %w", err)
+	}
+	if err := provider.WriteWorkspaceFileBytes(ctx, cfg.Endpoint, workspaceID, ".room/attachments/conformance-large.bin", make([]byte, n)); err != nil {
+		return fmt.Errorf("a %d-byte file write failed: a writeFile daemon accepts a file up to the chat attachment cap (%d bytes) or states a smaller limits.maxInputBytes: %w", n, protocol.MinWriteFileBytes, err)
 	}
 	return nil
 }

@@ -1,6 +1,7 @@
 package protocol
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"go/ast"
 	"go/parser"
@@ -185,4 +186,28 @@ func validProfile(p *core.AgentProfile) *core.AgentProfile {
 		p.MCPServers[i].Type = []string{core.MCPHTTP, core.MCPSSE}[i%2]
 	}
 	return p
+}
+
+// A binary write's body is what WriteFileBodyBytes says, and the largest
+// file MaxWriteFileBytes allows within a limit fits it (one more byte does
+// not, at a base64 boundary).
+func TestWriteFileBodyBytes(t *testing.T) {
+	for _, n := range []int{1, 2, 3, 1000, 1708534} {
+		raw, err := json.Marshal(WriteWorkspaceFileRequest{ContentBase64: base64.StdEncoding.EncodeToString(make([]byte, n))})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := WriteFileBodyBytes(int64(n)); got != int64(len(raw)) {
+			t.Fatalf("WriteFileBodyBytes(%d) = %d, body is %d", n, got, len(raw))
+		}
+	}
+	for _, limit := range []int64{2 << 20, 33554432, 100} {
+		n := MaxWriteFileBytes(limit)
+		if WriteFileBodyBytes(n) > limit || WriteFileBodyBytes(n+3) <= limit {
+			t.Fatalf("MaxWriteFileBytes(%d) = %d: body %d, +3 body %d", limit, n, WriteFileBodyBytes(n), WriteFileBodyBytes(n+3))
+		}
+	}
+	if MaxWriteFileBytes(10) != 0 {
+		t.Fatal("a limit under the envelope fits no file")
+	}
 }
