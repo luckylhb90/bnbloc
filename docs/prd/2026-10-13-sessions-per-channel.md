@@ -1,6 +1,6 @@
 # Sessions per channel, one workspace per agent (2026-10-13)
 
-Status: approved by the product owner (2026-10-13); landed (commit after the record, 2886020).
+Status: approved by the product owner (2026-10-13); landed: recorded in 2886020, built in d5607e3.
 
 Builds on `docs/bugs/2026-10-13-agent-loses-its-workspace.md` (an agent
 keeps one workspace across its sessions).

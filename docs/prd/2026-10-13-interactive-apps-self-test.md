@@ -1,6 +1,6 @@
 # Interactive apps test themselves before delivery (2026-10-13)
 
-Status: approved by the product owner (2026-10-13); in progress.
+Status: approved by the product owner (2026-10-13); landed: recorded in 2886020, built in bc5ad64.
 
 ## Problem
 
