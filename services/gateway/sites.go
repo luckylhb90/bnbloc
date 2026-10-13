@@ -148,32 +148,40 @@ func memberSiteBase(ticket string) string { return "/v1/sites/" + url.PathEscape
 // siteAuthTTL). Anything unreadable is a 404.
 func (s *Service) handleMemberSite(w http.ResponseWriter, r *http.Request) {
 	ticket := r.PathValue("ticket")
+	_, sv, err := s.memberTicket(r.Context(), ticket)
+	if errors.Is(err, errSiteNotFound) {
+		http.NotFound(w, r)
+		return
+	}
+	if err != nil {
+		obs.ServerError(w, "load site version failed", err)
+		httpx.Error(w, "load site version failed", http.StatusBadGateway)
+		return
+	}
+	s.serveSite(w, r, sv, memberSiteBase(ticket))
+}
+
+// memberTicket verifies a member's site ticket and the room-level read
+// behind it, re-checked whenever no positive check for the subject is
+// cached (≤ siteAuthTTL): the site's files and its app data (apps.go)
+// alike. Anything unreadable is errSiteNotFound.
+func (s *Service) memberTicket(ctx context.Context, ticket string) (auth.Claims, siteVersion, error) {
 	claims, err := s.Signer.VerifyKind(ticket, auth.KindSiteFrame)
 	if err != nil {
-		http.NotFound(w, r)
-		return
+		return auth.Claims{}, siteVersion{}, errSiteNotFound
 	}
 	if _, _, _, ok := parseSiteTicketScope(claims.ID); !ok {
-		http.NotFound(w, r)
-		return
+		return auth.Claims{}, siteVersion{}, errSiteNotFound
 	}
 	s.bundleCaches()
-	key := claims.Subject + "\x00" + claims.ID
-	sv, ok := s.siteAuth.get(key)
+	sv, ok := s.siteAuth.get(claims.Subject + "\x00" + claims.ID)
 	if !ok {
-		sv, err = s.memberSiteVersion(r.Context(), claims.Subject, claims.Tenant, claims.ID)
-		if errors.Is(err, errSiteNotFound) {
-			http.NotFound(w, r)
-			return
-		}
-		if err != nil {
-			obs.ServerError(w, "load site version failed", err)
-			httpx.Error(w, "load site version failed", http.StatusBadGateway)
-			return
+		if sv, err = s.memberSiteVersion(ctx, claims.Subject, claims.Tenant, claims.ID); err != nil {
+			return auth.Claims{}, siteVersion{}, err
 		}
 		s.cacheSiteAuth(claims.Subject, claims.ID, sv)
 	}
-	s.serveSite(w, r, sv, memberSiteBase(ticket))
+	return claims, sv, nil
 }
 
 func (s *Service) cacheSiteAuth(subject, scope string, sv siteVersion) {

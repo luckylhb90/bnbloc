@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"context"
 	"net/http"
 
 	"github.com/luckylhb90/bnbloc/internal/auth"
@@ -33,6 +34,14 @@ const (
 	// guessBudget: an unauthenticated credential exchange spends the client
 	// IP's guess budget (guessAllow): no trusted subject exists yet.
 	guessBudget
+	// visitorBudget: minting a public link's visitor token spends the
+	// client IP's visitor budget (visitorAllow).
+	visitorBudget
+	// appReadBudget / appWriteBudget: an interactive app's data call spends
+	// the client IP's, its link's and its participant's app budgets
+	// (appRates), the write ones stricter.
+	appReadBudget
+	appWriteBudget
 )
 
 // dependency is a part of the deployment a route needs; a route whose
@@ -50,7 +59,10 @@ var (
 // route is one gateway-served route. A session route runs session after
 // the caller holds perm (rbac.PermRead: any member, viewers included); a
 // public route carries no session, says why (the credential its handler
-// checks itself) and runs public.
+// checks itself) and runs public. An app route (apps.go) serves an
+// interactive app's data under the capability its entry resolves: the
+// room entry's is a session holding perm, the frame entries' carry none
+// and say why.
 type route struct {
 	pattern string
 	perm    rbac.Permission
@@ -59,6 +71,13 @@ type route struct {
 	session sessionHandler
 	why     string
 	public  http.HandlerFunc
+	app     *appRoute
+}
+
+// sessionLess reports a route that takes no session: a public route, or an
+// app route of a frame entry.
+func (rt route) sessionLess() bool {
+	return rt.public != nil || (rt.app != nil && rt.app.entry != appRoom)
 }
 
 // member is a session route any member may call.
@@ -91,7 +110,7 @@ func (s *Service) routes() []route {
 		org      = rbac.PermManageOrg
 		platform = rbac.PermManagePlatform
 	)
-	return []route{
+	return append([]route{
 		// Sign-in and sessions.
 		open("POST /v1/auth/login", "an IdP token", s.handleLogin).spends(guessBudget),
 		open("POST /v1/auth/refresh", "a refresh token", s.handleRefresh),
@@ -143,6 +162,7 @@ func (s *Service) routes() []route {
 		open("GET /v1/public/shares/{token}/content", "a public share token", s.handlePublicShareContent),
 		open("GET /v1/public/shares/{token}/site", "a public share token", s.handleSiteRootRedirect),
 		open("GET /v1/public/shares/{token}/site/{path...}", "a public share token", s.handlePublicShareSite),
+		open("POST /v1/public/shares/{token}/visitor", "a public share token", s.handleAppVisitor).spends(visitorBudget),
 
 		// A notifier's signed call on a member's behalf.
 		open("POST /v1/notifier/replies", "the notifier component's signature", s.handleNotifierReply),
@@ -220,20 +240,23 @@ func (s *Service) routes() []route {
 		gated("POST /v1/platform/org-sync/preview", platform, s.handleOrgSyncPreview).with(needOrgSync),
 		gated("POST /v1/platform/org-sync/deprovision", platform, s.handleOrgSyncDeprovision).with(needOrgSync),
 		gated("POST /v1/platform/org-sync/resync", platform, s.handleOrgSyncResync).with(needOrgSync),
-	}
+	},
+		// Interactive apps' data under its three entry points, the SDK and
+		// the reserved ~app/ namespace (apps.go).
+		s.appRoutes()...)
 }
 
 // serve applies a route's policy, then runs its handler.
 func (s *Service) serve(rt route) http.HandlerFunc {
+	if rt.app != nil {
+		return s.serveApp(rt)
+	}
 	if rt.session == nil {
 		return func(w http.ResponseWriter, r *http.Request) {
-			if rt.budget == guessBudget && !s.guessAllow("ip:"+s.clientIP(r)) {
-				httpx.Error(w, "rate limit exceeded", http.StatusTooManyRequests)
+			if !s.spendIP(w, r, rt.budget) || !s.ready(w, rt.needs) {
 				return
 			}
-			if s.ready(w, rt.needs) {
-				rt.public(w, r)
-			}
+			rt.public(w, r)
 		}
 	}
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -247,6 +270,56 @@ func (s *Service) serve(rt route) http.HandlerFunc {
 		}
 		rt.session(w, r, claims)
 	}
+}
+
+// serveApp applies an app route's policy, then serves it (apps.go): the
+// client IP's app budget, the capability its entry resolves (the room
+// entry: the session and the route's org permission first), then the
+// link's and the participant's app budgets.
+func (s *Service) serveApp(rt route) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Referrer-Policy", "no-referrer")
+		if !s.appSpend(w, appByIP, rt.budget, s.clientIP(r)) || !s.ready(w, rt.needs) {
+			return
+		}
+		var claims auth.Claims
+		if rt.app.entry == appRoom {
+			var err error
+			if claims, err = s.authenticate(r); err != nil {
+				httpx.Error(w, "unauthorized", http.StatusUnauthorized)
+				return
+			}
+			if !s.permitted(w, claims, rt.perm) {
+				return
+			}
+		}
+		c, err := s.appCapabilityOf(r, rt.app.entry, claims)
+		if err != nil {
+			writeAppErr(w, err)
+			return
+		}
+		if !s.appSpend(w, appByLink, rt.budget, c.link) || !s.appSpend(w, appByParticipant, rt.budget, c.tenant+"\x00"+c.scope.ParticipantKey()) {
+			return
+		}
+		c.still = func(ctx context.Context) bool {
+			again, err := s.appCapabilityOf(r.WithContext(ctx), rt.app.entry, claims)
+			return err == nil && again.scope == c.scope
+		}
+		rt.app.serve(s, w, r, c)
+	}
+}
+
+// spendIP spends a public route's per-client-IP budget; 429 when it is
+// spent.
+func (s *Service) spendIP(w http.ResponseWriter, r *http.Request, b rateBudget) bool {
+	ip := s.clientIP(r)
+	switch {
+	case b == guessBudget && !s.guessAllow("ip:"+ip),
+		b == visitorBudget && !s.visitorAllow(ip):
+		httpx.Error(w, "rate limit exceeded", http.StatusTooManyRequests)
+		return false
+	}
+	return true
 }
 
 // permitted is the one org-permission check at the edge: a gateway-served

@@ -65,6 +65,11 @@ func (s AppScope) ParticipantKey() string { return string(s.Kind) + ":" + s.Part
 // ErrAppScope reports a missing, malformed or forged app scope.
 var ErrAppScope = errors.New("invalid app scope assertion")
 
+// Valid reports whether AssertApp accepts s: a known participant kind and
+// bounded, printable room, app and participant values. The gateway checks
+// a scope it resolved from a capability before it forwards anything.
+func (s AppScope) Valid() bool { return s.valid() }
+
 func (s AppScope) valid() bool {
 	switch s.Kind {
 	case AppMember, AppAgent, AppVisitor:

@@ -109,10 +109,19 @@ func (s *Service) contentGrant(r *http.Request, caller auth.Claims) (contentActo
 	if jobID == "" {
 		return contentActor{Claims: claims, Room: roomID}, nil
 	}
+	return s.jobGrant(r.Context(), caller, claims, roomID, jobID)
+}
+
+// jobGrant is the one admission of a job grant (?job= in roomID, which the
+// caller reaches: claims is roomClaims' answer): the job is live and leased
+// by a bridge of the caller, and its requester may still post in the room.
+// The actor is that requester; Job names the agent acting for them. Content
+// requests (contentGrant) and an agent's app data calls (apps.go) use it.
+func (s *Service) jobGrant(ctx context.Context, caller, claims auth.Claims, roomID, jobID string) (contentActor, error) {
 	if s.ContentJobs == nil {
 		return contentActor{}, &grantError{status: http.StatusServiceUnavailable, msg: "agent jobs unavailable"}
 	}
-	ctx := tenant.NewContext(r.Context(), claims.Tenant)
+	ctx = tenant.NewContext(ctx, claims.Tenant)
 	job, err := store.LoadLeasedJob(ctx, s.ContentJobs, jobID, roomID, caller.Subject)
 	switch status := store.LeasedJobStatus(err); {
 	case err == nil:

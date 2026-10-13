@@ -81,43 +81,71 @@ func publicSiteBase(token string) string {
 // public-site cache (site file requests only).
 func (s *Service) publicShare(w http.ResponseWriter, r *http.Request, countView, reuse bool) (wire.ShareResolution, bool) {
 	w.Header().Set("Referrer-Policy", "no-referrer")
-	ip := s.clientIP(r)
-	guessKey := "share-ip:" + ip
-	if !s.publicAllow(ip) || s.guessBlocked(guessKey) {
+	if !s.publicAllow(s.clientIP(r)) {
 		httpx.Error(w, "rate limit exceeded", http.StatusTooManyRequests)
 		return wire.ShareResolution{}, false
 	}
-	token := r.PathValue("token")
-	notFound := func() (wire.ShareResolution, bool) {
-		s.guessAllow(guessKey)
-		w.Header().Set("Cache-Control", "no-store")
-		httpx.Error(w, "share not found", http.StatusNotFound)
+	res, err := s.shareByToken(r, countView, reuse)
+	if err != nil {
+		writeShareErr(w, err)
 		return wire.ShareResolution{}, false
 	}
+	return res, true
+}
+
+// errShareGuessing refuses a client IP whose guess budget token misses
+// have spent.
+var errShareGuessing = errors.New("rate limit exceeded")
+
+// shareByToken resolves the path's share token for a public route: the one
+// lookup of every route a share link reaches. An IP whose guess budget is
+// spent is refused before any lookup (errShareGuessing), and a miss
+// (errShareNotFound: a garbage token, or any inactive link) spends it. With
+// reuse, a recent resolution of the same token is served from the short
+// public-site cache.
+func (s *Service) shareByToken(r *http.Request, countView, reuse bool) (wire.ShareResolution, error) {
+	guessKey := "share-ip:" + s.clientIP(r)
+	if s.guessBlocked(guessKey) {
+		return wire.ShareResolution{}, errShareGuessing
+	}
+	token := r.PathValue("token")
 	if !plausibleShareToken(token) {
-		return notFound()
+		s.guessAllow(guessKey)
+		return wire.ShareResolution{}, errShareNotFound
 	}
 	s.bundleCaches()
 	sum := sha256.Sum256([]byte(token))
 	cacheKey := hex.EncodeToString(sum[:])
 	if reuse {
 		if res, ok := s.publicSites.get(cacheKey); ok {
-			return res, true
+			return res, nil
 		}
 	}
 	res, err := s.resolveShare(r.Context(), token, countView)
 	if errors.Is(err, errShareNotFound) {
-		return notFound()
+		s.guessAllow(guessKey)
 	}
 	if err != nil {
-		obs.ServerError(w, "resolve share failed", err)
-		httpx.Error(w, "resolve share failed", http.StatusBadGateway)
-		return wire.ShareResolution{}, false
+		return wire.ShareResolution{}, err
 	}
 	if reuse {
 		s.publicSites.put(cacheKey, res)
 	}
-	return res, true
+	return res, nil
+}
+
+// writeShareErr answers a shareByToken failure.
+func writeShareErr(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, errShareGuessing):
+		httpx.Error(w, "rate limit exceeded", http.StatusTooManyRequests)
+	case errors.Is(err, errShareNotFound):
+		w.Header().Set("Cache-Control", "no-store")
+		httpx.Error(w, "share not found", http.StatusNotFound)
+	default:
+		obs.ServerError(w, "resolve share failed", err)
+		httpx.Error(w, "resolve share failed", http.StatusBadGateway)
+	}
 }
 
 // resolveShare asks the room service to resolve a share token (svcauth-

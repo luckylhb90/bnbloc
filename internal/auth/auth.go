@@ -79,6 +79,11 @@ const (
 	// GET of the one attachment named in ID ("<roomId>/<attachmentId>") for
 	// its subject and tenant, and room membership is re-checked per read.
 	KindAttachment = "attachment"
+	// KindAppVisitor is a public link's visitor token (an interactive app's
+	// participant without a session): Subject is a random visitor id and ID
+	// the share link it was minted for. It authorizes nothing but app data
+	// calls through that link, which re-resolve the link on every call.
+	KindAppVisitor = "app-visitor"
 )
 
 // HasRoom reports whether the claims authorize the given room scope.

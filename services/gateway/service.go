@@ -149,6 +149,14 @@ type Service struct {
 	limiter       lazyLimiter
 	guessLimiter  lazyLimiter
 	publicLimiter lazyLimiter
+	// visitorLimiter throttles visitor-token mints per client IP;
+	// appLimiters an interactive app's data calls per IP, link and
+	// participant, reads and writes apart (appRates).
+	visitorLimiter lazyLimiter
+	appLimiters    [appDims]struct{ read, write lazyLimiter }
+	// appFeedRecheck overrides how often an app's change feed re-resolves
+	// its capability (tests; zero: appFeedRecheck).
+	appFeedRecheck time.Duration
 	// Peers is the live gateway replica set (BNBLOC_GATEWAY_PEERS): every
 	// per-replica limit above enforces 1/N of its configured budget. Nil =
 	// one replica.
@@ -303,6 +311,23 @@ func (s *Service) allowedOrigin(origin string) bool {
 // token, not cookies, so credentials mode is not enabled.
 func (s *Service) withCORS(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if appFramePath(r.URL.Path) {
+			// An interactive app's frame has an opaque origin ("null"), so
+			// its data calls are cross-origin. They carry no credentials
+			// (the capability is the path, plus a visitor token header):
+			// any origin may make them, never with cookies (apps.go).
+			h := w.Header()
+			h.Set("Access-Control-Allow-Origin", "*")
+			h.Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
+			h.Set("Access-Control-Allow-Headers", appCORSHeaders)
+			h.Set("Access-Control-Max-Age", "600")
+			if r.Method == http.MethodOptions {
+				w.WriteHeader(http.StatusNoContent)
+				return
+			}
+			next.ServeHTTP(w, r)
+			return
+		}
 		origin := r.Header.Get("Origin")
 		if s.allowedOrigin(origin) {
 			h := w.Header()

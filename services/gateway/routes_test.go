@@ -52,11 +52,28 @@ func TestEveryGatewayRouteGated(t *testing.T) {
 			t.Errorf("%s: registered twice", rt.pattern)
 		}
 		seen[rt.pattern] = true
-		if (rt.session == nil) == (rt.public == nil) {
-			t.Errorf("%s: exactly one of a session or a public handler", rt.pattern)
+		handlers := 0
+		for _, set := range []bool{rt.session != nil, rt.public != nil, rt.app != nil} {
+			if set {
+				handlers++
+			}
+		}
+		if handlers != 1 {
+			t.Errorf("%s: exactly one of a session, a public or an app handler", rt.pattern)
 			continue
 		}
-		if rt.public != nil {
+		if rt.app != nil {
+			// An app route spends the app budgets: reads the read ones,
+			// every other method the stricter write ones.
+			want := appWriteBudget
+			if method == http.MethodGet {
+				want = appReadBudget
+			}
+			if rt.budget != want {
+				t.Errorf("%s: an app route spends %v, want %v", rt.pattern, rt.budget, want)
+			}
+		}
+		if rt.sessionLess() {
 			if rt.why == "" || !publicPath(gw, path) {
 				t.Errorf("%s: a public route must say why and sit where a credential travels in the request", rt.pattern)
 			}
@@ -96,7 +113,7 @@ func TestEveryGatewayRouteGated(t *testing.T) {
 	}
 	viewer, member, orgAdmin := token(rbac.RoleViewer), token(rbac.RoleMember), token(rbac.RoleAdmin)
 	for _, rt := range gw.routes() {
-		if rt.session == nil {
+		if rt.sessionLess() {
 			continue
 		}
 		method, pattern, _ := strings.Cut(rt.pattern, " ")
