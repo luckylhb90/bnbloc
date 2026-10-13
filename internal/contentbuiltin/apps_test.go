@@ -157,6 +157,9 @@ func TestInteractiveAppsSkillMatchesSDK(t *testing.T) {
 		strings.Join(appdata.FilterOps, " "),
 		fmt.Sprintf("%d KiB per document, %d documents or %d MiB per app, %d\ncollections per app", wire.MaxAppDocBytes>>10, wire.MaxAppDocs, wire.MaxAppBytes>>20, wire.MaxAppCollections),
 		"`{public: true}`", "{ifAbsent: true}", "`$inc`", "`subscribe`", "app_data", "`index.html`", "`dist/`",
+		// The cover convention (docs/prd/2026-10-13-app-gallery.md §4.1):
+		// the file the app validator reads, within its cap.
+		"`cover.png`", "headless browser", fmt.Sprintf("under %d MiB", wire.MaxAppCoverBytes>>20), "never SVG",
 	} {
 		if !strings.Contains(skill, want) {
 			t.Errorf("the skill does not state %q", want)

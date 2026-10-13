@@ -33,6 +33,16 @@ this file: read it before your first app.
 - Fixed content (options, questions, slots) goes in the code: the data
   exists only once bnbloc has published the site, after your turn.
 
+## Its cover
+
+Before you finish, save a screenshot of the app's first screen as
+`cover.png` beside its `index.html` (16:10, e.g. 1280x800, under 1 MiB):
+open the page with a headless browser in your working directory, for
+example `npx playwright screenshot --viewport-size=1280,800 poll/index.html
+poll/cover.png`. Its data calls fail there; the layout is what counts. The
+cover is published with the site and shown on its cards, in the room and
+in the gallery. PNG, JPEG or WebP only, never SVG.
+
 ## The SDK
 
 <!-- sdk:begin -->
