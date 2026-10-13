@@ -156,7 +156,7 @@ func (c *Client) SendInput(ctx context.Context, ep core.Endpoint, workspaceID, s
 	if err := c.requireRequestCapabilities(ctx, ep, nil, opts.Execution); err != nil {
 		return err
 	}
-	body := SendInputRequest{Text: text, Options: WireOptions(opts), Execution: WireExecution(opts.Execution)}
+	body := WireSendInput(text, opts)
 	if err := c.postJSON(ctx, ep, SessionInputPath(workspaceID, sessionID), body, nil); err != nil {
 		return fmt.Errorf("send input: %w", err)
 	}

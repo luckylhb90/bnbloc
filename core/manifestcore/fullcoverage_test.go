@@ -153,7 +153,7 @@ func TestManifestPollTurn_reportsFailedTurn_whenLatestTurnFailed(t *testing.T) {
 		t.Fatalf("PollTurn: %v", err)
 	}
 	want := core.TurnStatus{Idle: true, Failed: true, FailMessage: "runner exploded"}
-	if got != want {
+	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("PollTurn = %+v; want %+v", got, want)
 	}
 }

@@ -147,7 +147,7 @@ func TestWireMappersRoundTrip(t *testing.T) {
 	check("SessionRequest", req, back)
 
 	opts := filled[core.SessionOptions](t)
-	in := throughJSON(t, SendInputRequest{Text: "next", Options: WireOptions(opts), Execution: WireExecution(opts.Execution)})
+	in := throughJSON(t, WireSendInput("next", opts))
 	gotOpts, err := in.CoreOptions()
 	if err != nil {
 		t.Fatal(err)

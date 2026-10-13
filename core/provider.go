@@ -242,6 +242,10 @@ type SessionOptions struct {
 	// The bridge sets it only for a core that advertises sandboxExec, on the
 	// session create AND every follow-up turn of a sandboxed session.
 	Execution *Execution
+	// DeadlineMs is when this drive's turn must end (Unix ms; 0 = none):
+	// the caller owns a turn's length, and a core fails a turn still
+	// running then (FailCodeDeadline) rather than ending one earlier.
+	DeadlineMs int64
 }
 
 // Execution is the neutral execution descriptor (wire: protocol.Execution).
@@ -357,6 +361,25 @@ type TurnStatus struct {
 	Idle        bool
 	Failed      bool
 	FailMessage string
+	// FailCode is a failed turn's machine-readable cause (FailCodeDeadline,
+	// or a core's own; "" when none is given).
+	FailCode string
+	// StartedAtMs and Activity describe a running turn (capability
+	// turnActivity): when it started and its latest steps, oldest first.
+	StartedAtMs int64
+	Activity    []TurnActivity
+}
+
+// FailCodeDeadline: the turn was still running at its deadline
+// (SessionOptions.DeadlineMs).
+const FailCodeDeadline = "deadline"
+
+// TurnActivity is one step of a running turn (protocol TurnActivity): its
+// kind (tool, thinking, text), a short title and when it happened.
+type TurnActivity struct {
+	Kind  string
+	Title string
+	AtMs  int64
 }
 
 // Target is one selectable agent target/harness exposed by the core. Models and

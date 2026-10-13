@@ -436,7 +436,7 @@ type PollTurnResponse struct {
 // Fail codes a core may report (PollTurnResponse.FailCode).
 const (
 	// FailCodeDeadline: the turn was still running at its DeadlineMs.
-	FailCodeDeadline = "deadline"
+	FailCodeDeadline = core.FailCodeDeadline
 )
 
 // Turn activity kinds (TurnActivity.Kind).
@@ -476,7 +476,7 @@ func (o SessionOptions) Core() core.SessionOptions {
 }
 
 func WireCreateSession(r core.SessionRequest) CreateSessionRequest {
-	return CreateSessionRequest{TargetID: r.TargetID, Prompt: r.Prompt, Options: WireOptions(r.Options), Execution: WireExecution(r.Options.Execution), Profile: WireProfile(r.Profile)}
+	return CreateSessionRequest{TargetID: r.TargetID, Prompt: r.Prompt, Options: WireOptions(r.Options), Execution: WireExecution(r.Options.Execution), Profile: WireProfile(r.Profile), DeadlineMs: r.Options.DeadlineMs}
 }
 
 // Core maps the request onto core.SessionRequest for the workspace named in
@@ -493,6 +493,7 @@ func (r CreateSessionRequest) Core(workspaceID string) (core.SessionRequest, err
 	if err != nil {
 		return core.SessionRequest{}, err
 	}
+	opts.DeadlineMs = r.DeadlineMs
 	return core.SessionRequest{WorkspaceID: workspaceID, TargetID: r.TargetID, Prompt: r.Prompt, Options: opts, Profile: profile}, nil
 }
 
@@ -665,6 +666,11 @@ func validEnvName(k string) bool {
 	return true
 }
 
+// WireSendInput maps a follow-up input onto the wire.
+func WireSendInput(text string, opts core.SessionOptions) SendInputRequest {
+	return SendInputRequest{Text: text, Options: WireOptions(opts), Execution: WireExecution(opts.Execution), DeadlineMs: opts.DeadlineMs}
+}
+
 // CoreOptions maps a follow-up input's options and execution onto
 // core.SessionOptions.
 func (r SendInputRequest) CoreOptions() (core.SessionOptions, error) {
@@ -674,6 +680,7 @@ func (r SendInputRequest) CoreOptions() (core.SessionOptions, error) {
 		return core.SessionOptions{}, err
 	}
 	opts.Execution = exec
+	opts.DeadlineMs = r.DeadlineMs
 	return opts, nil
 }
 
@@ -722,11 +729,19 @@ func (r MessagesResponse) Core() []core.Message {
 }
 
 func WireTurnStatus(ts core.TurnStatus) PollTurnResponse {
-	return PollTurnResponse{Idle: ts.Idle, Failed: ts.Failed, FailMessage: ts.FailMessage}
+	out := PollTurnResponse{Idle: ts.Idle, Failed: ts.Failed, FailMessage: ts.FailMessage, FailCode: ts.FailCode, StartedAtMs: ts.StartedAtMs}
+	for _, a := range ts.Activity {
+		out.Activity = append(out.Activity, TurnActivity{Kind: a.Kind, Title: a.Title, AtMs: a.AtMs})
+	}
+	return out
 }
 
 func (r PollTurnResponse) Core() core.TurnStatus {
-	return core.TurnStatus{Idle: r.Idle, Failed: r.Failed, FailMessage: r.FailMessage}
+	out := core.TurnStatus{Idle: r.Idle, Failed: r.Failed, FailMessage: r.FailMessage, FailCode: r.FailCode, StartedAtMs: r.StartedAtMs}
+	for _, a := range r.Activity {
+		out.Activity = append(out.Activity, core.TurnActivity{Kind: a.Kind, Title: a.Title, AtMs: a.AtMs})
+	}
+	return out
 }
 
 // MinWriteFileBytes is the largest file a core that advertises writeFile
