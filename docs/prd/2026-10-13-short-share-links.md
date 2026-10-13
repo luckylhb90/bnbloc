@@ -1,6 +1,11 @@
 # Short share links (2026-10-13)
 
-Status: accepted by the product owner (2026-10-13, final); being built.
+Status: accepted by the product owner (2026-10-13, final); **landed**
+2026-10-13: recorded in f70e5d1, built in ba3dca4 (store, room service,
+gateway and web together: the architecture test reads both). No
+migration. Front proxies that route by path must send `/s/` to the
+gateway (the Caddyfile and the Helm ingress send everything there; the
+web tier's nginx comment lists it).
 
 Amends `2026-10-09-artifact-shares-and-site-previews.md` (the token) and
 `2026-10-13-share-link-sign-in.md` (the share page it opens).
