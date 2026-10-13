@@ -1167,36 +1167,65 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
 ### Content components, agent profiles and room tools
 
 - **Content components go through one validator.** Experts, skill packs,
-  prompt packs and apps enter only through `internal/contentpkg` (form,
-  archive, import, bridge, a site published as an app). A new content kind
-  registers a `KindSpec`; no branches in shared code. A bundle is read
-  within `contentpkg.BundleLimits()` (the widest kind's profile) until its
-  manifest names the kind; never a fixed profile of one kind.
-- **An app is a content kind** (`bnbloc.app.package/v1`,
-  `docs/prd/2026-10-13-app-gallery.md`): a template of a site's files,
-  never its data. `KindSpec.Site` says its scripts run only in the
-  sandboxed site frame (no `scripts` permission, no sandbox forced); the
-  validator checks the entry point, protected paths, the cover and
-  `category` from `wire.AppCategories`. Which file is a cover (site or app)
-  and what it may hold has one owner, `tarbundle.SiteCover` (sniffed as
-  the type its name says, within `wire.MaxAppCoverBytes`, never an SVG;
-  `TestCoverRuleOwned`), served only through `writeCover`. A site becomes an app only
-  through `POST /v1/rooms/{roomId}/artifacts/{artifactId}/publish-app`
-  (`contentpkg.AppFromSite`, a room member who may post: the app owner
-  rule; the room tools' `save_component` with `artifactId`); a copy only
-  through `POST /v1/content-components/{id}/use-app` (`contentpkg.AppSite`,
-  a new site artifact, so a fresh empty data space; counted as a
-  `content_component_uses` row of scope `app-copy`). A listing never
-  opens an app's bundle (its `coverUrl` may answer 404). Favorites are `store.ContentFavoriteStore` (`content_favorites`,
-  per tenant, deleted with the component). An app's "Try demo" is only
-  `POST /v1/content-components/{id}/versions/{v}/demo`
+  prompt packs and works enter only through `internal/contentpkg` (form,
+  archive, import, bridge, a deliverable published as a work). A new
+  content kind registers a `KindSpec`; no branches in shared code. A bundle
+  is read within `contentpkg.BundleLimits()` (the widest kind's profile)
+  until its manifest names the kind; never a fixed profile of one kind. A
+  stored version is read against its row's manifest
+  (`contentpkg.ValidateStored`): the row is the version's manifest.
+- **A work is a content kind** (`bnbloc.work.package/v1`,
+  `docs/prd/2026-10-13-works-gallery-and-make-similar.md`): a snapshot of
+  one deliverable version of any type (a site's or an app's folder, or the
+  one file), never its data. Its `type` has one owner,
+  `contentpkg.WorkTypeOf` (an app is a site that is one per the
+  projection's `isApp`, an HTML document a site, any other file its media
+  type's via `store.ArtifactMIME`), never typed by hand; the validator
+  holds the files to the type. `KindSpec.Snapshot` says nothing in it runs
+  on a machine (no `scripts` permission, no sandbox forced). Which file is
+  a cover and what it may hold has one owner, `tarbundle.SiteCover`
+  (sniffed as the type its name says, within `wire.MaxWorkCoverBytes`,
+  never an SVG; `TestCoverRuleOwned`); a work's cover order is
+  `tarbundle.WorkCover` over it (the cover file, else an image work's
+  image, else the generated cover; a video's is the frame its turn saved
+  as a cover file, `turnCover`), served only through `writeCover`. A
+  deliverable becomes a work only through `POST
+  /v1/rooms/{roomId}/artifacts/{artifactId}/publish-work`
+  (`contentpkg.WorkFromDeliverable`, a room member who may post:
+  `deliverableOwner`; the room tools' `save_component` with `artifactId`);
+  an app's copy only through `POST /v1/content-components/{id}/use-app`
+  (`contentpkg.WorkSite`, a new site artifact, so a fresh empty data
+  space; scope `app-copy`). A listing never opens a work's bundle (its
+  `coverUrl` may answer 404). Favorites are `store.ContentFavoriteStore`
+  (`content_favorites`, per tenant, deleted with the component). "Try
+  demo" (an app's) and a site work's preview are only `POST
+  /v1/content-components/{id}/versions/{v}/demo`
   (`services/gateway/app_demo.go`): a demo ticket (`auth.KindAppDemo`) in
-  the member site path, whose files are `contentpkg.AppSite` pinned by
+  the member site path, whose files are `contentpkg.WorkSite` pinned by
   digest and whose `~app/sdk.js` is `appsdk.DemoJS` (the one `sdk.js` with
   its mode argument `"demo"`: an in-memory data space of the page, nothing
   sent). A demo ticket names no room or app: never let the app data API
   (`ticketApp`) or any `forwardApp` path accept it
   (`TestAppDemoNeverReachesAppData` counts the backends' app calls).
+- **A work's recipe has one owner: `deliverableRecipe`**
+  (`services/gateway/work_recipe.go`): the producing job through
+  `roomlog.ProducerOf` (the one producer rule; no job, no recipe), its
+  request text and expert, the packs in effect (`contentuse.Effective`,
+  the room's and the requester's prompt packs), its attachments within
+  `wire.MaxWorkReferences`/`MaxWorkReferenceBytes`, the agent. It is
+  captured at publish and shown first (`GET …/artifacts/{id}/recipe`);
+  the request's `recipe` overrides it (references only a subset of the
+  captured ones) and `includeRecipe: false` drops it; the reference files
+  ride the bundle under `references/` (`contentpkg.WorkReferences`), never
+  a copy of the site. "Make similar" is only `POST
+  /v1/content-components/{id}/make-similar`
+  (`services/gateway/make_similar.go`): the room as for a copy
+  (`galleryRoom`), the references copied in through realtime's own upload
+  as the caller's attachments, the packs they may see turned on through
+  `putContentUse` (the one writer of a content use, the room's editors
+  only), the expert when `contentuse.Usable`, the rest reported in
+  `skipped`; an empty recipe (`contentpkg.RecipeEmpty`) attaches the work
+  itself; scope `make-similar` counts it.
 - **Archives and directory packing have one owner: `internal/tarbundle`.**
   An upload of a foreign format is read by `ReadArchive` (an unsafe name is
   refused, never rewritten), and every directory pack (save_component's
@@ -1590,7 +1619,7 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   document count (only with a data space) and its working links. An app's
   cover is `GET …/versions/{v}/cover` (`services/gateway/site_cover.go`):
   `cover.png`/`.webp`/`.jpg` at the site's root, served only when its bytes
-  sniff as that type and within `wire.MaxAppCoverBytes`, with nosniff and a
+  sniff as that type and within `wire.MaxWorkCoverBytes`, with nosniff and a
   sandbox CSP (never an SVG); without one the web draws `lib/appCover.ts`.
 - **http MCP per-member sign-in is `mcp.http.auth.scheme = "oauth"`.** The
   desktop (`internal_ext/mcp_oauth.rs`) discovers the authorization server at
@@ -1948,16 +1977,25 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
     name's initial; `views/workbench/AppCover.tsx` draws a cover source,
     `siteCover` or `componentCover`, or it); the deliverables' filters:
     `views/workbench/deliverableFilters.ts` ("Apps" is `isApp`); a
-    member's apps (Library → Apps): `lib/myApps.ts` +
-    `views/library/AppsTab.tsx`
+    member's works and apps (Library → Works: Published, Apps in rooms):
+    `lib/myApps.ts` + `views/library/WorksTab.tsx`
     (who is an owner is the stats route's answer, never re-decided; an
     export is the server's audited route, the web only names the file);
-    the app gallery (Plaza → Apps): `lib/appGallery.ts` (category tabs,
-    the gallery filter, the author line, the publish form and request,
-    the room choice and request of "Use this app") + `lib/appGalleryApi.ts`
-    + `views/gallery/` (`PublishAppDialog` is "Publish to gallery" for
-    the My apps cards and an app deliverable's owners; `AppDemo` frames a
-    demo URL); a site frame's environment (desktop scheme, gateway base):
+    the works gallery (Plaza → Works): `lib/workGallery.ts` (the type
+    filters and category tabs, the gallery filter, the author line, the
+    recipe's chips and prompt preview, the publish form and request with
+    the author's recipe control, the room choice and request of "Use this
+    app" and "Make similar", the draft's hand-off) +
+    `lib/workGalleryApi.ts` + `views/gallery/` (`PublishWorkDialog` is
+    "Publish to gallery" on every deliverable card for the room's members
+    who may post, `DeliverableOwner` from `views/workbench/deliverableOwner.ts`
+    over the room's member list; `WorkPreview` renders a work with the
+    artifact viewers; `AppDemo` frames a demo URL); what another view
+    hands a room's composer (a draft's text, an expert, an agent,
+    references, stored attachments): the `lib/team.ts` hand-offs
+    (`composerDrafts`, `composerExpertPicks`, `composerAgentPicks`,
+    `composerRefs`, `composerAttachments`) taken by
+    `views/composer/useInjectedDraft.ts`, each once; a site frame's environment (desktop scheme, gateway base):
     `views/artifact/siteFrameEnv.ts`; what publishing to the organization
     says (by `publishApproval`) and its toast: `orgPublishCopy` /
     `orgPublishToast` (`lib/contentSharing.ts`);

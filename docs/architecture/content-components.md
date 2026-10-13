@@ -1,8 +1,9 @@
-# Content components: experts, skill packs, prompt packs and apps
+# Content components: experts, skill packs, prompt packs and works
 
 Design: [`docs/prd/2026-10-12-experts-and-teams.md`](../prd/2026-10-12-experts-and-teams.md)
-(delivery steps 1, 3 and 4, and the "Gap closure"); apps:
-[`docs/prd/2026-10-13-app-gallery.md`](../prd/2026-10-13-app-gallery.md). This is the durable reference for how content components
+(delivery steps 1, 3 and 4, and the "Gap closure"); works:
+[`docs/prd/2026-10-13-app-gallery.md`](../prd/2026-10-13-app-gallery.md) and
+[`docs/prd/2026-10-13-works-gallery-and-make-similar.md`](../prd/2026-10-13-works-gallery-and-make-similar.md). This is the durable reference for how content components
 are stored, who may use them, how they are shared and published, how a turn
 wears them, and the HTTP surface.
 
@@ -18,12 +19,13 @@ servers content requires, see "MCP tool components"):
 | Expert | `bnbloc.expert.package/v1` | `component.json`, `INSTRUCTIONS.md`, optional `README.md`, embedded skills `skills/<name>/SKILL.md` (+ scripts/, references/) |
 | Skill pack | `bnbloc.skill.package/v1` | `component.json` (`skills: [names]`), `<name>/SKILL.md` per skill, optional `README.md` |
 | Prompt pack | `bnbloc.prompt.package/v1` | `component.json` (its `prompts`), optional `README.md` (see "Prompt packs") |
-| App | `bnbloc.app.package/v1` | `component.json`, a site folder (`index.html` at the root or `dist/index.html`), optional cover (`cover.png`, `.webp`, `.jpg` or `.jpeg`) and `README.md` (see "Apps") |
+| Work | `bnbloc.work.package/v1` | `component.json` (`type`, `file`, `recipe`), a site folder (`index.html` at the root or `dist/index.html`) or one file at the root, optional cover (`cover.png`, `.webp`, `.jpg` or `.jpeg`), `README.md` and the recipe's `references/` (see "Works") |
 
 A package is a plain ustar bundle (`internal/tarbundle`, limit profile
 `tarbundle.ContentLimits`: 8 MiB, 512 files; a prompt pack's own profile,
-`contentpkg.PromptLimits`, is 1 MiB and 2 files; an app's,
-`contentpkg.AppLimits`, a site snapshot's plus its manifest). A bundle is
+`contentpkg.PromptLimits`, is 1 MiB and 2 files; a work's,
+`contentpkg.WorkLimits`, a site snapshot's plus its references, cover and
+manifest). A bundle is
 read within `contentpkg.BundleLimits()`, the widest registered profile,
 until its manifest names the kind (uploads, stored versions, imports). **One validator,
 `internal/contentpkg`**, backs every entry point (form saves, archive
@@ -62,68 +64,133 @@ that states a limit renders it from there (the builder's format skill).
 
 The kind registry (`contentpkg.KindSpec`: short name, limit profile, the
 kind's checks, its form layout, its import of foreign formats,
-`MemberUse` — whether a member turns it on for themselves — and `Site` —
-a bundle whose code runs only in the sandboxed site frame) is how a new
+`MemberUse` — whether a member turns it on for themselves — and
+`Snapshot` — a deliverable's snapshot that never runs on a machine) is how
+a new
 kind joins without branching the shared code.
 
-## Apps
+## Works
 
-An app (docs/prd/2026-10-13-app-gallery.md §3) is an interactive app
-published as a template: the site's files, never its data.
+A work (docs/prd/2026-10-13-works-gallery-and-make-similar.md §2) is a
+snapshot of one deliverable version published as a template, of any type:
+a site's or an app's folder, or any other deliverable's one file, never
+its data.
 
-- **Validator** (`contentpkg/app.go`): an entry point (`index.html` at the
-  root, or `dist/index.html`); no protected workspace path
-  (`core.ProtectedWorkspacePath`); a cover, when it ships one, that
-  `tarbundle.SiteCover` accepts (the one cover rule, the site cover
-  route's too: `cover.png`, `cover.webp`, `cover.jpg` or `cover.jpeg` at
-  the root, the first present, whose bytes sniff as the type its name
-  says, within `wire.MaxAppCoverBytes`; an SVG is never a cover); a
-  `README.md` that is text; `category` one of
-  `wire.AppCategories` (office, data, productivity, content, learning,
-  engineering, finance, life, other) or none; none of the other kinds'
-  fields, and no `requires` (an app requires nothing). Its scripts are no
-  executable content (`KindSpec.Site`): no `scripts` permission, no
-  sandbox forced. A form never writes an app; an import reads a site
-  folder.
-- **Publishing from a site.** `POST /v1/rooms/{roomId}/artifacts/{artifactId}/publish-app`
-  (`wire.AppPublishRequest {componentId?, name, displayName?, description?, category?, tags?}`)
-  snapshots the site's current version as the caller's personal app
-  (`contentpkg.AppFromSite`; the room service reads the site as the
-  member), or as the next version of their app `componentId` (keeping the
-  fields the request leaves out). Only an owner of the room's apps, a
-  member who may post in it (`membership.Member.MayChat`), publishes one;
-  `?job=` acts for the job's requester (the room tools' `save_component`
-  with `artifactId`). A site holding a `component.json` of its own is
-  refused. The data space is never read. Org and platform publishing are
-  the existing flows, for apps as for every kind.
-- **Cover.** `GET /v1/content-components/{id}/versions/{v}/cover` serves
-  it to a caller who may read the component, as the site cover route
-  does (`writeCover`: its checked type, `nosniff`, a sandbox CSP); 404
-  when the version ships none. A listing
-  carries an app's `coverUrl` without opening its bundle (a card falls
-  back to its generated cover on a 404).
+- **Type.** `component.json` `type` is derived from the deliverable by
+  the one rule `contentpkg.WorkTypeOf` (`wire.WorkType`): a site is `app`
+  when it is one (`store.Artifact.IsApp`, read as the projection's
+  `isApp`), else `site`; an HTML document is a `site` (it runs in the
+  sandboxed frame); any other file is typed by its media type
+  (`store.ArtifactMIME`: `image`, `video`, `audio`, `document` for
+  markdown, PDF, text and office documents, `slides`, `table`, else
+  `other`). It is never typed by hand.
+- **Validator** (`contentpkg/work.go`): per type, a site or an app has an
+  entry point (`index.html` at the root, or `dist/index.html`) and names
+  no file; any other type names its one file at the root (`file`), whose
+  type is `type`, beside only the manifest, a `README.md`, a cover and the
+  recipe's references. No protected workspace path
+  (`core.ProtectedWorkspacePath`); a cover file, when it ships one, that
+  `tarbundle.SiteCover` accepts (the one cover-file rule: `cover.png`,
+  `cover.webp`, `cover.jpg` or `cover.jpeg` at the root, the first
+  present, whose bytes sniff as the type its name says, within
+  `wire.MaxWorkCoverBytes`; an SVG is never a cover); a text `README.md`;
+  `category` one of `wire.WorkCategories` (office, data, productivity,
+  content, learning, engineering, finance, life, other) or none; no other
+  kind's fields and no `requires`. Nothing in it runs on a machine
+  (`KindSpec.Snapshot`): no `scripts` permission, no sandbox forced. A
+  form or an import of another format never writes a work.
+- **Cover order** (`tarbundle.WorkCover`, served only through
+  `writeCover`): the cover file; else, for an image work, the image
+  itself when it is a PNG, WebP or JPEG within the cap; else none (the
+  web draws the generated cover). A video's cover is the frame its
+  producing turn saved as a cover file: publishing a file that is not a
+  site takes an image deliverable of the room named as a cover file
+  (`tarbundle.IsCoverFile`) with a version produced by the same request
+  (`turnCover`).
+- **Stored versions** are read against their row's manifest
+  (`contentpkg.ValidateStored`): migration `2026_10_content_works` moved
+  the former app kind's rows (components, uses, drafts, publish requests)
+  to the work kind and its versions' manifests to type `app`; their
+  bundles keep the `component.json` they were saved with.
+- **Publishing a deliverable.** `POST /v1/rooms/{roomId}/artifacts/{artifactId}/publish-work`
+  (`wire.WorkPublishRequest {componentId?, name, displayName?,
+  description?, category?, tags?, recipe?, includeRecipe?}`) snapshots
+  the deliverable's current version as the caller's personal work
+  (`contentpkg.WorkFromDeliverable`; the room service reads it as the
+  member: a site's bundle, or the file's bytes within a site snapshot's
+  cap), or as the next version of their work `componentId` (keeping the
+  fields the request leaves out). Only an owner of the room's
+  deliverables, a member who may post in it (`membership.Member.MayChat`,
+  `deliverableOwner`), publishes one; `?job=` acts for the job's
+  requester (the room tools' `save_component` with `artifactId`). A site
+  holding a `component.json` of its own is refused. The data space is
+  never read. Org and platform publishing are the existing flows.
+- **Recipe** (works PRD §3; `wire.WorkRecipe` in the manifest's `recipe`):
+  the request's text (`prompt`, chat text within `wire.MaxChatTextBytes`),
+  its `expert`, the `skills` and `prompts` packs (by id, name and
+  version), the request's attachments as `references` (files under
+  `references/`, at most `wire.MaxWorkReferences` within
+  `wire.MaxWorkReferenceBytes`) and the `agent` (core and provider,
+  informational). The one owner of "the recipe of a deliverable version"
+  is the gateway's `deliverableRecipe` (`work_recipe.go`): the producing
+  job is the one producer rule's (`roomlog.ProducerOf` over the run
+  store; an upload, a person's publish or a job of another room has no
+  recipe); its text, its expert (the chat's, else the room's), the skill
+  packs it wears (`contentuse.Effective`), the room's and the requester's
+  prompt packs, and its attachments' metadata (realtime's
+  `GET /v1/rooms/{id}/attachments/{aid}/meta`). It is captured at
+  publish; `GET /v1/rooms/{roomId}/artifacts/{artifactId}/recipe`
+  (`wire.WorkRecipeCapture`) shows it to the author first. The request's
+  `recipe` overrides it (its references only a subset of the captured
+  ones, named by `attachmentId`: a reference the request did not attach
+  is a 400) and `includeRecipe: false` drops it; an empty recipe
+  (`contentpkg.RecipeEmpty`) is none. The room tools' save includes the
+  captured recipe and tells the agent to say so.
+- **Cover and files.** `GET /v1/content-components/{id}/versions/{v}/cover`
+  serves the cover (404 when none) to a caller who may read the
+  component; `GET …/versions/{v}/file[?path=]` serves a work's one file
+  (or a reference file) typed by its name, as an artifact's bytes are
+  (`nosniff`, a sandbox CSP, inline only for a raster image): what the
+  detail's viewers render. A listing carries `coverUrl`, `workType`,
+  `workFile` and `recipe` without opening a bundle.
 - **Use this app.** `POST /v1/content-components/{id}/use-app`
   (`wire.AppUseRequest {version?, roomId? | newRoom: {name?}}`) copies a
-  visible app's version (`contentpkg.AppSite`: its files without the
-  manifest, a `dist/` entry's at the root) as a new `site` artifact in a
-  room the caller owns (may post in) or in a new room they create (room
-  creation's permission), first version "from <name>@<version>", through
-  the room service's own artifact routes as the caller. Its data space is
-  its new artifact id's: empty, separate from the original's. The copy is
-  a use of the app in the room's organization (`content_component_uses`
-  scope `app-copy`, scope id = the copy's artifact), counted in `uses`.
+  visible app work's version (`contentpkg.WorkSite`: its files without
+  the manifest and the recipe's references, a `dist/` entry's at the
+  root) as a new `site` artifact in a room the caller owns (may post in)
+  or in a new room they create (`galleryRoom`, room creation's
+  permission), first version "from <name>@<version>", through the room
+  service's own artifact routes as the caller. Its data space is its new
+  artifact id's: empty. The copy is a use (`content_component_uses` scope
+  `app-copy`, scope id = the copy's artifact). Any other type is a 400.
+- **Make similar.** `POST /v1/content-components/{id}/make-similar`
+  (`wire.MakeSimilarRequest {version?, roomId? | newRoom: {name?}}`, the
+  room chosen as for a copy) answers `wire.MakeSimilarDraft {roomId,
+  createdRoom?, text, expert?, attachmentIds, attachments, enabled?,
+  skipped?}`: the recipe's reference files copied into the room as the
+  caller's attachments (through realtime's own upload route), its skill
+  packs and prompt packs the caller may see turned on as the room's uses
+  where they may change them (`putContentUse`, the Library's use route's
+  writer; `roomEditorClaims`), its expert when they may use it
+  (`contentuse.Usable`); anything else is listed in `skipped`. An empty
+  recipe gives an empty draft with the work itself attached (its file, or
+  a site's files as a zip, `tarbundle.ZipFiles`). Each draft is a use
+  (scope `make-similar`, scope id = the room). The web hands the draft to
+  the room's composer through the injected-draft owner (text, expert,
+  attachments: `queueSimilarDraft`).
 - **Favorites.** `PUT|DELETE /v1/content-components/{id}/favorite` stars a
   component the caller sees (any kind), in the organization they act in;
   listings carry `favorite` and `favoriteCount` (that organization's
   members, capped like the usage counts).
 - **Try demo** (`services/gateway/app_demo.go`).
   `POST /v1/content-components/{id}/versions/{v}/demo` answers
-  `wire.AppDemo {siteUrl, expiresAtMs}` for an app version the caller may
-  read: a demo ticket (`auth.KindAppDemo`, 1 h; its ID is
+  `wire.AppDemo {siteUrl, expiresAtMs}` for a site or app work's version
+  the caller may read (an app's Try demo; a site work's preview in its
+  detail): a demo ticket (`auth.KindAppDemo`, 1 h; its ID is
   `<componentId>@<version>#<site sha256>`) in the member site path
   (`/v1/sites/{ticket}/…`), so the sites origin, the site CSP and sandbox,
   and the desktop's `bnbloc-site` scheme apply unchanged. Its files are
-  the app's site (`contentpkg.AppSite`, packed deterministically and
+  the work's site (`contentpkg.WorkSite`, packed deterministically and
   pinned by the digest in the ticket, loaded through the site bundle
   cache), the read of the component re-checked on every file. Under a
   demo ticket `~app/sdk.js` is `appsdk.DemoJS`: the same `sdk.js` with its
@@ -136,11 +203,17 @@ published as a template: the site's files, never its data.
   call under a demo URL is refused before anything is forwarded
   (`TestAppDemoNeverReachesAppData`; the SDK's node test runs demo mode
   with every way out throwing).
-- **The gallery** (web): Plaza → Apps lists the content listing's apps
-  (`kind=app`) with category tabs, search, "My favorites", a detail with
-  the README, Try demo and Use this app; "Publish to gallery" is on the
-  Library's My apps cards and on an app deliverable's card for its
-  owners (`views/gallery/`).
+- **The gallery** (web, `views/gallery/`): Plaza → Works lists the
+  content listing's works (`kind=work`) with type filters (All, Apps,
+  Images, Videos, Documents, Slides, Sites), category tabs, search and "My
+  favorites", a type badge on each card; a work's detail renders it with
+  the artifact viewers (`WorkPreview` over `ArtifactBody`), its README and
+  recipe (`RecipePanel`), Make similar, and for an app Try demo and Use
+  this app. "Publish to gallery" (`PublishWorkDialog`, the captured recipe
+  shown to edit, untick or drop) is on every deliverable card's menu for
+  the room's members who may post (`DeliverableOwner`) and on the Library's
+  Works → Apps in rooms cards; Library → Works → Published lists the
+  member's own works.
 
 ### Import
 
@@ -251,11 +324,14 @@ Some content ships with the release:
   prompts are all starters: an empty room's general-purpose examples (see
   "Prompt packs").
 - Interactive apps (`docs/prd/2026-10-12-interactive-apps.md` §4.6): the
-  **Interactive apps** skill pack (`cc_builtin_interactive-apps`, 1.1.0:
+  **Interactive apps** skill pack (`cc_builtin_interactive-apps`, 1.3.1:
   the app SDK, the platform's two rules, the visitor model, closing in the
   app's code, publishing, mobile-first layout, the gallery cover (a
   headless-browser screenshot of the first screen saved as `cover.png`,
-  its cap stated from `wire.MaxAppCoverBytes`), reading the data back with
+  its cap stated from `wire.MaxWorkCoverBytes`), publishing to the works
+  gallery (`save_component` with `artifactId` saves any deliverable as a
+  work with its recipe; a video's cover is a frame saved as `cover.png`
+  in the same turn), reading the data back with
   `app_data`; its SDK section is pinned to the served `sdk.d.ts` by
   `TestInteractiveAppsSkillMatchesSDK`, its long examples are
   `references/examples.md`), the **App builder** expert
@@ -318,9 +394,11 @@ Tables (migration `2026_10_content_components`):
   `member` (a skill pack for all of a member's agents, a prompt pack in
   their composer), `room` (room skill packs and prompt packs, pinned
   experts) or `room-expert` (the room's expert, one of its pinned experts;
-  scope id = the room, at most one) or `app-copy` (an app copied into a
-  room by "Use this app"; scope id = the copy's site artifact; never in
-  effect for a turn) — at a pinned version or following the latest
+  scope id = the room, at most one), `app-copy` (an app copied into a
+  room by "Use this app"; scope id = the copy's site artifact) or
+  `make-similar` (a work's recipe drafted in a room; scope id = the room);
+  the last two are never in effect for a turn — at a pinned version or
+  following the latest
   (`''`). A `room-expert` row is not counted as a second use.
 - Usage counts read `agent_jobs` on `idx_agent_jobs_expert (tenant_id,
   expert_id, requester_user_id)` (migration
@@ -754,7 +832,7 @@ store and the artifact entitlement). JSON shapes: `internal/wire/content_compone
 
 | Route | What |
 |---|---|
-| `GET /v1/content-components?kind=expert\|skill\|prompt\|app` | The caller's Library (`contentuse.Visible`): their own components and the copies they hold plus org/platform ones visible to them, at the latest version, with usage counts (`runs`, `members`), the caller's star and the organization's count (`favorite`, `favoriteCount`), an app's `coverUrl`, a team's roster (`team`), `mine`/`removable`, a copy's `sharedBy`/`sourceId`/`sourceLatestVersion` and the author's `publication` |
+| `GET /v1/content-components?kind=expert\|skill\|prompt\|work` | The caller's Library (`contentuse.Visible`): their own components and the copies they hold plus org/platform ones visible to them, at the latest version, with usage counts (`runs`, `members`), the caller's star and the organization's count (`favorite`, `favoriteCount`), a work's `coverUrl`, `workType`, `workFile` and `recipe`, a team's roster (`team`), `mine`/`removable`, a copy's `sharedBy`/`sourceId`/`sourceLatestVersion` and the author's `publication` |
 | `POST /v1/content-components` | Save a new component: `{form, version?}` (JSON) or a package archive (`component.json` names it). 201 detail; 409 duplicate name; 400 validator message. With `?job=&room=`: a save by the bridge running the job, as its requester (below) |
 | `POST /v1/content-components/import?kind=&name=` | Import an archive (tar, tar.gz, zip) or a single markdown/json file of prompts as a new component; `?id=` imports a new version of the caller's component |
 | `POST /v1/content-drafts?job=&room=` | The bridge running a job stages an unsaved expert or skill pack for a quick try (archive body; as the job's requester; 201 `wire.ContentDraft`); see [room-tools.md](room-tools.md), "Quick tries of drafts" |
@@ -767,11 +845,14 @@ store and the artifact entitlement). JSON shapes: `internal/wire/content_compone
 | `DELETE /v1/content-components/{id}/shares/rooms/{room}` | Revoke a room share: later joiners get no copy, existing copies stay (the author only; 404 when there is none) |
 | `POST /v1/content-components/{id}/update` | A shared copy moves to its author's latest version (its holder; 409 when the author no longer has it) |
 | `POST /v1/content-components/{id}/publish` | `{scope: org\|personal\|platform, version?, note?}`: `org` opens a publish request (201 `{scope, request, note}`), or publishes at once where the organization requires no approval (201 `{scope: org, note}`); `personal` withdraws it and unpublishes the org row; `platform` is a 403 saying what a platform admin does (the author; with `?job=&room=` as the job's requester) |
-| `POST /v1/rooms/{roomId}/artifacts/{artifactId}/publish-app` | A site's current version as the caller's app (`wire.AppPublishRequest`; a room member who may post; with `?job=` as the job's requester); 201 detail (see "Apps") |
-| `GET /v1/content-components/{id}/versions/{v}/cover` | An app version's cover image (404 when none) |
-| `POST /v1/content-components/{id}/versions/{v}/demo` | An app version's demo: `wire.AppDemo {siteUrl, expiresAtMs}`, a site URL whose SDK keeps its data in the page (see "Apps") |
+| `POST /v1/rooms/{roomId}/artifacts/{artifactId}/publish-work` | A deliverable's current version as the caller's work, with its recipe (`wire.WorkPublishRequest`; a room member who may post; with `?job=` as the job's requester); 201 detail (see "Works") |
+| `GET /v1/rooms/{roomId}/artifacts/{artifactId}/recipe` | What publishing the deliverable's current version captures (`wire.WorkRecipeCapture`; a room member who may post) |
+| `GET /v1/content-components/{id}/versions/{v}/cover` | A work version's cover image (404 when none) |
+| `GET /v1/content-components/{id}/versions/{v}/file[?path=]` | A work version's one file, or one of its recipe's reference files |
+| `POST /v1/content-components/{id}/versions/{v}/demo` | A site or app work's demo: `wire.AppDemo {siteUrl, expiresAtMs}`, a site URL whose SDK keeps its data in the page (see "Works") |
 | `PUT\|DELETE /v1/content-components/{id}/favorite` | Star (a component the caller sees) or unstar it; 204 |
-| `POST /v1/content-components/{id}/use-app` | Copy a visible app into a room the caller owns or a new room (`wire.AppUseRequest`); 201 `wire.AppUseReply {roomId, artifactId, version, createdRoom?, from}` |
+| `POST /v1/content-components/{id}/use-app` | Copy a visible app work into a room the caller owns or a new room (`wire.AppUseRequest`); 201 `wire.AppUseReply {roomId, artifactId, version, createdRoom?, from}` |
+| `POST /v1/content-components/{id}/make-similar` | A draft of a visible work's recipe in a room the caller owns or a new room (`wire.MakeSimilarRequest`); 201 `wire.MakeSimilarDraft` (see "Works") |
 | `GET /v1/tenant/content-requests[?status=all]` | Org admins: publish requests of the organization (pending by default) with the approved version |
 | `GET /v1/tenant/content-requests/{id}` | Org admins: the review (`wire.ContentReview`: the requested version, `scriptFiles`, `previous`, `files` changes) |
 | `POST /v1/tenant/content-requests/{id}/approve\|decline` | Org admins: `{note?}`; approve publishes the version to the organization |

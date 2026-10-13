@@ -15,7 +15,14 @@ favorites", the detail with its README, Try demo and Use this app) and
 deliverable's card for its owners. Try demo is a demo ticket in the member
 site path whose SDK runs in demo mode (an in-memory data space of the
 page; no data call is answered under it). The reference is
-`docs/architecture/content-components.md`, "Apps".
+`docs/architecture/content-components.md`, "Works".
+
+Status (2026-10-13, later): extended by
+`docs/prd/2026-10-13-works-gallery-and-make-similar.md`. The content kind
+`app` became `work` (type `app` for an interactive app), `publish-app`
+became `publish-work` for every deliverable, Plaza → Apps became Works and
+the Library's Apps tab became Works; everything here holds for a work of
+type `app`.
 
 ## 1. Why
 

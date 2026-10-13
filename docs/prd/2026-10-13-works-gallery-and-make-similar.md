@@ -3,6 +3,43 @@
 Status: accepted (product owner, 2026-10-13). This extends
 `docs/prd/2026-10-13-app-gallery.md`.
 
+Status (2026-10-13): built, every part of §2–§4 with the tests of §6.
+The reference is `docs/architecture/content-components.md`, "Works".
+Decided while building:
+- **Type and validation.** The one type rule is `contentpkg.WorkTypeOf`
+  over the deliverable as members see it (the projection's `isApp`) and,
+  for a file, its name and first bytes (`store.ArtifactMIME`); an HTML
+  document is a `site` (packed as its `index.html`). A file that is not a
+  site is named by the manifest's `file`; the validator holds the bundle
+  to its type. A file named `component.json` or `README.md` is renamed.
+- **The migration** (`2026_10_content_works`) moves the rows and the
+  versions' manifests (type `app`); the stored bundles keep the
+  `component.json` they were saved with, and a stored version is read
+  against its row's manifest (`contentpkg.ValidateStored`) rather than
+  rewriting content-addressed blobs.
+- **A video's cover** is the frame its producing turn saved as a cover
+  file: publishing a file takes the room's image deliverable named as a
+  cover file with a version from the same request (`turnCover`), so the
+  room tools need no extra argument.
+- **The recipe's capture is shown first**:
+  `GET /v1/rooms/{roomId}/artifacts/{artifactId}/recipe`. An author's
+  edit replaces the captured recipe; its references can only be a subset
+  of the captured attachments. Realtime answers an attachment's metadata
+  (`…/attachments/{id}/meta`) for the capture. The room tools save the
+  captured recipe and report its parts (never the prompt's text) so the
+  agent says what it carries.
+- **Make similar** turns packs on only where the member may change the
+  room's (its owner or admins, the Library's rule); in a room they may
+  only post in, the packs are reported as left out. An empty recipe
+  attaches the work itself: its file, or a site's files as a zip. Each
+  draft counts once per room (`make-similar` use).
+- **The detail** renders a work's one file from
+  `GET /v1/content-components/{id}/versions/{v}/file` (also a reference
+  file with `?path=`), and a site work in the sandboxed frame through the
+  demo ticket; Try demo stays an app's. The Library's tab is "Works":
+  the member's published works of every type, and the apps of their
+  rooms.
+
 ## 1. Why
 
 The gallery we just built only shows interactive apps, but agents in a
