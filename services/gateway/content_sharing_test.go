@@ -329,9 +329,16 @@ func TestContentOrgApproval(t *testing.T) {
 	if g.library("kim", "expert") != nil && findContent(g.library("kim", "expert"), "reviewer", "org") != nil {
 		t.Fatal("another organization sees it")
 	}
+	// Jack stars the publication: the author's one card counts it.
+	if code, raw := g.do("jack", http.MethodPut, "/v1/content-components/"+org.ID+"/favorite", "", nil); code != http.StatusOK && code != http.StatusNoContent {
+		t.Fatalf("jack stars it = %d %s", code, raw)
+	}
 	mine := g.library("maya", "expert")
 	if findContent(mine, "reviewer", "org") != nil {
 		t.Fatal("the author sees her publication as a second card")
+	}
+	if c := findContent(mine, "reviewer", "personal"); c.FavoriteCount != 1 || c.Favorite {
+		t.Fatalf("author's card stars = %d (hers %v), want the publication's 1", c.FavoriteCount, c.Favorite)
 	}
 	if p := findContent(mine, "reviewer", "personal").Publication; p == nil || p.OrgVersion != "1.0.0" || p.OrgStatus != "active" || p.Request.Status != "approved" {
 		t.Fatalf("author's publication = %+v", p)

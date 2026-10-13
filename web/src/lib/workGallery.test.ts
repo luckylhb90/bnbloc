@@ -124,20 +124,6 @@ eq([workTypeLabel("video"), workTypeLabel("other"), workTypeLabel("game"), workT
   eq(ids({ favoritesOnly: true, tab: "finance" }), [], "favorites within a tab");
 }
 
-// An author's own work shows once, as its organization publication.
-{
-  const list = [
-    work({ id: "mine", scope: "personal", mine: true, publication: { orgComponentId: "org-row", orgStatus: "active", orgVersion: "1.0.0" } }),
-    work({ id: "org-row", scope: "org" }),
-    work({ id: "draft", scope: "personal", mine: true, publication: { orgComponentId: "not-listed" } }),
-  ];
-  eq(
-    galleryWorks(list, { tab: "all", type: "all", query: "", favoritesOnly: false }).map((c) => c.id),
-    ["org-row", "draft"],
-    "the personal row of a listed publication is hidden",
-  );
-}
-
 // The author line: a person, or the platform.
 eq(workAuthor(work({ scope: "platform", owner: "ops" })), { kind: "platform" }, "platform scope");
 eq(workAuthor(work({ scope: "builtin", owner: "" })), { kind: "platform" }, "built-in content");

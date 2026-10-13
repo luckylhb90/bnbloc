@@ -114,14 +114,12 @@ export function matchesWork(c: ContentComponent, query: string): boolean {
 
 /** galleryWorks is the grid: the listing's works under the type filter,
  *  the category tab, the search and "My favorites", newest-updated first.
- *  An author's own work whose organization publication is listed too
- *  shows once, as the publication (what everyone sees and stars). */
+ *  An author's own published work is one card, their own (the listing
+ *  folds its organization publication into it). */
 export function galleryWorks(list: readonly ContentComponent[], f: GalleryFilter): ContentComponent[] {
   const works = list.filter((c) => c.kind === "work");
-  const listed = new Set(works.map((c) => c.id));
   const types = TYPE_FILTERS.find((t) => t.value === f.type)?.types ?? [];
   return works
-    .filter((c) => !(c.publication?.orgComponentId && listed.has(c.publication.orgComponentId)))
     .filter((c) => types.length === 0 || (!!c.workType && types.includes(c.workType)))
     .filter((c) => f.tab === "all" || c.category === f.tab)
     .filter((c) => !f.favoritesOnly || c.favorite)

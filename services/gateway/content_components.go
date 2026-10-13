@@ -234,7 +234,8 @@ func (s *Service) memberContent(ctx context.Context, claims auth.Claims, full st
 		return nil, err
 	}
 	// The author sees their own organization publication on their personal
-	// component (its publication), not as a second card.
+	// component (its publication), not as a second card; the card counts
+	// the publication's uses and stars too.
 	authored := map[string]bool{}
 	for _, c := range visible {
 		if c.Scope == store.ContentScopePersonal && ownedBy(c, claims) {
@@ -242,8 +243,10 @@ func (s *Service) memberContent(ctx context.Context, claims auth.Claims, full st
 		}
 	}
 	comps := visible[:0:0]
+	folded := map[string]string{} // personal id -> its publication's id
 	for _, c := range visible {
 		if c.Scope == store.ContentScopeOrg && ownedBy(c, claims) && authored[c.SourceID] {
+			folded[c.SourceID] = c.ID
 			continue
 		}
 		comps = append(comps, c)
@@ -252,8 +255,50 @@ func (s *Service) memberContent(ctx context.Context, claims auth.Claims, full st
 	if err != nil {
 		return nil, err
 	}
+	if err := s.foldPublicationCounts(ctx, claims, views, folded); err != nil {
+		return nil, err
+	}
 	sortContentViews(views)
 	return views, nil
+}
+
+// foldPublicationCounts adds each folded publication's uses and stars to
+// its author's card (folded: personal id -> publication id); the caller's
+// star on either is their star.
+func (s *Service) foldPublicationCounts(ctx context.Context, claims auth.Claims, views []wire.ContentComponent, folded map[string]string) error {
+	if len(folded) == 0 {
+		return nil
+	}
+	ids := make([]string, 0, len(folded))
+	for _, id := range folded {
+		ids = append(ids, id)
+	}
+	uses, err := s.ContentComponents.CountContentUses(ctx, claims.Tenant, ids)
+	if err != nil {
+		return err
+	}
+	stars, err := s.ContentComponents.CountContentFavorites(ctx, claims.Tenant, ids)
+	if err != nil {
+		return err
+	}
+	starred, err := s.ContentComponents.ListContentFavorites(ctx, claims.Tenant, claims.Subject, ids)
+	if err != nil {
+		return err
+	}
+	mine := map[string]bool{}
+	for _, f := range starred {
+		mine[f.ComponentID] = true
+	}
+	for i := range views {
+		pub, ok := folded[views[i].ID]
+		if !ok {
+			continue
+		}
+		views[i].Uses += uses[pub]
+		views[i].FavoriteCount += stars[pub]
+		views[i].Favorite = views[i].Favorite || mine[pub]
+	}
+	return nil
 }
 
 // contentViews renders components at their latest (or pinned) version with
