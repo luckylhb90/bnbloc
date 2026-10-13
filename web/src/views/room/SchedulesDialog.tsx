@@ -43,6 +43,10 @@ import { useDisplayNames } from "@/lib/useDisplayName";
 import { UserName } from "@/views/UserName";
 import { errorText } from "@/lib/errors";
 import { agentIdentity } from "@/lib/roomAgents";
+import { runJSONAssist, useAssistTask } from "@/lib/assist";
+import { DRAFT_SCHEDULE, scheduleDraftFrom } from "@/lib/assistDrafts";
+import { isSubmitEnter } from "@/lib/keys";
+import { AssistButton, type AssistRunState } from "@/views/AssistButton";
 
 const SELECT =
   "h-9 w-full rounded-[var(--radius)] border border-[var(--color-border)] bg-[var(--color-surface-2)] px-3 text-sm text-[var(--color-fg)] focus:outline-none focus:border-[var(--color-accent)]";
@@ -306,6 +310,31 @@ function ScheduleEditor({
   const groups = useMemo(() => [...new Set(options.map((o) => o.group))], [options]);
   const borrowed = isBorrowedRecipient(recipient, me);
   const setKind = (kind: RecurrenceKind) => setForm((f) => ({ ...f, kind }));
+  // "Describe it" (AI assist PRD §6): plain words to the message and the
+  // recurrence, in the form's timezone; the member reviews and saves.
+  const describeTask = useAssistTask(DRAFT_SCHEDULE);
+  const [said, setSaid] = useState("");
+  const [describing, setDescribing] = useState<AssistRunState>("idle");
+  const describe = async () => {
+    if (!describeTask || describing !== "idle" || !said.trim()) return;
+    setDescribing("waiting");
+    try {
+      const r = await runJSONAssist(describeTask.name, { text: said.trim(), roomId, timezone });
+      const d = scheduleDraftFrom(r.fields);
+      if (d.text) setText(d.text);
+      setForm((f) => ({ ...f, ...d.form }));
+      if (!d.form.kind) toast.error("Could not read when to post it; set the time below");
+      setErr("");
+    } catch (e) {
+      toast.error(errorText(e, "Could not read the schedule"));
+    } finally {
+      setDescribing("idle");
+    }
+  };
+  const preview = useMemo(() => {
+    const built = recurrenceFromForm(form, timezone);
+    return built.recurrence ? describeRecurrence(built.recurrence, timezone) : null;
+  }, [form, timezone]);
 
   const save = async () => {
     if (!text.trim()) {
@@ -361,6 +390,20 @@ function ScheduleEditor({
       }
     >
       <div className="flex flex-col gap-4">
+        {describeTask && (
+          <div className="flex items-center gap-2 rounded-[var(--radius)] border border-dashed border-[var(--color-border)] bg-[var(--color-surface-2)]/40 p-2">
+            <Input
+              className="min-w-0 flex-1"
+              value={said}
+              onChange={(e) => setSaid(e.target.value)}
+              onKeyDown={(e) => isSubmitEnter(e) && void describe()}
+              placeholder="Describe it, e.g. every weekday at 9:30 ask the agent for yesterday's open issues"
+              aria-label="Describe the schedule"
+              disabled={describing !== "idle"}
+            />
+            <AssistButton variant="text" label="Describe it" state={describing} onRun={() => void describe()} disabled={!said.trim()} />
+          </div>
+        )}
         <Field label="Message">
           <Textarea autoFocus rows={4} value={text} onChange={(e) => setText(e.target.value)} placeholder="What changed since yesterday? Summarize open questions." />
         </Field>
@@ -410,7 +453,7 @@ function ScheduleEditor({
             </span>
           </p>
         )}
-        <Field label="When">
+        <Field label="When" hint={preview ? `${preview} (${timezone})` : undefined}>
           <Segment options={KINDS} value={form.kind} onChange={setKind} />
         </Field>
         {form.kind === "once" && (
