@@ -137,8 +137,10 @@ Cleaning up after a test, an agent deleted every directory under a shared
 temporary workspace root, not just its own. The member's real workspace
 survived only because it lived elsewhere at the time.
 
-Evidence: session notes of 2026-10-13 (no commit: a local action).
-Seen 1× (2026-10-13).
+Evidence: session notes of 2026-10-13 (no commit: a local action). On
+2026-10-14 a cleanup glob over release build clones (`/tmp/<prefix>-*`)
+also removed the clone a build was still running in; it had to be redone.
+Seen 2× (2026-10-13, 2026-10-14).
 
 ### Run CI stages one at a time in one working tree
 
@@ -148,6 +150,90 @@ diagnosis.
 
 Evidence: scripts/ci.sh (stages share `services/gateway/webui/static`).
 Seen 1× (2026-10-13).
+
+### Make a long command report its real exit code
+
+A desktop release build ran in the background as `build > log; rc=$?; echo
+…`, and a trailing `; echo` made the task report success. The build had
+died with "No space left on device". The version bump was already pushed
+when the publish step failed safely for want of a signature. Run the
+command last, or `exit $rc`; check the artifact itself (its version, its
+signature) before publishing.
+
+Evidence: desktop 0.1.46 (commit 7dc36210), rebuilt with a real exit code.
+Seen 1× (2026-10-14).
+
+### Reach for the owner function before writing a check
+
+A new file-name check was written by hand twice in one day. Both times
+the architecture test that keeps `core.CleanRelPath` the one owner of
+relative paths refused it (commits 4a3433b7 and 5f080187). Before writing
+a check, search for the function that owns it; the archtest is right.
+
+Evidence: commits 4a3433b7, 5f080187; internal/archtest.
+Seen 1× (2026-10-14).
+
+### Make every new assertion fail once before you trust it
+
+A ranking test asserted "an organization's pack before a built-in one". It
+passed with the order reversed: built-in packs were tagged "library" among
+the composer's choices, so the rule it named never applied. Only breaking
+the code on purpose (a red check) showed it. The same day an overlap test
+caught a real gap the check had (a window step that skipped shared runs).
+
+Evidence: commit 3fade890 (promptChoices tags built-in packs);
+lib/editScope.ts (commit bb55bfc9).
+Seen 1× (2026-10-14).
+
+### Check what you generate, not what you wrote
+
+The PDF guest script is a template literal. An edit written through a
+shell heredoc lost one level of escaping, so `"\n"` became a real line
+break inside a JS string, and the guest stopped parsing. That broke PDF
+Compare, and would have broken the PDF viewer. Type checks and unit tests
+passed; only a browser run showed it. A test now parses the generated
+script.
+
+Evidence: commit 897f3c35 (pdfFrame.test.ts "the guest script parses").
+Seen 1× (2026-10-14).
+
+### Prove the harness ran what you meant before you read its result
+
+Three browser checks reported on the wrong thing:
+- a "Show" locator matched "Show 2 pages unchanged" and stayed on Compare;
+- a stored session had expired, so the page was the sign-in screen;
+- a build ran with `--dir web` from inside `web/` and failed, and the run
+  went on serving the previous build.
+
+Each looked like a product failure. Check the harness itself: exact
+locators, a fresh session, the build's real exit status, a screenshot of
+the page before the first assertion.
+
+Evidence: session of 2026-10-14 (the select-edit-review checks).
+Seen 1× (2026-10-14).
+
+### A new value in a shared vocabulary must be harmless to an older reader
+
+An older web host refused a previewer whose capabilities named one it did
+not know, so publishing a previewer before the host was deployed would
+have hidden it from every member. Installed packages re-parse strictly at
+boot, so a manifest field cannot be removed in the same release that stops
+using it. Readers now ignore unknown capabilities; removals go in two
+deploys.
+
+Evidence: commit 4cd35e6c (unknown capabilities ignored);
+docs/prd/2026-10-14-file-prompts-and-compare.md rule 3 (F4).
+Seen 1× (2026-10-14).
+
+### Show the result of an action on the control that did it
+
+"Save to <file>" wrote the file and said so only in a four-second toast in
+the corner. The member saw nothing and reported that saving did nothing.
+A write's outcome now stays on the chip ("Saved v2 to deck.pptx") until
+another version is shown.
+
+Evidence: commit 2bef7603.
+Seen 1× (2026-10-14).
 
 ## Done right
 
@@ -170,6 +256,16 @@ whose context leaks across channels, what a deleted message must erase from
 an agent's memory.
 
 Evidence: docs/prd/2026-10-14-multi-member-rooms.md §2b; docs/design-review.md.
+Seen 1× (2026-10-14).
+
+### Check the UI of a change against real data before it ships
+
+A local web build pointed at the QA gateway, with the new pieces routed
+in (a content pack, previewer bundles), showed problems no unit test
+could: a file panel offering the room's generic starters, and a selection
+action cut off at the panel's edge. Both were fixed before anyone saw them.
+
+Evidence: commits aedd52f2, a2bc64af.
 Seen 1× (2026-10-14).
 
 ## Promoted
