@@ -5,7 +5,7 @@ import { gatewayBase } from "@/lib/config";
 import { localFiles, type LocalOpened } from "@/lib/localFiles";
 import { MY_FILES_DESCRIPTION, MY_FILES_NAME, myFilesRoomId, openLocal, type OpenDeps } from "@/lib/localOpen";
 import { StorageKey, memberKey, readStored, writeStored } from "@/lib/storageKeys";
-import { artifactLinks } from "@/lib/team";
+import { artifactLinks, fileAskRequests } from "@/lib/team";
 import { Button } from "@/ui/Button";
 import { Dialog } from "@/ui/Dialog";
 import { useToast } from "@/ui/Toast";
@@ -117,6 +117,8 @@ export function LocalFileOpener({ subject, tenant, onOpenRoom }: { readonly subj
       try {
         const at = await openLocal(o, liveDeps(gatewayBase(), tenant, subject));
         artifactLinks.queue(at.roomId, { artifactId: at.artifactId });
+        // Its Ask AI panel opens with it: the member opened it to work on it.
+        fileAskRequests.queue(at.roomId, { artifactId: at.artifactId });
         onOpenRoom(at.roomId);
       } catch (e) {
         toast.error(errorText(e, `Could not open ${o.name}`));

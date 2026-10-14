@@ -17,6 +17,9 @@ type ContentPrompt struct {
 	// Starter offers it among the starter prompts of a room the pack is
 	// turned on for.
 	Starter bool `json:"starter,omitempty"`
+	// Files scopes it to matching files: a starter with files is a file
+	// suggestion, not a room starter.
+	Files *FileMatch `json:"files,omitempty"`
 	// Uses counts its insertions by every member.
 	Uses int64 `json:"uses"`
 }

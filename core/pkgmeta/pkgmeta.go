@@ -87,7 +87,7 @@ type (
 	SidecarFile          = wire.ComponentSidecarFile
 	Guest                = wire.ComponentGuest
 	Previewer            = wire.ComponentPreviewer
-	PreviewerMatch       = wire.ComponentPreviewerMatch
+	PreviewerMatch       = wire.FileMatch
 	PreviewerToolbarItem = wire.ComponentPreviewerToolbarItem
 	PreviewerSuggestion  = wire.ComponentPreviewerSuggestion
 	MCP                  = wire.ComponentMCP

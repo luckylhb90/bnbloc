@@ -53,10 +53,21 @@ function PromptEditor({ draft, onChange, onRemove }: { readonly draft: PromptDra
         onChange={(e) => set({ body: e.target.value, variables: syncVariables(e.target.value, draft.variables) })}
       />
       <Input value={draft.tags} placeholder="Tags, e.g. writing, review" aria-label="Tags" onChange={(e) => set({ tags: e.target.value })} />
+      <Input
+        value={draft.files}
+        placeholder="For files, e.g. .pptx, .key, image/* (empty: any conversation)"
+        aria-label="For files"
+        className="font-mono text-xs"
+        onChange={(e) => set({ files: e.target.value })}
+      />
       <Switch
         checked={draft.starter}
         onChange={(on) => set({ starter: on })}
-        label="Starter: offered in empty rooms that use this pack"
+        label={
+          draft.files.trim()
+            ? "Suggested: offered for these files, in their Ask AI panel and in a room showing one"
+            : "Starter: offered in empty rooms that use this pack"
+        }
       />
       {draft.variables.length > 0 && (
         <div className="flex flex-col gap-2">

@@ -18,11 +18,9 @@
 import {
   PREVIEWER_CAPABILITIES,
   readFrameMessage,
-  readSuggestions,
   readToolbar,
   type FrameMessage,
   type PreviewerCapability,
-  type Suggestion,
   type ToolbarItem,
 } from "../../previewer-sdk/src/protocol.ts";
 import { schemeUrl, type ConvertFileSrc } from "./schemeUrl.ts";
@@ -44,8 +42,6 @@ export interface PreviewerDescriptor {
   readonly rank: number;
   readonly capabilities: readonly PreviewerCapability[];
   readonly toolbar: readonly ToolbarItem[];
-  /** The Ask AI panel's starting prompts (previewer.suggestions). */
-  readonly suggestions: readonly Suggestion[];
   readonly bundleSha256: string;
   /** Gateway-relative browser frame base (ticket included), ends with "/". */
   readonly frameUrl: string;
@@ -87,8 +83,7 @@ export function parsePreviewerEntry(entry: unknown): PreviewerDescriptor | null 
   const extensions = stringList(block.match.extensions);
   const caps = stringList(block.capabilities);
   const toolbar = readToolbar(block.toolbar ?? []);
-  const suggestions = readSuggestions(block.suggestions);
-  if (!mimeTypes || !extensions || !caps || !toolbar || !suggestions || mimeTypes.length + extensions.length === 0) return null;
+  if (!mimeTypes || !extensions || !caps || !toolbar || mimeTypes.length + extensions.length === 0) return null;
   const { entry: entryPath, rank, frameUrl, frameExpiresAtMs, bundleSha256 } = block;
   if (typeof entryPath !== "string" || !validBundlePath(entryPath)) return null;
   if (typeof rank !== "number" || !Number.isInteger(rank) || rank < 1 || rank > 1000) return null;
@@ -106,7 +101,6 @@ export function parsePreviewerEntry(entry: unknown): PreviewerDescriptor | null 
     // predates is ignored, not a reason to drop the previewer.
     capabilities: caps.filter((c): c is PreviewerCapability => (PREVIEWER_CAPABILITIES as readonly string[]).includes(c)),
     toolbar,
-    suggestions,
     bundleSha256,
     frameUrl,
     frameExpiresAtMs,

@@ -78,8 +78,8 @@ type ComponentGuest struct {
 // ComponentPreviewer is a previewer package's payload (pkgmeta.Package.Previewer).
 type ComponentPreviewer struct {
 	// Entry is the bundle-relative HTML document the frame loads.
-	Entry string                  `json:"entry"`
-	Match ComponentPreviewerMatch `json:"match"`
+	Entry string    `json:"entry"`
+	Match FileMatch `json:"match"`
 	// Rank orders previewers matching a file with equal specificity, like
 	// the web registry's built-ins (lower first).
 	Rank         int                             `json:"rank"`
@@ -97,8 +97,10 @@ type ComponentPreviewerSuggestion struct {
 	Prompt string `json:"prompt"`
 }
 
-// ComponentPreviewerMatch declares the files a previewer renders.
-type ComponentPreviewerMatch struct {
+// FileMatch declares the files something applies to: the files a
+// previewer renders, the files a prompt-pack prompt is for. One validator:
+// internal/filematch.
+type FileMatch struct {
 	MimeTypes  []string `json:"mimeTypes,omitempty"`
 	Extensions []string `json:"extensions,omitempty"`
 }

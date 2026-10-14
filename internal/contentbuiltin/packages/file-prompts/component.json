@@ -1,0 +1,367 @@
+{
+  "kind": "bnbloc.prompt.package/v1",
+  "name": "file-prompts",
+  "version": "1.0.0",
+  "displayName": "File prompts",
+  "description": "Suggested requests for a file, offered in its Ask AI panel and in a room whose workbench shows it: decks, documents, sheets, PDFs, Markdown, tables and images.",
+  "category": "general",
+  "tags": [
+    "files",
+    "starters"
+  ],
+  "prompts": [
+    {
+      "id": "deck-tighten",
+      "title": "Tighten the wording",
+      "body": "Tighten the wording on every slide: shorter titles, fewer words per bullet, the same meaning. Keep the layout and design.",
+      "starter": true,
+      "files": {
+        "extensions": [
+          ".pptx",
+          ".pptm",
+          ".ppsx",
+          ".potx"
+        ],
+        "mimeTypes": [
+          "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+        ]
+      }
+    },
+    {
+      "id": "deck-notes",
+      "title": "Add speaker notes",
+      "body": "Write speaker notes for each slide that has none: two to four sentences on what to say.",
+      "starter": true,
+      "files": {
+        "extensions": [
+          ".pptx",
+          ".pptm",
+          ".ppsx",
+          ".potx"
+        ],
+        "mimeTypes": [
+          "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+        ]
+      }
+    },
+    {
+      "id": "deck-consistent",
+      "title": "Make it consistent",
+      "body": "Check the deck for inconsistent fonts, sizes, colours, alignment and capitalisation, and fix them.",
+      "starter": true,
+      "files": {
+        "extensions": [
+          ".pptx",
+          ".pptm",
+          ".ppsx",
+          ".potx"
+        ],
+        "mimeTypes": [
+          "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+        ]
+      }
+    },
+    {
+      "id": "deck-summary",
+      "title": "Summarize the deck",
+      "body": "Summarize this deck in five bullet points. Do not change the file.",
+      "starter": true,
+      "files": {
+        "extensions": [
+          ".pptx",
+          ".pptm",
+          ".ppsx",
+          ".potx"
+        ],
+        "mimeTypes": [
+          "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+        ]
+      }
+    },
+    {
+      "id": "doc-proofread",
+      "title": "Proofread",
+      "body": "Proofread the document: fix spelling, grammar and punctuation without changing the meaning or the formatting.",
+      "starter": true,
+      "files": {
+        "extensions": [
+          ".docx",
+          ".docm",
+          ".dotx"
+        ],
+        "mimeTypes": [
+          "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        ]
+      }
+    },
+    {
+      "id": "doc-concise",
+      "title": "Make it concise",
+      "body": "Make the document more concise: cut repetition and filler, keep every point and the formatting.",
+      "starter": true,
+      "files": {
+        "extensions": [
+          ".docx",
+          ".docm",
+          ".dotx"
+        ],
+        "mimeTypes": [
+          "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        ]
+      }
+    },
+    {
+      "id": "doc-structure",
+      "title": "Improve the structure",
+      "body": "Improve the structure: clear headings, a logical order, one idea per paragraph. Keep the content.",
+      "starter": true,
+      "files": {
+        "extensions": [
+          ".docx",
+          ".docm",
+          ".dotx"
+        ],
+        "mimeTypes": [
+          "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        ]
+      }
+    },
+    {
+      "id": "doc-summary",
+      "title": "Summarize",
+      "body": "Summarize this document in five bullet points. Do not change the file.",
+      "starter": true,
+      "files": {
+        "extensions": [
+          ".docx",
+          ".docm",
+          ".dotx"
+        ],
+        "mimeTypes": [
+          "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        ]
+      }
+    },
+    {
+      "id": "sheet-explain",
+      "title": "Explain this workbook",
+      "body": "Explain what this workbook contains and how its sheets relate. Do not change the file.",
+      "starter": true,
+      "files": {
+        "extensions": [
+          ".xlsx",
+          ".xlsm",
+          ".xltx"
+        ],
+        "mimeTypes": [
+          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        ]
+      }
+    },
+    {
+      "id": "sheet-formulas",
+      "title": "Check the formulas",
+      "body": "Check the formulas and totals for errors or inconsistencies, fix them, and list what you changed.",
+      "starter": true,
+      "files": {
+        "extensions": [
+          ".xlsx",
+          ".xlsm",
+          ".xltx"
+        ],
+        "mimeTypes": [
+          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        ]
+      }
+    },
+    {
+      "id": "sheet-tidy",
+      "title": "Tidy the formatting",
+      "body": "Make number formats, column widths and header styles consistent across the sheets. Keep every value.",
+      "starter": true,
+      "files": {
+        "extensions": [
+          ".xlsx",
+          ".xlsm",
+          ".xltx"
+        ],
+        "mimeTypes": [
+          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        ]
+      }
+    },
+    {
+      "id": "sheet-summary",
+      "title": "Add a summary",
+      "body": "Add a summary of the key figures (totals, averages, changes) where it fits best, using formulas.",
+      "starter": true,
+      "files": {
+        "extensions": [
+          ".xlsx",
+          ".xlsm",
+          ".xltx"
+        ],
+        "mimeTypes": [
+          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        ]
+      }
+    },
+    {
+      "id": "pdf-summary",
+      "title": "Summarize",
+      "body": "Summarize this PDF: the key points, the decisions and the open questions, on one page. Do not change the file.",
+      "starter": true,
+      "files": {
+        "extensions": [
+          ".pdf"
+        ],
+        "mimeTypes": [
+          "application/pdf"
+        ]
+      }
+    },
+    {
+      "id": "pdf-figures",
+      "title": "Pull out the key figures",
+      "body": "List the key figures and dates in this PDF as a table, each with the page it comes from.",
+      "starter": true,
+      "files": {
+        "extensions": [
+          ".pdf"
+        ],
+        "mimeTypes": [
+          "application/pdf"
+        ]
+      }
+    },
+    {
+      "id": "pdf-questions",
+      "title": "Questions to ask",
+      "body": "List the questions a careful reader should ask after reading this PDF, with the passage that raises each.",
+      "starter": true,
+      "files": {
+        "extensions": [
+          ".pdf"
+        ],
+        "mimeTypes": [
+          "application/pdf"
+        ]
+      }
+    },
+    {
+      "id": "md-proofread",
+      "title": "Proofread",
+      "body": "Proofread this document: fix spelling, grammar and punctuation, keep the meaning and the Markdown.",
+      "starter": true,
+      "files": {
+        "extensions": [
+          ".md",
+          ".markdown"
+        ],
+        "mimeTypes": [
+          "text/markdown"
+        ]
+      }
+    },
+    {
+      "id": "md-concise",
+      "title": "Make it concise",
+      "body": "Make this document more concise: cut repetition and filler, keep every point and the headings.",
+      "starter": true,
+      "files": {
+        "extensions": [
+          ".md",
+          ".markdown"
+        ],
+        "mimeTypes": [
+          "text/markdown"
+        ]
+      }
+    },
+    {
+      "id": "md-slides",
+      "title": "Turn it into slides",
+      "body": "Turn this document into a short slide deck (.pptx), one idea per slide, with speaker notes.",
+      "starter": true,
+      "files": {
+        "extensions": [
+          ".md",
+          ".markdown"
+        ],
+        "mimeTypes": [
+          "text/markdown"
+        ]
+      }
+    },
+    {
+      "id": "csv-explain",
+      "title": "Explain this table",
+      "body": "Explain what this table holds: its columns, its rows and anything unusual. Do not change the file.",
+      "starter": true,
+      "files": {
+        "extensions": [
+          ".csv",
+          ".tsv"
+        ],
+        "mimeTypes": [
+          "text/csv",
+          "text/tab-separated-values"
+        ]
+      }
+    },
+    {
+      "id": "csv-anomalies",
+      "title": "Find anomalies",
+      "body": "Find missing values, duplicates and outliers in this table and list them by row.",
+      "starter": true,
+      "files": {
+        "extensions": [
+          ".csv",
+          ".tsv"
+        ],
+        "mimeTypes": [
+          "text/csv",
+          "text/tab-separated-values"
+        ]
+      }
+    },
+    {
+      "id": "csv-chart",
+      "title": "Chart it",
+      "body": "Make a chart of the most telling numbers in this table, as an image I can preview here.",
+      "starter": true,
+      "files": {
+        "extensions": [
+          ".csv",
+          ".tsv"
+        ],
+        "mimeTypes": [
+          "text/csv",
+          "text/tab-separated-values"
+        ]
+      }
+    },
+    {
+      "id": "image-describe",
+      "title": "Describe it",
+      "body": "Describe this image: what it shows, its text, and anything notable. Do not change the file.",
+      "starter": true,
+      "files": {
+        "mimeTypes": [
+          "image/*"
+        ]
+      }
+    },
+    {
+      "id": "image-variants",
+      "title": "Make variations",
+      "body": "Make two variations of this image with the same subject and a different style.",
+      "starter": true,
+      "files": {
+        "mimeTypes": [
+          "image/*"
+        ]
+      }
+    }
+  ]
+}

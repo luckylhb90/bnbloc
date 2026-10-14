@@ -2,7 +2,8 @@ import { useCallback, useMemo } from "react";
 import { api } from "@/lib/api";
 import { Button } from "@/ui/Button";
 import { dedupeMembers } from "@/lib/format";
-import { Composer } from "@/views/Composer";
+import { Composer, type ComposerFileContext } from "@/views/Composer";
+import type { PromptChoice } from "@/lib/promptPacks";
 import type { RoomAgent } from "@/views/composer/types";
 import { agentHandle } from "@/lib/roomAgents";
 import type { LocalAgent } from "@/lib/useLocalAgent";
@@ -37,7 +38,9 @@ export function RoomComposer({
   modelCatalogs,
   working = 0,
   variant = "room",
-  draft,
+  fileContext,
+  pick,
+  threadLength,
 }: {
   readonly roomPreview: boolean;
   // The member may follow the room but not post (a visitor).
@@ -63,7 +66,13 @@ export function RoomComposer({
   // "people": the people chat's composer (no agent picker, people-only);
   // "file": a file's Ask AI panel (its sends name the file).
   readonly variant?: "room" | "people" | "file";
-  readonly draft?: { readonly text: string; readonly nonce: number };
+  // The file the conversation is about (Composer fileContext) and a
+  // suggestion handed over to insert.
+  readonly fileContext?: ComposerFileContext;
+  readonly pick?: { readonly choice: PromptChoice; readonly nonce: number };
+  // The length of the conversation the starters are for, when it is not
+  // the feed (a file panel's thread).
+  readonly threadLength?: number;
 }) {
   // Stable inputs for the composer's mention list and references.
   const members = useMemo(
@@ -78,13 +87,12 @@ export function RoomComposer({
         .map((m) => ({ id: m.id, author: m.author, text: m.text })),
     [feed],
   );
-  // Starter prompts: an empty feed with an agent to send to (a member's, a
-  // local target, or a platform agent with an online host).
+  // Starter prompts: an empty conversation with an agent to send to (a
+  // member's, a local target, or a platform agent with an online host).
   const showStarters = showStarterPrompts({
-    feedLength: feed.length,
+    feedLength: threadLength ?? feed.length,
     working,
-    // Neither the people chat nor a file panel (it offers its own).
-    people: variant !== "room",
+    people: variant === "people",
     agentAvailable:
       roomAgents.some((a) => !a.platform) || agent.targets.length > 0 || !!platformAgents?.choices.some((c) => c.online),
   });
@@ -124,7 +132,8 @@ export function RoomComposer({
             modelCatalogs={modelCatalogs}
             showStarters={showStarters}
             variant={variant}
-            draft={draft}
+            fileContext={fileContext}
+            pick={pick}
           />
         </>
       )}

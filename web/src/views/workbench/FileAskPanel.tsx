@@ -1,7 +1,8 @@
-import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { CrosshairSimpleIcon, SparkleIcon, XIcon } from "@phosphor-icons/react";
+import { createContext, useContext, useEffect, useMemo, useRef, type ReactNode } from "react";
+import { CrosshairSimpleIcon, XIcon } from "@phosphor-icons/react";
+import type { FileFacts } from "@/lib/fileMatch";
+import type { PromptChoice } from "@/lib/promptPacks";
 import type { FileRef } from "@/lib/wire.gen";
-import type { ViewerSuggestion } from "@/views/artifact/registry";
 import { Message } from "@/views/room/Message";
 import type { FeedItem } from "@/views/room/types";
 import { fileThread } from "./fileAsk";
@@ -14,15 +15,34 @@ import { fileThread } from "./fileAsk";
 // window, a share page) there is no panel.
 //
 // M2: the previewer may point at part of the file (fileRef.selection, a
-// removable chip: the request is about that part) and offer starting
-// prompts (its package's suggestions, on an empty thread; a pick fills the
-// composer, it never sends).
+// removable chip: the request is about that part). An empty thread offers
+// the file's suggestions in the composer's starter row
+// (docs/prd/2026-10-14-file-prompts-and-compare.md rule 4): prompt-pack
+// prompts scoped to the file; a pick fills the composer, it never sends.
+
+/** The file in front of the room: the workbench's active file tab. */
+export interface FileFocus {
+  readonly artifactId: string;
+  readonly file: FileFacts;
+}
+
+/** What a file panel's composer is told. */
+export interface FileComposerOptions {
+  readonly file: FileFacts;
+  /** The file thread's length (its starters show while it is empty). */
+  readonly threadLength: number;
+  /** A suggestion handed over to insert (a new nonce inserts again). */
+  readonly pick?: { readonly choice: PromptChoice; readonly nonce: number };
+}
 
 export interface FileAsk {
   readonly roomId: string;
   readonly feed: readonly FeedItem[];
-  /** The room composer, its sends naming ref; draft fills its input. */
-  readonly composer: (ref: FileRef, draft?: { readonly text: string; readonly nonce: number }) => ReactNode;
+  /** The room composer, its sends naming ref. */
+  readonly composer: (ref: FileRef, options: FileComposerOptions) => ReactNode;
+  /** The active file tab says which file is in front (null when it
+   *  leaves); the room's starters follow it. */
+  readonly focus: (focus: FileFocus | null) => void;
 }
 
 const FileAskContext = createContext<FileAsk | null>(null);
@@ -35,17 +55,18 @@ export function useFileAsk(): FileAsk | null {
 export function FileAskPanel({
   ask,
   fileRef,
-  suggestions = [],
+  file,
+  pick,
   onClearSelection,
   onClose,
 }: {
   readonly ask: FileAsk;
   readonly fileRef: FileRef;
-  readonly suggestions?: readonly ViewerSuggestion[];
+  readonly file: FileFacts;
+  readonly pick?: FileComposerOptions["pick"];
   readonly onClearSelection: () => void;
   readonly onClose: () => void;
 }) {
-  const [draft, setDraft] = useState<{ text: string; nonce: number } | undefined>(undefined);
   const thread = useMemo(() => fileThread(ask.feed, fileRef.artifactId), [ask.feed, fileRef.artifactId]);
   const endRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
@@ -71,28 +92,10 @@ export function FileAskPanel({
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto px-3 py-3">
         {thread.length === 0 ? (
-          <>
-            <p className="text-xs leading-5 text-[var(--color-fg-subtle)]">
-              Ask an agent to change {fileRef.name ?? "this file"}. Each change becomes a new version of it, here and in the room; any
-              earlier version can be restored from the version picker.
-            </p>
-            {suggestions.length > 0 && (
-              <div className="mt-3 flex flex-wrap gap-1.5" role="group" aria-label="Suggested requests">
-                {suggestions.map((sg) => (
-                  <button
-                    key={sg.label}
-                    type="button"
-                    title={sg.prompt}
-                    onClick={() => setDraft((cur) => ({ text: sg.prompt, nonce: (cur?.nonce ?? 0) + 1 }))}
-                    className="tactile inline-flex max-w-full items-center gap-1 truncate rounded-full border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-1.5 text-xs text-[var(--color-fg-muted)] hover:border-[var(--color-accent)]/40 hover:bg-[var(--color-accent-soft)] hover:text-[var(--color-fg)]"
-                  >
-                    <SparkleIcon size={12} weight="fill" className="shrink-0 text-[var(--color-accent)]" aria-hidden="true" />
-                    <span className="truncate">{sg.label}</span>
-                  </button>
-                ))}
-              </div>
-            )}
-          </>
+          <p className="text-xs leading-5 text-[var(--color-fg-subtle)]">
+            Ask an agent to change {fileRef.name ?? "this file"}. Each change becomes a new version of it, here and in the room; any
+            earlier version can be restored from the version picker.
+          </p>
         ) : (
           thread.map((item) => <Message key={item.id} roomId={ask.roomId} item={item} />)
         )}
@@ -119,7 +122,7 @@ export function FileAskPanel({
         </div>
       )}
       {/* Its own container: the composer lays out for the panel's width. */}
-      <div className="@container shrink-0">{ask.composer(fileRef, draft)}</div>
+      <div className="@container shrink-0">{ask.composer(fileRef, { file, threadLength: thread.length, pick })}</div>
     </aside>
   );
 }

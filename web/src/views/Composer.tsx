@@ -25,6 +25,8 @@ import { AgentPicker } from "@/views/composer/AgentPicker";
 import { ModelPicker } from "@/views/composer/ModelPicker";
 import { SendModeToggle } from "@/views/composer/SendModeToggle";
 import { StarterPrompts } from "@/views/composer/StarterPrompts";
+import { fileSuggestions, type PromptChoice } from "@/lib/promptPacks";
+import type { FileFacts } from "@/lib/fileMatch";
 import type { Referenceable, RoomAgent } from "@/views/composer/types";
 import { agentHandle } from "@/lib/roomAgents";
 import type { SendOptions } from "@/views/room/useRoomMessageActions";
@@ -51,6 +53,13 @@ const toolButton =
 // segment and the model picker are icon-only and attach + reference share one
 // "+" menu. The "people" variant is the people chat's composer: no agent, no
 // pickers — every message is people-only by construction.
+
+/** The file a composer's conversation is about (Composer fileContext). */
+export interface ComposerFileContext {
+  readonly file: FileFacts;
+  /** Where a picked suggestion goes; default: this composer's input. */
+  readonly onPick?: (c: PromptChoice) => void;
+}
 export function Composer({
   roomId,
   channelId,
@@ -66,7 +75,8 @@ export function Composer({
   modelCatalogs = NO_ROOM_CATALOGS,
   showStarters = false,
   variant = "room",
-  draft,
+  fileContext,
+  pick,
 }: {
   roomId: string;
   channelId?: string | null;
@@ -88,9 +98,12 @@ export function Composer({
   // An empty room with an agent available: example prompts above the input.
   showStarters?: boolean;
   variant?: "room" | "people" | "file";
-  // Text to put in the input (a file panel's suggestion); a new nonce
-  // replaces the input with it again.
-  draft?: { readonly text: string; readonly nonce: number };
+  // The file the conversation is about (a file panel's, or the room's
+  // focused file): the starters become its suggestions.
+  fileContext?: ComposerFileContext;
+  // A prompt to insert (a suggestion handed over from the room); a new
+  // nonce inserts it again.
+  pick?: { readonly choice: PromptChoice; readonly nonce: number };
 }) {
   const people = variant === "people";
   // Drafts, agents, references and attachments handed to "the composer"
@@ -103,17 +116,6 @@ export function Composer({
   // A prompt "Used" from the library, and references asked from the people
   // chat, land in the room's main composer only (never the people chat's).
   useInjectedDraft(roomId, main ? channelId : null, setText, taRef);
-  useEffect(() => {
-    if (!draft) return;
-    setText(draft.text);
-    requestAnimationFrame(() => {
-      const el = taRef.current;
-      el?.focus();
-      el?.setSelectionRange(el.value.length, el.value.length);
-    });
-    // Only a new nonce re-applies the draft.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [draft?.nonce]);
   const fileInputRef = useRef<HTMLInputElement>(null);
   // The agent selection, restored from and saved to the room's prefs: the
   // picked recipient (another member's agent to borrow, a platform agent;
@@ -174,6 +176,15 @@ export function Composer({
   // Prompts of the member's packs and the room's: the picker, /commands
   // and expert quick prompts that point at a pack's prompt.
   const prompts = useComposerPrompts(roomId, !people, setText, taRef);
+  const starters = useMemo(
+    () => (fileContext ? fileSuggestions(prompts.choices, fileContext.file) : prompts.starters),
+    [fileContext, prompts.choices, prompts.starters],
+  );
+  useEffect(() => {
+    if (pick) prompts.pick(pick.choice);
+    // Only a new nonce inserts it again.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pick?.nonce]);
   const slashListId = useId();
   const expertMatches = mention ? exp.mentionMatches(mention.query) : [];
   const optionCount = expertMatches.length + matches.length;
@@ -559,8 +570,10 @@ export function Composer({
         )}
         {showStarters && !people && (
           <StarterPrompts
-            starters={prompts.starters}
+            starters={starters}
+            heading={fileContext ? `For ${fileContext.file.name}` : undefined}
             onPick={(c) => {
+              if (fileContext?.onPick) return fileContext.onPick(c);
               setPeopleOnly(false);
               prompts.pick(c);
             }}

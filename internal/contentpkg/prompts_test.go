@@ -261,3 +261,23 @@ func TestPromptStarterFlag(t *testing.T) {
 		t.Fatalf("markdown import = %+v %v", p.Manifest.Prompts, err)
 	}
 }
+
+// A prompt may be scoped to files (docs/prd/2026-10-14-file-prompts-and-compare.md
+// rule 2), validated by the one file-match validator.
+func TestPromptFilesScope(t *testing.T) {
+	ok := []map[string]any{{"id": "tighten", "title": "Tighten the wording", "body": "Tighten the wording.", "starter": true,
+		"files": map[string]any{"extensions": []string{".pptx"}, "mimeTypes": []string{"application/vnd.openxmlformats-officedocument.presentationml.presentation"}}}}
+	p, err := Validate(bundle(t, promptPackFiles(t, ok, nil)), "", Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f := p.Manifest.Prompts[0].Files; f == nil || f.Extensions[0] != ".pptx" {
+		t.Fatalf("files = %+v", f)
+	}
+	for _, bad := range []map[string]any{{}, {"mimeTypes": []string{"*/*"}}, {"extensions": []string{"pptx"}}} {
+		prompts := []map[string]any{{"id": "x", "title": "X", "body": "x", "files": bad}}
+		if _, err := Validate(bundle(t, promptPackFiles(t, prompts, nil)), "", Options{}); err == nil || !strings.Contains(err.Error(), "prompt x files") {
+			t.Errorf("files %v: got %v, want an error naming prompt x files", bad, err)
+		}
+	}
+}

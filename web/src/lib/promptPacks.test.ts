@@ -15,6 +15,7 @@ import {
   promptPackPayload,
   promptPackProblem,
   promptsFromMessages,
+  fileSuggestions,
   starterChoices,
   slashMatches,
   slashQuery,
@@ -137,9 +138,9 @@ eq(promptPackProblem(form), "The name uses lower-case letters, digits and hyphen
 form.name = "writing";
 eq(promptPackProblem(form), "Add at least one prompt", "needs a prompt");
 form.prompts = [
-  { id: "", title: "Notes", body: "Notes for {{audience}}", slash: "/Notes", tags: "Writing, ops", variables: [{ name: "audience", label: "Audience", default: "devs", options: "users\ndevs\n" }], starter: true },
-  { id: "", title: "", body: "Second prompt\nline", slash: "", tags: "", variables: [], starter: false },
-  { id: "", title: "", body: "", slash: "", tags: "", variables: [], starter: false },
+  { id: "", title: "Notes", body: "Notes for {{audience}}", slash: "/Notes", tags: "Writing, ops", variables: [{ name: "audience", label: "Audience", default: "devs", options: "users\ndevs\n" }], starter: true, files: "" },
+  { id: "", title: "", body: "Second prompt\nline", slash: "", tags: "", variables: [], starter: false, files: "" },
+  { id: "", title: "", body: "", slash: "", tags: "", variables: [], starter: false, files: "" },
 ];
 eq(promptPackProblem(form), null, "valid");
 eq(
@@ -199,6 +200,37 @@ eq(
   [{ title: "", ref: "writing/notes" }, { title: "T", prompt: "text" }],
   "quick prompt refs survive the form",
 );
+
+// ---- file suggestions (docs/prd/2026-10-14-file-prompts-and-compare.md rule 2).
+{
+  const deck = { name: "q3.pptx", mimeType: "application/vnd.openxmlformats-officedocument.presentationml.presentation", extension: "pptx" };
+  const office = { extensions: [".pptx", ".docx", ".xlsx"] };
+  const builtin = pack("file-prompts", [
+    prompt("tighten", { title: "Tighten the wording", starter: true, files: { extensions: [".pptx"] } }),
+    prompt("summary", { title: "Summarize", starter: true, files: office }),
+    prompt("not-starter", { files: { extensions: [".pptx"] } }),
+    prompt("image", { title: "Describe it", starter: true, files: { mimeTypes: ["image/*"] } }),
+  ], { scope: "builtin" });
+  const org = pack("finance", [prompt("org-summary", { title: "summarize", starter: true, files: { extensions: [".pptx"] }, uses: 3 })]);
+  const roomPack = pack("room-kit", [prompt("kickoff", { title: "Kick off", starter: true })]);
+  const choices = promptChoices([], [use(roomPack, "room")], [org, builtin]);
+  eq(
+    fileSuggestions(choices, deck).map((c) => [c.pack, c.prompt.id]),
+    [
+      ["finance", "org-summary"],
+      ["file-prompts", "tighten"],
+    ],
+    "the most specific first, the Library before built-in, one per title, starters only",
+  );
+  eq(fileSuggestions(choices, { name: "a.webp", mimeType: "image/webp", extension: "webp" }).map((c) => c.prompt.id), ["image"], "a wildcard match");
+  eq(fileSuggestions(choices, { name: "notes.txt", mimeType: "text/plain", extension: "txt" }), [], "no match, no suggestions");
+  // File suggestions are never room starters.
+  eq(starterChoices([use(roomPack, "room")], [builtin]).map((c) => c.prompt.id), ["kickoff"], "room starters skip file prompts");
+  // The scope round-trips through the Library form.
+  const back = promptPackPayload(formFromPack(builtin));
+  eq((back.prompts as { files?: unknown }[])[0].files, { extensions: [".pptx"] }, "files round trip");
+  eq((back.prompts as { files?: unknown }[])[3].files, { mimeTypes: ["image/*"] }, "mime round trip");
+}
 
 console.log("promptPacks tests passed");
 

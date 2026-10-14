@@ -7,6 +7,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/luckylhb90/bnbloc/core"
+	"github.com/luckylhb90/bnbloc/internal/filematch"
 )
 
 // KindPreviewerPackageV1 is the package-envelope kind for a previewer: a
@@ -42,24 +43,22 @@ var (
 
 // Previewer bounds (PRD "Previewer contract details").
 const (
-	maxPreviewerMatches      = 32
 	maxPreviewerToolbar      = 20
 	maxPreviewerLabel        = 40
 	minPreviewerRank         = 1
 	maxPreviewerRank         = 1000
 	previewerCapabilityTool  = "toolbar"
 	previewerCapabilityThumb = "thumbnail"
-	// Suggestions (the Ask AI panel's starting prompts) mirror the frame
-	// protocol's SUGGESTION_* limits.
+	// Suggestions are accepted and ignored: file prompts are prompt packs
+	// now (docs/prd/2026-10-14-file-prompts-and-compare.md rule 3). Installed
+	// 1.1.0 records carry them and re-parse strictly at boot; the field goes
+	// once they are replaced (F4).
 	maxPreviewerSuggestions      = 6
 	maxPreviewerSuggestionLabel  = 40
 	maxPreviewerSuggestionPrompt = 500
 )
 
 var (
-	// type/subtype or type/* (RFC 6838 restricted-name characters, lower case).
-	previewerMimeRE      = regexp.MustCompile(`^[a-z0-9][a-z0-9!#$&^_.+-]{0,62}/(\*|[a-z0-9][a-z0-9!#$&^_.+-]{0,126})$`)
-	previewerExtensionRE = regexp.MustCompile(`^(\.[a-z0-9][a-z0-9_-]{0,15}){1,3}$`)
 	previewerToolbarIDRE = regexp.MustCompile(`^[a-z][a-z0-9-]{0,31}$`)
 )
 
@@ -132,32 +131,7 @@ func validatePreviewerSuggestions(items []PreviewerSuggestion) error {
 }
 
 func validatePreviewerMatch(m PreviewerMatch) error {
-	if len(m.MimeTypes)+len(m.Extensions) == 0 {
-		return fmt.Errorf("previewer.match requires at least one MIME type or extension")
-	}
-	if len(m.MimeTypes) > maxPreviewerMatches || len(m.Extensions) > maxPreviewerMatches {
-		return fmt.Errorf("previewer.match lists hold at most %d entries", maxPreviewerMatches)
-	}
-	seen := map[string]bool{}
-	for _, mt := range m.MimeTypes {
-		if !previewerMimeRE.MatchString(mt) {
-			return fmt.Errorf("previewer.match.mimeTypes: %q must be a lower-case type/subtype or type/*", mt)
-		}
-		if seen[mt] {
-			return fmt.Errorf("previewer.match.mimeTypes: duplicate %q", mt)
-		}
-		seen[mt] = true
-	}
-	for _, ext := range m.Extensions {
-		if !previewerExtensionRE.MatchString(ext) {
-			return fmt.Errorf("previewer.match.extensions: %q must be a lower-case .ext (up to three parts)", ext)
-		}
-		if seen[ext] {
-			return fmt.Errorf("previewer.match.extensions: duplicate %q", ext)
-		}
-		seen[ext] = true
-	}
-	return nil
+	return filematch.Validate(m, "previewer.match")
 }
 
 func validatePreviewerToolbar(items []PreviewerToolbarItem) error {

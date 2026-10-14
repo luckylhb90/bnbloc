@@ -6,6 +6,7 @@
 // them on mount, or immediately when it is already open.
 import type { MessageTask, SearchResult, TaskUpdate } from "./teamModels.ts";
 import type { ChatAttachment } from "./wire.gen.ts";
+import type { PromptChoice } from "./promptPacks.ts";
 import type { Referenceable } from "../views/composer/types.ts";
 import { StorageKey, memberKey, readStored, writeStored } from "./storageKeys.ts";
 import { gatewayBase } from "./config.ts";
@@ -116,6 +117,12 @@ export const messageJumps = handoff<MessageJump>();
 // artifactLinks carries an "open this deliverable" request (a copied
 // #/room/<id>?artifact=<aid>[&v=n] link) to a room's preview workbench.
 export const artifactLinks = handoff<{ readonly artifactId: string; readonly version?: number }>();
+// fileAskRequests carries "ask about this file" to a room's workbench tab of
+// that file: it opens the tab's Ask AI panel, and inserts the suggestion
+// picked in the room's composer, if any (a local document just opened, a
+// file suggestion picked in the room;
+// docs/prd/2026-10-14-file-prompts-and-compare.md rules 4 and 5).
+export const fileAskRequests = handoff<{ readonly artifactId: string; readonly choice?: PromptChoice }>();
 // composerRefs carries quoted references to a room's main composer (the
 // people chat's "Ask the agent about this"); queued refs accumulate until the
 // composer takes them.

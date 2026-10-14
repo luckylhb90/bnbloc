@@ -12,7 +12,9 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/luckylhb90/bnbloc/internal/filematch"
 	"github.com/luckylhb90/bnbloc/internal/tarbundle"
+	"github.com/luckylhb90/bnbloc/internal/wire"
 )
 
 // Prompt packs (docs/prd/2026-10-12-experts-and-teams.md §4): a curated,
@@ -34,6 +36,11 @@ type Prompt struct {
 	// Starter offers it among a room's starter prompts (an empty room's
 	// examples above the composer) when the pack is turned on for the room.
 	Starter bool `json:"starter,omitempty"`
+	// Files scopes it to the files it is for: a starter with files is a
+	// file suggestion for matching files (the file's Ask AI panel, a room
+	// whose workbench shows one), never a room starter
+	// (docs/prd/2026-10-14-file-prompts-and-compare.md rule 2).
+	Files *wire.FileMatch `json:"files,omitempty"`
 }
 
 // PromptVariable is one {{name}} of a prompt: a text field, or a select
@@ -170,6 +177,11 @@ func validatePromptPack(p *Package) error {
 		}
 		if err := checkVariables(at, pr); err != nil {
 			return err
+		}
+		if pr.Files != nil {
+			if err := filematch.Validate(*pr.Files, at+" files"); err != nil {
+				return err
+			}
 		}
 	}
 	return nil

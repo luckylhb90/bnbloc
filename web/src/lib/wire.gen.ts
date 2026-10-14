@@ -903,7 +903,7 @@ export interface ComponentGuest {
 export interface ComponentPreviewer {
   // Entry is the bundle-relative HTML document the frame loads.
   entry: string;
-  match: ComponentPreviewerMatch;
+  match: FileMatch;
   // Rank orders previewers matching a file with equal specificity, like
   // the web registry's built-ins (lower first).
   rank: number;
@@ -921,8 +921,10 @@ export interface ComponentPreviewerSuggestion {
   prompt: string;
 }
 
-// ComponentPreviewerMatch declares the files a previewer renders.
-export interface ComponentPreviewerMatch {
+// FileMatch declares the files something applies to: the files a
+// previewer renders, the files a prompt-pack prompt is for. One validator:
+// internal/filematch.
+export interface FileMatch {
   mimeTypes?: string[];
   extensions?: string[];
 }
@@ -1664,6 +1666,9 @@ export interface ContentPrompt {
   // Starter offers it among the starter prompts of a room the pack is
   // turned on for.
   starter?: boolean;
+  // Files scopes it to matching files: a starter with files is a file
+  // suggestion, not a room starter.
+  files?: FileMatch;
   // Uses counts its insertions by every member.
   uses: number;
 }

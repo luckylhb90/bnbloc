@@ -43,7 +43,8 @@ import { AppDataLine } from "./AppDataLine";
 import { categoryIcons } from "./fileIcons";
 import { ShareDialog } from "./ShareDialog";
 import { VersionDiff } from "./VersionDiff";
-import { FileAskPanel, useFileAsk } from "./FileAskPanel";
+import { FileAskPanel, useFileAsk, type FileComposerOptions } from "./FileAskPanel";
+import { fileAskRequests } from "@/lib/team";
 import { LocalSaveChip } from "./LocalSaveChip";
 import { useDisplayNames } from "@/lib/useDisplayName";
 import { errorText } from "@/lib/errors";
@@ -188,7 +189,10 @@ export function ArtifactTabView({
   const [sharingOpen, setSharingOpen] = useState(false);
   // The Ask AI panel (FileAskPanel): only where the room provides it.
   const ask = useFileAsk();
+  const canAsk = !!ask && !!artifact && !runsSite && !artifact.isApp;
   const [asking, setAsking] = useState(false);
+  // A suggestion handed over from the room, for the panel to insert.
+  const [pick, setPick] = useState<FileComposerOptions["pick"]>();
   // The part of the shown version the viewer points at (preview.selection).
   const [selection, setSelection] = useState<ViewerSelection | null>(null);
   const updated = useUpdatedMark(shown, version === undefined);
@@ -206,6 +210,35 @@ export function ArtifactTabView({
   );
 
   useEffect(() => setSelection(null), [artifactId, shown]);
+
+  // This tab is the file in front of the room while it is mounted (only the
+  // active tab is): the room's starters follow it.
+  const focusKey = canAsk && file ? `${file.name}\n${file.mimeType}` : "";
+  useEffect(() => {
+    if (!ask || !focusKey || !file) return;
+    ask.focus({ artifactId, file });
+    return () => ask.focus(null);
+    // The file's identity is focusKey; a re-render's new object is the same file.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ask, artifactId, focusKey]);
+
+  // "Ask about this file" handed over (a suggestion picked in the room, a
+  // local document just opened): open the panel, insert the suggestion.
+  useEffect(() => {
+    if (!ask) return;
+    const take = () => {
+      const req = fileAskRequests.peek(ask.roomId);
+      if (!req || req.artifactId !== artifactId) return;
+      fileAskRequests.take(ask.roomId);
+      setAsking(true);
+      const choice = req.choice;
+      if (choice) setPick((p) => ({ choice, nonce: (p?.nonce ?? 0) + 1 }));
+    };
+    take();
+    return fileAskRequests.subscribe((room) => {
+      if (room === ask.roomId) take();
+    });
+  }, [ask, artifactId]);
 
   // Leaving compare/edit when the tab moves to another artifact.
   useEffect(() => {
@@ -228,7 +261,6 @@ export function ArtifactTabView({
   // meanwhile (docs/prd/2026-10-14-ai-document-editing.md rule 4).
   const editedFrom = meta?.editedFrom ?? 0;
   const changedMeanwhile = editedFrom > 0 && meta != null && editedFrom < meta.parentVersion;
-  const canAsk = !!ask && !runsSite && !artifact.isApp;
   const latest = shown === artifact.currentVersion;
   const editable = inlineText && latest;
   const versions = [...detail.versions].map((v) => v.version).sort((a, b) => b - a);
@@ -484,7 +516,8 @@ export function ArtifactTabView({
         <FileAskPanel
           ask={ask}
           fileRef={{ artifactId, version: shown, name: file.name, ...(selection ? { selection } : {}) }}
-          suggestions={viewer?.suggestions}
+          file={file}
+          pick={pick}
           onClearSelection={() => setSelection(null)}
           onClose={() => setAsking(false)}
         />

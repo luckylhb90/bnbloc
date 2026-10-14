@@ -109,7 +109,7 @@ function comp(p: Partial<ContentComponent> & Pick<ContentComponent, "id" | "name
 // A new version keeps a same-titled prompt's id, command and starter flag.
 {
   const form = emptyPromptPackForm();
-  form.prompts = [{ id: "weekly", title: "Weekly report", body: "old", slash: "weekly", tags: "report", variables: [], starter: true }];
+  form.prompts = [{ id: "weekly", title: "Weekly report", body: "old", slash: "weekly", tags: "report", variables: [], starter: true, files: "" }];
   const patch = promptPackDraftPatch({ prompts: [{ title: "weekly report", body: "New {{team}}" }, { title: "Retro", body: "Run a retro" }] }, form, false);
   eq(
     patch.prompts?.map((p) => [p.id, p.slash, p.starter, p.body, p.variables.map((v) => v.name)]),

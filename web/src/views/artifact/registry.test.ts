@@ -1,4 +1,4 @@
-import { matchSpecificity, selectViewer, selectViewers, type ArtifactFileInfo, type ArtifactViewer } from "./registry.ts";
+import { selectViewer, selectViewers, type ArtifactFileInfo, type ArtifactViewer } from "./registry.ts";
 
 function test(name: string, fn: () => void): void {
   try {
@@ -31,17 +31,6 @@ const builtins = [
   viewer("core.text", { mimeTypes: ["text/plain", "text/*"] }, { rank: 20 }),
 ];
 const ids = (list: { viewer: ArtifactViewer }[]) => list.map((c) => c.viewer.id);
-
-test("specificity: multi-part ext > exact MIME > extension > kind > wildcard", () => {
-  const m = { mimeTypes: ["image/png", "image/*"], extensions: [".atlas.json", "png"], kinds: ["image"] };
-  eq(matchSpecificity(m, file("a.png", "image/png")), 4, "exact mime");
-  eq(matchSpecificity(m, file("a.png", "")), 3, "extension");
-  eq(matchSpecificity(m, file("sheet.atlas.json", "application/json")), 5, "multi-part extension");
-  eq(matchSpecificity({ mimeTypes: ["application/json"] }, file("sheet.atlas.json", "application/json")), 4, "generic json loses to it");
-  eq(matchSpecificity(m, file("legacy", "", "image")), 2, "kind");
-  eq(matchSpecificity(m, file("a.webp", "image/webp")), 1, "wildcard");
-  eq(matchSpecificity(m, file("a.txt", "text/plain")), 0, "no match");
-});
 
 test("selection orders candidates and honours choice and size", () => {
   eq(ids(selectViewers(file("a.json", "application/json"), builtins)), ["core.json", "core.code"], "json tree first, code offered");

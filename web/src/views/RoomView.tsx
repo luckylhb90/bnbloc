@@ -25,7 +25,7 @@ import { MessageFeed } from "@/views/room/MessageFeed";
 import { RoomComposer } from "@/views/room/RoomComposer";
 import { PeopleChatDock, PeopleChatPanel } from "@/views/room/PeopleChatPanel";
 import { usePeopleChat } from "@/views/room/usePeopleChat";
-import { shareComposerRef } from "@/lib/team";
+import { fileAskRequests, shareComposerRef } from "@/lib/team";
 import { RoomDialogs } from "@/views/room/RoomDialogs";
 import { ActivityRail } from "@/views/room/ActivityRail";
 import { useRoomMessageActions } from "@/views/room/useRoomMessageActions";
@@ -47,7 +47,8 @@ import { useFeedScroll } from "@/views/room/useFeedScroll";
 import { useRoomTeam } from "@/views/room/useRoomTeam";
 import { MessageExtrasProvider } from "@/views/room/messageExtras";
 import { AttachmentOpenerProvider } from "@/views/room/MessageAttachments";
-import { FileAskProvider, type FileAsk } from "@/views/workbench/FileAskPanel";
+import { FileAskProvider, type FileAsk, type FileFocus } from "@/views/workbench/FileAskPanel";
+import type { ComposerFileContext } from "@/views/Composer";
 import { JobProgressProvider } from "@/views/room/JobProgressStrip";
 import { SaveTemplateDialog } from "@/views/room/SaveTemplateDialog";
 import { TemplateStartCard } from "@/views/room/TemplateStartCard";
@@ -386,13 +387,26 @@ export function RoomView({
       onSelectPanel={selectPanel}
     />
   );
+  // The file in front of the room (the workbench's active file tab): the
+  // room composer's starters become its suggestions, and a pick goes to the
+  // file's Ask AI panel (docs/prd/2026-10-14-file-prompts-and-compare.md
+  // rule 4).
+  const [fileFocus, setFileFocus] = useState<FileFocus | null>(null);
+  const roomFileContext = useMemo<ComposerFileContext | undefined>(
+    () =>
+      fileFocus
+        ? { file: fileFocus.file, onPick: (choice) => fileAskRequests.queue(roomId, { artifactId: fileFocus.artifactId, choice }) }
+        : undefined,
+    [fileFocus, roomId],
+  );
   // A file's Ask AI panel (workbench): the room's own composer, its sends
   // naming the file, over the room's feed.
   const fileAsk = useMemo<FileAsk>(
     () => ({
       roomId,
       feed,
-      composer: (ref, draft) => (
+      focus: setFileFocus,
+      composer: (ref, options) => (
         <RoomComposer
           key={`file:${ref.artifactId}`}
           roomPreview={!!room && "preview" in room}
@@ -412,7 +426,9 @@ export function RoomView({
           platformAgents={data.platform}
           modelCatalogs={data.modelCatalogs}
           variant="file"
-          draft={draft}
+          fileContext={{ file: options.file }}
+          threadLength={options.threadLength}
+          pick={options.pick}
         />
       ),
     }),
@@ -591,6 +607,7 @@ export function RoomView({
               platformAgents={data.platform}
               modelCatalogs={data.modelCatalogs}
               working={activity.working.size}
+              fileContext={roomFileContext}
             />
           </div>
         )}

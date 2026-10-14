@@ -9,14 +9,24 @@ const CHIP =
 // (starterChoices): the packs turned on for the room first, then the
 // built-in packs' general-purpose examples. Clicking one fills the composer
 // (a prompt with variables asks for them first); it never sends. The
-// composer renders them only while the feed is empty.
-export function StarterPrompts({ starters, onPick }: { readonly starters: readonly PromptChoice[]; readonly onPick: (c: PromptChoice) => void }) {
+// composer renders them only while the feed is empty. The same row shows a
+// file's suggestions (lib/promptPacks fileSuggestions) under its heading
+// ("For deck.pptx"): one component for every starting prompt.
+export function StarterPrompts({
+  starters,
+  onPick,
+  heading,
+}: {
+  readonly starters: readonly PromptChoice[];
+  readonly onPick: (c: PromptChoice) => void;
+  readonly heading?: string;
+}) {
   if (starters.length === 0) return null;
   return (
     <div className="px-3 pt-2" role="group" aria-label="Example prompts">
       <p className="mb-1.5 flex items-center gap-1 px-1 text-xs text-[var(--color-fg-subtle)]">
         <SparkleIcon size={12} weight="fill" className="text-[var(--color-accent)]" aria-hidden="true" />
-        {starters.some((c) => c.source === "room") ? "Start with" : "Try an example"}
+        {heading ?? (starters.some((c) => c.source === "room") ? "Start with" : "Try an example")}
       </p>
       {/* One scrolling row on a phone, wrapping on a wide composer. */}
       <div className="-mx-1 flex gap-1.5 overflow-x-auto px-1 pb-1 @md:flex-wrap @md:overflow-visible">

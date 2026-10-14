@@ -111,3 +111,27 @@ func TestBuiltinPromptsStayOutOfTheWeb(t *testing.T) {
 		}
 	})
 }
+
+// File suggestions are the same mechanism, scoped: the built-in file
+// prompts are starters with files, and the room starters have none
+// (docs/prd/2026-10-14-file-prompts-and-compare.md rule 2).
+func TestFilePromptsAreScopedStarters(t *testing.T) {
+	files, ok := Get(IDPrefix + "file-prompts")
+	if !ok {
+		t.Fatal("the file-prompts pack is missing")
+	}
+	for _, pr := range files.Validated.Manifest.Prompts {
+		if !pr.Starter || pr.Files == nil {
+			t.Errorf("file prompt %s: starter %v, files %v", pr.ID, pr.Starter, pr.Files)
+		}
+		if len(pr.Variables) > 0 {
+			t.Errorf("file prompt %s asks for variables: a suggestion should need no form", pr.ID)
+		}
+	}
+	starters, _ := Get(IDPrefix + "starters")
+	for _, pr := range starters.Validated.Manifest.Prompts {
+		if pr.Files != nil {
+			t.Errorf("room starter %s is scoped to files", pr.ID)
+		}
+	}
+}

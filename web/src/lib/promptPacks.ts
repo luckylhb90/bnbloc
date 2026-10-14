@@ -4,6 +4,7 @@
 // filling, insertion) and the Library form (drafts <-> payload, variables
 // kept in step with the body, prompts drafted from messages). Unit-tested.
 import { isBuiltin, type ContentComponent, type ContentUse } from "./contentComponents.ts";
+import { formatFileMatch, matchSpecificity, parseFileMatch, type FileFacts } from "./fileMatch.ts";
 
 export type { ContentPrompt } from "./wire.gen.ts";
 import type { ContentPrompt } from "./wire.gen.ts";
@@ -19,7 +20,7 @@ export const PERSONAL_PROMPT_PACK = "my-prompts";
 // A prompt the composer offers: the prompt and the pack it comes from (its
 // version in effect, and where it comes from: a pack turned on for the
 // member or the room, any other pack of the member's Library, or a
-// built-in pack's starter).
+// built-in pack: its starters, or its prompts among the Library's).
 export interface PromptChoice {
   readonly prompt: ContentPrompt;
   readonly componentId: string;
@@ -56,7 +57,7 @@ export function promptChoices(
   };
   for (const u of member) if (u.kind === "prompt") add(u.component, "mine");
   for (const u of room) if (u.kind === "prompt") add(u.component, "room");
-  for (const c of library) add(c, "library");
+  for (const c of library) add(c, isBuiltin(c) ? "builtin" : "library");
   return out;
 }
 
@@ -64,8 +65,8 @@ export function promptChoices(
 // packs' and the built-in packs'.
 export const MAX_PACK_STARTERS = 6;
 
-// packStarters are the prompts flagged starter of prompt packs, each pack
-// once, in order, at most limit.
+// packStarters are the room starters of prompt packs (flagged starter, not
+// scoped to files), each pack once, in order, at most limit.
 function packStarters(packs: readonly ContentComponent[], source: PromptChoice["source"], limit: number): PromptChoice[] {
   const out: PromptChoice[] = [];
   const seen = new Set<string>();
@@ -73,7 +74,7 @@ function packStarters(packs: readonly ContentComponent[], source: PromptChoice["
     if (c.kind !== "prompt" || seen.has(c.id)) continue;
     seen.add(c.id);
     for (const p of c.prompts ?? []) {
-      if (!p.starter) continue;
+      if (!p.starter || p.files) continue;
       out.push({ prompt: p, componentId: c.id, pack: c.name, packLabel: packLabel(c), version: c.version || c.latestVersion, source });
       if (out.length >= limit) return out;
     }
@@ -90,6 +91,43 @@ function packStarters(packs: readonly ContentComponent[], source: PromptChoice["
 export function starterChoices(room: readonly ContentUse[], library: readonly ContentComponent[], limit = MAX_PACK_STARTERS): PromptChoice[] {
   const roomPacks = room.flatMap((u) => (u.kind === "prompt" && u.component ? [u.component] : []));
   return [...packStarters(roomPacks, "room", limit), ...packStarters(library.filter(isBuiltin), "builtin", limit)];
+}
+
+// MAX_FILE_SUGGESTIONS bounds a file's suggestions.
+export const MAX_FILE_SUGGESTIONS = 6;
+
+const SOURCE_ORDER: Readonly<Record<PromptChoice["source"], number>> = { room: 0, mine: 1, library: 2, builtin: 3 };
+
+// fileSuggestions are the suggestions for a file
+// (docs/prd/2026-10-14-file-prompts-and-compare.md rule 2): the starters
+// scoped to files that match it, among the prompts the composer offers
+// (promptChoices). The most specific match first (a pack for .pptx before
+// one for every Office file), then the room's packs, the member's, the
+// Library's and the built-in ones, then the most used. One per title (two
+// packs' "Proofread" show once), at most limit.
+export function fileSuggestions(choices: readonly PromptChoice[], file: FileFacts, limit = MAX_FILE_SUGGESTIONS): PromptChoice[] {
+  const scored: { c: PromptChoice; specificity: number }[] = [];
+  for (const c of choices) {
+    if (!c.prompt.starter || !c.prompt.files) continue;
+    const specificity = matchSpecificity(c.prompt.files, file);
+    if (specificity > 0) scored.push({ c, specificity });
+  }
+  scored.sort(
+    (a, b) =>
+      b.specificity - a.specificity ||
+      SOURCE_ORDER[a.c.source] - SOURCE_ORDER[b.c.source] ||
+      b.c.prompt.uses - a.c.prompt.uses,
+  );
+  const out: PromptChoice[] = [];
+  const titles = new Set<string>();
+  for (const { c } of scored) {
+    const title = c.prompt.title.trim().toLowerCase();
+    if (titles.has(title)) continue;
+    titles.add(title);
+    out.push(c);
+    if (out.length >= limit) break;
+  }
+  return out;
 }
 
 // choiceFromRef turns an expert quick prompt's resolved reference into a
@@ -196,6 +234,9 @@ export interface PromptDraft {
   variables: VariableDraft[];
   // Offered among the starter prompts of rooms the pack is on for.
   starter: boolean;
+  // The files it is for (".pptx, image/*"): a starter with files is a file
+  // suggestion. Empty = any conversation.
+  files: string;
 }
 
 export interface PromptPackForm {
@@ -206,7 +247,7 @@ export interface PromptPackForm {
 }
 
 export function emptyPromptDraft(): PromptDraft {
-  return { id: "", title: "", body: "", slash: "", tags: "", variables: [], starter: false };
+  return { id: "", title: "", body: "", slash: "", tags: "", variables: [], starter: false, files: "" };
 }
 
 export function emptyPromptPackForm(): PromptPackForm {
@@ -261,6 +302,7 @@ export function draftFromPrompt(p: ContentPrompt): PromptDraft {
     tags: (p.tags ?? []).join(", "),
     variables: (p.variables ?? []).map((v) => ({ name: v.name, label: v.label ?? "", default: v.default ?? "", options: (v.options ?? []).join("\n") })),
     starter: !!p.starter,
+    files: formatFileMatch(p.files),
   };
 }
 
@@ -314,6 +356,7 @@ export function promptPackPayload(f: PromptPackForm): Record<string, unknown> {
     }
     const slash = d.slash.trim().toLowerCase().replace(/^\/*/, "");
     const tags = splitTags(d.tags);
+    const files = parseFileMatch(d.files);
     const variables = syncVariables(d.body, d.variables).map((v) => {
       const options = splitOptions(v.options);
       return {
@@ -331,6 +374,7 @@ export function promptPackPayload(f: PromptPackForm): Record<string, unknown> {
       ...(tags.length > 0 ? { tags } : {}),
       ...(variables.length > 0 ? { variables } : {}),
       ...(d.starter ? { starter: true } : {}),
+      ...(files ? { files } : {}),
     };
   });
   return out;

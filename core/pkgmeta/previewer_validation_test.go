@@ -206,7 +206,7 @@ func TestPreviewerVocabulariesMatchFrameProtocol(t *testing.T) {
 	}
 	for name, want := range map[string]int{
 		"TOOLBAR_LIMIT": maxPreviewerToolbar, "TOOLBAR_LABEL_LIMIT": maxPreviewerLabel,
-		"SUGGESTION_LIMIT": maxPreviewerSuggestions, "SUGGESTION_LABEL_LIMIT": maxPreviewerSuggestionLabel, "SUGGESTION_PROMPT_LIMIT": maxPreviewerSuggestionPrompt,
+
 		"SELECTION_LABEL_LIMIT": wire.MaxFileSelectionLabel, "SELECTION_DETAIL_LIMIT": wire.MaxFileSelectionDetail,
 	} {
 		re := regexp.MustCompile(`export const ` + name + ` = (\d+);`)

@@ -36,10 +36,6 @@ export const ERROR_LIMIT = 500;
 /** A selection's chip label and the content it carries to the agent. */
 export const SELECTION_LABEL_LIMIT = 120;
 export const SELECTION_DETAIL_LIMIT = 2000;
-/** Package suggestions: how many, and their label and prompt lengths. */
-export const SUGGESTION_LIMIT = 6;
-export const SUGGESTION_LABEL_LIMIT = 40;
-export const SUGGESTION_PROMPT_LIMIT = 500;
 /** Zoom values are scale factors (1 = 100%). */
 export const ZOOM_MIN = 0.01;
 export const ZOOM_MAX = 64;
@@ -267,27 +263,6 @@ export function readSelection(value: unknown): Selection | null {
   const label = boundedText(value.label, SELECTION_LABEL_LIMIT);
   const detail = boundedText(value.detail ?? "", SELECTION_DETAIL_LIMIT, true);
   return label === null || detail === null ? null : { label, detail };
-}
-
-/** A package's starting prompt for the Ask AI panel (previewer.suggestions). */
-export interface Suggestion {
-  readonly label: string;
-  readonly prompt: string;
-}
-
-/** Validates a package's suggestions list (absent = none). */
-export function readSuggestions(value: unknown): readonly Suggestion[] | null {
-  if (value === undefined) return [];
-  if (!Array.isArray(value) || value.length > SUGGESTION_LIMIT) return null;
-  const out: Suggestion[] = [];
-  for (const item of value) {
-    if (!isRecord(item)) return null;
-    const label = boundedText(item.label, SUGGESTION_LABEL_LIMIT);
-    const prompt = boundedText(item.prompt, SUGGESTION_PROMPT_LIMIT);
-    if (label === null || prompt === null) return null;
-    out.push({ label, prompt });
-  }
-  return out;
 }
 
 /** Fits a selection to the limits (the frame side: a long selection is cut,

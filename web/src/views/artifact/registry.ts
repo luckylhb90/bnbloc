@@ -1,5 +1,6 @@
 import type React from "react";
-import { useSyncExternalStore } from "react";
+import type { FileFacts } from "../../lib/fileMatch.ts";
+import { createFileRegistry, useRegistryRevision, type FileClaimant } from "../../lib/fileRegistry.ts";
 
 // The ONE artifact viewer registry: built-in viewers (builtin.ts) and
 // installed previewer components (registered at runtime from the member
@@ -7,24 +8,11 @@ import { useSyncExternalStore } from "react";
 // both the same way. Pure module (type-only React import) so selection is
 // unit-tested under node.
 //
-// Selection (selectViewers): every viewer whose match claims the file is a
-// candidate, ordered by
-//   1. specificity: exact MIME (4) > extension (3) > legacy kind (2) >
-//      MIME wildcard "type/*" (1);
-//   2. rank, ascending (lower wins; built-ins sit at 10, so a component that
-//      should beat a built-in of the same specificity declares < 10);
-//   3. an installed component before a built-in, then id.
-// A viewer with maxBytes drops out for larger files. selectViewer picks the
-// member's explicit choice when it is still a candidate, else the best.
+// Selection (selectViewers) is the generic file registry's
+// (lib/fileRegistry.ts): specificity, rank, component before built-in.
 
 /** What a viewer is told about the file it renders. */
-export interface ArtifactFileInfo {
-  /** Display name with extension ("report.pdf"). */
-  readonly name: string;
-  /** Effective MIME type ("" when unknown). */
-  readonly mimeType: string;
-  /** Lower-case extension without the dot ("" when none). */
-  readonly extension: string;
+export interface ArtifactFileInfo extends FileFacts {
   /** Legacy artifact kind (markdown | code | image | html | app | file …). */
   readonly kind: string;
   readonly language?: string;
@@ -104,36 +92,14 @@ export interface ViewerSelection {
   readonly detail: string;
 }
 
-/** A starting prompt the Ask AI panel offers for the files a viewer shows. */
-export interface ViewerSuggestion {
-  readonly label: string;
-  readonly prompt: string;
-}
 
-export interface ViewerMatch {
-  /** Exact ("image/png") or wildcard ("image/*") MIME types, lower-case. */
-  readonly mimeTypes?: readonly string[];
-  /** Extensions, lower-case, with or without the leading dot. */
-  readonly extensions?: readonly string[];
-  /** Legacy artifact kinds (inline artifacts carry no MIME type). */
-  readonly kinds?: readonly string[];
-}
-
-export interface ArtifactViewer {
-  readonly id: string;
+export interface ArtifactViewer extends FileClaimant {
   readonly label: string;
-  readonly match: ViewerMatch;
-  /** Lower wins among equally specific matches; built-ins use 10. */
-  readonly rank: number;
   /** "text": the host decodes the bytes into `content`; "blob": bytes only;
    *  "site": no bytes — the viewer frames the site through `site`. */
   readonly input: "text" | "blob" | "site";
   /** How the viewer contains untrusted content (documentation + review). */
   readonly safety: "safe" | "sanitized" | "sandboxed";
-  readonly source: "builtin" | "component";
-  /** Files larger than this fall through to the next candidate. */
-  readonly maxBytes?: number;
-  readonly suggestions?: readonly ViewerSuggestion[];
   readonly load: () => Promise<{ default: React.ComponentType<ArtifactViewerProps> }>;
 }
 
@@ -142,111 +108,24 @@ export interface ViewerCandidate {
   readonly specificity: number;
 }
 
-const viewers: ArtifactViewer[] = [];
-const listeners = new Set<() => void>();
-let revision = 0;
+const viewers = createFileRegistry<ArtifactViewer>();
 
-function changed(): void {
-  revision += 1;
-  for (const listener of listeners) listener();
-}
-
-/** Registers (or replaces, by id) a viewer; returns its unregister. */
-export function registerArtifactViewer(viewer: ArtifactViewer): () => void {
-  const existing = viewers.findIndex((candidate) => candidate.id === viewer.id);
-  if (existing >= 0) viewers[existing] = viewer;
-  else viewers.push(viewer);
-  changed();
-  return () => unregisterArtifactViewer(viewer.id);
-}
-
-export function unregisterArtifactViewer(id: string): void {
-  const at = viewers.findIndex((candidate) => candidate.id === id);
-  if (at < 0) return;
-  viewers.splice(at, 1);
-  changed();
-}
-
-/** Subscribes to registry changes (runtime installs/uninstalls), for
- *  useSyncExternalStore with registryRevision as the snapshot. */
-export function subscribeArtifactViewers(listener: () => void): () => void {
-  listeners.add(listener);
-  return () => listeners.delete(listener);
-}
-
-export function registryRevision(): number {
-  return revision;
-}
-
-export function listArtifactViewers(): readonly ArtifactViewer[] {
-  return [...viewers];
-}
-
-function normalizeExt(ext: string): string {
-  return ext.replace(/^\./, "").toLowerCase();
-}
-
-/** How specifically a viewer claims a file; 0 = not at all. A multi-part
- *  extension (".atlas.json") matching the end of the name is the most
- *  specific claim (it beats an exact generic MIME such as application/json),
- *  then exact MIME, plain extension, kind, MIME wildcard. */
-export function matchSpecificity(match: ViewerMatch, file: Pick<ArtifactFileInfo, "mimeType" | "extension" | "kind" | "name">): number {
-  const mime = file.mimeType.toLowerCase();
-  const mimes = (match.mimeTypes ?? []).map((m) => m.toLowerCase());
-  if (mime && mimes.includes(mime)) return 4;
-  const name = file.name.toLowerCase();
-  const ext = file.extension.toLowerCase();
-  for (const raw of match.extensions ?? []) {
-    const claimed = normalizeExt(raw);
-    if (!claimed) continue;
-    if (claimed.includes(".") && name.endsWith(`.${claimed}`)) return 5;
-  }
-  for (const raw of match.extensions ?? []) {
-    if (normalizeExt(raw) === ext) return 3;
-  }
-  if (file.kind && (match.kinds ?? []).some((k) => k.toLowerCase() === file.kind.toLowerCase())) return 2;
-  const top = mime.split("/")[0];
-  if (top && mimes.includes(`${top}/*`)) return 1;
-  return 0;
-}
+export const registerArtifactViewer = viewers.register;
+export const unregisterArtifactViewer = viewers.unregister;
+export const listArtifactViewers = viewers.list;
 
 /** Every viewer that can render the file, best first. */
-export function selectViewers(
-  file: ArtifactFileInfo,
-  from: readonly ArtifactViewer[] = viewers,
-): ViewerCandidate[] {
-  const out: ViewerCandidate[] = [];
-  for (const viewer of from) {
-    const specificity = matchSpecificity(viewer.match, file);
-    if (specificity === 0) continue;
-    if (viewer.maxBytes !== undefined && file.sizeBytes !== undefined && file.sizeBytes > viewer.maxBytes) continue;
-    out.push({ viewer, specificity });
-  }
-  return out.sort(
-    (a, b) =>
-      b.specificity - a.specificity ||
-      a.viewer.rank - b.viewer.rank ||
-      (a.viewer.source === b.viewer.source ? 0 : a.viewer.source === "component" ? -1 : 1) ||
-      a.viewer.id.localeCompare(b.viewer.id),
-  );
+export function selectViewers(file: ArtifactFileInfo, from?: readonly ArtifactViewer[]): ViewerCandidate[] {
+  return viewers.candidates(file, from).map((c) => ({ viewer: c.item, specificity: c.specificity }));
 }
 
 /** The viewer to use: the preferred one while it still claims the file,
  *  else the best candidate; null = no viewer (download card). */
-export function selectViewer(
-  file: ArtifactFileInfo,
-  preferredId?: string,
-  from: readonly ArtifactViewer[] = viewers,
-): ArtifactViewer | null {
-  const candidates = selectViewers(file, from);
-  if (preferredId) {
-    const preferred = candidates.find((c) => c.viewer.id === preferredId);
-    if (preferred) return preferred.viewer;
-  }
-  return candidates[0]?.viewer ?? null;
+export function selectViewer(file: ArtifactFileInfo, preferredId?: string, from?: readonly ArtifactViewer[]): ArtifactViewer | null {
+  return viewers.select(file, preferredId, from);
 }
 
 /** Re-renders on registry changes (runtime installs). */
 export function useViewerRegistry(): number {
-  return useSyncExternalStore(subscribeArtifactViewers, registryRevision, registryRevision);
+  return useRegistryRevision(viewers);
 }
