@@ -1396,6 +1396,32 @@ func (b *Bridge) driveClaim(ctx context.Context, d *drive, beforeReflow func(*ro
 		defer func() { b.endSandboxedTurn(ctx, key, exec.Sandbox, turn) }()
 	}
 
+	// A turn whose conversation outgrew its model's context window is run
+	// once more in a fresh session of the same workspace (contextOverflow):
+	// the agent gets its session guidance again and the room's history is
+	// in .room/. A second overflow fails the job (context_overflow).
+	var usage turnUsage
+	res, rs, err := b.runTurn(ctx, d, key, opts, deadline, beforeReflow, &usage)
+	turn = rs
+	if contextOverflow(err) {
+		b.noticeContextReset(ctx, d)
+		b.dropSession(d, rs)
+		replied := res.replied
+		res, rs, err = b.runTurn(ctx, d, key, opts, deadline, beforeReflow, &usage)
+		if rs != nil {
+			turn = rs
+		}
+		res.replied = res.replied || replied
+	}
+	res.usage = usage
+	return res, err
+}
+
+// runTurn runs the drive's request as one turn in the slot's session (a
+// fresh one when none is bound): ensure the session, send the follow-up
+// input to a reused one, then reflow the turn's replies into the room. It
+// returns the session it ran in (nil when none could be bound).
+func (b *Bridge) runTurn(ctx context.Context, d *drive, key driveKey, opts corepkg.SessionOptions, deadline time.Time, beforeReflow func(*roomSession), usage *turnUsage) (driveResult, *roomSession, error) {
 	// Fresh sessions materialize attachments + build their prompt inside
 	// ensureSession (workspace exists, session does not yet); a reused session
 	// materializes there too and returns the written descriptors so the
@@ -1406,9 +1432,8 @@ func (b *Bridge) driveClaim(ctx context.Context, d *drive, beforeReflow func(*ro
 	rs, err := b.ensureSession(ctx, d, key, promptFn, opts)
 	if err != nil {
 		// ensureSession tags its session create (the turn's start) itself.
-		return driveResult{}, atStage(stagePrepare, err)
+		return driveResult{}, nil, atStage(stagePrepare, err)
 	}
-	turn = rs.roomSession
 	if opts.Execution != nil {
 		defer b.renewExecution(ctx, d, rs.workspaceID, rs.sessionID, opts.Execution)()
 	}
@@ -1423,7 +1448,7 @@ func (b *Bridge) driveClaim(ctx context.Context, d *drive, beforeReflow func(*ro
 		// there is bnbloc's own, this turn's .room/ refresh included.
 		rs.roomSession.fenceBaseline()
 		if err := b.sendInput(ctx, entry, rs.workspaceID, rs.sessionID, prompt, opts); err != nil {
-			return driveResult{workspaceID: rs.workspaceID, sessionID: rs.sessionID}, atStage(stageStart, err)
+			return driveResult{workspaceID: rs.workspaceID, sessionID: rs.sessionID}, rs.roomSession, atStage(stageStart, err)
 		}
 	}
 	rs.roomSession.markTurn(deliverableTurn{StartMs: time.Now().UnixMilli(), JobID: d.job.JobID, SourceSeq: d.job.MessageSeq})
@@ -1439,10 +1464,41 @@ func (b *Bridge) driveClaim(ctx context.Context, d *drive, beforeReflow func(*ro
 	// drain only the prompt, and exit before the agent produces any reply — the
 	// reply would then surface only on the next message's reflow.
 	b.waitTurnStart(ctx, rs.roomSession)
-	var usage turnUsage
-	replied, err := b.reflow(ctx, reflowTurn{room: d.job.RoomID, channelID: d.job.ChannelID, jobID: d.job.JobID, deadline: deadline, bound: b.cfg.MaxTurn}, rs.roomSession, &usage)
+	replied, err := b.reflow(ctx, reflowTurn{room: d.job.RoomID, channelID: d.job.ChannelID, jobID: d.job.JobID, deadline: deadline, bound: b.cfg.MaxTurn}, rs.roomSession, usage)
 	b.postSessionState(ctx, d.job.RoomID, rs.roomSession, "idle")
-	return driveResult{workspaceID: rs.workspaceID, sessionID: rs.sessionID, replied: replied, usage: usage}, atStage(stageRun, err)
+	return driveResult{workspaceID: rs.workspaceID, sessionID: rs.sessionID, replied: replied}, rs.roomSession, atStage(stageRun, err)
+}
+
+// dropSession unbinds the drive's channel session when it is still rs, so
+// the next turn of the slot starts a fresh session in the same workspace.
+func (b *Bridge) dropSession(d *drive, rs *roomSession) {
+	if rs == nil {
+		return
+	}
+	sk := d.sessionKey()
+	b.mu.Lock()
+	if b.sessions[sk] == rs {
+		b.unbindLocked(sk)
+	}
+	b.mu.Unlock()
+}
+
+// noticeContextReset tells the room a turn outgrew its model's context
+// window and continues in a fresh session (once per job, apart from the
+// job's own notice).
+func (b *Bridge) noticeContextReset(ctx context.Context, d *drive) {
+	job := d.ref()
+	n := wire.JobNotice{
+		Kind:        wire.NoticeContextReset,
+		Text:        "The conversation grew past " + d.job.Provider + "'s context window; continuing in a fresh session (the room's history stays in .room/).",
+		OwnerUserID: d.owner, Provider: d.job.Provider,
+		RoomID: job.RoomID, ChannelID: job.ChannelID, JobID: job.ID, SourceSeq: job.MessageSeq,
+		Session: wire.ContextResetNoticeSessionID(job.ID), AtUnixMs: time.Now().UnixMilli(),
+	}
+	if _, err := b.gatewayPOST(ctx, "/v1/rooms/"+job.RoomID+"/agent-activity/messages", n.Report()); err != nil {
+		slog.Warn("bnbloc bridge post notice failed",
+			"event", "bnbloc.bridge.post_failed", "room", job.RoomID, "kind", n.Kind, "error", err)
+	}
 }
 
 // turnInfo is the turn this drive runs in session rs (the session
@@ -1939,7 +1995,7 @@ func (b *Bridge) reflow(ctx context.Context, t reflowTurn, rs *roomSession, usag
 			if ts.FailCode == corepkg.FailCodeDeadline && t.bound > 0 {
 				return posted, turnDeadlineError{after: t.bound}
 			}
-			return posted, turnFailedError{detail: ts.FailMessage}
+			return posted, turnFailedError{detail: ts.FailMessage, code: ts.FailCode}
 		}
 		if tsErr == nil && !ts.Idle {
 			// A running turn's steps reach the room (transient).

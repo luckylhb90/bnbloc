@@ -118,6 +118,11 @@ const (
 	// failed (Core Protocol PollTurn failed + failMessage: a CLI that could
 	// not start, a provider error); final for the same reason.
 	FailureAgentError AgentJobFailureReason = "agent_error"
+	// FailureContextOverflow: the conversation grew past the model's
+	// context window, and again in the fresh session the bridge continued
+	// it in (a turn that overflows once is retried once by the bridge
+	// itself); final.
+	FailureContextOverflow AgentJobFailureReason = "context_overflow"
 	// FailureLeaseExpired: the bridge holding the job stopped renewing its
 	// lease (it quit, restarted or lost the network) and the sweep took the
 	// job back; retryable, final once the attempts are spent.
@@ -233,6 +238,8 @@ func (r AgentJobFailureReason) Text(agent string) string {
 		return the + " stopped responding."
 	case FailureAgentError:
 		return the + " reported an error and stopped."
+	case FailureContextOverflow:
+		return the + " stopped: the request needs more than its model can read at once, even in a fresh session. Split it into smaller steps, or pick a model with a larger context window."
 	case FailureBudgetExhausted:
 		return the + " did not run: a monthly budget is reached."
 	case FailureBudgetUnavailable:

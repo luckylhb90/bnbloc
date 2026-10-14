@@ -62,6 +62,10 @@ const (
 	// reach the agent's workspace, and why (the bridge, once per job, under
 	// AttachmentNoticeSessionID so the job's own notice still posts).
 	NoticeAttachmentUndelivered = "attachment-undelivered"
+	// NoticeContextReset says a turn outgrew its model's context window and
+	// continues in a fresh session (the bridge, at most once per job, under
+	// ContextResetNoticeSessionID so the job's own notice still posts).
+	NoticeContextReset = "context-reset"
 )
 
 // AttachmentNoticeSessionID is the activity session of a job's
@@ -70,6 +74,12 @@ const (
 // or failure.
 func AttachmentNoticeSessionID(jobID string) string {
 	return JobNoticeSessionID(jobID) + "-attachments"
+}
+
+// ContextResetNoticeSessionID is the activity session of a job's
+// context-reset notice, apart from the job's own notice.
+func ContextResetNoticeSessionID(jobID string) string {
+	return JobNoticeSessionID(jobID) + "-context"
 }
 
 // session is the activity session the notice is recorded under.

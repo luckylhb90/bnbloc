@@ -193,9 +193,10 @@ func sandboxStarting(err error, ready bool) bool {
 
 // turnFailedError: the agent or its core reports the started turn failed
 // (detail is the core's failMessage, e.g. a CLI that could not start for a
-// missing API key). It fails the job agent_error even when replies were
-// posted before it (agentFailed): an agent's error is never a reply.
-type turnFailedError struct{ detail string }
+// missing API key; code its failCode, "" when it gives none). It fails the
+// job agent_error even when replies were posted before it (agentFailed):
+// an agent's error is never a reply.
+type turnFailedError struct{ detail, code string }
 
 func (e turnFailedError) Error() string { return "turn failed: " + e.detail }
 
@@ -233,6 +234,43 @@ func humanDuration(d time.Duration) string {
 func agentFailed(err error) bool {
 	var failed turnFailedError
 	return errors.As(err, &failed)
+}
+
+// contextOverflowMarks are what a model's refusal of an input too long for
+// its context window reads like (provider and proxy wordings).
+var contextOverflowMarks = []string{
+	"context window", "context length", "contextwindowexceeded", "context_length_exceeded",
+	"prompt is too long", "maximum context", "too many tokens",
+}
+
+// rateLimitMarks tell a throughput limit ("too many tokens per minute")
+// from a context overflow.
+var rateLimitMarks = []string{"rate limit", "rate_limit", "per minute", "tokens per min", "tpm"}
+
+// contextOverflow reports a turn that failed because its conversation grew
+// past the model's context window: the core says so (FailCodeContextOverflow)
+// or its failure reads as one. The one classifier of it (driveClaim retries
+// such a turn once in a fresh session; a second one fails context_overflow).
+func contextOverflow(err error) bool {
+	var failed turnFailedError
+	if !errors.As(err, &failed) {
+		return false
+	}
+	if failed.code == corepkg.FailCodeContextOverflow {
+		return true
+	}
+	d := strings.ToLower(failed.detail)
+	for _, m := range rateLimitMarks {
+		if strings.Contains(d, m) {
+			return false
+		}
+	}
+	for _, m := range contextOverflowMarks {
+		if strings.Contains(d, m) {
+			return true
+		}
+	}
+	return false
 }
 
 // credentialMarks are what an agent's error says when it ran without its
@@ -290,6 +328,10 @@ func driveFailureReason(err error) store.AgentJobFailureReason {
 	if errors.Is(err, errNoReply) || errors.As(err, &deadline) {
 		return store.FailureReplyTimeout
 	}
+	if contextOverflow(err) {
+		// driveClaim already continued it once in a fresh session.
+		return store.FailureContextOverflow
+	}
 	if agentFailed(err) {
 		return store.FailureAgentError
 	}
@@ -342,6 +384,9 @@ func driveErrorText(provider string, err error) string {
 		return "The " + provider + " agent ran out of time after " + humanDuration(deadline.after) + " and was stopped."
 	case errors.As(err, &notReady):
 		return "The " + provider + " agent did not start: its agent sandbox is still starting."
+	case contextOverflow(err):
+		// The provider's raw text goes in the notice's detail.
+		return store.FailureContextOverflow.Text(provider)
 	case errors.As(err, &failed):
 		// The agent's own words go in the notice's detail, fenced.
 		return "The " + provider + " agent reported an error and stopped."
