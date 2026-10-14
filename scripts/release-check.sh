@@ -14,6 +14,9 @@
 # BNBLOC_RELEASE_BETWEEN — the release step, run between the turns; empty
 # = none).
 #
+# With BNBLOC_RELEASE_TWO_MEMBERS=1 the first agent also runs the
+# two-member check (scripts/two-member-check.sh).
+#
 # A core, desktop or service release runs it BEFORE and AFTER the release
 # (AGENTS.md, "Releases"): a release that breaks a working agent is caught
 # by the operator, not by a member. Needs a signed-in bnbloc CLI and, for
@@ -39,6 +42,19 @@ for agent in "${agents[@]}"; do
     bnbloc smoke --agent "$agent" --scenario long-task --timeout "$timeout" ${between[@]+"${between[@]}"} || failed=1
   fi
 done
+
+# With BNBLOC_RELEASE_TWO_MEMBERS=1 a second member reads the room and
+# borrows the first agent (scripts/two-member-check.sh; the teammate's
+# provider in BNBLOC_RELEASE_TEAMMATE_AGENT).
+if [ "${BNBLOC_RELEASE_TWO_MEMBERS:-}" = 1 ]; then
+  if [ ${#agents[@]} -eq 0 ]; then
+    echo "BNBLOC_RELEASE_TWO_MEMBERS=1 needs an agent" >&2
+    failed=1
+  else
+    echo "==> scripts/two-member-check.sh ${agents[0]}"
+    "$(dirname "$0")/two-member-check.sh" "${agents[0]}" "${BNBLOC_RELEASE_TEAMMATE_AGENT:-}" || failed=1
+  fi
+fi
 
 if [ "$failed" -ne 0 ]; then
   echo "release check FAILED" >&2

@@ -97,6 +97,12 @@ Found by reviewing the rules above against the code before building:
 - Two members, each with their own agent, in one room (the release check
   gains this scenario): messages, deliverables, attachments, a correction
   between turns, two channels, ask_agent with and without authorization.
+  Status: `bnbloc smoke --scenario two-members` (run by
+  `scripts/two-member-check.sh`, `BNBLOC_RELEASE_TWO_MEMBERS=1` in the
+  release check) covers messages, deliverables, attachments, names and
+  ask_agent before and after authorization (the request, the approval, the
+  borrowed run and the borrower's isolation from the owner's workspace);
+  the correction and two channels are not automated yet.
 - Unit: per-requester session keys; record rewrite on edit/delete; sender
   by sequence; channel fairness and labels; attachment records and the
   tool; publish-before-done; names in records; the borrow request.

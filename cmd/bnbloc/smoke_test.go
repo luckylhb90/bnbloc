@@ -44,6 +44,8 @@ type fakeSmokeGateway struct {
 	fakeAgent fakeScenarioAgent
 	// versions answers GET /v1/platform/versions (nil: 403, not a super-admin).
 	versions *wire.DeploymentVersions
+	// two answers the two-members scenario (smoke_two_members_test.go).
+	two *fakeTwoMembers
 }
 
 func newFakeSmokeGateway(t *testing.T) *fakeSmokeGateway {
@@ -115,7 +117,7 @@ func newFakeSmokeGateway(t *testing.T) *fakeSmokeGateway {
 			AttachmentIDs []string        `json:"attachmentIds"`
 		}
 		_ = json.NewDecoder(r.Body).Decode(&body)
-		payload := map[string]any{"userId": "alice", "text": body.Text, "clientMsgId": body.ClientMsgID}
+		payload := map[string]any{"userId": bearerSubject(r), "text": body.Text, "clientMsgId": body.ClientMsgID}
 		if len(body.Recipient) > 0 {
 			payload["recipient"] = body.Recipient
 		}
@@ -132,6 +134,9 @@ func newFakeSmokeGateway(t *testing.T) *fakeSmokeGateway {
 		}
 		if len(body.Recipient) > 0 && g.scenario {
 			g.answerScenario(id, body.Text, body.AttachmentIDs)
+		}
+		if g.two != nil {
+			g.answerTwoMembers(id, bearerSubject(r), body.Text, body.Recipient, body.AttachmentIDs)
 		}
 		if len(body.Recipient) > 0 && g.agentReply {
 			msg := map[string]any{"role": "assistant", "text": "OK", "ownerUserId": "alice", "provider": "codex"}
@@ -188,8 +193,13 @@ func newFakeSmokeGateway(t *testing.T) *fakeSmokeGateway {
 	mux.HandleFunc("GET /v1/my/agents", func(w http.ResponseWriter, r *http.Request) {
 		g.mu.Lock()
 		defer g.mu.Unlock()
+		if g.two != nil && bearerSubject(r) == fakeMate {
+			_ = json.NewEncoder(w).Encode(map[string]any{"agents": g.two.mateAgents})
+			return
+		}
 		_ = json.NewEncoder(w).Encode(map[string]any{"agents": g.agents})
 	})
+	g.twoMemberRoutes(mux)
 	g.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		g.mu.Lock()
 		g.bearers = append(g.bearers, r.Header.Get("Authorization"))
@@ -198,6 +208,23 @@ func newFakeSmokeGateway(t *testing.T) *fakeSmokeGateway {
 	}))
 	t.Cleanup(g.Close)
 	return g
+}
+
+// bearerSubject is the subject of the request's (unsigned test) session.
+func bearerSubject(r *http.Request) string {
+	tok := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+	head, _, _ := strings.Cut(tok, ".")
+	raw, err := base64.RawURLEncoding.DecodeString(head)
+	if err != nil {
+		return "alice"
+	}
+	var claims struct {
+		Sub string `json:"sub"`
+	}
+	if json.Unmarshal(raw, &claims) != nil || claims.Sub == "" {
+		return "alice"
+	}
+	return claims.Sub
 }
 
 func (g *fakeSmokeGateway) publish(room string, ev smokeEvent, persist bool) {

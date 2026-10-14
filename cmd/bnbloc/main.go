@@ -111,6 +111,9 @@ Post-deploy smoke:
         throwaway room: stream-first chat echo, history, optional agent reply, delete;
         one PASS/FAIL line per step, non-zero exit on any FAIL
         [--alert-on-failure [--alert-to id,...]]  alert platform admins when the run fails
+        [--scenario long-task [--between <cmd>]]  attachment, workspace file, memory across a step
+        [--scenario two-members --teammate-agent <provider>]  a second member (the API token in
+                                          BNBLOC_TEAMMATE_API_TOKEN) reads A's room and borrows A's agent
 
 Deployment (super-admin):
   bnbloc version                          every service instance's commit + the web bundle's;

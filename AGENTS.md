@@ -2054,6 +2054,17 @@ workspace an agent keeps; a check of only the new path misses that
   return once the change is in effect), then asks for both: each of
   attachment, workspace write, memory and workspace file is its own
   PASS/FAIL line, and a failed run keeps its room for debugging.
+- **A release that touches rooms, records, attachments or borrowing runs
+  the two-member check**: `scripts/two-member-check.sh <A's agent>
+  <teammate provider>` (or `BNBLOC_RELEASE_TWO_MEMBERS=1
+  BNBLOC_RELEASE_TEAMMATE_AGENT=… scripts/release-check.sh`). It makes a
+  1-day API token for `svc:release-teammate`, runs a bridge of that
+  teammate's on this machine (default core `acp` at `127.0.0.1:7341`), and
+  runs `bnbloc smoke --scenario two-members`: the teammate's own agent must
+  read A's message, A's agent's file and A's attachment, a borrow of A's
+  agent must raise an access request A approves, and the borrowed turn must
+  not see A's workspace. The bridge, token and temporary files are always
+  removed.
 - **Never say a release recovers by itself** unless the code path that
   recovers was read and exercised.
 
