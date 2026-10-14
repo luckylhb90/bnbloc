@@ -2237,6 +2237,9 @@ type borrowReservation struct {
 	// DefaultModel is a platform agent's default model, chosen by its host
 	// ("" = none): the turn's model when the job named none.
 	DefaultModel string
+	// AccessRequested: the refusal recorded the borrower's request to the
+	// owner to authorize the agent (owner_not_authorized).
+	AccessRequested bool
 }
 
 // authorizeBorrow decides whether a borrowed job may be driven: the run's
@@ -2308,6 +2311,7 @@ func (b *Bridge) reserveBorrow(ctx context.Context, room, owner, coreName, provi
 		DenyReason      string `json:"denyReason"`
 		SandboxRequired bool   `json:"sandboxRequired"`
 		DefaultModel    string `json:"defaultModel"`
+		AccessRequested bool   `json:"accessRequested"`
 	}
 	var gwErr *gatewayError
 	switch {
@@ -2324,7 +2328,7 @@ func (b *Bridge) reserveBorrow(ctx context.Context, room, owner, coreName, provi
 		return borrowReservation{ID: parsed.ReservationID, DefaultModel: strings.TrimSpace(parsed.DefaultModel)}
 	}
 	if parsed.DenyReason != "" {
-		return borrowReservation{DenyReason: parsed.DenyReason}
+		return borrowReservation{DenyReason: parsed.DenyReason, AccessRequested: parsed.AccessRequested}
 	}
 	slog.Warn("bnbloc bridge borrow reservation failed",
 		"event", "bnbloc.bridge.borrow_reserve_failed", "room", room, "owner", owner, "core", coreName, "provider", provider, "error", err)
@@ -2452,6 +2456,11 @@ func borrowDeniedText(owner, provider, denyReason string) string {
 		return owner + " has not authorized borrowing their " + provider + " in this room."
 	}
 }
+
+// accessRequestedText ends a refused borrow's notice when the authority
+// recorded the borrower's access request to the owner (shareagent
+// requestAccess): one approval and the agent can be borrowed.
+const accessRequestedText = " They have been asked to approve it; send the message again once they do."
 
 // cleanDriveError turns a core REST error into a short, member-readable reason.
 // Core errors carry a JSON body (see core/rest.go) whose developerMessage holds

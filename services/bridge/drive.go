@@ -281,8 +281,15 @@ func (b *Bridge) authorize(ctx context.Context, d *drive) *refusal {
 	default:
 		diag := b.sandboxDiagnostics(d)
 		diag["denyReason"] = rsv.DenyReason
-		r := refuseBorrowDenied.refused(borrowDeniedText(d.owner, d.job.Provider, rsv.DenyReason), diag)
+		text := borrowDeniedText(d.owner, d.job.Provider, rsv.DenyReason)
+		if rsv.AccessRequested {
+			text += accessRequestedText
+		}
+		r := refuseBorrowDenied.refused(text, diag)
 		r.notice = map[string]any{"denyReason": rsv.DenyReason}
+		if rsv.AccessRequested {
+			r.notice["accessRequested"] = true
+		}
 		return r
 	}
 	d.reservationID = rsv.ID

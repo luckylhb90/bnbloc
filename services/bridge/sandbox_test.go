@@ -200,13 +200,15 @@ type sandboxGateway struct {
 	// defaultModel is the platform agent's default model the reservation
 	// answers ("" = none).
 	defaultModel string
-	// deny makes the reservation authority refuse with this reason.
-	deny     string
-	mu       sync.Mutex
-	statuses []map[string]any
-	tenants  []string
-	reserves []map[string]any
-	progress []wire.JobProgressInput
+	// deny makes the reservation authority refuse with this reason;
+	// accessRequested makes it say it recorded an access request.
+	deny            string
+	accessRequested bool
+	mu              sync.Mutex
+	statuses        []map[string]any
+	tenants         []string
+	reserves        []map[string]any
+	progress        []wire.JobProgressInput
 }
 
 func newSandboxGateway(t *testing.T, room string, require bool) *sandboxGateway {
@@ -232,7 +234,7 @@ func newSandboxGateway(t *testing.T, room string, require bool) *sandboxGateway 
 			switch {
 			case g.deny != "":
 				w.WriteHeader(http.StatusForbidden)
-				_ = json.NewEncoder(w).Encode(map[string]any{"reserved": false, "denyReason": g.deny})
+				_ = json.NewEncoder(w).Encode(map[string]any{"reserved": false, "denyReason": g.deny, "accessRequested": g.accessRequested})
 			case g.platform && body["sandboxed"] != true:
 				w.WriteHeader(http.StatusForbidden)
 				_, _ = w.Write([]byte(`{"reserved":false,"denyReason":"sandbox_required","sandboxRequired":true}`))
