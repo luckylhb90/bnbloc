@@ -84,8 +84,12 @@ export function useAgentPrefs({
           setRecipient((cur) => cur ?? r.recipient);
           setPeopleOnly(false);
         }
-        if (p.model) setModel(p.model);
-        if (p.reasoning) setReasoning(p.reasoning);
+        // The stored tuning, unless the member already picked their own
+        // while it was being read. It is never dropped for a catalog that
+        // has not loaded yet (Composer's offeredChoice decides what is
+        // sent), so a later save cannot write an empty pick over it.
+        if (p.model) setModel((cur) => cur || p.model || "");
+        if (p.reasoning) setReasoning((cur) => cur || p.reasoning || "");
       } catch {
         // no prefs / offline: defaults stand; a later roster change retries
         setSettled(true);

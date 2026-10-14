@@ -1,4 +1,4 @@
-import { restoreAgent, savedAgent } from "./agentPrefs.ts";
+import { offeredChoice, restoreAgent, savedAgent } from "./agentPrefs.ts";
 import type { RoomAgent } from "../views/composer/types.ts";
 
 function assert(condition: boolean, message: string): void {
@@ -44,3 +44,13 @@ eq(restoreAgent({ core: "acme", provider: "codex" }, roster, [target], "maya"), 
 eq(savedAgent(jacks, target, "maya"), { ownerId: "jack", core: "acme", provider: "codex" }, "a picked room agent is saved with its owner");
 eq(savedAgent(null, target, "maya"), { ownerId: "maya", core: "acme", provider: "codex" }, "my own target is saved as mine");
 eq(savedAgent(null, undefined, "maya"), null, "nothing picked, nothing saved");
+
+// A saved model survives a catalog that is unknown, loading or empty (the
+// agent's core restarting): it is used as stored. A loaded catalog that
+// lacks it sets it aside without changing the stored pick.
+eq(offeredChoice("opus-x", undefined), "opus-x", "unknown catalog keeps the stored pick");
+eq(offeredChoice("opus-x", []), "opus-x", "empty catalog keeps the stored pick");
+eq(offeredChoice("opus-x", ["glm", "opus-x"]), "opus-x", "an offered pick is used");
+eq(offeredChoice("opus-x", ["glm", "sonnet"]), "", "a loaded catalog without it sets it aside");
+eq(offeredChoice("", ["glm"]), "", "no pick is the agent's default");
+

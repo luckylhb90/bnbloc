@@ -48,3 +48,16 @@ export function savedAgent(
   if (ownTarget?.provider && subject) return { ownerId: subject, core: ownTarget.core || "", provider: ownTarget.provider };
   return null;
 }
+
+// offeredChoice is a stored model or reasoning pick as the composer uses it
+// right now (shown in the picker, sent with the message). The stored pick is
+// the member's: only their own pick or a restore changes it, never this.
+// It is used as stored while the agent's catalog is unknown or empty (a
+// core restarting, a catalog still loading), and set aside ("" = the
+// agent's default) only while a loaded, non-empty catalog lacks it — kept
+// for when the catalog offers it again.
+export function offeredChoice(stored: string, choices: readonly string[] | undefined): string {
+  if (!stored) return "";
+  if (!choices || choices.length === 0) return stored;
+  return choices.includes(stored) ? stored : "";
+}

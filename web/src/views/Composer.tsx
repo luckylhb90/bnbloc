@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
+import { useCallback, useId, useMemo, useRef, useState } from "react";
 import { useInjectedAgent, useInjectedAttachments, useInjectedDraft, useInjectedReferences } from "@/views/composer/useInjectedDraft";
 import {
   PaperPlaneRightIcon,
@@ -11,6 +11,7 @@ import {
 } from "@phosphor-icons/react";
 import { cn } from "@/lib/cn";
 import type { LocalAgent } from "@/lib/useLocalAgent";
+import { offeredChoice } from "@/lib/agentPrefs";
 import { NO_ROOM_CATALOGS, resolveModelCatalog, type RoomModelCatalogs } from "@/lib/agentCatalogs";
 import { PLATFORM_OFFLINE_MESSAGE, routeSend } from "@/lib/platformAgents";
 import { useAgentPrefs } from "@/views/composer/useAgentPrefs";
@@ -98,8 +99,8 @@ export function Composer({
   // The agent selection, restored from and saved to the room's prefs: the
   // picked recipient (another member's agent to borrow, a platform agent;
   // null = my own selected target), people-only (drives no agent), and the
-  // model + reasoning tuning ("" = the provider default; reset only when the
-  // effective provider's catalog no longer offers the pick).
+  // model + reasoning tuning ("" = the provider default; changed only by the
+  // member's own pick, see offeredChoice).
   const { agent, recipient, setRecipient, peopleOnly, setPeopleOnly, model, setModel, reasoning, setReasoning } =
     useAgentPrefs({ roomId, channelId, enabled: !people, agent: localAgent, roomAgents, subject: subject ?? null });
   // The welcome card's new room opens with its platform agent selected.
@@ -178,13 +179,18 @@ export function Composer({
     [text, roomAgents, recipient, subject, agent.targets, agent.target, modelCatalogs],
   );
   const modelChoices = useMemo(() => effTarget?.models ?? [], [effTarget]);
+  // The stored model as used now (offeredChoice): as stored while the
+  // catalog is unknown or empty, set aside only while a loaded catalog lacks
+  // it. The stored pick itself changes only by the member's own pick, so a
+  // catalog loading (re-entering a room, a core restarting) never erases it.
+  const offeredModel = offeredChoice(model, effTarget?.models);
   // The model whose reasoning options apply: the explicit pick, else the
   // target's configured default, else the first catalog entry. Without this
   // last fallback a harness that has per-model reasoning but no default model
   // (e.g. claude-code/opencode) would show no reasoning picker until a model
   // was picked.
   const effModelForReasoning =
-    model || effTarget?.defaultModel || modelChoices[0] || "";
+    offeredModel || effTarget?.defaultModel || modelChoices[0] || "";
   // Reasoning options follow that model (reasoningByModel), falling back to the
   // target-level ladder. Empty => no reasoning picker.
   const reasoningChoices = useMemo(() => {
@@ -193,14 +199,8 @@ export function Composer({
     return effTarget?.reasoningEfforts ?? [];
   }, [effTarget, effModelForReasoning]);
 
-  // Drop a stale model selection when the effective target no longer offers it.
-  useEffect(() => {
-    if (model && !modelChoices.includes(model)) setModel("");
-  }, [model, modelChoices]);
-  // Drop a stale reasoning selection when it is no longer offered.
-  useEffect(() => {
-    if (reasoning && !reasoningChoices.includes(reasoning)) setReasoning("");
-  }, [reasoning, reasoningChoices]);
+  // The stored reasoning as used now, by the same rule.
+  const offeredReasoning = offeredChoice(reasoning, reasoningChoices);
 
   // detectMention inspects the text before the caret for a trailing "@token"
   // (start-of-input or after whitespace) and opens/updates the picker. The token
@@ -344,12 +344,12 @@ export function Composer({
     // Attach the model+reasoning selection to the agent recipient when one is
     // present and the user picked either. Omitting both keeps agent defaults.
     const withOpts: RoomAgent | null =
-      eff && !peopleOnly && (model || reasoning)
+      eff && !peopleOnly && (offeredModel || offeredReasoning)
         ? {
             ...eff,
             agentOptions: {
-              ...(model ? { model } : {}),
-              ...(reasoning ? { reasoningEffort: reasoning } : {}),
+              ...(offeredModel ? { model: offeredModel } : {}),
+              ...(offeredReasoning ? { reasoningEffort: offeredReasoning } : {}),
             },
           }
         : eff;
@@ -734,8 +734,8 @@ export function Composer({
               <ModelPicker
                 models={modelChoices}
                 reasonings={reasoningChoices}
-                model={model}
-                reasoning={reasoning}
+                model={offeredModel}
+                reasoning={offeredReasoning}
                 defaultModel={effTarget?.defaultModel ?? ""}
                 defaultReasoning={effTarget?.defaultReasoning ?? ""}
                 onPickModel={setModel}
