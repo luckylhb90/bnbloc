@@ -32,7 +32,7 @@ import (
 // before Run.
 func (b *Bridge) EnableRoomTools(shimCommand string) (stop func(), err error) {
 	st := loadRoomToolsState(b.cfg.StateDir)
-	srv, err := roomtools.Start(roomtools.Config{Gateway: roomToolsGateway{b}, GatewayBaseURL: b.cfg.GatewayBaseURL, Addr: st.Addr})
+	srv, err := roomtools.Start(roomtools.Config{Gateway: roomToolsGateway{b}, GatewayBaseURL: b.cfg.GatewayBaseURL, Addr: st.Addr, Names: b.displayNames})
 	if err != nil {
 		return nil, err
 	}

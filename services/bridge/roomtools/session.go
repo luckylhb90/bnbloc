@@ -40,6 +40,9 @@ type Config struct {
 	// dispatched job to settle before returning its handle.
 	DefaultWait time.Duration
 	MaxWait     time.Duration
+	// Names resolves people's display names (id → name) the way the
+	// bridge's records do (nil = ids only).
+	Names func(ctx context.Context, ids []string) map[string]string
 }
 
 // Default waits: ask_agent runs inside the dispatching agent's own turn,

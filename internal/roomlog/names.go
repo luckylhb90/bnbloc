@@ -51,6 +51,12 @@ func SetNames(entries []Entry, names map[string]string) []Entry {
 	return out
 }
 
+// Named is entries as one rendered transcript names people: display names
+// by author id, the first mention of each with their id (names: id → name).
+func Named(entries []Entry, names map[string]string) []Entry {
+	return firstMentions(SetNames(entries, names))
+}
+
 // firstMentions marks, within one rendered file, every line of a person
 // after their first as named by name alone.
 func firstMentions(entries []Entry) []Entry {

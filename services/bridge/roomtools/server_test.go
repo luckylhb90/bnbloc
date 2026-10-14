@@ -583,3 +583,25 @@ func TestExpertRef(t *testing.T) {
 		t.Fatalf("expertRef = %+v", got)
 	}
 }
+
+// read_room names people the way records do: a display name by the row's
+// author id, the first mention with the id.
+func TestReadRoomNamesPeople(t *testing.T) {
+	f := newAskFixture(0)
+	srv, err := Start(Config{Gateway: f.gw, PollInterval: 5 * time.Millisecond, Names: func(_ context.Context, ids []string) map[string]string {
+		return map[string]string{"maya": "Maya Lee"}
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = srv.Close() })
+	token, sess, err := srv.Open(Scope{RoomID: "room-1", Owner: "jack", Core: "acme", Provider: "codex"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sess.Bind(Job{JobID: "job_parent", ChannelID: "ch_general"})
+	r := post(t, srv, token, rpc(1, "tools/call", map[string]any{"name": "read_room", "arguments": map[string]any{}}), nil)
+	if text, isErr := toolText(t, r); isErr || !strings.Contains(text, `#40 Maya Lee (maya): earlier`) {
+		t.Fatalf("read_room = %s", text)
+	}
+}

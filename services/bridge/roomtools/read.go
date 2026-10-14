@@ -92,6 +92,15 @@ func readRoom(ctx context.Context, env *Env, args json.RawMessage) Result {
 	case more:
 		lines = lines[len(lines)-in.Limit:]
 	}
+	if env.Config.Names != nil {
+		var ids []string
+		for _, e := range lines {
+			if e.Kind == roomlog.KindHuman {
+				ids = append(ids, e.Speaker)
+			}
+		}
+		lines = roomlog.Named(lines, env.Config.Names(ctx, ids))
+	}
 	latest := in.Since
 	var transcript strings.Builder
 	for _, e := range lines {
