@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -37,6 +38,10 @@ type fakeSmokeGateway struct {
 	deleteFirst bool // the room vanishes before the smoke's DELETE (404)
 	agentReply  bool // answer a recipient-addressed chat with agent_messages
 	failJob     bool // ...as a job-failure notice
+	// scenario answers the long-task scenario's turns like an agent
+	// (smoke_scenario_test.go); fakeAgent is its state.
+	scenario  bool
+	fakeAgent fakeScenarioAgent
 	// versions answers GET /v1/platform/versions (nil: 403, not a super-admin).
 	versions *wire.DeploymentVersions
 }
@@ -104,9 +109,10 @@ func newFakeSmokeGateway(t *testing.T) *fakeSmokeGateway {
 	mux.HandleFunc("POST /v1/rooms/{id}/chat", func(w http.ResponseWriter, r *http.Request) {
 		id := r.PathValue("id")
 		var body struct {
-			Text        string          `json:"text"`
-			ClientMsgID string          `json:"clientMsgId"`
-			Recipient   json.RawMessage `json:"recipient"`
+			Text          string          `json:"text"`
+			ClientMsgID   string          `json:"clientMsgId"`
+			Recipient     json.RawMessage `json:"recipient"`
+			AttachmentIDs []string        `json:"attachmentIds"`
 		}
 		_ = json.NewDecoder(r.Body).Decode(&body)
 		payload := map[string]any{"userId": "alice", "text": body.Text, "clientMsgId": body.ClientMsgID}
@@ -123,6 +129,9 @@ func newFakeSmokeGateway(t *testing.T) *fakeSmokeGateway {
 		g.mu.Unlock()
 		if !g.dropEcho {
 			g.publish(id, ev, true)
+		}
+		if len(body.Recipient) > 0 && g.scenario {
+			g.answerScenario(id, body.Text, body.AttachmentIDs)
 		}
 		if len(body.Recipient) > 0 && g.agentReply {
 			msg := map[string]any{"role": "assistant", "text": "OK", "ownerUserId": "alice", "provider": "codex"}
@@ -159,6 +168,22 @@ func newFakeSmokeGateway(t *testing.T) *fakeSmokeGateway {
 			return
 		}
 		_ = json.NewEncoder(w).Encode(g.versions)
+	})
+	mux.HandleFunc("POST /v1/rooms/{id}/attachments", func(w http.ResponseWriter, r *http.Request) {
+		f, hdr, err := r.FormFile("file")
+		if err != nil {
+			http.Error(w, "expected a multipart 'file' field", http.StatusBadRequest)
+			return
+		}
+		raw, _ := io.ReadAll(f)
+		g.mu.Lock()
+		if g.fakeAgent.files == nil {
+			g.fakeAgent.files = map[string]string{}
+		}
+		id := fmt.Sprintf("att_%d", len(g.fakeAgent.files)+1)
+		g.fakeAgent.files[id] = string(raw)
+		g.mu.Unlock()
+		_ = json.NewEncoder(w).Encode(wire.ChatAttachment{ID: id, Filename: hdr.Filename, ContentType: hdr.Header.Get("Content-Type"), Size: int64(len(raw))})
 	})
 	mux.HandleFunc("GET /v1/my/agents", func(w http.ResponseWriter, r *http.Request) {
 		g.mu.Lock()

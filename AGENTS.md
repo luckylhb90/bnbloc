@@ -2036,6 +2036,14 @@ workspace an agent keeps; a check of only the new path misses that
   already has a workspace, the release, then another turn in that room —
   both must reply. Only then does it go out, and it goes out with
   `--rollout optin` first; `auto` follows once it has served real turns.
+- **A core or desktop release runs the long-task scenario across the
+  upgrade**: `bnbloc smoke --agent <agent> --scenario long-task --between
+  "<the upgrade step>"` (or `BNBLOC_RELEASE_SCENARIO=1
+  BNBLOC_RELEASE_BETWEEN=… scripts/release-check.sh`). It uploads a brief,
+  has the agent write a workspace file, runs the upgrade step (which must
+  return once the change is in effect), then asks for both: each of
+  attachment, workspace write, memory and workspace file is its own
+  PASS/FAIL line, and a failed run keeps its room for debugging.
 - **Never say a release recovers by itself** unless the code path that
   recovers was read and exercised.
 

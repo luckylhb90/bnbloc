@@ -35,7 +35,9 @@ import (
 //	chat echo   POST /v1/rooms/{id}/chat {clientMsgId}; the chat_message echo carries it
 //	history     GET /v1/rooms/{id}/history contains that clientMsgId
 //	agent reply (--agent) chat addressed to the agent; an assistant agent_messages arrives
-//	delete room DELETE /v1/rooms/{id} (always, unless --keep)
+//	            (--scenario long-task replaces it with the scenario's checks,
+//	            smoke_scenario.go)
+//	delete room DELETE /v1/rooms/{id} (always, unless --keep or a failed scenario)
 
 // smokeOptions is one `bnbloc smoke` run.
 type smokeOptions struct {
@@ -47,14 +49,43 @@ type smokeOptions struct {
 	StepTimeout time.Duration
 	// Keep skips the room deletion.
 	Keep bool
-	Now  func() time.Time
+	// Scenario runs a scenario instead of the single agent reply
+	// ("long-task"; needs Agent).
+	Scenario string
+	// Between is a shell command the long-task scenario runs between its
+	// turns (an upgrade); it must return once the change is in effect.
+	Between string
+	// RunBetween runs Between (nil: sh -c; tests replace it).
+	RunBetween func(ctx context.Context, command string) error
+	// PollEvery spaces the online checks after Between (0: 3s).
+	PollEvery time.Duration
+	// Settle is how long a scenario turn waits for more replies after the
+	// last one before judging them (0: 30s).
+	Settle time.Duration
+	Now    func() time.Time
+}
+
+func (o smokeOptions) settle() time.Duration {
+	if o.Settle > 0 {
+		return o.Settle
+	}
+	return 30 * time.Second
+}
+
+func (o smokeOptions) pollEvery() time.Duration {
+	if o.PollEvery > 0 {
+		return o.PollEvery
+	}
+	return 3 * time.Second
 }
 
 func runSmoke(args []string) error {
 	fs := flag.NewFlagSet("smoke", flag.ContinueOnError)
 	gw := addGatewayFlags(fs)
 	agent := fs.String("agent", "", "also wait for a reply from this agent: provider | core/provider | target id of your own agent, or owner/provider | owner/core/provider")
-	timeout := fs.Duration("timeout", 120*time.Second, "how long to wait for the agent reply")
+	timeout := fs.Duration("timeout", 120*time.Second, "how long to wait for the agent reply (each turn of a scenario; default 4m for one)")
+	scenario := fs.String("scenario", "", `run a scenario instead of the single agent reply: "long-task" (needs --agent)`)
+	between := fs.String("between", "", "long-task: a shell command run between its turns (e.g. a core publish); it must return once the change is in effect")
 	keep := fs.Bool("keep", false, "keep the smoke room (skip the cleanup)")
 	alertOnFailure := fs.Bool("alert-on-failure", false, "when the run fails, alert platform admins through the installed notifiers (POST /v1/platform/alerts; needs a super-admin session)")
 	alertTo := fs.String("alert-to", "", "comma-separated alert recipients (default: every platform super-admin)")
@@ -69,7 +100,19 @@ func runSmoke(args []string) error {
 	defer stop()
 	c := gw.client()
 	fmt.Printf("smoke against %s\n", c.cfg.Gateway)
-	opts := smokeOptions{Agent: strings.TrimSpace(*agent), AgentTimeout: *timeout, StepTimeout: apiTimeout, Keep: *keep, Now: time.Now}
+	opts := smokeOptions{Agent: strings.TrimSpace(*agent), AgentTimeout: *timeout, StepTimeout: apiTimeout, Keep: *keep, Now: time.Now,
+		Scenario: strings.TrimSpace(*scenario), Between: strings.TrimSpace(*between)}
+	switch {
+	case opts.Scenario != "" && opts.Scenario != scenarioLongTask:
+		return fmt.Errorf("smoke: unknown --scenario %q (want %s)", opts.Scenario, scenarioLongTask)
+	case opts.Scenario != "" && opts.Agent == "":
+		return fmt.Errorf("smoke: --scenario %s needs --agent", opts.Scenario)
+	case opts.Between != "" && opts.Scenario == "":
+		return errors.New("smoke: --between needs --scenario long-task")
+	}
+	if opts.Scenario != "" && !flagSet(fs, "timeout") {
+		opts.AgentTimeout = 4 * time.Minute
+	}
 	run := &smokeRun{out: os.Stdout}
 	err := smokeChecks(ctx, c, opts, run)
 	if err != nil && *alertOnFailure {
@@ -174,6 +217,10 @@ func smokeChecks(ctx context.Context, c *client, opts smokeOptions, run *smokeRu
 			run.skip("delete room (--keep): " + roomID)
 			return
 		}
+		if opts.Scenario != "" && run.failed {
+			run.skip("delete room (kept: the scenario failed): " + roomID)
+			return
+		}
 		// Cleanup runs even after an interrupt, so it gets its own context.
 		if !run.step("delete room", func() (string, error) {
 			return "", c.call(context.Background(), opts.StepTimeout, http.MethodDelete, "/v1/rooms/"+url.PathEscape(roomID), nil, nil)
@@ -239,7 +286,9 @@ func smokeChecks(ctx context.Context, c *client, opts smokeOptions, run *smokeRu
 		return errSmokeFailed
 	}
 
-	if opts.Agent == "" {
+	if opts.Scenario == scenarioLongTask {
+		smokeLongTask(ctx, c, w, roomID, subject, opts, run)
+	} else if opts.Agent == "" {
 		run.skip("agent reply (pass --agent)")
 	} else if !run.step("agent reply", func() (string, error) {
 		return smokeAgentReply(ctx, c, w, roomID, subject, opts)
@@ -363,11 +412,13 @@ func readSSE(ctx context.Context, r io.Reader, out chan<- smokeEvent) error {
 	}
 }
 
-// smokeWaiter waits on the open stream for a matching event.
+// smokeWaiter waits on the open stream for a matching event. It counts the
+// agent_job_progress events that pass by (a live turn's activity).
 type smokeWaiter struct {
 	ctx       context.Context
 	events    <-chan smokeEvent
 	streamErr <-chan error
+	progress  int
 }
 
 // wait returns the first event match accepts; match may also fail the wait.
@@ -379,6 +430,9 @@ func (w *smokeWaiter) wait(timeout time.Duration, what string, match func(smokeE
 		case ev := <-w.events:
 			if ev.Kind == wire.EventRoomDeleted {
 				return ev, errors.New("the room was deleted while waiting")
+			}
+			if ev.Kind == wire.EventAgentJobProgress {
+				w.progress++
 			}
 			ok, err := match(ev)
 			if err != nil {
@@ -527,4 +581,15 @@ func truncateRunes(s string, n int) string {
 		return s
 	}
 	return string(r[:n]) + "…"
+}
+
+// flagSet reports whether the command line set flag name.
+func flagSet(fs *flag.FlagSet, name string) bool {
+	set := false
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == name {
+			set = true
+		}
+	})
+	return set
 }
