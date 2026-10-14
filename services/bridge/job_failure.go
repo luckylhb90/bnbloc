@@ -337,6 +337,11 @@ func driveFailureReason(err error) store.AgentJobFailureReason {
 	if errors.Is(err, errNoReply) || errors.As(err, &deadline) {
 		return store.FailureReplyTimeout
 	}
+	var reset contextResetError
+	if errors.As(err, &reset) {
+		// It had already acted: not rerun, its conversation reset.
+		return store.FailureContextReset
+	}
 	if contextOverflow(err) {
 		// driveClaim already continued it once in a fresh session.
 		return store.FailureContextOverflow

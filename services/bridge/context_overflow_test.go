@@ -152,7 +152,7 @@ func TestContextOverflowAfterWorkIsNotRunAgain(t *testing.T) {
 			if prov.sessions != 1 {
 				t.Fatalf("sessions = %d; want the request not run again", prov.sessions)
 			}
-			if st := gw.lastStatus(); st["status"] != "failed" || st["failureReason"] != "context_overflow" {
+			if st := gw.lastStatus(); st["status"] != "failed" || st["failureReason"] != "context_reset" {
 				t.Fatalf("status = %v", st)
 			}
 			_, fresh := gw.stored()

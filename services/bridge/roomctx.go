@@ -314,13 +314,16 @@ const (
 // from the room as it is. Best-effort: a failed read is retried next time.
 func (b *Bridge) followRevisions(ctx context.Context, room string, st roomlog.CtxState) roomlog.CtxState {
 	first := st.RevisedMs == 0
-	st.Revised, st.Resets = maps.Clone(st.Revised), maps.Clone(st.Resets)
+	st.Revised, st.Resets, st.Expired = maps.Clone(st.Revised), maps.Clone(st.Resets), maps.Clone(st.Expired)
 	now := time.Now().UnixMilli()
 	for range revisionPages {
 		raw, err := b.gatewayGET(ctx, "/v1/rooms/"+url.PathEscape(room)+"/history/revisions?after="+strconv.FormatInt(st.RevisedMs, 10)+"&limit="+strconv.Itoa(revisionPageRows))
 		var page wire.RevisionsPage
 		if err != nil || json.Unmarshal(raw, &page) != nil {
 			return st
+		}
+		if page.RetainedFrom != nil {
+			roomlog.ExpireBefore(&st, page.RetainedFrom)
 		}
 		if first {
 			st.RevisedMs = max(page.LatestMs, 1) // 1: looked, nothing revised yet
@@ -428,6 +431,7 @@ func (b *Bridge) drivePrompt(ctx context.Context, d *drive, workspaceID string, 
 		return b.driveTextDelta(ctx, room, owner, provider, d.job.MessageSeq, d.job.ChannelID, now, st, fresh)
 	}
 	shared.setRoomState(newSt)
+	b.workspaces.roomStateWritten(d.key(), workspaceID)
 	if from != "" {
 		now.From = from
 	}

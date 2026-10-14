@@ -504,3 +504,29 @@ func TestAttachmentsToMirror(t *testing.T) {
 		t.Fatalf("line = %q", l)
 	}
 }
+
+// Chunks wholly before a channel's retention horizon are marked for an
+// empty rewrite once per horizon; a channel the room no longer holds any
+// message of is wholly expired; a chunk straddling the horizon is kept.
+func TestExpireBefore(t *testing.T) {
+	st := CtxState{Channels: map[string]ChannelRecords{
+		"a": {Dir: ChannelDir("a"), EndSeq: 30, Chunks: []string{".room/channels/a/chunk-0000000001-0000000010.md", ".room/channels/a/chunk-0000000011-0000000020.md", ".room/channels/a/chunk-0000000021-0000000030.md"}},
+		"b": {Dir: ChannelDir("b"), EndSeq: 5, Chunks: []string{".room/channels/b/chunk-0000000001-0000000005.md"}},
+	}}
+	ExpireBefore(&st, map[string]int64{"a": 15})
+	if got := st.Revised["a"]; len(got) != 1 || got[0] != 1 {
+		t.Fatalf("channel a marks = %v, want the first chunk only", got)
+	}
+	if got := st.Revised["b"]; len(got) != 1 || got[0] != 1 || st.Expired["b"] != 6 {
+		t.Fatalf("channel b = %v expired %d, want wholly expired", got, st.Expired["b"])
+	}
+	st.Revised = nil
+	ExpireBefore(&st, map[string]int64{"a": 15})
+	if len(st.Revised["a"]) != 0 {
+		t.Fatalf("the same horizon marked again: %v", st.Revised["a"])
+	}
+	ExpireBefore(&st, map[string]int64{"a": 25})
+	if got := st.Revised["a"]; len(got) != 2 {
+		t.Fatalf("a later horizon marks = %v, want the two chunks before it", got)
+	}
+}

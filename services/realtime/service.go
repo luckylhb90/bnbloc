@@ -158,6 +158,7 @@ type ChatStore interface {
 	DeleteRoomMessage(ctx context.Context, roomID string, seq int64, requester string, atMs int64) (bool, error)
 	EditRoomMessage(ctx context.Context, roomID string, seq int64, requester, text string, atMs int64) (edited bool, err error)
 	RoomRevisions(ctx context.Context, roomID string, afterMs int64, limit int) ([]store.MessageRevision, int64, error)
+	RoomRetainedFrom(ctx context.Context, roomID string) (map[string]int64, error)
 	// GetRoomMessage returns one live message by sequence (found=false when
 	// missing or deleted): edits and deletes scope their live event to the
 	// message's channel with it.
@@ -847,6 +848,32 @@ func (s *Service) handleRevisions(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		page.Revisions = append(page.Revisions, wire.MessageRevision{ChannelID: rev.ChannelID, Sequence: rev.Seq, Deleted: rev.Deleted, AtMs: rev.AtMs})
+	}
+	retained, err := s.Chat.RoomRetainedFrom(r.Context(), roomID)
+	if err != nil {
+		obs.ServerError(w, "retention read failed", err)
+		httpx.Error(w, "retention read failed", http.StatusInternalServerError)
+		return
+	}
+	for ch, seq := range retained {
+		if !m.IsHuman() {
+			skip, seen := people[ch]
+			if !seen {
+				if skip, err = s.isPeopleChannel(r.Context(), roomID, ch); err != nil {
+					obs.ServerError(w, "channel lookup failed", err)
+					httpx.Error(w, "channel lookup failed", http.StatusInternalServerError)
+					return
+				}
+				people[ch] = skip
+			}
+			if skip {
+				continue
+			}
+		}
+		if page.RetainedFrom == nil {
+			page.RetainedFrom = map[string]int64{}
+		}
+		page.RetainedFrom[ch] = seq
 	}
 	httpx.WriteJSON(w, http.StatusOK, page)
 }

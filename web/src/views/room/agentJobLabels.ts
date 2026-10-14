@@ -27,6 +27,7 @@ export const AGENT_JOB_FAILURES: Record<AgentJobFailureReason, { readonly label:
   runner_failed: { label: "runner failed", why: "the agent's runner failed" },
   agent_error: { label: "agent error", why: "the agent reported an error" },
   context_overflow: { label: "context window exceeded", why: "the conversation outgrew the model's context window" },
+  context_reset: { label: "conversation reset", why: "the conversation outgrew the model's context window while the agent worked; send the request again" },
   lease_expired: { label: "bridge stopped responding", why: "the agent's bridge stopped responding" },
   sandbox_starting: { label: "sandbox starting", why: "the agent sandbox was starting" },
   reply_timeout: { label: "reply timed out", why: "the reply timed out" },

@@ -53,6 +53,14 @@ func TestRevisionsListEditsAndDeletes(t *testing.T) {
 	if host := page("root", ""); len(host.Revisions) != 1 || host.Revisions[0].Sequence != edited || host.Revisions[0].ChannelID != "ch_a" {
 		t.Fatalf("an agent host's revisions = %+v; want the people chat's omitted", host)
 	}
+	// Each channel's oldest stored sequence (the retention horizon agents'
+	// records follow); an agent host's omits the people chat's.
+	if all.RetainedFrom["ch_a"] != edited || all.RetainedFrom[people] != secret {
+		t.Fatalf("retainedFrom = %v", all.RetainedFrom)
+	}
+	if host := page("root", ""); host.RetainedFrom["ch_a"] != edited || len(host.RetainedFrom) != 1 {
+		t.Fatalf("an agent host's retainedFrom = %v; want the people chat's omitted", host.RetainedFrom)
+	}
 	if later := page("alice", fmt.Sprintf("?after=%d", all.LatestMs)); len(later.Revisions) != 0 || later.LatestMs != all.LatestMs {
 		t.Fatalf("revisions after the newest = %+v", later)
 	}

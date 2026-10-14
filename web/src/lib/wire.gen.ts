@@ -1974,6 +1974,10 @@ export interface FeedPage {
 export interface RevisionsPage {
   revisions: MessageRevision[];
   latestMs: number;
+  // RetainedFrom is each listed channel's oldest stored message sequence
+  // (channel id → seq): data retention purged everything before it, so
+  // agents' records drop it too.
+  retainedFrom?: Record<string, number>;
 }
 
 // MessageRevision is a message's last edit or deletion.
@@ -4389,8 +4393,8 @@ export const PublishApprovalValues: readonly PublishApproval[] = ["required", "n
 export type AgentJobStatus = "queued" | "claimed" | "running" | "reflowing" | "replied" | "failed" | "timed_out" | "cancelled";
 export const AgentJobStatusValues: readonly AgentJobStatus[] = ["queued", "claimed", "running", "reflowing", "replied", "failed", "timed_out", "cancelled"];
 // Why an agent job failed (store.AgentJobFailureReason).
-export type AgentJobFailureReason = "no_bridge_online" | "agent_not_advertised" | "borrow_not_authorized" | "core_unavailable" | "runner_start_failed" | "runner_failed" | "agent_error" | "context_overflow" | "lease_expired" | "sandbox_starting" | "reply_timeout" | "cancelled" | "budget_exhausted" | "budget_unavailable" | "sandbox_required" | "content_unavailable" | "team_unsupported" | "invalid_job";
-export const AgentJobFailureReasonValues: readonly AgentJobFailureReason[] = ["no_bridge_online", "agent_not_advertised", "borrow_not_authorized", "core_unavailable", "runner_start_failed", "runner_failed", "agent_error", "context_overflow", "lease_expired", "sandbox_starting", "reply_timeout", "cancelled", "budget_exhausted", "budget_unavailable", "sandbox_required", "content_unavailable", "team_unsupported", "invalid_job"];
+export type AgentJobFailureReason = "no_bridge_online" | "agent_not_advertised" | "borrow_not_authorized" | "core_unavailable" | "runner_start_failed" | "runner_failed" | "agent_error" | "context_overflow" | "context_reset" | "lease_expired" | "sandbox_starting" | "reply_timeout" | "cancelled" | "budget_exhausted" | "budget_unavailable" | "sandbox_required" | "content_unavailable" | "team_unsupported" | "invalid_job";
+export const AgentJobFailureReasonValues: readonly AgentJobFailureReason[] = ["no_bridge_online", "agent_not_advertised", "borrow_not_authorized", "core_unavailable", "runner_start_failed", "runner_failed", "agent_error", "context_overflow", "context_reset", "lease_expired", "sandbox_starting", "reply_timeout", "cancelled", "budget_exhausted", "budget_unavailable", "sandbox_required", "content_unavailable", "team_unsupported", "invalid_job"];
 // A member's role in a room (store.Role).
 export type RoomRole = "owner" | "admin" | "member" | "visitor";
 export const RoomRoleValues: readonly RoomRole[] = ["owner", "admin", "member", "visitor"];

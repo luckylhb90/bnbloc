@@ -112,6 +112,10 @@ type FeedPage struct {
 type RevisionsPage struct {
 	Revisions []MessageRevision `json:"revisions"`
 	LatestMs  int64             `json:"latestMs"`
+	// RetainedFrom is each listed channel's oldest stored message sequence
+	// (channel id → seq): data retention purged everything before it, so
+	// agents' records drop it too.
+	RetainedFrom map[string]int64 `json:"retainedFrom,omitempty"`
 }
 
 // MessageRevision is a message's last edit or deletion.

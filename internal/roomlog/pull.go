@@ -63,6 +63,10 @@ type CtxState struct {
 	RevisedMs int64              `json:",omitempty"`
 	Revised   map[string][]int64 `json:",omitempty"`
 	Resets    map[string]int64   `json:",omitempty"`
+	// Expired is, by channel, the retention horizon the records already
+	// follow: data retention purged every message before it, and the
+	// chunks wholly before it were rewritten empty (ExpireBefore).
+	Expired map[string]int64 `json:",omitempty"`
 	// StartedMs is when a session started (bridge clock, unix ms): a
 	// session's.
 	StartedMs int64 `json:",omitempty"`
@@ -365,4 +369,35 @@ func AgentSpeaker(owner, provider string) string {
 		return provider
 	}
 	return owner + "/" + provider
+}
+
+// ExpireBefore marks for rewriting (Revised) every chunk of each channel
+// lying wholly before its retention horizon (retainedFrom: the oldest
+// stored sequence; a channel the room no longer holds any message of is
+// wholly purged), once per horizon (Expired): the records drop what data
+// retention purged.
+func ExpireBefore(st *CtxState, retainedFrom map[string]int64) {
+	for ch, rec := range st.Channels {
+		horizon, ok := retainedFrom[ch]
+		if !ok {
+			horizon = rec.EndSeq + 1
+		}
+		if horizon <= st.Expired[ch] {
+			continue
+		}
+		var marks []int64
+		for _, name := range rec.Chunks {
+			if first, last, ok := ChunkRange(name); ok && last < horizon {
+				marks = append(marks, first)
+			}
+		}
+		if st.Revised == nil {
+			st.Revised = map[string][]int64{}
+		}
+		if st.Expired == nil {
+			st.Expired = map[string]int64{}
+		}
+		st.Revised[ch] = append(marks, st.Revised[ch]...)
+		st.Expired[ch] = horizon
+	}
 }

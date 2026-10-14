@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"maps"
 	"slices"
 	"strconv"
 	"testing"
@@ -141,6 +142,10 @@ func TestContractChatStoreHistoryAndFeed(t *testing.T) {
 		}
 		hist := func(ch string, before int64, limit int) []int64 {
 			return seqsOf(must(s.RoomHistory(ctx, room, ch, before, limit))(t))
+		}
+		// Each channel's oldest stored sequence: what retention has kept.
+		if got := must(s.RoomRetainedFrom(ctx, room))(t); !maps.Equal(got, map[string]int64{"ch_a": 1, "ch_b": 2, "": 4}) {
+			t.Fatalf("RoomRetainedFrom = %v", got)
 		}
 		for _, c := range []struct {
 			ch     string

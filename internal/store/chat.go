@@ -120,6 +120,10 @@ type ChatStore interface {
 	// is the room's newest revision time (0 = none), whatever the page.
 	// Agents' records follow the room with it.
 	RoomRevisions(ctx context.Context, roomID string, afterMs int64, limit int) (revs []MessageRevision, latestMs int64, err error)
+	// RoomRetainedFrom is each channel's oldest stored message sequence
+	// (channel id → seq; a channel with no message is absent): what data
+	// retention has not purged. Agents' records drop what lies before it.
+	RoomRetainedFrom(ctx context.Context, roomID string) (map[string]int64, error)
 	// ChatIndex: single-message lookup and cross-room search (search.go).
 	ChatIndex
 }
@@ -336,6 +340,24 @@ func (s *MemoryChat) RoomRevisions(ctx context.Context, roomID string, afterMs i
 		out = out[:n]
 	}
 	return out, latest, nil
+}
+
+// RoomRetainedFrom is each channel's oldest stored sequence (see
+// ChatStore).
+func (s *MemoryChat) RoomRetainedFrom(ctx context.Context, roomID string) (map[string]int64, error) {
+	tid, err := tenant.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := map[string]int64{}
+	for _, m := range s.msgs[tid+"\x00"+roomID] {
+		if cur, ok := out[m.ChannelID]; !ok || m.Seq < cur {
+			out[m.ChannelID] = m.Seq
+		}
+	}
+	return out, nil
 }
 
 // setPayloadText returns the payload with its "text" field replaced, preserving
@@ -775,4 +797,32 @@ func (s *MySQLChat) RoomRevisions(ctx context.Context, roomID string, afterMs in
 		return nil, 0, err
 	}
 	return revs, latest.Int64, nil
+}
+
+// RoomRetainedFrom is each channel's oldest stored sequence (see
+// ChatStore), on idx_room_channel_seq.
+func (s *MySQLChat) RoomRetainedFrom(ctx context.Context, roomID string) (map[string]int64, error) {
+	tid, err := tenant.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
+	type row struct {
+		channel string
+		seq     int64
+	}
+	rows, err := queryAll(ctx, s.DB,
+		`SELECT channel_id, MIN(seq) FROM room_messages WHERE room_id = ? AND tenant_id = ? GROUP BY channel_id`,
+		func(r rowScanner) (row, error) {
+			var x row
+			err := r.Scan(&x.channel, &x.seq)
+			return x, err
+		}, roomID, tid)
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]int64, len(rows))
+	for _, x := range rows {
+		out[x.channel] = x.seq
+	}
+	return out, nil
 }
