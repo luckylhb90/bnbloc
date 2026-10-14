@@ -530,3 +530,17 @@ func TestExpireBefore(t *testing.T) {
 		t.Fatalf("a later horizon marks = %v, want the two chunks before it", got)
 	}
 }
+
+// The file a message asks to change is one line ahead of the [now] marker:
+// where it is and that saving it there updates the room's file, or, when it
+// could not be placed, why (for the sender).
+func TestComposeNamesTheFileToEdit(t *testing.T) {
+	edit := &EditTarget{Path: "edits/deck.pptx", Source: ".room/edits/art_1/deck.pptx", Name: "deck.pptx", Version: 3}
+	if got := ComposePointer(Now{From: "maya", Text: "shorten slide 4's title", Edit: edit}, false); got != "[edit deck.pptx v3: it is at .room/edits/art_1/deck.pptx; save your version as edits/deck.pptx, which updates the room's file]\n\n[now — from maya]\nshorten slide 4's title" {
+		t.Fatalf("edit line:\n%s", got)
+	}
+	missing := &EditTarget{Name: "deck.pptx", Version: 3, Problem: "it is larger than this agent accepts (32 MB)"}
+	if got := ComposePointer(Now{From: "maya", Text: "x", Edit: missing}, false); !strings.HasPrefix(got, "[the file to edit, deck.pptx v3, is NOT in this workspace: it is larger than this agent accepts (32 MB) — tell the sender]\n") {
+		t.Fatalf("missing line:\n%s", got)
+	}
+}

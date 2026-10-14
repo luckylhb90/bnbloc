@@ -64,6 +64,10 @@ type drive struct {
 
 	reservationID string // stage 5: the borrow's reservation ("" = none)
 	target        string // stage 6
+
+	// edit is the room file the request edits, placed in the workspace with
+	// the attachments (file_edit.go; nil = none).
+	edit *editTarget
 }
 
 // stage is one refusable stage of the pipeline.
@@ -410,7 +414,8 @@ func (b *Bridge) publishTurn(ctx context.Context, d *drive) {
 	go func() {
 		defer close(done)
 		b.publishDeliverables(b.detached(ctx), d.job.RoomID, d.job.ChannelID, rs,
-			deliverableTurn{StartMs: d.startMs, JobID: d.job.JobID, SourceSeq: d.job.MessageSeq})
+			deliverableTurn{StartMs: d.startMs, JobID: d.job.JobID, SourceSeq: d.job.MessageSeq, edit: d.edit})
+		b.noticeEditOutcome(b.detached(ctx), d)
 	}()
 	t := time.NewTimer(b.publishWaitFor())
 	defer t.Stop()

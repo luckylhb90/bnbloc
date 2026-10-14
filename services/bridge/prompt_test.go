@@ -88,6 +88,10 @@ func TestPromptBudgets(t *testing.T) {
 		{"push first framing (one line excluded)", strings.Replace(roomlog.Compose([]roomlog.Entry{entry}, now, roomlog.Options{}), line, "", 1), 60},
 		{"attachments block, one file", strings.Replace(roomlog.ComposePointer(roomlog.Now{From: now.From, Attachments: att}, false), roomlog.ComposePointer(now, false), "", 1), 50},
 		{"undelivered block, one file", strings.Replace(roomlog.ComposePointer(roomlog.Now{From: now.From, Undelivered: undelivered}, false), roomlog.ComposePointer(now, false), "", 1), 70},
+		// The one line of a request about a room file (file_edit.go).
+		{"edit line", strings.Replace(roomlog.ComposePointer(roomlog.Now{From: now.From, Edit: &roomlog.EditTarget{
+			Path: "edits/Q3 board deck.pptx", Source: ".room/edits/artf_0123456789abcdef01234567/Q3 board deck.pptx", Name: "Q3 board deck.pptx", Version: 12,
+		}}, false), roomlog.ComposePointer(now, false), "", 1), 60},
 		// Once per session (cached prefix). +40 on 2026-10-14 for the two
 		// rules that keep work out of /tmp and many images out of the
 		// conversation (docs/prd/2026-10-14-context-overflow-recovery.md).

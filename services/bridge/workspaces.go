@@ -63,6 +63,27 @@ type workspaceShared struct {
 	// deliverable publish (nil before the first): the diff against the
 	// current listing is what changed since. Guarded by publishMu.
 	published map[string]fileStamp
+	// edits maps a path a room file was placed at for editing to that
+	// file's artifact (file_edit.go): a later rewrite of the path, in any
+	// turn, is a version of that file, never a new deliverable.
+	edits map[string]string
+}
+
+// rememberEdit records that path holds the room file artifactID.
+func (s *workspaceShared) rememberEdit(path, artifactID string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.edits == nil {
+		s.edits = map[string]string{}
+	}
+	s.edits[path] = artifactID
+}
+
+// editTargetOf is the room file path was placed for ("" = none).
+func (s *workspaceShared) editTargetOf(path string) string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.edits[path]
 }
 
 // roomState is the .room/ tree's pull state.

@@ -51,7 +51,20 @@ type pullGateway struct {
 	// their ids); profileReads counts those reads.
 	names        map[string]string
 	profileReads int
-	srv          *httptest.Server
+	// details answer an artifact's detail by id; published records each
+	// version publish (its path and body, JSON or multipart fields) and
+	// created each artifact create.
+	details   map[string]string
+	published []testPublish
+	created   []string
+	srv       *httptest.Server
+}
+
+// testPublish is one version publish the fake gateway received.
+type testPublish struct {
+	ArtifactID string
+	Fields     map[string]string
+	Content    string
 }
 
 // testAttachment is a chat attachment the test gateway serves.
@@ -116,6 +129,51 @@ func newPullGateway(t *testing.T) *pullGateway {
 		g.mu.Lock()
 		defer g.mu.Unlock()
 		fmt.Fprint(w, g.artifacts)
+	})
+	mux.HandleFunc("GET /v1/rooms/r1/artifacts/{id}", func(w http.ResponseWriter, r *http.Request) {
+		g.mu.Lock()
+		defer g.mu.Unlock()
+		body, ok := g.details[r.PathValue("id")]
+		if !ok {
+			http.NotFound(w, r)
+			return
+		}
+		fmt.Fprint(w, body)
+	})
+	mux.HandleFunc("POST /v1/rooms/r1/artifacts", func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			ArtifactID string `json:"artifactId"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		g.mu.Lock()
+		g.created = append(g.created, body.ArtifactID)
+		g.mu.Unlock()
+		fmt.Fprint(w, `{}`)
+	})
+	mux.HandleFunc("POST /v1/rooms/r1/artifacts/{id}/versions", func(w http.ResponseWriter, r *http.Request) {
+		p := testPublish{ArtifactID: r.PathValue("id"), Fields: map[string]string{}}
+		if strings.HasPrefix(r.Header.Get("Content-Type"), "multipart/") {
+			_ = r.ParseMultipartForm(1 << 20)
+			for k, v := range r.MultipartForm.Value {
+				p.Fields[k] = v[0]
+			}
+			if f, _, err := r.FormFile("file"); err == nil {
+				data, _ := io.ReadAll(f)
+				p.Content = string(data)
+			}
+		} else {
+			var body map[string]any
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			for k, v := range body {
+				p.Fields[k] = fmt.Sprint(v)
+			}
+			p.Content = p.Fields["content"]
+		}
+		g.mu.Lock()
+		g.published = append(g.published, p)
+		n := len(g.published)
+		g.mu.Unlock()
+		fmt.Fprintf(w, `{"artifact":{"artifactId":%q},"version":{"artifactId":%q,"version":%d}}`, p.ArtifactID, p.ArtifactID, 10+n)
 	})
 	mux.HandleFunc("GET /v1/rooms/r1/artifacts/{id}/versions/{v}", func(w http.ResponseWriter, r *http.Request) {
 		g.mu.Lock()

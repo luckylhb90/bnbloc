@@ -644,8 +644,10 @@ type bridgeJob struct {
 	TargetID        string   `json:"targetId"`
 	MessageText     string   `json:"messageText"`
 	AttachmentIDs   []string `json:"attachmentIds"`
-	Model           string   `json:"model"`
-	ReasoningEffort string   `json:"reasoningEffort"`
+	// FileRef is the room file the request edits (nil = none).
+	FileRef         *wire.FileRef `json:"fileRef,omitempty"`
+	Model           string        `json:"model"`
+	ReasoningEffort string        `json:"reasoningEffort"`
 	// ExpertID / ExpertVersion / ExpertName: the expert the chat asked the
 	// agent to wear, pinned on the job (content.go).
 	ExpertID      string `json:"expertId"`
@@ -1523,7 +1525,7 @@ func (b *Bridge) runTurn(ctx context.Context, d *drive, key driveKey, opts corep
 			return driveResult{workspaceID: rs.workspaceID, sessionID: rs.sessionID}, rs.roomSession, atStage(stageStart, err)
 		}
 	}
-	rs.roomSession.markTurn(deliverableTurn{StartMs: time.Now().UnixMilli(), JobID: d.job.JobID, SourceSeq: d.job.MessageSeq})
+	rs.roomSession.markTurn(deliverableTurn{StartMs: time.Now().UnixMilli(), JobID: d.job.JobID, SourceSeq: d.job.MessageSeq, edit: d.edit})
 	started()
 	// Signal the room that the agent is working, so members see a live indicator
 	// while codex runs; clear it once the turn drains. Best-effort presentation.
@@ -1705,6 +1707,7 @@ func (b *Bridge) ensureSession(ctx context.Context, d *drive, key driveKey, prom
 			// existing workspace BEFORE the caller composes the follow-up prompt,
 			// so the prompt can name files that actually exist.
 			atts := b.materializeAttachments(ctx, d.caps.bytesWriter, d.caps.maxInput, entry.endpoint, room, existing.workspaceID, d.job.AttachmentIDs)
+			d.edit = b.placeEditTarget(ctx, d, key, entry.endpoint, existing.workspaceID)
 			return &ensureResult{roomSession: existing, freshlyCreated: false, atts: atts}, nil
 		}
 	}
@@ -1784,6 +1787,7 @@ func (b *Bridge) startSession(ctx context.Context, d *drive, key driveKey, entry
 	// runs (createSession below executes it), so the agent's very first
 	// turn can open the files.
 	atts := b.materializeAttachments(ctx, d.caps.bytesWriter, d.caps.maxInput, entry.endpoint, room, workspaceID, d.job.AttachmentIDs)
+	d.edit = b.placeEditTarget(ctx, d, key, entry.endpoint, workspaceID)
 	// What the session is told once (the guidance, the content, the session
 	// contributors' servers): its profile or its first prompt's head.
 	profile, prefix, hooks, facts := b.sessionGuidance(ctx, d, entry.endpoint, workspaceID, b.sessionInfo(d, opts))

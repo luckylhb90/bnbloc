@@ -140,10 +140,12 @@ func (w sessionWorkspace) Deliverable(ctx context.Context, rel string) (string, 
 	if why != "" {
 		return "", fmt.Errorf("%s cannot be a deliverable: %s", rel, why)
 	}
+	// A path a room file was placed at for editing is that file's.
+	d.artifactID = w.rs.shared().editTargetOf(rel)
 	if err := w.b.publishArtifactNow(ctx, w.room, w.channel, w.rs, d, "agent"); err != nil {
 		return "", fmt.Errorf("publish %s: %w", rel, err)
 	}
-	return artifactIDForFile(w.room, w.rs, rel), nil
+	return firstNonEmpty(d.artifactID, artifactIDForFile(w.room, w.rs, rel)), nil
 }
 
 // errNoSessionFiles: the session's core does not expose workspace files.

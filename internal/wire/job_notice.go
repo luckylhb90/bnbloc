@@ -66,6 +66,10 @@ const (
 	// continues in a fresh session (the bridge, at most once per job, under
 	// ContextResetNoticeSessionID so the job's own notice still posts).
 	NoticeContextReset = "context-reset"
+	// NoticeFileEdit says the file a request asked to change did not
+	// change: it never reached the agent (and why), or the agent left it
+	// as it was (the bridge, once per job, under FileEditNoticeSessionID).
+	NoticeFileEdit = "file-edit"
 )
 
 // AttachmentNoticeSessionID is the activity session of a job's
@@ -80,6 +84,12 @@ func AttachmentNoticeSessionID(jobID string) string {
 // context-reset notice, apart from the job's own notice.
 func ContextResetNoticeSessionID(jobID string) string {
 	return JobNoticeSessionID(jobID) + "-context"
+}
+
+// FileEditNoticeSessionID is the activity session of a job's file-edit
+// notice, apart from the job's own notice.
+func FileEditNoticeSessionID(jobID string) string {
+	return JobNoticeSessionID(jobID) + "-file"
 }
 
 // session is the activity session the notice is recorded under.

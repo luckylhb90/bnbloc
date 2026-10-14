@@ -5,6 +5,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/luckylhb90/bnbloc/core"
 )
 
 // Options tunes how Compose lays out the context. Zero values are sane
@@ -25,11 +27,48 @@ type Options struct {
 // them; they render as an imperative block before the [now] marker. The
 // files that could not be put in the workspace are named too, with why, so
 // the agent tells the sender instead of answering as if there were none.
+// Edit is the room file the message asks to change (nil = none).
 type Now struct {
 	From        string
 	Text        string
 	Attachments []Attachment
 	Undelivered []UndeliveredAttachment
+	Edit        *EditTarget
+}
+
+// EditTarget is the room file a message asks the agent to change
+// (docs/prd/2026-10-14-ai-document-editing.md rule 3): Source is where the
+// version was placed (under .room/edits/, which bnbloc writes), Path where
+// saving the agent's version updates the room's file, or Problem why it
+// could not be placed.
+type EditTarget struct {
+	Path    string
+	Source  string
+	Name    string
+	Version int
+	Problem string
+}
+
+// EditsDir is where a room file to edit is placed: .room/edits/<artifact
+// id>/<file name>.
+const EditsDir = core.RoomContextDir + "edits/"
+
+// writeEditLine renders the one line that points the agent at the file to
+// change: no tool, no rule, just where it is and that saving it there is
+// what updates the room's file. When it could not be placed, the line says
+// why, for the sender.
+func writeEditLine(b *strings.Builder, e *EditTarget) {
+	if e == nil {
+		return
+	}
+	if b.Len() > 0 {
+		b.WriteString("\n")
+	}
+	if e.Problem != "" {
+		fmt.Fprintf(b, "[the file to edit, %s v%d, is NOT in this workspace: %s — tell the sender]\n", e.Name, e.Version, e.Problem)
+		return
+	}
+	fmt.Fprintf(b, "[edit %s v%d: it is at %s; save your version as %s, which updates the room's file]\n", e.Name, e.Version, e.Source, e.Path)
 }
 
 // writeNow renders the turn's message: its attachments, the [now] marker
@@ -37,6 +76,7 @@ type Now struct {
 // nothing else: the sender tells a person's own words from a task an agent
 // dispatched for them.
 func writeNow(b *strings.Builder, now Now) {
+	writeEditLine(b, now.Edit)
 	writeAttachmentsBlock(b, now.Attachments)
 	writeUndeliveredBlock(b, now.Undelivered)
 	if b.Len() > 0 {

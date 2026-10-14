@@ -2165,6 +2165,10 @@ export const NoticeAttachmentUndelivered = "attachment-undelivered";
 // continues in a fresh session (the bridge, at most once per job, under
 // ContextResetNoticeSessionID so the job's own notice still posts).
 export const NoticeContextReset = "context-reset";
+// NoticeFileEdit says the file a request asked to change did not
+// change: it never reached the agent (and why), or the agent left it
+// as it was (the bridge, once per job, under FileEditNoticeSessionID).
+export const NoticeFileEdit = "file-edit";
 
 // ---- wire/job_progress.go ----
 

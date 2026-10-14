@@ -396,7 +396,7 @@ func (b *Bridge) drivePrompt(ctx context.Context, d *drive, workspaceID string, 
 	if fresh && st != nil {
 		st.StartedMs = time.Now().UnixMilli()
 	}
-	now := roomlog.Now{From: b.personLabel(ctx, d.job.RequesterUserID), Text: text, Attachments: toPromptAttachments(atts.delivered), Undelivered: atts.undelivered}
+	now := roomlog.Now{From: b.personLabel(ctx, d.job.RequesterUserID), Text: text, Attachments: toPromptAttachments(atts.delivered), Undelivered: atts.undelivered, Edit: d.edit.line()}
 	entry, ok := b.coreEntry(d.core)
 	if d.caps.writer == nil || !ok {
 		return b.driveTextDelta(ctx, room, owner, provider, d.job.MessageSeq, d.job.ChannelID, now, st, fresh)

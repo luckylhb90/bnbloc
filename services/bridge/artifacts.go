@@ -21,6 +21,7 @@ import (
 
 	corepkg "github.com/luckylhb90/bnbloc/core"
 	"github.com/luckylhb90/bnbloc/internal/store"
+	"github.com/luckylhb90/bnbloc/internal/wire"
 )
 
 // Agent-produced deliverable publishing.
@@ -139,6 +140,8 @@ type deliverableTurn struct {
 	StartMs   int64
 	JobID     string
 	SourceSeq int64
+	// edit is the room file the turn edits (file_edit.go; nil = none).
+	edit *editTarget
 }
 
 // sessionFiles resolves the session core's optional SessionFiles capability:
@@ -194,6 +197,9 @@ func (b *Bridge) publishDeliverables(ctx context.Context, room, channelID string
 		slog.Debug("bnbloc bridge deliverables skipped: no session files", "event", "bnbloc.bridge.deliverables_skip", "ws", rs.workspaceID)
 		return
 	}
+	// The file the turn edits publishes to its own artifact, whatever its
+	// path and the rules below say (file_edit.go).
+	b.publishEdit(ctx, room, channelID, rs, files, ep, binarySafe, current, turn)
 	now := fileStamps(current)
 	cold := sh.published == nil
 
@@ -221,7 +227,7 @@ func (b *Bridge) publishDeliverables(ctx context.Context, room, channelID string
 			continue
 		}
 		changedPaths = append(changedPaths, f.Path)
-		if !ignoredDeliverable(f.Path) {
+		if !ignoredDeliverable(f.Path) && (turn.edit == nil || f.Path != turn.edit.path) {
 			changed = append(changed, f)
 		}
 	}
@@ -284,6 +290,8 @@ func (b *Bridge) publishDeliverables(ctx context.Context, room, channelID string
 		if why != "" {
 			continue
 		}
+		// A path a room file was placed at for editing stays that file's.
+		d.artifactID = sh.editTargetOf(f.Path)
 		published++
 		if err := b.publishArtifactNow(ctx, room, channelID, rs, d, "agent"); err != nil {
 			slog.Debug("bnbloc bridge artifact publish failed",
@@ -354,9 +362,14 @@ func (b *Bridge) artifactMaxBytes(ctx context.Context, room string) (int64, erro
 // of the id: its workspace is its own, so its report.md is not a version of
 // the owner's.
 func artifactIDForFile(room string, rs *roomSession, rel string) string {
-	seat := rs.seat
-	seat.room, seat.core, seat.provider = room, rs.core, rs.provider
-	return "artf_" + shortHash(seat.seatAgentID()+"\n"+rs.owner+"\n"+rel)
+	return artifactIDForSeat(room, rs.seat, rs.core, rs.provider, rs.owner, rel)
+}
+
+// artifactIDForSeat is artifactIDForFile before the session exists: the
+// seat, the agent (core, provider) and its owner.
+func artifactIDForSeat(room string, seat driveKey, core, provider, owner, rel string) string {
+	seat.room, seat.core, seat.provider = room, core, provider
+	return "artf_" + shortHash(seat.seatAgentID()+"\n"+owner+"\n"+rel)
 }
 
 // deliverable is one file to publish: inline text, or blob bytes with a MIME
@@ -372,11 +385,28 @@ type deliverable struct {
 	inline   bool
 	content  []byte
 	turn     deliverableTurn
+	// artifactID, when set, is the artifact the file publishes to (an edit
+	// target), not the one its path derives; editedFrom is the version the
+	// edit started from.
+	artifactID string
+	editedFrom int
 }
 
 // publishArtifactNow is the real entry: create-or-attach then CAS publish.
 func (b *Bridge) publishArtifactNow(ctx context.Context, room, channelID string, rs *roomSession, d deliverable, author string) error {
-	id := artifactIDForFile(room, rs, d.rel)
+	_, err := b.publishTo(ctx, room, channelID, rs, d, author)
+	return err
+}
+
+// publishTo publishes d and returns the version it became (0 when the
+// room found the bytes unchanged). The artifact is the file's own
+// (created or attached first), or d.artifactID, which exists already.
+func (b *Bridge) publishTo(ctx context.Context, room, channelID string, rs *roomSession, d deliverable, author string) (int, error) {
+	id := d.artifactID
+	explicit := id != ""
+	if !explicit {
+		id = artifactIDForFile(room, rs, d.rel)
+	}
 	roomPath := "/v1/rooms/" + url.PathEscape(room) + "/artifacts"
 	title, fileName := d.title, d.fileName
 	if title == "" {
@@ -390,8 +420,10 @@ func (b *Bridge) publishArtifactNow(ctx context.Context, room, channelID string,
 		"artifactId": id, "kind": d.kind, "title": title, "channelId": channelID,
 		"language": languageFor(d.rel), "fileName": fileName,
 	}
-	if _, err := b.gatewayPOST(ctx, roomPath, create); err != nil {
-		return fmt.Errorf("create artifact: %w", err)
+	if !explicit {
+		if _, err := b.gatewayPOST(ctx, roomPath, create); err != nil {
+			return 0, fmt.Errorf("create artifact: %w", err)
+		}
 	}
 	// Read the current version, then publish base+1.
 	base := 0
@@ -406,20 +438,36 @@ func (b *Bridge) publishArtifactNow(ctx context.Context, room, channelID string,
 		}
 	}
 	summary := "published by " + author
+	if d.editedFrom > 0 {
+		summary = fmt.Sprintf("edited by %s from v%d", author, d.editedFrom)
+	}
 	versionsPath := roomPath + "/" + id + "/versions"
+	var reply []byte
+	var err error
 	if d.inline {
 		body := map[string]any{
 			"baseVersion": base, "content": string(d.content), "summary": summary,
-			"sourceJobId": d.turn.JobID, "sourceSeq": d.turn.SourceSeq,
+			"sourceJobId": d.turn.JobID, "sourceSeq": d.turn.SourceSeq, "editedFrom": d.editedFrom,
 		}
-		_, err := b.gatewayPOST(ctx, versionsPath, body)
-		return err
+		reply, err = b.gatewayPOST(ctx, versionsPath, body)
+	} else {
+		fields := map[string]string{
+			"baseVersion": strconv.Itoa(base), "summary": summary,
+			"sourceJobId": d.turn.JobID, "sourceSeq": strconv.FormatInt(d.turn.SourceSeq, 10),
+		}
+		if d.editedFrom > 0 {
+			fields["editedFrom"] = strconv.Itoa(d.editedFrom)
+		}
+		reply, err = b.gatewayPOSTFile(ctx, versionsPath, fields, fileName, d.mimeType, d.content)
 	}
-	fields := map[string]string{
-		"baseVersion": strconv.Itoa(base), "summary": summary,
-		"sourceJobId": d.turn.JobID, "sourceSeq": strconv.FormatInt(d.turn.SourceSeq, 10),
+	if err != nil {
+		return 0, err
 	}
-	return b.gatewayPOSTFile(ctx, versionsPath, fields, fileName, d.mimeType, d.content)
+	var out wire.ArtifactReply
+	if json.Unmarshal(reply, &out) != nil || out.Unchanged || out.Version == nil {
+		return 0, nil
+	}
+	return out.Version.Version, nil
 }
 
 // artifactUploadTimeout bounds one blob version upload. The bridge's shared
@@ -429,7 +477,7 @@ const artifactUploadTimeout = 10 * time.Minute
 
 // gatewayPOSTFile posts a multipart body (form fields + one "file" part) to
 // the gateway under the owner token.
-func (b *Bridge) gatewayPOSTFile(ctx context.Context, p string, fields map[string]string, fileName, contentType string, content []byte) error {
+func (b *Bridge) gatewayPOSTFile(ctx context.Context, p string, fields map[string]string, fileName, contentType string, content []byte) ([]byte, error) {
 	var buf bytes.Buffer
 	mw := multipart.NewWriter(&buf)
 	keys := make([]string, 0, len(fields))
@@ -439,7 +487,7 @@ func (b *Bridge) gatewayPOSTFile(ctx context.Context, p string, fields map[strin
 	sort.Strings(keys)
 	for _, k := range keys {
 		if err := mw.WriteField(k, fields[k]); err != nil {
-			return err
+			return nil, err
 		}
 	}
 	h := textproto.MIMEHeader{}
@@ -447,19 +495,18 @@ func (b *Bridge) gatewayPOSTFile(ctx context.Context, p string, fields map[strin
 	h.Set("Content-Type", contentType)
 	part, err := mw.CreatePart(h)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if _, err := part.Write(content); err != nil {
-		return err
+		return nil, err
 	}
 	if err := mw.Close(); err != nil {
-		return err
+		return nil, err
 	}
 	ctx, cancel := context.WithTimeout(ctx, artifactUploadTimeout)
 	defer cancel()
 	client := &http.Client{Transport: b.http.Transport}
-	_, err = b.doRaw(ctx, client, http.MethodPost, b.cfg.GatewayBaseURL+p, b.gatewayAuth(ctx), mw.FormDataContentType(), &buf)
-	return err
+	return b.doRaw(ctx, client, http.MethodPost, b.cfg.GatewayBaseURL+p, b.gatewayAuth(ctx), mw.FormDataContentType(), &buf)
 }
 
 func languageFor(rel string) string {
