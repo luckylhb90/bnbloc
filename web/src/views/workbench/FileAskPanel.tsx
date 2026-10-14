@@ -2,10 +2,11 @@ import { createContext, useContext, useEffect, useMemo, useRef, type ReactNode }
 import { CrosshairSimpleIcon, XIcon } from "@phosphor-icons/react";
 import type { FileFacts } from "@/lib/fileMatch";
 import type { PromptChoice } from "@/lib/promptPacks";
-import type { FileRef } from "@/lib/wire.gen";
+import type { Artifact, ArtifactDetail, FileRef } from "@/lib/wire.gen";
 import { Message } from "@/views/room/Message";
 import type { FeedItem } from "@/views/room/types";
-import { fileThread } from "./fileAsk";
+import { EditCard } from "./EditCard";
+import { fileThread, threadWithEdits } from "./fileAsk";
 
 // The Ask AI panel beside a file in the workbench
 // (docs/prd/2026-10-14-ai-document-editing.md M1): the room conversation's
@@ -59,6 +60,10 @@ export function FileAskPanel({
   fileRef,
   file,
   pick,
+  artifact,
+  detail,
+  onViewChanges,
+  onShow,
   onClearSelection,
   onClose,
 }: {
@@ -66,6 +71,11 @@ export function FileAskPanel({
   readonly fileRef: FileRef;
   readonly file: FileFacts;
   readonly pick?: FileComposerOptions["pick"];
+  /** The file's versions: each edit a request produced gets a change card. */
+  readonly artifact: Artifact;
+  readonly detail: ArtifactDetail;
+  readonly onViewChanges: (prev: number, curr: number) => void;
+  readonly onShow?: (version: number, at: string) => void;
   readonly onClearSelection: () => void;
   readonly onClose: () => void;
 }) {
@@ -99,7 +109,22 @@ export function FileAskPanel({
             earlier version can be restored from the version picker.
           </p>
         ) : (
-          thread.map((item) => <Message key={item.id} roomId={ask.roomId} item={item} />)
+          threadWithEdits(thread, detail.versions).map((e) =>
+            e.kind === "item" ? (
+              <Message key={e.item.id} roomId={ask.roomId} item={e.item} />
+            ) : (
+              <EditCard
+                key={`edit-${e.version.version}`}
+                roomId={ask.roomId}
+                artifact={artifact}
+                detail={detail}
+                version={e.version}
+                selection={e.request.fileRef?.selection}
+                onViewChanges={onViewChanges}
+                onShow={onShow}
+              />
+            ),
+          )
         )}
         <div ref={endRef} />
       </div>

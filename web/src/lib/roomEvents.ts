@@ -265,7 +265,17 @@ export function fileRefOf(v: unknown): FileRef | undefined {
     artifactId: r.artifactId,
     version: r.version,
     ...(typeof r.name === "string" && r.name ? { name: r.name } : {}),
-    // The part pointed at, by its label (the detail is the agent's).
-    ...(sel && typeof sel.label === "string" && sel.label ? { selection: { label: sel.label } } : {}),
+    // The part pointed at: its label, content, kind and unit keys (the change
+    // card checks an edit against them).
+    ...(sel && typeof sel.label === "string" && sel.label
+      ? {
+          selection: {
+            label: sel.label,
+            ...(typeof sel.detail === "string" && sel.detail ? { detail: sel.detail } : {}),
+            ...(typeof sel.kind === "string" && sel.kind ? { kind: sel.kind } : {}),
+            ...(Array.isArray(sel.keys) && sel.keys.every((k) => typeof k === "string") && sel.keys.length ? { keys: sel.keys as string[] } : {}),
+          },
+        }
+      : {}),
   };
 }

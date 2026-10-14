@@ -104,10 +104,13 @@ function testJobEventIsTheProjection(): void {
 }
 
 // A request from a file's Ask AI panel names the file, its version and the
-// part pointed at (by label: the detail is the agent's).
+// part pointed at (the change card checks the edit against it).
 function testFileRefKeepsTheSelectionLabel(): void {
-  const ref = fileRefOf({ artifactId: "art_1", version: 2, name: "deck.pptx", selection: { label: "Slide 3", detail: "Q3 revenue" } });
-  assert(JSON.stringify(ref) === JSON.stringify({ artifactId: "art_1", version: 2, name: "deck.pptx", selection: { label: "Slide 3" } }), `ref ${JSON.stringify(ref)}`);
+  const ref = fileRefOf({ artifactId: "art_1", version: 2, name: "deck.pptx", selection: { label: "Slide 3", detail: "Q3 revenue", kind: "slide", keys: ["slide-258"] } });
+  assert(
+    JSON.stringify(ref) === JSON.stringify({ artifactId: "art_1", version: 2, name: "deck.pptx", selection: { label: "Slide 3", detail: "Q3 revenue", kind: "slide", keys: ["slide-258"] } }),
+    `ref ${JSON.stringify(ref)}`,
+  );
   assert(fileRefOf({ artifactId: "art_1", version: 2, selection: { label: "" } })?.selection === undefined, "an empty label is no selection");
   assert(fileRefOf({ artifactId: "art_1", version: 0 }) === undefined, "version 0 is no file");
 }

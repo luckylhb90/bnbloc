@@ -1,4 +1,4 @@
-import { fileThread, requestSelection } from "./fileAsk.ts";
+import { fileThread, requestSelection, threadWithEdits } from "./fileAsk.ts";
 import type { FeedItem } from "../room/types.ts";
 
 // Local runner (the web tsconfig has no node types); a failure throws.
@@ -29,4 +29,14 @@ console.log("fileAsk tests passed");
 {
   const sent = requestSelection({ label: "Slide 2", detail: "Highlights", kind: "slide", rect: { x: 1, y: 2, w: 3, h: 4 }, keys: ["slide-257"] });
   if (JSON.stringify(sent) !== JSON.stringify({ label: "Slide 2", detail: "Highlights", kind: "slide", keys: ["slide-257"] })) throw new Error(`requestSelection: ${JSON.stringify(sent)}`);
+}
+
+// A change card follows a request's last row, one per version it produced.
+{
+  const req = { id: "m1", seq: 10, author: "maya", text: "shorter", fileRef: { artifactId: "art", version: 2 } } as unknown as FeedItem;
+  const reply = { id: "m2", author: "agent", text: "done", sourceSeq: 10 } as unknown as FeedItem;
+  const other = { id: "m3", seq: 11, author: "maya", text: "thanks", fileRef: { artifactId: "art", version: 3 } } as unknown as FeedItem;
+  const v = (version: number, sourceSeq?: number) => ({ artifactId: "art", version, parentVersion: version - 1, contentHash: "", storage: "blob", sizeBytes: 1, authorUserId: "agent", createdAtMs: 1, ...(sourceSeq ? { sourceSeq } : {}) });
+  const got = threadWithEdits([req, reply, other], [v(3, 10), v(2), v(4, 99)]).map((e) => (e.kind === "item" ? e.item.id : `edit v${e.version.version}`));
+  if (JSON.stringify(got) !== JSON.stringify(["m1", "m2", "edit v3", "m3"])) throw new Error(`threadWithEdits: ${JSON.stringify(got)}`);
 }

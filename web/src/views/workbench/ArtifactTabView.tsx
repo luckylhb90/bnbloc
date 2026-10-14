@@ -34,6 +34,7 @@ import {
   fileInfoFor,
   invalidateArtifacts,
   loadVersionBlob,
+  restoreVersion,
   useArtifactDetail,
   useVersionBlob,
   versionMeta,
@@ -263,14 +264,8 @@ export function ArtifactTabView({
   const restore = async () => {
     setBusy(true);
     try {
-      const current = artifact.currentVersion;
-      const bytes = blob ?? (await loadVersionBlob(roomId, artifact, shown, meta));
-      const summary = `Restored v${shown}`;
-      const res =
-        meta?.storage === "blob"
-          ? await api.publishArtifactFile(roomId, artifactId, { file: bytes, fileName: artifact.fileName || file.name, baseVersion: current, summary })
-          : await api.publishArtifactVersion(roomId, artifactId, { baseVersion: current, content: await bytes.text(), summary });
-      toast.success(`Restored v${shown} as v${res.artifact.currentVersion}`);
+      const next = await restoreVersion(roomId, artifact, shown, meta, `Restored v${shown}`);
+      toast.success(`Restored v${shown} as v${next}`);
       refreshed();
     } catch (e) {
       toast.error(errorText(e, "Restore failed"));
@@ -463,7 +458,7 @@ export function ArtifactTabView({
           !comparer || compareWith === null ? (
             <p className="p-4 text-sm text-[var(--color-fg-subtle)]">These versions cannot be compared. Pick a version above to view it.</p>
           ) : (
-            <CompareView roomId={roomId} artifact={artifact} detail={detail} comparer={comparer} prevVersion={compareWith} currVersion={shown} />
+            <CompareView roomId={roomId} artifact={artifact} detail={detail} prevVersion={compareWith} currVersion={shown} />
           )
         ) : blobError ? (
           <p className="p-4 text-sm text-[var(--color-fg-subtle)]">Could not load this file: {blobError}</p>
@@ -492,6 +487,13 @@ export function ArtifactTabView({
           fileRef={{ artifactId, version: shown, name: file.name, ...(selection ? { selection: requestSelection(selection) } : {}) }}
           file={file}
           pick={pick}
+          artifact={artifact}
+          detail={detail}
+          onViewChanges={(prev, curr) => {
+            onVersion(curr === artifact.currentVersion ? undefined : curr);
+            setCompareWith(prev);
+            setMode("compare");
+          }}
           onClearSelection={() => setSelection(null)}
           onClose={() => setAsking(false)}
         />

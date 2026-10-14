@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { changeCounts, diffUnits, type UnitChange } from "@/lib/compareUnits";
+import { changeCounts, type UnitChange } from "@/lib/compareUnits";
 import { diffLines } from "@/lib/diff";
 import { cn } from "@/lib/cn";
 
@@ -49,17 +49,17 @@ function plural(n: number, noun?: readonly [string, string]): string {
 }
 
 export function UnitDiff({
-  prev,
-  curr,
+  changes,
   noun,
   truncated,
+  onShow,
 }: {
-  readonly prev: Parameters<typeof diffUnits>[0];
-  readonly curr: Parameters<typeof diffUnits>[1];
+  readonly changes: readonly UnitChange[];
   readonly noun?: readonly [string, string];
   readonly truncated?: boolean;
+  /** Shows a unit of the newer version in the preview (its `at`). */
+  readonly onShow?: (at: string) => void;
 }) {
-  const changes = useMemo(() => diffUnits(prev, curr), [prev, curr]);
   const [showSame, setShowSame] = useState(false);
   const counts = changeCounts(changes);
   if (counts.changed + counts.added + counts.removed === 0) {
@@ -100,6 +100,11 @@ export function UnitDiff({
               <div className="flex items-center gap-2 border-b border-[var(--color-border)] bg-[var(--color-surface-2)] px-3 py-1 text-xs">
                 <span className="min-w-0 flex-1 truncate font-medium text-[var(--color-fg)]">{label}</span>
                 {c.kind !== "same" && <span className="shrink-0 text-[10px] uppercase tracking-wide text-[var(--color-fg-subtle)]">{BADGE[c.kind]}</span>}
+                {onShow && c.kind !== "removed" && c.curr.at && (
+                  <button type="button" onClick={() => c.curr.at && onShow(c.curr.at)} className="tactile shrink-0 text-[11px] text-[var(--color-accent)]">
+                    Show
+                  </button>
+                )}
               </div>
               <div className="py-1">
                 {c.kind === "changed" ? (

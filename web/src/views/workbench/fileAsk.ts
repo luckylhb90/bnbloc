@@ -4,7 +4,7 @@
 
 import type { FeedItem } from "../room/types.ts";
 import type { Selection } from "../../../previewer-sdk/src/protocol.ts";
-import type { FileSelection } from "../../lib/wire.gen.ts";
+import type { ArtifactVersion, FileSelection } from "../../lib/wire.gen.ts";
 
 /** The requests that named artifactId (payload.fileRef), in feed order,
  *  each followed by the agent rows and notices of its job (sourceSeq). */
@@ -32,4 +32,40 @@ export function requestSelection(sel: Selection): FileSelection {
     ...(sel.kind ? { kind: sel.kind } : {}),
     ...(sel.keys?.length ? { keys: [...sel.keys] } : {}),
   };
+}
+
+/** A thread entry: a feed row, or the change card of a version a request
+ *  produced. */
+export type ThreadEntry =
+  | { readonly kind: "item"; readonly item: FeedItem }
+  | { readonly kind: "edit"; readonly version: ArtifactVersion; readonly request: FeedItem };
+
+/** The thread with a change card after each request's last row for every
+ *  version it produced (version.sourceSeq = the request's seq), in version
+ *  order (docs/prd/2026-10-14-select-edit-review.md rule 4). */
+export function threadWithEdits(thread: readonly FeedItem[], versions: readonly ArtifactVersion[]): ThreadEntry[] {
+  const bySeq = new Map<number, ArtifactVersion[]>();
+  for (const v of [...versions].sort((a, b) => a.version - b.version)) {
+    if (!v.sourceSeq) continue;
+    bySeq.set(v.sourceSeq, [...(bySeq.get(v.sourceSeq) ?? []), v]);
+  }
+  // The last row of each request: the request itself, or its latest reply.
+  const last = new Map<number, number>();
+  const requests = new Map<number, FeedItem>();
+  thread.forEach((item, i) => {
+    const seq = item.fileRef && item.seq != null ? item.seq : item.sourceSeq;
+    if (seq == null || !bySeq.has(seq)) return;
+    if (item.fileRef && item.seq != null) requests.set(seq, item);
+    last.set(seq, i);
+  });
+  const out: ThreadEntry[] = [];
+  thread.forEach((item, i) => {
+    out.push({ kind: "item", item });
+    for (const [seq, at] of last) {
+      const request = requests.get(seq);
+      if (at !== i || !request) continue;
+      for (const version of bySeq.get(seq) ?? []) out.push({ kind: "edit", version, request });
+    }
+  });
+  return out;
 }

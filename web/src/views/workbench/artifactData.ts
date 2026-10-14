@@ -222,3 +222,18 @@ function cachedCardImage(key: string, load: () => Promise<Blob>): Promise<string
   }
   return pending;
 }
+
+/** Publishes an earlier version's content as the next version: the one
+ *  restore, for the version picker's "Restore" and a change card's Undo
+ *  (docs/prd/2026-10-14-select-edit-review.md rule 4). Built on the current
+ *  version, so nothing published since is lost. Resolves to the new version. */
+export async function restoreVersion(roomId: string, artifact: Artifact, version: number, meta: ArtifactVersion | undefined, summary: string): Promise<number> {
+  const bytes = await loadVersionBlob(roomId, artifact, version, meta);
+  const base = artifact.currentVersion;
+  const res =
+    meta?.storage === "blob"
+      ? await api.publishArtifactFile(roomId, artifact.artifactId, { file: bytes, fileName: artifact.fileName || artifact.title, baseVersion: base, summary })
+      : await api.publishArtifactVersion(roomId, artifact.artifactId, { baseVersion: base, content: await bytes.text(), summary });
+  invalidateArtifacts(roomId, artifact.artifactId);
+  return res.artifact.currentVersion;
+}
