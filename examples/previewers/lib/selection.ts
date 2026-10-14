@@ -5,7 +5,7 @@
 // rules and the DOM plumbing so the previewers read alike. The sheet's cell
 // ranges are drawn by the xlsx previewer itself (xlsx/src/main.ts).
 
-import { sendSelection } from "../../../web/previewer-sdk/src/index.ts";
+import { sendSelection, type SelectionDraft, type SelectionKind } from "../../../web/previewer-sdk/src/index.ts";
 
 /** The class a picked part wears (each previewer's style.css outlines it). */
 export const PICKED = "bnbloc-picked";
@@ -59,6 +59,43 @@ export interface Part {
   readonly text: string;
   /** The chip label when clicked (default: where and the start of text). */
   readonly label?: string;
+  /** What it is (the host offers suggestions for the kind). */
+  readonly kind: SelectionKind;
+  /** The Compare unit keys it covers (a slide's), when it has any. */
+  readonly keys?: readonly string[];
+}
+
+/** Reports a selection with where it shows, and reports it again as the
+ *  frame scrolls or resizes, so the host's selection action stays beside
+ *  it (docs/prd/2026-10-14-select-edit-review.md rule 3). */
+export function selectionReporter(): { set(draft: Omit<SelectionDraft, "rect">, at: () => DOMRect | null): void; clear(): void } {
+  let current: { draft: Omit<SelectionDraft, "rect">; at: () => DOMRect | null } | null = null;
+  let frame = 0;
+  const send = () => {
+    if (!current) return;
+    const r = current.at();
+    sendSelection({ ...current.draft, ...(r ? { rect: { x: r.left, y: r.top, w: r.width, h: r.height } } : {}) });
+  };
+  const again = () => {
+    if (!current || frame) return;
+    frame = requestAnimationFrame(() => {
+      frame = 0;
+      send();
+    });
+  };
+  document.addEventListener("scroll", again, { capture: true, passive: true });
+  window.addEventListener("resize", again);
+  return {
+    set(draft, at) {
+      current = { draft, at };
+      send();
+    },
+    clear() {
+      if (!current) return;
+      current = null;
+      sendSelection(null);
+    },
+  };
 }
 
 /** Reports the member's pointing inside root: text they select (named by
@@ -68,6 +105,7 @@ export interface Part {
 export function watchPointing(root: HTMLElement, partOf: (el: Element) => Part | null): { reset(): void } {
   let picked: HTMLElement | null = null;
   let down: { x: number; y: number } | null = null;
+  const report = selectionReporter();
 
   const mark = (el: HTMLElement | null) => {
     picked?.classList.remove(PICKED);
@@ -77,7 +115,7 @@ export function watchPointing(root: HTMLElement, partOf: (el: Element) => Part |
   const clear = () => {
     if (!picked) return;
     mark(null);
-    sendSelection(null);
+    report.clear();
   };
 
   root.addEventListener("pointerdown", (e) => {
@@ -90,10 +128,11 @@ export function watchPointing(root: HTMLElement, partOf: (el: Element) => Part |
     const sel = document.getSelection();
     const text = sel && !sel.isCollapsed ? sel.toString().trim() : "";
     const anchor = sel?.anchorNode instanceof Element ? sel.anchorNode : sel?.anchorNode?.parentElement;
-    if (text && anchor && root.contains(anchor)) {
+    if (sel && text && anchor && root.contains(anchor)) {
       const part = partOf(anchor);
+      const range = sel.getRangeAt(0).cloneRange();
       mark(part?.element ?? null);
-      sendSelection({ label: quotedLabel(part?.where ?? "", text), detail: text });
+      report.set({ label: quotedLabel(part?.where ?? "", text), detail: text, kind: "text", ...(part?.keys ? { keys: part.keys } : {}) }, () => range.getBoundingClientRect());
       return;
     }
     if (Math.hypot(e.clientX - start.x, e.clientY - start.y) > CLICK_SLOP_PX) return;
@@ -103,7 +142,11 @@ export function watchPointing(root: HTMLElement, partOf: (el: Element) => Part |
       return;
     }
     mark(part.element);
-    sendSelection({ label: part.label ?? quotedLabel(part.where, part.text), detail: blockText(part.text) });
+    const el = part.element;
+    report.set(
+      { label: part.label ?? quotedLabel(part.where, part.text), detail: blockText(part.text), kind: part.kind, ...(part.keys ? { keys: part.keys } : {}) },
+      () => el.getBoundingClientRect(),
+    );
   });
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape") clear();
@@ -111,6 +154,7 @@ export function watchPointing(root: HTMLElement, partOf: (el: Element) => Part |
   return {
     reset() {
       picked = null;
+      report.clear();
       sendSelection(null);
     },
   };

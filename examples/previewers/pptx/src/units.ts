@@ -17,16 +17,33 @@ export interface DeckUnit {
   readonly at: string;
 }
 
+const PRESENTATION = "ppt/presentation.xml";
+
+/** A slide's unit key: its id in presentation.xml. */
+function slideKey(id: string | undefined, index: number): string {
+  return `slide-${id ?? index}`;
+}
+
+async function slideList(pkg: Awaited<ReturnType<typeof openPackage>>): Promise<{ key: string; path: string | undefined }[]> {
+  const pres = await pkg.part(PRESENTATION);
+  if (!pres) throw new Error("not a PowerPoint deck (no ppt/presentation.xml)");
+  const rels = relationships(await pkg.part(relsPath(PRESENTATION)), PRESENTATION);
+  return [...pres.matchAll(/<p:sldId\b[^>]*\/?>/g)].map((m, i) => {
+    const a = attributes(m[0]);
+    return { key: slideKey(a.id, i), path: rels.get(a["r:id"] ?? "")?.target };
+  });
+}
+
+/** Each slide's unit key, in order (what a click on a slide covers). */
+export async function deckSlideKeys(zip: ZipReader, bytes: ArrayBuffer | Uint8Array): Promise<string[]> {
+  return (await slideList(await openPackage(zip, bytes))).map((s) => s.key);
+}
+
 export async function deckUnits(zip: ZipReader, bytes: ArrayBuffer | Uint8Array): Promise<DeckUnit[]> {
   const pkg = await openPackage(zip, bytes);
-  const presPath = "ppt/presentation.xml";
-  const pres = await pkg.part(presPath);
-  if (!pres) throw new Error("not a PowerPoint deck (no ppt/presentation.xml)");
-  const rels = relationships(await pkg.part(relsPath(presPath)), presPath);
   const out: DeckUnit[] = [];
-  const ids = [...pres.matchAll(/<p:sldId\b[^>]*\/?>/g)].map((m) => attributes(m[0]));
-  for (const [i, a] of ids.entries()) {
-    const slidePath = rels.get(a["r:id"] ?? "")?.target;
+  for (const [i, slide] of (await slideList(pkg)).entries()) {
+    const slidePath = slide.path;
     if (!slidePath) continue;
     const lines = paragraphs((await pkg.part(slidePath)) ?? "", "a").filter((t) => t.trim() !== "");
     const slideRels = [...relationships(await pkg.part(relsPath(slidePath)), slidePath).values()];
@@ -39,7 +56,7 @@ export async function deckUnits(zip: ZipReader, bytes: ArrayBuffer | Uint8Array)
     const notes = notesPath ? paragraphs((await pkg.part(notesPath)) ?? "", "a").filter((t) => t.trim() !== "") : [];
     const title = lines[0] ? headline(lines[0]) : "";
     out.push({
-      key: `slide-${a.id ?? i}`,
+      key: slide.key,
       at: `slide:${i + 1}`,
       label: title ? `Slide ${i + 1} · ${title}` : `Slide ${i + 1}`,
       text: [...lines, ...(notes.length ? ["", "Notes:", ...notes] : [])].join("\n"),

@@ -27,7 +27,7 @@ import {
 } from "../../../../web/previewer-sdk/src/index.ts";
 import { countedTitle, keepLinksInside, sniffOffice, unreadableMessage, type OfficeKind } from "../../lib/office.ts";
 import { pendingReveal, reveal, watchPointing } from "../../lib/selection.ts";
-import { deckUnits } from "./units.ts";
+import { deckSlideKeys, deckUnits } from "./units.ts";
 
 const POWERPOINT: OfficeKind = { noun: "PowerPoint presentation", ext: ".pptx", legacy: ".ppt", apps: "PowerPoint or Keynote" };
 
@@ -53,11 +53,17 @@ function publishToolbar(): void {
   setToolbar(toolbarItems());
 }
 
+// Each slide's Compare key, read when a deck opens: a picked slide says
+// which unit it covers.
+let slideKeys: string[] = [];
+
 const pointing = watchPointing(deckEl, (el) => {
   const item = el.closest<HTMLElement>("[data-slide-index]");
   if (!item || !deckEl.contains(item)) return null;
-  const where = `Slide ${Number(item.dataset.slideIndex) + 1}`;
-  return { element: item, where, text: item.innerText, label: where };
+  const index = Number(item.dataset.slideIndex);
+  const where = `Slide ${index + 1}`;
+  const key = slideKeys[index];
+  return { element: item, where, text: item.innerText, label: where, kind: "slide", ...(key ? { keys: [key] } : {}) };
 });
 
 function close(): void {
@@ -85,6 +91,11 @@ async function open(bytes: ArrayBuffer, file: PreviewFile): Promise<void> {
   fileName = file.name;
   const format = sniffOffice(bytes);
   if (format !== "zip") throw new Error(unreadableMessage(POWERPOINT, format, file.name));
+  slideKeys = [];
+  void deckSlideKeys(JSZip, bytes.slice(0)).then(
+    (keys) => (slideKeys = keys),
+    () => {},
+  );
   const controller = new AbortController();
   opening = controller;
   statusEl.textContent = `Opening ${file.name}…`;

@@ -3,7 +3,7 @@
   "contract": "bnbloc.previewer.contract/v1",
   "runtime": "bundle",
   "name": "pptx",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "publisher": "bnbloc",
   "description": "PowerPoint decks (.pptx, .pptm, .ppsx, .potx): every slide rendered in place — text, shapes, images, tables, charts — with zoom and fit.",
   "artifacts": {

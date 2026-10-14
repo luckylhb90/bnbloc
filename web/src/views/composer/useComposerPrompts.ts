@@ -1,18 +1,15 @@
-import { useCallback, useEffect, useState, type Dispatch, type KeyboardEvent, type RefObject, type SetStateAction } from "react";
-import type { ContentComponent } from "@/lib/contentComponents";
-import { contentApi } from "@/lib/contentComponentsApi";
+import { useCallback, useState, type Dispatch, type KeyboardEvent, type RefObject, type SetStateAction } from "react";
 import {
   choiceFromRef,
   fillPrompt,
   insertPrompt,
-  promptChoices,
-  starterChoices,
   slashMatches,
   slashQuery,
   type PromptChoice,
   type PromptRef,
 } from "@/lib/promptPacks";
-import { PROMPT_PACKS_CHANGED, promptPacksApi } from "@/lib/promptPacksApi";
+import { promptPacksApi } from "@/lib/promptPacksApi";
+import { usePromptChoices } from "./usePromptChoices";
 
 export interface ComposerPrompts {
   // The prompts of the member's packs and the room's.
@@ -41,22 +38,6 @@ export interface ComposerPrompts {
   readonly submitFill: (values: Readonly<Record<string, string>>) => void;
 }
 
-// libraryPromptPacks are the prompt packs of the member's Library (their
-// own, the org's and the platform's published ones, the built-in ones):
-// loaded once per page and again when packs change (PROMPT_PACKS_CHANGED);
-// a failed load is retried.
-let libraryPacks: Promise<readonly ContentComponent[]> | null = null;
-function libraryPromptPacks(): Promise<readonly ContentComponent[]> {
-  libraryPacks ??= contentApi
-    .list("prompt")
-    .then((r) => r.components ?? [])
-    .catch(() => {
-      libraryPacks = null;
-      return [];
-    });
-  return libraryPacks;
-}
-
 // useComposerPrompts loads the prompts a room's composer offers and inserts
 // them into the draft (counting each insertion once). Disabled (the people
 // chat) it offers none.
@@ -66,40 +47,10 @@ export function useComposerPrompts(
   setText: Dispatch<SetStateAction<string>>,
   textareaRef: RefObject<HTMLTextAreaElement | null>,
 ): ComposerPrompts {
-  const [choices, setChoices] = useState<readonly PromptChoice[]>([]);
-  const [starters, setStarters] = useState<readonly PromptChoice[]>([]);
+  const { choices, starters } = usePromptChoices(roomId, enabled);
   const [slash, setSlash] = useState<{ query: string; end: number } | null>(null);
   const [active, setActive] = useState(0);
   const [filling, setFilling] = useState<{ choice: PromptChoice; slashEnd: number | null } | null>(null);
-  const [epoch, setEpoch] = useState(0);
-
-  useEffect(() => {
-    if (!enabled) return;
-    let live = true;
-    Promise.all([contentApi.uses(roomId), libraryPromptPacks()])
-      .then(([r, library]) => {
-        if (!live) return;
-        setChoices(promptChoices(r.member ?? [], r.room ?? [], library));
-        setStarters(starterChoices(r.room ?? [], library));
-      })
-      .catch(() => {
-        // prompts are optional: the composer works without them
-        if (!live) return;
-        setChoices([]);
-        setStarters([]);
-      });
-    return () => {
-      live = false;
-    };
-  }, [roomId, enabled, epoch]);
-  useEffect(() => {
-    const reload = () => {
-      libraryPacks = null;
-      setEpoch((n) => n + 1);
-    };
-    window.addEventListener(PROMPT_PACKS_CHANGED, reload);
-    return () => window.removeEventListener(PROMPT_PACKS_CHANGED, reload);
-  }, []);
 
   const matches = enabled && slash ? slashMatches(choices, slash.query) : [];
   const highlighted = matches.length > 0 ? Math.min(active, matches.length - 1) : -1;

@@ -13,6 +13,7 @@ import ExcelJS from "exceljs";
 
 import {
   SELECTION_DETAIL_LIMIT,
+  SELECTION_KEYS_LIMIT,
   UNITS_LIMIT,
   ZOOM_MAX,
   ZOOM_MIN,
@@ -22,14 +23,13 @@ import {
   onReveal,
   onUnits,
   reportError,
-  sendSelection,
   setTitle,
   setToolbar,
   type PreviewFile,
   type ToolbarItem,
 } from "../../../../web/previewer-sdk/src/index.ts";
 import { shortName, sniffOffice, unreadableMessage, type OfficeKind } from "../../lib/office.ts";
-import { PICKED, pendingReveal, reveal } from "../../lib/selection.ts";
+import { PICKED, pendingReveal, reveal, selectionReporter } from "../../lib/selection.ts";
 import { workbookUnits } from "./units.ts";
 import {
   cellCss,
@@ -205,11 +205,24 @@ function light(next: CellRange): void {
   }
 }
 
+// The picked range as the host's selection, kept beside it as the grid
+// scrolls (lib/selection.ts).
+const selection = selectionReporter();
+
 function unpick(): void {
   for (const el of lit) el.classList.remove(PICKED);
   lit = [];
-  if (range) sendSelection(null);
+  if (range) selection.clear();
   range = anchor = null;
+}
+
+/** Every address of a range, for the change card's check (empty cells
+ *  included: filling one is still inside); none past the limit. */
+function rangeKeys(sheet: string, r: CellRange): string[] | undefined {
+  if ((r.bottom - r.top + 1) * (r.right - r.left + 1) > SELECTION_KEYS_LIMIT) return undefined;
+  const out: string[] = [];
+  for (let y = r.top; y <= r.bottom; y++) for (let x = r.left; x <= r.right; x++) out.push(rangeLabel(sheet, { top: y, left: x, bottom: y, right: x }));
+  return out;
 }
 
 function report(): void {
@@ -224,7 +237,15 @@ function report(): void {
     },
     SELECTION_DETAIL_LIMIT,
   );
-  sendSelection({ label: rangeLabel(ws.name, range), detail });
+  const keys = rangeKeys(ws.name, range);
+  const first = lit[0];
+  const last = lit[lit.length - 1];
+  selection.set({ label: rangeLabel(ws.name, range), detail, kind: "cells", ...(keys ? { keys } : {}) }, () => {
+    if (!first || !last || !first.isConnected) return null;
+    const a = first.getBoundingClientRect();
+    const b = last.getBoundingClientRect();
+    return new DOMRect(Math.min(a.left, b.left), Math.min(a.top, b.top), Math.max(a.right, b.right) - Math.min(a.left, b.left), Math.max(a.bottom, b.bottom) - Math.min(a.top, b.top));
+  });
 }
 
 gridEl.addEventListener("pointerdown", (e) => {

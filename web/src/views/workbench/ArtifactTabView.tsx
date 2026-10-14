@@ -49,6 +49,7 @@ import { FileAskPanel, useFileAsk, type FileComposerOptions } from "./FileAskPan
 import { requestSelection } from "./fileAsk";
 import { fileAskRequests } from "@/lib/team";
 import { LocalSaveChip } from "./LocalSaveChip";
+import { SelectionAction } from "./SelectionAction";
 import { useDisplayNames } from "@/lib/useDisplayName";
 import { errorText } from "@/lib/errors";
 
@@ -488,6 +489,17 @@ export function ArtifactTabView({
             remoteState={liveStates?.[artifactId]}
             onSelection={setSelection}
             reveal={reveal}
+          />
+        )}
+        {mode === "view" && canAsk && selection?.rect && (
+          <SelectionAction
+            roomId={roomId}
+            file={file}
+            selection={selection}
+            onAsk={(choice) => {
+              setAsking(true);
+              if (choice) setPick((p) => ({ choice, nonce: (p?.nonce ?? 0) + 1 }));
+            }}
           />
         )}
       </div>

@@ -101,12 +101,12 @@ const pointing = watchPointing(pagesEl, (el) => {
   if (!page || !pagesEl.contains(page)) return null;
   const where = `Page ${pages.indexOf(page) + 1}`;
   const block = el.closest<HTMLElement>(BLOCKS);
-  if (!block || !page.contains(block) || !block.innerText.trim()) return { element: page, where, text: page.innerText, label: where };
+  if (!block || !page.contains(block) || !block.innerText.trim()) return { element: page, where, text: page.innerText, label: where, kind: "block" };
   if (block instanceof HTMLTableElement) {
     const text = tableText(block);
-    return { element: block, where, text, label: quotedLabel(`${where}, table`, text) };
+    return { element: block, where, text, label: quotedLabel(`${where}, table`, text), kind: "block" };
   }
-  return { element: block, where, text: block.innerText };
+  return { element: block, where, text: block.innerText, kind: "block" };
 });
 
 async function open(bytes: ArrayBuffer, file: PreviewFile): Promise<void> {
