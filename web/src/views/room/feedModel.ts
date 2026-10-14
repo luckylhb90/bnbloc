@@ -6,6 +6,7 @@ import type { RoomEvent } from "../../lib/roomEvents.ts";
 import type { RoomAgent } from "../composer/types.ts";
 import { type FeedItem, type OutgoingMessage, isSelf, nextFeedId } from "./types.ts";
 import type { ChatExpert } from "../../lib/contentComponents.ts";
+import type { FileRef } from "../../lib/wire.gen.ts";
 
 // feedItemFromEvent converts a chat/agent event (live or from history) into a
 // feed row, or null for an event with no visible content. `live` marks rows
@@ -33,6 +34,7 @@ export function feedItemFromEvent(e: RoomEvent, subject: string | null, live: bo
     scheduledId: e.scheduledId,
     dispatch: e.dispatch,
     expert: e.expert,
+    fileRef: e.fileRef,
     notice: e.notice,
     noticeDetail: e.noticeDetail,
     jobId: e.jobId,
@@ -54,6 +56,7 @@ function confirm(row: FeedItem, echo: FeedItem): FeedItem {
     metrics: echo.metrics ?? row.metrics,
     thinking: echo.thinking ?? row.thinking,
     expert: echo.expert ?? row.expert,
+    fileRef: echo.fileRef ?? row.fileRef,
   };
 }
 
@@ -156,9 +159,11 @@ export function outgoingMessage(
   channelId: string | null,
   attachmentIds: readonly string[] = [],
   expert?: ChatExpert,
+  fileRef?: FileRef,
 ): OutgoingMessage {
   return {
     ...(recipient && expert ? { expert } : {}),
+    ...(fileRef ? { fileRef } : {}),
     text,
     recipient: recipient
       ? {

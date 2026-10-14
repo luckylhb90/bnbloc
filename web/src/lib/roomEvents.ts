@@ -5,7 +5,7 @@
 // unit-tested; sse.ts owns the live subscription.
 import type { ChatAttachment, TurnMetrics } from "./api";
 import type { TaskUpdate } from "./teamModels";
-import type { RoomEventKind } from "./wire.gen.ts";
+import type { FileRef, RoomEventKind } from "./wire.gen.ts";
 import { importedEditedAtMs, importedFrom } from "./handoff.ts";
 import { scheduledMarker } from "./schedules.ts";
 import { dispatchAttribution, type DispatchAttribution } from "./dispatch.ts";
@@ -75,6 +75,9 @@ export interface RoomEvent {
   dispatch?: DispatchAttribution;
   // For chat_message asking its agent to wear an expert (payload.expert).
   expert?: ExpertMarker;
+  // For chat_message about a room file (payload.fileRef: the workbench's
+  // Ask AI panel).
+  fileRef?: FileRef;
   // For agent_messages that are a job's notice line, not a reply
   // (payload.notice: "progress", "member-timeout").
   notice?: string;
@@ -211,6 +214,7 @@ export function normalizeRoomEvent(ev: RoomEvent, emit: (e: RoomEvent) => void):
     ev.scheduledId = scheduledMarker(p)?.scheduleId;
     ev.dispatch = dispatchAttribution(p);
     ev.expert = expertMarker(p);
+    ev.fileRef = fileRefOf(p.fileRef);
     const recipient = p.recipient as { provider?: unknown } | undefined;
     ev.toAgent = typeof recipient?.provider === "string" && recipient.provider !== "";
   } else if (ev.kind === "agent_session_state") {
@@ -248,4 +252,13 @@ export function normalizeRoomEvent(ev: RoomEvent, emit: (e: RoomEvent) => void):
     ev.editedAtMs = typeof p.editedAtMs === "number" ? p.editedAtMs : ev.atUnixMs;
   }
   emit(ev);
+}
+
+// fileRefOf reads a chat message's payload.fileRef (undefined when absent
+// or malformed).
+export function fileRefOf(v: unknown): FileRef | undefined {
+  if (!v || typeof v !== "object") return undefined;
+  const r = v as Record<string, unknown>;
+  if (typeof r.artifactId !== "string" || !r.artifactId || typeof r.version !== "number" || r.version < 1) return undefined;
+  return { artifactId: r.artifactId, version: r.version, ...(typeof r.name === "string" && r.name ? { name: r.name } : {}) };
 }

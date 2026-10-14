@@ -5,6 +5,7 @@ import { onboardingEvents } from "@/lib/onboardingEvents";
 import { borrowTarget } from "@/lib/roomAgents";
 import { useToast } from "@/ui/Toast";
 import type { RoomAgent } from "@/views/composer/types";
+import type { FileRef } from "@/lib/wire.gen";
 import { ackSent, markStatus, outgoingMessage } from "@/views/room/feedModel";
 import { type ChatRecipient, type FeedItem, type OutgoingMessage, nextFeedId } from "@/views/room/types";
 import { displayNameOf } from "@/lib/useDisplayName";
@@ -20,6 +21,8 @@ export interface SendOptions {
   // optimistic row.
   readonly expert?: ChatExpert;
   readonly expertMarker?: ExpertMarker;
+  // The room file the message is about (the workbench's Ask AI panel).
+  readonly fileRef?: FileRef;
 }
 
 export interface RoomMessageActions {
@@ -135,7 +138,7 @@ export function useRoomMessageActions({
 
   const send = useCallback(
     async (text: string, opts: SendOptions): Promise<boolean> => {
-      const out = outgoingMessage(text, opts.peopleOnly ? null : opts.recipient, channelId, opts.attachmentIds, opts.expert);
+      const out = outgoingMessage(text, opts.peopleOnly ? null : opts.recipient, channelId, opts.attachmentIds, opts.expert, opts.fileRef);
       if (out.borrow && out.recipient && !(await ensureBorrow(out.recipient))) return false;
       const localId = nextFeedId();
       const clientMsgId = crypto.randomUUID();
@@ -154,6 +157,7 @@ export function useRoomMessageActions({
           borrowedFrom: out.borrow ? out.recipient?.ownerId : undefined,
           peopleOnly: out.recipient ? undefined : true,
           expert: out.expert ? opts.expertMarker : undefined,
+          fileRef: out.fileRef,
         },
       ]);
       const result = await deliver(localId, clientMsgId, out);

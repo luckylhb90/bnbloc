@@ -2,6 +2,7 @@ import type { ChatAttachment, TurnMetrics } from "@/lib/api";
 import type { AgentOptions } from "@/views/composer/types";
 import type { DispatchAttribution } from "@/lib/dispatch";
 import type { ChatExpert, ExpertMarker } from "@/lib/contentComponents";
+import type { FileRef } from "@/lib/wire.gen";
 import { sameUser } from "../../lib/format.ts";
 
 // The routing of one chat send, exactly as it went (or will go) on the wire.
@@ -26,6 +27,8 @@ export interface OutgoingMessage {
   readonly borrow: boolean;
   // The expert the agent is asked to wear (an agent recipient only).
   readonly expert?: ChatExpert;
+  // The room file the message is about (the workbench's Ask AI panel).
+  readonly fileRef?: FileRef;
 }
 
 export interface FeedItem {
@@ -71,6 +74,8 @@ export interface FeedItem {
   dispatch?: DispatchAttribution;
   // The expert the message asked its agent to wear (payload.expert).
   expert?: ExpertMarker;
+  // The room file the message is about (payload.fileRef).
+  fileRef?: FileRef;
   // An agent's notice line (a team lead's progress, a member timeout):
   // rendered as a compact line, not a reply.
   notice?: string;

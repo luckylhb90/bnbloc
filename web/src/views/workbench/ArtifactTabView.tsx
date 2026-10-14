@@ -11,6 +11,7 @@ import {
   LinkIcon,
   PencilSimpleIcon,
   ShareNetworkIcon,
+  SparkleIcon,
 } from "@phosphor-icons/react";
 import { api, type Artifact } from "@/lib/api";
 import { downloadFileName, fileCategory, fileTypeLabel, isSite, isTextual, versionFacts } from "@/lib/artifactFiles";
@@ -42,6 +43,7 @@ import { AppDataLine } from "./AppDataLine";
 import { categoryIcons } from "./fileIcons";
 import { ShareDialog } from "./ShareDialog";
 import { VersionDiff } from "./VersionDiff";
+import { FileAskPanel, useFileAsk } from "./FileAskPanel";
 import { useDisplayNames } from "@/lib/useDisplayName";
 import { errorText } from "@/lib/errors";
 
@@ -183,6 +185,9 @@ export function ArtifactTabView({
     [roomId, artifactId, shown],
   );
   const [sharingOpen, setSharingOpen] = useState(false);
+  // The Ask AI panel (FileAskPanel): only where the room provides it.
+  const ask = useFileAsk();
+  const [asking, setAsking] = useState(false);
   const updated = useUpdatedMark(shown, version === undefined);
   const [mode, setMode] = useState<Mode>("view");
   const [compareWith, setCompareWith] = useState<number | null>(null);
@@ -214,6 +219,11 @@ export function ArtifactTabView({
   }
 
   const Icon = categoryIcons[fileCategory(facts)];
+  // An edit asked about an earlier version while the file changed
+  // meanwhile (docs/prd/2026-10-14-ai-document-editing.md rule 4).
+  const editedFrom = meta?.editedFrom ?? 0;
+  const changedMeanwhile = editedFrom > 0 && meta != null && editedFrom < meta.parentVersion;
+  const canAsk = !!ask && !runsSite && !artifact.isApp;
   const latest = shown === artifact.currentVersion;
   const editable = inlineText && latest;
   const versions = [...detail.versions].map((v) => v.version).sort((a, b) => b - a);
@@ -298,12 +308,32 @@ export function ArtifactTabView({
           {meta?.sizeBytes !== undefined && (
             <span className="hidden shrink-0 text-[11px] text-[var(--color-fg-subtle)] tabular @xs:inline">{formatBytes(meta.sizeBytes)}</span>
           )}
+          {changedMeanwhile && (
+            <span
+              className="shrink-0 rounded-full border border-[var(--color-border)] px-1.5 text-[10px] text-[var(--color-fg-muted)]"
+              title={`This edit started from v${editedFrom}; v${meta?.parentVersion} landed while it ran. Compare them to see what each changed.`}
+            >
+              Edited from v{editedFrom} · v{meta?.parentVersion} changed meanwhile
+            </span>
+          )}
           {updated !== null && (
             <span role="status" className="animate-in shrink-0 rounded-full bg-[var(--color-accent-soft)] px-1.5 text-[10px] font-medium text-[var(--color-accent)]">
               Updated · v{updated}
             </span>
           )}
           <span className="ml-auto flex shrink-0 items-center">
+            {canAsk && (
+              <button
+                type="button"
+                className={cn(ACTION, asking && "bg-[var(--color-elevated)] text-[var(--color-fg)]")}
+                onClick={() => setAsking((v) => !v)}
+                title="Ask AI to change this file"
+                aria-label="Ask AI to change this file"
+                aria-pressed={asking}
+              >
+                <SparkleIcon size={16} />
+              </button>
+            )}
             <button type="button" className={ACTION} onClick={() => void download()} title="Download" aria-label="Download">
               <DownloadSimpleIcon size={16} />
             </button>
@@ -387,6 +417,7 @@ export function ArtifactTabView({
         </div>
       </div>
       {artifact.isApp && <AppDataLine roomId={roomId} artifactId={artifactId} appName={file.name} />}
+      <div className="flex min-h-0 flex-1 flex-col @2xl:flex-row">
       <div className="relative min-h-0 flex-1 overflow-hidden" role="region" aria-label={file.name}>
         {mode === "edit" ? (
           <div className="flex h-full flex-col gap-2 p-2">
@@ -439,6 +470,10 @@ export function ArtifactTabView({
             remoteState={liveStates?.[artifactId]}
           />
         )}
+      </div>
+      {asking && ask && canAsk && (
+        <FileAskPanel ask={ask} fileRef={{ artifactId, version: shown, name: file.name }} onClose={() => setAsking(false)} />
+      )}
       </div>
       <ShareDialog
         open={sharingOpen}

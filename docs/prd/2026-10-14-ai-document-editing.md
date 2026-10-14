@@ -1,6 +1,12 @@
 # AI edits a document in place (2026-10-14)
 
-Status: proposed. Builds on `docs/prd/2026-10-14-office-previewers.md`
+Status: M1 implemented (2026-10-14), not yet released: server 62f87313,
+bridge 95beb1dd, web (this commit). Two changes from the design below,
+both forced by the code: the version is placed at `.room/edits/<id>/<name>`
+(a bridge writes only bnbloc's own workspace paths,
+`core.CheckWorkspaceFile`), and the line names that copy and the path to
+save at; and the old-bridge notice is deferred (the web cannot tell a
+bridge's version today; desktops update themselves). Builds on `docs/prd/2026-10-14-office-previewers.md`
 (the file previews this edits), `docs/prd/2026-10-09-preview-workbench-and-previewer-components.md`
 (the workbench and the previewer SDK) and
 `docs/prd/2026-10-14-multi-member-rooms.md` (seats, borrowing, records).

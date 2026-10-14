@@ -86,23 +86,29 @@ export function Composer({
   modelCatalogs?: RoomModelCatalogs;
   // An empty room with an agent available: example prompts above the input.
   showStarters?: boolean;
-  variant?: "room" | "people";
+  variant?: "room" | "people" | "file";
 }) {
   const people = variant === "people";
+  // Drafts, agents, references and attachments handed to "the composer"
+  // (a used prompt, Make similar, Ask the agent) land in the room's main
+  // composer only: never the people chat's or a file panel's.
+  const main = variant === "room";
   const toast = useToast();
   const [text, setText] = useState("");
   const taRef = useRef<HTMLTextAreaElement>(null);
   // A prompt "Used" from the library, and references asked from the people
   // chat, land in the room's main composer only (never the people chat's).
-  useInjectedDraft(roomId, people ? null : channelId, setText, taRef);
+  useInjectedDraft(roomId, main ? channelId : null, setText, taRef);
   const fileInputRef = useRef<HTMLInputElement>(null);
   // The agent selection, restored from and saved to the room's prefs: the
   // picked recipient (another member's agent to borrow, a platform agent;
   // null = my own selected target), people-only (drives no agent), and the
   // model + reasoning tuning ("" = the provider default; changed only by the
   // member's own pick, see offeredChoice).
-  const { agent, recipient, setRecipient, peopleOnly, setPeopleOnly, model, setModel, reasoning, setReasoning } =
+  const { agent, recipient, setRecipient, peopleOnly: peopleOnlyPref, setPeopleOnly, model, setModel, reasoning, setReasoning } =
     useAgentPrefs({ roomId, channelId, enabled: !people, agent: localAgent, roomAgents, subject: subject ?? null });
+  // A file panel always asks an agent (its sends name the file to change).
+  const peopleOnly = variant === "file" ? false : peopleOnlyPref;
   // The welcome card's new room opens with its platform agent selected.
   const pickInjected = useCallback(
     (a: RoomAgent) => {
@@ -111,11 +117,11 @@ export function Composer({
     },
     [setRecipient, setPeopleOnly],
   );
-  useInjectedAgent(roomId, people ? null : channelId, roomAgents, pickInjected);
+  useInjectedAgent(roomId, main ? channelId : null, roomAgents, pickInjected);
   // Attached references (chips shown above the input), quoted into the message
   // on send so the agent receives the referenced content.
   const [refs, setRefs] = useState<Referenceable[]>([]);
-  useInjectedReferences(roomId, channelId, !people, setRefs, taRef);
+  useInjectedReferences(roomId, channelId, main, setRefs, taRef);
   const [sending, setSending] = useState(false);
   const [showRefPicker, setShowRefPicker] = useState(false);
   // The narrow toolbar's "+" menu (attach / reference).
@@ -124,7 +130,7 @@ export function Composer({
   useDismissOnOutside(showMore, moreRef, () => setShowMore(false));
   const attachments = useComposerAttachments(roomId);
   // A "Make similar" draft's references arrive stored in the room.
-  useInjectedAttachments(roomId, people ? null : channelId, attachments.addStored);
+  useInjectedAttachments(roomId, main ? channelId : null, attachments.addStored);
   // "Enhance prompt": the AI assist rewrites the text in place (Undo puts
   // it back); hidden without a model.
   const storedAttachmentIds = useMemo(() => attachments.files.flatMap((f) => (f.stored ? [f.stored.id] : [])), [attachments.files]);
@@ -579,7 +585,9 @@ export function Composer({
               ? "Message people in this room (agents can't see this)"
               : peopleOnly
                 ? "Message people (the agent won't reply)"
-                : "Message the room and its agent…"
+                : variant === "file"
+                  ? "Ask the agent to change this file…"
+                  : "Message the room and its agent…"
           }
           onChange={(e) => applyText(e.target.value, e.target.selectionStart ?? e.target.value.length)}
           onPaste={(e) => {
@@ -709,10 +717,10 @@ export function Composer({
               <PaperclipIcon size={18} />
             </button>
           )}
-          {!people && (
+          {main && (
             <PromptPickerButton choices={prompts.choices} onPick={prompts.pick} disabled={disabled || sending} className={toolButton} />
           )}
-          {!people && (
+          {main && (
             <SendModeToggle value={peopleOnly ? "people" : "agent"} onChange={(m) => setPeopleOnly(m === "people")} />
           )}
           <div className="flex min-w-0 flex-1 items-center gap-1">

@@ -59,8 +59,9 @@ export function RoomComposer({
   // Agents working in the room now (an empty feed shows starter prompts
   // only while nothing is under way).
   readonly working?: number;
-  // "people": the people chat's composer (no agent picker, people-only).
-  readonly variant?: "room" | "people";
+  // "people": the people chat's composer (no agent picker, people-only);
+  // "file": a file's Ask AI panel (its sends name the file).
+  readonly variant?: "room" | "people" | "file";
 }) {
   // Stable inputs for the composer's mention list and references.
   const members = useMemo(

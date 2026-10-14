@@ -47,6 +47,7 @@ import { useFeedScroll } from "@/views/room/useFeedScroll";
 import { useRoomTeam } from "@/views/room/useRoomTeam";
 import { MessageExtrasProvider } from "@/views/room/messageExtras";
 import { AttachmentOpenerProvider } from "@/views/room/MessageAttachments";
+import { FileAskProvider, type FileAsk } from "@/views/workbench/FileAskPanel";
 import { JobProgressProvider } from "@/views/room/JobProgressStrip";
 import { SaveTemplateDialog } from "@/views/room/SaveTemplateDialog";
 import { TemplateStartCard } from "@/views/room/TemplateStartCard";
@@ -67,6 +68,10 @@ type RoomDialog = "settings" | "members" | "borrow" | "leave" | null;
 // Channel-scoped state (feed, history, jobs, inline artifact cards) lives in
 // scope-keyed hooks that restart when the channel changes and ignore late
 // writes from the previous channel.
+
+// No typing line in a file panel's composer.
+const NO_TYPERS: Record<string, number> = {};
+
 export function RoomView({
   roomId,
   onBack,
@@ -381,6 +386,37 @@ export function RoomView({
       onSelectPanel={selectPanel}
     />
   );
+  // A file's Ask AI panel (workbench): the room's own composer, its sends
+  // naming the file, over the room's feed.
+  const fileAsk = useMemo<FileAsk>(
+    () => ({
+      roomId,
+      feed,
+      composer: (ref) => (
+        <RoomComposer
+          key={`file:${ref.artifactId}`}
+          roomPreview={!!room && "preview" in room}
+          readOnly={readOnly}
+          agent={agent}
+          subject={subject}
+          roomId={roomId}
+          channelId={channelId}
+          typingUsers={NO_TYPERS}
+          roomAgents={roomAgents}
+          roomMembers={data.members}
+          online={online}
+          feed={feed}
+          joining={data.joining}
+          onSend={(text, opts) => send(text, { ...opts, fileRef: ref })}
+          onJoin={() => void data.join()}
+          platformAgents={data.platform}
+          modelCatalogs={data.modelCatalogs}
+          variant="file"
+        />
+      ),
+    }),
+    [roomId, feed, room, readOnly, agent, subject, channelId, roomAgents, data, online, send],
+  );
   const dockPanel = workbench.open ? (
     <PreviewDock
       mode={dockMode}
@@ -475,6 +511,7 @@ export function RoomView({
       {/* Channel rail + feed + composer share one row; the rail scopes all
           three to the selected channel. */}
       <AttachmentOpenerProvider value={workbench.openAttachment}>
+      <FileAskProvider value={fileAsk}>
       <div ref={roomRowRef} data-room-row className="relative flex min-h-0 flex-1 overflow-hidden">
         {railSurface === "inline" && rail}
         {panel === "artifacts" ? (
@@ -596,6 +633,7 @@ export function RoomView({
           </DismissibleLayer>
         )}
       </div>
+      </FileAskProvider>
       </AttachmentOpenerProvider>
 
       {room && feed.length > 0 && <MyMessagesNav items={feed} />}

@@ -718,6 +718,8 @@ export const api = {
       readonly attachmentIds: readonly string[];
       // The expert the agent recipient is asked to wear.
       readonly expert?: { readonly id: string; readonly version?: string };
+      // The room file the message is about (the workbench's Ask AI panel).
+      readonly fileRef?: { readonly artifactId: string; readonly version: number };
     },
     clientMsgId: string,
   ) =>
@@ -731,6 +733,7 @@ export const api = {
         ...(message.recipient ? { recipient: message.recipient } : {}),
         ...(message.attachmentIds.length > 0 ? { attachmentIds: message.attachmentIds } : {}),
         ...(message.recipient && message.expert ? { expert: message.expert } : {}),
+        ...(message.fileRef ? { fileRef: { artifactId: message.fileRef.artifactId, version: message.fileRef.version } } : {}),
       }),
     }),
   // The caller's own bridge-advertised agents (all rooms): the "my agents"
