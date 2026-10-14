@@ -83,7 +83,8 @@ export function RoomComposer({
   const showStarters = showStarterPrompts({
     feedLength: feed.length,
     working,
-    people: variant === "people",
+    // Neither the people chat nor a file panel (it offers its own).
+    people: variant !== "room",
     agentAvailable:
       roomAgents.some((a) => !a.platform) || agent.targets.length > 0 || !!platformAgents?.choices.some((c) => c.online),
   });
