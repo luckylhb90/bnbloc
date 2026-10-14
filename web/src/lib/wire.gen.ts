@@ -1967,6 +1967,23 @@ export interface FeedPage {
   messages: FeedMessage[];
 }
 
+// RevisionsPage is GET /v1/rooms/{id}/history/revisions: the room's
+// messages edited or deleted after a time, oldest revision first, and the
+// room's newest revision time (0 = none). Agents' records follow the room
+// with it.
+export interface RevisionsPage {
+  revisions: MessageRevision[];
+  latestMs: number;
+}
+
+// MessageRevision is a message's last edit or deletion.
+export interface MessageRevision {
+  channelId: string;
+  sequence: number;
+  deleted?: boolean;
+  atMs: number;
+}
+
 // ImportedMarker is stamped by realtime into payload.imported of every message
 // written through the import path, so history readers (the web feed) can mark
 // the row as imported. It is server-authored: no client send path can set it.
