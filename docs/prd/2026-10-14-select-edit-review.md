@@ -1,6 +1,6 @@
 # Select, edit, review: the loop around one change (2026-10-14)
 
-Status: designed (2026-10-14), being built. Builds on
+Status: G1–G5 implemented (2026-10-14), not yet released. Builds on
 `docs/prd/2026-10-14-ai-document-editing.md` (the Ask AI panel, M2's
 selection) and `docs/prd/2026-10-14-file-prompts-and-compare.md`
 (file prompts, units, Compare).

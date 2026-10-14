@@ -1,4 +1,4 @@
-import { centered, fitScale, visibleGrid, zoomAt } from "./imageView.ts";
+import { centered, fitScale, regionRect, regionSelection, spanRegion, toImage, visibleGrid, zoomAt } from "./imageView.ts";
 
 function eq(a: unknown, b: unknown, message: string): void {
   if (JSON.stringify(a) !== JSON.stringify(b)) {
@@ -13,3 +13,16 @@ eq(zoomAt({ scale: 1, x: 0, y: 0 }, 2, 50, 50), { scale: 2, x: -50, y: -50 }, "p
 eq(zoomAt({ scale: 1, x: 0, y: 0 }, 1000, 0, 0).scale, 64, "clamped");
 eq(visibleGrid({ scale: 8, x: -20, y: 10 }, { w: 100, h: 100 }, { w: 200, h: 200 }), { left: 0, top: 10, width: 200, height: 190, offsetX: 4, offsetY: 0 }, "grid clipped to view");
 eq(visibleGrid({ scale: 4, x: 500, y: 0 }, { w: 10, h: 10 }, { w: 200, h: 200 }), null, "off-screen");
+
+// An area selected on the image (docs/prd/2026-10-14-select-edit-review.md rule 7).
+{
+  const view = { scale: 2, x: 10, y: 20 };
+  const image = { w: 100, h: 50 };
+  const a = toImage(view, image, 30, 40);
+  const b = toImage(view, image, 9999, -5);
+  const r = spanRegion(a, b);
+  if (JSON.stringify([a, b, r]) !== JSON.stringify([{ x: 10, y: 10 }, { x: 100, y: 0 }, { x: 10, y: 0, w: 90, h: 10 }])) throw new Error(`region ${JSON.stringify([a, b, r])}`);
+  if (JSON.stringify(regionRect(view, r)) !== JSON.stringify({ x: 30, y: 20, w: 180, h: 20 })) throw new Error("rect");
+  const s = regionSelection(r, image);
+  if (s.label !== "Area 90×10 at (10, 0)" || !s.detail.includes("(100, 10)") || !s.detail.includes("100×50 image")) throw new Error(JSON.stringify(s));
+}

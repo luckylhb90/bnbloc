@@ -53,3 +53,39 @@ export function visibleGrid(view: ImageView, image: Size, box: Size): { left: nu
   const mod = (n: number) => ((n % view.scale) + view.scale) % view.scale;
   return { left, top, width: right - left, height: bottom - top, offsetX: mod(view.x - left), offsetY: mod(view.y - top) };
 }
+
+/** An area of the image, in image pixels (top-left origin). */
+export interface Region {
+  readonly x: number;
+  readonly y: number;
+  readonly w: number;
+  readonly h: number;
+}
+
+/** The image pixel under a container point, clamped to the image. */
+export function toImage(view: ImageView, image: Size, px: number, py: number): { x: number; y: number } {
+  const x = (px - view.x) / view.scale;
+  const y = (py - view.y) / view.scale;
+  return { x: Math.min(image.w, Math.max(0, Math.round(x))), y: Math.min(image.h, Math.max(0, Math.round(y))) };
+}
+
+/** The area two image points span (either order). */
+export function spanRegion(a: { x: number; y: number }, b: { x: number; y: number }): Region {
+  return { x: Math.min(a.x, b.x), y: Math.min(a.y, b.y), w: Math.abs(a.x - b.x), h: Math.abs(a.y - b.y) };
+}
+
+/** Where an area shows in the container (CSS pixels). */
+export function regionRect(view: ImageView, r: Region): Region {
+  return { x: view.x + r.x * view.scale, y: view.y + r.y * view.scale, w: r.w * view.scale, h: r.h * view.scale };
+}
+
+/** The selection an area makes: a short label, and the coordinates the
+ *  agent works from. */
+export function regionSelection(r: Region, image: Size): { label: string; detail: string } {
+  return {
+    label: `Area ${r.w}×${r.h} at (${r.x}, ${r.y})`,
+    detail:
+      `The rectangle from (${r.x}, ${r.y}) to (${r.x + r.w}, ${r.y + r.h}) in image pixels, ${r.w}×${r.h}, ` +
+      `of the ${image.w}×${image.h} image (origin at the top-left).`,
+  };
+}

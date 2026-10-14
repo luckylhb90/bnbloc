@@ -3,14 +3,30 @@ import { cn } from "@/lib/cn";
 import { formatBytes } from "@/lib/format";
 import type { ArtifactViewerProps } from "./registry";
 import { useViewerToolbar } from "./toolbar";
-import { centered, clampScale, fitScale, GRID_MIN_SCALE, visibleGrid, zoomAt, type ImageView, type Size } from "./imageView";
+import {
+  centered,
+  clampScale,
+  fitScale,
+  GRID_MIN_SCALE,
+  regionRect,
+  regionSelection,
+  spanRegion,
+  toImage,
+  visibleGrid,
+  zoomAt,
+  type ImageView,
+  type Region,
+  type Size,
+} from "./imageView";
 
 // ImageViewer renders raster images (animated GIF/WebP keep animating — the
 // <img> element plays them) and SVG, always as an <img> from a blob URL: an
 // SVG's scripts never run and its external references never load, and the
 // markup never becomes app DOM. Zoom (toolbar, wheel, pinch, double-click),
 // pan (drag), fit / 100%, a pixel grid from 400%, and a checkerboard
-// background for transparency.
+// background for transparency. "Select an area" turns a drag into a
+// rectangle the Ask AI panel names (a region selection, image pixels;
+// docs/prd/2026-10-14-select-edit-review.md rule 7).
 
 // Older inline image artifacts carry a URL as text instead of bytes.
 const LEGACY_URL = /^(https:\/\/|data:image\/(png|jpe?g|gif|webp);base64,)/i;
@@ -39,7 +55,7 @@ function useImageSource(blob: Blob): { url: string | null; error: string } {
 const CHECKER =
   "repeating-conic-gradient(color-mix(in srgb, var(--color-fg) 9%, transparent) 0% 25%, transparent 0% 50%) 0 0 / 16px 16px";
 
-export default function ImageViewer({ blob, file, toolbar }: ArtifactViewerProps) {
+export default function ImageViewer({ blob, file, toolbar, onSelection }: ArtifactViewerProps) {
   const { url, error } = useImageSource(blob);
   const boxRef = useRef<HTMLDivElement | null>(null);
   const [box, setBox] = useState<Size>({ w: 0, h: 0 });
@@ -51,6 +67,25 @@ export default function ImageViewer({ blob, file, toolbar }: ArtifactViewerProps
   const [failed, setFailed] = useState(false);
   const viewRef = useRef(view);
   viewRef.current = view;
+  // Area selection: the mode, the area (image pixels) and where a drag began.
+  const [selecting, setSelecting] = useState(false);
+  const [region, setRegion] = useState<Region | null>(null);
+  const dragFrom = useRef<{ x: number; y: number } | null>(null);
+  const onSelectionRef = useRef(onSelection);
+  onSelectionRef.current = onSelection;
+
+  // The area as the tab's selection, again as the view moves (its action
+  // follows it); none once it is cleared.
+  const hadRegion = useRef(false);
+  useEffect(() => {
+    if (region && natural) {
+      hadRegion.current = true;
+      onSelectionRef.current?.({ ...regionSelection(region, natural), kind: "region", rect: regionRect(view, region) });
+    } else if (hadRegion.current) {
+      hadRegion.current = false;
+      onSelectionRef.current?.(null);
+    }
+  }, [region, view, natural]);
 
   useEffect(() => {
     const el = boxRef.current;
@@ -100,13 +135,19 @@ export default function ImageViewer({ blob, file, toolbar }: ArtifactViewerProps
     if (e.button !== 0 && e.pointerType === "mouse") return;
     e.currentTarget.setPointerCapture(e.pointerId);
     pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (selecting && natural && pointers.current.size === 1) {
+      const rect = e.currentTarget.getBoundingClientRect();
+      dragFrom.current = toImage(viewRef.current, natural, e.clientX - rect.left, e.clientY - rect.top);
+    }
   };
   const onPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
     const map = pointers.current;
     const prev = map.get(e.pointerId);
     if (!prev) return;
     const rect = e.currentTarget.getBoundingClientRect();
-    if (map.size === 1) {
+    if (map.size === 1 && dragFrom.current && natural) {
+      setRegion(spanRegion(dragFrom.current, toImage(viewRef.current, natural, e.clientX - rect.left, e.clientY - rect.top)));
+    } else if (map.size === 1) {
       setFit(false);
       setView((v) => ({ ...v, x: v.x + e.clientX - prev.x, y: v.y + e.clientY - prev.y }));
     } else if (map.size === 2) {
@@ -125,6 +166,11 @@ export default function ImageViewer({ blob, file, toolbar }: ArtifactViewerProps
   };
   const onPointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
     pointers.current.delete(e.pointerId);
+    if (dragFrom.current) {
+      dragFrom.current = null;
+      // A click (no area) clears the selection.
+      setRegion((r) => (r && r.w >= 2 && r.h >= 2 ? r : null));
+    }
   };
   const onDoubleClick = (e: React.MouseEvent<HTMLDivElement>) => {
     const rect = e.currentTarget.getBoundingClientRect();
@@ -136,6 +182,7 @@ export default function ImageViewer({ blob, file, toolbar }: ArtifactViewerProps
     else if (e.key === "-") zoomTo(view.scale / 1.25);
     else if (e.key === "0") actualSize();
     else if (e.key.toLowerCase() === "f") setFit(true);
+    else if (e.key === "Escape" && region) setRegion(null);
     else return;
     e.preventDefault();
   };
@@ -149,6 +196,7 @@ export default function ImageViewer({ blob, file, toolbar }: ArtifactViewerProps
       { id: "actual", kind: "button", icon: "actual-size", label: "1:1" },
       { id: "grid", kind: "toggle", icon: "grid", label: "Pixel grid (from 400%)", active: grid && gridAvailable, disabled: !gridAvailable },
       { id: "background", kind: "toggle", icon: "background", label: "Checkerboard background", active: checker },
+      { id: "select", kind: "toggle", icon: "crop", label: "Select an area", active: selecting, disabled: !natural },
     ],
     (id, value) => {
       if (id === "zoom" && typeof value === "number") zoomTo(value);
@@ -156,6 +204,10 @@ export default function ImageViewer({ blob, file, toolbar }: ArtifactViewerProps
       else if (id === "actual") actualSize();
       else if (id === "grid") setGrid(value === true);
       else if (id === "background") setChecker(value === true);
+      else if (id === "select") {
+        setSelecting(value === true);
+        if (value !== true) setRegion(null);
+      }
     },
   );
 
@@ -174,7 +226,10 @@ export default function ImageViewer({ blob, file, toolbar }: ArtifactViewerProps
         onPointerCancel={onPointerUp}
         onDoubleClick={onDoubleClick}
         onKeyDown={onKeyDown}
-        className="relative min-h-0 flex-1 cursor-grab touch-none select-none overflow-hidden outline-none active:cursor-grabbing focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--color-accent)]/60"
+        className={cn(
+          "relative min-h-0 flex-1 touch-none select-none overflow-hidden outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--color-accent)]/60",
+          selecting ? "cursor-crosshair" : "cursor-grab active:cursor-grabbing",
+        )}
         style={{ background: checker ? CHECKER : undefined }}
       >
         {message ? (
@@ -196,6 +251,17 @@ export default function ImageViewer({ blob, file, toolbar }: ArtifactViewerProps
             }}
           />
         ) : null}
+        {region && natural && (
+          <div
+            aria-hidden
+            data-image-region
+            className="pointer-events-none absolute border-2 border-[var(--color-accent)] bg-[var(--color-accent)]/10"
+            style={(() => {
+              const r = regionRect(view, region);
+              return { left: r.x, top: r.y, width: r.w, height: r.h };
+            })()}
+          />
+        )}
         {overlay && (
           <div
             aria-hidden

@@ -57,3 +57,12 @@ registerComparer({
   source: "builtin",
   load: async () => ({ kind: "view", View: (await import("./ImageCompare.tsx")).ImageCompare }),
 });
+
+registerComparer({
+  id: "core.compare.media",
+  label: "Side by side, in step",
+  match: { mimeTypes: ["video/*", "audio/*"], extensions: ["mp4", "webm", "mov", "m4v", "mp3", "wav", "m4a", "ogg", "flac", "aac"] },
+  rank: 10,
+  source: "builtin",
+  load: async () => ({ kind: "view", View: (await import("./MediaCompare.tsx")).MediaCompare }),
+});
