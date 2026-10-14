@@ -86,8 +86,9 @@ stage_web() {
   (cd web && node --test 'src/**/*.test.ts' 'scripts/*.test.mjs' 'previewer-sdk/src/*.test.ts')
   log "web: knip (no unused files, exports or dependencies)"
   pnpm --dir web exec knip
-  log "web: reference previewer build"
-  node --test examples/previewers/sprite-sheet/build.test.mjs
+  log "web: previewer builds (shared bundle build, sprite-sheet, pptx)"
+  pnpm --dir examples/previewers/pptx install --frozen-lockfile --silent
+  node --test examples/previewers/lib/bundle.test.mjs examples/previewers/sprite-sheet/build.test.mjs examples/previewers/pptx/build.test.mjs
 }
 
 stage_desktop() {

@@ -234,6 +234,19 @@ node examples/previewers/sprite-sheet/build.mjs
 # dist/site/ (the bundle files), dist/bundle.tar, dist/bundle.tar.sha256, dist/package.json
 ```
 
+[`examples/previewers/pptx`](../../examples/previewers/pptx) is a production
+previewer built the same way: PowerPoint decks (`.pptx`, `.pptm`, `.ppsx`,
+`.potx`) rendered slide by slide with a third-party library bundled in, its
+licenses shipped as `NOTICES.txt` (`docs/prd/2026-10-14-pptx-previewer.md`):
+
+```sh
+pnpm --dir examples/previewers/pptx install --frozen-lockfile
+node examples/previewers/pptx/build.mjs
+```
+
+Both builds share `examples/previewers/lib/bundle.mjs` (esbuild, the
+deterministic archive, the package placeholder).
+
 ## Publishing
 
 ```sh

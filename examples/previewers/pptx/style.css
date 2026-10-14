@@ -1,0 +1,54 @@
+/* Theme tokens: the host sends light|dark in preview.init. */
+:root {
+  --bg: #ecebe8;
+  --fg: #1d1d1b;
+  --muted: #6b6b66;
+  --slide-shadow: 0 1px 3px rgba(0, 0, 0, 0.18);
+  color-scheme: light;
+}
+:root[data-theme="dark"] {
+  --bg: #161615;
+  --fg: #ededea;
+  --muted: #9a9a94;
+  --slide-shadow: 0 1px 3px rgba(0, 0, 0, 0.6);
+  color-scheme: dark;
+}
+* {
+  box-sizing: border-box;
+}
+html,
+body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  background: var(--bg);
+  color: var(--fg);
+  font: 12px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+#deck {
+  height: 100vh;
+  overflow: auto;
+}
+/* The renderer fits slides to its container's width: the margin is the gap
+   around them. */
+#slides {
+  margin: 16px;
+}
+#slides .slide-failed {
+  display: grid;
+  place-items: center;
+  aspect-ratio: 16 / 9;
+  color: var(--muted);
+  border: 1px dashed var(--muted);
+}
+#status {
+  position: fixed;
+  inset: auto 0 0 0;
+  margin: 0;
+  padding: 8px 12px;
+  color: var(--muted);
+  text-align: center;
+}
+#status:empty {
+  display: none;
+}
