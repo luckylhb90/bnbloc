@@ -504,7 +504,7 @@ func TestMaterializeKeepsEveryLineInTheSharedTree(t *testing.T) {
 		return recent
 	}
 	self := roomlog.Producer{Owner: "maya", Provider: "agent-a"}
-	st, from, err := b.materializeRoomContext(context.Background(), w, ep, "r1", "ws", "job-x", "create final_check.rs: print done", self, roomlog.CtxState{}, roomlog.Guidance{HasRoomFiles: true}, nil)
+	st, from, err := b.materializeRoomContext(context.Background(), w, ep, "r1", "ws", "job-x", 0, "create final_check.rs: print done", self, roomlog.CtxState{}, roomlog.Guidance{HasRoomFiles: true}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -521,7 +521,7 @@ func TestMaterializeKeepsEveryLineInTheSharedTree(t *testing.T) {
 	// The next pass (another channel's session) continues the workspace's
 	// state: only what is new is fetched into a new chunk.
 	g.addAgentRow("general", 14, "maya", "agent-a", "my next reply")
-	st2, _, err := b.materializeRoomContext(context.Background(), w, ep, "r1", "ws", "job-y", "", self, st, roomlog.Guidance{HasRoomFiles: true}, nil)
+	st2, _, err := b.materializeRoomContext(context.Background(), w, ep, "r1", "ws", "job-y", 0, "", self, st, roomlog.Guidance{HasRoomFiles: true}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -546,7 +546,7 @@ func TestDriveTextDeltaFreshWindow(t *testing.T) {
 	b := New(Config{GatewayBaseURL: g.srv.URL, GatewayToken: "t", OwnerSubject: "maya"})
 
 	st := roomlog.CtxState{}
-	prompt := b.driveTextDelta(context.Background(), "r1", "maya", "agent-a", roomlog.Now{From: "maya", Text: "do the thing"}, &st, true)
+	prompt := b.driveTextDelta(context.Background(), "r1", "maya", "agent-a", 0, "", roomlog.Now{From: "maya", Text: "do the thing"}, &st, true)
 
 	if !strings.Contains(prompt, "person asks") {
 		t.Fatalf("person's message (general channel) must inject:\n%s", prompt)
@@ -579,7 +579,7 @@ func TestDriveTextDeltaFollowUpOnlyDelta(t *testing.T) {
 	b := New(Config{GatewayBaseURL: g.srv.URL, GatewayToken: "t", OwnerSubject: "maya"})
 
 	st := roomlog.CtxState{}
-	first := b.driveTextDelta(context.Background(), "r1", "maya", "agent-a", roomlog.Now{From: "maya", Text: "do the thing"}, &st, true)
+	first := b.driveTextDelta(context.Background(), "r1", "maya", "agent-a", 0, "", roomlog.Now{From: "maya", Text: "do the thing"}, &st, true)
 	_ = first
 
 	// New activity since the last push: a person question, a peer reply, and
@@ -587,7 +587,7 @@ func TestDriveTextDeltaFollowUpOnlyDelta(t *testing.T) {
 	g.setHistory("general", []int64{20}, map[int64]string{20: "new question"})
 	g.addAgentRow("test", 21, "maya", "opencode", "peer follow-up")
 	g.addAgentRow("general", 22, "maya", "agent-a", "my own this-session reply")
-	second := b.driveTextDelta(context.Background(), "r1", "maya", "agent-a", roomlog.Now{From: "maya", Text: "next instruction"}, &st, false)
+	second := b.driveTextDelta(context.Background(), "r1", "maya", "agent-a", 0, "", roomlog.Now{From: "maya", Text: "next instruction"}, &st, false)
 
 	if !strings.Contains(second, "New room messages since your last turn") {
 		t.Fatalf("follow-up must be framed as a delta:\n%s", second)
@@ -607,8 +607,46 @@ func TestDriveTextDeltaFollowUpOnlyDelta(t *testing.T) {
 
 	// Nothing new: the instruction alone, under the marker naming its
 	// sender (the requester when the history does not hold it).
-	third := b.driveTextDelta(context.Background(), "r1", "maya", "agent-a", roomlog.Now{From: "maya", Text: "nothing new at all"}, &st, false)
+	third := b.driveTextDelta(context.Background(), "r1", "maya", "agent-a", 0, "", roomlog.Now{From: "maya", Text: "nothing new at all"}, &st, false)
 	if third != "[now — from maya]\nnothing new at all" {
 		t.Fatalf("empty delta must send the instruction alone, got:\n%s", third)
+	}
+}
+
+// The [now] sender is the job's message, by its sequence: when two people
+// send the same words, the turn names the one who asked, never the newer
+// look-alike.
+func TestNowSenderIsTheJobsMessage(t *testing.T) {
+	g := newPullGateway(t)
+	g.addChatRow("general", 30, "jack", "continue")
+	g.addChatRow("general", 31, "maya", "continue")
+	b := New(Config{GatewayBaseURL: g.srv.URL, GatewayToken: "t", OwnerSubject: "jack"})
+	st := roomlog.CtxState{}
+	prompt := b.driveTextDelta(context.Background(), "r1", "jack", "agent-a", 30, "general", roomlog.Now{From: "jack", Text: "continue"}, &st, true)
+	if !strings.HasSuffix(prompt, "[now — from jack]\ncontinue") {
+		t.Fatalf("the turn must name jack (seq 30), got:\n%s", prompt)
+	}
+	if !strings.Contains(prompt, "maya: continue") {
+		t.Fatalf("maya's identical message is history, not the instruction:\n%s", prompt)
+	}
+}
+
+// A follow-up drops the agent's own replies of THIS session's channel only:
+// what it said in another channel is not in this session's memory.
+func TestDropSelfKeepsOtherChannelsReplies(t *testing.T) {
+	g := newPullGateway(t)
+	g.addChatRow("general", 10, "jack", "first ask")
+	b := New(Config{GatewayBaseURL: g.srv.URL, GatewayToken: "t", OwnerSubject: "jack"})
+	st := roomlog.CtxState{}
+	_ = b.driveTextDelta(context.Background(), "r1", "jack", "agent-a", 10, "general", roomlog.Now{From: "jack", Text: "first ask"}, &st, true)
+	g.addAgentRow("general", 11, "jack", "agent-a", "my general reply")
+	g.addAgentRow("test", 12, "jack", "agent-a", "my test reply")
+	g.addChatRow("general", 13, "jack", "second ask")
+	prompt := b.driveTextDelta(context.Background(), "r1", "jack", "agent-a", 13, "general", roomlog.Now{From: "jack", Text: "second ask"}, &st, false)
+	if strings.Contains(prompt, "my general reply") {
+		t.Fatalf("this channel's own reply is session memory:\n%s", prompt)
+	}
+	if !strings.Contains(prompt, "my test reply") {
+		t.Fatalf("the reply in another channel is not in this session's memory and must stay:\n%s", prompt)
 	}
 }
