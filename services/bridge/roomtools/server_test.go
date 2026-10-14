@@ -38,10 +38,7 @@ func (g *fakeGateway) Do(_ context.Context, method, path string, body any) ([]by
 	g.calls = append(g.calls, gwCall{method, path, raw})
 	g.mu.Unlock()
 	status, out := g.handle(method, path, raw)
-	buf, isRaw := out.([]byte) // a raw body (a file download), as is
-	if !isRaw {
-		buf, _ = json.Marshal(out)
-	}
+	buf, _ := json.Marshal(out)
 	if status < 200 || status > 299 {
 		return nil, &StatusError{Status: status, Body: buf}
 	}
@@ -184,7 +181,7 @@ func TestLegacyProtocol(t *testing.T) {
 	for _, tl := range tools {
 		names = append(names, tl.(map[string]any)["name"].(string))
 	}
-	if strings.Join(names, ",") != "list_room_agents,ask_agent,room_status,read_room,read_artifact,read_attachment,save_component,get_component,list_components,publish_component,try_draft,post_progress,app_data" {
+	if strings.Join(names, ",") != "list_room_agents,ask_agent,room_status,read_room,read_artifact,save_component,get_component,list_components,publish_component,try_draft,post_progress,app_data" {
 		t.Fatalf("tools = %v", names)
 	}
 

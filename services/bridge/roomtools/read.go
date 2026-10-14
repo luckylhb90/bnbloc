@@ -26,13 +26,11 @@ func readRoomTool() Tool {
 	return Tool{
 		Name:  "read_room",
 		Title: "Read the conversation",
-		Description: "Recent messages of the room (people's messages and agents' replies, across the room's channels — each line names " +
-			"its channel when the room has several), oldest first, one line each: \"#<seq> <author>: <text>\". Pass since (a seq from " +
-			"an earlier read) to get only newer messages, channel to read one channel.",
+		Description: "Recent messages of the room (people's messages and agents' replies, across the room's channels), oldest first, " +
+			"one line each: \"#<seq> <author>: <text>\". Pass since (a seq from an earlier read) to get only newer messages.",
 		InputSchema: objectSchema(map[string]any{
-			"since":   map[string]any{"type": "integer", "minimum": 0, "description": "Only messages after this seq."},
-			"channel": map[string]any{"type": "string", "description": "Only this channel (its name, as the lines show it, or its id)."},
-			"limit":   map[string]any{"type": "integer", "minimum": 1, "maximum": maxReadLimit, "description": "At most this many messages (default " + strconv.Itoa(defaultReadLimit) + ")."},
+			"since": map[string]any{"type": "integer", "minimum": 0, "description": "Only messages after this seq."},
+			"limit": map[string]any{"type": "integer", "minimum": 1, "maximum": maxReadLimit, "description": "At most this many messages (default " + strconv.Itoa(defaultReadLimit) + ")."},
 		}),
 		ReadOnly: true,
 		Call:     readRoom,
@@ -41,9 +39,8 @@ func readRoomTool() Tool {
 
 func readRoom(ctx context.Context, env *Env, args json.RawMessage) Result {
 	var in struct {
-		Since   int64  `json:"since"`
-		Limit   int    `json:"limit"`
-		Channel string `json:"channel"`
+		Since int64 `json:"since"`
+		Limit int   `json:"limit"`
 	}
 	if err := decodeArgs(args, &in); err != nil {
 		return toolError("invalid arguments: %v", err)
@@ -64,21 +61,8 @@ func readRoom(ctx context.Context, env *Env, args json.RawMessage) Result {
 		pages = 1
 	}
 	pageRows := min(in.Limit, readHistoryPageMax)
-	room := env.Session.Scope().RoomID
-	only := ""
-	if name := strings.TrimPrefix(strings.TrimSpace(in.Channel), "#"); name != "" {
-		list, _ := roomlog.AgentChannelList(ctx, gatewayFetch(env), room)
-		for _, c := range list {
-			if c.ID == name || (c.Name != "" && c.Name == name) {
-				only = c.ID
-			}
-		}
-		if only == "" {
-			return toolError("no channel %q you may read in this room", in.Channel)
-		}
-	}
-	entries, _, err := roomlog.History(ctx, gatewayFetch(env), room, roomlog.HistoryQuery{
-		Only: only, After: in.Since, PageRows: pageRows, Pages: pages, MaxRows: readHistoryPages * readHistoryPageMax,
+	entries, _, err := roomlog.History(ctx, gatewayFetch(env), env.Session.Scope().RoomID, roomlog.HistoryQuery{
+		After: in.Since, PageRows: pageRows, Pages: pages, MaxRows: readHistoryPages * readHistoryPageMax,
 	})
 	if err != nil {
 		return refusal("reading the room", err)

@@ -74,14 +74,10 @@
         "openWorldHint": false,
         "readOnlyHint": true
       },
-      "description": "Recent messages of the room (people's messages and agents' replies, across the room's channels — each line names its channel when the room has several), oldest first, one line each: \"#<seq> <author>: <text>\". Pass since (a seq from an earlier read) to get only newer messages, channel to read one channel.",
+      "description": "Recent messages of the room (people's messages and agents' replies, across the room's channels), oldest first, one line each: \"#<seq> <author>: <text>\". Pass since (a seq from an earlier read) to get only newer messages.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
-          "channel": {
-            "description": "Only this channel (its name, as the lines show it, or its id).",
-            "type": "string"
-          },
           "limit": {
             "description": "At most this many messages (default 30).",
             "maximum": 100,
@@ -129,28 +125,6 @@
       },
       "name": "read_artifact",
       "title": "Read a room deliverable"
-    },
-    {
-      "annotations": {
-        "openWorldHint": false,
-        "readOnlyHint": true
-      },
-      "description": "Read a file a person attached to a message in this room, by the id its record line shows ([attached: … id att_…]). Text comes back inline, fenced as data its uploader wrote; any other file is saved into your workspace under .room/attachments/ and its path returned.",
-      "inputSchema": {
-        "additionalProperties": false,
-        "properties": {
-          "attachmentId": {
-            "description": "The attachment's id (att_…).",
-            "type": "string"
-          }
-        },
-        "required": [
-          "attachmentId"
-        ],
-        "type": "object"
-      },
-      "name": "read_attachment",
-      "title": "Read a file someone attached"
     },
     {
       "annotations": {
