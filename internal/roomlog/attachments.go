@@ -15,10 +15,13 @@ import (
 // — and the record line points at the copy. The turn's own attachments are
 // written to the same path, so a file is never copied twice.
 
-// Mirror bounds: the largest attachment a pass copies, and what one pass
-// copies at most (later passes continue).
+// Mirror bounds: the largest attachment a pass copies — any chat
+// attachment (wire.MaxAttachmentBytes), so an agent can read an earlier
+// message's file however large the room allowed it; a core that takes less
+// states its limit and the bridge skips what exceeds it — and what one pass
+// copies at most (later passes continue, newest first).
 const (
-	MaxMirrorFileBytes = 8 << 20
+	MaxMirrorFileBytes = wire.MaxAttachmentBytes
 	MaxMirrorPassBytes = 32 << 20
 	// maxMirrorPassFiles is the most files one pass copies.
 	maxMirrorPassFiles = 20
