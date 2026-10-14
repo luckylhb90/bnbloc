@@ -209,6 +209,7 @@ type Bridge struct {
 	// sessions (workspaces.go).
 	workspaces *agentWorkspaces
 	locks      map[driveKey]*sync.Mutex      // drive slot -> drive lock
+	turns      turnCounter                   // running turns per core (turns_running.go)
 	syncs      map[string]context.CancelFunc // roomId -> sync engine canceller
 	// gone holds rooms the gateway answered 404/403 for (deleted, or the owner
 	// lost access) and when: reconcile does not re-subscribe them while they

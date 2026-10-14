@@ -312,6 +312,7 @@ func (b *Bridge) bindTarget(ctx context.Context, d *drive) *refusal {
 
 // driveTurn is stage 7: report the job running, then drive it.
 func (b *Bridge) driveTurn(ctx context.Context, d *drive) (driveResult, error) {
+	defer b.turnRunning(d.core)() // the desktop applies core updates only when idle
 	running := d.agent()
 	running["targetId"], running["sandboxed"] = d.target, d.prepareExec != nil
 	if c := d.content; c.expert != nil {
