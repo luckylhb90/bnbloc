@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { FloppyDiskIcon } from "@phosphor-icons/react";
+import { CheckIcon, FloppyDiskIcon } from "@phosphor-icons/react";
 import { gatewayBase } from "@/lib/config";
 import { errorText } from "@/lib/errors";
 import { localFiles, type LocalSaveMode } from "@/lib/localFiles";
@@ -29,6 +29,9 @@ export function LocalSaveChip({
   const [local, setLocal] = useState<{ token: string; name: string } | null>(null);
   const [busy, setBusy] = useState(false);
   const [conflict, setConflict] = useState<"changed" | "missing" | null>(null);
+  // What the last save of this tab did (the chip says it until another
+  // version is shown: a toast alone is easy to miss).
+  const [saved, setSaved] = useState<{ version: number; text: string } | null>(null);
 
   useEffect(() => {
     if (!localFiles.available()) return;
@@ -48,15 +51,14 @@ export function LocalSaveChip({
     setBusy(true);
     try {
       const bytes = await (await load()).arrayBuffer();
-      const saved = await localFiles.save(local.token, bytes, version, mode);
-      if (saved.status === "written") {
+      const result = await localFiles.save(local.token, bytes, version, mode);
+      if (result.status === "written" || result.status === "copied") {
+        const text = result.status === "written" ? `Saved v${version} to ${local.name}` : `Saved v${version} as ${result.name}`;
         setConflict(null);
-        toast.success(`Saved v${version} to ${local.name}`);
-      } else if (saved.status === "copied") {
-        setConflict(null);
-        toast.success(`Saved v${version} beside ${local.name} as ${saved.name}`);
+        setSaved({ version, text });
+        toast.success(text);
       } else {
-        setConflict(saved.status);
+        setConflict(result.status);
       }
     } catch (e) {
       toast.error(errorText(e, `Could not save to ${local.name}`));
@@ -74,7 +76,15 @@ export function LocalSaveChip({
         onClick={() => void save("check")}
         title={`Write v${version} to ${local.name} on this computer`}
       >
-        <FloppyDiskIcon size={14} /> Save to {local.name}
+        {saved?.version === version ? (
+          <>
+            <CheckIcon size={14} className="text-[var(--color-accent)]" /> {saved.text}
+          </>
+        ) : (
+          <>
+            <FloppyDiskIcon size={14} /> {busy ? "Saving…" : `Save to ${local.name}`}
+          </>
+        )}
       </button>
       <Dialog
         open={conflict !== null}
