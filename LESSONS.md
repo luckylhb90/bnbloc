@@ -93,6 +93,19 @@ to.
 Evidence: docs/bugs/2026-10-14-work-save-misses-new-files.md (causes 1–2).
 Seen 1× (2026-10-14).
 
+### A tool's result text is an instruction: change it with the tool
+
+The save tool learned to take a work's request and description. Its result
+note still told the agent to edit those "from its card", so the agent
+relayed that to the member instead of using the new arguments. It also
+trusted its own earlier refusal from before the update. Every hint a tool
+returns is read as how to proceed: review them with the tool's parameters,
+in the same change.
+
+Evidence: docs/bugs/2026-10-14-work-save-misses-new-files.md (follow-up);
+commit 349926c7.
+Seen 1× (2026-10-14).
+
 ### Put no fixed limits on a member's work: bound it by activity and by the product's own caps
 
 A two-hour turn deadline ended real multi-hour tasks. Attachments the
