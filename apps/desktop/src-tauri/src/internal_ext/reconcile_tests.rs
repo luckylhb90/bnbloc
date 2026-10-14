@@ -2,6 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use super::*;
 use sidecar_model::ComponentKind;
+use sidecar_status::status_for_test as sidecar_status_for_test;
 
 fn inner_with_desired_up() -> Inner {
     Inner {
@@ -161,14 +162,13 @@ fn a_running_cores_update_waits_for_an_idle_moment() {
         sidecar.pending.as_ref().map(|s| s.version.as_str()),
         Some("1.1.0")
     );
-    assert_eq!(sidecar.status.state, "update-pending");
-    assert!(
-        sidecar
-            .status
-            .message
-            .contains("waiting for 2 running tasks"),
-        "{}",
-        sidecar.status.message
+    let shown = sidecar_status_for_test(sidecar, 2);
+    assert_eq!(
+        shown.pending_update,
+        Some(sidecar_model::PendingUpdate {
+            version: "1.1.0".into(),
+            waiting_for: 2
+        })
     );
 
     // Still busy: it keeps waiting.
@@ -186,6 +186,7 @@ fn a_running_cores_update_waits_for_an_idle_moment() {
     );
     assert!(sidecar.pending.is_none());
     assert_eq!(sidecar.generation, 3);
+    assert!(sidecar_status_for_test(sidecar, 0).pending_update.is_none());
 }
 
 /// "Apply now" goes ahead while turns run; a stopped sidecar never waits.

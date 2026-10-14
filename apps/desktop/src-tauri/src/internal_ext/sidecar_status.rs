@@ -1,16 +1,18 @@
 use crate::internal_ext::sidecar_model::{
-    AdapterStatus, ComponentKind, ManagedSidecar, SidecarSpec,
+    AdapterStatus, ComponentKind, ManagedSidecar, PendingUpdate, SidecarSpec,
 };
 use crate::internal_ext::Adapter;
 
 impl Adapter {
     pub fn status(&self) -> Vec<AdapterStatus> {
+        // Read once, outside the lock: what a waiting update waits for.
+        let running = self.running_turns();
         let mut statuses: Vec<AdapterStatus> = self
             .inner
             .lock()
             .sidecars
             .values()
-            .map(status_for)
+            .map(|sidecar| status_for(sidecar, running))
             .collect();
         statuses.sort_by(|a, b| {
             a.name
@@ -145,12 +147,24 @@ fn kind_rank(kind: ComponentKind) -> u8 {
     }
 }
 
-fn status_for(sidecar: &ManagedSidecar) -> AdapterStatus {
+#[cfg(test)]
+pub(super) fn status_for_test(sidecar: &ManagedSidecar, running: u32) -> AdapterStatus {
+    status_for(sidecar, running)
+}
+
+/// A sidecar's status as the web reads it: its endpoint, and the update
+/// that waits for the bridge's `running` turns (update_gate) while it keeps
+/// running.
+fn status_for(sidecar: &ManagedSidecar, running: u32) -> AdapterStatus {
     let mut status = sidecar.status.clone();
     status.local_url = sidecar
         .runtime_url
         .clone()
         .or_else(|| sidecar.spec.as_ref().map(|spec| spec.local_url.clone()));
+    status.pending_update = sidecar.pending.as_ref().map(|spec| PendingUpdate {
+        version: spec.version.clone(),
+        waiting_for: running,
+    });
     status
 }
 

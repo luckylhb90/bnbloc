@@ -65,6 +65,18 @@ pub struct AdapterStatus {
     pub pid: Option<u32>,
     pub version: Option<String>,
     pub local_url: Option<String>,
+    /// A newer version that waits for the bridge's running turns to finish
+    /// (update_gate); the sidecar keeps running meanwhile.
+    pub pending_update: Option<PendingUpdate>,
+}
+
+/// An update kept until no agent turn runs.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PendingUpdate {
+    pub version: String,
+    /// The turns it waits for (when last checked).
+    pub waiting_for: u32,
 }
 
 impl AdapterStatus {
@@ -84,6 +96,7 @@ impl AdapterStatus {
             pid,
             version,
             local_url: None,
+            pending_update: None,
         }
     }
 

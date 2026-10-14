@@ -84,12 +84,6 @@ pub(crate) fn bridge_restart_waits(
     running > 0 && !apply_now && current.get(member_key) == desired.get(member_key)
 }
 
-/// The status line of a sidecar whose update waits.
-pub(crate) fn pending_message(name: &str, version: &str, running: u32) -> String {
-    let tasks = if running == 1 { "task" } else { "tasks" };
-    format!("{name} {version} is ready — waiting for {running} running {tasks} to finish")
-}
-
 /// Whether "apply now" is in effect at `now`.
 pub(crate) fn apply_now_active(until: Option<Instant>, now: Instant) -> bool {
     until.is_some_and(|until| now < until)
@@ -183,9 +177,5 @@ mod tests {
         assert!(apply_now_active(Some(now + Duration::from_secs(5)), now));
         assert!(!apply_now_active(Some(now), now + Duration::from_secs(1)));
         assert!(!apply_now_active(None, now));
-        assert_eq!(
-            pending_message("acp", "0.2.5", 1),
-            "acp 0.2.5 is ready — waiting for 1 running task to finish"
-        );
     }
 }

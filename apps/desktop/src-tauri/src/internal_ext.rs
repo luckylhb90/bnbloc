@@ -518,12 +518,11 @@ fn apply_specs_to_inner(
                 // (update_gate); a stopped one has nothing to interrupt.
                 let live = sidecar.spec.is_some()
                     && (sidecar.child.is_some() || sidecar.runtime_url.is_some());
-                if let (true, update_gate::Gate::Wait(n)) =
-                    (live, update_gate::gate(spec.kind, running, apply_now))
+                // It keeps running meanwhile; its status shows the waiting
+                // version (sidecar_status::status).
+                if live
+                    && update_gate::gate(spec.kind, running, apply_now) != update_gate::Gate::Apply
                 {
-                    sidecar.status.state = "update-pending".into();
-                    sidecar.status.message =
-                        update_gate::pending_message(&spec.name, &spec.version, n);
                     sidecar.pending = Some(spec);
                     continue;
                 }
@@ -570,16 +569,12 @@ fn apply_pending_in(inner: &mut Inner, running: u32, apply_now: bool) -> Applied
         let Some(spec) = sidecar.pending.take() else {
             continue;
         };
-        match update_gate::gate(spec.kind, running, apply_now) {
-            update_gate::Gate::Apply => {
-                let status = AdapterStatus::ready(&spec);
-                replace_spec(sidecar, id, spec, status, &mut removed);
-                applied_any = true;
-            }
-            update_gate::Gate::Wait(n) => {
-                sidecar.status.message = update_gate::pending_message(&spec.name, &spec.version, n);
-                sidecar.pending = Some(spec);
-            }
+        if update_gate::gate(spec.kind, running, apply_now) == update_gate::Gate::Apply {
+            let status = AdapterStatus::ready(&spec);
+            replace_spec(sidecar, id, spec, status, &mut removed);
+            applied_any = true;
+        } else {
+            sidecar.pending = Some(spec);
         }
     }
     AppliedSpecs {
