@@ -5,6 +5,7 @@ use tauri::Manager;
 
 use crate::internal_ext::sidecar_model::{ComponentKind, ManagedSidecar};
 use crate::internal_ext::sidecar_status::manifest_fingerprint;
+use crate::internal_ext::update_gate;
 use crate::internal_ext::Adapter;
 
 // The bridge resolves its core list (coreset) exactly once, at process start:
@@ -31,21 +32,39 @@ impl Adapter {
 
     pub(super) async fn stabilize_bridge(&self, generation: u64) {
         let mut previous: Option<HashMap<String, String>> = None;
+        let mut last_recheck = std::time::Instant::now();
         loop {
             tokio::time::sleep(CHECK_INTERVAL).await;
             if !self.manager_current(generation) {
                 return;
             }
+            // An update that waits for an idle moment (update_gate) is
+            // retried on its own cadence.
+            if last_recheck.elapsed() >= update_gate::RECHECK_EVERY {
+                last_recheck = std::time::Instant::now();
+                self.apply_pending();
+            }
             let desired = self.desired_bridge_cores();
-            let converged = {
+            let (converged, current) = {
                 let inner = self.inner.lock();
-                inner.bridge_cores == desired
+                (inner.bridge_cores == desired, inner.bridge_cores.clone())
             };
             if converged {
                 previous = None;
                 continue;
             }
             if previous.as_ref() == Some(&desired) {
+                // A restart kills the turns the bridge drives: it waits for
+                // an idle moment unless the member changed (update_gate).
+                if update_gate::bridge_restart_waits(
+                    &current,
+                    &desired,
+                    super::member_dir::BRIDGE_KEY,
+                    self.running_turns(),
+                    self.apply_now(),
+                ) {
+                    continue;
+                }
                 self.restart_bridge(desired);
                 previous = None;
             } else {

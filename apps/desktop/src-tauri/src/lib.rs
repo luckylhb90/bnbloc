@@ -137,6 +137,20 @@ fn internal_adapter_status(
     state.status()
 }
 
+/// The member's "apply now" for component updates that wait for the
+/// bridge's running turns to finish (internal_ext/update_gate.rs).
+#[tauri::command]
+fn internal_adapter_apply_updates(state: State<'_, internal_ext::Adapter>) {
+    state.apply_pending_now();
+}
+
+/// How many agent turns the bridge drives now: an update that restarts it
+/// (the app's own, or a pending component update) warns before cutting them.
+#[tauri::command]
+fn bridge_running_turns(state: State<'_, internal_ext::Adapter>) -> u32 {
+    state.running_turns()
+}
+
 #[tauri::command]
 async fn internal_adapter_targets(
     state: State<'_, internal_ext::Adapter>,
@@ -411,6 +425,8 @@ pub fn run() {
             set_settings,
             internal_adapter_session,
             internal_adapter_status,
+            internal_adapter_apply_updates,
+            bridge_running_turns,
             internal_adapter_targets,
             internal_adapter_login,
             internal_adapter_auth_status,

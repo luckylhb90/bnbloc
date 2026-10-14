@@ -27,6 +27,9 @@ pub(super) struct ManagedSidecar {
     /// checksum mismatch): no supervisor is started and no re-download is
     /// attempted until the catalog publishes a different spec.
     pub(super) refused: Option<String>,
+    /// A newer spec that waits to replace `spec` until no agent turn runs
+    /// (update_gate); None when nothing waits.
+    pub(super) pending: Option<SidecarSpec>,
     pub(super) status: AdapterStatus,
 }
 
@@ -46,6 +49,7 @@ impl ManagedSidecar {
             generation: 0,
             supervisor_active: false,
             refused: None,
+            pending: None,
             status,
         }
     }

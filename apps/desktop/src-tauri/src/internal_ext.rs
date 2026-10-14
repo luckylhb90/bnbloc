@@ -32,6 +32,7 @@ pub(super) mod sidecar_status;
 pub(super) mod sidecar_sweep;
 pub(super) mod sidecar_targets;
 pub(super) mod sidecar_util;
+pub(super) mod update_gate;
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -88,6 +89,9 @@ pub struct Adapter {
     /// Stops of sidecar runs still in progress, by sidecar id: a relaunch
     /// waits for its own (a fixed port is free again, a data dir released).
     stopping: Stopping,
+    /// Until when the member's "apply now" lets a pending update (and the
+    /// bridge restart it causes) go ahead while turns run (update_gate).
+    apply_now_until: Arc<Mutex<Option<std::time::Instant>>>,
 }
 
 impl Adapter {
@@ -114,6 +118,7 @@ impl Adapter {
             mcp: Arc::new(mcp_tools::McpState::default()),
             catalog_hints: Arc::new(plugin_events::HintDebounce::default()),
             stopping: Stopping::default(),
+            apply_now_until: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -390,10 +395,17 @@ impl Adapter {
     }
 
     fn apply_specs(&self, specs: Vec<SidecarSpec>, discovered: HashSet<String>) {
+        let running = self.running_turns();
+        let apply_now = self.apply_now();
         let applied = {
             let mut inner = self.inner.lock();
-            apply_specs_to_inner(&mut inner, specs, discovered)
+            apply_specs_to_inner(&mut inner, specs, discovered, running, apply_now)
         };
+        self.finish_applied(applied);
+    }
+
+    /// Stop what an apply removed or replaced and start the rest.
+    fn finish_applied(&self, applied: AppliedSpecs) {
         // What an uninstalled component leaves on disk goes with the
         // reconcile's sweep (sidecar_sweep).
         for (id, child) in applied.removed {
@@ -403,12 +415,61 @@ impl Adapter {
             self.start_known(generation);
         }
     }
+
+    /// Apply the updates that waited for an idle moment, when there is one
+    /// (or the member applied them now). Called on the recheck cadence.
+    pub(super) fn apply_pending(&self) {
+        let has_pending = self
+            .inner
+            .lock()
+            .sidecars
+            .values()
+            .any(|s| s.pending.is_some());
+        if !has_pending {
+            return;
+        }
+        let running = self.running_turns();
+        let apply_now = self.apply_now();
+        let applied = {
+            let mut inner = self.inner.lock();
+            apply_pending_in(&mut inner, running, apply_now)
+        };
+        self.finish_applied(applied);
+    }
+
+    /// The member's "apply now": pending updates (and the bridge restart
+    /// they cause) go ahead even though turns run.
+    pub fn apply_pending_now(&self) {
+        *self.apply_now_until.lock() =
+            Some(std::time::Instant::now() + update_gate::APPLY_NOW_WINDOW);
+        self.apply_pending();
+    }
+
+    pub(super) fn apply_now(&self) -> bool {
+        update_gate::apply_now_active(*self.apply_now_until.lock(), std::time::Instant::now())
+    }
+
+    /// The turns the bridge this app runs drives now (update_gate).
+    pub fn running_turns(&self) -> u32 {
+        let Some(state) = self.app.try_state::<crate::AppState>() else {
+            return 0;
+        };
+        let settings = state.settings.lock().clone();
+        let pid = state.supervisor.status().pid;
+        let Some(dir) = self.bridge_member_dir_for(&settings) else {
+            return 0;
+        };
+        let file = update_gate::read_running_turns(&dir.join(member_dir::BRIDGE_STATE_DIR));
+        update_gate::running_turns(file.as_ref(), pid)
+    }
 }
 
 fn apply_specs_to_inner(
     inner: &mut Inner,
     specs: Vec<SidecarSpec>,
     discovered: HashSet<String>,
+    running: u32,
+    apply_now: bool,
 ) -> AppliedSpecs {
     let mut removed = Vec::new();
     let runnable = specs.iter().map(SidecarSpec::id).collect::<HashSet<_>>();
@@ -429,6 +490,7 @@ fn apply_specs_to_inner(
         if let Some(sidecar) = inner.sidecars.get_mut(name) {
             sidecar.generation += 1;
             sidecar.spec = None;
+            sidecar.pending = None;
             sidecar.runtime_url = None;
             sidecar.supervisor_active = false;
             sidecar.refused = None;
@@ -441,6 +503,8 @@ fn apply_specs_to_inner(
         let id = spec.id();
         match inner.sidecars.get_mut(&id) {
             Some(sidecar) if sidecar.spec.as_ref() == Some(&spec) => {
+                // The catalog is back to what runs: nothing waits any more.
+                sidecar.pending = None;
                 sidecar.status.version = Some(spec.version.clone());
                 // A supervised sidecar's status is its supervisor's; a
                 // refused one stays failed until the catalog publishes a
@@ -450,13 +514,20 @@ fn apply_specs_to_inner(
                 }
             }
             Some(sidecar) => {
-                sidecar.generation += 1;
-                removed.extend(sidecar.child.take().map(|child| (id.clone(), child)));
-                sidecar.spec = Some(spec);
-                sidecar.runtime_url = None;
-                sidecar.supervisor_active = false;
-                sidecar.refused = None;
-                sidecar.status = status;
+                // A running sidecar's update waits while turns run on it
+                // (update_gate); a stopped one has nothing to interrupt.
+                let live = sidecar.spec.is_some()
+                    && (sidecar.child.is_some() || sidecar.runtime_url.is_some());
+                if let (true, update_gate::Gate::Wait(n)) =
+                    (live, update_gate::gate(spec.kind, running, apply_now))
+                {
+                    sidecar.status.state = "update-pending".into();
+                    sidecar.status.message =
+                        update_gate::pending_message(&spec.name, &spec.version, n);
+                    sidecar.pending = Some(spec);
+                    continue;
+                }
+                replace_spec(sidecar, &id, spec, status, &mut removed);
             }
             None => {
                 let mut sidecar = ManagedSidecar::pending(status);
@@ -467,6 +538,52 @@ fn apply_specs_to_inner(
     }
     AppliedSpecs {
         generation_to_start: inner.desired_up.then_some(inner.generation),
+        removed,
+    }
+}
+
+/// Put `spec` in place of what `sidecar` runs: its child stops (into
+/// `removed`) and the next start launches the new one.
+fn replace_spec(
+    sidecar: &mut ManagedSidecar,
+    id: &str,
+    spec: SidecarSpec,
+    status: AdapterStatus,
+    removed: &mut Vec<(String, Child)>,
+) {
+    sidecar.generation += 1;
+    removed.extend(sidecar.child.take().map(|child| (id.to_string(), child)));
+    sidecar.spec = Some(spec);
+    sidecar.pending = None;
+    sidecar.runtime_url = None;
+    sidecar.supervisor_active = false;
+    sidecar.refused = None;
+    sidecar.status = status;
+}
+
+/// Apply the waiting updates the gate now lets through (no turn runs, or
+/// the member applied them now); the others keep waiting.
+fn apply_pending_in(inner: &mut Inner, running: u32, apply_now: bool) -> AppliedSpecs {
+    let mut removed = Vec::new();
+    let mut applied_any = false;
+    for (id, sidecar) in inner.sidecars.iter_mut() {
+        let Some(spec) = sidecar.pending.take() else {
+            continue;
+        };
+        match update_gate::gate(spec.kind, running, apply_now) {
+            update_gate::Gate::Apply => {
+                let status = AdapterStatus::ready(&spec);
+                replace_spec(sidecar, id, spec, status, &mut removed);
+                applied_any = true;
+            }
+            update_gate::Gate::Wait(n) => {
+                sidecar.status.message = update_gate::pending_message(&spec.name, &spec.version, n);
+                sidecar.pending = Some(spec);
+            }
+        }
+    }
+    AppliedSpecs {
+        generation_to_start: (applied_any && inner.desired_up).then_some(inner.generation),
         removed,
     }
 }
