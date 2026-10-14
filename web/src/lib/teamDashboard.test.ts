@@ -75,7 +75,7 @@ test("summarizeTeam counts a shared usage total once", () => {
 
 test("sortQuotaRequests puts pending first, newest first", () => {
   const q = (id: string, status: QuotaRequest["status"], at: number): QuotaRequest => ({
-    requestId: id, roomId: "r", owner: "o", requester: "q", provider: "p", status, createdAtMs: at,
+    requestId: id, roomId: "r", owner: "o", requester: "q", provider: "p", kind: "quota", status, createdAtMs: at,
   });
   const out = sortQuotaRequests([q("a", "approved", 30), q("b", "pending", 10), q("c", "pending", 20)]);
   assert.deepEqual(out.map((x) => x.requestId), ["c", "b", "a"]);

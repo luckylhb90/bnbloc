@@ -55,14 +55,19 @@ export function QuotaRequestsPanel({
       if (approve) {
         const raw = (grant[req.requestId] ?? (req.requestedRuns ? String(req.requestedRuns) : "")).trim();
         const runs = Number(raw);
-        if (!raw || !Number.isInteger(runs) || runs < 1) {
+        // An access request authorizes the agent: an amount is optional
+        // (none = no run limit for the authorization's lifetime).
+        const access = req.kind === "access";
+        if ((!access || raw) && (!raw || !Number.isInteger(runs) || runs < 1)) {
           toast.error("Enter how many runs to grant");
           return;
         }
-        const res = await api.approveQuotaRequest(req.requestId, runs);
+        const res = await api.approveQuotaRequest(req.requestId, raw ? runs : undefined);
         toast.success(
-          `Granted ${runs} more run${runs === 1 ? "" : "s"} to ${displayNameOf(req.requester)}` +
-            (res.runQuota !== undefined ? ` (limit now ${res.runQuota})` : ""),
+          access
+            ? `${displayNameOf(req.requester)} can now use your ${req.provider} in this room` + (raw ? ` (${runs} run${runs === 1 ? "" : "s"})` : "")
+            : `Granted ${runs} more run${runs === 1 ? "" : "s"} to ${displayNameOf(req.requester)}` +
+                (res.runQuota !== undefined ? ` (limit now ${res.runQuota})` : ""),
         );
       } else {
         await api.declineQuotaRequest(req.requestId);
@@ -101,9 +106,18 @@ export function QuotaRequestsPanel({
                 <UserName id={role === "owner" ? r.requester : r.owner} />
               </span>
               <span className="text-[var(--color-fg-muted)]">
-                {role === "owner" ? "asks for" : "asked for"}{" "}
-                {r.requestedRuns ? `${r.requestedRuns} more run${r.requestedRuns === 1 ? "" : "s"}` : "more runs"} of{" "}
-                <span className="text-[var(--color-fg)]">{r.provider}</span>
+                {r.kind === "access" ? (
+                  <>
+                    {role === "owner" ? "asks to use your" : "asked to use"}{" "}
+                    <span className="text-[var(--color-fg)]">{r.provider}</span>
+                  </>
+                ) : (
+                  <>
+                    {role === "owner" ? "asks for" : "asked for"}{" "}
+                    {r.requestedRuns ? `${r.requestedRuns} more run${r.requestedRuns === 1 ? "" : "s"}` : "more runs"} of{" "}
+                    <span className="text-[var(--color-fg)]">{r.provider}</span>
+                  </>
+                )}
               </span>
               <Badge tone={statusTone(r.status)}>
                 {r.status}
@@ -123,7 +137,7 @@ export function QuotaRequestsPanel({
                   max={10000}
                   inputMode="numeric"
                   aria-label="Runs to grant"
-                  placeholder="Runs"
+                  placeholder={r.kind === "access" ? "Runs (optional)" : "Runs"}
                   className="h-8 w-24"
                   value={grant[r.requestId] ?? (r.requestedRuns ? String(r.requestedRuns) : "")}
                   onChange={(e) => setGrant((g) => ({ ...g, [r.requestId]: e.target.value }))}
