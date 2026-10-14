@@ -32,3 +32,20 @@ test("the build produces a deterministic, parseable bundle with its notices", as
     await rm(outB, { recursive: true, force: true });
   }
 });
+
+test("units: one per slide keyed by id; an edited title is one changed slide", async () => {
+  const { readFile } = await import("node:fs/promises");
+  const JSZip = (await import("jszip")).default;
+  const { deckUnits } = await import("./src/units.ts");
+  const { diffUnits } = await import("../../../web/src/lib/compareUnits.ts");
+  const bytes = await readFile(new URL("./samples/deck.pptx", import.meta.url));
+  const before = await deckUnits(JSZip, bytes);
+  assert.deepEqual(before.map((u) => u.label), ["Slide 1 · Quarterly review", "Slide 2 · Highlights", "Slide 3 · By region", "Slide 4 · Growth", "Slide 5 · Thank you"]);
+  assert.match(before[3].text, /^Growth\nChart: Q1 North South West 120 95 80/, "a chart's values are its text");
+  const zip = await JSZip.loadAsync(bytes);
+  const slide2 = await zip.file("ppt/slides/slide2.xml").async("string");
+  zip.file("ppt/slides/slide2.xml", slide2.replace(">Highlights<", ">Key highlights<"));
+  const after = await deckUnits(JSZip, await zip.generateAsync({ type: "uint8array" }));
+  const changes = diffUnits(before, after).filter((c) => c.kind !== "same");
+  assert.deepEqual(changes.map((c) => [c.kind, c.curr?.key]), [["changed", before[1].key]]);
+});

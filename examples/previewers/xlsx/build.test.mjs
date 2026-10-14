@@ -112,3 +112,27 @@ test("a picked range: its label, its extent with merges, its values", () => {
   const big = rangeText({ top: 1, left: 1, bottom: 10_000, right: 3 }, { text: () => "x", rowShown: () => true, colShown: () => true }, 100);
   assert.ok(big.length < 120, `cut near the limit: ${big.length}`);
 });
+
+test("units: non-empty cells keyed by address, merged ranges once, formulas kept, bounded", async () => {
+  const { workbookUnits } = await import("./src/units.ts");
+  const { diffUnits } = await import("../../../web/src/lib/compareUnits.ts");
+  const load = async (buf) => {
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(buf);
+    return wb;
+  };
+  const sample = await readFile(join(HERE, "samples", "book.xlsx"));
+  const wb = await load(sample);
+  const { units } = workbookUnits(wb, 5000);
+  assert.equal(units.filter((u) => u.key.endsWith("!B1") || u.key.endsWith("!C1")).length, 0, "a merged title is one cell");
+  assert.equal(units.find((u) => u.key === "Revenue!B3")?.text, "$120,000");
+  wb.getWorksheet("Revenue").getCell("C3").value = 150000;
+  wb.getWorksheet("Revenue").getCell("H3").value = { formula: "B3+C3", result: 270000 };
+  const after = workbookUnits(await load(await wb.xlsx.writeBuffer()), 5000).units;
+  const changes = diffUnits(units, after).filter((c) => c.kind !== "same");
+  assert.deepEqual(changes.map((c) => [c.kind, c.curr?.key, c.curr?.text]), [
+    ["changed", "Revenue!C3", "$150,000"],
+    ["added", "Revenue!H3", "270000\n=B3+C3"],
+  ]);
+  assert.deepEqual([workbookUnits(wb, 3).units.length, workbookUnits(wb, 3).truncated], [3, true], "bounded");
+});

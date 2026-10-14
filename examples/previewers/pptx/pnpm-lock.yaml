@@ -11,6 +11,9 @@ importers:
       '@aiden0z/pptx-renderer':
         specifier: 1.3.0
         version: 1.3.0
+      jszip:
+        specifier: 3.10.2
+        version: 3.10.2
 
 packages:
 

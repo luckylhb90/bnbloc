@@ -6,6 +6,7 @@ import {
   type PreviewerDescriptor,
 } from "@/lib/previewerFrame";
 import { registerArtifactViewer, unregisterArtifactViewer } from "./registry";
+import { registerComparer, unregisterComparer } from "./compare/registry";
 import { visiblePoll } from "@/lib/useVisiblePoll";
 import { roomPath } from "@/lib/roomId";
 
@@ -40,27 +41,51 @@ export function syncInstalledPreviewers(): Promise<void> {
 function applyCatalog(descriptors: readonly PreviewerDescriptor[]): void {
   const next = new Map(descriptors.map((d) => [d.name, d]));
   for (const name of installed.keys()) {
-    if (!next.has(name)) {
-      installed.delete(name);
-      unregisterArtifactViewer(previewerViewerId(name));
-    }
+    if (!next.has(name)) remove(name);
   }
   for (const d of descriptors) {
     const prev = installed.get(d.name);
     installed.set(d.name, d);
     // A ticket refresh alone keeps the registration (and mounted frames).
     if (prev && sameRegistration(prev, d)) continue;
-    registerArtifactViewer({
-      id: previewerViewerId(d.name),
-      label: d.description ? `${d.name} — ${d.description}` : d.name,
-      match: { mimeTypes: d.mimeTypes, extensions: d.extensions },
-      rank: d.rank,
-      input: "blob",
-      safety: "sandboxed",
-      source: "component",
-      load: () => import("./RemotePreviewer").then((m) => ({ default: m.previewerHost(d.name) })),
-    });
+    register(d);
   }
+}
+
+// What an installed previewer contributes: its viewer, and its comparer
+// when it reads its format into units (capability "units").
+function register(d: PreviewerDescriptor): void {
+  const match = { mimeTypes: d.mimeTypes, extensions: d.extensions };
+  registerArtifactViewer({
+    id: previewerViewerId(d.name),
+    label: d.description ? `${d.name} — ${d.description}` : d.name,
+    match,
+    rank: d.rank,
+    input: "blob",
+    safety: "sandboxed",
+    source: "component",
+    load: () => import("./RemotePreviewer").then((m) => ({ default: m.previewerHost(d.name) })),
+  });
+  if (d.capabilities.includes("units")) {
+    registerComparer({
+      id: previewerComparerId(d.name),
+      label: d.name,
+      match,
+      rank: d.rank,
+      source: "component",
+      load: () => import("./compare/remote").then((m) => m.previewerUnits(d.name)),
+    });
+  } else unregisterComparer(previewerComparerId(d.name));
+}
+
+function remove(name: string): void {
+  installed.delete(name);
+  unregisterArtifactViewer(previewerViewerId(name));
+  unregisterComparer(previewerComparerId(name));
+}
+
+function previewerComparerId(name: string): string {
+  return `component.compare.${name}`;
 }
 
 function sameRegistration(a: PreviewerDescriptor, b: PreviewerDescriptor): boolean {
@@ -70,7 +95,8 @@ function sameRegistration(a: PreviewerDescriptor, b: PreviewerDescriptor): boole
     a.rank === b.rank &&
     a.description === b.description &&
     a.mimeTypes.join() === b.mimeTypes.join() &&
-    a.extensions.join() === b.extensions.join()
+    a.extensions.join() === b.extensions.join() &&
+    a.capabilities.join() === b.capabilities.join()
   );
 }
 
@@ -93,10 +119,7 @@ export function startPreviewerSync(): () => void {
   const stop = visiblePoll(tick, SYNC_INTERVAL_MS);
   return () => {
     stop();
-    for (const name of [...installed.keys()]) {
-      installed.delete(name);
-      unregisterArtifactViewer(previewerViewerId(name));
-    }
+    for (const name of [...installed.keys()]) remove(name);
   };
 }
 

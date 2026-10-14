@@ -3,7 +3,7 @@
   "contract": "bnbloc.previewer.contract/v1",
   "runtime": "bundle",
   "name": "docx",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "publisher": "bnbloc",
   "description": "Word documents (.docx, .docm, .dotx): pages rendered in place — styles, tables, images, lists, headers and footers, footnotes — with zoom and fit.",
   "artifacts": {
@@ -20,13 +20,7 @@
       "extensions": [".docx", ".docm", ".dotx"]
     },
     "rank": 50,
-    "capabilities": ["toolbar", "selection"],
-    "suggestions": [
-      { "label": "Proofread", "prompt": "Proofread the document: fix spelling, grammar and punctuation without changing the meaning or the formatting." },
-      { "label": "Make it concise", "prompt": "Make the document more concise: cut repetition and filler, keep every point and the formatting." },
-      { "label": "Improve the structure", "prompt": "Improve the structure: clear headings, a logical order, one idea per paragraph. Keep the content." },
-      { "label": "Summarize", "prompt": "Summarize this document in five bullet points. Do not change the file." }
-    ],
+    "capabilities": ["toolbar", "selection", "units"],
     "toolbar": [
       { "id": "zoom", "icon": "zoom-in", "label": "Zoom", "kind": "zoom" },
       { "id": "fit", "icon": "fit", "label": "Fit to width", "kind": "button" }

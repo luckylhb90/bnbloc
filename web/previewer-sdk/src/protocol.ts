@@ -20,6 +20,8 @@
 //   frame -> host : preview.error       {message}
 //   frame -> host : preview.title       {text}
 //   frame -> host : preview.selection   {selection: {label, detail} | null}  (capability "selection")
+//   host  -> frame: preview.units.request {id, file, bytes}                  (capability "units")
+//   frame -> host : preview.units       {id, units, truncated} | {id, error}
 
 /** Frame protocol version carried in preview.init. */
 export const PREVIEWER_PROTOCOL = 1;
@@ -36,12 +38,19 @@ export const ERROR_LIMIT = 500;
 /** A selection's chip label and the content it carries to the agent. */
 export const SELECTION_LABEL_LIMIT = 120;
 export const SELECTION_DETAIL_LIMIT = 2000;
+/** Units (capability "units", Compare): how many, each one's key, label
+ *  and text lengths, and the whole list's serialized size. */
+export const UNITS_LIMIT = 5000;
+export const UNIT_KEY_LIMIT = 200;
+export const UNIT_LABEL_LIMIT = 120;
+export const UNIT_TEXT_LIMIT = 4000;
+export const UNITS_BYTES_LIMIT = 2 * 1024 * 1024;
 /** Zoom values are scale factors (1 = 100%). */
 export const ZOOM_MIN = 0.01;
 export const ZOOM_MAX = 64;
 
 /** Code-owned capability vocabulary (package `previewer.capabilities`). */
-export const PREVIEWER_CAPABILITIES = ["thumbnail", "liveState", "toolbar", "selection"] as const;
+export const PREVIEWER_CAPABILITIES = ["thumbnail", "liveState", "toolbar", "selection", "units"] as const;
 export type PreviewerCapability = (typeof PREVIEWER_CAPABILITIES)[number];
 
 /** Code-owned toolbar item kinds. */
@@ -118,7 +127,17 @@ export type HostMessage =
   | { readonly type: "preview.file"; readonly bytes: ArrayBuffer }
   | { readonly type: "preview.toolbar"; readonly id: string; readonly value: boolean | number | null }
   | { readonly type: "preview.state"; readonly state: unknown; readonly actor: string }
-  | { readonly type: "preview.resize"; readonly w: number; readonly h: number };
+  | { readonly type: "preview.resize"; readonly w: number; readonly h: number }
+  | { readonly type: "preview.units.request"; readonly id: string; readonly file: PreviewFile; readonly bytes: ArrayBuffer };
+
+/** One unit of a version for Compare (docs/prd/2026-10-14-file-prompts-and-compare.md
+ *  rule 7): a slide, a paragraph, a cell, a page. key is a stable identity
+ *  across versions when the format has one (a slide id, a cell address). */
+export interface Unit {
+  readonly key?: string;
+  readonly label: string;
+  readonly text: string;
+}
 
 export type FrameMessage =
   | { readonly type: "preview.ready" }
@@ -127,7 +146,9 @@ export type FrameMessage =
   | { readonly type: "preview.thumbnail"; readonly png: ArrayBuffer }
   | { readonly type: "preview.error"; readonly message: string }
   | { readonly type: "preview.title"; readonly text: string }
-  | { readonly type: "preview.selection"; readonly selection: Selection | null };
+  | { readonly type: "preview.selection"; readonly selection: Selection | null }
+  | { readonly type: "preview.units"; readonly id: string; readonly units: readonly Unit[]; readonly truncated: boolean }
+  | { readonly type: "preview.units"; readonly id: string; readonly error: string };
 
 type Rec = Readonly<Record<string, unknown>>;
 
@@ -251,9 +272,56 @@ export function readFrameMessage(data: unknown): FrameMessage | null {
       const sel = readSelection(data.selection);
       return sel ? { type: "preview.selection", selection: sel } : null;
     }
+    case "preview.units": {
+      if (typeof data.id !== "string" || !UNITS_ID_RE.test(data.id)) return null;
+      if (data.error !== undefined) {
+        const error = boundedText(data.error, ERROR_LIMIT);
+        return error === null ? null : { type: "preview.units", id: data.id, error };
+      }
+      const units = readUnits(data.units);
+      return units ? { type: "preview.units", id: data.id, units, truncated: data.truncated === true } : null;
+    }
     default:
       return null;
   }
+}
+
+const UNITS_ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
+
+/** Validates a unit list against the UNIT* limits (the host side). */
+export function readUnits(value: unknown): readonly Unit[] | null {
+  if (!Array.isArray(value) || value.length > UNITS_LIMIT) return null;
+  const out: Unit[] = [];
+  for (const item of value) {
+    if (!isRecord(item)) return null;
+    const label = boundedText(item.label, UNIT_LABEL_LIMIT, true);
+    const text = boundedText(item.text, UNIT_TEXT_LIMIT, true);
+    const key = item.key === undefined ? undefined : boundedText(item.key, UNIT_KEY_LIMIT);
+    if (label === null || text === null || key === null) return null;
+    out.push(key === undefined ? { label, text } : { key, label, text });
+  }
+  return JSON.stringify(out).length <= UNITS_BYTES_LIMIT ? out : null;
+}
+
+/** Fits units to the limits (the frame side): long texts and labels are cut
+ *  with an ellipsis, and the list stops (truncated) at UNITS_LIMIT units or
+ *  UNITS_BYTES_LIMIT, rather than being refused by the host. */
+export function fitUnits(units: readonly { readonly key?: string; readonly label: string; readonly text: string }[]): { units: Unit[]; truncated: boolean } {
+  const cut = (s: string, n: number) => {
+    const chars = [...s];
+    return chars.length <= n ? s : `${chars.slice(0, n - 1).join("")}…`;
+  };
+  const out: Unit[] = [];
+  let bytes = 2;
+  for (const u of units) {
+    if (out.length >= UNITS_LIMIT) return { units: out, truncated: true };
+    const key = u.key ? [...u.key].slice(0, UNIT_KEY_LIMIT).join("") : undefined;
+    const unit: Unit = { ...(key ? { key } : {}), label: cut(u.label, UNIT_LABEL_LIMIT), text: cut(u.text, UNIT_TEXT_LIMIT) };
+    bytes += JSON.stringify(unit).length + 1;
+    if (bytes > UNITS_BYTES_LIMIT) return { units: out, truncated: true };
+    out.push(unit);
+  }
+  return { units: out, truncated: false };
 }
 
 /** Validates a selection: a label within SELECTION_LABEL_LIMIT, a detail
@@ -314,6 +382,15 @@ export function readHostMessage(data: unknown): HostMessage | null {
       const w = finiteNonNegative(data.w);
       const h = finiteNonNegative(data.h);
       return w === null || h === null ? null : { type: "preview.resize", w, h };
+    }
+    case "preview.units.request": {
+      const file = data.file;
+      if (typeof data.id !== "string" || !UNITS_ID_RE.test(data.id) || !isRecord(file) || !isArrayBuffer(data.bytes)) return null;
+      if (typeof file.name !== "string" || typeof file.mimeType !== "string") return null;
+      const sizeBytes = finiteNonNegative(file.sizeBytes);
+      const version = finiteNonNegative(file.version);
+      if (sizeBytes === null || version === null) return null;
+      return { type: "preview.units.request", id: data.id, file: { name: file.name, mimeType: file.mimeType, sizeBytes, version }, bytes: data.bytes };
     }
     default:
       return null;

@@ -1,0 +1,78 @@
+// The document's units for Compare (capability "units"): one per paragraph
+// or table of the body, in order. Paragraphs have no identity across
+// versions, so units carry no key and align by text. A unit is labelled by
+// what it is and the heading it falls under ("Paragraph · Highlights",
+// "Table · By region"); a heading is its own unit ("Heading · Highlights").
+// A table's text is its rows, cells separated by tabs.
+
+import { headline, openPackage, runText, type ZipReader } from "../../lib/ooxml.ts";
+
+export interface DocUnit {
+  readonly label: string;
+  readonly text: string;
+}
+
+const HEADING_STYLE = /<w:pStyle\b[^>]*w:val="(Title|Heading\d|heading\d|Subtitle)"/;
+
+function tableText(xml: string): string {
+  const rows: string[] = [];
+  for (const row of xml.matchAll(/<w:tr\b[\s\S]*?<\/w:tr>/g)) {
+    const cells = [...row[0].matchAll(/<w:tc\b[\s\S]*?<\/w:tc>/g)].map((c) =>
+      [...c[0].matchAll(/<w:p\b[^>]*?(?:\/>|>([\s\S]*?)<\/w:p>)/g)].map((p) => runText(p[1] ?? "", "w").trim()).filter(Boolean).join(" "),
+    );
+    rows.push(cells.join("\t"));
+  }
+  return rows.join("\n");
+}
+
+/** The body's top-level blocks, in order: paragraphs and tables (a table
+ *  nested in a table belongs to its outer table). */
+function blocks(body: string): { kind: "p" | "tbl"; xml: string }[] {
+  const out: { kind: "p" | "tbl"; xml: string }[] = [];
+  const re = /<(\/?)w:(tbl|p)\b[^>]*?(\/?)>/g;
+  let tblDepth = 0;
+  let start = -1;
+  let pStart = -1;
+  for (const m of body.matchAll(re)) {
+    const [tag, close, name, selfClosing] = m;
+    const at = m.index ?? 0;
+    if (name === "tbl") {
+      if (!close) {
+        if (tblDepth++ === 0) start = at;
+      } else if (--tblDepth === 0) {
+        out.push({ kind: "tbl", xml: body.slice(start, at + tag.length) });
+      }
+    } else if (tblDepth === 0) {
+      if (selfClosing) continue;
+      if (!close) pStart = at;
+      else if (pStart >= 0) {
+        out.push({ kind: "p", xml: body.slice(pStart, at + tag.length) });
+        pStart = -1;
+      }
+    }
+  }
+  return out;
+}
+
+export async function docUnits(zip: ZipReader, bytes: ArrayBuffer | Uint8Array): Promise<DocUnit[]> {
+  const pkg = await openPackage(zip, bytes);
+  const doc = await pkg.part("word/document.xml");
+  if (!doc) throw new Error("not a Word document (no word/document.xml)");
+  const body = /<w:body\b[^>]*>([\s\S]*)<\/w:body>/.exec(doc)?.[1] ?? "";
+  const out: DocUnit[] = [];
+  let heading = "";
+  for (const b of blocks(body)) {
+    if (b.kind === "tbl") {
+      const text = tableText(b.xml);
+      if (text.trim()) out.push({ label: heading ? `Table · ${heading}` : "Table", text });
+      continue;
+    }
+    const text = runText(b.xml, "w").trim();
+    if (!text) continue;
+    if (HEADING_STYLE.test(b.xml)) {
+      heading = headline(text, 40);
+      out.push({ label: `Heading · ${heading}`, text });
+    } else out.push({ label: heading ? `Paragraph · ${heading}` : "Paragraph", text });
+  }
+  return out;
+}

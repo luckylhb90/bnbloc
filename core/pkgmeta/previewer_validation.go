@@ -33,7 +33,7 @@ const PreviewerBundleArtifact = "bundle"
 // web/previewer-sdk/src/protocol.ts (PREVIEWER_CAPABILITIES, TOOLBAR_KINDS,
 // TOOLBAR_ICONS); TestPreviewerVocabulariesMatchFrameProtocol keeps them equal.
 var (
-	PreviewerCapabilities = []string{"thumbnail", "liveState", "toolbar", "selection"}
+	PreviewerCapabilities = []string{"thumbnail", "liveState", "toolbar", "selection", "units"}
 	PreviewerToolbarKinds = []string{"button", "toggle", "zoom"}
 	PreviewerToolbarIcons = []string{
 		"zoom-in", "zoom-out", "fit", "expand", "grid", "layers", "background", "frames",

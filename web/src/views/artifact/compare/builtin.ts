@@ -3,9 +3,10 @@ import { registerComparer } from "./registry.ts";
 
 // The built-in comparers (docs/prd/2026-10-14-file-prompts-and-compare.md
 // rule 6), registered on import like the built-in viewers. Each is data
-// (what it claims, its rank) plus a strategy loaded on first use. PDF and
-// Office formats come from sandboxed extraction (compare/remote.ts): their
-// bytes are never parsed in the app's origin.
+// (what it claims, its rank) plus a strategy loaded on first use. A PDF is
+// read in its sandboxed guest frame (compare/pdfUnits.ts); Office formats
+// come from installed previewers (compare/remote.ts): neither is parsed in
+// the app's origin.
 
 // A table compared cell by cell is bounded like a previewer's units.
 const MAX_TABLE_CELLS = 5000;
@@ -37,6 +38,15 @@ registerComparer({
       extract: async ({ blob, file }) => tableUnits(await blob.text(), { mimeType: file.mimeType, extension: file.extension }, MAX_TABLE_CELLS),
     };
   },
+});
+
+registerComparer({
+  id: "core.compare.pdf",
+  label: "PDF pages",
+  match: { mimeTypes: ["application/pdf"], extensions: ["pdf"] },
+  rank: 10,
+  source: "builtin",
+  load: async () => (await import("./pdfUnits.ts")).pdfUnits,
 });
 
 registerComparer({

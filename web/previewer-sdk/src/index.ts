@@ -21,6 +21,7 @@ import {
   ERROR_LIMIT,
   TITLE_LIMIT,
   fitSelection,
+  fitUnits,
   hostOriginFromHash,
   readHostMessage,
   readToolbar,
@@ -68,6 +69,17 @@ export type FileHandler = (bytes: ArrayBuffer, file: PreviewFile) => void;
 export type ToolbarHandler = (id: string, value: boolean | number | null) => void;
 export type StateHandler = (state: unknown, actor: string) => void;
 export type ResizeHandler = (viewport: Viewport) => void;
+/** Reads a file into its units for Compare (capability "units"). */
+export type UnitsHandler = (
+  bytes: ArrayBuffer,
+  file: PreviewFile,
+) => readonly UnitDraft[] | Promise<readonly UnitDraft[]>;
+/** A unit as a previewer makes it: fitUnits cuts it to the limits. */
+export interface UnitDraft {
+  readonly key?: string;
+  readonly label: string;
+  readonly text: string;
+}
 export type Unsubscribe = () => void;
 
 export interface PreviewerClient {
@@ -90,6 +102,10 @@ export interface PreviewerClient {
    *  chip it shows beside its Ask AI composer, whose detail travels to the
    *  agent with the request; null clears it. Over-long text is cut. */
   sendSelection(selection: { label: string; detail?: string } | null): void;
+  /** Answers the host's requests to read a version into units (capability
+   *  "units", Compare): the last handler registered answers; a request that
+   *  arrives first waits for it. A throw is reported to the host. */
+  onUnits(cb: UnitsHandler): Unsubscribe;
 }
 
 function subscribe<T>(list: T[], cb: T): Unsubscribe {
@@ -113,6 +129,8 @@ export function createPreviewerClient(env: PreviewerEnv): PreviewerClient {
   let init: PreviewInit | null = null;
   let file: ArrayBuffer | null = null;
   let ready = false;
+  let unitsHandler: UnitsHandler | null = null;
+  const pendingUnits: Extract<HostMessage, { type: "preview.units.request" }>[] = [];
 
   // Outbound messages use targetOrigin "*", like the artifact runner: a
   // custom-scheme app origin (the desktop shell's tauri://localhost) is not
@@ -131,6 +149,23 @@ export function createPreviewerClient(env: PreviewerEnv): PreviewerClient {
     const meta = init.file;
     file = null;
     for (const cb of [...fileHandlers]) cb(bytes, meta);
+  };
+
+  const answerUnits = (req: Extract<HostMessage, { type: "preview.units.request" }>): void => {
+    const handler = unitsHandler;
+    if (!handler) {
+      pendingUnits.push(req);
+      return;
+    }
+    void Promise.resolve()
+      .then(() => handler(req.bytes, req.file))
+      .then(
+        (list) => post({ type: "preview.units", id: req.id, ...fitUnits(list) }),
+        (e: unknown) => {
+          const text = String(e instanceof Error ? e.message : e ?? "").trim() || "could not read the file";
+          post({ type: "preview.units", id: req.id, error: [...text].slice(0, ERROR_LIMIT).join("") });
+        },
+      );
   };
 
   const handle = (msg: HostMessage): void => {
@@ -153,6 +188,9 @@ export function createPreviewerClient(env: PreviewerEnv): PreviewerClient {
       case "preview.resize":
         if (init) init = { ...init, viewport: { w: msg.w, h: msg.h } };
         for (const cb of [...resizeHandlers]) cb({ w: msg.w, h: msg.h });
+        return;
+      case "preview.units.request":
+        answerUnits(msg);
         return;
     }
   };
@@ -213,6 +251,13 @@ export function createPreviewerClient(env: PreviewerEnv): PreviewerClient {
     sendSelection(selection) {
       post({ type: "preview.selection", selection: selection ? fitSelection(String(selection.label ?? ""), String(selection.detail ?? "")) : null });
     },
+    onUnits(cb) {
+      unitsHandler = cb;
+      for (const req of pendingUnits.splice(0)) answerUnits(req);
+      return () => {
+        if (unitsHandler === cb) unitsHandler = null;
+      };
+    },
   };
 }
 
@@ -249,3 +294,4 @@ export const provideThumbnail = (png: Blob | ArrayBuffer): Promise<void> => clie
 export const setTitle = (text: string): void => client().setTitle(text);
 export const reportError = (message: string): void => client().reportError(message);
 export const sendSelection = (selection: { label: string; detail?: string } | null): void => client().sendSelection(selection);
+export const onUnits = (cb: UnitsHandler): Unsubscribe => client().onUnits(cb);

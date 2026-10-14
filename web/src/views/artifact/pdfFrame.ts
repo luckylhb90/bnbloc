@@ -14,13 +14,22 @@
 //   host  -> guest: { type: "pdf.command", id: "zoom"|"fit"|"page-prev"|"page-next", value }
 //   guest -> host : { type: "pdf.status", page, pages, zoom }
 //   guest -> host : { type: "pdf.error", message }
+//
+// Compare reads a PDF the same way, in a hidden runner frame
+// (compare/pdfUnits.ts): pdf.units instead of pdf.load, answered with each
+// page's text, cut to the frame protocol's unit limits inside the guest.
+//
+//   host  -> guest: { type: "pdf.units", lib, worker, bytes }   once
+//   guest -> host : { type: "pdf.units", pages: [text], truncated }
 
 import { readGuestMessage, type GuestMessage } from "../../lib/artifactFrame.ts";
+import { UNITS_BYTES_LIMIT, UNITS_LIMIT, UNIT_TEXT_LIMIT, readUnits, type Unit } from "../../../previewer-sdk/src/protocol.ts";
 
 export type PdfMessage =
   | GuestMessage
   | { kind: "status"; page: number; pages: number; zoom: number }
-  | { kind: "error"; message: string };
+  | { kind: "error"; message: string }
+  | { kind: "units"; units: readonly Unit[]; truncated: boolean };
 
 const ERROR_LIMIT = 500;
 
@@ -48,6 +57,10 @@ export function readPdfMessage(
   }
   if (data.type === "pdf.error" && typeof data.message === "string") {
     return { kind: "error", message: data.message.slice(0, ERROR_LIMIT) };
+  }
+  if (data.type === "pdf.units" && Array.isArray(data.pages) && data.pages.every((t) => typeof t === "string")) {
+    const units = readUnits((data.pages as string[]).map((text, i) => ({ label: `Page ${i + 1}`, text })));
+    return units ? { kind: "units", units, truncated: data.truncated === true } : null;
   }
   return null;
 }
@@ -164,21 +177,47 @@ body{overflow:auto;font:13px system-ui,sans-serif;color:#bbb;}
     else if (id === "page-next") goTo(current + 1);
   }
 
+  // pdf.js, then the document: the one way the guest opens a PDF.
+  async function open(d) {
+    await runModule(d.worker);
+    await runModule(d.lib);
+    return globalThis.pdfjsLib.getDocument({
+      data: new Uint8Array(d.bytes),
+      isEvalSupported: false,
+      useSystemFonts: true,
+      enableXfa: false,
+      disableAutoFetch: true,
+      disableStream: true,
+      verbosity: 0,
+    }).promise;
+  }
+
+  // Each page's text, for Compare: cut to the unit limits here.
+  async function units(d) {
+    try {
+      var pdf = await open(d);
+      var count = Math.min(pdf.numPages, ${UNITS_LIMIT});
+      var out = [], size = 0;
+      for (var n = 1; n <= count; n++) {
+        var content = await (await pdf.getPage(n)).getTextContent();
+        var text = content.items.map(function (it) { return (it.str || "") + (it.hasEOL ? "\\n" : " "); }).join("");
+        text = text.replace(/[ \\t]+\\n/g, "\\n").replace(/[ \\t]{2,}/g, " ").trim();
+        text = text.length > ${UNIT_TEXT_LIMIT} ? text.slice(0, ${UNIT_TEXT_LIMIT - 1}) + "…" : text;
+        // Stay well inside the host's byte limit (labels and JSON add some).
+        size += text.length + 32;
+        if (size > ${Math.floor(UNITS_BYTES_LIMIT * 0.9)}) { count = n - 1; break; }
+        out.push(text);
+      }
+      post({ type: "pdf.units", pages: out, truncated: pdf.numPages > out.length });
+    } catch (e) {
+      fail(e);
+    }
+  }
+
   async function load(d) {
     try {
       if (typeof d.background === "string") document.body.style.background = d.background;
-      await runModule(d.worker);
-      await runModule(d.lib);
-      var lib = globalThis.pdfjsLib;
-      doc = await lib.getDocument({
-        data: new Uint8Array(d.bytes),
-        isEvalSupported: false,
-        useSystemFonts: true,
-        enableXfa: false,
-        disableAutoFetch: true,
-        disableStream: true,
-        verbosity: 0,
-      }).promise;
+      doc = await open(d);
       var first = (await doc.getPage(1)).getViewport({ scale: 1 });
       base = { width: first.width, height: first.height };
       msg.remove();
@@ -212,6 +251,9 @@ body{overflow:auto;font:13px system-ui,sans-serif;color:#bbb;}
     if (d.type === "pdf.load" && !started && typeof d.lib === "string" && typeof d.worker === "string" && d.bytes instanceof ArrayBuffer) {
       started = true;
       load(d);
+    } else if (d.type === "pdf.units" && !started && typeof d.lib === "string" && typeof d.worker === "string" && d.bytes instanceof ArrayBuffer) {
+      started = true;
+      units(d);
     } else if (d.type === "pdf.command" && typeof d.id === "string") {
       command(d.id, d.value);
     }

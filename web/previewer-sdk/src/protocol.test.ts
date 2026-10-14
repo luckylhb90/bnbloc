@@ -7,11 +7,16 @@ import {
   TOOLBAR_LIMIT,
   SELECTION_DETAIL_LIMIT,
   SELECTION_LABEL_LIMIT,
+  UNITS_BYTES_LIMIT,
+  UNITS_LIMIT,
+  UNIT_TEXT_LIMIT,
   fitSelection,
+  fitUnits,
   hostOriginFromHash,
   readFrameMessage,
   readHostMessage,
   readToolbar,
+  readUnits,
   readToolbarItem,
   stateKey,
   validThumbnail,
@@ -161,4 +166,18 @@ test("a selection is a bounded label and detail, or null to clear", () => {
   const fit = fitSelection("x".repeat(500), "y".repeat(5000));
   eq([[...fit.label].length, [...fit.detail].length, fit.detail.endsWith("…")], [SELECTION_LABEL_LIMIT, SELECTION_DETAIL_LIMIT, true], "fitSelection cuts to the limits");
   eq(readFrameMessage({ type: "preview.selection", selection: fit }) !== null, true, "a fitted selection is accepted");
+});
+
+test("units are bounded on both sides", () => {
+  const ok = { type: "preview.units", id: "r1", units: [{ key: "s1", label: "Slide 1", text: "Title" }, { label: "", text: "" }], truncated: false };
+  eq(readFrameMessage(ok), ok, "a unit list");
+  eq(readFrameMessage({ type: "preview.units", id: "r1", error: "bad file" }), { type: "preview.units", id: "r1", error: "bad file" }, "an error");
+  eq(readFrameMessage({ ...ok, id: "../x" }), null, "a bad id");
+  eq(readFrameMessage({ ...ok, units: [{ label: "x", text: "y".repeat(UNIT_TEXT_LIMIT + 1) }] }), null, "a long text");
+  eq(readFrameMessage({ ...ok, units: Array.from({ length: UNITS_LIMIT + 1 }, () => ({ label: "", text: "" })) }), null, "too many");
+  const fitted = fitUnits(Array.from({ length: UNITS_LIMIT + 2 }, (_, i) => ({ key: `k${i}`, label: "L", text: "t" })));
+  eq([fitted.units.length, fitted.truncated], [UNITS_LIMIT, true], "fitUnits stops at the limit");
+  eq(readUnits(fitted.units) !== null, true, "a fitted list is accepted");
+  const big = fitUnits(Array.from({ length: 1000 }, () => ({ label: "x", text: "y".repeat(UNIT_TEXT_LIMIT) })));
+  eq([big.truncated, JSON.stringify(big.units).length <= UNITS_BYTES_LIMIT], [true, true], "fitUnits stops at the byte limit");
 });

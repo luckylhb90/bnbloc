@@ -3,7 +3,7 @@
   "contract": "bnbloc.previewer.contract/v1",
   "runtime": "bundle",
   "name": "pptx",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "publisher": "bnbloc",
   "description": "PowerPoint decks (.pptx, .pptm, .ppsx, .potx): every slide rendered in place — text, shapes, images, tables, charts — with zoom and fit.",
   "artifacts": {
@@ -21,13 +21,7 @@
       "extensions": [".pptx", ".pptm", ".ppsx", ".potx"]
     },
     "rank": 50,
-    "capabilities": ["toolbar", "selection"],
-    "suggestions": [
-      { "label": "Tighten the wording", "prompt": "Tighten the wording on every slide: shorter titles, fewer words per bullet, the same meaning. Keep the layout and design." },
-      { "label": "Add speaker notes", "prompt": "Write speaker notes for each slide that has none: two to four sentences on what to say." },
-      { "label": "Make it consistent", "prompt": "Check the deck for inconsistent fonts, sizes, colours, alignment and capitalisation, and fix them." },
-      { "label": "Summarize the deck", "prompt": "Summarize this deck in five bullet points. Do not change the file." }
-    ],
+    "capabilities": ["toolbar", "selection", "units"],
     "toolbar": [
       { "id": "zoom", "icon": "zoom-in", "label": "Zoom", "kind": "zoom" },
       { "id": "fit", "icon": "fit", "label": "Fit to width", "kind": "button" }

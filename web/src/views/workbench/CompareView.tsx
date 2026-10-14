@@ -15,7 +15,7 @@ import { UnitDiff } from "./VersionDiff";
 type State =
   | { readonly phase: "loading" }
   | { readonly phase: "error"; readonly message: string }
-  | { readonly phase: "units"; readonly noun: readonly [string, string]; readonly prev: UnitList; readonly curr: UnitList }
+  | { readonly phase: "units"; readonly noun?: readonly [string, string]; readonly prev: UnitList; readonly curr: UnitList }
   | { readonly phase: "view"; readonly strategy: Extract<CompareStrategy, { kind: "view" }>; readonly prev: CompareInput; readonly curr: CompareInput };
 
 export function CompareView({

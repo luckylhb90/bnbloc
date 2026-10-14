@@ -50,17 +50,17 @@ Validation (`core/pkgmeta/previewer_validation.go`, enforced at install):
   10). Specificity, highest first: multi-part extension (`.atlas.json`
   matching the end of the name — it beats the JSON viewer's exact
   `application/json`), exact MIME, plain extension, kind, MIME wildcard;
-- `capabilities` ⊆ `thumbnail`, `liveState`, `toolbar`, `selection` (`edit`
-  is reserved); a host ignores a capability it predates (it never drops the
-  previewer for one);
+- `capabilities` ⊆ `thumbnail`, `liveState`, `toolbar`, `selection`, `units`
+  (`edit` is reserved); a host ignores a capability it predates (it never
+  drops the previewer for one);
 - `toolbar`: at most 20 items, unique ids `[a-z][a-z0-9-]{0,31}`, an icon
   NAME from the code-owned list, a 1–40 character label, kind
   `button | toggle | zoom`; a non-empty toolbar requires the `toolbar`
   capability;
-- `suggestions`: at most 6 starting prompts `{label, prompt}` for the file's
-  Ask AI panel (label 1–40 characters, prompt 1–500); the panel offers them
-  on an empty thread, and a pick fills the composer, never sends
-  (`docs/prd/2026-10-14-ai-document-editing.md` M2).
+- no prompts: a file's suggested requests are prompt-pack prompts scoped to
+  the files they are for (`files`; `docs/prd/2026-10-14-file-prompts-and-compare.md`).
+  A 1.1.0 package's `suggestions` are accepted and ignored until installed
+  ones are replaced.
 
 The vocabularies (capabilities, toolbar kinds and icons, limits) are defined
 once in `web/previewer-sdk/src/protocol.ts`; the Go validator mirrors them and
@@ -179,6 +179,8 @@ are `postMessage` objects with a `type`:
 | frame → host | `preview.thumbnail {png: ArrayBuffer}` | PNG ≤ 512 KiB; stored via `PUT …/versions/{n}/thumbnail` only when the previewer declares `thumbnail` and the version has none |
 | frame → host | `preview.error {message}` | ≤ 500 characters, shown over the frame |
 | frame → host | `preview.title {text}` | ≤ 120 characters, the frame's accessible title |
+| host → frame | `preview.units.request {id, file, bytes}` | Compare reads a version into units, in a hidden frame (needs `units`) |
+| frame → host | `preview.units {id, units, truncated}` or `{id, error}` | ordered units `{key?, label, text}`: at most 5,000, key ≤ 200, label ≤ 120, text ≤ 4,000 characters, 2 MiB in all; `key` is a stable identity across versions when the format has one (a slide id, a cell address). The host registers the previewer as the comparer of its files |
 | frame → host | `preview.selection {selection}` | the part the member points at, `{label ≤ 120, detail ≤ 2000}` or `null` to clear (needs `selection`); the Ask AI panel shows the label as a removable chip and sends both with the request, the detail fenced as the file's data |
 | host → frame | `preview.resize {w, h}` | viewport changes |
 
@@ -217,7 +219,7 @@ implements the frame side:
 
 ```ts
 import { onInit, onFile, onToolbar, onState, onResize, setToolbar, sendState,
-  provideThumbnail, setTitle, sendSelection, reportError } from "@bnbloc/previewer-sdk";
+  provideThumbnail, setTitle, sendSelection, onUnits, reportError } from "@bnbloc/previewer-sdk";
 
 onFile(async (bytes, file) => {
   const url = URL.createObjectURL(new Blob([bytes], { type: file.mimeType }));
@@ -229,6 +231,8 @@ onToolbar((id, value) => { /* apply the gesture, then setToolbar(updatedItems) *
 onState((state, actor) => { /* apply another member's live state */ });
 // The member clicked frame 7 ("selection" capability); sendSelection(null) clears.
 sendSelection({ label: "Frame 7", detail: "walk_cycle_07: 64×64 at 448,0" });
+// Compare ("units" capability): a version's units; the SDK fits them to the limits.
+onUnits(async (bytes) => frames(bytes).map((f) => ({ key: f.name, label: f.name, text: f.rect })));
 ```
 
 Bundle it into a classic script (or modules) with relative URLs and an
@@ -261,6 +265,9 @@ package without one fails the build). `examples/previewers/lib/selection.ts`
 is the Office previewers' pointing: a click picks a slide, a paragraph, a
 table or a page, selected text is quoted, Escape clears; the xlsx previewer
 picks cell ranges itself (drag, shift-click, row and column headers).
+`examples/previewers/lib/ooxml.ts` reads an Office package's parts and
+paragraph text for the pptx and docx units (each previewer brings its own
+jszip); the xlsx units come from ExcelJS.
 
 ## Publishing
 

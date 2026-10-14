@@ -13,11 +13,13 @@ import ExcelJS from "exceljs";
 
 import {
   SELECTION_DETAIL_LIMIT,
+  UNITS_LIMIT,
   ZOOM_MAX,
   ZOOM_MIN,
   onFile,
   onInit,
   onToolbar,
+  onUnits,
   reportError,
   sendSelection,
   setTitle,
@@ -27,6 +29,7 @@ import {
 } from "../../../../web/previewer-sdk/src/index.ts";
 import { shortName, sniffOffice, unreadableMessage, type OfficeKind } from "../../lib/office.ts";
 import { PICKED } from "../../lib/selection.ts";
+import { workbookUnits } from "./units.ts";
 import {
   cellCss,
   colName,
@@ -314,4 +317,12 @@ onToolbar((id, value) => {
   const table = gridEl.querySelector("table");
   if (table) table.style.zoom = String(zoom);
   publishToolbar();
+});
+
+// Compare reads a version into cells (capability "units", src/units.ts);
+// one past the limit lets the SDK mark the list cut.
+onUnits(async (bytes) => {
+  const wb = new ExcelJS.Workbook();
+  await wb.xlsx.load(bytes);
+  return workbookUnits(wb, UNITS_LIMIT + 1).units;
 });

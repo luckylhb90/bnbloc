@@ -5,16 +5,12 @@
 // removed; the view shows the changes and collapses the rest. Pure,
 // unit-tested under node.
 
+import type { Unit } from "../../previewer-sdk/src/protocol.ts";
 import { diffSequence, type SeqStep } from "./diff.ts";
 
-export interface CompareUnit {
-  /** A stable identity across versions (a slide id, a cell address);
-   *  absent when units have none (paragraphs, pages). */
-  readonly key?: string;
-  /** What the member reads ("Slide 3", "Revenue!B3"); "" for a whole text. */
-  readonly label: string;
-  readonly text: string;
-}
+/** A unit of a version: the frame protocol's Unit (one shape, whether a
+ *  previewer or a built-in comparer made it). */
+export type CompareUnit = Unit;
 
 export type UnitChange =
   | { readonly kind: "same"; readonly prev: CompareUnit; readonly curr: CompareUnit }

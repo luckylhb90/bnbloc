@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { artifactRunnerUrl, composeArtifactDocument, loadMessage, type ConvertFileSrc } from "@/lib/artifactFrame";
+import { composeArtifactDocument, loadMessage } from "@/lib/artifactFrame";
+import { loadPdfjs, pdfRunnerUrl } from "./pdfAssets";
 import type { ArtifactViewerProps } from "./registry";
 import { useViewerToolbar } from "./toolbar";
 import { PDF_GUEST_HTML, readPdfMessage } from "./pdfFrame";
@@ -10,24 +11,6 @@ import { PDF_GUEST_HTML, readPdfMessage } from "./pdfFrame";
 // PDF opens, as source text handed to the frame — the frame itself loads
 // nothing from the network.
 
-function runnerUrl(): string {
-  const internals = window.__TAURI_INTERNALS__ as { convertFileSrc?: ConvertFileSrc } | undefined;
-  return artifactRunnerUrl({ convertFileSrc: internals?.convertFileSrc, baseURI: document.baseURI, hostOrigin: window.location.origin });
-}
-
-let pdfjsSources: Promise<{ lib: string; worker: string }> | null = null;
-
-function loadPdfjs(): Promise<{ lib: string; worker: string }> {
-  pdfjsSources ??= Promise.all([
-    import("pdfjs-dist/legacy/build/pdf.min.mjs?raw"),
-    import("pdfjs-dist/legacy/build/pdf.worker.min.mjs?raw"),
-  ]).then(([lib, worker]) => ({ lib: lib.default, worker: worker.default }));
-  pdfjsSources.catch(() => {
-    pdfjsSources = null;
-  });
-  return pdfjsSources;
-}
-
 export default function PdfViewer({ blob, file, toolbar }: ArtifactViewerProps) {
   const frameRef = useRef<HTMLIFrameElement | null>(null);
   const handedOff = useRef(false);
@@ -35,7 +18,7 @@ export default function PdfViewer({ blob, file, toolbar }: ArtifactViewerProps) 
   const [status, setStatus] = useState({ page: 0, pages: 0, zoom: 1 });
   const [error, setError] = useState("");
   const doc = useMemo(() => composeArtifactDocument(PDF_GUEST_HTML), []);
-  const src = useMemo(runnerUrl, []);
+  const src = useMemo(pdfRunnerUrl, []);
 
   const send = useCallback((message: unknown, transfer?: Transferable[]) => {
     frameRef.current?.contentWindow?.postMessage(message, "*", transfer);

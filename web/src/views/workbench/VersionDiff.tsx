@@ -43,8 +43,9 @@ export function LineDiff({ prev, curr }: { readonly prev: string; readonly curr:
 
 const BADGE: Record<Exclude<UnitChange["kind"], "same">, string> = { changed: "Changed", added: "Added", removed: "Removed" };
 
-function plural(n: number, noun: readonly [string, string]): string {
-  return `${n} ${n === 1 ? noun[0] : noun[1]}`;
+// "3 slides"; just "3" when the units have no common name.
+function plural(n: number, noun?: readonly [string, string]): string {
+  return noun ? `${n} ${n === 1 ? noun[0] : noun[1]}` : String(n);
 }
 
 export function UnitDiff({
@@ -55,7 +56,7 @@ export function UnitDiff({
 }: {
   readonly prev: Parameters<typeof diffUnits>[0];
   readonly curr: Parameters<typeof diffUnits>[1];
-  readonly noun: readonly [string, string];
+  readonly noun?: readonly [string, string];
   readonly truncated?: boolean;
 }) {
   const changes = useMemo(() => diffUnits(prev, curr), [prev, curr]);
@@ -93,7 +94,7 @@ export function UnitDiff({
       <ul className="flex flex-col gap-2 p-2">
         {changes.map((c, i) => {
           if (c.kind === "same" && !showSame) return null;
-          const label = (c.kind === "removed" ? c.prev.label : c.curr.label) || `${noun[0]} ${i + 1}`;
+          const label = (c.kind === "removed" ? c.prev.label : c.curr.label) || `${noun?.[0] ?? "Part"} ${i + 1}`;
           return (
             <li key={i} className={cn("overflow-hidden rounded-[var(--radius)] border border-[var(--color-border)]", c.kind === "same" && "opacity-60")}>
               <div className="flex items-center gap-2 border-b border-[var(--color-border)] bg-[var(--color-surface-2)] px-3 py-1 text-xs">

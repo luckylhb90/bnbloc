@@ -31,8 +31,9 @@ export interface CompareViewProps {
 export type CompareStrategy =
   | {
       readonly kind: "units";
-      /** What a unit is called, singular and plural ("slide", "slides"). */
-      readonly noun: readonly [string, string];
+      /** What a unit is called, singular and plural ("slide", "slides");
+       *  absent for an installed previewer's units (their labels say). */
+      readonly noun?: readonly [string, string];
       extract(input: CompareInput, signal: AbortSignal): Promise<UnitList>;
     }
   | { readonly kind: "view"; readonly View: React.ComponentType<CompareViewProps> };
@@ -46,6 +47,7 @@ export interface VersionComparer extends FileClaimant {
 const comparers = createFileRegistry<VersionComparer>();
 
 export const registerComparer = comparers.register;
+export const unregisterComparer = comparers.unregister;
 
 /** The comparer for a file; null = its versions cannot be compared. */
 export function selectComparer(file: ArtifactFileInfo): VersionComparer | null {

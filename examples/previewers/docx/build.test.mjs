@@ -36,3 +36,21 @@ test("Symbol and Wingdings bullets become Unicode; other text stays", () => {
   assert.equal(unicodeBullets('content: "counter(a, decimal)."'), 'content: "counter(a, decimal)."');
   assert.equal(unicodeBullets('"o"'), '"o"', "Courier New's o is a real letter");
 });
+
+test("units: paragraphs and tables under their headings; an inserted paragraph is one addition", async () => {
+  const { readFile } = await import("node:fs/promises");
+  const JSZip = (await import("jszip")).default;
+  const { docUnits } = await import("./src/units.ts");
+  const { diffUnits } = await import("../../../web/src/lib/compareUnits.ts");
+  const bytes = await readFile(new URL("./samples/doc.docx", import.meta.url));
+  const before = await docUnits(JSZip, bytes);
+  assert.ok(before.some((u) => u.label === "Table · By region" && u.text.startsWith("Region\tQ1\tQ2\nNorth\t120\t140")), "a table as tab-separated rows");
+  const zip = await JSZip.loadAsync(bytes);
+  const doc = await zip.file("word/document.xml").async("string");
+  const anchor = doc.indexOf("<w:p", doc.indexOf("Support backlog halved") - 400);
+  const inserted = '<w:p><w:r><w:t>A new point</w:t></w:r></w:p>';
+  zip.file("word/document.xml", doc.slice(0, anchor) + inserted + doc.slice(anchor));
+  const after = await docUnits(JSZip, await zip.generateAsync({ type: "uint8array" }));
+  const changes = diffUnits(before, after).filter((c) => c.kind !== "same");
+  assert.deepEqual(changes.map((c) => [c.kind, c.curr?.text]), [["added", "A new point"]]);
+});

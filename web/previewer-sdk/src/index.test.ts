@@ -191,3 +191,23 @@ await test("title is bounded; errors are clamped, never thrown", () => {
   h.client.reportError("   ");
   eq((h.posted.at(-1)?.message as { message: string }).message, "previewer error", "blank becomes a generic message");
 });
+
+await test("units: a request waits for its handler, the answer is fitted, a throw is reported", async () => {
+  const h = harness();
+  const req = (id: string) => ({ type: "preview.units.request", id, file: { name: "deck.pptx", mimeType: "x/y", sizeBytes: 3, version: 2 }, bytes: new ArrayBuffer(3) });
+  h.deliver(req("r1"));
+  eq(h.posted.length, 0, "no handler yet: nothing answered");
+  h.client.onUnits((_bytes, file) => [{ key: "s1", label: `Slide 1 of ${file.name}`, text: "x".repeat(5000) }]);
+  await new Promise((r) => setTimeout(r, 0));
+  const answer = h.posted.at(-1)?.message as { type: string; id: string; units: { key: string; label: string; text: string }[]; truncated: boolean };
+  eq([answer.type, answer.id, answer.units[0].key, answer.units[0].label, [...answer.units[0].text].length, answer.truncated], ["preview.units", "r1", "s1", "Slide 1 of deck.pptx", 4000, false], "fitted answer");
+  h.client.onUnits(() => {
+    throw new Error("not a deck");
+  });
+  h.deliver(req("r2"));
+  await new Promise((r) => setTimeout(r, 0));
+  eq(h.posted.at(-1)?.message, { type: "preview.units", id: "r2", error: "not a deck" }, "error reported");
+  h.deliver({ ...req("bad id!") });
+  await new Promise((r) => setTimeout(r, 0));
+  eq((h.posted.at(-1)?.message as { id: string }).id, "r2", "a malformed request is ignored");
+});

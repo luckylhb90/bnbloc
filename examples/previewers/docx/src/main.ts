@@ -8,6 +8,7 @@
 // at it (lib/selection.ts).
 
 import { renderAsync } from "docx-preview";
+import JSZip from "jszip";
 
 import {
   ZOOM_MAX,
@@ -16,6 +17,7 @@ import {
   onInit,
   onResize,
   onToolbar,
+  onUnits,
   reportError,
   setTitle,
   setToolbar,
@@ -23,6 +25,7 @@ import {
   type ToolbarItem,
 } from "../../../../web/previewer-sdk/src/index.ts";
 import { unicodeBullets } from "./bullets.ts";
+import { docUnits } from "./units.ts";
 import { countedTitle, keepLinksInside, sniffOffice, unreadableMessage, type OfficeKind } from "../../lib/office.ts";
 import { quotedLabel, tableText, watchPointing } from "../../lib/selection.ts";
 
@@ -174,3 +177,7 @@ onToolbar((id, value) => {
 onResize(() => {
   if (zoom === null) applyZoom();
 });
+
+// Compare reads a version into paragraphs and tables (capability "units",
+// src/units.ts).
+onUnits((bytes) => docUnits(JSZip, bytes));

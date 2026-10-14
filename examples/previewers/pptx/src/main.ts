@@ -9,6 +9,7 @@
 // points the Ask AI panel at it (lib/selection.ts).
 
 import { PptxViewer, RECOMMENDED_ZIP_LIMITS } from "@aiden0z/pptx-renderer";
+import JSZip from "jszip";
 
 import {
   ZOOM_MAX,
@@ -16,6 +17,7 @@ import {
   onFile,
   onInit,
   onToolbar,
+  onUnits,
   reportError,
   setTitle,
   setToolbar,
@@ -24,6 +26,7 @@ import {
 } from "../../../../web/previewer-sdk/src/index.ts";
 import { countedTitle, keepLinksInside, sniffOffice, unreadableMessage, type OfficeKind } from "../../lib/office.ts";
 import { watchPointing } from "../../lib/selection.ts";
+import { deckUnits } from "./units.ts";
 
 const POWERPOINT: OfficeKind = { noun: "PowerPoint presentation", ext: ".pptx", legacy: ".ppt", apps: "PowerPoint or Keynote" };
 
@@ -148,3 +151,6 @@ onToolbar((id, value) => {
   }
   publishToolbar();
 });
+
+// Compare reads a version into slides (capability "units", src/units.ts).
+onUnits((bytes) => deckUnits(JSZip, bytes));
