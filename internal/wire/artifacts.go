@@ -55,6 +55,9 @@ type ArtifactVersion struct {
 	AuthorUserID string             `json:"authorUserId"`
 	CreatedAtMs  int64              `json:"createdAtMs"`
 	Thumbnail    *ArtifactThumbnail `json:"thumbnail,omitempty"`
+	// EditedFrom is the version an edit request started from (0 = not an
+	// edit); below ParentVersion when the file changed meanwhile.
+	EditedFrom int `json:"editedFrom,omitempty"`
 }
 
 // ArtifactList is GET /v1/rooms/{id}/artifacts: newest-updated first;

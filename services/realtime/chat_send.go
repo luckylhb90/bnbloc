@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"path"
 	"strings"
 	"time"
 
@@ -33,6 +34,12 @@ type errBadAttachment struct{ err error }
 
 func (e errBadAttachment) Error() string { return e.err.Error() }
 func (e errBadAttachment) Unwrap() error { return e.err }
+
+// errBadFileRef refuses a message naming a file it may not (not the room's,
+// gone, a version it does not have).
+type errBadFileRef struct{ msg string }
+
+func (e errBadFileRef) Error() string { return e.msg }
 
 // ChatAgentOptions is the sender's model + reasoning selection, forwarded
 // end-to-end to the agent process. Empty fields keep the core/CLI default.
@@ -81,6 +88,9 @@ type ChatPost struct {
 	// quick try, chat_expert.go): only a dispatch sets it, for a draft its
 	// parent job staged. Never set with Expert.
 	Draft string
+	// FileRef names the room file the message is about (version 0 = the
+	// current one); validated and completed (version, name) on post.
+	FileRef *wire.FileRef
 }
 
 // ChatPosted is what PostChat did: the message's sequence and, for an agent
@@ -115,6 +125,10 @@ func (s *Service) PostChat(ctx context.Context, p ChatPost) (ChatPosted, error) 
 	}
 	if text == "" && len(attachments) == 0 {
 		return ChatPosted{}, errEmptyMessage
+	}
+	fileRef, err := s.resolveFileRef(ctx, p.RoomID, p.FileRef)
+	if err != nil {
+		return ChatPosted{}, err
 	}
 	// Idempotency: a retry carrying a client id we already stored returns the
 	// original sequence without re-publishing (no duplicate message).
@@ -166,6 +180,9 @@ func (s *Service) PostChat(ctx context.Context, p ChatPost) (ChatPosted, error) 
 	}
 	if len(attachments) > 0 {
 		payload["attachments"] = attachments
+	}
+	if fileRef != nil {
+		payload["fileRef"] = *fileRef
 	}
 	if p.Scheduled != nil {
 		payload["scheduled"] = map[string]any{"scheduleId": p.Scheduled.ScheduleID}
@@ -251,6 +268,7 @@ func (s *Service) PostChat(ctx context.Context, p ChatPost) (ChatPosted, error) 
 			TargetID:          agentTargetID(coreName, p.Recipient.Provider),
 			MessageText:       text,
 			AttachmentIDs:     p.AttachmentIDs,
+			FileRef:           fileRef,
 			Model:             model,
 			ReasoningEffort:   reasoningEffort,
 			Status:            store.AgentJobQueued,
@@ -282,4 +300,48 @@ func agentTargetID(coreName, provider string) string {
 		return provider
 	}
 	return core.QualifyTargetID(coreName, provider)
+}
+
+// ArtifactReader is what realtime reads of a room's deliverables: search
+// (team.go) and the file a message names (resolveFileRef).
+type ArtifactReader interface {
+	store.ArtifactIndex
+	GetArtifact(ctx context.Context, artifactID string) (store.Artifact, error)
+	GetArtifactVersion(ctx context.Context, artifactID string, version int) (store.ArtifactVersion, error)
+}
+
+// resolveFileRef validates the file a message names and completes it: one
+// of the room's deliverables (never a web app: its snapshot is not a file
+// an agent edits), at a version it has (0 = its current one), named as its
+// file. nil for none.
+func (s *Service) resolveFileRef(ctx context.Context, roomID string, ref *wire.FileRef) (*wire.FileRef, error) {
+	if ref == nil {
+		return nil, nil
+	}
+	id := strings.TrimSpace(ref.ArtifactID)
+	if id == "" || s.Artifacts == nil {
+		return nil, errBadFileRef{"fileRef names no deliverable"}
+	}
+	art, err := s.Artifacts.GetArtifact(ctx, id)
+	if errors.Is(err, store.ErrArtifactNotFound) || (err == nil && art.RoomID != roomID) {
+		return nil, errBadFileRef{"the file is not one of this room's deliverables (it may have been deleted)"}
+	}
+	if err != nil {
+		return nil, fmt.Errorf("file lookup failed: %w", err)
+	}
+	if art.Kind == store.ArtifactKindSite {
+		return nil, errBadFileRef{"a web app cannot be edited from its preview yet; ask in the chat"}
+	}
+	version := ref.Version
+	if version == 0 {
+		version = art.CurrentVersion
+	}
+	if version < 1 || version > art.CurrentVersion {
+		return nil, errBadFileRef{fmt.Sprintf("%s has no version %d", art.Title, ref.Version)}
+	}
+	name := art.FileName
+	if name == "" {
+		name = path.Base(art.Title)
+	}
+	return &wire.FileRef{ArtifactID: art.ArtifactID, Version: version, Name: name}, nil
 }

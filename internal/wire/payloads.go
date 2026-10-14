@@ -31,6 +31,15 @@ type ChatRecipientRef struct {
 	Core     string `json:"core,omitempty"`
 }
 
+// FileRef names the room file a chat message is about: a deliverable at a
+// version, which the agent edits (docs/prd/2026-10-14-ai-document-editing.md
+// rules 2–4). Name is the file's display name, filled by the server.
+type FileRef struct {
+	ArtifactID string `json:"artifactId"`
+	Version    int    `json:"version"`
+	Name       string `json:"name,omitempty"`
+}
+
 // ChatAttachment is an attachment a chat message embeds.
 type ChatAttachment struct {
 	ID          string `json:"id"`

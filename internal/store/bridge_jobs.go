@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/luckylhb90/bnbloc/internal/tenant"
+	"github.com/luckylhb90/bnbloc/internal/wire"
 )
 
 var ErrAgentJobNotFound = errors.New("store: agent job not found")
@@ -305,19 +306,22 @@ func bridgeLiveSince(nowMs int64) int64 { return nowMs - BridgeOfflineAfterMs }
 
 // AgentJob is a durable request for a bridge to drive one agent turn.
 type AgentJob struct {
-	JobID            string                `json:"jobId"`
-	TenantID         string                `json:"tenantId"`
-	RoomID           string                `json:"roomId"`
-	ChannelID        string                `json:"channelId"`
-	MessageSeq       int64                 `json:"messageSeq"`
-	ClientMsgID      string                `json:"clientMsgId"`
-	RequesterUserID  string                `json:"requesterUserId"`
-	OwnerUserID      string                `json:"ownerUserId"`
-	Core             string                `json:"core"`
-	Provider         string                `json:"provider"`
-	TargetID         string                `json:"targetId"`
-	MessageText      string                `json:"messageText"`
-	AttachmentIDs    []string              `json:"attachmentIds,omitempty"`
+	JobID           string   `json:"jobId"`
+	TenantID        string   `json:"tenantId"`
+	RoomID          string   `json:"roomId"`
+	ChannelID       string   `json:"channelId"`
+	MessageSeq      int64    `json:"messageSeq"`
+	ClientMsgID     string   `json:"clientMsgId"`
+	RequesterUserID string   `json:"requesterUserId"`
+	OwnerUserID     string   `json:"ownerUserId"`
+	Core            string   `json:"core"`
+	Provider        string   `json:"provider"`
+	TargetID        string   `json:"targetId"`
+	MessageText     string   `json:"messageText"`
+	AttachmentIDs   []string `json:"attachmentIds,omitempty"`
+	// FileRef is the room file the request edits (the message's fileRef,
+	// validated when it was posted); nil = none.
+	FileRef          *wire.FileRef         `json:"fileRef,omitempty"`
 	Model            string                `json:"model,omitempty"`
 	ReasoningEffort  string                `json:"reasoningEffort,omitempty"`
 	Status           AgentJobStatus        `json:"status"`

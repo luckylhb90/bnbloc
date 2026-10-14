@@ -64,6 +64,18 @@ func TestContractArtifactStoreVersions(t *testing.T) {
 		if got, err := s.GetArtifactVersion(ctx, id, 2); err != nil || got.Content != "two-a" || got.AuthorUserID != "jack" {
 			t.Fatalf("v2 = %+v, %v: the loser's write landed", got, err)
 		}
+		// An edit records the version it started from, never one ahead of
+		// the base.
+		_, v3, err := s.PublishArtifactVersion(ctx, id, ArtifactVersion{Content: "three", EditedFrom: 1}, 2)
+		if err != nil || v3.EditedFrom != 1 {
+			t.Fatalf("edit = %+v, %v", v3, err)
+		}
+		if got, err := s.GetArtifactVersion(ctx, id, 3); err != nil || got.EditedFrom != 1 || got.ParentVersion != 2 {
+			t.Fatalf("edit read back = %+v, %v", got, err)
+		}
+		if _, _, err := s.PublishArtifactVersion(ctx, id, ArtifactVersion{Content: "x", EditedFrom: 4}, 3); !errors.Is(err, ErrInvalidArtifactVersion) {
+			t.Fatalf("an edit from a later version = %v", err)
+		}
 		if _, err := s.GetArtifactVersion(ctx, id, 9); !errors.Is(err, ErrArtifactNotFound) {
 			t.Fatalf("missing version = %v", err)
 		}
@@ -71,7 +83,7 @@ func TestContractArtifactStoreVersions(t *testing.T) {
 			t.Fatalf("publish to a missing artifact = %v", err)
 		}
 		list := must(s.ListArtifactVersions(ctx, id, 10))(t)
-		if len(list) != 2 || list[0].Version != 2 || list[1].Version != 1 {
+		if len(list) != 3 || list[0].Version != 3 || list[2].Version != 1 {
 			t.Fatalf("versions = %+v, want newest first", list)
 		}
 		for _, v := range list {

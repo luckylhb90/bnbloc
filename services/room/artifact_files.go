@@ -129,6 +129,7 @@ type blobUpload struct {
 	summary     string
 	sourceJobID string
 	sourceSeq   int64
+	editedFrom  int
 	// loadsSDK: the file is a site bundle that loads the app SDK.
 	loadsSDK bool
 }
@@ -206,6 +207,13 @@ func (s *Service) publishBlobVersion(w http.ResponseWriter, r *http.Request, art
 				return
 			}
 			up.sourceSeq = n
+		case "editedFrom":
+			n, err := strconv.Atoi(val)
+			if err != nil {
+				httpx.Error(w, "invalid editedFrom", http.StatusBadRequest)
+				return
+			}
+			up.editedFrom = n
 		}
 	}
 	if !seenFile {
@@ -216,7 +224,7 @@ func (s *Service) publishBlobVersion(w http.ResponseWriter, r *http.Request, art
 		httpx.Error(w, "baseVersion is required", http.StatusBadRequest)
 		return
 	}
-	if !validVersionProvenance(w, up.summary, up.sourceJobID, up.sourceSeq) {
+	if !validVersionProvenance(w, up.summary, up.sourceJobID, up.sourceSeq) || !validEditedFrom(w, up.editedFrom, up.baseVersion) {
 		return
 	}
 	// Dedupe: the same bytes as the current version are not a new revision.
@@ -234,6 +242,7 @@ func (s *Service) publishBlobVersion(w http.ResponseWriter, r *http.Request, art
 		SizeBytes: up.ref.Size, MimeType: up.mimeType, LoadsAppSDK: up.loadsSDK,
 		SourceJobID: up.sourceJobID, SourceSeq: up.sourceSeq,
 		Summary: up.summary, AuthorUserID: userID, CreatedAtMs: s.Now(),
+		EditedFrom: up.editedFrom,
 	}, up.baseVersion)
 }
 

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -307,6 +308,33 @@ func TestArtifactAnchorsRoute(t *testing.T) {
 		resp.Body.Close()
 		if resp.StatusCode != tc.want {
 			t.Fatalf("%s %s = %d, want %d", tc.user, tc.query, resp.StatusCode, tc.want)
+		}
+	}
+}
+
+// An edit records the version it started from: below its parent when the
+// file changed meanwhile, never a version the file does not have.
+func TestPublishVersionRecordsEditedFrom(t *testing.T) {
+	srv, _ := newArtifactServer(t)
+	body := decodeJSON(t, artifactRequest(t, srv, "POST", "/v1/rooms/room-1/artifacts", "alice", map[string]any{
+		"kind": "markdown", "title": "plan.md", "content": "v1",
+	}))
+	id := body["artifact"].(map[string]any)["artifactId"].(string)
+	publish := func(base, editedFrom int) *http.Response {
+		return artifactRequest(t, srv, "POST", "/v1/rooms/room-1/artifacts/"+id+"/versions", "alice",
+			map[string]any{"baseVersion": base, "content": fmt.Sprintf("from %d on %d", editedFrom, base), "editedFrom": editedFrom})
+	}
+	if r := publish(1, 0); r.StatusCode != http.StatusOK {
+		t.Fatalf("plain publish = %d", r.StatusCode)
+	}
+	// Asked to edit v1; v2 landed meanwhile, so the edit builds on v2.
+	v := decodeJSON(t, publish(2, 1))["version"].(map[string]any)
+	if v["editedFrom"].(float64) != 1 || v["parentVersion"].(float64) != 2 {
+		t.Fatalf("edit version = %+v", v)
+	}
+	for _, bad := range []int{-1, 4} {
+		if r := publish(3, bad); r.StatusCode != http.StatusBadRequest {
+			t.Errorf("editedFrom %d = %d, want 400", bad, r.StatusCode)
 		}
 	}
 }

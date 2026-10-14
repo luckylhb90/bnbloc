@@ -95,7 +95,7 @@ type Service struct {
 	// store answers its routes 503 (search skips that kind); Rooms is the
 	// server-side membership listing search is scoped to.
 	Tasks     store.MessageTaskStore
-	Artifacts store.ArtifactIndex
+	Artifacts ArtifactReader
 	Rooms     RoomDirectory
 	// Search is the message search backend (internal/search): the store's
 	// FULLTEXT index, or OpenSearch. SearchUpdates keeps an external index
@@ -595,6 +595,9 @@ func (s *Service) handleChat(w http.ResponseWriter, r *http.Request) {
 		// Expert asks the agent recipient to wear an expert (content
 		// component id, optional version).
 		Expert *wire.ChatExpert `json:"expert,omitempty"`
+		// FileRef names the room file the message is about (an edit
+		// request from the workbench's Ask AI panel).
+		FileRef *wire.FileRef `json:"fileRef,omitempty"`
 	}
 	// Cap the request body so a client cannot stream an unbounded payload; the
 	// text limit in PostChat is the product bound, this is defense-in-depth.
@@ -611,6 +614,7 @@ func (s *Service) handleChat(w http.ResponseWriter, r *http.Request) {
 		Recipient:     body.Recipient,
 		AttachmentIDs: body.AttachmentIds,
 		Expert:        body.Expert,
+		FileRef:       body.FileRef,
 	})
 	if err != nil {
 		writeChatPostErr(w, err)
@@ -631,7 +635,7 @@ func writeChatPostErr(w http.ResponseWriter, err error) {
 		writePlatformAgentOffline(w, offline)
 	case errors.Is(err, errMessageTooLong):
 		httpx.Error(w, err.Error(), http.StatusRequestEntityTooLarge)
-	case errors.Is(err, errEmptyMessage), errors.Is(err, errAgentInPeopleChat), errors.As(err, &bad),
+	case errors.Is(err, errEmptyMessage), errors.Is(err, errAgentInPeopleChat), errors.As(err, &bad), errors.As(err, new(errBadFileRef)),
 		errors.Is(err, errExpertNotAvailable), errors.Is(err, errExpertWithoutAgent):
 		httpx.Error(w, err.Error(), http.StatusBadRequest)
 	case errors.Is(err, errUnknownChannel):

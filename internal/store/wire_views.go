@@ -127,6 +127,7 @@ func (v ArtifactVersion) View() wire.ArtifactVersion {
 		Summary:       v.Summary,
 		AuthorUserID:  v.AuthorUserID,
 		CreatedAtMs:   v.CreatedAtMs,
+		EditedFrom:    v.EditedFrom,
 	}
 	if v.Thumbnail != nil {
 		out.Thumbnail = &wire.ArtifactThumbnail{MimeType: v.Thumbnail.MimeType, Width: v.Thumbnail.Width, Height: v.Thumbnail.Height}

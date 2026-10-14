@@ -407,6 +407,9 @@ export interface ArtifactVersion {
   authorUserId: string;
   createdAtMs: number;
   thumbnail?: ArtifactThumbnail;
+  // EditedFrom is the version an edit request started from (0 = not an
+  // edit); below ParentVersion when the file changed meanwhile.
+  editedFrom?: number;
 }
 
 // ArtifactList is GET /v1/rooms/{id}/artifacts: newest-updated first;
@@ -2672,6 +2675,15 @@ export interface ChatRecipientRef {
   ownerId: string;
   provider: string;
   core?: string;
+}
+
+// FileRef names the room file a chat message is about: a deliverable at a
+// version, which the agent edits (docs/prd/2026-10-14-ai-document-editing.md
+// rules 2–4). Name is the file's display name, filled by the server.
+export interface FileRef {
+  artifactId: string;
+  version: number;
+  name?: string;
 }
 
 // ChatAttachment is an attachment a chat message embeds.

@@ -163,6 +163,10 @@ type ArtifactVersion struct {
 	// detected once when its bytes were stored (appdata.SDKScan); the
 	// artifact's IsApp reads its current version's.
 	LoadsAppSDK bool `json:"-"`
+	// EditedFrom is the version an edit request started from
+	// (docs/prd/2026-10-14-ai-document-editing.md rule 4); 0 = not an edit.
+	// It is below ParentVersion when the artifact changed meanwhile.
+	EditedFrom int `json:"editedFrom,omitempty"`
 }
 
 // ArtifactThumbnailWrite is one thumbnail store request.
@@ -266,6 +270,9 @@ func prepareArtifactVersion(v ArtifactVersion) (ArtifactVersion, error) {
 		return v, ErrInvalidArtifactVersion
 	}
 	v.Thumbnail, v.ThumbnailBlobKey, v.ThumbnailRank = nil, "", 0
+	if v.EditedFrom < 0 {
+		return v, ErrInvalidArtifactVersion
+	}
 	return v, nil
 }
 
@@ -483,6 +490,9 @@ func (s *MemoryArtifacts) PublishArtifactVersion(ctx context.Context, artifactID
 	}
 	if baseVersion != a.CurrentVersion {
 		return a, ArtifactVersion{}, ErrArtifactVersionConflict
+	}
+	if v.EditedFrom > baseVersion {
+		return a, ArtifactVersion{}, ErrInvalidArtifactVersion
 	}
 	v.ArtifactID = artifactID
 	v.TenantID = tid

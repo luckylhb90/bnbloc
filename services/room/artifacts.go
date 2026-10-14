@@ -50,6 +50,8 @@ type publishVersionBody struct {
 	Summary     string `json:"summary"`
 	SourceJobID string `json:"sourceJobId"`
 	SourceSeq   int64  `json:"sourceSeq"`
+	// EditedFrom is the version an edit request started from (0 = none).
+	EditedFrom int `json:"editedFrom"`
 }
 
 // Bounds of the version provenance and file-name fields.
@@ -386,11 +388,25 @@ func (s *Service) handlePublishVersion(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, "baseVersion must be >= 0", http.StatusBadRequest)
 		return
 	}
+	if !validEditedFrom(w, body.EditedFrom, body.BaseVersion) {
+		return
+	}
 	s.commitVersion(w, r, art, userID, store.ArtifactVersion{
 		Content: body.Content, MimeType: store.ArtifactInlineMIME(art),
 		SourceJobID: strings.TrimSpace(body.SourceJobID), SourceSeq: body.SourceSeq,
 		Summary: strings.TrimSpace(body.Summary), AuthorUserID: userID, CreatedAtMs: s.Now(),
+		EditedFrom: body.EditedFrom,
 	}, body.BaseVersion)
+}
+
+// validEditedFrom checks an edit's start version: none (0), or a version
+// the artifact has (at most the base the publish builds on).
+func validEditedFrom(w http.ResponseWriter, editedFrom, baseVersion int) bool {
+	if editedFrom < 0 || editedFrom > baseVersion {
+		httpx.Error(w, "editedFrom must name an existing version (at most baseVersion)", http.StatusBadRequest)
+		return false
+	}
+	return true
 }
 
 // validVersionProvenance bounds a version's summary and source link.

@@ -25,7 +25,7 @@ const artifactCols = `a.artifact_id, a.tenant_id, a.room_id, a.channel_id, a.kin
 // artifactVersionCols selects a version row; {content} is replaced by the
 // content expression (the column, or an empty string literal for
 // metadata-only listings).
-const artifactVersionCols = `artifact_id, tenant_id, version, parent_version, content_hash, {content}, storage, blob_key, size_bytes, mime_type, source_job_id, source_seq, summary, author_user_id, created_at_ms, thumb_blob_key, thumb_mime_type, thumb_width, thumb_height, thumb_rank, loads_app_sdk`
+const artifactVersionCols = `artifact_id, tenant_id, version, parent_version, content_hash, {content}, storage, blob_key, size_bytes, mime_type, source_job_id, source_seq, summary, author_user_id, created_at_ms, thumb_blob_key, thumb_mime_type, thumb_width, thumb_height, thumb_rank, loads_app_sdk, edited_from`
 
 func versionCols(withContent bool) string {
 	if withContent {
@@ -163,6 +163,10 @@ func (m *MySQLArtifacts) PublishArtifactVersion(ctx context.Context, artifactID 
 	if err != nil {
 		return Artifact{}, ArtifactVersion{}, err
 	}
+	if v.EditedFrom > baseVersion {
+		// An edit starts from a version that exists: at most the base.
+		return Artifact{}, ArtifactVersion{}, ErrInvalidArtifactVersion
+	}
 	if v.CreatedAtMs <= 0 {
 		v.CreatedAtMs = time.Now().UnixMilli()
 	}
@@ -194,9 +198,9 @@ WHERE tenant_id=? AND artifact_id=? AND current_version = ?`,
 	v.Version = baseVersion + 1
 	v.ParentVersion = baseVersion
 	if _, err := tx.ExecContext(ctx, `
-INSERT INTO artifact_versions (tenant_id, artifact_id, version, parent_version, content_hash, content, storage, blob_key, size_bytes, mime_type, source_job_id, source_seq, summary, author_user_id, created_at_ms, loads_app_sdk)
-VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-		tid, artifactID, v.Version, v.ParentVersion, v.ContentHash, v.Content, v.Storage, v.BlobKey, v.SizeBytes, v.MimeType, v.SourceJobID, v.SourceSeq, v.Summary, v.AuthorUserID, v.CreatedAtMs, v.LoadsAppSDK); err != nil {
+INSERT INTO artifact_versions (tenant_id, artifact_id, version, parent_version, content_hash, content, storage, blob_key, size_bytes, mime_type, source_job_id, source_seq, summary, author_user_id, created_at_ms, loads_app_sdk, edited_from)
+VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		tid, artifactID, v.Version, v.ParentVersion, v.ContentHash, v.Content, v.Storage, v.BlobKey, v.SizeBytes, v.MimeType, v.SourceJobID, v.SourceSeq, v.Summary, v.AuthorUserID, v.CreatedAtMs, v.LoadsAppSDK, v.EditedFrom); err != nil {
 		return Artifact{}, ArtifactVersion{}, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -273,7 +277,7 @@ func scanArtifactVersion(row rowScanner) (ArtifactVersion, error) {
 	err := row.Scan(&v.ArtifactID, &v.TenantID, &v.Version, &v.ParentVersion, &v.ContentHash, &v.Content,
 		&v.Storage, &v.BlobKey, &v.SizeBytes, &v.MimeType, &v.SourceJobID, &v.SourceSeq,
 		&v.Summary, &v.AuthorUserID, &v.CreatedAtMs,
-		&v.ThumbnailBlobKey, &thumbMime, &thumbW, &thumbH, &v.ThumbnailRank, &v.LoadsAppSDK)
+		&v.ThumbnailBlobKey, &thumbMime, &thumbW, &thumbH, &v.ThumbnailRank, &v.LoadsAppSDK, &v.EditedFrom)
 	if err == sql.ErrNoRows {
 		return ArtifactVersion{}, ErrArtifactNotFound
 	}

@@ -1572,6 +1572,19 @@ WHERE r.channel_id = '' AND d.user_id IS NULL`)
 				"ADD KEY idx_room_messages_revised (room_id, revised_at_ms)")
 		},
 	},
+	{
+		// AI edits a room file (docs/prd/2026-10-14-ai-document-editing.md
+		// rules 2 and 4): the file a request edits, and the version an edit
+		// started from. Additive: the previous release neither writes nor
+		// reads either column, and both default to "none".
+		id: "2026_10_ai_file_edits",
+		run: func(ctx context.Context, db sqlConn) error {
+			if err := addColumnIfMissing(ctx, db, "agent_jobs", "file_ref_json", "JSON NULL AFTER not_before_ms"); err != nil {
+				return err
+			}
+			return addColumnIfMissing(ctx, db, "artifact_versions", "edited_from", "INT NOT NULL DEFAULT 0 AFTER loads_app_sdk")
+		},
+	},
 }
 
 // sqlConn is the statement surface a migration runs on. runMigrations passes
