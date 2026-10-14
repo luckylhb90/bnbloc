@@ -58,6 +58,7 @@ function applyCatalog(descriptors: readonly PreviewerDescriptor[]): void {
       input: "blob",
       safety: "sandboxed",
       source: "component",
+      suggestions: d.suggestions,
       load: () => import("./RemotePreviewer").then((m) => ({ default: m.previewerHost(d.name) })),
     });
   }
@@ -70,7 +71,8 @@ function sameRegistration(a: PreviewerDescriptor, b: PreviewerDescriptor): boole
     a.rank === b.rank &&
     a.description === b.description &&
     a.mimeTypes.join() === b.mimeTypes.join() &&
-    a.extensions.join() === b.extensions.join()
+    a.extensions.join() === b.extensions.join() &&
+    JSON.stringify(a.suggestions) === JSON.stringify(b.suggestions)
   );
 }
 

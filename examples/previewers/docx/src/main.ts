@@ -3,7 +3,9 @@
 // Renders a .docx as pages with docx-preview (paragraph and character
 // styles, tables, images, lists, headers/footers, footnotes, page breaks).
 // The host hands over the file bytes; the toolbar (zoom, fit) is
-// host-rendered; the frame title follows the page in view.
+// host-rendered; the frame title follows the page in view. Clicking a
+// paragraph, a table or a page, or selecting text, points the Ask AI panel
+// at it (lib/selection.ts).
 
 import { renderAsync } from "docx-preview";
 
@@ -22,6 +24,7 @@ import {
 } from "../../../../web/previewer-sdk/src/index.ts";
 import { unicodeBullets } from "./bullets.ts";
 import { countedTitle, keepLinksInside, sniffOffice, unreadableMessage, type OfficeKind } from "../../lib/office.ts";
+import { quotedLabel, tableText, watchPointing } from "../../lib/selection.ts";
 
 const WORD: OfficeKind = { noun: "Word document", ext: ".docx", legacy: ".doc", apps: "Word or Pages" };
 
@@ -85,8 +88,26 @@ function trackPages(): void {
   for (const p of pages) observer.observe(p);
 }
 
+// The blocks a click picks, innermost first: a table cell's paragraph
+// picks the paragraph, the table's border the table.
+const BLOCKS = "p, li, h1, h2, h3, h4, h5, h6, table";
+
+const pointing = watchPointing(pagesEl, (el) => {
+  const page = el.closest<HTMLElement>("section.docx");
+  if (!page || !pagesEl.contains(page)) return null;
+  const where = `Page ${pages.indexOf(page) + 1}`;
+  const block = el.closest<HTMLElement>(BLOCKS);
+  if (!block || !page.contains(block) || !block.innerText.trim()) return { element: page, where, text: page.innerText, label: where };
+  if (block instanceof HTMLTableElement) {
+    const text = tableText(block);
+    return { element: block, where, text, label: quotedLabel(`${where}, table`, text) };
+  }
+  return { element: block, where, text: block.innerText };
+});
+
 async function open(bytes: ArrayBuffer, file: PreviewFile): Promise<void> {
   const mine = ++generation;
+  pointing.reset();
   fileName = file.name;
   const format = sniffOffice(bytes);
   if (format !== "zip") throw new Error(unreadableMessage(WORD, format, file.name));

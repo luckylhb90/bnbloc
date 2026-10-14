@@ -5,7 +5,8 @@
 // Slides mount only near the viewport and decode their shapes and media on
 // demand, so a long deck opens as fast as a short one. The host hands over
 // the file bytes; the toolbar (zoom, fit) is host-rendered; the frame title
-// follows the slide in view.
+// follows the slide in view. Clicking a slide, or selecting text in it,
+// points the Ask AI panel at it (lib/selection.ts).
 
 import { PptxViewer, RECOMMENDED_ZIP_LIMITS } from "@aiden0z/pptx-renderer";
 
@@ -22,6 +23,7 @@ import {
   type ToolbarItem,
 } from "../../../../web/previewer-sdk/src/index.ts";
 import { countedTitle, keepLinksInside, sniffOffice, unreadableMessage, type OfficeKind } from "../../lib/office.ts";
+import { watchPointing } from "../../lib/selection.ts";
 
 const POWERPOINT: OfficeKind = { noun: "PowerPoint presentation", ext: ".pptx", legacy: ".ppt", apps: "PowerPoint or Keynote" };
 
@@ -47,7 +49,15 @@ function publishToolbar(): void {
   setToolbar(toolbarItems());
 }
 
+const pointing = watchPointing(deckEl, (el) => {
+  const item = el.closest<HTMLElement>("[data-slide-index]");
+  if (!item || !deckEl.contains(item)) return null;
+  const where = `Slide ${Number(item.dataset.slideIndex) + 1}`;
+  return { element: item, where, text: item.innerText, label: where };
+});
+
 function close(): void {
+  pointing.reset();
   opening?.abort();
   opening = null;
   viewer?.destroy();

@@ -269,6 +269,27 @@ export function readSelection(value: unknown): Selection | null {
   return label === null || detail === null ? null : { label, detail };
 }
 
+/** A package's starting prompt for the Ask AI panel (previewer.suggestions). */
+export interface Suggestion {
+  readonly label: string;
+  readonly prompt: string;
+}
+
+/** Validates a package's suggestions list (absent = none). */
+export function readSuggestions(value: unknown): readonly Suggestion[] | null {
+  if (value === undefined) return [];
+  if (!Array.isArray(value) || value.length > SUGGESTION_LIMIT) return null;
+  const out: Suggestion[] = [];
+  for (const item of value) {
+    if (!isRecord(item)) return null;
+    const label = boundedText(item.label, SUGGESTION_LABEL_LIMIT);
+    const prompt = boundedText(item.prompt, SUGGESTION_PROMPT_LIMIT);
+    if (label === null || prompt === null) return null;
+    out.push({ label, prompt });
+  }
+  return out;
+}
+
 /** Fits a selection to the limits (the frame side: a long selection is cut,
  *  marked with an ellipsis, rather than refused by the host). */
 export function fitSelection(label: string, detail: string): Selection {

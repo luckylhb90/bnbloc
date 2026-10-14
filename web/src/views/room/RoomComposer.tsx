@@ -37,6 +37,7 @@ export function RoomComposer({
   modelCatalogs,
   working = 0,
   variant = "room",
+  draft,
 }: {
   readonly roomPreview: boolean;
   // The member may follow the room but not post (a visitor).
@@ -62,6 +63,7 @@ export function RoomComposer({
   // "people": the people chat's composer (no agent picker, people-only);
   // "file": a file's Ask AI panel (its sends name the file).
   readonly variant?: "room" | "people" | "file";
+  readonly draft?: { readonly text: string; readonly nonce: number };
 }) {
   // Stable inputs for the composer's mention list and references.
   const members = useMemo(
@@ -121,6 +123,7 @@ export function RoomComposer({
             modelCatalogs={modelCatalogs}
             showStarters={showStarters}
             variant={variant}
+            draft={draft}
           />
         </>
       )}

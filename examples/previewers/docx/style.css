@@ -3,11 +3,13 @@
 :root {
   --bg: #ecebe8;
   --muted: #6b6b66;
+  --accent: #0a74d9;
   color-scheme: light;
 }
 :root[data-theme="dark"] {
   --bg: #161615;
   --muted: #9a9a94;
+  --accent: #4cc2ff;
   color-scheme: dark;
 }
 * {
@@ -45,4 +47,11 @@ body {
 }
 #status:empty {
   display: none;
+}
+/* The paragraph, table or page the Ask AI panel points at
+   (lib/selection.ts). */
+.bnbloc-picked {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 2px;
 }

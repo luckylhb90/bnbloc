@@ -8,6 +8,7 @@ import {
   type ArtifactFileInfo,
   type ArtifactViewer,
   type ArtifactViewerProps,
+  type ViewerSelection,
   type SiteSource,
   type ViewerToolbarItem,
   type ViewerToolbarValue,
@@ -117,6 +118,7 @@ export function ArtifactBody({
   onToolbar,
   onLocalState,
   remoteState,
+  onSelection,
 }: {
   readonly roomId: string;
   readonly actor?: string;
@@ -133,6 +135,7 @@ export function ArtifactBody({
   readonly onToolbar?: (items: readonly ViewerToolbarItem[], emit: (id: string, value: ViewerToolbarValue) => void) => void;
   readonly onLocalState?: (state: unknown) => void;
   readonly remoteState?: { state: unknown; actor: string; nonce: number };
+  readonly onSelection?: (selection: ViewerSelection | null) => void;
 }) {
   const instanceKey = `${viewer?.id ?? ""}:${artifactId}:${file.version}`;
   const onToolbarRef = useStableRef(onToolbar);
@@ -175,6 +178,7 @@ export function ArtifactBody({
     toolbar: toolbarHost,
     onLocalState,
     remoteState,
+    onSelection,
   };
   return (
     <ViewerBoundary resetKey={instanceKey}>

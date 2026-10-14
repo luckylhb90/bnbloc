@@ -7,10 +7,14 @@ import {
   TOOLBAR_LIMIT,
   SELECTION_DETAIL_LIMIT,
   SELECTION_LABEL_LIMIT,
+  SUGGESTION_LABEL_LIMIT,
+  SUGGESTION_LIMIT,
+  SUGGESTION_PROMPT_LIMIT,
   fitSelection,
   hostOriginFromHash,
   readFrameMessage,
   readHostMessage,
+  readSuggestions,
   readToolbar,
   readToolbarItem,
   stateKey,
@@ -161,4 +165,15 @@ test("a selection is a bounded label and detail, or null to clear", () => {
   const fit = fitSelection("x".repeat(500), "y".repeat(5000));
   eq([[...fit.label].length, [...fit.detail].length, fit.detail.endsWith("…")], [SELECTION_LABEL_LIMIT, SELECTION_DETAIL_LIMIT, true], "fitSelection cuts to the limits");
   eq(readFrameMessage({ type: "preview.selection", selection: fit }) !== null, true, "a fitted selection is accepted");
+});
+
+test("suggestions are bounded label/prompt pairs; absent means none", () => {
+  eq(readSuggestions(undefined), [], "absent");
+  eq(readSuggestions([{ label: "Summarize", prompt: "Summarize the key points." }]), [{ label: "Summarize", prompt: "Summarize the key points." }], "one");
+  eq(readSuggestions([{ label: "", prompt: "x" }]), null, "an empty label");
+  eq(readSuggestions([{ label: "x", prompt: " " }]), null, "a blank prompt");
+  eq(readSuggestions([{ label: "x".repeat(SUGGESTION_LABEL_LIMIT + 1), prompt: "y" }]), null, "a long label");
+  eq(readSuggestions([{ label: "x", prompt: "y".repeat(SUGGESTION_PROMPT_LIMIT + 1) }]), null, "a long prompt");
+  eq(readSuggestions(Array.from({ length: SUGGESTION_LIMIT + 1 }, (_, i) => ({ label: `s${i}`, prompt: "p" }))), null, "too many");
+  eq(readSuggestions("Summarize"), null, "not a list");
 });

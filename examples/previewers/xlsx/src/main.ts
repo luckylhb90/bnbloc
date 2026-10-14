@@ -5,23 +5,43 @@
 // cells, column widths, row heights, hidden rows and columns. Sheet tabs
 // switch sheets; the toolbar zoom is host-rendered; the frame title names
 // the sheet. Huge sheets draw their first MAX_CELLS cells and say so.
+// Clicking, dragging or shift-clicking cells (or a row or column header)
+// picks a range and points the Ask AI panel at it ("Revenue!B3:D5", its
+// values as tab-separated rows).
 
 import ExcelJS from "exceljs";
 
 import {
+  SELECTION_DETAIL_LIMIT,
   ZOOM_MAX,
   ZOOM_MIN,
   onFile,
   onInit,
   onToolbar,
   reportError,
+  sendSelection,
   setTitle,
   setToolbar,
   type PreviewFile,
   type ToolbarItem,
 } from "../../../../web/previewer-sdk/src/index.ts";
 import { shortName, sniffOffice, unreadableMessage, type OfficeKind } from "../../lib/office.ts";
-import { cellCss, colName, colWidthPx, displayText, drawnExtent, isNumeric, parseRange, rowHeightPx, type XStyle } from "./sheet.ts";
+import { PICKED } from "../../lib/selection.ts";
+import {
+  cellCss,
+  colName,
+  colWidthPx,
+  coverRange,
+  displayText,
+  drawnExtent,
+  isNumeric,
+  parseRange,
+  rangeLabel,
+  rangeText,
+  rowHeightPx,
+  type CellRange,
+  type XStyle,
+} from "./sheet.ts";
 
 const EXCEL: OfficeKind = { noun: "Excel workbook", ext: ".xlsx", legacy: ".xls", apps: "Excel or Numbers" };
 
@@ -35,6 +55,16 @@ let fileName = "";
 let sheets: ExcelJS.Worksheet[] = [];
 let active = 0;
 let zoom = 1;
+
+// The drawn sheet: its cells by "row,col" (a merged cell under its
+// top-left), extent and hidden rows and columns.
+let cells = new Map<string, HTMLElement>();
+let drawn = { rows: 0, cols: 0, hiddenRows: new Set<number>(), hiddenCols: new Set<number>() };
+// The picked range, the corner it grows from, and the cells it lit.
+let range: CellRange | null = null;
+let anchor: CellRange | null = null;
+let lit: HTMLElement[] = [];
+let dragging = false;
 
 function publishToolbar(): void {
   const items: ToolbarItem[] = [{ id: "zoom", icon: "zoom-in", label: "Zoom", kind: "zoom", value: zoom }];
@@ -62,6 +92,8 @@ function draw(i: number): void {
     for (let y = r.top; y <= r.bottom; y++) for (let x = r.left; x <= r.right; x++) if (y !== r.top || x !== r.left) covered.add(`${y},${x}`);
   }
   const hiddenCols = new Set<number>();
+  const hiddenRows = new Set<number>();
+  cells = new Map();
   const table = document.createElement("table");
   table.id = "sheet";
   const colgroup = document.createElement("colgroup");
@@ -86,6 +118,7 @@ function draw(i: number): void {
     if (hiddenCols.has(c)) continue;
     const th = document.createElement("th");
     th.textContent = colName(c);
+    th.dataset.col = String(c);
     headRow.append(th);
   }
   head.append(headRow);
@@ -93,11 +126,15 @@ function draw(i: number): void {
   const body = document.createElement("tbody");
   for (let r = 1; r <= extent.rows; r++) {
     const row = ws.getRow(r);
-    if (row.hidden) continue;
+    if (row.hidden) {
+      hiddenRows.add(r);
+      continue;
+    }
     const tr = document.createElement("tr");
     tr.style.height = `${rowHeightPx(row.height ?? ws.properties.defaultRowHeight)}px`;
     const th = document.createElement("th");
     th.textContent = String(r);
+    th.dataset.row = String(r);
     tr.append(th);
     for (let c = 1; c <= extent.cols; c++) {
       if (hiddenCols.has(c) || covered.has(`${r},${c}`)) continue;
@@ -108,6 +145,8 @@ function draw(i: number): void {
         if (s.rows > 1) td.rowSpan = s.rows;
         if (s.cols > 1) td.colSpan = s.cols;
       }
+      td.dataset.cell = `${r},${c},${r + (s?.rows ?? 1) - 1},${c + (s?.cols ?? 1) - 1}`;
+      cells.set(`${r},${c}`, td);
       const style = cell.style as XStyle;
       td.textContent = displayText(cell.value, style?.numFmt);
       const css = cellCss(style, isNumeric(cell.value));
@@ -117,6 +156,8 @@ function draw(i: number): void {
     body.append(tr);
   }
   table.append(body);
+  drawn = { rows: extent.rows, cols: extent.cols, hiddenRows, hiddenCols };
+  unpick();
   gridEl.replaceChildren(table);
   gridEl.scrollTo(0, 0);
   table.style.zoom = String(zoom);
@@ -132,6 +173,78 @@ function draw(i: number): void {
   for (const [k, b] of [...tabsEl.children].entries()) b.setAttribute("aria-selected", String(k === i));
   setTitle(title());
 }
+
+/** The cells (or the header's row or column) an element stands for. */
+function rangeAt(el: EventTarget | null): CellRange | null {
+  if (!(el instanceof Element)) return null;
+  const cell = el.closest<HTMLElement>("td[data-cell], th[data-row], th[data-col]");
+  if (!cell || !gridEl.contains(cell)) return null;
+  if (cell.dataset.row) return { top: Number(cell.dataset.row), left: 1, bottom: Number(cell.dataset.row), right: drawn.cols };
+  if (cell.dataset.col) return { top: 1, left: Number(cell.dataset.col), bottom: drawn.rows, right: Number(cell.dataset.col) };
+  const [top, left, bottom, right] = (cell.dataset.cell ?? "").split(",").map(Number);
+  return { top, left, bottom, right };
+}
+
+function light(next: CellRange): void {
+  for (const el of lit) el.classList.remove(PICKED);
+  lit = [];
+  range = next;
+  for (let r = next.top; r <= next.bottom; r++) {
+    for (let c = next.left; c <= next.right; c++) {
+      const el = cells.get(`${r},${c}`);
+      if (el) {
+        el.classList.add(PICKED);
+        lit.push(el);
+      }
+    }
+  }
+}
+
+function unpick(): void {
+  for (const el of lit) el.classList.remove(PICKED);
+  lit = [];
+  if (range) sendSelection(null);
+  range = anchor = null;
+}
+
+function report(): void {
+  if (!range || sheets.length === 0) return;
+  const ws = sheets[active];
+  const detail = rangeText(
+    range,
+    {
+      text: (r, c) => (cells.has(`${r},${c}`) ? displayText(ws.getRow(r).getCell(c).value, (ws.getRow(r).getCell(c).style as XStyle)?.numFmt) : ""),
+      rowShown: (r) => !drawn.hiddenRows.has(r),
+      colShown: (c) => !drawn.hiddenCols.has(c),
+    },
+    SELECTION_DETAIL_LIMIT,
+  );
+  sendSelection({ label: rangeLabel(ws.name, range), detail });
+}
+
+gridEl.addEventListener("pointerdown", (e) => {
+  const at = e.button === 0 ? rangeAt(e.target) : null;
+  if (!at) return;
+  // No text selection while picking; keep keyboard focus (Escape) here.
+  e.preventDefault();
+  window.focus();
+  anchor = e.shiftKey && anchor ? anchor : at;
+  light(coverRange(anchor, at));
+  dragging = true;
+});
+gridEl.addEventListener("pointermove", (e) => {
+  if (!dragging || !anchor) return;
+  const at = rangeAt(e.target);
+  if (at) light(coverRange(anchor, at));
+});
+document.addEventListener("pointerup", () => {
+  if (!dragging) return;
+  dragging = false;
+  report();
+});
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") unpick();
+});
 
 function drawTabs(): void {
   tabsEl.replaceChildren(

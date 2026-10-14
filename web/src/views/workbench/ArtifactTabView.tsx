@@ -28,7 +28,7 @@ import { ArtifactBody, resolveViewer } from "@/views/artifact/ArtifactBody";
 import { useViewerRegistry } from "@/views/artifact/registry";
 import { OpenWithMenu } from "@/views/artifact/OpenWithMenu";
 import { preferredViewerFor } from "@/lib/viewerPreference";
-import type { SiteSource, ViewerToolbarItem, ViewerToolbarValue } from "@/views/artifact/registry";
+import type { SiteSource, ViewerSelection, ViewerToolbarItem, ViewerToolbarValue } from "@/views/artifact/registry";
 import { ViewerToolbar } from "@/views/artifact/toolbar";
 import {
   fileInfoFor,
@@ -188,6 +188,8 @@ export function ArtifactTabView({
   // The Ask AI panel (FileAskPanel): only where the room provides it.
   const ask = useFileAsk();
   const [asking, setAsking] = useState(false);
+  // The part of the shown version the viewer points at (preview.selection).
+  const [selection, setSelection] = useState<ViewerSelection | null>(null);
   const updated = useUpdatedMark(shown, version === undefined);
   const [mode, setMode] = useState<Mode>("view");
   const [compareWith, setCompareWith] = useState<number | null>(null);
@@ -201,6 +203,8 @@ export function ArtifactTabView({
     (items: readonly ViewerToolbarItem[], emit: (id: string, value: ViewerToolbarValue) => void) => setTools({ items, emit }),
     [],
   );
+
+  useEffect(() => setSelection(null), [artifactId, shown]);
 
   // Leaving compare/edit when the tab moves to another artifact.
   useEffect(() => {
@@ -468,11 +472,18 @@ export function ArtifactTabView({
             onToolbar={onToolbar}
             onLocalState={onLocalState ? (st) => onLocalState(artifactId, st) : undefined}
             remoteState={liveStates?.[artifactId]}
+            onSelection={setSelection}
           />
         )}
       </div>
       {asking && ask && canAsk && (
-        <FileAskPanel ask={ask} fileRef={{ artifactId, version: shown, name: file.name }} onClose={() => setAsking(false)} />
+        <FileAskPanel
+          ask={ask}
+          fileRef={{ artifactId, version: shown, name: file.name, ...(selection ? { selection } : {}) }}
+          suggestions={viewer?.suggestions}
+          onClearSelection={() => setSelection(null)}
+          onClose={() => setAsking(false)}
+        />
       )}
       </div>
       <ShareDialog

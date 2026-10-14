@@ -1,4 +1,4 @@
-import { useCallback, useId, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { useInjectedAgent, useInjectedAttachments, useInjectedDraft, useInjectedReferences } from "@/views/composer/useInjectedDraft";
 import {
   PaperPlaneRightIcon,
@@ -66,6 +66,7 @@ export function Composer({
   modelCatalogs = NO_ROOM_CATALOGS,
   showStarters = false,
   variant = "room",
+  draft,
 }: {
   roomId: string;
   channelId?: string | null;
@@ -87,6 +88,9 @@ export function Composer({
   // An empty room with an agent available: example prompts above the input.
   showStarters?: boolean;
   variant?: "room" | "people" | "file";
+  // Text to put in the input (a file panel's suggestion); a new nonce
+  // replaces the input with it again.
+  draft?: { readonly text: string; readonly nonce: number };
 }) {
   const people = variant === "people";
   // Drafts, agents, references and attachments handed to "the composer"
@@ -99,6 +103,17 @@ export function Composer({
   // A prompt "Used" from the library, and references asked from the people
   // chat, land in the room's main composer only (never the people chat's).
   useInjectedDraft(roomId, main ? channelId : null, setText, taRef);
+  useEffect(() => {
+    if (!draft) return;
+    setText(draft.text);
+    requestAnimationFrame(() => {
+      const el = taRef.current;
+      el?.focus();
+      el?.setSelectionRange(el.value.length, el.value.length);
+    });
+    // Only a new nonce re-applies the draft.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draft?.nonce]);
   const fileInputRef = useRef<HTMLInputElement>(null);
   // The agent selection, restored from and saved to the room's prefs: the
   // picked recipient (another member's agent to borrow, a platform agent;

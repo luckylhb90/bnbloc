@@ -92,6 +92,22 @@ export interface ArtifactViewerProps {
   readonly toolbar: ViewerToolbarSink;
   readonly onLocalState?: (s: unknown) => void;
   readonly remoteState?: { readonly state: unknown; readonly actor: string; readonly nonce: number };
+  /** The part of the file the member points at (a slide, a cell range,
+   *  selected text), null when none: the Ask AI panel names it. */
+  readonly onSelection?: (s: ViewerSelection | null) => void;
+}
+
+/** What a viewer reports as selected: a short label and the content it
+ *  covers (the previewer frame protocol's Selection). */
+export interface ViewerSelection {
+  readonly label: string;
+  readonly detail: string;
+}
+
+/** A starting prompt the Ask AI panel offers for the files a viewer shows. */
+export interface ViewerSuggestion {
+  readonly label: string;
+  readonly prompt: string;
 }
 
 export interface ViewerMatch {
@@ -117,6 +133,7 @@ export interface ArtifactViewer {
   readonly source: "builtin" | "component";
   /** Files larger than this fall through to the next candidate. */
   readonly maxBytes?: number;
+  readonly suggestions?: readonly ViewerSuggestion[];
   readonly load: () => Promise<{ default: React.ComponentType<ArtifactViewerProps> }>;
 }
 

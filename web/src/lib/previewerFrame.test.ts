@@ -58,6 +58,11 @@ test("a well-formed catalog entry parses", () => {
   eq(d?.name, "sprite-sheet", "name");
   eq(d?.toolbar.length, 1, "toolbar");
   eq(d?.capabilities, ["thumbnail", "liveState", "toolbar"], "capabilities");
+  eq(d?.suggestions, [], "no suggestions");
+  const s = parsePreviewerEntry(withBlock({ capabilities: ["selection"], suggestions: [{ label: "Summarize", prompt: "Summarize it." }] }));
+  eq(s?.suggestions, [{ label: "Summarize", prompt: "Summarize it." }], "suggestions");
+  eq(s?.capabilities, ["selection"], "the selection capability");
+  eq(parsePreviewerEntry(withBlock({ capabilities: ["toolbar", "teleport"] }))?.capabilities, ["toolbar"], "a capability this host predates is ignored");
   eq(previewerViewerId("sprite-sheet"), "component.previewer.sprite-sheet", "viewer id");
 });
 
@@ -70,9 +75,9 @@ test("other kinds, opt-in-not-installed and malformed blocks are dropped", () =>
   eq(parsePreviewerEntry(withBlock({ frameUrl: "https://evil.example/v1/previewers/a/b/c/" })), null, "absolute frame url");
   eq(parsePreviewerEntry(withBlock({ frameUrl: "/v1/other/a/b/c/" })), null, "foreign frame url");
   eq(parsePreviewerEntry(withBlock({ rank: 0 })), null, "rank");
-  eq(parsePreviewerEntry(withBlock({ capabilities: ["network"] })), null, "capability");
   eq(parsePreviewerEntry(withBlock({ match: {} })), null, "empty match");
   eq(parsePreviewerEntry(withBlock({ toolbar: [{ id: "x", icon: "https://evil/icon.png", label: "X", kind: "button" }] })), null, "icon");
+  eq(parsePreviewerEntry(withBlock({ suggestions: [{ label: "", prompt: "x" }] })), null, "a bad suggestion");
   eq(parsePreviewerCatalog({ components: [entry, { kind: "core", name: "c" }] }).length, 1, "catalog filter");
   eq(parsePreviewerCatalog(null), [], "garbage catalog");
 });

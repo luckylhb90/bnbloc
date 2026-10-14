@@ -109,6 +109,51 @@ export function parseRange(range: string): { top: number; left: number; bottom: 
   return { top: Math.min(a.r, b.r), left: Math.min(a.c, b.c), bottom: Math.max(a.r, b.r), right: Math.max(a.c, b.c) };
 }
 
+/** A cell range, 1-based and inclusive. */
+export interface CellRange {
+  readonly top: number;
+  readonly left: number;
+  readonly bottom: number;
+  readonly right: number;
+}
+
+/** The smallest range holding both (a merged cell is its whole area). */
+export function coverRange(a: CellRange, b: CellRange): CellRange {
+  return { top: Math.min(a.top, b.top), left: Math.min(a.left, b.left), bottom: Math.max(a.bottom, b.bottom), right: Math.max(a.right, b.right) };
+}
+
+/** "Revenue!B3:D5", "'Q3 Sales'!B3" — how a formula names the range. */
+export function rangeLabel(sheet: string, r: CellRange): string {
+  const name = /^[A-Za-z_][A-Za-z0-9_.]*$/.test(sheet) ? sheet : `'${sheet.replace(/'/g, "''")}'`;
+  const from = `${colName(r.left)}${r.top}`;
+  const to = `${colName(r.right)}${r.bottom}`;
+  return `${name}!${from === to ? from : `${from}:${to}`}`;
+}
+
+/** How rangeText reads the drawn sheet. */
+export interface SheetReader {
+  text(row: number, col: number): string;
+  rowShown(row: number): boolean;
+  colShown(col: number): boolean;
+}
+
+/** The range's shown values as tab-separated rows, skipping hidden rows
+ *  and columns, cut once it passes limit characters (the selection's
+ *  detail is bounded anyway; this keeps a whole-sheet drag cheap). */
+export function rangeText(r: CellRange, sheet: SheetReader, limit: number): string {
+  const lines: string[] = [];
+  let size = 0;
+  for (let y = r.top; y <= r.bottom && size <= limit; y++) {
+    if (!sheet.rowShown(y)) continue;
+    const cells: string[] = [];
+    for (let x = r.left; x <= r.right; x++) if (sheet.colShown(x)) cells.push(sheet.text(y, x).replace(/[\t\n\r]+/g, " "));
+    const line = cells.join("\t");
+    lines.push(line);
+    size += line.length + 1;
+  }
+  return lines.join("\n");
+}
+
 // --- values ------------------------------------------------------------------
 
 const MS_PER_DAY = 86_400_000;

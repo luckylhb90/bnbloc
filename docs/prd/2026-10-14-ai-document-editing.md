@@ -1,7 +1,11 @@
 # AI edits a document in place (2026-10-14)
 
-Status: M1 implemented (2026-10-14), not yet released: server 62f87313,
-bridge 95beb1dd, web (this commit). Two changes from the design below,
+Status: M1 released and verified on QA (2026-10-14: server 7dc36210,
+desktop 0.1.46). M2 implemented (2026-10-14): protocol, server and bridge
+6b717f96; web host, previewers 1.1.0 and the feed's "About <file>" tag in
+the following commit; released once the server and desktop 0.1.47 are out
+(an older host predates `selection`, so the previewers publish after them).
+M1 notes: two changes from the design below,
 both forced by the code: the version is placed at `.room/edits/<id>/<name>`
 (a bridge writes only bnbloc's own workspace paths,
 `core.CheckWorkspaceFile`), and the line names that copy and the path to

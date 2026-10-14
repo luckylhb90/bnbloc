@@ -1,4 +1,4 @@
-import { normalizeRoomEvent, readTurnMetrics, type RoomEvent } from "./roomEvents.ts";
+import { fileRefOf, normalizeRoomEvent, readTurnMetrics, type RoomEvent } from "./roomEvents.ts";
 import { agentIdentity } from "./roomAgents.ts";
 // Golden fixtures written by internal/wire's golden tests: the exact JSON the
 // server sends. A field Go stops sending fails here.
@@ -103,7 +103,17 @@ function testJobEventIsTheProjection(): void {
   assert(job.error === "the core exited" && Array.isArray(job.contentMissing), "the member-facing diagnostics are named fields");
 }
 
+// A request from a file's Ask AI panel names the file, its version and the
+// part pointed at (by label: the detail is the agent's).
+function testFileRefKeepsTheSelectionLabel(): void {
+  const ref = fileRefOf({ artifactId: "art_1", version: 2, name: "deck.pptx", selection: { label: "Slide 3", detail: "Q3 revenue" } });
+  assert(JSON.stringify(ref) === JSON.stringify({ artifactId: "art_1", version: 2, name: "deck.pptx", selection: { label: "Slide 3" } }), `ref ${JSON.stringify(ref)}`);
+  assert(fileRefOf({ artifactId: "art_1", version: 2, selection: { label: "" } })?.selection === undefined, "an empty label is no selection");
+  assert(fileRefOf({ artifactId: "art_1", version: 0 }) === undefined, "version 0 is no file");
+}
+
 testSessionStateFixtureKeysTheAgent();
+testFileRefKeepsTheSelectionLabel();
 testReplyClearsOnlyItsOwnAgent();
 testNoticeCarriesTheAgentErrorApart();
 testPartialMetricsShowUsage();

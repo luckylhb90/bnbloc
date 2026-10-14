@@ -3,7 +3,7 @@
   "contract": "bnbloc.previewer.contract/v1",
   "runtime": "bundle",
   "name": "xlsx",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "publisher": "bnbloc",
   "description": "Excel workbooks (.xlsx, .xlsm, .xltx): every sheet drawn in place — formatted values, fonts, fills, borders, merged cells — with sheet tabs and zoom.",
   "artifacts": {
@@ -20,7 +20,13 @@
       "extensions": [".xlsx", ".xlsm", ".xltx"]
     },
     "rank": 50,
-    "capabilities": ["toolbar"],
+    "capabilities": ["toolbar", "selection"],
+    "suggestions": [
+      { "label": "Explain this workbook", "prompt": "Explain what this workbook contains and how its sheets relate. Do not change the file." },
+      { "label": "Check the formulas", "prompt": "Check the formulas and totals for errors or inconsistencies, fix them, and list what you changed." },
+      { "label": "Tidy the formatting", "prompt": "Make number formats, column widths and header styles consistent across the sheets. Keep every value." },
+      { "label": "Add a summary", "prompt": "Add a summary of the key figures (totals, averages, changes) where it fits best, using formulas." }
+    ],
     "toolbar": [{ "id": "zoom", "icon": "zoom-in", "label": "Zoom", "kind": "zoom" }]
   }
 }

@@ -16,7 +16,21 @@ import ExcelJS from "exceljs";
 
 import { build } from "./build.mjs";
 import { assertBundle } from "../lib/bundle-check.mjs";
-import { MAX_CELLS, cellCss, colName, colWidthPx, cssColor, displayText, drawnExtent, isNumeric, parseRange, rowHeightPx } from "./src/sheet.ts";
+import {
+  MAX_CELLS,
+  cellCss,
+  colName,
+  colWidthPx,
+  coverRange,
+  cssColor,
+  displayText,
+  drawnExtent,
+  isNumeric,
+  parseRange,
+  rangeLabel,
+  rangeText,
+  rowHeightPx,
+} from "./src/sheet.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -84,4 +98,17 @@ test("colours, sizes, names and ranges", () => {
   assert.deepEqual(drawnExtent(10, 5), { rows: 10, cols: 5 });
   assert.deepEqual(drawnExtent(1_000_000, 10), { rows: MAX_CELLS / 10, cols: 10 });
   assert.equal(drawnExtent(5, 10_000).cols, 200);
+});
+
+test("a picked range: its label, its extent with merges, its values", () => {
+  const b3d5 = { top: 3, left: 2, bottom: 5, right: 4 };
+  assert.equal(rangeLabel("Revenue", b3d5), "Revenue!B3:D5");
+  assert.equal(rangeLabel("Q3 Sales", { top: 3, left: 2, bottom: 3, right: 2 }), "'Q3 Sales'!B3");
+  assert.equal(rangeLabel("Bob's", { top: 1, left: 1, bottom: 1, right: 1 }), "'Bob''s'!A1");
+  // Dragging from a merged C2:D3 to B5 covers the whole merge.
+  assert.deepEqual(coverRange({ top: 2, left: 3, bottom: 3, right: 4 }, { top: 5, left: 2, bottom: 5, right: 2 }), { top: 2, left: 2, bottom: 5, right: 4 });
+  const sheet = { text: (r, c) => (c === 3 ? "a\tb" : `${colName(c)}${r}`), rowShown: (r) => r !== 4, colShown: () => true };
+  assert.equal(rangeText(b3d5, sheet, 2000), "B3\ta b\tD3\nB5\ta b\tD5");
+  const big = rangeText({ top: 1, left: 1, bottom: 10_000, right: 3 }, { text: () => "x", rowShown: () => true, colShown: () => true }, 100);
+  assert.ok(big.length < 120, `cut near the limit: ${big.length}`);
 });

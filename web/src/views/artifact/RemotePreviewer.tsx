@@ -94,6 +94,7 @@ function PreviewerFrame({
   toolbar,
   onLocalState,
   remoteState,
+  onSelection,
 }: ArtifactViewerProps & { readonly desc: Desc }) {
   const frameRef = useRef<HTMLIFrameElement | null>(null);
   const boxRef = useRef<HTMLDivElement | null>(null);
@@ -104,10 +105,11 @@ function PreviewerFrame({
   const [error, setError] = useState("");
   const [title, setTitle] = useState("");
   const liveState = desc.capabilities.includes("liveState");
+  const selection = desc.capabilities.includes("selection");
 
   // Latest props for the message handler (registered once per frame).
-  const latest = useRef({ blob, file, version, onLocalState, roomId, artifactId });
-  latest.current = { blob, file, version, onLocalState, roomId, artifactId };
+  const latest = useRef({ blob, file, version, onLocalState, onSelection, roomId, artifactId });
+  latest.current = { blob, file, version, onLocalState, onSelection, roomId, artifactId };
 
   const post = useCallback((msg: HostMessage, transfer?: Transferable[]) => {
     // A sandboxed frame's origin is opaque: "*" is the only accepted target;
@@ -191,11 +193,14 @@ function PreviewerFrame({
         case "preview.title":
           setTitle(msg.text);
           return;
+        case "preview.selection":
+          if (selection) latest.current.onSelection?.(msg.selection);
+          return;
       }
     };
     window.addEventListener("message", onMessage);
     return () => window.removeEventListener("message", onMessage);
-  }, [handOff, toolbar, liveState, storeThumbnail]);
+  }, [handOff, toolbar, liveState, selection, storeThumbnail]);
 
   // Remote live state from the room, deduped by nonce.
   useEffect(() => {

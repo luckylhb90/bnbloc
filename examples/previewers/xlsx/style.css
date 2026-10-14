@@ -120,3 +120,15 @@ body {
 #tabs[hidden] {
   display: none;
 }
+/* The range the Ask AI panel points at: cells keep their own fill under a
+   tint (an inset shadow paints over the inline background). */
+#sheet {
+  user-select: none;
+}
+#sheet td.bnbloc-picked {
+  box-shadow: inset 0 0 0 9999px rgba(10, 116, 217, 0.16);
+}
+#sheet th[data-row],
+#sheet th[data-col] {
+  cursor: pointer;
+}

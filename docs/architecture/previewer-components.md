@@ -50,11 +50,17 @@ Validation (`core/pkgmeta/previewer_validation.go`, enforced at install):
   10). Specificity, highest first: multi-part extension (`.atlas.json`
   matching the end of the name — it beats the JSON viewer's exact
   `application/json`), exact MIME, plain extension, kind, MIME wildcard;
-- `capabilities` ⊆ `thumbnail`, `liveState`, `toolbar` (`edit` is reserved);
+- `capabilities` ⊆ `thumbnail`, `liveState`, `toolbar`, `selection` (`edit`
+  is reserved); a host ignores a capability it predates (it never drops the
+  previewer for one);
 - `toolbar`: at most 20 items, unique ids `[a-z][a-z0-9-]{0,31}`, an icon
   NAME from the code-owned list, a 1–40 character label, kind
   `button | toggle | zoom`; a non-empty toolbar requires the `toolbar`
-  capability.
+  capability;
+- `suggestions`: at most 6 starting prompts `{label, prompt}` for the file's
+  Ask AI panel (label 1–40 characters, prompt 1–500); the panel offers them
+  on an empty thread, and a pick fills the composer, never sends
+  (`docs/prd/2026-10-14-ai-document-editing.md` M2).
 
 The vocabularies (capabilities, toolbar kinds and icons, limits) are defined
 once in `web/previewer-sdk/src/protocol.ts`; the Go validator mirrors them and
@@ -173,6 +179,7 @@ are `postMessage` objects with a `type`:
 | frame → host | `preview.thumbnail {png: ArrayBuffer}` | PNG ≤ 512 KiB; stored via `PUT …/versions/{n}/thumbnail` only when the previewer declares `thumbnail` and the version has none |
 | frame → host | `preview.error {message}` | ≤ 500 characters, shown over the frame |
 | frame → host | `preview.title {text}` | ≤ 120 characters, the frame's accessible title |
+| frame → host | `preview.selection {selection}` | the part the member points at, `{label ≤ 120, detail ≤ 2000}` or `null` to clear (needs `selection`); the Ask AI panel shows the label as a removable chip and sends both with the request, the detail fenced as the file's data |
 | host → frame | `preview.resize {w, h}` | viewport changes |
 
 Validation on both sides uses the same module
@@ -210,7 +217,7 @@ implements the frame side:
 
 ```ts
 import { onInit, onFile, onToolbar, onState, onResize, setToolbar, sendState,
-  provideThumbnail, setTitle, reportError } from "@bnbloc/previewer-sdk";
+  provideThumbnail, setTitle, sendSelection, reportError } from "@bnbloc/previewer-sdk";
 
 onFile(async (bytes, file) => {
   const url = URL.createObjectURL(new Blob([bytes], { type: file.mimeType }));
@@ -220,6 +227,8 @@ onFile(async (bytes, file) => {
 });
 onToolbar((id, value) => { /* apply the gesture, then setToolbar(updatedItems) */ });
 onState((state, actor) => { /* apply another member's live state */ });
+// The member clicked frame 7 ("selection" capability); sendSelection(null) clears.
+sendSelection({ label: "Frame 7", detail: "walk_cycle_07: 64×64 at 448,0" });
 ```
 
 Bundle it into a classic script (or modules) with relative URLs and an
@@ -248,7 +257,10 @@ node examples/previewers/pptx/build.mjs
 All builds share `examples/previewers/lib/bundle.mjs`: esbuild, the
 deterministic archive, the package placeholder, and `NOTICES.txt` with the
 license files of every third-party package esbuild inlined (a bundled
-package without one fails the build).
+package without one fails the build). `examples/previewers/lib/selection.ts`
+is the Office previewers' pointing: a click picks a slide, a paragraph, a
+table or a page, selected text is quoted, Escape clears; the xlsx previewer
+picks cell ranges itself (drag, shift-click, row and column headers).
 
 ## Publishing
 

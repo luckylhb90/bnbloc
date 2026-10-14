@@ -15,6 +15,7 @@ import {
   type ArtifactVersionReply,
   type CoresReply,
   type FeedPage,
+  type FileRef,
   type MyAgentsReply,
   type PlazaReply,
   type PublishApproval,
@@ -719,7 +720,7 @@ export const api = {
       // The expert the agent recipient is asked to wear.
       readonly expert?: { readonly id: string; readonly version?: string };
       // The room file the message is about (the workbench's Ask AI panel).
-      readonly fileRef?: { readonly artifactId: string; readonly version: number };
+      readonly fileRef?: FileRef;
     },
     clientMsgId: string,
   ) =>
@@ -733,7 +734,15 @@ export const api = {
         ...(message.recipient ? { recipient: message.recipient } : {}),
         ...(message.attachmentIds.length > 0 ? { attachmentIds: message.attachmentIds } : {}),
         ...(message.recipient && message.expert ? { expert: message.expert } : {}),
-        ...(message.fileRef ? { fileRef: { artifactId: message.fileRef.artifactId, version: message.fileRef.version } } : {}),
+        ...(message.fileRef
+          ? {
+              fileRef: {
+                artifactId: message.fileRef.artifactId,
+                version: message.fileRef.version,
+                ...(message.fileRef.selection ? { selection: message.fileRef.selection } : {}),
+              },
+            }
+          : {}),
       }),
     }),
   // The caller's own bridge-advertised agents (all rooms): the "my agents"

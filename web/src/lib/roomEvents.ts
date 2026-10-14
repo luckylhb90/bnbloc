@@ -260,5 +260,12 @@ export function fileRefOf(v: unknown): FileRef | undefined {
   if (!v || typeof v !== "object") return undefined;
   const r = v as Record<string, unknown>;
   if (typeof r.artifactId !== "string" || !r.artifactId || typeof r.version !== "number" || r.version < 1) return undefined;
-  return { artifactId: r.artifactId, version: r.version, ...(typeof r.name === "string" && r.name ? { name: r.name } : {}) };
+  const sel = r.selection as Record<string, unknown> | undefined;
+  return {
+    artifactId: r.artifactId,
+    version: r.version,
+    ...(typeof r.name === "string" && r.name ? { name: r.name } : {}),
+    // The part pointed at, by its label (the detail is the agent's).
+    ...(sel && typeof sel.label === "string" && sel.label ? { selection: { label: sel.label } } : {}),
+  };
 }

@@ -392,7 +392,7 @@ export function RoomView({
     () => ({
       roomId,
       feed,
-      composer: (ref) => (
+      composer: (ref, draft) => (
         <RoomComposer
           key={`file:${ref.artifactId}`}
           roomPreview={!!room && "preview" in room}
@@ -412,6 +412,7 @@ export function RoomView({
           platformAgents={data.platform}
           modelCatalogs={data.modelCatalogs}
           variant="file"
+          draft={draft}
         />
       ),
     }),
