@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sort"
 	"sync"
 	"time"
@@ -79,9 +80,14 @@ type agentWorkspaces struct {
 	mu   sync.Mutex
 	path string // "" = memory only
 	m    map[driveKey]agentWorkspace
+	// sessions are the channel sessions bound in these workspaces, kept so
+	// a bridge restart resumes them (session_restore.go).
+	sessions map[sessionKey]sessionRecord
 }
 
-// workspaceRecord is one binding as persisted.
+// workspaceRecord is one binding as persisted. Fence is the sandbox fence
+// baseline (the protected paths' fingerprint bnbloc last left there), so a
+// restored session's next turn still finds what the guest changed.
 type workspaceRecord struct {
 	Room        string            `json:"room"`
 	Core        string            `json:"core"`
@@ -89,10 +95,12 @@ type workspaceRecord struct {
 	Sandboxed   bool              `json:"sandboxed,omitempty"`
 	WorkspaceID string            `json:"workspaceId"`
 	Copies      roomlog.CopyState `json:"copies,omitempty"`
+	Fence       string            `json:"fence,omitempty"`
 }
 
 type workspacesDoc struct {
 	Workspaces []workspaceRecord `json:"workspaces"`
+	Sessions   []sessionRecord   `json:"sessions,omitempty"`
 }
 
 // newAgentWorkspaces loads the bindings persisted under dir ("" = memory
@@ -100,7 +108,7 @@ type workspacesDoc struct {
 // reset: the agents then start in new workspaces, and the old ones stay on
 // their cores.
 func newAgentWorkspaces(dir string) *agentWorkspaces {
-	w := &agentWorkspaces{m: map[driveKey]agentWorkspace{}}
+	w := &agentWorkspaces{m: map[driveKey]agentWorkspace{}, sessions: map[sessionKey]sessionRecord{}}
 	if dir == "" {
 		return w
 	}
@@ -125,7 +133,13 @@ func newAgentWorkspaces(dir string) *agentWorkspaces {
 			continue
 		}
 		k := driveKey{room: r.Room, core: r.Core, provider: r.Provider, sandboxed: r.Sandboxed}
-		w.m[k] = agentWorkspace{id: r.WorkspaceID, copies: r.Copies, shared: &workspaceShared{}}
+		w.m[k] = agentWorkspace{id: r.WorkspaceID, copies: r.Copies, shared: &workspaceShared{fence: r.Fence}}
+	}
+	for _, r := range doc.Sessions {
+		if r.SessionID == "" || r.WorkspaceID == "" {
+			continue
+		}
+		w.sessions[r.key()] = r
 	}
 	return w
 }
@@ -143,6 +157,7 @@ func (w *agentWorkspaces) bind(k driveKey, id string) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	w.m[k] = agentWorkspace{id: id, shared: &workspaceShared{}}
+	w.dropSessionsLocked(func(sk sessionKey, r sessionRecord) bool { return sk.driveKey == k && r.WorkspaceID != id })
 	w.saveLocked()
 }
 
@@ -164,6 +179,7 @@ func (w *agentWorkspaces) unbind(k driveKey, id string) {
 	defer w.mu.Unlock()
 	if ws, ok := w.m[k]; ok && ws.id == id {
 		delete(w.m, k)
+		w.dropSessionsLocked(func(sk sessionKey, _ sessionRecord) bool { return sk.driveKey == k })
 		w.saveLocked()
 	}
 }
@@ -179,9 +195,53 @@ func (w *agentWorkspaces) forgetRoom(room string) {
 			changed = true
 		}
 	}
+	if w.dropSessionsLocked(func(sk sessionKey, _ sessionRecord) bool { return sk.room == room }) {
+		changed = true
+	}
 	if changed {
 		w.saveLocked()
 	}
+}
+
+// session is channel session sk's persisted binding (false = none).
+func (w *agentWorkspaces) session(sk sessionKey) (sessionRecord, bool) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	r, ok := w.sessions[sk]
+	return r, ok
+}
+
+// putSession records channel session sk's binding (and saves the
+// workspace's fence with it).
+func (w *agentWorkspaces) putSession(sk sessionKey, r sessionRecord) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if cur, ok := w.sessions[sk]; ok && reflect.DeepEqual(cur, r) {
+		return
+	}
+	w.sessions[sk] = r
+	w.saveLocked()
+}
+
+// dropSession forgets channel session sk's binding when it is still
+// session id ("" = whichever).
+func (w *agentWorkspaces) dropSession(sk sessionKey, id string) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.dropSessionsLocked(func(k sessionKey, r sessionRecord) bool { return k == sk && (id == "" || r.SessionID == id) }) {
+		w.saveLocked()
+	}
+}
+
+func (w *agentWorkspaces) dropSessionsLocked(match func(sessionKey, sessionRecord) bool) bool {
+	dropped := false
+	for k, r := range w.sessions {
+		if match(k, r) {
+			delete(w.sessions, k)
+			dropped = true
+		}
+	}
+	return dropped
 }
 
 // copies is what workspace id of slot k holds of the room's deliverables.
@@ -247,8 +307,18 @@ func (w *agentWorkspaces) saveLocked() {
 	}
 	doc := workspacesDoc{Workspaces: make([]workspaceRecord, 0, len(w.m))}
 	for k, ws := range w.m {
-		doc.Workspaces = append(doc.Workspaces, workspaceRecord{Room: k.room, Core: k.core, Provider: k.provider, Sandboxed: k.sandboxed, WorkspaceID: ws.id, Copies: ws.copies})
+		rec := workspaceRecord{Room: k.room, Core: k.core, Provider: k.provider, Sandboxed: k.sandboxed, WorkspaceID: ws.id, Copies: ws.copies}
+		if ws.shared != nil {
+			ws.shared.mu.Lock()
+			rec.Fence = ws.shared.fence
+			ws.shared.mu.Unlock()
+		}
+		doc.Workspaces = append(doc.Workspaces, rec)
 	}
+	for _, r := range w.sessions {
+		doc.Sessions = append(doc.Sessions, r)
+	}
+	sort.Slice(doc.Sessions, func(i, j int) bool { return sessionRecordLess(doc.Sessions[i], doc.Sessions[j]) })
 	sort.Slice(doc.Workspaces, func(i, j int) bool {
 		a, b := doc.Workspaces[i], doc.Workspaces[j]
 		if a.Room != b.Room {

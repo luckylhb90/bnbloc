@@ -3,6 +3,8 @@ package bridge
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -71,9 +73,14 @@ func TestContextOverflowContinuesInAFreshSession(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			gw := newSandboxGateway(t, "room-1", false)
 			prov := &overflowProv{ends: []corepkg.TurnStatus{first, {Idle: true}}}
-			b := New(Config{GatewayBaseURL: gw.srv.URL, GatewayToken: "t", OwnerSubject: "alice", Cores: newTestCore(prov)})
+			dir := t.TempDir()
+			b := New(Config{GatewayBaseURL: gw.srv.URL, GatewayToken: "t", OwnerSubject: "alice", Cores: newTestCore(prov), StateDir: dir})
 			b.runBridgeJob(context.Background(), job("job-1", "alice"))
 
+			// The kept binding is the fresh session's: a restart resumes it.
+			if raw, _ := os.ReadFile(filepath.Join(dir, workspacesFile)); !strings.Contains(string(raw), `"sessionId": "s2"`) || strings.Contains(string(raw), `"sessionId": "s1"`) {
+				t.Fatalf("kept bindings = %s; want s2 in place of s1", raw)
+			}
 			if prov.sessions != 2 {
 				t.Fatalf("sessions = %d; want the overflowing one and a fresh one", prov.sessions)
 			}

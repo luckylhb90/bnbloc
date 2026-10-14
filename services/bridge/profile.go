@@ -2,6 +2,7 @@ package bridge
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"log/slog"
 	"strings"
@@ -125,6 +126,22 @@ type SessionContribution struct {
 	// binding (rebind, room forgotten, core endpoint changed): revoke
 	// whatever the contribution granted.
 	Release func()
+	// State is what the contributor needs to reattach to the session after
+	// a bridge restart (SessionRestorer), kept with the session's persisted
+	// binding: never a secret. A contribution that grants anything without
+	// a State makes the session unrestorable (a restart starts it anew).
+	State json.RawMessage
+}
+
+// SessionRestorer is a SessionContributor that can reattach what it granted
+// a session to the same session after the bridge restarted (the core keeps
+// the session, and the agent its conversation).
+type SessionRestorer interface {
+	// RestoreSession reattaches from the State ContributeSession returned:
+	// the hooks of the reattached grant (MCPServers and Env are ignored: the
+	// session already has them). ok=false when it cannot (the session is
+	// then started anew).
+	RestoreSession(ctx context.Context, s SessionInfo, state json.RawMessage) (part SessionContribution, ok bool)
 }
 
 // SessionContributor contributes per-session profile entries. It is
@@ -166,17 +183,29 @@ func (b *Bridge) sessionContributors() []SessionContributor {
 	return append([]SessionContributor(nil), b.contrib.list...)
 }
 
-// sessionHooks are a bound session's contribution callbacks.
+// sessionHooks are a bound session's contribution callbacks, and what
+// restores them after a bridge restart: states holds each contributor's
+// State by its position (nil = it granted nothing), unrestorable whether a
+// grant cannot be restored.
 type sessionHooks struct {
-	turn    []func(TurnInfo)
-	release []func()
+	turn         []func(TurnInfo)
+	release      []func()
+	states       []json.RawMessage
+	unrestorable bool
+}
+
+// granted reports whether a contribution grants the session anything.
+func (part SessionContribution) granted() bool {
+	return len(part.MCPServers) > 0 || len(part.Env) > 0 || part.Turn != nil || part.Release != nil || part.RoomTools
 }
 
 // contribute asks every contributor for its part of a new session's profile
 // and merges it into p (which must be non-nil). It returns the hooks to
 // keep with the session and whether a contribution attached the room tools.
 func (b *Bridge) contribute(ctx context.Context, info SessionInfo, p *corepkg.AgentProfile) (hooks sessionHooks, roomTools bool) {
-	for _, c := range b.sessionContributors() {
+	list := b.sessionContributors()
+	hooks.states = make([]json.RawMessage, len(list))
+	for i, c := range list {
 		part, err := c.ContributeSession(ctx, info)
 		if err != nil {
 			slog.Warn("bnbloc bridge session contributor failed",
@@ -199,8 +228,52 @@ func (b *Bridge) contribute(ctx context.Context, info SessionInfo, p *corepkg.Ag
 		if part.Release != nil {
 			hooks.release = append(hooks.release, part.Release)
 		}
+		if _, ok := c.(SessionRestorer); ok && len(part.State) > 0 {
+			hooks.states[i] = part.State
+		} else if part.granted() {
+			hooks.unrestorable = true
+		}
 	}
 	return hooks, roomTools
+}
+
+// restoreContributions reattaches every contributor's grant to a session
+// restored after a bridge restart, from the states its binding kept. ok is
+// false (and nothing stays granted) when the states no longer match the
+// contributors, or one cannot reattach.
+func (b *Bridge) restoreContributions(ctx context.Context, info SessionInfo, states []json.RawMessage) (hooks sessionHooks, ok bool) {
+	list := b.sessionContributors()
+	if len(states) > len(list) {
+		return sessionHooks{}, false
+	}
+	hooks.states = make([]json.RawMessage, len(list))
+	fail := func() (sessionHooks, bool) {
+		for _, r := range hooks.release {
+			r()
+		}
+		return sessionHooks{}, false
+	}
+	for i, st := range states {
+		if len(st) == 0 {
+			continue
+		}
+		r, ok := list[i].(SessionRestorer)
+		if !ok {
+			return fail()
+		}
+		part, ok := r.RestoreSession(ctx, info, st)
+		if !ok {
+			return fail()
+		}
+		if part.Turn != nil {
+			hooks.turn = append(hooks.turn, part.Turn)
+		}
+		if part.Release != nil {
+			hooks.release = append(hooks.release, part.Release)
+		}
+		hooks.states[i] = st
+	}
+	return hooks, true
 }
 
 // appendInstructions appends one block of profile instructions to another,
@@ -303,6 +376,11 @@ func (b *Bridge) unbindLocked(sk sessionKey) {
 	rs := b.sessions[sk]
 	delete(b.sessions, sk)
 	if rs != nil {
+		// Dropped for good: a restart must not restore it either.
+		rs.mu.Lock()
+		id := rs.sessionID
+		rs.mu.Unlock()
+		b.workspaces.dropSession(sk, id)
 		go rs.release()
 	}
 }

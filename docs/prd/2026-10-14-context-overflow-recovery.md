@@ -37,6 +37,20 @@ model they had chosen, so it ran on a smaller default model.
   directory (lost when the sandbox restarts); look at many images or large
   files through a script (a contact sheet, extracted text or colors), not
   by reading each one into the conversation.
+- **A session outlives a bridge restart.** The desktop restarts the
+  bridge whenever a core is updated; a session binding kept only in memory
+  made every agent start a new core session, losing its conversation
+  although the core still held it. Each channel session's binding (the
+  core's workspace and session ids, the reflow cursor, the content and
+  guidance it was created with, the sandbox fence baseline, and what each
+  session contributor needs to reattach — never a secret) is kept with the
+  workspace bindings (`workspaces.json`, owner-only) and restored when it
+  still fits (same workspace, same content, every contributor able to
+  reattach); a session the core no longer knows falls back to a new one.
+  The room tools keep their address across restarts when it is free, and a
+  session's bearer derives again from a nonce its binding keeps and a key
+  in the bridge's state directory (`roomtools.key`, owner-only), so the
+  agent's room tools keep working in a restored session.
 - **A chosen model is kept.** The composer never drops the member's saved
   model while the agent's model list is unknown, loading or empty (a core
   restarting); only a loaded, non-empty list without it drops it. A
@@ -50,5 +64,9 @@ model they had chosen, so it ran on a smaller default model.
   notice; a second overflow fails with a plain notice and the raw detail;
   a normal failure is not retried.
 - Guidance: goldens and the token budget.
+- Restart: a session survives a bridge restart with its cursor; a session
+  the core forgot falls back to a new one; other content is not restored;
+  the room tools reattach with the bearer the agent was given (never
+  persisted); a context reset's fresh session replaces the kept binding.
 - Web: a saved model survives an empty or loading catalog and is dropped
   only by a loaded catalog without it; the outgoing message carries it.

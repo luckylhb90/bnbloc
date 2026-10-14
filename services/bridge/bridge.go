@@ -1466,6 +1466,14 @@ func (b *Bridge) runTurn(ctx context.Context, d *drive, key driveKey, opts corep
 	b.waitTurnStart(ctx, rs.roomSession)
 	replied, err := b.reflow(ctx, reflowTurn{room: d.job.RoomID, channelID: d.job.ChannelID, jobID: d.job.JobID, deadline: deadline, bound: b.cfg.MaxTurn}, rs.roomSession, usage)
 	b.postSessionState(ctx, d.job.RoomID, rs.roomSession, "idle")
+	// The turn moved the session's cursor: keep it for a restart.
+	sk := d.sessionKey()
+	b.mu.Lock()
+	bound := b.sessions[sk] == rs.roomSession
+	b.mu.Unlock()
+	if bound {
+		b.persistSession(sk, rs.roomSession)
+	}
 	return driveResult{workspaceID: rs.workspaceID, sessionID: rs.sessionID, replied: replied}, rs.roomSession, atStage(stageRun, err)
 }
 
@@ -1553,6 +1561,11 @@ func (b *Bridge) ensureSession(ctx context.Context, d *drive, key driveKey, prom
 		existing = nil
 	}
 	b.mu.Unlock()
+	if existing == nil {
+		// None bound since the bridge started: the one the channel had
+		// before a restart, when it still fits (session_restore.go).
+		existing = b.restoreSession(ctx, d, key, sk, b.sessionInfo(d, opts))
+	}
 	if existing != nil && !existing.fenceIntact() {
 		// The sandboxed workspace's protected paths changed since its last
 		// turn's fence (a quiesce that failed, a write from outside): no
@@ -1642,6 +1655,7 @@ func (b *Bridge) ensureSession(ctx context.Context, d *drive, key driveKey, prom
 	b.mu.Lock()
 	b.sessions[sk] = rs
 	b.mu.Unlock()
+	b.persistSession(sk, rs)
 	slog.Info("bnbloc bridge bound room to session",
 		"event", "bnbloc.bridge.session_bound", "room", room, "channel", sk.channel, "core", d.core, "provider", provider, "workspace", workspaceID, "reused", reused, "session", rs.sessionID)
 	return &ensureResult{roomSession: rs, freshlyCreated: true, atts: atts}, nil
@@ -1660,11 +1674,7 @@ func (b *Bridge) startSession(ctx context.Context, d *drive, key driveKey, entry
 	atts := b.materializeAttachments(ctx, d.caps.bytesWriter, d.caps.maxInput, entry.endpoint, room, workspaceID, d.job.AttachmentIDs)
 	// What the session is told once (the guidance, the content, the session
 	// contributors' servers): its profile or its first prompt's head.
-	profile, prefix, hooks, facts := b.sessionGuidance(ctx, d, entry.endpoint, workspaceID, SessionInfo{
-		TenantID: d.job.TenantID, RoomID: room, ChannelID: d.job.ChannelID, Owner: d.owner, Core: d.core, Provider: provider,
-		Sandboxed: opts.Execution != nil, MCPTransports: b.targetTransports(d.core, d.target, provider),
-		JobID: d.job.JobID, RequesterUserID: d.job.RequesterUserID,
-	})
+	profile, prefix, hooks, facts := b.sessionGuidance(ctx, d, entry.endpoint, workspaceID, b.sessionInfo(d, opts))
 	var st roomlog.CtxState
 	initialPrompt := prefix + prompt(workspaceID, &st, atts, facts)
 	rs := &roomSession{owner: d.owner, provider: provider, core: d.core, workspaceID: workspaceID, ws: b.workspaces.shared(key, workspaceID), ctx: st, hooks: hooks, profileSum: d.content.bindingSum(), guidance: facts}
@@ -1687,6 +1697,16 @@ func (b *Bridge) startSession(ctx context.Context, d *drive, key driveKey, entry
 	// wrote for this session.
 	rs.fenceBaseline()
 	return rs, atts, nil
+}
+
+// sessionInfo is what the session contributors are told about a drive's
+// session.
+func (b *Bridge) sessionInfo(d *drive, opts corepkg.SessionOptions) SessionInfo {
+	return SessionInfo{
+		TenantID: d.job.TenantID, RoomID: d.job.RoomID, ChannelID: d.job.ChannelID, Owner: d.owner, Core: d.core, Provider: d.job.Provider,
+		Sandboxed: opts.Execution != nil, MCPTransports: b.targetTransports(d.core, d.target, d.job.Provider),
+		JobID: d.job.JobID, RequesterUserID: d.job.RequesterUserID,
+	}
 }
 
 // --- local agent core (via core.Provider) ---

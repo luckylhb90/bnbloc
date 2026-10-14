@@ -89,13 +89,14 @@ type Server struct {
 	sessions map[[sha256.Size]byte]*Session
 }
 
-// Start listens on 127.0.0.1 at a random port and serves until Close.
+// Start listens on 127.0.0.1 (cfg.Addr when it is free, else a random
+// port) and serves until Close.
 func Start(cfg Config) (*Server, error) {
 	cfg = cfg.withDefaults()
 	if cfg.Gateway == nil {
 		return nil, errors.New("roomtools: a gateway client is required")
 	}
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	ln, err := listenLoopback(cfg.Addr)
 	if err != nil {
 		return nil, fmt.Errorf("roomtools: listen: %w", err)
 	}
@@ -111,6 +112,22 @@ func Start(cfg Config) (*Server, error) {
 	}()
 	return s, nil
 }
+
+// listenLoopback listens on addr when it is a free loopback address, else
+// on a random loopback port.
+func listenLoopback(addr string) (net.Listener, error) {
+	if host, _, err := net.SplitHostPort(addr); err == nil && net.ParseIP(host).IsLoopback() {
+		if ln, err := net.Listen("tcp", addr); err == nil {
+			return ln, nil
+		}
+		slog.Info("bnbloc bridge room tools address busy; listening on a new port",
+			"event", "bnbloc.bridge.roomtools_addr_busy", "addr", addr)
+	}
+	return net.Listen("tcp", "127.0.0.1:0")
+}
+
+// Addr is the address the server listens on.
+func (s *Server) Addr() string { return s.ln.Addr().String() }
 
 // URL is the MCP endpoint agents are given.
 func (s *Server) URL() string { return "http://" + s.ln.Addr().String() + Endpoint }
@@ -136,11 +153,30 @@ func (s *Server) Open(scope Scope) (token string, sess *Session, err error) {
 		return "", nil, fmt.Errorf("roomtools: mint token: %w", err)
 	}
 	token = base64.RawURLEncoding.EncodeToString(raw)
-	sess = &Session{scope: scope, token: token}
+	sess, err = s.OpenWithToken(scope, token)
+	return token, sess, err
+}
+
+// minTokenBytes bounds a caller-chosen bearer (OpenWithToken).
+const minTokenBytes = 32
+
+// OpenWithToken opens a session whose bearer the caller chose (one it can
+// derive again, so a session restored after a bridge restart keeps the
+// bearer its agent was given). It must be at least minTokenBytes long and
+// not already in use.
+func (s *Server) OpenWithToken(scope Scope, token string) (*Session, error) {
+	if len(token) < minTokenBytes {
+		return nil, errors.New("roomtools: bearer too short")
+	}
+	sess := &Session{scope: scope, token: token}
+	k := sha256.Sum256([]byte(token))
 	s.mu.Lock()
-	s.sessions[sha256.Sum256([]byte(token))] = sess
-	s.mu.Unlock()
-	return token, sess, nil
+	defer s.mu.Unlock()
+	if s.sessions[k] != nil {
+		return nil, errors.New("roomtools: bearer already in use")
+	}
+	s.sessions[k] = sess
+	return sess, nil
 }
 
 // Revoke ends a session: its bearer is refused from now on.

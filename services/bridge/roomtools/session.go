@@ -30,6 +30,10 @@ type Config struct {
 	Gateway Gateway
 	// GatewayBaseURL prefixes deliverable links ("" = relative paths).
 	GatewayBaseURL string
+	// Addr is the loopback address to listen on, when free (the bridge
+	// keeps its server's address across restarts, so the sessions it
+	// restores keep reaching it); "" or a busy one = a random port.
+	Addr string
 	// PollInterval is how often ask_agent checks a dispatched job.
 	PollInterval time.Duration
 	// DefaultWait / MaxWait bound how long ask_agent waits for a
