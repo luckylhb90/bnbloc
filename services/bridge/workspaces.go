@@ -190,13 +190,16 @@ func (w *agentWorkspaces) unbind(k driveKey, id string) {
 	}
 }
 
-// forgetRoom drops the bindings of a room that is gone.
-func (w *agentWorkspaces) forgetRoom(room string) {
+// forgetRoom drops the bindings of a room that is gone and returns its
+// workspaces (slot → workspace id).
+func (w *agentWorkspaces) forgetRoom(room string) map[driveKey]string {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	changed := false
-	for k := range w.m {
+	gone := map[driveKey]string{}
+	for k, ws := range w.m {
 		if k.room == room {
+			gone[k] = ws.id
 			delete(w.m, k)
 			changed = true
 		}
@@ -207,6 +210,7 @@ func (w *agentWorkspaces) forgetRoom(room string) {
 	if changed {
 		w.saveLocked()
 	}
+	return gone
 }
 
 // session is channel session sk's persisted binding (false = none).

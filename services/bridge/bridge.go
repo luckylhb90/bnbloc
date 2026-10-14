@@ -998,7 +998,7 @@ func (b *Bridge) dropGoneRoom(room string, err error) {
 	b.forgetRoom(room)
 	// The room is gone (deleted, or the owner is no longer a member): so
 	// are its agents' workspace bindings.
-	b.workspaces.forgetRoom(room)
+	workspaces := b.workspaces.forgetRoom(room)
 	if b.gone == nil {
 		b.gone = map[string]time.Time{}
 	}
@@ -1006,6 +1006,25 @@ func (b *Bridge) dropGoneRoom(room string, err error) {
 	b.mu.Unlock()
 	slog.Warn("bnbloc bridge dropped a room the gateway reports gone",
 		"event", "bnbloc.bridge.room_gone", "room", room, "error", err)
+	// A deleted room's workspaces go with it, its records in .room/ among
+	// them (docs/prd/2026-10-14-multi-member-rooms.md rule 2); a lost
+	// membership (403) keeps them, in case it was a misreport.
+	var ge *gatewayError
+	if errors.As(err, &ge) && ge.Status == http.StatusNotFound && len(workspaces) > 0 {
+		go b.deleteRoomWorkspaces(workspaces)
+	}
+}
+
+// deleteRoomWorkspaces removes a deleted room's workspaces, best-effort
+// (deleteWorkspace).
+func (b *Bridge) deleteRoomWorkspaces(workspaces map[driveKey]string) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	for k, id := range workspaces {
+		if entry, ok := b.coreEntry(k.core); ok {
+			b.deleteWorkspace(ctx, entry, id)
+		}
+	}
 }
 
 // discoverRooms lists the owner's rooms from the gateway, with the subset the
@@ -1645,6 +1664,19 @@ func (b *Bridge) ensureSession(ctx context.Context, d *drive, key driveKey, prom
 			"event", "bnbloc.bridge.sandbox_fence_breached", "room", room, "core", d.core, "provider", provider, "session", existing.sessionID)
 		b.mu.Lock()
 		b.unbindWorkspaceLocked(key)
+		b.mu.Unlock()
+		existing = nil
+	}
+	if existing != nil && b.channelReset(ctx, room, d.job.ChannelID, existing) {
+		// A message of the channel was deleted after the session started:
+		// a new session, so the deleted text leaves its memory.
+		slog.Info("bnbloc bridge a deleted message resets the session",
+			"event", "bnbloc.bridge.session_reset_deleted", "room", room, "core", d.core,
+			"provider", provider, "session", existing.sessionID)
+		b.mu.Lock()
+		if b.sessions[sk] == existing {
+			b.unbindLocked(sk)
+		}
 		b.mu.Unlock()
 		existing = nil
 	}

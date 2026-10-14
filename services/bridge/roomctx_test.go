@@ -2,16 +2,21 @@ package bridge
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	corepkg "github.com/luckylhb90/bnbloc/core"
 	"github.com/luckylhb90/bnbloc/internal/roomlog"
+	"github.com/luckylhb90/bnbloc/internal/wire"
 )
 
 // pullGateway serves everything the pull-context flow fetches: channels,
@@ -39,7 +44,10 @@ type pullGateway struct {
 	attachments map[string]testAttachment
 	downloads   map[string]int
 	reports     []string
-	srv         *httptest.Server
+	// revisions are the room's edits and deletions the revisions listing
+	// serves.
+	revisions []wire.MessageRevision
+	srv       *httptest.Server
 }
 
 // testAttachment is a chat attachment the test gateway serves.
@@ -70,6 +78,19 @@ func newPullGateway(t *testing.T) *pullGateway {
 			body = `{"messages":[]}`
 		}
 		fmt.Fprint(w, body)
+	})
+	mux.HandleFunc("GET /v1/rooms/r1/history/revisions", func(w http.ResponseWriter, r *http.Request) {
+		g.mu.Lock()
+		defer g.mu.Unlock()
+		after, _ := strconv.ParseInt(r.URL.Query().Get("after"), 10, 64)
+		page := wire.RevisionsPage{Revisions: []wire.MessageRevision{}}
+		for _, rev := range g.revisions {
+			page.LatestMs = max(page.LatestMs, rev.AtMs)
+			if rev.AtMs > after {
+				page.Revisions = append(page.Revisions, rev)
+			}
+		}
+		_ = json.NewEncoder(w).Encode(page)
 	})
 	mux.HandleFunc("GET /v1/rooms/r1/artifacts", func(w http.ResponseWriter, r *http.Request) {
 		g.mu.Lock()
@@ -692,5 +713,80 @@ func TestPassMirrorsTheRoomsAttachments(t *testing.T) {
 	g.mu.Unlock()
 	if n != 1 {
 		t.Fatalf("downloads = %d, want the copy kept, not fetched again", n)
+	}
+}
+
+// Records follow the room (docs/prd/2026-10-14-multi-member-rooms.md rule
+// 2): a chunk holding an edited or deleted message is written again under
+// its name, and a deletion resets the channel's sessions that started
+// before it — the text may be in their memory — while an edit does not.
+func TestRecordsFollowEditsAndDeletes(t *testing.T) {
+	g := newPullGateway(t)
+	g.setHistory("general", []int64{10, 11}, map[int64]string{10: "draft plan", 11: "secret token"})
+	prov := &fakeCoreProvider{url: g.srv.URL}
+	b := New(Config{GatewayBaseURL: g.srv.URL, GatewayToken: "t", OwnerSubject: "maya",
+		Cores: []CoreConfig{{Name: "core-a", Provider: prov, Endpoint: corepkg.Endpoint{BaseURL: g.srv.URL}}}})
+	w, ep, ok := testWriter(b, "core-a")
+	if !ok {
+		t.Fatal("fake provider must satisfy WorkspaceFileWriter")
+	}
+	self := roomlog.Producer{Owner: "maya", Provider: "agent-a"}
+	chunk := ".room/channels/general/chunk-0000000010-0000000011.md"
+	fileOf := func(name string) string {
+		var out string
+		for _, wr := range prov.roomFileWrites() {
+			if wr.path == name {
+				out = wr.content
+			}
+		}
+		return out
+	}
+	st := b.followRevisions(context.Background(), "r1", roomlog.CtxState{})
+	st, _, _, err := b.materializeRoomContext(context.Background(), w, ep, "r1", "ws", "job-x", "general", 0, 0, "", self, st, roomlog.Guidance{HasRoomFiles: true}, nil)
+	if err != nil || !strings.Contains(fileOf(chunk), "secret token") {
+		t.Fatalf("first pass: %v\n%s", err, fileOf(chunk))
+	}
+	shared := b.workspaces.shared(driveKey{}, "ws")
+	shared.setRoomState(st)
+	before := &roomSession{ws: shared, ctx: roomlog.CtxState{StartedMs: time.Now().UnixMilli() - 1000}}
+	if b.channelReset(context.Background(), "r1", "general", before) {
+		t.Fatal("a session is reset with nothing deleted")
+	}
+
+	// 10 is edited: the records are rewritten, no session resets.
+	g.setHistory("general", []int64{10, 11}, map[int64]string{10: "final plan", 11: "secret token"})
+	g.revisions = []wire.MessageRevision{{ChannelID: "general", Sequence: 10, AtMs: 500}}
+	if b.channelReset(context.Background(), "r1", "general", before) {
+		t.Fatal("an edit resets the session")
+	}
+	// 11 is deleted: its channel's earlier sessions reset, not a later one
+	// nor another channel's.
+	g.setHistory("general", []int64{10}, map[int64]string{10: "final plan"})
+	g.revisions = append(g.revisions, wire.MessageRevision{ChannelID: "general", Sequence: 11, Deleted: true, AtMs: 600})
+	if !b.channelReset(context.Background(), "r1", "general", before) {
+		t.Fatal("a deletion does not reset a session that started before it")
+	}
+	if b.channelReset(context.Background(), "r1", "test", before) {
+		t.Fatal("a deletion resets another channel's session")
+	}
+	if later := (&roomSession{ws: shared, ctx: roomlog.CtxState{StartedMs: time.Now().UnixMilli() + 1000}}); b.channelReset(context.Background(), "r1", "general", later) {
+		t.Fatal("a deletion resets a session that started after it")
+	}
+	st = shared.roomState()
+	if !slices.Equal(st.Revised["general"], []int64{10, 11}) || st.RevisedMs != 600 {
+		t.Fatalf("state = %+v", st)
+	}
+	next, _, _, err := b.materializeRoomContext(context.Background(), w, ep, "r1", "ws", "job-y", "general", 0, 0, "", self, st, roomlog.Guidance{HasRoomFiles: true}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := fileOf(chunk); strings.Contains(got, "secret token") || strings.Contains(got, "draft plan") || !strings.Contains(got, "final plan") {
+		t.Fatalf("the chunk is not rewritten:\n%s", got)
+	}
+	if got := fileOf(".room/channels/general/recent.md"); strings.Contains(got, "secret token") {
+		t.Fatalf("recent.md keeps the deleted text:\n%s", got)
+	}
+	if len(next.Revised) != 0 {
+		t.Fatalf("revised after the rewrite = %v", next.Revised)
 	}
 }

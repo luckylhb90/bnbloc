@@ -7,6 +7,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	corepkg "github.com/luckylhb90/bnbloc/core"
 )
 
 // roomGoneGateway lists one room in discovery but answers its event stream and
@@ -151,5 +153,41 @@ func TestBridgeKeepsRoomWhoseDetailIsOutOfTenant(t *testing.T) {
 	time.Sleep(200 * time.Millisecond) // the sync plan lookup has answered 404 by now
 	if stream, _, gone := b.watching("other-tenant-room"); !stream || gone {
 		t.Fatalf("an out-of-tenant room detail 404 dropped the room (stream=%v gone=%v)", stream, gone)
+	}
+}
+
+// deletingCore records the workspaces the bridge deletes.
+type deletingCore struct {
+	*fakeCoreProvider
+	deleted chan string
+}
+
+func (c *deletingCore) DeleteWorkspace(_ context.Context, _ corepkg.Endpoint, id string) error {
+	c.deleted <- id
+	return nil
+}
+
+// A deleted room's workspaces — its records in .room/ among them — are
+// removed with it; a lost membership (403) keeps them.
+func TestDeletedRoomRemovesItsWorkspaces(t *testing.T) {
+	for _, status := range []int{http.StatusNotFound, http.StatusForbidden} {
+		prov := &deletingCore{fakeCoreProvider: &fakeCoreProvider{url: "http://core.invalid"}, deleted: make(chan string, 1)}
+		b := New(Config{GatewayBaseURL: "http://gw.invalid", GatewayToken: "t", OwnerSubject: "alice",
+			Cores: []CoreConfig{{Name: "core-a", Provider: prov, Endpoint: corepkg.Endpoint{BaseURL: "http://core.invalid"}}}})
+		b.workspaces.bind(driveKey{room: "gone-room", core: "core-a", provider: "codex"}, "ws-1")
+		b.dropGoneRoom("gone-room", &gatewayError{Status: status})
+		if _, ok := b.workspaces.id(driveKey{room: "gone-room", core: "core-a", provider: "codex"}); ok {
+			t.Fatalf("status %d: the binding outlived the room", status)
+		}
+		select {
+		case id := <-prov.deleted:
+			if status != http.StatusNotFound || id != "ws-1" {
+				t.Fatalf("status %d: deleted %q", status, id)
+			}
+		case <-time.After(300 * time.Millisecond):
+			if status == http.StatusNotFound {
+				t.Fatal("a deleted room's workspace was kept")
+			}
+		}
 	}
 }

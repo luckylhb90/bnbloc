@@ -54,6 +54,18 @@ type CtxState struct {
 	// Attachments are the room's attachments the workspace holds a copy of
 	// (id → path; Mirrored).
 	Attachments map[string]string `json:",omitempty"`
+	// RevisedMs is the room's newest edit or deletion the workspace's
+	// records follow (the revisions listing's time); Revised are the
+	// sequences, by channel, whose chunks the next pass rewrites; Resets
+	// are when (bridge clock, unix ms) a deletion was found in each channel:
+	// a session started before it is reset at its next turn, since the
+	// deleted text may be in its memory.
+	RevisedMs int64              `json:",omitempty"`
+	Revised   map[string][]int64 `json:",omitempty"`
+	Resets    map[string]int64   `json:",omitempty"`
+	// StartedMs is when a session started (bridge clock, unix ms): a
+	// session's.
+	StartedMs int64 `json:",omitempty"`
 }
 
 // NamedFile is one materialized .room/ file.
@@ -145,13 +157,58 @@ func MaterializeChannel(entries []Entry, complete bool, rec ChannelRecords) (fil
 
 // chunkContent renders one chunk of history.
 func chunkContent(chunk []Entry) string {
+	return rangeContent(chunk[0].Seq, chunk[len(chunk)-1].Seq, chunk)
+}
+
+func rangeContent(first, last int64, entries []Entry) string {
 	var b strings.Builder
-	b.WriteString(RecordsHeader(fmt.Sprintf("Room history %d–%d", chunk[0].Seq, chunk[len(chunk)-1].Seq)))
+	b.WriteString(RecordsHeader(fmt.Sprintf("Room history %d–%d", first, last)))
 	b.WriteString("\n")
-	for _, e := range chunk {
+	for _, e := range entries {
 		b.WriteString(Line(e))
 	}
 	return b.String()
+}
+
+// ChunkRange is the sequence range a chunk file holds, from its name.
+func ChunkRange(name string) (first, last int64, ok bool) {
+	base := name[strings.LastIndexByte(name, '/')+1:]
+	if _, err := fmt.Sscanf(base, "chunk-%d-%d.md", &first, &last); err != nil {
+		return 0, 0, false
+	}
+	return first, last, true
+}
+
+// ChunksHolding are the chunks of rec holding any of seqs.
+func ChunksHolding(rec ChannelRecords, seqs []int64) []string {
+	var out []string
+	for _, name := range rec.Chunks {
+		first, last, ok := ChunkRange(name)
+		if !ok {
+			continue
+		}
+		for _, s := range seqs {
+			if s >= first && s <= last {
+				out = append(out, name)
+				break
+			}
+		}
+	}
+	return out
+}
+
+// RewriteChunk renders chunk name again from entries (its range as the
+// room holds it now: edits applied, deletions gone), under the same name,
+// so no file keeps the old text.
+func RewriteChunk(name string, entries []Entry) NamedFile {
+	first, last, _ := ChunkRange(name)
+	var kept []Entry
+	for _, e := range entries {
+		if e.Seq >= first && e.Seq <= last {
+			kept = append(kept, e)
+		}
+	}
+	return NamedFile{Name: name, Content: rangeContent(first, last, kept)}
 }
 
 // GuidanceChannel is how the session guidance names a channel's records

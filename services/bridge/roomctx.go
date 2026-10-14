@@ -5,7 +5,11 @@ import (
 	"encoding/json"
 	"log/slog"
 	"maps"
+	"net/url"
+	"slices"
+	"strconv"
 	"strings"
+	"time"
 
 	corepkg "github.com/luckylhb90/bnbloc/core"
 	"github.com/luckylhb90/bnbloc/core/protocol"
@@ -247,7 +251,18 @@ func (b *Bridge) materializeRoomContext(ctx context.Context, w corepkg.Workspace
 	next.Channels = map[string]roomlog.ChannelRecords{}
 	var files []roomlog.NamedFile
 	var index []roomlog.ChannelRecords
+	next.Revised = nil
 	for _, r := range reads {
+		// Chunks holding an edited or deleted message are written again,
+		// under their names: no file keeps the old text.
+		for _, name := range roomlog.ChunksHolding(r.rec, st.Revised[r.ch.ID]) {
+			first, last, _ := roomlog.ChunkRange(name)
+			entries, _, err := roomlog.History(ctx, b.gatewayGET, room, roomlog.HistoryQuery{Only: r.ch.ID, After: first - 1, Before: last + 1, MaxRows: 2 * chunkRereadRows})
+			if err != nil {
+				return st, nil, "", err
+			}
+			files = append(files, roomlog.RewriteChunk(name, roomlog.PointAttachments(entries, next.Attachments)))
+		}
 		entries := roomlog.PointAttachments(r.entries, next.Attachments)
 		chFiles, rec := roomlog.MaterializeChannel(entries, r.complete, r.rec)
 		files = append(files, chFiles...)
@@ -263,6 +278,83 @@ func (b *Bridge) materializeRoomContext(ctx context.Context, w corepkg.Workspace
 		}
 	}
 	return next, own, from, nil
+}
+
+// chunkRereadRows bounds the rows a chunk rewrite reads (a chunk holds at
+// most that many messages).
+const chunkRereadRows = 200
+
+// Revision reads: a page of the revisions listing, and the pages one look
+// reads at most (later looks continue).
+const (
+	revisionPageRows = 200
+	revisionPages    = 5
+	// maxRevisedPerChannel bounds the sequences a channel's records wait
+	// to rewrite.
+	maxRevisedPerChannel = 500
+)
+
+// followRevisions brings st up to the room's edits and deletions since
+// st.RevisedMs (docs/prd/2026-10-14-multi-member-rooms.md rule 2): their
+// sequences, by channel, for the next pass to rewrite (Revised), and a
+// deletion's channel for its sessions to reset (Resets). A workspace's
+// first look only notes where the room stands: its records are written
+// from the room as it is. Best-effort: a failed read is retried next time.
+func (b *Bridge) followRevisions(ctx context.Context, room string, st roomlog.CtxState) roomlog.CtxState {
+	first := st.RevisedMs == 0
+	st.Revised, st.Resets = maps.Clone(st.Revised), maps.Clone(st.Resets)
+	now := time.Now().UnixMilli()
+	for range revisionPages {
+		raw, err := b.gatewayGET(ctx, "/v1/rooms/"+url.PathEscape(room)+"/history/revisions?after="+strconv.FormatInt(st.RevisedMs, 10)+"&limit="+strconv.Itoa(revisionPageRows))
+		var page wire.RevisionsPage
+		if err != nil || json.Unmarshal(raw, &page) != nil {
+			return st
+		}
+		if first {
+			st.RevisedMs = max(page.LatestMs, 1) // 1: looked, nothing revised yet
+			return st
+		}
+		for _, r := range page.Revisions {
+			if st.Revised == nil {
+				st.Revised = map[string][]int64{}
+			}
+			seqs := append(slices.Clone(st.Revised[r.ChannelID]), r.Sequence)
+			st.Revised[r.ChannelID] = seqs[max(len(seqs)-maxRevisedPerChannel, 0):]
+			if r.Deleted {
+				if st.Resets == nil {
+					st.Resets = map[string]int64{}
+				}
+				st.Resets[r.ChannelID] = now
+			}
+			st.RevisedMs = max(st.RevisedMs, r.AtMs)
+		}
+		if len(page.Revisions) < revisionPageRows {
+			return st
+		}
+	}
+	return st
+}
+
+// channelReset reports whether a reused session must start again before
+// its turn: a message of its channel was deleted after it started, and the
+// text may be in its memory (an edit only rewrites the records). The
+// session code (ensureSession) unbinds such a session.
+func (b *Bridge) channelReset(ctx context.Context, room, channelID string, rs *roomSession) bool {
+	if rs.ws == nil {
+		return false
+	}
+	rs.ws.pass.Lock()
+	defer rs.ws.pass.Unlock()
+	st := b.followRevisions(ctx, room, rs.ws.roomState())
+	rs.ws.setRoomState(st)
+	if len(st.Resets) == 0 {
+		return false
+	}
+	if channelID == "" {
+		list, _ := roomlog.AgentChannelList(ctx, b.gatewayGET, room)
+		channelID = list[0].ID
+	}
+	return st.Resets[channelID] > rs.ctx.StartedMs
 }
 
 // guidanceChannel is the session's own channel's records directory, as
@@ -286,6 +378,9 @@ func (b *Bridge) guidanceChannel(ctx context.Context, room, channelID string) st
 // job's requester.
 func (b *Bridge) drivePrompt(ctx context.Context, d *drive, workspaceID string, atts turnAttachments, st *roomlog.CtxState, g roomlog.Guidance, fresh bool) string {
 	room, owner, provider, text := d.job.RoomID, d.owner, d.job.Provider, d.text
+	if fresh && st != nil {
+		st.StartedMs = time.Now().UnixMilli()
+	}
 	now := roomlog.Now{From: d.job.RequesterUserID, Text: text, Attachments: toPromptAttachments(atts.delivered), Undelivered: atts.undelivered}
 	entry, ok := b.coreEntry(d.core)
 	if d.caps.writer == nil || !ok {
@@ -303,7 +398,7 @@ func (b *Bridge) drivePrompt(ctx context.Context, d *drive, workspaceID string, 
 	if d.caps.bytesWriter != nil {
 		cp = &deliverableCopier{key: d.key(), workspaceID: workspaceID, w: d.caps.bytesWriter, ep: ep, maxInput: d.caps.maxInput}
 	}
-	roomSt := shared.roomState()
+	roomSt := b.followRevisions(ctx, room, shared.roomState())
 	roomSt.Attachments = maps.Clone(roomSt.Attachments)
 	for _, a := range atts.delivered {
 		if a.ID != "" {
