@@ -324,9 +324,14 @@ func (b *Bridge) artifactMaxBytes(ctx context.Context, room string) (int64, erro
 // sessions wrote it (its sessions change, its workspace and its files do
 // not: workspaces.go), and after its workspace was replaced and the agent
 // restored the file from its .room/deliverables/ copy.
+//
+// A seat other than the owner's own (driveKey.seatID: a borrower's) is part
+// of the id: its workspace is its own, so its report.md is not a version of
+// the owner's.
 func artifactIDForFile(room string, rs *roomSession, rel string) string {
-	agent := driveKey{room: room, core: rs.core, provider: rs.provider}.agentID()
-	return "artf_" + shortHash(agent+"\n"+rs.owner+"\n"+rel)
+	seat := rs.seat
+	seat.room, seat.core, seat.provider = room, rs.core, rs.provider
+	return "artf_" + shortHash(seat.seatAgentID()+"\n"+rs.owner+"\n"+rel)
 }
 
 // deliverable is one file to publish: inline text, or blob bytes with a MIME

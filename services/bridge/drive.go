@@ -36,6 +36,9 @@ import (
 type drive struct {
 	job   bridgeJob
 	owner string // the agent's owner
+	// seatOwner is the owner when the agent is not the bridge owner's own
+	// (a bridge serving every owner): the slot is that owner's (driveKey).
+	seatOwner string
 	// run is the job's registration (a cancel interrupts the bound turn).
 	run *runningJob
 	// startMs is when the drive began: deliverable publishing is scoped to
@@ -84,7 +87,16 @@ func (d *drive) ref() jobRef {
 
 // key is the drive's slot: its session and drive lock.
 func (d *drive) key() driveKey {
-	return driveKey{room: d.job.RoomID, core: d.core, provider: d.job.Provider, sandboxed: d.prepareExec != nil}
+	return driveKey{room: d.job.RoomID, core: d.core, provider: d.job.Provider, sandboxed: d.prepareExec != nil, owner: d.seatOwner, requester: d.seatRequester()}
+}
+
+// seatRequester is the requester whose seat the drive takes: none for the
+// owner's own turn, the requester for a borrowed one.
+func (d *drive) seatRequester() string {
+	if d.borrowed {
+		return d.job.RequesterUserID
+	}
+	return ""
 }
 
 // agent is the core/provider pair of the job's diagnostics.
@@ -103,6 +115,9 @@ func (b *Bridge) runBridgeJob(ctx context.Context, job bridgeJob) {
 	// interrupt this turn at once. The lease loop is the fallback for when the
 	// stream is down: slower, but it still stops the work.
 	d := &drive{job: job, owner: firstNonEmpty(job.OwnerUserID, b.cfg.OwnerSubject), run: &runningJob{stop: stopDrive}, startMs: time.Now().UnixMilli()}
+	if d.owner != b.cfg.OwnerSubject {
+		d.seatOwner = d.owner
+	}
 	defer b.trackJob(job.JobID, d.run)()
 	go b.renewLeaseLoop(ctx, job.JobID, func() { b.abortJob(job.JobID, "lease_lost") })
 	for _, st := range refusableStages {
@@ -387,9 +402,19 @@ func (b *Bridge) detached(ctx context.Context) context.Context {
 // workspaces root, so a change of execution kind (mode switch, sandbox
 // ready/unavailable, own vs borrowed) starts a separate session and
 // workspace instead of moving one.
+//
+// A slot is also one requester's seat
+// (docs/prd/2026-10-14-multi-member-rooms.md rule 1): the owner's own turns
+// use the slot with no requester; a member borrowing the agent (and every
+// member using a platform agent) gets a slot of their own — workspace,
+// sessions, sandbox space, drive lock — so the owner's conversation,
+// attachments and Library listing never reach a borrower's turn, nor the
+// reverse. owner is set only when the agent is not the bridge owner's (a
+// bridge serving every owner), so two owners' agents never share a slot.
 type driveKey struct {
 	room, core, provider string
 	sandboxed            bool
+	owner, requester     string
 }
 
 // sessionKey is one channel's session of a drive slot
@@ -409,6 +434,27 @@ func (d *drive) sessionKey() sessionKey {
 // agentID is the (room, core, provider) identity both execution kinds of
 // an agent share (its sandbox space is named from it).
 func (k driveKey) agentID() string { return k.room + "\x00" + k.core + "\x00" + k.provider }
+
+// seatID is what tells the slot's seat apart within its agent: "" for the
+// owner's own seat (the identity every own-seat name and id is derived
+// from, unchanged), else the owner and requester.
+func (k driveKey) seatID() string {
+	if k.owner == "" && k.requester == "" {
+		return ""
+	}
+	return k.owner + "\x00" + k.requester
+}
+
+// seatAgentID is the identity of one seat of the agent: agentID for the
+// owner's own seat, else agentID with the seat appended (the sandbox space
+// and a deliverable id are named from it).
+func (k driveKey) seatAgentID() string {
+	id := driveKey{room: k.room, core: k.core, provider: k.provider}.agentID()
+	if seat := k.seatID(); seat != "" {
+		id += "\x00" + seat
+	}
+	return id
+}
 
 // driveLock returns the drive slot's lock: consecutive turns of one agent
 // session queue instead of interleaving on the same core session.

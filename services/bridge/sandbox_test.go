@@ -301,7 +301,8 @@ func TestSandbox_borrowedDriveRunsInTheSpace_withAFreshSpaceTokenPerTurn(t *test
 	b.runBridgeJob(ctx, job("job-1", "bob"))
 	b.runBridgeJob(ctx, job("job-2", "bob"))
 
-	space := sandboxSpaceName("room-1", "core-a", "codex")
+	// bob's turns take bob's seat: a space and workdir of their own.
+	space := sandboxSpaceName(driveKey{room: "room-1", core: "core-a", provider: "codex", requester: "bob"})
 	workdir := filepath.Join(root, space)
 	if fi, err := os.Stat(workdir); err != nil || !fi.IsDir() || fi.Mode().Perm() != 0o700 {
 		t.Fatalf("workspace dir %s: %v %v", workdir, fi, err)
@@ -584,13 +585,14 @@ func TestSandbox_ownDriveForwardsTheOwnersEnv_borrowedNever(t *testing.T) {
 	}
 
 	b.runBridgeJob(ctx, job("job-2", "bob"))
-	if len(prov.inputs) != 1 || prov.inputs[0].Execution == nil || len(prov.inputs[0].Execution.Sandbox.Env) != 0 {
-		t.Fatalf("borrowed turn execution = %+v; want no forwarded names", prov.inputs)
+	// bob's turn is a session of bob's own seat, never an input to alice's.
+	if len(prov.inputs) != 0 || prov.opts.Execution == nil || len(prov.opts.Execution.Sandbox.Env) != 0 {
+		t.Fatalf("borrowed turn execution = %+v (inputs %d); want its own session, no forwarded names", prov.opts.Execution, len(prov.inputs))
 	}
 	if got := sbx.ensures[1].EnvAllowlist; !slices.Equal(got, coreprotocol.VMExecForwardEnv) {
 		t.Fatalf("borrowed turn space allowlist = %v; want the default list only", got)
 	}
-	raw, _ := json.Marshal(prov.inputs)
+	raw, _ := json.Marshal(prov.opts)
 	if strings.Contains(string(raw), "EXAMPLE_") {
 		t.Fatalf("the owner's names reached a borrowed turn: %s", raw)
 	}
@@ -691,11 +693,16 @@ func TestParseSandboxMode(t *testing.T) {
 }
 
 func TestSandboxSpaceName(t *testing.T) {
-	a := sandboxSpaceName("room-1", "core-a", "codex")
-	if a != sandboxSpaceName("room-1", "core-a", "codex") || a == sandboxSpaceName("room-1", "core-a", "claude") || a == sandboxSpaceName("room-2", "core-a", "codex") {
+	a := sandboxSpaceName(driveKey{room: "room-1", core: "core-a", provider: "codex"})
+	if a != sandboxSpaceName(driveKey{room: "room-1", core: "core-a", provider: "codex"}) || a == sandboxSpaceName(driveKey{room: "room-1", core: "core-a", provider: "claude"}) || a == sandboxSpaceName(driveKey{room: "room-2", core: "core-a", provider: "codex"}) {
 		t.Fatalf("space names must be stable and distinct: %s", a)
 	}
-	long := sandboxSpaceName("r", "A Very Long Core Name", "acp:hermes/agent")
+	// A borrower's seat is a space of its own; the owner's keeps its name.
+	seat := sandboxSpaceName(driveKey{room: "room-1", core: "core-a", provider: "codex", requester: "bob"})
+	if seat == a || seat == sandboxSpaceName(driveKey{room: "room-1", core: "core-a", provider: "codex", requester: "carol"}) {
+		t.Fatalf("seats share a space: %s", seat)
+	}
+	long := sandboxSpaceName(driveKey{room: "r", core: "A Very Long Core Name", provider: "acp:hermes/agent"})
 	if len("sp-"+long) > 32 || strings.ContainsAny(long, " :/_.") {
 		t.Fatalf("unsafe space name %q", long)
 	}

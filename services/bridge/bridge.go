@@ -264,7 +264,10 @@ type Bridge struct {
 }
 
 type roomSession struct {
-	owner       string // agent owner this session serves (e.g. "jack")
+	owner string // agent owner this session serves (e.g. "jack")
+	// seat is the session's slot (driveKey): its seat names its
+	// deliverables' ids (seatAgentID).
+	seat        driveKey
 	provider    string // agent provider (harness) this session serves (e.g. "codex")
 	core        string // core name this session is bound to
 	workspaceID string
@@ -1677,7 +1680,7 @@ func (b *Bridge) startSession(ctx context.Context, d *drive, key driveKey, entry
 	profile, prefix, hooks, facts := b.sessionGuidance(ctx, d, entry.endpoint, workspaceID, b.sessionInfo(d, opts))
 	var st roomlog.CtxState
 	initialPrompt := prefix + prompt(workspaceID, &st, atts, facts)
-	rs := &roomSession{owner: d.owner, provider: provider, core: d.core, workspaceID: workspaceID, ws: b.workspaces.shared(key, workspaceID), ctx: st, hooks: hooks, profileSum: d.content.bindingSum(), guidance: facts}
+	rs := &roomSession{owner: d.owner, seat: key, provider: provider, core: d.core, workspaceID: workspaceID, ws: b.workspaces.shared(key, workspaceID), ctx: st, hooks: hooks, profileSum: d.content.bindingSum(), guidance: facts}
 	if opts.Execution != nil {
 		rs.workdir = opts.Execution.Sandbox.Workdir
 	}

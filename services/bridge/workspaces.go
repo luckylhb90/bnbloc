@@ -89,10 +89,14 @@ type agentWorkspaces struct {
 // baseline (the protected paths' fingerprint bnbloc last left there), so a
 // restored session's next turn still finds what the guest changed.
 type workspaceRecord struct {
-	Room        string            `json:"room"`
-	Core        string            `json:"core"`
-	Provider    string            `json:"provider"`
-	Sandboxed   bool              `json:"sandboxed,omitempty"`
+	Room      string `json:"room"`
+	Core      string `json:"core"`
+	Provider  string `json:"provider"`
+	Sandboxed bool   `json:"sandboxed,omitempty"`
+	// SeatOwner and Requester are the slot's seat (driveKey): empty for
+	// the owner's own.
+	SeatOwner   string            `json:"seatOwner,omitempty"`
+	Requester   string            `json:"requester,omitempty"`
 	WorkspaceID string            `json:"workspaceId"`
 	Copies      roomlog.CopyState `json:"copies,omitempty"`
 	Fence       string            `json:"fence,omitempty"`
@@ -132,7 +136,7 @@ func newAgentWorkspaces(dir string) *agentWorkspaces {
 		if r.WorkspaceID == "" {
 			continue
 		}
-		k := driveKey{room: r.Room, core: r.Core, provider: r.Provider, sandboxed: r.Sandboxed}
+		k := driveKey{room: r.Room, core: r.Core, provider: r.Provider, sandboxed: r.Sandboxed, owner: r.SeatOwner, requester: r.Requester}
 		w.m[k] = agentWorkspace{id: r.WorkspaceID, copies: r.Copies, shared: &workspaceShared{fence: r.Fence}}
 	}
 	for _, r := range doc.Sessions {
@@ -307,7 +311,7 @@ func (w *agentWorkspaces) saveLocked() {
 	}
 	doc := workspacesDoc{Workspaces: make([]workspaceRecord, 0, len(w.m))}
 	for k, ws := range w.m {
-		rec := workspaceRecord{Room: k.room, Core: k.core, Provider: k.provider, Sandboxed: k.sandboxed, WorkspaceID: ws.id, Copies: ws.copies}
+		rec := workspaceRecord{Room: k.room, Core: k.core, Provider: k.provider, Sandboxed: k.sandboxed, SeatOwner: k.owner, Requester: k.requester, WorkspaceID: ws.id, Copies: ws.copies}
 		if ws.shared != nil {
 			ws.shared.mu.Lock()
 			rec.Fence = ws.shared.fence
@@ -330,7 +334,13 @@ func (w *agentWorkspaces) saveLocked() {
 		if a.Provider != b.Provider {
 			return a.Provider < b.Provider
 		}
-		return !a.Sandboxed && b.Sandboxed
+		if a.Sandboxed != b.Sandboxed {
+			return !a.Sandboxed
+		}
+		if a.SeatOwner != b.SeatOwner {
+			return a.SeatOwner < b.SeatOwner
+		}
+		return a.Requester < b.Requester
 	})
 	if err := writeFileAtomic(w.path, doc); err != nil {
 		slog.Warn("bnbloc bridge workspace bindings not saved",

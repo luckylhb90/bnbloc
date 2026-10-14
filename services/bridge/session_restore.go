@@ -24,11 +24,15 @@ import (
 
 // sessionRecord is one channel session's binding as persisted.
 type sessionRecord struct {
-	Room          string            `json:"room"`
-	Channel       string            `json:"channel"`
-	Core          string            `json:"core"`
-	Provider      string            `json:"provider"`
-	Sandboxed     bool              `json:"sandboxed,omitempty"`
+	Room      string `json:"room"`
+	Channel   string `json:"channel"`
+	Core      string `json:"core"`
+	Provider  string `json:"provider"`
+	Sandboxed bool   `json:"sandboxed,omitempty"`
+	// SeatOwner and Requester are the slot's seat (driveKey): empty for
+	// the owner's own.
+	SeatOwner     string            `json:"seatOwner,omitempty"`
+	Requester     string            `json:"requester,omitempty"`
 	Owner         string            `json:"owner"`
 	WorkspaceID   string            `json:"workspaceId"`
 	SessionID     string            `json:"sessionId"`
@@ -41,7 +45,7 @@ type sessionRecord struct {
 }
 
 func (r sessionRecord) key() sessionKey {
-	return sessionKey{driveKey: driveKey{room: r.Room, core: r.Core, provider: r.Provider, sandboxed: r.Sandboxed}, channel: r.Channel}
+	return sessionKey{driveKey: driveKey{room: r.Room, core: r.Core, provider: r.Provider, sandboxed: r.Sandboxed, owner: r.SeatOwner, requester: r.Requester}, channel: r.Channel}
 }
 
 func sessionRecordLess(a, b sessionRecord) bool {
@@ -57,7 +61,13 @@ func sessionRecordLess(a, b sessionRecord) bool {
 	if a.Provider != b.Provider {
 		return a.Provider < b.Provider
 	}
-	return !a.Sandboxed && b.Sandboxed
+	if a.Sandboxed != b.Sandboxed {
+		return !a.Sandboxed
+	}
+	if a.SeatOwner != b.SeatOwner {
+		return a.SeatOwner < b.SeatOwner
+	}
+	return a.Requester < b.Requester
 }
 
 // persistSession keeps channel session sk's binding (rs) for a restart, or
@@ -69,6 +79,7 @@ func (b *Bridge) persistSession(sk sessionKey, rs *roomSession) {
 	rs.mu.Lock()
 	rec := sessionRecord{
 		Room: sk.room, Channel: sk.channel, Core: sk.core, Provider: sk.provider, Sandboxed: sk.sandboxed,
+		SeatOwner: sk.owner, Requester: sk.requester,
 		Owner: rs.owner, WorkspaceID: rs.workspaceID, SessionID: rs.sessionID, LastVersion: rs.lastVersion,
 		ProfileSum: rs.profileSum, Guidance: rs.guidance, Context: rs.ctx, Workdir: rs.workdir,
 		Contributions: rs.hooks.states,
@@ -109,7 +120,7 @@ func (b *Bridge) restoreSession(ctx context.Context, d *drive, key driveKey, sk 
 		return forget("a session contributor could not reattach")
 	}
 	rs := &roomSession{
-		owner: rec.Owner, provider: rec.Provider, core: rec.Core, workspaceID: rec.WorkspaceID, sessionID: rec.SessionID,
+		owner: rec.Owner, seat: key, provider: rec.Provider, core: rec.Core, workspaceID: rec.WorkspaceID, sessionID: rec.SessionID,
 		lastVersion: rec.LastVersion, ws: b.workspaces.shared(key, rec.WorkspaceID), ctx: rec.Context,
 		profileSum: rec.ProfileSum, guidance: rec.Guidance, hooks: hooks, workdir: rec.Workdir,
 	}

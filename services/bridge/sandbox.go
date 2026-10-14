@@ -225,12 +225,14 @@ func (s *sandboxRuntime) probe(ctx context.Context) (bool, string) {
 }
 
 // sandboxSpaceName names the space (and the workspace directory) of one
-// (room, core, provider): readable, path- and user-name-safe (the default
-// guest user is "sp-<space>", so it stays well under 32 characters), and
-// collision-free through the hash of the full key.
-func sandboxSpaceName(room, core, provider string) string {
-	sum := sha256.Sum256([]byte(driveKey{room: room, core: core, provider: provider}.agentID()))
-	return slugPart(core, 8) + "-" + slugPart(provider, 8) + "-" + hex.EncodeToString(sum[:5])
+// seat of one (room, core, provider) (driveKey): readable, path- and
+// user-name-safe (the default guest user is "sp-<space>", so it stays well
+// under 32 characters), and collision-free through the hash of the full
+// key. The owner's own seat keeps the name the agent always had; another
+// requester's seat is a space of its own.
+func sandboxSpaceName(k driveKey) string {
+	sum := sha256.Sum256([]byte(k.seatAgentID()))
+	return slugPart(k.core, 8) + "-" + slugPart(k.provider, 8) + "-" + hex.EncodeToString(sum[:5])
 }
 
 func slugPart(s string, max int) string {
@@ -260,8 +262,9 @@ func slugPart(s string, max int) string {
 // forwarded names for this drive (nil unless decideSandbox marked it
 // ownerEnv): the space's envAllowlist is re-ensured from it every turn, so
 // a turn for someone else after the owner's converges back to the default.
-func (s *sandboxRuntime) prepare(ctx context.Context, room, core, provider, owner string, env []string, ttl time.Duration) (*corepkg.Execution, error) {
-	space := sandboxSpaceName(room, core, provider)
+func (s *sandboxRuntime) prepare(ctx context.Context, k driveKey, owner string, env []string, ttl time.Duration) (*corepkg.Execution, error) {
+	room, core, provider := k.room, k.core, k.provider
+	space := sandboxSpaceName(k)
 	workdir := filepath.Join(s.cfg.WorkspacesRoot, space)
 	if err := os.MkdirAll(workdir, 0o700); err != nil {
 		return nil, fmt.Errorf("agent sandbox workspace: %w", err)
@@ -497,9 +500,10 @@ func (b *Bridge) planSandbox(ctx context.Context, d *drive) (refuse string) {
 		env = s.cfg.Env
 	}
 	d.ownSandbox = dec.ownerEnv
-	room, core, provider, owner := d.job.RoomID, d.core, d.job.Provider, d.owner
+	owner := d.owner
+	key := driveKey{room: d.job.RoomID, core: d.core, provider: d.job.Provider, sandboxed: true, owner: d.seatOwner, requester: d.seatRequester()}
 	d.prepareExec = func(ctx context.Context) (*corepkg.Execution, error) {
-		exec, err := s.prepare(ctx, room, core, provider, owner, env, d.execTokenTTL())
+		exec, err := s.prepare(ctx, key, owner, env, d.execTokenTTL())
 		if err != nil {
 			return nil, s.prepareFailure(ctx, err)
 		}
