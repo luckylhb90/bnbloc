@@ -1,6 +1,9 @@
 # Many people, many agents in one room (2026-10-14)
 
-Status: accepted (product owner, 2026-10-14).
+Status: accepted (product owner, 2026-10-14). Revised the same day: no
+new cognitive load for agents — the platform does the work and agents see
+plain files and conversation; no new room tools, no new guidance rules or
+meta-instructions (rules 4, 6, 7 below are stated in that form).
 
 ## 1. Why
 
@@ -31,26 +34,26 @@ but several paths leak, misattribute or starve.
 
 **Context every agent can rely on**
 
-4. **A room's attachments are the room's.** Records list each message's
-   attachments (name, type, size, id); a message carrying only attachments
-   is recorded. A room tool `read_attachment` gives an agent any attachment
-   of the room its requester may read (text inline within a bound, binary
-   files written into the session's `.room/attachments/`).
+4. **A room's attachments are the room's.** The bridge mirrors the room's
+   attachments the requester may read into the session's
+   `.room/attachments/` (lazy, bounded, like deliverable copies), and the
+   records reference that path next to the message; a message carrying
+   only attachments is recorded. No new tool.
 5. **Every channel gets its share.** History reads every agent-visible
-   channel fairly (no channel starves because another is busy), and each
-   record line carries its channel's name; the agent's own channel is
-   marked.
-6. **A reused session hears what changed.** Each turn's prompt says, in one
-   or two lines of dynamic data, what arrived since the agent's last turn
-   in this channel (how many messages, from whom, and that they are in
-   `.room/recent.md`), so a correction someone else posted is not missed.
+   channel fairly (no channel starves because another is busy); lines from
+   other channels carry a short `#name`, the agent's own channel stays
+   unmarked.
+6. **A reused session hears what changed.** A turn's input carries the
+   messages others posted in this channel since the agent's last turn, as
+   plain conversation lines (capped) before the request — data, not
+   instructions — so a correction someone else posted is not missed.
 7. **Deliverables are there when the reply is.** A turn's deliverables are
-   published before its job is reported done; `ask_agent` returns them; a
-   room tool `list_artifacts` lists every deliverable (not only the newest
-   30).
+   published before its job is reported done; `ask_agent` returns them;
+   `.room/artifacts.md` indexes every deliverable (paged if long), the
+   existing `read_artifact` reads older ones. No new tool.
 8. **Names, not ids.** Records and prompts show people's display names
-   (with the id once, so mentions stay unambiguous), and each session's
-   guidance states its owner, and each turn its requester.
+   (with the id once, so mentions stay unambiguous); the session states its
+   owner and each turn its requester in the existing lines.
 9. **A refused borrow asks.** When `ask_agent` (or a member) is refused
    because the owner has not authorized borrowing, the owner gets a request
    they can approve in one step, and the asker is told it was requested.

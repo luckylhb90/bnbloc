@@ -105,6 +105,24 @@ func (w sessionWorkspace) ReadFile(ctx context.Context, rel string) ([]byte, err
 	return files.ReadSessionFile(ctx, ep, ws, sess, rel)
 }
 
+// WriteFile writes a file into the session's workspace through the core's
+// binary write (read_attachment saves a file there).
+func (w sessionWorkspace) WriteFile(ctx context.Context, rel string, data []byte) error {
+	coreName, ws, _ := w.ids()
+	entry, ok := w.b.coreEntry(coreName)
+	if !ok {
+		return errNoSessionFiles
+	}
+	bw, ok := corepkg.As[corepkg.WorkspaceFileBytesWriter](ctx, entry.provider, entry.endpoint, corepkg.CapabilityWriteFile)
+	if !ok || bw == nil {
+		return errors.New("the agent's core takes no files")
+	}
+	if ws == "" {
+		return errors.New("the session has no workspace yet")
+	}
+	return bw.WriteWorkspaceFileBytes(ctx, entry.endpoint, ws, rel, data)
+}
+
 // errNoSessionFiles: the session's core does not expose workspace files.
 var errNoSessionFiles = errors.New("the agent's core does not expose its workspace files")
 

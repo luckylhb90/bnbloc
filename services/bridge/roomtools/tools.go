@@ -130,7 +130,7 @@ func (r *Registry) Descriptors() []map[string]any {
 func DefaultRegistry() *Registry {
 	r := NewRegistry()
 	for _, t := range []Tool{
-		listRoomAgentsTool(), askAgentTool(), roomStatusTool(), readRoomTool(), readArtifactTool(),
+		listRoomAgentsTool(), askAgentTool(), roomStatusTool(), readRoomTool(), readArtifactTool(), readAttachmentTool(),
 		saveComponentTool(), getComponentTool(), listComponentsTool(), publishComponentTool(), tryDraftTool(),
 		postProgressTool(), appDataTool(),
 	} {

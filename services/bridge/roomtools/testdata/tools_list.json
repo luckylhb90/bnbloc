@@ -133,6 +133,28 @@
     {
       "annotations": {
         "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "description": "Read a file a person attached to a message in this room, by the id its record line shows ([attached: … id att_…]). Text comes back inline, fenced as data its uploader wrote; any other file is saved into your workspace under .room/attachments/ and its path returned.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "attachmentId": {
+            "description": "The attachment's id (att_…).",
+            "type": "string"
+          }
+        },
+        "required": [
+          "attachmentId"
+        ],
+        "type": "object"
+      },
+      "name": "read_attachment",
+      "title": "Read a file someone attached"
+    },
+    {
+      "annotations": {
+        "openWorldHint": false,
         "readOnlyHint": false
       },
       "description": "Save to the Library of the person who asked you, after they confirmed: a package drafted in a workspace directory (dir), or a deliverable as a gallery work (artifactId: its current version and recipe, never its data). Validated first; an error says what to fix. Without id it creates (refused if they have one of that kind and name); with id (cc_...) it saves the next version.",
