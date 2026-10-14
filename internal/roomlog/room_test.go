@@ -56,7 +56,7 @@ func (f *fakeFetch) fetch(_ context.Context, path string) ([]byte, error) {
 // core acme) published, one a person uploaded, and one the reading agent
 // published itself.
 func roomFetch() *fakeFetch {
-	return &fakeFetch{bodies: map[string]string{
+	ff := &fakeFetch{bodies: map[string]string{
 		"/v1/rooms/r1/artifacts?limit=30": `{"artifacts":[
 			{"artifactId":"artf_a","title":"drafts/weekly-report-assistant/component.json","kind":"code","currentVersion":2,"createdBy":"maya","updatedAtMs":3},
 			{"artifactId":"art_b","title":"brief.md","kind":"markdown","currentVersion":1,"createdBy":"maya","updatedAtMs":2},
@@ -67,6 +67,9 @@ func roomFetch() *fakeFetch {
 		"/v1/rooms/r1/jobs/job-a":                  `{"jobId":"job-a","agent":{"owner":"maya","core":"acme","provider":"opencode"}}`,
 		"/v1/rooms/r1/jobs/job-c":                  `{"jobId":"job-c","agent":{"owner":"maya","core":"nimbus","provider":"codex"}}`,
 	}}
+	// The index pages through every deliverable (listAllDeliverables).
+	ff.bodies["/v1/rooms/r1/artifacts?limit=200"] = ff.bodies["/v1/rooms/r1/artifacts?limit=30"]
+	return ff
 }
 
 // pullTools are the facts of a session with the room tools and .room/.

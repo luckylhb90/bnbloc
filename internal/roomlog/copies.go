@@ -87,6 +87,10 @@ func CopyDeliverables(ctx context.Context, fetch Fetch, room string, list []Deli
 	copies := make(map[string]Copy, len(list))
 	next := CopyState{}
 	budget := int64(MaxDeliverableCopyPassBytes)
+	if len(list) > MaxListedDeliverables {
+		// Copies are the newest deliverables'; an older one is read by id.
+		list = list[:MaxListedDeliverables]
+	}
 	for _, d := range list {
 		dir := CopyDir(d.ArtifactID)
 		if dir == "" {

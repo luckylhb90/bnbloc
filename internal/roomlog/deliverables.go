@@ -22,9 +22,18 @@ import (
 // when no job did: VersionProducer is the one resolution, used by
 // .room/artifacts.md and the room tools' read_artifact alike.
 
-// MaxListedDeliverables bounds .room/artifacts.md: the newest-updated
-// deliverables of the room.
+// MaxListedDeliverables bounds what .room/artifacts.md details (producer,
+// copy) and what is copied into a workspace: the room's newest-updated
+// deliverables. The index lists older ones too, by id
+// (docs/prd/2026-10-14-multi-member-rooms.md rule 7), up to
+// MaxIndexedDeliverables.
 const MaxListedDeliverables = 30
+
+// MaxIndexedDeliverables bounds the deliverables .room/artifacts.md lists.
+const MaxIndexedDeliverables = 1000
+
+// deliverablesPage is one page of the index's listing.
+const deliverablesPage = 200
 
 // Producer is who produced one deliverable version: an agent (Owner,
 // Provider, Core), or a person (Person) for a manual publish.
@@ -146,18 +155,58 @@ type Deliverable struct {
 	Producer    Producer
 }
 
-// ReadDeliverables lists the room's newest-updated deliverables (at most
-// MaxListedDeliverables) with the producer of each one's latest version.
-// A version whose producer cannot be read is listed with what is known (the
+// ReadDeliverables lists the room's deliverables, newest-updated first (at
+// most MaxIndexedDeliverables); the newest MaxListedDeliverables carry the
+// producer of their latest version (an older one is listed by id only). A
+// version whose producer cannot be read is listed with what is known (the
 // job id) and resolved again next time.
 func ReadDeliverables(ctx context.Context, fetch Fetch, room string, cache *ProducerCache) ([]Deliverable, error) {
-	list, err := listDeliverables(ctx, fetch, room)
+	list, err := listAllDeliverables(ctx, fetch, room)
 	if err != nil {
 		return nil, err
 	}
 	out := make([]Deliverable, 0, len(list))
-	for _, a := range list {
-		out = append(out, deliverableOf(ctx, fetch, room, a, cache))
+	for i, a := range list {
+		if i < MaxListedDeliverables {
+			out = append(out, deliverableOf(ctx, fetch, room, a, cache))
+			continue
+		}
+		out = append(out, Deliverable{ArtifactID: a.ArtifactID, Title: a.Title, Kind: a.Kind, FileName: a.FileName, Version: a.CurrentVersion, UpdatedAtMs: a.UpdatedAtMs})
+	}
+	return out, nil
+}
+
+// listAllDeliverables pages through the room's deliverables that have a
+// title and a version, newest-updated first, up to MaxIndexedDeliverables.
+func listAllDeliverables(ctx context.Context, fetch Fetch, room string) ([]wire.Artifact, error) {
+	var out []wire.Artifact
+	cursor := ""
+	for len(out) < MaxIndexedDeliverables {
+		q := url.Values{"limit": {strconv.Itoa(deliverablesPage)}}
+		if cursor != "" {
+			q.Set("cursor", cursor)
+		}
+		raw, err := fetch(ctx, deliverablesPath(room)+"?"+q.Encode())
+		if err != nil {
+			return nil, err
+		}
+		var list wire.ArtifactList
+		if err := json.Unmarshal(raw, &list); err != nil {
+			return nil, fmt.Errorf("unreadable deliverables listing: %w", err)
+		}
+		for _, a := range list.Artifacts {
+			if a.Title == "" || a.CurrentVersion <= 0 {
+				continue
+			}
+			out = append(out, a)
+			if len(out) == MaxIndexedDeliverables {
+				break
+			}
+		}
+		if list.NextCursor == "" || list.NextCursor == cursor {
+			break
+		}
+		cursor = list.NextCursor
 	}
 	return out, nil
 }
@@ -237,7 +286,14 @@ func DeliverablesFile(list []Deliverable, err error, self Producer, copies map[s
 	case len(list) == 0:
 		b.WriteString("(none yet)\n")
 	}
-	for _, d := range list {
+	for i, d := range list {
+		if i == MaxListedDeliverables {
+			b.WriteString("\nOlder:\n")
+		}
+		if i >= MaxListedDeliverables {
+			fmt.Fprintf(&b, "- %s (%s) v%d, id %s\n", d.Title, d.Kind, d.Version, d.ArtifactID)
+			continue
+		}
 		fmt.Fprintf(&b, "- %s (%s) v%d, id %s: ", d.Title, d.Kind, d.Version, d.ArtifactID)
 		switch {
 		case d.Producer.Same(self):
@@ -251,8 +307,8 @@ func DeliverablesFile(list []Deliverable, err error, self Producer, copies map[s
 		}
 		b.WriteString("; " + copyNote(copies[d.ArtifactID], d.Version) + "\n")
 	}
-	if len(list) == MaxListedDeliverables {
-		fmt.Fprintf(&b, "\n(the %d most recently updated; older deliverables, if any, are not listed)\n", MaxListedDeliverables)
+	if len(list) == MaxIndexedDeliverables {
+		fmt.Fprintf(&b, "\n(the %d most recently updated; older deliverables, if any, are not listed)\n", MaxIndexedDeliverables)
 	}
 	return NamedFile{Name: ".room/artifacts.md", Content: b.String()}
 }
