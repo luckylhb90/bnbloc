@@ -102,6 +102,12 @@ type workspaceRecord struct {
 	WorkspaceID string            `json:"workspaceId"`
 	Copies      roomlog.CopyState `json:"copies,omitempty"`
 	Fence       string            `json:"fence,omitempty"`
+	// Records is the .room/ tree's pull state (each channel's chunks, the
+	// revisions cursor, the mirrored attachments): a restarted bridge
+	// continues the records it wrote instead of re-chunking from scratch
+	// (stale chunk files would survive, and edits or deletions made while
+	// it was down would go unseen).
+	Records *roomlog.CtxState `json:"records,omitempty"`
 }
 
 type workspacesDoc struct {
@@ -139,7 +145,11 @@ func newAgentWorkspaces(dir string) *agentWorkspaces {
 			continue
 		}
 		k := driveKey{room: r.Room, core: r.Core, provider: r.Provider, sandboxed: r.Sandboxed, owner: r.SeatOwner, requester: r.Requester}
-		w.m[k] = agentWorkspace{id: r.WorkspaceID, copies: r.Copies, shared: &workspaceShared{fence: r.Fence}}
+		shared := &workspaceShared{fence: r.Fence}
+		if r.Records != nil {
+			shared.room = *r.Records
+		}
+		w.m[k] = agentWorkspace{id: r.WorkspaceID, copies: r.Copies, shared: shared}
 	}
 	for _, r := range doc.Sessions {
 		if r.SessionID == "" || r.WorkspaceID == "" {
@@ -290,11 +300,24 @@ func (w *agentWorkspaces) roomFilesCleared(k driveKey) {
 	if ws.shared != nil {
 		ws.shared.setRoomState(roomlog.CtxState{})
 	}
-	if len(ws.copies) > 0 {
-		ws.copies = nil
-		w.m[k] = ws
+	ws.copies = nil
+	w.m[k] = ws
+	w.saveLocked()
+}
+
+// roomStateWritten persists slot k's .room/ pull state after a pass
+// (ignored when the slot was rebound meanwhile).
+func (w *agentWorkspaces) roomStateWritten(k driveKey, id string) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if ws, ok := w.m[k]; ok && ws.id == id {
 		w.saveLocked()
 	}
+}
+
+// roomStateEmpty reports a pull state with nothing written yet.
+func roomStateEmpty(st roomlog.CtxState) bool {
+	return len(st.Channels) == 0 && st.ReadmeSum == "" && len(st.Attachments) == 0 && st.RevisedMs == 0
 }
 
 func copiesEqual(a, b roomlog.CopyState) bool {
@@ -321,6 +344,9 @@ func (w *agentWorkspaces) saveLocked() {
 		if ws.shared != nil {
 			ws.shared.mu.Lock()
 			rec.Fence = ws.shared.fence
+			if st := ws.shared.room; !roomStateEmpty(st) {
+				rec.Records = &st
+			}
 			ws.shared.mu.Unlock()
 		}
 		doc.Workspaces = append(doc.Workspaces, rec)

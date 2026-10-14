@@ -473,3 +473,31 @@ func TestWorkspaceHoldsTheDemoAppSDK(t *testing.T) {
 		t.Fatalf("the SDK was written %d times over three turns of two sessions, want once", n)
 	}
 }
+
+// A restarted bridge continues the records it wrote: each channel's chunks
+// and the revisions cursor survive, so nothing is re-chunked from scratch
+// (stale chunk files would survive) and deletions made while it was down
+// are still followed.
+func TestRecordsStateSurvivesARestart(t *testing.T) {
+	dir := t.TempDir()
+	k := driveKey{room: "room-1", core: "acp", provider: "codex"}
+	w := newAgentWorkspaces(dir)
+	w.bind(k, "ws-1")
+	st := roomlog.CtxState{
+		Channels:  map[string]roomlog.ChannelRecords{"ch-1": {Name: "general", Dir: roomlog.ChannelDir("ch-1"), EndSeq: 42, Chunks: []string{".room/channels/ch-1/chunk-0000000001-0000000042.md"}}},
+		RevisedMs: 1234,
+	}
+	w.shared(k, "ws-1").setRoomState(st)
+	w.roomStateWritten(k, "ws-1")
+
+	again := newAgentWorkspaces(dir)
+	got := again.shared(k, "ws-1").roomState()
+	if got.RevisedMs != 1234 || got.Channels["ch-1"].EndSeq != 42 || len(got.Channels["ch-1"].Chunks) != 1 {
+		t.Fatalf("restored records = %+v", got)
+	}
+	// A cleared .room/ tree is cleared on disk too.
+	again.roomFilesCleared(k)
+	if third := newAgentWorkspaces(dir).shared(k, "ws-1").roomState(); len(third.Channels) != 0 || third.RevisedMs != 0 {
+		t.Fatalf("cleared records restored = %+v", third)
+	}
+}
