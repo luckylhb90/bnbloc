@@ -12,7 +12,7 @@ import { buildBundle } from "../lib/bundle.mjs";
 const HERE = dirname(fileURLToPath(import.meta.url));
 
 export function build({ outDir = join(HERE, "dist"), quiet = false } = {}) {
-  return buildBundle({ dir: HERE, assets: ["index.html", "style.css"], outDir, quiet });
+  return buildBundle({ dir: HERE, title: "sprite-sheet previewer", assets: ["index.html", "style.css"], outDir, quiet });
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

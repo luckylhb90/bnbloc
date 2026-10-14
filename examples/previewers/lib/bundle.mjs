@@ -2,7 +2,8 @@
 // runtime "bundle"): one esbuild bundle of src/main.ts plus static files,
 // packed as a deterministic ustar archive with its package template.
 //
-//   dist/site/<files>         the bundle files (inspect / serve)
+//   dist/site/<files>         the bundle files (inspect / serve), with
+//                             NOTICES.txt when main.js inlines packages
 //   dist/bundle.tar           uncompressed POSIX ustar, deterministic
 //   dist/bundle.tar.sha256    the archive's sha256 (hex)
 //   dist/package.json         previewer.json, artifacts.bundle left as the
@@ -20,6 +21,8 @@ import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+
+import { bundledPackageRoots, dependencyRoots, notices } from "./notices.mjs";
 
 const WEB = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "web");
 
@@ -80,24 +83,38 @@ export function packTar(files) {
 // --- build -----------------------------------------------------------------
 
 /** Builds the previewer in dir: src/main.ts bundled to main.js, the static
- *  files named in assets (paths relative to dir) and the generated files
- *  ({name: Buffer}). esbuild options extend the defaults (iife, es2020,
- *  minified). */
-export async function buildBundle({ dir, assets, generated = {}, outDir = join(dir, "dist"), quiet = false, esbuild = {} }) {
+ *  files named in assets (paths relative to dir), and NOTICES.txt with the
+ *  licenses of every third-party package main.js holds (title names the
+ *  previewer there). prebuilt names bundled packages whose browser build
+ *  already inlines their own dependencies: those are attributed too.
+ *  esbuild options extend the defaults (iife, es2020, minified). */
+export async function buildBundle({ dir, title, assets, prebuilt = [], outDir = join(dir, "dist"), quiet = false, esbuild = {} }) {
   const result = await loadEsbuild().build({
     entryPoints: [join(dir, "src", "main.ts")],
     bundle: true,
     format: "iife",
     target: "es2020",
     minify: true,
-    legalComments: "none",
+    // License headers inside bundled code (e.g. what a dependency's own
+    // dist inlines) stay, collected at the end of main.js.
+    legalComments: "eof",
     write: false,
     logLevel: "silent",
+    metafile: true,
+    absWorkingDir: dir,
     ...esbuild,
   });
   const files = { "main.js": Buffer.from(result.outputFiles[0].contents) };
   for (const name of assets) files[name] = await readFile(join(dir, name));
-  Object.assign(files, generated);
+  const packages = bundledPackageRoots(Object.keys(result.metafile.inputs), dir);
+  const inlined = new Set();
+  for (const root of [...packages]) {
+    const { name } = JSON.parse(await readFile(join(root, "package.json"), "utf8"));
+    if (!prebuilt.includes(name)) continue;
+    for (const dep of await dependencyRoots(root)) if (!packages.includes(dep)) inlined.add(dep);
+  }
+  const notice = await notices([...packages, ...[...inlined].sort()], title, inlined);
+  if (notice) files["NOTICES.txt"] = notice;
   const template = JSON.parse(await readFile(join(dir, "previewer.json"), "utf8"));
   if (!files[template.previewer.entry]) throw new Error(`entry ${template.previewer.entry} is not in the bundle`);
 
@@ -121,5 +138,5 @@ export async function buildBundle({ dir, assets, generated = {}, outDir = join(d
     console.log(`package  ${packagePath}`);
     console.log(`site     ${join(outDir, "site")}`);
   }
-  return { sha256, tarPath, packagePath, siteDir: join(outDir, "site"), files: Object.keys(files).sort() };
+  return { sha256, tarPath, packagePath, siteDir: join(outDir, "site"), files: Object.keys(files).sort(), packages };
 }

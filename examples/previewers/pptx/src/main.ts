@@ -21,7 +21,9 @@ import {
   type PreviewFile,
   type ToolbarItem,
 } from "../../../../web/previewer-sdk/src/index.ts";
-import { deckTitle, sniffDeck, unreadableMessage } from "./deck.ts";
+import { countedTitle, keepLinksInside, sniffOffice, unreadableMessage, type OfficeKind } from "../../lib/office.ts";
+
+const POWERPOINT: OfficeKind = { noun: "PowerPoint presentation", ext: ".pptx", legacy: ".ppt", apps: "PowerPoint or Keynote" };
 
 const scrollEl = document.getElementById("deck") as HTMLElement;
 const deckEl = document.getElementById("slides") as HTMLElement;
@@ -67,8 +69,8 @@ function failedSlide(index: number, error: unknown): void {
 async function open(bytes: ArrayBuffer, file: PreviewFile): Promise<void> {
   close();
   fileName = file.name;
-  const format = sniffDeck(bytes);
-  if (format !== "zip") throw new Error(unreadableMessage(format, file.name));
+  const format = sniffOffice(bytes);
+  if (format !== "zip") throw new Error(unreadableMessage(POWERPOINT, format, file.name));
   const controller = new AbortController();
   opening = controller;
   statusEl.textContent = `Opening ${file.name}…`;
@@ -78,7 +80,7 @@ async function open(bytes: ArrayBuffer, file: PreviewFile): Promise<void> {
     scrollContainer: scrollEl,
     zipLimits: RECOMMENDED_ZIP_LIMITS,
     pdfjs: false,
-    onSlideChange: (index) => setTitle(deckTitle(fileName, index, next.slideCount)),
+    onSlideChange: (index) => setTitle(countedTitle(fileName, "slide", index, next.slideCount)),
     onSlideError: failedSlide,
   });
   try {
@@ -93,7 +95,7 @@ async function open(bytes: ArrayBuffer, file: PreviewFile): Promise<void> {
     next.destroy();
     if (controller.signal.aborted) return;
     console.error(err);
-    throw new Error(unreadableMessage("zip", file.name));
+    throw new Error(unreadableMessage(POWERPOINT, "zip", file.name));
   }
   if (controller.signal.aborted) {
     next.destroy();
@@ -103,9 +105,11 @@ async function open(bytes: ArrayBuffer, file: PreviewFile): Promise<void> {
   viewer = next;
   zoom = 1;
   statusEl.textContent = next.slideCount === 0 ? `${file.name} has no slides.` : "";
-  setTitle(deckTitle(file.name, 0, next.slideCount));
+  setTitle(countedTitle(file.name, "slide", 0, next.slideCount));
   publishToolbar();
 }
+
+keepLinksInside(deckEl);
 
 onInit((init) => {
   document.documentElement.dataset.theme = init.theme;

@@ -1,0 +1,29 @@
+{
+  "kind": "bnbloc.previewer.package/v1",
+  "contract": "bnbloc.previewer.contract/v1",
+  "runtime": "bundle",
+  "name": "docx",
+  "version": "1.0.0",
+  "publisher": "bnbloc",
+  "description": "Word documents (.docx, .docm, .dotx): pages rendered in place — styles, tables, images, lists, headers and footers, footnotes — with zoom and fit.",
+  "artifacts": {
+    "bundle": { "url": "", "sha256": "" }
+  },
+  "previewer": {
+    "entry": "index.html",
+    "match": {
+      "mimeTypes": [
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "application/vnd.ms-word.document.macroenabled.12",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.template"
+      ],
+      "extensions": [".docx", ".docm", ".dotx"]
+    },
+    "rank": 50,
+    "capabilities": ["toolbar"],
+    "toolbar": [
+      { "id": "zoom", "icon": "zoom-in", "label": "Zoom", "kind": "zoom" },
+      { "id": "fit", "icon": "fit", "label": "Fit to width", "kind": "button" }
+    ]
+  }
+}

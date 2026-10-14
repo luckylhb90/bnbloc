@@ -5,6 +5,7 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
+import { join } from "node:path";
 
 import { PREVIEWER_CAPABILITIES, readToolbar } from "../../../web/previewer-sdk/src/protocol.ts";
 
@@ -63,5 +64,16 @@ export async function assertBundle(a, b, { files: want, toolbar: toolbarIds }) {
   assert.match(html, /<script src="main\.js" defer><\/script>/, "external classic script");
   assert.doesNotMatch(html, /<script>/, "no inline script (the CSP refuses it)");
   assert.doesNotMatch(files.get("main.js").toString("utf8"), /\bfetch\(|XMLHttpRequest|WebSocket\(/, "no network calls");
+  // Every inlined third-party package has its licenses in NOTICES.txt.
+  if (a.packages.length > 0) {
+    assert.ok(files.has("NOTICES.txt"), "NOTICES.txt for the bundled packages");
+    const notices = files.get("NOTICES.txt").toString("utf8");
+    for (const root of a.packages) {
+      const { name } = JSON.parse(await readFile(join(root, "package.json"), "utf8"));
+      assert.ok(notices.includes(`\n${name}@`), `${name} has its notice`);
+    }
+  } else {
+    assert.ok(!files.has("NOTICES.txt"), "no NOTICES.txt without third-party code");
+  }
   return { files, pkg };
 }

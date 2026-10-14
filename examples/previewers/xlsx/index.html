@@ -1,0 +1,20 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="referrer" content="no-referrer">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Excel previewer</title>
+<!-- Excel previewer (bnbloc.previewer.contract/v1). Runs in a sandboxed
+     opaque-origin frame: no inline script, no network, assets from the
+     bundle only. -->
+<link rel="stylesheet" href="style.css">
+<script src="main.js" defer></script>
+</head>
+<body>
+<p id="note" role="note"></p>
+<main id="grid" aria-label="Sheet"></main>
+<nav id="tabs" role="tablist" aria-label="Sheets" hidden></nav>
+<p id="status" role="status">Waiting for a file…</p>
+</body>
+</html>

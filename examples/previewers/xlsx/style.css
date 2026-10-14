@@ -1,0 +1,122 @@
+/* Theme tokens: the host sends light|dark in preview.init. Cells keep the
+   workbook's own colours on white (they are the document); headers, tabs
+   and the desk follow the theme. */
+:root {
+  --bg: #f6f6f4;
+  --fg: #1d1d1b;
+  --muted: #6b6b66;
+  --head: #ecebe8;
+  --line: #d6d5d1;
+  --accent: #0a74d9;
+  color-scheme: light;
+}
+:root[data-theme="dark"] {
+  --bg: #161615;
+  --fg: #ededea;
+  --muted: #9a9a94;
+  --head: #242422;
+  --line: #3a3a37;
+  --accent: #4cc2ff;
+  color-scheme: dark;
+}
+* {
+  box-sizing: border-box;
+}
+html,
+body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  background: var(--bg);
+  color: var(--fg);
+  font: 12px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+body {
+  display: flex;
+  flex-direction: column;
+}
+#note {
+  margin: 0;
+  padding: 6px 12px;
+  color: var(--muted);
+  border-bottom: 1px solid var(--line);
+}
+#note:empty {
+  display: none;
+}
+#grid {
+  flex: 1;
+  overflow: auto;
+}
+#sheet {
+  border-collapse: collapse;
+  table-layout: fixed;
+  width: max-content;
+  font: 14.67px/1.25 Calibri, Carlito, "Segoe UI", system-ui, sans-serif;
+}
+#sheet td {
+  overflow: hidden;
+  padding: 1px 3px;
+  white-space: nowrap;
+  vertical-align: bottom;
+  color: #000;
+  background: #fff;
+  border: 1px solid #e1e1e1;
+}
+#sheet th {
+  position: sticky;
+  z-index: 1;
+  padding: 1px 4px;
+  font: 12px/1.25 system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-weight: 400;
+  color: var(--muted);
+  background: var(--head);
+  border: 1px solid var(--line);
+}
+#sheet thead th {
+  top: 0;
+  text-align: center;
+}
+#sheet tbody th {
+  left: 0;
+  text-align: right;
+}
+#sheet thead th:first-child {
+  left: 0;
+  z-index: 2;
+}
+#tabs {
+  display: flex;
+  gap: 2px;
+  overflow-x: auto;
+  padding: 4px 8px;
+  border-top: 1px solid var(--line);
+}
+#tabs button {
+  padding: 4px 12px;
+  font: inherit;
+  white-space: nowrap;
+  color: var(--fg);
+  background: transparent;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  cursor: pointer;
+}
+#tabs button[aria-selected="true"] {
+  border-bottom-color: var(--accent);
+  font-weight: 600;
+}
+#status {
+  position: fixed;
+  inset: auto 0 40px 0;
+  margin: 0;
+  padding: 8px 12px;
+  color: var(--muted);
+  text-align: center;
+}
+#status:empty {
+  display: none;
+}
+#tabs[hidden] {
+  display: none;
+}
