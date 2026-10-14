@@ -161,8 +161,12 @@
             "description": "Workspace-relative directory holding component.json, e.g. drafts/contract-reviewer.",
             "type": "string"
           },
+          "displayName": {
+            "description": "A work's title.",
+            "type": "string"
+          },
           "file": {
-            "description": "A workspace file (published to the room first if needed).",
+            "description": "A workspace file (published first if needed).",
             "type": "string"
           },
           "id": {
@@ -174,7 +178,7 @@
             "type": "string"
           },
           "request": {
-            "description": "A work's \"how it was made\": a request that would make a similar one (default: the message that produced the file).",
+            "description": "A work's \"how it was made\": a request that would make a similar one.",
             "type": "string"
           }
         },

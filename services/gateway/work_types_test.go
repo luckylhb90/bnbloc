@@ -58,7 +58,7 @@ func TestPublishWorkEveryType(t *testing.T) {
 	png := coverPNG(t)
 	chart := e.realFile(e.roomID, store.ArtifactKindImage, "chart.png", "image/png", []byte(png), 0)
 	img := e.publishApp("maya", chart, wire.WorkPublishRequest{Name: "sales-chart"})
-	if img.Kind != "work" || img.WorkType != wire.WorkTypeImage || img.WorkFile != "chart.png" || img.DisplayName != "chart.png" {
+	if img.Kind != "work" || img.WorkType != wire.WorkTypeImage || img.WorkFile != "chart.png" || img.DisplayName != "chart" {
 		t.Fatalf("the image work = %+v", img)
 	}
 	if got := strings.Join(e.versionFiles("maya", img.ID, "1.0.0"), ","); got != "chart.png,component.json" {
@@ -138,6 +138,24 @@ func TestPublishWorkEveryType(t *testing.T) {
 	for _, name := range []string{"sales-chart", "plan", "clip"} {
 		if e.libraryApp("maya", name) == nil {
 			t.Errorf("maya's gallery has no %s", name)
+		}
+	}
+}
+
+// A work's default title reads as a name, not a workspace path.
+func TestWorkTitle(t *testing.T) {
+	for _, tc := range []struct {
+		art  wire.Artifact
+		want string
+	}{
+		{wire.Artifact{Title: "work/gallery/Acme_Deck_Layout_Gallery_ZH.pptx", FileName: "Acme_Deck_Layout_Gallery_ZH.pptx"}, "Acme Deck Layout Gallery ZH"},
+		{wire.Artifact{Title: "out/Q3-sales-report.pdf"}, "Q3 sales report"},
+		{wire.Artifact{Title: "Q4 Launch Spec", FileName: "spec.md"}, "Q4 Launch Spec"},
+		{wire.Artifact{Title: "chart.png", FileName: "chart.png"}, "chart"},
+		{wire.Artifact{Title: "notes/.env"}, ".env"},
+	} {
+		if got := workTitle(tc.art); got != tc.want {
+			t.Errorf("workTitle(%q) = %q, want %q", tc.art.Title, got, tc.want)
 		}
 	}
 }

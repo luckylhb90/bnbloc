@@ -69,13 +69,14 @@ func saveComponentTool() Tool {
 			"Without id it creates (refused if they have one of that kind and name); with id (cc_...) it saves the next version.",
 		InputSchema: objectSchema(map[string]any{
 			"dir":         map[string]any{"type": "string", "description": "Workspace-relative directory holding component.json, e.g. drafts/contract-reviewer."},
-			"file":        map[string]any{"type": "string", "description": "A workspace file (published to the room first if needed)."},
+			"file":        map[string]any{"type": "string", "description": "A workspace file (published first if needed)."},
 			"artifactId":  map[string]any{"type": "string", "description": "Or any deliverable's id (artf_...)."},
 			"id":          map[string]any{"type": "string", "description": "The component to save a new version of; omit to create."},
 			"name":        map[string]any{"type": "string", "description": "A new work's name (lower-case, hyphens)."},
 			"category":    map[string]any{"type": "string", "enum": wire.WorkCategories},
+			"displayName": map[string]any{"type": "string", "description": "A work's title."},
 			"description": map[string]any{"type": "string", "description": "A work's gallery description."},
-			"request":     map[string]any{"type": "string", "description": "A work's \"how it was made\": a request that would make a similar one (default: the message that produced the file)."},
+			"request":     map[string]any{"type": "string", "description": "A work's \"how it was made\": a request that would make a similar one."},
 		}),
 		Call: saveComponent,
 	}
@@ -241,6 +242,7 @@ func saveComponent(ctx context.Context, env *Env, args json.RawMessage) Result {
 		ID          string `json:"id"`
 		Name        string `json:"name"`
 		Category    string `json:"category"`
+		DisplayName string `json:"displayName"`
 		Description string `json:"description"`
 		Request     string `json:"request"`
 	}
@@ -283,11 +285,12 @@ func saveComponent(ctx context.Context, env *Env, args json.RawMessage) Result {
 		p = "/v1/rooms/" + url.PathEscape(env.Session.Scope().RoomID) + "/artifacts/" + url.PathEscape(art) + "/publish-work?" + url.Values{"job": {job.JobID}}.Encode()
 		body = wire.WorkPublishRequest{
 			ComponentID: id, Name: strings.TrimSpace(in.Name), Category: strings.TrimSpace(in.Category),
-			Description: strings.TrimSpace(in.Description), RecipePrompt: strings.TrimSpace(in.Request),
+			DisplayName: strings.TrimSpace(in.DisplayName), Description: strings.TrimSpace(in.Description),
+			RecipePrompt: strings.TrimSpace(in.Request),
 		}
 		what = "the deliverable " + art
-	case in.Name != "" || in.Category != "" || in.Description != "" || in.Request != "":
-		return toolError("name, category, description and request are a work's: pass file or artifactId to save one")
+	case in.Name != "" || in.Category != "" || in.DisplayName != "" || in.Description != "" || in.Request != "":
+		return toolError("name, category, displayName, description and request are a work's: pass file or artifactId to save one")
 	default:
 		dir, err := cleanDir(in.Dir)
 		if err != nil {
@@ -330,7 +333,7 @@ func saveComponent(ctx context.Context, env *Env, args json.RawMessage) Result {
 		out["note"] = fmt.Sprintf("Saved the work %s version %s to the Library of the person who asked you: a snapshot of the deliverable, without its data. publish_component shares it with their organization's gallery.", c.Name, c.LatestVersion)
 		if c.Recipe != nil {
 			out["recipe"] = recipeSummary(c.Recipe)
-			out["note"] = out["note"].(string) + " It carries its recipe (the request, its expert, packs and reference files), which others start from with Make similar: say so, and that they can edit or drop it by publishing the deliverable again from its card."
+			out["note"] = out["note"].(string) + " It carries its recipe (the request, its expert, packs and reference files), which others start from with Make similar: say so. To change its title, description or \"how it was made\" request, save it again with id and displayName, description or request."
 		}
 	}
 	if rs := d.Resubmitted; rs != nil {

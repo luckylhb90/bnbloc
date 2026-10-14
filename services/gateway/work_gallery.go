@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/textproto"
 	"net/url"
+	"path"
 	"strconv"
 	"strings"
 	"time"
@@ -91,7 +92,7 @@ func (s *Service) handlePublishWork(w http.ResponseWriter, r *http.Request, call
 	art := d.Artifact
 	m := contentpkg.Manifest{
 		Name: strings.TrimSpace(in.Name), Version: "1.0.0",
-		DisplayName: firstNonEmpty(in.DisplayName, art.Title), Description: strings.TrimSpace(in.Description),
+		DisplayName: firstNonEmpty(in.DisplayName, workTitle(art)), Description: strings.TrimSpace(in.Description),
 		Category: strings.TrimSpace(in.Category), Tags: in.Tags,
 	}
 	var existing *store.ContentComponent
@@ -121,11 +122,22 @@ func (s *Service) handlePublishWork(w http.ResponseWriter, r *http.Request, call
 			return
 		}
 		// The next version keeps what the request leaves out.
-		m.DisplayName = firstNonEmpty(in.DisplayName, prev.DisplayName, art.Title)
+		// A title that was only the deliverable's own (a path, for an
+		// agent's file) was never chosen: the default applies again.
+		kept := prev.DisplayName
+		if kept == art.Title {
+			kept = ""
+		}
+		m.DisplayName = firstNonEmpty(in.DisplayName, kept, workTitle(art))
 		m.Description = firstNonEmpty(in.Description, prev.Description)
 		m.Category = firstNonEmpty(in.Category, prev.Category)
 		if len(m.Tags) == 0 {
 			m.Tags = prev.Tags
+		}
+		// So does the recipe's request text: an author's rewording is kept
+		// (the rest of the recipe is captured again).
+		if in.Recipe == nil && strings.TrimSpace(in.RecipePrompt) == "" && prev.Recipe != nil {
+			in.RecipePrompt = prev.Recipe.Prompt
 		}
 		m.Name, existing = c.Name, &c
 	}
@@ -643,4 +655,21 @@ func (s *Service) writeRoomBackendErr(w http.ResponseWriter, what string, err er
 	}
 	obs.ServerError(w, what, err)
 	httpx.Error(w, what, http.StatusBadGateway)
+}
+
+// workTitle is a work's default title: the deliverable's own title, unless
+// that is a workspace path or the file name (an agent's file is titled by
+// its path): then the file's name without its extension, words apart
+// ("work/out/Q3_sales-report.pptx" → "Q3 sales report").
+func workTitle(art wire.Artifact) string {
+	title := strings.TrimSpace(art.Title)
+	if title != "" && !strings.Contains(title, "/") && title != art.FileName {
+		return title
+	}
+	name := path.Base(firstNonEmpty(art.FileName, title))
+	if ext := path.Ext(name); ext != "" && len(ext) < len(name) {
+		name = strings.TrimSuffix(name, ext)
+	}
+	name = strings.Join(strings.FieldsFunc(name, func(r rune) bool { return r == '_' || r == '-' }), " ")
+	return firstNonEmpty(name, title)
 }

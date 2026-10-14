@@ -59,6 +59,31 @@ organization's gallery. It took three messages and still went wrong:
    before and after `--between`. An agent that had tools before and has
    none after fails the run ("room tools").
 
+## Follow-up (same day): the work's title and an edit that did not stick
+
+After the fixes above shipped, the member asked again and it still did not
+work:
+
+- The agent had tried a `prompt` argument under the old bridge and been
+  refused. Under the new one it did not try the new `request` argument;
+  it believed the earlier refusal. It also read the save result's note,
+  which still said the recipe could only be edited "from its card".
+- Its re-save (with `id`) captured the recipe again from the producing
+  turn, so the wrong "how it was made" came back.
+- The title was the deliverable's title, which for an agent's file is its
+  workspace path (`work/gallery/…pptx`), and no argument could set it.
+
+Fixes:
+
+- `save_component` takes `displayName`, and its note now says that title,
+  description and request change by saving again with `id`.
+- A next version keeps the previous version's request text unless the
+  save gives one; the rest of the recipe is captured again.
+- A work's default title is the deliverable's own title unless that is a
+  path or the file name; then it is the file name without extension,
+  words apart ("Acme Deck Layout Gallery ZH"). A title that was only
+  that default is defaulted again on the next version.
+
 ## Lessons
 
 - A silent skip rule turned into a missing feature: the publisher should
