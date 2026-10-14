@@ -382,9 +382,16 @@ type TurnStatus struct {
 	Activity    []TurnActivity
 }
 
-// FailCodeDeadline: the turn was still running at its deadline
-// (SessionOptions.DeadlineMs).
-const FailCodeDeadline = "deadline"
+// Fail codes a core may report (TurnStatus.FailCode).
+const (
+	// FailCodeDeadline: the turn was still running at its deadline
+	// (SessionOptions.DeadlineMs).
+	FailCodeDeadline = "deadline"
+	// FailCodeContextOverflow: the model refused the turn's input as too
+	// long for its context window. The session's next turn starts a fresh
+	// agent conversation (the session id stays).
+	FailCodeContextOverflow = "context_overflow"
+)
 
 // TurnActivity is one step of a running turn (protocol TurnActivity): its
 // kind (tool, thinking, text), a short title and when it happened.

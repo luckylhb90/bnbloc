@@ -209,6 +209,18 @@ no deadline imposes none of its own; ending a turn (deadline, interrupt)
 stops everything it started (the process group). The bridge reports a
 deadline as the agent having run out of time.
 
+**A conversation that outgrew its model**
+([`docs/prd/2026-10-14-context-overflow-recovery.md`](../prd/2026-10-14-context-overflow-recovery.md)).
+A core whose model refused a turn's input as too long for its context
+window fails the turn with `failCode: "context_overflow"`, and the
+session's next turn starts a fresh agent conversation (the session id
+stays); a core that cannot classify a failure reports it without a code.
+The bridge treats that code — or a failure message that reads as a
+context-window overflow (`contextOverflow`, services/bridge/job_failure.go)
+— by running the same request once more in a fresh session of the same
+workspace (the session guidance again, the room's history in `.room/`),
+with one notice to the room; a second overflow fails the job.
+
 **A sandboxed turn's command access renews itself** (capability
 `executionRefresh`). A sandboxed turn's exec token is short-lived (1 hour);
 while the turn runs the bridge mints a fresh one every 30 minutes and hands

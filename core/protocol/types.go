@@ -440,6 +440,11 @@ type PollTurnResponse struct {
 const (
 	// FailCodeDeadline: the turn was still running at its DeadlineMs.
 	FailCodeDeadline = core.FailCodeDeadline
+	// FailCodeContextOverflow: the model refused the turn's input as too
+	// long for its context window; the session's next turn starts a fresh
+	// agent conversation (the session id stays). A core that cannot
+	// classify a failure reports it without a code.
+	FailCodeContextOverflow = core.FailCodeContextOverflow
 )
 
 // Turn activity kinds (TurnActivity.Kind).

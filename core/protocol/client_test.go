@@ -389,7 +389,7 @@ func TestClient_WireShape_isExplicitCamelCase(t *testing.T) {
 		case "/core/v1/workspaces/ws-1/sessions/s-1/messages":
 			_, _ = w.Write([]byte(`{"messages":[{"version":4,"role":"assistant","text":"hi","userVisible":true,"completed":true,"messageId":"m-4","seq":4,"createdAtMs":1700}],"latestVersion":4}`))
 		case "/core/v1/workspaces/ws-1/sessions/s-1/turn":
-			_, _ = w.Write([]byte(`{"idle":true,"failed":true,"failMessage":"no key"}`))
+			_, _ = w.Write([]byte(`{"idle":true,"failed":true,"failMessage":"no key","failCode":"context_overflow"}`))
 		case PathTargets:
 			_, _ = w.Write([]byte(`{"targets":[{"id":"codex","provider":"codex","models":["m1"],"defaultModel":"m1"}]}`))
 		default:
@@ -424,7 +424,7 @@ func TestClient_WireShape_isExplicitCamelCase(t *testing.T) {
 		t.Fatalf("message = %+v", m)
 	}
 	ts, err := c.PollTurn(ctx, ep, "ws-1", "s-1")
-	if err != nil || !ts.Idle || !ts.Failed || ts.FailMessage != "no key" {
+	if err != nil || !ts.Idle || !ts.Failed || ts.FailMessage != "no key" || ts.FailCode != FailCodeContextOverflow {
 		t.Fatalf("PollTurn = %+v %v", ts, err)
 	}
 	targets, err := c.ListTargets(ctx, ep)
