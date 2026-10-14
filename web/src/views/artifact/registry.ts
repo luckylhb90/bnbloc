@@ -1,5 +1,6 @@
 import type React from "react";
 import type { FileFacts } from "../../lib/fileMatch.ts";
+import type { Selection } from "../../../previewer-sdk/src/protocol.ts";
 import { createFileRegistry, useRegistryRevision, type FileClaimant } from "../../lib/fileRegistry.ts";
 
 // The ONE artifact viewer registry: built-in viewers (builtin.ts) and
@@ -85,12 +86,10 @@ export interface ArtifactViewerProps {
   readonly onSelection?: (s: ViewerSelection | null) => void;
 }
 
-/** What a viewer reports as selected: a short label and the content it
- *  covers (the previewer frame protocol's Selection). */
-export interface ViewerSelection {
-  readonly label: string;
-  readonly detail: string;
-}
+/** What a viewer reports as selected: the frame protocol's Selection
+ *  (a label, the content it covers, and optionally its kind, place and unit
+ *  keys), whether a previewer or a built-in viewer reports it. */
+export type ViewerSelection = Selection;
 
 
 export interface ArtifactViewer extends FileClaimant {

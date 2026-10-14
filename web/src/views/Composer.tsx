@@ -57,6 +57,9 @@ const toolButton =
 /** The file a composer's conversation is about (Composer fileContext). */
 export interface ComposerFileContext {
   readonly file: FileFacts;
+  /** What the member points at in it (a selection's kind): its
+   *  suggestions come first. */
+  readonly selectionKind?: string;
   /** Where a picked suggestion goes; default: this composer's input. */
   readonly onPick?: (c: PromptChoice) => void;
 }
@@ -177,7 +180,7 @@ export function Composer({
   // and expert quick prompts that point at a pack's prompt.
   const prompts = useComposerPrompts(roomId, !people, setText, taRef);
   const starters = useMemo(
-    () => (fileContext ? fileSuggestions(prompts.choices, fileContext.file) : prompts.starters),
+    () => (fileContext ? fileSuggestions(prompts.choices, fileContext.file, fileContext.selectionKind) : prompts.starters),
     [fileContext, prompts.choices, prompts.starters],
   );
   useEffect(() => {

@@ -22,6 +22,7 @@
 //   frame -> host : preview.selection   {selection: {label, detail} | null}  (capability "selection")
 //   host  -> frame: preview.units.request {id, file, bytes}                  (capability "units")
 //   frame -> host : preview.units       {id, units, truncated} | {id, error}
+//   host  -> frame: preview.reveal      {at}                                  (capability "units")
 
 /** Frame protocol version carried in preview.init. */
 export const PREVIEWER_PROTOCOL = 1;
@@ -38,6 +39,14 @@ export const ERROR_LIMIT = 500;
 /** A selection's chip label and the content it carries to the agent. */
 export const SELECTION_LABEL_LIMIT = 120;
 export const SELECTION_DETAIL_LIMIT = 2000;
+/** The unit keys a selection covers (Compare units): how many, how long. */
+export const SELECTION_KEYS_LIMIT = 500;
+export const SELECTION_KEY_LIMIT = 200;
+
+/** Code-owned selection kinds (what a member points at); prompt packs scope
+ *  selection suggestions by them. */
+export const SELECTION_KINDS = ["text", "block", "slide", "cells", "region", "time"] as const;
+export type SelectionKind = (typeof SELECTION_KINDS)[number];
 /** Units (capability "units", Compare): how many, each one's key, label
  *  and text lengths, and the whole list's serialized size. */
 export const UNITS_LIMIT = 5000;
@@ -102,6 +111,20 @@ export type Theme = "light" | "dark";
 export interface Selection {
   readonly label: string;
   readonly detail: string;
+  /** What was selected (drives selection suggestions). */
+  readonly kind?: SelectionKind;
+  /** Where it shows, in the viewer's box (CSS pixels): the host places its
+   *  selection action there. */
+  readonly rect?: Rect;
+  /** The Compare unit keys it covers (a slide's, every cell of a range). */
+  readonly keys?: readonly string[];
+}
+
+export interface Rect {
+  readonly x: number;
+  readonly y: number;
+  readonly w: number;
+  readonly h: number;
 }
 
 export interface PreviewFile {
@@ -128,7 +151,8 @@ export type HostMessage =
   | { readonly type: "preview.toolbar"; readonly id: string; readonly value: boolean | number | null }
   | { readonly type: "preview.state"; readonly state: unknown; readonly actor: string }
   | { readonly type: "preview.resize"; readonly w: number; readonly h: number }
-  | { readonly type: "preview.units.request"; readonly id: string; readonly file: PreviewFile; readonly bytes: ArrayBuffer };
+  | { readonly type: "preview.units.request"; readonly id: string; readonly file: PreviewFile; readonly bytes: ArrayBuffer }
+  | { readonly type: "preview.reveal"; readonly at: string };
 
 /** One unit of a version for Compare (docs/prd/2026-10-14-file-prompts-and-compare.md
  *  rule 7): a slide, a paragraph, a cell, a page. key is a stable identity
@@ -137,6 +161,9 @@ export interface Unit {
   readonly key?: string;
   readonly label: string;
   readonly text: string;
+  /** Where it is in this version ("slide:2", "Revenue!C3", "p:7"): the
+   *  host hands it back in preview.reveal to show the unit. */
+  readonly at?: string;
 }
 
 export type FrameMessage =
@@ -297,8 +324,9 @@ export function readUnits(value: unknown): readonly Unit[] | null {
     const label = boundedText(item.label, UNIT_LABEL_LIMIT, true);
     const text = boundedText(item.text, UNIT_TEXT_LIMIT, true);
     const key = item.key === undefined ? undefined : boundedText(item.key, UNIT_KEY_LIMIT);
-    if (label === null || text === null || key === null) return null;
-    out.push(key === undefined ? { label, text } : { key, label, text });
+    const at = item.at === undefined ? undefined : boundedText(item.at, UNIT_KEY_LIMIT);
+    if (label === null || text === null || key === null || at === null) return null;
+    out.push({ ...(key === undefined ? {} : { key }), label, text, ...(at === undefined ? {} : { at }) });
   }
   return JSON.stringify(out).length <= UNITS_BYTES_LIMIT ? out : null;
 }
@@ -306,7 +334,7 @@ export function readUnits(value: unknown): readonly Unit[] | null {
 /** Fits units to the limits (the frame side): long texts and labels are cut
  *  with an ellipsis, and the list stops (truncated) at UNITS_LIMIT units or
  *  UNITS_BYTES_LIMIT, rather than being refused by the host. */
-export function fitUnits(units: readonly { readonly key?: string; readonly label: string; readonly text: string }[]): { units: Unit[]; truncated: boolean } {
+export function fitUnits(units: readonly { readonly key?: string; readonly label: string; readonly text: string; readonly at?: string }[]): { units: Unit[]; truncated: boolean } {
   const cut = (s: string, n: number) => {
     const chars = [...s];
     return chars.length <= n ? s : `${chars.slice(0, n - 1).join("")}…`;
@@ -316,7 +344,8 @@ export function fitUnits(units: readonly { readonly key?: string; readonly label
   for (const u of units) {
     if (out.length >= UNITS_LIMIT) return { units: out, truncated: true };
     const key = u.key ? [...u.key].slice(0, UNIT_KEY_LIMIT).join("") : undefined;
-    const unit: Unit = { ...(key ? { key } : {}), label: cut(u.label, UNIT_LABEL_LIMIT), text: cut(u.text, UNIT_TEXT_LIMIT) };
+    const at = u.at && [...u.at].length <= UNIT_KEY_LIMIT ? u.at : undefined;
+    const unit: Unit = { ...(key ? { key } : {}), label: cut(u.label, UNIT_LABEL_LIMIT), text: cut(u.text, UNIT_TEXT_LIMIT), ...(at ? { at } : {}) };
     bytes += JSON.stringify(unit).length + 1;
     if (bytes > UNITS_BYTES_LIMIT) return { units: out, truncated: true };
     out.push(unit);
@@ -330,17 +359,61 @@ export function readSelection(value: unknown): Selection | null {
   if (!isRecord(value)) return null;
   const label = boundedText(value.label, SELECTION_LABEL_LIMIT);
   const detail = boundedText(value.detail ?? "", SELECTION_DETAIL_LIMIT, true);
-  return label === null || detail === null ? null : { label, detail };
+  if (label === null || detail === null) return null;
+  let out: Selection = { label, detail };
+  if (value.kind !== undefined) {
+    if (!(SELECTION_KINDS as readonly unknown[]).includes(value.kind)) return null;
+    out = { ...out, kind: value.kind as SelectionKind };
+  }
+  if (value.rect !== undefined) {
+    const r = readRect(value.rect);
+    if (!r) return null;
+    out = { ...out, rect: r };
+  }
+  if (value.keys !== undefined) {
+    if (!Array.isArray(value.keys) || value.keys.length > SELECTION_KEYS_LIMIT) return null;
+    const keys = value.keys.map((k) => boundedText(k, SELECTION_KEY_LIMIT));
+    if (keys.some((k) => k === null)) return null;
+    out = { ...out, keys: keys as string[] };
+  }
+  return out;
+}
+
+function readRect(value: unknown): Rect | null {
+  if (!isRecord(value)) return null;
+  const n = (v: unknown) => (typeof v === "number" && Number.isFinite(v) && Math.abs(v) <= 1e6 ? v : null);
+  const x = n(value.x);
+  const y = n(value.y);
+  const w = n(value.w);
+  const h = n(value.h);
+  return x === null || y === null || w === null || h === null || w < 0 || h < 0 ? null : { x, y, w, h };
 }
 
 /** Fits a selection to the limits (the frame side: a long selection is cut,
  *  marked with an ellipsis, rather than refused by the host). */
-export function fitSelection(label: string, detail: string): Selection {
+export function fitSelection(draft: {
+  readonly label: string;
+  readonly detail?: string;
+  readonly kind?: SelectionKind;
+  readonly rect?: Rect;
+  readonly keys?: readonly string[];
+}): Selection {
   const cut = (s: string, n: number) => {
     const chars = [...s];
     return chars.length <= n ? s : `${chars.slice(0, n - 1).join("")}…`;
   };
-  return { label: cut(label.trim() || "Selection", SELECTION_LABEL_LIMIT), detail: cut(detail, SELECTION_DETAIL_LIMIT) };
+  const label = cut(String(draft.label ?? "").trim() || "Selection", SELECTION_LABEL_LIMIT);
+  const out: Selection = { label, detail: cut(String(draft.detail ?? ""), SELECTION_DETAIL_LIMIT) };
+  const rect = draft.rect ? readRect(draft.rect) : null;
+  // A selection covering more units than the limit says none (the host
+  // falls back to comparing text), rather than a misleading part.
+  const keys = draft.keys && draft.keys.length <= SELECTION_KEYS_LIMIT ? draft.keys.filter((k) => k && [...k].length <= SELECTION_KEY_LIMIT) : undefined;
+  return {
+    ...out,
+    ...(draft.kind && (SELECTION_KINDS as readonly string[]).includes(draft.kind) ? { kind: draft.kind } : {}),
+    ...(rect ? { rect } : {}),
+    ...(keys && keys.length ? { keys } : {}),
+  };
 }
 
 /** Validates the payload of a host -> frame message (the SDK additionally
@@ -391,6 +464,10 @@ export function readHostMessage(data: unknown): HostMessage | null {
       const version = finiteNonNegative(file.version);
       if (sizeBytes === null || version === null) return null;
       return { type: "preview.units.request", id: data.id, file: { name: file.name, mimeType: file.mimeType, sizeBytes, version }, bytes: data.bytes };
+    }
+    case "preview.reveal": {
+      const at = boundedText(data.at, UNIT_KEY_LIMIT);
+      return at === null ? null : { type: "preview.reveal", at };
     }
     default:
       return null;

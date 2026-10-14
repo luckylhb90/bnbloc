@@ -138,9 +138,9 @@ eq(promptPackProblem(form), "The name uses lower-case letters, digits and hyphen
 form.name = "writing";
 eq(promptPackProblem(form), "Add at least one prompt", "needs a prompt");
 form.prompts = [
-  { id: "", title: "Notes", body: "Notes for {{audience}}", slash: "/Notes", tags: "Writing, ops", variables: [{ name: "audience", label: "Audience", default: "devs", options: "users\ndevs\n" }], starter: true, files: "" },
-  { id: "", title: "", body: "Second prompt\nline", slash: "", tags: "", variables: [], starter: false, files: "" },
-  { id: "", title: "", body: "", slash: "", tags: "", variables: [], starter: false, files: "" },
+  { id: "", title: "Notes", body: "Notes for {{audience}}", slash: "/Notes", tags: "Writing, ops", variables: [{ name: "audience", label: "Audience", default: "devs", options: "users\ndevs\n" }], starter: true, files: "", selection: "" },
+  { id: "", title: "", body: "Second prompt\nline", slash: "", tags: "", variables: [], starter: false, files: "", selection: "" },
+  { id: "", title: "", body: "", slash: "", tags: "", variables: [], starter: false, files: "", selection: "" },
 ];
 eq(promptPackProblem(form), null, "valid");
 eq(
@@ -230,6 +230,25 @@ eq(
   const back = promptPackPayload(formFromPack(builtin));
   eq((back.prompts as { files?: unknown }[])[0].files, { extensions: [".pptx"] }, "files round trip");
   eq((back.prompts as { files?: unknown }[])[3].files, { mimeTypes: ["image/*"] }, "mime round trip");
+}
+
+// ---- selection suggestions (docs/prd/2026-10-14-select-edit-review.md rule 2).
+{
+  const deck = { name: "q3.pptx", mimeType: "", extension: "pptx" };
+  const pack2 = pack("file-prompts", [
+    prompt("tighten", { title: "Tighten the wording", starter: true, files: { extensions: [".pptx"] } }),
+    prompt("rewrite", { title: "Rewrite this", starter: true, selection: ["text", "block"] }),
+    prompt("slide", { title: "Tighten this slide", starter: true, selection: ["slide"], files: { extensions: [".pptx"] } }),
+    prompt("cells", { title: "Add a total", starter: true, selection: ["cells"], files: { extensions: [".xlsx"] } }),
+  ], { scope: "builtin" });
+  const choices = promptChoices([], [], [pack2]);
+  eq(fileSuggestions(choices, deck).map((c) => c.prompt.id), ["tighten"], "no selection: the file's");
+  eq(fileSuggestions(choices, deck, "slide").map((c) => c.prompt.id), ["slide"], "a slide: its suggestions");
+  eq(fileSuggestions(choices, deck, "text").map((c) => c.prompt.id), ["rewrite"], "text: for any file");
+  eq(fileSuggestions(choices, deck, "cells").map((c) => c.prompt.id), ["tighten"], "cells of a deck: none apply, the file's");
+  eq(starterChoices([], [pack2]).length, 0, "selection prompts are never room starters");
+  const back = promptPackPayload(formFromPack(pack2));
+  eq((back.prompts as { selection?: unknown }[])[1].selection, ["text", "block"], "selection round trip");
 }
 
 console.log("promptPacks tests passed");

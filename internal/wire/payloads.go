@@ -49,6 +49,27 @@ type FileRef struct {
 type FileSelection struct {
 	Label  string `json:"label"`
 	Detail string `json:"detail,omitempty"`
+	// Kind is what was selected (FileSelectionKinds; "" = not said).
+	Kind string `json:"kind,omitempty"`
+	// Keys are the Compare unit keys the selection covers (a slide's, every
+	// cell of a range), at most MaxFileSelectionKeys: the change card names
+	// edits outside them (docs/prd/2026-10-14-select-edit-review.md rule 5).
+	Keys []string `json:"keys,omitempty"`
+}
+
+// FileSelectionKinds is the code-owned vocabulary of selection kinds,
+// equal to the frame protocol's SELECTION_KINDS (core/pkgmeta's vocabulary
+// test compares them). Prompt packs scope selection suggestions by it.
+var FileSelectionKinds = []string{"text", "block", "slide", "cells", "region", "time"}
+
+// IsFileSelectionKind reports whether k is in FileSelectionKinds.
+func IsFileSelectionKind(k string) bool {
+	for _, v := range FileSelectionKinds {
+		if v == k {
+			return true
+		}
+	}
+	return false
 }
 
 // The selection bounds, equal to the frame protocol's SELECTION_*_LIMIT
@@ -56,6 +77,8 @@ type FileSelection struct {
 const (
 	MaxFileSelectionLabel  = 120
 	MaxFileSelectionDetail = 2000
+	MaxFileSelectionKeys   = 500
+	MaxFileSelectionKey    = 200
 )
 
 // ChatAttachment is an attachment a chat message embeds.

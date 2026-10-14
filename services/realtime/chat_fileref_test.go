@@ -2,6 +2,7 @@ package realtimehttp
 
 import (
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -51,9 +52,9 @@ func TestChatFileRefValidatedAndCarried(t *testing.T) {
 		t.Fatalf("explicit version = %+v, %v", posted.Job, err)
 	}
 	// A selection rides along, trimmed and bounded.
-	sel := &wire.FileSelection{Label: " Slide 4 ", Detail: "Q3 revenue up 18%"}
+	sel := &wire.FileSelection{Label: " Slide 4 ", Detail: "Q3 revenue up 18%", Kind: "slide", Keys: []string{"slide-259"}}
 	if posted, err = svc.PostChat(dctx(), ChatPost{RoomID: "room-1", Author: "maya", Text: "shorter", Recipient: toJackCodex(), FileRef: &wire.FileRef{ArtifactID: "deck", Selection: sel}}); err != nil ||
-		posted.Job.FileRef.Selection == nil || *posted.Job.FileRef.Selection != (wire.FileSelection{Label: "Slide 4", Detail: "Q3 revenue up 18%"}) {
+		posted.Job.FileRef.Selection == nil || !reflect.DeepEqual(*posted.Job.FileRef.Selection, wire.FileSelection{Label: "Slide 4", Detail: "Q3 revenue up 18%", Kind: "slide", Keys: []string{"slide-259"}}) {
 		t.Fatalf("selection = %+v, %v", posted.Job, err)
 	}
 	for name, ref := range map[string]*wire.FileRef{
@@ -65,6 +66,9 @@ func TestChatFileRefValidatedAndCarried(t *testing.T) {
 		"no id":          {},
 		"empty label":    {ArtifactID: "deck", Selection: &wire.FileSelection{Label: " "}},
 		"long detail":    {ArtifactID: "deck", Selection: &wire.FileSelection{Label: "x", Detail: strings.Repeat("y", wire.MaxFileSelectionDetail+1)}},
+		"unknown kind":   {ArtifactID: "deck", Selection: &wire.FileSelection{Label: "x", Kind: "galaxy"}},
+		"too many keys":  {ArtifactID: "deck", Selection: &wire.FileSelection{Label: "x", Keys: make([]string, wire.MaxFileSelectionKeys+1)}},
+		"an empty key":   {ArtifactID: "deck", Selection: &wire.FileSelection{Label: "x", Keys: []string{""}}},
 	} {
 		if _, err := svc.PostChat(dctx(), ChatPost{RoomID: "room-1", Author: "maya", Text: "x", Recipient: toJackCodex(), FileRef: ref}); !errors.As(err, new(errBadFileRef)) {
 			t.Errorf("%s: err = %v", name, err)

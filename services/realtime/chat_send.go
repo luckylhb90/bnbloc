@@ -350,7 +350,18 @@ func (s *Service) resolveFileRef(ctx context.Context, roomID string, ref *wire.F
 		if label == "" || utf8.RuneCountInString(label) > wire.MaxFileSelectionLabel || utf8.RuneCountInString(sel.Detail) > wire.MaxFileSelectionDetail {
 			return nil, errBadFileRef{fmt.Sprintf("the selection must be a label of 1-%d characters and at most %d characters of content", wire.MaxFileSelectionLabel, wire.MaxFileSelectionDetail)}
 		}
-		out.Selection = &wire.FileSelection{Label: label, Detail: sel.Detail}
+		if sel.Kind != "" && !wire.IsFileSelectionKind(sel.Kind) {
+			return nil, errBadFileRef{fmt.Sprintf("the selection kind %q is not one of %v", sel.Kind, wire.FileSelectionKinds)}
+		}
+		if len(sel.Keys) > wire.MaxFileSelectionKeys {
+			return nil, errBadFileRef{fmt.Sprintf("a selection covers at most %d keys", wire.MaxFileSelectionKeys)}
+		}
+		for _, k := range sel.Keys {
+			if k == "" || utf8.RuneCountInString(k) > wire.MaxFileSelectionKey {
+				return nil, errBadFileRef{fmt.Sprintf("a selection key is 1-%d characters", wire.MaxFileSelectionKey)}
+			}
+		}
+		out.Selection = &wire.FileSelection{Label: label, Detail: sel.Detail, Kind: sel.Kind, Keys: sel.Keys}
 	}
 	return out, nil
 }

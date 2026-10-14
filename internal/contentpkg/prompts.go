@@ -41,6 +41,11 @@ type Prompt struct {
 	// whose workbench shows one), never a room starter
 	// (docs/prd/2026-10-14-file-prompts-and-compare.md rule 2).
 	Files *wire.FileMatch `json:"files,omitempty"`
+	// Selection scopes it to selections of these kinds
+	// (wire.FileSelectionKinds): a starter with selection is a selection
+	// suggestion, offered while the member points at such a part
+	// (docs/prd/2026-10-14-select-edit-review.md rule 2).
+	Selection []string `json:"selection,omitempty"`
 }
 
 // PromptVariable is one {{name}} of a prompt: a text field, or a select
@@ -182,6 +187,13 @@ func validatePromptPack(p *Package) error {
 			if err := filematch.Validate(*pr.Files, at+" files"); err != nil {
 				return err
 			}
+		}
+		seen := map[string]bool{}
+		for _, k := range pr.Selection {
+			if !wire.IsFileSelectionKind(k) || seen[k] {
+				return fmt.Errorf("%s selection: %q must be one of %v, once", at, k, wire.FileSelectionKinds)
+			}
+			seen[k] = true
 		}
 	}
 	return nil

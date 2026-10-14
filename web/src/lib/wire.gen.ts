@@ -1669,6 +1669,9 @@ export interface ContentPrompt {
   // Files scopes it to matching files: a starter with files is a file
   // suggestion, not a room starter.
   files?: FileMatch;
+  // Selection scopes it to selections of these kinds (a selection
+  // suggestion).
+  selection?: string[];
   // Uses counts its insertions by every member.
   uses: number;
 }
@@ -2714,12 +2717,25 @@ export interface FileRef {
 export interface FileSelection {
   label: string;
   detail?: string;
+  // Kind is what was selected (FileSelectionKinds; "" = not said).
+  kind?: string;
+  // Keys are the Compare unit keys the selection covers (a slide's, every
+  // cell of a range), at most MaxFileSelectionKeys: the change card names
+  // edits outside them (docs/prd/2026-10-14-select-edit-review.md rule 5).
+  keys?: string[];
 }
+
+// FileSelectionKinds is the code-owned vocabulary of selection kinds,
+// equal to the frame protocol's SELECTION_KINDS (core/pkgmeta's vocabulary
+// test compares them). Prompt packs scope selection suggestions by it.
+export const FileSelectionKinds: readonly string[] = ["text", "block", "slide", "cells", "region", "time"];
 
 // The selection bounds, equal to the frame protocol's SELECTION_*_LIMIT
 // (core/pkgmeta's vocabulary test compares them).
 export const MaxFileSelectionLabel = 120;
 export const MaxFileSelectionDetail = 2000;
+export const MaxFileSelectionKeys = 500;
+export const MaxFileSelectionKey = 200;
 
 // ChatAttachment is an attachment a chat message embeds.
 export interface ChatAttachment {

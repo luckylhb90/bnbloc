@@ -189,6 +189,7 @@ func TestPreviewerVocabulariesMatchFrameProtocol(t *testing.T) {
 		"PREVIEWER_CAPABILITIES": PreviewerCapabilities,
 		"TOOLBAR_KINDS":          PreviewerToolbarKinds,
 		"TOOLBAR_ICONS":          PreviewerToolbarIcons,
+		"SELECTION_KINDS":        wire.FileSelectionKinds,
 	} {
 		re := regexp.MustCompile(`(?s)export const ` + name + ` = \[(.*?)\] as const`)
 		m := re.FindSubmatch(src)
@@ -208,6 +209,7 @@ func TestPreviewerVocabulariesMatchFrameProtocol(t *testing.T) {
 		"TOOLBAR_LIMIT": maxPreviewerToolbar, "TOOLBAR_LABEL_LIMIT": maxPreviewerLabel,
 
 		"SELECTION_LABEL_LIMIT": wire.MaxFileSelectionLabel, "SELECTION_DETAIL_LIMIT": wire.MaxFileSelectionDetail,
+		"SELECTION_KEYS_LIMIT": wire.MaxFileSelectionKeys, "SELECTION_KEY_LIMIT": wire.MaxFileSelectionKey,
 	} {
 		re := regexp.MustCompile(`export const ` + name + ` = (\d+);`)
 		m := re.FindSubmatch(src)

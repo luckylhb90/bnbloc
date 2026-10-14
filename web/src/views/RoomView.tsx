@@ -426,7 +426,7 @@ export function RoomView({
           platformAgents={data.platform}
           modelCatalogs={data.modelCatalogs}
           variant="file"
-          fileContext={{ file: options.file }}
+          fileContext={{ file: options.file, selectionKind: options.selectionKind }}
           threadLength={options.threadLength}
           pick={options.pick}
         />

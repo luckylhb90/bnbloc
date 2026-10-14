@@ -120,17 +120,26 @@ func TestFilePromptsAreScopedStarters(t *testing.T) {
 	if !ok {
 		t.Fatal("the file-prompts pack is missing")
 	}
+	selections := 0
 	for _, pr := range files.Validated.Manifest.Prompts {
-		if !pr.Starter || pr.Files == nil {
-			t.Errorf("file prompt %s: starter %v, files %v", pr.ID, pr.Starter, pr.Files)
+		// A file suggestion is scoped to files, a selection suggestion to
+		// selection kinds (and maybe files); never neither.
+		if !pr.Starter || (pr.Files == nil && len(pr.Selection) == 0) {
+			t.Errorf("file prompt %s: starter %v, files %v, selection %v", pr.ID, pr.Starter, pr.Files, pr.Selection)
+		}
+		if len(pr.Selection) > 0 {
+			selections++
 		}
 		if len(pr.Variables) > 0 {
 			t.Errorf("file prompt %s asks for variables: a suggestion should need no form", pr.ID)
 		}
 	}
+	if selections == 0 {
+		t.Error("no selection suggestions ship")
+	}
 	starters, _ := Get(IDPrefix + "starters")
 	for _, pr := range starters.Validated.Manifest.Prompts {
-		if pr.Files != nil {
+		if pr.Files != nil || len(pr.Selection) > 0 {
 			t.Errorf("room starter %s is scoped to files", pr.ID)
 		}
 	}

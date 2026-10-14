@@ -1,4 +1,4 @@
-import { fileThread } from "./fileAsk.ts";
+import { fileThread, requestSelection } from "./fileAsk.ts";
 import type { FeedItem } from "../room/types.ts";
 
 // Local runner (the web tsconfig has no node types); a failure throws.
@@ -23,3 +23,10 @@ eq(fileThread(feed, "a").map((m) => m.id), [1, 3, 7, 8], "file a's thread");
 eq(fileThread(feed, "b").map((m) => m.id), [5, 6], "file b's thread");
 eq(fileThread(feed, "c"), [], "no thread");
 console.log("fileAsk tests passed");
+
+// A request carries the selection's label, content, kind and keys; never
+// where it showed on screen.
+{
+  const sent = requestSelection({ label: "Slide 2", detail: "Highlights", kind: "slide", rect: { x: 1, y: 2, w: 3, h: 4 }, keys: ["slide-257"] });
+  if (JSON.stringify(sent) !== JSON.stringify({ label: "Slide 2", detail: "Highlights", kind: "slide", keys: ["slide-257"] })) throw new Error(`requestSelection: ${JSON.stringify(sent)}`);
+}

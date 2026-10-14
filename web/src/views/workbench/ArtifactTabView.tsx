@@ -45,6 +45,7 @@ import { ShareDialog } from "./ShareDialog";
 import { CompareView } from "./CompareView";
 import { selectComparer, useComparerRegistry } from "@/views/artifact/compare/registry";
 import { FileAskPanel, useFileAsk, type FileComposerOptions } from "./FileAskPanel";
+import { requestSelection } from "./fileAsk";
 import { fileAskRequests } from "@/lib/team";
 import { LocalSaveChip } from "./LocalSaveChip";
 import { useDisplayNames } from "@/lib/useDisplayName";
@@ -488,7 +489,7 @@ export function ArtifactTabView({
       {asking && ask && canAsk && (
         <FileAskPanel
           ask={ask}
-          fileRef={{ artifactId, version: shown, name: file.name, ...(selection ? { selection } : {}) }}
+          fileRef={{ artifactId, version: shown, name: file.name, ...(selection ? { selection: requestSelection(selection) } : {}) }}
           file={file}
           pick={pick}
           onClearSelection={() => setSelection(null)}

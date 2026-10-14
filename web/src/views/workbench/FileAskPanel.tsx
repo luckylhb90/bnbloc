@@ -29,6 +29,8 @@ export interface FileFocus {
 /** What a file panel's composer is told. */
 export interface FileComposerOptions {
   readonly file: FileFacts;
+  /** The selection's kind, when the member points at a part. */
+  readonly selectionKind?: string;
   /** The file thread's length (its starters show while it is empty). */
   readonly threadLength: number;
   /** A suggestion handed over to insert (a new nonce inserts again). */
@@ -122,7 +124,7 @@ export function FileAskPanel({
         </div>
       )}
       {/* Its own container: the composer lays out for the panel's width. */}
-      <div className="@container shrink-0">{ask.composer(fileRef, { file, threadLength: thread.length, pick })}</div>
+      <div className="@container shrink-0">{ask.composer(fileRef, { file, selectionKind: fileRef.selection?.kind, threadLength: thread.length, pick })}</div>
     </aside>
   );
 }

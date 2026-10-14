@@ -7,6 +7,7 @@ import {
   TOOLBAR_LIMIT,
   SELECTION_DETAIL_LIMIT,
   SELECTION_LABEL_LIMIT,
+  SELECTION_KEYS_LIMIT,
   UNITS_BYTES_LIMIT,
   UNITS_LIMIT,
   UNIT_TEXT_LIMIT,
@@ -163,7 +164,7 @@ test("a selection is a bounded label and detail, or null to clear", () => {
   eq(readFrameMessage({ type: "preview.selection", selection: { label: "" } }), null, "an empty label");
   eq(readFrameMessage({ type: "preview.selection", selection: { label: "x".repeat(SELECTION_LABEL_LIMIT + 1) } }), null, "a long label");
   eq(readFrameMessage({ type: "preview.selection", selection: { label: "x", detail: "y".repeat(SELECTION_DETAIL_LIMIT + 1) } }), null, "a long detail");
-  const fit = fitSelection("x".repeat(500), "y".repeat(5000));
+  const fit = fitSelection({ label: "x".repeat(500), detail: "y".repeat(5000) });
   eq([[...fit.label].length, [...fit.detail].length, fit.detail.endsWith("…")], [SELECTION_LABEL_LIMIT, SELECTION_DETAIL_LIMIT, true], "fitSelection cuts to the limits");
   eq(readFrameMessage({ type: "preview.selection", selection: fit }) !== null, true, "a fitted selection is accepted");
 });
@@ -180,4 +181,17 @@ test("units are bounded on both sides", () => {
   eq(readUnits(fitted.units) !== null, true, "a fitted list is accepted");
   const big = fitUnits(Array.from({ length: 1000 }, () => ({ label: "x", text: "y".repeat(UNIT_TEXT_LIMIT) })));
   eq([big.truncated, JSON.stringify(big.units).length <= UNITS_BYTES_LIMIT], [true, true], "fitUnits stops at the byte limit");
+});
+
+test("a selection may say its kind, place and keys; units their place; reveal names one", () => {
+  const sel = { label: "Slide 2", detail: "Highlights", kind: "slide", rect: { x: 10, y: 20, w: 300, h: 160 }, keys: ["slide-257"] };
+  eq(readFrameMessage({ type: "preview.selection", selection: sel }), { type: "preview.selection", selection: sel }, "a full selection");
+  eq(readFrameMessage({ type: "preview.selection", selection: { ...sel, kind: "galaxy" } }), null, "an unknown kind");
+  eq(readFrameMessage({ type: "preview.selection", selection: { ...sel, rect: { x: 0, y: 0, w: -1, h: 1 } } }), null, "a negative rect");
+  eq(readFrameMessage({ type: "preview.selection", selection: { ...sel, keys: Array.from({ length: SELECTION_KEYS_LIMIT + 1 }, (_, i) => `k${i}`) } }), null, "too many keys");
+  const many = fitSelection({ label: "Revenue!A1:Z100", kind: "cells", keys: Array.from({ length: SELECTION_KEYS_LIMIT + 1 }, (_, i) => `k${i}`) });
+  eq([many.kind, many.keys], ["cells", undefined], "a range too big for keys sends none");
+  eq(readFrameMessage({ type: "preview.units", id: "r1", units: [{ key: "s1", label: "Slide 1", text: "x", at: "slide:1" }], truncated: false })?.type, "preview.units", "a unit's place");
+  eq(readHostMessage({ type: "preview.reveal", at: "Revenue!C3" }), { type: "preview.reveal", at: "Revenue!C3" }, "reveal");
+  eq(readHostMessage({ type: "preview.reveal", at: "" }), null, "an empty reveal");
 });

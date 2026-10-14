@@ -60,11 +60,20 @@ function PromptEditor({ draft, onChange, onRemove }: { readonly draft: PromptDra
         className="font-mono text-xs"
         onChange={(e) => set({ files: e.target.value })}
       />
+      <Input
+        value={draft.selection}
+        placeholder="For selections, e.g. text, cells, region (empty: whole file)"
+        aria-label="For selections"
+        className="font-mono text-xs"
+        onChange={(e) => set({ selection: e.target.value })}
+      />
       <Switch
         checked={draft.starter}
         onChange={(on) => set({ starter: on })}
         label={
-          draft.files.trim()
+          draft.selection.trim()
+            ? "Suggested: offered while a member selects such a part, beside it and in the Ask AI panel"
+            : draft.files.trim()
             ? "Suggested: offered for these files, in their Ask AI panel and in a room showing one"
             : "Starter: offered in empty rooms that use this pack"
         }

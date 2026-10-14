@@ -69,6 +69,10 @@ export type FileHandler = (bytes: ArrayBuffer, file: PreviewFile) => void;
 export type ToolbarHandler = (id: string, value: boolean | number | null) => void;
 export type StateHandler = (state: unknown, actor: string) => void;
 export type ResizeHandler = (viewport: Viewport) => void;
+/** Shows a unit (its `at`): the host's "Show" on a change. */
+export type RevealHandler = (at: string) => void;
+/** A selection as a previewer reports it (fitSelection bounds it). */
+export type SelectionDraft = Parameters<typeof fitSelection>[0];
 /** Reads a file into its units for Compare (capability "units"). */
 export type UnitsHandler = (
   bytes: ArrayBuffer,
@@ -101,11 +105,13 @@ export interface PreviewerClient {
   /** Points the host at a part of the file (capability "selection"): a
    *  chip it shows beside its Ask AI composer, whose detail travels to the
    *  agent with the request; null clears it. Over-long text is cut. */
-  sendSelection(selection: { label: string; detail?: string } | null): void;
+  sendSelection(selection: SelectionDraft | null): void;
   /** Answers the host's requests to read a version into units (capability
    *  "units", Compare): the last handler registered answers; a request that
    *  arrives first waits for it. A throw is reported to the host. */
   onUnits(cb: UnitsHandler): Unsubscribe;
+  /** Scrolls to a unit the host asks to show (the `at` its units carried). */
+  onReveal(cb: RevealHandler): Unsubscribe;
 }
 
 function subscribe<T>(list: T[], cb: T): Unsubscribe {
@@ -126,6 +132,9 @@ export function createPreviewerClient(env: PreviewerEnv): PreviewerClient {
   const toolbarHandlers: ToolbarHandler[] = [];
   const stateHandlers: StateHandler[] = [];
   const resizeHandlers: ResizeHandler[] = [];
+  const revealHandlers: RevealHandler[] = [];
+  // A reveal that arrives before the file is shown waits for it.
+  let pendingReveal: string | null = null;
   let init: PreviewInit | null = null;
   let file: ArrayBuffer | null = null;
   let ready = false;
@@ -192,6 +201,10 @@ export function createPreviewerClient(env: PreviewerEnv): PreviewerClient {
       case "preview.units.request":
         answerUnits(msg);
         return;
+      case "preview.reveal":
+        if (revealHandlers.length === 0) pendingReveal = msg.at;
+        for (const cb of [...revealHandlers]) cb(msg.at);
+        return;
     }
   };
 
@@ -249,7 +262,16 @@ export function createPreviewerClient(env: PreviewerEnv): PreviewerClient {
       post({ type: "preview.error", message: [...text].slice(0, ERROR_LIMIT).join("") });
     },
     sendSelection(selection) {
-      post({ type: "preview.selection", selection: selection ? fitSelection(String(selection.label ?? ""), String(selection.detail ?? "")) : null });
+      post({ type: "preview.selection", selection: selection ? fitSelection(selection) : null });
+    },
+    onReveal(cb) {
+      const off = subscribe(revealHandlers, cb);
+      if (pendingReveal !== null) {
+        const at = pendingReveal;
+        pendingReveal = null;
+        cb(at);
+      }
+      return off;
     },
     onUnits(cb) {
       unitsHandler = cb;
@@ -293,5 +315,6 @@ export const sendState = (state: unknown): void => client().sendState(state);
 export const provideThumbnail = (png: Blob | ArrayBuffer): Promise<void> => client().provideThumbnail(png);
 export const setTitle = (text: string): void => client().setTitle(text);
 export const reportError = (message: string): void => client().reportError(message);
-export const sendSelection = (selection: { label: string; detail?: string } | null): void => client().sendSelection(selection);
+export const sendSelection = (selection: SelectionDraft | null): void => client().sendSelection(selection);
 export const onUnits = (cb: UnitsHandler): Unsubscribe => client().onUnits(cb);
+export const onReveal = (cb: RevealHandler): Unsubscribe => client().onReveal(cb);

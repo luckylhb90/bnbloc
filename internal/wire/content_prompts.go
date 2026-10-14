@@ -20,6 +20,9 @@ type ContentPrompt struct {
 	// Files scopes it to matching files: a starter with files is a file
 	// suggestion, not a room starter.
 	Files *FileMatch `json:"files,omitempty"`
+	// Selection scopes it to selections of these kinds (a selection
+	// suggestion).
+	Selection []string `json:"selection,omitempty"`
 	// Uses counts its insertions by every member.
 	Uses int64 `json:"uses"`
 }

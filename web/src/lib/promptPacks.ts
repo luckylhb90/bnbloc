@@ -74,7 +74,7 @@ function packStarters(packs: readonly ContentComponent[], source: PromptChoice["
     if (c.kind !== "prompt" || seen.has(c.id)) continue;
     seen.add(c.id);
     for (const p of c.prompts ?? []) {
-      if (!p.starter || p.files) continue;
+      if (!p.starter || p.files || p.selection?.length) continue;
       out.push({ prompt: p, componentId: c.id, pack: c.name, packLabel: packLabel(c), version: c.version || c.latestVersion, source });
       if (out.length >= limit) return out;
     }
@@ -99,17 +99,37 @@ export const MAX_FILE_SUGGESTIONS = 6;
 const SOURCE_ORDER: Readonly<Record<PromptChoice["source"], number>> = { room: 0, mine: 1, library: 2, builtin: 3 };
 
 // fileSuggestions are the suggestions for a file
-// (docs/prd/2026-10-14-file-prompts-and-compare.md rule 2): the starters
-// scoped to files that match it, among the prompts the composer offers
-// (promptChoices). The most specific match first (a pack for .pptx before
-// one for every Office file), then the room's packs, the member's, the
+// (docs/prd/2026-10-14-file-prompts-and-compare.md rule 2), or for the part
+// of it the member selected (docs/prd/2026-10-14-select-edit-review.md
+// rule 2), among the prompts the composer offers (promptChoices):
+//   - with a selection, the starters scoped to its kind whose files (if
+//     any) match the file; none, and the file's own;
+//   - without, the starters scoped to files that match it.
+// The most specific match first (a pack for .pptx before one for every
+// Office file; any file last), then the room's packs, the member's, the
 // Library's and the built-in ones, then the most used. One per title (two
 // packs' "Proofread" show once), at most limit.
-export function fileSuggestions(choices: readonly PromptChoice[], file: FileFacts, limit = MAX_FILE_SUGGESTIONS): PromptChoice[] {
+export function fileSuggestions(
+  choices: readonly PromptChoice[],
+  file: FileFacts,
+  selectionKind?: string,
+  limit = MAX_FILE_SUGGESTIONS,
+): PromptChoice[] {
+  if (selectionKind) {
+    const picked = rankSuggestions(choices, file, selectionKind, limit);
+    if (picked.length > 0) return picked;
+  }
+  return rankSuggestions(choices, file, undefined, limit);
+}
+
+function rankSuggestions(choices: readonly PromptChoice[], file: FileFacts, selectionKind: string | undefined, limit: number): PromptChoice[] {
   const scored: { c: PromptChoice; specificity: number }[] = [];
   for (const c of choices) {
-    if (!c.prompt.starter || !c.prompt.files) continue;
-    const specificity = matchSpecificity(c.prompt.files, file);
+    const p = c.prompt;
+    if (!p.starter) continue;
+    if (selectionKind ? !p.selection?.includes(selectionKind) : !p.files || p.selection?.length) continue;
+    // A selection prompt for any file ranks below one for this kind of file.
+    const specificity = p.files ? matchSpecificity(p.files, file) : selectionKind ? 0.5 : 0;
     if (specificity > 0) scored.push({ c, specificity });
   }
   scored.sort(
@@ -237,6 +257,9 @@ export interface PromptDraft {
   // The files it is for (".pptx, image/*"): a starter with files is a file
   // suggestion. Empty = any conversation.
   files: string;
+  // The selection kinds it is for ("text, cells"): a starter with them is a
+  // selection suggestion.
+  selection: string;
 }
 
 export interface PromptPackForm {
@@ -247,7 +270,7 @@ export interface PromptPackForm {
 }
 
 export function emptyPromptDraft(): PromptDraft {
-  return { id: "", title: "", body: "", slash: "", tags: "", variables: [], starter: false, files: "" };
+  return { id: "", title: "", body: "", slash: "", tags: "", variables: [], starter: false, files: "", selection: "" };
 }
 
 export function emptyPromptPackForm(): PromptPackForm {
@@ -303,6 +326,7 @@ export function draftFromPrompt(p: ContentPrompt): PromptDraft {
     variables: (p.variables ?? []).map((v) => ({ name: v.name, label: v.label ?? "", default: v.default ?? "", options: (v.options ?? []).join("\n") })),
     starter: !!p.starter,
     files: formatFileMatch(p.files),
+    selection: (p.selection ?? []).join(", "),
   };
 }
 
@@ -357,6 +381,7 @@ export function promptPackPayload(f: PromptPackForm): Record<string, unknown> {
     const slash = d.slash.trim().toLowerCase().replace(/^\/*/, "");
     const tags = splitTags(d.tags);
     const files = parseFileMatch(d.files);
+    const selection = splitTags(d.selection);
     const variables = syncVariables(d.body, d.variables).map((v) => {
       const options = splitOptions(v.options);
       return {
@@ -375,6 +400,7 @@ export function promptPackPayload(f: PromptPackForm): Record<string, unknown> {
       ...(variables.length > 0 ? { variables } : {}),
       ...(d.starter ? { starter: true } : {}),
       ...(files ? { files } : {}),
+      ...(selection.length > 0 ? { selection } : {}),
     };
   });
   return out;

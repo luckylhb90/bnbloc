@@ -281,3 +281,19 @@ func TestPromptFilesScope(t *testing.T) {
 		}
 	}
 }
+
+// A prompt may be scoped to selection kinds, from the one vocabulary
+// (docs/prd/2026-10-14-select-edit-review.md rule 2).
+func TestPromptSelectionScope(t *testing.T) {
+	ok := []map[string]any{{"id": "rewrite", "title": "Rewrite this", "body": "Rewrite it.", "starter": true, "selection": []string{"text", "block"}}}
+	p, err := Validate(bundle(t, promptPackFiles(t, ok, nil)), "", Options{})
+	if err != nil || len(p.Manifest.Prompts[0].Selection) != 2 {
+		t.Fatalf("selection = %+v, %v", p.Manifest.Prompts, err)
+	}
+	for _, bad := range [][]string{{"galaxy"}, {"text", "text"}} {
+		prompts := []map[string]any{{"id": "x", "title": "X", "body": "x", "selection": bad}}
+		if _, err := Validate(bundle(t, promptPackFiles(t, prompts, nil)), "", Options{}); err == nil || !strings.Contains(err.Error(), "prompt x selection") {
+			t.Errorf("selection %v: got %v", bad, err)
+		}
+	}
+}
