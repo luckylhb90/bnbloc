@@ -22,6 +22,16 @@ explicit and reviewable, and prevents half-remembered scope. Fill what you know
 up front (a bug may have a repro before a root cause); update the file, don't
 delete it, as understanding and status change.
 
+**Design review before building (mandatory).** A PRD for any change that
+alters behaviour includes a "Design review" section answering every lens of
+`docs/design-review.md` (actors, time and lifecycle, scale and cost, failure
+and recovery, boundaries and privacy, abuse, one owner, defaults and
+fallbacks, external contracts, load on users and agents, release and
+compatibility, observability) plus a pre-mortem — checked against the code,
+not memory. A bug record includes "Why it was not caught" (the lens, the
+missing question or test) and adds that question to `docs/design-review.md`
+in the same change.
+
 ## Debugging discipline: no temporary patches
 
 When a defect appears, do not patch the symptom with hardcoded values, local
