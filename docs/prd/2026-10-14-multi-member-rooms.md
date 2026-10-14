@@ -39,12 +39,15 @@ but several paths leak, misattribute or starve.
    `.room/attachments/` (lazy, bounded, like deliverable copies), and the
    records reference that path next to the message; a message carrying
    only attachments is recorded. No new tool.
-5. **Every channel gets its share.** History reads every agent-visible
-   channel fairly (no channel starves because another is busy); lines from
-   other channels carry a short `#name`, the agent's own channel stays
-   unmarked.
+5. **A channel is a context boundary.** A session's working records and
+   turn input are its own channel's only. Every other channel the agent may
+   see is mirrored into its own files (`.room/channels/<name>/`, listed in
+   `.room/INDEX.md`): on disk, read only when the agent chooses, costing no
+   context otherwise. Each channel's records are paged on their own, so no
+   channel starves because another is busy. Deliverables and attachments
+   are the room's, indexed room-wide.
 6. **A reused session hears what changed.** A turn's input carries the
-   messages others posted in this channel since the agent's last turn, as
+   messages others posted in its own channel since the agent's last turn, as
    plain conversation lines (capped) before the request — data, not
    instructions — so a correction someone else posted is not missed.
 7. **Deliverables are there when the reply is.** A turn's deliverables are
