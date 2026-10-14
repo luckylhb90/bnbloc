@@ -1,6 +1,6 @@
 # File prompts and comparing any file (2026-10-14)
 
-Status: F1 implemented (2026-10-14); F2–F4 being built. Follows
+Status: F1 and F2 implemented (2026-10-14); F3 and F4 being built. Follows
 `docs/prd/2026-10-14-ai-document-editing.md` (M2 shipped `previewer.suggestions`
 and the Ask AI panel; M3 local documents) and
 `docs/prd/2026-10-14-office-previewers.md`.
@@ -87,8 +87,12 @@ Two gaps were seen on QA:
    - `view`: it renders its own comparison (images: side by side and a
      slider).
 
-   Built-in comparers: text, CSV/TSV (cells), PDF (pages, pdf.js), images.
-   The Compare button shows whenever a comparer claims the file.
+   Built-in comparers: text, CSV/TSV (cells), images. PDF pages come with
+   F3: a PDF is parsed only inside the sandboxed PDF guest frame
+   (`views/artifact/pdfFrame.ts`), never in the app's origin, so its text
+   is extracted there, through the same hidden-frame channel as a
+   previewer's units. The Compare button shows whenever a comparer claims
+   the file.
 7. **Formats come from Components: the `units` capability.** A previewer
    that declares `units` answers `preview.units.request {id, file, bytes}`
    with `preview.units {id, units}`, in a hidden sandboxed frame (same
@@ -145,8 +149,8 @@ Two gaps were seen on QA:
   starters, local open opens the panel, web stops reading
   `previewer.suggestions`.
 - **F2:** compare registry, `diffSequence`, unit view, built-in comparers
-  (text, CSV, PDF, image).
+  (text, CSV, image).
 - **F3:** `units` capability (SDK, Go vocabulary, hidden frame runner), Office
-  previewers 1.2.0 (units, no suggestions).
+  previewers 1.2.0 (units, no suggestions), PDF pages through the PDF guest.
 - **F4 (after F3 is installed everywhere):** remove `previewer.suggestions`
   from the Go schema.

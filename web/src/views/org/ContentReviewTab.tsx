@@ -14,7 +14,7 @@ import { useToast } from "@/ui/Toast";
 import { PermissionBadges } from "@/views/library/ContentViewDialog";
 import { TeamRoster } from "@/views/library/ContentFormExtras";
 import { UserName } from "@/views/UserName";
-import { VersionDiff } from "@/views/workbench/VersionDiff";
+import { LineDiff } from "@/views/workbench/VersionDiff";
 import { errorText } from "@/lib/errors";
 
 // Org-admin: content members asked to publish to the organization
@@ -359,7 +359,7 @@ function ReviewDialog({
                     <p className="px-3 pb-2 text-xs text-[var(--color-fg-subtle)]">Binary file.</p>
                   ) : (
                     <div className="max-h-72 overflow-auto border-t border-[var(--color-border)]">
-                      <VersionDiff prev={f.before ?? ""} curr={f.after ?? ""} />
+                      <LineDiff prev={f.before ?? ""} curr={f.after ?? ""} />
                     </div>
                   )}
                 </details>

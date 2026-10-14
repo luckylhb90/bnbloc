@@ -13,7 +13,7 @@ import {
   ShareNetworkIcon,
   SparkleIcon,
 } from "@phosphor-icons/react";
-import { api, type Artifact } from "@/lib/api";
+import { api } from "@/lib/api";
 import { downloadFileName, fileCategory, fileTypeLabel, isSite, isTextual, versionFacts } from "@/lib/artifactFiles";
 import { cn } from "@/lib/cn";
 import { appLinkBase } from "@/lib/config";
@@ -42,7 +42,8 @@ import {
 import { AppDataLine } from "./AppDataLine";
 import { categoryIcons } from "./fileIcons";
 import { ShareDialog } from "./ShareDialog";
-import { VersionDiff } from "./VersionDiff";
+import { CompareView } from "./CompareView";
+import { selectComparer, useComparerRegistry } from "@/views/artifact/compare/registry";
 import { FileAskPanel, useFileAsk, type FileComposerOptions } from "./FileAskPanel";
 import { fileAskRequests } from "@/lib/team";
 import { LocalSaveChip } from "./LocalSaveChip";
@@ -102,33 +103,6 @@ function useUpdatedMark(shown: number, following: boolean): number | null {
   return following ? mark : null;
 }
 
-function useVersionText(roomId: string, artifact: Artifact | null, version: number | null, detail: ArtifactDetail | null) {
-  const [text, setText] = useState<{ key: string; text: string | null }>({ key: "", text: null });
-  const meta = versionMeta(detail, version ?? 0);
-  // The bytes are identified by artifact, version and storage; the latest
-  // objects are read through a ref so a detail refetch does not reload them.
-  const key = artifact && version ? `${artifact.artifactId}:${version}:${meta?.storage ?? ""}` : "";
-  const latest = useRef({ artifact, meta });
-  latest.current = { artifact, meta };
-  useEffect(() => {
-    const { artifact: a, meta: m } = latest.current;
-    if (!key || !a || !version) return;
-    let cancelled = false;
-    loadVersionBlob(roomId, a, version, m)
-      .then((b) => b.text())
-      .then((t) => {
-        if (!cancelled) setText({ key, text: t });
-      })
-      .catch(() => {
-        if (!cancelled) setText({ key, text: "" });
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [roomId, key, version]);
-  return text.key === key ? text.text : null;
-}
-
 export function ArtifactTabView({
   roomId,
   actor,
@@ -164,6 +138,7 @@ export function ArtifactTabView({
   const toast = useToast();
   const copy = useCopy();
   useViewerRegistry();
+  useComparerRegistry();
   const { detail, error } = useArtifactDetail(roomId, artifactId);
   const nameOf = useDisplayNames((detail?.versions ?? []).map((v) => v.authorUserId ?? ""));
   const artifact = detail?.artifact ?? null;
@@ -179,6 +154,8 @@ export function ArtifactTabView({
   // A web app runs from the gateway's site routes: its archive is fetched
   // only to download or restore it.
   const runsSite = viewer?.input === "site";
+  // How two versions of this file compare (null: they cannot be).
+  const comparer = file && !runsSite ? selectComparer(file) : null;
   const { blob, error: blobError } = useVersionBlob(roomId, runsSite ? null : artifact, shown, meta);
   const site = useMemo<SiteSource>(
     () => ({
@@ -246,8 +223,6 @@ export function ArtifactTabView({
     setCompareWith(null);
   }, [artifactId]);
 
-  const baseText = useVersionText(roomId, artifact, mode === "compare" ? compareWith : null, detail);
-  const shownText = useVersionText(roomId, artifact, mode === "compare" ? shown : null, detail);
 
   if (error) {
     return <p className="p-4 text-sm text-[var(--color-fg-subtle)]">This deliverable could not be loaded. It may have been deleted, or you no longer have access.</p>;
@@ -416,7 +391,7 @@ export function ArtifactTabView({
               </option>
             ))}
           </Select>
-          {versions.length > 1 && (
+          {versions.length > 1 && comparer && (
             <button type="button" className={cn(CHIP, mode === "compare" && "bg-[var(--color-elevated)] text-[var(--color-fg)]")} onClick={startCompare} aria-pressed={mode === "compare"}>
               <GitDiffIcon size={14} /> Compare
             </button>
@@ -484,12 +459,10 @@ export function ArtifactTabView({
             </div>
           </div>
         ) : mode === "compare" ? (
-          !textual ? (
-            <p className="p-4 text-sm text-[var(--color-fg-subtle)]">Comparing versions is available for text files. Pick a version above to view it.</p>
-          ) : baseText === null || shownText === null ? (
-            <p className="p-4 text-sm text-[var(--color-fg-subtle)]">Loading versions…</p>
+          !comparer || compareWith === null ? (
+            <p className="p-4 text-sm text-[var(--color-fg-subtle)]">These versions cannot be compared. Pick a version above to view it.</p>
           ) : (
-            <VersionDiff prev={baseText} curr={shownText} />
+            <CompareView roomId={roomId} artifact={artifact} detail={detail} comparer={comparer} prevVersion={compareWith} currVersion={shown} />
           )
         ) : blobError ? (
           <p className="p-4 text-sm text-[var(--color-fg-subtle)]">Could not load this file: {blobError}</p>

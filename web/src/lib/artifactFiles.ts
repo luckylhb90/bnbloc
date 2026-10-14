@@ -8,6 +8,7 @@
 // "what extension?", "which icon/category?" — so the answers live here once.
 
 import type { Artifact, ArtifactVersion } from "./wire.gen.ts";
+import { matchSpecificity, type MatchSpec } from "./fileMatch.ts";
 
 export interface ArtifactFileFacts {
   readonly kind?: string;
@@ -252,20 +253,19 @@ export function fileCategory(facts: ArtifactFileFacts): FileCategory {
   return "file";
 }
 
-/** True when the bytes are meaningful as UTF-8 text (text viewers, the text
- *  diff, inline editing). */
+/** The files whose bytes are meaningful as UTF-8 text: the one definition,
+ *  read by isTextual and claimed by the text comparer. Inline artifacts
+ *  (no MIME type) are text by kind. */
+export const TEXTUAL_MATCH: MatchSpec = {
+  mimeTypes: ["text/*", "application/json", "application/xml", "application/yaml", "application/sql", "application/toml", "image/svg+xml"],
+  kinds: ["markdown", "code", "html", "app"],
+};
+
+/** True when the bytes are meaningful as UTF-8 text (text viewers, inline
+ *  editing; TEXTUAL_MATCH). */
 export function isTextual(facts: ArtifactFileFacts): boolean {
   const mime = inferMime(facts);
-  if (!mime) return facts.kind !== undefined && facts.kind !== "image";
-  if (mime === "image/svg+xml") return true;
-  return (
-    mime.startsWith("text/") ||
-    mime === "application/json" ||
-    mime === "application/xml" ||
-    mime === "application/yaml" ||
-    mime === "application/sql" ||
-    mime === "application/toml"
-  );
+  return matchSpecificity(TEXTUAL_MATCH, { name: "", mimeType: mime, extension: "", kind: mime ? undefined : facts.kind }) > 0;
 }
 
 /** A deliverable's type label: "Interactive app" for an app (the server's
