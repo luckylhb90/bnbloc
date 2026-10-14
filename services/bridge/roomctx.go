@@ -193,44 +193,87 @@ func (b *Bridge) roomRecordFiles(ctx context.Context, room, jobID string, self r
 
 // materializeRoomContext refreshes the .room/ tree in the given workspace and
 // returns the updated state. The tree is the workspace's, shared by every
-// channel session of the agent (docs/prd/2026-10-13-sessions-per-channel.md):
-// it holds the room's records, every line of every channel an agent may
-// read, the agent's own replies and the current message included (a filter
-// of one session would hide them from another session, whose memory does
-// not hold them; the turn answers its [now] message alone, records are
-// background). now is the current turn's message: its sender as the
-// history records it (roomlog.Sender: "jack/codex for maya" for a
-// dispatched task; "" when the fetch did not hold it) is returned for the
-// [now] marker. jobID is the turn's job, whose grant reads the requester's
-// Library. self is this agent. Files are written chunks → recent → records
-// (roomRecordFiles) → INDEX (INDEX last, so a partial write never
-// advertises files that do not exist). State is only advanced on full
-// success, so a failed pass retries cleanly next turn.
-func (b *Bridge) materializeRoomContext(ctx context.Context, w corepkg.WorkspaceFileWriter, ep corepkg.Endpoint, room, workspaceID, jobID string, msgSeq int64, now string, self roomlog.Producer, st roomlog.CtxState, g roomlog.Guidance, cp *deliverableCopier) (roomlog.CtxState, string, error) {
-	entries, complete, err := roomlog.History(ctx, b.gatewayGET, room, roomlog.HistoryQuery{After: st.EndSeq})
-	if err != nil {
-		return st, "", err
+// channel session of the agent (docs/prd/2026-10-13-sessions-per-channel.md).
+// A channel is a context boundary (docs/prd/2026-10-14-multi-member-rooms.md):
+// every channel an agent may read keeps its own records in
+// .room/channels/<id>/ (its recent.md and chunks), paged on its own, and
+// INDEX.md lists the channels; no shared file depends on the turn's channel
+// (the session guidance names it).
+// channelID is the turn's channel ("" = the room's default). seen is the
+// session's last seen sequence (0 = none): the own channel is read from
+// there, so own holds every message of it the session has not seen. now is
+// the current turn's message: its sender as the history records it is
+// returned for the [now] marker. jobID is the turn's job, whose grant reads
+// the requester's Library. self is this agent. Files are written channel
+// records → records (roomRecordFiles) → INDEX (INDEX last, so a
+// partial write never advertises files that do not exist). State is only
+// advanced on full success, so a failed pass retries cleanly next turn.
+func (b *Bridge) materializeRoomContext(ctx context.Context, w corepkg.WorkspaceFileWriter, ep corepkg.Endpoint, room, workspaceID, jobID, channelID string, seen, msgSeq int64, now string, self roomlog.Producer, st roomlog.CtxState, g roomlog.Guidance, cp *deliverableCopier) (next roomlog.CtxState, own []roomlog.Entry, from string, err error) {
+	list, _ := roomlog.AgentChannelList(ctx, b.gatewayGET, room)
+	ownCh, ok := roomlog.ChannelOf(list, channelID)
+	if !ok {
+		ownCh = list[0]
 	}
-	from := instructionSender(entries, msgSeq, now)
-	if cp != nil {
-		st = b.mirrorAttachments(ctx, room, entries, st, cp)
+	type read struct {
+		ch       roomlog.Channel
+		rec      roomlog.ChannelRecords
+		entries  []roomlog.Entry
+		complete bool
 	}
-	entries = roomlog.PointAttachments(entries, st.Attachments)
-	files, newState := roomlog.Materialize(entries, complete, st)
-	// Insert the records before the trailing INDEX.
-	records, recorded := b.roomRecordFiles(ctx, room, jobID, self, st, g, cp)
-	newState.ReadmeSum, newState.AppsListed, newState.AppSDKSum = recorded.ReadmeSum, recorded.AppsListed, recorded.AppSDKSum
-	if n := len(files); n > 0 && files[n-1].Name == ".room/INDEX.md" {
-		files = append(append(files[:n-1:n-1], records...), files[n-1])
-	} else {
-		files = append(files, records...)
-	}
-	for _, f := range files {
-		if err := w.WriteWorkspaceFile(ctx, ep, workspaceID, f.Name, f.Content); err != nil {
-			return st, "", err
+	var reads []read
+	var all []roomlog.Entry
+	for _, ch := range list {
+		rec := st.Channels[ch.ID]
+		rec.Dir, rec.Name = roomlog.ChannelDir(ch.ID), ch.Name // the name follows a rename
+		after := rec.EndSeq
+		if ch.ID == ownCh.ID && seen > 0 && seen < after {
+			after = seen
+		}
+		entries, complete, err := roomlog.History(ctx, b.gatewayGET, room, roomlog.HistoryQuery{Only: ch.ID, After: after})
+		if err != nil {
+			return st, nil, "", err
+		}
+		reads = append(reads, read{ch: ch, rec: rec, entries: entries, complete: complete})
+		all = append(all, entries...)
+		if ch.ID == ownCh.ID {
+			own = entries
 		}
 	}
-	return newState, from, nil
+	from = instructionSender(own, msgSeq, now)
+	next = st
+	if cp != nil {
+		next = b.mirrorAttachments(ctx, room, all, next, cp)
+	}
+	next.Channels = map[string]roomlog.ChannelRecords{}
+	var files []roomlog.NamedFile
+	var index []roomlog.ChannelRecords
+	for _, r := range reads {
+		entries := roomlog.PointAttachments(r.entries, next.Attachments)
+		chFiles, rec := roomlog.MaterializeChannel(entries, r.complete, r.rec)
+		files = append(files, chFiles...)
+		next.Channels[r.ch.ID] = rec
+		index = append(index, rec)
+	}
+	records, recorded := b.roomRecordFiles(ctx, room, jobID, self, st, g, cp)
+	next.ReadmeSum, next.AppsListed, next.AppSDKSum = recorded.ReadmeSum, recorded.AppsListed, recorded.AppSDKSum
+	files = append(append(files, records...), roomlog.IndexFile(index))
+	for _, f := range files {
+		if err := w.WriteWorkspaceFile(ctx, ep, workspaceID, f.Name, f.Content); err != nil {
+			return st, nil, "", err
+		}
+	}
+	return next, own, from, nil
+}
+
+// guidanceChannel is the session's own channel's records directory, as
+// its guidance names it (channelID "" = the room's default channel, as the
+// pass resolves it).
+func (b *Bridge) guidanceChannel(ctx context.Context, room, channelID string) string {
+	if channelID == "" {
+		list, _ := roomlog.AgentChannelList(ctx, b.gatewayGET, room)
+		channelID = list[0].ID
+	}
+	return roomlog.GuidanceChannel(channelID)
 }
 
 // drivePrompt builds a turn's prompt. A pull-capable core gets the pointer
@@ -252,6 +295,10 @@ func (b *Bridge) drivePrompt(ctx context.Context, d *drive, workspaceID string, 
 	// The tree is the workspace's: a session continues what the workspace
 	// holds, whichever of the agent's sessions wrote it.
 	shared := b.workspaces.shared(d.key(), workspaceID)
+	// One pass at a time per workspace: the agent's channels' turns may run
+	// at once, and each pass advances the tree's shared state.
+	shared.pass.Lock()
+	defer shared.pass.Unlock()
 	var cp *deliverableCopier
 	if d.caps.bytesWriter != nil {
 		cp = &deliverableCopier{key: d.key(), workspaceID: workspaceID, w: d.caps.bytesWriter, ep: ep, maxInput: d.caps.maxInput}
@@ -263,7 +310,11 @@ func (b *Bridge) drivePrompt(ctx context.Context, d *drive, workspaceID string, 
 			roomlog.Mirrored(&roomSt, a.ID, a.Path) // the turn's own files: never copied twice
 		}
 	}
-	newSt, from, err := b.materializeRoomContext(ctx, w, ep, room, workspaceID, d.job.JobID, d.job.MessageSeq, text, roomlog.Producer{Owner: owner, Provider: provider, Core: d.core}, roomSt, g, cp)
+	var seen int64
+	if st != nil && !fresh {
+		seen = st.PushSeenSeq
+	}
+	newSt, own, from, err := b.materializeRoomContext(ctx, w, ep, room, workspaceID, d.job.JobID, d.job.ChannelID, seen, d.job.MessageSeq, text, roomlog.Producer{Owner: owner, Provider: provider, Core: d.core}, roomSt, g, cp)
 	if err != nil {
 		slog.Warn("bnbloc bridge room-context materialization failed; falling back to pushed context",
 			"event", "bnbloc.bridge.roomctx_failed", "room", room, "core", d.core, "error", err)
@@ -273,10 +324,37 @@ func (b *Bridge) drivePrompt(ctx context.Context, d *drive, workspaceID string, 
 	if from != "" {
 		now.From = from
 	}
+	// A reused session hears what others said in its channel since its last
+	// turn, as conversation lines before the message (its own replies are
+	// in its memory; a fresh session has .room/ and its guidance).
+	var delta []roomlog.Entry
+	if st != nil {
+		delta = sinceLastTurn(own, seen, d.job.MessageSeq, text, agentSpeakerLabel(owner, provider))
+		for _, e := range own {
+			st.PushSeenSeq = max(st.PushSeenSeq, e.Seq)
+		}
+	}
 	// A session whose guidance rode its first prompt (no agentProfile) keeps
 	// one line pointing at the records: a harness may compact that prompt
 	// away.
-	return roomlog.ComposePointer(now, !d.caps.profile)
+	return roomlog.ComposeTurn(now, !d.caps.profile, delta)
+}
+
+// sinceLastTurn is what others said in the session's channel after seen
+// (0: nothing — a fresh session), without the turn's own message and the
+// agent's own replies.
+func sinceLastTurn(own []roomlog.Entry, seen, msgSeq int64, text, self string) []roomlog.Entry {
+	if seen <= 0 {
+		return nil
+	}
+	var out []roomlog.Entry
+	for _, e := range own {
+		if e.Seq > seen {
+			out = append(out, e)
+		}
+	}
+	out, _ = dropInstruction(out, msgSeq, text)
+	return dropSelf(out, self, 0)
 }
 
 // deliverableCopier is where a pass copies the room's deliverables: one
@@ -371,7 +449,14 @@ func (b *Bridge) driveTextDelta(ctx context.Context, room, owner, provider strin
 		return roomlog.ComposeDelta(nil, now, roomlog.Options{})
 	}
 	self := agentSpeakerLabel(owner, provider)
-	entries, _, err := roomlog.History(ctx, b.gatewayGET, room, roomlog.HistoryQuery{After: st.PushSeenSeq, MaxRows: b.recentRows})
+	// A channel is a context boundary: the session reads its own channel
+	// (docs/prd/2026-10-14-multi-member-rooms.md).
+	list, _ := roomlog.AgentChannelList(ctx, b.gatewayGET, room)
+	own, ok := roomlog.ChannelOf(list, channelID)
+	if !ok {
+		own = list[0]
+	}
+	entries, _, err := roomlog.History(ctx, b.gatewayGET, room, roomlog.HistoryQuery{Only: own.ID, After: st.PushSeenSeq, MaxRows: b.recentRows})
 	if err != nil {
 		slog.Debug("bnbloc bridge room-context unavailable, sending the message alone",
 			"event", "bnbloc.bridge.context_unavailable", "room", room, "error", err)
@@ -396,27 +481,18 @@ func (b *Bridge) driveTextDelta(ctx context.Context, room, owner, provider strin
 		}
 		entries = kept
 	}
-	// The turn's channel: the instruction's as the history records it (the
-	// job names the default channel ""), else the job's.
-	channel := channelID
-	if e, ok := instructionEntry(entries, msgSeq, now.Text); ok && e.ChannelID != "" {
-		channel = e.ChannelID
-	}
 	entries, from := dropInstruction(entries, msgSeq, now.Text)
 	if from != "" {
 		now.From = from
 	}
 	// The agent's own replies from THIS session are in its CLI memory: on a
-	// follow-up they are dropped as redundancy — the ones past the last push
-	// in this session's channel (a session is one channel's: its replies in
-	// the agent's other channels are not in its memory). On a fresh session
-	// the opposite holds: a rebind starts a blank CLI, so its own PRIOR
-	// replies in the window are exactly the continuity it needs and must
-	// stay.
+	// follow-up they are dropped as redundancy. On a fresh session the
+	// opposite holds: a rebind starts a blank CLI, so its own PRIOR replies
+	// in the window are exactly the continuity it needs and must stay.
 	if fresh {
 		boundary = noSelfBound
 	}
-	entries = roomlog.MarkChannels(dropSelf(entries, self, boundary, channel), channel)
+	entries = dropSelf(entries, self, boundary)
 	if fresh {
 		return roomlog.Compose(entries, now, roomlog.Options{
 			WindowChars: b.windowChars,
@@ -487,17 +563,17 @@ func dropInstruction(entries []roomlog.Entry, seq int64, text string) (kept []ro
 	return append(entries[:i], entries[i+1:]...), from
 }
 
-// dropSelf removes the agent's own replies (speaker self) newer than bound
-// in the session's channel: those were said in the current session, whose
-// CLI memory holds them.
+// dropSelf removes the agent's own replies (speaker self) newer than bound:
+// those were said in the current session, whose CLI memory holds them (the
+// entries are the session's channel's).
 // Others' lines — people and other agents — always stay.
-func dropSelf(entries []roomlog.Entry, self string, bound int64, channel string) []roomlog.Entry {
+func dropSelf(entries []roomlog.Entry, self string, bound int64) []roomlog.Entry {
 	if strings.TrimSpace(self) == "" {
 		return entries
 	}
 	kept := entries[:0]
 	for _, e := range entries {
-		if e.Speaker == self && e.Seq > bound && (channel == "" || e.ChannelID == "" || e.ChannelID == channel) {
+		if e.Speaker == self && e.Seq > bound {
 			continue
 		}
 		kept = append(kept, e)

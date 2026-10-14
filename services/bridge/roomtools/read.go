@@ -26,7 +26,7 @@ func readRoomTool() Tool {
 	return Tool{
 		Name:  "read_room",
 		Title: "Read the conversation",
-		Description: "Recent messages of the room (people's messages and agents' replies, across the room's channels), oldest first, " +
+		Description: "Recent messages of this conversation (people's messages and agents' replies), oldest first, " +
 			"one line each: \"#<seq> <author>: <text>\". Pass since (a seq from an earlier read) to get only newer messages.",
 		InputSchema: objectSchema(map[string]any{
 			"since": map[string]any{"type": "integer", "minimum": 0, "description": "Only messages after this seq."},
@@ -61,15 +61,20 @@ func readRoom(ctx context.Context, env *Env, args json.RawMessage) Result {
 		pages = 1
 	}
 	pageRows := min(in.Limit, readHistoryPageMax)
-	entries, _, err := roomlog.History(ctx, gatewayFetch(env), env.Session.Scope().RoomID, roomlog.HistoryQuery{
-		After: in.Since, PageRows: pageRows, Pages: pages, MaxRows: readHistoryPages * readHistoryPageMax,
+	// A channel is a context boundary: the agent reads the conversation it
+	// is answering in (the others' records are in .room/channels/).
+	room := env.Session.Scope().RoomID
+	list, listed := roomlog.AgentChannelList(ctx, gatewayFetch(env), room)
+	own, ok := roomlog.ChannelOf(list, env.Session.current().ChannelID)
+	if listed && !ok {
+		return toolError("the conversation you are answering in is not one you may read")
+	}
+	entries, _, err := roomlog.History(ctx, gatewayFetch(env), room, roomlog.HistoryQuery{
+		Only: own.ID, After: in.Since, PageRows: pageRows, Pages: pages, MaxRows: readHistoryPages * readHistoryPageMax,
 	})
 	if err != nil {
 		return refusal("reading the room", err)
 	}
-	// Lines of another channel than the one the agent is answering in
-	// carry its name.
-	entries = roomlog.MarkChannels(entries, env.Session.current().ChannelID)
 	var lines []roomlog.Entry
 	for _, e := range entries {
 		if e.Seq <= in.Since {

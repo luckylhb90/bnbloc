@@ -20,6 +20,8 @@ import (
 const (
 	MaxMirrorFileBytes = 8 << 20
 	MaxMirrorPassBytes = 32 << 20
+	// maxMirrorPassFiles is the most files one pass copies.
+	maxMirrorPassFiles = 20
 	// maxMirrored bounds the copies a workspace remembers.
 	maxMirrored = 2000
 )
@@ -54,7 +56,9 @@ func attachmentExt(contentType, filename string) string {
 
 // AttachmentsToMirror picks the attachments of entries a pass copies: the
 // ones the workspace does not hold yet (mirrored: id → path), newest first,
-// none over MaxMirrorFileBytes, until MaxMirrorPassBytes.
+// none over MaxMirrorFileBytes, at most maxMirrorPassFiles and
+// MaxMirrorPassBytes a pass. Every attachment is named in the records
+// whether copied or not (its id: read_artifact reads it).
 func AttachmentsToMirror(entries []Entry, mirrored map[string]string) []AttachmentRef {
 	var out []AttachmentRef
 	var budget int64 = MaxMirrorPassBytes
@@ -66,7 +70,9 @@ func AttachmentsToMirror(entries []Entry, mirrored map[string]string) []Attachme
 			}
 			seen[a.ID] = true
 			budget -= a.Size
-			out = append(out, a)
+			if out = append(out, a); len(out) >= maxMirrorPassFiles {
+				return out
+			}
 		}
 	}
 	return out

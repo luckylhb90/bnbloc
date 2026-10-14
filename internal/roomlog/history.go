@@ -102,7 +102,7 @@ func AgentChannels(ctx context.Context, fetch Fetch, room string) (channels []st
 // empty yields the default channel alone (the empty id, which realtime
 // resolves to the room's default channel — never the people chat), so a
 // degraded listing narrows the read instead of failing the turn; ok reports
-// whether the listing was read.
+// whether the listing was read and named a channel.
 func AgentChannelList(ctx context.Context, fetch Fetch, room string) (channels []Channel, ok bool) {
 	raw, err := fetch(ctx, "/v1/rooms/"+url.PathEscape(room)+"/channels")
 	if err != nil {
@@ -124,8 +124,8 @@ func AgentChannelList(ctx context.Context, fetch Fetch, room string) (channels [
 			channels = append(channels, Channel{ID: id, Name: strings.TrimSpace(c.Name)})
 		}
 	}
-	if len(channels) == 0 {
-		return []Channel{{}}, true
+	if len(channels) == 0 { // a room always has its default channel
+		return []Channel{{}}, false
 	}
 	return channels, true
 }
@@ -158,8 +158,6 @@ func ChannelOf(list []Channel, id string) (Channel, bool) {
 // was fully covered (false: the cap truncated the read, keeping the newest).
 func History(ctx context.Context, fetch Fetch, room string, q HistoryQuery) (entries []Entry, complete bool, err error) {
 	channels, listed := AgentChannelList(ctx, fetch, room)
-	defaultID := channels[0].ID // the listing names the default channel first
-	multi := len(channels) > 1
 	if q.Only != "" {
 		only, found := ChannelOf(channels, q.Only)
 		if !listed || !found {
@@ -259,12 +257,6 @@ func History(ctx context.Context, fetch Fetch, room string, q HistoryQuery) (ent
 		}
 		rows = append(rows, c.rows...)
 	}
-	names := map[string]string{}
-	if multi {
-		for _, c := range cursors {
-			names[c.ch.ID] = channelLabel(c.ch.Name, c.ch.ID)
-		}
-	}
 	// Newest first, de-duplicated (a row is one sequence), capped, then
 	// decoded in chronological order.
 	sort.Slice(rows, func(i, j int) bool { return rows[i].Sequence > rows[j].Sequence })
@@ -273,38 +265,9 @@ func History(ctx context.Context, fetch Fetch, room string, q HistoryQuery) (ent
 		rows, complete = rows[:maxRows], false
 	}
 	for i := len(rows) - 1; i >= 0; i-- {
-		for _, e := range DecodeRow(rows[i]) {
-			e.InDefault = e.ChannelID == defaultID
-			if n, ok := names[e.ChannelID]; ok {
-				e.ChannelName = n
-			}
-			entries = append(entries, e)
-		}
+		entries = append(entries, DecodeRow(rows[i])...)
 	}
-	return MarkChannels(entries, ""), complete, nil
-}
-
-// MarkChannels tags the lines said in another channel than own ("" = the
-// room's default channel) with that channel's name; a line of own stays
-// unmarked, so a reader sees only where the others were said.
-func MarkChannels(entries []Entry, own string) []Entry {
-	for i := range entries {
-		e := &entries[i]
-		mine := e.ChannelID == own || (own == "" && e.InDefault) || e.ChannelName == ""
-		e.Channel = ""
-		if !mine {
-			e.Channel = e.ChannelName
-		}
-	}
-	return entries
-}
-
-// channelLabel is how a record names a channel: its name, else its id.
-func channelLabel(name, id string) string {
-	if name = strings.TrimSpace(name); name != "" {
-		return name
-	}
-	return id
+	return entries, complete, nil
 }
 
 // DecodeRow maps one history row to the entries an agent reads: a
@@ -321,7 +284,7 @@ func DecodeRow(r Row) []Entry {
 				OwnerID  string `json:"ownerId"`
 				Provider string `json:"provider"`
 			} `json:"recipient"`
-			DispatchedBy *wire.DispatchMarker `json:"dispatchedBy"`
+			DispatchedBy *wire.DispatchMarker  `json:"dispatchedBy"`
 			Attachments  []wire.ChatAttachment `json:"attachments"`
 		}
 		if json.Unmarshal(r.Payload, &p) != nil || (strings.TrimSpace(p.Text) == "" && len(p.Attachments) == 0) {

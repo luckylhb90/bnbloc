@@ -79,16 +79,12 @@ func Sender(e Entry) string {
 
 // Line renders one record line: "maya: …", "maya → jack/codex: …" for a
 // message addressed to an agent (Entry.To), "jack/codex for maya → jill/claude:
-// …" for a task an agent dispatched on maya's behalf; "#design …" names
-// another channel than the reader's (Entry.Channel), and "[attached: …]"
-// each file the message carried.
+// …" for a task an agent dispatched on maya's behalf; "[attached: …]" each
+// file the message carried.
 func Line(e Entry) string {
 	head := Sender(e)
 	if to := strings.TrimSpace(e.To); to != "" {
 		head += " → " + to
-	}
-	if ch := strings.TrimSpace(e.Channel); ch != "" {
-		head = "#" + ch + " " + head
 	}
 	body := []string{}
 	if t := strings.TrimSpace(e.Text); t != "" {
@@ -101,7 +97,8 @@ func Line(e Entry) string {
 }
 
 // attachmentNote is how a record line shows a file its message carried:
-// where its copy is in the reader's workspace, else what it is.
+// where its copy is in the reader's workspace, else what it is and its id
+// (read_artifact reads it).
 func attachmentNote(a AttachmentRef) string {
 	name := strings.TrimSpace(a.Filename)
 	if name == "" {
@@ -116,6 +113,9 @@ func attachmentNote(a AttachmentRef) string {
 	}
 	if a.Size > 0 {
 		parts = append(parts, HumanBytes(a.Size))
+	}
+	if a.ID != "" {
+		parts = append(parts, "id "+a.ID)
 	}
 	if len(parts) == 0 {
 		return "[attached: " + name + "]"

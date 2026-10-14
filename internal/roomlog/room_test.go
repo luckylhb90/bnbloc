@@ -83,7 +83,7 @@ func TestSessionGuidanceGolden(t *testing.T) {
 	for name, g := range map[string]Guidance{
 		"guidance-tools.txt": pullTools,
 		"guidance-plain.txt": {},
-		"guidance-team.txt":  {Self: "maya/codex", HasTools: true, HasRoomFiles: true, TeamLead: true},
+		"guidance-team.txt":  {Self: "maya/codex", HasTools: true, HasRoomFiles: true, TeamLead: true, Channel: GuidanceChannel("ch_general")},
 	} {
 		golden(t, name, SessionGuidance(g))
 	}
@@ -106,9 +106,13 @@ func TestSessionGuidanceGolden(t *testing.T) {
 	}
 }
 
-// .room/README.md is the session's guidance, kept beside the records.
+// .room/README.md is the session's guidance, kept beside the records,
+// without the session's own channel: the agent's channels share the
+// workspace.
 func TestReadmeGolden(t *testing.T) {
-	f := ReadmeFile(pullTools)
+	g := pullTools
+	g.Channel = GuidanceChannel("ch_general")
+	f := ReadmeFile(g)
 	if f.Name != ".room/README.md" || !strings.HasSuffix(f.Content, SessionGuidance(pullTools)) {
 		t.Fatalf("README = %s:\n%s", f.Name, f.Content)
 	}
@@ -266,17 +270,18 @@ func TestLibraryGolden(t *testing.T) {
 	}
 }
 
-// Every .room/ history file is pinned: INDEX.md, recent.md and a chunk,
-// their record lines attributed (Line).
+// Every .room/ history file is pinned: INDEX.md, a channel's recent.md and
+// a chunk, their record lines attributed (Line).
 func TestHistoryFilesGolden(t *testing.T) {
-	files, _ := Materialize(attributedEntries, true, CtxState{})
+	files, rec := MaterializeChannel(attributedEntries, true, ChannelRecords{Dir: ChannelDir("ch_general"), Name: "general"})
 	byName := map[string]string{}
 	for _, f := range files {
 		byName[f.Name] = f.Content
 	}
-	golden(t, "recent.md", byName[".room/recent.md"])
-	golden(t, "chunk.md", byName[".room/chunk-0000000010-0000000012.md"])
-	golden(t, "INDEX.md", byName[".room/INDEX.md"])
+	golden(t, "recent.md", byName[".room/channels/ch_general/recent.md"])
+	golden(t, "chunk.md", byName[".room/channels/ch_general/chunk-0000000010-0000000012.md"])
+	design := ChannelRecords{Name: "design", Dir: ChannelDir("ch_design"), EndSeq: 9, Chunks: []string{".room/channels/ch_design/chunk-0000000001-0000000009.md"}}
+	golden(t, "INDEX.md", IndexFile([]ChannelRecords{rec, design, {Name: "quiet", Dir: ChannelDir("ch_quiet")}}).Content)
 }
 
 // The push model's prompts are pinned: a session's first (records, then the

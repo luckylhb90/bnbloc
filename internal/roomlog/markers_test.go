@@ -143,11 +143,12 @@ func TestLineAttribution(t *testing.T) {
 // Every composer and .room/ file renders lines through Line, and the [now]
 // marker names the sender.
 func TestAttributionEverywhere(t *testing.T) {
-	files, _ := Materialize(attributedEntries, true, CtxState{})
+	files, _ := MaterializeChannel(attributedEntries, true, ChannelRecords{Dir: ChannelDir("c")})
+	recent := files[0].Content
 	now := Now{From: Sender(attributedEntries[1]), Text: "go"}
 	for name, out := range map[string]string{
-		"recent.md": files[0].Content,
-		"chunk":     files[1].Content,
+		"recent.md": recent,
+		"chunk":     files[len(files)-1].Content,
 		"compose":   Compose(attributedEntries, now, Options{}),
 		"delta":     ComposeDelta(attributedEntries, now, Options{}),
 	} {

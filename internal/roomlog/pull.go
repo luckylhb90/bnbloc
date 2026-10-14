@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"unicode"
 )
 
 // Pull-based room context.
@@ -26,17 +27,16 @@ const (
 )
 
 // CtxState tracks shared-context coverage for BOTH delivery models. The
-// pull model (materialized .room/ files) uses OldestSeq/EndSeq/Chunks,
+// pull model (materialized .room/ files) uses Channels,
 // ReadmeSum and AppsListed: a workspace's, shared by the agent's channel
 // sessions (the bridge keeps it with the workspace); the push model (inline
 // prompt context) uses PushSeenSeq: a session's.
 type CtxState struct {
-	// OldestSeq is the oldest materialized sequence; 0 means full history.
-	OldestSeq int64
-	// EndSeq is the newest materialized sequence.
-	EndSeq int64
-	// Chunks lists the chunk file names, chronological.
-	Chunks []string
+	// Channels are each agent-readable channel's materialized history
+	// (.room/channels/<dir>/), keyed by channel id: a channel is a context
+	// boundary, paged on its own (no channel starves another, no cursor
+	// skips another's lines).
+	Channels map[string]ChannelRecords `json:",omitempty"`
 	// PushSeenSeq is the newest room-message seq the push model has delivered
 	// into this session's prompt (the current instruction counts: it is
 	// delivered as the [now] section). 0 means nothing pushed yet; the next
@@ -62,61 +62,73 @@ type NamedFile struct {
 	Content string
 }
 
-// Materialize builds the .room/ file set: new chunks for entries beyond
-// st.EndSeq, a fresh recent.md, and an INDEX.md describing the whole set
-// (written last by convention — the caller orders writes chunks → recent →
-// index so a partial materialization never advertises files that do not exist).
-func Materialize(entries []Entry, complete bool, st CtxState) (files []NamedFile, newState CtxState) {
-	newState = st
-	// The newest N entries always rebuild recent.md, even when nothing new
-	// arrived, so the file reflects the current fetch.
-	var recent []Entry
-	if len(entries) > recentEntries {
-		recent = entries[len(entries)-recentEntries:]
-	} else {
-		recent = entries
+// ChannelRecords is one channel's materialized history.
+type ChannelRecords struct {
+	Name string
+	// Dir is where its files live (ChannelDir).
+	Dir string
+	// OldestSeq is the oldest materialized sequence; 0 means full history.
+	OldestSeq int64
+	// EndSeq is the newest materialized sequence.
+	EndSeq int64
+	// Chunks lists the chunk file names, chronological.
+	Chunks []string
+}
+
+// channelsDir holds every channel's records.
+const channelsDir = ".room/channels/"
+
+// ChannelDir is a channel's records directory, by its id: stable when the
+// channel is renamed (INDEX.md shows the current name) and path-safe.
+func ChannelDir(id string) string {
+	var b strings.Builder
+	for _, r := range id {
+		if r < 128 && (unicode.IsLetter(r) || unicode.IsDigit(r) || r == '-' || r == '_') {
+			b.WriteRune(r)
+		}
 	}
-	if len(recent) > 0 {
+	if b.Len() == 0 {
+		return channelsDir + "default"
+	}
+	return channelsDir + b.String()
+}
+
+// MaterializeChannel builds one channel's files in rec.Dir: new chunks for
+// entries beyond rec.EndSeq and a fresh recent.md (its newest messages,
+// rebuilt every pass). Every path is the channel's own: an agent's channels
+// share one workspace and their passes may run at once.
+func MaterializeChannel(entries []Entry, complete bool, rec ChannelRecords) (files []NamedFile, next ChannelRecords) {
+	next = rec
+	tail := entries
+	if len(tail) > recentEntries {
+		tail = tail[len(tail)-recentEntries:]
+	}
+	if len(tail) > 0 {
 		var b strings.Builder
 		b.WriteString(RecordsHeader("Latest room messages"))
 		b.WriteString("\n")
-		for _, e := range recent {
+		for _, e := range tail {
 			b.WriteString(Line(e))
 		}
-		files = append(files, NamedFile{Name: ".room/recent.md", Content: b.String()})
+		files = append(files, NamedFile{Name: rec.Dir + "/recent.md", Content: b.String()})
 	}
-
-	var fresh []Entry
-	for _, e := range entries {
-		if e.Seq > st.EndSeq {
-			fresh = append(fresh, e)
-		}
-	}
-	if len(fresh) == 0 {
-		files = append(files, indexFile(newState))
-		return files, newState
-	}
-	// Pack new entries into chunks.
 	var chunk []Entry
 	size := 0
 	flush := func() {
 		if len(chunk) == 0 {
 			return
 		}
-		name := fmt.Sprintf(".room/chunk-%010d-%010d.md", chunk[0].Seq, chunk[len(chunk)-1].Seq)
-		var b strings.Builder
-		b.WriteString(RecordsHeader(fmt.Sprintf("Room history %d–%d", chunk[0].Seq, chunk[len(chunk)-1].Seq)))
-		b.WriteString("\n")
-		for _, e := range chunk {
-			b.WriteString(Line(e))
-		}
-		files = append(files, NamedFile{Name: name, Content: b.String()})
-		newState.Chunks = append(newState.Chunks, name)
-		newState.EndSeq = chunk[len(chunk)-1].Seq
-		chunk = nil
-		size = 0
+		first, last := chunk[0].Seq, chunk[len(chunk)-1].Seq
+		name := fmt.Sprintf("%s/chunk-%010d-%010d.md", rec.Dir, first, last)
+		files = append(files, NamedFile{Name: name, Content: chunkContent(chunk)})
+		next.Chunks = append(next.Chunks, name)
+		next.EndSeq = last
+		chunk, size = nil, 0
 	}
-	for _, e := range fresh {
+	for _, e := range entries {
+		if e.Seq <= rec.EndSeq {
+			continue
+		}
 		chunk = append(chunk, e)
 		size += len(e.Text) + len(e.Speaker) + 2
 		if len(chunk) >= chunkMaxEntries || size >= chunkMaxBytes {
@@ -124,29 +136,63 @@ func Materialize(entries []Entry, complete bool, st CtxState) (files []NamedFile
 		}
 	}
 	flush()
-	if newState.OldestSeq == 0 && !complete && len(entries) > 0 {
-		// The fetch hit its row cap: the room's beginning was not reached.
-		newState.OldestSeq = entries[0].Seq
+	if next.OldestSeq == 0 && !complete && len(entries) > 0 && rec.EndSeq == 0 {
+		// The fetch hit its row cap: the channel's beginning was not reached.
+		next.OldestSeq = entries[0].Seq
 	}
-	files = append(files, indexFile(newState))
-	return files, newState
+	return files, next
 }
 
-// indexFile describes the materialized set so the agent can navigate it.
-func indexFile(st CtxState) NamedFile {
+// chunkContent renders one chunk of history.
+func chunkContent(chunk []Entry) string {
 	var b strings.Builder
-	b.WriteString(RecordsHeader("Shared room history index"))
+	b.WriteString(RecordsHeader(fmt.Sprintf("Room history %d–%d", chunk[0].Seq, chunk[len(chunk)-1].Seq)))
 	b.WriteString("\n")
-	coverage := "from the beginning"
-	if st.OldestSeq > 0 {
-		coverage = "from seq " + strconv.FormatInt(st.OldestSeq, 10)
+	for _, e := range chunk {
+		b.WriteString(Line(e))
 	}
-	fmt.Fprintf(&b, "Coverage: %s through seq %d, %d chunks.\n", coverage, st.EndSeq, len(st.Chunks))
-	b.WriteString("Chunks are chronological; filenames carry their seq ranges (chunk-<start>-<end>.md).\n")
-	b.WriteString("The latest messages are in recent.md. Room deliverables: artifacts.md. The Library: library.md. Live deliverables: live.md.\n")
+	return b.String()
+}
+
+// GuidanceChannel is how the session guidance names a channel's records
+// (Guidance.Channel): its directory under .room/.
+func GuidanceChannel(id string) string {
+	return strings.TrimPrefix(ChannelDir(id), ".room/") + "/"
+}
+
+// IndexFile describes the records so the agent can navigate them: the
+// room's channels, one line each, whichever session's pass writes it (an
+// agent's channels share the workspace; the session guidance names its
+// own). Written last: it never names files that do not exist.
+func IndexFile(channels []ChannelRecords) NamedFile {
+	var b strings.Builder
+	b.WriteString(RecordsHeader("Room records index"))
+	b.WriteString("\n")
+	b.WriteString("Channels (each directory: recent.md, its latest messages, and chronological chunks, chunk-<start>-<end>.md by seq):\n")
+	for _, c := range channels {
+		b.WriteString("- " + indexLine(c) + "\n")
+	}
+	b.WriteString("Room deliverables: artifacts.md. The Library: library.md. Live deliverables: live.md.\n")
 	b.WriteString("Interactive apps and how much data each holds: apps.md, once the room has one.\n")
 	b.WriteString("How this room works (every agent has its own workspace): README.md.\n")
 	return NamedFile{Name: ".room/INDEX.md", Content: b.String()}
+}
+
+func indexLine(rec ChannelRecords) string {
+	name := strings.TrimSpace(rec.Name)
+	if name == "" {
+		name = "the room's channel"
+	} else {
+		name = "#" + name
+	}
+	if rec.EndSeq == 0 {
+		return name + " (no messages yet)"
+	}
+	coverage := "from the beginning"
+	if rec.OldestSeq > 0 {
+		coverage = "from seq " + strconv.FormatInt(rec.OldestSeq, 10)
+	}
+	return fmt.Sprintf("%s — %s/ (%s through seq %d, %d chunks)", name, strings.TrimPrefix(rec.Dir, ".room/"), coverage, rec.EndSeq, len(rec.Chunks))
 }
 
 // ComposePointer is the pull-model prompt of every turn: the current
@@ -160,10 +206,19 @@ func indexFile(st CtxState) NamedFile {
 // testdata/golden/pointer*.txt pin it and TestPromptBudgets bounds it: it
 // rides every turn.
 func ComposePointer(now Now, recordsHint bool) string {
+	return ComposeTurn(now, recordsHint, nil)
+}
+
+// ComposeTurn is the pull-model prompt of a reused session's turn: the
+// pointer prompt, with what others said in the session's channel since its
+// last turn (delta) as conversation lines before the message — bounded
+// (writeDelta), the rest in the channel's recent.md.
+func ComposeTurn(now Now, recordsHint bool, delta []Entry) string {
 	var b strings.Builder
 	if recordsHint {
 		b.WriteString("(room records: .room/INDEX.md)\n")
 	}
+	writeDelta(&b, delta, 0)
 	writeNow(&b, now)
 	return b.String()
 }
@@ -176,43 +231,72 @@ func ComposePointer(now Now, recordsHint bool) string {
 // (its sender and attachments): a follow-up with nothing new needs no
 // framing at all.
 func ComposeDelta(entries []Entry, now Now, opts Options) string {
+	var b strings.Builder
+	writeDelta(&b, entries, opts.WindowChars)
+	writeNow(&b, now)
+	return b.String()
+}
+
+// Turn-input delta bounds: the most lines, characters and characters of
+// one line the messages since the session's last turn bring into a turn's
+// input; the rest stay in the channel's recent.md.
+const (
+	maxDeltaLines     = 20
+	maxDeltaChars     = 4000
+	maxDeltaLineBytes = 500
+)
+
+// writeDelta renders the messages since the session's last turn under the
+// records header: the newest within maxDeltaLines and windowChars (0 or
+// more than maxDeltaChars = maxDeltaChars), each line cut to
+// maxDeltaLineBytes; nothing when there are none.
+func writeDelta(b *strings.Builder, entries []Entry, windowChars int) {
 	if len(entries) == 0 {
-		var b strings.Builder
-		writeNow(&b, now)
-		return b.String()
+		return
 	}
-	// Bound the verbatim delta by the window budget, newest kept first.
+	if windowChars <= 0 || windowChars > maxDeltaChars {
+		windowChars = maxDeltaChars
+	}
+	cut := make([]Entry, len(entries))
+	for i, e := range entries {
+		e.Text = Truncate(strings.TrimSpace(e.Text), maxDeltaLineBytes)
+		cut[i] = e
+	}
+	entries = cut
 	kept := entries
 	omitted := 0
-	if opts.WindowChars > 0 {
+	if len(kept) > maxDeltaLines {
+		omitted = len(kept) - maxDeltaLines
+		kept = kept[omitted:]
+		entries = kept
+	}
+	if windowChars > 0 {
 		cost := 0
 		cut := 0
 		for i := len(entries) - 1; i >= 0; i-- {
 			cost += entryCost(entries[i])
-			if cost > opts.WindowChars {
+			if cost > windowChars {
 				cut = i + 1
 				break
 			}
 		}
 		if cut > 0 {
 			kept = entries[cut:]
-			omitted = cut
+			dropped := cut
 			if len(kept) == 0 { // never drop the newest line entirely
 				kept = entries[len(entries)-1:]
-				omitted = len(entries) - 1
+				dropped = len(entries) - 1
 			}
+			omitted += dropped
 		}
 	}
-	var b strings.Builder
 	b.WriteString(RecordsHeader("New room messages since your last turn"))
 	if omitted > 0 {
-		fmt.Fprintf(&b, "(%d older new messages omitted)\n", omitted)
+		fmt.Fprintf(b, "(%d older new messages omitted)\n", omitted)
 	}
 	for _, e := range kept {
 		b.WriteString(Line(e))
 	}
-	writeNow(&b, now)
-	return b.String()
 }
 
 // AgentSpeaker renders an agent's speaker label as "owner/provider", or just

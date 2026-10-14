@@ -38,6 +38,10 @@ type Guidance struct {
 	// HasRoomFiles: bnbloc writes the room's records into the session's
 	// workspace (.room/, the pull model).
 	HasRoomFiles bool
+	// Channel is the session's own channel's records directory under .room/
+	// (GuidanceChannel); empty in the workspace's README, which the agent's
+	// channels share.
+	Channel string
 	// TeamLead: the session wears a team expert (its default rule for
 	// leading; the team's SOP may override it).
 	TeamLead bool
@@ -72,6 +76,7 @@ func SessionGuidance(g Guidance) string {
 // ReadmeFile is .room/README.md: the session's guidance, kept in the
 // workspace beside the records it describes.
 func ReadmeFile(g Guidance) NamedFile {
+	g.Channel = ""
 	return NamedFile{Name: ".room/README.md", Content: "# How this room works (read before judging anyone's work)\n\n" + SessionGuidance(g)}
 }
 

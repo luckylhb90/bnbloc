@@ -54,7 +54,7 @@ func newPullGateway(t *testing.T) *pullGateway {
 		attachments: map[string]testAttachment{}, downloads: map[string]int{}}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /v1/rooms/r1/channels", func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprint(w, `{"channels":[{"channelId":"general"},{"channelId":"test"}]}`)
+		fmt.Fprint(w, `{"channels":[{"channelId":"general","name":"general"},{"channelId":"test","name":"test"}]}`)
 	})
 	mux.HandleFunc("GET /v1/rooms/r1/history", func(w http.ResponseWriter, r *http.Request) {
 		g.mu.Lock()
@@ -255,9 +255,9 @@ func TestDriveClaimPullWritesRoomFilesAndPointerPrompt(t *testing.T) {
 	var sawChunk, sawRecent bool
 	for _, w := range writes {
 		switch {
-		case strings.HasPrefix(w, ".room/chunk-"):
+		case strings.HasPrefix(w, ".room/channels/") && strings.Contains(w, "/chunk-"):
 			sawChunk = true
-		case w == ".room/recent.md":
+		case strings.HasPrefix(w, ".room/channels/") && strings.HasSuffix(w, "/recent.md"):
 			sawRecent = true
 		}
 	}
@@ -470,13 +470,14 @@ func TestDriveClaimPullFallsBackOnWriterFailure(t *testing.T) {
 }
 
 // The .room/ tree is the workspace's, shared by every channel session of
-// the agent (docs/prd/2026-10-13-sessions-per-channel.md): it keeps every
-// line of every channel an agent may read, the agent's own replies and the
-// current message included (a filter of one session would hide them from
-// another session, whose memory does not hold them), and a pass continues
-// what the workspace holds. The current message's sender is returned for
+// the agent, and a channel is a context boundary
+// (docs/prd/2026-10-14-multi-member-rooms.md): every channel keeps its own
+// records in .room/channels/<id>/, the agent's own replies and the current
+// message included; no shared file depends on the turn's channel: INDEX.md
+// lists every channel. A pass continues what the workspace holds, each
+// channel paged on its own. The current message's sender is returned for
 // the [now] marker.
-func TestMaterializeKeepsEveryLineInTheSharedTree(t *testing.T) {
+func TestMaterializeKeepsEveryChannelApart(t *testing.T) {
 	g := newPullGateway(t)
 	g.setHistory("general", []int64{10}, map[int64]string{10: "person asks"})
 	g.addAgentRow("general", 11, "maya", "agent-a", "my reply in general")
@@ -494,38 +495,47 @@ func TestMaterializeKeepsEveryLineInTheSharedTree(t *testing.T) {
 	if !ok {
 		t.Fatal("fake provider must satisfy WorkspaceFileWriter")
 	}
-	recentOf := func() string {
-		var recent string
+	fileOf := func(name string) string {
+		var out string
 		for _, wr := range prov.roomFileWrites() {
-			if strings.HasSuffix(wr.path, "recent.md") {
-				recent = wr.content
+			if wr.path == name {
+				out = wr.content
 			}
 		}
-		return recent
+		return out
 	}
 	self := roomlog.Producer{Owner: "maya", Provider: "agent-a"}
-	st, from, err := b.materializeRoomContext(context.Background(), w, ep, "r1", "ws", "job-x", 0, "create final_check.rs: print done", self, roomlog.CtxState{}, roomlog.Guidance{HasRoomFiles: true}, nil)
+	st, own, from, err := b.materializeRoomContext(context.Background(), w, ep, "r1", "ws", "job-x", "test", 0, 13, "create final_check.rs: print done", self, roomlog.CtxState{}, roomlog.Guidance{HasRoomFiles: true}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if from != "jack" {
-		t.Fatalf("instruction sender = %q, want jack", from)
+	if from != "jack" || len(own) != 2 {
+		t.Fatalf("instruction sender = %q, own = %+v", from, own)
 	}
-	recent := recentOf()
-	for _, want := range []string{"person asks", "my reply in general", "peer agent answers", "final_check"} {
-		if !strings.Contains(recent, want) {
-			t.Errorf("the shared records lack %q:\n%s", want, recent)
-		}
+	recent := fileOf(".room/channels/test/recent.md")
+	if !strings.Contains(recent, "peer agent answers") || !strings.Contains(recent, "final_check") || strings.Contains(recent, "person asks") {
+		t.Errorf("a channel's recent.md must be that channel's only:\n%s", recent)
+	}
+	general := fileOf(".room/channels/general/recent.md")
+	if !strings.Contains(general, "person asks") || !strings.Contains(general, "my reply in general") {
+		t.Errorf("the other channel's records are in its own folder:\n%s", general)
+	}
+	if fileOf(".room/recent.md") != "" {
+		t.Error("no shared file may hold one channel's messages: the agent's channels share the workspace")
+	}
+	if idx := fileOf(".room/INDEX.md"); !strings.Contains(idx, "- #general — channels/general/") || !strings.Contains(idx, "- #test — channels/test/") {
+		t.Errorf("INDEX.md does not list the channels:\n%s", idx)
 	}
 
 	// The next pass (another channel's session) continues the workspace's
-	// state: only what is new is fetched into a new chunk.
+	// state: only what is new is fetched into a new chunk of its channel.
 	g.addAgentRow("general", 14, "maya", "agent-a", "my next reply")
-	st2, _, err := b.materializeRoomContext(context.Background(), w, ep, "r1", "ws", "job-y", 0, "", self, st, roomlog.Guidance{HasRoomFiles: true}, nil)
+	st2, _, _, err := b.materializeRoomContext(context.Background(), w, ep, "r1", "ws", "job-y", "general", 0, 0, "", self, st, roomlog.Guidance{HasRoomFiles: true}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if st2.EndSeq != 14 || len(st2.Chunks) != len(st.Chunks)+1 || !strings.Contains(recentOf(), "my next reply") {
+	gen, gen2 := st.Channels["general"], st2.Channels["general"]
+	if gen2.EndSeq != 14 || len(gen2.Chunks) != len(gen.Chunks)+1 || st2.Channels["test"].EndSeq != 13 || !strings.Contains(fileOf(".room/channels/general/recent.md"), "my next reply") {
 		t.Fatalf("continued pass: state %+v after %+v", st2, st)
 	}
 }
@@ -537,22 +547,23 @@ func TestMaterializeKeepsEveryLineInTheSharedTree(t *testing.T) {
 // the records (it is the [now] section).
 func TestDriveTextDeltaFreshWindow(t *testing.T) {
 	g := newPullGateway(t)
-	// general: a person's line, then SELF's reply. test: the current
-	// instruction (chat), then a peer agent's reply.
+	// general (the turn's channel): a person's line, SELF's reply, the
+	// current instruction. test: a peer agent's reply — another channel,
+	// another conversation.
 	g.setHistory("general", []int64{10}, map[int64]string{10: "person asks"})
 	g.addAgentRow("general", 11, "maya", "agent-a", "my own earlier reply")
-	g.setHistory("test", []int64{12}, map[int64]string{12: "do the thing"})
+	g.addChatRow("general", 12, "jack", "do the thing")
 	g.addAgentRow("test", 13, "maya", "opencode", "peer agent answers")
 	b := New(Config{GatewayBaseURL: g.srv.URL, GatewayToken: "t", OwnerSubject: "maya"})
 
 	st := roomlog.CtxState{}
-	prompt := b.driveTextDelta(context.Background(), "r1", "maya", "agent-a", 0, "", roomlog.Now{From: "maya", Text: "do the thing"}, &st, true)
+	prompt := b.driveTextDelta(context.Background(), "r1", "maya", "agent-a", 12, "", roomlog.Now{From: "maya", Text: "do the thing"}, &st, true)
 
 	if !strings.Contains(prompt, "person asks") {
-		t.Fatalf("person's message (general channel) must inject:\n%s", prompt)
+		t.Fatalf("the channel's earlier message must inject:\n%s", prompt)
 	}
-	if !strings.Contains(prompt, "peer agent answers") {
-		t.Fatalf("peer agent's reply (test channel) must inject — push must read ALL channels:\n%s", prompt)
+	if strings.Contains(prompt, "peer agent answers") {
+		t.Fatalf("a channel is a context boundary: another channel's reply must not inject:\n%s", prompt)
 	}
 	// A FRESH session keeps its own prior replies: a rebind starts a blank
 	// CLI, so they are continuity, not redundancy.
@@ -565,8 +576,8 @@ func TestDriveTextDeltaFreshWindow(t *testing.T) {
 	if !strings.Contains(prompt, "[now — from jack]\ndo the thing") {
 		t.Fatalf("instruction must directly follow the now marker:\n%s", prompt)
 	}
-	if st.PushSeenSeq != 13 {
-		t.Fatalf("PushSeenSeq = %d, want 13 (newest fetched row, filtered rows included)", st.PushSeenSeq)
+	if st.PushSeenSeq != 12 {
+		t.Fatalf("PushSeenSeq = %d, want 12 (the channel's newest fetched row)", st.PushSeenSeq)
 	}
 }
 
@@ -574,20 +585,20 @@ func TestDriveTextDeltaFollowUpOnlyDelta(t *testing.T) {
 	g := newPullGateway(t)
 	g.setHistory("general", []int64{10}, map[int64]string{10: "person asks"})
 	g.addAgentRow("general", 11, "maya", "agent-a", "my own earlier reply")
-	g.setHistory("test", []int64{12}, map[int64]string{12: "do the thing"})
-	g.addAgentRow("test", 13, "maya", "opencode", "peer agent answers")
+	g.addChatRow("general", 12, "jack", "do the thing")
 	b := New(Config{GatewayBaseURL: g.srv.URL, GatewayToken: "t", OwnerSubject: "maya"})
 
 	st := roomlog.CtxState{}
-	first := b.driveTextDelta(context.Background(), "r1", "maya", "agent-a", 0, "", roomlog.Now{From: "maya", Text: "do the thing"}, &st, true)
-	_ = first
+	_ = b.driveTextDelta(context.Background(), "r1", "maya", "agent-a", 12, "", roomlog.Now{From: "maya", Text: "do the thing"}, &st, true)
 
-	// New activity since the last push: a person question, a peer reply, and
-	// THIS session's own reply (posted as the first turn drained).
-	g.setHistory("general", []int64{20}, map[int64]string{20: "new question"})
-	g.addAgentRow("test", 21, "maya", "opencode", "peer follow-up")
+	// New activity since the last push: a person question, a peer reply in
+	// this channel, THIS session's own reply, and another channel's line.
+	g.addChatRow("general", 20, "jack", "new question")
+	g.addAgentRow("general", 21, "maya", "opencode", "peer follow-up")
 	g.addAgentRow("general", 22, "maya", "agent-a", "my own this-session reply")
-	second := b.driveTextDelta(context.Background(), "r1", "maya", "agent-a", 0, "", roomlog.Now{From: "maya", Text: "next instruction"}, &st, false)
+	g.addAgentRow("test", 23, "maya", "opencode", "elsewhere")
+	g.addChatRow("general", 24, "jack", "next instruction")
+	second := b.driveTextDelta(context.Background(), "r1", "maya", "agent-a", 24, "", roomlog.Now{From: "maya", Text: "next instruction"}, &st, false)
 
 	if !strings.Contains(second, "New room messages since your last turn") {
 		t.Fatalf("follow-up must be framed as a delta:\n%s", second)
@@ -595,14 +606,14 @@ func TestDriveTextDeltaFollowUpOnlyDelta(t *testing.T) {
 	if !strings.Contains(second, "new question") || !strings.Contains(second, "peer follow-up") {
 		t.Fatalf("delta must carry the new messages:\n%s", second)
 	}
-	if strings.Contains(second, "my own this-session reply") {
-		t.Fatalf("this session's own reply is session memory; the delta must drop it:\n%s", second)
+	if strings.Contains(second, "my own this-session reply") || strings.Contains(second, "elsewhere") {
+		t.Fatalf("the delta must drop the session's own reply and other channels:\n%s", second)
 	}
 	if strings.Contains(second, "person asks") {
-		t.Fatalf("already-seen messages must not re-inject — that repetition is the push model's old cost:\n%s", second)
+		t.Fatalf("already-seen messages must not re-inject:\n%s", second)
 	}
-	if st.PushSeenSeq != 22 {
-		t.Fatalf("PushSeenSeq = %d, want 22 (self replies count as seen — the session authored them)", st.PushSeenSeq)
+	if st.PushSeenSeq != 24 {
+		t.Fatalf("PushSeenSeq = %d, want 24", st.PushSeenSeq)
 	}
 
 	// Nothing new: the instruction alone, under the marker naming its
@@ -628,26 +639,6 @@ func TestNowSenderIsTheJobsMessage(t *testing.T) {
 	}
 	if !strings.Contains(prompt, "maya: continue") {
 		t.Fatalf("maya's identical message is history, not the instruction:\n%s", prompt)
-	}
-}
-
-// A follow-up drops the agent's own replies of THIS session's channel only:
-// what it said in another channel is not in this session's memory.
-func TestDropSelfKeepsOtherChannelsReplies(t *testing.T) {
-	g := newPullGateway(t)
-	g.addChatRow("general", 10, "jack", "first ask")
-	b := New(Config{GatewayBaseURL: g.srv.URL, GatewayToken: "t", OwnerSubject: "jack"})
-	st := roomlog.CtxState{}
-	_ = b.driveTextDelta(context.Background(), "r1", "jack", "agent-a", 10, "general", roomlog.Now{From: "jack", Text: "first ask"}, &st, true)
-	g.addAgentRow("general", 11, "jack", "agent-a", "my general reply")
-	g.addAgentRow("test", 12, "jack", "agent-a", "my test reply")
-	g.addChatRow("general", 13, "jack", "second ask")
-	prompt := b.driveTextDelta(context.Background(), "r1", "jack", "agent-a", 13, "general", roomlog.Now{From: "jack", Text: "second ask"}, &st, false)
-	if strings.Contains(prompt, "my general reply") {
-		t.Fatalf("this channel's own reply is session memory:\n%s", prompt)
-	}
-	if !strings.Contains(prompt, "my test reply") {
-		t.Fatalf("the reply in another channel is not in this session's memory and must stay:\n%s", prompt)
 	}
 }
 
@@ -677,7 +668,7 @@ func TestPassMirrorsTheRoomsAttachments(t *testing.T) {
 	sink := &bytesSink{files: map[string][]byte{}}
 	cp := &deliverableCopier{workspaceID: "ws", w: sink, ep: ep}
 	self := roomlog.Producer{Owner: "maya", Provider: "agent-a"}
-	st, _, err := b.materializeRoomContext(context.Background(), w, ep, "r1", "ws", "job-x", 0, "", self, roomlog.CtxState{}, roomlog.Guidance{HasRoomFiles: true}, cp)
+	st, _, _, err := b.materializeRoomContext(context.Background(), w, ep, "r1", "ws", "job-x", "test", 0, 0, "", self, roomlog.CtxState{}, roomlog.Guidance{HasRoomFiles: true}, cp)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -686,14 +677,14 @@ func TestPassMirrorsTheRoomsAttachments(t *testing.T) {
 	}
 	var recent string
 	for _, wr := range prov.roomFileWrites() {
-		if strings.HasSuffix(wr.path, "recent.md") {
+		if wr.path == ".room/channels/test/recent.md" {
 			recent = wr.content
 		}
 	}
 	if !strings.Contains(recent, "jack: the brief [attached: brief.md → .room/attachments/att_9.md]") {
 		t.Fatalf("recent.md does not point at the copy:\n%s", recent)
 	}
-	if _, _, err := b.materializeRoomContext(context.Background(), w, ep, "r1", "ws", "job-y", 0, "", self, st, roomlog.Guidance{HasRoomFiles: true}, cp); err != nil {
+	if _, _, _, err := b.materializeRoomContext(context.Background(), w, ep, "r1", "ws", "job-y", "test", 0, 0, "", self, st, roomlog.Guidance{HasRoomFiles: true}, cp); err != nil {
 		t.Fatal(err)
 	}
 	g.mu.Lock()

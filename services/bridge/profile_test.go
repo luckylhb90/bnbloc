@@ -19,8 +19,15 @@ func cutGuidance(text string) (facts roomlog.Guidance, rest string, ok bool) {
 	if m := guidanceSelf.FindStringSubmatch(text); m != nil {
 		self = m[1]
 	}
+	channel := ""
+	if m := guidanceChannel.FindStringSubmatch(text); m != nil {
+		channel = m[1]
+	}
 	for _, g := range []roomlog.Guidance{{HasTools: true, HasRoomFiles: true}, {HasTools: true}, {HasRoomFiles: true}, {}} {
 		g.Self = self
+		if g.HasRoomFiles {
+			g.Channel = channel
+		}
 		if rest, ok := strings.CutPrefix(text, strings.TrimRight(roomlog.SessionGuidance(g), "\n")); ok {
 			return g, rest, true
 		}
@@ -30,6 +37,10 @@ func cutGuidance(text string) (facts roomlog.Guidance, rest string, ok bool) {
 
 // guidanceSelf reads the agent a session's guidance names.
 var guidanceSelf = regexp.MustCompile(`^\[How this bnbloc room works\]\nYou are the agent "([^"]*)"`)
+
+// guidanceChannel reads the own channel's records a session's guidance
+// names.
+var guidanceChannel = regexp.MustCompile(`this conversation's: (channels/[^/\s]*/)\.`)
 
 // profileContent is a session profile's instructions after the guidance
 // every profile opens with (sessionGuidance); it fails when the guidance is
@@ -172,7 +183,7 @@ func TestSessionContributorReachesProfileCore(t *testing.T) {
 	// The room tools' usage is session guidance (HasTools), worded by
 	// roomlog alone: the contributor adds none of its own.
 	if facts, _, _ := cutGuidance(p.Instructions); len(p.MCPServers) != 1 || p.MCPServers[0].Name != "room" || profileContent(t, p) != "" ||
-		facts != (roomlog.Guidance{Self: "maya/agent-a", HasTools: true, HasRoomFiles: true}) {
+		facts != (roomlog.Guidance{Self: "maya/agent-a", HasTools: true, HasRoomFiles: true, Channel: roomlog.GuidanceChannel("ch")}) {
 		t.Fatalf("profile = %+v", p)
 	}
 	mu.Lock()

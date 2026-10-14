@@ -55,6 +55,8 @@ type workspaceShared struct {
 	mu    sync.Mutex
 	room  roomlog.CtxState
 	fence string
+	// pass serializes the .room/ passes (drivePrompt).
+	pass sync.Mutex
 
 	publishMu sync.Mutex
 	// published is the workspace's file listing as of the previous

@@ -484,8 +484,9 @@ func TestAskAgentRefusals(t *testing.T) {
 	}
 }
 
-// read_room reads every channel an agent may read (decision O1: the room's
-// listing, never the people chat) and renders people, agents and dispatch
+// read_room reads the conversation the agent answers in — its channel, a
+// context boundary (docs/prd/2026-10-14-multi-member-rooms.md), never
+// another channel nor the people chat — and renders people, agents and dispatch
 // attribution as record lines (roomlog.Line), fenced as what others wrote.
 func TestReadRoom(t *testing.T) {
 	f := newAskFixture(0)
@@ -505,8 +506,15 @@ func TestReadRoom(t *testing.T) {
 			}
 		}
 	}
-	if !read["ch_general"] || !read["ch_design"] || read["ch_people"] {
-		t.Fatalf("channels read = %v; want every listed channel and never the people chat", read)
+	if !read["ch_general"] || read["ch_design"] || read["ch_people"] {
+		t.Fatalf("channels read = %v; want the turn's channel only", read)
+	}
+	// A turn in a channel the room does not list for agents (the people
+	// chat) reads nothing.
+	sess.Bind(Job{JobID: "job_parent", ChannelID: "ch_people"})
+	r = post(t, srv, token, rpc(2, "tools/call", map[string]any{"name": "read_room", "arguments": map[string]any{}}), nil)
+	if text, isErr := toolText(t, r); !isErr || !strings.Contains(text, "not one you may read") {
+		t.Fatalf("read_room in the people chat = %s", text)
 	}
 }
 

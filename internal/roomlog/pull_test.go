@@ -173,49 +173,63 @@ func TestMaterializeChunksAndDeltas(t *testing.T) {
 	for i := 1; i <= 250; i++ {
 		entries = append(entries, Entry{Seq: int64(i), Speaker: "jack", Kind: KindHuman, Text: fmt.Sprintf("message %d", i)})
 	}
-	files, st := Materialize(entries, true, CtxState{})
-	chunks := 0
-	recentIdx, indexIdx := -1, -1
-	for i, f := range files {
-		switch {
-		case strings.HasPrefix(f.Name, ".room/chunk-"):
+	rec := ChannelRecords{Dir: ChannelDir("ch_general"), Name: "general"}
+	files, st := MaterializeChannel(entries, true, rec)
+	chunks, recent := 0, ""
+	for _, f := range files {
+		if f.Name == ".room/channels/ch_general/recent.md" {
+			recent = f.Content
+		}
+		if strings.HasPrefix(f.Name, ".room/channels/ch_general/chunk-") {
 			chunks++
-		case f.Name == ".room/recent.md":
-			recentIdx = i
-		case f.Name == ".room/INDEX.md":
-			indexIdx = i
 		}
 	}
 	if chunks != 2 { // 200-entry cap per chunk
-		t.Fatalf("chunks = %d, want 2", chunks)
+		t.Fatalf("chunks = %d, want 2 (%v)", chunks, files)
 	}
 	if st.EndSeq != 250 || len(st.Chunks) != 2 || st.OldestSeq != 0 {
 		t.Fatalf("state = %+v", st)
 	}
-	if indexIdx != len(files)-1 {
-		t.Fatal("INDEX must be the last file so a partial write never advertises missing chunks")
-	}
-	if recentIdx == -1 {
-		t.Fatal("recent.md missing")
-	}
-	if !strings.Contains(files[recentIdx].Content, "message 250") || strings.Contains(files[recentIdx].Content, "message 100") {
+	if !strings.Contains(recent, "message 250") || strings.Contains(recent, "message 100") {
 		t.Fatal("recent.md must carry the newest entries only")
 	}
 
 	// Delta pass: 10 new entries, only one new chunk file.
 	newEntries := append(append([]Entry{}, entries[240:]...), Entry{Seq: 251, Speaker: "maya", Kind: KindHuman, Text: "new 251"})
-	files2, st2 := Materialize(newEntries, true, st)
+	files2, st2 := MaterializeChannel(newEntries, true, st)
 	newChunks := 0
 	for _, f := range files2 {
-		if strings.HasPrefix(f.Name, ".room/chunk-") {
+		if strings.Contains(f.Name, "/chunk-") {
 			newChunks++
 		}
 	}
 	if newChunks != 1 || st2.EndSeq != 251 || len(st2.Chunks) != 3 {
 		t.Fatalf("delta materialize: newChunks=%d state=%+v", newChunks, st2)
 	}
-	if !strings.Contains(files2[len(files2)-1].Content, "through seq 251") {
-		t.Fatal("index must reflect the new end")
+	idx := IndexFile([]ChannelRecords{st2, {Name: "design", Dir: ChannelDir("ch_design"), EndSeq: 9, Chunks: []string{"x"}}})
+	for _, want := range []string{"- #general — channels/ch_general/ (from the beginning through seq 251, 3 chunks)", "- #design — channels/ch_design/"} {
+		if !strings.Contains(idx.Content, want) {
+			t.Fatalf("INDEX.md lacks %q:\n%s", want, idx.Content)
+		}
+	}
+}
+
+// A turn's delta is bounded: at most maxDeltaLines lines, each cut, within
+// maxDeltaChars; the rest are counted as omitted.
+func TestComposeTurnBoundsTheDelta(t *testing.T) {
+	var delta []Entry
+	for i := 1; i <= 30; i++ {
+		delta = append(delta, Entry{Seq: int64(i), Speaker: "maya", Text: strings.Repeat("x", 1000)})
+	}
+	out := ComposeTurn(Now{From: "jack", Text: "go"}, false, delta)
+	if n := strings.Count(out, "maya: "); n == 0 || n > maxDeltaLines {
+		t.Fatalf("delta lines = %d", n)
+	}
+	if len(out) > maxDeltaChars+1000 || !strings.Contains(out, "older new messages omitted") || !strings.HasSuffix(out, "[now — from jack]\ngo") {
+		t.Fatalf("delta not bounded (%d bytes):\n%s", len(out), out)
+	}
+	if ComposeTurn(Now{From: "jack", Text: "go"}, false, nil) != ComposePointer(Now{From: "jack", Text: "go"}, false) {
+		t.Fatal("an empty delta must be the pointer prompt")
 	}
 }
 
@@ -418,8 +432,8 @@ func TestHistorySharesTheCapAcrossChannels(t *testing.T) {
 		switch e.ChannelID {
 		case "quiet":
 			quiet++
-			if Line(e) != "#n-quiet maya: quiet-501\n" {
-				t.Fatalf("line = %q, want the other channel's tag", Line(e))
+			if Line(e) != "maya: quiet-501\n" {
+				t.Fatalf("line = %q, want no channel tag", Line(e))
 			}
 		case "busy":
 			busy++
@@ -428,14 +442,8 @@ func TestHistorySharesTheCapAcrossChannels(t *testing.T) {
 	if quiet != 1 || busy != 199 || len(entries) != 200 {
 		t.Fatalf("quiet=%d busy=%d total=%d: the quiet channel must not starve", quiet, busy, len(entries))
 	}
-	// The default channel's lines stay unmarked; a reader of the quiet
-	// channel sees the busy one's tagged instead.
 	if Line(entries[len(entries)-1]) != "jack: busy-510\n" {
-		t.Fatalf("line = %q, want no tag for the default channel", Line(entries[len(entries)-1]))
-	}
-	MarkChannels(entries, "quiet")
-	if Line(entries[len(entries)-1]) != "#n-busy jack: busy-510\n" {
-		t.Fatalf("line = %q, want the busy channel tagged for a quiet-channel reader", Line(entries[len(entries)-1]))
+		t.Fatalf("line = %q, want no channel tag", Line(entries[len(entries)-1]))
 	}
 }
 
@@ -454,14 +462,13 @@ func TestHistoryRecordsAttachments(t *testing.T) {
 	if err != nil || len(entries) != 2 {
 		t.Fatalf("entries = %+v, %v; the attachment-only message must be recorded", entries, err)
 	}
-	if got := Line(entries[0]); got != "maya: see the brief [attached: brief.md (text/markdown, 2 KB)]\n" {
+	if got := Line(entries[0]); got != "maya: see the brief [attached: brief.md (text/markdown, 2 KB, id att_1)]\n" {
 		t.Fatalf("line = %q", got)
 	}
-	if got := Line(entries[1]); got != "jack: [attached: plan.pdf (application/pdf, 10 bytes)]\n" {
+	if got := Line(entries[1]); got != "jack: [attached: plan.pdf (application/pdf, 10 bytes, id att_2)]\n" {
 		t.Fatalf("attachment-only line = %q", got)
 	}
 }
-
 
 // An attachment's copy keeps its type's extension (the original name's when
 // it is one of them), else the name's own.

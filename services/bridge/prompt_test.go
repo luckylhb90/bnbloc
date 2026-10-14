@@ -65,8 +65,9 @@ func TestPromptBudgets(t *testing.T) {
 	now := roomlog.Now{From: "jack/codex for maya"}
 	att := []roomlog.Attachment{{Path: ".room/attachments/att_1.png", Filename: "shot.png", ContentType: "image/png"}}
 	undelivered := []roomlog.UndeliveredAttachment{{Filename: "brand.png", ContentType: "image/png", Size: 1708534, Reason: undeliveredTooLarge(2 << 20)}}
-	guidance := roomlog.SessionGuidance(roomlog.Guidance{Self: "maya/codex", HasTools: true, HasRoomFiles: true})
-	team := roomlog.SessionGuidance(roomlog.Guidance{Self: "maya/codex", HasTools: true, HasRoomFiles: true, TeamLead: true})
+	ch := roomlog.GuidanceChannel("ch_0123456789abcdef")
+	guidance := roomlog.SessionGuidance(roomlog.Guidance{Self: "maya/codex", HasTools: true, HasRoomFiles: true, Channel: ch})
+	team := roomlog.SessionGuidance(roomlog.Guidance{Self: "maya/codex", HasTools: true, HasRoomFiles: true, TeamLead: true, Channel: ch})
 	var tools bytes.Buffer
 	enc := json.NewEncoder(&tools)
 	enc.SetEscapeHTML(false)
