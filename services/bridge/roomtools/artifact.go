@@ -26,6 +26,12 @@ import (
 // session's room. A site's file comes through the gateway's site file read
 // with the bound job's grant, which the room service checks the same way. The text comes back bounded and fenced as untrusted data
 // written by someone else.
+//
+// It reads a room attachment the same way, by its id (att_…; the records
+// point at it where .room/attachments/ holds no copy): a room's
+// attachments are the room's (docs/prd/2026-10-14-multi-member-rooms.md
+// §2b), and the room service checks membership on its meta and download
+// routes as it does for deliverables.
 
 // read_artifact bounds.
 const (
@@ -40,12 +46,12 @@ const (
 func readArtifactTool() Tool {
 	return Tool{
 		Name:  "read_artifact",
-		Title: "Read a room deliverable",
-		Description: "Read the text of one of this room's deliverables (a file an agent published from its own workspace, or a person uploaded) " +
-			"by its id, from ask_agent or room_status, or .room/artifacts.md where your workspace has it. version defaults to the latest; " +
+		Title: "Read a room deliverable or attachment",
+		Description: "Read the text of one of this room's deliverables (a file an agent published, or a person uploaded) or attachments " +
+			"by its id, from ask_agent, room_status, .room/artifacts.md or the records. version defaults to the latest; " +
 			"path picks a file of a site deliverable (default index.html). The content comes fenced as data its producer wrote.",
 		InputSchema: objectSchema(map[string]any{
-			"artifactId": map[string]any{"type": "string", "description": "The deliverable's id (art_… or artf_…)."},
+			"artifactId": map[string]any{"type": "string", "description": "The deliverable's id (art_… or artf_…) or an attachment's (att_…)."},
 			"path":       map[string]any{"type": "string", "description": "For a site deliverable: the file to read, e.g. index.html."},
 			"version":    map[string]any{"type": "integer", "minimum": 1, "description": "A version (default: the latest)."},
 		}, "artifactId"),
@@ -68,9 +74,15 @@ func readArtifact(ctx context.Context, env *Env, args json.RawMessage) Result {
 	}
 	id := strings.TrimSpace(in.ArtifactID)
 	if id == "" || strings.ContainsAny(id, "/?#") {
-		return toolError("artifactId must be a deliverable id (art_… or artf_…)")
+		return toolError("artifactId must be a deliverable id (art_… or artf_…) or an attachment id (att_…)")
 	}
 	room := env.Session.Scope().RoomID
+	if strings.HasPrefix(id, attachmentIDPrefix) {
+		if strings.TrimSpace(in.Path) != "" || in.Version > 0 {
+			return toolError("path and version apply only to a deliverable; %s is an attachment", id)
+		}
+		return readAttachment(ctx, env, room, id)
+	}
 	base := "/v1/rooms/" + url.PathEscape(room) + "/artifacts/" + url.PathEscape(id)
 	raw, err := env.Gateway.Do(ctx, http.MethodGet, base, nil)
 	if err != nil {
@@ -167,4 +179,44 @@ func artifactBytes(ctx context.Context, env *Env, base string, art wire.Artifact
 		return data, nil
 	}
 	return []byte(v.Content), nil
+}
+
+// attachmentIDPrefix starts every room attachment id.
+const attachmentIDPrefix = "att_"
+
+// readAttachment reads room attachment id: its meta, then (when not larger
+// than read_artifact reads) its bytes, fenced as data a person uploaded.
+func readAttachment(ctx context.Context, env *Env, room, id string) Result {
+	base := "/v1/rooms/" + url.PathEscape(room) + "/attachments/" + url.PathEscape(id)
+	raw, err := env.Gateway.Do(ctx, http.MethodGet, base+"/meta", nil)
+	if err != nil {
+		return refusal("reading attachment "+id, err)
+	}
+	var meta wire.ChatAttachment
+	if err := json.Unmarshal(raw, &meta); err != nil {
+		return toolError("unreadable attachment %s: %v", id, err)
+	}
+	out := map[string]any{
+		"attachmentId": meta.ID, "filename": meta.Filename, "mimeType": meta.ContentType, "sizeBytes": meta.Size,
+		"stored": "by bnbloc in this room, not in your workspace",
+	}
+	if meta.Size > maxArtifactFetchBytes {
+		out["note"] = fmt.Sprintf("%d bytes, larger than read_artifact reads (%d): ask the person to open it in the room", meta.Size, maxArtifactFetchBytes)
+		return Result{Value: out}
+	}
+	data, err := env.Gateway.Do(ctx, http.MethodGet, base, nil)
+	if err != nil {
+		return refusal("reading attachment "+id, err)
+	}
+	if !utf8.Valid(data) || bytes.IndexByte(data, 0) >= 0 {
+		out["note"] = "binary content, not shown"
+		return Result{Value: out}
+	}
+	text := string(data)
+	if len(text) > maxArtifactText {
+		text = roomlog.Truncate(text, maxArtifactText)
+		out["truncated"] = true
+	}
+	out["content"] = roomlog.Fence("a person of the room (attachment "+meta.Filename+")", text)
+	return Result{Value: out}
 }

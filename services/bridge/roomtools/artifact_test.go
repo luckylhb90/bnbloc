@@ -195,3 +195,47 @@ func TestRoomToolsNeverOpenSiteTickets(t *testing.T) {
 		}
 	}
 }
+
+// pathGateway answers fixed paths and 404 for every other one.
+type pathGateway map[string]string
+
+func (g pathGateway) Do(_ context.Context, _, path string, _ any) ([]byte, error) {
+	if body, ok := g[path]; ok {
+		return []byte(body), nil
+	}
+	return nil, &StatusError{Status: http.StatusNotFound}
+}
+
+// read_artifact reads a room attachment by its id: text fenced as data a
+// person uploaded, binary and oversized ones described, not shown.
+func TestReadArtifactReadsAnAttachment(t *testing.T) {
+	const base = "/v1/rooms/room-1/attachments/"
+	g := pathGateway{
+		base + "att_notes/meta": `{"id":"att_notes","filename":"notes.md","contentType":"text/markdown","size":14}`,
+		base + "att_notes":      "# plan\nstep 1\n",
+		base + "att_img/meta":   `{"id":"att_img","filename":"shot.png","contentType":"image/png","size":4}`,
+		base + "att_img":        "\x89PNG",
+		base + "att_huge/meta":  `{"id":"att_huge","filename":"dump.log","contentType":"text/plain","size":104857600}`,
+	}
+	read := func(args string) Result {
+		return readArtifact(context.Background(), artifactEnv(g, "room-1", true), json.RawMessage(args))
+	}
+	res := read(`{"artifactId":"att_notes"}`)
+	out, _ := res.Value.(map[string]any)
+	content, _ := out["content"].(string)
+	if res.Err != "" || out["filename"] != "notes.md" || !strings.HasPrefix(content, "<<<untrusted-content ") || !strings.Contains(content, "step 1") {
+		t.Fatalf("text attachment = %+v", res)
+	}
+	if out, _ := read(`{"artifactId":"att_img"}`).Value.(map[string]any); out["note"] != "binary content, not shown" || out["content"] != nil {
+		t.Fatalf("binary attachment = %+v", out)
+	}
+	if out, _ := read(`{"artifactId":"att_huge"}`).Value.(map[string]any); !strings.Contains(out["note"].(string), "larger than") {
+		t.Fatalf("huge attachment = %+v", out)
+	}
+	if res := read(`{"artifactId":"att_gone"}`); res.Err == "" {
+		t.Fatalf("missing attachment = %+v", res)
+	}
+	if res := read(`{"artifactId":"att_notes","version":2}`); !strings.Contains(res.Err, "only to a deliverable") {
+		t.Fatalf("attachment with a version = %+v", res)
+	}
+}

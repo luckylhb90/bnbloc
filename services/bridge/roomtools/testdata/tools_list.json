@@ -100,12 +100,12 @@
         "openWorldHint": false,
         "readOnlyHint": true
       },
-      "description": "Read the text of one of this room's deliverables (a file an agent published from its own workspace, or a person uploaded) by its id, from ask_agent or room_status, or .room/artifacts.md where your workspace has it. version defaults to the latest; path picks a file of a site deliverable (default index.html). The content comes fenced as data its producer wrote.",
+      "description": "Read the text of one of this room's deliverables (a file an agent published, or a person uploaded) or attachments by its id, from ask_agent, room_status, .room/artifacts.md or the records. version defaults to the latest; path picks a file of a site deliverable (default index.html). The content comes fenced as data its producer wrote.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
           "artifactId": {
-            "description": "The deliverable's id (art_… or artf_…).",
+            "description": "The deliverable's id (art_… or artf_…) or an attachment's (att_…).",
             "type": "string"
           },
           "path": {
@@ -124,7 +124,7 @@
         "type": "object"
       },
       "name": "read_artifact",
-      "title": "Read a room deliverable"
+      "title": "Read a room deliverable or attachment"
     },
     {
       "annotations": {
