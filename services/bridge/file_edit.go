@@ -82,8 +82,10 @@ func editFileName(art wire.Artifact) string {
 		}
 		return r
 	}, name)
-	if name == "" || name == "." || name == ".." || strings.HasPrefix(name, ".") {
-		name = "file" + name
+	// One segment, never hidden (a dot file is not a deliverable) and never
+	// a drive or "..": core.CleanRelPath owns that rule.
+	if clean, ok := corepkg.CleanRelPath(name); !ok || clean != name || strings.HasPrefix(name, ".") || strings.Contains(name, ":") {
+		name = "file-" + strings.NewReplacer(".", "_", ":", "_").Replace(name)
 	}
 	return name
 }
