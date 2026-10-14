@@ -157,6 +157,7 @@ type ChatStore interface {
 	LookupClientMsg(ctx context.Context, roomID, clientMsgID string) (int64, bool, error)
 	DeleteRoomMessage(ctx context.Context, roomID string, seq int64, requester string, atMs int64) (bool, error)
 	EditRoomMessage(ctx context.Context, roomID string, seq int64, requester, text string, atMs int64) (edited bool, err error)
+	RoomRevisions(ctx context.Context, roomID string, afterMs int64, limit int) ([]store.MessageRevision, int64, error)
 	// GetRoomMessage returns one live message by sequence (found=false when
 	// missing or deleted): edits and deletes scope their live event to the
 	// message's channel with it.
@@ -208,6 +209,7 @@ func (s *Service) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/rooms/{roomId}/attachments/{attachmentId}", s.handleDownloadAttachment)
 	mux.HandleFunc("GET /v1/rooms/{roomId}/attachments/{attachmentId}/meta", s.handleAttachmentMeta)
 	mux.HandleFunc("GET /v1/rooms/{roomId}/history", s.handleHistory)
+	mux.HandleFunc("GET /v1/rooms/{roomId}/history/revisions", s.handleRevisions)
 	mux.HandleFunc("POST /v1/rooms/{roomId}/typing", s.handleTyping)
 	mux.HandleFunc("POST /v1/rooms/{roomId}/read", s.handleMarkRead)
 	mux.HandleFunc("DELETE /v1/rooms/{roomId}/messages/{seq}", s.handleDeleteMessage)
@@ -806,6 +808,47 @@ func (s *Service) handleHistory(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeFeedPage(w, msgs)
+}
+
+// handleRevisions lists the room's messages edited or deleted after
+// ?after= (ms), oldest first (wire.RevisionsPage); an agent's listing omits
+// the people chat's. The bridge rewrites its agents' records with it.
+func (s *Service) handleRevisions(w http.ResponseWriter, r *http.Request) {
+	roomID, _, m, ok := s.room(w, r, membership.AnyMember)
+	if !ok {
+		return
+	}
+	page := wire.RevisionsPage{Revisions: []wire.MessageRevision{}}
+	if s.Chat == nil {
+		httpx.WriteJSON(w, http.StatusOK, page)
+		return
+	}
+	revs, latest, err := s.Chat.RoomRevisions(r.Context(), roomID, parseInt(r.URL.Query().Get("after")), int(parseInt(r.URL.Query().Get("limit"))))
+	if err != nil {
+		obs.ServerError(w, "revisions read failed", err)
+		httpx.Error(w, "revisions read failed", http.StatusInternalServerError)
+		return
+	}
+	page.LatestMs = latest
+	people := map[string]bool{}
+	for _, rev := range revs {
+		if !m.IsHuman() {
+			skip, seen := people[rev.ChannelID]
+			if !seen {
+				if skip, err = s.isPeopleChannel(r.Context(), roomID, rev.ChannelID); err != nil {
+					obs.ServerError(w, "channel lookup failed", err)
+					httpx.Error(w, "channel lookup failed", http.StatusInternalServerError)
+					return
+				}
+				people[rev.ChannelID] = skip
+			}
+			if skip {
+				continue
+			}
+		}
+		page.Revisions = append(page.Revisions, wire.MessageRevision{ChannelID: rev.ChannelID, Sequence: rev.Seq, Deleted: rev.Deleted, AtMs: rev.AtMs})
+	}
+	httpx.WriteJSON(w, http.StatusOK, page)
 }
 
 // parseInt parses a base-10 int64 from a query value, 0 on empty/invalid.

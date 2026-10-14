@@ -1558,6 +1558,20 @@ WHERE r.channel_id = '' AND d.user_id IS NULL`)
 			return addColumnIfMissing(ctx, db, "shared_agent_quota_requests", "kind", "VARCHAR(16) NOT NULL DEFAULT 'quota' AFTER provider")
 		},
 	},
+	{
+		// When a message was last edited or deleted, indexed, so agents'
+		// records follow the room (RoomRevisions,
+		// docs/prd/2026-10-14-multi-member-rooms.md rule 2). Additive:
+		// earlier revisions stay unlisted.
+		id: "2026_10_room_messages_revised_at_ms",
+		run: func(ctx context.Context, db sqlConn) error {
+			if err := addColumnIfMissing(ctx, db, "room_messages", "revised_at_ms", "BIGINT NULL AFTER edited_at_ms"); err != nil {
+				return err
+			}
+			return addIndexIfMissing(ctx, db, "room_messages", "idx_room_messages_revised",
+				"ADD KEY idx_room_messages_revised (room_id, revised_at_ms)")
+		},
+	},
 }
 
 // sqlConn is the statement surface a migration runs on. runMigrations passes

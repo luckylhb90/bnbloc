@@ -180,6 +180,16 @@ func TestContractChatStoreHistoryAndFeed(t *testing.T) {
 		if !ok || MessageText(m.Kind, m.Payload) != "edited" || m.EditedAtMs == nil || *m.EditedAtMs != 77 || m.CreatedAtMs != 30 || m.ChannelID != "ch_a" {
 			t.Fatalf("edited message = %+v %v", m, ok)
 		}
+		revisions := func(after int64) ([]MessageRevision, int64) {
+			revs, latest, err := s.RoomRevisions(ctx, room, after, 0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			return revs, latest
+		}
+		if revs, latest := revisions(0); latest != 77 || !slices.Equal(revs, []MessageRevision{{ChannelID: "ch_a", Seq: 3, AtMs: 77}}) {
+			t.Fatalf("revisions after an edit = %+v (latest %d)", revs, latest)
+		}
 		if ok, err := s.EditRoomMessage(ctx, room, 3, "jack", "hijack", 78); err != nil || ok {
 			t.Fatalf("edit by another member = %v %v", ok, err)
 		}
@@ -199,6 +209,14 @@ func TestContractChatStoreHistoryAndFeed(t *testing.T) {
 		}
 		if _, ok := must2(s.GetRoomMessage(ctx, room, 3))(t); ok {
 			t.Fatal("GetRoomMessage returned a deleted message")
+		}
+		// The deletion is the message's last revision (a repeated delete
+		// does not move it); nothing is revised after it.
+		if revs, latest := revisions(0); latest != 80 || !slices.Equal(revs, []MessageRevision{{ChannelID: "ch_a", Seq: 3, Deleted: true, AtMs: 80}}) {
+			t.Fatalf("revisions after a delete = %+v (latest %d)", revs, latest)
+		}
+		if revs, latest := revisions(80); len(revs) != 0 || latest != 80 {
+			t.Fatalf("revisions after the newest = %+v (latest %d)", revs, latest)
 		}
 		if got := hist("ch_a", 0, 0); !slices.Equal(got, []int64{1, 5}) {
 			t.Fatalf("history after delete = %v", got)

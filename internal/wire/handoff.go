@@ -105,6 +105,23 @@ type FeedPage struct {
 	Messages []FeedMessage `json:"messages"`
 }
 
+// RevisionsPage is GET /v1/rooms/{id}/history/revisions: the room's
+// messages edited or deleted after a time, oldest revision first, and the
+// room's newest revision time (0 = none). Agents' records follow the room
+// with it.
+type RevisionsPage struct {
+	Revisions []MessageRevision `json:"revisions"`
+	LatestMs  int64             `json:"latestMs"`
+}
+
+// MessageRevision is a message's last edit or deletion.
+type MessageRevision struct {
+	ChannelID string `json:"channelId"`
+	Sequence  int64  `json:"sequence"`
+	Deleted   bool   `json:"deleted,omitempty"`
+	AtMs      int64  `json:"atMs"`
+}
+
 // ImportedMarker is stamped by realtime into payload.imported of every message
 // written through the import path, so history readers (the web feed) can mark
 // the row as imported. It is server-authored: no client send path can set it.

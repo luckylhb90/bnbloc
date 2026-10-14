@@ -347,9 +347,11 @@ CREATE TABLE IF NOT EXISTS room_messages (
   created_at_ms BIGINT NOT NULL,
   deleted_at_ms BIGINT NULL,
   edited_at_ms  BIGINT NULL,
+  revised_at_ms BIGINT NULL,
   PRIMARY KEY (room_id, seq),
   UNIQUE KEY uq_room_client_msg (room_id, client_msg_id),
   KEY idx_room_channel_seq (room_id, channel_id, seq),
+  KEY idx_room_messages_revised (room_id, revised_at_ms),
   KEY idx_room_messages_retention (tenant_id, kind, created_at_ms),
   FULLTEXT KEY ft_room_messages_search (search_text) WITH PARSER ngram
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

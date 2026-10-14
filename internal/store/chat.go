@@ -114,8 +114,22 @@ type ChatStore interface {
 	// when requester is its author and it is not soft-deleted. Returns
 	// edited=false when missing, not the requester's, or already deleted.
 	EditRoomMessage(ctx context.Context, roomID string, seq int64, requester, text string, atMs int64) (edited bool, err error)
+	// RoomRevisions lists the room's messages edited or deleted after
+	// afterMs (every channel), oldest revision first, at most
+	// clampLimit(limit, DefaultRoomHistoryPage, MaxRoomHistoryPage); latestMs
+	// is the room's newest revision time (0 = none), whatever the page.
+	// Agents' records follow the room with it.
+	RoomRevisions(ctx context.Context, roomID string, afterMs int64, limit int) (revs []MessageRevision, latestMs int64, err error)
 	// ChatIndex: single-message lookup and cross-room search (search.go).
 	ChatIndex
+}
+
+// MessageRevision is a message's last edit or deletion.
+type MessageRevision struct {
+	ChannelID string
+	Seq       int64
+	Deleted   bool
+	AtMs      int64
 }
 
 // Room feed page sizes: one clampLimit call per read, the same on both
@@ -134,6 +148,7 @@ type MemoryChat struct {
 	read    map[string]int64         // "roomID\x00channelID\x00userID" -> last-read seq
 	byCMI   map[string]int64         // "roomID\x00clientMsgID" -> seq
 	deleted map[string]bool          // "roomID\x00seq" -> soft-deleted
+	revised map[string]int64         // "roomID\x00seq" -> last edit or deletion
 }
 
 // NewMemoryChat constructs an empty in-memory chat store.
@@ -143,6 +158,7 @@ func NewMemoryChat() *MemoryChat {
 		read:    map[string]int64{},
 		byCMI:   map[string]int64{},
 		deleted: map[string]bool{},
+		revised: map[string]int64{},
 	}
 }
 
@@ -242,7 +258,7 @@ func (s *MemoryChat) LookupClientMsg(ctx context.Context, roomID, clientMsgID st
 }
 
 // DeleteRoomMessage soft-deletes a message if the requester authored it.
-func (s *MemoryChat) DeleteRoomMessage(ctx context.Context, roomID string, seq int64, requester string, _ int64) (bool, error) {
+func (s *MemoryChat) DeleteRoomMessage(ctx context.Context, roomID string, seq int64, requester string, atMs int64) (bool, error) {
 	tid, err := tenant.Require(ctx)
 	if err != nil {
 		return false, err
@@ -255,7 +271,10 @@ func (s *MemoryChat) DeleteRoomMessage(ctx context.Context, roomID string, seq i
 			if m.Author != requester {
 				return false, nil
 			}
-			s.deleted[deletedKey(rk, seq)] = true
+			if !s.deleted[deletedKey(rk, seq)] {
+				s.deleted[deletedKey(rk, seq)] = true
+				s.revised[deletedKey(rk, seq)] = atMs
+			}
 			return true, nil
 		}
 	}
@@ -284,9 +303,39 @@ func (s *MemoryChat) EditRoomMessage(ctx context.Context, roomID string, seq int
 		m.Payload = setPayloadText(m.Payload, text)
 		at := atMs
 		m.EditedAtMs = &at
+		s.revised[deletedKey(rk, seq)] = atMs
 		return true, nil
 	}
 	return false, nil
+}
+
+// RoomRevisions lists the room's edits and deletions after afterMs (see
+// ChatStore).
+func (s *MemoryChat) RoomRevisions(ctx context.Context, roomID string, afterMs int64, limit int) ([]MessageRevision, int64, error) {
+	tid, err := tenant.Require(ctx)
+	if err != nil {
+		return nil, 0, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	rk := tid + "\x00" + roomID
+	var out []MessageRevision
+	var latest int64
+	for _, m := range s.msgs[rk] {
+		at, ok := s.revised[deletedKey(rk, m.Seq)]
+		if !ok {
+			continue
+		}
+		latest = max(latest, at)
+		if at > afterMs {
+			out = append(out, MessageRevision{ChannelID: m.ChannelID, Seq: m.Seq, Deleted: s.isDeleted(rk, m.Seq), AtMs: at})
+		}
+	}
+	sort.SliceStable(out, func(i, j int) bool { return out[i].AtMs < out[j].AtMs })
+	if n := clampLimit(limit, DefaultRoomHistoryPage, MaxRoomHistoryPage); len(out) > n {
+		out = out[:n]
+	}
+	return out, latest, nil
 }
 
 // setPayloadText returns the payload with its "text" field replaced, preserving
@@ -652,9 +701,9 @@ func (s *MySQLChat) DeleteRoomMessage(ctx context.Context, roomID string, seq in
 		return false, err
 	}
 	res, err := s.DB.ExecContext(ctx,
-		`UPDATE room_messages SET deleted_at_ms = ?
+		`UPDATE room_messages SET deleted_at_ms = ?, revised_at_ms = ?
 		 WHERE tenant_id = ? AND room_id = ? AND seq = ? AND author = ? AND `+sqlNotDeleted,
-		atMs, tid, roomID, seq, requester)
+		atMs, atMs, tid, roomID, seq, requester)
 	if err != nil {
 		return false, err
 	}
@@ -690,12 +739,40 @@ func (s *MySQLChat) EditRoomMessage(ctx context.Context, roomID string, seq int6
 	}
 	res, err := s.DB.ExecContext(ctx,
 		`UPDATE room_messages
-		 SET payload_json = JSON_SET(payload_json, '$.text', ?), search_text = ?, edited_at_ms = ?
+		 SET payload_json = JSON_SET(payload_json, '$.text', ?), search_text = ?, edited_at_ms = ?, revised_at_ms = ?
 		 WHERE tenant_id = ? AND room_id = ? AND seq = ? AND author = ? AND `+sqlNotDeleted,
-		text, text, atMs, tid, roomID, seq, requester)
+		text, text, atMs, atMs, tid, roomID, seq, requester)
 	if err != nil {
 		return false, err
 	}
 	n, _ := res.RowsAffected()
 	return n > 0, nil
+}
+
+// RoomRevisions lists the room's edits and deletions after afterMs (see
+// ChatStore), on idx_room_messages_revised.
+func (s *MySQLChat) RoomRevisions(ctx context.Context, roomID string, afterMs int64, limit int) ([]MessageRevision, int64, error) {
+	tid, err := tenant.Require(ctx)
+	if err != nil {
+		return nil, 0, err
+	}
+	revs, err := queryAll(ctx, s.DB,
+		`SELECT COALESCE(channel_id, ''), seq, deleted_at_ms IS NOT NULL, revised_at_ms FROM room_messages
+		 WHERE tenant_id = ? AND room_id = ? AND revised_at_ms > ?
+		 ORDER BY revised_at_ms, seq LIMIT ?`,
+		func(row rowScanner) (MessageRevision, error) {
+			var r MessageRevision
+			err := row.Scan(&r.ChannelID, &r.Seq, &r.Deleted, &r.AtMs)
+			return r, err
+		},
+		tid, roomID, afterMs, clampLimit(limit, DefaultRoomHistoryPage, MaxRoomHistoryPage))
+	if err != nil {
+		return nil, 0, err
+	}
+	var latest sql.NullInt64
+	if err := s.DB.QueryRowContext(ctx,
+		`SELECT MAX(revised_at_ms) FROM room_messages WHERE tenant_id = ? AND room_id = ?`, tid, roomID).Scan(&latest); err != nil {
+		return nil, 0, err
+	}
+	return revs, latest.Int64, nil
 }
