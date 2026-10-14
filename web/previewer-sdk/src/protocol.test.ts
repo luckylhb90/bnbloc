@@ -5,6 +5,9 @@ import {
   THUMBNAIL_LIMIT,
   TITLE_LIMIT,
   TOOLBAR_LIMIT,
+  SELECTION_DETAIL_LIMIT,
+  SELECTION_LABEL_LIMIT,
+  fitSelection,
   hostOriginFromHash,
   readFrameMessage,
   readHostMessage,
@@ -146,4 +149,16 @@ test("the host origin comes from the fragment", () => {
   eq(hostOriginFromHash("host=tauri%3A%2F%2Flocalhost"), "tauri://localhost", "without #");
   eq(hostOriginFromHash(""), "", "no fragment");
   eq(hostOriginFromHash("#other=1"), "", "no host key");
+});
+
+test("a selection is a bounded label and detail, or null to clear", () => {
+  eq(readFrameMessage({ type: "preview.selection", selection: { label: "Slide 4", detail: "Q3 revenue" } }), { type: "preview.selection", selection: { label: "Slide 4", detail: "Q3 revenue" } }, "a selection");
+  eq(readFrameMessage({ type: "preview.selection", selection: { label: "Revenue!B3:D5" } }), { type: "preview.selection", selection: { label: "Revenue!B3:D5", detail: "" } }, "no detail");
+  eq(readFrameMessage({ type: "preview.selection", selection: null }), { type: "preview.selection", selection: null }, "cleared");
+  eq(readFrameMessage({ type: "preview.selection", selection: { label: "" } }), null, "an empty label");
+  eq(readFrameMessage({ type: "preview.selection", selection: { label: "x".repeat(SELECTION_LABEL_LIMIT + 1) } }), null, "a long label");
+  eq(readFrameMessage({ type: "preview.selection", selection: { label: "x", detail: "y".repeat(SELECTION_DETAIL_LIMIT + 1) } }), null, "a long detail");
+  const fit = fitSelection("x".repeat(500), "y".repeat(5000));
+  eq([[...fit.label].length, [...fit.detail].length, fit.detail.endsWith("…")], [SELECTION_LABEL_LIMIT, SELECTION_DETAIL_LIMIT, true], "fitSelection cuts to the limits");
+  eq(readFrameMessage({ type: "preview.selection", selection: fit }) !== null, true, "a fitted selection is accepted");
 });

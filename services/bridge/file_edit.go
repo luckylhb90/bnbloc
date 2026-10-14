@@ -51,6 +51,8 @@ type editTarget struct {
 	path   string
 	// problem says why the file is not in the workspace ("" = it is).
 	problem string
+	// selection is the part the member points at (nil = the whole file).
+	selection *wire.FileSelection
 
 	mu sync.Mutex
 	// hash is the content last placed or published: a pass publishes only
@@ -65,7 +67,11 @@ func (e *editTarget) line() *roomlog.EditTarget {
 	if e == nil {
 		return nil
 	}
-	return &roomlog.EditTarget{Path: e.path, Source: e.source, Name: e.name, Version: e.version, Problem: e.problem}
+	t := &roomlog.EditTarget{Path: e.path, Source: e.source, Name: e.name, Version: e.version, Problem: e.problem}
+	if e.selection != nil {
+		t.SelectionLabel, t.SelectionDetail = e.selection.Label, e.selection.Detail
+	}
+	return t
 }
 
 func contentHash(b []byte) string {
@@ -109,7 +115,7 @@ func (b *Bridge) placeEditTarget(ctx context.Context, d *drive, seat driveKey, e
 		return nil
 	}
 	room := d.job.RoomID
-	e := &editTarget{artifactID: ref.ArtifactID, version: ref.Version, name: firstNonEmpty(ref.Name, ref.ArtifactID)}
+	e := &editTarget{artifactID: ref.ArtifactID, version: ref.Version, name: firstNonEmpty(ref.Name, ref.ArtifactID), selection: ref.Selection}
 	miss := func(problem string, err error) *editTarget {
 		e.problem = problem
 		slog.Warn("bnbloc bridge file to edit not placed", "event", "bnbloc.bridge.edit_unplaced",

@@ -8,6 +8,7 @@ import (
 	"path"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/luckylhb90/bnbloc/core"
 	"github.com/luckylhb90/bnbloc/internal/ids"
@@ -343,5 +344,13 @@ func (s *Service) resolveFileRef(ctx context.Context, roomID string, ref *wire.F
 	if name == "" {
 		name = path.Base(art.Title)
 	}
-	return &wire.FileRef{ArtifactID: art.ArtifactID, Version: version, Name: name}, nil
+	out := &wire.FileRef{ArtifactID: art.ArtifactID, Version: version, Name: name}
+	if sel := ref.Selection; sel != nil {
+		label := strings.TrimSpace(sel.Label)
+		if label == "" || utf8.RuneCountInString(label) > wire.MaxFileSelectionLabel || utf8.RuneCountInString(sel.Detail) > wire.MaxFileSelectionDetail {
+			return nil, errBadFileRef{fmt.Sprintf("the selection must be a label of 1-%d characters and at most %d characters of content", wire.MaxFileSelectionLabel, wire.MaxFileSelectionDetail)}
+		}
+		out.Selection = &wire.FileSelection{Label: label, Detail: sel.Detail}
+	}
+	return out, nil
 }

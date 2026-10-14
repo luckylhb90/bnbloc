@@ -50,6 +50,12 @@ func TestChatFileRefValidatedAndCarried(t *testing.T) {
 	if posted, err = svc.PostChat(dctx(), ChatPost{RoomID: "room-1", Author: "maya", Text: "as it was", Recipient: toJackCodex(), FileRef: &wire.FileRef{ArtifactID: "deck", Version: 2}}); err != nil || posted.Job.FileRef.Version != 2 {
 		t.Fatalf("explicit version = %+v, %v", posted.Job, err)
 	}
+	// A selection rides along, trimmed and bounded.
+	sel := &wire.FileSelection{Label: " Slide 4 ", Detail: "Q3 revenue up 18%"}
+	if posted, err = svc.PostChat(dctx(), ChatPost{RoomID: "room-1", Author: "maya", Text: "shorter", Recipient: toJackCodex(), FileRef: &wire.FileRef{ArtifactID: "deck", Selection: sel}}); err != nil ||
+		posted.Job.FileRef.Selection == nil || *posted.Job.FileRef.Selection != (wire.FileSelection{Label: "Slide 4", Detail: "Q3 revenue up 18%"}) {
+		t.Fatalf("selection = %+v, %v", posted.Job, err)
+	}
 	for name, ref := range map[string]*wire.FileRef{
 		"another room's": {ArtifactID: "other"},
 		"unknown":        {ArtifactID: "gone"},
@@ -57,6 +63,8 @@ func TestChatFileRefValidatedAndCarried(t *testing.T) {
 		"negative":       {ArtifactID: "deck", Version: -1},
 		"a web app":      {ArtifactID: "site"},
 		"no id":          {},
+		"empty label":    {ArtifactID: "deck", Selection: &wire.FileSelection{Label: " "}},
+		"long detail":    {ArtifactID: "deck", Selection: &wire.FileSelection{Label: "x", Detail: strings.Repeat("y", wire.MaxFileSelectionDetail+1)}},
 	} {
 		if _, err := svc.PostChat(dctx(), ChatPost{RoomID: "room-1", Author: "maya", Text: "x", Recipient: toJackCodex(), FileRef: ref}); !errors.As(err, new(errBadFileRef)) {
 			t.Errorf("%s: err = %v", name, err)

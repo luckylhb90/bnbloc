@@ -89,6 +89,7 @@ type (
 	Previewer            = wire.ComponentPreviewer
 	PreviewerMatch       = wire.ComponentPreviewerMatch
 	PreviewerToolbarItem = wire.ComponentPreviewerToolbarItem
+	PreviewerSuggestion  = wire.ComponentPreviewerSuggestion
 	MCP                  = wire.ComponentMCP
 	MCPTool              = wire.ComponentMCPTool
 	MCPEnv               = wire.ComponentMCPEnv

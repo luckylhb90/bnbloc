@@ -85,6 +85,16 @@ type ComponentPreviewer struct {
 	Rank         int                             `json:"rank"`
 	Capabilities []string                        `json:"capabilities,omitempty"`
 	Toolbar      []ComponentPreviewerToolbarItem `json:"toolbar,omitempty"`
+	// Suggestions are the Ask AI panel's starting prompts for the files it
+	// shows (docs/prd/2026-10-14-ai-document-editing.md rule 6).
+	Suggestions []ComponentPreviewerSuggestion `json:"suggestions,omitempty"`
+}
+
+// ComponentPreviewerSuggestion is one starting prompt: its chip label and
+// the request it puts in the composer.
+type ComponentPreviewerSuggestion struct {
+	Label  string `json:"label"`
+	Prompt string `json:"prompt"`
 }
 
 // ComponentPreviewerMatch declares the files a previewer renders.

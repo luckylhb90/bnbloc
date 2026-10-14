@@ -909,6 +909,16 @@ export interface ComponentPreviewer {
   rank: number;
   capabilities?: string[];
   toolbar?: ComponentPreviewerToolbarItem[];
+  // Suggestions are the Ask AI panel's starting prompts for the files it
+  // shows (docs/prd/2026-10-14-ai-document-editing.md rule 6).
+  suggestions?: ComponentPreviewerSuggestion[];
+}
+
+// ComponentPreviewerSuggestion is one starting prompt: its chip label and
+// the request it puts in the composer.
+export interface ComponentPreviewerSuggestion {
+  label: string;
+  prompt: string;
 }
 
 // ComponentPreviewerMatch declares the files a previewer renders.
@@ -2688,7 +2698,23 @@ export interface FileRef {
   artifactId: string;
   version: number;
   name?: string;
+  // Selection is the part of the file the member points at (rule 5): the
+  // previewer's chip label and the content it names. It reaches the agent
+  // as the file's data, never as the member's words.
+  selection?: FileSelection;
 }
+
+// FileSelection is a previewer's selection (preview.selection): Label
+// 1–MaxFileSelectionLabel characters, Detail at most MaxFileSelectionDetail.
+export interface FileSelection {
+  label: string;
+  detail?: string;
+}
+
+// The selection bounds, equal to the frame protocol's SELECTION_*_LIMIT
+// (core/pkgmeta's vocabulary test compares them).
+export const MaxFileSelectionLabel = 120;
+export const MaxFileSelectionDetail = 2000;
 
 // ChatAttachment is an attachment a chat message embeds.
 export interface ChatAttachment {

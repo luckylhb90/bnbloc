@@ -19,6 +19,7 @@
 //   frame -> host : preview.thumbnail   {png: ArrayBuffer}
 //   frame -> host : preview.error       {message}
 //   frame -> host : preview.title       {text}
+//   frame -> host : preview.selection   {selection: {label, detail} | null}  (capability "selection")
 
 /** Frame protocol version carried in preview.init. */
 export const PREVIEWER_PROTOCOL = 1;
@@ -32,12 +33,19 @@ export const TOOLBAR_LIMIT = 20;
 export const TOOLBAR_LABEL_LIMIT = 40;
 export const TITLE_LIMIT = 120;
 export const ERROR_LIMIT = 500;
+/** A selection's chip label and the content it carries to the agent. */
+export const SELECTION_LABEL_LIMIT = 120;
+export const SELECTION_DETAIL_LIMIT = 2000;
+/** Package suggestions: how many, and their label and prompt lengths. */
+export const SUGGESTION_LIMIT = 6;
+export const SUGGESTION_LABEL_LIMIT = 40;
+export const SUGGESTION_PROMPT_LIMIT = 500;
 /** Zoom values are scale factors (1 = 100%). */
 export const ZOOM_MIN = 0.01;
 export const ZOOM_MAX = 64;
 
 /** Code-owned capability vocabulary (package `previewer.capabilities`). */
-export const PREVIEWER_CAPABILITIES = ["thumbnail", "liveState", "toolbar"] as const;
+export const PREVIEWER_CAPABILITIES = ["thumbnail", "liveState", "toolbar", "selection"] as const;
 export type PreviewerCapability = (typeof PREVIEWER_CAPABILITIES)[number];
 
 /** Code-owned toolbar item kinds. */
@@ -83,6 +91,14 @@ export interface ToolbarItem {
 
 export type Theme = "light" | "dark";
 
+/** What the member points at in the file: the chip's label ("Slide 4",
+ *  "Revenue!B3:D5") and the content it names (the selected text, the
+ *  range's values), which travels to the agent as the file's data. */
+export interface Selection {
+  readonly label: string;
+  readonly detail: string;
+}
+
 export interface PreviewFile {
   readonly name: string;
   readonly mimeType: string;
@@ -114,7 +130,8 @@ export type FrameMessage =
   | { readonly type: "preview.state.send"; readonly state: unknown }
   | { readonly type: "preview.thumbnail"; readonly png: ArrayBuffer }
   | { readonly type: "preview.error"; readonly message: string }
-  | { readonly type: "preview.title"; readonly text: string };
+  | { readonly type: "preview.title"; readonly text: string }
+  | { readonly type: "preview.selection"; readonly selection: Selection | null };
 
 type Rec = Readonly<Record<string, unknown>>;
 
@@ -233,9 +250,33 @@ export function readFrameMessage(data: unknown): FrameMessage | null {
       const text = boundedText(data.text, TITLE_LIMIT, true);
       return text === null ? null : { type: "preview.title", text };
     }
+    case "preview.selection": {
+      if (data.selection === null) return { type: "preview.selection", selection: null };
+      const sel = readSelection(data.selection);
+      return sel ? { type: "preview.selection", selection: sel } : null;
+    }
     default:
       return null;
   }
+}
+
+/** Validates a selection: a label within SELECTION_LABEL_LIMIT, a detail
+ *  (possibly empty) within SELECTION_DETAIL_LIMIT. */
+export function readSelection(value: unknown): Selection | null {
+  if (!isRecord(value)) return null;
+  const label = boundedText(value.label, SELECTION_LABEL_LIMIT);
+  const detail = boundedText(value.detail ?? "", SELECTION_DETAIL_LIMIT, true);
+  return label === null || detail === null ? null : { label, detail };
+}
+
+/** Fits a selection to the limits (the frame side: a long selection is cut,
+ *  marked with an ellipsis, rather than refused by the host). */
+export function fitSelection(label: string, detail: string): Selection {
+  const cut = (s: string, n: number) => {
+    const chars = [...s];
+    return chars.length <= n ? s : `${chars.slice(0, n - 1).join("")}…`;
+  };
+  return { label: cut(label.trim() || "Selection", SELECTION_LABEL_LIMIT), detail: cut(detail, SELECTION_DETAIL_LIMIT) };
 }
 
 /** Validates the payload of a host -> frame message (the SDK additionally

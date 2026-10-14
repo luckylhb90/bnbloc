@@ -20,6 +20,7 @@
 import {
   ERROR_LIMIT,
   TITLE_LIMIT,
+  fitSelection,
   hostOriginFromHash,
   readHostMessage,
   readToolbar,
@@ -85,6 +86,10 @@ export interface PreviewerClient {
   provideThumbnail(png: Blob | ArrayBuffer): Promise<void>;
   setTitle(text: string): void;
   reportError(message: string): void;
+  /** Points the host at a part of the file (capability "selection"): a
+   *  chip it shows beside its Ask AI composer, whose detail travels to the
+   *  agent with the request; null clears it. Over-long text is cut. */
+  sendSelection(selection: { label: string; detail?: string } | null): void;
 }
 
 function subscribe<T>(list: T[], cb: T): Unsubscribe {
@@ -205,6 +210,9 @@ export function createPreviewerClient(env: PreviewerEnv): PreviewerClient {
       const text = String(message ?? "").trim() || "previewer error";
       post({ type: "preview.error", message: [...text].slice(0, ERROR_LIMIT).join("") });
     },
+    sendSelection(selection) {
+      post({ type: "preview.selection", selection: selection ? fitSelection(String(selection.label ?? ""), String(selection.detail ?? "")) : null });
+    },
   };
 }
 
@@ -240,3 +248,4 @@ export const sendState = (state: unknown): void => client().sendState(state);
 export const provideThumbnail = (png: Blob | ArrayBuffer): Promise<void> => client().provideThumbnail(png);
 export const setTitle = (text: string): void => client().setTitle(text);
 export const reportError = (message: string): void => client().reportError(message);
+export const sendSelection = (selection: { label: string; detail?: string } | null): void => client().sendSelection(selection);

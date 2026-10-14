@@ -47,6 +47,11 @@ type EditTarget struct {
 	Name    string
 	Version int
 	Problem string
+	// SelectionLabel / SelectionDetail are the part of the file the member
+	// points at (a slide, a passage, a range): the file's own content,
+	// fenced as data under the line.
+	SelectionLabel  string
+	SelectionDetail string
 }
 
 // EditsDir is where a room file to edit is placed: .room/edits/<artifact
@@ -69,6 +74,15 @@ func writeEditLine(b *strings.Builder, e *EditTarget) {
 		return
 	}
 	fmt.Fprintf(b, "[edit %s v%d: it is at %s; save your version as %s, which updates the room's file]\n", e.Name, e.Version, e.Source, e.Path)
+	if e.SelectionLabel != "" {
+		b.WriteString("[the part of it they point at]\n")
+		body := e.SelectionLabel
+		if d := strings.TrimSpace(e.SelectionDetail); d != "" {
+			body += "\n" + d
+		}
+		b.WriteString(Fence(e.Name, body))
+		b.WriteString("\n")
+	}
 }
 
 // writeNow renders the turn's message: its attachments, the [now] marker

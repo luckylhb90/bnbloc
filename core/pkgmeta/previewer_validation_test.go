@@ -7,6 +7,8 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/luckylhb90/bnbloc/internal/wire"
 )
 
 func validPreviewerPackage() map[string]any {
@@ -93,6 +95,17 @@ func TestPreviewerPackage_rejectsInvalidShapes(t *testing.T) {
 		{"traversal entry", func(_, p map[string]any) { p["entry"] = "../index.html" }, "entry"},
 		{"dot entry", func(_, p map[string]any) { p["entry"] = "./index.html" }, "entry"},
 		{"non-html entry", func(_, p map[string]any) { p["entry"] = "main.js" }, "entry"},
+		{"seven suggestions", func(_, p map[string]any) {
+			var list []map[string]string
+			for i := 0; i < 7; i++ {
+				list = append(list, map[string]string{"label": "x", "prompt": "y"})
+			}
+			p["suggestions"] = list
+		}, "at most 6"},
+		{"suggestion without prompt", func(_, p map[string]any) { p["suggestions"] = []map[string]string{{"label": "Summarize"}} }, "suggestions[0].prompt"},
+		{"long suggestion label", func(_, p map[string]any) {
+			p["suggestions"] = []map[string]string{{"label": strings.Repeat("x", 41), "prompt": "y"}}
+		}, "suggestions[0].label"},
 		{"empty match", func(_, p map[string]any) { p["match"] = map[string]any{} }, "at least one"},
 		{"any mime", func(_, p map[string]any) { p["match"] = map[string]any{"mimeTypes": []string{"*/*"}} }, "type/subtype"},
 		{"upper mime", func(_, p map[string]any) { p["match"] = map[string]any{"mimeTypes": []string{"Image/PNG"}} }, "type/subtype"},
@@ -191,7 +204,11 @@ func TestPreviewerVocabulariesMatchFrameProtocol(t *testing.T) {
 			t.Fatalf("%s: protocol.ts %v != Go %v", name, names, want)
 		}
 	}
-	for name, want := range map[string]int{"TOOLBAR_LIMIT": maxPreviewerToolbar, "TOOLBAR_LABEL_LIMIT": maxPreviewerLabel} {
+	for name, want := range map[string]int{
+		"TOOLBAR_LIMIT": maxPreviewerToolbar, "TOOLBAR_LABEL_LIMIT": maxPreviewerLabel,
+		"SUGGESTION_LIMIT": maxPreviewerSuggestions, "SUGGESTION_LABEL_LIMIT": maxPreviewerSuggestionLabel, "SUGGESTION_PROMPT_LIMIT": maxPreviewerSuggestionPrompt,
+		"SELECTION_LABEL_LIMIT": wire.MaxFileSelectionLabel, "SELECTION_DETAIL_LIMIT": wire.MaxFileSelectionDetail,
+	} {
 		re := regexp.MustCompile(`export const ` + name + ` = (\d+);`)
 		m := re.FindSubmatch(src)
 		if m == nil || string(m[1]) != strconv.Itoa(want) {

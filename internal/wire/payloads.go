@@ -38,7 +38,25 @@ type FileRef struct {
 	ArtifactID string `json:"artifactId"`
 	Version    int    `json:"version"`
 	Name       string `json:"name,omitempty"`
+	// Selection is the part of the file the member points at (rule 5): the
+	// previewer's chip label and the content it names. It reaches the agent
+	// as the file's data, never as the member's words.
+	Selection *FileSelection `json:"selection,omitempty"`
 }
+
+// FileSelection is a previewer's selection (preview.selection): Label
+// 1–MaxFileSelectionLabel characters, Detail at most MaxFileSelectionDetail.
+type FileSelection struct {
+	Label  string `json:"label"`
+	Detail string `json:"detail,omitempty"`
+}
+
+// The selection bounds, equal to the frame protocol's SELECTION_*_LIMIT
+// (core/pkgmeta's vocabulary test compares them).
+const (
+	MaxFileSelectionLabel  = 120
+	MaxFileSelectionDetail = 2000
+)
 
 // ChatAttachment is an attachment a chat message embeds.
 type ChatAttachment struct {
