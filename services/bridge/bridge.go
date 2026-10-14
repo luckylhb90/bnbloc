@@ -749,6 +749,9 @@ type driveResult struct {
 	workspaceID string
 	sessionID   string
 	replied     bool
+	// acted: the core reported a step of the turn (a tool call), so it may
+	// have changed something.
+	acted bool
 	// usage is what the turn's consumed replies reported (borrow record).
 	usage turnUsage
 }
@@ -1419,10 +1422,19 @@ func (b *Bridge) driveClaim(ctx context.Context, d *drive, beforeReflow func(*ro
 	// A turn whose conversation outgrew its model's context window is run
 	// once more in a fresh session of the same workspace (contextOverflow):
 	// the agent gets its session guidance again and the room's history is
-	// in .room/. A second overflow fails the job (context_overflow).
+	// in .room/. A second overflow fails the job (context_overflow). Only a
+	// turn that did nothing observable is run again (no step, no reply, no
+	// file written): rerunning one that did could repeat what it did, so
+	// its session is reset and the room told to send the request again.
 	var usage turnUsage
+	startMs := time.Now().UnixMilli()
 	res, rs, err := b.runTurn(ctx, d, key, opts, deadline, beforeReflow, &usage)
 	turn = rs
+	if contextOverflow(err) && (res.replied || res.acted || b.turnWroteFiles(ctx, rs, startMs)) {
+		b.dropSession(d, rs)
+		res.usage = usage
+		return res, contextResetError{err: err}
+	}
 	if contextOverflow(err) {
 		b.noticeContextReset(ctx, d)
 		b.dropSession(d, rs)
@@ -1496,7 +1508,8 @@ func (b *Bridge) runTurn(ctx context.Context, d *drive, key driveKey, opts corep
 	// drain only the prompt, and exit before the agent produces any reply — the
 	// reply would then surface only on the next message's reflow.
 	b.waitTurnStart(ctx, rs.roomSession)
-	replied, err := b.reflow(ctx, reflowTurn{room: d.job.RoomID, channelID: d.job.ChannelID, jobID: d.job.JobID, deadline: deadline, bound: b.cfg.MaxTurn}, rs.roomSession, usage)
+	var acted bool
+	replied, err := b.reflow(ctx, reflowTurn{room: d.job.RoomID, channelID: d.job.ChannelID, jobID: d.job.JobID, deadline: deadline, bound: b.cfg.MaxTurn, acted: &acted}, rs.roomSession, usage)
 	b.postSessionState(ctx, d.job.RoomID, rs.roomSession, "idle")
 	// The turn moved the session's cursor: keep it for a restart.
 	sk := d.sessionKey()
@@ -1506,7 +1519,7 @@ func (b *Bridge) runTurn(ctx context.Context, d *drive, key driveKey, opts corep
 	if bound {
 		b.persistSession(sk, rs.roomSession)
 	}
-	return driveResult{workspaceID: rs.workspaceID, sessionID: rs.sessionID, replied: replied}, rs.roomSession, atStage(stageRun, err)
+	return driveResult{workspaceID: rs.workspaceID, sessionID: rs.sessionID, replied: replied, acted: acted}, rs.roomSession, atStage(stageRun, err)
 }
 
 // dropSession unbinds the drive's channel session when it is still rs, so
@@ -1521,6 +1534,31 @@ func (b *Bridge) dropSession(d *drive, rs *roomSession) {
 		b.unbindLocked(sk)
 	}
 	b.mu.Unlock()
+}
+
+// turnWroteFiles reports whether the turn that started at startMs wrote a
+// file of session rs's workspace (one it would deliver: not bnbloc's own,
+// not build output). A core that lists no session files delivers none.
+func (b *Bridge) turnWroteFiles(ctx context.Context, rs *roomSession, startMs int64) bool {
+	if rs == nil || rs.workspaceID == "" || rs.sessionID == "" {
+		return false
+	}
+	files, ep, _, ok := b.sessionFiles(ctx, rs.core)
+	if !ok {
+		return false
+	}
+	current, err := files.ListSessionFiles(ctx, ep, rs.workspaceID, rs.sessionID)
+	if err != nil {
+		// Unknown: assume it did.
+		return true
+	}
+	const skewMs = 2000
+	for _, f := range current {
+		if f.MtimeMs >= startMs-skewMs && !ignoredDeliverable(f.Path) {
+			return true
+		}
+	}
+	return false
 }
 
 // noticeContextReset tells the room a turn outgrew its model's context
@@ -1992,6 +2030,8 @@ type reflowTurn struct {
 	room, channelID, jobID string
 	deadline               time.Time
 	bound                  time.Duration
+	// acted is set when the core reports a step of the turn.
+	acted *bool
 }
 
 func (b *Bridge) reflow(ctx context.Context, t reflowTurn, rs *roomSession, usage *turnUsage) (bool, error) {
@@ -2052,6 +2092,9 @@ func (b *Bridge) reflow(ctx context.Context, t reflowTurn, rs *roomSession, usag
 		if tsErr == nil && !ts.Idle {
 			// A running turn's steps reach the room (transient).
 			b.relayProgress(ctx, t.jobID, ts, &progress)
+		}
+		if tsErr == nil && len(ts.Activity) > 0 && t.acted != nil {
+			*t.acted = true
 		}
 		progressed := false
 		var postErr error

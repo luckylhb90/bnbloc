@@ -200,6 +200,15 @@ type turnFailedError struct{ detail, code string }
 
 func (e turnFailedError) Error() string { return "turn failed: " + e.detail }
 
+// contextResetError: the turn outgrew its model's context window after it
+// had done something (a step, a reply, a file), so it was not run again:
+// its session was reset, and the request can be sent again. Final
+// (context_overflow).
+type contextResetError struct{ err error }
+
+func (e contextResetError) Error() string { return e.err.Error() }
+func (e contextResetError) Unwrap() error { return e.err }
+
 // turnDeadlineError: the turn was still running at its deadline (the
 // bridge's bound, Config.MaxTurn; the core reports it with
 // FailCodeDeadline, or the bridge's own deadline passed). Final: the turn
@@ -377,7 +386,11 @@ func driveErrorText(provider string, err error) string {
 	var failed turnFailedError
 	var notReady sandboxNotReadyError
 	var deadline turnDeadlineError
+	var reset contextResetError
 	switch {
+	case errors.As(err, &reset):
+		return "The conversation grew past " + provider + "'s context window while the agent was working, so it stopped and its conversation was reset. " +
+			"What it did so far stays; send the request again to continue (the room's history stays in .room/)."
 	case errors.Is(err, errNoReply):
 		return "The " + provider + " agent finished without a visible reply."
 	case errors.As(err, &deadline):

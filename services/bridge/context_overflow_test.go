@@ -15,11 +15,14 @@ import (
 
 // overflowProv runs each session's turn to the end its script gives (the
 // n-th created session ends as ends[n-1]); a session that ends without a
-// failure answers one reply.
+// failure answers one reply; acts[n-1] makes it report a step while busy,
+// says[n-1] a reply even when it fails.
 type overflowProv struct {
 	recordingProv
 	mu       sync.Mutex
 	ends     []corepkg.TurnStatus
+	acts     []bool
+	says     []bool
 	sessions int
 	polls    map[string]int
 }
@@ -39,6 +42,11 @@ func (p *overflowProv) end(sid string) corepkg.TurnStatus {
 	return p.ends[n-1]
 }
 
+func (p *overflowProv) scripted(flags []bool, sid string) bool {
+	n, _ := strconv.Atoi(strings.TrimPrefix(sid, "s"))
+	return n >= 1 && n <= len(flags) && flags[n-1]
+}
+
 func (p *overflowProv) PollTurn(_ context.Context, _ corepkg.Endpoint, _, sid string) (corepkg.TurnStatus, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -46,8 +54,16 @@ func (p *overflowProv) PollTurn(_ context.Context, _ corepkg.Endpoint, _, sid st
 		p.polls = map[string]int{}
 	}
 	p.polls[sid]++
-	if p.polls[sid] == 1 {
-		return corepkg.TurnStatus{Idle: false}, nil
+	busy := 1
+	if p.scripted(p.acts, sid) || p.scripted(p.says, sid) {
+		busy = 2 // the turn start's poll, then the reflow's
+	}
+	if p.polls[sid] <= busy {
+		var ts corepkg.TurnStatus
+		if p.scripted(p.acts, sid) {
+			ts.Activity = []corepkg.TurnActivity{{Kind: "tool", Title: "write report.md"}}
+		}
+		return ts, nil
 	}
 	return p.end(sid), nil
 }
@@ -55,7 +71,7 @@ func (p *overflowProv) PollTurn(_ context.Context, _ corepkg.Endpoint, _, sid st
 func (p *overflowProv) Messages(_ context.Context, _ corepkg.Endpoint, _, sid string, after int64) ([]corepkg.Message, int64, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if p.end(sid).Failed || after >= 1 {
+	if (p.end(sid).Failed && !p.scripted(p.says, sid)) || after >= 1 {
 		return nil, after, nil
 	}
 	return []corepkg.Message{{Version: 1, Seq: 1, Role: "assistant", Text: "done in " + sid, UserVisible: true, Completed: true, MessageID: "m-" + sid, CreatedAtMs: 1}}, 1, nil
@@ -117,6 +133,47 @@ func TestContextOverflowTwiceFails(t *testing.T) {
 	if len(texts) != 2 || strings.Contains(texts[1], "litellm") || !strings.Contains(texts[1], "even in a fresh session") ||
 		!strings.Contains(payloadField(last, "detail"), "ContextWindowExceededError") {
 		t.Fatalf("rows = %q (detail %q)", texts, payloadField(last, "detail"))
+	}
+}
+
+// An overflowing turn that already did something (a step, a reply) is not
+// run again, which could repeat it: its session is reset, and the room is
+// told once to send the request again. The next request starts fresh.
+func TestContextOverflowAfterWorkIsNotRunAgain(t *testing.T) {
+	over := corepkg.TurnStatus{Idle: true, Failed: true, FailCode: corepkg.FailCodeContextOverflow, FailMessage: "too long"}
+	for name, prov := range map[string]*overflowProv{
+		"a step":  {ends: []corepkg.TurnStatus{over}, acts: []bool{true}},
+		"a reply": {ends: []corepkg.TurnStatus{over}, says: []bool{true}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			gw := newSandboxGateway(t, "room-1", false)
+			b := New(Config{GatewayBaseURL: gw.srv.URL, GatewayToken: "t", OwnerSubject: "alice", Cores: newTestCore(prov)})
+			b.runBridgeJob(context.Background(), job("job-1", "alice"))
+			if prov.sessions != 1 {
+				t.Fatalf("sessions = %d; want the request not run again", prov.sessions)
+			}
+			if st := gw.lastStatus(); st["status"] != "failed" || st["failureReason"] != "context_overflow" {
+				t.Fatalf("status = %v", st)
+			}
+			_, fresh := gw.stored()
+			texts := storedTexts(fresh)
+			resets := 0
+			for _, text := range texts {
+				if strings.Contains(text, "conversation was reset") && strings.Contains(text, "send the request again") {
+					resets++
+				}
+				if strings.Contains(text, "continuing in a fresh session") {
+					t.Fatalf("rows = %q; want no continuation notice", texts)
+				}
+			}
+			if resets != 1 {
+				t.Fatalf("rows = %q; want one reset notice", texts)
+			}
+			b.runBridgeJob(context.Background(), job("job-2", "alice"))
+			if prov.sessions != 2 {
+				t.Fatalf("sessions = %d; want the next request in a fresh session", prov.sessions)
+			}
+		})
 	}
 }
 
