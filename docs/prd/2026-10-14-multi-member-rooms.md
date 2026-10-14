@@ -61,6 +61,37 @@ but several paths leak, misattribute or starve.
    because the owner has not authorized borrowing, the owner gets a request
    they can approve in one step, and the asker is told it was requested.
 
+## 2b. Design review (2026-10-14)
+
+Found by reviewing the rules above against the code before building:
+
+- **A borrower gets their own workspace**, not only their own session: a
+  shared slot workspace would let a borrower's agent read the owner's
+  unpublished files. Collaboration goes through the room's deliverables.
+- **One agent runs turns in parallel.** The drive lock was per agent slot,
+  so one agent's turns were serialized across every channel and every
+  requester; with turns of no fixed length a three-hour task would block
+  everyone else for hours. The lock is per session, and an agent runs at
+  most its core's `limits.maxConcurrentTurns` turns at once (2 when the core
+  states none); a job waiting for a slot keeps its lease.
+- **Context-overflow retry never repeats side effects**: it reruns the
+  request only when the failed turn did nothing observable (no tool step,
+  no message, no deliverable); otherwise the session is reset and the room
+  told the request can be sent again.
+- **Progress titles are redacted** in the bridge before they reach the room
+  (secret-looking assignments, auth headers, tokens): every member sees
+  them.
+- **Attachments are indexed, not copied wholesale**: all are listed; only
+  bounded ones are mirrored (like deliverable copies); `read_artifact`
+  reads any room file — a deliverable or an attachment.
+- **Turn-input deltas are capped** (about 20 lines, 4,000 characters; long
+  replies cut, the rest in `recent.md`).
+- **A deletion or redaction resets the sessions that may have seen it**:
+  rewriting the records is not enough once the text was in a turn input.
+- **Channel files use the channel id**; names are shown in the index.
+- **Names never replace identity**: the first mention shows "Name (id)",
+  the owner and requester lines always carry the id.
+
 ## 3. Tests
 
 - Two members, each with their own agent, in one room (the release check
