@@ -3679,15 +3679,23 @@ export const QuotaPending = "pending";
 export const QuotaApproved = "approved";
 export const QuotaDeclined = "declined";
 
+// Borrow request kinds (QuotaRequest.Kind; store.QuotaRequestKind): more
+// runs on a live authorization, or access to borrow at all — recorded when
+// a borrow was refused because the owner had authorized none; approving it
+// authorizes the agent in the room.
+export const QuotaKindRuns = "quota";
+export const QuotaKindAccess = "access";
+
 // QuotaRequest is one borrower's request for more runs on an owner's room
 // authorization of Provider (the grant discriminator: "<core>:<provider>" or a
-// bare provider).
+// bare provider), or (Kind access) for an authorization to borrow it.
 export interface QuotaRequest {
   requestId: string;
   roomId: string;
   owner: string;
   requester: string;
   provider: string;
+  kind: QuotaRequestKind;
   requestedRuns?: number;
   note?: string;
   status: QuotaRequestStatus;
@@ -4350,6 +4358,8 @@ export type UsageAs = "owner" | "borrower" | "tenant";
 export const UsageAsValues: readonly UsageAs[] = ["owner", "borrower", "tenant"];
 export type QuotaRequestStatus = "pending" | "approved" | "declined";
 export const QuotaRequestStatusValues: readonly QuotaRequestStatus[] = ["pending", "approved", "declined"];
+export type QuotaRequestKind = "quota" | "access";
+export const QuotaRequestKindValues: readonly QuotaRequestKind[] = ["quota", "access"];
 export type WorkCategory = "office" | "data" | "productivity" | "content" | "learning" | "engineering" | "finance" | "life" | "other";
 export const WorkCategoryValues: readonly WorkCategory[] = ["office", "data", "productivity", "content", "learning", "engineering", "finance", "life", "other"];
 export type WorkType = "app" | "site" | "image" | "video" | "audio" | "document" | "slides" | "table" | "other";

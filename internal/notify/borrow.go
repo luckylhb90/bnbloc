@@ -13,7 +13,8 @@ import (
 )
 
 // BorrowRequested notifies an agent owner that a borrower asked for more runs
-// on the owner's room authorization (a borrow quota request). It returns at
+// on the owner's room authorization (a borrow quota request), or for access
+// to borrow the agent at all (an access request). It returns at
 // once: the enqueue runs detached, bounded, and best-effort, so the request
 // write never waits on (or fails because of) notification work.
 func (e *Emitter) BorrowRequested(ctx context.Context, q store.QuotaRequest) {
@@ -36,9 +37,15 @@ func (e *Emitter) BorrowRequested(ctx context.Context, q store.QuotaRequest) {
 	if text == "" {
 		text = "Approve or decline the request in the room."
 	}
+	title := q.RequesterUserID + " asked for more runs on your " + q.Provider + " agent"
+	if q.Kind == store.QuotaRequestAccess {
+		// A borrow refused for want of an authorization: approving it
+		// authorizes the agent in the room.
+		title = q.RequesterUserID + " asked to use your " + q.Provider + " agent in this room"
+	}
 	ev := Event{
 		Type: wire.NotificationBorrowRequest, RoomID: q.RoomID, Recipients: []string{q.OwnerUserID},
-		Actor: q.RequesterUserID, Title: q.RequesterUserID + " asked for more runs on your " + q.Provider + " agent",
+		Actor: q.RequesterUserID, Title: title,
 		Text: text, DedupKey: "quota:" + q.RequestID,
 	}
 	go func() {

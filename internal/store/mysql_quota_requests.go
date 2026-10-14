@@ -20,19 +20,20 @@ func NewMySQLQuotaRequests(db *sql.DB) *MySQLQuotaRequests { return &MySQLQuotaR
 
 var _ QuotaRequestStore = (*MySQLQuotaRequests)(nil)
 
-const quotaRequestCols = `request_id, room_id, owner_user_id, requester_user_id, provider, requested_runs,
+const quotaRequestCols = `request_id, room_id, owner_user_id, requester_user_id, provider, kind, requested_runs,
   note, status, granted_runs, created_at_ms, decided_at_ms, decided_by`
 
 func scanQuotaRequest(scan func(...any) error, tnt string) (QuotaRequest, error) {
 	var r QuotaRequest
 	var requested, granted sql.NullInt64
-	var status string
-	if err := scan(&r.RequestID, &r.RoomID, &r.OwnerUserID, &r.RequesterUserID, &r.Provider, &requested,
+	var status, kind string
+	if err := scan(&r.RequestID, &r.RoomID, &r.OwnerUserID, &r.RequesterUserID, &r.Provider, &kind, &requested,
 		&r.Note, &status, &granted, &r.CreatedAtMs, &r.DecidedAtMs, &r.DecidedBy); err != nil {
 		return QuotaRequest{}, err
 	}
 	r.TenantID = tnt
 	r.Status = QuotaRequestStatus(status)
+	r.Kind = QuotaRequestKind(kind)
 	if requested.Valid {
 		v := int(requested.Int64)
 		r.RequestedRuns = &v
@@ -54,13 +55,16 @@ func (s *MySQLQuotaRequests) CreateQuotaRequest(ctx context.Context, r QuotaRequ
 	}
 	r.TenantID = tnt
 	r.Status = QuotaRequestPending
+	if r.Kind == "" {
+		r.Kind = QuotaRequestMoreRuns
+	}
 	pk := quotaPendingKey(tnt, r)
 	_, err = s.DB.ExecContext(ctx,
 		`INSERT INTO shared_agent_quota_requests
-		 (request_id, tenant_id, room_id, owner_user_id, requester_user_id, provider, requested_runs,
+		 (request_id, tenant_id, room_id, owner_user_id, requester_user_id, provider, kind, requested_runs,
 		  note, status, pending_key, created_at_ms)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)`,
-		r.RequestID, tnt, r.RoomID, r.OwnerUserID, r.RequesterUserID, r.Provider, nullPtr(r.RequestedRuns),
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)`,
+		r.RequestID, tnt, r.RoomID, r.OwnerUserID, r.RequesterUserID, r.Provider, string(r.Kind), nullPtr(r.RequestedRuns),
 		r.Note, pk, r.CreatedAtMs)
 	if isDupKey(err, "uq_quota_req_pending") {
 		existing, gerr := scanQuotaRequest(s.DB.QueryRowContext(ctx,

@@ -125,15 +125,27 @@ const (
 	QuotaDeclined = "declined"
 )
 
+// Borrow request kinds (QuotaRequest.Kind; store.QuotaRequestKind): more
+// runs on a live authorization, or access to borrow at all — recorded when
+// a borrow was refused because the owner had authorized none; approving it
+// authorizes the agent in the room.
+//
+//wire:union QuotaRequestKind
+const (
+	QuotaKindRuns   = "quota"
+	QuotaKindAccess = "access"
+)
+
 // QuotaRequest is one borrower's request for more runs on an owner's room
 // authorization of Provider (the grant discriminator: "<core>:<provider>" or a
-// bare provider).
+// bare provider), or (Kind access) for an authorization to borrow it.
 type QuotaRequest struct {
 	RequestID     string `json:"requestId"`
 	RoomID        string `json:"roomId"`
 	Owner         string `json:"owner"`
 	Requester     string `json:"requester"`
 	Provider      string `json:"provider"`
+	Kind          string `json:"kind" tstype:"QuotaRequestKind"`
 	RequestedRuns *int   `json:"requestedRuns,omitempty"`
 	Note          string `json:"note,omitempty"`
 	Status        string `json:"status" tstype:"QuotaRequestStatus"`

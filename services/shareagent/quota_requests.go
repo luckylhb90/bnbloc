@@ -3,6 +3,7 @@ package shareagenthttp
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"net/http"
 	"strings"
 	"unicode/utf8"
@@ -18,7 +19,12 @@ import (
 
 // Borrow quota requests (F3). A borrower asks an agent's owner for more runs
 // on the owner's room authorization; the owner approves (raising the
-// authorization's run quota, keeping its usage history) or declines. Like the
+// authorization's run quota, keeping its usage history) or declines. When
+// the owner has no live authorization the request asks for access (kind
+// access, docs/prd/2026-10-14-multi-member-rooms.md rule 9): approving it
+// authorizes the agent in the room in one step. A borrow the reservation
+// refused for want of an authorization records that request itself
+// (requestAccess). Like the
 // authorization itself this is fail-closed on identity: the requester and the
 // deciding owner are always X-Bnbloc-User, never a body field, and only the
 // request's owner may decide it.
@@ -42,6 +48,7 @@ func quotaRequestView(q store.QuotaRequest) wire.QuotaRequest {
 		Owner:         q.OwnerUserID,
 		Requester:     q.RequesterUserID,
 		Provider:      q.Provider,
+		Kind:          string(quotaKind(q)),
 		RequestedRuns: q.RequestedRuns,
 		Note:          q.Note,
 		Status:        string(q.Status),
@@ -49,6 +56,14 @@ func quotaRequestView(q store.QuotaRequest) wire.QuotaRequest {
 		CreatedAtMs:   q.CreatedAtMs,
 		DecidedAtMs:   q.DecidedAtMs,
 	}
+}
+
+// quotaKind is a request's kind (more runs when it names none).
+func quotaKind(q store.QuotaRequest) store.QuotaRequestKind {
+	if q.Kind == "" {
+		return store.QuotaRequestMoreRuns
+	}
+	return q.Kind
 }
 
 func validRuns(n *int) bool { return n == nil || (*n >= 1 && *n <= maxQuotaRequestRuns) }
@@ -95,14 +110,14 @@ func (s *Service) handleCreateQuotaRequest(w http.ResponseWriter, r *http.Reques
 		httpx.Error(w, "note must be at most 500 characters", http.StatusBadRequest)
 		return
 	}
-	grant, live := s.liveAuthorization(r.Context(), roomID, owner, provider)
-	if !live {
-		httpx.Error(w, "the owner has no active authorization for this agent in this room", http.StatusConflict)
-		return
-	}
-	if grant.RunQuota == nil {
-		httpx.Error(w, "this authorization has no run limit", http.StatusConflict)
-		return
+	// No live authorization: the request asks for access.
+	kind := store.QuotaRequestAccess
+	if grant, live := s.liveAuthorization(r.Context(), roomID, owner, provider); live {
+		if grant.RunQuota == nil {
+			httpx.Error(w, "this authorization has no run limit", http.StatusConflict)
+			return
+		}
+		kind = store.QuotaRequestMoreRuns
 	}
 	created, err := s.QuotaRequests.CreateQuotaRequest(r.Context(), store.QuotaRequest{
 		RequestID:       ids.New("qr_"),
@@ -110,6 +125,7 @@ func (s *Service) handleCreateQuotaRequest(w http.ResponseWriter, r *http.Reques
 		OwnerUserID:     owner,
 		RequesterUserID: requester,
 		Provider:        provider,
+		Kind:            kind,
 		RequestedRuns:   in.RequestedRuns,
 		Note:            note,
 		CreatedAtMs:     s.Now(),
@@ -228,15 +244,19 @@ func (s *Service) handleApproveQuotaRequest(w http.ResponseWriter, r *http.Reque
 	if runs == nil {
 		runs = req.RequestedRuns
 	}
-	if runs == nil {
-		httpx.Error(w, "runs is required (the request named no amount)", http.StatusBadRequest)
-		return
-	}
 	if !validRuns(runs) {
 		httpx.Error(w, "runs must be between 1 and 10000", http.StatusBadRequest)
 		return
 	}
 	owner := callerSubject(r)
+	if quotaKind(req) == store.QuotaRequestAccess {
+		s.approveAccess(w, r, req, owner, runs)
+		return
+	}
+	if runs == nil {
+		httpx.Error(w, "runs is required (the request named no amount)", http.StatusBadRequest)
+		return
+	}
 	if _, live := s.liveAuthorization(r.Context(), req.RoomID, owner, req.Provider); !live {
 		httpx.Error(w, "your authorization for this agent is no longer active; authorize it again first", http.StatusConflict)
 		return
@@ -267,6 +287,56 @@ func (s *Service) handleApproveQuotaRequest(w http.ResponseWriter, r *http.Reque
 		resp["runQuota"] = *grant.RunQuota
 	}
 	httpx.WriteJSON(w, http.StatusOK, resp)
+}
+
+// approveAccess approves an access request: the owner's room authorization
+// of the provider (authorizeRoom's defaults; runs, when given, its run
+// quota), unless one is live already (the owner authorized meanwhile).
+func (s *Service) approveAccess(w http.ResponseWriter, r *http.Request, req store.QuotaRequest, owner string, runs *int) {
+	decided, err := s.QuotaRequests.DecideQuotaRequest(r.Context(), store.QuotaDecision{
+		RequestID: req.RequestID, OwnerUserID: owner, Status: store.QuotaRequestApproved, GrantedRuns: runs, AtMs: s.Now(),
+	})
+	if err != nil {
+		s.writeDecideErr(w, err)
+		return
+	}
+	grant, live := s.liveAuthorization(r.Context(), req.RoomID, owner, req.Provider)
+	if !live {
+		if grant, err = s.authorizeRoom(r.Context(), req.RoomID, owner, req.Provider, authorizeBody{RunQuota: runs}); err != nil {
+			_ = s.QuotaRequests.ReopenQuotaRequest(r.Context(), req.RequestID)
+			obs.ServerError(w, "authorize failed", err)
+			httpx.Error(w, "authorize failed", http.StatusInternalServerError)
+			return
+		}
+	}
+	resp := map[string]any{"request": quotaRequestView(decided), "authorized": true, "grantId": grant.GrantID}
+	if grant.ExpiresAtMs != nil {
+		resp["expiresAtMs"] = *grant.ExpiresAtMs
+	}
+	httpx.WriteJSON(w, http.StatusOK, resp)
+}
+
+// requestAccess records borrower's access request to owner for provider in
+// roomID (a reservation refused for want of an authorization) and notifies
+// the owner; an open request already there is answered as is. Best-effort:
+// it reports whether a request is open.
+func (s *Service) requestAccess(ctx context.Context, roomID, owner, borrower, provider string) (store.QuotaRequest, bool) {
+	if s.QuotaRequests == nil {
+		return store.QuotaRequest{}, false
+	}
+	created, err := s.QuotaRequests.CreateQuotaRequest(ctx, store.QuotaRequest{
+		RequestID: ids.New("qr_"), RoomID: roomID, OwnerUserID: owner, RequesterUserID: borrower,
+		Provider: provider, Kind: store.QuotaRequestAccess, CreatedAtMs: s.Now(),
+	})
+	switch {
+	case errors.Is(err, store.ErrQuotaRequestPending):
+		return created, true
+	case err != nil:
+		slog.Warn("bnbloc shareagent: access request not recorded", "event", "bnbloc.shareagent.access_request_failed", "room", roomID, "error", err)
+		return store.QuotaRequest{}, false
+	}
+	s.notifyQuotaRequest(ctx, created)
+	return created, true
 }
 
 // handleDeclineQuotaRequest declines a pending request (owner only).

@@ -95,13 +95,18 @@ func (s *Service) handleReserveBorrow(w http.ResponseWriter, r *http.Request) {
 	if platform {
 		spec, published = s.platformGrantSpec(r.Context(), current)
 	}
+	extra := map[string]any{}
 	deny := func(reason string) {
 		shareagent.RecordDecision(s.Metrics, "deny", reason)
 		_ = s.Grants.AppendAudit(r.Context(), store.AuditRecord{
 			RoomID: roomID, GrantID: grantID, ActorUserID: borrower, OwnerUserID: owner,
 			Action: "turn", Decision: "deny", DenyReason: reason, Model: model, ChannelID: channelID, AtMs: s.Now(),
 		})
-		httpx.WriteJSON(w, http.StatusForbidden, map[string]any{"reserved": false, "denyReason": reason, "sandboxRequired": platform})
+		resp := map[string]any{"reserved": false, "denyReason": reason, "sandboxRequired": platform}
+		for k, v := range extra {
+			resp[k] = v
+		}
+		httpx.WriteJSON(w, http.StatusForbidden, resp)
 	}
 	switch {
 	case platform && !published:
@@ -147,6 +152,11 @@ func (s *Service) handleReserveBorrow(w http.ResponseWriter, r *http.Request) {
 	})
 	switch {
 	case errors.Is(err, store.ErrGrantNotFound):
+		// The borrower asks the owner for access: one request, approved
+		// in one step (requestAccess).
+		if req, ok := s.requestAccess(r.Context(), roomID, owner, borrower, provider); ok {
+			extra["accessRequested"], extra["requestId"] = true, req.RequestID
+		}
 		deny(shareagent.DenyOwnerNotAuthorized)
 		return
 	case errors.Is(err, store.ErrRunQuotaExhausted), errors.Is(err, store.ErrCostAllowanceExhausted):

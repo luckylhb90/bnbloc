@@ -1549,6 +1549,15 @@ WHERE r.channel_id = '' AND d.user_id IS NULL`)
 			return addColumnIfMissing(ctx, db, "tenants", "assist_disabled", "TINYINT(1) NOT NULL DEFAULT 0 AFTER publish_approval")
 		},
 	},
+	{
+		// A borrow request's kind: more runs ("quota", every existing
+		// row) or access to borrow at all ("access",
+		// docs/prd/2026-10-14-multi-member-rooms.md rule 9). Additive.
+		id: "2026_10_borrow_access_requests",
+		run: func(ctx context.Context, db sqlConn) error {
+			return addColumnIfMissing(ctx, db, "shared_agent_quota_requests", "kind", "VARCHAR(16) NOT NULL DEFAULT 'quota' AFTER provider")
+		},
+	},
 }
 
 // sqlConn is the statement surface a migration runs on. runMigrations passes

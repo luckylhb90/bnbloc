@@ -103,50 +103,13 @@ func (s *Service) handleAuthorize(w http.ResponseWriter, r *http.Request) {
 	if !httpx.DecodeJSON(w, r, httpx.DefaultBodyLimit, &body) {
 		return
 	}
-	// The model range is exactly what the owner authorized. No default is
-	// invented here: a model catalog is environment data owned by the agent's
-	// core/provider, so an omitted list stays empty rather than becoming a
-	// hardcoded model name that is wrong for every other provider.
-	models := make([]store.AllowedModel, 0, len(body.AllowedModels))
-	for _, m := range body.AllowedModels {
-		if m = strings.TrimSpace(m); m != "" {
-			models = append(models, store.AllowedModel{Model: m})
-		}
-	}
-	maxConc := body.MaxConcurrent
-	if maxConc < 1 {
-		maxConc = 2
-	}
-	// Authorization TTL: bounded default 24h, capped at 7d, owner-shortenable.
-	const defaultTTL = int64(24 * 60 * 60 * 1000)
-	const maxTTL = int64(7 * 24 * 60 * 60 * 1000)
-	ttl := body.TTLMs
-	if ttl <= 0 {
-		ttl = defaultTTL
-	} else if ttl > maxTTL {
-		ttl = maxTTL
-	}
-	expiresAt := s.Now() + ttl
-	grantID := roomAuthGrantID(r.Context(), roomID, owner, provider)
-	grant := store.Grant{
-		GrantID:       grantID,
-		RoomID:        roomID,
-		TargetID:      "shared-agent:" + provider,
-		OwnerUserID:   owner,
-		GranteeUserID: "*",
-		AllowedModels: models,
-		Capabilities:  store.Capabilities{Consult: true, Review: true, Delegate: true, Upgrade: true},
-		RunQuota:      body.RunQuota,
-		MaxConcurrent: maxConc,
-		CreatedAtMs:   s.Now(),
-		CreatedBy:     owner,
-		ExpiresAtMs:   &expiresAt,
-	}
-	if err := s.Grants.PutGrant(r.Context(), grant); err != nil {
+	grant, err := s.authorizeRoom(r.Context(), roomID, owner, provider, body)
+	if err != nil {
 		obs.ServerError(w, "authorize failed", err)
 		httpx.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	grantID, expiresAt := grant.GrantID, *grant.ExpiresAtMs
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{
 		"authorized":  true,
 		"grantId":     grantID,
@@ -234,4 +197,56 @@ func (s *Service) roomAuthorized(ctx context.Context, roomID, owner, provider st
 		expiresAt = *grant.ExpiresAtMs
 	}
 	return true, expiresAt, grant.AllowedModels
+}
+
+// authorizeRoom writes owner's room-wide borrow authorization of provider
+// in roomID from body (the one construction: the authorize route and an
+// approved access request): the models the owner allowed (never an
+// invented default), at most body.MaxConcurrent (default 2) concurrent
+// runs, body.RunQuota, a lifetime of body.TTLMs (default 24h, capped at
+// 7d).
+func (s *Service) authorizeRoom(ctx context.Context, roomID, owner, provider string, body authorizeBody) (store.Grant, error) {
+	// The model range is exactly what the owner authorized. No default is
+	// invented here: a model catalog is environment data owned by the agent's
+	// core/provider, so an omitted list stays empty rather than becoming a
+	// hardcoded model name that is wrong for every other provider.
+	models := make([]store.AllowedModel, 0, len(body.AllowedModels))
+	for _, m := range body.AllowedModels {
+		if m = strings.TrimSpace(m); m != "" {
+			models = append(models, store.AllowedModel{Model: m})
+		}
+	}
+	maxConc := body.MaxConcurrent
+	if maxConc < 1 {
+		maxConc = 2
+	}
+	// Authorization TTL: bounded default 24h, capped at 7d, owner-shortenable.
+	const defaultTTL = int64(24 * 60 * 60 * 1000)
+	const maxTTL = int64(7 * 24 * 60 * 60 * 1000)
+	ttl := body.TTLMs
+	if ttl <= 0 {
+		ttl = defaultTTL
+	} else if ttl > maxTTL {
+		ttl = maxTTL
+	}
+	expiresAt := s.Now() + ttl
+	grantID := roomAuthGrantID(ctx, roomID, owner, provider)
+	grant := store.Grant{
+		GrantID:       grantID,
+		RoomID:        roomID,
+		TargetID:      "shared-agent:" + provider,
+		OwnerUserID:   owner,
+		GranteeUserID: "*",
+		AllowedModels: models,
+		Capabilities:  store.Capabilities{Consult: true, Review: true, Delegate: true, Upgrade: true},
+		RunQuota:      body.RunQuota,
+		MaxConcurrent: maxConc,
+		CreatedAtMs:   s.Now(),
+		CreatedBy:     owner,
+		ExpiresAtMs:   &expiresAt,
+	}
+	if err := s.Grants.PutGrant(ctx, grant); err != nil {
+		return store.Grant{}, err
+	}
+	return grant, nil
 }

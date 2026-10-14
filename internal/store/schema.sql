@@ -537,6 +537,7 @@ CREATE TABLE IF NOT EXISTS shared_agent_quota_requests (
   owner_user_id     VARCHAR(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
   requester_user_id VARCHAR(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
   provider          VARCHAR(128) NOT NULL,
+  kind              VARCHAR(16) NOT NULL DEFAULT 'quota',
   requested_runs    INT NULL,
   note              VARCHAR(500) NOT NULL DEFAULT '',
   status            ENUM('pending','approved','declined') NOT NULL DEFAULT 'pending',

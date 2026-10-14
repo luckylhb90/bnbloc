@@ -17,6 +17,20 @@ import (
 // authenticated callers; the store additionally refuses a decision by anyone
 // but the request's owner.
 
+// QuotaRequestKind is what a borrow request asks of the owner.
+type QuotaRequestKind string
+
+// Borrow request kinds.
+const (
+	// QuotaRequestMoreRuns: more runs on the owner's live authorization.
+	QuotaRequestMoreRuns QuotaRequestKind = "quota"
+	// QuotaRequestAccess: an authorization to borrow at all, recorded when
+	// a borrow was refused because the owner had none
+	// (docs/prd/2026-10-14-multi-member-rooms.md rule 9); approving it
+	// authorizes the agent in the room.
+	QuotaRequestAccess QuotaRequestKind = "access"
+)
+
 // QuotaRequestStatus is a quota request's lifecycle state.
 type QuotaRequestStatus string
 
@@ -48,6 +62,8 @@ type QuotaRequest struct {
 	OwnerUserID     string
 	RequesterUserID string
 	Provider        string
+	// Kind is what the request asks (QuotaRequestMoreRuns when empty).
+	Kind QuotaRequestKind
 	// RequestedRuns is how many more runs the borrower asked for (nil = the
 	// borrower left the amount to the owner).
 	RequestedRuns *int
@@ -142,6 +158,9 @@ func (s *MemoryQuotaRequests) CreateQuotaRequest(ctx context.Context, r QuotaReq
 	}
 	r.TenantID = tnt
 	r.Status = QuotaRequestPending
+	if r.Kind == "" {
+		r.Kind = QuotaRequestMoreRuns
+	}
 	pk := quotaPendingKey(tnt, r)
 	s.mu.Lock()
 	defer s.mu.Unlock()

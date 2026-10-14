@@ -68,6 +68,18 @@ func quotaRequestCases(t *testing.T, s QuotaRequestStore, tnt, room string) {
 	if _, err := s.CreateQuotaRequest(ctx, dup); err != nil {
 		t.Fatalf("create after decision: %v", err)
 	}
+	// A request's kind round-trips (more runs when it names none).
+	if r, _ := s.GetQuotaRequest(ctx, dup.RequestID); r.Kind != QuotaRequestMoreRuns {
+		t.Fatalf("kind = %q, want quota", r.Kind)
+	}
+	access := QuotaRequest{RequestID: "qr-3-" + room, RoomID: room, OwnerUserID: "dave", RequesterUserID: "carol",
+		Provider: "core:codex", Kind: QuotaRequestAccess, CreatedAtMs: 500}
+	if _, err := s.CreateQuotaRequest(ctx, access); err != nil {
+		t.Fatalf("create access: %v", err)
+	}
+	if r, _ := s.GetQuotaRequest(ctx, access.RequestID); r.Kind != QuotaRequestAccess {
+		t.Fatalf("access kind = %q", r.Kind)
+	}
 	// Only an approved request reopens; a taken id is refused.
 	if err := s.ReopenQuotaRequest(ctx, dup.RequestID); !errors.Is(err, ErrQuotaRequestDecided) {
 		t.Fatalf("reopen of a pending request = %v, want ErrQuotaRequestDecided", err)

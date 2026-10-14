@@ -137,7 +137,6 @@ func TestQuotaRequestDeclineAndPreconditions(t *testing.T) {
 		want               int
 	}{
 		{"own agent", "alice", `{"roomId":"room-1","owner":"alice","provider":"codex"}`, http.StatusBadRequest},
-		{"no authorization", "bob", `{"roomId":"room-1","owner":"alice","provider":"gemini"}`, http.StatusConflict},
 		{"unlimited authorization", "bob", `{"roomId":"room-1","owner":"jack","provider":"claude"}`, http.StatusConflict},
 		{"bad runs", "bob", `{"roomId":"room-1","owner":"alice","provider":"codex","requestedRuns":0}`, http.StatusBadRequest},
 		{"non-member requester", "mallory", `{"roomId":"room-1","owner":"alice","provider":"codex"}`, http.StatusForbidden},
@@ -172,8 +171,8 @@ func TestQuotaRequestDeclineAndPreconditions(t *testing.T) {
 	_ = gs.RevokeGrant(tctx(tenant.Default), roomAuthGrantID(tctx(tenant.Default), "room-1", "alice", "codex"), 1)
 	_, list, _ := call(t, svc, http.MethodGet, "/v1/borrow/quota-requests?role=owner&status=pending", "alice", "")
 	pending := list["requests"].([]any)
-	if len(pending) != 1 {
-		t.Fatalf("pending = %d, want 1", len(pending))
+	if len(pending) != 1 || pending[0].(map[string]any)["kind"] != "quota" {
+		t.Fatalf("pending = %v, want the one quota request", pending)
 	}
 	pid := pending[0].(map[string]any)["requestId"].(string)
 	if code, _, _ := call(t, svc, http.MethodPost, "/v1/borrow/quota-requests/"+pid+"/approve", "alice", ""); code != http.StatusConflict {
