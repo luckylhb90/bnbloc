@@ -18,6 +18,7 @@ import { useWebUpdate, WebUpdateNotice } from "@/views/WebUpdateNotice";
 import { GettingStarted } from "@/views/onboarding/GettingStarted";
 import { takeLoginReturn } from "@/lib/loginReturn";
 import { TourOverlay } from "@/views/onboarding/TourOverlay";
+import { LocalFileOpener } from "@/views/LocalFileOpener";
 
 // Surfaces load on demand so the first paint ships only the shell and the
 // landing views: sign-in is not downloaded by a signed-in member, a room's
@@ -164,6 +165,7 @@ export function App() {
         <GlobalSearch onOpenRoom={openRoom} />
       </Suspense>
       <TourOverlay subject={subject} inRoom={room !== null} />
+      <LocalFileOpener subject={subject} tenant={tenant ?? ""} onOpenRoom={openRoom} />
       <Shell
         footerNotice={(collapsed, closeDrawer) => (
           <>

@@ -43,6 +43,9 @@ export const StorageKey = {
   // Where sign-in brings the person back to (sessionStorage,
   // lib/loginReturn.ts).
   loginReturn: "bnbloc.loginReturn",
+  // "Don't ask again" for uploading an opened local document, per member
+  // (lib/localOpen.ts).
+  localOpenConsent: "bnbloc.localOpenConsent",
 } as const;
 
 export type StorageKeyName = (typeof StorageKey)[keyof typeof StorageKey];

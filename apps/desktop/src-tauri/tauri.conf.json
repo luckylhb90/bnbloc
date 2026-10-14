@@ -45,6 +45,14 @@
       "binaries/bnbloc-bridge"
     ],
     "category": "DeveloperTool",
+    "fileAssociations": [
+      { "ext": ["pptx"], "name": "PowerPoint presentation", "contentTypes": ["org.openxmlformats.presentationml.presentation"], "role": "Editor", "rank": "Alternate" },
+      { "ext": ["docx"], "name": "Word document", "contentTypes": ["org.openxmlformats.wordprocessingml.document"], "role": "Editor", "rank": "Alternate" },
+      { "ext": ["xlsx"], "name": "Excel workbook", "contentTypes": ["org.openxmlformats.spreadsheetml.sheet"], "role": "Editor", "rank": "Alternate" },
+      { "ext": ["pdf"], "name": "PDF document", "contentTypes": ["com.adobe.pdf"], "role": "Viewer", "rank": "Alternate" },
+      { "ext": ["md", "markdown"], "name": "Markdown document", "contentTypes": ["net.daringfireball.markdown"], "role": "Editor", "rank": "Alternate" },
+      { "ext": ["csv"], "name": "CSV table", "contentTypes": ["public.comma-separated-values-text"], "role": "Editor", "rank": "Alternate" }
+    ],
     "macOS": {
       "entitlements": "./Entitlements.plist",
       "hardenedRuntime": true,

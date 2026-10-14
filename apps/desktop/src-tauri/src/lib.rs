@@ -10,6 +10,7 @@ mod child_process;
 mod dirs;
 mod files;
 mod internal_ext;
+mod local_files;
 mod previewer_scheme;
 mod secret;
 mod settings;
@@ -318,12 +319,15 @@ pub fn run() {
         // persisted session. The second process just focuses the existing
         // window and exits; with the `deep-link` feature its argv link is
         // forwarded to the deep-link handler first.
-        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+        .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
             if let Some(win) = app.get_webview_window(MAIN_WINDOW) {
                 let _ = win.show();
                 let _ = win.set_focus();
             }
+            // `bnbloc-desktop <file>` while the app runs: open it here.
+            local_files::hand(app, local_files::paths_in_args(&args));
         }))
+        .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         // The live-artifact runner's own origin (see artifact_scheme): agent
@@ -368,6 +372,15 @@ pub fn run() {
                 None => Settings::default(),
             };
             sso_deep_link::setup(&handle);
+            app.manage(local_files::LocalFiles::load(
+                dirs.as_ref().ok().map(dirs::Dirs::local_files_file),
+            ));
+            // A cold start with files to open: `bnbloc-desktop <file>`, or
+            // Open With delivered before this ran.
+            let launch: Vec<String> = std::env::args().collect();
+            let mut paths = local_files::take_early();
+            paths.extend(local_files::paths_in_args(&launch));
+            local_files::hand(&handle, paths);
 
             // Inject the gateway URL before any page script runs, so the shared
             // UI's /v1 + /api calls reach the right origin in bundled mode (the
@@ -450,6 +463,12 @@ pub fn run() {
             internal_ext::sandbox::sandbox_env_set,
             internal_ext::sandbox::sandbox_restart_vm,
             shell_env_reload,
+            local_files::local_file_pick,
+            local_files::local_file_take_pending,
+            local_files::local_file_read,
+            local_files::local_file_bind,
+            local_files::local_file_for_artifact,
+            local_files::local_file_save,
         ])
         .on_page_load(|webview, payload| {
             // A pending cold-start SSO link is applied once the main page has
@@ -464,12 +483,14 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building bnbloc desktop");
 
-    app.run(|app, event| {
+    app.run(|app, event| match event {
         // App exit (quit, main window closed, updater restart): stop the
         // bridge and every sidecar together — gracefully, then forced.
-        if let tauri::RunEvent::Exit = event {
-            child_process::terminate_all(detach_children(app), EXIT_GRACE);
-        }
+        tauri::RunEvent::Exit => child_process::terminate_all(detach_children(app), EXIT_GRACE),
+        // macOS Open With / a double-click on an associated document.
+        #[cfg(target_os = "macos")]
+        tauri::RunEvent::Opened { urls } => local_files::hand(app, local_files::paths_in_urls(&urls)),
+        _ => {}
     });
 }
 

@@ -11,6 +11,8 @@
 //!   treated as empty and then overwritten (that erased credentials).
 //! - `owner_name`: which file a temp, partial download or quarantined copy
 //!   belongs to, so a sweep forgets them with their component.
+//! - `write_document`: a member's own document saved back (local_files):
+//!   atomic like `atomic_write`, but keeping the document's permissions.
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
@@ -34,6 +36,30 @@ pub(crate) fn atomic_write(path: &Path, raw: &[u8]) -> Result<(), String> {
         }
         let mut file = options.open(&tmp)?;
         file.write_all(raw)?;
+        file.sync_all()
+    })();
+    if let Err(e) = written {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(format!("write {}: {e}", path.display()));
+    }
+    std::fs::rename(&tmp, path).map_err(|e| {
+        let _ = std::fs::remove_file(&tmp);
+        format!("replace {}: {e}", path.display())
+    })
+}
+
+/// Write a member's document atomically (a temp beside it, synced, then
+/// renamed over it), keeping the permissions of the file it replaces; a
+/// new file gets the process default.
+pub(crate) fn write_document(path: &Path, raw: &[u8]) -> Result<(), String> {
+    let tmp = temp_path(path, "tmp")?;
+    let keep = std::fs::metadata(path).ok().map(|m| m.permissions());
+    let written = (|| {
+        let mut file = std::fs::OpenOptions::new().write(true).create_new(true).open(&tmp)?;
+        file.write_all(raw)?;
+        if let Some(perm) = keep {
+            file.set_permissions(perm)?;
+        }
         file.sync_all()
     })();
     if let Err(e) = written {

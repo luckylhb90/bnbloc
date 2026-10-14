@@ -485,7 +485,10 @@ export const api = {
     ),
 
   // Room artifacts: create / list / read / publish under the room's membership.
-  createArtifact: (roomId: string, body: { kind: string; title: string; channelId?: string; language?: string; content?: string; summary?: string }) =>
+  createArtifact: (
+    roomId: string,
+    body: { kind: string; title: string; fileName?: string; channelId?: string; language?: string; content?: string; summary?: string },
+  ) =>
     req<ArtifactReply>(roomPath(roomId, "artifacts"), {
       method: "POST",
       body: JSON.stringify(body),

@@ -44,6 +44,7 @@ import { categoryIcons } from "./fileIcons";
 import { ShareDialog } from "./ShareDialog";
 import { VersionDiff } from "./VersionDiff";
 import { FileAskPanel, useFileAsk } from "./FileAskPanel";
+import { LocalSaveChip } from "./LocalSaveChip";
 import { useDisplayNames } from "@/lib/useDisplayName";
 import { errorText } from "@/lib/errors";
 
@@ -413,6 +414,9 @@ export function ArtifactTabView({
             <button type="button" className={cn(CHIP, mode === "edit" && "bg-[var(--color-elevated)] text-[var(--color-fg)]")} onClick={() => void startEdit()} aria-pressed={mode === "edit"}>
               <PencilSimpleIcon size={14} /> Edit
             </button>
+          )}
+          {!runsSite && (
+            <LocalSaveChip artifactId={artifactId} version={shown} load={async () => blob ?? (await loadVersionBlob(roomId, artifact, shown, meta))} className={CHIP} />
           )}
           {mode === "view" && <ViewerToolbar items={tools.items} onAction={tools.emit} className="ml-auto" />}
           {mode === "view" && onViewer && (

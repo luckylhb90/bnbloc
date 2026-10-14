@@ -96,13 +96,20 @@ export interface SidecarAuthStatus {
 export type DesktopUpdateCheck = { available: boolean; version?: string; notes?: string; forced: boolean };
 export type DesktopUpdateProgress = { downloaded: number; total?: number };
 
-type InvokeFn = (cmd: string, args?: Record<string, unknown>) => Promise<unknown>;
+// args is a raw body (a Uint8Array) for commands that take bytes; options
+// carry that call's headers.
+type InvokeFn = (
+  cmd: string,
+  args?: Record<string, unknown> | Uint8Array,
+  options?: { headers?: Record<string, string> },
+) => Promise<unknown>;
 type ListenFn = (
   event: string,
   handler: (e: { payload: unknown }) => void,
 ) => Promise<() => void>;
 
-function tauri(): { invoke: InvokeFn; listen: ListenFn } | null {
+/** The shell's IPC (null outside the desktop shell). */
+export function tauri(): { invoke: InvokeFn; listen: ListenFn } | null {
   if (!inDesktopShell()) return null;
   const w = window as unknown as {
     __TAURI__?: {

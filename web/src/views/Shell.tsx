@@ -12,6 +12,7 @@ import {
   BooksIcon,
   MagnifyingGlassIcon,
   BuildingsIcon,
+  FolderOpenIcon,
 } from "@phosphor-icons/react";
 import { api, type RoomSummary } from "@/lib/api";
 import { useActingTenant } from "@/lib/session";
@@ -23,6 +24,8 @@ import { useModalLayer } from "@/ui/useModalLayer";
 import { AccountMenu } from "@/views/AccountMenu";
 import { notify, requestNotificationPermission } from "@/lib/notify";
 import { openGlobalSearch } from "@/lib/team";
+import { localFiles } from "@/lib/localFiles";
+import { requestLocalOpen } from "@/views/LocalFileOpener";
 import { onRoomGone, withoutRoom } from "@/lib/roomGone";
 import { can } from "@/lib/permissions";
 import { StorageKey, readStored, writeStored } from "@/lib/storageKeys";
@@ -327,6 +330,26 @@ export function Shell({
               <kbd className="rounded border border-[var(--color-border)] px-1 text-[0.6rem] text-[var(--color-fg-subtle)]">⌘K</kbd>
             )}
           </button>
+          {/* A document from this computer, opened with AI (desktop only, also Cmd/Ctrl+O). */}
+          {localFiles.available() && (
+            <button
+              onClick={() => {
+                requestLocalOpen();
+                setOpen(false);
+              }}
+              title="Open a file (Ctrl+O)"
+              className={cn(
+                "tactile flex items-center rounded-[var(--radius)] text-sm text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-2)] hover:text-[var(--color-fg)]",
+                sidebarCollapsed ? "relative h-10 w-10 justify-center" : "gap-3 px-3 py-2",
+              )}
+            >
+              <FolderOpenIcon size={sidebarCollapsed ? 19 : 18} className="shrink-0" />
+              {!sidebarCollapsed && <span className="flex-1 text-left">Open a file…</span>}
+              {!sidebarCollapsed && (
+                <kbd className="rounded border border-[var(--color-border)] px-1 text-[0.6rem] text-[var(--color-fg-subtle)]">⌘O</kbd>
+              )}
+            </button>
+          )}
           {nav.map((n) => {
             const active = view === n.id;
             return (

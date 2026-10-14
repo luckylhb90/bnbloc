@@ -5,6 +5,26 @@ desktop 0.1.46). M2 implemented (2026-10-14): protocol, server and bridge
 6b717f96; web host, previewers 1.1.0 and the feed's "About <file>" tag in
 the following commit; released once the server and desktop 0.1.47 are out
 (an older host predates `selection`, so the previewers publish after them).
+M3 implemented (2026-10-14, not yet released; desktop
+`local_files.rs`, web `lib/localOpen.ts`, `LocalFileOpener`,
+`LocalSaveChip`). Its decisions against §4 below:
+
+- Entry points: the Open dialog (sidebar "Open a file…", ⌘O), Open With
+  (`fileAssociations` for pptx, docx, xlsx, pdf, md, csv at rank
+  Alternate, so the app is offered, never made the default), and
+  `bnbloc-desktop <file>` (cold start and second launch).
+- Drop-with-path is deferred. The window hands drops to the web
+  (`disable_drag_drop_handler`, for HTML5 attachment drops), and an HTML5
+  drop carries no path.
+- "My files" is one private room per member and organization. Its id is
+  `my-files-<hash>`, the same on every machine, and it is recreated if it
+  was deleted.
+- The consent is asked per member on the gateway ("don't ask again");
+  a document opened before goes back to its room file without asking.
+- On conflict the default is a copy beside the file. "Replace it" is
+  explicit, and the OS trash is not used: the replaced bytes are the
+  member's own edits, which they chose to drop.
+
 M1 notes: two changes from the design below,
 both forced by the code: the version is placed at `.room/edits/<id>/<name>`
 (a bridge writes only bnbloc's own workspace paths,

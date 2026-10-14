@@ -6,7 +6,7 @@
 //!   MCP tool binaries, core manifests, spawn records, sandbox bundles;
 //! - config: the member directories (`member_dir`), one per gateway, member
 //!   and tenant;
-//! - data: the settings file.
+//! - data: the settings file and the opened local documents.
 use std::path::{Path, PathBuf};
 
 #[derive(Clone, Debug)]
@@ -36,6 +36,11 @@ impl Dirs {
     /// The persisted shell settings (settings.rs).
     pub(crate) fn settings_file(&self) -> PathBuf {
         self.data.join("settings.json")
+    }
+
+    /// The local documents the member opened (local_files.rs).
+    pub(crate) fn local_files_file(&self) -> PathBuf {
+        self.data.join("local-files.json")
     }
 
     /// The app config dir: the member directories live below it

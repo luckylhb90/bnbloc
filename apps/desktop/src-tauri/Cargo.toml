@@ -34,6 +34,8 @@ http-body-util = "0.1"
 # Per-launch plugin host tokens (OS CSPRNG); already in the tree.
 getrandom = "0.3"
 tauri-plugin-deep-link = "2"
+# The Open dialog for local documents (local_files.rs), driven from Rust only.
+tauri-plugin-dialog = "2"
 # `deep-link`: a second launch's argv deep link (Windows/Linux warm start) is
 # forwarded to the running instance's deep-link handler instead of dropped.
 tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }
