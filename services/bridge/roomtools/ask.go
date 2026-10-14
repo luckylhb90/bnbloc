@@ -238,13 +238,8 @@ func describe(ctx context.Context, env *Env, run wire.AgentRun, handle string) o
 		// instructions.
 		out.Reply = roomlog.Fence(handle, reply)
 	}
-	if env.Config.DeliverableSettle > 0 && run.Status == "replied" {
-		// The bridge publishes a turn's files right after its reply.
-		select {
-		case <-ctx.Done():
-		case <-time.After(env.Config.DeliverableSettle):
-		}
-	}
+	// A settled run's deliverables are published before its outcome is
+	// reported (the bridge's publishTurn), so they are listed now.
 	out.Deliverables = deliverables(ctx, env, run)
 	return out
 }

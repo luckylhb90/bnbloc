@@ -40,19 +40,14 @@ type Config struct {
 	// dispatched job to settle before returning its handle.
 	DefaultWait time.Duration
 	MaxWait     time.Duration
-	// DeliverableSettle is how long ask_agent waits after a job settles
-	// before reading its deliverables (the bridge publishes them just after
-	// the reply).
-	DeliverableSettle time.Duration
 }
 
-// Default waits. MaxWait stays well under the bridge's 30-minute hard cap
-// on one turn: ask_agent runs inside the dispatching agent's own turn.
+// Default waits: ask_agent runs inside the dispatching agent's own turn,
+// so it returns a handle (room_status) rather than wait without end.
 const (
-	defaultPollInterval      = 2 * time.Second
-	defaultWait              = 10 * time.Minute
-	defaultMaxWait           = 20 * time.Minute
-	defaultDeliverableSettle = 3 * time.Second
+	defaultPollInterval = 2 * time.Second
+	defaultWait         = 10 * time.Minute
+	defaultMaxWait      = 20 * time.Minute
 )
 
 // waitDescription is the wait_seconds parameter's description, from the
@@ -73,11 +68,6 @@ func (c Config) withDefaults() Config {
 	}
 	if c.DefaultWait > c.MaxWait {
 		c.DefaultWait = c.MaxWait
-	}
-	if c.DeliverableSettle < 0 {
-		c.DeliverableSettle = 0
-	} else if c.DeliverableSettle == 0 {
-		c.DeliverableSettle = defaultDeliverableSettle
 	}
 	return c
 }

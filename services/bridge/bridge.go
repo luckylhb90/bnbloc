@@ -258,6 +258,8 @@ type Bridge struct {
 	sandbox *sandboxRuntime
 	// execRenewInterval overrides sandboxExecRenewEvery (tests).
 	execRenewInterval time.Duration
+	// publishWaitOverride overrides publishWait (tests).
+	publishWaitOverride time.Duration
 
 	// contrib holds the registered session contributors (profile.go).
 	contrib contributors

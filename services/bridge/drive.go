@@ -341,8 +341,11 @@ func (b *Bridge) driveTurn(ctx context.Context, d *drive) (driveResult, error) {
 // server already recorded the cancel and cleared the lease, so no outcome
 // is reported. Otherwise the job reports replied, or fails by the stage its
 // drive reached; a turn its agent or core reported failed fails even when
-// it posted replies (agentFailed). Then, once per turn, the files the turn
-// changed become artifact versions (publishTurn).
+// it posted replies (agentFailed). Before the outcome is reported, the files
+// the turn changed become artifact versions, once per turn (publishTurn):
+// whoever reads the job's outcome — a member, a dispatching agent's
+// ask_agent — finds its deliverables
+// (docs/prd/2026-10-14-multi-member-rooms.md rule 7).
 func (b *Bridge) settle(ctx context.Context, d *drive, res driveResult, err error) {
 	if d.reservationID != "" {
 		go b.settleBorrow(b.detached(ctx), d.job.RoomID, d.owner, d.core, d.job.Provider, d.reservationID, res.usage.recordFields(d.job.Model))
@@ -352,7 +355,7 @@ func (b *Bridge) settle(ctx context.Context, d *drive, res driveResult, err erro
 			"event", "bnbloc.bridge.job_abandoned", "job", d.job.JobID)
 		return
 	}
-	defer b.publishTurn(ctx, d)
+	b.publishTurn(ctx, d)
 	diag := d.agent()
 	if res.sessionID != "" {
 		diag["workspaceId"], diag["sessionId"] = res.workspaceID, res.sessionID
@@ -373,17 +376,45 @@ func (b *Bridge) settle(ctx context.Context, d *drive, res driveResult, err erro
 	b.fail(ctx, d, err, res.usage.withRunReport(diag, d.job.Model))
 }
 
+// publishWait bounds how long a job's outcome waits for its deliverables'
+// publish; a slower publish finishes after the outcome is reported.
+const publishWait = time.Minute
+
 // publishTurn publishes what the turn changed in its session's workspace as
 // artifact versions, once per turn, after the turn settled (reflow
-// returned): each site or file the turn changed gets exactly one new
-// version however often the agent rewrote it, and an unchanged one none. A
-// drive that never bound a session started no turn and publishes nothing.
-// Presentation only: a failed publish never marks the turn failed.
+// returned) and before its outcome is reported (bounded by publishWait):
+// each site or file the turn changed gets exactly one new version however
+// often the agent rewrote it, and an unchanged one none. A drive that never
+// bound a session started no turn and publishes nothing. Presentation only:
+// a failed publish never marks the turn failed.
 func (b *Bridge) publishTurn(ctx context.Context, d *drive) {
-	if _, rs := d.run.bound(); rs != nil {
-		go b.publishDeliverables(b.detached(ctx), d.job.RoomID, d.job.ChannelID, rs,
-			deliverableTurn{StartMs: d.startMs, JobID: d.job.JobID, SourceSeq: d.job.MessageSeq})
+	_, rs := d.run.bound()
+	if rs == nil {
+		return
 	}
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		b.publishDeliverables(b.detached(ctx), d.job.RoomID, d.job.ChannelID, rs,
+			deliverableTurn{StartMs: d.startMs, JobID: d.job.JobID, SourceSeq: d.job.MessageSeq})
+	}()
+	t := time.NewTimer(b.publishWaitFor())
+	defer t.Stop()
+	select {
+	case <-done:
+	case <-t.C:
+		slog.Warn("bnbloc bridge deliverables still publishing; reporting the job first",
+			"event", "bnbloc.bridge.publish_slow", "job", d.job.JobID, "room", d.job.RoomID)
+	case <-ctx.Done():
+	}
+}
+
+// publishWaitFor is publishWait (Bridge.publishWaitOverride in tests).
+func (b *Bridge) publishWaitFor() time.Duration {
+	if b.publishWaitOverride > 0 {
+		return b.publishWaitOverride
+	}
+	return publishWait
 }
 
 // detached is the context for work that outlives a drive (a borrow settle,

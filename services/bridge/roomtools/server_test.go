@@ -69,7 +69,7 @@ var roster = map[string]any{"agents": []wire.RosterAgent{
 
 func startServer(t *testing.T, gw Gateway) (*Server, string, *Session) {
 	t.Helper()
-	srv, err := Start(Config{Gateway: gw, GatewayBaseURL: "https://bnbloc.example.com", PollInterval: 5 * time.Millisecond, DeliverableSettle: -1})
+	srv, err := Start(Config{Gateway: gw, GatewayBaseURL: "https://bnbloc.example.com", PollInterval: 5 * time.Millisecond})
 	if err != nil {
 		t.Fatal(err)
 	}
