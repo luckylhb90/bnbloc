@@ -396,7 +396,7 @@ func (b *Bridge) driveTextDelta(ctx context.Context, room, owner, provider strin
 	if fresh {
 		boundary = noSelfBound
 	}
-	entries = dropSelf(entries, self, boundary, channel)
+	entries = roomlog.MarkChannels(dropSelf(entries, self, boundary, channel), channel)
 	if fresh {
 		return roomlog.Compose(entries, now, roomlog.Options{
 			WindowChars: b.windowChars,

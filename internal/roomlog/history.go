@@ -158,6 +158,8 @@ func ChannelOf(list []Channel, id string) (Channel, bool) {
 // was fully covered (false: the cap truncated the read, keeping the newest).
 func History(ctx context.Context, fetch Fetch, room string, q HistoryQuery) (entries []Entry, complete bool, err error) {
 	channels, listed := AgentChannelList(ctx, fetch, room)
+	defaultID := channels[0].ID // the listing names the default channel first
+	multi := len(channels) > 1
 	if q.Only != "" {
 		only, found := ChannelOf(channels, q.Only)
 		if !listed || !found {
@@ -258,9 +260,9 @@ func History(ctx context.Context, fetch Fetch, room string, q HistoryQuery) (ent
 		rows = append(rows, c.rows...)
 	}
 	names := map[string]string{}
-	if len(channels) > 1 {
-		for _, c := range channels {
-			names[c.ID] = c.Name
+	if multi {
+		for _, c := range cursors {
+			names[c.ch.ID] = channelLabel(c.ch.Name, c.ch.ID)
 		}
 	}
 	// Newest first, de-duplicated (a row is one sequence), capped, then
@@ -272,13 +274,29 @@ func History(ctx context.Context, fetch Fetch, room string, q HistoryQuery) (ent
 	}
 	for i := len(rows) - 1; i >= 0; i-- {
 		for _, e := range DecodeRow(rows[i]) {
+			e.InDefault = e.ChannelID == defaultID
 			if n, ok := names[e.ChannelID]; ok {
-				e.Channel = channelLabel(n, e.ChannelID)
+				e.ChannelName = n
 			}
 			entries = append(entries, e)
 		}
 	}
-	return entries, complete, nil
+	return MarkChannels(entries, ""), complete, nil
+}
+
+// MarkChannels tags the lines said in another channel than own ("" = the
+// room's default channel) with that channel's name; a line of own stays
+// unmarked, so a reader sees only where the others were said.
+func MarkChannels(entries []Entry, own string) []Entry {
+	for i := range entries {
+		e := &entries[i]
+		mine := e.ChannelID == own || (own == "" && e.InDefault) || e.ChannelName == ""
+		e.Channel = ""
+		if !mine {
+			e.Channel = e.ChannelName
+		}
+	}
+	return entries
 }
 
 // channelLabel is how a record names a channel: its name, else its id.

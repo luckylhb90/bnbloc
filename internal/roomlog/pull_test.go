@@ -418,8 +418,8 @@ func TestHistorySharesTheCapAcrossChannels(t *testing.T) {
 		switch e.ChannelID {
 		case "quiet":
 			quiet++
-			if e.Channel != "n-quiet" {
-				t.Fatalf("channel label = %q, want the channel's name", e.Channel)
+			if Line(e) != "#n-quiet maya: quiet-501\n" {
+				t.Fatalf("line = %q, want the other channel's tag", Line(e))
 			}
 		case "busy":
 			busy++
@@ -428,8 +428,14 @@ func TestHistorySharesTheCapAcrossChannels(t *testing.T) {
 	if quiet != 1 || busy != 199 || len(entries) != 200 {
 		t.Fatalf("quiet=%d busy=%d total=%d: the quiet channel must not starve", quiet, busy, len(entries))
 	}
-	if !strings.HasPrefix(Line(entries[len(entries)-1]), "[#n-busy] jack: ") {
-		t.Fatalf("line = %q, want the channel label", Line(entries[len(entries)-1]))
+	// The default channel's lines stay unmarked; a reader of the quiet
+	// channel sees the busy one's tagged instead.
+	if Line(entries[len(entries)-1]) != "jack: busy-510\n" {
+		t.Fatalf("line = %q, want no tag for the default channel", Line(entries[len(entries)-1]))
+	}
+	MarkChannels(entries, "quiet")
+	if Line(entries[len(entries)-1]) != "#n-busy jack: busy-510\n" {
+		t.Fatalf("line = %q, want the busy channel tagged for a quiet-channel reader", Line(entries[len(entries)-1]))
 	}
 }
 

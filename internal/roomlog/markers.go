@@ -79,16 +79,16 @@ func Sender(e Entry) string {
 
 // Line renders one record line: "maya: …", "maya → jack/codex: …" for a
 // message addressed to an agent (Entry.To), "jack/codex for maya → jill/claude:
-// …" for a task an agent dispatched on maya's behalf; "[#design] …" names
-// the channel in a room with several, and "[attached: …]" each file the
-// message carried.
+// …" for a task an agent dispatched on maya's behalf; "#design …" names
+// another channel than the reader's (Entry.Channel), and "[attached: …]"
+// each file the message carried.
 func Line(e Entry) string {
 	head := Sender(e)
 	if to := strings.TrimSpace(e.To); to != "" {
 		head += " → " + to
 	}
 	if ch := strings.TrimSpace(e.Channel); ch != "" {
-		head = "[#" + ch + "] " + head
+		head = "#" + ch + " " + head
 	}
 	body := []string{}
 	if t := strings.TrimSpace(e.Text); t != "" {

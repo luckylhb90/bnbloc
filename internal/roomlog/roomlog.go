@@ -29,10 +29,15 @@ type Entry struct {
 	Speaker string // "jack" (human) or "jack/codex" (agent: owner/provider)
 	Kind    Kind
 	Text    string
-	// ChannelID is the channel the line was said in; Channel its name as a
-	// record shows it ("" in a room with one channel: no label needed).
-	ChannelID string
-	Channel   string
+	// ChannelID is the channel the line was said in, ChannelName its name
+	// ("" in a room with one channel) and InDefault whether it is the room's
+	// default channel. Channel is the tag a record shows: set only for a
+	// line from another channel than the reader's (MarkChannels; History
+	// marks against the default channel).
+	ChannelID   string
+	ChannelName string
+	InDefault   bool
+	Channel     string
 	// Attachments are the files a person's message carried (the room's:
 	// read_attachment reads one by id).
 	Attachments []AttachmentRef

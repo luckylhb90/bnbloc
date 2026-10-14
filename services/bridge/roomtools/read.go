@@ -67,6 +67,9 @@ func readRoom(ctx context.Context, env *Env, args json.RawMessage) Result {
 	if err != nil {
 		return refusal("reading the room", err)
 	}
+	// Lines of another channel than the one the agent is answering in
+	// carry its name.
+	entries = roomlog.MarkChannels(entries, env.Session.current().ChannelID)
 	var lines []roomlog.Entry
 	for _, e := range entries {
 		if e.Seq <= in.Since {
