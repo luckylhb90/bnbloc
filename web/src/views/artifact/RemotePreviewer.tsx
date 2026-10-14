@@ -104,6 +104,15 @@ function PreviewerFrame({
   const remoteNonce = useRef(0);
   const thumbnailDone = useRef(false);
   const [error, setError] = useState("");
+  // Until the frame says it is ready its bundle is still downloading: say so
+  // (a large previewer on a slow link takes a while), never "no file".
+  const [ready, setReady] = useState(false);
+  const [slow, setSlow] = useState(false);
+  useEffect(() => {
+    if (ready) return;
+    const t = window.setTimeout(() => setSlow(true), 8000);
+    return () => window.clearTimeout(t);
+  }, [ready]);
   const [title, setTitle] = useState("");
   const liveState = desc.capabilities.includes("liveState");
   const selection = desc.capabilities.includes("selection");
@@ -182,6 +191,7 @@ function PreviewerFrame({
         case "preview.ready":
           if (readyRef.current) return; // one hand-off per frame
           readyRef.current = true;
+          setReady(true);
           void handOff().catch((e: unknown) => setError(errorText(e, "Could not load the file")));
           return;
         case "preview.toolbar.set":
@@ -249,6 +259,14 @@ function PreviewerFrame({
         src={src}
         className="absolute inset-0 block h-full w-full border-0"
       />
+      {!ready && !error && (
+        <div className="absolute inset-0 grid place-items-center bg-[var(--color-bg)] p-4 text-center text-sm text-[var(--color-fg-subtle)]" role="status">
+          <p>
+            Loading the {desc.name} previewer…
+            {slow && <span className="mt-1 block text-xs">It is still downloading; a slow connection can take a while.</span>}
+          </p>
+        </div>
+      )}
       {error && (
         <div className="absolute inset-x-2 bottom-2 rounded-[var(--radius)] border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-xs text-[var(--color-fg-muted)] shadow">
           <span className="font-medium text-[var(--color-fg)]">{desc.name}:</span> {error}

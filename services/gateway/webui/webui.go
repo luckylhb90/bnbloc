@@ -9,7 +9,11 @@ package webui
 import (
 	"embed"
 	"io/fs"
+	"mime"
 	"net/http"
+	"path"
+
+	"github.com/luckylhb90/bnbloc/internal/httpx"
 )
 
 //go:embed static/*
@@ -62,6 +66,15 @@ func Handler() http.Handler {
 			w.Header().Set("Cache-Control", "no-cache")
 		} else if len(r.URL.Path) > 8 && r.URL.Path[:8] == "/assets/" {
 			w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+			// Content-hashed and immutable: served compressed (httpx.WriteStatic)
+			// whatever the edge does.
+			if data, err := fs.ReadFile(sub, trimLeadingSlash(r.URL.Path)); err == nil {
+				if ct := mime.TypeByExtension(path.Ext(r.URL.Path)); ct != "" {
+					w.Header().Set("Content-Type", ct)
+				}
+				httpx.WriteStatic(w, r, "webui:"+r.URL.Path, data)
+				return
+			}
 		}
 		fileServer.ServeHTTP(w, r)
 	})

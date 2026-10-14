@@ -4,6 +4,7 @@ import (
 	"archive/tar"
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -182,6 +183,14 @@ func TestPreviewerFrame_servesBundleFilesWithSandboxHeaders(t *testing.T) {
 	}
 	if resp.Header.Get("X-Content-Type-Options") != "nosniff" || resp.Header.Get("Referrer-Policy") != "no-referrer" || resp.Header.Get("Access-Control-Allow-Origin") != "*" {
 		t.Fatalf("headers = %+v", resp.Header)
+	}
+	// The files are the bundle's (sha-pinned) under a ticketed URL: cacheable
+	// until the ticket expires, never shared.
+	var maxAge int
+	if cc := resp.Header.Get("Cache-Control"); !strings.HasPrefix(cc, "private, max-age=") || !strings.HasSuffix(cc, ", immutable") {
+		t.Fatalf("cache-control = %q", cc)
+	} else if _, err := fmt.Sscanf(strings.TrimPrefix(cc, "private, max-age="), "%d", &maxAge); err != nil || maxAge <= 0 || maxAge > int(previewerFrameTTL.Seconds()) {
+		t.Fatalf("max-age %d from %q", maxAge, cc)
 	}
 
 	// Relative assets resolve under the same ticketed base.

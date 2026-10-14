@@ -128,12 +128,15 @@ func (s *Service) handlePreviewerFile(w http.ResponseWriter, r *http.Request) {
 	// origin ("null"); the bytes are already readable by whoever holds the
 	// ticket, so a wildcard discloses nothing more.
 	h.Set("Access-Control-Allow-Origin", "*")
-	h.Set("Cache-Control", "private, no-cache")
-	h.Set("Content-Length", fmt.Sprint(len(data)))
-	if r.Method == http.MethodHead {
-		return
+	// A version's files are pinned by the bundle's sha, and the URL carries
+	// the ticket: the browser may keep them until the ticket expires, so
+	// reopening a file of the same type within the hour downloads nothing.
+	if left := claims.ExpiresAtUnix - s.nowTime().Unix(); left > 0 {
+		h.Set("Cache-Control", fmt.Sprintf("private, max-age=%d, immutable", left))
+	} else {
+		h.Set("Cache-Control", "private, no-cache")
 	}
-	_, _ = w.Write(data)
+	httpx.WriteStatic(w, r, "previewer:"+art.SHA256+"/"+file, data)
 }
 
 // previewerCSP is the policy of every served bundle file: scripts, styles
