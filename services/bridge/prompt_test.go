@@ -87,11 +87,13 @@ func TestPromptBudgets(t *testing.T) {
 		{"push first framing (one line excluded)", strings.Replace(roomlog.Compose([]roomlog.Entry{entry}, now, roomlog.Options{}), line, "", 1), 60},
 		{"attachments block, one file", strings.Replace(roomlog.ComposePointer(roomlog.Now{From: now.From, Attachments: att}, false), roomlog.ComposePointer(now, false), "", 1), 50},
 		{"undelivered block, one file", strings.Replace(roomlog.ComposePointer(roomlog.Now{From: now.From, Undelivered: undelivered}, false), roomlog.ComposePointer(now, false), "", 1), 70},
-		// Once per session (cached prefix).
-		{"session guidance (tools, .room/)", guidance, 700},
-		{"session guidance (tools, .room/, team lead)", team, 750},
+		// Once per session (cached prefix). +40 on 2026-10-14 for the two
+		// rules that keep work out of /tmp and many images out of the
+		// conversation (docs/prd/2026-10-14-context-overflow-recovery.md).
+		{"session guidance (tools, .room/)", guidance, 740},
+		{"session guidance (tools, .room/, team lead)", team, 820},
 		{"tools/list", toolsList, 2550},
-		{"session prefix (guidance + tools/list)", guidance + toolsList, 3250},
+		{"session prefix (guidance + tools/list)", guidance + toolsList, 3290},
 	} {
 		got := tokens(c.text)
 		t.Logf("%-48s %5d tokens (budget %d)", c.name, got, c.budget)
