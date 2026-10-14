@@ -1026,6 +1026,14 @@ func (b *Bridge) deleteRoomWorkspaces(workspaces map[driveKey]string) {
 		if entry, ok := b.coreEntry(k.core); ok {
 			b.deleteWorkspace(ctx, entry, id)
 		}
+		if k.sandboxed {
+			// The workdir is the bridge's own (a core without deleteWorkspace
+			// would otherwise leave it, records included).
+			if err := b.sandbox.removeRoomWorkspace(ctx, k); err != nil {
+				slog.Warn("bnbloc bridge could not remove a deleted room's sandbox workspace",
+					"event", "bnbloc.bridge.room_workspace_remove_failed", "room", k.room, "core", k.core, "error", err)
+			}
+		}
 	}
 }
 

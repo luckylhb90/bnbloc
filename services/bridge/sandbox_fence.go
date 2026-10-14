@@ -291,3 +291,35 @@ func (s *sandboxRuntime) takeQuiesced(space string) bool {
 	delete(s.quiesced, space)
 	return q
 }
+
+// removeRoomWorkspace removes a deleted room's sandboxed workspace: its
+// space (purged: processes, home, local disks) and the workdir the bridge
+// created for it under the workspaces root — never a path outside it.
+// Best-effort; a core's own record of the workspace is its deleteWorkspace.
+func (s *sandboxRuntime) removeRoomWorkspace(ctx context.Context, k driveKey) error {
+	if s == nil || !s.cfg.present() {
+		return nil
+	}
+	space := sandboxSpaceName(k)
+	if err := s.client.DeleteSpace(ctx, s.endpoint(), s.cfg.Machine, space, true); err != nil && sandbox.ErrorCodeOf(err) != sandbox.ErrorSpaceNotFound {
+		return err
+	}
+	s.mu.Lock()
+	delete(s.quiesced, space)
+	s.mu.Unlock()
+	return removeWorkdirUnder(s.cfg.WorkspacesRoot, space)
+}
+
+// removeWorkdirUnder removes root/name when name is one plain path segment
+// (core.CleanRelPath, unchanged and without a separator): never root itself
+// nor anything outside it.
+func removeWorkdirUnder(root, name string) error {
+	if root == "" {
+		return nil
+	}
+	clean, ok := corepkg.CleanRelPath(name)
+	if !ok || clean != name || clean == "." || strings.Contains(clean, "/") {
+		return fmt.Errorf("refusing to remove %q under %q: not one workspace directory", name, root)
+	}
+	return os.RemoveAll(filepath.Join(root, clean))
+}

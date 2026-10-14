@@ -227,3 +227,33 @@ func TestSandboxFence_channelSessionsShareTheWorkspace(t *testing.T) {
 		t.Fatalf("after the breach: sessions %d, planted at create %v; want a fresh session on a clean tree", len(prov.planted), prov.planted)
 	}
 }
+
+// A deleted room's workdir is removed only when it lies directly under the
+// workspaces root.
+func TestRemoveWorkdirUnder(t *testing.T) {
+	root := t.TempDir()
+	keep := filepath.Join(t.TempDir(), "outside")
+	if err := os.MkdirAll(filepath.Join(root, "ws-1", ".room"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(keep, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := removeWorkdirUnder(root, "ws-1"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "ws-1")); !os.IsNotExist(err) {
+		t.Fatalf("workdir still there: %v", err)
+	}
+	for _, name := range []string{"..", "../" + filepath.Base(filepath.Dir(keep)), "a/b", "."} {
+		if err := removeWorkdirUnder(root, name); err == nil {
+			t.Errorf("removeWorkdirUnder(%q) = nil, want a refusal", name)
+		}
+	}
+	if _, err := os.Stat(keep); err != nil {
+		t.Fatalf("a directory outside the root was touched: %v", err)
+	}
+	if _, err := os.Stat(root); err != nil {
+		t.Fatalf("the root itself was removed: %v", err)
+	}
+}
