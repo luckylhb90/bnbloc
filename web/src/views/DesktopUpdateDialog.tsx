@@ -4,6 +4,7 @@ import { cn } from "@/lib/cn";
 import { Badge } from "@/ui/Card";
 import { Button } from "@/ui/Button";
 import { Dialog } from "@/ui/Dialog";
+import { RunningTurnsWarning } from "@/views/RunningTurnsWarning";
 
 export function DesktopUpdateDialog({
   update,
@@ -45,6 +46,7 @@ export function DesktopUpdateDialog({
           </div>
           {update.notes && <p className="mt-2 whitespace-pre-wrap text-[var(--color-fg-muted)]">{update.notes}</p>}
         </div>
+        <RunningTurnsWarning />
         {progress && <p className="tabular text-xs text-[var(--color-fg-subtle)]">{progress}</p>}
       </div>
     </Dialog>

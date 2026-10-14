@@ -28,6 +28,7 @@ import { isCore, sidecarCoreView, sidecarProviders, type SidecarCoreView } from 
 import { sidecarAgents, useSidecarAgents } from "@/lib/useSidecarAgents";
 import { CoreHeader, coreStatus } from "@/views/agents/MyAgents";
 import { ManagedSidecars } from "@/views/agents/ManagedSidecars";
+import { PendingUpdates } from "@/views/agents/PendingUpdates";
 import { AgentCoreEmptyState } from "@/views/AgentCoreEmptyState";
 import { DesktopUpdatePanel } from "@/views/DesktopUpdates";
 import { ReleaseDownloadButton } from "@/views/ReleaseDownloadButton";
@@ -287,6 +288,7 @@ export function Agents() {
       <div className="p-6">
         <div className="mx-auto flex w-full max-w-[720px] flex-col gap-2">
           <SectionLabel>Available agents</SectionLabel>
+          {shell && <PendingUpdates statuses={adapterStatus} />}
 
           {scan === "loading" && (
             <p className="text-xs text-[var(--color-fg-subtle)]">Scanning for agent cores…</p>

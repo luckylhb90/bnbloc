@@ -68,7 +68,10 @@ export function useDesktopUpdate(signedIn: boolean): DesktopUpdateController {
       try {
         const result = await desktop.checkUpdate();
         if (cancelled || !result?.available) return;
-        if (autoInstall) {
+        // An automatic install restarts the app and with it the bridge:
+        // never while it drives agent turns (live turns PRD) — offer the
+        // update instead; the next check installs it once idle.
+        if (autoInstall && (await desktop.bridgeRunningTurns()) === 0) {
           setInstalling(true);
           await desktop.installUpdate();
           return;

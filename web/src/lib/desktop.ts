@@ -79,6 +79,9 @@ export interface InternalAdapterStatus {
   pid?: number | null;
   version?: string | null;
   localUrl?: string | null;
+  /** A newer version that waits for running agent turns to finish; the
+   *  component keeps running meanwhile (live turns PRD). */
+  pendingUpdate?: { version: string; waitingFor: number } | null;
 }
 
 /** A sidecar's sign-in state (optional sidecar contract GET /v1/auth/status).
@@ -210,6 +213,21 @@ export const desktop = {
     const t = tauri();
     if (!t) return [];
     return (await t.invoke("internal_adapter_status").catch(() => [])) as InternalAdapterStatus[];
+  },
+
+  // Apply component updates that wait for running agent turns now.
+  async applyPendingUpdates(): Promise<void> {
+    const t = tauri();
+    if (!t) return;
+    await t.invoke("internal_adapter_apply_updates");
+  },
+
+  // How many agent turns this machine's bridge drives now (0 outside the
+  // shell or when unknown).
+  async bridgeRunningTurns(): Promise<number> {
+    const t = tauri();
+    if (!t) return 0;
+    return ((await t.invoke("bridge_running_turns").catch(() => 0)) as number) ?? 0;
   },
 
   // Rejects when the sidecar cannot list its agents: callers surface the

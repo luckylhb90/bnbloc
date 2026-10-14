@@ -6,6 +6,7 @@ import { Badge, Card } from "@/ui/Card";
 import { Button } from "@/ui/Button";
 import { useToast } from "@/ui/Toast";
 import { DesktopUpdateDialog } from "@/views/DesktopUpdateDialog";
+import { RunningTurnsWarning } from "@/views/RunningTurnsWarning";
 import { enterUpdateWork, progressLabel } from "@/views/desktopUpdateState";
 import { errorText } from "@/lib/errors";
 
@@ -138,6 +139,9 @@ export function DesktopUpdatePanel() {
               </Button>
             </div>
             {latest.notes && <p className="mt-2 whitespace-pre-wrap text-[var(--color-fg-muted)]">{latest.notes}</p>}
+            <div className="mt-2">
+              <RunningTurnsWarning />
+            </div>
             {progressText && <p className="mt-2 text-xs tabular text-[var(--color-fg-subtle)]">{progressText}</p>}
           </div>
         )}
