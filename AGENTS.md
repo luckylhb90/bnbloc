@@ -32,6 +32,40 @@ not memory. A bug record includes "Why it was not caught" (the lens, the
 missing question or test) and adds that question to `docs/design-review.md`
 in the same change.
 
+## Lessons: the mistake book (LESSONS.md)
+
+`LESSONS.md` is what agents learned the hard way on this project. Read it
+before you start; it is short on purpose. It closes the loop of the
+workflow above:
+
+- **Review.** After each working day with commits, and after every release,
+  run `scripts/lessons-review.sh`. From its digest (commits, reworks, bug
+  records, lessons due for promotion), record what was fixed twice, what
+  should not have landed as it did, and what was verified too loosely. Each
+  finding is an entry, or a new date on an existing one. A bug record's "Why
+  it was not caught" and its lesson are the same finding: link them.
+- **Promotion.** A lesson seen on three distinct days becomes a rule in its
+  owner (a design-review lens, this file, or a check that enforces it), and
+  LESSONS.md keeps one line saying where it went.
+- **Done right** entries are lessons too: what to keep doing.
+
+## Verification: what "done" means
+
+- **Reproduce the reported case exactly** (its real input, on its real
+  surface) before you call a bug fixed or not reproducible. A pass on a
+  simplified input proves nothing about the report.
+- **Red check for a fix.** The test that covers a bug fails with the fix
+  reverted, for the reason the bug names. A test that passes either way is
+  not the bug's test.
+- **Report what was not run.** A completion report says what was run, on
+  which commit and where, and lists every relevant check that was not run
+  as "not run" (a platform, a real account, a deploy, a desktop build).
+  Never leave one out, and never describe an unrun check as passing.
+- **Releases replay real use.** A core or desktop update is checked with
+  `bnbloc smoke --scenario long-task --between "<the update>"` on a live
+  session (conversation, files and room tools survive), plus
+  `scripts/two-member-check.sh` when rooms or borrowing changed.
+
 ## Debugging discipline: no temporary patches
 
 When a defect appears, do not patch the symptom with hardcoded values, local

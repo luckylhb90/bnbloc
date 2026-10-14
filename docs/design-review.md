@@ -135,10 +135,17 @@ types; two components each deciding how long a turn may run.
 - When the system falls back (default model, default setting, degraded
   mode), does the user know?
 
+- Every skip, drop, cap or truncation: does the person (and the agent)
+  learn what was left out, and why? A rule may only skip what it can name
+  as noise.
+
 *Test:* every input absent; slow loading; a list that is momentarily
-empty.
+empty; one input over each cap and each skip rule.
 *Seen:* a saved model cleared because the list had not loaded yet, then
-saved as empty; a missing choice silently running a different model.
+saved as empty; a missing choice silently running a different model; a
+download cut at a proxy deadline; attachments over a core's body cap
+dropped without a word; an agent's decks under `out/` never published
+(LESSONS.md, promoted 2026-10-14).
 
 ### 9. External contracts
 
