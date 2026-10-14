@@ -93,8 +93,9 @@ func ValidPublishApproval(p string) bool {
 // version of that work of the caller's. DisplayName defaults to the
 // deliverable's title. The recipe is captured from the producing job
 // (WorkRecipeCapture): Recipe overrides it (its references are a subset
-// of the captured ones, named by attachmentId), and IncludeRecipe false
-// publishes none.
+// of the captured ones, named by attachmentId), RecipePrompt replaces only
+// its request text (the request that produced the version was not one to
+// make it: "publish it", a copy), and IncludeRecipe false publishes none.
 type WorkPublishRequest struct {
 	ComponentID   string      `json:"componentId,omitempty"`
 	Name          string      `json:"name,omitempty"`
@@ -103,6 +104,7 @@ type WorkPublishRequest struct {
 	Category      string      `json:"category,omitempty" tstype:"WorkCategory"`
 	Tags          []string    `json:"tags,omitempty"`
 	Recipe        *WorkRecipe `json:"recipe,omitempty"`
+	RecipePrompt  string      `json:"recipePrompt,omitempty"`
 	IncludeRecipe *bool       `json:"includeRecipe,omitempty"`
 }
 

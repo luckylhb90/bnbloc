@@ -33,6 +33,9 @@ import (
 //	                (its conversation survived)
 //	workspace file  notes/plan.md still holds what it wrote (its files
 //	                survived)
+//	room tools      the agent still answers through its room tools (a core
+//	                that restarts its sessions must not drop them); INFO
+//	                when the agent had none before --between
 //	progress        INFO: agent_job_progress events seen during the turns
 //
 // A failed scenario keeps its room for debugging.
@@ -92,6 +95,9 @@ func smokeLongTask(ctx context.Context, c *client, w *smokeWaiter, roomID, subje
 	}) {
 		return
 	}
+	// Whether the agent has room tools now: checked again after --between.
+	toolsBefore, _ := turn(roomToolsProbe, nil)
+	hadTools := strings.Contains(toolsBefore, roomToolsOK)
 	if opts.Between != "" {
 		if !run.step("between", func() (string, error) {
 			between := opts.RunBetween
@@ -129,8 +135,26 @@ func smokeLongTask(ctx context.Context, c *client, w *smokeWaiter, roomID, subje
 		}
 		return marker, nil
 	})
+	if hadTools {
+		run.step("room tools", func() (string, error) {
+			reply, err := turn(roomToolsProbe, nil, roomToolsOK)
+			if err != nil && reply != "" {
+				return "", fmt.Errorf("the agent no longer reaches its room tools: %q", truncateRunes(reply, 120))
+			}
+			return roomToolsOK, err
+		})
+	} else {
+		fmt.Fprintf(run.out, "INFO room tools: the agent had none before the change (not checked)\n")
+	}
 	fmt.Fprintf(run.out, "INFO progress events seen: %d\n", w.progress)
 }
+
+// roomToolsProbe asks the agent to use one of its room tools; roomToolsOK
+// is the answer of an agent that could.
+const (
+	roomToolsOK    = "ROOMTOOLS-OK"
+	roomToolsProbe = "Call your room_status tool. Reply " + roomToolsOK + " if it answered, or ROOMTOOLS-NONE if you have no such tool."
+)
 
 // smokeResolveAgent resolves --agent against the caller's agents.
 func smokeResolveAgent(ctx context.Context, c *client, subject string, opts smokeOptions) (smokeRecipient, error) {

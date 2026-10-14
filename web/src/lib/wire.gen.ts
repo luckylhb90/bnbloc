@@ -4201,8 +4201,9 @@ export const PublishApprovalNone = "none";
 // version of that work of the caller's. DisplayName defaults to the
 // deliverable's title. The recipe is captured from the producing job
 // (WorkRecipeCapture): Recipe overrides it (its references are a subset
-// of the captured ones, named by attachmentId), and IncludeRecipe false
-// publishes none.
+// of the captured ones, named by attachmentId), RecipePrompt replaces only
+// its request text (the request that produced the version was not one to
+// make it: "publish it", a copy), and IncludeRecipe false publishes none.
 export interface WorkPublishRequest {
   componentId?: string;
   name?: string;
@@ -4211,6 +4212,7 @@ export interface WorkPublishRequest {
   category?: WorkCategory;
   tags?: string[];
   recipe?: WorkRecipe;
+  recipePrompt?: string;
   includeRecipe?: boolean;
 }
 

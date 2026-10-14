@@ -23,6 +23,8 @@ type fakeScenarioAgent struct {
 	wipe       bool              // --between drops the workspace
 	noAttach   bool              // attachments never reach the agent
 	progress   bool              // publish agent_job_progress before replying
+	noTools    bool              // the agent never has room tools
+	loseTools  bool              // --between drops its room tools
 	betweenRan int
 }
 
@@ -49,6 +51,11 @@ func (g *fakeSmokeGateway) answerScenario(room, text string, attachmentIDs []str
 	case strings.HasPrefix(text, "Create the file notes/plan.md"):
 		a.plan = markerRE.FindString(text)
 		reply = "Narration: writing the file.\x00DONE" // narration, then the answer
+	case strings.HasPrefix(text, "Call your room_status tool"):
+		reply = "ROOMTOOLS-OK"
+		if a.noTools {
+			reply = "ROOMTOOLS-NONE"
+		}
 	case strings.HasPrefix(text, "Without re-reading"):
 		reply = strings.TrimSpace(a.codeword + " " + a.plan)
 		if reply == "" {
@@ -107,6 +114,9 @@ func scenarioOptions(g *fakeSmokeGateway, between string) smokeOptions {
 		if a.wipe {
 			a.plan = ""
 		}
+		if a.loseTools {
+			a.noTools = true
+		}
 		return nil
 	}
 	return opts
@@ -126,7 +136,7 @@ func TestSmokeLongTaskPasses(t *testing.T) {
 	if err != nil {
 		t.Fatalf("scenario failed: %v\n%s", err, out)
 	}
-	for _, want := range []string{"PASS agent (", "PASS attachment (", "PASS workspace write (", `PASS between (`, "PASS memory (", "PASS workspace file (", "INFO progress events seen: 3", "PASS delete room ("} {
+	for _, want := range []string{"PASS agent (", "PASS attachment (", "PASS workspace write (", `PASS between (`, "PASS memory (", "PASS workspace file (", "PASS room tools (", "INFO progress events seen: 5", "PASS delete room ("} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("missing %q:\n%s", want, out)
 		}
@@ -148,6 +158,7 @@ func TestSmokeLongTaskNamesWhatBroke(t *testing.T) {
 		{"conversation lost", func(a *fakeScenarioAgent) { a.forget = true }, "FAIL memory: the reply does not hold the codeword", "PASS workspace file (", false},
 		{"files lost", func(a *fakeScenarioAgent) { a.wipe = true }, "FAIL workspace file: the reply does not hold notes/plan.md's", "PASS memory (", false},
 		{"attachment lost", func(a *fakeScenarioAgent) { a.noAttach = true }, "FAIL attachment: the reply does not hold CW-", "", true},
+		{"room tools lost", func(a *fakeScenarioAgent) { a.loseTools = true }, "FAIL room tools: the agent no longer reaches its room tools", "PASS memory (", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			g := newScenarioGateway(t)
@@ -220,5 +231,16 @@ func TestSmokeLongTaskUploadsTheBrief(t *testing.T) {
 	}
 	if strings.Contains(out, "between") {
 		t.Fatalf("no --between, yet:\n%s", out)
+	}
+}
+
+// An agent without room tools before the change is not failed for lacking
+// them after it.
+func TestSmokeLongTaskSkipsRoomToolsForAnAgentWithout(t *testing.T) {
+	g := newScenarioGateway(t)
+	g.fakeAgent.noTools = true
+	out, err := runFakeSmoke(t, g, scenarioOptions(g, "restart"))
+	if err != nil || !strings.Contains(out, "INFO room tools: the agent had none before the change (not checked)") || strings.Contains(out, "PASS room tools") {
+		t.Fatalf("err = %v\n%s", err, out)
 	}
 }

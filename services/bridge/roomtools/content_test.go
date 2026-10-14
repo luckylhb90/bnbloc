@@ -11,6 +11,7 @@ import (
 	"github.com/luckylhb90/bnbloc/core"
 	"github.com/luckylhb90/bnbloc/internal/roomlog"
 	"github.com/luckylhb90/bnbloc/internal/tarbundle"
+	"github.com/luckylhb90/bnbloc/internal/wire"
 )
 
 // fakeWorkspace is a session workspace in memory.
@@ -30,6 +31,15 @@ func (w fakeWorkspace) ReadFile(_ context.Context, rel string) ([]byte, error) {
 		return nil, errors.New("no such file")
 	}
 	return []byte(data), nil
+}
+
+// Deliverable names a file's deliverable id after "publishing" it; a file
+// that is not there cannot be one.
+func (w fakeWorkspace) Deliverable(_ context.Context, rel string) (string, error) {
+	if _, ok := w[rel]; !ok {
+		return "", errors.New(rel + " cannot be a deliverable: no such file")
+	}
+	return "artf_" + strings.ReplaceAll(rel, "/", "_"), nil
 }
 
 // recordingGateway answers every call with a fixed reply and records it.
@@ -125,6 +135,9 @@ func TestSaveComponentRefusals(t *testing.T) {
 		{"no manifest", contentEnv(ws, ok, true), `{"dir":"drafts/y"}`, "has no component.json"},
 		{"no files seam", contentEnv(nil, ok, true), `{"dir":"drafts/x"}`, "Save as expert"},
 		{"unknown arg", contentEnv(ws, ok, true), `{"dir":"drafts/x","kind":"expert"}`, "invalid arguments"},
+		{"two sources", contentEnv(ws, ok, true), `{"dir":"drafts/x","file":"notes.md"}`, "give one of"},
+		{"no such file", contentEnv(ws, ok, true), `{"file":"out/missing.pptx"}`, "cannot be a deliverable"},
+		{"work fields on a package", contentEnv(ws, ok, true), `{"dir":"drafts/x","request":"make a deck"}`, "are a work's"},
 	} {
 		if res := saveComponent(context.Background(), tc.env, json.RawMessage(tc.args)); !strings.Contains(res.Err, tc.want) {
 			t.Errorf("%s: err = %q, want %q", tc.name, res.Err, tc.want)
@@ -244,5 +257,26 @@ func TestSaveComponentReportsResubmission(t *testing.T) {
 	note, _ := out["note"].(string)
 	if out["resubmitted"] == nil || !strings.Contains(note, "version 1.1.0 was sent to its admins for approval; members keep using version 1.0.0 until then") {
 		t.Fatalf("result = %+v", out)
+	}
+}
+
+// A workspace file saves as a work through its deliverable, published first
+// (one the agent wrote this turn is in no room record yet), with the
+// agent's own description and "how it was made" request.
+func TestSaveComponentSavesAWorkspaceFileAsAWork(t *testing.T) {
+	ws := fakeWorkspace{"work/out/deck.pptx": "PK"}
+	work := `{"component":{"id":"cc_9","kind":"work","name":"deck","displayName":"Deck","scope":"personal","latestVersion":"1.0.0","mine":true}}`
+	gw := &recordingGateway{reply: func(string, string) ([]byte, error) { return []byte(work), nil }}
+	res := saveComponent(context.Background(), contentEnv(ws, gw, true), json.RawMessage(
+		`{"file":"work/out/deck.pptx","name":"deck","category":"office","description":"A 39-slide layout gallery.","request":"Make a layout gallery deck from our template"}`))
+	if res.Err != "" {
+		t.Fatalf("save = %s", res.Err)
+	}
+	if len(gw.calls) != 1 || gw.calls[0].Path != "/v1/rooms/room-1/artifacts/artf_work_out_deck.pptx/publish-work?job=job-1" {
+		t.Fatalf("calls = %+v", gw.calls)
+	}
+	body := gw.calls[0].Body.(wire.WorkPublishRequest)
+	if body.Description != "A 39-slide layout gallery." || body.RecipePrompt != "Make a layout gallery deck from our template" || body.Name != "deck" {
+		t.Fatalf("publish request = %+v", body)
 	}
 }

@@ -229,6 +229,14 @@ func (s *Service) publishedRecipe(ctx context.Context, claims auth.Claims, roomI
 		}
 		r = &edit
 	}
+	if prompt := strings.TrimSpace(in.RecipePrompt); prompt != "" {
+		edit := wire.WorkRecipe{}
+		if r != nil {
+			edit = *r
+		}
+		edit.Prompt = prompt
+		r = &edit
+	}
 	if contentpkg.RecipeEmpty(r) {
 		return nil, nil, nil
 	}

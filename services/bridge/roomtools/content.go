@@ -28,6 +28,9 @@ import (
 type Workspace interface {
 	ListFiles(ctx context.Context) ([]core.SessionFile, error)
 	ReadFile(ctx context.Context, rel string) ([]byte, error)
+	// Deliverable is the room deliverable id of a workspace file, published
+	// now when its content is not yet.
+	Deliverable(ctx context.Context, rel string) (string, error)
 }
 
 // RawBody is a request body sent as-is (a package archive, an app data
@@ -62,14 +65,17 @@ func saveComponentTool() Tool {
 		Name:  "save_component",
 		Title: "Save a drafted component",
 		Description: "Save to the Library of the person who asked you, after they confirmed: a package drafted in a workspace directory (dir), " +
-			"or a deliverable as a gallery work (artifactId: its current version and recipe, never its data). Validated first; an error says what to fix. " +
+			"or a file as a gallery work (file or artifactId; its current version and recipe, never its data). Validated first; an error says what to fix. " +
 			"Without id it creates (refused if they have one of that kind and name); with id (cc_...) it saves the next version.",
 		InputSchema: objectSchema(map[string]any{
-			"dir":        map[string]any{"type": "string", "description": "Workspace-relative directory holding component.json, e.g. drafts/contract-reviewer."},
-			"artifactId": map[string]any{"type": "string", "description": "Instead of dir: any deliverable's id (art_...)."},
-			"id":         map[string]any{"type": "string", "description": "The component to save a new version of; omit to create."},
-			"name":       map[string]any{"type": "string", "description": "A new work's name (lower-case, hyphens)."},
-			"category":   map[string]any{"type": "string", "enum": wire.WorkCategories},
+			"dir":         map[string]any{"type": "string", "description": "Workspace-relative directory holding component.json, e.g. drafts/contract-reviewer."},
+			"file":        map[string]any{"type": "string", "description": "A workspace file (published to the room first if needed)."},
+			"artifactId":  map[string]any{"type": "string", "description": "Or any deliverable's id (artf_...)."},
+			"id":          map[string]any{"type": "string", "description": "The component to save a new version of; omit to create."},
+			"name":        map[string]any{"type": "string", "description": "A new work's name (lower-case, hyphens)."},
+			"category":    map[string]any{"type": "string", "enum": wire.WorkCategories},
+			"description": map[string]any{"type": "string", "description": "A work's gallery description."},
+			"request":     map[string]any{"type": "string", "description": "A work's \"how it was made\": a request that would make a similar one (default: the message that produced the file)."},
 		}),
 		Call: saveComponent,
 	}
@@ -132,6 +138,16 @@ func jobGrant(env *Env, tool string) (Job, url.Values, *Result) {
 		return Job{}, nil, &r
 	}
 	return job, url.Values{"job": {job.JobID}, "room": {env.Session.Scope().RoomID}}, nil
+}
+
+func countSet(b ...bool) int {
+	n := 0
+	for _, v := range b {
+		if v {
+			n++
+		}
+	}
+	return n
 }
 
 // cleanDir validates a workspace-relative directory.
@@ -219,11 +235,14 @@ type componentDetail struct {
 
 func saveComponent(ctx context.Context, env *Env, args json.RawMessage) Result {
 	var in struct {
-		Dir        string `json:"dir"`
-		ArtifactID string `json:"artifactId"`
-		ID         string `json:"id"`
-		Name       string `json:"name"`
-		Category   string `json:"category"`
+		Dir         string `json:"dir"`
+		File        string `json:"file"`
+		ArtifactID  string `json:"artifactId"`
+		ID          string `json:"id"`
+		Name        string `json:"name"`
+		Category    string `json:"category"`
+		Description string `json:"description"`
+		Request     string `json:"request"`
 	}
 	if err := decodeArgs(args, &in); err != nil {
 		return toolError("invalid arguments: %v", err)
@@ -238,17 +257,37 @@ func saveComponent(ctx context.Context, env *Env, args json.RawMessage) Result {
 		body    any
 		files   int
 	)
-	switch art := strings.TrimSpace(in.ArtifactID); {
-	case art != "" && in.Dir != "":
-		return toolError("give dir (a drafted package) or artifactId (a deliverable, saved as a work), not both")
+	art, file := strings.TrimSpace(in.ArtifactID), strings.TrimSpace(in.File)
+	if n := countSet(in.Dir != "", art != "", file != ""); n > 1 {
+		return toolError("give one of dir (a drafted package), file or artifactId (saved as a work)")
+	}
+	if file != "" {
+		// A workspace file: its deliverable, published now when it is not
+		// yet (one written this turn is in no room record yet).
+		ws := env.Session.workspace()
+		if ws == nil {
+			return toolError("save_component cannot read your workspace: this agent's core does not expose its files. Pass the deliverable's artifactId instead")
+		}
+		rel, err := cleanDir(file)
+		if err != nil {
+			return toolError("%v", err)
+		}
+		if art, err = ws.Deliverable(ctx, rel); err != nil {
+			return toolError("%v", err)
+		}
+	}
+	switch {
 	case art != "":
 		// A deliverable's current version as a work (the gateway snapshots
 		// its files as the job's requester; its data never comes along).
 		p = "/v1/rooms/" + url.PathEscape(env.Session.Scope().RoomID) + "/artifacts/" + url.PathEscape(art) + "/publish-work?" + url.Values{"job": {job.JobID}}.Encode()
-		body = wire.WorkPublishRequest{ComponentID: id, Name: strings.TrimSpace(in.Name), Category: strings.TrimSpace(in.Category)}
+		body = wire.WorkPublishRequest{
+			ComponentID: id, Name: strings.TrimSpace(in.Name), Category: strings.TrimSpace(in.Category),
+			Description: strings.TrimSpace(in.Description), RecipePrompt: strings.TrimSpace(in.Request),
+		}
 		what = "the deliverable " + art
-	case in.Name != "" || in.Category != "":
-		return toolError("name and category are a work's: pass artifactId (a deliverable) to save one")
+	case in.Name != "" || in.Category != "" || in.Description != "" || in.Request != "":
+		return toolError("name, category, description and request are a work's: pass file or artifactId to save one")
 	default:
 		dir, err := cleanDir(in.Dir)
 		if err != nil {

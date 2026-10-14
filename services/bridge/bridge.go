@@ -1611,7 +1611,7 @@ func (b *Bridge) noticeContextReset(ctx context.Context, d *drive) {
 // turnInfo is the turn this drive runs in session rs (the session
 // contributors' turn hooks: the room tools bind it).
 func (b *Bridge) turnInfo(d *drive, rs *roomSession) TurnInfo {
-	return TurnInfo{JobID: d.job.JobID, RequesterUserID: d.job.RequesterUserID, ChannelID: d.job.ChannelID, MessageSeq: d.job.MessageSeq, Workspace: sessionWorkspace{b, rs}, Team: d.content.teamRoster()}
+	return TurnInfo{JobID: d.job.JobID, RequesterUserID: d.job.RequesterUserID, ChannelID: d.job.ChannelID, MessageSeq: d.job.MessageSeq, Workspace: sessionWorkspace{b: b, rs: rs, room: d.job.RoomID, channel: d.job.ChannelID, turn: deliverableTurn{JobID: d.job.JobID, SourceSeq: d.job.MessageSeq}}, Team: d.content.teamRoster()}
 }
 
 type ensureResult struct {

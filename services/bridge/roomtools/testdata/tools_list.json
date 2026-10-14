@@ -131,12 +131,12 @@
         "openWorldHint": false,
         "readOnlyHint": false
       },
-      "description": "Save to the Library of the person who asked you, after they confirmed: a package drafted in a workspace directory (dir), or a deliverable as a gallery work (artifactId: its current version and recipe, never its data). Validated first; an error says what to fix. Without id it creates (refused if they have one of that kind and name); with id (cc_...) it saves the next version.",
+      "description": "Save to the Library of the person who asked you, after they confirmed: a package drafted in a workspace directory (dir), or a file as a gallery work (file or artifactId; its current version and recipe, never its data). Validated first; an error says what to fix. Without id it creates (refused if they have one of that kind and name); with id (cc_...) it saves the next version.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
           "artifactId": {
-            "description": "Instead of dir: any deliverable's id (art_...).",
+            "description": "Or any deliverable's id (artf_...).",
             "type": "string"
           },
           "category": {
@@ -153,8 +153,16 @@
             ],
             "type": "string"
           },
+          "description": {
+            "description": "A work's gallery description.",
+            "type": "string"
+          },
           "dir": {
             "description": "Workspace-relative directory holding component.json, e.g. drafts/contract-reviewer.",
+            "type": "string"
+          },
+          "file": {
+            "description": "A workspace file (published to the room first if needed).",
             "type": "string"
           },
           "id": {
@@ -163,6 +171,10 @@
           },
           "name": {
             "description": "A new work's name (lower-case, hyphens).",
+            "type": "string"
+          },
+          "request": {
+            "description": "A work's \"how it was made\": a request that would make a similar one (default: the message that produced the file).",
             "type": "string"
           }
         },

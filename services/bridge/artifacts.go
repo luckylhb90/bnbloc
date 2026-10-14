@@ -58,10 +58,20 @@ var dependencyDirs = map[string]bool{
 	"venv": true, "__pycache__": true, "target": true, "coverage": true,
 }
 
-// buildOutputDirs hold web build output. Their files are never individual
-// deliverables, but a site root lives there (sites.go): a built static web
-// app publishes as one site snapshot.
+// buildOutputDirs hold build output: a built static web app there publishes
+// as one site snapshot (sites.go), and the scripts, styles and maps of a
+// build are never individual deliverables. Everything else an agent writes
+// there — a deck, a report, a chart, an archive (out/ is where many put
+// what they made) — is a deliverable like any other file.
 var buildOutputDirs = map[string]bool{"dist": true, "build": true, "out": true}
+
+// buildIntermediateExts are what a build leaves in buildOutputDirs that no
+// person opens as a deliverable.
+var buildIntermediateExts = map[string]bool{
+	".html": true, ".htm": true, ".js": true, ".mjs": true, ".cjs": true, ".css": true, ".map": true, ".wasm": true,
+	".json": true, ".webmanifest": true, ".ico": true, ".woff": true, ".woff2": true,
+	".ttf": true, ".otf": true, ".eot": true, ".ts": true, ".class": true,
+}
 
 // dependencyPath reports a path with a hidden or dependency-dir segment
 // (any segment for dirs; the last segment of a file path only when hidden).
@@ -88,6 +98,9 @@ var ignoredDeliverableExts = map[string]bool{
 func ignoredDeliverable(rel string) bool {
 	if ignoredDeliverableExts[strings.ToLower(path.Ext(rel))] || dependencyPath(rel, false) || corepkg.ProtectedWorkspacePath(rel) {
 		return true
+	}
+	if !buildIntermediateExts[strings.ToLower(path.Ext(rel))] {
+		return false
 	}
 	segs := strings.Split(rel, "/")
 	for _, seg := range segs[:len(segs)-1] {
@@ -267,18 +280,9 @@ func (b *Bridge) publishDeliverables(ctx context.Context, room, channelID string
 				"event", "bnbloc.bridge.deliverable_read_failed", "room", room, "file", f.Path, "error", err)
 			continue
 		}
-		d := deliverable{rel: f.Path, content: content, turn: turn}
-		switch {
-		case isText && len(content) <= store.ArtifactInlineMaxBytes && utf8.Valid(content):
-			d.inline = true
-			d.kind = artifactKindForContent(f.Path, string(content))
-		case !binarySafe:
-			continue // not inline-publishable text, and the bytes are not exact
-		case int64(len(content)) > maxBytes:
+		d, why := deliverableFor(f.Path, content, binarySafe, maxBytes, turn)
+		if why != "" {
 			continue
-		default:
-			d.mimeType = store.ArtifactMIME(f.Path, sniffHead(content))
-			d.kind = store.ArtifactKindForFile(f.Path, d.mimeType)
 		}
 		published++
 		if err := b.publishArtifactNow(ctx, room, channelID, rs, d, "agent"); err != nil {
@@ -286,6 +290,27 @@ func (b *Bridge) publishDeliverables(ctx context.Context, room, channelID string
 				"event", "bnbloc.bridge.artifact_publish_failed", "room", room, "file", f.Path, "error", err)
 		}
 	}
+}
+
+// deliverableFor is how a workspace file publishes: inline text, or a blob
+// version with its MIME type. why says why it cannot ("" = it can): the
+// core cannot read its bytes faithfully, or it is over the room's cap.
+func deliverableFor(rel string, content []byte, binarySafe bool, maxBytes int64, turn deliverableTurn) (deliverable, string) {
+	d := deliverable{rel: rel, content: content, turn: turn}
+	_, isText := store.ArtifactTextMIME(rel)
+	switch {
+	case isText && len(content) <= store.ArtifactInlineMaxBytes && utf8.Valid(content):
+		d.inline = true
+		d.kind = artifactKindForContent(rel, string(content))
+	case !binarySafe:
+		return d, "the agent's core cannot read this file's bytes exactly"
+	case int64(len(content)) > maxBytes:
+		return d, fmt.Sprintf("it is %d bytes, over the room's %d-byte cap", len(content), maxBytes)
+	default:
+		d.mimeType = store.ArtifactMIME(rel, sniffHead(content))
+		d.kind = store.ArtifactKindForFile(rel, d.mimeType)
+	}
+	return d, ""
 }
 
 func sniffHead(b []byte) []byte {

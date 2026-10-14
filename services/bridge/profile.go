@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"strings"
 	"sync"
@@ -65,14 +66,18 @@ type TurnInfo struct {
 type SessionWorkspace interface {
 	ListFiles(ctx context.Context) ([]corepkg.SessionFile, error)
 	ReadFile(ctx context.Context, rel string) ([]byte, error)
+	Deliverable(ctx context.Context, rel string) (string, error)
 }
 
 // sessionWorkspace is a session's workspace as the core exposes it
 // (core.SessionFiles). The session id is read at call time: the first
 // turn starts before its session exists.
 type sessionWorkspace struct {
-	b  *Bridge
-	rs *roomSession
+	b       *Bridge
+	rs      *roomSession
+	room    string
+	channel string
+	turn    deliverableTurn
 }
 
 func (w sessionWorkspace) ids() (core, ws, sess string) {
@@ -103,6 +108,42 @@ func (w sessionWorkspace) ReadFile(ctx context.Context, rel string) ([]byte, err
 		return nil, errors.New("the session has not started yet")
 	}
 	return files.ReadSessionFile(ctx, ep, ws, sess, rel)
+}
+
+// Deliverable is the room deliverable of workspace file rel, published now
+// when its current content is not yet (save_component): a file the agent
+// wrote this turn has an id before the turn's own publish pass, and before
+// the room records (.room/artifacts.md, written at turn start) list it.
+// Any file but bnbloc's own may be named, build output included: naming it
+// is the agent's choice.
+func (w sessionWorkspace) Deliverable(ctx context.Context, rel string) (string, error) {
+	if dependencyPath(rel, false) || corepkg.ProtectedWorkspacePath(rel) {
+		return "", fmt.Errorf("%s is not a deliverable (hidden, dependency or bnbloc's own files)", rel)
+	}
+	coreName, ws, sess := w.ids()
+	files, ep, binarySafe, ok := w.b.sessionFiles(ctx, coreName)
+	if !ok {
+		return "", errNoSessionFiles
+	}
+	if ws == "" || sess == "" {
+		return "", errors.New("the session has not started yet")
+	}
+	content, err := files.ReadSessionFile(ctx, ep, ws, sess, rel)
+	if err != nil {
+		return "", fmt.Errorf("read %s: %w", rel, err)
+	}
+	maxBytes, err := w.b.artifactMaxBytes(ctx, w.room)
+	if err != nil {
+		return "", fmt.Errorf("the room's limits are unavailable: %w", err)
+	}
+	d, why := deliverableFor(rel, content, binarySafe, maxBytes, w.turn)
+	if why != "" {
+		return "", fmt.Errorf("%s cannot be a deliverable: %s", rel, why)
+	}
+	if err := w.b.publishArtifactNow(ctx, w.room, w.channel, w.rs, d, "agent"); err != nil {
+		return "", fmt.Errorf("publish %s: %w", rel, err)
+	}
+	return artifactIDForFile(w.room, w.rs, rel), nil
 }
 
 // errNoSessionFiles: the session's core does not expose workspace files.

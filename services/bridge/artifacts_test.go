@@ -307,6 +307,9 @@ func TestIgnoredDeliverable(t *testing.T) {
 		"src/main.go": false, "docs/build-notes.md": false, "build.md": false,
 		"build/out.js": true, "dist/index.html": true, "web/out/app.css": true, "dist.md": false, "a/node_modules/b.js": true, ".venv/x.py": true, "target/debug/app": true,
 		".env": true, "src/.DS_Store": true, "__pycache__/m.pyc": true, "lib/x.o": true, "Main.class": true,
+		// What an agent makes in an output directory is a deliverable.
+		"work/out/deck.pptx": false, "out/report.pdf": false, "dist/chart.png": false, "build/data.csv": false,
+		"out/assets/manifest.json": true, "dist/main.js.map": true,
 	} {
 		if got := ignoredDeliverable(p); got != want {
 			t.Errorf("ignoredDeliverable(%q) = %v, want %v", p, got, want)

@@ -93,8 +93,11 @@ func TestPromptBudgets(t *testing.T) {
 		// conversation (docs/prd/2026-10-14-context-overflow-recovery.md).
 		{"session guidance (tools, .room/)", guidance, 740},
 		{"session guidance (tools, .room/, team lead)", team, 820},
-		{"tools/list", toolsList, 2550},
-		{"session prefix (guidance + tools/list)", guidance + toolsList, 3290},
+		// +80 on 2026-10-14: save_component takes a workspace file and a
+		// work's description and "how it was made" request
+		// (docs/bugs/2026-10-14-work-save-misses-new-files.md).
+		{"tools/list", toolsList, 2630},
+		{"session prefix (guidance + tools/list)", guidance + toolsList, 3370},
 	} {
 		got := tokens(c.text)
 		t.Logf("%-48s %5d tokens (budget %d)", c.name, got, c.budget)

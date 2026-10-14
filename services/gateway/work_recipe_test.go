@@ -167,6 +167,12 @@ func TestRecipeAuthorEditRespected(t *testing.T) {
 	if got := strings.Join(e.versionFiles("maya", w.ID, "1.0.0"), ","); got != "component.json,q3.png,references/brief.md" {
 		t.Fatalf("the edited work's files = %s", got)
 	}
+	// A new request text only (the producing message was "publish it"): the
+	// rest of the recipe stays as captured.
+	w = e.publishApp("maya", chart, wire.WorkPublishRequest{Name: "reworded", RecipePrompt: "  Chart quarterly sales by region  "})
+	if w.Recipe == nil || w.Recipe.Prompt != "Chart quarterly sales by region" || len(w.Recipe.References) != len(captured.References) {
+		t.Fatalf("the reworded recipe = %+v", w.Recipe)
+	}
 	off := false
 	if w := e.publishApp("maya", chart, wire.WorkPublishRequest{Name: "no-recipe", IncludeRecipe: &off}); w.Recipe != nil {
 		t.Fatalf("a dropped recipe = %+v", w.Recipe)
