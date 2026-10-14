@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
-	"slices"
+	"maps"
 	"strings"
 
 	corepkg "github.com/luckylhb90/bnbloc/core"
@@ -28,6 +28,7 @@ import (
 // writtenAttachment describes an attachment materialized into the workspace: the
 // path the agent can open, plus its original name and type for the prompt.
 type writtenAttachment struct {
+	ID          string
 	Path        string
 	Filename    string
 	ContentType string
@@ -103,12 +104,12 @@ func (b *Bridge) materializeAttachments(ctx context.Context, w corepkg.Workspace
 			miss(undeliveredTooLarge(maxInput), nil)
 			continue
 		}
-		path := ".room/attachments/" + id + extForContentType(contentType, filename)
+		path := roomlog.AttachmentPath(id, contentType, filename)
 		if err := w.WriteWorkspaceFileBytes(ctx, ep, workspaceID, path, blob); err != nil {
 			miss(undeliveredRefused(err), err)
 			continue
 		}
-		out.delivered = append(out.delivered, writtenAttachment{Path: path, Filename: filename, ContentType: contentType})
+		out.delivered = append(out.delivered, writtenAttachment{ID: id, Path: path, Filename: filename, ContentType: contentType})
 	}
 	return out
 }
@@ -126,29 +127,6 @@ func (b *Bridge) attachmentMeta(ctx context.Context, room, id string) wire.ChatA
 		return wire.ChatAttachment{}
 	}
 	return meta
-}
-
-// extForContentType is the extension an attachment is written with, so the
-// agent's tools recognize the file (an image tool needs .png, a deck .pptx):
-// its type's (wire.AttachmentTypes, which the upload held it to) — the
-// original name's when that is one of them (.potx stays .potx) — else the
-// original name's, else "".
-func extForContentType(contentType, filename string) string {
-	ext := ""
-	if dot := strings.LastIndexByte(filename, '.'); dot >= 0 && dot+1 < len(filename) {
-		ext = filename[dot:]
-	}
-	ct := strings.ToLower(strings.TrimSpace(contentType))
-	for _, t := range wire.AttachmentTypes {
-		if t.MIME != ct {
-			continue
-		}
-		if slices.Contains(t.Extensions, strings.ToLower(ext)) {
-			return strings.ToLower(ext)
-		}
-		return t.Extensions[0]
-	}
-	return ext
 }
 
 // roomRecordFiles are the .room/ records of a pass besides the history
@@ -234,6 +212,10 @@ func (b *Bridge) materializeRoomContext(ctx context.Context, w corepkg.Workspace
 		return st, "", err
 	}
 	from := instructionSender(entries, msgSeq, now)
+	if cp != nil {
+		st = b.mirrorAttachments(ctx, room, entries, st, cp)
+	}
+	entries = roomlog.PointAttachments(entries, st.Attachments)
 	files, newState := roomlog.Materialize(entries, complete, st)
 	// Insert the records before the trailing INDEX.
 	records, recorded := b.roomRecordFiles(ctx, room, jobID, self, st, g, cp)
@@ -272,9 +254,16 @@ func (b *Bridge) drivePrompt(ctx context.Context, d *drive, workspaceID string, 
 	shared := b.workspaces.shared(d.key(), workspaceID)
 	var cp *deliverableCopier
 	if d.caps.bytesWriter != nil {
-		cp = &deliverableCopier{key: d.key(), workspaceID: workspaceID, w: d.caps.bytesWriter, ep: ep}
+		cp = &deliverableCopier{key: d.key(), workspaceID: workspaceID, w: d.caps.bytesWriter, ep: ep, maxInput: d.caps.maxInput}
 	}
-	newSt, from, err := b.materializeRoomContext(ctx, w, ep, room, workspaceID, d.job.JobID, d.job.MessageSeq, text, roomlog.Producer{Owner: owner, Provider: provider, Core: d.core}, shared.roomState(), g, cp)
+	roomSt := shared.roomState()
+	roomSt.Attachments = maps.Clone(roomSt.Attachments)
+	for _, a := range atts.delivered {
+		if a.ID != "" {
+			roomlog.Mirrored(&roomSt, a.ID, a.Path) // the turn's own files: never copied twice
+		}
+	}
+	newSt, from, err := b.materializeRoomContext(ctx, w, ep, room, workspaceID, d.job.JobID, d.job.MessageSeq, text, roomlog.Producer{Owner: owner, Provider: provider, Core: d.core}, roomSt, g, cp)
 	if err != nil {
 		slog.Warn("bnbloc bridge room-context materialization failed; falling back to pushed context",
 			"event", "bnbloc.bridge.roomctx_failed", "room", room, "core", d.core, "error", err)
@@ -297,6 +286,9 @@ type deliverableCopier struct {
 	workspaceID string
 	w           corepkg.WorkspaceFileBytesWriter
 	ep          corepkg.Endpoint
+	// maxInput is the core's stated request limit (0 = unstated): a file
+	// whose write would exceed it is not copied.
+	maxInput int64
 }
 
 // copyDeliverables writes the listed deliverables whose latest version the
@@ -310,6 +302,34 @@ func (b *Bridge) copyDeliverables(ctx context.Context, room string, list []rooml
 	})
 	b.workspaces.setCopies(cp.key, cp.workspaceID, next)
 	return copies
+}
+
+// mirrorAttachments copies the attachments of the pass's records the
+// workspace does not hold yet into .room/attachments/ (roomlog's
+// AttachmentsToMirror: newest first, bounded per file and pass), downloaded
+// with the bridge's session as a member of the room, and records what it
+// holds in the workspace state. A copy that fails is skipped (the record
+// then names the file without a path) and tried again by a later pass.
+func (b *Bridge) mirrorAttachments(ctx context.Context, room string, entries []roomlog.Entry, st roomlog.CtxState, cp *deliverableCopier) roomlog.CtxState {
+	next := st
+	next.Attachments = maps.Clone(st.Attachments)
+	for _, a := range roomlog.AttachmentsToMirror(entries, st.Attachments) {
+		if cp.maxInput > 0 && protocol.WriteFileBodyBytes(a.Size) > cp.maxInput {
+			continue
+		}
+		blob, contentType, filename, err := b.gatewayGETAttachment(ctx, "/v1/rooms/"+room+"/attachments/"+a.ID)
+		if err != nil || int64(len(blob)) > roomlog.MaxMirrorFileBytes {
+			slog.Debug("bnbloc bridge attachment not mirrored", "event", "bnbloc.bridge.attachment_mirror_failed", "room", room, "attachment", a.ID, "error", err)
+			continue
+		}
+		path := roomlog.AttachmentPath(a.ID, firstNonEmpty(a.ContentType, contentType), firstNonEmpty(a.Filename, filename))
+		if err := cp.w.WriteWorkspaceFileBytes(ctx, cp.ep, cp.workspaceID, path, blob); err != nil {
+			slog.Debug("bnbloc bridge attachment not mirrored", "event", "bnbloc.bridge.attachment_mirror_failed", "room", room, "attachment", a.ID, "error", err)
+			continue
+		}
+		roomlog.Mirrored(&next, a.ID, path)
+	}
+	return next
 }
 
 // toPromptAttachments maps the bridge's written descriptors to roomlog's prompt

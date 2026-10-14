@@ -80,5 +80,8 @@ type AttachmentRef struct {
 	Filename    string
 	ContentType string
 	Size        int64
+	// Path is the copy in the reader's workspace (.room/attachments/…);
+	// "" until a pass mirrored it.
+	Path string
 }
 

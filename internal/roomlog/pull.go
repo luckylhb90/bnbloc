@@ -51,6 +51,9 @@ type CtxState struct {
 	// AppSDKSum is the sum of the demo-mode app SDK last written into the
 	// workspace (AppSDKUpdate); empty until the first pull pass.
 	AppSDKSum string
+	// Attachments are the room's attachments the workspace holds a copy of
+	// (id → path; Mirrored).
+	Attachments map[string]string `json:",omitempty"`
 }
 
 // NamedFile is one materialized .room/ file.

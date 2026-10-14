@@ -650,3 +650,56 @@ func TestDropSelfKeepsOtherChannelsReplies(t *testing.T) {
 		t.Fatalf("the reply in another channel is not in this session's memory and must stay:\n%s", prompt)
 	}
 }
+
+// bytesSink records binary workspace writes.
+type bytesSink struct{ files map[string][]byte }
+
+func (s *bytesSink) WriteWorkspaceFileBytes(_ context.Context, _ corepkg.Endpoint, _, rel string, data []byte) error {
+	s.files[rel] = data
+	return nil
+}
+
+// A file another person attached reaches every agent of the room: the pass
+// mirrors it into .room/attachments/ once, and the record points at it.
+func TestPassMirrorsTheRoomsAttachments(t *testing.T) {
+	g := newPullGateway(t)
+	g.mu.Lock()
+	g.history["test"] = `{"messages":[{"sequence":20,"kind":"chat_message","payload":{"userId":"jack","text":"the brief","attachments":[{"id":"att_9","filename":"brief.md","contentType":"text/markdown","size":7}]}}]}`
+	g.attachments["att_9"] = testAttachment{name: "brief.md", contentType: "text/markdown", data: []byte("# brief")}
+	g.mu.Unlock()
+	prov := &fakeCoreProvider{url: g.srv.URL}
+	b := New(Config{GatewayBaseURL: g.srv.URL, GatewayToken: "t", OwnerSubject: "maya",
+		Cores: []CoreConfig{{Name: "core-a", Provider: prov, Endpoint: corepkg.Endpoint{BaseURL: g.srv.URL}}}})
+	w, ep, ok := testWriter(b, "core-a")
+	if !ok {
+		t.Fatal("fake provider must satisfy WorkspaceFileWriter")
+	}
+	sink := &bytesSink{files: map[string][]byte{}}
+	cp := &deliverableCopier{workspaceID: "ws", w: sink, ep: ep}
+	self := roomlog.Producer{Owner: "maya", Provider: "agent-a"}
+	st, _, err := b.materializeRoomContext(context.Background(), w, ep, "r1", "ws", "job-x", 0, "", self, roomlog.CtxState{}, roomlog.Guidance{HasRoomFiles: true}, cp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(sink.files[".room/attachments/att_9.md"]) != "# brief" {
+		t.Fatalf("mirrored files = %v", sink.files)
+	}
+	var recent string
+	for _, wr := range prov.roomFileWrites() {
+		if strings.HasSuffix(wr.path, "recent.md") {
+			recent = wr.content
+		}
+	}
+	if !strings.Contains(recent, "jack: the brief [attached: brief.md → .room/attachments/att_9.md]") {
+		t.Fatalf("recent.md does not point at the copy:\n%s", recent)
+	}
+	if _, _, err := b.materializeRoomContext(context.Background(), w, ep, "r1", "ws", "job-y", 0, "", self, st, roomlog.Guidance{HasRoomFiles: true}, cp); err != nil {
+		t.Fatal(err)
+	}
+	g.mu.Lock()
+	n := g.downloads["att_9"]
+	g.mu.Unlock()
+	if n != 1 {
+		t.Fatalf("downloads = %d, want the copy kept, not fetched again", n)
+	}
+}

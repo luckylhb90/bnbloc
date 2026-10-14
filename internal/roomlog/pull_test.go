@@ -454,11 +454,46 @@ func TestHistoryRecordsAttachments(t *testing.T) {
 	if err != nil || len(entries) != 2 {
 		t.Fatalf("entries = %+v, %v; the attachment-only message must be recorded", entries, err)
 	}
-	if got := Line(entries[0]); got != "maya: see the brief [attached: brief.md (text/markdown, 2 KB, id att_1)]\n" {
+	if got := Line(entries[0]); got != "maya: see the brief [attached: brief.md (text/markdown, 2 KB)]\n" {
 		t.Fatalf("line = %q", got)
 	}
-	if got := Line(entries[1]); got != "jack: [attached: plan.pdf (application/pdf, 10 bytes, id att_2)]\n" {
+	if got := Line(entries[1]); got != "jack: [attached: plan.pdf (application/pdf, 10 bytes)]\n" {
 		t.Fatalf("attachment-only line = %q", got)
 	}
 }
 
+
+// An attachment's copy keeps its type's extension (the original name's when
+// it is one of them), else the name's own.
+func TestAttachmentPath(t *testing.T) {
+	for _, c := range []struct{ ct, name, want string }{
+		{"image/png", "image", ".room/attachments/a.png"},
+		{"image/jpeg", "photo.JPEG", ".room/attachments/a.jpeg"},
+		{"application/vnd.openxmlformats-officedocument.presentationml.template", "Brand.potx", ".room/attachments/a.potx"},
+		{"application/vnd.openxmlformats-officedocument.presentationml.presentation", "deck", ".room/attachments/a.pptx"},
+		{"application/x-unknown", "data.bin", ".room/attachments/a.bin"},
+		{"application/x-unknown", "noext", ".room/attachments/a"},
+	} {
+		if got := AttachmentPath("a", c.ct, c.name); got != c.want {
+			t.Errorf("AttachmentPath(%q, %q) = %q, want %q", c.ct, c.name, got, c.want)
+		}
+	}
+}
+
+// A pass mirrors the newest attachments first, never one it holds or one
+// over the per-file bound, within the pass budget; records point at copies.
+func TestAttachmentsToMirror(t *testing.T) {
+	entries := []Entry{
+		{Seq: 1, Attachments: []AttachmentRef{{ID: "old", Size: 10}}},
+		{Seq: 2, Attachments: []AttachmentRef{{ID: "held", Size: 10}, {ID: "huge", Size: MaxMirrorFileBytes + 1}}},
+		{Seq: 3, Attachments: []AttachmentRef{{ID: "new", Size: 10, Filename: "brief.md"}}},
+	}
+	got := AttachmentsToMirror(entries, map[string]string{"held": ".room/attachments/held"})
+	if len(got) != 2 || got[0].ID != "new" || got[1].ID != "old" {
+		t.Fatalf("to mirror = %+v, want new then old", got)
+	}
+	PointAttachments(entries, map[string]string{"new": ".room/attachments/new.md"})
+	if l := Line(Entry{Speaker: "maya", Text: "see", Attachments: entries[2].Attachments}); l != "maya: see [attached: brief.md → .room/attachments/new.md]\n" {
+		t.Fatalf("line = %q", l)
+	}
+}

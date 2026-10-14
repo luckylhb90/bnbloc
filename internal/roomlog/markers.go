@@ -101,11 +101,14 @@ func Line(e Entry) string {
 }
 
 // attachmentNote is how a record line shows a file its message carried:
-// enough to tell what it is and to read it by id (read_attachment).
+// where its copy is in the reader's workspace, else what it is.
 func attachmentNote(a AttachmentRef) string {
 	name := strings.TrimSpace(a.Filename)
 	if name == "" {
 		name = "file"
+	}
+	if p := strings.TrimSpace(a.Path); p != "" {
+		return "[attached: " + name + " → " + p + "]"
 	}
 	var parts []string
 	if ct := strings.TrimSpace(a.ContentType); ct != "" {
@@ -114,7 +117,9 @@ func attachmentNote(a AttachmentRef) string {
 	if a.Size > 0 {
 		parts = append(parts, HumanBytes(a.Size))
 	}
-	parts = append(parts, "id "+a.ID)
+	if len(parts) == 0 {
+		return "[attached: " + name + "]"
+	}
 	return "[attached: " + name + " (" + strings.Join(parts, ", ") + ")]"
 }
 
