@@ -11,7 +11,7 @@
 // opaque origin, and none is needed) and draws pages to canvases.
 //
 //   host  -> guest: { type: "pdf.load", lib, worker, bytes, background }   once
-//   host  -> guest: { type: "pdf.command", id: "zoom"|"fit"|"page-prev"|"page-next", value }
+//   host  -> guest: { type: "pdf.command", id: "zoom"|"fit"|"page"|"page-prev"|"page-next", value }
 //   guest -> host : { type: "pdf.status", page, pages, zoom }
 //   guest -> host : { type: "pdf.error", message }
 //
@@ -59,7 +59,7 @@ export function readPdfMessage(
     return { kind: "error", message: data.message.slice(0, ERROR_LIMIT) };
   }
   if (data.type === "pdf.units" && Array.isArray(data.pages) && data.pages.every((t) => typeof t === "string")) {
-    const units = readUnits((data.pages as string[]).map((text, i) => ({ label: `Page ${i + 1}`, text })));
+    const units = readUnits((data.pages as string[]).map((text, i) => ({ label: `Page ${i + 1}`, text, at: `page:${i + 1}` })));
     return units ? { kind: "units", units, truncated: data.truncated === true } : null;
   }
   return null;
@@ -173,7 +173,8 @@ body{overflow:auto;font:13px system-ui,sans-serif;color:#bbb;}
       var anchor = current; fitWidth = false; zoom = Math.min(64, Math.max(0.05, value)); layout(); goTo(anchor);
     } else if (id === "fit") {
       var at = current; fitWidth = true; layout(); goTo(at);
-    } else if (id === "page-prev") goTo(current - 1);
+    } else if (id === "page" && typeof value === "number" && isFinite(value)) goTo(Math.round(value));
+    else if (id === "page-prev") goTo(current - 1);
     else if (id === "page-next") goTo(current + 1);
   }
 

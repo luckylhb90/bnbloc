@@ -11,7 +11,7 @@ import { PDF_GUEST_HTML, readPdfMessage } from "./pdfFrame";
 // PDF opens, as source text handed to the frame — the frame itself loads
 // nothing from the network.
 
-export default function PdfViewer({ blob, file, toolbar }: ArtifactViewerProps) {
+export default function PdfViewer({ blob, file, toolbar, reveal }: ArtifactViewerProps) {
   const frameRef = useRef<HTMLIFrameElement | null>(null);
   const handedOff = useRef(false);
   const loaded = useRef(false);
@@ -59,6 +59,14 @@ export default function PdfViewer({ blob, file, toolbar }: ArtifactViewerProps) 
     window.addEventListener("message", onMessage);
     return () => window.removeEventListener("message", onMessage);
   }, [blob, doc, send]);
+
+  // "Show" a page (Compare's units: "page:<n>"), once the document is open.
+  useEffect(() => {
+    const n = reveal ? /^page:(\d+)$/.exec(reveal.at)?.[1] : undefined;
+    if (n && status.pages > 0) send({ type: "pdf.command", id: "page", value: Number(n) });
+    // The page count arriving (the document opened) applies a waiting reveal.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reveal?.nonce, status.pages > 0]);
 
   useViewerToolbar(
     toolbar,

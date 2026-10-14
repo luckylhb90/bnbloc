@@ -115,3 +115,30 @@ export function watchPointing(root: HTMLElement, partOf: (el: Element) => Part |
     },
   };
 }
+
+/** The class a revealed part wears for a moment (style.css animates it). */
+export const FLASH = "bnbloc-flash";
+
+/** Scrolls a part into view and marks it for a moment (a host's "Show"). */
+export function reveal(el: Element | null | undefined): void {
+  if (!el) return;
+  el.scrollIntoView({ block: "center" });
+  el.classList.remove(FLASH);
+  void (el as HTMLElement).offsetWidth;
+  el.classList.add(FLASH);
+  setTimeout(() => el.classList.remove(FLASH), 1600);
+}
+
+/** Holds a reveal until the file is shown: apply() once it is. */
+export function pendingReveal(show: (at: string) => boolean): { ask(at: string): void; apply(): void } {
+  let at: string | null = null;
+  return {
+    ask(next) {
+      at = next;
+      if (show(next)) at = null;
+    },
+    apply() {
+      if (at !== null && show(at)) at = null;
+    },
+  };
+}

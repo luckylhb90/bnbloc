@@ -130,6 +130,15 @@ export function rangeLabel(sheet: string, r: CellRange): string {
   return `${name}!${from === to ? from : `${from}:${to}`}`;
 }
 
+/** A cell address as rangeLabel writes it ("Revenue!B3", "'Q3 Sales'!B3"):
+ *  its sheet and 1-based row and column; null when malformed. */
+export function parseCellLabel(label: string): { sheet: string; row: number; col: number } | null {
+  const m = /^(?:'((?:[^']|'')+)'|([^!']+))!([A-Z]+)(\d+)$/.exec(label);
+  if (!m) return null;
+  const col = [...m[3]].reduce((n, ch) => n * 26 + ch.charCodeAt(0) - 64, 0);
+  return { sheet: m[1] !== undefined ? m[1].replace(/''/g, "'") : m[2], row: Number(m[4]), col };
+}
+
 /** How rangeText reads the drawn sheet. */
 export interface SheetReader {
   text(row: number, col: number): string;

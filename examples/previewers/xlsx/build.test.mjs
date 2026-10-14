@@ -26,6 +26,7 @@ import {
   displayText,
   drawnExtent,
   isNumeric,
+  parseCellLabel,
   parseRange,
   rangeLabel,
   rangeText,
@@ -135,4 +136,13 @@ test("units: non-empty cells keyed by address, merged ranges once, formulas kept
     ["added", "Revenue!H3", "270000\n=B3+C3"],
   ]);
   assert.deepEqual([workbookUnits(wb, 3).units.length, workbookUnits(wb, 3).truncated], [3, true], "bounded");
+});
+
+test("a cell label reads back as rangeLabel wrote it", () => {
+  for (const [sheet, row, col] of [["Revenue", 3, 2], ["Q3 Sales", 10, 27], ["Bob's", 1, 1]]) {
+    const label = rangeLabel(sheet, { top: row, left: col, bottom: row, right: col });
+    assert.deepEqual(parseCellLabel(label), { sheet, row, col }, label);
+  }
+  assert.equal(parseCellLabel("B3"), null);
+  assert.equal(parseCellLabel("Revenue!B3:C4"), null, "a range is not one cell");
 });

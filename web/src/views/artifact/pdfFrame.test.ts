@@ -34,7 +34,7 @@ eq(PDF_GUEST_HTML.split("</script>").length, 2, "single script block");
 // Compare's answer: each page a unit, bounded like a previewer's.
 eq(
   from({ type: "pdf.units", pages: ["Overview", "Revenue"], truncated: false }),
-  { kind: "units", units: [{ label: "Page 1", text: "Overview" }, { label: "Page 2", text: "Revenue" }], truncated: false },
+  { kind: "units", units: [{ label: "Page 1", text: "Overview", at: "page:1" }, { label: "Page 2", text: "Revenue", at: "page:2" }], truncated: false },
   "page units",
 );
 eq(from({ type: "pdf.units", pages: ["x".repeat(4001)] }), null, "an over-long page");

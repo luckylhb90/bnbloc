@@ -19,6 +19,7 @@ import {
   onFile,
   onInit,
   onToolbar,
+  onReveal,
   onUnits,
   reportError,
   sendSelection,
@@ -28,7 +29,7 @@ import {
   type ToolbarItem,
 } from "../../../../web/previewer-sdk/src/index.ts";
 import { shortName, sniffOffice, unreadableMessage, type OfficeKind } from "../../lib/office.ts";
-import { PICKED } from "../../lib/selection.ts";
+import { PICKED, pendingReveal, reveal } from "../../lib/selection.ts";
 import { workbookUnits } from "./units.ts";
 import {
   cellCss,
@@ -38,6 +39,7 @@ import {
   displayText,
   drawnExtent,
   isNumeric,
+  parseCellLabel,
   parseRange,
   rangeLabel,
   rangeText,
@@ -292,6 +294,7 @@ async function open(bytes: ArrayBuffer, file: PreviewFile): Promise<void> {
   const visibleActive = sheets.indexOf(wb.worksheets[first]);
   draw(visibleActive >= 0 ? visibleActive : 0);
   publishToolbar();
+  reveals.apply();
 }
 
 onInit((init) => {
@@ -326,3 +329,20 @@ onUnits(async (bytes) => {
   await wb.xlsx.load(bytes);
   return workbookUnits(wb, UNITS_LIMIT + 1).units;
 });
+
+// "Show" a cell (its units' at: its address): its sheet drawn, the cell lit
+// and in view, once the workbook is open.
+const reveals = pendingReveal((at) => {
+  const cell = parseCellLabel(at);
+  if (!cell) return true;
+  if (sheets.length === 0) return false;
+  const i = sheets.findIndex((ws) => ws.name === cell.sheet);
+  if (i < 0) return true;
+  if (i !== active) draw(i);
+  const range = { top: cell.row, left: cell.col, bottom: cell.row, right: cell.col };
+  anchor = range;
+  light(range);
+  reveal(cells.get(`${cell.row},${cell.col}`));
+  return true;
+});
+onReveal((at) => reveals.ask(at));

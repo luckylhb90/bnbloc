@@ -84,6 +84,8 @@ export interface ArtifactViewerProps {
   /** The part of the file the member points at (a slide, a cell range,
    *  selected text), null when none: the Ask AI panel names it. */
   readonly onSelection?: (s: ViewerSelection | null) => void;
+  /** A unit to show (its Compare `at`); a new nonce shows it again. */
+  readonly reveal?: { readonly at: string; readonly nonce: number };
 }
 
 /** What a viewer reports as selected: the frame protocol's Selection

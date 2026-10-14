@@ -13,6 +13,8 @@ export interface DeckUnit {
   readonly key: string;
   readonly label: string;
   readonly text: string;
+  /** Where it is in this version: "slide:<n>" (main.ts reveals it). */
+  readonly at: string;
 }
 
 export async function deckUnits(zip: ZipReader, bytes: ArrayBuffer | Uint8Array): Promise<DeckUnit[]> {
@@ -38,6 +40,7 @@ export async function deckUnits(zip: ZipReader, bytes: ArrayBuffer | Uint8Array)
     const title = lines[0] ? headline(lines[0]) : "";
     out.push({
       key: `slide-${a.id ?? i}`,
+      at: `slide:${i + 1}`,
       label: title ? `Slide ${i + 1} · ${title}` : `Slide ${i + 1}`,
       text: [...lines, ...(notes.length ? ["", "Notes:", ...notes] : [])].join("\n"),
     });

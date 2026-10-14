@@ -10,6 +10,14 @@ import { headline, openPackage, runText, type ZipReader } from "../../lib/ooxml.
 export interface DocUnit {
   readonly label: string;
   readonly text: string;
+  /** Where it is: "t:<its first words>" (main.ts finds the rendered block
+   *  that starts so; paragraphs carry no identity). */
+  readonly at: string;
+}
+
+/** A block's locator: its text's start, whitespace folded. */
+export function textLocator(text: string): string {
+  return `t:${[...text.replace(/\s+/g, " ").trim()].slice(0, 120).join("")}`;
 }
 
 const HEADING_STYLE = /<w:pStyle\b[^>]*w:val="(Title|Heading\d|heading\d|Subtitle)"/;
@@ -64,15 +72,15 @@ export async function docUnits(zip: ZipReader, bytes: ArrayBuffer | Uint8Array):
   for (const b of blocks(body)) {
     if (b.kind === "tbl") {
       const text = tableText(b.xml);
-      if (text.trim()) out.push({ label: heading ? `Table · ${heading}` : "Table", text });
+      if (text.trim()) out.push({ label: heading ? `Table · ${heading}` : "Table", text, at: textLocator(text) });
       continue;
     }
     const text = runText(b.xml, "w").trim();
     if (!text) continue;
     if (HEADING_STYLE.test(b.xml)) {
       heading = headline(text, 40);
-      out.push({ label: `Heading · ${heading}`, text });
-    } else out.push({ label: heading ? `Paragraph · ${heading}` : "Paragraph", text });
+      out.push({ label: `Heading · ${heading}`, text, at: textLocator(text) });
+    } else out.push({ label: heading ? `Paragraph · ${heading}` : "Paragraph", text, at: textLocator(text) });
   }
   return out;
 }

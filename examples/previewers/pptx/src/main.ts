@@ -17,6 +17,7 @@ import {
   onFile,
   onInit,
   onToolbar,
+  onReveal,
   onUnits,
   reportError,
   setTitle,
@@ -25,7 +26,7 @@ import {
   type ToolbarItem,
 } from "../../../../web/previewer-sdk/src/index.ts";
 import { countedTitle, keepLinksInside, sniffOffice, unreadableMessage, type OfficeKind } from "../../lib/office.ts";
-import { watchPointing } from "../../lib/selection.ts";
+import { pendingReveal, reveal, watchPointing } from "../../lib/selection.ts";
 import { deckUnits } from "./units.ts";
 
 const POWERPOINT: OfficeKind = { noun: "PowerPoint presentation", ext: ".pptx", legacy: ".ppt", apps: "PowerPoint or Keynote" };
@@ -120,6 +121,7 @@ async function open(bytes: ArrayBuffer, file: PreviewFile): Promise<void> {
   statusEl.textContent = next.slideCount === 0 ? `${file.name} has no slides.` : "";
   setTitle(countedTitle(file.name, "slide", 0, next.slideCount));
   publishToolbar();
+  reveals.apply();
 }
 
 keepLinksInside(deckEl);
@@ -154,3 +156,12 @@ onToolbar((id, value) => {
 
 // Compare reads a version into slides (capability "units", src/units.ts).
 onUnits((bytes) => deckUnits(JSZip, bytes));
+
+// "Show" a slide (its units' at: "slide:<n>"), once the deck is open.
+const reveals = pendingReveal((at) => {
+  const n = /^slide:(\d+)$/.exec(at)?.[1];
+  const el = n && viewer ? deckEl.querySelector(`[data-slide-index="${Number(n) - 1}"]`) : null;
+  reveal(el);
+  return !!el || !n;
+});
+onReveal((at) => reveals.ask(at));

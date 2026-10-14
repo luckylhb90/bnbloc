@@ -172,6 +172,8 @@ export function ArtifactTabView({
   const [asking, setAsking] = useState(false);
   // A suggestion handed over from the room, for the panel to insert.
   const [pick, setPick] = useState<FileComposerOptions["pick"]>();
+  // A change to show in the preview (a card's or Compare's "Show").
+  const [reveal, setReveal] = useState<{ at: string; nonce: number }>();
   // The part of the shown version the viewer points at (preview.selection).
   const [selection, setSelection] = useState<ViewerSelection | null>(null);
   const updated = useUpdatedMark(shown, version === undefined);
@@ -284,6 +286,13 @@ export function ArtifactTabView({
     } finally {
       setBusy(false);
     }
+  };
+  // Shows a unit of a version in the preview: that version, view mode, then
+  // the viewer is asked to reveal it.
+  const show = (v: number, at: string) => {
+    setMode("view");
+    onVersion(v === artifact.currentVersion ? undefined : v);
+    setReveal((r) => ({ at, nonce: (r?.nonce ?? 0) + 1 }));
   };
   const startCompare = () => {
     if (mode === "compare") {
@@ -458,7 +467,7 @@ export function ArtifactTabView({
           !comparer || compareWith === null ? (
             <p className="p-4 text-sm text-[var(--color-fg-subtle)]">These versions cannot be compared. Pick a version above to view it.</p>
           ) : (
-            <CompareView roomId={roomId} artifact={artifact} detail={detail} prevVersion={compareWith} currVersion={shown} />
+            <CompareView roomId={roomId} artifact={artifact} detail={detail} prevVersion={compareWith} currVersion={shown} onShow={(at) => show(shown, at)} />
           )
         ) : blobError ? (
           <p className="p-4 text-sm text-[var(--color-fg-subtle)]">Could not load this file: {blobError}</p>
@@ -478,6 +487,7 @@ export function ArtifactTabView({
             onLocalState={onLocalState ? (st) => onLocalState(artifactId, st) : undefined}
             remoteState={liveStates?.[artifactId]}
             onSelection={setSelection}
+            reveal={reveal}
           />
         )}
       </div>
@@ -489,6 +499,7 @@ export function ArtifactTabView({
           pick={pick}
           artifact={artifact}
           detail={detail}
+          onShow={show}
           onViewChanges={(prev, curr) => {
             onVersion(curr === artifact.currentVersion ? undefined : curr);
             setCompareWith(prev);

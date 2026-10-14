@@ -119,6 +119,7 @@ export function ArtifactBody({
   onLocalState,
   remoteState,
   onSelection,
+  reveal,
 }: {
   readonly roomId: string;
   readonly actor?: string;
@@ -136,6 +137,7 @@ export function ArtifactBody({
   readonly onLocalState?: (state: unknown) => void;
   readonly remoteState?: { state: unknown; actor: string; nonce: number };
   readonly onSelection?: (selection: ViewerSelection | null) => void;
+  readonly reveal?: ArtifactViewerProps["reveal"];
 }) {
   const instanceKey = `${viewer?.id ?? ""}:${artifactId}:${file.version}`;
   const onToolbarRef = useStableRef(onToolbar);
@@ -179,6 +181,7 @@ export function ArtifactBody({
     onLocalState,
     remoteState,
     onSelection,
+    reveal,
   };
   return (
     <ViewerBoundary resetKey={instanceKey}>

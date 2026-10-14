@@ -95,6 +95,7 @@ function PreviewerFrame({
   onLocalState,
   remoteState,
   onSelection,
+  reveal,
 }: ArtifactViewerProps & { readonly desc: Desc }) {
   const frameRef = useRef<HTMLIFrameElement | null>(null);
   const boxRef = useRef<HTMLDivElement | null>(null);
@@ -108,8 +109,9 @@ function PreviewerFrame({
   const selection = desc.capabilities.includes("selection");
 
   // Latest props for the message handler (registered once per frame).
-  const latest = useRef({ blob, file, version, onLocalState, onSelection, roomId, artifactId });
-  latest.current = { blob, file, version, onLocalState, onSelection, roomId, artifactId };
+  const units = desc.capabilities.includes("units");
+  const latest = useRef({ blob, file, version, onLocalState, onSelection, roomId, artifactId, revealAt: reveal?.at });
+  latest.current = { blob, file, version, onLocalState, onSelection, roomId, artifactId, revealAt: reveal?.at };
 
   const post = useCallback((msg: HostMessage, transfer?: Transferable[]) => {
     // A sandboxed frame's origin is opaque: "*" is the only accepted target;
@@ -142,11 +144,20 @@ function PreviewerFrame({
     });
     const buffer = await bytes.arrayBuffer();
     post({ type: "preview.file", bytes: buffer }, [buffer]);
+    const at = latest.current.revealAt;
+    if (at && units) post({ type: "preview.reveal", at });
     if (liveState && latest.current.artifactId) {
       const snap = await api.getArtifactState(latest.current.roomId, latest.current.artifactId).catch(() => null);
       if (snap && stateKey(snap.state) !== null) post({ type: "preview.state", state: snap.state, actor: snap.actor });
     }
-  }, [post, liveState]);
+  }, [post, liveState, units]);
+
+  // "Show" a unit: once the frame has the file (handOff sends a pending one).
+  useEffect(() => {
+    if (reveal && units && readyRef.current) post({ type: "preview.reveal", at: reveal.at });
+    // A new nonce shows it again.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reveal?.nonce]);
 
   const storeThumbnail = useCallback(
     async (png: ArrayBuffer) => {

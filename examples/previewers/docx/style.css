@@ -55,3 +55,11 @@ body {
   outline-offset: 2px;
   border-radius: 2px;
 }
+/* A part the host asked to show (lib/selection.ts reveal). */
+@keyframes bnbloc-flash {
+  from { box-shadow: 0 0 0 4px var(--accent); }
+  to { box-shadow: 0 0 0 4px transparent; }
+}
+.bnbloc-flash {
+  animation: bnbloc-flash 1.6s ease-out;
+}

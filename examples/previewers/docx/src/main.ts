@@ -17,6 +17,7 @@ import {
   onInit,
   onResize,
   onToolbar,
+  onReveal,
   onUnits,
   reportError,
   setTitle,
@@ -27,7 +28,7 @@ import {
 import { unicodeBullets } from "./bullets.ts";
 import { docUnits } from "./units.ts";
 import { countedTitle, keepLinksInside, sniffOffice, unreadableMessage, type OfficeKind } from "../../lib/office.ts";
-import { quotedLabel, tableText, watchPointing } from "../../lib/selection.ts";
+import { collapseText, pendingReveal, quotedLabel, reveal, tableText, watchPointing } from "../../lib/selection.ts";
 
 const WORD: OfficeKind = { noun: "Word document", ext: ".docx", legacy: ".doc", apps: "Word or Pages" };
 
@@ -146,6 +147,7 @@ async function open(bytes: ArrayBuffer, file: PreviewFile): Promise<void> {
   setTitle(countedTitle(file.name, "page", 0, pages.length));
   trackPages();
   applyZoom();
+  reveals.apply();
 }
 
 keepLinksInside(pagesEl);
@@ -181,3 +183,18 @@ onResize(() => {
 // Compare reads a version into paragraphs and tables (capability "units",
 // src/units.ts).
 onUnits((bytes) => docUnits(JSZip, bytes));
+
+// "Show" a paragraph or table (its units' at: "t:<its first words>"): the
+// first rendered block that starts so, once the document is shown.
+const reveals = pendingReveal((at) => {
+  if (!at.startsWith("t:")) return true;
+  if (pages.length === 0) return false;
+  const want = at.slice(2).toLowerCase();
+  const el = [...pagesEl.querySelectorAll<HTMLElement>(BLOCKS)].find((b) => {
+    const text = collapseText(b instanceof HTMLTableElement ? tableText(b) : b.innerText).toLowerCase();
+    return text.length > 0 && (text.startsWith(want) || want.startsWith(text));
+  });
+  reveal(el);
+  return true;
+});
+onReveal((at) => reveals.ask(at));

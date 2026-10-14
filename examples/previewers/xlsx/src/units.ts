@@ -12,6 +12,8 @@ export interface CellUnit {
   readonly key: string;
   readonly label: string;
   readonly text: string;
+  /** Where it is: its address, as the key (main.ts reveals it). */
+  readonly at: string;
 }
 
 export function workbookUnits(wb: ExcelJS.Workbook, maxCells: number): { units: CellUnit[]; truncated: boolean } {
@@ -33,7 +35,7 @@ export function workbookUnits(wb: ExcelJS.Workbook, maxCells: number): { units: 
           return;
         }
         const address = rangeLabel(ws.name, { top: r, left: c, bottom: r, right: c });
-        units.push({ key: address, label: address, text: formula ? `${shown}\n${formula}` : shown });
+        units.push({ key: address, label: address, at: address, text: formula ? `${shown}\n${formula}` : shown });
       });
     });
     if (full) return { units, truncated: true };
