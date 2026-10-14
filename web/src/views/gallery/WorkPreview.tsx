@@ -5,7 +5,8 @@ import { errorText } from "@/lib/errors";
 import { saveBlob } from "@/lib/saveBlob";
 import { workGalleryApi } from "@/lib/workGalleryApi";
 import { useToast } from "@/ui/Toast";
-import { ArtifactBody, resolveViewer, useViewerRegistry } from "@/views/artifact/ArtifactBody";
+import { ArtifactBody, resolveViewer } from "@/views/artifact/ArtifactBody";
+import { useViewerRegistry } from "@/views/artifact/registry";
 import { fileInfoFromFacts } from "@/views/artifact/fileInfo";
 import type { SiteSource } from "@/views/artifact/registry";
 

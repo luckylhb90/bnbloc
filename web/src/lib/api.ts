@@ -685,6 +685,9 @@ export const api = {
     req<RoomHandoffInfo>(roomPath(roomId, "handoff")),
   // A short-lived ticket URL for one attachment (an <img>/<a download>
   // cannot carry the bearer); lib/attachmentTickets.ts caches and renews it.
+  // An attachment's bytes with the session (the preview workbench hands
+  // them to a viewer); links and <img> use a ticket instead.
+  attachmentBlob: (roomId: string, attachmentId: string) => fetchArtifactBlob(roomPath(roomId, "attachments", attachmentId)),
   attachmentTicket: (roomId: string, attachmentId: string) =>
     req<{ url: string; expiresAtMs: number }>(
       roomPath(roomId, "attachments", attachmentId, "ticket"),

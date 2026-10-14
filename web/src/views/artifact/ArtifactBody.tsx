@@ -1,12 +1,10 @@
-import { Component, lazy, Suspense, useEffect, useMemo, useState, useSyncExternalStore, type ReactNode } from "react";
+import { Component, lazy, Suspense, useEffect, useMemo, useState, type ReactNode } from "react";
 import { DownloadSimpleIcon, FileIcon } from "@phosphor-icons/react";
 import { formatBytes } from "@/lib/format";
 import { TEXT_VIEWER_ID } from "./builtin";
 import {
   listArtifactViewers,
-  registryRevision,
   selectViewer,
-  subscribeArtifactViewers,
   type ArtifactFileInfo,
   type ArtifactViewer,
   type ArtifactViewerProps,
@@ -36,11 +34,6 @@ function lazyViewer(viewer: ArtifactViewer) {
     lazyViewers.set(viewer, component);
   }
   return component;
-}
-
-/** Re-renders on registry changes (runtime installs). */
-export function useViewerRegistry(): number {
-  return useSyncExternalStore(subscribeArtifactViewers, registryRevision, registryRevision);
 }
 
 /** The viewer a file opens with (the member's choice when still valid); the

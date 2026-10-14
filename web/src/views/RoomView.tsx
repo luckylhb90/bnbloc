@@ -46,6 +46,7 @@ import { useRoomActivity } from "@/views/room/useRoomActivity";
 import { useFeedScroll } from "@/views/room/useFeedScroll";
 import { useRoomTeam } from "@/views/room/useRoomTeam";
 import { MessageExtrasProvider } from "@/views/room/messageExtras";
+import { AttachmentOpenerProvider } from "@/views/room/MessageAttachments";
 import { JobProgressProvider } from "@/views/room/JobProgressStrip";
 import { SaveTemplateDialog } from "@/views/room/SaveTemplateDialog";
 import { TemplateStartCard } from "@/views/room/TemplateStartCard";
@@ -473,6 +474,7 @@ export function RoomView({
 
       {/* Channel rail + feed + composer share one row; the rail scopes all
           three to the selected channel. */}
+      <AttachmentOpenerProvider value={workbench.openAttachment}>
       <div ref={roomRowRef} data-room-row className="relative flex min-h-0 flex-1 overflow-hidden">
         {railSurface === "inline" && rail}
         {panel === "artifacts" ? (
@@ -594,6 +596,7 @@ export function RoomView({
           </DismissibleLayer>
         )}
       </div>
+      </AttachmentOpenerProvider>
 
       {room && feed.length > 0 && <MyMessagesNav items={feed} />}
       {team.dialogs}

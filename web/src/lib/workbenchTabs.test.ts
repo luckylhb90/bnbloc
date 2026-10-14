@@ -122,3 +122,24 @@ test("persistence round-trips and rejects malformed storage", () => {
     active: "a:w",
   }, "sanitized");
 });
+
+test("an attachment opens once as its own tab and persists", () => {
+  const file = { id: "att_1", filename: "deck.pptx", contentType: "application/vnd.openxmlformats-officedocument.presentationml.presentation", size: 38422 };
+  let s = r(EMPTY_WORKBENCH, { type: "open", artifactId: "a" });
+  s = r(s, { type: "openAttachment", attachment: file });
+  eq(keys(s), ["a:a", "f:att_1"], "after the active tab");
+  eq(s.active, "f:att_1", "activated");
+  s = r(s, { type: "activate", key: "a:a" });
+  s = r(s, { type: "openAttachment", attachment: file });
+  eq([keys(s), s.active], [["a:a", "f:att_1"], "f:att_1"], "reopening only activates");
+  eq(parseWorkbench(serializeWorkbench(s)), s, "round trip");
+  const dirty = JSON.stringify({
+    v: 1,
+    tabs: [
+      { key: "f:x", attachment: { id: "y", filename: "a", contentType: "", size: 1 }, pinned: false },
+      { key: "f:z", attachment: { id: "z", filename: "a" }, pinned: false },
+      { key: "f:q", attachment: null, pinned: false },
+    ],
+  });
+  eq(parseWorkbench(dirty), EMPTY_WORKBENCH, "mismatched key, missing fields and null are dropped");
+});

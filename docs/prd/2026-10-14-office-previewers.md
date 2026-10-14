@@ -1,6 +1,7 @@
 # Office previewers: PowerPoint, Word, Excel (2026-10-14)
 
-Status: implemented (2026-10-14), not yet published. Builds on
+Status: implemented and published to QA (2026-10-14; optin, checked in a
+room's workbench, then auto). Builds on
 `docs/prd/2026-10-09-preview-workbench-and-previewer-components.md`.
 
 ## 1. Why
@@ -172,11 +173,26 @@ previews in place.
 - On QA: publish optin, open agent-made files in a room, the workbench and
   a share page.
 
-## 5. Follow-ups
+## 5. Chat attachments open in the workbench
 
-- Non-image chat attachments open in the preview workbench. Today only
-  images get a lightbox; a member-attached deck, document, sheet or PDF is
-  a download.
+A member's attached deck, document, sheet or PDF was a download link (only
+raster images had a lightbox). Now any attachment a viewer can show opens
+as a workbench tab beside the conversation, with the same viewers as a
+deliverable and a download button beside it; files no viewer claims stay
+download links, and images keep the lightbox.
+
+- An attachment tab (`f:<attachmentId>`, `lib/workbenchTabs.ts`) is one
+  immutable file, not an artifact: no versions, no share link, no live
+  state, no stored thumbnail. Viewers get `artifactId: ""`, which the
+  previewer host and the app runner read as "no artifact routes".
+- Its bytes come from the member-authenticated attachment route through
+  `api.attachmentBlob`; the last few are cached (they never change).
+- Tabs persist per room like deliverable tabs; a tab whose attachment was
+  deleted shows the load error.
+- Checked on 2026-10-14 against QA with a local web build: the three
+  sample files attached to a message, each opened in its tab and rendered.
+
+## 6. Follow-ups
 - A first-page thumbnail for file cards (needs DOM-to-PNG in the frame).
 - Excel: charts and pictures; the workbook's own theme colours; virtualized
   drawing instead of the cell cap.

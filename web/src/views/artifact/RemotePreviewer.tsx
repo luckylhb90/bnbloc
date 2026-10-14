@@ -140,7 +140,7 @@ function PreviewerFrame({
     });
     const buffer = await bytes.arrayBuffer();
     post({ type: "preview.file", bytes: buffer }, [buffer]);
-    if (liveState) {
+    if (liveState && latest.current.artifactId) {
       const snap = await api.getArtifactState(latest.current.roomId, latest.current.artifactId).catch(() => null);
       if (snap && stateKey(snap.state) !== null) post({ type: "preview.state", state: snap.state, actor: snap.actor });
     }
@@ -151,6 +151,7 @@ function PreviewerFrame({
       if (thumbnailDone.current) return;
       thumbnailDone.current = true;
       const { roomId: room, artifactId: id, version: v } = latest.current;
+      if (!id) return; // a file that is not an artifact (a chat attachment) stores none
       const detail = await loadArtifactDetail(room, id).catch(() => null);
       const ver = detail?.versions.find((candidate) => candidate.version === v);
       if (!wantsThumbnail(desc, ver)) return;
@@ -174,7 +175,7 @@ function PreviewerFrame({
           toolbar.set(msg.items as readonly ViewerToolbarItem[]);
           return;
         case "preview.state.send": {
-          if (!liveState) return;
+          if (!liveState || !latest.current.artifactId) return;
           const key = stateKey(msg.state);
           if (key === null || key === lastSentState.current) return;
           lastSentState.current = key;

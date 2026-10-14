@@ -3,7 +3,7 @@ import { Menu, MenuGroup, MenuItem } from "@/ui/Menu";
 import { cn } from "@/lib/cn";
 import { rememberViewer } from "@/lib/viewerPreference";
 import { selectViewers, type ArtifactFileInfo } from "./registry";
-import { useViewerRegistry } from "./ArtifactBody";
+import { useViewerRegistry } from "./registry";
 
 // "Open with…" for a workbench tab: every viewer that claims the file —
 // built-ins and installed previewer components from the one registry — best

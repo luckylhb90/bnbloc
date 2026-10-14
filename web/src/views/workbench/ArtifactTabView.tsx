@@ -23,7 +23,8 @@ import { sharesApi } from "@/lib/sharesApi";
 import { useToast } from "@/ui/Toast";
 import { useCopy } from "@/ui/useCopy";
 import "@/views/artifact/builtin";
-import { ArtifactBody, resolveViewer, useViewerRegistry } from "@/views/artifact/ArtifactBody";
+import { ArtifactBody, resolveViewer } from "@/views/artifact/ArtifactBody";
+import { useViewerRegistry } from "@/views/artifact/registry";
 import { OpenWithMenu } from "@/views/artifact/OpenWithMenu";
 import { preferredViewerFor } from "@/lib/viewerPreference";
 import type { SiteSource, ViewerToolbarItem, ViewerToolbarValue } from "@/views/artifact/registry";
@@ -55,9 +56,9 @@ import { errorText } from "@/lib/errors";
 
 type Mode = "view" | "compare" | "edit";
 
-const ACTION =
+export const ACTION =
   "tap tactile grid size-8 shrink-0 place-items-center rounded-[var(--radius)] text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-2)] hover:text-[var(--color-fg)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/60";
-const CHIP =
+export const CHIP =
   "tactile inline-flex h-8 items-center gap-1 rounded-[var(--radius)] px-2 text-xs text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-2)] hover:text-[var(--color-fg)] disabled:opacity-40";
 const SELECT =
   "h-8 min-w-0 max-w-[13rem] rounded-[var(--radius)] border border-[var(--color-border)] bg-[var(--color-surface)] px-1.5 text-xs text-[var(--color-fg)]";

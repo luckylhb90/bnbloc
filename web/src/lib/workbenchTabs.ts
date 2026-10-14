@@ -2,9 +2,10 @@
 // under node). useWorkbench wires it to React state and per-room
 // browser storage (lib/storageKeys.ts).
 //
-// A tab is either one artifact (optionally pinned to a version, optionally
-// opened with a specific viewer — the "Open with…" choice) or the room's
-// "All deliverables" list. Pinned tabs form a group at the front: they are
+// A tab is one artifact (optionally pinned to a version, optionally opened
+// with a specific viewer — the "Open with…" choice), one chat attachment
+// (a file a member attached to a message: one immutable version, no
+// history), or the room's "All deliverables" list. Pinned tabs form a group at the front: they are
 // skipped by "close others", never evicted, and reorder only among
 // themselves.
 
@@ -19,10 +20,19 @@ export interface DeliverablesFilter {
   readonly sourceSeq?: number;
 }
 
+/** A chat attachment as its tab shows it (the message carries the rest). */
+export interface AttachmentTabFile {
+  readonly id: string;
+  readonly filename: string;
+  readonly contentType: string;
+  readonly size: number;
+}
+
 export interface WorkbenchTab {
-  /** "a:<artifactId>" or DELIVERABLES_TAB. */
+  /** "a:<artifactId>", "f:<attachmentId>" or DELIVERABLES_TAB. */
   readonly key: string;
   readonly artifactId?: string;
+  readonly attachment?: AttachmentTabFile;
   /** A specific version; absent = follow the current version. */
   readonly version?: number;
   readonly pinned: boolean;
@@ -40,6 +50,7 @@ export const EMPTY_WORKBENCH: WorkbenchState = { tabs: [], active: null };
 
 export type WorkbenchAction =
   | { type: "open"; artifactId: string; version?: number }
+  | { type: "openAttachment"; attachment: AttachmentTabFile }
   | { type: "openDeliverables"; filter?: DeliverablesFilter }
   | { type: "activate"; key: string }
   | { type: "close"; key: string }
@@ -52,6 +63,10 @@ export type WorkbenchAction =
 
 export function artifactTabKey(artifactId: string): string {
   return `a:${artifactId}`;
+}
+
+export function attachmentTabKey(attachmentId: string): string {
+  return `f:${attachmentId}`;
 }
 
 // Pinned tabs first, each group keeping its relative order.
@@ -102,6 +117,12 @@ export function workbenchReducer(state: WorkbenchState, action: WorkbenchAction)
         return { ...next, active: key };
       }
       const tab: WorkbenchTab = { key, artifactId: action.artifactId, pinned: false, version: action.version };
+      return { tabs: evict(insertAfterActive(state, tab), key), active: key };
+    }
+    case "openAttachment": {
+      const key = attachmentTabKey(action.attachment.id);
+      if (state.tabs.some((t) => t.key === key)) return { ...state, active: key };
+      const tab: WorkbenchTab = { key, attachment: action.attachment, pinned: false };
       return { tabs: evict(insertAfterActive(state, tab), key), active: key };
     }
     case "openDeliverables": {
@@ -201,6 +222,12 @@ function parseTab(item: unknown): WorkbenchTab | null {
     const f = t.filter as { sourceSeq?: unknown } | undefined;
     const seq = f && typeof f.sourceSeq === "number" && Number.isInteger(f.sourceSeq) && f.sourceSeq > 0 ? f.sourceSeq : undefined;
     return { key: DELIVERABLES_TAB, pinned, filter: seq ? { sourceSeq: seq } : undefined };
+  }
+  if (t.attachment !== undefined) {
+    const a = t.attachment as Record<string, unknown> | null;
+    if (!a || typeof a.id !== "string" || !a.id || t.key !== attachmentTabKey(a.id)) return null;
+    if (typeof a.filename !== "string" || typeof a.contentType !== "string" || typeof a.size !== "number") return null;
+    return { key: t.key, attachment: { id: a.id, filename: a.filename, contentType: a.contentType, size: a.size }, pinned, viewerId };
   }
   if (typeof t.artifactId !== "string" || !t.artifactId || t.key !== artifactTabKey(t.artifactId)) return null;
   const version = typeof t.version === "number" && Number.isInteger(t.version) && t.version > 0 ? t.version : undefined;

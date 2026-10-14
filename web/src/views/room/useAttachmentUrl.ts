@@ -66,3 +66,22 @@ export function useAttachmentUrl(roomId: string, attachmentId: string, filename:
 
   return { url, ensure, onDownload };
 }
+
+// An attachment's bytes never change: the last few opened stay cached so a
+// workbench tab switching back does not download them again.
+const MAX_BLOBS = 8;
+const blobs = new Map<string, Promise<Blob>>();
+
+/** An attachment's bytes, typed with its content type (the preview
+ *  workbench hands them to a viewer). */
+export function attachmentBlob(roomId: string, attachmentId: string, contentType: string): Promise<Blob> {
+  const key = `${roomId}\n${attachmentId}`;
+  let p = blobs.get(key);
+  if (!p) {
+    p = api.attachmentBlob(roomId, attachmentId).then((b) => (b.type === contentType ? b : new Blob([b], { type: contentType })));
+    p.catch(() => blobs.delete(key));
+    blobs.set(key, p);
+    while (blobs.size > MAX_BLOBS) blobs.delete(blobs.keys().next().value!);
+  }
+  return p;
+}

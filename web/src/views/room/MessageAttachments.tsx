@@ -1,10 +1,14 @@
-import { useCallback, useRef, useState } from "react";
+import { createContext, useCallback, useContext, useRef, useState } from "react";
 import { DownloadSimpleIcon, FileIcon, XIcon } from "@phosphor-icons/react";
 import type { ChatAttachment } from "@/lib/api";
 import { formatBytes } from "@/lib/format";
 import { cn } from "@/lib/cn";
+import type { AttachmentTabFile } from "@/lib/workbenchTabs";
 import { useModalLayer } from "@/ui/useModalLayer";
+import "@/views/artifact/builtin";
+import { selectViewer, useViewerRegistry } from "@/views/artifact/registry";
 import { useAttachmentUrl } from "@/views/room/useAttachmentUrl";
+import { attachmentFileInfo } from "@/views/artifact/fileInfo";
 
 const INLINE_IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/gif", "image/webp", "image/avif", "image/bmp"]);
 
@@ -12,8 +16,19 @@ export function isInlineImage(contentType: string): boolean {
   return INLINE_IMAGE_TYPES.has(contentType.split(";")[0].trim().toLowerCase());
 }
 
+// Opens an attachment in the room's preview workbench; absent where there is
+// no workbench (the attachment is then a download link).
+const AttachmentOpenerContext = createContext<((file: AttachmentTabFile) => void) | null>(null);
+export const AttachmentOpenerProvider = AttachmentOpenerContext.Provider;
+
+function tabFile(a: ChatAttachment): AttachmentTabFile {
+  return { id: a.id, filename: a.filename, contentType: a.contentType, size: a.size };
+}
+
 // Attachment links carry a per-attachment ticket, never the session
-// (useAttachmentUrl).
+// (useAttachmentUrl). A raster image opens in a lightbox; any other file a
+// viewer can show (documents, slides, sheets, PDF, text…) opens in the
+// preview workbench; the rest download.
 export function MessageAttachments({
   roomId,
   attachments,
@@ -50,8 +65,9 @@ function AttachmentItem({
   readonly onOpen: (a: ChatAttachment) => void;
 }) {
   const { url, ensure, onDownload } = useAttachmentUrl(roomId, attachment.id, attachment.filename);
-  // Only raster images render inline; everything else (SVG included,
-  // which the gateway serves as a download) is a download link.
+  const openInWorkbench = useContext(AttachmentOpenerContext);
+  useViewerRegistry();
+  // Only raster images render inline (SVG included is served as a download).
   if (isInlineImage(attachment.contentType)) {
     return (
       <button
@@ -77,6 +93,41 @@ function AttachmentItem({
       </button>
     );
   }
+  const label = (
+    <>
+      <FileIcon size={17} className="shrink-0 text-[var(--color-fg-subtle)]" />
+      <span className="min-w-0">
+        <span className="block truncate font-medium">{attachment.filename}</span>
+        <span className="block tabular text-xs text-[var(--color-fg-subtle)]">{formatBytes(attachment.size)}</span>
+      </span>
+    </>
+  );
+  const file = tabFile(attachment);
+  if (openInWorkbench && selectViewer(attachmentFileInfo(file))) {
+    return (
+      <span className="flex w-fit max-w-full items-stretch overflow-hidden rounded-[var(--radius)] border border-[var(--color-border)] bg-[var(--color-surface-2)] text-sm text-[var(--color-fg)] hover:border-[var(--color-border-strong)]">
+        <button
+          type="button"
+          onClick={() => openInWorkbench(file)}
+          className="tactile flex min-w-0 items-center gap-2 px-3 py-2 text-left hover:bg-[var(--color-elevated)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--color-accent)]/60"
+          title={`Preview ${attachment.filename}`}
+          aria-label={`Preview ${attachment.filename}`}
+        >
+          {label}
+        </button>
+        <a
+          href={url ?? undefined}
+          download={attachment.filename}
+          onClick={onDownload}
+          className="tactile grid shrink-0 place-items-center border-l border-[var(--color-border)] px-2.5 text-[var(--color-fg-subtle)] hover:bg-[var(--color-elevated)] hover:text-[var(--color-fg)]"
+          title={`Download ${attachment.filename}`}
+          aria-label={`Download ${attachment.filename}`}
+        >
+          <DownloadSimpleIcon size={15} />
+        </a>
+      </span>
+    );
+  }
   return (
     <a
       href={url ?? undefined}
@@ -84,11 +135,7 @@ function AttachmentItem({
       onClick={onDownload}
       className="tactile flex w-fit max-w-full items-center gap-2 rounded-[var(--radius)] border border-[var(--color-border)] bg-[var(--color-surface-2)] px-3 py-2 text-sm text-[var(--color-fg)] hover:border-[var(--color-border-strong)] hover:bg-[var(--color-elevated)]"
     >
-      <FileIcon size={17} className="shrink-0 text-[var(--color-fg-subtle)]" />
-      <span className="min-w-0">
-        <span className="block truncate font-medium">{attachment.filename}</span>
-        <span className="block tabular text-xs text-[var(--color-fg-subtle)]">{formatBytes(attachment.size)}</span>
-      </span>
+      {label}
     </a>
   );
 }

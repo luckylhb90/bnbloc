@@ -106,7 +106,8 @@ export function ArtifactRunner({
   // re-pings) and the snapshot refetches in case the board advanced.
   useEffect(() => {
     setGuestReady(false);
-    if (!running || !roomId) return;
+    // No room or no artifact (a chat attachment): no shared state to join.
+    if (!running || !roomId || !artifactId) return;
     let cancelled = false;
     setSnapshot(null);
     api

@@ -1,4 +1,5 @@
 import type React from "react";
+import { useSyncExternalStore } from "react";
 
 // The ONE artifact viewer registry: built-in viewers (builtin.ts) and
 // installed previewer components (registered at runtime from the member
@@ -75,6 +76,8 @@ export interface ArtifactViewerProps {
    *  viewer must not call room APIs then). */
   readonly roomId: string;
   readonly actor?: string;
+  /** "" for a file that is not an artifact (a chat attachment): no live
+   *  state, no stored thumbnail, no artifact routes. */
   readonly artifactId: string;
   readonly version: number;
   readonly file: ArtifactFileInfo;
@@ -224,4 +227,9 @@ export function selectViewer(
     if (preferred) return preferred.viewer;
   }
   return candidates[0]?.viewer ?? null;
+}
+
+/** Re-renders on registry changes (runtime installs). */
+export function useViewerRegistry(): number {
+  return useSyncExternalStore(subscribeArtifactViewers, registryRevision, registryRevision);
 }

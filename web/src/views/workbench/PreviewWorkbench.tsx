@@ -6,12 +6,15 @@ import { DELIVERABLES_TAB, type WorkbenchTab } from "@/lib/workbenchTabs";
 import { Menu, MenuItem } from "@/ui/Menu";
 import { fileInfoFor, useArtifactDetail, versionMeta } from "./artifactData";
 import { ArtifactTabView } from "./ArtifactTabView";
+import { attachmentFacts, attachmentFileInfo } from "@/views/artifact/fileInfo";
+import { AttachmentTabView } from "./AttachmentTabView";
 import { DeliverablesView } from "./DeliverablesView";
 import { categoryIcons } from "./fileIcons";
 import type { Workbench } from "./useWorkbench";
 
 // PreviewWorkbench: the room's right-hand preview — a strip of tabs (many
-// deliverables open at once, plus the "All deliverables" list), reorderable
+// deliverables and chat attachments open at once, plus the "All
+// deliverables" list), reorderable
 // by drag (or Alt+Shift+Arrow), pinnable, closable — over the active tab.
 // Only the active tab is mounted; the others keep their state in the tab
 // model (version, viewer) and reload their bytes from cache.
@@ -21,6 +24,16 @@ const STRIP_BUTTON =
 
 function TabLabel({ roomId, tab }: { readonly roomId: string; readonly tab: WorkbenchTab }) {
   const { detail } = useArtifactDetail(roomId, tab.artifactId ?? null);
+  if (tab.attachment) {
+    const file = attachmentFileInfo(tab.attachment);
+    const Icon = categoryIcons[fileCategory(attachmentFacts(tab.attachment))];
+    return (
+      <>
+        <Icon size={14} className="shrink-0" aria-hidden />
+        <span className="truncate">{file.name}</span>
+      </>
+    );
+  }
   if (tab.key === DELIVERABLES_TAB) {
     return (
       <>
@@ -210,6 +223,16 @@ export function PreviewWorkbench({
             sourceSeq={active.filter?.sourceSeq}
             onClearSourceSeq={() => dispatch({ type: "openDeliverables" })}
             onOpen={(id) => workbench.openArtifact(id)}
+          />
+        ) : active.attachment ? (
+          <AttachmentTabView
+            key={active.key}
+            roomId={roomId}
+            attachment={active.attachment}
+            viewerId={active.viewerId}
+            onViewer={(viewerId) => dispatch({ type: "setViewer", key: active.key, viewerId })}
+            fullscreen={fullscreen}
+            onToggleFullscreen={onToggleFullscreen}
           />
         ) : active.artifactId ? (
           <ArtifactTabView

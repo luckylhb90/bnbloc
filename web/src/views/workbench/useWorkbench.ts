@@ -6,6 +6,7 @@ import {
   serializeWorkbench,
   workbenchReducer,
   workbenchStorageKey,
+  type AttachmentTabFile,
   type DeliverablesFilter,
   type WorkbenchAction,
   type WorkbenchState,
@@ -23,6 +24,7 @@ export interface Workbench {
   readonly open: boolean;
   readonly dispatch: (action: WorkbenchAction) => void;
   readonly openArtifact: (artifactId: string, version?: number) => void;
+  readonly openAttachment: (attachment: AttachmentTabFile) => void;
   readonly openDeliverables: (filter?: DeliverablesFilter) => void;
   readonly closeWorkbench: () => void;
 }
@@ -51,6 +53,10 @@ export function useWorkbench(roomId: string): Workbench {
     },
     [roomId],
   );
+  const openAttachment = useCallback((attachment: AttachmentTabFile) => {
+    dispatch({ type: "openAttachment", attachment });
+    setOpen(true);
+  }, []);
   const openDeliverables = useCallback((filter?: DeliverablesFilter) => {
     dispatch({ type: "openDeliverables", filter });
     setOpen(true);
@@ -70,5 +76,5 @@ export function useWorkbench(roomId: string): Workbench {
     });
   }, [roomId, openArtifact]);
 
-  return { state, open, dispatch, openArtifact, openDeliverables, closeWorkbench };
+  return { state, open, dispatch, openArtifact, openAttachment, openDeliverables, closeWorkbench };
 }
