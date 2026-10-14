@@ -119,7 +119,7 @@ func MaterializeChannel(entries []Entry, complete bool, rec ChannelRecords) (fil
 		var b strings.Builder
 		b.WriteString(RecordsHeader("Latest room messages"))
 		b.WriteString("\n")
-		for _, e := range tail {
+		for _, e := range firstMentions(tail) {
 			b.WriteString(Line(e))
 		}
 		files = append(files, NamedFile{Name: rec.Dir + "/recent.md", Content: b.String()})
@@ -164,7 +164,7 @@ func rangeContent(first, last int64, entries []Entry) string {
 	var b strings.Builder
 	b.WriteString(RecordsHeader(fmt.Sprintf("Room history %d–%d", first, last)))
 	b.WriteString("\n")
-	for _, e := range entries {
+	for _, e := range firstMentions(entries) {
 		b.WriteString(Line(e))
 	}
 	return b.String()
@@ -351,7 +351,7 @@ func writeDelta(b *strings.Builder, entries []Entry, windowChars int) {
 	if omitted > 0 {
 		fmt.Fprintf(b, "(%d older new messages omitted)\n", omitted)
 	}
-	for _, e := range kept {
+	for _, e := range firstMentions(kept) {
 		b.WriteString(Line(e))
 	}
 }

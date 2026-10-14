@@ -243,6 +243,18 @@ func (b *Bridge) materializeRoomContext(ctx context.Context, w corepkg.Workspace
 			own = entries
 		}
 	}
+	// People's lines carry their display names (by author id).
+	names := map[string]string{}
+	for _, e := range all {
+		if e.Kind == roomlog.KindHuman {
+			names[e.Speaker] = ""
+		}
+	}
+	names = b.displayNames(ctx, slices.Collect(maps.Keys(names)))
+	for i := range reads {
+		reads[i].entries = roomlog.SetNames(reads[i].entries, names)
+	}
+	own = roomlog.SetNames(own, names)
 	from = instructionSender(own, msgSeq, now)
 	next = st
 	if cp != nil {
@@ -261,7 +273,7 @@ func (b *Bridge) materializeRoomContext(ctx context.Context, w corepkg.Workspace
 			if err != nil {
 				return st, nil, "", err
 			}
-			files = append(files, roomlog.RewriteChunk(name, roomlog.PointAttachments(entries, next.Attachments)))
+			files = append(files, roomlog.RewriteChunk(name, roomlog.PointAttachments(b.nameEntries(ctx, entries), next.Attachments)))
 		}
 		entries := roomlog.PointAttachments(r.entries, next.Attachments)
 		chFiles, rec := roomlog.MaterializeChannel(entries, r.complete, r.rec)
@@ -381,7 +393,7 @@ func (b *Bridge) drivePrompt(ctx context.Context, d *drive, workspaceID string, 
 	if fresh && st != nil {
 		st.StartedMs = time.Now().UnixMilli()
 	}
-	now := roomlog.Now{From: d.job.RequesterUserID, Text: text, Attachments: toPromptAttachments(atts.delivered), Undelivered: atts.undelivered}
+	now := roomlog.Now{From: b.personLabel(ctx, d.job.RequesterUserID), Text: text, Attachments: toPromptAttachments(atts.delivered), Undelivered: atts.undelivered}
 	entry, ok := b.coreEntry(d.core)
 	if d.caps.writer == nil || !ok {
 		return b.driveTextDelta(ctx, room, owner, provider, d.job.MessageSeq, d.job.ChannelID, now, st, fresh)
@@ -557,6 +569,7 @@ func (b *Bridge) driveTextDelta(ctx context.Context, room, owner, provider strin
 			"event", "bnbloc.bridge.context_unavailable", "room", room, "error", err)
 		return roomlog.ComposeDelta(nil, now, roomlog.Options{})
 	}
+	entries = b.nameEntries(ctx, entries)
 	// History returns the newest-page tail, not the delta itself (pages
 	// crossing the boundary are how the recent window is reached). The delta
 	// is the rows past the boundary; seen-coverage advances over everything

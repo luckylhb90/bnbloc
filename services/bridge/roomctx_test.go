@@ -47,7 +47,11 @@ type pullGateway struct {
 	// revisions are the room's edits and deletions the revisions listing
 	// serves.
 	revisions []wire.MessageRevision
-	srv       *httptest.Server
+	// names are people's display names the profiles read serves (others:
+	// their ids); profileReads counts those reads.
+	names        map[string]string
+	profileReads int
+	srv          *httptest.Server
 }
 
 // testAttachment is a chat attachment the test gateway serves.
@@ -78,6 +82,22 @@ func newPullGateway(t *testing.T) *pullGateway {
 			body = `{"messages":[]}`
 		}
 		fmt.Fprint(w, body)
+	})
+	mux.HandleFunc("GET /v1/users/profiles", func(w http.ResponseWriter, r *http.Request) {
+		g.mu.Lock()
+		defer g.mu.Unlock()
+		g.profileReads++
+		var page struct {
+			Profiles []wire.UserProfile `json:"profiles"`
+		}
+		for _, id := range strings.Split(r.URL.Query().Get("ids"), ",") {
+			name := g.names[id]
+			if name == "" {
+				name = id
+			}
+			page.Profiles = append(page.Profiles, wire.UserProfile{UserID: id, DisplayName: name})
+		}
+		_ = json.NewEncoder(w).Encode(page)
 	})
 	mux.HandleFunc("GET /v1/rooms/r1/history/revisions", func(w http.ResponseWriter, r *http.Request) {
 		g.mu.Lock()
@@ -788,5 +808,46 @@ func TestRecordsFollowEditsAndDeletes(t *testing.T) {
 	}
 	if len(next.Revised) != 0 {
 		t.Fatalf("revised after the rewrite = %v", next.Revised)
+	}
+}
+
+// Records and prompts name people by display name (rule 8): a file's first
+// mention with the id, the [now] marker always with it; names are read by
+// author id and cached.
+func TestRecordsNamePeople(t *testing.T) {
+	g := newPullGateway(t)
+	g.names = map[string]string{"jack": "Jack Doe"}
+	g.setHistory("general", []int64{10}, map[int64]string{10: "first"})
+	g.addChatRow("general", 11, "jack", "second")
+	g.addChatRow("general", 12, "jack", "do it")
+	prov := &fakeCoreProvider{url: g.srv.URL}
+	b := New(Config{GatewayBaseURL: g.srv.URL, GatewayToken: "t", OwnerSubject: "maya",
+		Cores: []CoreConfig{{Name: "core-a", Provider: prov, Endpoint: corepkg.Endpoint{BaseURL: g.srv.URL}}}})
+	w, ep, _ := testWriter(b, "core-a")
+	self := roomlog.Producer{Owner: "maya", Provider: "agent-a"}
+	_, _, from, err := b.materializeRoomContext(context.Background(), w, ep, "r1", "ws", "job-x", "general", 0, 12, "do it", self, roomlog.CtxState{}, roomlog.Guidance{HasRoomFiles: true}, nil)
+	if err != nil || from != "Jack Doe (jack)" {
+		t.Fatalf("from = %q, %v", from, err)
+	}
+	var recent string
+	for _, wr := range prov.roomFileWrites() {
+		if wr.path == ".room/channels/general/recent.md" {
+			recent = wr.content
+		}
+	}
+	if !strings.Contains(recent, "Jack Doe (jack): first\n") || !strings.Contains(recent, "Jack Doe: second\n") {
+		t.Fatalf("recent.md:\n%s", recent)
+	}
+	if got := b.personLabel(context.Background(), "jack"); got != "Jack Doe (jack)" {
+		t.Fatalf("requester label = %q", got)
+	}
+	if got := b.personLabel(context.Background(), "maya"); got != "maya" {
+		t.Fatalf("a person without a name = %q", got)
+	}
+	g.mu.Lock()
+	reads := g.profileReads
+	g.mu.Unlock()
+	if reads != 2 {
+		t.Fatalf("profile reads = %d, want each id read once", reads)
 	}
 }

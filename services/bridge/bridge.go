@@ -181,6 +181,8 @@ const leaseRenewInterval = 20 * time.Second
 
 // Bridge runs the chat->agent->reply loop for one member.
 type Bridge struct {
+	// names are people's display names (names.go).
+	names       nameCache
 	cfg         Config
 	cores       map[string]coreEntry // core name -> provider + endpoint
 	coreNames   []string             // configured cores in priority order

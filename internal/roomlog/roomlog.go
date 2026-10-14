@@ -27,12 +27,16 @@ package roomlog
 type Entry struct {
 	Seq     int64
 	Speaker string // "jack" (human) or "jack/codex" (agent: owner/provider)
-	Kind    Kind
-	Text    string
+	// Name is a person's display name (SetNames; "" = none to show).
+	Name string
+	// short: the line names the person by Name alone (firstMentions).
+	short bool
+	Kind  Kind
+	Text  string
 	// ChannelID is the channel the line was said in.
 	ChannelID string
 	// Attachments are the files a person's message carried (the room's:
-	// read_attachment reads one by id).
+	// read_artifact reads one by id).
 	Attachments []AttachmentRef
 	// AtMs is when the row was recorded (0 when unknown).
 	AtMs int64

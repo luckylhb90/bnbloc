@@ -174,7 +174,7 @@ func Compose(entries []Entry, now Now, opts Options) string {
 			b.WriteString("\n")
 		}
 		b.WriteString(RecordsHeader("Room conversation"))
-		for _, e := range window {
+		for _, e := range firstMentions(window) {
 			b.WriteString(Line(e))
 		}
 	}

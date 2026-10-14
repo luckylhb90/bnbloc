@@ -523,6 +523,9 @@ func TestClaimOnceDrivesJobPayloadAndReportsStatuses(t *testing.T) {
 		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/v1/rooms/room-1/history"):
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"items":[]}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/users/profiles":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"profiles":[]}`))
 		case r.Method == http.MethodPost && r.URL.Path == "/v1/rooms/room-1/agent-activity/session-state":
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"ok":true}`))

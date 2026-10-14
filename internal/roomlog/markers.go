@@ -71,6 +71,7 @@ func Sender(e Entry) string {
 	if sp == "" {
 		sp = "unknown"
 	}
+	sp = speakerLabel(e, sp)
 	if via := strings.TrimSpace(e.Via); via != "" {
 		sp = via + " for " + sp
 	}
