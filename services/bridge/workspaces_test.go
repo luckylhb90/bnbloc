@@ -57,9 +57,12 @@ type fsCore struct {
 	// states (core.InputLimiter, 0 = none).
 	maxBody  int
 	maxInput int64
+	// maxTurns is the turn limit it states (core.TurnLimiter, 0 = none).
+	maxTurns int
 }
 
-func (c *fsCore) MaxInputBytes(context.Context, corepkg.Endpoint) int64 { return c.maxInput }
+func (c *fsCore) MaxInputBytes(context.Context, corepkg.Endpoint) int64    { return c.maxInput }
+func (c *fsCore) MaxConcurrentTurns(context.Context, corepkg.Endpoint) int { return c.maxTurns }
 
 type fsSession struct {
 	id, workspace string

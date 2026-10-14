@@ -542,7 +542,11 @@ The bridge/gateway drive it through the protocol client with
    absent, bnbloc retries a 429/503 that started no work (`core.Retryable`).
    State the largest request body you accept as discovery
    `limits.maxInputBytes` when it is under what a `writeFile` write of a
-   25 MiB attachment needs (see "Workspace file size").
+   25 MiB attachment needs (see "Workspace file size"). State how many
+   turns you run at once (sessions of one workspace included) as
+   `limits.maxConcurrentTurns` (`core.TurnLimiter`): the bridge runs at
+   most that many turns of one agent in parallel, 2 when you state none
+   (1 = one at a time); the turns of one session always run one at a time.
    Advertise only the optional
    capabilities you actually serve (`interrupt`, `writeFile`,
    `deleteWorkspace`, `sandboxExec`, `executionRefresh`, `agentProfile`,

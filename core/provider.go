@@ -187,6 +187,21 @@ func MaxInputBytes(ctx context.Context, p Provider, ep Endpoint) int64 {
 	return 0
 }
 
+// TurnLimiter is implemented by a provider whose core states how many turns
+// it runs at once (Core Protocol discovery limits.maxConcurrentTurns): the
+// bridge runs no more of one agent's turns in parallel. 0 = not stated.
+type TurnLimiter interface {
+	MaxConcurrentTurns(ctx context.Context, ep Endpoint) int
+}
+
+// MaxConcurrentTurns is p's stated turn limit for ep (0 = none stated).
+func MaxConcurrentTurns(ctx context.Context, p Provider, ep Endpoint) int {
+	if l, ok := p.(TurnLimiter); ok {
+		return l.MaxConcurrentTurns(ctx, ep)
+	}
+	return 0
+}
+
 // SessionFile is one file in an agent session's workspace listing. Bytes and
 // MtimeMs are the change-detection stamp: size alone misses a same-length
 // rewrite, so a caller compares both.

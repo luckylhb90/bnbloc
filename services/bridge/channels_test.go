@@ -46,12 +46,14 @@ func TestChannelsHaveSessionsOfOneWorkspace(t *testing.T) {
 	}
 }
 
-// Turns of two channels on one workspace never overlap: the drive lock is
-// the workspace's, so the second channel's turn waits for the first.
-func TestChannelTurnsOnOneWorkspaceNeverOverlap(t *testing.T) {
+// A core that runs one turn at once (limits.maxConcurrentTurns 1) never
+// gets two: the second channel's turn waits for the first
+// (turn_gates_test.go has agents that run several).
+func TestChannelTurnsOfAOneTurnCoreNeverOverlap(t *testing.T) {
 	g := newPullGateway(t)
 	c := newFSCore(t)
 	c.turnPolls = 2
+	c.maxTurns = 1
 	b := fsBridge(t, g, c, "")
 	var wg sync.WaitGroup
 	for i, ch := range []string{"general", "test", "general", "test"} {

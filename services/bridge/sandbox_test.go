@@ -209,6 +209,8 @@ type sandboxGateway struct {
 	tenants         []string
 	reserves        []map[string]any
 	progress        []wire.JobProgressInput
+	// leases counts lease renewals per job.
+	leases map[string]int
 }
 
 func newSandboxGateway(t *testing.T, room string, require bool) *sandboxGateway {
@@ -243,6 +245,14 @@ func newSandboxGateway(t *testing.T, room string, require bool) *sandboxGateway 
 			default:
 				_, _ = w.Write([]byte(`{"reserved":true,"reservationId":"rsv"}`))
 			}
+		case strings.HasSuffix(r.URL.Path, "/lease"):
+			g.mu.Lock()
+			if g.leases == nil {
+				g.leases = map[string]int{}
+			}
+			g.leases[strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/v1/bridge/jobs/"), "/lease")]++
+			g.mu.Unlock()
+			_, _ = w.Write([]byte(`{}`))
 		case strings.HasSuffix(r.URL.Path, "/progress"):
 			var body wire.JobProgressInput
 			_ = json.NewDecoder(r.Body).Decode(&body)

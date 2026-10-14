@@ -4,7 +4,6 @@ import (
 	"context"
 	"log/slog"
 	"strings"
-	"sync"
 	"time"
 
 	corepkg "github.com/luckylhb90/bnbloc/core"
@@ -55,6 +54,9 @@ type drive struct {
 	// prepareExec readies a sandboxed turn (nil: the drive runs on the
 	// host); unsandboxed says why a borrowed drive is not sandboxed (stage 4).
 	prepareExec func(context.Context) (*corepkg.Execution, error)
+	// startGate is the workspace gate the turn's start passes (nil when
+	// the drive holds it for the whole turn; turn_gates.go).
+	startGate   gate
 	unsandboxed string
 	// ownSandbox: the sandboxed drive runs on its owner's own behalf and
 	// gets the owner's forwarded environment (sandboxDecision.ownerEnv).
@@ -203,6 +205,9 @@ type driveCaps struct {
 	// refresher: executionRefresh (a running sandboxed turn's exec token
 	// is renewed; renewExecution).
 	refresher corepkg.ExecutionRefresher
+	// maxTurns is how many turns the core states it runs at once (0 =
+	// unstated; turn_gates.go).
+	maxTurns int
 }
 
 // execTokenTTL is a sandboxed turn's first exec token lifetime: short
@@ -236,6 +241,7 @@ func (b *Bridge) coreCaps(ctx context.Context, coreName string) driveCaps {
 	caps.writer, _ = corepkg.As[corepkg.WorkspaceFileWriter](ctx, p, ep, corepkg.CapabilityWriteFile)
 	caps.bytesWriter, _ = corepkg.As[corepkg.WorkspaceFileBytesWriter](ctx, p, ep, corepkg.CapabilityWriteFile)
 	caps.maxInput = corepkg.MaxInputBytes(ctx, p, ep)
+	caps.maxTurns = corepkg.MaxConcurrentTurns(ctx, p, ep)
 	caps.refresher, _ = corepkg.As[corepkg.ExecutionRefresher](ctx, p, ep, corepkg.CapabilityExecutionRefresh)
 	return caps
 }
@@ -493,17 +499,4 @@ func (k driveKey) seatAgentID() string {
 		id += "\x00" + seat
 	}
 	return id
-}
-
-// driveLock returns the drive slot's lock: consecutive turns of one agent
-// session queue instead of interleaving on the same core session.
-func (b *Bridge) driveLock(k driveKey) *sync.Mutex {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	l := b.locks[k]
-	if l == nil {
-		l = &sync.Mutex{}
-		b.locks[k] = l
-	}
-	return l
 }

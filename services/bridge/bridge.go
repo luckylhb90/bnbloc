@@ -208,7 +208,7 @@ type Bridge struct {
 	// workspaces is each drive slot's workspace, which outlives its
 	// sessions (workspaces.go).
 	workspaces *agentWorkspaces
-	locks      map[driveKey]*sync.Mutex      // drive slot -> drive lock
+	gates      turnGates                     // session, agent and workspace turn gates (turn_gates.go)
 	turns      turnCounter                   // running turns per core (turns_running.go)
 	syncs      map[string]context.CancelFunc // roomId -> sync engine canceller
 	// gone holds rooms the gateway answered 404/403 for (deleted, or the owner
@@ -259,8 +259,10 @@ type Bridge struct {
 	sandbox *sandboxRuntime
 	// execRenewInterval overrides sandboxExecRenewEvery (tests).
 	execRenewInterval time.Duration
-	// publishWaitOverride overrides publishWait (tests).
+	// publishWaitOverride overrides publishWait, leaseRenewOverride
+	// leaseRenewInterval (tests).
 	publishWaitOverride time.Duration
+	leaseRenewOverride  time.Duration
 
 	// contrib holds the registered session contributors (profile.go).
 	contrib contributors
@@ -447,7 +449,7 @@ func New(cfg Config) *Bridge {
 		rooms:       map[string]context.CancelFunc{},
 		sessions:    map[sessionKey]*roomSession{},
 		workspaces:  newAgentWorkspaces(cfg.StateDir),
-		locks:       map[driveKey]*sync.Mutex{},
+		gates:       newTurnGates(),
 		syncs:       map[string]context.CancelFunc{},
 		gone:        map[string]time.Time{},
 		claimSem:    make(chan struct{}, maxConcurrentClaims),
@@ -692,7 +694,11 @@ func (b *Bridge) renewLeaseLoop(ctx context.Context, jobID string, lost func()) 
 	if strings.TrimSpace(jobID) == "" {
 		return
 	}
-	ticker := time.NewTicker(leaseRenewInterval)
+	every := leaseRenewInterval
+	if b.leaseRenewOverride > 0 {
+		every = b.leaseRenewOverride
+	}
+	ticker := time.NewTicker(every)
 	defer ticker.Stop()
 	for {
 		select {
@@ -827,7 +833,7 @@ func (b *Bridge) reconcile(ctx context.Context) {
 	}
 	// Drop rooms that disappeared (deleted, or the owner left): cancel their
 	// stream + sync contexts and delete the map entries so the bridge stops
-	// reconnecting to dead rooms. Also prune their drive locks so they do not
+	// reconnecting to dead rooms. Also prune their turn gates so they do not
 	// grow without bound across a long-lived bridge.
 	for room, cancel := range b.rooms {
 		if _, ok := want[room]; ok {
@@ -944,18 +950,14 @@ func (b *Bridge) refreshTargets(ctx context.Context) {
 }
 
 // forgetRoom drops per-room state for a room the bridge no longer watches:
-// its bound sessions and drive locks. Callers hold b.mu.
+// its bound sessions and turn gates. Callers hold b.mu.
 func (b *Bridge) forgetRoom(room string) {
 	for sk := range b.sessions {
 		if sk.room == room {
 			b.unbindLocked(sk)
 		}
 	}
-	for key := range b.locks {
-		if key.room == room {
-			delete(b.locks, key)
-		}
-	}
+	b.gates.forgetRoom(room)
 }
 
 // goneRoomCooldown is how long a room the gateway rejected as gone stays
@@ -1368,20 +1370,32 @@ func (b *Bridge) handleJobUpdate(data string) {
 	b.abortJob(ev.Payload.JobID, ev.Payload.Status)
 }
 
-// driveClaim is stage 7's drive. Drives are serialized per drive slot
-// (room, core, provider, execution kind) so consecutive turns for one agent
-// session queue instead of interleaving on the same core session. A
-// sandboxed drive readies its turn under that lock — space re-ensure + a
-// fresh exec token — and the descriptor rides the session create / input.
+// driveClaim is stage 7's drive. A turn passes its session's and its
+// agent's gates first (turn_gates.go): the turns of one conversation queue,
+// and one agent runs a bounded number at once. A sandboxed drive holds its
+// workspace's gate for the whole turn and readies the turn under it —
+// space re-ensure + a fresh exec token — and the descriptor rides the
+// session create / input; any other holds it while its turn starts
+// (runTurn).
 func (b *Bridge) driveClaim(ctx context.Context, d *drive, beforeReflow func(*roomSession)) (driveResult, error) {
 	if d.caps.unknown != nil {
 		// Nothing was sent to the core: a retryable core_unavailable.
 		return driveResult{}, atStage(stagePrepare, capabilitiesUnknownError{core: d.core, err: d.caps.unknown})
 	}
 	key := d.key()
-	lock := b.driveLock(key)
-	lock.Lock()
-	defer lock.Unlock()
+	leave, err := b.enterTurn(ctx, d)
+	if err != nil {
+		return driveResult{}, atStage(stagePrepare, err)
+	}
+	defer leave()
+	d.startGate = b.workspaceGate(key)
+	if d.prepareExec != nil {
+		if err := d.startGate.enter(ctx); err != nil {
+			return driveResult{}, atStage(stagePrepare, err)
+		}
+		defer d.startGate.leave()
+		d.startGate = nil // held for the whole turn
+	}
 
 	// The turn's deadline, only when the deployment bounds a turn: sent to
 	// the core so it ends the turn then (and not earlier for time reasons).
@@ -1435,6 +1449,17 @@ func (b *Bridge) runTurn(ctx context.Context, d *drive, key driveKey, opts corep
 	promptFn := func(workspaceID string, st *roomlog.CtxState, atts turnAttachments, g roomlog.Guidance) string {
 		return b.drivePrompt(ctx, d, workspaceID, atts, st, g, true)
 	}
+	// The turn's start (the session bound or created, the .room/ pass, the
+	// input sent) holds the workspace's gate, unless the drive holds it.
+	started := func() {}
+	if g := d.startGate; g != nil {
+		if err := g.enter(ctx); err != nil {
+			return driveResult{}, nil, atStage(stagePrepare, err)
+		}
+		var once sync.Once
+		started = func() { once.Do(g.leave) }
+		defer started()
+	}
 	rs, err := b.ensureSession(ctx, d, key, promptFn, opts)
 	if err != nil {
 		// ensureSession tags its session create (the turn's start) itself.
@@ -1458,6 +1483,7 @@ func (b *Bridge) runTurn(ctx context.Context, d *drive, key driveKey, opts corep
 		}
 	}
 	rs.roomSession.markTurn(deliverableTurn{StartMs: time.Now().UnixMilli(), JobID: d.job.JobID, SourceSeq: d.job.MessageSeq})
+	started()
 	// Signal the room that the agent is working, so members see a live indicator
 	// while codex runs; clear it once the turn drains. Best-effort presentation.
 	b.postSessionState(ctx, d.job.RoomID, rs.roomSession, "working")

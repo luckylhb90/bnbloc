@@ -20,7 +20,10 @@ room's channels. A question in `#design` is answered with the context of
   kind), shared by all of that agent's channel sessions, as the workspace
   fix established. Files an agent writes from one channel are there in the
   next channel's turn.
-- **Turns on one workspace never overlap.** The drive lock stays per
+- **Turns on one workspace never overlap.** (Superseded on 2026-10-14,
+  docs/prd/2026-10-14-multi-member-rooms.md §2b: turns of one session
+  queue, and one agent runs up to its core's `limits.maxConcurrentTurns`
+  at once; only turn starts and sandboxed turns hold the workspace.) The drive lock stays per
   workspace (the agent slot), not per session: two channels queue behind
   each other instead of running one agent concurrently in one working
   tree. Per-session locking would let two harnesses write one tree at
