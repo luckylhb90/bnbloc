@@ -30,13 +30,14 @@ func (h *historyServer) handler(t *testing.T) http.Handler {
 			// chat; peopleChannel models it here).
 			type channel struct {
 				ChannelID string `json:"channelId"`
+				Name      string `json:"name"`
 			}
 			var out []channel
 			seen := map[string]bool{h.peopleChannel: true}
 			for _, row := range h.rows {
 				if !seen[row.channel] {
 					seen[row.channel] = true
-					out = append(out, channel{ChannelID: row.channel})
+					out = append(out, channel{ChannelID: row.channel, Name: "n-" + row.channel})
 				}
 			}
 			_ = json.NewEncoder(w).Encode(map[string]any{"channels": out})
@@ -54,8 +55,12 @@ func (h *historyServer) handler(t *testing.T) http.Handler {
 		}
 		// Match the real API contract: the newest `limit` messages with
 		// seq < before, returned in ASCENDING order (stores reverse DESC pages).
+		limit := 200
+		if l := r.URL.Query().Get("limit"); l != "" {
+			fmt.Sscanf(l, "%d", &limit)
+		}
 		var desc []msg
-		for i := len(h.rows) - 1; i >= 0 && len(desc) < 200; i-- {
+		for i := len(h.rows) - 1; i >= 0 && len(desc) < limit; i-- {
 			row := h.rows[i]
 			if row.channel != ch {
 				continue
@@ -388,3 +393,66 @@ func TestAttachmentBlockRendered(t *testing.T) {
 		t.Fatal("no-attachment prompt must not render the block")
 	}
 }
+
+// A busy channel never starves the others: with the cap shared fairly,
+// every channel's newest messages are read even when the first channel
+// alone holds more than the cap.
+func TestHistorySharesTheCapAcrossChannels(t *testing.T) {
+	h := &historyServer{}
+	for i := 1; i <= 500; i++ {
+		h.rows = append(h.rows, mkRow(chatRow(int64(i), "busy", "jack", fmt.Sprintf("busy-%d", i))))
+	}
+	h.rows = append(h.rows, mkRow(chatRow(501, "quiet", "maya", "quiet-501")))
+	for i := 502; i <= 510; i++ {
+		h.rows = append(h.rows, mkRow(chatRow(int64(i), "busy", "jack", fmt.Sprintf("busy-%d", i))))
+	}
+	srv := httptest.NewServer(h.handler(t))
+	defer srv.Close()
+	fetch := func(ctx context.Context, path string) ([]byte, error) { return httpGet(ctx, srv.URL+path) }
+	entries, complete, err := History(context.Background(), fetch, "room-1", HistoryQuery{MaxRows: 200})
+	if err != nil || complete {
+		t.Fatalf("complete=%v err=%v; want a truncated read", complete, err)
+	}
+	var quiet, busy int
+	for _, e := range entries {
+		switch e.ChannelID {
+		case "quiet":
+			quiet++
+			if e.Channel != "n-quiet" {
+				t.Fatalf("channel label = %q, want the channel's name", e.Channel)
+			}
+		case "busy":
+			busy++
+		}
+	}
+	if quiet != 1 || busy != 199 || len(entries) != 200 {
+		t.Fatalf("quiet=%d busy=%d total=%d: the quiet channel must not starve", quiet, busy, len(entries))
+	}
+	if !strings.HasPrefix(Line(entries[len(entries)-1]), "[#n-busy] jack: ") {
+		t.Fatalf("line = %q, want the channel label", Line(entries[len(entries)-1]))
+	}
+}
+
+// A message's attachments reach the records, an attachment-only message
+// included, and a room with one channel needs no channel label.
+func TestHistoryRecordsAttachments(t *testing.T) {
+	h := &historyServer{}
+	h.rows = append(h.rows,
+		mkRow(1, "general", "chat_message", `{"userId":"maya","text":"see the brief","attachments":[{"id":"att_1","filename":"brief.md","contentType":"text/markdown","size":2048}]}`),
+		mkRow(2, "general", "chat_message", `{"userId":"jack","attachments":[{"id":"att_2","filename":"plan.pdf","contentType":"application/pdf","size":10}]}`),
+	)
+	srv := httptest.NewServer(h.handler(t))
+	defer srv.Close()
+	fetch := func(ctx context.Context, path string) ([]byte, error) { return httpGet(ctx, srv.URL+path) }
+	entries, _, err := History(context.Background(), fetch, "room-1", HistoryQuery{})
+	if err != nil || len(entries) != 2 {
+		t.Fatalf("entries = %+v, %v; the attachment-only message must be recorded", entries, err)
+	}
+	if got := Line(entries[0]); got != "maya: see the brief [attached: brief.md (text/markdown, 2 KB, id att_1)]\n" {
+		t.Fatalf("line = %q", got)
+	}
+	if got := Line(entries[1]); got != "jack: [attached: plan.pdf (application/pdf, 10 bytes, id att_2)]\n" {
+		t.Fatalf("attachment-only line = %q", got)
+	}
+}
+

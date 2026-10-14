@@ -498,6 +498,9 @@ func (s *Service) assistRecent(ctx context.Context, claims auth.Claims, roomID, 
 	var lines []assist.Line
 	for _, row := range page.Messages {
 		for _, e := range roomlog.DecodeRow(row) {
+			if strings.TrimSpace(e.Text) == "" {
+				continue // a message that carried only files
+			}
 			lines = append(lines, assist.Line{Speaker: e.Speaker, Text: e.Text})
 		}
 	}

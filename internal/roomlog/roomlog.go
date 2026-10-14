@@ -29,6 +29,13 @@ type Entry struct {
 	Speaker string // "jack" (human) or "jack/codex" (agent: owner/provider)
 	Kind    Kind
 	Text    string
+	// ChannelID is the channel the line was said in; Channel its name as a
+	// record shows it ("" in a room with one channel: no label needed).
+	ChannelID string
+	Channel   string
+	// Attachments are the files a person's message carried (the room's:
+	// read_attachment reads one by id).
+	Attachments []AttachmentRef
 	// AtMs is when the row was recorded (0 when unknown).
 	AtMs int64
 	// To is the agent a person's message addressed (AgentSpeaker form; ""
@@ -61,3 +68,12 @@ type Summarizer interface {
 	// An empty result means "nothing worth prepending".
 	Summarize(entries []Entry) string
 }
+
+// AttachmentRef names a file a message carried: what a record shows of it.
+type AttachmentRef struct {
+	ID          string
+	Filename    string
+	ContentType string
+	Size        int64
+}
+

@@ -493,8 +493,8 @@ func TestReadRoom(t *testing.T) {
 	sess.Bind(Job{JobID: "job_parent", ChannelID: "ch_general"})
 	r := post(t, srv, token, rpc(1, "tools/call", map[string]any{"name": "read_room", "arguments": map[string]any{"since": 40}}), nil)
 	text, isErr := toolText(t, r)
-	if isErr || strings.Contains(text, "earlier") || !strings.Contains(text, `#41 jack/codex for maya → bob/claude: review it\n`) ||
-		!strings.Contains(text, `#43 bob/claude: Found two issues.`) || !strings.Contains(text, `"transcript":"<<<untrusted-content `) || !strings.Contains(text, `"latestSeq":45`) {
+	if isErr || strings.Contains(text, "earlier") || !strings.Contains(text, `#41 [#ch_general] jack/codex for maya → bob/claude: review it\n`) ||
+		!strings.Contains(text, `#43 [#ch_general] bob/claude: Found two issues.`) || !strings.Contains(text, `"transcript":"<<<untrusted-content `) || !strings.Contains(text, `"latestSeq":45`) {
 		t.Fatalf("read_room = %s", text)
 	}
 	read := map[string]bool{}

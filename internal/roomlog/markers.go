@@ -79,13 +79,43 @@ func Sender(e Entry) string {
 
 // Line renders one record line: "maya: …", "maya → jack/codex: …" for a
 // message addressed to an agent (Entry.To), "jack/codex for maya → jill/claude:
-// …" for a task an agent dispatched on maya's behalf.
+// …" for a task an agent dispatched on maya's behalf; "[#design] …" names
+// the channel in a room with several, and "[attached: …]" each file the
+// message carried.
 func Line(e Entry) string {
 	head := Sender(e)
 	if to := strings.TrimSpace(e.To); to != "" {
 		head += " → " + to
 	}
-	return head + ": " + strings.TrimSpace(e.Text) + "\n"
+	if ch := strings.TrimSpace(e.Channel); ch != "" {
+		head = "[#" + ch + "] " + head
+	}
+	body := []string{}
+	if t := strings.TrimSpace(e.Text); t != "" {
+		body = append(body, t)
+	}
+	for _, a := range e.Attachments {
+		body = append(body, attachmentNote(a))
+	}
+	return head + ": " + strings.Join(body, " ") + "\n"
+}
+
+// attachmentNote is how a record line shows a file its message carried:
+// enough to tell what it is and to read it by id (read_attachment).
+func attachmentNote(a AttachmentRef) string {
+	name := strings.TrimSpace(a.Filename)
+	if name == "" {
+		name = "file"
+	}
+	var parts []string
+	if ct := strings.TrimSpace(a.ContentType); ct != "" {
+		parts = append(parts, ct)
+	}
+	if a.Size > 0 {
+		parts = append(parts, HumanBytes(a.Size))
+	}
+	parts = append(parts, "id "+a.ID)
+	return "[attached: " + name + " (" + strings.Join(parts, ", ") + ")]"
 }
 
 // nowMarker opens the message a turn answers, naming who sent it (a Sender;

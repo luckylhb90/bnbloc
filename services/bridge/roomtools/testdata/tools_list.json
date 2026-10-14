@@ -74,10 +74,14 @@
         "openWorldHint": false,
         "readOnlyHint": true
       },
-      "description": "Recent messages of the room (people's messages and agents' replies, across the room's channels), oldest first, one line each: \"#<seq> <author>: <text>\". Pass since (a seq from an earlier read) to get only newer messages.",
+      "description": "Recent messages of the room (people's messages and agents' replies, across the room's channels — each line names its channel when the room has several), oldest first, one line each: \"#<seq> <author>: <text>\". Pass since (a seq from an earlier read) to get only newer messages, channel to read one channel.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
+          "channel": {
+            "description": "Only this channel (its name, as the lines show it, or its id).",
+            "type": "string"
+          },
           "limit": {
             "description": "At most this many messages (default 30).",
             "maximum": 100,

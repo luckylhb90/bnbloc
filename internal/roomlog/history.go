@@ -39,10 +39,11 @@ type Fetch func(ctx context.Context, path string) ([]byte, error)
 // Row is one room history row as the gateway serves it (GET
 // /v1/rooms/{id}/history, realtime handleHistory).
 type Row struct {
-	Sequence int64           `json:"sequence"`
-	Kind     string          `json:"kind"`
-	Payload  json.RawMessage `json:"payload"`
-	AtUnixMs int64           `json:"atUnixMs"`
+	Sequence  int64           `json:"sequence"`
+	ChannelID string          `json:"channelId"`
+	Kind      string          `json:"kind"`
+	Payload   json.RawMessage `json:"payload"`
+	AtUnixMs  int64           `json:"atUnixMs"`
 }
 
 const (
@@ -61,7 +62,12 @@ type HistoryQuery struct {
 	// cross it. Entries at or below it may still be returned (the pages that
 	// cross the boundary); callers that want only the delta filter by Seq.
 	After int64
-	// MaxRows bounds the rows read across all channels (0 = maxFetchRows).
+	// Before starts every channel's read below this sequence (0 = from the
+	// newest): a range read (After..Before) of records being rewritten.
+	Before int64
+	// MaxRows bounds the rows read across all channels (0 = maxFetchRows),
+	// shared fairly: every channel gets its share before any gets more, so
+	// a busy channel never starves the others.
 	MaxRows int
 	// PageRows is the page size (0 = fetchPageRows).
 	PageRows int
@@ -74,36 +80,69 @@ type HistoryQuery struct {
 // (the people chat, or one that is not the room's).
 var ErrChannelNotReadable = errors.New("an agent may not read that channel")
 
-// AgentChannels lists the channels of a room an agent may read: the room's
-// channel listing (GET /v1/rooms/{id}/channels), which never lists the people
-// chat. A listing that fails or is empty yields the default channel alone
-// (the empty id, which realtime resolves to the room's default channel —
-// never the people chat), so a degraded listing narrows the read instead of
-// failing the turn; ok reports whether the listing was read.
+// Channel is one channel an agent may read: its id and its name.
+type Channel struct {
+	ID   string
+	Name string
+}
+
+// AgentChannels lists the ids of the channels of a room an agent may read
+// (AgentChannelList).
 func AgentChannels(ctx context.Context, fetch Fetch, room string) (channels []string, ok bool) {
+	list, ok := AgentChannelList(ctx, fetch, room)
+	for _, c := range list {
+		channels = append(channels, c.ID)
+	}
+	return channels, ok
+}
+
+// AgentChannelList lists the channels of a room an agent may read: the
+// room's channel listing (GET /v1/rooms/{id}/channels), which never lists
+// the people chat, the default channel first. A listing that fails or is
+// empty yields the default channel alone (the empty id, which realtime
+// resolves to the room's default channel — never the people chat), so a
+// degraded listing narrows the read instead of failing the turn; ok reports
+// whether the listing was read.
+func AgentChannelList(ctx context.Context, fetch Fetch, room string) (channels []Channel, ok bool) {
 	raw, err := fetch(ctx, "/v1/rooms/"+url.PathEscape(room)+"/channels")
 	if err != nil {
 		slog.Debug("bnbloc roomlog channel listing failed; reading the default channel",
 			"event", "bnbloc.roomlog.channels_failed", "room", room, "error", err)
-		return []string{""}, false
+		return []Channel{{}}, false
 	}
 	var parsed struct {
 		Channels []struct {
 			ChannelID string `json:"channelId"`
+			Name      string `json:"name"`
 		} `json:"channels"`
 	}
 	if json.Unmarshal(raw, &parsed) != nil {
-		return []string{""}, false
+		return []Channel{{}}, false
 	}
 	for _, c := range parsed.Channels {
 		if id := strings.TrimSpace(c.ChannelID); id != "" {
-			channels = append(channels, id)
+			channels = append(channels, Channel{ID: id, Name: strings.TrimSpace(c.Name)})
 		}
 	}
 	if len(channels) == 0 {
-		return []string{""}, true
+		return []Channel{{}}, true
 	}
 	return channels, true
+}
+
+// ChannelOf resolves a channel id as a job names it ("" = the room's default
+// channel, which the listing names first) to the listed channel; ok is false
+// when the room does not list it.
+func ChannelOf(list []Channel, id string) (Channel, bool) {
+	if id == "" && len(list) > 0 {
+		return list[0], true
+	}
+	for _, c := range list {
+		if c.ID == id {
+			return c, true
+		}
+	}
+	return Channel{}, false
 }
 
 // History reads the room's history across the channels an agent may read
@@ -118,12 +157,13 @@ func AgentChannels(ctx context.Context, fetch Fetch, room string) (channels []st
 // stops globally at q.MaxRows rows; complete reports whether every channel
 // was fully covered (false: the cap truncated the read, keeping the newest).
 func History(ctx context.Context, fetch Fetch, room string, q HistoryQuery) (entries []Entry, complete bool, err error) {
-	channels, listed := AgentChannels(ctx, fetch, room)
+	channels, listed := AgentChannelList(ctx, fetch, room)
 	if q.Only != "" {
-		if !listed || !slices.Contains(channels, q.Only) {
+		only, found := ChannelOf(channels, q.Only)
+		if !listed || !found {
 			return nil, false, ErrChannelNotReadable
 		}
-		channels = []string{q.Only}
+		channels = []Channel{only}
 	}
 	maxRows := q.MaxRows
 	if maxRows <= 0 {
@@ -133,37 +173,94 @@ func History(ctx context.Context, fetch Fetch, room string, q HistoryQuery) (ent
 	if pageRows <= 0 {
 		pageRows = fetchPageRows
 	}
-	var rows []Row
-	truncated := false
-	for _, ch := range channels {
-		var before int64
-		for pages := 0; q.Pages <= 0 || pages < q.Pages; pages++ {
-			if len(rows) >= maxRows {
-				truncated = true
+	// Each channel's read: where its next page starts, whether it is done.
+	type cursor struct {
+		ch     Channel
+		before int64
+		pages  int
+		done   bool
+		rows   []Row
+	}
+	cursors := make([]*cursor, len(channels))
+	for i, ch := range channels {
+		cursors[i] = &cursor{ch: ch, before: q.Before}
+	}
+	total := 0
+	// read pages one channel until it is done or holds quota rows.
+	read := func(c *cursor, quota int) error {
+		for !c.done && len(c.rows) < quota && total < maxRows {
+			if q.Pages > 0 && c.pages >= q.Pages {
+				c.done = true
 				break
 			}
-			v := url.Values{"limit": {strconv.Itoa(pageRows)}}
-			if ch != "" {
-				v.Set("channelId", ch)
+			limit := min(pageRows, quota-len(c.rows), maxRows-total)
+			v := url.Values{"limit": {strconv.Itoa(limit)}}
+			if c.ch.ID != "" {
+				v.Set("channelId", c.ch.ID)
 			}
-			if before > 0 {
-				v.Set("before", strconv.FormatInt(before, 10))
+			if c.before > 0 {
+				v.Set("before", strconv.FormatInt(c.before, 10))
 			}
 			raw, err := fetch(ctx, fmt.Sprintf("/v1/rooms/%s/history?%s", url.PathEscape(room), v.Encode()))
 			if err != nil {
-				return nil, false, err
+				return err
 			}
 			var page struct {
 				Messages []Row `json:"messages"`
 			}
 			if err := json.Unmarshal(raw, &page); err != nil {
-				return nil, false, fmt.Errorf("decode room history: %w", err)
+				return fmt.Errorf("decode room history: %w", err)
 			}
-			rows = append(rows, page.Messages...)
-			if len(page.Messages) < pageRows || page.Messages[0].Sequence <= q.After {
-				break // channel exhausted, or the delta boundary crossed
+			c.pages++
+			for i := range page.Messages {
+				if page.Messages[i].ChannelID == "" {
+					page.Messages[i].ChannelID = c.ch.ID
+				}
 			}
-			before = page.Messages[0].Sequence
+			c.rows = append(c.rows, page.Messages...)
+			total += len(page.Messages)
+			if len(page.Messages) < limit || len(page.Messages) == 0 || page.Messages[0].Sequence <= q.After {
+				c.done = true // channel exhausted, or the delta boundary crossed
+				break
+			}
+			c.before = page.Messages[0].Sequence
+		}
+		return nil
+	}
+	// Every channel gets its share first; what the done ones leave is
+	// shared among the rest, until the cap or every channel is done.
+	for {
+		open := 0
+		for _, c := range cursors {
+			if !c.done {
+				open++
+			}
+		}
+		if open == 0 || total >= maxRows {
+			break
+		}
+		share := max((maxRows-total)/open, 1)
+		for _, c := range cursors {
+			if c.done {
+				continue
+			}
+			if err := read(c, len(c.rows)+share); err != nil {
+				return nil, false, err
+			}
+		}
+	}
+	complete = true
+	var rows []Row
+	for _, c := range cursors {
+		if !c.done {
+			complete = false
+		}
+		rows = append(rows, c.rows...)
+	}
+	names := map[string]string{}
+	if len(channels) > 1 {
+		for _, c := range channels {
+			names[c.ID] = c.Name
 		}
 	}
 	// Newest first, de-duplicated (a row is one sequence), capped, then
@@ -171,12 +268,25 @@ func History(ctx context.Context, fetch Fetch, room string, q HistoryQuery) (ent
 	sort.Slice(rows, func(i, j int) bool { return rows[i].Sequence > rows[j].Sequence })
 	rows = slices.CompactFunc(rows, func(a, b Row) bool { return a.Sequence == b.Sequence })
 	if len(rows) > maxRows {
-		rows, truncated = rows[:maxRows], true
+		rows, complete = rows[:maxRows], false
 	}
 	for i := len(rows) - 1; i >= 0; i-- {
-		entries = append(entries, DecodeRow(rows[i])...)
+		for _, e := range DecodeRow(rows[i]) {
+			if n, ok := names[e.ChannelID]; ok {
+				e.Channel = channelLabel(n, e.ChannelID)
+			}
+			entries = append(entries, e)
+		}
 	}
-	return entries, !truncated, nil
+	return entries, complete, nil
+}
+
+// channelLabel is how a record names a channel: its name, else its id.
+func channelLabel(name, id string) string {
+	if name = strings.TrimSpace(name); name != "" {
+		return name
+	}
+	return id
 }
 
 // DecodeRow maps one history row to the entries an agent reads: a
@@ -194,11 +304,17 @@ func DecodeRow(r Row) []Entry {
 				Provider string `json:"provider"`
 			} `json:"recipient"`
 			DispatchedBy *wire.DispatchMarker `json:"dispatchedBy"`
+			Attachments  []wire.ChatAttachment `json:"attachments"`
 		}
-		if json.Unmarshal(r.Payload, &p) != nil || strings.TrimSpace(p.Text) == "" {
+		if json.Unmarshal(r.Payload, &p) != nil || (strings.TrimSpace(p.Text) == "" && len(p.Attachments) == 0) {
 			return nil
 		}
-		e := Entry{Seq: r.Sequence, AtMs: r.AtUnixMs, Speaker: p.UserID, Kind: KindHuman, Text: p.Text}
+		e := Entry{Seq: r.Sequence, ChannelID: r.ChannelID, AtMs: r.AtUnixMs, Speaker: p.UserID, Kind: KindHuman, Text: p.Text}
+		for _, a := range p.Attachments {
+			if a.ID != "" {
+				e.Attachments = append(e.Attachments, AttachmentRef{ID: a.ID, Filename: a.Filename, ContentType: a.ContentType, Size: a.Size})
+			}
+		}
 		if p.Recipient != nil && p.Recipient.Provider != "" {
 			e.To = AgentSpeaker(p.Recipient.OwnerID, p.Recipient.Provider)
 		}
@@ -229,7 +345,7 @@ func DecodeRow(r Row) []Entry {
 				continue
 			}
 			out = append(out, Entry{
-				Seq: r.Sequence, AtMs: r.AtUnixMs,
+				Seq: r.Sequence, ChannelID: r.ChannelID, AtMs: r.AtUnixMs,
 				Speaker: AgentSpeaker(mp.OwnerUserID, mp.Provider), Kind: KindAgent, Text: mp.Text,
 				Owner: mp.OwnerUserID, Provider: mp.Provider, Session: p.AgentSessionID, Role: mp.Role,
 			})
