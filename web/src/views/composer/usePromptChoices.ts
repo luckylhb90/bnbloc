@@ -26,13 +26,18 @@ function libraryPromptPacks(): Promise<readonly ContentComponent[]> {
 
 type Loaded = { readonly choices: readonly PromptChoice[]; readonly starters: readonly PromptChoice[] };
 
+// Before the first load, and when it fails: no prompts (the composer works
+// without them).
+const NONE: readonly PromptChoice[] = [];
+const EMPTY: Loaded = { choices: NONE, starters: NONE };
+
 // The last load per room: a new user of the same room (the selection
 // action beside the composer) starts from it while it reloads, so its
 // suggestions show at once.
 const lastLoaded = new Map<string, Loaded>();
 
 export function usePromptChoices(roomId: string, enabled = true): Loaded {
-  const [state, setState] = useState<Loaded>(() => lastLoaded.get(roomId) ?? { choices: [], starters: [] });
+  const [state, setState] = useState<Loaded>(() => lastLoaded.get(roomId) ?? EMPTY);
   const [epoch, setEpoch] = useState(0);
   useEffect(() => {
     if (!enabled) return;
@@ -45,7 +50,7 @@ export function usePromptChoices(roomId: string, enabled = true): Loaded {
       })
       .catch(() => {
         // prompts are optional: the composer works without them
-        if (live) setState({ choices: [], starters: [] });
+        if (live) setState(EMPTY);
       });
     return () => {
       live = false;

@@ -25,7 +25,7 @@ import { MessageFeed } from "@/views/room/MessageFeed";
 import { RoomComposer } from "@/views/room/RoomComposer";
 import { PeopleChatDock, PeopleChatPanel } from "@/views/room/PeopleChatPanel";
 import { usePeopleChat } from "@/views/room/usePeopleChat";
-import { fileAskRequests, shareComposerRef } from "@/lib/team";
+import { shareComposerRef } from "@/lib/team";
 import { RoomDialogs } from "@/views/room/RoomDialogs";
 import { ActivityRail } from "@/views/room/ActivityRail";
 import { useRoomMessageActions } from "@/views/room/useRoomMessageActions";
@@ -36,7 +36,7 @@ import { jobQueueAhead } from "@/lib/platformAgents";
 import { useDesktopHandoff } from "@/views/room/useDesktopHandoff";
 import { HandoffBanner } from "@/views/room/HandoffBanner";
 import { useHandoffExport } from "@/views/room/useHandoffExport";
-import { canInvite, mayChat } from "@/lib/roomRoles";
+import { canInvite, mayChat, readOnlyInRoom } from "@/lib/roomRoles";
 import { can } from "@/lib/permissions";
 import { EventMemberJoined, EventMemberRemoved } from "@/lib/wire.gen";
 import { DesktopConnectBanner } from "@/views/DesktopConnect";
@@ -47,8 +47,8 @@ import { useFeedScroll } from "@/views/room/useFeedScroll";
 import { useRoomTeam } from "@/views/room/useRoomTeam";
 import { MessageExtrasProvider } from "@/views/room/messageExtras";
 import { AttachmentOpenerProvider } from "@/views/room/MessageAttachments";
-import { FileAskProvider, type FileAsk, type FileFocus } from "@/views/workbench/FileAskPanel";
-import type { ComposerFileContext } from "@/views/Composer";
+import { FileAskProvider } from "@/views/workbench/FileAskPanel";
+import { useRoomFileAsk } from "@/views/workbench/useRoomFileAsk";
 import { JobProgressProvider } from "@/views/room/JobProgressStrip";
 import { SaveTemplateDialog } from "@/views/room/SaveTemplateDialog";
 import { TemplateStartCard } from "@/views/room/TemplateStartCard";
@@ -69,9 +69,6 @@ type RoomDialog = "settings" | "members" | "borrow" | "leave" | null;
 // Channel-scoped state (feed, history, jobs, inline artifact cards) lives in
 // scope-keyed hooks that restart when the channel changes and ignore late
 // writes from the previous channel.
-
-// No typing line in a file panel's composer.
-const NO_TYPERS: Record<string, number> = {};
 
 export function RoomView({
   roomId,
@@ -129,7 +126,7 @@ export function RoomView({
   // read-only (viewer) organization role (the gateway refuses its chat);
   // unknown until the member list answers, so the composer never flashes
   // read-only.
-  const readOnly = data.me !== undefined && !(me && mayChat(me) && can(orgRole, "drive_agent"));
+  const readOnly = readOnlyInRoom(me, data.me !== undefined, can(orgRole, "drive_agent"));
   const handoffExport = useHandoffExport(roomId);
 
   // Layout: container stage drives the rail (inline/drawer/collapsed) and the
@@ -387,53 +384,10 @@ export function RoomView({
       onSelectPanel={selectPanel}
     />
   );
-  // The file in front of the room (the workbench's active file tab): the
-  // room composer's starters become its suggestions, and a pick goes to the
-  // file's Ask AI panel (docs/prd/2026-10-14-file-prompts-and-compare.md
-  // rule 4).
-  const [fileFocus, setFileFocus] = useState<FileFocus | null>(null);
-  const roomFileContext = useMemo<ComposerFileContext | undefined>(
-    () =>
-      fileFocus
-        ? { file: fileFocus.file, onPick: (choice) => fileAskRequests.queue(roomId, { artifactId: fileFocus.artifactId, choice }) }
-        : undefined,
-    [fileFocus, roomId],
-  );
-  // A file's Ask AI panel (workbench): the room's own composer, its sends
-  // naming the file, over the room's feed.
-  const fileAsk = useMemo<FileAsk>(
-    () => ({
-      roomId,
-      feed,
-      focus: setFileFocus,
-      composer: (ref, options) => (
-        <RoomComposer
-          key={`file:${ref.artifactId}`}
-          roomPreview={!!room && "preview" in room}
-          readOnly={readOnly}
-          agent={agent}
-          subject={subject}
-          roomId={roomId}
-          channelId={channelId}
-          typingUsers={NO_TYPERS}
-          roomAgents={roomAgents}
-          roomMembers={data.members}
-          online={online}
-          feed={feed}
-          joining={data.joining}
-          onSend={(text, opts) => send(text, { ...opts, fileRef: ref })}
-          onJoin={() => void data.join()}
-          platformAgents={data.platform}
-          modelCatalogs={data.modelCatalogs}
-          variant="file"
-          fileContext={{ file: options.file, selectionKind: options.selectionKind }}
-          threadLength={options.threadLength}
-          pick={options.pick}
-        />
-      ),
-    }),
-    [roomId, feed, room, readOnly, agent, subject, channelId, roomAgents, data, online, send],
-  );
+  // A file's Ask AI panel (workbench) and the file in front of the room:
+  // the composer its sends are built by, and the room composer's starters
+  // that follow the focused file (workbench/useRoomFileAsk).
+  const { fileAsk, roomFileContext } = useRoomFileAsk({ roomId, channelId, feed, data, readOnly, agent, subject, online, send });
   const dockPanel = workbench.open ? (
     <PreviewDock
       mode={dockMode}

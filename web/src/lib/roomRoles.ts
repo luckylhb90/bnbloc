@@ -39,3 +39,10 @@ export function canInvite(m: RoomMembership): boolean {
 export function isOwner(m: RoomMembership): boolean {
   return isHuman(m) && m.role === "owner";
 }
+
+// readOnlyInRoom: the member follows the room but may not post or ask agents
+// (a visitor, or an organization role without drive_agent). Unknown (false)
+// until the member list answers, so a composer never flashes read-only.
+export function readOnlyInRoom(me: RoomMembership | null | undefined, known: boolean, orgMayDriveAgent: boolean): boolean {
+  return known && !(me && mayChat(me) && orgMayDriveAgent);
+}
