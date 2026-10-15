@@ -550,9 +550,9 @@ func TestHandoffImportSkipsRefusedAttachment(t *testing.T) {
 	files := map[string][]byte{
 		"manifest.json": validManifest(),
 		"messages.jsonl": []byte(`{"sequence":1,"channelId":"ch_a","kind":"chat_message","payload":{"userId":"alice","text":"see file",` +
-			`"attachments":[{"id":"att_1","filename":"page.html","contentType":"text/html","size":5}]},"atUnixMs":7}`),
-		"attachments/att_1/attachment.json": []byte(`{"id":"att_1","filename":"page.html","contentType":"text/html","size":5,"file":"attachments/att_1/page.html"}`),
-		"attachments/att_1/page.html":       []byte("<b>x</b>"),
+			`"attachments":[{"id":"att_1","filename":"tool.exe","contentType":"application/x-msdownload","size":4}]},"atUnixMs":7}`),
+		"attachments/att_1/attachment.json": []byte(`{"id":"att_1","filename":"tool.exe","contentType":"application/x-msdownload","size":4,"file":"attachments/att_1/tool.exe"}`),
+		"attachments/att_1/tool.exe":        []byte("MZ\x90\x00"),
 	}
 	code, out := e.importPackage("dave", writeZip(t, files))
 	if code != http.StatusOK {
