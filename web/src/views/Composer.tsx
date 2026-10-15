@@ -21,6 +21,7 @@ import { Button } from "@/ui/Button";
 import { useToast } from "@/ui/Toast";
 import { AttachmentChips } from "@/views/AttachmentChips";
 import { ATTACHMENT_ACCEPT, useComposerAttachments } from "@/views/useComposerAttachments";
+import { pastedFiles } from "@/views/composer/pastedFiles";
 import { AgentPicker } from "@/views/composer/AgentPicker";
 import { ModelPicker } from "@/views/composer/ModelPicker";
 import { SendModeToggle } from "@/views/composer/SendModeToggle";
@@ -622,12 +623,13 @@ export function Composer({
           }
           onChange={(e) => applyText(e.target.value, e.target.selectionStart ?? e.target.value.length)}
           onPaste={(e) => {
-            const imageFiles = Array.from(e.clipboardData.files).filter((file) =>
-              file.type.startsWith("image/"),
-            );
-            if (!sending && imageFiles.length > 0) {
+            // Pasted files attach, whatever their type: a file copied in
+            // the Finder arrives as a file, and WebKit (the desktop app's
+            // webview) would otherwise also insert its name or path as text.
+            const files = pastedFiles(e.clipboardData);
+            if (!sending && files.length > 0) {
               e.preventDefault();
-              attachments.addFiles(imageFiles);
+              attachments.addFiles(files);
               requestAnimationFrame(() => taRef.current?.focus());
             }
           }}
