@@ -909,16 +909,6 @@ export interface ComponentPreviewer {
   rank: number;
   capabilities?: string[];
   toolbar?: ComponentPreviewerToolbarItem[];
-  // Suggestions are the Ask AI panel's starting prompts for the files it
-  // shows (docs/prd/2026-10-14-ai-document-editing.md rule 6).
-  suggestions?: ComponentPreviewerSuggestion[];
-}
-
-// ComponentPreviewerSuggestion is one starting prompt: its chip label and
-// the request it puts in the composer.
-export interface ComponentPreviewerSuggestion {
-  label: string;
-  prompt: string;
 }
 
 // FileMatch declares the files something applies to: the files a

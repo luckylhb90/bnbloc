@@ -59,8 +59,7 @@ Validation (`core/pkgmeta/previewer_validation.go`, enforced at install):
   capability;
 - no prompts: a file's suggested requests are prompt-pack prompts scoped to
   the files they are for (`files`; `docs/prd/2026-10-14-file-prompts-and-compare.md`).
-  A 1.1.0 package's `suggestions` are accepted and ignored until installed
-  ones are replaced.
+  The old `suggestions` field is refused by the strict schema.
 
 The vocabularies (capabilities, toolbar kinds and icons, limits) are defined
 once in `web/previewer-sdk/src/protocol.ts`; the Go validator mirrors them and

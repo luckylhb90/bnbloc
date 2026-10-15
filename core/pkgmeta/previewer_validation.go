@@ -49,13 +49,6 @@ const (
 	maxPreviewerRank         = 1000
 	previewerCapabilityTool  = "toolbar"
 	previewerCapabilityThumb = "thumbnail"
-	// Suggestions are accepted and ignored: file prompts are prompt packs
-	// now (docs/prd/2026-10-14-file-prompts-and-compare.md rule 3). Installed
-	// 1.1.0 records carry them and re-parse strictly at boot; the field goes
-	// once they are replaced (F4).
-	maxPreviewerSuggestions      = 6
-	maxPreviewerSuggestionLabel  = 40
-	maxPreviewerSuggestionPrompt = 500
 )
 
 var (
@@ -107,27 +100,7 @@ func validatePreviewer(p Previewer) error {
 	if len(p.Toolbar) > 0 && !caps[previewerCapabilityTool] {
 		return fmt.Errorf("previewer.toolbar requires the %q capability", previewerCapabilityTool)
 	}
-	if err := validatePreviewerSuggestions(p.Suggestions); err != nil {
-		return err
-	}
 	return validatePreviewerToolbar(p.Toolbar)
-}
-
-// validatePreviewerSuggestions checks the Ask AI panel's starting prompts:
-// at most maxPreviewerSuggestions, each a short label and a prompt.
-func validatePreviewerSuggestions(items []PreviewerSuggestion) error {
-	if len(items) > maxPreviewerSuggestions {
-		return fmt.Errorf("previewer.suggestions holds at most %d items", maxPreviewerSuggestions)
-	}
-	for i, it := range items {
-		if n := utf8.RuneCountInString(it.Label); strings.TrimSpace(it.Label) == "" || n > maxPreviewerSuggestionLabel {
-			return fmt.Errorf("previewer.suggestions[%d].label must be 1-%d characters", i, maxPreviewerSuggestionLabel)
-		}
-		if n := utf8.RuneCountInString(it.Prompt); strings.TrimSpace(it.Prompt) == "" || n > maxPreviewerSuggestionPrompt {
-			return fmt.Errorf("previewer.suggestions[%d].prompt must be 1-%d characters", i, maxPreviewerSuggestionPrompt)
-		}
-	}
-	return nil
 }
 
 func validatePreviewerMatch(m PreviewerMatch) error {

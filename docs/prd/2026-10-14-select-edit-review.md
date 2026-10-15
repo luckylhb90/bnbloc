@@ -118,6 +118,17 @@ A member can already point at a part of a file and ask for a change, but:
    selection's rect, flips above when there is no room, and hides while
    dragging.
 
+## 3b. The popped-out window
+
+A previewer torn out into its own window (`#/preview/<room>/<artifact>`)
+has no room view, so it had no Ask AI. It now loads what the panel needs
+with the room's own hooks (members, agents, the default channel's feed
+over its one event stream) and builds the panel's composer with the same
+hook as the room (`useRoomFileAsk`). Requests go to the room's default
+channel. The window reads no cursor, so opening a file there marks
+nothing read. A run-limit refusal says so in a toast (its request dialog
+lives in the room window).
+
 ## 4. Milestones
 
 - **G1:** selection fields (protocol, wire, realtime), prompt `selection`,

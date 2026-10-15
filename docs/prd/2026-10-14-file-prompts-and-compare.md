@@ -1,7 +1,8 @@
 # File prompts and comparing any file (2026-10-14)
 
-Status: F1–F3 implemented (2026-10-14), not yet released; F4 after the
-1.2.0 previewers replace the installed 1.1.0 ones. Follows
+Status: F1–F4 implemented and released (2026-10-14/15). F4 (the Go
+schema refuses `previewer.suggestions`) followed once QA ran no 1.1.0
+previewer. Follows
 `docs/prd/2026-10-14-ai-document-editing.md` (M2 shipped `previewer.suggestions`
 and the Ask AI panel; M3 local documents) and
 `docs/prd/2026-10-14-office-previewers.md`.
