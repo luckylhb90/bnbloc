@@ -396,7 +396,7 @@ function ScheduleEditor({
       onClose={onClose}
       size="lg"
       title={schedule ? "Edit schedule" : "New schedule"}
-      description="Posted as you, through the normal chat path."
+      description={recipient.kind === "ai" ? "AI carries the task out at each run, with your permissions." : "Posted as you, through the normal chat path."}
       footer={
         <>
           <Button variant="ghost" onClick={onClose}>

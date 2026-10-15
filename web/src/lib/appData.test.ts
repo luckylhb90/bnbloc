@@ -1,4 +1,4 @@
-import { appCollectionCounts, appDataLineShown, appExportFileName, appStatsAnswer, collectionsLabel, documentsLabel } from "./appData.ts";
+import { appCollectionCounts, appDataLineShown, appDataSummary, appExportFileName, appHasData, appStatsAnswer, collectionsLabel, documentsLabel } from "./appData.ts";
 import { ApiError } from "./errors.ts";
 import type { AppDataStats } from "./wire.gen.ts";
 
@@ -14,7 +14,11 @@ const stats = (documents: number, collections: Record<string, number> = {}): App
 function testDataLineVisibility(): void {
   const owner = appStatsAnswer({ data: stats(3, { votes: 3 }), error: undefined });
   assert(appDataLineShown(owner), "an owner's app with data shows the line");
-  assert(!appDataLineShown(appStatsAnswer({ data: stats(0), error: undefined })), "an owner's empty app shows none");
+  assert(appDataLineShown(appStatsAnswer({ data: stats(0), error: undefined })), "an owner's empty app still shows the line (to automate it)");
+  assert(!appHasData(stats(0)) && appHasData(stats(1)) && appHasData({ ...stats(0), files: 2, fileBytes: 9 }), "data is documents or files");
+  eq(appDataSummary(stats(0)), "No data yet", "empty summary");
+  eq(appDataSummary({ ...stats(12), files: 3, fileBytes: 9 }), "12 documents · 3 files", "documents and files");
+  eq(appDataSummary({ ...stats(0), files: 1, fileBytes: 9 }), "1 file", "files only");
   const notOwner = appStatsAnswer({ data: undefined, error: new ApiError(403, "only the app's owners may do this") });
   assert(notOwner.kind === "hidden" && !appDataLineShown(notOwner), "a non-owner (403) sees no line");
   const notApp = appStatsAnswer({ data: undefined, error: new ApiError(404, "app not found") });

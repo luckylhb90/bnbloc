@@ -31,9 +31,16 @@ export function appStatsAnswer(q: { readonly data: AppDataStats | undefined; rea
   return { kind: "loading" };
 }
 
-/** appDataLineShown: the line shows for an owner whose app has data. */
+/** appDataLineShown: the line shows for an owner (the room's members), data or
+ *  not: an app that nobody filled in yet is the one to automate (a reminder
+ *  to fill it in) or to connect a group chat to. */
 export function appDataLineShown(a: AppStatsAnswer): a is { readonly kind: "stats"; readonly stats: AppDataStats } {
-  return a.kind === "stats" && a.stats.documents > 0;
+  return a.kind === "stats";
+}
+
+/** appHasData: there is something to export or clear (documents or files). */
+export function appHasData(stats: AppDataStats): boolean {
+  return stats.documents > 0 || (stats.files ?? 0) > 0;
 }
 
 /** The app's collections with their document counts, largest first (then
@@ -48,6 +55,19 @@ export function appCollectionCounts(stats: AppDataStats): { readonly name: strin
 /** "1 document" / "1,204 documents". */
 export function documentsLabel(n: number): string {
   return n === 1 ? "1 document" : `${n.toLocaleString("en-US")} documents`;
+}
+
+export function filesLabel(n: number): string {
+  return n === 1 ? "1 file" : `${n.toLocaleString("en-US")} files`;
+}
+
+/** What the app holds, in a few words: "12 documents · 3 files", or "No data
+ *  yet". */
+export function appDataSummary(stats: AppDataStats): string {
+  const parts: string[] = [];
+  if (stats.documents > 0) parts.push(documentsLabel(stats.documents));
+  if ((stats.files ?? 0) > 0) parts.push(filesLabel(stats.files));
+  return parts.length ? parts.join(" · ") : "No data yet";
 }
 
 /** "votes 10 · comments 2". */

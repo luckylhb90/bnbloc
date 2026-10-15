@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { ArrowClockwiseIcon, ChatsCircleIcon, ClockIcon, DatabaseIcon, DotsThreeIcon, DownloadSimpleIcon, FileCsvIcon, TrashIcon } from "@phosphor-icons/react";
 import { useAutomateApp } from "@/views/room/automate";
-import { appCollectionCounts, appDataLineShown, appExportFileName, appStatsAnswer, collectionsLabel, documentsLabel } from "@/lib/appData";
+import { appCollectionCounts, appDataLineShown, appDataSummary, appExportFileName, appHasData, appStatsAnswer, collectionsLabel, documentsLabel } from "@/lib/appData";
 import { appDataApi } from "@/lib/appDataApi";
 import { useAuth } from "@/lib/auth";
 import { cn } from "@/lib/cn";
@@ -102,9 +102,10 @@ export function AppDataLine({
   }
   if (!appDataLineShown(answer)) return null;
   const collections = appCollectionCounts(answer.stats);
-  const total = documentsLabel(answer.stats.documents);
+  const summary = appDataSummary(answer.stats);
+  const hasData = appHasData(answer.stats);
   const perCollection = collectionsLabel(answer.stats);
-  const mayClear = can(role, "drive_agent");
+  const mayClear = hasData && can(role, "drive_agent");
   const automate = useAutomateApp();
 
   const run = async (what: string, fn: () => Promise<void>) => {
@@ -151,7 +152,7 @@ export function AppDataLine({
       onClose={() => setConfirmClear(false)}
       onConfirm={clear}
       title="Clear this app's data?"
-      description={`This permanently deletes the app's ${total} for everyone, including what people entered through share links. The app and its links stay. It cannot be undone: export the data first to keep a copy.`}
+      description={`This permanently deletes the app's ${summary} for everyone, including what people entered through share links. The app and its links stay. It cannot be undone: export the data first to keep a copy.`}
       confirmLabel="Clear data"
       danger
     />
@@ -161,8 +162,8 @@ export function AppDataLine({
     return (
       <div className="flex min-w-0 items-center gap-1 px-1 pt-1 text-[11px] text-[var(--color-fg-subtle)]" data-app-data>
         <DatabaseIcon size={12} className="shrink-0" aria-hidden />
-        <span className="min-w-0 flex-1 truncate tabular" title={`${total}: ${perCollection}`}>
-          {perCollection}
+        <span className="min-w-0 flex-1 truncate tabular" title={perCollection ? `${summary}: ${perCollection}` : summary}>
+          {perCollection || summary}
         </span>
         <Menu
           label="App data actions"
@@ -180,7 +181,7 @@ export function AppDataLine({
             </button>
           )}
         >
-          {exportItems}
+          {hasData && exportItems}
           {automate && (
             <MenuItem icon={ClockIcon} onSelect={() => automate.open({ artifactId, title: appName })}>
               Automate…
@@ -205,22 +206,24 @@ export function AppDataLine({
   return (
     <div className="flex min-w-0 shrink-0 flex-wrap items-center gap-x-2 gap-y-1 border-b border-[var(--color-border)] px-3 py-1 text-xs text-[var(--color-fg-muted)]" data-app-data>
       <DatabaseIcon size={14} className="shrink-0 text-[var(--color-fg-subtle)]" aria-hidden />
-      <span className="shrink-0 font-medium text-[var(--color-fg)] tabular">{total}</span>
+      <span className="shrink-0 font-medium text-[var(--color-fg)] tabular">{summary}</span>
       <span className="min-w-0 flex-1 truncate tabular" title={perCollection}>
         {perCollection}
       </span>
-      <Menu
-        label="Export app data"
-        className="relative shrink-0"
-        menuClassName="absolute right-0 top-full mt-1 w-52"
-        trigger={(props) => (
-          <button {...props} disabled={busy} className={CHIP}>
-            <DownloadSimpleIcon size={14} /> Export
-          </button>
-        )}
-      >
-        {exportItems}
-      </Menu>
+      {hasData && (
+        <Menu
+          label="Export app data"
+          className="relative shrink-0"
+          menuClassName="absolute right-0 top-full mt-1 w-52"
+          trigger={(props) => (
+            <button {...props} disabled={busy} className={CHIP}>
+              <DownloadSimpleIcon size={14} /> Export
+            </button>
+          )}
+        >
+          {exportItems}
+        </Menu>
+      )}
       {automate && (
         <button type="button" onClick={() => automate.open({ artifactId, title: appName })} className={CHIP} title="Run a task on this app at set times: remind, notify, report">
           <ClockIcon size={14} /> Automate…
