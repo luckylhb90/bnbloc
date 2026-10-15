@@ -155,15 +155,45 @@ schedule's `notify` action is the same function.
   Notifier components deliver it: the organization's bot, a member's
   personal bot, desktop or web push, whichever the member has.
 - **Group delivery is the notifier's.** A notifier package declares the
-  `groups` capability when it can post to a named group. A `group:` notice
-  is then handed to it (and only to it), the group named in the payload.
-  Without such a notifier, the call fails with a sentence the app shows
-  (`groups_unavailable`).
+  `groups` capability when it can post to a group chat, and the room's
+  members connect group chats to the room (§5a). A `group:<name>` notice
+  goes to the notifier of that connection. An unconnected name fails with
+  a sentence the app shows (`groups_unavailable`).
 - **Rules only the platform can enforce:**
   - who may notify: a page only for its caller's own link session, a
     schedule as its owner;
   - rate limits per app and per recipient;
   - every notice is signed with the app's name and links back to it.
+
+## 5a. Group chats are connected to a room, by the people in it
+
+Revised 2026-10-15 (the first cut had the notifier's operator map group
+names to chat ids in its environment): which group chats a room's apps
+and AI tasks may post into is the room's members' to set, not a global
+list.
+
+- **Connect.** A member opens "Group chats" (from an app's card or the
+  room's schedules), names the group ("weekly report") and gets a one-time
+  code (`bnbloc-7K3QXM`, 10 minutes). They add the organization's bot to
+  the group chat and send the code there.
+- **The notifier binds it.** A notifier declaring the `groups` capability
+  watches its groups for a code; it posts `{code, address}` to bnbloc
+  (`POST /v1/notifier/group-binds`, signed like a reply), `address` being
+  its own opaque id of that chat. bnbloc spends the code, records the
+  binding on the room (name, notifier, address) and answers the name; the
+  bot confirms in the group. A code works once, only in its own tenant's
+  notifiers, and only before it expires.
+- **One owner.** The room service owns the bindings (they are the room's,
+  deleted with it); the gateway verifies the notifier and relays.
+- **Send.** `to: "group:<name>"` resolves the room's binding: the notice
+  goes to that binding's notifier only, with `group` (the name) and
+  `groupAddress` in the payload. The notifier needs no configuration. An
+  unconnected name is refused with a sentence.
+- **Agents learn nothing new.** An AI task's `notify` action lists the
+  room's connected groups in its description; an app names a group the
+  member typed.
+- **Bounds.** 20 groups per room, names of at most 64 characters, 5 open
+  codes per room.
 
 ## 6. AI from an app
 
