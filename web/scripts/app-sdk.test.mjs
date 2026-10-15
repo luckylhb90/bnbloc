@@ -134,6 +134,16 @@ test("files upload as one multipart part, read back as a blob URL, refuse oversi
   assert.equal(sdk.requests.length, 2);
 });
 
+test("ai posts the app's prompt and its input apart; an object input goes as its JSON", async () => {
+  const sdk = boot(() => jsonResponse(200, { text: "ok" }));
+  assert.deepEqual(plain(await sdk.app.ai({ prompt: "Tidy.", input: { mon: "x" }, json: true })), { text: "ok" });
+  const [req] = sdk.requests;
+  assert.equal(req.url, BASE + "ai");
+  assert.deepEqual(JSON.parse(req.body), { prompt: "Tidy.", input: '{"mon":"x"}', json: true });
+  await assert.rejects(sdk.app.ai({ input: "x" }), (e) => e.status === 400);
+  assert.equal(sdk.requests.length, 1);
+});
+
 test("subscribe hands over only app_changed events, until unsubscribed", async () => {
   const frames =
     ": connected\n\n" +
@@ -233,6 +243,7 @@ test("demo mode answers the whole data API in the page's memory and never sends 
   await assert.rejects(app.collection("bad name").insert({ a: 1 }), (e) => e.status === 400);
   await assert.rejects(votes.insert({ big: "x".repeat(70000) }), (e) => e.status === 413);
 
+  assert.match(plain(await app.ai({ prompt: "p", input: "log" })).text, /log/);
   // Files stay in the page too.
   const photo = new Blob(["png"], { type: "image/png" });
   const f = plain(await app.files.upload(photo));

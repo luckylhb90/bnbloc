@@ -166,3 +166,27 @@ const (
 	AppExportJSON = "json"
 	AppExportCSV  = "csv"
 )
+
+// AppAIRequest is an app's ai call (POST ~app/ai): the app's own Prompt
+// (its instruction to the model) and Input (the data to work on, fenced
+// as data); JSON asks for a JSON object instead of text.
+type AppAIRequest struct {
+	Prompt string `json:"prompt"`
+	Input  string `json:"input,omitempty"`
+	JSON   bool   `json:"json,omitempty"`
+}
+
+// AppAIReply is its answer: Text, or JSON for a json call.
+type AppAIReply struct {
+	Text string         `json:"text,omitempty"`
+	JSON map[string]any `json:"json,omitempty"`
+}
+
+// The codes of an app's ai refusals (httpx.ErrorBody.Code).
+const (
+	// AppAISignInRequired: the caller did not sign in (an anonymous
+	// visitor), or is an agent.
+	AppAISignInRequired = "ai_sign_in_required"
+	// AppAIUnavailable: no assist model, or the organization turned AI off.
+	AppAIUnavailable = "ai_unavailable"
+)

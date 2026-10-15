@@ -264,20 +264,27 @@ func (s *Service) assistClient() *assist.Client {
 	return &assist.Client{Transport: s.AssistTransport, Now: s.nowTime}
 }
 
-// auditAssist records a run: the task, the model (and whether it is the
-// organization's own), the tokens and the latency, never the text.
+// auditAssist records a task's run (auditModelRun).
 func (s *Service) auditAssist(ctx context.Context, claims auth.Claims, task assistTask, model assist.Model, usage wire.AssistUsage, runErr error) {
-	name := firstNonEmpty(usage.Model, model.Model)
+	s.auditModelRun(ctx, claims, task.Component.Name+"@"+task.Version.Version, "component "+task.Component.ID, model, usage, runErr)
+}
+
+// auditModelRun records one assist model call: what ran (name, and what
+// it ran for), the model (and whether it is the organization's own), the
+// tokens and the latency, never the text. It is the audit of every call
+// of the assist model (a task, an app's ai).
+func (s *Service) auditModelRun(ctx context.Context, claims auth.Claims, name, what string, model assist.Model, usage wire.AssistUsage, runErr error) {
+	modelName := firstNonEmpty(usage.Model, model.Model)
 	if model.Org {
-		name += " (the organization's)"
+		modelName += " (the organization's)"
 	}
-	outcome, detail := wire.AuditOutcomeAllow, fmt.Sprintf("component %s, model %s, %d prompt + %d completion tokens, %d ms",
-		task.Component.ID, name, usage.PromptTokens, usage.CompletionTokens, usage.LatencyMs)
+	outcome, detail := wire.AuditOutcomeAllow, fmt.Sprintf("%s, model %s, %d prompt + %d completion tokens, %d ms",
+		what, modelName, usage.PromptTokens, usage.CompletionTokens, usage.LatencyMs)
 	if runErr != nil {
 		outcome, detail = "failed", detail+", failed: "+assistErrClass(runErr)
 	}
 	s.audit(ctx, claims.Tenant, store.ExtAuditRecord{
-		Kind: wire.AuditKindAssist, Name: task.Component.Name + "@" + task.Version.Version, Action: "run",
+		Kind: wire.AuditKindAssist, Name: name, Action: "run",
 		Actor: claims.Subject, Outcome: outcome, Detail: detail,
 	})
 }

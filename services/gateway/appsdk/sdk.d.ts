@@ -136,6 +136,13 @@ declare global {
     me(): Promise<{ id: string; name?: string; account?: { login: string; email?: string } }>;
     /** Files uploaded by the app's pages. */
     files: BnblocAppFiles;
+    /** Asks the organization's AI model. prompt is the app's instruction,
+     *  input the data to work on (an object is sent as its JSON), given to
+     *  the model as data. json: answers {json} (an object) instead of
+     *  {text}. Signed-in callers only: 403 code "ai_sign_in_required" for
+     *  an anonymous visitor, 409 "ai_unavailable" where the organization
+     *  has no model or turned AI off, 429 when the caller asks too often. */
+    ai(req: { prompt: string; input?: string | object; json?: boolean }): Promise<{ text?: string; json?: Record<string, unknown> }>;
     /** Calls fn with each change until the returned function is called.
      *  Live only: changes made while disconnected are not replayed. */
     subscribe(fn: (change: BnblocAppChange) => void): () => void;

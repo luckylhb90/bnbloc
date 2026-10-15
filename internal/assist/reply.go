@@ -55,6 +55,16 @@ func Fields(reply string, fields []wire.AssistField) (map[string]any, error) {
 	return out, nil
 }
 
+// Object is a reply's JSON object, as Fields finds it (an interactive
+// app's json call); ErrBadReply when it holds none.
+func Object(reply string) (map[string]any, error) {
+	obj, ok := object(reply)
+	if !ok {
+		return nil, ErrBadReply
+	}
+	return obj, nil
+}
+
 // object finds the reply's JSON object: the whole text, a fenced block, or
 // the outermost braces.
 func object(reply string) (map[string]any, bool) {

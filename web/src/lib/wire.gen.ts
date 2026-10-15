@@ -382,6 +382,28 @@ export const AppVisitorInvalid = "visitor_token_invalid";
 export const AppExportJSON = "json";
 export const AppExportCSV = "csv";
 
+// AppAIRequest is an app's ai call (POST ~app/ai): the app's own Prompt
+// (its instruction to the model) and Input (the data to work on, fenced
+// as data); JSON asks for a JSON object instead of text.
+export interface AppAIRequest {
+  prompt: string;
+  input?: string;
+  json?: boolean;
+}
+
+// AppAIReply is its answer: Text, or JSON for a json call.
+export interface AppAIReply {
+  text?: string;
+  json?: Record<string, unknown>;
+}
+
+// The codes of an app's ai refusals (httpx.ErrorBody.Code).
+// AppAISignInRequired: the caller did not sign in (an anonymous
+// visitor), or is an agent.
+export const AppAISignInRequired = "ai_sign_in_required";
+// AppAIUnavailable: no assist model, or the organization turned AI off.
+export const AppAIUnavailable = "ai_unavailable";
+
 // ---- wire/artifacts.go ----
 
 // Artifact is a room deliverable (spec, report, code, image, site) as room
@@ -2324,6 +2346,11 @@ export const MaxAppFileBytes = 2147483648;
 // MaxAppUploadBytes bounds an upload's request body: one file and its
 // multipart envelope.
 export const MaxAppUploadBytes = 26230784;
+// MaxAppAIPrompt and MaxAppAIInput bound an app's ai call, in
+// characters: its instruction, and the data it works on (a week of a
+// team's logs).
+export const MaxAppAIPrompt = 8000;
+export const MaxAppAIInput = 60000;
 
 // The caps of a work (docs/prd/2026-10-13-works-gallery-and-make-similar.md):
 // contentpkg's work kind enforces them.

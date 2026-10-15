@@ -17,6 +17,7 @@
  *   const stop = app.subscribe(change => refresh());  // {appId, collection, id, version}
  *   const f = await app.files.upload(input.files[0]);   // {id, name, type, size}
  *   img.src = await app.files.url(f.id);                // a blob: URL of its bytes
+ *   const {text} = await app.ai({prompt: "Tidy this log.", input: log});  // signed-in callers
  *
  * Every call is relative to the capability the page was opened with (a
  * member's site ticket or a public share link), so the page handles no
@@ -270,6 +271,18 @@
       return call("DELETE", "files/" + enc(id)).then(function () {});
     },
   };
+
+  // ---- ai ----
+
+  // ai asks the organization's AI model: prompt is the app's instruction,
+  // input the data to work on (kept apart, as data); json: true answers
+  // {json: {...}} instead of {text}. For signed-in callers only.
+  function ai(req) {
+    if (!req || typeof req.prompt !== "string" || !req.prompt.trim()) return Promise.reject(appError(400, "", "ai needs a prompt"));
+    var body = { prompt: req.prompt, input: typeof req.input === "string" ? req.input : req.input === undefined ? "" : JSON.stringify(req.input), json: !!req.json };
+    if (memory) return memory.ai(body);
+    return call("POST", "ai", body);
+  }
 
   // ---- the change feed ----
 
@@ -555,7 +568,13 @@
       return held ? Promise.resolve(URL.createObjectURL(held.blob)) : refuse(404, "file not found");
     }
 
-    return { call: call, subscribe: subscribe, upload: upload, fileURL: fileURL };
+    // ai in the demo answers without a model: the input, marked.
+    function demoAI(body) {
+      if (body.json) return Promise.resolve({ json: { demo: true, input: body.input } });
+      return Promise.resolve({ text: "[demo AI reply] " + body.input });
+    }
+
+    return { call: call, subscribe: subscribe, upload: upload, fileURL: fileURL, ai: demoAI };
   }
 
   var memory = demo ? memoryBackend() : null;
@@ -564,6 +583,7 @@
     collection: function (name) { return new Collection(name); },
     me: function () { return call("GET", "me"); },
     files: files,
+    ai: ai,
     subscribe: subscribe,
   };
 

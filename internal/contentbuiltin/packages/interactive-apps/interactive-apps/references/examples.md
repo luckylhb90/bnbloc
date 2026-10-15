@@ -183,6 +183,25 @@ async function show(doc, img) {
 }
 ```
 
+## A log with "Polish with AI"
+
+The person's text is `input`, the instruction is the app's `prompt`. Show
+the suggestion for them to keep or not; an anonymous visitor or an
+organization without AI gets an error to show.
+
+```js
+async function polish(textarea, status) {
+  status.textContent = "Polishing…";
+  try {
+    const { text } = await app.ai({ prompt: "Rewrite this work log as three short, clear bullet points. Keep every fact.", input: textarea.value });
+    textarea.value = text;
+    status.textContent = "Polished: edit it or save it.";
+  } catch (e) {
+    status.textContent = e.code === "ai_sign_in_required" ? "Sign in to use AI." : "AI is not available (" + e.status + ").";
+  }
+}
+```
+
 ## A counter a person keeps for themself
 
 `$inc` adds on the locked document, so taps from two of the person's tabs

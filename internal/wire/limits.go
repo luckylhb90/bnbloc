@@ -68,6 +68,11 @@ const (
 	// MaxAppUploadBytes bounds an upload's request body: one file and its
 	// multipart envelope.
 	MaxAppUploadBytes = MaxAttachmentBytes + 16<<10
+	// MaxAppAIPrompt and MaxAppAIInput bound an app's ai call, in
+	// characters: its instruction, and the data it works on (a week of a
+	// team's logs).
+	MaxAppAIPrompt = 8000
+	MaxAppAIInput  = 60000
 )
 
 // The caps of a work (docs/prd/2026-10-13-works-gallery-and-make-similar.md):
