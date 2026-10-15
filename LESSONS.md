@@ -170,8 +170,15 @@ the architecture test that keeps `core.CleanRelPath` the one owner of
 relative paths refused it (commits 4a3433b7 and 5f080187). Before writing
 a check, search for the function that owns it; the archtest is right.
 
-Evidence: commits 4a3433b7, 5f080187; internal/archtest.
-Seen 1× (2026-10-14).
+A day later the same checks refused three more hand-written copies: the
+web boundary check (polling and a clipboard write written inline instead of
+through the shared hooks), the store's single-source rule (an inline expiry
+comparison) and the status-write check (a run-time status written without
+the one function that logs it). Each time the owner already existed.
+
+Evidence: commits 4a3433b7, 5f080187, fc80a90c; internal/archtest;
+web/scripts/check-boundaries.test.mjs.
+Seen 2× (2026-10-14, 2026-10-15).
 
 ### Make every new assertion fail once before you trust it
 
@@ -181,9 +188,14 @@ the composer's choices, so the rule it named never applied. Only breaking
 the code on purpose (a red check) showed it. The same day an overlap test
 caught a real gap the check had (a window step that skipped shared runs).
 
+Again the next day: a red check of a new capability gate printed "ok" and
+the gate was nearly trusted. The run had been served from the test cache,
+and one earlier attempt had not even compiled. Run a red check with
+`-count=1` and read that the test failed for the reason you broke.
+
 Evidence: commit 3fade890 (promptChoices tags built-in packs);
-lib/editScope.ts (commit bb55bfc9).
-Seen 1× (2026-10-14).
+lib/editScope.ts (commit bb55bfc9); commit fc80a90c (group bind gate).
+Seen 2× (2026-10-14, 2026-10-15).
 
 ### Check what you generate, not what you wrote
 
@@ -235,6 +247,62 @@ another version is shown.
 Evidence: commit 2bef7603.
 Seen 1× (2026-10-14).
 
+### Put a new control where its empty state still reaches it
+
+The owner's data line of an interactive app showed only once the app held a
+document. "Automate…" and "Group chats" were added to that line, so a new
+app, the one that most needs a reminder to fill it in, had neither. Unit
+tests and the design review passed; running the UI against real data on QA
+showed it. Ask of every new control: which states of its container hide it?
+
+Evidence: commit 912edfc1.
+Seen 1× (2026-10-15).
+
+### After a shared type changes, run every consumer's checks, not the edited package's
+
+Adding fields to a shared wire type broke a test of another package (an
+attachment type that a test still counted as refused) and a web test's type
+check; both showed only at the end, once the whole suite and
+`typecheck:tests` ran. Run all Go packages and the web test type check
+before the first commit that changes a shared type.
+
+Evidence: commits 14ea7234, 587da432, 5e2d1b2a.
+Seen 1× (2026-10-15).
+
+### Two senders of one notice share one builder
+
+A notice an app sends and the same notice an AI task sends were written as
+two functions. The first named its app and opened it; the second carried
+only the room, and a member saw the difference in the chat before any test
+did. The fix added the missing field to the second copy. The copies still
+duplicate the link, the title prefix and the dedup key: build a notice in
+one place, and give both senders the same inputs.
+
+Evidence: commits 5e2d1b2a, e2df2b3a.
+Seen 1× (2026-10-15).
+
+### Say what the error showed, not the cause you guessed
+
+An install failed with "no such host" for the component's address. The
+reply told the owner the component's service was probably down. It had not
+been checked: the address was simply wrong. Report what the error said and
+what you checked; name a cause only after checking it.
+
+Evidence: session of 2026-10-15 (component upgrade).
+Seen 1× (2026-10-15).
+
+### Take a package's deployment values from the installed record, not its source defaults
+
+A component package was materialized from its source manifest, which holds
+the placeholder address of the compose layout. The installed record held
+the deployment's real address and network permission. The install probe
+refused the wrong address, which is the only reason it did not replace the
+right one. Read the installed record first; the endpoint and permissions
+are deployment data the publisher supplies.
+
+Evidence: session of 2026-10-15 (component upgrade).
+Seen 1× (2026-10-15).
+
 ## Done right
 
 ### Replay a member's long task across a release, not just a smoke reply
@@ -265,8 +333,20 @@ in (a content pack, previewer bundles), showed problems no unit test
 could: a file panel offering the room's generic starters, and a selection
 action cut off at the panel's edge. Both were fixed before anyone saw them.
 
-Evidence: commits aedd52f2, a2bc64af.
-Seen 1× (2026-10-14).
+Evidence: commits aedd52f2, a2bc64af, 912edfc1.
+Seen 2× (2026-10-14, 2026-10-15): the owner line shown only with data was
+found the same way.
+
+### Mark an assumption unverified in the doc, then confirm it before the live test
+
+The group chat feature rested on two guesses about a messenger's API (the
+shape of a group destination, and whether a bot receives group messages).
+The docs said so ("unverified against the API"), and before the live test
+the shape was checked against the vendor SDK a sibling project already
+used. The live test then only had to prove the rest.
+
+Evidence: docs/notifications.md (Groups); services/gateway/notifier_group_binds.go.
+Seen 1× (2026-10-15).
 
 ## Promoted
 
