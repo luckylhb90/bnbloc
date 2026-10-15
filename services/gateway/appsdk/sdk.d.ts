@@ -10,7 +10,8 @@
 // or delete it. _by and me().id are the same per-app pseudonym, so
 // `put((await app.me()).id, doc, {ifAbsent: true})` is one record per
 // person. Caps: 64 KiB per document, 100k documents or 256 MiB per app, 64
-// collections per app.
+// collections per app. Files (app.files): 25 MiB each, 10000 or 2 GiB per
+// app, the same types a chat attachment may be.
 //
 // In the app gallery's "Try demo" the same calls are answered by an empty,
 // in-memory data space of the page alone (me() is {id: "demo"}); nothing
@@ -97,6 +98,34 @@ declare global {
     remove(id: string, opts?: { ifVersion?: number }): Promise<void>;
   }
 
+  /** A file a page uploaded. Keep its id in a document. */
+  interface BnblocAppFile {
+    id: string;
+    name: string;
+    /** The attachment type it was checked as (image/png, application/pdf, …). */
+    type: string;
+    size: number;
+    public: boolean;
+    /** The uploader's per-app pseudonym (equals their me().id). */
+    _by: string;
+    _createdAt: number;
+    /** The real uploader, for the app's owners only. */
+    _author?: string;
+  }
+
+  interface BnblocAppFiles {
+    /** Uploads a file (images, PDF, Office and OpenDocument files, text,
+     *  audio, video, zip; at most 25 MiB): private to its uploader and the
+     *  app's owners unless public. 415 for a type not accepted. */
+    upload(file: File | Blob, opts?: { public?: boolean }): Promise<BnblocAppFile>;
+    get(id: string): Promise<BnblocAppFile>;
+    /** A blob: URL of the file's bytes, for <img src> or a download link.
+     *  Revoke it (URL.revokeObjectURL) when no longer shown. */
+    url(id: string): Promise<string>;
+    /** Deletes the file (its uploader or an owner). */
+    remove(id: string): Promise<void>;
+  }
+
   interface BnblocApp {
     collection<T = Record<string, unknown>>(name: string): BnblocAppCollection<T>;
     /** The caller's per-app id, and for a signed-in caller (a member, or
@@ -105,6 +134,8 @@ declare global {
      *  identity provider asserted. An anonymous visitor (a link anyone may
      *  open) has no account. Only ever the caller's own. */
     me(): Promise<{ id: string; name?: string; account?: { login: string; email?: string } }>;
+    /** Files uploaded by the app's pages. */
+    files: BnblocAppFiles;
     /** Calls fn with each change until the returned function is called.
      *  Live only: changes made while disconnected are not replayed. */
     subscribe(fn: (change: BnblocAppChange) => void): () => void;

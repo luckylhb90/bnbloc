@@ -79,6 +79,7 @@ var roomOwnedTables = []roomOwnedTable{
 	// row) and the key rows go in batches.
 	{table: "app_docs", batched: true, args: tenantTenantRoomArgs,
 		where: `tenant_id = ? AND app_id IN (SELECT app_id FROM app_keys WHERE tenant_id = ? AND room_id = ?)`},
+	{table: "app_files", batched: true, args: tenantRoomArgs, where: `tenant_id = ? AND room_id = ?`},
 	{table: "app_keys", destroy: appKeyDestroyed, batched: true, args: tenantRoomArgs, where: `tenant_id = ? AND room_id = ?`},
 }
 

@@ -3,6 +3,7 @@ package roomtools
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -44,6 +45,15 @@ type Env struct {
 type Result struct {
 	Value any
 	Err   string
+	// Image, when set, is shown to the agent as MCP image content after
+	// the value's text (an app's uploaded photo).
+	Image *Image
+}
+
+// Image is a raster image a tool hands the agent to look at.
+type Image struct {
+	MIME string
+	Data []byte
 }
 
 func toolError(format string, args ...any) Result {
@@ -64,7 +74,11 @@ func (r Result) wire() map[string]any {
 	if err := enc.Encode(r.Value); err != nil {
 		return map[string]any{"content": []any{map[string]any{"type": "text", "text": "result encoding failed"}}, "isError": true}
 	}
-	out := map[string]any{"content": []any{map[string]any{"type": "text", "text": strings.TrimRight(text.String(), "\n")}}, "isError": false}
+	content := []any{map[string]any{"type": "text", "text": strings.TrimRight(text.String(), "\n")}}
+	if r.Image != nil {
+		content = append(content, map[string]any{"type": "image", "mimeType": r.Image.MIME, "data": base64.StdEncoding.EncodeToString(r.Image.Data)})
+	}
+	out := map[string]any{"content": content, "isError": false}
 	if _, isObject := r.Value.(map[string]any); isObject {
 		out["structuredContent"] = r.Value
 	}

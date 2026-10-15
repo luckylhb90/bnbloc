@@ -79,6 +79,14 @@ func TestContractRetentionStoreReferencedBlobKeys(t *testing.T) {
 			"content_component_versions.bundle_blob_key": func(key string) error {
 				return b.ContentComponents.CreateContentComponent(context.Background(), cc, contentVersion(cc.ID, "1.0.0", key, 1))
 			},
+			"app_files.blob_key": func(key string) error {
+				appRoom := newContractRoom(t, ctx, b, "maya")
+				k, err := b.AppDocs.EnsureAppKey(ctx, AppKey{AppID: uniq("app-"), RoomID: appRoom, WrappedKey: "wk", CreatedAtMs: 1})
+				if err != nil {
+					return err
+				}
+				return b.AppDocs.InsertAppFile(ctx, AppFile{AppID: k.AppID, FileID: uniq("f-"), RoomID: appRoom, ByKey: "p", NameSealed: []byte("n"), AuthorSealed: []byte("a"), ContentType: "image/png", Size: 1, BlobKey: key, CreatedAtMs: 1}, "wk")
+			},
 			"content_drafts.bundle_blob_key": func(key string) error {
 				return b.ContentComponents.PutContentDraft(context.Background(), ContentDraft{ID: uniq("cd_blob-"), TenantID: "t", RoomID: room, JobID: "j", Kind: "k", Name: "n", Version: "1.0.0",
 					ManifestJSON: []byte(`{}`), BundleBlobKey: key, SHA256: strings.TrimPrefix(key, "sha256/"), CreatedAtMs: 1, ExpiresAtMs: 1 << 50})

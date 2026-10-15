@@ -937,6 +937,27 @@ CREATE TABLE IF NOT EXISTS app_docs (
   KEY idx_app_docs_by (app_id, collection, by_key, doc_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+-- Files an interactive app's pages uploaded (app.files): the bytes in the
+-- blob store (blob_key, like an attachment's), the name and the uploader's
+-- identity sealed under the app's data key, the rest routing metadata.
+-- Deleted with the app's data (a wipe) and with the room, like app_docs.
+CREATE TABLE IF NOT EXISTS app_files (
+  app_id          VARCHAR(64) NOT NULL,
+  file_id         VARCHAR(64) NOT NULL,
+  tenant_id       VARCHAR(64) NOT NULL,
+  room_id         VARCHAR(64) NOT NULL,
+  by_key          VARCHAR(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
+  public          TINYINT(1) NOT NULL DEFAULT 0,
+  name_sealed     VARBINARY(1024) NOT NULL,
+  author_sealed   VARBINARY(512) NOT NULL,
+  content_type    VARCHAR(128) NOT NULL,
+  size_bytes      BIGINT NOT NULL,
+  blob_key        VARCHAR(128) NOT NULL,
+  created_at_ms   BIGINT NOT NULL,
+  PRIMARY KEY (app_id, file_id),
+  KEY idx_app_files_blob (blob_key)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 -- Each app's data key, wrapped by the deployment key (internal/sealbox),
 -- created on the app's first write. An empty wrapped_key is a key being
 -- destroyed: the app takes no writes until its documents are gone.

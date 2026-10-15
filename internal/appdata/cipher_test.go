@@ -169,6 +169,52 @@ func TestCipherRoundTripAndPseudonyms(t *testing.T) {
 	})
 }
 
+// A file's name and uploader open under its own app's key, at its own id
+// only.
+func TestCipherFileNames(t *testing.T) {
+	c := NewCipher(newBox(t))
+	k1, k2 := mustKey(t, c, "app-1"), mustKey(t, c, "app-2")
+	f := store.AppFile{AppID: "app-1", FileID: "f1"}
+	if err := k1.SealFile(&f, "receipt.png", "member:maya"); err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(f.NameSealed, []byte("receipt")) || bytes.Contains(f.AuthorSealed, []byte("maya")) {
+		t.Fatal("a sealed file holds plaintext")
+	}
+	if n, err := k1.FileName(f); err != nil || n != "receipt.png" {
+		t.Fatalf("FileName = %q, %v", n, err)
+	}
+	if who, err := k1.FileAuthor(f); err != nil || who != "member:maya" {
+		t.Fatalf("FileAuthor = %q, %v", who, err)
+	}
+	moved := f
+	moved.FileID = "f2"
+	if _, err := k1.FileName(moved); !errors.Is(err, ErrOpen) {
+		t.Fatalf("name moved to another file: %v, want ErrOpen", err)
+	}
+	other := f
+	other.AppID = "app-2"
+	if _, err := k2.FileName(other); !errors.Is(err, ErrOpen) {
+		t.Fatalf("name moved to another app: %v, want ErrOpen", err)
+	}
+	if err := k2.SealFile(&store.AppFile{AppID: "app-1", FileID: "x"}, "n", "p"); err == nil {
+		t.Fatal("sealed a file of another app")
+	}
+}
+
+func mustKey(t *testing.T, c *Cipher, appID string) *DataKey {
+	t.Helper()
+	wrapped, err := c.NewKey("t", "room", appID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	k, err := c.Key(store.AppKey{AppID: appID, TenantID: "t", RoomID: "room", WrappedKey: wrapped})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return k
+}
+
 // The database never holds a readable body or author: the raw columns are
 // ciphertext.
 func TestCipherRawColumnsNeverPlaintext(t *testing.T) {
@@ -337,12 +383,12 @@ func TestCipherRotateRewrapsKeysOnly(t *testing.T) {
 }
 
 // TestSealedColumnsWrittenOnlyByCipher: app_docs.body_sealed (and
-// author_sealed) hold only what Cipher sealed. Outside this package's
+// author_sealed, and app_files.name_sealed) hold only what Cipher sealed. Outside this package's
 // cipher.go nothing assigns AppDoc.BodySealed / AuthorSealed, and outside
 // the store (which passes rows through) no Go source names the columns.
 func TestSealedColumnsWrittenOnlyByCipher(t *testing.T) {
-	assign := regexp.MustCompile(`\.(BodySealed|AuthorSealed)\s*=[^=]|\b(BodySealed|AuthorSealed)\s*:\s*[^=]`)
-	column := regexp.MustCompile(`\b(body_sealed|author_sealed)\b`)
+	assign := regexp.MustCompile(`\.(BodySealed|AuthorSealed|NameSealed)\s*=[^=]|\b(BodySealed|AuthorSealed|NameSealed)\s*:\s*[^=]`)
+	column := regexp.MustCompile(`\b(body_sealed|author_sealed|name_sealed)\b`)
 	var problems []string
 	archtest.Scan(t, archtest.Opts{Lang: archtest.Go, Roots: []string{"services", "internal", "cmd", "core"}}, func(rel string, src []byte) {
 		if rel == "internal/appdata/cipher.go" || strings.HasPrefix(rel, "internal/store/") {

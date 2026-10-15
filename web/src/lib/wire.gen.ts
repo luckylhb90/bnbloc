@@ -284,6 +284,25 @@ export interface AppDataStats {
   documents: number;
   bytes: number;
   collections: Record<string, number>;
+  // Files and FileBytes are the files the app's pages uploaded.
+  files: number;
+  fileBytes: number;
+}
+
+// AppFile is a file an app's page uploaded (app.files.upload), as the app
+// reads it: its id (what the app keeps in its own documents), name, type
+// (the attachment type it was checked as) and size, and the stamps a
+// document carries: _by (the uploader's per-app id), _createdAt, and
+// _author for the app's owners only.
+export interface AppFile {
+  id: string;
+  name: string;
+  type: string;
+  size: number;
+  public: boolean;
+  _by: string;
+  _createdAt: number;
+  _author?: string;
 }
 
 // AppDataWiped answers an owner's delete of all of an app's data.
@@ -2296,6 +2315,15 @@ export const MaxAppFindLimit = 500;
 // MaxAppRequestBytes bounds one app data request body: a document plus
 // its envelope (AppDocWrite, AppDocPatch).
 export const MaxAppRequestBytes = 69632;
+// MaxAppFiles and MaxAppFileBytes bound the files one app's pages
+// uploaded (app.files), apart from its documents: a form collecting
+// photos must not crowd out its own answers. One file is at most
+// MaxAttachmentBytes, a chat attachment's cap.
+export const MaxAppFiles = 10000;
+export const MaxAppFileBytes = 2147483648;
+// MaxAppUploadBytes bounds an upload's request body: one file and its
+// multipart envelope.
+export const MaxAppUploadBytes = 26230784;
 
 // The caps of a work (docs/prd/2026-10-13-works-gallery-and-make-similar.md):
 // contentpkg's work kind enforces them.

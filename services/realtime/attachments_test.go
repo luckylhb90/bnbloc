@@ -16,6 +16,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/luckylhb90/bnbloc/internal/attachment"
 	"github.com/luckylhb90/bnbloc/internal/membership"
 	"github.com/luckylhb90/bnbloc/internal/realtime"
 	"github.com/luckylhb90/bnbloc/internal/store"
@@ -143,7 +144,7 @@ func TestMarkupFilesAttachAndDownloadOpaque(t *testing.T) {
 		if cd := got.Header.Get("Content-Disposition"); !strings.HasPrefix(cd, "attachment") {
 			t.Errorf("%s: Content-Disposition = %q, want attachment", c.name, cd)
 		}
-		if got.Header.Get("Content-Security-Policy") != attachmentCSP || got.Header.Get("X-Content-Type-Options") != "nosniff" {
+		if got.Header.Get("Content-Security-Policy") != attachment.CSP || got.Header.Get("X-Content-Type-Options") != "nosniff" {
 			t.Errorf("%s: headers = %v, want the sandbox CSP and nosniff", c.name, got.Header)
 		}
 	}
@@ -219,7 +220,7 @@ func TestMarkupTextIsServedAsADownload(t *testing.T) {
 	if cd := got.Header.Get("Content-Disposition"); !strings.HasPrefix(cd, "attachment") {
 		t.Errorf("Content-Disposition = %q, want attachment", cd)
 	}
-	if got.Header.Get("X-Content-Type-Options") != "nosniff" || got.Header.Get("Content-Security-Policy") != attachmentCSP {
+	if got.Header.Get("X-Content-Type-Options") != "nosniff" || got.Header.Get("Content-Security-Policy") != attachment.CSP {
 		t.Errorf("missing nosniff/CSP: %v", got.Header)
 	}
 }
@@ -255,7 +256,7 @@ func TestDownloadImageInlineSandboxed(t *testing.T) {
 	if cd := got.Header.Get("Content-Disposition"); !strings.HasPrefix(cd, "inline") {
 		t.Errorf("Content-Disposition = %q, want inline", cd)
 	}
-	if got.Header.Get("X-Content-Type-Options") != "nosniff" || got.Header.Get("Content-Security-Policy") != attachmentCSP {
+	if got.Header.Get("X-Content-Type-Options") != "nosniff" || got.Header.Get("Content-Security-Policy") != attachment.CSP {
 		t.Errorf("missing nosniff/CSP: %v", got.Header)
 	}
 }
@@ -279,7 +280,7 @@ func TestDownloadNonImageIsOpaqueAttachment(t *testing.T) {
 	if !strings.HasPrefix(cd, "attachment") {
 		t.Errorf("Content-Disposition = %q, want attachment", cd)
 	}
-	if got.Header.Get("Content-Security-Policy") != attachmentCSP {
+	if got.Header.Get("Content-Security-Policy") != attachment.CSP {
 		t.Error("missing sandbox CSP")
 	}
 }

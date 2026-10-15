@@ -11,8 +11,10 @@ import (
 	"go/token"
 	"io"
 	"log/slog"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"net/textproto"
 	"regexp"
 	"strconv"
 	"strings"
@@ -107,6 +109,7 @@ func newAppGW(t *testing.T) *appGW {
 	e.room.Artifacts, e.room.Profiles, e.room.Tenants = b.Artifacts, b.Profiles, b.Tenant
 	e.room.AppDocs, e.room.AppCipher = b.AppDocs, appdata.NewCipher(box)
 	e.room.Publisher = realtime.NewHTTPPublisher(rtSrv.URL, "room")
+	e.room.Blobs = realtime.NewHandoffClient(rtSrv.URL, "room")
 	roomSrv := httptest.NewServer(e.countAppCalls(svcauth.Middleware(appGWKey, e.room.Handler())))
 	t.Cleanup(roomSrv.Close)
 	e.roomURL = roomSrv.URL
@@ -414,6 +417,59 @@ func TestAppDataEndToEnd(t *testing.T) {
 	}
 	if r := e.call(http.MethodGet, jack+"~app/c/votes", nil); r.status != http.StatusOK || len(r.docs()) != 0 {
 		t.Fatalf("after the wipe = %d %s", r.status, r.body)
+	}
+}
+
+// A page's file goes through the gateway to the room service and the blob
+// store, beyond a document's body bound: a visitor uploads through a public
+// link, reads it back, and the owners read it with its real uploader; the
+// frame's calls are answered cross-origin.
+func TestAppFilesEndToEnd(t *testing.T) {
+	e := newAppGW(t)
+	tok, _ := e.share(e.appA)
+	vis := visitorHeader(e.visitor(tok, ""))
+	pub := shareBase(tok)
+	png := append([]byte("\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00"), make([]byte, 200<<10)...)
+	var body bytes.Buffer
+	mw := multipart.NewWriter(&body)
+	h := textproto.MIMEHeader{}
+	h.Set("Content-Disposition", `form-data; name="file"; filename="photo.png"`)
+	h.Set("Content-Type", "image/png")
+	part, _ := mw.CreatePart(h)
+	_, _ = part.Write(png)
+	_ = mw.Close()
+	r := e.call(http.MethodPost, pub+"~app/files", body.String(), vis, "Content-Type: "+mw.FormDataContentType(), "Origin: null")
+	if r.status != http.StatusCreated {
+		t.Fatalf("upload = %d %s", r.status, r.body)
+	}
+	if r.header.Get("Access-Control-Allow-Origin") != "*" {
+		t.Fatalf("an upload from the frame is not answered cross-origin: %v", r.header)
+	}
+	var f wire.AppFile
+	_ = json.Unmarshal(r.body, &f)
+	if f.Size != int64(len(png)) || f.Name != "photo.png" {
+		t.Fatalf("file = %+v", f)
+	}
+	if r := e.call(http.MethodGet, pub+"~app/files/"+f.ID+"/content", nil, vis); r.status != http.StatusOK || !bytes.Equal(r.body, png) ||
+		r.header.Get("Content-Type") != "image/png" || r.header.Get("Cache-Control") != "no-store" {
+		t.Fatalf("content = %d %v", r.status, r.header)
+	}
+	jack := e.ticketBase("jack", e.appA)
+	var owned wire.AppFile
+	if r := e.call(http.MethodGet, jack+"~app/files/"+f.ID, nil); r.status != http.StatusOK || json.Unmarshal(r.body, &owned) != nil || !strings.HasPrefix(owned.Author, "visitor:") {
+		t.Fatalf("an owner reads %d %s", r.status, r.body)
+	}
+	if r := e.call(http.MethodGet, e.ticketBase("jack", e.appB)+"~app/files/"+f.ID, nil); r.status != http.StatusNotFound {
+		t.Fatalf("another app reads the file: %d", r.status)
+	}
+	// Over the upload bound: a 413 the page can show, not a proxy failure.
+	huge := strings.Repeat("x", int(wire.MaxAppUploadBytes)+1)
+	if r := e.call(http.MethodPost, jack+"~app/files", huge, "Content-Type: multipart/form-data; boundary=b"); r.status != http.StatusRequestEntityTooLarge {
+		t.Fatalf("an upload over the bound = %d %s", r.status, r.body)
+	}
+	// A document keeps its own, smaller bound.
+	if r := e.call(http.MethodPost, jack+"~app/c/big", strings.Repeat("x", int(wire.MaxAppRequestBytes)+1)); r.status != http.StatusRequestEntityTooLarge {
+		t.Fatalf("a document over its bound = %d %s", r.status, r.body)
 	}
 }
 
@@ -753,6 +809,7 @@ func TestAppSDKServed(t *testing.T) {
 		"VISITOR_INVALID":   strconv.Quote(wire.AppVisitorInvalid),
 		"CHANGE_EVENT":      strconv.Quote(wire.EventAppChanged),
 		"MAX_DOC_BYTES":     strconv.Itoa(wire.MaxAppDocBytes),
+		"MAX_FILE_BYTES":    strconv.Itoa(wire.MaxAttachmentBytes),
 		// The demo mode's in-memory data space keeps the API's bounds.
 		"MAX_FIND_LIMIT":          strconv.Itoa(wire.MaxAppFindLimit),
 		"MAX_COLLECTION_NAME_LEN": strconv.Itoa(wire.MaxAppCollectionNameLen),

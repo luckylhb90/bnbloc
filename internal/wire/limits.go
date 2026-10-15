@@ -59,6 +59,15 @@ const (
 	// MaxAppRequestBytes bounds one app data request body: a document plus
 	// its envelope (AppDocWrite, AppDocPatch).
 	MaxAppRequestBytes = MaxAppDocBytes + 4<<10
+	// MaxAppFiles and MaxAppFileBytes bound the files one app's pages
+	// uploaded (app.files), apart from its documents: a form collecting
+	// photos must not crowd out its own answers. One file is at most
+	// MaxAttachmentBytes, a chat attachment's cap.
+	MaxAppFiles     = 10_000
+	MaxAppFileBytes = 2 << 30
+	// MaxAppUploadBytes bounds an upload's request body: one file and its
+	// multipart envelope.
+	MaxAppUploadBytes = MaxAttachmentBytes + 16<<10
 )
 
 // The caps of a work (docs/prd/2026-10-13-works-gallery-and-make-similar.md):

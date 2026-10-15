@@ -1,18 +1,15 @@
 package realtimehttp
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"net/http"
-	"path/filepath"
-	"slices"
 	"strings"
 	"time"
 
+	"github.com/luckylhb90/bnbloc/internal/attachment"
 	"github.com/luckylhb90/bnbloc/internal/httpx"
 	"github.com/luckylhb90/bnbloc/internal/ids"
 	"github.com/luckylhb90/bnbloc/internal/membership"
@@ -21,80 +18,9 @@ import (
 	"github.com/luckylhb90/bnbloc/internal/wire"
 )
 
-const maxAttachmentField = 512
-
-// attachmentType resolves an upload's type from wire.AttachmentTypes (the
-// one list, which the composer's picker offers too): by the file's
-// extension, else — a name without one — by its declared Content-Type. The
-// declared type never overrides the name, and neither is trusted without
-// attachmentContentMatches.
-func attachmentType(filename, declared string) (wire.AttachmentType, bool) {
-	ext := strings.ToLower(filepath.Ext(filename))
-	for _, t := range wire.AttachmentTypes {
-		if ext != "" && slices.Contains(t.Extensions, ext) {
-			return t, true
-		}
-		if ext == "" && t.MIME == mediaType(declared) {
-			return t, true
-		}
-	}
-	return wire.AttachmentType{}, false
-}
-
-// oleMagic opens an OLE compound file (legacy Office documents).
-var oleMagic = []byte{0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1}
-
-// attachmentContentMatches reports whether an upload's first bytes pass its
-// type's content check (wire.AttachmentContent*). Text must be text, not
-// binary: markup is text too (a README opening with <!-- toc --> or
-// <p align="center">), and a text attachment is only ever served as an
-// opaque, nosniff, sandboxed download, so its markup never renders.
-func attachmentContentMatches(content string, head []byte) bool {
-	sniffed := mediaType(http.DetectContentType(head))
-	switch content {
-	case wire.AttachmentContentPNG:
-		return sniffed == "image/png"
-	case wire.AttachmentContentJPEG:
-		return sniffed == "image/jpeg"
-	case wire.AttachmentContentGIF:
-		return sniffed == "image/gif"
-	case wire.AttachmentContentWebP:
-		return sniffed == "image/webp"
-	case wire.AttachmentContentPDF:
-		return sniffed == "application/pdf"
-	case wire.AttachmentContentZip:
-		return bytes.HasPrefix(head, []byte("PK\x03\x04")) || bytes.HasPrefix(head, []byte("PK\x05\x06"))
-	case wire.AttachmentContentOLE:
-		return bytes.HasPrefix(head, oleMagic)
-	case wire.AttachmentContentText:
-		return strings.HasPrefix(sniffed, "text/")
-	case wire.AttachmentContentISOMedia:
-		return len(head) >= 12 && string(head[4:8]) == "ftyp"
-	case wire.AttachmentContentWebM:
-		return bytes.HasPrefix(head, []byte{0x1A, 0x45, 0xDF, 0xA3})
-	case wire.AttachmentContentMP3:
-		return bytes.HasPrefix(head, []byte("ID3")) || (len(head) >= 2 && head[0] == 0xFF && head[1]&0xE0 == 0xE0)
-	case wire.AttachmentContentWAV:
-		return len(head) >= 12 && string(head[:4]) == "RIFF" && string(head[8:12]) == "WAVE"
-	case wire.AttachmentContentOgg:
-		return bytes.HasPrefix(head, []byte("OggS"))
-	}
-	return false
-}
-
-// inlineAttachmentTypes are the only types served inline (rendered by the
-// browser): raster images, whose bytes were sniff-verified at upload. Every
-// other attachment is served as an opaque download.
-var inlineAttachmentTypes = map[string]bool{
-	"image/png":  true,
-	"image/jpeg": true,
-	"image/gif":  true,
-	"image/webp": true,
-}
-
-// attachmentCSP sandboxes any attachment response that a browser does render,
-// so even a mis-typed file cannot run script with the app origin's privileges.
-const attachmentCSP = "default-src 'none'; sandbox"
+// maxAttachmentField is the multipart overhead an upload may add to its
+// file (the part's headers, the boundary).
+const maxAttachmentField = attachment.MaxNameLen
 
 // AttachmentStore is the metadata port the realtime service needs (the store
 // package's concrete impl satisfies it).
@@ -107,15 +33,6 @@ type AttachmentStore interface {
 type BlobStore interface {
 	Put(ctx context.Context, r io.Reader) (key string, size int64, sha256hex string, err error)
 	Get(ctx context.Context, key string) (io.ReadCloser, int64, error)
-}
-
-// mediaType lowercases a content type and strips its parameters.
-func mediaType(ct string) string {
-	ct = strings.TrimSpace(strings.ToLower(ct))
-	if i := strings.IndexByte(ct, ';'); i >= 0 {
-		ct = strings.TrimSpace(ct[:i])
-	}
-	return ct
 }
 
 func (s *Service) attachmentsReady() bool {
@@ -140,25 +57,16 @@ func (s *Service) handleUploadAttachment(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	defer file.Close()
-	filename := sanitizeFilename(header.Filename)
-	kind, ok := attachmentType(filename, header.Header.Get("Content-Type"))
-	if !ok {
-		httpx.Error(w, fmt.Sprintf("%s can't be attached: images, PDF, Office and OpenDocument files, text, audio, video and zip can", filename), http.StatusUnsupportedMediaType)
+	checked, err := attachment.Check(header.Filename, header.Header.Get("Content-Type"), file)
+	if msg, refused := attachment.Refusal(err); refused {
+		httpx.Error(w, msg, http.StatusUnsupportedMediaType)
 		return
 	}
-	contentType := kind.MIME
-	head := make([]byte, 512)
-	n, err := io.ReadFull(file, head)
-	if err != nil && !errors.Is(err, io.ErrUnexpectedEOF) && !errors.Is(err, io.EOF) {
+	if err != nil {
 		httpx.Error(w, "attachment read failed", http.StatusBadRequest)
 		return
 	}
-	head = head[:n]
-	if !attachmentContentMatches(kind.Content, head) {
-		httpx.Error(w, fmt.Sprintf("%s can't be attached: its content is not a %s file", filename, kind.Extensions[0]), http.StatusUnsupportedMediaType)
-		return
-	}
-	body := io.MultiReader(bytes.NewReader(head), file)
+	filename, contentType, body := checked.Name, checked.Type.MIME, checked.Body
 	key, size, sha, err := s.Blobs.Put(r.Context(), io.LimitReader(body, wire.MaxAttachmentBytes+1))
 	if err != nil {
 		obs.ServerError(w, "attachment store failed", err)
@@ -215,7 +123,7 @@ func (s *Service) handleDownloadAttachment(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	defer blob.Close()
-	writeAttachmentHeaders(w.Header(), att)
+	attachment.ServeHeaders(w.Header(), att.Filename, att.ContentType)
 	setContentLength(w.Header(), size)
 	_, _ = io.Copy(w, blob)
 }
@@ -246,23 +154,6 @@ func (s *Service) handleAttachmentMeta(w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, http.StatusOK, attachmentMeta(att))
 }
 
-// writeAttachmentHeaders sets the download response headers. Only verified
-// raster images render inline with their type; everything else (including
-// rows stored before upload sniffing existed, e.g. SVG) is an opaque
-// application/octet-stream attachment. nosniff and a sandboxing CSP apply to
-// every response, and the filename is RFC 2231-encoded so it cannot break out
-// of the header value.
-func writeAttachmentHeaders(h http.Header, att store.Attachment) {
-	ct, disposition := "application/octet-stream", "attachment"
-	if t := mediaType(att.ContentType); inlineAttachmentTypes[t] {
-		ct, disposition = t, "inline"
-	}
-	h.Set("Content-Type", ct)
-	h.Set("Content-Disposition", httpx.ContentDisposition(disposition, att.Filename))
-	h.Set("X-Content-Type-Options", "nosniff")
-	h.Set("Content-Security-Policy", attachmentCSP)
-}
-
 // validateAttachmentIDs confirms every id belongs to the room and returns their
 // metadata for embedding in the chat_message payload.
 func (s *Service) validateAttachmentIDs(ctx context.Context, roomID string, ids []string) ([]wire.ChatAttachment, error) {
@@ -288,18 +179,4 @@ func (s *Service) validateAttachmentIDs(ctx context.Context, roomID string, ids 
 
 func attachmentMeta(a store.Attachment) wire.ChatAttachment {
 	return wire.ChatAttachment{ID: a.ID, Filename: a.Filename, ContentType: a.ContentType, Size: a.Size}
-}
-
-func sanitizeFilename(name string) string {
-	name = strings.TrimSpace(name)
-	if i := strings.LastIndexAny(name, "/\\"); i >= 0 {
-		name = name[i+1:]
-	}
-	if len(name) > maxAttachmentField {
-		name = name[len(name)-maxAttachmentField:]
-	}
-	if name == "" {
-		return "file"
-	}
-	return name
 }

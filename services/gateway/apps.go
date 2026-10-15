@@ -35,8 +35,8 @@ import (
 //	/v1/public/shares/{token}/site/~app/…      a share link: a share ticket's member (Kind member), or a visitor token (Kind visitor)
 //	/v1/rooms/{roomId}/apps/{artifactId}/…     a session: the member, or with ?job= the job's agent (Kind agent)
 //
-// with the same API under each (appAPI): c/{collection}[/{id}], me and
-// events (the change feed); the room entry adds the owners' stats, export and data;
+// with the same API under each (appAPI): c/{collection}[/{id}], me,
+// files[/{id}[/content]] and events (the change feed); the room entry adds the owners' stats, export and data;
 // sdk.js and sdk.d.ts are served under the two frame entries.
 //
 // appCapability is the ONE resolution of an app request's scope (tenant,
@@ -108,6 +108,10 @@ var appAPI = []struct {
 	{http.MethodPatch, "/c/{collection}/{id}", false, forwardAppDoc},
 	{http.MethodDelete, "/c/{collection}/{id}", false, forwardAppDoc},
 	{http.MethodGet, "/me", false, forwardAppPath("/me")},
+	{http.MethodPost, "/files", false, forwardAppUpload},
+	{http.MethodGet, "/files/{id}", false, forwardAppFile("")},
+	{http.MethodGet, "/files/{id}/content", false, forwardAppFile("/content")},
+	{http.MethodDelete, "/files/{id}", false, forwardAppFile("")},
 	{http.MethodGet, "/events", false, (*Service).forwardAppEvents},
 	{http.MethodGet, "/stats", true, forwardAppPath("/stats")},
 	{http.MethodGet, "/export", true, forwardAppPath("/export")},
@@ -308,6 +312,19 @@ func forwardAppDoc(s *Service, w http.ResponseWriter, r *http.Request, c appCapa
 	s.forwardApp(w, r, c, "/c/"+url.PathEscape(r.PathValue("collection"))+"/"+url.PathEscape(r.PathValue("id")))
 }
 
+// forwardAppFile forwards files/{id}{suffix}.
+func forwardAppFile(suffix string) func(*Service, http.ResponseWriter, *http.Request, appCapability) {
+	return func(s *Service, w http.ResponseWriter, r *http.Request, c appCapability) {
+		s.forwardApp(w, r, c, "/files/"+url.PathEscape(r.PathValue("id"))+suffix)
+	}
+}
+
+// forwardAppUpload forwards a file upload, its body bounded by
+// wire.MaxAppUploadBytes instead of a document's bound.
+func forwardAppUpload(s *Service, w http.ResponseWriter, r *http.Request, c appCapability) {
+	s.forwardAppBody(w, r, c, "/files", wire.MaxAppUploadBytes)
+}
+
 // forwardAppPath forwards a fixed path.
 func forwardAppPath(path string) func(*Service, http.ResponseWriter, *http.Request, appCapability) {
 	return func(s *Service, w http.ResponseWriter, r *http.Request, c appCapability) { s.forwardApp(w, r, c, path) }
@@ -324,12 +341,24 @@ var appForwardHeaders = []string{"Content-Type", "If-Match", "If-None-Match", "A
 // gateway in the room's tenant (Assert) with the resolved scope
 // (AssertApp). The room service's status and body are the answer.
 func (s *Service) forwardApp(w http.ResponseWriter, r *http.Request, c appCapability, path string) {
+	s.forwardAppBody(w, r, c, path, wire.MaxAppRequestBytes)
+}
+
+// forwardAppBody is forwardApp with the request body bounded by limit.
+func (s *Service) forwardAppBody(w http.ResponseWriter, r *http.Request, c appCapability, path string, limit int64) {
 	target, ok := s.appUpstream(w, s.Backends.Room, "/internal/v1/app"+path)
 	if !ok {
 		return
 	}
 	target.RawQuery = r.URL.RawQuery
-	r.Body = http.MaxBytesReader(w, r.Body, wire.MaxAppRequestBytes)
+	// A declared length over the bound is refused before anything is
+	// sent (a browser's upload declares it); a body that runs past it
+	// unannounced is cut.
+	if r.ContentLength > limit {
+		httpx.Error(w, fmt.Sprintf("the request is over %d bytes", limit), http.StatusRequestEntityTooLarge)
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, limit)
 	proxy := &httputil.ReverseProxy{
 		Rewrite: func(pr *httputil.ProxyRequest) {
 			s.appRequest(pr, c, target)
@@ -338,7 +367,14 @@ func (s *Service) forwardApp(w http.ResponseWriter, r *http.Request, c appCapabi
 			resp.Header.Set("Cache-Control", "no-store")
 			return nil
 		},
-		ErrorHandler: obs.ProxyError("app data proxy failed"),
+		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
+			var tooLarge *http.MaxBytesError
+			if errors.As(err, &tooLarge) {
+				httpx.Error(w, fmt.Sprintf("the request is over %d bytes", limit), http.StatusRequestEntityTooLarge)
+				return
+			}
+			obs.ProxyError("app data proxy failed")(w, r, err)
+		},
 	}
 	proxy.ServeHTTP(w, r)
 }

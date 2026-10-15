@@ -73,6 +73,35 @@ func (d AppDoc) Ref() AppDocRef {
 	return AppDocRef{AppScope: AppScope{AppID: d.AppID, RoomID: d.RoomID}, Collection: d.Collection, DocID: d.DocID}
 }
 
+// AppFile is one file an app's page uploaded
+// (docs/prd/2026-10-15-app-identity-schedules-notify-ai.md §6a): its bytes
+// in the blob store (BlobKey, like a chat attachment's), its name sealed
+// under the app's key (appdata.Cipher), the rest routing metadata. It
+// belongs to the app: readable by its uploader (ByKey) and the app's
+// owners unless Public, deleted with the app's data.
+type AppFile struct {
+	AppID    string
+	FileID   string
+	TenantID string
+	RoomID   string
+	ByKey    string
+	Public   bool
+	// NameSealed is the file name; AuthorSealed the uploader's real
+	// identity (the participant), as a document's.
+	NameSealed   []byte
+	AuthorSealed []byte
+	ContentType  string
+	Size         int64
+	BlobKey      string
+	CreatedAtMs  int64
+}
+
+// AppFileRef names one file.
+type AppFileRef struct {
+	AppScope
+	FileID string
+}
+
 // AppDocQuery is one page of a collection, narrowed by metadata only (the
 // body is sealed: a body filter runs on the decrypted page, in the service).
 // Pages are in doc_id order (Desc: reverse), after the After cursor.
@@ -100,6 +129,10 @@ type AppCounts struct {
 	Docs        int64
 	Bytes       int64
 	Collections map[string]int64
+	// Files and FileBytes are the app's uploaded files and their size;
+	// FileBytes counts against the app's byte cap with Bytes.
+	Files     int64
+	FileBytes int64
 }
 
 // defaultAppFindLimit is a find page without a limit.
@@ -162,11 +195,22 @@ type AppDocs interface {
 	DeleteAppDoc(ctx context.Context, ref AppDocRef, check func(cur AppDoc) error) error
 	// WipeApp crypto-shreds the app: its key is destroyed first (every
 	// sealed document is unreadable from then on, a copy in a backup
-	// included), then its documents are deleted in batches and the key row
-	// last. It returns the documents deleted. A later write mints a new key.
+	// included), then its documents and files are deleted in batches and
+	// the key row last (blob collection then clears the files' bytes). It
+	// returns the documents deleted. A later write mints a new key.
 	WipeApp(ctx context.Context, scope AppScope) (int64, error)
-	// CountAppDocs returns the app's usage.
+	// CountAppDocs returns the app's usage, its files included.
 	CountAppDocs(ctx context.Context, scope AppScope) (AppCounts, error)
+	// InsertAppFile stores a new file's row under wrappedKey, which must
+	// still be the app's key (ErrAppKeyChanged, ErrAppWiping). A file id
+	// the app holds is ErrAppDocExists.
+	InsertAppFile(ctx context.Context, f AppFile, wrappedKey string) error
+	// GetAppFile reads one file's row.
+	GetAppFile(ctx context.Context, ref AppFileRef) (AppFile, bool, error)
+	// DeleteAppFile deletes one file's row after check accepts it (an
+	// error from check aborts and is returned); ErrAppDocNotFound when
+	// there is none. Blob collection clears its bytes.
+	DeleteAppFile(ctx context.Context, ref AppFileRef, check func(cur AppFile) error) error
 	// RewrapAppKeys re-wraps every app's key, of every tenant, with rewrap
 	// (master-key rotation: documents are not re-encrypted). It returns the
 	// keys re-wrapped; a key destroyed meanwhile is skipped.
@@ -183,17 +227,24 @@ var (
 type MemoryAppDocs struct {
 	mu    sync.Mutex
 	rooms *MemoryRoom
-	keys  map[string]AppKey            // app_id -> key
-	docs  map[string]map[string]AppDoc // app_id -> collection\x00doc_id -> doc
+	keys  map[string]AppKey             // app_id -> key
+	docs  map[string]map[string]AppDoc  // app_id -> collection\x00doc_id -> doc
+	files map[string]map[string]AppFile // app_id -> file_id -> file
 }
 
 // NewMemoryAppDocs builds the memory store over the room store whose live
 // rooms may hold app keys.
 func NewMemoryAppDocs(rooms *MemoryRoom) *MemoryAppDocs {
-	return &MemoryAppDocs{rooms: rooms, keys: map[string]AppKey{}, docs: map[string]map[string]AppDoc{}}
+	return &MemoryAppDocs{rooms: rooms, keys: map[string]AppKey{}, docs: map[string]map[string]AppDoc{}, files: map[string]map[string]AppFile{}}
 }
 
 func appDocKey(collection, docID string) string { return collection + "\x00" + docID }
+
+func cloneAppFile(f AppFile) AppFile {
+	f.NameSealed = slices.Clone(f.NameSealed)
+	f.AuthorSealed = slices.Clone(f.AuthorSealed)
+	return f
+}
 
 func cloneAppDoc(d AppDoc) AppDoc {
 	d.AuthorSealed = slices.Clone(d.AuthorSealed)
@@ -392,6 +443,11 @@ func (s *MemoryAppDocs) WipeApp(ctx context.Context, scope AppScope) (int64, err
 			n++
 		}
 	}
+	for id, f := range s.files[scope.AppID] {
+		if f.TenantID == tid && f.RoomID == scope.RoomID {
+			delete(s.files[scope.AppID], id)
+		}
+	}
 	return n, nil
 }
 
@@ -410,7 +466,83 @@ func (s *MemoryAppDocs) CountAppDocs(ctx context.Context, scope AppScope) (AppCo
 			c.Collections[d.Collection]++
 		}
 	}
+	for _, f := range s.files[scope.AppID] {
+		if f.TenantID == tid && f.RoomID == scope.RoomID {
+			c.Files++
+			c.FileBytes += f.Size
+		}
+	}
 	return c, nil
+}
+
+func (s *MemoryAppDocs) InsertAppFile(ctx context.Context, f AppFile, wrappedKey string) error {
+	tid, err := tenant.Require(ctx)
+	if err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	k, ok, err := s.keyLocked(tid, AppScope{AppID: f.AppID, RoomID: f.RoomID})
+	if err != nil {
+		return err
+	}
+	if !ok || k.WrappedKey != wrappedKey {
+		return ErrAppKeyChanged
+	}
+	if s.files[f.AppID] == nil {
+		s.files[f.AppID] = map[string]AppFile{}
+	}
+	if _, taken := s.files[f.AppID][f.FileID]; taken {
+		return ErrAppDocExists
+	}
+	f.TenantID = tid
+	s.files[f.AppID][f.FileID] = cloneAppFile(f)
+	return nil
+}
+
+func (s *MemoryAppDocs) GetAppFile(ctx context.Context, ref AppFileRef) (AppFile, bool, error) {
+	tid, err := tenant.Require(ctx)
+	if err != nil {
+		return AppFile{}, false, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	f, ok := s.files[ref.AppID][ref.FileID]
+	if !ok || f.TenantID != tid || f.RoomID != ref.RoomID {
+		return AppFile{}, false, nil
+	}
+	return cloneAppFile(f), true, nil
+}
+
+func (s *MemoryAppDocs) DeleteAppFile(ctx context.Context, ref AppFileRef, check func(cur AppFile) error) error {
+	tid, err := tenant.Require(ctx)
+	if err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	f, ok := s.files[ref.AppID][ref.FileID]
+	if !ok || f.TenantID != tid || f.RoomID != ref.RoomID {
+		return ErrAppDocNotFound
+	}
+	if check != nil {
+		if err := check(cloneAppFile(f)); err != nil {
+			return err
+		}
+	}
+	delete(s.files[ref.AppID], ref.FileID)
+	return nil
+}
+
+// eachAppFile visits every stored file (blob references).
+func (s *MemoryAppDocs) eachAppFile(see func(AppFile)) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, files := range s.files {
+		for _, f := range files {
+			see(f)
+		}
+	}
 }
 
 func (s *MemoryAppDocs) RewrapAppKeys(_ context.Context, rewrap func(AppKey) (string, error)) (int, error) {
@@ -429,7 +561,8 @@ func (s *MemoryAppDocs) RewrapAppKeys(_ context.Context, rewrap func(AppKey) (st
 	return n, nil
 }
 
-// app_docs, app_keys: a deleted room's apps lose their keys and documents.
+// app_docs, app_files, app_keys: a deleted room's apps lose their keys,
+// documents and files.
 func (s *MemoryAppDocs) deleteRoomRows(tenantID, roomID string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -446,6 +579,16 @@ func (s *MemoryAppDocs) deleteRoomRows(tenantID, roomID string) {
 		}
 		if len(docs) == 0 {
 			delete(s.docs, id)
+		}
+	}
+	for id, files := range s.files {
+		for fid, f := range files {
+			if f.TenantID == tenantID && f.RoomID == roomID {
+				delete(files, fid)
+			}
+		}
+		if len(files) == 0 {
+			delete(s.files, id)
 		}
 	}
 }

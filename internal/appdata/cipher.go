@@ -210,3 +210,53 @@ func (k *DataKey) Author(d store.AppDoc) (string, error) {
 	raw, err := k.open(d.AuthorSealed, authorAD(d))
 	return string(raw), err
 }
+
+// fileAD is the additional data of an app file's name: its app and id
+// (file ids never contain "|": ValidDocID).
+func fileAD(f store.AppFile) []byte { return []byte(f.AppID + "|file|" + f.FileID) }
+
+func fileAuthorAD(f store.AppFile) []byte { return append(fileAD(f), "|author"...) }
+
+// checkFileApp refuses a file of another app than the key's.
+func (k *DataKey) checkFileApp(f store.AppFile) error {
+	if f.AppID != k.appID {
+		return fmt.Errorf("file of app %s under the key of app %s", f.AppID, k.appID)
+	}
+	return nil
+}
+
+// SealFile seals a file's name and its uploader's real identity (a
+// participant) into f (its AppID and FileID set).
+func (k *DataKey) SealFile(f *store.AppFile, name, participant string) error {
+	if err := k.checkFileApp(*f); err != nil {
+		return err
+	}
+	n, err := k.seal([]byte(name), fileAD(*f))
+	if err != nil {
+		return err
+	}
+	a, err := k.seal([]byte(participant), fileAuthorAD(*f))
+	if err != nil {
+		return err
+	}
+	f.NameSealed, f.AuthorSealed = n, a
+	return nil
+}
+
+// FileName opens f's name.
+func (k *DataKey) FileName(f store.AppFile) (string, error) {
+	if err := k.checkFileApp(f); err != nil {
+		return "", err
+	}
+	raw, err := k.open(f.NameSealed, fileAD(f))
+	return string(raw), err
+}
+
+// FileAuthor opens f's uploader (the participant).
+func (k *DataKey) FileAuthor(f store.AppFile) (string, error) {
+	if err := k.checkFileApp(f); err != nil {
+		return "", err
+	}
+	raw, err := k.open(f.AuthorSealed, fileAuthorAD(f))
+	return string(raw), err
+}

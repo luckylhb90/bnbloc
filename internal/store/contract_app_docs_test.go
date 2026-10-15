@@ -360,3 +360,79 @@ func TestContractAppDocsRewrapKeys(t *testing.T) {
 		}
 	})
 }
+
+// A file is stored once per id under the app's current key, read only in
+// its own scope, counted with the app's usage, and deleted with the app's
+// data and with its room.
+func TestContractAppFiles(t *testing.T) {
+	forEachBackend(t, func(t *testing.T, b *Backends) {
+		f := newAppFixture(t, b)
+		file := AppFile{AppID: f.scope.AppID, FileID: uniq("f-"), RoomID: f.scope.RoomID, ByKey: "p1", NameSealed: []byte("n"), AuthorSealed: []byte("a"),
+			ContentType: "image/png", Size: 300, BlobKey: uniqBlobKey(), CreatedAtMs: 7}
+		if err := b.AppDocs.InsertAppFile(f.ctx, file, "not-the-key"); !errors.Is(err, ErrAppKeyChanged) {
+			t.Fatalf("insert under another key = %v, want ErrAppKeyChanged", err)
+		}
+		if err := b.AppDocs.InsertAppFile(f.ctx, file, f.key); err != nil {
+			t.Fatal(err)
+		}
+		if err := b.AppDocs.InsertAppFile(f.ctx, file, f.key); !errors.Is(err, ErrAppDocExists) {
+			t.Fatalf("second insert = %v, want ErrAppDocExists", err)
+		}
+		ref := AppFileRef{AppScope: f.scope, FileID: file.FileID}
+		got, ok, err := b.AppDocs.GetAppFile(f.ctx, ref)
+		if err != nil || !ok || got.ByKey != "p1" || got.Size != 300 || string(got.NameSealed) != "n" || got.BlobKey != file.BlobKey || got.TenantID == "" {
+			t.Fatalf("GetAppFile = %+v %v %v", got, ok, err)
+		}
+		other := newContractRoom(t, f.ctx, b, "maya")
+		if _, ok, err := b.AppDocs.GetAppFile(f.ctx, AppFileRef{AppScope: AppScope{AppID: f.scope.AppID, RoomID: other}, FileID: file.FileID}); err != nil || ok {
+			t.Fatalf("file read from another room = %v, %v", ok, err)
+		}
+		if _, ok, err := b.AppDocs.GetAppFile(tenantCtx(uniq("t-other-")), ref); err != nil || ok {
+			t.Fatalf("file read from another tenant = %v, %v", ok, err)
+		}
+		gone := file
+		gone.FileID = uniq("f-")
+		if err := b.AppDocs.InsertAppFile(f.ctx, gone, f.key); err != nil {
+			t.Fatal(err)
+		}
+		goneRef := AppFileRef{AppScope: f.scope, FileID: gone.FileID}
+		refused := errors.New("not yours")
+		if err := b.AppDocs.DeleteAppFile(f.ctx, goneRef, func(cur AppFile) error {
+			if cur.ByKey != "p1" {
+				return fmt.Errorf("check got %+v", cur)
+			}
+			return refused
+		}); !errors.Is(err, refused) {
+			t.Fatalf("refused delete = %v", err)
+		}
+		if err := b.AppDocs.DeleteAppFile(f.ctx, goneRef, nil); err != nil {
+			t.Fatal(err)
+		}
+		if err := b.AppDocs.DeleteAppFile(f.ctx, goneRef, nil); !errors.Is(err, ErrAppDocNotFound) {
+			t.Fatalf("second delete = %v, want ErrAppDocNotFound", err)
+		}
+		f.insert(t, b, f.doc("c", "d", "p1", false, "xy"))
+		if c := must(b.AppDocs.CountAppDocs(f.ctx, f.scope))(t); c.Files != 1 || c.FileBytes != 300 || c.Docs != 1 {
+			t.Fatalf("counts = %+v", c)
+		}
+		if _, err := b.AppDocs.WipeApp(f.ctx, f.scope); err != nil {
+			t.Fatal(err)
+		}
+		if _, ok, _ := b.AppDocs.GetAppFile(f.ctx, ref); ok {
+			t.Fatal("a file outlived the wipe")
+		}
+
+		g := newAppFixture(t, b)
+		gf := file
+		gf.AppID, gf.RoomID, gf.FileID = g.scope.AppID, g.scope.RoomID, uniq("f-")
+		if err := b.AppDocs.InsertAppFile(g.ctx, gf, g.key); err != nil {
+			t.Fatal(err)
+		}
+		if err := b.Room.DeleteRoom(g.ctx, g.scope.RoomID); err != nil {
+			t.Fatal(err)
+		}
+		if _, ok, _ := b.AppDocs.GetAppFile(g.ctx, AppFileRef{AppScope: g.scope, FileID: gf.FileID}); ok {
+			t.Fatal("a file outlived its room")
+		}
+	})
+}

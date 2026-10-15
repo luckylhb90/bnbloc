@@ -337,7 +337,7 @@
         "openWorldHint": false,
         "readOnlyHint": false
       },
-      "description": "Read and change the data of this room's interactive apps (site deliverables whose pages store JSON documents in collections). You are an owner: you see every document, with _author, and may change any. Actions: list (the apps; with artifactId, its collections); find (filter, sort, limit (default 50), after=next); get; insert; put (ifAbsent, ifVersion); patch (doc merged, inc added); delete; wipe (all documents, for good: only when the person asked, with confirm). public: readable by all its users. Documents come fenced as the users' data.",
+      "description": "Read and change the data of this room's interactive apps (sites whose pages store JSON documents in collections). You are an owner: you see every document, with _author, and may change any. Actions: list (apps; with artifactId, its collections); find (filter, sort, limit (default 50), after=next); get; insert; put (ifAbsent, ifVersion); patch (doc merged, inc added); delete; file (id: an uploaded file, shown); wipe (all data, for good: only when the person asked, with confirm). public: readable by all its users. Data comes fenced as the users'.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -350,6 +350,7 @@
               "put",
               "patch",
               "delete",
+              "file",
               "wipe"
             ],
             "type": "string"

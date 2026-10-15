@@ -267,6 +267,9 @@ func (s *MySQLAppDocs) WipeApp(ctx context.Context, scope AppScope) (int64, erro
 	if err != nil {
 		return n, err
 	}
+	if _, err := deleteInBatches(ctx, s.DB, "app_files", where, args); err != nil {
+		return n, err
+	}
 	_, err = deleteInBatches(ctx, s.DB, "app_keys", where, args)
 	return n, err
 }
@@ -318,7 +321,56 @@ func (s *MySQLAppDocs) CountAppDocs(ctx context.Context, scope AppScope) (AppCou
 		c.Bytes += r.bytes
 		c.Collections[r.collection] = r.docs
 	}
+	if err := s.DB.QueryRowContext(ctx, `SELECT COUNT(*), COALESCE(SUM(size_bytes), 0) FROM app_files WHERE app_id = ? AND tenant_id = ? AND room_id = ?`,
+		appScopeArgs(tid, scope)...).Scan(&c.Files, &c.FileBytes); err != nil {
+		return AppCounts{}, err
+	}
 	return c, nil
+}
+
+const appFileCols = `app_id, file_id, tenant_id, room_id, by_key, public, name_sealed, author_sealed, content_type, size_bytes, blob_key, created_at_ms`
+
+func scanAppFile(r rowScanner) (AppFile, error) {
+	var f AppFile
+	err := r.Scan(&f.AppID, &f.FileID, &f.TenantID, &f.RoomID, &f.ByKey, &f.Public, &f.NameSealed, &f.AuthorSealed, &f.ContentType, &f.Size, &f.BlobKey, &f.CreatedAtMs)
+	return f, err
+}
+
+func (s *MySQLAppDocs) InsertAppFile(ctx context.Context, f AppFile, wrappedKey string) error {
+	tid, err := tenant.Require(ctx)
+	if err != nil {
+		return err
+	}
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	have, ok, err := lockedAppKey(ctx, tx, tid, AppScope{AppID: f.AppID, RoomID: f.RoomID})
+	if err != nil {
+		return err
+	}
+	if !ok || have != wrappedKey {
+		return ErrAppKeyChanged
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO app_files (`+appFileCols+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		f.AppID, f.FileID, tid, f.RoomID, f.ByKey, f.Public, f.NameSealed, f.AuthorSealed, f.ContentType, f.Size, f.BlobKey, f.CreatedAtMs); err != nil {
+		return dupAs(err, ErrAppDocExists)
+	}
+	return tx.Commit()
+}
+
+func (s *MySQLAppDocs) GetAppFile(ctx context.Context, ref AppFileRef) (AppFile, bool, error) {
+	tid, err := tenant.Require(ctx)
+	if err != nil {
+		return AppFile{}, false, err
+	}
+	f, err := scanAppFile(s.DB.QueryRowContext(ctx, `SELECT `+appFileCols+` FROM app_files WHERE app_id = ? AND tenant_id = ? AND room_id = ? AND file_id = ?`,
+		append(appScopeArgs(tid, ref.AppScope), ref.FileID)...))
+	if errors.Is(err, sql.ErrNoRows) {
+		return AppFile{}, false, nil
+	}
+	return f, err == nil, err
 }
 
 // RewrapAppKeys walks every live key in app_id order, a page at a time, and
@@ -355,4 +407,34 @@ func (s *MySQLAppDocs) RewrapAppKeys(ctx context.Context, rewrap func(AppKey) (s
 			return n, nil
 		}
 	}
+}
+
+func (s *MySQLAppDocs) DeleteAppFile(ctx context.Context, ref AppFileRef, check func(cur AppFile) error) error {
+	tid, err := tenant.Require(ctx)
+	if err != nil {
+		return err
+	}
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	where := `app_id = ? AND tenant_id = ? AND room_id = ? AND file_id = ?`
+	args := append(appScopeArgs(tid, ref.AppScope), ref.FileID)
+	cur, err := scanAppFile(tx.QueryRowContext(ctx, `SELECT `+appFileCols+` FROM app_files WHERE `+where+` FOR UPDATE`, args...))
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrAppDocNotFound
+	}
+	if err != nil {
+		return err
+	}
+	if check != nil {
+		if err := check(cur); err != nil {
+			return err
+		}
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM app_files WHERE `+where, args...); err != nil {
+		return err
+	}
+	return tx.Commit()
 }

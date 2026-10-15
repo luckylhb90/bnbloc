@@ -201,6 +201,11 @@ var blobKeySources = []blobKeySource{
 			}
 		}
 	}},
+	{"app_files", "blob_key", func(m *MemoryRetention, see func(string)) {
+		if a := m.AppDocs; a != nil {
+			a.eachAppFile(func(f AppFile) { see(f.BlobKey) })
+		}
+	}},
 	{"content_drafts", "bundle_blob_key", func(m *MemoryRetention, see func(string)) {
 		if c := m.Content; c != nil {
 			c.mu.Lock()
@@ -260,6 +265,7 @@ func NewRetention(b *Backends) RetentionStore {
 	m.Tasks, _ = b.MessageTasks.(*MemoryMessageTasks)
 	m.Activity, _ = b.Activity.(*Memory)
 	m.Attachments, _ = b.Attachments.(*MemoryAttachments)
+	m.AppDocs, _ = b.AppDocs.(*MemoryAppDocs)
 	m.Artifacts, _ = b.Artifacts.(*MemoryArtifacts)
 	m.Grants, _ = b.Grant.(*MemoryGrant)
 	m.ExtAudit, _ = b.ExtAudit.(*MemoryExtensionAudit)
@@ -280,6 +286,7 @@ type MemoryRetention struct {
 	ExtAudit    *MemoryExtensionAudit
 	Jobs        *MemoryBridgeJobs
 	Content     *MemoryContentComponents
+	AppDocs     *MemoryAppDocs
 	Settings    PlatformSettingsStore
 
 	lock sync.Mutex

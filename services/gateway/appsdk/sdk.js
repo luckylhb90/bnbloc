@@ -15,6 +15,8 @@
  *   await votes.put(me.id, {choice: "B"}, {ifAbsent: true});   // one per person
  *   const {docs, next} = await votes.find({choice: {$eq: "B"}}, {limit: 50});
  *   const stop = app.subscribe(change => refresh());  // {appId, collection, id, version}
+ *   const f = await app.files.upload(input.files[0]);   // {id, name, type, size}
+ *   img.src = await app.files.url(f.id);                // a blob: URL of its bytes
  *
  * Every call is relative to the capability the page was opened with (a
  * member's site ticket or a public share link), so the page handles no
@@ -59,6 +61,7 @@
   var MAX_FIND_LIMIT = 500;
   var MAX_COLLECTION_NAME_LEN = 64;
   var MAX_DOC_ID_LEN = 128;
+  var MAX_FILE_BYTES = 26214400;
 
   var demo = mode === "demo";
 
@@ -235,6 +238,39 @@
     return call("DELETE", this.path + "/" + enc(id), undefined, conditional(opts, false)).then(function () {});
   };
 
+  // ---- files ----
+
+  // files: a file a page uploads (a photo, a receipt), kept by the app
+  // beside its documents. Store the returned id in a document. Its bytes
+  // come back as a blob: URL (url), because an <img src> cannot carry the
+  // visitor token a public link's calls need.
+  var files = {
+    upload: function (file, opts) {
+      if (!file || typeof file.size !== "number") return Promise.reject(appError(400, "", "upload takes a File or Blob"));
+      if (file.size > MAX_FILE_BYTES) return Promise.reject(appError(413, "", "a file is at most " + MAX_FILE_BYTES + " bytes"));
+      var path = "files" + (opts && opts.public ? "?public=1" : "");
+      if (memory) return memory.upload(file, !!(opts && opts.public));
+      var form = new FormData();
+      form.append("file", file, file.name || "file");
+      return send(path, { method: "POST", body: form }).then(parse);
+    },
+    get: function (id) {
+      if (memory) return memory.call("GET", "files/" + enc(id), undefined, {});
+      return call("GET", "files/" + enc(id));
+    },
+    url: function (id) {
+      if (memory) return memory.fileURL(id);
+      return send("files/" + enc(id) + "/content", { method: "GET" }).then(function (resp) {
+        if (!resp.ok) return parse(resp);
+        return resp.blob().then(function (b) { return URL.createObjectURL(b); });
+      });
+    },
+    remove: function (id) {
+      if (memory) return memory.call("DELETE", "files/" + enc(id), undefined, {}).then(function () {});
+      return call("DELETE", "files/" + enc(id)).then(function () {});
+    },
+  };
+
   // ---- the change feed ----
 
   // readEvents reads a text/event-stream body, calling fn with each
@@ -325,6 +361,7 @@
     var DOC_ID = /^[A-Za-z0-9_.:-]+$/;
     var STAMPS = { _id: 1, _by: 1, _createdAt: 1, _updatedAt: 1, _version: 1, _author: 1 };
     var data = {};
+    var stored = {};
     var listeners = [];
     var seq = 0;
 
@@ -436,6 +473,13 @@
       // A signed-in caller, so a page that fills in its caller's login works
       // in the demo as it does for a member.
       if (method === "GET" && parts.length === 1 && parts[0] === "me") return Promise.resolve({ id: DEMO_ID, name: "Demo", account: { login: "demo@example.com", email: "demo@example.com" } });
+      if (parts[0] === "files" && parts.length === 2) {
+        var held = stored[parts[1]];
+        if (!held) return refuse(404, "file not found");
+        if (method === "GET") return Promise.resolve(copy(held.meta));
+        if (method === "DELETE") { delete stored[parts[1]]; return Promise.resolve(null); }
+        return refuse(405, "method not allowed");
+      }
       if (parts[0] !== "c" || parts.length < 2 || parts.length > 3) return refuse(404, "not an app API path");
       var name = parts[1];
       var id = parts[2];
@@ -498,7 +542,20 @@
       };
     }
 
-    return { call: call, subscribe: subscribe };
+    function upload(file, isPublic) {
+      seq += 1;
+      var id = "demofile" + ("000000000" + seq).slice(-10);
+      var meta = { id: id, name: file.name || "file", type: file.type || "application/octet-stream", size: file.size, public: isPublic, _by: DEMO_ID, _createdAt: Date.now() };
+      stored[id] = { meta: meta, blob: file };
+      return Promise.resolve(copy(meta));
+    }
+
+    function fileURL(id) {
+      var held = stored[id];
+      return held ? Promise.resolve(URL.createObjectURL(held.blob)) : refuse(404, "file not found");
+    }
+
+    return { call: call, subscribe: subscribe, upload: upload, fileURL: fileURL };
   }
 
   var memory = demo ? memoryBackend() : null;
@@ -506,6 +563,7 @@
   var app = {
     collection: function (name) { return new Collection(name); },
     me: function () { return call("GET", "me"); },
+    files: files,
     subscribe: subscribe,
   };
 

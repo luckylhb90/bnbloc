@@ -39,6 +39,7 @@ import (
 //	GET    /internal/v1/app/stats                owners: usage                      → wire.AppDataStats
 //	GET    /internal/v1/app/export               owners: ?collection=&format=json|csv → the data, streamed (audited)
 //	DELETE /internal/v1/app/data                 owners: delete all data            → wire.AppDataWiped
+//	…/internal/v1/app/files…                     the app's files (appfiles.go)
 //
 // The scope comes ONLY from the request's signed assertions, never from the
 // path, query or body (no route names an app, room or tenant):
@@ -93,6 +94,7 @@ func (s *Service) registerAppDataRoutes(mux *http.ServeMux) {
 	route("GET /internal/v1/app/stats", appOwner, s.handleAppStats)
 	route("GET /internal/v1/app/export", appOwnerRead, s.handleAppExport)
 	route("DELETE /internal/v1/app/data", appOwner, s.handleAppWipe)
+	s.registerAppFileRoutes(route)
 }
 
 // appNeed is what a route needs of the app before its handler runs.
@@ -757,7 +759,7 @@ func (s *Service) handleAppStats(w http.ResponseWriter, _ *http.Request, a *appC
 		writeAppError(w, err)
 		return
 	}
-	httpx.WriteJSON(w, http.StatusOK, wire.AppDataStats{Documents: c.Docs, Bytes: c.Bytes, Collections: c.Collections})
+	httpx.WriteJSON(w, http.StatusOK, wire.AppDataStats{Documents: c.Docs, Bytes: c.Bytes, Collections: c.Collections, Files: c.Files, FileBytes: c.FileBytes})
 }
 
 // handleAppWipe is DELETE …/data (owners): crypto-shreds all of the app's
@@ -777,9 +779,11 @@ func (s *Service) handleAppWipe(w http.ResponseWriter, _ *http.Request, a *appCa
 // only by tests.
 type appCaps struct {
 	docs, bytes, collections int64
+	// files, fileBytes bound the app's uploaded files (admitFile).
+	files, fileBytes int64
 }
 
-var defaultAppCaps = appCaps{docs: wire.MaxAppDocs, bytes: wire.MaxAppBytes, collections: wire.MaxAppCollections}
+var defaultAppCaps = appCaps{docs: wire.MaxAppDocs, bytes: wire.MaxAppBytes, collections: wire.MaxAppCollections, files: wire.MaxAppFiles, fileBytes: wire.MaxAppFileBytes}
 
 // admit checks a write adding docs documents and bytes stored bytes to
 // collection against usage.
@@ -866,6 +870,22 @@ func (c *appUsageCache) add(tid string, scope store.AppScope, collection string,
 	}
 }
 
+// addFile records a file this replica stored (size < 0: deleted).
+func (c *appUsageCache) addFile(tid string, scope store.AppScope, size int64) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	e, ok := c.m[appUsageKey(tid, scope)]
+	if !ok {
+		return
+	}
+	if size >= 0 {
+		e.counts.Files++
+	} else {
+		e.counts.Files--
+	}
+	e.counts.FileBytes += size
+}
+
 // forget drops an app's usage (it was wiped).
 func (c *appUsageCache) forget(tid string, scope store.AppScope) {
 	c.mu.Lock()
@@ -874,7 +894,7 @@ func (c *appUsageCache) forget(tid string, scope store.AppScope) {
 }
 
 func copyCounts(c store.AppCounts) store.AppCounts {
-	out := store.AppCounts{Docs: c.Docs, Bytes: c.Bytes, Collections: make(map[string]int64, len(c.Collections))}
+	out := store.AppCounts{Docs: c.Docs, Bytes: c.Bytes, Collections: make(map[string]int64, len(c.Collections)), Files: c.Files, FileBytes: c.FileBytes}
 	for k, v := range c.Collections {
 		out.Collections[k] = v
 	}

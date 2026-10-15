@@ -47,6 +47,7 @@ func TestMySQLDeleteRoomRemovesEveryRoomOwnedRow(t *testing.T) {
 		"content_room_shares":         `INSERT INTO content_room_shares (room_id, component_id, tenant_id, version, shared_by, created_at_ms, updated_at_ms) VALUES ('{id}', 'cc', 'org-a', '1.0.0', 'alice', 1, 1)`,
 		"content_component_uses":      `INSERT INTO content_component_uses (scope_kind, scope_id, component_id, tenant_id, kind, created_by, created_at_ms) VALUES ('room', '{id}', 'cc', 'org-a', 'expert', 'alice', 1)`,
 		"org_sync_default_rooms":      `INSERT INTO org_sync_default_rooms (user_id, room_id, granted_at_ms) VALUES ('alice', '{id}', 1)`,
+		"app_files":                   `INSERT INTO app_files (app_id, file_id, tenant_id, room_id, by_key, public, name_sealed, author_sealed, content_type, size_bytes, blob_key, created_at_ms) VALUES ('app-{id}', 'f1', 'org-a', '{id}', 'p', 0, 'n', 'a', 'image/png', 1, 'sha256/x', 1)`,
 		"app_keys":                    `INSERT INTO app_keys (app_id, tenant_id, room_id, wrapped_key, created_at_ms) VALUES ('app-{id}', 'org-a', '{id}', 'wk', 1)`,
 		// More documents than one shred batch (appShredBatch), so the
 		// batched delete loops.

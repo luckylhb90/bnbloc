@@ -38,6 +38,7 @@ const (
 	appActPatch  = "patch"
 	appActDelete = "delete"
 	appActWipe   = "wipe"
+	appActFile   = "file"
 )
 
 // app_data bounds.
@@ -48,6 +49,9 @@ const (
 	// stops at the document that would pass it (next continues there); a
 	// single document over it is cut.
 	maxAppDataText = 96 << 10
+	// maxAppFileImage bounds an uploaded image handed to the agent to
+	// look at; a larger one is described, not shown.
+	maxAppFileImage = 4 << 20
 )
 
 // appDataAuthor names who wrote the documents inside their fence.
@@ -57,13 +61,14 @@ func appDataTool() Tool {
 	return Tool{
 		Name:  "app_data",
 		Title: "Read and change an app's data",
-		Description: "Read and change the data of this room's interactive apps (site deliverables whose pages store JSON documents in collections). " +
-			"You are an owner: you see every document, with _author, and may change any. Actions: list (the apps; with artifactId, its collections); " +
+		Description: "Read and change the data of this room's interactive apps (sites whose pages store JSON documents in collections). " +
+			"You are an owner: you see every document, with _author, and may change any. Actions: list (apps; with artifactId, its collections); " +
 			"find (filter, sort, limit (default " + strconv.Itoa(defaultAppFindLimit) + "), after=next); get; insert; put (ifAbsent, ifVersion); " +
-			"patch (doc merged, inc added); delete; wipe (all documents, for good: only when the person asked, with confirm). " +
-			"public: readable by all its users. Documents come fenced as the users' data.",
+			"patch (doc merged, inc added); delete; file (id: an uploaded file, shown); " +
+			"wipe (all data, for good: only when the person asked, with confirm). " +
+			"public: readable by all its users. Data comes fenced as the users'.",
 		InputSchema: objectSchema(map[string]any{
-			"action":     map[string]any{"type": "string", "enum": []string{appActList, appActFind, appActGet, appActInsert, appActPut, appActPatch, appActDelete, appActWipe}},
+			"action":     map[string]any{"type": "string", "enum": []string{appActList, appActFind, appActGet, appActInsert, appActPut, appActPatch, appActDelete, appActFile, appActWipe}},
 			"artifactId": map[string]any{"type": "string"},
 			"collection": map[string]any{"type": "string"},
 			"id":         map[string]any{"type": "string"},
@@ -143,7 +148,7 @@ func appData(ctx context.Context, env *Env, args json.RawMessage) Result {
 	}
 	needs := map[string]struct{ collection, id bool }{
 		appActFind: {true, false}, appActGet: {true, true}, appActInsert: {true, false}, appActPut: {true, true},
-		appActPatch: {true, true}, appActDelete: {true, true},
+		appActPatch: {true, true}, appActDelete: {true, true}, appActFile: {false, true},
 	}
 	if need, ok := needs[in.Action]; ok {
 		if need.collection && in.Collection == "" {
@@ -174,10 +179,12 @@ func appData(ctx context.Context, env *Env, args json.RawMessage) Result {
 			return refusal("app_data delete", err)
 		}
 		return Result{Value: map[string]any{"artifactId": in.ArtifactID, "collection": in.Collection, "deleted": in.ID}}
+	case appActFile:
+		return c.file()
 	case appActWipe:
 		return c.wipe()
 	}
-	return toolError("action must be one of list, find, get, insert, put, patch, delete, wipe")
+	return toolError("action must be one of list, find, get, insert, put, patch, delete, file, wipe")
 }
 
 // conditions are a write's request headers: ifVersion (If-Match), and on
@@ -224,7 +231,11 @@ func (c appCall) stats() Result {
 	if st.Collections == nil {
 		st.Collections = map[string]int64{}
 	}
-	return Result{Value: map[string]any{"artifactId": c.in.ArtifactID, "documents": st.Documents, "bytes": st.Bytes, "collections": st.Collections}}
+	out := map[string]any{"artifactId": c.in.ArtifactID, "documents": st.Documents, "bytes": st.Bytes, "collections": st.Collections}
+	if st.Files > 0 {
+		out["files"] = st.Files
+	}
+	return Result{Value: out}
 }
 
 // find reads one page of a collection, cut at maxAppDataText.
@@ -322,6 +333,44 @@ func (c appCall) document(method, rest string, body any, header http.Header) Res
 		line, out["truncated"] = roomlog.Truncate(line, maxAppDataText), true
 	}
 	out["document"] = roomlog.Fence(appDataAuthor, line)
+	return Result{Value: out}
+}
+
+// appFileImages are the uploaded types handed to the agent as an image.
+var appFileImages = map[string]bool{"image/png": true, "image/jpeg": true, "image/gif": true, "image/webp": true}
+
+// file reads one uploaded file: its metadata, plus its text (fenced) or
+// the image itself. Other types are described only.
+func (c appCall) file() Result {
+	rest := "files/" + url.PathEscape(c.in.ID)
+	raw, err := c.env.Gateway.Do(c.ctx, http.MethodGet, c.path(rest, nil), nil)
+	if err != nil {
+		return refusal("app_data file", err)
+	}
+	var f wire.AppFile
+	if err := json.Unmarshal(raw, &f); err != nil {
+		return toolError("unreadable app file: %v", err)
+	}
+	out := map[string]any{"artifactId": c.in.ArtifactID, "id": f.ID, "name": roomlog.Fence(appDataAuthor, f.Name), "type": f.Type, "size": f.Size,
+		"uploadedBy": f.Author, "uploadedAt": f.CreatedAt}
+	text := strings.HasPrefix(f.Type, "text/")
+	image := appFileImages[f.Type] && f.Size <= maxAppFileImage
+	if !text && !image {
+		out["note"] = "binary content, not shown"
+		return Result{Value: out}
+	}
+	body, err := c.env.Gateway.Do(c.ctx, http.MethodGet, c.path(rest+"/content", nil), nil)
+	if err != nil {
+		return refusal("app_data file", err)
+	}
+	if image {
+		return Result{Value: out, Image: &Image{MIME: f.Type, Data: body}}
+	}
+	content := string(body)
+	if len(content) > maxAppDataText {
+		content, out["truncated"] = roomlog.Truncate(content, maxAppDataText), true
+	}
+	out["text"] = roomlog.Fence(appDataAuthor, content)
 	return Result{Value: out}
 }
 

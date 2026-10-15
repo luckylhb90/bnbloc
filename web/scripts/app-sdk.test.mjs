@@ -41,6 +41,8 @@ function boot(answer) {
     TextDecoder,
     AbortController,
     Response,
+    FormData,
+    Blob,
     setTimeout,
     clearTimeout,
     Promise,
@@ -109,6 +111,29 @@ test("a failed call rejects with its status and code; an oversized document is r
   assert.equal(sdk.requests.length, 1);
 });
 
+test("files upload as one multipart part, read back as a blob URL, refuse oversized files before sending", async () => {
+  const blobs = [];
+  const sdk = boot((req) =>
+    req.url.endsWith("/content")
+      ? new Response(new Uint8Array([1, 2, 3]), { status: 200 })
+      : jsonResponse(201, { id: "f1", name: "a.png", type: "image/png", size: 3 }),
+  );
+  const file = new Blob([new Uint8Array([1, 2, 3])], { type: "image/png" });
+  file.name = "a.png";
+  const up = plain(await sdk.app.files.upload(file, { public: true }));
+  assert.equal(up.id, "f1");
+  const [post] = sdk.requests;
+  assert.equal(post.method, "POST");
+  assert.equal(post.url, BASE + "files?public=1");
+  assert.ok(post.body instanceof FormData && post.body.get("file").size === 3);
+  assert.equal(post.headers["Content-Type"], undefined, "the browser sets the multipart boundary");
+  globalThis.URL.createObjectURL = (b) => (blobs.push(b), "blob:x");
+  assert.equal(await sdk.app.files.url("f 1"), "blob:x");
+  assert.equal(sdk.requests[1].url, BASE + "files/f%201/content");
+  await assert.rejects(sdk.app.files.upload({ size: 26214401, name: "big.mp4" }), (e) => e.status === 413);
+  assert.equal(sdk.requests.length, 2);
+});
+
 test("subscribe hands over only app_changed events, until unsubscribed", async () => {
   const frames =
     ": connected\n\n" +
@@ -166,7 +191,7 @@ function bootDemo() {
     document: { currentScript: { src: BASE + "sdk.js" }, baseURI: BASE },
     location: { href: BASE },
   };
-  const context = { window, fetch: way("fetch"), XMLHttpRequest: way("XMLHttpRequest"), EventSource: way("EventSource"), URL, TextEncoder, setTimeout, clearTimeout, Promise };
+  const context = { window, fetch: way("fetch"), XMLHttpRequest: way("XMLHttpRequest"), EventSource: way("EventSource"), URL, TextEncoder, Blob, setTimeout, clearTimeout, Promise };
   vm.createContext(context);
   vm.runInContext(DEMO_SDK, context);
   return { app: window.bnblocApp, out };
@@ -207,6 +232,13 @@ test("demo mode answers the whole data API in the page's memory and never sends 
   await assert.rejects(votes.get(first._id), (e) => e.status === 404);
   await assert.rejects(app.collection("bad name").insert({ a: 1 }), (e) => e.status === 400);
   await assert.rejects(votes.insert({ big: "x".repeat(70000) }), (e) => e.status === 413);
+
+  // Files stay in the page too.
+  const photo = new Blob(["png"], { type: "image/png" });
+  const f = plain(await app.files.upload(photo));
+  assert.equal(plain(await app.files.get(f.id)).size, 3);
+  await app.files.remove(f.id);
+  await assert.rejects(app.files.get(f.id), (e) => e.status === 404);
 
   await new Promise((r) => setTimeout(r, 10));
   assert.deepEqual(

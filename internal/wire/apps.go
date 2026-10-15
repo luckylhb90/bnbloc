@@ -59,6 +59,25 @@ type AppDataStats struct {
 	Documents   int64            `json:"documents"`
 	Bytes       int64            `json:"bytes"`
 	Collections map[string]int64 `json:"collections"`
+	// Files and FileBytes are the files the app's pages uploaded.
+	Files     int64 `json:"files"`
+	FileBytes int64 `json:"fileBytes"`
+}
+
+// AppFile is a file an app's page uploaded (app.files.upload), as the app
+// reads it: its id (what the app keeps in its own documents), name, type
+// (the attachment type it was checked as) and size, and the stamps a
+// document carries: _by (the uploader's per-app id), _createdAt, and
+// _author for the app's owners only.
+type AppFile struct {
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	Type      string `json:"type"`
+	Size      int64  `json:"size"`
+	Public    bool   `json:"public"`
+	By        string `json:"_by"`
+	CreatedAt int64  `json:"_createdAt"`
+	Author    string `json:"_author,omitempty"`
 }
 
 // AppDataWiped answers an owner's delete of all of an app's data.

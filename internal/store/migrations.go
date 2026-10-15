@@ -1595,6 +1595,14 @@ WHERE r.channel_id = '' AND d.user_id IS NULL`)
 			return addColumnIfMissing(ctx, db, "user_profiles", "email", "VARCHAR(320) NOT NULL DEFAULT '' AFTER display_name")
 		},
 	},
+	{
+		// Files of interactive apps (docs/prd/2026-10-15-app-identity-
+		// schedules-notify-ai.md §6a). Additive: a new table.
+		id: "2026_10_app_files",
+		run: func(ctx context.Context, db sqlConn) error {
+			return createSchemaTable(ctx, db, "app_files")
+		},
+	},
 }
 
 // sqlConn is the statement surface a migration runs on. runMigrations passes
