@@ -94,9 +94,9 @@ func scheduleActions() []scheduleAction {
 				"limit":      map[string]any{"type": "integer", "minimum": 1, "maximum": wire.MaxAppFindLimit},
 				"after":      map[string]any{"type": "string"},
 			}, "action")}, run: (*scheduleRun).appData},
-		{tool: assist.Tool{Name: "notify", Description: "Send a notice through the organization's notifications. to: \"room\" (the room's members) or a list of logins. Plain text; it links to the room unless url is a link on this deployment.",
+		{tool: assist.Tool{Name: "notify", Description: "Send a notice through the organization's notifications. to: \"room\" (the room's members), a list of logins, or \"group:<name>\" (a group chat the organization's notifier knows). Plain text; it links to the room unless url is a link on this deployment.",
 			Parameters: objectParams(map[string]any{
-				"to":    map[string]any{"description": "\"room\" or a list of logins"},
+				"to":    map[string]any{"description": "\"room\", a list of logins, or \"group:<name>\""},
 				"title": map[string]any{"type": "string"},
 				"text":  map[string]any{"type": "string"},
 				"url":   map[string]any{"type": "string"},
@@ -331,6 +331,9 @@ func (r *scheduleRun) notify(ctx context.Context, raw json.RawMessage) (string, 
 	}
 	r.notices++
 	who := fmt.Sprintf("%d people", len(targets.Recipients))
+	if targets.Group != "" {
+		who = "the group " + targets.Group
+	}
 	if r.dry {
 		r.record("notify", "would notify "+who+": "+in.Title)
 		return "dry run: would notify " + who, nil
@@ -343,11 +346,14 @@ func (r *scheduleRun) notify(ctx context.Context, raw json.RawMessage) (string, 
 		Actor: r.claims.Subject, Title: in.Title, Text: in.Text, URL: link,
 		DedupKey: fmt.Sprintf("schedule:%s:%d:%x", r.sc.ScheduleID, r.slot.UnixMilli(), noticeDigest(string(raw))),
 	}
-	if _, err := r.s.Alerts.Emit(ctx, ev); err != nil {
+	if err := r.s.sendNotice(ctx, ev, targets); err != nil {
+		if errors.Is(err, notify.ErrNoGroupNotifier) {
+			return "", err
+		}
 		return "", errors.New("the notice could not be queued")
 	}
 	r.s.audit(ctx, r.claims.Tenant, store.ExtAuditRecord{Kind: wire.AuditKindApp, Name: "schedule:" + r.sc.ScheduleID, Action: "notify", Actor: r.claims.Subject,
-		Outcome: wire.AuditOutcomeAllow, Detail: fmt.Sprintf("room %s, %d recipients", r.sc.RoomID, len(targets.Recipients))})
+		Outcome: wire.AuditOutcomeAllow, Detail: noticeAuditDetail(r.sc.RoomID, targets)})
 	r.record("notify", "notified "+who+": "+in.Title)
 	return "notified " + who, nil
 }

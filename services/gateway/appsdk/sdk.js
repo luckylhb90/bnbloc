@@ -288,12 +288,14 @@
   // ---- notify ----
 
   // notify sends a notice through the organization's notifications: to
-  // "room" (the room's members) or a list of logins (the app's owners
+  // "room" (the room's members), a list of logins or "group:<name>" (a
+  // group chat the organization's notifier knows; both the app's owners
   // only). Each person's notification settings apply. Signed-in callers
   // only.
   function notify(n) {
     if (!n || typeof n.title !== "string" || !n.title.trim()) return Promise.reject(appError(400, "", "notify needs a title"));
-    if (n.to !== "room" && !Array.isArray(n.to)) return Promise.reject(appError(400, "", 'notify needs to: "room" or a list of logins'));
+    var group = typeof n.to === "string" && n.to.indexOf("group:") === 0;
+    if (n.to !== "room" && !group && !Array.isArray(n.to)) return Promise.reject(appError(400, "", 'notify needs to: "room", a list of logins or "group:<name>"'));
     var body = { to: n.to, title: n.title, text: n.text || "", url: n.url || "" };
     if (memory) return Promise.resolve({ recipients: 0 });
     return call("POST", "notify", body);

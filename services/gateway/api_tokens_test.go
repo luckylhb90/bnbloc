@@ -143,7 +143,7 @@ func TestAPITokenLifecycle(t *testing.T) {
 
 // installTestNotifier installs (unsigned, dev) a notifier record into the
 // gateway's platform settings, the way realtime's directory reads it.
-func installTestNotifier(t *testing.T, settings store.PlatformSettingsStore, name string) {
+func installTestNotifier(t *testing.T, settings store.PlatformSettingsStore, name string, capabilities ...string) {
 	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]string{"name": name, "contract": pkgmeta.NotifierContractV1})
@@ -154,6 +154,7 @@ func installTestNotifier(t *testing.T, settings store.PlatformSettingsStore, nam
 		"kind": pkgmeta.KindNotifierPackageV1, "name": name, "version": "0.1.0", "publisher": "test",
 		"runtime": "endpoint", "contract": pkgmeta.NotifierContractV1,
 		"endpoint": map[string]any{"baseUrl": srv.URL}, "permissions": map[string]any{"network": []string{u.Hostname()}},
+		"capabilities": capabilities,
 	})
 	pipe := &extpipe.Pipeline{Settings: settings, Audit: store.NewMemoryExtensionAudit(), AllowUnsigned: true,
 		Installers: map[extreg.Kind]extpipe.KindInstaller{extreg.KindNotifier: notify.NewDirectory(settings).Installer()}}

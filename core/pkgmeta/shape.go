@@ -30,7 +30,7 @@ var kindFields = []kindField{
 	{"endpoint", func(p Package) bool { return p.Endpoint != nil },
 		[]string{KindCorePackageV1, KindAuthProviderPackageV1, KindNotifierPackageV1, KindSandboxPackageV1, KindMCPPackageV1}},
 	{"capabilities", func(p Package) bool { return len(p.Capabilities) > 0 },
-		[]string{KindCorePackageV1, KindPluginPackageV1, KindSandboxPackageV1}},
+		[]string{KindCorePackageV1, KindPluginPackageV1, KindSandboxPackageV1, KindNotifierPackageV1}},
 	{"hooks", func(p Package) bool { return len(p.Hooks) > 0 }, []string{KindPluginPackageV1}},
 	{"localSettings", func(p Package) bool { return len(p.LocalSettings) > 0 }, []string{KindPluginPackageV1}},
 	{"permissions.host", func(p Package) bool { return len(p.Permissions.Host) > 0 }, []string{KindPluginPackageV1}},

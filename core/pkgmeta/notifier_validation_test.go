@@ -38,6 +38,14 @@ func TestParsePackage_acceptsNotifierWithPathPrefix(t *testing.T) {
 	}
 }
 
+// A notifier may declare that it delivers to groups.
+func TestParsePackage_acceptsNotifierGroups(t *testing.T) {
+	pkg, err := ParsePackage(notifierPackageBody(t, func(b map[string]any) { b["capabilities"] = []string{NotifierCapabilityGroups} }))
+	if err != nil || len(pkg.Capabilities) != 1 || pkg.Capabilities[0] != "groups" {
+		t.Fatalf("parse = %+v, %v", pkg.Capabilities, err)
+	}
+}
+
 func TestParsePackage_rejectsInvalidNotifier(t *testing.T) {
 	tests := map[string]struct {
 		mutate func(map[string]any)
@@ -50,6 +58,7 @@ func TestParsePackage_rejectsInvalidNotifier(t *testing.T) {
 		// plugin (localSettings), never a server-side secret.
 		"member settings": {func(b map[string]any) { b["memberSettings"] = []map[string]any{{"key": "a", "label": "A"}} }, "unknown field"},
 		"local settings":  {func(b map[string]any) { b["localSettings"] = []map[string]any{{"key": "a", "label": "A"}} }, "localSettings is only valid"},
+		"unknown capability": {func(b map[string]any) { b["capabilities"] = []string{"broadcast"} }, `unknown notifier capability "broadcast"`},
 		"host permission": {func(b map[string]any) {
 			b["permissions"] = map[string]any{"network": []string{"notify.internal"}, "host": []string{"chat"}}
 		}, "permissions.host is only valid"},

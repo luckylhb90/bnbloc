@@ -271,6 +271,11 @@ func conclude(p wire.NotificationPayload, res DeliveryResult) (store.Notificatio
 	if len(retryable) == 0 {
 		return store.NotificationDelivered, summary, nil
 	}
+	if p.Group != "" {
+		// A group notification has no recipients to narrow: a retryable
+		// failure retries it whole.
+		return store.NotificationRetry, summary, nil
+	}
 	owed := map[string]bool{}
 	for _, r := range retryable {
 		owed[r.UserID] = true

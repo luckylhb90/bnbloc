@@ -189,14 +189,25 @@ const (
 	AppSignInRequired = "sign_in_required"
 	// AppAIUnavailable: no assist model, or the organization turned AI off.
 	AppAIUnavailable = "ai_unavailable"
+	// AppGroupsUnavailable: no notifier of the organization delivers to
+	// groups.
+	AppGroupsUnavailable = "groups_unavailable"
 )
 
-// AppNotifyRoom is the to of a notice for the room's members.
-const AppNotifyRoom = "room"
+// AppNotifyRoom is the to of a notice for the room's members;
+// AppNotifyGroupPrefix starts the to of a notice for a named group of the
+// organization's notifier ("group:team-weekly").
+const (
+	AppNotifyRoom        = "room"
+	AppNotifyGroupPrefix = "group:"
+	// MaxNotifyGroupLen bounds a group name, in characters.
+	MaxNotifyGroupLen = 64
+)
 
 // AppNotifyRequest is an app's notify call (POST ~app/notify): To is
-// AppNotifyRoom (the room's members) or a list of logins in the
-// organization; Title and Text are plain text; URL, when set, must be on
+// AppNotifyRoom (the room's members), a list of logins in the
+// organization, or "group:<name>" (a group the organization's notifier
+// delivers to); Title and Text are plain text; URL, when set, must be on
 // the deployment's own origin (default: the app's card in its room).
 type AppNotifyRequest struct {
 	To    json.RawMessage `json:"to"`
@@ -216,6 +227,8 @@ type AppNotifyReply struct {
 // app's title and the room's name.
 type AppNotifyTargets struct {
 	Recipients []string `json:"recipients"`
-	AppTitle   string   `json:"appTitle"`
-	RoomName   string   `json:"roomName"`
+	// Group is the group a "group:<name>" notice goes to (no recipients).
+	Group    string `json:"group,omitempty"`
+	AppTitle string `json:"appTitle"`
+	RoomName string `json:"roomName"`
 }

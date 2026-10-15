@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/luckylhb90/bnbloc/internal/httpx"
 	"github.com/luckylhb90/bnbloc/internal/membership"
@@ -34,8 +36,10 @@ import (
 
 // The refusals of a notice's to.
 var (
-	errAppNotifyTo     = errors.New(`to is "room" or a list of logins`)
-	errAppNotifyLogins = errors.New("only the app's owners (the room's members) may notify people by login")
+	errAppNotifyTo     = errors.New(`to is "room", a list of logins or "group:<name>"`)
+	errAppNotifyLogins = errors.New("only the app's owners (the room's members) may notify people by login or a group")
+	// errAppNotifyGroup marks a group to (noticeGroup resolves it).
+	errAppNotifyGroup = errors.New("a group notice")
 )
 
 func (s *Service) handleAppNotifyTargets(w http.ResponseWriter, r *http.Request, a *appCall) {
@@ -47,12 +51,11 @@ func (s *Service) handleAppNotifyTargets(w http.ResponseWriter, r *http.Request,
 	if !httpx.DecodeJSON(w, r, wire.MaxAppRequestBytes, &in) {
 		return
 	}
-	recipients, err := s.noticeRecipients(a.ctx, a.tenantID, a.scope.RoomID, a.owner, in.To)
+	out, err := s.noticeTargets(a.ctx, a.tenantID, a.scope.RoomID, a.owner, in.To)
 	if err != nil {
 		writeAppError(w, err)
 		return
 	}
-	out := wire.AppNotifyTargets{Recipients: recipients}
 	if art, err := s.Artifacts.GetArtifact(a.ctx, a.scope.AppID); err == nil {
 		out.AppTitle = art.Title
 	}
@@ -87,16 +90,42 @@ func (s *Service) handleRoomNoticeTargets(w http.ResponseWriter, r *http.Request
 	if !httpx.DecodeJSON(w, r, wire.MaxAppRequestBytes, &in) {
 		return
 	}
-	recipients, err := s.noticeRecipients(ctx, tid, roomID, true, in.To)
+	out, err := s.noticeTargets(ctx, tid, roomID, true, in.To)
 	if err != nil {
 		writeAppError(w, err)
 		return
 	}
-	out := wire.AppNotifyTargets{Recipients: recipients}
 	if room, err := s.Store.GetRoom(ctx, roomID); err == nil {
 		out.RoomName = room.Name
 	}
 	httpx.WriteJSON(w, http.StatusOK, out)
+}
+
+// noticeGroup is a "group:<name>" to's group: the owner's only, a name of
+// at most wire.MaxNotifyGroupLen printable characters; "" for any other to.
+func noticeGroup(to json.RawMessage, owner bool) (string, error) {
+	var s string
+	if json.Unmarshal(to, &s) != nil || !strings.HasPrefix(s, wire.AppNotifyGroupPrefix) {
+		return "", nil
+	}
+	if !owner {
+		return "", errAppNotifyLogins
+	}
+	name := strings.TrimSpace(strings.TrimPrefix(s, wire.AppNotifyGroupPrefix))
+	if name == "" || utf8.RuneCountInString(name) > wire.MaxNotifyGroupLen || strings.IndexFunc(name, unicode.IsControl) >= 0 {
+		return "", appdataInvalid(fmt.Sprintf("a group name is 1 to %d characters", wire.MaxNotifyGroupLen))
+	}
+	return name, nil
+}
+
+// noticeTargets resolves a notice's to: a group, or the members it reaches.
+func (s *Service) noticeTargets(ctx context.Context, tenantID, roomID string, owner bool, to json.RawMessage) (wire.AppNotifyTargets, error) {
+	group, err := noticeGroup(to, owner)
+	if err != nil || group != "" {
+		return wire.AppNotifyTargets{Recipients: []string{}, Group: group}, err
+	}
+	recipients, err := s.noticeRecipients(ctx, tenantID, roomID, owner, to)
+	return wire.AppNotifyTargets{Recipients: recipients}, err
 }
 
 // noticeRecipients is the one resolution of a notice's to in a room: the
@@ -105,6 +134,9 @@ func (s *Service) handleRoomNoticeTargets(w http.ResponseWriter, r *http.Request
 func (s *Service) noticeRecipients(ctx context.Context, tenantID, roomID string, owner bool, to json.RawMessage) ([]string, error) {
 	var room string
 	if json.Unmarshal(to, &room) == nil {
+		if strings.HasPrefix(room, wire.AppNotifyGroupPrefix) {
+			return nil, errAppNotifyGroup
+		}
 		if room != wire.AppNotifyRoom {
 			return nil, appdataInvalid(errAppNotifyTo.Error())
 		}

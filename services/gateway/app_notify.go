@@ -114,16 +114,42 @@ func (s *Service) serveAppNotify(w http.ResponseWriter, r *http.Request, c appCa
 		Actor: c.scope.Participant, Title: title, Text: in.Text, URL: link, DedupKey: dedup,
 	}
 	ctx := tenant.NewContext(context.WithoutCancel(r.Context()), c.tenant)
-	if _, err := s.Alerts.Emit(ctx, ev); err != nil {
+	if err := s.sendNotice(ctx, ev, targets); err != nil {
+		if errors.Is(err, notify.ErrNoGroupNotifier) {
+			httpx.WriteJSON(w, http.StatusConflict, httpx.ErrorBody{Error: "no notifier of the organization delivers to groups", Code: wire.AppGroupsUnavailable})
+			return
+		}
 		obs.ServerError(w, "queue the notice failed", err)
 		httpx.Error(w, "queue the notice failed", http.StatusInternalServerError)
 		return
 	}
 	s.audit(ctx, c.tenant, store.ExtAuditRecord{
 		Kind: wire.AuditKindApp, Name: c.scope.AppID, Action: "notify", Actor: c.scope.Participant,
-		Outcome: wire.AuditOutcomeAllow, Detail: fmt.Sprintf("room %s, %d recipients", c.scope.RoomID, len(targets.Recipients)),
+		Outcome: wire.AuditOutcomeAllow, Detail: noticeAuditDetail(c.scope.RoomID, targets),
 	})
 	httpx.WriteJSON(w, http.StatusOK, wire.AppNotifyReply{Recipients: len(targets.Recipients)})
+}
+
+// sendNotice queues one notice: to its group through the notifiers that
+// deliver to groups (notify.ErrNoGroupNotifier when none does), else to
+// its members.
+func (s *Service) sendNotice(ctx context.Context, ev notify.Event, targets wire.AppNotifyTargets) error {
+	if targets.Group != "" {
+		ev.Group = targets.Group
+		_, err := s.Alerts.EmitGroup(ctx, ev)
+		return err
+	}
+	_, err := s.Alerts.Emit(ctx, ev)
+	return err
+}
+
+// noticeAuditDetail is a notice's audit detail: where it went, never what
+// it said.
+func noticeAuditDetail(roomID string, t wire.AppNotifyTargets) string {
+	if t.Group != "" {
+		return fmt.Sprintf("room %s, group %s", roomID, t.Group)
+	}
+	return fmt.Sprintf("room %s, %d recipients", roomID, len(t.Recipients))
 }
 
 // appNotifyTargets asks the room service who the notice reaches, as the

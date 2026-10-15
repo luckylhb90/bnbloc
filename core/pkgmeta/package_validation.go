@@ -35,6 +35,14 @@ const AuthProviderContractV1 = "bnbloc.auth-provider.contract/v1"
 // signed notification payload.
 const NotifierContractV1 = "bnbloc.notifier.contract/v1"
 
+// NotifierCapabilityGroups: the notifier delivers a notification addressed
+// to a named group (NotificationPayload.Group) as well as to members; the
+// group names it knows are its own configuration.
+const NotifierCapabilityGroups = "groups"
+
+// notifierCapabilities is the code-owned set a notifier package may declare.
+var notifierCapabilities = map[string]bool{NotifierCapabilityGroups: true}
+
 // KindPlugin is the plugin's extreg kind. Hooks dispatch in the realtime host,
 // so the plugin kind activates there (Task 4 owns the installer; this descriptor
 // only makes the kind known to the registry).
@@ -137,6 +145,11 @@ func validateAuthProviderPackage(pkg Package) error {
 }
 
 func validateNotifierPackage(pkg Package) error {
+	for _, c := range pkg.Capabilities {
+		if !notifierCapabilities[c] {
+			return fmt.Errorf("unknown notifier capability %q", c)
+		}
+	}
 	return validateEndpointPackage(pkg, "notifier", NotifierContractV1)
 }
 

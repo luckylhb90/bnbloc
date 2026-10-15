@@ -1,6 +1,7 @@
 # Apps that know who you are, and run on time, notify and use AI (2026-10-15)
 
-Status: A1–A4 implemented (2026-10-15), not yet released; A5 next. Builds on
+Status: A1–A5 implemented (2026-10-15), not yet released (the
+organization's group-chat notifier adds group delivery in its own package). Builds on
 `docs/prd/2026-10-12-interactive-apps.md` (the app base: a document store,
 `me()`, the two platform rules), schedules (`internal/schedule`), notifier
 components (`docs/notifications.md`) and assists
@@ -102,7 +103,7 @@ that the platform's assist model carries out with a small set of
   - `app_data` (`list`, `find`, `get`): the room's apps' data, read as the
     schedule's owner (an app owner: every document, `_author`), through
     the room service's app API, the same one the room tool uses;
-  - `notify`: section 5's one function (members, logins, `channel:`);
+  - `notify`: section 5's one function (members, logins, `group:`);
   - `post_message`: a message in the room, as the owner (PostChat);
   - `ask_agent`: a message to one of the room's agents, as the owner (the
     `agent` recipient's path: borrow rules at drive time), for work that
@@ -147,16 +148,17 @@ schedule's `notify` action is the same function.
 - **Recipients** are people, not addresses:
   - `to: "room"` means the room's members;
   - `to: ["login", …]` means those accounts in the organization;
-  - `to: "channel:<name>"` means a group the organization's notifier knows
+  - `to: "group:<name>"` means a group the organization's notifier knows
     (its group chat), when the notifier offers group delivery.
 - **Delivery** goes through `notify.Emitter`, the one producer seam, as a new
   kind `app_notice`. Members' preferences apply: a member can mute an app.
   Notifier components deliver it: the organization's bot, a member's
   personal bot, desktop or web push, whichever the member has.
-- **Group delivery is the notifier's.** A notifier package declares
-  `groups: true` in its discover answer when it can post to a named group.
-  A `channel:` notice is then handed to it. Without such a notifier, the
-  call fails with a sentence the app shows.
+- **Group delivery is the notifier's.** A notifier package declares the
+  `groups` capability when it can post to a named group. A `group:` notice
+  is then handed to it (and only to it), the group named in the payload.
+  Without such a notifier, the call fails with a sentence the app shows
+  (`groups_unavailable`).
 - **Rules only the platform can enforce:**
   - who may notify: a page only for its caller's own link session, a
     schedule as its owner;
@@ -240,8 +242,8 @@ app.files.url(id: string): Promise<string>;   // a short-lived link to show or d
 | Boundaries and privacy | A caller sees only their own account. An `ai` run has no network of its own: only its actions, each acting with the owner's rights; app data reaches the model fenced as data. |
 | Abuse and untrusted input | App input to the model is fenced as data. A notice's text is plain text and links to the app; notifiers render it as text. |
 | One owner | Accounts: the new store, written at sign-in. When: `internal/schedule`. Delivery: `notify.Emitter` and notifier components. Model: `internal/assist`. Actions: one registry, each action calling its owner. |
-| Defaults and fallbacks | No IdP email: `account.email` absent. No group-capable notifier: `channel:` fails with a sentence, member notices still work. Assist off: `app.ai` fails with a sentence. |
-| External contracts | SDK: `me().account`, `files`, `notify`, `ai`. Schedules: recipient `ai` (task text, actions). Notifier discover: optional `groups`. Wire notice kind `app_notice`. All additive. |
+| Defaults and fallbacks | No IdP email: `account.email` absent. No group-capable notifier: `group:` fails with a sentence, member notices still work. Assist off: `app.ai` fails with a sentence. |
+| External contracts | SDK: `me().account`, `files`, `notify`, `ai`. Schedules: recipient `ai` (task text, actions). Notifier package: optional `groups` capability; payload `group`. Wire notice kind `app_notice`. All additive. |
 | Load on users and agents | The member says what and when in words, and tries it before turning it on. The agent learns three SDK calls; nothing about schedules. |
 | Release and compatibility | Server first (accounts, SDK, notify, ai, the `ai` schedule run), then the skill update, then notifier packages that add group delivery. Older apps keep working. |
 | Observability | Every notice and AI call is audited with the app or schedule id; a run records its outcome and a one-line summary on the schedule. |

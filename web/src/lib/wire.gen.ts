@@ -403,13 +403,22 @@ export interface AppAIReply {
 export const AppSignInRequired = "sign_in_required";
 // AppAIUnavailable: no assist model, or the organization turned AI off.
 export const AppAIUnavailable = "ai_unavailable";
+// AppGroupsUnavailable: no notifier of the organization delivers to
+// groups.
+export const AppGroupsUnavailable = "groups_unavailable";
 
-// AppNotifyRoom is the to of a notice for the room's members.
+// AppNotifyRoom is the to of a notice for the room's members;
+// AppNotifyGroupPrefix starts the to of a notice for a named group of the
+// organization's notifier ("group:team-weekly").
 export const AppNotifyRoom = "room";
+export const AppNotifyGroupPrefix = "group:";
+// MaxNotifyGroupLen bounds a group name, in characters.
+export const MaxNotifyGroupLen = 64;
 
 // AppNotifyRequest is an app's notify call (POST ~app/notify): To is
-// AppNotifyRoom (the room's members) or a list of logins in the
-// organization; Title and Text are plain text; URL, when set, must be on
+// AppNotifyRoom (the room's members), a list of logins in the
+// organization, or "group:<name>" (a group the organization's notifier
+// delivers to); Title and Text are plain text; URL, when set, must be on
 // the deployment's own origin (default: the app's card in its room).
 export interface AppNotifyRequest {
   to: unknown;
@@ -429,6 +438,8 @@ export interface AppNotifyReply {
 // app's title and the room's name.
 export interface AppNotifyTargets {
   recipients: string[];
+  // Group is the group a "group:<name>" notice goes to (no recipients).
+  group?: string;
   appTitle: string;
   roomName: string;
 }
@@ -2768,6 +2779,10 @@ export interface NotificationPayload {
   // agent_finished, agent_failed): each recipient then carries a
   // ReplyToken.
   reply?: NotificationReply;
+  // Group, when set, addresses the notification to the named group (a
+  // group chat the notifier knows) instead of members: Recipients is
+  // empty. Only a notifier declaring the groups capability receives one.
+  group?: string;
 }
 
 // ---- wire/payloads.go ----

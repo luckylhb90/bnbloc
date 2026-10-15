@@ -213,4 +213,8 @@ type NotificationPayload struct {
 	// agent_finished, agent_failed): each recipient then carries a
 	// ReplyToken.
 	Reply *NotificationReply `json:"reply,omitempty"`
+	// Group, when set, addresses the notification to the named group (a
+	// group chat the notifier knows) instead of members: Recipients is
+	// empty. Only a notifier declaring the groups capability receives one.
+	Group string `json:"group,omitempty"`
 }

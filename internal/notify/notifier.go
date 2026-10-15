@@ -2,6 +2,7 @@ package notify
 
 import (
 	"context"
+	"slices"
 	"strconv"
 	"sync"
 	"time"
@@ -62,10 +63,12 @@ type liveEndpoint struct {
 	endpoint endpointpkg.Endpoint
 }
 
-// Target is one notifier component an event of a tenant goes to.
+// Target is one notifier component an event of a tenant goes to. Groups:
+// it declared the groups capability (it delivers to named groups).
 type Target struct {
 	Name   string
 	OptIn  bool
+	Groups bool
 	Record extpipe.Record
 }
 
@@ -152,7 +155,7 @@ func (d *Directory) Targets(ctx context.Context, tenantID string) ([]Target, err
 	for _, rec := range recs {
 		// Opt-in additionally filters recipients (Target.OptIn).
 		if d := extpipe.TenantDistribution(rec, tenantID); d.Distributed {
-			out = append(out, Target{Name: rec.Name, OptIn: d.OptIn, Record: rec})
+			out = append(out, Target{Name: rec.Name, OptIn: d.OptIn, Groups: declaresGroups(rec), Record: rec})
 		}
 	}
 	return out, nil
@@ -181,4 +184,11 @@ func (d *Directory) Live(rec extpipe.Record) (endpointpkg.Endpoint, bool) {
 		return endpointpkg.Endpoint{}, false
 	}
 	return l.endpoint, true
+}
+
+// declaresGroups reports a record whose package declared the groups
+// capability (a record that does not decode declares nothing).
+func declaresGroups(rec extpipe.Record) bool {
+	cfg, err := extpipe.DecodeConfig(rec)
+	return err == nil && slices.Contains(cfg.Capabilities, pkgmeta.NotifierCapabilityGroups)
 }

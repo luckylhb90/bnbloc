@@ -145,13 +145,15 @@ declare global {
     ai(req: { prompt: string; input?: string | object; json?: boolean }): Promise<{ text?: string; json?: Record<string, unknown> }>;
     /** Sends a notice through the organization's notifications (its chat
      *  bot, desktop, browser push: whatever each person uses). to: "room"
-     *  is the room's members (any signed-in caller); a list of logins is
-     *  for the app's owners only, and keeps the organization's people. Each
+     *  is the room's members (any signed-in caller); a list of logins (the
+     *  organization's people) or "group:<name>" (a group chat the
+     *  organization's notifier knows; 409 "groups_unavailable" when none
+     *  does) are for the app's owners only. Each
      *  person's notification settings apply, the sender is never notified,
      *  and it links to this app unless url (on this deployment) is given.
      *  Plain text. Signed-in callers only (403 "sign_in_required"); 429
      *  when the app sends too many. In the demo nothing is sent. */
-    notify(n: { to: "room" | string[]; title: string; text?: string; url?: string }): Promise<{ recipients: number }>;
+    notify(n: { to: "room" | `group:${string}` | string[]; title: string; text?: string; url?: string }): Promise<{ recipients: number }>;
     /** Calls fn with each change until the returned function is called.
      *  Live only: changes made while disconnected are not replayed. */
     subscribe(fn: (change: BnblocAppChange) => void): () => void;

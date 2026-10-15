@@ -133,3 +133,46 @@ func TestAppNotifyHonoursPrefs(t *testing.T) {
 		t.Fatalf("a member who turned app notices off got one: %d %s, %d queued", r.status, r.body, len(queued(t, outbox)))
 	}
 }
+
+// A group notice goes only to the notifiers that deliver to groups, as
+// one payload naming the group and no members; without such a notifier it
+// is refused with groups_unavailable; only the app's owners may send one.
+func TestAppNotifyGroup(t *testing.T) {
+	e, outbox, sink := notifyGW(t)
+	jack := e.ticketBase("jack", e.appA)
+	body := map[string]any{"to": "group:team-weekly", "title": "Weekly report due", "text": "Fill it in by Friday"}
+	if r := e.call(http.MethodPost, jack+"~app/notify", body); r.status != http.StatusConflict || r.json()["code"] != wire.AppGroupsUnavailable {
+		t.Fatalf("a group notice without a group notifier = %d %s", r.status, r.body)
+	}
+	installTestNotifier(t, e.gw.PlatformSettings, "chat-bot", "groups")
+	// A fresh emitter: the directory's records snapshot lives a few
+	// seconds (recordsTTL), longer than this test waits.
+	e.gw.Alerts = notify.NewEmitter(notify.Stores{Prefs: outbox, Outbox: outbox, Settings: e.gw.PlatformSettings, Installs: store.NewMemoryComponentInstall()}, "https://bnbloc.example.com")
+	if r := e.call(http.MethodPost, jack+"~app/notify", body); r.status != http.StatusOK {
+		t.Fatalf("a group notice = %d %s", r.status, r.body)
+	}
+	var groupItems []wire.NotificationPayload
+	for _, it := range outbox.Items() {
+		var p wire.NotificationPayload
+		_ = json.Unmarshal(it.EventJSON, &p)
+		if p.Group != "" {
+			if it.Notifier != "chat-bot" {
+				t.Fatalf("a group notice went to %s, which does not deliver to groups", it.Notifier)
+			}
+			groupItems = append(groupItems, p)
+		}
+	}
+	if len(groupItems) != 1 || groupItems[0].Group != "team-weekly" || len(groupItems[0].Recipients) != 0 || !strings.Contains(groupItems[0].Title, "Weekly report due") {
+		t.Fatalf("group notices = %+v", groupItems)
+	}
+	if recs := sink.take(); len(recs) == 0 || !strings.Contains(recs[len(recs)-1].Detail, "group team-weekly") {
+		t.Fatalf("audit = %+v", recs)
+	}
+	tok, _ := e.share(e.appA)
+	if r := e.call(http.MethodPost, shareBase(e.ticket("nora", tok))+"~app/notify", body); r.status != http.StatusForbidden {
+		t.Fatalf("a non-owner's group notice = %d %s", r.status, r.body)
+	}
+	if r := e.call(http.MethodPost, jack+"~app/notify", map[string]any{"to": "group:", "title": "x"}); r.status != http.StatusBadRequest {
+		t.Fatalf("an empty group = %d %s", r.status, r.body)
+	}
+}
