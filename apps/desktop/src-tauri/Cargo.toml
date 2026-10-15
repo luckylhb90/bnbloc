@@ -1,6 +1,6 @@
 [package]
 name = "bnbloc-desktop"
-version = "0.1.51"
+version = "0.1.52"
 description = "bnbloc desktop client"
 authors = ["bnbloc"]
 edition = "2021"
