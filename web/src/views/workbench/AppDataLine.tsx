@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { ArrowClockwiseIcon, ClockIcon, DatabaseIcon, DotsThreeIcon, DownloadSimpleIcon, FileCsvIcon, TrashIcon } from "@phosphor-icons/react";
+import { ArrowClockwiseIcon, ChatsCircleIcon, ClockIcon, DatabaseIcon, DotsThreeIcon, DownloadSimpleIcon, FileCsvIcon, TrashIcon } from "@phosphor-icons/react";
 import { useAutomateApp } from "@/views/room/automate";
 import { appCollectionCounts, appDataLineShown, appExportFileName, appStatsAnswer, collectionsLabel, documentsLabel } from "@/lib/appData";
 import { appDataApi } from "@/lib/appDataApi";
@@ -186,6 +186,11 @@ export function AppDataLine({
               Automate…
             </MenuItem>
           )}
+          {automate && (
+            <MenuItem icon={ChatsCircleIcon} onSelect={automate.groups}>
+              Group chats…
+            </MenuItem>
+          )}
           {mayClear && (
             <MenuItem icon={TrashIcon} onSelect={() => setConfirmClear(true)}>
               Clear data…
@@ -219,6 +224,11 @@ export function AppDataLine({
       {automate && (
         <button type="button" onClick={() => automate.open({ artifactId, title: appName })} className={CHIP} title="Run a task on this app at set times: remind, notify, report">
           <ClockIcon size={14} /> Automate…
+        </button>
+      )}
+      {automate && (
+        <button type="button" onClick={automate.groups} className={CHIP} title="Connect group chats this room's apps and AI tasks can notify">
+          <ChatsCircleIcon size={14} /> Group chats
         </button>
       )}
       {mayClear && (

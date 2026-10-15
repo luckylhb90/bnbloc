@@ -438,11 +438,69 @@ export interface AppNotifyReply {
 // app's title and the room's name.
 export interface AppNotifyTargets {
   recipients: string[];
-  // Group is the group a "group:<name>" notice goes to (no recipients).
+  // Group is the connected group chat a "group:<name>" notice goes to
+  // (no recipients): its name, notifier and address.
   group?: string;
+  groupNotifier?: string;
+  groupAddress?: string;
   appTitle: string;
   roomName: string;
 }
+
+// RoomGroup is a group chat connected to a room (docs/prd/2026-10-15-app-
+// identity-schedules-notify-ai.md §5a), as its members see it: the name
+// notices address ("group:<name>"), the notifier that delivers to it, who
+// connected it and when. The chat's address stays server-side.
+export interface RoomGroup {
+  name: string;
+  notifier: string;
+  connectedBy: string;
+  createdAtMs: number;
+}
+
+// RoomGroupsReply lists a room's connected group chats.
+export interface RoomGroupsReply {
+  groups: RoomGroup[];
+}
+
+// RoomGroupConnectRequest asks for a code connecting a group chat under
+// Name.
+export interface RoomGroupConnectRequest {
+  name: string;
+}
+
+// RoomGroupConnect is that code: posted in the group chat (where the
+// organization's bot is a member) before ExpiresAtMs, it connects the chat.
+export interface RoomGroupConnect {
+  name: string;
+  code: string;
+  expiresAtMs: number;
+}
+
+// NotifierGroupBindRequest is a notifier's report of a connect code posted
+// in a group chat (POST /v1/notifier/group-binds, signed like a reply):
+// the code as typed and the notifier's own address of the chat.
+export interface NotifierGroupBindRequest {
+  code: string;
+  address: string;
+}
+
+// NotifierGroupBindReply answers a bind: the room and the group's name (for
+// the bot's confirmation in the chat).
+export interface NotifierGroupBindReply {
+  roomName: string;
+  name: string;
+}
+
+// Bounds of a room's group chats.
+export const MaxRoomGroups = 20;
+export const MaxRoomGroupCodesOpen = 5;
+export const MaxGroupAddressLen = 512;
+// RoomGroupCodeTTLMs is how long a connect code binds.
+export const RoomGroupCodeTTLMs = 600000;
+// RoomGroupCodePrefix starts every connect code, so a notifier knows a
+// message is one.
+export const RoomGroupCodePrefix = "bnbloc-";
 
 // ---- wire/artifacts.go ----
 
@@ -2779,10 +2837,13 @@ export interface NotificationPayload {
   // agent_finished, agent_failed): each recipient then carries a
   // ReplyToken.
   reply?: NotificationReply;
-  // Group, when set, addresses the notification to the named group (a
-  // group chat the notifier knows) instead of members: Recipients is
-  // empty. Only a notifier declaring the groups capability receives one.
+  // Group, when set, addresses the notification to a group chat a room
+  // connected through this notifier instead of members: Recipients is
+  // empty, GroupAddress is the notifier's own address of the chat (what
+  // it reported when the chat was connected). Only a notifier declaring
+  // the groups capability receives one.
   group?: string;
+  groupAddress?: string;
 }
 
 // ---- wire/payloads.go ----

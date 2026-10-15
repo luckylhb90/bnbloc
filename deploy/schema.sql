@@ -940,6 +940,32 @@ CREATE TABLE IF NOT EXISTS app_docs (
   KEY idx_app_docs_by (app_id, collection, by_key, doc_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+-- Group chats a room's members connected to the room (docs/prd/2026-10-15-
+-- app-identity-schedules-notify-ai.md §5a): by name, delivered through one
+-- notifier at its own opaque address of the chat. Deleted with the room.
+CREATE TABLE IF NOT EXISTS room_groups (
+  tenant_id     VARCHAR(64) NOT NULL,
+  room_id       VARCHAR(64) NOT NULL,
+  name          VARCHAR(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
+  notifier      VARCHAR(128) NOT NULL,
+  address       VARCHAR(512) NOT NULL,
+  connected_by  VARCHAR(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
+  created_at_ms BIGINT NOT NULL,
+  PRIMARY KEY (tenant_id, room_id, name)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- One-time codes that connect a group chat to a room: posted in the chat,
+-- seen by the notifier's bot, spent at its bind. Deleted with the room.
+CREATE TABLE IF NOT EXISTS room_group_codes (
+  code          VARCHAR(32) PRIMARY KEY,
+  tenant_id     VARCHAR(64) NOT NULL,
+  room_id       VARCHAR(64) NOT NULL,
+  name          VARCHAR(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
+  created_by    VARCHAR(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
+  expires_at_ms BIGINT NOT NULL,
+  KEY idx_room_group_codes_room (tenant_id, room_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 -- Files an interactive app's pages uploaded (app.files): the bytes in the
 -- blob store (blob_key, like an attachment's), the name and the uploader's
 -- identity sealed under the app's data key, the rest routing metadata.

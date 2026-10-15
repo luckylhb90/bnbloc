@@ -116,7 +116,7 @@ func (s *Service) serveAppNotify(w http.ResponseWriter, r *http.Request, c appCa
 	ctx := tenant.NewContext(context.WithoutCancel(r.Context()), c.tenant)
 	if err := s.sendNotice(ctx, ev, targets); err != nil {
 		if errors.Is(err, notify.ErrNoGroupNotifier) {
-			httpx.WriteJSON(w, http.StatusConflict, httpx.ErrorBody{Error: "no notifier of the organization delivers to groups", Code: wire.AppGroupsUnavailable})
+			httpx.WriteJSON(w, http.StatusConflict, httpx.ErrorBody{Error: "the group chat's notifier no longer delivers here: connect the group again", Code: wire.AppGroupsUnavailable})
 			return
 		}
 		obs.ServerError(w, "queue the notice failed", err)
@@ -130,12 +130,13 @@ func (s *Service) serveAppNotify(w http.ResponseWriter, r *http.Request, c appCa
 	httpx.WriteJSON(w, http.StatusOK, wire.AppNotifyReply{Recipients: len(targets.Recipients)})
 }
 
-// sendNotice queues one notice: to its group through the notifiers that
-// deliver to groups (notify.ErrNoGroupNotifier when none does), else to
-// its members.
+// sendNotice queues one notice: to its connected group chat through the
+// notifier it was connected with (notify.ErrNoGroupNotifier when that
+// notifier no longer delivers to the tenant or to groups), else to its
+// members.
 func (s *Service) sendNotice(ctx context.Context, ev notify.Event, targets wire.AppNotifyTargets) error {
 	if targets.Group != "" {
-		ev.Group = targets.Group
+		ev.Group, ev.GroupNotifier, ev.GroupAddress = targets.Group, targets.GroupNotifier, targets.GroupAddress
 		_, err := s.Alerts.EmitGroup(ctx, ev)
 		return err
 	}

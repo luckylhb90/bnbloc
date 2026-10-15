@@ -57,6 +57,7 @@ func main() {
 		log.Fatalf("bnbloc-room: %v", err)
 	}
 	svc.AppDocs = backends.AppDocs
+	svc.RoomGroups = backends.RoomGroups
 	// Exports and agent reads of app data are audited.
 	svc.Audit = backends.ExtAudit
 	// A member's apps name who produced each (the source job's run record).

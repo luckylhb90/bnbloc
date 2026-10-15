@@ -77,7 +77,8 @@ recipe (any deliverable can be one; a video's cover is a frame saved as
 - For signed-in callers: `app.ai({prompt, input, json})`, the
   organization's AI on `input` (kept apart from your `prompt`), to
   `{text}` or `{json}`; `app.notify({to, title, text})`, a notice through
-  the organization's notifications, to "room", logins or "group:<name>".
+  the organization's notifications, to "room", logins or a group chat the
+  room connected ("group:<name>").
 - `app.subscribe(fn)` calls `fn` with `{appId, collection, id, version}`
   on every change and returns a function that stops it. No content
   (re-read what changed), no replay (read on load too). `version` 0:

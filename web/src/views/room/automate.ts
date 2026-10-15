@@ -9,6 +9,8 @@ import { createContext, useContext } from "react";
 export interface AutomateApp {
   // Opens a new AI task schedule naming the app.
   readonly open: (app: { readonly artifactId: string; readonly title: string }) => void;
+  // Opens the room's group chats (connect one for the app to notify).
+  readonly groups: () => void;
 }
 
 const AutomateContext = createContext<AutomateApp | null>(null);

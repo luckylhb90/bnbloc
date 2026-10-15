@@ -29,7 +29,7 @@ deliver them.
 | `budget_warning` | A monthly usage budget crosses its warning threshold, then 100% — each once per month (R12, `docs/prd/2026-10-08-batch-3-reliability-and-scale.md`). No room; `url` opens Settings (member budget) or Team (organization budget) when `BNBLOC_PUBLIC_URL` is set on activity. | The member (member budget) or the organization's org admins (organization budget). | None. |
 | `content_shared` | An author shares an expert, skill pack or prompt pack with a member, or moves their copy to a newer version (`docs/prd/2026-10-12-experts-and-teams.md`, step 4); also a member who joins a room with a standing room share and gets a copy then (realtime, "Gap closure" 2). One version notifies a member once. No room; `url` opens the Library. | Each recipient whose copy was created or updated. | The author. |
 | `content_review` | An author asks to publish a content component to the organization, or saves a new version of one the organization uses (the request opens by itself; the admins are notified only when no request was pending); an org admin approves or declines it. No room; `url` opens the Organization console (request) or the Library (decision). | The organization's org admins (request); the author (decision). | The author (request); the deciding admin (decision). |
-| `app_notice` | An interactive app's page calls `app.notify` (`docs/prd/2026-10-15-app-identity-schedules-notify-ai.md` §5). The title is the app's title, then the title the app gave; `url` opens the app in its room unless the app gave a link on this deployment. At most 30 an hour per app and 10 per sender; the same notice within 10 minutes is one. | The room's members (`to: "room"`), the logins the app's owners name that belong to the organization, or a group (`to: "group:<name>"`, owners only; below). | The member who sent it (never notified). |
+| `app_notice` | An interactive app's page calls `app.notify` (`docs/prd/2026-10-15-app-identity-schedules-notify-ai.md` §5). The title is the app's title, then the title the app gave; `url` opens the app in its room unless the app gave a link on this deployment. At most 30 an hour per app and 10 per sender; the same notice within 10 minutes is one. | The room's members (`to: "room"`), the logins the app's owners name that belong to the organization, or a group chat connected to the room (`to: "group:<name>"`, owners only; below). | The member who sent it (never notified). |
 
 Rules applied before anything is queued (`admin_alert` and `budget_warning`
 are operational and skip the first three: they reach exactly their
@@ -133,17 +133,29 @@ A notifier package:
   desktop plugin (`localSettings` on the plugin package), so no member
   credential is ever stored or sent server-side.
 
-**Groups.** A notifier that can post to a named group (a team's group
-chat) declares `"capabilities": ["groups"]` in its package. A notification
-for a group (an `app_notice` sent `to: "group:<name>"` by an app or an AI
-schedule) is queued only for such notifiers, as one payload whose `group`
-names the group and whose `recipients` is empty; members' preferences do
-not apply (the sender's rate limits and the event id do). Which names a
-notifier knows (and which chat each maps to) is the notifier's own
-configuration; an unknown group is a failed result
-(`{userId: "", ok: false, error}`), a transient failure a retryable one
-(the whole notification is retried). Without a groups notifier the send is
-refused (`groups_unavailable`).
+**Groups.** A notifier that can post into group chats declares
+`"capabilities": ["groups"]` in its package. The room's members connect
+a group chat to the room: they ask for a one-time code (`POST
+/v1/rooms/{room}/groups/connect {name}`, 10 minutes) and post it in the
+chat; the notifier's bot sees it and reports it, signed like a reply:
+
+```http
+POST /v1/notifier/group-binds
+X-Bnbloc-Component: corp-notify
+X-Bnbloc-Signature: t=…,v1=…
+
+{"code": "bnbloc-7K3QXMPA", "address": "<the notifier's own id of the chat>"}
+```
+
+bnbloc answers `{roomName, name}` (for the bot's confirmation in the chat),
+404 for an unknown or expired code. A notification for that group (an
+`app_notice` sent `to: "group:<name>"`) then goes to that notifier only,
+as one payload whose `group` is the name, `groupAddress` the address it
+reported, and `recipients` empty; members' preferences do not apply (the
+sender's rate limits and the event id do). The notifier needs no
+configuration of groups. A failure is `{userId: "", ok: false, error,
+retryable}` (retryable retries the whole notification). An unconnected
+name is refused (`groups_unavailable`).
 
 Install it like any component: Platform → Components (upload the package),
 or `bnbloc cores install --package corp-notify.json --signature

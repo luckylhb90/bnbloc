@@ -227,8 +227,68 @@ type AppNotifyReply struct {
 // app's title and the room's name.
 type AppNotifyTargets struct {
 	Recipients []string `json:"recipients"`
-	// Group is the group a "group:<name>" notice goes to (no recipients).
-	Group    string `json:"group,omitempty"`
-	AppTitle string `json:"appTitle"`
-	RoomName string `json:"roomName"`
+	// Group is the connected group chat a "group:<name>" notice goes to
+	// (no recipients): its name, notifier and address.
+	Group         string `json:"group,omitempty"`
+	GroupNotifier string `json:"groupNotifier,omitempty"`
+	GroupAddress  string `json:"groupAddress,omitempty"`
+	AppTitle      string `json:"appTitle"`
+	RoomName      string `json:"roomName"`
 }
+
+// RoomGroup is a group chat connected to a room (docs/prd/2026-10-15-app-
+// identity-schedules-notify-ai.md §5a), as its members see it: the name
+// notices address ("group:<name>"), the notifier that delivers to it, who
+// connected it and when. The chat's address stays server-side.
+type RoomGroup struct {
+	Name        string `json:"name"`
+	Notifier    string `json:"notifier"`
+	ConnectedBy string `json:"connectedBy"`
+	CreatedAtMs int64  `json:"createdAtMs"`
+}
+
+// RoomGroupsReply lists a room's connected group chats.
+type RoomGroupsReply struct {
+	Groups []RoomGroup `json:"groups"`
+}
+
+// RoomGroupConnectRequest asks for a code connecting a group chat under
+// Name.
+type RoomGroupConnectRequest struct {
+	Name string `json:"name"`
+}
+
+// RoomGroupConnect is that code: posted in the group chat (where the
+// organization's bot is a member) before ExpiresAtMs, it connects the chat.
+type RoomGroupConnect struct {
+	Name        string `json:"name"`
+	Code        string `json:"code"`
+	ExpiresAtMs int64  `json:"expiresAtMs"`
+}
+
+// NotifierGroupBindRequest is a notifier's report of a connect code posted
+// in a group chat (POST /v1/notifier/group-binds, signed like a reply):
+// the code as typed and the notifier's own address of the chat.
+type NotifierGroupBindRequest struct {
+	Code    string `json:"code"`
+	Address string `json:"address"`
+}
+
+// NotifierGroupBindReply answers a bind: the room and the group's name (for
+// the bot's confirmation in the chat).
+type NotifierGroupBindReply struct {
+	RoomName string `json:"roomName"`
+	Name     string `json:"name"`
+}
+
+// Bounds of a room's group chats.
+const (
+	MaxRoomGroups         = 20
+	MaxRoomGroupCodesOpen = 5
+	MaxGroupAddressLen    = 512
+	// RoomGroupCodeTTLMs is how long a connect code binds.
+	RoomGroupCodeTTLMs = 10 * 60 * 1000
+	// RoomGroupCodePrefix starts every connect code, so a notifier knows a
+	// message is one.
+	RoomGroupCodePrefix = "bnbloc-"
+)

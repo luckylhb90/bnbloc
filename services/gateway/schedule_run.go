@@ -152,6 +152,13 @@ func (s *Service) runSchedule(ctx context.Context, sc wire.RoomSchedule, slot ti
 		return fail("AI is not available: the organization has no AI model, or turned AI off")
 	}
 	actions := scheduleActions()
+	if groups := s.roomGroupNames(ctx, claims, sc.RoomID); len(groups) > 0 {
+		for i := range actions {
+			if actions[i].tool.Name == "notify" {
+				actions[i].tool.Description += " This room's group chats: " + strings.Join(groups, ", ") + "."
+			}
+		}
+	}
 	tools := make([]assist.Tool, len(actions))
 	byName := map[string]scheduleAction{}
 	for i, a := range actions {
@@ -448,6 +455,20 @@ func (r *scheduleRun) listAgents(ctx context.Context, _ json.RawMessage) (string
 	}
 	out, _ := json.Marshal(map[string]any{"agents": names})
 	return string(out), nil
+}
+
+// roomGroupNames are the group chats connected to the room, as "group:<name>"
+// (none when they cannot be read).
+func (s *Service) roomGroupNames(ctx context.Context, claims auth.Claims, roomID string) []string {
+	var out wire.RoomGroupsReply
+	if err := s.roomBackendDo(ctx, backendHTTP, http.MethodGet, "/v1/rooms/"+url.PathEscape(roomID)+"/groups", "", nil, claims.Subject, claims.Tenant, &out); err != nil {
+		return nil
+	}
+	names := make([]string, 0, len(out.Groups))
+	for _, g := range out.Groups {
+		names = append(names, wire.AppNotifyGroupPrefix+g.Name)
+	}
+	return names
 }
 
 // scheduleRoom is the room as the owner reads it (the assist's own room

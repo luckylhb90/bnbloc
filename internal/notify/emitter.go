@@ -68,27 +68,29 @@ type Event struct {
 	// RoomName, when set, is the room's display name, read by the producer
 	// already (else RoomName resolves it).
 	RoomName string
-	// Group, when set, addresses the event to a named group instead of
-	// members (EmitGroup): Recipients is ignored.
-	Group string
+	// Group, when set, addresses the event to a connected group chat
+	// instead of members (EmitGroup): its name, the notifier it was
+	// connected with and that notifier's address of it. Recipients is
+	// ignored.
+	Group, GroupNotifier, GroupAddress string
 }
 
-// ErrNoGroupNotifier: no notifier distributed to the tenant delivers to
-// groups.
-var ErrNoGroupNotifier = errors.New("no notifier of the organization delivers to groups")
+// ErrNoGroupNotifier: the group chat's notifier is not distributed to the
+// tenant, or does not declare the groups capability (any more).
+var ErrNoGroupNotifier = errors.New("the group chat's notifier does not deliver to groups here")
 
-// EmitGroup queues ev for its group through every notifier of the tenant
-// that declares the groups capability (opt-in ones included: a group is
+// EmitGroup queues ev for its group chat through the notifier it was
+// connected with, when that notifier is distributed to the tenant and
+// declares the groups capability (an opt-in notifier included: a group is
 // not a member who could opt in). Members' preferences do not apply (the
 // group is no member); the producer's rate limits and dedup key do.
-// ErrNoGroupNotifier when no notifier can carry it.
 func (e *Emitter) EmitGroup(ctx context.Context, ev Event) (bool, error) {
 	tid, err := tenant.Require(ctx)
 	if err != nil {
 		return false, err
 	}
-	if strings.TrimSpace(ev.Group) == "" {
-		return false, errors.New("a group event needs a group")
+	if strings.TrimSpace(ev.Group) == "" || ev.GroupNotifier == "" || ev.GroupAddress == "" {
+		return false, errors.New("a group event needs its group, notifier and address")
 	}
 	targets, err := e.Notifiers.Targets(ctx, tid)
 	if err != nil {
@@ -96,14 +98,14 @@ func (e *Emitter) EmitGroup(ctx context.Context, ev Event) (bool, error) {
 	}
 	now := e.now()
 	payload := e.payload(ctx, tid, ev, now)
-	payload.Group, payload.Recipients = ev.Group, []wire.NotificationRecipient{}
+	payload.Group, payload.GroupAddress, payload.Recipients = ev.Group, ev.GroupAddress, []wire.NotificationRecipient{}
 	body, err := json.Marshal(payload)
 	if err != nil {
 		return false, err
 	}
 	any, queued := false, false
 	for _, t := range targets {
-		if !t.Groups {
+		if !t.Groups || t.Name != ev.GroupNotifier {
 			continue
 		}
 		any = true

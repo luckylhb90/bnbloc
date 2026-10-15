@@ -427,7 +427,7 @@ function ScheduleEditor({
           label={recipient.kind === "ai" ? "Task" : "Message"}
           hint={
             recipient.kind === "ai"
-              ? "In your own words. At each run AI reads the room's apps' data and can notify people, post here or ask an agent, as you. Try it before turning it on."
+              ? "In your own words. At each run AI reads the room's apps' data and can notify people or a connected group chat (group:<name>), post here or ask an agent, as you. Try it before turning it on."
               : undefined
           }
         >

@@ -1,11 +1,14 @@
 package gateway
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/luckylhb90/bnbloc/internal/notify"
 	"github.com/luckylhb90/bnbloc/internal/store"
@@ -19,6 +22,9 @@ func notifyGW(t *testing.T) (*appGW, *store.MemoryNotifications, *recordedAudit)
 	e := newAppGW(t)
 	if e.gw.PlatformSettings == nil {
 		e.gw.PlatformSettings = store.NewMemoryPlatformSettings()
+		// The component pipeline (verifyNotifierCall's record lookup)
+		// reads the store the gateway was given.
+		e.gw.ExtPipe = NewCorePipeline(e.gw, e.gw.ExtAudit)
 	}
 	outbox := store.NewMemoryNotifications()
 	installTestNotifier(t, e.gw.PlatformSettings, "n1")
@@ -134,20 +140,58 @@ func TestAppNotifyHonoursPrefs(t *testing.T) {
 	}
 }
 
-// A group notice goes only to the notifiers that deliver to groups, as
-// one payload naming the group and no members; without such a notifier it
-// is refused with groups_unavailable; only the app's owners may send one.
+// connectGroup connects a group chat to the room as a member would: a
+// connect code from the room service, then the notifier's signed bind
+// with its address of the chat. It returns the bind's status.
+func (e *appGW) connectGroup(notifier, name, address string) int {
+	e.t.Helper()
+	r := e.roomCall("jack", http.MethodPost, "/v1/rooms/"+e.roomID+"/groups/connect", wire.RoomGroupConnectRequest{Name: name})
+	var code wire.RoomGroupConnect
+	if r.status != http.StatusCreated || json.Unmarshal(r.body, &code) != nil || !strings.HasPrefix(code.Code, wire.RoomGroupCodePrefix) {
+		e.t.Fatalf("connect code = %d %s", r.status, r.body)
+	}
+	secret, _, err := (&notify.SecretStore{Settings: e.gw.PlatformSettings}).Ensure(context.Background(), notifier, "root")
+	if err != nil {
+		e.t.Fatal(err)
+	}
+	// The code as a person types it in the chat: any case.
+	body, _ := json.Marshal(wire.NotifierGroupBindRequest{Code: strings.ToLower(code.Code), Address: address})
+	req, _ := http.NewRequest(http.MethodPost, e.srv.URL+"/v1/notifier/group-binds", bytes.NewReader(body))
+	req.Header.Set(wire.NotifierComponentHeader, notifier)
+	req.Header.Set(wire.NotificationSignatureHeader, notify.Sign(secret, time.Now(), body))
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		e.t.Fatal(err)
+	}
+	resp.Body.Close()
+	return resp.StatusCode
+}
+
+// A group chat is connected to the room by its members: a connect code,
+// posted in the chat, bound by a notifier that declares the groups
+// capability (others are refused). A group notice then goes to that
+// notifier only, with the chat's address; an unconnected name is refused
+// with groups_unavailable; only the app's owners may send one.
 func TestAppNotifyGroup(t *testing.T) {
 	e, outbox, sink := notifyGW(t)
-	jack := e.ticketBase("jack", e.appA)
-	body := map[string]any{"to": "group:team-weekly", "title": "Weekly report due", "text": "Fill it in by Friday"}
-	if r := e.call(http.MethodPost, jack+"~app/notify", body); r.status != http.StatusConflict || r.json()["code"] != wire.AppGroupsUnavailable {
-		t.Fatalf("a group notice without a group notifier = %d %s", r.status, r.body)
-	}
+	e.room.RoomGroups = e.b.RoomGroups
+	e.gw.NotifierReplies = e.b.ReplyTokens
 	installTestNotifier(t, e.gw.PlatformSettings, "chat-bot", "groups")
-	// A fresh emitter: the directory's records snapshot lives a few
-	// seconds (recordsTTL), longer than this test waits.
 	e.gw.Alerts = notify.NewEmitter(notify.Stores{Prefs: outbox, Outbox: outbox, Settings: e.gw.PlatformSettings, Installs: store.NewMemoryComponentInstall()}, "https://bnbloc.example.com")
+	jack := e.ticketBase("jack", e.appA)
+	body := map[string]any{"to": "group:weekly", "title": "Weekly report due", "text": "Fill it in by Friday"}
+	if r := e.call(http.MethodPost, jack+"~app/notify", body); r.status != http.StatusConflict || r.json()["code"] != wire.AppGroupsUnavailable {
+		t.Fatalf("an unconnected group = %d %s", r.status, r.body)
+	}
+	if code := e.connectGroup("n1", "weekly", "g-1"); code != http.StatusForbidden {
+		t.Fatalf("a notifier without the groups capability bound a chat: %d", code)
+	}
+	if code := e.connectGroup("chat-bot", "weekly", "g-42"); code != http.StatusOK {
+		t.Fatalf("bind = %d", code)
+	}
+	if r := e.roomCall("maya", http.MethodGet, "/v1/rooms/"+e.roomID+"/groups", nil); r.status != http.StatusOK || !strings.Contains(string(r.body), `"name":"weekly"`) || strings.Contains(string(r.body), "g-42") {
+		t.Fatalf("the room's groups = %d %s (the address stays server-side)", r.status, r.body)
+	}
 	if r := e.call(http.MethodPost, jack+"~app/notify", body); r.status != http.StatusOK {
 		t.Fatalf("a group notice = %d %s", r.status, r.body)
 	}
@@ -157,22 +201,26 @@ func TestAppNotifyGroup(t *testing.T) {
 		_ = json.Unmarshal(it.EventJSON, &p)
 		if p.Group != "" {
 			if it.Notifier != "chat-bot" {
-				t.Fatalf("a group notice went to %s, which does not deliver to groups", it.Notifier)
+				t.Fatalf("a group notice went to %s", it.Notifier)
 			}
 			groupItems = append(groupItems, p)
 		}
 	}
-	if len(groupItems) != 1 || groupItems[0].Group != "team-weekly" || len(groupItems[0].Recipients) != 0 || !strings.Contains(groupItems[0].Title, "Weekly report due") {
+	if len(groupItems) != 1 || groupItems[0].Group != "weekly" || groupItems[0].GroupAddress != "g-42" || len(groupItems[0].Recipients) != 0 {
 		t.Fatalf("group notices = %+v", groupItems)
 	}
-	if recs := sink.take(); len(recs) == 0 || !strings.Contains(recs[len(recs)-1].Detail, "group team-weekly") {
+	if recs := sink.take(); len(recs) == 0 || !strings.Contains(recs[len(recs)-1].Detail, "group weekly") {
 		t.Fatalf("audit = %+v", recs)
 	}
 	tok, _ := e.share(e.appA)
 	if r := e.call(http.MethodPost, shareBase(e.ticket("nora", tok))+"~app/notify", body); r.status != http.StatusForbidden {
 		t.Fatalf("a non-owner's group notice = %d %s", r.status, r.body)
 	}
-	if r := e.call(http.MethodPost, jack+"~app/notify", map[string]any{"to": "group:", "title": "x"}); r.status != http.StatusBadRequest {
-		t.Fatalf("an empty group = %d %s", r.status, r.body)
+	// Disconnected: refused again.
+	if r := e.roomCall("jack", http.MethodDelete, "/v1/rooms/"+e.roomID+"/groups/weekly", nil); r.status != http.StatusNoContent {
+		t.Fatalf("disconnect = %d %s", r.status, r.body)
+	}
+	if r := e.call(http.MethodPost, jack+"~app/notify", body); r.status != http.StatusConflict {
+		t.Fatalf("a disconnected group = %d %s", r.status, r.body)
 	}
 }

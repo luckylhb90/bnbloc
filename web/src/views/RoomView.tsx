@@ -54,6 +54,7 @@ import { JobProgressProvider } from "@/views/room/JobProgressStrip";
 import { SaveTemplateDialog } from "@/views/room/SaveTemplateDialog";
 import { TemplateStartCard } from "@/views/room/TemplateStartCard";
 import { SchedulesDialog } from "@/views/room/SchedulesDialog";
+import { GroupChatsDialog } from "@/views/room/GroupChatsDialog";
 import { RunsDialog } from "@/views/room/RunsDialog";
 import { CONTENT_SAVED, contentSaves, parseContentSaved } from "@/lib/contentSavedEvents";
 import { CONTENT_USES_CHANGED, contentUsesChanged } from "@/lib/contentUsesEvents";
@@ -98,6 +99,7 @@ export function RoomView({
   const [showSearch, setShowSearch] = useState(false);
   const [savingTemplate, setSavingTemplate] = useState(false);
   const [showSchedules, setShowSchedules] = useState(false);
+  const [showGroups, setShowGroups] = useState(false);
   // An app's "Automate…" opens the schedules on a new AI task about it.
   const [automating, setAutomating] = useState<string | undefined>();
   const [showRuns, setShowRuns] = useState(false);
@@ -345,6 +347,7 @@ export function RoomView({
               setAutomating(automateTaskSeed(app));
               setShowSchedules(true);
             },
+            groups: () => setShowGroups(true),
           }
         : null,
     [member],
@@ -667,6 +670,7 @@ export function RoomView({
           }}
         />
       )}
+      {showGroups && <GroupChatsDialog roomId={roomId} mayChange={member} onClose={() => setShowGroups(false)} />}
       {showRuns && <RunsDialog roomId={roomId} onClose={() => setShowRuns(false)} />}
       {quotaAsk && (
         <QuotaRequestDialog

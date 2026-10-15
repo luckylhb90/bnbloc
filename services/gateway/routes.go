@@ -179,6 +179,7 @@ func (s *Service) routes() []route {
 		// A notifier's signed call on a member's behalf.
 		open("POST /v1/notifier/replies", "the notifier component's signature", s.handleNotifierReply),
 		open("POST /v1/notifier/reply-refs", "the notifier component's signature", s.handleNotifierReplyRef),
+		open("POST /v1/notifier/group-binds", "the notifier component's signature", s.handleNotifierGroupBind),
 
 		// Content components (content_components.go and siblings). A write
 		// drives agents' configuration and spends the cost budget; whether

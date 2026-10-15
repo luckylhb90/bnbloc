@@ -1627,6 +1627,17 @@ WHERE r.channel_id = '' AND d.user_id IS NULL`)
 			return addColumnIfMissing(ctx, db, "room_schedules", "failed_runs", "BIGINT NOT NULL DEFAULT 0 AFTER last_summary")
 		},
 	},
+	{
+		// Group chats connected to rooms, and their connect codes
+		// (docs/prd/2026-10-15-app-identity-schedules-notify-ai.md §5a).
+		id: "2026_10_room_groups",
+		run: func(ctx context.Context, db sqlConn) error {
+			if err := createSchemaTable(ctx, db, "room_groups"); err != nil {
+				return err
+			}
+			return createSchemaTable(ctx, db, "room_group_codes")
+		},
+	},
 }
 
 // sqlConn is the statement surface a migration runs on. runMigrations passes

@@ -7,12 +7,11 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
-	"unicode"
-	"unicode/utf8"
 
 	"github.com/luckylhb90/bnbloc/internal/httpx"
 	"github.com/luckylhb90/bnbloc/internal/membership"
 	"github.com/luckylhb90/bnbloc/internal/obs"
+	"github.com/luckylhb90/bnbloc/internal/store"
 	"github.com/luckylhb90/bnbloc/internal/svcauth"
 	"github.com/luckylhb90/bnbloc/internal/tenant"
 	"github.com/luckylhb90/bnbloc/internal/wire"
@@ -40,6 +39,8 @@ var (
 	errAppNotifyLogins = errors.New("only the app's owners (the room's members) may notify people by login or a group")
 	// errAppNotifyGroup marks a group to (noticeGroup resolves it).
 	errAppNotifyGroup = errors.New("a group notice")
+	// errAppNotifyNoGroup: the room connected no group chat of that name.
+	errAppNotifyNoGroup = errors.New("no group chat of that name is connected to this room (connect one from the app's card)")
 )
 
 func (s *Service) handleAppNotifyTargets(w http.ResponseWriter, r *http.Request, a *appCall) {
@@ -101,8 +102,8 @@ func (s *Service) handleRoomNoticeTargets(w http.ResponseWriter, r *http.Request
 	httpx.WriteJSON(w, http.StatusOK, out)
 }
 
-// noticeGroup is a "group:<name>" to's group: the owner's only, a name of
-// at most wire.MaxNotifyGroupLen printable characters; "" for any other to.
+// noticeGroup is a "group:<name>" to's name: the owner's only; "" for any
+// other to.
 func noticeGroup(to json.RawMessage, owner bool) (string, error) {
 	var s string
 	if json.Unmarshal(to, &s) != nil || !strings.HasPrefix(s, wire.AppNotifyGroupPrefix) {
@@ -112,17 +113,32 @@ func noticeGroup(to json.RawMessage, owner bool) (string, error) {
 		return "", errAppNotifyLogins
 	}
 	name := strings.TrimSpace(strings.TrimPrefix(s, wire.AppNotifyGroupPrefix))
-	if name == "" || utf8.RuneCountInString(name) > wire.MaxNotifyGroupLen || strings.IndexFunc(name, unicode.IsControl) >= 0 {
+	if !validGroupName(name) {
 		return "", appdataInvalid(fmt.Sprintf("a group name is 1 to %d characters", wire.MaxNotifyGroupLen))
 	}
 	return name, nil
 }
 
-// noticeTargets resolves a notice's to: a group, or the members it reaches.
+// noticeTargets resolves a notice's to: a group chat connected to the
+// room (errAppNotifyNoGroup when none has the name), or the members it
+// reaches.
 func (s *Service) noticeTargets(ctx context.Context, tenantID, roomID string, owner bool, to json.RawMessage) (wire.AppNotifyTargets, error) {
-	group, err := noticeGroup(to, owner)
-	if err != nil || group != "" {
-		return wire.AppNotifyTargets{Recipients: []string{}, Group: group}, err
+	name, err := noticeGroup(to, owner)
+	if err != nil {
+		return wire.AppNotifyTargets{}, err
+	}
+	if name != "" {
+		if s.RoomGroups == nil {
+			return wire.AppNotifyTargets{}, errAppNotifyNoGroup
+		}
+		g, err := s.RoomGroups.GetRoomGroup(ctx, roomID, name)
+		if errors.Is(err, store.ErrRoomGroupNotFound) {
+			return wire.AppNotifyTargets{}, fmt.Errorf("%w: %q", errAppNotifyNoGroup, name)
+		}
+		if err != nil {
+			return wire.AppNotifyTargets{}, err
+		}
+		return wire.AppNotifyTargets{Recipients: []string{}, Group: g.Name, GroupNotifier: g.Notifier, GroupAddress: g.Address}, nil
 	}
 	recipients, err := s.noticeRecipients(ctx, tenantID, roomID, owner, to)
 	return wire.AppNotifyTargets{Recipients: recipients}, err

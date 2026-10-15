@@ -247,6 +247,9 @@ func writeAppError(w http.ResponseWriter, err error) {
 		status, msg = http.StatusForbidden, err.Error()
 	case errors.Is(err, store.ErrAppDocNotFound):
 		status, msg = http.StatusNotFound, "document not found"
+	case errors.Is(err, errAppNotifyNoGroup):
+		httpx.WriteJSON(w, http.StatusConflict, httpx.ErrorBody{Error: err.Error(), Code: wire.AppGroupsUnavailable})
+		return
 	case errors.Is(err, store.ErrRoomNotFound), errors.Is(err, store.ErrAppScope):
 		status, msg = http.StatusNotFound, "app not found"
 	case errors.Is(err, store.ErrAppDocExists):
