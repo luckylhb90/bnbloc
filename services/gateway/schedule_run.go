@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -100,6 +101,7 @@ func scheduleActions() []scheduleAction {
 				"title": map[string]any{"type": "string"},
 				"text":  map[string]any{"type": "string"},
 				"url":   map[string]any{"type": "string"},
+				"app":   map[string]any{"type": "string", "description": "artifactId of the room's app the notice is about: it opens that app and carries its name"},
 			}, "to", "title")}, run: (*scheduleRun).notify},
 		{tool: assist.Tool{Name: "post_message", Description: "Post a message in the room, as the schedule's owner, for its people.",
 			Parameters: objectParams(map[string]any{"text": map[string]any{"type": "string"}}, "text")}, run: (*scheduleRun).postMessage},
@@ -287,26 +289,44 @@ func (r *scheduleRun) appData(ctx context.Context, raw json.RawMessage) (string,
 // listApps lists the room's interactive apps (the room's deliverables that
 // are apps), as the owner reads them.
 func (r *scheduleRun) listApps(ctx context.Context) (string, error) {
-	var page struct {
-		Artifacts []wire.Artifact `json:"artifacts"`
+	list, err := r.roomApps(ctx)
+	if err != nil {
+		return "", err
 	}
-	if err := r.s.roomBackendDo(ctx, backendHTTP, http.MethodGet, "/v1/rooms/"+url.PathEscape(r.sc.RoomID)+"/artifacts", "", nil, r.claims.Subject, r.claims.Tenant, &page); err != nil {
-		return "", errors.New("the room's deliverables could not be read")
-	}
-	var apps []map[string]any
-	for _, a := range page.Artifacts {
-		if a.IsApp {
-			apps = append(apps, map[string]any{"artifactId": a.ArtifactID, "title": a.Title})
-		}
+	apps := []map[string]any{}
+	for _, a := range list {
+		apps = append(apps, map[string]any{"artifactId": a.ArtifactID, "title": a.Title})
 	}
 	out, _ := json.Marshal(map[string]any{"apps": apps})
 	r.record("app_data", "list the apps")
 	return string(out), nil
 }
 
+// roomApps are the room's interactive apps, as the owner reads them.
+func (r *scheduleRun) roomApps(ctx context.Context) ([]wire.Artifact, error) {
+	var page struct {
+		Artifacts []wire.Artifact `json:"artifacts"`
+	}
+	if err := r.s.roomBackendDo(ctx, backendHTTP, http.MethodGet, "/v1/rooms/"+url.PathEscape(r.sc.RoomID)+"/artifacts", "", nil, r.claims.Subject, r.claims.Tenant, &page); err != nil {
+		return nil, errors.New("the room's deliverables could not be read")
+	}
+	var apps []wire.Artifact
+	for _, a := range page.Artifacts {
+		if a.IsApp {
+			apps = append(apps, a)
+		}
+	}
+	return apps, nil
+}
+
 // notify sends a notice through the emitter, as the owner.
 func (r *scheduleRun) notify(ctx context.Context, raw json.RawMessage) (string, error) {
-	var in wire.AppNotifyRequest
+	var in struct {
+		wire.AppNotifyRequest
+		// App is the room's app the notice is about: it opens that app and
+		// carries its name, as a notice the app itself sends does.
+		App string `json:"app"`
+	}
 	if err := json.Unmarshal(raw, &in); err != nil {
 		return "", errors.New("invalid arguments")
 	}
@@ -318,6 +338,20 @@ func (r *scheduleRun) notify(ctx context.Context, raw json.RawMessage) (string, 
 		return "", fmt.Errorf("a run sends at most %d notices", maxScheduleNotices)
 	}
 	link := r.origin + "/#/room/" + url.PathEscape(r.sc.RoomID)
+	if app := strings.TrimSpace(in.App); app != "" {
+		apps, err := r.roomApps(ctx)
+		if err != nil {
+			return "", err
+		}
+		i := slices.IndexFunc(apps, func(a wire.Artifact) bool { return a.ArtifactID == app })
+		if i < 0 {
+			return "", errors.New("app is the artifactId of one of this room's apps (from app_data list)")
+		}
+		link += "?artifact=" + url.QueryEscape(app)
+		if t := strings.TrimSpace(apps[i].Title); t != "" {
+			in.Title = t + ": " + in.Title
+		}
+	}
 	if in.URL != "" {
 		u, err := url.Parse(in.URL)
 		o, oerr := url.Parse(r.origin)

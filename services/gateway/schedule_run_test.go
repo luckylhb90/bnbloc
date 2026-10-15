@@ -150,6 +150,33 @@ func TestAIScheduleRun(t *testing.T) {
 		t.Fatalf("a re-run of the slot queued %d notices", n)
 	}
 
+	// A notice about an app opens that app and carries its name, as a
+	// notice the app sends does; an id that is no app of the room is
+	// refused to the model.
+	model.turns = []any{
+		calls([2]string{"notify", fmt.Sprintf(`{"to":["nora"],"title":"Fill it in","app":%q}`, e.appA)}),
+		calls([2]string{"notify", `{"to":["nora"],"title":"x","app":"art_not_here"}`}),
+		map[string]any{"content": "ok"},
+	}
+	e.runAI("remind about the app", false)
+	var withApp, refusedApp string
+	for _, p := range queued(t, outbox) {
+		if strings.Contains(p.Title, "Fill it in") {
+			withApp = p.URL + " | " + p.Title
+		}
+	}
+	for _, m := range model.seen[len(model.seen)-1] {
+		if m["role"] == "tool" && strings.HasPrefix(fmt.Sprint(m["content"]), "error:") {
+			refusedApp = fmt.Sprint(m["content"])
+		}
+	}
+	if !strings.Contains(withApp, "?artifact="+e.appA) || !strings.Contains(withApp, ": Fill it in in ") {
+		t.Fatalf("an app-linked notice = %q", withApp)
+	}
+	if !strings.Contains(refusedApp, "artifactId of one of this room's apps") {
+		t.Fatalf("an unknown app was answered %q", refusedApp)
+	}
+
 	// Dry: reads for real, sends nothing, says what it would do.
 	before := len(queued(t, outbox))
 	model.turns = []any{calls([2]string{"notify", `{"to":"room","title":"Due"}`}), map[string]any{"content": "Would remind the room."}}
