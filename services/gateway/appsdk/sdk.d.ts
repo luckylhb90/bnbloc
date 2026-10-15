@@ -139,10 +139,19 @@ declare global {
     /** Asks the organization's AI model. prompt is the app's instruction,
      *  input the data to work on (an object is sent as its JSON), given to
      *  the model as data. json: answers {json} (an object) instead of
-     *  {text}. Signed-in callers only: 403 code "ai_sign_in_required" for
+     *  {text}. Signed-in callers only: 403 code "sign_in_required" for
      *  an anonymous visitor, 409 "ai_unavailable" where the organization
      *  has no model or turned AI off, 429 when the caller asks too often. */
     ai(req: { prompt: string; input?: string | object; json?: boolean }): Promise<{ text?: string; json?: Record<string, unknown> }>;
+    /** Sends a notice through the organization's notifications (its chat
+     *  bot, desktop, browser push: whatever each person uses). to: "room"
+     *  is the room's members (any signed-in caller); a list of logins is
+     *  for the app's owners only, and keeps the organization's people. Each
+     *  person's notification settings apply, the sender is never notified,
+     *  and it links to this app unless url (on this deployment) is given.
+     *  Plain text. Signed-in callers only (403 "sign_in_required"); 429
+     *  when the app sends too many. In the demo nothing is sent. */
+    notify(n: { to: "room" | string[]; title: string; text?: string; url?: string }): Promise<{ recipients: number }>;
     /** Calls fn with each change until the returned function is called.
      *  Live only: changes made while disconnected are not replayed. */
     subscribe(fn: (change: BnblocAppChange) => void): () => void;

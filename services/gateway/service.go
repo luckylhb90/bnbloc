@@ -164,6 +164,9 @@ type Service struct {
 	// assistLimiter throttles a member's AI assist runs (assistRate).
 	assistLimiter lazyLimiter
 	appLimiters   [appDims]struct{ read, write lazyLimiter }
+	// appNotifyLimiters bound app notices per app and per caller
+	// (app_notify.go).
+	appNotifyLimiters struct{ app, caller lazyLimiter }
 	// appFeedRecheck overrides how often an app's change feed re-resolves
 	// its capability (tests; zero: appFeedRecheck).
 	appFeedRecheck time.Duration

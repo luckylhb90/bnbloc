@@ -64,6 +64,9 @@ type Event struct {
 	// Reply, when set, makes the notification answerable (N1): where a
 	// member's reply from the notifier is posted (agentReplyTo/roomReplyTo).
 	Reply *wire.NotificationReply
+	// RoomName, when set, is the room's display name, read by the producer
+	// already (else RoomName resolves it).
+	RoomName string
 }
 
 // Emitter turns Events into outbox items for the context tenant. It is the
@@ -223,7 +226,9 @@ func FallbackRowID(eventID, member string) string {
 // payload builds the notifier payload of ev (recipients are set per channel).
 func (e *Emitter) payload(ctx context.Context, tid string, ev Event, now time.Time) wire.NotificationPayload {
 	roomName := ev.RoomID
-	if e.RoomName != nil {
+	if ev.RoomName != "" {
+		roomName = ev.RoomName
+	} else if e.RoomName != nil {
 		if n := strings.TrimSpace(e.RoomName(ctx, ev.RoomID)); n != "" {
 			roomName = n
 		}
@@ -378,6 +383,8 @@ func Allows(p store.NotificationPrefs, typ, roomID string) bool {
 		return p.ContentShared
 	case wire.NotificationContentReview:
 		return p.ContentReview
+	case wire.NotificationAppNotice:
+		return p.AppNotices
 	}
 	return false
 }

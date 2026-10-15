@@ -73,6 +73,11 @@ const (
 	// team's logs).
 	MaxAppAIPrompt = 8000
 	MaxAppAIInput  = 60000
+	// MaxAppNotifyLogins bounds the logins one app notice names, and
+	// MaxAppNotifyRecipients the people it reaches (a room's members
+	// included).
+	MaxAppNotifyLogins     = 100
+	MaxAppNotifyRecipients = 500
 )
 
 // The caps of a work (docs/prd/2026-10-13-works-gallery-and-make-similar.md):

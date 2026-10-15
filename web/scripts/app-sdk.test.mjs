@@ -144,6 +144,16 @@ test("ai posts the app's prompt and its input apart; an object input goes as its
   assert.equal(sdk.requests.length, 1);
 });
 
+test("notify posts to, title and text; refuses a call without a title or to before sending", async () => {
+  const sdk = boot(() => jsonResponse(200, { recipients: 3 }));
+  assert.deepEqual(plain(await sdk.app.notify({ to: "room", title: "Due Friday" })), { recipients: 3 });
+  assert.deepEqual(JSON.parse(sdk.requests[0].body), { to: "room", title: "Due Friday", text: "", url: "" });
+  assert.equal(sdk.requests[0].url, BASE + "notify");
+  await assert.rejects(sdk.app.notify({ to: "room" }), (e) => e.status === 400);
+  await assert.rejects(sdk.app.notify({ title: "x" }), (e) => e.status === 400);
+  assert.equal(sdk.requests.length, 1);
+});
+
 test("subscribe hands over only app_changed events, until unsubscribed", async () => {
   const frames =
     ": connected\n\n" +
@@ -244,6 +254,7 @@ test("demo mode answers the whole data API in the page's memory and never sends 
   await assert.rejects(votes.insert({ big: "x".repeat(70000) }), (e) => e.status === 413);
 
   assert.match(plain(await app.ai({ prompt: "p", input: "log" })).text, /log/);
+  assert.deepEqual(plain(await app.notify({ to: "room", title: "t" })), { recipients: 0 });
   // Files stay in the page too.
   const photo = new Blob(["png"], { type: "image/png" });
   const f = plain(await app.files.upload(photo));

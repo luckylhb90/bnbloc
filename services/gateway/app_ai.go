@@ -33,7 +33,7 @@ import (
 const appAIRequestBytes = 4 * (wire.MaxAppAIPrompt + wire.MaxAppAIInput)
 
 // errAppAIVisitor refuses app.ai to a caller who did not sign in.
-var errAppAIVisitor = &appError{status: http.StatusForbidden, code: wire.AppAISignInRequired, msg: "AI in this app is for people who signed in: open the link signed in"}
+var errAppAIVisitor = &appError{status: http.StatusForbidden, code: wire.AppSignInRequired, msg: "AI in this app is for people who signed in: open the link signed in"}
 
 // serveAppAI answers POST ~app/ai.
 func (s *Service) serveAppAI(w http.ResponseWriter, r *http.Request, c appCapability) {

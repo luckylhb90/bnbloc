@@ -182,11 +182,40 @@ type AppAIReply struct {
 	JSON map[string]any `json:"json,omitempty"`
 }
 
-// The codes of an app's ai refusals (httpx.ErrorBody.Code).
+// The codes of an app's ai and notify refusals (httpx.ErrorBody.Code).
 const (
-	// AppAISignInRequired: the caller did not sign in (an anonymous
-	// visitor), or is an agent.
-	AppAISignInRequired = "ai_sign_in_required"
+	// AppSignInRequired: the call is for people who signed in, and the
+	// caller is an anonymous visitor (or an agent).
+	AppSignInRequired = "sign_in_required"
 	// AppAIUnavailable: no assist model, or the organization turned AI off.
 	AppAIUnavailable = "ai_unavailable"
 )
+
+// AppNotifyRoom is the to of a notice for the room's members.
+const AppNotifyRoom = "room"
+
+// AppNotifyRequest is an app's notify call (POST ~app/notify): To is
+// AppNotifyRoom (the room's members) or a list of logins in the
+// organization; Title and Text are plain text; URL, when set, must be on
+// the deployment's own origin (default: the app's card in its room).
+type AppNotifyRequest struct {
+	To    json.RawMessage `json:"to"`
+	Title string          `json:"title"`
+	Text  string          `json:"text,omitempty"`
+	URL   string          `json:"url,omitempty"`
+}
+
+// AppNotifyReply answers it: how many people the notice was addressed to
+// (each one's preferences and mutes still apply).
+type AppNotifyReply struct {
+	Recipients int `json:"recipients"`
+}
+
+// AppNotifyTargets is the room service's resolution of a notice's to
+// (POST /internal/v1/app/notify-targets): the members it reaches, the
+// app's title and the room's name.
+type AppNotifyTargets struct {
+	Recipients []string `json:"recipients"`
+	AppTitle   string   `json:"appTitle"`
+	RoomName   string   `json:"roomName"`
+}

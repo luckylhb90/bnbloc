@@ -18,6 +18,7 @@
  *   const f = await app.files.upload(input.files[0]);   // {id, name, type, size}
  *   img.src = await app.files.url(f.id);                // a blob: URL of its bytes
  *   const {text} = await app.ai({prompt: "Tidy this log.", input: log});  // signed-in callers
+ *   await app.notify({to: "room", title: "Report due", text: "Friday 18:00"});
  *
  * Every call is relative to the capability the page was opened with (a
  * member's site ticket or a public share link), so the page handles no
@@ -282,6 +283,20 @@
     var body = { prompt: req.prompt, input: typeof req.input === "string" ? req.input : req.input === undefined ? "" : JSON.stringify(req.input), json: !!req.json };
     if (memory) return memory.ai(body);
     return call("POST", "ai", body);
+  }
+
+  // ---- notify ----
+
+  // notify sends a notice through the organization's notifications: to
+  // "room" (the room's members) or a list of logins (the app's owners
+  // only). Each person's notification settings apply. Signed-in callers
+  // only.
+  function notify(n) {
+    if (!n || typeof n.title !== "string" || !n.title.trim()) return Promise.reject(appError(400, "", "notify needs a title"));
+    if (n.to !== "room" && !Array.isArray(n.to)) return Promise.reject(appError(400, "", 'notify needs to: "room" or a list of logins'));
+    var body = { to: n.to, title: n.title, text: n.text || "", url: n.url || "" };
+    if (memory) return Promise.resolve({ recipients: 0 });
+    return call("POST", "notify", body);
   }
 
   // ---- the change feed ----
@@ -584,6 +599,7 @@
     me: function () { return call("GET", "me"); },
     files: files,
     ai: ai,
+    notify: notify,
     subscribe: subscribe,
   };
 

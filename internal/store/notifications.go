@@ -23,13 +23,15 @@ type NotificationPrefs struct {
 	// ContentReview: content waits for the member's approval (org
 	// admins), or an admin decided the member's publish request.
 	ContentReview bool
-	QuietRooms    []string
-	UpdatedAtMs   int64
+	// AppNotices: an interactive app sent the member a notice.
+	AppNotices  bool
+	QuietRooms  []string
+	UpdatedAtMs int64
 }
 
 // DefaultNotificationPrefs is the setting of a member who never saved any.
 func DefaultNotificationPrefs() NotificationPrefs {
-	return NotificationPrefs{Mentions: true, AgentFinished: true, AgentFailed: true, BorrowRequests: true, ContentShared: true, ContentReview: true, QuietRooms: []string{}}
+	return NotificationPrefs{Mentions: true, AgentFinished: true, AgentFailed: true, BorrowRequests: true, ContentShared: true, ContentReview: true, AppNotices: true, QuietRooms: []string{}}
 }
 
 // NotificationPrefsStore persists per-member notification settings keyed
@@ -319,6 +321,17 @@ func (m *MemoryNotifications) Item(tenantID, id, notifier string) (NotificationO
 		return NotificationOutboxItem{}, false
 	}
 	return row.item, true
+}
+
+// Items returns every stored outbox item (tests and diagnostics).
+func (m *MemoryNotifications) Items() []NotificationOutboxItem {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := make([]NotificationOutboxItem, 0, len(m.outbox))
+	for _, row := range m.outbox {
+		out = append(out, row.item)
+	}
+	return out
 }
 
 // Len returns how many outbox items are stored (tests and diagnostics).

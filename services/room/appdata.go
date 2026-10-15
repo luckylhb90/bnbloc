@@ -40,6 +40,7 @@ import (
 //	GET    /internal/v1/app/export               owners: ?collection=&format=json|csv → the data, streamed (audited)
 //	DELETE /internal/v1/app/data                 owners: delete all data            → wire.AppDataWiped
 //	…/internal/v1/app/files…                     the app's files (appfiles.go)
+//	POST   /internal/v1/app/notify-targets       who a notice reaches (appnotify.go)
 //
 // The scope comes ONLY from the request's signed assertions, never from the
 // path, query or body (no route names an app, room or tenant):
@@ -95,6 +96,7 @@ func (s *Service) registerAppDataRoutes(mux *http.ServeMux) {
 	route("GET /internal/v1/app/export", appOwnerRead, s.handleAppExport)
 	route("DELETE /internal/v1/app/data", appOwner, s.handleAppWipe)
 	s.registerAppFileRoutes(route)
+	route("POST /internal/v1/app/notify-targets", appRead, s.handleAppNotifyTargets)
 }
 
 // appNeed is what a route needs of the app before its handler runs.
@@ -240,7 +242,7 @@ func writeAppError(w http.ResponseWriter, err error) {
 		status, msg = http.StatusRequestEntityTooLarge, err.Error()
 	case errors.Is(err, appdata.ErrInvalid):
 		status, msg = http.StatusBadRequest, err.Error()
-	case errors.Is(err, errAppNotYours):
+	case errors.Is(err, errAppNotYours), errors.Is(err, errAppNotifyLogins):
 		status, msg = http.StatusForbidden, err.Error()
 	case errors.Is(err, store.ErrAppDocNotFound):
 		status, msg = http.StatusNotFound, "document not found"

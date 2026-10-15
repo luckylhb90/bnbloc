@@ -35,6 +35,10 @@ const (
 	// decided. Room-less; it links to the Organization console or the
 	// Library.
 	NotificationContentReview = "content_review"
+	// NotificationAppNotice is a notice an interactive app sent to the
+	// room's members or to named people of the organization (app.notify):
+	// its title is the app's, and it links to the app.
+	NotificationAppNotice = "app_notice"
 )
 
 // AdminAlertRequest is the body of POST /v1/platform/alerts. Recipients
@@ -74,6 +78,7 @@ type NotificationPrefs struct {
 	BorrowRequests bool     `json:"borrowRequests"`
 	ContentShared  bool     `json:"contentShared"`
 	ContentReview  bool     `json:"contentReview"`
+	AppNotices     bool     `json:"appNotices"`
 	QuietRooms     []string `json:"quietRooms"`
 }
 

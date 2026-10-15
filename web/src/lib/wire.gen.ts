@@ -397,12 +397,41 @@ export interface AppAIReply {
   json?: Record<string, unknown>;
 }
 
-// The codes of an app's ai refusals (httpx.ErrorBody.Code).
-// AppAISignInRequired: the caller did not sign in (an anonymous
-// visitor), or is an agent.
-export const AppAISignInRequired = "ai_sign_in_required";
+// The codes of an app's ai and notify refusals (httpx.ErrorBody.Code).
+// AppSignInRequired: the call is for people who signed in, and the
+// caller is an anonymous visitor (or an agent).
+export const AppSignInRequired = "sign_in_required";
 // AppAIUnavailable: no assist model, or the organization turned AI off.
 export const AppAIUnavailable = "ai_unavailable";
+
+// AppNotifyRoom is the to of a notice for the room's members.
+export const AppNotifyRoom = "room";
+
+// AppNotifyRequest is an app's notify call (POST ~app/notify): To is
+// AppNotifyRoom (the room's members) or a list of logins in the
+// organization; Title and Text are plain text; URL, when set, must be on
+// the deployment's own origin (default: the app's card in its room).
+export interface AppNotifyRequest {
+  to: unknown;
+  title: string;
+  text?: string;
+  url?: string;
+}
+
+// AppNotifyReply answers it: how many people the notice was addressed to
+// (each one's preferences and mutes still apply).
+export interface AppNotifyReply {
+  recipients: number;
+}
+
+// AppNotifyTargets is the room service's resolution of a notice's to
+// (POST /internal/v1/app/notify-targets): the members it reaches, the
+// app's title and the room's name.
+export interface AppNotifyTargets {
+  recipients: string[];
+  appTitle: string;
+  roomName: string;
+}
 
 // ---- wire/artifacts.go ----
 
@@ -2351,6 +2380,11 @@ export const MaxAppUploadBytes = 26230784;
 // team's logs).
 export const MaxAppAIPrompt = 8000;
 export const MaxAppAIInput = 60000;
+// MaxAppNotifyLogins bounds the logins one app notice names, and
+// MaxAppNotifyRecipients the people it reaches (a room's members
+// included).
+export const MaxAppNotifyLogins = 100;
+export const MaxAppNotifyRecipients = 500;
 
 // The caps of a work (docs/prd/2026-10-13-works-gallery-and-make-similar.md):
 // contentpkg's work kind enforces them.
@@ -2561,6 +2595,10 @@ export const NotificationContentShared = "content_shared";
 // decided. Room-less; it links to the Organization console or the
 // Library.
 export const NotificationContentReview = "content_review";
+// NotificationAppNotice is a notice an interactive app sent to the
+// room's members or to named people of the organization (app.notify):
+// its title is the app's, and it links to the app.
+export const NotificationAppNotice = "app_notice";
 
 // AdminAlertRequest is the body of POST /v1/platform/alerts. Recipients
 // default to every configured platform super-admin.
@@ -2597,6 +2635,7 @@ export interface NotificationPrefs {
   borrowRequests: boolean;
   contentShared: boolean;
   contentReview: boolean;
+  appNotices: boolean;
   quietRooms: string[];
 }
 

@@ -1603,6 +1603,14 @@ WHERE r.channel_id = '' AND d.user_id IS NULL`)
 			return createSchemaTable(ctx, db, "app_files")
 		},
 	},
+	{
+		// The switch for app notices (app.notify), on for every member who
+		// saved prefs before.
+		id: "2026_10_notification_prefs_app_notices",
+		run: func(ctx context.Context, db sqlConn) error {
+			return addColumnIfMissing(ctx, db, "notification_prefs", "app_notices", "TINYINT(1) NOT NULL DEFAULT 1 AFTER content_review")
+		},
+	},
 }
 
 // sqlConn is the statement surface a migration runs on. runMigrations passes

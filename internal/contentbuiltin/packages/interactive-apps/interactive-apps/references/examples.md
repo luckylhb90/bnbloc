@@ -197,7 +197,7 @@ async function polish(textarea, status) {
     textarea.value = text;
     status.textContent = "Polished: edit it or save it.";
   } catch (e) {
-    status.textContent = e.code === "ai_sign_in_required" ? "Sign in to use AI." : "AI is not available (" + e.status + ").";
+    status.textContent = e.code === "sign_in_required" ? "Sign in to use AI." : "AI is not available (" + e.status + ").";
   }
 }
 ```

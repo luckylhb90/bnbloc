@@ -29,6 +29,7 @@ deliver them.
 | `budget_warning` | A monthly usage budget crosses its warning threshold, then 100% — each once per month (R12, `docs/prd/2026-10-08-batch-3-reliability-and-scale.md`). No room; `url` opens Settings (member budget) or Team (organization budget) when `BNBLOC_PUBLIC_URL` is set on activity. | The member (member budget) or the organization's org admins (organization budget). | None. |
 | `content_shared` | An author shares an expert, skill pack or prompt pack with a member, or moves their copy to a newer version (`docs/prd/2026-10-12-experts-and-teams.md`, step 4); also a member who joins a room with a standing room share and gets a copy then (realtime, "Gap closure" 2). One version notifies a member once. No room; `url` opens the Library. | Each recipient whose copy was created or updated. | The author. |
 | `content_review` | An author asks to publish a content component to the organization, or saves a new version of one the organization uses (the request opens by itself; the admins are notified only when no request was pending); an org admin approves or declines it. No room; `url` opens the Organization console (request) or the Library (decision). | The organization's org admins (request); the author (decision). | The author (request); the deciding admin (decision). |
+| `app_notice` | An interactive app's page calls `app.notify` (`docs/prd/2026-10-15-app-identity-schedules-notify-ai.md` §5). The title is the app's title, then the title the app gave; `url` opens the app in its room unless the app gave a link on this deployment. At most 30 an hour per app and 10 per sender; the same notice within 10 minutes is one. | The room's members (`to: "room"`), or the logins the app's owners name that belong to the organization. | The member who sent it (never notified). |
 
 Rules applied before anything is queued (`admin_alert` and `budget_warning`
 are operational and skip the first three: they reach exactly their
@@ -170,14 +171,16 @@ own settings; `PUT` replaces the whole object):
   "borrowRequests": true,
   "contentShared": true,
   "contentReview": true,
+  "appNotices": true,
   "quietRooms": ["room-a"]
 }
 ```
 
 One switch per type a member can turn off: `mentions`, `agentFinished`,
 `agentFailed`, `borrowRequests` (`borrow_request`), `contentShared`
-(`content_shared`) and `contentReview` (`content_review`, the requests an
-org admin reviews and the decisions on the member's own requests).
+(`content_shared`), `contentReview` (`content_review`, the requests an
+org admin reviews and the decisions on the member's own requests) and
+`appNotices` (`app_notice`).
 A member who never saved preferences has everything on and no quiet rooms
 (the stored columns default on, so prefs saved before a switch existed
 keep it on).

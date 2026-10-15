@@ -564,6 +564,7 @@ CREATE TABLE IF NOT EXISTS notification_prefs (
   borrow_requests TINYINT(1) NOT NULL,
   content_shared  TINYINT(1) NOT NULL DEFAULT 1,
   content_review  TINYINT(1) NOT NULL DEFAULT 1,
+  app_notices     TINYINT(1) NOT NULL DEFAULT 1,
   quiet_rooms     JSON NOT NULL,
   updated_at_ms   BIGINT NOT NULL,
   PRIMARY KEY (tenant_id, user_id)

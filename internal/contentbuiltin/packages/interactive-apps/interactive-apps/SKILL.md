@@ -74,8 +74,10 @@ recipe (any deliverable can be one; a video's cover is a frame saved as
 - `app.files.upload(file, {public})`: a picked file (chat attachment
   types, 25 MiB) to `{id, name, type, size}`; keep `id` in a document.
   `app.files.url(id)` shows it, `app.files.remove(id)` deletes it.
-- `app.ai({prompt, input, json})`: the organization's AI on `input`, kept
-  apart from your `prompt`; `{text}`, or `{json}`. Signed-in callers only.
+- For signed-in callers: `app.ai({prompt, input, json})`, the
+  organization's AI on `input` (kept apart from your `prompt`), to
+  `{text}` or `{json}`; `app.notify({to, title, text})`, a notice through
+  the organization's notifications, to "room" or a list of logins.
 - `app.subscribe(fn)` calls `fn` with `{appId, collection, id, version}`
   on every change and returns a function that stops it. No content
   (re-read what changed), no replay (read on load too). `version` 0:
@@ -115,9 +117,7 @@ API calls:
 - **Live results:** `subscribe` and re-run the `find` on each change.
   Private votes count only for owners: show visitors a thank-you, or make
   votes public.
-- **Closing:** the app's own code: a closing time checked before the form
-  shows. A direct API call can still write after it: when you report,
-  leave out documents created after the close (`_createdAt`).
+- **Closing:** a closing time in the code (see the poll example).
 
 ## Who opens it
 

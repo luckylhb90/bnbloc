@@ -28,9 +28,9 @@ func (m *MySQLNotifications) GetNotificationPrefs(ctx context.Context, userID st
 	var p NotificationPrefs
 	var quiet string
 	err = m.DB.QueryRowContext(ctx,
-		`SELECT mentions, agent_finished, agent_failed, borrow_requests, content_shared, content_review, quiet_rooms, updated_at_ms
+		`SELECT mentions, agent_finished, agent_failed, borrow_requests, content_shared, content_review, app_notices, quiet_rooms, updated_at_ms
 		 FROM notification_prefs WHERE tenant_id=? AND user_id=?`, tid, userID).
-		Scan(&p.Mentions, &p.AgentFinished, &p.AgentFailed, &p.BorrowRequests, &p.ContentShared, &p.ContentReview, &quiet, &p.UpdatedAtMs)
+		Scan(&p.Mentions, &p.AgentFinished, &p.AgentFailed, &p.BorrowRequests, &p.ContentShared, &p.ContentReview, &p.AppNotices, &quiet, &p.UpdatedAtMs)
 	if errors.Is(err, sql.ErrNoRows) {
 		return NotificationPrefs{}, false, nil
 	}
@@ -59,12 +59,12 @@ func (m *MySQLNotifications) PutNotificationPrefs(ctx context.Context, userID st
 		return err
 	}
 	_, err = m.DB.ExecContext(ctx,
-		`INSERT INTO notification_prefs (tenant_id, user_id, mentions, agent_finished, agent_failed, borrow_requests, content_shared, content_review, quiet_rooms, updated_at_ms)
-		 VALUES (?,?,?,?,?,?,?,?,?,?)
+		`INSERT INTO notification_prefs (tenant_id, user_id, mentions, agent_finished, agent_failed, borrow_requests, content_shared, content_review, app_notices, quiet_rooms, updated_at_ms)
+		 VALUES (?,?,?,?,?,?,?,?,?,?,?)
 		 ON DUPLICATE KEY UPDATE mentions=VALUES(mentions), agent_finished=VALUES(agent_finished), agent_failed=VALUES(agent_failed),
 		   borrow_requests=VALUES(borrow_requests), content_shared=VALUES(content_shared), content_review=VALUES(content_review),
-		   quiet_rooms=VALUES(quiet_rooms), updated_at_ms=VALUES(updated_at_ms)`,
-		tid, userID, p.Mentions, p.AgentFinished, p.AgentFailed, p.BorrowRequests, p.ContentShared, p.ContentReview, quiet, p.UpdatedAtMs)
+		   app_notices=VALUES(app_notices), quiet_rooms=VALUES(quiet_rooms), updated_at_ms=VALUES(updated_at_ms)`,
+		tid, userID, p.Mentions, p.AgentFinished, p.AgentFailed, p.BorrowRequests, p.ContentShared, p.ContentReview, p.AppNotices, quiet, p.UpdatedAtMs)
 	return err
 }
 

@@ -44,7 +44,7 @@ func TestAppAI(t *testing.T) {
 
 	tok, _ := e.shareWith(e.appA, "anyone")
 	vis := visitorHeader(e.visitor(tok, ""))
-	if r := e.call(http.MethodPost, shareBase(tok)+"~app/ai", wire.AppAIRequest{Prompt: "p"}, vis); r.status != http.StatusForbidden || r.json()["code"] != wire.AppAISignInRequired {
+	if r := e.call(http.MethodPost, shareBase(tok)+"~app/ai", wire.AppAIRequest{Prompt: "p"}, vis); r.status != http.StatusForbidden || r.json()["code"] != wire.AppSignInRequired {
 		t.Fatalf("a visitor's ai = %d %s", r.status, r.body)
 	}
 

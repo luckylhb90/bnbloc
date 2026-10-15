@@ -7,7 +7,7 @@ export type { MemberNotifier, NotificationPrefs, NotificationTestResult } from "
 import type { NotificationPrefs, NotificationTestResult } from "./wire.gen.ts";
 
 // NotificationToggle is a per-type switch of the member's preferences.
-export type NotificationToggle = "mentions" | "agentFinished" | "agentFailed" | "borrowRequests" | "contentShared" | "contentReview";
+export type NotificationToggle = "mentions" | "agentFinished" | "agentFailed" | "borrowRequests" | "contentShared" | "contentReview" | "appNotices";
 
 // NOTIFICATION_TOGGLES are Settings → Notifications' switches, one per
 // notification type a member can turn off.
@@ -18,6 +18,7 @@ export const NOTIFICATION_TOGGLES: readonly { readonly key: NotificationToggle; 
   { key: "borrowRequests", label: "Borrow requests", hint: "A member asks to use (or needs more runs of) your agent." },
   { key: "contentShared", label: "Shared with you", hint: "Someone shares an expert, skill pack or prompt pack with you, or with a room you join." },
   { key: "contentReview", label: "Content reviews", hint: "Content waits for your approval as an organization admin, or an admin decided on content you asked to publish." },
+  { key: "appNotices", label: "App notices", hint: "An interactive app (a poll, a form, a weekly report) sends you a reminder or an update." },
 ];
 
 // The server default for a member who never saved preferences.
@@ -28,6 +29,7 @@ export const DEFAULT_NOTIFICATION_PREFS: NotificationPrefs = {
   borrowRequests: true,
   contentShared: true,
   contentReview: true,
+  appNotices: true,
   quietRooms: [],
 };
 
