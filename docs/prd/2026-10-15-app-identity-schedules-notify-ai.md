@@ -78,33 +78,66 @@ me(): Promise<{
   `me().account.login`, read-only; ask people to type a name only on an
   `anyone` link.
 
-## 4. Schedules that act on the app
+## 4. Schedules that act: a task in plain words, run by AI
 
-A schedule gains a third recipient, next to `room` and `agent`: **`app`**.
+Revised 2026-10-15 (the first draft had apps ship `on/<name>.js` handlers
+run in a JS sandbox): schedules should be general and AI native, not a
+code runtime per app.
 
-- **What it does.** At its time, it calls the app's own handler, with no
-  agent turn and no page open: a small server-side function the app ships,
-  `on/<name>.js`, run sandboxed with the SDK only.
-  - It reads and writes the app's data as an owner.
-  - It may call `notify` and `ai` (sections 5 and 6).
-  - It has a time and memory cap per run, and no network.
-- **Why not an agent turn.** "Remind the team on Thursday" must not
-  depend on someone's desktop being online, and must not cost a model turn
-  each week. An agent schedule stays the way to ask for judgement ("write
-  the report"); an app schedule is the app's own logic.
-- **Who creates it.** The app's owners. Schedules are created as today
-  (`/v1/rooms/{room}/schedules`), with `recipient: {kind: "app", appId,
-  handler}`, and owned by the member who created them, so pausing,
-  limits and "the creator left" work as today. The agent creates none: it
-  writes the handler, and the member turns the schedule on from the app's
-  card ("Run every Thursday 09:00"), or the app's manifest proposes it.
-- **One engine.** `internal/schedule` stays the one owner of when.
-  Realtime's scheduler gains the new recipient's dispatch, nothing else.
+A schedule is **when** plus **what**. "When" is `internal/schedule`, as
+today. "What" gains a third kind next to `room` (post a message) and
+`agent` (a message an agent works on): **`ai`**, a task in plain words
+("remind whoever has not filled in this week's report, with the link")
+that the platform's assist model carries out with a small set of
+**actions**.
+
+- **No code to write.** Nobody writes a handler: not the agent that built
+  the app, not the member. A member says what should happen and when, in
+  their own words, from the app's card ("Automate…") or the room's
+  schedules; the `draft-schedule` assist turns it into the recurrence and
+  the task. The agent's skill does not change.
+- **Actions are a registry, each with its one owner.** An action is a name,
+  a description, an input schema and a function; the run offers them to
+  the model as tools (OpenAI-compatible `tools`). The first ones:
+  - `app_data` (`list`, `find`, `get`): the room's apps' data, read as the
+    schedule's owner (an app owner: every document, `_author`), through
+    the room service's app API, the same one the room tool uses;
+  - `notify`: section 5's one function (members, logins, `channel:`);
+  - `post_message`: a message in the room, as the owner (PostChat);
+  - `ask_agent`: a message to one of the room's agents, as the owner (the
+    `agent` recipient's path: borrow rules at drive time), for work that
+    needs files or judgement ("write the report").
+
+  Adding a capability later is adding an action; delivery stays the
+  notifier components', and a notifier that delivers to groups extends
+  `notify` without a new action.
+- **How a run goes.** Realtime's scheduler claims the slot (as today) and
+  hands an `ai` slot to the gateway (`POST /internal/v1/schedules/run`,
+  service-signed), because only the gateway calls the model. The gateway
+  runs the loop: the task as the instruction, the room's apps and the
+  clock as fenced context, tool calls answered by actions, until the model
+  answers without a call. It records a short summary of what it did on the
+  schedule ("notified 3 people", "nothing to do").
+- **Bounds that are real, not clocks.** A run has a step cap (tool calls),
+  a per-run notice cap, and the assist budget; no wall-clock cap. Each
+  notice's dedup key is the schedule, the slot and the recipient, so a
+  re-claimed slot (a crash) never notifies twice.
+- **Try it first.** "Run now" in dry mode runs the loop with actions that
+  read for real and only report what they would send or post. The member
+  sees "would notify maya, jack: …" before turning it on.
+- **Why not an agent turn.** An agent turn needs someone's desktop online
+  and costs a full turn every time; an `ai` run is a few assist calls in
+  the gateway. When the work does need an agent, `ask_agent` hands it on.
+- **Who.** The schedule's owner is its creator, as today: they must still
+  be a room member (else the schedule pauses), the run acts with their
+  rights, spends their organization's assist budget, and is audited as
+  `kind: assist` with the schedule id. An organization with
+  `assistDisabled` cannot create or run `ai` schedules.
 
 ## 5. Notify from an app
 
-The SDK adds `app.notify({to, title, text, url?})`, from a page or a
-handler.
+The SDK adds `app.notify({to, title, text, url?})` from a page; an `ai`
+schedule's `notify` action is the same function.
 
 - **Recipients** are people, not addresses:
   - `to: "room"` means the room's members;
@@ -121,13 +154,13 @@ handler.
   call fails with a sentence the app shows.
 - **Rules only the platform can enforce:**
   - who may notify: a page only for its caller's own link session, a
-    handler as its schedule's owner;
+    schedule as its owner;
   - rate limits per app and per recipient;
   - every notice is signed with the app's name and links back to it.
 
 ## 6. AI from an app
 
-The SDK adds `app.ai({prompt, input?, json?})`, from a page or a handler.
+The SDK adds `app.ai({prompt, input?, json?})`, from a page.
 
 - **One model owner.** The call is an assist run: the organization's assist
   model (or the platform's), its key, its cost budget and its audit row
@@ -138,7 +171,6 @@ The SDK adds `app.ai({prompt, input?, json?})`, from a page or a handler.
 - **Who pays and who may.**
   - From a page, the call runs on behalf of the caller, and counts against
     their per-member assist rate. An anonymous visitor may not call it.
-  - From a handler, it runs on behalf of the schedule's owner.
   - The organization's `assistDisabled` turns it off for apps too.
 - **Why not the room's agent.** "Turn my log into a report paragraph" is a
   one-shot text transform, not an agent turn. A turn would need someone's
@@ -178,54 +210,63 @@ app.files.url(id: string): Promise<string>;   // a short-lived link to show or d
 
 1. The lead asks the App builder. The agent builds `index.html`: a form
    whose name field is `me().account.login`, read-only; a "Polish with AI"
-   button calling `app.ai`; a lead view listing who has filled in. It also
-   builds `on/thursday.js`: it reads who has not filled in this week, and
-   calls `app.notify({to: "channel:team-weekly", …})` with the link.
-2. The app's card offers "Run on/thursday every Thursday 09:00". The lead
-   turns it on: a schedule, the lead as owner.
-3. Thursday 09:00, the handler runs and the organization's bot posts in
-   the group. Members sign in, the form knows them, and they write their
-   log and polish it.
-4. Friday, the lead asks the agent "write the team report from this week's
-   logs". The agent reads them with `app_data`, as today.
+   button calling `app.ai`; a lead view listing who has filled in. Nothing
+   about schedules.
+2. On the app's card the lead clicks "Automate…" and types "every
+   Thursday 09:00, remind in the team-weekly group whoever has not filled
+   in this week, with the link; Friday 18:00 ask the agent to write the
+   team report". The draft shows two schedules (an `ai` task and an
+   `agent` message); "Try it" shows "would post in team-weekly: …"; the
+   lead turns them on.
+3. Thursday 09:00, the run reads the app's data, finds who is missing and
+   calls `notify` to the group; the organization's bot posts. Members sign
+   in, the form knows them, and they write and polish their log.
+4. Friday 18:00 the agent schedule asks the agent for the report, which
+   reads the logs with `app_data` as today.
 
 ## 8. Design review
 
 | Lens | Answer |
 |---|---|
 | Actors | An app's owners create its schedules; a schedule acts as its creator. A page acts as its caller; an anonymous visitor gets no account, no AI and may notify no one. |
-| Time and lifecycle | A handler run is bounded (time, memory) and stateless between runs; its state is the app's data. A schedule pauses when its creator leaves (as today) or the app is deleted. |
-| Scale and cost | Notices are rate-limited per app and recipient; AI calls spend the assist budget and the per-member rate; handlers have a per-run CPU cap and a per-app daily run cap. |
-| Failure and recovery | A failed handler run is recorded on the schedule ("last run failed: …") and visible on the app's card; it does not retry endlessly. Notification delivery has the outbox's retries. |
-| Boundaries and privacy | A caller sees only their own account. Handlers run without network; a notice carries only what the app wrote into it. |
+| Time and lifecycle | An `ai` run is bounded by steps and budget, not a clock, and is stateless between runs: its state is the app's data. A schedule pauses when its creator leaves (as today). A re-claimed slot re-runs with the same dedup keys. |
+| Scale and cost | Notices are rate-limited per app and recipient and capped per run; AI calls spend the assist budget and the per-member rate; a run has a step cap; schedules keep their minimum spacing (5 min). |
+| Failure and recovery | A failed run is recorded on the schedule ("last run failed: …") with its summary, visible in the schedules list; the slot is not retried past the misfire grace. Notification delivery has the outbox's retries. |
+| Boundaries and privacy | A caller sees only their own account. An `ai` run has no network of its own: only its actions, each acting with the owner's rights; app data reaches the model fenced as data. |
 | Abuse and untrusted input | App input to the model is fenced as data. A notice's text is plain text and links to the app; notifiers render it as text. |
-| One owner | Accounts: the new store, written at sign-in. When: `internal/schedule`. Delivery: `notify.Emitter` and notifier components. Model: `internal/assist`. |
+| One owner | Accounts: the new store, written at sign-in. When: `internal/schedule`. Delivery: `notify.Emitter` and notifier components. Model: `internal/assist`. Actions: one registry, each action calling its owner. |
 | Defaults and fallbacks | No IdP email: `account.email` absent. No group-capable notifier: `channel:` fails with a sentence, member notices still work. Assist off: `app.ai` fails with a sentence. |
-| External contracts | SDK: `me().account`, `files`, `notify`, `ai`. Schedules: recipient `app`. Notifier discover: optional `groups`. Wire notice kind `app_notice`. All additive. |
-| Load on users and agents | The member turns a schedule on from the app's card. The agent learns three SDK calls and a handler folder from the skill's examples. |
-| Release and compatibility | Server first (accounts, SDK, notify, ai, the scheduler's dispatch), then the skill update, then notifier packages that add group delivery. Older apps keep working. |
-| Observability | Every notice and AI call is audited with the app id; a handler run records its outcome and duration on the schedule. |
+| External contracts | SDK: `me().account`, `files`, `notify`, `ai`. Schedules: recipient `ai` (task text, actions). Notifier discover: optional `groups`. Wire notice kind `app_notice`. All additive. |
+| Load on users and agents | The member says what and when in words, and tries it before turning it on. The agent learns three SDK calls; nothing about schedules. |
+| Release and compatibility | Server first (accounts, SDK, notify, ai, the `ai` schedule run), then the skill update, then notifier packages that add group delivery. Older apps keep working. |
+| Observability | Every notice and AI call is audited with the app or schedule id; a run records its outcome and a one-line summary on the schedule. |
 
 **Pre-mortem.**
 
-1. **"Everyone got pinged twice."** Two schedules, or a handler that both
-   pinged the group and each member. Each notice carries the app and the
-   run's slot, and the emitter collapses the same app's notice to a
-   recipient within a run.
-2. **"The bot spammed the group."** A bug in a handler looping notify. The
-   per-app rate limit and per-run notice cap stop it; the schedule pauses
-   after repeated failures.
-3. **"It used the wrong person's AI budget."** A page's call is always the
-   caller's; a handler's is the owner's, and the audit row says whose.
+1. **"Everyone got pinged twice."** A crashed run re-claimed, or a task
+   that both pinged the group and each member. A notice's dedup key is the
+   schedule, the slot and the recipient, so a re-run is a no-op; the dry
+   run shows both before anything is sent.
+2. **"The bot spammed the group."** A model looping on `notify`. The step
+   cap, the per-run notice cap and the per-app rate limit stop it; the
+   schedule pauses after repeated failures.
+3. **"It did something nobody asked."** The model only has the actions the
+   registry offers, each acting with the owner's rights; the task text is
+   the owner's own words, app data is fenced as data, and "Try it" shows
+   what a run would do.
+4. **"It used the wrong person's AI budget."** A page's call is always the
+   caller's; a schedule's is its owner's, and the audit row says whose.
 
 ## 9. Milestones
 
 - **A1:** accounts store, `me().account`, the skill update. This is
-  enough for "no need to type the login".
+  enough for "no need to type the login". Done (ff7d6670).
 - **A2:** `app.files` (upload, url), and `app_data` reading them.
 - **A2b:** `app.ai` from pages.
 - **A3:** `app.notify` to members, with the `app_notice` kind and mutes.
-- **A4:** app handlers and the `app` schedule recipient; `notify` and `ai`
-  from handlers.
+- **A4:** `ai` schedules: the action registry (`app_data`, `notify`,
+  `post_message`, `ask_agent`), the gateway's run loop with tool calls,
+  dry run, "Automate…" on the app card and `draft-schedule` drafting the
+  task.
 - **A5:** group delivery in the notifier contract (`groups`), and the
   organization's group-chat notifier package adding it.
