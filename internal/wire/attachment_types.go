@@ -4,9 +4,12 @@ package wire
 // composer's file picker offers the same list, from wire.gen.ts). A file's
 // type comes from its extension — the declared Content-Type only when the
 // name has none — and its first bytes must pass the type's content check:
-// nothing is trusted by name alone. Active formats (SVG, HTML, XML) are never
-// on the list: served from the app origin they would run script. Only raster
-// images are served inline; every other attachment is an opaque download.
+// nothing is trusted by name alone. What keeps an attachment from running
+// script is how it is served, not its type: only sniff-verified raster
+// images are served inline; every other attachment, markup included (HTML,
+// SVG, XML), is an opaque, nosniff, sandboxed download. Where the app renders
+// one, it renders it as it renders an agent's file: HTML in the sandboxed
+// runner, SVG as an image (docs/bugs/2026-10-15-html-attachment-refused.md).
 
 // Content checks of an attachment type (AttachmentType.Content): what its
 // first bytes must look like.
@@ -70,6 +73,9 @@ var AttachmentTypes = []AttachmentType{
 	{MIME: "text/tab-separated-values", Extensions: []string{".tsv"}, Content: AttachmentContentText},
 	{MIME: "application/json", Extensions: []string{".json"}, Content: AttachmentContentText},
 	{MIME: "application/yaml", Extensions: []string{".yaml", ".yml"}, Content: AttachmentContentText},
+	{MIME: "text/html", Extensions: []string{".html", ".htm"}, Content: AttachmentContentText},
+	{MIME: "image/svg+xml", Extensions: []string{".svg"}, Content: AttachmentContentText},
+	{MIME: "application/xml", Extensions: []string{".xml"}, Content: AttachmentContentText},
 	{MIME: "video/mp4", Extensions: []string{".mp4", ".m4v"}, Content: AttachmentContentISOMedia},
 	{MIME: "video/quicktime", Extensions: []string{".mov"}, Content: AttachmentContentISOMedia},
 	{MIME: "video/webm", Extensions: []string{".webm"}, Content: AttachmentContentWebM},

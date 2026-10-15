@@ -91,25 +91,60 @@ func uploadAttachment(t *testing.T, srv *httptest.Server, filename, contentType 
 
 var pngBytes = []byte("\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00")
 
-// Active formats are refused, and so is content that is not its type (HTML
-// smuggled as image/png): an upload can never become script served from the
-// app origin.
-func TestUploadRejectsActiveAndMismatchedContent(t *testing.T) {
+// Content that is not its type is refused (HTML smuggled as image/png, a
+// binary named .txt): a name never vouches for the bytes.
+func TestUploadRejectsMismatchedContent(t *testing.T) {
 	srv, _ := newAttachmentServer(t)
 	html := []byte("<html><script>alert(document.cookie)</script></html>")
 	cases := []struct {
 		name, ct string
 		body     []byte
 	}{
-		{"x.svg", "image/svg+xml", []byte(`<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>`)},
-		{"x.html", "text/html", html},
 		{"x.png", "image/png", html},
 		{"x.txt", "text/plain", []byte("\x00\x01\x02binary\x00")},
+		{"x.html", "text/html", []byte("\x00\x01\x02binary\x00")},
 		{"x.png", "image/png", []byte("GIF89a......")},
 	}
 	for _, c := range cases {
 		if resp := uploadAttachment(t, srv, c.name, c.ct, c.body); resp.StatusCode != http.StatusUnsupportedMediaType {
 			t.Errorf("%s as %s: status %d, want 415", c.name, c.ct, resp.StatusCode)
+		}
+	}
+}
+
+// Markup files (an HTML report, an SVG diagram, an XML feed) are attached,
+// and never served as what they are: every one downloads as an opaque,
+// nosniff, sandboxed file, so its script cannot run with the app's origin
+// (docs/bugs/2026-10-15-html-attachment-refused.md).
+func TestMarkupFilesAttachAndDownloadOpaque(t *testing.T) {
+	srv, _ := newAttachmentServer(t)
+	for _, c := range []struct {
+		name, want string
+		body       []byte
+	}{
+		{"2026-10-15-report.html", "text/html", []byte("<!doctype html><html><script>alert(document.cookie)</script></html>")},
+		{"page.htm", "text/html", []byte("<html><body>hi</body></html>")},
+		{"logo.svg", "image/svg+xml", []byte(`<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>`)},
+		{"feed.xml", "application/xml", []byte(`<?xml version="1.0"?><rss></rss>`)},
+	} {
+		resp := uploadAttachment(t, srv, c.name, "", c.body)
+		var meta struct {
+			ID          string `json:"id"`
+			ContentType string `json:"contentType"`
+		}
+		_ = json.NewDecoder(resp.Body).Decode(&meta)
+		if resp.StatusCode != http.StatusOK || meta.ContentType != c.want {
+			t.Fatalf("%s: status %d type %q, want 200 %q", c.name, resp.StatusCode, meta.ContentType, c.want)
+		}
+		got := download(t, srv, meta.ID)
+		if ct := got.Header.Get("Content-Type"); ct != "application/octet-stream" {
+			t.Errorf("%s: Content-Type = %q, want application/octet-stream", c.name, ct)
+		}
+		if cd := got.Header.Get("Content-Disposition"); !strings.HasPrefix(cd, "attachment") {
+			t.Errorf("%s: Content-Disposition = %q, want attachment", c.name, cd)
+		}
+		if got.Header.Get("Content-Security-Policy") != attachmentCSP || got.Header.Get("X-Content-Type-Options") != "nosniff" {
+			t.Errorf("%s: headers = %v, want the sandbox CSP and nosniff", c.name, got.Header)
 		}
 	}
 }
@@ -156,7 +191,7 @@ func TestUploadAcceptsWorkFilesByExtension(t *testing.T) {
 		{"deck.pptx", "application/vnd.openxmlformats-officedocument.presentationml.presentation", []byte("<html><script>x</script></html>")},
 		{"old.doc", "application/msword", zip},
 		{"tool.exe", "application/octet-stream", []byte("MZ\x90\x00")},
-		{"page", "text/html", []byte("<html></html>")},
+		{"page", "application/x-msdownload", []byte("MZ\x90\x00")},
 	}
 	for _, c := range refused {
 		if resp := uploadAttachment(t, srv, c.name, c.declared, c.body); resp.StatusCode != http.StatusUnsupportedMediaType {

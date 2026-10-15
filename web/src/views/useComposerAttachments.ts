@@ -110,10 +110,11 @@ export function useComposerAttachments(roomId: string) {
         );
       } catch (e) {
         const status = e instanceof ApiError ? e.status : 0;
-        // A refused type: the server's reason names the file and why.
+        // A refused type: the server's reason names the file and why, so it
+        // is shown as is (prefixing the name again said it twice).
         const message =
           status === 415
-            ? errorText(e, `${file.name} can't be attached`)
+            ? errorText(e, "") || `${file.name} can't be attached`
             : status === 413
               ? `${file.name} is larger than ${formatBytes(MaxAttachmentBytes)}`
               : errorText(e, `Upload failed for ${file.name}`);
