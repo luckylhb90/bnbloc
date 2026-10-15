@@ -727,9 +727,13 @@ CREATE TABLE IF NOT EXISTS usage_budgets (
 -- §1): the name a user chose to be shown as instead of their id (usually an
 -- e-mail address). Global per user, not per tenant: a person reads the same
 -- in every organization. No row = the default (store.DisplayName).
+-- email is the address the identity provider last asserted at sign-in ("" =
+-- none asserted); an app reads its caller's own (me().account, docs/prd/
+-- 2026-10-15-app-identity-schedules-notify-ai.md §3).
 CREATE TABLE IF NOT EXISTS user_profiles (
   user_id        VARCHAR(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
   display_name   VARCHAR(40) NOT NULL,
+  email          VARCHAR(320) NOT NULL DEFAULT '',
   updated_at_ms  BIGINT NOT NULL,
   PRIMARY KEY (user_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

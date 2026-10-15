@@ -11,7 +11,7 @@
  * window. Types: ~app/sdk.d.ts.
  *
  *   const votes = app.collection("votes");
- *   const me = await app.me();                     // {id, name?}
+ *   const me = await app.me();                     // {id, name?, account?: {login, email?}}
  *   await votes.put(me.id, {choice: "B"}, {ifAbsent: true});   // one per person
  *   const {docs, next} = await votes.find({choice: {$eq: "B"}}, {limit: 50});
  *   const stop = app.subscribe(change => refresh());  // {appId, collection, id, version}
@@ -433,7 +433,9 @@
     function call(method, path, payload, headers) {
       var url = new URL(path, "https://demo.invalid/");
       var parts = url.pathname.slice(1).split("/").map(decodeURIComponent);
-      if (method === "GET" && parts.length === 1 && parts[0] === "me") return Promise.resolve({ id: DEMO_ID, name: "Demo" });
+      // A signed-in caller, so a page that fills in its caller's login works
+      // in the demo as it does for a member.
+      if (method === "GET" && parts.length === 1 && parts[0] === "me") return Promise.resolve({ id: DEMO_ID, name: "Demo", account: { login: "demo@example.com", email: "demo@example.com" } });
       if (parts[0] !== "c" || parts.length < 2 || parts.length > 3) return refuse(404, "not an app API path");
       var name = parts[1];
       var id = parts[2];

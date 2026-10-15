@@ -117,6 +117,7 @@ type tenantWiring struct {
 	// replica reads (SSO hand-offs, refresh-token families).
 	SSOHandoffs   store.SSOHandoffStore
 	RefreshTokens store.RefreshTokenStore
+	Profiles      store.UserProfileStore
 	// APITokens holds super-admin-issued API tokens; Alerts queues admin
 	// alerts into the shared notification outbox (realtime delivers).
 	APITokens store.APITokenStore
@@ -229,7 +230,7 @@ func resolveTenantWiring() tenantWiring {
 		}
 		return out, nil
 	}
-	return tenantWiring{Resolve: res.Resolve, RoomMembers: roomMembers, OrgAdmins: orgAdmins, TenantSettings: tenants.GetTenant, Suspended: suspended, MemberRole: memberRole, Settings: backends.Settings, ExtAudit: backends.ExtAudit, ComponentInstalls: backends.ComponentInstalls, NotifierReplies: backends.ReplyTokens, SSOHandoffs: backends.SSOHandoffs, RefreshTokens: backends.RefreshTokens, MemberCount: memberCount, Health: backends.HealthCheck(),
+	return tenantWiring{Resolve: res.Resolve, RoomMembers: roomMembers, OrgAdmins: orgAdmins, TenantSettings: tenants.GetTenant, Suspended: suspended, MemberRole: memberRole, Settings: backends.Settings, ExtAudit: backends.ExtAudit, ComponentInstalls: backends.ComponentInstalls, NotifierReplies: backends.ReplyTokens, SSOHandoffs: backends.SSOHandoffs, RefreshTokens: backends.RefreshTokens, Profiles: backends.Profiles, MemberCount: memberCount, Health: backends.HealthCheck(),
 		APITokens: backends.APITokens,
 		// Built-in content (the Expert builder) overlays the stored components.
 		ContentComponents: contentbuiltin.Overlay(backends.ContentComponents),
@@ -332,6 +333,7 @@ func main() {
 		TenantMemberRole:   tw.MemberRole,
 		SSOHandoffs:        tw.SSOHandoffs,
 		RefreshTokens:      tw.RefreshTokens,
+		Profiles:           tw.Profiles,
 		APITokens:          tw.APITokens,
 		Alerts:             tw.Alerts,
 		OrgSync:            tw.OrgSync,

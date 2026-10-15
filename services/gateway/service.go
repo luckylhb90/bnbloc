@@ -198,6 +198,9 @@ type Service struct {
 	// back to process-local memory stores (see refreshTokens).
 	SSOHandoffs   store.SSOHandoffStore
 	RefreshTokens store.RefreshTokenStore
+	// Profiles records the email each sign-in's identity provider asserted
+	// (recordEmail); nil records none.
+	Profiles      store.UserProfileStore
 	authStateOnce sync.Once
 	// APITokens holds super-admin-issued API tokens (api_tokens.go); nil
 	// falls back to a process-local memory store like RefreshTokens.

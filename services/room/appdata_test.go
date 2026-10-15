@@ -700,6 +700,47 @@ func TestAppDataMe(t *testing.T) {
 	})
 }
 
+// A signed-in caller's own account (docs/prd/2026-10-15-app-identity-
+// schedules-notify-ai.md §3): their login and the email sign-in recorded.
+// A link opened after signing in is a member participant too. An anonymous
+// visitor and an agent have none, and nobody reads another's.
+func TestAppDataMeAccount(t *testing.T) {
+	forAppBackends(t, func(t *testing.T, b *store.Backends) {
+		e := newAppEnv(t, b)
+		if err := b.Profiles.SetEmail(e.ctx(), "jack", "jack@example.com", 1); err != nil {
+			t.Fatal(err)
+		}
+		// A display name and an email live on one row; setting or clearing
+		// one keeps the other.
+		if err := b.Profiles.SetDisplayName(e.ctx(), "jack", "Jack J", 2); err != nil {
+			t.Fatal(err)
+		}
+		if err := b.Profiles.SetDisplayName(e.ctx(), "jack", "", 3); err != nil {
+			t.Fatal(err)
+		}
+		meOf := func(p who) wire.AppMe {
+			t.Helper()
+			var me wire.AppMe
+			if r := e.do(p, http.MethodGet, "/me", nil); r.status != http.StatusOK || json.Unmarshal(r.body, &me) != nil {
+				t.Fatalf("%v me = %d %s", p, r.status, r.body)
+			}
+			return me
+		}
+		if got := meOf(jack); got.Account == nil || *got.Account != (wire.AppAccount{Login: "jack", Email: "jack@example.com"}) || got.Name != "jack" {
+			t.Fatalf("member account = %+v (name %q)", got.Account, got.Name)
+		}
+		// Signed in, no email asserted: the login alone.
+		if got := meOf(maya); got.Account == nil || got.Account.Login != "maya" || got.Account.Email != "" {
+			t.Fatalf("no-email account = %+v", got.Account)
+		}
+		for _, p := range []who{visitA, agent} {
+			if got := meOf(p); got.Account != nil {
+				t.Fatalf("%v has an account %+v", p, got.Account)
+			}
+		}
+	})
+}
+
 // Without the secret store key app data is off, not open.
 func TestAppDataOffWithoutKey(t *testing.T) {
 	b, err := store.NewBackends("")

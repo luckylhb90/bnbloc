@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -245,7 +246,22 @@ func (s *Service) openFamily(ctx context.Context, identity auth.Identity, scope 
 	if err := s.refreshTokens().CreateRefreshFamily(ctx, fam); err != nil {
 		return sessionGrant{}, err
 	}
+	s.recordEmail(ctx, fam.Subject, fam.Email, now)
 	return s.grantFor(fam, scope), nil
+}
+
+// recordEmail keeps the email the identity provider asserted for a subject:
+// an app reads its caller's own (me().account, docs/prd/2026-10-15-app-
+// identity-schedules-notify-ai.md §3). Every sign-in passes here (openFamily),
+// so it follows the IdP; an assertion without one leaves the recorded email
+// as it was. Best-effort: a failed write never refuses a sign-in.
+func (s *Service) recordEmail(ctx context.Context, subject, email string, now time.Time) {
+	if s.Profiles == nil || email == "" || len(email) > store.MaxEmailLen {
+		return
+	}
+	if err := s.Profiles.SetEmail(ctx, subject, email, now.UnixMilli()); err != nil {
+		slog.Warn("record signed-in email failed", "event", "bnbloc.gateway.email_record_failed", "error", err)
+	}
 }
 
 // grantFor mints the session bearer and the family's current refresh token.

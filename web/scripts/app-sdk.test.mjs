@@ -179,7 +179,7 @@ test("demo mode answers the whole data API in the page's memory and never sends 
   const votes = app.collection("votes");
 
   const me = plain(await app.me());
-  assert.deepEqual(me, { id: "demo", name: "Demo" });
+  assert.deepEqual(me, { id: "demo", name: "Demo", account: { login: "demo@example.com", email: "demo@example.com" } });
   const first = plain(await votes.insert({ choice: "A" }, { public: true }));
   assert.equal(first.choice, "A");
   assert.equal(first._by, "demo");

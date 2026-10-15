@@ -39,6 +39,19 @@ type AppDocPage struct {
 type AppMe struct {
 	ID   string `json:"id"`
 	Name string `json:"name,omitempty"`
+	// Account is the caller's own verified account, for a signed-in caller
+	// (a member, or a person who signed in to open an organization link);
+	// absent for an anonymous visitor and for an agent
+	// (docs/prd/2026-10-15-app-identity-schedules-notify-ai.md §3).
+	Account *AppAccount `json:"account,omitempty"`
+}
+
+// AppAccount is who a signed-in caller is: their login (the identity
+// provider's subject, what they sign in with) and the email it asserted
+// ("" when it asserted none).
+type AppAccount struct {
+	Login string `json:"login"`
+	Email string `json:"email,omitempty"`
 }
 
 // AppDataStats is an app's usage, for its owners.

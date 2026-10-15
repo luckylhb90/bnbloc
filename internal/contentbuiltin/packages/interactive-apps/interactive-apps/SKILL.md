@@ -24,8 +24,8 @@ this file: read it before your first app.
 - Plain HTML, CSS and JavaScript in one page is enough. With a bundler,
   keep that tag as written in `index.html` and publish `dist/`.
 - The page runs sandboxed: no cookies or local storage (they throw), no
-  sign-in, no access to the room. Keep everything in the app's data. Avoid
-  external services and fonts: people open it on phones, anywhere.
+  access to the room. Keep everything in the app's data. Avoid external
+  services and fonts: people open it on phones, anywhere.
 - Mobile first: one column, readable text, large tap targets, no
   hover-only controls, a visible state after every action (saved, already
   answered, closed, error). Show errors in the page, never only in the
@@ -69,9 +69,10 @@ saved as `cover.png`).
   - `patch(id, {merge, $inc, public}, {ifVersion})`: merge fields, add to
     numbers atomically;
   - `remove(id, {ifVersion})`.
-- `app.me()` resolves to `{id, name}`: the caller's own id in this app
-  (the same value as the `_by` of what they write) and, for a signed-in
-  member only, their `name`.
+- `app.me()` resolves to `{id, name, account}`: the caller's id here (the
+  `_by` they write) and, when signed in, their `name` and
+  `account: {login, email}`. Show `account.login` read-only; don't ask who
+  they are.
 - `app.subscribe(fn)` calls `fn` with `{appId, collection, id, version}`
   on every change and returns a function that stops it. It carries no
   content (re-read what changed) and replays nothing missed while
@@ -123,12 +124,12 @@ API calls:
 ## Who opens it
 
 - Room members, from the deliverable's card: signed in, owners of the
-  app; `me()` gives their `name`.
-- Anyone with its share link (the card's Share link): a visitor, without
-  sign-in. The share page gives the page a visitor identity per browser:
-  `me().id` is stable for that browser, and there is no name (ask for one
-  in the form when the app needs it). Visitors see only public documents
-  and their own.
+  app; `me()` gives their `name` and `account`.
+- People with its share link (the card's Share link). A link asks them
+  to sign in first, so `me()` gives their `account` too. A link opened to
+  anyone gives a visitor identity per browser: no `name` or `account`
+  (ask for a name only then). They see only public documents and their
+  own.
 - Tries by the room's members are real data: offer to clear them before
   the link goes out.
 

@@ -1585,6 +1585,16 @@ WHERE r.channel_id = '' AND d.user_id IS NULL`)
 			return addColumnIfMissing(ctx, db, "artifact_versions", "edited_from", "INT NOT NULL DEFAULT 0 AFTER loads_app_sdk")
 		},
 	},
+	{
+		// An app knows its caller's account (docs/prd/2026-10-15-app-identity-
+		// schedules-notify-ai.md §3): the email the identity provider last
+		// asserted, written at sign-in. Additive: the previous release neither
+		// writes nor reads it, and "" means none asserted.
+		id: "2026_10_user_profiles_email",
+		run: func(ctx context.Context, db sqlConn) error {
+			return addColumnIfMissing(ctx, db, "user_profiles", "email", "VARCHAR(320) NOT NULL DEFAULT '' AFTER display_name")
+		},
+	},
 }
 
 // sqlConn is the statement surface a migration runs on. runMigrations passes

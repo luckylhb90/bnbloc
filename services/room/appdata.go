@@ -725,8 +725,10 @@ func (s *Service) findAppDocs(a *appCall, q store.AppDocQuery, filter appdata.Fi
 	}
 }
 
-// handleAppMe is GET …/me: the caller's per-app id, and a member's own
-// display name.
+// handleAppMe is GET …/me: the caller's per-app id, and a signed-in
+// caller's own display name and account (login, the email their identity
+// provider asserted). Only ever the caller's own: no route answers another
+// participant's account to the page.
 func (s *Service) handleAppMe(w http.ResponseWriter, _ *http.Request, a *appCall) {
 	me := wire.AppMe{ID: a.me}
 	if a.subject != "" && s.Profiles != nil {
@@ -737,6 +739,13 @@ func (s *Service) handleAppMe(w http.ResponseWriter, _ *http.Request, a *appCall
 			return
 		}
 		me.Name = names[0].DisplayName
+		email, err := s.Profiles.Email(a.ctx, a.subject)
+		if err != nil {
+			obs.ServerError(w, "read account failed", err)
+			httpx.Error(w, "read account failed", http.StatusInternalServerError)
+			return
+		}
+		me.Account = &wire.AppAccount{Login: a.subject, Email: email}
 	}
 	httpx.WriteJSON(w, http.StatusOK, me)
 }

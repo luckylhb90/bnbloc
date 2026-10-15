@@ -99,8 +99,12 @@ declare global {
 
   interface BnblocApp {
     collection<T = Record<string, unknown>>(name: string): BnblocAppCollection<T>;
-    /** The caller's per-app id, and a signed-in member's display name. */
-    me(): Promise<{ id: string; name?: string }>;
+    /** The caller's per-app id, and for a signed-in caller (a member, or
+     *  a person who signed in to open the link) their display name and
+     *  account: their login (what they sign in with) and the email their
+     *  identity provider asserted. An anonymous visitor (a link anyone may
+     *  open) has no account. Only ever the caller's own. */
+    me(): Promise<{ id: string; name?: string; account?: { login: string; email?: string } }>;
     /** Calls fn with each change until the returned function is called.
      *  Live only: changes made while disconnected are not replayed. */
     subscribe(fn: (change: BnblocAppChange) => void): () => void;

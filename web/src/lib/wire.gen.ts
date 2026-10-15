@@ -264,6 +264,19 @@ export interface AppDocPage {
 export interface AppMe {
   id: string;
   name?: string;
+  // Account is the caller's own verified account, for a signed-in caller
+  // (a member, or a person who signed in to open an organization link);
+  // absent for an anonymous visitor and for an agent
+  // (docs/prd/2026-10-15-app-identity-schedules-notify-ai.md §3).
+  account?: AppAccount;
+}
+
+// AppAccount is who a signed-in caller is: their login (the identity
+// provider's subject, what they sign in with) and the email it asserted
+// ("" when it asserted none).
+export interface AppAccount {
+  login: string;
+  email?: string;
 }
 
 // AppDataStats is an app's usage, for its owners.

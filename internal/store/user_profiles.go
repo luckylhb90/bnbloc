@@ -65,19 +65,28 @@ type UserProfileStore interface {
 	// as given; an id with no stored name is absent (apply DisplayName).
 	DisplayNames(ctx context.Context, ids []string) (map[string]string, error)
 	// SetDisplayName stores userID's display name (already normalized);
-	// an empty name deletes it, restoring the default.
+	// an empty name restores the default.
 	SetDisplayName(ctx context.Context, userID, name string, nowMs int64) error
+	// SetEmail records the email the identity provider asserted for userID
+	// at sign-in ("" = none asserted). Sign-in is its only writer.
+	SetEmail(ctx context.Context, userID, email string, nowMs int64) error
+	// Email returns userID's recorded email ("" when none).
+	Email(ctx context.Context, userID string) (string, error)
 }
+
+// MaxEmailLen bounds a recorded email (the RFC 5321 path limit, rounded up).
+const MaxEmailLen = 320
 
 // MemoryUserProfiles is the in-memory UserProfileStore.
 type MemoryUserProfiles struct {
-	mu    sync.Mutex
-	names map[string]string // user id -> display name
+	mu     sync.Mutex
+	names  map[string]string // user id -> display name
+	emails map[string]string // user id -> asserted email
 }
 
 // NewMemoryUserProfiles returns an empty in-memory profile store.
 func NewMemoryUserProfiles() *MemoryUserProfiles {
-	return &MemoryUserProfiles{names: map[string]string{}}
+	return &MemoryUserProfiles{names: map[string]string{}, emails: map[string]string{}}
 }
 
 var _ UserProfileStore = (*MemoryUserProfiles)(nil)
@@ -107,6 +116,25 @@ func (s *MemoryUserProfiles) SetDisplayName(_ context.Context, userID, name stri
 	return nil
 }
 
+// SetEmail implements UserProfileStore.
+func (s *MemoryUserProfiles) SetEmail(_ context.Context, userID, email string, _ int64) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if email == "" {
+		delete(s.emails, userID)
+		return nil
+	}
+	s.emails[userID] = email
+	return nil
+}
+
+// Email implements UserProfileStore.
+func (s *MemoryUserProfiles) Email(_ context.Context, userID string) (string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.emails[userID], nil
+}
+
 // MySQLUserProfiles is the MySQL UserProfileStore (table user_profiles).
 type MySQLUserProfiles struct{ DB *sql.DB }
 
@@ -116,7 +144,8 @@ func NewMySQLUserProfiles(db *sql.DB) *MySQLUserProfiles { return &MySQLUserProf
 var _ UserProfileStore = (*MySQLUserProfiles)(nil)
 
 // DisplayNames implements UserProfileStore in one query (user ids compare
-// exactly: the column is utf8mb4_bin).
+// exactly: the column is utf8mb4_bin). A row holding only an email is no
+// display name.
 func (s *MySQLUserProfiles) DisplayNames(ctx context.Context, ids []string) (map[string]string, error) {
 	out := make(map[string]string, len(ids))
 	if len(ids) == 0 {
@@ -127,7 +156,7 @@ func (s *MySQLUserProfiles) DisplayNames(ctx context.Context, ids []string) (map
 		args[i] = id
 	}
 	rows, err := s.DB.QueryContext(ctx,
-		`SELECT user_id, display_name FROM user_profiles WHERE user_id IN (`+inPlaceholders(len(ids))+`)`, args...)
+		`SELECT user_id, display_name FROM user_profiles WHERE display_name <> '' AND user_id IN (`+inPlaceholders(len(ids))+`)`, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -143,12 +172,28 @@ func (s *MySQLUserProfiles) DisplayNames(ctx context.Context, ids []string) (map
 }
 
 // SetDisplayName implements UserProfileStore.
+// A row holds both facts; clearing the display name keeps the email (and
+// "" is the column's "none").
 func (s *MySQLUserProfiles) SetDisplayName(ctx context.Context, userID, name string, nowMs int64) error {
-	if name == "" {
-		_, err := s.DB.ExecContext(ctx, `DELETE FROM user_profiles WHERE user_id = ?`, userID)
-		return err
-	}
 	_, err := s.DB.ExecContext(ctx, `INSERT INTO user_profiles (user_id, display_name, updated_at_ms) VALUES (?, ?, ?)
     ON DUPLICATE KEY UPDATE display_name = VALUES(display_name), updated_at_ms = VALUES(updated_at_ms)`, userID, name, nowMs)
 	return err
+}
+
+// SetEmail implements UserProfileStore. It leaves the display name as it
+// was (a new row starts with none).
+func (s *MySQLUserProfiles) SetEmail(ctx context.Context, userID, email string, nowMs int64) error {
+	_, err := s.DB.ExecContext(ctx, `INSERT INTO user_profiles (user_id, display_name, email, updated_at_ms) VALUES (?, '', ?, ?)
+    ON DUPLICATE KEY UPDATE email = VALUES(email), updated_at_ms = VALUES(updated_at_ms)`, userID, email, nowMs)
+	return err
+}
+
+// Email implements UserProfileStore.
+func (s *MySQLUserProfiles) Email(ctx context.Context, userID string) (string, error) {
+	var email string
+	err := s.DB.QueryRowContext(ctx, `SELECT email FROM user_profiles WHERE user_id = ?`, userID).Scan(&email)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	return email, err
 }

@@ -120,6 +120,8 @@ func TestSSOSignInAppliesOrgSyncRules(t *testing.T) {
 	t.Cleanup(func() { _ = extreg.Unregister(extreg.KindAuthProvider, name) })
 
 	gw, tenants := orgSyncGateway(t)
+	profiles := store.NewMemoryUserProfiles()
+	gw.Profiles = profiles
 	if _, err := gw.OrgSync.SaveRules(context.Background(), []orgsync.Rule{
 		{Match: orgsync.Match{Group: "eng"}, Tenant: "labs", Role: orgsync.RoleOrgAdmin},
 	}, "root"); err != nil {
@@ -145,5 +147,10 @@ func TestSSOSignInAppliesOrgSyncRules(t *testing.T) {
 	m, ok, _ := tenants.GetMember(context.Background(), "labs", "kim@corp.example")
 	if !ok || m.Source != store.MemberSourceSync {
 		t.Fatalf("labs membership = %+v ok=%v, want a sync row", m, ok)
+	}
+	// Sign-in records the email the provider asserted: an app reads its
+	// caller's own (me().account).
+	if email, _ := profiles.Email(context.Background(), "kim@corp.example"); email != "kim@corp.example" {
+		t.Fatalf("recorded email = %q", email)
 	}
 }
