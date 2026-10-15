@@ -1611,6 +1611,22 @@ WHERE r.channel_id = '' AND d.user_id IS NULL`)
 			return addColumnIfMissing(ctx, db, "notification_prefs", "app_notices", "TINYINT(1) NOT NULL DEFAULT 1 AFTER content_review")
 		},
 	},
+	{
+		// What an ai schedule's last run did (docs/prd/2026-10-15-app-
+		// identity-schedules-notify-ai.md §4). Additive.
+		id: "2026_10_room_schedules_last_summary",
+		run: func(ctx context.Context, db sqlConn) error {
+			return addColumnIfMissing(ctx, db, "room_schedules", "last_summary", "VARCHAR(512) NOT NULL DEFAULT '' AFTER last_error")
+		},
+	},
+	{
+		// How many runs in a row an ai schedule failed: it pauses after a
+		// few. Additive.
+		id: "2026_10_room_schedules_failed_runs",
+		run: func(ctx context.Context, db sqlConn) error {
+			return addColumnIfMissing(ctx, db, "room_schedules", "failed_runs", "BIGINT NOT NULL DEFAULT 0 AFTER last_summary")
+		},
+	},
 }
 
 // sqlConn is the statement surface a migration runs on. runMigrations passes

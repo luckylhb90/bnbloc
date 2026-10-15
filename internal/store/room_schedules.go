@@ -47,6 +47,8 @@ type ScheduleRunResult struct {
 	Seq         int64
 	NextRunAtMs int64
 	Disable     bool
+	// Summary is what an ai run did, in a line (replaces the last one).
+	Summary string
 }
 
 // RoomScheduleStore persists scheduled prompts.
@@ -252,6 +254,12 @@ func (m *MemoryRoomSchedules) CompleteScheduleRun(_ context.Context, res Schedul
 		return nil // deleted while running: nothing to record
 	}
 	r.s.LastRunAtMs, r.s.LastStatus, r.s.LastError = res.AtMs, res.Status, truncateRunError(res.Error)
+	r.s.LastSummary = truncateRunError(res.Summary)
+	if res.Status == wire.ScheduleRunError {
+		r.s.FailedRuns++
+	} else {
+		r.s.FailedRuns = 0
+	}
 	if res.Status == wire.ScheduleRunOK {
 		r.s.LastSeq = res.Seq
 		r.s.RunCount++
@@ -292,14 +300,14 @@ func NewMySQLRoomSchedules(db *sql.DB) *MySQLRoomSchedules { return &MySQLRoomSc
 var _ RoomScheduleStore = (*MySQLRoomSchedules)(nil)
 
 const scheduleCols = `schedule_id, tenant_id, room_id, channel_id, created_by, text, recipient_json, recurrence_json,
-  timezone, enabled, next_run_at_ms, last_run_at_ms, last_status, last_error, last_seq, run_count, created_at_ms, updated_at_ms`
+  timezone, enabled, next_run_at_ms, last_run_at_ms, last_status, last_error, last_summary, failed_runs, last_seq, run_count, created_at_ms, updated_at_ms`
 
 func scanSchedule(row rowScanner) (wire.RoomSchedule, error) {
 	var s wire.RoomSchedule
 	var recip, recur []byte
 	var next, last sql.NullInt64
 	if err := row.Scan(&s.ScheduleID, &s.TenantID, &s.RoomID, &s.ChannelID, &s.CreatedBy, &s.Text, &recip, &recur,
-		&s.Timezone, &s.Enabled, &next, &last, &s.LastStatus, &s.LastError, &s.LastSeq, &s.RunCount,
+		&s.Timezone, &s.Enabled, &next, &last, &s.LastStatus, &s.LastError, &s.LastSummary, &s.FailedRuns, &s.LastSeq, &s.RunCount,
 		&s.CreatedAtMs, &s.UpdatedAtMs); err != nil {
 		return wire.RoomSchedule{}, err
 	}
@@ -327,9 +335,9 @@ func (m *MySQLRoomSchedules) CreateSchedule(ctx context.Context, s wire.RoomSche
 	if err != nil {
 		return wire.RoomSchedule{}, err
 	}
-	_, err = m.DB.ExecContext(ctx, `INSERT INTO room_schedules (`+scheduleCols+`) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+	_, err = m.DB.ExecContext(ctx, `INSERT INTO room_schedules (`+scheduleCols+`) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		s.ScheduleID, tid, s.RoomID, s.ChannelID, s.CreatedBy, s.Text, recip, recur,
-		s.Timezone, s.Enabled, nullIfZero(s.NextRunAtMs), nullIfZero(s.LastRunAtMs), s.LastStatus, s.LastError,
+		s.Timezone, s.Enabled, nullIfZero(s.NextRunAtMs), nullIfZero(s.LastRunAtMs), s.LastStatus, s.LastError, truncateRunError(s.LastSummary), s.FailedRuns,
 		s.LastSeq, s.RunCount, s.CreatedAtMs, s.UpdatedAtMs)
 	if err != nil {
 		return wire.RoomSchedule{}, dupAs(err, ErrScheduleExists)
@@ -450,14 +458,16 @@ func (m *MySQLRoomSchedules) CompleteScheduleRun(ctx context.Context, r Schedule
 	// schedule id is global.
 	ok := r.Status == wire.ScheduleRunOK
 	_, err := m.DB.ExecContext(ctx, `UPDATE room_schedules SET
-		last_run_at_ms = ?, last_status = ?, last_error = ?,
+		last_run_at_ms = ?, last_status = ?, last_error = ?, last_summary = ?,
+		failed_runs = IF(?, failed_runs + 1, 0),
 		last_seq = IF(?, ?, last_seq), run_count = run_count + IF(?, 1, 0),
 		next_run_at_ms = IF(claim_token <=> ?, ?, next_run_at_ms),
 		enabled = IF(claim_token <=> ? AND ?, 0, enabled),
 		claimed_until_ms = IF(claim_token <=> ?, NULL, claimed_until_ms),
 		claim_token = IF(claim_token <=> ?, NULL, claim_token)
 		WHERE schedule_id = ?`,
-		r.AtMs, r.Status, truncateRunError(r.Error),
+		r.AtMs, r.Status, truncateRunError(r.Error), truncateRunError(r.Summary),
+		r.Status == wire.ScheduleRunError,
 		ok, r.Seq, ok,
 		claimArg(r.ClaimToken), nullIfZero(r.NextRunAtMs),
 		claimArg(r.ClaimToken), r.Disable,

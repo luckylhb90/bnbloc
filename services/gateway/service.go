@@ -247,6 +247,10 @@ func (s *Service) Handler() http.Handler {
 	for _, rt := range s.routes() {
 		mux.HandleFunc(rt.pattern, s.serve(rt))
 	}
+	// Realtime's scheduler hands the gateway an ai schedule's slot: the
+	// gateway is the only caller of the assist model (schedule_run.go).
+	// Service-signed only, never a session's.
+	mux.Handle("POST /internal/v1/schedule-runs", svcauth.RequireService(svcauth.KeyFromEnv(), []string{"realtime"}, http.HandlerFunc(s.handleScheduleRun)))
 	// API traffic is authenticated and proxied to the owning backend.
 	mux.HandleFunc("/v1/", s.handleProxy)
 	// Everything else serves the collaboration web client when configured; the

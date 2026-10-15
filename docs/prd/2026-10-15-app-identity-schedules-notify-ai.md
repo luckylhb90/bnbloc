@@ -1,6 +1,6 @@
 # Apps that know who you are, and run on time, notify and use AI (2026-10-15)
 
-Status: proposed (2026-10-15). Builds on
+Status: A1–A4 implemented (2026-10-15), not yet released; A5 next. Builds on
 `docs/prd/2026-10-12-interactive-apps.md` (the app base: a document store,
 `me()`, the two platform rules), schedules (`internal/schedule`), notifier
 components (`docs/notifications.md`) and assists
@@ -106,7 +106,8 @@ that the platform's assist model carries out with a small set of
   - `post_message`: a message in the room, as the owner (PostChat);
   - `ask_agent`: a message to one of the room's agents, as the owner (the
     `agent` recipient's path: borrow rules at drive time), for work that
-    needs files or judgement ("write the report").
+    needs files or judgement ("write the report"); `list_agents` names
+    the room's agents online.
 
   Adding a capability later is adding an action; delivery stays the
   notifier components', and a notifier that delivers to groups extends
@@ -118,10 +119,14 @@ that the platform's assist model carries out with a small set of
   clock as fenced context, tool calls answered by actions, until the model
   answers without a call. It records a short summary of what it did on the
   schedule ("notified 3 people", "nothing to do").
-- **Bounds that are real, not clocks.** A run has a step cap (tool calls),
-  a per-run notice cap, and the assist budget; no wall-clock cap. Each
-  notice's dedup key is the schedule, the slot and the recipient, so a
-  re-claimed slot (a crash) never notifies twice.
+- **Bounds that are real, not clocks.** A run has a step cap (8 model
+  calls), per-run caps (5 notices, 3 posts), the owner's assist rate and
+  the assist budget; no wall-clock cap. A notice's dedup key is the
+  schedule, the slot and its content, a post's client id the schedule and
+  the slot, so a re-claimed slot (a crash) sends nothing twice. Three
+  failed runs in a row pause the schedule (`failedRuns`); a run that could
+  not reach the gateway keeps its slot for the next tick, within the
+  misfire grace.
 - **Try it first.** "Run now" in dry mode runs the loop with actions that
   read for real and only report what they would send or post. The member
   sees "would notify maya, jack: …" before turning it on.

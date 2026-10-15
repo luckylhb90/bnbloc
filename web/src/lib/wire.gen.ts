@@ -3326,12 +3326,15 @@ export interface UnreadReply {
 // bound so a stored scheduled prompt always fits the post it becomes.
 export const MaxChatTextBytes = 16384;
 
-// Schedule recipient kinds: a people-only room message, or a message
+// Schedule recipient kinds: a people-only room message, a message
 // addressed to one member's agent (the bridge serving that agent claims it,
 // and enforces borrow authorization at drive time exactly as for a typed
-// message).
+// message), or a task in plain words the assist model carries out with the
+// room's actions, as the schedule's owner (docs/prd/2026-10-15-app-
+// identity-schedules-notify-ai.md §4).
 export const ScheduleRecipientRoom = "room";
 export const ScheduleRecipientAgent = "agent";
+export const ScheduleRecipientAI = "ai";
 
 // Schedule recurrence kinds.
 // RecurOnce runs once at AtMs.
@@ -3389,10 +3392,45 @@ export interface RoomSchedule {
   lastRunAtMs?: number;
   lastStatus?: ScheduleRunStatus;
   lastError?: string;
+  // LastSummary is what an ai schedule's last run did, in a line.
+  lastSummary?: string;
+  // FailedRuns is how many runs in a row failed (0 after a run that
+  // did not).
+  failedRuns?: number;
   lastSeq?: number;
   runCount: number;
   createdAtMs: number;
   updatedAtMs: number;
+}
+
+// ScheduleRunRequest is realtime's call to the gateway to run an ai
+// schedule's slot (POST /internal/v1/schedule-runs): the schedule as
+// stored, the slot it runs (the idempotency of what it sends), and DryRun:
+// read for real, send nothing, report what it would do.
+export interface ScheduleRunRequest {
+  schedule: RoomSchedule;
+  slotMs: number;
+  dryRun?: boolean;
+}
+
+// ScheduleRunReply is what an ai run did: its outcome (ScheduleRunStatus),
+// its summary (the model's last words), an error a person reads, and the
+// actions it took (or, dry, would take).
+export interface ScheduleRunReply {
+  status: ScheduleRunStatus;
+  summary?: string;
+  error?: string;
+  actions: ScheduleAction[];
+  // Seq is the last message the run posted (0: none).
+  seq?: number;
+}
+
+// ScheduleAction is one action of a run: its name and what it did, in a
+// line; DryRun when it was only described.
+export interface ScheduleAction {
+  name: string;
+  detail: string;
+  dryRun?: boolean;
 }
 
 // ScheduledMarker is set as payload.scheduled on a chat_message the scheduler
@@ -4517,8 +4555,8 @@ export type RoomEventKind = "chat_message" | "agent_messages" | "agent_job_creat
 export const RoomEventKindValues: readonly RoomEventKind[] = ["chat_message", "agent_messages", "agent_job_created", "agent_job_updated", "agent_job_progress", "agent_session_state", "agent_roster", "presence_join", "presence_leave", "presence_snapshot", "presence_typing", "message_deleted", "message_edited", "task_updated", "artifact_updated", "artifact_state", "member_joined", "member_removed", "room_deleted", "content_saved", "content_uses_changed", "app_changed"];
 export type JobActivityKind = "tool" | "thinking" | "text";
 export const JobActivityKindValues: readonly JobActivityKind[] = ["tool", "thinking", "text"];
-export type ScheduleRecipientKind = "room" | "agent";
-export const ScheduleRecipientKindValues: readonly ScheduleRecipientKind[] = ["room", "agent"];
+export type ScheduleRecipientKind = "room" | "agent" | "ai";
+export const ScheduleRecipientKindValues: readonly ScheduleRecipientKind[] = ["room", "agent", "ai"];
 export type RecurrenceKind = "once" | "daily" | "weekly" | "cron";
 export const RecurrenceKindValues: readonly RecurrenceKind[] = ["once", "daily", "weekly", "cron"];
 export type ScheduleRunStatus = "ok" | "error" | "skipped";

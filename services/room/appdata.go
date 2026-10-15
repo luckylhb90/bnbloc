@@ -97,6 +97,7 @@ func (s *Service) registerAppDataRoutes(mux *http.ServeMux) {
 	route("DELETE /internal/v1/app/data", appOwner, s.handleAppWipe)
 	s.registerAppFileRoutes(route)
 	route("POST /internal/v1/app/notify-targets", appRead, s.handleAppNotifyTargets)
+	mux.Handle("POST /internal/v1/rooms/{roomId}/notice-targets", svcauth.RequireService(key, []string{"gateway"}, http.HandlerFunc(s.handleRoomNoticeTargets)))
 }
 
 // appNeed is what a route needs of the app before its handler runs.

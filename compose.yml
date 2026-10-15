@@ -43,6 +43,9 @@ services:
       # is the Helm chart's job (docs/production-deployment.md).
       BNBLOC_INTERNAL_KEY: "${BNBLOC_INTERNAL_KEY:-dev-bnbloc-internal-key-change-me}"
       BNBLOC_ROOM_BASE_URL: "http://room:8080"
+      # AI schedules are carried out by the gateway (the assist model's
+      # only caller).
+      BNBLOC_GATEWAY_BASE_URL: "http://gateway:8080"
       BNBLOC_MYSQL_DSN: "bnbloc:bnbloc-pass@tcp(mysql:3306)/bnbloc?parseTime=true"
       # Blob storage for attachments + sidecar-core artifacts. Set
       # BNBLOC_ATTACHMENTS_S3_BUCKET to use S3; otherwise the disk dir below is

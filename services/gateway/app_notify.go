@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -129,29 +130,44 @@ func (s *Service) serveAppNotify(w http.ResponseWriter, r *http.Request, c appCa
 // call's app scope; a refusal comes back as its status and body.
 func (s *Service) appNotifyTargets(ctx context.Context, c appCapability, body []byte) (wire.AppNotifyTargets, int, []byte, error) {
 	var out wire.AppNotifyTargets
-	base := strings.TrimRight(s.Backends.Room, "/")
-	key := svcauth.Key(svcauth.KeyFromEnv())
-	req, err := key.NewRequest(ctx, http.MethodPost, base+"/internal/v1/app/notify-targets", bytes.NewReader(body), gatewayServiceSubject, c.tenant)
-	if err != nil {
-		return out, 0, nil, err
+	status, raw, err := s.appBackend(ctx, c, http.MethodPost, "/notify-targets", body)
+	if err != nil || status != http.StatusOK {
+		return out, status, raw, err
 	}
-	req.Header.Set("Content-Type", "application/json")
+	return out, status, nil, json.Unmarshal(raw, &out)
+}
+
+// appBackend makes one call of the room service's app data API
+// (/internal/v1/app{path}) in c's scope, signed as forwardApp signs it, and
+// returns its status and body: the gateway's own calls (a notice's
+// recipients, a schedule run's reads), where forwardApp relays a client's.
+func (s *Service) appBackend(ctx context.Context, c appCapability, method, path string, body []byte) (int, []byte, error) {
+	base := strings.TrimRight(s.Backends.Room, "/")
+	if base == "" {
+		return 0, nil, errors.New("no room service")
+	}
+	var rd io.Reader
+	if body != nil {
+		rd = bytes.NewReader(body)
+	}
+	key := svcauth.Key(svcauth.KeyFromEnv())
+	req, err := key.NewRequest(ctx, method, base+"/internal/v1/app"+path, rd, gatewayServiceSubject, c.tenant)
+	if err != nil {
+		return 0, nil, err
+	}
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
 	if err := key.AssertApp(req, c.scope); err != nil {
-		return out, 0, nil, err
+		return 0, nil, err
 	}
 	resp, err := backendHTTP.Do(req)
 	if err != nil {
-		return out, 0, nil, err
+		return 0, nil, err
 	}
 	defer resp.Body.Close()
-	raw, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-	if err != nil {
-		return out, 0, nil, err
-	}
-	if resp.StatusCode != http.StatusOK {
-		return out, resp.StatusCode, raw, nil
-	}
-	return out, http.StatusOK, nil, json.Unmarshal(raw, &out)
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
+	return resp.StatusCode, raw, err
 }
 
 // appNoticeURL is a notice's link: the app's card in its room by default;

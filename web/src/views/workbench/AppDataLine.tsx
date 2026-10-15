@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { ArrowClockwiseIcon, DatabaseIcon, DotsThreeIcon, DownloadSimpleIcon, FileCsvIcon, TrashIcon } from "@phosphor-icons/react";
+import { ArrowClockwiseIcon, ClockIcon, DatabaseIcon, DotsThreeIcon, DownloadSimpleIcon, FileCsvIcon, TrashIcon } from "@phosphor-icons/react";
+import { useAutomateApp } from "@/views/room/automate";
 import { appCollectionCounts, appDataLineShown, appExportFileName, appStatsAnswer, collectionsLabel, documentsLabel } from "@/lib/appData";
 import { appDataApi } from "@/lib/appDataApi";
 import { useAuth } from "@/lib/auth";
@@ -104,6 +105,7 @@ export function AppDataLine({
   const total = documentsLabel(answer.stats.documents);
   const perCollection = collectionsLabel(answer.stats);
   const mayClear = can(role, "drive_agent");
+  const automate = useAutomateApp();
 
   const run = async (what: string, fn: () => Promise<void>) => {
     setBusy(true);
@@ -179,6 +181,11 @@ export function AppDataLine({
           )}
         >
           {exportItems}
+          {automate && (
+            <MenuItem icon={ClockIcon} onSelect={() => automate.open({ artifactId, title: appName })}>
+              Automate…
+            </MenuItem>
+          )}
           {mayClear && (
             <MenuItem icon={TrashIcon} onSelect={() => setConfirmClear(true)}>
               Clear data…
@@ -209,6 +216,11 @@ export function AppDataLine({
       >
         {exportItems}
       </Menu>
+      {automate && (
+        <button type="button" onClick={() => automate.open({ artifactId, title: appName })} className={CHIP} title="Run a task on this app at set times: remind, notify, report">
+          <ClockIcon size={14} /> Automate…
+        </button>
+      )}
       {mayClear && (
         <button type="button" disabled={busy} onClick={() => setConfirmClear(true)} className={CHIP}>
           <TrashIcon size={14} /> Clear data

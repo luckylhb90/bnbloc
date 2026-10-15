@@ -103,6 +103,8 @@ services:
       # Member notifications: public origin for deep links. Notifier
       # components are installed packages (permissions.network).
       BNBLOC_PUBLIC_URL: "${BNBLOC_PUBLIC_URL:-}"
+      # AI schedules are carried out by the gateway (compose.yml's
+      # http://gateway:8080 passes through).
       # Browser push (N4): VAPID pair (`bnbloc keys gen-vapid`); empty = off.
       BNBLOC_WEB_PUSH_VAPID_PUBLIC_KEY: "${BNBLOC_WEB_PUSH_VAPID_PUBLIC_KEY:-}"
       BNBLOC_WEB_PUSH_VAPID_PRIVATE_KEY: "${BNBLOC_WEB_PUSH_VAPID_PRIVATE_KEY:-}"

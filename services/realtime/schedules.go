@@ -53,6 +53,13 @@ const (
 	scheduleMisfireGrace = time.Hour
 )
 
+// AIRunner carries out an ai schedule's slot: the gateway's
+// POST /internal/v1/schedule-runs (schedule_ai.go). dry reads for real and
+// sends nothing.
+type AIRunner interface {
+	RunSchedule(ctx context.Context, sc wire.RoomSchedule, slot time.Time, dry bool) (wire.ScheduleRunReply, error)
+}
+
 // RoomRoleStore reads room existence and member roles (the shared room
 // store). Schedule moderation (owner/admin pause/delete) and the scheduler's
 // "room deleted" diagnosis use it.
@@ -233,6 +240,9 @@ func (s *Service) checkScheduleSpec(ctx context.Context, sc *wire.RoomSchedule, 
 		return http.StatusBadRequest, err
 	}
 	sc.Recipient = rcpt
+	if rcpt.Kind == wire.ScheduleRecipientAI && s.AIRuns == nil {
+		return http.StatusServiceUnavailable, errors.New("AI schedules are not available on this deployment")
+	}
 	if sc.ChannelID != "" {
 		if _, err := s.resolveChannel(ctx, sc.RoomID, sc.ChannelID); err != nil {
 			if errors.Is(err, errChannelLookup) {
@@ -374,6 +384,10 @@ func (s *Service) handleRunSchedule(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	now := time.Now()
+	if cur.Recipient.Kind == wire.ScheduleRecipientAI {
+		s.runAINow(w, r, cur, now)
+		return
+	}
 	seq, err := s.postScheduled(r.Context(), cur, now)
 	res := store.ScheduleRunResult{ScheduleID: cur.ScheduleID, AtMs: now.UnixMilli(), Status: wire.ScheduleRunOK, Seq: seq}
 	if err != nil {
@@ -479,6 +493,11 @@ func (s *Service) runClaimedSchedule(ctx context.Context, sc wire.RoomSchedule, 
 	if late := now.Sub(slot); late > scheduleMisfireGrace {
 		res.Status = wire.ScheduleRunSkipped
 		res.Error = fmt.Sprintf("missed the %s run (%s late)", slot.In(loc).Format("2006-01-02 15:04 MST"), late.Round(time.Minute))
+		finish()
+		return
+	}
+	if sc.Recipient.Kind == wire.ScheduleRecipientAI {
+		s.runClaimedAI(tctx, sc, slot, &res)
 		finish()
 		return
 	}

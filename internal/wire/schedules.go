@@ -10,15 +10,18 @@ package wire
 // bound so a stored scheduled prompt always fits the post it becomes.
 const MaxChatTextBytes = 16 * 1024
 
-// Schedule recipient kinds: a people-only room message, or a message
+// Schedule recipient kinds: a people-only room message, a message
 // addressed to one member's agent (the bridge serving that agent claims it,
 // and enforces borrow authorization at drive time exactly as for a typed
-// message).
+// message), or a task in plain words the assist model carries out with the
+// room's actions, as the schedule's owner (docs/prd/2026-10-15-app-
+// identity-schedules-notify-ai.md §4).
 //
 //wire:union ScheduleRecipientKind
 const (
 	ScheduleRecipientRoom  = "room"
 	ScheduleRecipientAgent = "agent"
+	ScheduleRecipientAI    = "ai"
 )
 
 // Schedule recurrence kinds.
@@ -85,10 +88,45 @@ type RoomSchedule struct {
 	LastRunAtMs int64              `json:"lastRunAtMs,omitempty"`
 	LastStatus  string             `json:"lastStatus,omitempty" tstype:"ScheduleRunStatus"`
 	LastError   string             `json:"lastError,omitempty"`
+	// LastSummary is what an ai schedule's last run did, in a line.
+	LastSummary string `json:"lastSummary,omitempty"`
+	// FailedRuns is how many runs in a row failed (0 after a run that
+	// did not).
+	FailedRuns int64 `json:"failedRuns,omitempty"`
 	LastSeq     int64              `json:"lastSeq,omitempty"`
 	RunCount    int64              `json:"runCount"`
 	CreatedAtMs int64              `json:"createdAtMs"`
 	UpdatedAtMs int64              `json:"updatedAtMs"`
+}
+
+// ScheduleRunRequest is realtime's call to the gateway to run an ai
+// schedule's slot (POST /internal/v1/schedule-runs): the schedule as
+// stored, the slot it runs (the idempotency of what it sends), and DryRun:
+// read for real, send nothing, report what it would do.
+type ScheduleRunRequest struct {
+	Schedule RoomSchedule `json:"schedule"`
+	SlotMs   int64        `json:"slotMs"`
+	DryRun   bool         `json:"dryRun,omitempty"`
+}
+
+// ScheduleRunReply is what an ai run did: its outcome (ScheduleRunStatus),
+// its summary (the model's last words), an error a person reads, and the
+// actions it took (or, dry, would take).
+type ScheduleRunReply struct {
+	Status  string           `json:"status" tstype:"ScheduleRunStatus"`
+	Summary string           `json:"summary,omitempty"`
+	Error   string           `json:"error,omitempty"`
+	Actions []ScheduleAction `json:"actions"`
+	// Seq is the last message the run posted (0: none).
+	Seq int64 `json:"seq,omitempty"`
+}
+
+// ScheduleAction is one action of a run: its name and what it did, in a
+// line; DryRun when it was only described.
+type ScheduleAction struct {
+	Name   string `json:"name"`
+	Detail string `json:"detail"`
+	DryRun bool   `json:"dryRun,omitempty"`
 }
 
 // ScheduledMarker is set as payload.scheduled on a chat_message the scheduler

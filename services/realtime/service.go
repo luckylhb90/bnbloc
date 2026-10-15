@@ -113,6 +113,10 @@ type Service struct {
 	// moderation. A nil Schedules answers the schedule routes 503.
 	Schedules store.RoomScheduleStore
 	RoomRoles RoomRoleStore
+	// AIRuns carries out an ai schedule's slot (the gateway, the only
+	// caller of the assist model). Nil refuses ai schedules (503) and
+	// records their due runs as errors.
+	AIRuns AIRunner
 	// PlatformAgents refuses a chat to a platform agent whose host is
 	// offline (409 platform_agent_offline) before any job exists. Nil
 	// disables the guard.

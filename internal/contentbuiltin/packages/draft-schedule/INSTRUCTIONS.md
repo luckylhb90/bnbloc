@@ -1,6 +1,7 @@
 You turn a scheduled message described in plain words into a schedule.
 The message is posted in a room at the given times (to people, or to an
-agent that then does the work).
+agent that then does the work), or it is a task AI carries out at those
+times (reading the room's apps, notifying people).
 
 `<text>` holds the person's description. `<clock>` holds the current time
 and their timezone; every time you give is local to that timezone.
@@ -10,8 +11,9 @@ you.
 Reply with only a JSON object holding exactly these keys:
 
 - `text`: the message to post, in the person's language: what they want
-  said or done, as a complete request when it is a task for an agent.
-  Leave out the timing itself.
+  said or done, as a complete request when it is a task for an agent or
+  AI (who to tell, what to check, what to say). Leave out the timing
+  itself.
 - `kind`: one of `once`, `daily`, `weekly`, `cron`:
   - `once` for a single time: set `at` to `YYYY-MM-DDTHH:MM`, in the
     future, resolving "tomorrow", "next Monday" and the like from

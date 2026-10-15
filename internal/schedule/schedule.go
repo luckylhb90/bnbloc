@@ -92,7 +92,8 @@ func Validate(rec wire.ScheduleRecurrence, tz string) (wire.ScheduleRecurrence, 
 }
 
 // NormalizeRecipient validates a schedule recipient: "room" (or empty) is a
-// people-only message; "agent" needs the agent's owner and provider.
+// people-only message; "agent" needs the agent's owner and provider; "ai"
+// (a task the assist model carries out) takes nothing more.
 func NormalizeRecipient(r wire.ScheduleRecipient) (wire.ScheduleRecipient, error) {
 	switch strings.TrimSpace(r.Kind) {
 	case "", wire.ScheduleRecipientRoom:
@@ -108,8 +109,10 @@ func NormalizeRecipient(r wire.ScheduleRecipient) (wire.ScheduleRecipient, error
 			return out, errors.New("recipient: an agent recipient needs ownerId and provider")
 		}
 		return out, nil
+	case wire.ScheduleRecipientAI:
+		return wire.ScheduleRecipient{Kind: wire.ScheduleRecipientAI}, nil
 	}
-	return r, fmt.Errorf("recipient: unknown kind %q (room, agent)", r.Kind)
+	return r, fmt.Errorf("recipient: unknown kind %q (room, agent, ai)", r.Kind)
 }
 
 // LoadZone loads an IANA timezone. The process-local zone is refused: a

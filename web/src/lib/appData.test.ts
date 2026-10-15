@@ -9,7 +9,7 @@ function eq(a: unknown, b: unknown, message: string): void {
   if (JSON.stringify(a) !== JSON.stringify(b)) throw new Error(`${message}: got ${JSON.stringify(a)}, want ${JSON.stringify(b)}`);
 }
 
-const stats = (documents: number, collections: Record<string, number> = {}): AppDataStats => ({ documents, bytes: documents * 10, collections });
+const stats = (documents: number, collections: Record<string, number> = {}): AppDataStats => ({ documents, bytes: documents * 10, collections, files: 0, fileBytes: 0 });
 
 function testDataLineVisibility(): void {
   const owner = appStatsAnswer({ data: stats(3, { votes: 3 }), error: undefined });

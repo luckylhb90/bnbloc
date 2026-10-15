@@ -657,6 +657,8 @@ CREATE TABLE IF NOT EXISTS room_schedules (
   last_run_at_ms   BIGINT NULL,
   last_status      VARCHAR(16) NOT NULL DEFAULT '',
   last_error       VARCHAR(512) NOT NULL DEFAULT '',
+  last_summary     VARCHAR(512) NOT NULL DEFAULT '',
+  failed_runs      BIGINT NOT NULL DEFAULT 0,
   last_seq         BIGINT NOT NULL DEFAULT 0,
   run_count        BIGINT NOT NULL DEFAULT 0,
   created_at_ms    BIGINT NOT NULL,

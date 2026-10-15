@@ -7,6 +7,7 @@ import {
   PlayIcon,
   PaperPlaneRightIcon,
   PlusIcon,
+  SparkleIcon,
   TrashIcon,
   WarningIcon,
 } from "@phosphor-icons/react";
@@ -31,6 +32,7 @@ import {
   type ScheduleRecipient,
 } from "@/lib/schedules";
 import { schedulesApi } from "@/lib/schedulesApi";
+import type { ScheduleRunReply } from "@/lib/wire.gen";
 import { Button } from "@/ui/Button";
 import { Badge } from "@/ui/Card";
 import { ConfirmDialog, Dialog } from "@/ui/Dialog";
@@ -67,6 +69,7 @@ export function SchedulesDialog({
   moderator,
   roomAgents,
   localTargets,
+  aiTask,
   onClose,
 }: {
   readonly roomId: string;
@@ -75,13 +78,17 @@ export function SchedulesDialog({
   readonly moderator: boolean;
   readonly roomAgents: RoomAgent[];
   readonly localTargets: readonly PickerTarget[];
+  // Opens straight into a new AI task starting with this text (an app's
+  // "Automate…").
+  readonly aiTask?: string;
   readonly onClose: () => void;
 }) {
   const toast = useToast();
   const [list, setList] = useState<RoomSchedule[] | null>(null);
   const [channels, setChannels] = useState<Channel[]>([]);
-  const [editing, setEditing] = useState<RoomSchedule | "new" | null>(null);
+  const [editing, setEditing] = useState<RoomSchedule | "new" | null>(aiTask !== undefined ? "new" : null);
   const [deleting, setDeleting] = useState<RoomSchedule | null>(null);
+  const [trying, setTrying] = useState<RoomSchedule | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const nameOf = useDisplayNames((list ?? []).flatMap((s) => [s.createdBy, s.recipient.kind === "agent" ? s.recipient.ownerId : ""]));
 
@@ -125,7 +132,7 @@ export function SchedulesDialog({
         onClose={onClose}
         size="lg"
         title="Schedules"
-        description="Messages posted into this room at set times, as the member who scheduled them."
+        description="Messages posted into this room at set times, and AI tasks carried out at them, as the member who scheduled them."
         footer={
           <>
             <Button variant="ghost" onClick={onClose}>
@@ -144,7 +151,7 @@ export function SchedulesDialog({
             <ClockIcon size={26} className="text-[var(--color-fg-subtle)]" />
             <p className="text-sm font-medium">No schedules yet</p>
             <p className="max-w-sm text-xs text-[var(--color-fg-muted)]">
-              Schedule a recurring prompt — a daily standup question to an agent, a weekly reminder to the room.
+              Schedule a recurring prompt — a daily standup question to an agent, a weekly reminder to the room — or a task for AI in plain words.
             </p>
           </div>
         ) : (
@@ -167,6 +174,7 @@ export function SchedulesDialog({
                         {s.enabled && s.nextRunAtMs ? ` · next ${formatInZone(s.nextRunAtMs, s.timezone)}` : ""}
                         {s.lastRunAtMs ? ` · last ${formatInZone(s.lastRunAtMs, s.timezone)} (${s.lastStatus ?? "?"})` : ""}
                       </p>
+                      {s.lastSummary && <p className="mt-0.5 text-xs text-[var(--color-fg-muted)]">Last run: {s.lastSummary}</p>}
                     </div>
                     <Badge tone={status.tone === "ok" ? "accent" : status.tone === "warn" ? "warning" : "neutral"} title={status.label}>
                       <span className="max-w-[12rem] truncate">{status.label}</span>
@@ -198,9 +206,14 @@ export function SchedulesDialog({
                         size="sm"
                         variant="ghost"
                         disabled={busy !== null}
-                        onClick={() => void act(s, "run", () => schedulesApi.runNow(roomId, s.scheduleId), "Posted now")}
+                        onClick={() => void act(s, "run", () => schedulesApi.runNow(roomId, s.scheduleId), s.recipient.kind === "ai" ? "Ran now" : "Posted now")}
                       >
                         <PaperPlaneRightIcon size={14} /> Run now
+                      </Button>
+                    )}
+                    {mine && s.recipient.kind === "ai" && (
+                      <Button size="sm" variant="ghost" disabled={busy !== null} onClick={() => setTrying(s)}>
+                        <SparkleIcon size={14} /> Try it
                       </Button>
                     )}
                     {mine && (
@@ -225,6 +238,7 @@ export function SchedulesDialog({
           roomId={roomId}
           subject={subject}
           schedule={editing === "new" ? null : editing}
+          seed={editing === "new" && aiTask !== undefined ? { text: aiTask, recipient: { kind: "ai" } } : undefined}
           channels={channels}
           roomAgents={roomAgents}
           localTargets={localTargets}
@@ -235,6 +249,7 @@ export function SchedulesDialog({
           }}
         />
       )}
+      {trying && <TryRunDialog roomId={roomId} schedule={trying} onClose={() => setTrying(null)} />}
       <ConfirmDialog
         open={deleting !== null}
         onClose={() => setDeleting(null)}
@@ -254,7 +269,8 @@ export function SchedulesDialog({
 
 // recipientKey identifies a recipient option ("room" or the agent identity).
 function recipientKey(r: ScheduleRecipient): string {
-  return r.kind === "room" ? "room" : agentIdentity({ ownerId: r.ownerId ?? "", core: r.core || undefined, provider: r.provider ?? "" });
+  if (r.kind === "room" || r.kind === "ai") return r.kind;
+  return agentIdentity({ ownerId: r.ownerId ?? "", core: r.core || undefined, provider: r.provider ?? "" });
 }
 
 // ScheduleEditor creates or edits one schedule. The recipient choices are the
@@ -264,6 +280,7 @@ function ScheduleEditor({
   roomId,
   subject,
   schedule,
+  seed,
   channels,
   roomAgents,
   localTargets,
@@ -273,6 +290,8 @@ function ScheduleEditor({
   readonly roomId: string;
   readonly subject: string | null;
   readonly schedule: RoomSchedule | null;
+  // A new schedule's starting text and recipient.
+  readonly seed?: { readonly text: string; readonly recipient: ScheduleRecipient };
   readonly channels: Channel[];
   readonly roomAgents: RoomAgent[];
   readonly localTargets: readonly PickerTarget[];
@@ -282,10 +301,10 @@ function ScheduleEditor({
   const toast = useToast();
   const me = subject ?? "";
   const nameOf = useDisplayNames([...roomAgents.map((a) => a.ownerId), schedule?.recipient.kind === "agent" ? schedule.recipient.ownerId : ""]);
-  const [text, setText] = useState(schedule?.text ?? "");
+  const [text, setText] = useState(schedule?.text ?? seed?.text ?? "");
   const [timezone, setTimezone] = useState(schedule?.timezone ?? browserTimezone());
   const [channelId, setChannelId] = useState(schedule?.channelId ?? "");
-  const [recipient, setRecipient] = useState<ScheduleRecipient>(schedule?.recipient ?? { kind: "room" });
+  const [recipient, setRecipient] = useState<ScheduleRecipient>(schedule?.recipient ?? seed?.recipient ?? { kind: "room" });
   const [form, setForm] = useState<RecurrenceForm>(() => formFromRecurrence(schedule?.recurrence, schedule?.timezone ?? browserTimezone()));
   const [enabled, setEnabled] = useState(schedule?.enabled ?? true);
   const [err, setErr] = useState("");
@@ -321,7 +340,7 @@ function ScheduleEditor({
     try {
       const r = await runJSONAssist(describeTask.name, { text: said.trim(), roomId, timezone });
       const d = scheduleDraftFrom(r.fields);
-      if (d.text) setText(d.text);
+      if (d.text) setText(seed && recipient.kind === "ai" && !d.text.includes(seed.text.trim()) ? seed.text + d.text : d.text);
       setForm((f) => ({ ...f, ...d.form }));
       if (!d.form.kind) toast.error("Could not read when to post it; set the time below");
       setErr("");
@@ -338,7 +357,7 @@ function ScheduleEditor({
 
   const save = async () => {
     if (!text.trim()) {
-      setErr("Write the message to post");
+      setErr(recipient.kind === "ai" ? "Write the task" : "Write the message to post");
       return;
     }
     const built = recurrenceFromForm(form, timezone);
@@ -404,8 +423,21 @@ function ScheduleEditor({
             <AssistButton variant="text" label="Describe it" state={describing} onRun={() => void describe()} disabled={!said.trim()} />
           </div>
         )}
-        <Field label="Message">
-          <Textarea autoFocus rows={4} value={text} onChange={(e) => setText(e.target.value)} placeholder="What changed since yesterday? Summarize open questions." />
+        <Field
+          label={recipient.kind === "ai" ? "Task" : "Message"}
+          hint={
+            recipient.kind === "ai"
+              ? "In your own words. At each run AI reads the room's apps' data and can notify people, post here or ask an agent, as you. Try it before turning it on."
+              : undefined
+          }
+        >
+          <Textarea
+            autoFocus
+            rows={4}
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            placeholder={recipient.kind === "ai" ? "Remind whoever has not filled in this week's report, with the link." : "What changed since yesterday? Summarize open questions."}
+          />
         </Field>
         <div className="grid gap-4 sm:grid-cols-2">
           <Field label="Send to">
@@ -414,10 +446,11 @@ function ScheduleEditor({
               value={recipientKey(recipient)}
               onChange={(e) => {
                 const o = options.find((x) => x.key === e.target.value);
-                setRecipient(o ? o.recipient : { kind: "room" });
+                setRecipient(o ? o.recipient : { kind: e.target.value === "ai" ? "ai" : "room" });
               }}
             >
               <option value="room">The room (people only)</option>
+              <option value="ai">AI: carry out the task</option>
               {groups.map((g) => (
                 <optgroup key={g} label={g}>
                   {options
@@ -508,6 +541,57 @@ function ScheduleEditor({
         {!schedule && <Switch checked={enabled} onChange={setEnabled} label="Start active" />}
         {err && <p className="text-sm text-[var(--color-danger)]">{err}</p>}
       </div>
+    </Dialog>
+  );
+}
+
+// TryRunDialog is an AI task's dry run: what a run would do now (real
+// reads, nothing sent), for its creator to check before it runs for real.
+function TryRunDialog({ roomId, schedule, onClose }: { readonly roomId: string; readonly schedule: RoomSchedule; readonly onClose: () => void }) {
+  const [reply, setReply] = useState<ScheduleRunReply | null>(null);
+  const [failed, setFailed] = useState("");
+  useEffect(() => {
+    let live = true;
+    schedulesApi
+      .tryAI(roomId, schedule.scheduleId)
+      .then((r) => live && setReply(r))
+      .catch((e) => live && setFailed(errorText(e, "Could not try the task")));
+    return () => {
+      live = false;
+    };
+  }, [roomId, schedule.scheduleId]);
+  return (
+    <Dialog
+      open
+      onClose={onClose}
+      title="Try the task"
+      description="What a run would do now. It read the room for real and sent nothing."
+      footer={
+        <Button variant="primary" onClick={onClose}>
+          Close
+        </Button>
+      }
+    >
+      {failed ? (
+        <p className="text-sm text-[var(--color-danger)]">{failed}</p>
+      ) : !reply ? (
+        <p className="py-4 text-center text-sm text-[var(--color-fg-muted)]">Running the task…</p>
+      ) : (
+        <div className="flex flex-col gap-3 text-sm">
+          {reply.error ? <p className="text-[var(--color-danger)]">{reply.error}</p> : reply.summary && <p>{reply.summary}</p>}
+          {reply.actions.length === 0 ? (
+            <p className="text-xs text-[var(--color-fg-muted)]">It would do nothing.</p>
+          ) : (
+            <ul className="flex flex-col gap-1">
+              {reply.actions.map((a, i) => (
+                <li key={i} className="rounded-[var(--radius)] border border-[var(--color-border)] px-2 py-1 text-xs">
+                  <span className="font-medium">{a.name}</span> <span className="text-[var(--color-fg-muted)]">{a.detail}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
     </Dialog>
   );
 }

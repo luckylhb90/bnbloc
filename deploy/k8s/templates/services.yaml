@@ -23,7 +23,7 @@ reads — see docs/deploy-service-env.md.
   "gateway"         (dict "cfg" .Values.gateway         "db" true  "shard" "count" "peers" (list "room" "activity" "realtime" "shareagent" "relay"))
   "room"            (dict "cfg" .Values.room            "db" true  "shard" ""      "peers" (list "realtime"))
   "activity"        (dict "cfg" .Values.activity        "db" true  "shard" ""      "peers" (list "room" "realtime"))
-  "realtime"        (dict "cfg" .Values.realtime        "db" true  "shard" "owner" "peers" (list "room"))
+  "realtime"        (dict "cfg" .Values.realtime        "db" true  "shard" "owner" "peers" (list "room" "gateway"))
   "shareagent"      (dict "cfg" .Values.shareagent      "db" true  "shard" ""      "peers" (list "room"))
   "relay"           (dict "cfg" .Values.relay           "db" false "shard" "owner" "peers" (list))
 -}}

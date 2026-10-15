@@ -149,6 +149,7 @@ export function isBorrowedRecipient(r: ScheduleRecipient, me: string): boolean {
 // recipientLabel renders the recipient by display name ("room",
 // "Jack · codex"); the canonical handle stays recipientHandle's job.
 export function recipientLabel(r: ScheduleRecipient, nameOf: (id: string) => string = defaultDisplayName): string {
+  if (r.kind === "ai") return "AI";
   return r.kind === "agent" ? formatAgentHandle(nameOf(r.ownerId ?? ""), r.provider ?? "") : "room";
 }
 

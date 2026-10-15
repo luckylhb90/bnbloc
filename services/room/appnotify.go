@@ -1,6 +1,7 @@
 package room
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -9,7 +10,9 @@ import (
 
 	"github.com/luckylhb90/bnbloc/internal/httpx"
 	"github.com/luckylhb90/bnbloc/internal/membership"
+	"github.com/luckylhb90/bnbloc/internal/obs"
 	"github.com/luckylhb90/bnbloc/internal/svcauth"
+	"github.com/luckylhb90/bnbloc/internal/tenant"
 	"github.com/luckylhb90/bnbloc/internal/wire"
 )
 
@@ -19,7 +22,8 @@ import (
 // notification emitter (one producer seam), with the app's title and the
 // room's name this answers.
 //
-//	POST /internal/v1/app/notify-targets   wire.AppNotifyRequest's to → wire.AppNotifyTargets
+//	POST /internal/v1/app/notify-targets          an app's notice (its scope's caller)  → wire.AppNotifyTargets
+//	POST /internal/v1/rooms/{roomId}/notice-targets?as=  a room's notice (as: an ai schedule's owner) → wire.AppNotifyTargets
 //
 // "room" is the room's people who may act in it (the app's human owners:
 // not visitors, not agent hosts): any signed-in caller may reach them (a
@@ -43,7 +47,7 @@ func (s *Service) handleAppNotifyTargets(w http.ResponseWriter, r *http.Request,
 	if !httpx.DecodeJSON(w, r, wire.MaxAppRequestBytes, &in) {
 		return
 	}
-	recipients, err := s.appNoticeRecipients(a, in.To)
+	recipients, err := s.noticeRecipients(a.ctx, a.tenantID, a.scope.RoomID, a.owner, in.To)
 	if err != nil {
 		writeAppError(w, err)
 		return
@@ -58,14 +62,53 @@ func (s *Service) handleAppNotifyTargets(w http.ResponseWriter, r *http.Request,
 	httpx.WriteJSON(w, http.StatusOK, out)
 }
 
-// appNoticeRecipients resolves to.
-func (s *Service) appNoticeRecipients(a *appCall, to json.RawMessage) ([]string, error) {
+// handleRoomNoticeTargets resolves a room notice's to for its sender (as,
+// named by the gateway, the only caller): an ai schedule's owner, who must
+// still be a member who may act in the room (else 403: the schedule
+// pauses).
+func (s *Service) handleRoomNoticeTargets(w http.ResponseWriter, r *http.Request) {
+	ctx, roomID, sender := r.Context(), r.PathValue("roomId"), strings.TrimSpace(r.URL.Query().Get("as"))
+	tid, err := tenant.Require(ctx)
+	if err != nil {
+		httpx.Error(w, err.Error(), http.StatusUnauthorized)
+		return
+	}
+	m, ok, err := s.Store.GetMember(ctx, roomID, sender)
+	if err != nil {
+		obs.ServerError(w, "read membership failed", err)
+		httpx.Error(w, "read membership failed", http.StatusInternalServerError)
+		return
+	}
+	if !ok || !(membership.Member{Role: m.Role, AgentHost: m.AgentHost}).MayChat() {
+		httpx.Error(w, "the sender may not act in this room", http.StatusForbidden)
+		return
+	}
+	var in wire.AppNotifyRequest
+	if !httpx.DecodeJSON(w, r, wire.MaxAppRequestBytes, &in) {
+		return
+	}
+	recipients, err := s.noticeRecipients(ctx, tid, roomID, true, in.To)
+	if err != nil {
+		writeAppError(w, err)
+		return
+	}
+	out := wire.AppNotifyTargets{Recipients: recipients}
+	if room, err := s.Store.GetRoom(ctx, roomID); err == nil {
+		out.RoomName = room.Name
+	}
+	httpx.WriteJSON(w, http.StatusOK, out)
+}
+
+// noticeRecipients is the one resolution of a notice's to in a room: the
+// room's members who may act in it, or (owner only) the logins that belong
+// to the organization.
+func (s *Service) noticeRecipients(ctx context.Context, tenantID, roomID string, owner bool, to json.RawMessage) ([]string, error) {
 	var room string
 	if json.Unmarshal(to, &room) == nil {
 		if room != wire.AppNotifyRoom {
 			return nil, appdataInvalid(errAppNotifyTo.Error())
 		}
-		members, err := s.Store.Members(a.ctx, a.scope.RoomID)
+		members, err := s.Store.Members(ctx, roomID)
 		if err != nil {
 			return nil, err
 		}
@@ -84,7 +127,7 @@ func (s *Service) appNoticeRecipients(a *appCall, to json.RawMessage) ([]string,
 	if err := json.Unmarshal(to, &logins); err != nil || len(logins) == 0 {
 		return nil, appdataInvalid(errAppNotifyTo.Error())
 	}
-	if !a.owner {
+	if !owner {
 		return nil, errAppNotifyLogins
 	}
 	if len(logins) > wire.MaxAppNotifyLogins {
@@ -101,7 +144,7 @@ func (s *Service) appNoticeRecipients(a *appCall, to json.RawMessage) ([]string,
 			continue
 		}
 		seen[l] = true
-		_, ok, err := s.Tenants.GetMember(a.ctx, a.tenantID, l)
+		_, ok, err := s.Tenants.GetMember(ctx, tenantID, l)
 		if err != nil {
 			return nil, err
 		}

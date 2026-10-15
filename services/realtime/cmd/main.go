@@ -4,6 +4,7 @@ package main
 import (
 	"context"
 	"log"
+	"net/http"
 	"time"
 
 	"github.com/luckylhb90/bnbloc/internal/blobstore"
@@ -143,6 +144,11 @@ func main() {
 	// scheduler; runs post as the schedule's creator through the chat path.
 	svc.Schedules = backends.Schedules
 	svc.RoomRoles = backends.Room
+	// AI schedules run in the gateway, the only caller of the assist model
+	// (unset: ai schedules are refused).
+	if gw := config.FromEnvRaw("BNBLOC_GATEWAY_BASE_URL"); gw != "" {
+		svc.AIRuns = realtimehttp.GatewayAIRuns{BaseURL: gw, Client: &http.Client{Timeout: 10 * time.Minute}}
+	}
 	go svc.RunScheduler(context.Background())
 	// blobs stays nil when the store is unavailable (the retention worker
 	// then skips the blob collection).

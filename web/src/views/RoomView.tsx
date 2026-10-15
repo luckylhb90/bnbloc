@@ -48,6 +48,7 @@ import { useRoomTeam } from "@/views/room/useRoomTeam";
 import { MessageExtrasProvider } from "@/views/room/messageExtras";
 import { AttachmentOpenerProvider } from "@/views/room/MessageAttachments";
 import { FileAskProvider } from "@/views/workbench/FileAskPanel";
+import { AutomateProvider, automateTaskSeed, type AutomateApp } from "@/views/room/automate";
 import { useRoomFileAsk } from "@/views/workbench/useRoomFileAsk";
 import { JobProgressProvider } from "@/views/room/JobProgressStrip";
 import { SaveTemplateDialog } from "@/views/room/SaveTemplateDialog";
@@ -97,6 +98,8 @@ export function RoomView({
   const [showSearch, setShowSearch] = useState(false);
   const [savingTemplate, setSavingTemplate] = useState(false);
   const [showSchedules, setShowSchedules] = useState(false);
+  // An app's "Automate…" opens the schedules on a new AI task about it.
+  const [automating, setAutomating] = useState<string | undefined>();
   const [showRuns, setShowRuns] = useState(false);
   const [search, setSearch] = useState("");
   const [starting, setStarting] = useState(false);
@@ -334,6 +337,18 @@ export function RoomView({
   // beside the timeline on a wide room, a full-screen sheet otherwise, its
   // own window in the desktop shell.
   const member = !!room && !("preview" in room);
+  const automate = useMemo<AutomateApp | null>(
+    () =>
+      member
+        ? {
+            open: (app) => {
+              setAutomating(automateTaskSeed(app));
+              setShowSchedules(true);
+            },
+          }
+        : null,
+    [member],
+  );
   const peopleChat = usePeopleChat({
     roomId,
     joinedGen,
@@ -482,6 +497,7 @@ export function RoomView({
       {/* Channel rail + feed + composer share one row; the rail scopes all
           three to the selected channel. */}
       <AttachmentOpenerProvider value={workbench.openAttachment}>
+      <AutomateProvider value={automate}>
       <FileAskProvider value={fileAsk}>
       <div ref={roomRowRef} data-room-row className="relative flex min-h-0 flex-1 overflow-hidden">
         {railSurface === "inline" && rail}
@@ -606,6 +622,7 @@ export function RoomView({
         )}
       </div>
       </FileAskProvider>
+      </AutomateProvider>
       </AttachmentOpenerProvider>
 
       {room && feed.length > 0 && <MyMessagesNav items={feed} />}
@@ -643,7 +660,11 @@ export function RoomView({
           moderator={canManageRoom}
           roomAgents={roomAgents}
           localTargets={agent.targets}
-          onClose={() => setShowSchedules(false)}
+          aiTask={automating}
+          onClose={() => {
+            setShowSchedules(false);
+            setAutomating(undefined);
+          }}
         />
       )}
       {showRuns && <RunsDialog roomId={roomId} onClose={() => setShowRuns(false)} />}

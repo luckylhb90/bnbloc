@@ -28,10 +28,41 @@ import (
 // Timeout bounds one call, the stream included.
 const Timeout = 60 * time.Second
 
-// Message is one chat message.
+// Message is one chat message. An assistant message may carry tool calls
+// (ToolCalls); a "tool" message answers one (ToolCallID).
 type Message struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
+	Role       string     `json:"role"`
+	Content    string     `json:"content"`
+	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
+	ToolCallID string     `json:"tool_call_id,omitempty"`
+}
+
+// Tool is a function the model may call (OpenAI-compatible tools): its
+// name, what it does and its JSON Schema parameters.
+type Tool struct {
+	Name        string
+	Description string
+	Parameters  map[string]any
+}
+
+// ToolCall is one call the model asked for: its id, the function and the
+// arguments as JSON text.
+type ToolCall struct {
+	ID       string `json:"id"`
+	Type     string `json:"type"`
+	Function struct {
+		Name      string `json:"name"`
+		Arguments string `json:"arguments"`
+	} `json:"function"`
+}
+
+type toolSpec struct {
+	Type     string `json:"type"`
+	Function struct {
+		Name        string         `json:"name"`
+		Description string         `json:"description"`
+		Parameters  map[string]any `json:"parameters"`
+	} `json:"function"`
 }
 
 // Client calls the assist model.
@@ -52,6 +83,7 @@ type chatRequest struct {
 	ResponseFormat *struct {
 		Type string `json:"type"`
 	} `json:"response_format,omitempty"`
+	Tools []toolSpec `json:"tools,omitempty"`
 }
 
 type streamOptions struct {
@@ -66,7 +98,8 @@ type chatUsage struct {
 type chatResponse struct {
 	Choices []struct {
 		Message struct {
-			Content string `json:"content"`
+			Content   string     `json:"content"`
+			ToolCalls []ToolCall `json:"tool_calls"`
 		} `json:"message"`
 		Delta struct {
 			Content string `json:"content"`
@@ -259,4 +292,34 @@ func (c *Client) Complete(ctx context.Context, m Model, msgs []Message, jsonObje
 		text = cr.Choices[0].Message.Content
 	}
 	return text, usageOf(m, cr.Usage, start, c.now()), nil
+}
+
+// Call asks the model once with tools it may call, and returns its
+// message: tool calls to answer (each with a "tool" message, then Call
+// again), or the final text. The caller bounds the rounds.
+func (c *Client) Call(ctx context.Context, m Model, msgs []Message, tools []Tool) (Message, wire.AssistUsage, error) {
+	ctx, cancel := context.WithTimeout(ctx, Timeout)
+	defer cancel()
+	start := c.now()
+	req := chatRequest{Messages: msgs, Temperature: 0.2}
+	for _, t := range tools {
+		var spec toolSpec
+		spec.Type = "function"
+		spec.Function.Name, spec.Function.Description, spec.Function.Parameters = t.Name, t.Description, t.Parameters
+		req.Tools = append(req.Tools, spec)
+	}
+	resp, err := c.post(ctx, m, req)
+	if err != nil {
+		return Message{}, wire.AssistUsage{}, err
+	}
+	defer resp.Body.Close()
+	var cr chatResponse
+	if err := json.NewDecoder(io.LimitReader(resp.Body, maxReplyBytes)).Decode(&cr); err != nil {
+		return Message{}, wire.AssistUsage{}, fmt.Errorf("the assist model's answer is unreadable: %w", err)
+	}
+	out := Message{Role: "assistant"}
+	if len(cr.Choices) > 0 {
+		out.Content, out.ToolCalls = cr.Choices[0].Message.Content, cr.Choices[0].Message.ToolCalls
+	}
+	return out, usageOf(m, cr.Usage, start, c.now()), nil
 }
