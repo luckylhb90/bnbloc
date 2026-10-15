@@ -146,6 +146,34 @@ The SDK adds `app.ai({prompt, input?, json?})`, from a page or a handler.
   (files, a deck, judgement across everyone's logs), the app posts a
   request to the room, an agent schedule, as today.
 
+## 6a. Files from an app
+
+An app can only store JSON documents of at most 64 KiB, so a form that
+collects a photo, a screenshot or a receipt has nowhere to put it (base64
+in a document fits only a few dozen KB). The SDK adds:
+
+```ts
+app.files.upload(file: File): Promise<{ id: string; name: string; type: string; size: number }>;
+app.files.url(id: string): Promise<string>;   // a short-lived link to show or download it
+```
+
+- **One owner of what a file may be.** Uploads go through the chat
+  attachments' type list and content checks (`wire.AttachmentTypes`), the
+  same blob store, and the same serving: only sniff-verified raster images
+  inline, every other file an opaque, sandboxed download.
+- **The app's rules apply.** A file belongs to the app (its room and
+  tenant), and its uploader is the caller's `_by`. It is readable by its
+  uploader and the app's owners, unless uploaded `{public: true}`. An
+  anonymous visitor may upload under stricter rate limits. Per-file size is
+  the attachment cap (`wire.MaxAttachmentBytes`), and an app's files count
+  against the app's total cap.
+- **The app keeps the reference.** The app stores the returned id in its
+  own document (`{receipt: id}`); deleting the document does not delete the
+  file, and a wipe of the app's data deletes both.
+- **Agents read them back** through `app_data` (a file id resolves to its
+  name, type and a readable copy in the workspace), so the agent can look
+  at what people submitted. No new tool.
+
 ## 7. The weekly report app, end to end
 
 1. The lead asks the App builder. The agent builds `index.html`: a form
@@ -173,7 +201,7 @@ The SDK adds `app.ai({prompt, input?, json?})`, from a page or a handler.
 | Abuse and untrusted input | App input to the model is fenced as data. A notice's text is plain text and links to the app; notifiers render it as text. |
 | One owner | Accounts: the new store, written at sign-in. When: `internal/schedule`. Delivery: `notify.Emitter` and notifier components. Model: `internal/assist`. |
 | Defaults and fallbacks | No IdP email: `account.email` absent. No group-capable notifier: `channel:` fails with a sentence, member notices still work. Assist off: `app.ai` fails with a sentence. |
-| External contracts | SDK: `me().account`, `notify`, `ai`. Schedules: recipient `app`. Notifier discover: optional `groups`. Wire notice kind `app_notice`. All additive. |
+| External contracts | SDK: `me().account`, `files`, `notify`, `ai`. Schedules: recipient `app`. Notifier discover: optional `groups`. Wire notice kind `app_notice`. All additive. |
 | Load on users and agents | The member turns a schedule on from the app's card. The agent learns three SDK calls and a handler folder from the skill's examples. |
 | Release and compatibility | Server first (accounts, SDK, notify, ai, the scheduler's dispatch), then the skill update, then notifier packages that add group delivery. Older apps keep working. |
 | Observability | Every notice and AI call is audited with the app id; a handler run records its outcome and duration on the schedule. |
@@ -194,7 +222,8 @@ The SDK adds `app.ai({prompt, input?, json?})`, from a page or a handler.
 
 - **A1:** accounts store, `me().account`, the skill update. This is
   enough for "no need to type the login".
-- **A2:** `app.ai` from pages.
+- **A2:** `app.files` (upload, url), and `app_data` reading them.
+- **A2b:** `app.ai` from pages.
 - **A3:** `app.notify` to members, with the `app_notice` kind and mutes.
 - **A4:** app handlers and the `app` schedule recipient; `notify` and `ai`
   from handlers.
