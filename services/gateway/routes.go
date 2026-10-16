@@ -220,6 +220,12 @@ func (s *Service) routes() []route {
 		member("GET /v1/assist", s.handleAssistStatus).with(needContent),
 		gated("POST /v1/assist/{task}", drive, s.handleAssist).spends(costBudget).with(needContent),
 		member("GET /v1/rooms/{roomId}/artifacts/{artifactId}/recipe", s.handleDeliverableRecipe).with(needContent),
+		// Media model calls (media.go): speech to text and image generation
+		// through admin-configured providers. They feed message composition,
+		// so they follow the assist routes' permission rule.
+		member("GET /v1/media", s.handleMediaCapabilities),
+		gated("POST /v1/media/transcriptions", drive, s.handleMediaTranscribe).spends(costBudget),
+		gated("POST /v1/media/image", drive, s.handleMediaImage).spends(costBudget),
 
 		// Organization administration (manage_org in the acting tenant).
 		gated("GET /v1/tenant/mcp-connectors", org, s.handleListMCPConnectors),
@@ -265,6 +271,10 @@ func (s *Service) routes() []route {
 		gated("GET /v1/platform/assist-model", platform, s.handleAssistModel),
 		gated("PUT /v1/platform/assist-model", platform, s.handlePutAssistModel),
 		gated("POST /v1/platform/assist-model/test", platform, s.handleTestAssistModel),
+		// Media providers (media.go): speech-to-text and image generation.
+		gated("GET /v1/platform/media/{capability}", platform, s.handleMediaProvider),
+		gated("PUT /v1/platform/media/{capability}", platform, s.handlePutMediaProvider),
+		gated("POST /v1/platform/media/{capability}/test", platform, s.handleTestMediaProvider),
 		gated("GET /v1/platform/content-components", platform, s.handleListPlatformContent).with(needContent),
 		gated("GET /v1/platform/content-components/{id}/package", platform, s.handleExportContentPackage).with(needContent),
 		gated("POST /v1/platform/content-components/{id}/unpublish", platform, s.handlePlatformContentStatus(store.ContentStatusRetired)).with(needContent),

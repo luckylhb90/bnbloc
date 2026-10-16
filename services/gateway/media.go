@@ -1,0 +1,399 @@
+package gateway
+
+import (
+	"context"
+	"encoding/base64"
+	"encoding/binary"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"net/http"
+	"net/url"
+	"strings"
+	"time"
+	"unicode/utf8"
+
+	"github.com/luckylhb90/bnbloc/internal/auth"
+	"github.com/luckylhb90/bnbloc/internal/httpx"
+	"github.com/luckylhb90/bnbloc/internal/media"
+	"github.com/luckylhb90/bnbloc/internal/modelsettings"
+	"github.com/luckylhb90/bnbloc/internal/obs"
+	"github.com/luckylhb90/bnbloc/internal/store"
+	"github.com/luckylhb90/bnbloc/internal/wire"
+)
+
+// Media model calls (docs/prd/2026-10-16-voice-and-image-generation.md):
+// speech to text for the composer and image generation for agents, through
+// admin-configured providers (internal/media). internal/media owns the
+// provider call; this file admits the caller and relays the reply, exactly
+// as the assist routes do (the rate, the budget, the audit kind).
+//
+//	GET  /v1/media                          which media calls run for the caller
+//	POST /v1/media/transcriptions           one transcription (raw audio body)
+//	POST /v1/media/image                    one image generation
+//	GET  /v1/platform/media/{capability}    the capability's provider (never its key)
+//	PUT  /v1/platform/media/{capability}    set it (super admin)
+//	POST /v1/platform/media/{capability}/test   one real short call through it
+
+// mediaSettings is the media providers' settings.
+func (s *Service) mediaSettings() *media.Settings {
+	return &media.Settings{Store: s.PlatformSettings, Box: s.SecretBox, Now: func() int64 { return s.nowTime().UnixMilli() }}
+}
+
+// mediaProvider resolves the capability's provider for claims'
+// organization: a configured provider and an organization that has not
+// turned AI off (the assist switch's meaning: no data leaving to a model).
+func (s *Service) mediaProvider(ctx context.Context, claims auth.Claims, cap media.Capability) (media.Provider, bool, error) {
+	if s.PlatformSettings == nil {
+		return media.Provider{}, false, nil
+	}
+	t, err := s.tenantSettings(ctx, claims.Tenant)
+	if err != nil && !errors.Is(err, store.ErrTenantNotFound) {
+		return media.Provider{}, false, err
+	}
+	if t.AssistDisabled {
+		return media.Provider{}, false, nil
+	}
+	return s.mediaSettings().Provider(ctx, cap)
+}
+
+// handleMediaCapabilities answers GET /v1/media: which media calls run for
+// the caller (the entries the web shows).
+func (s *Service) handleMediaCapabilities(w http.ResponseWriter, r *http.Request, claims auth.Claims) {
+	out := wire.MediaCapabilities{}
+	for _, cap := range media.Capabilities {
+		p, ok, err := s.mediaProvider(r.Context(), claims, cap)
+		if err != nil {
+			obs.ServerError(w, "read the media provider failed", err)
+			httpx.Error(w, "read the media provider failed", http.StatusInternalServerError)
+			return
+		}
+		if cap == media.CapImage {
+			out.Image.Available = ok && p.Model.Configured()
+			continue
+		}
+		out.Transcribe.Available = ok && p.Model.Configured()
+	}
+	httpx.WriteJSON(w, http.StatusOK, out)
+}
+
+// errMediaUnavailable: no provider, or the organization turned AI off.
+var errMediaUnavailable = errors.New("this is not available here: the deployment has no provider for it, or your organization turned AI off")
+
+// handleMediaTranscribe answers POST /v1/media/transcriptions: the request
+// body is the audio (audio/*), at most wire.MaxMediaAudioBytes; the reply is
+// the transcript. Feeds message composition, so it drives agents' routes'
+// permission rule (PermDriveAgent), spends the cost budget and the
+// member's assist rate, and is audited as an assist run (never the audio,
+// never the text).
+func (s *Service) handleMediaTranscribe(w http.ResponseWriter, r *http.Request, claims auth.Claims) {
+	ctx := r.Context()
+	if !s.assistLimiter.get(assistRate, assistBurst, s.Peers.Size).allow(claims.Tenant + "/" + claims.Subject) {
+		httpx.Error(w, "too many requests: try again in a minute", http.StatusTooManyRequests)
+		return
+	}
+	audio, ok := readBody(w, r, wire.MaxMediaAudioBytes)
+	if !ok {
+		return
+	}
+	if len(audio) == 0 {
+		httpx.Error(w, "the request body is the audio: it is empty", http.StatusBadRequest)
+		return
+	}
+	mimeType := strings.TrimSpace(r.Header.Get("Content-Type"))
+	if mimeType == "" {
+		mimeType = "application/octet-stream"
+	}
+	p, has, err := s.mediaProvider(ctx, claims, media.CapTranscribe)
+	if err != nil {
+		obs.ServerError(w, "read the media provider failed", err)
+		httpx.Error(w, "read the media provider failed", http.StatusInternalServerError)
+		return
+	}
+	if !has {
+		httpx.Error(w, errMediaUnavailable.Error(), http.StatusConflict)
+		return
+	}
+	start := time.Now()
+	text, err := p.Transcribe(ctx, audio, mimeType, filenameQuery(r))
+	usage := wire.AssistUsage{Model: p.Model.Model, LatencyMs: timeSinceMs(s, start)}
+	s.auditMediaRun(ctx, claims, "transcribe", usage, err)
+	if err != nil {
+		writeMediaErr(w, err)
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, wire.MediaTranscribeReply{Text: text})
+}
+
+// handleMediaImage answers POST /v1/media/image: one image generation.
+// Same admission, budget, rate and audit as a transcription (never the
+// prompt, never the image).
+func (s *Service) handleMediaImage(w http.ResponseWriter, r *http.Request, claims auth.Claims) {
+	ctx := r.Context()
+	if !s.assistLimiter.get(assistRate, assistBurst, s.Peers.Size).allow(claims.Tenant + "/" + claims.Subject) {
+		httpx.Error(w, "too many requests: try again in a minute", http.StatusTooManyRequests)
+		return
+	}
+	raw, ok := readBody(w, r, 64<<10)
+	if !ok {
+		return
+	}
+	var req wire.MediaImageRequest
+	if err := json.Unmarshal(raw, &req); err != nil {
+		httpx.Error(w, "invalid json body", http.StatusBadRequest)
+		return
+	}
+	req.Prompt = strings.TrimSpace(req.Prompt)
+	switch {
+	case req.Prompt == "":
+		httpx.Error(w, "image needs a prompt", http.StatusBadRequest)
+		return
+	case !utf8.ValidString(req.Prompt) || utf8.RuneCountInString(req.Prompt) > wire.MaxMediaImagePrompt:
+		httpx.Error(w, fmt.Sprintf("the prompt is at most %d characters", wire.MaxMediaImagePrompt), http.StatusBadRequest)
+		return
+	case req.Aspect != "" && !aspectAllowed(req.Aspect):
+		httpx.Error(w, "aspect must be one of "+strings.Join(wire.MediaImageAspects, ", "), http.StatusBadRequest)
+		return
+	}
+	p, has, err := s.mediaProvider(ctx, claims, media.CapImage)
+	if err != nil {
+		obs.ServerError(w, "read the media provider failed", err)
+		httpx.Error(w, "read the media provider failed", http.StatusInternalServerError)
+		return
+	}
+	if !has {
+		httpx.Error(w, errMediaUnavailable.Error(), http.StatusConflict)
+		return
+	}
+	start := time.Now()
+	img, err := p.Generate(ctx, media.ImageRequest{Prompt: req.Prompt, Aspect: req.Aspect})
+	usage := wire.AssistUsage{Model: p.Model.Model, LatencyMs: timeSinceMs(s, start)}
+	s.auditMediaRun(ctx, claims, "image", usage, err)
+	if err != nil {
+		writeMediaErr(w, err)
+		return
+	}
+	dataURL := "data:" + img.MimeType + ";base64," + base64Of(img.Bytes)
+	width, height := pngSize(img.Bytes)
+	httpx.WriteJSON(w, http.StatusOK, wire.MediaImageReply{DataURL: dataURL, MimeType: img.MimeType,
+		Width: width, Height: height, RevisedPrompt: img.RevisedPrompt})
+}
+
+// auditMediaRun records one media model call: the capability's name, the
+// model and the latency, never the audio, the prompt, the transcript or the
+// image (auditModelRun's shape, kind assist).
+func (s *Service) auditMediaRun(ctx context.Context, claims auth.Claims, name string, usage wire.AssistUsage, runErr error) {
+	modelName := firstNonEmpty(usage.Model, "")
+	detail := "media " + name + ", model " + modelName + ", " + itoa(usage.LatencyMs) + " ms"
+	outcome := wire.AuditOutcomeAllow
+	if runErr != nil {
+		outcome, detail = "failed", detail+", failed: "+mediaErrClass(runErr)
+	}
+	s.audit(ctx, claims.Tenant, store.ExtAuditRecord{
+		Kind: wire.AuditKindAssist, Name: name, Action: "run",
+		Actor: claims.Subject, Outcome: outcome, Detail: detail,
+	})
+}
+
+// mediaErrClass names a media failure for the audit row without the
+// provider's message (it may quote the request).
+func mediaErrClass(err error) string {
+	var pe *media.ProviderError
+	switch {
+	case errors.As(err, &pe):
+		return "provider answered " + itoa(int64(pe.Status))
+	case errors.Is(err, media.ErrProviderUnreachable):
+		return "unreadable reply"
+	case errors.Is(err, context.Canceled):
+		return "caller went away"
+	}
+	return "provider unreachable"
+}
+
+// writeMediaErr answers a media failure: the provider's refusal carries its
+// own message; everything else is one plain sentence.
+func writeMediaErr(w http.ResponseWriter, err error) {
+	if errors.Is(err, context.Canceled) {
+		return
+	}
+	var pe *media.ProviderError
+	if errors.As(err, &pe) {
+		// A refusal the provider owns (4xx) answers its own status; anything
+		// else is ours (502).
+		status := http.StatusBadGateway
+		if pe.Status >= 400 && pe.Status < 500 {
+			status = pe.Status
+		}
+		httpx.WriteStatus(w, status, "the media provider refused the call: "+pe.Message, err)
+		return
+	}
+	httpx.WriteStatus(w, http.StatusBadGateway, "the media provider could not be reached", err)
+}
+
+// filenameQuery is the transcription's optional ?filename= (a provider may
+// need the extension).
+func filenameQuery(r *http.Request) string {
+	return strings.TrimSpace(r.URL.Query().Get("filename"))
+}
+
+// aspectAllowed reports an aspect the request may name.
+func aspectAllowed(aspect string) bool {
+	for _, a := range wire.MediaImageAspects {
+		if a == aspect {
+			return true
+		}
+	}
+	return false
+}
+
+// timeSinceMs is start's elapsed milliseconds.
+func timeSinceMs(s *Service, start time.Time) int64 { return time.Since(start).Milliseconds() }
+
+// base64Of is the bytes' standard base64 (a data URL's body).
+func base64Of(b []byte) string { return base64.StdEncoding.EncodeToString(b) }
+
+// pngSize reads a PNG's IHDR dimensions; 0, 0 when the bytes are not a PNG
+// (the client sizes the image from its own load).
+func pngSize(b []byte) (int, int) {
+	if len(b) < 24 || string(b[:8]) != "\x89PNG\r\n\x1a\n" || string(b[12:16]) != "IHDR" {
+		return 0, 0
+	}
+	return int(binary.BigEndian.Uint32(b[16:20])), int(binary.BigEndian.Uint32(b[20:24]))
+}
+
+// itoa is strconv.Itoa, spelled for the audit detail lines.
+func itoa(n int64) string { return fmt.Sprintf("%d", n) }
+
+// mediaCapability is the path's capability (a route's {capability}).
+func mediaCapability(r *http.Request) (media.Capability, bool) {
+	switch strings.TrimSpace(r.PathValue("capability")) {
+	case string(media.CapTranscribe):
+		return media.CapTranscribe, true
+	case string(media.CapImage):
+		return media.CapImage, true
+	}
+	return "", false
+}
+
+// handleMediaProvider answers GET /v1/platform/media/{capability}.
+func (s *Service) handleMediaProvider(w http.ResponseWriter, r *http.Request, _ auth.Claims) {
+	cap, ok := mediaCapability(r)
+	if !ok {
+		httpx.Error(w, "capability must be one of "+strings.Join(capNames(), ", "), http.StatusNotFound)
+		return
+	}
+	view, err := s.mediaSettings().View(r.Context(), cap)
+	if err != nil {
+		obs.ServerError(w, "read the media provider failed", err)
+		httpx.Error(w, "read the media provider failed", http.StatusInternalServerError)
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, view)
+}
+
+// capNames are the capabilities, as strings.
+func capNames() []string {
+	out := make([]string, 0, len(media.Capabilities))
+	for _, c := range media.Capabilities {
+		out = append(out, string(c))
+	}
+	return out
+}
+
+// handlePutMediaProvider answers PUT /v1/platform/media/{capability}: set
+// the capability's provider (kind, base URL, model, key, params).
+func (s *Service) handlePutMediaProvider(w http.ResponseWriter, r *http.Request, claims auth.Claims) {
+	cap, ok := mediaCapability(r)
+	if !ok {
+		httpx.Error(w, "capability must be one of "+strings.Join(capNames(), ", "), http.StatusNotFound)
+		return
+	}
+	var u wire.MediaProviderUpdate
+	if !httpx.DecodeJSON(w, r, 64<<10, &u) {
+		return
+	}
+	view, err := s.mediaSettings().Put(r.Context(), cap, u, claims.Subject)
+	switch {
+	case errors.Is(err, modelsettings.ErrSettingsOff):
+		httpx.Error(w, err.Error(), http.StatusConflict)
+	case errors.As(err, &modelsettings.InvalidError{}):
+		httpx.Error(w, err.Error(), http.StatusBadRequest)
+	case err != nil:
+		obs.ServerError(w, "save the media provider failed", err)
+		httpx.Error(w, "save the media provider failed", http.StatusInternalServerError)
+	default:
+		s.audit(r.Context(), claims.Tenant, store.ExtAuditRecord{Kind: wire.AuditKindAssist, Name: "media-" + string(cap),
+			Action: "provider-set", Actor: claims.Subject, Outcome: wire.AuditOutcomeAllow,
+			Detail: "kind " + view.Kind + ", model " + view.Model + " at " + hostOfBaseURL(view.BaseURL)})
+		httpx.WriteJSON(w, http.StatusOK, view)
+	}
+}
+
+// hostOfBaseURL is the host of a base URL, for the audit detail line only.
+func hostOfBaseURL(base string) string {
+	u, err := url.Parse(strings.TrimSpace(base))
+	if err != nil {
+		return ""
+	}
+	return u.Host
+}
+
+// handleTestMediaProvider answers POST /v1/platform/media/{capability}/test:
+// one real short call through the stored provider, its latency reported. A
+// failure is the answer, not an HTTP error.
+func (s *Service) handleTestMediaProvider(w http.ResponseWriter, r *http.Request, _ auth.Claims) {
+	cap, ok := mediaCapability(r)
+	if !ok {
+		httpx.Error(w, "capability must be one of "+strings.Join(capNames(), ", "), http.StatusNotFound)
+		return
+	}
+	ctx := r.Context()
+	p, has, err := s.mediaProvider(ctx, auth.Claims{}, cap)
+	if err != nil {
+		obs.ServerError(w, "read the media provider failed", err)
+		httpx.Error(w, "read the media provider failed", http.StatusInternalServerError)
+		return
+	}
+	if !has {
+		httpx.Error(w, "no provider is configured for this capability", http.StatusConflict)
+		return
+	}
+	out := wire.MediaProviderTest{}
+	start := time.Now()
+	switch cap {
+	case media.CapTranscribe:
+		text, err := p.Transcribe(ctx, testAudio(), "audio/wav", "test.wav")
+		out.LatencyMs = time.Since(start).Milliseconds()
+		if err != nil {
+			out.Error = mediaErrText(err)
+			break
+		}
+		out.OK, out.Reply = true, firstNonEmpty(strings.TrimSpace(text), "(no speech)")
+	default:
+		img, err := p.Generate(ctx, media.ImageRequest{Prompt: "A small solid blue square on white.", Aspect: wire.MediaImageAspectSquare})
+		out.LatencyMs = time.Since(start).Milliseconds()
+		if err != nil {
+			out.Error = mediaErrText(err)
+			break
+		}
+		out.OK = true
+		out.Reply = fmt.Sprintf("%s, %d bytes", img.MimeType, len(img.Bytes))
+	}
+	httpx.WriteJSON(w, http.StatusOK, out)
+}
+
+// testAudio is a minimal silent WAV file (44-byte header, 8 zero samples):
+// enough for a provider to prove it answers a transcription.
+func testAudio() []byte {
+	const header = "RIFF$\x00\x00\x00WAVEfmt \x10\x00\x00\x00\x01\x00\x01\x00\x80\xbb\x00\x00\x80\xbb\x00\x00\x02\x00\x10\x00data\x00\x00\x00\x00"
+	return []byte(header)
+}
+
+// mediaErrText is a media failure's sentence for a test answer.
+func mediaErrText(err error) string {
+	var pe *media.ProviderError
+	if errors.As(err, &pe) {
+		return pe.Error()
+	}
+	return "the provider could not be reached: " + err.Error()
+}

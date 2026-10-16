@@ -26,6 +26,14 @@ const (
 	MaxDisplayNameRunes = 40
 	// MaxContentTagRunes bounds one content component tag, in characters.
 	MaxContentTagRunes = 32
+	// Media bounds (docs/prd/2026-10-16-voice-and-image-generation.md):
+	// what one media model call may carry. The gateway enforces them; the
+	// web reads them here to say why before it sends.
+	MaxMediaAudioBytes     = 20 << 20  // one transcription's uploaded audio
+	MaxMediaTranscriptChars = 32_768    // a transcript's characters
+	MaxMediaImagePrompt     = 4000      // a generation's prompt, in characters
+	MaxMediaImageReplyBytes = 16 << 20  // read of one generation's reply body
+	MaxMediaImageBytes      = 12 << 20  // one generated image, decoded
 )
 
 // ContentTagPattern is the one rule for a content component tag: lower-case

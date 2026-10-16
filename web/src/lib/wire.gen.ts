@@ -2421,6 +2421,14 @@ export const MaxArtifactStateBytes = 16384;
 export const MaxDisplayNameRunes = 40;
 // MaxContentTagRunes bounds one content component tag, in characters.
 export const MaxContentTagRunes = 32;
+// Media bounds (docs/prd/2026-10-16-voice-and-image-generation.md):
+// what one media model call may carry. The gateway enforces them; the
+// web reads them here to say why before it sends.
+export const MaxMediaAudioBytes = 20971520;
+export const MaxMediaTranscriptChars = 32768;
+export const MaxMediaImagePrompt = 4000;
+export const MaxMediaImageReplyBytes = 16777216;
+export const MaxMediaImageBytes = 12582912;
 
 // ContentTagPattern is the one rule for a content component tag: lower-case
 // letters of any script (CJK and other caseless letters included), digits,
@@ -2575,6 +2583,94 @@ export interface MCPConnectorsReply {
 // store (an empty secret keeps the stored one).
 export interface MCPConnectorUpdate {
   values: Record<string, string>;
+}
+
+// ---- wire/media.go ----
+
+// MediaCapabilities is GET /v1/media: which media calls run for the caller
+// (a configured provider and an organization that has not turned AI off).
+export interface MediaCapabilities {
+  transcribe: MediaCapability;
+  image: MediaCapability;
+}
+
+// MediaCapability is one media ability as the caller sees it.
+export interface MediaCapability {
+  // Available: a provider is configured for the caller's organization.
+  available: boolean;
+}
+
+// MediaProviderConfig is GET /v1/platform/media/{capability}: the
+// capability's provider. The key is never returned, only whether one is set.
+// kind names the wire protocol adapter (media.AdapterKind*).
+export interface MediaProviderConfig {
+  configurable: boolean;
+  kind: string;
+  baseUrl: string;
+  model: string;
+  keySet: boolean;
+  // Params is the provider's own knobs as the admin set them.
+  params?: Record<string, string>;
+  updatedBy?: string;
+  updatedAtMs?: number;
+}
+
+// MediaProviderUpdate is PUT /v1/platform/media/{capability}: an empty APIKey
+// keeps the stored one, ClearKey removes it, an empty BaseURL turns the
+// capability off. Kind must name a registered adapter.
+export interface MediaProviderUpdate {
+  kind: string;
+  baseUrl: string;
+  model: string;
+  apiKey?: string;
+  clearKey?: boolean;
+  params?: Record<string, string>;
+}
+
+// MediaProviderTest is POST /v1/platform/media/{capability}/test: one real
+// short call through the stored provider.
+export interface MediaProviderTest {
+  ok: boolean;
+  error?: string;
+  // Reply is what the provider answered, bounded (a transcript line, or
+  // nothing for an image test).
+  reply?: string;
+  // LatencyMs is the call's wall time.
+  latencyMs: number;
+}
+
+// MediaTranscribeReply is POST /v1/media/transcriptions: the transcript,
+// capped at MaxMediaTranscriptChars characters.
+export interface MediaTranscribeReply {
+  text: string;
+}
+
+// Image aspect ratios a generation may ask for.
+export const MediaImageAspectSquare = "square";
+export const MediaImageAspectLandscape = "landscape";
+export const MediaImageAspectPortrait = "portrait";
+
+// MediaImageAspects are the aspects a generation may ask for.
+export const MediaImageAspects: readonly string[] = ["square", "landscape", "portrait"];
+
+// MediaImageRequest is POST /v1/media/image.
+export interface MediaImageRequest {
+  // Prompt is what to draw, at most MaxMediaImagePrompt characters.
+  prompt: string;
+  // Aspect defaults to MediaImageAspectSquare.
+  aspect?: MediaImageAspect;
+}
+
+// MediaImageReply is POST /v1/media/image's answer: the image inline
+// (dataUrl), never a link out to another host.
+export interface MediaImageReply {
+  dataUrl: string;
+  mimeType: string;
+  width: number;
+  height: number;
+  // RevisedPrompt is the provider's own rewording, when it sends one: data
+  // the provider wrote, fenced wherever an agent reads it.
+  revisedPrompt?: string;
 }
 
 // ---- wire/my_agents.go ----
@@ -4676,6 +4772,8 @@ export type RoomEventKind = "chat_message" | "agent_messages" | "agent_job_creat
 export const RoomEventKindValues: readonly RoomEventKind[] = ["chat_message", "agent_messages", "agent_job_created", "agent_job_updated", "agent_job_progress", "agent_session_state", "agent_roster", "presence_join", "presence_leave", "presence_snapshot", "presence_typing", "message_deleted", "message_edited", "task_updated", "artifact_updated", "artifact_state", "member_joined", "member_removed", "room_deleted", "content_saved", "content_uses_changed", "app_changed"];
 export type JobActivityKind = "tool" | "thinking" | "text";
 export const JobActivityKindValues: readonly JobActivityKind[] = ["tool", "thinking", "text"];
+export type MediaImageAspect = "square" | "landscape" | "portrait";
+export const MediaImageAspectValues: readonly MediaImageAspect[] = ["square", "landscape", "portrait"];
 export type ScheduleRecipientKind = "room" | "agent" | "ai" | "notice";
 export const ScheduleRecipientKindValues: readonly ScheduleRecipientKind[] = ["room", "agent", "ai", "notice"];
 export type RecurrenceKind = "once" | "daily" | "weekly" | "cron";
