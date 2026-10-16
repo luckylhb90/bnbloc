@@ -3,6 +3,7 @@ import {
   useContext,
   useEffect,
   useId,
+  useLayoutEffect,
   useRef,
   useState,
   type KeyboardEvent,
@@ -37,6 +38,44 @@ export interface MenuTriggerProps {
 const CloseMenu = createContext<() => void>(() => {});
 
 const ITEM = '[role="menuitem"]:not([disabled])';
+// The gap kept between an open surface and the edge that clips it.
+const EDGE = 4;
+
+/** The box that clips the menu: the nearest ancestor that does not let
+ *  content overflow horizontally (a dock panel), else the window. */
+function clippingBox(from: HTMLElement | null): { left: number; right: number } {
+  for (let el = from; el; el = el.parentElement) {
+    if (getComputedStyle(el).overflowX !== "visible") {
+      const r = el.getBoundingClientRect();
+      return { left: r.left, right: r.right };
+    }
+  }
+  return { left: 0, right: window.innerWidth };
+}
+
+/** Keeps an open surface inside the box that clips it, whichever side its
+ *  position class anchors it to: it flips to the other edge of its trigger's
+ *  box when it overflows, and is narrowed when it fits on neither. */
+function keepInside(el: HTMLElement): void {
+  el.style.left = "";
+  el.style.right = "";
+  el.style.maxWidth = "";
+  const box = clippingBox(el.parentElement);
+  let r = el.getBoundingClientRect();
+  if (r.left < box.left + EDGE) {
+    el.style.left = "0";
+    el.style.right = "auto";
+  } else if (r.right > box.right - EDGE) {
+    el.style.right = "0";
+    el.style.left = "auto";
+  } else return;
+  r = el.getBoundingClientRect();
+  if (r.left < box.left + EDGE || r.right > box.right - EDGE) el.style.maxWidth = `${Math.max(120, box.right - box.left - 2 * EDGE)}px`;
+  r = el.getBoundingClientRect();
+  // Still past an edge (a narrow box): slide along it.
+  if (r.left < box.left + EDGE) el.style.transform = `translateX(${box.left + EDGE - r.left}px)`;
+  else if (r.right > box.right - EDGE) el.style.transform = `translateX(${box.right - EDGE - r.right}px)`;
+}
 
 export function Menu({
   label,
@@ -62,6 +101,10 @@ export function Menu({
   // Declared before the focus effect below: the layer records the trigger as
   // the element to restore focus to before the menu moves focus inside.
   useModalLayer(menuRef, { open: open !== false, onEscape: close, lockScroll: false });
+
+  useLayoutEffect(() => {
+    if (open && menuRef.current) keepInside(menuRef.current);
+  }, [open]);
 
   useEffect(() => {
     if (!open) return;

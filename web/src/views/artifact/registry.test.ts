@@ -52,6 +52,17 @@ test("an installed component outranks a built-in by rank, then by source", () =>
   eq(selectViewer(file("hero.png", "image/png"), undefined, [...builtins, weak])?.id, "core.image", "specificity before rank");
 });
 
+test("a diagram previewer wins a file stored as text/plain, and the text viewer stays offered", () => {
+  // The server once typed .mmd by sniffing: stored versions keep that type.
+  const mermaid = viewer("component.mermaid", { mimeTypes: ["text/vnd.mermaid"], extensions: [".mmd", ".mermaid"] }, { rank: 50, source: "component" });
+  const all = [...builtins, mermaid];
+  eq(selectViewer(file("flow.mmd", "text/plain"), undefined, all)?.id, "component.mermaid", "extension beats the generic MIME");
+  eq(ids(selectViewers(file("flow.mmd", "text/plain"), all)), ["component.mermaid", "core.text"], "the text viewer is still offered");
+  eq(selectViewer(file("flow.mmd", "text/vnd.mermaid"), undefined, all)?.id, "component.mermaid", "typed by name: exact MIME");
+  eq(selectViewer(file("flow.mmd", "text/plain"), "core.text", all)?.id, "core.text", "the member's choice stands");
+  eq(selectViewer(file("notes.txt", "text/plain"), undefined, all)?.id, "core.text", "a real text file is untouched");
+});
+
 test("a web app (site) opens only in the site viewer", () => {
   const site = viewer("core.site", { mimeTypes: ["application/vnd.bnbloc.site+tar"], kinds: ["site"] }, { input: "site" });
   const all = [...builtins, site];

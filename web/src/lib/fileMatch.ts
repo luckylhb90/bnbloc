@@ -33,14 +33,22 @@ function normalizeExt(ext: string): string {
   return ext.replace(/^\./, "").toLowerCase();
 }
 
+/** MIME types that only say "some bytes" (the sniffer's fallback, what an
+ *  upload with no better type carries): claiming one exactly is weaker than
+ *  claiming the file's extension, so a previewer for ".mmd" beats the plain
+ *  text viewer for a Mermaid file stored as text/plain. */
+const GENERIC_MIMES: ReadonlySet<string> = new Set(["text/plain", "application/octet-stream"]);
+
 /** How specifically a spec claims a file; 0 = not at all. A multi-part
  *  extension (".atlas.json") matching the end of the name is the most
  *  specific claim (it beats an exact generic MIME such as application/json),
- *  then exact MIME, plain extension, kind, MIME wildcard. */
+ *  then an exact MIME, a plain extension, an exact *generic* MIME
+ *  (GENERIC_MIMES), a kind, a MIME wildcard. */
 export function matchSpecificity(match: MatchSpec, file: FileFacts): number {
   const mime = file.mimeType.toLowerCase();
   const mimes = (match.mimeTypes ?? []).map((m) => m.toLowerCase());
-  if (mime && mimes.includes(mime)) return 4;
+  const exact = !!mime && mimes.includes(mime);
+  if (exact && !GENERIC_MIMES.has(mime)) return 4;
   const name = file.name.toLowerCase();
   const ext = file.extension.toLowerCase();
   for (const raw of match.extensions ?? []) {
@@ -51,6 +59,7 @@ export function matchSpecificity(match: MatchSpec, file: FileFacts): number {
   for (const raw of match.extensions ?? []) {
     if (normalizeExt(raw) === ext) return 3;
   }
+  if (exact) return 2.5;
   if (file.kind && (match.kinds ?? []).some((k) => k.toLowerCase() === file.kind?.toLowerCase())) return 2;
   const top = mime.split("/")[0];
   if (top && mimes.includes(`${top}/*`)) return 1;
