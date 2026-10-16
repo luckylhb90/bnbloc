@@ -2,6 +2,7 @@ package bridge
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -202,5 +203,21 @@ func TestRoomToolsReattachAfterARestart(t *testing.T) {
 	resp.Body.Close()
 	if _, ok := c2.RestoreSession(context.Background(), info, []byte(`{"url":"http://127.0.0.1:1/mcp","nonce":"x"}`)); ok {
 		t.Fatal("a session told another address was restored")
+	}
+	// A session given another tool list (a build that added or changed a tool)
+	// is not restored: it keeps the list it began with, so it starts anew.
+	var grant roomToolsGrant
+	if err := json.Unmarshal(part.State, &grant); err != nil || grant.Tools == "" {
+		t.Fatalf("the kept state names its tool list: %s %v", part.State, err)
+	}
+	grant.Tools = "an older list"
+	older, _ := json.Marshal(grant)
+	if _, ok := c2.RestoreSession(context.Background(), info, older); ok {
+		t.Fatal("a session given another tool list was restored")
+	}
+	grant.Tools = ""
+	legacy, _ := json.Marshal(grant)
+	if _, ok := c2.RestoreSession(context.Background(), info, legacy); ok {
+		t.Fatal("a session kept before the tool list was recorded was restored")
 	}
 }

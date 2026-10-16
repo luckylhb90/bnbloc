@@ -134,6 +134,9 @@ type roomToolsContributor struct {
 type roomToolsGrant struct {
 	URL   string `json:"url"`
 	Nonce string `json:"nonce"`
+	// Tools is the tool list the session was given (roomtools.ListDigest): a
+	// session keeps its list, so one given another is not restored.
+	Tools string `json:"tools,omitempty"`
 }
 
 // bearer is the session bearer a nonce derives.
@@ -156,7 +159,7 @@ func (c *roomToolsContributor) hooks(sess *roomtools.Session) (func(TurnInfo), f
 // server listens where its agent was told it does.
 func (c *roomToolsContributor) RestoreSession(_ context.Context, info SessionInfo, state json.RawMessage) (SessionContribution, bool) {
 	var g roomToolsGrant
-	if json.Unmarshal(state, &g) != nil || g.Nonce == "" || g.URL != c.srv.URL() {
+	if json.Unmarshal(state, &g) != nil || g.Nonce == "" || g.URL != c.srv.URL() || g.Tools != roomtools.ListDigest() {
 		return SessionContribution{}, false
 	}
 	sess, err := c.srv.OpenWithToken(roomToolsScope(info), c.bearer(g.Nonce))
@@ -199,7 +202,7 @@ func (c *roomToolsContributor) ContributeSession(_ context.Context, info Session
 	if err != nil {
 		return SessionContribution{}, err
 	}
-	state, _ := json.Marshal(roomToolsGrant{URL: c.srv.URL(), Nonce: nonce})
+	state, _ := json.Marshal(roomToolsGrant{URL: c.srv.URL(), Nonce: nonce, Tools: roomtools.ListDigest()})
 	if server.Type == corepkg.MCPHTTP {
 		server.Headers = []corepkg.NameValue{{Name: "Authorization", Value: "Bearer " + token}}
 	} else {

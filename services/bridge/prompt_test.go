@@ -98,9 +98,10 @@ func TestPromptBudgets(t *testing.T) {
 		// -50 on 2026-10-16: tools/list lists each room tool in brief and room_help
 		// gives the full instructions on demand (roomtools/brief.go), so the
 		// guidance no longer repeats the tools' rules; one line says the person
-		// sees none of the tools or files.
-		{"session guidance (tools, .room/)", guidance, 720},
-		{"session guidance (tools, .room/, team lead)", team, 800},
+		// sees none of the tools or files; +30 for the line that timed work is a
+		// schedule, not a timer in a page or the agent's own scheduler.
+		{"session guidance (tools, .room/)", guidance, 745},
+		{"session guidance (tools, .room/, team lead)", team, 825},
 		// +80 on 2026-10-14: save_component takes a workspace file and a
 		// work's description and "how it was made" request
 		// (docs/bugs/2026-10-14-work-save-misses-new-files.md).
