@@ -17,6 +17,7 @@ import { PlatformComponents } from "@/views/PlatformComponents";
 import { PlatformReleases } from "@/views/PlatformReleases";
 import { PlatformUpdateConfig } from "@/views/PlatformUpdateConfig";
 import { PlatformAssistModel } from "@/views/PlatformAssistModel";
+import { PlatformMediaProviders } from "@/views/PlatformMediaProviders";
 import { invalidateAssistStatus } from "@/lib/assist";
 import { ErrorBox } from "@/ui/ErrorBox";
 import { Switch } from "@/ui/Segment";
@@ -174,7 +175,12 @@ export function Organization() {
       {tab === "tenants" && isSuper && <TenantsTab />}
       {tab === "orgsync" && isSuper && <OrgSyncTab />}
       {tab === "updates" && isSuper && <PlatformUpdateConfig />}
-      {tab === "assist" && isSuper && <PlatformAssistModel />}
+      {tab === "assist" && isSuper && (
+        <>
+          <PlatformAssistModel />
+          <PlatformMediaProviders />
+        </>
+      )}
       {tab === "components" && isSuper && <PlatformComponents />}
       {tab === "platformContent" && isSuper && <PlatformContentTab />}
       {tab === "releases" && isSuper && <PlatformReleases />}

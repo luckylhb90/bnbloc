@@ -1,6 +1,21 @@
 # Voice input and image generation (2026-10-16)
 
-Status: design accepted in review (2026-10-16); building M1 up.
+Status: M1–M5 built (2026-10-16, commits 9890368d, bd561205, f486b4a9,
+acc23820, 570a3350, and the console card). M6 (an organization's own
+providers) is next. Decided while building:
+
+- **The ai routes of the app data API spend none of the app data
+  budgets** (apps.go): their limit is the caller's per-member assist rate,
+  the assist routes' rule — the app budgets are the data API's.
+- **generate_image publishes through a new roomtools Config.Publish seam**
+  the bridge injects (publishArtifactNow): the one publish path, with the
+  job's channel and seq; the tool's result carries the artifact id, never
+  the image.
+- **transcribe_audio is read-only**: it posts the workspace file's bytes
+  and fences the transcript; nothing is published.
+- **The interactive-apps skill's budget rose to 1850** with the two SDK
+  calls (still under the 8 KiB inline cap); the session prefix budget rose
+  with the two tool briefs.
 
 Two model abilities the room product keeps asking for, both re-implemented
 from scratch on the platform's own seams (nothing here imports or names

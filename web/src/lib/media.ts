@@ -77,3 +77,45 @@ export function transcribeAudio(blob: Blob, filename = "voice.wav", signal?: Abo
 export function generateImage(prompt: string, aspect: MediaImageAspect = "square", signal?: AbortSignal): Promise<MediaImageReply> {
   return req<MediaImageReply>("/v1/media/image", { method: "POST", body: JSON.stringify({ prompt, aspect }), signal });
 }
+
+// ---- The platform console's media providers ----
+
+/** One capability's provider as the console edits it. */
+export interface MediaProviderConfigView {
+  configurable: boolean;
+  kind: string;
+  baseUrl: string;
+  model: string;
+  keySet: boolean;
+  params?: Record<string, string>;
+  updatedBy?: string;
+  updatedAtMs?: number;
+}
+
+/** A provider update (PUT): an empty apiKey keeps the stored one. */
+export interface MediaProviderUpdateBody {
+  kind: string;
+  baseUrl: string;
+  model: string;
+  apiKey?: string;
+  clearKey?: boolean;
+  params?: Record<string, string>;
+}
+
+/** The console's provider API per capability (never the key). */
+export function mediaProviderApi(cap: "transcribe" | "image") {
+  const base = `/v1/platform/media/${cap}`;
+  return {
+    get: () => req<MediaProviderConfigView>(base),
+    put: (body: MediaProviderUpdateBody) =>
+      req<MediaProviderConfigView>(base, { method: "PUT", body: JSON.stringify(body) }).then((c) => {
+        invalidateMediaCaps();
+        return c;
+      }),
+    test: () => req<{ ok: boolean; error?: string; reply?: string; latencyMs: number }>(`${base}/test`, { method: "POST" }),
+  };
+}
+
+/** The adapter kinds the console offers (kinds are the platform's wire
+ *  protocol families; openai-compatible is the first). */
+export const MEDIA_ADAPTER_KINDS = ["openai-compatible"] as const;
