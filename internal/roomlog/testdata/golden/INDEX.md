@@ -6,4 +6,5 @@ Channels (each directory: recent.md, its latest messages, and chronological chun
 - #quiet (no messages yet)
 Room deliverables: artifacts.md. The Library: library.md. Live deliverables: live.md.
 Interactive apps and how much data each holds: apps.md, once the room has one.
+Group chats connected to the room, for notices: groups.md, once the room has one.
 How this room works (every agent has its own workspace): README.md.

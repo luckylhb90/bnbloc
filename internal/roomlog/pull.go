@@ -48,6 +48,9 @@ type CtxState struct {
 	// AppsListed: the workspace holds a .room/apps.md (the room
 	// had an app), so every pass rewrites it (AppsUpdate).
 	AppsListed bool
+	// GroupsListed: the workspace holds a .room/groups.md (the room had a
+	// connected group chat), so every pass rewrites it (GroupsUpdate).
+	GroupsListed bool
 	// AppSDKSum is the sum of the demo-mode app SDK last written into the
 	// workspace (AppSDKUpdate); empty until the first pull pass.
 	AppSDKSum string
@@ -235,6 +238,7 @@ func IndexFile(channels []ChannelRecords) NamedFile {
 	}
 	b.WriteString("Room deliverables: artifacts.md. The Library: library.md. Live deliverables: live.md.\n")
 	b.WriteString("Interactive apps and how much data each holds: apps.md, once the room has one.\n")
+	b.WriteString("Group chats connected to the room, for notices: groups.md, once the room has one.\n")
 	b.WriteString("How this room works (every agent has its own workspace): README.md.\n")
 	return NamedFile{Name: ".room/INDEX.md", Content: b.String()}
 }
