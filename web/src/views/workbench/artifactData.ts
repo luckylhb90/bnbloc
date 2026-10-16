@@ -9,6 +9,7 @@ import type { ArtifactFileInfo } from "@/views/artifact/registry";
 export type { ArtifactDetail } from "../../lib/wire.gen.ts";
 import type { ArtifactDetail } from "../../lib/wire.gen.ts";
 import { errorText } from "@/lib/errors";
+import { coverLines, renderTextCover } from "../../../previewer-sdk/src/cover.ts";
 
 // Shared artifact data for the workbench, chat file cards and the
 // deliverables view:
@@ -178,19 +179,37 @@ export function useVersionBlob(
 const MAX_CARD_IMAGES = 80;
 const cardImages = new Map<string, Promise<string>>();
 
-/** Object URL of a card image: the stored thumbnail ("thumbnail") or the
- *  image itself ("content"). Evicted URLs are revoked; an <img> that already
- *  decoded keeps its pixels. */
+/** Object URL of a card image: the stored thumbnail ("thumbnail"), the image
+ *  itself ("content") or a text file's first lines ("excerpt"). Evicted URLs
+ *  are revoked; an <img> that already decoded keeps its pixels. */
+export type CardImageSource = "thumbnail" | "content" | "excerpt";
+
+/** Text files above this are not read just to draw a card. */
+export const COVER_TEXT_MAX_BYTES = 512 * 1024;
+const COVER_TEXT_READ_CHARS = 64 * 1024;
+
+/** A text file's cover: its first lines drawn as a page. Made here, for this
+ *  session, and not stored: a previewer that renders the file better sends
+ *  its own cover when it is opened, and that is the one worth keeping. */
+async function excerptCover(roomId: string, artifact: Artifact, meta: ArtifactVersion): Promise<Blob> {
+  const blob = await loadVersionBlob(roomId, artifact, meta.version, meta);
+  const lines = coverLines((await blob.slice(0, COVER_TEXT_READ_CHARS).text()).slice(0, COVER_TEXT_READ_CHARS));
+  if (lines.length === 0) throw new Error("nothing to draw");
+  return new Blob([await renderTextCover(lines)], { type: "image/png" });
+}
+
 export function loadCardImage(
   roomId: string,
   artifact: Artifact,
   meta: ArtifactVersion,
-  source: "thumbnail" | "content",
+  source: CardImageSource,
 ): Promise<string> {
   return cachedCardImage(`${roomId}\u0000${artifact.artifactId}\u0000${meta.version}\u0000${source}`, () =>
     source === "thumbnail"
       ? api.artifactThumbnail(roomId, artifact.artifactId, meta.version)
-      : loadVersionBlob(roomId, artifact, meta.version, meta),
+      : source === "excerpt"
+        ? excerptCover(roomId, artifact, meta)
+        : loadVersionBlob(roomId, artifact, meta.version, meta),
   );
 }
 

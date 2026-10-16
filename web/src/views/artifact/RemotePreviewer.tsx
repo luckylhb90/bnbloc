@@ -13,7 +13,7 @@ import {
 import { PREVIEWER_PROTOCOL, stateKey, type HostMessage } from "../../../previewer-sdk/src/protocol.ts";
 import { invalidateArtifacts, loadArtifactDetail } from "@/views/workbench/artifactData";
 import type { ArtifactViewerProps, ViewerToolbarItem } from "./registry";
-import { freshPreviewer, installedPreviewer, putVersionThumbnail } from "./remotePreviewers";
+import { freshPreviewer, installedPreviewer } from "./remotePreviewers";
 import { errorText } from "@/lib/errors";
 
 // RemotePreviewer hosts an installed previewer component: a third-party
@@ -177,7 +177,7 @@ function PreviewerFrame({
       const detail = await loadArtifactDetail(room, id).catch(() => null);
       const ver = detail?.versions.find((candidate) => candidate.version === v);
       if (!wantsThumbnail(desc, ver)) return;
-      await putVersionThumbnail(room, id, v, png);
+      await api.putArtifactThumbnail(room, id, v, png, "previewer");
       invalidateArtifacts(room, id);
     },
     [desc],

@@ -10,7 +10,8 @@ import { AppCover, siteCover } from "./AppCover";
 import { PublishWorkDialog } from "@/views/gallery/PublishWorkDialog";
 import { AppDataLine } from "./AppDataLine";
 import { useDeliverableOwner } from "./deliverableOwner";
-import { fileInfoFor, loadCardImage, useArtifactDetail, versionMeta } from "./artifactData";
+import { COVER_TEXT_MAX_BYTES, fileInfoFor, loadCardImage, useArtifactDetail, versionMeta, type CardImageSource } from "./artifactData";
+import { selectViewer, useViewerRegistry } from "@/views/artifact/registry";
 import { categoryIcons } from "./fileIcons";
 import { ShareDialog } from "./ShareDialog";
 
@@ -53,13 +54,18 @@ export function useInView<T extends Element>(): [React.RefObject<T | null>, bool
 
 function useCardImage(roomId: string, artifact: Artifact | null, meta: ArtifactVersion | undefined): string | null {
   const [url, setUrl] = useState<string | null>(null);
-  const source: "thumbnail" | "content" | null = !artifact || !meta
+  useViewerRegistry();
+  // The viewer that would open the file says how its card gets a picture.
+  const viewer = artifact && meta ? selectViewer(fileInfoFor(artifact, artifact.currentVersion, meta)) : null;
+  const source: CardImageSource | null = !artifact || !meta
     ? null
     : meta.thumbnail
       ? "thumbnail"
       : isPreviewableImage(versionFacts(artifact, meta)) && (meta.sizeBytes ?? 0) <= CARD_IMAGE_MAX_BYTES && meta.storage === "blob"
         ? "content"
-        : null;
+        : viewer?.cover === "text" && (meta.sizeBytes ?? 0) <= COVER_TEXT_MAX_BYTES
+          ? "excerpt"
+          : null;
   // The image is identified by artifact, version and source; the latest
   // objects are read through a ref so a detail refetch does not reload it.
   const latest = useRef({ artifact, meta });

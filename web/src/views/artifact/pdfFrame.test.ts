@@ -31,6 +31,14 @@ eq(from({ type: "pdf.selection", text: 3, page: 1, rect }), null, "text must be 
 eq(from({ type: "pdf.selection", text: "hi", page: 1, rect }, "https://evil.example"), null, "selection from a non-opaque origin");
 eq(from({ type: "pdf.selection", text: "hi", page: 1, rect }, "null", {}), null, "selection from another frame");
 
+// A card cover: PNG bytes within the room's limit, from the opaque guest only.
+const png = new Uint8Array([137, 80, 78, 71]).buffer;
+eq(from({ type: "pdf.thumbnail", png }), { kind: "thumbnail", png }, "a thumbnail");
+eq(from({ type: "pdf.thumbnail", png: new ArrayBuffer(0) }), null, "empty");
+eq(from({ type: "pdf.thumbnail", png: new ArrayBuffer((512 << 10) + 1) }), null, "over the room's limit");
+eq(from({ type: "pdf.thumbnail", png: "AAAA" }), null, "bytes, not text");
+eq(from({ type: "pdf.thumbnail", png }, "https://evil.example"), null, "thumbnail from a non-opaque origin");
+
 // The guest is written through document.write: exactly one script element.
 eq(PDF_GUEST_HTML.split("</script>").length, 2, "single script block");
 // The guest script is generated from a template literal: it must still

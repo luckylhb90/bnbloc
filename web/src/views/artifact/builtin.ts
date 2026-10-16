@@ -29,6 +29,7 @@ registerArtifactViewer({
   input: "text",
   safety: "sanitized",
   source: "builtin",
+  cover: "text",
   maxBytes: 5 * MiB,
   load: () => import("./MarkdownRenderer"),
 });
@@ -99,6 +100,7 @@ registerArtifactViewer({
   input: "text",
   safety: "safe",
   source: "builtin",
+  cover: "text",
   maxBytes: 50 * MiB,
   load: () => import("./TableRenderer"),
 });
@@ -111,6 +113,7 @@ registerArtifactViewer({
   input: "text",
   safety: "safe",
   source: "builtin",
+  cover: "text",
   maxBytes: 50 * MiB,
   load: () => import("./JsonViewer"),
 });
@@ -151,6 +154,7 @@ registerArtifactViewer({
   input: "text",
   safety: "safe",
   source: "builtin",
+  cover: "text",
   maxBytes: 20 * MiB,
   load: () => import("./CodeViewer"),
 });
@@ -163,6 +167,7 @@ registerArtifactViewer({
   input: "text",
   safety: "safe",
   source: "builtin",
+  cover: "text",
   maxBytes: 20 * MiB,
   load: () => import("./CodeViewer").then((m) => ({ default: m.PlainTextViewer })),
 });

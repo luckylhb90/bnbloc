@@ -18,15 +18,18 @@ import {
   onReveal,
   onToolbar,
   onUnits,
+  provideThumbnail,
   reportError,
   setTitle,
   setToolbar,
   type PreviewFile,
   type ToolbarItem,
 } from "../../../../web/previewer-sdk/src/index.ts";
+import { renderCover } from "../../../../web/previewer-sdk/src/cover.ts";
 import { countedTitle, keepLinksInside, shortName } from "../../lib/office.ts";
 import { pendingReveal, reveal, watchPointing } from "../../lib/selection.ts";
 import { clampZoom, fitZoom } from "../../lib/zoom.ts";
+import { coverLayout, drawCover } from "./cover.ts";
 import { MAX_CELLS, MAX_PAGES, graphXml, readDrawing, type Drawing } from "./model.ts";
 import { createGraph } from "./shapes.ts";
 import { cellIndex, cellPoint, drawingUnits, findCell, nounOf } from "./units.ts";
@@ -214,6 +217,14 @@ const pointing = watchPointing(diagramEl, (el) => {
 
 keepLinksInside(diagramEl);
 
+// The file's card picture: the first page as a schematic (cover.ts), sent once
+// per file; a drawing with nothing to draw leaves the card its icon.
+async function sendCover(read: Drawing): Promise<void> {
+  const layout = coverLayout(read.pages[0]);
+  if (!layout) return;
+  await provideThumbnail(await renderCover((ctx, w, h) => drawCover(ctx, layout, w, h)));
+}
+
 async function open(bytes: ArrayBuffer, info: PreviewFile): Promise<void> {
   const mine = ++generation;
   let read: Drawing;
@@ -235,6 +246,7 @@ async function open(bytes: ArrayBuffer, info: PreviewFile): Promise<void> {
   drawing = read;
   file = info;
   showPage(Math.min(pageIndex, read.pages.length - 1));
+  void sendCover(read).catch(() => {});
 }
 
 onInit((init) => {

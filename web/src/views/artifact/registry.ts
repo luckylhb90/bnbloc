@@ -102,6 +102,11 @@ export interface ArtifactViewer extends FileClaimant {
   /** How the viewer contains untrusted content (documentation + review). */
   readonly safety: "safe" | "sanitized" | "sandboxed";
   readonly load: () => Promise<{ default: React.ComponentType<ArtifactViewerProps> }>;
+  /** How a card for this viewer's files gets a picture when no cover is
+   *  stored: "text" has the host draw the first lines as a page (for files
+   *  this viewer shows as text; the file is read, never rendered). Absent:
+   *  only a stored cover (a viewer that renders sends one) or an image. */
+  readonly cover?: "text";
 }
 
 export interface ViewerCandidate {

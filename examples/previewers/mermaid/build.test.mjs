@@ -26,7 +26,7 @@ test("the build produces a deterministic, parseable bundle with its notices", as
       toolbar: ["zoom", "fit"],
     });
     assert.deepEqual(pkg.previewer.match.extensions, [".mmd", ".mermaid"]);
-    assert.deepEqual(pkg.previewer.capabilities, ["toolbar", "selection", "units"]);
+    assert.deepEqual(pkg.previewer.capabilities, ["thumbnail", "toolbar", "selection", "units"]);
     const notices = files.get("NOTICES.txt").toString("utf8");
     for (const name of ["mermaid", "d3", "dompurify"]) assert.match(notices, new RegExp(`^${name}@`, "m"), `${name} attributed`);
   } finally {

@@ -15,6 +15,7 @@ import { fileURLToPath } from "node:url";
 
 import { build } from "./build.mjs";
 import { assertBundle } from "../lib/bundle-check.mjs";
+import { coverLayout, fitCover, leaveBox } from "./src/cover.ts";
 import { MAX_CELLS, MAX_INFLATED_BYTES, MAX_PAGES, graphXml, labelText, readDrawing } from "./src/model.ts";
 import { CUSTOM_SHAPES, NAMED_STYLES, shapeSize } from "./src/shapeTable.ts";
 import { isContainer, normalizeStyle, parseStyle, shapeOf } from "./src/style.ts";
@@ -37,7 +38,7 @@ test("the build produces a deterministic, parseable bundle with its notices", as
       toolbar: ["zoom", "fit"],
     });
     assert.deepEqual(pkg.previewer.match.extensions, [".drawio", ".dio"]);
-    assert.deepEqual(pkg.previewer.capabilities, ["toolbar", "selection", "units"]);
+    assert.deepEqual(pkg.previewer.capabilities, ["thumbnail", "toolbar", "selection", "units"]);
     const notices = files.get("NOTICES.txt").toString("utf8");
     for (const name of ["@maxgraph/core", "dompurify"]) assert.match(notices, new RegExp(`^${name}@`, "m"), `${name} attributed`);
   } finally {
@@ -212,4 +213,45 @@ test("pointing names the part: chip, detail for the agent, unit keys", async () 
   assert.equal(cellPoint(one, 0, one.pages[0].cells.find((c) => c.id === "a")).label, "Box (a)", "no text: the id");
   assert.ok([...cellPoint(one, 0, one.pages[0].cells.find((c) => c.id === "b")).label].length <= 60, "a long label is cut");
   assert.doesNotMatch(cellPoint(one, 0, one.pages[0].cells[1]).detail, /Page:/, "a one-page file names no page");
+});
+
+test("the card cover: boxes in absolute places, their shapes and colors, arrows through their bends", async () => {
+  const d = await readDrawing(await sample("flow.drawio"));
+  const layout = coverLayout(d.pages[0]);
+  assert.equal(layout.boxes.length, 9, "every box with a geometry: seven on the page and two in the lane");
+  assert.equal(layout.edges.length, 7);
+  const byLabel = (label) => layout.boxes.find((b) => b.label === label);
+  assert.deepEqual([byLabel("Request received").shape, byLabel("Approved?").shape, byLabel("Fulfil order").shape], ["ellipse", "rhombus", "rect"]);
+  assert.equal(byLabel("Request received").fill, "#d5e8d4");
+  assert.equal(byLabel("Fulfil order").rounded, true);
+  // "Pick items" sits at (30, 60) inside the lane at (580, 140).
+  assert.deepEqual([byLabel("Pick items").x, byLabel("Pick items").y], [610, 200]);
+  assert.equal(byLabel("Notify requester").label, "Notify requester", "a label is its first line");
+  const ship = layout.edges.find((e) => e.points.length === 5);
+  assert.deepEqual(ship.points.slice(1, 4), [{ x: 110, y: 260 }, { x: 560, y: 260 }, { x: 560, y: 225 }], "an arrow keeps its bends between the two centres");
+  assert.deepEqual(ship.points[0], { x: 110, y: 290 }, "from the edge of its source, the side facing its first bend (the box is at y 290..350, the bend above it)");
+  assert.equal(byLabel("Warehouse").container, true, "a lane is a container");
+  for (const b of layout.boxes) {
+    assert.ok(b.x >= layout.bounds.x && b.x + b.w <= layout.bounds.x + layout.bounds.w + 0.001 && b.y >= layout.bounds.y && b.y + b.h <= layout.bounds.y + layout.bounds.h + 0.001, "bounds hold every box");
+  }
+  assert.equal(coverLayout((await readDrawing(model(""))).pages[0]), null, "an empty page has no cover");
+  assert.equal(coverLayout((await readDrawing(model(box("n", "none").replace("<mxGeometry", "<mxGeometry relative=\"1\"")))).pages[0]), null, "a relative geometry is not a box");
+});
+
+test("an arrow ends at the edge of its box", () => {
+  const box = { x: 100, y: 100, w: 200, h: 100 };
+  assert.deepEqual(leaveBox(box, { x: 200, y: 400 }), { x: 200, y: 200 }, "straight down leaves by the bottom");
+  assert.deepEqual(leaveBox(box, { x: 600, y: 150 }), { x: 300, y: 150 }, "to the right leaves by the right side");
+  assert.deepEqual(leaveBox(box, { x: 250, y: 150 }), { x: 250, y: 150 }, "a point inside the box is where it stays");
+  assert.deepEqual(leaveBox(box, { x: 200, y: 150 }), { x: 200, y: 150 }, "the centre itself");
+  const diagonal = leaveBox(box, { x: 500, y: 350 });
+  assert.ok(Math.abs(diagonal.x - 300) < 1e-9 || Math.abs(diagonal.y - 200) < 1e-9, "a diagonal leaves by a side");
+});
+
+test("the cover is fitted and centred, never blown up", () => {
+  const wide = fitCover({ x: 100, y: 50, w: 800, h: 200 }, 480, 300);
+  assert.equal(wide.k, (480 - 28) / 800);
+  assert.ok(Math.abs(100 * wide.k + wide.ox - (480 - 800 * wide.k) / 2) < 1e-9, "centred across");
+  assert.equal(fitCover({ x: 0, y: 0, w: 10, h: 10 }, 480, 300).k, 1.5, "a tiny diagram stops at 1.5");
+  assert.ok(fitCover({ x: 0, y: 0, w: 0, h: 0 }, 480, 300).k <= 1.5, "an empty extent does not divide by zero");
 });

@@ -544,6 +544,16 @@ export const api = {
   // The stored thumbnail of one version (present when version.thumbnail is).
   artifactThumbnail: (roomId: string, artifactId: string, version: number) =>
     fetchArtifactBlob(`${artifactVersionPath(roomId, artifactId, version)}/thumbnail`),
+  // Stores a version's cover (PNG). The room keeps the first and lets a
+  // higher-ranked source replace it: "builtin" is the app's own viewers,
+  // "previewer" an installed previewer's (services/room/artifact_files.go).
+  putArtifactThumbnail: (roomId: string, artifactId: string, version: number, png: ArrayBuffer, source: "builtin" | "previewer") =>
+    req<void>(`${artifactVersionPath(roomId, artifactId, version)}/thumbnail?source=${source}`, {
+      method: "PUT",
+      headers: { "Content-Type": "image/png" },
+      body: png,
+      as: "none",
+    }),
   // Publish a blob-backed version (multipart): a file deliverable, or the
   // "restore as new version" of an older file version.
   publishArtifactFile: async (

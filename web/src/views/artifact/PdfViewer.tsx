@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { fitSelection } from "../../../previewer-sdk/src/protocol.ts";
 import { quotedLabel } from "../../../previewer-sdk/src/pointing.ts";
+import { api } from "@/lib/api";
+import { invalidateArtifacts, loadArtifactDetail } from "../workbench/artifactData";
 import { composeArtifactDocument, loadMessage } from "@/lib/artifactFrame";
 import { loadPdfjs, pdfRunnerUrl } from "./pdfAssets";
 import type { ArtifactViewerProps } from "./registry";
@@ -13,7 +15,10 @@ import { PDF_GUEST_HTML, readPdfMessage } from "./pdfFrame";
 // PDF opens, as source text handed to the frame — the frame itself loads
 // nothing from the network.
 
-export default function PdfViewer({ blob, file, toolbar, reveal, onSelection }: ArtifactViewerProps) {
+export default function PdfViewer({ roomId, artifactId, version, blob, file, toolbar, reveal, onSelection }: ArtifactViewerProps) {
+  const latestFile = useRef({ roomId, artifactId, version });
+  latestFile.current = { roomId, artifactId, version };
+  const coverDone = useRef(false);
   const onSelectionRef = useRef(onSelection);
   onSelectionRef.current = onSelection;
   const frameRef = useRef<HTMLIFrameElement | null>(null);
@@ -56,6 +61,19 @@ export default function PdfViewer({ blob, file, toolbar, reveal, onSelection }: 
         case "error":
           setError(msg.message);
           return;
+        case "thumbnail": {
+          // The first page as the file's card picture, when the version has none.
+          const { roomId: room, artifactId: id, version: v } = latestFile.current;
+          if (coverDone.current || !id) return;
+          coverDone.current = true;
+          void loadArtifactDetail(room, id)
+            .then((detail) => {
+              if (detail.versions.find((x) => x.version === v)?.thumbnail) return;
+              return api.putArtifactThumbnail(room, id, v, msg.png, "builtin").then(() => invalidateArtifacts(room, id));
+            })
+            .catch(() => {});
+          return;
+        }
         case "selection":
           // The frame fills the viewer's box, so its rect is already the box's.
           onSelectionRef.current?.(

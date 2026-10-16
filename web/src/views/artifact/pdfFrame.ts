@@ -15,6 +15,7 @@
 //   guest -> host : { type: "pdf.status", page, pages, zoom }
 //   guest -> host : { type: "pdf.error", message }
 //   guest -> host : { type: "pdf.selection", text, page, rect }  (text "" = cleared)
+//   guest -> host : { type: "pdf.thumbnail", png }  once, page 1's top as a card cover
 //
 // The pages carry pdf.js's text layer (transparent text over each canvas), so
 // text can be selected; the guest reports the selection with where it shows
@@ -34,10 +35,13 @@ export type PdfMessage =
   | GuestMessage
   | { kind: "status"; page: number; pages: number; zoom: number }
   | { kind: "error"; message: string }
+  | { kind: "thumbnail"; png: ArrayBuffer }
   | { kind: "selection"; text: string; page: number; rect: { x: number; y: number; w: number; h: number } | null }
   | { kind: "units"; units: readonly Unit[]; truncated: boolean };
 
 const ERROR_LIMIT = 500;
+// The room refuses a thumbnail above this (services/room/artifact_files.go).
+const THUMBNAIL_LIMIT = 512 << 10;
 // A selection is read as text: bounded here, then again by the protocol.
 const SELECTION_TEXT_LIMIT = 4000;
 const RECT_LIMIT = 10_000_000;
@@ -63,6 +67,10 @@ export function readPdfMessage(
     const zoom = typeof data.zoom === "number" && Number.isFinite(data.zoom) && data.zoom > 0 && data.zoom <= 64 ? data.zoom : null;
     if (page === null || pages === null || zoom === null) return null;
     return { kind: "status", page, pages, zoom };
+  }
+  if (data.type === "pdf.thumbnail") {
+    const png = data.png;
+    return png instanceof ArrayBuffer && png.byteLength > 0 && png.byteLength <= THUMBNAIL_LIMIT ? { kind: "thumbnail", png } : null;
   }
   if (data.type === "pdf.selection" && typeof data.text === "string") {
     if (data.text === "") return { kind: "selection", text: "", page: 0, rect: null };
@@ -108,7 +116,7 @@ body{overflow:auto;font:13px system-ui,sans-serif;color:#bbb;}
   var started = false;
   var doc = null, pages = [], base = null;
   var fitWidth = true, zoom = 1, current = 1;
-  var observer = null, statusTimer = 0, selFrame = 0, hadSel = false, laidOutAt = 0;
+  var observer = null, statusTimer = 0, selFrame = 0, hadSel = false, laidOutAt = 0, coverSent = false;
   var list = document.getElementById("pages");
   var msg = document.getElementById("msg");
 
@@ -157,6 +165,23 @@ body{overflow:auto;font:13px system-ui,sans-serif;color:#bbb;}
     });
     status();
   }
+  // The card's picture: the top of page 1, at the room's cover size (16:10).
+  function cover(src) {
+    try {
+      var w = 960, h = 600;
+      var sh = Math.min(src.height, Math.round(src.width * h / w));
+      var t = document.createElement("canvas");
+      t.width = w; t.height = h;
+      var c = t.getContext("2d");
+      c.fillStyle = "#fff";
+      c.fillRect(0, 0, w, h);
+      c.drawImage(src, 0, 0, src.width, sh, 0, 0, w, Math.round(sh * w / src.width));
+      t.toBlob(function (blob) {
+        if (!blob) return;
+        blob.arrayBuffer().then(function (ab) { host.postMessage({ type: "pdf.thumbnail", png: ab }, "*", [ab]); });
+      }, "image/png");
+    } catch (e) { /* no cover: the card keeps its icon */ }
+  }
   function render(p) {
     var s = cssScale();
     if (p.renderedAt === s || p.busy) return;
@@ -178,6 +203,7 @@ body{overflow:auto;font:13px system-ui,sans-serif;color:#bbb;}
         p.canvas = canvas;
         p.el.appendChild(canvas);
         p.renderedAt = s;
+        if (p.n === 1 && !coverSent) { coverSent = true; cover(canvas); }
         // Transparent text over the canvas, so text can be selected.
         if (p.text) p.text.remove();
         var layer = document.createElement("div");

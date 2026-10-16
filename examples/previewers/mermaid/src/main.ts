@@ -15,11 +15,13 @@ import {
   onInit,
   onToolbar,
   onUnits,
+  provideThumbnail,
   reportError,
   setTitle,
   setToolbar,
   type ToolbarItem,
 } from "../../../../web/previewer-sdk/src/index.ts";
+import { renderCover } from "../../../../web/previewer-sdk/src/cover.ts";
 import { keepLinksInside } from "../../lib/office.ts";
 import { collapseText, quotedLabel, watchPointing } from "../../lib/selection.ts";
 import { clampZoom, fitZoom } from "../../lib/zoom.ts";
@@ -49,6 +51,40 @@ function initMermaid(): void {
     maxTextSize: MAX_SOURCE_CHARS,
     flowchart: { htmlLabels: true },
   });
+}
+
+// The file's card picture (capability "thumbnail"): the diagram on paper, in
+// the light theme whatever the member's (the room keeps one for everyone).
+// Drawn from a second render whose labels are SVG text: a label held in a
+// foreignObject taints the canvas in WebKit, and the picture could not be read
+// back. One per source; a diagram that will not draw leaves the card its icon.
+let coverFor = "";
+async function sendCover(text: string): Promise<void> {
+  if (coverFor === text) return;
+  coverFor = text;
+  try {
+    mermaid.initialize({ startOnLoad: false, securityLevel: "strict", theme: "default", maxTextSize: MAX_SOURCE_CHARS, htmlLabels: false, flowchart: { htmlLabels: false } });
+    const { svg: markup } = await mermaid.render(`bnbloc-mermaid-cover-${++renderNo}`, text);
+    const el = new DOMParser().parseFromString(markup, "image/svg+xml").documentElement;
+    const box = (el.getAttribute("viewBox") ?? "").split(/[\s,]+/).map(Number);
+    if (box.length !== 4 || !(box[2] > 0) || !(box[3] > 0)) return;
+    el.setAttribute("width", String(box[2]));
+    el.setAttribute("height", String(box[3]));
+    el.removeAttribute("style");
+    const img = new Image();
+    img.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(new XMLSerializer().serializeToString(el))}`;
+    await img.decode();
+    const png = await renderCover((ctx, w, h) => {
+      const pad = 14;
+      const k = Math.min((w - 2 * pad) / box[2], (h - 2 * pad) / box[3], 2);
+      ctx.drawImage(img, (w - box[2] * k) / 2, (h - box[3] * k) / 2, box[2] * k, box[3] * k);
+    });
+    await provideThumbnail(png);
+  } catch {
+    // no cover
+  } finally {
+    initMermaid();
+  }
 }
 
 function toolbarItems(): ToolbarItem[] {
@@ -122,6 +158,7 @@ async function draw(text: string, name: string): Promise<void> {
   showStatus("");
   setTitle(name);
   publishToolbar();
+  void sendCover(text);
 }
 
 // What a click on the drawing names. Each diagram type draws its parts as
