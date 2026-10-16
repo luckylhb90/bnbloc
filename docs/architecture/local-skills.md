@@ -87,7 +87,7 @@ is waived when it declares one of these capabilities. Uninstalling the plugin
 sweeps its descriptor (its mounts vanish from the next turn), data dir and
 copies.
 
-The component reads `BNBLOC_LOCAL_SKILLS_LISTEN_URL`, `_TOKEN`, `_DATA_DIR`,
+The component reads `BNBLOC_LOCAL_SKILLS_LISTEN_ADDR`, `_TOKEN`, `_DATA_DIR`,
 `_MOUNTS_FILE`, `_MOUNT_ROOT` and `_SUPERVISED` (`packages/local-skills/package.json`).
 
 ## Installing it

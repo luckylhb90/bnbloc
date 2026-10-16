@@ -14,7 +14,7 @@
 //
 // The environment is the one the package's sidecar block names:
 //
-//	BNBLOC_LOCAL_SKILLS_LISTEN_URL   loopback http URL to listen on
+//	BNBLOC_LOCAL_SKILLS_LISTEN_ADDR  loopback host:port to listen on (what the desktop sets)
 //	BNBLOC_LOCAL_SKILLS_TOKEN        the bearer every request must carry
 //	BNBLOC_LOCAL_SKILLS_DATA_DIR     private folder for settings
 //	BNBLOC_LOCAL_SKILLS_MOUNTS_FILE  where the mount descriptor is written
@@ -30,7 +30,6 @@ import (
 	"log"
 	"net"
 	"net/http"
-	"net/url"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -43,7 +42,7 @@ import (
 
 // Env names; the package manifest (packages/local-skills) declares the same.
 const (
-	envListen     = "BNBLOC_LOCAL_SKILLS_LISTEN_URL"
+	envListen     = "BNBLOC_LOCAL_SKILLS_LISTEN_ADDR"
 	envToken      = "BNBLOC_LOCAL_SKILLS_TOKEN"
 	envDataDir    = "BNBLOC_LOCAL_SKILLS_DATA_DIR"
 	envMounts     = "BNBLOC_LOCAL_SKILLS_MOUNTS_FILE"
@@ -110,15 +109,15 @@ func run() error {
 	return nil
 }
 
-// listenAddr is the host:port of a loopback http URL; any other address is
-// refused, since the bearer travels in the clear.
+// listenAddr checks a host:port is loopback (an IP, or localhost) and returns
+// it; any other address is refused, since the bearer travels in the clear.
 func listenAddr(raw string) (string, error) {
-	u, err := url.Parse(raw)
-	if err != nil || u.Scheme != "http" || u.Port() == "" {
-		return "", fmt.Errorf("%s must be an http URL with a port, got %q", envListen, raw)
+	host, port, err := net.SplitHostPort(raw)
+	if err != nil || port == "" {
+		return "", fmt.Errorf("%s must be host:port, got %q", envListen, raw)
 	}
-	if ip := net.ParseIP(u.Hostname()); u.Hostname() != "localhost" && (ip == nil || !ip.IsLoopback()) {
-		return "", fmt.Errorf("%s must be a loopback address, got %q", envListen, u.Hostname())
+	if ip := net.ParseIP(host); host != "localhost" && (ip == nil || !ip.IsLoopback()) {
+		return "", fmt.Errorf("%s must be a loopback address, got %q", envListen, host)
 	}
-	return u.Host, nil
+	return raw, nil
 }
