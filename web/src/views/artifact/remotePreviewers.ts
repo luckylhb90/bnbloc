@@ -63,6 +63,8 @@ function register(d: PreviewerDescriptor): void {
     input: "blob",
     safety: "sandboxed",
     source: "component",
+    // A previewer that declares the capability sends a cover when it renders.
+    ...(d.capabilities.includes("thumbnail") ? { cover: "render" as const } : {}),
     load: () => import("./RemotePreviewer").then((m) => ({ default: m.previewerHost(d.name) })),
   });
   if (d.capabilities.includes("units")) {

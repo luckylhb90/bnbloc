@@ -22,12 +22,14 @@ import {
   onToolbar,
   onReveal,
   onUnits,
+  provideThumbnail,
   reportError,
   setTitle,
   setToolbar,
   type PreviewFile,
   type ToolbarItem,
 } from "../../../../web/previewer-sdk/src/index.ts";
+import { renderGridCover } from "../../../../web/previewer-sdk/src/cover.ts";
 import { shortName, sniffOffice, unreadableMessage, type OfficeKind } from "../../lib/office.ts";
 import { PICKED, pendingReveal, reveal, selectionReporter } from "../../lib/selection.ts";
 import { workbookUnits } from "./units.ts";
@@ -38,6 +40,7 @@ import {
   coverRange,
   displayText,
   drawnExtent,
+  gridRows,
   isNumeric,
   parseCellLabel,
   parseRange,
@@ -286,6 +289,19 @@ function drawTabs(): void {
   tabsEl.hidden = sheets.length < 2;
 }
 
+// The file's card picture (capability "thumbnail"): the first sheet's first rows
+// and columns as a grid, values as the sheet shows them. Nothing in the sheet:
+// the icon stays.
+async function sendCover(ws: ExcelJS.Worksheet): Promise<void> {
+  const grid = gridRows((r, c) => {
+    const cell = ws.getCell(r, c);
+    // A merged range is its top-left cell: the others echo its value.
+    if (cell.isMerged && cell.master.address !== cell.address) return "";
+    return displayText(cell.value, (cell.style as XStyle)?.numFmt);
+  });
+  if (grid) await provideThumbnail(await renderGridCover(grid.rows, grid.header));
+}
+
 async function open(bytes: ArrayBuffer, file: PreviewFile): Promise<void> {
   const mine = ++generation;
   fileName = file.name;
@@ -314,6 +330,7 @@ async function open(bytes: ArrayBuffer, file: PreviewFile): Promise<void> {
   const first = (wb.views?.[0] as { activeTab?: number } | undefined)?.activeTab ?? 0;
   const visibleActive = sheets.indexOf(wb.worksheets[first]);
   draw(visibleActive >= 0 ? visibleActive : 0);
+  void sendCover(sheets[visibleActive >= 0 ? visibleActive : 0]).catch(() => {});
   publishToolbar();
   reveals.apply();
 }

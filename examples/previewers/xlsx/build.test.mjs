@@ -146,3 +146,15 @@ test("a cell label reads back as rangeLabel wrote it", () => {
   assert.equal(parseCellLabel("B3"), null);
   assert.equal(parseCellLabel("Revenue!B3:C4"), null, "a range is not one cell");
 });
+
+test("the cover is the first rows and columns as a grid, a header read as one", async () => {
+  const { gridRows } = await import("./src/sheet.ts");
+  const data = [["", "", ""], ["Region", "Q1", "Q2"], ["North", "120", "140"], ["South", "95", "130"]];
+  const at = (r, c) => data[r - 1]?.[c - 1] ?? "";
+  assert.deepEqual(gridRows(at), { rows: [["Region", "Q1", "Q2"], ["North", "120", "140"], ["South", "95", "130"]], header: true }, "leading empty row skipped, empty columns dropped");
+  assert.equal(gridRows((r, c) => (r === 1 ? ["1", "2"][c - 1] ?? "" : "")).header, false, "one row, numbers: no header");
+  assert.equal(gridRows((r, c) => ["10", "x"][r - 1]?.repeat(c === 1 ? 1 : 0) ?? "").header, false, "a numeric first row is data");
+  assert.equal(gridRows(() => ""), null, "an empty sheet has no cover");
+  assert.equal(gridRows((r, c) => (r <= 40 && c <= 6 ? `r${r}c${c}` : "")).rows.length, 9, "at most nine rows");
+  assert.equal(gridRows((r, c) => (c <= 20 ? `c${c}` : "")).rows[0].length, 6, "at most six columns");
+});

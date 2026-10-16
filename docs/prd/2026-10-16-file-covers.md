@@ -1,6 +1,6 @@
 # Covers: a picture on every file's card (2026-10-16)
 
-Status: levels 1 and 2 implemented (2026-10-16); level 3 proposed, not built.
+Status: levels 1–3 and the Office covers implemented (2026-10-16).
 Builds on the stored version thumbnail (`services/room/artifact_files.go`,
 `docs/architecture/previewer-components.md` capability `thumbnail`).
 
@@ -49,7 +49,7 @@ reference sprite-sheet previewer used it.
 |---|---|
 | Actors | Any member who can read the file stores its cover; a visitor's write is refused and ignored. The cover shows what the version holds, to everyone who can see the card: a text excerpt is the file's own first lines, no more than opening it shows. |
 | Time and lifecycle | A cover belongs to a version; a new version has none until rendered. A cover stored before a better renderer exists is replaced by it (higher rank), never by an equal one. |
-| Scale and cost | Level 1 reads at most 64 KiB of a file of at most 512 KiB, for a card in view, once per session. Level 2 costs one PNG (~40–100 KB) per version, once. |
+| Scale and cost | Level 1 reads at most 64 KiB of a file of at most 512 KiB, for a card in view, once per session. Levels 2–3 cost one PNG (~40–100 KB) per version, once; level 3 renders at most 24 files per session, one at a time. |
 | Failure and recovery | A diagram that does not draw, a canvas that cannot be read back, a refused write: the card keeps its icon. Nothing blocks opening the file. |
 | Boundaries and privacy | Text covers are pixels drawn from text the member can already read. The PDF guest posts PNG bytes only, bounded to the room's limit and read through the validated guest reader. |
 | Abuse and untrusted input | The excerpt is drawn as text on a canvas, never as markup. The room validates the PNG by magic bytes and dimensions. |
@@ -60,18 +60,24 @@ reference sprite-sheet previewer used it.
 | Release and compatibility | Web alone for levels 1 and the PDF; the previewers publish `optin` first. Covers fill in as files are opened. |
 | Observability | None new. |
 
-## 4. Level 3 (not built): files nobody has opened
+## 4. Level 3: files nobody has opened
 
-A card still shows an icon for a PDF, a diagram or an Office file until someone
-opens it once. The cover could be made at once by having the room's list render
-the file in a hidden sandboxed frame when its card scrolls into view, one at a
-time, bounded by size, once per version. That reverses the rule that **a card is
-a pointer and never renders the file itself** (cost, and untrusted content
-rendering without a click, though inside the same sandbox as the viewer). It is
-the owner's decision, with these limits as the proposal.
+A card used to show an icon for a PDF, a diagram or an Office file until someone
+opened it once. Now a card in view whose version has no cover, and whose viewer
+sends one when it renders it (`cover: "render"`: a PDF, or an installed
+previewer that declares `thumbnail`), has the file rendered once, out of sight,
+in the sandbox the viewer always runs in; the viewer stores the cover itself.
+This reverses the old rule that a card never renders its file, under limits that
+keep the cost and the exposure where they were: one job at a time, 25 seconds at
+most, a version tried once per session, at most 24 jobs per session, files up to
+8 MiB, only for a card in view and only for a viewer that renders in a sandbox
+(never an app). A visitor's write is refused and ignored. Other members of the
+room do the same until the first cover is stored.
 
-## 5. Not yet: Office
+## 5. Office
 
-The Office previewers (pptx, docx, xlsx) do not send covers yet. Their units
-already read the first slide's, page's or sheet's text: a mock slide or page
-drawn from them (same canvas, no renderer, no taint) is the next step.
+The Office previewers (1.4.0) send covers drawn from the text their units
+already read, on the same canvas: the first slide's title and lines on a slide,
+the first blocks on a page (headings bold, a table as its first rows), the first
+rows and columns of the first sheet as a grid (a merged range once, text running
+on over empty cells). No renderer, so nothing to taint a canvas.

@@ -11,7 +11,9 @@ import { PublishWorkDialog } from "@/views/gallery/PublishWorkDialog";
 import { AppDataLine } from "./AppDataLine";
 import { useDeliverableOwner } from "./deliverableOwner";
 import { COVER_TEXT_MAX_BYTES, fileInfoFor, loadCardImage, useArtifactDetail, versionMeta, type CardImageSource } from "./artifactData";
-import { selectViewer, useViewerRegistry } from "@/views/artifact/registry";
+import { selectViewer, useViewerRegistry, type ArtifactViewer } from "@/views/artifact/registry";
+import { useCoverJob } from "@/lib/useCoverJob";
+import { CoverJob } from "./CoverJob";
 import { categoryIcons } from "./fileIcons";
 import { ShareDialog } from "./ShareDialog";
 
@@ -29,6 +31,8 @@ import { ShareDialog } from "./ShareDialog";
 
 /** Images above this are not fetched just to draw a card. */
 const CARD_IMAGE_MAX_BYTES = 8 * 1024 * 1024;
+/** Files above this are not rendered just to make a card's cover. */
+const COVER_RENDER_MAX_BYTES = 8 * 1024 * 1024;
 
 export function useInView<T extends Element>(): [React.RefObject<T | null>, boolean] {
   const ref = useRef<T | null>(null);
@@ -52,11 +56,9 @@ export function useInView<T extends Element>(): [React.RefObject<T | null>, bool
   return [ref, seen];
 }
 
-function useCardImage(roomId: string, artifact: Artifact | null, meta: ArtifactVersion | undefined): string | null {
+function useCardImage(roomId: string, artifact: Artifact | null, meta: ArtifactVersion | undefined, viewer: ArtifactViewer | null): string | null {
   const [url, setUrl] = useState<string | null>(null);
-  useViewerRegistry();
   // The viewer that would open the file says how its card gets a picture.
-  const viewer = artifact && meta ? selectViewer(fileInfoFor(artifact, artifact.currentVersion, meta)) : null;
   const source: CardImageSource | null = !artifact || !meta
     ? null
     : meta.thumbnail
@@ -103,7 +105,14 @@ export function FileCard({
   const { detail, error } = useArtifactDetail(roomId, artifactId, visible);
   const artifact = detail?.artifact ?? null;
   const meta = artifact ? versionMeta(detail, artifact.currentVersion) : undefined;
-  const image = useCardImage(roomId, artifact, meta);
+  useViewerRegistry();
+  const viewer = artifact && meta ? selectViewer(fileInfoFor(artifact, artifact.currentVersion, meta)) : null;
+  const image = useCardImage(roomId, artifact, meta, viewer);
+  // A card in view whose version has no cover, and whose viewer sends one when
+  // it renders, has the file rendered once out of sight (lib/coverJobs).
+  const wantsRender =
+    visible && !!artifact && !!meta && !meta.thumbnail && !artifact.isApp && viewer?.cover === "render" && (meta.sizeBytes ?? 0) <= COVER_RENDER_MAX_BYTES;
+  const rendering = useCoverJob(`${roomId}/${artifactId}/${meta?.version ?? 0}`, wantsRender);
   const [tiny, setTiny] = useState(false);
   const [sharingOpen, setSharingOpen] = useState(false);
   const [publishing, setPublishing] = useState(false);
@@ -118,6 +127,7 @@ export function FileCard({
   const app = !!artifact?.isApp;
   return (
     <div className={cn("flex min-w-0 flex-col", className)}>
+      {rendering && artifact && meta && viewer && <CoverJob roomId={roomId} artifact={artifact} meta={meta} viewer={viewer} />}
       <div className="group/card relative flex min-w-0">
         <button
           ref={ref}

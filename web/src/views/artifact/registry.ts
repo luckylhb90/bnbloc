@@ -103,10 +103,12 @@ export interface ArtifactViewer extends FileClaimant {
   readonly safety: "safe" | "sanitized" | "sandboxed";
   readonly load: () => Promise<{ default: React.ComponentType<ArtifactViewerProps> }>;
   /** How a card for this viewer's files gets a picture when no cover is
-   *  stored: "text" has the host draw the first lines as a page (for files
-   *  this viewer shows as text; the file is read, never rendered). Absent:
-   *  only a stored cover (a viewer that renders sends one) or an image. */
-  readonly cover?: "text";
+   *  stored. "text": the host draws the first lines as a page (for files this
+   *  viewer shows as text; the file is read, never rendered). "render": the
+   *  viewer sends a cover when it renders the file, so a card in view may have
+   *  it rendered once, out of sight (lib/coverJobs). Absent: only a stored
+   *  cover or an image. */
+  readonly cover?: "text" | "render";
 }
 
 export interface ViewerCandidate {

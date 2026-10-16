@@ -19,15 +19,17 @@ import {
   onToolbar,
   onReveal,
   onUnits,
+  provideThumbnail,
   reportError,
   setTitle,
   setToolbar,
   type PreviewFile,
   type ToolbarItem,
 } from "../../../../web/previewer-sdk/src/index.ts";
+import { renderSlideCover } from "../../../../web/previewer-sdk/src/cover.ts";
 import { countedTitle, keepLinksInside, sniffOffice, unreadableMessage, type OfficeKind } from "../../lib/office.ts";
 import { pendingReveal, reveal, watchPointing } from "../../lib/selection.ts";
-import { deckSlideKeys, deckUnits } from "./units.ts";
+import { deckSlideKeys, deckUnits, slideCover } from "./units.ts";
 
 const POWERPOINT: OfficeKind = { noun: "PowerPoint presentation", ext: ".pptx", legacy: ".ppt", apps: "PowerPoint or Keynote" };
 
@@ -86,12 +88,21 @@ function failedSlide(index: number, error: unknown): void {
   panel.replaceChildren(note);
 }
 
+// The file's card picture (capability "thumbnail"): the first slide's title and
+// lines on a slide-shaped page, from the text the units already read; no
+// rendering, so nothing to taint a canvas. Nothing to draw: the icon stays.
+async function sendCover(bytes: ArrayBuffer): Promise<void> {
+  const cover = slideCover((await deckUnits(JSZip, bytes))[0]);
+  if (cover) await provideThumbnail(await renderSlideCover(cover));
+}
+
 async function open(bytes: ArrayBuffer, file: PreviewFile): Promise<void> {
   close();
   fileName = file.name;
   const format = sniffOffice(bytes);
   if (format !== "zip") throw new Error(unreadableMessage(POWERPOINT, format, file.name));
   slideKeys = [];
+  void sendCover(bytes.slice(0)).catch(() => {});
   void deckSlideKeys(JSZip, bytes.slice(0)).then(
     (keys) => (slideKeys = keys),
     () => {},

@@ -19,14 +19,16 @@ import {
   onToolbar,
   onReveal,
   onUnits,
+  provideThumbnail,
   reportError,
   setTitle,
   setToolbar,
   type PreviewFile,
   type ToolbarItem,
 } from "../../../../web/previewer-sdk/src/index.ts";
+import { renderPageCover } from "../../../../web/previewer-sdk/src/cover.ts";
 import { unicodeBullets } from "./bullets.ts";
-import { docUnits } from "./units.ts";
+import { docUnits, pageCover } from "./units.ts";
 import { countedTitle, keepLinksInside, sniffOffice, unreadableMessage, type OfficeKind } from "../../lib/office.ts";
 import { collapseText, pendingReveal, quotedLabel, reveal, tableText, watchPointing } from "../../lib/selection.ts";
 
@@ -109,6 +111,14 @@ const pointing = watchPointing(pagesEl, (el) => {
   return { element: block, where, text: block.innerText, kind: "block" };
 });
 
+// The file's card picture (capability "thumbnail"): the first blocks on a white
+// page, from the text the units already read (no rendering, nothing to taint a
+// canvas). Nothing to draw: the icon stays.
+async function sendCover(bytes: ArrayBuffer): Promise<void> {
+  const page = pageCover(await docUnits(JSZip, bytes));
+  if (page.length > 0) await provideThumbnail(await renderPageCover(page));
+}
+
 async function open(bytes: ArrayBuffer, file: PreviewFile): Promise<void> {
   const mine = ++generation;
   pointing.reset();
@@ -116,6 +126,7 @@ async function open(bytes: ArrayBuffer, file: PreviewFile): Promise<void> {
   const format = sniffOffice(bytes);
   if (format !== "zip") throw new Error(unreadableMessage(WORD, format, file.name));
   statusEl.textContent = `Opening ${file.name}…`;
+  void sendCover(bytes.slice(0)).catch(() => {});
   const next = document.createElement("div");
   try {
     await renderAsync(new Blob([bytes]), next, undefined, {

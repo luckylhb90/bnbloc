@@ -3,7 +3,7 @@
   "contract": "bnbloc.previewer.contract/v1",
   "runtime": "bundle",
   "name": "xlsx",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "publisher": "bnbloc",
   "description": "Excel workbooks (.xlsx, .xlsm, .xltx): every sheet drawn in place — formatted values, fonts, fills, borders, merged cells — with sheet tabs and zoom.",
   "artifacts": {
@@ -20,7 +20,7 @@
       "extensions": [".xlsx", ".xlsm", ".xltx"]
     },
     "rank": 50,
-    "capabilities": ["toolbar", "selection", "units"],
+    "capabilities": ["thumbnail", "toolbar", "selection", "units"],
     "toolbar": [{ "id": "zoom", "icon": "zoom-in", "label": "Zoom", "kind": "zoom" }]
   }
 }

@@ -3,7 +3,7 @@
   "contract": "bnbloc.previewer.contract/v1",
   "runtime": "bundle",
   "name": "docx",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "publisher": "bnbloc",
   "description": "Word documents (.docx, .docm, .dotx): pages rendered in place — styles, tables, images, lists, headers and footers, footnotes — with zoom and fit.",
   "artifacts": {
@@ -20,7 +20,7 @@
       "extensions": [".docx", ".docm", ".dotx"]
     },
     "rank": 50,
-    "capabilities": ["toolbar", "selection", "units"],
+    "capabilities": ["thumbnail", "toolbar", "selection", "units"],
     "toolbar": [
       { "id": "zoom", "icon": "zoom-in", "label": "Zoom", "kind": "zoom" },
       { "id": "fit", "icon": "fit", "label": "Fit to width", "kind": "button" }

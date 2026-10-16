@@ -245,3 +245,27 @@ export function drawnExtent(rows: number, cols: number): { rows: number; cols: n
   const c = Math.min(cols, MAX_COLS);
   return { rows: Math.min(rows, Math.max(1, Math.floor(MAX_CELLS / Math.max(1, c)))), cols: c };
 }
+
+/** The first rows and columns of a sheet as a cover's grid: leading empty rows
+ *  skipped, trailing empty rows and columns dropped, and whether the first row reads as
+ *  a header (every cell text, none a number). null when there is nothing. */
+export function gridRows(
+  text: (row: number, col: number) => string,
+  maxRows = 9,
+  maxCols = 6,
+  scanRows = 40,
+): { rows: string[][]; header: boolean } | null {
+  const rows: string[][] = [];
+  for (let r = 1; r <= scanRows && rows.length < maxRows; r++) {
+    const cells = Array.from({ length: maxCols }, (_, c) => text(r, c + 1).replace(/\s+/g, " ").trim());
+    if (rows.length === 0 && cells.every((c) => c === "")) continue;
+    rows.push(cells);
+  }
+  while (rows.length > 0 && rows[rows.length - 1].every((c) => c === "")) rows.pop();
+  let cols = maxCols;
+  while (cols > 0 && rows.every((row) => row[cols - 1] === "")) cols--;
+  if (cols === 0 || rows.length === 0) return null;
+  const grid = rows.map((row) => row.slice(0, cols));
+  const header = grid.length > 1 && grid[0].every((c) => c !== "" && !/^[-+$€£¥]?[\d,.]+%?$/.test(c));
+  return { rows: grid, header };
+}

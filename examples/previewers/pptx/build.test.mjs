@@ -49,3 +49,17 @@ test("units: one per slide keyed by id; an edited title is one changed slide", a
   const changes = diffUnits(before, after).filter((c) => c.kind !== "same");
   assert.deepEqual(changes.map((c) => [c.kind, c.curr?.key]), [["changed", before[1].key]]);
 });
+
+test("the cover is the first slide's title and lines, never its speaker notes", async () => {
+  const { readFile } = await import("node:fs/promises");
+  const JSZip = (await import("jszip")).default;
+  const { deckUnits, slideCover } = await import("./src/units.ts");
+  const units = await deckUnits(JSZip, await readFile(new URL("./samples/deck.pptx", import.meta.url)));
+  const cover = slideCover(units[1]);
+  assert.equal(cover.title, "Highlights");
+  assert.deepEqual(cover.lines, ["Revenue up 18% year over year", "Two new regions launched", "Support backlog halved"]);
+  assert.deepEqual(slideCover({ text: "Title\nBody\n\nNotes:\nsay this aloud" }), { title: "Title", lines: ["Body"] }, "notes are not on the slide");
+  assert.equal(slideCover({ text: "" }), null, "an empty slide has no cover");
+  assert.equal(slideCover(undefined), null, "no slide");
+  assert.equal(slideCover({ text: Array.from({ length: 20 }, (_, i) => `l${i}`).join("\n") }).lines.length, 7, "at most seven lines");
+});

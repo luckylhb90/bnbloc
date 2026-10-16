@@ -64,3 +64,15 @@ export async function deckUnits(zip: ZipReader, bytes: ArrayBuffer | Uint8Array)
   }
   return out;
 }
+
+/** The first slide as a cover: its title and the next lines of its text (its
+ *  speaker notes are not on the slide). */
+export function slideCover(unit: Pick<DeckUnit, "text"> | undefined): { title: string; lines: string[] } | null {
+  if (!unit) return null;
+  const lines = unit.text
+    .split("\n\nNotes:")[0]
+    .split("\n")
+    .map((l) => l.trim())
+    .filter(Boolean);
+  return lines.length === 0 ? null : { title: lines[0], lines: lines.slice(1, 8) };
+}

@@ -94,3 +94,149 @@ export function renderTextCover(lines: readonly string[], options: { mono?: bool
     ctx.fillStyle = FAINT;
   });
 }
+
+// --- covers drawn from a document's text ---------------------------------------
+// A viewer that reads a document (a deck, a page, a sheet) but has no use for
+// its own renderer on a 240 px card draws its first screen from the text it
+// already reads: same canvas, no foreignObject, nothing to taint.
+
+const SANS = 'system-ui, -apple-system, "Segoe UI", sans-serif';
+
+/** The text broken into lines that fit `width`, at most `maxLines`; when
+ *  text is left over, the last line ends with an ellipsis. Breaks at spaces;
+ *  a word wider than the line (CJK has no spaces) at any character. */
+function wrap(ctx: CanvasRenderingContext2D, text: string, width: number, maxLines: number): string[] {
+  const tokens = text.trim().split(/(\s+)/).flatMap((t) => (ctx.measureText(t).width > width ? [...t] : [t]));
+  const lines: string[] = [];
+  let line = "";
+  for (const token of tokens) {
+    if (line === "" || ctx.measureText(line + token).width <= width) {
+      line += token;
+      continue;
+    }
+    lines.push(line.trimEnd());
+    if (lines.length === maxLines) {
+      let last = lines[maxLines - 1];
+      while (last !== "" && ctx.measureText(`${last}…`).width > width) last = last.slice(0, -1);
+      lines[maxLines - 1] = `${last}…`;
+      return lines;
+    }
+    line = token.trimStart();
+  }
+  if (line.trim() !== "") lines.push(line.trimEnd());
+  return lines;
+}
+
+/** A slide: the first one of a deck, a white slide on the paper with its
+ *  title and bullets. */
+export function renderSlideCover(slide: { readonly title: string; readonly lines: readonly string[] }): Promise<ArrayBuffer> {
+  return renderCover((ctx, w, h) => {
+    const sw = w - 40;
+    const sh = Math.round((sw * 9) / 16);
+    const x = 20;
+    const y = Math.round((h - sh) / 2);
+    ctx.fillStyle = "#ffffff";
+    ctx.strokeStyle = "#dcdcd6";
+    ctx.lineWidth = 1;
+    ctx.fillRect(x, y, sw, sh);
+    ctx.strokeRect(x + 0.5, y + 0.5, sw - 1, sh - 1);
+    ctx.fillStyle = INK;
+    ctx.textBaseline = "top";
+    ctx.font = `700 22px ${SANS}`;
+    let top = y + 22;
+    for (const line of wrap(ctx, slide.title, sw - 48, 2)) {
+      ctx.fillText(line, x + 24, top);
+      top += 28;
+    }
+    top += 8;
+    ctx.font = `13px ${SANS}`;
+    ctx.fillStyle = "#4a4a46";
+    for (const text of slide.lines) {
+      if (top > y + sh - 22) break;
+      const [first = ""] = wrap(ctx, text, sw - 64, 1);
+      ctx.fillText(`•  ${first}`, x + 28, top);
+      top += 20;
+    }
+  });
+}
+
+export interface PageBlock {
+  readonly text: string;
+  readonly heading?: boolean;
+}
+
+/** A document's first page: a white page in the middle of the cover, running
+ *  off the bottom, headings bold and larger. */
+export function renderPageCover(blocks: readonly PageBlock[]): Promise<ArrayBuffer> {
+  return renderCover((ctx, w, h) => {
+    const pw = 320;
+    const x = (w - pw) / 2;
+    ctx.fillStyle = "#ffffff";
+    ctx.strokeStyle = "#dcdcd6";
+    ctx.lineWidth = 1;
+    ctx.fillRect(x, 10, pw, h);
+    ctx.strokeRect(x + 0.5, 10.5, pw - 1, h);
+    ctx.fillStyle = INK;
+    ctx.textBaseline = "top";
+    let top = 28;
+    for (const block of blocks) {
+      if (top > h) break;
+      ctx.font = block.heading ? `700 15px ${SANS}` : `11px ${SANS}`;
+      ctx.fillStyle = block.heading ? INK : "#4a4a46";
+      const pitch = block.heading ? 20 : 15;
+      // A block's own line breaks stay (a table's rows); each line wraps on its own.
+      const own = block.text.split("\n");
+      for (const part of own) {
+        for (const line of wrap(ctx, part, pw - 48, block.heading ? 2 : own.length > 1 ? 1 : 3)) {
+          ctx.fillText(line, x + 24, top);
+          top += pitch;
+        }
+      }
+      top += block.heading ? 4 : 7;
+    }
+  });
+}
+
+/** A sheet's first rows and columns as a grid; the first row shaded when it is
+ *  a header. */
+export function renderGridCover(rows: readonly (readonly string[])[], header: boolean): Promise<ArrayBuffer> {
+  return renderCover((ctx, w, h) => {
+    const cols = Math.max(1, ...rows.map((r) => r.length));
+    const colW = Math.min(150, (w - 24) / cols);
+    const rowH = 26;
+    const x0 = (w - colW * cols) / 2;
+    const y0 = 16;
+    const shown = rows.filter((_, r) => y0 + r * rowH <= h);
+    // The cells first, then the text: a cell's text runs on over the empty
+    // cells to its right (as in a sheet) and must not be painted over by them.
+    shown.forEach((_, r) => {
+      for (let c = 0; c < cols; c++) {
+        ctx.fillStyle = header && r === 0 ? "#ecebe8" : "#ffffff";
+        ctx.fillRect(x0 + c * colW, y0 + r * rowH, colW, rowH);
+        ctx.strokeStyle = "#d6d5d1";
+        ctx.strokeRect(x0 + c * colW + 0.5, y0 + r * rowH + 0.5, colW, rowH);
+      }
+    });
+    ctx.textBaseline = "middle";
+    ctx.fillStyle = INK;
+    shown.forEach((row, r) => {
+      ctx.font = `${header && r === 0 ? "700 " : ""}12px ${SANS}`;
+      for (let c = 0; c < cols; c++) {
+        const text = row[c] ?? "";
+        if (text === "") continue;
+        const x = x0 + c * colW;
+        const y = y0 + r * rowH + rowH / 2 + 1;
+        if (/^[-+$€£¥]?[\d,.]+%?$/.test(text)) {
+          ctx.textAlign = "right";
+          ctx.fillText(text, x + colW - 8, y, colW - 16);
+        } else {
+          let room = colW;
+          for (let n = c + 1; n < cols && (row[n] ?? "") === ""; n++) room += colW;
+          ctx.textAlign = "left";
+          ctx.fillText(text, x + 8, y, room - 16);
+        }
+      }
+    });
+    ctx.textAlign = "left";
+  });
+}

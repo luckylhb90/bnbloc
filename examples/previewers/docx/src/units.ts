@@ -84,3 +84,16 @@ export async function docUnits(zip: ZipReader, bytes: ArrayBuffer | Uint8Array):
   }
   return out;
 }
+
+/** The first blocks of the document as a cover's page: headings marked, a
+ *  table as its first rows with the cells joined, a paragraph as it is. */
+export function pageCover(units: readonly Pick<DocUnit, "label" | "text">[], maxBlocks = 12): { text: string; heading?: boolean }[] {
+  const out: { text: string; heading?: boolean }[] = [];
+  for (const u of units) {
+    if (out.length >= maxBlocks) break;
+    if (u.label.startsWith("Heading")) out.push({ text: u.text, heading: true });
+    else if (u.label.startsWith("Table")) out.push({ text: u.text.split("\n").slice(0, 3).map((row) => row.split("\t").join("  ·  ")).join("\n") });
+    else out.push({ text: u.text });
+  }
+  return out;
+}

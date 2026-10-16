@@ -88,6 +88,7 @@ registerArtifactViewer({
   input: "blob",
   safety: "sandboxed",
   source: "builtin",
+  cover: "render",
   maxBytes: 100 * MiB,
   load: () => import("./PdfViewer"),
 });

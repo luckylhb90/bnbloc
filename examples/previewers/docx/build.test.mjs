@@ -54,3 +54,19 @@ test("units: paragraphs and tables under their headings; an inserted paragraph i
   const changes = diffUnits(before, after).filter((c) => c.kind !== "same");
   assert.deepEqual(changes.map((c) => [c.kind, c.curr?.text]), [["added", "A new point"]]);
 });
+
+test("the cover is the first blocks as a page: headings marked, a table as its first rows", async () => {
+  const { pageCover } = await import("./src/units.ts");
+  const page = pageCover([
+    { label: "Heading · Highlights", text: "Highlights" },
+    { label: "Paragraph · Highlights", text: "Revenue is up." },
+    { label: "Table · By region", text: "Region\tQ1\nNorth\t120\nSouth\t95\nWest\t80" },
+  ]);
+  assert.deepEqual(page, [
+    { text: "Highlights", heading: true },
+    { text: "Revenue is up." },
+    { text: "Region  ·  Q1\nNorth  ·  120\nSouth  ·  95" },
+  ]);
+  assert.equal(pageCover(Array.from({ length: 30 }, () => ({ label: "Paragraph", text: "x" }))).length, 12, "at most twelve blocks");
+  assert.deepEqual(pageCover([]), [], "an empty document");
+});
