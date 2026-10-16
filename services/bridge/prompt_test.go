@@ -95,16 +95,17 @@ func TestPromptBudgets(t *testing.T) {
 		// Once per session (cached prefix). +40 on 2026-10-14 for the two
 		// rules that keep work out of /tmp and many images out of the
 		// conversation (docs/prd/2026-10-14-context-overflow-recovery.md).
-		// +30 on 2026-10-16: the agent cannot schedule (a person sets a
-		// schedule from an app's card); an app builder had no word of it and
-		// said it could not do a timed group reminder.
-		{"session guidance (tools, .room/)", guidance, 770},
-		{"session guidance (tools, .room/, team lead)", team, 850},
+		// -50 on 2026-10-16: tools/list lists each room tool in brief and room_help
+		// gives the full instructions on demand (roomtools/brief.go), so the
+		// guidance no longer repeats the tools' rules; one line says the person
+		// sees none of the tools or files.
+		{"session guidance (tools, .room/)", guidance, 720},
+		{"session guidance (tools, .room/, team lead)", team, 800},
 		// +80 on 2026-10-14: save_component takes a workspace file and a
 		// work's description and "how it was made" request
 		// (docs/bugs/2026-10-14-work-save-misses-new-files.md).
 		{"tools/list", toolsList, 2630},
-		{"session prefix (guidance + tools/list)", guidance + toolsList, 3400},
+		{"session prefix (guidance + tools/list)", guidance + toolsList, 2880},
 	} {
 		got := tokens(c.text)
 		t.Logf("%-48s %5d tokens (budget %d)", c.name, got, c.budget)

@@ -433,6 +433,13 @@ export interface AppNotifyReply {
   recipients: number;
 }
 
+// AppGroupsReply answers GET ~app/groups: the names of the group chats the
+// room's members connected, for an owner's page to send to
+// (to: "group:<name>"); empty for anyone else, who cannot send to one.
+export interface AppGroupsReply {
+  groups: string[];
+}
+
 // AppNotifyTargets is the room service's resolution of a notice's to
 // (POST /internal/v1/app/notify-targets): the members it reaches, the
 // app's title and the room's name.
@@ -853,6 +860,9 @@ export const AuditKindContent = "content";
 // AuditKindApp: an interactive app's data read out (name = the app):
 // an owner's export, or an agent's read through its job's grant.
 export const AuditKindApp = "app";
+// AuditKindSchedule: a schedule an agent created or deleted for the person
+// who asked it (name = the room; the detail says which, never its text).
+export const AuditKindSchedule = "schedule";
 // AuditKindAssist: an AI assist ran (name = task@version; the model,
 // tokens and latency, never the text) or the assist model was set.
 export const AuditKindAssist = "assist";

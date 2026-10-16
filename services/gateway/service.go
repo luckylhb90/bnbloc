@@ -526,6 +526,10 @@ func (s *Service) handleProxy(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	// An agent's act for the person who asked it (?job=) runs as that person.
+	if claims, ok = s.agentDoor(w, r, p, claims); !ok {
+		return
+	}
 	r.Header.Del(actingTenantHeader)
 	if p.isRoomDispatch(r.Method) {
 		// The only route the edge maps onto an internal one (isRoomDispatch).

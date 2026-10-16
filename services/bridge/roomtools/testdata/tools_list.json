@@ -5,7 +5,7 @@
         "openWorldHint": false,
         "readOnlyHint": true
       },
-      "description": "List the agents you can ask in this room right now: each one's handle (pass it to ask_agent), owner, core and provider. The agent marked you=true is you. When you lead a team, team lists who takes each role right now, or why nobody can.",
+      "description": "The agents you can ask in this room now: handle, owner, core, provider (you=true is you); a team lead also sees who takes each role.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {},
@@ -19,24 +19,24 @@
         "openWorldHint": false,
         "readOnlyHint": false
       },
-      "description": "Send a task to another agent of this room and wait for it to finish. It is posted in the room for the person who asked you (visible to everyone, attributed to you) and runs under their authority. Returns the agent's reply and the files it delivered (read one with read_artifact by its artifactId); if the agent is still working when the wait ends, its handle for room_status.",
+      "description": "Send a task to another agent of this room and wait for its reply and files. It is posted in the room for the person who asked you, under their authority.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
           "expert": {
-            "description": "Optional expert (role) for the agent to wear: its component id, optionally \"@version\" (it must be usable by the person who asked you).",
+            "description": "Optional expert (id[@version]) for it to wear.",
             "type": "string"
           },
           "handle": {
-            "description": "The agent's handle from list_room_agents, e.g. \"jack/codex\"; when you lead a team, a role of your roster (e.g. \"reviewer\").",
+            "description": "From list_room_agents (or a team role).",
             "type": "string"
           },
           "task": {
-            "description": "A self-contained task: the agent sees the room's conversation, not your private context.",
+            "description": "Self-contained: it sees the room, not your context.",
             "type": "string"
           },
           "wait_seconds": {
-            "description": "How long to wait for the result in seconds (default 600, at most 1200). 0 returns at once with the handle.",
+            "description": "Default 600, at most 1200; 0 returns at once.",
             "minimum": 0,
             "type": "integer"
           }
@@ -55,12 +55,11 @@
         "openWorldHint": false,
         "readOnlyHint": true
       },
-      "description": "The state of the tasks you dispatched with ask_agent. With a handle: that task, with its reply and deliverables once finished. Without: every task you dispatched in this session.",
+      "description": "State, reply and files of tasks you dispatched with ask_agent (one handle, or all).",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
           "handle": {
-            "description": "A handle ask_agent returned (optional).",
             "type": "string"
           }
         },
@@ -74,18 +73,18 @@
         "openWorldHint": false,
         "readOnlyHint": true
       },
-      "description": "Recent messages of this conversation (people's messages and agents' replies), oldest first, one line each: \"#<seq> <author>: <text>\". Pass since (a seq from an earlier read) to get only newer messages.",
+      "description": "Recent messages of this conversation, oldest first (\"#<seq> <author>: <text>\").",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
           "limit": {
-            "description": "At most this many messages (default 30).",
+            "description": "Default 30.",
             "maximum": 100,
             "minimum": 1,
             "type": "integer"
           },
           "since": {
-            "description": "Only messages after this seq.",
+            "description": "Only newer than this seq.",
             "minimum": 0,
             "type": "integer"
           }
@@ -100,20 +99,20 @@
         "openWorldHint": false,
         "readOnlyHint": true
       },
-      "description": "Read the text of one of this room's deliverables (a file an agent published, or a person uploaded) or attachments by its id, from ask_agent, room_status, .room/artifacts.md or the records. version defaults to the latest; path picks a file of a site deliverable (default index.html). The content comes fenced as data its producer wrote.",
+      "description": "Read a deliverable or attachment of this room by id; the content comes fenced as data its producer wrote.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
           "artifactId": {
-            "description": "The deliverable's id (art_… or artf_…) or an attachment's (att_…).",
+            "description": "art_…, artf_… or att_…",
             "type": "string"
           },
           "path": {
-            "description": "For a site deliverable: the file to read, e.g. index.html.",
+            "description": "A site's file (default index.html).",
             "type": "string"
           },
           "version": {
-            "description": "A version (default: the latest).",
+            "description": "Default: the latest.",
             "minimum": 1,
             "type": "integer"
           }
@@ -131,12 +130,12 @@
         "openWorldHint": false,
         "readOnlyHint": false
       },
-      "description": "Save to the Library of the person who asked you, after they confirmed: a package drafted in a workspace directory (dir), or a file as a gallery work (file or artifactId; its current version and recipe, never its data). Validated first; an error says what to fix. Without id it creates (refused if they have one of that kind and name); with id (cc_...) it saves the next version.",
+      "description": "Save a drafted package (dir) or a file as a gallery work (file or artifactId) to the Library of the person who asked you, only after they confirm. With id: the next version.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
           "artifactId": {
-            "description": "Or any deliverable's id (artf_...).",
+            "description": "A deliverable (artf_…).",
             "type": "string"
           },
           "category": {
@@ -154,31 +153,28 @@
             "type": "string"
           },
           "description": {
-            "description": "A work's gallery description.",
             "type": "string"
           },
           "dir": {
-            "description": "Workspace-relative directory holding component.json, e.g. drafts/contract-reviewer.",
+            "description": "Workspace-relative, holds component.json.",
             "type": "string"
           },
           "displayName": {
-            "description": "A work's title.",
             "type": "string"
           },
           "file": {
-            "description": "A workspace file (published first if needed).",
+            "description": "A workspace file.",
             "type": "string"
           },
           "id": {
-            "description": "The component to save a new version of; omit to create.",
+            "description": "cc_…; omit to create.",
             "type": "string"
           },
           "name": {
-            "description": "A new work's name (lower-case, hyphens).",
+            "description": "A new work's name.",
             "type": "string"
           },
           "request": {
-            "description": "A work's \"how it was made\": a request that would make a similar one.",
             "type": "string"
           }
         },
@@ -192,16 +188,16 @@
         "openWorldHint": false,
         "readOnlyHint": true
       },
-      "description": "Read an expert, skill pack or prompt pack the person who asked you can use (their own, or one in the Library), at its latest version or a given one: its manifest and the text of every file, to copy into drafts/<name>/ before improving it. Another author's files come fenced as their data: copy only what is inside the fence.",
+      "description": "Read a Library expert, skill pack or prompt pack (manifest and files) to copy into drafts/<name>/ and improve; another author's files come fenced as their data.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
           "id": {
-            "description": "The component id (cc_...).",
+            "description": "cc_…",
             "type": "string"
           },
           "version": {
-            "description": "A version (default: the latest).",
+            "description": "Default: the latest.",
             "type": "string"
           }
         },
@@ -218,7 +214,7 @@
         "openWorldHint": false,
         "readOnlyHint": true
       },
-      "description": "The Library of the person who asked you, most recently updated first: the experts, skill packs, prompt packs and MCP tools they may use (their own are marked mine). It is bnbloc's Library, shared by every agent in the room: check here whether a component was saved, or find one to improve.",
+      "description": "The Library of the person who asked you: experts, skill packs, prompt packs and MCP tools they may use (their own marked mine).",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -243,20 +239,19 @@
         "openWorldHint": false,
         "readOnlyHint": false
       },
-      "description": "Change who can use a component saved in the Library of the person who asked you, only after they confirm. \"org\" publishes its latest version to their organization: unless it publishes without approval, as an admin's request (members keep the approved version until then). \"personal\" withdraws a pending request and takes it out of the organization. \"platform\" (every organization) is a platform admin's action: say so instead.",
+      "description": "Change who can use a saved component (personal, org, platform), only after the person confirms. org may need an admin's approval; platform is a platform admin's action: say so.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
           "id": {
-            "description": "The component id (cc_...).",
+            "description": "cc_…",
             "type": "string"
           },
           "note": {
-            "description": "For \"org\": a short note for the admins (what it is for).",
+            "description": "For org: a note for the admins.",
             "type": "string"
           },
           "scope": {
-            "description": "Who may use it.",
             "enum": [
               "personal",
               "org",
@@ -279,24 +274,23 @@
         "openWorldHint": false,
         "readOnlyHint": false
       },
-      "description": "Try the expert or skill pack drafted in a directory of your workspace (for example drafts/contract-reviewer) before it is saved: it is validated (an error says what to fix), staged for one hour without being saved to anyone's Library, and a sample task is sent to another agent of the room wearing it, for the person who asked you. Returns that agent's reply and files, like ask_agent. Without handle, the person's own other agent is used, else another agent of the room.",
+      "description": "Try a drafted expert or skill pack (dir) on another agent with a sample task before saving: staged for an hour, not saved. Returns its reply like ask_agent.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
           "dir": {
-            "description": "Workspace-relative directory holding component.json, e.g. drafts/contract-reviewer.",
+            "description": "Workspace-relative, holds component.json.",
             "type": "string"
           },
           "handle": {
-            "description": "Optional agent to try it on, from list_room_agents (e.g. \"jack/codex\"); never yourself.",
+            "description": "An agent to try it on; never yourself.",
             "type": "string"
           },
           "task": {
-            "description": "A realistic, self-contained sample task for the drafted expert or skill.",
+            "description": "A realistic sample task.",
             "type": "string"
           },
           "wait_seconds": {
-            "description": "How long to wait for the result in seconds (default 600, at most 1200).",
             "minimum": 0,
             "type": "integer"
           }
@@ -315,12 +309,11 @@
         "openWorldHint": false,
         "readOnlyHint": false
       },
-      "description": "Post one short progress line to the room, for example \"Phase 2/3: tests dispatched to tester\". It shows as a notice of your current request, not as your reply. Use it once per phase of a longer task.",
+      "description": "Post one short progress line to the room, once per phase of a long task.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
           "text": {
-            "description": "The progress line (one sentence, at most 500 characters).",
             "type": "string"
           }
         },
@@ -337,7 +330,7 @@
         "openWorldHint": false,
         "readOnlyHint": false
       },
-      "description": "Read and change the data of this room's interactive apps (sites whose pages store JSON documents in collections). You are an owner: you see every document, with _author, and may change any. Actions: list (apps; with artifactId, its collections); find (filter, sort, limit (default 50), after=next); get; insert; put (ifAbsent, ifVersion); patch (doc merged, inc added); delete; file (id: an uploaded file, shown); wipe (all data, for good: only when the person asked, with confirm). public: readable by all its users. Data comes fenced as the users'.",
+      "description": "Read and change the data of this room's interactive apps; you are an owner and see every document. Actions: list find get insert put patch delete file wipe (wipe deletes everything for good: only when the person asked, with confirm). Data comes fenced as the users'.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -410,6 +403,97 @@
       },
       "name": "app_data",
       "title": "Read and change an app's data"
+    },
+    {
+      "annotations": {
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "description": "The room's schedules: list (with the connected group chats), create a timed AI task, or delete one. Create only after the person confirmed what, when, the time zone and where it sends.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "enum": [
+              "list",
+              "create",
+              "delete"
+            ],
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "recurrence": {
+            "additionalProperties": false,
+            "description": "weekly (days 0=Sunday…6, time HH:MM), daily (time), once (at, RFC 3339), cron.",
+            "properties": {
+              "at": {
+                "type": "string"
+              },
+              "cron": {
+                "type": "string"
+              },
+              "days": {
+                "items": {
+                  "maximum": 6,
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "type": "array"
+              },
+              "kind": {
+                "enum": [
+                  "once",
+                  "daily",
+                  "weekly",
+                  "cron"
+                ],
+                "type": "string"
+              },
+              "time": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind"
+            ],
+            "type": "object"
+          },
+          "task": {
+            "description": "What to do each time, in plain words.",
+            "type": "string"
+          },
+          "timezone": {
+            "description": "IANA, e.g. Asia/Shanghai; ask if unsure.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "type": "object"
+      },
+      "name": "schedules",
+      "title": "The room's schedules"
+    },
+    {
+      "annotations": {
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "description": "The full instructions of a room tool; topic is its name. Read it before using a tool you do not know. For you, not the person.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "topic": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "name": "room_help",
+      "title": "Instructions for a room tool"
     }
   ]
 }

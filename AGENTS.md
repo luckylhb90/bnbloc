@@ -732,6 +732,16 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   env entry — an installed core need not be added to `BNBLOC_CORES`. Installs
   are super-admin-gated and require a trusted key (or dev `--unsigned` with
   `BNBLOC_EXT_ALLOW_UNSIGNED`, which the prod overlay pins off).
+- **Room tools are listed in brief, explained on demand.** A tool's size in
+  `tools/list` is paid by every turn of every session, so each tool lists a
+  one or two sentence brief with the constraint that must never be missed, its
+  parameters, and a note only where a name does not explain itself; the full
+  description is `room_help(<tool>)` (`services/bridge/roomtools/brief.go`; a
+  tool without a brief is refused). Never put a tool's rules in the session
+  guidance, and never add a tool whose brief needs a paragraph. An agent acts
+  for the person who asked it only through its job's grant, as that person, on
+  routes people already use (`services/gateway/agent_door.go`: schedules, an AI
+  task only, and the room's group names).
 - **Plugins are typed sidecar packages, never cores.** A plugin package
   declares `kind: "bnbloc.plugin.package/v1"`,
   `contract: "bnbloc.plugin.contract/v1"`, and `runtime: "sidecar"`, with

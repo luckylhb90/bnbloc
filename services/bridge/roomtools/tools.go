@@ -101,6 +101,9 @@ func (r *Registry) Register(t Tool) error {
 	if t.Name == "" || t.Call == nil {
 		return errors.New("roomtools: a tool needs a name and an implementation")
 	}
+	if _, ok := briefs[t.Name]; !ok {
+		return fmt.Errorf("roomtools: tool %q has no brief (brief.go): tools/list lists a tool in brief", t.Name)
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if _, dup := r.byName[t.Name]; dup {
@@ -122,13 +125,25 @@ func (r *Registry) Lookup(name string) (Tool, bool) {
 	return r.tools[i], true
 }
 
+// Names are the registered tools' names, in registration order.
+func (r *Registry) Names() []string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	out := make([]string, 0, len(r.tools))
+	for _, t := range r.tools {
+		out = append(out, t.Name)
+	}
+	return out
+}
+
 // Descriptors are the tools/list entries, in registration order.
 func (r *Registry) Descriptors() []map[string]any {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	out := make([]map[string]any, 0, len(r.tools))
 	for _, t := range r.tools {
-		d := map[string]any{"name": t.Name, "description": t.Description, "inputSchema": t.InputSchema}
+		description, schema := listed(t)
+		d := map[string]any{"name": t.Name, "description": description, "inputSchema": schema}
 		if t.Title != "" {
 			d["title"] = t.Title
 		}
@@ -146,11 +161,14 @@ func DefaultRegistry() *Registry {
 	for _, t := range []Tool{
 		listRoomAgentsTool(), askAgentTool(), roomStatusTool(), readRoomTool(), readArtifactTool(),
 		saveComponentTool(), getComponentTool(), listComponentsTool(), publishComponentTool(), tryDraftTool(),
-		postProgressTool(), appDataTool(),
+		postProgressTool(), appDataTool(), schedulesTool(),
 	} {
 		if err := r.Register(t); err != nil {
 			panic(err) // a static registration bug
 		}
+	}
+	if err := r.Register(helpTool(r)); err != nil {
+		panic(err)
 	}
 	return r
 }
