@@ -191,17 +191,6 @@ text has one owner per category
   again only when the SDK changes. The `interactive-apps` skill's
   self-test serves it as the page's `~app/sdk.js` before the agent says an
   app works (`docs/prd/2026-10-13-interactive-apps-self-test.md`).
-- **`.room/groups.md`** (`roomlog.ReadGroups`, `GroupsFile`, `GroupsUpdate`):
-  the group chats the room's members connected
-  (`GET /v1/rooms/{room}/groups` as the bridge's member): `group:<name>` and
-  the notifier that delivers there, never the chat's address. Written once the
-  room has one and every turn after (`CtxState.GroupsListed`); a failed read
-  says so, never "none". It exists because an app's `app.notify({to:
-  "group:<name>"})` needs the name the members gave, which the agent that
-  writes the app has no other way to learn. The session guidance also says
-  the agent cannot schedule: a reminder or report at a time is a schedule the
-  person sets from the app's card ("Automate…"), for which the agent offers
-  the task in plain words.
 - **`.room/apps.md`** (`roomlog.ReadApps`, `AppsFile`): the room's
   interactive apps, each with its producer and its collections' document
   counts, never a document's content. The apps are the listed deliverables

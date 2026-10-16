@@ -154,6 +154,10 @@ declare global {
      *  Plain text. Signed-in callers only (403 "sign_in_required"); 429
      *  when the app sends too many. In the demo nothing is sent. */
     notify(n: { to: "room" | `group:${string}` | string[]; title: string; text?: string; url?: string }): Promise<{ recipients: number }>;
+    /** The group chats the room's members connected, to send to with
+     *  notify({to: `group:${name}`}). The app's owners see them; anyone else
+     *  gets an empty list. Signed-in callers only. In the demo: none. */
+    groups(): Promise<{ name: string }[]>;
     /** Calls fn with each change until the returned function is called.
      *  Live only: changes made while disconnected are not replayed. */
     subscribe(fn: (change: BnblocAppChange) => void): () => void;

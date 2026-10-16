@@ -190,8 +190,10 @@ list.
   `groupAddress` in the payload. The notifier needs no configuration. An
   unconnected name is refused with a sentence.
 - **Agents learn nothing new.** An AI task's `notify` action lists the
-  room's connected groups in its description; an app names a group the
-  member typed.
+  room's connected groups in its description; an app's page lists them at
+  run time with `app.groups()` (`GET ~app/groups`: the names, for the app's
+  owners; others get none) and offers them, so the agent that writes the
+  app never needs a name and no per-feature file grows the room's records.
 - **Bounds.** 20 groups per room, names of at most 64 characters, 5 open
   codes per room.
 

@@ -41,6 +41,7 @@ import (
 //	DELETE /internal/v1/app/data                 owners: delete all data            → wire.AppDataWiped
 //	…/internal/v1/app/files…                     the app's files (appfiles.go)
 //	POST   /internal/v1/app/notify-targets       who a notice reaches (appnotify.go)
+//	GET    /internal/v1/app/groups               owners: the connected group names (appnotify.go)
 //
 // The scope comes ONLY from the request's signed assertions, never from the
 // path, query or body (no route names an app, room or tenant):
@@ -97,6 +98,7 @@ func (s *Service) registerAppDataRoutes(mux *http.ServeMux) {
 	route("DELETE /internal/v1/app/data", appOwner, s.handleAppWipe)
 	s.registerAppFileRoutes(route)
 	route("POST /internal/v1/app/notify-targets", appRead, s.handleAppNotifyTargets)
+	route("GET /internal/v1/app/groups", appRead, s.handleAppGroups)
 	mux.Handle("POST /internal/v1/rooms/{roomId}/notice-targets", svcauth.RequireService(key, []string{"gateway"}, http.HandlerFunc(s.handleRoomNoticeTargets)))
 }
 

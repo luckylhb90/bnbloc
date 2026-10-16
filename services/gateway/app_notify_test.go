@@ -192,6 +192,9 @@ func TestAppNotifyGroup(t *testing.T) {
 	if r := e.roomCall("maya", http.MethodGet, "/v1/rooms/"+e.roomID+"/groups", nil); r.status != http.StatusOK || !strings.Contains(string(r.body), `"name":"weekly"`) || strings.Contains(string(r.body), "g-42") {
 		t.Fatalf("the room's groups = %d %s (the address stays server-side)", r.status, r.body)
 	}
+	if r := e.call(http.MethodGet, jack+"~app/groups", nil); r.status != http.StatusOK || string(bytes.TrimSpace(r.body)) != `{"groups":["weekly"]}` {
+		t.Fatalf("an owner's page lists the group names only = %d %s", r.status, r.body)
+	}
 	if r := e.call(http.MethodPost, jack+"~app/notify", body); r.status != http.StatusOK {
 		t.Fatalf("a group notice = %d %s", r.status, r.body)
 	}
@@ -215,6 +218,9 @@ func TestAppNotifyGroup(t *testing.T) {
 	tok, _ := e.share(e.appA)
 	if r := e.call(http.MethodPost, shareBase(e.ticket("nora", tok))+"~app/notify", body); r.status != http.StatusForbidden {
 		t.Fatalf("a non-owner's group notice = %d %s", r.status, r.body)
+	}
+	if r := e.call(http.MethodGet, shareBase(e.ticket("nora", tok))+"~app/groups", nil); r.status != http.StatusOK || string(bytes.TrimSpace(r.body)) != `{"groups":[]}` {
+		t.Fatalf("a non-owner lists no group = %d %s", r.status, r.body)
 	}
 	// Disconnected: refused again.
 	if r := e.roomCall("jack", http.MethodDelete, "/v1/rooms/"+e.roomID+"/groups/weekly", nil); r.status != http.StatusNoContent {

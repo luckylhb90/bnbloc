@@ -115,6 +115,7 @@ var appAPI = []struct {
 	{http.MethodDelete, "/files/{id}", false, forwardAppFile("")},
 	{http.MethodPost, "/ai", false, (*Service).serveAppAI},
 	{http.MethodPost, "/notify", false, (*Service).serveAppNotify},
+	{http.MethodGet, "/groups", false, forwardAppPath("/groups")},
 	{http.MethodGet, "/events", false, (*Service).forwardAppEvents},
 	{http.MethodGet, "/stats", true, forwardAppPath("/stats")},
 	{http.MethodGet, "/export", true, forwardAppPath("/export")},

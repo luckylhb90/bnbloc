@@ -24,6 +24,7 @@ import (
 // room's name this answers.
 //
 //	POST /internal/v1/app/notify-targets          an app's notice (its scope's caller)  → wire.AppNotifyTargets
+//	GET  /internal/v1/app/groups                  the room's connected group names (owners; others get none) → wire.AppGroupsReply
 //	POST /internal/v1/rooms/{roomId}/notice-targets?as=  a room's notice (as: an ai schedule's owner) → wire.AppNotifyTargets
 //
 // "room" is the room's people who may act in it (the app's human owners:
@@ -62,6 +63,25 @@ func (s *Service) handleAppNotifyTargets(w http.ResponseWriter, r *http.Request,
 	}
 	if room, err := s.Store.GetRoom(a.ctx, a.scope.RoomID); err == nil {
 		out.RoomName = room.Name
+	}
+	httpx.WriteJSON(w, http.StatusOK, out)
+}
+
+// handleAppGroups answers GET …/groups: the names an owner's page may send a
+// group notice to. Anyone else (a signed-in visitor, a share link) gets none:
+// they cannot send to a group, and the room's group names are not theirs to list.
+func (s *Service) handleAppGroups(w http.ResponseWriter, r *http.Request, a *appCall) {
+	out := wire.AppGroupsReply{Groups: []string{}}
+	if a.owner && s.RoomGroups != nil {
+		list, err := s.RoomGroups.ListRoomGroups(a.ctx, a.scope.RoomID)
+		if err != nil {
+			obs.ServerError(w, "list room groups failed", err)
+			httpx.Error(w, "list room groups failed", http.StatusInternalServerError)
+			return
+		}
+		for _, g := range list {
+			out.Groups = append(out.Groups, g.Name)
+		}
 	}
 	httpx.WriteJSON(w, http.StatusOK, out)
 }

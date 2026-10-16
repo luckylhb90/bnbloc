@@ -222,6 +222,13 @@ type AppNotifyReply struct {
 	Recipients int `json:"recipients"`
 }
 
+// AppGroupsReply answers GET ~app/groups: the names of the group chats the
+// room's members connected, for an owner's page to send to
+// (to: "group:<name>"); empty for anyone else, who cannot send to one.
+type AppGroupsReply struct {
+	Groups []string `json:"groups"`
+}
+
 // AppNotifyTargets is the room service's resolution of a notice's to
 // (POST /internal/v1/app/notify-targets): the members it reaches, the
 // app's title and the room's name.

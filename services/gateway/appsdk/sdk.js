@@ -301,6 +301,16 @@
     return call("POST", "notify", body);
   }
 
+  // groups lists the group chats the room connected, as [{name}] (the
+  // names notify takes as "group:<name>"). The app's owners see them; anyone
+  // else gets an empty list. Signed-in callers only.
+  function groups() {
+    if (memory) return Promise.resolve([]);
+    return call("GET", "groups").then(function (r) {
+      return ((r && r.groups) || []).map(function (name) { return { name: name }; });
+    });
+  }
+
   // ---- the change feed ----
 
   // readEvents reads a text/event-stream body, calling fn with each
@@ -602,6 +612,7 @@
     files: files,
     ai: ai,
     notify: notify,
+    groups: groups,
     subscribe: subscribe,
   };
 

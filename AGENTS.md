@@ -1393,8 +1393,7 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   `list_components` reads the same) and `.room/apps.md` (`ReadApps`, the
   room's interactive apps with their collections' counts, written by
   `AppsUpdate` once the room has an app and every turn after, so it never
-  goes stale; `CtxState.AppsListed`) and `.room/groups.md` (`ReadGroups`: the
-  connected group chats' names, `GroupsUpdate`, `CtxState.GroupsListed`). An agent with tools reads a
+  goes stale; `CtxState.AppsListed`). An agent with tools reads a
   deliverable with `read_artifact`, through the room's own artifact routes
   (membership and room checked there), bounded and fenced as untrusted; a
   site's file through the gateway's site file read on the main origin
