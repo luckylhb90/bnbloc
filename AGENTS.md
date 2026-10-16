@@ -32,6 +32,17 @@ not memory. A bug record includes "Why it was not caught" (the lens, the
 missing question or test) and adds that question to `docs/design-review.md`
 in the same change.
 
+## Language: English unless told otherwise
+
+Everything the project keeps is written in English: code comments, commit
+messages, docs and records (`docs/`, PRDs, bug records, this file), tests and
+fixtures, UI strings, and **release notes** (`bnbloc updates publish
+--notes`, the Release Hub entry). A conversation with a person is in their
+language; what lands in the repo, a release or a deployment is not. Another
+language is used only where the task says so (a localized string a feature
+exists to produce, a fixture of another language's text), and the file or
+commit says why.
+
 ## Lessons: the mistake book (LESSONS.md)
 
 `LESSONS.md` is what agents learned the hard way on this project. Read it
@@ -2115,6 +2126,8 @@ workspace an agent keeps; a check of only the new path misses that
   agent must raise an access request A approves, and the borrowed turn must
   not see A's workspace. The bridge, token and temporary files are always
   removed.
+- **Release notes are English** (`--notes-file`), one or two plain sentences
+  on what changed for the member.
 - **Never say a release recovers by itself** unless the code path that
   recovers was read and exercised.
 
