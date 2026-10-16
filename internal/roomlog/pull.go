@@ -67,10 +67,6 @@ type CtxState struct {
 	// follow: data retention purged every message before it, and the
 	// chunks wholly before it were rewritten empty (ExpireBefore).
 	Expired map[string]int64 `json:",omitempty"`
-	// GuidanceSum is the sum of the room guidance (README.md) this session was
-	// last given: at its start, or by GuidanceChangedHint. Empty on a session
-	// that began before this was recorded.
-	GuidanceSum string `json:",omitempty"`
 	// StartedMs is when a session started (bridge clock, unix ms): a
 	// session's.
 	StartedMs int64 `json:",omitempty"`
@@ -271,38 +267,17 @@ func indexLine(rec ChannelRecords) string {
 // testdata/golden/pointer*.txt pin it and TestPromptBudgets bounds it: it
 // rides every turn.
 func ComposePointer(now Now, recordsHint bool) string {
-	return ComposeTurn(now, recordsHint, false, nil)
+	return ComposeTurn(now, recordsHint, nil)
 }
-
-// NoteGuidance records that the session now holds the room guidance of sum (a
-// README.md sum; "" when there is none) and reports whether a reused session
-// held an older one: the caller then adds GuidanceChangedHint to its turn.
-// A fresh session holds the current guidance by being started with it.
-func (st *CtxState) NoteGuidance(sum string, fresh bool) (changed bool) {
-	if sum == "" {
-		return false
-	}
-	changed = !fresh && st.GuidanceSum != sum
-	st.GuidanceSum = sum
-	return changed
-}
-
-// GuidanceChangedHint is the one line a reused session gets, once, when the
-// room guidance it was started with has changed since (a bnbloc update): the
-// session keeps the guidance it began with, so it is pointed at the current one.
-const GuidanceChangedHint = "(room guidance changed: re-read .room/README.md)"
 
 // ComposeTurn is the pull-model prompt of a reused session's turn: the
 // pointer prompt, with what others said in the session's channel since its
 // last turn (delta) as conversation lines before the message — bounded
 // (writeDelta), the rest in the channel's recent.md.
-func ComposeTurn(now Now, recordsHint, guidanceChanged bool, delta []Entry) string {
+func ComposeTurn(now Now, recordsHint bool, delta []Entry) string {
 	var b strings.Builder
 	if recordsHint {
 		b.WriteString("(room records: .room/INDEX.md)\n")
-	}
-	if guidanceChanged {
-		b.WriteString(GuidanceChangedHint + "\n")
 	}
 	writeDelta(&b, delta, 0)
 	writeNow(&b, now)

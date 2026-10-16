@@ -2,8 +2,6 @@ package roomtools
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"sort"
 	"strings"
@@ -207,26 +205,4 @@ func helpTool(r *Registry) Tool {
 			return Result{Value: map[string]any{"topic": t.Name, "instructions": manual(t)}}
 		},
 	}
-}
-
-// ListDigest identifies the tools/list this build offers (every tool's listed
-// description and schema). An agent session keeps the tool list it was given
-// when it started, so the bridge keeps the digest with the session and starts
-// a new one after a restart that changed the tools: otherwise a session that
-// began before a tool existed would never see it.
-func ListDigest() string {
-	raw, _ := json.Marshal(DefaultRegistry().Descriptors())
-	sum := sha256.Sum256(raw)
-	return hex.EncodeToString(sum[:8])
-}
-
-// Overview is every tool's name and brief, one per line: what a session that
-// last worked here with other tools is told once when they changed.
-func Overview() string {
-	var b strings.Builder
-	reg := DefaultRegistry()
-	for _, name := range reg.Names() {
-		b.WriteString("- " + name + ": " + briefs[name].Text + "\n")
-	}
-	return b.String()
 }

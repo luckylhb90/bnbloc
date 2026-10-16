@@ -16,7 +16,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"strings"
 
 	corepkg "github.com/luckylhb90/bnbloc/core"
 	"github.com/luckylhb90/bnbloc/services/bridge/roomtools"
@@ -135,9 +134,6 @@ type roomToolsContributor struct {
 type roomToolsGrant struct {
 	URL   string `json:"url"`
 	Nonce string `json:"nonce"`
-	// Tools is the tool list the session was given (roomtools.ListDigest): a
-	// session keeps its list, so one given another is not restored.
-	Tools string `json:"tools,omitempty"`
 }
 
 // bearer is the session bearer a nonce derives.
@@ -160,7 +156,7 @@ func (c *roomToolsContributor) hooks(sess *roomtools.Session) (func(TurnInfo), f
 // server listens where its agent was told it does.
 func (c *roomToolsContributor) RestoreSession(_ context.Context, info SessionInfo, state json.RawMessage) (SessionContribution, bool) {
 	var g roomToolsGrant
-	if json.Unmarshal(state, &g) != nil || g.Nonce == "" || g.URL != c.srv.URL() || g.Tools != roomtools.ListDigest() {
+	if json.Unmarshal(state, &g) != nil || g.Nonce == "" || g.URL != c.srv.URL() {
 		return SessionContribution{}, false
 	}
 	sess, err := c.srv.OpenWithToken(roomToolsScope(info), c.bearer(g.Nonce))
@@ -203,7 +199,7 @@ func (c *roomToolsContributor) ContributeSession(_ context.Context, info Session
 	if err != nil {
 		return SessionContribution{}, err
 	}
-	state, _ := json.Marshal(roomToolsGrant{URL: c.srv.URL(), Nonce: nonce, Tools: roomtools.ListDigest()})
+	state, _ := json.Marshal(roomToolsGrant{URL: c.srv.URL(), Nonce: nonce})
 	if server.Type == corepkg.MCPHTTP {
 		server.Headers = []corepkg.NameValue{{Name: "Authorization", Value: "Bearer " + token}}
 	} else {
@@ -211,34 +207,4 @@ func (c *roomToolsContributor) ContributeSession(_ context.Context, info Session
 	}
 	turn, release := c.hooks(sess)
 	return SessionContribution{MCPServers: []corepkg.MCPServer{server}, RoomTools: true, Turn: turn, Release: release, State: state}, nil
-}
-
-// toolsChanged reports whether a kept session's states hold a room tools grant
-// given another tool list than this build offers.
-func toolsChanged(states []json.RawMessage) bool {
-	for _, st := range states {
-		var g roomToolsGrant
-		if json.Unmarshal(st, &g) == nil && g.Nonce != "" && g.Tools != roomtools.ListDigest() {
-			return true
-		}
-	}
-	return false
-}
-
-// updateNote is what a session that began under other room guidance or tools
-// is told once, at the start of its new session. An agent's own conversation
-// can outlast the session (a core may resume it, and keep the instructions it
-// was created with), so what it was told then, and what it concluded ("the
-// room has no way to schedule"), stays true to it unless it is told.
-func updateNote(u update) string {
-	var b strings.Builder
-	b.WriteString("[bnbloc was updated since you last worked in this room.")
-	if u.guidance {
-		b.WriteString(" Your room guidance changed: read .room/README.md again; it replaces what you were told when this conversation began.")
-	}
-	if u.tools || u.guidance {
-		b.WriteString(" Your room tools are now:\n" + roomtools.Overview())
-	}
-	b.WriteString(" Anything you concluded earlier about what the room cannot do may be out of date.]\n\n")
-	return b.String()
 }

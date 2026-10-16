@@ -28,7 +28,7 @@ func TestNamesInRecords(t *testing.T) {
 		}
 	}
 	// Each file names a person with their id once: the delta too.
-	if out := ComposeTurn(Now{From: PersonLabel("Maya Lee", "maya"), Text: "go"}, false, false, entries[2:3]); !strings.Contains(out, "Maya Lee (maya): jack (jack) says hi") || !strings.HasSuffix(out, "[now — from Maya Lee (maya)]\ngo") {
+	if out := ComposeTurn(Now{From: PersonLabel("Maya Lee", "maya"), Text: "go"}, false, entries[2:3]); !strings.Contains(out, "Maya Lee (maya): jack (jack) says hi") || !strings.HasSuffix(out, "[now — from Maya Lee (maya)]\ngo") {
 		t.Fatalf("turn:\n%s", out)
 	}
 	if got := PersonLabel("", "maya"); got != "maya" {

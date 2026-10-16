@@ -448,13 +448,7 @@ func (b *Bridge) drivePrompt(ctx context.Context, d *drive, workspaceID string, 
 	// A session whose guidance rode its first prompt (no agentProfile) keeps
 	// one line pointing at the records: a harness may compact that prompt
 	// away.
-	// The guidance a session starts with is the one it keeps: when the room's
-	// guidance changed since (a bnbloc update), say so once.
-	guidanceChanged := false
-	if st != nil && newSt.ReadmeSum != "" {
-		guidanceChanged = st.NoteGuidance(roomlog.GuidanceSum(g), fresh)
-	}
-	return roomlog.ComposeTurn(now, !d.caps.profile, guidanceChanged, delta)
+	return roomlog.ComposeTurn(now, !d.caps.profile, delta)
 }
 
 // sinceLastTurn is what others said in the session's channel after seen
