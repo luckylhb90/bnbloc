@@ -1,7 +1,7 @@
 {
   "kind": "bnbloc.skill.package/v1",
   "name": "interactive-apps",
-  "version": "1.8.0",
+  "version": "1.9.0",
   "displayName": "Interactive apps",
   "description": "Builds pages people use from a link whose answers bnbloc keeps (polls, surveys, sign-ups, forms, boards, games) with the app SDK, and reads the collected data back for a report.",
   "category": "apps",

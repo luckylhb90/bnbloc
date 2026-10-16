@@ -219,3 +219,14 @@ func ListDigest() string {
 	sum := sha256.Sum256(raw)
 	return hex.EncodeToString(sum[:8])
 }
+
+// Overview is every tool's name and brief, one per line: what a session that
+// last worked here with other tools is told once when they changed.
+func Overview() string {
+	var b strings.Builder
+	reg := DefaultRegistry()
+	for _, name := range reg.Names() {
+		b.WriteString("- " + name + ": " + briefs[name].Text + "\n")
+	}
+	return b.String()
+}

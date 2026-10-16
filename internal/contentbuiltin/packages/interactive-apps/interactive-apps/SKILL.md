@@ -23,8 +23,7 @@ this file: read it before your first app.
 - Plain HTML, CSS and JavaScript in one page is enough. With a bundler,
   keep that tag as written in `index.html` and publish `dist/`.
 - The page runs sandboxed: no cookies or local storage (they throw), no
-  access to the room. Keep everything in the app's data; avoid external
-  services and fonts.
+  access to the room. Keep everything in the app's data; no external services.
 - Mobile first: one column, large tap targets, no hover-only controls, a
   visible state after every action (saved, closed, error).
 - Fixed content (options, questions, slots) goes in the code: the data
@@ -50,8 +49,7 @@ In the same run, save the first screen as `cover.png` beside its
 `index.html` (16:10, e.g. 1280x800, under 1 MiB): its card's cover in the
 room and the gallery. PNG, JPEG or WebP only, never SVG. Asked to publish
 it, `save_component` with its `artifactId` saves it as a work with its
-recipe (any deliverable can be one; a video's cover is a frame saved as
-`cover.png`).
+recipe.
 
 ## The SDK
 
@@ -78,7 +76,8 @@ recipe (any deliverable can be one; a video's cover is a frame saved as
   `{text}` or `{json}`; `app.notify({to, title, text})`, a notice through
   the organization's notifications, to "room", logins or a connected group
   chat ("group:<name>"); `app.groups()` lists them as `[{name}]` (owners):
-  offer them, never hardcode one.
+  offer them, never hardcode one. A page cannot run on a timer: a reminder or
+  report at a time is a schedule (the schedules room tool).
 - `app.subscribe(fn)` calls `fn` with `{appId, collection, id, version}`
   on every change and returns a function that stops it. No content
   (re-read what changed), no replay (read on load too). `version` 0:
@@ -111,13 +110,11 @@ API calls:
 ## Patterns
 
 - **Once per person:** `put((await app.me()).id, doc, {ifAbsent: true})`.
-  A 409 means they already answered: show it, or let them change it with
-  `put` and `ifVersion`.
+  A 409 means they already answered: show it, or let them `put` with `ifVersion`.
 - **Counting:** one document per action, counted when reading; no shared
   counter (rule 1). `$inc` only on a document the caller may change.
 - **Live results:** `subscribe` and re-run the `find` on each change.
-  Private votes count only for owners: show visitors a thank-you, or make
-  votes public.
+  Private votes count only for owners: thank visitors, or make votes public.
 - **Closing:** a closing time in the code (see the poll example).
 
 ## Who opens it
@@ -127,8 +124,7 @@ API calls:
 - People with its share link (the card's Share link). A link asks them
   to sign in first, so `me()` gives their `account` too. A link opened to
   anyone gives a visitor identity per browser: no `name` or `account`
-  (ask for a name only then). They see only public documents and their
-  own.
+  (ask for a name only then). They see public documents and their own.
 - Members' tries are real data: offer to clear them before sharing.
 
 ## Reading the data back

@@ -181,6 +181,9 @@ const leaseRenewInterval = 20 * time.Second
 
 // Bridge runs the chat->agent->reply loop for one member.
 type Bridge struct {
+	// toolsChanged marks the channel sessions whose next session follows a
+	// change of the room tools (guarded by mu).
+	toolsChanged map[sessionKey]bool
 	// names are people's display names (names.go).
 	names       nameCache
 	cfg         Config
@@ -1792,7 +1795,11 @@ func (b *Bridge) startSession(ctx context.Context, d *drive, key driveKey, entry
 	// contributors' servers): its profile or its first prompt's head.
 	profile, prefix, hooks, facts := b.sessionGuidance(ctx, d, entry.endpoint, workspaceID, b.sessionInfo(d, opts))
 	var st roomlog.CtxState
-	initialPrompt := prefix + prompt(workspaceID, &st, atts, facts)
+	note := ""
+	if b.takeToolsChanged(d.sessionKey()) {
+		note = toolsChangedNote()
+	}
+	initialPrompt := prefix + note + prompt(workspaceID, &st, atts, facts)
 	rs := &roomSession{owner: d.owner, seat: key, provider: provider, core: d.core, workspaceID: workspaceID, ws: b.workspaces.shared(key, workspaceID), ctx: st, hooks: hooks, profileSum: d.content.bindingSum(), guidance: facts}
 	if opts.Execution != nil {
 		rs.workdir = opts.Execution.Sandbox.Workdir

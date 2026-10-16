@@ -117,6 +117,9 @@ func (b *Bridge) restoreSession(ctx context.Context, d *drive, key driveKey, sk 
 	}
 	hooks, ok := b.restoreContributions(ctx, info, rec.Contributions)
 	if !ok {
+		if toolsChanged(rec.Contributions) {
+			b.noteToolsChanged(sk)
+		}
 		return forget("a session contributor could not reattach")
 	}
 	rs := &roomSession{
@@ -136,4 +139,25 @@ func (b *Bridge) restoreSession(ctx context.Context, d *drive, key driveKey, sk 
 	slog.Info("bnbloc bridge restored a kept session",
 		"event", "bnbloc.bridge.session_restored", "room", sk.room, "channel", sk.channel, "core", sk.core, "provider", sk.provider, "workspace", rec.WorkspaceID, "session", rec.SessionID)
 	return rs
+}
+
+// noteToolsChanged remembers that channel session sk's next session starts
+// after the room tools changed (takeToolsChanged).
+func (b *Bridge) noteToolsChanged(sk sessionKey) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.toolsChanged == nil {
+		b.toolsChanged = map[sessionKey]bool{}
+	}
+	b.toolsChanged[sk] = true
+}
+
+// takeToolsChanged reports, once, that sk's new session follows a change of the
+// room tools.
+func (b *Bridge) takeToolsChanged(sk sessionKey) bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	was := b.toolsChanged[sk]
+	delete(b.toolsChanged, sk)
+	return was
 }

@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	corepkg "github.com/luckylhb90/bnbloc/core"
+	"github.com/luckylhb90/bnbloc/services/bridge/roomtools"
 )
 
 // restartProv is a core that keeps its sessions across a bridge restart:
@@ -219,5 +220,45 @@ func TestRoomToolsReattachAfterARestart(t *testing.T) {
 	legacy, _ := json.Marshal(grant)
 	if _, ok := c2.RestoreSession(context.Background(), info, legacy); ok {
 		t.Fatal("a session kept before the tool list was recorded was restored")
+	}
+}
+
+// A session that began under other room tools is told once, in its new first
+// prompt, what the tools are now: its own conversation may outlast the session
+// and keep concluding that the room cannot do what a new tool now does.
+func TestToolsChangedIsToldOnce(t *testing.T) {
+	grant := func(tools string) []json.RawMessage {
+		raw, _ := json.Marshal(roomToolsGrant{URL: "http://127.0.0.1:1/mcp", Nonce: "n", Tools: tools})
+		return []json.RawMessage{raw}
+	}
+	if toolsChanged(grant(roomtools.ListDigest())) {
+		t.Fatal("the same tool list is not a change")
+	}
+	for name, states := range map[string][]json.RawMessage{
+		"another list":           grant("an older list"),
+		"kept before it existed": grant(""),
+	} {
+		if !toolsChanged(states) {
+			t.Errorf("%s is a change", name)
+		}
+	}
+	if toolsChanged([]json.RawMessage{json.RawMessage(`{"other":1}`)}) || toolsChanged(nil) {
+		t.Error("a contribution that is not the room tools' is not a change")
+	}
+
+	b := New(Config{})
+	sk := sessionKey{driveKey: driveKey{room: "r", core: "c", provider: "p"}, channel: "ch"}
+	if b.takeToolsChanged(sk) {
+		t.Fatal("nothing noted yet")
+	}
+	b.noteToolsChanged(sk)
+	if !b.takeToolsChanged(sk) || b.takeToolsChanged(sk) {
+		t.Fatal("a change is told exactly once")
+	}
+	note := toolsChangedNote()
+	for _, want := range []string{"schedules:", "room_help:", "may be out of date"} {
+		if !strings.Contains(note, want) {
+			t.Errorf("the note lacks %q:\n%s", want, note)
+		}
 	}
 }

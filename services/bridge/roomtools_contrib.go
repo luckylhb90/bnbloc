@@ -211,3 +211,24 @@ func (c *roomToolsContributor) ContributeSession(_ context.Context, info Session
 	turn, release := c.hooks(sess)
 	return SessionContribution{MCPServers: []corepkg.MCPServer{server}, RoomTools: true, Turn: turn, Release: release, State: state}, nil
 }
+
+// toolsChanged reports whether a kept session's states hold a room tools grant
+// given another tool list than this build offers.
+func toolsChanged(states []json.RawMessage) bool {
+	for _, st := range states {
+		var g roomToolsGrant
+		if json.Unmarshal(st, &g) == nil && g.Nonce != "" && g.Tools != roomtools.ListDigest() {
+			return true
+		}
+	}
+	return false
+}
+
+// toolsChangedNote is what a session that began under other room tools is
+// told once, at the start of its new session: an agent's own conversation can
+// outlast the session (a core may resume it), and what it concluded then ("the
+// room has no way to schedule") stays true to it unless it is told.
+func toolsChangedNote() string {
+	return "[The room tools changed since you last worked in this room. You now have:\n" + roomtools.Overview() +
+		"Anything you concluded earlier about what the room cannot do may be out of date.]\n\n"
+}
