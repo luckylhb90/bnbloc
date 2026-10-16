@@ -280,8 +280,8 @@ func (s *Scanner) allowed(name string, f File) bool {
 	return hash != "" && slices.Contains(list, AllowedFile{File: f.Rel, Hash: hash})
 }
 
-// digest is the hash of a skill's files: the same names and bytes, the same hash.
-func digest(files []File) (string, error) {
+// skillDigest is the hash of a skill's files: the same names and bytes, the same hash.
+func skillDigest(files []File) (string, error) {
 	h := sha256.New()
 	for _, f := range files {
 		fh, err := os.Open(f.Abs)
@@ -364,7 +364,7 @@ func (s *Scanner) Inspect(source, dir string) Skill {
 		sk.PublishProblem = fmt.Sprintf("%s was allowed for your sandbox only; it is not shared with the library", sk.Allowed[0])
 	}
 	if problem == "" && sk.PublishProblem == "" {
-		sk.Hash, _ = digest(files)
+		sk.Hash, _ = skillDigest(files)
 	}
 	for _, f := range files {
 		if sk.PublishProblem != "" {

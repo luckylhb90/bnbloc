@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/luckylhb90/bnbloc/core"
+	"github.com/luckylhb90/bnbloc/internal/digest"
 )
 
 // ProviderContract names the API a Settings view renders and a component
@@ -227,7 +228,7 @@ func (s *Service) Validate(in Settings) error {
 			return fmt.Errorf("the skill %s allows more than %d files", name, maxAllowed)
 		}
 		for _, a := range c.Allowed {
-			if clean, ok := core.CleanRelPath(a.File); !ok || clean != a.File || len(a.Hash) != 64 {
+			if clean, ok := core.CleanRelPath(a.File); !ok || clean != a.File || !digest.Valid(a.Hash) {
 				return fmt.Errorf("%q is not an allowable file of %s", a.File, name)
 			}
 		}

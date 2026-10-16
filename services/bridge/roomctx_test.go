@@ -909,3 +909,26 @@ func TestRecordsNamePeople(t *testing.T) {
 		t.Fatalf("profile reads = %d, want each id read once", reads)
 	}
 }
+
+// A session records the guidance it was given when it starts, so a later change
+// can be told to it (roomlog.CtxState.NoteGuidance).
+func TestDriveClaimPullRecordsTheGuidanceASessionStartedWith(t *testing.T) {
+	g := newPullGateway(t)
+	g.setHistory("general", []int64{1}, map[int64]string{1: "old message"})
+	g.setHistory("test", []int64{}, nil)
+	prov := &fakeCoreProvider{url: g.srv.URL}
+	b := New(Config{GatewayBaseURL: g.srv.URL, GatewayToken: "t", OwnerSubject: "maya", Cores: []CoreConfig{{Name: "core-a", Provider: prov, Endpoint: corepkg.Endpoint{BaseURL: g.srv.URL}}}})
+	if _, err := b.driveClaim(context.Background(), testDrive(b, jobRef{ID: "job-x"}, "r1", "maya", "core-a", "agent-a", "t", "one", "ch"), nil); err != nil {
+		t.Fatal(err)
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if len(b.sessions) != 1 {
+		t.Fatalf("sessions = %d", len(b.sessions))
+	}
+	for _, s := range b.sessions {
+		if s.ctx.GuidanceSum == "" {
+			t.Fatal("a new session records the guidance it started with")
+		}
+	}
+}

@@ -221,14 +221,14 @@ func TestComposeTurnBoundsTheDelta(t *testing.T) {
 	for i := 1; i <= 30; i++ {
 		delta = append(delta, Entry{Seq: int64(i), Speaker: "maya", Text: strings.Repeat("x", 1000)})
 	}
-	out := ComposeTurn(Now{From: "jack", Text: "go"}, false, delta)
+	out := ComposeTurn(Now{From: "jack", Text: "go"}, false, false, delta)
 	if n := strings.Count(out, "maya: "); n == 0 || n > maxDeltaLines {
 		t.Fatalf("delta lines = %d", n)
 	}
 	if len(out) > maxDeltaChars+1000 || !strings.Contains(out, "older new messages omitted") || !strings.HasSuffix(out, "[now — from jack]\ngo") {
 		t.Fatalf("delta not bounded (%d bytes):\n%s", len(out), out)
 	}
-	if ComposeTurn(Now{From: "jack", Text: "go"}, false, nil) != ComposePointer(Now{From: "jack", Text: "go"}, false) {
+	if ComposeTurn(Now{From: "jack", Text: "go"}, false, false, nil) != ComposePointer(Now{From: "jack", Text: "go"}, false) {
 		t.Fatal("an empty delta must be the pointer prompt")
 	}
 }
@@ -547,5 +547,40 @@ func TestComposeNamesTheFileToEdit(t *testing.T) {
 	missing := &EditTarget{Name: "deck.pptx", Version: 3, Problem: "it is larger than this agent accepts (32 MB)"}
 	if got := ComposePointer(Now{From: "maya", Text: "x", Edit: missing}, false); !strings.HasPrefix(got, "[the file to edit, deck.pptx v3, is NOT in this workspace: it is larger than this agent accepts (32 MB) — tell the sender]\n") {
 		t.Fatalf("missing line:\n%s", got)
+	}
+}
+
+// A reused session is told once that the room guidance it began with changed.
+func TestComposeTurnGuidanceChanged(t *testing.T) {
+	now := Now{From: "jack", Text: "go"}
+	out := ComposeTurn(now, false, true, nil)
+	if !strings.HasPrefix(out, GuidanceChangedHint+"\n") || !strings.HasSuffix(out, "[now — from jack]\ngo") {
+		t.Fatalf("turn with a changed guidance:\n%s", out)
+	}
+	if strings.Contains(ComposeTurn(now, false, false, nil), "guidance") {
+		t.Fatal("an unchanged guidance says nothing")
+	}
+}
+
+func TestNoteGuidance(t *testing.T) {
+	var st CtxState
+	if st.NoteGuidance("a", true) || st.GuidanceSum != "a" {
+		t.Fatal("a fresh session holds the current guidance and is told nothing")
+	}
+	if st.NoteGuidance("a", false) {
+		t.Fatal("an unchanged guidance is not announced")
+	}
+	if !st.NoteGuidance("b", false) || st.GuidanceSum != "b" {
+		t.Fatal("a changed guidance is announced")
+	}
+	if st.NoteGuidance("b", false) {
+		t.Fatal("once")
+	}
+	legacy := CtxState{}
+	if !legacy.NoteGuidance("a", false) {
+		t.Fatal("a session that began before the guidance was recorded is told once")
+	}
+	if st.NoteGuidance("", false) || st.GuidanceSum != "b" {
+		t.Fatal("no guidance on disk changes nothing")
 	}
 }
