@@ -1,6 +1,8 @@
 import { Component, lazy, Suspense, useEffect, useMemo, useState, type ReactNode } from "react";
 import { DownloadSimpleIcon, FileIcon } from "@phosphor-icons/react";
 import { formatBytes } from "@/lib/format";
+import { isChunkLoadError } from "@/lib/webBuild";
+import { reportStaleBuild } from "@/views/WebUpdateNotice";
 import { TEXT_VIEWER_ID } from "./builtin";
 import {
   listArtifactViewers,
@@ -58,10 +60,27 @@ class ViewerBoundary extends Component<{ children: ReactNode; resetKey: string }
 
   componentDidCatch(error: Error) {
     console.error("bnbloc viewer error:", error);
+    if (isChunkLoadError(error)) reportStaleBuild();
   }
 
   render() {
     if (!this.state.error) return this.props.children;
+    // The viewer's code is a file a deployment replaced: not a broken viewer,
+    // a page that is older than the server. Say that and offer the reload.
+    if (isChunkLoadError(this.state.error)) {
+      return (
+        <div className="flex flex-col items-start gap-3 p-4 text-sm text-[var(--color-fg-muted)]">
+          <p>bnbloc was updated while this page was open, so this viewer is no longer available here. Reload to open the file.</p>
+          <button
+            type="button"
+            onClick={() => window.location.reload()}
+            className="tap tactile rounded-[var(--radius)] border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-3 py-1.5 text-[var(--color-fg)] hover:bg-[var(--color-surface-2)]"
+          >
+            Reload
+          </button>
+        </div>
+      );
+    }
     return (
       <p className="p-4 text-sm text-[var(--color-danger,#f87171)]">
         This viewer failed: {this.state.error.message || "unknown error"}

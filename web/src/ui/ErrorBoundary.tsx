@@ -1,4 +1,5 @@
 import { Component, type ErrorInfo, type ReactNode } from "react";
+import { isChunkLoadError } from "@/lib/webBuild";
 
 // ErrorBoundary renders the crash instead of a blank window when a descendant
 // throws during render. Without it a single render error unmounts the whole app
@@ -26,15 +27,18 @@ export class ErrorBoundary extends Component<{ children: ReactNode }, State> {
   render() {
     const { error, info } = this.state;
     if (!error) return this.props.children;
+    // A file a deployment replaced is not a crash: say what happened.
+    const updated = isChunkLoadError(error);
     return (
       <div className="min-h-[100dvh] overflow-auto bg-[var(--color-bg)] p-6 text-sm text-[var(--color-fg)]">
         <div className="mx-auto max-w-3xl">
           <h1 className="mb-2 text-lg font-semibold text-[var(--color-danger,#f66)]">
-            Something went wrong
+            {updated ? "bnbloc was updated" : "Something went wrong"}
           </h1>
           <p className="mb-4 text-[var(--color-fg-muted)]">
-            The interface hit an unexpected error. Reload to recover; the details
-            below help diagnose it.
+            {updated
+              ? "A newer version was deployed while this page was open, so part of it could not be loaded. Reload to continue."
+              : "The interface hit an unexpected error. Reload to recover; the details below help diagnose it."}
           </p>
           <button
             onClick={() => window.location.reload()}

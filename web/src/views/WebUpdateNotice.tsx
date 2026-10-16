@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import { ArrowClockwiseIcon } from "@phosphor-icons/react";
 import { cn } from "@/lib/cn";
 import { inDesktopShell } from "@/lib/config";
@@ -8,12 +8,31 @@ import { entryScriptFromHtml, runningEntryScript } from "@/lib/webBuild";
 // How often a visible browser tab checks whether a newer web build is deployed.
 const CHECK_MS = 5 * 60_000;
 
+// A lazy import that failed is proof the page is out of date, faster than the
+// poll below: whoever sees one (the viewer boundary, vite's preload error)
+// reports it here, and the notice shows.
+let reportedStale = false;
+const reportListeners = new Set<() => void>();
+
+export function reportStaleBuild(): void {
+  if (reportedStale) return;
+  reportedStale = true;
+  for (const l of reportListeners) l();
+}
+
+const subscribeReports = (l: () => void): (() => void) => {
+  reportListeners.add(l);
+  return () => reportListeners.delete(l);
+};
+
 // useWebUpdate reports whether the gateway now serves a different web build
-// than this tab is running. Browser only: the desktop shell embeds its bundle
-// and has its own updater.
+// than this tab is running, or a lazy import of this page already failed.
+// The poll is browser only: the desktop shell embeds its bundle and has its
+// own updater.
 export function useWebUpdate(signedIn: boolean): boolean {
   const [stale, setStale] = useState(false);
-  const enabled = signedIn && !inDesktopShell() && !stale;
+  const reported = useSyncExternalStore(subscribeReports, () => reportedStale);
+  const enabled = signedIn && !inDesktopShell() && !stale && !reported;
   const check = useCallback(async () => {
     const running = runningEntryScript(document);
     if (!running) return; // dev server: no hashed entry to compare
@@ -27,7 +46,11 @@ export function useWebUpdate(signedIn: boolean): boolean {
     }
   }, []);
   useVisiblePoll(() => void check(), CHECK_MS, enabled);
-  return stale;
+  useEffect(() => {
+    window.addEventListener("vite:preloadError", reportStaleBuild);
+    return () => window.removeEventListener("vite:preloadError", reportStaleBuild);
+  }, []);
+  return stale || reported;
 }
 
 // WebUpdateNotice is the quiet sidebar entry offering a reload; nothing

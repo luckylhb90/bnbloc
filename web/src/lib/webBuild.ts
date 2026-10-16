@@ -23,3 +23,11 @@ export function runningEntryScript(doc: Document): string | null {
   }
   return null;
 }
+
+// isChunkLoadError tells that a lazily loaded file is gone: a deployment
+// replaced the hashed files this page was loaded with, so its next dynamic
+// import (a viewer, a dialog) fails. The message differs by engine.
+export function isChunkLoadError(err: unknown): boolean {
+  const message = err instanceof Error ? err.message : typeof err === "string" ? err : "";
+  return /dynamically imported module|Importing a module script failed|Unable to preload CSS/i.test(message);
+}
