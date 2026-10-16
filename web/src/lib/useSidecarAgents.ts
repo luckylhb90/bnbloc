@@ -27,7 +27,8 @@ import { StorageKey, readStored, writeStored } from "./storageKeys.ts";
 // Each tick reads the shell's sidecar statuses (cheap, in-memory), then — per
 // the pure rules in sidecarState — re-lists a core's agents when it (re)starts
 // or its last listing failed/was empty, and re-checks its sign-in state. A
-// core that reports signed out gets its sign-in started once per app session.
+// core that reports signed out gets its sign-in started once per sign-out
+// episode (SignInNotice stays up until it is signed in again).
 
 let snapshot: SidecarSnapshot = EMPTY_SNAPSHOT;
 const listeners = new Set<() => void>();
@@ -39,13 +40,26 @@ const inflightAuth = new Set<string>();
 
 const SIGN_IN_KEY = StorageKey.sidecarSignInStarted;
 
-// Auto sign-in happens at most once per app session per sidecar, surviving a
-// webview reload (sessionStorage) but not an app restart.
+// Auto sign-in happens at most once per sign-out episode per sidecar (a core
+// seen signed in ends the episode), surviving a webview reload
+// (sessionStorage) but not an app restart.
 function signInStarted(name: string): boolean {
   try {
     return (JSON.parse(readStored(SIGN_IN_KEY, "session") || "[]") as string[]).includes(name);
   } catch {
     return false;
+  }
+}
+
+// A core seen signed in starts a new episode: a sign-in that expires later
+// is offered again, once, instead of staying silent for the rest of the app
+// session.
+function clearSignInStarted(name: string): void {
+  try {
+    const started = JSON.parse(readStored(SIGN_IN_KEY, "session") || "[]") as string[];
+    if (started.includes(name)) writeStored(SIGN_IN_KEY, JSON.stringify(started.filter((n) => n !== name)), "session");
+  } catch {
+    // sessionStorage unavailable: nothing to clear.
   }
 }
 
@@ -115,6 +129,7 @@ async function loadAuth(e: SidecarEntry): Promise<void> {
     const signedIn = authPhase(auth) === "signedIn";
     const wasPending = !!before && ["checking", "signedOut"].includes(authPhase(before.auth));
     const signedInNow = signedIn && wasPending;
+    if (signedIn) clearSignInStarted(e.status.name);
     update(key, (cur) =>
       runKey(cur.status) !== rk
         ? cur

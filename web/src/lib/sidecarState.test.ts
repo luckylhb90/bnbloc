@@ -15,6 +15,7 @@ import {
   pollDelayMs,
   runKey,
   shouldAutoSignIn,
+  signedOutCores,
   sidecarCoreView,
   sidecarProviders,
   sidecarTargets,
@@ -92,7 +93,9 @@ function testAuthPhasesAndSignInGate(): void {
   assert(canSignIn({ ...base, auth: SIGNED_OUT }), "sign-in button only when signed out");
 
   assert(shouldAutoSignIn({ ...base, auth: SIGNED_OUT }, false), "signed out → start sign-in once");
-  assert(!shouldAutoSignIn({ ...base, auth: SIGNED_OUT }, true), "never auto-open twice in one app session");
+  assert(!shouldAutoSignIn({ ...base, auth: SIGNED_OUT }, true), "never auto-open twice in one sign-out episode");
+  assert(signedOutCores([{ ...base, auth: SIGNED_OUT }]).length === 1, "a running core that is signed out waits on the member");
+  assert(signedOutCores([base]).length === 0, "a core not known to be signed out does not");
   assert(!shouldAutoSignIn({ ...base, auth: CHECKING }, false), "never auto-open while checking");
   assert(!shouldAutoSignIn({ ...base, auth: SIGNED_OUT, signIn: "waiting" }, false), "never while a sign-in is in progress");
 }

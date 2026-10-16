@@ -130,9 +130,16 @@ export function pollDelayMs(entries: readonly SidecarEntry[], unsettledStreak: n
 }
 
 /** Start the sidecar's sign-in on our own: only when it positively reports
- *  signed out, and at most once per app session. */
+ *  signed out, and at most once per sign-out episode (a core seen signed in
+ *  ends the episode). */
 export function shouldAutoSignIn(e: SidecarEntry, alreadyStarted: boolean): boolean {
   return !alreadyStarted && running(e) && authPhase(e.auth) === "signedOut" && e.signIn === "idle";
+}
+
+/** The cores waiting on the member to sign in, in the order listed: running,
+ *  and positively signed out. */
+export function signedOutCores(entries: readonly SidecarEntry[]): SidecarEntry[] {
+  return entries.filter((e) => canSignIn(e));
 }
 
 /** Offer a manual "Sign in" button. */

@@ -14,6 +14,7 @@ import { useDesktopUpdate } from "@/views/DesktopUpdateWatcher";
 import { DesktopPresenceProvider } from "@/lib/desktopPresence";
 import { DesktopConnectNotice } from "@/views/DesktopConnect";
 import { MacInstallGuideHost } from "@/views/MacInstallGuideHost";
+import { SidecarSignInNotice } from "@/views/SidecarSignInNotice";
 import { useWebUpdate, WebUpdateNotice } from "@/views/WebUpdateNotice";
 import { GettingStarted } from "@/views/onboarding/GettingStarted";
 import { takeLoginReturn } from "@/lib/loginReturn";
@@ -170,6 +171,7 @@ export function App() {
         footerNotice={(collapsed, closeDrawer) => (
           <>
             {webUpdate && <WebUpdateNotice collapsed={collapsed} />}
+            <SidecarSignInNotice collapsed={collapsed} subject={subject} />
             {desktopUpdate.renderNotice(collapsed)}
             <DesktopConnectNotice collapsed={collapsed} />
             <GettingStarted
