@@ -1,5 +1,10 @@
 # Room memory, knowledge and evolution (2026-10-16)
 
+**Superseded 2026-10-17 by `2026-10-17-room-knowledge-component.md`**: this design built
+memory into the platform; the product owner wanted an installable component. Kept as
+the record of the domain design (content model, read tiers, curator, evolution),
+which moves into the component. Its stage 1 code is removed in the new PRD's stage 5.
+
 Status: design agreed with the product owner (2026-10-16) on the points under
 "Decisions". **Stage 1 is built** (2026-10-17: store, room routes and gateway read
 in fe416c71; the `.room/memory/` files and the web panel after it); stages 2 to 4

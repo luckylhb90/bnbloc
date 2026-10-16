@@ -209,6 +209,25 @@ version identity; problems found only by a user.
 
 ## The process
 
+### 14. Component or platform
+
+- Before any code: could this be an installable component behind generic
+  contracts (a core, a plugin, a notifier, an extension, content), the way
+  local skills became one? A feature is platform code only for what a component
+  cannot do safely or at all: consent and enablement, signing and confinement,
+  events only the platform sees, the member-authenticated proxy, identity,
+  isolation, the budget and the audit.
+- Does the platform name the feature anywhere (a type, a weight, a file's
+  wording, a panel, a route)? Then it is not a contract, it is the feature.
+- Would an organization that wants its own version have to fork the platform?
+
+*Test:* grep the platform for the feature's nouns; the only hits should be
+the contract's. The PRD names the component, the contracts it uses, and what
+the platform adds for it.
+*Seen:* a room-memory feature (note types, ranking, file wording, a panel)
+built into the gateway, the room service, the bridge and the web app when the
+owner wanted an installable component.
+
 ### 13. AI capability
 
 - Every new feature gets an AI answer, the product owner's standing request

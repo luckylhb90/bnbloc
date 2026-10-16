@@ -335,6 +335,22 @@ proven. Look at the tree first, then decide whose failure it is.
 Evidence: session of 2026-10-17 (no commit: a local observation).
 Seen 1× (2026-10-17).
 
+### Ask "component or platform?" before the first line, and say which in the PRD
+
+A room-memory feature went in as platform code: note types, a ranking rule, the
+wording of `.room/` files, a store, routes and a panel across four services, with
+only the AI prompt as content. The owner had wanted an installable component and
+said so again after stage 1 had shipped in two desktop releases. The same project
+had just shown the right shape (local skills as a component behind two small
+contracts). The redesign is a generic room-extension framework plus the memory
+component, and the shipped code is removed. Decide the shape first; the platform
+keeps only what a component cannot do.
+
+Evidence: docs/prd/2026-10-17-room-knowledge-component.md (supersedes
+2026-10-16-room-memory-and-evolution.md); commits fe416c71, cf2ae7df.. (stage 1);
+design-review lens 14.
+Seen 1× (2026-10-17).
+
 ## Done right
 
 ### Replay a member's long task across a release, not just a smoke reply
