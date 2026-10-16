@@ -11,10 +11,16 @@ export interface PublishedSkill {
   readonly version: string;
 }
 
+export interface AllowedFile {
+  readonly file: string;
+  readonly hash: string;
+}
+
 export interface SkillChoice {
   readonly vm: boolean;
   readonly borrowers: boolean;
   readonly published?: PublishedSkill;
+  readonly allowed?: readonly AllowedFile[];
 }
 
 export interface SkillsSettings {
@@ -41,6 +47,9 @@ export interface SkillRow {
   readonly eligible: boolean;
   readonly reason?: string;
   readonly publishProblem?: string;
+  /** The file a content rule flagged; allowable unless it was flagged by name. */
+  readonly finding?: { readonly file: string; readonly hash: string; readonly allowable: boolean };
+  readonly allowed?: readonly string[];
   readonly hiddenBy?: string;
   readonly hash?: string;
   readonly choice: SkillChoice;
@@ -70,7 +79,7 @@ export interface SkillsProvider {
 const OFF: SkillChoice = { vm: false, borrowers: false };
 
 function keep(choice: SkillChoice): boolean {
-  return choice.vm || choice.borrowers || choice.published !== undefined;
+  return choice.vm || choice.borrowers || choice.published !== undefined || (choice.allowed?.length ?? 0) > 0;
 }
 
 function withSkills(s: SkillsSettings, skills: Record<string, SkillChoice>): SkillsSettings {
@@ -106,6 +115,26 @@ export function withChoice(s: SkillsSettings, name: string, patch: Partial<Pick<
 /** Record a publish of `name`, so a later change to the skill shows. */
 export function withPublished(s: SkillsSettings, name: string, published: PublishedSkill): SkillsSettings {
   return withSkills(s, { ...s.skills, [name]: { ...(s.skills[name] ?? OFF), published } });
+}
+
+/** Let one flagged file through for the sandbox (never for the library). The
+ *  allowance is for these bytes: the provider checks the file again if it changes. */
+export function withAllowed(s: SkillsSettings, name: string, file: AllowedFile): SkillsSettings {
+  const before = s.skills[name] ?? OFF;
+  const rest = (before.allowed ?? []).filter((a) => a.file !== file.file);
+  return withSkills(s, { ...s.skills, [name]: { ...before, allowed: [...rest, file] } });
+}
+
+/** Stop allowing a file. */
+export function withoutAllowed(s: SkillsSettings, name: string, file: string): SkillsSettings {
+  const before = s.skills[name];
+  if (!before) return s;
+  const allowed = (before.allowed ?? []).filter((a) => a.file !== file);
+  const next: SkillChoice = { ...before, allowed: allowed.length > 0 ? allowed : undefined };
+  const skills = { ...s.skills };
+  if (keep(next)) skills[name] = next;
+  else delete skills[name];
+  return withSkills(s, skills);
 }
 
 /** How many skills reach the member's sandbox / a borrower's. */

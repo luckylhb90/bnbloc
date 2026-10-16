@@ -38,7 +38,7 @@ func BuildPlan(in PlanInput) (Plan, error) {
 	if !in.Settings.Enabled {
 		return plan, nil
 	}
-	sc, err := NewScanner(in.Policy)
+	sc, err := ScannerFor(in.Policy, in.Settings)
 	if err != nil {
 		return plan, err
 	}

@@ -18,6 +18,16 @@ type Choice struct {
 	// sets it after an import); the skill's hash against it says whether the
 	// skill changed since.
 	Published *Published `json:"published,omitempty"`
+	// Allowed are files the member looked at and let through although a
+	// content rule flagged them: by name and by the file's hash, so an edited
+	// file is checked again. Allowed for the sandbox only, never for the library.
+	Allowed []AllowedFile `json:"allowed,omitempty"`
+}
+
+// AllowedFile is one flagged file the member allowed.
+type AllowedFile struct {
+	File string `json:"file"`
+	Hash string `json:"hash"`
 }
 
 // Published is a skill as it was last published.

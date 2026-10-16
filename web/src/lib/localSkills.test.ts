@@ -4,8 +4,10 @@ import {
   reachCounts,
   skillLine,
   unframePackedSkill,
+  withAllowed,
   withChoice,
   withEnabled,
+  withoutAllowed,
   withoutSource,
   withPublished,
   withSource,
@@ -35,6 +37,12 @@ const published = withPublished(withChoice(ticked, "alpha", { vm: false }), "alp
 eq(published.skills.alpha, { vm: false, borrowers: false, published: { hash: "h", componentId: "c1", version: "1.0.0" } }, "a published skill keeps its record when unticked");
 eq(withChoice(published, "alpha", { vm: true }).skills.alpha?.published?.hash, "h", "ticking keeps the publish record");
 eq(empty.skills, {}, "settings are never edited in place");
+
+const allowed = withAllowed(empty, "alpha", { file: "notes.md", hash: "h" });
+eq(allowed.skills.alpha, { vm: false, borrowers: false, allowed: [{ file: "notes.md", hash: "h" }] }, "a file allowed");
+eq(withAllowed(allowed, "alpha", { file: "notes.md", hash: "h2" }).skills.alpha?.allowed, [{ file: "notes.md", hash: "h2" }], "allowing again replaces the hash");
+eq(withoutAllowed(allowed, "alpha", "notes.md").skills, {}, "stop allowing forgets an empty choice");
+eq(withoutAllowed(withChoice(allowed, "alpha", { vm: true }), "alpha", "notes.md").skills.alpha, { vm: true, borrowers: false, allowed: undefined }, "but keeps a ticked one");
 
 const row = (patch: Partial<SkillRow>): SkillRow => ({
   name: "a", description: "Does a", source: "/s", hasScripts: false, files: 1, bytes: 10, eligible: true, choice: { vm: false, borrowers: false }, ...patch,

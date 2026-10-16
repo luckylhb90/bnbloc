@@ -26,6 +26,7 @@ const (
 	maxSources   = 16
 	maxAgentDirs = 32
 	maxChoices   = 512
+	maxAllowed   = 32
 )
 
 // Service is the component: it holds a member's settings, scans their sources,
@@ -68,12 +69,24 @@ type SkillState struct {
 	// PublishProblem is why it cannot be added to the library, when that is
 	// all that is wrong with it.
 	PublishProblem string `json:"publishProblem,omitempty"`
+	// Finding is the file a content rule flagged, with its hash and whether the
+	// member may allow it (a file flagged by its name never is); Allowed are the
+	// flagged files the member let through for the sandbox.
+	Finding *FindingState `json:"finding,omitempty"`
+	Allowed []string      `json:"allowed,omitempty"`
 	// Hidden is the source whose skill of the same name is the one used.
 	HiddenBy string `json:"hiddenBy,omitempty"`
 	Hash     string `json:"hash,omitempty"`
 	Choice   Choice `json:"choice"`
 	// Changed is true when the skill was published and its files differ now.
 	Changed bool `json:"changed,omitempty"`
+}
+
+// FindingState is a flagged file as the Settings view shows it.
+type FindingState struct {
+	File      string `json:"file"`
+	Hash      string `json:"hash"`
+	Allowable bool   `json:"allowable"`
 }
 
 // State is the provider API's answer to "what do you have".
@@ -121,7 +134,7 @@ func (s *Service) stateLocked() (State, error) {
 	if err != nil {
 		return State{}, err
 	}
-	sc, err := NewScanner(policy)
+	sc, err := ScannerFor(policy, settings)
 	if err != nil {
 		return State{}, err
 	}
@@ -147,7 +160,10 @@ func (s *Service) stateLocked() (State, error) {
 		st.Sources = append(st.Sources, ss)
 		for _, sk := range skills {
 			row := SkillState{Name: sk.Name, Description: sk.Description, Source: src, HasScripts: sk.HasScripts, Files: sk.Files, Bytes: sk.Bytes,
-				Eligible: sk.Eligible, Reason: sk.Reason, PublishProblem: sk.PublishProblem, Hash: sk.Hash, Choice: settings.Skills[sk.Name]}
+				Eligible: sk.Eligible, Reason: sk.Reason, PublishProblem: sk.PublishProblem, Allowed: sk.Allowed, Hash: sk.Hash, Choice: settings.Skills[sk.Name]}
+			if sk.Finding != nil {
+				row.Finding = &FindingState{File: sk.Finding.File, Hash: sk.Finding.Hash, Allowable: sk.Finding.Allowable}
+			}
 			if first, taken := owner[sk.Name]; taken {
 				row.HiddenBy = first
 				row.Choice = Choice{}
@@ -205,6 +221,16 @@ func (s *Service) Validate(in Settings) error {
 	}
 	if in.PolicyFile != "" && !filepath.IsAbs(ExpandHome(in.PolicyFile, s.Home)) {
 		return fmt.Errorf("the policy file %q is not an absolute path", in.PolicyFile)
+	}
+	for name, c := range in.Skills {
+		if len(c.Allowed) > maxAllowed {
+			return fmt.Errorf("the skill %s allows more than %d files", name, maxAllowed)
+		}
+		for _, a := range c.Allowed {
+			if clean, ok := core.CleanRelPath(a.File); !ok || clean != a.File || len(a.Hash) != 64 {
+				return fmt.Errorf("%q is not an allowable file of %s", a.File, name)
+			}
+		}
 	}
 	for name := range in.Skills {
 		if clean, ok := core.CleanRelPath(name); !ok || clean != name || strings.Contains(name, "/") {
@@ -318,7 +344,7 @@ func (s *Service) Pack(name string) (archive []byte, hash string, err error) {
 	if err != nil {
 		return nil, "", err
 	}
-	sc, err := NewScanner(policy)
+	sc, err := ScannerFor(policy, settings)
 	if err != nil {
 		return nil, "", err
 	}

@@ -22,6 +22,14 @@
     { "name": "an OpenAI or Anthropic style key", "pattern": "\\bsk-(ant-)?[A-Za-z0-9_-]{32,}\\b" },
     { "name": "a credential assignment", "pattern": "(?i)\\b(password|passwd|secret|api[_-]?key|access[_-]?token|auth[_-]?token)\\b\\s*[:=]\\s*['\"]?[A-Za-z0-9/+_.=-]{16,}" }
   ],
+  "secretPlaceholders": [
+    "(?i)not[-_ ]?a[-_ ]?real",
+    "(?i)example|dummy|fake|placeholder|changeme|redacted|sample[-_ ]?(key|token|secret|password)",
+    "(?i)your[-_ ]?(api[-_ ]?)?(key|token|secret|password)",
+    "<[^>]+>",
+    "\\*{3,}",
+    "(?i)x{6,}"
+  ],
   "limits": {
     "files": 5000,
     "bytes": 268435456,

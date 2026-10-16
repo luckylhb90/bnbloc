@@ -7,8 +7,10 @@ import {
   publishLabel,
   reachCounts,
   skillLine,
+  withAllowed,
   withChoice,
   withEnabled,
+  withoutAllowed,
   withoutSource,
   withPublished,
   withSource,
@@ -208,7 +210,10 @@ function ProviderCard({ provider, reload }: { readonly provider: SkillsProvider;
       {state.skills.length > 0 && (
         <div className="flex flex-col divide-y divide-[var(--color-border)] border-t border-[var(--color-border)]">
           {state.skills.map((row) => (
-            <SkillRowView key={`${row.source}/${row.name}`} row={row} on={s.enabled} busy={busy === row.name} onChoice={(patch) => void save(withChoice(s, row.name, patch))} onPublish={() => void publish(row)} />
+            <SkillRowView key={`${row.source}/${row.name}`} row={row} on={s.enabled} busy={busy === row.name} onChoice={(patch) => void save(withChoice(s, row.name, patch))}
+              onAllow={(file, hash) => void save(withAllowed(s, row.name, { file, hash }), `${file} allowed for your sandbox`)}
+              onDisallow={(file) => void save(withoutAllowed(s, row.name, file))}
+              onPublish={() => void publish(row)} />
           ))}
         </div>
       )}
@@ -241,12 +246,16 @@ function SkillRowView({
   on,
   busy,
   onChoice,
+  onAllow,
+  onDisallow,
   onPublish,
 }: {
   readonly row: SkillRow;
   readonly on: boolean;
   readonly busy: boolean;
   readonly onChoice: (patch: { vm?: boolean; borrowers?: boolean }) => void;
+  readonly onAllow: (file: string, hash: string) => void;
+  readonly onDisallow: (file: string) => void;
   readonly onPublish: () => void;
 }) {
   const usable = row.eligible && !row.hiddenBy;
@@ -268,6 +277,22 @@ function SkillRowView({
           </Button>
         )}
       </div>
+      {!row.eligible && !row.hiddenBy && row.finding?.allowable && (
+        <div className="flex flex-wrap items-center gap-2 text-xs text-[var(--color-fg-muted)]">
+          <span>Look at {row.finding.file}: if it is a placeholder, allow it for your sandbox (it is never shared with the library).</span>
+          <Button size="sm" variant="ghost" onClick={() => onAllow(row.finding!.file, row.finding!.hash)}>
+            Allow this file
+          </Button>
+        </div>
+      )}
+      {(row.allowed ?? []).map((file) => (
+        <div key={file} className="flex flex-wrap items-center gap-2 text-xs text-[var(--color-fg-muted)]">
+          <span>{file} is allowed for your sandbox.</span>
+          <Button size="sm" variant="ghost" onClick={() => onDisallow(file)}>
+            Stop allowing
+          </Button>
+        </div>
+      ))}
       {usable && (
         <div className="flex flex-wrap items-center gap-4 text-sm">
           <label className="flex items-center gap-2">

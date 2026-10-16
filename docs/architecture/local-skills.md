@@ -65,7 +65,12 @@ changes".
   searched. A skill that holds a credential file, a link out of its folder or
   exceeds a limit (5000 files, 256 MiB; the library's own bundle limit of 512
   files and 8 MiB only stops *publishing*, never the sandbox) is **ineligible**: not mirrored, not packed, and the Settings
-  row says why. Adding an agent (Codex, opencode, a company CLI, …) is a row in
+  row says why. A content rule's hit that is plainly a placeholder
+  (`secretPlaceholders` in the policy: `not-a-real-token`, `<your key>`,
+  `xxxxxx`) is not a finding; any other hit stops the skill, and the member may
+  look at the file and **allow it for the sandbox** ("Allow this file": recorded
+  against the file's hash, so an edited file is checked again, and never for the
+  library). A file flagged by its *name* (`.env`, a key file) is never allowable. Adding an agent (Codex, opencode, a company CLI, …) is a row in
   the policy, not code.
 - **Mirror**: a copy, never the member's folder. A folder is mounted only
   while its skill is ticked; an edit to the source reaches the mirror within ten

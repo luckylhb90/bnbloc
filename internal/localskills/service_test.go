@@ -289,3 +289,65 @@ func TestBigSkillIsForTheSandboxNotTheLibrary(t *testing.T) {
 		t.Fatalf("the copy is whole: %v", err)
 	}
 }
+
+// A fixture's placeholder is not a credential; a real-looking one is, and the
+// member may allow a content match (for the sandbox only) until the file changes.
+func TestCredentialPlaceholdersAndAllowances(t *testing.T) {
+	s, home := newService(t)
+	src := filepath.Join(home, "src")
+	fake := skill(t, src, "fixture")
+	write(t, filepath.Join(fake, "test", "evidence.test.mjs"), "set('https://x-access-token:not-a-real-token@github.com/example/repo.git')\n", 0o644)
+	real := skill(t, src, "flagged")
+	realFile := filepath.Join(real, "notes.md")
+	write(t, realFile, "api_key = \"q8W2k9ZxP4mN7vB3cL6tR1yU5\"\n", 0o644)
+	named := skill(t, src, "named")
+	write(t, filepath.Join(named, ".env"), "A=1\n", 0o644)
+
+	find := func(st State, name string) SkillState {
+		for _, sk := range st.Skills {
+			if sk.Name == name {
+				return sk
+			}
+		}
+		t.Fatalf("no %s in %+v", name, st.Skills)
+		return SkillState{}
+	}
+	st, err := s.Apply(Settings{Sources: []string{src}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sk := find(st, "fixture"); !sk.Eligible {
+		t.Fatalf("a placeholder is not a credential: %+v", sk)
+	}
+	flagged := find(st, "flagged")
+	if flagged.Eligible || flagged.Finding == nil || !flagged.Finding.Allowable || flagged.Finding.File != "notes.md" || len(flagged.Finding.Hash) != 64 {
+		t.Fatalf("a real-looking key stops the skill, and may be allowed: %+v", flagged)
+	}
+	if n := find(st, "named"); n.Eligible || n.Finding == nil || n.Finding.Allowable {
+		t.Fatalf("a .env is never allowable: %+v", n)
+	}
+
+	allow := Settings{Enabled: true, Sources: []string{src}, Skills: map[string]Choice{"flagged": {VM: true, Allowed: []AllowedFile{{File: "notes.md", Hash: flagged.Finding.Hash}}}}}
+	if st, err = s.Apply(allow); err != nil {
+		t.Fatal(err)
+	}
+	ok := find(st, "flagged")
+	if !ok.Eligible || len(ok.Allowed) != 1 || ok.PublishProblem == "" {
+		t.Fatalf("allowed for the sandbox, never for the library: %+v", ok)
+	}
+	if _, _, err := s.Pack("flagged"); err == nil {
+		t.Fatal("an allowed file is not packed for the library")
+	}
+	if _, err := os.Stat(filepath.Join(s.MirrorRoot, "flagged", "notes.md")); err != nil {
+		t.Fatalf("it is mirrored: %v", err)
+	}
+
+	write(t, realFile, "api_key = \"Z1x2C3v4B5n6M7a8S9d0F1g2H\"\n", 0o644)
+	st, _ = s.State()
+	if find(st, "flagged").Eligible {
+		t.Fatal("an edited file is checked again")
+	}
+	if _, err := s.Apply(Settings{Skills: map[string]Choice{"x": {Allowed: []AllowedFile{{File: "../up", Hash: strings.Repeat("a", 64)}}}}}); err == nil {
+		t.Error("an allowance outside the skill is refused")
+	}
+}

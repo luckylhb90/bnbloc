@@ -58,7 +58,11 @@ type Policy struct {
 	// SecretNames are file name patterns, SecretRules content patterns.
 	SecretNames []string     `json:"secretNames"`
 	SecretRules []SecretRule `json:"secretRules"`
-	Limits      Limits       `json:"limits"`
+	// SecretPlaceholders are patterns for text that is plainly not a real
+	// secret (a test fixture's "not-a-real-token", "<your key>", "xxxxxx"): a
+	// content rule whose every match is one of these does not stop a skill.
+	SecretPlaceholders []string `json:"secretPlaceholders"`
+	Limits             Limits   `json:"limits"`
 }
 
 // DefaultPolicy is the embedded policy.
@@ -90,6 +94,7 @@ func (p Policy) Merge(o Policy) Policy {
 	out.ScriptExts = union(p.ScriptExts, o.ScriptExts)
 	out.ScriptDirs = union(p.ScriptDirs, o.ScriptDirs)
 	out.SecretNames = union(p.SecretNames, o.SecretNames)
+	out.SecretPlaceholders = union(p.SecretPlaceholders, o.SecretPlaceholders)
 	out.SecretRules = slices.Clone(p.SecretRules)
 	for _, r := range o.SecretRules {
 		if !slices.Contains(out.SecretRules, r) {

@@ -10,6 +10,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"sort"
 	"strings"
@@ -46,6 +47,10 @@ type Skill struct {
 	HasScripts bool
 	Eligible   bool
 	Reason     string
+	// Finding is the file that stopped the skill, when a credential check did.
+	Finding *Finding
+	// Allowed lists flagged files the member allowed for the sandbox.
+	Allowed []string
 	// PublishProblem is why the skill cannot be added to the library ("" when
 	// it can): the library takes file names of letters, digits, '.', '_' and
 	// '-' only. It does not stop the skill reaching the sandbox.
@@ -55,10 +60,41 @@ type Skill struct {
 	Hash string
 }
 
+// ScannerFor is NewScanner with what the member allowed in st.
+func ScannerFor(p Policy, st Settings) (*Scanner, error) {
+	sc, err := NewScanner(p)
+	if err != nil {
+		return nil, err
+	}
+	for name, c := range st.Skills {
+		if len(c.Allowed) > 0 {
+			if sc.Allow == nil {
+				sc.Allow = map[string][]AllowedFile{}
+			}
+			sc.Allow[name] = c.Allowed
+		}
+	}
+	return sc, nil
+}
+
+// Finding is a file a credential check flagged.
+type Finding struct {
+	File string
+	Why  string
+	// Hash is the file's sha256, what an allowance is recorded against.
+	Hash string
+	// Allowable is false for a file flagged by its name (a .env, a key file):
+	// those are never let through. A content match can be allowed by the member.
+	Allowable bool
+}
+
 // Scanner reads folders by a Policy.
 type Scanner struct {
-	p     Policy
-	rules []compiledRule
+	p            Policy
+	rules        []compiledRule
+	placeholders []*regexp.Regexp
+	// Allow is what the member allowed, by skill name.
+	Allow map[string][]AllowedFile
 }
 
 // NewScanner prepares the policy's secret rules.
@@ -67,7 +103,15 @@ func NewScanner(p Policy) (*Scanner, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Scanner{p: p, rules: rules}, nil
+	var ph []*regexp.Regexp
+	for _, pat := range p.SecretPlaceholders {
+		re, err := regexp.Compile(pat)
+		if err != nil {
+			return nil, fmt.Errorf("secret placeholder %q: %w", pat, err)
+		}
+		ph = append(ph, re)
+	}
+	return &Scanner{p: p, rules: rules, placeholders: ph}, nil
 }
 
 func matchAny(patterns []string, name string) bool {
@@ -176,27 +220,64 @@ func (s *Scanner) isScript(f File) bool {
 	return false
 }
 
-// credential reports why a file looks like it holds a credential ("" when it
-// does not): its name, or its first bytes (a binary file is not read).
-func (s *Scanner) credential(f File) string {
+// credential reports whether a file looks like it holds a credential (nil when
+// it does not): its name, or its first bytes (a binary file is not read). A
+// content match whose every hit is a placeholder (Policy.SecretPlaceholders) is
+// not a finding.
+func (s *Scanner) credential(f File) *Finding {
 	if matchAny(s.p.SecretNames, path.Base(f.Rel)) {
-		return fmt.Sprintf("%s looks like a credential file", f.Rel)
+		return &Finding{File: f.Rel, Why: fmt.Sprintf("%s looks like a credential file", f.Rel)}
 	}
+	fh, err := os.Open(f.Abs)
+	if err != nil {
+		return nil
+	}
+	defer fh.Close()
+	head, _ := io.ReadAll(io.LimitReader(fh, s.p.Limits.SecretScanBytes))
+	if bytes.IndexByte(head[:min(len(head), 8192)], 0) >= 0 {
+		return nil
+	}
+	for _, r := range s.rules {
+		for _, hit := range r.re.FindAll(head, -1) {
+			if !s.isPlaceholder(hit) {
+				return &Finding{File: f.Rel, Why: fmt.Sprintf("%s looks like it holds %s", f.Rel, r.name), Allowable: true}
+			}
+		}
+	}
+	return nil
+}
+
+func (s *Scanner) isPlaceholder(hit []byte) bool {
+	for _, re := range s.placeholders {
+		if re.Match(hit) {
+			return true
+		}
+	}
+	return false
+}
+
+// fileHash is a file's sha256, hex.
+func fileHash(f File) string {
 	fh, err := os.Open(f.Abs)
 	if err != nil {
 		return ""
 	}
 	defer fh.Close()
-	head, _ := io.ReadAll(io.LimitReader(fh, s.p.Limits.SecretScanBytes))
-	if bytes.IndexByte(head[:min(len(head), 8192)], 0) >= 0 {
+	h := sha256.New()
+	if _, err := io.Copy(h, fh); err != nil {
 		return ""
 	}
-	for _, r := range s.rules {
-		if r.re.Match(head) {
-			return fmt.Sprintf("%s looks like it holds %s", f.Rel, r.name)
-		}
+	return hex.EncodeToString(h.Sum(nil))
+}
+
+// allowed says whether the member allowed this flagged file of skill name.
+func (s *Scanner) allowed(name string, f File) bool {
+	list := s.Allow[name]
+	if len(list) == 0 {
+		return false
 	}
-	return ""
+	hash := fileHash(f)
+	return hash != "" && slices.Contains(list, AllowedFile{File: f.Rel, Hash: hash})
 }
 
 // digest is the hash of a skill's files: the same names and bytes, the same hash.
@@ -255,10 +336,17 @@ func (s *Scanner) Inspect(source, dir string) Skill {
 		sk.Reason = problem
 	default:
 		for _, f := range files {
-			if why := s.credential(f); why != "" {
-				sk.Reason = why
-				break
+			found := s.credential(f)
+			if found == nil {
+				continue
 			}
+			if found.Allowable && s.allowed(sk.Name, f) {
+				sk.Allowed = append(sk.Allowed, f.Rel)
+				continue
+			}
+			found.Hash = fileHash(f)
+			sk.Finding, sk.Reason = found, found.Why
+			break
 		}
 	}
 	// The library takes a skill within its own bundle limits (tarbundle's):
@@ -271,6 +359,9 @@ func (s *Scanner) Inspect(source, dir string) Skill {
 		sk.PublishProblem = fmt.Sprintf("too many files for the library (%d, at most %d)", sk.Files, tarbundle.ContentLimits.MaxFiles)
 	case sk.Bytes > int64(tarbundle.ContentLimits.MaxBytes):
 		sk.PublishProblem = fmt.Sprintf("too large for the library (%s, at most %d MiB)", formatMiB(sk.Bytes), tarbundle.ContentLimits.MaxBytes>>20)
+	}
+	if len(sk.Allowed) > 0 && sk.PublishProblem == "" {
+		sk.PublishProblem = fmt.Sprintf("%s was allowed for your sandbox only; it is not shared with the library", sk.Allowed[0])
 	}
 	if problem == "" && sk.PublishProblem == "" {
 		sk.Hash, _ = digest(files)
